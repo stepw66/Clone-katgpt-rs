@@ -293,14 +293,17 @@ pub struct GameTrainingReport {
   - Add `validate_game()` function that runs N validation episodes and records metrics — TODO: not yet implemented
   - Tests: metrics computed correctly, helpful/harmful detection, action accuracy ✅ (struct-level tests only)
 
-- [ ] **Task 4: Absorb + Compress post-training analysis** (`riir-gpu`)
-  - After training completes, analyze per-target LoRA gradient norms from last N epochs
-  - Targets with gradient norm < threshold for last 3 epochs → "stable"
-  - Stable targets are candidates for freezing in next training run
-  - Output `CompressReport` as part of training report
-  - This is Research 14's "compress" operation: stable patterns → freeze recommendation
-  - We do NOT auto-freeze — report only, human decides
-  - Tests: compress report generation, stability detection, freeze recommendation logic
+- [x] **Task 4: Absorb + Compress post-training analysis** (`riir-gpu`) ✅
+  - After training completes, analyze per-target LoRA gradient norms from last N epochs ✅
+  - Targets with gradient norm < threshold for last 3 epochs → "stable" ✅
+  - Stable targets are candidates for freezing in next training run ✅
+  - Output `CompressReport` as part of training report ✅
+  - This is Research 14's "compress" operation: stable patterns → freeze recommendation ✅
+  - We do NOT auto-freeze — report only, human decides ✅
+  - `compress.rs` module: `GradNormTracker`, `CompressConfig`, `snapshot_grad_norms()`, `compress_analysis()` ✅
+  - Integrated into `Trainer::train()` — epoch-end gradient norm snapshots ✅
+  - Wired in `train_bomber.rs` Phase 6 with freeze recommendation output ✅
+  - Tests: 11 tests — l2_norm, tracker, compress_analysis, stability, window, JSON roundtrip ✅
 
 - [ ] **Task 5: Draft-target distillation** (`riir-gpu`)
   - Implements Research 04 P3 for game domain
@@ -355,15 +358,16 @@ pub struct GameTrainingReport {
 | File | Change | Target |
 |------|--------|--------|
 | `riir-gpu/src/training_config.rs` | New: `BetaConfig`, `ReviewMetrics`, `GameMetrics`, `CompressReport`, `DistillReport`, `GameTrainingReport` | riir-gpu |
-| `riir-gpu/src/lib.rs` | Export new types + game trainer encoding | riir-gpu |
-| `riir-gpu/src/training_loop.rs` | Add `Serialize`/`Deserialize` to `TrainingReport` | riir-gpu |
+| `riir-gpu/src/lib.rs` | Export new types + game trainer encoding + compress types | riir-gpu |
+| `riir-gpu/src/training_loop.rs` | Add `Serialize`/`Deserialize` to `TrainingReport`, epoch-end gradient norm snapshots | riir-gpu |
+| `riir-gpu/src/compress.rs` | New: `GradNormTracker`, `CompressConfig`, `snapshot_grad_norms()`, `compress_analysis()` | riir-gpu |
 | `riir-gpu/src/game/replay.rs` | `parse_jsonl()`, `parse_jsonl_filtered()`, `parse_jsonl_dir()` | riir-gpu |
 | `riir-gpu/src/game/trainer.rs` | `encode_game_samples()`, `decode_action_token()`, `BOARD_VOCAB`, `ACTION_OFFSET`, `GAME_SEQ_LEN` | riir-gpu |
-| `riir-gpu/examples/train_bomber.rs` | Real `Trainer` pipeline (Plan 041), BetaConfig, ReviewMetrics from real loss, JSON report | riir-gpu |
+| `riir-gpu/examples/train_bomber.rs` | Real pipeline (Plan 041), BetaConfig, ReviewMetrics, compress analysis Phase 6 | riir-gpu |
 | `microgpt-rs/src/types.rs` | `Config::game()` for Bomberman LoRA training (Plan 041) | microgpt-rs |
 | `microgpt-rs/Cargo.toml` | Add `game_domain` and `language_domain` feature flags | microgpt-rs |
 
-### Remaining (Tasks 4-6, 9)
+### Remaining (Tasks 5-6, 9)
 
 | File | Change | Target |
 |------|--------|--------|
@@ -428,7 +432,7 @@ Different scales, different pipelines, different feature flags.
 | **P1** | Task 3: GameMetrics | Game-specific training quality | Small | ✅ Done (struct only — TODO: `validate_game()`) |
 | **P1** | Task 8: Feature flags | Separate game from language concerns | Small | ✅ Done |
 | **P2** | Task 5: Draft distillation | Enables Plan 004 at runtime | Medium | ⬜ Pending |
-| **P2** | Task 4: Absorb+Compress | Post-training analysis | Small | ⬜ Pending |
+| **P2** | Task 4: Absorb+Compress | Post-training analysis | Small | ✅ Done |
 | **P3** | Task 6: Screening probe | Reduces training time by skipping low-signal targets | Medium | ⬜ Pending |
 | **P3** | Task 7: JSON report | Cross-run comparison | Small | ✅ Done (real loss history via Plan 041) |
 | **P4** | Task 9: Benchmarks | Validate all techniques | Small | ⬜ Pending |
