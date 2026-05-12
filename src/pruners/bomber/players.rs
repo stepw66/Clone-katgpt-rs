@@ -1,16 +1,22 @@
 //! AI player trait and implementations for Bomberman HL Arena.
 //!
-//! Four player types representing increasing HL technology levels:
+//! Player types representing increasing HL technology levels:
 //! - P1 (Random): no model, no learning — pure baseline
-//! - P2 (Greedy): heuristic action selection simulating LoRA marginals
-//! - P3 (Validator): heuristic + hard safety rules simulating WASM validator
-//! - P4 (Full HL): bandit-adapted selection with absorb-compress
+//! - P2 (Greedy): heuristic action selection
+//! - P2b (LoraPlayer): trained LoRA model scoring — proves LoRA > random
+//! - P3 (Validator): heuristic + hard safety rules
+//! - P3b (NNPlayer/WasmPlayer): WASM validator sandbox — proves safety > none
+//! - P4 (LoraWasmPlayer): LoRA proposals + WASM validation — proves synergy
+//! - P5 (HLPlayer): LoRA + WASM + Bandit + AbsorbCompress — proves adaptation
 
 use std::any::Any;
 
 use fastrand::Rng;
 
 use super::{ArenaGrid, BomberAction, GameEvent, GridPos};
+
+#[cfg(feature = "bomber-wasm")]
+use crate::types::{LoraAdapter, lora_apply};
 
 // ── Constants ──────────────────────────────────────────────────
 
@@ -683,6 +689,93 @@ fn score_action(
     }
 }
 
+// ── LoRA Inference Helpers ─────────────────────────────────────
+
+/// Softmax over logits, producing probability distribution.
+#[cfg(feature = "bomber-wasm")]
+#[allow(dead_code)]
+fn softmax(logits: &[f32]) -> Vec<f32> {
+    let max_val = logits.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+    let exps: Vec<f32> = logits.iter().map(|&x| (x - max_val).exp()).collect();
+    let sum: f32 = exps.iter().sum();
+    exps.iter().map(|&x| x / sum).collect()
+}
+
+/// Count walkable adjacent cells (for board feature encoding).
+#[cfg(feature = "bomber-wasm")]
+fn count_walkable(grid: &ArenaGrid, pos: GridPos) -> usize {
+    [(-1i32, 0i32), (1, 0), (0, -1), (0, 1)]
+        .iter()
+        .filter(|&&(dx, dy)| grid.is_walkable(pos.x + dx, pos.y + dy))
+        .count()
+}
+
+/// Use loaded LoRA adapter to score all 6 actions.
+///
+/// Strategy: compute heuristic scores, then use LoRA as a learned re-weighting.
+/// The LoRA was trained on game traces and encodes patterns like
+/// "bomb near walls is good", "don't walk into blast".
+///
+/// Returns `None` if LoRA dimensions don't align (falls back to heuristic).
+#[cfg(feature = "bomber-wasm")]
+fn lora_score_actions(
+    lora: &LoraAdapter,
+    grid: &ArenaGrid,
+    pos: GridPos,
+    bombs: &[KnownBomb],
+    powerups: &[(i32, i32)],
+    last_dir: Option<BomberAction>,
+    lora_buf: &mut [f32],
+) -> Option<[f32; ACTION_COUNT]> {
+    // Compute heuristic base scores for all actions
+    let heuristic: [f32; ACTION_COUNT] =
+        ALL_ACTIONS.map(|action| score_action(&action, grid, pos, bombs, powerups, last_dir));
+
+    // LoRA input: heuristic scores padded to in_dim with board features
+    let in_dim = lora.in_dim;
+    if in_dim < ACTION_COUNT {
+        return None;
+    }
+
+    let mut input = vec![0.0f32; in_dim];
+    for (i, &h) in heuristic.iter().enumerate() {
+        input[i] = if h == f32::NEG_INFINITY { -10.0 } else { h };
+    }
+    // Pad remaining dimensions with board statistics
+    if in_dim > ACTION_COUNT {
+        input[ACTION_COUNT] = count_walkable(grid, pos) as f32 / 4.0;
+    }
+    if in_dim > ACTION_COUNT + 1 {
+        input[ACTION_COUNT + 1] = if in_blast_zone(pos, grid, bombs) {
+            1.0
+        } else {
+            0.0
+        };
+    }
+    if in_dim > ACTION_COUNT + 2 {
+        input[ACTION_COUNT + 2] = bombs.len() as f32 / 8.0;
+    }
+    if in_dim > ACTION_COUNT + 3 {
+        input[ACTION_COUNT + 3] = powerups.len() as f32 / 4.0;
+    }
+
+    // Apply LoRA: output += scale * B @ (A @ input)
+    let mut output = vec![0.0f32; lora.out_dim];
+    lora_apply(&mut output, lora, &input, lora_buf);
+
+    // Combine: LoRA re-weights heuristic scores
+    let out_dim = lora.out_dim.min(ACTION_COUNT);
+    let mut scores = heuristic;
+    for i in 0..out_dim {
+        if scores[i] != f32::NEG_INFINITY {
+            // Blend: 70% heuristic + 30% LoRA correction (scaled)
+            scores[i] = scores[i] * 0.7 + output[i] * 3.0;
+        }
+    }
+
+    Some(scores)
+}
+
 // ── P1: Random ─────────────────────────────────────────────────
 
 /// P1: Modelless baseline — uniform random action selection.
@@ -1322,6 +1415,397 @@ impl BomberPlayer for HLPlayer {
         self.round_actions.clear();
         self.last_dir = None;
         // NOTE: Q-values, visits, compressed persist across rounds (bandit memory)
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+}
+
+// ── P2b: LoRA Player ───────────────────────────────────────────
+
+/// P2b: LoRA-only player — uses trained LoRA model for action scoring.
+///
+/// No WASM validator, no bandit. Proves LoRA > random.
+/// Falls back to heuristic scoring if LoRA fails to load or apply.
+#[cfg(feature = "bomber-wasm")]
+pub struct LoraPlayer {
+    _id: u8,
+    lora: Option<LoraAdapter>,
+    lora_buf: Vec<f32>,
+    known_bombs: Vec<KnownBomb>,
+    known_powerups: Vec<(i32, i32)>,
+    last_dir: Option<BomberAction>,
+}
+
+#[cfg(feature = "bomber-wasm")]
+impl LoraPlayer {
+    /// Create LoraPlayer without LoRA (heuristic fallback).
+    pub fn new(id: u8) -> Self {
+        Self {
+            _id: id,
+            lora: None,
+            lora_buf: Vec::new(),
+            known_bombs: Vec::new(),
+            known_powerups: Vec::new(),
+            last_dir: None,
+        }
+    }
+
+    /// Create LoraPlayer with LoRA loaded from file.
+    pub fn new_with_lora(id: u8, lora_path: &str) -> Self {
+        let lora = LoraAdapter::load(std::path::Path::new(lora_path)).ok();
+        let buf_size = lora.as_ref().map_or(0, |l| l.rank);
+        Self {
+            _id: id,
+            lora,
+            lora_buf: vec![0.0; buf_size],
+            known_bombs: Vec::new(),
+            known_powerups: Vec::new(),
+            last_dir: None,
+        }
+    }
+}
+
+#[cfg(feature = "bomber-wasm")]
+impl BomberPlayer for LoraPlayer {
+    fn select_action(
+        &mut self,
+        grid: &ArenaGrid,
+        pos: GridPos,
+        events: &[GameEvent],
+        rng: &mut Rng,
+    ) -> BomberAction {
+        update_bombs(&mut self.known_bombs, events);
+        update_powerups(&mut self.known_powerups, events);
+
+        let bomb_positions: std::collections::HashSet<(i32, i32)> =
+            self.known_bombs.iter().map(|(p, _, _)| *p).collect();
+
+        // Try LoRA scoring first
+        let scores = self.lora.as_ref().and_then(|lora| {
+            lora_score_actions(
+                lora,
+                grid,
+                pos,
+                &self.known_bombs,
+                &self.known_powerups,
+                self.last_dir,
+                &mut self.lora_buf,
+            )
+        });
+
+        let mut best = BomberAction::Wait;
+        let mut best_score = f32::NEG_INFINITY;
+
+        for (i, action) in ALL_ACTIONS.iter().enumerate() {
+            let is_move = matches!(
+                action,
+                BomberAction::Up | BomberAction::Down | BomberAction::Left | BomberAction::Right
+            );
+
+            // Basic wall collision filter
+            if is_move {
+                let target = move_target(action, pos);
+                if !grid.is_walkable(target.x, target.y)
+                    || bomb_positions.contains(&(target.x, target.y))
+                {
+                    continue;
+                }
+            }
+
+            let score = match &scores {
+                Some(s) => s[i],
+                None => score_action(
+                    action,
+                    grid,
+                    pos,
+                    &self.known_bombs,
+                    &self.known_powerups,
+                    self.last_dir,
+                ),
+            };
+
+            if score > best_score {
+                best_score = score;
+                best = *action;
+            }
+        }
+
+        // 10% random exploration (epsilon-greedy)
+        if rng.f32() < 0.10 {
+            let safe_moves: Vec<BomberAction> = ALL_ACTIONS
+                .iter()
+                .filter(|a| {
+                    if matches!(
+                        a,
+                        BomberAction::Up
+                            | BomberAction::Down
+                            | BomberAction::Left
+                            | BomberAction::Right
+                    ) {
+                        let target = move_target(a, pos);
+                        grid.is_walkable(target.x, target.y)
+                    } else {
+                        false
+                    }
+                })
+                .copied()
+                .collect();
+            if !safe_moves.is_empty() {
+                best = safe_moves[rng.usize(0..safe_moves.len())];
+            }
+        }
+
+        if matches!(
+            best,
+            BomberAction::Up | BomberAction::Down | BomberAction::Left | BomberAction::Right
+        ) {
+            self.last_dir = Some(best);
+        }
+        if best == BomberAction::Bomb {
+            self.known_bombs
+                .push(((pos.x, pos.y), DEFAULT_BLAST_RANGE, BOMB_FUSE_TICKS));
+        }
+        best
+    }
+
+    fn name(&self) -> &str {
+        match self.lora {
+            Some(_) => "LoRA",
+            None => "LoRA-Fallback",
+        }
+    }
+
+    fn emoji(&self) -> &str {
+        "🤖"
+    }
+
+    fn reset(&mut self) {
+        self.known_bombs.clear();
+        self.known_powerups.clear();
+        self.last_dir = None;
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+}
+
+// ── P4: LoRA+WASM Player ──────────────────────────────────────
+
+/// P4: LoRA proposals + WASM validation — the synergy player.
+///
+/// Model proposes action scores via LoRA, WASM validator filters unsafe ones.
+/// Proves LoRA+WASM synergy > either alone.
+#[cfg(feature = "bomber-wasm")]
+pub struct LoraWasmPlayer {
+    _id: u8,
+    lora: Option<LoraAdapter>,
+    wasm: Option<super::wasm_pruner::BomberWasmPruner>,
+    lora_buf: Vec<f32>,
+    known_bombs: Vec<KnownBomb>,
+    known_powerups: Vec<(i32, i32)>,
+    last_dir: Option<BomberAction>,
+}
+
+#[cfg(feature = "bomber-wasm")]
+impl LoraWasmPlayer {
+    /// Create with no artifacts (heuristic + native safety).
+    pub fn new(id: u8) -> Self {
+        Self {
+            _id: id,
+            lora: None,
+            wasm: None,
+            lora_buf: Vec::new(),
+            known_bombs: Vec::new(),
+            known_powerups: Vec::new(),
+            last_dir: None,
+        }
+    }
+
+    /// Create with LoRA only.
+    pub fn new_with_lora(id: u8, lora_path: &str) -> Self {
+        let lora = LoraAdapter::load(std::path::Path::new(lora_path)).ok();
+        let buf_size = lora.as_ref().map_or(0, |l| l.rank);
+        Self {
+            _id: id,
+            lora,
+            wasm: None,
+            lora_buf: vec![0.0; buf_size],
+            known_bombs: Vec::new(),
+            known_powerups: Vec::new(),
+            last_dir: None,
+        }
+    }
+
+    /// Create with WASM only.
+    pub fn new_with_wasm(id: u8, wasm_path: &str) -> Self {
+        let wasm = super::wasm_pruner::BomberWasmPruner::load_from_file(wasm_path).ok();
+        Self {
+            _id: id,
+            lora: None,
+            wasm,
+            lora_buf: Vec::new(),
+            known_bombs: Vec::new(),
+            known_powerups: Vec::new(),
+            last_dir: None,
+        }
+    }
+
+    /// Create with both artifacts (full LoRA + WASM stack).
+    pub fn new_with_secrets(id: u8, lora_path: &str, wasm_path: &str) -> Self {
+        let lora = LoraAdapter::load(std::path::Path::new(lora_path)).ok();
+        let wasm = super::wasm_pruner::BomberWasmPruner::load_from_file(wasm_path).ok();
+        let buf_size = lora.as_ref().map_or(0, |l| l.rank);
+        Self {
+            _id: id,
+            lora,
+            wasm,
+            lora_buf: vec![0.0; buf_size],
+            known_bombs: Vec::new(),
+            known_powerups: Vec::new(),
+            last_dir: None,
+        }
+    }
+
+    /// Check if action is safe — WASM if available, native otherwise.
+    fn is_action_safe(
+        &self,
+        action: &BomberAction,
+        grid: &ArenaGrid,
+        pos: GridPos,
+        bombs: &[KnownBomb],
+    ) -> bool {
+        if let Some(ref wasm) = self.wasm {
+            return wasm.is_safe_action(action_index(action), grid, pos.x, pos.y, self._id, bombs);
+        }
+        is_safe_action(action, grid, pos, bombs)
+    }
+}
+
+#[cfg(feature = "bomber-wasm")]
+impl BomberPlayer for LoraWasmPlayer {
+    fn select_action(
+        &mut self,
+        grid: &ArenaGrid,
+        pos: GridPos,
+        events: &[GameEvent],
+        _rng: &mut Rng,
+    ) -> BomberAction {
+        update_bombs(&mut self.known_bombs, events);
+        update_powerups(&mut self.known_powerups, events);
+
+        let in_danger = in_blast_zone(pos, grid, &self.known_bombs);
+        let bomb_positions: std::collections::HashSet<(i32, i32)> =
+            self.known_bombs.iter().map(|(p, _, _)| *p).collect();
+
+        // Try LoRA scoring
+        let lora_scores = self.lora.as_ref().and_then(|lora| {
+            lora_score_actions(
+                lora,
+                grid,
+                pos,
+                &self.known_bombs,
+                &self.known_powerups,
+                self.last_dir,
+                &mut self.lora_buf,
+            )
+        });
+
+        let mut best = BomberAction::Wait;
+        let mut best_score = f32::NEG_INFINITY;
+
+        for (i, action) in ALL_ACTIONS.iter().enumerate() {
+            let is_move = matches!(
+                action,
+                BomberAction::Up | BomberAction::Down | BomberAction::Left | BomberAction::Right
+            );
+
+            if in_danger {
+                // Escape mode: skip Bomb/Wait, find escape route
+                if !is_move {
+                    continue;
+                }
+                let target = move_target(action, pos);
+                if !grid.is_walkable(target.x, target.y)
+                    || bomb_positions.contains(&(target.x, target.y))
+                {
+                    continue;
+                }
+                let score = match escape_distance(target, grid, &self.known_bombs, &bomb_positions)
+                {
+                    Some(dist) => 10.0 - dist as f32 * 0.5,
+                    None => -5.0,
+                };
+                if score > best_score {
+                    best_score = score;
+                    best = *action;
+                }
+            } else {
+                // Safe mode: hard-block unsafe actions via WASM or native
+                if !self.is_action_safe(action, grid, pos, &self.known_bombs) {
+                    continue;
+                }
+
+                // Use LoRA scores if available, else heuristic
+                let score = match &lora_scores {
+                    Some(s) => s[i],
+                    None => score_action(
+                        action,
+                        grid,
+                        pos,
+                        &self.known_bombs,
+                        &self.known_powerups,
+                        self.last_dir,
+                    ),
+                };
+
+                if score > best_score {
+                    best_score = score;
+                    best = *action;
+                }
+            }
+        }
+
+        if matches!(
+            best,
+            BomberAction::Up | BomberAction::Down | BomberAction::Left | BomberAction::Right
+        ) {
+            self.last_dir = Some(best);
+        }
+        if best == BomberAction::Bomb {
+            self.known_bombs
+                .push(((pos.x, pos.y), DEFAULT_BLAST_RANGE, BOMB_FUSE_TICKS));
+        }
+        best
+    }
+
+    fn name(&self) -> &str {
+        match (&self.lora, &self.wasm) {
+            (Some(_), Some(_)) => "LoRA+WASM",
+            (Some(_), None) => "LoRA+Native",
+            (None, Some(_)) => "Heuristic+WASM",
+            (None, None) => "Heuristic+Native",
+        }
+    }
+
+    fn emoji(&self) -> &str {
+        "🔮"
+    }
+
+    fn reset(&mut self) {
+        self.known_bombs.clear();
+        self.known_powerups.clear();
+        self.last_dir = None;
     }
 
     fn as_any(&self) -> &dyn Any {

@@ -17,7 +17,7 @@ pub use arena::ArenaGrid;
 pub use players::{BomberPlayer, GreedyPlayer, HLPlayer, RandomPlayer, ValidatorPlayer};
 
 #[cfg(feature = "bomber-wasm")]
-pub use players::{NNPlayer, create_players_with_wasm, is_safe_action};
+pub use players::{LoraPlayer, LoraWasmPlayer, NNPlayer, create_players_with_wasm, is_safe_action};
 pub use systems::*;
 #[cfg(feature = "bomber-wasm")]
 pub use wasm_state::{ZeroCopyStateBuffer, serialize_grid_only, serialize_into_buffer};
