@@ -276,22 +276,22 @@ pub struct GameTrainingReport {
   - Tests: monotonicity of all derived functions, boundary values (β=0, β=1), β overrides explicit params
 
 - [x] **Task 2: ReviewMetrics for training quality** (`riir-gpu`)
-  - Add `ReviewMetrics` to `training_config.rs`
-  - Record per-epoch loss changes: helpful (loss↓), harmful (loss↑), neutral (loss→)
-  - Compute `benefit_ratio()` at end of training
-  - Log warning if `benefit_ratio < 1.0` ("training is net-negative, check LR/data")
-  - Integrate into `Trainer::train()` — track metrics alongside loss history
-  - Include in `TrainingReport::Display` output
-  - Tests: benefit_ratio computation, epoch recording, boundary cases (all helpful, all harmful)
+  - Add `ReviewMetrics` to `training_config.rs` ✅
+  - Record per-epoch loss changes: helpful (loss↓), harmful (loss↑), neutral (loss→) ✅
+  - Compute `benefit_ratio()` at end of training ✅
+  - Log warning if `benefit_ratio < 1.0` ("training is net-negative, check LR/data") — TODO: not yet in Trainer
+  - Integrate into `Trainer::train()` — ⚠️ partial: used in `train_bomber.rs` example, not in core `Trainer::train()`
+  - Include in `TrainingReport::Display` output — TODO: not yet added
+  - Tests: benefit_ratio computation, epoch recording, boundary cases (all helpful, all harmful) ✅
 
 - [x] **Task 3: GameMetrics for game-specific quality** (`riir-gpu`)
-  - Add `GameMetrics` struct to track per-action accuracy and win rate
-  - After training, run validation games with trained LoRA to compute:
-    - Per-action accuracy (correct action vs model's top-1 prediction)
-    - Win rate before vs after training
-    - Action distribution entropy (are strategies diverse or degenerate?)
-  - Add `validate_game()` function that runs N validation episodes and records metrics
-  - Tests: metrics computed correctly, helpful/harmful detection, action accuracy
+  - Add `GameMetrics` struct to track per-action accuracy and win rate ✅ (struct + `helpful()`, `win_delta()`)
+  - After training, run validation games with trained LoRA to compute: — ⚠️ TODO: not yet wired
+    - Per-action accuracy (correct action vs model's top-1 prediction) — TODO
+    - Win rate before vs after training — TODO
+    - Action distribution entropy (are strategies diverse or degenerate?) — TODO
+  - Add `validate_game()` function that runs N validation episodes and records metrics — TODO: not yet implemented
+  - Tests: metrics computed correctly, helpful/harmful detection, action accuracy ✅ (struct-level tests only)
 
 - [ ] **Task 4: Absorb + Compress post-training analysis** (`riir-gpu`)
   - After training completes, analyze per-target LoRA gradient norms from last N epochs
@@ -324,20 +324,19 @@ pub struct GameTrainingReport {
   - Default: all targets (backward compatible)
   - Tests: probe produces gradient ranking, top-K selection is correct, full training still works
 
-- [x] **Task 7: GameTrainingReport and JSON export** (`riir-gpu`)
-  - Consolidate `TrainingReport`, `ReviewMetrics`, `GameMetrics`, `CompressReport`, `DistillReport` into `GameTrainingReport`
-  - Implement `Serialize` for JSON export to `output/training_report.json`
-  - This enables cross-run comparison and tracking training quality over time
-  - Tests: JSON roundtrip, all fields present, Display output formatted
+- [x] **Task 7: GameTrainingReport and JSON export** (`riir-gpu`) ✅
+  - Consolidate `TrainingReport`, `ReviewMetrics`, `GameMetrics`, `CompressReport`, `DistillReport` into `GameTrainingReport` ✅
+  - Implement `Serialize` for JSON export to `output/training_report.json` ✅ (via `train_bomber.rs`)
+  - This enables cross-run comparison and tracking training quality over time ✅
+  - Tests: JSON roundtrip, all fields present ✅
 
-- [x] **Task 8: `game_domain` feature flag in microgpt-rs** (`microgpt-rs`)
-  - Add `game_domain` feature flag to `Cargo.toml`
-  - Feature enables: `domain_latent` (already exists), game-specific LoRA loading, draft LoRA loading
-  - `language_domain` feature flag added as placeholder (no code yet, just the flag)
-  - `game_domain` implies `domain_latent` feature
-  - `full` feature includes both `game_domain` and `language_domain`
-  - Ensure existing tests pass with and without `game_domain`
-  - Tests: feature flag compiles, correct features implied, no regression
+- [x] **Task 8: `game_domain` feature flag in microgpt-rs** (`microgpt-rs`) ✅
+  - Add `game_domain` feature flag to `Cargo.toml` ✅
+  - Feature enables: `domain_latent` (already exists) ✅
+  - `language_domain` feature flag added as placeholder (no code yet, just the flag) ✅
+  - `game_domain` implies `domain_latent` feature ✅
+  - `full` feature includes both `game_domain` and `language_domain` ✅
+  - Ensure existing tests pass with and without `game_domain` ✅ (350 tests pass)
 
 - [ ] **Task 9: Benchmarks**
   - Benchmark: `BetaConfig` training (β=0.3) vs manual config (same derived params) — should be identical
@@ -351,14 +350,24 @@ pub struct GameTrainingReport {
 
 ## File Change Summary
 
+### Done ✅
+
 | File | Change | Target |
 |------|--------|--------|
 | `riir-gpu/src/training_config.rs` | New: `BetaConfig`, `ReviewMetrics`, `GameMetrics`, `CompressReport`, `DistillReport`, `GameTrainingReport` | riir-gpu |
 | `riir-gpu/src/lib.rs` | Export new types | riir-gpu |
-| `riir-gpu/src/training_loop.rs` | Integrate `BetaConfig`, `ReviewMetrics`, `GameMetrics`, update `TrainingReport` | riir-gpu |
-| `riir-gpu/src/lora.rs` | Add gradient norm tracking for screening probe | riir-gpu |
-| `riir-gpu/examples/train_bomber.rs` | `--beta` flag, `--lora-top-k` flag, distillation, validation, JSON report | riir-gpu |
+| `riir-gpu/src/training_loop.rs` | Add `Serialize`/`Deserialize` to `TrainingReport` | riir-gpu |
+| `riir-gpu/src/game/replay.rs` | `parse_jsonl()`, `parse_jsonl_filtered()`, `parse_jsonl_dir()` | riir-gpu |
+| `riir-gpu/examples/train_bomber.rs` | `--beta` flag, BetaConfig integration, ReviewMetrics tracking, JSON report | riir-gpu |
 | `microgpt-rs/Cargo.toml` | Add `game_domain` and `language_domain` feature flags | microgpt-rs |
+
+### Remaining (Tasks 4-6, 9)
+
+| File | Change | Target |
+|------|--------|--------|
+| `riir-gpu/src/training_loop.rs` | Integrate `ReviewMetrics` into core `Trainer::train()`, add `validate_game()` | riir-gpu |
+| `riir-gpu/src/lora.rs` | Add gradient norm tracking for screening probe | riir-gpu |
+| `riir-gpu/examples/train_bomber.rs` | `--lora-top-k` flag, distillation, game validation | riir-gpu |
 
 ---
 
@@ -410,17 +419,17 @@ Different scales, different pipelines, different feature flags.
 
 ## Priority Order
 
-| Priority | Task | Why | Effort |
-|----------|------|-----|--------|
-| **P0** | Task 1: BetaConfig | Reduces config complexity, enables easy sweep | Small |
-| **P0** | Task 2: ReviewMetrics | Training quality visibility, prevents wasted runs | Small |
-| **P1** | Task 3: GameMetrics | Game-specific training quality | Small |
-| **P1** | Task 8: Feature flags | Separate game from language concerns | Small |
-| **P2** | Task 5: Draft distillation | Enables Plan 004 at runtime | Medium |
-| **P2** | Task 4: Absorb+Compress | Post-training analysis | Small |
-| **P3** | Task 6: Screening probe | Reduces training time by skipping low-signal targets | Medium |
-| **P3** | Task 7: JSON report | Cross-run comparison | Small |
-| **P4** | Task 9: Benchmarks | Validate all techniques | Small |
+| Priority | Task | Why | Effort | Status |
+|----------|------|-----|--------|--------|
+| **P0** | Task 1: BetaConfig | Reduces config complexity, enables easy sweep | Small | ✅ Done |
+| **P0** | Task 2: ReviewMetrics | Training quality visibility, prevents wasted runs | Small | ✅ Done (partial — TODO: Trainer integration, Display) |
+| **P1** | Task 3: GameMetrics | Game-specific training quality | Small | ✅ Done (struct only — TODO: `validate_game()`) |
+| **P1** | Task 8: Feature flags | Separate game from language concerns | Small | ✅ Done |
+| **P2** | Task 5: Draft distillation | Enables Plan 004 at runtime | Medium | ⬜ Pending |
+| **P2** | Task 4: Absorb+Compress | Post-training analysis | Small | ⬜ Pending |
+| **P3** | Task 6: Screening probe | Reduces training time by skipping low-signal targets | Medium | ⬜ Pending |
+| **P3** | Task 7: JSON report | Cross-run comparison | Small | ✅ Done |
+| **P4** | Task 9: Benchmarks | Validate all techniques | Small | ⬜ Pending |
 
 ---
 
