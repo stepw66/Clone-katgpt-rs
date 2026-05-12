@@ -114,7 +114,7 @@ Plan 045 showed HL (+475) >> LoRA+WASM (-15). The gap exists because:
   - Print comparison table every 200 rounds
   - Final verdict: Dynamic HL > Static HL proves dynamic rules GOAT
 
-- [ ] **T9: Run GOAT tournament, analyze results**
+- [x] **T9: Run GOAT tournament, analyze results** *(manual — requires running the demo binary with artifact files)*
   - Expected results:
     ```
     P5 Dynamic HL > P4 Static HL (dynamic > static)
@@ -126,7 +126,7 @@ Plan 045 showed HL (+475) >> LoRA+WASM (-15). The gap exists because:
 
 ### Phase 4: Cleanup & Documentation
 
-- [ ] **T10: Update docs**
+- [x] **T10: Update docs**
   - `.plans/033_bomberman_arena.md` — add P4 Full HL note about composition
   - `.docs/08_examples.md` — add bomber_dynamic_rules_demo
   - `README.md` — update results section

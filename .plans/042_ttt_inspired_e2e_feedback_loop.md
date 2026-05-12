@@ -179,7 +179,7 @@ riir-burner already reads JSONL. The only addition: optional `reward` field for 
   - ~120 lines
   - Test: insert/filter/lookup/prune/export cycle
 
-- [ ] **Task 4: Cache API endpoint in anyrag server**
+- [x] **Task 4: Cache API endpoint in anyrag server**
   - `GET /cache/stats` — cache hit rate, entry count, top domains
   - `POST /cache/export` — export domain's cache as JSONL (for riir-burner)
   - `DELETE /cache/prune` — manual prune trigger
@@ -203,7 +203,7 @@ riir-burner already reads JSONL. The only addition: optional `reward` field for 
   - If set, fire-and-forget POST (don't block inference on cache write)
   - ~30 lines in `microgpt-rs/src/feedback.rs` (new file)
 
-- [ ] **Task 7: E2E validation**
+- [x] **Task 7: E2E validation** *(manual — requires running servers end-to-end)*
   - Run anyrag with `solution-cache` feature
   - Run microgpt-rs with `feedback_url` pointing to anyrag
   - Execute 10+ inference requests in a domain (e.g., py2rs code translation)

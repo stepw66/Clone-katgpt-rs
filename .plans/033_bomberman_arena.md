@@ -206,6 +206,8 @@ The difference from P3:
   P4's validator EVOLVES (bandit adapts, compresses into rules between games)
 ```
 
+> **Note (Plan 046):** The full composition of LoRA + WASM + Bandit + HotSwap is now implemented as `FullHLPlayer` in `riir-ai/crates/riir-examples/src/bomber_full_hl.rs`. The GOAT proof tournament is `bomber_dynamic_rules_demo.rs`.
+
 ---
 
 ## ECS Architecture (bevy_ecs standalone)
