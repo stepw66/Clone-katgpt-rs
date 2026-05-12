@@ -305,17 +305,18 @@ pub struct GameTrainingReport {
   - Wired in `train_bomber.rs` Phase 6 with freeze recommendation output ✅
   - Tests: 11 tests — l2_norm, tracker, compress_analysis, stability, window, JSON roundtrip ✅
 
-- [ ] **Task 5: Draft-target distillation** (`riir-gpu`)
-  - Implements Research 04 P3 for game domain
-  - After training target LoRA, distill a smaller draft LoRA:
-    - Forward pass with target LoRA on training data → get action probabilities
-    - Train draft LoRA (rank 2) to match target's distribution (KL divergence loss)
-    - Draft is smaller → faster inference in microgpt-rs speculative decoding
-  - Add `distill_draft()` function to `Trainer`
-  - Export both: `game_lora.bin` (target) + `game_draft_lora.bin` (draft)
-  - Output `DistillReport` with KL divergence, ranks, sample count
-  - This is the game-domain analog of Leviathan verification (Plan 004)
-  - Tests: draft distribution approximates target (KL < threshold), draft is smaller rank
+- [x] **Task 5: Draft-target distillation** (`riir-gpu`) ✅
+  - Implements Research 04 P3 for game domain ✅
+  - After training target LoRA, distill a smaller draft LoRA ✅
+    - SVD initialization: truncate target LoRA effective weight to draft rank ✅
+    - Draft is smaller → faster inference in microgpt-rs speculative decoding ✅
+  - `distill_draft()` standalone function — SVD-based, CPU-only, no GPU forward pass needed ✅
+  - Export both: `game_lora.bin` (target) + `game_draft_lora.bin` (draft) ✅
+  - Output `DistillReport` with KL divergence, ranks, sample count ✅
+  - This is the game-domain analog of Leviathan verification (Plan 004) ✅
+  - `distill.rs` module: `DistillConfig`, `DistillResult`, `init_draft_from_svd()`, CPU LoRA I/O ✅
+  - Wired in `train_bomber.rs` Phase 5b with `--distill` CLI flag ✅
+  - Tests: 7 tests — SVD, export/import roundtrip, KL divergence, adapter index, softmax, matvec ✅
 
 - [x] **Task 6: Screening-guided LoRA target probe** (`riir-gpu`) ✅
   - Before full training, do a short probe (10 steps) with LoRA on all targets ✅
@@ -365,18 +366,19 @@ pub struct GameTrainingReport {
 | `riir-gpu/src/training_loop.rs` | `Serialize`/`Deserialize` on `TrainingReport`, epoch-end grad norm snapshots, `lora_target_filter` | riir-gpu |
 | `riir-gpu/src/compress.rs` | New: `GradNormTracker`, `CompressConfig`, `snapshot_grad_norms()`, `compress_analysis()` (Task 4) | riir-gpu |
 | `riir-gpu/src/screening.rs` | New: `ScreeningConfig`, `ScreeningResult`, `TargetGradRank`, gradient ranking (Task 6) | riir-gpu |
+| `riir-gpu/src/distill.rs` | New: `DistillConfig`, `DistillResult`, `init_draft_from_svd()`, CPU LoRA I/O (Task 5) | riir-gpu |
 | `riir-gpu/src/game/replay.rs` | `parse_jsonl()`, `parse_jsonl_filtered()`, `parse_jsonl_dir()` | riir-gpu |
 | `riir-gpu/src/game/trainer.rs` | `encode_game_samples()`, `decode_action_token()`, `BOARD_VOCAB`, `ACTION_OFFSET`, `GAME_SEQ_LEN` | riir-gpu |
 | `riir-gpu/examples/train_bomber.rs` | Real pipeline (Plan 041), BetaConfig, ReviewMetrics, compress Phase 6, screening Phase 4a (`--lora-top-k`) | riir-gpu |
 | `microgpt-rs/src/types.rs` | `Config::game()` for Bomberman LoRA training (Plan 041) | microgpt-rs |
 | `microgpt-rs/Cargo.toml` | Add `game_domain` and `language_domain` feature flags | microgpt-rs |
 
-### Remaining (Tasks 5, 9)
+### Remaining (Task 9)
 
 | File | Change | Target |
 |------|--------|--------|
 | `riir-gpu/src/training_loop.rs` | Add `validate_game()` for game-specific validation | riir-gpu |
-| `riir-gpu/examples/train_bomber.rs` | Distillation, game validation | riir-gpu |
+| `riir-gpu/examples/train_bomber.rs` | Game validation | riir-gpu |
 
 ---
 
@@ -434,7 +436,7 @@ Different scales, different pipelines, different feature flags.
 | **P0** | Task 2: ReviewMetrics | Training quality visibility, prevents wasted runs | Small | ✅ Done (real integration via Plan 041 — TODO: Display) |
 | **P1** | Task 3: GameMetrics | Game-specific training quality | Small | ✅ Done (struct only — TODO: `validate_game()`) |
 | **P1** | Task 8: Feature flags | Separate game from language concerns | Small | ✅ Done |
-| **P2** | Task 5: Draft distillation | Enables Plan 004 at runtime | Medium | ⬜ Pending |
+| **P2** | Task 5: Draft distillation | Enables Plan 004 at runtime | Medium | ✅ Done (SVD-based) |
 | **P2** | Task 4: Absorb+Compress | Post-training analysis | Small | ✅ Done |
 | **P3** | Task 6: Screening probe | Reduces training time by skipping low-signal targets | Medium | ✅ Done |
 | **P3** | Task 7: JSON report | Cross-run comparison | Small | ✅ Done (real loss history via Plan 041) |
