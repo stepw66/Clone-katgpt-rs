@@ -683,7 +683,7 @@ fn bench_niah_csv_output() {
     let csv = rows.join("\n");
     println!("{csv}");
 
-    std::fs::create_dir_all("bench").ok();
-    std::fs::write("bench/058_niah_results.csv", &csv).unwrap();
-    println!("\n  📝 Saved to bench/058_niah_results.csv");
+    std::fs::create_dir_all("bench/specialized").ok();
+    std::fs::write("bench/specialized/058_niah_retrieval.csv", &csv).unwrap();
+    println!("\n  📝 Saved to bench/specialized/058_niah_retrieval.csv");
 }

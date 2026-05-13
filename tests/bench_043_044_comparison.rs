@@ -444,9 +444,9 @@ fn bench_043_turboquant_before_after() {
 
     // Config that actually demonstrates compression: disable last_n_full
     let mut cfg_compress = FlashPrefillConfig {
-        attention_sink: 1,  // keep first block
-        window: 1,          // keep last block
-        last_n_full: 0,     // allow middle blocks to be dropped
+        attention_sink: 1, // keep first block
+        window: 1,         // keep last block
+        last_n_full: 0,    // allow middle blocks to be dropped
         ..Default::default()
     };
 
@@ -520,7 +520,9 @@ fn bench_043_turboquant_before_after() {
         let ratio = selected.len() as f64 / prompt_len as f64;
         println!(
             "  │   len={prompt_len}: kept={}/{} ({:.0}%) — last_n_full keeps all  │",
-            selected.len(), prompt_len, ratio * 100.0
+            selected.len(),
+            prompt_len,
+            ratio * 100.0
         );
     }
     println!("  └───────────────────────────────────────────────────────────┘");
@@ -671,26 +673,37 @@ fn bench_043_turboquant_before_after() {
             niah_scores[secret_pos] = 0.95;
 
             // Config A: default
-            let cfg_a = FlashPrefillConfig { alpha, ..Default::default() };
+            let cfg_a = FlashPrefillConfig {
+                alpha,
+                ..Default::default()
+            };
             let sel_a = compress_prompt_blocks(&niah_scores, &cfg_a, 2, 2);
             let survives_a = sel_a.contains(&needle_pos) && sel_a.contains(&secret_pos);
             total_cases_a += 1;
-            if survives_a { passed_cases_a += 1; }
+            if survives_a {
+                passed_cases_a += 1;
+            }
 
             // Config B: compress
             cfg_niah_b.alpha = alpha;
             let sel_b = compress_prompt_blocks(&niah_scores, &cfg_niah_b, 2, 2);
             let survives_b = sel_b.contains(&needle_pos) && sel_b.contains(&secret_pos);
             total_cases_b += 1;
-            if survives_b { passed_cases_b += 1; }
+            if survives_b {
+                passed_cases_b += 1;
+            }
         }
     }
 
     let rate_a = passed_cases_a as f64 / total_cases_a as f64 * 100.0;
     let rate_b = passed_cases_b as f64 / total_cases_b as f64 * 100.0;
 
-    println!("  │ Config A retrieval: {rate_a:>5.1}% ({passed_cases_a}/{total_cases_a} cases)              │");
-    println!("  │ Config B retrieval: {rate_b:>5.1}% ({passed_cases_b}/{total_cases_b} cases)              │");
+    println!(
+        "  │ Config A retrieval: {rate_a:>5.1}% ({passed_cases_a}/{total_cases_a} cases)              │"
+    );
+    println!(
+        "  │ Config B retrieval: {rate_b:>5.1}% ({passed_cases_b}/{total_cases_b} cases)              │"
+    );
     println!("  │                                                           │");
     println!("  │ Note: retrieval tested with crafted importance scores.    │");
     println!("  │ Config A: needle always survives (last_n_full keeps all). │");
@@ -756,9 +769,9 @@ fn bench_043_turboquant_before_after() {
     println!("  └───────────────────────────────────────────────────────────┘");
 
     // ── Write CSV ──────────────────────────────────────────────
-    let csv_path = "bench/057_results.csv";
+    let csv_path = "bench/specialized/057_tq_pflash_comparison.csv";
     let csv_content = csv_rows.join("\n") + "\n";
-    std::fs::create_dir_all("bench").ok();
+    std::fs::create_dir_all("bench/specialized").ok();
     std::fs::write(csv_path, &csv_content).unwrap();
     println!("\n  📝 Results saved to {csv_path}");
 
