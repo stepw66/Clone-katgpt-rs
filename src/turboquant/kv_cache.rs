@@ -37,6 +37,13 @@ pub struct TurboQuantKVCache {
     val_bits: u8,
     /// Maximum sequence length.
     max_seq_len: usize,
+    // ── Scratch buffers for zero-alloc hot path (Plan 051) ──
+    /// Normalized input: [kv_dim]. Reused across store/dequantize calls.
+    scratch_normalized: Vec<f32>,
+    /// Rotation output: [kv_dim]. Reused across store/dequantize calls.
+    scratch_rotated: Vec<f32>,
+    /// Quantized/unpacked indices: [kv_dim]. Reused across store/dequantize calls.
+    scratch_indices: Vec<u8>,
 }
 
 impl TurboQuantKVCache {
@@ -75,6 +82,9 @@ impl TurboQuantKVCache {
             key_bits,
             val_bits,
             max_seq_len,
+            scratch_normalized: vec![0.0f32; kv_dim],
+            scratch_rotated: vec![0.0f32; kv_dim],
+            scratch_indices: vec![0u8; kv_dim],
         }
     }
 
@@ -114,6 +124,9 @@ impl TurboQuantKVCache {
             key_bits: tq_config.key_bits,
             val_bits: tq_config.val_bits,
             max_seq_len: tq_config.kv_dim,
+            scratch_normalized: vec![0.0f32; tq_config.kv_dim],
+            scratch_rotated: vec![0.0f32; tq_config.kv_dim],
+            scratch_indices: vec![0u8; tq_config.kv_dim],
         }
     }
 
@@ -130,18 +143,35 @@ impl TurboQuantKVCache {
             return;
         }
 
-        // Normalize
-        let normalized: Vec<f32> = key.iter().map(|x| x / norm).collect();
+        // Normalize in-place into scratch buffer
+        let inv_norm = 1.0 / norm;
+        for (i, &v) in key.iter().enumerate() {
+            unsafe {
+                *self.scratch_normalized.get_unchecked_mut(i) = v * inv_norm;
+            }
+        }
 
-        // Rotate: R * normalized
-        let rotated = mat_vec(&layer_state.rotation, &normalized);
+        // Rotate in-place: R * normalized → scratch_rotated
+        mat_vec_into(
+            &layer_state.rotation,
+            &self.scratch_normalized,
+            &mut self.scratch_rotated,
+        );
 
-        // Quantize each coordinate
+        // Quantize in-place into scratch_indices
         let cb = &layer_state.key_codebook;
-        let indices: Vec<u8> = rotated.iter().map(|&v| cb.quantize(v)).collect();
+        for (i, &v) in self.scratch_rotated.iter().enumerate() {
+            unsafe {
+                *self.scratch_indices.get_unchecked_mut(i) = cb.quantize(v);
+            }
+        }
 
-        // Pack into bytes
-        self.key_indices[layer][pos] = pack_indices(&indices, self.key_bits);
+        // Pack into existing buffer (zero-alloc)
+        pack_indices_into(
+            &self.scratch_indices,
+            self.key_bits,
+            &mut self.key_indices[layer][pos],
+        );
     }
 
     /// Quantize and store a value vector at given layer and position.
@@ -156,11 +186,35 @@ impl TurboQuantKVCache {
             return;
         }
 
-        let normalized: Vec<f32> = value.iter().map(|x| x / norm).collect();
-        let rotated = mat_vec(&layer_state.rotation, &normalized);
+        // Normalize in-place into scratch buffer
+        let inv_norm = 1.0 / norm;
+        for (i, &v) in value.iter().enumerate() {
+            unsafe {
+                *self.scratch_normalized.get_unchecked_mut(i) = v * inv_norm;
+            }
+        }
+
+        // Rotate in-place: R * normalized → scratch_rotated
+        mat_vec_into(
+            &layer_state.rotation,
+            &self.scratch_normalized,
+            &mut self.scratch_rotated,
+        );
+
+        // Quantize in-place into scratch_indices
         let cb = &layer_state.val_codebook;
-        let indices: Vec<u8> = rotated.iter().map(|&v| cb.quantize(v)).collect();
-        self.val_indices[layer][pos] = pack_indices(&indices, self.val_bits);
+        for (i, &v) in self.scratch_rotated.iter().enumerate() {
+            unsafe {
+                *self.scratch_indices.get_unchecked_mut(i) = cb.quantize(v);
+            }
+        }
+
+        // Pack into existing buffer (zero-alloc)
+        pack_indices_into(
+            &self.scratch_indices,
+            self.val_bits,
+            &mut self.val_indices[layer][pos],
+        );
     }
 
     /// Dequantize key at position. Returns reconstructed key vector.
@@ -199,18 +253,94 @@ impl TurboQuantKVCache {
         normalized.iter().map(|x| x * norm).collect()
     }
 
-    /// Dequantize key slice into pre-allocated buffer.
-    pub fn dequantize_key_into(&self, layer: usize, pos: usize, out: &mut [f32]) {
+    /// Dequantize key into pre-allocated buffer. Zero-alloc hot path (Plan 051).
+    ///
+    /// Uses internal scratch buffers — requires `&mut self`.
+    /// Reconstruction: unpack → dequantize → inverse rotate → scale by norm.
+    pub fn dequantize_key_into(&mut self, layer: usize, pos: usize, out: &mut [f32]) {
         debug_assert_eq!(out.len(), self.kv_dim);
-        let result = self.dequantize_key(layer, pos);
-        out.copy_from_slice(&result);
+        let layer_state = &self.layers[layer];
+        let norm = self.key_norms[layer][pos];
+
+        if norm < 1e-8 {
+            out.fill(0.0);
+            return;
+        }
+
+        // Unpack in-place into scratch_indices
+        unpack_indices_into(
+            &self.key_indices[layer][pos],
+            self.key_bits,
+            self.kv_dim,
+            &mut self.scratch_indices,
+        );
+
+        // Dequantize in-place into scratch_rotated
+        let cb = &layer_state.key_codebook;
+        for (i, &idx) in self.scratch_indices.iter().enumerate() {
+            unsafe {
+                *self.scratch_rotated.get_unchecked_mut(i) = cb.dequantize(idx);
+            }
+        }
+
+        // Inverse rotate in-place: R^T * rotated → scratch_normalized
+        mat_vec_t_into(
+            &layer_state.rotation,
+            &self.scratch_rotated,
+            &mut self.scratch_normalized,
+        );
+
+        // Scale by norm → output
+        for (i, out_val) in out.iter_mut().enumerate() {
+            unsafe {
+                *out_val = *self.scratch_normalized.get_unchecked(i) * norm;
+            }
+        }
     }
 
-    /// Dequantize value slice into pre-allocated buffer.
-    pub fn dequantize_value_into(&self, layer: usize, pos: usize, out: &mut [f32]) {
+    /// Dequantize value into pre-allocated buffer. Zero-alloc hot path (Plan 051).
+    ///
+    /// Uses internal scratch buffers — requires `&mut self`.
+    /// Reconstruction: unpack → dequantize → inverse rotate → scale by norm.
+    pub fn dequantize_value_into(&mut self, layer: usize, pos: usize, out: &mut [f32]) {
         debug_assert_eq!(out.len(), self.kv_dim);
-        let result = self.dequantize_value(layer, pos);
-        out.copy_from_slice(&result);
+        let layer_state = &self.layers[layer];
+        let norm = self.val_norms[layer][pos];
+
+        if norm < 1e-8 {
+            out.fill(0.0);
+            return;
+        }
+
+        // Unpack in-place into scratch_indices
+        unpack_indices_into(
+            &self.val_indices[layer][pos],
+            self.val_bits,
+            self.kv_dim,
+            &mut self.scratch_indices,
+        );
+
+        // Dequantize in-place into scratch_rotated
+        let cb = &layer_state.val_codebook;
+        for (i, &idx) in self.scratch_indices.iter().enumerate() {
+            unsafe {
+                *self.scratch_rotated.get_unchecked_mut(i) = cb.dequantize(idx);
+            }
+        }
+
+        // Inverse rotate in-place: R^T * rotated → scratch_normalized
+        mat_vec_t_into(
+            &layer_state.rotation,
+            &self.scratch_rotated,
+            &mut self.scratch_normalized,
+        );
+
+        // Scale by norm → output
+        for (i, out_val) in out.iter_mut().enumerate() {
+            unsafe {
+                *out_val = *self.scratch_normalized.get_unchecked(i) * norm;
+            }
+        }
     }
 
     /// Reset cache for new sequence.
@@ -259,10 +389,20 @@ impl TurboQuantKVCache {
 // ── Matrix operations ────────────────────────────────────────
 
 /// Matrix-vector multiply: result = M * v (M is dim×dim row-major).
+/// Backward-compat wrapper kept for tests. Hot path uses [`mat_vec_into`].
+#[allow(dead_code)]
 fn mat_vec(m: &[f32], v: &[f32]) -> Vec<f32> {
     let dim = v.len();
     let mut result = vec![0.0f32; dim];
-    for (i, out) in result.iter_mut().enumerate() {
+    mat_vec_into(m, v, &mut result);
+    result
+}
+
+/// In-place matrix-vector multiply: out = M * v (zero-alloc, Plan 051).
+fn mat_vec_into(m: &[f32], v: &[f32], out: &mut [f32]) {
+    let dim = v.len();
+    debug_assert_eq!(out.len(), dim);
+    for (i, out_val) in out.iter_mut().enumerate() {
         let mut sum = 0.0f32;
         let row_off = i * dim;
         for j in 0..dim {
@@ -270,25 +410,31 @@ fn mat_vec(m: &[f32], v: &[f32]) -> Vec<f32> {
                 sum += *m.get_unchecked(row_off + j) * *v.get_unchecked(j);
             }
         }
-        *out = sum;
+        *out_val = sum;
     }
-    result
 }
 
 /// Transpose matrix-vector multiply: result = M^T * v (M is dim×dim row-major).
 fn mat_vec_t(m: &[f32], v: &[f32]) -> Vec<f32> {
     let dim = v.len();
     let mut result = vec![0.0f32; dim];
-    for (i, out) in result.iter_mut().enumerate() {
+    mat_vec_t_into(m, v, &mut result);
+    result
+}
+
+/// In-place transpose matrix-vector multiply: out = M^T * v (zero-alloc, Plan 051).
+fn mat_vec_t_into(m: &[f32], v: &[f32], out: &mut [f32]) {
+    let dim = v.len();
+    debug_assert_eq!(out.len(), dim);
+    for (i, out_val) in out.iter_mut().enumerate() {
         let mut sum = 0.0f32;
         for j in 0..dim {
             unsafe {
                 sum += *m.get_unchecked(j * dim + i) * *v.get_unchecked(j);
             }
         }
-        *out = sum;
+        *out_val = sum;
     }
-    result
 }
 
 // ── Bit packing ──────────────────────────────────────────────
@@ -304,6 +450,8 @@ fn packed_len(n: usize, bits: u8) -> usize {
 }
 
 /// Pack quantized indices into bytes.
+/// Backward-compat wrapper kept for tests. Hot path uses [`pack_indices_into`].
+#[allow(dead_code)]
 fn pack_indices(indices: &[u8], bits: u8) -> Vec<u8> {
     match bits {
         2 => {
@@ -344,6 +492,51 @@ fn pack_indices(indices: &[u8], bits: u8) -> Vec<u8> {
                 bit_pos += bits as usize;
             }
             packed
+        }
+    }
+}
+
+/// Pack indices into pre-allocated buffer (zero-alloc, Plan 051).
+fn pack_indices_into(indices: &[u8], bits: u8, out: &mut [u8]) {
+    match bits {
+        2 => {
+            out.fill(0);
+            for (i, &idx) in indices.iter().enumerate() {
+                let byte = i / 4;
+                let shift = (i % 4) * 2;
+                unsafe {
+                    *out.get_unchecked_mut(byte) |= (idx & 0x3) << shift;
+                }
+            }
+        }
+        3 | 4 => {
+            out.fill(0);
+            for (i, &idx) in indices.iter().enumerate() {
+                let byte = i / 2;
+                let shift = (i % 2) * 4;
+                unsafe {
+                    *out.get_unchecked_mut(byte) |= (idx & 0xF) << shift;
+                }
+            }
+        }
+        8 => {
+            let copy_len = out.len().min(indices.len());
+            out[..copy_len].copy_from_slice(&indices[..copy_len]);
+        }
+        _ => {
+            out.fill(0);
+            let mut bit_pos = 0usize;
+            for &idx in indices {
+                let byte_pos = bit_pos / 8;
+                let shift = bit_pos % 8;
+                unsafe {
+                    *out.get_unchecked_mut(byte_pos) |= idx << shift;
+                    if shift + bits as usize > 8 {
+                        *out.get_unchecked_mut(byte_pos + 1) |= idx >> (8 - shift);
+                    }
+                }
+                bit_pos += bits as usize;
+            }
         }
     }
 }
@@ -396,6 +589,71 @@ fn unpack_indices(packed: &[u8], bits: u8, n: usize) -> Vec<u8> {
                 bit_pos += bits as usize;
             }
             indices
+        }
+    }
+}
+
+/// Unpack indices into pre-allocated buffer (zero-alloc, Plan 051).
+fn unpack_indices_into(packed: &[u8], bits: u8, n: usize, out: &mut [u8]) {
+    debug_assert!(out.len() >= n);
+    match bits {
+        2 => {
+            for i in 0..n {
+                let byte = i / 4;
+                let shift = (i % 4) * 2;
+                if byte < packed.len() {
+                    unsafe {
+                        *out.get_unchecked_mut(i) = (*packed.get_unchecked(byte) >> shift) & 0x3;
+                    }
+                } else {
+                    unsafe {
+                        *out.get_unchecked_mut(i) = 0;
+                    }
+                }
+            }
+        }
+        3 | 4 => {
+            for i in 0..n {
+                let byte = i / 2;
+                let shift = (i % 2) * 4;
+                if byte < packed.len() {
+                    unsafe {
+                        *out.get_unchecked_mut(i) = (*packed.get_unchecked(byte) >> shift) & 0xF;
+                    }
+                } else {
+                    unsafe {
+                        *out.get_unchecked_mut(i) = 0;
+                    }
+                }
+            }
+        }
+        8 => {
+            let copy_len = n.min(packed.len());
+            out[..copy_len].copy_from_slice(&packed[..copy_len]);
+            out[copy_len..n].fill(0);
+        }
+        _ => {
+            let mask = (1u8 << bits) - 1;
+            let mut bit_pos = 0usize;
+            for i in 0..n {
+                let byte_pos = bit_pos / 8;
+                let shift = bit_pos % 8;
+                if byte_pos < packed.len() {
+                    unsafe {
+                        *out.get_unchecked_mut(i) =
+                            (*packed.get_unchecked(byte_pos) >> shift) & mask;
+                        if shift + bits as usize > 8 && byte_pos + 1 < packed.len() {
+                            *out.get_unchecked_mut(i) |=
+                                (*packed.get_unchecked(byte_pos + 1) << (8 - shift)) & mask;
+                        }
+                    }
+                } else {
+                    unsafe {
+                        *out.get_unchecked_mut(i) = 0;
+                    }
+                }
+                bit_pos += bits as usize;
+            }
         }
     }
 }
@@ -549,10 +807,13 @@ mod tests {
         let key: Vec<f32> = (0..cache.kv_dim).map(|i| (i as f32 * 0.3).sin()).collect();
         cache.store_key(0, 0, &key);
 
+        // Zero-alloc _into path (Plan 051): uses scratch buffers, requires &mut self
         let mut buf = vec![0.0f32; cache.kv_dim];
         cache.dequantize_key_into(0, 0, &mut buf);
+
+        // Compare with allocating path (still &self)
         let direct = cache.dequantize_key(0, 0);
-        assert_eq!(buf, direct);
+        assert_eq!(buf, direct, "zero-alloc _into must match allocating path");
     }
 
     #[test]

@@ -174,6 +174,8 @@ Compresses KV cache from f32 (32 bits) to 2-4 bits per coordinate using random r
 
 Architecture: random orthogonal rotation → Beta-distributed coordinates → Lloyd-Max codebook → bit-packed storage. Unbiased attention scores by construction (E[estimated] = true).
 
+**Zero-alloc hot path (Plan 051):** Pre-allocated scratch buffers eliminate all heap allocations from `store_key`/`store_value`/`dequantize_key_into`/`dequantize_value_into`. Full store+dequant cycle **44.6% faster**, per-call dequantize **17-20% faster** at production kv_dim.
+
 📁 `src/turboquant/` — `codebook.rs`, `rotation.rs`, `kv_cache.rs`, `forward.rs`, `types.rs`
 
 ## ⚡ PFlash: Block-Sparse Speculative Prefill
