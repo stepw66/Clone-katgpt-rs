@@ -31,6 +31,14 @@ Plan 009 (REST)              Plan 010 (Multi-Layer)        Plan 011 (GQA + Paged
 │                           bridge to speculative_step_rest()             │
 │                                                                         │
 │  Target-Conditioned ───── uses hidden_state + MultiLayerKVCache         │
+│                                                                         │
+│  TurboQuant KV Cache ─── compresses f32→2-4bit per coordinate,          │
+│                           random rotation + Lloyd-Max codebook           │
+│                           composable with PFlash (precision × seq)      │
+│                                                                         │
+│  PFlash Block-Sparse ─── block-level importance scoring (sink+window+   │
+│                           last_n_full+alpha), compress_prompt_blocks()  │
+│                           ported from lucebox-hub C++/CUDA              │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -188,6 +196,113 @@ pub fn dflash_predict_conditioned(
 
 +15% acceptance length improvement from target conditioning.
 
+## Technique 6: TurboQuant KV Cache Compression (Plan 043)
+
+### Problem
+KV cache is the memory bottleneck for long-context inference. `MultiLayerKVCache` stores f32 keys+values growing linearly with sequence length. 32K context × 128 head_dim × 32 layers = 1 GB.
+
+### Solution
+Compress each KV coordinate from 32-bit f32 to 2-4 bits using TurboQuant (Zandieh et al., 2025):
+1. **Normalize** → unit vector
+2. **Random rotation** (QR-based orthogonal Π) → coordinates become Beta-distributed
+3. **Lloyd-Max codebook** → optimal scalar quantizer per coordinate
+4. **Bit-pack** → 2/3/4 bits per coordinate stored as u8 array
+
+```rust
+// turboquant/kv_cache.rs
+pub struct TurboQuantKVCache { /* bit-packed indices + norms + rotation matrices */ }
+
+impl TurboQuantKVCache {
+    pub fn store_key(&mut self, layer, pos, key: &[f32]);    // quantize + pack
+    pub fn dequantize_key(&self, layer, pos) -> Vec<f32>;     // unpack + rotate back
+    pub fn bytes_per_token(&self) -> usize;                    // packed size
+    pub fn compression_ratio(&self) -> f64;                    // flat / packed
+}
+```
+
+### Key Properties
+- **Data-oblivious**: No calibration data needed, works on any distribution
+- **Online**: Per-token quantization, no preprocessing
+- **Unbiased**: E[estimated ⟨Q,K⟩] = true ⟨Q,K⟩ (Algorithm 2 guarantee)
+- **Composable**: Orthogonal to Raven (sequence compression) and PFlash (token reduction)
+
+### Results
+| Bits | Compression | Key cos_sim | Attention corr | Output cos_sim |
+|:----:|:-----------:|:-----------:|:--------------:|:--------------:|
+| 2 | 8.0× | 0.9242 | 0.9450 | 0.9699 |
+| **3** | **5.3×** | **0.9825** | **0.9907** | **0.9989** |
+| 4 | 5.3× | 0.9958 | 0.9978 | 0.9975 |
+
+At 32K context (hypothetical hd=128): **1073.7 MB → 151.0 MB (7.1× compression)**.
+
+### Modules
+- `turboquant/codebook.rs` — Lloyd-Max codebook computation
+- `turboquant/rotation.rs` — QR-based orthogonal rotation + QJL projection
+- `turboquant/kv_cache.rs` — Bit-packed compressed KV cache
+- `turboquant/forward.rs` — Dequantization + attention forward path
+
+## Technique 7: PFlash Block-Sparse Speculative Prefill (Plan 044)
+
+### Problem
+Long-context prefill is O(S²). Vanilla llama.cpp on RTX 3090 takes ~257s to prefill 131K tokens. User waits 4+ minutes before first token.
+
+### Solution
+Score per-block importance using draft model's tail attention, then select important blocks with structured rules:
+
+```rust
+// speculative/prefill.rs
+pub fn block_select(block_scores: &[f32], cfg: &FlashPrefillConfig) -> Vec<usize>;
+pub fn block_select_grid(grid: &[f32], m: usize, n: usize, h: usize, cfg: &FlashPrefillConfig) -> Vec<usize>;
+pub fn compress_prompt_blocks(scores: &[f32], cfg: &FlashPrefillConfig, prefix: usize, suffix: usize) -> Vec<usize>;
+```
+
+### Block Selection Rules
+1. **Sink rule**: First `attention_sink` blocks always kept (system prompt)
+2. **Window rule**: Blocks within `window` of query position always kept (local context)
+3. **last_n_full**: When query is in last N blocks, keep all (short prompt safety)
+4. **Alpha rule**: Keep blocks with `score >= max_score × alpha` (importance threshold)
+
+### Pipeline
+```
+prompt tokens
+    │
+    ▼
+block_select (sink + window + last_n + alpha)
+    │
+    ▼
+compress_prompt_blocks (prefix + suffix + selected blocks)
+    │
+    ▼
+target model prefill on compressed tokens
+```
+
+### Config Presets
+```rust
+FlashPrefillConfig::default()        // block_size=32, sink=1, window=2, last_n=1, alpha=0.15
+FlashPrefillConfig::metal()          // block_size=64, optimized for Apple Silicon
+FlashPrefillConfig::long_context()   // aggressive compression for 64K+ ctx
+FlashPrefillConfig::short_context()  // conservative for <4K ctx
+```
+
+### Results
+| Context | Alpha | Before | After | Reduction | NIAH |
+|:-------:|:-----:|:------:|:-----:|:---------:|:----:|
+| 512 | 0.15 | 512 | 192 | 2.7× | ✅ |
+| 1024 | 0.15 | 1024 | 192 | 5.3× | ✅ |
+| 2048 | 0.15 | 2048 | 192 | 10.7× | ✅ |
+| 4096 | 0.15 | 4096 | 192 | 21.3× | ✅ |
+
+NIAH retrieval: **20/20 = 100%** across all context sizes and alpha values.
+
+C++ reference (RTX 3090, BSA): 128K → 2.6K (50× reduction), TTFT 257s → 24.8s (**10.4×** speedup).
+
+### Composable with TurboQuant
+| Config | Sequence | Memory | Combined |
+|--------|----------|--------|----------|
+| TQ 3-bit + PF α=0.15 | 9.4% | 18.8% | **14.9% (6.7× reduction)** |
+
+Both reductions multiply: PFlash reduces tokens, TurboQuant reduces bits per token.
+
 ## Architecture Decisions
 
 1. **Chain-seed is additive** — `build_dd_tree()` works as before (chain_seed=false)
@@ -196,6 +311,8 @@ pub fn dflash_predict_conditioned(
 4. **Target conditioning via KV seed** — simplest option, no weight changes
 5. **Flat cache first** — PagedKVCache integration deferred to Plan 014
 6. **No new model weights** — reuses draft model attention + target hidden_state
+7. **TurboQuant is a separate module** — not extension of existing KV cache, lives in `src/turboquant/`
+8. **PFlash uses FlashPrefillConfig** — config-driven, no feature flag, CPU path with GPU kernel reserved for future
 
 ## Key References
 - [Luce-Org/lucebox-hub](https://github.com/Luce-Org/lucebox-hub/) — Open LLM Inference, Rewritten by Hand for One Specific Chip at a Time
@@ -203,3 +320,4 @@ pub fn dflash_predict_conditioned(
 - [DDTree: Block Diffusion Draft Trees](https://arxiv.org/abs/2604.12989) — Ringel & Romano, 2026
 - [Cross-Family Speculative Prefill](https://arxiv.org/abs/2603.02631) — Liu et al., ICLR 2026
 - [FlashPrefill](https://arxiv.org/abs/2603.06199) — Fan et al., 2026
+- [TurboQuant: Online Vector Quantization with Near-Optimal Distortion Rate](https://arxiv.org/pdf/2504.19874) — Zandieh et al., 2025

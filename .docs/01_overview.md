@@ -20,7 +20,9 @@ A from-scratch Rust implementation of a GPT-2 style transformer with speculative
 - Speculative decoding: ~1.64M tok/s (AR Draft)
 - forward_raven (16 slots): ~1.6M trees/s
 - raven_recall (1000 noise): ~9.3M tok/s
-- 276+ tests passing, zero clippy warnings
+- TurboQuant 3-bit KV cache: 5.3× compression, 0.99 attention correlation
+- PFlash block-sparse prefill: up to 21.3× sequence reduction, 100% NIAH retrieval
+- 295+ tests passing, zero clippy warnings
 
 ## Module Structure
 
@@ -55,6 +57,13 @@ src/
   tokenizer/        BPE tokenizer (encode/decode/train, Config::bpe())
   validator/        SynPruner + partial parser ‡
   percepta.rs       Vec2, KVCache2D, Sudoku9x9, SymbolicValidator, StreamingSolver, SolveEvent
+  turboquant/      TurboQuant KV cache compression:
+    mod.rs          Module root (re-exports)
+    types.rs        TurboQuantCodebook, TurboQuantLayer, TurboQuantKVCacheConfig
+    codebook.rs     Lloyd-Max codebook (compute_codebook, quantize, dequantize)
+    rotation.rs     QR-based orthogonal rotation + QJL projection
+    kv_cache.rs     TurboQuantKVCache (store_key, store_value, dequantize, bit-pack)
+    forward.rs      attention_turboquant, dequantize_keys_flat/values_flat, cosine_similarity
   benchmark.rs      BenchResult, run_all, save_results_csv
   plot.rs           plot_results → PNG
 
@@ -81,7 +90,7 @@ src/
 ## Quick Start
 
 ```bash
-cargo test --quiet --workspace --all-features   # Run all 276+ tests
+cargo test --quiet --workspace --all-features   # Run all 295+ tests
 cargo run --release                             # Run benchmark suite (includes Leviathan verification)
 cargo run --example sudoku_01_9x9 --features sudoku           # Sudoku streaming solver
 cargo run --example sudoku_02_speculative --features sudoku   # DDTree pruning demo

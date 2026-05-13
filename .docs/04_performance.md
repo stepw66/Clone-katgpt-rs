@@ -192,6 +192,46 @@ The benchmarks progress from individual components to full pipelines:
 | **forward_raven (16 slots)** | Forward pass through `RavenKVCache` — 16 fixed routing slots, O(1) attention. | Proves Raven is faster than flat forward (0.62 vs 0.83 μs). Slot memory wins. |
 | **raven_recall (1000 noise)** | Recall accuracy test: inject 1000 noise tokens, verify target tokens are recalled from frozen slots. | 9.25M tok/s with 63.21/64 recall — proves slot memory retains signal through noise. |
 
+## TurboQuant KV Cache Compression (Plan 043)
+
+### Memory Compression
+| Bits | Bytes/token | Compression | Key cos_sim | Attention corr |
+|:----:|:----------:|:-----------:|:-----------:|:--------------:|
+| 2 | 16 | 8.0× | 0.9242 | 0.9450 |
+| 3 | 24 | 5.3× | 0.9825 | 0.9907 |
+| 4 | 24 | 5.3× | 0.9958 | 0.9978 |
+
+### At Scale (32K ctx, 32 layers, hd=128)
+- Flat f32: 1073.7 MB
+- TQ 3-bit: 151.0 MB (7.1× compression)
+- TQ 2-bit: 83.9 MB (12.8× compression)
+
+### Trade-off
+Store+dequantize has ~200× compute overhead vs flat f32 copy. Net win at long contexts where memory bandwidth is the bottleneck, not compute.
+
+## PFlash Block-Sparse Prefill (Plan 044)
+
+### Sequence Reduction
+| Context | Alpha | Before | After | Reduction |
+|:-------:|:-----:|:------:|:-----:|:---------:|
+| 512 | 0.15 | 512 | 192 | 2.7× |
+| 1024 | 0.15 | 1024 | 192 | 5.3× |
+| 2048 | 0.15 | 2048 | 192 | 10.7× |
+| 4096 | 0.15 | 4096 | 192 | 21.3× |
+
+### NIAH Retrieval
+20/20 = 100% across all context sizes (256-4096) and alpha values (0.05-0.85).
+
+### block_select Throughput
+| Scale | Blocks | blocks/s | µs/call |
+|:-----:|:------:|:--------:|:-------:|
+| 2K | 64 | 30M | 2.1µ |
+| 32K | 1024 | 28M | 36µ |
+| 128K | 4096 | 29M | 140µ |
+
+### Combined with TurboQuant
+TQ 3-bit + PF α=0.15 = 14.9% resources (6.7× total reduction).
+
 ## What We Don't Do (and why)
 
 | Technique | Reason |

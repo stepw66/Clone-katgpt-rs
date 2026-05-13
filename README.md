@@ -21,6 +21,8 @@ Inspired by [microgpt-c](https://github.com/nicholasgasior/microgpt-c), [talos-v
 - **Bomberman Arena** — 4-player HL proof: adaptive intelligence (+177) > greedy (+131) > static rules (-30) > random (-55).
 - **Monopoly FSM Arena** — 4-player turn-based FSM: sequential phase AI (PreTurn→Rolling→Resolving→Strategic→EndTurn) with bandit strategy adaptation across 1000 games.
 - **Bandit + WASM Pruners** — `BanditPruner` wraps any `ScreeningPruner` with exploration. `WasmPruner` loads sandboxed `.wasm` validators.
+- **TurboQuant KV Cache** — 5-8× KV cache compression via random rotation + Lloyd-Max quantization (2-4 bit). 3-bit: 0.99 attention correlation, 0.98 cosine similarity.
+- **PFlash Block-Sparse Prefill** — Block-sparse speculative prefill with sink/window/alpha selection rules. Up to 21× sequence reduction with 100% NIAH needle retrieval.
 
 📖 **Deep dives:** See [`.docs/`](.docs/) for architecture, speculative decoding, performance, sudoku, validator, HL, bomber arena, and monopoly FSM details.
 
@@ -156,6 +158,39 @@ When keys form a convex hull, finding the maximum attention score becomes ternar
 **Proved:** All 4 arithmetic ops (+, −, ×, ÷), power, combined expressions, backtracking search (4×4 Sudoku, 8-Queens, 9×9 Arto Inkala) — all computed via attention-based state retrieval.
 
 **960 arithmetic operations** verified: all a+b, a×b, a−b, a÷b for a,b ∈ 0..=10.
+
+## 🗜️ TurboQuant: Near-Optimal KV Cache Compression
+
+Compresses KV cache from f32 (32 bits) to 2-4 bits per coordinate using random rotation + Lloyd-Max scalar quantization. Based on [TurboQuant (Zandieh et al., 2025)](https://arxiv.org/pdf/2504.19874).
+
+| Metric | Flat f32 | TQ 3-bit | TQ 4-bit |
+|--------|----------|----------|----------|
+| Bytes/token | 128 | 24 (**5.3×**) | 24 (**5.3×**) |
+| 32K ctx memory | 1073.7 MB | 151.0 MB (**7.1×**) | 151.0 MB (**7.1×**) |
+| Key cosine sim | 1.0000 | 0.9825 | 0.9958 |
+| Attention correlation | 1.0000 | 0.9907 | 0.9978 |
+| Output cosine sim | 1.0000 | 0.9989 | 0.9975 |
+
+Architecture: random orthogonal rotation → Beta-distributed coordinates → Lloyd-Max codebook → bit-packed storage. Unbiased attention scores by construction (E[estimated] = true).
+
+📁 `src/turboquant/` — `codebook.rs`, `rotation.rs`, `kv_cache.rs`, `forward.rs`, `types.rs`
+
+## ⚡ PFlash: Block-Sparse Speculative Prefill
+
+Compresses long prompts before target prefill using block-level importance scoring with selection rules (sink + window + last_n_full + alpha threshold). Ported from [lucebox-hub/pflash](https://github.com/Luce-Org/lucebox-hub/) C++/CUDA implementation.
+
+| Metric | Before | After | Gain |
+|--------|--------|-------|------|
+| 4K ctx tokens | 4096 | 192 | **21.3×** |
+| NIAH retrieval | 100% | **100%** (20/20) | preserved |
+| block_select throughput | — | ~30M blocks/s | — |
+| 128K ctx block_select | — | 140µs | — |
+
+C++ reference: 128K → 2.6K tokens (50× seq reduction), TTFT ~257s → ~24.8s (**10.4×** speedup).
+
+Composable with TurboQuant: TQ compresses the *precision* dimension (fewer bits), PFlash compresses the *sequence* dimension (fewer tokens). Combined: **6.7× total resource reduction**.
+
+📁 `src/speculative/prefill.rs` — `block_select`, `block_select_grid`, `compress_prompt_blocks`, `BlockAttentionScorer`
 
 ## 🎰 Multi-Armed Bandit
 
@@ -382,10 +417,17 @@ src/
   tokenizer/        BPE tokenizer (encode/decode/train)
   validator/        SynPruner + PartialParser + CompilerFeedback
   percepta.rs       O(log N) convex hull attention, Sudoku solvers, StreamingSolver
+  turboquant/      TurboQuant KV cache compression:
+    mod.rs          Module root (re-exports)
+    types.rs        TurboQuantCodebook, TurboQuantLayer, TurboQuantKVCacheConfig
+    codebook.rs     Lloyd-Max codebook (compute_codebook, quantize, dequantize)
+    rotation.rs     QR-based orthogonal rotation + QJL projection
+    kv_cache.rs     TurboQuantKVCache (store_key, store_value, dequantize, bit-pack)
+    forward.rs      attention_turboquant, dequantize_keys_flat/values_flat, cosine_similarity
   benchmark.rs      BenchResult, run_all, save_results_csv
   plot.rs           PNG horizontal bar chart
 examples/           36 examples (sudoku, validator, bandit, bomber, monopoly, tactical, dungeon, raven, prefill)
-tests/              88 integration tests + 7 benchmark suites
+tests/              88+ integration tests + 9 benchmark suites (TurboQuant, PFlash NIAH)
 bench/              Auto-numbered PNG + CSV benchmark output
 ```
 
@@ -419,4 +461,6 @@ Lessons from [NVIDIA Dynamo's agentic inference](https://developer.nvidia.com/bl
 - [Probabilistic Programs of Thought](https://arxiv.org/abs/2604.17290) — Logit-parameterized CPU resampling
 - [Reinforced Agent: Inference-Time Feedback](https://arxiv.org/abs/2604.27233) — Review metrics, benefit-risk ratio
 - [Luce-Org/lucebox-hub](https://github.com/Luce-Org/lucebox-hub/) — Per-chip LLM inference
+- [TurboQuant: Online Vector Quantization with Near-Optimal Distortion Rate](https://arxiv.org/pdf/2504.19874) — Zandieh et al., 2025
+- [Luce PFlash: Speculative Prefill Compression for Long-Context Spec Decode](https://github.com/Luce-Org/lucebox-hub/) — lucebox-hub, 2026
 - [Learning Beyond Gradients](https://trinkle23897.github.io/learning-beyond-gradients/) — Heuristic Learning paradigm
