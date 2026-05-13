@@ -13,6 +13,12 @@ use std::any::Any;
 
 use fastrand::Rng;
 
+#[cfg(feature = "bandit")]
+use std::sync::Arc;
+
+#[cfg(feature = "bandit")]
+use crate::pruners::SharedBanditStats;
+
 use super::{ArenaGrid, BomberAction, GameEvent, GridPos};
 
 #[cfg(feature = "bomber-wasm")]
@@ -1111,6 +1117,10 @@ pub struct HLPlayer {
     compressed: [bool; ACTION_COUNT],
     round_actions: Vec<BomberAction>,
     last_dir: Option<BomberAction>,
+    /// Shared bandit stats for multi-agent cooperative learning.
+    /// When `Some`, Q-values/visits/compressed are delegated here.
+    #[cfg(feature = "bandit")]
+    shared_stats: Option<Arc<SharedBanditStats>>,
 }
 
 impl HLPlayer {
@@ -1126,7 +1136,112 @@ impl HLPlayer {
             compressed: [false; ACTION_COUNT],
             round_actions: Vec::new(),
             last_dir: None,
+            #[cfg(feature = "bandit")]
+            shared_stats: None,
         }
+    }
+
+    /// Create HLPlayer sharing bandit stats with other agents.
+    ///
+    /// Multiple agents sharing one `SharedBanditStats` learn cooperatively:
+    /// Q-values and visit counts are shared, but each agent still has
+    /// its own heuristic scoring and RNG for action selection.
+    #[cfg(feature = "bandit")]
+    pub fn with_shared_stats(id: u8, stats: Arc<SharedBanditStats>) -> Self {
+        Self {
+            _id: id,
+            known_bombs: Vec::new(),
+            known_powerups: Vec::new(),
+            known_opponents: Vec::new(),
+            q_values: [0.0; ACTION_COUNT],
+            visits: [0; ACTION_COUNT],
+            total_pulls: 0,
+            compressed: [false; ACTION_COUNT],
+            round_actions: Vec::new(),
+            last_dir: None,
+            shared_stats: Some(stats),
+        }
+    }
+
+    // ── Shared Stats Accessors ─────────────────────────────────
+
+    /// Whether an arm is compressed (hard-blocked).
+    ///
+    /// Delegates to shared stats when present, else uses local field.
+    #[cfg(feature = "bandit")]
+    fn arm_compressed(&self, arm: usize) -> bool {
+        self.shared_stats
+            .as_ref()
+            .map_or(self.compressed[arm], |s| s.is_compressed(arm))
+    }
+
+    #[cfg(not(feature = "bandit"))]
+    fn arm_compressed(&self, arm: usize) -> bool {
+        self.compressed[arm]
+    }
+
+    /// Visit count for an arm.
+    #[cfg(feature = "bandit")]
+    fn arm_visits(&self, arm: usize) -> u32 {
+        self.shared_stats
+            .as_ref()
+            .map_or(self.visits[arm], |s| s.visits(arm))
+    }
+
+    #[cfg(not(feature = "bandit"))]
+    fn arm_visits(&self, arm: usize) -> u32 {
+        self.visits[arm]
+    }
+
+    /// Q-value estimate for an arm.
+    #[cfg(feature = "bandit")]
+    fn arm_q(&self, arm: usize) -> f32 {
+        self.shared_stats
+            .as_ref()
+            .map_or(self.q_values[arm], |s| s.q_value(arm))
+    }
+
+    #[cfg(not(feature = "bandit"))]
+    fn arm_q(&self, arm: usize) -> f32 {
+        self.q_values[arm]
+    }
+
+    /// Update Q-value for an arm with observed reward.
+    ///
+    /// Delegates to shared stats when present, else updates local fields.
+    #[cfg(feature = "bandit")]
+    fn update_arm_q(&mut self, arm: usize, reward: f32) {
+        match &self.shared_stats {
+            Some(stats) => stats.update(arm, reward),
+            None => {
+                self.visits[arm] += 1;
+                self.total_pulls += 1;
+                let n = self.visits[arm] as f32;
+                self.q_values[arm] += (reward - self.q_values[arm]) / n;
+            }
+        }
+    }
+
+    #[cfg(not(feature = "bandit"))]
+    fn update_arm_q(&mut self, arm: usize, reward: f32) {
+        self.visits[arm] += 1;
+        self.total_pulls += 1;
+        let n = self.visits[arm] as f32;
+        self.q_values[arm] += (reward - self.q_values[arm]) / n;
+    }
+
+    /// Mark an arm as compressed (hard-blocked).
+    #[cfg(feature = "bandit")]
+    fn mark_compressed(&mut self, arm: usize) {
+        match &self.shared_stats {
+            Some(stats) => stats.compress_arm(arm),
+            None => self.compressed[arm] = true,
+        }
+    }
+
+    #[cfg(not(feature = "bandit"))]
+    fn mark_compressed(&mut self, arm: usize) {
+        self.compressed[arm] = true;
     }
 
     /// Update bandit Q-values based on round outcome.
@@ -1161,16 +1276,13 @@ impl HLPlayer {
             action_weights[idx] += recency;
         }
 
-        // Update Q-values with weighted rewards
+        // Update Q-values with weighted rewards (delegates to shared stats when present)
         for idx in 0..ACTION_COUNT {
             if action_weights[idx] == 0.0 {
                 continue;
             }
             let reward = action_rewards[idx] / action_weights[idx];
-            self.visits[idx] += 1;
-            self.total_pulls += 1;
-            let n = self.visits[idx] as f32;
-            self.q_values[idx] += (reward - self.q_values[idx]) / n;
+            self.update_arm_q(idx, reward);
         }
     }
 
@@ -1181,11 +1293,11 @@ impl HLPlayer {
         let mut newly_compressed = Vec::new();
 
         for i in 0..ACTION_COUNT {
-            if self.compressed[i] {
+            if self.arm_compressed(i) {
                 continue;
             }
-            if self.visits[i] >= min_visits && self.q_values[i] < threshold {
-                self.compressed[i] = true;
+            if self.arm_visits(i) >= min_visits && self.arm_q(i) < threshold {
+                self.mark_compressed(i);
                 newly_compressed.push(i);
             }
         }
@@ -1195,6 +1307,28 @@ impl HLPlayer {
 
     /// Generate a compression report string.
     pub fn compress_report(&self) -> String {
+        #[cfg(feature = "bandit")]
+        if let Some(ref stats) = self.shared_stats {
+            let compressed_count = (0..ACTION_COUNT)
+                .filter(|&i| stats.is_compressed(i))
+                .count();
+            let compressed_names: Vec<String> = (0..ACTION_COUNT)
+                .filter(|&i| stats.is_compressed(i))
+                .map(|i| format!("{}({:.2})", index_to_action(i), stats.q_value(i)))
+                .collect();
+            return format!(
+                "Pulls={} Compressed={}/{} [{}] Q=[{}]",
+                stats.total_pulls(),
+                compressed_count,
+                ACTION_COUNT,
+                compressed_names.join(","),
+                (0..ACTION_COUNT)
+                    .map(|i| format!("{}:{:.2}", index_to_action(i), stats.q_value(i)))
+                    .collect::<Vec<_>>()
+                    .join(" "),
+            );
+        }
+
         let compressed_count = self.compressed.iter().filter(|&&c| c).count();
         let compressed_names: Vec<String> = self
             .compressed
@@ -1251,7 +1385,7 @@ impl BomberPlayer for HLPlayer {
 
         for (i, action) in ALL_ACTIONS.iter().enumerate() {
             // Skip compressed (hard-blocked) arms
-            if self.compressed[i] {
+            if self.arm_compressed(i) {
                 scores[i] = (*action, f32::NEG_INFINITY);
                 continue;
             }
@@ -1335,8 +1469,8 @@ impl BomberPlayer for HLPlayer {
             }
 
             // Bandit Q-value component (default 0.0 for unvisited arms)
-            let _bandit_q = if self.visits[i] > 0 {
-                self.q_values[i]
+            let _bandit_q = if self.arm_visits(i) > 0 {
+                self.arm_q(i)
             } else {
                 0.0
             };
@@ -1350,7 +1484,7 @@ impl BomberPlayer for HLPlayer {
             // Pick a random non-compressed, non-hard-blocked, safe action
             let safe_explore: Vec<usize> = (0..ACTION_COUNT)
                 .filter(|&i| {
-                    if self.compressed[i] || scores[i].1 <= f32::NEG_INFINITY {
+                    if self.arm_compressed(i) || scores[i].1 <= f32::NEG_INFINITY {
                         return false;
                     }
                     let action = ALL_ACTIONS[i];

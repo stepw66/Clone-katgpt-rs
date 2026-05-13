@@ -875,6 +875,113 @@ impl<P: ScreeningPruner + AbsorbCompress> BanditPruner<P> {
     }
 }
 
+// ── Shared Bandit Stats ────────────────────────────────────────
+
+/// Thread-safe shared bandit statistics for multi-agent cooperative learning.
+/// Wraps bandit state in Mutex so multiple agents share one learning process.
+///
+/// Contention is minimal — ~1 update per ~200 tick round per agent.
+/// Use `Arc<SharedBanditStats>` to share across agents.
+#[cfg(feature = "bandit")]
+pub struct SharedBanditStats {
+    inner: std::sync::Mutex<BanditStatsInner>,
+}
+
+#[cfg(feature = "bandit")]
+struct BanditStatsInner {
+    q_values: Vec<f32>,
+    visits: Vec<u32>,
+    total_pulls: u32,
+    compressed: Vec<bool>,
+}
+
+#[cfg(feature = "bandit")]
+impl SharedBanditStats {
+    /// Create shared stats with optimistic initialization (Q=1.0 for all arms).
+    pub fn new(n_arms: usize) -> Self {
+        Self {
+            inner: std::sync::Mutex::new(BanditStatsInner {
+                q_values: vec![1.0; n_arms],
+                visits: vec![0; n_arms],
+                total_pulls: 0,
+                compressed: vec![false; n_arms],
+            }),
+        }
+    }
+
+    /// Update Q-value for `arm` after observing `reward`.
+    ///
+    /// Uses incremental mean: `Q(a) += (reward - Q(a)) / n(a)`.
+    pub fn update(&self, arm: usize, reward: f32) {
+        let mut inner = self.inner.lock().unwrap();
+        if arm >= inner.q_values.len() {
+            return;
+        }
+        inner.visits[arm] += 1;
+        inner.total_pulls += 1;
+        let n = inner.visits[arm] as f32;
+        inner.q_values[arm] += (reward - inner.q_values[arm]) / n;
+    }
+
+    /// UCB1 score: `Q(a) + sqrt(2 * ln(N) / n(a))`.
+    ///
+    /// Returns `f32::MAX` for unvisited arms (must explore first).
+    pub fn ucb1_score(&self, arm: usize) -> f32 {
+        let inner = self.inner.lock().unwrap();
+        if arm >= inner.q_values.len() || inner.visits[arm] == 0 || inner.total_pulls == 0 {
+            return f32::MAX;
+        }
+        let q = inner.q_values[arm];
+        let n = inner.visits[arm] as f32;
+        let total = inner.total_pulls as f32;
+        q + (2.0 * total.ln() / n).sqrt()
+    }
+
+    /// Index of the arm with highest Q-value.
+    pub fn best_arm(&self) -> usize {
+        let inner = self.inner.lock().unwrap();
+        inner
+            .q_values
+            .iter()
+            .enumerate()
+            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+            .map(|(i, _)| i)
+            .unwrap_or(0)
+    }
+
+    /// Whether an arm has been compressed (hard-blocked).
+    pub fn is_compressed(&self, arm: usize) -> bool {
+        let inner = self.inner.lock().unwrap();
+        inner.compressed.get(arm).copied().unwrap_or(false)
+    }
+
+    /// Mark an arm as compressed (hard-blocked).
+    pub fn compress_arm(&self, arm: usize) {
+        let mut inner = self.inner.lock().unwrap();
+        if arm < inner.compressed.len() {
+            inner.compressed[arm] = true;
+        }
+    }
+
+    /// Total pulls across all arms.
+    pub fn total_pulls(&self) -> u32 {
+        let inner = self.inner.lock().unwrap();
+        inner.total_pulls
+    }
+
+    /// Visit count for an arm.
+    pub fn visits(&self, arm: usize) -> u32 {
+        let inner = self.inner.lock().unwrap();
+        inner.visits.get(arm).copied().unwrap_or(0)
+    }
+
+    /// Q-value estimate for an arm.
+    pub fn q_value(&self, arm: usize) -> f32 {
+        let inner = self.inner.lock().unwrap();
+        inner.q_values.get(arm).copied().unwrap_or(0.0)
+    }
+}
+
 // ── Tests ───────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -1282,5 +1389,68 @@ mod tests {
         // Other arms still allowed
         assert!(pruner.relevance(0, 0, &[]) >= 0.0);
         assert!(pruner.relevance(0, 2, &[]) >= 0.0);
+    }
+
+    // ── Shared Bandit Stats Tests ──────────────────────────────
+
+    #[test]
+    fn test_shared_bandit_stats_convergence() {
+        use std::sync::Arc;
+        use std::thread;
+
+        let stats = Arc::new(SharedBanditStats::new(4));
+        let mut handles = Vec::new();
+
+        // 4 threads, each updating different arms with different rewards
+        // Arm 0: reward 0.1, Arm 1: reward 0.3, Arm 2: reward 0.9, Arm 3: reward 0.5
+        let rewards = [0.1f32, 0.3f32, 0.9f32, 0.5f32];
+        let updates_per_thread = 200u32;
+
+        for arm in 0..4 {
+            let stats_clone = Arc::clone(&stats);
+            let reward = rewards[arm];
+            handles.push(thread::spawn(move || {
+                for _ in 0..updates_per_thread {
+                    stats_clone.update(arm, reward);
+                }
+            }));
+        }
+
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        // Best arm should converge to arm 2 (highest reward 0.9)
+        assert_eq!(
+            stats.best_arm(),
+            2,
+            "shared stats should find arm 2 as best"
+        );
+
+        // Total pulls = 4 threads × 200 updates
+        assert_eq!(
+            stats.total_pulls(),
+            800,
+            "total pulls should equal sum of all thread updates"
+        );
+
+        // Verify individual arm visits
+        for arm in 0..4 {
+            assert_eq!(
+                stats.visits(arm),
+                updates_per_thread,
+                "arm {arm} should have {updates_per_thread} visits"
+            );
+        }
+
+        // Verify Q-values converge toward true rewards
+        for arm in 0..4 {
+            let q = stats.q_value(arm);
+            let expected = rewards[arm];
+            assert!(
+                (q - expected).abs() < 0.1,
+                "arm {arm} q_value {q} should be close to {expected}"
+            );
+        }
     }
 }
