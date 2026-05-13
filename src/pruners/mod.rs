@@ -48,7 +48,7 @@ pub use absorb_compress::{AbsorbCompress, AbsorbCompressLayer, CompressConfig};
 #[cfg(feature = "bandit")]
 pub use bandit::{
     BanditEnv, BanditEvent, BanditPruner, BanditResult, BanditSession, BanditStats, BanditStrategy,
-    BernoulliEnv, GaussianEnv,
+    BernoulliEnv, GaussianEnv, SharedBanditStats,
 };
 
 #[cfg(feature = "bandit")]

@@ -16,6 +16,9 @@ pub mod wasm_state;
 pub use arena::ArenaGrid;
 pub use players::{BomberPlayer, GreedyPlayer, HLPlayer, RandomPlayer, ValidatorPlayer};
 
+#[cfg(feature = "bandit")]
+pub use crate::pruners::SharedBanditStats;
+
 #[cfg(feature = "bomber-wasm")]
 pub use players::{LoraPlayer, LoraWasmPlayer, NNPlayer, create_players_with_wasm, is_safe_action};
 pub use systems::*;
