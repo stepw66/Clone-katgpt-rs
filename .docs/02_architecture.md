@@ -192,10 +192,10 @@ pub trait SpeculativeVerifier: Send + Sync {
 }
 ```
 
-| Verifier | Feature Flag | What it does |
-|----------|-------------|--------------|
-| `SimulatedVerifier` | always available | DFlash/AR draft → DDTree → simulated acceptance cap → bonus token from last marginal |
-| `LeviathanVerifier` | always available | AR draft → target model p/q scoring → rejection sampling → residual distribution → bonus from target p(x). Proves Algorithm 1 works end-to-end. |
+| Verifier | Availability | What it does |
+|----------|--------------|--------------|
+| `SimulatedVerifier` | always compiled | DFlash/AR draft → DDTree → simulated acceptance cap → bonus token from last marginal |
+| `LeviathanVerifier` | always compiled | AR draft → target model p/q scoring → rejection sampling → residual distribution → bonus from target p(x). Proves Algorithm 1 works end-to-end. |
 
 `SimulatedVerifier` is fast (no target model). `LeviathanVerifier` is the full Algorithm 1 — mathematically proven distribution-preserving, but needs large model asymmetry to be faster than pure AR.
 

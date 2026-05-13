@@ -22,6 +22,11 @@
 - [ ] T9: Implement model-based `GZeroLoop` + wire into `SelfImprovingCycle`
 - [ ] T10: Update README, .docs, references
 
+### Feature Gate
+
+- [ ] T11: Add `g_zero = ["bandit"]` feature gate + `#[cfg(feature = "g_zero")]` on all new code — always gated, regardless of benchmark outcome
+- [ ] T12: Log-prob extraction via separate `logprobs()` function, NOT modifying `forward()` hot path
+
 ---
 
 ## Paper Summary
@@ -687,6 +692,32 @@ Key architectural difference: The source runs on **Tinker** (cloud API with `Sam
 | No GRPO/DPO in Rust ecosystem | Greenfield implementation; derive from paper equations | 2 |
 
 ---
+
+## Feature Gate Strategy
+
+**Always gate.** Not because it might lose benchmarks — because it's a different concern.
+
+### Honest Assessment
+
+| Plan Claim | Reality |
+|---|---|
+| "Fills gaps, no competitor" | Competes with `ReviewMetrics` gating (absorb), game-outcome rewards (bandit), game-generated scenarios (TemplateProposer) |
+| "Just two forward passes" | Needs per-token log-prob extraction from `forward()`, tokenizer integration, string handling — touches hot path |
+| "Always useful" | `TemplateProposer` is language-domain only; irrelevant to Bomberman/Monopoly/Sudoku arenas |
+
+### Why Gate Regardless
+
+1. **Concern separation** — self-play training ≠ inference. `#[cfg(feature = "g_zero")]` keeps `transformer.rs` clean
+2. **Hot path protection** — `forward()` must not carry log-prob baggage unconditionally. Separate `logprobs()` function instead
+3. **Domain mismatch** — `TemplateProposer` generates text queries. Your arenas generate scenarios from gameplay. Only useful for language domain (Phase 2+)
+4. **Proven pattern** — `bandit`, `sparse_mlp`, `domain_latent` are all gated. G-Zero is the same tier
+
+### Gate Rules
+
+- `g_zero = ["bandit"]` in `Cargo.toml`
+- All new code behind `#[cfg(feature = "g_zero")]`
+- `logprobs()` as standalone function, not `forward()` modification
+- If T5 wins → consider promoting to default later. Gate stays until proven.
 
 ## Success Criteria
 

@@ -1,4 +1,5 @@
 pub mod benchmark;
+#[cfg(feature = "feedback")]
 pub mod feedback;
 pub mod percepta;
 pub mod plot;

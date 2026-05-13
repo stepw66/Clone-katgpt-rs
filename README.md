@@ -492,17 +492,23 @@ cargo clippy --all-targets --all-features --quiet
 |------|-------------|
 | `sudoku` | SudokuPruner constraint pruning + examples |
 | `validator` | SynPruner + partial parser (BPE tokenizer, `syn` AST) |
-| `sparse_mlp` | TwELL-inspired sparse MLP matmul |
-| `ppot` | PPoT logit-parameterized CPU resampling + adaptive rescue |
+| `sparse_mlp` | TwELL-inspired sparse MLP matmul (Plan 022) |
+| `ppot` | PPoT logit-parameterized CPU resampling + adaptive rescue (Plan 026) |
+| `domain_latent` | Mid-layer domain conditioning (Plan 038) |
 | `bandit` | Multi-armed bandit + HL infrastructure (TrialLog, AbsorbCompress, HotSwapPruner) |
-| `bomber` | Bomberman HL arena (bevy_ecs + bandit) |
-| `bomber-wasm` | WASM bomber validator loader (bomber + wasmtime) |
-| `monopoly` | Monopoly FSM arena (bevy_ecs + bandit) |
-| `rest` | REST client for RAG-augmented speculative decoding |
-| `embedding_router` | Semantic embedding retrieval from anyrag |
-| `gpu` | GPU compute via wgpu, safetensors model loading (planned) |
-| `leviathan` | LeviathanVerifier real p/q rejection sampling |
+| `bomber` | Bomberman HL arena (bevy_ecs + bandit, Plan 033) |
+| `bomber-wasm` | WASM bomber validator loader (bomber + wasmtime + papaya, Plan 034) |
+| `monopoly` | Monopoly FSM arena (bevy_ecs + bandit, Plan 035) |
+| `feedback` | E2E feedback loop — sends inference results to REST endpoint (Plan 042, requires consumer in riir-gpu) |
+| `rest` | REST bridge test + merge stub (Plan 009, client lives in riir-ai/riir-rest) |
+| `embedding_router` | Semantic embedding routing (Plan 024, not yet started) |
+| `gpu` | Placeholder — GPU training lives in riir-ai/riir-gpu |
+| `game_domain` | Alias for `domain_latent` — game-specific Config presets (Plan 040) |
+| `language_domain` | Language domain: BPE vocab, LLM models (Plan 040, future) |
+| `g_zero` | G-Zero self-play distillation (Plan 049, planned) |
 | `full` | Enable all features |
+
+> **Note:** `LeviathanVerifier` is always compiled (no feature gate) — it's part of `verifier.rs` and `benchmark.rs`. `Transformer AR`, `DFlash`, `Raven`, `TurboQuant`, and `PFlash` are also always available — they're zero-cost until their caches are instantiated.
 
 ## 📁 Project Structure
 

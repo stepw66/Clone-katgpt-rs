@@ -164,15 +164,17 @@ High-level entry points that compose the full speculative decoding pipeline.
 |----------|-------------|
 | `speculative_step(draft_weights, draft_config, token, pos, rng)` | Default: uses `SimulatedVerifier` internally. |
 | `speculative_step_verifier(..., verifier)` | Plugs in a custom `SpeculativeVerifier` implementation. |
-| `speculative_step_rest(..., rest_client)` | REST-augmented speculative decoding (behind `"rest"` feature). |
+| `speculative_step_rest(..., rest_client)` | REST-augmented speculative decoding (behind `"rest"` feature). **Note:** REST client lives in `riir-ai/riir-rest`; this repo has only the bridge test + `merge_retrieved_branches()` stub (Plan 009). |
 | `speculative_step_rollback(..., verifier)` | KV snapshot/rollback per branch — enables speculative branching without corrupting the main KV cache. |
 | `speculative_step_conditioned(...)` | Target-conditioned draft seeding + Leviathan verification for highest-fidelity output. |
 
 ---
 
-## REST Bridge (`rest/`) (behind `"rest"` feature)
+## REST Bridge (behind `"rest"` feature)
 
 Augments speculative decoding with historically successful token sequences retrieved from an external vector store.
+
+> **Note:** The full REST client (`RestClient`, `RetrievalResult`) lives in `riir-ai/riir-rest`. This repo contains only `merge_retrieved_branches()` (DDTree merge logic) and a bridge test. The `"rest"` feature flag enables the test; the merge function is always compiled.
 
 ### REST Architecture
 
