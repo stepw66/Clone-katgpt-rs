@@ -1,4 +1,3 @@
-run_date,commit,category,method,throughput,us_per_step,avg_accept_len
 2026-05-13T11:48:19,5e2667b,speculative,Transformer AR,1071864,0.93,1.00
 2026-05-13T11:48:19,5e2667b,tree_build,DFlash,520147,1.92,8.00
 2026-05-13T11:48:19,5e2667b,tree_build,DDTree Build,370902,2.70,0.00
@@ -59,7 +58,7 @@ run_date,commit,category,method,throughput,us_per_step,avg_accept_len
 2026-05-13T16:10:10,7c56369,infrastructure,forward_paged,993866,1.01,0.00
 2026-05-13T16:10:10,7c56369,infrastructure,forward_raven (16 slots),1668840,0.60,0.00
 2026-05-13T16:10:10,7c56369,infrastructure,raven_recall (1000 noise, slot 12=9.9→6.3 acc=63%),9565533,0.10,63.21
-2026-05-13T16:10:10,7c56369,infrastructure,TQ-3bit store+dequant,1388889,0.72,5.33
+2026-05-13T16:10:10,7c56369,infrastructure,TQ-3bit store+dequant (alloc),1388889,0.72,5.33
 2026-05-13T19:17:34,5d6b1ff,speculative,Transformer AR,1180098,0.85,1.00
 2026-05-13T19:17:34,5d6b1ff,tree_build,DFlash,517238,1.93,8.00
 2026-05-13T19:17:34,5d6b1ff,tree_build,DDTree Build,354030,2.82,0.00
@@ -80,7 +79,7 @@ run_date,commit,category,method,throughput,us_per_step,avg_accept_len
 2026-05-13T19:17:34,5d6b1ff,infrastructure,forward_paged,1029546,0.97,0.00
 2026-05-13T19:17:34,5d6b1ff,infrastructure,forward_raven (16 slots),1727395,0.58,0.00
 2026-05-13T19:17:34,5d6b1ff,infrastructure,raven_recall (1000 noise, slot 12=9.9→6.3 acc=63%),9356725,0.11,63.21
-2026-05-13T19:17:34,5d6b1ff,infrastructure,TQ-3bit store+dequant,1501056,0.67,5.33
+2026-05-13T19:17:34,5d6b1ff,infrastructure,TQ-3bit store+dequant (alloc),1501056,0.67,5.33
 2026-05-13T19:17:34,5d6b1ff,infrastructure,PFlash block_select (1024 blocks),1180091,0.85,0.00
 2026-05-13T19:17:34,5d6b1ff,heuristic_learning,Hint-δ compute (64 tok),9533723,0.10,0.00
 2026-05-13T19:17:34,5d6b1ff,heuristic_learning,TemplateProposer,2807195,0.36,0.00
@@ -89,3 +88,33 @@ run_date,commit,category,method,throughput,us_per_step,avg_accept_len
 2026-05-13T19:17:34,5d6b1ff,heuristic_learning,Blind Spot Arms (bandit),15535984,0.06,0.00
 2026-05-13T19:17:34,5d6b1ff,heuristic_learning,Δ-Absorb relevance,499585344,0.00,0.00
 2026-05-13T19:17:34,5d6b1ff,heuristic_learning,Δ-Bandit relevance,183626401,0.01,0.00
+2026-05-13T22:52:53,a45ef8a,speculative,Transformer AR,879447,1.14,1.00
+2026-05-13T22:52:53,a45ef8a,tree_build,DFlash,517664,1.93,8.00
+2026-05-13T22:52:53,a45ef8a,tree_build,DDTree Build,369149,2.71,0.00
+2026-05-13T22:52:53,a45ef8a,speculative,Speculative (Simulated),1047582,4.77,5.00
+2026-05-13T22:52:53,a45ef8a,speculative,Speculative (AR Draft),1481971,4.72,7.00
+2026-05-13T22:52:53,a45ef8a,speculative,Leviathan (Algorithm 1),116153,10.15,1.18
+2026-05-13T22:52:53,a45ef8a,speculative,Leviathan (no rollback),116586,10.11,1.18
+2026-05-13T22:52:53,a45ef8a,speculative,Leviathan (w/ rollback),191937,6.12,1.18
+2026-05-13T22:52:53,a45ef8a,speculative,Spec (unconditioned),1050797,4.76,5.00
+2026-05-13T22:52:53,a45ef8a,speculative,Spec (conditioned),1127772,5.98,6.74
+2026-05-13T22:52:53,a45ef8a,infrastructure,Prefill (no compress),305758,3.27,64.00
+2026-05-13T22:52:53,a45ef8a,infrastructure,Prefill (compressed),281667,3.55,7.00
+2026-05-13T22:52:53,a45ef8a,tree_build,DDTree (no chain),372537,2.68,16.00
+2026-05-13T22:52:53,a45ef8a,tree_build,DDTree (chain-seed),391839,2.55,16.00
+2026-05-13T22:52:53,a45ef8a,tree_build,DDTree (screened R=1.0),297874,3.36,16.00
+2026-05-13T22:52:53,a45ef8a,tree_build,DDTree (screened adapter),300616,3.33,16.00
+2026-05-13T22:52:53,a45ef8a,infrastructure,forward (flat),1166925,0.86,0.00
+2026-05-13T22:52:53,a45ef8a,infrastructure,forward_paged,1043308,0.96,0.00
+2026-05-13T22:52:53,a45ef8a,infrastructure,forward_raven (16 slots),1749112,0.57,0.00
+2026-05-13T22:52:53,a45ef8a,infrastructure,raven_recall (1000 noise, slot 12=9.9→6.3 acc=63%),10118078,0.10,63.21
+2026-05-13T22:52:53,a45ef8a,infrastructure,TQ-3bit store+dequant (alloc),1805529,0.55,5.33
+2026-05-13T22:52:53,a45ef8a,infrastructure,TQ-3bit store+dequant (zero-alloc),2426540,0.41,5.33
+2026-05-13T22:52:53,a45ef8a,infrastructure,PFlash block_select (1024 blocks),1222068,0.82,0.00
+2026-05-13T22:52:53,a45ef8a,heuristic_learning,Hint-δ compute (64 tok),10148505,0.10,0.00
+2026-05-13T22:52:53,a45ef8a,heuristic_learning,TemplateProposer,2885358,0.35,0.00
+2026-05-13T22:52:53,a45ef8a,heuristic_learning,G-Zero Pipeline,2141289,0.47,0.00
+2026-05-13T22:52:53,a45ef8a,heuristic_learning,Blind Spot Arms (absorb),19793788,0.05,0.00
+2026-05-13T22:52:53,a45ef8a,heuristic_learning,Blind Spot Arms (bandit),19821606,0.05,0.00
+2026-05-13T22:52:53,a45ef8a,heuristic_learning,Δ-Absorb relevance,532384978,0.00,0.00
+2026-05-13T22:52:53,a45ef8a,heuristic_learning,Δ-Bandit relevance,176887210,0.01,0.00
