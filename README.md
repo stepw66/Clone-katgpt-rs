@@ -23,6 +23,7 @@ Inspired by [microgpt-c](https://github.com/nicholasgasior/microgpt-c), [talos-v
 - **Bandit + WASM Pruners** — `BanditPruner` wraps any `ScreeningPruner` with exploration. `WasmPruner` loads sandboxed `.wasm` validators.
 - **TurboQuant KV Cache** — 5-8× KV cache compression via random rotation + Lloyd-Max quantization (2-4 bit). 3-bit: 0.99 attention correlation, 0.98 cosine similarity.
 - **PFlash Block-Sparse Prefill** — Block-sparse speculative prefill with sink/window/alpha selection rules. Up to 21× sequence reduction with 100% NIAH needle retrieval.
+- **G-Zero Self-Play** — Verifier-free Hint-δ intrinsic reward makes modelless HL smarter (δ-gated AbsorbCompress + δ-reward BanditPruner), then optionally adds model-based self-play (GRPO Proposer + length-normalized DPO Generator). No external LLM judge needed.
 
 📖 **Deep dives:** See [`.docs/`](.docs/) for architecture, speculative decoding, performance, sudoku, validator, HL, bomber arena, and monopoly FSM details.
 
@@ -276,6 +277,109 @@ The system closes the feedback → retrain → hot-swap cycle for continuous imp
 
 See [riir-ai `.docs/13_research_audit_results.md`](../riir-ai/.docs/13_research_audit_results.md) for the full research audit.
 
+## 🎯 G-Zero: Verifier-Free Self-Play (Plan 049)
+
+Distilled from [G-Zero: Self-Play for Open-Ended Generation from Zero Data](https://arxiv.org/pdf/2605.09959) (Huang et al., 2026). Makes our existing **modelless HL smarter** with the Hint-δ signal, then optionally adds gradient-based self-play on top.
+
+### Core Innovation: Hint-δ
+
+An intrinsic reward measuring how much a hint shifts the Generator's predictive distribution — **no external verifier or LLM judge needed**:
+
+```text
+δ(q, h, a_hard) = (1/T) Σ [log πG(at | q, h, a<t) − log πG(at | q, a<t)]
+```
+
+δ is large only when the query is challenging AND the hint carries information the Generator lacks. Two objectives in one scalar — and it's architecture-agnostic.
+
+### Two Phases: Modelless First, Model-Based Second
+
+| Phase | Mechanism | Updates | Cost | Strength |
+|-------|-----------|---------|------|----------|
+| **Phase 1 (Modelless)** | δ → `AbsorbCompress` + `BanditPruner` | Heuristics/rules | Low | Safe, fast, proven HL loop |
+| **Phase 2 (Model-Based)** | δ → GRPO + DPO | LoRA weights | High | Stronger for open-ended domains |
+
+Phase 1 makes the existing modelless path **smarter** — δ is a denser, more informative reward than raw environment feedback. Phase 2 adds neural self-play only when needed.
+
+### Phase 1: Smarter Modelless (T1–T5)
+
+```text
+TemplateProposer ──(query, hint)──▸ Generator (frozen, inference only)
+       │                                    │
+       │                             log-probs with/without hint
+       │                                    │
+       │                               HintDelta
+       │                                    │
+       │                    ┌───────────────┴──────────────┐
+       │                    ▼                              ▼
+       │          DeltaGatedAbsorbCompress      DeltaBanditPruner
+       │          (promote high-δ arms          (δ as dense reward
+       │           to hard constraints)          for arm selection)
+       │                    │                              │
+       │                    └──────────┬───────────────────┘
+       │                               ▼
+       │                     TrialLog (JSONL)
+       │                               │
+       └─── next episode ◂─────────────┘
+```
+
+**No gradient updates.** The model generates log-probs for inference only. All learning happens through heuristic promotion and bandit Q-values, same as existing HL — but with a better reward signal.
+
+| New Component | What | Why Smarter |
+|---------------|------|-------------|
+| `HintDelta` | Log-prob shift computation | Shared foundation for both phases |
+| `DeltaGatedAbsorbCompress` | Absorb only when δ reveals blind spot | Promotes heuristics the model doesn't already know |
+| `DeltaBanditPruner` | δ as dense reward for arm selection | No need to wait for episode completion |
+| `TemplateProposer` | Rule-based query-hint generation | 0 GPU cost, targets blind spots from bandit history |
+
+### Phase 2: Model-Based Self-Play (T6–T9)
+
+Builds on Phase 1's δ computation — adds gradient-based training via GRPO (Proposer) and length-normalized DPO (Generator):
+
+```text
+Phase 2a — Proposer Training (GRPO):
+  NeuralProposer πP generates {(qi, hi)} → Generator answers unassisted
+  → δ reward + length/BLEU penalties → GRPO gradient update
+
+Phase 2b — Generator Training (Length-Normalized DPO):
+  Frozen πP generates query-hints → Generator answers with/without hint
+  → lower-half δ filter → DPO update (hint-assisted=chosen, unassisted=rejected)
+  → HotSwapPruner reloads adapter (zero-downtime)
+```
+
+### Three Training Paths
+
+```text
+SelfImprovingCycle {
+  Collecting → ReadyToSynthesize → ...
+    ├── Path A (existing):  Export JSONL → riir-burner LoRA SFT          (modelless HL)
+    ├── Path B (Phase 1):   δ → DeltaGatedAbsorbCompress + DeltaBanditPruner (smarter modelless)
+    └── Path C (Phase 2):   Proposer↔Generator self-play → DPO LoRA      (model-based G-Zero)
+}
+```
+
+Path A → B is **incremental** (same architecture, better signal). Path B → C is **opt-in** (add gradient training when modelless plateaus). All three feed into `HotSwapPruner`.
+
+### Key Design Decisions (from paper)
+
+| Decision | Rationale |
+|----------|-----------|
+| **Modelless first** | δ is architecture-agnostic — use it without DPO/GRPO before adding complexity |
+| Lower-half δ filter `[0, 50th %ile]` | Low-δ = hard-to-distinguish pairs = fine-grained DPO signal; high-δ = answer leakage |
+| Length-normalized DPO | Neutralizes vanilla DPO's length bias via per-token mean log-ratio |
+| Length penalty `λ·max(0, |h|-200)/100` | Prevents verbose hint reward hacking |
+| BLEU duplication penalty `|Ci|/|B|` | Prevents Proposer collapse into repetitive pairs |
+
+### Critical Finding
+
+>70% of DPO training pool is **non-verifiable tasks** (advice, writing, explanation), yet reasoning **transfers** to verifiable math domains. Structural depth is internalized, not memorized.
+
+| Model | Chat (AlpLC) | IFEval-pS | AIME25 | Average |
+|-------|-------------|-----------|--------|---------|
+| Qwen3-8B base → G-Zero R2 | 8.47 | 43.81 | **12.40** | **35.43** (+1.48) |
+| Llama-3.1-8B → G-Zero R2 | **27.86** | 59.52 | 0.63 | **43.90** (+1.13) |
+
+📖 See [`.plans/049_g_zero_self_play.md`](.plans/049_g_zero_self_play.md) for full implementation plan, types, hyperparameters, and risk assessment.
+
 ## 🏭 Productions
 
 MicroGPT-RS is the **core inference library** — pure algorithms, zero side effects. It powers a broader production ecosystem:
@@ -482,3 +586,4 @@ Lessons from [NVIDIA Dynamo's agentic inference](https://developer.nvidia.com/bl
 - [TurboQuant: Online Vector Quantization with Near-Optimal Distortion Rate](https://arxiv.org/pdf/2504.19874) — Zandieh et al., 2025
 - [Luce PFlash: Speculative Prefill Compression for Long-Context Spec Decode](https://github.com/Luce-Org/lucebox-hub/) — lucebox-hub, 2026
 - [Learning Beyond Gradients](https://trinkle23897.github.io/learning-beyond-gradients/) — Heuristic Learning paradigm
+- [G-Zero: Self-Play for Open-Ended Generation from Zero Data](https://arxiv.org/pdf/2605.09959) — Huang et al., 2026 — Verifier-free co-evolutionary self-play via Hint-δ, GRPO Proposer, length-normalized DPO Generator
