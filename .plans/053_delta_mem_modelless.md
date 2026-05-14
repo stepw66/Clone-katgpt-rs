@@ -540,8 +540,8 @@ The paper's Multi-State Write (MSW). Verified from `delta_impl.py`:
   - `cargo test --features delta_mem --lib` → 517 tests passing ✅
   - `cargo check --features delta_mem --quiet` ✅
 
-- [ ] **T14: Update `README.md`** — Add δ-mem distillation section
-- [ ] **T15: Commit** — `feat: δ-mem modelless distillation (Plan 053)`
+- [x] **T14: Update `README.md`** — Add δ-mem distillation section
+- [x] **T15: Commit** — `feat: δ-mem modelless distillation (Plan 053)`
 
 ## Implementation Summary
 
