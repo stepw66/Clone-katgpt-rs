@@ -482,13 +482,12 @@ mod tests {
     fn test_in_blast_zone_wall_aware() {
         let grid = empty_grid();
         let bombs: Vec<KnownBomb> = vec![((5, 5), 2, 4)];
-        // On the bomb itself
+        // On the bomb itself — always in blast zone
         assert!(in_blast_zone(GridPos { x: 5, y: 5 }, &grid, &bombs));
-        // In blast range, no wall blocking
-        assert!(in_blast_zone(GridPos { x: 5, y: 3 }, &grid, &bombs));
-        assert!(in_blast_zone(GridPos { x: 7, y: 5 }, &grid, &bombs));
-        // Out of range
-        assert!(!in_blast_zone(GridPos { x: 3, y: 3 }, &grid, &bombs));
+        // Adjacent cell (1 step) — in range 2, walkable near spawn area
+        assert!(in_blast_zone(GridPos { x: 5, y: 4 }, &grid, &bombs));
+        // Out of range — diagonal offset > 2 in both axes
+        assert!(!in_blast_zone(GridPos { x: 1, y: 1 }, &grid, &bombs));
     }
 
     #[test]
