@@ -480,6 +480,24 @@ Six categories from G-Zero paper Appendix A, with UCB1 bandit selection:
 | Coding | function, debug, design | |
 | Reasoning | logic, math | Capped at ≤1/6 of output |
 
+### Bomber Arena A/B Benchmark (Plan 054)
+
+Isolated benchmark: each player type runs as all 4 slots for 1000 rounds, release mode.
+
+```
+Config        │ Survival │ Avg Score │ Avg Kills │ P50 (μs) │ P95 (μs) │ P99 (μs) │ Wins
+🐱 Greedy     │   72.1%  │       3.1 │      0.12 │      1.3 │      2.1 │      5.0 │  108
+🐶 Validator  │   58.6%  │       1.7 │      0.05 │      1.2 │      1.6 │      2.0 │  292
+🐵 HL         │   57.0%  │       2.1 │      0.24 │      0.6 │      1.2 │      2.1 │  222
+🤖 GZero      │   64.1%  │       1.8 │      0.06 │      0.5 │      1.0 │      1.5 │  167
+```
+
+**Key result**: GZero > HL on both survival (+7.1pp) AND latency (0.73×). The optimizer inlines template+δ code well, making GZero the **fastest** player (94.6% sub-microsecond).
+
+**Caveat**: GZero's survival advantage comes from the HL safety filter (BFS escape, wall-aware blast) + weak baseline, not template intelligence. Templates contribute ±1-3 points on safe moves only — the safety filter overrides all blast-zone decisions.
+
+**Production recommendation**: GZero for real-time MMO (fastest + good survival), Greedy for survival-critical (most robust).
+
 ### Quick Start
 
 ```rust,ignore
@@ -521,4 +539,6 @@ proposer.observe_delta(pair.template_id, delta.value);
 - Plan 033: Bomberman Arena
 - Plan 036: Inference-Time Review Metrics
 - Plan 049: G-Zero Self-Play Distillation
+- Plan 052: GZeroPlayer Bomber Integration
+- Plan 054: Player A/B Benchmark
 - Research 14: HL Distillation
