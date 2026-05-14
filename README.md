@@ -261,6 +261,25 @@ Run: `cargo run --example review_01_metrics --features bandit`
 
 📖 See [`.docs/11_monopoly_fsm.md`](.docs/11_monopoly_fsm.md).
 
+## ⚔️ FFT Tactics Arena — TFT Party AI
+
+Final Fantasy Tactics-inspired 4v4 ATB (Active Time Battle) arena with status effects, 6 classes, and 5 AI strategies. **TFT (Tit-for-Tat) dominates with 99% win rate** — game theory's optimal strategy applied to MMORPG party combat.
+
+| Player | Tech | Win% | Survival | Kills/rnd |
+|--------|------|------|----------|-----------|
+| **TFT** 🦊 | Provocation FSM + role-based response | **99.0** | **95.7%** | **1.10** |
+| HL 🐵 | Bandit Q-learning over 9 action types | 91.5 | 85.9% | 0.88 |
+| Greedy 🐱 | Weakest-target + heal + potion | 56.1 | 35.7% | 0.83 |
+| GZero 🤖 | Template hints + δ bandit + heuristics | 15.8 | 61.9% | 0.16 |
+| Validator 🐶 | Safety-first + debuff cure + retreat | — | — | — |
+
+**TFT game theory:** Nice (role default) → Retaliatory (on provoke from `GameEvent::DamageDealt`) → Forgiving (10% generous TFT + 5-tick timer). Each class retaliates differently: Knight intercepts, WhiteMage heals first then attacks, BlackMage bursts.
+
+**GvG Round-Robin** (250 rounds × 6 matchups): TFT 92.5% > HL 73.0% > Greedy 61.6%. Nash analysis confirms TFT is a dominant strategy.
+
+3 examples (arena, GvG tournament, A/B benchmark).
+📖 See [`.docs/09_heuristic-learning.md`](.docs/09_heuristic-learning.md) for full benchmark results.
+
 ## 🔄 Self-Improving Loop (Plan 048)
 
 The system closes the feedback → retrain → hot-swap cycle for continuous improvement:
@@ -507,7 +526,7 @@ cargo clippy --all-targets --all-features --quiet
 | `gpu` | Placeholder — GPU training lives in riir-ai/riir-gpu |
 | `game_domain` | Alias for `domain_latent` — game-specific Config presets (Plan 040) |
 | `language_domain` | Language domain: BPE vocab, LLM models (Plan 040, future) |
-| `g_zero` | G-Zero self-play distillation (Plan 049, planned) |
+| `g_zero` | G-Zero self-play + FFT arena + Bomber arena + TFT party AI (Plans 049–055) |
 | `full` | Enable all features |
 
 > **Note:** `LeviathanVerifier` is always compiled (no feature gate) — it's part of `verifier.rs` and `benchmark.rs`. `Transformer AR`, `DFlash`, `Raven`, `TurboQuant`, and `PFlash` are also always available — they're zero-cost until their caches are instantiated.
@@ -562,6 +581,15 @@ src/
       systems.rs       ECS systems
       wasm_pruner.rs   WASM pruner
       wasm_state.rs    WASM state
+      tft_player.rs    TftPlayer — game theory Tit-for-Tat bomber (Issue 056)
+    fft/             FFT Tactics Arena (ATB battle engine):
+      mod.rs           Module root
+      types.rs         Class, Team, ActionType, Stats, Unit, Action, GameEvent, TFT types
+      battle.rs        BattleState, ATB resolution, resolve_action
+      players.rs       FftPlayer trait + Greedy, Validator, HL implementations
+      status.rs        Status effects (Poison, Sleep, Haste, Slow, etc.)
+      g_zero_player.rs GZeroFFTPlayer — template hints + δ bandit (Plan 053)
+      tft_player.rs    TftFFTPlayer — Tit-for-Tat party AI (Plan 055)
     monopoly/        Monopoly FSM arena (bevy_ecs):
       mod.rs           Module root
       board.rs         Board definition

@@ -190,6 +190,17 @@ type KnownOpponent = (u8, (i32, i32), Option<(i32, i32)>);
 
 The safety filter (step 5) overrides G-Zero's template decisions in all blast-zone situations. The G-Zero components (Hint-δ, bandit, absorb-compress) influence only **safe, normal moves** — they contribute ±1-3 points on top of the weak baseline. The 64.1% survival rate comes primarily from the HL safety filter + 15% random exploration, not from template intelligence.
 
+### P6 🦊 TftPlayer — Tit-for-Tat (Issue 056)
+
+Game theory's Tit-for-Tat applied to bomberman. 2-state FSM with wall-aware provocation detection.
+
+- **Strategy:** Nice by default (score-based like Greedy). Retaliates when in blast zone + opponent nearby.
+- **Retaliation:** Hunt bonus (+1.5), intercept (+1.0), chokepoint (+1.0) — targets nearest opponent.
+- **Forgiving:** 10-tick auto-reset timer + 10% generous forgiveness chance.
+- **Safety:** Always flees when in blast zone, even in Retaliatory mode.
+- **Feature gate:** `--features g_zero` (same as GZero).
+- **Mixed tournament result:** 58.4% survival, 3.1 avg score, 0.32 kills/rnd (highest kills, 2nd best score).
+
 ## Shared AI Functions (`players.rs`)
 
 These utility functions are used by multiple player types:
@@ -214,6 +225,7 @@ These utility functions are used by multiple player types:
 | `src/pruners/bomber/systems.rs` | 559 | World-based ECS systems: `init_world`, `spawn_players`, `run_tick` |
 | `src/pruners/bomber/players.rs` | 1447 | `BomberPlayer` trait + 4 implementations (Random, Greedy, Validator, HL) + shared AI functions |
 | `src/pruners/bomber/g_zero_player.rs` | 775 | `GZeroPlayer` — G-Zero self-play with template hints + Hint-δ (Plan 052) |
+| `src/pruners/bomber/tft_player.rs` | 640 | `TftPlayer` — game theory Tit-for-Tat bomber (Issue 056) |
 | `src/pruners/g_zero/bomber_templates.rs` | — | `BomberTemplate` + `BomberTemplateProposer` — 8 strategy archetypes |
 | `examples/bomber_01_arena.rs` | 350 | Headless 100-round tournament runner + `--replay-dir` dump |
 | `examples/bomber_02_tui.rs` | 509 | Animated ratatui TUI replay with emoji rendering |
@@ -286,6 +298,26 @@ cargo run -p riir-examples --example g_zero_04_player_ab_benchmark --features g_
 4. **Random wins via survival** — doesn't hunt or bomb, avoids dangerous situations, outlives aggressive players in chaotic rounds.
 5. **Score ≠ Survival** — Greedy optimizes score (power-ups), HL optimizes survival (wins), Random gets lucky.
 6. **GZero beats HL in isolation** — weaker baseline + template hints create more robust policy than HL's strategy bonus, AND faster latency.
+
+### TFT Mixed Tournament (Issue 056)
+
+1000-round mixed tournament, release build:
+
+```
+Player    │ Survival │ Avg Score │ Avg Kills │ Game Theory Analog
+🐱 Greedy │   64.5%  │      3.6  │     0.26  │ Pure Cooperator
+🐵 HL     │   60.6%  │      1.7  │     0.00  │ Grim Trigger
+🤖 GZero  │   70.5%  │      1.9  │     0.04  │ Noisy Cooperator
+🦊 TFT    │   58.4%  │      3.1  │     0.32  │ Tit-for-Tat
+```
+
+**Key findings:**
+1. **TFT highest kills** (0.32/rnd) — retaliatory mode punishes aggressors.
+2. **TFT 2nd best score** (3.1) — Nice mode collects powerups like Greedy.
+3. **TFT survival below target** (58.4% < 68% hypothesis) — retaliation bonus pulls toward danger.
+4. **FFT is better TFT domain** — `GameEvent::DamageDealt` is crystal-clear signal vs bomber's ambiguous proximity.
+
+Run: `cargo run -p riir-examples --example g_zero_05_tft_mixed --features g_zero --release`
 
 ## How to Run
 
