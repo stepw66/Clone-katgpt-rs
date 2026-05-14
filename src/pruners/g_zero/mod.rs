@@ -20,12 +20,18 @@
 //!
 //! **Source:** [G-Zero: Self-Play for Open-Ended Generation from Zero Data](https://arxiv.org/pdf/2605.09959) — Huang et al., 2026
 
+pub mod bomber_templates;
 pub mod delta_absorb;
 pub mod delta_bandit;
+#[cfg(all(feature = "g_zero", feature = "fft"))]
+pub mod fft_templates;
 pub mod template_proposer;
 pub mod types;
 
+pub use bomber_templates::{BomberTemplate, BomberTemplateProposer, hint_score_override};
 pub use delta_absorb::{DeltaGatedAbsorbCompress, DeltaGatedConfig};
 pub use delta_bandit::DeltaBanditPruner;
+#[cfg(all(feature = "g_zero", feature = "fft"))]
+pub use fft_templates::{FFTTemplate, FFTTemplateProposer};
 pub use template_proposer::{GeneratedPair, QueryTemplate, TemplateProposer};
 pub use types::{HintDelta, LogProbResult};

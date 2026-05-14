@@ -8,6 +8,8 @@ pub mod players;
 pub mod replay;
 pub mod systems;
 
+#[cfg(feature = "g_zero")]
+pub mod g_zero_player;
 #[cfg(feature = "bomber-wasm")]
 pub mod wasm_pruner;
 #[cfg(feature = "bomber-wasm")]
@@ -19,6 +21,8 @@ pub use players::{BomberPlayer, GreedyPlayer, HLPlayer, RandomPlayer, ValidatorP
 #[cfg(feature = "bandit")]
 pub use crate::pruners::SharedBanditStats;
 
+#[cfg(feature = "g_zero")]
+pub use g_zero_player::GZeroPlayer;
 #[cfg(feature = "bomber-wasm")]
 pub use players::{LoraPlayer, LoraWasmPlayer, NNPlayer, create_players_with_wasm, is_safe_action};
 pub use systems::*;

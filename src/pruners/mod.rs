@@ -68,9 +68,15 @@ pub mod g_zero;
 
 #[cfg(feature = "g_zero")]
 pub use g_zero::{
-    DeltaBanditPruner, DeltaGatedAbsorbCompress, DeltaGatedConfig, GeneratedPair, HintDelta,
-    LogProbResult, QueryTemplate, TemplateProposer,
+    BomberTemplate, BomberTemplateProposer, DeltaBanditPruner, DeltaGatedAbsorbCompress,
+    DeltaGatedConfig, GeneratedPair, HintDelta, LogProbResult, QueryTemplate, TemplateProposer,
 };
+
+#[cfg(all(feature = "g_zero", feature = "fft"))]
+pub use g_zero::{FFTTemplate, FFTTemplateProposer};
+
+#[cfg(all(feature = "fft", feature = "g_zero"))]
+pub use fft::GZeroFFTPlayer;
 
 #[cfg(feature = "bomber")]
 pub use bomber::{
@@ -87,4 +93,13 @@ pub use monopoly::{
     JailReason, MonopolyPlayer, Owned, Player, Property, PropertyGroup, ReleaseMethod, Statistics,
     Strategy, TaxKind, TradeOffer, TradeResponse, TurnPhase, build_board, shuffle_decks,
     square_kind, square_name,
+};
+
+#[cfg(feature = "fft")]
+pub mod fft;
+
+#[cfg(feature = "fft")]
+pub use fft::{
+    Action, ActionType, ActiveEffect, BattleState, Class, FftPlayer, GameEvent, GreedyFFTPlayer,
+    HLFFTPlayer, Pos, Stats, StatusEffect, Team, Unit, ValidatorFFTPlayer, resolve_action,
 };

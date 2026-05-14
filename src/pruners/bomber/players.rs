@@ -83,7 +83,7 @@ pub trait BomberPlayer {
 // ── Shared Helpers ─────────────────────────────────────────────
 
 /// Compute target position after applying a move action.
-fn move_target(action: &BomberAction, pos: GridPos) -> GridPos {
+pub(crate) fn move_target(action: &BomberAction, pos: GridPos) -> GridPos {
     match action {
         BomberAction::Up => GridPos {
             x: pos.x,
@@ -137,7 +137,7 @@ fn manhattan(a: GridPos, b: GridPos) -> i32 {
 
 /// Check if position is in the blast zone of any known bomb.
 /// Accounts for walls blocking blast propagation (blast stops at walls).
-fn in_blast_zone(pos: GridPos, grid: &ArenaGrid, bombs: &[KnownBomb]) -> bool {
+pub(crate) fn in_blast_zone(pos: GridPos, grid: &ArenaGrid, bombs: &[KnownBomb]) -> bool {
     for &(bomb_pos, range, _fuse) in bombs {
         if is_in_single_blast(pos, grid, bomb_pos, range) {
             return true;
@@ -357,7 +357,7 @@ fn intercept_score(
 /// Check if player has an escape route after placing a bomb at `new_bomb_pos`.
 /// BFS from `player_pos` — must reach a cell outside ALL blast zones within
 /// `blast_range + 1` steps. Accounts for bomb entities blocking movement.
-fn has_escape_route(
+pub(crate) fn has_escape_route(
     grid: &ArenaGrid,
     player_pos: GridPos,
     new_bomb_pos: (i32, i32),
@@ -453,7 +453,7 @@ pub fn is_safe_action(
 /// The player stands ON the bomb but moves away next tick, so escape is
 /// checked from adjacent cells — not from the bomb position itself.
 /// Accounts for existing bombs' blast zones and bomb entities blocking movement.
-fn should_place_bomb(grid: &ArenaGrid, pos: GridPos, bombs: &[KnownBomb]) -> bool {
+pub(crate) fn should_place_bomb(grid: &ArenaGrid, pos: GridPos, bombs: &[KnownBomb]) -> bool {
     // Don't place if already in a blast zone (walls may block, but be safe)
     if in_blast_zone(pos, grid, bombs) {
         return false;
@@ -500,7 +500,7 @@ fn should_place_bomb(grid: &ArenaGrid, pos: GridPos, bombs: &[KnownBomb]) -> boo
 // ── Policy Scoring ─────────────────────────────────────────────
 
 /// True if action reverses the previous direction.
-fn is_reverse(action: BomberAction, prev: Option<BomberAction>) -> bool {
+pub(crate) fn is_reverse(action: BomberAction, prev: Option<BomberAction>) -> bool {
     matches!(
         (action, prev),
         (BomberAction::Up, Some(BomberAction::Down))
@@ -541,7 +541,7 @@ fn has_adjacent_wall(grid: &ArenaGrid, pos: GridPos) -> bool {
 
 /// BFS distance from pos to nearest cell outside all blast zones.
 /// Returns `None` if no safe cell is reachable. Accounts for walls blocking blast.
-fn escape_distance(
+pub(crate) fn escape_distance(
     pos: GridPos,
     grid: &ArenaGrid,
     bombs: &[KnownBomb],
@@ -588,7 +588,7 @@ fn escape_distance(
 ///   Hunt    → +0..2  (moving toward destructible walls)
 ///   Persist → -1.0   (penalize reversing direction)
 ///   Explore → +0.2   (slight center bias)
-fn score_action(
+pub(crate) fn score_action(
     action: &BomberAction,
     grid: &ArenaGrid,
     pos: GridPos,

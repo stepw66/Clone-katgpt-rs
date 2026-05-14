@@ -238,6 +238,10 @@ pub fn run_all(config: &Config) -> Vec<BenchResult> {
     #[cfg(feature = "g_zero")]
     results.extend(bench_g_zero());
 
+    // FFT G-Zero pruner benchmarks (Plan 053)
+    #[cfg(all(feature = "g_zero", feature = "fft"))]
+    results.extend(bench_fft_g_zero());
+
     results
 }
 
@@ -1977,5 +1981,154 @@ pub fn bench_g_zero() -> Vec<BenchResult> {
 /// Placeholder when `g_zero` feature is disabled.
 #[cfg(not(feature = "g_zero"))]
 pub fn bench_g_zero() -> Vec<BenchResult> {
+    Vec::new()
+}
+
+// ── FFT G-Zero Pruner Benchmark ────────────────────────────────
+
+/// Benchmark FFT G-Zero pruner components: FFTTemplateProposer, hint_score_override, GZeroFFTPlayer.
+///
+/// Measures ops/sec for each component at 1 unit, 8 units, 64 units, and 1000 units (parallel).
+#[cfg(all(feature = "g_zero", feature = "fft"))]
+pub fn bench_fft_g_zero() -> Vec<BenchResult> {
+    use crate::pruners::fft::battle::BattleState;
+    use crate::pruners::fft::g_zero_player::GZeroFFTPlayer;
+    use crate::pruners::fft::players::FftPlayer;
+    use crate::pruners::fft::types::ActionType;
+    use crate::pruners::g_zero::fft_templates::{
+        FFTTemplate, FFTTemplateProposer, hint_score_override,
+    };
+    use std::hint::black_box;
+
+    let warmup = 1_000;
+    let iters = 50_000;
+
+    println!("   FFT G-Zero pruner ({iters} iters, {warmup} warmup)...");
+
+    let mut results = Vec::new();
+
+    // ── T1: FFTTemplateProposer::select() ──────────────────────
+
+    let mut proposer = FFTTemplateProposer::new();
+    for _ in 0..warmup {
+        let _ = black_box(proposer.select());
+    }
+    let start = Instant::now();
+    for _ in 0..iters {
+        let (template, id) = black_box(proposer.select());
+        proposer.observe_delta(id, 0.1);
+        let _ = black_box(template);
+    }
+    let elapsed = start.elapsed();
+    let throughput = iters as f64 / elapsed.as_secs_f64();
+    let us_per = elapsed.as_secs_f64() * 1_000_000.0 / iters as f64;
+    results.push(BenchResult {
+        label: "FFT Template select".into(),
+        throughput,
+        time_per_step_us: us_per,
+        avg_acceptance_len: 0.0,
+        color: (180, 70, 70),
+        category: BenchCategory::HeuristicLearning,
+    });
+
+    // ── T2: hint_score_override (all 10 templates × 9 actions) ─
+
+    let state = BattleState::new();
+    let all_templates = FFTTemplate::all();
+    let all_actions = [
+        ActionType::Attack,
+        ActionType::Defend,
+        ActionType::BlackMagic,
+        ActionType::WhiteMagic,
+        ActionType::Potion,
+        ActionType::Wait,
+        ActionType::CurePoison,
+        ActionType::Esuna,
+        ActionType::Dispel,
+    ];
+
+    for _ in 0..warmup {
+        for &template in &all_templates {
+            for &action in &all_actions {
+                let _ = black_box(hint_score_override(template, action, &state, 0));
+            }
+        }
+    }
+    let start = Instant::now();
+    for _ in 0..iters {
+        for &template in &all_templates {
+            for &action in &all_actions {
+                let _ = black_box(hint_score_override(template, action, &state, 0));
+            }
+        }
+    }
+    let elapsed = start.elapsed();
+    let total_ops = iters * 10 * 9;
+    let throughput = total_ops as f64 / elapsed.as_secs_f64();
+    let us_per = elapsed.as_secs_f64() * 1_000_000.0 / total_ops as f64;
+    results.push(BenchResult {
+        label: "FFT hint_score_override".into(),
+        throughput,
+        time_per_step_us: us_per,
+        avg_acceptance_len: 0.0,
+        color: (70, 180, 70),
+        category: BenchCategory::HeuristicLearning,
+    });
+
+    // ── T3: GZeroFFTPlayer select_action (full flow) ───────────
+
+    let fft_iters = 10_000_usize;
+    let mut player = GZeroFFTPlayer::new(0);
+    let mut rng = fastrand::Rng::with_seed(42);
+
+    for _ in 0..warmup.min(fft_iters) {
+        let state = BattleState::new();
+        let _ = black_box(player.select_action(0, &state, &mut rng));
+    }
+    let start = Instant::now();
+    for _ in 0..fft_iters {
+        let state = BattleState::new();
+        let _ = black_box(player.select_action(0, &state, &mut rng));
+    }
+    let elapsed = start.elapsed();
+    let throughput = fft_iters as f64 / elapsed.as_secs_f64();
+    let us_per = elapsed.as_secs_f64() * 1_000_000.0 / fft_iters as f64;
+    results.push(BenchResult {
+        label: "GZeroFFT select_action".into(),
+        throughput,
+        time_per_step_us: us_per,
+        avg_acceptance_len: 0.0,
+        color: (70, 70, 180),
+        category: BenchCategory::HeuristicLearning,
+    });
+
+    // ── T4: Parallel 1000-unit decision (rayon) ────────────────
+
+    let par_iters = 1_000_usize;
+    let start = Instant::now();
+    (0..par_iters).into_par_iter().for_each(|i| {
+        let mut p = GZeroFFTPlayer::new((i % 8) as u8);
+        let state = BattleState::new();
+        let mut rng = fastrand::Rng::with_seed(i as u64);
+        let _ = black_box(p.select_action((i % 8) as u8, &state, &mut rng));
+    });
+    let elapsed = start.elapsed();
+    let throughput = par_iters as f64 / elapsed.as_secs_f64();
+    let us_per = elapsed.as_secs_f64() * 1_000_000.0 / par_iters as f64;
+    results.push(BenchResult {
+        label: "GZeroFFT 1K parallel".into(),
+        throughput,
+        time_per_step_us: us_per,
+        avg_acceptance_len: 0.0,
+        color: (180, 180, 70),
+        category: BenchCategory::HeuristicLearning,
+    });
+
+    results
+}
+
+/// Placeholder when `g_zero` or `fft` feature is disabled.
+#[cfg(not(all(feature = "g_zero", feature = "fft")))]
+pub fn bench_fft_g_zero() -> Vec<BenchResult> {
     Vec::new()
 }
