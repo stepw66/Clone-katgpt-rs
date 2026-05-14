@@ -178,7 +178,7 @@ Fractional relevance (R ∈ (0,1)) provides priority signal that binary relevanc
 - [x] **T13: Update `.research/23_GFlowNet_Shortest_Paths.md`** — Add actual benchmark results
 - [x] **T14: Commit** — `feat: GFlowNet modelless distillation (Plan 052)` — commit `0ee4009`
 - [x] **T15: Real benchmark** — tight budget proves BanditPruner guides search where binary fails
-- [ ] **T16: Commit T15** — `test: T15 real benchmark with TacticalPruner (Plan 052)`
+- [x] **T16: Commit T15** — `test: T15 real benchmark with TacticalPruner proves BanditPruner guides search (Plan 052)` — commit `a17f58b`
 
 ## Files Modified
 
