@@ -19,11 +19,34 @@ pub struct Config {
     pub draft_lookahead: usize,
     pub tree_budget: usize,
     pub parallel_threshold: usize,  // skip rayon if n_embd ≤ this
+    pub lora_rank: usize,           // LoRA adapter rank (Plan 008)
+    pub lora_alpha: f32,            // LoRA scaling factor
+    pub lora_dropout: f32,          // LoRA dropout probability
+    pub lora_targets: Vec<String>,  // which projections to apply LoRA
+    pub screening_threshold: f32,   // hard-trim cutoff for ScreeningPruner (Plan 021)
+    pub sparse_threshold: f32,      // use sparse_mlp when alive ratio ≤ this (Plan 022)
+    pub early_exit_patience: usize, // AutoTTS early exit patience (Plan 026)
+    pub early_exit_gap: f32,        // AutoTTS early exit confidence gap
 }
 ```
-- All configs constructed via `Config::micro()`, `Config::draft()`, `Config::bpe()`, etc.
+- All configs constructed via factory methods: `Config::micro()`, `Config::micro_lora()`, `Config::draft()`, `Config::game()`, `Config::bpe()`, `Config::bpe_draft()`, `Config::small_target()`, `Config::gqa_draft()`
 - Validation: `n_head % n_kv_head == 0`, `n_embd == n_head * head_dim`
 - `kv_dim()` helper returns `n_kv_head * head_dim`
+
+### InferenceOverrides (`types.rs`)
+
+Runtime override fields that can be applied per-inference call without modifying the base `Config`:
+
+```rust
+pub struct InferenceOverrides {
+    pub tree_budget: Option<usize>,
+    pub temperature: Option<f32>,
+    pub draft_lookahead: Option<usize>,
+    // ...
+}
+```
+
+Overrides are merged onto a base `Config` at inference time, allowing per-request parameter tuning without cloning or mutating the shared config.
 
 ## TransformerWeights (`transformer.rs`)
 ```rust
@@ -62,10 +85,18 @@ pub struct ForwardContext {
     scores: Vec<f32>,         // [block_size] — attention scores
     logits: Vec<f32>,         // [vocab_size]
     pub hidden_state: Vec<f32>, // [n_embd] — snapshot before lm_head (for REST/Validator)
+    // Feature-gated buffers (allocated once, zero runtime cost when unused):
+    lora_buf: Vec<f32>,       // [rank] — LoRA intermediate (always allocated)
+    // #[cfg(feature = "sparse_mlp")]
+    active_indices: Vec<usize>, // [mlp_hidden] — alive neuron indices (Plan 022)
+    // #[cfg(feature = "sparse_mlp")]
+    active_values: Vec<f32>,    // [mlp_hidden] — alive neuron values (Plan 022)
 }
 ```
-- Created once, reused across calls via `cache.reset()`
+- Created once, reused across calls via `ctx.reset()`
 - `hidden_state` is copied from `x` before lm_head projection — "free embedding" for vector search
+- `lora_buf` avoids per-projection LoRA allocation; fused into `lora_apply()` in-place
+- Sparse MLP buffers pack alive ReLU neurons for `sparse_matmul()` — only used when `alive_ratio ≤ sparse_threshold`
 
 ## MultiLayerKVCache (`transformer.rs`)
 ```rust
@@ -84,7 +115,11 @@ pub struct KVCache {
 - `restore(snapshot, config)` — rollback to earlier state
 
 ## Forward Pass (`transformer.rs`)
+
+`forward()` is the **public API** — it delegates to internal `forward_base()` with feature-appropriate parameters:
+
 ```rust
+// Public API — handles domain_latent feature gating internally
 pub fn forward(
     ctx: &mut ForwardContext,
     weights: &TransformerWeights,
@@ -93,8 +128,17 @@ pub fn forward(
     pos: usize,
     config: &Config,
 ) -> &mut [f32]  // logits
+
+// Internal — called by forward(), forward_prefill(), and generate_with_prefill()
+// Accepts optional LoRA adapter and domain latent
+fn forward_base(
+    ctx, weights, cache, token, pos, config,
+    lora: Option<&LoraAdapter>,        // cfg: always available
+    domain_latent: Option<&DomainLatent>,  // cfg(feature = "domain_latent")
+) -> &mut [f32]
 ```
-Pipeline:
+
+Pipeline (inside `forward_base`):
 1. **Embedding**: `x = wte[token] + wpe[pos]`
 2. **Layer loop** (n_layer iterations):
    a. RMSNorm → QKV projection (GQA: K/V use kv_group)
@@ -102,6 +146,7 @@ Pipeline:
    c. Multi-head attention (fused: score → softmax → weighted value)
    d. Output projection + residual add
    e. RMSNorm → MLP (matmul_relu + matmul) + residual add
+   f. *(domain_latent)* At layer `n_layer / 2`: inject `DomainLatent` into K/V
 3. **Snapshot**: `hidden_state = x` (before lm_head)
 4. **LM Head**: `logits = lm_head @ x`
 
@@ -115,22 +160,42 @@ When `n_kv_head < n_head`, K/V heads are shared:
 All hot-path kernels are `#[inline(always)]` with `unsafe get_unchecked`:
 - `matmul(out, w, x, rows, cols)` — out = W @ x
 - `matmul_relu(out, w, x, rows, cols)` — fused matmul + ReLU
+- `sparse_matmul(out, w, x, rows, cols, active_indices, active_values)` — skip dead ReLU neurons (Plan 022)
 - `softmax(x)` — in-place, one-pass exp+sum, uses `inv_sum` multiply
+- `softmax_scaled(x, scale)` — scaled softmax for attention (divides by sqrt(head_dim) before exp)
 - `rmsnorm(x)` — in-place, two-pass with `inv_rms` multiply
 - `attention_head(...)` — fused: score → softmax → weighted value (avoids separate softmax write)
 - `sample_token(logits, rng)` — categorical sampling
+- `lora_apply(output, lora, input, lora_buf)` — in-place LoRA delta: `output += (α/r) × B @ (A @ input)`
+
+## Additional Forward Variants (`transformer.rs`)
+
+| Function | Description |
+|----------|-------------|
+| `forward_prefill(ctx, prefill, weights, cache, tokens, config, lora, domain_latent)` | Bidirectional prefill — all prompt tokens attend to all others (Plan 025) |
+| `forward_paged(ctx, weights, paged_cache, token, pos, config, seq_idx)` | Paged KV cache forward — copy-on-write branch isolation |
+| `forward_raven(ctx, weights, raven_cache, token, pos, config)` | Raven RSM forward — slot-based O(1) routing attention |
+| `forward_turboquant(ctx, weights, tq_cache, token, pos, config)` | TurboQuant forward — bit-packed KV cache with dequantize-on-read |
+| `forward_with_domain_latent(ctx, weights, cache, token, pos, config, dl)` | Convenience wrapper — `forward_base` with domain latent only (no LoRA) |
 
 ## Generate (`transformer.rs`)
 ```rust
 pub fn generate(ctx, cache, weights, config, rng, token, n_tokens) -> Vec<usize>
 pub fn generate_into(ctx, cache, weights, config, rng, tokens, n_tokens)  // zero-alloc variant
 pub fn generate_batch(ctx, cache, weights, config, rng, token, n_tokens, n_samples) -> Vec<Vec<usize>>
-pub fn generate_with_prefill(ctx, prefill, cache, weights, config, rng, prompt_tokens, n_tokens) -> Vec<usize>
+pub fn generate_with_prefill(
+    ctx, prefill, cache, weights, config, rng,
+    prompt_tokens, n_tokens,
+    // Optional per-call overrides:
+    lora_pair: Option<&LoraPair>,          // reader→writer LoRA switching
+    domain_latent: Option<&DomainLatent>,  // mid-layer domain conditioning
+) -> Vec<usize>
 ```
 - Autoregressive: sample → feed back → repeat
-- `generate_into` reuses pre-allocated buffers
+- `generate_into` reuses pre-allocated buffers (zero-alloc hot path)
 - `generate_batch` uses Rayon `par_iter` with per-worker contexts
-- `generate_with_prefill` runs bidirectional prefill then switches to causal decode
+- `generate_with_prefill` runs bidirectional prefill (reader LoRA) then switches to causal decode (writer LoRA), with optional domain latent injection
+- `tokens_to_string(tokens, config)` — converts token IDs back to string via `id_to_vocab` lookup
 
 ## PagedKVCache (implemented, DDTree integration pending)
 ```rust
@@ -313,13 +378,14 @@ Two-phase per layer (zero-copy):
 ```rust
 let mut prefill = PrefillContext::new(&config);
 
-// Bidirectional prefill with reader LoRA
+// Bidirectional prefill with reader LoRA + optional domain latent
 let logits = forward_prefill(&mut ctx, &mut prefill, &weights, &mut cache,
-    &prompt_tokens, &config, lora_pair.reader.as_ref());
+    &prompt_tokens, &config, lora_pair.reader.as_ref(), domain_latent);
 
-// Causal decode with writer LoRA (reference swap, zero data movement)
-let logits = forward_base(&mut ctx, &weights, &mut cache, token, pos, &config,
-    lora_pair.writer.as_ref());
+// Causal decode — forward() delegates to forward_base(writer LoRA + domain latent)
+let logits = forward(&mut ctx, &weights, &mut cache, token, pos, &config);
+// Note: for explicit LoRA control during decode, use generate_with_prefill()
+// which handles the reader→writer swap internally.
 ```
 
 Domain config in `domains.toml`:

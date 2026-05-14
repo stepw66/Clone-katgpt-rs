@@ -128,7 +128,13 @@ pub struct LoraAdapter {
     pub in_dim: usize,
     pub out_dim: usize,
 }
+```
 
+Loading methods:
+- `LoraAdapter::load(path)` — loads a single-adapter binary file (Plan 008 format: `[LORA 4B][VERSION 4B][RANK 4B][ALPHA 4B][A rows×cols f32][B rows×cols f32]`)
+- `LoraAdapter::load_from_bin(path)` — loads a multi-adapter binary file, returns `Vec<LoraAdapter>` (one per target projection). Alpha defaults to `rank * 2`.
+
+```rust
 /// Apply LoRA delta in-place: output += (α/r) × B @ (A @ input)
 /// `lora_buf` is pre-allocated [rank] intermediate, zero alloc in hot path.
 fn lora_apply(output: &mut [f32], lora: &LoraAdapter, input: &[f32], lora_buf: &mut [f32])

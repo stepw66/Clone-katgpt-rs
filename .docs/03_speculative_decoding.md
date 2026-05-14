@@ -48,6 +48,11 @@ pub struct TreeNode {
 |----------|-------------|
 | `build_dd_tree(marginals, config) → Vec<TreeNode>` | Standard best-first tree construction from marginal distributions. |
 | `build_dd_tree_pruned(marginals, config, pruner, chain_seed) → Vec<TreeNode>` | Best-first with constraint pruning and optional chain-seed backbone. |
+| `build_dd_tree_screened(marginals, config, screener, chain_seed) → Vec<TreeNode>` | ScreeningPruner-graded relevance: `blended = parent_score + ln(P) + ln(R)`. Hard-trim at R ≤ 0. |
+| `build_dd_tree_balanced(marginals, config, screener) → Vec<TreeNode>` | Balanced tree: ensures equal expansion across depth levels for broader exploration. |
+| `extract_best_path(tree) → Vec<usize>` | Extract the highest-scoring token path from the built tree. |
+| `extract_best_path_into(tree, buf)` | Zero-alloc variant — writes into pre-allocated buffer. |
+| `build_inference_result(tree, config) → InferenceResult` | Build a result struct from the best tree path with reward and domain info. |
 | `merge_retrieved_branches(tree, marginals, config, retrieved, rest_weight)` | Inject REST-retrieved token sequences into the tree with blended scores. |
 
 **Chain-seed mode:**
@@ -70,6 +75,8 @@ pub struct TreeBuilder {
 - Pre-allocated once, cleared via `clear()` (reuses existing capacity across calls).
 - `build(&mut self, marginals: &[&[f32]], config, pruner, chain_seed) -> &[TreeNode]` — main entry point, returns a slice into the internal buffer.
 - `build_and_merge(...)` — performs tree build + REST merge in a single call.
+- `build_screened(&mut self, marginals, config, screener, chain_seed) -> &[TreeNode]` — screening pruner with graded relevance scoring.
+- `build_balanced(&mut self, marginals, config, screener) -> &[TreeNode]` — balanced expansion across depth levels.
 
 ---
 
@@ -166,7 +173,10 @@ High-level entry points that compose the full speculative decoding pipeline.
 | `speculative_step_verifier(..., verifier)` | Plugs in a custom `SpeculativeVerifier` implementation. |
 | `speculative_step_rest(..., rest_client)` | REST-augmented speculative decoding (behind `"rest"` feature). **Note:** REST client lives in `riir-ai/riir-rest`; this repo has only the bridge test + `merge_retrieved_branches()` stub (Plan 009). |
 | `speculative_step_rollback(..., verifier)` | KV snapshot/rollback per branch — enables speculative branching without corrupting the main KV cache. |
+| `speculative_step_rollback_with(..., sctx, verifier)` | Zero-alloc variant: accepts pre-allocated `SpeculativeContext`. |
 | `speculative_step_conditioned(...)` | Target-conditioned draft seeding + Leviathan verification for highest-fidelity output. |
+| `speculative_step_conditioned_with(..., sctx)` | Zero-alloc variant: accepts pre-allocated `SpeculativeContext`. |
+| `speculative_step_rollback_paged(..., branch_cache)` | Paged KV cache rollback — uses `DDTreeBranchCache` with copy-on-write fork for branch isolation. Avoids full snapshot copies. |
 
 ---
 
@@ -251,6 +261,7 @@ pub struct SpeculativeContext {
 - `new(config)` — allocates all buffers based on `draft_lookahead` and `vocab_size`.
 - `reset()` — clears lengths to zero; capacity is reused.
 - Used by all `_with` variants and both verifier implementations.
+- `DDTreeBranchCache` (separate struct) — paged KV cache for `speculative_step_rollback_paged`, avoids full snapshot copies via copy-on-write fork.
 
 ---
 
@@ -269,10 +280,57 @@ pub trait ConstraintPruner: Send + Sync {
 | Pruner | Feature | Description |
 |--------|---------|-------------|
 | `NoPruner` | (always available) | Always returns `true`. No-op pass-through. |
+| `NoScreeningPruner` | (always available) | Returns `relevance = 1.0` for all inputs. No-op screening. |
+| `BinaryScreeningPruner<P>` | (always available) | Adapts a `ConstraintPruner` to `ScreeningPruner` — R ∈ {0.0, 1.0}. |
 | `SudokuPruner` | `"sudoku"` | Row/column/box validation with path-aware cross-depth checks. Ensures generated token sequences satisfy Sudoku constraints. |
 | `SynPruner` | `"validator"` | Bracket balance + syntax parse validation. Ensures generated code/structured output remains syntactically valid. |
+| `FlowPruner<P>` | `"bandit"` | GFlowNet-inspired stop-probability regularization: `relevance = inner × (1 + λ × (1 - stop_prob))`. Wraps inner `ScreeningPruner`. |
 
-Pruners are called during `build_dd_tree_pruned` for every candidate node before it enters the priority heap. Invalid branches are discarded immediately, saving budget for valid explorations.
+Pruners are called during tree building for every candidate node before it enters the priority heap. Invalid branches are discarded immediately, saving budget for valid explorations.
+
+## Event & Diagnostic Types (`speculative/types.rs`)
+
+```rust
+pub enum RejectionReason {
+    LowProbability,
+    ConstraintViolation,
+    LowRelevance,
+    DivergedFromTarget,
+}
+
+pub enum DraftEvent {
+    Drafting { depth: usize, token_idx: usize },
+    Pruned { depth: usize, token_idx: usize, reason: RejectionReason },
+    Verified { depth: usize, token_idx: usize },
+    BranchRejected { path: Vec<usize>, reason: RejectionReason },
+    StepComplete { accepted: usize, total: usize },
+}
+
+pub enum PrefillMode {
+    Off,
+    Auto,
+    Always,
+}
+
+pub struct FlashPrefillConfig {
+    pub block_size: usize,
+    pub attention_sink: usize,
+    pub window: usize,
+    pub last_n_full: usize,
+    pub alpha: f32,
+}
+
+pub struct BlockScores {
+    pub scores: Vec<f32>,
+    pub block_size: usize,
+}
+```
+
+- `RejectionReason` — why a branch was pruned (diagnostics + PPoT rescue targeting).
+- `DraftEvent` — trace events for debugging pipeline behavior.
+- `PrefillMode` — controls when block-sparse prefill activates.
+- `FlashPrefillConfig` — PFlash block selection rules: sink, window, last_n_full, alpha threshold.
+- `BlockScores` — per-block importance scores from `BlockAttentionScorer`.
 
 ---
 
@@ -291,19 +349,31 @@ pub trait PrefillScorer: Send + Sync {
 | Scorer | Description |
 |--------|-------------|
 | `AttentionScorer` | Uses Q·K dot-product attention magnitudes to estimate token importance. Tokens with high attention scores are retained. |
+| `BlockAttentionScorer` | Block-level attention scoring for PFlash — scores entire blocks instead of individual tokens. |
 | `RandomScorer` | Random importance scores (baseline/ablation). |
 | `UniformScorer` | Uniform scores (baseline/ablation). |
 
 ### Compression
 
-`compress_prompt(tokens, scores, keep_ratio) -> Vec<usize>` — retains the first token, the last token, and the top-scoring spans in between, proportional to `keep_ratio`.
+| Function | Description |
+|----------|-------------|
+| `compress_prompt(tokens, scores, keep_ratio) -> Vec<usize>` | Retains first/last tokens + top-scoring spans proportional to `keep_ratio`. |
+| `compress_prompt_blocks(scores, cfg, prefix, suffix) -> Vec<usize>` | Block-level compression — selects important blocks via `FlashPrefillConfig` rules. |
+| `block_select(block_scores, cfg) -> Vec<usize>` | Selects important blocks: sink + window + last_n_full + alpha threshold. |
+| `block_select_grid(grid, m, n, h, cfg) -> Vec<usize>` | 2D grid block selection for multi-head/multi-layer scoring. |
+| `should_compress(prompt_len, cfg) -> bool` | Quick check: skip compression overhead for short prompts. |
 
 ### Full Prefill Pipeline
 
-`speculative_prefill(draft_weights, draft_config, target_weights, target_config, prompt, scorer, keep_ratio)`
+| Function | Description |
+|----------|-------------|
+| `speculative_prefill(draft_weights, draft_config, target_weights, target_config, prompt, scorer, keep_ratio)` | Token-level scoring + compression + target prefill. ~10× TTFT reduction. |
+| `speculative_prefill_block(...)` | Block-level PFlash prefill — uses `FlashPrefillConfig` for structured block selection. |
+| `speculative_prefill_adaptive(...)` | Adaptive prefill — automatically selects token vs block compression based on prompt length. |
 
+Pipeline steps:
 1. Score prompt tokens using the draft model (fast).
-2. Compress the prompt based on scores and `keep_ratio`.
+2. Compress the prompt based on scores and `keep_ratio` / `FlashPrefillConfig`.
 3. Run target prefill on the compressed prompt (slow, but ~10× shorter).
 4. Result: ~10× TTFT reduction with minimal quality loss for long prompts.
 
@@ -313,10 +383,14 @@ pub trait PrefillScorer: Send + Sync {
 
 | Flag | Enables |
 |------|---------|
-| (default) | SimulatedVerifier, LeviathanVerifier, basic speculative decoding |
-| `"rest"` | `RestClient`, REST-augmented tree merge |
+| `sparse_mlp` (default) | TwELL-inspired sparse MLP matmul |
+| `domain_latent` (default) | Free Transformer mid-layer domain conditioning |
+| `ppot` (default) | PPoT logit-parameterized CPU resampling + adaptive rescue |
+| `bandit` (default) | Multi-armed bandit + FlowPruner + AbsorbCompress + HotSwapPruner |
 | `"sudoku"` | `SudokuPruner` — constrained decoding for Sudoku |
 | `"validator"` | `SynPruner` — syntax-aware constrained decoding |
+| `"rest"` | REST bridge test + `merge_retrieved_branches` (client in `riir-ai/riir-rest`) |
+| `"feedback"` | E2E feedback loop — sends `InferenceResult` to REST endpoint |
 
 ---
 

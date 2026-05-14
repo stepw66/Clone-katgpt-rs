@@ -562,6 +562,113 @@ proposer.observe_delta(pair.template_id, delta.value);
 
 ---
 
+## δ-Mem: Modelless Distillation — Associative Bandit Memory (Plan 053)
+
+> **Feature:** `--features delta_mem` (implies `bandit`)
+
+δ-Mem provides **modelless distillation** — an associative memory that learns input→output corrections without a neural network. It combines random-projection hashing with a compact rank-r associative matrix updated via the delta rule.
+
+### Core Idea
+
+```
+Traditional distillation:  teacher logits → gradient → update student weights
+δ-Mem distillation:        (context, outcome) pairs → delta rule → update associative matrix
+```
+
+No backpropagation. No loss function. The memory learns a linear correction map in a compressed feature space.
+
+### Architecture
+
+| Component | File | Purpose |
+|-----------|------|---------|
+| `DeltaMemoryState` | `delta_mem/state.rs` | Compact r×r associative memory with `read()`, `write()`, `adapt_gates()` |
+| `DeltaMemoryConfig` | `delta_mem/state.rs` | `rank`, `beta_init`, `couple_gates` configuration |
+| `FeatureHasher` | `delta_mem/hash.rs` | Random projection: L2-normalized keys, raw values |
+| `ContextFeatures` | `delta_mem/hash.rs` | Extracts hashable features from DDTree context (depth, parent tokens) |
+| `OutcomeFeatures` | `delta_mem/hash.rs` | Extracts hashable features from outcome (reward, acceptance) |
+| `MemorySteeredPruner<P>` | `delta_mem/pruner.rs` | `ScreeningPruner` with memory-steered corrections |
+| `MultiDomainMemory` | `delta_mem/multi.rs` | Per-domain `DeltaMemoryState` instances |
+| `MultiDomainMemoryPruner<P>` | `delta_mem/multi_pruner.rs` | Per-domain pruner routing |
+
+### Correction Modes
+
+```rust
+pub enum CorrectionMode {
+    QuerySide,   // Correct the query representation before retrieval
+    OutputSide,  // Correct the output after retrieval
+    Both,        // Apply corrections at both stages
+}
+
+pub enum WriteGranularity {
+    Token,    // Write one memory entry per token
+    Segment,  // Write one memory entry per path/segment
+}
+```
+
+### Read/Write Cycle
+
+```
+1. Hash context → h_key (L2-normalized random projection)
+2. Read: correction = h_key^T × M × h_value  (rank-r associative retrieval)
+3. Apply correction to ScreeningPruner.relevance() output
+4. After episode: hash outcome → h_value
+5. Write: M += β × (target - prediction) × h_key × h_value^T  (delta rule)
+6. adapt_gates(): decay β when memory stabilizes
+```
+
+### Multi-Domain Support
+
+`MultiDomainMemory` maintains separate `DeltaMemoryState` instances per domain. `AggregationStrategy` controls how they combine:
+
+| Strategy | Behavior |
+|----------|----------|
+| `RoutedOnly` | Use only the memory for the routed domain |
+| `BanditWeighted` | Weight memories by bandit Q-values for each domain |
+
+### Integration with HL Pipeline
+
+```
+DDTree Branch → MemorySteeredPruner.relevance()
+                           │
+                   ┌───────┴───────┐
+                   │  inner pruner  │  (e.g., BanditPruner)
+                   └───────┬───────┘
+                           │ base_relevance
+                           ▼
+              DeltaMemoryState.read(context)
+                           │ correction
+                           ▼
+              corrected_relevance = base + correction
+                           │
+                           ▼
+                  DDTree uses corrected score
+```
+
+After episode completion, `write(context, outcome)` stores the correction signal. Over time, the memory learns domain-specific patterns without any gradient computation.
+
+### When It Helps
+
+- **Repeated contexts**: Same game states recur across episodes → memory recalls corrections
+- **Domain-specific patterns**: Different domains need different corrections → per-domain state
+- **Cold start supplement**: Before bandit converges, memory provides immediate corrections
+- **Low-rank structure**: When the true correction is approximately low-rank, r=8–16 suffices
+
+### Quick Start
+
+```rust,ignore
+use microgpt_rs::pruners::delta_mem::*;
+
+// Create a memory-steered pruner
+let config = DeltaMemoryConfig { rank: 8, beta_init: 0.1, couple_gates: true };
+let inner = BanditPruner::new(NoScreeningPruner, BanditStrategy::Ucb1, 6);
+let mut pruner = MemorySteeredPruner::new(inner, config, 6);
+
+// During DDTree: pruner.relevance() applies memory correction
+// After episode: pruner.write(context_features, outcome_features)
+```
+
+---
+
 ## References
 
 - [Learning Beyond Gradients](https://trinkle23897.github.io/learning-beyond-gradients/) — Jiayi Weng, 2026
@@ -574,6 +681,7 @@ proposer.observe_delta(pair.template_id, delta.value);
 - Plan 036: Inference-Time Review Metrics
 - Plan 049: G-Zero Self-Play Distillation
 - Plan 052: GZeroPlayer Bomber Integration
+- Plan 053: δ-Mem Modelless Distillation
 - Plan 054: Player A/B Benchmark
 - Plan 055: MMORPG TFT Party AI
 - Research 14: HL Distillation

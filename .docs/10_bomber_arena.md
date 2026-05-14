@@ -223,9 +223,12 @@ These utility functions are used by multiple player types:
 | `src/pruners/bomber/arena.rs` | 195 | Procedural 13×13 grid generation with `ArenaGrid::generate(seed)` |
 | `src/pruners/bomber/replay.rs` | 290 | `ReplaySample`, `ReplayWriter`, board/bomb/powerup serialization (Plan 039) |
 | `src/pruners/bomber/systems.rs` | 559 | World-based ECS systems: `init_world`, `spawn_players`, `run_tick` |
-| `src/pruners/bomber/players.rs` | 1447 | `BomberPlayer` trait + 4 implementations (Random, Greedy, Validator, HL) + shared AI functions |
+| `src/pruners/bomber/players.rs` | 1447 | `BomberPlayer` trait + 7 implementations (Random, Greedy, Validator, HL, LoraPlayer, LoraWasmPlayer, NNPlayer) + shared AI functions |
 | `src/pruners/bomber/g_zero_player.rs` | 775 | `GZeroPlayer` — G-Zero self-play with template hints + Hint-δ (Plan 052) |
 | `src/pruners/bomber/tft_player.rs` | 640 | `TftPlayer` — game theory Tit-for-Tat bomber (Issue 056) |
+| `src/pruners/bomber/wasm_pruner.rs` | — | `BomberWasmPruner` — WASM-based batch validation with `BatchResult` (Plan 034) |
+| `src/pruners/bomber/wasm_state.rs` | — | `serialize_game_state`, `ZeroCopyStateBuffer` — efficient ECS→WASM state transfer |
+| `src/pruners/bomber/replay_backward.rs` | — | `BackwardSample`, `ReplayBackwardWalker` — GFlowNet-inspired backward policy extraction |
 | `src/pruners/g_zero/bomber_templates.rs` | — | `BomberTemplate` + `BomberTemplateProposer` — 8 strategy archetypes |
 | `examples/bomber_01_arena.rs` | 350 | Headless 100-round tournament runner + `--replay-dir` dump |
 | `examples/bomber_02_tui.rs` | 509 | Animated ratatui TUI replay with emoji rendering |
