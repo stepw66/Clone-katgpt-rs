@@ -2,7 +2,7 @@
 //! Runs 1000 rounds with 4 players, filters to dump only P3 (Validator) and P4 (HL) winning episodes.
 //! Output: output/replays/bomber_replay_{timestamp}.jsonl
 //!
-//! Run: `cargo run --example bomber_04_replay_gen --features bomber`
+//! Run: `cargo run --example bomber_05_replay_gen --features bomber`
 
 use std::path::PathBuf;
 

@@ -8,7 +8,7 @@ All examples run with `cargo run --example <name>`. Some require feature flags.
 |---|-------|----------|---------|
 | 1 | Bandit (RL) | 7 examples | `bandit` |
 | 2 | Heuristic Learning | 2 examples | `bandit` |
-| 3 | Bomberman Arena | 3 examples | `bomber` |
+| 3 | Bomberman Arena | 6 examples | `bomber`, `bomber-wasm` |
 | 4 | Monopoly FSM | 4 examples | `monopoly` |
 | 5 | FFT Tactics Arena | 1 example | — |
 | 6 | Blue Bear | 2 examples | — |
@@ -16,8 +16,9 @@ All examples run with `cargo run --example <name>`. Some require feature flags.
 | 8 | Dungeon | 2 examples | — |
 | 9 | Sudoku | 3 examples | `sudoku` |
 | 10 | Tactical AI | 6 examples | — |
-| 11 | Getting Started | 1 example | — |
-| 12 | Stepwise Reward Shaping | 1 example | `stepcode` |
+| 11 | Review | 1 example | `bandit` |
+| 12 | Getting Started | 1 example | — |
+| 13 | Stepwise Reward Shaping | 1 example | `stepcode` |
 
 ---
 
@@ -107,7 +108,7 @@ cargo run --example hl_02_hotswap --features bandit
 
 ## 3. Bomberman HL Arena
 
-4-player Bomberman with `bevy_ecs` standalone. Tick-based priority FSM with 8 states and 4 AI tiers.
+4-player Bomberman with `bevy_ecs` standalone. Tick-based priority FSM with 8 states, 4 AI tiers, WASM-validated NN player, and replay data generation.
 
 ### bomber_01_arena
 
@@ -131,6 +132,34 @@ cargo run --example bomber_02_tui --features bomber
 
 ```bash
 cargo run --example bomber_03_hl_proof --features bomber
+```
+
+### bomber_04_nn
+
+NNPlayer demo with WASM validator safety checks. Loads `bomber_validator.wasm` at runtime for A/B comparison vs native safety rules. Falls back gracefully if WASM unavailable.
+
+```bash
+# With WASM validator:
+cargo run --example bomber_04_nn --features bomber-wasm -- /path/to/bomber_validator.wasm
+
+# Without WASM (native fallback):
+cargo run --example bomber_04_nn --features bomber-wasm
+```
+
+### bomber_05_replay_gen
+
+Dedicated replay generator for training data. 1000 rounds, filters P3 (Validator) and P4 (HL) winning episodes with quality > 0.5. Outputs JSONL with board state, bombs, powerups, and action labels.
+
+```bash
+cargo run --example bomber_05_replay_gen --features bomber
+```
+
+### bomber_06_replay_gen_v2
+
+Enhanced replay generator with richer per-sample metrics: `danger_level`, `nearest_opponent_dist`, `escape_routes`. Enables ML training with context-aware quality scoring.
+
+```bash
+cargo run --example bomber_06_replay_gen_v2 --features bomber
 ```
 
 ---
@@ -197,7 +226,7 @@ Experimental tools and TUI demos.
 
 ### bear_01_demo
 
-Basic Blue Bear demonstration.
+Blue Bear tactical puzzle solver — uses DDTree with `TacticalPruner` as a heavily constrained state-space search. Solves a 3×3 map (BXT/#MG) in 7 steps with step-by-step verification.
 
 ```bash
 cargo run --example bear_01_demo
@@ -205,7 +234,7 @@ cargo run --example bear_01_demo
 
 ### bear_02_tui
 
-Blue Bear ratatui TUI visualization.
+Ratatui TUI with animated step-through, auto-play, solution replay, and emoji grid rendering. Navigate with ←/→/Home/End, toggle auto-play with A.
 
 ```bash
 cargo run --example bear_02_tui
@@ -227,7 +256,7 @@ cargo run --example core_01_validator --features validator
 
 ### core_02_raven
 
-Raven inference demo.
+Raven RSM (Routing Slot Memory) demo — 3 parts: (1) frozen-slot memory preservation under noise, (2) O(1) per-step scaling vs O(N) flat attention, (3) memory footprint comparison.
 
 ```bash
 cargo run --example core_02_raven
@@ -357,7 +386,21 @@ cargo run --example tactical_06_tui
 
 ---
 
-## 11. Getting Started
+## 11. Review
+
+Inference-time review metrics based on arXiv:2604.27233 — "Reinforced Agent: Inference-Time Feedback for Tool-Calling Agents".
+
+### review_01_metrics
+
+Tracks how often the bandit reviewer *fixes* a wrong random pick (helpful) vs *breaks* a correct pick (harmful). Computes benefit-to-risk ratio and AbsorbCompress gating. Compares UCB1, Thompson Sampling, and ε-greedy strategies.
+
+```bash
+cargo run --example review_01_metrics --features bandit
+```
+
+---
+
+## 12. Getting Started
 
 ### hello_py2rs
 
@@ -369,7 +412,7 @@ cargo run --example hello_py2rs
 
 ---
 
-## 12. Stepwise Reward Shaping (StepCodeReasoner Plan 054)
+## 13. Stepwise Reward Shaping (StepCodeReasoner Plan 054)
 
 Intra-trajectory reward shaping distilled from StepCodeReasoner (ICML 2026). Rewards bandit arms proportionally to how many downstream arms they enable.
 
@@ -392,7 +435,9 @@ cargo run --example stepcode_01_shaped_bandit --features stepcode
 | `ppot` | PPoT resampling | — |
 | `bandit` | BanditPruner, bandit/HL examples | — |
 | `bomber` | Bomberman arena (Plan 033) | `bevy_ecs`, `bandit` |
+| `bomber-wasm` | Bomberman NNPlayer with WASM validator | `wasmtime`, `bomber` |
 | `monopoly` | Monopoly FSM arena (Plan 035) | `bevy_ecs`, `bandit` |
+| `stepcode` | StepCode shaped bandit rewards | — |
 | — | FFT Tactics Arena (Plan 047) | `fastrand` |
 | `rest` | REST API client | `reqwest`, `tokio` |
 | `embedding_router` | Semantic embedding retrieval | — |
