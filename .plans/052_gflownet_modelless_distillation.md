@@ -29,6 +29,9 @@ Measured via existing benchmarks. To be filled during Task 1:
 | Bandit flow reward delta | 420.00 | 420.00 (+0.0%) ✅ |
 | Backward replay avg alternatives | — | 4.0 alt/tick ✅ |
 | Backward replay ticks with ≥2 alt | — | 100.0% ✅ |
+| **T15: BanditPruner goal @budget=64** | **0% (binary pruners)** | **100% (7-step goal) ✅ KEY FINDING** |
+| **T15: Fractional relevance R ∈ (0,1)** | — | **ln(R) ∈ [-1.61, -0.11] at depth=1 ✅** |
+| **T15: FlowPruner shifts relevance** | — | **R=0.9→1.0, R=0.2→0.254 at depth=1 ✅** |
 
 ## Tasks
 
@@ -142,7 +145,28 @@ The paper constructs the backward policy by reversing graph edges. We walk winni
   - **Gate: backward walker must find ≥2 safe alternatives per tick on average OR revert T8**
   - **Result: ✅ PASS — 4.0 avg alternatives/tick, 100% ticks with ≥2 alternatives**
 
-### Phase 5: Integration & Final Benchmark
+### Phase 5: Real Benchmark with Non-Trivial Screeners (T15)
+
+The original D1-D4 benchmarks used `NoScreeningPruner` (relevance=1.0, ln(1)=0), showing zero delta.
+T15 uses `BanditPruner<BinaryScreeningPruner<TacticalPruner>>` on a real game map (BXT/SMG, 2×3, 7-step optimal).
+
+**Key Finding:** At tight tree budget (64 nodes), BanditPruner finds the 7-step goal 100% of the time,
+while binary pruners (ConstraintPruner, BinaryScreeningPruner) fail 100% of the time.
+Fractional relevance (R ∈ (0,1)) provides priority signal that binary relevance (R ∈ {0,1}) cannot.
+
+| Budget | Pruned | Binary | Bandit | Balanced | FlowBal |
+|--------|--------|--------|--------|----------|---------|
+| 64 | 0% goal | 0% goal | **100%** goal[7] | **100%** goal[7] | **100%** goal[7] |
+| 128 | 100% goal[7] | 100% goal[7] | 100% goal[7] | 100% goal[7] | 100% goal[7] |
+| 269 (full) | 100% goal[7] | 100% goal[7] | 100% goal[7] | 100% goal[7] | 100% goal[7] |
+
+- [x] **T15: Real benchmark with TacticalPruner + BanditPruner** — `tests/bench_gflownet_modelless.rs`
+  - BanditPruner<BinaryScreeningPruner<TacticalPruner>> vs BinaryScreeningPruner<TacticalPruner> vs ConstraintPruner
+  - FlowPruner<BanditPruner> relevance shift measurement
+  - Tight budget sweep (64, 128, 256) to expose scoring competition
+  - **Result: ✅ KEY FINDING — BanditPruner finds goal at budget=64 where binary fails**
+
+### Phase 6: Integration & Final Benchmark
 
 - [x] **T10: Run full benchmark suite** — `tests/bench_gflownet_modelless.rs`
   - All phases combined: 6 tests, all passing
@@ -153,6 +177,8 @@ The paper constructs the backward policy by reversing graph edges. We walk winni
 - [x] **T12: Update `README.md`** — Add GFlowNet distillation section
 - [x] **T13: Update `.research/23_GFlowNet_Shortest_Paths.md`** — Add actual benchmark results
 - [x] **T14: Commit** — `feat: GFlowNet modelless distillation (Plan 052)` — commit `0ee4009`
+- [x] **T15: Real benchmark** — tight budget proves BanditPruner guides search where binary fails
+- [ ] **T16: Commit T15** — `test: T15 real benchmark with TacticalPruner (Plan 052)`
 
 ## Files Modified
 
