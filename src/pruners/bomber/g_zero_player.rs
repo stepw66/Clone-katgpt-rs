@@ -39,8 +39,8 @@ use crate::speculative::types::NoScreeningPruner;
 use super::players::BomberPlayer;
 use super::players::{in_blast_zone, score_action, should_place_bomb};
 use super::{
-    ARENA_H, ARENA_W, ArenaGrid, BOMB_FUSE_TICKS, BomberAction, DEFAULT_BLAST_RANGE, GameEvent,
-    GridPos,
+    ARENA_H, ARENA_W, ArenaGrid, BOMB_FUSE_TICKS, BomberAction, Cell, DEFAULT_BLAST_RANGE,
+    GameEvent, GridPos,
 };
 
 // ── Constants ──────────────────────────────────────────────────
@@ -159,20 +159,27 @@ fn update_opponents(opponents: &mut Vec<KnownOpponent>, events: &[GameEvent], my
     }
 }
 
-/// Compute game-domain Hint-δ: mean score shift from hint template.
+/// Compute game-domain Hint-δ: delta at argmax action (not mean).
+///
+/// Mean δ is always positive because hints add to 2-4 actions and subtract from 0-2,
+/// giving the bandit zero discriminative signal. Argmax δ measures how much the hint
+/// improved the **chosen** action — templates that shift the best action get rewarded.
 fn compute_game_delta(
     query_scores: &[f32; ACTION_COUNT],
     hinted_scores: &[f32; ACTION_COUNT],
 ) -> f32 {
-    let mut sum = 0.0f32;
-    let mut count = 0usize;
-    for i in 0..ACTION_COUNT {
-        if query_scores[i] > f32::NEG_INFINITY && hinted_scores[i] > f32::NEG_INFINITY {
-            sum += hinted_scores[i] - query_scores[i];
-            count += 1;
-        }
+    // Find argmax of hinted_scores among valid actions
+    let best_idx = hinted_scores
+        .iter()
+        .enumerate()
+        .filter(|(_, s)| **s > f32::NEG_INFINITY)
+        .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(Ordering::Equal))
+        .map(|(i, _)| i);
+
+    match best_idx {
+        Some(idx) => hinted_scores[idx] - query_scores[idx],
+        None => 0.0,
     }
-    if count == 0 { 0.0 } else { sum / count as f32 }
 }
 
 // ── GZeroPlayer ────────────────────────────────────────────────
@@ -195,6 +202,8 @@ pub struct GZeroPlayer {
     absorb_compress: DeltaGatedAbsorbCompress<NoScreeningPruner>,
     delta_history: Vec<f32>,
     round_actions: Vec<(BomberAction, f32)>,
+    /// All template IDs selected this round — for outcome-based bandit reward attribution.
+    round_template_ids: Vec<usize>,
     // Cross-round Q-values
     q_values: [f32; ACTION_COUNT],
     visits: [u32; ACTION_COUNT],
@@ -223,6 +232,7 @@ impl GZeroPlayer {
             absorb_compress,
             delta_history: Vec::new(),
             round_actions: Vec::new(),
+            round_template_ids: Vec::new(),
             q_values: [0.0; ACTION_COUNT],
             visits: [0; ACTION_COUNT],
         }
@@ -236,25 +246,46 @@ impl GZeroPlayer {
         self.round_actions.iter().map(|(_, d)| d).sum::<f32>() / self.round_actions.len() as f32
     }
 
-    /// Update Q-values from round outcome.
+    /// Update Q-values from round outcome + feed outcome reward to template bandit (F4).
+    ///
+    /// Per-tick δ alone cannot differentiate templates (issue 055: always positive).
+    /// The round outcome (survived/killed/powerups) provides the real discriminative signal
+    /// for the template proposer — surviving with a template = positive reward, dying = negative.
     pub fn update_outcome(&mut self, survived: bool, killed: bool, powerups: u32) {
         if self.round_actions.is_empty() {
             return;
         }
 
-        let reward = if survived { 1.0 } else { -1.0 }
+        let outcome_reward = if survived { 1.0 } else { -1.0 }
             + if killed { 2.0 } else { 0.0 }
             + powerups as f32 * 0.5;
 
+        // Distribute outcome reward across ALL templates used this round (not just last one).
+        // Each template gets equal share of the reward — survived = positive, died = negative.
+        // Uses observe_outcome (not observe_delta) so UCB1 score uses outcome-based reward.
+        let template_reward = if survived { 1.0 } else { -0.5 }
+            + if killed { 1.0 } else { 0.0 }
+            + powerups as f32 * 0.3;
+        let share = if self.round_template_ids.is_empty() {
+            0.0
+        } else {
+            template_reward / self.round_template_ids.len() as f32
+        };
+        for &tid in &self.round_template_ids {
+            self.template_proposer.observe_outcome(tid, share);
+        }
+
+        // Update per-action Q-values with blended reward
         for (action, delta) in &self.round_actions {
             let idx = action.as_usize();
             let alpha = 1.0 / (1.0 + self.visits[idx] as f32).sqrt();
-            self.q_values[idx] += alpha * (reward + delta - self.q_values[idx]);
+            self.q_values[idx] += alpha * (outcome_reward + delta - self.q_values[idx]);
             self.visits[idx] += 1;
         }
 
         self.delta_history.push(self.round_delta_mean());
         self.round_actions.clear();
+        self.round_template_ids.clear();
     }
 
     /// Run absorb-compress cycle. Returns newly compressed arm indices.
@@ -295,21 +326,67 @@ impl BomberPlayer for GZeroPlayer {
         let opponent_positions: Vec<(i32, i32)> =
             self.known_opponents.iter().map(|(_, op, _)| *op).collect();
 
-        // 2. Compute query_scores (heuristic baseline — reuse players.rs scoring)
+        // 2. Compute query_scores (WEAK heuristic — templates have room to add value)
+        //
+        // Uses simple walkability + distance scoring (no BFS escape, no wall-aware blast).
+        // The strong score_action is reserved for the safety filter (step 10).
+        // This is F3 from issue 055: weak baseline → hints can actually shift the decision.
         let mut query_scores = [0.0f32; ACTION_COUNT];
         for (i, action) in ALL_ACTIONS.iter().enumerate() {
-            query_scores[i] = score_action(
-                action,
-                grid,
-                pos,
-                &self.known_bombs,
-                &self.known_powerups,
-                self.last_dir,
-            );
+            query_scores[i] = match action {
+                BomberAction::Up
+                | BomberAction::Down
+                | BomberAction::Left
+                | BomberAction::Right => {
+                    let target = move_target(*action, pos);
+                    if !grid.is_walkable(target.x, target.y) {
+                        f32::NEG_INFINITY
+                    } else {
+                        let mut s = 1.0;
+                        // Mild powerup attraction (weaker than score_action's)
+                        if let Some(pu) = self
+                            .known_powerups
+                            .iter()
+                            .min_by_key(|p| (target.x - p.0).abs() + (target.y - p.1).abs())
+                        {
+                            let dist = (target.x - pu.0).abs() + (target.y - pu.1).abs();
+                            s += 0.5 / (dist as f32 + 1.0);
+                        }
+                        // Penalize being near bombs (simple distance, not wall-aware)
+                        let min_bomb_dist = bomb_positions
+                            .iter()
+                            .map(|b| (target.x - b.0).abs() + (target.y - b.1).abs())
+                            .min()
+                            .unwrap_or(999);
+                        if min_bomb_dist <= 2 {
+                            s -= 2.0;
+                        }
+                        // Mild center bias
+                        let center = ARENA_W as i32 / 2;
+                        let dist_after = (target.x - center).abs() + (target.y - center).abs();
+                        s += 0.1 * (center as f32 - dist_after as f32) / center as f32;
+                        s
+                    }
+                }
+                BomberAction::Bomb => {
+                    let wall_adj = [(0i32, -1i32), (0, 1), (-1, 0), (1, 0)]
+                        .iter()
+                        .filter(|(dx, dy)| {
+                            matches!(
+                                grid.get(pos.x + dx, pos.y + dy),
+                                Cell::DestructibleWall | Cell::PowerUpHidden(_)
+                            )
+                        })
+                        .count();
+                    if wall_adj > 0 { 1.0 } else { 0.0 }
+                }
+                BomberAction::Wait => 0.0,
+            };
         }
 
-        // 3. Select template via UCB1
+        // 3. Select template via UCB1 — track for outcome attribution
         let (template, template_id) = self.template_proposer.select();
+        self.round_template_ids.push(template_id);
 
         // 4. Compute hinted_scores = query_scores + hint_score_override
         let mut hinted_scores = query_scores;
@@ -321,6 +398,7 @@ impl BomberPlayer for GZeroPlayer {
                     (pos.x, pos.y),
                     &bomb_positions,
                     &opponent_positions,
+                    &self.known_powerups,
                     ARENA_W as i32,
                     ARENA_H as i32,
                 );
@@ -353,7 +431,14 @@ impl BomberPlayer for GZeroPlayer {
             }
         }
 
-        // 10. Safety filter (wall-aware blast zones, escape-gated bombs)
+        // 10. Safety filter — wall-aware blast zones with escape guidance
+        //
+        // Key insight: when already in a blast zone, blocking ALL blast-zone cells
+        // leaves no valid moves → Wait → death. Instead, when in danger, override
+        // move scores with score_action's BFS escape-distance guidance.
+        // When safe, block moves INTO blast zones to prevent walking into danger.
+        let currently_in_blast = in_blast_zone(pos, grid, &self.known_bombs);
+
         for i in 0..ACTION_COUNT {
             let action = ALL_ACTIONS[i];
             match action {
@@ -363,6 +448,19 @@ impl BomberPlayer for GZeroPlayer {
                 | BomberAction::Right => {
                     let target = move_target(action, pos);
                     if !grid.is_walkable(target.x, target.y) {
+                        final_scores[i] = f32::NEG_INFINITY;
+                    } else if currently_in_blast {
+                        // In danger: use score_action's escape-distance BFS to guide out
+                        final_scores[i] = score_action(
+                            &action,
+                            grid,
+                            pos,
+                            &self.known_bombs,
+                            &self.known_powerups,
+                            self.last_dir,
+                        );
+                    } else if in_blast_zone(target, grid, &self.known_bombs) {
+                        // Safe: block moves INTO blast zone
                         final_scores[i] = f32::NEG_INFINITY;
                     }
                 }
@@ -379,8 +477,8 @@ impl BomberPlayer for GZeroPlayer {
             }
         }
 
-        // 11. ε-greedy exploration (5% — only safe moves, no Bomb/Wait)
-        let best_action = if rng.f32() < 0.05 {
+        // 11. ε-greedy exploration (15% — diverse template discovery, only safe moves)
+        let best_action = if rng.f32() < 0.15 {
             let safe: Vec<usize> = (0..ACTION_COUNT)
                 .filter(|&i| {
                     if final_scores[i] <= f32::NEG_INFINITY {
@@ -441,6 +539,7 @@ impl BomberPlayer for GZeroPlayer {
         self.known_powerups.clear();
         self.known_opponents.clear();
         self.round_actions.clear();
+        self.round_template_ids.clear();
         self.last_dir = None;
         // NOTE: Q-values, visits, template stats persist across rounds (bandit memory)
     }

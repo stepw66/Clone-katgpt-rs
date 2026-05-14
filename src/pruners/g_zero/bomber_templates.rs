@@ -71,6 +71,9 @@ struct TemplateStats {
     total_delta: f32,
     delta_count: usize,
     pulls: u32,
+    /// Outcome-based reward (survived/killed/powerups) — primary bandit signal.
+    total_outcome: f32,
+    outcome_count: usize,
 }
 
 impl TemplateStats {
@@ -79,6 +82,8 @@ impl TemplateStats {
             total_delta: 0.0,
             delta_count: 0,
             pulls: 0,
+            total_outcome: 0.0,
+            outcome_count: 0,
         }
     }
 
@@ -89,12 +94,19 @@ impl TemplateStats {
         self.total_delta / self.delta_count as f32
     }
 
+    /// UCB1 using outcome-based reward (not δ). Outcome reward is the primary
+    /// discriminative signal — survived templates get +reward, dead templates get -reward.
     fn ucb1_score(&self, total_pulls: u32) -> f32 {
         if self.pulls == 0 {
             return f32::MAX; // Prioritize unvisited
         }
+        let reward = if self.outcome_count > 0 {
+            self.total_outcome / self.outcome_count as f32
+        } else {
+            self.mean_delta() // Fallback to δ if no outcome yet
+        };
         let exploration = (2.0 * (total_pulls as f32).ln() / self.pulls as f32).sqrt();
-        self.mean_delta() + exploration
+        reward + exploration
     }
 }
 
@@ -135,13 +147,26 @@ impl BomberTemplateProposer {
         (BomberTemplate::all()[best_id], best_id)
     }
 
-    /// Feed Hint-δ back to the bandit for a template.
+    /// Feed Hint-δ back to the bandit for a template (per-tick signal, secondary).
     pub fn observe_delta(&mut self, template_id: usize, delta_value: f32) {
         if template_id >= 8 {
             return;
         }
         self.stats[template_id].total_delta += delta_value;
         self.stats[template_id].delta_count += 1;
+    }
+
+    /// Feed round outcome reward to a specific template (primary signal, F4).
+    ///
+    /// This is the real discriminative signal: survived = positive, died = negative.
+    /// Per-tick δ alone is always positive (issue 055) and cannot differentiate templates.
+    /// Caller distributes reward across all templates used in the round.
+    pub fn observe_outcome(&mut self, template_id: usize, reward: f32) {
+        if template_id >= 8 {
+            return;
+        }
+        self.stats[template_id].total_outcome += reward;
+        self.stats[template_id].outcome_count += 1;
     }
 
     /// Mean δ for a specific template.
@@ -152,14 +177,21 @@ impl BomberTemplateProposer {
             .unwrap_or(0.0)
     }
 
-    /// Template with highest mean δ (most informative).
+    /// Template with highest mean outcome reward (most successful).
     pub fn best_template(&self) -> BomberTemplate {
         (0..8)
             .max_by(|a, b| {
-                self.stats[*a]
-                    .mean_delta()
-                    .partial_cmp(&self.stats[*b].mean_delta())
-                    .unwrap_or(Ordering::Equal)
+                let a_reward = if self.stats[*a].outcome_count > 0 {
+                    self.stats[*a].total_outcome / self.stats[*a].outcome_count as f32
+                } else {
+                    self.stats[*a].mean_delta()
+                };
+                let b_reward = if self.stats[*b].outcome_count > 0 {
+                    self.stats[*b].total_outcome / self.stats[*b].outcome_count as f32
+                } else {
+                    self.stats[*b].mean_delta()
+                };
+                a_reward.partial_cmp(&b_reward).unwrap_or(Ordering::Equal)
             })
             .map(|i| BomberTemplate::all()[i])
             .unwrap_or(BomberTemplate::FleeBlast)
@@ -202,12 +234,14 @@ impl Default for BomberTemplateProposer {
 /// * `opponents` - Known opponent positions
 /// * `grid_w` - Grid width
 /// * `grid_h` - Grid height
+#[allow(clippy::too_many_arguments)]
 pub fn hint_score_override(
     template: BomberTemplate,
     action_idx: usize,
     pos: (i32, i32),
     bomb_positions: &[(i32, i32)],
     opponents: &[(i32, i32)],
+    powerups: &[(i32, i32)],
     grid_w: i32,
     grid_h: i32,
 ) -> f32 {
@@ -235,7 +269,9 @@ pub fn hint_score_override(
         BomberTemplate::CampCorner => {
             hint_camp_corner(is_move, is_wait, pos, target, grid_w, grid_h)
         }
-        BomberTemplate::PowerUpHunt => hint_powerup_hunt(is_move, is_bomb, is_wait),
+        BomberTemplate::PowerUpHunt => {
+            hint_powerup_hunt(is_move, is_bomb, is_wait, pos, target, powerups)
+        }
         BomberTemplate::CutoffOpponent => hint_cutoff_opponent(is_bomb, is_move, pos, opponents),
         BomberTemplate::CenterControl => hint_center_control(is_move, pos, target, grid_w, grid_h),
         BomberTemplate::WaitTrap => hint_wait_trap(is_wait, is_bomb, is_move, pos, opponents),
@@ -351,13 +387,41 @@ fn hint_camp_corner(
     }
 }
 
-fn hint_powerup_hunt(is_move: bool, is_bomb: bool, is_wait: bool) -> f32 {
+/// PowerUpHunt: +2.5 toward nearest powerup, -1.0 away, 0.0 if none known.
+fn hint_powerup_hunt(
+    is_move: bool,
+    is_bomb: bool,
+    is_wait: bool,
+    pos: (i32, i32),
+    target: (i32, i32),
+    powerups: &[(i32, i32)],
+) -> f32 {
+    if powerups.is_empty() {
+        // No powerups known — don't bias actions
+        return if is_wait { -0.5 } else { 0.0 };
+    }
     if is_move {
-        2.0
+        let current_min = powerups
+            .iter()
+            .map(|p| (pos.0 - p.0).abs() + (pos.1 - p.1).abs())
+            .min()
+            .unwrap_or(i32::MAX);
+        let target_min = powerups
+            .iter()
+            .map(|p| (target.0 - p.0).abs() + (target.1 - p.1).abs())
+            .min()
+            .unwrap_or(i32::MAX);
+        if target_min < current_min {
+            2.5 // Moving toward nearest powerup
+        } else if target_min == current_min && target_min <= 2 {
+            1.0 // Lateral but close — mild positive
+        } else {
+            -1.0 // Moving away from powerups
+        }
     } else if is_bomb {
-        0.5
+        -0.5 // Don't bomb when hunting powerups (blast may destroy them)
     } else if is_wait {
-        -1.0
+        -1.0 // Don't wait when powerups to collect
     } else {
         0.0
     }
@@ -496,6 +560,7 @@ mod tests {
             (4, 4),
             &bombs,
             &[],
+            &[],
             13,
             13,
         );
@@ -514,6 +579,7 @@ mod tests {
             (4, 4),
             &[],
             &opponents,
+            &[],
             13,
             13,
         );
@@ -529,6 +595,7 @@ mod tests {
             BomberTemplate::BombWall,
             4, // Bomb
             (5, 5),
+            &[],
             &[],
             &[],
             13,
@@ -564,6 +631,7 @@ mod tests {
             (3, 3),
             &[],
             &[],
+            &[],
             13,
             13,
         );
@@ -580,6 +648,7 @@ mod tests {
             BomberTemplate::CenterControl,
             3, // Right
             (3, 3),
+            &[],
             &[],
             &[],
             13,
@@ -599,6 +668,7 @@ mod tests {
             (5, 5),
             &[],
             &[],
+            &[],
             13,
             13,
         );
@@ -614,6 +684,7 @@ mod tests {
             (5, 5),
             &[],
             &opponents,
+            &[],
             13,
             13,
         );
@@ -632,6 +703,7 @@ mod tests {
             (5, 5),
             &[],
             &opponents,
+            &[],
             13,
             13,
         );
