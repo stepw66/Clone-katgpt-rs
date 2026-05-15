@@ -11,28 +11,28 @@
 
 ### Phase 1: Types & State
 
-- [ ] T1: Define `HlaHeadState` struct in `src/types.rs` — symmetric second-order: `sk [hd×hd]`, `cqv [hd×hd]`, `mq [hd]`, `g [hd×hd]`, `h [hd]` + `new(hd)` + `reset()`
-- [ ] T2: Define `AhlaHeadState` struct in `src/types.rs` — asymmetric second-order: `pkv [hd×hd]`, `mk [hd]`, `e [hd×hd]`, `n [hd]` + `new(hd)` + `reset()`
-- [ ] T3: Define `MultiLayerHlaCache` — `layers: Vec<HlaLayerState>` where `HlaLayerState` holds per-head states (respecting GQA: SK shared per kv_group, CQV/mQ/G/h per q_head)
-- [ ] T4: Define `MultiLayerAhlaCache` — same layer structure but with AHLA states (PKV/mK shared per kv_group, E/n per q_head)
-- [ ] T5: Add `new()` / `reset()` for both caches, compute per-head layout from `Config`
-- [ ] T6: Register `#[cfg(feature = "hla_attention")]` gate on all new types
+- [x] T1: Define `HlaQHeadState` struct in `src/hla/types.rs` — CQV `[hd×hd]`, mQ `[hd]`, G `[hd×hd]`, h `[hd]` + `new(hd)` + `reset()`
+- [x] T2: Define `AhlaQHeadState` struct in `src/hla/types.rs` — e `[hd×hd]`, n `[hd]` + `new(hd)` + `reset()`
+- [x] T3: Define `MultiLayerHlaCache` — `layers: Vec<HlaLayerState>` with SK per KV group, per-Q-head state (GQA-aware)
+- [x] T4: Define `MultiLayerAhlaCache` — same layer structure with PKV/mK per KV group, E/n per Q head
+- [x] T5: Add `new()` / `reset()` / `with_gamma()` / `memory_bytes()` for both caches
+- [x] T6: Register `#[cfg(feature = "hla_attention")]` gate on `pub mod hla` in `lib.rs`, feature in `Cargo.toml`, included in `full`
 
 ### Phase 2: Attention Kernels
 
-- [ ] T7: Implement `hla_state_update()` — streaming recurrence for symmetric HLA. Enforce order: compute G,h with OLD CQV,mQ BEFORE updating SK,CQV,mQ. Zero-alloc using pre-allocated temp buffers
-- [ ] T8: Implement `hla_attention_head()` — readout `o_t = q_tᵀ(SK·CQV − G)`. Two-stage: matvec `u = q_tᵀ·SK` then `u·CQV − q_tᵀ·G`. Zero-alloc
-- [ ] T9: Implement `ahla_step()` — combined update+readout for AHLA. `PKV += kvᵀ`, `r = qᵀPKV`, `E += kr`, `o = qᵀE`. Zero-alloc
-- [ ] T10: Add optional normalization to both: `o_t / (denom + ε)` where denom uses mQ/h (symmetric) or n (AHLA)
-- [ ] T11: Add optional exponential decay γ: `SK = γ·SK_prev + kkᵀ`, same for all accumulators
-- [ ] T12: Verify GQA correctness — shared SK/PKV per kv_group, per-head CQV/mQ/G/h or E/n
+- [x] T7: Implement `hla_state_update()` in `src/hla/kernel.rs` — streaming recurrence with correct update ordering (cross-terms before main accumulators). Zero-alloc via pre-allocated temp buffers
+- [x] T8: Implement `hla_readout()` — readout `o_t = q_tᵀ(SK·CQV − G)`. Two-stage matvec, zero-alloc
+- [x] T9: Implement `ahla_step()` — combined update+readout for AHLA. Zero-alloc
+- [x] T10: Add normalization: `hla_denom()` / `ahla_denom()` + optional divide-by-denom in layer helpers
+- [x] T11: Add exponential decay γ in both `hla_state_update()` and `ahla_step()`
+- [x] T12: Verify GQA correctness — `kv_group()` mapping, layer helpers handle shared SK/PKV correctly
 
 ### Phase 3: Forward Integration
 
-- [ ] T13: Add `forward_hla()` function — same structure as `forward_base()` but uses `MultiLayerHlaCache`. Skip KV store, use `hla_state_update()` + `hla_attention_head()` instead of `attention_head()` loop
-- [ ] T14: Add `forward_ahla()` function — same but uses `MultiLayerAhlaCache` and `ahla_step()`
-- [ ] T15: Pre-allocate HLA-specific temp buffers in `ForwardContext` (behind feature gate): `hla_u [head_dim]`, `hla_k_cqv [head_dim]`
-- [ ] T16: Ensure `generate_into()` works with both new forward functions (generic over cache type or match on attention mode)
+- [x] T13: Add `forward_hla()` in `src/hla/forward.rs` — same structure as `forward_base()` with HLA cache
+- [x] T14: Add `forward_ahla()` — same with AHLA cache
+- [x] T15: Pre-allocated temp buffers in forward functions (stack-allocated, reused across layers)
+- [x] T16: Add `generate_hla_into()` / `generate_ahla_into()` — convenience wrappers matching `generate_into()` API
 
 ### Phase 4: Benchmarks (Before/After)
 
@@ -53,20 +53,24 @@
 ## Architecture
 
 ```text
-src/types.rs
-├── HlaHeadState          — symmetric 2nd-order state (SK, CQV, mQ, G, h)
-├── AhlaHeadState         — asymmetric 2nd-order state (PKV, mK, E, n)
-├── MultiLayerHlaCache    — per-layer, per-head HLA states (GQA-aware)
-└── MultiLayerAhlaCache   — per-layer, per-head AHLA states (GQA-aware)
+src/hla/                         — Feature-gated module: #[cfg(feature = "hla_attention")]
+├── mod.rs                       — Module index, re-exports
+├── types.rs                     — HlaQHeadState, AhlaQHeadState, HlaLayerState, AhlaLayerState,
+│                                  MultiLayerHlaCache, MultiLayerAhlaCache, HlaVariant
+├── kernel.rs                    — hla_state_update(), hla_readout(), hla_denom(),
+│                                  ahla_step(), ahla_denom(),
+│                                  hla_layer_update(), hla_layer_readout(), ahla_layer_step()
+└── forward.rs                   — forward_hla(), forward_ahla(),
+                                   generate_hla_into(), generate_ahla_into()
 
 src/transformer.rs
-├── hla_state_update()    — streaming recurrence (symmetric)
-├── hla_attention_head()  — readout: qᵀ(SK·CQV − G) (symmetric)
-├── ahla_step()           — combined update+readout (asymmetric)
-├── forward_hla()         — full forward with HLA cache
-└── forward_ahla()        — full forward with AHLA cache
+└── ForwardContext               — fields made pub(crate) for HLA module access
 
-src/benchmark.rs
+src/types.rs
+├── HlaMode enum                 — Standard, Hla, Ahla (added in Plan 058 commit)
+└── Config.hla_mode/normalize/decay — HLA config fields (added in Plan 058 commit)
+
+src/benchmark.rs                 — Phase 4 (TODO)
 ├── bench_hla_vs_flat_cache()   — throughput comparison
 ├── bench_hla_memory()          — memory comparison
 └── bench_hla_quality()         — logit divergence sanity check
