@@ -35,6 +35,16 @@ pub struct TransformerWeights {
     pub wpe: Vec<f32>,             // [block_size, n_embd]
     pub lm_head: Vec<f32>,         // [vocab_size, n_embd]
     pub layers: Vec<LayerWeights>, // [n_layer]
+    // MTP Drafter weights (Plan 055: Gemma 4 MTP)
+    /// Target→Draft activation projection: [draft_n_embd, target_n_embd + embed_dim]
+    /// Only loaded when Config mtp_activation_threshold is met and weights file exists.
+    /// Falls back to truncate/pad when absent.
+    pub mtp_activation_proj: Option<Vec<f32>>,
+    /// Cluster classifier: [num_clusters, n_embd]
+    /// Only loaded when vocab_size > mtp_cluster_vocab_threshold.
+    pub mtp_cluster_classifier: Option<Vec<f32>>,
+    /// Cluster membership table: [num_clusters] → Vec<usize> (token indices)
+    pub mtp_cluster_map: Option<Vec<Vec<usize>>>,
 }
 
 impl TransformerWeights {
@@ -78,6 +88,9 @@ impl TransformerWeights {
             wpe,
             lm_head,
             layers,
+            mtp_activation_proj: None,
+            mtp_cluster_classifier: None,
+            mtp_cluster_map: None,
         }
     }
 }
@@ -152,6 +165,48 @@ impl MultiLayerKVCache {
     }
 }
 
+/// Preload drafter's KV cache with target's pre-computed key/value pairs.
+///
+/// Copies target's KV for positions [0..pos) into drafter's cache.
+/// This enables cross-attention: the drafter attends to the target's past KV
+/// instead of computing its own from scratch.
+///
+/// Only active when `target_kv_dim == draft_kv_dim` (dimensions must match).
+/// When dimensions don't match, silently returns (drafter computes its own KV).
+///
+/// Hybrid behavior after preload:
+/// - Past positions [0..pos): read from preloaded target KV
+/// - New positions [pos..]: computed by drafter during forward pass
+pub fn preload_kv_cache(
+    draft_cache: &mut MultiLayerKVCache,
+    target_cache: &MultiLayerKVCache,
+    pos: usize,
+    target_config: &Config,
+    draft_config: &Config,
+) {
+    let target_kv_dim = types::kv_dim(target_config);
+    let draft_kv_dim = types::kv_dim(draft_config);
+
+    // Dimension guard: can only share when kv_dim matches
+    if target_kv_dim != draft_kv_dim {
+        return;
+    }
+
+    // Layer guard: can only share layers that exist in both caches
+    let min_layers = draft_cache.layers.len().min(target_cache.layers.len());
+
+    // Copy KV for positions [0..pos) for each shared layer
+    let copy_len = pos * target_kv_dim;
+    if copy_len > 0 {
+        for layer_idx in 0..min_layers {
+            let draft_layer = &mut draft_cache.layers[layer_idx];
+            let target_layer = &target_cache.layers[layer_idx];
+            draft_layer.key[..copy_len].copy_from_slice(&target_layer.key[..copy_len]);
+            draft_layer.value[..copy_len].copy_from_slice(&target_layer.value[..copy_len]);
+        }
+    }
+}
+
 /// Cheap snapshot of KV cache state up to position `pos`.
 /// Only copies filled slots [0..pos) per layer, not the entire block_size buffer.
 pub struct KVSnapshot {
@@ -191,6 +246,8 @@ pub struct ForwardContext {
     paged_flat_value: Vec<f32>, // [block_size * kv_dim]
     // Raven: pre-allocated query buffer for per-head slot attention
     raven_query_buf: Vec<f32>, // [kv_dim]
+    // MTP Drafter: pre-allocated projection buffer [n_embd] for target activation conditioning (Plan 055)
+    pub mtp_context_buf: Vec<f32>,
 }
 
 impl ForwardContext {
@@ -217,6 +274,7 @@ impl ForwardContext {
             paged_flat_key: vec![0.0; block_kv],
             paged_flat_value: vec![0.0; block_kv],
             raven_query_buf: vec![0.0; kvd],
+            mtp_context_buf: vec![0.0; config.n_embd],
         }
     }
 }
@@ -354,6 +412,102 @@ pub fn forward_with_domain_latent<'a>(
     domain_latent: Option<&crate::types::DomainLatent>,
 ) -> &'a mut [f32] {
     forward_base(ctx, weights, cache, token, pos, config, lora, domain_latent)
+}
+
+/// Standard full-vocab LM head (current behavior).
+#[inline(always)]
+fn standard_lm_head(
+    logits: &mut [f32],
+    hidden: &[f32],
+    lm_head: &[f32],
+    vocab_size: usize,
+    n_embd: usize,
+) {
+    matmul(logits, lm_head, hidden, vocab_size, n_embd);
+}
+
+/// Two-stage clustered LM head for large vocabularies.
+///
+/// Stage 1: predict cluster ID via classifier matmul + argmax.
+/// Stage 2: compute exact logits only for tokens in the winning cluster.
+///
+/// Only called when `vocab_size >= mtp_cluster_vocab_threshold` AND
+/// cluster weights are available.
+#[inline(always)]
+fn clustered_lm_head(
+    logits: &mut [f32],
+    hidden: &[f32],
+    lm_head: &[f32],
+    cluster_classifier: &[f32],
+    cluster_map: &[Vec<usize>],
+    vocab_size: usize,
+    n_embd: usize,
+) {
+    let num_clusters = cluster_map.len();
+
+    // Stage 1: predict cluster (argmax over classifier dot products)
+    let mut best_cluster = 0usize;
+    let mut best_score = f32::NEG_INFINITY;
+    for c in 0..num_clusters {
+        let row_off = c * n_embd;
+        let mut dot = 0.0f32;
+        for d in 0..n_embd {
+            unsafe {
+                dot += *cluster_classifier.get_unchecked(row_off + d) * *hidden.get_unchecked(d);
+            }
+        }
+        if dot > best_score {
+            best_score = dot;
+            best_cluster = c;
+        }
+    }
+
+    // Stage 2: fill all logits with -inf, then compute exact for winning cluster
+    logits.fill(f32::NEG_INFINITY);
+
+    let cluster_tokens = &cluster_map[best_cluster];
+    for &token_idx in cluster_tokens {
+        if token_idx < vocab_size {
+            let row_off = token_idx * n_embd;
+            let mut dot = 0.0f32;
+            for d in 0..n_embd {
+                unsafe {
+                    dot += *lm_head.get_unchecked(row_off + d) * *hidden.get_unchecked(d);
+                }
+            }
+            unsafe {
+                *logits.get_unchecked_mut(token_idx) = dot;
+            }
+        }
+    }
+}
+
+/// Create a round-robin cluster assignment for tokens.
+///
+/// Token `i` is assigned to cluster `i / cluster_size`.
+/// Deterministic, no training needed — simple baseline.
+pub fn cluster_map_round_robin(vocab_size: usize, cluster_size: usize) -> Vec<Vec<usize>> {
+    let num_clusters = vocab_size.div_ceil(cluster_size);
+    let mut map: Vec<Vec<usize>> = vec![Vec::new(); num_clusters];
+    for token_id in 0..vocab_size {
+        let cluster_id = token_id / cluster_size;
+        map[cluster_id].push(token_id);
+    }
+    map
+}
+
+/// Create cluster assignment from embedding similarity (K-means style).
+///
+/// Groups tokens with similar embeddings together for efficient LM head computation.
+/// Current implementation: round-robin baseline.
+/// TODO: implement actual K-means using embedding cosine similarity (Plan 056: riir-burner).
+pub fn cluster_map_from_embeddings(
+    _wte: &[f32],
+    vocab_size: usize,
+    _n_embd: usize,
+    cluster_size: usize,
+) -> Vec<Vec<usize>> {
+    cluster_map_round_robin(vocab_size, cluster_size)
 }
 
 /// Internal forward with optional LoRA and domain latent (writer LoRA during decode).
@@ -528,16 +682,92 @@ fn forward_base<'a>(
     // Snapshot hidden state (for Plan 009 compatibility)
     ctx.hidden_state[..n].copy_from_slice(&ctx.x[..n]);
 
-    // LM Head
-    matmul(
-        &mut ctx.logits,
-        &weights.lm_head,
-        &ctx.x,
-        config.vocab_size,
-        n,
-    );
+    // LM Head: clustered when vocab >= threshold AND cluster weights present
+    if config.vocab_size >= config.mtp_cluster_vocab_threshold
+        && let Some(classifier) = weights.mtp_cluster_classifier.as_ref()
+        && let Some(cluster_map) = weights.mtp_cluster_map.as_ref()
+    {
+        clustered_lm_head(
+            &mut ctx.logits,
+            &ctx.x,
+            &weights.lm_head,
+            classifier,
+            cluster_map,
+            config.vocab_size,
+            n,
+        );
+    } else {
+        standard_lm_head(
+            &mut ctx.logits,
+            &ctx.x,
+            &weights.lm_head,
+            config.vocab_size,
+            n,
+        );
+    }
 
     &mut ctx.logits
+}
+
+// ---------------------------------------------------------------------------
+// MTP Target Activation Projection (Plan 055)
+// ---------------------------------------------------------------------------
+
+/// Project target model's hidden state into drafter dimension space.
+///
+/// Two strategies (threshold-gated):
+/// - **Truncate/Pad** (no weights): if `mtp_activation_proj` is `None`, truncate target
+///   hidden state to drafter's n_embd (or zero-pad if drafter is larger).
+///   Zero-cost, no training needed.
+/// - **Learned projection** (with weights): matmul the target hidden state by
+///   `mtp_activation_proj` to produce a drafter-sized conditioning vector.
+///
+/// The result is written into `out_buf` (pre-allocated `[drafter_n_embd]`).
+/// Does nothing if `target_n_embd < config.mtp_activation_threshold`.
+#[allow(clippy::too_many_arguments)]
+pub fn project_target_activation(
+    out_buf: &mut [f32],         // [drafter_n_embd] output buffer
+    target_hidden: &[f32],       // [target_n_embd] from target's forward pass
+    mtp_proj: Option<&Vec<f32>>, // optional [drafter_n_embd, target_n_embd] weights
+    target_n_embd: usize,
+    drafter_n_embd: usize,
+    activation_threshold: usize,
+) {
+    // Gate: skip if target is too small for activation conditioning
+    if target_n_embd < activation_threshold {
+        return;
+    }
+
+    match mtp_proj {
+        // Strategy 1: Learned projection — full matmul
+        Some(proj_weights) => {
+            // proj_weights layout: [drafter_n_embd * target_n_embd]
+            // out[i] = sum_j(proj_weights[i * target_n_embd + j] * target_hidden[j])
+            let out_len = out_buf.len().min(drafter_n_embd);
+            for i in 0..out_len {
+                let row_off = i * target_n_embd;
+                let mut sum = 0.0f32;
+                for j in 0..target_n_embd {
+                    unsafe {
+                        sum += *proj_weights.get_unchecked(row_off + j)
+                            * *target_hidden.get_unchecked(j);
+                    }
+                }
+                unsafe {
+                    *out_buf.get_unchecked_mut(i) = sum;
+                }
+            }
+        }
+        // Strategy 2: Truncate/Pad — zero-cost fallback
+        None => {
+            let copy_len = drafter_n_embd.min(target_n_embd);
+            out_buf[..copy_len].copy_from_slice(&target_hidden[..copy_len]);
+            // Zero-pad if drafter dimension is larger (rest should already be zeroed)
+            if drafter_n_embd > target_n_embd {
+                out_buf[target_n_embd..drafter_n_embd].fill(0.0);
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -3699,5 +3929,405 @@ mod tests {
                 "zero domain_latent + lora should match lora-only, diff at {i}: {diff}"
             );
         }
+    }
+
+    // ── Shared KV Cache (Phase 3, Plan 055) ─────────────────────
+
+    #[test]
+    fn test_preload_kv_cache_dimension_mismatch() {
+        // bpe: n_kv_head=4, head_dim=8 → kv_dim=32
+        // bpe_draft: n_kv_head=2, head_dim=8 → kv_dim=16
+        let target_config = Config::bpe();
+        let draft_config = Config::bpe_draft();
+
+        let target_cache = MultiLayerKVCache::new(&target_config);
+        let mut draft_cache = MultiLayerKVCache::new(&draft_config);
+
+        // Preload should silently skip (kv_dim mismatch)
+        preload_kv_cache(
+            &mut draft_cache,
+            &target_cache,
+            1,
+            &target_config,
+            &draft_config,
+        );
+
+        // Draft cache should remain all zeros
+        for layer in &draft_cache.layers {
+            assert!(
+                layer.key.iter().all(|&v| v == 0.0),
+                "draft cache key should remain zero on dim mismatch"
+            );
+            assert!(
+                layer.value.iter().all(|&v| v == 0.0),
+                "draft cache value should remain zero on dim mismatch"
+            );
+        }
+    }
+
+    #[test]
+    fn test_preload_kv_cache_matching_dims() {
+        // Same config for both → kv_dim matches
+        let config = Config::small_target();
+        let kvd = crate::types::kv_dim(&config);
+
+        let mut rng = Rng::new(42);
+        let weights = TransformerWeights::new(&config, &mut rng);
+
+        // Populate target cache at pos 0 and pos 1
+        let mut target_cache = MultiLayerKVCache::new(&config);
+        let mut target_ctx = ForwardContext::new(&config);
+        let _ = forward(&mut target_ctx, &weights, &mut target_cache, 0, 0, &config);
+        let _ = forward(&mut target_ctx, &weights, &mut target_cache, 1, 1, &config);
+
+        // Create empty draft cache
+        let mut draft_cache = MultiLayerKVCache::new(&config);
+
+        // Preload positions [0..2) from target
+        preload_kv_cache(&mut draft_cache, &target_cache, 2, &config, &config);
+
+        // Verify draft cache has target's KV for positions 0 and 1
+        for (layer_idx, draft_layer) in draft_cache.layers.iter().enumerate() {
+            let target_layer = &target_cache.layers[layer_idx];
+            let copy_len = 2 * kvd;
+            for i in 0..copy_len {
+                assert_eq!(
+                    draft_layer.key[i], target_layer.key[i],
+                    "draft key mismatch at layer {layer_idx}, idx {i}"
+                );
+                assert_eq!(
+                    draft_layer.value[i], target_layer.value[i],
+                    "draft value mismatch at layer {layer_idx}, idx {i}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_preload_kv_cache_zero_pos() {
+        let config = Config::small_target();
+        let mut rng = Rng::new(42);
+        let weights = TransformerWeights::new(&config, &mut rng);
+
+        let mut target_cache = MultiLayerKVCache::new(&config);
+        let mut target_ctx = ForwardContext::new(&config);
+        let _ = forward(&mut target_ctx, &weights, &mut target_cache, 0, 0, &config);
+
+        let mut draft_cache = MultiLayerKVCache::new(&config);
+
+        // Preload with pos=0 copies nothing (no positions to share)
+        preload_kv_cache(&mut draft_cache, &target_cache, 0, &config, &config);
+
+        // Draft cache should remain all zeros
+        for layer in &draft_cache.layers {
+            assert!(
+                layer.key.iter().all(|&v| v == 0.0),
+                "draft cache should remain zero with pos=0"
+            );
+        }
+    }
+
+    #[test]
+    fn test_preload_kv_cache_fewer_draft_layers() {
+        // Target: 2 layers, Draft: 1 layer — only layer 0 shared
+        let target_config = Config {
+            n_layer: 2,
+            ..Config::small_target()
+        };
+        let draft_config = Config {
+            n_layer: 1,
+            ..Config::small_target()
+        };
+
+        let kvd = crate::types::kv_dim(&target_config);
+        let mut rng = Rng::new(42);
+        let target_weights = TransformerWeights::new(&target_config, &mut rng);
+
+        let mut target_cache = MultiLayerKVCache::new(&target_config);
+        let mut target_ctx = ForwardContext::new(&target_config);
+        let _ = forward(
+            &mut target_ctx,
+            &target_weights,
+            &mut target_cache,
+            0,
+            0,
+            &target_config,
+        );
+
+        let mut draft_cache = MultiLayerKVCache::new(&draft_config);
+
+        preload_kv_cache(
+            &mut draft_cache,
+            &target_cache,
+            1,
+            &target_config,
+            &draft_config,
+        );
+
+        // Draft has 1 layer, only layer 0 should be copied
+        assert_eq!(draft_cache.layers.len(), 1);
+        let draft_layer = &draft_cache.layers[0];
+        let target_layer = &target_cache.layers[0];
+        for i in 0..kvd {
+            assert_eq!(
+                draft_layer.key[i], target_layer.key[i],
+                "layer 0 key should be copied"
+            );
+            assert_eq!(
+                draft_layer.value[i], target_layer.value[i],
+                "layer 0 value should be copied"
+            );
+        }
+    }
+
+    /// T14: Verify hybrid behavior — drafter forwards with preloaded target KV.
+    /// Past positions [0..pos) read from preloaded target KV,
+    /// new position [pos] computed by drafter and written to its own cache.
+    #[test]
+    fn test_preload_kv_cache_hybrid_forward() {
+        let config = Config::small_target();
+        let kvd = crate::types::kv_dim(&config);
+        let mut rng = Rng::new(42);
+        let weights = TransformerWeights::new(&config, &mut rng);
+
+        // Build target KV cache for positions 0 and 1
+        let mut target_cache = MultiLayerKVCache::new(&config);
+        let mut target_ctx = ForwardContext::new(&config);
+        let _ = forward(&mut target_ctx, &weights, &mut target_cache, 0, 0, &config);
+        let _ = forward(&mut target_ctx, &weights, &mut target_cache, 1, 1, &config);
+
+        // Preload target KV [0..2) into draft cache
+        let mut draft_cache = MultiLayerKVCache::new(&config);
+        preload_kv_cache(&mut draft_cache, &target_cache, 2, &config, &config);
+
+        // Drafter forwards at pos=2 with preloaded KV — should produce valid logits
+        let mut draft_ctx = ForwardContext::new(&config);
+        let logits = forward(&mut draft_ctx, &weights, &mut draft_cache, 2, 2, &config);
+
+        // Logits must be finite (no NaN/Inf from garbage KV)
+        for (i, &v) in logits.iter().enumerate() {
+            assert!(v.is_finite(), "logit[{i}] not finite: {v}");
+        }
+
+        // Draft cache now has: [0..2) from target, [2] from drafter
+        for layer in &draft_cache.layers {
+            // Position 2 should have non-zero KV (written by drafter)
+            let pos2_off = 2 * kvd;
+            let has_nonzero = layer.key[pos2_off..pos2_off + kvd]
+                .iter()
+                .any(|&v| v != 0.0);
+            assert!(has_nonzero, "drafter should have written KV at pos 2");
+        }
+    }
+
+    // --- T15–T19: Clustered LM Head Tests ---
+
+    #[test]
+    fn test_cluster_map_round_robin() {
+        // 10 tokens, cluster_size=3 → 4 clusters: [0,1,2], [3,4,5], [6,7,8], [9]
+        let map = cluster_map_round_robin(10, 3);
+        assert_eq!(map.len(), 4);
+        assert_eq!(map[0], vec![0, 1, 2]);
+        assert_eq!(map[1], vec![3, 4, 5]);
+        assert_eq!(map[2], vec![6, 7, 8]);
+        assert_eq!(map[3], vec![9]);
+    }
+
+    #[test]
+    fn test_cluster_map_round_robin_exact_division() {
+        // 8 tokens, cluster_size=4 → 2 clusters
+        let map = cluster_map_round_robin(8, 4);
+        assert_eq!(map.len(), 2);
+        assert_eq!(map[0], vec![0, 1, 2, 3]);
+        assert_eq!(map[1], vec![4, 5, 6, 7]);
+    }
+
+    #[test]
+    fn test_standard_lm_head_matches_matmul() {
+        let config = Config::micro();
+        let mut rng = Rng::new(42);
+        let weights = TransformerWeights::new(&config, &mut rng);
+        let n = config.n_embd;
+
+        let mut logits_matmul = vec![0.0f32; config.vocab_size];
+        let mut logits_standard = vec![0.0f32; config.vocab_size];
+        let hidden: Vec<f32> = (0..n).map(|i| (i as f32 + 1.0) * 0.1).collect();
+
+        matmul(
+            &mut logits_matmul,
+            &weights.lm_head,
+            &hidden,
+            config.vocab_size,
+            n,
+        );
+        standard_lm_head(
+            &mut logits_standard,
+            &hidden,
+            &weights.lm_head,
+            config.vocab_size,
+            n,
+        );
+
+        for i in 0..config.vocab_size {
+            let diff = (logits_matmul[i] - logits_standard[i]).abs();
+            assert!(diff < 1e-6, "standard_lm_head differs at {i}: {diff}");
+        }
+    }
+
+    #[test]
+    fn test_clustered_lm_head_only_cluster_tokens_finite() {
+        let config = Config::micro();
+        let mut rng = Rng::new(42);
+        let mut weights = TransformerWeights::new(&config, &mut rng);
+        let n = config.n_embd;
+        let cluster_size = 16;
+
+        let cluster_map = cluster_map_round_robin(config.vocab_size, cluster_size);
+        let num_clusters = cluster_map.len();
+        let classifier: Vec<f32> = (0..num_clusters * n).map(|_| rng.normal()).collect();
+
+        weights.mtp_cluster_classifier = Some(classifier);
+        weights.mtp_cluster_map = Some(cluster_map.clone());
+
+        let mut logits = vec![0.0f32; config.vocab_size];
+        let hidden: Vec<f32> = (0..n).map(|i| (i as f32 + 1.0) * 0.1).collect();
+
+        clustered_lm_head(
+            &mut logits,
+            &hidden,
+            &weights.lm_head,
+            weights.mtp_cluster_classifier.as_ref().unwrap(),
+            weights.mtp_cluster_map.as_ref().unwrap(),
+            config.vocab_size,
+            n,
+        );
+
+        // Find winning cluster (the one with finite logits)
+        let winning = cluster_map
+            .iter()
+            .find(|tokens| tokens.iter().all(|&t| logits[t].is_finite()))
+            .expect("one cluster should have finite logits");
+
+        // Cluster tokens: finite. Others: -inf
+        let cluster_set: std::collections::HashSet<usize> = winning.iter().copied().collect();
+        for i in 0..config.vocab_size {
+            if cluster_set.contains(&i) {
+                assert!(
+                    logits[i].is_finite(),
+                    "token {i} in cluster should be finite"
+                );
+            } else {
+                assert_eq!(logits[i], f32::NEG_INFINITY, "token {i} should be -inf");
+            }
+        }
+    }
+
+    #[test]
+    fn test_clustered_lm_head_logits_match_standard() {
+        let config = Config::micro();
+        let mut rng = Rng::new(42);
+        let mut weights = TransformerWeights::new(&config, &mut rng);
+        let n = config.n_embd;
+        let cluster_size = 16;
+
+        let cluster_map = cluster_map_round_robin(config.vocab_size, cluster_size);
+        let num_clusters = cluster_map.len();
+        let classifier: Vec<f32> = (0..num_clusters * n).map(|_| rng.normal()).collect();
+
+        weights.mtp_cluster_classifier = Some(classifier);
+        weights.mtp_cluster_map = Some(cluster_map.clone());
+
+        let hidden: Vec<f32> = (0..n).map(|i| (i as f32 + 1.0) * 0.1).collect();
+
+        // Standard logits
+        let mut logits_std = vec![0.0f32; config.vocab_size];
+        standard_lm_head(
+            &mut logits_std,
+            &hidden,
+            &weights.lm_head,
+            config.vocab_size,
+            n,
+        );
+
+        // Clustered logits
+        let mut logits_clust = vec![0.0f32; config.vocab_size];
+        clustered_lm_head(
+            &mut logits_clust,
+            &hidden,
+            &weights.lm_head,
+            weights.mtp_cluster_classifier.as_ref().unwrap(),
+            weights.mtp_cluster_map.as_ref().unwrap(),
+            config.vocab_size,
+            n,
+        );
+
+        // Find winning cluster
+        let winning = cluster_map
+            .iter()
+            .find(|tokens| tokens.iter().all(|&t| logits_clust[t].is_finite()))
+            .expect("one cluster should win");
+
+        // Clustered logits for winning tokens should match standard exactly
+        for &t in winning {
+            let diff = (logits_clust[t] - logits_std[t]).abs();
+            assert!(diff < 1e-5, "logit[{t}] mismatch: diff={diff}");
+        }
+    }
+
+    #[test]
+    fn test_forward_base_clustered_dispatch() {
+        // Config::bpe() has vocab=4096, threshold=4096 → 4096 >= 4096 activates
+        let config = Config::bpe();
+        let mut rng = Rng::new(42);
+        let mut weights = TransformerWeights::new(&config, &mut rng);
+
+        let cluster_map = cluster_map_round_robin(config.vocab_size, config.mtp_cluster_size);
+        let num_clusters = cluster_map.len();
+        let classifier: Vec<f32> = (0..num_clusters * config.n_embd)
+            .map(|_| rng.normal())
+            .collect();
+        weights.mtp_cluster_classifier = Some(classifier);
+        weights.mtp_cluster_map = Some(cluster_map);
+
+        let mut ctx = ForwardContext::new(&config);
+        let mut cache = MultiLayerKVCache::new(&config);
+
+        let logits = forward(&mut ctx, &weights, &mut cache, 0, 0, &config);
+
+        // Clustered path active: some -inf, some finite
+        let inf_count = logits.iter().filter(|&&v| v == f32::NEG_INFINITY).count();
+        let finite_count = logits.iter().filter(|&&v| v.is_finite()).count();
+        assert!(inf_count > 0, "should have -inf logits (clustered path)");
+        assert!(
+            finite_count > 0,
+            "should have finite logits (cluster tokens)"
+        );
+        assert_eq!(inf_count + finite_count, config.vocab_size);
+    }
+
+    #[test]
+    fn test_forward_base_standard_fallback_no_weights() {
+        // Config::micro() has threshold=usize::MAX → never activates clustered path
+        let config = Config::micro();
+        let mut rng = Rng::new(42);
+        let weights = TransformerWeights::new(&config, &mut rng);
+
+        let mut ctx = ForwardContext::new(&config);
+        let mut cache = MultiLayerKVCache::new(&config);
+
+        let logits = forward(&mut ctx, &weights, &mut cache, 0, 0, &config);
+
+        // Standard path: all finite, no -inf
+        for (i, &v) in logits.iter().enumerate() {
+            assert!(v.is_finite(), "logit[{i}] should be finite: {v}");
+        }
+    }
+
+    #[test]
+    fn test_cluster_map_from_embeddings_fallback() {
+        let wte = vec![0.0f32; 100 * 32];
+        let map = cluster_map_from_embeddings(&wte, 100, 32, 25);
+        let expected = cluster_map_round_robin(100, 25);
+        assert_eq!(map, expected);
     }
 }

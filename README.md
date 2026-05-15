@@ -199,6 +199,20 @@ Composable with TurboQuant: TQ compresses the *precision* dimension (fewer bits)
 
 📁 `src/speculative/prefill.rs` — `block_select`, `block_select_grid`, `compress_prompt_blocks`, `BlockAttentionScorer`
 
+### Gemma 4 MTP Drafter (Plan 055)
+
+Threshold-gated Multi-Token Prediction inspired by Gemma 4's architecture:
+
+| Feature | Threshold | When Active | Gain |
+|---------|-----------|-------------|------|
+| Target Activations | `mtp_activation_threshold` | `n_embd >= threshold` | Richer drafter context |
+| Shared KV Cache | `mtp_shared_kv_prompt_threshold` | `pos > threshold` | Avoids re-computing past KV |
+| Clustered LM Head | `mtp_cluster_vocab_threshold` | `vocab_size >= threshold` + weights present | Reduces vocab matmul cost |
+
+Small configs (`micro`, `game`) pay **zero cost** — all thresholds are `usize::MAX`.
+
+📖 See [`.docs/055_mtp_threshold_guide.md`](.docs/055_mtp_threshold_guide.md).
+
 ## 🎰 Multi-Armed Bandit
 
 `ScreeningPruner::relevance()` IS a reward signal. DDTree's best-first search IS exploration. The bandit adds **policy update across episodes**.

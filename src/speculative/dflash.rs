@@ -56,8 +56,10 @@ pub fn dflash_predict_ar_with(
     token: usize,
     pos: usize,
     rng: &mut Rng,
+    mtp_context: Option<&[f32]>,
 ) -> usize {
-    sctx.cache.reset();
+    // NOTE: Caller is responsible for resetting sctx before calling this function.
+    // This allows KV cache preloading (Phase 3, Plan 055) between reset and AR loop.
     let max_steps = draft_config
         .draft_lookahead
         .min(draft_config.block_size.saturating_sub(pos));
@@ -66,7 +68,7 @@ pub fn dflash_predict_ar_with(
 
     let mut cur_token = token;
     for step in 0..max_steps {
-        let logits = forward(
+        let _logits = forward(
             &mut sctx.ctx,
             draft_weights,
             &mut sctx.cache,
@@ -74,7 +76,29 @@ pub fn dflash_predict_ar_with(
             pos + step,
             draft_config,
         );
-        sctx.probs_buf.copy_from_slice(logits);
+
+        // MTP conditioning: inject target activations into drafter's hidden state
+        // on the first step, then re-compute logits from the conditioned state.
+        if step == 0
+            && let Some(mtp_ctx) = mtp_context
+        {
+            let n = draft_config.n_embd.min(mtp_ctx.len());
+            for i in 0..n {
+                unsafe {
+                    *sctx.ctx.hidden_state.get_unchecked_mut(i) += *mtp_ctx.get_unchecked(i);
+                }
+            }
+            // Re-compute logits from conditioned hidden state
+            crate::types::matmul(
+                &mut sctx.ctx.logits,
+                &draft_weights.lm_head,
+                &sctx.ctx.hidden_state,
+                draft_config.vocab_size,
+                draft_config.n_embd,
+            );
+        }
+
+        sctx.probs_buf.copy_from_slice(&sctx.ctx.logits);
         softmax_scaled(&mut sctx.probs_buf, 1.0 / temperature);
 
         let next_token = sample_from_distribution(&sctx.probs_buf, rng);
@@ -222,7 +246,16 @@ pub fn dflash_predict_ar(
     rng: &mut Rng,
 ) -> DraftResult {
     let mut sctx = SpeculativeContext::new(draft_config);
-    let steps = dflash_predict_ar_with(&mut sctx, draft_weights, draft_config, token, pos, rng);
+    sctx.cache.reset();
+    let steps = dflash_predict_ar_with(
+        &mut sctx,
+        draft_weights,
+        draft_config,
+        token,
+        pos,
+        rng,
+        None,
+    );
     let vocab_size = draft_config.vocab_size;
     DraftResult {
         marginals: (0..steps)
@@ -486,7 +519,9 @@ mod tests {
     fn test_dflash_predict_ar_with_matches_original() {
         let (weights, config) = make_draft();
         let mut sctx = SpeculativeContext::new(&config);
-        let steps = dflash_predict_ar_with(&mut sctx, &weights, &config, 0, 0, &mut Rng::new(42));
+        sctx.cache.reset();
+        let steps =
+            dflash_predict_ar_with(&mut sctx, &weights, &config, 0, 0, &mut Rng::new(42), None);
         let vocab_size = config.vocab_size;
 
         assert_eq!(steps, config.draft_lookahead);

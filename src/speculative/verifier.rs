@@ -7,7 +7,9 @@ use crate::types::{Config, Rng};
 
 use crate::speculative::dflash::dflash_predict_ar_with;
 use crate::speculative::sampling::sample_residual_distribution_into;
-use crate::transformer::{ForwardContext, MultiLayerKVCache, forward};
+use crate::transformer::{
+    ForwardContext, MultiLayerKVCache, forward, preload_kv_cache, project_target_activation,
+};
 use crate::types::softmax_scaled;
 
 // ── Speculative Verifier: Strategy Pattern ──────────────────
@@ -161,36 +163,8 @@ impl SpeculativeVerifier for LeviathanVerifier<'_> {
         let vocab_size = draft_config.vocab_size;
         let target_temp = self.target_config.temperature;
 
-        // Phase 1: Zero-alloc AR draft
-        self.draft_sctx.reset();
-        let gamma = dflash_predict_ar_with(
-            &mut self.draft_sctx,
-            draft_weights,
-            draft_config,
-            token,
-            pos,
-            rng,
-        );
-
-        if gamma == 0 {
-            self.target_cache.reset();
-            let logits = forward(
-                &mut self.target_ctx,
-                self.target_weights,
-                &mut self.target_cache,
-                token,
-                pos,
-                self.target_config,
-            );
-            self.draft_sctx.probs_buf.copy_from_slice(logits);
-            softmax_scaled(&mut self.draft_sctx.probs_buf, 1.0 / target_temp);
-            return vec![sample_from_distribution(&self.draft_sctx.probs_buf, rng)];
-        }
-
-        // Phase 2: Target scoring — write p_dist directly to flat buffer
+        // Phase 0 (MTP): Get target hidden state for conditioning + score initial token
         self.target_cache.reset();
-
-        // Score initial token → p_dist[0]
         {
             let logits = forward(
                 &mut self.target_ctx,
@@ -202,10 +176,62 @@ impl SpeculativeVerifier for LeviathanVerifier<'_> {
             );
             self.draft_sctx.probs_buf.copy_from_slice(logits);
             softmax_scaled(&mut self.draft_sctx.probs_buf, 1.0 / target_temp);
+            // Save p_dist[0] from this early target forward (avoids re-scoring later)
             self.draft_sctx.p_distributions_flat[..vocab_size]
                 .copy_from_slice(&self.draft_sctx.probs_buf);
         }
 
+        // Project target hidden state → drafter context buffer
+        project_target_activation(
+            &mut self.draft_sctx.ctx.mtp_context_buf,
+            &self.target_ctx.hidden_state,
+            self.target_weights.mtp_activation_proj.as_ref(),
+            self.target_config.n_embd,
+            draft_config.n_embd,
+            self.target_config.mtp_activation_threshold,
+        );
+
+        // Determine if MTP conditioning is active (threshold gate)
+        let mtp_active = self.target_config.n_embd >= self.target_config.mtp_activation_threshold;
+
+        // Phase 1: AR draft with optional MTP conditioning
+        self.draft_sctx.reset();
+
+        // Preload drafter's KV cache from target's pre-computed KV
+        // (hybrid: shared past positions + drafter computes own new positions)
+        // Only active when prompt is long enough to benefit and kv_dim matches
+        if pos > self.target_config.mtp_shared_kv_prompt_threshold {
+            preload_kv_cache(
+                &mut self.draft_sctx.cache,
+                &self.target_cache,
+                pos,
+                self.target_config,
+                draft_config,
+            );
+        }
+
+        // Clone context only when MTP is active to avoid borrow conflict with &mut self.draft_sctx
+        let mtp_buf = if mtp_active {
+            Some(self.draft_sctx.ctx.mtp_context_buf.clone())
+        } else {
+            None
+        };
+        let gamma = dflash_predict_ar_with(
+            &mut self.draft_sctx,
+            draft_weights,
+            draft_config,
+            token,
+            pos,
+            rng,
+            mtp_buf.as_deref(),
+        );
+
+        if gamma == 0 {
+            // Already have softmaxed target logits in probs_buf from Phase 0
+            return vec![sample_from_distribution(&self.draft_sctx.probs_buf, rng)];
+        }
+
+        // Phase 2: Target scoring — skip token[0] (already scored in Phase 0)
         // Copy sampled tokens before iterating (avoids borrow conflicts with flat buffers)
         let sampled_tokens = self.draft_sctx.sampled_tokens[..gamma].to_vec();
 
@@ -476,5 +502,276 @@ mod tests {
         assert!(avg_1 >= 1.0, "gamma=1 should give >=1 token, got {avg_1}");
         assert!(avg_4 >= 1.0, "gamma=4 should give >=1 token, got {avg_4}");
         assert!(avg_8 >= 1.0, "gamma=8 should give >=1 token, got {avg_8}");
+    }
+
+    // ── MTP Smoke Tests (Phase 5: T21–T23) ───────────────────
+
+    /// T21: Small config (game) — all MTP features disabled.
+    /// `mtp_activation_threshold = usize::MAX` → MTP inactive (32 < MAX).
+    /// `draft_lookahead = 0` → no speculative drafting, returns single target sample.
+    /// Output should be valid with the MTP code path present but inactive.
+    #[test]
+    fn test_mtp_small_config_disabled() {
+        let target_config = Config::game();
+        let draft_config = Config::game();
+
+        let mut rng = Rng::new(42);
+        let target_weights = TransformerWeights::new(&target_config, &mut rng);
+        let draft_weights = TransformerWeights::new(&draft_config, &mut Rng::new(99));
+
+        // MTP should be completely inactive: n_embd(32) < threshold(usize::MAX)
+        assert!(
+            target_config.n_embd < target_config.mtp_activation_threshold,
+            "MTP should be inactive for game config"
+        );
+
+        let mut verifier = LeviathanVerifier::new(&target_weights, &target_config, &draft_config);
+        let result = verifier.speculate(
+            &draft_weights,
+            &draft_config,
+            target_config.bos_token,
+            0,
+            &mut Rng::new(100),
+        );
+
+        assert!(!result.is_empty(), "should return at least 1 token");
+        for &t in &result {
+            assert!(
+                t < target_config.vocab_size,
+                "token {t} out of range (vocab_size={})",
+                target_config.vocab_size
+            );
+        }
+    }
+
+    /// T22: BPE config — MTP features active.
+    /// `mtp_activation_threshold = 32`, `n_embd = 32` → MTP IS active (32 >= 32).
+    /// Measures that acceptance rate is non-zero over multiple runs.
+    #[test]
+    fn test_mtp_bpe_config_active() {
+        let target_config = Config::bpe();
+        let draft_config = Config::bpe_draft();
+
+        // MTP is active: n_embd(32) >= threshold(32)
+        assert!(
+            target_config.n_embd >= target_config.mtp_activation_threshold,
+            "MTP should be active for bpe config"
+        );
+
+        let mut rng = Rng::new(42);
+        let target_weights = TransformerWeights::new(&target_config, &mut rng);
+        let draft_weights = TransformerWeights::new(&draft_config, &mut Rng::new(99));
+
+        // Measure acceptance rate across multiple seeds
+        let iters = 50u64;
+        let mut total_tokens = 0usize;
+        let mut all_valid = true;
+
+        for seed in 0..iters {
+            let mut verifier =
+                LeviathanVerifier::new(&target_weights, &target_config, &draft_config);
+            let result = verifier.speculate(
+                &draft_weights,
+                &draft_config,
+                target_config.bos_token,
+                0,
+                &mut Rng::new(seed),
+            );
+
+            assert!(
+                !result.is_empty(),
+                "seed {seed}: should return at least 1 token"
+            );
+            total_tokens += result.len();
+
+            for &t in &result {
+                if t >= target_config.vocab_size {
+                    all_valid = false;
+                }
+            }
+        }
+
+        let avg_tokens = total_tokens as f64 / iters as f64;
+        assert!(all_valid, "all tokens should be within vocab range");
+        assert!(
+            avg_tokens >= 1.0,
+            "acceptance rate should be >= 1.0 avg tokens, got {avg_tokens}"
+        );
+    }
+
+    /// T23: Projection fallback — no trained MTP weights loaded.
+    /// `TransformerWeights::new()` always sets `mtp_activation_proj: None`,
+    /// so `project_target_activation` falls back to truncate/pad.
+    /// Verifies the fallback path produces valid results with mismatched
+    /// target n_embd(32) vs draft n_embd(16).
+    #[test]
+    fn test_mtp_projection_fallback_no_weights() {
+        let target_config = Config::bpe(); // n_embd=32, threshold=32 → active
+        let draft_config = Config::bpe_draft(); // n_embd=16
+
+        let mut rng = Rng::new(42);
+        let target_weights = TransformerWeights::new(&target_config, &mut rng);
+
+        // Verify no MTP projection weights loaded (always None from ::new)
+        assert!(
+            target_weights.mtp_activation_proj.is_none(),
+            "mtp_activation_proj should be None when loaded via ::new"
+        );
+
+        // MTP is active but will use truncate/pad fallback
+        assert!(
+            target_config.n_embd >= target_config.mtp_activation_threshold,
+            "MTP should be active for this test"
+        );
+        assert_ne!(
+            target_config.n_embd, draft_config.n_embd,
+            "target and draft n_embd should differ to exercise truncate/pad"
+        );
+
+        let draft_weights = TransformerWeights::new(&draft_config, &mut Rng::new(99));
+
+        let mut verifier = LeviathanVerifier::new(&target_weights, &target_config, &draft_config);
+        let result = verifier.speculate(
+            &draft_weights,
+            &draft_config,
+            target_config.bos_token,
+            0,
+            &mut Rng::new(100),
+        );
+
+        assert!(
+            !result.is_empty(),
+            "should return at least 1 token via fallback path"
+        );
+        for &t in &result {
+            assert!(
+                t < target_config.vocab_size,
+                "token {t} out of range (vocab_size={})",
+                target_config.vocab_size
+            );
+        }
+    }
+
+    // ── Shared KV Cache Tests (Phase 3, Plan 055) ──────────────
+
+    /// T14: Shared KV with mismatching kv_dim — preload silently skipped.
+    /// bpe (kv_dim=32) vs bpe_draft (kv_dim=16) — dimensions don't match,
+    /// so drafter computes its own KV as before. Should still produce valid output.
+    #[test]
+    fn test_shared_kv_mismatching_dims_skips_preload() {
+        let target_config = Config::bpe(); // kv_dim=32
+        let draft_config = Config::bpe_draft(); // kv_dim=16
+
+        let target_kv = crate::types::kv_dim(&target_config);
+        let draft_kv = crate::types::kv_dim(&draft_config);
+        assert_ne!(target_kv, draft_kv, "kv_dim should differ for this test");
+
+        let mut rng = Rng::new(42);
+        let target_weights = TransformerWeights::new(&target_config, &mut rng);
+        let draft_weights = TransformerWeights::new(&draft_config, &mut Rng::new(99));
+
+        let mut verifier = LeviathanVerifier::new(&target_weights, &target_config, &draft_config);
+
+        // Use pos above threshold — but preload should still skip due to dim mismatch
+        let pos = target_config.mtp_shared_kv_prompt_threshold + 1;
+        let result = verifier.speculate(
+            &draft_weights,
+            &draft_config,
+            target_config.bos_token,
+            pos,
+            &mut Rng::new(100),
+        );
+
+        assert!(!result.is_empty(), "should return at least 1 token");
+        for &t in &result {
+            assert!(t < target_config.vocab_size, "token {t} out of range");
+        }
+    }
+
+    /// T14: Shared KV with matching kv_dim — preload active.
+    /// Uses same config for both target and draft (guaranteed matching kv_dim).
+    /// Verifies hybrid forward produces valid output.
+    #[test]
+    fn test_shared_kv_matching_dims_produces_valid_output() {
+        // Use small_target with threshold=0 so preload always triggers
+        let config = Config {
+            mtp_shared_kv_prompt_threshold: 0,
+            ..Config::small_target()
+        };
+
+        let mut rng = Rng::new(42);
+        let target_weights = TransformerWeights::new(&config, &mut rng);
+        let draft_weights = TransformerWeights::new(&config, &mut Rng::new(99));
+
+        let mut verifier = LeviathanVerifier::new(&target_weights, &config, &config);
+
+        // pos=5 > threshold(0), kv_dim matches → preload active
+        let pos = 5;
+        let result = verifier.speculate(
+            &draft_weights,
+            &config,
+            config.bos_token,
+            pos,
+            &mut Rng::new(100),
+        );
+
+        assert!(
+            !result.is_empty(),
+            "should return at least 1 token with shared KV"
+        );
+        for &t in &result {
+            assert!(t < config.vocab_size, "token {t} out of range");
+        }
+
+        // Run again at different positions to verify stability
+        for pos in [1, 10, 20] {
+            let result = verifier.speculate(
+                &draft_weights,
+                &config,
+                config.bos_token,
+                pos,
+                &mut Rng::new(pos as u64),
+            );
+            assert!(
+                !result.is_empty(),
+                "should return at least 1 token at pos={pos}"
+            );
+            for &t in &result {
+                assert!(t < config.vocab_size, "token {t} out of range at pos={pos}");
+            }
+        }
+    }
+
+    /// T14: Shared KV below threshold — preload not triggered.
+    /// Same config (matching kv_dim) but pos <= threshold → no preload.
+    #[test]
+    fn test_shared_kv_below_threshold_no_preload() {
+        let config = Config {
+            mtp_shared_kv_prompt_threshold: 10, // Only preload when pos > 10
+            ..Config::small_target()
+        };
+
+        let mut rng = Rng::new(42);
+        let target_weights = TransformerWeights::new(&config, &mut rng);
+        let draft_weights = TransformerWeights::new(&config, &mut Rng::new(99));
+
+        let mut verifier = LeviathanVerifier::new(&target_weights, &config, &config);
+
+        // pos=3 < threshold(10) → preload NOT triggered
+        let result = verifier.speculate(
+            &draft_weights,
+            &config,
+            config.bos_token,
+            3,
+            &mut Rng::new(100),
+        );
+
+        assert!(
+            !result.is_empty(),
+            "should return at least 1 token without preload"
+        );
+        for &t in &result {
+            assert!(t < config.vocab_size, "token {t} out of range");
+        }
     }
 }

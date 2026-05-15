@@ -27,6 +27,11 @@ pub struct Config {
     // Early exit (Plan 026: AutoTTS)
     pub early_exit_patience: usize,
     pub early_exit_gap: f32,
+    // MTP Drafter thresholds (Plan 055: Gemma 4 MTP)
+    pub mtp_activation_threshold: usize,
+    pub mtp_cluster_vocab_threshold: usize,
+    pub mtp_shared_kv_prompt_threshold: usize,
+    pub mtp_cluster_size: usize,
 }
 
 impl Config {
@@ -56,6 +61,10 @@ impl Config {
             sparse_threshold: 0.8,
             early_exit_patience: 0,
             early_exit_gap: 0.0,
+            mtp_activation_threshold: usize::MAX,
+            mtp_cluster_vocab_threshold: usize::MAX,
+            mtp_shared_kv_prompt_threshold: usize::MAX,
+            mtp_cluster_size: 512,
         }
     }
 
@@ -111,6 +120,10 @@ impl Config {
             sparse_threshold: 0.8,
             early_exit_patience: 0,
             early_exit_gap: 0.0,
+            mtp_activation_threshold: usize::MAX,
+            mtp_cluster_vocab_threshold: usize::MAX,
+            mtp_shared_kv_prompt_threshold: usize::MAX,
+            mtp_cluster_size: 512,
         }
     }
 
@@ -139,6 +152,10 @@ impl Config {
             sparse_threshold: 0.8,
             early_exit_patience: 0,
             early_exit_gap: 0.0,
+            mtp_activation_threshold: usize::MAX,
+            mtp_cluster_vocab_threshold: usize::MAX,
+            mtp_shared_kv_prompt_threshold: usize::MAX,
+            mtp_cluster_size: 512,
         }
     }
 
@@ -168,6 +185,10 @@ impl Config {
             sparse_threshold: 0.8,
             early_exit_patience: 0,
             early_exit_gap: 0.0,
+            mtp_activation_threshold: 64,
+            mtp_cluster_vocab_threshold: usize::MAX,
+            mtp_shared_kv_prompt_threshold: 128,
+            mtp_cluster_size: 512,
         }
     }
 
@@ -195,6 +216,10 @@ impl Config {
             sparse_threshold: 0.8,
             early_exit_patience: 0,
             early_exit_gap: 0.0,
+            mtp_activation_threshold: 64,
+            mtp_cluster_vocab_threshold: usize::MAX,
+            mtp_shared_kv_prompt_threshold: 128,
+            mtp_cluster_size: 512,
         }
     }
 
@@ -224,6 +249,10 @@ impl Config {
             sparse_threshold: 0.8,
             early_exit_patience: 0,
             early_exit_gap: 0.0,
+            mtp_activation_threshold: 32,
+            mtp_cluster_vocab_threshold: 4096,
+            mtp_shared_kv_prompt_threshold: 64,
+            mtp_cluster_size: 512,
         }
     }
 
@@ -252,6 +281,10 @@ impl Config {
             sparse_threshold: 0.8,
             early_exit_patience: 0,
             early_exit_gap: 0.0,
+            mtp_activation_threshold: 16,
+            mtp_cluster_vocab_threshold: 4096,
+            mtp_shared_kv_prompt_threshold: 64,
+            mtp_cluster_size: 512,
         }
     }
 
@@ -274,6 +307,10 @@ impl Config {
                 "n_kv_head ({}) * head_dim ({}) must not exceed n_embd ({})",
                 self.n_kv_head, self.head_dim, self.n_embd
             ));
+        }
+        // MTP thresholds must be consistent
+        if self.mtp_cluster_size == 0 {
+            return Err("mtp_cluster_size must be > 0".into());
         }
         Ok(())
     }
@@ -308,6 +345,18 @@ impl Config {
         if let Some(v) = overrides.early_exit_gap {
             c.early_exit_gap = v;
         }
+        if let Some(v) = overrides.mtp_activation_threshold {
+            c.mtp_activation_threshold = v;
+        }
+        if let Some(v) = overrides.mtp_cluster_vocab_threshold {
+            c.mtp_cluster_vocab_threshold = v;
+        }
+        if let Some(v) = overrides.mtp_shared_kv_prompt_threshold {
+            c.mtp_shared_kv_prompt_threshold = v;
+        }
+        if let Some(v) = overrides.mtp_cluster_size {
+            c.mtp_cluster_size = v;
+        }
         c
     }
 }
@@ -330,6 +379,11 @@ pub struct InferenceOverrides {
     pub sparse_threshold: Option<f32>,
     pub early_exit_patience: Option<usize>,
     pub early_exit_gap: Option<f32>,
+    // MTP Drafter overrides (Plan 055: Gemma 4 MTP)
+    pub mtp_activation_threshold: Option<usize>,
+    pub mtp_cluster_vocab_threshold: Option<usize>,
+    pub mtp_shared_kv_prompt_threshold: Option<usize>,
+    pub mtp_cluster_size: Option<usize>,
 }
 
 impl Default for Config {
@@ -1111,6 +1165,10 @@ mod tests_types {
             sparse_threshold: Some(0.5),
             early_exit_patience: Some(10),
             early_exit_gap: Some(3.0),
+            mtp_activation_threshold: None,
+            mtp_cluster_vocab_threshold: None,
+            mtp_shared_kv_prompt_threshold: None,
+            mtp_cluster_size: None,
         };
         let result = config.with_overrides(&overrides);
         assert_eq!(result.tree_budget, 9999);

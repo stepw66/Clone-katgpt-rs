@@ -494,7 +494,7 @@ fn run_speculative_ar_step(
 ) -> usize {
     // 1. Zero-alloc AR draft
     sctx.reset();
-    let steps = dflash_predict_ar_with(sctx, draft_weights, draft_config, 0, 0, rng);
+    let steps = dflash_predict_ar_with(sctx, draft_weights, draft_config, 0, 0, rng, None);
     let vocab_size = draft_config.vocab_size;
 
     // 2. Build tree from marginals
