@@ -112,11 +112,14 @@ Cost: 2 × kv_dim additions. Zero allocations, zero RNG calls.
   - Unit test: `test_domain_latent_zero_embedding_same_logits` — zero embedding is identity
   - Unit test: `test_forward_with_domain_latent_wrapper` — public API works
 
-- [ ] **Task 3: DomainLatent in Config** (`src/types.rs`) — partial
+- [x] **Task 3: DomainLatent in Config** (`src/types.rs`) ✅
   - ✅ `DomainLatent` type exists with `load()`, `save()`, `zeros()`, `from_vec()`
   - ~~`domain_latent_path: Option<PathBuf>` in Config — blocked on runtime config system (not built)~~
   - ~~Lazy loading alongside `LoraAdapter` — blocked on runtime config system (not built)~~
-  - ⏳ Integration test with lora + domain_latent — **unblocked** (both APIs accept both params), needs writing
+  - ✅ Integration test with lora + domain_latent — 3 tests in `transformer.rs`:
+    - `test_domain_latent_with_lora_changes_logits` — lora+dl differs from lora-only
+    - `test_domain_latent_with_lora_prefill_pipeline` — prefill→decode pipeline with lora+dl
+    - `test_domain_latent_zero_with_lora_same_as_lora_only` — zero dl is identity with lora
 
 - [x] **Task 4: Prefill integration** (`src/transformer.rs`) ✅
   - `forward_prefill` gained `#[cfg(feature = "domain_latent")] domain_latent` parameter
@@ -139,12 +142,17 @@ Cost: 2 × kv_dim additions. Zero allocations, zero RNG calls.
   - ~~LoRA training pipeline has matured (riir-burner supports Gemma 2/4 LoRA) — but no domain_latent training path exists yet~~
   - Needs: `DomainLatentAdamWStep` equivalent added to burn pipeline (riir-gpu has it, riir-burner does not)
 
-- [ ] **Task 6: Expert Registry integration** (`riir-ai/crates/riir-router/src/registry.rs`) — **unblocked**
-  - ✅ `ExpertRegistry` is fully implemented at `riir-ai/crates/riir-router/src/registry.rs` (10+ tests)
+- [x] **Task 6: Expert Registry integration** (`riir-ai/crates/riir-router/src/registry.rs`) ✅
+  - ✅ `ExpertRegistry` is fully implemented at `riir-ai/crates/riir-router/src/registry.rs` (12+ tests)
   - ✅ `ExpertBundle` exists at `riir-ai/crates/riir-router/src/types.rs` (has `lora_path`, `pruner`, `inference_budget`)
-  - ⏳ Add `domain_latent_path: Option<PathBuf>` to `DomainConfig`
-  - ⏳ Add `domain_latent: Option<DomainLatent>` to `ExpertBundle`
-  - ⏳ Load in `ExpertRegistry::from_config()`, thread to `forward()` / `forward_prefill()`
+  - ✅ Added `domain_latent_path: Option<String>` to `DomainConfig` (feature-gated behind `domain_latent`)
+  - ✅ Added `domain_latent: Option<DomainLatent>` to `ExpertBundle` (feature-gated)
+  - ✅ Added `resolve_domain_latent()` in `ExpertRegistry` — loads `.dlat` file, graceful degradation on failure
+  - ✅ Threaded through `from_config()` — all bundles get domain_latent loaded at registry build time
+  - ✅ Added `domain_latent` feature to `riir-router/Cargo.toml` (enables `microgpt-rs/domain_latent`)
+  - ✅ 2 tests: `test_domain_latent_none_for_domain_without_path`, `test_domain_latent_missing_file_graceful_degradation`
+  - ✅ All existing tests updated with `#[cfg(feature = "domain_latent")] domain_latent_path: None`
+  - ✅ 35 tests pass with feature, 33 without (2 new tests are feature-gated)
 
 ---
 
@@ -155,13 +163,16 @@ Cost: 2 × kv_dim additions. Zero allocations, zero RNG calls.
 | `src/types.rs` | `DomainLatent` struct, `load()`, `save()`, binary format, 5 tests | ✅ Done |
 | `src/transformer.rs` | `forward_base` + `forward_prefill`: mid-layer injection, 5 tests | ✅ Done |
 | `Cargo.toml` | `domain_latent` feature flag + added to `full` | ✅ Done |
-| `src/router/registry.rs` | `ExpertBundle` includes `DomainLatent` | ⏳ Deferred |
+| `riir-router/src/types.rs` | `DomainConfig.domain_latent_path`, `ExpertBundle.domain_latent` | ✅ Done |
+| `riir-router/src/registry.rs` | `resolve_domain_latent()`, 2 tests | ✅ Done |
+| `riir-router/Cargo.toml` | `domain_latent` feature flag | ✅ Done |
 | `riir-gpu/src/domain_latent.rs` | `GpuDomainLatent`, export, CPU AdamW, 4 tests | ✅ Done |
 | `riir-gpu/src/optimizer.rs` | `step_domain_latent()` method | ✅ Done |
 | `riir-gpu/examples/train_bomber.rs` | Train LoRA + domain latent, export both | ✅ Done |
 | `riir-burner/train_lora.py` | Language model training (future) | ⏳ Deferred |
 
-**Tests:** 260 pass (with `domain_latent`), 255 pass (without). 5 new domain_latent tests.
+**Tests:** 260 pass (microgpt-rs with `domain_latent`), 255 pass (without). 5 domain_latent tests.
+riir-router: 35 pass (with `domain_latent`), 33 pass (without). 2 new domain_latent tests.
 
 ---
 
