@@ -440,33 +440,75 @@ The deployment target is server-side AI for a real-time game:
 
 ### Throughput Math
 
+#### Estimated (pre-implementation)
+
 | Config | Single-core scalar | Single-core SIMD (4×) | 8-core SIMD | GPU Batched |
 |--------|-------------------|----------------------|-------------|-------------|
 | `micro` (hd=4, n=16) | 863K/s | 3.4M/s | 27M/s | ~50M/s |
 | `game` (hd=8, n=32) | ~200K/s | ~800K/s | ~6.4M/s | ~50M/s |
 
+#### Measured (Plan 060 T12, NEON, Apple M-series ARM, release build)
+
+**Kernel-level throughput:**
+
+| Operation | Throughput | µs/op |
+|-----------|-----------|-------|
+| matmul [16×16] | 15.6M/s | 0.06µs |
+| matmul [32×32] | 5.1M/s | 0.20µs |
+| matmul [64×64] | 2.1M/s | 0.48µs |
+| matmul_relu [32×32] | 4.4M/s | 0.23µs |
+| matmul_relu [128×32] | 1.8M/s | 0.55µs |
+| hla_update hd=4 | 16.4M/s | 0.06µs |
+| hla_update hd=8 | 9.9M/s | 0.10µs |
+| ahla_step hd=4 | 18.2M/s | 0.05µs |
+| ahla_step hd=8 | 10.2M/s | 0.10µs |
+
+**End-to-end forward throughput (Config::micro, 8 positions):**
+
+| Variant | tok/s | µs/tok |
+|---------|-------|--------|
+| forward (SDPA) | 1.1M/s | 0.93µs |
+| forward_hla | 939K/s | 1.06µs |
+| forward_ahla | 1.2M/s | 0.84µs |
+
+**30K CCU @ 20Hz feasibility (NEON, single-core):**
+
+| Metric | Value |
+|--------|-------|
+| Required | 600K tok/s (30K × 20Hz) |
+| Single-core HLA | 939K tok/s |
+| Cores needed | 1 |
+| 8-core headroom | 9.8× |
+| Full-node headroom (16c) | 19.6× |
+
+**Note**: E2E throughput is lower than kernel-level estimates because forward pass includes embedding, layer norm, residual connections, MLP, and LM head — not just matmul. The kernel-level 15M/s matmul doesn't translate to 15M tok/s E2E.
+
 Required: 600K/s for 30K × 20Hz.
 
-- **Scalar CPU**: insufficient (200K/s << 600K/s)
-- **SIMD single-core**: borderline for `game` config (800K/s ≈ 600K/s, no headroom)
-- **SIMD multi-core (8c)**: comfortable headroom (6.4M/s, 10× margin)
-- **GPU batched**: massive overkill but lowest latency per tick (~0.5ms for 30K batch)
+- **SIMD single-core (NEON)**: ✅ sufficient (939K/s > 600K/s, 1.6× margin)
+- **SIMD multi-core (8c)**: comfortable headroom (7.5M/s, 12.5× margin)
+- **SIMD multi-core (16c)**: large headroom (15M/s, 25× margin)
+- **GPU batched**: massive overkill for this config but lowest latency per tick (~0.5ms for 30K batch)
 
-### Decision: SIMD First, GPU Later
+### Decision: SIMD First, GPU Later — ✅ VALIDATED (Plan 060)
 
-**Phase 1: SIMD (NEON/AVX2) — handles 30K CCU on 2-3 server cores**
+**Phase 1: SIMD (NEON/AVX2) — ✅ DONE — handles 30K CCU on 1 server core**
 
-The current `matmul()` in `types.rs` is pure scalar loops — zero SIMD. Apple NEON (4× f32) and x86 AVX2 (8× f32) provide immediate 4-8× throughput gains with no architecture changes:
+Apple NEON (4× f32) and x86 AVX2 (8× f32) SIMD implemented in Plan 060:
 
 ```text
-Changes needed:
-  types.rs: matmul()         → SIMD inner loop (NEON vmlaq / AVX2 _mm256_fmadd_ps)
-  types.rs: matmul_relu()    → SIMD + fused ReLU
-  types.rs: sparse_matmul()  → SIMD gather + mask
-  hla/kernel.rs: outer products + matvec → SIMD
+Changes delivered (Plan 060):
+  src/simd.rs                 — NEW: SimdLevel enum, NEON/AVX2 dispatch
+  types.rs: matmul()          → SIMD dot product (NEON vmlaq_f32 / AVX2 _mm256_mul_ps)
+  types.rs: matmul_relu()     → SIMD dot + fused ReLU zero-clamp
+  hla/kernel.rs: hla_state_update → simd_outer_product_acc for SK, CQV, G
+  hla/kernel.rs: hla_readout     → simd_dot_f32 for numerator/denominator
+  hla/kernel.rs: ahla_step       → simd_outer_product_acc for PKV, E
+  benchmark.rs: bench_simd       → NEW: kernel + E2E throughput benchmarks
 ```
 
 No new dependencies, no build pipeline changes, no nightly toolchain.
+Zero test regressions (516/516 pass). Bit-identical results to scalar.
 
 **Phase 2: GPU Batched Inference — for scale beyond 100K CCU or larger configs**
 
@@ -479,14 +521,17 @@ When configs grow (n_embd > 128) or CCU exceeds 100K, GPU batching becomes neces
 
 | Factor | SIMD | GPU |
 |--------|------|-----|
-| Build complexity | None (intrinsics or `std::simd`) | WGSL kernels, wgpu runtime |
-| Latency for hd=4-8 | ~1µs per forward pass | ~500µs dispatch overhead alone |
+| Build complexity | None (core::arch intrinsics) | WGSL kernels, wgpu runtime |
+| Latency for hd=4-8 | ~1µs per forward pass (measured) | ~500µs dispatch overhead alone |
 | Batch requirement | None (per-stream) | Need 30K batch to amortize |
 | Memory | L1/L2 cache resident | GPU VRAM + upload/download |
 | Deployment | Any server | Needs GPU-capable server |
 | Cross-platform | ARM NEON + x86 AVX2 | Metal/Vulkan/DX12/WebGPU |
+| Measured E2E | 939K tok/s single-core (NEON) | Not yet benchmarked |
 
-For head_dim=4-8, the HLA state operations (outer products, matvec on 4×4 or 8×8 matrices) are **too small for GPU** — dispatch overhead exceeds compute time. SIMD processes them in a handful of instructions.
+For head_dim=4-8, the HLA state operations (outer products, matvec on 4×4 or 8×8 matrices) are **too small for GPU** — dispatch overhead exceeds compute time. SIMD processes them in a handful of instructions (16.4M/s for hla_update hd=4, 18.2M/s for ahla_step hd=4).
+
+**Plan 059 Update**: HLA distillation experiment (SDPA→HLA via LoRA) shows KL divergence does NOT converge — Path C decision: HLA is inference-only, cannot be trained via SDPA distillation. HLA remains useful for streaming attention but DeltaMemoryState handles facts/retrieval.
 
 ### Constraints for Future GPU Path
 

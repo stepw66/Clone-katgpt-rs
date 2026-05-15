@@ -729,7 +729,7 @@ mod tests {
         );
 
         // After first update: CQV[0,2] = q[0]*v[2] = 1.0
-        assert_eq!(q_head.cqv[0 * hd + 2], 1.0);
+        assert_eq!(q_head.cqv[2], 1.0);
 
         // Second token: different q, k, v
         let q2 = [0.0, 1.0, 0.0, 0.0];
@@ -753,12 +753,8 @@ mod tests {
         // Wait: k2ᵀ · CQV = Σ_i k2[i]*CQV[i,:], k2=[1,0,0,0] → CQV[0,:] = [0,0,1,0]
         // G += k2 · [0,0,1,0] = [1,0,0,0]ᵀ · [0,0,1,0]
         // G[0,0]=0, G[0,1]=0, G[0,2]=1, G[0,3]=0
-        assert_eq!(
-            q_head.g[0 * hd + 2],
-            1.0,
-            "G should capture k2 · (k2ᵀ·CQV_old)"
-        );
-        assert_eq!(q_head.g[0 * hd + 0], 0.0, "G[0,0] should be 0");
+        assert_eq!(q_head.g[2], 1.0, "G should capture k2 · (k2ᵀ·CQV_old)");
+        assert_eq!(q_head.g[0], 0.0, "G[0,0] should be 0");
     }
 
     /// Verify symmetric readout: o = qᵀ(SK·CQV − G)

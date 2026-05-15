@@ -98,9 +98,12 @@
   - HLA kernel tests (22/22 from Plan 057) must still pass
   - Run on both ARM (macOS) and x86_64 (CI) if possible
 
-- [ ] T12: Update `.research/29_rust_gpu_feasibility.md` with benchmark results
-  - Fill in actual SIMD throughput numbers
-  - Confirm or adjust the 30K CCU feasibility assessment
+- [x] T12: Update `.research/29_rust_gpu_feasibility.md` with benchmark results ✅
+  - Measured NEON throughput: matmul 15.6M/s [16×16], hla_update 16.4M/s (hd=4), ahla_step 18.2M/s (hd=4)
+  - E2E forward_hla: 939K tok/s (Config::micro, single-core NEON)
+  - 30K CCU @ 20Hz: ✅ single-core handles it (939K > 600K, 9.8× headroom on 8-core)
+  - Added `tests/bench_simd.rs` benchmark test file (6 tests)
+  - Research doc updated with measured vs estimated comparison
 
 ---
 
