@@ -1,7 +1,7 @@
 # Plan 049: G-Zero Self-Play Distillation
 
 > **Source:** [G-Zero: Self-Play for Open-Ended Generation from Zero Data](https://arxiv.org/pdf/2605.09959) — Huang et al., 2026
-> **Status:** Planning
+> **Status:** Phase 1 Complete
 > **Depends on:** Plan 048 (Research Audit), Plan 032 (HL Infrastructure), Plan 036 (Review Metrics)
 
 ## Tasks
@@ -12,7 +12,7 @@
 - [x] T2: Implement `DeltaGatedAbsorbCompress` (use δ to gate heuristic promotion)
 - [x] T3: Implement `DeltaBanditPruner` (use δ as reward signal for bandit arms)
 - [x] T4: Implement `TemplateProposer` (rule-based query-hint generation, no neural model)
-- [ ] T5: Benchmark modelless G-Zero vs existing HL AbsorbCompress
+- [x] T5: Benchmark modelless G-Zero vs existing HL AbsorbCompress
 
 ### Phase 2: Model-Based (δ → DPO/GRPO weight updates)
 

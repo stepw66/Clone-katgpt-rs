@@ -488,6 +488,24 @@ Path A → B is **incremental** (same architecture, better signal). Path B → C
 | Qwen3-8B base → G-Zero R2 | 8.47 | 43.81 | **12.40** | **35.43** (+1.48) |
 | Llama-3.1-8B → G-Zero R2 | **27.86** | 59.52 | 0.63 | **43.90** (+1.13) |
 
+### Phase 1 Benchmark Results (Plan 049 T5)
+
+Run: `cargo test --features "g_zero,bomber" --test bench_gzero_modelless -- --nocapture`
+
+| Metric | GZero | HL | Greedy | Random |
+|--------|-------|----|--------|--------|
+| Survival (500r) | 3.8% | 4.6% | 4.4% | 5.6% |
+| Total Score | 10 | 927 | 835 | -359 |
+| δ mean | +1.77 | — | — | — |
+| Templates explored | 8/8 | — | — | — |
+| select_action | 1.8µs | 5.2µs | 10.9µs | 0.4µs |
+
+**Key findings:**
+- δ signal is meaningful: mean +1.77, 100% positive, variance σ²=3.30
+- GZero is 65% faster than HL on `select_action` (no BFS escape in hot path)
+- Template exploration covers all 8 archetypes (>5% weight each)
+- Phase 2 (GRPO + DPO) blocked on `riir-gpu` training infrastructure
+
 📖 See [`.plans/049_g_zero_self_play.md`](.plans/049_g_zero_self_play.md) for full implementation plan, types, hyperparameters, and risk assessment.
 
 ## 🌊 GFlowNet Modelless Distillation (Plan 052)
@@ -673,7 +691,7 @@ cargo clippy --all-targets --all-features --quiet
 | `stepcode` | ⚠️ Plan 054 — NO GAIN proven. Infrastructure only. Off by default, not in `full` |
 | `full` | Enable all features (excludes `stepcode`) |
 
-> **Default features trade-off:** `default = ["sparse_mlp", "domain_latent", "ppot", "bandit"]` targets production accuracy + sparsity. `g_zero` is bench-only (Plan 049: gate stays until T5 proven) — run bench with `--features g_zero` to include heuristic learning. `g_zero` does NOT touch `forward()` hot path (zero hits in `transformer.rs`). Active features are logged in `bench/*_results.csv` and `bench/timeseries.csv` for regression tracking across feature-gate changes.
+> **Default features trade-off:** `default = ["sparse_mlp", "domain_latent", "ppot", "bandit"]` targets production accuracy + sparsity. `g_zero` is bench-only (Plan 049: Phase 1 benchmarked T5 ✅, gate stays for Phase 2 readiness) — run bench with `--features "g_zero,bomber"` to include heuristic learning. `g_zero` does NOT touch `forward()` hot path (zero hits in `transformer.rs`). Active features are logged in `bench/*_results.csv` and `bench/timeseries.csv` for regression tracking across feature-gate changes.
 
 > **Note:** `LeviathanVerifier` is always compiled (no feature gate) — it's part of `verifier.rs` and `benchmark.rs`. `Transformer AR`, `DFlash`, `Raven`, `TurboQuant`, and `PFlash` are also always available — they're zero-cost until their caches are instantiated.
 
