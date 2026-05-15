@@ -1,65 +1,105 @@
 # Plan 059: HLA Distillation Validation — Measurable Binary Test for Latent State RAG
 
 **Branch:** `develop/feature/059_hla_distillation_validation`
-**Depends on:** Plan 057 (HLA Implementation — `forward_hla()`, `forward_ahla()`), Plan 004 (Leviathan distillation pattern)
+**Depends on:** Plan 057 (HLA Implementation), Plan 008 (riir-gpu LoRA Training)
 **Research:** `.research/28_Higher_order_Linear_Attention.md` (Latent State RAG Analysis section)
-**Goal:** Run SDPA→HLA distillation on micro config. Measure KL divergence at the LM head. If it converges to near-zero, HLA is viable for infinite-context inference. If it plateaus, kill the HLA training path and double down on `DeltaMemoryState`.
+**Goal:** Run SDPA→HLA distillation using CPU-only training in riir-gpu. Measure KL divergence at the LM head. If it converges to near-zero, HLA is viable for infinite-context inference. If it plateaus, kill the HLA training path and double down on `DeltaMemoryState`.
 
 ---
 
 ## Tasks
 
-### Phase 1: Distillation Infrastructure
+### Phase 0: Dependency Setup
 
-- [ ] T1: Create `src/hla/distill.rs` — feature-gated behind `hla_attention`
-  - `struct DistillConfig` — learning_rate, temperature τ, n_steps, eval_interval, seq_len
-  - `struct DistillMetrics` — kl_div, cosine_sim, max_logit_diff, token_match_pct per step
-  - `fn kl_divergence(p: &[f32], q: &[f32]) -> f32` — KL(p || q) with numerical stability
-  - `fn cosine_similarity(a: &[f32], b: &[f32]) -> f32`
+- [ ] T0: Wire `riir-gpu` → `microgpt-rs` with HLA feature
+  - Add `hla_attention` feature to `riir-gpu/Cargo.toml`:
+    ```toml
+    [features]
+    default = []
+    feedback-consumer = ["reqwest"]
+    hla_attention = ["microgpt-rs/hla_attention"]
+    ```
+  - Add `mod distill_attention;` to `riir-gpu/src/lib.rs` behind `#[cfg(feature = "hla_attention")]`
+  - Verify: `cargo build -p riir-gpu --features hla_attention` compiles (no new code yet)
 
-- [ ] T2: Implement `distill_step()` — single training step
-  - Forward pass with SDPA teacher (frozen) → teacher_logits
-  - Forward pass with HLA student (trainable) → student_logits
-  - Compute KL(softmax(teacher/τ) || softmax(student/τ))
-  - Backprop through student W_Q, W_K, W_V only (FFN/embeddings frozen)
-  - SGD update with gradient clipping
+- [ ] T1: Expose `distill.rs` helpers as `pub(crate)`
+  - Make these functions `pub(crate)` (currently private, `#[allow(dead_code)]`):
+    - `matvec()` — matrix-vector multiply
+    - `lora_forward()` — LoRA correction `(α/r) · B @ (A @ x)`
+    - `softmax()` — stable softmax
+    - `kl_divergence()` — KL(p‖q)
+  - No behavioral changes — just visibility for `distill_attention.rs`
+  - Run existing `distill.rs` tests to confirm no regressions
 
-- [ ] T3: Implement `distill_loop()` — full training loop
-  - Generates random token sequences (seq_len tokens)
-  - Runs `distill_step()` for N iterations
+### Phase 1: Infrastructure (riir-gpu)
+
+- [ ] T2: Implement `AttentionDistillConfig` + `AttentionDistillMetrics`
+  - `AttentionDistillConfig` — learning_rate, temperature τ, n_steps, eval_interval, seq_len, lora_rank, lora_alpha
+  - `AttentionDistillMetrics` — kl_div, cosine_sim, max_logit_diff, token_match_pct per step
+  - `DistillMode` enum: `SdpaToAhla`, `SdpaToHla`, `SdpaToSdpa` (control)
+  - Uses `pub(crate)` helpers from `distill.rs`
+
+- [ ] T3: Implement LoRA-aware attention forward (CPU)
+  - `forward_sdpa_with_lora()` — SDPA teacher: `forward()` + LoRA on QKV, collect logits per position
+  - `forward_hla_with_lora()` — HLA student: apply LoRA to QKV, then call HLA update+readout, collect logits
+  - `forward_ahla_with_lora()` — AHLA student: same pattern for AHLA
+  - LoRA math: `q = matvec(W_Q, x) + lora_forward(A_q, B_q, x, rank, n, n, alpha)`
+  - Uses `ForwardContext`, `TransformerWeights` from microgpt-rs
+  - No changes to base `forward_hla()`/`forward_ahla()` in microgpt-rs — LoRA applied before HLA step
+
+- [ ] T4: Implement CPU backprop via finite differences
+  - `compute_lora_gradients_fd()` — finite difference gradient for all LoRA params
+  - For each LoRA param θᵢ: `grad_θᵢ = (L(θ + ε·eᵢ) - L(θ - ε·eᵢ)) / (2ε)`
+  - ε = 1e-4 (standard for float32 finite differences)
+  - Loss = `KL(softmax(teacher_logits/τ) || softmax(student_logits/τ))` averaged over seq_len positions
+  - 1,536 params × 2 forward passes per param = ~3K forward passes per step
+  - Config::micro() forward pass ≈ microseconds → step completes in <1 second on CPU
+  - **Why finite differences, not analytical gradients:**
+    - `backward.rs` is GPU-only (WGSL kernels) — zero CPU backprop exists
+    - Implementing analytical CPU backward through HLA recurrence (SK, CQV, G, h updates) is error-prone and not worth it for a validation experiment
+    - Finite differences is always correct by construction — perfect for a binary science experiment
+    - 1,536 params is small enough that FD is tractable
+
+- [ ] T5: Implement `distill_attention_step()` — single training step
+  - Generate random token sequence [t₀, t₁, …, t_{seq_len}]
+  - Teacher: `forward_sdpa_with_lora()` (frozen weights, no LoRA) → `teacher_logits[pos]`
+  - Student: `forward_hla_with_lora()` (or AHLA/SDPA depending on mode) → `student_logits[pos]`
+  - Compute loss: `KL(softmax(teacher/τ) || softmax(student/τ))` averaged over positions
+  - Compute gradients: `compute_lora_gradients_fd()`
+  - AdamW update: `CpuAdamWStep` from `optimizer.rs`
+  - Return `AttentionDistillMetrics` for this step
+
+- [ ] T6: Implement `distill_attention_loop()` — full training loop
+  - Runs `distill_attention_step()` for N iterations
   - Logs metrics every eval_interval steps
-  - Returns convergence curve (Vec<DistillMetrics>)
-  - Zero external deps — pure Rust, no autograd framework
-
-- [ ] T4: Implement manual backprop for attention projections
-  - Forward: x → W_Q·x=q, W_K·x=k, W_V·x=v → HLA readout → logits
-  - Backward: ∂L/∂logits → ∂L/∂attn_out → ∂L/∂W_Q,W_K,W_V (chain rule through HLA readout)
-  - Only `attn_wq`, `attn_wk`, `attn_wv` per layer are trainable
-  - `attn_wo`, `mlp_w1`, `mlp_w2`, `wte`, `wpe`, `lm_head` frozen
+  - Returns convergence curve (`Vec<AttentionDistillMetrics>`)
+  - 3 modes via `DistillMode`: `SdpaToAhla`, `SdpaToHla`, `SdpaToSdpa` (control)
 
 ### Phase 2: Validation Experiment
 
-- [ ] T5: Create `tests/bench_hla_distill.rs` — the binary test
-  - Run distill_loop with `Config::micro()` (27 vocab, 16 embd, 4 heads, hd=4)
-  - 3 variants: SDPA→HLA (symmetric), SDPA→AHLA (asymmetric), SDPA→SDPA (control)
-  - Report: KL divergence curve, final cosine sim, token match %, convergence speed
-  - Assert: all metrics finite, KL decreases monotonically (or plateaus)
-  - Run: `cargo test --features hla_attention --test bench_hla_distill -- --nocapture`
+- [ ] T7: Create tests in `riir-gpu` — the binary tests
+  - `distill_attention_ahla_converges` — SDPA→AHLA distillation
+  - `distill_attention_hla_converges` — SDPA→HLA distillation
+  - `distill_attention_sdpa_control` — SDPA→SDPA (ceiling)
+  - `distill_attention_fd_gradient_check` — verify finite diff gradients against perturbation
+  - Uses `Config::micro()` (27 vocab, 16 embd, 4 heads, hd=4)
+  - Assert: all metrics finite, KL decreases over training
+  - Run: `cargo test -p riir-gpu --features hla_attention -- distill_attention --nocapture`
 
-- [ ] T6: Run distillation experiment — capture results
+- [ ] T8: Run distillation experiment — capture results
   - Fill in the results table below
   - The binary question: does KL drop below 0.01 within 10K steps?
 
-- [ ] T7: If KL converges → validate on tiny retrieval task
+- [ ] T9: If KL converges → validate on tiny retrieval task
   - Train SDPA model on 5 short "documents" (each ~8 tokens)
-  - Distill to HLA
+  - Distill to HLA with LoRA
   - Query: can HLA model produce correct next-token for document content?
   - Needle-in-a-haystack: inject one specific fact, can HLA retrieve it?
   - If retrieval fails → HLA is a domain shaper, not a knowledge store
 
 ### Phase 3: Decision Gate
 
-- [ ] T8: Write decision document based on T6/T7 results
+- [ ] T10: Write decision document based on T8/T9 results
   - Path A: KL ≈ 0, retrieval works → Proceed to `forward_hybrid()` (Plan 060)
   - Path B: KL ≈ 0, retrieval fails → HLA is domain shaper only, DeltaMem for facts
   - Path C: KL plateaus → Kill HLA training path, double down on DeltaMemoryState
@@ -68,64 +108,138 @@
 
 ## Architecture
 
-```text
-src/hla/
-├── mod.rs              — Add: pub mod distill; (behind #[cfg(test)] or feature gate)
-├── distill.rs          — NEW: distillation loop + metrics
-├── types.rs            — Existing: HLA/AHLA cache types
-├── kernel.rs           — Existing: HLA/AHLA kernels
-└── forward.rs          — Existing: forward_hla(), forward_ahla()
+### Why riir-gpu, Not microgpt-rs
 
-tests/
-└── bench_hla_distill.rs — NEW: the binary validation test
+```text
+microgpt-rs  = inference engine (no training code)
+riir-gpu     = training engine (forward, backward, loss, optimizer, distill)
+```
+
+riir-gpu already has:
+
+| Component | File | Status | Notes |
+|-----------|------|--------|-------|
+| `kl_divergence()` | `distill.rs` | ⚠️ Private → `pub(crate)` in T1 | Direct reuse after visibility fix |
+| `softmax()` | `distill.rs` | ⚠️ Private → `pub(crate)` in T1 | Direct reuse after visibility fix |
+| `lora_forward()` | `distill.rs` | ⚠️ Private → `pub(crate)` in T1 | Direct reuse after visibility fix |
+| `matvec()` | `distill.rs` | ⚠️ Private → `pub(crate)` in T1 | Direct reuse after visibility fix |
+| `CpuAdamWStep` | `optimizer.rs` | ✅ Direct reuse | CPU AdamW already implemented |
+| `ForwardContext` | microgpt-rs | ✅ Direct reuse | Shared context for forward passes |
+| `TransformerWeights` | microgpt-rs | ✅ Direct reuse | Random init via `Weights::new()` |
+| `forward_hla/ahla()` | microgpt-rs `hla/` | ✅ Direct reuse | Feature-gated behind `hla_attention` |
+| GPU backward pass | `backward.rs` | ❌ NOT usable | WGSL-only, no CPU variant exists |
+| GPU training loop | `training_loop.rs` | ❌ NOT usable | GPU-only, different architecture |
+
+**Key gap:** No CPU backward pass exists anywhere. `backward.rs` is 100% WGSL kernels — it dispatches compute shaders for matmul, outer products, and attention backward. We use finite differences instead (T4).
+
+### File Layout
+
+```text
+riir-ai/crates/riir-gpu/src/
+├── distill.rs              — Existing: LoRA→LoRA distillation (expose helpers in T1)
+├── distill_attention.rs    — NEW: SDPA→HLA attention distillation (T2–T6)
+├── backward.rs             — Existing: GPU LoRA backward (NOT used — WGSL only)
+├── optimizer.rs            — Existing: CpuAdamWStep (reused for AdamW updates)
+└── lib.rs                  — Add: #[cfg(feature = "hla_attention")] mod distill_attention;
+
+microgpt-rs/src/hla/
+├── forward.rs              — Existing: forward_hla(), forward_ahla() (no changes)
+├── types.rs                — Existing: cache types (no changes)
+└── (no changes)            — LoRA applied at riir-gpu level, not in microgpt-rs
+```
+
+### Dependency Chain
+
+```text
+riir-gpu/Cargo.toml
+  └── microgpt-rs = { path = "../../../microgpt-rs" }  # always present
+  └── feature "hla_attention" → enables microgpt-rs/hla_attention
+
+distill_attention.rs (feature-gated)
+  ├── use microgpt_rs::transformer::{forward, TransformerWeights, ForwardContext};
+  ├── use microgpt_rs::hla::{forward_hla, forward_ahla, MultiLayerHlaCache, MultiLayerAhlaCache};
+  ├── use crate::distill::{kl_divergence, softmax, lora_forward, matvec};  // pub(crate) after T1
+  ├── use crate::optimizer::CpuAdamWStep;  // existing CPU AdamW
+  └── use microgpt_rs::types::{Config, Rng, MultiLayerKVCache};
 ```
 
 ### Distillation Flow
 
 ```text
 1. Initialize teacher weights (random, frozen SDPA)
-2. Copy teacher weights to student (trainable HLA)
-3. For each step:
-   a. Generate random token sequence [t0, t1, ..., t_{seq_len}]
-   b. Teacher: forward(ctx_t, weights_teacher, cache_kv, ...) for each position
+2. Initialize student weights (same as teacher — shared base weights)
+3. Initialize LoRA adapters on student's W_Q, W_K, W_V per layer
+   - A matrices: zero-init (start as identity-like correction)
+   - B matrices: small random (Kaiming init)
+4. For each step:
+   a. Generate random token sequence [t₀, t₁, …, t_{seq_len}]
+   b. Teacher: forward(ctx_teacher, weights, kv_cache, token, pos, config) per position
       → Collect teacher_logits[pos] for each position
-   c. Student: forward_hla(ctx_s, weights_student, cache_hla, ...) for each position
+   c. Student: forward_hla_with_lora(ctx_student, weights, lora, hla_cache, token, pos, config)
+      → LoRA correction applied to QKV before HLA update+readout
       → Collect student_logits[pos] for each position
-   d. For each position:
-      - p = softmax(teacher_logits[pos] / τ)
-      - q = softmax(student_logits[pos] / τ)
-      - KL += p · (log(p) - log(q))
-   e. Backprop KL through student W_Q, W_K, W_V
-   f. SGD update: w -= lr · ∂KL/∂w
-4. Log metrics, repeat
+   d. Compute loss = mean over positions of KL(softmax(teacher/τ) || softmax(student/τ))
+   e. Compute gradients via finite differences (T4):
+      - For each LoRA param θᵢ:
+        - L₊ = loss(θ + ε·eᵢ), L₋ = loss(θ - ε·eᵢ)
+        - grad_θᵢ = (L₊ - L₋) / (2ε)
+      - Total: ~3K forward passes (1,536 params × 2 perturbations)
+   f. AdamW update via CpuAdamWStep
+5. Log metrics, repeat
 ```
+
+### LoRA Strategy
+
+Instead of training full W_Q, W_K, W_V (which would require full analytical backward through HLA recurrence), we add LoRA adapters to the student and train those:
+
+```text
+Student attention:
+  q = matvec(W_Q, x) + lora_forward(A_q, B_q, x, rank, n, n, alpha)
+  k = matvec(W_K, x) + lora_forward(A_k, B_k, x, rank, kv_dim, n, alpha)
+  v = matvec(W_V, x) + lora_forward(A_v, B_v, x, rank, kv_dim, n, alpha)
+  → HLA/AHLA update + readout → logits
+```
+
+**Why LoRA, not full weights:**
+- Reduces trainable params: 1,536 vs ~30K for full QKV across 4 layers
+- Finite differences is O(n) forward passes — 1.5K is tractable, 30K is painful
+- If LoRA rank=4 can bridge the gap → HLA and SDPA are close in function space
+- If LoRA can't converge → HLA is fundamentally different from SDPA
+- The "trained HLA model" = base weights + LoRA adapter (portable, small)
 
 ### Trainable Parameters
 
-For `Config::micro()` (n_embd=16, n_layer=4, n_head=4, head_dim=4):
+For `Config::micro()` (n_embd=16, n_layer=4, n_head=4, head_dim=4) with LoRA rank=4:
 
 ```text
-Per layer trainable:
-  attn_wq: [16 × 16] = 256 floats
-  attn_wk: [16 × 16] = 256 floats  (n_embd × n_embd since n_kv_head == n_head)
-  attn_wv: [16 × 16] = 256 floats
-  Total per layer: 768 floats
+Per layer LoRA (rank=4):
+  W_Q LoRA: A=[4×16], B=[16×4] = 128 floats
+  W_K LoRA: A=[4×16], B=[16×4] = 128 floats  (note: kv_dim=16 for MHA)
+  W_V LoRA: A=[4×16], B=[16×4] = 128 floats  (note: kv_dim=16 for MHA)
+  Total per layer: 384 floats
 
-Frozen per layer:
-  attn_wo: [16 × 16] = 256 floats
-  mlp_w1:  [64 × 16] = 1024 floats
-  mlp_w2:  [16 × 64] = 1024 floats
+Total trainable: 384 × 4 layers = 1,536 floats = 6 KB
 
-Frozen global:
-  wte:     [27 × 16] = 432 floats
-  wpe:     [16 × 16] = 256 floats
-  lm_head: [27 × 16] = 432 floats
-
-Total trainable: 768 × 4 layers = 3,072 floats = 12 KB
-Total frozen:     2,560 × 4 + 1,120 = 11,360 floats = 45 KB
+Finite differences cost per step:
+  1,536 params × 2 forward passes × 8 positions = ~24K forward passes
+  Each forward pass: ~microseconds on CPU
+  Estimated step time: <500ms on Apple M-series
 ```
 
-Tiny model, fast iteration. The entire training loop should run in seconds, not minutes.
+### SDPA→SDPA Control Experiment
+
+The control experiment measures the ceiling: can LoRA at rank=4 learn an identity mapping?
+
+```text
+Teacher: forward(ctx, weights, kv_cache, token, pos, config) — plain SDPA, no LoRA
+Student: forward(ctx, weights, kv_cache, token, pos, config) + trainable LoRA on QKV
+         → Same SDPA path, but LoRA adds correction to QKV before attention
+
+Expected: KL → 0 quickly (LoRA learning to output zero correction)
+If KL doesn't → 0: LoRA rank=4 is insufficient even for identity → increase rank
+```
+
+This is NOT "two models with different LoRA init". It's the same model, teacher has no LoRA, student has trainable LoRA. The student should learn to output zero correction (identity).
 
 ---
 
@@ -136,15 +250,15 @@ Tiny model, fast iteration. The entire training loop should run in seconds, not 
 | Criterion | Threshold | Action if Met |
 |-----------|-----------|---------------|
 | KL divergence < 0.01 | Within 10K steps | Proceed to Phase 3 Path A or B |
-| KL divergence < 0.1 | Within 10K steps | Investigate — maybe more steps or lower LR |
+| KL divergence < 0.1 | Within 10K steps | Investigate — more steps or higher LoRA rank |
 | KL divergence plateaus > 0.5 | After 10K steps | Phase 3 Path C — kill HLA training |
 | Token match > 90% | At convergence | HLA viable for inference |
 | Token match < 50% | At convergence | HLA not viable for precise tasks |
 
 ### What This Proves
 
-- ✅ Whether HLA can approximate SDPA outputs with distillation
-- ✅ How fast/whether KL divergences converges
+- ✅ Whether HLA can approximate SDPA outputs with LoRA correction
+- ✅ How fast/whether KL divergence converges
 - ✅ Whether token-level predictions match (the real quality signal)
 - ✅ Whether the distillation approach is viable at all
 
@@ -159,7 +273,7 @@ Tiny model, fast iteration. The entire training loop should run in seconds, not 
 
 ## Benchmark Targets
 
-### T6 Results Table (to be filled)
+### T8 Results Table (to be filled)
 
 ```text
 Variant       | KL @ step 100 | KL @ step 1K | KL @ step 10K | Final cos-sim | Token match %
@@ -168,7 +282,7 @@ SDPA→HLA      |           ??? |          ??? |            ??? |           ??? 
 SDPA→SDPA     |           ??? |          ??? |            ??? |           ??? |          ???
 ```
 
-The SDPA→SDPA control (training one SDPA model to match another with different init) establishes the ceiling.
+The SDPA→SDPA control establishes the ceiling: same SDPA forward path, LoRA learning identity. If this doesn't converge, the LoRA rank is too low.
 
 ---
 
@@ -176,13 +290,21 @@ The SDPA→SDPA control (training one SDPA model to match another with different
 
 1. **KL at LM head, not hidden states** — Cosine sim of 0.95 on hidden states can still completely scramble the final token argmax. The only metric that matters is distributional divergence at the vocabulary level.
 
-2. **Manual backprop, no autograd** — We don't have a tensor framework. The backward pass through HLA readout is tractable (chain rule through matmuls). For micro config (3K trainable params), this is ~200 lines of code.
+2. **LoRA correction, not full weight training** — Reduces trainable params to 1,536. If LoRA rank=4 can bridge SDPA→HLA, the function spaces are close. If not, no amount of full-weight training will help.
 
-3. **Random token sequences** — We're not testing language understanding. We're testing whether the HLA operator can learn to approximate the SDPA operator. Random tokens are sufficient for this.
+3. **Finite differences for backprop** — No CPU backward pass exists in the codebase. `backward.rs` is GPU-only (WGSL kernels). For 1,536 params, FD is tractable and guaranteed correct. Analytical CPU backward through HLA recurrence (SK, CQV, G, h updates) would be error-prone and is overkill for a binary science experiment.
 
-4. **AHLA first** — Lower state cost, simpler math, closer to SDPA (0.95 vs 0.80 cosine sim). If AHLA distills, symmetric HLA is a follow-up.
+4. **CPU for validation, GPU for production** — 1,536 params trains in <500ms/step on CPU. No need for WGSL kernels until we scale up. The validation experiment is a science experiment, not a production pipeline.
 
-5. **Temperature τ = 2.0** — Higher temperature softens the distributions, making KL gradient signal richer. Standard distillation practice (Hinton et al., 2015).
+5. **Random token sequences** — We're testing whether the HLA operator can learn to approximate the SDPA operator. Random tokens are sufficient. We're not testing language understanding.
+
+6. **AHLA first** — Lower state cost, simpler math, closer to SDPA (0.95 vs 0.80 cosine sim on random weights from research §Key Insight). If AHLA distills, symmetric HLA is a follow-up.
+
+7. **Temperature τ = 2.0** — Higher temperature softens the distributions, making KL gradient signal richer. Standard distillation practice (Hinton et al., 2015).
+
+8. **Code lives in riir-gpu** — Training infrastructure belongs in the training crate. microgpt-rs stays inference-only.
+
+9. **Feature gate `hla_attention`** — Matches existing microgpt-rs feature name. riir-gpu's `Cargo.toml` adds `hla_attention = ["microgpt-rs/hla_attention"]` to propagate the feature.
 
 ---
 
@@ -190,9 +312,12 @@ The SDPA→SDPA control (training one SDPA model to match another with different
 
 | Risk | Likelihood | Mitigation |
 |------|-----------|------------|
-| Manual backprop bugs | High | Finite difference gradient check in T4 |
+| Finite differences too slow | Low | 1,536 params × seq_len=8 ≈ 24K forward passes, each <10µs → <500ms/step |
+| LoRA rank too low to bridge gap | Medium | Try rank=4, 8, 16 — if rank=16 can't converge, it's not a rank problem |
 | KL doesn't converge | Medium | That's the answer — Path C |
-| HLA readout gradient is ill-conditioned | Low | Gradient clipping + lower LR |
+| Finite difference precision issues | Low | ε=1e-4, add gradient check test (T7) comparing FD to perturbation |
+| riir-gpu + hla_attention feature combo issues | Low | T0 verifies build before any implementation |
+| Numerical instability in HLA recurrence | Low | Existing HLA tests already verify finite outputs |
 | Overfitting to random sequences | Low | We WANT to overfit — measuring approximation, not generalization |
 
 ---
@@ -202,6 +327,7 @@ The SDPA→SDPA control (training one SDPA model to match another with different
 | Plan | Relationship |
 |------|-------------|
 | Plan 057 (HLA) | Provides `forward_hla()`, `forward_ahla()`, cache types |
+| Plan 008 (riir-gpu) | Provides training infrastructure: `distill.rs` helpers, `CpuAdamWStep` |
 | Plan 004 (Leviathan) | Pattern: distillation loss, p/q distribution comparison |
 | Plan 052 (GFlowNet) | Pattern: modelless distillation, bench test structure |
 | Plan 024 (DeltaMem) | Alternative path — if HLA fails, DeltaMem is the fallback |
