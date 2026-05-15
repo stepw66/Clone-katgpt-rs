@@ -11,14 +11,15 @@ All examples run with `cargo run --example <name>`. Some require feature flags.
 | 3 | Bomberman Arena | 6 examples | `bomber`, `bomber-wasm` |
 | 4 | Monopoly FSM | 4 examples | `monopoly` |
 | 5 | FFT Tactics Arena | 1 example | — |
-| 6 | Blue Bear | 2 examples | — |
-| 7 | Core | 4 examples | varies |
-| 8 | Dungeon | 2 examples | — |
-| 9 | Sudoku | 3 examples | `sudoku` |
-| 10 | Tactical AI | 6 examples | — |
-| 11 | Review | 1 example | `bandit` |
-| 12 | Getting Started | 1 example | — |
-| 13 | Stepwise Reward Shaping | 1 example | `stepcode` |
+| 6 | GameState Forward Model | 2 examples | `game_state` |
+| 7 | Blue Bear | 2 examples | — |
+| 8 | Core | 4 examples | varies |
+| 9 | Dungeon | 2 examples | — |
+| 10 | Sudoku | 3 examples | `sudoku` |
+| 11 | Tactical AI | 6 examples | — |
+| 12 | Review | 1 example | `bandit` |
+| 14 | Getting Started | 1 example | — |
+| 15 | Stepwise Reward Shaping | 1 example | `stepcode` |
 
 ---
 
@@ -220,7 +221,27 @@ cargo run --example fft_01_arena
 
 ---
 
-## 6. Blue Bear
+## 6. GameState Forward Model (STRATEGA)
+
+Generic forward model trait + MCTS search across game domains. Validates the `GameState` abstraction from STRATEGA research.
+
+### game_state_01_bomber_mcts
+
+MCTS vs Random 4-player FFA tournament (100 rounds). Confirms STRATEGA finding: generic MCTS ≈ Random (25%) in high-variance FFA without domain heuristics.
+
+```bash
+cargo run --example game_state_01_bomber_mcts --features game_state
+```
+
+### game_state_02_bomber_gvg
+
+2v2 GvG (Guild vs Guild) MCTS showcase. Team Alpha (P0,P1) uses MCTS with team-aware heuristic vs Team Beta (P2,P3) Random/Greedy. Demonstrates MCTS beats Random (62%) with clear team objectives, but Greedy (OSLA) still dominates (100%). Budget scaling shows diminishing returns after 500.
+
+```bash
+cargo run --example game_state_02_bomber_gvg --features game_state
+```
+
+## 7. Blue Bear
 
 Experimental tools and TUI demos.
 
@@ -242,7 +263,7 @@ cargo run --example bear_02_tui
 
 ---
 
-## 7. Core
+## 8. Core
 
 Core library features — validation, inference, sampling.
 
@@ -280,7 +301,7 @@ cargo run --example core_04_prefill
 
 ---
 
-## 8. Dungeon
+## 9. Dungeon
 
 Roguelike dungeon generation and TUI.
 
@@ -302,7 +323,7 @@ cargo run --example dungeon_02_multifloor
 
 ---
 
-## 9. Sudoku
+## 10. Sudoku
 
 Streaming "Thinking" Sudoku solver with deterministic validation.
 
@@ -332,7 +353,7 @@ cargo run --example sudoku_03_tui --features sudoku
 
 ---
 
-## 10. Tactical AI
+## 11. Tactical AI
 
 Grid-based tactical AI with terrain, procedural maps, and parallel simulation.
 
@@ -386,7 +407,7 @@ cargo run --example tactical_06_tui
 
 ---
 
-## 11. Review
+## 12. Review
 
 Inference-time review metrics based on arXiv:2604.27233 — "Reinforced Agent: Inference-Time Feedback for Tool-Calling Agents".
 
@@ -400,7 +421,7 @@ cargo run --example review_01_metrics --features bandit
 
 ---
 
-## 12. Getting Started
+## 13. Getting Started
 
 ### hello_py2rs
 
@@ -412,7 +433,7 @@ cargo run --example hello_py2rs
 
 ---
 
-## 13. Stepwise Reward Shaping (StepCodeReasoner Plan 054)
+## 14. Stepwise Reward Shaping (StepCodeReasoner Plan 054)
 
 Intra-trajectory reward shaping distilled from StepCodeReasoner (ICML 2026). Rewards bandit arms proportionally to how many downstream arms they enable.
 

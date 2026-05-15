@@ -149,6 +149,10 @@ required-features = ["monopoly"]
 name = "game_state_01_bomber_mcts"
 required-features = ["game_state"]
 
+[[example]]
+name = "game_state_02_bomber_gvg"
+required-features = ["game_state"]
+
 # ── FFT Tactics Arena ────────────────────────────────────────
 
 [[example]]
