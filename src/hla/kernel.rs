@@ -19,6 +19,7 @@
 //! Reference: Zhang et al. (2026), "Higher-order Linear Attention," §3.
 
 use crate::hla::types::{AhlaLayerState, AhlaQHeadState, HlaLayerState, HlaQHeadState};
+use crate::simd;
 
 // ── Symmetric Second-Order HLA Kernels ─────────────────────────
 
@@ -49,7 +50,7 @@ pub fn hla_state_update(
     hd: usize,
     gamma: f32,
     tmp_k_cqv: &mut [f32],
-    tmp_q_g: &mut [f32],
+    _tmp_q_g: &mut [f32],
 ) {
     debug_assert_eq!(sk.len(), hd * hd);
     debug_assert_eq!(q_head.cqv.len(), hd * hd);
@@ -60,7 +61,7 @@ pub fn hla_state_update(
     debug_assert_eq!(k.len(), hd);
     debug_assert_eq!(v.len(), hd);
     debug_assert!(tmp_k_cqv.len() >= hd);
-    debug_assert!(tmp_q_g.len() >= hd);
+    debug_assert!(_tmp_q_g.len() >= hd);
 
     // ── Step 1: Cross-terms using OLD state ──
 
@@ -78,21 +79,10 @@ pub fn hla_state_update(
     }
 
     // G_t += k_t · (kᵀ · CQV_{t-1})
-    // G[i*hd+j] += k[i] * tmp_k_cqv[j]
-    for i in 0..hd {
-        let ki = unsafe { *k.get_unchecked(i) };
-        let g_row = &mut q_head.g[i * hd..i * hd + hd];
-        for j in 0..hd {
-            unsafe {
-                *g_row.get_unchecked_mut(j) += ki * *tmp_k_cqv.get_unchecked(j);
-            }
-        }
-    }
+    simd::simd_outer_product_acc(&mut q_head.g, k, &tmp_k_cqv[..hd], hd, hd);
 
     // kᵀ · mQ_{t-1} → scalar
-    let k_mq: f32 = (0..hd)
-        .map(|i| unsafe { *k.get_unchecked(i) * *q_head.mq.get_unchecked(i) })
-        .sum();
+    let k_mq = simd::simd_dot_f32(k, &q_head.mq, hd);
 
     // h_t += k_t · (kᵀ · mQ_{t-1})
     for i in 0..hd {
@@ -123,26 +113,10 @@ pub fn hla_state_update(
     }
 
     // SK_t += k_t · k_tᵀ (rank-1 update)
-    for i in 0..hd {
-        let ki = unsafe { *k.get_unchecked(i) };
-        let sk_row = &mut sk[i * hd..i * hd + hd];
-        for j in 0..hd {
-            unsafe {
-                *sk_row.get_unchecked_mut(j) += ki * *k.get_unchecked(j);
-            }
-        }
-    }
+    simd::simd_outer_product_acc(sk, k, k, hd, hd);
 
     // CQV_t += q_t · v_tᵀ (rank-1 update)
-    for i in 0..hd {
-        let qi = unsafe { *q.get_unchecked(i) };
-        let cqv_row = &mut q_head.cqv[i * hd..i * hd + hd];
-        for j in 0..hd {
-            unsafe {
-                *cqv_row.get_unchecked_mut(j) += qi * *v.get_unchecked(j);
-            }
-        }
-    }
+    simd::simd_outer_product_acc(&mut q_head.cqv, q, v, hd, hd);
 
     // mQ_t += q_t
     for i in 0..hd {
@@ -167,7 +141,7 @@ fn hla_per_head_update(
     hd: usize,
     gamma: f32,
     tmp_k_cqv: &mut [f32],
-    tmp_q_g: &mut [f32],
+    _tmp_q_g: &mut [f32],
 ) {
     // Step 1: Cross-terms using OLD CQV, mQ (before decay/accumulation)
 
@@ -184,20 +158,10 @@ fn hla_per_head_update(
     }
 
     // G_t += k_t · (kᵀ · CQV_{t-1})
-    for i in 0..hd {
-        let ki = unsafe { *k.get_unchecked(i) };
-        let g_row = &mut q_head.g[i * hd..i * hd + hd];
-        for j in 0..hd {
-            unsafe {
-                *g_row.get_unchecked_mut(j) += ki * *tmp_k_cqv.get_unchecked(j);
-            }
-        }
-    }
+    simd::simd_outer_product_acc(&mut q_head.g, k, &tmp_k_cqv[..hd], hd, hd);
 
     // kᵀ · mQ_{t-1} → scalar
-    let k_mq: f32 = (0..hd)
-        .map(|i| unsafe { *k.get_unchecked(i) * *q_head.mq.get_unchecked(i) })
-        .sum();
+    let k_mq = simd::simd_dot_f32(k, &q_head.mq, hd);
 
     // h_t += k_t · (kᵀ · mQ_{t-1})
     for i in 0..hd {
@@ -224,15 +188,7 @@ fn hla_per_head_update(
 
     // Step 3: Accumulate per-head state
     // CQV_t += q_t · v_tᵀ
-    for i in 0..hd {
-        let qi = unsafe { *q.get_unchecked(i) };
-        let cqv_row = &mut q_head.cqv[i * hd..i * hd + hd];
-        for j in 0..hd {
-            unsafe {
-                *cqv_row.get_unchecked_mut(j) += qi * *v.get_unchecked(j);
-            }
-        }
-    }
+    simd::simd_outer_product_acc(&mut q_head.cqv, q, v, hd, hd);
 
     // mQ_t += q_t
     for i in 0..hd {
@@ -329,12 +285,8 @@ pub fn hla_denom(
 
     // denom = Σ_j u[j] * mQ[j] − Σ_j q[j] * h[j]
     let mut denom = eps;
-    for j in 0..hd {
-        unsafe {
-            denom += *tmp_u.get_unchecked(j) * *q_head.mq.get_unchecked(j);
-            denom -= *q.get_unchecked(j) * *q_head.h.get_unchecked(j);
-        }
-    }
+    denom += simd::simd_dot_f32(&tmp_u[..hd], &q_head.mq, hd);
+    denom -= simd::simd_dot_f32(q, &q_head.h, hd);
     denom
 }
 
@@ -405,15 +357,7 @@ pub fn ahla_step(
     }
 
     // PKV_t += k_t · v_tᵀ (rank-1 update)
-    for i in 0..hd {
-        let ki = unsafe { *k.get_unchecked(i) };
-        let pkv_row = &mut pkv[i * hd..i * hd + hd];
-        for j in 0..hd {
-            unsafe {
-                *pkv_row.get_unchecked_mut(j) += ki * *v.get_unchecked(j);
-            }
-        }
-    }
+    simd::simd_outer_product_acc(pkv, k, v, hd, hd);
 
     // r = q_tᵀ · PKV_t (1×hd matvec)
     tmp_r[..hd].fill(0.0);
@@ -435,20 +379,10 @@ pub fn ahla_step(
     }
 
     // E_t += k_t · r_t (outer product)
-    for i in 0..hd {
-        let ki = unsafe { *k.get_unchecked(i) };
-        let e_row = &mut q_head.e[i * hd..i * hd + hd];
-        for j in 0..hd {
-            unsafe {
-                *e_row.get_unchecked_mut(j) += ki * *tmp_r.get_unchecked(j);
-            }
-        }
-    }
+    simd::simd_outer_product_acc(&mut q_head.e, k, &tmp_r[..hd], hd, hd);
 
     // q_tᵀ · mK_t → scalar
-    let q_mk: f32 = (0..hd)
-        .map(|i| unsafe { *q.get_unchecked(i) * *mk.get_unchecked(i) })
-        .sum();
+    let q_mk = simd::simd_dot_f32(q, mk, hd);
 
     // n_t += k_t · (q_tᵀ · mK_t)
     for i in 0..hd {
@@ -526,15 +460,7 @@ pub fn hla_layer_update(
         }
         // SK[g] += k_g · k_gᵀ
         let k_slice = &k[g * hd..(g + 1) * hd];
-        for i in 0..hd {
-            let ki = unsafe { *k_slice.get_unchecked(i) };
-            let sk_row = &mut layer.sk[g][i * hd..i * hd + hd];
-            for j in 0..hd {
-                unsafe {
-                    *sk_row.get_unchecked_mut(j) += ki * *k_slice.get_unchecked(j);
-                }
-            }
-        }
+        simd::simd_outer_product_acc(&mut layer.sk[g], k_slice, k_slice, hd, hd);
     }
 
     // Phase 2: Per-Q-head update (cross-terms + accumulators)
@@ -654,20 +580,10 @@ fn ahla_per_head_step(
     }
 
     // Step 3: E_t += k_t · r_t
-    for i in 0..hd {
-        let ki = unsafe { *k.get_unchecked(i) };
-        let e_row = &mut q_head.e[i * hd..i * hd + hd];
-        for j in 0..hd {
-            unsafe {
-                *e_row.get_unchecked_mut(j) += ki * *tmp_r.get_unchecked(j);
-            }
-        }
-    }
+    simd::simd_outer_product_acc(&mut q_head.e, k, &tmp_r[..hd], hd, hd);
 
     // Step 4: q_tᵀ · mK_t → scalar (shared, already updated)
-    let q_mk: f32 = (0..hd)
-        .map(|i| unsafe { *q.get_unchecked(i) * *mk.get_unchecked(i) })
-        .sum();
+    let q_mk = simd::simd_dot_f32(q, mk, hd);
 
     // Step 5: n_t += k_t · (q_tᵀ · mK_t)
     for i in 0..hd {
@@ -736,15 +652,7 @@ pub fn ahla_layer_step(
         // PKV[g] += k_g · v_gᵀ
         let k_slice = &k[g * hd..(g + 1) * hd];
         let v_slice = &v[g * hd..(g + 1) * hd];
-        for i in 0..hd {
-            let ki = unsafe { *k_slice.get_unchecked(i) };
-            let pkv_row = &mut layer.pkv[g][i * hd..i * hd + hd];
-            for j in 0..hd {
-                unsafe {
-                    *pkv_row.get_unchecked_mut(j) += ki * *v_slice.get_unchecked(j);
-                }
-            }
-        }
+        simd::simd_outer_product_acc(&mut layer.pkv[g], k_slice, v_slice, hd, hd);
         // mK[g] += k_g
         for i in 0..hd {
             unsafe {

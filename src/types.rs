@@ -573,17 +573,7 @@ pub fn rmsnorm(x: &mut [f32]) {
 /// Weight layout: [rows, cols] row-major.
 #[inline(always)]
 pub fn matmul(output: &mut [f32], weight: &[f32], input: &[f32], rows: usize, cols: usize) {
-    for r in 0..rows {
-        let row_off = r * cols;
-        let mut sum = 0.0f32;
-        for c in 0..cols {
-            sum +=
-                unsafe { *weight.get_unchecked(row_off + c) } * unsafe { *input.get_unchecked(c) };
-        }
-        unsafe {
-            *output.get_unchecked_mut(r) = sum;
-        }
-    }
+    crate::simd::simd_matmul_rows(output, weight, input, rows, cols);
 }
 
 /// Fused matrix-vector multiply + ReLU: output = max(0, weight @ input).
@@ -591,18 +581,7 @@ pub fn matmul(output: &mut [f32], weight: &[f32], input: &[f32], rows: usize, co
 /// Used for MLP hidden layer where activation immediately follows projection.
 #[inline(always)]
 pub fn matmul_relu(output: &mut [f32], weight: &[f32], input: &[f32], rows: usize, cols: usize) {
-    for r in 0..rows {
-        let row_off = r * cols;
-        let mut sum = 0.0f32;
-        for c in 0..cols {
-            sum +=
-                unsafe { *weight.get_unchecked(row_off + c) } * unsafe { *input.get_unchecked(c) };
-        }
-        // Fused ReLU: clamp to non-negative
-        unsafe {
-            *output.get_unchecked_mut(r) = sum.max(0.0);
-        }
-    }
+    crate::simd::simd_matmul_relu_rows(output, weight, input, rows, cols);
 }
 
 /// Sparse matrix-vector multiply for ReLU-activated inputs (TwELL-inspired).

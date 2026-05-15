@@ -18,11 +18,8 @@ use crate::speculative::{
     LeviathanVerifier, speculative_step_conditioned_with, speculative_step_rollback_with,
 };
 
-
 #[cfg(feature = "hla_attention")]
-use crate::hla::{
-    MultiLayerAhlaCache, MultiLayerHlaCache, forward_ahla, forward_hla,
-};
+use crate::hla::{MultiLayerAhlaCache, MultiLayerHlaCache, forward_ahla, forward_hla};
 
 /// Benchmark category for grouping into separate graphs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -2711,9 +2708,7 @@ pub fn bench_hla_quality(_config: &Config) -> BenchResult {
     println!(
         "\u{2502} Verified: all logits finite, non-NaN \u{2713}                          \u{2502}"
     );
-    println!(
-        "\u{2514}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2518}"
-    );
+    println!("└──────────────────────────────────────────────────────────────────────┘");
 
     BenchResult {
         label: format!("hla_quality (HLA={hla_avg:.3}, AHLA={ahla_avg:.3})"),
@@ -2725,3 +2720,239 @@ pub fn bench_hla_quality(_config: &Config) -> BenchResult {
     }
 }
 
+/// SIMD micro-benchmark: matmul, HLA kernels, and end-to-end forward (Plan 060).
+///
+/// Measures throughput of SIMD-accelerated operations:
+/// - `matmul` [32×32]×[32] (game config n_embd)
+/// - `matmul` [16×16]×[16] (micro config n_embd)
+/// - HLA state update hd=4, hd=8
+/// - AHLA step hd=4, hd=8
+/// - End-to-end `forward_hla()` and `forward_ahla()` with micro config
+#[cfg(feature = "hla_attention")]
+pub fn bench_simd(_config: &Config) -> BenchResult {
+    use crate::simd::{self, SimdLevel};
+
+    let level = simd::simd_level();
+    let level_name = match level {
+        SimdLevel::Scalar => "Scalar",
+        SimdLevel::Neon => "NEON",
+        SimdLevel::Avx2 => "AVX2",
+    };
+
+    let iters = 10_000;
+
+    // ── Matmul benchmarks ──
+    let matmul_configs: [(&str, usize); 2] = [("16×16", 16), ("32×32", 32)];
+    let mut matmul_results: Vec<(&str, f64)> = Vec::new();
+
+    for &(label, dim) in &matmul_configs {
+        let weight = vec![0.5f32; dim * dim];
+        let input = vec![1.0f32; dim];
+        let mut output = vec![0.0f32; dim];
+
+        // Warmup
+        for _ in 0..100 {
+            crate::types::matmul(&mut output, &weight, &input, dim, dim);
+        }
+
+        let start = Instant::now();
+        for _ in 0..iters {
+            crate::types::matmul(&mut output, &weight, &input, dim, dim);
+        }
+        let elapsed = start.elapsed();
+        let tps = iters as f64 / elapsed.as_secs_f64();
+        matmul_results.push((label, tps));
+    }
+
+    // ── HLA kernel benchmarks ──
+    let hd_configs: [usize; 2] = [4, 8];
+    let mut hla_update_tps: Vec<(usize, f64)> = Vec::new();
+    let mut ahla_step_tps: Vec<(usize, f64)> = Vec::new();
+
+    for &hd in &hd_configs {
+        // HLA state update
+        {
+            let mut sk = vec![0.0f32; hd * hd];
+            let mut q_head = crate::hla::HlaQHeadState::new(hd);
+            let q = vec![0.5f32; hd];
+            let k = vec![0.3f32; hd];
+            let v = vec![0.7f32; hd];
+            let mut tmp_k_cqv = vec![0.0f32; hd];
+            let mut tmp_q_g = vec![0.0f32; hd];
+
+            let start = Instant::now();
+            for _ in 0..iters {
+                crate::hla::hla_state_update(
+                    &mut sk,
+                    &mut q_head,
+                    &q,
+                    &k,
+                    &v,
+                    hd,
+                    1.0,
+                    &mut tmp_k_cqv,
+                    &mut tmp_q_g,
+                );
+            }
+            let elapsed = start.elapsed();
+            let tps = iters as f64 / elapsed.as_secs_f64();
+            hla_update_tps.push((hd, tps));
+        }
+
+        // AHLA step
+        {
+            let mut pkv = vec![0.0f32; hd * hd];
+            let mut mk = vec![0.0f32; hd];
+            let mut q_head = crate::hla::AhlaQHeadState::new(hd);
+            let q = vec![0.5f32; hd];
+            let k = vec![0.3f32; hd];
+            let v = vec![0.7f32; hd];
+            let mut out = vec![0.0f32; hd];
+            let mut tmp_r = vec![0.0f32; hd];
+
+            let start = Instant::now();
+            for _ in 0..iters {
+                crate::hla::ahla_step(
+                    &mut pkv,
+                    &mut mk,
+                    &mut q_head,
+                    &q,
+                    &k,
+                    &v,
+                    hd,
+                    1.0,
+                    &mut out,
+                    &mut tmp_r,
+                );
+            }
+            let elapsed = start.elapsed();
+            let tps = iters as f64 / elapsed.as_secs_f64();
+            ahla_step_tps.push((hd, tps));
+        }
+    }
+
+    // ── End-to-end forward benchmarks ──
+    let bench_config = Config::micro();
+    let mut rng = Rng::new(42);
+    let weights = TransformerWeights::new(&bench_config, &mut rng);
+    let forward_iters = 2_000;
+    let positions = 8;
+
+    // Forward HLA
+    let mut ctx_hla = ForwardContext::new(&bench_config);
+    let mut cache_hla = MultiLayerHlaCache::new(&bench_config);
+    // Warmup
+    for pos in 0..positions {
+        let _ = forward_hla(
+            &mut ctx_hla,
+            &weights,
+            &mut cache_hla,
+            0,
+            pos,
+            &bench_config,
+        );
+    }
+    let start_hla = Instant::now();
+    for _ in 0..forward_iters {
+        cache_hla.reset();
+        for pos in 0..positions {
+            let _ = forward_hla(
+                &mut ctx_hla,
+                &weights,
+                &mut cache_hla,
+                0,
+                pos,
+                &bench_config,
+            );
+        }
+    }
+    let elapsed_hla = start_hla.elapsed();
+    let hla_steps = forward_iters as f64 * positions as f64;
+    let hla_tps = hla_steps / elapsed_hla.as_secs_f64();
+    let hla_us = elapsed_hla.as_micros() as f64 / hla_steps;
+
+    // Forward AHLA
+    let mut ctx_ahla = ForwardContext::new(&bench_config);
+    let mut cache_ahla = MultiLayerAhlaCache::new(&bench_config);
+    // Warmup
+    for pos in 0..positions {
+        let _ = forward_ahla(
+            &mut ctx_ahla,
+            &weights,
+            &mut cache_ahla,
+            0,
+            pos,
+            &bench_config,
+        );
+    }
+    let start_ahla = Instant::now();
+    for _ in 0..forward_iters {
+        cache_ahla.reset();
+        for pos in 0..positions {
+            let _ = forward_ahla(
+                &mut ctx_ahla,
+                &weights,
+                &mut cache_ahla,
+                0,
+                pos,
+                &bench_config,
+            );
+        }
+    }
+    let elapsed_ahla = start_ahla.elapsed();
+    let ahla_steps = forward_iters as f64 * positions as f64;
+    let ahla_tps = ahla_steps / elapsed_ahla.as_secs_f64();
+    let ahla_us = elapsed_ahla.as_micros() as f64 / ahla_steps;
+
+    // ── Print results ──
+    println!("\n┌── SIMD Benchmark ({level_name}, {iters} iters) ──────────────────────────────┐");
+    println!("│ {:<20} {:>14} {:>14} │", "Operation", "ops/s", "µs/op");
+    println!("│ {} │", "─".repeat(50));
+
+    for (label, tps) in &matmul_results {
+        let us = 1_000_000.0 / tps;
+        println!(
+            "│ {:<20} {:>14.0} {:>14.2} │",
+            format!("matmul [{label}]"),
+            tps,
+            us
+        );
+    }
+    for &(hd, tps) in &hla_update_tps {
+        let us = 1_000_000.0 / tps;
+        println!(
+            "│ {:<20} {:>14.0} {:>14.2} │",
+            format!("hla_update hd={hd}"),
+            tps,
+            us
+        );
+    }
+    for &(hd, tps) in &ahla_step_tps {
+        let us = 1_000_000.0 / tps;
+        println!(
+            "│ {:<20} {:>14.0} {:>14.2} │",
+            format!("ahla_step hd={hd}"),
+            tps,
+            us
+        );
+    }
+    println!("│ {} │", "─".repeat(50));
+    println!(
+        "│ {:<20} {:>14.0} {:>14.2} │",
+        "forward_hla (micro)", hla_tps, hla_us
+    );
+    println!(
+        "│ {:<20} {:>14.0} {:>14.2} │",
+        "forward_ahla (micro)", ahla_tps, ahla_us
+    );
+    println!("└──────────────────────────────────────────────────────────┘");
+
+    BenchResult {
+        label: format!("simd ({level_name}, hla={hla_tps:.0} tps)"),
+        throughput: hla_tps,
+        time_per_step_us: hla_us,
+        avg_acceptance_len: ahla_tps,
+        color: (0, 200, 150),
+        category: BenchCategory::Infrastructure,
+    }
+}

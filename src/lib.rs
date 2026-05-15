@@ -6,6 +6,7 @@ pub mod hla;
 pub mod percepta;
 pub mod plot;
 pub mod pruners;
+pub mod simd;
 pub mod speculative;
 pub mod tokenizer;
 pub mod transformer;
