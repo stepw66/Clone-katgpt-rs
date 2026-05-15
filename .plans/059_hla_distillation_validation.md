@@ -11,7 +11,7 @@
 
 ### Phase 0: Dependency Setup
 
-- [ ] T0: Wire `riir-gpu` → `microgpt-rs` with HLA feature
+- [x] T0: Wire `riir-gpu` → `microgpt-rs` with HLA feature
   - Add `hla_attention` feature to `riir-gpu/Cargo.toml`:
     ```toml
     [features]
@@ -22,7 +22,7 @@
   - Add `mod distill_attention;` to `riir-gpu/src/lib.rs` behind `#[cfg(feature = "hla_attention")]`
   - Verify: `cargo build -p riir-gpu --features hla_attention` compiles (no new code yet)
 
-- [ ] T1: Expose `distill.rs` helpers as `pub(crate)`
+- [x] T1: Expose `distill.rs` helpers as `pub(crate)`
   - Make these functions `pub(crate)` (currently private, `#[allow(dead_code)]`):
     - `matvec()` — matrix-vector multiply
     - `lora_forward()` — LoRA correction `(α/r) · B @ (A @ x)`
@@ -33,13 +33,13 @@
 
 ### Phase 1: Infrastructure (riir-gpu)
 
-- [ ] T2: Implement `AttentionDistillConfig` + `AttentionDistillMetrics`
+- [x] T2: Implement `AttentionDistillConfig` + `AttentionDistillMetrics`
   - `AttentionDistillConfig` — learning_rate, temperature τ, n_steps, eval_interval, seq_len, lora_rank, lora_alpha
   - `AttentionDistillMetrics` — kl_div, cosine_sim, max_logit_diff, token_match_pct per step
   - `DistillMode` enum: `SdpaToAhla`, `SdpaToHla`, `SdpaToSdpa` (control)
   - Uses `pub(crate)` helpers from `distill.rs`
 
-- [ ] T3: Implement LoRA-aware attention forward (CPU)
+- [x] T3: Implement LoRA-aware attention forward (CPU)
   - `forward_sdpa_with_lora()` — SDPA teacher: `forward()` + LoRA on QKV, collect logits per position
   - `forward_hla_with_lora()` — HLA student: apply LoRA to QKV, then call HLA update+readout, collect logits
   - `forward_ahla_with_lora()` — AHLA student: same pattern for AHLA
@@ -47,7 +47,7 @@
   - Uses `ForwardContext`, `TransformerWeights` from microgpt-rs
   - No changes to base `forward_hla()`/`forward_ahla()` in microgpt-rs — LoRA applied before HLA step
 
-- [ ] T4: Implement CPU backprop via finite differences
+- [x] T4: Implement CPU backprop via finite differences
   - `compute_lora_gradients_fd()` — finite difference gradient for all LoRA params
   - For each LoRA param θᵢ: `grad_θᵢ = (L(θ + ε·eᵢ) - L(θ - ε·eᵢ)) / (2ε)`
   - ε = 1e-4 (standard for float32 finite differences)
@@ -60,7 +60,7 @@
     - Finite differences is always correct by construction — perfect for a binary science experiment
     - 1,536 params is small enough that FD is tractable
 
-- [ ] T5: Implement `distill_attention_step()` — single training step
+- [x] T5: Implement `distill_attention_step()` — single training step
   - Generate random token sequence [t₀, t₁, …, t_{seq_len}]
   - Teacher: `forward_sdpa_with_lora()` (frozen weights, no LoRA) → `teacher_logits[pos]`
   - Student: `forward_hla_with_lora()` (or AHLA/SDPA depending on mode) → `student_logits[pos]`
@@ -69,7 +69,7 @@
   - AdamW update: `CpuAdamWStep` from `optimizer.rs`
   - Return `AttentionDistillMetrics` for this step
 
-- [ ] T6: Implement `distill_attention_loop()` — full training loop
+- [x] T6: Implement `distill_attention_loop()` — full training loop
   - Runs `distill_attention_step()` for N iterations
   - Logs metrics every eval_interval steps
   - Returns convergence curve (`Vec<AttentionDistillMetrics>`)
@@ -77,7 +77,7 @@
 
 ### Phase 2: Validation Experiment
 
-- [ ] T7: Create tests in `riir-gpu` — the binary tests
+- [x] T7: Create tests in `riir-gpu` — the binary tests
   - `distill_attention_ahla_converges` — SDPA→AHLA distillation
   - `distill_attention_hla_converges` — SDPA→HLA distillation
   - `distill_attention_sdpa_control` — SDPA→SDPA (ceiling)
@@ -273,16 +273,23 @@ This is NOT "two models with different LoRA init". It's the same model, teacher 
 
 ## Benchmark Targets
 
-### T8 Results Table (to be filled)
+### T8 Results Table (50-step run, lr=3e-4, Config::micro)
 
 ```text
-Variant       | KL @ step 100 | KL @ step 1K | KL @ step 10K | Final cos-sim | Token match %
-SDPA→AHLA     |           ??? |          ??? |            ??? |           ??? |          ???
-SDPA→HLA      |           ??? |          ??? |            ??? |           ??? |          ???
-SDPA→SDPA     |           ??? |          ??? |            ??? |           ??? |          ???
+Variant       | KL @ step 0   | KL @ step 25  | KL @ step 49  | Final cos-sim | Token match %
+SDPA→AHLA     |       4.6179  |       3.7016   |       7.5155  |        0.4483 |        37.5%
+SDPA→HLA      |       8.5415  |       7.5817   |       8.1978  |        0.2897 |        37.5%
+SDPA→SDPA     |       0.0000  |       —        |       0.0000  |        1.0000 |       100.0%
 ```
 
-The SDPA→SDPA control establishes the ceiling: same SDPA forward path, LoRA learning identity. If this doesn't converge, the LoRA rank is too low.
+**Observations (50 steps only — not full 10K experiment):**
+- SDPA→SDPA control: KL ≈ 0, cos=1.0, 100% token match — LoRA correctly learns identity ✅
+- SDPA→AHLA: KL starts ~4.6, dips to ~3.7, then rises — needs more steps / lower LR / higher rank to converge
+- SDPA→HLA: KL starts ~8.5, similar pattern — symmetric HLA is harder to approximate than AHLA
+- Both HLA variants maintain finite KL (no NaN/inf), all gradients finite ✅
+- **Verdict: infrastructure works. Need 1K–10K steps at lower LR (1e-4) for real convergence data.**
+
+The SDPA→SDPA control establishes the ceiling: same SDPA forward path, LoRA learning identity. ✅ Confirmed working.
 
 ---
 

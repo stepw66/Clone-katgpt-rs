@@ -11,7 +11,7 @@
 
 ### Phase 1: SIMD Infrastructure
 
-- [ ] T0: Add SIMD detection and dispatch module
+- [x] T0: Add SIMD detection and dispatch module
   - Create `microgpt-rs/src/simd.rs` with feature-gated SIMD backends
   - `SimdLevel` enum: `Scalar`, `Neon`, `Avx2`
   - Runtime detection via `#[cfg(target_arch = "aarch64")]` / `#[cfg(target_arch = "x86_64")]`
@@ -19,7 +19,7 @@
   - Zero dependencies — uses `core::arch::{aarch64, x86_64}` intrinsics directly
   - Add `mod simd;` to `lib.rs`
 
-- [ ] T1: Implement NEON backend (macOS / ARM servers)
+- [x] T1: Implement NEON backend (macOS / ARM servers)
   - `simd_dot_f32(a: &[f32], b: &[f32], len: usize) -> f32`
     - Process 4 floats per iteration via `vmlaq_f32`
     - Horizontal add via `vaddvq_f32`
@@ -32,25 +32,25 @@
   - Uses `#[cfg(target_arch = "aarch64")]` gate
   - Fallback to scalar when NEON unavailable
 
-- [ ] T2: Implement AVX2 backend (x86_64 servers)
+- [x] T2: Implement AVX2 backend (x86_64 servers)
   - Same API as T1, uses `_mm256_fmadd_ps`, `_mm256_reduce_add_ps`
   - `#[cfg(target_arch = "x86_64")]` gate
   - Fallback to NEON (via emulation) or scalar
 
 ### Phase 2: SIMD Matmul Integration
 
-- [ ] T3: SIMD-accelerate `matmul()` in `types.rs`
+- [x] T3: SIMD-accelerate `matmul()` in `types.rs`
   - Replace inner loop in `matmul()` with `simd_dot_f32()`
   - For n_embd=32: 32-wide dot product → 8 NEON ops + 1 reduce
   - Benchmark before/after with `game` config
   - Must pass all existing tests unchanged (same numerical results)
 
-- [ ] T4: SIMD-accelerate `matmul_relu()` in `types.rs`
+- [x] T4: SIMD-accelerate `matmul_relu()` in `types.rs`
   - Replace inner loop with `simd_dot_f32()` + fused ReLU
   - NEON: `vmaxq_f32(acc, vdupq_n_f32(0.0))` for zero-clamp
   - AVX2: `_mm256_max_ps(acc, _mm256_setzero_ps())`
 
-- [ ] T5: SIMD-accelerate `sparse_matmul()` in `types.rs`
+- [ ] ~~T5: SIMD-accelerate `sparse_matmul()` in `types.rs`~~ Skipped — not worth it for >80% sparsity (gather overhead negates SIMD benefit on 2-4 active elements)
   - Gather active indices + SIMD dot product on active elements only
   - For sparsity > 80%: SIMD on 2-4 active elements may not be worth it
   - Add heuristic: if active_count >= 4, use SIMD; else scalar
@@ -58,33 +58,33 @@
 
 ### Phase 3: SIMD HLA Kernels
 
-- [ ] T6: SIMD-accelerate HLA `hla_state_update()` in `hla/kernel.rs`
+- [x] T6: SIMD-accelerate HLA `hla_state_update()` in `hla/kernel.rs`
   - Outer product SK += kkᵀ: `simd_outer_product_acc()` on hd×hd matrix
   - Cross moment CQV += qvᵀ: `simd_outer_product_acc()`
   - Matvec kᵀ·CQV: `simd_matvec()` for tmp_k_cqv
   - For hd=4: single NEON instruction covers entire row
   - For hd=8: 2 NEON instructions per row
 
-- [ ] T7: SIMD-accelerate HLA `hla_readout()` in `hla/kernel.rs`
+- [x] T7: SIMD-accelerate HLA `hla_readout()` in `hla/kernel.rs`
   - Numerator: qᵀ(SK·CQV − G) → SIMD matvec + SIMD dot
   - Denominator: qᵀ(SK·mQ − h) + ε → SIMD matvec + SIMD dot
   - For hd=4: entire readout is ~4 NEON ops
 
-- [ ] T8: SIMD-accelerate AHLA `ahla_step()` in `hla/kernel.rs`
+- [x] T8: SIMD-accelerate AHLA `ahla_step()` in `hla/kernel.rs`
   - PKV update: `simd_outer_product_acc()`
   - E accumulation: SIMD matvec + outer product
   - Readout: qᵀE / (qᵀn + ε) → SIMD dot products
 
 ### Phase 4: Benchmarks
 
-- [ ] T9: Add SIMD benchmark to `benchmark.rs`
+- [x] T9: Add SIMD benchmark to `benchmark.rs`
   - Benchmark `matmul` scalar vs SIMD for [32×32]×[32] (game config)
   - Benchmark `hla_state_update` scalar vs SIMD for hd=4, hd=8
   - Benchmark `ahla_step` scalar vs SIMD for hd=4, hd=8
   - Report throughput (tok/s) for each variant
   - Add to existing benchmark runner
 
-- [ ] T10: End-to-end throughput benchmark
+- [x] T10: End-to-end throughput benchmark
   - `forward_hla()` scalar vs SIMD with `game` config
   - `forward_ahla()` scalar vs SIMD with `game` config
   - Report aggregate tok/s
@@ -92,7 +92,7 @@
 
 ### Phase 5: Validation
 
-- [ ] T11: All existing tests pass with SIMD
+- [x] T11: All existing tests pass with SIMD
   - `cargo test` — zero regressions
   - SIMD results must be bit-identical to scalar (same float operations, just vectorized)
   - HLA kernel tests (22/22 from Plan 057) must still pass
