@@ -52,8 +52,8 @@ pub enum BombType {
 - [x] A8: Add `BombType` to replay/action serialization
 - [x] A9: Update `BomberWasmPruner` WASM state format — add bomb_type per bomb token
 - [x] A10: Update player heuristics — `HLPlayer` / `GreedyPlayer` consider bomb types
-- [ ] A11: Add tests for each bomb type behavior
-- [ ] A12: Add bomber example demonstrating all bomb types
+- [x] A11: Add tests for each bomb type behavior
+- [x] A12: Add bomber example demonstrating all bomb types
 
 ### Design Notes
 

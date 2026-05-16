@@ -1191,4 +1191,131 @@ mod tests {
             "timed blast should stop at wall, player 1 at (3,1) should survive"
         );
     }
+
+    // ── A11: Additional bomb type tests ─────────────────────────────
+
+    /// Piercing blast should NOT pass through FixedWall — only DestructibleWall.
+    #[test]
+    fn piercing_blast_stops_at_fixed_wall() {
+        let mut world = init_world(42);
+        let [p0, p1, ..] = spawn_players(&mut world);
+
+        // Layout: FixedWall pillar at (2,2), player 1 at (1,2)
+        // Piercing bomb at (3,2) going left — blast stops at pillar, player 1 survives
+        {
+            let mut grid = world.resource_mut::<ArenaGrid>();
+            grid.set(1, 2, Cell::Floor);
+            grid.set(2, 2, Cell::FixedWall); // pillar
+            grid.set(3, 2, Cell::Floor);
+        }
+
+        // Move player 1 behind the pillar
+        *world.get_mut::<GridPos>(p1).unwrap() = GridPos { x: 1, y: 2 };
+
+        // Place a piercing bomb at (3,2) with range 3
+        world.spawn((
+            Bomb::with_type(BombType::Piercing),
+            GridPos { x: 3, y: 2 },
+            BombFuse {
+                owner: p0,
+                ticks_remaining: 1,
+            },
+            BombRange { cells: 3 },
+        ));
+        world.get_mut::<BombCount>(p0).unwrap().active = 1;
+
+        // Run one tick — bomb explodes
+        let _ = run_tick(&mut world, [None; 4]);
+
+        // FixedWall should remain intact
+        assert_eq!(
+            world.resource::<ArenaGrid>().get(2, 2),
+            Cell::FixedWall,
+            "piercing blast should not destroy FixedWall"
+        );
+
+        // Player 1 behind the pillar should survive — blast stopped at FixedWall
+        assert!(
+            world.get::<Alive>(p1).is_some(),
+            "piercing blast should stop at FixedWall, player 1 at (1,2) should survive"
+        );
+
+        // Bomb cleaned up
+        assert_eq!(world.get_mut::<BombCount>(p0).unwrap().active, 0);
+    }
+
+    /// Chain reaction across different bomb types: Timed triggers Piercing,
+    /// which continues through a destructible wall to hit a target behind it.
+    #[test]
+    fn chain_reaction_different_bomb_types() {
+        let mut world = init_world(42);
+        // Layout:
+        //   (1,1) Timed bomb (player 0's, fuse=1)
+        //   (2,1) Piercing bomb (player 1's, fuse=99 — only chain-explodes)
+        //   (3,1) Destructible wall
+        //   (4,1) player 2 — should die from piercing chain through wall
+        let [p0, p1, p2, ..] = spawn_players(&mut world);
+        {
+            let mut grid = world.resource_mut::<ArenaGrid>();
+            grid.set(1, 1, Cell::Floor);
+            grid.set(2, 1, Cell::Floor);
+            grid.set(3, 1, Cell::DestructibleWall);
+            grid.set(4, 1, Cell::Floor);
+        }
+
+        // Move player 2 behind the wall as the victim
+        *world.get_mut::<GridPos>(p2).unwrap() = GridPos { x: 4, y: 1 };
+
+        // Place Timed bomb at (1,1) — will explode after 1 tick (owner: p0)
+        world.spawn((
+            Bomb::new(), // default Timed
+            GridPos { x: 1, y: 1 },
+            BombFuse {
+                owner: p0,
+                ticks_remaining: 1,
+            },
+            BombRange { cells: 3 },
+        ));
+        world.get_mut::<BombCount>(p0).unwrap().active += 1;
+
+        // Place Piercing bomb at (2,1) — won't self-explode (fuse=99, owner: p1)
+        world.spawn((
+            Bomb::with_type(BombType::Piercing),
+            GridPos { x: 2, y: 1 },
+            BombFuse {
+                owner: p1,
+                ticks_remaining: 99,
+            },
+            BombRange { cells: 3 },
+        ));
+        world.get_mut::<BombCount>(p1).unwrap().active += 1;
+
+        // Run one tick — Timed bomb explodes, triggers Piercing chain
+        let _ = run_tick(&mut world, [None; 4]);
+
+        // Both bombs gone — each owner's active count decremented
+        assert_eq!(
+            world.get_mut::<BombCount>(p0).unwrap().active,
+            0,
+            "timed bomb should be despawned"
+        );
+        assert_eq!(
+            world.get_mut::<BombCount>(p1).unwrap().active,
+            0,
+            "piercing chain bomb should be despawned"
+        );
+
+        // Wall destroyed by piercing blast
+        assert_eq!(
+            world.resource::<ArenaGrid>().get(3, 1),
+            Cell::Floor,
+            "piercing chain should destroy wall at (3,1)"
+        );
+
+        // Player 2 behind wall should be dead — piercing continued through wall
+        assert!(
+            world.get::<Alive>(p2).is_none(),
+            "piercing chain should continue through wall and kill player 2 at (4,1)"
+        );
+    }
 }

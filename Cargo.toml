@@ -126,6 +126,10 @@ required-features = ["bomber"]
 name = "bomber_06_replay_gen_v2"
 required-features = ["bomber"]
 
+[[example]]
+name = "bomber_07_bomb_types"
+required-features = ["bomber"]
+
 # ── Monopoly FSM Arena ────────────────────────────────────────
 
 [[example]]
