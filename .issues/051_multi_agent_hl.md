@@ -77,10 +77,18 @@ let mut players: Vec<Box<dyn BomberPlayer>> = vec![
   - Test: `test_shared_trial_log_multi_writer` — 4 threads × 50 records, verifies 200 total + per-player counts
   - Test: `test_player_id_backward_compat` — legacy JSONL without `player_id` parses with default `0`
 
-- [ ] **T5: Tournament benchmark**
+- [x] **T5: Tournament benchmark** ✅
   - Run 1000-game tournament: 4× shared HL vs 4× independent HL
   - Metrics: convergence speed (Q-value stability), win rate, survival rate
   - Record in `.benchmarks/` with sequential numbering
+  - **Results (Benchmark 006):**
+    - Shared survival: **95.4%** vs Independent: 57.8% (**+37.5pp**)
+    - Shared Q convergence: 85.5% of final at R250 (2.8× stronger signal)
+    - Shared wins: 43 vs Independent: 269 (cooperative = conservative, less aggressive)
+    - Shared score: 2.9 vs Independent: 2.1 (+0.7)
+    - Verdict: Shared bandit dramatically improves survival for cooperative teams, but suppresses aggressive play for competitive FFA
+  - Benchmark: `.benchmarks/006_shared_vs_independent_hl.md`
+  - Example: `riir-ai/crates/riir-examples/examples/g_zero_06_shared_vs_independent_hl.rs`
 
 - [x] **T6: Generalize to `BanditPruner<P>`** ✅
   - Added `BanditPruner::with_shared_stats(inner, strategy, num_arms, stats: Arc<SharedBanditStats>)` constructor (feature-gated)

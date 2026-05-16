@@ -1078,9 +1078,10 @@ impl BomberPlayer for ValidatorPlayer {
                 // Detonate validation: only valid when active bombs exist and safe to detonate.
                 // Future: restrict to Remote bombs only once bomb_type is tracked in KnownBomb.
                 if *action == BomberAction::Detonate
-                    && (self.known_bombs.is_empty() || in_blast_zone(pos, grid, &self.known_bombs)) {
-                        continue;
-                    }
+                    && (self.known_bombs.is_empty() || in_blast_zone(pos, grid, &self.known_bombs))
+                {
+                    continue;
+                }
                 let score = score_action(
                     action,
                     grid,
@@ -1217,41 +1218,56 @@ impl HLPlayer {
     ///
     /// Delegates to shared stats when present, else uses local field.
     #[cfg(feature = "bandit")]
-    fn arm_compressed(&self, arm: usize) -> bool {
+    pub fn arm_compressed(&self, arm: usize) -> bool {
         self.shared_stats
             .as_ref()
             .map_or(self.compressed[arm], |s| s.is_compressed(arm))
     }
 
     #[cfg(not(feature = "bandit"))]
-    fn arm_compressed(&self, arm: usize) -> bool {
+    pub fn arm_compressed(&self, arm: usize) -> bool {
         self.compressed[arm]
     }
 
     /// Visit count for an arm.
     #[cfg(feature = "bandit")]
-    fn arm_visits(&self, arm: usize) -> u32 {
+    pub fn arm_visits(&self, arm: usize) -> u32 {
         self.shared_stats
             .as_ref()
             .map_or(self.visits[arm], |s| s.visits(arm))
     }
 
     #[cfg(not(feature = "bandit"))]
-    fn arm_visits(&self, arm: usize) -> u32 {
+    pub fn arm_visits(&self, arm: usize) -> u32 {
         self.visits[arm]
     }
 
     /// Q-value estimate for an arm.
     #[cfg(feature = "bandit")]
-    fn arm_q(&self, arm: usize) -> f32 {
+    pub fn arm_q(&self, arm: usize) -> f32 {
         self.shared_stats
             .as_ref()
             .map_or(self.q_values[arm], |s| s.q_value(arm))
     }
 
     #[cfg(not(feature = "bandit"))]
-    fn arm_q(&self, arm: usize) -> f32 {
+    pub fn arm_q(&self, arm: usize) -> f32 {
         self.q_values[arm]
+    }
+
+    /// Total pulls across all arms.
+    ///
+    /// Delegates to shared stats when present, else uses local field.
+    #[cfg(feature = "bandit")]
+    pub fn arm_total_pulls(&self) -> u32 {
+        self.shared_stats
+            .as_ref()
+            .map_or(self.total_pulls, |s| s.total_pulls())
+    }
+
+    #[cfg(not(feature = "bandit"))]
+    pub fn arm_total_pulls(&self) -> u32 {
+        self.total_pulls
     }
 
     /// Update Q-value for an arm with observed reward.
