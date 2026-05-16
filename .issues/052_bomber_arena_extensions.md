@@ -1,7 +1,7 @@
 # Issue 052: Bomber Arena Extensions — Complex Bombs, Custom Maps, Agent Validators
 
 **Source:** Plan 033 (Bomberman Arena) — Out of Scope items now actionable
-**Status:** Partial — Task A complete, Task B complete, Task C (C1-C4) complete, C5-C10 open
+**Status:** ✅ Complete — Task A, B, C all done
 **Feature gate:** `bomber`, `bomber-wasm`
 
 ---
@@ -132,8 +132,8 @@ Build an outer orchestration loop that:
 - [x] C6: Implement `propose_from_trace(failures) -> Vec<ValidatorCandidate>` — generate fix candidates from failure patterns
 - [x] C7: Implement `AgentLoop` — propose → evaluate → filter → iterate, with max rounds and convergence check
 - [x] C8: Add bomber example: `bomber_08_agent_loop.rs` — runs agent loop, outputs best discovered validator
-- [ ] C9: Add feature gate `bomber-agent` (depends on `bomber-wasm`)
-- [ ] C10: Benchmarks: agent-discovered validator vs hand-written `ValidatorPlayer` rules
+- [x] C9: Add feature gate `bomber-agent` (depends on `bomber`)
+- [x] C10: Benchmarks: agent-discovered validator vs hand-written `ValidatorPlayer` rules
 
 ### Design Notes
 

@@ -9,7 +9,7 @@ pub mod replay;
 pub mod replay_backward;
 pub mod systems;
 
-#[cfg(feature = "bomber")]
+#[cfg(feature = "bomber-agent")]
 pub mod validator_agent;
 
 #[cfg(feature = "g_zero")]
@@ -25,7 +25,7 @@ pub use arena::ArenaGrid;
 pub use players::{BomberPlayer, GreedyPlayer, HLPlayer, RandomPlayer, ValidatorPlayer};
 pub use replay_backward::{BackwardSample, BackwardWalkResult, ReplayBackwardWalker};
 
-#[cfg(feature = "bomber")]
+#[cfg(feature = "bomber-agent")]
 pub use validator_agent::{
     AgentLoop, AgentLoopResult, ArenaEvaluation, FailureTrace, RulePlayer, TemplateProposer,
     ValidatorCandidate, ValidatorRule, evaluate_validator, propose_from_trace,

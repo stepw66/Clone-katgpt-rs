@@ -35,6 +35,7 @@ g_zero = ["bandit"]  # G-Zero self-play distillation — Hint-δ gated absorb + 
 fft = ["bandit"]     # FFT Tactics Arena — ATB battle engine with status effects (Plan 053)
 stepcode = ["bandit"]  # ⚠️ Plan 054 — NO GAIN proven. Infrastructure only. Off by default, not in `full`.
 bomber = ["bevy_ecs", "bandit"]  # Bomberman HL Arena (Plan 033)
+bomber-agent = ["bomber"]  # Coding agent validator loop (Issue 052, Tasks C9-C10)
 bomber-wasm = ["bomber", "wasmtime", "papaya"]  # WASM bomber validator loader (Plan 034) + batch pool (Plan 037)
 game_state = ["bomber"]  # GameState forward model trait + generic MCTS (Plan 056)
 hla_attention = []  # Higher-order Linear Attention — O(1) inference cache (Plan 057)
@@ -46,7 +47,7 @@ game_domain = ["domain_latent"]  # Alias for domain_latent — game-specific Con
 language_domain = []  # Language domain: BPE vocab, LLM models (Plan 040, future)
 gpu = []  # Placeholder — GPU training lives in riir-ai/riir-gpu
 # LeviathanVerifier is always compiled (no gate needed) — verifier.rs, benchmark.rs
-full = ["sudoku", "validator", "ppot", "domain_latent", "bandit", "delta_mem", "g_zero", "fft", "bomber", "bomber-wasm", "game_state", "hla_attention", "monopoly", "feedback", "rest", "embedding_router", "gpu", "game_domain", "language_domain"]
+full = ["sudoku", "validator", "ppot", "domain_latent", "bandit", "delta_mem", "g_zero", "fft", "bomber", "bomber-agent", "bomber-wasm", "game_state", "hla_attention", "monopoly", "feedback", "rest", "embedding_router", "gpu", "game_domain", "language_domain"]
 
 # ── Bandit (RL / Game Theory) ─────────────────────────────────
 
@@ -132,7 +133,7 @@ required-features = ["bomber"]
 
 [[example]]
 name = "bomber_08_agent_loop"
-required-features = ["bomber"]
+required-features = ["bomber-agent"]
 
 # ── Monopoly FSM Arena ────────────────────────────────────────
 

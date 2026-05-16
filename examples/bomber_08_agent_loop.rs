@@ -4,7 +4,7 @@
 //! Runs multiple generations of rule candidates, selects top performers,
 //! mutates from failure traces, and outputs the best discovered validator.
 //!
-//! Run: `cargo run --example bomber_08_agent_loop --features bomber --quiet`
+//! Run: `cargo run --example bomber_08_agent_loop --features bomber-agent --quiet`
 
 use microgpt_rs::pruners::bomber::{AgentLoop, ValidatorRule};
 
