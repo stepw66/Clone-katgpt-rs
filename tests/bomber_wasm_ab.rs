@@ -48,7 +48,7 @@ const NUM_BOMB_CONFIGS: u32 = 5;
 
 /// All movement actions (must match exactly between WASM and native).
 /// All action indices for comprehensive testing.
-const ALL_ACTION_INDICES: [usize; 6] = [0, 1, 2, 3, 4, 5];
+const ALL_ACTION_INDICES: [usize; 7] = [0, 1, 2, 3, 4, 5, 6];
 
 // ── Helpers ────────────────────────────────────────────────────
 

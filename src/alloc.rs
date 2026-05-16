@@ -46,9 +46,14 @@ mod tests {
     /// Serializes alloc tests — they share global counters and interfere in parallel.
     static TEST_MUTEX: Mutex<()> = Mutex::new(());
 
+    /// Recover from poisoned mutex (another test panicked while holding the lock).
+    fn lock_test_mutex() -> std::sync::MutexGuard<'static, ()> {
+        TEST_MUTEX.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     #[test]
     fn test_reset_clears_stats() {
-        let _lock = TEST_MUTEX.lock().unwrap();
+        let _lock = lock_test_mutex();
         reset_alloc_stats();
         let (count, bytes) = get_alloc_stats();
         assert_eq!(count, 0, "count should be zero after reset");
@@ -57,7 +62,7 @@ mod tests {
 
     #[test]
     fn test_alloc_increments_count() {
-        let _lock = TEST_MUTEX.lock().unwrap();
+        let _lock = lock_test_mutex();
         reset_alloc_stats();
         let _v: Vec<u8> = vec![0u8; 1024];
         let (count, bytes) = get_alloc_stats();
@@ -67,7 +72,7 @@ mod tests {
 
     #[test]
     fn test_multiple_allocs_accumulate() {
-        let _lock = TEST_MUTEX.lock().unwrap();
+        let _lock = lock_test_mutex();
         reset_alloc_stats();
         let _v1: Vec<u8> = vec![0u8; 64];
         let _v2: Vec<u8> = vec![0u8; 128];
@@ -78,7 +83,7 @@ mod tests {
 
     #[test]
     fn test_string_allocation() {
-        let _lock = TEST_MUTEX.lock().unwrap();
+        let _lock = lock_test_mutex();
         reset_alloc_stats();
         let _s = String::from("hello world test allocation");
         let (count, bytes) = get_alloc_stats();
@@ -88,7 +93,7 @@ mod tests {
 
     #[test]
     fn test_box_allocation() {
-        let _lock = TEST_MUTEX.lock().unwrap();
+        let _lock = lock_test_mutex();
         reset_alloc_stats();
         let _b = Box::new(42u64);
         let (count, bytes) = get_alloc_stats();
