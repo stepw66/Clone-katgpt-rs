@@ -333,6 +333,215 @@ pub fn simd_matmul_relu_rows(
     }
 }
 
+// ── Sparse Dot Product (Scattered Gather) ────────────────────
+
+/// SIMD sparse dot: `Σ weight[row_off + active_indices[i]] * active_values[i]` for `i in 0..alive`.
+///
+/// Gathers weight values at scattered positions and multiplies with contiguous
+/// `active_values`. Used for sparse MLP matmul where only alive (post-ReLU)
+/// neurons contribute.
+///
+/// Scalar fallback for alive ≤ 4 (gather overhead not worth it).
+/// NEON/AVX2 processes 4/8 elements per iteration for larger counts.
+#[inline]
+pub fn simd_sparse_dot_f32(
+    weight: &[f32],
+    row_off: usize,
+    active_indices: &[usize],
+    active_values: &[f32],
+    alive: usize,
+) -> f32 {
+    // Scalar fallback for very sparse cases — gather setup overhead exceeds benefit.
+    if alive <= 4 {
+        let mut sum = 0.0f32;
+        for i in 0..alive {
+            unsafe {
+                let c = *active_indices.get_unchecked(i);
+                sum += *weight.get_unchecked(row_off + c) * *active_values.get_unchecked(i);
+            }
+        }
+        return sum;
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    {
+        unsafe { neon_sparse_dot_f32(weight, row_off, active_indices, active_values, alive) }
+    }
+    #[cfg(target_arch = "x86_64")]
+    {
+        if is_avx2_fma_available() {
+            unsafe { avx2_sparse_dot_f32(weight, row_off, active_indices, active_values, alive) }
+        } else {
+            scalar_sparse_dot_f32(weight, row_off, active_indices, active_values, alive)
+        }
+    }
+    #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
+    {
+        scalar_sparse_dot_f32(weight, row_off, active_indices, active_values, alive)
+    }
+}
+
+#[allow(dead_code)]
+fn scalar_sparse_dot_f32(
+    weight: &[f32],
+    row_off: usize,
+    active_indices: &[usize],
+    active_values: &[f32],
+    alive: usize,
+) -> f32 {
+    let mut sum = 0.0f32;
+    for i in 0..alive {
+        unsafe {
+            let c = *active_indices.get_unchecked(i);
+            sum += *weight.get_unchecked(row_off + c) * *active_values.get_unchecked(i);
+        }
+    }
+    sum
+}
+
+#[cfg(target_arch = "aarch64")]
+#[inline]
+unsafe fn neon_sparse_dot_f32(
+    weight: &[f32],
+    row_off: usize,
+    active_indices: &[usize],
+    active_values: &[f32],
+    alive: usize,
+) -> f32 {
+    use core::arch::aarch64::{vaddvq_f32, vdupq_n_f32, vfmaq_f32, vld1q_f32, vsetq_lane_f32};
+
+    unsafe {
+        let mut acc = vdupq_n_f32(0.0);
+        let mut i = 0;
+        let chunks = alive / 4;
+
+        for _ in 0..chunks {
+            // Gather 4 weight values from scattered indices into NEON register
+            let mut ww = vdupq_n_f32(0.0);
+            ww = vsetq_lane_f32(
+                *weight.get_unchecked(row_off + *active_indices.get_unchecked(i)),
+                ww,
+                0,
+            );
+            ww = vsetq_lane_f32(
+                *weight.get_unchecked(row_off + *active_indices.get_unchecked(i + 1)),
+                ww,
+                1,
+            );
+            ww = vsetq_lane_f32(
+                *weight.get_unchecked(row_off + *active_indices.get_unchecked(i + 2)),
+                ww,
+                2,
+            );
+            ww = vsetq_lane_f32(
+                *weight.get_unchecked(row_off + *active_indices.get_unchecked(i + 3)),
+                ww,
+                3,
+            );
+
+            // Load 4 contiguous active values
+            let vv = vld1q_f32(active_values.as_ptr().add(i));
+
+            // FMA: acc += ww * vv (4 multiply-accumulates in one instruction)
+            acc = vfmaq_f32(acc, ww, vv);
+            i += 4;
+        }
+
+        let mut sum = vaddvq_f32(acc);
+        // Remainder tail (0..3 elements)
+        while i < alive {
+            let c = *active_indices.get_unchecked(i);
+            sum += *weight.get_unchecked(row_off + c) * *active_values.get_unchecked(i);
+            i += 1;
+        }
+
+        sum
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[inline]
+unsafe fn avx2_sparse_dot_f32(
+    weight: &[f32],
+    row_off: usize,
+    active_indices: &[usize],
+    active_values: &[f32],
+    alive: usize,
+) -> f32 {
+    use core::arch::x86_64::{
+        _mm256_fmadd_ps, _mm256_i32gather_ps, _mm256_loadu_ps, _mm256_set_epi32, _mm256_setzero_ps,
+    };
+
+    unsafe {
+        let mut acc = _mm256_setzero_ps();
+        let mut i = 0;
+        let chunks = alive / 8;
+
+        for _ in 0..chunks {
+            // Load 8 indices into __m256i for hardware gather
+            // Note: _mm256_set_epi32 parameter order is (e7, e6, ..., e0)
+            let idx = _mm256_set_epi32(
+                *active_indices.get_unchecked(i + 7) as i32,
+                *active_indices.get_unchecked(i + 6) as i32,
+                *active_indices.get_unchecked(i + 5) as i32,
+                *active_indices.get_unchecked(i + 4) as i32,
+                *active_indices.get_unchecked(i + 3) as i32,
+                *active_indices.get_unchecked(i + 2) as i32,
+                *active_indices.get_unchecked(i + 1) as i32,
+                *active_indices.get_unchecked(i) as i32,
+            );
+
+            // Hardware gather: weight[row_off + active_indices[j]] for each lane j
+            let ww = _mm256_i32gather_ps(weight.as_ptr().add(row_off), idx, 4);
+
+            // Load 8 contiguous active values
+            let vv = _mm256_loadu_ps(active_values.as_ptr().add(i));
+
+            // FMA: acc += ww * vv (8 multiply-accumulates in one instruction)
+            acc = _mm256_fmadd_ps(ww, vv, acc);
+            i += 8;
+        }
+
+        let mut sum = horizontal_sum_256(acc);
+        // Remainder tail (0..7 elements)
+        while i < alive {
+            let c = *active_indices.get_unchecked(i);
+            sum += *weight.get_unchecked(row_off + c) * *active_values.get_unchecked(i);
+            i += 1;
+        }
+
+        sum
+    }
+}
+
+// ── Sparse Matmul Row Dispatch ────────────────────────────────
+
+/// SIMD-accelerated sparse matmul: `output[r] = sparse_dot(weight_row_r, active)`.
+///
+/// Replaces the inner loop of `sparse_matmul()` in `types.rs`.
+/// `alive` is the count of active (non-zero) input elements after ReLU.
+///
+/// For each output row, computes the dot product using only the `alive`
+/// elements at `active_indices` positions from the weight row.
+#[inline(always)]
+pub fn simd_sparse_matmul_rows(
+    output: &mut [f32],
+    weight: &[f32],
+    active_indices: &[usize],
+    active_values: &[f32],
+    rows: usize,
+    cols: usize,
+    alive: usize,
+) {
+    for r in 0..rows {
+        let row_off = r * cols;
+        unsafe {
+            *output.get_unchecked_mut(r) =
+                simd_sparse_dot_f32(weight, row_off, active_indices, active_values, alive);
+        }
+    }
+}
+
 // ── x86_64 Horizontal Sum Helpers ─────────────────────────────
 
 #[cfg(target_arch = "x86_64")]
@@ -570,5 +779,183 @@ mod tests {
         let fma = simd_fma_row(&a, &b, 4);
 
         assert!((dot - fma).abs() < 1e-6);
+    }
+
+    // ── Sparse SIMD Tests ────────────────────────────────────
+
+    #[test]
+    fn sparse_dot_matches_scalar_dense() {
+        // 8 elements, all alive (indices 0..7) — should match dense dot
+        let weight = [1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
+        let indices: Vec<usize> = (0..8).collect();
+        let values = [0.5f32, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0];
+
+        let sparse = simd_sparse_dot_f32(&weight, 0, &indices, &values, 8);
+        let dense = simd_dot_f32(&weight, &values, 8);
+
+        assert!(
+            (sparse - dense).abs() < 1e-4,
+            "sparse={sparse}, dense={dense}"
+        );
+    }
+
+    #[test]
+    fn sparse_dot_matches_scalar_sparse() {
+        // 13 elements alive out of 64 (typical micro config: 20% of mlp_hidden=64)
+        let mut weight = vec![0.0f32; 64];
+        for (i, w) in weight.iter_mut().enumerate() {
+            *w = (i as f32 + 1.0) * 0.01;
+        }
+        let indices: Vec<usize> = vec![0, 3, 7, 12, 15, 20, 25, 31, 38, 45, 50, 56, 63];
+        let values: Vec<f32> = indices.iter().map(|&i| weight[i] * 2.0).collect();
+
+        let simd_result = simd_sparse_dot_f32(&weight, 0, &indices, &values, 13);
+        let scalar_result = scalar_sparse_dot_f32(&weight, 0, &indices, &values, 13);
+
+        assert!(
+            (simd_result - scalar_result).abs() < 1e-4,
+            "simd={simd_result}, scalar={scalar_result}"
+        );
+    }
+
+    #[test]
+    fn sparse_dot_small_alive_uses_scalar() {
+        // alive=3 — should use inline scalar fallback (≤4)
+        let weight = [1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
+        let indices = vec![0usize, 3, 7];
+        let values = [0.5f32, 1.0, 1.5];
+
+        let result = simd_sparse_dot_f32(&weight, 0, &indices, &values, 3);
+        let expected = 1.0 * 0.5 + 4.0 * 1.0 + 8.0 * 1.5; // 0.5 + 4.0 + 12.0 = 16.5
+
+        assert!(
+            (result - expected).abs() < 1e-4,
+            "result={result}, expected={expected}"
+        );
+    }
+
+    #[test]
+    fn sparse_dot_zero_alive() {
+        let weight = [1.0f32, 2.0, 3.0, 4.0];
+        let indices: Vec<usize> = vec![];
+        let values: Vec<f32> = vec![];
+
+        let result = simd_sparse_dot_f32(&weight, 0, &indices, &values, 0);
+        assert!(result.abs() < 1e-6, "expected 0.0, got {result}");
+    }
+
+    #[test]
+    fn sparse_dot_with_row_offset() {
+        // 8-element weight row at offset 4 in a 12-element weight matrix
+        let mut weight = [0.0f32; 12]; // first 4 are padding
+        weight[4] = 1.0;
+        weight[5] = 2.0;
+        weight[6] = 3.0;
+        weight[7] = 4.0;
+        weight[8] = 5.0;
+        weight[9] = 6.0;
+        weight[10] = 7.0;
+        weight[11] = 8.0;
+        // Need mutable for construction
+        let weight = weight;
+
+        let indices: Vec<usize> = (0..8).collect();
+        let values = [1.0f32; 8];
+
+        let result = simd_sparse_dot_f32(&weight, 4, &indices, &values, 8);
+        // Expected: 1+2+3+4+5+6+7+8 = 36
+        assert!((result - 36.0).abs() < 1e-4, "result={result}");
+    }
+
+    #[test]
+    fn sparse_dot_alive_5_triggers_simd() {
+        // alive=5 — just above scalar fallback threshold (4)
+        let weight = [1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
+        let indices: Vec<usize> = (0..8).collect();
+        let values = [1.0f32, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0];
+
+        let simd_result = simd_sparse_dot_f32(&weight, 0, &indices, &values, 5);
+        let expected = 1.0 + 2.0 + 3.0 + 4.0 + 5.0; // first 5 only
+
+        assert!(
+            (simd_result - expected).abs() < 1e-4,
+            "simd={simd_result}, expected={expected}"
+        );
+    }
+
+    #[test]
+    fn sparse_matmul_rows_matches_scalar() {
+        let rows = 4;
+        let cols = 8;
+        // Identity-like weight: row r has weight[r*cols + r] = 1.0, rest = 0.1
+        let weight: Vec<f32> = (0..rows * cols)
+            .map(|i| {
+                let r = i / cols;
+                let c = i % cols;
+                if r == c { 1.0 } else { 0.1 }
+            })
+            .collect();
+
+        // Only indices 1, 3, 5 are alive with values
+        let indices = vec![1usize, 3, 5];
+        let values = vec![2.0f32, 3.0, 4.0];
+
+        let mut output_scalar = vec![0.0f32; rows];
+        let mut output_simd = vec![0.0f32; rows];
+
+        // Scalar
+        for r in 0..rows {
+            output_scalar[r] = scalar_sparse_dot_f32(&weight, r * cols, &indices, &values, 3);
+        }
+
+        // SIMD
+        simd_sparse_matmul_rows(&mut output_simd, &weight, &indices, &values, rows, cols, 3);
+
+        for r in 0..rows {
+            assert!(
+                (output_scalar[r] - output_simd[r]).abs() < 1e-4,
+                "row {r}: scalar={}, simd={}",
+                output_scalar[r],
+                output_simd[r]
+            );
+        }
+    }
+
+    #[test]
+    fn sparse_matmul_rows_game_config() {
+        // Game config: n_embd=32 rows, mlp_hidden=128 cols, ~20% alive = 26 elements
+        let rows = 32;
+        let cols = 128;
+        let weight: Vec<f32> = (0..rows * cols).map(|i| (i % 100) as f32 * 0.01).collect();
+
+        // Simulate 26 alive neurons (20% of 128)
+        let alive = 26;
+        let indices: Vec<usize> = (0..alive).map(|i| i * (cols / alive)).collect();
+        let values: Vec<f32> = (0..alive).map(|i| (i as f32 + 1.0) * 0.1).collect();
+
+        let mut output_scalar = vec![0.0f32; rows];
+        let mut output_simd = vec![0.0f32; rows];
+
+        for r in 0..rows {
+            output_scalar[r] = scalar_sparse_dot_f32(&weight, r * cols, &indices, &values, alive);
+        }
+        simd_sparse_matmul_rows(
+            &mut output_simd,
+            &weight,
+            &indices,
+            &values,
+            rows,
+            cols,
+            alive,
+        );
+
+        for r in 0..rows {
+            assert!(
+                (output_scalar[r] - output_simd[r]).abs() < 1e-3,
+                "row {r}: scalar={}, simd={}",
+                output_scalar[r],
+                output_simd[r]
+            );
+        }
     }
 }

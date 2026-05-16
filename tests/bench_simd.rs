@@ -129,6 +129,145 @@ fn bench_simd_matmul_relu() {
     }
 }
 
+// ── Sparse Matmul Benchmarks ────────────────────────────────
+
+#[test]
+fn bench_simd_sparse_matmul() {
+    let iters = 50_000;
+    let warmup = 1_000;
+
+    println!("\n━━ SIMD Sparse Matmul Throughput ━━━━━━━━━━━━━━━━━━━━━━━━━");
+    println!(
+        "  {:<18} {:>6} {:>12} {:>12}",
+        "Config", "alive", "ops/s", "µs/op"
+    );
+    println!("  {}", "─".repeat(50));
+
+    // Test configs: (rows, cols, alive_pct, label)
+    let configs: [(usize, usize, f32, &str); 4] = [
+        (16, 64, 0.20, "micro 16×64"),
+        (32, 128, 0.20, "game 32×128"),
+        (64, 256, 0.20, "small 64×256"),
+        (32, 128, 0.10, "game 10% alive"),
+    ];
+
+    for (rows, cols, alive_pct, label) in &configs {
+        let weight: Vec<f32> = (0..*rows * *cols)
+            .map(|i| (i % 100) as f32 * 0.01)
+            .collect();
+        let mut input = vec![0.0f32; *cols];
+        let alive_count = (*cols as f32 * alive_pct) as usize;
+        // Place alive values evenly spaced
+        for i in 0..alive_count {
+            let idx = i * (*cols / alive_count.max(1));
+            if idx < *cols {
+                input[idx] = (i as f32 + 1.0) * 0.1;
+            }
+        }
+        let mut output = vec![0.0f32; *rows];
+        let mut active_indices = vec![0usize; *cols];
+        let mut active_values = vec![0.0f32; *cols];
+
+        for _ in 0..warmup {
+            microgpt_rs::types::sparse_matmul(
+                &mut output,
+                &weight,
+                &input,
+                *rows,
+                *cols,
+                &mut active_indices,
+                &mut active_values,
+            );
+        }
+
+        let start = Instant::now();
+        for _ in 0..iters {
+            microgpt_rs::types::sparse_matmul(
+                &mut output,
+                &weight,
+                &input,
+                *rows,
+                *cols,
+                &mut active_indices,
+                &mut active_values,
+            );
+        }
+        let elapsed = start.elapsed();
+        let tps = iters as f64 / elapsed.as_secs_f64();
+        let us = 1_000_000.0 / tps;
+
+        println!(
+            "  {:<18} {:>6} {:>12} {:>12}",
+            label,
+            alive_count,
+            fmt_tps(tps),
+            fmt_us(us),
+        );
+    }
+
+    // Compare sparse vs dense for game config when sparsity is high
+    println!("\n  Sparse vs Dense (game config, 20% alive):");
+    let rows = 32;
+    let cols = 128;
+    let weight: Vec<f32> = (0..rows * cols).map(|i| (i % 100) as f32 * 0.01).collect();
+    let mut input = vec![0.0f32; cols];
+    let alive_count = (cols as f32 * 0.20) as usize;
+    for i in 0..alive_count {
+        let idx = i * (cols / alive_count);
+        if idx < cols {
+            input[idx] = (i as f32 + 1.0) * 0.1;
+        }
+    }
+    let mut output_sparse = vec![0.0f32; rows];
+    let mut output_dense = vec![0.0f32; rows];
+    let mut active_indices = vec![0usize; cols];
+    let mut active_values = vec![0.0f32; cols];
+
+    // Sparse
+    for _ in 0..warmup {
+        microgpt_rs::types::sparse_matmul(
+            &mut output_sparse,
+            &weight,
+            &input,
+            rows,
+            cols,
+            &mut active_indices,
+            &mut active_values,
+        );
+    }
+    let start = Instant::now();
+    for _ in 0..iters {
+        microgpt_rs::types::sparse_matmul(
+            &mut output_sparse,
+            &weight,
+            &input,
+            rows,
+            cols,
+            &mut active_indices,
+            &mut active_values,
+        );
+    }
+    let sparse_tps = iters as f64 / start.elapsed().as_secs_f64();
+
+    // Dense
+    for _ in 0..warmup {
+        microgpt_rs::types::matmul(&mut output_dense, &weight, &input, rows, cols);
+    }
+    let start = Instant::now();
+    for _ in 0..iters {
+        microgpt_rs::types::matmul(&mut output_dense, &weight, &input, rows, cols);
+    }
+    let dense_tps = iters as f64 / start.elapsed().as_secs_f64();
+
+    let speedup = sparse_tps / dense_tps;
+    println!(
+        "    Sparse (SIMD): {} ({:.1}× vs dense)",
+        fmt_tps(sparse_tps),
+        speedup,
+    );
+    println!("    Dense  (SIMD): {}", fmt_tps(dense_tps));
+}
+
 // ── HLA Kernel Benchmarks ───────────────────────────────────
 
 #[test]

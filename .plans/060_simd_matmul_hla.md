@@ -50,7 +50,17 @@
   - NEON: `vmaxq_f32(acc, vdupq_n_f32(0.0))` for zero-clamp
   - AVX2: `_mm256_max_ps(acc, _mm256_setzero_ps())`
 
-- [ ] ~~T5: SIMD-accelerate `sparse_matmul()` in `types.rs`~~ Skipped — YAGNI: >80% sparsity means gather overhead negates SIMD benefit on 2-4 active elements
+- [x] T5: SIMD-accelerate `sparse_matmul()` in `types.rs` ✅
+  - Added `simd_sparse_dot_f32()` — NEON gather via `vsetq_lane_f32` (4 elements/iter), AVX2 hardware gather via `_mm256_i32gather_ps` (8 elements/iter)
+  - Added `simd_sparse_matmul_rows()` — row-wise dispatch using sparse dot
+  - Scalar fallback for alive ≤ 4 (gather setup overhead exceeds benefit)
+  - Updated `sparse_matmul()` Phase 2 to call `simd_sparse_matmul_rows()`
+  - Benchmark results (NEON, 20% sparsity):
+    - micro 16×64 (12 alive): 269K/s
+    - game 32×128 (25 alive): 78K/s
+    - small 64×256 (51 alive): 21K/s
+    - **Sparse SIMD is 2.4× faster than dense SIMD** at 20% sparsity
+  - 8 new unit tests: sparse dot matches scalar, sparse matmul matches scalar, row offset, edge cases
 
 ### Phase 3: SIMD HLA Kernels
 

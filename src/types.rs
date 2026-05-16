@@ -622,19 +622,18 @@ pub fn sparse_matmul(
         }
     }
 
-    // Phase 2: Sparse multiply — only process alive neurons
-    for r in 0..rows {
-        let row_off = r * cols;
-        let mut sum = 0.0f32;
-        for i in 0..alive {
-            let c = unsafe { *active_indices.get_unchecked(i) };
-            let val = unsafe { *active_values.get_unchecked(i) };
-            sum += unsafe { *weight.get_unchecked(row_off + c) } * val;
-        }
-        unsafe {
-            *output.get_unchecked_mut(r) = sum;
-        }
-    }
+    // Phase 2: Sparse multiply — SIMD-accelerated (Plan 060 T5)
+    // NEON gathers 4 elements/iter, AVX2 gathers 8 elements/iter via hardware gather.
+    // Scalar fallback for alive ≤ 4 (gather overhead exceeds benefit).
+    crate::simd::simd_sparse_matmul_rows(
+        output,
+        weight,
+        active_indices,
+        active_values,
+        rows,
+        cols,
+        alive,
+    );
 
     alive
 }
