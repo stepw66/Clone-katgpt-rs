@@ -291,7 +291,8 @@ impl AbResults {
             | BomberAction::Down
             | BomberAction::Left
             | BomberAction::Right
-            | BomberAction::Wait => {
+            | BomberAction::Wait
+            | BomberAction::Detonate => {
                 self.critical_mismatches.push(Mismatch {
                     seed,
                     x,
