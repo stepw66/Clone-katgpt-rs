@@ -1573,6 +1573,138 @@ fn test_sudoku9x9_next_empty() {
     assert_eq!(puzzle.grid[r][c], 0, "returned cell should be empty");
 }
 
+// ── Percepta Head-to-Head Regression ───────────────────────────
+//
+// We benchmark against Percepta's reported ~30K tok/s, ~900K tokens for Sudoku.
+// Our Rust hull attention should be orders of magnitude faster.
+// These tests guard against performance regressions.
+
+/// Parse the exact puzzle from Percepta's transformer-vm manifest.yaml.
+fn percepta_reference_puzzle() -> [[u8; 9]; 9] {
+    let s = "530070000600195000098000060800060003400803001700020006060000280000419005000080079";
+    let mut grid = [[0u8; 9]; 9];
+    for (i, ch) in s.chars().enumerate() {
+        grid[i / 9][i % 9] = ch.to_digit(10).unwrap() as u8;
+    }
+    grid
+}
+
+#[test]
+fn test_percepta_sudoku_reference_puzzle_solves() {
+    use microgpt_rs::percepta::{SolveEvent, StreamingSolver};
+
+    let grid = percepta_reference_puzzle();
+    let mut solver = StreamingSolver::new(grid);
+    let solved = solver.solve_streaming();
+
+    assert!(solved, "Percepta reference puzzle should solve");
+    assert!(solver.state.is_solved(), "board should be fully solved");
+
+    // Verify we get solved event with stats
+    let last = solver.events.last();
+    assert!(
+        matches!(last, Some(SolveEvent::Solved { .. })),
+        "should end with Solved event"
+    );
+}
+
+#[test]
+fn test_percepta_sudoku_hull_compression() {
+    use microgpt_rs::percepta::StreamingSolver;
+
+    let grid = percepta_reference_puzzle();
+    let mut solver = StreamingSolver::new(grid);
+    solver.solve_streaming();
+
+    let total = solver.cache.len();
+    let hull = solver.cache.hull_len();
+
+    // Percepta's reference puzzle: 4209 trace entries, hull compresses to ~6 vertices
+    // Regression: hull should compress by at least 100x
+    assert!(
+        total >= 3000,
+        "Percepta puzzle should produce >= 3000 trace entries, got {total}"
+    );
+    assert!(
+        hull <= 20,
+        "hull should compress to <= 20 vertices, got {hull}"
+    );
+    let ratio = total as f64 / hull as f64;
+    assert!(
+        ratio >= 100.0,
+        "hull compression should be >= 100x, got {ratio:.1}x ({total} → {hull})"
+    );
+}
+
+#[test]
+fn test_percepta_sudoku_beats_their_throughput() {
+    use microgpt_rs::percepta::StreamingSolver;
+    use std::time::Instant;
+
+    // Percepta reports ~30K tok/s for their C++ engine, ~900K tokens → ~30s
+    // Our bar: we should solve at least 100× faster (sub-second is trivial)
+    let grid = percepta_reference_puzzle();
+    let iterations = 10;
+    let mut durations = Vec::with_capacity(iterations);
+
+    for _ in 0..iterations {
+        let mut solver = StreamingSolver::new(grid);
+        let start = Instant::now();
+        let solved = solver.solve_streaming();
+        durations.push(start.elapsed());
+        assert!(solved, "must solve on every iteration");
+    }
+
+    durations.sort();
+    let median = durations[iterations / 2];
+
+    // Regression: median solve must be under 10ms (we typically see ~300µs)
+    assert!(
+        median.as_millis() < 10,
+        "median solve should be < 10ms, got {}ms — performance regression!",
+        median.as_millis()
+    );
+
+    // Verify throughput: at least 1M steps/s (we typically see ~13M/s)
+    let steps = 4209.0; // known step count for this puzzle
+    let steps_per_sec = steps / median.as_secs_f64();
+    assert!(
+        steps_per_sec >= 1_000_000.0,
+        "throughput should be >= 1M steps/s, got {steps_per_sec:.0}/s — performance regression!"
+    );
+}
+
+#[test]
+fn test_percepta_arto_inkala_beats_their_throughput() {
+    use microgpt_rs::percepta::StreamingSolver;
+    use std::time::Instant;
+
+    // Arto Inkala (21 clues, world's hardest): ~49K steps, we typically solve in ~5ms
+    // Percepta would take ~900K tokens / 30K tok/s = ~30s for easier puzzles
+    // If they ran Arto Inkala it would take much longer (more backtracking → more tokens)
+    let grid = microgpt_rs::percepta::Sudoku9x9::arto_inkala().grid;
+    let iterations = 10;
+    let mut durations = Vec::with_capacity(iterations);
+
+    for _ in 0..iterations {
+        let mut solver = StreamingSolver::new(grid);
+        let start = Instant::now();
+        let solved = solver.solve_streaming();
+        durations.push(start.elapsed());
+        assert!(solved, "must solve Arto Inkala on every iteration");
+    }
+
+    durations.sort();
+    let median = durations[iterations / 2];
+
+    // Regression: median solve must be under 50ms (we typically see ~5ms)
+    assert!(
+        median.as_millis() < 50,
+        "Arto Inkala median solve should be < 50ms, got {}ms — performance regression!",
+        median.as_millis()
+    );
+}
+
 // ── Raven RSM (Routing Slot Memory) Tests ──────────────────────
 
 #[test]

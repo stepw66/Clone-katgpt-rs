@@ -101,6 +101,36 @@ The full compiler stack, ported from Python to Rust. This is the "transformer as
 
 ---
 
+## Capability Comparison: What Percepta CAN'T Do
+
+Percepta compiles C programs into transformer weights for deterministic execution. Impressive, but limited to static programs. Our `riir-ai` pipeline does things they fundamentally cannot:
+
+| Capability | Percepta | Us (riir-ai) |
+|-----------|----------|--------------|
+| **Sudoku (deterministic)** | ✅ C→WASM→weights, ~30K tok/s | ✅ Hull attention, ~13M steps/s |
+| **Bomberman (game AI)** | ❌ Could compile C AI, but static — no learning | ✅ LoRA + validator.wasm + bandit adaptation |
+| **Self-play improvement** | ❌ Weights constructed, never updated | ✅ G-Zero, HL heuristic learning, episode DB flywheel |
+| **Dynamic rule hotswap** | ❌ Recompile needed to change behavior | ✅ Hotswap validators at runtime (bomber_dynamic_rules_demo) |
+| **Trained model inference** | ❌ No training paradigm — analytical weights only | ✅ lora.bin loaded for real game policy (bandit_with_real_model_demo) |
+| **Adaptive strategies** | ❌ Deterministic by construction | ✅ Multi-armed bandit, Thompson sampling, decaying epsilon |
+| **Cross-domain transfer** | ❌ One model per program (Futamura) | ✅ Same engine for code translation, game AI, constraint satisfaction |
+
+**The bomber demos in `riir-ai/crates/riir-examples/` are the proof:**
+
+- `bomber_demo.rs` — loads `bomber_validator.wasm` + `game_lora.bin`, runs mini-arena, A/B validates WASM vs native
+- `bomber_tech_ab_demo.rs` — tech tree A/B testing,ValidatorPlayer vs GreedyPlayer vs HLPlayer
+- `bomber_dynamic_rules_demo.rs` — hotswap validation rules mid-game at runtime
+- `bandit_with_real_model_demo.rs` — loads real lora.bin, runs Leviathan verification, compares Rust vs Python validators
+
+Percepta could theoretically compile a Bomberman AI into transformer weights, but:
+1. It would play the SAME way every time (deterministic)
+2. It can't learn from outcomes or improve
+3. The model would need to be much larger for game state
+4. Execution at ~30K tok/s is too slow for real-time game decisions
+5. No mechanism for loading trained weights or adapting strategies
+
+**Our moat isn't speed — it's learning.** They proved transformers can execute programs. We proved transformers can *learn to play games*.
+
 ## What Stays Secret
 
 Per our strategy (`03_Commercial_Open_Source_Strategy_Verdict.md`), the open engine needs closed fuel:
@@ -119,13 +149,44 @@ Per our strategy (`03_Commercial_Open_Source_Strategy_Verdict.md`), the open eng
 
 ## Speed Comparison (Honest)
 
-| System | What | Speed | Verdict |
+### Current: UNFAIR — Different Algorithms, Different Machines
+
+Our `sudoku_04_percepta_vs` example shows 92,000× faster. That's misleading:
+
+| | Ours | Percepta |
+|---|---|---|
+| **Algorithm** | Rust backtracking + hull attention | Transformer executes WASM bytecodes |
+| **Machine** | Our Mac | Their machine (unknown specs) |
+| **Comparison** | Steps/s (backtracking) | tok/s (WASM interpretation) |
+
+Speed difference is mostly algorithm (backtracking vs WASM-in-transformer), NOT language (Rust vs C++).
+
+### Fair Benchmark Plan (After Plan 064)
+
+After we RIIR their transformer-vm, we can run a **fair** comparison:
+
+1. **Same algorithm**: Our Rust transformer-vm executing the same WASM bytecodes
+2. **Same inputs**: Same Sudoku puzzle, same token prefix
+3. **Same machine**: Our Mac, both binaries compiled with `-O2`/`--release`
+4. **Metric**: tok/s (identical computation per token)
+
+Then we compare:
+- Python transformer (their code, our machine)
+- C++ transformer (their engine, our machine)
+- Rust transformer (our port, our machine)
+
+This isolates language/runtime performance from algorithm differences.
+
+### Raw Execution Speed (Oracles)
+
+| System | What | Speed | Context |
 |--------|------|-------|---------|
-| Our wasmtime validators | Token validation | ~0.5μs/call | Production-grade |
-| Their C++ transformer engine | Program execution | ~30K tok/s (30KB/s) | Research-grade |
+| Our wasmtime validators | Token validation | ~0.5μs/call | Production pipeline |
+| Our Rust backtracking | Sudoku solve | ~13M steps/s | Different algorithm |
+| Their C++ transformer | Program execution | ~30K tok/s | Research artifact |
 | Their Python transformer | Program execution | Much slower than C++ | Development only |
 
-For raw execution, wasmtime is ~1000× faster. But this comparison misses the point — Percepta's contribution is proving transformers CAN execute programs deterministically, not doing it fast.
+For raw program execution, wasmtime is ~1000× faster than their transformer. But their contribution is proving transformers CAN execute programs deterministically — the speed will improve with better implementations.
 
 ---
 
@@ -138,10 +199,21 @@ Phase A (now):     CHT + CumSum + Parabolic → src/percepta/cht.rs, hull.rs
 Phase B (next):    ReGLU/stepglu/persist → src/percepta/gates.rs
                    New plan after 063 completes
                    
-Phase C (maybe):   DSL → MILP → WASM interpreter → weights → Futamura
-                   DECISION GATE: only if Phase B reveals product-market fit
-                   for "programs as weights"
+Phase C (DO IT):   DSL → MILP → WASM interpreter → weights → Futamura
+                   Full RIIR of transformer-vm (~9K lines Python+C++ → Rust)
+                   Then: fair benchmark, same algorithm, same machine
+                   Plan 064: 11 task groups, all committed
 ```
+
+### Head-to-Head Benchmarks
+
+| Benchmark | Status | Fair? | Where |
+|-----------|--------|-------|-------|
+| Sudoku (hull attention vs reported numbers) | ✅ Done | ❌ Different algo/machine | `examples/sudoku_04_percepta_vs.rs` |
+| Sudoku regression tests | ✅ Done | ❌ Same | `tests/integration.rs` |
+| Sudoku (Rust transformer-vm vs C++ transformer-vm) | ❌ After Plan 064 | ✅ Same algo/machine | `src/percepta/runner.rs` |
+| Bomberman (learning vs static) | ❌ N/A — they can't do it | N/A — capability gap | `riir-ai/crates/riir-examples/` |
+| lora.bin + validator.wasm vs percepta_wasm | ❌ After Plan 064 | Different paradigm | `riir-ai/crates/riir-examples/` |
 
 ---
 

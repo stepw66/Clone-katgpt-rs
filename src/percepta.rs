@@ -241,6 +241,23 @@ impl Sudoku9x9 {
         ])
     }
 
+    /// The exact puzzle from Percepta's transformer-vm `manifest.yaml` (30 clues).
+    /// Source: <https://github.com/Percepta-Core/transformer-vm/blob/main/transformer_vm/examples/manifest.yaml>
+    /// String: `530070000600195000098000060800060003400803001700020006060000280000419005000080079`
+    pub fn percepta_reference() -> Self {
+        Self::new([
+            [5, 3, 0, 0, 7, 0, 0, 0, 0],
+            [6, 0, 0, 1, 9, 5, 0, 0, 0],
+            [0, 9, 8, 0, 0, 0, 0, 6, 0],
+            [8, 0, 0, 0, 6, 0, 0, 0, 3],
+            [4, 0, 0, 8, 0, 3, 0, 0, 1],
+            [7, 0, 0, 0, 2, 0, 0, 0, 6],
+            [0, 6, 0, 0, 0, 0, 2, 8, 0],
+            [0, 0, 0, 4, 1, 9, 0, 0, 5],
+            [0, 0, 0, 0, 8, 0, 0, 7, 9],
+        ])
+    }
+
     /// Check if placing `digit` at (row, col) violates Sudoku rules.
     /// The "rules engine" — deterministic constraint satisfaction.
     pub fn is_valid_move(&self, row: usize, col: usize, digit: u8) -> bool {

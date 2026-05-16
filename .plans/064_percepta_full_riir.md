@@ -199,7 +199,7 @@ src/percepta/
 - [ ] **J8:** End-to-end test: compile → build → run for all example programs (hello, addition, collatz, fibonacci, min_cost_matching, sudoku)
 - [ ] **J9:** Benchmark: Rust transformer vs Python transformer vs C++ transformer throughput
 
-### TG-K: Examples + Documentation
+### TG-K: Examples + Benchmarks + Documentation
 
 **Depends on:** TG-J. **Source:** `examples/` directory
 
@@ -207,8 +207,53 @@ src/percepta/
 - [ ] **K2:** Add Rust-specific examples and benchmarks
 - [ ] **K3:** Write module documentation for each `src/percepta/` file
 - [ ] **K4:** Update README with full Percepta section (remove "known limitations" as they're fixed)
-- [ ] **K5:** Add feature flag hierarchy to Cargo.toml (`percepta` → `percepta_gates` → `percepta_graph` → `percepta_wasm` → `percepta_compile`)
+- [ ] **K5:** Add feature flag hierarchy to Cargo.toml (`percepta` → `percepta_gates` → `percepta_graph` → `percepta_wasm` → `percepta_compile`) ✅ done
 - [ ] **K6:** Write a blog post: "transformer-vm in Rust — 9K lines of Python+C++ → idiomatic Rust"
+
+### TG-L: Percepta Head-to-Head Benchmarks (Pre-064)
+
+**Depends on:** Nothing (uses existing `KVCache2D` + `StreamingSolver`). **Status:** Done.
+
+These benchmarks use our *existing* Graham Scan implementation vs Percepta's reported numbers.
+The real same-algorithm comparison comes after Plan 064 completes (TG-H).
+
+- [x] **L1:** Add `percepta_reference_puzzle()` to parse their manifest.yaml Sudoku string
+- [x] **L2:** Add `examples/sudoku_04_percepta_vs.rs` — visual head-to-head comparison
+- [x] **L3:** Add regression tests in `tests/integration.rs`:
+  - `test_percepta_sudoku_reference_puzzle_solves` — their puzzle solves correctly
+  - `test_percepta_sudoku_hull_compression` — hull compresses >= 100x
+  - `test_percepta_sudoku_beats_their_throughput` — median < 10ms, >= 1M steps/s
+  - `test_percepta_arto_inkala_beats_their_throughput` — median < 50ms
+
+**Current results (Apple M-series, release build) — ⚠️ UNFAIR COMPARISON:**
+
+| Puzzle | Steps | Our Time | Throughput | vs Percepta (C++) |
+|--------|-------|----------|------------|-------------------|
+| Percepta reference (30 clues) | 4,209 | 325µs | 12.9M steps/s | **92,213× faster** |
+| Arto Inkala (21 clues, hardest) | 49,559 | 5.18ms | 9.6M steps/s | **~5,800× faster** |
+
+**Why this is unfair:**
+- Different algorithms (our Rust backtracking vs their WASM-in-transformer)
+- Different machines (our Mac vs their unknown specs)
+- Different metrics (steps/s vs tok/s)
+- Speed difference is mostly algorithm, NOT language
+
+**Fair benchmark plan (after Plan 064 completes):**
+1. RIIR their transformer-vm to Rust
+2. Same algorithm: Rust transformer executing same WASM bytecodes
+3. Same inputs: same Sudoku puzzle, same token prefix
+4. Same machine: our Mac, both binaries with `-O2`/`--release`
+5. Metric: tok/s (identical computation per token)
+6. Compare: Python tok/s vs C++ tok/s vs Rust tok/s
+
+**What Percepta CANNOT do (capability gap):**
+- Bomberman with learning/adaptation (lora.bin + validator.wasm + bandit)
+- Self-play improvement (G-Zero, heuristic learning)
+- Dynamic rule hotswap at runtime
+- Real model inference with trained weights
+
+Our moat isn't speed — it's learning. They proved transformers can execute programs.
+We proved transformers can learn to play games.
 
 ## Design Decisions
 
