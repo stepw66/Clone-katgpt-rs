@@ -94,12 +94,7 @@
   - **Verdict: Path C — HLA training path not viable via QKV LoRA distillation**
   - 10K full run skipped: 500-step pilot shows clear divergence trend, no convergence signal
 
-- [ ] T9: If KL converges → validate on tiny retrieval task
-  - Train SDPA model on 5 short "documents" (each ~8 tokens)
-  - Distill to HLA with LoRA
-  - Query: can HLA model produce correct next-token for document content?
-  - Needle-in-a-haystack: inject one specific fact, can HLA retrieve it?
-  - If retrieval fails → HLA is a domain shaper, not a knowledge store
+- [x] ~~T9: If KL converges → validate on tiny retrieval task~~ Skipped — KL did not converge (Path C decision, T10). Condition "If KL converges" was not met; 500-step pilot showed clear divergence.
 
 ### Phase 3: Decision Gate
 

@@ -50,11 +50,7 @@
   - NEON: `vmaxq_f32(acc, vdupq_n_f32(0.0))` for zero-clamp
   - AVX2: `_mm256_max_ps(acc, _mm256_setzero_ps())`
 
-- [ ] ~~T5: SIMD-accelerate `sparse_matmul()` in `types.rs`~~ Skipped — not worth it for >80% sparsity (gather overhead negates SIMD benefit on 2-4 active elements)
-  - Gather active indices + SIMD dot product on active elements only
-  - For sparsity > 80%: SIMD on 2-4 active elements may not be worth it
-  - Add heuristic: if active_count >= 4, use SIMD; else scalar
-  - Only compiled when `sparse_mlp` feature enabled
+- [ ] ~~T5: SIMD-accelerate `sparse_matmul()` in `types.rs`~~ Skipped — YAGNI: >80% sparsity means gather overhead negates SIMD benefit on 2-4 active elements
 
 ### Phase 3: SIMD HLA Kernels
 
