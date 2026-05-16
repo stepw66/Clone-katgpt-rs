@@ -72,7 +72,7 @@ src/
     absorb_compress.rs  CompressConfig, AbsorbCompress trait, AbsorbCompressLayer<P> ♭
     hot_swap.rs     HotSwapPruner<P> — blake3 hash comparison reload ♭
     regression.rs   GoldenTrace, RegressionFailure, RegressionResult, RegressionSuite, ReplayReward trait ♭
-    review_metrics.rs  ReviewSummary, ReviewMetrics, ReviewStrategy ♭
+    review_metrics.rs  ReviewSummary, ReviewMetrics, ReviewStrategy, EntropyAnomalySummary ♭
     bomber/         Bomberman 4-player HL arena (bevy_ecs) ⍟
       mod.rs        BomberAction, PowerUpKind, Cell, ECS components/resources, GameEvent
       arena.rs      ArenaGrid — 13×13 grid generation + presets

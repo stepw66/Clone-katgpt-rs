@@ -2,6 +2,8 @@
 
 > **Status (Plan 049):** G-Zero self-play distillation — both phases complete. Phase 1 (modelless): `HintDelta`, `DeltaGatedAbsorbCompress`, `DeltaBanditPruner`, `TemplateProposer` behind `--features g_zero` (implies `bandit`). Phase 2 (model-based): `LengthNormalizedDPO`, `GRPO`, `DeltaFilter` (6-stage), `GZeroLoop` in `riir-gpu` (Plan 059, 3,369 lines, 76 tests, 2 DPO WGSL kernels). See `src/pruners/g_zero/` and `riir-gpu/src/`.
 >
+> **Status (Plan 061):** Entropy anomaly detection — `ReviewMetrics` now tracks session-level entropy (mean, max, count) via `record_entropy()` and `is_high_entropy_session()`. `DeltaMemoryState::mean_prediction_error()` exposes drift signal. Behind `--features bandit,delta_mem`. See `.plans/061_entropy_anomaly_detection.md`.
+>
 > **Status (Plan 036):** ReviewMetrics, ReviewStrategy, and benefit-ratio gating are implemented behind `--features bandit`. AbsorbCompress gates compression by benefit-risk ratio. `ppot_rescue_reviewed` provides structured review loops behind `--features bandit,ppot`. See example `review_01_metrics`.
 >
 > **Status (Plan 032):** TrialLog, AbsorbCompress, HotSwapPruner, and RegressionSuite are implemented behind `--features bandit`. See examples `hl_01_trial_log` and `hl_02_hotswap`.
@@ -383,7 +385,7 @@ The paper found **3.1:1** for o3-mini. Our default threshold is **2.0:1** (conse
 
 | Component | Review Metrics Integration |
 |---|---|
-| `ReviewMetrics` | Atomic counters tracking helpful/harmful/both_correct/both_wrong |
+| `ReviewMetrics` | Atomic counters tracking helpful/harmful/both_correct/both_wrong + entropy anomaly (mean, max, count) |
 | `BanditSession::with_metrics()` | Records whether bandit pick vs random pick was optimal |
 | `AbsorbCompress::should_compress_gated()` | Blocks compression when ratio < threshold |
 | `PpotConfig::with_review_loop(N)` | Structured review loop (paper's rN) |
@@ -625,7 +627,7 @@ No backpropagation. No loss function. The memory learns a linear correction map 
 
 | Component | File | Purpose |
 |-----------|------|---------|
-| `DeltaMemoryState` | `delta_mem/state.rs` | Compact r×r associative memory with `read()`, `write()`, `adapt_gates()` |
+| `DeltaMemoryState` | `delta_mem/state.rs` | Compact r×r associative memory with `read()`, `write()`, `adapt_gates()`, `mean_prediction_error()` |
 | `DeltaMemoryConfig` | `delta_mem/state.rs` | `rank`, `beta_init`, `couple_gates` configuration |
 | `FeatureHasher` | `delta_mem/hash.rs` | Random projection: L2-normalized keys, raw values |
 | `ContextFeatures` | `delta_mem/hash.rs` | Extracts hashable features from DDTree context (depth, parent tokens) |
