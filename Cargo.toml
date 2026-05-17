@@ -262,6 +262,10 @@ required-features = ["go"]
 name = "go_06_bench"
 required-features = ["go"]
 
+[[example]]
+name = "go_07_tui"
+required-features = ["go"]
+
 # ── Tactical AI ────────────────────────────────────────────────
 
 [[example]]

@@ -18,8 +18,9 @@ All examples run with `cargo run --example <name>`. Some require feature flags.
 | 10 | Sudoku | 3 examples | `sudoku` |
 | 11 | Tactical AI | 6 examples | — |
 | 12 | Review | 1 example | `bandit` |
-| 14 | Getting Started | 1 example | — |
-| 15 | Stepwise Reward Shaping | 1 example | `stepcode` |
+| 14 | Go (AutoGo) | 1 example | `go` |
+| 15 | Getting Started | 1 example | — |
+| 16 | Stepwise Reward Shaping | 1 example | `stepcode` |
 
 ---
 
@@ -447,6 +448,29 @@ cargo run --example stepcode_01_shaped_bandit --features stepcode
 
 ---
 
+## 14. Go (AutoGo)
+
+Go game AI with 6 player strategies: Random, Greedy, Validator, HL, GZero, MCTS. Tromp-Taylor scoring on 9×9, 13×13, or 19×19 boards.
+
+### go_07_tui
+
+Animated ratatui TUI replay — AI vs AI auto-play on a Go board. Two-panel layout: unicode stone grid + scoreboard with captures, score estimate, and last move. Supports 6 player types and configurable board size.
+
+```bash
+# Default: Greedy (Black) vs Validator (White) on 9×9
+cargo run --features go --example go_07_tui
+
+# Custom players and board
+cargo run --features go --example go_07_tui -- --black hl --white gzero --size 9
+
+# Custom seed
+cargo run --features go --example go_07_tui -- --seed 99
+```
+
+Controls: ←/→ step, Space auto-play, R new game, Q quit.
+
+---
+
 ## Feature Flags
 
 | Flag | Gates | Dependencies |
@@ -458,6 +482,7 @@ cargo run --example stepcode_01_shaped_bandit --features stepcode
 | `bomber` | Bomberman arena (Plan 033) | `bevy_ecs`, `bandit` |
 | `bomber-wasm` | Bomberman NNPlayer with WASM validator | `wasmtime`, `bomber` |
 | `monopoly` | Monopoly FSM arena (Plan 035) | `bevy_ecs`, `bandit` |
+| `go` | AutoGo API bridge + Go GameState (Plan 065) | `bandit`, `reqwest` |
 | `stepcode` | StepCode shaped bandit rewards | — |
 | — | FFT Tactics Arena (Plan 047) | `fastrand` |
 | `rest` | REST API client | `reqwest`, `tokio` |
