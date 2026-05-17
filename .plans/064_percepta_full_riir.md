@@ -87,29 +87,29 @@ src/percepta/
 
 **Depends on:** TG-A. **Source:** `graph/core.py` (gates portion, ~80 lines)
 
-- [ ] **B1:** Implement `reglu(a, b) = relu(b) * a` — 1 FFN neuron
-- [ ] **B2:** Implement `stepglu(a, b) = a * step(b >= 0)` — 2 neurons + persist
-- [ ] **B3:** Implement `multiply(a, b) = a * b` — 2 neurons + persist (full multiplication)
-- [ ] **B4:** Implement `persist(expr)` — materialize expression into residual slot
-- [ ] **B5:** Unit tests: each gate produces correct output for known inputs
-- [ ] **B6:** Integration test: gates compose into conditional logic (if/else pattern)
+- [x] **B1:** Implement `reglu(a, b) = relu(b) * a` — 1 FFN neuron ✅
+- [x] **B2:** Implement `stepglu(a, b) = a * step(b >= 0)` — 2 neurons + persist ✅
+- [x] **B3:** Implement `multiply(a, b) = a * b` — 2 neurons + persist (full multiplication) ✅
+- [x] **B4:** Implement `persist(expr)` — materialize expression into residual slot ✅
+- [x] **B5:** Unit tests: each gate produces correct output for known inputs ✅
+- [x] **B6:** Integration test: gates compose into conditional logic (if/else pattern) ✅
 
 ### TG-C: Expression/Dimension DSL
 
 **Depends on:** TG-B. **Source:** `graph/core.py` (449 lines)
 
-- [ ] **C1:** Implement `Expression` — sparse linear combination of dimensions
-- [ ] **C2:** Implement `Dimension` enum with 6 variants:
-  - `InputDimension` — token embedding values
-  - `ReGLUDimension` — relu(b)*a gated FFN unit
-  - `PersistDimension` — materialize expression into residual slot
-  - `LookUpDimension` — attention-based retrieval from token history
-  - `CumSumDimension` — cumulative sum via attention averaging
-  - `GenericDimension` — named intermediate value
-- [ ] **C3:** Implement `ProgramGraph` — DAG of expressions + dimensions
-- [ ] **C4:** Implement `fetch()`, `fetch_sum()`, `reglu()`, `stepglu()`, `persist()` builder methods
-- [ ] **C5:** Implement graph validation (cycle detection, dimension consistency)
-- [ ] **C6:** Unit tests: build simple computation graphs, verify dimension counts
+- [x] **C1:** Implement `Expression` — sparse linear combination of dimensions ✅
+- [x] **C2:** Implement `Dimension` enum with 6 variants: ✅
+  - `Input` — token embedding values (one, position, inv_log_pos, position_sq)
+  - `ReGLU` — relu(b)*a gated FFN unit (has a_expr, b_expr)
+  - `Persist` — materialize expression into residual slot (has expr)
+  - `LookUp` — attention-based retrieval from token history (lookup_id, value_index)
+  - `CumSum` — cumulative sum via attention averaging (has value_expr)
+  - `Generic` — named intermediate value
+- [x] **C3:** Implement `ProgramGraph` — DAG of expressions + dimensions ✅
+- [x] **C4:** Implement `fetch()`, `fetch_sum()`, `reglu()`, `stepglu()`, `persist()` builder methods ✅
+- [x] **C5:** Implement graph validation (cycle detection, dimension consistency) ✅
+- [x] **C6:** Unit tests: build simple computation graphs, verify dimension counts ✅ (50 tests, 0 failures)
 
 ### TG-D: MILP Scheduling
 
