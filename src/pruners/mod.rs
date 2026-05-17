@@ -120,6 +120,12 @@ pub use monopoly::{
     square_kind, square_name,
 };
 
+#[cfg(feature = "go")]
+pub mod go;
+
+#[cfg(feature = "go")]
+pub use go::{AutoGoClient, AutoGoGameState};
+
 #[cfg(feature = "fft")]
 pub mod fft;
 

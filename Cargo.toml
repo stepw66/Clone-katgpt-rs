@@ -18,6 +18,7 @@ wasmtime = { version = "28", optional = true }     # WASM bomber validator (Plan
 papaya = { version = "0.2", optional = true }      # Lock-free concurrent HashMap (Plan 037)
 ordered-float = { version = "4", optional = true } # Ord wrapper for f64 — CHT breakpoints (Plan 064 TG-A)
 good_lp = { version = "1", optional = true, default-features = false, features = ["microlp"] } # MILP solver — scheduling (Plan 064 TG-D), pure Rust microlp backend
+reqwest = { version = "0.12", features = ["blocking", "json"], optional = true } # AutoGo REST API client (Plan 065)
 toml = "0.8"
 
 [dev-dependencies]
@@ -44,6 +45,7 @@ game_state = ["bomber"]  # GameState forward model trait + generic MCTS (Plan 05
 bandit_mcts = ["game_state"]  # Bandit-guided MCTS rollout policy — NFSP/MCTS duality (Plan 067)
 hla_attention = []  # Higher-order Linear Attention — O(1) inference cache (Plan 057)
 monopoly = ["bevy_ecs", "bandit"]  # Monopoly Board Game Engine (Plan 034)
+go = ["bandit", "dep:reqwest"]  # AutoGo API bridge + Go GameState (Plan 065)
 # ── Percepta (transformer-vm RIIR, Plan 064) ──────────────────
 percepta = ["ordered-float"]  # CHT hull cache: upper+lower, HullMeta, tie-break, cumsum (TG-A)
 percepta_gates = ["percepta"]  # + ReGLU, stepglu, multiply, persist primitives (TG-B)
@@ -57,7 +59,7 @@ game_domain = ["domain_latent"]  # Alias for domain_latent — game-specific Con
 language_domain = []  # Language domain: BPE vocab, LLM models (Plan 040, future)
 gpu = []  # Placeholder — GPU training lives in riir-ai/riir-gpu
 # LeviathanVerifier is always compiled (no gate needed) — verifier.rs, benchmark.rs
-full = ["sudoku", "validator", "ppot", "domain_latent", "bandit", "delta_mem", "g_zero", "fft", "bomber", "bomber-agent", "bomber-wasm", "game_state", "bandit_mcts", "hla_attention", "monopoly", "feedback", "rest", "embedding_router", "gpu", "game_domain", "language_domain", "percepta_compile", "dllm"]
+full = ["sudoku", "validator", "ppot", "domain_latent", "bandit", "delta_mem", "g_zero", "fft", "bomber", "bomber-agent", "bomber-wasm", "game_state", "bandit_mcts", "hla_attention", "monopoly", "go", "feedback", "rest", "embedding_router", "gpu", "game_domain", "language_domain", "percepta_compile", "dllm"]
 
 # ── Bandit (RL / Game Theory) ─────────────────────────────────
 
@@ -228,6 +230,12 @@ required-features = ["sudoku"]
 [[example]]
 name = "sudoku_03_tui"
 required-features = ["sudoku"]
+
+# ── Go (AutoGo API Bridge) ────────────────────────────────────
+
+[[example]]
+name = "go_00_api_bridge"
+required-features = ["go"]
 
 # ── Tactical AI ────────────────────────────────────────────────
 

@@ -50,12 +50,13 @@
 
 Before writing any Go rules, validate the head-to-head benchmarking path by spinning up AutoGo and calling its REST API.
 
-- [ ] T0: Plan creation
-- [ ] T1: Create `src/pruners/go/` module directory with `mod.rs` (index + re-exports)
-- [ ] T2: Add feature gate `go = ["bandit", "dep:reqwest", "dep:serde", "dep:serde_json"]` in `Cargo.toml`
+- [x] T0: Plan creation
+- [x] T1: Create `src/pruners/go/` module directory with `mod.rs` (index + re-exports)
+- [x] T2: Add feature gate `go = ["bandit", "dep:reqwest"]` in `Cargo.toml`
   - **NOT** `game_state` (which pulls in `bevy_ecs` via bomber). The `GameState` trait is always compiled.
   - `bandit` is needed for HL player and G-Zero.
-- [ ] T3: Create `src/pruners/go/autogo_client.rs` — REST API client for AutoGo's `play.py` server:
+  - Note: `serde`/`serde_json` are already non-optional deps, only `reqwest` needed as optional.
+- [x] T3: Create `src/pruners/go/autogo_client.rs` — REST API client for AutoGo's `play.py` server:
   ```rust
   /// AutoGo REST API client (calls play.py FastAPI server).
   ///
@@ -108,9 +109,9 @@ Before writing any Go rules, validate the head-to-head benchmarking path by spin
       pub fn pass_move(&self, game_id: &str) -> Result<AutoGoGameState>;
   }
   ```
-- [ ] T4: Add `reqwest` (blocking) + `serde` + `serde_json` as optional deps behind `go` feature
-- [ ] T5: Write integration test `tests/go_integration.rs` — spin up AutoGo Docker, play 10 random games via API, validate game flow (new → move → response → is_over)
-- [ ] T6: Write `scripts/autogo_server.sh` — helper script to build + run AutoGo Docker container on port 8000:
+- [x] T4: Add `reqwest` (blocking, json) as optional dep behind `go` feature (`serde`/`serde_json` already non-optional)
+- [x] T5: Write integration test `tests/go_integration.rs` — 16 tests (all `#[ignore]` pending server), validates game flow (new → move → response → is_over)
+- [x] T6: Write `scripts/autogo_server.sh` — helper script with start/stop/status commands, builds + runs AutoGo Docker container on port 8000:
   ```bash
   #!/bin/bash
   # Spin up AutoGo container for head-to-head benchmarking
@@ -121,8 +122,8 @@ Before writing any Go rules, validate the head-to-head benchmarking path by spin
   echo "AutoGo server: http://localhost:8000"
   echo "Agents: $(curl -s http://localhost:8000/api/agents | python3 -m json.tool)"
   ```
-- [ ] T7: Create `examples/go_00_api_bridge.rs` — play 5 random games against AutoGo's random agent via API, print results
-- [ ] T8: Measure API latency: time per full game (new + N moves), estimate max games/sec. Note: one `make_move()` call = two Go moves (G2), so effective moves/sec = 2 × API calls/sec.
+- [x] T7: Create `examples/go_00_api_bridge.rs` — play 5 random games against AutoGo's random agent via API, print results summary with W/L/D
+- [x] T8: Latency measurement in `tests/go_integration.rs::measure_api_latency` — times API calls, computes games/sec and effective moves/sec (×2 via G2 dual-move). Actual measurement requires running AutoGo server.
 
 ### Phase 1: Go GameState (Port from AutoGo)
 
