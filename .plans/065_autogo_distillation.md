@@ -289,7 +289,7 @@ Port `FastGoBoard` (`go.py`) + `GoBoard` (`go_game.h`) to Rust, implementing our
 
 ### Phase 3: Head-to-Head Tournament via API (Prove Against AutoGo)
 
-- [ ] T25: Create `src/pruners/go/tournament.rs` — tournament runner using `AutoGoClient`:
+- [x] T25: Create `src/pruners/go/tournament.rs` — tournament runner using `AutoGoClient`:
   ```rust
   pub struct GoTournamentConfig {
       pub board_size: usize,           // 9
@@ -309,12 +309,12 @@ Port `FastGoBoard` (`go.py`) + `GoBoard` (`go_game.h`) to Rust, implementing our
       pub total_moves: usize,
   }
   ```
-- [ ] T26: Implement `run_tournament()` — plays N games via API, records results:
+- [x] T26: Implement `run_tournament()` — plays N games via API, records results:
   - For each game: `new_game()` → our player picks from `legal_moves` → `make_move()` → **response has AI move baked in (G2)** → read new `legal_moves` → repeat until `is_over`
   - Swap colors each game if `play_both_colors`
   - Track per-move timing, game outcome, score delta
   - **Note:** API returns `result` as string like "W+2.5" — parse to determine winner
-- [ ] T27: Implement `AutoGoProxyPlayer` — adapter that lets our tournament runner also play AS AutoGo's agent (for control experiments):
+- [x] T27: Implement `AutoGoProxyPlayer` — adapter that lets our tournament runner also play AS AutoGo's agent (for control experiments):
   ```rust
   /// Wraps AutoGo's REST API as a GoPlayer, so we can run pure-AutoGo games for baseline.
   pub struct AutoGoProxyPlayer<'a> {
@@ -322,16 +322,16 @@ Port `FastGoBoard` (`go.py`) + `GoBoard` (`go_game.h`) to Rust, implementing our
       game_id: String,
   }
   ```
-- [ ] T28: Run baseline tournaments:
+- [x] T28: Run baseline tournaments:
   - Our Random vs AutoGo Random (sanity: should be ~50/50)
   - Our Random vs AutoGo `gnugo1` (expect: we lose badly)
   - Our Greedy vs AutoGo `gnugo1` (expect: competitive)
-- [ ] T29: Run HL tournaments:
+- [x] T29: Run HL tournaments:
   - Our HL vs AutoGo Random (expect: >70% win rate)
   - Our HL vs AutoGo `gnugo1` (target: >55% win rate)
-- [ ] T30: Run G-Zero tournament:
+- [x] T30: Run G-Zero tournament:
   - Our GZero vs AutoGo `gnugo1` (stretch: >55% win rate)
-- [ ] T31: Create `examples/go_03_head_to_head.rs` — run tournament against AutoGo, print results table
+- [x] T31: Create `examples/go_03_head_to_head.rs` — run tournament against AutoGo, print results table
 
 ### Phase 4: Go G-Zero Self-Play (Prove Transfer)
 

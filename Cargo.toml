@@ -246,6 +246,10 @@ required-features = ["go"]
 name = "go_02_tournament"
 required-features = ["go"]
 
+[[example]]
+name = "go_03_head_to_head"
+required-features = ["go"]
+
 # ── Tactical AI ────────────────────────────────────────────────
 
 [[example]]

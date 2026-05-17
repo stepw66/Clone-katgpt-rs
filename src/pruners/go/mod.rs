@@ -9,11 +9,13 @@
 //! - [`autogo_client`] — REST API client for AutoGo's `play.py` server
 //! - [`replay`] — Game recording and deterministic playback
 //! - [`players`] — `GoPlayer` trait + 6 AI player implementations (Plan 065 Phase 2)
+//! - [`tournament`] — Head-to-head tournament runner against AutoGo agents (Plan 065 Phase 3)
 
 pub mod autogo_client;
 pub mod players;
 pub mod replay;
 pub mod state;
+pub mod tournament;
 pub mod types;
 
 // ── Re-exports ─────────────────────────────────────────────────
@@ -34,4 +36,11 @@ pub use autogo_client::{AutoGoClient, AutoGoError, AutoGoGameState};
 pub use players::{
     GoGZeroPlayer, GoGreedyPlayer, GoHLPlayer, GoMctsPlayer, GoMoveCategory, GoPlayer,
     GoRandomPlayer, GoTemplate, GoValidatorPlayer,
+};
+
+// Tournament
+pub use tournament::{
+    AutoGoProxyPlayer, GameOutcome, GameResult, GoPlayerType, GoTournamentConfig,
+    GoTournamentResult, ParsedResult, TournamentDef, parse_go_result, print_batch_table,
+    run_tournament, run_tournament_batch,
 };
