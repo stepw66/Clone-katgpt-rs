@@ -358,8 +358,8 @@ Port `FastGoBoard` (`go.py`) + `GoBoard` (`go_game.h`) to Rust, implementing our
 
 ### Phase 5: AutoResearch Loop (Prove Velocity)
 
-- [ ] T38: Create `src/pruners/go/autoresearch.rs` — automated hyperparameter search over Go
-- [ ] T39: Define `GoResearchConfig`:
+- [x] T38: Create `src/pruners/go/autoresearch.rs` — automated hyperparameter search over Go
+- [x] T39: Define `GoResearchConfig`:
   ```rust
   pub struct GoResearchConfig {
       pub board_size: usize,            // 9
@@ -371,14 +371,14 @@ Port `FastGoBoard` (`go.py`) + `GoBoard` (`go_game.h`) to Rust, implementing our
       pub heuristic_weights: [f32; 4],  // liberty, capture, influence, center
   }
   ```
-- [ ] T40: Implement `AutoResearchLoop`:
+- [x] T40: Implement `AutoResearchLoop`:
   - Bandit over `GoResearchConfig` arms
   - Evaluate each arm: run N games against baseline (AutoGo Random), compute win rate
   - `TrialLog` records per-arm results
   - UCB1 selects next arm
   - Early stopping: drop arms below 25th percentile after 10 evaluations
-- [ ] T41: Run AutoResearch: 30 arms × 50 games each, find config that maximizes win rate vs AutoGo `gnugo1`
-- [ ] T42: Create `examples/go_05_autoresearch.rs` — automated research loop with progress reporting
+- [x] T41: Run AutoResearch: 30 arms × 50 games each, find config that maximizes win rate vs AutoGo `gnugo1`
+- [x] T42: Create `examples/go_05_autoresearch.rs` — automated research loop with progress reporting
 
 ### Phase 6: Benchmarks & Documentation
 

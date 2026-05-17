@@ -119,7 +119,7 @@ fn section_quick_demo(board_size: usize) {
         let winner_str = match ep.winner {
             Some(GoCell::Black) => "Black",
             Some(GoCell::White) => "White",
-            None => "Draw",
+            Some(GoCell::Empty) | None => "Draw",
         };
 
         let avg_delta = if ep.move_deltas.is_empty() {
