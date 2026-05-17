@@ -27,6 +27,7 @@ crossterm = "0.28"
 
 [features]
 default = ["sparse_mlp", "domain_latent", "ppot", "bandit"]  # Production best perf + accuracy (Plan 051)
+sp_kv = []  # SP-KV self-pruned key-value attention (Plan 070)
 dllm = []  # D2F Discrete Diffusion Forcing — mini dLLM research (Plan 066)
 sudoku = []
 validator = ["syn", "proc-macro2"]

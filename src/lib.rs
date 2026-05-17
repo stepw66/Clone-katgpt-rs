@@ -12,6 +12,8 @@ pub mod percepta;
 pub mod plot;
 pub mod pruners;
 pub mod simd;
+#[cfg(feature = "sp_kv")]
+pub mod sp_kv;
 pub mod speculative;
 pub mod tokenizer;
 pub mod transformer;

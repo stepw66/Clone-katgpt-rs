@@ -69,6 +69,10 @@ pub enum AttentionMode {
     Causal,
     Bidirectional,
     BlockCausal,
+    /// SP-KV self-pruned key-value attention (Plan 070).
+    /// Learns which KV pairs to retain via utility prediction.
+    /// Gate bias = log(u) during training, 0|-inf during inference.
+    SpKv,
 }
 
 impl Config {
