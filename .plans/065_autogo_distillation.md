@@ -335,8 +335,8 @@ Port `FastGoBoard` (`go.py`) + `GoBoard` (`go_game.h`) to Rust, implementing our
 
 ### Phase 4: Go G-Zero Self-Play (Prove Transfer)
 
-- [ ] T32: Create `src/pruners/go/g_zero_player.rs` — full G-Zero self-play for Go
-- [ ] T33: Implement `GoTemplateProposer` with **4 initial templates** (G7 — reduced from 9):
+- [x] T32: Create `src/pruners/go/g_zero_player.rs` — full G-Zero self-play for Go
+- [x] T33: Implement `GoTemplateProposer` with **4 initial templates** (G7 — reduced from 9):
   ```rust
   /// Go strategy templates for G-Zero self-play.
   /// Start with 4 proven patterns, expand based on δ signal results.
@@ -348,13 +348,13 @@ Port `FastGoBoard` (`go.py`) + `GoBoard` (`go_game.h`) to Rust, implementing our
   }
   ```
   Future expansion (post-plan): `SideApproach`, `Invasion`, `Attachment`, `Peep`, `Joseki`
-- [ ] T34: Implement Go-specific HintDelta computation:
+- [x] T34: Implement Go-specific HintDelta computation:
   - Query: board state as flat token array (0=empty, 1=black, 2=white)
   - Hint: template-suggested move + rationale string
   - δ = log-prob shift between hinted and unhinted generation
-- [ ] T35: Implement `DeltaGatedAbsorbCompress` for Go — promote high-δ templates to hard constraints
-- [ ] T36: Run G-Zero self-play: 500 episodes, 9×9, track δ evolution, template exploration, win rates over time
-- [ ] T37: Create `examples/go_04_gzero.rs` — G-Zero self-play with per-round metrics + δ tracking
+- [x] T35: Implement `DeltaGatedAbsorbCompress` for Go — promote high-δ templates to hard constraints
+- [x] T36: Run G-Zero self-play: 500 episodes, 9×9, track δ evolution, template exploration, win rates over time
+- [x] T37: Create `examples/go_04_gzero.rs` — G-Zero self-play with per-round metrics + δ tracking
 
 ### Phase 5: AutoResearch Loop (Prove Velocity)
 

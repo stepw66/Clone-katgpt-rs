@@ -10,8 +10,10 @@
 //! - [`replay`] — Game recording and deterministic playback
 //! - [`players`] — `GoPlayer` trait + 6 AI player implementations (Plan 065 Phase 2)
 //! - [`tournament`] — Head-to-head tournament runner against AutoGo agents (Plan 065 Phase 3)
+//! - [`g_zero_player`] — G-Zero self-play with HintDelta and absorb-compress (Plan 065 Phase 4)
 
 pub mod autogo_client;
+pub mod g_zero_player;
 pub mod players;
 pub mod replay;
 pub mod state;
@@ -36,6 +38,12 @@ pub use autogo_client::{AutoGoClient, AutoGoError, AutoGoGameState};
 pub use players::{
     GoGZeroPlayer, GoGreedyPlayer, GoHLPlayer, GoMctsPlayer, GoMoveCategory, GoPlayer,
     GoRandomPlayer, GoTemplate, GoValidatorPlayer,
+};
+
+// G-Zero Self-Play
+pub use g_zero_player::{
+    GoDeltaGatedAbsorbCompress, GoDeltaGatedConfig, GoGZeroSelfPlayConfig, GoGZeroSelfPlayResults,
+    GoSelfPlayResult, GoTemplateProposer, MoveDelta, compute_go_delta, run_gzero_selfplay,
 };
 
 // Tournament
