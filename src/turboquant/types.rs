@@ -41,4 +41,6 @@ pub struct TurboQuantKVCacheConfig {
     pub n_layers: usize,
     /// KV dimension (head_dim × n_kv_head).
     pub kv_dim: usize,
+    /// Maximum sequence length (block_size).
+    pub max_seq_len: usize,
 }

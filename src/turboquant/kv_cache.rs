@@ -110,21 +110,21 @@ impl TurboQuantKVCache {
         Self {
             layers,
             key_indices: vec![
-                vec![vec![0u8; packed_key_len]; tq_config.kv_dim];
+                vec![vec![0u8; packed_key_len]; tq_config.max_seq_len];
                 tq_config.n_layers
             ],
-            key_norms: vec![vec![0.0f32; tq_config.kv_dim]; tq_config.n_layers],
+            key_norms: vec![vec![0.0f32; tq_config.max_seq_len]; tq_config.n_layers],
             val_indices: vec![
-                vec![vec![0u8; packed_val_len]; tq_config.kv_dim];
+                vec![vec![0u8; packed_val_len]; tq_config.max_seq_len];
                 tq_config.n_layers
             ],
-            val_norms: vec![vec![0.0f32; tq_config.kv_dim]; tq_config.n_layers],
+            val_norms: vec![vec![0.0f32; tq_config.max_seq_len]; tq_config.n_layers],
             pos: 0,
             n_layers: tq_config.n_layers,
             kv_dim: tq_config.kv_dim,
             key_bits: tq_config.key_bits,
             val_bits: tq_config.val_bits,
-            max_seq_len: tq_config.kv_dim,
+            max_seq_len: tq_config.max_seq_len,
             scratch_normalized: vec![0.0f32; tq_config.kv_dim],
             scratch_rotated: vec![0.0f32; tq_config.kv_dim],
             scratch_indices: vec![0u8; tq_config.kv_dim],
@@ -644,6 +644,7 @@ fn unpack_indices_into(packed: &[u8], bits: u8, n: usize, out: &mut [u8]) {
 
 #[cfg(test)]
 mod tests {
+    use super::super::types::TurboQuantKVCacheConfig;
     use super::*;
     use crate::types::Config;
 
@@ -831,5 +832,80 @@ mod tests {
             return 0.0;
         }
         dot / (na * nb)
+    }
+
+    #[test]
+    fn test_with_config_max_seq_len_independent_of_kv_dim() {
+        // Regression test: with_config must use max_seq_len for position dimension,
+        // not kv_dim. If kv_dim < max_seq_len, storing beyond kv_dim would OOB.
+        // If kv_dim > max_seq_len, the cache is oversized but functional.
+        let kv_dim = 32;
+        let max_seq_len = 64; // kv_dim < max_seq_len — the dangerous case
+        let n_layers = 2;
+
+        let tq_config = TurboQuantKVCacheConfig {
+            key_bits: 4,
+            val_bits: 4,
+            seed: 42,
+            n_layers,
+            kv_dim,
+            max_seq_len,
+        };
+
+        let mut cache = TurboQuantKVCache::with_config(&tq_config);
+
+        // Verify structural dimensions
+        assert_eq!(cache.kv_dim, kv_dim);
+        assert_eq!(cache.max_seq_len, max_seq_len);
+        assert_eq!(cache.key_indices.len(), n_layers);
+        assert_eq!(cache.key_norms.len(), n_layers);
+        assert_eq!(
+            cache.key_norms[0].len(),
+            max_seq_len,
+            "key_norms positions must be max_seq_len"
+        );
+        assert_eq!(
+            cache.val_norms[0].len(),
+            max_seq_len,
+            "val_norms positions must be max_seq_len"
+        );
+
+        // Store at position kv_dim (would OOB if max_seq_len was wrongly set to kv_dim)
+        let key: Vec<f32> = (0..kv_dim).map(|i| (i as f32 * 0.1).sin()).collect();
+        let val: Vec<f32> = (0..kv_dim).map(|i| (i as f32 * 0.2).cos()).collect();
+        cache.store_key(0, kv_dim, &key);
+        cache.store_value(0, kv_dim, &val);
+
+        let recon_key = cache.dequantize_key(0, kv_dim);
+        let cos_key = cosine_sim(&key, &recon_key);
+        assert!(
+            cos_key > 0.85,
+            "Key at pos={kv_dim} cos_sim={cos_key}, expected > 0.85"
+        );
+    }
+
+    #[test]
+    fn test_with_config_matches_new() {
+        // Verify with_config produces same dimensions as new() given equivalent params
+        let config = test_config();
+        let cache_new = TurboQuantKVCache::new(&config, 4, 4);
+
+        let tq_config = TurboQuantKVCacheConfig {
+            key_bits: 4,
+            val_bits: 4,
+            seed: 42,
+            n_layers: config.n_layer,
+            kv_dim: crate::types::kv_dim(&config),
+            max_seq_len: config.block_size,
+        };
+        let cache_cfg = TurboQuantKVCache::with_config(&tq_config);
+
+        assert_eq!(cache_new.kv_dim, cache_cfg.kv_dim);
+        assert_eq!(cache_new.max_seq_len, cache_cfg.max_seq_len);
+        assert_eq!(cache_new.n_layers, cache_cfg.n_layers);
+        assert_eq!(cache_new.key_bits, cache_cfg.key_bits);
+        assert_eq!(cache_new.val_bits, cache_cfg.val_bits);
+        assert_eq!(cache_new.key_norms[0].len(), cache_cfg.key_norms[0].len());
+        assert_eq!(cache_new.val_norms[0].len(), cache_cfg.val_norms[0].len());
     }
 }
