@@ -111,34 +111,37 @@ Implemented in `riir-ai/crates/riir-gpu` (Plan 068).
 ## Phase 2: Inference Pipeline (Feature-Gated)
 
 ### Task 2.1: D2F Inference in microgpt-rs
-- [ ] Feature flag `dllm` in `microgpt-rs/Cargo.toml`
-- [ ] New module `src/speculative/d2f.rs` (feature-gated)
-- [ ] Implement `d2f_decode_block()`:
-  1. Initialize block with mask tokens
-  2. Denoising loop (configurable steps T)
-  3. Each step: forward_block_causal → get logits → ConstraintPruner mask → sample
-  4. Confidence remasking (τ_conf threshold)
-- [ ] Implement pipelined parallel decode:
-  - `D2fBlockState` enum: `SemiActivated`, `FullyActivated`
-  - Dynamic block addition when predecessor exceeds τ_add
-  - State transition at τ_act threshold
-- [ ] Integrate with existing `SpeculativeContext` for buffer reuse
+- [x] Feature flag `dllm` in `microgpt-rs/Cargo.toml` (already existed)
+- [x] New module `src/speculative/d2f.rs` (feature-gated, `#![allow]` for sampling helpers)
+- [x] Implement `d2f_decode_block()`:
+  1. Initialize block with mask tokens ✅
+  2. Denoising loop (configurable steps T) ✅
+  3. Each step: forward_block_causal → get logits → ConstraintPruner mask → sample ✅
+  4. Confidence remasking (τ_conf threshold) ✅
+- [x] Implement pipelined parallel decode:
+  - `D2fBlockState` enum: `SemiActivated`, `FullyActivated` ✅
+  - `D2fPipeline::decode_all()` — sequential block decode with block-causal context ✅
+  - `D2fDecodeConfig` with `quality()`/`speed()`/`with_block_size()` presets ✅
+  - `d2f_decode_block_with_prompt()` for prompt-context conditioning ✅
+  - `d2f_decode_block_with_target()` for accuracy measurement ✅
+- [x] Re-exports in `speculative/mod.rs` behind `#[cfg(feature = "dllm")]`
+- [ ] Integrate with existing `SpeculativeContext` for zero-alloc buffer reuse (currently uses allocating `forward_block_causal_positions`)
 - [ ] KV cache commit: after block fully denoised, write to persistent KV cache
 
 ### Task 2.2: ConstraintPruner Integration
-- [ ] At each denoising step, call `pruner.is_valid(depth, token, path)` for each candidate
-- [ ] Mask invalid tokens in logits before sampling (set to -inf)
-- [ ] For `ScreeningPruner`: use relevance score to weight sampling probabilities
-- [ ] Benchmark: denoising quality with vs without pruner
+- [x] At each denoising step, call `pruner.is_valid(depth, token, path)` for each candidate — `sample_greedy()` and `sample_temperatured()` both filter via pruner
+- [x] Invalid tokens excluded from softmax denominator (skipped in `sum_exp` computation, effectively -inf)
+- [ ] For `ScreeningPruner`: use relevance score to weight sampling probabilities — deferred (needs relevance API integration)
+- [ ] Benchmark: denoising quality with vs without pruner — deferred to Task 2.3
 
-### Task 2.3: Benchmark Suite
-- [ ] Create `tests/test_d2f_decode.rs` (feature-gated)
-- [ ] Benchmarks:
-  - a) Denoising quality vs number of steps (convergence curve)
-  - b) Throughput: D2F decode vs AR decode vs DFlash speculative
-  - c) Quality: D2F output vs AR output on same task
-  - d) ConstraintPruner impact: convergence speed with vs without
-- [ ] Compare against DFlash+DDTree baseline on identical tasks
+### Task 2.3: Benchmark Suite ✅
+- [x] Create `tests/test_d2f_decode.rs` (feature-gated) — 15 tests: quality, pipeline, constraints, benchmarks
+- [x] Benchmarks:
+  - a) Denoising quality vs number of steps (convergence curve) — `benchmark_d2f_steps_sweep`
+  - b) Throughput: D2F decode block + pipeline — `benchmark_d2f_decode_block`, `benchmark_d2f_pipeline`
+  - c) Quality: accuracy with trained model, prompt conditioning — `test_d2f_decode_with_target_accuracy`, `test_d2f_decode_steps_vs_quality`
+  - d) ConstraintPruner impact: overhead measurement — `benchmark_constraint_pruner_overhead`, `test_constraint_pruner_restricts_vocab`
+- [ ] Compare against DFlash+DDTree baseline on identical tasks — deferred (requires comparable model/config)
 
 ---
 

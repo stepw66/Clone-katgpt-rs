@@ -12,6 +12,9 @@ pub mod ppot;
 #[cfg(feature = "bandit")]
 pub mod flow_pruner;
 
+#[cfg(feature = "dllm")]
+pub mod d2f;
+
 // Re-exports — preserves existing import paths like `speculative::build_dd_tree`
 pub use dd_tree::{
     TreeBuilder, build_dd_tree, build_dd_tree_balanced, build_dd_tree_pruned,
@@ -48,6 +51,13 @@ pub use step::{
 
 #[cfg(feature = "bandit")]
 pub use flow_pruner::FlowPruner;
+
+// ── D2F Re-exports (Plan 066 Phase 2) ─────────────────────────
+#[cfg(feature = "dllm")]
+pub use d2f::{
+    D2fBlockResult, D2fBlockState, D2fDecodeConfig, D2fPipeline, D2fPipelineResult,
+    d2f_decode_block, d2f_decode_block_with_prompt, d2f_decode_block_with_target,
+};
 
 #[cfg(feature = "sudoku")]
 pub use crate::pruners::SudokuPruner;
