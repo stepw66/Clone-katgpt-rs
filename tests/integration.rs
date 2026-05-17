@@ -1705,6 +1705,136 @@ fn test_percepta_arto_inkala_beats_their_throughput() {
     );
 }
 
+// ── CHT HardAttentionHead Integration Tests ────────────────────
+
+#[cfg(feature = "percepta")]
+#[test]
+fn test_cht_streaming_solver_populates_head() {
+    use microgpt_rs::percepta::{StreamingSolver, Sudoku9x9};
+
+    let mut solver = StreamingSolver::new(Sudoku9x9::arto_inkala().grid);
+    let solved = solver.solve_streaming();
+    assert!(solved, "should solve");
+
+    // CHT head should have the same number of entries as legacy cache
+    assert_eq!(
+        solver.cht_size(),
+        solver.cache.len(),
+        "CHT head entries should match legacy cache length"
+    );
+    assert!(
+        solver.cht_size() > 0,
+        "CHT head should not be empty after solve"
+    );
+}
+
+#[cfg(feature = "percepta")]
+#[test]
+fn test_cht_streaming_solver_parity() {
+    use microgpt_rs::percepta::{StreamingSolver, Sudoku9x9};
+
+    let mut solver = StreamingSolver::new(Sudoku9x9::arto_inkala().grid);
+    let solved = solver.solve_streaming();
+    assert!(solved, "should solve");
+
+    let (matches, total) = solver.verify_cht_parity();
+    assert_eq!(
+        matches, total,
+        "CHT queries should match legacy on all upper-hull directions (got {matches}/{total})"
+    );
+}
+
+#[cfg(feature = "percepta")]
+#[test]
+fn test_cht_streaming_solver_query_correctness() {
+    use microgpt_rs::percepta::{HardAttentionHead, TieBreak};
+
+    let mut head = HardAttentionHead::new();
+
+    // Insert monotonic trace: (step, filled) → value = step
+    for i in 0..20usize {
+        let filled = i + 5;
+        head.insert([i as f64, filled as f64], [i as f64, 0.0], i as i64);
+    }
+
+    // Query: rightmost kx (qx=1, qy=0) → should return last step
+    let result = head.query([1.0, 0.0], TieBreak::Latest);
+    assert!(
+        result.is_some(),
+        "query on non-empty head should return Some"
+    );
+    assert_eq!(
+        result.unwrap()[0] as usize,
+        19,
+        "rightmost kx should be step 19"
+    );
+
+    // Query: highest ky (qx=0, qy=1) → should return max filled = step 19
+    let result = head.query([0.0, 1.0], TieBreak::Latest);
+    assert!(result.is_some());
+    assert_eq!(
+        result.unwrap()[0] as usize,
+        19,
+        "highest ky should be step 19"
+    );
+
+    // Query: diagonal (qx=1, qy=1) → should return highest kx+ky
+    let result = head.query([1.0, 1.0], TieBreak::Latest);
+    assert!(result.is_some());
+    assert_eq!(
+        result.unwrap()[0] as usize,
+        19,
+        "diagonal should pick step 19"
+    );
+}
+
+#[cfg(feature = "percepta")]
+#[test]
+fn test_cht_streaming_solver_reference_puzzle() {
+    use microgpt_rs::percepta::StreamingSolver;
+
+    let grid = {
+        let s = "530070000600195000098000060800060003400803001700020006060000280000419005000080079";
+        let mut g = [[0u8; 9]; 9];
+        for (i, ch) in s.chars().enumerate() {
+            g[i / 9][i % 9] = ch.to_digit(10).unwrap() as u8;
+        }
+        g
+    };
+
+    let mut solver = StreamingSolver::new(grid);
+    let solved = solver.solve_streaming();
+    assert!(solved, "reference puzzle should solve");
+
+    let (matches, total) = solver.verify_cht_parity();
+    assert_eq!(
+        matches, total,
+        "CHT parity should hold on reference puzzle (got {matches}/{total})"
+    );
+    assert_eq!(solver.cht_size(), solver.cache.len());
+}
+
+#[cfg(feature = "percepta")]
+#[test]
+fn test_cht_lower_hull_query_after_solve() {
+    use microgpt_rs::percepta::{StreamingSolver, Sudoku9x9, TieBreak};
+
+    let mut solver = StreamingSolver::new(Sudoku9x9::arto_inkala().grid);
+    let solved = solver.solve_streaming();
+    assert!(solved);
+
+    // qy < 0 queries should work on CHT (lower hull)
+    // These would be WRONG with legacy KVCache2D (upper hull only)
+    let result = solver.cht_head.query([1.0, -1.0], TieBreak::Latest);
+    assert!(result.is_some(), "lower hull query should return Some");
+
+    let val = result.unwrap();
+    assert!(
+        val[0] >= 0.0,
+        "lower hull query should return a valid value"
+    );
+}
+
 // ── Raven RSM (Routing Slot Memory) Tests ──────────────────────
 
 #[test]

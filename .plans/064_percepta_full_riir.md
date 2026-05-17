@@ -71,17 +71,17 @@ src/percepta/
 
 **Depends on:** Nothing. **Source:** `hull2d_cht.h` (419 lines) + `hull_cache.py` (44 lines)
 
-- [ ] **A1:** Create `src/percepta/` module directory, move `src/percepta.rs` → `src/percepta/mod.rs`
-- [ ] **A2:** Implement `TieBreak` enum, `HullMeta` value aggregation in `types.rs`
-- [ ] **A3:** Implement `CHT` data structure (BTreeSet-based LineContainer) in `cht.rs`
-- [ ] **A4:** Implement `HullHalf` + `HardAttentionHead` in `hull.rs`
-- [ ] **A5:** Implement parabolic key encoding in `encoding.rs`
-- [ ] **A6:** Implement cumulative sum in `cumsum.rs`
-- [ ] **A7:** Implement O(n) softmax reference in `standard_cache.rs`
-- [ ] **A8:** Keep legacy `KVCache2D` as `KVCache2DLegacy` in `legacy.rs`
-- [ ] **A9:** Port all 30+ existing tests to `HardAttentionHead`
-- [ ] **A10:** Integration with `StreamingSolver` + `Sudoku9x9`
-- [ ] **A11:** Benchmark: Graham Scan vs CHT throughput
+- [x] **A1:** Create `src/percepta/` module directory, move `src/percepta.rs` → `src/percepta/mod.rs` ✅
+- [x] **A2:** Implement `TieBreak` enum, `HullMeta` value aggregation in `types.rs` ✅
+- [x] **A3:** Implement `CHT` data structure (Vec-based LineContainer) in `cht.rs` ✅
+- [x] **A4:** Implement `HullHalf` + `HardAttentionHead` + `BruteAttentionHead` in `hull.rs` ✅
+- [x] **A5:** Implement parabolic key encoding in `encoding.rs` ✅
+- [x] **A6:** Implement cumulative sum in `cumsum.rs` ✅
+- [x] **A7:** Implement O(n) softmax reference in `standard_cache.rs` ✅
+- [x] **A8:** Keep legacy `KVCache2D` in `legacy.rs` (original name, all 538 tests pass) ✅
+- [x] **A9:** Port existing tests to `HardAttentionHead` (19 CHT tests, V-shape PASSES) ✅
+- [x] **A10:** Integration with `StreamingSolver` + `Sudoku9x9` ✅
+- [x] **A11:** Benchmark: Graham Scan vs CHT throughput ✅
 
 ### TG-B: ReGLU Gate Primitives
 

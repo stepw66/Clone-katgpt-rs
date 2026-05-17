@@ -478,6 +478,11 @@ pub struct StreamingSolver {
     pub cache: KVCache2D,
     pub step: usize,
     pub events: Vec<SolveEvent>,
+    /// CHT-based hard attention head for O(log N) queries on arbitrary 2D points.
+    /// Records the same `(step, filled)` trace as `cache`.
+    /// Only available with `percepta` feature flag.
+    #[cfg(feature = "percepta")]
+    pub cht_head: super::hull::HardAttentionHead,
 }
 
 impl StreamingSolver {
@@ -487,6 +492,8 @@ impl StreamingSolver {
             cache: KVCache2D::new(),
             step: 0,
             events: Vec::new(),
+            #[cfg(feature = "percepta")]
+            cht_head: super::hull::HardAttentionHead::new(),
         }
     }
 
@@ -499,6 +506,16 @@ impl StreamingSolver {
         let filled = self.state.clue_count();
         self.cache
             .append(Vec2::new(self.step as f32, filled as f32), self.step);
+
+        // Mirror trace into CHT head (feature-gated).
+        // Key: (step, filled_count), Value: step index, Seq: step for tie-breaking.
+        #[cfg(feature = "percepta")]
+        self.cht_head.insert(
+            [self.step as f64, filled as f64],
+            [self.step as f64, 0.0],
+            self.step as i64,
+        );
+
         self.step += 1;
 
         let Some((row, col)) = self.state.next_empty() else {
@@ -670,6 +687,55 @@ impl StreamingSolver {
         }
 
         out
+    }
+
+    // ── CHT Integration Methods (feature-gated) ──────────────
+
+    /// Total entries in the CHT hard attention head.
+    #[cfg(feature = "percepta")]
+    pub fn cht_size(&self) -> usize {
+        self.cht_head.size()
+    }
+
+    /// Verify CHT queries match legacy cache on standard query directions.
+    ///
+    /// Only tests directions where legacy is expected to be correct (`qy >= 0`).
+    /// Returns `(matches, total_queries)`. Perfect parity = `(N, N)`.
+    ///
+    /// Note: `qy < 0` queries are *not* tested here because legacy only
+    /// maintains the upper hull — those queries return wrong results with
+    /// `KVCache2D` but correct results with `HardAttentionHead`.
+    #[cfg(feature = "percepta")]
+    pub fn verify_cht_parity(&self) -> (usize, usize) {
+        // Only upper-hull directions (qy > 0) and horizontal (qy == 0)
+        // where legacy's Graham scan is correct.
+        let queries: [[f64; 2]; 6] = [
+            [1.0, 0.0],  // rightmost kx
+            [0.0, 1.0],  // highest ky
+            [1.0, 1.0],  // diagonal
+            [5.0, 10.0], // steep positive
+            [10.0, 1.0], // shallow positive
+            [-1.0, 0.0], // leftmost kx (edge case)
+        ];
+        let mut matches = 0usize;
+        for q in &queries {
+            let legacy_val = {
+                let query = Vec2::new(q[0] as f32, q[1] as f32);
+                let (_, val) = self.cache.fast_attention(&query);
+                val
+            };
+            let cht_val = self
+                .cht_head
+                .query(*q, super::types::TieBreak::Latest)
+                .map(|v| v[0] as usize);
+
+            if let Some(cv) = cht_val
+                && cv == legacy_val
+            {
+                matches += 1;
+            }
+        }
+        (matches, queries.len())
     }
 }
 

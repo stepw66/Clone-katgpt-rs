@@ -188,6 +188,10 @@ fn main() {
 
     percepta_benchmark();
 
+    // ── 7. CHT vs Graham Scan Benchmark ───────────────────────────
+    #[cfg(feature = "percepta")]
+    percepta_cht_benchmark();
+
     println!("\n✨ Done.");
 }
 
@@ -261,6 +265,91 @@ fn percepta_benchmark() {
     println!();
     println!("  Hull compression: O(N) keys → O(H) hull vertices");
     println!("  Attention search: ternary search over unimodal dot-product sequence");
+}
+
+/// Benchmark: CHT [`HardAttentionHead`] vs Legacy [`KVCache2D`] throughput.
+///
+/// Measures insert + query performance on the same parabolic trace distribution.
+/// CHT uses O(log H) amortized insert (dynamic line container) vs Graham Scan's
+/// O(N) full rebuild. Both use O(log H) query (binary/ternary search on hull).
+#[cfg(feature = "percepta")]
+fn percepta_cht_benchmark() {
+    use microgpt_rs::percepta::{HardAttentionHead, TieBreak};
+
+    let trace_sizes = [1_000, 10_000, 100_000];
+
+    println!("\n🧠 CHT HardAttentionHead vs Legacy KVCache2D");
+    println!("{}", "─".repeat(85));
+    println!(
+        "  {:>12} {:>10} {:>12} {:>12} {:>12} {:>12} {:>8}",
+        "Size", "Entries", "Legacy Ins", "CHT Ins", "Legacy Qry", "CHT Qry", "Match"
+    );
+    println!("{}", "─".repeat(85));
+
+    for &size in &trace_sizes {
+        let mid = size as f32 / 2.0;
+
+        // Build parabolic trace: y = -((x - mid) / (mid * 0.02))^2
+        let points: Vec<(f32, f32)> = (0..size)
+            .map(|i| {
+                let x = i as f32;
+                let y = -((x - mid) / (mid * 0.02)).powi(2);
+                (x, y)
+            })
+            .collect();
+
+        // ── Legacy KVCache2D (Graham Scan) ──
+        let mut legacy = percepta::KVCache2D::with_capacity(size);
+        let start = std::time::Instant::now();
+        for (i, (x, y)) in points.iter().enumerate() {
+            legacy.append(percepta::Vec2::new(*x, *y), i);
+        }
+        let legacy_insert = start.elapsed();
+
+        let query_legacy = percepta::Vec2::new(5.0, 10.0);
+        let iters = 10_000;
+        let start = std::time::Instant::now();
+        let (_, legacy_val) = legacy.fast_attention(&query_legacy);
+        for _ in 0..iters {
+            let _ = legacy.fast_attention(&query_legacy);
+        }
+        let legacy_query = start.elapsed() / (iters + 1);
+
+        // ── CHT HardAttentionHead ──
+        let mut cht = HardAttentionHead::new();
+        let start = std::time::Instant::now();
+        for (i, (x, y)) in points.iter().enumerate() {
+            cht.insert([*x as f64, *y as f64], [i as f64, 0.0], i as i64);
+        }
+        let cht_insert = start.elapsed();
+
+        let query_cht = [5.0_f64, 10.0];
+        let start = std::time::Instant::now();
+        let cht_result = cht.query(query_cht, TieBreak::Latest);
+        for _ in 0..iters {
+            let _ = cht.query(query_cht, TieBreak::Latest);
+        }
+        let cht_query = start.elapsed() / (iters + 1);
+
+        // ── Correctness: value and score parity ──
+        let cht_val = cht_result.map(|v| v[0] as usize);
+        let score_ok = { cht_val == Some(legacy_val) };
+
+        println!(
+            "  {:>12} {:>10} {:>10.2}ms {:>10.2}ms {:>10.2}μs {:>10.2}μs {:>8}",
+            size,
+            cht.size(),
+            legacy_insert.as_secs_f64() * 1000.0,
+            cht_insert.as_secs_f64() * 1000.0,
+            legacy_query.as_secs_f64() * 1e6,
+            cht_query.as_secs_f64() * 1e6,
+            if score_ok { "✅" } else { "❌" },
+        );
+    }
+
+    println!();
+    println!("  CHT: O(log H) amortized insert, O(log H) query (dual hull)");
+    println!("  Graham Scan: O(H) rebuild per insert, O(log H) ternary search query");
 }
 
 /// Auto-number bench results sequentially.

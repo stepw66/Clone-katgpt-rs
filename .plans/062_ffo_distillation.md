@@ -1,3 +1,4 @@
+# BLOCKED BY Plan 063-064
 # Plan 062: FFO Distillation — Verify Active-Set Masking Already Captured by BanditPruner
 
 **Branch:** `develop/feature/062_ffo_distillation`
