@@ -9,6 +9,12 @@
 
 **Key Insight:** ROPD's rubric = (criterion, weight) pairs scored by binary pass/fail. Our `Validator` trait already does binary + graded validation. The gap: our reward is scalar δ, ROPD's is a weighted vector. This plan vectorizes the reward signal while keeping everything modelless.
 
+**Multi-Reference Requirement (from ablation):** Paper Table 6 shows m=4→m=1 costs **−17.94 pts** — the single biggest ablation impact. Single reference over-anchors rubric to one solution trajectory. Our modelless path MUST score multiple references (golden replay + hint-assisted + alternative paths) alongside student responses.
+
+**Inter-Dimensional Interference (from mechanism analysis):** Paper Section 4.3 shows scalar signals cause 15.9% regression rate (LOPD) vs rubric's 6.2%. Per-criterion scoring prevents improving one facet from eroding another. This directly supports vector-gated absorb over scalar δ-gated absorb.
+
+**HintDelta Misalignment Concern:** Paper shows teacher logit AUC = 0.35 (near random) vs rubric AUC = 0.90. Our `HintDelta` is also log-prob-based. If δ shares logit's misalignment, rubric vectors could provide a more correctness-aligned signal even in modelless mode. Benchmarks will test this hypothesis.
+
 **Honest Caveat (from Plan 053 lesson):** δ-Mem's vector corrections showed no DDTree gain — "the correction surface is too simple." Rubric vectors may face the same issue in game domains (Bomber, FFT, Go) where quality is well-captured by scalar reward. Rubrics help most in domains with **multiple independent quality axes** (code gen: correctness + style + security). Benchmarks will determine if this ships behind default features or stays opt-in.
 
 ---
@@ -22,6 +28,7 @@
   - Compare: `RubricGatedAbsorbCompress` + `RubricBanditPruner` with RubricVector
   - Metrics: DDTree nodes, latency, reward convergence (1000 episodes)
   - Domains: Bomber arena (single quality axis), FFT arena (role-based multi-axis)
+  - **Additional metric:** Inter-dimensional regression rate (track per-criterion pass rates across episodes — target <10% regression vs scalar δ baseline)
   - **Gate:** Must show measurable improvement on at least one metric before proceeding past Phase 2
 
 ### Phase 1: Core Types — RubricVector + RubricTemplate
@@ -83,7 +90,12 @@ The foundation: structured rubric representation that replaces scalar δ.
       /// ROPD formula: weighted_score = Σ(w_k * v_k) / Σ(w_k)
       pub fn weighted_score(&self) -> f32;
 
-      /// Which criteria have gaps vs a reference — for targeted absorb.
+      /// Aggregate gap across M references (critical — ablation shows m=1 costs 17.9 pts).
+      /// For each criterion, gap = max(reference_scores) - student_score.
+      /// Returns sorted by weight × gap magnitude.
+      pub fn gap_vs_references(&self, references: &[RubricVector]) -> Vec<(usize, f32)>;
+
+      /// Which criteria have gaps vs a single reference — for targeted absorb.
       /// Returns (criterion_index, gap_magnitude) sorted by weight × gap.
       pub fn gap_criteria(&self, reference: &RubricVector) -> Vec<(usize, f32)>;
 
@@ -109,6 +121,30 @@ The foundation: structured rubric representation that replaces scalar δ.
   Two implementations:
   - `PatternScorer` — regex/pattern-based criterion checks (cheap, always available)
   - `ValidatorScorer` — wraps existing `Validator` trait as rubric scorer
+
+  **Multi-reference scoring (critical from ablation):**
+  ```rust
+  /// Score student response against M references.
+  /// Single reference over-anchors rubric to one trajectory (−17.9 pts).
+  /// Multiple references prevent collapse to path-matching.
+  pub fn score_with_references(
+      &self,
+      student_response: &str,
+      references: &[&str],  // M ≥ 2 references
+      template: &RubricTemplate,
+  ) -> (RubricVector, Vec<RubricVector>) {
+      let student = self.score(student_response, template);
+      let refs: Vec<RubricVector> = references.iter()
+          .map(|r| self.score(r, template))
+          .collect();
+      (student, refs)
+  }
+  ```
+
+  Reference sources for modelless path:
+  - `RegressionSuite` golden examples (known-good outputs)
+  - Hint-assisted responses (from existing hint mechanism)
+  - Alternative winning paths (from `ReplayBackwardWalker`, Plan 052 D4)
 
 ### Phase 2: RubricGatedAbsorbCompress
 
@@ -143,8 +179,10 @@ Replace `DeltaGatedAbsorbCompress`'s scalar δ gate with rubric vector gate.
       pub gap_threshold: f32,       // default: 0.3
       /// Only absorb gaps in criteria with weight ≥ this
       pub min_weight_for_absorb: f32,  // default: 2.0
+      /// Number of reference rubrics to maintain per arm (≥2 critical from ablation)
+      pub min_references: usize,    // default: 2
   }
-  ```
+```
 
   Implements `ScreeningPruner` (delegates to inner) + `AbsorbCompress` (gated by rubric gap).
 
@@ -154,6 +192,9 @@ Replace `DeltaGatedAbsorbCompress`'s scalar δ gate with rubric vector gate.
   - Test: gap_criteria returns sorted by weight × gap magnitude
   - Test: no reference rubric → skip absorb (same as no δ evidence)
   - Test: compatibility with existing `AbsorbCompressLayer` inner
+  - Test: multi-reference gap uses max(reference) per criterion (not mean)
+  - Test: single reference still works but logs warning (m<2 degrades quality)
+  - Test: inter-dimensional regression — absorbing criterion A doesn't regress criterion B
 
 ### Phase 3: RubricBanditPruner
 
@@ -259,7 +300,7 @@ Wire rubric components into existing game arenas for real-world validation.
 | Rubric | Bomber | ~64% | ~1.8 | ~0.5µs | ≈ No change (single-axis) |
 | Rubric | FFT | >15.8% | >0.16 | ~600µs | ↑ Multi-axis helps |
 
-**Success criteria:** Measurable improvement on FFT (multi-axis domain) without regression on Bomber (single-axis).
+**Success criteria:** Measurable improvement on FFT (multi-axis domain) without regression on Bomber (single-axis). Inter-dimensional regression rate <10% (vs scalar δ baseline).
 
 **Failure criteria (from Plan 053 lesson):** If vector corrections add overhead without quality gain (like δ-Mem's 2500% latency for 0% quality), we stop at Phase 2 and document.
 
