@@ -74,6 +74,16 @@ pub use g_zero::{
     DeltaGatedConfig, GeneratedPair, HintDelta, LogProbResult, QueryTemplate, TemplateProposer,
 };
 
+#[cfg(feature = "ropd_rubric")]
+pub mod ropd_rubric;
+
+#[cfg(feature = "ropd_rubric")]
+pub use ropd_rubric::{
+    PatternRule, PatternScorer, RubricBanditConfig, RubricBanditPruner, RubricCriterion,
+    RubricGatedAbsorbCompress, RubricGatedConfig, RubricScorer, RubricTemplate, RubricVector,
+    ScoreResult, score_with_references, score_with_references_id,
+};
+
 #[cfg(feature = "stepcode")]
 pub mod stepcode;
 
