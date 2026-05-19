@@ -6,7 +6,9 @@
 //!
 //! Quality gates: outputs must match within 1e-6.
 //!
-//! Run: cargo test bench_068 -- --nocapture
+//! Run: cargo test -p microgpt-rs --features turboquant --test bench_068_raven_readout_incremental -- --nocapture
+
+#![cfg(feature = "turboquant")]
 
 use std::hint::black_box;
 use std::time::Instant;

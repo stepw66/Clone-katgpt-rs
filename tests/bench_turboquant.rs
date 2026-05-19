@@ -1,4 +1,4 @@
-//! TurboQuant KV Cache Compression benchmarks.
+//! TurboQuant KV Cache Compression benchmarks (legacy baseline).
 //! Plan 043 Task 1 (baseline) + Task 7 (quality validation).
 //!
 //! These benchmarks test:
@@ -6,7 +6,9 @@
 //! 2. Round-trip quality: cos_sim(original, quantize→dequantize) for keys and values
 //! 3. Attention fidelity: correlation between flat and TQ attention scores
 //!
-//! Run with: cargo test bench_turboquant -- --nocapture
+//! Run with: cargo test -p microgpt-rs --features turboquant --test bench_turboquant -- --nocapture
+
+#![cfg(feature = "turboquant")]
 
 use std::hint::black_box;
 use std::time::Instant;

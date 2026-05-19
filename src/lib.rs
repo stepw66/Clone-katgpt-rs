@@ -14,9 +14,12 @@ pub mod pruners;
 pub mod simd;
 #[cfg(feature = "sp_kv")]
 pub mod sp_kv;
+#[cfg(feature = "spectral_quant")]
+pub mod spectralquant;
 pub mod speculative;
 pub mod tokenizer;
 pub mod transformer;
+#[cfg(feature = "turboquant")]
 pub mod turboquant;
 pub mod types;
 

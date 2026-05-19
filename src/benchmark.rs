@@ -8,8 +8,11 @@ use crate::transformer::{
     ForwardContext, MultiLayerKVCache, PagedKVCache, RavenKVCache, TransformerWeights, forward,
     forward_paged, forward_raven, generate_into, raven_readout, raven_update, tokens_to_string,
 };
+#[cfg(feature = "turboquant")]
 use crate::turboquant::TurboQuantKVCache;
-use crate::types::{Config, Rng, kv_dim, softmax_scaled};
+#[cfg(any(feature = "turboquant", feature = "hla_attention"))]
+use crate::types::kv_dim;
+use crate::types::{Config, Rng, softmax_scaled};
 use rayon::prelude::*;
 use std::io::Write;
 use std::time::Instant;
@@ -22,20 +25,21 @@ use crate::speculative::{
 use crate::hla::{MultiLayerAhlaCache, MultiLayerHlaCache, forward_ahla, forward_hla};
 
 /// Benchmark category for grouping into separate graphs.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum BenchCategory {
     /// Speculative decoding: accepted tok/s, μs/step
     Speculative,
     /// Tree/draft operations: builds/s or steps/s, μs/step
     TreeBuild,
     /// Infrastructure: KV cache, prefill, recall — steps/s, μs/step
+    #[default]
     Infrastructure,
     /// G-Zero self-play components: Hint-δ, TemplateProposer, Δ-Absorb, Δ-Bandit
     HeuristicLearning,
 }
 
 /// Single benchmark result.
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct BenchResult {
     pub label: String,
     pub throughput: f64,
@@ -216,7 +220,10 @@ pub fn run_all(config: &Config) -> Vec<BenchResult> {
     let (flat_br, paged_br) = bench_paged_vs_flat_cache(config);
     let (_, raven_br) = bench_raven_vs_flat_cache(config);
     let recall_br = bench_raven_recall(config);
+    #[cfg(feature = "turboquant")]
     let (tq_alloc_br, tq_zero_br) = bench_turboquant_store_dequant(config);
+    #[cfg(not(feature = "turboquant"))]
+    let (tq_alloc_br, tq_zero_br) = (BenchResult::default(), BenchResult::default());
     let pflash_br = bench_pflash_block_select();
     let (nocompress_br, compress_br) =
         bench_prefill_compression(&draft_weights, &draft_config, warmup, iters);
@@ -1592,7 +1599,7 @@ pub fn bench_raven_recall(_config: &Config) -> BenchResult {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// Plan 043: TurboQuant KV Cache Compression
+// Plan 043: TurboQuant KV Cache Compression (legacy baseline)
 // ═══════════════════════════════════════════════════════════════
 
 /// Benchmark TQ-3bit store+dequant throughput.
@@ -1601,6 +1608,7 @@ pub fn bench_raven_recall(_config: &Config) -> BenchResult {
 /// Uses 3-bit as the sweet spot between compression and quality.
 /// Benchmark TurboQuant store+dequant: both allocating and zero-alloc paths.
 /// Returns (allocating_result, zero_alloc_result) for comparison.
+#[cfg(feature = "turboquant")]
 pub fn bench_turboquant_store_dequant(config: &Config) -> (BenchResult, BenchResult) {
     let kvd = kv_dim(config);
     let n_positions = config.block_size;

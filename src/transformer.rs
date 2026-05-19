@@ -248,10 +248,10 @@ pub struct ForwardContext {
     raven_query_buf: Vec<f32>, // [kv_dim]
     // MTP Drafter: pre-allocated projection buffer [n_embd] for target activation conditioning (Plan 055)
     pub mtp_context_buf: Vec<f32>,
-    // TurboQuant incremental dequant: tracks last dequantized position per layer (Plan 068)
-    // When tq_dequant_pos[layer] == pos - 1, only dequant the new position (O(1) vs O(pos)).
+    // Quantized KV cache incremental dequant: tracks last dequantized position per layer (Plan 068).
+    // When dequant_pos[layer] == pos - 1, only dequant the new position (O(1) vs O(pos)).
     // On mismatch (layer switch, reset, pos jump), rebuild all positions for that layer.
-    tq_dequant_pos: Vec<usize>, // [n_layer]
+    dequant_pos: Vec<usize>, // [n_layer]
 }
 
 impl ForwardContext {
@@ -279,14 +279,20 @@ impl ForwardContext {
             paged_flat_value: vec![0.0; block_kv],
             raven_query_buf: vec![0.0; kvd],
             mtp_context_buf: vec![0.0; config.n_embd],
-            tq_dequant_pos: vec![0; config.n_layer],
+            dequant_pos: vec![0; config.n_layer],
         }
     }
 
-    /// Reset TurboQuant incremental dequant state.
+    /// Reset quantized KV cache incremental dequant state.
     /// Call when starting a new sequence or after cache reset.
+    pub fn reset_dequant(&mut self) {
+        self.dequant_pos.fill(0);
+    }
+
+    /// Backward-compat alias for [`reset_dequant`].
+    #[cfg(feature = "turboquant")]
     pub fn reset_tq_dequant(&mut self) {
-        self.tq_dequant_pos.fill(0);
+        self.reset_dequant();
     }
 }
 
@@ -551,12 +557,11 @@ fn forward_base<'a>(
     // 1. Embedding: x = wte[token] + wpe[pos]
     let tok_off = token * n;
     let pos_off_emb = pos * n;
-    for i in 0..n {
-        unsafe {
-            *ctx.x.get_unchecked_mut(i) = *weights.wte.get_unchecked(tok_off + i)
-                + *weights.wpe.get_unchecked(pos_off_emb + i);
-        }
-    }
+    crate::simd::simd_add_into(
+        &mut ctx.x[..n],
+        &weights.wte[tok_off..tok_off + n],
+        &weights.wpe[pos_off_emb..pos_off_emb + n],
+    );
 
     // 2. Layer loop
     for (layer_idx, layer_weights) in weights.layers.iter().enumerate() {
@@ -586,12 +591,8 @@ fn forward_base<'a>(
         if layer_idx == config.n_layer / 2
             && let Some(dl) = domain_latent
         {
-            for i in 0..kvd {
-                unsafe {
-                    *ctx.k.get_unchecked_mut(i) += *dl.embedding.get_unchecked(i);
-                    *ctx.v.get_unchecked_mut(i) += *dl.embedding.get_unchecked(i);
-                }
-            }
+            crate::simd::simd_add_inplace(&mut ctx.k[..kvd], &dl.embedding[..kvd]);
+            crate::simd::simd_add_inplace(&mut ctx.v[..kvd], &dl.embedding[..kvd]);
         }
 
         // Store K,V in per-layer cache (kv_dim elements per position)
@@ -638,11 +639,7 @@ fn forward_base<'a>(
         if let Some(lora) = lora {
             crate::types::lora_apply(&mut ctx.x, lora, &ctx.attn_out, &mut ctx.lora_buf);
         }
-        for i in 0..n {
-            unsafe {
-                *ctx.x.get_unchecked_mut(i) += *ctx.xr.get_unchecked(i);
-            }
-        }
+        crate::simd::simd_add_inplace(&mut ctx.x[..n], &ctx.xr[..n]);
 
         // MLP: save residual → RMSNorm → MLP → residual
         ctx.xr2[..n].copy_from_slice(&ctx.x[..n]);
@@ -690,11 +687,7 @@ fn forward_base<'a>(
         if let Some(lora) = lora {
             crate::types::lora_apply(&mut ctx.x, lora, &ctx.hidden, &mut ctx.lora_buf);
         }
-        for i in 0..n {
-            unsafe {
-                *ctx.x.get_unchecked_mut(i) += *ctx.xr2.get_unchecked(i);
-            }
-        }
+        crate::simd::simd_add_inplace(&mut ctx.x[..n], &ctx.xr2[..n]);
     }
 
     // Snapshot hidden state (for Plan 009 compatibility)
@@ -1088,13 +1081,11 @@ pub fn forward_prefill<'a>(
         for (p, &token) in tokens.iter().enumerate().take(prompt_len) {
             let tok_off = token * n;
             let pos_off = p * n;
-            for i in 0..n {
-                unsafe {
-                    *prefill.hidden.get_unchecked_mut(p * n + i) =
-                        *weights.wte.get_unchecked(tok_off + i)
-                            + *weights.wpe.get_unchecked(pos_off + i);
-                }
-            }
+            crate::simd::simd_add_into(
+                &mut prefill.hidden[p * n..(p + 1) * n],
+                &weights.wte[tok_off..tok_off + n],
+                &weights.wpe[pos_off..pos_off + n],
+            );
         }
     }
 
@@ -1109,12 +1100,11 @@ pub fn forward_prefill<'a>(
             } else {
                 let tok_off = token * n;
                 let pos_off = p * n;
-                for i in 0..n {
-                    unsafe {
-                        *ctx.x.get_unchecked_mut(i) = *weights.wte.get_unchecked(tok_off + i)
-                            + *weights.wpe.get_unchecked(pos_off + i);
-                    }
-                }
+                crate::simd::simd_add_into(
+                    &mut ctx.x[..n],
+                    &weights.wte[tok_off..tok_off + n],
+                    &weights.wpe[pos_off..pos_off + n],
+                );
             }
 
             // Pre-attention norm (matches forward_base exactly: double rmsnorm)
@@ -1137,12 +1127,8 @@ pub fn forward_prefill<'a>(
             if layer_idx == config.n_layer / 2
                 && let Some(dl) = domain_latent
             {
-                for i in 0..kvd {
-                    unsafe {
-                        *ctx.k.get_unchecked_mut(i) += *dl.embedding.get_unchecked(i);
-                        *ctx.v.get_unchecked_mut(i) += *dl.embedding.get_unchecked(i);
-                    }
-                }
+                crate::simd::simd_add_inplace(&mut ctx.k[..kvd], &dl.embedding[..kvd]);
+                crate::simd::simd_add_inplace(&mut ctx.v[..kvd], &dl.embedding[..kvd]);
             }
 
             // Store K/V in cache
@@ -1227,11 +1213,7 @@ pub fn forward_prefill<'a>(
             if let Some(lora) = lora {
                 crate::types::lora_apply(&mut ctx.x, lora, &ctx.attn_out, &mut prefill.lora_buf);
             }
-            for i in 0..n {
-                unsafe {
-                    *ctx.x.get_unchecked_mut(i) += *ctx.xr.get_unchecked(i);
-                }
-            }
+            crate::simd::simd_add_inplace(&mut ctx.x[..n], &ctx.xr[..n]);
 
             // MLP: residual → RMSNorm → MLP → residual
             ctx.xr2[..n].copy_from_slice(&ctx.x[..n]);
@@ -1279,11 +1261,7 @@ pub fn forward_prefill<'a>(
             if let Some(lora) = lora {
                 crate::types::lora_apply(&mut ctx.x, lora, &ctx.hidden, &mut prefill.lora_buf);
             }
-            for i in 0..n {
-                unsafe {
-                    *ctx.x.get_unchecked_mut(i) += *ctx.xr2.get_unchecked(i);
-                }
-            }
+            crate::simd::simd_add_inplace(&mut ctx.x[..n], &ctx.xr2[..n]);
 
             // Store hidden state for next layer (multi-layer only)
             if config.n_layer > 1 {
@@ -1474,12 +1452,11 @@ pub fn forward_paged<'a>(
     // 1. Embedding: x = wte[token] + wpe[pos]
     let tok_off = token * n;
     let pos_off_emb = pos * n;
-    for i in 0..n {
-        unsafe {
-            *ctx.x.get_unchecked_mut(i) = *weights.wte.get_unchecked(tok_off + i)
-                + *weights.wpe.get_unchecked(pos_off_emb + i);
-        }
-    }
+    crate::simd::simd_add_into(
+        &mut ctx.x[..n],
+        &weights.wte[tok_off..tok_off + n],
+        &weights.wpe[pos_off_emb..pos_off_emb + n],
+    );
 
     // 2. Layer loop
     for (layer_idx, layer_weights) in weights.layers.iter().enumerate() {
@@ -1528,11 +1505,7 @@ pub fn forward_paged<'a>(
 
         // Output projection + residual
         matmul(&mut ctx.x, &layer_weights.attn_wo, &ctx.attn_out, n, n);
-        for i in 0..n {
-            unsafe {
-                *ctx.x.get_unchecked_mut(i) += *ctx.xr.get_unchecked(i);
-            }
-        }
+        crate::simd::simd_add_inplace(&mut ctx.x[..n], &ctx.xr[..n]);
 
         // MLP: save residual → RMSNorm → MLP → residual
         ctx.xr2[..n].copy_from_slice(&ctx.x[..n]);
@@ -1574,11 +1547,7 @@ pub fn forward_paged<'a>(
             n,
             config.mlp_hidden,
         );
-        for i in 0..n {
-            unsafe {
-                *ctx.x.get_unchecked_mut(i) += *ctx.xr2.get_unchecked(i);
-            }
-        }
+        crate::simd::simd_add_inplace(&mut ctx.x[..n], &ctx.xr2[..n]);
     }
 
     // Snapshot hidden state
@@ -2021,10 +1990,18 @@ pub fn raven_update(
         let write = 1.0 - decay;
         let offset = slot * kv_dim;
 
-        for d in 0..kv_dim {
-            keys[offset + d] = decay * keys[offset + d] + write * new_key[d];
-            values[offset + d] = decay * values[offset + d] + write * new_value[d];
-        }
+        crate::simd::simd_fused_decay_write(
+            &mut keys[offset..offset + kv_dim],
+            decay,
+            &new_key[..kv_dim],
+            write,
+        );
+        crate::simd::simd_fused_decay_write(
+            &mut values[offset..offset + kv_dim],
+            decay,
+            &new_value[..kv_dim],
+            write,
+        );
     }
 }
 
@@ -2053,12 +2030,7 @@ pub fn raven_readout_into<'a>(
     let mut max_score = f32::NEG_INFINITY;
     for s in 0..num_slots {
         let k_off = s * kv_dim;
-        let mut dot = 0.0f32;
-        for d in 0..kv_dim {
-            unsafe {
-                dot += *query.get_unchecked(d) * *keys.get_unchecked(k_off + d);
-            }
-        }
+        let dot = crate::simd::simd_dot_f32(query, &keys[k_off..k_off + kv_dim], kv_dim);
         unsafe {
             *scores.get_unchecked_mut(s) = dot;
         }
@@ -2139,12 +2111,11 @@ pub fn forward_raven<'a>(
     // 1. Embedding: x = wte[token] + wpe[pos]
     let tok_off = token * n;
     let pos_off_emb = pos * n;
-    for i in 0..n {
-        unsafe {
-            *ctx.x.get_unchecked_mut(i) = *weights.wte.get_unchecked(tok_off + i)
-                + *weights.wpe.get_unchecked(pos_off_emb + i);
-        }
-    }
+    crate::simd::simd_add_into(
+        &mut ctx.x[..n],
+        &weights.wte[tok_off..tok_off + n],
+        &weights.wpe[pos_off_emb..pos_off_emb + n],
+    );
 
     // 2. Layer loop
     for layer_weights in &weights.layers {
@@ -2229,11 +2200,7 @@ pub fn forward_raven<'a>(
 
         // Output projection + residual
         matmul(&mut ctx.x, &layer_weights.attn_wo, &ctx.attn_out, n, n);
-        for i in 0..n {
-            unsafe {
-                *ctx.x.get_unchecked_mut(i) += *ctx.xr.get_unchecked(i);
-            }
-        }
+        crate::simd::simd_add_inplace(&mut ctx.x[..n], &ctx.xr[..n]);
 
         // MLP: save residual → RMSNorm → MLP → residual
         ctx.xr2[..n].copy_from_slice(&ctx.x[..n]);
@@ -2275,11 +2242,7 @@ pub fn forward_raven<'a>(
             n,
             config.mlp_hidden,
         );
-        for i in 0..n {
-            unsafe {
-                *ctx.x.get_unchecked_mut(i) += *ctx.xr2.get_unchecked(i);
-            }
-        }
+        crate::simd::simd_add_inplace(&mut ctx.x[..n], &ctx.xr2[..n]);
     }
 
     // Snapshot hidden state
@@ -2297,21 +2260,23 @@ pub fn forward_raven<'a>(
     &mut ctx.logits
 }
 
-/// Forward pass using TurboQuant compressed KV cache (Plan 043).
+/// Forward pass using quantized KV cache (Plan 043, generalized Plan 063).
 ///
 /// Mirrors [`forward_base`] but stores K/V into a compressed cache and
 /// dequantizes on-the-fly during attention scoring. The rest of the
 /// transformer (embedding, QKV projection, MLP, LM head) is unchanged.
+///
+/// Generic over any [`types::QuantizedKVCache`] backend (SpectralQuant, TurboQuant, etc.).
 ///
 /// **Trade-off**: ~8× KV cache memory savings at the cost of dequantization
 /// overhead during attention. Best for long sequences where cache memory
 /// dominates.
 #[allow(clippy::too_many_arguments)]
 #[inline(always)]
-pub fn forward_turboquant<'a>(
+pub fn forward_quantized<'a, C: types::QuantizedKVCache>(
     ctx: &'a mut ForwardContext,
     weights: &TransformerWeights,
-    cache: &mut crate::turboquant::TurboQuantKVCache,
+    cache: &mut C,
     token: usize,
     pos: usize,
     config: &Config,
@@ -2324,12 +2289,11 @@ pub fn forward_turboquant<'a>(
     // 1. Embedding: x = wte[token] + wpe[pos]
     let tok_off = token * n;
     let pos_off_emb = pos * n;
-    for i in 0..n {
-        unsafe {
-            *ctx.x.get_unchecked_mut(i) = *weights.wte.get_unchecked(tok_off + i)
-                + *weights.wpe.get_unchecked(pos_off_emb + i);
-        }
-    }
+    crate::simd::simd_add_into(
+        &mut ctx.x[..n],
+        &weights.wte[tok_off..tok_off + n],
+        &weights.wpe[pos_off_emb..pos_off_emb + n],
+    );
 
     // 2. Layer loop
     for (layer_idx, layer_weights) in weights.layers.iter().enumerate() {
@@ -2352,7 +2316,7 @@ pub fn forward_turboquant<'a>(
         // already contains positions 0..pos-1 from the previous decode step for this layer.
         // On mismatch (first call, layer switch, reset, pos jump), rebuild all positions.
         let t_n = pos + 1;
-        let last_pos = ctx.tq_dequant_pos[layer_idx];
+        let last_pos = ctx.dequant_pos[layer_idx];
         if last_pos + 1 == pos && pos > 0 {
             // Incremental: only dequant the new position
             cache.dequantize_key_into(
@@ -2380,7 +2344,7 @@ pub fn forward_turboquant<'a>(
                 );
             }
         }
-        ctx.tq_dequant_pos[layer_idx] = pos;
+        ctx.dequant_pos[layer_idx] = pos;
 
         // Multi-head attention with GQA using dequantized flat cache
         let scale = 1.0 / (hd as f32).sqrt();
@@ -2407,11 +2371,7 @@ pub fn forward_turboquant<'a>(
 
         // Output projection + residual
         matmul(&mut ctx.x, &layer_weights.attn_wo, &ctx.attn_out, n, n);
-        for i in 0..n {
-            unsafe {
-                *ctx.x.get_unchecked_mut(i) += *ctx.xr.get_unchecked(i);
-            }
-        }
+        crate::simd::simd_add_inplace(&mut ctx.x[..n], &ctx.xr[..n]);
 
         // MLP: save residual → RMSNorm → MLP → residual
         ctx.xr2[..n].copy_from_slice(&ctx.x[..n]);
@@ -2453,11 +2413,7 @@ pub fn forward_turboquant<'a>(
             n,
             config.mlp_hidden,
         );
-        for i in 0..n {
-            unsafe {
-                *ctx.x.get_unchecked_mut(i) += *ctx.xr2.get_unchecked(i);
-            }
-        }
+        crate::simd::simd_add_inplace(&mut ctx.x[..n], &ctx.xr2[..n]);
     }
 
     // Snapshot hidden state (Plan 009 compatibility)
@@ -2473,6 +2429,24 @@ pub fn forward_turboquant<'a>(
     );
 
     &mut ctx.logits
+}
+
+/// Backward-compat alias: forward using TurboQuant-specific cache.
+///
+/// Prefer [`forward_quantized`] for new code — it's generic over any
+/// [`types::QuantizedKVCache`] backend.
+#[cfg(feature = "turboquant")]
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+pub fn forward_turboquant<'a>(
+    ctx: &'a mut ForwardContext,
+    weights: &TransformerWeights,
+    cache: &mut crate::turboquant::TurboQuantKVCache,
+    token: usize,
+    pos: usize,
+    config: &Config,
+) -> &'a mut [f32] {
+    forward_quantized(ctx, weights, cache, token, pos, config)
 }
 
 #[cfg(test)]

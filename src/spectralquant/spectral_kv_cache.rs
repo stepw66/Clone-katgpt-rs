@@ -575,6 +575,36 @@ impl SpectralQuantKVCache {
     }
 }
 
+impl crate::types::QuantizedKVCache for SpectralQuantKVCache {
+    fn store_key(&mut self, layer: usize, pos: usize, key: &[f32]) {
+        self.store_key(layer, pos, key);
+    }
+
+    fn store_value(&mut self, layer: usize, pos: usize, value: &[f32]) {
+        self.store_value(layer, pos, value);
+    }
+
+    fn dequantize_key_into(&mut self, layer: usize, pos: usize, out: &mut [f32]) {
+        self.dequantize_key_into(layer, pos, out);
+    }
+
+    fn dequantize_value_into(&mut self, layer: usize, pos: usize, out: &mut [f32]) {
+        self.dequantize_value_into(layer, pos, out);
+    }
+
+    fn reset(&mut self) {
+        self.reset();
+    }
+
+    fn pos(&self) -> usize {
+        self.pos()
+    }
+
+    fn set_pos(&mut self, pos: usize) {
+        self.set_pos(pos);
+    }
+}
+
 // ── Helpers ─────────────────────────────────────────────────────────────
 
 /// Compute L2 norm of a vector.

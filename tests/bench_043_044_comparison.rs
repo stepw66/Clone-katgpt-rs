@@ -4,7 +4,9 @@
 //! - Plan 043 (TurboQuant): flat f32 KV cache vs bit-packed quantized cache
 //! - Plan 044 (PFlash): full prefill vs block-sparse speculative prefill
 //!
-//! Run with: cargo test bench_043_044 -- --nocapture
+//! Run with: cargo test -p microgpt-rs --features turboquant --test bench_043_044_comparison -- --nocapture
+
+#![cfg(feature = "turboquant")]
 
 use std::hint::black_box;
 use std::time::Instant;

@@ -1,7 +1,7 @@
-//! Rotation transforms for SpectralQuant — spectral (calibrated) and random baseline.
+//! Rotation transforms for SpectralQuant — spectral (calibrated).
 //!
 //! Spectral rotation uses learned eigenvectors from covariance analysis.
-//! Random rotation uses deterministic QR decomposition (baseline/fallback).
+//! `RandomRotation` (TurboQuant baseline/fallback) is gated behind the `turboquant` feature.
 
 /// Data-driven orthogonal rotation using calibrated eigenvectors.
 ///
@@ -62,6 +62,7 @@ impl SpectralRotation {
 ///
 /// Uses the same QR decomposition as `generate_rotation_matrix` but wraps
 /// it in a struct for interface consistency with `SpectralRotation`.
+#[cfg(feature = "turboquant")]
 pub struct RandomRotation {
     /// Per-(layer, head) rotation matrices, flattened.
     /// Indexed as rotations[layer * n_heads + head].
@@ -71,6 +72,7 @@ pub struct RandomRotation {
     n_heads: usize,
 }
 
+#[cfg(feature = "turboquant")]
 impl RandomRotation {
     /// Generate all per-(layer, head) rotation matrices upfront.
     pub fn new(head_dim: usize, n_layers: usize, n_heads: usize, global_seed: u64) -> Self {
@@ -78,7 +80,7 @@ impl RandomRotation {
         let mut rotations = Vec::with_capacity(total * head_dim * head_dim);
         for idx in 0..total {
             let seed = global_seed.wrapping_add(idx as u64 * 7919);
-            let mat = super::rotation::generate_rotation_matrix(head_dim, seed);
+            let mat = crate::turboquant::rotation::generate_rotation_matrix(head_dim, seed);
             rotations.extend_from_slice(&mat);
         }
         Self {
@@ -188,6 +190,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "turboquant")]
     #[test]
     fn test_random_rotation_roundtrip() {
         let dim = 16;
@@ -208,6 +211,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "turboquant")]
     #[test]
     fn test_random_rotation_preserves_norm() {
         let dim = 16;

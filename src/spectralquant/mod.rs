@@ -1,0 +1,34 @@
+//! SpectralQuant: Calibrated eigenbasis KV cache compression (Plan 078).
+//!
+//! Near-optimal quantization using data-driven spectral analysis:
+//! - Offline calibration: covariance → eigendecomposition → eigenbasis
+//! - Two-regime allocation: semantic (high-energy) + tail dimensions
+//! - Water-fill: per-dim bit allocation proportional to eigenvalue
+//! - Lloyd-Max: optimal non-uniform scalar quantizer per regime
+//!
+//! Compresses KV cache from f32 to ~3 bits/coordinate with minimal MSE.
+
+pub mod forward;
+pub mod nonuniform_quant;
+pub mod spectral;
+pub mod spectral_kv_cache;
+pub mod spectral_rotation;
+pub mod types;
+
+pub use forward::{
+    attention_spectralquant, dequantize_spectral_keys_flat, dequantize_spectral_values_flat,
+};
+pub use nonuniform_quant::{CompressedVector, NonUniformQuantizer};
+pub use spectral::{
+    BitAllocator, CalibrationResult, LloydMaxQuantizer, calibrate_eigenbasis,
+    cumulative_variance_thresholds, generate_selective_qjl_signs, marginal_gain,
+    participation_ratio, spectral_gap, waterfill_bits,
+};
+pub use spectral_kv_cache::SpectralQuantKVCache;
+#[cfg(feature = "turboquant")]
+pub use spectral_rotation::RandomRotation;
+pub use spectral_rotation::SpectralRotation;
+pub use types::{
+    LloydMaxCodebook, SpectralQuantCalibration, SpectralQuantKVCacheConfig, SpectralQuantLayer,
+    WaterfillAllocation,
+};

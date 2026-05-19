@@ -7,11 +7,15 @@
 use std::slice::from_ref;
 use std::time::Instant;
 
-use microgpt_rs::turboquant::{
-    SpectralQuantCalibration, SpectralQuantKVCache, SpectralQuantKVCacheConfig, TurboQuantKVCache,
-    TurboQuantKVCacheConfig, calibrate_eigenbasis,
+use microgpt_rs::spectralquant::{
+    SpectralQuantCalibration, SpectralQuantKVCache, SpectralQuantKVCacheConfig,
+    calibrate_eigenbasis,
 };
-use microgpt_rs::types::{Config, Rng, kv_dim};
+#[cfg(feature = "turboquant")]
+use microgpt_rs::turboquant::{TurboQuantKVCache, TurboQuantKVCacheConfig};
+use microgpt_rs::types::Rng;
+#[cfg(feature = "turboquant")]
+use microgpt_rs::types::{Config, kv_dim};
 
 fn make_calibration(kv_dim: usize, n_samples: usize) -> SpectralQuantCalibration {
     let mut rng = Rng::new(42);
@@ -49,6 +53,7 @@ fn cosine_sim(a: &[f32], b: &[f32]) -> f32 {
     (dot / (na * nb)) as f32
 }
 
+#[cfg(feature = "turboquant")]
 #[test]
 fn bench_spectralquant_cosine_vs_turboquant() {
     let config = Config::micro();
