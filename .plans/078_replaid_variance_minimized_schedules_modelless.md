@@ -11,6 +11,10 @@
 
 **Why modelless first:** Validates the variance-minimization pattern cheaply across three independent subsystems. If flattening per-step variance improves convergence in at least one subsystem, the pattern is worth porting to the gradient-based path (Plan 079).
 
+**Over-Training Validation (Research 41 Sec 2.7):** RePlaid proves small, over-trained models with self-supervised regularization beat larger compute-optimal ones (3.1× vs 6.9× past optimal). Our modelless pruners (GFlowNet, ROPD, SDAR) are exactly this: small pruners trained on observation data without a teacher. This validates the modelless-first strategy.
+
+**ROPD vs SDAR Compatibility (Research 41 Sec 2.6):** RePlaid shows mixing ELBO + CE objectives destroys embedding geometry (22.1→26.1 PPL). Our SDAR (sigmoid gating) is ELBO-like; our ROPD (pointwise scoring) is CE-like. If both are used, ROPD must be gated through SDAR — never added independently.
+
 **Honest Scope:** We do NOT implement continuous diffusion. We port the **schedule optimization principle** (Prop 1) to three existing discrete subsystems. The theoretical guarantee (constant loss → optimal schedule) assumes Bayes-optimal conditions; our models are far from Bayes-optimal, so empirical validation is required.
 
 ---
@@ -234,6 +238,24 @@
   - Metrics: win rate, DDTree nodes, β evolution over episodes
   - **Gate:** If learned β doesn't beat fixed β=5.0, document why and keep feature-gated
 
+### Phase 3.5: D2F Higher-Order Denoising (Future — Not Blocked)
+
+RePlaid Sec 4.2 shows DPM-Solver++(2M) — a second-order multistep solver — beats first-order DDPM at low NFEs (< 64 steps). The solver caches previous predictions and linearly extrapolates (Eq 16-17), reducing steps by ~4×. This is directly transferable to our D2F pipeline.
+
+- [ ] **T10.5: Add `prev_logits` cache to `D2fContext`** — `src/dllm.rs`
+  - New field: `prev_logits: Vec<f32>` — `[vocab_size]` cached from previous denoising step
+  - New field: `prev_prev_logits: Vec<f32>` — second cache for multistep extrapolation
+  - No FLOPs increase — just memory for 2 extra logit vectors (~400KB at vocab=32K)
+  - **Deferred** until Phase 4 benchmarks show variance-minimized schedules help D2F
+
+- [ ] **T10.6: Implement multistep logit extrapolation in `d2f_decode_block()`** — `src/speculative/d2f.rs`
+  - At each denoising step, instead of using only current logits:
+    - Step 1: use current logits (DDIM fallback, no cache)
+    - Step 2+: extrapolate using `D_i = (1 + r_i/2) * logits^(i-1) - (r_i/2) * logits^(i-2)` (RePlaid Eq 16)
+  - `r_i = h_{i-1} / h_i` where h is step size in log-SNR space
+  - Potential: `D2fDecodeConfig::quality()` from 16 steps → 4 steps, 4× throughput
+  - **Deferred** — requires T10.5 cache + Phase 4 variance schedule validation
+
 ### Phase 4: Unified Benchmark + Feature Gate
 
 - [ ] **T11: Create comprehensive benchmark** — `tests/bench_replaid_variance_schedules.rs`
@@ -275,6 +297,13 @@ Each target validates the variance-minimization principle in a different regime:
 
 If the principle works across all three scales, it's robust. If it only works at one scale, we know the boundary conditions.
 
+### Why not combine ROPD and SDAR losses directly?
+RePlaid Sec 5.1 proves mixing ELBO and CE objectives destroys the low-rank embedding structure that ELBO creates (PPL 22.1→26.1, PCA scree flattens from 6 PCs to 13). In our stack:
+- SDAR's sigmoid gating `σ(β·Δt)` is structurally similar to ELBO — it gates based on teacher-student gap, preserving embedding geometry
+- ROPD's pointwise rubric scoring is structurally similar to CE — it applies discriminative pressure per-criterion
+- **If both are active, ROPD must be gated through SDAR** (ROPD output → SDAR gate → final signal), never added as independent loss
+- This is a design constraint for any future distillation pipeline that combines multiple pruner signals
+
 ### Why not just add noise to the schedule?
 Random perturbation (jitter) is not the same as variance-minimized adaptation. Jitter adds noise to explore; variance minimization removes noise to converge. These are complementary: jitter for exploration, variance minimization for exploitation.
 
@@ -292,6 +321,9 @@ Same pattern as `g_zero`, `delta_mem`, `sdar`. Experimental until benchmarks pro
 | Training | None (online statistics only) | wgpu kernel backward passes |
 | Shared types | `VarianceMinimizer`, `VarianceMinimizerConfig` | Same types, plus ELBO loss |
 | Shared insight | Prop 1 (constant per-step loss) | Prop 1 + self-conditioning + ELBO |
+| D2F acceleration | Higher-order multistep solver (T10.5-T10.6, deferred) | N/A (uses self-conditioning instead) |
+| Over-training validation | Modelless pruners validated by RePlaid Sec 2.7 | ELBO auxiliary for LoRA over-training |
+| ROPD vs SDAR | Gate ROPD through SDAR if combining (Sec 2.6) | Same constraint applies to model-based |
 
 **Shared types** (`VarianceMinimizer`, `VarianceMinimizerConfig`) are defined here (modelless) and re-exported by riir-ai's training infrastructure. The model-based plan adds ELBO loss computation and self-conditioning loops on top of the same variance-minimization core.
 
@@ -319,3 +351,5 @@ Same pattern as `g_zero`, `delta_mem`, `sdar`. Experimental until benchmarks pro
 - Plan 030: Multi-Armed Bandit (existing bandit infrastructure)
 - Plan 072: SDAR Gated Distillation Modelless (existing SDAR infrastructure)
 - `riir-ai/.plans/079_replaid_elbo_self_condition_model_based.md` — model-based twin plan
+- RePlaid Sec 4.2, Appendix D: DPM-Solver++(2M) multistep extrapolation (D2F acceleration)
+- RePlaid Sec 5.1, Fig 5c: ELBO + CE incompatibility (ROPD vs SDAR design constraint)

@@ -68,6 +68,33 @@ ELBO-trained embeddings at d_e=16 show:
 - RePlaid (no s.c.) outperforms Duo at every T on MAUVE
 - Self-conditioning compounds confidence → lower entropy at high T
 
+### 2.6 The ELBO vs Cross-Entropy Incompatibility
+
+This is the most architecturally significant finding for our distillation stack:
+
+**Adding CE to ELBO makes things WORSE** (Tab 2 + Sec 5.1):
+- RePlaid with pure ELBO: PPL 22.1
+- RePlaid with ELBO + auxiliary CE: PPL 26.1 (+4.0 degradation)
+- Root cause: CE gradients are **separative** — they push embedding vectors apart, destroying the low-rank POS-clustered structure ELBO creates
+- PCA scree flattens from 6 PCs (90% variance) to 13 PCs when CE is added (Fig 5b vs 5c)
+
+**Implication for our pipeline:**
+- Our ROPD rubric distillation (Plan 071/072) uses pointwise scoring — functionally CE-like
+- Our SDAR sigmoid gating (Plan 072/073) uses teacher-student gap with learned β — closer to ELBO-like variance minimization
+- **SDAR's gating mechanism is more compatible with embedding structure preservation than ROPD's pointwise scoring**
+- If combining both, **gate the ROPD signal through SDAR** (don't add them independently)
+
+### 2.7 Over-Training Advantage Validates Modelless Approach
+
+RePlaid beats MDLM when trained past compute-optimal (Fig 1c):
+- A 66M RePlaid trained for 3.1× optimal compute matches MDLM trained for 6.9× optimal
+- The crossover occurs because ELBO regularization prevents overfitting in small models
+
+**Why this matters for modelless:** Our modelless pruners (GFlowNet, ROPD, SDAR) are essentially "over-training" the pruner on observation data without a teacher model. RePlaid's result provides theoretical support:
+- Small, over-trained pruners can beat larger, compute-optimal ones
+- Self-supervised regularization (variance minimization) is the key enabler
+- This validates our modelless-first approach (Plan 049 Phase 1 T1–T5) where we train pruners on self-play data without a model
+
 ---
 
 ## 3. Relationship to Our Previous Research
@@ -91,8 +118,11 @@ ELBO-trained embeddings at d_e=16 show:
 |--------|-------------------|---------|
 | Diffusion type | Discrete (mask tokens) | Continuous (Gaussian noise on embeddings) |
 | Noise schedule | Fixed monotonic (min→max ratio) | Learned (variance-minimized) |
+| Solver | Iterative DDPM-style (step-by-step unmask) | DDPM + DDIM + DPM-Solver++(2M) + Heun |
 | Our implementation | ✅ Plan 066 complete | ❌ Not implementing full pipeline |
-| What to adapt | **Variance-minimized schedule for D2F** | — |
+| What to adapt | **Variance-minimized schedule + higher-order solvers for D2F** | — |
+
+**New finding (Sec 4.2, Appendix D):** RePlaid shows DPM-Solver++(2M) — a second-order multistep ODE solver — significantly outperforms first-order DDIM/DDPM at low NFEs. This is directly transferable to our D2F pipeline: replacing iterative step-by-step unmasking with a higher-order denoising schedule could reduce steps from 16→4 while maintaining quality. The solver caches the previous prediction and linearly extrapolates (Eq 16-17), requiring only 1 NFE per step.
 
 ### 3.3 vs Research 38 (SDAR Sigmoid Gating)
 
@@ -148,6 +178,30 @@ ELBO-trained embeddings at d_e=16 show:
 
 **Priority:** Low-Medium. Interesting but would require new infrastructure.
 
+### 4.5 Over-Training Advantage Validates Modelless — ADOPT (Conceptual)
+
+**Insight:** RePlaid's over-training crossover (Fig 1c) proves small, aggressively-trained models with proper regularization can beat larger compute-optimal models.
+
+**Implication for modelless distillation:**
+- Our GFlowNet modelless (Plan 052) and SDAR modelless (Plan 072) train pruners on observed game trajectories — effectively "over-training" on limited data
+- RePlaid shows this is a valid strategy: small models trained past compute-optimal with self-supervised regularization beat larger models
+- Our `.benchmarks/008_sdar_gated_modelless.md` results (negative for arena, positive for components) align with RePlaid's finding that not all over-training regimes help — the regularization method matters
+
+**Priority:** Conceptual. Validates existing modelless strategy, no new code needed.
+
+### 4.6 Higher-Order D2F Denoising — CONSIDER
+
+**Insight:** RePlaid Sec 4.2 shows DPM-Solver++(2M) beats DDPM at low NFEs. The solver uses linear extrapolation from cached predictions (Eq 16-17), reducing steps by 4× with maintained quality.
+
+**Adaptation for D2F:**
+- Our `d2f_decode_block()` uses iterative denoising (DDPM-style, step-by-step)
+- A second-order variant could cache the previous step's logits and extrapolate
+- Potential: reduce `D2fDecodeConfig::quality()` from 16 steps to 4 steps
+- Implementation: WGSL kernel for multistep logit extrapolation (cache `x_θ^(i-1)`, `x_θ^(i-2)`)
+- This is discrete-adapted: we cache logit vectors, not continuous latent states
+
+**Priority:** Medium. Would require new WGSL kernels but could 4× D2F throughput.
+
 ---
 
 ## 5. What We Do NOT Distill (Rejected)
@@ -162,13 +216,17 @@ Our D2F (Plan 066) is discrete diffusion and works well with our stack. Switchin
 
 **Reason:** RePlaid's 50× FLOP savings at d_e=16 vs d_e=768 is specific to the embedding corruption step in continuous diffusion. Our game states and validator embeddings serve different purposes (classification, reward, constraint checking, not generative modeling).
 
-### 5.3 ELBO as Sole Training Objective — REJECTED
+### 5.3 ELBO as Sole Training Objective — REJECTED (with nuance)
 
 **Reason:** Our SDAR (Plan 072) and ROPD (Plan 071) results show sigmoid gating and rubric vectors work well modellessly. Adding ELBO would be over-engineering for the modelless path. The model path uses cross-entropy + SDAR loss, which our benchmarks show is effective.
 
-### 5.4 ODE Solver Distillation — DEFERRED
+**Nuance (Sec 2.6):** If we ever combine ROPD and SDAR losses, we must gate ROPD through SDAR — never add them independently. RePlaid's ELBO+CE experiment (22.1→26.1) shows that mixing objectives with different embedding geometry properties is destructive. SDAR's sigmoid gating preserves structure; ROPD's pointwise scoring disperses it.
 
-**Reason:** Continuous diffusion enables trajectory distillation via PFODE solvers, which is unavailable to discrete diffusion. This is a significant advantage but requires adopting continuous diffusion first (rejected above). Long-term research direction only.
+### 5.4 ODE Solver Distillation — PARTIALLY ADOPTED
+
+**Original stance:** Continuous diffusion enables trajectory distillation via PFODE solvers, unavailable to discrete diffusion. Long-term research direction only.
+
+**Updated stance (Sec 4.6):** The **solver acceleration** insight transfers. RePlaid shows DPM-Solver++(2M) achieves comparable quality in 4× fewer steps via multistep extrapolation. Our D2F pipeline can adopt the same principle: cache previous denoising predictions and extrapolate. This doesn't require continuous diffusion — just smarter step scheduling. Promoted to Section 4.6.
 
 ---
 
@@ -201,6 +259,7 @@ Prop 2 (near-linear CE) assumes a Bayes-optimal denoiser (Def 1). Our D2F models
 | `src/dllm.rs` `NoiseSchedule` | Fixed monotonic min→max | Variance-minimized ratios (track per-step loss, equalize difficulty) | Prop 1 |
 | `src/pruners/bandit.rs` `BanditStrategy` | Fixed ε, UCB1 | Add `VarianceEpsilon` that adapts ε to equalize per-episode reward variance | Prop 1 analog |
 | `src/pruners/sdar_gate.rs` `SDAR_BETA` | Fixed 5.0 | Add `learned_beta()` that minimizes gated-signal variance across episodes | Sec 5.2 |
+| `src/pruners/sdar_gate.rs` + `ropd.rs` | Independent losses | Gate ROPD through SDAR (never add independently) | Sec 2.6, Fig 5c |
 
 ### 7.2 Medium-term (Model — riir-ai)
 
@@ -210,7 +269,14 @@ Prop 2 (near-linear CE) assumes a Bayes-optimal denoiser (Def 1). Our D2F models
 | `riir-gpu/src/forward.rs` `GpuForwardPass::forward()` | Single forward pass | Add self-conditioning path (forward → estimate → forward with conditioning) | Sec 2 |
 | `riir-gpu/src/training_loop.rs` `TrainingConfig` | Fixed LR schedule | Add per-component LR (embeddings: 1e-2, backbone: 2e-4) from Tab 7 | Tab 7, 9 |
 
-### 7.3 Long-term Research
+### 7.3 Medium-term (D2F Acceleration)
+
+| Code Location | Current | Change | Insight Source |
+|---|---|---|---|
+| `src/speculative/d2f.rs` `d2f_decode_block()` | Iterative DDPM-style (16 steps) | Higher-order multistep solver with cached prediction extrapolation (4 steps) | Sec 4.2, Eq 16-17 |
+| `src/dllm.rs` `D2fContext` | Single-step logit buffer | Add `prev_logits` cache for DPM-Solver++(2M) extrapolation | Appendix D |
+
+### 7.4 Long-term Research
 
 - PFODE distillation path for continuous embeddings (if we ever adopt them)
 - Low-rank game state embeddings via variance-minimized optimization
