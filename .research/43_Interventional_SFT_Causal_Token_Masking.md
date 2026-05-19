@@ -282,8 +282,7 @@ The intervention/evidence distinction is not philosophical — it is a measurabl
 **Action items:**
 - ✅ Implemented: `LossMask::Interventional`, `RoleGate`, `backward_pass_interventional()`
 - ✅ Benchmarked: L_do produces cleaner signal than L_obs
-- ⬜ Needed: A plan to generate/collect multi-turn tutoring dialogues with `role_gates` and train with `LossMask::Interventional`. Plan 072 (ROPD) is about rubric reward for GRPO — it doesn't produce this data. No plan exists yet.
-- ⬜ Needed: GZeroLoop already sets `LossMask::Interventional` in `GZeroRound` and game traces already encode `role_gates` (board=World, action=Agent). This integration is wired but untested on real self-play data — needs a benchmark plan.
+- 🔄 Plan 080: Proof test with gradient verification + Go game traces + semantic tutoring dialogues. Fixes Go encoder `role_gates` gap. Validates paper's Eq. 6 on structured truth/lie data.
 
 **Run:**
 ```sh
