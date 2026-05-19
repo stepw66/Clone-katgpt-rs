@@ -702,3 +702,42 @@ For microgpt-rs specifically: implement Phase 1 (water-fill) immediately as it's
 - **Research 37** (REAP): Model-based/modelless duality. SpectralQuant is model-based (calibrated) vs TurboQuant's modelless (random).
 - **Research 22** (Lighthouse Attention): Alternative KV compression via attention pattern sparsity. Orthogonal to SpectralQuant.
 - **Research 24** (Delta Mem): Online associative memory. Could benefit from SpectralQuant compression of stored associations.
+
+## 9. GPU Benchmark Results — Plan 078 (WGSL Compute)
+
+_Benchmarks run on macOS Metal via `riir-gpu` with `spectral_quant_gpu` feature._
+_Command: `cargo bench -p riir-gpu --bench spectralquant_bench --features spectral_quant_gpu`_
+
+### 9.1 Individual Kernel Latency
+
+| Kernel | seq_len=64 | seq_len=512 | seq_len=2048 |
+|--------|-----------|------------|-------------|
+| **covariance** | 43.7 µs | 245.9 µs | 901.2 µs |
+| **eigenbasis_rotation** | 47.2 µs | 282.9 µs | 1,088 µs |
+| **selective_qjl** | 42.6 µs | 42.7 µs | 40.6 µs |
+| **waterfill_dequant** | 51.9 µs | 246.8 µs | 1,002 µs |
+| **spectralquant_attention** | 168.9 µs | 687.8 µs | 1,980 µs |
+
+### 9.2 SQ vs TQ Attention Decode (Head-to-Head)
+
+| Metric | TurboQuant | SpectralQuant | Speedup |
+|--------|-----------|--------------|---------|
+| **seq_len=64** | 1,250 µs | 169 µs | **7.4×** |
+| **seq_len=512** | 1,313 µs | 688 µs | **1.9×** |
+| **seq_len=2048** | 2,232 µs | 1,980 µs | **1.1×** |
+
+### 9.3 End-to-End Decode Pipeline
+
+| Pipeline | Time |
+|----------|------|
+| **turboquant_decode** | 2,913 µs |
+| **spectralquant_decode** | 2,714 µs |
+| **Delta** | **-6.8%** (SQ faster) |
+
+### 9.4 Key Observations
+
+1. **No regression** — SpectralQuant is faster than TurboQuant across all decode scenarios.
+2. **selective_qjl is O(1) w.r.t. seq_len** — ~42 µs regardless of sequence length. The d_eff=6 truncation means only 6 dimensions are projected, so work is independent of sequence length. This is the biggest architectural win.
+3. **spectralquant_attention** (fused dequant+scoring) beats TurboQuant's attention scoring at every seq_len, with the biggest advantage at short sequences (7.4× at seq_len=64).
+4. **E2E decode** (full pipeline including covariance, rotation, QJL, dequant, scoring): SQ is 6.8% faster than TQ at seq_len=2048.
+5. **Latency scales linearly** for covariance, rotation, and dequant kernels — consistent with O(seq_len × d_h²) tiled matmul expectations.
