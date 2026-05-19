@@ -120,7 +120,7 @@ Configurable budget: 50–1000 simulations per move
 Rollout: random playout to terminal, then Tromp-Taylor scoring
 Selection: UCB1 tree policy
 Weakness: budget=200 insufficient for Go's ~80 branching factor
-Win rate vs Random: 85% (17/20 games, improved from 55% via territorial heuristic)
+Win rate vs Random: 65% (13/20 games, improved from 55% via territorial heuristic)
 ```
 
 ## Examples & Results
@@ -149,14 +149,14 @@ MCTS (budget=200) vs Random, 20 games on 9×9, komi=7.5.
 
 | Metric | Value |
 |--------|-------|
-| MCTS Win Rate | 85% (17W / 3L) |
-| As Black | ~85% |
-| As White | ~85% |
-| Avg Moves/Game | ~194 |
-| Avg Time/Game | ~1.2s |
-| Moves/sec | ~162 |
+| MCTS Win Rate | 65% (13W / 7L) |
+| As Black | 60% |
+| As White | 70% |
+| Avg Moves/Game | ~185 |
+| Avg Time/Game | ~0.18s |
+| Moves/sec | ~1018 |
 
-**Verdict:** MCTS now reliably beats Random at budget=200 after Plan 073 territorial heuristic fix. Previous 55% was caused by backwards center-preference weight — Go rewards corner/edge territory, not center control.
+**Verdict:** MCTS beats Random at budget=200 after Plan 073 territorial heuristic fix (65%, up from 55%). Previous 55% was caused by backwards center-preference weight — Go rewards corner/edge territory, not center control. Budget=200 still insufficient for Go's ~80 branching factor; higher budgets needed for stronger play.
 
 ```bash
 cargo run --features go --example go_01_mcts
@@ -176,12 +176,12 @@ Round-robin tournament: each player vs Random, 10 games, 9×9.
 | Greedy | 70% | ~302 | 0.2s |
 | Validator | **100%** | ~302 | 0.2s |
 | HL | **100%** | ~302 | 0.5s |
-| MCTS | 85% | ~181 | 1.2s |
+| MCTS | 80% | ~196 | 0.2s |
 
 **Verdict:**
 - Validator/HL dominate Random with 100% win rate
 - Greedy dropped to 70% after Plan 073 — more positional play, sometimes misses tactical captures
-- MCTS improved from 55% → 85% via territorial heuristic — biggest winner from the fix
+- MCTS improved from 55% → 80% via territorial heuristic in tournament format
 - Random baseline wins ~35% due to first-player advantage from komi (Black)
 
 ```bash
@@ -362,9 +362,9 @@ cargo run --features go --example go_07_tui -- --seed 99
 
 ## Key Findings
 
-1. **Territorial heuristic fixed (Plan 073)** — Go rewards corner/edge territory, not center control. Flipping `center_preference()` to `territorial_preference()` with phase-aware evaluation (Early: corners, Late: influence) improved MCTS from 55% → 85% vs Random.
+1. **Territorial heuristic fixed (Plan 073)** — Go rewards corner/edge territory, not center control. Flipping `center_preference()` to `territorial_preference()` with phase-aware evaluation (Early: corners, Late: influence) improved MCTS from 55% → 65% vs Random.
 
-2. **MCTS now reliable at budget=200** — Go's branching factor (~80 on 9×9, ~250 on 19×19) still exhausts budget, but the corrected heuristic makes each simulation count more. Win rate jumped from 55% → 85%.
+2. **MCTS modest at budget=200** — Go's branching factor (~80 on 9×9, ~250 on 19×19) exhausts budget. The corrected heuristic helps (55% → 65%), but budget=200 remains insufficient for reliable dominance.
 
 3. **Greedy trades tactics for position** — After Plan 073, Greedy dropped from 100% → 70% vs Random. The corner/side bonus makes it play more positionally, sometimes missing tactical captures. Validator and HL (which layer on top of Greedy) remain at 100%.
 

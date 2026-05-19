@@ -1,6 +1,6 @@
 # Benchmark 009: Arena Integration — RubricPlayer Tournaments
 
-**Date:** 2026-05-19
+**Date:** 2026-05-21
 **Plan:** 077 (Arena Integration)
 **Features:** `ropd_rubric,g_zero,bomber,fft`
 **Command (Bomber):** `cargo run --example bomber_09_rubric_tournament --features ropd_rubric,g_zero,bomber --release`

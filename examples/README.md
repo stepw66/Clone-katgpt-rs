@@ -8,9 +8,9 @@ All examples run with `cargo run --example <name>`. Some require feature flags.
 |---|-------|----------|---------|
 | 1 | Bandit (RL) | 7 examples | `bandit` |
 | 2 | Heuristic Learning | 2 examples | `bandit` |
-| 3 | Bomberman Arena | 8 examples | `bomber`, `bomber-wasm`, `bomber-agent` |
+| 3 | Bomberman Arena | 9 examples | `bomber`, `bomber-wasm`, `bomber-agent`, `ropd_rubric` |
 | 4 | Monopoly FSM | 4 examples | `monopoly` |
-| 5 | FFT Tactics Arena | 1 example | — |
+| 5 | FFT Tactics Arena | 2 examples | `ropd_rubric`, `g_zero` |
 | 6 | GameState Forward Model | 2 examples | `game_state` |
 | 7 | Blue Bear | 2 examples | — |
 | 8 | Core | 4 examples | varies |
@@ -181,6 +181,27 @@ Agent validator optimization loop — evolves bomber safety rule sets using popu
 cargo run --example bomber_08_agent_loop --features bomber-agent
 ```
 
+### bomber_09_rubric_tournament
+
+6-player Rubric Tournament (Plan 077) — pits `RubricPlayer` (ROPD rubric-vector) against the full player hierarchy (Random, Greedy, Validator, HL, GZero). 4 matchups × 50 games each.
+
+**Results:** Random wins most (12.0%, 18W) — Bomber 4-player FFA has ~80% draws (multiple survivors at tick limit). Rubric and GZero tied at 8.0% win rate.
+
+| Rank | Player | W | L | Games | Win% | ELO |
+|------|--------|---|---|-------|------|-----|
+| 1 | 🐰 Random | 18 | 132 | 150 | 12.0% | 1042 |
+| 2 | 🐱 Greedy | 2 | 48 | 50 | 4.0% | 994 |
+| 3 | 📋 Rubric | 8 | 92 | 100 | 8.0% | 985 |
+| 4 | 🧠 GZero | 8 | 92 | 100 | 8.0% | 974 |
+| 5 | 🐵 HL | 6 | 194 | 200 | 3.0% | 957 |
+| 6 | 🐶 Validator | 0 | 200 | 200 | 0.0% | 957 |
+
+> **Insight:** Bomber is single-axis (survival) — rubric adds little when survival is dominant. Random benefits from high variance in FFA.
+
+```bash
+cargo run --example bomber_09_rubric_tournament --features "ropd_rubric,g_zero,bomber"
+```
+
 ---
 
 ## 4. Monopoly FSM Arena
@@ -217,7 +238,7 @@ cargo run --example monopoly_03_hl_proof --features monopoly
 
 Performance benchmark — measures game throughput, per-turn latency, and latency distribution (p50/p90/p99).
 
-**Performance:** 87 games/sec, 41µs/turn (25× under 1ms target).
+**Performance:** 84.8 games/sec, 41µs/turn (24.4× under 1ms target).
 
 ```bash
 cargo run --example monopoly_04_bench --features monopoly
@@ -235,6 +256,18 @@ Headless 100-round tournament. 8 units (4v4) with classes: Knight, Archer, Black
 
 ```bash
 cargo run --example fft_01_arena
+```
+
+### fft_02_rubric_tournament
+
+6-player FFT Rubric Tournament (Plan 077) — pits `RubricFFTPlayer` (ROPD multi-criteria rubric) against the full player hierarchy. Round-robin matchups, 600 total battles.
+
+**Results:** Champion: 🧠 GZero (ELO 1185, 60% win%). Rubric vs GZero = Tie (inconclusive). Multi-axis rubrics help FFT more than single-axis bomber.
+
+> **Insight:** FFT has multi-axis quality (kills, survival, healing) — rubrics provide more signal than in bomber (single-axis: survival). GZero still wins via self-play discovery.
+
+```bash
+cargo run --example fft_02_rubric_tournament --features "ropd_rubric,g_zero,fft"
 ```
 
 ---
@@ -495,7 +528,7 @@ cargo run --features go --example go_00_api_bridge
 
 ### go_01_mcts
 
-MCTS (budget=200) vs Random benchmark, 20 games on 9×9. **Result:** MCTS wins 55% — barely above random due to insufficient budget for Go's ~80 branching factor.
+MCTS (budget=200) vs Random benchmark, 20 games on 9×9. **Result:** MCTS wins 65% (13W/7L) — reliably beats Random after Plan 073 territorial heuristic fix. Avg 185.4 moves/game, 115 moves/sec.
 
 ```bash
 cargo run --features go --example go_01_mcts
@@ -503,7 +536,7 @@ cargo run --features go --example go_01_mcts
 
 ### go_02_tournament
 
-Round-robin tournament: each player vs Random, 10 games. **Results:** Greedy/Validator/HL all 100%, MCTS 70%.
+Round-robin tournament: each player vs Random, 10 games. **Results:** Validator/HL 100%, MCTS 80%, Greedy 70%.
 
 ```bash
 cargo run --features go --example go_02_tournament
@@ -521,13 +554,16 @@ GO_GAMES=2 cargo run --features go --example go_03_head_to_head
 
 GZero template-based self-play with delta-gating absorb-compress. 500 episodes. **Result:** Black wins 98.6% — massive first-move advantage. Template ranking: Capture (+0.0) > CornerStar (-7.25) > Tenuki (-9.50) > Defend (-50.22).
 
+> ⚠️ Long-running example (~300+ episodes in debug). Use `--release` for faster execution.
+
 ```bash
 cargo run --features go --example go_04_gzero
+cargo run --features go --example go_04_gzero --release
 ```
 
 ### go_05_autoresearch
 
-Bandit-driven hyperparameter search. 10 arms, 50 evaluations, Greedy vs Random. **Result:** All configs win 100% (Random too easy for meaningful differentiation).
+Bandit-driven hyperparameter search. 10 arms, 50 evaluations, 500 games in 72.4s (7 games/s). **Result:** Top config M0:D50:C1.9:E0.26:T4 at 100% win rate. All arms ≥92% vs Random. Convergence: STABLE (-1.9pp Q1→Q4).
 
 ```bash
 cargo run --features go --example go_05_autoresearch
@@ -535,10 +571,35 @@ cargo run --features go --example go_05_autoresearch
 
 ### go_06_bench
 
-Comprehensive benchmark: advance performance (5µs 9×9, 23µs 19×19), MCTS throughput (~25K nodes/sec), player scaling laws.
+Comprehensive benchmark: `GoState::advance()` throughput, MCTS search speed, player scaling laws. Long-running — use `--release` for accurate latency numbers.
+
+**Run Result** (debug build):
+
+T43 — `advance()` Performance:
+| Config | ops/sec | µs/adv |
+|---|---|---|
+| 9×9 opening | 182K | 5.48µs |
+| 9×9 midgame | 166K | 6.07µs |
+| 9×9 endgame | 98K | 10.26µs |
+| 19×19 opening | 42K | 23.79µs |
+
+T44 — MCTS Search (9×9):
+| Budget | nodes/sec |
+|---|---|
+| 200 | ~35K |
+| 500 | ~36K |
+
+T46 — Player Scaling (20 games):
+| Player | Win Rate |
+|---|---|
+| Validator / HL | 100% |
+| MCTS(200) | 80% |
+| Greedy | 70% |
+| Random | 35% |
 
 ```bash
 cargo run --features go --example go_06_bench
+cargo run --features go --example go_06_bench --release
 ```
 
 ### go_07_tui
