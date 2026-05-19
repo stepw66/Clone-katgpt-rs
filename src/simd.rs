@@ -626,6 +626,420 @@ unsafe fn avx2_scale_inplace(x: &mut [f32], scale: f32) {
     }
 }
 
+/// SIMD-accelerated in-place add: `dst[i] += src[i]` for all `i`.
+///
+/// Used for residual connections in transformer forward pass (attn + MLP).
+/// NEON: 4× f32 per `vaddq_f32`. AVX2: 8× f32 per `_mm256_add_ps`.
+#[inline]
+pub fn simd_add_inplace(dst: &mut [f32], src: &[f32]) {
+    debug_assert_eq!(
+        dst.len(),
+        src.len(),
+        "simd_add_inplace: slices must have equal length"
+    );
+    #[cfg(target_arch = "aarch64")]
+    {
+        unsafe { neon_add_inplace(dst, src) }
+    }
+    #[cfg(target_arch = "x86_64")]
+    {
+        if is_avx2_fma_available() {
+            unsafe { avx2_add_inplace(dst, src) }
+        } else {
+            scalar_add_inplace(dst, src)
+        }
+    }
+    #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
+    {
+        scalar_add_inplace(dst, src)
+    }
+}
+
+/// SIMD-accelerated zip add: `dst[i] = a[i] + b[i]` for all `i`.
+///
+/// Used for embedding addition (wte + wpe) in transformer forward pass.
+/// NEON: 4× f32 per `vaddq_f32`. AVX2: 8× f32 per `_mm256_add_ps`.
+#[inline]
+pub fn simd_add_into(dst: &mut [f32], a: &[f32], b: &[f32]) {
+    debug_assert_eq!(
+        dst.len(),
+        a.len(),
+        "simd_add_into: dst and a must have equal length"
+    );
+    debug_assert_eq!(
+        dst.len(),
+        b.len(),
+        "simd_add_into: dst and b must have equal length"
+    );
+    #[cfg(target_arch = "aarch64")]
+    {
+        unsafe { neon_add_into(dst, a, b) }
+    }
+    #[cfg(target_arch = "x86_64")]
+    {
+        if is_avx2_fma_available() {
+            unsafe { avx2_add_into(dst, a, b) }
+        } else {
+            scalar_add_into(dst, a, b)
+        }
+    }
+    #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
+    {
+        scalar_add_into(dst, a, b)
+    }
+}
+
+/// SIMD-accelerated max reduction: returns the maximum value in `x`.
+///
+/// Used for softmax numerical stability (pass 1 max-finding).
+/// NEON: 4× f32 per `vmaxq_f32`. AVX2: 8× f32 per `_mm256_max_ps`.
+#[inline]
+pub fn simd_max_f32(x: &[f32]) -> f32 {
+    if x.is_empty() {
+        return f32::NEG_INFINITY;
+    }
+    #[cfg(target_arch = "aarch64")]
+    {
+        unsafe { neon_max_f32(x) }
+    }
+    #[cfg(target_arch = "x86_64")]
+    {
+        if is_avx2_fma_available() {
+            unsafe { avx2_max_f32(x) }
+        } else {
+            scalar_max_f32(x)
+        }
+    }
+    #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
+    {
+        scalar_max_f32(x)
+    }
+}
+
+/// SIMD-accelerated fused decay-write: `dst[i] = decay * dst[i] + write * src[i]`.
+///
+/// Used for Raven KV cache update (exponential moving average with gating).
+/// NEON: fused via `vfmaq_f32`. AVX2: fused via `_mm256_fmadd_ps`.
+#[inline]
+pub fn simd_fused_decay_write(dst: &mut [f32], decay: f32, src: &[f32], write: f32) {
+    debug_assert_eq!(
+        dst.len(),
+        src.len(),
+        "simd_fused_decay_write: slices must have equal length"
+    );
+    #[cfg(target_arch = "aarch64")]
+    {
+        unsafe { neon_fused_decay_write(dst, decay, src, write) }
+    }
+    #[cfg(target_arch = "x86_64")]
+    {
+        if is_avx2_fma_available() {
+            unsafe { avx2_fused_decay_write(dst, decay, src, write) }
+        } else {
+            scalar_fused_decay_write(dst, decay, src, write)
+        }
+    }
+    #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
+    {
+        scalar_fused_decay_write(dst, decay, src, write)
+    }
+}
+
+// ── Scalar Fallbacks (new primitives) ─────────────────────────
+
+#[inline]
+#[allow(dead_code)]
+fn scalar_add_inplace(dst: &mut [f32], src: &[f32]) {
+    for i in 0..dst.len() {
+        unsafe {
+            *dst.get_unchecked_mut(i) += *src.get_unchecked(i);
+        }
+    }
+}
+
+#[inline]
+#[allow(dead_code)]
+fn scalar_add_into(dst: &mut [f32], a: &[f32], b: &[f32]) {
+    for i in 0..dst.len() {
+        unsafe {
+            *dst.get_unchecked_mut(i) = *a.get_unchecked(i) + *b.get_unchecked(i);
+        }
+    }
+}
+
+#[inline]
+#[allow(dead_code)]
+fn scalar_max_f32(x: &[f32]) -> f32 {
+    let mut max = x[0];
+    for i in 1..x.len() {
+        let v = unsafe { *x.get_unchecked(i) };
+        if v > max {
+            max = v;
+        }
+    }
+    max
+}
+
+#[inline]
+#[allow(dead_code)]
+fn scalar_fused_decay_write(dst: &mut [f32], decay: f32, src: &[f32], write: f32) {
+    for i in 0..dst.len() {
+        unsafe {
+            *dst.get_unchecked_mut(i) =
+                decay * *dst.get_unchecked(i) + write * *src.get_unchecked(i);
+        }
+    }
+}
+
+// ── NEON Backend (new primitives) ─────────────────────────────
+
+#[cfg(target_arch = "aarch64")]
+#[inline]
+unsafe fn neon_add_inplace(dst: &mut [f32], src: &[f32]) {
+    use core::arch::aarch64::{vaddq_f32, vld1q_f32, vst1q_f32};
+    unsafe {
+        let mut i = 0;
+        let chunks = dst.len() / 4;
+        for _ in 0..chunks {
+            let vd = vld1q_f32(dst.as_ptr().add(i));
+            let vs = vld1q_f32(src.as_ptr().add(i));
+            let result = vaddq_f32(vd, vs);
+            vst1q_f32(dst.as_mut_ptr().add(i), result);
+            i += 4;
+        }
+        while i < dst.len() {
+            *dst.get_unchecked_mut(i) += *src.get_unchecked(i);
+            i += 1;
+        }
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+#[inline]
+unsafe fn neon_add_into(dst: &mut [f32], a: &[f32], b: &[f32]) {
+    use core::arch::aarch64::{vaddq_f32, vld1q_f32, vst1q_f32};
+    unsafe {
+        let mut i = 0;
+        let chunks = dst.len() / 4;
+        for _ in 0..chunks {
+            let va = vld1q_f32(a.as_ptr().add(i));
+            let vb = vld1q_f32(b.as_ptr().add(i));
+            let result = vaddq_f32(va, vb);
+            vst1q_f32(dst.as_mut_ptr().add(i), result);
+            i += 4;
+        }
+        while i < dst.len() {
+            *dst.get_unchecked_mut(i) = *a.get_unchecked(i) + *b.get_unchecked(i);
+            i += 1;
+        }
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+#[inline]
+unsafe fn neon_max_f32(x: &[f32]) -> f32 {
+    use core::arch::aarch64::{vld1q_f32, vmaxq_f32};
+    unsafe {
+        let len = x.len();
+        let chunks = len / 4;
+        if chunks == 0 {
+            let mut max = x[0];
+            for j in 1..len {
+                let v = *x.get_unchecked(j);
+                if v > max {
+                    max = v;
+                }
+            }
+            return max;
+        }
+
+        let mut vmax = vld1q_f32(x.as_ptr());
+        let mut i = 4;
+        for _ in 1..chunks {
+            let vx = vld1q_f32(x.as_ptr().add(i));
+            vmax = vmaxq_f32(vmax, vx);
+            i += 4;
+        }
+
+        // Horizontal max of 4 lanes
+        let arr: [f32; 4] = core::mem::transmute(vmax);
+        let mut max = arr[0];
+        for &v in &arr[1..] {
+            if v > max {
+                max = v;
+            }
+        }
+
+        // Handle tail
+        while i < len {
+            let v = *x.get_unchecked(i);
+            if v > max {
+                max = v;
+            }
+            i += 1;
+        }
+        max
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+#[inline]
+unsafe fn neon_fused_decay_write(dst: &mut [f32], decay: f32, src: &[f32], write: f32) {
+    use core::arch::aarch64::{vdupq_n_f32, vfmaq_f32, vld1q_f32, vmulq_f32, vst1q_f32};
+    unsafe {
+        let vd_decay = vdupq_n_f32(decay);
+        let vd_write = vdupq_n_f32(write);
+        let mut i = 0;
+        let chunks = dst.len() / 4;
+        for _ in 0..chunks {
+            let vdst = vld1q_f32(dst.as_ptr().add(i));
+            let vsrc = vld1q_f32(src.as_ptr().add(i));
+            // FMA: write * vsrc + decay * vdst
+            let result = vfmaq_f32(vmulq_f32(vdst, vd_decay), vsrc, vd_write);
+            vst1q_f32(dst.as_mut_ptr().add(i), result);
+            i += 4;
+        }
+        while i < dst.len() {
+            *dst.get_unchecked_mut(i) =
+                decay * *dst.get_unchecked(i) + write * *src.get_unchecked(i);
+            i += 1;
+        }
+    }
+}
+
+// ── AVX2 Backend (new primitives) ─────────────────────────────
+
+#[cfg(target_arch = "x86_64")]
+#[inline]
+unsafe fn avx2_add_inplace(dst: &mut [f32], src: &[f32]) {
+    use core::arch::x86_64::{_mm256_add_ps, _mm256_loadu_ps, _mm256_storeu_ps};
+    unsafe {
+        let mut i = 0;
+        let chunks = dst.len() / 8;
+        for _ in 0..chunks {
+            let vd = _mm256_loadu_ps(dst.as_ptr().add(i));
+            let vs = _mm256_loadu_ps(src.as_ptr().add(i));
+            let result = _mm256_add_ps(vd, vs);
+            _mm256_storeu_ps(dst.as_mut_ptr().add(i), result);
+            i += 8;
+        }
+        while i < dst.len() {
+            *dst.get_unchecked_mut(i) += *src.get_unchecked(i);
+            i += 1;
+        }
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[inline]
+unsafe fn avx2_add_into(dst: &mut [f32], a: &[f32], b: &[f32]) {
+    use core::arch::x86_64::{_mm256_add_ps, _mm256_loadu_ps, _mm256_storeu_ps};
+    unsafe {
+        let mut i = 0;
+        let chunks = dst.len() / 8;
+        for _ in 0..chunks {
+            let va = _mm256_loadu_ps(a.as_ptr().add(i));
+            let vb = _mm256_loadu_ps(b.as_ptr().add(i));
+            let result = _mm256_add_ps(va, vb);
+            _mm256_storeu_ps(dst.as_mut_ptr().add(i), result);
+            i += 8;
+        }
+        while i < dst.len() {
+            *dst.get_unchecked_mut(i) = *a.get_unchecked(i) + *b.get_unchecked(i);
+            i += 1;
+        }
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[inline]
+unsafe fn avx2_max_f32(x: &[f32]) -> f32 {
+    use core::arch::x86_64::{_mm256_loadu_ps, _mm256_max_ps};
+    unsafe {
+        let len = x.len();
+        let chunks = len / 8;
+        if chunks == 0 {
+            let mut max = x[0];
+            for j in 1..len {
+                let v = *x.get_unchecked(j);
+                if v > max {
+                    max = v;
+                }
+            }
+            return max;
+        }
+
+        let mut vmax = _mm256_loadu_ps(x.as_ptr());
+        let mut i = 8;
+        for _ in 1..chunks {
+            let vx = _mm256_loadu_ps(x.as_ptr().add(i));
+            vmax = _mm256_max_ps(vmax, vx);
+            i += 8;
+        }
+
+        // Horizontal max reduction
+        let mut max = horizontal_max_256(vmax);
+
+        // Handle tail
+        while i < len {
+            let v = *x.get_unchecked(i);
+            if v > max {
+                max = v;
+            }
+            i += 1;
+        }
+        max
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[inline]
+unsafe fn avx2_fused_decay_write(dst: &mut [f32], decay: f32, src: &[f32], write: f32) {
+    use core::arch::x86_64::{
+        _mm256_fmadd_ps, _mm256_loadu_ps, _mm256_mul_ps, _mm256_set1_ps, _mm256_storeu_ps,
+    };
+    unsafe {
+        let vd_decay = _mm256_set1_ps(decay);
+        let vd_write = _mm256_set1_ps(write);
+        let mut i = 0;
+        let chunks = dst.len() / 8;
+        for _ in 0..chunks {
+            let vdst = _mm256_loadu_ps(dst.as_ptr().add(i));
+            let vsrc = _mm256_loadu_ps(src.as_ptr().add(i));
+            // FMA: decay * vdst + write * vsrc
+            let result = _mm256_fmadd_ps(vdst, vd_decay, _mm256_mul_ps(vsrc, vd_write));
+            _mm256_storeu_ps(dst.as_mut_ptr().add(i), result);
+            i += 8;
+        }
+        while i < dst.len() {
+            *dst.get_unchecked_mut(i) =
+                decay * *dst.get_unchecked(i) + write * *src.get_unchecked(i);
+            i += 1;
+        }
+    }
+}
+
+// ── x86_64 Horizontal Max/Sum Helpers ─────────────────────────
+
+#[cfg(target_arch = "x86_64")]
+#[inline]
+fn horizontal_max_256(v: core::arch::x86_64::__m256) -> f32 {
+    use core::arch::x86_64::{
+        _mm_cvtss_f32, _mm_max_ps, _mm_shuffle_ps, _mm256_castps256_ps128, _mm256_extractf128_ps,
+    };
+    unsafe {
+        let hi = _mm256_extractf128_ps(v, 1);
+        let lo = _mm256_castps256_ps128(v);
+        let m = _mm_max_ps(lo, hi);
+        // Reduce 4 lanes via shuffle+max
+        let shuf = _mm_shuffle_ps(m, m, 0xB1);
+        let m2 = _mm_max_ps(m, shuf);
+        let shuf2 = _mm_shuffle_ps(m2, m2, 0x4E);
+        let m3 = _mm_max_ps(m2, shuf2);
+        _mm_cvtss_f32(m3)
+    }
+}
+
 // ── x86_64 Horizontal Sum Helpers ─────────────────────────────
 
 #[cfg(target_arch = "x86_64")]
@@ -1099,6 +1513,226 @@ mod tests {
                 "x[{i}]: simd={}, scalar={}",
                 x_simd[i],
                 x_scalar[i]
+            );
+        }
+    }
+
+    // ── simd_add_inplace tests ────────────────────────────────
+
+    #[test]
+    fn add_inplace_aligned_len_8() {
+        let mut dst = [1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
+        let src = [0.1f32, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8];
+        simd_add_inplace(&mut dst, &src);
+        for (i, val) in dst.iter().enumerate() {
+            let expected = (1.0 + i as f32) + (i + 1) as f32 * 0.1;
+            assert!((val - expected).abs() < 1e-6, "mismatch at {i}");
+        }
+    }
+
+    #[test]
+    fn add_inplace_non_aligned_len_13() {
+        let mut dst = [0.0f32; 13];
+        let src = [1.0f32; 13];
+        for (i, val) in dst.iter_mut().enumerate() {
+            *val = i as f32;
+        }
+        simd_add_inplace(&mut dst, &src);
+        for (i, val) in dst.iter().enumerate() {
+            assert!((val - (i as f32 + 1.0)).abs() < 1e-6, "mismatch at {i}");
+        }
+    }
+
+    #[test]
+    fn add_inplace_empty() {
+        let mut dst: [f32; 0] = [];
+        let src: [f32; 0] = [];
+        simd_add_inplace(&mut dst, &src);
+    }
+
+    #[test]
+    fn add_inplace_single_element() {
+        let mut dst = [3.0f32];
+        let src = [7.0f32];
+        simd_add_inplace(&mut dst, &src);
+        assert!((dst[0] - 10.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn add_inplace_matches_scalar() {
+        let mut dst_simd = [0.0f32; 37];
+        let mut dst_scalar = [0.0f32; 37];
+        for i in 0..37 {
+            dst_simd[i] = i as f32 * 0.7;
+            dst_scalar[i] = i as f32 * 0.7;
+        }
+        let src: Vec<f32> = (0..37).map(|i| (i as f32 * 0.3).sin()).collect();
+        simd_add_inplace(&mut dst_simd, &src);
+        scalar_add_inplace(&mut dst_scalar, &src);
+        for i in 0..37 {
+            assert!(
+                (dst_simd[i] - dst_scalar[i]).abs() < 1e-5,
+                "mismatch at {i}"
+            );
+        }
+    }
+
+    // ── simd_add_into tests ───────────────────────────────────
+
+    #[test]
+    fn add_into_aligned_len_8() {
+        let a = [1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
+        let b = [8.0f32, 7.0, 6.0, 5.0, 4.0, 3.0, 2.0, 1.0];
+        let mut dst = [0.0f32; 8];
+        simd_add_into(&mut dst, &a, &b);
+        for val in &dst {
+            assert!((val - 9.0).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn add_into_non_aligned_len_13() {
+        let a: Vec<f32> = (0..13).map(|i| i as f32).collect();
+        let b = [1.0f32; 13];
+        let mut dst = [0.0f32; 13];
+        simd_add_into(&mut dst, &a, &b);
+        for (i, val) in dst.iter().enumerate() {
+            assert!((val - (i as f32 + 1.0)).abs() < 1e-6, "mismatch at {i}");
+        }
+    }
+
+    #[test]
+    fn add_into_empty() {
+        let a: [f32; 0] = [];
+        let b: [f32; 0] = [];
+        let mut dst: [f32; 0] = [];
+        simd_add_into(&mut dst, &a, &b);
+    }
+
+    #[test]
+    fn add_into_matches_scalar() {
+        let a: Vec<f32> = (0..37).map(|i| (i as f32 * 0.7).sin()).collect();
+        let b: Vec<f32> = (0..37).map(|i| (i as f32 * 0.3).cos()).collect();
+        let mut dst_simd = [0.0f32; 37];
+        let mut dst_scalar = [0.0f32; 37];
+        simd_add_into(&mut dst_simd, &a, &b);
+        scalar_add_into(&mut dst_scalar, &a, &b);
+        for i in 0..37 {
+            assert!(
+                (dst_simd[i] - dst_scalar[i]).abs() < 1e-5,
+                "mismatch at {i}"
+            );
+        }
+    }
+
+    // ── simd_max_f32 tests ────────────────────────────────────
+
+    #[test]
+    fn max_aligned_len_8() {
+        let x = [1.0f32, 5.0, 3.0, 8.0, 2.0, 7.0, 4.0, 6.0];
+        let max = simd_max_f32(&x);
+        assert!((max - 8.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn max_non_aligned_len_13() {
+        let x: Vec<f32> = (0..13).map(|i| (i as f32 * 1.7).sin()).collect();
+        let max = simd_max_f32(&x);
+        let expected = x.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+        assert!((max - expected).abs() < 1e-5);
+    }
+
+    #[test]
+    fn max_empty() {
+        let x: [f32; 0] = [];
+        let max = simd_max_f32(&x);
+        assert!(max.is_infinite() && max.is_sign_negative());
+    }
+
+    #[test]
+    fn max_single_element() {
+        let x = [42.0f32];
+        let max = simd_max_f32(&x);
+        assert!((max - 42.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn max_negative_values() {
+        let x = [-5.0f32, -3.0, -8.0, -1.0, -4.0];
+        let max = simd_max_f32(&x);
+        assert!((max - (-1.0)).abs() < 1e-6);
+    }
+
+    #[test]
+    fn max_matches_scalar() {
+        let x: Vec<f32> = (0..37).map(|i| (i as f32 * 0.97 - 18.0).sin()).collect();
+        let max_simd = simd_max_f32(&x);
+        let max_scalar = scalar_max_f32(&x);
+        assert!((max_simd - max_scalar).abs() < 1e-5);
+    }
+
+    // ── simd_fused_decay_write tests ──────────────────────────
+
+    #[test]
+    fn fused_decay_write_aligned_len_8() {
+        let mut dst = [1.0f32; 8];
+        let src = [2.0f32; 8];
+        let decay = 0.5f32;
+        let write = 0.5f32;
+        simd_fused_decay_write(&mut dst, decay, &src, write);
+        // 0.5 * 1.0 + 0.5 * 2.0 = 1.5
+        for val in &dst {
+            assert!((val - 1.5).abs() < 1e-5);
+        }
+    }
+
+    #[test]
+    fn fused_decay_write_zero_decay() {
+        let mut dst = [1.0f32, 2.0, 3.0, 4.0];
+        let src = [10.0f32, 20.0, 30.0, 40.0];
+        let decay = 0.0f32;
+        let write = 1.0f32;
+        simd_fused_decay_write(&mut dst, decay, &src, write);
+        for i in 0..4 {
+            assert!((dst[i] - src[i]).abs() < 1e-5, "mismatch at {i}");
+        }
+    }
+
+    #[test]
+    fn fused_decay_write_zero_write() {
+        let mut dst = [1.0f32, 2.0, 3.0, 4.0];
+        let src = [10.0f32, 20.0, 30.0, 40.0];
+        let decay = 1.0f32;
+        let write = 0.0f32;
+        simd_fused_decay_write(&mut dst, decay, &src, write);
+        assert!((dst[0] - 1.0).abs() < 1e-5);
+        assert!((dst[1] - 2.0).abs() < 1e-5);
+        assert!((dst[2] - 3.0).abs() < 1e-5);
+        assert!((dst[3] - 4.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn fused_decay_write_empty() {
+        let mut dst: [f32; 0] = [];
+        let src: [f32; 0] = [];
+        simd_fused_decay_write(&mut dst, 0.5, &src, 0.5);
+    }
+
+    #[test]
+    fn fused_decay_write_matches_scalar() {
+        let mut dst_simd: Vec<f32> = (0..37).map(|i| i as f32 * 0.7).collect();
+        let mut dst_scalar: Vec<f32> = (0..37).map(|i| i as f32 * 0.7).collect();
+        let src: Vec<f32> = (0..37).map(|i| (i as f32 * 0.3).sin()).collect();
+        let decay = 0.9f32;
+        let write = 0.1f32;
+        simd_fused_decay_write(&mut dst_simd, decay, &src, write);
+        scalar_fused_decay_write(&mut dst_scalar, decay, &src, write);
+        for i in 0..37 {
+            assert!(
+                (dst_simd[i] - dst_scalar[i]).abs() < 1e-4,
+                "mismatch at {i}: simd={}, scalar={}",
+                dst_simd[i],
+                dst_scalar[i]
             );
         }
     }

@@ -527,7 +527,7 @@ mod tests {
     #[test]
     fn test_regularization_effect() {
         // Without comparisons, regularization pulls scores toward 0
-        let mut scores = vec![10.0f32, -5.0f32];
+        let mut scores = [10.0f32, -5.0f32];
         let config = BtConfig {
             lambda: 0.1,
             ..BtConfig::default()

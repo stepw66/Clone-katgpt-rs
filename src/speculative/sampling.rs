@@ -36,9 +36,7 @@ pub fn sample_residual_distribution_into(
 
     if sum > 0.0 {
         let inv_sum = 1.0 / sum;
-        for val in &mut scratch[..len] {
-            *val *= inv_sum;
-        }
+        crate::simd::simd_scale_inplace(&mut scratch[..len], inv_sum);
         sample_from_distribution(&scratch[..len], rng)
     } else {
         // Distributions identical — fallback to target distribution

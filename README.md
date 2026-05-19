@@ -1320,6 +1320,10 @@ Lessons from [NVIDIA Dynamo's agentic inference](https://developer.nvidia.com/bl
 | Per-request agent hints | `AgentHints` with latency_sensitivity, priority, speculative_prefill |
 | `/v1/tokenize` for context accounting | BPE-based tokenize/detokenize endpoint types |
 
+## 📦 Related Crates
+
+- **[riir-ai](../riir-ai/)** — Frame-sampling real-time gamestate bridge ([Plan 070](../riir-ai/.docs/17_frame_sampling_gamestate.md)): samples every Nth tick from a real-time simulation (20Hz) into a lightweight `FrameSnapshot` (<2KB) that implements the `GameState` trait, enabling modelless AI (BanditMCTS) to operate on live game state with no neural network required.
+
 ## 📜 References
 
 - [microgpt-c](https://github.com/nicholasgasior/microgpt-c) — Original C implementation
