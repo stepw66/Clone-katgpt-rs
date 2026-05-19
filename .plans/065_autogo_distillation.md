@@ -610,6 +610,7 @@ If we accidentally depend on `game_state` feature, we pull in bomber + bevy_ecs.
 4. ❌ Positional superko
 5. ❌ Distributed training across GPU fleet
 6. ❌ More than 4 G-Zero templates (G7 — start small, expand based on results)
+7. 🔄 [DEFERRED] Local LLM agent integration — AutoGo's `autoresearch`/`experiment` skills are Claude Code `.claude/commands/*.md` files (agentic loop: read files → edit → run → parse results → keep/revert). Using a local LLM (e.g. `qwen3-coder-30b` via LM Studio) requires building a Python agent wrapper around the chat completion API. External config concern, not our code.
 
 ### Verdict
 

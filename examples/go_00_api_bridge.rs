@@ -8,7 +8,11 @@
 //! ./scripts/autogo_server.sh
 //!
 //! # Run this example
+//! # Default: connects to localhost:8765 (override with GO_URL)
 //! cargo run --features go --example go_00_api_bridge
+//!
+//! # Custom server
+//! GO_URL=http://192.168.1.100:8765 cargo run --features go --example go_00_api_bridge
 //! ```
 
 use microgpt_rs::pruners::go::AutoGoClient;
@@ -17,7 +21,7 @@ use microgpt_rs::pruners::go::AutoGoClient;
 const NUM_GAMES: usize = 5;
 
 /// Default AutoGo server URL.
-const AUTOGO_URL: &str = "http://localhost:8000";
+const DEFAULT_AUTOGO_URL: &str = "http://localhost:8765";
 
 /// Board fill percentage at which we start passing every turn to force game end.
 /// Random play without passes leads to infinite capture/recapture cycles.
@@ -36,17 +40,23 @@ struct GameResult {
 }
 
 fn main() {
-    let client = AutoGoClient::new(AUTOGO_URL);
+    let autogo_url = std::env::var("GO_URL").unwrap_or_else(|_| DEFAULT_AUTOGO_URL.to_string());
+    let client = AutoGoClient::new(&autogo_url);
 
     // Discover available agents
     let agents = match client.list_agents() {
         Ok(agents) => agents,
         Err(e) => {
-            eprintln!("ERROR: Cannot reach AutoGo server at {AUTOGO_URL}");
+            eprintln!("ERROR: Cannot reach AutoGo server at {autogo_url}");
             eprintln!("  {e}");
             eprintln!();
             eprintln!("Start the server first:");
-            eprintln!("  cd .raw/autogo && uv run -m alpha_go.play --host 127.0.0.1 --port 8000");
+            eprintln!("  cd .raw/autogo && uv run -m alpha_go.play --host 127.0.0.1 --port 8765");
+            eprintln!();
+            eprintln!("Or set GO_URL:");
+            eprintln!(
+                "  GO_URL=http://localhost:8765 cargo run --features go --example go_00_api_bridge"
+            );
             std::process::exit(1);
         }
     };

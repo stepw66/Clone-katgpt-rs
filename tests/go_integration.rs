@@ -14,17 +14,24 @@
 
 #[cfg(feature = "go")]
 mod go_integration {
+    use std::env;
+
     use microgpt_rs::pruners::go::{AutoGoClient, AutoGoGameState};
 
-    const AUTOGO_URL: &str = "http://localhost:8000";
+    /// Default AutoGo server URL (matches `python -m alpha_go.play --port 8765`).
+    const DEFAULT_AUTOGO_URL: &str = "http://localhost:8765";
 
     /// Board fill percentage at which we start passing every turn to force game end.
     /// Random play without passes leads to infinite capture/recapture cycles.
     /// At 70% fill on 9×9 (~51 stones), the remaining territory is clear enough.
     const PASS_FILL_PCT: f64 = 0.70;
 
+    fn autogo_url() -> String {
+        env::var("GO_URL").unwrap_or_else(|_| DEFAULT_AUTOGO_URL.to_string())
+    }
+
     fn client() -> AutoGoClient {
-        AutoGoClient::new(AUTOGO_URL)
+        AutoGoClient::new(&autogo_url())
     }
 
     /// Helper: play a full random game, returning the final state and move count.

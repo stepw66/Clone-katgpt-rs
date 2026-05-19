@@ -7,11 +7,11 @@
 //! # Start AutoGo server first
 //! cd autogo && python play.py
 //!
-//! # Default: 10 games per matchup, 9×9 board, localhost:8000
+//! # Default: 10 games per matchup, 9×9 board, localhost:8765
 //! cargo run --features go --example go_03_head_to_head
 //!
 //! # Custom: 20 games, different server
-//! GO_GAMES=20 GO_URL=http://192.168.1.100:8000 cargo run --features go --example go_03_head_to_head
+//! GO_GAMES=20 GO_URL=http://192.168.1.100:8765 cargo run --features go --example go_03_head_to_head
 //!
 //! # Quick test with 2 games
 //! GO_GAMES=2 cargo run --features go --example go_03_head_to_head
@@ -32,7 +32,7 @@ const DEFAULT_NUM_GAMES: usize = 10;
 const DEFAULT_BOARD_SIZE: usize = 9;
 
 /// Default AutoGo server URL.
-const DEFAULT_AUTOGO_URL: &str = "http://localhost:8000";
+const DEFAULT_AUTOGO_URL: &str = "http://localhost:8765";
 
 // ── Tournament Definitions ─────────────────────────────────────
 
