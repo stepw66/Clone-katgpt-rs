@@ -14,15 +14,15 @@ Reference implementation: `.raw/spectralquant/src/spectralquant/` (Python).
 
 ## Tasks
 
-- [ ] T1: Add `participation_ratio(eigenvalues: &[f32]) -> f32` to new `spectral.rs`
-- [ ] T2: Add `BitAllocator::allocate(d_eff, avg_bits, head_dim) -> (b_high, b_low)` two-regime splitter + `waterfill_bits(eigenvalues, total_bits, min_bits, max_bits) -> Vec<u8>` per-semantic-dim allocator
-- [ ] T3: Add `SpectralQuantCalibration` (eigenbasis only) + `SpectralQuantLayer` (calibration + fitted quantizers) + `SpectralQuantKVCacheConfig` to `types.rs`
-- [ ] T4: Add `calibrate_eigenbasis()` — covariance + eigendecompose (offline, uses manual Jacobi for Rust portability; reference code uses `torch.linalg.eigh`)
-- [ ] T5: Add `SelectiveQJL` — Rademacher ±1 sign matrix only on top `d_eff` coords in `spectral.rs`
-- [ ] T6: Add `LloydMaxQuantizer` struct with `.fit()/.quantize()/.dequantize()` + `NonUniformQuantizer` combining two-regime allocation + per-dim water-fill
-- [ ] T7: Add `SpectralQuantKVCache` with per-dim variable-bit packing to new `spectral_kv_cache.rs`
+- [x] T1: Add `participation_ratio(eigenvalues: &[f32]) -> f32` to new `spectral.rs`
+- [x] T2: Add `BitAllocator::allocate(d_eff, avg_bits, head_dim) -> (b_high, b_low)` two-regime splitter + `waterfill_bits(eigenvalues, total_bits, min_bits, max_bits) -> Vec<u8>` per-semantic-dim allocator
+- [x] T3: Add `SpectralQuantCalibration` (eigenbasis only) + `SpectralQuantLayer` (calibration + fitted quantizers) + `SpectralQuantKVCacheConfig` to `types.rs`
+- [x] T4: Add `calibrate_eigenbasis()` — covariance + eigendecompose (offline, uses manual Jacobi for Rust portability; reference code uses `torch.linalg.eigh`)
+- [x] T5: Add `SelectiveQJL` — Rademacher ±1 sign matrix only on top `d_eff` coords in `spectral.rs`
+- [x] T6: Add `LloydMaxQuantizer` struct with `.fit()/.quantize()/.dequantize()` + `NonUniformQuantizer` combining two-regime allocation + per-dim water-fill
+- [x] T7: Add `SpectralQuantKVCache` with per-dim variable-bit packing to new `spectral_kv_cache.rs`
 - [ ] T8: Modify `forward.rs` — add `attention_spectralquant` path gated behind feature
-- [ ] T9: Feature gate `spectral_quant = []` — **on by default after T10 benchmarks prove GOAT** (added to `default` + `full`); off during development
+- [x] T9: Feature gate `spectral_quant = []` — **on by default after T10 benchmarks prove GOAT** (added to `default` + `full`); off during development
 - [ ] T10: Benchmarks: cosine similarity before/after, compression ratio, latency — **gate for default-on**
 
 ## New Types

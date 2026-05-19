@@ -14,7 +14,35 @@ pub mod kv_cache;
 pub mod rotation;
 pub mod types;
 
+// ── SpectralQuant (Plan 078) ──────────────────────────────────
+#[cfg(feature = "spectral_quant")]
+pub mod nonuniform_quant;
+#[cfg(feature = "spectral_quant")]
+pub mod spectral;
+#[cfg(feature = "spectral_quant")]
+pub mod spectral_kv_cache;
+#[cfg(feature = "spectral_quant")]
+pub mod spectral_rotation;
+
 pub use codebook::compute_codebook;
 pub use kv_cache::TurboQuantKVCache;
 pub use rotation::{generate_qjl_matrix, generate_rotation_matrix};
 pub use types::{TurboQuantCodebook, TurboQuantKVCacheConfig, TurboQuantLayer};
+
+// ── SpectralQuant re-exports (Plan 078) ───────────────────────
+#[cfg(feature = "spectral_quant")]
+pub use nonuniform_quant::{CompressedVector, NonUniformQuantizer};
+#[cfg(feature = "spectral_quant")]
+pub use spectral::{
+    BitAllocator, LloydMaxQuantizer, calibrate_eigenbasis, cumulative_variance_thresholds,
+    generate_selective_qjl_signs, marginal_gain, participation_ratio, spectral_gap, waterfill_bits,
+};
+#[cfg(feature = "spectral_quant")]
+pub use spectral_kv_cache::SpectralQuantKVCache;
+#[cfg(feature = "spectral_quant")]
+pub use spectral_rotation::{RandomRotation, SpectralRotation};
+#[cfg(feature = "spectral_quant")]
+pub use types::{
+    LloydMaxCodebook, SpectralQuantCalibration, SpectralQuantKVCacheConfig, SpectralQuantLayer,
+    WaterfillAllocation,
+};
