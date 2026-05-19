@@ -183,7 +183,7 @@ cargo run --example bomber_08_agent_loop --features bomber-agent
 
 ### bomber_09_rubric_tournament
 
-6-player Rubric Tournament (Plan 077) — pits `RubricPlayer` (ROPD rubric-vector) against the full player hierarchy (Random, Greedy, Validator, HL, GZero). 4 matchups × 50 games each.
+6-player Rubric Tournament (Plan 076) — pits `RubricPlayer` (ROPD rubric-vector) against the full player hierarchy (Random, Greedy, Validator, HL, GZero). 4 matchups × 50 games each.
 
 **Results:** Random wins most (12.0%, 18W) — Bomber 4-player FFA has ~80% draws (multiple survivors at tick limit). Rubric and GZero tied at 8.0% win rate.
 
@@ -260,7 +260,7 @@ cargo run --example fft_01_arena
 
 ### fft_02_rubric_tournament
 
-6-player FFT Rubric Tournament (Plan 077) — pits `RubricFFTPlayer` (ROPD multi-criteria rubric) against the full player hierarchy. Round-robin matchups, 600 total battles.
+6-player FFT Rubric Tournament (Plan 076) — pits `RubricFFTPlayer` (ROPD multi-criteria rubric) against the full player hierarchy. Round-robin matchups, 600 total battles.
 
 **Results:** Champion: 🧠 GZero (ELO 1185, 60% win%). Rubric vs GZero = Tie (inconclusive). Multi-axis rubrics help FFT more than single-axis bomber.
 

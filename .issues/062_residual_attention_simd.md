@@ -1,6 +1,6 @@
 # Issue 062: Residual Add + Attention SIMD Audit (Issue 058 Follow-up)
 
-## Status: OPEN
+## Status: CLOSED
 
 ## Summary
 
@@ -21,16 +21,16 @@ softmax max-finding                | scalar loop    | for i in 1..len { if v > m
 
 ## Tasks
 
-- [ ] T1: Add `simd_add_inplace(dst: &mut [f32], src: &[f32], len: usize)` to `src/simd.rs`
-- [ ] T2: Add `simd_add_into(dst: &mut [f32], a: &[f32], b: &[f32], len: usize)` to `src/simd.rs`
-- [ ] T3: Wire `simd_add_into` into all embedding add loops (`forward_base`, `forward_paged`, `forward_raven`, `forward_turboquant`, `forward_prefill`)
-- [ ] T4: Wire `simd_add_inplace` into all residual add loops (attn residual + MLP residual × 4 forward variants)
-- [ ] T5: SIMD-ize `raven_readout_into` Q·K dot — replace manual loop with `simd_dot_f32`
-- [ ] T6: SIMD-ize `raven_update` decay/write — use `simd_scale_inplace` + `simd_add_inplace` or FMA pattern
-- [ ] T7: Wire `simd_scale_inplace` into `sample_residual_distribution_into` normalize
-- [ ] T8: Add `simd_max_f32(x: &[f32], len: usize) -> f32` for softmax max-finding
-- [ ] T9: Wire `simd_max_f32` into `softmax` and `softmax_scaled` pass 1
-- [ ] T10: Add benchmark `bench_residual_simd_062` for component-level timing
+- [x] T1: Add `simd_add_inplace(dst: &mut [f32], src: &[f32], len: usize)` to `src/simd.rs`
+- [x] T2: Add `simd_add_into(dst: &mut [f32], a: &[f32], b: &[f32], len: usize)` to `src/simd.rs`
+- [x] T3: Wire `simd_add_into` into all embedding add loops (`forward_base`, `forward_paged`, `forward_raven`, `forward_turboquant`, `forward_prefill`)
+- [x] T4: Wire `simd_add_inplace` into all residual add loops (attn residual + MLP residual × 4 forward variants)
+- [x] T5: SIMD-ize `raven_readout_into` Q·K dot — replace manual loop with `simd_dot_f32`
+- [x] T6: SIMD-ize `raven_update` decay/write — use `simd_fused_decay_write` (NEON `vfmaq_f32`, AVX2 `_mm256_fmadd_ps`)
+- [x] T7: Wire `simd_scale_inplace` into `sample_residual_distribution_into` normalize
+- [x] T8: Add `simd_max_f32(x: &[f32]) -> f32` for softmax max-finding (NEON `vmaxq_f32`, AVX2 `_mm256_max_ps`)
+- [x] T9: Wire `simd_max_f32` into `softmax` and `softmax_scaled` pass 1
+- [x] T10: Add benchmark `bench_residual_simd_062` for component-level timing
 
 ## Architecture
 
@@ -202,3 +202,4 @@ Pattern follows existing `simd_scale_inplace` dispatch structure.
 - Issue 057 — SIMD dot + zero-alloc (CLOSED, +25-32% forward improvement)
 - Issue 058 — SIMD scale + extract paths (CLOSED)
 - Plan 069 — SIMD scale audit (COMPLETED)
+- Plan 075 — SIMD residual + attention audit (COMPLETED)

@@ -1,4 +1,4 @@
-# Plan 077: Arena Integration — RubricPlayer Match Scheduling + Leaderboards
+# Plan 076: Arena Integration — RubricPlayer Match Scheduling + Leaderboards
 
 > **Status**: Done
 > **Depends on**: Plan 071 (ROPD Rubric — RubricPlayer + RubricFFTPlayer built)
@@ -498,7 +498,7 @@ pub fn run_fft_matchup(
 ### File: `microgpt-rs/examples/bomber_09_rubric_tournament.rs`
 
 ```rust
-//! Bomberman Rubric Tournament — RubricPlayer vs all baselines (Plan 077).
+//! Bomberman Rubric Tournament — RubricPlayer vs all baselines (Plan 076).
 //!
 //! Round-robin tournament pitting RubricPlayer against:
 //! Random, Greedy, Validator, HL, GZero
@@ -536,7 +536,7 @@ required-features = ["ropd_rubric", "g_zero", "bomber"]
 ### File: `microgpt-rs/examples/fft_02_rubric_tournament.rs`
 
 ```rust
-//! FFT Rubric Tournament — RubricFFTPlayer vs all baselines (Plan 077).
+//! FFT Rubric Tournament — RubricFFTPlayer vs all baselines (Plan 076).
 //!
 //! 4v4 battles comparing RubricFFT against Random, Greedy, Validator, HL, GZeroFFT.
 //!

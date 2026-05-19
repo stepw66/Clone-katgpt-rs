@@ -482,7 +482,7 @@ Run: `cargo test --features "stepcode" --test bench_stepcode_modelless -- --noca
 | Random 🐰 | Blast-zone avoidance only | -55 | 9 |
 | Rubric 🎯 | Multi-criteria rubric reward + template hints + Q-learning (`ropd_rubric`+`g_zero`+`bomber`) | — | 8 (8.0%)* |
 
-*\*Plan 077 tournament: Rubric ≈ GZero (8W each), confirming single-axis hypothesis. High FFA draw rate (~80%) limits decisive outcomes. See `.benchmarks/009_arena_integration.md`.*
+*\*Plan 076 tournament: Rubric ≈ GZero (8W each), confirming single-axis hypothesis. High FFA draw rate (~80%) limits decisive outcomes. See `.benchmarks/009_arena_integration.md`.*
 
 📖 See [`.docs/10_bomber_arena.md`](.docs/10_bomber_arena.md). Tournament infrastructure: `bomber_09_rubric_tournament` example.
 
@@ -589,7 +589,7 @@ Final Fantasy Tactics-inspired 4v4 ATB (Active Time Battle) arena with status ef
 | Rubric 🎯 | Multi-criteria rubric reward + template hints + Q-learning (`ropd_rubric`+`g_zero`+`fft`) | 60.0* | — | — |
 | Validator 🐶 | Safety-first + debuff cure + retreat | 5.0* | — | — |
 
-*\*Plan 077 tournament (600 battles): Rubric ≡ GZero (identical 60% win rate, 100% draws head-to-head). The 3-criterion rubric collapses to scalar-equivalent signal. See `.benchmarks/009_arena_integration.md`.*
+*\*Plan 076 tournament (600 battles): Rubric ≡ GZero (identical 60% win rate, 100% draws head-to-head). The 3-criterion rubric collapses to scalar-equivalent signal. See `.benchmarks/009_arena_integration.md`.*
 
 **TFT game theory:** Nice (role default) → Retaliatory (on provoke from `GameEvent::DamageDealt`) → Forgiving (10% generous TFT + 5-tick timer). Each class retaliates differently: Knight intercepts, WhiteMage heals first then attacks, BlackMage bursts.
 
