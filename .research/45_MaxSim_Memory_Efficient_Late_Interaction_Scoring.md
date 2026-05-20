@@ -3,7 +3,7 @@
 **Source:** [erikkaum/maxsim](https://github.com/erikkaum/maxsim) — Exact MaxSim kernel for ColBERT/PyLate late-interaction retrieval
 **Author:** Erik Kaum
 **Date:** 2026-05-20
-**Status:** 🟡 SELECTIVE ADOPTION — Core `maxsim_score` primitive is universally useful (CPU SIMD). PFlash block scoring upgrade is high-value. Compressed KV path is redundant with SpectralQuant (Research 39). Full GPU kernel is future work.
+**Status:** 🟢 ADOPT — Core `maxsim_score` primitive proven (CPU SIMD 7.46×, GPU 41–74× at scale). PFlash block scoring proven (371% better). Compressed KV path proven (SQ exact match). GPU dispatch proven (Plan 085, `maxsim` feature in `riir-gpu`).
 
 ---
 
@@ -107,6 +107,8 @@ This applies MaxSim in its **original design context** (retrieval reranking) wit
 | REST reranking with maxsim | Plan 009 bridge | CPU | Low — scoring function change |
 | `ScoreReduction::MaxSim` mode | `src/turboquant/forward.rs` | CPU | Low — minor extension of existing kernel |
 | `ScoreReduction::MaxSim` mode | `riir-gpu` SpectralQuant | GPU | Low — minor extension of existing WGSL |
+| Size-gated MaxSim dispatch | `riir-gpu` `maxsim` feature | GPU | ✅ Done — Plan 085, `maxsim_score.wgsl` + `MaxSimScorer` (threshold=256) |
+| Fused SQ + MaxSim kernel | `riir-gpu` dual feature gate | GPU | ✅ Done — Plan 085 T5, `spectralquant_maxsim.wgsl`, dequant + MaxSim in one pass |
 
 ### ⚠️ Distillable With Moderate Changes
 
@@ -187,7 +189,7 @@ This applies MaxSim in its **original design context** (retrieval reranking) wit
 
 **Hypothesis:** A dedicated WGSL compute shader for PFlash block scoring can accelerate the maxsim per-block computation on GPU, similar to the Metal kernel's 2-3× speedup over naive.
 
-**Status:** Deferred until CPU maxsim proves useful. GPU kernel is only warranted if PFlash block maxsim becomes a bottleneck.
+**Status:** ✅ Done — Plan 085. `maxsim_score.wgsl` + `MaxSimScorer` with size-gated CPU/GPU dispatch (threshold=256). GPU 41–74× faster for large batches. Fused SQ+MaxSim kernel (`spectralquant_maxsim.wgsl`) also complete.
 
 ---
 
@@ -214,6 +216,8 @@ This applies MaxSim in its **original design context** (retrieval reranking) wit
 - `ScoreReduction::MaxSim` for TurboQuant/SpectralQuant — one-parameter extension of existing kernels
 - PFlash block maxsim scoring — **371% better** needle separation vs mean-K (T7 GOAT passed)
 - REST reranking with MaxSim — `src/rerank.rs` module, `RerankMethod` enum, NDCG@10 proven ≥2% better than cosine (T12 GOAT passed, Benchmark 014)
+- GPU MaxSim dispatch — `maxsim_score.wgsl` + `MaxSimScorer` (Plan 085), GPU **41–74× faster** for large batches, threshold=256 (T11 GOAT passed)
+- Fused SQ + MaxSim kernel — `spectralquant_maxsim.wgsl`, dequant + MaxSim in one GPU pass (Plan 085 T5)
 
 **🟡 INVESTIGATE (distillable, needs demand/validation):**
 - Packed/ragged batch maxsim — useful API for multi-pair scoring, needs demand
@@ -256,6 +260,10 @@ This applies MaxSim in its **original design context** (retrieval reranking) wit
 ### Model-Based Proposals (tested in microgpt-rs CPU)
 - [x] TurboQuant `ScoreReduction::MaxSim`: matches uncompressed maxsim within 0.95% at 4-bit; **40.54% error at 3-bit** — Plan 080 T9
 - [x] SpectralQuant `ScoreReduction::MaxSim`: streaming vs dequantized **exact match (0.00%)**; **18.90% error at 3-bit** (2.1× less than TQ) — Plan 080 T10
+
+### GPU Dispatch (Plan 085 — `riir-gpu` `maxsim` feature)
+- [x] `maxsim_score.wgsl` + `MaxSimScorer`: size-gated CPU/GPU dispatch, threshold=256 — GPU **41–74× faster** for work_size ≥ 50K, crossover at work_size ≈ 300–800, correctness within 1e-3 — Plan 085 T1-T3
+- [x] Fused `spectralquant_maxsim.wgsl`: dequantize K from compressed bitstream + MaxSim scoring in one GPU pass — Plan 085 T5
 
 ### 4-Way Matrix: TQ/SQ × Cosine/MaxSim (3-bit, calibrated)
 
