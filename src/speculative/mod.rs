@@ -47,6 +47,10 @@ pub use types::{
 
 #[cfg(feature = "elf_sde")]
 pub use types::EarlyStopGate;
+
+// ── SimpleTES re-exports (Plan 086, feature: tes_loop) ────────
+#[cfg(feature = "tes_loop")]
+pub use types::{TesConfig, TesNode, TrajectoryCredit};
 pub use verifier::{SimulatedVerifier, SpeculativeVerifier};
 
 pub use verifier::LeviathanVerifier;

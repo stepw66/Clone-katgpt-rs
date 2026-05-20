@@ -647,6 +647,7 @@ pub trait BanditEnv: Send + Sync {
 /// Bernoulli bandit: each arm returns 1.0 with probability `p`, 0.0 otherwise.
 ///
 /// Classic MAB setting. Optimal for Thompson Sampling with Beta posteriors.
+#[derive(Clone)]
 pub struct BernoulliEnv {
     probs: Vec<f32>,
     optimal_arm: usize,
@@ -707,6 +708,7 @@ impl BanditEnv for BernoulliEnv {
 /// Gaussian bandit: each arm returns a reward sampled from N(μ, σ²).
 ///
 /// Rewards are clamped to [0.0, 1.0]. Useful for continuous reward settings.
+#[derive(Clone)]
 pub struct GaussianEnv {
     means: Vec<f32>,
     std: f32,

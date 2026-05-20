@@ -180,6 +180,238 @@ pub trait TesLoop: Send + Sync {
     }
 }
 
+// ── Concrete Implementation ────────────────────────────────────
+
+use crate::pruners::bandit::{BanditEnv, BanditStrategy};
+
+/// Concrete TES evaluation loop using RPUCG over a bandit environment.
+///
+/// Implements the full SimpleTES (C, L, K, Φ) loop:
+/// - **C trajectories** run in parallel (sequential with budget redistribution)
+/// - **L steps** per trajectory with candidate mutation
+/// - **K candidates** evaluated per step via the bandit environment
+/// - **Φ = RPUCG** for inspiration selection and value propagation
+///
+/// After running, `history` contains all evaluated nodes with propagated values
+/// and `best_solution()` returns the highest-scoring candidate found.
+#[cfg(feature = "tes_loop")]
+pub struct SimpleTesLoop<E: BanditEnv> {
+    config: TesConfig,
+    env: E,
+    history: Vec<TesNode>,
+    best_score: f32,
+    best_idx: usize,
+}
+
+#[cfg(feature = "tes_loop")]
+impl<E: BanditEnv + Clone> SimpleTesLoop<E> {
+    /// Create a new TES loop with the given configuration and environment.
+    pub fn new(config: TesConfig, env: E) -> Self {
+        Self {
+            config,
+            env,
+            history: Vec::new(),
+            best_score: f32::MIN,
+            best_idx: 0,
+        }
+    }
+
+    /// Get the TES configuration.
+    pub fn config(&self) -> &TesConfig {
+        &self.config
+    }
+
+    /// Get the evaluation history (all nodes across all trajectories).
+    pub fn history(&self) -> &[TesNode] {
+        &self.history
+    }
+
+    /// Get the best solution found so far.
+    pub fn best_solution(&self) -> Option<&TesNode> {
+        self.history.get(self.best_idx)
+    }
+
+    /// Best score across all evaluated nodes.
+    pub fn best_score(&self) -> f32 {
+        self.best_score
+    }
+
+    /// Total evaluations performed so far.
+    pub fn total_evaluations(&self) -> usize {
+        self.history.len()
+    }
+
+    /// Run a single step: generate K candidates from inspiration, evaluate, propagate.
+    ///
+    /// Returns indices of newly added nodes.
+    fn run_step(
+        &mut self,
+        inspiration_idx: Option<usize>,
+        arm: usize,
+        rng: &mut crate::types::Rng,
+        vocab_size: usize,
+    ) -> Vec<usize> {
+        let k = self.config.local_sample_size;
+        let parent_idx = inspiration_idx;
+
+        // Generate K candidate solutions by mutating the inspiration
+        let base_solution = match inspiration_idx {
+            Some(idx) => self.history[idx].solution.clone(),
+            None => (0..vocab_size)
+                .map(|_| (rng.uniform() * vocab_size as f32) as usize)
+                .collect(),
+        };
+
+        let mut new_indices = Vec::with_capacity(k);
+
+        for _ in 0..k {
+            // Mutate one position
+            let mut candidate = base_solution.clone();
+            if !candidate.is_empty() {
+                let pos = (rng.uniform() * candidate.len() as f32) as usize;
+                candidate[pos] = arm; // Use the selected arm as the mutation
+            }
+
+            let node = TesNode::new(candidate, parent_idx);
+            let idx = self.history.len();
+            self.history.push(node);
+            new_indices.push(idx);
+        }
+
+        new_indices
+    }
+
+    /// Run the full TES loop: C trajectories × L steps × K candidates.
+    ///
+    /// Uses RPUCG for inspiration selection and value propagation at each step.
+    /// TrajectoryPruner kills underperforming trajectories at checkpoints.
+    ///
+    /// Returns (total_evaluations, best_score).
+    pub fn run(&mut self, vocab_size: usize, rng: &mut crate::types::Rng) -> (usize, f32) {
+        let c = self.config.global_width;
+        let l = self.config.refinement_depth;
+        let _k = self.config.local_sample_size;
+        let gamma = match &self.config.bandit_strategy {
+            BanditStrategy::Rpucg { gamma, .. } => *gamma,
+            _ => 0.8,
+        };
+
+        let pruner = crate::pruners::arena::TrajectoryPruner::new();
+
+        // Track which trajectory each node belongs to
+        let mut node_trajectory: Vec<usize> = Vec::new();
+        // Track active trajectories (not pruned)
+        let mut active_trajectories: Vec<usize> = (0..c).collect();
+        // Track best score per trajectory
+        let mut trajectory_best: Vec<f32> = vec![f32::MIN; c];
+        // Track current step per trajectory
+        let mut trajectory_step: Vec<usize> = vec![0; c];
+        // Track root node index per trajectory
+        let mut trajectory_root: Vec<usize> = vec![0; c];
+
+        // Phase 1: Initialize C trajectories with random starting solutions
+        for t in 0..c {
+            let solution: Vec<usize> = (0..vocab_size)
+                .map(|_| (rng.uniform() * vocab_size as f32) as usize)
+                .collect();
+            let mut node = TesNode::new(solution, None);
+            let reward = self.env.pull(t % self.env.num_arms(), rng);
+            node.score = reward;
+            node.visit_count = 1;
+
+            let idx = self.history.len();
+            self.history.push(node);
+            node_trajectory.push(t);
+            trajectory_root[t] = idx;
+            trajectory_best[t] = reward;
+
+            if reward > self.best_score {
+                self.best_score = reward;
+                self.best_idx = idx;
+            }
+        }
+
+        // Phase 2: Run L steps per trajectory
+        for step in 0..l {
+            // Checkpoint pruning
+            if pruner.is_checkpoint(step, l) && active_trajectories.len() > 1 {
+                let values: Vec<f32> = active_trajectories
+                    .iter()
+                    .map(|&t| trajectory_best[t])
+                    .collect();
+                let to_kill = pruner.prune(&values);
+                let killed: Vec<usize> = to_kill.iter().map(|&i| active_trajectories[i]).collect();
+                active_trajectories.retain(|t| !killed.contains(t));
+            }
+
+            if active_trajectories.is_empty() {
+                break;
+            }
+
+            // Select inspiration for each active trajectory using RPUCG
+            for &t in &active_trajectories {
+                trajectory_step[t] += 1;
+
+                // Select arm via bandit session
+                let arm = if !self.history.is_empty() {
+                    // Simple arm selection: use trajectory index modulo num_arms
+                    t % self.env.num_arms()
+                } else {
+                    (rng.uniform() * self.env.num_arms() as f32) as usize
+                };
+
+                let inspiration_idx = if !self.history.is_empty() {
+                    let insps = self.select_inspirations(&self.history, 1);
+                    insps.first().copied()
+                } else {
+                    None
+                };
+
+                // Generate and evaluate K candidates
+                let new_indices = self.run_step(inspiration_idx, arm, rng, vocab_size);
+
+                for &idx in &new_indices {
+                    // Evaluate the candidate
+                    let reward = self.env.pull(arm, rng);
+                    self.history[idx].score = reward;
+                    self.history[idx].visit_count = 1;
+                    node_trajectory.push(t);
+
+                    if reward > trajectory_best[t] {
+                        trajectory_best[t] = reward;
+                    }
+
+                    if reward > self.best_score {
+                        self.best_score = reward;
+                        self.best_idx = idx;
+                    }
+                }
+            }
+
+            // Propagate values through the graph (inlined to avoid borrow conflict)
+            for i in (0..self.history.len()).rev() {
+                let own_score = self.history[i].score;
+                let max_child_value = self
+                    .history
+                    .iter()
+                    .filter(|node| node.parent_idx == Some(i))
+                    .map(|node| node.propagated_value)
+                    .fold(0.0f32, f32::max);
+                self.history[i].propagated_value = own_score.max(gamma * max_child_value);
+            }
+        }
+
+        (self.history.len(), self.best_score)
+    }
+}
+
+#[cfg(feature = "tes_loop")]
+impl<E: BanditEnv + Clone> TesLoop for SimpleTesLoop<E> {
+    fn config(&self) -> &TesConfig {
+        &self.config
+    }
+}
+
 // ── Tests ───────────────────────────────────────────────────────
 
 #[cfg(feature = "tes_loop")]

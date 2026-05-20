@@ -1304,3 +1304,129 @@ impl TesNode {
         }
     }
 }
+
+/// Trajectory-level credit assignment for G-Zero Phase 2 bridge.
+///
+/// SimpleTES assigns credit by **max trajectory score** to ALL nodes in that
+/// trajectory (not per-step reward). This is coarser but more robust to sparse
+/// rewards and aligns with the evaluation-driven scaling paradigm.
+///
+/// # Credit Assignment Rule
+///
+/// - `weight = 1` for all nodes in the best trajectory
+/// - `weight = 0` for all nodes in the worst trajectory
+/// - Linear interpolation for intermediate trajectories
+///
+/// This bridges trajectory-level evaluation (SimpleTES) to per-step credit
+/// signals needed for DPO/GRPO training (G-Zero Phase 2).
+#[cfg(feature = "tes_loop")]
+#[derive(Clone, Debug)]
+pub struct TrajectoryCredit {
+    /// Number of trajectories (C in SimpleTES notation).
+    pub num_trajectories: usize,
+    /// Max score observed across all trajectories.
+    pub best_score: f32,
+    /// Min score observed across all trajectories.
+    pub worst_score: f32,
+    /// Index of the best trajectory.
+    pub best_trajectory_idx: usize,
+    /// Index of the worst trajectory.
+    pub worst_trajectory_idx: usize,
+}
+
+#[cfg(feature = "tes_loop")]
+impl TrajectoryCredit {
+    /// Compute credit weights from trajectory scores.
+    ///
+    /// Takes a slice of (trajectory_index, max_score) pairs and returns
+    /// normalized credit weights for each trajectory.
+    ///
+    /// Returns `Vec<f32>` of weights in the same order as input.
+    pub fn from_trajectory_scores(scores: &[(usize, f32)]) -> Self {
+        if scores.is_empty() {
+            return Self {
+                num_trajectories: 0,
+                best_score: 0.0,
+                worst_score: 0.0,
+                best_trajectory_idx: 0,
+                worst_trajectory_idx: 0,
+            };
+        }
+
+        let best = scores
+            .iter()
+            .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(Ordering::Equal));
+        let worst = scores
+            .iter()
+            .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(Ordering::Equal));
+
+        Self {
+            num_trajectories: scores.len(),
+            best_score: best.map(|(_, s)| *s).unwrap_or(0.0),
+            worst_score: worst.map(|(_, s)| *s).unwrap_or(0.0),
+            best_trajectory_idx: best.map(|(i, _)| *i).unwrap_or(0),
+            worst_trajectory_idx: worst.map(|(i, _)| *i).unwrap_or(0),
+        }
+    }
+
+    /// Compute per-node weight for a given trajectory score.
+    ///
+    /// SimpleTES rule:
+    /// - `w = 1.0` if score == best_score
+    /// - `w = 0.0` if score == worst_score
+    /// - Linear interpolation otherwise
+    pub fn node_weight(&self, score: f32) -> f32 {
+        let range = self.best_score - self.worst_score;
+        if range.abs() < f32::EPSILON {
+            // All trajectories have the same score
+            return 1.0;
+        }
+        ((score - self.worst_score) / range).clamp(0.0, 1.0)
+    }
+
+    /// Compute per-node weights for all trajectories.
+    ///
+    /// Returns `Vec<(trajectory_idx, weight)>` sorted by weight descending.
+    pub fn all_weights(&self, scores: &[(usize, f32)]) -> Vec<(usize, f32)> {
+        let mut weighted: Vec<(usize, f32)> = scores
+            .iter()
+            .map(|(idx, score)| (*idx, self.node_weight(*score)))
+            .collect();
+        weighted.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(Ordering::Equal));
+        weighted
+    }
+
+    /// Assign credit to nodes based on their trajectory membership.
+    ///
+    /// Takes nodes grouped by trajectory and assigns max-trajectory-score
+    /// credit to all nodes in each trajectory. This is the SimpleTES
+    /// credit assignment used for G-Zero Phase 2 training signal.
+    pub fn assign_credit(nodes: &mut [TesNode], trajectory_ids: &[usize]) -> Self {
+        // Group nodes by trajectory and find max score per trajectory
+        let mut traj_scores: std::collections::HashMap<usize, f32> =
+            std::collections::HashMap::new();
+
+        for (node_idx, &traj_id) in trajectory_ids.iter().enumerate() {
+            let entry = traj_scores.entry(traj_id).or_insert(f32::MIN);
+            *entry = entry.max(nodes[node_idx].score);
+        }
+
+        let scores: Vec<(usize, f32)> = traj_scores.into_iter().collect();
+        let credit = Self::from_trajectory_scores(&scores);
+
+        // Assign propagated credit to each node based on its trajectory's max score
+        for (node_idx, &traj_id) in trajectory_ids.iter().enumerate() {
+            let traj_max = scores
+                .iter()
+                .find(|(id, _)| *id == traj_id)
+                .map(|(_, s)| *s)
+                .unwrap_or(0.0);
+            // Weight is the trajectory's normalized credit
+            let weight = credit.node_weight(traj_max);
+            // Store credit as metadata (don't overwrite propagated_value which is RPUCG)
+            nodes[node_idx].metadata = format!("{weight:.4}");
+        }
+
+        credit
+    }
+}
