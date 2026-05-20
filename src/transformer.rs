@@ -236,6 +236,9 @@ pub struct ForwardContext {
     pub hidden_state: Vec<f32>,    // [n_embd] final hidden state (Plan 009 compat)
     /// LoRA intermediate buffer [lora_rank]. Pre-allocated, zero alloc in hot path.
     pub lora_buf: Vec<f32>,
+    // CNA: contrastive neuron attribution runtime modulator (Plan 087)
+    #[cfg(feature = "cna_steering")]
+    pub cna_modulator: Option<crate::pruners::CnaModulator>,
     // Sparse MLP buffers (Plan 022: TwELL-inspired unstructured sparsity)
     #[cfg(feature = "sparse_mlp")]
     pub(crate) active_indices: Vec<usize>, // [mlp_hidden] pre-allocated index buffer
@@ -271,6 +274,8 @@ impl ForwardContext {
             logits: vec![0.0; config.vocab_size],
             hidden_state: vec![0.0; config.n_embd],
             lora_buf: vec![0.0; config.lora_rank],
+            #[cfg(feature = "cna_steering")]
+            cna_modulator: None,
             #[cfg(feature = "sparse_mlp")]
             active_indices: vec![0; config.mlp_hidden],
             #[cfg(feature = "sparse_mlp")]
@@ -653,6 +658,11 @@ fn forward_base<'a>(
         );
         if let Some(lora) = lora {
             crate::types::lora_apply(&mut ctx.hidden, lora, &ctx.x, &mut ctx.lora_buf);
+        }
+        // CNA: modulate discovered circuit neurons (Plan 087)
+        #[cfg(feature = "cna_steering")]
+        if let Some(ref modulator) = ctx.cna_modulator {
+            crate::pruners::cna_modulate(&mut ctx.hidden, layer_idx, modulator);
         }
         // MLP w2: sparse when feature enabled and sparsity is high enough (Plan 022)
         #[cfg(feature = "sparse_mlp")]
