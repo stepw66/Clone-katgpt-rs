@@ -199,5 +199,5 @@ Root cause: `from_calibration()` created `LloydMaxCodebook` with all-zero centro
 
 ### GOAT Verdict
 
-⚠️ **Tradeoff, not clear win.** SpectralQuant achieves 2× better compression (10.7× vs 5.3×) but at significantly lower cosine similarity (0.65 vs 0.97). Water-fill adds +0.05 cosine over uniform. The `spectral_quant` feature remains default-on for the compression advantage, but users who need fidelity should prefer `turboquant`.
+⚠️ **Tradeoff at different bit budgets.** This benchmark compared SQ (~2.4 bits, 10.7×) vs TQ (~5 bits, 5.3×) at different compression levels — TQ had 2× more bits. At **same 3-bit budget** with real calibration (see benchmark 013): SQ cosine=0.9917 > TQ 0.9692, SQ MaxSim error=3.88% < TQ 27.15%, SQ compression=9.1× > TQ 5.3×. SpectralQuant dominates at matched budget. The `spectral_quant` feature remains default-on.
 

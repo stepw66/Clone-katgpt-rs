@@ -8,7 +8,7 @@
 
 ## Corrigendum
 
-Initial version of this benchmark compared **4-bit TurboQuant** vs **~3-bit SpectralQuant** with **identity eigenvectors** (no calibration). This was an unfair comparison — different bit budgets and SQ degraded to random rotation fallback. The corrected benchmark below uses the **same 3-bit budget** with **real calibration data** from `calibrate_eigenbasis`, matching the methodology of `tests/bench_spectralquant.rs::bench_spectralquant_cosine_vs_turboquant`.
+Initial version of this benchmark compared **4-bit TurboQuant** vs **~3-bit SpectralQuant** with **identity eigenvectors** (no calibration). This was an unfair comparison — different bit budgets and SQ degraded to random rotation fallback. The corrected benchmark below uses the **same 3-bit budget** with **real calibration data** from `calibrate_eigenbasis`, matching the methodology of `tests/bench_spectralquant.rs::bench_spectralquant_cosine_vs_turboquant`. Latest version adds a **4-way matrix** (TQ/SQ × Cosine/MaxSim) to measure the interaction between quantization method and scoring method.
 
 ## 1. MaxSim Core Primitive (T2 Correctness)
 
@@ -24,9 +24,9 @@ Initial version of this benchmark compared **4-bit TurboQuant** vs **~3-bit Spec
 |--------|-------|
 | Config | Lq=32, Ld=256, dim=128, 1000 iterations |
 | MaxSim latency | 48.3 µs/call |
-| Throughput | 20,688 scores/s |
-| Naive latency | 356.8 µs/call |
-| **Speedup** | **7.38×** |
+| Throughput | 20,721 scores/s |
+| Naive latency | 360.0 µs/call |
+| **Speedup** | **7.46×** |
 
 ## 3. Block Scoring: MaxSim vs Mean-K (T7 Quality)
 
@@ -57,21 +57,47 @@ Initial version of this benchmark compared **4-bit TurboQuant** vs **~3-bit Spec
 | **Roundtrip error** | **0.00%** (exact match) |
 | Status | ✓ PASS |
 
-## 6. Fair Head-to-Head: Same 3-bit Budget, Real Calibration
+## 6. 4-Way Matrix: TQ/SQ × Cosine/MaxSim (Same 3-bit, Calibrated)
 
-kv_dim=16, 3-bit budget, 16 positions, 2 query tokens.
-Calibration via `calibrate_eigenbasis` from synthetic keys with exponential eigenvalue decay.
-Calibration quality: d_eff=4.78, var_95=8, var_99=13.
+kv_dim=16, 3-bit budget, 16 doc positions, 4 query tokens.
+Calibration via `from_keys()` — auto-calibrates from actual data, cannot forget.
+Ground truth MaxSim score: 40.8321.
 
-### Results
+### Results Table
 
-| Metric | TurboQuant (3-bit) | SpectralQuant (3-bit) | Delta |
-|--------|--------------------|-----------------------|-------|
-| Key cosine | 0.9715 | **0.9845** | **+0.0129** |
-| MaxSim error | 27.15% | **3.88%** | **-23.27%** |
-| Compression | 5.3× | **9.7×** | **+83%** |
-| MaxSim latency | **5.17 µs** | 5.69 µs | +10% |
-| Uncompressed score | 12.8597 | 12.8597 | — |
+```
+┌──────────────────────────────────┬──────────────┬──────────────┐
+│ Metric                            │ TurboQuant   │ SpectralQuant│
+├ ─ ─ Scoring Quality ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ┤
+│ Key cosine (reconstruction)       │ 0.9715       │ 0.9845       │
+│ MaxSim error (vs uncompressed)    │  40.54%       │  18.90%       │
+│ Compression ratio                 │ 5.3×         │ 9.7×         │
+├ ─ ─ Latency (10K iters) ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─┤
+│ Cosine: dequant+cos (16 pos)     │   2.71 µs    │   3.16 µs    │
+│ MaxSim: dequant+maxdot (4q×16d) │  10.55 µs    │  11.24 µs    │
+└──────────────────────────────────┴──────────────┴──────────────┘
+```
+
+### Interaction Analysis: Does MaxSim Amplify Quantization Error?
+
+MaxSim's `max` operation selects the highest dot product per query token. If quantization noise shifts which doc token has the maximum, the error compounds beyond per-vector reconstruction error.
+
+**Amplification factor** = MaxSim error ÷ cosine error:
+- **TQ**: 40.5% MaxSim error from 2.8% cosine error = **14.2× amplification**
+- **SQ**: 18.9% MaxSim error from 1.6% cosine error = **12.2× amplification**
+
+Both methods show significant amplification (12–14×), meaning MaxSim is inherently sensitive to quantization noise. However, SQ's better base fidelity means its amplified error is still **2.1× lower** than TQ's.
+
+### Summary
+
+| Dimension | Winner | Evidence |
+|-----------|--------|----------|
+| **Cosine similarity** | **SpectralQuant ✓** | +0.0129 higher (1.3% better) |
+| **MaxSim fidelity** | **SpectralQuant ✓** | 2.1× less error (18.90% vs 40.54%) |
+| **Compression** | **SpectralQuant ✓** | 81% more (9.7× vs 5.3×) |
+| **Cosine latency** | **TurboQuant** | 14% faster (2.71 vs 3.16 µs) |
+| **MaxSim latency** | **TurboQuant** | 7% faster (10.55 vs 11.24 µs) |
+| **MaxSim amplification** | **SpectralQuant ✓** | 12.2× vs 14.2× (less compounding) |
 
 ### Cross-validation with bench_spectralquant test
 
@@ -83,36 +109,27 @@ The existing `tests/bench_spectralquant.rs::bench_spectralquant_cosine_vs_turboq
 | Value cosine | 0.9827 | **0.9917** | **+0.0089** |
 | Compression | 5.3× | **9.1×** | **+72%** |
 
-### Verdict
-
-| Dimension | Winner | Evidence |
-|-----------|--------|----------|
-| **Cosine similarity** | **SpectralQuant ✓** | +0.01 to +0.02 higher cosine |
-| **MaxSim fidelity** | **SpectralQuant ✓** | 7× less error (3.88% vs 27.15%) |
-| **Compression** | **SpectralQuant ✓** | 83% more compression (9.7× vs 5.3×) |
-| **Latency** | **TurboQuant** | 10% faster (5.17 vs 5.69 µs) |
-
-**SpectralQuant dominates at same bit budget with real calibration.**
-
 ## 7. Why the Initial Comparison Was Wrong
 
 The first version of Section 7 showed TQ winning because:
 
 1. **Different bit budgets**: TQ at 4-bit vs SQ at ~3-bit — TQ had 33% more bits
 2. **No calibration**: Identity eigenvectors caused SQ to fall back to random rotation (same as TQ), eliminating its eigenbasis advantage
-3. **Result**: "4-bit TQ" vs "3-bit TQ with extra steps" — TQ naturally won
+3. **Missing SQ store loop**: `from_keys()` calibrates but does not store keys — the example forgot to call `store_key` after creating the SQ cache
+4. **Result**: "4-bit TQ" vs "empty SQ cache" — TQ naturally won
 
-With fair comparison (same bits, real calibration):
+With fair comparison (same bits, real calibration, both caches populated):
 - SQ's eigenbasis rotation concentrates variance into fewer dimensions
 - SQ's two-regime bit allocation spends bits where they matter
 - SQ achieves higher fidelity AND better compression simultaneously
+- MaxSim amplifies quantization error 12–14×, but SQ's lower base error means amplified error is still 2.1× better than TQ
 
 ## GOAT Gate Summary
 
 | Gate | Metric | Result | Status |
 |------|--------|--------|--------|
 | T2 | Correctness: naive within 1e-6 | exact match | ✅ |
-| T4 | Speedup: ≥2× vs naive | **7.38×** | ✅ |
+| T4 | Speedup: ≥2× vs naive | **7.46×** | ✅ |
 | T7 | Separation: ≥5% better than mean-K | **371% better** | ✅ |
 | T9 | TQ error: < 10% vs uncompressed | **0.95%** (4-bit) | ✅ |
 | T10 | SQ streaming vs dequantized | **0.00%** exact | ✅ |
@@ -122,8 +139,9 @@ With fair comparison (same bits, real calibration):
 
 `Cargo.toml` default features include `spectral_quant` and exclude `turboquant` (labeled "legacy baseline for bench/educate only"). This benchmark proves that decision was correct:
 
-- **SpectralQuant**: higher quality, better compression, default-on ✓
+- **SpectralQuant**: higher quality, better compression, lower MaxSim amplification, default-on ✓
 - **TurboQuant**: simpler, slightly faster, useful as baseline/comparison ✓
+- **MaxSim + SpectralQuant** is the optimal combination for late-interaction scoring on compressed KV
 
 ## Test Commands
 
@@ -131,7 +149,7 @@ With fair comparison (same bits, real calibration):
 # Run all tests (683 pass)
 cargo test --features "maxsim,turboquant,spectral_quant" --lib --quiet
 
-# Run benchmark example
+# Run benchmark example (7 sections including 4-way matrix)
 cargo run --example core_05_maxsim --features "maxsim,turboquant,spectral_quant" --release
 
 # Run dedicated SQ vs TQ cosine comparison

@@ -241,22 +241,48 @@ This applies MaxSim in its **original design context** (retrieval reranking) wit
 
 6. **dim alignment matters for SIMD paths.** The Metal kernel's fast path requires `dim % 8 == 0`. Our SIMD paths have no such constraint but benefit from aligned lengths. Typical embedding sizes (64, 128) are always aligned.
 
+7. **MaxSim amplifies quantization error 12–14×** (benchmark 013, Section 7 4-way matrix). The `max` operation selects the highest dot product per query token; if quantization noise shifts which doc token "wins", the error compounds far beyond per-vector reconstruction error. TQ: 2.8% cosine error → 40.5% MaxSim error (14.2×). SQ: 1.6% cosine error → 18.9% MaxSim error (12.2×). SQ's lower base error means its amplified MaxSim error is still 2.1× better than TQ, but the amplification means **higher bit budgets are more important for MaxSim than for cosine-based scoring**.
+
 ---
 
 ## 9. GOAT Proof Checklist
 
-Before any adoption, each proposal must pass:
-
 ### Modelless Proposals (tested in microgpt-rs)
-- [ ] `maxsim_score()`: matches naive materialized result within 1e-6, ≥2× faster for Lq≥32 Ld≥128
-- [ ] PFlash block maxsim: ≥5% more needle blocks selected in synthetic attention, ≤3× latency overhead vs mean-K
-- [ ] REST maxsim reranking: ≥2% better retrieval NDCG vs cosine similarity
+- [x] `maxsim_score()`: matches naive materialized result within 1e-6, **7.46× faster** (48.3µs vs 360.0µs, Lq=32, Ld=256, dim=128, release build) — Plan 080 T2/T4
+- [x] PFlash block maxsim: **371% more** needle blocks selected (4.71× better separation: 20× vs 4.25× for mean-K) — Plan 080 T7
+- [ ] REST maxsim reranking: ≥2% better retrieval NDCG vs cosine similarity — blocked on Plan 009 REST pathway
 
-### Model-Based Proposals (tested in riir-ai)
-- [ ] TurboQuant `ScoreReduction::MaxSim`: matches uncompressed maxsim within 1e-3, ≤5% latency overhead
-- [ ] SpectralQuant `ScoreReduction::MaxSim`: matches CPU reference within 1e-3, ≤5% latency overhead
+### Model-Based Proposals (tested in microgpt-rs CPU)
+- [x] TurboQuant `ScoreReduction::MaxSim`: matches uncompressed maxsim within 0.95% at 4-bit; **40.54% error at 3-bit** — Plan 080 T9
+- [x] SpectralQuant `ScoreReduction::MaxSim`: streaming vs dequantized **exact match (0.00%)**; **18.90% error at 3-bit** (2.1× less than TQ) — Plan 080 T10
 
-**Failure mode:** If PFlash block maxsim shows no improvement over mean-K (possible if attention patterns are smooth rather than spiky), then the PFlash application is dead. The CPU `maxsim_score` primitive remains useful for REST reranking regardless.
+### 4-Way Matrix: TQ/SQ × Cosine/MaxSim (3-bit, calibrated)
+
+kv_dim=16, 3-bit budget, 16 doc positions, 4 query tokens. Calibration via `from_keys()`.
+
+```
+┌──────────────────────────────────┬──────────────┬──────────────┐
+│ Metric                            │ TurboQuant   │ SpectralQuant│
+├ ─ ─ Scoring Quality ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ┤
+│ Key cosine (reconstruction)       │ 0.9715       │ 0.9845       │
+│ MaxSim error (vs uncompressed)    │  40.54%       │  18.90%       │
+│ Compression ratio                 │ 5.3×         │ 9.7×         │
+├ ─ ─ Latency (10K iters) ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─┤
+│ Cosine: dequant+cos (16 pos)     │   2.71 µs    │   3.16 µs    │
+│ MaxSim: dequant+maxdot (4q×16d) │  10.55 µs    │  11.24 µs    │
+└──────────────────────────────────┴──────────────┴──────────────┘
+```
+
+**Key finding: MaxSim amplifies quantization error 12–14×** (MaxSim error ÷ cosine error).
+TQ: 40.5% MaxSim error from 2.8% cosine error = 14.2× amplification.
+SQ: 18.9% MaxSim error from 1.6% cosine error = 12.2× amplification.
+SQ's lower base cosine error means its amplified MaxSim error is still **2.1× better** than TQ.
+
+→ **MaxSim + SpectralQuant is the optimal combination** for late-interaction scoring on compressed KV.
+
+Cross-validated by `bench_spectralquant_cosine_vs_turboquant` test: SQ cosine 0.9917 > TQ 0.9692, SQ compression 9.1× > TQ 5.3×, both at 3-bit.
+
+**Failure mode:** PFlash block maxsim shows strong improvement (371% better), not dead. REST reranking blocked on Plan 009. CPU `maxsim_score` primitive proven useful regardless. Detailed results in `.benchmarks/013_turboquant_vs_spectralquant_maxsim.md`.
 
 ---
 

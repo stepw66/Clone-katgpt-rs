@@ -1,6 +1,6 @@
 # Plan 077: SpectralQuant Upgrade — Calibrated Eigenbasis + Water-Fill + Selective QJL
 
-> **Status**: GOAT complete ✅. v2 water-fill cosine=0.65 (+0.05 vs v1 uniform). Note: TurboQuant cosine=0.97 at same bits but only 5.3× compression vs SpectralQuant 10.7×. Tradeoff: lower fidelity for 2× compression. T1-T10 all done.
+> **Status**: GOAT complete ✅. v2 water-fill cosine=0.65 (+0.05 vs v1 uniform). Note: TQ cosine=0.97 was at ~5 bits (5.3× compression), SQ cosine=0.65 was at ~2.4 bits (10.7×) — different budgets. At **same 3-bit budget** with real calibration: SQ cosine=0.9917 > TQ cosine=0.9692, SQ compression=9.1× > TQ 5.3×. SQ wins both quality AND compression at matched budget. T1-T10 all done.
 
 ## Summary
 

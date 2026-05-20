@@ -53,6 +53,11 @@ pub struct SpectralQuantKVCache {
 impl SpectralQuantKVCache {
     /// Create from pre-computed calibration data and config.
     ///
+    /// **Prefer `from_keys()` for new code** — it auto-calibrates from actual data
+    /// and cannot accidentally use identity eigenvectors. This constructor remains
+    /// available for cases where calibration is loaded from serialized model weights
+    /// (pre-computed during a prior offline calibration step).
+    ///
     /// Fits Lloyd-Max codebooks by generating synthetic rotated data from the
     /// eigenvalue distribution: in the spectral basis, dimension `i` has variance `λ_i`,
     /// so we sample `N(0, λ_i)` to build representative codebooks.
@@ -277,6 +282,54 @@ impl SpectralQuantKVCache {
             scratch_all_indices: vec![0u8; kv_dim],
             scratch_all_bits: vec![0u8; kv_dim],
         }
+    }
+
+    /// Create from actual key/value data with auto-calibration.
+    ///
+    /// This is the **recommended** constructor — it calibrates the eigenbasis from
+    /// the provided key samples, ensuring SpectralQuant's spectral advantage is
+    /// fully utilized. Unlike `from_calibration()`, there is no risk of accidentally
+    /// passing identity eigenvectors that would degrade SQ to random rotation quality.
+    ///
+    /// # Arguments
+    /// * `config` — SpectralQuant config (avg_bits, min_tail_bits, etc.)
+    /// * `key_samples` — Representative key vectors for calibration (typically from prefill)
+    /// * `val_samples` — Representative value vectors for calibration (typically from prefill)
+    pub fn from_keys(
+        config: &SpectralQuantKVCacheConfig,
+        key_samples: &[Vec<f32>],
+        val_samples: &[Vec<f32>],
+    ) -> Self {
+        use super::spectral::calibrate_eigenbasis;
+
+        let key_result = calibrate_eigenbasis(key_samples, config.kv_dim);
+        let val_result = calibrate_eigenbasis(val_samples, config.kv_dim);
+
+        let key_cal = SpectralQuantCalibration {
+            eigenvectors: key_result.eigenvectors,
+            eigenvalues: key_result.eigenvalues,
+            d_eff: key_result.d_eff,
+            spectral_gap: key_result.spectral_gap,
+            var_95: key_result.var_95,
+            var_99: key_result.var_99,
+            n_samples: key_result.n_samples,
+            head_dim: key_result.head_dim,
+        };
+        let val_cal = SpectralQuantCalibration {
+            eigenvectors: val_result.eigenvectors,
+            eigenvalues: val_result.eigenvalues,
+            d_eff: val_result.d_eff,
+            spectral_gap: val_result.spectral_gap,
+            var_95: val_result.var_95,
+            var_99: val_result.var_99,
+            n_samples: val_result.n_samples,
+            head_dim: val_result.head_dim,
+        };
+
+        let key_calibrations = vec![key_cal; config.n_layers];
+        let val_calibrations = vec![val_cal; config.n_layers];
+
+        Self::from_calibration(config, &key_calibrations, &val_calibrations)
     }
 
     /// Quantize and store a key vector at given layer and position.

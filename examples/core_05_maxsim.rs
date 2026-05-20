@@ -535,28 +535,24 @@ fn section6_spectralquant_proof() {
     println!();
 }
 
-/// Section 7: TurboQuant vs SpectralQuant head-to-head benchmark (Plan 080).
+/// Section 7: 4-way TQ/SQ × Cosine/MaxSim matrix benchmark (Plan 080).
 ///
-/// **Fair comparison** — both at the **same 3-bit budget** with **real calibration data**
-/// from `calibrate_eigenbasis`. Previous benchmark 013 used identity eigenvectors and
-/// different bit budgets (4-bit TQ vs 3-bit SQ), making SQ appear worse. The existing
-/// `bench_spectralquant_cosine_vs_turboquant` test proves SQ wins on both cosine AND
-/// compression at the same bit budget. This section replicates that proof in the MaxSim
-/// scoring context.
+/// Measures the **interaction** between quantization method and scoring method:
+/// - Quantization: TurboQuant (random rotation) vs SpectralQuant (calibrated eigenbasis)
+/// - Scoring: cosine similarity (reconstruction) vs MaxSim (late-interaction)
 ///
-/// Metrics: cosine similarity, MaxSim score error vs uncompressed, compression ratio, latency.
+/// The 4-way matrix proves whether MaxSim amplifies or mitigates quantization error,
+/// and validates that SpectralQuant's advantage holds across both scoring paradigms.
+/// Uses `from_keys()` so calibration cannot be accidentally skipped.
 #[cfg(all(feature = "turboquant", feature = "spectral_quant"))]
 fn section7_tq_vs_sq_benchmark() {
     use microgpt_rs::spectralquant::forward::maxsim_score_spectralquant;
-    use microgpt_rs::spectralquant::{
-        SpectralQuantCalibration, SpectralQuantKVCache, SpectralQuantKVCacheConfig,
-        calibrate_eigenbasis,
-    };
+    use microgpt_rs::spectralquant::{SpectralQuantKVCache, SpectralQuantKVCacheConfig};
     use microgpt_rs::turboquant::TurboQuantKVCache;
     use microgpt_rs::turboquant::forward::{cosine_similarity, maxsim_score_turboquant};
     use microgpt_rs::types::{Config, Rng};
 
-    println!("── 7. TurboQuant vs SpectralQuant Head-to-Head (3-bit, calibrated) ────\n");
+    println!("── 7. 4-Way Matrix: TQ/SQ × Cosine/MaxSim (3-bit, calibrated) ─────────\n");
 
     let config = Config::micro();
     let kv_dim = microgpt_rs::types::kv_dim(&config);
@@ -575,20 +571,9 @@ fn section7_tq_vs_sq_benchmark() {
                 .collect()
         })
         .collect();
-
-    // Calibrate eigenvectors from the actual key distribution
-    // This is the key advantage of SQ over TQ — it learns the spectral structure
-    let cal_result = calibrate_eigenbasis(&keys, kv_dim);
-    let cal = SpectralQuantCalibration {
-        eigenvectors: cal_result.eigenvectors,
-        eigenvalues: cal_result.eigenvalues,
-        d_eff: cal_result.d_eff,
-        spectral_gap: cal_result.spectral_gap,
-        var_95: cal_result.var_95,
-        var_99: cal_result.var_99,
-        n_samples: n_positions,
-        head_dim: kv_dim,
-    };
+    let values: Vec<Vec<f32>> = (0..n_positions)
+        .map(|_| (0..kv_dim).map(|_| rng.normal()).collect())
+        .collect();
 
     let sq_config = SpectralQuantKVCacheConfig {
         avg_bits: bits as f32,
@@ -606,71 +591,94 @@ fn section7_tq_vs_sq_benchmark() {
         max_seq_len: config.block_size,
     };
 
-    // ── TurboQuant (3-bit, random rotation) ──
+    // ── Fill caches ──────────────────────────────────────────────────
+    // TurboQuant: random rotation, no calibration possible
     let mut tq_cache = TurboQuantKVCache::new(&config, bits, bits);
     for (pos, key) in keys.iter().enumerate() {
         tq_cache.store_key(0, pos, key);
     }
     let tq_ratio = tq_cache.compression_ratio();
 
-    // TQ cosine similarity (key roundtrip)
-    let mut tq_key_cosines = Vec::new();
-    for (pos, key) in keys.iter().enumerate() {
-        let recon = tq_cache.dequantize_key(0, pos);
-        let norm_orig: f32 = key.iter().map(|x| x * x).sum::<f32>().sqrt();
-        let norm_rec: f32 = recon.iter().map(|x| x * x).sum::<f32>().sqrt();
-        if norm_orig > 1e-6 && norm_rec > 1e-6 {
-            tq_key_cosines.push(cosine_similarity(key, &recon));
-        }
-    }
-    let tq_avg_cos: f32 = tq_key_cosines.iter().sum::<f32>() / tq_key_cosines.len() as f32;
-
-    // ── SpectralQuant (3-bit, calibrated eigenbasis) ──
-    let sq_cals = vec![cal; config.n_layer];
-    let mut sq_cache = SpectralQuantKVCache::from_calibration(&sq_config, &sq_cals, &sq_cals);
+    // SpectralQuant: auto-calibrated from actual keys (can't forget calibration)
+    // NOTE: from_keys calibrates the eigenbasis + codebooks but does NOT store keys into cache.
+    // Calibration samples ≠ stored keys — we must store separately.
+    let mut sq_cache = SpectralQuantKVCache::from_keys(&sq_config, &keys, &values);
     for (pos, key) in keys.iter().enumerate() {
         sq_cache.store_key(0, pos, key);
     }
     let sq_ratio = sq_cache.compression_ratio();
 
-    // SQ cosine similarity (key roundtrip)
-    let mut sq_key_cosines = Vec::new();
+    // ── Cell [TQ, Cosine]: key reconstruction quality ────────────────
+    let mut tq_cosines = Vec::new();
+    let mut sq_cosines = Vec::new();
     for (pos, key) in keys.iter().enumerate() {
-        let mut recon = vec![0.0f32; kv_dim];
-        sq_cache.dequantize_key_into(0, pos, &mut recon);
-        let norm_orig: f32 = key.iter().map(|x| x * x).sum::<f32>().sqrt();
-        let norm_rec: f32 = recon.iter().map(|x| x * x).sum::<f32>().sqrt();
-        if norm_orig > 1e-6 && norm_rec > 1e-6 {
-            let dot: f32 = key.iter().zip(recon.iter()).map(|(a, b)| a * b).sum();
-            sq_key_cosines.push(dot / (norm_orig * norm_rec));
-        }
+        let tq_recon = tq_cache.dequantize_key(0, pos);
+        tq_cosines.push(cosine_similarity(key, &tq_recon));
+        let mut sq_recon = vec![0.0f32; kv_dim];
+        sq_cache.dequantize_key_into(0, pos, &mut sq_recon);
+        sq_cosines.push(cosine_similarity(key, &sq_recon));
     }
-    let sq_avg_cos: f32 = sq_key_cosines.iter().sum::<f32>() / sq_key_cosines.len() as f32;
+    let tq_cos: f32 = tq_cosines.iter().sum::<f32>() / tq_cosines.len() as f32;
+    let sq_cos: f32 = sq_cosines.iter().sum::<f32>() / sq_cosines.len() as f32;
 
-    // ── MaxSim scoring comparison ──
-    let lq = 2;
+    // ── Cell [TQ, MaxSim]: late-interaction scoring fidelity ─────────
+    let lq = 4;
     let queries: Vec<f32> = (0..lq * kv_dim).map(|i| (i as f32 * 0.1).sin()).collect();
     let flat_keys: Vec<f32> = keys.iter().flatten().copied().collect();
-    let uncompressed = maxsim_score(&queries, &flat_keys, lq, n_positions, kv_dim);
+    let gt_ms = maxsim_score(&queries, &flat_keys, lq, n_positions, kv_dim);
 
-    let tq_score = maxsim_score_turboquant(&queries, &tq_cache, 0, 0..n_positions, kv_dim);
-    let sq_score = maxsim_score_spectralquant(&queries, &mut sq_cache, 0, 0..n_positions, kv_dim);
+    let tq_ms = maxsim_score_turboquant(&queries, &tq_cache, 0, 0..n_positions, kv_dim);
+    let sq_ms = maxsim_score_spectralquant(&queries, &mut sq_cache, 0, 0..n_positions, kv_dim);
 
-    let tq_error = if uncompressed.abs() > 1e-6 {
-        (tq_score - uncompressed).abs() / uncompressed.abs() * 100.0
-    } else {
-        0.0
+    let pct_err = |s: f32| -> f32 {
+        if gt_ms.abs() > 1e-6 {
+            (s - gt_ms).abs() / gt_ms.abs() * 100.0
+        } else {
+            0.0
+        }
     };
-    let sq_error = if uncompressed.abs() > 1e-6 {
-        (sq_score - uncompressed).abs() / uncompressed.abs() * 100.0
-    } else {
-        0.0
-    };
+    let tq_ms_err = pct_err(tq_ms);
+    let sq_ms_err = pct_err(sq_ms);
 
-    // ── Latency benchmark ──
-    let bench_iters = 10_000u64;
+    // ── Cell [*, Cosine Latency]: per-position dequantize + cosine ───
+    let iters = 10_000u64;
 
-    // TQ warmup + timing
+    // TQ cosine latency
+    for _ in 0..200 {
+        for (pos, key) in keys.iter().enumerate() {
+            let recon = tq_cache.dequantize_key(0, pos);
+            std::hint::black_box(cosine_similarity(key, &recon));
+        }
+    }
+    let start = std::time::Instant::now();
+    for _ in 0..iters {
+        for (pos, key) in keys.iter().enumerate() {
+            let recon = tq_cache.dequantize_key(0, pos);
+            std::hint::black_box(cosine_similarity(key, &recon));
+        }
+    }
+    let tq_cos_us = start.elapsed().as_micros() as f64 / iters as f64;
+
+    // SQ cosine latency
+    for _ in 0..200 {
+        for (pos, key) in keys.iter().enumerate() {
+            let mut recon = vec![0.0f32; kv_dim];
+            sq_cache.dequantize_key_into(0, pos, &mut recon);
+            std::hint::black_box(cosine_similarity(key, &recon));
+        }
+    }
+    let start = std::time::Instant::now();
+    for _ in 0..iters {
+        for (pos, key) in keys.iter().enumerate() {
+            let mut recon = vec![0.0f32; kv_dim];
+            sq_cache.dequantize_key_into(0, pos, &mut recon);
+            std::hint::black_box(cosine_similarity(key, &recon));
+        }
+    }
+    let sq_cos_us = start.elapsed().as_micros() as f64 / iters as f64;
+
+    // ── Cell [*, MaxSim Latency]: fused dequantize + max-dot ─────────
+    // TQ MaxSim
     for _ in 0..200 {
         std::hint::black_box(maxsim_score_turboquant(
             &queries,
@@ -681,7 +689,7 @@ fn section7_tq_vs_sq_benchmark() {
         ));
     }
     let start = std::time::Instant::now();
-    for _ in 0..bench_iters {
+    for _ in 0..iters {
         std::hint::black_box(maxsim_score_turboquant(
             &queries,
             &tq_cache,
@@ -690,9 +698,9 @@ fn section7_tq_vs_sq_benchmark() {
             kv_dim,
         ));
     }
-    let tq_us = start.elapsed().as_micros() as f64 / bench_iters as f64;
+    let tq_ms_us = start.elapsed().as_micros() as f64 / iters as f64;
 
-    // SQ warmup + timing
+    // SQ MaxSim
     for _ in 0..200 {
         std::hint::black_box(maxsim_score_spectralquant(
             &queries,
@@ -703,7 +711,7 @@ fn section7_tq_vs_sq_benchmark() {
         ));
     }
     let start = std::time::Instant::now();
-    for _ in 0..bench_iters {
+    for _ in 0..iters {
         std::hint::black_box(maxsim_score_spectralquant(
             &queries,
             &mut sq_cache,
@@ -712,79 +720,89 @@ fn section7_tq_vs_sq_benchmark() {
             kv_dim,
         ));
     }
-    let sq_us = start.elapsed().as_micros() as f64 / bench_iters as f64;
+    let sq_ms_us = start.elapsed().as_micros() as f64 / iters as f64;
 
-    // ── Print results ──
-    println!("  kv_dim={kv_dim}, {bits}-bit budget, {n_positions} positions, {lq} query tokens");
+    // ── Print 4-way matrix ───────────────────────────────────────────
     println!(
-        "  Calibration: d_eff={}, var_95={}, var_99={}",
-        cal_result.d_eff, cal_result.var_95, cal_result.var_99
+        "  kv_dim={kv_dim}, {bits}-bit budget, {n_positions} doc positions, {lq} query tokens"
     );
+    println!("  Ground truth MaxSim score: {gt_ms:.4}");
     println!();
-    println!("  ┌─────────────────────────────────────────────────────────────────────────────┐");
-    println!("  │ Metric             │ TurboQuant  │ SpectralQuant │ Delta                  │");
-    println!("  ├─────────────────────────────────────────────────────────────────────────────┤");
-    let cos_delta = sq_avg_cos - tq_avg_cos;
+    println!("  ┌──────────────────────────────────┬──────────────┬──────────────┐");
+    println!("  │ Metric                            │ TurboQuant   │ SpectralQuant│");
+    println!("  ├ ─ ─ Scoring Quality ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ┤");
+    println!("  │ Key cosine (reconstruction)       │ {tq_cos:.4}       │ {sq_cos:.4}       │");
     println!(
-        "  │ Key cosine         │ {tq_avg_cos:.4}       │ {sq_avg_cos:.4}          │ {cos_delta:+.4}                 │"
-    );
-    let err_delta = sq_error - tq_error;
-    println!(
-        "  │ MaxSim error       │ {tq_error:7.2}%      │ {sq_error:7.2}%         │ {err_delta:+.2}%                 │"
+        "  │ MaxSim error (vs uncompressed)    │ {tq_ms_err:6.2}%       │ {sq_ms_err:6.2}%       │"
     );
     println!(
-        "  │ Compression        │ {tq_ratio:.1}×         │ {sq_ratio:.1}×            │                       │"
+        "  │ Compression ratio                 │ {tq_ratio:.1}×         │ {sq_ratio:.1}×         │"
+    );
+    println!("  ├ ─ ─ Latency (10K iters) ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─┤");
+    println!(
+        "  │ Cosine: dequant+cos ({n_positions:2} pos)     │ {tq_cos_us:6.2} µs    │ {sq_cos_us:6.2} µs    │"
     );
     println!(
-        "  │ MaxSim latency     │ {tq_us:7.2} µs    │ {sq_us:7.2} µs       │                       │"
+        "  │ MaxSim: dequant+maxdot ({lq}q×{n_positions}d) │ {tq_ms_us:6.2} µs    │ {sq_ms_us:6.2} µs    │"
     );
-    println!(
-        "  │ Uncompressed score │ {uncompressed:11.4}     │               │                       │"
-    );
-    println!("  └─────────────────────────────────────────────────────────────────────────────┘");
+    println!("  └──────────────────────────────────┴──────────────┴──────────────┘");
     println!();
 
-    // Quality verdict
-    let sq_wins_cos = sq_avg_cos > tq_avg_cos;
-    let sq_wins_compression = sq_ratio > tq_ratio as f32;
-    let sq_wins_error = sq_error < tq_error;
+    // ── Interaction analysis: does MaxSim amplify quantization error? ─
+    let cos_delta = sq_cos - tq_cos;
+    let ms_err_ratio = if tq_ms_err > 0.01 {
+        tq_ms_err / sq_ms_err
+    } else {
+        0.0
+    };
+    // Amplification = how much MaxSim compounds per-vector reconstruction error.
+    // Higher = MaxSim is more sensitive to quantization noise for this method.
+    let amp_tq = if (1.0 - tq_cos) > 0.001 {
+        tq_ms_err / ((1.0 - tq_cos) * 100.0)
+    } else {
+        0.0
+    };
+    let amp_sq = if (1.0 - sq_cos) > 0.001 {
+        sq_ms_err / ((1.0 - sq_cos) * 100.0)
+    } else {
+        0.0
+    };
 
-    println!("  Verdict (same {bits}-bit budget, real calibration via calibrate_eigenbasis):");
+    println!("  Interaction: does MaxSim amplify quantization error?");
     println!(
-        "  • Cosine:    {} ({sq_avg_cos:.4} vs {tq_avg_cos:.4}, Δ={cos_delta:+.4})",
-        if sq_wins_cos {
-            "SQ wins ✓"
-        } else {
-            "TQ wins"
-        }
+        "    Cosine Δ:        SQ +{cos_delta:.4} ({:.1}% better reconstruction)",
+        cos_delta / tq_cos * 100.0
     );
     println!(
-        "  • MaxSim:    {} ({sq_error:.2}% vs {tq_error:.2}% error)",
-        if sq_wins_error {
-            "SQ wins ✓"
-        } else {
-            "TQ wins"
-        }
+        "    MaxSim Δ:        SQ {sq_ms_err:.2}% vs TQ {tq_ms_err:.2}% (SQ {ms_err_ratio:.1}× less error)"
     );
     println!(
-        "  • Compress:  {} ({sq_ratio:.1}× vs {tq_ratio:.1}×)",
-        if sq_wins_compression {
-            "SQ wins ✓"
-        } else {
-            "TQ wins"
-        }
+        "    Compression Δ:   SQ {sq_ratio:.1}× vs TQ {tq_ratio:.1}× (+{:.0}%)",
+        (sq_ratio / tq_ratio as f32 - 1.0) * 100.0
+    );
+    println!("    Amplification:   TQ {amp_tq:.1}×, SQ {amp_sq:.1}× (MaxSim error ÷ cosine error)");
+    println!(
+        "      → TQ: {tq_ms_err:.1}% MaxSim error from {:.1}% cosine error = {amp_tq:.1}× amplification",
+        (1.0 - tq_cos) * 100.0
     );
     println!(
-        "  • Latency:   {} ({sq_us:.2} vs {tq_us:.2} µs)",
-        if sq_us <= tq_us {
-            "SQ faster"
-        } else {
-            "TQ faster"
-        }
+        "      → SQ: {sq_ms_err:.1}% MaxSim error from {:.1}% cosine error = {amp_sq:.1}× amplification",
+        (1.0 - sq_cos) * 100.0
     );
     println!();
-    println!("  Confirmed: SpectralQuant dominates at same bit budget with real calibration.");
-    println!("  Higher cosine + better compression = SQ is the correct default choice.");
+
+    // Verdict
+    let sq_sweeps = sq_cos > tq_cos && sq_ms_err < tq_ms_err && sq_ratio > tq_ratio as f32;
+    if sq_sweeps {
+        println!("  ✅ SpectralQuant sweeps all quality metrics at {bits}-bit:");
+        println!(
+            "     +{cos_delta:.4} cosine, {ms_err_ratio:.1}× less MaxSim error, {:.0}% more compression.",
+            (sq_ratio / tq_ratio as f32 - 1.0) * 100.0
+        );
+        println!(
+            "     MaxSim + SpectralQuant is the optimal combination for late-interaction scoring."
+        );
+    }
     println!();
 }
 

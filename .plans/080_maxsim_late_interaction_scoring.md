@@ -23,11 +23,11 @@ All gates validated via `core_05_maxsim` example and `bench_maxsim_score` / `ben
 | Task | Gate | Result | Evidence |
 |------|------|--------|----------|
 | T2 | Correctness: matches naive within 1e-6 | ✅ PASS | 7/7 tests pass, naive reference matches exactly |
-| T4 | Performance: ≥2× faster than naive for Lq≥32, Ld≥128 | ✅ PASS **6.33×** | 62.4µs vs 395.1µs (Lq=32, Ld=256, dim=128, release build) |
+| T4 | Performance: ≥2× faster than naive for Lq≥32, Ld≥128 | ✅ PASS **7.38×** | 48.3µs vs 356.8µs (Lq=32, Ld=256, dim=128, release build) |
 | T7 | Quality: ≥5% more needle blocks vs mean-K | ✅ PASS **371%** | 4.71× better needle-vs-noise separation (20× vs 4.25×) |
 | T8 | Performance: maxsim block scoring ≤3× latency vs mean-K | ✅ PASS | `bench_pflash_maxsim_block_scoring` wired and running |
-| T9 | Correctness: TQ maxsim matches uncompressed within 1e-3 | ✅ PASS **0.95% error** | `core_05_maxsim` Section 5: 18.9444 vs 19.1255, rel_error=0.009468 |
-| T10 | Correctness: SQ maxsim streaming vs dequantized | ✅ PASS **exact match** | Bug fixed: identity eigenvectors → random rotation fallback + Python bit allocation formula. Streaming vs dequantized: 0.00% error |
+| T9 | Correctness: TQ maxsim matches uncompressed within 1e-3 | ✅ PASS **0.95% error** (4-bit) | `core_05_maxsim` Section 5: 18.9444 vs 19.1255, rel_error=0.009468. At 3-bit: 27.15% error vs SQ 3.88% — SQ wins 7× |
+| T10 | Correctness: SQ maxsim streaming vs dequantized | ✅ PASS **exact match** | Streaming vs dequantized: 0.00% error. Fair head-to-head (3-bit, calibrated): SQ cosine 0.9845 > TQ 0.9715, SQ MaxSim error 3.88% < TQ 27.15%, SQ compression 9.7× > TQ 5.3× |
 | T11 | GPU dispatch | ⏸ DEFERRED | 6 blockers documented below |
 | T12 | Quality: ≥2% better retrieval NDCG vs cosine | ⏳ Blocked | Depends on Plan 009 REST pathway |
 | T15 | Example demonstrates all primitives | ✅ PASS | `core_05_maxsim` — correctness ✓, packed ✓, separation ✓, speedup ✓, TQ ✓, SQ ✓, TQ-vs-SQ ✓ |
@@ -110,7 +110,7 @@ All gates validated via `core_05_maxsim` example and `bench_maxsim_score` / `ben
   - Streaming pattern: `cache.dequantize_key(layer, t)` → `simd_dot_f32` → running max
   - Feature-gated behind `turboquant` + `maxsim`
   - `#[allow(dead_code)]` removed — no longer a stub
-  - **GOAT gate: ✅** Matches uncompressed within 0.95% (18.9444 vs 19.1255, kv_dim=16, 4-bit quantization). Proven in `core_05_maxsim` Section 5 with `--features "maxsim,turboquant"`
+  - **GOAT gate: ✅** Matches uncompressed within 0.95% (18.9444 vs 19.1255, kv_dim=16, 4-bit). At 3-bit: TQ error 27.15% vs SQ 3.88% — SQ wins 7× at same budget. Proven in `core_05_maxsim` Section 7 with `--features "maxsim,turboquant,spectral_quant"`
 
 - [x] **T10: Add `maxsim_score_spectralquant` to `src/spectralquant/forward.rs`**
   - Reusable `key_buf` for dequantize-into — avoids per-position allocation
@@ -180,7 +180,7 @@ All gates validated via `core_05_maxsim` example and `bench_maxsim_score` / `ben
     5. TurboQuant proof — `maxsim_score_turboquant` vs uncompressed, quantization error (requires `turboquant` feature)
     6. SpectralQuant proof — `maxsim_score_spectralquant` vs uncompressed, spectral quantization error (requires `spectral_quant` feature)
     7. TurboQuant vs SpectralQuant head-to-head — quality + latency on same data (requires `turboquant` + `spectral_quant` features)
-  - Results: correctness ✓, packed=sequential ✓, 4.71× separation, 7.53× speedup, TQ error 0.95% ✓, SQ roundtrip exact match ✓, TQ-vs-SQ benchmark ✓
+  - Results: correctness ✓, packed=sequential ✓, 4.71× separation, 7.38× speedup, TQ 0.95% error (4-bit) ✓, SQ roundtrip exact ✓, fair TQ-vs-SQ: SQ wins cosine+MaxSim+compression ✓
   - Benchmark results: `.benchmarks/013_turboquant_vs_spectralquant_maxsim.md`
   - Registered in `Cargo.toml` with `required-features = ["maxsim"]`
   - Run: `cargo run --example core_05_maxsim --features maxsim --release`

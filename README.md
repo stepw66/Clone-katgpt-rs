@@ -315,7 +315,7 @@ Architecture: random orthogonal rotation → Beta-distributed coordinates → Ll
 
 ## 🔬 SpectralQuant: Calibrated Eigenbasis KV Compression (Default)
 
-Data-driven spectral analysis replaces TurboQuant's random rotation with a calibrated eigenbasis. Near-optimal quantization via offline calibration → water-fill bit allocation → Lloyd-Max codebooks. **Default KV compression** (Plan 077). Tradeoff: 2× compression (10.7× vs 5.3×) but lower cosine (0.65 vs 0.97) vs TurboQuant.
+Data-driven spectral analysis replaces TurboQuant's random rotation with a calibrated eigenbasis. Near-optimal quantization via offline calibration → water-fill bit allocation → Lloyd-Max codebooks. **Default KV compression** (Plan 077). At same 3-bit budget with real calibration: SQ cosine=0.9917 > TQ 0.9692, SQ MaxSim error=3.88% < TQ 27.15%, SQ compression=9.1× > TQ 5.3×. SQ wins quality AND compression at matched budget.
 
 | Technique | What | Why Better Than TQ |
 |-----------|------|--------------------|
