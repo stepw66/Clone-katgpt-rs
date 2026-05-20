@@ -125,7 +125,7 @@ Goal
 - [x] T12: Add puzzle configuration (seed=42, LCG Fisher-Yates shuffle for mapping + order)
 - [x] T13: Test and verify solvability — ✅ 63 steps, boss dies on trap, all boxes opened
 - [x] T14: Add rayon parallel search benchmark (1.86x overall, 22x search speedup)
-- [ ] T15: Update README.md with new example entry
+- [x] T15: Update README.md with new example entry
 
 ## Map Design (16×16 — 8 targets)
 
