@@ -13,6 +13,10 @@
 - [x] **T4: Trajectory-level pruning** — Chain-level early stopping in arena infrastructure
 - [x] **T5: GOAT proof — Simulated TES loop** — Prove RPUCG beats greedy (4/4 proofs passed, Bench 016)
 - [x] **T6: Feature gate audit** — Zero impact on default build
+- [ ] **T7: Trajectory Credit Bridge** — Max-trajectory-score credit assignment for G-Zero Phase 2
+- [ ] **T8: SimpleTesLoop struct** — Concrete `SimpleTesLoop<E>` implementing full C×L×K loop
+- [ ] **T9: Budget Scaling Benchmark** — Vary (C,L,K) at fixed budget, prove balanced beats extreme
+- [ ] **T10: Cross-Strategy GOAT proof** — RPUCG vs UCB1 vs Thompson vs ε-greedy tournament
 
 ---
 

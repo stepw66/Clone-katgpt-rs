@@ -105,8 +105,8 @@ pub mod cna;
 
 #[cfg(feature = "cna_steering")]
 pub use cna::{
-    CnaCircuit, CnaDiscoveryConfig, CnaModulator, CnaNeuron, CnaScreeningPruner, cna_discover,
-    cna_modulate, detect_universal_neurons,
+    CnaCircuit, CnaDiscoveryConfig, CnaModulator, CnaNeuron, CnaScreeningPruner,
+    ContrastivePairProvider, cna_discover, cna_modulate, detect_universal_neurons,
 };
 
 #[cfg(feature = "replaid_schedules")]
@@ -143,7 +143,7 @@ pub use delta_mem::{
 pub mod tes_loop;
 
 #[cfg(feature = "tes_loop")]
-pub use tes_loop::TesLoop;
+pub use tes_loop::{SimpleTesLoop, TesLoop};
 
 #[cfg(all(feature = "g_zero", feature = "fft"))]
 pub use g_zero::{FFTTemplate, FFTTemplateProposer};

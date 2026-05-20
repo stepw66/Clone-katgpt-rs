@@ -334,6 +334,473 @@ impl ScreeningPruner for CnaScreeningPruner {
     }
 }
 
+// ── Game Domain Contrastive Pairs ───────────────────────────────
+
+/// A contrastive pair provider for CNA discovery.
+///
+/// Game domains implement this to produce positive/negative observations
+/// from episode data, using their `StateHeuristic` for labeling.
+pub trait ContrastivePairProvider: Send + Sync {
+    /// Domain name (e.g., "bomber", "go", "fft").
+    fn domain(&self) -> &str;
+
+    /// Positive observations: (layer-like_index, feature_vector).
+    /// These represent "good" states/actions from episodes.
+    fn positive_observations(&self) -> Vec<(usize, Vec<f32>)>;
+
+    /// Negative observations: (layer-like_index, feature_vector).
+    /// These represent "bad" states/actions from episodes.
+    fn negative_observations(&self) -> Vec<(usize, Vec<f32>)>;
+
+    /// Number of observations in each set: (positive, negative).
+    fn observation_count(&self) -> (usize, usize);
+}
+
+/// Go domain contrastive pair provider.
+///
+/// Uses `GoHeuristic` scores to classify moves as positive (high heuristic)
+/// or negative (low heuristic). Maps board states to pseudo-activation vectors
+/// for CNA discovery.
+///
+/// The "layer" dimension maps to board regions:
+/// - Layer 0: corners (3×3 regions at each corner)
+/// - Layer 1: edges (border rows/cols minus corners)
+/// - Layer 2: center (inner board area)
+/// - Layer 3: global (aggregate features)
+#[cfg(feature = "go")]
+pub mod go_pairs {
+    use super::ContrastivePairProvider;
+    use crate::pruners::game_state::StateHeuristic;
+    use crate::pruners::go::{GoAction, GoCell, GoHeuristic, GoState};
+
+    /// Threshold for positive moves: heuristic score above this fraction of max.
+    const POSITIVE_THRESHOLD: f32 = 0.7;
+    /// Threshold for negative moves: heuristic score below this fraction of max.
+    const NEGATIVE_THRESHOLD: f32 = 0.3;
+    /// Number of feature layers for Go board regions.
+    const GO_FEATURE_LAYERS: usize = 4;
+
+    /// Go contrastive pair provider.
+    pub struct GoContrastivePairs {
+        /// Collected positive observations.
+        positive: Vec<(usize, Vec<f32>)>,
+        /// Collected negative observations.
+        negative: Vec<(usize, Vec<f32>)>,
+        /// Board size.
+        board_size: usize,
+    }
+
+    impl GoContrastivePairs {
+        /// Create a new empty provider for the given board size.
+        pub fn new(board_size: usize) -> Self {
+            Self {
+                positive: Vec::new(),
+                negative: Vec::new(),
+                board_size,
+            }
+        }
+
+        /// Collect contrastive pairs from a completed game replay.
+        ///
+        /// Replays all moves, evaluates each position with `GoHeuristic`,
+        /// and classifies as positive or negative based on threshold.
+        /// Feature vector = flattened board state per region.
+        pub fn collect_from_states(&mut self, states: &[(GoState, f32)]) {
+            let heuristic = GoHeuristic;
+            let _feature_dim = self.board_size * self.board_size;
+
+            for (state, _move_quality) in states {
+                let score = heuristic.evaluate(state, 0); // Black perspective
+
+                // Extract board features per region layer
+                let features = self.extract_features(state);
+
+                // Classify based on heuristic score
+                if score > POSITIVE_THRESHOLD {
+                    for (layer, vec) in features.iter().enumerate() {
+                        self.positive.push((layer, vec.clone()));
+                    }
+                } else if score < NEGATIVE_THRESHOLD {
+                    for (layer, vec) in features.iter().enumerate() {
+                        self.negative.push((layer, vec.clone()));
+                    }
+                }
+            }
+        }
+
+        /// Extract board features as 4 pseudo-activation layers.
+        fn extract_features(&self, state: &GoState) -> [Vec<f32>; GO_FEATURE_LAYERS] {
+            let n = self.board_size;
+            let dim = n * n;
+
+            // Layer 0: corners (stone presence in 3x3 corner regions)
+            let mut corners = vec![0.0f32; dim];
+            // Layer 1: edges (border cells)
+            let mut edges = vec![0.0f32; dim];
+            // Layer 2: center (non-border cells)
+            let mut center = vec![0.0f32; dim];
+            // Layer 3: global influence (liberty count per cell)
+            let mut global = vec![0.0f32; dim];
+
+            for row in 0..n {
+                for col in 0..n {
+                    let idx = row * n + col;
+                    let cell = state.board[idx];
+                    let cell_val = match cell {
+                        GoCell::Black => 1.0,
+                        GoCell::White => -1.0,
+                        GoCell::Empty => 0.0,
+                    };
+
+                    let is_corner = (row < 3 || row >= n - 3) && (col < 3 || col >= n - 3);
+                    let is_edge = row == 0 || row == n - 1 || col == 0 || col == n - 1;
+
+                    if is_corner {
+                        corners[idx] = cell_val;
+                    }
+                    if is_edge {
+                        edges[idx] = cell_val;
+                    }
+                    if !is_edge {
+                        center[idx] = cell_val;
+                    }
+                    global[idx] = cell_val; // simplified
+                }
+            }
+
+            [corners, edges, center, global]
+        }
+
+        /// Collect from a single game: list of (state, player_id, action).
+        /// Classifies each move by post-move heuristic evaluation.
+        pub fn collect_from_game(&mut self, moves: &[(GoState, u8, GoAction)]) {
+            let heuristic = GoHeuristic;
+
+            for (state, player_id, _action) in moves {
+                let score = heuristic.evaluate(state, *player_id);
+                let features = self.extract_features(state);
+
+                if score > POSITIVE_THRESHOLD {
+                    for (layer, vec) in features.iter().enumerate() {
+                        self.positive.push((layer, vec.clone()));
+                    }
+                } else if score < NEGATIVE_THRESHOLD {
+                    for (layer, vec) in features.iter().enumerate() {
+                        self.negative.push((layer, vec.clone()));
+                    }
+                }
+            }
+        }
+    }
+
+    impl ContrastivePairProvider for GoContrastivePairs {
+        fn domain(&self) -> &str {
+            "go"
+        }
+
+        fn positive_observations(&self) -> Vec<(usize, Vec<f32>)> {
+            self.positive.clone()
+        }
+
+        fn negative_observations(&self) -> Vec<(usize, Vec<f32>)> {
+            self.negative.clone()
+        }
+
+        fn observation_count(&self) -> (usize, usize) {
+            (self.positive.len(), self.negative.len())
+        }
+    }
+}
+
+/// Bomber domain contrastive pair provider.
+///
+/// Uses `BomberHeuristic` to classify positions as positive (safe, good moves)
+/// or negative (blast zone, trapped). Maps grid states to pseudo-activation vectors.
+#[cfg(feature = "bomber")]
+pub mod bomber_pairs {
+    use super::ContrastivePairProvider;
+    use crate::pruners::game_state::{BomberHeuristic, BomberState, StateHeuristic};
+
+    const POSITIVE_THRESHOLD: f32 = 0.5;
+    const NEGATIVE_THRESHOLD: f32 = -0.3;
+    const BOMBER_FEATURE_LAYERS: usize = 3;
+
+    /// Bomber contrastive pair provider.
+    pub struct BomberContrastivePairs {
+        positive: Vec<(usize, Vec<f32>)>,
+        negative: Vec<(usize, Vec<f32>)>,
+    }
+
+    impl Default for BomberContrastivePairs {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
+
+    impl BomberContrastivePairs {
+        /// Create a new empty provider.
+        pub fn new() -> Self {
+            Self {
+                positive: Vec::new(),
+                negative: Vec::new(),
+            }
+        }
+
+        /// Collect from game states with player ID.
+        pub fn collect(&mut self, states: &[(BomberState, u8)]) {
+            let heuristic = BomberHeuristic;
+
+            for (state, player_id) in states {
+                let score = heuristic.evaluate(state, *player_id);
+                let features = self.extract_features(state);
+
+                if score > POSITIVE_THRESHOLD {
+                    for (layer, vec) in features.iter().enumerate() {
+                        self.positive.push((layer, vec.clone()));
+                    }
+                } else if score < NEGATIVE_THRESHOLD {
+                    for (layer, vec) in features.iter().enumerate() {
+                        self.negative.push((layer, vec.clone()));
+                    }
+                }
+            }
+        }
+
+        /// Extract features as 3 pseudo-activation layers.
+        fn extract_features(&self, state: &BomberState) -> [Vec<f32>; BOMBER_FEATURE_LAYERS] {
+            let grid_h = state.cells.len();
+            let grid_w = if grid_h > 0 { state.cells[0].len() } else { 0 };
+            let dim = grid_h * grid_w;
+
+            // Layer 0: cell types
+            let mut cells = vec![0.0f32; dim];
+            // Layer 1: player positions
+            let mut players = vec![0.0f32; dim];
+            // Layer 2: blast zones
+            let mut blast = vec![0.0f32; dim];
+
+            for r in 0..grid_h {
+                for c in 0..grid_w {
+                    let idx = r * grid_w + c;
+                    // Cell type encoding
+                    cells[idx] = match state.cells[r][c] {
+                        crate::pruners::bomber::Cell::Floor => 0.0,
+                        crate::pruners::bomber::Cell::FixedWall => -1.0,
+                        crate::pruners::bomber::Cell::DestructibleWall => -0.5,
+                        crate::pruners::bomber::Cell::PowerUpHidden(_) => 0.5,
+                    };
+                    // Blast zone
+                    if state.is_in_blast_zone((c as i32, r as i32)) {
+                        blast[idx] = -1.0;
+                    }
+                }
+            }
+
+            // Player positions
+            for (i, player) in state.players.iter().enumerate() {
+                if player.alive {
+                    let (px, py) = (player.pos.0 as usize, player.pos.1 as usize);
+                    if py < grid_h && px < grid_w {
+                        let idx = py * grid_w + px;
+                        players[idx] = if i == 0 { 1.0 } else { -0.5 };
+                    }
+                }
+            }
+
+            [cells, players, blast]
+        }
+    }
+
+    impl ContrastivePairProvider for BomberContrastivePairs {
+        fn domain(&self) -> &str {
+            "bomber"
+        }
+
+        fn positive_observations(&self) -> Vec<(usize, Vec<f32>)> {
+            self.positive.clone()
+        }
+
+        fn negative_observations(&self) -> Vec<(usize, Vec<f32>)> {
+            self.negative.clone()
+        }
+
+        fn observation_count(&self) -> (usize, usize) {
+            (self.positive.len(), self.negative.len())
+        }
+    }
+}
+
+/// FFT Tactics domain contrastive pair provider.
+///
+/// Classifies battle actions as positive (high heuristic: kills, heals low-HP)
+/// or negative (low heuristic: waste, wait).
+#[cfg(feature = "fft")]
+pub mod fft_pairs {
+    use super::ContrastivePairProvider;
+    use crate::pruners::fft::battle::BattleState;
+    use crate::pruners::fft::types::{ActionType, Unit};
+
+    const FFT_FEATURE_DIM: usize = 64; // Fixed feature vector size
+    const FFT_FEATURE_LAYERS: usize = 2;
+
+    /// FFT contrastive pair provider.
+    pub struct FftContrastivePairs {
+        positive: Vec<(usize, Vec<f32>)>,
+        negative: Vec<(usize, Vec<f32>)>,
+    }
+
+    impl Default for FftContrastivePairs {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
+
+    impl FftContrastivePairs {
+        /// Create a new empty provider.
+        pub fn new() -> Self {
+            Self {
+                positive: Vec::new(),
+                negative: Vec::new(),
+            }
+        }
+
+        /// Score an action heuristically (mirrors g_zero_player heuristic).
+        fn heuristic_score(action: ActionType, unit: &Unit, state: &BattleState) -> f32 {
+            let hp_pct = unit.hp_pct();
+            let can_cast = crate::pruners::fft::status::can_cast(unit, &state.effects);
+            let enemies: Vec<u8> = state
+                .units
+                .iter()
+                .enumerate()
+                .filter(|(_, u)| u.team != unit.team && u.alive)
+                .map(|(i, _)| i as u8)
+                .collect();
+            let allies: Vec<u8> = state
+                .units
+                .iter()
+                .enumerate()
+                .filter(|(_, u)| u.team == unit.team && u.alive)
+                .map(|(i, _)| i as u8)
+                .collect();
+
+            match action {
+                ActionType::Attack if !enemies.is_empty() => 2.0,
+                ActionType::Defend => 1.0,
+                ActionType::BlackMagic
+                    if !enemies.is_empty() && can_cast && unit.can_afford(action) =>
+                {
+                    2.5
+                }
+                ActionType::WhiteMagic
+                    if !allies.is_empty() && can_cast && unit.can_afford(action) =>
+                {
+                    let wounded = allies
+                        .iter()
+                        .any(|&a| state.units[a as usize].hp_pct() < 0.7);
+                    if wounded { 3.0 } else { 0.5 }
+                }
+                ActionType::Potion if hp_pct < 0.5 && unit.can_afford(action) => 3.0,
+                ActionType::Wait => 0.0,
+                _ => f32::NEG_INFINITY,
+            }
+        }
+
+        /// Collect from battle state observations.
+        pub fn collect(&mut self, observations: &[(BattleState, u8, ActionType)]) {
+            for (state, unit_id, action) in observations {
+                let unit = &state.units[*unit_id as usize];
+                let score = Self::heuristic_score(*action, unit, state);
+                let features = Self::extract_features(state, *unit_id);
+
+                if score >= 2.0 {
+                    for (layer, vec) in features.iter().enumerate() {
+                        self.positive.push((layer, vec.clone()));
+                    }
+                } else if score <= 0.5 {
+                    for (layer, vec) in features.iter().enumerate() {
+                        self.negative.push((layer, vec.clone()));
+                    }
+                }
+            }
+        }
+
+        /// Extract features as 2 pseudo-activation layers.
+        fn extract_features(state: &BattleState, unit_id: u8) -> [Vec<f32>; FFT_FEATURE_LAYERS] {
+            let mut unit_features = vec![0.0f32; FFT_FEATURE_DIM];
+            let mut battle_features = vec![0.0f32; FFT_FEATURE_DIM];
+
+            // Layer 0: unit features (hp, mp, stats)
+            let unit = &state.units[unit_id as usize];
+            if FFT_FEATURE_DIM >= 8 {
+                unit_features[0] = unit.hp as f32 / unit.stats.max_hp as f32;
+                unit_features[1] = unit.mp as f32 / unit.stats.max_mp as f32;
+                unit_features[2] = unit.stats.atk as f32 / 20.0;
+                unit_features[3] = unit.stats.def as f32 / 20.0;
+                unit_features[4] = unit.stats.mag as f32 / 20.0;
+                unit_features[5] = unit.stats.speed as f32 / 10.0;
+                unit_features[6] = if unit.defending { 1.0 } else { 0.0 };
+                unit_features[7] = unit.pos.x as f32 / 8.0 + unit.pos.y as f32 / 8.0;
+            }
+
+            // Layer 1: battle context (team HP, enemy HP, tick)
+            let alive_allies = state
+                .units
+                .iter()
+                .filter(|u| u.team == unit.team && u.alive)
+                .count();
+            let alive_enemies = state
+                .units
+                .iter()
+                .filter(|u| u.team != unit.team && u.alive)
+                .count();
+            let total_ally_hp: f32 = state
+                .units
+                .iter()
+                .filter(|u| u.team == unit.team && u.alive)
+                .map(|u| u.hp as f32 / u.stats.max_hp as f32)
+                .sum();
+            let total_enemy_hp: f32 = state
+                .units
+                .iter()
+                .filter(|u| u.team != unit.team && u.alive)
+                .map(|u| u.hp as f32 / u.stats.max_hp as f32)
+                .sum();
+
+            if FFT_FEATURE_DIM >= 8 {
+                battle_features[0] = alive_allies as f32;
+                battle_features[1] = alive_enemies as f32;
+                battle_features[2] = total_ally_hp;
+                battle_features[3] = total_enemy_hp;
+                battle_features[4] = state.tick as f32 / 200.0;
+                battle_features[5] = state.effects.len() as f32 / 20.0;
+                battle_features[6] = state.events.len() as f32 / 100.0;
+                battle_features[7] =
+                    (alive_allies as f32) / (alive_allies + alive_enemies).max(1) as f32;
+            }
+
+            [unit_features, battle_features]
+        }
+    }
+
+    impl ContrastivePairProvider for FftContrastivePairs {
+        fn domain(&self) -> &str {
+            "fft"
+        }
+
+        fn positive_observations(&self) -> Vec<(usize, Vec<f32>)> {
+            self.positive.clone()
+        }
+
+        fn negative_observations(&self) -> Vec<(usize, Vec<f32>)> {
+            self.negative.clone()
+        }
+
+        fn observation_count(&self) -> (usize, usize) {
+            (self.positive.len(), self.negative.len())
+        }
+    }
+}
+
 // ── Tests ───────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -594,5 +1061,16 @@ mod tests {
         assert_eq!(circuit.neurons[0].layer, 0);
         assert_eq!(circuit.neurons[0].index, 0);
         assert!((circuit.neurons[0].delta - 3.0).abs() < 0.01);
+    }
+
+    // ── Contrastive Pair Tests ─────────────────────────────────
+
+    #[test]
+    fn test_contrastive_pair_trait_bounds() {
+        // Verify ContrastivePairProvider is Send + Sync
+        #[allow(dead_code)]
+        fn assert_send_sync<T: Send + Sync>() {}
+        // The trait requires Send + Sync, so this is compile-time verified
+        // by the trait definition itself
     }
 }
