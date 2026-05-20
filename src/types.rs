@@ -80,6 +80,10 @@ pub enum AttentionMode {
     /// Learns which KV pairs to retain via utility prediction.
     /// Gate bias = log(u) during training, 0|-inf during inference.
     SpKv,
+    /// SP-KV + Quantized KV fusion (Plan 070 Phase 3, Task T12).
+    /// Selective write (SP-KV utility gating) + lossy quantize (any QuantizedKVCache backend).
+    /// Two-stage compression: only useful KV pairs kept, those compressed to 2-4 bits/coord.
+    SpKvQuant,
 }
 
 impl Config {

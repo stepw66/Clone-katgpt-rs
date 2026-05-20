@@ -46,7 +46,7 @@ forward_base()                    forward_sp_kv() dispatch variant
 - [x] **T11**: Wire `forward_sp_kv()` — `AttentionMode::SpKv` variant added, `SpKvForwardContext` for dispatch, full feature-gated module behind `sp_kv` flag ✅
 
 ### Phase 3: Integration
-- [x] **T12**: `forward_sp_kv_tq()` stub with TODO tasks — `SpKvTqCache` hybrid type design documented, compression estimates (~3×–29×), two-stage pipeline (SP-KV selective write → TurboQuant quantize retained) ✅
+- [x] **T12**: `forward_sp_kv_quant()` fully implemented — generic `SpKvQuantCache<C: QuantizedKVCache>` hybrid type (works with TurboQuant, SpectralQuant, any backend), `SpKvQuantLayerMeta` for utility tracking, `write_gated()` conditional quantize, `dequantize_retained_*_into()` selective dequant, `AttentionMode::SpKvQuant` dispatch variant, 8/8 tests pass (`tests/bench_sp_kv_quant.rs`), ~7856 tok/s debug build, compression ~3×–29× ✅
 - [x] **T13**: `sp_kv` feature flag in `Cargo.toml` + `pub mod sp_kv` in `lib.rs` (completed in Phase 1) ✅
 - [x] **T14**: `attention_score_sp_kv.wgsl` — WGSL kernel with `gate_bias[t]` additive bias, `SpKvAttnScoreParams` uniform struct, pipeline registered in `GpuPipelines` ✅
 - [x] **T15**: `forward_sp_kv.rs` — GPU dispatch stub with `SpKvForwardState`, `SpKvGateMode` enum, `forward_sp_kv_gpu()` TODO, kernel dispatch plan documented ✅

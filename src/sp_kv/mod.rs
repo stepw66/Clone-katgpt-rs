@@ -35,7 +35,7 @@ pub use forward::{
 };
 pub use types::{
     GateBiasBuffer, SpKvCache, SpKvConfig, SpKvGateMode, SpKvLayerCache, SpKvPredictors,
-    UtilityPredictorWeights,
+    SpKvQuantCache, SpKvQuantLayerMeta, UtilityPredictorWeights,
 };
 pub use utility_predictor::{
     UtilityAggregation, aggregate_utilities, hard_gate_bias, predict, predict_single_head,

@@ -27,6 +27,10 @@ pub struct SpKvForwardContext {
     predictor_buf: Vec<f32>,
     /// Per-head utilities: [n_kv_heads]. Reused across layers.
     head_utilities: Vec<f32>,
+    /// Flat dequantized key buffer: [block_size * kv_dim]. Used by quant fusion path.
+    flat_keys: Vec<f32>,
+    /// Flat dequantized value buffer: [block_size * kv_dim]. Used by quant fusion path.
+    flat_values: Vec<f32>,
 }
 
 impl SpKvForwardContext {
@@ -41,6 +45,39 @@ impl SpKvForwardContext {
             gate_bias: crate::sp_kv::types::GateBiasBuffer::new(config.block_size),
             predictor_buf: vec![0.0; hidden],
             head_utilities: vec![0.0; n_kv_heads],
+            flat_keys: Vec::new(),
+            flat_values: Vec::new(),
+        }
+    }
+
+    /// Create context pre-allocated for quantized cache fusion.
+    ///
+    /// Flat KV buffers are sized `[block_size * kv_dim]` for dequantized attention.
+    pub fn new_quant(
+        block_size: usize,
+        kv_dim: usize,
+        predictor_hidden: usize,
+        n_kv_heads: usize,
+    ) -> Self {
+        let block_kv = block_size * kv_dim;
+        Self {
+            gate_bias: crate::sp_kv::types::GateBiasBuffer::new(block_size),
+            predictor_buf: vec![0.0; predictor_hidden],
+            head_utilities: vec![0.0; n_kv_heads],
+            flat_keys: vec![0.0; block_kv],
+            flat_values: vec![0.0; block_kv],
+        }
+    }
+
+    /// Ensure flat KV buffers are allocated for quant path.
+    ///
+    /// No-op if already sized (e.g. created via [`new_quant`]).
+    /// Lazily allocates if created via [`new`] and then used for quant fusion.
+    fn ensure_quant_bufs(&mut self, block_size: usize, kv_dim: usize) {
+        let block_kv = block_size * kv_dim;
+        if self.flat_keys.len() < block_kv {
+            self.flat_keys.resize(block_kv, 0.0);
+            self.flat_values.resize(block_kv, 0.0);
         }
     }
 }
@@ -544,50 +581,255 @@ pub fn forward_sp_kv<'a>(
 }
 
 // ---------------------------------------------------------------------------
-// SP-KV + TurboQuant Fusion (T12) — stub for Plan 070 Phase 3
+// SP-KV + Quantized KV Fusion (Plan 070 Phase 3, Task T12)
 // ---------------------------------------------------------------------------
 
-/// SP-KV + TurboQuant fused forward: selective write + lossy quantize.
+/// SP-KV + Quantized KV fused forward: selective write + lossy quantize.
 ///
-/// Two-stage KV compression pipeline:
+/// Two-stage KV compression pipeline, generic over any [`QuantizedKVCache`](crate::types::QuantizedKVCache) backend:
 /// 1. **SP-KV selective write**: utility predictor decides which positions to retain
-/// 2. **TurboQuant quantize**: retained positions are compressed (f32 → 2-4 bits)
+/// 2. **Quantized storage**: retained positions are compressed (f32 → 2-4 bits)
 ///
 /// This is the maximal-compression decode path:
 /// ```text
 /// Prefill: PFlash (block-sparse token selection)
-/// Decode:  SP-KV (selective write) → TurboQuant (lossy quantize retained)
+/// Decode:  SP-KV (selective write) → Quant cache (lossy quantize retained)
 /// Result:  only useful KV pairs kept, those compressed to 2-4 bits/coord
 /// ```
 ///
-/// ## Implementation Strategy
+/// ## Architecture
 ///
-/// `forward_sp_kv_tq()` mirrors `forward_sp_kv()` but replaces `SpKvCache` with
-/// a hybrid cache that combines:
-/// - `SpKvLayerCache.retained[]` bitfield (which positions to keep)
-/// - `TurboQuantKVCache` (compressed storage for retained positions)
+/// Mirrors [`forward_sp_kv`] but replaces raw `SpKvCache` with [`SpKvQuantCache`]:
+/// - `SpKvQuantCache.meta[]` tracks utilities + retained bitfield (which positions to keep)
+/// - `SpKvQuantCache.quant` stores compressed KV for retained positions only
 ///
-/// For retained positions: `TurboQuantKVCache::store_key/value()` quantizes in-place.
-/// For pruned positions: no write (cache stays at default).
-/// During attention: dequantize only retained positions into flat buffer, then
-/// `attention_head_gated()` with hard gate bias.
-///
-/// ## TODO (Phase 3)
-///
-/// - [ ] Create `SpKvTqCache` hybrid type wrapping `SpKvLayerCache` + `TurboQuantKVCache`
-/// - [ ] Implement `forward_sp_kv_tq()` with dual cache
-/// - [ ] Benchmark: density × compression ratio vs standalone SP-KV and TQ
-/// - [ ] Wire into `forward()` dispatch as `AttentionMode::SpKvTq`
+/// For retained positions: `quant.store_key/value()` quantizes in-place.
+/// For pruned positions: no write — saving quantize compute and storage.
+/// During attention: dequantize retained positions into flat buffer, then
+/// `attention_head_core` with `GateBias` masking pruned positions to `-inf`.
 ///
 /// ## Estimated Compression
 ///
-/// At τ=0.5 (~30% density) + 3-bit TQ: ~10.7 bits/position vs 32-bit baseline = **3× compression**.
-/// At τ=0.7 (~11% density) + 3-bit TQ: ~33 bits/position vs 32-bit baseline = **~29× compression**.
-#[allow(dead_code)]
-fn forward_sp_kv_tq() {
-    // Stub — will be implemented in Phase 3 when TurboQuant integration is wired.
-    // See Plan 070, Task T12.
-    todo!("forward_sp_kv_tq: SP-KV + TurboQuant fusion (Plan 070 Phase 3)")
+/// At τ=0.5 (~30% density) + 3-bit quant: ~10.7 bits/position vs 32-bit baseline = **3× compression**.
+/// At τ=0.7 (~11% density) + 3-bit quant: ~33 bits/position vs 32-bit baseline = **~29× compression**.
+#[allow(clippy::too_many_arguments)]
+pub fn forward_sp_kv_quant<'a, C: crate::types::QuantizedKVCache>(
+    ctx: &'a mut crate::transformer::ForwardContext,
+    weights: &crate::transformer::TransformerWeights,
+    cache: &mut crate::sp_kv::types::SpKvQuantCache<C>,
+    predictors: &crate::sp_kv::types::SpKvPredictors,
+    sp_ctx: &mut SpKvForwardContext,
+    token: usize,
+    pos: usize,
+    config: &crate::types::Config,
+    lora: Option<&crate::types::LoraAdapter>,
+    gate_mode: crate::sp_kv::types::SpKvGateMode,
+    #[cfg(feature = "domain_latent")] domain_latent: Option<&crate::types::DomainLatent>,
+) -> &'a mut [f32] {
+    use crate::types::{kv_dim, matmul, matmul_relu, rmsnorm};
+
+    let n = config.n_embd;
+    let hd = config.head_dim;
+    let kvd = kv_dim(config);
+    let n_kv = config.n_kv_head;
+    let sp_config = cache.config.clone();
+
+    // Ensure flat dequant buffers are allocated
+    sp_ctx.ensure_quant_bufs(config.block_size, kvd);
+
+    // 1. Embedding: x = wte[token] + wpe[pos]
+    let tok_off = token * n;
+    let pos_off_emb = pos * n;
+    for i in 0..n {
+        unsafe {
+            *ctx.x.get_unchecked_mut(i) = *weights.wte.get_unchecked(tok_off + i)
+                + *weights.wpe.get_unchecked(pos_off_emb + i);
+        }
+    }
+
+    // 2. Layer loop
+    for (layer_idx, layer_weights) in weights.layers.iter().enumerate() {
+        // Pre-attention: RMSNorm → save residual → RMSNorm
+        rmsnorm(&mut ctx.x);
+        ctx.xr[..n].copy_from_slice(&ctx.x[..n]);
+        rmsnorm(&mut ctx.x);
+
+        // ── SP-KV: Predict utility from hidden state (after RMSNorm, before QKV) ──
+        let predictor = &predictors.layers[layer_idx];
+        sp_ctx.head_utilities = crate::sp_kv::utility_predictor::predict(
+            predictor,
+            &ctx.x,
+            n,
+            sp_config.predictor_hidden,
+            n_kv,
+            &mut sp_ctx.predictor_buf,
+        );
+
+        // Aggregate per-head utilities to single scalar for cache write decision
+        let pos_utility = crate::sp_kv::utility_predictor::aggregate_utilities(
+            &sp_ctx.head_utilities,
+            crate::sp_kv::utility_predictor::UtilityAggregation::Max,
+        );
+
+        // QKV projections from per-layer weights (GQA: K/V produce kv_dim outputs)
+        matmul(&mut ctx.q, &layer_weights.attn_wq, &ctx.x, n, n);
+        if let Some(lora) = lora {
+            crate::types::lora_apply(&mut ctx.q, lora, &ctx.x, &mut ctx.lora_buf);
+        }
+        matmul(&mut ctx.k, &layer_weights.attn_wk, &ctx.x, kvd, n);
+        if let Some(lora) = lora {
+            crate::types::lora_apply(&mut ctx.k, lora, &ctx.x, &mut ctx.lora_buf);
+        }
+        matmul(&mut ctx.v, &layer_weights.attn_wv, &ctx.x, kvd, n);
+        if let Some(lora) = lora {
+            crate::types::lora_apply(&mut ctx.v, lora, &ctx.x, &mut ctx.lora_buf);
+        }
+
+        // Domain latent injection at mid-layer (Plan 038)
+        #[cfg(feature = "domain_latent")]
+        if layer_idx == config.n_layer / 2
+            && let Some(dl) = domain_latent
+        {
+            for i in 0..kvd {
+                unsafe {
+                    *ctx.k.get_unchecked_mut(i) += *dl.embedding.get_unchecked(i);
+                    *ctx.v.get_unchecked_mut(i) += *dl.embedding.get_unchecked(i);
+                }
+            }
+        }
+
+        // ── SP-KV + Quant: Conditional KV write (quantize only retained positions) ──
+        // Current position is always in window (distance 0 < window).
+        cache.write_gated(
+            layer_idx,
+            &ctx.k,
+            &ctx.v,
+            pos_utility,
+            pos,
+            true, // current pos always in window
+            sp_config.threshold,
+        );
+
+        // ── SP-KV: Build gate biases for all past positions ──
+        build_gate_biases(
+            &mut sp_ctx.gate_bias,
+            &cache.meta[layer_idx].utilities,
+            &cache.meta[layer_idx].retained,
+            pos,
+            sp_config.window,
+            sp_config.threshold,
+            gate_mode,
+        );
+
+        // ── Quant: Dequantize retained positions into flat buffer ──
+        // Non-retained positions are zeroed — masked by gate_bias = -inf during attention.
+        cache.dequantize_retained_keys_into(layer_idx, pos, kvd, &mut sp_ctx.flat_keys);
+        cache.dequantize_retained_values_into(layer_idx, pos, kvd, &mut sp_ctx.flat_values);
+
+        // Multi-head attention with GQA + SP-KV gate bias on dequantized flat cache
+        let scale = 1.0 / (hd as f32).sqrt();
+        ctx.attn_out[..n].fill(0.0);
+        let t_n = pos + 1;
+
+        for h in 0..config.n_head {
+            let kv_group = h * n_kv / config.n_head;
+            unsafe {
+                attention_head_core(
+                    &ctx.q,
+                    &sp_ctx.flat_keys,
+                    &sp_ctx.flat_values,
+                    &mut ctx.attn_out,
+                    &mut ctx.scores,
+                    h * hd,
+                    kv_group * hd,
+                    kvd,
+                    hd,
+                    t_n,
+                    scale,
+                    GateBias::new(&sp_ctx.gate_bias.bias),
+                );
+            }
+        }
+
+        // Output projection + residual
+        matmul(&mut ctx.x, &layer_weights.attn_wo, &ctx.attn_out, n, n);
+        if let Some(lora) = lora {
+            crate::types::lora_apply(&mut ctx.x, lora, &ctx.attn_out, &mut ctx.lora_buf);
+        }
+        for i in 0..n {
+            unsafe {
+                *ctx.x.get_unchecked_mut(i) += *ctx.xr.get_unchecked(i);
+            }
+        }
+
+        // MLP: save residual → RMSNorm → MLP → residual
+        ctx.xr2[..n].copy_from_slice(&ctx.x[..n]);
+        rmsnorm(&mut ctx.x);
+        matmul_relu(
+            &mut ctx.hidden,
+            &layer_weights.mlp_w1,
+            &ctx.x,
+            config.mlp_hidden,
+            n,
+        );
+        if let Some(lora) = lora {
+            crate::types::lora_apply(&mut ctx.hidden, lora, &ctx.x, &mut ctx.lora_buf);
+        }
+
+        // MLP w2: sparse when feature enabled and sparsity is high enough
+        #[cfg(feature = "sparse_mlp")]
+        {
+            let alive = crate::types::sparse_matmul(
+                &mut ctx.x,
+                &layer_weights.mlp_w2,
+                &ctx.hidden,
+                n,
+                config.mlp_hidden,
+                &mut ctx.active_indices,
+                &mut ctx.active_values,
+            );
+            if (alive as f32 / config.mlp_hidden as f32) > (1.0 - config.sparse_threshold) {
+                matmul(
+                    &mut ctx.x,
+                    &layer_weights.mlp_w2,
+                    &ctx.hidden,
+                    n,
+                    config.mlp_hidden,
+                );
+            }
+        }
+        #[cfg(not(feature = "sparse_mlp"))]
+        matmul(
+            &mut ctx.x,
+            &layer_weights.mlp_w2,
+            &ctx.hidden,
+            n,
+            config.mlp_hidden,
+        );
+
+        if let Some(lora) = lora {
+            crate::types::lora_apply(&mut ctx.x, lora, &ctx.hidden, &mut ctx.lora_buf);
+        }
+        for i in 0..n {
+            unsafe {
+                *ctx.x.get_unchecked_mut(i) += *ctx.xr2.get_unchecked(i);
+            }
+        }
+    }
+
+    // Snapshot hidden state (Plan 009 compatibility)
+    ctx.hidden_state[..n].copy_from_slice(&ctx.x[..n]);
+
+    // LM Head: standard matmul (clustered LM head not yet wired)
+    matmul(
+        &mut ctx.logits,
+        &weights.lm_head,
+        &ctx.x,
+        config.vocab_size,
+        n,
+    );
+
+    &mut ctx.logits
 }
 
 #[cfg(test)]

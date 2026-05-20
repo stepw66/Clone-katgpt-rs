@@ -393,3 +393,209 @@ impl GateBiasBuffer {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// SP-KV + Quantized KV Cache Fusion (Plan 070 Phase 3, Task T12)
+// ---------------------------------------------------------------------------
+
+/// Per-layer SP-KV metadata for quantized cache fusion.
+///
+/// Tracks utility scores and retention decisions without storing raw KV data.
+/// The actual KV storage is delegated to the quantized backend `C`.
+pub struct SpKvQuantLayerMeta {
+    /// Per-position gate utility scores.
+    pub utilities: Vec<f32>,
+    /// Bitfield: which positions have retained KV entries.
+    pub retained: Vec<bool>,
+    /// Number of retained positions (for density computation).
+    pub retained_count: usize,
+}
+
+impl SpKvQuantLayerMeta {
+    /// Create new empty metadata for one layer.
+    pub fn new(block_size: usize) -> Self {
+        Self {
+            utilities: vec![0.0; block_size],
+            retained: vec![false; block_size],
+            retained_count: 0,
+        }
+    }
+
+    /// Reset to empty state.
+    pub fn reset(&mut self) {
+        self.utilities.fill(0.0);
+        self.retained.fill(false);
+        self.retained_count = 0;
+    }
+
+    /// Density ratio: fraction of positions retained up to `pos`.
+    pub fn density(&self, pos: usize) -> f32 {
+        if pos == 0 {
+            1.0
+        } else {
+            self.retained_count as f32 / pos as f32
+        }
+    }
+}
+
+/// Hybrid SP-KV + Quantized KV cache.
+///
+/// Combines SP-KV's utility-based selective write with any [`QuantizedKVCache`](crate::types::QuantizedKVCache) backend.
+/// Two-stage compression pipeline:
+/// 1. **SP-KV selective write**: utility predictor decides which positions to retain
+/// 2. **Quantized storage**: retained positions are compressed (f32 → 2-4 bits)
+///
+/// Generic over `C: QuantizedKVCache` — works with TurboQuant, SpectralQuant, or any
+/// future quantized backend.
+///
+/// # Estimated Compression
+///
+/// At τ=0.5 (~30% density) + 3-bit quant: ~10.7 bits/position vs 32-bit baseline = **3× compression**.
+/// At τ=0.7 (~11% density) + 3-bit quant: ~33 bits/position vs 32-bit baseline = **~29× compression**.
+///
+/// # Feature Flag
+///
+/// Available when `sp_kv` is enabled. The quantized backend `C` must also be available
+/// (e.g., `turboquant` or `spectral_quant`).
+pub struct SpKvQuantCache<C: crate::types::QuantizedKVCache> {
+    /// Per-layer SP-KV metadata (utilities, retained bitfield).
+    pub meta: Vec<SpKvQuantLayerMeta>,
+    /// Quantized KV cache backend (TurboQuant, SpectralQuant, etc.).
+    pub quant: C,
+    /// SP-KV configuration.
+    pub config: SpKvConfig,
+}
+
+impl<C: crate::types::QuantizedKVCache> SpKvQuantCache<C> {
+    /// Create a new hybrid cache wrapping an existing quantized backend.
+    pub fn new(config: SpKvConfig, quant: C, n_layers: usize, block_size: usize) -> Self {
+        Self {
+            meta: (0..n_layers)
+                .map(|_| SpKvQuantLayerMeta::new(block_size))
+                .collect(),
+            quant,
+            config,
+        }
+    }
+
+    /// Conditionally write KV pair to quantized storage.
+    ///
+    /// If retained (utility ≥ threshold or in window), quantizes and stores
+    /// via the backend. Otherwise, skips the write entirely — saving quantize compute
+    /// and storage for positions predicted to be unimportant.
+    ///
+    /// Returns true if written (retained), false if skipped (pruned).
+    #[allow(clippy::too_many_arguments)]
+    pub fn write_gated(
+        &mut self,
+        layer: usize,
+        k: &[f32],
+        v: &[f32],
+        utility: f32,
+        pos: usize,
+        pos_is_in_window: bool,
+        threshold: f32,
+    ) -> bool {
+        let retain = pos_is_in_window || utility >= threshold;
+        let meta = &mut self.meta[layer];
+        meta.utilities[pos] = utility;
+
+        if retain {
+            self.quant.store_key(layer, pos, k);
+            self.quant.store_value(layer, pos, v);
+            if !meta.retained[pos] {
+                meta.retained[pos] = true;
+                meta.retained_count += 1;
+            }
+        }
+        retain
+    }
+
+    /// Unconditional write — quantizes and stores regardless of utility.
+    ///
+    /// Used during prefill or warmup before the utility predictor is trained.
+    pub fn write_unconditional(&mut self, layer: usize, k: &[f32], v: &[f32], pos: usize) {
+        let meta = &mut self.meta[layer];
+        self.quant.store_key(layer, pos, k);
+        self.quant.store_value(layer, pos, v);
+        if !meta.retained[pos] {
+            meta.retained[pos] = true;
+            meta.retained_count += 1;
+        }
+        meta.utilities[pos] = 1.0;
+    }
+
+    /// Dequantize retained key vectors for positions `[0..=pos]` into flat buffer.
+    ///
+    /// Only positions marked as retained are dequantized. Non-retained positions
+    /// are left as zeros — they'll be masked by gate bias (`-inf`) during attention.
+    ///
+    /// Layout: `flat_keys[t * kv_dim..(t+1) * kv_dim]` holds the reconstructed key for position `t`.
+    pub fn dequantize_retained_keys_into(
+        &mut self,
+        layer: usize,
+        pos: usize,
+        kv_dim: usize,
+        flat_keys: &mut [f32],
+    ) {
+        let meta = &self.meta[layer];
+        for t in 0..=pos {
+            let off = t * kv_dim;
+            if meta.retained[t] {
+                self.quant
+                    .dequantize_key_into(layer, t, &mut flat_keys[off..off + kv_dim]);
+            } else {
+                flat_keys[off..off + kv_dim].fill(0.0);
+            }
+        }
+    }
+
+    /// Dequantize retained value vectors for positions `[0..=pos]` into flat buffer.
+    ///
+    /// Same semantics as [`dequantize_retained_keys_into`](Self::dequantize_retained_keys_into) but for values.
+    pub fn dequantize_retained_values_into(
+        &mut self,
+        layer: usize,
+        pos: usize,
+        kv_dim: usize,
+        flat_values: &mut [f32],
+    ) {
+        let meta = &self.meta[layer];
+        for t in 0..=pos {
+            let off = t * kv_dim;
+            if meta.retained[t] {
+                self.quant
+                    .dequantize_value_into(layer, t, &mut flat_values[off..off + kv_dim]);
+            } else {
+                flat_values[off..off + kv_dim].fill(0.0);
+            }
+        }
+    }
+
+    /// Reset all layers and the quantized backend.
+    pub fn reset(&mut self) {
+        for meta in &mut self.meta {
+            meta.reset();
+        }
+        self.quant.reset();
+    }
+
+    /// Average density across all layers up to position `pos`.
+    pub fn avg_density(&self, pos: usize) -> f32 {
+        if pos == 0 || self.meta.is_empty() {
+            return 1.0;
+        }
+        let total: f32 = self.meta.iter().map(|m| m.density(pos)).sum();
+        total / self.meta.len() as f32
+    }
+
+    /// Whether a position is retained in a given layer.
+    pub fn is_retained(&self, layer: usize, pos: usize) -> bool {
+        self.meta[layer].retained[pos]
+    }
+
+    /// Per-layer density at given position.
+    pub fn layer_density(&self, layer: usize, pos: usize) -> f32 {
+        self.meta[layer].density(pos)
+    }
+}
