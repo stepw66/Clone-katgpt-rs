@@ -16,6 +16,7 @@ use super::types::{
     WaterfillAllocation,
 };
 use crate::simd::simd_scale_inplace;
+use rayon::prelude::*;
 
 /// Compressed KV cache using SpectralQuant quantization.
 ///
@@ -48,6 +49,30 @@ pub struct SpectralQuantKVCache {
     scratch_tail_indices: Vec<u8>,
     scratch_all_indices: Vec<u8>,
     scratch_all_bits: Vec<u8>,
+}
+
+/// Per-thread scratch buffers for parallel dequantize operations.
+///
+/// Created once per rayon worker thread via `map_init`, avoiding
+/// contention on [`SpectralQuantKVCache`]'s internal scratch buffers.
+/// Enables `&self` parallel dequantize without requiring `&mut self`.
+pub struct DequantizeScratch {
+    all_bits: Vec<u8>,
+    all_indices: Vec<u8>,
+    rotated: Vec<f32>,
+    unrotated: Vec<f32>,
+}
+
+impl DequantizeScratch {
+    /// Create scratch buffers sized for `kv_dim` dimensions.
+    pub fn new(kv_dim: usize) -> Self {
+        Self {
+            all_bits: vec![0u8; kv_dim],
+            all_indices: vec![0u8; kv_dim],
+            rotated: vec![0.0f32; kv_dim],
+            unrotated: vec![0.0f32; kv_dim],
+        }
+    }
 }
 
 impl SpectralQuantKVCache {
@@ -739,6 +764,233 @@ impl SpectralQuantKVCache {
         }
         original / used
     }
+
+    // ── Thread-safe dequantize with external scratch (for rayon) ────────
+
+    /// Dequantize key using external scratch buffers (thread-safe).
+    ///
+    /// Same logic as [`dequantize_key_into`](Self::dequantize_key_into) but uses
+    /// caller-provided [`DequantizeScratch`], enabling parallel dequantize via
+    /// rayon's `map_init`. Takes `&self` instead of `&mut self` — safe for
+    /// concurrent reads from multiple threads.
+    pub fn dequantize_key_into_with_scratch(
+        &self,
+        layer: usize,
+        pos: usize,
+        scratch: &mut DequantizeScratch,
+        out: &mut [f32],
+    ) {
+        debug_assert_eq!(out.len(), self.kv_dim);
+        let layer_state = &self.layers[layer];
+        let norm = self.key_norms[layer][pos];
+
+        if norm < 1e-8 {
+            out.fill(0.0);
+            return;
+        }
+
+        let d_eff = layer_state.d_eff;
+        let b_low = layer_state.b_low.max(1);
+
+        let all_bits = &mut scratch.all_bits;
+        if let Some(ref bits) = layer_state.semantic_bits_per_dim {
+            all_bits[..d_eff].copy_from_slice(&bits[..d_eff.min(bits.len())]);
+        } else {
+            all_bits[..d_eff].fill(layer_state.b_high);
+        }
+        all_bits[d_eff..self.kv_dim].fill(b_low);
+
+        let all_indices = &mut scratch.all_indices;
+        unpack_variable_bits(
+            &self.key_indices[layer][pos],
+            &all_bits[..self.kv_dim],
+            self.kv_dim,
+            all_indices,
+        );
+
+        if let Some(cb) = &layer_state.semantic_codebook {
+            for (i, c) in scratch.rotated.iter_mut().enumerate().take(d_eff) {
+                *c = dequantize_idx(all_indices[i], &cb.centroids);
+            }
+        } else if let Some(per_dim) = &layer_state.per_dim_semantic_codebooks {
+            for (i, cb) in per_dim.iter().enumerate().take(d_eff) {
+                scratch.rotated[i] = dequantize_idx(all_indices[i], &cb.centroids);
+            }
+        }
+        let tail_cb = &layer_state.tail_codebook;
+        for (i, r) in scratch.rotated.iter_mut().enumerate().skip(d_eff) {
+            *r = dequantize_idx(all_indices[i], &tail_cb.centroids);
+        }
+
+        let rotation = SpectralRotation::new(
+            layer_state.calibration.eigenvectors.clone(),
+            layer_state.calibration.head_dim,
+        );
+        rotation.unrotate(&scratch.rotated, &mut scratch.unrotated);
+
+        out.copy_from_slice(&scratch.unrotated);
+        simd_scale_inplace(out, norm);
+    }
+
+    /// Dequantize value using external scratch buffers (thread-safe).
+    ///
+    /// Same logic as [`dequantize_value_into`](Self::dequantize_value_into) but uses
+    /// caller-provided [`DequantizeScratch`], enabling parallel dequantize via
+    /// rayon's `map_init`. Takes `&self` instead of `&mut self` — safe for
+    /// concurrent reads from multiple threads.
+    pub fn dequantize_value_into_with_scratch(
+        &self,
+        layer: usize,
+        pos: usize,
+        scratch: &mut DequantizeScratch,
+        out: &mut [f32],
+    ) {
+        debug_assert_eq!(out.len(), self.kv_dim);
+        let layer_state = &self.layers[layer];
+        let norm = self.val_norms[layer][pos];
+
+        if norm < 1e-8 {
+            out.fill(0.0);
+            return;
+        }
+
+        let d_eff = layer_state.d_eff;
+        let b_low = layer_state.b_low.max(1);
+
+        let all_bits = &mut scratch.all_bits;
+        if let Some(ref bits) = layer_state.semantic_bits_per_dim {
+            all_bits[..d_eff].copy_from_slice(&bits[..d_eff.min(bits.len())]);
+        } else {
+            all_bits[..d_eff].fill(layer_state.b_high);
+        }
+        all_bits[d_eff..self.kv_dim].fill(b_low);
+
+        let all_indices = &mut scratch.all_indices;
+        unpack_variable_bits(
+            &self.val_indices[layer][pos],
+            &all_bits[..self.kv_dim],
+            self.kv_dim,
+            all_indices,
+        );
+
+        if let Some(cb) = &layer_state.semantic_codebook {
+            for (i, r) in scratch.rotated.iter_mut().enumerate().take(d_eff) {
+                *r = dequantize_idx(all_indices[i], &cb.centroids);
+            }
+        } else if let Some(per_dim) = &layer_state.per_dim_semantic_codebooks {
+            for (i, cb) in per_dim.iter().enumerate().take(d_eff) {
+                scratch.rotated[i] = dequantize_idx(all_indices[i], &cb.centroids);
+            }
+        }
+        let tail_cb = &layer_state.tail_codebook;
+        for (i, r) in scratch.rotated.iter_mut().enumerate().skip(d_eff) {
+            *r = dequantize_idx(all_indices[i], &tail_cb.centroids);
+        }
+
+        let rotation = SpectralRotation::new(
+            layer_state.calibration.eigenvectors.clone(),
+            layer_state.calibration.head_dim,
+        );
+        rotation.unrotate(&scratch.rotated, &mut scratch.unrotated);
+
+        out.copy_from_slice(&scratch.unrotated);
+        simd_scale_inplace(out, norm);
+    }
+
+    // ── Parallel batch dequantize ──────────────────────────────────
+
+    /// Parallel batch dequantize of all key positions `[0..=pos]` using rayon.
+    ///
+    /// Each rayon worker thread gets its own [`DequantizeScratch`] via `map_init`,
+    /// eliminating contention on the cache's internal scratch buffers.
+    /// Takes `&self` — safe for concurrent reads from multiple threads.
+    ///
+    /// Falls back to sequential for small batches (`n <= threshold`),
+    /// where rayon overhead outweighs parallelism benefit.
+    pub fn par_dequantize_keys_flat(&self, layer: usize, pos: usize, threshold: usize) -> Vec<f32> {
+        let kv_dim = self.kv_dim;
+        let n = pos + 1;
+
+        if n == 0 {
+            return Vec::new();
+        }
+
+        // Sequential fallback for small batches (rayon overhead > benefit)
+        if n <= threshold {
+            let mut flat = vec![0.0f32; n * kv_dim];
+            let mut scratch = DequantizeScratch::new(kv_dim);
+            let mut buf = vec![0.0f32; kv_dim];
+            for t in 0..n {
+                self.dequantize_key_into_with_scratch(layer, t, &mut scratch, &mut buf);
+                flat[t * kv_dim..(t + 1) * kv_dim].copy_from_slice(&buf);
+            }
+            return flat;
+        }
+
+        // Parallel: each rayon worker gets its own scratch + output buffer
+        let rows: Vec<Vec<f32>> = (0..n)
+            .into_par_iter()
+            .map_init(
+                || (DequantizeScratch::new(kv_dim), vec![0.0f32; kv_dim]),
+                |(scratch, buf), t| {
+                    self.dequantize_key_into_with_scratch(layer, t, scratch, buf);
+                    buf.clone()
+                },
+            )
+            .collect();
+
+        let mut flat = Vec::with_capacity(n * kv_dim);
+        for row in rows {
+            flat.extend_from_slice(&row);
+        }
+        flat
+    }
+
+    /// Parallel batch dequantize of all value positions `[0..=pos]` using rayon.
+    ///
+    /// Same pattern as [`par_dequantize_keys_flat`](Self::par_dequantize_keys_flat)
+    /// but for value vectors. Takes `&self` — safe for concurrent reads.
+    pub fn par_dequantize_values_flat(
+        &self,
+        layer: usize,
+        pos: usize,
+        threshold: usize,
+    ) -> Vec<f32> {
+        let kv_dim = self.kv_dim;
+        let n = pos + 1;
+
+        if n == 0 {
+            return Vec::new();
+        }
+
+        if n <= threshold {
+            let mut flat = vec![0.0f32; n * kv_dim];
+            let mut scratch = DequantizeScratch::new(kv_dim);
+            let mut buf = vec![0.0f32; kv_dim];
+            for t in 0..n {
+                self.dequantize_value_into_with_scratch(layer, t, &mut scratch, &mut buf);
+                flat[t * kv_dim..(t + 1) * kv_dim].copy_from_slice(&buf);
+            }
+            return flat;
+        }
+
+        let rows: Vec<Vec<f32>> = (0..n)
+            .into_par_iter()
+            .map_init(
+                || (DequantizeScratch::new(kv_dim), vec![0.0f32; kv_dim]),
+                |(scratch, buf), t| {
+                    self.dequantize_value_into_with_scratch(layer, t, scratch, buf);
+                    buf.clone()
+                },
+            )
+            .collect();
+
+        let mut flat = Vec::with_capacity(n * kv_dim);
+        for row in rows {
+            flat.extend_from_slice(&row);
+        }
+        flat
+    }
 }
 
 impl crate::types::QuantizedKVCache for SpectralQuantKVCache {
@@ -1217,5 +1469,178 @@ mod tests {
         assert_eq!(cache.pos(), 0);
         cache.set_pos(10);
         assert_eq!(cache.pos(), 10);
+    }
+
+    // ── Parallel dequantize tests (Issue 064) ──────────────────
+
+    #[test]
+    fn test_dequantize_with_scratch_matches_into() {
+        let kv_dim = 16;
+        let cal = make_test_calibration(kv_dim);
+        let config = make_test_config(1, kv_dim, 32);
+        let mut cache = SpectralQuantKVCache::from_calibration(
+            &config,
+            std::slice::from_ref(&cal),
+            std::slice::from_ref(&cal),
+        );
+
+        let key: Vec<f32> = (0..kv_dim).map(|i| (i as f32 * 0.1).sin()).collect();
+        let value: Vec<f32> = (0..kv_dim).map(|i| (i as f32 * 0.1).cos()).collect();
+        cache.store_key(0, 0, &key);
+        cache.store_value(0, 0, &value);
+
+        // Mut-self path
+        let mut buf_into = vec![0.0f32; kv_dim];
+        cache.dequantize_key_into(0, 0, &mut buf_into);
+
+        // External scratch path
+        let mut scratch = DequantizeScratch::new(kv_dim);
+        let mut buf_scratch = vec![0.0f32; kv_dim];
+        cache.dequantize_key_into_with_scratch(0, 0, &mut scratch, &mut buf_scratch);
+
+        for (i, (a, b)) in buf_into.iter().zip(buf_scratch.iter()).enumerate() {
+            assert!((a - b).abs() < 1e-6, "key mismatch at [{i}]: {a} vs {b}");
+        }
+
+        // Same for value
+        let mut val_into = vec![0.0f32; kv_dim];
+        cache.dequantize_value_into(0, 0, &mut val_into);
+        let mut val_scratch = vec![0.0f32; kv_dim];
+        cache.dequantize_value_into_with_scratch(0, 0, &mut scratch, &mut val_scratch);
+
+        for (i, (a, b)) in val_into.iter().zip(val_scratch.iter()).enumerate() {
+            assert!((a - b).abs() < 1e-6, "value mismatch at [{i}]: {a} vs {b}");
+        }
+    }
+
+    #[test]
+    fn test_par_dequantize_keys_matches_seq() {
+        use super::super::forward::{
+            dequantize_spectral_keys_flat, par_dequantize_spectral_keys_flat,
+        };
+
+        let kv_dim = 16;
+        let n_positions = 32;
+        let cal = make_test_calibration(kv_dim);
+        let config = make_test_config(1, kv_dim, n_positions);
+        let mut cache = SpectralQuantKVCache::from_calibration(
+            &config,
+            std::slice::from_ref(&cal),
+            std::slice::from_ref(&cal),
+        );
+
+        // Store keys at all positions
+        for pos in 0..n_positions {
+            let key: Vec<f32> = (0..kv_dim)
+                .map(|i| ((i + pos * 3) as f32 * 0.1).sin())
+                .collect();
+            cache.store_key(0, pos, &key);
+        }
+
+        // Sequential (uses &mut self)
+        let seq_flat = dequantize_spectral_keys_flat(&mut cache, 0, n_positions - 1, kv_dim);
+
+        // Parallel (uses &self, threshold=1 forces parallel path)
+        let par_flat = par_dequantize_spectral_keys_flat(&cache, 0, n_positions - 1, kv_dim, 1);
+
+        assert_eq!(seq_flat.len(), par_flat.len(), "length mismatch");
+        for (i, (a, b)) in seq_flat.iter().zip(par_flat.iter()).enumerate() {
+            assert!(
+                (a - b).abs() < 1e-6,
+                "key dequant mismatch at [{i}]: {a} vs {b}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_par_dequantize_values_matches_seq() {
+        use super::super::forward::{
+            dequantize_spectral_values_flat, par_dequantize_spectral_values_flat,
+        };
+
+        let kv_dim = 16;
+        let n_positions = 32;
+        let cal = make_test_calibration(kv_dim);
+        let config = make_test_config(1, kv_dim, n_positions);
+        let mut cache = SpectralQuantKVCache::from_calibration(
+            &config,
+            std::slice::from_ref(&cal),
+            std::slice::from_ref(&cal),
+        );
+
+        for pos in 0..n_positions {
+            let val: Vec<f32> = (0..kv_dim)
+                .map(|i| ((i + pos * 5) as f32 * 0.07).cos())
+                .collect();
+            cache.store_value(0, pos, &val);
+        }
+
+        let seq_flat = dequantize_spectral_values_flat(&mut cache, 0, n_positions - 1, kv_dim);
+        let par_flat = par_dequantize_spectral_values_flat(&cache, 0, n_positions - 1, kv_dim, 1);
+
+        assert_eq!(seq_flat.len(), par_flat.len(), "length mismatch");
+        for (i, (a, b)) in seq_flat.iter().zip(par_flat.iter()).enumerate() {
+            assert!(
+                (a - b).abs() < 1e-6,
+                "value dequant mismatch at [{i}]: {a} vs {b}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_par_dequantize_threshold_fallback() {
+        use super::super::forward::par_dequantize_spectral_keys_flat;
+
+        let kv_dim = 16;
+        let n_positions = 8;
+        let cal = make_test_calibration(kv_dim);
+        let config = make_test_config(1, kv_dim, n_positions);
+        let mut cache = SpectralQuantKVCache::from_calibration(
+            &config,
+            std::slice::from_ref(&cal),
+            std::slice::from_ref(&cal),
+        );
+
+        for pos in 0..n_positions {
+            let key: Vec<f32> = (0..kv_dim)
+                .map(|i| ((i + pos) as f32 * 0.1).sin())
+                .collect();
+            cache.store_key(0, pos, &key);
+        }
+
+        // threshold=100 → sequential fallback (n_positions=8 < 100)
+        let seq_result = par_dequantize_spectral_keys_flat(&cache, 0, n_positions - 1, kv_dim, 100);
+        // threshold=1 → parallel path
+        let par_result = par_dequantize_spectral_keys_flat(&cache, 0, n_positions - 1, kv_dim, 1);
+
+        assert_eq!(seq_result.len(), par_result.len());
+        for (i, (a, b)) in seq_result.iter().zip(par_result.iter()).enumerate() {
+            assert!(
+                (a - b).abs() < 1e-6,
+                "threshold fallback mismatch at [{i}]: {a} vs {b}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_par_dequantize_empty() {
+        use super::super::forward::par_dequantize_spectral_keys_flat;
+
+        let kv_dim = 16;
+        let cal = make_test_calibration(kv_dim);
+        let config = make_test_config(1, kv_dim, 4);
+        let cache = SpectralQuantKVCache::from_calibration(
+            &config,
+            std::slice::from_ref(&cal),
+            std::slice::from_ref(&cal),
+        );
+
+        // No keys stored — all zero norms, dequantize returns zeros
+        let result = par_dequantize_spectral_keys_flat(&cache, 0, 3, kv_dim, 1);
+        assert_eq!(result.len(), 4 * kv_dim);
+        assert!(
+            result.iter().all(|&v| v == 0.0),
+            "empty cache should dequantize to zeros"
+        );
     }
 }

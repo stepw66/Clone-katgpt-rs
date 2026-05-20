@@ -4,7 +4,11 @@
 //! SpectralQuant KV cache path. The main forward function
 //! (`forward_quantized`) is generic and lives in [`crate::transformer`].
 
+#[cfg(all(feature = "spectral_quant", feature = "maxsim"))]
+use super::spectral_kv_cache::DequantizeScratch;
 use super::spectral_kv_cache::SpectralQuantKVCache;
+#[cfg(all(feature = "spectral_quant", feature = "maxsim"))]
+use rayon::prelude::*;
 
 /// Dequantize SpectralQuant key vectors for positions `[0..=pos]` into a flat buffer.
 ///
@@ -165,6 +169,134 @@ pub fn maxsim_score_spectralquant(
             // variable-bit unpack + codebook lookup all happen inside
             // dequantize_key_into. Only one key vector in memory at a time.
             cache.dequantize_key_into(layer, t, &mut key_buf);
+            let dot = crate::simd::simd_dot_f32(q_row, &key_buf, dim);
+            my_max = my_max.max(dot);
+        }
+        score += my_max;
+    }
+    score
+}
+
+// ── Parallel Variants (rayon + per-thread scratch) ──────────────────
+
+/// Parallel batch dequantize of SpectralQuant key vectors for positions `[0..=pos]`.
+///
+/// Same output as [`dequantize_spectral_keys_flat`] but uses rayon with per-thread
+/// [`DequantizeScratch`] buffers. Takes `&cache` (not `&mut`) — safe for concurrent reads.
+///
+/// Falls back to sequential for `n <= threshold` where rayon overhead outweighs benefit.
+pub fn par_dequantize_spectral_keys_flat(
+    cache: &SpectralQuantKVCache,
+    layer: usize,
+    pos: usize,
+    kv_dim: usize,
+    threshold: usize,
+) -> Vec<f32> {
+    let n = pos + 1;
+    if n == 0 {
+        return Vec::new();
+    }
+    debug_assert_eq!(kv_dim, cache.kv_dim());
+
+    cache.par_dequantize_keys_flat(layer, pos, threshold)
+}
+
+/// Parallel batch dequantize of SpectralQuant value vectors for positions `[0..=pos]`.
+///
+/// Same output as [`dequantize_spectral_values_flat`] but uses rayon with per-thread
+/// [`DequantizeScratch`] buffers. Takes `&cache` (not `&mut`) — safe for concurrent reads.
+///
+/// Falls back to sequential for `n <= threshold` where rayon overhead outweighs benefit.
+pub fn par_dequantize_spectral_values_flat(
+    cache: &SpectralQuantKVCache,
+    layer: usize,
+    pos: usize,
+    kv_dim: usize,
+    threshold: usize,
+) -> Vec<f32> {
+    let n = pos + 1;
+    if n == 0 {
+        return Vec::new();
+    }
+    debug_assert_eq!(kv_dim, cache.kv_dim());
+
+    cache.par_dequantize_values_flat(layer, pos, threshold)
+}
+
+/// Parallel MaxSim scoring on SpectralQuant-compressed KV cache.
+///
+/// Same math as [`maxsim_score_spectralquant`] but parallelizes the outer loop
+/// over query tokens using rayon. Each rayon worker gets its own
+/// [`DequantizeScratch`] + key buffer via `map_init`.
+///
+/// Takes `&cache` (not `&mut`) — safe for concurrent reads from multiple threads.
+/// Falls back to sequential for `lq <= threshold` where rayon overhead outweighs benefit.
+///
+/// # Feature flag
+/// Requires both `spectralquant` and `maxsim` features.
+#[cfg(all(feature = "spectral_quant", feature = "maxsim"))]
+pub fn par_maxsim_score_spectralquant(
+    queries: &[f32],
+    cache: &SpectralQuantKVCache,
+    layer: usize,
+    pos_range: std::ops::Range<usize>,
+    dim: usize,
+    threshold: usize,
+) -> f32 {
+    let lq = queries.len() / dim;
+    if lq == 0 || pos_range.is_empty() {
+        return 0.0;
+    }
+
+    // Sequential fallback for few query tokens
+    if lq <= threshold {
+        return maxsim_score_spectralquant_fallback(queries, cache, layer, pos_range, dim);
+    }
+
+    // Parallel: each worker gets its own scratch + key buffer
+    let per_query_max: Vec<f32> = (0..lq)
+        .into_par_iter()
+        .map_init(
+            || (DequantizeScratch::new(dim), vec![0.0f32; dim]),
+            |(scratch, key_buf), i| {
+                let q_row = &queries[i * dim..(i + 1) * dim];
+                let mut my_max = f32::NEG_INFINITY;
+                for t in pos_range.clone() {
+                    cache.dequantize_key_into_with_scratch(layer, t, scratch, key_buf);
+                    let dot = crate::simd::simd_dot_f32(q_row, key_buf, dim);
+                    my_max = my_max.max(dot);
+                }
+                my_max
+            },
+        )
+        .collect();
+
+    per_query_max.into_iter().sum()
+}
+
+/// Sequential fallback for `par_maxsim_score_spectralquant`.
+///
+/// Uses `&cache` + [`DequantizeScratch`] (no `&mut cache` required).
+/// Extracted as a standalone function so both seq and par paths use
+/// the same `dequantize_key_into_with_scratch` code path.
+#[cfg(all(feature = "spectral_quant", feature = "maxsim"))]
+fn maxsim_score_spectralquant_fallback(
+    queries: &[f32],
+    cache: &SpectralQuantKVCache,
+    layer: usize,
+    pos_range: std::ops::Range<usize>,
+    dim: usize,
+) -> f32 {
+    let lq = queries.len() / dim;
+    let mut scratch = DequantizeScratch::new(dim);
+    let mut key_buf = vec![0.0f32; dim];
+
+    let mut score = 0.0f32;
+    for i in 0..lq {
+        let q_row = &queries[i * dim..(i + 1) * dim];
+        let mut my_max = f32::NEG_INFINITY;
+        for t in pos_range.clone() {
+            cache.dequantize_key_into_with_scratch(layer, t, &mut scratch, &mut key_buf);
             let dot = crate::simd::simd_dot_f32(q_row, &key_buf, dim);
             my_max = my_max.max(dot);
         }
@@ -404,6 +536,88 @@ mod tests {
         assert!(
             (sq_score - reconstructed).abs() < 1e-4,
             "streaming vs dequantized mismatch: {sq_score} vs {reconstructed}"
+        );
+    }
+
+    /// Verify `par_maxsim_score_spectralquant` produces the same score as the
+    /// sequential `maxsim_score_spectralquant`. Issue 064 T7 — GOAT proof.
+    #[test]
+    #[cfg(all(feature = "spectral_quant", feature = "maxsim"))]
+    fn test_par_maxsim_matches_seq() {
+        use super::{maxsim_score_spectralquant, par_maxsim_score_spectralquant};
+        use crate::spectralquant::spectral::participation_ratio;
+        use crate::spectralquant::types::{SpectralQuantCalibration, SpectralQuantKVCacheConfig};
+        use crate::types::Config;
+
+        let config = Config::micro();
+        let kv_dim = crate::types::kv_dim(&config);
+        let n_positions = 32;
+        let lq = 8;
+
+        // Build calibration
+        let mut eigenvectors = vec![0.0f32; kv_dim * kv_dim];
+        for i in 0..kv_dim {
+            eigenvectors[i * kv_dim + i] = 1.0;
+        }
+        let eigenvalues: Vec<f32> = (0..kv_dim).map(|i| 10.0 * 0.8f32.powi(i as i32)).collect();
+        let d_eff = participation_ratio(&eigenvalues);
+        let cal = SpectralQuantCalibration {
+            eigenvectors,
+            eigenvalues,
+            d_eff,
+            spectral_gap: None,
+            var_95: 10,
+            var_99: 20,
+            n_samples: 100,
+            head_dim: kv_dim,
+        };
+
+        let sq_config = SpectralQuantKVCacheConfig {
+            avg_bits: 3.0,
+            min_tail_bits: 1,
+            max_bits: 8,
+            qjl_dim: 16,
+            lloyd_max_iter: 30,
+            calibration_samples: 100,
+            seed: 42,
+            use_water_fill: false,
+            wf_min_bits: 1,
+            wf_max_bits: 6,
+            n_layers: config.n_layer,
+            kv_dim,
+            max_seq_len: n_positions,
+        };
+
+        let mut cache = SpectralQuantKVCache::from_calibration(
+            &sq_config,
+            &vec![cal.clone(); config.n_layer],
+            &vec![cal; config.n_layer],
+        );
+
+        // Store synthetic keys
+        for pos in 0..n_positions {
+            let key: Vec<f32> = (0..kv_dim)
+                .map(|d| ((d + pos * 7) as f32 * 0.1).sin())
+                .collect();
+            cache.store_key(0, pos, &key);
+        }
+
+        // Build queries
+        let queries: Vec<f32> = (0..lq * kv_dim).map(|i| (i as f32 * 0.1).sin()).collect();
+
+        // Sequential (requires &mut cache)
+        let seq_score = maxsim_score_spectralquant(&queries, &mut cache, 0, 0..n_positions, kv_dim);
+
+        // Parallel (requires only &cache, threshold=1 forces parallel path)
+        let par_score =
+            par_maxsim_score_spectralquant(&queries, &cache, 0, 0..n_positions, kv_dim, 1);
+
+        assert!(seq_score.is_finite(), "seq score not finite: {seq_score}");
+        assert!(par_score.is_finite(), "par score not finite: {par_score}");
+        assert!(
+            (seq_score - par_score).abs() < 1e-4,
+            "par maxsim mismatch: seq={seq_score} par={par_score} delta={}",
+            (seq_score - par_score).abs()
         );
     }
 }

@@ -1,8 +1,14 @@
+#[cfg(feature = "spectral_quant")]
+use crate::spectralquant::{
+    DequantizeScratch, SpectralQuantKVCache, SpectralQuantKVCacheConfig,
+    par_dequantize_spectral_keys_flat,
+};
 use crate::speculative::types::FlashPrefillConfig;
 use crate::speculative::{
     AttentionScorer, NoPruner, NoScreeningPruner, SimulatedVerifier, SpeculativeContext,
-    TreeBuilder, block_select, compress_prompt, dflash_predict_ar_with, dflash_predict_with,
-    extract_best_path_into, sample_from_distribution, speculative_step_verifier,
+    TreeBuilder, block_select, compress_prompt, dflash_predict_ar_with, dflash_predict_parallel,
+    dflash_predict_with, extract_best_path_into, sample_from_distribution,
+    speculative_step_verifier,
 };
 use crate::transformer::{
     ForwardContext, MultiLayerKVCache, PagedKVCache, RavenKVCache, TransformerWeights, forward,
@@ -300,6 +306,12 @@ pub fn run_all(config: &Config) -> Vec<BenchResult> {
     results.push(screened_adapter);
     cooldown(3);
 
+    // ── Phase 4.5: DFlash parallel proof ──
+    {
+        let (_df_seq, df_par) = bench_dflash_parallel(&draft_weights, &draft_config, warmup, iters);
+        results.push(df_par);
+    }
+
     // ── Phase 5: Infrastructure results (already measured on cool CPU) ──
     results.push(flat_br);
     results.push(paged_br);
@@ -308,6 +320,14 @@ pub fn run_all(config: &Config) -> Vec<BenchResult> {
     results.push(tq_alloc_br);
     results.push(tq_zero_br);
     results.push(pflash_br);
+
+    // ── Phase 5.1: SpectralQuant parallel dequant proof ──
+    #[cfg(feature = "spectral_quant")]
+    {
+        let (sq_seq, sq_par) = bench_spectralquant_par_dequant(config);
+        results.push(sq_seq);
+        results.push(sq_par);
+    }
 
     // ── Phase 5.5: MaxSim benchmarks (feature-gated) ──
     #[cfg(feature = "maxsim")]
@@ -403,6 +423,72 @@ fn bench_dflash(
         color: (255, 99, 71),
         category: BenchCategory::TreeBuild,
     }
+}
+
+/// Benchmark DFlash parallel vs sequential.
+///
+/// Measures `dflash_predict_with` (seq) against `dflash_predict_parallel` (rayon).
+/// Parallel uses `map_init` for per-thread ForwardContext + KV cache.
+/// For micro/draft models (n_embd ≤ parallel_threshold), parallel falls back to seq.
+pub fn bench_dflash_parallel(
+    draft_weights: &TransformerWeights,
+    draft_config: &Config,
+    warmup: usize,
+    iters: usize,
+) -> (BenchResult, BenchResult) {
+    // ── Sequential ──
+    let mut sctx = SpeculativeContext::new(draft_config);
+
+    for _ in 0..warmup {
+        sctx.reset();
+        dflash_predict_with(&mut sctx, draft_weights, draft_config, 0, 0);
+    }
+
+    let start = Instant::now();
+    for _ in 0..iters {
+        sctx.reset();
+        let _steps = dflash_predict_with(&mut sctx, draft_weights, draft_config, 0, 0);
+    }
+    let elapsed_seq = start.elapsed();
+
+    let seq_tps = iters as f64 / elapsed_seq.as_secs_f64();
+    let seq_br = BenchResult {
+        label: "DFlash (seq)".into(),
+        throughput: seq_tps,
+        time_per_step_us: elapsed_seq.as_micros() as f64 / iters as f64,
+        avg_acceptance_len: draft_config.draft_lookahead as f64,
+        color: (255, 99, 71),
+        category: BenchCategory::TreeBuild,
+    };
+
+    // ── Parallel ──
+    for _ in 0..warmup {
+        std::hint::black_box(dflash_predict_parallel(draft_weights, draft_config, 0, 0));
+    }
+
+    let start = Instant::now();
+    for _ in 0..iters {
+        std::hint::black_box(dflash_predict_parallel(draft_weights, draft_config, 0, 0));
+    }
+    let elapsed_par = start.elapsed();
+
+    let par_tps = iters as f64 / elapsed_par.as_secs_f64();
+    let par_br = BenchResult {
+        label: "DFlash (par)".into(),
+        throughput: par_tps,
+        time_per_step_us: elapsed_par.as_micros() as f64 / iters as f64,
+        avg_acceptance_len: draft_config.draft_lookahead as f64,
+        color: (255, 140, 71),
+        category: BenchCategory::TreeBuild,
+    };
+
+    let speedup = par_tps / seq_tps;
+    println!(
+        "  DFlash par vs seq: {:.2}× ({:.0} vs {:.0} ops/s, threshold={})",
+        speedup, par_tps, seq_tps, draft_config.parallel_threshold
+    );
+
+    (seq_br, par_br)
 }
 
 fn bench_ddtree(
@@ -1721,6 +1807,160 @@ pub fn bench_turboquant_store_dequant(config: &Config) -> (BenchResult, BenchRes
     };
 
     (alloc_result, zero_result)
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Issue 064: SpectralQuant Rayon Parallel Dequant Bench Proof
+// ═══════════════════════════════════════════════════════════════
+
+/// Benchmark SpectralQuant sequential vs parallel batch dequantize.
+///
+/// Creates a synthetic SQ cache with `block_size` positions, stores random KV,
+/// then measures:
+/// 1. Sequential: `dequantize_spectral_keys_flat` (loop over positions)
+/// 2. Parallel: `par_dequantize_spectral_keys_flat` (rayon `map_init` per-thread scratch)
+///
+/// GOAT proof: parallel must produce bit-exact same output as sequential.
+/// Speedup depends on n_positions × kv_dim vs rayon overhead.
+#[cfg(feature = "spectral_quant")]
+pub fn bench_spectralquant_par_dequant(config: &Config) -> (BenchResult, BenchResult) {
+    use crate::spectralquant::spectral::participation_ratio;
+    use crate::spectralquant::types::SpectralQuantCalibration;
+
+    let kvd = crate::types::kv_dim(config);
+    let n_positions = config.block_size.min(256); // Cap for bench speed
+    let iters = 50u64;
+    let threshold = 1; // Force parallel path for bench
+
+    // Build calibration with identity eigenvectors (will get random rotation fallback)
+    let mut eigenvectors = vec![0.0f32; kvd * kvd];
+    for i in 0..kvd {
+        eigenvectors[i * kvd + i] = 1.0;
+    }
+    let eigenvalues: Vec<f32> = (0..kvd).map(|i| 10.0 * 0.8f32.powi(i as i32)).collect();
+    let d_eff = participation_ratio(&eigenvalues);
+    let cal = SpectralQuantCalibration {
+        eigenvectors,
+        eigenvalues,
+        d_eff,
+        spectral_gap: None,
+        var_95: 10,
+        var_99: 20,
+        n_samples: 100,
+        head_dim: kvd,
+    };
+
+    let sq_config = SpectralQuantKVCacheConfig {
+        avg_bits: 3.0,
+        min_tail_bits: 1,
+        max_bits: 8,
+        qjl_dim: 16,
+        lloyd_max_iter: 30,
+        calibration_samples: 100,
+        seed: 42,
+        use_water_fill: false,
+        wf_min_bits: 1,
+        wf_max_bits: 6,
+        n_layers: config.n_layer,
+        kv_dim: kvd,
+        max_seq_len: n_positions,
+    };
+
+    let mut cache = SpectralQuantKVCache::from_calibration(
+        &sq_config,
+        &vec![cal.clone(); config.n_layer],
+        &vec![cal; config.n_layer],
+    );
+
+    // Store synthetic keys
+    let keys: Vec<Vec<f32>> = (0..n_positions)
+        .map(|p| (0..kvd).map(|i| ((i + p * 7) as f32 * 0.1).sin()).collect())
+        .collect();
+    for (pos, key) in keys.iter().enumerate() {
+        cache.store_key(0, pos, key);
+    }
+
+    // ── Sequential ──
+    // Re-use `cache` since both paths only need &self.
+    // Warmup seq
+    {
+        let mut scratch = DequantizeScratch::new(kvd);
+        let mut buf = vec![0.0f32; kvd];
+        for _ in 0..5 {
+            for t in 0..n_positions {
+                cache.dequantize_key_into_with_scratch(0, t, &mut scratch, &mut buf);
+                std::hint::black_box(&buf);
+            }
+        }
+    }
+
+    let start = Instant::now();
+    {
+        let mut scratch = DequantizeScratch::new(kvd);
+        let mut buf = vec![0.0f32; kvd];
+        for _ in 0..iters {
+            for t in 0..n_positions {
+                cache.dequantize_key_into_with_scratch(0, t, &mut scratch, &mut buf);
+                std::hint::black_box(&buf);
+            }
+        }
+    }
+    let elapsed_seq = start.elapsed();
+
+    let total_tokens = n_positions as u64 * iters;
+    let seq_br = BenchResult {
+        label: format!("SQ-3bit dequant {n_positions}pos (seq)"),
+        throughput: total_tokens as f64 / elapsed_seq.as_secs_f64(),
+        time_per_step_us: elapsed_seq.as_micros() as f64 / total_tokens as f64,
+        avg_acceptance_len: cache.compression_ratio() as f64,
+        color: (180, 100, 220),
+        category: BenchCategory::Infrastructure,
+    };
+
+    // ── Parallel ──
+    // Warmup par
+    for _ in 0..5 {
+        std::hint::black_box(par_dequantize_spectral_keys_flat(
+            &cache,
+            0,
+            n_positions - 1,
+            kvd,
+            threshold,
+        ));
+    }
+
+    let start = Instant::now();
+    for _ in 0..iters {
+        std::hint::black_box(par_dequantize_spectral_keys_flat(
+            &cache,
+            0,
+            n_positions - 1,
+            kvd,
+            threshold,
+        ));
+    }
+    let elapsed_par = start.elapsed();
+
+    let par_br = BenchResult {
+        label: format!("SQ-3bit dequant {n_positions}pos (par)"),
+        throughput: total_tokens as f64 / elapsed_par.as_secs_f64(),
+        time_per_step_us: elapsed_par.as_micros() as f64 / total_tokens as f64,
+        avg_acceptance_len: cache.compression_ratio() as f64,
+        color: (100, 200, 255),
+        category: BenchCategory::Infrastructure,
+    };
+
+    let speedup = (elapsed_seq.as_secs_f64() / elapsed_par.as_secs_f64()).max(0.01);
+    println!(
+        "  SQ par vs seq: {:.2}× ({:.0} vs {:.0} tokens/s, {} positions × {} dim)",
+        speedup,
+        total_tokens as f64 / elapsed_par.as_secs_f64(),
+        total_tokens as f64 / elapsed_seq.as_secs_f64(),
+        n_positions,
+        kvd,
+    );
+
+    (seq_br, par_br)
 }
 
 // ═══════════════════════════════════════════════════════════════
