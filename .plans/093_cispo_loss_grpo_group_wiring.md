@@ -3,7 +3,7 @@
 > **Parent**: Research 57 (ART Agent Reinforcement Trainer Distillation)
 > **Depends**: Plan 059 (G-Zero DPO/GRPO in `riir-gpu`) ✅
 > **Scope**: Add CISPO loss variant to `riir-gpu/src/loss_grpo.rs`, wire trajectory grouping into `GZeroLoop`
-> **Feature gate**: `cispo_loss` (off by default, proof via GOAT benchmark)
+> **Default**: CISPO is now the default loss variant (GOAT proved 5/6, Plan 093 T5)
 
 ## Tasks
 
@@ -12,11 +12,11 @@
 - [x] T3: Add CISPO GPU kernel (`cispo_loss.wgsl`) to `riir-gpu`
 - [x] T4: Wire trajectory grouping into `GZeroLoop` (group_size rollouts → advantage)
 - [x] T5: GOAT benchmark: CISPO vs PPO-clip (1000 rounds, 5/6 criteria passed → GOAT PROVED)
-- [x] T6: GOAT passed → CISPO promoted to documented opt-in feature (benchmark: `riir-ai/.benchmarks/003_cispo_vs_ppoclip_goat.md`)
+- [x] T6: GOAT passed → CISPO promoted to **default** loss variant (benchmark: `riir-ai/.benchmarks/003_cispo_vs_ppoclip_goat.md`)
 
 ## Objective
 
-Distill the one genuinely useful idea from ART (OpenPipe's Agent Reinforcement Trainer): the **CISPO** (Clipped Importance Sampling Policy Optimization) loss variant. Our current GRPO uses standard PPO-clip. CISPO detaches the importance ratio before clipping, uses a wider clip range (ε=1.0 vs 0.2), and multiplies by `new_logprobs` directly. ART reports this is more stable for agent training.
+Distill the one genuinely useful idea from ART (OpenPipe's Agent Reinforcement Trainer): the **CISPO** (Clipped Importance Sampling Policy Optimization) loss variant. CISPO is now the **default** GRPO loss (GOAT proved 5/6 — 1473× more stable than PPO-clip). CISPO detaches the importance ratio before clipping, uses a wider clip range (ε=1.0 vs 0.2), and multiplies by `new_logprobs` directly. PPO-clip remains available as a conservative fallback via `GrpoLossVariant::PpoClip`.
 
 Additionally, wire the existing `GrpoConfig::group_size` into `GZeroLoop` so rollouts are properly grouped for advantage computation — ART's `TrajectoryGroup` pattern.
 

@@ -720,17 +720,26 @@ Zero-dependency `repr(C)` binary persistence for bandit knowledge. Play → lear
 - **Magic bytes + version** — `BDTB`/`GODT`/`GOTM` + version 1 for format validation
 - **Deterministic replay** — same seed per round in both phases; frozen knowledge changes action selection but game engine is deterministic
 
-### Example Results (100 rounds × 2 phases)
+### Example Results (100 rounds × 3 phases)
 
 ```sh
 cargo run --example bomber_12_self_play_freeze --features bomber
 cargo run --example go_08_self_play_freeze --features go
 ```
 
-| Game | Player | Phase 1 (naive) | Phase 2 (frozen) | Expected Δ |
-|------|--------|-----------------|-------------------|------------|
-| Bomber | HL vs Random/Greedy/Validator | ~25% survival | ~40-50% survival | +15-25pp |
-| Go | GoHL vs Random | ~60% win rate | ~75-80% win rate | +10-20pp |
+#### Go: GoHL vs Validator (α=1.0 per-move reward fix)
+
+| Metric | Frozen | Baseline | Δ |
+|--------|--------|----------|---|
+| Win Rate | 25% | 14% | **+11pp ✅** |
+| Avg Score | -13.3 | -16.8 | **+3.5 ✅** |
+
+Q-values after learning (real differentiation vs old flat ~0.25):
+```
+Corner:0.80 Side:0.64 Center:0.74 Cap:0.75 Def:0.40 Ext:0.48 Inf:0.59 Pass:0.00
+```
+
+**Key fix:** α=1.0 (pure per-move reward) + 10× delta amplification. Old α=0.3 with game-end blending caused all Q-values to converge to ~0.25 when losing 86% of games — binary win/loss drowned the per-move heuristic signal.
 
 Feature gate: `bomber` or `go` (both imply `bandit`). 18 round-trip tests pass.
 
@@ -826,7 +835,7 @@ Phase 2b — Generator Training (Length-Normalized DPO):
 | Module | Lines | Key Components | Tests |
 |--------|-------|---------------|-------|
 | `loss_dpo.rs` | 774 | `LengthNormalizedDpo`, `PreferencePair`, `DpoMetrics`, GPU DPO pipeline | CPU parity + GPU tests |
-| `loss_grpo.rs` | 565 | `GrpoConfig`, `group_advantage`, `grpo_loss`, `grpo_reward`, `length_penalty` | Advantage + loss tests |
+| `loss_grpo.rs` | 565 | `GrpoConfig`, `group_advantage`, `grpo_loss`, `cispo_loss` (default), `GrpoLossVariant`, `grpo_reward`, `length_penalty` | Advantage + loss + CISPO GOAT tests |
 | `proposer.rs` | 413 | `Proposer` trait, `NeuralProposer`, `TemplateProposerAdapter`, `QueryTemplate` | Template tests |
 | `delta_filter.rs` | 794 | 6-stage filter (δ percentile → length → ratio → zlib → echo → role markers) | 24 filter tests |
 | `gzero_loop.rs` | 823 | `GZeroLoop`, `GZeroRound`, `RoundMetrics`, `GZeroCheckpoint` (crash recovery) | 5 checkpoint tests |
@@ -1294,10 +1303,15 @@ cargo clippy --all-targets --all-features --quiet
 ## 📁 Project Structure
 
 ```
+crates/microgpt-core/   Shared types & SIMD kernels (used by microgpt-rs and riir-engine):
+  lib.rs            Crate root (re-exports: Config, Rng, HlaMode, AttentionMode, ModelArchitecture, WeightDtype, kv_dim, SimdLevel, …)
+  types.rs          Config (micro/micro_lora/micro_dllm/game/game_go/draft/small_target/gqa_draft/bpe/bpe_draft/gemma2_2b), InferenceOverrides, InferenceResult, Rng, HlaMode, AttentionMode, ModelArchitecture, WeightDtype, LoraAdapter, LoraPair, DomainLatent, math kernels (softmax, rmsnorm, gegelu, matmul, sparse_matmul, sample_token, …)
+  simd.rs           SimdLevel (Scalar/Neon/Avx2), simd_dot_f32, simd_matmul_rows, simd_sparse_matmul_rows, maxsim_score, simd_fused_decay_write, simd_add_into (Plan 060)
 src/
-  lib.rs            Module index
+  lib.rs            Module index + debug tracking allocator
   main.rs           Entry point (proof → bench → Percepta bench → plot)
-  types.rs          Config, Rng, math kernels, LoraAdapter, LoraPair
+  types.rs          Re-exports microgpt-core types + QuantizedKVCache trait
+  simd.rs           Re-exports microgpt-core SIMD kernels
   transformer.rs    Weights, KVCache (flat/paged/raven), ForwardContext, forward/generate
   rerank.rs         MaxSim + Cosine reranking, NDCG evaluation, SymmetricBoundaryPair (behind "maxsim" feature)
   speculative/      SOLID decomposition:
@@ -1311,6 +1325,7 @@ src/
     d2f.rs          D2F Discrete Diffusion Forcing — block-parallel denoising (behind "dllm" feature)
     alpha.rs        LDT Lattice Deduction — α-intersection pruning + conflict detection (behind "lattice_deduction" feature, Plan 088)
     flow_pruner.rs  GFlowNet stop-probability regularization
+    d2f_verifier.rs D2fDrafterVerifier — D2F drafts, AR verifies (Plan 089, behind "tri_mode" feature)
     ppot/           PPoT CPU resampling:
       mod.rs         Module root
       entropy.rs     Entropy-based sampling
@@ -1338,6 +1353,7 @@ src/
     manifold_residual.rs  L2ResidualScorer, KlResidualScorer, ResidualRelevanceScorer — Deep Manifold fixed-point scoring (Plan 085)
     boundary_alignment.rs  BoundaryAlignment trait, KlBoundaryAligner — federated KL coupling (Plan 085)
     tes_loop.rs     TesLoop trait, SimpleTesLoop, TrajectoryPruner — SimpleTES RPUCG loop (Plan 086)
+    freeze.rs       Freeze/thaw disk I/O for repr(C) bandit knowledge structs (Plan 092)
     delta_mem/      δ-Mem modelless distillation (Plan 053):
       mod.rs        Module root
       hash.rs       FeatureHasher, ContextFeatures, OutcomeFeatures
@@ -1477,8 +1493,8 @@ src/
     nonuniform_quant.rs  NonUniformQuantizer, CompressedVector — Lloyd-Max scalar quantizer
     spectral_rotation.rs  SpectralRotation — eigenbasis rotation, RandomRotation (turboquant compat)
     spectral_kv_cache.rs  SpectralQuantKVCache, DequantizeScratch — full quantized KV cache implementation
-    forward.rs      attention_spectralquant, dequantize_spectral_keys_flat/values_flat
-  dllm.rs          NoiseSchedule, D2fContext, DenoiseConstraint trait, denoise_loop — dLLM research (behind "dllm" feature)
+    forward.rs      attention_spectralquant, dequantize_spectral_keys_flat/values_flat, par_maxsim_score_spectralquant (behind "maxsim" feature)
+  dllm.rs          NoiseSchedule, D2fContext, DenoiseConstraint trait, denoise_loop, forward_bidirectional_positions, forward_block_causal_positions, denoising_accuracy — dLLM research (behind "dllm" feature)
   alloc.rs          Debug-only tracking allocator (feature-gated debug_assertions)
   feedback.rs       TTT feedback (feature-gated feedback)
   benchmark.rs      BenchResult, run_all, save_results_csv
