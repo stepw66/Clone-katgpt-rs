@@ -313,6 +313,52 @@ pub fn simd_matmul_rows(
     }
 }
 
+/// Row-parallel matmul: splits output rows across rayon threads (Plan 096).
+///
+/// Each thread gets an exclusive `&mut [f32]` chunk of the output and reads
+/// its corresponding weight rows (read-only). The input vector is shared (read-only).
+///
+/// Use this for large matmuls where row count >> core count:
+/// - `down_proj`: 2304×9216 (21.1% of decode time)
+/// - `lm_head`: 256000×2304 (22.6% of decode time)
+///
+/// Falls back to sequential `simd_matmul_rows` for small matmuls (rows < threshold).
+#[inline]
+pub fn simd_matmul_rows_parallel(
+    output: &mut [f32],
+    weight: &[f32],
+    input: &[f32],
+    rows: usize,
+    cols: usize,
+) {
+    /// Minimum rows before parallelizing. Below this, sequential is faster
+    /// due to rayon thread pool scheduling overhead (~1-5µs per task).
+    /// At 9216 rows, parallel gives ~3-4× on 8+ cores.
+    const PARALLEL_ROWS_MIN: usize = 512;
+
+    if rows < PARALLEL_ROWS_MIN {
+        // Sequential: overhead would exceed savings
+        simd_matmul_rows(output, weight, input, rows, cols);
+    } else {
+        // Parallel: split output into row chunks, each thread processes its chunk.
+        // chunk_rows=256 balances parallelism (36 chunks for 9216 rows) with
+        // low scheduling overhead (~1µs per task on Apple M3 Max).
+        use rayon::prelude::*;
+        const PARALLEL_CHUNK_ROWS: usize = 256;
+        output
+            .par_chunks_mut(PARALLEL_CHUNK_ROWS)
+            .enumerate()
+            .for_each(|(chunk_idx, out_chunk)| {
+                let start_row = chunk_idx * PARALLEL_CHUNK_ROWS;
+                for (local_r, out) in out_chunk.iter_mut().enumerate() {
+                    let r = start_row + local_r;
+                    let row_off = r * cols;
+                    *out = simd_dot_f32(&weight[row_off..row_off + cols], input, cols);
+                }
+            });
+    }
+}
+
 /// SIMD-accelerated matmul + ReLU: `output[r] = max(0, dot(weight_row_r, input))`.
 ///
 /// Replaces the inner loop of `matmul_relu()` in `types.rs`.
@@ -422,6 +468,39 @@ pub fn simd_matmul_f16_f32_rows(
             *output.get_unchecked_mut(r) =
                 simd_dot_f16_f32(&weight_f16[row_off..row_off + cols], input_f32, cols);
         }
+    }
+}
+
+/// Row-parallel f16×f32 matmul: splits output rows across rayon threads (Plan 096).
+///
+/// Same as [`simd_matmul_f16_f32_rows`] but uses `par_chunks_mut` for large matmuls.
+/// Falls back to sequential for rows < 512 (thread overhead exceeds savings).
+#[inline]
+pub fn simd_matmul_f16_f32_rows_parallel(
+    output: &mut [f32],
+    weight_f16: &[half::f16],
+    input_f32: &[f32],
+    rows: usize,
+    cols: usize,
+) {
+    const PARALLEL_ROWS_MIN: usize = 512;
+
+    if rows < PARALLEL_ROWS_MIN {
+        simd_matmul_f16_f32_rows(output, weight_f16, input_f32, rows, cols);
+    } else {
+        use rayon::prelude::*;
+        const PARALLEL_CHUNK_ROWS: usize = 256;
+        output
+            .par_chunks_mut(PARALLEL_CHUNK_ROWS)
+            .enumerate()
+            .for_each(|(chunk_idx, out_chunk)| {
+                let start_row = chunk_idx * PARALLEL_CHUNK_ROWS;
+                for (local_r, out) in out_chunk.iter_mut().enumerate() {
+                    let r = start_row + local_r;
+                    let row_off = r * cols;
+                    *out = simd_dot_f16_f32(&weight_f16[row_off..row_off + cols], input_f32, cols);
+                }
+            });
     }
 }
 

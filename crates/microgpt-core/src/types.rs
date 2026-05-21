@@ -979,6 +979,22 @@ pub fn matmul(output: &mut [f32], weight: &[f32], input: &[f32], rows: usize, co
     crate::simd::simd_matmul_rows(output, weight, input, rows, cols);
 }
 
+/// Row-parallel matrix-vector multiply for large weight matrices (Plan 096).
+///
+/// Splits output rows across rayon threads. Use for large matmuls where
+/// row count >> core count (e.g., `down_proj` 2304×9216, `lm_head` 256K×2304).
+/// Falls back to sequential [`matmul`] for small matrices (rows < 512).
+#[inline(always)]
+pub fn matmul_parallel(
+    output: &mut [f32],
+    weight: &[f32],
+    input: &[f32],
+    rows: usize,
+    cols: usize,
+) {
+    crate::simd::simd_matmul_rows_parallel(output, weight, input, rows, cols);
+}
+
 /// Fused matrix-vector multiply + ReLU: output = max(0, weight @ input).
 /// Saves one full buffer scan vs separate matmul + ReLU.
 /// Used for MLP hidden layer where activation immediately follows projection.
@@ -1001,6 +1017,22 @@ pub fn matmul_f16(
     cols: usize,
 ) {
     crate::simd::simd_matmul_f16_f32_rows(output, weight, input, rows, cols);
+}
+
+/// Row-parallel f16×f32 matrix-vector multiply for large weight matrices (Plan 096).
+///
+/// Splits output rows across rayon threads. Use for large f16 matmuls where
+/// row count >> core count (e.g., `down_proj` 2304×9216, `lm_head` 256K×2304).
+/// Falls back to sequential [`matmul_f16`] for small matrices (rows < 512).
+#[inline(always)]
+pub fn matmul_f16_parallel(
+    output: &mut [f32],
+    weight: &[half::f16],
+    input: &[f32],
+    rows: usize,
+    cols: usize,
+) {
+    crate::simd::simd_matmul_f16_f32_rows_parallel(output, weight, input, rows, cols);
 }
 
 /// Sparse matrix-vector multiply for ReLU-activated inputs (TwELL-inspired).
