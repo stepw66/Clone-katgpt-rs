@@ -375,9 +375,11 @@ unsafe fn neon_dot_f16_f32(w: &[half::f16], x: &[f32], len: usize) -> f32 {
         let chunks = len / 4;
 
         for _ in 0..chunks {
-            // Convert 4 f16 → f32 scalarly (stable Rust), then vectorize the FMA.
-            // f16→f32 conversion is the bottleneck on stable — NEON vcvt_f32_f16
-            // requires nightly. The FMA accumulation is still vectorized (4 per cycle).
+            // Convert 4 f16 → f32 scalarly, then vectorize the FMA.
+            // Note: NEON vcvt_f32_f16 / fcvtl requires nightly or inline asm.
+            // The scalar conversion via half::f16::to_f32() compiles to hardware
+            // fcvt on Apple Silicon, so the per-element cost is ~1 cycle.
+            // The FMA accumulation is still vectorized (4-wide).
             let w32 = [
                 (*w.get_unchecked(i)).to_f32(),
                 (*w.get_unchecked(i + 1)).to_f32(),
