@@ -20,13 +20,14 @@ calibrated for strong players, not template-based bots.
 
 ## Approach: Adaptive Komi + Score-Based Rewards
 
-### Adaptive Komi (Option A)
-- Start with `komi=7.5`
-- Every 100 episodes, compute win rate over last window
-- If `black_win_rate > 0.7`: `komi += 2.0`
-- If `white_win_rate > 0.7`: `komi -= 2.0`
-- Clamp to `[0.0, 20.0]`
-- Log adjustments at absorb-compress checkpoints
+### Adaptive Komi — Score-Margin-Guided (Implemented)
+- Start with `komi=7.5` (or `initial_komi=42` for 9×9 production)
+- Every `komi_window` (50) episodes, compute average raw score margin over last window
+- `delta = avg_score × DAMPING(0.5)`, clamped to `[-step, +step]`
+- Positive margin (Black ahead) → increase komi; negative → decrease
+- Clamp to `[komi_min, komi_max]` = `[0.0, 50.0]`
+- Log adjustments with avg margin and win rate
+- Converges from 7.5 → ~42 in ~300 episodes (score margin +30 → ~0)
 
 ### Score-Based Rewards (Option C)
 - Use `state.score()` margin instead of binary win/loss
@@ -69,10 +70,10 @@ Recommendation: use `initial_komi=42` for 9×9 production runs to skip convergen
 ```rust
 pub initial_komi: f32,          // default: 7.5
 pub adaptive_komi: bool,        // default: true
-pub komi_adjustment_step: f32,  // default: 2.0
+pub komi_adjustment_step: f32,  // default: 10.0 (clamp for score-guided delta)
 pub komi_min: f32,              // default: 0.0
-pub komi_max: f32,              // default: 20.0
-pub komi_window: usize,         // default: 100 (episodes between adjustments)
+pub komi_max: f32,              // default: 50.0
+pub komi_window: usize,         // default: 50 (episodes between adjustments)
 pub score_based_rewards: bool,  // default: true
 ```
 
@@ -83,30 +84,33 @@ pub final_komi: f32,
 pub avg_score_margin: f32,
 ```
 
-### Adaptive komi adjustment logic (inside episode loop):
+### Score-margin-guided komi adjustment (actual implementation):
 ```rust
+// Track raw scores per episode for komi adjustment
+episode_raw_scores.push(score); // Tromp-Taylor: positive = Black advantage
+
 if config.adaptive_komi && episode_num % config.komi_window == 0 && episode_num > 0 {
-    let window_start = episode_num.saturating_sub(config.komi_window);
-    let window_episodes = &episodes[window_start..episode_num];
-    let window_black_wins = window_episodes.iter()
-        .filter(|e| e.winner == Some(GoCell::Black)).count();
-    let window_total = window_episodes.len().max(1);
-    let black_wr = window_black_wins as f32 / window_total as f32;
+    let window_scores = &episode_raw_scores[window_start..episode_num];
+    let avg_score: f32 = window_scores.iter().sum::<f32>() / window_total as f32;
 
-    if black_wr > 0.7 {
-        current_komi = (current_komi + config.komi_adjustment_step).min(config.komi_max);
-    } else if black_wr < 0.3 {
-        current_komi = (current_komi - config.komi_adjustment_step).max(config.komi_min);
+    // Score-guided: positive margin → increase komi (compensate Black advantage)
+    // Damping = 0.5 prevents overshoot; clamp to base_step prevents wild swings
+    const DAMPING: f32 = 0.5;
+    let raw_delta = avg_score * DAMPING;
+    let clamped_delta = raw_delta.clamp(-config.komi_adjustment_step, config.komi_adjustment_step);
+
+    if clamped_delta.abs() > 0.1 {
+        current_komi = (current_komi + clamped_delta).clamp(config.komi_min, config.komi_max);
     }
-
     komi_history.push((episode_num, current_komi));
 }
 ```
 
-### Score-based reward (replaces binary win counting):
+### Score-based reward (normalized margin for results):
 ```rust
 let score = state.score(); // positive = Black advantage
-let reward = score / score.abs().max(1.0); // normalized [-1, 1]
+let score_margin = score / score.abs().max(1.0); // normalized [-1, 1]
+total_score_margin += score_margin;
 ```
 
 ## Dependencies
