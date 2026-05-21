@@ -67,6 +67,57 @@ pub enum WeightDtype {
 }
 
 // ---------------------------------------------------------------------------
+// Delta Routing (Plan 097, Research 061)
+// ---------------------------------------------------------------------------
+
+/// Delta routing mode — cross-layer information flow via delta vectors.
+/// Research 061: Delta Attention Residuals (Plan 097).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum DeltaRoutingMode {
+    /// No delta routing (default).
+    #[default]
+    Off,
+    /// Delta Block: accumulate deltas within blocks of `block_size` layers.
+    /// B+1 sources per routing decision. ~20% throughput overhead.
+    DeltaBlock,
+    /// Delta Attention Residuals: per-sublayer delta routing.
+    /// 2L sources. 69% throughput reduction at L=36. Use only for research.
+    DeltaAttnRes,
+}
+
+/// Configuration for delta routing (Plan 097, Research 061).
+#[derive(Clone, Copy, Debug)]
+pub struct DeltaRoutingConfig {
+    /// Routing mode.
+    pub mode: DeltaRoutingMode,
+    /// Block size for DeltaBlock mode (number of layers per block).
+    /// Default: 4. Paper recommends B=4.
+    pub block_size: usize,
+}
+
+impl Default for DeltaRoutingConfig {
+    fn default() -> Self {
+        Self {
+            mode: DeltaRoutingMode::Off,
+            block_size: 4,
+        }
+    }
+}
+
+impl DeltaRoutingConfig {
+    pub fn delta_block(block_size: usize) -> Self {
+        Self {
+            mode: DeltaRoutingMode::DeltaBlock,
+            block_size,
+        }
+    }
+
+    pub fn is_enabled(&self) -> bool {
+        self.mode != DeltaRoutingMode::Off
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Config
 // ---------------------------------------------------------------------------
 

@@ -57,6 +57,12 @@ pub use types::EarlyStopGate;
 #[cfg(feature = "tri_mode")]
 pub use types::SelfSpecConfig;
 
+// ── MoE+SD Co-Design (Plan 096, Research 59) ──────────────────
+#[cfg(feature = "domain_latent")]
+pub use types::RoutingOverlapSnapshot;
+#[cfg(feature = "spec_cost_model")]
+pub use types::SpecCostSnapshot;
+
 // ── LDT Lattice Deduction Transformer re-exports (Plan 088) ──
 #[cfg(feature = "lattice_deduction")]
 pub use alpha::{AlphaTarget, alpha_intersect, is_consistent};

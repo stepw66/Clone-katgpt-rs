@@ -190,6 +190,12 @@ impl Ord for TreeNode {
 pub struct DraftResult {
     pub marginals: Vec<Vec<f32>>,
     pub sampled_tokens: Vec<usize>,
+    /// Raven slot routing overlap diagnostic (Plan 096)
+    #[cfg(feature = "domain_latent")]
+    pub routing_overlap: Option<RoutingOverlapSnapshot>,
+    /// Amdahl cost model snapshot (Plan 096)
+    #[cfg(feature = "spec_cost_model")]
+    pub cost_snapshot: Option<SpecCostSnapshot>,
 }
 
 // ── Pre-allocated Speculative Context ──────────────────────────
@@ -876,6 +882,45 @@ impl Default for SelfSpecConfig {
             d2f_config: crate::speculative::d2f::D2fDecodeConfig::default(),
         }
     }
+}
+
+// ── Routing Overlap Diagnostic (Plan 096, Research 59) ───────
+
+/// Diagnostic: Raven slot routing overlap across K+1 tokens.
+/// Analogous to Cohere's "expert overlap" metric.
+/// Only collected when `domain_latent` feature is active.
+#[cfg(feature = "domain_latent")]
+#[derive(Clone, Debug, Default)]
+pub struct RoutingOverlapSnapshot {
+    /// Per-step overlap ratio: shared slots / top_k
+    pub step_overlap: Vec<f64>,
+    /// Total unique slots across all K+1 tokens
+    pub unique_slots: usize,
+    /// top_k (slots selected per token)
+    pub top_k: usize,
+    /// Number of tokens in verification batch
+    pub n_tokens: usize,
+}
+
+// ── Amdahl Cost Model (Plan 096, Research 59) ────────────────
+
+/// Amdahl decomposition of speculative verification cost.
+/// T(K+1)/T(1) = f_sparse * unique_ratio + (1-f_sparse)
+#[cfg(feature = "spec_cost_model")]
+#[derive(Clone, Debug)]
+pub struct SpecCostSnapshot {
+    /// Fraction of forward pass in sparse MLP operations
+    pub f_sparse: f64,
+    /// Fraction in fixed costs (attention, norms, sampling, kernel overhead)
+    pub f_fixed: f64,
+    /// Ratio of unique active neurons across K+1 tokens vs single token
+    pub unique_ratio: f64,
+    /// Amdahl prediction: f_sparse * unique_ratio + f_fixed
+    pub predicted_ratio: f64,
+    /// Wall-clock measurement: T(K+1) / T(1) in nanoseconds
+    pub actual_ratio: f64,
+    /// Draft length K used
+    pub k: usize,
 }
 
 #[cfg(test)]

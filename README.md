@@ -1296,6 +1296,9 @@ cargo clippy --all-targets --all-features --quiet
 | `deep_manifold` | Deep Manifold fixed-point residual scoring — L2/KL residual traits + blended scorer (Research 51, Plan 085). **GOAT proved 6/6**, default-on |
 | `federation` | Deep Manifold federated boundary alignment — symmetric KL coupling between domain experts (Research 51, Plan 085). **GOAT proved 6/6**, default-on. Requires `bandit` |
 | `lattice_deduction` | LDT Lattice Deduction Transformer — α-intersection pruning, conflict detection, asymmetric elimination. `AlphaTarget`, `alpha_intersect`, `is_consistent`, `EntropyConflictDetector`, `LdtPruneConfig` (Plan 088, off by default) |
+| `memo_reflections` | MeMo 5-step Reflection QA pipeline — compositional data synthesis with Reflect→Critique→Revise→Verify→Distill. Requires `bandit` (Plan 094, off by default) |
+| `spec_cost_model` | Amdahl cost model for LeviathanVerifier — overlap diagnostic + parallel speedup estimation (Research 59, Plan 096, off by default) |
+| `delta_routing` | Delta Block cross-layer routing — residual delta routing between transformer layers (Research 61, Plan 097, off by default) |
 | `full` | Enable all features (excludes `stepcode`, `sp_kv`) |
 
 > **Default features trade-off:** `default = ["sparse_mlp", "domain_latent", "ppot", "bandit", "bt_rank", "spectral_quant", "elf_sde", "cna_steering", "deep_manifold", "federation"]` targets production accuracy + sparsity + pairwise ranking + calibrated KV compression + neuron-level steering + fixed-point residual scoring + federated KL coupling. `g_zero` is bench-only (Plan 049: Phase 1 ✅ T5 benchmarked, Phase 2 ✅ Plan 059 GRPO/DPO in `riir-gpu`) — run bench with `--features "g_zero,bomber"` to include heuristic learning. `g_zero` does NOT touch `forward()` hot path (zero hits in `transformer.rs`). Active features are logged in `bench/*_results.csv` and `bench/timeseries.csv` for regression tracking across feature-gate changes.
@@ -1562,6 +1565,10 @@ Every feature traced from research paper to implementation to benchmark. Separat
 | **SP-KV** (`sp_kv`) | [SP-KV Research 42](https://arxiv.org/abs/2605.09959) | Full forward pass with Soft/Hard/TAHG gate modes. Utility predictor (2-layer SiLU MLP). **Quant fusion** (`SpKvQuantCache<C>`): selective write + lossy quantize, works with TQ or SQ backend. `AttentionMode::SpKvQuant` dispatch. 8/8 tests. | Requires joint training (model-based path) |
 | **MTP** (no gate) | [Gemma 4 MTP](https://arxiv.org/abs/2605.09959) | Target activation sharing via truncate/pad. Shared KV preloading. Clustered LM head. Config thresholds (set `usize::MAX` = disabled). | Always compiled, controlled via `Config` thresholds |
 | **SimpleTES** (`tes_loop`) | [SimpleTES (arXiv:2604.19341)](https://arxiv.org/abs/2604.19341) | **GOAT 8/8** (Bench 016+017). RPUCG beats greedy: 42.8% vs 10.6% wins, +0.08 avg score. Budget scaling: Wide(24×5×8)=0.9988 vs Narrow(2×8×30)=0.8266 (spread=0.17). `SimpleTesLoop<E>` full C×L×K loop. `TrajectoryCredit` bridges to G-Zero Phase 2. | Extends `bandit`; RPUCG advantage requires graph-based trajectory context |
+| **MeMo Reflections** (`memo_reflections`) | Research 60 | 5-step Reflection QA pipeline: Reflect→Critique→Revise→Verify→Distill. `src/pruners/reflection.rs`. TIES merging in `riir-gpu` (Plan 094). | Requires `bandit`; compositional data synthesis |
+| **GRAM Width/Depth** | Plan 095 | Width-vs-depth GOAT benchmark (Bench 019). PTRM-style scaling: wide rollouts beat narrow depth at matched compute. | Benchmark only; `tests/bench_gram_width_depth.rs` |
+| **Spec Cost Model** (`spec_cost_model`) | Research 59 | Amdahl cost model for `LeviathanVerifier` — Raven overlap diagnostic + parallel speedup estimation. MoE+SD co-design (Plan 096). | Analytical model; no runtime overhead |
+| **Delta Routing** (`delta_routing`) | Research 61 | Delta Block cross-layer routing — residual delta routing between transformer layers via `depth_route()`. `src/transformer.rs` (Plan 097). | Experimental routing; off by default |
 
 
 ### 🪦 Replaced / Fell Behind / No Gain

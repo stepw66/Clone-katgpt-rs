@@ -12,20 +12,20 @@ MeMo validates our existing Raven RSM (O(1) retrieval) and G-Zero (multi-phase p
 
 ## Tasks
 
-- [ ] T1: Add `memo_reflections` feature gate to `microgpt-rs/Cargo.toml`
-- [ ] T2: Create `src/pruners/reflection.rs` with `ReflectionQA` struct and `synthesize_reflections()` skeleton
-- [ ] T3: Implement Step 1 (Fact Extraction) — direct + indirect extraction from game state sequences
-- [ ] T4: Implement Step 2 (Consolidation) — merge related facts into multi-fact questions
-- [ ] T5: Implement Step 3 (Verification) — self-containment check + rewrite
-- [ ] T6: Implement Step 4 (Entity Surfacing) — pattern-from-description QA pairs (reversal curse)
-- [ ] T7: Implement Step 5 (Cross-Game Synthesis) — converging clues + parallel properties across game domains
-- [ ] T8: Create `examples/bomber_13_reflection_qa.rs` — generate reflection QA from bomber replays
-- [ ] T9: Create `examples/go_09_reflection_qa.rs` — generate reflection QA from Go replays
-- [ ] T10: Add GOAT proof test in `tests/test_memo_reflections.rs`
-- [ ] T11: Implement `ties_merge()` in `riir-ai/crates/riir-gpu/src/merging.rs` (or new crate)
-- [ ] T12: Add `ties_merge` feature gate to riir-ai
+- [x] T1: Add `memo_reflections` feature gate to `microgpt-rs/Cargo.toml`
+- [x] T2: Create `src/pruners/reflection.rs` with `ReflectionQA` struct and `synthesize_reflections()` skeleton
+- [x] T3: Implement Step 1 (Fact Extraction) — direct + indirect extraction from game state sequences
+- [x] T4: Implement Step 2 (Consolidation) — merge related facts into multi-fact questions
+- [x] T5: Implement Step 3 (Verification) — self-containment check + rewrite
+- [x] T6: Implement Step 4 (Entity Surfacing) — pattern-from-description QA pairs (reversal curse)
+- [x] T7: Implement Step 5 (Cross-Game Synthesis) — converging clues + parallel properties across game domains
+- [x] T8: Create `examples/bomber_13_reflection_qa.rs` — generate reflection QA from bomber replays
+- [x] T9: Create `examples/go_09_reflection_qa.rs` — generate reflection QA from Go replays
+- [x] T10: Add GOAT proof test in `tests/test_memo_reflections.rs`
+- [x] T11: Implement `ties_merge()` in `riir-ai/crates/riir-gpu/src/merging.rs` (or new crate)
+- [x] T12: Add `ties_merge` feature gate to riir-ai
 - [ ] T13: Create merge benchmark example
-- [ ] T14: Run clippy + tests, fix diagnostics
+- [x] T14: Run clippy + tests, fix diagnostics
 - [ ] T15: Update README.md (both repos) + research doc
 
 ## Context

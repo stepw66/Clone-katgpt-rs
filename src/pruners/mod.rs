@@ -86,6 +86,16 @@ pub use ropd_rubric::{
     ScoreResult, score_with_references, score_with_references_id,
 };
 
+#[cfg(feature = "memo_reflections")]
+pub mod reflection;
+
+#[cfg(feature = "memo_reflections")]
+pub use reflection::{
+    GameStateSnapshot, ReflectionDomain, ReflectionQA, ReflectionResult, ReflectionStep,
+    consolidate_facts, extract_facts, surface_entities, synthesize_cross_game,
+    synthesize_reflections, verify_self_containment,
+};
+
 #[cfg(feature = "sdar_gate")]
 pub mod sdar;
 #[cfg(feature = "sdar_gate")]

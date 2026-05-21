@@ -262,6 +262,10 @@ pub fn dflash_predict_ar(
             .map(|step| sctx.marginal_slice(step, vocab_size).to_vec())
             .collect(),
         sampled_tokens: sctx.sampled_tokens().to_vec(),
+        #[cfg(feature = "domain_latent")]
+        routing_overlap: None,
+        #[cfg(feature = "spec_cost_model")]
+        cost_snapshot: None,
     }
 }
 
@@ -299,6 +303,10 @@ pub fn dflash_predict_conditioned(
             .map(|step| sctx.marginal_slice(step, vocab_size).to_vec())
             .collect(),
         sampled_tokens: sctx.sampled_tokens().to_vec(),
+        #[cfg(feature = "domain_latent")]
+        routing_overlap: None,
+        #[cfg(feature = "spec_cost_model")]
+        cost_snapshot: None,
     }
 }
 

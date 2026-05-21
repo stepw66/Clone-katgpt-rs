@@ -45,6 +45,11 @@ pub struct TransformerWeights {
     pub mtp_cluster_classifier: Option<Vec<f32>>,
     /// Cluster membership table: [num_clusters] → Vec<usize> (token indices)
     pub mtp_cluster_map: Option<Vec<Vec<usize>>>,
+    // Delta routing weights (Plan 097: Delta Attention Residuals)
+    #[cfg(feature = "delta_routing")]
+    pub delta_routing_query: Vec<Vec<f32>>, // [n_layer][n_embd] per-layer query vectors
+    #[cfg(feature = "delta_routing")]
+    pub delta_routing_norm: Vec<Vec<f32>>, // [n_layer][n_embd] per-layer RMSNorm weights (gamma)
 }
 
 impl TransformerWeights {
@@ -91,6 +96,14 @@ impl TransformerWeights {
             mtp_activation_proj: None,
             mtp_cluster_classifier: None,
             mtp_cluster_map: None,
+            #[cfg(feature = "delta_routing")]
+            delta_routing_query: (0..config.n_layer)
+                .map(|_| vec![0.0; config.n_embd]) // Zero-init: safe additive start
+                .collect(),
+            #[cfg(feature = "delta_routing")]
+            delta_routing_norm: (0..config.n_layer)
+                .map(|_| (0..config.n_embd).map(|_| 1.0f32).collect()) // Ones: identity RMSNorm
+                .collect(),
         }
     }
 }
@@ -255,6 +268,11 @@ pub struct ForwardContext {
     // When dequant_pos[layer] == pos - 1, only dequant the new position (O(1) vs O(pos)).
     // On mismatch (layer switch, reset, pos jump), rebuild all positions for that layer.
     dequant_pos: Vec<usize>, // [n_layer]
+    // Delta routing: block delta accumulation buffers (Plan 097)
+    #[cfg(feature = "delta_routing")]
+    block_deltas: Vec<Vec<f32>>, // [n_blocks][n_embd] accumulated deltas per block
+    #[cfg(feature = "delta_routing")]
+    delta_routing_logits: Vec<f32>, // [max_sources] routing logits temp buffer
 }
 
 impl ForwardContext {
@@ -285,6 +303,14 @@ impl ForwardContext {
             raven_query_buf: vec![0.0; kvd],
             mtp_context_buf: vec![0.0; config.n_embd],
             dequant_pos: vec![0; config.n_layer],
+            #[cfg(feature = "delta_routing")]
+            block_deltas: {
+                let block_size = 4; // Default B=4
+                let n_blocks = config.n_layer.div_ceil(block_size);
+                (0..n_blocks).map(|_| vec![0.0; config.n_embd]).collect()
+            },
+            #[cfg(feature = "delta_routing")]
+            delta_routing_logits: vec![0.0; config.n_layer + 1], // Max B+1 sources
         }
     }
 
@@ -539,6 +565,75 @@ pub fn cluster_map_from_embeddings(
     cluster_map_round_robin(vocab_size, cluster_size)
 }
 
+/// Delta routing: softmax over delta sources, additive to residual (Plan 097).
+///
+/// depth_route(sources, residual, proj, norm):
+///   V = stack(sources)          // [N, D]
+///   K = norm(V)                  // RMSNorm
+///   logits = dot(proj_weight, K) // per-source score
+///   weights = softmax(logits)    // routing weights
+///   return residual + weighted_sum(weights, V)  // additive
+#[cfg(feature = "delta_routing")]
+#[allow(clippy::needless_range_loop)]
+#[inline(always)]
+fn depth_route(
+    residual: &mut [f32],
+    sources: &[&[f32]],     // N delta vectors, each [n_embd]
+    query_weight: &[f32],   // [n_embd] per-layer query
+    norm_weight: &[f32],    // [n_embd] RMSNorm gamma
+    logits_buf: &mut [f32], // [N] temp buffer
+    n_embd: usize,
+) {
+    let n_sources = sources.len();
+    if n_sources == 0 {
+        return;
+    }
+
+    // 1. RMSNorm each source and compute dot product with query
+    let eps = 1e-5f32;
+    let mut max_logit = f32::NEG_INFINITY;
+
+    for (i, &src) in sources.iter().enumerate() {
+        // Compute RMSNorm of source
+        let mut sum_sq = 0.0f32;
+        for d in 0..n_embd {
+            sum_sq += src[d] * src[d];
+        }
+        let rms = (sum_sq / n_embd as f32 + eps).sqrt();
+        let inv_rms = 1.0 / rms;
+
+        // Dot product with query weight (on normalized source)
+        let mut logit = 0.0f32;
+        for d in 0..n_embd {
+            let normalized = src[d] * inv_rms * norm_weight[d];
+            logit += query_weight[d] * normalized;
+        }
+
+        logits_buf[i] = logit;
+        if logit > max_logit {
+            max_logit = logit;
+        }
+    }
+
+    // 2. Softmax (numerically stable)
+    let mut sum_exp = 0.0f32;
+    for i in 0..n_sources {
+        let exp_val = (logits_buf[i] - max_logit).exp();
+        logits_buf[i] = exp_val;
+        sum_exp += exp_val;
+    }
+    let inv_sum = 1.0 / sum_exp;
+
+    // 3. Weighted sum of sources, added to residual (additive routing)
+    for d in 0..n_embd {
+        let mut weighted = 0.0f32;
+        for (i, &src) in sources.iter().enumerate() {
+            weighted += logits_buf[i] * inv_sum * src[d];
+        }
+        residual[d] += weighted;
+    }
+}
+
 /// Internal forward with optional LoRA and domain latent (writer LoRA during decode).
 /// Zero-alloc forward pass. Writes logits into `ctx.logits` and returns &mut to it.
 /// Multi-layer: RMSNorm → Attn → Res → RMSNorm → MLP → Res per layer, then LM Head.
@@ -698,6 +793,49 @@ fn forward_base<'a>(
             crate::types::lora_apply(&mut ctx.x, lora, &ctx.hidden, &mut ctx.lora_buf);
         }
         crate::simd::simd_add_inplace(&mut ctx.x[..n], &ctx.xr2[..n]);
+
+        // Delta routing: accumulate per-sublayer deltas, route at block boundaries (Plan 097)
+        #[cfg(feature = "delta_routing")]
+        {
+            let block_size = 4; // Default B=4
+            let block_idx = layer_idx / block_size;
+            let pos_in_block = layer_idx % block_size;
+
+            // Compute delta: current x minus pre-layer residual (xr was saved after first rmsnorm)
+            // Delta captures full layer contribution: attention + MLP residuals
+            for d in 0..n {
+                let delta = ctx.x[d] - ctx.xr[d];
+                if block_idx < ctx.block_deltas.len() {
+                    ctx.block_deltas[block_idx][d] += delta;
+                }
+            }
+
+            // At block boundary: route accumulated deltas from all completed blocks
+            if pos_in_block == block_size - 1 && block_idx < ctx.block_deltas.len() {
+                let query = &weights.delta_routing_query[layer_idx];
+                let norm = &weights.delta_routing_norm[layer_idx];
+
+                // Sources: accumulated deltas from previous blocks + current block
+                let mut source_refs: Vec<&[f32]> = Vec::new();
+                for prev_block in 0..=block_idx {
+                    if prev_block < ctx.block_deltas.len() {
+                        source_refs.push(&ctx.block_deltas[prev_block]);
+                    }
+                }
+
+                depth_route(
+                    &mut ctx.x[..n],
+                    &source_refs,
+                    query,
+                    norm,
+                    &mut ctx.delta_routing_logits,
+                    n,
+                );
+
+                // Reset current block delta
+                ctx.block_deltas[block_idx].fill(0.0);
+            }
+        }
     }
 
     // Snapshot hidden state (for Plan 009 compatibility)
@@ -1273,6 +1411,48 @@ pub fn forward_prefill<'a>(
             }
             crate::simd::simd_add_inplace(&mut ctx.x[..n], &ctx.xr2[..n]);
 
+            // Delta routing: accumulate per-sublayer deltas, route at block boundaries (Plan 097)
+            #[cfg(feature = "delta_routing")]
+            {
+                let block_size = 4; // Default B=4
+                let block_idx = layer_idx / block_size;
+                let pos_in_block = layer_idx % block_size;
+
+                // Compute delta: current x minus pre-layer residual (xr was saved after first rmsnorm)
+                for d in 0..n {
+                    let delta = ctx.x[d] - ctx.xr[d];
+                    if block_idx < ctx.block_deltas.len() {
+                        ctx.block_deltas[block_idx][d] += delta;
+                    }
+                }
+
+                // At block boundary: route accumulated deltas from all completed blocks
+                if pos_in_block == block_size - 1 && block_idx < ctx.block_deltas.len() {
+                    let query = &weights.delta_routing_query[layer_idx];
+                    let norm = &weights.delta_routing_norm[layer_idx];
+
+                    // Sources: accumulated deltas from previous blocks + current block
+                    let mut source_refs: Vec<&[f32]> = Vec::new();
+                    for prev_block in 0..=block_idx {
+                        if prev_block < ctx.block_deltas.len() {
+                            source_refs.push(&ctx.block_deltas[prev_block]);
+                        }
+                    }
+
+                    depth_route(
+                        &mut ctx.x[..n],
+                        &source_refs,
+                        query,
+                        norm,
+                        &mut ctx.delta_routing_logits,
+                        n,
+                    );
+
+                    // Reset current block delta
+                    ctx.block_deltas[block_idx].fill(0.0);
+                }
+            }
+
             // Store hidden state for next layer (multi-layer only)
             if config.n_layer > 1 {
                 prefill.hidden[p * n..(p + 1) * n].copy_from_slice(&ctx.x[..n]);
@@ -1558,6 +1738,48 @@ pub fn forward_paged<'a>(
             config.mlp_hidden,
         );
         crate::simd::simd_add_inplace(&mut ctx.x[..n], &ctx.xr2[..n]);
+
+        // Delta routing: accumulate per-sublayer deltas, route at block boundaries (Plan 097)
+        #[cfg(feature = "delta_routing")]
+        {
+            let block_size = 4; // Default B=4
+            let block_idx = layer_idx / block_size;
+            let pos_in_block = layer_idx % block_size;
+
+            // Compute delta: current x minus pre-layer residual (xr was saved after first rmsnorm)
+            for d in 0..n {
+                let delta = ctx.x[d] - ctx.xr[d];
+                if block_idx < ctx.block_deltas.len() {
+                    ctx.block_deltas[block_idx][d] += delta;
+                }
+            }
+
+            // At block boundary: route accumulated deltas from all completed blocks
+            if pos_in_block == block_size - 1 && block_idx < ctx.block_deltas.len() {
+                let query = &weights.delta_routing_query[layer_idx];
+                let norm = &weights.delta_routing_norm[layer_idx];
+
+                // Sources: accumulated deltas from previous blocks + current block
+                let mut source_refs: Vec<&[f32]> = Vec::new();
+                for prev_block in 0..=block_idx {
+                    if prev_block < ctx.block_deltas.len() {
+                        source_refs.push(&ctx.block_deltas[prev_block]);
+                    }
+                }
+
+                depth_route(
+                    &mut ctx.x[..n],
+                    &source_refs,
+                    query,
+                    norm,
+                    &mut ctx.delta_routing_logits,
+                    n,
+                );
+
+                // Reset current block delta
+                ctx.block_deltas[block_idx].fill(0.0);
+            }
+        }
     }
 
     // Snapshot hidden state
@@ -2128,7 +2350,10 @@ pub fn forward_raven<'a>(
     );
 
     // 2. Layer loop
-    for layer_weights in &weights.layers {
+    for (layer_idx, layer_weights) in weights.layers.iter().enumerate() {
+        // layer_idx used by delta_routing cfg blocks below
+        #[cfg(not(feature = "delta_routing"))]
+        let _ = layer_idx;
         // Pre-attention: RMSNorm → save residual → RMSNorm
         rmsnorm(&mut ctx.x);
         ctx.xr[..n].copy_from_slice(&ctx.x[..n]);
@@ -2253,6 +2478,48 @@ pub fn forward_raven<'a>(
             config.mlp_hidden,
         );
         crate::simd::simd_add_inplace(&mut ctx.x[..n], &ctx.xr2[..n]);
+
+        // Delta routing: accumulate per-sublayer deltas, route at block boundaries (Plan 097)
+        #[cfg(feature = "delta_routing")]
+        {
+            let block_size = 4; // Default B=4
+            let block_idx = layer_idx / block_size;
+            let pos_in_block = layer_idx % block_size;
+
+            // Compute delta: current x minus pre-layer residual (xr was saved after first rmsnorm)
+            for d in 0..n {
+                let delta = ctx.x[d] - ctx.xr[d];
+                if block_idx < ctx.block_deltas.len() {
+                    ctx.block_deltas[block_idx][d] += delta;
+                }
+            }
+
+            // At block boundary: route accumulated deltas from all completed blocks
+            if pos_in_block == block_size - 1 && block_idx < ctx.block_deltas.len() {
+                let query = &weights.delta_routing_query[layer_idx];
+                let norm = &weights.delta_routing_norm[layer_idx];
+
+                // Sources: accumulated deltas from previous blocks + current block
+                let mut source_refs: Vec<&[f32]> = Vec::new();
+                for prev_block in 0..=block_idx {
+                    if prev_block < ctx.block_deltas.len() {
+                        source_refs.push(&ctx.block_deltas[prev_block]);
+                    }
+                }
+
+                depth_route(
+                    &mut ctx.x[..n],
+                    &source_refs,
+                    query,
+                    norm,
+                    &mut ctx.delta_routing_logits,
+                    n,
+                );
+
+                // Reset current block delta
+                ctx.block_deltas[block_idx].fill(0.0);
+            }
+        }
     }
 
     // Snapshot hidden state
@@ -2424,6 +2691,48 @@ pub fn forward_quantized<'a, C: types::QuantizedKVCache>(
             config.mlp_hidden,
         );
         crate::simd::simd_add_inplace(&mut ctx.x[..n], &ctx.xr2[..n]);
+
+        // Delta routing: accumulate per-sublayer deltas, route at block boundaries (Plan 097)
+        #[cfg(feature = "delta_routing")]
+        {
+            let block_size = 4; // Default B=4
+            let block_idx = layer_idx / block_size;
+            let pos_in_block = layer_idx % block_size;
+
+            // Compute delta: current x minus pre-layer residual (xr was saved after first rmsnorm)
+            for d in 0..n {
+                let delta = ctx.x[d] - ctx.xr[d];
+                if block_idx < ctx.block_deltas.len() {
+                    ctx.block_deltas[block_idx][d] += delta;
+                }
+            }
+
+            // At block boundary: route accumulated deltas from all completed blocks
+            if pos_in_block == block_size - 1 && block_idx < ctx.block_deltas.len() {
+                let query = &weights.delta_routing_query[layer_idx];
+                let norm = &weights.delta_routing_norm[layer_idx];
+
+                // Sources: accumulated deltas from previous blocks + current block
+                let mut source_refs: Vec<&[f32]> = Vec::new();
+                for prev_block in 0..=block_idx {
+                    if prev_block < ctx.block_deltas.len() {
+                        source_refs.push(&ctx.block_deltas[prev_block]);
+                    }
+                }
+
+                depth_route(
+                    &mut ctx.x[..n],
+                    &source_refs,
+                    query,
+                    norm,
+                    &mut ctx.delta_routing_logits,
+                    n,
+                );
+
+                // Reset current block delta
+                ctx.block_deltas[block_idx].fill(0.0);
+            }
+        }
     }
 
     // Snapshot hidden state (Plan 009 compatibility)
