@@ -53,8 +53,8 @@ ensures each agent plays both sides equally for per-agent balance.
 
 - [~] Black win rate converges toward balance — cumulative 98.6% (low-komi phase), ~81% at komi=42 with 14.7% draws. Swap-colors gives per-agent balance (each agent plays both sides)
 - [x] Adaptive komi algorithm converges correctly: 7.5 → 42 in ~300 episodes, score margin drops from +30 to ~0
-- [ ] Template deltas still reflect color assignment (templates too weak for komi alone to fix)
-- [ ] No templates promoted via absorb-compress (all δ below threshold)
+- [~] Template deltas still reflect color assignment (templates too weak for komi alone to fix) — *deferred: requires production run validation*
+- [~] No templates promoted via absorb-compress (all δ below threshold) — *deferred: requires production run validation*
 - [x] Zero regressions — 760 existing tests pass, 6 new komi tests pass (4 komi + 2 swap-colors)
 - [x] Score-based rewards produce normalized [-1, 1] margins
 - [x] Komi history tracking works (logged at each adjustment window)
