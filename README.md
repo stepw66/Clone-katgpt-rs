@@ -741,7 +741,9 @@ Corner:0.80 Side:0.64 Center:0.74 Cap:0.75 Def:0.40 Ext:0.48 Inf:0.59 Pass:0.00
 
 **Key fix:** α=1.0 (pure per-move reward) + 10× delta amplification. Old α=0.3 with game-end blending caused all Q-values to converge to ~0.25 when losing 86% of games — binary win/loss drowned the per-move heuristic signal.
 
-Feature gate: `bomber` or `go` (both imply `bandit`). 18 round-trip tests pass.
+- **Learning vs Random verified:** Q-values differentiate with spread > 0.1 (old bug: spread ~0.0), confirming per-move reward works against both strong and weak opponents. Test: `hl_learning_vs_random_q_values_differentiate`.
+
+Feature gate: `bomber` or `go` (both imply `bandit`). 19 round-trip tests pass (includes `hl_learning_vs_random_q_values_differentiate`).
 
 📖 See [`.plans/092_self_play_freeze_thaw.md`](.plans/092_self_play_freeze_thaw.md).
 

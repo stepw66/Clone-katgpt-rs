@@ -412,6 +412,26 @@ pub fn save_frozen<T>(path: &Path, data: &T) -> Result<(), String>
 pub fn load_frozen<T>(path: &Path) -> Result<T, String>
 ```
 
+### Key Fix: Per-Move Reward (Issue 065)
+
+Initial freeze/thaw showed **negative** knowledge transfer (-3pp win rate). Root cause: binary game-end reward + low α=0.3 blended with per-move signal, causing all Q-values to converge to ~0.25 when losing 86% of games (no differentiation).
+
+**Fix:** `HL_PER_MOVE_ALPHA = 1.0` (pure per-move reward, no game-end blending) + `HL_DELTA_AMPLIFICATION = 10.0` (amplifies raw heuristic delta ±0.01–0.06 → ±0.1–0.6).
+
+Results (GoHL vs Validator, 100 rounds × 3 phases):
+| Metric | Frozen | Baseline | Δ |
+|--------|--------|----------|---|
+| Win Rate | 25% | 14% | **+11pp ✅** |
+| Avg Score | -13.3 | -16.8 | **+3.5 ✅** |
+
+Q-values after learning:
+- Corner: 0.80, Side: 0.64, Center: 0.74, Capture: 0.75, Defense: 0.40, Extend: 0.48, Influence: 0.59, Pass: 0.00
+- 2× spread (Corner vs Defense) vs old flat ~0.25
+
+Learning vs Random also verified: Q-values differentiate properly (spread > 0.1) with α=1.0, unlike old binary reward that collapsed all to ~0.85.
+
+Run: `cargo run --example go_08_self_play_freeze --features go`
+
 ## SpeculativeVerifier (Strategy Pattern)
 
 Based on [Algorithm 1 from Leviathan et al. 2022](https://arxiv.org/pdf/2211.17192) — the verification strategy is swappable via trait:

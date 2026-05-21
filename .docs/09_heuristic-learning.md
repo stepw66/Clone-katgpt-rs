@@ -146,6 +146,10 @@ After N episodes:
 
 `BanditPruner` uses `src/pruners/freeze.rs` for `repr(C)` bandit knowledge persistence across sessions. Arena players (Bomber, FFT, Go) call `.freeze()` → `save_frozen()` to write raw bytes, and `load_frozen()` on startup to restore Q-values and visit counts. Zero-dependency binary I/O — no serde/bincode needed.
 
+**Per-Move Reward Fix (Issue 065):** Initial implementation used blended reward (`α=0.3 * per_move + 0.7 * game_end`), which caused all Q-values to collapse to ~0.25 when losing 86% of games (binary game-end reward = 0 for losses). Fix: `α=1.0` (pure per-move heuristic delta) + 10× amplification. Result: **+11pp win rate** for frozen GoHL vs Validator over naive baseline. Q-values now differentiate meaningfully (Corner: 0.80 vs Defense: 0.40).
+
+Run: `cargo run --example go_08_self_play_freeze --features go`
+
 ### Between Rounds (Evolution)
 
 ```
