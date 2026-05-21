@@ -6,6 +6,8 @@
 
 Plan 092 implemented freeze/thaw pipeline correctly — `repr(C)` structs serialize/deserialize, disk I/O works, round-trip tests pass. Initially knowledge transfer was **negative** (-3pp), but after switching to pure per-move reward (α=1.0) with delta amplification (10×), frozen HL now **beats naive HL by +11pp** against Validator.
 
+Learning vs Random also verified: Q-values differentiate properly (Corner > Defense) with α=1.0, unlike the old binary game-end reward that collapsed all Q-values to ~0.85.
+
 ## Experiment Results
 
 ### Before Fix: α=0.3 (game-end reward primary)
@@ -63,6 +65,14 @@ Corner:0.80 Side:0.64 Center:0.74 Cap:0.75 Def:0.40 Ext:0.48 Inf:0.59 Pass:0.00
 
 The 8 arms are coarse but **sufficient** when the reward signal is clean. Corner (0.80) vs Defense (0.40) = 2× spread.
 
+### Learning vs Random Verification
+
+Verified with `hl_learning_vs_random_q_values_differentiate` test (50 games, alternating colors):
+- Q-values differentiate: spread > 0.1 (old bug: spread ~0.0)
+- Corner Q > Defense Q (positional value vs reactive)
+- Pass Q < 0.3 (rarely useful)
+- Best category Q > 0.5 (signal exists even vs weak opponent)
+
 ## Go Player Rankings (from tournament)
 
 | Rank | Player | vs Random Win% |
@@ -83,14 +93,16 @@ Validator dominates HL head-to-head (~86% win rate).
 - ✅ Round-trip tests pass
 - ✅ 3-phase experiment design (learn → frozen test → baseline)
 - ✅ Alternating colors for fairness
+- ✅ Frozen knowledge transfers positively against Validator (+11pp)
+- ✅ Q-values differentiate when learning vs Random (spread > 0.1)
 
-## What Doesn't Work (before fix)
+## What Was Fixed
 
 - ~~❌ Frozen knowledge transfers negatively against Validator~~ → **Fixed with α=1.0**
 - ~~❌ More learning rounds makes it worse (deeper convergence to "everything loses")~~ → **Fixed with α=1.0**
-- ~~❌ Learning vs Random also doesn't help (Q-values all ~0.85, no differentiation)~~ → **Not re-tested yet**
+- ~~❌ Learning vs Random also doesn't help (Q-values all ~0.85, no differentiation)~~ → **Fixed with α=1.0** — verified with test
 
-## Potential Fixes
+## Potential Future Improvements
 
 ### Option A: Finer Bandit Granularity
 - Per-position bandit (81 arms for 9×9) — too sparse
@@ -119,7 +131,7 @@ Validator dominates HL head-to-head (~86% win rate).
 
 | File | Change |
 |------|--------|
-| `src/pruners/go/players.rs` | α=1.0 (pure per-move reward) + 10× delta amplification (`HL_DELTA_AMPLIFICATION`) |
+| `src/pruners/go/players.rs` | α=1.0 (pure per-move reward) + 10× delta amplification (`HL_DELTA_AMPLIFICATION`) + test for learning vs Random |
 | `src/pruners/go/g_zero_player.rs` | Fix missing `swapped_episodes` field |
 | `examples/go_08_self_play_freeze.rs` | 3-phase experiment: learn vs Validator, frozen vs Validator, baseline |
 

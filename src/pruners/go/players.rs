@@ -1932,4 +1932,106 @@ mod tests {
     fn go_template_count() {
         assert_eq!(GoTemplate::count(), 4);
     }
+
+    /// Issue 065: Verify Q-values differentiate when learning vs Random with α=1.0.
+    /// Old bug: binary game-end reward made all Q-values ~0.85 (win 85% vs Random → all converge).
+    /// Fix: per-move reward (α=1.0) uses heuristic delta, so categories with better
+    /// positional value (Corner, Side) should get higher Q than worse ones (Defense).
+    #[test]
+    fn hl_learning_vs_random_q_values_differentiate() {
+        let mut hl = GoHLPlayer::new();
+        let mut random = GoRandomPlayer;
+        let board_size: usize = 9;
+        let num_games = 50;
+
+        for game_idx in 0..num_games {
+            let mut state = GoState::new(board_size);
+            let max_moves = board_size * board_size * 3;
+            let mut moves = 0usize;
+            let seed = 100u64.wrapping_add(game_idx as u64);
+            let mut game_rng = Rng::with_seed(seed);
+
+            hl.reset();
+            random.reset();
+
+            while !state.is_terminal() && moves < max_moves {
+                let legal = state.legal_moves();
+                if legal.is_empty() {
+                    state.play_pass();
+                    moves += 1;
+                    continue;
+                }
+
+                let action = if game_idx % 2 == 0 {
+                    match state.to_play {
+                        GoCell::Black => hl.select_move(&state, &legal, &mut game_rng),
+                        GoCell::White => random.select_move(&state, &legal, &mut game_rng),
+                        GoCell::Empty => GoAction::Pass,
+                    }
+                } else {
+                    match state.to_play {
+                        GoCell::Black => random.select_move(&state, &legal, &mut game_rng),
+                        GoCell::White => hl.select_move(&state, &legal, &mut game_rng),
+                        GoCell::Empty => GoAction::Pass,
+                    }
+                };
+
+                match action {
+                    GoAction::Place(r, c) => {
+                        state.play_move(r, c);
+                    }
+                    GoAction::Pass => state.play_pass(),
+                }
+                moves += 1;
+            }
+
+            if !state.is_terminal() {
+                state.play_pass();
+                state.play_pass();
+            }
+
+            let score = state.score();
+            let hl_won = if game_idx % 2 == 0 {
+                score > 0.0
+            } else {
+                score < 0.0
+            };
+            hl.update_outcome(hl_won);
+        }
+
+        // With α=1.0 + 10× delta amplification, Q-values should differentiate.
+        // Corner (high positional value) should be notably higher than Defense (low value).
+        let q = hl.q_values();
+        let corner_q = q[GoMoveCategory::CornerStar as usize];
+        let defend_q = q[GoMoveCategory::Defend as usize];
+        let _side_q = q[GoMoveCategory::SideApproach as usize];
+        let pass_q = q[GoMoveCategory::Pass as usize];
+
+        // Q-values should NOT all be ~0.85 (old bug with binary game-end reward)
+        let q_range = q.iter().cloned().fold(f32::INFINITY, f32::min)
+            ..=q.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+        let spread = q_range.end() - q_range.start();
+
+        // Spread should be meaningful — at least 0.1 (old bug: spread ~0.0)
+        assert!(
+            spread > 0.1,
+            "Q-values should differentiate: spread={spread:.3}, q={q:?}"
+        );
+
+        // Corner should beat Defense (positional value vs reactive)
+        assert!(
+            corner_q > defend_q,
+            "Corner ({corner_q:.2}) should > Defense ({defend_q:.2})"
+        );
+
+        // Pass should be near zero (rarely useful)
+        assert!(pass_q < 0.3, "Pass Q-value should be low: {pass_q:.2}");
+
+        // At least one category should be well above 0.5 (learning signal exists)
+        let max_q = q.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+        assert!(
+            max_q > 0.5,
+            "Best category should have Q > 0.5: max={max_q:.2}, q={q:?}"
+        );
+    }
 }
