@@ -12,7 +12,8 @@ pub mod types;
 // Re-export key types at crate root for convenience
 pub use types::{
     AttentionMode, Config, HlaMode, InferenceOverrides, InferenceResult, ModelArchitecture, Rng,
-    WeightDtype, kv_dim, matmul, matmul_relu, rmsnorm, sample_token, softmax, softmax_scaled,
+    WeightDtype, kv_dim, matmul, matmul_f16, matmul_relu, rmsnorm, sample_token, softmax,
+    softmax_scaled,
 };
 
 #[cfg(feature = "domain_latent")]

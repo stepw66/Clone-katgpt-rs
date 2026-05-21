@@ -333,6 +333,96 @@ pub fn simd_matmul_relu_rows(
     }
 }
 
+// ── f16×f32 Mixed-Precision Kernels ──────────────────────────
+
+/// SIMD dot product: `Σ f16_weight[i] * f32_input[i]`.
+///
+/// Converts f16 weights to f32 on-the-fly during accumulation.
+/// This is the hot-path for f16 weight inference — halves memory bandwidth
+/// for weight reads while maintaining f32 precision for accumulation.
+#[inline]
+pub fn simd_dot_f16_f32(w_f16: &[half::f16], x_f32: &[f32], len: usize) -> f32 {
+    #[cfg(target_arch = "aarch64")]
+    {
+        unsafe { neon_dot_f16_f32(w_f16, x_f32, len) }
+    }
+    #[cfg(not(target_arch = "aarch64"))]
+    {
+        scalar_dot_f16_f32(w_f16, x_f32, len)
+    }
+}
+
+#[inline]
+#[allow(dead_code)]
+fn scalar_dot_f16_f32(w: &[half::f16], x: &[f32], len: usize) -> f32 {
+    let mut sum = 0.0f32;
+    for i in 0..len {
+        unsafe {
+            sum += (*w.get_unchecked(i)).to_f32() * *x.get_unchecked(i);
+        }
+    }
+    sum
+}
+
+#[cfg(target_arch = "aarch64")]
+#[inline]
+unsafe fn neon_dot_f16_f32(w: &[half::f16], x: &[f32], len: usize) -> f32 {
+    use core::arch::aarch64::{vaddvq_f32, vdupq_n_f32, vfmaq_f32, vld1q_f32};
+
+    unsafe {
+        let mut acc = vdupq_n_f32(0.0);
+        let mut i = 0;
+        let chunks = len / 4;
+
+        for _ in 0..chunks {
+            // Convert 4 f16 → f32 scalarly (stable Rust), then vectorize the FMA.
+            // f16→f32 conversion is the bottleneck on stable — NEON vcvt_f32_f16
+            // requires nightly. The FMA accumulation is still vectorized (4 per cycle).
+            let w32 = [
+                (*w.get_unchecked(i)).to_f32(),
+                (*w.get_unchecked(i + 1)).to_f32(),
+                (*w.get_unchecked(i + 2)).to_f32(),
+                (*w.get_unchecked(i + 3)).to_f32(),
+            ];
+            let vw = vld1q_f32(w32.as_ptr());
+            let vx = vld1q_f32(x.as_ptr().add(i));
+            acc = vfmaq_f32(acc, vw, vx);
+            i += 4;
+        }
+
+        let mut sum = vaddvq_f32(acc);
+        // Handle remainder
+        while i < len {
+            sum += (*w.get_unchecked(i)).to_f32() * *x.get_unchecked(i);
+            i += 1;
+        }
+
+        sum
+    }
+}
+
+/// SIMD f16×f32 matmul: `output[r] = dot(f16_weight_row_r, f32_input)`.
+///
+/// Replaces `simd_matmul_rows()` when weights are stored as f16.
+/// Each row's f16 weights are converted to f32 during the dot product,
+/// halving the memory bandwidth for weight reads.
+#[inline(always)]
+pub fn simd_matmul_f16_f32_rows(
+    output: &mut [f32],
+    weight_f16: &[half::f16],
+    input_f32: &[f32],
+    rows: usize,
+    cols: usize,
+) {
+    for r in 0..rows {
+        let row_off = r * cols;
+        unsafe {
+            *output.get_unchecked_mut(r) =
+                simd_dot_f16_f32(&weight_f16[row_off..row_off + cols], input_f32, cols);
+        }
+    }
+}
+
 // ── Sparse Dot Product (Scattered Gather) ────────────────────
 
 /// SIMD sparse dot: `Σ weight[row_off + active_indices[i]] * active_values[i]` for `i in 0..alive`.
@@ -2051,6 +2141,111 @@ mod tests {
                 "mismatch at {i}: simd={}, scalar={}",
                 dst_simd[i],
                 dst_scalar[i]
+            );
+        }
+    }
+
+    // ── f16×f32 kernel tests ──────────────────────────────────
+
+    fn scalar_dot_f16_f32_ref(w: &[half::f16], x: &[f32], len: usize) -> f32 {
+        let mut sum = 0.0f32;
+        for i in 0..len {
+            sum += w[i].to_f32() * x[i];
+        }
+        sum
+    }
+
+    #[test]
+    fn dot_f16_f32_aligned_len_8() {
+        let w: Vec<half::f16> = (0..8)
+            .map(|i| half::f16::from_f32(i as f32 * 0.1))
+            .collect();
+        let x: Vec<f32> = (0..8).map(|i| i as f32 * 0.2).collect();
+        let result = simd_dot_f16_f32(&w, &x, 8);
+        let expected = scalar_dot_f16_f32_ref(&w, &x, 8);
+        assert!(
+            (result - expected).abs() < 1e-4,
+            "f16 dot aligned: got {result}, expected {expected}"
+        );
+    }
+
+    #[test]
+    fn dot_f16_f32_non_aligned_len_13() {
+        let w: Vec<half::f16> = (0..13)
+            .map(|i| half::f16::from_f32(i as f32 + 1.0))
+            .collect();
+        let x: Vec<f32> = (0..13).map(|i| i as f32 * 0.3).collect();
+        let result = simd_dot_f16_f32(&w, &x, 13);
+        let expected = scalar_dot_f16_f32_ref(&w, &x, 13);
+        assert!(
+            (result - expected).abs() < 1e-3,
+            "f16 dot non-aligned: got {result}, expected {expected}"
+        );
+    }
+
+    #[test]
+    fn dot_f16_f32_len_4() {
+        let w: Vec<half::f16> = vec![1.0f32, 2.0, 3.0, 4.0]
+            .into_iter()
+            .map(half::f16::from_f32)
+            .collect();
+        let x: Vec<f32> = vec![0.25, 0.5, 0.75, 1.0];
+        let result = simd_dot_f16_f32(&w, &x, 4);
+        let expected = scalar_dot_f16_f32_ref(&w, &x, 4);
+        assert!(
+            (result - expected).abs() < 1e-4,
+            "f16 dot len 4: got {result}, expected {expected}"
+        );
+    }
+
+    #[test]
+    fn dot_f16_f32_zero_length() {
+        let w: Vec<half::f16> = Vec::new();
+        let x: Vec<f32> = Vec::new();
+        let result = simd_dot_f16_f32(&w, &x, 0);
+        assert_eq!(result, 0.0, "f16 dot zero-length should be 0.0");
+    }
+
+    #[test]
+    fn matmul_f16_f32_identity() {
+        // 3×3 identity matrix stored as f16
+        let w: Vec<half::f16> = vec![1.0f32, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
+            .into_iter()
+            .map(half::f16::from_f32)
+            .collect();
+        let x: Vec<f32> = vec![2.0, 3.0, 4.0];
+        let mut out = vec![0.0f32; 3];
+        simd_matmul_f16_f32_rows(&mut out, &w, &x, 3, 3);
+        assert!(
+            (out[0] - 2.0).abs() < 1e-4
+                && (out[1] - 3.0).abs() < 1e-4
+                && (out[2] - 4.0).abs() < 1e-4,
+            "f16 identity matmul: got {out:?}"
+        );
+    }
+
+    #[test]
+    fn matmul_f16_f32_matches_f32() {
+        // Compare f16 matmul vs f32 matmul on the same values
+        let rows = 4;
+        let cols = 6;
+        let weight_f32: Vec<f32> = (0..rows * cols).map(|i| (i as f32 * 0.01 - 0.1)).collect();
+        let weight_f16: Vec<half::f16> =
+            weight_f32.iter().map(|&v| half::f16::from_f32(v)).collect();
+        let input: Vec<f32> = (0..cols).map(|i| (i as f32 * 0.05)).collect();
+
+        let mut out_f32 = vec![0.0f32; rows];
+        let mut out_f16 = vec![0.0f32; rows];
+        simd_matmul_rows(&mut out_f32, &weight_f32, &input, rows, cols);
+        simd_matmul_f16_f32_rows(&mut out_f16, &weight_f16, &input, rows, cols);
+
+        for i in 0..rows {
+            let diff = (out_f32[i] - out_f16[i]).abs();
+            assert!(
+                diff < 0.01,
+                "f16 vs f32 matmul mismatch at row {i}: f32={}, f16={}, diff={diff}",
+                out_f32[i],
+                out_f16[i]
             );
         }
     }

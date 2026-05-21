@@ -987,6 +987,22 @@ pub fn matmul_relu(output: &mut [f32], weight: &[f32], input: &[f32], rows: usiz
     crate::simd::simd_matmul_relu_rows(output, weight, input, rows, cols);
 }
 
+/// Matrix-vector multiply with f16 weights: output = f16_weight @ f32_input.
+/// Weight layout: [rows, cols] row-major, stored as `half::f16`.
+///
+/// Converts f16 weights to f32 on-the-fly during dot product.
+/// Halves memory bandwidth for weight reads vs f32 storage.
+#[inline(always)]
+pub fn matmul_f16(
+    output: &mut [f32],
+    weight: &[half::f16],
+    input: &[f32],
+    rows: usize,
+    cols: usize,
+) {
+    crate::simd::simd_matmul_f16_f32_rows(output, weight, input, rows, cols);
+}
+
 /// Sparse matrix-vector multiply for ReLU-activated inputs (TwELL-inspired).
 ///
 /// Only processes columns where `input[c] > 0.0`, skipping dead neurons entirely.
