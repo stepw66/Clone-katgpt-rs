@@ -238,8 +238,9 @@ At 32K context (hypothetical hd=128): **1073.7 MB → 151.0 MB (7.1× compressio
 ### Modules
 - `turboquant/codebook.rs` — Lloyd-Max codebook computation
 - `turboquant/rotation.rs` — QR-based orthogonal rotation + QJL projection
-- `turboquant/kv_cache.rs` — Bit-packed compressed KV cache
+- `turboquant/kv_cache.rs` — Bit-packed compressed KV cache (implements `QuantizedKVCache` trait from `src/types.rs`)
 - `turboquant/forward.rs` — Dequantization + attention forward path
+- `spectralquant/spectral_kv_cache.rs` — SpectralQuant KV cache (also implements `QuantizedKVCache` trait)
 
 ## Technique 7: PFlash Block-Sparse Speculative Prefill (Plan 044)
 

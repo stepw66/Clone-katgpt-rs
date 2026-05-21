@@ -3,7 +3,7 @@
 ## Overview
 The transformer is a from-scratch GPT-2 style implementation. No frameworks — weights are `Vec<f32>`, ops are hand-written matmul/softmax/rmsnorm. Supports multi-layer, grouped-query attention (GQA), and zero-allocation inference.
 
-## Config (`types.rs`)
+## Config (`crates/microgpt-core/src/types.rs`, re-exported via `src/types.rs`)
 ```rust
 pub struct Config {
     pub vocab_size: usize,
@@ -44,13 +44,29 @@ pub struct Config {
     pub sp_kv_threshold: f32,              // gate threshold for SP-KV utility predictor
     pub sp_kv_predictor_hidden: usize,     // hidden dim for utility predictor MLP
     pub sp_kv_predictor_lr_mult: f32,      // learning rate multiplier for predictor
+    // Gemma 2 architecture (Plan 087)
+    pub model_arch: ModelArchitecture,      // Generic, Gemma2
+    pub rms_norm_eps: f64,                  // epsilon for RMSNorm (1e-5 default, 1e-6 for Gemma2)
+    pub rms_norm_offset: bool,              // add offset in RMSNorm (Gemma2: true)
+    pub tied_embeddings: bool,              // share wte and lm_head (Gemma2: true)
+    pub use_rope: bool,                     // rotary position embeddings (Gemma2: true)
+    pub rope_theta: f32,                    // RoPE base frequency
+    pub post_norm: bool,                    // post-attention norm (Gemma2: true)
+    pub attn_logit_softcapping: f32,        // cap attention logits (Gemma2: 50.0)
+    pub final_logit_softcapping: f32,       // cap final logits (Gemma2: 30.0)
+    pub weight_dtype: WeightDtype,          // F32, F16, BF16
+    // PTRM width scaling (Plan 083)
+    pub width_rollouts: usize,              // number of parallel rollouts
+    pub early_stop_threshold: f32,          // stop early when reward exceeds this
+    // D2F block size for discrete diffusion forcing
+    pub d2f_block_size: usize,              // block size for D2F diffusion
 }
 ```
-- All configs constructed via factory methods: `Config::micro()`, `Config::micro_lora()`, `Config::draft()`, `Config::game()`, `Config::bpe()`, `Config::bpe_draft()`, `Config::small_target()`, `Config::gqa_draft()`
+- All configs constructed via factory methods: `Config::micro()`, `Config::micro_lora()`, `Config::draft()`, `Config::game()`, `Config::game_go()`, `Config::gemma2_2b()`, `Config::micro_dllm()`, `Config::bpe()`, `Config::bpe_draft()`, `Config::small_target()`, `Config::gqa_draft()`
 - Validation: `n_head % n_kv_head == 0`, `n_embd == n_head * head_dim`
 - `kv_dim()` helper returns `n_kv_head * head_dim`
 
-### Key Enums (`types.rs`)
+### Key Enums (`crates/microgpt-core/src/types.rs`)
 
 ```rust
 #[repr(u8)]
@@ -66,10 +82,24 @@ pub enum AttentionMode {
     Bidirectional, // Attend to ALL positions — dLLM masked prediction
     BlockCausal,  // Bidirectional within block, causal across blocks — D2F student
     SpKv,         // Self-pruned key-value attention with learned utility (Plan 070)
+    SpKvQuant,    // SP-KV + Quantized KV fusion (Plan 070 Phase 3, Task T12)
+}
+
+#[repr(u8)]
+pub enum ModelArchitecture {
+    Generic,  // Default GPT-2 style
+    Gemma2,   // Gemma 2 architecture (Plan 087)
+}
+
+#[repr(u8)]
+pub enum WeightDtype {
+    F32,   // Full precision (default)
+    F16,   // Half precision
+    BF16,  // Bfloat16
 }
 ```
 
-### InferenceOverrides (`types.rs`)
+### InferenceOverrides (`crates/microgpt-core/src/types.rs`)
 
 Runtime override fields that can be applied per-inference call without modifying the base `Config`:
 
@@ -78,11 +108,60 @@ pub struct InferenceOverrides {
     pub tree_budget: Option<usize>,
     pub temperature: Option<f32>,
     pub draft_lookahead: Option<usize>,
-    // ...
+    pub parallel_threshold: Option<usize>,
+    pub screening_threshold: Option<f32>,
+    pub sparse_threshold: Option<f32>,
+    pub early_exit_patience: Option<usize>,
+    pub early_exit_gap: Option<f32>,
+    // MTP Drafter overrides (Plan 055)
+    pub mtp_activation_threshold: Option<usize>,
+    pub mtp_cluster_vocab_threshold: Option<usize>,
+    pub mtp_shared_kv_prompt_threshold: Option<usize>,
+    pub mtp_cluster_size: Option<usize>,
+    // SP-KV inference-time threshold knob (Plan 070)
+    pub sp_kv_threshold: Option<f32>,
+    // PTRM width scaling (Plan 083)
+    pub width_rollouts: Option<usize>,
+    pub early_stop_threshold: Option<f32>,
 }
 ```
 
 Overrides are merged onto a base `Config` at inference time, allowing per-request parameter tuning without cloning or mutating the shared config.
+
+### InferenceResult (`crates/microgpt-core/src/types.rs`)
+
+Output of a single inference pass with reward signal for feedback loop:
+
+```rust
+pub struct InferenceResult {
+    pub domain: String,
+    pub reward: f32,
+    pub tree_budget_used: usize,
+    pub budget_level: u8,
+    pub prompt_hash: u64,
+    pub output: String,
+    pub timestamp: i64,
+    pub screened: bool,
+}
+```
+
+### QuantizedKVCache (`src/types.rs`)
+
+Shared interface for quantized KV caches, microgpt-rs–specific (not in microgpt-core):
+
+```rust
+pub trait QuantizedKVCache {
+    fn store_key(&mut self, layer: usize, pos: usize, key: &[f32]);
+    fn store_value(&mut self, layer: usize, pos: usize, value: &[f32]);
+    fn dequantize_key_into(&mut self, layer: usize, pos: usize, out: &mut [f32]);
+    fn dequantize_value_into(&mut self, layer: usize, pos: usize, out: &mut [f32]);
+    fn reset(&mut self);
+    fn pos(&self) -> usize;
+    fn set_pos(&mut self, pos: usize);
+}
+```
+
+Enables `forward_quantized` to work with any compression backend (TurboQuant, SpectralQuant, or future methods).
 
 ## TransformerWeights (`transformer.rs`)
 ```rust
@@ -199,7 +278,7 @@ When `n_kv_head < n_head`, K/V heads are shared:
 - K/V projection outputs `kv_dim` instead of `n_embd`
 - 4× KV cache reduction for `n_head=8, n_kv_head=2`
 
-## Math Kernels (`types.rs`)
+## Math Kernels (`crates/microgpt-core/src/types.rs`)
 All hot-path kernels are `#[inline(always)]` with `unsafe get_unchecked`:
 - `matmul(out, w, x, rows, cols)` — out = W @ x — SIMD-accelerated via `simd_dot_f32` (Plan 060)
 - `matmul_relu(out, w, x, rows, cols)` — fused matmul + ReLU — SIMD-accelerated with fused ReLU zero-clamp (Plan 060)
@@ -210,8 +289,12 @@ All hot-path kernels are `#[inline(always)]` with `unsafe get_unchecked`:
 - `attention_head(...)` — fused: score → softmax → weighted value (avoids separate softmax write)
 - `sample_token(logits, rng)` — categorical sampling
 - `lora_apply(output, lora, input, lora_buf)` — in-place LoRA delta: `output += (α/r) × B @ (A @ input)`
+- `gegelu(hidden, gate, up)` — GeGLU activation for Gemma 2 MLP: `GELU(gate) * up`
+- `gegelu_tanh(hidden, gate, up)` — GeGLU with tanh approximation
+- `rmsnorm_with_gamma(x, gamma)` — RMSNorm with learnable gain parameter
+- `rmsnorm_with_gamma_eps(x, gamma, eps)` — RMSNorm with gain and custom epsilon
 
-## SIMD Kernels (`simd.rs`, Plan 060)
+## SIMD Kernels (`crates/microgpt-core/src/simd.rs`, Plan 060)
 
 Runtime SIMD detection and dispatch for hot-path operations:
 - `SimdLevel` enum: `Scalar`, `Neon` (ARM), `Avx2` (x86_64)
@@ -220,6 +303,10 @@ Runtime SIMD detection and dispatch for hot-path operations:
 - `simd_outer_product_acc(acc, a, b, m, n)` — rank-1 update for HLA SK, CQV, PKV
 - `simd_matmul_rows(out, w, x, rows, cols)` — row-major matmul via SIMD dot
 - `simd_matmul_relu_rows(out, w, x, rows, cols)` — SIMD matmul + fused ReLU clamp
+- `simd_fused_decay_write(dst, decay, src, write)` — fused decay+write for HLA state update
+- `maxsim_score(queries, documents, lq, ld, dim)` — MaxSim late-interaction scoring
+- `maxsim_score_packed(queries, query_offsets, documents, doc_offsets, pair_q_ids, pair_d_ids, dim)` — batched MaxSim for packed representations
+- `simd_add_into(dst, a, b)` — SIMD-accelerated element-wise vector add
 - No dependencies — pure `core::arch::{aarch64, x86_64}` intrinsics
 - Zero-cost dispatch: compile-time `#[cfg(target_arch)]` + runtime level check
 
@@ -316,6 +403,15 @@ Score formula: `blended = parent_score + ln(P_llm) + ln(R)`
 
 `config.screening_threshold` (default `0.0`) controls hard-trim cutoff. Set `> 0.0` to aggressively trim low-relevance branches.
 
+## Freeze/Thaw (`src/pruners/freeze.rs`, Plan 092)
+
+Shared freeze/thaw disk I/O for `repr(C)` bandit knowledge structs. Zero-dependency binary persistence — raw `std::fs::write`/`read` on `repr(C)` data with magic bytes + version validation on load. No serde/bincode needed.
+
+```rust
+pub fn save_frozen<T>(path: &Path, data: &T) -> Result<(), String>
+pub fn load_frozen<T>(path: &Path) -> Result<T, String>
+```
+
 ## SpeculativeVerifier (Strategy Pattern)
 
 Based on [Algorithm 1 from Leviathan et al. 2022](https://arxiv.org/pdf/2211.17192) — the verification strategy is swappable via trait:
@@ -330,6 +426,7 @@ pub trait SpeculativeVerifier: Send + Sync {
 |----------|--------------|--------------|
 | `SimulatedVerifier` | always compiled | DFlash/AR draft → DDTree → simulated acceptance cap → bonus token from last marginal |
 | `LeviathanVerifier` | always compiled | AR draft → target model p/q scoring → rejection sampling → residual distribution → bonus from target p(x). Proves Algorithm 1 works end-to-end. |
+| `D2fDrafterVerifier` | `tri_mode` feature | D2F diffusion drafts in parallel (bidirectional within block) → AR verifies with causal attention (Plan 089: Tri-Mode "self-speculation") |
 
 `SimulatedVerifier` is fast (no target model). `LeviathanVerifier` is the full Algorithm 1 — mathematically proven distribution-preserving, but needs large model asymmetry to be faster than pure AR.
 

@@ -53,6 +53,7 @@ microgpt-rs is uniquely positioned for HL because of its **trait-based pruner ar
 | SDAR Sigmoid Gate | `sdar_gate()` — asymmetric trust σ(β·x), β=5.0 optimum (Plan 072) |
 | SDAR-Gated Bandit | `SdarBanditPruner` — sigmoid-gated reward updates (Plan 072) |
 | SDAR-Gated Absorb | `SdarGatedAbsorbCompress` — soft sigmoid promotion gate (Plan 072) |
+| Knowledge Persistence | `BanditPruner` → `src/pruners/freeze.rs` — `repr(C)` bandit knowledge save/load (Plan 092) |
 | Width Scaling | `best_of_k_rollouts()` — K parallel SDE rollouts, select best (PTRM Plan 083) |
 | Early Stop Gate | `EarlyStopGate<P>` — depth-aware pruning when relevance < threshold (PTRM Plan 083) |
 | Width Selection | `WidthSelectionMode::{BestQ, MostFrequent}` — rollout selection strategy (PTRM Plan 083) |
@@ -140,6 +141,10 @@ After N episodes:
 4. High-Q arms → boost relevance weight
 5. RegressionSuite.replay_golden() → verify no regression
 ```
+
+### Freeze/Thaw Persistence (Plan 092)
+
+`BanditPruner` uses `src/pruners/freeze.rs` for `repr(C)` bandit knowledge persistence across sessions. Arena players (Bomber, FFT, Go) call `.freeze()` → `save_frozen()` to write raw bytes, and `load_frozen()` on startup to restore Q-values and visit counts. Zero-dependency binary I/O — no serde/bincode needed.
 
 ### Between Rounds (Evolution)
 

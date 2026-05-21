@@ -16,7 +16,8 @@ Token + Position
        ▼                    ▼
   SpeculativeVerifier
   ├─ SimulatedVerifier: DDTree path + acceptance rate
-  └─ LeviathanVerifier: real p/q rejection + residual + bonus token
+  ├─ LeviathanVerifier: real p/q rejection + residual + bonus token
+  └─ D2fDrafterVerifier: D2F block draft + AR verify (behind "tri_mode")
        │
        ▼
   Accepted Tokens (1 to draft_lookahead+1)
@@ -148,6 +149,34 @@ Implements the full Algorithm 1 from Leviathan et al. 2022 ("Fast Inference from
 - Guarantees exact target distribution (no approximation drift).
 - Real p/q rejection sampling + residual distribution + bonus token.
 - Currently slow at 4× model ratio — requires training/distillation for viable throughput in production.
+
+### D2fDrafterVerifier (`speculative/d2f_verifier.rs`, behind `"tri_mode"` feature)
+
+Self-speculation mode — uses the same model for both drafting and verification (Plan 089: Tri-Mode Inference). D2F block decode acts as the drafter (parallel, bidirectional within block), standard AR forward pass acts as the verifier.
+
+**Internal state:**
+- Pre-allocated target `ForwardContext` + `MultiLayerKVCache`
+- Pre-allocated `D2fContext` for block decode
+- `probs_buf` for target probability distribution
+
+**Pipeline:**
+1. **Phase 0** — Score the initial token through the target AR model → p_dist[0].
+2. **Phase 1** — D2F block decode in parallel → draft tokens (up to `draft_width`).
+3. **Phase 2** — Score each draft token through the target AR model → p_dist[i+1].
+4. **Phase 3** — Argmax prefix matching: accept draft[i] if it matches argmax(p_dist[i+1]); on first mismatch, take target's preferred token.
+5. **Phase 4** — Bonus token: if all draft tokens accepted, sample +1 from p_dist at last position.
+
+**Key difference from LeviathanVerifier:**
+- Draft: `d2f_decode_block()` (parallel, bidirectional within block)
+- Verify: `forward()` with causal attention (same as Leviathan)
+- KV caches are separate (block-causal for draft, causal for verify)
+
+**Configuration (`SelfSpecConfig`):**
+
+| Field | Default | Purpose |
+|-------|---------|---------|
+| `draft_width` | 8 | Number of tokens per D2F draft block |
+| `d2f_config` | `D2fDecodeConfig::default()` | D2F decode parameters |
 
 ---
 
@@ -347,6 +376,19 @@ pub struct SpeculativeContext {
 - Used by all `_with` variants and both verifier implementations.
 - `DDTreeBranchCache` (separate struct) — paged KV cache for `speculative_step_rollback_paged`, avoids full snapshot copies via copy-on-write fork.
 
+### SelfSpecConfig (`speculative/types.rs`, behind `"tri_mode"` feature)
+
+Configuration for D2F self-speculation mode (used by `D2fDrafterVerifier`).
+
+```rust
+pub struct SelfSpecConfig {
+    pub draft_width: usize,        // tokens per D2F draft block (default: 8)
+    pub d2f_config: D2fDecodeConfig,
+}
+```
+
+Types re-export base primitives from `crate::types` (`Config`, `Rng`, `softmax_scaled`, etc.) — no direct `microgpt-core` dependency in the speculative module.
+
 ---
 
 ## ConstraintPruner (`speculative/types.rs`)
@@ -476,6 +518,7 @@ Pipeline steps:
 | `"rest"` | REST bridge test + `merge_retrieved_branches` (client in `riir-ai/riir-rest`) |
 | `"feedback"` | E2E feedback loop — sends `InferenceResult` to REST endpoint |
 | `"dllm"` | D2F Discrete Diffusion Forcing — `D2fContext`, `D2fPipeline`, block-parallel decode (Plan 066) |
+| `"tri_mode"` | Tri-Mode inference — depends on `"dllm"`. `D2fDrafterVerifier` + `SelfSpecConfig` (Plan 089) |
 
 ---
 

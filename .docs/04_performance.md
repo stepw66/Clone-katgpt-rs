@@ -40,7 +40,7 @@ Speedup: Speculative vs AR went from **0.72×** → **1.82×** after zero-alloc 
 - `get_unchecked` / `get_unchecked_mut` in inner matmul loops — eliminates bounds checks
 - `copy_nonoverlapping` for KV cache store — faster than `copy_from_slice` for known sizes
 - Edition 2024: explicit `unsafe {}` blocks inside `unsafe fn`
-- SIMD intrinsics (NEON/AVX2) in `src/simd.rs` — runtime detection, safe API wrapping `core::arch::{aarch64, x86_64}` (Plan 060)
+- SIMD intrinsics (NEON/AVX2) in `crates/microgpt-core/src/simd.rs` (re-exported via `src/simd.rs`) — runtime detection, safe API wrapping `core::arch::{aarch64, x86_64}` (Plan 060)
 
 ### Fused Kernels
 - **`matmul_relu`**: single-pass MLP hidden layer (avoids extra scan of hidden buffer) — SIMD-accelerated dot product + fused ReLU zero-clamp
@@ -56,7 +56,7 @@ Speedup: Speculative vs AR went from **0.72×** → **1.82×** after zero-alloc 
 
 ## SIMD Acceleration (Plan 060)
 
-NEON (ARM) / AVX2 (x86_64) SIMD dispatch for matmul, matmul_relu, and HLA streaming kernels.
+NEON (ARM) / AVX2 (x86_64) SIMD dispatch for matmul, matmul_relu, HLA streaming, MaxSim scoring, fused decay/write, and vectorized add kernels.
 
 ### Kernel-Level Throughput (NEON, Apple Silicon, release)
 
@@ -67,6 +67,10 @@ NEON (ARM) / AVX2 (x86_64) SIMD dispatch for matmul, matmul_relu, and HLA stream
 | matmul_relu [32×32] | 4.4M ops/s | 0.23µs |
 | hla_update hd=4 | 16.4M ops/s | 0.06µs |
 | ahla_step hd=4 | 18.2M ops/s | 0.05µs |
+| maxsim_score | — | SIMD-parallel |
+| maxsim_score_packed | — | batched MaxSim |
+| simd_fused_decay_write | — | fused dst=α·dst+β·src |
+| simd_add_into | — | vectorized dst=a+b |
 
 ### End-to-End Forward Throughput (Config::micro, 8 positions)
 

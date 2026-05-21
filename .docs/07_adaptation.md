@@ -407,7 +407,7 @@ pub fn ahla_step(pkv, mk, q_head, q, k, v, hd, lr, out, tmp_r)
 
 ### SIMD Acceleration (Plan 060)
 
-All HLA kernels dispatch through `src/simd.rs` — runtime NEON/AVX2 detection:
+All HLA kernels dispatch through `crates/microgpt-core/src/simd.rs` (re-exported via `src/simd.rs`) — runtime NEON/AVX2 detection:
 
 | Operation | NEON Throughput (hd=4) |
 |-----------|----------------------|
@@ -470,7 +470,7 @@ Each dimension gets bits proportional to its variance share. High-variance dimen
 ### Forward Integration
 
 ```rust
-// transformer.rs — quantized KV forward with SpectralQuant backend
+// transformer.rs — quantized KV forward, generic over QuantizedKVCache trait (src/types.rs)
 pub fn forward_quantized(ctx, weights, cache: &mut dyn QuantizedKVCache, ...)
 // AttentionMode::SpectralQuant dispatches to spectralquant::forward
 ```
@@ -513,13 +513,19 @@ Noise concentrates near t=0 via logit-normal distribution: 2.2× concentration a
 ### Width Scaling (PTRM, Plan 083)
 
 ```rust
-// speculative/types.rs — width scaling via best-of-K
+// speculative/dd_tree.rs — width scaling via best-of-K
 pub struct WidthScaleConfig {
-    pub width_rollouts: usize,        // K parallel rollouts
-    pub early_stop_threshold: f32,    // confidence gate
+    pub k_rollouts: usize,                // K parallel rollouts
+    pub selection: WidthSelectionMode,     // how to pick winner
 }
 pub enum WidthSelectionMode { BestQ, MostFrequent }
-pub fn best_of_k_rollouts(...) -> Vec<TreeNode>
+pub fn best_of_k_rollouts(...) -> Vec<usize>
+
+// crates/microgpt-core/src/types.rs — Config convenience fields
+pub struct Config {
+    pub width_rollouts: usize,            // default: 1 (disabled)
+    pub early_stop_threshold: f32,        // default: 0.0 (disabled)
+}
 ```
 
 PTRM proves width >> depth for small models. K=64 rollouts + `EarlyStopGate` depth-aware pruning.

@@ -36,14 +36,21 @@ A from-scratch Rust implementation of a GPT-2 style transformer with speculative
 - MaxSim late-interaction scoring: 7.46× SIMD speedup (behind `"maxsim"` feature, Plan 080)
 - SimpleTES RPUCG loop: wide>narrow budget scaling (behind `"tes_loop"` feature, Plan 086)
 - 320+ tests passing (47 test files), zero clippy warnings
+- Shared `microgpt-core` crate: types (Config, enums, math utilities), SIMD kernels — extracted for multi-crate reuse
 
 ## Module Structure
 
 ```
+crates/
+  microgpt-core/    Shared types + SIMD kernels (multi-crate reuse):
+    types.rs        Config (all presets + with_overrides + validate), Rng, HlaMode, AttentionMode (Causal/Bidirectional/BlockCausal/SpKv/SpKvQuant), ModelArchitecture (Generic/Gemma2), WeightDtype (F32/F16/BF16), InferenceOverrides, InferenceResult, kv_dim, softmax, softmax_scaled, rmsnorm, rmsnorm_with_gamma, rmsnorm_with_gamma_eps, gegelu, gegelu_tanh, matmul, matmul_relu, sparse_matmul, sample_token, LoraAdapter, LoraPair, DomainLatent
+    simd.rs         SimdLevel (Scalar/Neon/Avx2), simd_level(), simd_dot_f32, simd_fma_row, simd_outer_product_acc, simd_matvec, simd_matmul_rows, simd_matmul_relu_rows, simd_sparse_dot_f32, simd_sparse_matmul_rows, simd_scale_inplace
+    lib.rs          Feature gates: default=["sparse_mlp"], sparse_mlp, domain_latent, maxsim, dllm
+
 src/
   lib.rs            Module index + debug tracking allocator
   main.rs           Entry point (proof → bench → Percepta bench → plot)
-  types.rs          Config (micro/micro_lora/draft/game/bpe/bpe_draft/small_target/gqa_draft/dllm_micro/validate + with_overrides), InferenceOverrides, Rng, HlaMode, AttentionMode, softmax, rmsnorm, matmul, matmul_relu, sparse_matmul, sample_token, LoraAdapter, LoraPair, DomainLatent, InferenceResult, lora_apply, kv_dim
+  types.rs          Re-exports microgpt_core::types::* + QuantizedKVCache trait (interface for TurboQuant/SpectralQuant KV caches)
   simd.rs          SimdLevel (Scalar/Neon/Avx2), simd_level(), simd_dot_f32, simd_fma_row, simd_outer_product_acc, simd_matvec, simd_matmul_rows, simd_matmul_relu_rows, simd_sparse_dot_f32, simd_sparse_matmul_rows, simd_scale_inplace (Plan 060)
   transformer.rs    TransformerWeights (+ mtp projections), LayerWeights, KVCache, MultiLayerKVCache, KVSnapshot, PagedKVCache, RavenKVCache, ForwardContext (+ sparse buffers + lora_buf + mtp_context_buf + tq_dequant_pos), PrefillContext, forward, forward_with_domain_latent, forward_prefill, forward_paged, forward_raven, forward_turboquant, generate, generate_into, generate_batch, generate_with_prefill, tokens_to_string, project_target_activation, cluster_map_round_robin, cluster_map_from_embeddings, raven_compute_router, raven_update, raven_readout, preload_kv_cache
   feedback.rs       FeedbackConfig, send_feedback ⌁
@@ -90,6 +97,7 @@ src/
     step.rs         speculative_step, speculative_step_verifier, speculative_step_rollback, speculative_step_rollback_with, speculative_step_conditioned, speculative_step_conditioned_with, speculative_step_rollback_paged
     prefill.rs      PrefillScorer trait, AttentionScorer, BlockAttentionScorer, compress_prompt, compress_prompt_blocks, block_select, block_select_grid, should_compress, speculative_prefill, speculative_prefill_block, speculative_prefill_adaptive
     flow_pruner.rs  FlowPruner<P> — GFlowNet-inspired stop-probability regularization ♭
+    d2f_verifier.rs D2fDrafterVerifier — D2F diffusion drafts, AR verifies (Tri-Mode, Plan 089) ⓘ
     d2f.rs          D2fBlockState, D2fDecodeConfig, D2fBlockResult, D2fPipelineBlock, D2fPipeline, D2fPipelineResult, d2f_decode_block* (behind "dllm" feature)
     alpha.rs        AlphaTarget, alpha_intersect, is_consistent — LDT α-intersection pruning + conflict detection (behind "lattice_deduction" feature, Plan 088) ⎌
     ppot/           PPoT (Plans 026 + 027) ○
@@ -116,6 +124,7 @@ src/
     review_metrics.rs  ReviewSummary, ReviewMetrics, ReviewStrategy, EntropyAnomalySummary ♭
     stepcode.rs     PathStep, ShapedPath, shape_path, path_consistency ≋
     variance_minimizer.rs  VarianceMinimizer, VarianceMinimizerConfig (Plan 078) ☀
+    freeze.rs       save_frozen, load_frozen — shared freeze/thaw disk I/O for repr(C) bandit knowledge structs (Plan 092)
     game_state/     GameState forward model trait + generic MCTS (Plan 056) ⎗
       mcts_search   mcts_search — Monte Carlo Tree Search
                     StateHeuristic trait, ActionSpaceLog
@@ -276,6 +285,7 @@ src/
   ▣+++ behind --features percepta_wasm  (percepta_graph)
   ▣++++ behind --features percepta_compile (percepta_wasm + good_lp)
   ⎌ behind --features lattice_deduction
+  ⓘ behind --features tri_mode (dllm)
 ```
 
 ## Feature Flags
@@ -326,6 +336,8 @@ src/
 | `percepta_wasm` | `percepta_graph` | + WASM decoder + lowering + interpreter (pure Rust) |
 | `percepta_compile` | `percepta_wasm`, `good_lp` | + MILP scheduling + weights + transformer + Futamura |
 | `lattice_deduction` | — | LDT Lattice Deduction Transformer — α-intersection pruning, conflict detection, asymmetric elimination (Plan 088) |
+| `tri_mode` | `dllm` | Tri-Mode inference — AR + Diffusion + Self-Speculation, D2F Drafter Verifier (Plan 089) |
+| `unit_distance` | — | Unit Distance GOAT proof — number-theoretic lattice constructions (Plan 090) |
 | `full` | all above (excludes `stepcode`, `sp_kv`) | Enable all features |
 
 Default features: `sparse_mlp`, `domain_latent`, `ppot`, `bandit`, `bt_rank`, `spectral_quant`, `elf_sde`, `cna_steering`, `deep_manifold`, `federation` (production best perf + accuracy, Plans 051, 077-079, 085, 087).
@@ -364,6 +376,9 @@ cargo run --example go_06_bench --features go --release       # Go benchmark sui
 | `bpe_draft` | 4096 | 8 | 2 | 1 | 32 | BPE draft model |
 | `small_target` | 4096 | 64 | 4 | 4 | 256 | Multi-layer target |
 | `gqa_draft` | 4096 | 64 | 8 | 4 | 256 | GQA draft (n_kv_head=2) |
+| `micro_dllm` | 27 | 16 | 4 | 1 | 64 | D2F discrete diffusion (bidirectional) |
+| `game_go` | 85 | 32 | 4 | 1 | 128 | Go board 9×9 + action (~16K params) |
+| `gemma2_2b` | 256000 | 2304 | 8 | 26 | 9216 | Gemma 2 2B architecture (kv_heads=4, head_dim=256) |
 
 ## Key Design Principles
 
