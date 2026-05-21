@@ -15,6 +15,9 @@ pub mod flow_pruner;
 #[cfg(feature = "dllm")]
 pub mod d2f;
 
+#[cfg(feature = "lattice_deduction")]
+pub mod alpha;
+
 // Re-exports — preserves existing import paths like `speculative::build_dd_tree`
 pub use dd_tree::{
     TreeBuilder, build_dd_tree, build_dd_tree_balanced, build_dd_tree_balanced_sde,
@@ -47,6 +50,12 @@ pub use types::{
 
 #[cfg(feature = "elf_sde")]
 pub use types::EarlyStopGate;
+
+// ── LDT Lattice Deduction Transformer re-exports (Plan 088) ──
+#[cfg(feature = "lattice_deduction")]
+pub use alpha::{AlphaTarget, alpha_intersect, is_consistent};
+#[cfg(feature = "lattice_deduction")]
+pub use types::{ConflictDetector, EntropyConflictDetector, LDT_THETA_ELIM, LdtPruneConfig};
 
 // ── SimpleTES re-exports (Plan 086, feature: tes_loop) ────────
 #[cfg(feature = "tes_loop")]

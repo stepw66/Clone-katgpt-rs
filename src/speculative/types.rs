@@ -711,6 +711,143 @@ pub struct BlockScores {
     pub selected: Vec<usize>,
 }
 
+// ── LDT Lattice Deduction Transformer (Plan 088) ─────────────
+// Feature gate: `lattice_deduction`
+//
+// Distilled from "Lattice Deduction Transformers" (arXiv:2605.08605).
+// LDT (800K params, 15min training on B200) achieves 100% on Sudoku-Extreme
+// where frontier LLMs score 0%. Key insight: operate on an interpretable
+// lattice so deduction is structurally sound.
+//
+// All three enhancements are modelless (zero training):
+// T1: Asymmetric pruning threshold (θ_elim ≈ 0.111)
+// T2: Entropy-based conflict detection for early backtracking
+// T3: α-operator for multi-solution supervision (in alpha.rs)
+
+/// LDT-derived asymmetric elimination threshold.
+///
+/// From w+/w− = 8 in BCE loss: penalize false elimination 8× harder than
+/// false retention. The natural threshold: `θ_elim = 1/(1 + w+/w−) = 1/9 ≈ 0.111`.
+///
+/// Only eliminate candidates when confidence is very high.
+#[cfg(feature = "lattice_deduction")]
+pub const LDT_THETA_ELIM: f32 = 1.0 / (1.0 + 8.0); // ≈ 0.111
+
+/// Configuration for LDT-style asymmetric pruning (T1).
+///
+/// When enabled, DDTree expansion uses `theta_elim` instead of the default
+/// screening threshold, making the pruner conservative: only eliminate
+/// candidates when very confident.
+#[cfg(feature = "lattice_deduction")]
+#[derive(Debug, Clone)]
+pub struct LdtPruneConfig {
+    /// Elimination threshold (default: LDT_THETA_ELIM ≈ 0.111).
+    pub theta_elim: f32,
+    /// Whether to use asymmetric threshold (default: true).
+    pub enabled: bool,
+}
+
+#[cfg(feature = "lattice_deduction")]
+impl Default for LdtPruneConfig {
+    fn default() -> Self {
+        Self {
+            theta_elim: LDT_THETA_ELIM,
+            enabled: true,
+        }
+    }
+}
+
+/// LDT-inspired conflict detection for early backtracking (T2).
+///
+/// LDT uses a separate CLS sigmoid for conflict detection.
+/// Our modelless translation: detect conflict via entropy/marginal analysis.
+///
+/// Returns true when the current search state is likely unsatisfiable,
+/// triggering early backtracking instead of continued exploration.
+#[cfg(feature = "lattice_deduction")]
+pub trait ConflictDetector: Send + Sync {
+    /// Check if the current state shows conflict signals.
+    ///
+    /// - `marginals` — per-depth token probability distributions
+    /// - `pruned_count` — how many candidates were eliminated this step
+    /// - `total_candidates` — total candidates before pruning
+    fn is_conflicted(
+        &self,
+        marginals: &[&[f32]],
+        pruned_count: usize,
+        total_candidates: usize,
+    ) -> bool;
+}
+
+/// Entropy-based conflict detector (T2).
+///
+/// Flags conflict when:
+/// 1. Pruning rate exceeds threshold (too aggressive = likely wrong path)
+/// 2. Any position has near-zero entropy (overconfident = probably hallucinating)
+///
+/// LDT's conflict threshold θ_cls = 0.6 → analogous to 60% max prune rate.
+#[cfg(feature = "lattice_deduction")]
+#[derive(Debug, Clone)]
+pub struct EntropyConflictDetector {
+    /// Maximum fraction of candidates that can be pruned in one step.
+    /// LDT's conflict threshold θ_cls = 0.6 analog.
+    pub max_prune_rate: f32,
+    /// Minimum entropy per position (below = conflict signal).
+    pub entropy_floor: f32,
+}
+
+#[cfg(feature = "lattice_deduction")]
+impl Default for EntropyConflictDetector {
+    fn default() -> Self {
+        Self {
+            max_prune_rate: 0.6, // LDT θ_cls = 0.6 analog
+            entropy_floor: 0.01, // Near-deterministic = suspicious
+        }
+    }
+}
+
+#[cfg(feature = "lattice_deduction")]
+impl ConflictDetector for EntropyConflictDetector {
+    fn is_conflicted(
+        &self,
+        marginals: &[&[f32]],
+        pruned_count: usize,
+        total_candidates: usize,
+    ) -> bool {
+        // Hard conflict: no candidates remain
+        if total_candidates == 0 {
+            return true;
+        }
+
+        // Check pruning rate: too aggressive = likely wrong path
+        let prune_rate = pruned_count as f32 / total_candidates as f32;
+        if prune_rate > self.max_prune_rate {
+            return true;
+        }
+
+        // Check entropy per position: overconfident = probably hallucinating
+        for marginal in marginals {
+            let entropy = compute_entropy(marginal);
+            if entropy < self.entropy_floor && marginal.len() > 1 {
+                return true;
+            }
+        }
+
+        false
+    }
+}
+
+/// Compute Shannon entropy of a probability distribution.
+/// H(p) = -Σ p_i * ln(p_i)
+#[cfg(feature = "lattice_deduction")]
+fn compute_entropy(probs: &[f32]) -> f32 {
+    probs
+        .iter()
+        .filter(|&&p| p > 0.0)
+        .map(|&p| -p * p.ln())
+        .sum()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

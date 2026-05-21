@@ -3,20 +3,20 @@
 > **Source:** Research 51 — Deep Manifold Part 2 Fixed-Point Boundary Conditions
 > **Date:** 2025-12
 > **Feature Gates:** `deep_manifold`, `federation`
-> **Status:** 📋 Planning
+> **Status:** ✅ Complete
 
 ## Tasks
 
-- [ ] T1: Add `deep_manifold` feature gate to `Cargo.toml`
-- [ ] T2: Implement `ManifoldResidual` trait + `L2ResidualScorer` in `src/pruners/manifold_residual.rs`
-- [ ] T3: Add benchmark `bench_manifold_residual` — residual vs relevance scoring comparison
-- [ ] T4: Implement `BoundaryAlignment` trait + `KlBoundaryAligner` in `src/pruners/boundary_alignment.rs`
-- [ ] T5: Add `federation` feature gate (depends on `bandit`)
-- [ ] T6: Add benchmark `bench_boundary_alignment` — KL coupling between domain experts
-- [ ] T7: Enhance `bt_rank` with `SymmetricBoundaryPair` tracking
-- [ ] T8: GOAT proof test — deep_manifold residual convergence on bomber arena
-- [ ] T9: Update README.md — Deep Manifold section + feature flags table
-- [ ] T10: Update Research 51 with benchmark results
+- [x] T1: Add `deep_manifold` feature gate to `Cargo.toml`
+- [x] T2: Implement `ManifoldResidual` trait + `L2ResidualScorer` in `src/pruners/manifold_residual.rs`
+- [x] T3: Add benchmark `bench_manifold_residual` — residual vs relevance scoring comparison
+- [x] T4: Implement `BoundaryAlignment` trait + `KlBoundaryAligner` in `src/pruners/boundary_alignment.rs`
+- [x] T5: Add `federation` feature gate (depends on `bandit`)
+- [x] T6: Add benchmark `bench_boundary_alignment` — KL coupling between domain experts
+- [x] T7: Enhance `bt_rank` with `SymmetricBoundaryPair` tracking
+- [x] T8: GOAT proof test — deep_manifold residual convergence on bomber arena
+- [x] T9: Update README.md — Deep Manifold section + feature flags table
+- [x] T10: Update Research 51 with benchmark results
 
 ---
 
