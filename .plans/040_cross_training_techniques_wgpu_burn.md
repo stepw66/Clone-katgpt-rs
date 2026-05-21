@@ -441,7 +441,7 @@ Different scales, different pipelines, different feature flags.
 | **P2** | Task 4: Absorb+Compress | Post-training analysis | Small | ✅ Done |
 | **P3** | Task 6: Screening probe | Reduces training time by skipping low-signal targets | Medium | ✅ Done |
 | **P3** | Task 7: JSON report | Cross-run comparison | Small | ✅ Done (real loss history via Plan 041) |
-| **P4** | Task 9: Benchmarks | Validate all techniques | Small | ⬜ Pending |
+| **P4** | Task 9: Benchmarks | Validate all techniques | Small | ◼️ Pending |
 
 ---
 

@@ -156,7 +156,7 @@ This IS our `riir-ai/crates/riir-router` architecture:
 |---------------|-------------------|--------|
 | Small elastic model | Domain LoRA adapter (QLoRA/IA3) | ✅ Plan 071 |
 | Local manifold piece | Expert domain (bomber, go, fft) | ✅ Plan 023 |
-| Mosaic alignment | KL coupling between experts | ⬜ New trait |
+| Mosaic alignment | KL coupling between experts | ◼️ New trait |
 | Foundation prior | Frozen base model weights | ✅ Plan 059 |
 
 ### 3.2 Federated Learning as Distributed Manifold Alignment (§7.6)
@@ -173,7 +173,7 @@ This maps to our architecture:
 | Paper | Our Stack | Feasibility |
 |-------|-----------|-------------|
 | Local manifold Mi | Domain LoRA weights per expert | ✅ Already have |
-| KL coupling KL(pθᵢ ‖ q₋ᵢ) | Cross-domain consistency scoring | ⬜ New trait |
+| KL coupling KL(pθᵢ ‖ q₋ᵢ) | Cross-domain consistency scoring | ◼️ New trait |
 | Foundation prior θ₀ | Shared frozen base model | ✅ Already have |
 | Fisher metric Gi(θ) | Curvature proxy from SpectralQuant | ✅ Already have |
 | Boundary sampling μb | Bandit arm selection distribution | ✅ Already have |

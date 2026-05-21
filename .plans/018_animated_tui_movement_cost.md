@@ -21,7 +21,7 @@ Enhance `blue_bear_tui` with two major features:
   - [x] Bear position interpolated as `f32` for smooth movement between cells
   - [x] Animation tick via `event::poll()` with timeout (no blocking)
   - [x] Cost overlay: digit shown on tiles with cost > 1
-  - [x] Terrain emoji: ⬜=grass, 🟨=sand, 🟦=water, 🧱=wall
+  - [x] Terrain emoji: ◼️=grass, 🟨=sand, 🟦=water, 🧱=wall
 - [x] Add animation state machine to `App`
   - [x] `AnimState { from, to, action, start, duration_ms }`
   - [x] Animation speed: 150ms per cost unit (grass fast, water slow), 200ms for attack
@@ -50,13 +50,13 @@ Enhance `blue_bear_tui` with two major features:
 Each cell = "{emoji}{cost}" followed by 2-char gap
 Cost indicator: " " for cost=1, "2" for sand, "3" for water
 
-Example row:  🐻  ⬜2 🟨  👹  ⬜  🚪
+Example row:  🐻  ◼️2 🟨  👹  ◼️  🚪
               ^cost hidden  ^cost shown
 
 During animation, bear slides through the gap:
-Step N:   🐻  ⬜2 👹  ...
-Anim:     ⬜  🐻 👹  ...     ← bear in gap, sliding right
-Step N+1: ⬜2  🐻  ...     ← bear arrived at next cell
+Step N:   🐻  ◼️2 👹  ...
+Anim:     ◼️  🐻 👹  ...     ← bear in gap, sliding right
+Step N+1: ◼️2  🐻  ...     ← bear arrived at next cell
 ```
 
 ### Animation State Machine
@@ -72,7 +72,7 @@ Step N+1: ⬜2  🐻  ...     ← bear arrived at next cell
 ### Cost Model
 ```
 Terrain  Char  Cost  Emoji    Animation Speed
-Grass    .     1     ⬜       150ms (fast)
+Grass    .     1     ◼️       150ms (fast)
 Sand     ~     2     🟨       300ms (medium)
 Water    w     3     🟦       450ms (slow)
 Wall     #     ∞     🧱       impassable

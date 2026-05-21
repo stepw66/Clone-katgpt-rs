@@ -22,7 +22,7 @@ const TREASURE: &str = "💎";
 const GOAL: &str = "🚪";
 const GOAL_OPEN: &str = "🏆";
 const WALL: &str = "🧱";
-const FLOOR: &str = "⬜";
+const FLOOR: &str = "◼️";
 const ITEM: &str = "🔑";
 
 fn cell_emoji(pruner: &TacticalPruner, state: &GameState, r: usize, c: usize) -> String {

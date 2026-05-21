@@ -255,7 +255,7 @@ Implementation status (all complete):
 2. ✅ `active_indices` / `active_values` buffers in `ForwardContext`
 3. ✅ Feature-gated with `sparse_mlp`, opt-in
 4. ✅ Runtime auto-detection via `config.sparse_threshold` (default 0.8)
-5. ⬜ Benchmarks on real trained weights (not yet — current models use random weights)
+5. ◼️ Benchmarks on real trained weights (not yet — current models use random weights)
 
 ---
 

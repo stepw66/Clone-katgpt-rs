@@ -140,7 +140,7 @@ fn target_cost(from: Pos, target: Target, state: &GameState) -> Cost {
 
 ```
 Terrain  Char  Cost  Emoji
-Grass    .     1     ⬜
+Grass    .     1     ◼️
 Sand     ~     2     🟨
 Water    w     3     🟦
 Wall     #     ∞     🧱
@@ -338,7 +338,7 @@ Plan 018 (Animated TUI with Movement Costs) contributed:
 - `TacticalPruner.terrain_cost(r, c)` function
 - `pathfinder::terrain_cost()` + weighted A* g-score
 - Animation primitives (AnimState, tick, interpolation) in `blue_bear_tui.rs`
-- Terrain emoji: ⬜ grass, 🟨 sand, 🟦 water
+- Terrain emoji: ◼️ grass, 🟨 sand, 🟦 water
 
 Phase 4 reuses these primitives for the 16×16 dungeon TUI.
 

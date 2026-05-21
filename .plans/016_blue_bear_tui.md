@@ -14,7 +14,7 @@ Additionally, refactor `sudoku_pruner` from `speculative/` into the new `pruners
 - [x] Update `src/lib.rs` to include `pub mod pruners;`
 - [x] Create `examples/blue_bear.rs` — non-TUI solver/benchmark with emoji output
 - [x] Create `examples/blue_bear_tui.rs` with:
-  - [x] Emoji map rendering (🐻=Bear, 👹=Monster, 💎=Treasure, 🚪=Goal, 🧱=Wall, ⬜=Floor, 🔑=Item)
+  - [x] Emoji map rendering (🐻=Bear, 👹=Monster, 💎=Treasure, 🚪=Goal, 🧱=Wall, ◼️=Floor, 🔑=Item)
   - [x] TUI with ratatui + crossterm
   - [x] Step-by-step solution navigation with Next/Back buttons
   - [x] State info panel (inventory, killed monsters, collected treasures)

@@ -104,18 +104,18 @@ Based on `blue_bear_tui.rs` layout, restructured for multi-floor:
 └───────────────────────────────────────────────────────────────────────────────┘
 ┌ 🏢 Floors ─┐┌ 🗺 Floor 2 ──────────────────┐┌ 📊 State ─────────────────────┐
 │ 3F 🚪      ││ 🧱 🧱 🧱 🧱 🧱 🧱 🧱 🧱 🧱   ││  Position:  F2 (3, 5)         │
-│  ↑🪜(1,2)  ││ 🧱 ⬜ ⬜ ⬜ ⬜ ⬜ ⬜ ⬜ 🧱   ││  Floor:      2/3               │
-│ 2F 🐻 ◀   ││ 🧱 ⬜ 👹 ⬜ ⬜ ⬜ ⬜ ⬜ 🧱   ││  Cost:       67                │
-│  ↓🪜(5,7)  ││ 🧱 ⬜ ⬜ ⬜ ⬜ ⬜ ⬜ ⬜ 🧱   ││  Inventory:  🔑                │
-│ 1F ⬜      ││ 🧱 ⬜ ⬜ 💎 ⬜ ⬜ ⬜ ⬜ 🧱   ││  Monsters:   1/3 killed        │
-│            ││ 🧱 ⬜ ⬜ ⬜ ⬜ ⬜ ⬜ ⬜ 🧱   ││  Treasures:  1/3 collected     │
-│ Stairs:    ││ 🧱 ⬜ ⬜ ⬜ ⬜ 🪜⬇ ⬜ 🧱   ││  Stairs:     ↑(1,2) ↓(5,7)     │
+│  ↑🪜(1,2)  ││ 🧱 ◼️ ◼️ ◼️ ◼️ ◼️ ◼️ ◼️ 🧱   ││  Floor:      2/3               │
+│ 2F 🐻 ◀   ││ 🧱 ◼️ 👹 ◼️ ◼️ ◼️ ◼️ ◼️ 🧱   ││  Cost:       67                │
+│  ↓🪜(5,7)  ││ 🧱 ◼️ ◼️ ◼️ ◼️ ◼️ ◼️ ◼️ 🧱   ││  Inventory:  🔑                │
+│ 1F ◼️      ││ 🧱 ◼️ ◼️ 💎 ◼️ ◼️ ◼️ ◼️ 🧱   ││  Monsters:   1/3 killed        │
+│            ││ 🧱 ◼️ ◼️ ◼️ ◼️ ◼️ ◼️ ◼️ 🧱   ││  Treasures:  1/3 collected     │
+│ Stairs:    ││ 🧱 ◼️ ◼️ ◼️ ◼️ 🪜⬇ ◼️ 🧱   ││  Stairs:     ↑(1,2) ↓(5,7)     │
 │ ↑ to F3    ││ 🧱 🧱 🧱 🧱 🧱 🧱 🧱 🧱 🧱   │└────────────────────────────────┘
 │ ↓ to F1    ││                                 │
 └────────────┘│                                 │┌ Legend ───────────────────────┐
               └─────────────────────────────────┘│ 🐻 You     👹 Monster         │
                                                │ 💎 Treasure 🚪 Exit            │
-                                               │ 🧱 Wall    ⬜ Floor            │
+                                               │ 🧱 Wall    ◼️ Floor            │
                                                │ 🪜⬇ Down   🪜⬆ Up             │
                                                └──────────────────────────────┘
 ┌───────────────────────────────────────────────────────────────────────────────┐
@@ -150,7 +150,7 @@ Based on `blue_bear_tui.rs` layout, restructured for multi-floor:
 │  ↑🪜(1,2)   │  ← Stairs UP at (1,2) on F2, leads to F3
 │ 2F 🐻 ◀    │  ← Current floor (bear here, ◀ indicator)
 │  ↓🪜(5,7)   │  ← Stairs DOWN at (5,7) on F2, leads to F1
-│ 1F ⬜       │  ← Start floor (cleared/empty indicator)
+│ 1F ◼️       │  ← Start floor (cleared/empty indicator)
 │             │
 │ Stairs:     │  ← Summary section
 │ ↑ leads F3  │

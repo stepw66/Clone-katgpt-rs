@@ -33,7 +33,7 @@ const TREASURE: &str = "💎";
 const GOAL: &str = "🚪";
 const GOAL_OPEN: &str = "🏆";
 const WALL: &str = "🧱";
-const FLOOR_TILE: &str = "⬜";
+const FLOOR_TILE: &str = "◼️";
 const ITEM: &str = "🔑";
 const STAIRS: &str = "🪜";
 
