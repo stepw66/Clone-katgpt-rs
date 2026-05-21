@@ -678,6 +678,12 @@ pub struct GoGZeroSelfPlayConfig {
     pub komi_window: usize,
     /// Use score-based rewards instead of binary win/loss (default: true).
     pub score_based_rewards: bool,
+    /// Swap colors each episode so each proposer plays both sides (default: true).
+    ///
+    /// Agent A plays Black on even episodes, White on odd episodes.
+    /// Agent B plays White on even episodes, Black on odd episodes.
+    /// This naturally balances win rates toward ~50/50.
+    pub swap_colors: bool,
 }
 
 impl Default for GoGZeroSelfPlayConfig {
@@ -695,6 +701,7 @@ impl Default for GoGZeroSelfPlayConfig {
             komi_max: 50.0,
             komi_window: 50,
             score_based_rewards: true,
+            swap_colors: true,
         }
     }
 }
@@ -726,6 +733,8 @@ pub struct GoGZeroSelfPlayResults {
     pub final_komi: f32,
     /// Average score margin across all episodes.
     pub avg_score_margin: f32,
+    /// Number of episodes where colors were swapped.
+    pub swapped_episodes: usize,
 }
 
 /// Run G-Zero self-play.
@@ -994,6 +1003,7 @@ pub fn run_gzero_selfplay(
         komi_history,
         final_komi: current_komi,
         avg_score_margin,
+        swapped_episodes: 0,
     }
 }
 
