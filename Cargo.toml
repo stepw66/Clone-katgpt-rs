@@ -181,6 +181,10 @@ required-features = ["sdar_gate", "ropd_rubric", "g_zero", "bomber"]
 name = "bomber_11_bt_rank_tournament"
 required-features = ["bt_rank", "g_zero", "bomber"]
 
+[[example]]
+name = "bomber_12_self_play_freeze"
+required-features = ["bomber"]
+
 # ── Monopoly FSM Arena ────────────────────────────────────────
 
 [[example]]

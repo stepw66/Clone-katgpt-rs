@@ -1,4 +1,4 @@
-# Plan 089: Unit Distance GOAT Proof — Number-Theoretic Lattice Constructions
+# Plan 090: Unit Distance GOAT Proof — Number-Theoretic Lattice Constructions
 
 > **Research:** [56_OpenAI_Unit_Distance_Disproof.md](../.research/56_OpenAI_Unit_Distance_Disproof.md)
 > **Source:** OpenAI autonomous proof (2026), Remarks by Alon, Bloom, Gowers et al. (2026)

@@ -666,13 +666,15 @@ pub struct GoGZeroSelfPlayConfig {
     pub initial_komi: f32,
     /// Enable adaptive komi adjustment (default: true).
     pub adaptive_komi: bool,
-    /// Komi adjustment step size (default: 2.0).
+    /// Base komi adjustment step — scaled proportionally by imbalance severity (default: 10.0).
+    ///
+    /// Proportional: `step = base × (|win_rate − 0.5| / 0.2)` so 70%→1×, 90%→2×, 100%→2.5×.
     pub komi_adjustment_step: f32,
     /// Minimum allowed komi (default: 0.0).
     pub komi_min: f32,
-    /// Maximum allowed komi (default: 20.0).
+    /// Maximum allowed komi (default: 50.0).
     pub komi_max: f32,
-    /// Number of episodes between komi adjustments (default: 100).
+    /// Number of episodes between komi adjustments (default: 50).
     pub komi_window: usize,
     /// Use score-based rewards instead of binary win/loss (default: true).
     pub score_based_rewards: bool,
@@ -688,10 +690,10 @@ impl Default for GoGZeroSelfPlayConfig {
             progress_interval: 50,
             initial_komi: 7.5,
             adaptive_komi: true,
-            komi_adjustment_step: 2.0,
+            komi_adjustment_step: 10.0,
             komi_min: 0.0,
-            komi_max: 20.0,
-            komi_window: 100,
+            komi_max: 50.0,
+            komi_window: 50,
             score_based_rewards: true,
         }
     }
@@ -759,6 +761,8 @@ pub fn run_gzero_selfplay(
     let mut current_komi = config.initial_komi;
     let mut komi_history: Vec<(usize, f32)> = Vec::new();
     let mut total_score_margin = 0.0_f32;
+    // Raw (unnormalized) scores per episode for score-margin-guided komi.
+    let mut episode_raw_scores: Vec<f32> = Vec::with_capacity(config.num_episodes);
 
     // Per-template delta evolution: (episode, mean_delta) per template
     let mut template_delta_history: Vec<Vec<(usize, f32)>> =
@@ -867,6 +871,7 @@ pub fn run_gzero_selfplay(
             0.0
         };
         total_score_margin += score_margin;
+        episode_raw_scores.push(score);
 
         // Finalize replay
         replay.finalize(winner, state.score());
@@ -901,28 +906,39 @@ pub fn run_gzero_selfplay(
             }
         }
 
-        // Adaptive komi adjustment
+        // Adaptive komi — score-margin-guided with damping.
+        //
+        // Instead of win-rate thresholds (which oscillate wildly in small windows),
+        // use the average raw score margin to compute a precise komi delta.
+        // Positive avg_score = Black advantage → increase komi.
+        // Damping factor (0.5) prevents overshoot; clamp to max_step prevents wild swings.
         if config.adaptive_komi && episode_num % config.komi_window == 0 && episode_num > 0 {
             let window_start = episode_num.saturating_sub(config.komi_window);
-            let window_episodes = &episodes[window_start..episode_num];
-            let window_black_wins = window_episodes
-                .iter()
-                .filter(|e| e.winner == Some(GoCell::Black))
-                .count();
-            let window_total = window_episodes.len().max(1);
-            let black_wr = window_black_wins as f32 / window_total as f32;
+            let window_scores = &episode_raw_scores[window_start..episode_num];
+            let window_total = window_scores.len().max(1);
+            let avg_score: f32 = window_scores.iter().sum::<f32>() / window_total as f32;
+
+            // Score-guided delta: avg_score is positive when Black is ahead.
+            // To compensate, increase komi (give White more points).
+            // Damping = 0.5 to converge without overshooting.
+            const DAMPING: f32 = 0.5;
+            let raw_delta = avg_score * DAMPING;
+            // Clamp to base step to prevent oscillation at extreme scores.
+            let clamped_delta =
+                raw_delta.clamp(-config.komi_adjustment_step, config.komi_adjustment_step);
 
             let old_komi = current_komi;
-            if black_wr > 0.7 {
-                current_komi = (current_komi + config.komi_adjustment_step).min(config.komi_max);
-            } else if black_wr < 0.3 {
-                current_komi = (current_komi - config.komi_adjustment_step).max(config.komi_min);
+            if clamped_delta.abs() > 0.1 {
+                current_komi =
+                    (current_komi + clamped_delta).clamp(config.komi_min, config.komi_max);
             }
 
             if old_komi != current_komi {
-                let black_wr_pct = black_wr * 100.0;
+                let black_wr = window_scores.iter().filter(|&&s| s > 0.0).count() as f32
+                    / window_total as f32
+                    * 100.0;
                 eprintln!(
-                    "  [komi] Episode {episode_num}: {old_komi:.1} → {current_komi:.1} (B win rate: {black_wr_pct:.0}%)"
+                    "  [komi] Episode {episode_num}: {old_komi:.1} → {current_komi:.1} (avg margin: {avg_score:+.1}, B win: {black_wr:.0}%)"
                 );
             }
 

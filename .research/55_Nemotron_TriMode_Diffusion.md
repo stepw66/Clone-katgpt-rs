@@ -104,32 +104,39 @@ Temperature: τ=3.0 for distributions, τ=1.0 for CE
 | SDAR sigmoid gating | `pruners/sdar_gate.rs` modelless | ✅ Plan 072 |
 | Gemma 2 model loading | `riir-engine/safetensors_loader.rs` | ✅ Plan 087 |
 | KV cache | `MultiLayerKVCache`, `PagedKVCache` | ✅ Production |
-| **Self-speculation (Diff→AR)** | **MISSING** | ❌ Gap |
-| **Dual-stream attention** | **MISSING** | ❌ Gap |
-| **Trained sampler** | **MISSING** | ❌ Gap |
-| **LoRA drafter alignment loss** | **MISSING** | ❌ Gap (riir-gpu) |
-| **Global loss averaging** | **MISSING** | ❌ Gap |
+| Draft→Verify→Accept pattern | `speculative/step.rs` `speculative_step_rollback()` | ✅ Production |
+| `SpeculativeVerifier` trait | `verifier.rs` with `SimulatedVerifier`, `LeviathanVerifier` | ✅ Production |
+| DDTree path extraction | `speculative/dd_tree.rs` | ✅ Production |
+| KV cache snapshot/rollback | `MultiLayerKVCache::snapshot()/restore()` | ✅ Production |
+| Prefix acceptance logic | `LeviathanVerifier::speculate()` | ✅ Production |
+| **D2F Drafter Verifier** | **MISSING — new `SpeculativeVerifier` impl** | ❌ ~100 lines |
+| **Dual-stream attention** | **MISSING** (training-only, not needed for inference) | — |
+| **Trained sampler** | **MISSING** | ❌ Research |
+| **LoRA drafter alignment loss** | **MISSING** | ❌ riir-gpu |
+| **Global loss averaging** | **MISSING** | ❌ ~30 lines |
 
 ---
 
 ## Distillation Ideas for Our System
 
-### D1: Self-Speculation Mode (HIGH VALUE, MEDIUM EFFORT)
+### D1: D2F Drafter Verifier (LOW EFFORT — Same Pattern, Different Drafter)
 
-Our D2F diffusion and AR speculative decoding are currently separate. Self-speculation unifies them:
+**Honest take:** The Nemotron "self-speculation" is NOT a new system. It's the same `Draft → Verify → Prefix Accept` pattern we already have in `LeviathanVerifier`. The only delta is **what does the drafting**:
 
-```
-1. Forward pass 1: Diffusion drafts k tokens (block-causal, our existing d2f_decode_block)
-2. Forward pass 2: AR verifies same tokens (causal, our existing forward())
-3. Accept longest prefix match
-```
+| Verifier | Drafter | Verify Method | Our Code |
+|---|---|---|---|
+| `SimulatedVerifier` | DFlash (AR) | Simulated acceptance | ✅ `verifier.rs` |
+| `LeviathanVerifier` | DFlash (AR) + MTP activation | Real p/q rejection, DDTree, KV rollback | ✅ `verifier.rs` |
+| **`D2fDrafterVerifier`** | **D2F diffusion (parallel)** | **Real AR verify, prefix accept** | ❌ **~100 lines** |
 
-**What we need:**
-- New `SelfSpeculationState` struct
-- `self_speculate_step()` that calls d2f draft → AR verify → prefix match
-- Integration with existing `SpeculativeVerifier` trait
+The actual code is a new `impl SpeculativeVerifier for D2fDrafterVerifier` that:
+1. Calls `d2f_decode_block()` instead of `dflash_predict()` for drafting
+2. Calls existing `forward()` for verification (same as `LeviathanVerifier`)
+3. Uses existing prefix acceptance logic (same as `LeviathanVerifier`)
 
-**Proof task:** Compare self-speculation acceptance rate vs our current MTP drafter on same model.
+This is a **variant**, not a new system. The `SpeculativeVerifier` trait already abstracts the orchestration.
+
+**Proof task:** Compare D2F drafter acceptance rate vs AR drafter (DFlash/Leviathan) on same model.
 
 ### D2: Mode-Adaptive Decode Strategy (LOW EFFORT)
 
@@ -230,11 +237,11 @@ LoRA: rank=128, α=512 on o_proj only (~36M params, 0.4% backbone)
 
 ### What We Should Steal (Priority Order)
 
-1. **Self-speculation orchestration** (P0) — bridges our D2F + AR, no new kernels needed
-2. **Global loss averaging** (P1) — one-line change, +2.12% accuracy
-3. **LoRA drafter alignment loss** (P2) — new training loss in riir-gpu
-4. **Trained sampler** (P3) — research project, needs trajectory data
-5. **Mode-adaptive decode** (P1) — extend existing DecodeStrategy enum
+1. **D2F drafter verifier** (P0) — new `SpeculativeVerifier` impl, ~100 lines, no new kernels
+2. **Global loss averaging** (P1) — one-line change in `masked_loss()`, +2.12% accuracy
+3. **Mode-adaptive decode** (P1) — extend existing `DecodeStrategy` enum with `SelfSpeculation` variant
+4. **LoRA drafter alignment loss** (P2) — new training loss in riir-gpu
+5. **Trained sampler** (P3) — research project, needs trajectory data
 
 ### What We Should NOT Steal
 
@@ -246,7 +253,7 @@ LoRA: rank=128, α=512 on o_proj only (~36M params, 0.4% backbone)
 
 The paper validates our D2F approach (Plan 066) — block-causal attention with bidirectional intra-block denoising is exactly what Nemotron uses. Our architecture is already aligned.
 
-The missing piece is **self-speculation orchestration** — using our existing D2F diffusion as drafter and existing AR as verifier in a unified loop. This is ~200 lines of new code, no new GPU kernels, and should work with our existing trained models.
+The missing piece is a **D2F drafter verifier** — a new `impl SpeculativeVerifier` that uses `d2f_decode_block()` instead of `dflash_predict()` for drafting. This is ~100 lines of new code, no new GPU kernels, and plugs directly into our existing `SpeculativeVerifier` trait. The draft→verify→accept pattern is identical to `LeviathanVerifier`; only the drafter backend changes.
 
 The SOL analysis is the most exciting finding: **diffusion decoding has 76.5% headroom beyond self-speculation**. This means our D2F investment has long-term upside — better samplers will unlock more parallelism over time.
 

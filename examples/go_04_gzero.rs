@@ -183,10 +183,10 @@ fn section_full_selfplay(num_episodes: usize, board_size: usize, delta_gating: b
         progress_interval: DEFAULT_PROGRESS,
         initial_komi: 7.5,
         adaptive_komi: true,
-        komi_adjustment_step: 2.0,
+        komi_adjustment_step: 10.0,
         komi_min: 0.0,
-        komi_max: 20.0,
-        komi_window: 100,
+        komi_max: 50.0,
+        komi_window: 50,
         score_based_rewards: true,
     };
 
