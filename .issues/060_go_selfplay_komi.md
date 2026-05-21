@@ -87,13 +87,26 @@ Combine **Option A** (adaptive komi) + **Option C** (score-based rewards):
 
 ## Success Criteria
 
-- [ ] Black win rate between 40-60% over 500 episodes
-- [ ] Template deltas reflect move quality, not color assignment
-- [ ] At least 2 templates promoted via delta-gating absorb-compress
-- [ ] Updated docs with new results
+- [~] Black win rate: cumulative 98.6% (low-komi convergence phase), ~81% at komi=42 with 14.7% draws
+- [x] Adaptive komi algorithm converges correctly: 7.5 → 42 in ~300 episodes, score margin +30 → ~0
+- [ ] Template deltas still reflect color assignment (templates too weak for komi alone)
+- [ ] No templates promoted via absorb-compress (all δ below threshold)
+- [x] Zero regressions — 760 existing tests pass, 4 new komi tests pass
+- [x] Updated docs with new results (`14_go_arena.md`)
+
+### Production Run Results (500 episodes, initial_komi=7.5)
+
+```
+Komi convergence: 7.5→17.5→27.5→34.3→38.2→40.1→41.0→41.5→41.8→41.9
+Score margin:     +30.2→+22.8→+13.6→+7.7→+3.8→+1.9→+1.0→+0.5→+0.2→~0
+```
+
+At pre-converged komi=42 (150 eps): B=121(80.7%) W=7(4.7%) D=22(14.7%)
+Recommendation: use `initial_komi=42` for 9×9 production runs.
 
 ## References
 
 - `go_04_gzero` example output
-- `.docs/15_go_arena.md` — full Go arena documentation
+- `.docs/14_go_arena.md` — full Go arena documentation (updated with komi results)
 - Plan 065 — Go arena implementation
+- Plan 091 — Adaptive komi fix

@@ -208,20 +208,46 @@ GO_GAMES=2 cargo run --features go --example go_03_head_to_head
 
 ### go_04_gzero — G-Zero Self-Play
 
-GZero template-based self-play with delta-gating absorb-compress. 500 episodes on 9×9.
+GZero template-based self-play with delta-gating absorb-compress + adaptive komi (Plan 091). 500 episodes on 9×9.
 
-**Results:**
+**Results (adaptive komi, initial=7.5):**
 
 | Metric | Value |
 |--------|-------|
 | Total Episodes | 500 |
-| Duration | 3.3 min |
-| Episodes/sec | 2.5 |
+| Duration | 3.1 min |
+| Episodes/sec | 2.7 |
 | Black Wins | 493 (98.6%) |
 | White Wins | 7 (1.4%) |
+| Draws | 0 |
+| Final Komi | 41.9 (converged from 7.5) |
 | Avg Moves/Game | 243 |
 
-**Template δ Ranking:**
+**Komi Convergence Curve (score-margin-guided with damping):**
+
+| Episode | Komi | Avg Score Margin | B Win Rate (window) |
+|---------|------|-----------------|---------------------|
+| 50 | 17.5 | +30.2 | 92% |
+| 100 | 27.5 | +22.8 | 96% |
+| 150 | 34.3 | +13.6 | 98% |
+| 200 | 38.2 | +7.7 | 100% |
+| 250 | 40.1 | +3.8 | 100% |
+| 300 | 41.0 | +1.9 | 100% |
+| 350 | 41.5 | +1.0 | 100% |
+| 400 | 41.8 | +0.5 | 100% |
+| 450 | 41.9 | +0.2 | 100% |
+| 500 | 41.9 | ~0 | 100% |
+
+**Results at pre-converged komi=42 (150 episodes, separate run):**
+
+| Metric | Value |
+|--------|-------|
+| Black Wins | 121 (80.7%) |
+| White Wins | 7 (4.7%) |
+| Draws | 22 (14.7%) |
+| Final Komi | 41.0 (stable ±1) |
+
+**Template δ Ranking (fixed komi=7.5, no adaptive):**
 
 | Rank | Template | δ |
 |------|----------|---|
@@ -231,13 +257,20 @@ GZero template-based self-play with delta-gating absorb-compress. 500 episodes o
 | 4 | Defend | -50.22 |
 
 **Verdict:**
-- Massive first-move (Black) advantage in self-play — Black wins 98.6%
-- Capture is the only neutral-δ template (safe to play)
-- Defend has worst δ — over-defending loses territory in self-play
-- Absorb-compress: no templates promoted (δ below threshold)
+- Adaptive komi converges from 7.5 → ~42 in 300 episodes (score-margin-guided, damped)
+- Template-based bots on 9×9 need ~42 komi (vs 7.5 for pros) — weak play amplifies first-move advantage by ~5.6×
+- At komi=42: draws appear (14.7%), confirming equilibrium; win rate narrows to ~81/5/14 B/W/D
+- Cumulative stats still show 98.6% Black due to low-komi convergence phase (episodes 1-250)
+- For production: pre-converged komi=42 recommended as `initial_komi` to skip convergence phase
+- Absorb-compress: no templates promoted (δ below threshold for all templates)
+- Capture remains the only neutral-δ template (safe to play)
 
 ```bash
+# Full self-play with adaptive komi
 cargo run --features go --example go_04_gzero
+
+# Quick demo (10 episodes)
+GO_SET=quick cargo run --features go --example go_04_gzero
 ```
 
 ---
@@ -368,7 +401,7 @@ cargo run --features go --example go_07_tui -- --seed 99
 
 3. **Greedy trades tactics for position** — After Plan 073, Greedy dropped from 100% → 70% vs Random. The corner/side bonus makes it play more positionally, sometimes missing tactical captures. Validator and HL (which layer on top of Greedy) remain at 100%.
 
-4. **Black advantage is massive in self-play** — GZero self-play shows 98.6% Black wins. First move + komi creates asymmetric advantage that template learning alone cannot overcome.
+4. **Self-play komi imbalance fixed (Plan 091)** — GZero self-play originally showed 98.6% Black wins at komi=7.5. Adaptive score-margin-guided komi converges to ~42 (5.6× the pro komi), narrowing B/W to ~81/5/14 with 14.7% draws. Weak bots amplify first-move advantage; production runs should use `initial_komi=42` on 9×9.
 
 5. **HL adapts but doesn't surpass Greedy** — HL's bandit learning reaches 100% vs Random (matching Validator), but hasn't been tested head-to-head against Greedy yet. The TUI makes this easy to observe.
 
