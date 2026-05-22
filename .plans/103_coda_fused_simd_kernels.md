@@ -10,13 +10,13 @@
 
 ### D1: Core Fused SIMD Kernels — Feature Gate `coda_fusion`
 
-- [ ] **T1**: Add `coda_fusion` feature to `microgpt-rs/Cargo.toml` (no default)
+- [x] **T1**: Add `coda_fusion` feature to `microgpt-rs/Cargo.toml` (no default)
   ```toml
   [features]
   coda_fusion = []
   ```
 
-- [ ] **T2**: Create `crates/microgpt-core/src/coda.rs` — fused SIMD kernel implementations
+- [x] **T2**: Create `crates/microgpt-core/src/coda.rs` — fused SIMD kernel implementations
   ```rust
   //! CODA-inspired fused SIMD kernels (Research 67).
   //!
@@ -29,7 +29,7 @@
   //! This lets us delay the row-wise RMSNorm scale past the next GEMM.
   ```
 
-- [ ] **T3**: Implement `simd_matmul_residual_partial_rms()` — the core fused kernel
+- [x] **T3**: Implement `simd_matmul_residual_partial_rms()` — the core fused kernel
   ```
   For each output row i:
     acc = dot(weight_row[i], input)     // SIMD dot product
@@ -42,7 +42,7 @@
   - partial_sums = per-block mean-square values
   - O = D * gamma (norm-weight scaled)
 
-- [ ] **T4**: Implement `compute_rstd()` — lightweight reduction over partial sums
+- [x] **T4**: Implement `compute_rstd()` — lightweight reduction over partial sums
   ```rust
   pub fn compute_rstd(partial_sums: &[f32], eps: f32) -> Vec<f32> {
       // One rstd per row: 1/sqrt(sum(partial_sums) + eps)
@@ -50,7 +50,7 @@
   ```
   This is the "auxiliary reduction" from CODA — tiny compared to full RMSNorm kernel.
 
-- [ ] **T5**: Implement `simd_matmul_rmsnorm_swiglu()` — fused MLP gate+up
+- [x] **T5**: Implement `simd_matmul_rmsnorm_swiglu()` — fused MLP gate+up
   ```
   For each output row i:
     acc = dot(weight_row[i], input) * rstd[row_of_i]   // matmul + delayed RMS scale
@@ -59,7 +59,7 @@
   ```
   Returns: output of dimension N/2 (SwiGLU halves the paired features)
 
-- [ ] **T6**: Implement `simd_matmul_residual()` — fused down-proj + residual
+- [x] **T6**: Implement `simd_matmul_residual()` — fused down-proj + residual
   ```
   For each output row i:
     acc = dot(weight_row[i], input)    // SIMD dot product
@@ -67,7 +67,7 @@
     output[i] = acc
   ```
 
-- [ ] **T7**: Implement `simd_matmul_rmsnorm_rope()` — fused QKV + RoPE (stretch)
+- [x] **T7**: Implement `simd_matmul_rmsnorm_rope()` — fused QKV + RoPE (stretch)
   ```
   For each output row i (paired features 2i, 2i+1):
     acc = dot(weight_row[i], input) * rstd[row_of_i]   // matmul + RMS scale
@@ -81,7 +81,7 @@
 
 ### D2: Wire Fused Kernels into Forward Pass
 
-- [ ] **T8**: Add `forward_coda()` in `src/transformer.rs` behind `#[cfg(feature = "coda_fusion")]`
+- [x] **T8**: Add `forward_coda()` in `src/transformer.rs` behind `#[cfg(feature = "coda_fusion")]`
   - Replaces the standard `forward_base()` layer loop with CODA-fused version
   - Layer structure changes from:
     ```
@@ -96,12 +96,12 @@
     ```
   - Falls back to `forward_base()` when feature is disabled (zero-cost abstraction)
 
-- [ ] **T9**: Handle Gemma2-specific activations
+- [x] **T9**: Handle Gemma2-specific activations
   - Gemma2 uses `gegelu_tanh` not `silu` for the gate activation
   - The `simd_matmul_rmsnorm_swiglu` kernel needs a generic activation parameter
   - Consider: `fn simd_matmul_rmsnorm_activation<A: Activation>(...)` where Activation is a trait
 
-- [ ] **T10**: Handle LoRA application in fused path
+- [x] **T10**: Handle LoRA application in fused path
   - LoRA is applied after each matmul: `output += B @ A @ input`
   - In the fused path, LoRA should be applied to the pre-residual matmul output
   - i.e., `acc = dot(W_row, input) + lora_dot(B_row, A @ input)`
@@ -109,18 +109,18 @@
 
 ### D3: GOAT Proof — Benchmark
 
-- [ ] **T11**: Create `tests/bench_103_coda_fusion_goat.rs`
+- [x] **T11**: Create `tests/bench_103_coda_fusion_goat.rs`
   - Benchmark: `forward_base()` vs `forward_coda()` on micro config (n_embd=64, 4 layers)
   - Measure: wall time per token (ns), L1 cache misses (via `perf stat` on Linux, `sample` on macOS)
   - Assert: `forward_coda()` >= 5% faster than `forward_base()` for BS=1 decode
   - Assert: output tokens are bit-identical (or within f32 epsilon for the partial RMS path)
   - Assert: zero overhead when `coda_fusion` feature is disabled
 
-- [ ] **T12**: Create `microgpt-rs/.benchmarks/030_coda_fusion_simd.md`
+- [x] **T12**: Create `microgpt-rs/.benchmarks/030_coda_fusion_simd.md`
   - Report: baseline vs fused, per-layer breakdown, buffer write count comparison
   - Include: numerical accuracy comparison (cosine similarity of outputs)
 
-- [ ] **T13**: Cross-validation with riir-ai GPU path
+- [x] **T13**: Cross-validation with riir-ai GPU path
   - Document the CODA epilogue patterns that should guide Plan 106 (CubeCL) tasks T2.3-T2.6
   - Specifically: which visitor primitives map to which CubeCL kernel types
 

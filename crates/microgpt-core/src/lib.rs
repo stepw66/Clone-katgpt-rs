@@ -6,6 +6,8 @@
 //!
 //! No feature flags on types — both projects get the full superset.
 
+#[cfg(feature = "coda_fusion")]
+pub mod coda;
 pub mod simd;
 pub mod types;
 
@@ -21,5 +23,11 @@ pub use types::DomainLatent;
 
 #[cfg(feature = "sparse_mlp")]
 pub use types::sparse_matmul;
+
+#[cfg(feature = "coda_fusion")]
+pub use coda::{
+    GateActivation, compute_rstd, simd_matmul_residual, simd_matmul_residual_partial_rms,
+    simd_matmul_rmsnorm_activation, simd_matmul_rmsnorm_rope, simd_matmul_rmsnorm_swiglu,
+};
 
 pub use simd::SimdLevel;

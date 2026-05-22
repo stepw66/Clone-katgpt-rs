@@ -291,6 +291,9 @@ pub struct ForwardContext {
     block_deltas: Vec<Vec<f32>>, // [n_blocks][n_embd] accumulated deltas per block
     #[cfg(feature = "delta_routing")]
     delta_routing_logits: Vec<f32>, // [max_sources] routing logits temp buffer
+    // CODA fused kernels: partial RMS accumulation buffer (Plan 103)
+    #[cfg(feature = "coda_fusion")]
+    coda_partial_sums: Vec<f32>, // [1] single-block RMS sum of squares
 }
 
 impl ForwardContext {
@@ -329,6 +332,8 @@ impl ForwardContext {
             },
             #[cfg(feature = "delta_routing")]
             delta_routing_logits: vec![0.0; config.n_layer + 1], // Max B+1 sources
+            #[cfg(feature = "coda_fusion")]
+            coda_partial_sums: vec![0.0; 1], // Single-block partial RMS (Plan 103)
         }
     }
 
@@ -462,13 +467,27 @@ pub fn forward<'a>(
     pos: usize,
     config: &Config,
 ) -> &'a mut [f32] {
-    #[cfg(not(feature = "domain_latent"))]
+    #[cfg(feature = "coda_fusion")]
     {
-        forward_base(ctx, weights, cache, token, pos, config, None)
+        #[cfg(not(feature = "domain_latent"))]
+        {
+            forward_coda(ctx, weights, cache, token, pos, config, None)
+        }
+        #[cfg(feature = "domain_latent")]
+        {
+            forward_coda(ctx, weights, cache, token, pos, config, None, None)
+        }
     }
-    #[cfg(feature = "domain_latent")]
+    #[cfg(not(feature = "coda_fusion"))]
     {
-        forward_base(ctx, weights, cache, token, pos, config, None, None)
+        #[cfg(not(feature = "domain_latent"))]
+        {
+            forward_base(ctx, weights, cache, token, pos, config, None)
+        }
+        #[cfg(feature = "domain_latent")]
+        {
+            forward_base(ctx, weights, cache, token, pos, config, None, None)
+        }
     }
 }
 
@@ -486,7 +505,14 @@ pub fn forward_with_domain_latent<'a>(
     lora: Option<&crate::types::LoraAdapter>,
     domain_latent: Option<&crate::types::DomainLatent>,
 ) -> &'a mut [f32] {
-    forward_base(ctx, weights, cache, token, pos, config, lora, domain_latent)
+    #[cfg(feature = "coda_fusion")]
+    {
+        forward_coda(ctx, weights, cache, token, pos, config, lora, domain_latent)
+    }
+    #[cfg(not(feature = "coda_fusion"))]
+    {
+        forward_base(ctx, weights, cache, token, pos, config, lora, domain_latent)
+    }
 }
 
 /// Stage-specialized forward pass (Plan 102: TileRT pipeline).
@@ -971,6 +997,287 @@ fn forward_base<'a>(
                 let norm = &weights.delta_routing_norm[layer_idx];
 
                 // Sources: accumulated deltas from previous blocks + current block
+                let mut source_refs: Vec<&[f32]> = Vec::new();
+                for prev_block in 0..=block_idx {
+                    if prev_block < ctx.block_deltas.len() {
+                        source_refs.push(&ctx.block_deltas[prev_block]);
+                    }
+                }
+
+                depth_route(
+                    &mut ctx.x[..n],
+                    &source_refs,
+                    query,
+                    norm,
+                    &mut ctx.delta_routing_logits,
+                    n,
+                );
+
+                // Reset current block delta
+                ctx.block_deltas[block_idx].fill(0.0);
+            }
+        }
+    }
+
+    // Snapshot hidden state (for Plan 009 compatibility)
+    ctx.hidden_state[..n].copy_from_slice(&ctx.x[..n]);
+
+    // LM Head: clustered when vocab >= threshold AND cluster weights present
+    if config.vocab_size >= config.mtp_cluster_vocab_threshold
+        && let Some(classifier) = weights.mtp_cluster_classifier.as_ref()
+        && let Some(cluster_map) = weights.mtp_cluster_map.as_ref()
+    {
+        clustered_lm_head(
+            &mut ctx.logits,
+            &ctx.x,
+            &weights.lm_head,
+            classifier,
+            cluster_map,
+            config.vocab_size,
+            n,
+        );
+    } else {
+        standard_lm_head(
+            &mut ctx.logits,
+            &ctx.x,
+            &weights.lm_head,
+            config.vocab_size,
+            n,
+        );
+    }
+
+    &mut ctx.logits
+}
+
+// ---------------------------------------------------------------------------
+// CODA Fused Forward Pass (Plan 103)
+// ---------------------------------------------------------------------------
+
+/// CODA-inspired fused forward pass (Research 67, Plan 103).
+///
+/// Algebraic reparameterization: fuse matmul+residual+rmsnorm+activation
+/// into single-pass SIMD loops, eliminating intermediate buffer writes.
+///
+/// Key identity (CODA §3.2.1):
+/// ```text
+/// RMSNorm(x@W + z) * gamma @ W' = r * ((x@W + z) * gamma) @ W'
+/// ```
+///
+/// This lets us delay the row-wise RMSNorm scale past the next GEMM,
+/// fusing 3 separate operations into one SIMD loop per kernel.
+///
+/// # Buffer Write Savings (per layer)
+///
+/// Eliminated: out_proj write, residual add, xr2 copy, rmsnorm (pre-MLP),
+/// gate_up write, activation pass, down_proj write, residual add = ~6 passes
+///
+/// Retained: 2× rmsnorm (pre-QKV), 1× xr copy = ~3 passes
+///
+/// # Feature Gate
+///
+/// Only compiled when `coda_fusion` feature is enabled. Falls back to
+/// [`forward_base`] when LoRA is active (T10: future fused LoRA support).
+#[cfg(feature = "coda_fusion")]
+#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_lines)]
+fn forward_coda<'a>(
+    ctx: &'a mut ForwardContext,
+    weights: &TransformerWeights,
+    cache: &mut MultiLayerKVCache,
+    token: usize,
+    pos: usize,
+    config: &Config,
+    lora: Option<&crate::types::LoraAdapter>,
+    #[cfg(feature = "domain_latent")] domain_latent: Option<&crate::types::DomainLatent>,
+) -> &'a mut [f32] {
+    // Fall back to standard path when LoRA is active (T10: future fused LoRA support)
+    if lora.is_some() {
+        #[cfg(feature = "domain_latent")]
+        return forward_base(ctx, weights, cache, token, pos, config, lora, domain_latent);
+        #[cfg(not(feature = "domain_latent"))]
+        return forward_base(ctx, weights, cache, token, pos, config, lora);
+    }
+
+    let n = config.n_embd;
+    let hd = config.head_dim;
+    let kvd = types::kv_dim(config);
+    let n_kv = config.n_kv_head;
+
+    // 1. Embedding: x = wte[token] + wpe[pos]
+    let tok_off = token * n;
+    let pos_off_emb = pos * n;
+    crate::simd::simd_add_into(
+        &mut ctx.x[..n],
+        &weights.wte[tok_off..tok_off + n],
+        &weights.wpe[pos_off_emb..pos_off_emb + n],
+    );
+
+    // 2. Layer loop with CODA-fused kernels
+    for (layer_idx, layer_weights) in weights.layers.iter().enumerate() {
+        let layer_cache = &mut cache.layers[layer_idx];
+
+        // Pre-attention: RMSNorm → save residual → RMSNorm (same as baseline)
+        rmsnorm(&mut ctx.x);
+        ctx.xr[..n].copy_from_slice(&ctx.x[..n]);
+        rmsnorm(&mut ctx.x);
+
+        // QKV projections (same as baseline — attention needs separate Q, K, V)
+        matmul(&mut ctx.q, &layer_weights.attn_wq, &ctx.x, n, n);
+        matmul(&mut ctx.k, &layer_weights.attn_wk, &ctx.x, kvd, n);
+        matmul(&mut ctx.v, &layer_weights.attn_wv, &ctx.x, kvd, n);
+
+        // Domain latent injection at mid-layer (Plan 038: Free Transformer adaptation)
+        #[cfg(feature = "domain_latent")]
+        if layer_idx == config.n_layer / 2
+            && let Some(dl) = domain_latent
+        {
+            crate::simd::simd_add_inplace(&mut ctx.k[..kvd], &dl.embedding[..kvd]);
+            crate::simd::simd_add_inplace(&mut ctx.v[..kvd], &dl.embedding[..kvd]);
+        }
+
+        // Store K,V in per-layer cache (kv_dim elements per position)
+        let pos_off = pos * kvd;
+        unsafe {
+            std::ptr::copy_nonoverlapping(
+                ctx.k.as_ptr(),
+                layer_cache.key.as_mut_ptr().add(pos_off),
+                kvd,
+            );
+            std::ptr::copy_nonoverlapping(
+                ctx.v.as_ptr(),
+                layer_cache.value.as_mut_ptr().add(pos_off),
+                kvd,
+            );
+        }
+
+        // Multi-head attention with GQA: fused score → softmax → weighted value per head
+        let scale = 1.0 / (hd as f32).sqrt();
+        ctx.attn_out[..n].fill(0.0);
+        let t_n = pos + 1;
+
+        for h in 0..config.n_head {
+            let kv_group = h * n_kv / config.n_head;
+            unsafe {
+                attention_head(
+                    &ctx.q,
+                    &layer_cache.key,
+                    &layer_cache.value,
+                    &mut ctx.attn_out,
+                    &mut ctx.scores,
+                    h * hd,
+                    kv_group * hd,
+                    kvd,
+                    hd,
+                    t_n,
+                    scale,
+                );
+            }
+        }
+
+        // ── CODA FUSED KERNEL 1: out_proj + residual + partial_rms ──────
+        // Replaces: matmul(x, wo, ao) + add(x, xr) + copy(xr2, x) + rmsnorm(x)
+        //
+        // D = wo @ attn_out + xr  → stored in ctx.xr2 (residual for down_proj)
+        // O = D * gamma          → stored in ctx.x (input to MLP, gamma=identity)
+        // partial_sums = Σ D[i]²  → for rstd computation
+        microgpt_core::coda::simd_matmul_residual_partial_rms(
+            &mut ctx.xr2[..n],          // output_d: D = matmul + residual
+            &mut ctx.x[..n],            // output_o: O = D * gamma (gamma=identity)
+            &mut ctx.coda_partial_sums, // partial RMS accumulation
+            &layer_weights.attn_wo,     // weight
+            &ctx.attn_out[..n],         // input
+            &ctx.xr[..n],               // residual
+            None,                       // gamma (None = identity for standard rmsnorm)
+            None,                       // bias (no LoRA in fused path)
+            n,                          // rows
+            n,                          // cols
+            n,                          // block_size (single block)
+        );
+
+        // ── CODA AUXILIARY REDUCTION: compute rstd ─────────────────────
+        // rstd = 1 / sqrt(mean(D²) + eps) — tiny reduction, O(1) for single block
+        let rstd = microgpt_core::coda::compute_rstd(&ctx.coda_partial_sums, n, 1e-5);
+
+        // ── CODA FUSED KERNEL 2: MLP matmul + delayed RMS + activation ─
+        // Replaces: rmsnorm(x) + matmul_relu(hidden, w1, x)
+        // hidden[i] = activation(dot(w1[i], O) * rstd)  — delayed RMS scale
+        microgpt_core::coda::simd_matmul_rmsnorm_activation(
+            &mut ctx.hidden,                           // output
+            &layer_weights.mlp_w1,                     // weight
+            &ctx.x[..n],                               // input (O from kernel 1)
+            rstd,                                      // delayed RMS scale
+            microgpt_core::coda::GateActivation::Relu, // matches baseline matmul_relu
+            config.mlp_hidden,                         // rows
+            n,                                         // cols
+        );
+
+        // CNA: modulate discovered circuit neurons (Plan 087)
+        #[cfg(feature = "cna_steering")]
+        if let Some(ref modulator) = ctx.cna_modulator {
+            crate::pruners::cna_modulate(&mut ctx.hidden, layer_idx, modulator);
+        }
+
+        // ── CODA FUSED KERNEL 3: down_proj + residual ─────────────────
+        // Replaces: matmul(x, w2, hidden) + add(x, xr2)
+        // x[i] = dot(w2[i], hidden) + xr2[i]
+        #[cfg(not(feature = "sparse_mlp"))]
+        microgpt_core::coda::simd_matmul_residual(
+            &mut ctx.x[..n],       // output
+            &layer_weights.mlp_w2, // weight
+            &ctx.hidden,           // input
+            &ctx.xr2[..n],         // residual (D from kernel 1)
+            n,                     // rows
+            config.mlp_hidden,     // cols
+        );
+
+        // Sparse MLP: try sparse first, fall back to fused dense + residual
+        #[cfg(feature = "sparse_mlp")]
+        {
+            let alive = types::sparse_matmul(
+                &mut ctx.x,
+                &layer_weights.mlp_w2,
+                &ctx.hidden,
+                n,
+                config.mlp_hidden,
+                &mut ctx.active_indices,
+                &mut ctx.active_values,
+            );
+            if (alive as f32 / config.mlp_hidden as f32) > (1.0 - config.sparse_threshold) {
+                // Too dense for sparse, use fused dense + residual
+                microgpt_core::coda::simd_matmul_residual(
+                    &mut ctx.x[..n],
+                    &layer_weights.mlp_w2,
+                    &ctx.hidden,
+                    &ctx.xr2[..n],
+                    n,
+                    config.mlp_hidden,
+                );
+            } else {
+                // Sparse succeeded, add residual manually
+                crate::simd::simd_add_inplace(&mut ctx.x[..n], &ctx.xr2[..n]);
+            }
+        }
+
+        // Delta routing: accumulate per-sublayer deltas, route at block boundaries (Plan 097)
+        #[cfg(feature = "delta_routing")]
+        {
+            let block_size = 4; // Default B=4
+            let block_idx = layer_idx / block_size;
+            let pos_in_block = layer_idx % block_size;
+
+            // Compute delta: current x minus pre-layer residual
+            for d in 0..n {
+                let delta = ctx.x[d] - ctx.xr[d];
+                if block_idx < ctx.block_deltas.len() {
+                    ctx.block_deltas[block_idx][d] += delta;
+                }
+            }
+
+            // At block boundary: route accumulated deltas from all completed blocks
+            if pos_in_block == block_size - 1 && block_idx < ctx.block_deltas.len() {
+                let query = &weights.delta_routing_query[layer_idx];
+                let norm = &weights.delta_routing_norm[layer_idx];
+
                 let mut source_refs: Vec<&[f32]> = Vec::new();
                 for prev_block in 0..=block_idx {
                     if prev_block < ctx.block_deltas.len() {
