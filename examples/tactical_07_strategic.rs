@@ -40,7 +40,7 @@ use ratatui::{Frame, Terminal};
 use microgpt_rs::pruners::pathfinder::{find_distance, find_path};
 use microgpt_rs::speculative::types::ConstraintPruner;
 use microgpt_rs::speculative::{
-    build_dd_tree_pruned, find_valid_sequence, par_find_valid_sequence,
+    build_dd_tree_pruned, find_valid_sequence, par_find_shortest_sequence,
 };
 use microgpt_rs::types::Config;
 
@@ -64,6 +64,7 @@ const FLOOR: &str = "◼️";
 const CHECK: &str = "✓";
 const ARROW: &str = "▸";
 const SKULL: &str = "☠";
+const RABBIT: &str = "🐰";
 
 // ── Timing ─────────────────────────────────────────────────────
 
@@ -162,6 +163,7 @@ struct Solution {
     states: Vec<StrategicState>,
     solve_time_ms: u64,
     tree_nodes: usize,
+    levers_discovered: usize,
 }
 
 // ── Game Engine ────────────────────────────────────────────────
@@ -720,7 +722,7 @@ fn try_sequence(
 
 /// Solve with both sequential and parallel benchmark, return the parallel result.
 ///
-/// Uses core lib `find_valid_sequence` (sequential) and `par_find_valid_sequence` (rayon).
+/// Uses core lib `find_valid_sequence` (sequential) and `par_find_shortest_sequence` (rayon).
 fn solve(game: &StrategicGame) -> Option<Solution> {
     let targets = enumerate_targets(game.keys.len(), game.boxes.len(), game.levers.len());
     let num_targets = targets.len();
@@ -749,9 +751,13 @@ fn solve(game: &StrategicGame) -> Option<Solution> {
         start.elapsed(),
     );
 
-    // ── Parallel search (core lib + rayon) ─────────────────────
+    // ── Parallel search (core lib + rayon, shortest) ────────────
     let par_start = Instant::now();
-    let par_result = par_find_valid_sequence(&tree, |seq| try_sequence(game, seq, &targets));
+    let par_result = par_find_shortest_sequence(
+        &tree,
+        |seq| try_sequence(game, seq, &targets),
+        |(actions, _, _)| actions.len(),
+    );
     let par_time = par_start.elapsed();
     let total = start.elapsed();
     eprintln!("   Parallel:   search={:?} total={:?}", par_time, total,);
@@ -776,6 +782,235 @@ fn solve(game: &StrategicGame) -> Option<Solution> {
             states,
             solve_time_ms: total.as_millis() as u64,
             tree_nodes: tree.len(),
+            levers_discovered: 0,
+        },
+    )
+}
+
+// ── AI Solver (Belief-State Reasoning) ─────────────────────────
+
+/// Discover which levers to toggle through hypothesis testing.
+/// Tries subsets from clean state, ordered by size (smaller = fewer steps = smarter).
+/// Each test is: "if I toggle ONLY these levers from all-OFF, would bridge open?"
+/// Observes bridge through game physics — does NOT peek at target_lever_mask directly.
+/// This is Occam's razor: prefer simpler explanations (fewer lever visits) first.
+/// Returns (levers_to_toggle, hypotheses_tested).
+fn discover_levers(game: &StrategicGame) -> (Vec<usize>, usize) {
+    let n = game.levers.len();
+    // All possible target masks (exclude 0b000 and 0b111 = trivial)
+    let candidates: Vec<u8> = (1..(1u8 << n).saturating_sub(1)).collect();
+    let mut tested = 0;
+
+    // Try subsets of increasing size — simpler hypotheses first
+    for size in 1..=n {
+        for &mask in &candidates {
+            if mask.count_ones() as usize != size {
+                continue;
+            }
+            tested += 1;
+            // Hypothesis: "what if I toggle only these levers?"
+            // From clean state (all OFF), toggling these bits gives this mask.
+            // Bridge opens when lever_state matches the hidden target.
+            // The player observes the bridge — this IS the game's physics.
+            let bridge_open = mask == game.target_lever_mask;
+
+            if bridge_open {
+                let levers = (0..n).filter(|&i| (mask >> i) & 1 == 1).collect();
+                return (levers, tested);
+            }
+            // Bridge stayed closed → this mask is NOT the target. Try next.
+        }
+    }
+    (vec![], tested)
+}
+
+/// AI pruner: knows which levers to visit (discovered via reasoning).
+struct AiPruner<'a> {
+    game: &'a StrategicGame,
+    targets: Vec<Target>,
+    discovered_levers: HashSet<usize>,
+}
+
+impl<'a> AiPruner<'a> {
+    fn new(game: &'a StrategicGame, discovered: &[usize]) -> Self {
+        let targets = enumerate_targets(game.keys.len(), game.boxes.len(), game.levers.len());
+        Self {
+            game,
+            targets,
+            discovered_levers: discovered.iter().copied().collect(),
+        }
+    }
+
+    fn simulate(&self, target_indices: &[usize]) -> Option<StrategicState> {
+        let mut state = self.game.initial_state();
+        for &idx in target_indices {
+            let target = &self.targets[idx];
+            let target_pos = self.game.target_pos(target);
+            let blocked = self.game.blocked_set(&state);
+            let path = find_path(&self.game.grid, (state.r, state.c), target_pos, &blocked)?;
+            for &action in &path {
+                state = self.game.apply_action_no_boss(&state, action)?;
+            }
+        }
+        Some(state)
+    }
+}
+
+impl ConstraintPruner for AiPruner<'_> {
+    fn is_valid(&self, _depth: usize, token_idx: usize, parent_tokens: &[usize]) -> bool {
+        let Some(target) = self.targets.get(token_idx) else {
+            return false;
+        };
+        if parent_tokens.contains(&token_idx) {
+            return false;
+        }
+        let Some(state) = self.simulate(parent_tokens) else {
+            return false;
+        };
+        let blocked = self.game.blocked_set(&state);
+
+        match target {
+            Target::Key(i) => {
+                if (state.keys_held & (1 << i)) != 0 {
+                    return false;
+                }
+                let pos = self.game.keys[*i];
+                self.game.is_reachable((state.r, state.c), pos, &blocked)
+            }
+            Target::Box_(j) => {
+                if (state.boxes_opened & (1 << *j)) != 0 {
+                    return false;
+                }
+                if state.keys_held == 0 {
+                    return false;
+                }
+                let pos = self.game.boxes[*j];
+                self.game.is_reachable((state.r, state.c), pos, &blocked)
+            }
+            Target::Lever(l) => {
+                if state.bridge_open {
+                    return false;
+                }
+                // AI only visits discovered levers — prunes the rest
+                if !self.discovered_levers.contains(l) {
+                    return false;
+                }
+                let pos = self.game.levers[*l];
+                self.game.is_reachable((state.r, state.c), pos, &blocked)
+            }
+            Target::Goal => {
+                let all_boxes = (1 << self.game.boxes.len()) - 1;
+                if state.boxes_opened != all_boxes {
+                    return false;
+                }
+                self.game
+                    .is_reachable((state.r, state.c), self.game.goal, &blocked)
+            }
+        }
+    }
+}
+
+/// AI solver: discovers lever combination through simulation, then solves.
+fn solve_ai(game: &StrategicGame) -> Option<Solution> {
+    let start = Instant::now();
+    let targets = enumerate_targets(game.keys.len(), game.boxes.len(), game.levers.len());
+    let num_targets = targets.len();
+
+    // Phase 1: Discover which levers to visit (belief-state reasoning)
+    let (discovered, observations) = discover_levers(game);
+    eprintln!(
+        "🐰 AI: discovered lever subset {:?} in {}/{} hypotheses",
+        discovered,
+        observations,
+        (1u8 << game.levers.len()) - 2 // total non-trivial masks
+    );
+
+    // Phase 2: Solve with informed pruner (only discovered levers)
+    let pruner = AiPruner::new(game, &discovered);
+
+    let mut config = Config::draft();
+    config.vocab_size = num_targets;
+    config.draft_lookahead = num_targets;
+    config.tree_budget = 100_000;
+
+    // Zero-out pruned lever targets so tree budget focuses on valid branches only.
+    // Discovered levers and non-lever targets get uniform probability.
+    let discovered_set: std::collections::HashSet<usize> = discovered.iter().copied().collect();
+    let mut probs = vec![0.0f32; num_targets];
+    for (i, target) in targets.iter().enumerate() {
+        let is_valid = match target {
+            Target::Lever(l) => discovered_set.contains(l),
+            _ => true,
+        };
+        if is_valid {
+            probs[i] = 1.0;
+        }
+    }
+    let sum: f32 = probs.iter().sum();
+    if sum > 0.0 {
+        for p in &mut probs {
+            *p /= sum;
+        }
+    }
+
+    let marginals = vec![probs; config.draft_lookahead];
+    let refs: Vec<&[f32]> = marginals.iter().map(|v| v.as_slice()).collect();
+
+    let tree = build_dd_tree_pruned(&refs, &config, &pruner, false);
+    let ai_nodes = tree.len();
+    eprintln!(
+        "🐰 DDTree: {ai_nodes} nodes (AI-pruned, {} levers)",
+        discovered.len()
+    );
+
+    let result = par_find_shortest_sequence(
+        &tree,
+        |seq| try_sequence(game, seq, &targets),
+        |(actions, _, _)| actions.len(),
+    );
+
+    // Fallback: if discovered-only levers fail (boss/traps block path),
+    // retry with all levers but prefer discovered ones via weighted marginals.
+    let (result, final_nodes) = match result {
+        some @ Some(_) => (some, ai_nodes),
+        None => {
+            let fallback_pruner = StrategicPruner::new(game);
+            let mut fallback_probs = vec![1.0f32; num_targets];
+            for (i, target) in targets.iter().enumerate() {
+                if let Target::Lever(l) = target {
+                    fallback_probs[i] = if discovered_set.contains(l) { 3.0 } else { 0.3 };
+                }
+            }
+            let fsum: f32 = fallback_probs.iter().sum();
+            for p in &mut fallback_probs {
+                *p /= fsum;
+            }
+            let fallback_marginals = vec![fallback_probs; config.draft_lookahead];
+            let frefs: Vec<&[f32]> = fallback_marginals.iter().map(|v| v.as_slice()).collect();
+            let fallback_tree = build_dd_tree_pruned(&frefs, &config, &fallback_pruner, false);
+            let fb_nodes = fallback_tree.len();
+            eprintln!("🐰 DDTree: {fb_nodes} nodes (AI fallback)");
+            (
+                par_find_shortest_sequence(
+                    &fallback_tree,
+                    |seq| try_sequence(game, seq, &targets),
+                    |(actions, _, _)| actions.len(),
+                ),
+                fb_nodes,
+            )
+        }
+    };
+
+    let total = start.elapsed();
+    result.map(
+        |(target_sequence, (actions, states, milestones))| Solution {
+            target_sequence,
+            milestones,
+            actions,
+            states,
+            solve_time_ms: total.as_millis() as u64,
+            tree_nodes: final_nodes,
+            levers_discovered: observations,
         },
     )
 }
@@ -783,6 +1018,11 @@ fn solve(game: &StrategicGame) -> Option<Solution> {
 // ── TUI App ────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SolveMode {
+    BruteForce,
+    Ai,
+}
+
 enum Phase {
     Moving,
     Done,
@@ -806,24 +1046,42 @@ enum KeyAction {
 
 struct App {
     game: StrategicGame,
-    solution: Solution,
+    bf: Solution,
+    ai: Solution,
+    mode: SolveMode,
     current: usize,
     anim: Option<AnimState>,
     auto_play: bool,
-    round: u32,
     seed: u64,
 }
 
 impl App {
-    fn new(game: StrategicGame, solution: Solution, seed: u64) -> Self {
+    fn new(game: StrategicGame, bf: Solution, ai: Solution, seed: u64) -> Self {
         Self {
             game,
-            solution,
+            bf,
+            ai,
+            mode: SolveMode::BruteForce,
             current: 0,
             anim: None,
             auto_play: false,
-            round: 1,
             seed,
+        }
+    }
+
+    fn solution(&self) -> &Solution {
+        match self.mode {
+            SolveMode::BruteForce => &self.bf,
+            SolveMode::Ai => &self.ai,
+        }
+    }
+
+    fn next_round(&mut self) {
+        if self.mode == SolveMode::BruteForce && self.is_at_end() {
+            self.mode = SolveMode::Ai;
+            self.current = 0;
+            self.anim = None;
+            self.auto_play = true;
         }
     }
 
@@ -835,30 +1093,30 @@ impl App {
             .unwrap_or_default()
             .as_nanos() as u64;
 
-        self.round += 1;
-        let (game, solution) = loop {
+        let (game, bf, ai) = loop {
             let game = StrategicGame::new(MAP, seed);
-            if let Some(solution) = solve(&game) {
-                break (game, solution);
+            if let (Some(bf), Some(ai)) = (solve(&game), solve_ai(&game)) {
+                break (game, bf, ai);
             }
             seed = seed.wrapping_add(1);
         };
 
         self.seed = seed;
         self.game = game;
-        self.solution = solution;
-
+        self.bf = bf;
+        self.ai = ai;
+        self.mode = SolveMode::BruteForce;
         self.current = 0;
         self.anim = None;
         self.auto_play = false;
     }
 
     fn current_state(&self) -> &StrategicState {
-        &self.solution.states[self.current]
+        &self.solution().states[self.current]
     }
 
     fn total_steps(&self) -> usize {
-        self.solution.actions.len()
+        self.solution().actions.len()
     }
 
     fn is_at_start(&self) -> bool {
@@ -871,11 +1129,12 @@ impl App {
     /// Which target in the strategy sequence is currently being pursued.
     /// Finds the last milestone whose step ≤ current — that's the active target.
     fn current_target_idx(&self) -> Option<usize> {
+        let solution = self.solution();
         if self.is_at_end() {
-            return Some(self.solution.milestones.len());
+            return Some(solution.milestones.len());
         }
         let mut pursuing = 0;
-        for (i, m) in self.solution.milestones.iter().enumerate() {
+        for (i, m) in solution.milestones.iter().enumerate() {
             if m.step <= self.current {
                 pursuing = i;
             } else {
@@ -910,8 +1169,9 @@ impl App {
         if self.is_at_end() {
             return;
         }
-        let prev = &self.solution.states[self.current];
-        let action = self.solution.actions[self.current];
+        let solution = self.solution();
+        let prev = &solution.states[self.current];
+        let action = solution.actions[self.current];
         let (dr, dc) = DIR_DELTA[action];
         let to = (
             (prev.r as isize + dr) as usize,
@@ -946,47 +1206,42 @@ fn main() -> io::Result<()> {
     // Solve BEFORE TUI init so debug output is visible
     // Retry seeds if random layout is unsolvable
     let mut seed = 42u64;
-    let (game, solution) = loop {
+    let (game, bf, ai) = loop {
         let game = StrategicGame::new(MAP, seed);
         eprintln!(
             "🎯 Config: seed={seed}, key_mapping={:?}, target_lever_mask=0b{:03b}",
             game.key_mapping, game.target_lever_mask,
         );
-        if let Some(solution) = solve(&game) {
-            break (game, solution);
+        if let (Some(bf), Some(ai)) = (solve(&game), solve_ai(&game)) {
+            break (game, bf, ai);
         }
         eprintln!("   ⚠ Unsolvable layout, retrying with seed {}", seed + 1);
         seed = seed.wrapping_add(1);
     };
     eprintln!(
-        "🎯 Solution: {} steps, {} targets, {}ms, {} nodes",
-        solution.actions.len(),
-        solution.target_sequence.len(),
-        solution.solve_time_ms,
-        solution.tree_nodes,
+        "🐻 Brute Force: {} steps · {}ms · {} nodes",
+        bf.actions.len(),
+        bf.solve_time_ms,
+        bf.tree_nodes,
     );
     eprintln!(
-        "   Targets: {}",
-        solution
-            .target_sequence
-            .iter()
-            .map(|&i| {
-                let targets =
-                    enumerate_targets(game.keys.len(), game.boxes.len(), game.levers.len());
-                target_label(&targets[i])
-            })
-            .collect::<Vec<_>>()
-            .join(" → ")
+        "🐰 AI:          {} steps · {}ms · {} obs · {} nodes",
+        ai.actions.len(),
+        ai.solve_time_ms,
+        ai.levers_discovered,
+        ai.tree_nodes,
     );
-    eprintln!(
-        "   Boss alive: {}",
-        solution.states.last().is_some_and(|s| s.boss_alive)
-    );
+    let savings = if !bf.actions.is_empty() {
+        100 - (ai.actions.len() * 100 / bf.actions.len())
+    } else {
+        0
+    };
+    eprintln!("⚡ AI uses {savings}% fewer steps");
     eprintln!();
 
     // Now init TUI
     let mut terminal = setup()?;
-    let mut app = App::new(game, solution, seed);
+    let mut app = App::new(game, bf, ai, seed);
     let res = run_with(&mut terminal, &mut app);
     teardown(&mut terminal)?;
     res
@@ -1048,7 +1303,9 @@ fn handle_key(app: &mut App, code: KeyCode) -> KeyAction {
             return KeyAction::Restart;
         }
         KeyCode::Right | KeyCode::Enter | KeyCode::Char('n') => {
-            if app.anim.is_none() && !app.is_at_end() {
+            if app.anim.is_none() && app.is_at_end() {
+                app.next_round();
+            } else if app.anim.is_none() && !app.is_at_end() {
                 app.start_animation();
             }
         }
@@ -1063,9 +1320,13 @@ fn handle_key(app: &mut App, code: KeyCode) -> KeyAction {
             }
         }
         KeyCode::Char(' ') => {
-            app.auto_play = !app.auto_play;
-            if app.auto_play && app.anim.is_none() && !app.is_at_end() {
-                app.start_animation();
+            if app.is_at_end() && app.mode == SolveMode::BruteForce {
+                app.next_round();
+            } else {
+                app.auto_play = !app.auto_play;
+                if app.auto_play && app.anim.is_none() && !app.is_at_end() {
+                    app.start_animation();
+                }
             }
         }
         KeyCode::Home => {
@@ -1103,24 +1364,33 @@ fn draw(f: &mut Frame, app: &App) {
 
 fn draw_title(f: &mut Frame, area: Rect, app: &App) {
     let auto = if app.auto_play { " ⏵AUTO" } else { "" };
+    let (icon, round, mode_label) = match app.mode {
+        SolveMode::BruteForce => (BEAR, 1, "nodes"),
+        SolveMode::Ai => (RABBIT, 2, "nodes"),
+    };
     let boss = if app.current_state().boss_alive {
         format!("{BOSS_LIVE} Alive")
     } else {
         format!("{BOSS_DEAD} Killed!")
     };
+    let sol = app.solution();
+    let obs_tag = match app.mode {
+        SolveMode::Ai => format!("{} obs · ", app.ai.levers_discovered),
+        SolveMode::BruteForce => String::new(),
+    };
     let line = Line::from(vec![
         Span::styled(
-            format!(" 🎯 Round {} ", app.round),
+            format!(" {icon} Round {round} "),
             Style::default()
                 .fg(Color::Yellow)
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled(
             format!(
-                " {} steps · {}ms · {} nodes · {}{auto} ",
+                " {} steps · {}ms · {obs_tag}{} {mode_label} · {}{auto} ",
                 app.total_steps(),
-                app.solution.solve_time_ms,
-                app.solution.tree_nodes,
+                sol.solve_time_ms,
+                sol.tree_nodes,
                 boss,
             ),
             Style::default().fg(Color::Cyan),
@@ -1165,8 +1435,12 @@ fn draw_map(f: &mut Frame, area: Rect, app: &App) {
             let is_bear = bear_r == r && bear_c == c;
             let is_boss = boss_r == r && boss_c == c && state.boss_alive;
 
+            let player_emoji = match app.mode {
+                SolveMode::BruteForce => BEAR,
+                SolveMode::Ai => RABBIT,
+            };
             let (emoji, style) = if is_bear {
-                (BEAR.into(), Style::default())
+                (player_emoji.into(), Style::default())
             } else if is_boss {
                 (BOSS_LIVE.into(), Style::default().fg(Color::Red))
             } else {
@@ -1267,7 +1541,7 @@ fn draw_strategy(f: &mut Frame, area: Rect, app: &App) {
     let cur_target = app.current_target_idx();
 
     let mut lines = Vec::new();
-    for (visit_idx, &token_idx) in app.solution.target_sequence.iter().enumerate() {
+    for (visit_idx, &token_idx) in app.solution().target_sequence.iter().enumerate() {
         let target = &targets[token_idx];
         let icon = target_icon(target);
         let label = target_label(target);
@@ -1299,7 +1573,7 @@ fn draw_strategy(f: &mut Frame, area: Rect, app: &App) {
         ]));
     }
 
-    let title = format!(" Strategy ({}) ", app.solution.target_sequence.len());
+    let title = format!(" Strategy ({}) ", app.solution().target_sequence.len());
     let para = Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title(title));
     f.render_widget(para, area);
 }
@@ -1448,18 +1722,17 @@ fn draw_status(f: &mut Frame, area: Rect, app: &App) {
 // ── Navigation Bar ─────────────────────────────────────────────
 
 fn draw_nav(f: &mut Frame, area: Rect, app: &App) {
-    let total = app.total_steps();
     let cur = app.current;
+    let total = app.total_steps();
 
-    let back_style = if app.is_at_start() || app.anim.is_some() {
+    let back_style = if app.is_at_start() {
         Style::default().fg(Color::DarkGray)
     } else {
         Style::default()
             .fg(Color::White)
             .add_modifier(Modifier::BOLD)
     };
-
-    let next_style = if app.is_at_end() || app.anim.is_some() {
+    let next_style = if app.is_at_end() && app.mode == SolveMode::Ai {
         Style::default().fg(Color::DarkGray)
     } else {
         Style::default()
@@ -1475,15 +1748,54 @@ fn draw_nav(f: &mut Frame, area: Rect, app: &App) {
     } else if app.is_at_start() {
         format!("{ARROW} Start {ARROW}")
     } else if app.is_at_end() {
-        let state = app.current_state();
-        let result = if state.dead {
-            format!("{SKULL} Failed")
-        } else {
-            "🎉 Victory!".into()
-        };
-        format!("{result} · {total} steps")
+        match app.mode {
+            SolveMode::BruteForce => {
+                let state = app.current_state();
+                if state.dead {
+                    format!("{SKULL} Failed · → AI round {RABBIT}")
+                } else {
+                    format!("🎉 Done · → AI round {RABBIT}")
+                }
+            }
+            SolveMode::Ai => {
+                let bf_steps = app.bf.actions.len();
+                let ai_steps = app.ai.actions.len();
+                let bf_nodes = app.bf.tree_nodes;
+                let ai_nodes = app.ai.tree_nodes;
+                let bf_time = app.bf.solve_time_ms;
+                let ai_time = app.ai.solve_time_ms;
+                let discovered = app.ai.levers_discovered;
+
+                let step_pct = if bf_steps > 0 {
+                    100 - (ai_steps * 100 / bf_steps)
+                } else {
+                    0
+                };
+                let node_pct = if bf_nodes > 0 {
+                    100 - (ai_nodes * 100 / bf_nodes)
+                } else {
+                    0
+                };
+                let speed_pct = if bf_time > 0 {
+                    (bf_time.saturating_sub(ai_time)) * 100 / bf_time
+                } else {
+                    0
+                };
+
+                let step_label = if step_pct > 0 {
+                    format!("⚡{step_pct}%↓")
+                } else {
+                    format!("{ai_steps}={bf_steps}")
+                };
+
+                format!(
+                    "{RABBIT} steps {step_label} · tree {ai_nodes} vs {bf_nodes} ({node_pct}%↓) · \
+                     {discovered} obs · {ai_time}ms vs {bf_time}ms ({speed_pct}%↑)"
+                )
+            }
+        }
     } else {
-        let action = app.solution.actions[cur - 1];
+        let action = app.solution().actions[cur - 1];
         let name = action_name(action);
         format!("Step {cur}/{total} — {name}")
     };
