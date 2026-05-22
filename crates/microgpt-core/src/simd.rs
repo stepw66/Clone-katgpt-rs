@@ -949,6 +949,33 @@ pub fn simd_scale_mul_inplace(x: &mut [f32], gamma: &[f32], scale: f32) {
     }
 }
 
+/// SIMD-accelerated in-place exp: `x[i] = exp(x[i])` for all `i`.
+///
+/// Uses a 6th-order Cephes polynomial approximation with range reduction,
+/// accurate to ~1 ULP for inputs in [-88, 88]. Sufficient for softmax
+/// where inputs are shifted by max (range [0, ~30]).
+///
+/// NEON: 4× f32 per iteration. AVX2: 8× f32 per iteration.
+#[inline]
+pub fn simd_exp_inplace(x: &mut [f32]) {
+    #[cfg(target_arch = "aarch64")]
+    {
+        unsafe { neon_exp_inplace(x) }
+    }
+    #[cfg(target_arch = "x86_64")]
+    {
+        if is_avx2_fma_available() {
+            unsafe { avx2_exp_inplace(x) }
+        } else {
+            scalar_exp_inplace(x)
+        }
+    }
+    #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
+    {
+        scalar_exp_inplace(x)
+    }
+}
+
 // ── MaxSim Late-Interaction Scoring (Research 45, Plan 080) ────
 
 /// Memory-efficient MaxSim scoring: `score = Σ_i max_j dot(q_i, d_j)`.
@@ -1132,6 +1159,48 @@ fn scalar_scale_mul_inplace(x: &mut [f32], gamma: &[f32], scale: f32) {
     }
 }
 
+/// Scalar Cephes exp approximation: accurate to ~1 ULP for |x| < 88.
+/// Uses range reduction: exp(x) = exp(g) * 2^n where g = x - n*ln2, n = round(x/ln2).
+/// The reduced argument g is in [-0.5*ln2, 0.5*ln2] for minimal polynomial error.
+#[inline]
+fn cephes_exp_scalar(x: f32) -> f32 {
+    const LN2_HI: f32 = 6.9314575195e-01; // 0x3f317200
+    const LN2_LO: f32 = 1.4286067773e-06; // 0x35bfbe8e
+    const INV_LN2: f32 = 1.4426950216e+00; // 0x3fb8aa3b
+
+    // Range reduction: n = round(x / ln2)
+    let n = (x * INV_LN2).round() as i32;
+    let g = x - n as f32 * LN2_HI - n as f32 * LN2_LO;
+
+    // 6th-order Cephes polynomial for exp(g) in [-0.5*ln2, 0.5*ln2]
+    // Q(g) = 1 + g*(1 + g/2*(1 + g/3*(1 + g/4*(1 + g/5*(1 + g/6)))))
+    let q = 1.0
+        + g * (1.0
+            + g * 0.5
+                * (1.0
+                    + g * (1.0 / 3.0)
+                        * (1.0 + g * 0.25 * (1.0 + g * 0.2 * (1.0 + g * (1.0 / 6.0))))));
+
+    // 2^n via bit manipulation: (n + 127) << 23
+    if n < -126 {
+        return 0.0;
+    }
+    if n > 127 {
+        return f32::INFINITY;
+    }
+    let bits = ((n + 127) as u32) << 23;
+    let scale = f32::from_bits(bits);
+    scale * q
+}
+
+#[inline]
+#[allow(dead_code)]
+fn scalar_exp_inplace(x: &mut [f32]) {
+    for val in x.iter_mut() {
+        *val = cephes_exp_scalar(*val);
+    }
+}
+
 // ── NEON Backend (new primitives) ─────────────────────────────
 
 #[cfg(target_arch = "aarch64")]
@@ -1265,6 +1334,201 @@ unsafe fn neon_scale_mul_inplace(x: &mut [f32], gamma: &[f32], scale: f32) {
         }
         while i < x.len() {
             *x.get_unchecked_mut(i) = *gamma.get_unchecked(i) * *x.get_unchecked(i) * scale;
+            i += 1;
+        }
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[inline]
+unsafe fn avx2_exp_inplace(x: &mut [f32]) {
+    use core::arch::x86_64::{
+        _mm256_add_epi32, _mm256_add_ps, _mm256_castsi256_ps, _mm256_cvtps_epi32, _mm256_loadu_ps,
+        _mm256_mul_ps, _mm256_round_ps, _mm256_set1_epi32, _mm256_set1_ps, _mm256_slli_epi32,
+        _mm256_storeu_ps, _mm256_sub_ps,
+    };
+    unsafe {
+        const LN2_HI: f32 = 6.9314575195e-01;
+        const LN2_LO: f32 = 1.4286067773e-06;
+        const INV_LN2: f32 = 1.4426950216e+00;
+        const ROUND_NEAREST: i32 = 0x00;
+
+        let v_inv_ln2 = _mm256_set1_ps(INV_LN2);
+        let v_ln2_hi = _mm256_set1_ps(LN2_HI);
+        let v_ln2_lo = _mm256_set1_ps(LN2_LO);
+        let v_one = _mm256_set1_ps(1.0);
+        let v_half = _mm256_set1_ps(0.5);
+        let v_third = _mm256_set1_ps(1.0 / 3.0);
+        let v_quarter = _mm256_set1_ps(0.25);
+        let v_fifth = _mm256_set1_ps(0.2);
+        let v_sixth = _mm256_set1_ps(1.0 / 6.0);
+
+        let mut i = 0;
+        let chunks = x.len() / 8;
+
+        for _ in 0..chunks {
+            let vx = _mm256_loadu_ps(x.as_ptr().add(i));
+
+            // Range reduction: n = round(x * inv_ln2)
+            let vn_f = _mm256_round_ps(_mm256_mul_ps(vx, v_inv_ln2), ROUND_NEAREST);
+            let vn_i = _mm256_cvtps_epi32(vn_f);
+
+            // g = x - n * ln2_hi - n * ln2_lo
+            let vg = _mm256_sub_ps(
+                _mm256_sub_ps(vx, _mm256_mul_ps(vn_f, v_ln2_hi)),
+                _mm256_mul_ps(vn_f, v_ln2_lo),
+            );
+
+            // Cephes 6th-order polynomial
+            let q = _mm256_add_ps(
+                v_one,
+                _mm256_mul_ps(
+                    vg,
+                    _mm256_add_ps(
+                        v_one,
+                        _mm256_mul_ps(
+                            vg,
+                            _mm256_add_ps(
+                                v_half,
+                                _mm256_mul_ps(
+                                    vg,
+                                    _mm256_add_ps(
+                                        v_third,
+                                        _mm256_mul_ps(
+                                            vg,
+                                            _mm256_add_ps(
+                                                v_quarter,
+                                                _mm256_mul_ps(
+                                                    vg,
+                                                    _mm256_add_ps(
+                                                        v_fifth,
+                                                        _mm256_mul_ps(vg, v_sixth),
+                                                    ),
+                                                ),
+                                            ),
+                                        ),
+                                    ),
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
+            );
+
+            // 2^n via AVX2 bit manipulation: shift = (n + 127) << 23
+            let vn_shifted_i = _mm256_add_epi32(vn_i, _mm256_set1_epi32(127));
+            let v_scale_bits = _mm256_slli_epi32::<23>(vn_shifted_i);
+            let v_scale = _mm256_castsi256_ps(v_scale_bits);
+
+            let result = _mm256_mul_ps(v_scale, q);
+            _mm256_storeu_ps(x.as_mut_ptr().add(i), result);
+            i += 8;
+        }
+
+        // Scalar tail
+        while i < x.len() {
+            *x.get_unchecked_mut(i) = cephes_exp_scalar(*x.get_unchecked(i));
+            i += 1;
+        }
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+#[inline]
+unsafe fn neon_exp_inplace(x: &mut [f32]) {
+    use core::arch::aarch64::{
+        vaddq_f32, vcvtq_s32_f32, vdupq_n_f32, vld1q_f32, vmulq_f32, vrndq_f32, vst1q_f32,
+        vsubq_f32,
+    };
+    unsafe {
+        const LN2_HI: f32 = 6.9314575195e-01;
+        const LN2_LO: f32 = 1.4286067773e-06;
+        const INV_LN2: f32 = 1.4426950216e+00;
+
+        let v_inv_ln2 = vdupq_n_f32(INV_LN2);
+        let v_ln2_hi = vdupq_n_f32(LN2_HI);
+        let v_ln2_lo = vdupq_n_f32(LN2_LO);
+        let v_one = vdupq_n_f32(1.0);
+        let v_half = vdupq_n_f32(0.5);
+        let v_third = vdupq_n_f32(1.0 / 3.0);
+        let v_quarter = vdupq_n_f32(0.25);
+        let v_fifth = vdupq_n_f32(0.2);
+        let v_sixth = vdupq_n_f32(1.0 / 6.0);
+
+        let mut i = 0;
+        let chunks = x.len() / 4;
+
+        for _ in 0..chunks {
+            let vx = vld1q_f32(x.as_ptr().add(i));
+
+            // Range reduction: n = round(x * inv_ln2)
+            let vn_f = vrndq_f32(vmulq_f32(vx, v_inv_ln2));
+            let vn_i = vcvtq_s32_f32(vn_f);
+
+            // g = x - n * ln2_hi - n * ln2_lo
+            let vg = vsubq_f32(
+                vsubq_f32(vx, vmulq_f32(vn_f, v_ln2_hi)),
+                vmulq_f32(vn_f, v_ln2_lo),
+            );
+
+            // Cephes 6th-order polynomial
+            let q = vaddq_f32(
+                v_one,
+                vmulq_f32(
+                    vg,
+                    vaddq_f32(
+                        v_one,
+                        vmulq_f32(
+                            vg,
+                            vaddq_f32(
+                                v_half,
+                                vmulq_f32(
+                                    vg,
+                                    vaddq_f32(
+                                        v_third,
+                                        vmulq_f32(
+                                            vg,
+                                            vaddq_f32(
+                                                v_quarter,
+                                                vmulq_f32(
+                                                    vg,
+                                                    vaddq_f32(v_fifth, vmulq_f32(vg, v_sixth)),
+                                                ),
+                                            ),
+                                        ),
+                                    ),
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
+            );
+
+            // 2^n via scalar bit manipulation (NEON lacks direct float-to-bits cast)
+            let q_arr: [f32; 4] = core::mem::transmute(q);
+            let n_arr: [i32; 4] = core::mem::transmute(vn_i);
+            let mut result = [0.0f32; 4];
+            for j in 0..4 {
+                let n = n_arr[j];
+                if n < -126 {
+                    result[j] = 0.0;
+                } else if n > 127 {
+                    result[j] = f32::INFINITY;
+                } else {
+                    let bits = ((n + 127) as u32) << 23;
+                    let scale = f32::from_bits(bits);
+                    result[j] = scale * q_arr[j];
+                }
+            }
+            let vresult = vld1q_f32(result.as_ptr());
+
+            vst1q_f32(x.as_mut_ptr().add(i), vresult);
+            i += 4;
+        }
+
+        // Scalar tail
+        while i < x.len() {
+            *x.get_unchecked_mut(i) = cephes_exp_scalar(*x.get_unchecked(i));
             i += 1;
         }
     }

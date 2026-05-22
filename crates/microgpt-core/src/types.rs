@@ -916,14 +916,19 @@ pub fn softmax(x: &mut [f32]) {
     // Pass 1: find max for numerical stability (SIMD-accelerated)
     let max_val = crate::simd::simd_max_f32(x);
 
-    // Pass 2: exp(x - max) + accumulate sum
-    let mut sum = 0.0f32;
+    // Pass 2: x[i] -= max_val (scalar subtraction — fast, avoids allocation)
     for val in x.iter_mut() {
-        *val = (*val - max_val).exp();
-        sum += *val;
+        *val -= max_val;
     }
 
-    // Pass 3: normalize
+    // Pass 3: exp(x) — SIMD-accelerated via Cephes polynomial approximation
+    crate::simd::simd_exp_inplace(x);
+
+    // Pass 4: accumulate sum + normalize
+    let mut sum = 0.0f32;
+    for &val in x.iter() {
+        sum += val;
+    }
     let inv_sum = 1.0 / sum;
     crate::simd::simd_scale_inplace(x, inv_sum);
 }
@@ -943,14 +948,19 @@ pub fn softmax_scaled(x: &mut [f32], inv_temp: f32) {
     // Pass 1: find max for numerical stability (SIMD-accelerated)
     let max_val = crate::simd::simd_max_f32(x);
 
-    // Pass 2: exp((x - max) * inv_temp) + accumulate sum
-    let mut sum = 0.0f32;
+    // Pass 2: x[i] = (x[i] - max_val) * inv_temp (fused subtract + scale)
     for val in x.iter_mut() {
-        *val = ((*val - max_val) * inv_temp).exp();
-        sum += *val;
+        *val = (*val - max_val) * inv_temp;
     }
 
-    // Pass 3: normalize
+    // Pass 3: exp(x) — SIMD-accelerated via Cephes polynomial approximation
+    crate::simd::simd_exp_inplace(x);
+
+    // Pass 4: accumulate sum + normalize
+    let mut sum = 0.0f32;
+    for &val in x.iter() {
+        sum += val;
+    }
     let inv_sum = 1.0 / sum;
     crate::simd::simd_scale_inplace(x, inv_sum);
 }
