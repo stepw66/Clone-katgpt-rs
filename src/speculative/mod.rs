@@ -27,7 +27,7 @@ pub use dd_tree::{
     build_dd_tree_pruned, build_dd_tree_screened, build_dd_tree_sde, build_inference_result,
     extract_all_sequences, extract_best_path, extract_best_path_into, extract_candidate_sequences,
     extract_parent_tokens, find_valid_sequence, inject_sde_noise, merge_retrieved_branches,
-    par_find_valid_sequence,
+    par_find_shortest_sequence, par_find_valid_sequence,
 };
 
 #[cfg(feature = "elf_sde")]

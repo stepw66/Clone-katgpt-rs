@@ -603,6 +603,54 @@ where
     None
 }
 
+/// Parallel search for the **shortest** valid sequence by cost.
+///
+/// Unlike [`par_find_valid_sequence`] which returns the first valid candidate,
+/// this validates all candidates in parallel and returns the one with minimum cost.
+/// Use when optimality (fewest steps) matters more than speed.
+///
+/// # Arguments
+///
+/// * `tree` — DDTree nodes (one candidate sequence per node)
+/// * `validator` — Returns `Some(result)` for valid sequences, `None` for invalid
+/// * `cost_fn` — Extracts cost from result (e.g., `|r: &T| r.0.len()` for step count)
+///
+/// # Example
+///
+/// ```ignore
+/// use microgpt_rs::speculative::dd_tree::par_find_shortest_sequence;
+///
+/// let result = par_find_shortest_sequence(
+///     &tree,
+///     |seq| try_sequence(game, seq, &targets),
+///     |(actions, _, _)| actions.len(),
+/// );
+/// ```
+pub fn par_find_shortest_sequence<T, V, C>(
+    tree: &[TreeNode],
+    validator: V,
+    cost_fn: C,
+) -> Option<(Vec<usize>, T)>
+where
+    V: Fn(&[usize]) -> Option<T> + Sync,
+    T: Send,
+    C: Fn(&T) -> usize + Sync,
+{
+    if tree.is_empty() {
+        return None;
+    }
+
+    let candidates: Vec<Vec<usize>> = tree
+        .iter()
+        .map(|node| extract_parent_tokens(node.parent_path, node.depth + 1))
+        .collect();
+
+    candidates
+        .par_iter()
+        .filter_map(|seq| validator(seq).map(|result| (seq.clone(), result)))
+        .min_by_key(|(_, result)| cost_fn(result))
+}
+
 /// Build an InferenceResult from a completed DDTree inference.
 pub fn build_inference_result(
     domain: &str,
