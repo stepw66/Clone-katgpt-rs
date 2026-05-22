@@ -1014,13 +1014,9 @@ pub fn rmsnorm_with_gamma_eps(x: &mut [f32], gamma: &[f32], eps: f64) {
     if n == 0 {
         return;
     }
-    let sum_sq: f32 = x.iter().map(|&v| v * v).sum();
+    let sum_sq = crate::simd::simd_dot_f32(x, x, n);
     let inv_rms = 1.0 / (sum_sq / n as f32 + eps as f32).sqrt();
-    for i in 0..n {
-        unsafe {
-            *x.get_unchecked_mut(i) = *gamma.get_unchecked(i) * *x.get_unchecked(i) * inv_rms;
-        }
-    }
+    crate::simd::simd_scale_mul_inplace(x, gamma, inv_rms);
 }
 
 /// Matrix-vector multiply: output = weight @ input.

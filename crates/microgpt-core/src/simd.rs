@@ -916,6 +916,39 @@ pub fn simd_fused_decay_write(dst: &mut [f32], decay: f32, src: &[f32], write: f
     }
 }
 
+/// SIMD-accelerated fused scale+multiply: `x[i] = gamma[i] * x[i] * scale`.
+///
+/// Used for `rmsnorm_with_gamma`: fuses the inv_rms scale and learnable gamma
+/// multiply into a single pass, saving one full buffer scan vs separate
+/// `simd_scale_inplace` + elementwise multiply.
+///
+/// NEON: fused via `vmulq_f32` (2 multiplies per 4 elements).
+/// AVX2: fused via `_mm256_mul_ps` (2 multiplies per 8 elements).
+#[inline]
+pub fn simd_scale_mul_inplace(x: &mut [f32], gamma: &[f32], scale: f32) {
+    debug_assert_eq!(
+        x.len(),
+        gamma.len(),
+        "simd_scale_mul_inplace: slices must have equal length"
+    );
+    #[cfg(target_arch = "aarch64")]
+    {
+        unsafe { neon_scale_mul_inplace(x, gamma, scale) }
+    }
+    #[cfg(target_arch = "x86_64")]
+    {
+        if is_avx2_fma_available() {
+            unsafe { avx2_scale_mul_inplace(x, gamma, scale) }
+        } else {
+            scalar_scale_mul_inplace(x, gamma, scale)
+        }
+    }
+    #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
+    {
+        scalar_scale_mul_inplace(x, gamma, scale)
+    }
+}
+
 // ── MaxSim Late-Interaction Scoring (Research 45, Plan 080) ────
 
 /// Memory-efficient MaxSim scoring: `score = Σ_i max_j dot(q_i, d_j)`.
@@ -1089,6 +1122,16 @@ fn scalar_fused_decay_write(dst: &mut [f32], decay: f32, src: &[f32], write: f32
     }
 }
 
+#[inline]
+#[allow(dead_code)]
+fn scalar_scale_mul_inplace(x: &mut [f32], gamma: &[f32], scale: f32) {
+    for i in 0..x.len() {
+        unsafe {
+            *x.get_unchecked_mut(i) = *gamma.get_unchecked(i) * *x.get_unchecked(i) * scale;
+        }
+    }
+}
+
 // ── NEON Backend (new primitives) ─────────────────────────────
 
 #[cfg(target_arch = "aarch64")]
@@ -1205,6 +1248,28 @@ unsafe fn neon_fused_decay_write(dst: &mut [f32], decay: f32, src: &[f32], write
     }
 }
 
+#[cfg(target_arch = "aarch64")]
+#[inline]
+unsafe fn neon_scale_mul_inplace(x: &mut [f32], gamma: &[f32], scale: f32) {
+    use core::arch::aarch64::{vdupq_n_f32, vld1q_f32, vmulq_f32, vst1q_f32};
+    unsafe {
+        let vs = vdupq_n_f32(scale);
+        let mut i = 0;
+        let chunks = x.len() / 4;
+        for _ in 0..chunks {
+            let vx = vld1q_f32(x.as_ptr().add(i));
+            let vg = vld1q_f32(gamma.as_ptr().add(i));
+            let result = vmulq_f32(vg, vmulq_f32(vx, vs));
+            vst1q_f32(x.as_mut_ptr().add(i), result);
+            i += 4;
+        }
+        while i < x.len() {
+            *x.get_unchecked_mut(i) = *gamma.get_unchecked(i) * *x.get_unchecked(i) * scale;
+            i += 1;
+        }
+    }
+}
+
 // ── AVX2 Backend (new primitives) ─────────────────────────────
 
 #[cfg(target_arch = "x86_64")]
@@ -1294,24 +1359,51 @@ unsafe fn avx2_max_f32(x: &[f32]) -> f32 {
 #[inline]
 unsafe fn avx2_fused_decay_write(dst: &mut [f32], decay: f32, src: &[f32], write: f32) {
     use core::arch::x86_64::{
-        _mm256_fmadd_ps, _mm256_loadu_ps, _mm256_mul_ps, _mm256_set1_ps, _mm256_storeu_ps,
+        _mm256_add_ps, _mm256_loadu_ps, _mm256_mul_ps, _mm256_set1_ps, _mm256_storeu_ps,
     };
+
     unsafe {
-        let vd_decay = _mm256_set1_ps(decay);
-        let vd_write = _mm256_set1_ps(write);
+        let vd = _mm256_set1_ps(decay);
+        let vw = _mm256_set1_ps(write);
         let mut i = 0;
         let chunks = dst.len() / 8;
+
         for _ in 0..chunks {
             let vdst = _mm256_loadu_ps(dst.as_ptr().add(i));
             let vsrc = _mm256_loadu_ps(src.as_ptr().add(i));
-            // FMA: decay * vdst + write * vsrc
-            let result = _mm256_fmadd_ps(vdst, vd_decay, _mm256_mul_ps(vsrc, vd_write));
+            let result = _mm256_add_ps(_mm256_mul_ps(vd, vdst), _mm256_mul_ps(vw, vsrc));
             _mm256_storeu_ps(dst.as_mut_ptr().add(i), result);
             i += 8;
         }
+
         while i < dst.len() {
             *dst.get_unchecked_mut(i) =
                 decay * *dst.get_unchecked(i) + write * *src.get_unchecked(i);
+            i += 1;
+        }
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[inline]
+unsafe fn avx2_scale_mul_inplace(x: &mut [f32], gamma: &[f32], scale: f32) {
+    use core::arch::x86_64::{_mm256_loadu_ps, _mm256_mul_ps, _mm256_set1_ps, _mm256_storeu_ps};
+
+    unsafe {
+        let vs = _mm256_set1_ps(scale);
+        let mut i = 0;
+        let chunks = x.len() / 8;
+
+        for _ in 0..chunks {
+            let vx = _mm256_loadu_ps(x.as_ptr().add(i));
+            let vg = _mm256_loadu_ps(gamma.as_ptr().add(i));
+            let result = _mm256_mul_ps(vg, _mm256_mul_ps(vx, vs));
+            _mm256_storeu_ps(x.as_mut_ptr().add(i), result);
+            i += 8;
+        }
+
+        while i < x.len() {
+            *x.get_unchecked_mut(i) = *gamma.get_unchecked(i) * *x.get_unchecked(i) * scale;
             i += 1;
         }
     }

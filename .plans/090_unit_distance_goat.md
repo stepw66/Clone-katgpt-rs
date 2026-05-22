@@ -223,12 +223,12 @@ Ensure `unit_distance` feature gate has zero impact on default build.
 
 ### Checklist
 
-- [ ] `Cargo.toml`: `unit_distance` in `[features]` with optional deps only
-- [ ] All `src/unit_distance/` modules behind `#[cfg(feature = "unit_distance")]`
-- [ ] No `use` of unit_distance types in default modules
-- [ ] `cargo build` succeeds without `--features unit_distance`
-- [ ] `cargo test` passes without feature
-- [ ] `cargo clippy` clean without feature
+- [x] `Cargo.toml`: `unit_distance` in `[features]` with optional deps only
+- [x] All `src/unit_distance/` modules behind `#[cfg(feature = "unit_distance")]`
+- [x] No `use` of unit_distance types in default modules
+- [x] `cargo build` succeeds without `--features unit_distance`
+- [x] `cargo test` passes without feature
+- [x] `cargo clippy` clean without feature
 
 ---
 
