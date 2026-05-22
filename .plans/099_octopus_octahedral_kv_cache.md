@@ -35,9 +35,9 @@ At 2-bit, OCTOPUS is the only codec that doesn't collapse on needle-in-a-haystac
 - [x] T6: Add `octopus/kv_cache.rs` — `OctopusKVCache` implementing `QuantizedKVCache` trait
 - [x] T7: Add `octopus/forward.rs` — score-path decode + attention scoring helpers
 - [x] T8: Add `octopus` feature gate to `Cargo.toml` + conditional module in `src/lib.rs`
-- [ ] T9: Add GOAT benchmark — synthetic MSE, cosine, IP error sweep (2/3/4 bit, d=64/128/256)
-- [ ] T10: Add GOAT benchmark — compression ratio comparison vs. TurboQuant at matched bits
-- [ ] T11: Run GOAT proof, record results in `.benchmarks/022_octopus_goat.md`
+- [x] T9: Add GOAT benchmark — synthetic MSE, cosine, IP error sweep (2/3/4 bit, d=64/128/256)
+- [x] T10: Add GOAT benchmark — compression ratio comparison vs. TurboQuant at matched bits
+- [x] T11: Run GOAT proof, record results in `.benchmarks/022_octopus_goat.md`
 - [ ] T12: Update `README.md` with OCTOPUS section + production stack ordering
 
 ## Architecture
