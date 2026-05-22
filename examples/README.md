@@ -8,20 +8,109 @@ All examples run with `cargo run --example <name>`. Some require feature flags.
 |---|-------|----------|---------|
 | 1 | Bandit (RL) | 7 examples | `bandit` |
 | 2 | Heuristic Learning | 2 examples | `bandit` |
-| 3 | Bomberman Arena | 9 examples | `bomber`, `bomber-wasm`, `bomber-agent`, `ropd_rubric` |
+| 3 | Bomberman Arena | 13 examples | `bomber`, `bomber-wasm`, `bomber-agent`, `ropd_rubric`, `g_zero`, `sdar_gate`, `bt_rank`, `memo_reflections` |
 | 4 | Monopoly FSM | 4 examples | `monopoly` |
-| 5 | FFT Tactics Arena | 2 examples | `ropd_rubric`, `g_zero` |
+| 5 | FFT Tactics Arena | 3 examples | `ropd_rubric`, `g_zero`, `fft` |
 | 6 | GameState Forward Model | 2 examples | `game_state` |
 | 7 | Blue Bear | 2 examples | — |
-| 8 | Core | 4 examples | varies |
+| 8 | Core | 5 examples | varies |
 | 9 | Dungeon | 2 examples | — |
 | 10 | Sudoku | 4 examples | `sudoku` |
-| 11 | Tactical AI | 6 examples | — |
+| 11 | Tactical AI | 7 examples | — |
 | 12 | Review | 1 example | `bandit` |
 | 13 | Percepta Comparison | 1 example | — |
 | 14 | Getting Started | 1 example | — |
 | 15 | Stepwise Reward Shaping | 1 example | `stepcode` |
-| 16 | Go (AutoGo) | 8 examples | `go` |
+| 16 | Go (AutoGo) | 10 examples | `go`, `memo_reflections` |
+| 17 | CNA (Contrastive Neuron Analysis) | 3 examples | `cna_steering` |
+
+---
+
+## AI Classification
+
+Examples grouped by whether they use **AI/ML techniques** (learning, adaptation, search) or **deterministic methods** (brute force, fixed heuristics, constraint satisfaction).
+
+### 🧠 AI / Adaptive
+
+Examples that **learn, adapt, or use intelligent search** beyond brute force.
+
+| Example | AI Technique | Group |
+|---------|-------------|-------|
+| `bandit_01_basic` | UCB1, ε-greedy, Thompson Sampling — RL bandit strategies that learn optimal arms | Bandit |
+| `bandit_02_ddtree` | DDTree speculative decoding with bandit arm selection | Bandit |
+| `bandit_03_slot` | Bandit reward optimization | Bandit |
+| `bandit_04_combat` | Bandit action selection + opponent modeling | Bandit |
+| `bandit_05_rps` | Bandit strategy adaptation in tournament play | Bandit |
+| `bandit_06_resolver` | Constrained bandit with action masking | Bandit |
+| `bandit_07_director` | Meta-bandit selecting sub-bandit strategy per round | Bandit |
+| `hl_01_trial_log` | Q-value updates with structured trial tracking | HL |
+| `hl_02_hotswap` | Dynamic strategy switching from performance feedback | HL |
+| `bomber_03_hl_proof` | Bandit Q-learning convergence over 1000 games | Bomber |
+| `bomber_04_nn` | NNPlayer with WASM neural network validator | Bomber |
+| `bomber_08_agent_loop` | Evolutionary population-based rule search across generations | Bomber |
+| `bomber_09_rubric_tournament` | Rubric vector player (ROPD) + GZero self-play | Bomber |
+| `bomber_10_sdar_tournament` | SDAR player vs all baselines | Bomber |
+| `bomber_12_self_play_freeze` | Freeze/thaw bandit knowledge persistence across phases | Bomber |
+| `bomber_13_reflection_qa` | MeMo 5-step reflection QA pipeline on game data | Bomber |
+| `go_01_mcts` | MCTS (Monte Carlo Tree Search) — search-based AI | Go |
+| `go_04_gzero` | GZero self-play + template learning + delta-gating absorb-compress | Go |
+| `go_05_autoresearch` | Bandit-driven hyperparameter search (10 arms, discovers optimal configs) | Go |
+| `go_08_self_play_freeze` | Freeze/thaw knowledge pipeline with bandit learning | Go |
+| `go_09_reflection_qa` | MeMo 5-step reflection QA pipeline on Go game data | Go |
+| `game_state_01_bomber_mcts` | Generic MCTS search in Bomberman FFA | GameState |
+| `game_state_02_bomber_gvg` | MCTS with team-aware heuristics (2v2) | GameState |
+| `fft_01_arena` | HL bandit Q-learning player among 4 AI tiers | FFT |
+| `fft_02_rubric_tournament` | ROPD multi-criteria rubric + GZero self-play | FFT |
+| `review_01_metrics` | Bandit reviewer that learns to fix vs break picks | Review |
+| `stepcode_01_shaped_bandit` | Intra-trajectory reward shaping (StepCodeReasoner ICML 2026) | StepCode |
+| `core_02_raven` | RSM (Routing Slot Memory) — learned memory routing | Core |
+| `cna_01_discovery` | Contrastive neuron circuit discovery from activations | CNA |
+| `cna_02_steering` | Runtime activation modulation with discovered circuits | CNA |
+| `cna_03_go_circuit` | End-to-end circuit discovery from Go game data | CNA |
+| `monopoly_03_hl_proof` | Bandit Q-learning convergence proof over 1000 games (HL 56.5% win rate) | Monopoly |
+
+### ⚙️ Deterministic / Brute Force
+
+Examples using **fixed heuristics, constraint solving, or procedural methods** — no learning or adaptation.
+
+| Example | Method | Group |
+|---------|--------|-------|
+| `bomber_01_arena` | Fixed AI tiers (Random/Greedy/Validator), no learning | Bomber |
+| `bomber_02_tui` | TUI replay with fixed heuristics | Bomber |
+| `bomber_05_replay_gen` | Training data generation, no AI | Bomber |
+| `bomber_06_replay_gen_v2` | Enhanced data generation | Bomber |
+| `bomber_07_bomb_types` | Bomb variant demo, no AI | Bomber |
+| `bomber_11_bt_rank_tournament` | Bradley-Terry pairwise ranking (placeholder) | Bomber |
+| `monopoly_01_arena` | Fixed FSM tiers (Random/Greedy/Validator) | Monopoly |
+| `monopoly_02_tui` | TUI replay with fixed heuristics | Monopoly |
+| `monopoly_04_bench` | Performance benchmark | Monopoly |
+| `sudoku_01_9x9` | Constraint satisfaction / backtracking | Sudoku |
+| `sudoku_02_speculative` | DDTree + deterministic validator pruning | Sudoku |
+| `sudoku_03_tui` | TUI with deterministic solver | Sudoku |
+| `sudoku_04_percepta_vs` | Rust vs Python speed comparison | Sudoku |
+| `bear_01_demo` | DDTree constrained search, no learning | Bear |
+| `bear_02_tui` | TUI step-through replay | Bear |
+| `tactical_01_ai` | Fixed heuristics / pathfinding | Tactical |
+| `tactical_02_terrain` | Terrain-aware pathfinding | Tactical |
+| `tactical_03_procedural` | Procedural map generation | Tactical |
+| `tactical_04_parallel` | Parallel simulation (rayon), no learning | Tactical |
+| `tactical_05_bench` | Performance benchmark | Tactical |
+| `tactical_06_tui` | TUI map viewer | Tactical |
+| `tactical_07_strategic` | DDTree constraint puzzle + rayon parallel search | Tactical |
+| `dungeon_01_tui` | Procedural generation, no AI | Dungeon |
+| `dungeon_02_multifloor` | Multi-floor procedural generation | Dungeon |
+| `core_01_validator` | Syntax-aware token pruning | Core |
+| `core_03_ppot` | CPU resampling, not adaptive | Core |
+| `core_04_prefill` | Prompt processing | Core |
+| `core_05_maxsim` | SIMD late-interaction scoring | Core |
+| `go_00_api_bridge` | REST client, plays random | Go |
+| `go_02_tournament` | Fixed-strategy round-robin | Go |
+| `go_03_head_to_head` | External engine matchup via API | Go |
+| `go_06_bench` | Performance benchmark | Go |
+| `go_07_tui` | TUI viewer | Go |
+| `hello_py2rs` | Python-to-Rust tutorial | Getting Started |
+
+> **Rule of thumb:** If the example **adapts its behavior based on experience** → AI. If it **applies a fixed algorithm** → Deterministic.
 
 ---
 
