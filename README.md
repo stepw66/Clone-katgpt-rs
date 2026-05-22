@@ -21,7 +21,7 @@ Inspired by [microgpt-c](https://github.com/nicholasgasior/microgpt-c), [talos-v
 - **Bomberman Arena** — 4-player HL proof: adaptive intelligence (+177) > greedy (+131) > static rules (-30) > random (-55).
 - **Monopoly FSM Arena** — 4-player turn-based FSM: sequential phase AI (PreTurn→Rolling→Resolving→Strategic→EndTurn) with bandit strategy adaptation across 1000 games.
 - **Bandit + WASM Pruners** — `BanditPruner` wraps any `ScreeningPruner` with exploration. `WasmPruner` loads sandboxed `.wasm` validators.
-- **TurboQuant KV Cache** — 5-8× KV cache compression via random rotation + Lloyd-Max quantization (2-4 bit). 3-bit: 0.99 attention correlation, 0.98 cosine similarity. Superseded by OCTOPUS (primary), PlanarQuant/IsoQuant (speed alternatives).
+- **Hybrid OCT+PQ KV Cache** — Default KV codec: OCTOPUS triplet encoding + PlanarQuant 2D Givens rotation. Best MSE at all bit widths, 64× fewer rotation FMAs than pure OCTOPUS (256 vs 16,384). GOAT proved (Bench 024, Plan 101). TurboQuant/SpectralQuant available as alternatives.
 - **PFlash Block-Sparse Prefill** — Block-sparse speculative prefill with sink/window/alpha selection rules. Up to 21× sequence reduction with 100% NIAH needle retrieval.
 - **G-Zero Self-Play** — Verifier-free Hint-δ intrinsic reward makes modelless HL smarter (δ-gated AbsorbCompress + δ-reward BanditPruner), then optionally adds model-based self-play (GRPO Proposer + length-normalized DPO Generator). No external LLM judge needed.
 
@@ -328,7 +328,7 @@ src/percepta/
 
 ## 🗜️ TurboQuant: Near-Optimal KV Cache Compression (Legacy Baseline)
 
-Legacy baseline for benchmarking and education. Superseded by **OCTOPUS** (primary default) and **SpectralQuant** (secondary). Compresses KV cache from f32 (32 bits) to 2-4 bits per coordinate using random rotation + Lloyd-Max scalar quantization. Based on [TurboQuant (Zandieh et al., 2025)](https://arxiv.org/pdf/2504.19874).
+Legacy baseline for benchmarking and education. Superseded by **Hybrid OCT+PQ** (primary default, Plan 101) and **SpectralQuant** (calibrated alternative). Compresses KV cache from f32 (32 bits) to 2-4 bits per coordinate using random rotation + Lloyd-Max scalar quantization. Based on [TurboQuant (Zandieh et al., 2025)](https://arxiv.org/pdf/2504.19874).
 
 | Metric | Flat f32 | TQ 3-bit | TQ 4-bit |
 |--------|----------|----------|----------|
@@ -365,7 +365,7 @@ Data-driven spectral analysis replaces TurboQuant's random rotation with a calib
 📁 `src/spectralquant/` — `types.rs`, `spectral.rs`, `nonuniform_quant.rs`, `spectral_rotation.rs`, `spectral_kv_cache.rs`, `forward.rs`
 🔧 Feature flag: `spectral_quant` (**on by default**)
 
-## 🐙 OCTOPUS: Octahedral Triplet KV Cache Compression (Data-Oblivious, Default-On)
+## 🐙 OCTOPUS: Octahedral Triplet KV Cache Compression (Data-Oblivious, Legacy)
 
 Data-oblivious triplet codec that beats calibrated SpectralQuant at all bit widths. Groups rotated coordinates into contiguous 3-blocks, encodes direction via octahedral map (S² → [-1,1]²), and applies MSE-optimal non-uniform bit split (b+1 for direction, b-1 for norm). Based on [OCTOPUS (Boss et al., 2026)](https://arxiv.org/abs/2605.21226).
 
@@ -380,7 +380,7 @@ Data-oblivious triplet codec that beats calibrated SpectralQuant at all bit widt
 **First data-oblivious codec to beat a calibrated codec in our benchmarks.** Joint 3×3 rounding gives additional 6-9% MSE reduction (encoder-only, zero decoder change).
 
 **Production stack position:**
-1. **Hybrid OCT+PQ** — new default, best MSE + best rotation cost (Bench 024)
+1. **Hybrid OCT+PQ** — **default-on**, best MSE + best rotation cost (Bench 024, Plan 101)
 2. **OCTOPUS** — legacy baseline (same encoding, slower rotation; Bench 022/023)
 3. **PlanarQuant** — speed fallback (per-coordinate quantization)
 4. **SpectralQuant** — calibrated alternative, useful for per-dimension water-fill adaptation
@@ -388,7 +388,7 @@ Data-oblivious triplet codec that beats calibrated SpectralQuant at all bit widt
 6. **TurboQuant** — legacy baseline (off by default)
 
 📁 `src/octopus/` — `octahedral.rs`, `triplet.rs`, `codebook.rs`, `types.rs`, `encode.rs`, `kv_cache.rs`, `forward.rs`
-🔧 Feature flag: `octopus` (default-on, in `full`)
+🔧 Feature flag: `octopus` (pulled in by `hybrid_oct_pq`, in `full`)
 
 ## 🔧 Block-Diagonal Rotation: PlanarQuant & IsoQuant (Opt-In Speed Alternatives)
 
@@ -1394,7 +1394,7 @@ cargo clippy --all-targets --all-features --quiet
 | `dllm` | D2F Discrete Diffusion Forcing — mini dLLM + block-parallel decode (Plan 066) |
 | `tri_mode` | Tri-Mode inference — AR + Diffusion + Self-Speculation via `D2fDrafterVerifier`. GOAT 4/4 proved (Bench 018). Requires `dllm` (Plan 089) |
 | `spectral_quant` | SpectralQuant calibrated eigenbasis + water-fill — 9.1× compression vs TQ 5.3×, cosine 0.9917 vs TQ 0.9692 (Bench 013, Plan 077, default-on) |
-| `octopus` | OCTOPUS octahedral triplet codec — data-oblivious, beats calibrated SQ at all bit widths (-22% to -49% MSE), default-on (Bench 022, Plan 099) |
+| `octopus` | OCTOPUS octahedral triplet codec — data-oblivious, beats calibrated SQ at all bit widths (-22% to -49% MSE). Legacy — use `hybrid_oct_pq` for best quality + speed (Bench 022, Plan 099) |
 | `replaid_schedules` | RePlaid variance-minimized adaptive schedules — experimental, off by default (Plan 078) |
 | `elf_sde` | ELF SDE noise injection + logit-normal schedule — GOAT proved: 10-22× diversity (Plan 079, default-on) |
 | `cna_steering` | CNA Contrastive Neuron Attribution — sparse MLP circuit discovery + runtime modulation. GOAT proved (Bench 015). ~10µs/pair discovery, 163ns K=50 modulation, quality cosine 1.0 (Plan 087) |
@@ -1407,7 +1407,7 @@ cargo clippy --all-targets --all-features --quiet
 | `delta_routing` | Delta Block cross-layer routing — residual delta routing between transformer layers (Research 61, Plan 097, off by default) |
 | `full` | Enable all features (excludes `stepcode`, `sp_kv`) |
 
-> **Default features trade-off:** `default = ["sparse_mlp", "domain_latent", "ppot", "bandit", "bt_rank", "spectral_quant", "elf_sde", "cna_steering", "deep_manifold", "federation"]` targets production accuracy + sparsity + pairwise ranking + calibrated KV compression + neuron-level steering + fixed-point residual scoring + federated KL coupling. `g_zero` is bench-only (Plan 049: Phase 1 ✅ T5 benchmarked, Phase 2 ✅ Plan 059 GRPO/DPO in `riir-gpu`) — run bench with `--features "g_zero,bomber"` to include heuristic learning. `g_zero` does NOT touch `forward()` hot path (zero hits in `transformer.rs`). Active features are logged in `bench/*_results.csv` and `bench/timeseries.csv` for regression tracking across feature-gate changes.
+> **Default features trade-off:** `default = ["sparse_mlp", "domain_latent", "ppot", "bandit", "bt_rank", "spectral_quant", "hybrid_oct_pq", "elf_sde", "cna_steering", "deep_manifold", "federation", "tes_loop", "lattice_deduction", "delta_routing"]` targets production accuracy + sparsity + pairwise ranking + hybrid KV compression (OCT triplet + PQ rotation) + neuron-level steering + fixed-point residual scoring + federated KL coupling. `g_zero` is bench-only (Plan 049: Phase 1 ✅ T5 benchmarked, Phase 2 ✅ Plan 059 GRPO/DPO in `riir-gpu`) — run bench with `--features "g_zero,bomber"` to include heuristic learning. `g_zero` does NOT touch `forward()` hot path (zero hits in `transformer.rs`). Active features are logged in `bench/*_results.csv` and `bench/timeseries.csv` for regression tracking across feature-gate changes.
 
 > **Note:** `LeviathanVerifier` is always compiled (no feature gate) — it's part of `verifier.rs` and `benchmark.rs`. `Transformer AR`, `DFlash`, `Raven`, `TurboQuant`, and `PFlash` are also always available — they're zero-cost until their caches are instantiated.
 
@@ -1635,7 +1635,7 @@ Every feature traced from research paper to implementation to benchmark. Separat
 
 ### 🐐 Default GOAT (Production Stack)
 
-`default = ["sparse_mlp", "domain_latent", "ppot", "bandit", "bt_rank", "spectral_quant", "elf_sde", "cna_steering", "deep_manifold", "federation", "tes_loop", "lattice_deduction", "delta_routing"]`
+`default = ["sparse_mlp", "domain_latent", "ppot", "bandit", "bt_rank", "spectral_quant", "hybrid_oct_pq", "elf_sde", "cna_steering", "deep_manifold", "federation", "tes_loop", "lattice_deduction", "delta_routing"]`
 
 | Feature | Source | Real Gain (from code) | Replaced |
 |---------|--------|-----------------------|----------|
@@ -1662,7 +1662,7 @@ Every feature traced from research paper to implementation to benchmark. Separat
 
 | Feature | Source | Real Gain | Why Gated |
 |---------|--------|-----------|-----------|
-| **OCTOPUS** (`octopus`) | [OCTOPUS (Boss 2026)](https://arxiv.org/abs/2605.21226) | **First data-oblivious codec to beat calibrated SQ** — -22% to -49% MSE, +0.3% to +1.5% cosine at 2-4 bit (Bench 022). Joint 3×3 rounding: 6-9% MSE gain (encoder-only). Zero calibration overhead. | Default-on as of Plan 099; SQ still useful for per-dimension water-fill adaptation |
+| **Hybrid OCT+PQ** (`hybrid_oct_pq`) | [OCTOPUS (Boss 2026)](https://arxiv.org/abs/2605.21226) + [RotorQuant (Zandieh 2025)](https://www.scrya.com/rotorquant.pdf) | **Default KV codec** — OCT triplet encoding + PQ 2D Givens rotation. Sweeps MSE at all bit widths (0.998× of pure OCT), beats OCT MaxSim at bits ≥ 3, 64× fewer rotation FMAs (256 vs 16,384). GOAT proved (Bench 024, Plan 101). | Default-on as of Plan 101; supersedes pure OCTOPUS as primary codec |
 | **G-Zero** (`g_zero`) | [G-Zero Self-Play](https://arxiv.org/pdf/2605.09959) | 8.57M δ/sec, 1.76M pairs/sec, 1.16M cycles/sec (Bench 005). Hint-δ intrinsic reward, no external verifier. TemplateProposer for Bomber+FFT. | Bench-only; does NOT touch `forward()` hot path |
 | **Bomber** (`bomber`) | Plan 033 HL Arena | HL thesis proven: deterministic heuristics beat naive MCTS in complex games. `ReplayBackwardWalker`: 4.0 alternatives/tick. | Requires `bevy_ecs`, arena-specific |
 | **GameState** (`game_state`) | [STRATEGA](https://arxiv.org/abs/2605.09959) | Cross-game MCTS reuse: one `mcts_search()` works on Bomber, Go, any `GameState` impl. `BomberState` wraps ECS for snapshot/restore. | Depends on `bomber`, arena-specific |

@@ -32,7 +32,7 @@ crossterm = "0.28"
 tempfile = "3"
 
 [features]
-default = ["sparse_mlp", "domain_latent", "ppot", "bandit", "bt_rank", "spectral_quant", "octopus", "elf_sde", "cna_steering", "deep_manifold", "federation", "tes_loop", "lattice_deduction", "delta_routing"]  # Production best perf + accuracy (Plan 051, bt_rank Plan 079, spectral_quant Plan 063, octopus Plan 099 GOAT -22% to -49% MSE vs SQ, elf_sde Plan 079, cna_steering Plan 087 GOAT, deep_manifold Plan 085 GOAT 6/6, federation Plan 085 GOAT 6/6, tes_loop Plan 086 GOAT 8/8, lattice_deduction Plan 088 GOAT 7/7, delta_routing Plan 097 GOAT 6/6)
+default = ["sparse_mlp", "domain_latent", "ppot", "bandit", "bt_rank", "spectral_quant", "hybrid_oct_pq", "elf_sde", "cna_steering", "deep_manifold", "federation", "tes_loop", "lattice_deduction", "delta_routing"]  # Production best perf + accuracy (Plan 051, bt_rank Plan 079, spectral_quant Plan 063, hybrid_oct_pq Plan 101 GOAT best MSE + 64x fewer FMAs vs OCT, elf_sde Plan 079, cna_steering Plan 087 GOAT, deep_manifold Plan 085 GOAT 6/6, federation Plan 085 GOAT 6/6, tes_loop Plan 086 GOAT 8/8, lattice_deduction Plan 088 GOAT 7/7, delta_routing Plan 097 GOAT 6/6)
 sp_kv = []  # SP-KV self-pruned key-value attention (Plan 070)
 dllm = []  # D2F Discrete Diffusion Forcing — mini dLLM research (Plan 066)
 tri_mode = ["dllm"]  # Tri-Mode inference — AR + Diffusion + Self-Speculation (Plan 089, Research 55)

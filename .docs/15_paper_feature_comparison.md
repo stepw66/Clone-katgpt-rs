@@ -30,7 +30,7 @@ Legend: ✓ = direct feature, ○ = partial/conceptual alignment, ✗ = not appl
 | Feature | Technique | Status |
 |---------|-----------|--------|
 | Speculative Decoding | DDTree + DFlash + Leviathan verification + Tri-Mode self-speculation | ✓ Implemented |
-| KV Optimization | OCTOPUS (12.2×, 0.9512 cosine at 2-bit, **primary default**, zero calibration), SpectralQuant (9.1×, 0.9917 cosine, secondary), SP-KV (3-10×), TurboQuant 3-bit (legacy) | ✓ Implemented |
+| KV Optimization | **Hybrid OCT+PQ** (OCT triplet + PQ 2D Givens, best MSE all bits, 64× fewer FMAs, **primary default**, Plan 101), OCTOPUS (legacy, same encoding slower rotation), SpectralQuant (9.1×, 0.9917 cosine, calibrated alternative), SP-KV (3-10×), TurboQuant 3-bit (legacy) | ✓ Implemented |
 | Attention Innovation | forward_hla / forward_ahla (88% memory savings), Percepta 2D Convex Hull, MaxSim, SHINE Alternating2D (90% FLOPs savings) | ✓ Implemented |
 | Noise Scheduling | ELF SDE noise injection (10-22× path diversity, **default**), GRAM validates approach | ✓ Implemented |
 | Distillation/Compression | LoRA adapters, SpectralQuant, BT pairwise ranking (**default**), MeMo reflections, ROPD rubric | ✓ Partial (ASFT/SLIME in riir-gpu, CISPO default GRPO variant) |
@@ -40,7 +40,7 @@ Legend: ✓ = direct feature, ○ = partial/conceptual alignment, ✗ = not appl
 | Game/Self-Play | Sudoku, Go, Monopoly, Bomber, Unit Distance lattice constructions | ✓ Implemented |
 | SIMD/Perf | NEON SIMD matmul/HLA kernels, zero-alloc hot paths, Minkowski lattice embedding, LDT α-intersection (**default**) | ✓ Implemented |
 
-**Default feature set:** `sparse_mlp`, `domain_latent`, `ppot`, `bandit`, `bt_rank`, `spectral_quant`, `octopus`, `elf_sde`, `cna_steering`, `deep_manifold`, `federation`, `tes_loop`, `lattice_deduction`, `delta_routing`
+**Default feature set:** `sparse_mlp`, `domain_latent`, `ppot`, `bandit`, `bt_rank`, `spectral_quant`, `hybrid_oct_pq`, `elf_sde`, `cna_steering`, `deep_manifold`, `federation`, `tes_loop`, `lattice_deduction`, `delta_routing`
 
 ---
 
