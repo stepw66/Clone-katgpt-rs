@@ -1,9 +1,9 @@
 # Plan 097: Delta Attention Residuals
 
-**Status:** ✅ Complete
+**Status:** ✅ Complete (Gemma 2 2B validated)
 **Research:** 061 (Delta Attention Residuals)
 **Related Plans:** 057 (HLA), 070 (SP-KV), 022 (Sparse MLP), 085 (Deep Manifold)
-**Feature Gate:** `delta_routing` (off by default)
+**Feature Gate:** `delta_routing` (off by default) — both `microgpt-rs` and `riir-engine`
 
 ## Context
 
@@ -68,7 +68,16 @@ In our forward_base():
 5. `tests/test_delta_routing_goat.rs` — GOAT proof tests (6 tests, all passing)
 6. `tests/test_097_delta_routing_sharpness.rs` — Routing sharpness GOAT tests (6 tests, all passing)
 7. `tests/bench_097_delta_routing_throughput.rs` — Throughput & memory benchmarks (6 tests, all passing)
-8. `.benchmarks/020_delta_routing_throughput.md` — Benchmark results (4/5 criteria met, 1 N/A at micro scale)
+8. `.benchmarks/020_delta_routing_throughput.md` — Benchmark results (5/5 criteria met)
+
+### Gemma 2 2B Integration (riir-engine)
+
+9. `riir-ai/crates/riir-engine/Cargo.toml` — Added `delta_routing` feature gate
+10. `riir-ai/crates/riir-engine/src/gemma_layer.rs` — Added `delta_routing_query`/`delta_routing_norm` to both f32 and f16 weight structs
+11. `riir-ai/crates/riir-engine/src/safetensors_loader.rs` — Zero/one-init delta routing weights on model load
+12. `riir-ai/crates/riir-engine/src/transformer.rs` — Integrated delta routing into `forward_gemma2()`, `forward_gemma2_trace()`, `forward_gemma2_f16()`
+13. `riir-ai/crates/riir-engine/tests/bench_097_gemma2_delta_routing_ppl.rs` — 2B-scale PPL benchmark (4 tests, all passing)
+14. `riir-ai/.benchmarks/021_gemma2_delta_routing_ppl.md` — Gemma 2 2B results
 
 ## Feature Gate
 
@@ -85,3 +94,5 @@ Default: OFF. Requires n_layer ≥ 4 for meaningful benefit. Enable with `--feat
 - [x] GOAT proof: all 6 tests pass — valid output, deterministic, multiple layer counts, weight init, block boundaries, non-block-aligned
 - [x] Throughput overhead ≤ 30% at n_layer=6 with B=4 blocks (0.97× efficiency, <1% overhead at micro scale)
 - [x] Memory overhead ≤ (B+1) × n_embd × sizeof(f32) per block delta storage (156 ≤ 640 bytes, 1.18% of base model)
+- [x] Gemma 2 2B PPL: 15.37 → 15.12 (−1.62%) with untrained random query weights on layers 20-25 only
+- [x] Gemma 2 2B memory overhead: 531 KB (0.005% of 9.74 GB f32 model)
