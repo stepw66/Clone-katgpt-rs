@@ -8,6 +8,8 @@ pub mod dllm;
 pub mod feedback;
 #[cfg(feature = "hla_attention")]
 pub mod hla;
+#[cfg(feature = "octopus")]
+pub mod octopus;
 pub mod percepta;
 pub mod plot;
 pub mod pruners;
