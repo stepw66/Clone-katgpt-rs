@@ -237,12 +237,12 @@ mod tests {
         let cw = ContiguousWeights::from_weights(&weights);
         let packed = cw.wte();
         assert_eq!(packed.len(), weights.wte.len(), "wte length mismatch");
-        for i in 0..packed.len() {
+        (0..packed.len()).for_each(|i| {
             assert!(
                 (packed[i] - weights.wte[i]).abs() < 1e-6,
                 "wte mismatch at index {i}"
             );
-        }
+        });
     }
 
     #[test]
@@ -251,12 +251,12 @@ mod tests {
         let cw = ContiguousWeights::from_weights(&weights);
         let packed = cw.wpe();
         assert_eq!(packed.len(), weights.wpe.len(), "wpe length mismatch");
-        for i in 0..packed.len() {
+        (0..packed.len()).for_each(|i| {
             assert!(
                 (packed[i] - weights.wpe[i]).abs() < 1e-6,
                 "wpe mismatch at index {i}"
             );
-        }
+        });
     }
 
     #[test]
@@ -269,12 +269,12 @@ mod tests {
             weights.lm_head.len(),
             "lm_head length mismatch"
         );
-        for i in 0..packed.len() {
+        (0..packed.len()).for_each(|i| {
             assert!(
                 (packed[i] - weights.lm_head[i]).abs() < 1e-6,
                 "lm_head mismatch at index {i}"
             );
-        }
+        });
     }
 
     #[test]
