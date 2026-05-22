@@ -2,7 +2,7 @@
 
 > **Research:** 63 (OCTOPUS Octahedral KV Cache Compression)
 > **Related Plans:** 043 (TurboQuant), 077 (SpectralQuant Upgrade), 044 (PFlash), 080 (MaxSim), 095 (GRAM Width/Depth GOAT), 096 (MoE+SD CoDesign GOAT), 050 (Feature Gate Audit)
-> **Status:** 📋 Draft
+**Status:** ✅ Complete
 > **Verdict:** High-value addition. OCTOPUS is the natural successor to TurboQuant in the rotation-preconditioned family. Data-oblivious (no calibration), dominates at 2-bit extreme compression, regular memory access patterns (GPU-friendly), simple piecewise-linear math (Rust-friendly). Feature gate `octopus`. Sits between TurboQuant (legacy) and SpectralQuant (calibrated default) in the production stack.
 
 ## Summary
@@ -38,7 +38,7 @@ At 2-bit, OCTOPUS is the only codec that doesn't collapse on needle-in-a-haystac
 - [x] T9: Add GOAT benchmark — synthetic MSE, cosine, IP error sweep (2/3/4 bit, d=64/128/256)
 - [x] T10: Add GOAT benchmark — compression ratio comparison vs. TurboQuant at matched bits
 - [x] T11: Run GOAT proof, record results in `.benchmarks/022_octopus_goat.md`
-- [ ] T12: Update `README.md` with OCTOPUS section + production stack ordering
+- [x] T12: Update `README.md` with OCTOPUS section + production stack ordering
 
 ## Architecture
 
