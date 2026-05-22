@@ -292,9 +292,9 @@ fn bench_ldt_lattice_deduction_goat_proof() {
     println!("  AlphaTarget: reset restores all solutions ✓");
 
     // is_consistent edge cases
-    assert!(is_consistent(&vec![None], &[42]));
-    assert!(is_consistent(&vec![Some(42)], &[42]));
-    assert!(!is_consistent(&vec![Some(99)], &[42]));
+    assert!(is_consistent(&[None], &[42]));
+    assert!(is_consistent(&[Some(42)], &[42]));
+    assert!(!is_consistent(&[Some(99)], &[42]));
     println!("  is_consistent: edge cases pass ✓");
 
     // ── T4: Sudoku-style GOAT Proof ─────────────────────────────
@@ -401,7 +401,7 @@ fn bench_ldt_lattice_deduction_goat_proof() {
     let mut multi_total_candidates = 0_usize;
 
     // Step through committing positions along path 1
-    for pos in 0..maze_len {
+    (0..maze_len).for_each(|pos| {
         let single_set = single_target.target()[pos].len();
         let multi_set = multi_target.target()[pos].len();
         single_total_candidates += single_set;
@@ -410,7 +410,7 @@ fn bench_ldt_lattice_deduction_goat_proof() {
         // Commit the token from path 1
         single_target.commit(pos, maze_paths[0][pos]);
         multi_target.commit(pos, maze_paths[0][pos]);
-    }
+    });
 
     println!("  Single-path total candidates across all positions: {single_total_candidates}");
     println!("  Multi-path (K=4) total candidates across all positions: {multi_total_candidates}");
@@ -489,9 +489,9 @@ fn bench_ldt_lattice_deduction_goat_proof() {
         for _ in 0..mcts_depths {
             let mut probs = vec![0.0_f32; mcts_vocab];
             let n_active = 3 + rng.usize(..8); // 3-10 active tokens
-            for i in 0..n_active {
+            (0..n_active).for_each(|i| {
                 probs[i] = 1.0 / n_active as f32;
-            }
+            });
             total += mcts_vocab;
             pruned += mcts_vocab - n_active;
             branch_marginals.push(probs);

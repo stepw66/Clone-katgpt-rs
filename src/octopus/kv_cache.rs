@@ -775,4 +775,73 @@ mod tests {
         }
         dot / (na * nb)
     }
+
+    // ── SP-KV + OCTOPUS Composition Proof ────────────────────
+    // Verifies SpKvQuantCache<OctopusKVCache> compiles and works end-to-end.
+    // Acceptance criterion: "SpKvQuantCache<OctopusKVCache> compiles (composition proof)".
+
+    #[cfg(all(feature = "sp_kv", feature = "octopus"))]
+    #[test]
+    fn test_sp_kv_octopus_composition_compiles() {
+        use crate::sp_kv::types::{SpKvConfig, SpKvQuantCache};
+
+        let octopus = make_cache(64, 3, 3);
+        let sp_cfg = SpKvConfig::default();
+        let mut hybrid: SpKvQuantCache<OctopusKVCache> =
+            SpKvQuantCache::new(sp_cfg, octopus, 2, 32);
+
+        let key: Vec<f32> = (0..64).map(|i| (i as f32 * 0.1 - 3.2).sin()).collect();
+        let val: Vec<f32> = (0..64).map(|i| (i as f32 * 0.05).cos()).collect();
+
+        // High utility → should be retained and written
+        let written = hybrid.write_gated(0, &key, &val, 0.9, 0, false, 0.5);
+        assert!(written, "high utility should be retained");
+        assert!(hybrid.meta[0].retained[0]);
+        assert_eq!(hybrid.meta[0].retained_count, 1);
+
+        // Low utility, not in window → should be pruned
+        let written = hybrid.write_gated(0, &key, &val, 0.1, 1, false, 0.5);
+        assert!(!written, "low utility should be pruned");
+        assert!(!hybrid.meta[0].retained[1]);
+        assert_eq!(hybrid.meta[0].retained_count, 1);
+
+        // In window → should be retained regardless of utility
+        let written = hybrid.write_gated(0, &key, &val, 0.01, 2, true, 0.5);
+        assert!(written, "in-window should always be retained");
+        assert!(hybrid.meta[0].retained[2]);
+        assert_eq!(hybrid.meta[0].retained_count, 2);
+    }
+
+    #[cfg(all(feature = "sp_kv", feature = "octopus"))]
+    #[test]
+    fn test_sp_kv_octopus_roundtrip() {
+        use crate::sp_kv::types::{SpKvConfig, SpKvQuantCache};
+
+        let octopus = make_cache(64, 3, 3);
+        let sp_cfg = SpKvConfig::default();
+        let mut hybrid: SpKvQuantCache<OctopusKVCache> =
+            SpKvQuantCache::new(sp_cfg, octopus, 2, 32);
+
+        let key: Vec<f32> = (0..64).map(|i| (i as f32 * 0.1 - 3.2).sin()).collect();
+        let val: Vec<f32> = (0..64).map(|i| (i as f32 * 0.05).cos()).collect();
+
+        // Write with high utility so it's retained
+        hybrid.write_gated(0, &key, &val, 0.99, 0, false, 0.5);
+
+        // Dequantize through the quant backend
+        let mut recon_key = vec![0.0f32; 64];
+        hybrid.quant.dequantize_key_into(0, 0, &mut recon_key);
+
+        let cos = cosine_sim(&key, &recon_key);
+        assert!(cos > 0.95, "SP-KV + OCTOPUS roundtrip cosine = {cos}");
+
+        let mut recon_val = vec![0.0f32; 64];
+        hybrid.quant.dequantize_value_into(0, 0, &mut recon_val);
+
+        let cos_v = cosine_sim(&val, &recon_val);
+        assert!(
+            cos_v > 0.95,
+            "SP-KV + OCTOPUS value roundtrip cosine = {cos_v}"
+        );
+    }
 }

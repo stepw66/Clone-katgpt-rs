@@ -157,5 +157,5 @@ Decision flow:
 - [x] GOAT synthetic benchmark shows MSE improvement over TurboQuant at d=128
 - [x] Feature gate `octopus` works independently (`cargo test --features octopus`)
 - [x] `.benchmarks/022_octopus_goat.md` populated with results
-- [ ] `SpKvQuantCache<OctopusKVCache>` compiles (composition proof — requires sp_kv feature)
-- [ ] README updated with OCTOPUS section (T12)
+- [x] `SpKvQuantCache<OctopusKVCache>` compiles (composition proof — `test_sp_kv_octopus_composition_compiles` + `test_sp_kv_octopus_roundtrip` pass)
+- [x] README updated with OCTOPUS section (T12)
