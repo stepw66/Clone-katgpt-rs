@@ -136,7 +136,8 @@ For our LLM inference engine, the transfer is: intermediate transformer layers c
 
 ### D4: Documentation & Cleanup
 
-- [ ] **T13**: Update `README.md` — add MLS section under 🔧 Block-Diagonal Rotation area
+- [x] **T13**: Update `README.md` — add MLS section under 🔧 Block-Diagonal Rotation area ✅
+  Added at L420 between Block-Diagonal Rotation and PFlash sections with file references and GOAT 6/6 badge.
   ```markdown
   ## 📐 MLS: Multi-Layer Sum Aggregation (Plan 104)
   Training-free aggregation of last K layer residuals before LM head.
@@ -144,11 +145,14 @@ For our LLM inference engine, the transfer is: intermediate transformer layers c
   representation quality vs task specialization tradeoff.
   ```
 
-- [ ] **T14**: Update `.docs/15_paper_feature_comparison.md` with RAEv2 row
+- [x] **T14**: Update `.docs/15_paper_feature_comparison.md` with RAEv2 row ✅
+  Added Papers 63–69 section with 7 rows (63 OCTOPUS, 64 LlamaWeb, 65 RotorQuant, 66 TileRT, 67 CODA, 68 RAEv2, 69 AutoDreamer). Updated paper count from 62 to 69. Updated References section.
 
-- [ ] **T15**: Run `cargo clippy --fix --allow-dirty` with `--features mls_aggregate`
+- [x] **T15**: Run `cargo clippy --fix --allow-dirty` with `--features mls_aggregate` ✅
+  Clean — no warnings, no fixes applied. Both microgpt-core and microgpt-rs checked successfully.
 
-- [ ] **T16**: Run `cargo test --features mls_aggregate` — all tests pass
+- [x] **T16**: Run `cargo test --features mls_aggregate` — all tests pass ✅
+  Full suite: 1178 lib tests + 45 integration tests passed (0 failed). GOAT 7/7 (6 proofs + summary) passed in 0.00s.
 
 ## Feature Gate Summary
 

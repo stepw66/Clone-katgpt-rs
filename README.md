@@ -418,6 +418,18 @@ Block-diagonal rotation alternatives to OCTOPUS's full WHT. Replaces O(d²) rota
 📁 `src/iso_quant/` — `types.rs`, `rotation.rs`, `kv_cache.rs`, `mod.rs`
 🔧 Feature flags: `planar_quant` (opt-in), `iso_quant` (opt-in)
 
+## 📐 MLS: Multi-Layer Sum Aggregation (Plan 104)
+
+Training-free aggregation of last K layer residuals before LM head.
+Opt-in via `mls_aggregate` feature gate. Sweeping K provides Pareto-optimal
+representation quality vs task specialization tradeoff.
+
+📁 `src/transformer.rs` — MLS accumulation in `forward_base` layer loop
+📁 `crates/microgpt-core/src/types.rs` — `mls_layers` config field
+📁 `src/benchmark.rs` — `ep_accuracy_k` convergence metric
+📁 `tests/goat_104_mls_aggregate.rs` — GOAT 6/6 proofs passed ✅
+🔧 Feature flag: `mls_aggregate` (opt-in, controlled via `Config.mls_layers`)
+
 ## ⚡ PFlash: Block-Sparse Speculative Prefill
 
 Compresses long prompts before target prefill using block-level importance scoring with selection rules (sink + window + last_n_full + alpha threshold). Ported from [lucebox-hub/pflash](https://github.com/Luce-Org/lucebox-hub/) C++/CUDA implementation.

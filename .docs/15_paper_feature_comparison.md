@@ -2,11 +2,11 @@
 
 **Date:** 2025-07
 **Status:** Living Document
-**Scope:** All 62 research papers (00–61) in `.research/` mapped against microgpt-rs feature dimensions. Includes Research 061 (Delta Attention Residuals) mapped to `delta_routing`.
+**Scope:** All 69 research papers (00–069) in `.research/` mapped against microgpt-rs feature dimensions. Includes Research 061 (Delta Attention Residuals) mapped to `delta_routing`. Includes Research 068 (RAEv2) mapped to `mls_aggregate`.
 
 ## Introduction
 
-This document provides a comprehensive feature-intersection matrix between our work (microgpt-rs) and all 62+ researched papers. Each paper is evaluated across 10 feature dimensions derived from our core architecture:
+This document provides a comprehensive feature-intersection matrix between our work (microgpt-rs) and all 69 researched papers. Each paper is evaluated across 10 feature dimensions derived from our core architecture:
 
 | Column | Description |
 |--------|-------------|
@@ -150,6 +150,18 @@ Legend: ✓ = direct feature, ○ = partial/conceptual alignment, ✗ = not appl
 | 61 | SLIME Stabilized Likelihood Implicit Margin | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ |
 | 061 | Delta Attention Residuals (Cross-Layer Routing) | ✗ | ✗ | ✓ | ✗ | ✗ | ✗ | ✓ | ✗ | ✗ | ✗ |
 | 62 | SHINE Scalable In-Context Hypernetwork | ✗ | ✗ | ✓ | ✗ | ✓ | ✗ | ✓ | ✗ | ✗ | ○ |
+
+### Papers 63–69: KV Compression, Inference, Rotation, Pipelines, GEMM, Representation & Dreamer
+
+| # | Paper / Feature | SD | KV | Attn | Noise | Distill | TTC | Route | Diff | Game | SIMD |
+|---|----------------|----|----|------|-------|---------|-----|-------|------|------|------|
+| 63 | OCTOPUS Octahedral KV Cache Compression | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ |
+| 64 | LlamaWeb WebGPU Inference Distillation | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | ○ |
+| 65 | RotorQuant Block-Diagonal Rotation Quantization | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ |
+| 66 | TileRT Persistent Tile Pipeline Inference | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ |
+| 67 | CODA GEMM Epilogue Programming | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ |
+| 68 | RAEv2 Multi-Layer Representation Autoencoders | ✗ | ✗ | ○ | ✗ | ○ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| 69 | AutoDreamer Offline Memory Consolidation | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ○ | ✗ | ✗ | ✗ |
 
 ---
 
@@ -348,4 +360,4 @@ SIMD/Perf             ███████████████████�
 
 ## References
 
-All papers are located in `microgpt-rs/.research/` with filenames `{index}_{Title}.md` where index ranges from 00 to 73 (plus 061 for Delta Attention Residuals). See individual research files for full analysis, verdicts, and implementation details. Key post-62 papers: 70 (GDN2 recurrent attention), 71 (DashAttention sparse), 72 (DMax SPD), 73 (LT2 looped inference).
+All papers are located in `microgpt-rs/.research/` with filenames `{index}_{Title}.md` where index ranges from 00 to 73 (plus 061 for Delta Attention Residuals). See individual research files for full analysis, verdicts, and implementation details. Papers 63–69 added: OCTOPUS (63), LlamaWeb (64), RotorQuant (65), TileRT (66), CODA (67), RAEv2 MLS (68), AutoDreamer (69). Key post-69 papers: 70 (GDN2 recurrent attention), 71 (DashAttention sparse), 72 (DMax SPD), 73 (LT2 looped inference).
