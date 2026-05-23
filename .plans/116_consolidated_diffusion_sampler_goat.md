@@ -70,11 +70,13 @@ Consolidate three open tasks into a single ordered plan:
 - [x] GOAT gate: Natsukaze accuracy (100.0%) > self-play accuracy (98.0%) ✅ PASS
 - [x] Cross-validation: NK-on-SP 32%, SP-on-NK 61% (domain-specific features)
 
-### T6: LoRA Drafter Alignment research (Plan 089 T7 — deferred)
-- [ ] Design LK-hybrid loss for aligning diffusion drafter with AR verifier
-- [ ] LoRA on `o_proj` only (rank 128, α=512)
-- [ ] **BLOCKED:** riir-gpu needs D2F training support
-- [ ] This task is documented here for tracking; implementation deferred until riir-gpu supports D2F
+### T6: LoRA Drafter Alignment → Superseded by Plan 108
+- [ ] **MOVED to `riir-ai/.plans/108_gemma2_d2f_block_causal_decode.md`**
+- Plan 108 proves DiffusionSampler at Gemma 2 2B scale (n_embd=2304)
+- Requires: `forward_gemma2_block_causal()` (CPU) + CubeCL block-causal attention + D2F decode loop
+- Feature gate: `gemma2_d2f` → requires `cubecl_runtime` + `dllm`
+- Aligns with Plan 106 (CubeCL GPU rewrite T2.1-T2.7 complete)
+- Original T7 scope (LoRA alignment) remains blocked on riir-gpu D2F training
 
 ---
 
