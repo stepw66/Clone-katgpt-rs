@@ -12,7 +12,7 @@
 //!   R               — New game (re-play)
 //!   Q / Esc         — Quit
 //!
-//! Run: `cargo run --features go --example go_07_tui`
+//! Run: `cargo run --features go --example go_07_tui --black hl --white greedy`
 //!
 //! Options:
 //!   --black <player>  Black player: random, greedy, validator, hl, gzero (default: greedy)
