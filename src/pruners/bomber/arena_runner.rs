@@ -463,9 +463,12 @@ mod tests {
 
         // In a game that runs to completion, there should be events tracked
         // (not asserting specific values since outcome depends on player behavior)
-        assert_eq!(
+        // kills excludes suicides (killer == victim), so kills.len() <= deaths.len()
+        assert!(
+            result.kills.len() <= result.deaths.len(),
+            "kills ({}) should not exceed deaths ({})",
             result.kills.len(),
-            result.deaths.len() - result.deaths.len() % 2 + result.deaths.len() % 2
+            result.deaths.len()
         );
         // deaths and kills vectors exist and are consistent
         for (killer, victim) in &result.kills {

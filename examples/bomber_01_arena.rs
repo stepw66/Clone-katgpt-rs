@@ -104,6 +104,8 @@ fn main() {
     let mut scores = [0i32; 4];
     let mut wins = [0u32; 4];
     let mut deaths = [0u32; 4];
+    let mut suicides = [0u32; 4]; // killed by own bomb or unknown
+    let mut kill_matrix: [[u32; 4]; 4] = [[0; 4]; 4]; // kill_matrix[killer][victim]
     let mut total_replay_samples: u64 = 0;
 
     for round in 0..ROUNDS {
@@ -138,6 +140,19 @@ fn main() {
         }
         for &victim in &result.deaths {
             deaths[victim as usize] += 1;
+        }
+
+        // Track kill matrix and suicides
+        for &(killer, victim) in &result.kills {
+            kill_matrix[killer as usize][victim as usize] += 1;
+        }
+        // Deaths without a killer entry = suicide or unknown
+        let killed_by_someone: std::collections::HashSet<usize> =
+            result.kills.iter().map(|(_, v)| *v as usize).collect();
+        for &victim in &result.deaths {
+            if !killed_by_someone.contains(&(victim as usize)) {
+                suicides[victim as usize] += 1;
+            }
         }
 
         // Update HL player with outcome
@@ -179,14 +194,36 @@ fn main() {
 
     for (rank, (idx, score)) in ranking.iter().enumerate() {
         println!(
-            "  #{} {} {:<10} Score={:+5}  Wins={}  Deaths={}",
+            "  #{} {} {:<10} Score={:+5}  Wins={}  Deaths={}  Suicides={}",
             rank + 1,
             emoji[*idx],
             names[*idx],
             score,
             wins[*idx],
             deaths[*idx],
+            suicides[*idx],
         );
+    }
+
+    // Kill matrix
+    println!();
+    println!("═══ Kill Matrix (killer → victim) ═══");
+    print!("           ");
+    for j in 0..4 {
+        print!("  {} {:<6}", emoji[j], names[j]);
+    }
+    println!("  Total");
+    for i in 0..4 {
+        let total_kills: u32 = kill_matrix[i].iter().sum();
+        print!("  {} {:<6}", emoji[i], names[i]);
+        for j in 0..4 {
+            if i == j {
+                print!("    ---   ");
+            } else {
+                print!("  {:>8} ", kill_matrix[i][j]);
+            }
+        }
+        println!("  {}", total_kills);
     }
 
     // Replay stats

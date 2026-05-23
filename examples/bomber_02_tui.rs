@@ -299,13 +299,9 @@ fn render_arena(f: &mut Frame, snap: &TickSnapshot, area: Rect) {
         for x in 0..snap.grid.width {
             let pos = (x as i32, y as i32);
 
-            // Check blast
-            if snap.blasts.contains(&pos) {
-                row.push_str(BLAST_EMOJI);
-                continue;
-            }
-
-            // Check player
+            // Check player (alive players take priority over blast visuals)
+            // Movement happens after explosions — a player may walk into a
+            // blast cell post-explosion and correctly survive (blast is instantaneous)
             let mut player_found = None;
             for (i, &(px, py)) in snap.player_pos.iter().enumerate() {
                 if (px, py) == pos {
@@ -319,6 +315,12 @@ fn render_arena(f: &mut Frame, snap: &TickSnapshot, area: Rect) {
                 } else {
                     row.push_str(P_DEAD);
                 }
+                continue;
+            }
+
+            // Check blast (only render if no player occupies this cell)
+            if snap.blasts.contains(&pos) {
+                row.push_str(BLAST_EMOJI);
                 continue;
             }
 
