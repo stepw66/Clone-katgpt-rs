@@ -24,7 +24,7 @@ For our LLM inference engine, the transfer is: intermediate transformer layers c
 
 ### D1: EP Accuracy@k Metric — Zero-Risk Reporting Improvement (No Feature Gate)
 
-- [ ] **T1**: Add `ep_accuracy_k` helper to `src/benchmark.rs`
+- [x] **T1**: Add `ep_accuracy_k` helper to `src/benchmark.rs`
   ```rust
   /// Compute EP Accuracy@k: number of rounds to first reach target_accuracy.
   /// Returns None if target was never reached within the data.
@@ -40,13 +40,13 @@ For our LLM inference engine, the transfer is: intermediate transformer layers c
 
 ### D2: MLS Aggregation Core — Feature Gate `mls_aggregate`
 
-- [ ] **T3**: Add `mls_aggregate` feature to `Cargo.toml`
+- [x] **T3**: Add `mls_aggregate` feature to `Cargo.toml`
   ```toml
   [features]
   mls_aggregate = []  # Multi-Layer Sum: aggregate last K layer residuals (Research 68)
   ```
 
-- [ ] **T4**: Add MLS config fields to `crates/microgpt-core/src/types.rs`
+- [x] **T4**: Add MLS config fields to `crates/microgpt-core/src/types.rs`
   ```rust
   pub struct Config {
       // ... existing fields ...
@@ -61,7 +61,7 @@ For our LLM inference engine, the transfer is: intermediate transformer layers c
   }
   ```
 
-- [ ] **T5**: Add MLS accumulator buffer to `ForwardContext` in `src/transformer.rs`
+- [x] **T5**: Add MLS accumulator buffer to `ForwardContext` in `src/transformer.rs`
   ```rust
   pub struct ForwardContext {
       // ... existing fields ...
@@ -72,7 +72,7 @@ For our LLM inference engine, the transfer is: intermediate transformer layers c
   }
   ```
 
-- [ ] **T6**: Implement MLS accumulation in `forward_base` layer loop
+- [x] **T6**: Implement MLS accumulation in `forward_base` layer loop
   ```rust
   // In the layer loop, after MLP residual add:
   #[cfg(feature = "mls_aggregate")]
@@ -100,7 +100,7 @@ For our LLM inference engine, the transfer is: intermediate transformer layers c
   standard_lm_head(&mut ctx.logits, lm_input, &weights.lm_head, config.vocab_size, n);
   ```
 
-- [ ] **T7**: Reset MLS state in `ForwardContext` at start of each forward call
+- [x] **T7**: Reset MLS state in `ForwardContext` at start of each forward call
   ```rust
   #[cfg(feature = "mls_aggregate")]
   {
@@ -109,13 +109,13 @@ For our LLM inference engine, the transfer is: intermediate transformer layers c
   }
   ```
 
-- [ ] **T8**: Add `mls_layers` to relevant `Config` constructors
+- [x] **T8**: Add `mls_layers` to relevant `Config` constructors
   - `Config::micro()` → `mls_layers: 0`
   - `Config::game()` → `mls_layers: 0`
   - `Config::gemma2_2b()` → `mls_layers: 0`
   - All other constructors → `mls_layers: 0`
 
-- [ ] **T9**: Add `mls_layers` to `InferenceOverrides::apply()` and `Config::with_overrides()`
+- [x] **T9**: Add `mls_layers` to `InferenceOverrides::apply()` and `Config::with_overrides()`
 
 ### D3: GOAT Proof — Benchmark MLS with K Sweep
 

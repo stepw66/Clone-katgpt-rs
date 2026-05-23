@@ -45,6 +45,10 @@ pub enum AttentionMode {
     /// Selective write (SP-KV utility gating) + lossy quantize (any QuantizedKVCache backend).
     /// Two-stage compression: only useful KV pairs kept, those compressed to 2-4 bits/coord.
     SpKvQuant,
+    /// DashAttention: adaptive sparse hierarchical attention via α-entmax routing (Plan 106).
+    /// Replaces fixed-budget top-k block selection with adaptive support selection.
+    /// Learned chunk summaries via head_cls vectors.
+    DashAttn,
 }
 
 /// Model architecture selector for forward pass dispatch.
@@ -118,6 +122,107 @@ impl DeltaRoutingConfig {
 }
 
 // ---------------------------------------------------------------------------
+// DashAttention Config (Plan 106, Research 68)
+// ---------------------------------------------------------------------------
+
+/// Configuration for DashAttention adaptive sparse hierarchical attention.
+/// Controls α-entmax routing, chunk summarization, and routing bias.
+#[derive(Clone, Copy, Debug)]
+pub struct DashAttnConfig {
+    /// Chunk size for block-level attention (default: 64).
+    pub chunk_size: usize,
+    /// α parameter for entmax. Only α=1.5 supported (quadratic, closed-form).
+    pub alpha: f32,
+    /// Scaling factor γ applied to chunk logits before entmax (default: 1.0).
+    pub scaling_factor: f32,
+    /// Prior strength σ for routing bias (default: 1e6, weak prior).
+    pub sigma: f32,
+    /// Whether to estimate diagonal attention contribution (default: true).
+    pub estimate_diagonal: bool,
+}
+
+impl Default for DashAttnConfig {
+    fn default() -> Self {
+        Self {
+            chunk_size: 64,
+            alpha: 1.5,
+            scaling_factor: 1.0,
+            sigma: 1e6,
+            estimate_diagonal: true,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// LT2 Looped Inference (Plan 108, Research 73)
+// ---------------------------------------------------------------------------
+
+/// Looped transformer mode — weight-shared layer repetition.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[repr(u8)]
+pub enum LoopMode {
+    /// Standard single-pass (no looping).
+    #[default]
+    None,
+    /// Weight-shared looping: same layers applied T times.
+    /// Effective depth = n_layer × loop_count.
+    WeightShared { loop_count: usize },
+}
+
+/// Hybrid attention pattern for looped inference.
+/// Controls which layers use full SDPA vs linear attention.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[repr(u8)]
+pub enum HybridPattern {
+    /// All layers use the same attention mode.
+    #[default]
+    Uniform,
+    /// Depth-level interleave: every Nth layer uses full SDPA.
+    /// e.g., Interleave { full_ratio: 5 } = every 5th layer is full.
+    /// Paper optimal: 1:4 ratio (full_ratio=5).
+    Interleave { full_ratio: usize },
+    /// Bookend: first and last layers are full, middle is linear.
+    Bookend,
+}
+
+/// Head-specific sigmoid gate after SDPA, before Wo.
+/// Zero-initialized → starts at sigmoid(0) = 0.5 (neutral multiplicative identity).
+#[derive(Clone)]
+pub struct SdpaOutputGate {
+    /// Gate weights: [n_heads * head_dim, dim].
+    /// Zero-init so gate starts at sigmoid(0) = 0.5.
+    pub w_gate: Vec<f32>,
+}
+
+impl SdpaOutputGate {
+    /// Allocate zeroed gate weights.
+    pub fn new(n_heads: usize, head_dim: usize, dim: usize) -> Self {
+        Self {
+            w_gate: vec![0.0; n_heads * head_dim * dim],
+        }
+    }
+}
+
+/// Per-loop residual scaling gate.
+/// h^(τ) = h̃^(τ) + ρ_τ ⊙ h^(τ-1)
+/// Zero-init so first iteration is h̃^(1) (no residual from "previous").
+#[derive(Clone)]
+pub struct ResidualGate {
+    /// Per-loop gates: [loop_count, dim].
+    /// Each ρ_τ is element-wise, zero-init.
+    pub gates: Vec<f32>,
+}
+
+impl ResidualGate {
+    /// Allocate zeroed residual gates.
+    pub fn new(loop_count: usize, dim: usize) -> Self {
+        Self {
+            gates: vec![0.0; loop_count * dim],
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Config
 // ---------------------------------------------------------------------------
 
@@ -154,6 +259,10 @@ pub struct Config {
     pub mtp_cluster_vocab_threshold: usize,
     pub mtp_shared_kv_prompt_threshold: usize,
     pub mtp_cluster_size: usize,
+    /// Minimum expected output tokens for MTP speculative decoding.
+    /// If remaining tokens < this threshold, MTP is skipped (single-token path).
+    /// Prevents MoE overhead on short texts (Plan 117 Phase 2).
+    pub mtp_min_output_tokens: usize,
     // HLA Attention (Plan 057: Higher-order Linear Attention)
     pub hla_mode: HlaMode,
     pub hla_normalize: bool,
@@ -182,6 +291,13 @@ pub struct Config {
     pub early_stop_threshold: f32,
     // D2F block size for discrete diffusion forcing
     pub d2f_block_size: usize,
+    // MLS Multi-Layer Sum aggregation (Plan 104: Research 68)
+    // Number of last layers to sum before LM head. 0 = disabled (standard).
+    pub mls_layers: usize,
+    // LT2 Looped Inference Pipeline (Plan 108, Research 73)
+    pub loop_mode: LoopMode,
+    pub hybrid_pattern: HybridPattern,
+    pub gated_attn: bool,
 }
 
 impl Config {
@@ -215,6 +331,7 @@ impl Config {
             mtp_cluster_vocab_threshold: usize::MAX,
             mtp_shared_kv_prompt_threshold: usize::MAX,
             mtp_cluster_size: 512,
+            mtp_min_output_tokens: usize::MAX,
             hla_mode: HlaMode::Standard,
             hla_normalize: false,
             hla_decay: 1.0,
@@ -237,6 +354,10 @@ impl Config {
             width_rollouts: 1,
             early_stop_threshold: 0.0,
             d2f_block_size: 8,
+            mls_layers: 0,
+            loop_mode: LoopMode::None,
+            hybrid_pattern: HybridPattern::Uniform,
+            gated_attn: false,
         }
     }
 
@@ -329,6 +450,10 @@ impl Config {
             width_rollouts: 1,
             early_stop_threshold: 0.0,
             d2f_block_size: 8,
+            mls_layers: 0,
+            loop_mode: LoopMode::None,
+            hybrid_pattern: HybridPattern::Uniform,
+            gated_attn: false,
         }
     }
 
@@ -393,6 +518,10 @@ impl Config {
             width_rollouts: 1,
             early_stop_threshold: 0.0,
             d2f_block_size: 8,
+            mls_layers: 0,
+            loop_mode: LoopMode::None,
+            hybrid_pattern: HybridPattern::Uniform,
+            gated_attn: false,
         }
     }
 
@@ -447,6 +576,10 @@ impl Config {
             width_rollouts: 1,
             early_stop_threshold: 0.0,
             d2f_block_size: 8,
+            mls_layers: 0,
+            loop_mode: LoopMode::None,
+            hybrid_pattern: HybridPattern::Uniform,
+            gated_attn: false,
         }
     }
 
@@ -502,6 +635,10 @@ impl Config {
             width_rollouts: 1,
             early_stop_threshold: 0.0,
             d2f_block_size: 16,
+            mls_layers: 0,
+            loop_mode: LoopMode::None,
+            hybrid_pattern: HybridPattern::Uniform,
+            gated_attn: false,
         }
     }
 
@@ -555,6 +692,10 @@ impl Config {
             width_rollouts: 1,
             early_stop_threshold: 0.0,
             d2f_block_size: 16,
+            mls_layers: 0,
+            loop_mode: LoopMode::None,
+            hybrid_pattern: HybridPattern::Uniform,
+            gated_attn: false,
         }
     }
 
@@ -610,6 +751,10 @@ impl Config {
             width_rollouts: 1,
             early_stop_threshold: 0.0,
             d2f_block_size: 16,
+            mls_layers: 0,
+            loop_mode: LoopMode::None,
+            hybrid_pattern: HybridPattern::Uniform,
+            gated_attn: false,
         }
     }
 
@@ -664,6 +809,10 @@ impl Config {
             width_rollouts: 1,
             early_stop_threshold: 0.0,
             d2f_block_size: 16,
+            mls_layers: 0,
+            loop_mode: LoopMode::None,
+            hybrid_pattern: HybridPattern::Uniform,
+            gated_attn: false,
         }
     }
 
@@ -720,6 +869,10 @@ impl Config {
             width_rollouts: 1,
             early_stop_threshold: 0.0,
             d2f_block_size: 16,
+            mls_layers: 0,
+            loop_mode: LoopMode::None,
+            hybrid_pattern: HybridPattern::Uniform,
+            gated_attn: false,
         }
     }
 
@@ -804,6 +957,9 @@ impl Config {
         if let Some(v) = overrides.early_stop_threshold {
             c.early_stop_threshold = v;
         }
+        if let Some(v) = overrides.mls_layers {
+            c.mls_layers = v;
+        }
         c
     }
 }
@@ -843,6 +999,10 @@ pub struct InferenceOverrides {
     // PTRM width scaling (Plan 083)
     pub width_rollouts: Option<usize>,
     pub early_stop_threshold: Option<f32>,
+    // MLS Multi-Layer Sum override (Plan 104)
+    pub mls_layers: Option<usize>,
+    // Drafter LoRA path (Plan 117: MTP LoRA Drafter)
+    pub drafter_lora_path: Option<std::path::PathBuf>,
 }
 
 impl Default for Config {
@@ -1702,6 +1862,9 @@ mod tests_types {
             sp_kv_threshold: Some(0.5),
             width_rollouts: Some(9),
             early_stop_threshold: Some(0.6),
+            mls_layers: Some(3),
+            // drafter_lora_path is consumed by the caller, not applied to Config
+            drafter_lora_path: None,
         };
         let result = config.with_overrides(&overrides);
         assert_eq!(result.tree_budget, 1);
@@ -1719,6 +1882,7 @@ mod tests_types {
         assert!((result.sp_kv_threshold - 0.5).abs() < 1e-6);
         assert_eq!(result.width_rollouts, 9);
         assert!((result.early_stop_threshold - 0.6).abs() < 1e-6);
+        assert_eq!(result.mls_layers, 3);
     }
 
     #[test]

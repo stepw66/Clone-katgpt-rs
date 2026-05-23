@@ -21,19 +21,19 @@ Our specific advantage: we already have AHLA (asymmetric second-order linear att
 - [ ] T2: Benchmark naive 4× looped SDPA (4 full passes, KV cache ×4) — `bench_naive_loop`
 
 ### Phase 1: Core Types & Enums (microgpt-core)
-- [ ] T3: Add `LoopMode` enum to `microgpt-core/src/types.rs`
-- [ ] T4: Add `HybridPattern` enum to `microgpt-core/src/types.rs`
-- [ ] T5: Add `SdpaOutputGate` struct to `microgpt-core/src/types.rs`
-- [ ] T6: Add `ResidualGate` struct (per-loop learned gate ρ_τ) to `microgpt-core/src/types.rs`
-- [ ] T7: Update `Config` struct with loop/hybrid fields + defaults
-- [ ] T8: Add `lt2_looped` feature gate to `microgpt-core/Cargo.toml`
+- [x] T3: Add `LoopMode` enum to `microgpt-core/src/types.rs`
+- [x] T4: Add `HybridPattern` enum to `microgpt-core/src/types.rs`
+- [x] T5: Add `SdpaOutputGate` struct to `microgpt-core/src/types.rs`
+- [x] T6: Add `ResidualGate` struct (per-loop learned gate ρ_τ) to `microgpt-core/src/types.rs`
+- [x] T7: Update `Config` struct with loop/hybrid fields + defaults
+- [x] T8: Add `lt2_looped` feature gate to `microgpt-core/Cargo.toml`
 
 ### Phase 2: Looped Forward Pass (microgpt-rs)
-- [ ] T9: Add `lt2_looped` feature gate to `microgpt-rs/Cargo.toml` (depends on `hla_attention`)
-- [ ] T10: Implement `forward_looped()` in `transformer.rs` — weight-shared T-pass loop
-- [ ] T11: Implement per-loop residual gate: `h^(τ) = h̃^(τ) + ρ_τ ⊙ h^(τ-1)`
-- [ ] T12: Implement `DecodeStage` dispatch for looped inference (prefill vs decode)
-- [ ] T13: Update `TransformerWeights::new()` to generate residual gate params
+- [x] T9: Add `lt2_looped` feature gate to `microgpt-rs/Cargo.toml` (depends on `hla_attention`)
+- [x] T10: Implement `forward_looped()` in `transformer.rs` — weight-shared T-pass loop
+- [x] T11: Implement per-loop residual gate: `h^(τ) = h̃^(τ) + ρ_τ ⊙ h^(τ-1)`
+- [x] T12: Implement `DecodeStage` dispatch for looped inference (prefill vs decode)
+- [x] T13: Update `TransformerWeights::new()` to generate residual gate params
 
 ### Phase 3: SDPA Output Gate
 - [ ] T14: Implement `SdpaOutputGate::forward()` — sigmoid gate after SDPA, before Wo

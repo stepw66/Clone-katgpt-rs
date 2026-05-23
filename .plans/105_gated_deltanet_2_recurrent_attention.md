@@ -14,56 +14,56 @@ Implement Gated DeltaNet-2 (GDN2) recurrent attention as an alternative to HLA/A
 ## Tasks
 
 ### Phase 1: Core Types & State
-- [ ] **T1:** Create `src/gdn2/` module with `mod.rs` (index + re-exports), `types.rs` (cache structs), `kernel.rs` (recurrent step), `forward.rs` (forward pass)
-- [ ] **T2:** Add `gdn2_attention` feature flag to `Cargo.toml` + `pub mod gdn2` in `src/lib.rs`
-- [ ] **T3:** Implement `Gdn2LayerState` — per-head recurrent state `S ∈ R^{d_k × d_v}`, erase gate buffer `b ∈ R^{d_k}`, write gate buffer `w ∈ R^{d_v}`, decay buffer `alpha ∈ R^{d_k}`
-- [ ] **T4:** Implement `MultiLayerGdn2Cache` — multi-layer cache with `layers: Vec<Gdn2LayerState>`, GQA support (same KV group mapping as HLA), `memory_bytes()`, `reset()`
-- [ ] **T5:** Add `Gdn2GateConfig` enum: `EraseOnly` (b-only, scalar w), `Full` (channel b + w), `Kda` (scalar β fallback). Controls gate projection dimensions.
+- [x] **T1:** Create `src/gdn2/` module with `mod.rs` (index + re-exports), `types.rs` (cache structs), `kernel.rs` (recurrent step), `forward.rs` (forward pass)
+- [x] **T2:** Add `gdn2_attention` feature flag to `Cargo.toml` + `pub mod gdn2` in `src/lib.rs`
+- [x] **T3:** Implement `Gdn2LayerState` — per-head recurrent state `S ∈ R^{d_k × d_v}`, erase gate buffer `b ∈ R^{d_k}`, write gate buffer `w ∈ R^{d_v}`, decay buffer `alpha ∈ R^{d_k}`
+- [x] **T4:** Implement `MultiLayerGdn2Cache` — multi-layer cache with `layers: Vec<Gdn2LayerState>`, GQA support (same KV group mapping as HLA), `memory_bytes()`, `reset()`
+- [x] **T5:** Add `Gdn2GateConfig` enum: `EraseOnly` (b-only, scalar w), `Full` (channel b + w), `Kda` (scalar β fallback). Controls gate projection dimensions.
 
 ### Phase 2: Recurrent Step Kernel
-- [ ] **T6:** Implement `gdn2_recurrent_step()` — the core O(d_k × d_v) token-by-token update:
+- [x] **T6:** Implement `gdn2_recurrent_step()` — the core O(d_k × d_v) token-by-token update:
   1. Decay: `S *= Diag(α)` (row-wise scale)
   2. Read: `r = Sᵀ (b ⊙ k)` (gated matvec)
   3. Update: `S += k ⊗ (w ⊙ v − r)` (outer product delta)
   4. Readout: `o = Sᵀ q` (matvec)
-- [ ] **T7:** SIMD-optimize `gdn2_recurrent_step()` using existing `simd_dot_f32` for matvec, `simd_scale` for elementwise multiply. Target: within 10% of AHLA step cost.
-- [ ] **T8:** Implement `gdn2_project_gates()` — erase gate `b = σ(W_b @ x)` and write gate `w = σ(W_w @ x)` projections. Uses `matmul()` + elementwise sigmoid.
-- [ ] **T9:** Implement `gdn2_project_decay()` — log-decay `g = -exp(a) ⊙ softplus(W_f @ x + δ)`, decay `α = exp(g)`. Computed in f32 for precision.
+- [x] **T7:** SIMD-optimize `gdn2_recurrent_step()` using existing `simd_dot_f32` for matvec, `simd_scale` for elementwise multiply. Target: within 10% of AHLA step cost.
+- [x] **T8:** Implement `gdn2_project_gates()` — erase gate `b = σ(W_b @ x)` and write gate `w = σ(W_w @ x)` projections. Uses `matmul()` + elementwise sigmoid.
+- [x] **T9:** Implement `gdn2_project_decay()` — log-decay `g = -exp(a) ⊙ softplus(W_f @ x + δ)`, decay `α = exp(g)`. Computed in f32 for precision.
 
 ### Phase 3: Forward Pass
-- [ ] **T10:** Implement `forward_gdn2()` — mirrors `forward_hla()` structure:
+- [x] **T10:** Implement `forward_gdn2()` — mirrors `forward_hla()` structure:
   1. Embedding (same as base)
   2. Per-layer: RMSNorm → save residual → RMSNorm → QKV projection
   3. **Gate projections:** erase b, write w, decay α from x (new vs HLA)
   4. **L2 normalize** q and k (stability, from paper)
   5. **Recurrent step:** `gdn2_recurrent_step()` per head
   6. Output: RMSNorm → output projection → add residual
-- [ ] **T11:** Implement `generate_gdn2_into()` — streaming generation with GDN2 cache (mirrors `generate_hla_into`)
-- [ ] **T12:** Add `AttentionMode::Gdn2` variant to `types.rs` + dispatch in `forward()` match
+- [x] **T11:** Implement `generate_gdn2_into()` — streaming generation with GDN2 cache (mirrors `generate_hla_into`)
+- [x] **T12:** Add `AttentionMode::Gdn2` variant to `types.rs` + dispatch in `forward()` match
 
 ### Phase 4: Weight Projections
-- [ ] **T13:** Add GDN2 weight tensors to `TransformerWeights` (feature-gated):
+- [x] **T13:** Add GDN2 weight tensors to `TransformerWeights` (feature-gated):
   - `attn_w_erase: Vec<f32>` — n_embd → n_head × d_k (erase gate projection)
   - `attn_w_write: Vec<f32>` — n_embd → n_head × d_v (write gate projection)
   - `attn_w_decay_w: Vec<f32>` — n_embd → n_head × d_k (decay projection weight)
   - `attn_w_decay_a: Vec<f32>` — d_k (per-head decay base, broadcast)
   - `attn_w_decay_bias: Vec<f32>` — d_k (per-channel decay bias)
-- [ ] **T14:** Random init for GDN2 weights in `TransformerWeights::new()` — Xavier uniform for projections, learnable `a` and `δ` for decay
+- [x] **T14:** Random init for GDN2 weights in `TransformerWeights::new()` — Xavier uniform for projections, learnable `a` and `δ` for decay
 
 ### Phase 5: Benchmark & GOAT Proof
-- [ ] **T15:** Add `bench_gdn2_vs_hla_vs_flat()` — compare throughput, memory, and quality:
+- [x] **T15:** Add `bench_gdn2_vs_hla_vs_flat()` — compare throughput, memory, and quality:
   - Throughput: tok/s for GDN2 recurrent decode vs AHLA vs flat KV
   - Memory: bytes per layer for GDN2 state vs AHLA state vs flat KV
   - Quality: cosine similarity vs SDPA (random weights, same as HLA bench)
-- [ ] **T16:** Add `bench_gdn2_gate_ablation()` — measure erase-only vs full vs KDA-tied variants:
+- [x] **T16:** Add `bench_gdn2_gate_ablation()` — measure erase-only vs full vs KDA-tied variants:
   - EraseOnly (channel b, scalar w) — expect ~90% of full gain
   - Full (channel b + w) — full GDN2
   - Kda (scalar β) — baseline tied gate
-- [ ] **T17:** Add `bench_gdn2_context_scaling()` — throughput at positions [8, 64, 256, 1024, 4096]:
+- [x] **T17:** Add `bench_gdn2_context_scaling()` — throughput at positions [8, 64, 256, 1024, 4096]:
   - GDN2 should be flat (O(1) per step)
   - Flat KV should degrade linearly
   - Compare with AHLA flat profile
-- [ ] **T18:** GOAT proof: `tests/bench_gdn2.rs` — 3 assertions:
+- [x] **T18:** GOAT proof: `tests/bench_gdn2.rs` — 3 assertions:
   1. `gdn2_tps >= ahla_tps * 0.90` (within 10% of AHLA throughput)
   2. `gdn2_memory <= flat_kv_memory` (always smaller than flat KV)
   3. `gdn2_logits_finite` (no NaN/Inf at any position)

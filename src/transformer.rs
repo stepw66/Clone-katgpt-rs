@@ -294,6 +294,11 @@ pub struct ForwardContext {
     // CODA fused kernels: partial RMS accumulation buffer (Plan 103)
     #[cfg(feature = "coda_fusion")]
     coda_partial_sums: Vec<f32>, // [1] single-block RMS sum of squares
+    // MLS Multi-Layer Sum aggregation (Plan 104: Research 68)
+    #[cfg(feature = "mls_aggregate")]
+    mls_buf: Vec<f32>, // [n_embd] accumulator for last K layer residuals
+    #[cfg(feature = "mls_aggregate")]
+    mls_count: usize, // How many layers accumulated
 }
 
 impl ForwardContext {
@@ -334,6 +339,10 @@ impl ForwardContext {
             delta_routing_logits: vec![0.0; config.n_layer + 1], // Max B+1 sources
             #[cfg(feature = "coda_fusion")]
             coda_partial_sums: vec![0.0; 1], // Single-block partial RMS (Plan 103)
+            #[cfg(feature = "mls_aggregate")]
+            mls_buf: vec![0.0; config.n_embd],
+            #[cfg(feature = "mls_aggregate")]
+            mls_count: 0,
         }
     }
 
@@ -596,6 +605,207 @@ fn forward_verify<'a>(
     }
 }
 
+// ---------------------------------------------------------------------------
+// LT2 Looped Inference (Plan 108, Research 73)
+// ---------------------------------------------------------------------------
+
+/// Looped transformer forward pass — weight-shared T-pass loop.
+///
+/// Applies the same layer weights T times in succession, yielding effective
+/// depth T×n_layer with no extra parameters. Key insight from LT2: looping
+/// uniquely synergizes with subquadratic attention — T loops turn rank-1
+/// DPLR state updates into rank-T updates.
+///
+/// Per-loop residual gate: h^(τ) = h̃^(τ) + ρ_τ ⊙ h^(τ-1)
+/// Zero-init ρ_τ means first iteration is h̃^(1) (no residual from "previous").
+///
+/// Feature gate: `lt2_looped` (requires `hla_attention`).
+#[cfg(feature = "lt2_looped")]
+#[allow(clippy::too_many_arguments, clippy::needless_range_loop)]
+fn forward_looped<'a>(
+    ctx: &'a mut ForwardContext,
+    weights: &TransformerWeights,
+    cache: &mut MultiLayerKVCache,
+    ahla_cache: &mut crate::hla::MultiLayerAhlaCache,
+    token: usize,
+    pos: usize,
+    config: &Config,
+    residual_gate: &crate::types::ResidualGate,
+) -> &'a mut [f32] {
+    use crate::types::{HybridPattern, LoopMode};
+
+    let n = config.n_embd;
+    let hd = config.head_dim;
+    let kvd = crate::types::kv_dim(config);
+
+    let loop_count = match config.loop_mode {
+        LoopMode::WeightShared { loop_count } => loop_count,
+        LoopMode::None => 1,
+    };
+
+    // 1. Embedding: x = wte[token] + wpe[pos]
+    let tok_off = token * n;
+    let pos_off_emb = pos * n;
+    crate::simd::simd_add_into(
+        &mut ctx.x[..n],
+        &weights.wte[tok_off..tok_off + n],
+        &weights.wpe[pos_off_emb..pos_off_emb + n],
+    );
+
+    // Save initial embedding for residual gating across loops
+    let mut prev_h = vec![0.0f32; n];
+
+    // 2. Outer loop: T passes over all layers
+    for tau in 0..loop_count {
+        // Save h^(τ-1) for residual gate
+        prev_h[..n].copy_from_slice(&ctx.x[..n]);
+
+        // 3. Inner loop: weight-shared layer pass
+        for (layer_idx, layer_weights) in weights.layers.iter().enumerate() {
+            let layer_cache = &mut cache.layers[layer_idx];
+
+            // Determine if this layer uses full SDPA or linear attention
+            let is_full = match config.hybrid_pattern {
+                HybridPattern::Uniform => true,
+                HybridPattern::Interleave { full_ratio } => {
+                    (layer_idx % full_ratio) == full_ratio - 1
+                }
+                HybridPattern::Bookend => layer_idx == 0 || layer_idx == weights.layers.len() - 1,
+            };
+
+            // Pre-attention: RMSNorm → save residual → RMSNorm
+            crate::types::rmsnorm(&mut ctx.x);
+            ctx.xr[..n].copy_from_slice(&ctx.x[..n]);
+            crate::types::rmsnorm(&mut ctx.x);
+
+            // QKV projections
+            crate::types::matmul(&mut ctx.q, &layer_weights.attn_wq, &ctx.x, n, n);
+            crate::types::matmul(&mut ctx.k, &layer_weights.attn_wk, &ctx.x, kvd, n);
+            crate::types::matmul(&mut ctx.v, &layer_weights.attn_wv, &ctx.x, kvd, n);
+
+            if is_full {
+                // Full SDPA: store K,V in cache and compute standard attention
+                let pos_off = pos * kvd;
+                unsafe {
+                    std::ptr::copy_nonoverlapping(
+                        ctx.k.as_ptr(),
+                        layer_cache.key.as_mut_ptr().add(pos_off),
+                        kvd,
+                    );
+                    std::ptr::copy_nonoverlapping(
+                        ctx.v.as_ptr(),
+                        layer_cache.value.as_mut_ptr().add(pos_off),
+                        kvd,
+                    );
+                }
+
+                // Multi-head attention with GQA
+                let scale = 1.0 / (hd as f32).sqrt();
+                ctx.attn_out[..n].fill(0.0);
+                let t_n = pos + 1;
+                for h in 0..config.n_head {
+                    let kv_group = h * config.n_kv_head / config.n_head;
+                    unsafe {
+                        attention_head(
+                            &ctx.q,
+                            &layer_cache.key,
+                            &layer_cache.value,
+                            &mut ctx.attn_out,
+                            &mut ctx.scores,
+                            h * hd,
+                            kv_group * hd,
+                            kvd,
+                            hd,
+                            t_n,
+                            scale,
+                        );
+                    }
+                }
+            } else {
+                // Linear attention via AHLA recurrent step
+                let ahla_layer = &mut ahla_cache.layers[layer_idx];
+                ctx.attn_out[..n].fill(0.0);
+
+                for h in 0..config.n_head {
+                    let kv_group = h * config.n_kv_head / config.n_head;
+                    let head_state = &mut ahla_layer.heads[h];
+
+                    crate::hla::ahla_step(
+                        &mut ahla_layer.pkv[kv_group],
+                        &mut ahla_layer.mk[kv_group],
+                        head_state,
+                        &ctx.q[h * hd..(h + 1) * hd],
+                        &ctx.k[kv_group * hd..(kv_group + 1) * hd],
+                        &ctx.v[kv_group * hd..(kv_group + 1) * hd],
+                        hd,
+                        ahla_cache.gamma,
+                        &mut ctx.attn_out[h * hd..(h + 1) * hd],
+                        &mut ctx.scores[..hd],
+                    );
+                }
+            }
+
+            // SDPA output gate (if configured)
+            if config.gated_attn && is_full {
+                // sigmoid gate with zero-init weights → sigmoid(0) = 0.5
+                for v in ctx.attn_out[..n].iter_mut() {
+                    // Simple elementwise gate: sigmoid(w·x) · x
+                    // At zero-init w=0: sigmoid(0) = 0.5, so output = 0.5 * attn_out
+                    *v *= 0.5; // Neutral gate at init
+                }
+            }
+
+            // Output projection + residual
+            crate::types::matmul(&mut ctx.x, &layer_weights.attn_wo, &ctx.attn_out, n, n);
+            crate::simd::simd_add_inplace(&mut ctx.x[..n], &ctx.xr[..n]);
+
+            // MLP: save residual → RMSNorm → MLP → residual
+            ctx.xr2[..n].copy_from_slice(&ctx.x[..n]);
+            crate::types::rmsnorm(&mut ctx.x);
+            crate::types::matmul_relu(
+                &mut ctx.hidden,
+                &layer_weights.mlp_w1,
+                &ctx.x,
+                config.mlp_hidden,
+                n,
+            );
+            crate::types::matmul(
+                &mut ctx.x,
+                &layer_weights.mlp_w2,
+                &ctx.hidden,
+                n,
+                config.mlp_hidden,
+            );
+            crate::simd::simd_add_inplace(&mut ctx.x[..n], &ctx.xr2[..n]);
+        }
+
+        // Per-loop residual gate: h^(τ) = h̃^(τ) + ρ_τ ⊙ h^(τ-1)
+        // ρ_τ is zero-init → first iteration: h^(0) = h̃^(0) (no residual)
+        if tau > 0 {
+            let gate_offset = tau * n;
+            if gate_offset + n <= residual_gate.gates.len() {
+                for d in 0..n {
+                    ctx.x[d] += residual_gate.gates[gate_offset + d] * prev_h[d];
+                }
+            }
+        }
+    }
+
+    // Snapshot hidden state
+    ctx.hidden_state[..n].copy_from_slice(&ctx.x[..n]);
+
+    // LM Head
+    standard_lm_head(
+        &mut ctx.logits,
+        &ctx.x,
+        &weights.lm_head,
+        config.vocab_size,
+        n,
+    );
+
+    &mut ctx.logits
+}
+
 /// Standard full-vocab LM head (current behavior).
 #[inline(always)]
 fn standard_lm_head(
@@ -844,6 +1054,13 @@ fn forward_base<'a>(
         &weights.wpe[pos_off_emb..pos_off_emb + n],
     );
 
+    // MLS: reset accumulator at start of forward call (Plan 104)
+    #[cfg(feature = "mls_aggregate")]
+    {
+        ctx.mls_buf[..n].fill(0.0);
+        ctx.mls_count = 0;
+    }
+
     // 2. Layer loop
     for (layer_idx, layer_weights) in weights.layers.iter().enumerate() {
         let layer_cache = &mut cache.layers[layer_idx];
@@ -975,6 +1192,15 @@ fn forward_base<'a>(
         }
         crate::simd::simd_add_inplace(&mut ctx.x[..n], &ctx.xr2[..n]);
 
+        // MLS: accumulate last K layer residuals (Plan 104)
+        #[cfg(feature = "mls_aggregate")]
+        {
+            if config.mls_layers > 0 && layer_idx >= weights.layers.len() - config.mls_layers {
+                crate::simd::simd_add_inplace(&mut ctx.mls_buf[..n], &ctx.x[..n]);
+                ctx.mls_count += 1;
+            }
+        }
+
         // Delta routing: accumulate per-sublayer deltas, route at block boundaries (Plan 097)
         #[cfg(feature = "delta_routing")]
         {
@@ -1017,6 +1243,16 @@ fn forward_base<'a>(
                 ctx.block_deltas[block_idx].fill(0.0);
             }
         }
+    }
+
+    // MLS: replace ctx.x with aggregated buffer (Plan 104)
+    #[cfg(feature = "mls_aggregate")]
+    if ctx.mls_count > 0 {
+        let inv_k = 1.0 / ctx.mls_count as f32;
+        for v in &mut ctx.mls_buf[..n] {
+            *v *= inv_k;
+        }
+        ctx.x[..n].copy_from_slice(&ctx.mls_buf[..n]);
     }
 
     // Snapshot hidden state (for Plan 009 compatibility)

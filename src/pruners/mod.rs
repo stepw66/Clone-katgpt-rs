@@ -46,6 +46,15 @@ pub mod review_metrics;
 #[cfg(feature = "bandit")]
 pub mod trial_log;
 
+#[cfg(feature = "dreamer")]
+pub mod dreamer;
+
+#[cfg(feature = "dreamer")]
+pub use dreamer::{
+    CounterfactualEstimator, DecayPolicy, DreamerConfig, DreamerConsolidator, DreamerScheduler,
+    MemoryDecay, ReplacementSet, WorkingRegion,
+};
+
 #[cfg(feature = "bandit")]
 pub use absorb_compress::{AbsorbCompress, AbsorbCompressLayer, CompressConfig};
 

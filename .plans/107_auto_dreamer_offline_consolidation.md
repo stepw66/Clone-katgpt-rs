@@ -6,12 +6,12 @@
 
 ## Tasks
 
-- [ ] T1: Create `dreamer` feature gate + module scaffold (`src/pruners/dreamer/`)
-- [ ] T2: Implement `DreamerConfig` + `WorkingRegion` + `ReplacementSet` types
-- [ ] T3: Implement consolidation scheduler (cadence-based region selection)
-- [ ] T4: Implement region rewriting consolidator (deterministic modelless merge)
-- [ ] T5: Implement memory decay/forgetting policy
-- [ ] T6: Implement counterfactual dropout utility estimation
+- [x] T1: Create `dreamer` feature gate + module scaffold (`src/pruners/dreamer/`)
+- [x] T2: Implement `DreamerConfig` + `WorkingRegion` + `ReplacementSet` types
+- [x] T3: Implement consolidation scheduler (cadence-based region selection)
+- [x] T4: Implement region rewriting consolidator (deterministic modelless merge)
+- [x] T5: Implement memory decay/forgetting policy
+- [x] T6: Implement counterfactual dropout utility estimation
 - [ ] T7: Integrate Dreamer into existing bandit/δ-mem pipeline
 - [ ] T8: Add Freeze/Thaw support for consolidated banks
 - [ ] T9: Bomber GOAT proof — dreamer vs no-dreamer (1000 rounds)

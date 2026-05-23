@@ -21,9 +21,10 @@ pub use traits::{
 
 // Re-export key types at crate root for convenience
 pub use types::{
-    AttentionMode, Config, HlaMode, InferenceOverrides, InferenceResult, ModelArchitecture, Rng,
-    WeightDtype, kv_dim, matmul, matmul_f16, matmul_f16_parallel, matmul_parallel, matmul_relu,
-    rmsnorm, sample_token, softmax, softmax_scaled,
+    AttentionMode, Config, DashAttnConfig, HlaMode, HybridPattern, InferenceOverrides,
+    InferenceResult, LoopMode, ModelArchitecture, ResidualGate, Rng, SdpaOutputGate, WeightDtype,
+    kv_dim, matmul, matmul_f16, matmul_f16_parallel, matmul_parallel, matmul_relu, rmsnorm,
+    sample_token, softmax, softmax_scaled,
 };
 
 #[cfg(feature = "domain_latent")]

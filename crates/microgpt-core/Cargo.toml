@@ -20,3 +20,4 @@ domain_latent = []
 maxsim = []
 dllm = []  # Discrete diffusion language model support (Plan 068)
 coda_fusion = []  # CODA-inspired fused SIMD kernels — matmul+residual+rmsnorm+activation (Plan 103)
+lt2_looped = []  # LT2 looped inference types — LoopMode, HybridPattern, SdpaOutputGate, ResidualGate (Plan 108)

@@ -41,7 +41,7 @@ dmax_spd = ["dllm"]  # Soft Parallel Decoding, depends on D2F infrastructure
 ## Tasks
 
 ### T1: Hybrid Embedding Infrastructure — The Core Delta
-- [ ] Add `SoftDecodeConfig` to `d2f.rs` (feature-gated `dmax_spd`):
+- [x] Add `SoftDecodeConfig` to `d2f.rs` (feature-gated `dmax_spd`):
   ```rust
   /// Configuration for DMax Soft Parallel Decoding.
   ///
@@ -64,8 +64,8 @@ dmax_spd = ["dllm"]  # Soft Parallel Decoding, depends on D2F infrastructure
       pub consistency_check: bool,
   }
   ```
-- [ ] Implement `SoftDecodeConfig::default()`, `::aggressive()`, `::conservative()` presets
-- [ ] Implement `HybridEmbedding` helper struct:
+- [x] Implement `SoftDecodeConfig::default()`, `::aggressive()`, `::conservative()` presets
+- [x] Implement `HybridEmbedding` helper struct:
   ```rust
   /// Hybrid embedding: soft interpolation between token and mask embeddings.
   ///
@@ -87,13 +87,13 @@ dmax_spd = ["dllm"]  # Soft Parallel Decoding, depends on D2F infrastructure
       pub fn build(&self, token_emb: &[f32], mask_emb: &[f32], out: &mut [f32]) { ... }
   }
   ```
-- [ ] Test: `HybridEmbedding::build()` produces valid normalized output
-- [ ] Test: confidence=1.0 → output ≈ token_embedding
-- [ ] Test: confidence=0.0 → output ≈ mask_embedding
-- [ ] Test: confidence=0.5 → output is valid interpolation with correct norm
+- [x] Test: `HybridEmbedding::build()` produces valid normalized output
+- [x] Test: confidence=1.0 → output ≈ token_embedding
+- [x] Test: confidence=0.0 → output ≈ mask_embedding
+- [x] Test: confidence=0.5 → output is valid interpolation with correct norm
 
 ### T2: Contiguous Prefix Promotion
-- [ ] Implement `contiguous_prefix_promote()`:
+- [x] Implement `contiguous_prefix_promote()`:
   ```rust
   /// DMax contiguous prefix promotion rule.
   ///
@@ -109,13 +109,13 @@ dmax_spd = ["dllm"]  # Soft Parallel Decoding, depends on D2F infrastructure
       decode_threshold: f32,
   ) -> Vec<usize> { ... }
   ```
-- [ ] Test: all positions above threshold → promote all
-- [ ] Test: no positions above threshold → promote leftmost only
-- [ ] Test: partial prefix → promote only prefix positions
-- [ ] Test: gap in confidence → stop at first below-threshold position
+- [x] Test: all positions above threshold → promote all
+- [x] Test: no positions above threshold → promote leftmost only
+- [x] Test: partial prefix → promote only prefix positions
+- [x] Test: gap in confidence → stop at first below-threshold position
 
 ### T3: Block Convergence Check
-- [ ] Implement `BlockConvergence` enum and check function:
+- [x] Implement `BlockConvergence` enum and check function:
   ```rust
   /// Convergence status for a D2F decode block.
   #[cfg(feature = "dmax_spd")]
@@ -142,13 +142,13 @@ dmax_spd = ["dllm"]  # Soft Parallel Decoding, depends on D2F infrastructure
       accept_threshold: f32,
   ) -> BlockConvergence { ... }
   ```
-- [ ] Test: all confidences above threshold → ConfidenceConverged
-- [ ] Test: top-1 unchanged from previous → ConsistencyConverged
-- [ ] Test: neither condition met → NotConverged
-- [ ] Test: prev_top1=None (first step) → falls through to confidence check
+- [x] Test: all confidences above threshold → ConfidenceConverged
+- [x] Test: top-1 unchanged from previous → ConsistencyConverged
+- [x] Test: neither condition met → NotConverged
+- [x] Test: prev_top1=None (first step) → falls through to confidence check
 
 ### T4: SPD-Enhanced D2F Denoising Loop
-- [ ] Add `d2f_decode_block_soft()` to `d2f.rs` (feature-gated `dmax_spd`):
+- [x] Add `d2f_decode_block_soft()` to `d2f.rs` (feature-gated `dmax_spd`):
   ```rust
   /// DMax Soft Parallel Decoding — enhanced D2F block decode.
   ///
@@ -172,7 +172,7 @@ dmax_spd = ["dllm"]  # Soft Parallel Decoding, depends on D2F infrastructure
       rng: &mut Rng,
   ) -> Vec<usize> { ... }
   ```
-- [ ] Integration points:
+- [x] Integration points:
   1. Get mask embedding from `weights.embedding_table[config.mask_token]`
   2. At each denoising step:
      - Forward pass via `forward_block_causal_with()` → logits
@@ -182,13 +182,13 @@ dmax_spd = ["dllm"]  # Soft Parallel Decoding, depends on D2F infrastructure
      - Apply contiguous prefix promotion for position selection
      - Check block convergence → early stop if converged
   3. Write hybrid embeddings into `ctx.x_norm` for next forward pass input
-- [ ] Ensure `D2fContext` has space for previous-step top-1 tracking:
+- [x] Ensure `D2fContext` has space for previous-step top-1 tracking:
   - Add `prev_top1: Vec<usize>` field behind `#[cfg(feature = "dmax_spd")]`
   - Initialize in `D2fContext::new()` with zeros
-- [ ] Test: `d2f_decode_block_soft()` produces valid token sequence
-- [ ] Test: soft decode terminates (no infinite loop)
-- [ ] Test: convergence check triggers early stop on easy inputs
-- [ ] Test: hybrid embeddings flow correctly through forward pass
+- [x] Test: `d2f_decode_block_soft()` produces valid token sequence
+- [x] Test: soft decode terminates (no infinite loop)
+- [x] Test: convergence check triggers early stop on easy inputs
+- [x] Test: hybrid embeddings flow correctly through forward pass
 
 ### T5: Integrate with D2fPipeline
 - [ ] Add `SoftDecodeConfig` field to `D2fPipeline` behind `#[cfg(feature = "dmax_spd")]`:

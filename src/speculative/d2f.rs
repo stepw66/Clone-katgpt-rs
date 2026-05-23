@@ -266,7 +266,7 @@ pub struct D2fBlockResult {
     pub tokens: Vec<usize>,
     /// Number of denoising steps actually used (may be < max if converged early).
     pub steps_used: usize,
-    /// Confidence at each denoising step.
+    /// Average confidence across positions at each denoising step.
     pub confidence_history: Vec<f32>,
     /// Final fraction of correctly predicted tokens (if ground truth available).
     pub accuracy: Option<f32>,
@@ -1100,6 +1100,349 @@ impl<'a> D2fPipeline<'a> {
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
+// DMax Soft Parallel Decode (Plan 109, Research 72)
+// ---------------------------------------------------------------------------
+
+/// Configuration for DMax Soft Parallel Decoding.
+///
+/// When enabled, decoded positions use hybrid embeddings (interpolation
+/// between predicted token embedding and mask embedding) instead of
+/// binary mask/token transitions. This carries uncertainty forward,
+/// enabling iterative self-refinement.
+#[cfg(feature = "dmax_spd")]
+#[derive(Clone, Debug)]
+pub struct SoftDecodeConfig {
+    /// Enable hybrid embedding construction (default: true).
+    pub use_hybrid_embeddings: bool,
+    /// Decoding threshold τ_dec: promote positions with confidence > τ_dec (default: 0.5).
+    pub decode_threshold: f32,
+    /// Acceptance threshold τ_acc: block converges when all positions > τ_acc (default: 0.9).
+    pub accept_threshold: f32,
+    /// Enable contiguous prefix promotion rule (default: true).
+    pub contiguous_prefix: bool,
+    /// Enable consistency convergence check (default: true).
+    pub consistency_check: bool,
+}
+
+#[cfg(feature = "dmax_spd")]
+impl Default for SoftDecodeConfig {
+    fn default() -> Self {
+        Self {
+            use_hybrid_embeddings: true,
+            decode_threshold: 0.5,
+            accept_threshold: 0.9,
+            contiguous_prefix: true,
+            consistency_check: true,
+        }
+    }
+}
+
+#[cfg(feature = "dmax_spd")]
+impl SoftDecodeConfig {
+    /// Aggressive preset: lower thresholds, more parallelism.
+    pub fn aggressive() -> Self {
+        Self {
+            decode_threshold: 0.3,
+            accept_threshold: 0.8,
+            ..Self::default()
+        }
+    }
+
+    /// Conservative preset: higher thresholds, safer decoding.
+    pub fn conservative() -> Self {
+        Self {
+            decode_threshold: 0.7,
+            accept_threshold: 0.95,
+            ..Self::default()
+        }
+    }
+}
+
+/// Hybrid embedding: soft interpolation between token and mask embeddings.
+///
+/// h̃ = π * e_token + (1 - π) * e_mask
+/// h = h̃ / ||h̃||₂ * (π * ||e_token||₂ + (1 - π) * ||e_mask||₂)
+///
+/// The renormalization prevents magnitude collapse from adding high-dim vectors.
+#[cfg(feature = "dmax_spd")]
+pub struct HybridEmbedding {
+    /// Confidence π for the predicted token.
+    pub confidence: f32,
+    /// Predicted token id.
+    pub token_id: usize,
+}
+
+#[cfg(feature = "dmax_spd")]
+impl HybridEmbedding {
+    /// Construct hybrid embedding vector in-place.
+    /// Writes into `out[dim]` slice, reads from `token_emb[dim]` and `mask_emb[dim]`.
+    pub fn build(&self, token_emb: &[f32], mask_emb: &[f32], out: &mut [f32]) {
+        let dim = out.len();
+        let pi = self.confidence.clamp(0.0, 1.0);
+        let one_minus_pi = 1.0 - pi;
+
+        // h̃ = π * e_token + (1 - π) * e_mask
+        let mut norm_sq = 0.0f32;
+        for d in 0..dim {
+            let h_tilde = pi * token_emb[d] + one_minus_pi * mask_emb[d];
+            out[d] = h_tilde;
+            norm_sq += h_tilde * h_tilde;
+        }
+
+        // Renormalize: h = h̃ / ||h̃||₂ * target_norm
+        let norm = norm_sq.sqrt();
+        if norm > 1e-8 {
+            let token_norm: f32 = token_emb.iter().map(|v| v * v).sum::<f32>().sqrt();
+            let mask_norm: f32 = mask_emb.iter().map(|v| v * v).sum::<f32>().sqrt();
+            let target_norm = pi * token_norm + one_minus_pi * mask_norm;
+            let scale = target_norm / norm;
+            for v in out.iter_mut() {
+                *v *= scale;
+            }
+        }
+    }
+}
+
+/// DMax contiguous prefix promotion rule.
+///
+/// Scan masked positions left-to-right. Promote the longest contiguous prefix
+/// where confidence > τ_dec. If none qualify, promote the leftmost position
+/// (ensure progress). This keeps the masked region contiguous.
+///
+/// Returns: Vec of position indices to promote from mask→token.
+#[cfg(feature = "dmax_spd")]
+pub fn contiguous_prefix_promote(
+    masked_positions: &[usize],
+    confidences: &[f32],
+    decode_threshold: f32,
+) -> Vec<usize> {
+    if masked_positions.is_empty() {
+        return Vec::new();
+    }
+
+    // Build confidence map: position → confidence
+    let mut to_promote = Vec::new();
+    for &pos in masked_positions {
+        let conf = confidences.get(pos).copied().unwrap_or(0.0);
+        if conf >= decode_threshold {
+            to_promote.push(pos);
+        } else {
+            // Contiguous prefix: stop at first below-threshold
+            break;
+        }
+    }
+
+    // Ensure progress: if none qualify, promote leftmost
+    if to_promote.is_empty() {
+        to_promote.push(masked_positions[0]);
+    }
+
+    to_promote
+}
+
+/// Convergence status for a D2F decode block.
+#[cfg(feature = "dmax_spd")]
+#[derive(Clone, Debug, PartialEq)]
+pub enum BlockConvergence {
+    /// Block has not converged, continue denoising.
+    NotConverged,
+    /// Block converged: all positions above acceptance threshold.
+    ConfidenceConverged,
+    /// Block converged: top-1 predictions unchanged for 2 consecutive steps.
+    ConsistencyConverged,
+}
+
+/// Check if a block has converged using DMax criteria.
+///
+/// Primary signal: consistency (unchanged top-1 across 2 steps).
+/// Secondary signal: confidence (all positions > τ_acc).
+/// Either criterion triggers convergence.
+#[cfg(feature = "dmax_spd")]
+pub fn check_block_convergence(
+    current_top1: &[usize],
+    prev_top1: Option<&[usize]>,
+    confidences: &[f32],
+    accept_threshold: f32,
+) -> BlockConvergence {
+    // Primary: consistency check (unchanged top-1 from previous step)
+    if let Some(prev) = prev_top1
+        && current_top1.len() == prev.len()
+            && current_top1.iter().zip(prev.iter()).all(|(a, b)| a == b)
+        {
+            return BlockConvergence::ConsistencyConverged;
+        }
+
+    // Secondary: confidence check (all positions above threshold)
+    if !confidences.is_empty() && confidences.iter().all(|&c| c >= accept_threshold) {
+        return BlockConvergence::ConfidenceConverged;
+    }
+
+    BlockConvergence::NotConverged
+}
+
+/// DMax Soft Parallel Decoding — enhanced D2F block decode.
+///
+/// Key differences from standard `d2f_decode_block()`:
+/// 1. Hybrid embeddings prepared for decoded positions (token IDs carry confidence info)
+/// 2. Contiguous prefix promotion for position selection
+/// 3. Block convergence check for early stopping
+///
+/// The forward pass uses standard `forward_block_causal_with` with token IDs.
+/// Hybrid embedding logic is applied via the promotion/convergence heuristics.
+/// Full hybrid embedding injection requires a custom forward pass variant (future work).
+///
+/// **Important:** Best results with OPUT-trained models. May degrade quality
+/// on models trained with standard D2F loss only. See Research 072.
+#[cfg(feature = "dmax_spd")]
+#[allow(clippy::too_many_arguments, clippy::needless_range_loop)]
+pub fn d2f_decode_block_soft(
+    ctx: &mut D2fContext,
+    weights: &TransformerWeights,
+    config: &Config,
+    decode_config: &D2fDecodeConfig,
+    _pruner: &dyn ConstraintPruner,
+    soft_config: &SoftDecodeConfig,
+    _rng: &mut Rng,
+) -> D2fBlockResult {
+    let block_len = decode_config.block_size;
+    let mask_id = config.mask_token;
+    let vocab_size = config.vocab_size;
+
+    // Initialize all positions as masked
+    let mut tokens: Vec<usize> = vec![mask_id; block_len];
+    let mut confidences = vec![0.0f32; block_len];
+    let mut prev_top1: Option<Vec<usize>> = None;
+
+    let max_steps = decode_config.denoise_steps;
+
+    for step_idx in 0..max_steps {
+        // Forward pass with block-causal attention using current token IDs
+        // Masked positions use mask_token; decoded positions use predicted tokens
+        let seq_len = forward_block_causal_with(ctx, weights, &tokens, config, block_len);
+
+        // Sample top-1 and confidence for each position
+        let mut current_top1 = vec![0usize; block_len];
+        for pos in 0..seq_len.min(block_len) {
+            let logit_off = pos * vocab_size;
+            let logit_end = logit_off + vocab_size;
+            let logits = &ctx.logits_flat[logit_off..logit_end];
+
+            // Get logits for this position (copy for local processing)
+            let local_logits = logits.to_vec();
+
+            // Top-1 token and its logit value
+            let (best_idx, best_val) = local_logits
+                .iter()
+                .copied()
+                .enumerate()
+                .max_by(|a: &(usize, f32), b: &(usize, f32)| {
+                    a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal)
+                })
+                .unwrap_or((0, 0.0f32));
+
+            current_top1[pos] = best_idx;
+
+            // Confidence via softmax max probability
+            let max_val = local_logits
+                .iter()
+                .copied()
+                .fold(f32::NEG_INFINITY, f32::max);
+            let sum_exp: f32 = local_logits.iter().map(|&v| (v - max_val).exp()).sum();
+            let conf = if sum_exp > 0.0 {
+                (best_val - max_val).exp() / sum_exp
+            } else {
+                1.0 / vocab_size as f32
+            };
+            confidences[pos] = conf;
+        }
+
+        // Collect currently masked positions
+        let masked_positions: Vec<usize> =
+            (0..block_len).filter(|&p| tokens[p] == mask_id).collect();
+
+        // Promote positions: contiguous prefix or all-above-threshold
+        if soft_config.contiguous_prefix {
+            let to_promote = contiguous_prefix_promote(
+                &masked_positions,
+                &confidences,
+                soft_config.decode_threshold,
+            );
+            for pos in to_promote {
+                if tokens[pos] == mask_id {
+                    tokens[pos] = current_top1[pos];
+                }
+            }
+        } else {
+            // Standard: promote all above threshold
+            for &pos in &masked_positions {
+                if confidences[pos] >= soft_config.decode_threshold {
+                    tokens[pos] = current_top1[pos];
+                }
+            }
+            // Ensure progress: promote leftmost if none qualified
+            if !masked_positions.is_empty()
+                && masked_positions.iter().all(|&p| tokens[p] == mask_id)
+            {
+                tokens[masked_positions[0]] = current_top1[masked_positions[0]];
+            }
+        }
+
+        // Check convergence for early stopping
+        if soft_config.consistency_check && step_idx > 0 {
+            let convergence = check_block_convergence(
+                &current_top1,
+                prev_top1.as_deref(),
+                &confidences,
+                soft_config.accept_threshold,
+            );
+            if convergence != BlockConvergence::NotConverged {
+                // Fill remaining masked positions with current top-1
+                for pos in 0..block_len {
+                    if tokens[pos] == mask_id {
+                        tokens[pos] = current_top1[pos];
+                    }
+                }
+                break;
+            }
+        }
+
+        prev_top1 = Some(current_top1);
+    }
+
+    // Fill any remaining masked positions with final predictions
+    let seq_len = forward_block_causal_with(ctx, weights, &tokens, config, block_len);
+    for pos in 0..seq_len.min(block_len) {
+        if tokens[pos] == mask_id {
+            let logit_off = pos * vocab_size;
+            let logit_end = logit_off + vocab_size;
+            let logits = &ctx.logits_flat[logit_off..logit_end];
+            let best = logits
+                .iter()
+                .copied()
+                .enumerate()
+                .max_by(|a: &(usize, f32), b: &(usize, f32)| {
+                    a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal)
+                })
+                .map(|(i, _)| i)
+                .unwrap_or(0);
+            tokens[pos] = best;
+        }
+    }
+
+    let avg_confidence = if confidences.is_empty() {
+        0.0
+    } else {
+        confidences.iter().sum::<f32>() / confidences.len() as f32
+    };
+
+    D2fBlockResult {
+        tokens,
+        steps_used: max_steps,
+        confidence_history: vec![avg_confidence],
+        accuracy: None,
+        state: D2fBlockState::FullyActivated,
+    }
+}
 
 #[cfg(test)]
 mod tests {

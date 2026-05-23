@@ -55,6 +55,21 @@ pub struct BenchResult {
     pub category: BenchCategory,
 }
 
+// ---------------------------------------------------------------------------
+// EP Accuracy@k — convergence speed metric (Plan 104)
+// ---------------------------------------------------------------------------
+
+/// Compute EP Accuracy@k: number of rounds to first reach target_accuracy.
+/// Returns `None` if target was never reached within the data.
+///
+/// EP = Episode Precision: the episode index where accuracy first crosses the
+/// target threshold. Lower is better (faster convergence).
+///
+/// Use: `ep_accuracy_k(&accuracies, 0.8)` → first episode where accuracy ≥ 80%.
+pub fn ep_accuracy_k(accuracies: &[f32], target: f32) -> Option<usize> {
+    accuracies.iter().position(|&a| a >= target)
+}
+
 /// Save benchmark results to numbered CSV (e.g. `bench/024_results.csv`).
 ///
 /// CSV columns: `commit,date,method,throughput,us_per_step,avg_accept_len`

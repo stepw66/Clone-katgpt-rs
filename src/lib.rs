@@ -1,4 +1,6 @@
 pub mod benchmark;
+#[cfg(feature = "dash_attn")]
+pub mod dash_attn;
 #[cfg(feature = "dllm")]
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::too_many_lines)]
@@ -6,6 +8,8 @@ pub mod benchmark;
 pub mod dllm;
 #[cfg(feature = "feedback")]
 pub mod feedback;
+#[cfg(feature = "gdn2_attention")]
+pub mod gdn2;
 #[cfg(feature = "hla_attention")]
 pub mod hla;
 #[cfg(feature = "hybrid_oct_pq")]
