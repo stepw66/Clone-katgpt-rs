@@ -1,4 +1,4 @@
-# 104 — Fog of War Tactical Puzzle: Exploration-Based Solver Comparison
+# 118 — Fog of War Tactical Puzzle: Exploration-Based Solver Comparison
 
 ## Tasks
 
@@ -12,7 +12,7 @@
 - [x] Headless benchmark across seeds (tactical_10_fog_bench.rs)
 - [x] Three-round TUI flow with comparison metrics
 - [x] Boss avoidance heuristics for AI/Hybrid — adjacent dodge (plan 113)
-- [ ] Larger map / more rooms for richer exploration decisions
+- [x] ~~Larger map / more rooms for richer exploration decisions~~ → Deferred to [Plan 107](../../riir-ai/.plans/107_riir_games_crate.md) T2.1 (24×24 with rooms/corridors)
 
 ## Problem Statement
 
@@ -154,17 +154,16 @@ across all 25 seeds), the fog-of-war version produces **measurably different** o
 | `examples/tactical_09_fog.rs` | Full TUI with fog rendering, 3-round flow |
 | `examples/tactical_10_fog_bench.rs` | Headless benchmark across 30 seeds |
 
-## Next Steps
+## Status: ✅ Complete — Graduated to Plan 107
+
+All implementation tasks done. Remaining items deferred to [Plan 107: riir-games Crate](../../riir-ai/.plans/107_riir_games_crate.md).
+
+## Next Steps (Superseded by Plan 107)
 
 1. ~~**Boss avoidance heuristics**~~ — ✅ Done (plan 113). Minimal adjacent-only dodge is optimal.
    Stronger avoidance (frontier penalties, path-level dodge) creates oscillation worse than death.
    AI now beats BF (6 vs 5 wins). See plan 113 for full research findings.
-2. **Hybrid exploration loop fix** — Hybrid's cluster-based exploration gets stuck in loops
-   on certain seeds (500-step timeouts). Potential fix: stuck detector that switches to BF
-   nearest-frontier after N steps without progress. This is the next lever to pull for Hybrid.
-3. **Larger map with rooms** — 16×16 with one bridge is too small. A multi-room map
-   with multiple doors would create richer exploration decisions and more differentiation.
-4. **Oracle tiles** — tiles that reveal information (e.g., "goal is to the south").
-   AI reasons about when to visit oracles vs explore directly.
-5. **Adaptive exploration** — AI that adjusts strategy based on what it's discovered
-   so far (e.g., "found keys but no boxes → boxes must be behind bridge").
+2. **Hybrid exploration loop fix** — → Plan 107 Phase 1 (proper module extraction with stuck detector)
+3. ~~**Larger map with rooms**~~ → Plan 107 T2.1 (24×24 with rooms, corridors, procedural layout)
+4. **Oracle tiles** — → Plan 107 Phase 2 (information tiles as map feature)
+5. **Adaptive exploration** — → Plan 107 Phase 1 (extracted explorer module with adaptive strategy)
