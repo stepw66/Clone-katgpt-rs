@@ -70,6 +70,7 @@ enum Target {
 struct Milestone {
     #[allow(dead_code)]
     target_idx: usize,
+    #[allow(dead_code)]
     step: usize,
 }
 
@@ -435,6 +436,7 @@ fn enumerate_targets(num_keys: usize, num_boxes: usize, num_levers: usize) -> Ve
     targets
 }
 
+#[allow(dead_code)]
 fn target_label(target: &Target) -> String {
     match target {
         Target::Key(i) => format!("Key({i})"),
@@ -1010,13 +1012,13 @@ fn main() {
             r.ai_ms,
             r.ai_obs,
             ai_fb_tag,
-            format!("steps:{} nodes:{}%↓", ai_step_tag, node_pct_ai),
+            format_args!("steps:{} nodes:{}%↓", ai_step_tag, node_pct_ai),
             r.hy_steps,
             r.hy_nodes,
             r.hy_ms,
             r.hy_obs,
             hy_fb_tag,
-            format!("steps:{} nodes:{}%↓", hy_step_tag, node_pct_hy),
+            format_args!("steps:{} nodes:{}%↓", hy_step_tag, node_pct_hy),
         );
     }
 
