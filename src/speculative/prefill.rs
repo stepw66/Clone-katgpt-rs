@@ -314,6 +314,12 @@ pub fn block_select_entmax(block_scores: &[f32], cfg: &FlashPrefillConfig) -> Ve
     // Apply α-entmax routing to get sparse probability distribution
     let (probs, _tau) = entmax_1p5(block_scores);
     let entmax_selected = entmax_support(&probs);
+
+    // Fallback to block_select() if entmax produces empty support (e.g. NaN inputs)
+    if entmax_selected.is_empty() {
+        return block_select(block_scores, cfg);
+    }
+
     let entmax_set: std::collections::HashSet<usize> = entmax_selected.into_iter().collect();
 
     let mut selected: Vec<usize> = Vec::with_capacity(num_blocks);
@@ -981,5 +987,85 @@ mod tests {
         assert!(should_compress(PrefillMode::Always, 10, 100));
         assert!(should_compress(PrefillMode::Auto, 200, 100));
         assert!(!should_compress(PrefillMode::Auto, 50, 100));
+    }
+
+    // ── Plan 106 T20: block_select_entmax tests ──────────────
+
+    #[cfg(feature = "dash_attn")]
+    #[test]
+    fn test_block_select_entmax_produces_valid_indices() {
+        let cfg = FlashPrefillConfig {
+            attention_sink: 1,
+            window: 1,
+            ..Default::default()
+        };
+        let scores = vec![0.8, 0.2, 0.5, 0.1, 0.9];
+        let selected = block_select_entmax(&scores, &cfg);
+
+        // All indices must be within bounds
+        for &idx in &selected {
+            assert!(
+                idx < scores.len(),
+                "index {idx} out of bounds (max {})",
+                scores.len()
+            );
+        }
+
+        // Indices should be sorted and unique (dedup contract)
+        for w in selected.windows(2) {
+            assert!(w[0] < w[1], "indices should be sorted ascending");
+        }
+
+        // Should select at least sink + window blocks
+        assert!(!selected.is_empty(), "should select at least some blocks");
+    }
+
+    #[cfg(feature = "dash_attn")]
+    #[test]
+    fn test_block_select_entmax_adaptive_support() {
+        let cfg = FlashPrefillConfig {
+            attention_sink: 0,
+            window: 0,
+            ..Default::default()
+        };
+
+        // Concentrated scores: one dominant block → entmax selects few
+        let concentrated = vec![10.0f32, 0.01, 0.01, 0.01, 0.01];
+        let selected_concentrated = block_select_entmax(&concentrated, &cfg);
+
+        // Uniform scores: all equal → entmax selects all
+        let uniform = vec![1.0f32, 1.0, 1.0, 1.0, 1.0];
+        let selected_uniform = block_select_entmax(&uniform, &cfg);
+
+        // Adaptive: different inputs select different numbers of blocks
+        assert_ne!(
+            selected_concentrated.len(),
+            selected_uniform.len(),
+            "concentrated scores should select fewer blocks than uniform"
+        );
+    }
+
+    #[cfg(feature = "dash_attn")]
+    #[test]
+    fn test_block_select_entmax_fallback_on_empty() {
+        let cfg = FlashPrefillConfig {
+            attention_sink: 1,
+            window: 1,
+            ..Default::default()
+        };
+        // NaN scores cause entmax to produce empty support → triggers fallback
+        let scores = vec![f32::NAN, f32::NAN, f32::NAN, f32::NAN, f32::NAN];
+        let selected = block_select_entmax(&scores, &cfg);
+        let fallback = block_select(&scores, &cfg);
+
+        assert_eq!(
+            selected, fallback,
+            "should fall back to block_select when entmax produces empty support"
+        );
+        // Fallback should still select sink + window blocks
+        assert!(
+            !selected.is_empty(),
+            "fallback should select sink/window blocks"
+        );
     }
 }

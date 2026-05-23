@@ -191,7 +191,7 @@ dmax_spd = ["dllm"]  # Soft Parallel Decoding, depends on D2F infrastructure
 - [x] Test: hybrid embeddings flow correctly through forward pass
 
 ### T5: Integrate with D2fPipeline
-- [ ] Add `SoftDecodeConfig` field to `D2fPipeline` behind `#[cfg(feature = "dmax_spd")]`:
+- [x] Add `SoftDecodeConfig` field to `D2fPipeline` behind `#[cfg(feature = "dmax_spd")]`:
   ```rust
   pub struct D2fPipeline<'a> {
       // ... existing fields ...
@@ -199,23 +199,23 @@ dmax_spd = ["dllm"]  # Soft Parallel Decoding, depends on D2F infrastructure
       soft_config: Option<SoftDecodeConfig>,
   }
   ```
-- [ ] In `D2fPipeline::decode_all()`:
+- [x] In `D2fPipeline::decode_all()`:
   - If `soft_config` is `Some`, call `d2f_decode_block_soft()` instead of `d2f_decode_block()`
   - Otherwise, use existing binary decode path
-- [ ] Test: pipeline with SPD config uses soft decode
-- [ ] Test: pipeline without SPD config uses existing binary decode (no regression)
-- [ ] Test: multi-block SPD decode produces coherent output across blocks
+- [x] Test: pipeline with SPD config uses soft decode
+- [x] Test: pipeline without SPD config uses existing binary decode (no regression)
+- [x] Test: multi-block SPD decode produces coherent output across blocks
 
 ### T6: DecodeStrategy Integration
-- [ ] Extend `DecodeStrategy` recommendation heuristic:
+- [x] Extend `DecodeStrategy` recommendation heuristic:
   ```rust
   // In DecodeStrategy::recommend():
   // If dmax_spd feature enabled and n_tokens >= block_size:
   //   → DiscreteDiffusionSoft (new variant) instead of DiscreteDiffusion
   ```
-- [ ] Add `DiscreteDiffusionSoft` variant to `DecodeStrategy` behind `#[cfg(feature = "dmax_spd")]`
-- [ ] Test: recommend() selects soft decode when appropriate
-- [ ] Test: config-driven switch between binary/soft D2F
+- [x] Add `DiscreteDiffusionSoft` variant to `DecodeStrategy` behind `#[cfg(feature = "dmax_spd")]`
+- [x] Test: recommend() selects soft decode when appropriate
+- [x] Test: config-driven switch between binary/soft D2F
 
 ### T7: GOAT Proof — SPD vs Binary D2F
 - [ ] Create `tests/test_dmax_spd.rs` (feature-gated `dmax_spd`)

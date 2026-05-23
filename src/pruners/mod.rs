@@ -20,6 +20,9 @@ pub mod bomber;
 
 pub mod game_state; // Always compiled — GameState trait has no bevy_ecs dependency (G1 fix, Plan 065)
 
+#[cfg(feature = "subterranean")]
+pub mod subterranean;
+
 pub mod freeze;
 
 #[cfg(feature = "sudoku")]
@@ -45,6 +48,9 @@ pub mod review_metrics;
 
 #[cfg(feature = "bandit")]
 pub mod trial_log;
+
+#[cfg(feature = "sr2am_configurator")]
+pub mod configurator_bandit;
 
 #[cfg(feature = "dreamer")]
 pub mod dreamer;
@@ -76,6 +82,9 @@ pub use regression::{GoldenTrace, RegressionResult, RegressionSuite, ReplayRewar
 
 #[cfg(feature = "bandit")]
 pub use trial_log::{SharedTrialLog, TrialLog, TrialRecord, TrialSummary};
+
+#[cfg(feature = "sr2am_configurator")]
+pub use configurator_bandit::ConfiguratorBandit;
 
 #[cfg(feature = "g_zero")]
 pub mod g_zero;
@@ -239,6 +248,16 @@ pub use arena::TrajectoryPruner;
 
 #[cfg(feature = "fft")]
 pub mod fft;
+
+#[cfg(feature = "subterranean")]
+pub use subterranean::{
+    BomberNode, BomberProcedure, BridgeError, ComplexityTier, DecisionPoint, GoNode, GoProcedure,
+    NodeStateMapping, PathEnumerator, PathSampler, ProcedureCostModel, ProcedureEdge,
+    ProcedureGameState, ProcedureGraph, ProcedureNode, Sample, SampleFilter,
+    SubterraneanTrainingMode, TrainingBudget, Trajectory, TrajectoryBanditSummary,
+    TrajectoryValidator, extract_all_decision_points, extract_decision_points,
+    graph_to_global_session, graph_trajectories_to_sessions, graph_trajectories_to_sessions_seeded,
+};
 
 #[cfg(feature = "fft")]
 pub use fft::{

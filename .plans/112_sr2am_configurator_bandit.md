@@ -4,50 +4,50 @@
 > **Paper:** [arXiv:2605.22138](https://arxiv.org/pdf/2605.22138) — Deng, Hou, Sá Neves et al., May 2026
 > **Depends:** Plan 030 (Multi-Armed Bandit ✅), Plan 049 (G-Zero ✅), Plan 026 (Early Exit ✅)
 > **Feature Gate:** `sr2am_configurator = ["bandit"]`
-> **Status:** Planning
+> **Status:** Phase 1–3 Complete ✅ (T1–T14)
 
 ## Tasks
 
 ### Phase 1: Configurator Types & Bandit Arm (Modelless)
 
-- [ ] T1: Define `PlanningDecision` enum in `microgpt-core/src/types.rs`
+- [x] T1: Define `PlanningDecision` enum in `microgpt-core/src/types.rs`
   - `PlanNew` — reset tree, full budget allocation
   - `PlanExtend` — keep tree, add one depth level
   - `PlanSkip` — early exit, direct token sampling
-- [ ] T2: Define `ConfiguratorAction` struct with `decision: PlanningDecision` + `depth_budget: usize`
-- [ ] T3: Add `ConfiguratorBandit` struct in `src/pruners/configurator_bandit.rs`
+- [x] T2: Define `ConfiguratorContext` struct with `domain: usize` + `entropy_bin: usize`
+- [x] T3: Add `ConfiguratorBandit` struct in `src/pruners/configurator_bandit.rs`
   - Three arms: `PlanNew`, `PlanExtend`, `PlanSkip`
   - UCB1 selection from existing bandit infrastructure
   - Q-values keyed by `(domain, entropy_bin)` — context-aware arm selection
-- [ ] T4: Add `sr2am_configurator` feature gate in `Cargo.toml` with `#[cfg(feature = "sr2am_configurator")]` on all new code
-- [ ] T5: Unit tests for `ConfiguratorBandit` arm selection, Q-value updates, context binning
+- [x] T4: Add `sr2am_configurator` feature gate in `Cargo.toml` with `#[cfg(feature = "sr2am_configurator")]` on all new code
+- [x] T5: Unit tests for `ConfiguratorBandit` arm selection, Q-value updates, context binning
 
 ### Phase 2: DDTree Integration (Modelless)
 
-- [ ] T6: Add `planning_decision: Option<PlanningDecision>` to `InferenceResult`
+- [x] T6: Add `planning_decision: Option<PlanningDecision>` to `InferenceResult`
 - [ ] T7: Wire `ConfiguratorBandit` into speculative decode path
   - Before DDTree `build()`: query configurator → get `PlanningDecision`
   - `PlanNew` → reset tree, allocate full `tree_budget`
   - `PlanExtend` → keep existing tree, `draft_lookahead += 1`
   - `PlanSkip` → bypass tree, use `sample_token()` directly (early exit)
-- [ ] T8: Implement entropy-based context binning
+- [x] T8: Implement entropy-based context binning
   - `entropy_bin = (entropy * 10.0) as usize` — coarse 10-bin discretization
   - Q-values tracked per `(domain, entropy_bin)` pair
-- [ ] T9: Implement reward signal for Q-value updates
+- [x] T9: Implement reward signal for Q-value updates
   - `quality_gain = screening_relevance - prev_relevance`
   - `token_cost = tokens_used / tree_budget`
   - `reward = quality_gain - β * token_cost` (β configurable, default 0.1)
-- [ ] T10: Integration tests: configurator correctly gates DDTree builds
+- [x] T10: Integration tests: configurator correctly gates DDTree builds
 
 ### Phase 3: Uncertainty-Aware Horizon Truncation (Modelless)
 
 - [ ] T11: Add `max_plan_horizon: Option<usize>` to `InferenceOverrides`
   - When set, caps `draft_lookahead` to this value regardless of domain config
-- [ ] T12: Implement `entropy_truncate_horizon()` helper
+- [x] T12: Implement `entropy_truncate_horizon()` helper
   - If `entropy > threshold` (default 2.5 nats), cap `draft_lookahead` at 2
   - Maps directly to SR²AM's finding that web tasks benefit from short horizons
 - [ ] T13: Add `plan_horizon_used` metric to `InferenceResult`
-- [ ] T14: Tests for horizon truncation edge cases (entropy boundary, override precedence)
+- [x] T14: Tests for horizon truncation edge cases (entropy boundary, override precedence)
 
 ### Phase 4: GOAT Proof (Bomber/Go Arena)
 
@@ -231,16 +231,18 @@ Run GZeroLoop 100 rounds with/without reward shaping:
 
 | File | Change | Lines (est.) |
 |------|--------|-------------|
-| `crates/microgpt-core/src/types.rs` | `PlanningDecision`, `ConfiguratorAction`, `ConfiguratorContext` | +60 |
-| `src/pruners/mod.rs` | Add `configurator_bandit` module | +5 |
-| `src/pruners/configurator_bandit.rs` | `ConfiguratorBandit` struct + impl | +200 |
-| `crates/microgpt-core/src/types.rs` | `InferenceResult` additions | +15 |
-| `src/speculative/dd_tree.rs` | Configurator gate before build/extend | +30 |
-| `examples/bomber_12_sr2am_tournament.rs` | Arena example | +150 |
-| `examples/go_11_sr2am_arena.rs` | Go arena example | +120 |
-| `Cargo.toml` | Feature gate | +2 |
-| Tests | Unit + integration | +100 |
-| **Total** | | **~680** |
+| `crates/microgpt-core/src/types.rs` | `PlanningDecision`, `ConfiguratorContext` | +36 |
+| `crates/microgpt-core/src/lib.rs` | Feature-gated re-exports | +3 |
+| `crates/microgpt-core/Cargo.toml` | Feature gate | +1 |
+| `src/pruners/mod.rs` | Add `configurator_bandit` module + re-exports | +6 |
+| `src/pruners/configurator_bandit.rs` | `ConfiguratorBandit` struct + impl + tests | +570 |
+| `crates/microgpt-core/src/types.rs` | `InferenceResult` addition | +3 |
+| `src/feedback.rs` | `planning_decision: None` in test structs | +6 |
+| `src/speculative/dd_tree.rs` | `entropy_truncate_horizon` + `build_inference_result` update | +29 |
+| `src/speculative/mod.rs` | Re-export `entropy_truncate_horizon` | +2 |
+| `Cargo.toml` | Feature gate + default/full | +3 |
+| `tests/test_sr2am_configurator_goat.rs` | Integration tests (29 tests) | +487 |
+| **Total** | | **~1146** |
 
 ## References
 

@@ -204,8 +204,8 @@ MTP = "predict ahead with a small model, verify with the big model." This maps t
 
 ### Phase 2: Output-Length Gating (Safety)
 
-- [ ] **T13**: Add `mtp_min_output_tokens: usize` to `Config` struct in `types.rs`
-- [ ] **T14**: Set defaults in all `Config` constructors:
+- [x] **T13**: Add `mtp_min_output_tokens: usize` to `Config` struct in `types.rs`
+- [x] **T14**: Set defaults in all `Config` constructors:
 
   | Config | mtp_min_output_tokens | Rationale |
   |--------|-----------------------|-----------|
@@ -219,31 +219,31 @@ MTP = "predict ahead with a small model, verify with the big model." This maps t
   | `bpe_draft` | `usize::MAX` | Already a drafter |
   | `gemma2_2b` | 16 | Dense, 256K vocab, main beneficiary |
 
-- [ ] **T15**: Add `mtp_min_output_tokens: Option<usize>` to `InferenceOverrides`
-- [ ] **T16**: Wire in `Config::with_overrides()`
-- [ ] **T17**: Add output-length check in `LeviathanVerifier::speculate()` — early return with single-token result when output too short
-- [ ] **T18**: Test: `test_mtp_min_output_tokens_disables_short` — verify MTP skips when expected output < threshold
-- [ ] **T19**: Test: `test_mtp_min_output_tokens_enables_long` — verify MTP activates when expected output ≥ threshold
+- [x] **T15**: Add `mtp_min_output_tokens: Option<usize>` to `InferenceOverrides`
+- [x] **T16**: Wire in `Config::with_overrides()`
+- [x] **T17**: Add output-length check in `LeviathanVerifier::speculate()` — early return with single-token result when output too short
+- [x] **T18**: Test: `test_mtp_min_output_tokens_disables_short` — verify MTP skips when expected output < threshold
+- [x] **T19**: Test: `test_mtp_min_output_tokens_enables_long` — verify MTP activates when expected output ≥ threshold
 
 ### Phase 3: Top-K Cluster Selection
 
-- [ ] **T20**: Add `mtp_cluster_topk: usize` to `Config` struct in `types.rs`
-- [ ] **T21**: Set defaults: game/micro/draft = 1, bpe = 8, gemma2_2b = 32
-- [ ] **T22**: Add `mtp_cluster_topk: Option<usize>` to `InferenceOverrides`
-- [ ] **T23**: Wire in `Config::with_overrides()`
-- [ ] **T24**: Update `Config::validate()` — assert `mtp_cluster_topk >= 1`
-- [ ] **T25**: Implement `select_topk_indices(scores: &[f32], k: usize) -> SmallVec<[usize; 32]>` — min-heap, O(N × log K)
-- [ ] **T26**: Modify `clustered_lm_head` to accept `topk: usize`, use `select_topk_indices` instead of argmax
-- [ ] **T27**: Add guard: if `topk >= num_clusters`, skip selection and compute all clusters
-- [ ] **T28**: Update call sites in `forward_base` and `forward_coda`
-- [ ] **T29**: Test: `test_clustered_lm_head_topk_equals_top1_when_k1` — K=1 identical to current behavior
-- [ ] **T30**: Test: `test_clustered_lm_head_topk_covers_more_tokens` — K=4 ≥ K × cluster_size candidates
-- [ ] **T31**: Test: `test_clustered_lm_head_topk_all_clusters_when_k_ge_num_clusters` — K ≥ num_clusters = all tokens
-- [ ] **T32**: Test: `test_select_topk_indices_correctness` — verify selection picks correct top-K
+- [x] **T20**: Add `mtp_cluster_topk: usize` to `Config` struct in `types.rs`
+- [x] **T21**: Set defaults: game/micro/draft = 1, bpe = 8, gemma2_2b = 32
+- [x] **T22**: Add `mtp_cluster_topk: Option<usize>` to `InferenceOverrides`
+- [x] **T23**: Wire in `Config::with_overrides()`
+- [x] **T24**: Update `Config::validate()` — assert `mtp_cluster_topk >= 1`
+- [x] **T25**: Implement `select_topk_indices(scores: &[f32], k: usize) -> SmallVec<[usize; 32]>` — min-heap, O(N × log K)
+- [x] **T26**: Modify `clustered_lm_head` to accept `topk: usize`, use `select_topk_indices` instead of argmax
+- [x] **T27**: Add guard: if `topk >= num_clusters`, skip selection and compute all clusters
+- [x] **T28**: Update call sites in `forward_base` and `forward_coda`
+- [x] **T29**: Test: `test_clustered_lm_head_topk_equals_top1_when_k1` — K=1 identical to current behavior
+- [x] **T30**: Test: `test_clustered_lm_head_topk_covers_more_tokens` — K=4 ≥ K × cluster_size candidates
+- [x] **T31**: Test: `test_clustered_lm_head_topk_all_clusters_when_k_ge_num_clusters` — K ≥ num_clusters = all tokens
+- [x] **T32**: Test: `test_select_topk_indices_correctness` — verify selection picks correct top-K
 
 ### Phase 4: Integration Tests + Overrides
 
-- [ ] **T33**: Update `test_with_overrides_all_fields` to include `mtp_cluster_topk` and `mtp_min_output_tokens`
+- [x] **T33**: Update `test_with_overrides_all_fields` to include `mtp_cluster_topk` and `mtp_min_output_tokens`
 - [ ] **T34**: Test: `test_mtp_lora_gated_integration` — LoRA drafter + output-length gate + Top-K all compose correctly
 - [ ] **T35**: Test: `test_mtp_game_config_disabled` — all game configs produce identical output with/without MTP infrastructure present
 

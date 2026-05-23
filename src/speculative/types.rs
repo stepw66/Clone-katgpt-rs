@@ -520,6 +520,10 @@ pub enum DecodeStrategy {
     /// Block-parallel discrete diffusion forcing (D2F).
     #[cfg(feature = "dllm")]
     DiscreteDiffusion,
+    /// DMax Soft Parallel Decode — hybrid embedding D2F (Plan 109 T6).
+    /// Prefer over DiscreteDiffusion when dmax_spd feature is enabled.
+    #[cfg(feature = "dmax_spd")]
+    DiscreteDiffusionSoft,
     /// D2F drafts → AR verifies (self-speculation / tri-mode).
     #[cfg(feature = "tri_mode")]
     SelfSpeculation,
@@ -537,6 +541,12 @@ impl DecodeStrategy {
         #[cfg(feature = "tri_mode")]
         if has_draft_model && n_tokens >= block_size {
             return Self::SelfSpeculation;
+        }
+        // Prefer soft D2F when dmax_spd is enabled (Plan 109 T6).
+        // dmax_spd implies dllm, so this check must come before the binary D2F fallback.
+        #[cfg(feature = "dmax_spd")]
+        if n_tokens >= block_size {
+            return Self::DiscreteDiffusionSoft;
         }
         #[cfg(feature = "dllm")]
         if n_tokens >= block_size {
@@ -1290,19 +1300,19 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "dllm")]
-    fn test_decode_strategy_recommend_discrete_diffusion_when_enough_tokens() {
-        // With dllm feature and enough tokens → DiscreteDiffusion
+    #[cfg(feature = "dmax_spd")]
+    fn test_decode_strategy_recommend_discrete_diffusion_soft_when_enough_tokens() {
+        // With dmax_spd feature and enough tokens → DiscreteDiffusionSoft (Plan 109 T6)
         let strategy = DecodeStrategy::recommend(4, 8, false);
-        assert_eq!(strategy, DecodeStrategy::DiscreteDiffusion);
+        assert_eq!(strategy, DecodeStrategy::DiscreteDiffusionSoft);
     }
 
     #[test]
-    #[cfg(all(feature = "dllm", not(feature = "tri_mode")))]
-    fn test_decode_strategy_recommend_discrete_diffusion_over_speculative() {
-        // D2F takes priority over speculative when enough tokens (dllm-only)
+    #[cfg(all(feature = "dmax_spd", not(feature = "tri_mode")))]
+    fn test_decode_strategy_recommend_discrete_diffusion_soft_over_speculative() {
+        // Soft D2F takes priority over speculative when enough tokens (Plan 109 T6)
         let strategy = DecodeStrategy::recommend(4, 8, true);
-        assert_eq!(strategy, DecodeStrategy::DiscreteDiffusion);
+        assert_eq!(strategy, DecodeStrategy::DiscreteDiffusionSoft);
     }
 
     #[test]

@@ -68,6 +68,8 @@ mod tests {
             output: "hello".into(),
             timestamp: 0,
             screened: false,
+            #[cfg(feature = "sr2am_configurator")]
+            planning_decision: None,
         };
         // Should not panic or error when url is None
         send_feedback(&config, &result);
@@ -88,6 +90,8 @@ mod tests {
             output: String::new(),
             timestamp: 0,
             screened: true,
+            #[cfg(feature = "sr2am_configurator")]
+            planning_decision: None,
         };
         send_feedback(&config, &result);
         // Thread spawned but reward too low — no actual POST happens

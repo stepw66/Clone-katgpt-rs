@@ -805,6 +805,8 @@ pub fn build_inference_result(
                 .as_millis() as i64
         },
         screened: reward < screening_threshold,
+        #[cfg(feature = "sr2am_configurator")]
+        planning_decision: None,
     }
 }
 
@@ -1833,6 +1835,33 @@ impl TreeBuilder {
         }
 
         &self.tree
+    }
+}
+
+// ── SR²AM Entropy-Based Horizon Truncation (Plan 112, Research 076) ──
+
+/// If entropy exceeds threshold, cap draft lookahead at a truncated horizon.
+///
+/// High-uncertainty states benefit from shorter planning horizons to avoid
+/// overcommitting to unreliable predictions. Maps to SR²AM's finding that
+/// web tasks (high environmental uncertainty) benefit from planning horizon
+/// capped at 2 steps.
+///
+/// # Arguments
+///
+/// * `entropy` — Shannon entropy in nats (>= 0)
+/// * `max_horizon` — Maximum draft lookahead from domain config
+///
+/// # Returns
+///
+/// Truncated horizon (min of capped value and max_horizon).
+#[cfg(feature = "sr2am_configurator")]
+pub fn entropy_truncate_horizon(entropy: f32, max_horizon: usize) -> usize {
+    const ENTROPY_THRESHOLD: f32 = 2.5;
+    const TRUNCATED_HORIZON: usize = 2;
+    match entropy > ENTROPY_THRESHOLD {
+        true => TRUNCATED_HORIZON.min(max_horizon),
+        false => max_horizon,
     }
 }
 

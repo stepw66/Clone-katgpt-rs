@@ -4,19 +4,19 @@
 > **Paper:** [arXiv:2605.22502](https://arxiv.org/pdf/2605.22502) — Dennis et al., May 2026
 > **Related Plans:** 049 (G-Zero Self-Play), 052 (GFlowNet Modelless), 071 (ROPD Modelless), 092 (Freeze/Thaw), 094 (MeMo Reflections)
 > **Feature Gate:** `subterranean = ["bandit"]`
-> **Status:** Planning
+> **Status:** Complete
 
 ## Tasks
 
-- [ ] T1: `ProcedureGraph` trait + `ProcedureEdge` + `ProcedureNode` types
-- [ ] T2: `PathEnumerator` — enumerate all acyclic paths through procedure graph
-- [ ] T3: `PathSampler` — sample trajectories with scenario variables
-- [ ] T4: `ProcedureCostModel` — complexity-proportional budget allocation
-- [ ] T5: GOAT proof — Bomber procedure graph + path enumeration benchmark
-- [ ] T6: GOAT proof — Go procedure graph + complexity scaling benchmark
-- [ ] T7: Integration — `ProcedureGraph` ↔ existing `GameState` trait bridge
-- [ ] T8: Integration — `PathSampler` → bandit training data (replace template proposer)
-- [ ] T9: Full fine-tuning flag — `TrainingMode::FullFineTune` variant in Productions config
+- [x] T1: `ProcedureGraph` trait + `ProcedureEdge` + `ProcedureNode` types
+- [x] T2: `PathEnumerator` — enumerate all acyclic paths through procedure graph
+- [x] T3: `PathSampler` — sample trajectories with scenario variables
+- [x] T4: `ProcedureCostModel` — complexity-proportional budget allocation
+- [x] T5: GOAT proof — Bomber procedure graph + path enumeration benchmark
+- [x] T6: GOAT proof — Go procedure graph + complexity scaling benchmark
+- [x] T7: Integration — `ProcedureGraph` ↔ existing `GameState` trait bridge
+- [x] T8: Integration — `PathSampler` → bandit training data (replace template proposer)
+- [x] T9: Full fine-tuning flag — `TrainingMode::FullFineTune` variant in Productions config
 
 ## Motivation
 

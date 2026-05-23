@@ -35,6 +35,9 @@ pub use types::DomainLatent;
 #[cfg(feature = "sr2am_configurator")]
 pub use types::{ConfiguratorContext, PlanningDecision};
 
+#[cfg(feature = "data_gate")]
+pub use types::{DataGate, GateDecision, ProposerTask, TaskType};
+
 #[cfg(feature = "sparse_mlp")]
 pub use types::sparse_matmul;
 

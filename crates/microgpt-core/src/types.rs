@@ -1959,10 +1959,11 @@ pub struct InferenceResult {
 }
 
 // ---------------------------------------------------------------------------
-// Data Gate — Self-Play Stability (Plan 111, T1)
+// Data Gate — Self-Play Stability (Plan 111, Research 075)
 // ---------------------------------------------------------------------------
 
 /// Discriminator for different self-play task types.
+#[cfg(feature = "data_gate")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TaskType {
     /// Python code output prediction
@@ -1976,6 +1977,7 @@ pub enum TaskType {
 }
 
 /// A task proposed by the self-play proposer, before solver evaluation.
+#[cfg(feature = "data_gate")]
 #[derive(Debug, Clone)]
 pub struct ProposerTask {
     /// Task identifier for diagnostics.
@@ -1994,6 +1996,7 @@ pub struct ProposerTask {
 ///
 /// Decides whether a proposer-generated task should enter the training pool
 /// BEFORE the solver attempts it.
+#[cfg(feature = "data_gate")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GateDecision {
     /// Task passes the gate — admitted to training pool.
@@ -2010,6 +2013,7 @@ pub enum GateDecision {
 ///
 /// Key finding: a strict gate is sufficient for stability under every reward
 /// variant; no reward variant is sufficient once the gate is removed.
+#[cfg(feature = "data_gate")]
 pub trait DataGate {
     /// Admit or reject a proposed task.
     ///

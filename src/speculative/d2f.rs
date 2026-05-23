@@ -886,6 +886,11 @@ pub struct D2fPipeline<'a> {
     total_len: usize,
     /// Prompt tokens (prepended to all blocks).
     prompt: Vec<usize>,
+    /// DMax Soft Parallel Decode configuration (Plan 109 T5).
+    /// When `Some`, `decode_all()` uses `d2f_decode_block_soft()` instead of
+    /// the binary mask/token denoising loop.
+    #[cfg(feature = "dmax_spd")]
+    soft_config: Option<SoftDecodeConfig>,
 }
 
 /// Result of full pipeline decode.
@@ -911,6 +916,8 @@ impl<'a> D2fPipeline<'a> {
             decode_config,
             total_len,
             prompt: Vec::new(),
+            #[cfg(feature = "dmax_spd")]
+            soft_config: None,
         }
     }
 
@@ -926,7 +933,19 @@ impl<'a> D2fPipeline<'a> {
             decode_config,
             total_len,
             prompt: prompt.to_vec(),
+            #[cfg(feature = "dmax_spd")]
+            soft_config: None,
         }
+    }
+
+    /// Set DMax Soft Parallel Decode configuration (Plan 109 T5).
+    ///
+    /// When set, `decode_all()` uses `d2f_decode_block_soft()` with hybrid
+    /// embeddings instead of the standard binary mask/token denoising loop.
+    #[cfg(feature = "dmax_spd")]
+    pub fn with_soft_config(mut self, soft_config: SoftDecodeConfig) -> Self {
+        self.soft_config = Some(soft_config);
+        self
     }
 
     /// Number of blocks needed to cover `total_len`.
@@ -963,6 +982,41 @@ impl<'a> D2fPipeline<'a> {
         for block_idx in 0..n_blocks {
             let remaining = self.total_len.saturating_sub(block_idx * block_size);
             let current_block_size = remaining.min(block_size);
+
+            // ── Soft decode path (DMax SPD, Plan 109 T5) ────────────
+            // When soft_config is Some, use d2f_decode_block_soft() with
+            // hybrid embeddings instead of the binary denoising loop.
+            #[cfg(feature = "dmax_spd")]
+            if let Some(ref sc) = self.soft_config {
+                let result = d2f_decode_block_soft(
+                    &mut ctx,
+                    weights,
+                    self.config,
+                    &self.decode_config,
+                    pruner,
+                    sc,
+                    rng,
+                );
+                // Truncate to actual block size for last partial block
+                let block_tokens: Vec<usize> =
+                    result.tokens.into_iter().take(current_block_size).collect();
+                total_steps += result.steps_used;
+                match result.state {
+                    D2fBlockState::FullyActivated => n_fully_activated += 1,
+                    _ => n_semi_activated += 1,
+                }
+                all_tokens.extend_from_slice(&block_tokens);
+                block_results.push(D2fBlockResult {
+                    tokens: block_tokens,
+                    steps_used: result.steps_used,
+                    confidence_history: result.confidence_history,
+                    accuracy: result.accuracy,
+                    state: result.state,
+                });
+                // Commit KV cache so subsequent blocks see this block's context
+                ctx.commit(all_tokens.len());
+                continue;
+            }
 
             // Build sequence: prompt + previously decoded blocks + mask for current block
             let mut seq_tokens = all_tokens.clone();
@@ -1267,10 +1321,10 @@ pub fn check_block_convergence(
     // Primary: consistency check (unchanged top-1 from previous step)
     if let Some(prev) = prev_top1
         && current_top1.len() == prev.len()
-            && current_top1.iter().zip(prev.iter()).all(|(a, b)| a == b)
-        {
-            return BlockConvergence::ConsistencyConverged;
-        }
+        && current_top1.iter().zip(prev.iter()).all(|(a, b)| a == b)
+    {
+        return BlockConvergence::ConsistencyConverged;
+    }
 
     // Secondary: confidence check (all positions above threshold)
     if !confidences.is_empty() && confidences.iter().all(|&c| c >= accept_threshold) {
@@ -1711,5 +1765,81 @@ mod tests {
         assert!(config.multistep);
         assert_eq!(config.denoise_steps, 4);
         assert_eq!(config.confidence_threshold, 0.7);
+    }
+
+    // ── Plan 109 T5: D2fPipeline + SoftDecodeConfig Integration ────
+
+    #[test]
+    fn test_pipeline_with_soft_config_uses_soft_decode() {
+        let config = Config::micro_dllm();
+        let mut rng = Rng::new(42);
+        let weights = TransformerWeights::new(&config, &mut rng);
+        let decode_config = D2fDecodeConfig::with_block_size(4);
+        let soft_config = SoftDecodeConfig::default();
+
+        let pipeline = D2fPipeline::with_prompt(&config, decode_config, 4, &[config.bos_token])
+            .with_soft_config(soft_config);
+
+        let result = pipeline.decode_all(&weights, &NoPruner, &mut rng);
+
+        // Should produce valid tokens (not all mask tokens)
+        assert!(
+            result.tokens.iter().any(|&t| t != config.mask_token),
+            "SPD pipeline should decode at least one non-mask token"
+        );
+        // All tokens should be valid vocab indices
+        for &t in &result.tokens {
+            assert!(t < config.vocab_size, "token {t} out of vocab range");
+        }
+    }
+
+    #[test]
+    fn test_pipeline_without_soft_config_uses_binary_decode() {
+        let config = Config::micro_dllm();
+        let mut rng = Rng::new(42);
+        let weights = TransformerWeights::new(&config, &mut rng);
+        let decode_config = D2fDecodeConfig::with_block_size(4);
+
+        let pipeline = D2fPipeline::with_prompt(&config, decode_config, 4, &[config.bos_token]);
+
+        let result = pipeline.decode_all(&weights, &NoPruner, &mut rng);
+
+        // Should produce valid tokens (not all mask tokens)
+        assert!(
+            result.tokens.iter().any(|&t| t != config.mask_token),
+            "Binary pipeline should decode at least one non-mask token"
+        );
+        // All tokens should be valid vocab indices
+        for &t in &result.tokens {
+            assert!(t < config.vocab_size, "token {t} out of vocab range");
+        }
+    }
+
+    #[test]
+    fn test_pipeline_multi_block_spd_coherent() {
+        let config = Config::micro_dllm();
+        let mut rng = Rng::new(42);
+        let weights = TransformerWeights::new(&config, &mut rng);
+        let decode_config = D2fDecodeConfig::with_block_size(4);
+        let soft_config = SoftDecodeConfig::default();
+
+        // Decode 8 tokens across 2 blocks
+        let pipeline = D2fPipeline::with_prompt(&config, decode_config, 8, &[config.bos_token])
+            .with_soft_config(soft_config);
+
+        let result = pipeline.decode_all(&weights, &NoPruner, &mut rng);
+
+        // Should have 2 blocks
+        assert_eq!(result.block_results.len(), 2, "should have 2 blocks");
+        // Total tokens: prompt (1) + decoded (8) = 9
+        assert_eq!(
+            result.tokens.len(),
+            9,
+            "should have 1 prompt + 8 decoded tokens"
+        );
+        // All decoded tokens should be valid vocab indices
+        for &t in &result.tokens {
+            assert!(t < config.vocab_size, "token {t} out of vocab range");
+        }
     }
 }

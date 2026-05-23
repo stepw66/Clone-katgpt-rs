@@ -216,6 +216,14 @@ impl SpeculativeVerifier for LeviathanVerifier<'_> {
                 .copy_from_slice(&self.draft_sctx.probs_buf);
         }
 
+        // Output-length gating (Plan 117 T17):
+        // Skip MTP when remaining capacity is too short to amortize overhead.
+        let remaining_capacity = self.target_config.block_size.saturating_sub(pos);
+        if remaining_capacity < self.target_config.mtp_min_output_tokens {
+            let p_dist = &self.draft_sctx.p_distributions_flat[..vocab_size];
+            return vec![sample_from_distribution(p_dist, rng)];
+        }
+
         // Phase 1: AR draft
         self.draft_sctx.reset();
 
@@ -510,7 +518,8 @@ mod tests {
 
     #[test]
     fn test_leviathan_verifier_bonus_token() {
-        let config = Config::micro();
+        let mut config = Config::micro();
+        config.mtp_min_output_tokens = 1; // Bypass output-length gating for test (Plan 117 T17)
         let draft_config = Config::draft();
         let mut rng = Rng::new(42);
         let target_weights = TransformerWeights::new(&config, &mut rng);
