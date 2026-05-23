@@ -156,11 +156,15 @@ across all 25 seeds), the fog-of-war version produces **measurably different** o
 
 ## Next Steps
 
-1. **Boss avoidance heuristics** — AI/Hybrid should factor boss position into exploration
-   scoring (avoid frontiers near boss). This should flip the survival advantage.
-2. **Larger map with rooms** — 16×16 with one bridge is too small. A multi-room map
+1. ~~**Boss avoidance heuristics**~~ — ✅ Done (plan 113). Minimal adjacent-only dodge is optimal.
+   Stronger avoidance (frontier penalties, path-level dodge) creates oscillation worse than death.
+   AI now beats BF (6 vs 5 wins). See plan 113 for full research findings.
+2. **Hybrid exploration loop fix** — Hybrid's cluster-based exploration gets stuck in loops
+   on certain seeds (500-step timeouts). Potential fix: stuck detector that switches to BF
+   nearest-frontier after N steps without progress. This is the next lever to pull for Hybrid.
+3. **Larger map with rooms** — 16×16 with one bridge is too small. A multi-room map
    with multiple doors would create richer exploration decisions and more differentiation.
-3. **Oracle tiles** — tiles that reveal information (e.g., "goal is to the south").
+4. **Oracle tiles** — tiles that reveal information (e.g., "goal is to the south").
    AI reasons about when to visit oracles vs explore directly.
-4. **Adaptive exploration** — AI that adjusts strategy based on what it's discovered
+5. **Adaptive exploration** — AI that adjusts strategy based on what it's discovered
    so far (e.g., "found keys but no boxes → boxes must be behind bridge").
