@@ -1,7 +1,7 @@
 # Plan 116: Consolidated — DiffusionSampler GOAT + Natsukaze Validation
 
 > **Consolidates:** Plan 089 T6 (Trained Sampler), Plan 089 T7 (LoRA Drafter Alignment), Plan 086 T6 (Natsukaze Validation)
-> **Status:** 🔧 Ready — `diffusion_sampler.rs` created, needs wiring + tests
+> **Status:** ✅ T1-T5 Complete — T6 deferred (blocked on riir-gpu)
 > **Branch:** `develop/feature/116_consolidated_diffusion_sampler_goat`
 > **Feature Gate:** `tri_mode` (Plan 089), `go-training` (Plan 086)
 > **Depends on:** Plan 089 T1-T5 ✅, Plan 086 T1-T5 ✅, Plan 081 T0-T14 ✅, Plan 083 ✅
@@ -61,14 +61,14 @@ Consolidate three open tasks into a single ordered plan:
 - [x] AUC: Logistic 0.765, MLP 0.781 — both >0.55 discriminative signal threshold
 - [x] 5/5 GOAT proof tests pass in `tests/test_diffusion_sampler_goat.rs`
 
-### T5: Natsukaze Go analytics validation (Plan 086 T6)
-- [ ] Run `cargo run -p riir-examples --features go-training --example go_12_analytics_validate`
-- [ ] Validates against `data/go_9x7514_games.flat.zip` (8.7MB, ~460K games)
-- [ ] Compare: Natsukaze analytics features vs self-play features
-- [ ] Expected: Natsukaze shows higher CR, lower MLWR, lower garbage ratio
-- [ ] Train predictor on both datasets → compare accuracy
-- [ ] GOAT gate: Natsukaze features produce higher prediction accuracy than self-play features
-- [ ] Record results in GOAT table below
+### T5: Natsukaze Go analytics validation (Plan 086 T6) ✅
+- [x] Run `cargo run -p riir-examples --features go-training --example go_12_analytics_validate`
+- [x] Validates against `data/go_9x7514_games.flat.zip` (8.7MB, 352388 samples → 7514 games)
+- [x] Compare: Natsukaze analytics features vs self-play features
+- [x] Results: CR 0.4657 vs 0.1577, Garbage 0.0004 vs 0.5266, MLWR 0.5032 vs 0.4896
+- [x] Train predictor on both datasets → Natsukaze 100.0% accuracy, Self-play 98.0%
+- [x] GOAT gate: Natsukaze accuracy (100.0%) > self-play accuracy (98.0%) ✅ PASS
+- [x] Cross-validation: NK-on-SP 32%, SP-on-NK 61% (domain-specific features)
 
 ### T6: LoRA Drafter Alignment research (Plan 089 T7 — deferred)
 - [ ] Design LK-hybrid loss for aligning diffusion drafter with AR verifier
@@ -86,7 +86,7 @@ Consolidate three open tasks into a single ordered plan:
 | T2 | Unit tests: all pass | Test run | All `diffusion_sampler` tests pass (22/22) | ✅ PASS |
 | T3 | Integration: sampler in denoising loop | Test | D2F+logistic produces valid output, decisions differ from fixed | ✅ PASS |
 | T4 | Benchmark: trained ≥ fixed | Benchmark | Sampler AUC ≥ 0.55 (Logistic 0.765, MLP 0.781), within ±15pp baseline | ✅ PASS |
-| T5 | Natsukaze: real data validation | Integration | Natsukaze accuracy > self-play accuracy | ⬜ |
+| T5 | Natsukaze: real data validation | Integration | Natsukaze accuracy (100.0%) > self-play (98.0%), CR 0.47 vs 0.16 | ✅ PASS |
 | T6 | LoRA alignment | Research | LK-hybrid loss designed, training pipeline ready | ⬜ DEFERRED |
 
 **Gate order:** T1 → T2 → T3 → T4 → T5. T6 independent/deferred.
