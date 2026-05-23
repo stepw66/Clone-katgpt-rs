@@ -1,4 +1,3 @@
-```
 # 114 — Boss Line-of-Sight + Same Speed + Trap Luring
 
 ## Tasks
@@ -14,9 +13,9 @@
 - [x] Update TUI (tactical_09_fog.rs) with same changes
 - [x] Run benchmark and compare with plan 113 results
 - [x] Commit
-- [ ] Investigate why AI trap-luring causes 500-step timeouts
-- [ ] Consider boss idle behavior (patrol instead of stay put)
-- [ ] Larger map with more traps for richer luring opportunities
+- [x] ~~Investigate why AI trap-luring causes 500-step timeouts~~ → Deferred to [Plan 107](../../riir-ai/.plans/107_riir_games_crate.md) Phase 2 (rocks as alternative lure)
+- [x] ~~Consider boss idle behavior (patrol instead of stay put)~~ → Deferred to [Plan 107](../../riir-ai/.plans/107_riir_games_crate.md) T2.3 (patrol A↔B + idle rotation)
+- [x] ~~Larger map with more traps for richer luring opportunities~~ → Deferred to [Plan 107](../../riir-ai/.plans/107_riir_games_crate.md) T2.1 (24×24 with rooms/corridors) + T2.5 (2 traps + 2 rocks)
 
 ## Problem Statement
 
@@ -274,11 +273,28 @@ Success criteria:
 
 1. `287069f` — feat: boss line-of-sight + speed 2 + trap luring
 
-## Future Work
+## Status: ✅ Complete — Graduated to Plan 107
 
-- **Boss patrol behavior when idle** — move toward unexplored areas instead of staying put
-- **AI lure cooldown** — prevent oscillation by committing to lure position for N steps
-- **Boss "noise" system** — player actions (open boxes, toggle levers) alert boss
-- **Larger map with more traps** — 16×16 with 2 traps is too tight for reliable luring
-- **Multiple bosses** with different behaviors (one chases, one patrols)
-- **Trap placement redesign** — traps near corridors/chokepoints for better luring geometry
+All implementation tasks done. Remaining items deferred to [Plan 107: riir-games Crate](../../riir-ai/.plans/107_riir_games_crate.md) which redesigns the dungeon engine with:
+
+| Plan 114 Item | Plan 107 Equivalent |
+|---------------|---------------------|
+| Boss idle (stay put) | T2.3: Patrol A↔B + idle rotation (4-mode state machine) |
+| AI lure 500-step loops | T2.4–T2.5: Throwable rocks as alternative lure (noise-based) |
+| 16×16 map, 2 traps | T2.1: 24×24 with rooms/corridors; T2.5: 2 traps + 2 rocks |
+| 1 boss (360° vision) | T2.3: 2 monsters (90° cone vision from facing direction) |
+| Monolithic example files | Phase 1: Extracted into `dungeon/` module crate |
+
+### Key Result
+
+**Hybrid is the ONLY strategy that survives** boss LOS + trap luring (2/30 seeds).
+This validates the design — plan 107 graduates it to production.
+
+## Future Work (Superseded by Plan 107)
+
+- ~~**Boss patrol behavior when idle**~~ → Plan 107 T2.3
+- ~~**AI lure cooldown**~~ → Plan 107 T2.5 (rocks as noise lure)
+- **Boss "noise" system** — player actions (open boxes, toggle levers) alert boss → Plan 107 T2.4
+- ~~**Larger map with more traps**~~ → Plan 107 T2.1 (24×24)
+- ~~**Multiple bosses**~~ → Plan 107 T2.3 (2 monsters with different patrol routes)
+- **Trap placement redesign** — traps near corridors/chokepoints → Plan 107 T2.1 (procedural placement)
