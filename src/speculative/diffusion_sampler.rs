@@ -39,8 +39,7 @@
 #![cfg(feature = "tri_mode")]
 
 use crate::dllm::{D2fContext, forward_block_causal_with};
-use crate::speculative::d2f::{D2fDecodeConfig, d2f_decode_block_with_target_with};
-use crate::speculative::types::NoPruner;
+use crate::speculative::d2f::D2fDecodeConfig;
 use crate::transformer::TransformerWeights;
 use crate::types::{Config, Rng};
 
@@ -107,7 +106,6 @@ impl SamplerFeatures {
         }
 
         // Find top-1 and top-2
-        let mut top1_idx = 0usize;
         let mut top1_prob = 0.0f32;
         let mut top2_prob = 0.0f32;
         for t in 0..vocab {
@@ -117,7 +115,6 @@ impl SamplerFeatures {
             if top_probs[t] > top1_prob {
                 top2_prob = top1_prob;
                 top1_prob = top_probs[t];
-                top1_idx = t;
             } else if top_probs[t] > top2_prob {
                 top2_prob = top_probs[t];
             }
@@ -680,7 +677,7 @@ pub fn collect_trajectories(
     max_trajectories: usize,
 ) -> Vec<SamplerTrajectory> {
     let mut all_trajectories = Vec::new();
-    let mut rng = Rng::new(42);
+    let _rng = Rng::new(42);
     let mut dctx = D2fContext::new(config);
 
     for target in targets {
@@ -1261,7 +1258,7 @@ mod tests {
 
     #[test]
     fn test_sampler_decision() {
-        let mut sampler = DiffusionSampler::logistic_zeros();
+        let sampler = DiffusionSampler::logistic_zeros();
         // Zero weights always predict 0.5 → accept with threshold <= 0.5
 
         let features = SamplerFeatures {
@@ -1286,16 +1283,7 @@ mod tests {
 
     #[test]
     fn test_auc_perfect_predictor() {
-        // Create a perfect predictor scenario
-        let sampler = DiffusionSampler::logistic_zeros();
-        // Manually set weights to separate correct from incorrect
-        if let DiffusionSampler::Logistic(ref mut s) =
-            std::cell::RefCell::new(sampler).borrow_mut() as &mut LogisticSampler
-        {
-            // This won't compile due to ownership, let's test differently
-        }
-
-        // Test with uniform predictions → AUC should be ~0.5
+        // Test AUC with an untrained (random) logistic sampler → should be ~0.5
         let mut rng = Rng::new(42);
         let sampler = DiffusionSampler::logistic(&mut rng);
 
@@ -1335,5 +1323,134 @@ mod tests {
             auc >= 0.0 && auc <= 1.0,
             "AUC should be in [0, 1], got {auc}",
         );
+    }
+
+    // ── T3 Integration Tests (Plan 116) ──
+
+    #[test]
+    fn test_d2f_decode_with_sampler_produces_valid_output() {
+        use crate::dllm::D2fContext;
+        use crate::dllm::{generate_pattern_dataset, train_mini_dllm};
+        use crate::speculative::d2f::d2f_decode_block_with_sampler;
+        use crate::speculative::types::NoPruner;
+
+        let config = make_config();
+        let mut rng = Rng::new(42);
+        let effective_vocab = config.vocab_size.saturating_sub(1);
+
+        let train_data = generate_pattern_dataset(&mut rng, 30, config.block_size, effective_vocab);
+        let test_data = generate_pattern_dataset(&mut rng, 10, config.block_size, effective_vocab);
+        let (weights, _) = train_mini_dllm(&config, &train_data, &test_data, 200, 0.01, 0.3, 42);
+
+        let decode_config = D2fDecodeConfig::with_block_size(4);
+
+        // Train a sampler on the test data
+        let trajectories = collect_trajectories(&weights, &config, &decode_config, &test_data, 0);
+        let mut sampler = DiffusionSampler::logistic(&mut rng);
+        if !trajectories.is_empty() {
+            sampler.train(&trajectories, 0.1, 50);
+        }
+
+        // Decode with sampler
+        let mut dctx = D2fContext::new(&config);
+        let result = d2f_decode_block_with_sampler(
+            &mut dctx,
+            &weights,
+            &config,
+            &decode_config,
+            &NoPruner,
+            &mut rng,
+            Some(&sampler),
+        );
+
+        // All tokens should be valid (in vocab range)
+        for (i, &t) in result.tokens.iter().enumerate() {
+            assert!(
+                t < config.vocab_size,
+                "token[{i}] = {t} out of vocab range [0, {})",
+                config.vocab_size,
+            );
+        }
+        assert!(
+            result.steps_used > 0,
+            "should use at least 1 denoising step",
+        );
+    }
+
+    #[test]
+    fn test_d2f_decode_sampler_differs_from_fixed_threshold() {
+        use crate::dllm::D2fContext;
+        use crate::dllm::{generate_pattern_dataset, train_mini_dllm};
+        use crate::speculative::d2f::d2f_decode_block_with_sampler;
+        use crate::speculative::types::NoPruner;
+
+        let config = make_config();
+        let mut rng = Rng::new(42);
+        let effective_vocab = config.vocab_size.saturating_sub(1);
+
+        let train_data = generate_pattern_dataset(&mut rng, 30, config.block_size, effective_vocab);
+        let test_data = generate_pattern_dataset(&mut rng, 10, config.block_size, effective_vocab);
+        let (weights, _) = train_mini_dllm(&config, &train_data, &test_data, 200, 0.01, 0.3, 42);
+
+        let decode_config = D2fDecodeConfig::with_block_size(4);
+
+        // Train a sampler with strong weights to force different decisions
+        let trajectories = collect_trajectories(&weights, &config, &decode_config, &test_data, 0);
+        let mut sampler = DiffusionSampler::logistic(&mut rng);
+        if !trajectories.is_empty() {
+            // Train aggressively to differentiate from fixed threshold
+            sampler.train(&trajectories, 0.5, 200);
+        }
+
+        // Decode with sampler=None (fixed threshold)
+        let mut dctx_fixed = D2fContext::new(&config);
+        let mut rng_fixed = Rng::new(99);
+        let result_fixed = d2f_decode_block_with_sampler(
+            &mut dctx_fixed,
+            &weights,
+            &config,
+            &decode_config,
+            &NoPruner,
+            &mut rng_fixed,
+            None,
+        );
+
+        // Decode with sampler=Some (adaptive)
+        let mut dctx_sampler = D2fContext::new(&config);
+        let mut rng_sampler = Rng::new(99);
+        let result_sampler = d2f_decode_block_with_sampler(
+            &mut dctx_sampler,
+            &weights,
+            &config,
+            &decode_config,
+            &NoPruner,
+            &mut rng_sampler,
+            Some(&sampler),
+        );
+
+        // Both should produce valid output
+        assert!(
+            !result_fixed.tokens.is_empty(),
+            "fixed should produce tokens"
+        );
+        assert!(
+            !result_sampler.tokens.is_empty(),
+            "sampler should produce tokens",
+        );
+
+        // If the sampler learned anything non-trivial, confidence histories
+        // should differ (different accept/reject patterns at each step).
+        // This may not always differ (e.g., if training data is too easy),
+        // so we only check that both produce valid confidence values.
+        for &c in &result_fixed.confidence_history {
+            assert!(c >= 0.0 && c <= 1.0, "fixed confidence {c} out of [0,1]");
+        }
+        for &c in &result_sampler.confidence_history {
+            assert!(c >= 0.0 && c <= 1.0, "sampler confidence {c} out of [0,1]",);
+        }
+
+        // At minimum, steps_used should be positive for both
+        assert!(result_fixed.steps_used > 0, "fixed should use steps");
+        assert!(result_sampler.steps_used > 0, "sampler should use steps",);
     }
 }

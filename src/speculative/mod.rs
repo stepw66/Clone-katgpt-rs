@@ -18,6 +18,9 @@ pub mod d2f;
 #[cfg(feature = "tri_mode")]
 pub mod d2f_verifier;
 
+#[cfg(feature = "tri_mode")]
+pub mod diffusion_sampler;
+
 #[cfg(feature = "lattice_deduction")]
 pub mod alpha;
 
@@ -108,6 +111,15 @@ pub use d2f::{
 // ── D2F Drafter Verifier Re-exports (Plan 089, Tri-Mode) ───
 #[cfg(feature = "tri_mode")]
 pub use d2f_verifier::D2fDrafterVerifier;
+
+// ── DiffusionSampler Re-exports (Plan 116, Tri-Mode) ──────────
+#[cfg(feature = "tri_mode")]
+pub use d2f::{d2f_decode_block_with_prompt_with_sampler, d2f_decode_block_with_sampler};
+#[cfg(feature = "tri_mode")]
+pub use diffusion_sampler::{
+    DiffusionSampler, SamplerDecision, SamplerFeatures, SamplerTrajectory, SamplerVariant,
+    collect_trajectories, train_logistic_on_patterns,
+};
 
 #[cfg(feature = "sudoku")]
 pub use crate::pruners::SudokuPruner;

@@ -25,6 +25,9 @@ use crate::transformer::TransformerWeights;
 use crate::types::Config;
 use crate::types::Rng;
 
+#[cfg(feature = "tri_mode")]
+use crate::speculative::diffusion_sampler::{DiffusionSampler, SamplerFeatures};
+
 // ---------------------------------------------------------------------------
 // D2F Block State Machine
 // ---------------------------------------------------------------------------
@@ -531,6 +534,217 @@ pub fn d2f_decode_block_with_prompt_with(
         accuracy: None,
         state,
     }
+}
+
+// ── DiffusionSampler Integration (Plan 116 T3) ─────────────────
+
+/// D2F block decode with adaptive confidence via trained [`DiffusionSampler`].
+///
+/// Plan 116 T3: Integrates trained per-position correctness predictor into the
+/// D2F denoising loop. When `sampler` is `Some`, extracts [`SamplerFeatures`]
+/// at each masked position and uses `sampler.decide()` instead of the fixed
+/// `chosen_prob >= tau_conf` threshold.
+///
+/// When `sampler` is `None`, behaves identically to [`d2f_decode_block_with_prompt_with`].
+#[cfg(feature = "tri_mode")]
+pub fn d2f_decode_block_with_prompt_with_sampler(
+    dctx: &mut D2fContext,
+    weights: &TransformerWeights,
+    config: &Config,
+    decode_config: &D2fDecodeConfig,
+    prompt: &[usize],
+    pruner: &dyn ConstraintPruner,
+    rng: &mut Rng,
+    sampler: Option<&DiffusionSampler>,
+) -> D2fBlockResult {
+    // Standalone decode — no persistent KV across calls
+    dctx.committed_len = 0;
+
+    // Clear multistep caches for fresh decode (Plan 078 T10.6)
+    if decode_config.multistep {
+        dctx.prev_logits_flat.fill(0.0);
+        dctx.prev_prev_logits_flat.fill(0.0);
+    }
+
+    let mask = config.mask_token;
+    let vocab = config.vocab_size;
+    let block_size = decode_config.block_size;
+    let seq_len = (prompt.len() + block_size).min(config.block_size);
+    let block_start = prompt.len();
+    let max_steps = decode_config.denoise_steps;
+    let tau_conf = decode_config.confidence_threshold;
+    let temperature = decode_config.temperature;
+
+    // Initialize: prompt + mask tokens for the block
+    let mut tokens: Vec<usize> = prompt.to_vec();
+    tokens.extend(std::iter::repeat_n(mask, block_size));
+    tokens.truncate(config.block_size);
+
+    let mut confidence_history = Vec::with_capacity(max_steps);
+    let mut converged_step = max_steps;
+
+    for step in 0..max_steps {
+        // Zero-alloc forward pass with block-causal attention
+        let _seq_len_actual =
+            forward_block_causal_with(dctx, weights, &tokens[..seq_len], config, block_size);
+
+        // DPM-Solver++(2M) multistep logit extrapolation (Plan 078 T10.6)
+        if decode_config.multistep {
+            let logits_len = seq_len * vocab;
+            dctx.prev_prev_logits_flat[..logits_len]
+                .copy_from_slice(&dctx.logits_flat[..logits_len]);
+
+            if step >= 1 {
+                let r = 1.0f32;
+                let alpha = 1.0 + r / 2.0;
+                let beta = r / 2.0;
+                let blend_start = block_start * vocab;
+                let blend_end = seq_len * vocab;
+                for idx in blend_start..blend_end {
+                    dctx.logits_flat[idx] =
+                        alpha * dctx.logits_flat[idx] - beta * dctx.prev_logits_flat[idx];
+                }
+            }
+
+            std::mem::swap(&mut dctx.prev_logits_flat, &mut dctx.prev_prev_logits_flat);
+        }
+
+        let mut n_confident = 0usize;
+
+        for p in block_start..seq_len {
+            if tokens[p] != mask {
+                n_confident += 1;
+                continue;
+            }
+
+            let logits_start = p * vocab;
+            let logits_end = logits_start + vocab;
+            let logits_p = &dctx.logits_flat[logits_start..logits_end];
+            let max_logit = logits_p.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+
+            let depth = p - block_start;
+            let parent_tokens = &tokens[block_start..p];
+
+            let mut sum_exp = 0.0f32;
+            for t in 0..vocab {
+                if t == mask {
+                    continue;
+                }
+                if !pruner.is_valid(depth, t, parent_tokens) {
+                    continue;
+                }
+                sum_exp += (logits_p[t] - max_logit).exp();
+            }
+
+            if sum_exp == 0.0 {
+                continue;
+            }
+
+            let (chosen_token, chosen_prob) = if temperature > 0.0 && temperature != 1.0 {
+                sample_temperatured(
+                    logits_p,
+                    mask,
+                    vocab,
+                    max_logit,
+                    temperature,
+                    depth,
+                    parent_tokens,
+                    pruner,
+                    rng,
+                )
+            } else {
+                sample_greedy(
+                    logits_p,
+                    mask,
+                    vocab,
+                    max_logit,
+                    sum_exp,
+                    depth,
+                    parent_tokens,
+                    pruner,
+                    rng,
+                )
+            };
+
+            // Plan 116 T3: Adaptive confidence via trained sampler.
+            // When sampler is available, use per-position features to decide
+            // accept/reject instead of the fixed tau_conf threshold.
+            let accept = match sampler {
+                Some(s) => {
+                    let features = SamplerFeatures::from_logits(
+                        logits_p,
+                        vocab,
+                        mask,
+                        step,
+                        max_steps,
+                        p - block_start,
+                        block_size,
+                    );
+                    s.decide(&features, tau_conf).accept
+                }
+                None => chosen_prob >= tau_conf,
+            };
+
+            if accept && chosen_token != mask {
+                tokens[p] = chosen_token;
+                n_confident += 1;
+            }
+        }
+
+        let confidence = n_confident as f32 / block_size as f32;
+        confidence_history.push(confidence);
+
+        if tokens[block_start..seq_len].iter().all(|&t| t != mask) {
+            converged_step = step;
+            break;
+        }
+    }
+
+    let all_unmasked = tokens[block_start..seq_len].iter().all(|&t| t != mask);
+    let final_confidence = confidence_history.last().copied().unwrap_or(0.0);
+
+    let state = if all_unmasked {
+        D2fBlockState::FullyActivated
+    } else {
+        D2fBlockState::SemiActivated {
+            step: converged_step.min(max_steps - 1),
+            confidence: final_confidence,
+        }
+    };
+
+    let block_tokens: Vec<usize> = tokens[block_start..seq_len].to_vec();
+    let steps_used = confidence_history.len();
+
+    D2fBlockResult {
+        tokens: block_tokens,
+        steps_used,
+        confidence_history,
+        accuracy: None,
+        state,
+    }
+}
+
+/// Convenience wrapper for [`d2f_decode_block_with_prompt_with_sampler`] without prompt.
+#[cfg(feature = "tri_mode")]
+pub fn d2f_decode_block_with_sampler(
+    dctx: &mut D2fContext,
+    weights: &TransformerWeights,
+    config: &Config,
+    decode_config: &D2fDecodeConfig,
+    pruner: &dyn ConstraintPruner,
+    rng: &mut Rng,
+    sampler: Option<&DiffusionSampler>,
+) -> D2fBlockResult {
+    d2f_decode_block_with_prompt_with_sampler(
+        dctx,
+        weights,
+        config,
+        decode_config,
+        &[],
+        pruner,
+        rng,
+        sampler,
+    )
 }
 
 /// Zero-alloc variant of [`d2f_decode_block_with_target`].

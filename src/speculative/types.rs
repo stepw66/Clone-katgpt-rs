@@ -7,106 +7,13 @@ use std::cmp::Ordering;
 #[cfg(feature = "tes_loop")]
 use crate::pruners::bandit::BanditStrategy;
 
-// ── Constraint Pruner: Neuro-Symbolic Intercept ──────────────────
+// ── Re-exported from microgpt-core (Plan 107 Phase 0) ─────────────
+// ConstraintPruner, ScreeningPruner, and companion structs consolidated
+// into microgpt-core/src/traits.rs to eliminate duplication with riir-engine.
 
-/// Trait for pruning drafted tokens against deterministic constraints.
-///
-/// The Deterministic Validator concept: before the target model verifies drafted
-/// branches, a rules engine prunes invalid ones. This prevents the DDTree
-/// from wasting budget on branches that can never be accepted.
-///
-/// Without pruner: DDTree explores ALL high-probability tokens.
-/// With pruner:    DDTree explores only VALID high-probability tokens.
-pub trait ConstraintPruner: Send + Sync {
-    /// Check if `token_idx` at the given `depth` is valid, given the
-    /// tokens placed at earlier depths in this path.
-    ///
-    /// `parent_token[i]` = token placed at depth `i` in the current path.
-    /// At depth 0, `parent_tokens` is empty.
-    ///
-    /// Returns `false` to prune (reject) this branch.
-    fn is_valid(&self, depth: usize, token_idx: usize, parent_tokens: &[usize]) -> bool;
-}
-
-/// No-op pruner: allows all tokens (original DDTree behavior).
-pub struct NoPruner;
-
-impl ConstraintPruner for NoPruner {
-    fn is_valid(&self, _depth: usize, _token_idx: usize, _parent_tokens: &[usize]) -> bool {
-        true
-    }
-}
-
-// ── Screening Pruner: Absolute Relevance (Plan 021) ─────────────
-
-/// Graded relevance pruner replacing binary valid/invalid with continuous score.
-///
-/// Distilled from "Screening Is Enough" (arXiv:2604.01178).
-/// Returns `R ∈ [0.0, 1.0]` which is blended into log-prob space:
-/// - `1.0` = perfect match, no penalty (`ln(1.0) = 0.0`)
-/// - `0.5` = mediocre match, soft penalty (`ln(0.5) ≈ -0.69`)
-/// - `0.0` = hard rejection / trim (`ln(0.0) = -∞`)
-///
-/// This subsumes [`ConstraintPruner`] as the special case `R ∈ {0.0, 1.0}`.
-/// A blanket impl provides automatic upgrade from any `ConstraintPruner`.
-///
-/// # Ownership Boundary with ConstraintPruner (Plan 029, Task 7)
-///
-/// Single parser ownership: `ConstraintPruner` and `ScreeningPruner` make
-/// **independent** decisions and must not compete for the same judgment:
-///
-/// - **`ConstraintPruner`** = hard structural validity (syntax, brackets, keywords).
-///   Returns `bool`. Owns the decision: "is this token *syntactically* legal here?"
-///
-/// - **`ScreeningPruner`** = graded semantic relevance (domain fit, topic match).
-///   Returns `f32` in `[0.0, 1.0]`. Owns the decision: "is this token *semantically*
-///   relevant to the current domain?"
-///
-/// - **`BinaryScreeningPruner` adapter** = bridge only, zero additional logic.
-///   Converts `ConstraintPruner::is_valid()` → `{0.0, 1.0}` relevance.
-///
-/// Both may prune the same token for different reasons — that's fine.
-/// Both must NOT claim ownership of the same decision type — that's a bug.
-///
-/// NVIDIA Dynamo's lesson: competing parser layers caused silent malformation.
-/// Explicit ownership boundaries prevent this class of error.
-pub trait ScreeningPruner: Send + Sync {
-    /// Returns the absolute relevance of taking this token given the path.
-    ///
-    /// `parent_tokens[i]` = token placed at depth `i` in the current path.
-    /// At depth 0, `parent_tokens` is empty.
-    fn relevance(&self, depth: usize, token_idx: usize, parent_tokens: &[usize]) -> f32;
-}
-
-/// Adapter: wraps any [`ConstraintPruner`] as a [`ScreeningPruner`] with binary relevance.
-/// - `is_valid() == true` → relevance 1.0 (no penalty)
-/// - `is_valid() == false` → relevance 0.0 (hard trim)
-///
-/// Use this to pass a `ConstraintPruner` where a `ScreeningPruner` is expected.
-/// We use an explicit adapter instead of a blanket impl to avoid conflicts
-/// with types that implement `ConstraintPruner` but need a custom `ScreeningPruner`.
-pub struct BinaryScreeningPruner<P>(pub P);
-
-impl<P: ConstraintPruner + Send + Sync> ScreeningPruner for BinaryScreeningPruner<P> {
-    #[inline]
-    fn relevance(&self, depth: usize, token_idx: usize, parent_tokens: &[usize]) -> f32 {
-        if self.0.is_valid(depth, token_idx, parent_tokens) {
-            1.0
-        } else {
-            0.0
-        }
-    }
-}
-
-/// No-op screener: returns 1.0 for everything (no penalty, no trimming).
-pub struct NoScreeningPruner;
-
-impl ScreeningPruner for NoScreeningPruner {
-    #[inline]
-    fn relevance(&self, _depth: usize, _token_idx: usize, _parent_tokens: &[usize]) -> f32 {
-        1.0
-    }
-}
+pub use microgpt_core::traits::{
+    BinaryScreeningPruner, ConstraintPruner, NoPruner, NoScreeningPruner, ScreeningPruner,
+};
 
 /// Depth-aware early stopping gate (PTRM Plan 083).
 ///
@@ -973,6 +880,10 @@ pub struct SelfSpecConfig {
     pub draft_width: usize,
     /// D2F decode parameters.
     pub d2f_config: crate::speculative::d2f::D2fDecodeConfig,
+    /// Optional trained sampler for adaptive confidence (Plan 116 T3).
+    /// When `Some`, uses per-position features to decide accept/reject instead
+    /// of the fixed `tau_conf` threshold in the D2F denoising loop.
+    pub sampler: Option<crate::speculative::diffusion_sampler::DiffusionSampler>,
 }
 
 #[cfg(feature = "tri_mode")]
@@ -981,6 +892,7 @@ impl Default for SelfSpecConfig {
         Self {
             draft_width: 8,
             d2f_config: crate::speculative::d2f::D2fDecodeConfig::default(),
+            sampler: None,
         }
     }
 }
