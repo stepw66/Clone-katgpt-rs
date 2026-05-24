@@ -1089,6 +1089,40 @@ Run: `cargo test --features "g_zero,bomber" --test bench_gzero_modelless -- --no
 
 📖 See [`.plans/049_g_zero_self_play.md`](.plans/049_g_zero_self_play.md) for full implementation plan, types, hyperparameters, and risk assessment.
 
+## 🎛️ SR²AM Configurator Bandit (Plan 112)
+
+Distilled from [SR²AM: Self-Regulated Simulative Reasoning](https://arxiv.org/pdf/2605.22138) (Deng, Hou, Sá Neves et al., 2026). Bandit-based per-turn planning regulation — learns when to plan deep, extend, or skip entirely.
+
+### Adaptive Planning Decisions
+
+| Decision | When | Effect |
+|----------|------|--------|
+| `PlanNew` | High uncertainty, new sub-problem | Reset tree, full budget allocation |
+| `PlanExtend` | Moderate uncertainty, continuing | Keep tree, +1 depth level |
+| `PlanSkip` | Low uncertainty, confident | Bypass tree, direct token sampling |
+
+### Context-Aware UCB1 Selection
+
+```text
+Context: (domain, entropy_bin)
+  → ConfiguratorBandit selects arm via UCB1
+  → Reward: quality_gain − β × token_cost
+```
+
+Entropy binning (10 bins via `floor(entropy * 10.0)`) provides coarse context — low entropy → `PlanSkip`, high → `PlanNew`.
+
+### Uncertainty-Aware Horizon Truncation
+
+High-uncertainty states cap `draft_lookahead` at 2 (SR²AM finding: web tasks benefit from short horizons). Configurable via `max_plan_horizon` override.
+
+### Feature Gate
+
+`sr2am_configurator = ["bandit"]` — default-on. All new code behind feature flag. `InferenceResult` extended with `planning_decision` and `plan_horizon_used` metrics.
+
+🧪 `tests/test_sr2am_configurator_goat.rs` — 29 integration tests (arm selection, context isolation, entropy truncation, pipeline wiring)
+
+📖 See [`.plans/112_sr2am_configurator_bandit.md`](.plans/112_sr2am_configurator_bandit.md) for full plan.
+
 ## 🌊 GFlowNet Modelless Distillation (Plan 052)
 
 Distills the GFlowNet shortest-path theorem — **minimize flow = shortest paths** — into the existing ScreeningPruner + BanditPruner + DDTree stack **without any neural network training**.
@@ -1600,6 +1634,9 @@ cargo clippy --all-targets --all-features --quiet
 | `lt2_looped` | LT2 looped inference — weight-shared T-pass loop, hybrid SDPA+AHLA dispatch, zero-init residual gating (Research 73, Plan 108, GOAT 8/8, **default-on**). Requires `hla_attention` |
 | `dmax_spd` | DMax Soft Parallel Decode — hybrid token/mask embeddings, contiguous prefix promotion, confidence+consistency convergence (Research 72, Plan 109, GOAT 7/7, **default-on**). Requires `dllm` |
 | `eqr_convergence` | EqR convergence-based rollout selection — `Top1Converged` picks smallest marginal-change residual ∥p_{d+1} − p_d∥₂ via `ResidualTracker`. `ConvergenceSelector` config + `WidthSelectionMode::Top1Converged`. GOAT 7/7 (Plan 119, **default-on**). Requires `elf_sde` |
+| `subterranean` | Subterranean procedure compilation — user-defined token-rewriting procedures compiled to zero-cost native code (Plan 110, **default-on**). Requires `bandit` |
+| `sr2am_configurator` | SR²AM Configurator Bandit — per-turn planning regulation via UCB1 over PlanNew/PlanExtend/PlanSkip arms, entropy-aware horizon truncation (Research 76, Plan 112, 29 tests, **default-on**). Requires `bandit` |
+| `data_gate` | Data Gate — self-play stability via task-level filtering before solver, ε-Bernoulli relaxation, execution-based gating (Research 75, Plan 111, **default-on**). Requires `bandit` |
 | `full` | Enable all features (excludes `stepcode`, `sp_kv`) |
 
 > **Default features trade-off:** `default = ["sparse_mlp", "domain_latent", "ppot", "bandit", "bt_rank", "spectral_quant", "hybrid_oct_pq", "elf_sde", "cna_steering", "deep_manifold", "federation", "tes_loop", "lattice_deduction", "delta_routing", "stability_metrics", "mls_aggregate", "gdn2_attention", "dash_attn", "dreamer", "lt2_looped", "dmax_spd", "eqr_convergence", "subterranean"]` targets production accuracy + sparsity + pairwise ranking + hybrid KV compression (OCT triplet + PQ rotation) + neuron-level steering + fixed-point residual scoring + federated KL coupling + per-step latency observability + multi-layer sum aggregation + O(1) recurrent attention + adaptive sparse routing + offline memory consolidation + looped inference + soft parallel decode + EqR convergence selection + procedure compilation. All 23 default features are GOAT-proved. `g_zero` is bench-only (Plan 049: Phase 1 ✅ T5 benchmarked, Phase 2 ✅ Plan 059 GRPO/DPO in `riir-gpu`) — run bench with `--features "g_zero,bomber"` to include heuristic learning. `g_zero` does NOT touch `forward()` hot path (zero hits in `transformer.rs`). Active features are logged in `bench/*_results.csv` and `bench/timeseries.csv` for regression tracking across feature-gate changes.

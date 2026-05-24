@@ -85,9 +85,9 @@
 
 ### Documentation
 
-- [ ] T24: Update `README.md` — add SR²AM Configurator section under 🎯 G-Zero
+- [x] T24: Update `README.md` — add SR²AM Configurator section under 🎯 G-Zero (section + feature flag table entry added)
 - [ ] T25: Update `.docs/09_heuristic-learning.md` — configurator as HL pattern
-- [ ] T26: Update `Cargo.toml` feature flags documentation
+- [x] T26: Update `Cargo.toml` feature flags documentation — added sr2am_configurator + data_gate + subterranean to feature flag table
 - [ ] T27: Add benchmark results to `.benchmarks/012_sr2am_configurator_goat.md`
 
 ---
