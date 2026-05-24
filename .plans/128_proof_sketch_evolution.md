@@ -4,21 +4,21 @@
 **Depends on:** Plan 030 (Multi-armed bandit), Plan 080 (MaxSim late-interaction), Plan 040 (Bradley-Terry ranking)
 **Research:** 088 (AlphaProof Nexus — AI-Driven Formal Proof Search)
 **Paper:** [Advancing Mathematics Research with AI-Driven Formal Proof Search](https://arxiv.org/abs/2605.22763) (Tsoukalas et al., Google DeepMind, May 2026)
-**Status:** 🔲 Planned
+**Status:** ✅ Complete (T1–T9, 46 GOAT proofs)
 
 ---
 
 ## Tasks
 
-- [ ] T1: `ProofGoalCache` — blake3-keyed global goal deduplication (`proof/goal_cache.rs`)
-- [ ] T2: `SketchEntry` + `SketchId` types — proof state + pending goals + lessons (`proof/sketch_types.rs`)
-- [ ] T3: `SketchPopulation` — top-64 Elo-rated sketch database (`proof/sketch_population.rs`)
-- [ ] T4: Plackett-Luce rating — pairwise comparison → Elo via Gibbs sampling (`proof/plackett_luce.rs`)
-- [ ] T5: P-UCB sketch sampling — bridge from `BanditPruner` to sketch selection (`proof/sketch_sampler.rs`)
-- [ ] T6: DDTree integration — goal cache shared across draft branches (`proof/dtree_goal_cache.rs`)
-- [ ] T7: Feature gate `proof_sketch_evolution` + module glue
-- [ ] T8: GOAT proof — convergence speedup: evolutionary vs independent search
-- [ ] T9: Benchmark — constraint verification reduction on Bomber/Go arenas
+- [x] T1: `ProofGoalCache` — blake3-keyed global goal deduplication (`proof/goal_cache.rs`)
+- [x] T2: `SketchEntry` + `SketchId` types — proof state + pending goals + lessons (`proof/sketch_types.rs`)
+- [x] T3: `SketchPopulation` — top-64 Elo-rated sketch database (`proof/sketch_population.rs`)
+- [x] T4: Plackett-Luce rating — pairwise comparison → Elo via Gibbs sampling (`proof/plackett_luce.rs`)
+- [x] T5: P-UCB sketch sampling + diversity injection — bridge from `BanditPruner` to sketch selection (`proof/sketch_sampler.rs`)
+- [x] T6: DDTree integration — goal cache shared across draft branches (`proof/dtree_goal_cache.rs`) ✅
+- [x] T7: Feature gate `proof_sketch_evolution` + parallelism guard + module glue ✅
+- [x] T8: GOAT proof — 46/46 tests (cache dedup, population CRUD, Plackett-Luce rating, P-UCB sampling, diversity injection, parallelism guard, integration) ✅
+- [x] T9: Benchmark — `.benchmarks/039_proof_sketch_evolution_goat.md` ✅
 
 ---
 
@@ -108,7 +108,7 @@ rate(sketches: &[SketchEntry], rankings: &[Vec<usize>]) -> HashMap<SketchId, f64
 
 **Bridge to existing:** Our `BradleyTerry` (Research 040, Plan 080) handles pairwise. Plackett-Luce is the multi-item generalization. Implement as extension, not replacement.
 
-### T5: P-UCB Sketch Sampling
+### T5: P-UCB Sketch Sampling + Diversity Injection
 
 Already partially in `BanditPruner`. The sketch-specific variant:
 
@@ -119,6 +119,27 @@ where:
   q = normalize_to_01(sketch.elo_rating, top_64_min, top_64_max)
   c = 0.2  // paper's empirical value
 ```
+
+**Diversity injection** (Supplementary Insight 7 from Research 088): The paper's controller stochastically injects structured exploration hints. We apply this by randomly selecting from `DiversityStrategy` during explore:
+
+```text
+enum DiversityStrategy {
+    Decompose,    // "Split complex goals into sub-goals" (Go: split territory fight)
+    Combine,      // "Merge ideas from prior attempts" (Bomber: team tactic merge)
+    NovelApproach, // "Try completely new strategy" (switch opening/heuristic)
+}
+
+// During explore arm (ε-greedy or UCB exploration):
+fn inject_diversity(sketch: &SketchEntry, rng: &mut impl Rng) -> DiversityHint {
+    match rng.gen_range(0..3) {
+        0 => DiversityHint::Decompose,   // 33% chance
+        1 => DiversityHint::Combine,     // 33% chance
+        _ => DiversityHint::NovelApproach, // 34% chance
+    }
+}
+```
+
+This prevents population collapse into a single lineage — a failure mode the paper observed when diversity injection was disabled.
 
 ### T6: DDTree Integration
 
@@ -135,14 +156,31 @@ DDTree with ProofGoalCache:
   3. Report cache hit rate as GOAT metric
 ```
 
-### T7: Feature Gate
+### T7: Feature Gate + Parallelism Guard
 
 ```toml
 [features]
-proof_sketch_evolution = []
+proof_sketch_evolution = ["bandit_pruner"]
 ```
 
 Default: off (opt-in). Requires `bandit_pruner` feature.
+
+**Parallelism guard** (Supplementary Insight 6 from Research 088): The paper found that population search with only 1 generator **underperforms** the basic setup. The database only helps when multiple agents contribute asynchronously. Runtime guard:
+
+```text
+fn should_use_population() -> bool {
+    rayon::current_num_threads() > 1  // need ≥2 threads for population to help
+}
+
+// In sketch selection:
+if should_use_population() {
+    population.sample_p_ucb()  // evolutionary path
+} else {
+    bandit.select()            // fallback to basic UCB (single-threaded)
+}
+```
+
+Single-threaded decode (e.g., `NoScreeningPruner`) should skip population lookup entirely and use basic Q-value bandit. The population adds overhead without benefit in serial execution.
 
 Module structure:
 ```text
@@ -221,6 +259,8 @@ T1 + T2 can be parallelized. T3-T5 are sequential. T6 depends on T1 + T5. T7 can
 4. **Gamma(1, Gamma(1,1)) hierarchical prior** — Paper's choice. Heavy tails prevent premature convergence. We replicate rather than innovate on the statistical model.
 5. **Feature gate opt-in** — Not all users need sketch evolution. `bandit_pruner` users get the basic path; `proof_sketch_evolution` adds the population + rating layer.
 6. **Per-decode-step cache scope** — Goal cache is created fresh per decode step, not persisted across steps. This avoids stale entries and keeps memory bounded. Transposition tables (GoState) handle cross-step caching separately.
+7. **Parallelism guard required** — Paper's ablation shows population search underperforms basic with single generator. Runtime check `rayon::current_num_threads() > 1` gates population usage. Single-threaded fallback to basic UCB.
+8. **Diversity injection via enum** — `DiversityStrategy { Decompose, Combine, NovelApproach }` prevents population collapse. Cheap (no extra compute), applied during explore arm only.
 
 ---
 
