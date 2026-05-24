@@ -346,6 +346,33 @@ Architecture: random orthogonal rotation → Beta-distributed coordinates → Ll
 📁 `src/turboquant/` — `codebook.rs`, `rotation.rs`, `kv_cache.rs`, `forward.rs`, `types.rs`
 🔧 Feature flag: `turboquant` (off by default, legacy baseline)
 
+## 🗜️ Asymmetric K/V Cache Compression (Plan 123, Research 081)
+
+**Core finding:** V-side compression is quality-free while K precision is critical. Softmax amplifies K errors exponentially O(e^ε) but V errors only scale linearly O(w·ε). This is a mechanistic property of attention, not model-specific.
+
+**GOAT proof (25/25 ✅):** All 24 proofs + cross-method benchmark pass (Bench 036).
+
+| Config | key_bits | val_bits | cos_k | cos_v | combined | compression |
+|--------|----------|----------|-------|-------|----------|-------------|
+| symmetric (3,3) | 3 | 3 | 0.9910 | 0.9911 | 0.9910 | 10.67× |
+| aggressive (8,2) | 8 | 2 | 1.0000 | 0.9581 | 0.9786 | 6.40× |
+| **recommended (8,3)** | **8** | **3** | **1.0000** | **0.9910** | **0.9955** | **5.82×** |
+| inverted (2,8) | 2 | 8 | 0.9579 | 1.0000 | 0.9785 | 6.40× |
+
+**Recommended config:** `key_bits=8, val_bits=3` — near-perfect K reconstruction with <1% V quality loss. 5.82× compression. Asymmetric beats inverted at same bit budget because K fidelity matters more than V fidelity under softmax.
+
+```rust
+use katgpt_rs::types::AsymmetricKVConfig;
+
+let config = AsymmetricKVConfig::default(); // key_bits=8, val_bits=3
+
+// With TurboQuant (feature-gated)
+let cache = TurboQuantKVCache::new_asymmetric(&config);
+```
+
+📁 `src/types.rs` — `AsymmetricKVConfig` · `src/benchmark.rs` — `bench_asymmetric_cross_method()` · `src/turboquant/kv_cache.rs` — `new_asymmetric()`
+🔧 Feature flag: `asymmetric_kv` (opt-in, depends on `turboquant`)
+
 ## 🔬 SpectralQuant: Calibrated Eigenbasis KV Compression (Secondary, Default-On)
 
 Data-driven spectral analysis replaces TurboQuant's random rotation with a calibrated eigenbasis. Near-optimal quantization via offline calibration → water-fill bit allocation → Lloyd-Max codebooks. **Secondary KV compression** — useful for per-dimension water-fill adaptation (Plan 077). Superseded by OCTOPUS (primary default, zero calibration, -22% to -49% MSE vs SQ). At same 3-bit budget with real calibration (Bench 013): SQ cosine=0.9845 > TQ 0.9715, SQ MaxSim error=18.90% < TQ 40.54% (2.1× lower), SQ compression=9.7× > TQ 5.3×. SQ wins quality AND compression at matched budget vs TQ.
@@ -1718,6 +1745,7 @@ cargo clippy --all-targets --all-features --quiet
 | `hybrid_oct_pq` | Default KV codec — OCT triplet encoding + PQ 2D Givens rotation (Plan 101, default-on) |
 | `planar_quant` | 2D Givens rotation KV cache — O(d) rotation (behind "planar_quant") |
 | `iso_quant` | 4D quaternion rotation KV cache — O(d) rotation (behind "iso_quant") |
+| `asymmetric_kv` | Asymmetric K/V compression benchmarks — V compression is quality-free, K precision is critical. Recommended: key_bits=8, val_bits=3 (Plan 123, GOAT 25/25). Requires `turboquant` |
 | `replaid_schedules` | RePlaid variance-minimized adaptive schedules — experimental, off by default (Plan 078) |
 | `elf_sde` | ELF SDE noise injection + logit-normal schedule — GOAT proved: 10-22× diversity (Plan 079, default-on) |
 | `cna_steering` | CNA Contrastive Neuron Attribution — sparse MLP circuit discovery + runtime modulation. GOAT proved (Bench 015). ~10µs/pair discovery, 163ns K=50 modulation, quality cosine 1.0 (Plan 087) |

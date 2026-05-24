@@ -89,6 +89,15 @@ impl TurboQuantKVCache {
         }
     }
 
+    /// Recommended asymmetric config from Research 081.
+    ///
+    /// V compression is quality-free (softmax amplifies K errors O(e^ε),
+    /// V errors only O(w·ε)). Default: key_bits=8, val_bits=3.
+    #[cfg(feature = "asymmetric_kv")]
+    pub fn new_asymmetric(config: &types::Config) -> Self {
+        Self::new(config, 8, 3)
+    }
+
     /// Create from explicit config struct.
     pub fn with_config(tq_config: &TurboQuantKVCacheConfig) -> Self {
         let key_codebook = compute_codebook(tq_config.kv_dim, tq_config.key_bits);

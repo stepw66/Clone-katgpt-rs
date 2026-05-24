@@ -13,7 +13,9 @@
 
 #![cfg(feature = "asymmetric_kv")]
 
-use katgpt_rs::benchmark::{AsymmetricBenchResult, cosine_similarity};
+use katgpt_rs::benchmark::{
+    AsymmetricBenchResult, bench_asymmetric_cross_method, cosine_similarity,
+};
 use katgpt_rs::types::AsymmetricKVConfig;
 
 // ── Helpers ───────────────────────────────────────────────────
@@ -369,4 +371,28 @@ fn test_cosine_similarity_zero_vector() {
     let b = vec![1.0, 2.0, 3.0];
     let sim = cosine_similarity(&a, &b);
     assert_eq!(sim, 0.0, "Zero vector should return 0.0");
+}
+
+#[test]
+fn test_cross_method_benchmark_output() {
+    let results: Vec<AsymmetricBenchResult> = bench_asymmetric_cross_method(64, 8, 128);
+    assert!(!results.is_empty(), "Should have results");
+
+    println!("\n## Cross-Method Asymmetric Benchmark (head_dim=64, n_kv_heads=8, seq_len=128)");
+    println!();
+    println!("| Config | key_bits | val_bits | cos_k | cos_v | combined | compression |");
+    println!("|--------|----------|----------|-------|-------|----------|-------------|");
+    for r in &results {
+        let combined: f32 = r.combined_fidelity();
+        println!(
+            "| {} | {} | {} | {:.4} | {:.4} | {:.4} | {:.2}x |",
+            r.label,
+            r.key_bits,
+            r.val_bits,
+            r.cosine_sim_key,
+            r.cosine_sim_value,
+            combined,
+            r.compression_ratio
+        );
+    }
 }
