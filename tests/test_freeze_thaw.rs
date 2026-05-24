@@ -76,7 +76,7 @@ mod bomber_hl {
 
 // ── Bomber GZeroPlayer ─────────────────────────────────────────
 
-#[cfg(feature = "g_zero")]
+#[cfg(all(feature = "bomber", feature = "g_zero"))]
 mod bomber_gzero {
     use katgpt_rs::pruners::bomber::{BomberFrozenBandit, GZeroPlayer};
     use katgpt_rs::pruners::{load_frozen, save_frozen};

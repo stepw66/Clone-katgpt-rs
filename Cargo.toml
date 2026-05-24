@@ -210,6 +210,10 @@ required-features = ["bomber"]
 name = "bomber_13_reflection_qa"
 required-features = ["memo_reflections"]
 
+[[example]]
+name = "bomber_14_sr2am_tournament"
+required-features = ["sr2am_configurator", "bomber"]
+
 # ── Monopoly FSM Arena ────────────────────────────────────────
 
 [[example]]
