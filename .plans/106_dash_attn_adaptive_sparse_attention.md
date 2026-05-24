@@ -52,7 +52,7 @@
 - [x] **T27**: Update `README.md` — added `## 🔥 DashAttention` section after PFlash with component table, composability pipeline, file paths
 - [x] **T28**: Update `Cargo.toml` feature flags section in README — `dash_attn` already present in feature table and default list (L1571, L1580), confirmed accurate
 - [x] **T29**: Fix all clippy warnings: `cargo clippy --features dash_attn --fix --allow-dirty` — clean, no warnings or fixes applied
-- [ ] **T30**: Commit with message `feat(dash_attn): adaptive sparse hierarchical attention via α-entmax routing`
+- [x] **T30**: Commit with message `feat(dash_attn): adaptive sparse hierarchical attention via α-entmax routing` — committed in batch with T21-T24, T26
 
 ---
 
