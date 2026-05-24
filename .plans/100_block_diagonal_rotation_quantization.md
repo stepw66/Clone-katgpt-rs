@@ -396,17 +396,17 @@ T17 Default features           — if GOAT positive
 
 ## Acceptance Criteria
 
-- [ ] `PlanarQuantKVCache` implements `QuantizedKVCache` trait
-- [ ] `IsoQuantKVCache` implements `QuantizedKVCache` trait
-- [ ] All unit tests pass for Givens 2D rotation roundtrip
-- [ ] All unit tests pass for quaternion 4D rotation roundtrip
-- [ ] Feature gate `planar_quant` works independently (`cargo test --features planar_quant`)
-- [ ] Feature gate `iso_quant` works independently (`cargo test --features iso_quant`)
-- [ ] `SpKvQuantCache<PlanarQuantKVCache>` compiles (composition proof)
-- [ ] `SpKvQuantCache<IsoQuantKVCache>` compiles (composition proof)
-- [ ] GOAT benchmark shows rotation cost reduction (≥32× fewer FMAs than WHT)
-- [ ] `.benchmarks/023_block_diagonal_goat.md` populated with results
-- [ ] README updated with PlanarQuant/IsoQuant section
+- [x] `PlanarQuantKVCache` implements `QuantizedKVCache` trait
+- [x] `IsoQuantKVCache` implements `QuantizedKVCache` trait
+- [x] All unit tests pass for Givens 2D rotation roundtrip
+- [x] All unit tests pass for quaternion 4D rotation roundtrip
+- [x] Feature gate `planar_quant` works independently (`cargo test --features planar_quant`)
+- [x] Feature gate `iso_quant` works independently (`cargo test --features iso_quant`)
+- [x] `SpKvQuantCache<PlanarQuantKVCache>` compiles (composition proof)
+- [x] `SpKvQuantCache<IsoQuantKVCache>` compiles (composition proof)
+- [x] GOAT benchmark shows rotation cost reduction (≥32× fewer FMAs than WHT)
+- [x] `.benchmarks/023_block_diagonal_goat.md` populated with results
+- [x] README updated with PlanarQuant/IsoQuant section
 
 ## GOAT Results Summary (Bench 023)
 
