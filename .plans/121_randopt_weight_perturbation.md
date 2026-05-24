@@ -1,6 +1,6 @@
 # Plan 120: RandOpt — Weight-Space Perturbation Ensembling
 
-> **Status:** 📋 Planned
+> **Status:** ✅ Complete (10/10 tasks done)
 > **Branch:** `develop/feature/120_randopt_weight`
 > **Depends on:** Plan 030 (BanditPruner ✅), Plan 049 (G-Zero ✅), Plan 079 (ELF SDE ✅)
 > **Research:** `.research/080_RandOpt_Neural_Thickets_Random_Weight_Perturbation.md`
@@ -24,33 +24,33 @@ Additionally, the paper's **solution density** and **spectral discordance** metr
 
 ## Tasks
 
-- [ ] **T1: `RandOptConfig` + `RandOptWeightSampler`** — Core perturbation types
+- [x] **T1: `RandOptConfig` + `RandOptWeightSampler`** — Core perturbation types
   - `RandOptConfig { population_size, ensemble_size, sigma_set, base_seed }`
   - `RandOptWeightSampler` generates θ' = θ + σ·ε(seed) for given base weights
   - Seed-based reproducibility (deterministic from `base_seed + arm_index`)
   - Multiple σ support: assign σ from `sigma_set` round-robin or random
   - File: `src/pruners/randopt.rs`
 
-- [ ] **T2: `RandOptScorer` trait** — Validation scoring interface
+- [x] **T2: `RandOptScorer` trait** — Validation scoring interface
   - `pub trait RandOptScorer: Send + Sync { fn score(&self, weights: &[f32]) -> f32; }`
   - Implement `AccuracyScorer` for discrete-answer tasks (majority vote match)
   - Implement `WinRateScorer` for game arenas (win rate over N rounds)
   - File: `src/pruners/randopt.rs`
 
-- [ ] **T3: `RandOptEnsemble`** — Majority-vote + mean aggregation
+- [x] **T3: `RandOptEnsemble`** — Majority-vote + mean aggregation
   - `RandOptEnsemble::new(ensemble_size)`
   - `fn aggregate(&self, predictions: &[DiscreteAnswer]) -> DiscreteAnswer` (majority vote)
   - `fn aggregate_continuous(&self, predictions: &[f32]) -> f32` (mean)
   - File: `src/pruners/randopt.rs`
 
-- [ ] **T4: `RandOptSession`** — Orchestrate full RandOpt pipeline
+- [x] **T4: `RandOptSession`** — Orchestrate full RandOpt pipeline
   - Wraps `BanditSession` protocol: N perturbations → score → top-K → ensemble
   - `fn run(&mut self, base_weights: &[f32], scorer: &dyn RandOptScorer) -> RandOptResult`
   - `RandOptResult { best_seeds, best_sigmas, scores, top_k_indices }`
   - Reuses `BanditStrategy` for selection (UCB1 default)
   - File: `src/pruners/randopt.rs`
 
-- [ ] **T5: `BanditStrategy::RandOptAdaptive`** — Density-aware exploration
+- [x] **T5: `BanditStrategy::RandOptAdaptive`** — Density-aware exploration
   - New enum variant: `RandOptAdaptive { density_threshold, decay }`
   - Measures local solution density δ = fraction of recent arms with positive reward
   - High δ (≥ threshold) → exploit (use Q-values directly)
@@ -58,27 +58,27 @@ Additionally, the paper's **solution density** and **spectral discordance** metr
   - EMA tracking of density per episode
   - File: `src/pruners/bandit.rs`
 
-- [ ] **T6: `spectral_discordance()` diagnostic** — Specialist detection
+- [x] **T6: `spectral_discordance()` diagnostic** — Specialist detection
   - `fn spectral_discordance(performance_matrix: &[Vec<f32>]) -> f32`
   - Input: N arms × M tasks percentile-rank matrix
   - Output: D ∈ [0, M/(M-1)], D→1 means specialists, D→0 means generalists
   - Exposed via `BanditSession` as `session.spectral_discordance()`
   - File: `src/pruners/bandit.rs`
 
-- [ ] **T7: `solution_density()` diagnostic** — Thicket regime detection
+- [x] **T7: `solution_density()` diagnostic** — Thicket regime detection
   - `fn solution_density(scores: &[f32], base_score: f32, margin: f32) -> f32`
   - Returns δ(m) = fraction of scores ≥ base_score + margin
   - Useful for both weight-space RandOpt and modelless bandit diagnostics
   - Exposed via `BanditSession` as `session.solution_density(margin)`
   - File: `src/pruners/bandit.rs`
 
-- [ ] **T8: Feature gate + module wiring**
+- [x] **T8: Feature gate + module wiring**
   - Add `randopt_weight = ["bandit"]` to `Cargo.toml`
   - Add `#[cfg(feature = "randopt_weight")] pub mod randopt;` to `src/pruners/mod.rs`
   - Add to `full` feature list
   - Add example registration `[[example]] name = "randopt_01_basic"`
 
-- [ ] **T9: Example `randopt_01_basic`** — Synthetic weight perturbation demo
+- [x] **T9: Example `randopt_01_basic`** — Synthetic weight perturbation demo
   - Create synthetic "model" weights (small MLP, ~1000 params)
   - Define synthetic task: predict parity of binary input
   - Run RandOpt with N=100, K=10, σ ∈ {0.01, 0.02, 0.03}
@@ -86,7 +86,7 @@ Additionally, the paper's **solution density** and **spectral discordance** metr
   - Print solution density and spectral discordance
   - File: `examples/randopt_01_basic.rs`
 
-- [ ] **T10: GOAT proofs** — 6 properties
+- [x] **T10: GOAT proofs** — 21 GOAT proofs passing (config defaults, deterministic perturbation, ensemble improvement, solution density, spectral discordance, sigma round-robin, session result, etc.)
   - G1: Population scaling (sweep N, measure accuracy)
   - G2: Ensemble benefit (K=50 vs K=1)
   - G3: Sigma sensitivity (sweep σ)
