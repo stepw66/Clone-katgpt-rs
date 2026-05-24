@@ -316,3 +316,12 @@ pub use proof::{
     SketchPopulation, SketchSampler, SketchSamplerConfig, SketchSelectionStrategy,
     encode_constraint_key, select_strategy, should_use_population,
 };
+
+#[cfg(feature = "epiplexity_scoring")]
+pub mod epiplexity;
+
+#[cfg(feature = "epiplexity_scoring")]
+pub use epiplexity::{
+    EpiplexityEstimator, EpiplexityScreeningPruner, EpiplexityWeight, FactorizationOrder,
+    FactorizationScorer, LossCurveTracker, PerPositionLossTracker, TimeBoundedEntropy,
+};
