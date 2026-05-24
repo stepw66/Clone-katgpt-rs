@@ -467,6 +467,29 @@ Composable with PFlash: `block_select_entmax()` shares the same sink/window/caus
 📁 `src/speculative/prefill.rs` — `block_select_entmax`
 🔧 Feature flag: `dash_attn` (**default-on**)
 
+### 🔍 RTPurbo — Retrieval Head Sparse Decode (Plan 126)
+
+Head-wise retrieval/local classification + dynamic top-p token selection for decode-phase sparse attention. Only ~15% of heads need full KV access — the rest use sliding window + sinks.
+
+| Component | Purpose |
+|-----------|---------|
+| `HeadCalibration` | Offline needle-based per-head retrieval scoring |
+| `RetrievalProjection` | Low-dim pre-RoPE W_Q/W_K projection (16-dim) |
+| `select_top_p` / `select_top_p_blockwise` | Dynamic top-p token/block selection |
+| `RtTurboCache` | Per-layer decode routing + projection cache |
+| `forward_rt_turbo_decode()` | Head-wise sparse decode routing |
+
+**Key properties:**
+- **16-dim pre-RoPE projection** captures low-frequency retrieval signal
+- **Dynamic top-p** adapts to attention distribution per query
+- **Offline calibration** — one forward pass, serialized to JSON for disk reuse
+- **6/6 GOAT proofs passing** — calibration stability, top-p recall, low-dim accuracy, routing efficiency, accuracy preservation, compatibility
+
+📁 `src/rt_turbo/` — `calibration`, `projection`, `top_p`, `forward`
+📁 `tests/test_126_rt_turbo_goat.rs` — 6 GOAT proofs
+📁 `.benchmarks/035_rt_turbo_goat.md` — Full benchmark results
+🔧 Feature flag: `rt_turbo` (requires `dash_attn`)
+
 ## 🔄 LT2 — Looped Inference Pipeline (Plan 108)
 
 Weight-shared T-pass loop gives effective depth T×n_layer with no extra parameters. Based on [arXiv:2605.20670](https://arxiv.org/abs/2605.20670).
@@ -1713,6 +1736,7 @@ cargo clippy --all-targets --all-features --quiet
 | `mls_aggregate` | MLS Multi-Layer Sum — average last K transformer layer residuals before LM head for training-free quality boost (Research 68, Plan 104, GOAT 6/6, **default-on**) |
 | `gdn2_attention` | Gated DeltaNet-2 recurrent attention — O(1) decode with decoupled erase/write gates, constant state S∈R^{dk×dv} per head (Research 70, Plan 105, GOAT 14/14, **default-on**) |
 | `dash_attn` | DashAttention adaptive sparse attention — α-entmax routing with learned chunk summaries, replaces fixed-budget top-k block selection (Research 68, Plan 106, GOAT 9/9, **default-on**) |
+| `rt_turbo` | RTPurbo retrieval head sparse decode — head-wise retrieval/local classification + dynamic top-p token selection, 16-dim pre-RoPE projection, offline calibration (Research 86, Plan 126, GOAT 6/6). Requires `dash_attn` |
 | `dreamer` | Auto-Dreamer offline consolidation — cadence-based scheduler, O(n log n) Q-value clustering, access-based decay, counterfactual MC dropout utility (Research 69, Plan 107, GOAT 8/8, **default-on**). Requires `bandit` |
 | `lt2_looped` | LT2 looped inference — weight-shared T-pass loop, hybrid SDPA+AHLA dispatch, zero-init residual gating (Research 73, Plan 108, GOAT 8/8, **default-on**). Requires `hla_attention` |
 | `dmax_spd` | DMax Soft Parallel Decode — hybrid token/mask embeddings, contiguous prefix promotion, confidence+consistency convergence (Research 72, Plan 109, GOAT 7/7, **default-on**). Requires `dllm` |
@@ -2015,6 +2039,7 @@ Every feature traced from research paper to implementation to benchmark. Separat
 | **MLS Aggregate** (`mls_aggregate`) | Research 68 | **GOAT 6/6** (Plan 104). Average last K transformer layer residuals before LM head. Training-free, zero new parameters. `ep_accuracy_k()` metric helper. Default-on. | Single-layer LM head output |
 | **GDN2** (`gdn2_attention`) | [Gated DeltaNet-2 (Yang 2024)](https://arxiv.org/abs/2605.09959) | **GOAT 14/14** (Plan 105). O(1) decode with constant state S∈R^{dk×dv} per head. SIMD-accelerated decay/read/update/readout. 3 gate configs. 99.4% of AHLA throughput, 87–98% memory savings. Default-on. | O(N) flat KV cache |
 | **DashAttention** (`dash_attn`) | [Peters 2019] + [Correia 2019] α-entmax | **GOAT 9/9** (Plan 106). Adaptive sparse hierarchical attention via α=1.5 entmax routing. Learned chunk summaries. Replaces fixed-budget top-k block selection. Default-on. | Fixed-budget top-k block selection |
+| **RTPurbo** (`rt_turbo`) | [RTPurbo (arXiv 2605.16928)](https://arxiv.org/pdf/2605.16928) | **GOAT 6/6** (Plan 126). Head-wise retrieval/local classification + dynamic top-p token selection. 16-dim pre-RoPE projection captures low-frequency retrieval signal. Only ~15% of heads scan full KV. Offline calibration (JSON). Requires `dash_attn`. | Uniform dense decode for all heads |
 | **Auto-Dreamer** (`dreamer`) | Research 69 | **GOAT 8/8** (Plan 107). Offline memory consolidation: cadence scheduler, O(n log n) Q-value clustering, access-based decay, counterfactual MC dropout utility. Default-on. Requires `bandit`. | No memory consolidation; unbounded Q-value growth |
 | **LT2 Looped** (`lt2_looped`) | Research 73 | **GOAT 8/8** (Plan 108). Weight-shared T-pass loop over all layers. Hybrid SDPA+AHLA dispatch (Uniform/Interleave/Bookend). Zero-init residual gating. Default-on. Requires `hla_attention`. | Single-pass inference only |
 | **DMax SPD** (`dmax_spd`) | Research 72 | **GOAT 7/7** (Plan 109). Soft parallel decode with hybrid token/mask embeddings. Contiguous prefix promotion. Confidence + consistency convergence. Default-on. Requires `dllm`. | Single-token autoregressive decode |
