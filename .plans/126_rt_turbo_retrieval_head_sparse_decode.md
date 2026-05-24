@@ -1,5 +1,7 @@
 # Plan 126: RTPurbo — Retrieval Head Sparse Decode via Low-Dimensional Indexing
 
+> **Status:** ✅ Complete (31/31 tasks done — 6/6 GOAT proofs passing, 90 tests)
+
 **Branch:** `develop/feature/126_rt_turbo_retrieval_head`
 **Depends on:** Plan 106 (DashAttention), Plan 044 (PFlash), Plan 070 (SP-KV)
 **Research:** 86 (RTPurbo — Retrieval Head Sparse Attention)
@@ -25,33 +27,33 @@
 - [x] **T10**: Unit tests: zero-initialized projection → uniform scores, identity projection → matches full-dim dot product on first 16 dims, dimensionality check — 31 projection tests passing
 
 ### Phase 3: Dynamic Top-P Token Selection
-- [ ] **T11**: Create `src/rt_turbo/top_p.rs` — sort-free top-p selector for CPU
-- [ ] **T12**: Implement `select_top_p()` — given scores `[seq_len]` and threshold p (0.9): sort descending, compute cumulative softmax mass, return indices where cumsum < p + last index that pushes over threshold
-- [ ] **T13**: Implement `select_top_p_blockwise()` — block-level variant that scores blocks via low-dim projection, selects blocks where cumulative block mass ≥ p, then fine-grained within selected blocks
-- [ ] **T14**: Unit tests: concentrated scores (single peak) → 1-2 tokens selected, uniform scores → many tokens selected, edge case p=1.0 → all tokens, edge case p=0.0 → top-1 only, exact mass preservation check
+- [x] **T11**: Create `src/rt_turbo/top_p.rs` — sort-free top-p selector for CPU
+- [x] **T12**: Implement `select_top_p()` — given scores `[seq_len]` and threshold p (0.9): sort descending, compute cumulative softmax mass, return indices where cumsum < p + last index that pushes over threshold
+- [x] **T13**: Implement `select_top_p_blockwise()` — block-level variant that scores blocks via low-dim projection, selects blocks where cumulative block mass ≥ p, then fine-grained within selected blocks
+- [x] **T14**: Unit tests: concentrated scores (single peak) → 1-2 tokens selected, uniform scores → many tokens selected, edge case p=1.0 → all tokens, edge case p=0.0 → top-1 only, exact mass preservation check — 11 tests passing
 
 ### Phase 4: Head-Wise Sparse Decode Integration
-- [ ] **T15**: Create `src/rt_turbo/forward.rs` — `forward_rt_turbo_decode()` integrating head-wise routing
-- [ ] **T16**: Implement local-head path — sliding window (8192) + sink tokens (4) only, skip full KV scan, use existing `forward_sdpa` on window slice
-- [ ] **T17**: Implement retrieval-head path — low-dim projection → top-p token selection → full-dim SDPA on selected token indices only
-- [ ] **T18**: Implement `forward_rt_turbo_prefill()` — local heads: window + sinks; retrieval heads: dense (delegate to standard prefill). This matches RTPurbo design
-- [ ] **T19**: Add `RtTurboCache` struct — per-layer storage for: calibration result reference, projection weights, selected token indices (reusable across decode steps until KV shift)
-- [ ] **T20**: Integration tests: prefill → decode round-trip, micro config, verify output shape matches standard decode
+- [x] **T15**: Create `src/rt_turbo/forward.rs` — `forward_rt_turbo_decode()` integrating head-wise routing
+- [x] **T16**: Implement local-head path — sliding window (8192) + sink tokens (4) only, skip full KV scan, use existing `forward_sdpa` on window slice
+- [x] **T17**: Implement retrieval-head path — low-dim projection → top-p token selection → full-dim SDPA on selected token indices only
+- [x] **T18**: Implement `forward_rt_turbo_prefill()` — local heads: window + sinks; retrieval heads: dense (delegate to standard prefill). This matches RTPurbo design
+- [x] **T19**: Add `RtTurboCache` struct — per-layer storage for: calibration result reference, projection weights, selected token indices (reusable across decode steps until KV shift)
+- [x] **T20**: Integration tests: prefill → decode round-trip, micro config, verify output shape matches standard decode
 
 ### Phase 5: GOAT Proof (6/6 Required for Default-On)
-- [ ] **T21**: Proof 1 — Calibration stability: single-sequence calibration vs 10-sequence calibration produces identical partition (±0 heads). Test with 3 random seeds
-- [ ] **T22**: Proof 2 — Top-p vs top-k: synthetic long-context test showing top-p achieves >90% attention mass recall with fewer tokens than top-k=4096
-- [ ] **T23**: Proof 3 — Low-dim recall: 16-dim projection achieves >85% overlap with top-256 full-dim token indices across 100 random query/key pairs
-- [ ] **T24**: Proof 4 — Decode throughput: head-gated decode is faster than uniform decode at seq_len ≥ 8192. Benchmark `rt_turbo` vs `dash_attn` vs baseline
-- [ ] **T25**: Proof 5 — Accuracy preservation: micro benchmark perplexity within 1% of dense baseline on validation set
-- [ ] **T26**: Proof 6 — Compatibility: test with `spectral_quant`, `hybrid_oct_pq`, `gdn2_attention` feature combinations. No panics, no NaN
+- [x] **T21**: Proof 1 — Calibration stability: single-sequence calibration vs 10-sequence calibration produces identical partition (±0 heads). Test with 3 random seeds
+- [x] **T22**: Proof 2 — Top-p vs top-k: synthetic long-context test showing top-p achieves >90% attention mass recall with fewer tokens than top-k=4096
+- [x] **T23**: Proof 3 — Low-dim recall: 16-dim projection achieves >85% overlap with top-256 full-dim token indices across 100 random query/key pairs
+- [x] **T24**: Proof 4 — Decode throughput: head-gated decode is faster than uniform decode at seq_len ≥ 8192. Benchmark `rt_turbo` vs `dash_attn` vs baseline
+- [x] **T25**: Proof 5 — Accuracy preservation: micro benchmark perplexity within 1% of dense baseline on validation set
+- [x] **T26**: Proof 6 — Compatibility: test with `spectral_quant`, `hybrid_oct_pq`, `gdn2_attention` feature combinations. No panics, no NaN
 
 ### Phase 6: Benchmarks & Documentation
-- [ ] **T27**: Create `benchmarks/012_rt_turbo_goat.md` — all 6 GOAT proof results with commands to reproduce
-- [ ] **T28**: Add `rt_turbo_01_calibration` example — demonstrate offline calibration on synthetic model
-- [ ] **T29**: Add `rt_turbo_02_decode_bench` example — throughput comparison: baseline vs dash_attn vs rt_turbo
-- [ ] **T30**: Update `README.md` — add RTPurbo section under DashAttention, document feature gate, link to benchmark results
-- [ ] **T31**: Update `.docs/` if applicable
+- [x] **T27**: Create `benchmarks/012_rt_turbo_goat.md` — all 6 GOAT proof results with commands to reproduce → `.benchmarks/035_rt_turbo_goat.md`
+- [x] **T28**: Add `rt_turbo_01_calibration` example — demonstrate offline calibration on synthetic model
+- [x] **T29**: Add `rt_turbo_02_decode_bench` example — throughput comparison: baseline vs dash_attn vs rt_turbo
+- [x] **T30**: Update `README.md` — add RTPurbo section under DashAttention, document feature gate, link to benchmark results
+- [x] **T31**: Update `.docs/` if applicable — skipped (`.docs/` not used in this project)
 
 ---
 
