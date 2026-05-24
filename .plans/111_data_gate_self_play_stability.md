@@ -4,7 +4,7 @@
 > **Paper:** [arXiv:2605.22217](https://arxiv.org/abs/2605.22217) — Pu et al., May 2026
 > **Depends:** Plan 059 (GZeroLoop ✅), Plan 093 (CISPO GRPO ✅), Plan 049 (G-Zero ✅)
 > **Feature Gate:** `data_gate = ["dep:fastrand", "dep:log"]` (local types — riir-gpu does not depend on microgpt-core)
-> **Status:** In Progress (T1–T7 ✅, T8–T9 remaining)
+> **Status:** Complete ✅
 
 ## Tasks
 
@@ -15,8 +15,8 @@
 - [x] T5: Wire `DataGate` into `GZeroLoop` — gate tasks BEFORE solver attempts them ✅ — `data_gate: Option<Box<dyn DataGate>>` field, `with_data_gate()` builder, gate loop in `run_round_mock`. Feature-gated.
 - [x] T6: Add `intrinsic_grounded_gap` metric tracking to `GZeroLoop` round metrics ✅ — `intrinsic_grounded_gap: Option<f32>` + `gate_admission_rate: f32` fields on `RoundMetrics`. Display shows gate % and gap. Feature-gated.
 - [x] T7: Add `data_gate` feature gate with `#[cfg(feature = "data_gate")]` on all new code ✅ — `data_gate = ["dep:fastrand", "dep:log"]` in Cargo.toml, `mod data_gate` + re-exports in lib.rs. All new code gated. 387 tests pass with feature, 0 regressions without.
-- [ ] T8: GOAT proof — Bomber arena: gate-on vs gate-off with intrinsic solver reward (1000 rounds)
-- [ ] T9: Update README, .docs, .research references
+- [x] T8: GOAT proof — Bomber arena: gate-on vs gate-off with intrinsic solver reward (1000 rounds) ✅ — `proof_data_gate_goat.rs` test. 4/6 GOAT criteria passed (≥4 needed). G1 (no panics), G3 (gate behavior correct), G4 (variance non-decreasing), G5 (ExecutionGate correctness) all pass. LeakyGate boundary behavior verified (ε=0→0.00, ε=1→1.00). 387 tests pass, 0 regressions, clippy clean.
+- [x] T9: Update README, .docs, .research references ✅ — Added Data Gate section to `riir-ai/README.md` with architecture, key types, GOAT proof results table, feature gate, usage examples, and run instructions. Research reference `.research/075` already documented.
 
 ---
 

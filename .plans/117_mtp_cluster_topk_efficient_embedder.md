@@ -260,7 +260,7 @@ MTP = "predict ahead with a small model, verify with the big model." This maps t
 
 - [x] **T42**: Update `README.md` — add LoRA-trained drafter section, output-length gating, Top-K note (MTP section + feature table updated)
 - [x] **T43**: Update `.docs/13_mtp_threshold_guide.md` — add LoRA, output-length gating, Top-K sections + threshold tables
-- [ ] **T44**: Commit with message `feat(mtp): add LoRA-trained drafter, output-length gating, top-K clusters (Plan 117)`
+- [x] **T44**: Commit with message `feat(mtp): add LoRA-trained drafter, output-length gating, top-K clusters (Plan 117)` — committed across 6 commits: T1-T12 (Phase 1-4), T36-T37 (riir-ai sync), T38-T41 (benchmarks), T42-T43 (docs)
 
 ## Execution Order
 
