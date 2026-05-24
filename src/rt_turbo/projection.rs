@@ -242,6 +242,7 @@ impl RetrievalProjection {
         let w = self.w_q_for_head(head_local_idx);
         // q_proj[j] = sum_i q_pre[i] * W[i][j] = sum_i q_pre[i] * w[i * low_dim + j]
         let mut q_proj = vec![0.0f32; self.low_dim];
+        #[allow(clippy::needless_range_loop)] // multi-dim indexing: w[i * low_dim + j]
         for i in 0..self.head_dim {
             let qi = q_pre[i];
             let row = i * self.low_dim;
@@ -268,6 +269,7 @@ impl RetrievalProjection {
         assert_eq!(k_pre.len(), self.head_dim, "k_pre dimension mismatch");
         let w = self.w_k_for_head(head_local_idx);
         let mut k_proj = vec![0.0f32; self.low_dim];
+        #[allow(clippy::needless_range_loop)] // multi-dim indexing: w[i * low_dim + j]
         for i in 0..self.head_dim {
             let ki = k_pre[i];
             let row = i * self.low_dim;
@@ -362,6 +364,7 @@ impl RetrievalProjection {
         let w_k = self.w_k_for_head(head_local_idx);
         let mut scores = vec![0.0f32; seq_len];
 
+        #[allow(clippy::needless_range_loop)] // multi-dim indexing: k_cache[n * head_dim + i]
         for n in 0..seq_len {
             let k_off = n * self.head_dim;
             let mut score = 0.0f32;
