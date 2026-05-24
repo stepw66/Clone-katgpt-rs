@@ -391,6 +391,89 @@ impl VpdPlayer {
     pub fn template_distribution(&self) -> Vec<(BomberTemplate, f32)> {
         self.template_proposer.template_distribution()
     }
+
+    /// Select template guided by EM cycle Q-values when available.
+    ///
+    /// When the EM cycle has completed at least one E-step (m_step_count >= e_step_frequency),
+    /// we blend UCB1 exploration with the EM-learned `student_q` to select better templates.
+    /// Otherwise, fall back to pure UCB1 (same as SDAR).
+    ///
+    /// This is the key VPD advantage: the EM cycle actively learns which templates
+    /// produce better outcomes, then biases selection toward them.
+    fn select_template_guided(&mut self, rng: &mut Rng) -> (BomberTemplate, usize) {
+        let n_templates = NUM_TEMPLATES;
+        let m_steps = self.em_cycle.m_step_count();
+        let min_steps_for_em = self.em_cycle.config().e_step_frequency;
+
+        // Not enough data for EM guidance — fall back to UCB1
+        if m_steps < min_steps_for_em {
+            return self.template_proposer.select();
+        }
+
+        // EM cycle has learned: blend UCB1 score with EM student_q
+        let student_q = self.em_cycle.student_q();
+        let q_max = student_q.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+        let q_min = student_q.iter().copied().fold(f32::INFINITY, f32::min);
+        let q_range = q_max - q_min;
+
+        // 10% chance to explore purely via UCB1 (avoid premature convergence)
+        if rng.f32() < 0.10 {
+            return self.template_proposer.select();
+        }
+
+        // Score each template: blend UCB1 with normalized EM Q-value
+        let total_pulls = self.template_proposer.total_pulls();
+        let mut best_id = 0;
+        let mut best_score = f32::NEG_INFINITY;
+
+        for tid in 0..n_templates {
+            let ucb1 = self.template_proposer.ucb1_score(tid, total_pulls);
+            let q_norm = if q_range.abs() > 1e-6 {
+                (student_q[tid] - q_min) / q_range
+            } else {
+                0.5
+            };
+            // 40% UCB1 exploration + 60% EM learned quality
+            let blended = ucb1 * 0.4 + q_norm * 0.6;
+
+            if blended > best_score {
+                best_score = blended;
+                best_id = tid;
+            }
+        }
+
+        self.template_proposer.record_pull(best_id);
+        (BomberTemplate::all()[best_id], best_id)
+    }
+
+    /// Compute hint weight based on EM cycle's learned Q-value for a template.
+    ///
+    /// Templates with high `student_q` get stronger hints (more confident guidance).
+    /// Templates with low `student_q` get weaker hints (less confident, more exploration).
+    fn em_hint_weight(&self, template_id: usize) -> f32 {
+        let student_q = self.em_cycle.student_q();
+        let m_steps = self.em_cycle.m_step_count();
+        let min_steps = self.em_cycle.config().e_step_frequency;
+
+        // No EM learning yet — neutral weight
+        if m_steps < min_steps {
+            return 1.0;
+        }
+
+        let q = student_q.get(template_id).copied().unwrap_or(0.0);
+        let q_max = student_q.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+        let q_min = student_q.iter().copied().fold(f32::INFINITY, f32::min);
+        let q_range = q_max - q_min;
+
+        // Normalized Q in [0, 1], then map to [0.5, 1.5] hint weight
+        let q_norm = if q_range.abs() > 1e-6 {
+            (q - q_min) / q_range
+        } else {
+            0.5
+        };
+
+        0.5 + q_norm
+    }
 }
 
 // ── BomberPlayer Implementation ────────────────────────────────
@@ -480,11 +563,12 @@ impl BomberPlayer for VpdPlayer {
             };
         }
 
-        // 3. Select template via UCB1 — track for outcome attribution
-        let (template, template_id) = self.template_proposer.select();
+        // 3. Select template — EM-guided when cycle has learned, UCB1 fallback
+        let (template, template_id) = self.select_template_guided(rng);
         self.round_template_ids.push(template_id);
 
-        // 4. Compute hinted_scores = query_scores + hint_score_override
+        // 4. Compute hinted_scores = query_scores + EM-weighted hint
+        let em_weight = self.em_hint_weight(template_id);
         let mut hinted_scores = query_scores;
         for i in 0..ACTION_COUNT {
             if query_scores[i] > f32::NEG_INFINITY {
@@ -498,7 +582,8 @@ impl BomberPlayer for VpdPlayer {
                     ARENA_W as i32,
                     ARENA_H as i32,
                 );
-                hinted_scores[i] += hint;
+                // EM-weighted: high-Q templates get stronger hints
+                hinted_scores[i] += hint * em_weight;
             }
         }
 
@@ -509,7 +594,12 @@ impl BomberPlayer for VpdPlayer {
         self.template_proposer
             .observe_delta(template_id, delta_value);
 
-        // 7. Blend hinted_scores with Q-values (80% heuristic + 20% bandit)
+        // 7. Blend hinted_scores with Q-values
+        // When EM has learned, shift weight from heuristic toward bandit Q
+        let em_learned = self.em_cycle.m_step_count() > 0;
+        let heuristic_w = if em_learned { 0.7 } else { 0.8 };
+        let bandit_w = if em_learned { 0.3 } else { 0.2 };
+
         let mut final_scores = [0.0f32; ACTION_COUNT];
         for i in 0..ACTION_COUNT {
             if hinted_scores[i] <= f32::NEG_INFINITY {
@@ -520,7 +610,7 @@ impl BomberPlayer for VpdPlayer {
                 } else {
                     0.0
                 };
-                final_scores[i] = hinted_scores[i] * 0.8 + bandit_q * 0.2;
+                final_scores[i] = hinted_scores[i] * heuristic_w + bandit_q * bandit_w;
             }
         }
 

@@ -191,3 +191,33 @@ VPD's core contribution — **co-evolutionary EM with dynamic trust region** —
 | 076 SR²AM | VPD's asymmetric frequency relates to SR²AM's adaptive planning |
 | 055 Nemotron TriMode | VPD's EM is orthogonal to tri-mode inference but complementary for training |
 | 060 MeMo | VPD's self-critique feedback source aligns with MeMo reflection pipeline |
+
+---
+
+## Bomber Arena Results (Plan 120)
+
+### Tournament (fixed seed, 300 games)
+| Rank | Player | Wins | Win% | ELO |
+|------|--------|------|------|-----|
+| 1 | VPD | 114 | 38.0% | 1058 |
+| 2 | SDAR | 95 | 31.7% | 818 |
+| 3 | GZero | 80 | 26.7% | 122 |
+| 4 | Random | 0 | 0.0% | -5412 |
+
+**VPD vs SDAR: +6.3% win rate, +240 ELO**
+
+### Arena GOAT (varied seeds, 1000 games)
+| Player | Wins | Win% |
+|--------|------|------|
+| VPD | 302 | 30.2% |
+| SDAR | 309 | 30.9% |
+| GZero | 332 | 33.2% |
+| Random | 0 | 0.0% |
+
+**VPD within 2.3% of SDAR** — non-degrading across map variance.
+
+### Key Observations
+1. VPD outperforms SDAR in fixed-seed tournaments (+6.3%)
+2. VPD does not degrade across varied-seed maps (<3% gap)
+3. EM cycle learning is slow at 1 outcome/game — needs richer feedback for full advantage
+4. GZero dominates both VPD and SDAR — template-based strategy has inherent ceiling

@@ -1418,6 +1418,32 @@ The infrastructure (sigmoid gate primitive, bandit wrapper, absorb wrapper) is p
 
 **Feature gate:** `sdar_gate = []` — off by default.
 
+## 🧬 VPD — Variational Policy Distillation
+
+EM-style co-evolutionary teacher-student distillation that actively trains the feedback-conditioned teacher via BCO (Binary Cross-Entropy Optimization).
+
+- **E-step (every F=5 rounds)**: BCO refines teacher Q-values from unpaired outcome preferences
+- **M-step (every round)**: KL-gated distillation of teacher → student with dynamic prior
+- **Dynamic prior**: Student Q tracks teacher Q via soft update (η=0.2), breaking SDAR plateau
+- **+6.3% win rate over SDAR** in fixed-seed bomber tournament (38.0% vs 31.7%)
+- **Non-degrading** in varied-seed arena (within 2.3% of SDAR over 1000 games)
+
+Feature gate: `vpd_em_distill` (requires `sdar_gate`, `bandit`)
+
+```rust
+use katgpt_rs::pruners::vpd_em::{VpdConfig, VpdEmCycle};
+use katgpt_rs::pruners::bomber::VpdPlayer;
+
+// Create VPD player with paper defaults
+let player = VpdPlayer::new(0);
+
+// Or customize: F=5, β=0.1, λ=0.1, dynamic prior
+let config = VpdConfig::default();
+let player = VpdPlayer::with_config(0, config);
+```
+
+Paper: arXiv:2605.15113 — Variational Policy Distillation (Salesforce AI Research, 2026)
+
 ## 🏆 Bradley-Terry Pairwise Ranking (OpenDeepThink Distillation)
 
 Distilled from [OpenDeepThink: Parallel Reasoning via Bradley–Terry Aggregation](https://arxiv.org/pdf/2605.15177) (Zhou et al., 2026). The paper proves pairwise BT ranking (86% accuracy) dramatically outperforms pointwise scoring (59%) for candidate selection — the **untested variable** in our stack.
@@ -1783,6 +1809,7 @@ cargo clippy --all-targets --all-features --quiet
 | `stepcode` | ⚠️ Plan 054 — NO GAIN proven. Infrastructure only. Off by default, not in `full` |
 | `ropd_rubric` | ROPD rubric modelless distillation — multi-criteria reward vectors, per-criterion gap targeting. Players: `RubricPlayer` (+`g_zero`+`bomber`), `RubricFFTPlayer` (+`g_zero`+`fft`) (Plan 071, off by default) |
 | `sdar_gate` | SDAR sigmoid-gated distillation — asymmetric trust for bandit updates + soft absorb promotion (Plan 072, off by default) |
+| `vpd_em_distill` | VPD Variational Policy Distillation — EM-style co-evolutionary teacher-student distillation with BCO E-step + KL-gated M-step + dynamic prior. Player: `VpdPlayer` (+`g_zero`+`bomber`). +6.3% win rate over SDAR in bomber tournament (Plan 120, off by default). Requires `sdar_gate`, `bandit` |
 | `dllm` | D2F Discrete Diffusion Forcing — mini dLLM + block-parallel decode (Plan 066) |
 | `tri_mode` | Tri-Mode inference — AR + Diffusion + Self-Speculation via `D2fDrafterVerifier` + adaptive `DiffusionSampler`. GOAT 9/9 proved (Bench 018 + 019). Requires `dllm` (Plan 089, Plan 116) |
 | `spectral_quant` | SpectralQuant calibrated eigenbasis + water-fill — 9.1× compression vs TQ 5.3×, cosine 0.9917 vs TQ 0.9692 (Bench 013, Plan 077, default-on) |

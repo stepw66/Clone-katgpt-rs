@@ -372,10 +372,10 @@ impl<P: ScreeningPruner> VpdEmCycle<P> {
             if let Some(q) = self.teacher_q.get_mut(sample.action_idx) {
                 if sample.outcome > 0.5 {
                     // Positive sample: nudge teacher Q up
-                    *q += r_tilde * 0.01;
+                    *q += r_tilde * 0.1;
                 } else {
                     // Negative sample: nudge teacher Q down
-                    *q -= r_tilde.abs() * 0.01;
+                    *q -= r_tilde.abs() * 0.1;
                 }
             }
         }
@@ -410,9 +410,9 @@ impl<P: ScreeningPruner> VpdEmCycle<P> {
         let teacher_q_val = self.teacher_q.get(action_idx).copied().unwrap_or(0.0);
         absorb.observe_with_q(action_idx, reward * gate, teacher_q_val);
 
-        // Soft-update student Q towards teacher (η=0.1)
+        // Soft-update student Q towards teacher (η=0.2)
         if let Some(sq) = self.student_q.get_mut(action_idx) {
-            *sq = *sq + 0.1 * (teacher_q_val - *sq);
+            *sq = *sq + 0.2 * (teacher_q_val - *sq);
         }
 
         self.m_step_count += 1;
@@ -423,7 +423,10 @@ impl<P: ScreeningPruner> VpdEmCycle<P> {
 
     /// Returns true when an E-step should fire (every `e_step_frequency` M-steps).
     pub fn should_e_step(&self) -> bool {
-        self.m_step_count > 0 && self.m_step_count.is_multiple_of(self.config.e_step_frequency)
+        self.m_step_count > 0
+            && self
+                .m_step_count
+                .is_multiple_of(self.config.e_step_frequency)
     }
 
     /// Current student Q-values (dynamic prior).

@@ -191,13 +191,13 @@ fn test_em_cycle_dynamic_prior() {
 
     let updated_student_q = cycle.student_q()[0];
 
-    // Student should have moved towards teacher: lerp(0.0, 10.0, 0.1) = 1.0
+    // Student should have moved towards teacher: lerp(0.0, 10.0, 0.2) = 2.0
     assert!(
         updated_student_q > initial_student_q,
         "[P5] Student Q should increase after M-step: {initial_student_q} → {updated_student_q}"
     );
 
-    let expected_lerp = initial_student_q + 0.1 * (10.0 - initial_student_q);
+    let expected_lerp = initial_student_q + 0.2 * (10.0 - initial_student_q);
     assert!(
         approx_eq(updated_student_q, expected_lerp, 0.01),
         "[P5] Student Q should lerp towards teacher: expected {expected_lerp}, got {updated_student_q}"
@@ -205,7 +205,7 @@ fn test_em_cycle_dynamic_prior() {
 
     // Verify dynamic prior: next sample uses updated student_q
     cycle.collect_sample(0, 1.0, 0.5);
-    // implicit_reward = teacher - student = 10.0 - 1.0 = 9.0
+    // implicit_reward = teacher - student = 10.0 - 2.0 = 8.0
     assert_eq!(cycle.buffer_len(), 1, "Sample collected");
 }
 

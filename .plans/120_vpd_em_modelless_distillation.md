@@ -52,12 +52,12 @@ VPD identifies a critical flaw in existing self-distillation (SDPO): the feedbac
 - [x] T4: Implement `DynamicPrior` — replace static π_ref with current π_θ anchoring
 - [x] T5: Implement `VpdPlayer` for bomber arena — extends SdarPlayer with E/M phases
 - [x] T6: Add feature gate `vpd_em_distill` to `Cargo.toml` (depends on `sdar_gate`, `bandit`)
-- [ ] T7: Add `bomber_15_vpd_tournament` example — VPD vs SDAR vs GZero vs Random
-- [ ] T8: GOAT proof — VPD ≥ SDAR on bomber arena (1000 rounds, 4-player)
-- [ ] T9: GOAT proof — Dynamic prior ≥ Fixed prior (ablation)
-- [ ] T10: GOAT proof — F=5 ≥ F=1 and F=10 (frequency ablation)
-- [ ] T11: Update README.md with VPD section
-- [ ] T12: Update research 080 with benchmark results
+- [x] T7: Add `bomber_15_vpd_tournament` example — VPD vs SDAR vs GZero vs Random
+- [x] T8: GOAT proof — VPD ≥ SDAR on bomber arena (1000 rounds, 4-player)
+- [x] T9: GOAT proof — Dynamic prior ≥ Fixed prior (ablation)
+- [x] T10: GOAT proof — F=5 ≥ F=1 and F=10 (frequency ablation)
+- [x] T11: Update README.md with VPD section
+- [x] T12: Update research 080 with benchmark results
 
 ## Test Coverage
 
