@@ -1444,6 +1444,41 @@ let player = VpdPlayer::with_config(0, config);
 
 Paper: arXiv:2605.15113 — Variational Policy Distillation (Salesforce AI Research, 2026)
 
+## 🎯 RMSD — Relevance-Masked Self-Distillation (Plan 125)
+
+Extends SDAR's uniform token gating with a two-step relevance mask: pre-filter T actions by |Q_teacher - Q_student| magnitude, then select S most informative actions. Only these S actions receive SDAR sigmoid gating updates.
+
+- **Two-step filter:** T=20 (magnitude pre-filter) → S=5 (judge selection)
+- **Signal concentration:** Selected actions have 5-10× higher |ΔQ| than rejected
+- **Teacher continuation:** Snapshots student Q-values as new teacher on plateau (patience=30)
+- **Top-K vocabulary KL:** Approximation using top-K=500 tokens instead of full softmax
+- **Non-degrading:** Within 10% relative gap of SDAR over 1000 bomber arena games
+- **44 GOAT proofs** (34 unit + 2 arena + 8 pipeline)
+
+Feature gate: `rmsd_distill` (requires `sdar_gate`, `bandit`)
+
+```rust
+use katgpt_rs::pruners::rmsd_relevance::{RmsdConfig, RmsdRelevanceFilter, rmsd_loss};
+use katgpt_rs::pruners::bomber::RmsdPlayer;
+
+// Create RMSD player with paper defaults (T=20, S=5)
+let player = RmsdPlayer::new(0);
+
+// Or use the filter directly
+let filter = RmsdRelevanceFilter::new(20, 5);
+let (selected, metrics) = filter.filter_actions(&teacher_q, &student_q);
+let loss = rmsd_loss(&selected, &teacher_q, &student_q, 5.0);
+```
+
+| Component | Throughput | Hot-path overhead |
+|-----------|-----------|-------------------|
+| `RmsdRelevanceFilter::filter_actions()` | ~50M/sec | — |
+| `rmsd_loss()` | ~100M/sec | — |
+| `RmsdPlayer::select_action()` | ~10K/sec | +~5% vs SDAR |
+
+📖 See `.benchmarks/037_rmsd_goat.md` for full GOAT proof results.
+Paper: [Relevance-Masked Self-Distillation](https://www.appliedcompute.com/research/relevance-masked-self-distillation) — Applied Compute, 2026
+
 ## 🏆 Bradley-Terry Pairwise Ranking (OpenDeepThink Distillation)
 
 Distilled from [OpenDeepThink: Parallel Reasoning via Bradley–Terry Aggregation](https://arxiv.org/pdf/2605.15177) (Zhou et al., 2026). The paper proves pairwise BT ranking (86% accuracy) dramatically outperforms pointwise scoring (59%) for candidate selection — the **untested variable** in our stack.

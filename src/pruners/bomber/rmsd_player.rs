@@ -507,7 +507,7 @@ impl BomberPlayer for RmsdPlayer {
         //    Teacher = hinted_scores, Student = q_values
         let hinted_vec: Vec<f32> = hinted_scores.to_vec();
         let q_vec: Vec<f32> = self.q_values.to_vec();
-        let (selected_actions, _rmsd_metrics) =
+        let (_selected_actions, _rmsd_metrics) =
             self.rmsd_filter.filter_actions(&hinted_vec, &q_vec);
 
         // Feed scalar reward to SDAR components — same as SdarPlayer

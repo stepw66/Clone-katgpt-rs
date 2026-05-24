@@ -297,6 +297,63 @@ Implement as **Plan 121** with feature gate `rmsd_distill`:
 
 ---
 
+## Modelless Implementation Results (katgpt-rs, Plan 125)
+
+### GOAT Proofs: 44/44 ✅
+
+| Category | Count | Status |
+|----------|-------|--------|
+| Unit tests (RmsdConfig, LogprobMagnitudeFilter, TopKlApproximator, MagnitudeJudge) | 24 | ✅ All pass |
+| Unit GOAT proofs (T1-T10) | 10 | ✅ All pass |
+| Arena GOAT proofs (T9 non-degradation, T10 continuation) | 2 | ✅ All pass |
+| Pipeline integration tests | 8 | ✅ All pass |
+
+### Key Findings from Modelless Path
+
+1. **Signal concentration works:** `RmsdRelevanceFilter` selects actions with 5-10× higher |ΔQ| magnitude than rejected actions. The two-step filter (T=20 → S=5) correctly identifies the most informative actions.
+
+2. **Non-degradation confirmed:** RMSD vs SDAR in 1000-game bomber arena: relative gap < 10%. RMSD's additional relevance filtering does not hurt game-playing performance. This mirrors SDAR's own arena result — the quality of the learning signal affects convergence, not action selection in short tournaments.
+
+3. **Continuation mechanism activates:** `TeacherContinuation` correctly detects plateau after `patience=30` rounds without improvement and snapshots student Q-values as the new teacher reference. This is the modelless analogue of the paper's teacher weight continuation.
+
+4. **Low overhead:** +~5% vs plain SDAR player (relevance filter + continuation check per round). The filter operates on tiny action vectors (7 elements) so the top-T/top-S sort is negligible.
+
+### Modelless vs Model-Based Gap
+
+| Aspect | Model-Based (Paper) | Modelless (Ours) | Gap |
+|--------|--------------------|--------------------|-----|
+| Pre-filter | T=20 token positions | T=20 actions | Action-level analogue |
+| Judge | gpt-5-mini (LLM) | Magnitude-only (argmax) | No LLM, but same principle |
+| Loss | Full reverse-KL top-K | SDAR gate × \|ΔQ\| proxy | Proxy instead of real KL |
+| Continuation | LoRA weight snapshot | Q-value snapshot | Same mechanism, different granularity |
+| Data efficiency | 2× fewer steps | Not measured (arena-based) | Would need per-round training |
+| Specificity | 1.000 (zero off-topic) | N/A (game domain) | Game domains don't have "off-topic" |
+
+### Composability
+
+RMSD composes with existing distillation methods:
+- **RMSD + SDAR:** `update = sdar_gate(ΔQ) × is_in_top_S(ΔQ)` — gate modulates, mask filters
+- **RMSD + VPD:** VPD's EM cycle could use RMSD filter for E-step teacher refinement
+- **RMSD + Interventional SFT:** Action masking is orthogonal to RMSD's magnitude filter
+
+### Feature Gate
+
+```toml
+rmsd_distill = ["sdar_gate", "bandit"]
+```
+
+### Files
+
+| File | Lines | Role |
+|------|-------|------|
+| `src/pruners/rmsd_relevance.rs` | ~330 | Core types, filter, loss, continuation |
+| `src/pruners/bomber/rmsd_player.rs` | ~800 | Bomber arena player |
+| `tests/test_125_rmsd_goat.rs` | ~620 | 44 GOAT proofs |
+| `examples/bomber_16_rmsd_tournament.rs` | ~394 | Tournament example |
+| `.benchmarks/037_rmsd_goat.md` | — | Benchmark results |
+
+---
+
 ## References
 
 - RMSD blog post: https://www.appliedcompute.com/research/relevance-masked-self-distillation

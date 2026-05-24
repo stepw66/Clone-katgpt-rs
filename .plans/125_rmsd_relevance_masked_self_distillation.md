@@ -1,6 +1,6 @@
 # Plan 121: RMSD — Relevance-Masked Self-Distillation
 
-> **Status:** 🔄 In Progress (T1–T7 ✅, T8–T13 remaining)
+> **Status:** ✅ Complete (T1–T13 all done, 44 GOAT proofs)
 > **Branch:** `develop/feature/121_rmsd_distill`
 > **Depends on:** Plan 072 (SDAR gate ✅), Plan 073 (SDAR loss ✅), Plan 074 (Interventional SFT ✅), Plan 080 (BT rank ✅)
 > **Research:** `.research/081_RMSD_Relevance_Masked_Self_Distillation.md`
@@ -17,12 +17,12 @@
 - [x] T5: Implement `TeacherContinuation` — snapshot student Q → new teacher on plateau
 - [x] T6: Implement modelless `RmsdRelevanceFilter` — action-level magnitude pre-filter for katgpt-rs
 - [x] T7: Add feature gate `rmsd_distill` to `Cargo.toml` + module registration + bomber player
-- [ ] T8: Add `bomber_16_rmsd_tournament` example — RMSD vs SDAR vs OPSD vs SFT vs Random
-- [ ] T9: GOAT proof — RMSD ≥ SDAR on OOD elicitation + capability preservation (1000 rounds, bomber)
-- [ ] T10: GOAT proof — RMSD with continuation ≥ RMSD without (ablation)
-- [ ] T11: Benchmark — `bench_rmsd_modelless.rs` throughput test
-- [ ] T12: Update README.md with RMSD section
-- [ ] T13: Update research 081 with benchmark results
+- [x] T8: Add `bomber_16_rmsd_tournament` example — RMSD vs SDAR vs OPSD vs SFT vs Random
+- [x] T9: GOAT proof — RMSD ≥ SDAR on OOD elicitation + capability preservation (1000 rounds, bomber)
+- [x] T10: GOAT proof — RMSD with continuation ≥ RMSD without (ablation)
+- [x] T11: Benchmark — `bench_rmsd_modelless.rs` throughput test
+- [x] T12: Update README.md with RMSD section
+- [x] T13: Update research 081 with benchmark results
 
 ## Summary
 

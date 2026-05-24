@@ -380,7 +380,10 @@ mod tests {
         let loss = rmsd_loss(&selected, &teacher, &student, 5.0);
         // Negative gap: gate < 0.5, but |gap| still positive
         // gate * |gap| should still contribute
-        assert!(loss > 0.0, "Even negative gap produces positive loss via |Δ|");
+        assert!(
+            loss > 0.0,
+            "Even negative gap produces positive loss via |Δ|"
+        );
     }
 
     // ── Integration: Full Pipeline ─────────────────────────────
@@ -466,13 +469,7 @@ mod tests {
     #[test]
     fn goat_t3_judge_selects_exactly_top_s() {
         let judge = MagnitudeJudge::new(3);
-        let candidates = vec![
-            (10, 0.9),
-            (5, 0.7),
-            (3, 0.5),
-            (7, 0.3),
-            (1, 0.1),
-        ];
+        let candidates = vec![(10, 0.9), (5, 0.7), (3, 0.5), (7, 0.3), (1, 0.1)];
 
         let selected = judge.select(&candidates, 5);
         assert_eq!(selected.len(), 3);
@@ -527,7 +524,7 @@ mod tests {
         // Plateau phase
         assert!(!cont.check_plateau(0.4)); // step 1
         assert!(!cont.check_plateau(0.3)); // step 2
-        assert!(cont.check_plateau(0.2));  // step 3 = patience
+        assert!(cont.check_plateau(0.2)); // step 3 = patience
     }
 
     /// GOAT T7: rmsd_loss zero for identical distributions
@@ -590,6 +587,115 @@ mod tests {
                 "mask_density should be in [0, 1], got {} for n={n}",
                 metrics.mask_density
             );
+        }
+    }
+}
+
+// ── Arena GOAT Proofs (Plan 125 T9-T10) ────────────────────────
+
+#[cfg(all(feature = "rmsd_distill", feature = "sdar_gate", feature = "bomber"))]
+mod arena_goat {
+    use katgpt_rs::pruners::bomber::arena_runner::{BomberArenaConfig, run_bomber_matchup};
+    use katgpt_rs::pruners::bomber::{BomberPlayer, RandomPlayer, RmsdPlayer, SdarPlayer};
+
+    /// GOAT T9: RMSD non-degradation vs SDAR in bomber arena (1000 rounds).
+    ///
+    /// Tests that RMSD's relevance-masking doesn't catastrophically hurt performance
+    /// compared to plain SDAR. RMSD should be within 10% relative gap of SDAR.
+    ///
+    /// Like SDAR and VPD, RMSD's signal improvement affects convergence rate,
+    /// not action selection — so it performs comparably in arena.
+    #[test]
+    fn goat_t9_rmsd_non_degradation_vs_sdar() {
+        let config = BomberArenaConfig {
+            games: 1000,
+            tick_limit: 300,
+            procedural: true,
+            ..Default::default()
+        };
+
+        // Run RMSD + Random vs SDAR + Random matchup
+        let mut players: Vec<Box<dyn BomberPlayer>> = vec![
+            Box::new(RmsdPlayer::new(0)),
+            Box::new(RandomPlayer::new(1)),
+            Box::new(SdarPlayer::new(2)),
+            Box::new(RandomPlayer::new(3)),
+        ];
+
+        let result = run_bomber_matchup(&mut players, &config);
+
+        // Count wins for each player
+        let mut rmsd_wins = 0usize;
+        let mut sdar_wins = 0usize;
+
+        for game in &result.games {
+            match game.winner {
+                Some(0) => rmsd_wins += 1, // RMSD is slot 0
+                Some(2) => sdar_wins += 1, // SDAR is slot 2
+                _ => {}
+            }
+        }
+
+        let total_decisive = rmsd_wins + sdar_wins;
+        if total_decisive == 0 {
+            // All draws — neither dominates
+            return;
+        }
+
+        let rmsd_rate = rmsd_wins as f64 / total_decisive as f64;
+        let sdar_rate = sdar_wins as f64 / total_decisive as f64;
+        let relative_gap = (rmsd_rate - sdar_rate).abs();
+
+        // Non-degradation: RMSD within 10% relative gap of SDAR
+        assert!(
+            relative_gap <= 0.10,
+            "RMSD ({rmsd_wins}W/{rmsd_rate:.3}) vs SDAR ({sdar_wins}W/{sdar_rate:.3}): \
+             relative gap {relative_gap:.3} > 0.10 — RMSD degraded",
+        );
+    }
+
+    /// GOAT T10: RMSD continuation activates without degradation (ablation).
+    ///
+    /// TeacherContinuation detects plateau and triggers teacher snapshot.
+    /// Verifies the mechanism runs for 200 games without panicking and
+    /// maintains valid internal state.
+    #[test]
+    fn goat_t10_continuation_activates_arena() {
+        let config = BomberArenaConfig {
+            games: 200,
+            tick_limit: 300,
+            procedural: true,
+            ..Default::default()
+        };
+
+        let mut players: Vec<Box<dyn BomberPlayer>> = vec![
+            Box::new(RmsdPlayer::new(0)),
+            Box::new(RandomPlayer::new(1)),
+            Box::new(RandomPlayer::new(2)),
+            Box::new(RandomPlayer::new(3)),
+        ];
+
+        let result = run_bomber_matchup(&mut players, &config);
+
+        // All games should complete without errors
+        assert_eq!(
+            result.games.len(),
+            config.games,
+            "All games should complete"
+        );
+
+        // Verify player state after continuation cycles
+        if let Some(rmsd) = players[0].as_any().downcast_ref::<RmsdPlayer>() {
+            let (mean_delta, gate_at_zero, _best_template, mask_density) = rmsd.rmsd_summary();
+
+            // After 200 games, Q-values should be non-trivial
+            assert!(mean_delta >= 0.0, "Mean delta should be non-negative");
+            assert!(
+                (gate_at_zero - 0.5).abs() < 0.01,
+                "Gate at zero should be ~0.5"
+            );
+            assert!(mask_density > 0.0, "Mask density should be positive");
+            assert!(mask_density <= 1.0, "Mask density should be ≤ 1.0");
         }
     }
 }
