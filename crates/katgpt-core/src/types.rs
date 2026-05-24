@@ -154,6 +154,65 @@ impl Default for DashAttnConfig {
 }
 
 // ---------------------------------------------------------------------------
+// RTPurbo Retrieval Head Sparse Decode (Plan 126, Research 86)
+// ---------------------------------------------------------------------------
+
+/// Head role classification for RTPurbo sparse decode.
+///
+/// Only ~15% of attention heads ("retrieval heads") need full long-context access.
+/// The remaining ~85% ("local heads") attend only to local context + attention sinks.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[repr(u8)]
+pub enum RetrievalHeadRole {
+    /// Local head — sliding window + sink tokens only, no full KV scan.
+    #[default]
+    Local,
+    /// Retrieval head — low-dim projection + dynamic top-p token selection.
+    Retrieval,
+}
+
+/// Configuration for RTPurbo retrieval head sparse decode.
+///
+/// Feature gate: `rt_turbo` (opt-in, requires `dash_attn`).
+/// Adds head-wise retrieval/local classification + dynamic top-p token selection
+/// for decode-phase sparse attention. Complements DashAttention's α-entmax block
+/// routing with per-head specialization.
+///
+/// Must pass 6/6 GOAT proofs before default-on promotion.
+#[derive(Clone, Copy, Debug)]
+pub struct RtTurboConfig {
+    /// Fraction of heads classified as retrieval heads (default: 0.15).
+    /// Paper ablation: 15% is optimal balance of accuracy vs sparsity.
+    pub retrieval_head_ratio: f32,
+    /// Low-dimensional projection size for pre-RoPE scoring (default: 16).
+    /// Paper ablation: dim=16 is the sweet spot for low-frequency retrieval.
+    pub low_dim: usize,
+    /// Cumulative attention mass threshold for dynamic top-p selection (default: 0.9).
+    /// Paper ablation: top-p=0.9 preserves >93% attention mass at 97% sparsity.
+    pub top_p: f32,
+    /// Sliding window size for local heads (default: 8192).
+    pub sliding_window: usize,
+    /// Number of attention sink tokens always retained for local heads (default: 4).
+    pub sink_tokens: usize,
+    /// Block size for block-level top-p variant (default: 64).
+    /// Should match `DashAttnConfig::chunk_size` for consistent routing.
+    pub block_size: usize,
+}
+
+impl Default for RtTurboConfig {
+    fn default() -> Self {
+        Self {
+            retrieval_head_ratio: 0.15,
+            low_dim: 16,
+            top_p: 0.9,
+            sliding_window: 8192,
+            sink_tokens: 4,
+            block_size: 64,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // LT2 Looped Inference (Plan 108, Research 73)
 // ---------------------------------------------------------------------------
 
