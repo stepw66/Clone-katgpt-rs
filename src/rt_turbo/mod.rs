@@ -39,9 +39,11 @@ mod tests;
 
 pub mod calibration;
 pub mod projection;
+pub mod top_p;
 
 pub use calibration::{
     CalibrationConfigSnapshot, HeadCalibration, HeadClassification, calibrate_from_scores,
     compute_all_retrieval_scores, compute_retrieval_score,
 };
 pub use projection::RetrievalProjection;
+pub use top_p::{select_top_p, select_top_p_blockwise};
