@@ -808,6 +808,83 @@ let mut pruner = MemorySteeredPruner::new(inner, config, 6);
 
 ---
 
+## SR²AM Configurator: Adaptive Planning Depth (Plan 112)
+
+> **Feature:** `--features sr2am_configurator` (implies `bandit`)
+
+The ConfiguratorBandit is an **adaptive planning depth regulator** — a multi-armed bandit that decides *how deeply* to plan at each turn. Instead of fixed-depth planning for every situation, the bandit learns when to invest in fresh analysis, when to extend existing work, and when to skip planning entirely.
+
+### Three Arms
+
+| Arm | Behavior | When It Helps |
+|-----|----------|---------------|
+| `PlanNew` | Discard tree, build fresh | High entropy / novel situations |
+| `PlanExtend` | Keep tree, +1 depth | Moderate uncertainty / continuing strategy |
+| `PlanSkip` | Early exit, zero tokens | Low entropy / confident / routine |
+
+### Context-Aware via Entropy Binning
+
+The bandit doesn't use a single global policy. It bins the decision entropy into **10 bins** (0–9) and maintains separate Q-values per `(domain, entropy_bin)` pair. This means:
+
+- **Low entropy (bin 0–2)**: Agent is confident → learns to `PlanSkip`, saving tokens
+- **High entropy (bin 7–9)**: Agent is uncertain → learns to `PlanNew`, investing tokens wisely
+- **Medium entropy (bin 3–6)**: Balanced → learns `PlanExtend` to incrementally refine
+
+### UCB1 Selection from Existing Infrastructure
+
+The ConfiguratorBandit reuses the same UCB1 selection logic from the existing bandit infrastructure (`BanditStrategy::Ucb1`). No new selection algorithm — just a new application of the proven UCB1 exploration-exploitation balance.
+
+### Reward Signal
+
+```
+reward = quality_gain − β × token_cost
+```
+
+- `quality_gain`: measured improvement from planning (0.0–1.0)
+- `token_cost`: compute budget consumed (0.0 for PlanSkip, 1.0 for PlanNew)
+- `β = 0.1`: weight controlling how much to penalize expensive decisions
+
+This reward shape encourages the bandit to find the *cheapest* decision that still delivers quality.
+
+### Feature Gate
+
+```toml
+sr2am_configurator = ["bandit"]
+```
+
+Builds on the existing `bandit` feature — no new ML primitives needed.
+
+### Key Result
+
+Over 1000 simulated game turns with natural entropy distribution:
+
+| Decision | Usage | Interpretation |
+|----------|-------|----------------|
+| PlanSkip | 33.0% | 1/3 of turns skip planning entirely |
+| PlanNew | 25.1% | Fresh analysis for uncertain situations |
+| PlanExtend | 41.9% | Incremental refinement for moderate cases |
+
+The bandit learns **domain-specific policies via context isolation**: same entropy level, different domain → different best arm. See `.benchmarks/034_sr2am_configurator_goat.md` for the full 6/6 GOAT proof.
+
+### Quick Start
+
+```rust,ignore
+use microgpt_rs::pruners::ConfiguratorBandit;
+use microgpt_core::{ConfiguratorContext, PlanningDecision};
+
+let mut bandit = ConfiguratorBandit::new();
+
+// Each turn:
+let ctx = ConfiguratorContext { domain: 0, entropy_bin: 3 };
+let decision = bandit.select(ctx);
+
+// After observing outcome:
+let reward = ConfiguratorBandit::reward_signal(quality_gain, token_cost, 0.1);
+bandit.update(ctx, decision, reward);
+```
+
+---
+
 ## References
 
 - [Learning Beyond Gradients](https://trinkle23897.github.io/learning-beyond-gradients/) — Jiayi Weng, 2026
@@ -826,4 +903,5 @@ let mut pruner = MemorySteeredPruner::new(inner, config, 6);
 - Plan 071: ROPD Rubric Modelless Distillation
 - Plan 071 T9: RubricPlayer (Bomber Arena)
 - Plan 071 T10: RubricFFTPlayer (FFT Tactics Arena)
+- Plan 112: SR²AM Configurator Bandit
 - Research 14: HL Distillation
