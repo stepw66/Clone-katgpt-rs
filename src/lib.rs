@@ -25,6 +25,8 @@ pub mod plot;
 pub mod pruners;
 #[cfg(feature = "maxsim")]
 pub mod rerank;
+#[cfg(feature = "rt_turbo")]
+pub mod rt_turbo;
 pub mod simd;
 #[cfg(feature = "sp_kv")]
 pub mod sp_kv;

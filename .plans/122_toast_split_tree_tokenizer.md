@@ -2,18 +2,18 @@
 
 **Research:** `.research/081_ToaST_Tokenization_Split_Trees.md`
 **Paper:** [Tokenization with Split Trees](https://arxiv.org/abs/2605.22705) (Schmidt et al., 2026)
-**Status:** 📋 Planned
+**Status:** ✅ Complete (T1–T5, T6 deferred)
 
 ---
 
 ## Tasks
 
-- [ ] T1: Split tree types (`tokenizer/toast_types.rs`)
-- [ ] T2: Split tree construction from byte n-gram counts (`tokenizer/toast_builder.rs`)
-- [ ] T3: Recursive descent inference (`tokenizer/toast_inference.rs`)
-- [ ] T4: Feature gate `toast_tokenizer` + module glue
-- [ ] T5: GOAT proof — compression vs BPE benchmark
-- [ ] T6: Rényi efficiency metric + benchmark
+- [x] T1: Split tree types (`tokenizer/toast_types.rs`)
+- [x] T2: Split tree construction from byte n-gram counts (`tokenizer/toast_builder.rs`)
+- [x] T3: Recursive descent inference (`tokenizer/toast_inference.rs`)
+- [x] T4: Feature gate `toast_tokenizer` + module glue
+- [x] T5: GOAT proof — 17/17 tests pass (encode/decode roundtrip, serde, compression, no UNK)
+- [ ] T6: Rényi efficiency metric + benchmark (deferred — requires corpus pipeline)
 
 ---
 

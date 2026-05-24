@@ -36,6 +36,7 @@ default = ["sparse_mlp", "domain_latent", "ppot", "bandit", "bt_rank", "spectral
 sp_kv = []  # SP-KV self-pruned key-value attention (Plan 070)
 tiled_attention = ["katgpt-core/tiled_attention"]  # Tiled online-softmax flash attention for CPU SIMD (Plan 115)
 dash_attn = []  # DashAttention adaptive sparse hierarchical attention via α-entmax routing (Plan 106, Research 68)
+rt_turbo = ["dash_attn"]  # RTPurbo retrieval head sparse decode via low-dim indexing (Plan 126, Research 86)
 mls_aggregate = []  # MLS Multi-Layer Sum aggregation of last K layer residuals (Plan 104, Research 68)
 dllm = []  # D2F Discrete Diffusion Forcing — mini dLLM research (Plan 066)
 dmax_spd = ["dllm"]  # DMax Soft Parallel Decode — hybrid embedding D2F enhancement (Plan 109, Research 72)
@@ -62,6 +63,7 @@ decode_specialize = []  # Stage-specialized decode paths for speculative decodin
 lattice_deduction = []  # LDT Lattice Deduction Transformer — asymmetric pruning + conflict detection + α-operator (Plan 088, GOAT 7/7, default-on)
 unit_distance = []  # Unit Distance GOAT proof — number-theoretic lattice constructions (Plan 090)
 sdar_gate = []  # SDAR sigmoid gating for modelless distillation signals (Plan 072)
+rmsd_distill = ["sdar_gate", "bandit"]  # RMSD relevance-masked self-distillation (Plan 125, Research 081)
 memo_reflections = ["bandit"]  # MeMo Reflection QA pipeline — 5-step compositional data synthesis (Research 60, Plan 094)
 replaid_schedules = []  # RePlaid variance-minimized adaptive schedules (Plan 078) — experimental, off by default
 elf_sde = []  # ELF SDE noise injection + logit-normal schedule (Plan 079) — GOAT proved: 10-22× diversity, default-on
@@ -73,6 +75,7 @@ maxsim = ["katgpt-core/maxsim"]  # MaxSim late-interaction scoring (Research 45,
 spectral_quant = []  # SpectralQuant calibrated eigenbasis + water-fill (Plan 077) — default-on, 9.1× compression vs TQ 5.3×, cosine 0.9917 vs TQ 0.9692 (Bench 013)
 octopus = []  # OCTOPUS octahedral triplet codec — data-oblivious, dominates SQ at all bit widths: -22% to -49% MSE (Bench 022, Plan 099, default-on)
 turboquant = []  # TurboQuant rotation + uniform codebook — legacy baseline for bench/educate only (Plan 063)
+asymmetric_kv = ["turboquant"]  # Asymmetric K/V cache compression benchmarks (Plan 123, Research 081)
 planar_quant = ["turboquant"]  # PlanarQuant 2D Givens rotation KV cache — O(d) vs TQ O(d²), 256 FMAs for d=128
 iso_quant = ["turboquant"]  # IsoQuant 4D quaternion rotation KV cache — O(d) vs TQ O(d²), 512 FMAs for d=128
 hybrid_oct_pq = ["planar_quant", "octopus"]  # Hybrid OCT encoding + PQ rotation (Plan 101)
@@ -89,6 +92,10 @@ gdn2_attention = []  # Gated DeltaNet-2 recurrent attention — O(1) decode (Pla
 lt2_looped = ["hla_attention"]  # LT2 looped inference pipeline — weight-shared T-pass loop (Plan 108, Research 73)
 monopoly = ["bevy_ecs", "bandit"]  # Monopoly Board Game Engine (Plan 034)
 go = ["bandit", "dep:reqwest"]  # AutoGo API bridge + Go GameState (Plan 065)
+randopt_weight = ["bandit"]  # RandOpt weight-space perturbation ensembling (Plan 121, Research 080)
+toast_tokenizer = []  # ToaST split-tree tokenization (Plan 122, Research 081)
+event_log = []  # Event-sourced game traces with fork-and-diff (Plan 124, Research 081)
+vpd_em_distill = ["sdar_gate", "bandit"]  # VPD EM-style co-evolutionary distillation (Plan 120, Research 080)
 # ── Percepta (transformer-vm RIIR, Plan 064) ──────────────────
 percepta = ["ordered-float"]  # CHT hull cache: upper+lower, HullMeta, tie-break, cumsum (TG-A)
 percepta_gates = ["percepta"]  # + ReGLU, stepglu, multiply, persist primitives (TG-B)
@@ -102,7 +109,7 @@ game_domain = ["domain_latent"]  # Alias for domain_latent — game-specific Con
 language_domain = []  # Language domain: BPE vocab, LLM models (Plan 040, future)
 gpu = []  # Placeholder — GPU training lives in riir-ai/riir-gpu
 # LeviathanVerifier is always compiled (no gate needed) — verifier.rs, benchmark.rs
-full = ["sudoku", "validator", "ppot", "domain_latent", "bandit", "delta_mem", "g_zero", "fft", "bomber", "bomber-agent", "bomber-wasm", "game_state", "bandit_mcts", "hla_attention", "gdn2_attention", "lt2_looped", "dash_attn", "mls_aggregate", "dmax_spd", "dreamer", "monopoly", "go", "feedback", "rest", "embedding_router", "gpu", "game_domain", "language_domain", "percepta_compile", "dllm", "tri_mode", "bt_rank", "spectral_quant", "octopus", "turboquant", "planar_quant", "iso_quant", "hybrid_oct_pq", "replaid_schedules", "elf_sde", "maxsim", "cna_steering", "deep_manifold", "federation", "delta_routing", "decode_specialize", "lattice_deduction", "unit_distance", "memo_reflections", "eqr_convergence", "subterranean", "sr2am_configurator", "data_gate", "coda_fusion", "tiled_attention"]
+full = ["sudoku", "validator", "ppot", "domain_latent", "bandit", "delta_mem", "g_zero", "fft", "bomber", "bomber-agent", "bomber-wasm", "game_state", "bandit_mcts", "hla_attention", "gdn2_attention", "lt2_looped", "dash_attn", "mls_aggregate", "dmax_spd", "dreamer", "monopoly", "go", "randopt_weight", "feedback", "rest", "embedding_router", "gpu", "game_domain", "language_domain", "percepta_compile", "dllm", "tri_mode", "bt_rank", "spectral_quant", "octopus", "turboquant", "planar_quant", "iso_quant", "hybrid_oct_pq", "replaid_schedules", "elf_sde", "maxsim", "cna_steering", "deep_manifold", "federation", "delta_routing", "decode_specialize", "lattice_deduction", "unit_distance", "memo_reflections", "eqr_convergence", "subterranean", "sr2am_configurator", "data_gate", "coda_fusion", "tiled_attention", "vpd_em_distill"]
 
 # ── Bandit (RL / Game Theory) ─────────────────────────────────
 
@@ -385,3 +392,7 @@ required-features = ["cna_steering"]
 [[example]]
 name = "cna_03_go_circuit"
 required-features = ["cna_steering", "go"]
+
+[[example]]
+name = "randopt_01_basic"
+required-features = ["randopt_weight"]

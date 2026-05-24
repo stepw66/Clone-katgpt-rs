@@ -1,6 +1,6 @@
 # Plan 121: RMSD — Relevance-Masked Self-Distillation
 
-> **Status:** 📋 Planned
+> **Status:** 🔄 In Progress (T1–T7 ✅, T8–T13 remaining)
 > **Branch:** `develop/feature/121_rmsd_distill`
 > **Depends on:** Plan 072 (SDAR gate ✅), Plan 073 (SDAR loss ✅), Plan 074 (Interventional SFT ✅), Plan 080 (BT rank ✅)
 > **Research:** `.research/081_RMSD_Relevance_Masked_Self_Distillation.md`
@@ -10,13 +10,13 @@
 
 ## Tasks
 
-- [ ] T1: Implement `LogprobMagnitudeFilter` — top-T positions by |Δlogprob| (Step 1 of RMSD)
-- [ ] T2: Implement `TopKlApproximator` — top-K=500 vocabulary KL approximation for efficiency
-- [ ] T3: Implement `rmsd_loss()` in `loss_rmsd.rs` — combining SDAR gate + RMSD mask
-- [ ] T4: Implement `RelevanceMask` trait and `JudgeSelectFilter` — S-position selection (Step 2 of RMSD)
-- [ ] T5: Implement `TeacherContinuation` — snapshot student LoRA → new teacher on plateau
-- [ ] T6: Implement modelless `RmsdRelevanceFilter` — action-level magnitude pre-filter for katgpt-rs
-- [ ] T7: Add feature gate `rmsd_distill` to both `Cargo.toml` files
+- [x] T1: Implement `LogprobMagnitudeFilter` — top-T positions by |Δlogprob| (Step 1 of RMSD)
+- [x] T2: Implement `TopKlApproximator` — top-K=500 vocabulary KL approximation for efficiency
+- [x] T3: Implement `rmsd_loss()` in `rmsd_relevance.rs` — combining SDAR gate + RMSD mask
+- [x] T4: Implement `RelevanceMask` trait and `MagnitudeJudge` — S-position selection (Step 2 of RMSD)
+- [x] T5: Implement `TeacherContinuation` — snapshot student Q → new teacher on plateau
+- [x] T6: Implement modelless `RmsdRelevanceFilter` — action-level magnitude pre-filter for katgpt-rs
+- [x] T7: Add feature gate `rmsd_distill` to `Cargo.toml` + module registration + bomber player
 - [ ] T8: Add `bomber_16_rmsd_tournament` example — RMSD vs SDAR vs OPSD vs SFT vs Random
 - [ ] T9: GOAT proof — RMSD ≥ SDAR on OOD elicitation + capability preservation (1000 rounds, bomber)
 - [ ] T10: GOAT proof — RMSD with continuation ≥ RMSD without (ablation)

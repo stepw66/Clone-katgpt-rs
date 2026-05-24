@@ -131,6 +131,21 @@ pub use sdar_gate::{
     sdar_gated_reward, sdar_modulate, sdar_modulate_default, sdar_should_promote,
 };
 
+#[cfg(feature = "vpd_em_distill")]
+pub mod vpd_em;
+
+#[cfg(feature = "vpd_em_distill")]
+pub use vpd_em::{BcoOptimizer, BcoSample, VpdConfig, VpdEmCycle};
+
+#[cfg(feature = "rmsd_distill")]
+pub mod rmsd_relevance;
+
+#[cfg(feature = "rmsd_distill")]
+pub use rmsd_relevance::{
+    LogprobMagnitudeFilter, MagnitudeJudge, RmsdConfig, RmsdMetrics, RmsdRelevanceFilter,
+    TeacherContinuation, TopKlApproximator, rmsd_loss,
+};
+
 #[cfg(feature = "cna_steering")]
 pub mod cna;
 
@@ -233,8 +248,23 @@ pub use go::{
     run_tournament_batch,
 };
 
+#[cfg(feature = "event_log")]
+pub mod event_log;
+
+#[cfg(feature = "event_log")]
+pub use event_log::{Actor, DiffEvent, EvalCache, Event, EventId, EventLog, EventType, ForkDiff};
+
 #[cfg(any(feature = "bomber", feature = "fft", feature = "tes_loop"))]
 pub mod arena;
+
+#[cfg(feature = "randopt_weight")]
+pub mod randopt;
+
+#[cfg(feature = "randopt_weight")]
+pub use randopt::{
+    AccuracyScorer, RandOptConfig, RandOptEnsemble, RandOptResult, RandOptScorer, RandOptSession,
+    RandOptWeightSampler,
+};
 
 #[cfg(all(any(feature = "bomber", feature = "fft"), not(feature = "go")))]
 pub use arena::GameResult;

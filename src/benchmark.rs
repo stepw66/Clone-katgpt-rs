@@ -3360,3 +3360,51 @@ pub fn bench_simd(_config: &Config) -> BenchResult {
         category: BenchCategory::Infrastructure,
     }
 }
+
+// ── Asymmetric KV Cache Benchmarks (Plan 123) ─────────────────
+
+/// Result of asymmetric KV cache benchmark.
+///
+/// Proves V-side compression is quality-free while K precision is critical
+/// (Research 081: softmax amplifies K errors O(e^ε), V errors only O(w·ε)).
+#[cfg(feature = "asymmetric_kv")]
+#[derive(Clone, Debug)]
+pub struct AsymmetricBenchResult {
+    /// Configuration tested.
+    pub key_bits: u8,
+    pub val_bits: u8,
+    /// Cosine similarity between original and dequantized key vectors.
+    pub cosine_sim_key: f32,
+    /// Cosine similarity between original and dequantized value vectors.
+    pub cosine_sim_value: f32,
+    /// Compression ratio vs fp32.
+    pub compression_ratio: f32,
+    /// Label for this configuration.
+    pub label: String,
+}
+
+#[cfg(feature = "asymmetric_kv")]
+impl AsymmetricBenchResult {
+    /// Harmonic mean of key and value cosine similarities.
+    pub fn combined_fidelity(&self) -> f32 {
+        if self.cosine_sim_key <= 0.0 || self.cosine_sim_value <= 0.0 {
+            return 0.0;
+        }
+        2.0 * self.cosine_sim_key * self.cosine_sim_value
+            / (self.cosine_sim_key + self.cosine_sim_value)
+    }
+}
+
+/// Compute cosine similarity between two vectors.
+pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
+    if a.len() != b.len() || a.is_empty() {
+        return 0.0;
+    }
+    let dot: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
+    let norm_a: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
+    let norm_b: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
+    if norm_a < f32::EPSILON || norm_b < f32::EPSILON {
+        return 0.0;
+    }
+    dot / (norm_a * norm_b)
+}

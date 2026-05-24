@@ -1,6 +1,6 @@
 # Plan 120: VPD EM-Style Modelless Distillation
 
-> **Status:** 📋 Planned
+> **Status:** 🔄 In Progress (T1-T6 ✅, T7-T12 pending)
 > **Branch:** `develop/feature/120_vpd_em_distill`
 > **Depends on:** Plan 072 (SDAR gate ✅), Plan 079 (BT rank ✅), Plan 111 (data gate ✅), Plan 030 (BanditPruner ✅)
 > **Research:** `.research/080_VPD_Variational_Policy_Distillation.md`
@@ -46,18 +46,26 @@ VPD identifies a critical flaw in existing self-distillation (SDPO): the feedbac
 
 ## Tasks
 
-- [ ] T1: Implement `BcoSample` and `BcoOptimizer` in `src/pruners/vpd_em.rs`
-- [ ] T2: Implement `VpdConfig` with paper-validated defaults (F=5, β=0.1, λ=0.01)
-- [ ] T3: Implement `VpdEmCycle` — the core EM loop with asymmetric frequency
-- [ ] T4: Implement `DynamicPrior` — replace static π_ref with current π_θ anchoring
-- [ ] T5: Implement `VpdPlayer` for bomber arena — extends SdarPlayer with E/M phases
-- [ ] T6: Add feature gate `vpd_em_distill` to `Cargo.toml` (depends on `sdar_gate`, `bandit`)
+- [x] T1: Implement `BcoSample` and `BcoOptimizer` in `src/pruners/vpd_em.rs`
+- [x] T2: Implement `VpdConfig` with paper-validated defaults (F=5, β=0.1, λ=0.01)
+- [x] T3: Implement `VpdEmCycle` — the core EM loop with asymmetric frequency
+- [x] T4: Implement `DynamicPrior` — replace static π_ref with current π_θ anchoring
+- [x] T5: Implement `VpdPlayer` for bomber arena — extends SdarPlayer with E/M phases
+- [x] T6: Add feature gate `vpd_em_distill` to `Cargo.toml` (depends on `sdar_gate`, `bandit`)
 - [ ] T7: Add `bomber_15_vpd_tournament` example — VPD vs SDAR vs GZero vs Random
 - [ ] T8: GOAT proof — VPD ≥ SDAR on bomber arena (1000 rounds, 4-player)
 - [ ] T9: GOAT proof — Dynamic prior ≥ Fixed prior (ablation)
 - [ ] T10: GOAT proof — F=5 ≥ F=1 and F=10 (frequency ablation)
 - [ ] T11: Update README.md with VPD section
 - [ ] T12: Update research 080 with benchmark results
+
+## Test Coverage
+
+- `tests/test_120_vpd_em_goat.rs` — 10 GOAT proof tests (BCO loss, shift convergence, E-step frequency, dynamic prior, config defaults, softmax/KL)
+- `src/pruners/vpd_em.rs` — 31 internal unit tests (log_sigmoid, softmax, KL divergence, BCO optimizer, VpdConfig, VpdEmCycle)
+- `src/pruners/bomber/vpd_player.rs` — 10 internal unit tests (reward, player init, action selection, outcome, reset)
+- Run: `cargo test --features vpd_em_distill --test test_120_vpd_em_goat`
+- Run: `cargo test --features "vpd_em_distill,bomber" -p katgpt-rs --lib vpd`
 
 ## Architecture
 

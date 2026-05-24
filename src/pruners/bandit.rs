@@ -1329,8 +1329,7 @@ pub fn spectral_discordance(performance_matrix: &[Vec<f32>]) -> f32 {
                 return 0.0;
             }
             let mean = row.iter().sum::<f32>() / row.len() as f32;
-            let var = row.iter().map(|x| (x - mean).powi(2)).sum::<f32>() / row.len() as f32;
-            var
+            row.iter().map(|x| (x - mean).powi(2)).sum::<f32>() / row.len() as f32
         })
         .collect();
     // Normalize: max variance = 0.25 (for binary 0/1 with p=0.5)

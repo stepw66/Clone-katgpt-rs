@@ -15,6 +15,8 @@ pub mod validator_agent;
 pub mod arena_runner;
 #[cfg(feature = "g_zero")]
 pub mod g_zero_player;
+#[cfg(feature = "rmsd_distill")]
+pub mod rmsd_player;
 #[cfg(feature = "ropd_rubric")]
 pub mod rubric_player;
 #[cfg(feature = "sdar_gate")]
@@ -23,6 +25,8 @@ pub mod sdar_player;
 pub mod sr2am_player;
 #[cfg(feature = "g_zero")]
 pub mod tft_player;
+#[cfg(feature = "vpd_em_distill")]
+pub mod vpd_player;
 #[cfg(feature = "bomber-wasm")]
 pub mod wasm_pruner;
 #[cfg(feature = "bomber-wasm")]
@@ -46,6 +50,8 @@ pub use arena_runner::{BomberArenaConfig, BomberRoundResult, run_bomber_game, ru
 pub use g_zero_player::GZeroPlayer;
 #[cfg(feature = "bomber-wasm")]
 pub use players::{LoraPlayer, LoraWasmPlayer, NNPlayer, create_players_with_wasm, is_safe_action};
+#[cfg(feature = "rmsd_distill")]
+pub use rmsd_player::RmsdPlayer;
 #[cfg(feature = "ropd_rubric")]
 pub use rubric_player::RubricPlayer;
 #[cfg(feature = "sdar_gate")]
@@ -55,6 +61,8 @@ pub use sr2am_player::Sr2amPlayer;
 pub use systems::*;
 #[cfg(feature = "g_zero")]
 pub use tft_player::TftPlayer;
+#[cfg(feature = "vpd_em_distill")]
+pub use vpd_player::VpdPlayer;
 #[cfg(feature = "bomber-wasm")]
 pub use wasm_state::{ZeroCopyStateBuffer, serialize_grid_only, serialize_into_buffer};
 
