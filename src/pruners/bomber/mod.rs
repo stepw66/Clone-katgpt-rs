@@ -19,6 +19,8 @@ pub mod g_zero_player;
 pub mod rubric_player;
 #[cfg(feature = "sdar_gate")]
 pub mod sdar_player;
+#[cfg(feature = "sr2am_configurator")]
+pub mod sr2am_player;
 #[cfg(feature = "g_zero")]
 pub mod tft_player;
 #[cfg(feature = "bomber-wasm")]
@@ -48,6 +50,8 @@ pub use players::{LoraPlayer, LoraWasmPlayer, NNPlayer, create_players_with_wasm
 pub use rubric_player::RubricPlayer;
 #[cfg(feature = "sdar_gate")]
 pub use sdar_player::SdarPlayer;
+#[cfg(feature = "sr2am_configurator")]
+pub use sr2am_player::Sr2amPlayer;
 pub use systems::*;
 #[cfg(feature = "g_zero")]
 pub use tft_player::TftPlayer;

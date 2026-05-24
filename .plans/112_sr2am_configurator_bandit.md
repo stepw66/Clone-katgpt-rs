@@ -4,7 +4,7 @@
 > **Paper:** [arXiv:2605.22138](https://arxiv.org/pdf/2605.22138) — Deng, Hou, Sá Neves et al., May 2026
 > **Depends:** Plan 030 (Multi-Armed Bandit ✅), Plan 049 (G-Zero ✅), Plan 026 (Early Exit ✅)
 > **Feature Gate:** `sr2am_configurator = ["bandit"]`
-> **Status:** Phase 1–4 Complete ✅ (T1–T18, T24–T27). Phase 5 (T19–T23) deferred — blocked on riir-gpu GZeroLoop integration.
+> **Status:** Phase 1–4b Complete ✅ (T1–T18c, T24–T27). Phase 5 (T19–T23) deferred — blocked on riir-gpu GZeroLoop integration.
 
 ## Tasks
 
@@ -55,6 +55,21 @@
 - [x] T16: Verify context-aware arm selection across entropy spectrum (G1: 10 contexts learned) ✅
 - [x] T17: Record decision distribution: PlanSkip 33.0%, PlanNew 25.1%, PlanExtend 41.9% — skip savings >20% gate (G6) ✅
 - [x] T18: Verify low entropy→PlanSkip (G2), high entropy→PlanNew (G3), context isolation (G5) ✅
+
+### Phase 4b: SR²AM Bomber Player + Tournament (Bomber Arena Integration)
+
+- [x] T18b: Create `src/pruners/bomber/sr2am_player.rs` — `Sr2amPlayer` extending GZero with ConfiguratorBandit ✅
+  - Per-tick: compute Shannon entropy from query_scores → bin context → UCB1 select PlanningDecision
+  - `PlanNew`: full template search (GZero behavior)
+  - `PlanExtend`: reuse last template, recompute hints with current state
+  - `PlanSkip`: skip template, use pure heuristic + Q-values
+  - Reward signal: `quality_gain(δ) - 0.1 * planning_cost(decision)`
+  - 17 unit tests pass (entropy, decision stats, action selection, outcome update)
+- [x] T18c: Create `examples/bomber_14_sr2am_tournament.rs` — SR²AM vs baselines tournament ✅
+  - 3 matchups: Baseline Hierarchy, SR²AM Challenge, Championship
+  - Players: Random, Greedy, Validator, HL, GZero, SR²AM
+  - ELO rating system + per-matchup decision stats
+  - Feature flags: `sr2am_configurator,g_zero,bomber`
 
 ### Phase 5: Horizon-Deepening Reward for GZeroLoop (Model-Based Bridge)
 
