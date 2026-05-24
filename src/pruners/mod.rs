@@ -294,3 +294,25 @@ pub use fft::{
     Action, ActionType, ActiveEffect, BattleState, Class, FftPlayer, GameEvent, GreedyFFTPlayer,
     HLFFTPlayer, Pos, Stats, StatusEffect, Team, Unit, ValidatorFFTPlayer, resolve_action,
 };
+
+#[cfg(feature = "opus_selection")]
+pub mod opus;
+
+#[cfg(feature = "opus_selection")]
+pub use opus::{
+    CountSketch, OpusBanditPruner, OpusConfig, OpusRedundantEnv, boltzmann_probabilities,
+    boltzmann_sample, boltzmann_sample_batch, exact_inner_product, squared_norm,
+};
+
+#[cfg(feature = "proof_sketch_evolution")]
+pub mod proof;
+
+#[cfg(feature = "proof_sketch_evolution")]
+pub use proof::{
+    DEFAULT_ELO, DEFAULT_EPSILON, DEFAULT_EXPLORATION_C, DTreeCacheSnapshot, DTreeGoalCache,
+    DiversityHint, DiversityStrategy, ELO_SCALE, EvictionReport, Goal, GoalHash, GoalResult,
+    MAX_LESSONS, MAX_PENDING_GOALS, ParallelismGuard, PlackettLuceConfig, PlackettLuceRater,
+    PopulationConfig, ProofGoalCache, ProofGoalSnapshot, ProofState, SketchEntry, SketchId,
+    SketchPopulation, SketchSampler, SketchSamplerConfig, SketchSelectionStrategy,
+    encode_constraint_key, select_strategy, should_use_population,
+};
