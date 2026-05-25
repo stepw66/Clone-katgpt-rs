@@ -30,7 +30,7 @@ src/stiff_anomaly/
 
 ## Tasks
 
-### T1: `StiffSoftDecomposition` struct + `soft_alignment_ratio()`
+- [x] T1: `StiffSoftDecomposition` struct + `soft_alignment_ratio()`
 
 **Feature gate:** `stiff_anomaly`
 
@@ -62,7 +62,7 @@ pub fn stiff_subspace_k(eigenvalues: &[f32], trace_mass: f32) -> usize
 
 ---
 
-### T2: Temporal eigenvalue tracking + Jaccard stability
+- [x] T2: Temporal eigenvalue tracking + Jaccard stability
 
 **Feature gate:** `stiff_anomaly`
 
@@ -99,7 +99,7 @@ impl EigenvalueTracker {
 
 ---
 
-### T3: Z-score gating with FPR validation
+- [x] T3: Z-score gating with FPR validation
 
 **Feature gate:** `stiff_anomaly`
 
@@ -143,7 +143,7 @@ impl StiffAnomalyGate {
 
 ---
 
-### T4: Monte Carlo null test
+- [x] T4: Monte Carlo null test
 
 **Feature gate:** `stiff_anomaly`
 
@@ -175,7 +175,7 @@ pub struct MonteCarloNull {
 
 ---
 
-### T5: Wire into SpectralQuant module
+- [ ] T5: Wire into SpectralQuant module
 
 **Feature gate:** `stiff_anomaly`
 
@@ -197,7 +197,7 @@ impl CalibrationResult {
 
 ---
 
-### T6: Example + benchmark
+- [x] T6: Example + benchmark
 
 **Feature gate:** `stiff_anomaly`
 
@@ -223,12 +223,12 @@ Demonstrate:
 
 | Proof | What | Threshold | Status |
 |---|---|---|---|
-| G1 | Subspace correctness | k matches known rank | ⏳ |
-| G2 | Jaccard stability | Median ≥ 0.85 | ⏳ |
-| G3 | FPR validation | 0.0% on stable | ⏳ |
-| G4 | Null separation | σ ≥ 10.0 | ⏳ |
+| G1 | Subspace correctness | k matches known rank | ✅ |
+| G2 | Jaccard stability | Median ≥ 0.85 | ✅ |
+| G3 | FPR validation | 0.0% on stable | ✅ |
+| G4 | Null separation | σ ≥ 10.0 | ✅ |
 | G5 | SpectralQuant integration | k matches d_eff | ⏳ |
-| G6 | End-to-end example | All above pass | ⏳ |
+| G6 | End-to-end example | All above pass | ✅ |
 
 ---
 
