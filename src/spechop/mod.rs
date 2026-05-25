@@ -14,13 +14,22 @@
 //! Reference: arXiv:2605.21965
 
 pub mod cost_model;
+pub mod hop_tree;
 pub mod pipeline;
 pub mod speculator;
 pub mod types;
 pub mod verifier;
 pub mod window;
 
-pub use cost_model::{bounded_rel_lat, compute_optimal_k, oracle_rel_lat, starvation_prob};
+pub use cost_model::{
+    InferenceStats, bounded_rel_lat, compute_optimal_k, oracle_rel_lat, should_activate_spechop,
+    spechop_configurator_reward, starvation_prob,
+};
+pub use hop_tree::{
+    HopCandidate, HopMarginal, HopTreeConfig, HopTreeNode, HopVerifyState, VerifiedHopPath,
+    build_and_verify_hop_tree, build_hop_dd_tree, extract_best_hop_path, extract_deepest_hop_path,
+    verify_hop_tree,
+};
 pub use pipeline::{PipelineResult, SpecHopPipeline, TrajectoryHop};
 pub use speculator::{CacheSpeculator, HopSpeculator};
 pub use types::{HopObservation, HopState, SpecError, SpecHopConfig, SpecOutcome};

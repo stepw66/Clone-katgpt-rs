@@ -30,6 +30,12 @@ fn simulate_turn(decision: PlanningDecision, entropy: f32) -> (f32, f32) {
             let quality = if entropy < 0.3 { 0.7 } else { 0.2 };
             (quality, 0.0)
         }
+        PlanningDecision::SpecHop { k } => {
+            // SpecHop: speculative threads, moderate cost, best when tool-bound
+            let quality = if entropy < 0.3 { 0.6 } else { 0.3 };
+            let cost = 0.1 * (k.min(8) as f32);
+            (quality, cost)
+        }
     }
 }
 

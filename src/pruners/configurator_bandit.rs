@@ -12,8 +12,11 @@ use katgpt_core::{ConfiguratorContext, PlanningDecision};
 
 // ── Constants ─────────────────────────────────────────────────
 
-/// Number of arms in the configurator bandit (PlanNew, PlanExtend, PlanSkip).
-const NUM_ARMS: usize = 3;
+/// Number of arms in the configurator bandit (PlanNew, PlanExtend, PlanSkip, SpecHop).
+const NUM_ARMS: usize = 4;
+
+/// Default k (speculative thread count) when SpecHop is selected.
+const DEFAULT_SPECHOP_K: usize = 4;
 
 /// Number of entropy bins (0..10, coarse discretization).
 const NUM_ENTROPY_BINS: usize = 10;
@@ -34,6 +37,7 @@ fn arm_index(decision: PlanningDecision) -> usize {
         PlanningDecision::PlanNew => 0,
         PlanningDecision::PlanExtend => 1,
         PlanningDecision::PlanSkip => 2,
+        PlanningDecision::SpecHop { .. } => 3,
     }
 }
 
@@ -42,7 +46,10 @@ fn from_arm_index(idx: usize) -> PlanningDecision {
     match idx {
         0 => PlanningDecision::PlanNew,
         1 => PlanningDecision::PlanExtend,
-        _ => PlanningDecision::PlanSkip,
+        2 => PlanningDecision::PlanSkip,
+        _ => PlanningDecision::SpecHop {
+            k: DEFAULT_SPECHOP_K,
+        },
     }
 }
 
@@ -285,10 +292,15 @@ mod tests {
         assert_eq!(arm_index(PlanningDecision::PlanNew), 0);
         assert_eq!(arm_index(PlanningDecision::PlanExtend), 1);
         assert_eq!(arm_index(PlanningDecision::PlanSkip), 2);
+        assert_eq!(arm_index(PlanningDecision::SpecHop { k: 4 }), 3);
 
         assert_eq!(from_arm_index(0), PlanningDecision::PlanNew);
         assert_eq!(from_arm_index(1), PlanningDecision::PlanExtend);
         assert_eq!(from_arm_index(2), PlanningDecision::PlanSkip);
+        assert!(matches!(
+            from_arm_index(3),
+            PlanningDecision::SpecHop { .. }
+        ));
     }
 
     // ── Entropy binning ───────────────────────────────────────
@@ -470,6 +482,7 @@ mod tests {
                 PlanningDecision::PlanSkip => 0.9,
                 PlanningDecision::PlanExtend => 0.3,
                 PlanningDecision::PlanNew => 0.1,
+                PlanningDecision::SpecHop { .. } => 0.2,
             };
             bandit.update(ctx, decision, reward);
         }
@@ -499,6 +512,7 @@ mod tests {
                 PlanningDecision::PlanNew => 0.9,
                 PlanningDecision::PlanExtend => 0.3,
                 PlanningDecision::PlanSkip => 0.1,
+                PlanningDecision::SpecHop { .. } => 0.2,
             };
             bandit.update(ctx, decision, reward);
         }

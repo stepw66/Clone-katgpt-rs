@@ -242,8 +242,8 @@ fn print_leaderboard(
 #[cfg(feature = "sr2am_configurator")]
 fn print_sr2am_stats(player: &dyn BomberPlayer, matchup_label: &str) {
     if let Some(sr2am) = player.as_any().downcast_ref::<Sr2amPlayer>() {
-        let (plan_new, plan_extend, plan_skip) = sr2am.decision_stats();
-        let total = plan_new + plan_extend + plan_skip;
+        let (plan_new, plan_extend, plan_skip, plan_spechop) = sr2am.decision_stats();
+        let total = plan_new + plan_extend + plan_skip + plan_spechop;
         let pct = |v: usize| {
             if total == 0 {
                 0.0

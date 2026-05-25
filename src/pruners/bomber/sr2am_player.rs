@@ -222,6 +222,7 @@ fn planning_cost(decision: PlanningDecision) -> f32 {
         PlanningDecision::PlanNew => 1.0,
         PlanningDecision::PlanExtend => 0.3,
         PlanningDecision::PlanSkip => 0.0,
+        PlanningDecision::SpecHop { k } => 0.1 * (k.min(8) as f32),
     }
 }
 
@@ -258,6 +259,7 @@ pub struct Sr2amPlayer {
     plan_skip_count: usize,
     plan_new_count: usize,
     plan_extend_count: usize,
+    plan_spechop_count: usize,
 }
 
 impl Sr2amPlayer {
@@ -293,6 +295,7 @@ impl Sr2amPlayer {
             plan_skip_count: 0,
             plan_new_count: 0,
             plan_extend_count: 0,
+            plan_spechop_count: 0,
         }
     }
 
@@ -402,15 +405,17 @@ impl Sr2amPlayer {
             plan_skip_count: 0,
             plan_new_count: 0,
             plan_extend_count: 0,
+            plan_spechop_count: 0,
         })
     }
 
     /// Get planning decision distribution: (plan_new, plan_extend, plan_skip) counts.
-    pub fn decision_stats(&self) -> (usize, usize, usize) {
+    pub fn decision_stats(&self) -> (usize, usize, usize, usize) {
         (
             self.plan_new_count,
             self.plan_extend_count,
             self.plan_skip_count,
+            self.plan_spechop_count,
         )
     }
 
@@ -591,6 +596,11 @@ impl BomberPlayer for Sr2amPlayer {
                 // hinted_scores = query_scores (no template modification)
                 (query_scores, None)
             }
+            PlanningDecision::SpecHop { .. } => {
+                // SpecHop operates at hop level (Plan 131) — skip template search here.
+                // The speculator handles prediction independently; use query_scores as base.
+                (query_scores, None)
+            }
         };
 
         // 6. Compute δ (game-domain Hint-δ)
@@ -615,6 +625,7 @@ impl BomberPlayer for Sr2amPlayer {
             PlanningDecision::PlanNew => self.plan_new_count += 1,
             PlanningDecision::PlanExtend => self.plan_extend_count += 1,
             PlanningDecision::PlanSkip => self.plan_skip_count += 1,
+            PlanningDecision::SpecHop { .. } => self.plan_spechop_count += 1,
         }
         self.decision_history.push(decision);
 
@@ -775,10 +786,11 @@ mod tests {
         assert_eq!(player.q_values, [0.0; ACTION_COUNT]);
         assert_eq!(player.visits, [0; ACTION_COUNT]);
         // SR²AM additions start at zero
-        let (new, extend, skip) = player.decision_stats();
+        let (new, extend, skip, spechop) = player.decision_stats();
         assert_eq!(new, 0);
         assert_eq!(extend, 0);
         assert_eq!(skip, 0);
+        assert_eq!(spechop, 0);
     }
 
     #[test]
@@ -813,8 +825,8 @@ mod tests {
             player.select_action(&grid, pos, &[], &mut rng);
         }
 
-        let (new, extend, skip) = player.decision_stats();
-        let total = new + extend + skip;
+        let (new, extend, skip, spechop) = player.decision_stats();
+        let total = new + extend + skip + spechop;
         assert_eq!(total, 30, "all 30 ticks should have a decision recorded");
         // UCB1 explores all arms, so we expect at least some of each type
         assert!(new > 0, "PlanNew should be selected at least once");
@@ -907,7 +919,7 @@ mod tests {
         // Q-values persist
         assert_eq!(player.q_values, [0.0; ACTION_COUNT]);
         // Decision stats persist across reset
-        let (new, _extend, _skip) = player.decision_stats();
+        let (new, _extend, _skip, _spechop) = player.decision_stats();
         assert_eq!(new, 0);
     }
 
@@ -938,6 +950,8 @@ mod tests {
         assert_eq!(planning_cost(PlanningDecision::PlanNew), 1.0);
         assert_eq!(planning_cost(PlanningDecision::PlanExtend), 0.3);
         assert_eq!(planning_cost(PlanningDecision::PlanSkip), 0.0);
+        assert!((planning_cost(PlanningDecision::SpecHop { k: 4 }) - 0.4).abs() < f32::EPSILON);
+        assert!((planning_cost(PlanningDecision::SpecHop { k: 8 }) - 0.8).abs() < f32::EPSILON);
     }
 
     #[test]

@@ -329,6 +329,9 @@ pub enum PlanningDecision {
     PlanExtend,
     /// Skip tree search, direct token sampling (low uncertainty, confident).
     PlanSkip,
+    /// Activate SpecHop continuous speculation with k speculative threads (Plan 131).
+    /// Selected when speculator latency α is low and tool ratio β is moderate.
+    SpecHop { k: usize },
 }
 
 /// Context key for configurator bandit — coarse entropy binning.

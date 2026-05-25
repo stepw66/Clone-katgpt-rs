@@ -4,7 +4,7 @@
 > **Paper:** [arXiv:2605.21965](https://arxiv.org/pdf/2605.21965) — Continuous speculation for multi-hop retrieval agents
 > **Feature Gate:** `spechop` (**Opt-in**, requires GOAT proof before default-on promotion)
 > **Depends on:** Plan 030 (Bandit), speculative module (DDTree + verifier), Plan 112 (SR²AM configurator)
-> **Status:** ✅ Phase 1–5 Complete (T1–T24) · Phase 6+ planned
+> **Status:** ✅ Phase 1–7 Complete (T1–T32) · Phase 8+ planned
 
 ## Summary
 
@@ -53,16 +53,16 @@ Our existing DDTree operates at **token granularity**. This plan extends specula
 - [x] **T24**: Integration test: synthetic 4-hop trajectory with cache speculator, verify final answer matches sequential execution
 
 ### Phase 6: DDTree Integration
-- [ ] **T25**: Add `SpecHopMode` variant to DDTree builder — when enabled, DDTree branches represent speculative hops (not tokens)
-- [ ] **T26**: Implement `build_dd_tree_spechop()` — hop-level DDTree where each node is a (action, observation) pair, branch score = speculator confidence
-- [ ] **T27**: Wire `ObservationVerifier` into DDTree verification path — accept/reject branches at hop granularity
-- [ ] **T28**: Integration test: DDTree with spechop produces same best-path as sequential DDTree when speculator is perfect (p=1.0)
+- [x] **T25**: Add `SpecHopMode` variant to DDTree builder — when enabled, DDTree branches represent speculative hops (not tokens)
+- [x] **T26**: Implement `build_dd_tree_spechop()` — hop-level DDTree where each node is a (action, observation) pair, branch score = speculator confidence
+- [x] **T27**: Wire `ObservationVerifier` into DDTree verification path — accept/reject branches at hop granularity
+- [x] **T28**: Integration test: DDTree with spechop produces same best-path as sequential DDTree when speculator is perfect (p=1.0)
 
 ### Phase 7: SR²AM Configurator Integration
-- [ ] **T29**: Add `PlanningDecision::SpecHop { k: usize }` arm to SR²AM configurator (Plan 112)
-- [ ] **T30**: Implement auto-k computation: measure α and β from recent inference stats, compute k* via cost model
-- [ ] **T31**: Implement configurator reward: `reward = latency_reduction / compute_overhead` — only activate spechop when ratio > 1.0
-- [ ] **T32**: Unit test: configurator selects SpecHop when α < 0.3 and β < 0.5 (tool-bound scenarios), skips when β > 0.8 (decode-bound)
+- [x] **T29**: Add `PlanningDecision::SpecHop { k: usize }` arm to SR²AM configurator (Plan 112)
+- [x] **T30**: Implement auto-k computation: measure α and β from recent inference stats, compute k* via cost model
+- [x] **T31**: Implement configurator reward: `reward = latency_reduction / compute_overhead` — only activate spechop when ratio > 1.0
+- [x] **T32**: Unit test: configurator selects SpecHop when α < 0.3 and β < 0.5 (tool-bound scenarios), skips when β > 0.8 (decode-bound)
 
 ### Phase 8: GOAT Proof (6/6 Required for Default-On Consideration)
 - [ ] **T33**: Proof 1 — Losslessness: run Bomber arena 1000 rounds with and without spechop, identical win rates (±2%), identical game traces (verified via EventLog)
@@ -93,6 +93,7 @@ src/spechop/
 ├── speculator.rs       # HopSpeculator trait + CacheSpeculator + BanditSpeculator
 ├── window.rs           # SpecWindow thread pool manager (commit/rollback)
 ├── pipeline.rs         # SpecHopPipeline continuous loop (Algorithm 1)
+├── hop_tree.rs         # Hop-level DDTree integration (T25–T27)
 └── tests.rs            # Integration tests
 ```
 
