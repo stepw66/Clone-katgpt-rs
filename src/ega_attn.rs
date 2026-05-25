@@ -1,0 +1,243 @@
+//! Energy-Gated Attention (EGA) — Spectral salience gating for attention.
+//!
+//! Feature gate: `ega_attn` (Plan 139, opt-in).
+//!
+//! Gates value aggregation by the spectral energy of key token embeddings.
+//! Each key position's attention weight is scaled by a learned sigmoid gate
+//! derived from the dot-product energy of the input embedding with a learned
+//! projection vector.
+//!
+//! # Paper Algorithm (Algorithm 1)
+//!
+//! ```text
+//! Q, K, V ← XW_Q, XW_K, XW_V
+//! S ← QKᵀ/√d + causal_mask
+//! A ← softmax(S)
+//!
+//! e ← X · w_proj                    // [seq_len] energy scores
+//! ẽ ← (e - μ) / (σ + ε)             // z-normalize
+//! g ← σ(α · (ẽ - τ))                // sigmoid gate [seq_len]
+//!
+//! Âᵢⱼ ← Aᵢⱼ · gⱼ                   // gate each key position
+//! Âᵢⱼ ← Âᵢⱼ / Σₖ(Âᵢₖ + ε)          // renormalize (sum-to-one)
+//! Y ← Â · V                         // value aggregation
+//! ```
+//!
+//! # Parameter overhead
+//!
+//! Per attention head: `d + 2` parameters (`w_proj`: d, `alpha`: 1, `tau`: 1).
+//! Paper converges to α ≈ 2.2, τ ≈ 0.35.
+
+/// Numerical epsilon for division safety.
+const EPS: f32 = 1e-8;
+
+// ── Helper functions ──────────────────────────────────────────
+
+/// Standard sigmoid: σ(x) = 1 / (1 + exp(-x)).
+#[inline]
+pub fn sigmoid(x: f32) -> f32 {
+    1.0 / (1.0 + (-x).exp())
+}
+
+/// Z-normalize scores in-place: (x - μ) / (σ + ε).
+///
+/// Handles the degenerate case where all values are equal (σ → 0)
+/// by producing all-zero output.
+pub fn z_normalize(scores: &mut [f32]) {
+    if scores.is_empty() {
+        return;
+    }
+    let n = scores.len() as f32;
+    let mean = scores.iter().sum::<f32>() / n;
+    let variance = scores.iter().map(|&x| (x - mean) * (x - mean)).sum::<f32>() / n;
+    let std_dev = variance.sqrt() + EPS;
+    for s in scores.iter_mut() {
+        *s = (*s - mean) / std_dev;
+    }
+}
+
+/// Compute the energy gate vector g from energy scores.
+///
+/// Returns g[j] = σ(α · (ẽ[j] - τ)) where ẽ is the z-normalized energy.
+pub fn compute_energy_gate(energy: &[f32], alpha: f32, tau: f32) -> Vec<f32> {
+    let mut normalized = energy.to_vec();
+    z_normalize(&mut normalized);
+    normalized
+        .iter()
+        .map(|&e| sigmoid(alpha * (e - tau)))
+        .collect()
+}
+
+// ── EgaGate ───────────────────────────────────────────────────
+
+/// Energy-Gated Attention parameters per attention head.
+///
+/// Adds `d + 2` learnable parameters per head:
+/// - `w_proj` (d): energy projection vector
+/// - `alpha` (1): gate sharpness (paper converges to ~2.2)
+/// - `tau` (1): energy threshold (paper converges to ~0.35)
+#[derive(Clone, Debug)]
+pub struct EgaGate {
+    /// Learned energy projection vector [head_dim].
+    pub w_proj: Vec<f32>,
+    /// Gate sharpness parameter. Higher α → sharper gate transition.
+    pub alpha: f32,
+    /// Energy threshold. Tokens with energy above τ are preserved,
+    /// tokens below are suppressed.
+    pub tau: f32,
+}
+
+impl EgaGate {
+    /// Create a new EGA gate with default initialization.
+    ///
+    /// - `w_proj`: initialized to 1/d (uniform energy prior)
+    /// - `alpha`: 2.2 (paper converged value)
+    /// - `tau`: 0.35 (paper converged value)
+    pub fn new(head_dim: usize) -> Self {
+        let uniform = 1.0 / head_dim as f32;
+        Self {
+            w_proj: vec![uniform; head_dim],
+            alpha: 2.2,
+            tau: 0.35,
+        }
+    }
+
+    /// Total number of learnable parameters: head_dim + 2.
+    pub fn parameter_count(&self) -> usize {
+        self.w_proj.len() + 2
+    }
+
+    /// Compute energy scores for all positions: e = X · w_proj.
+    ///
+    /// - `x`: input embeddings, `[seq_len * dim]` row-major
+    /// - `seq_len`: number of token positions
+    /// - `dim`: embedding dimension (must equal `w_proj.len()`)
+    ///
+    /// Returns energy scores `[seq_len]`.
+    pub fn energy_scores(&self, x: &[f32], seq_len: usize, dim: usize) -> Vec<f32> {
+        assert_eq!(x.len(), seq_len * dim, "x must have seq_len × dim elements");
+        assert_eq!(dim, self.w_proj.len(), "dim must match w_proj length");
+
+        let mut energy = vec![0.0; seq_len];
+        for i in 0..seq_len {
+            let mut dot = 0.0f32;
+            for j in 0..dim {
+                dot += x[i * dim + j] * self.w_proj[j];
+            }
+            energy[i] = dot;
+        }
+        energy
+    }
+
+    /// Apply EGA gate to attention weights (in-place).
+    ///
+    /// - `attn_weights`: `[seq_len × seq_len]` row-major attention weight matrix.
+    ///   Row i contains the attention distribution from query i to all keys.
+    /// - `energy`: energy scores `[seq_len]` (one per key position)
+    /// - `seq_len`: sequence length
+    ///
+    /// After this call, `attn_weights` contains gated + renormalized weights:
+    /// Âᵢⱼ = Aᵢⱼ · gⱼ / Σₖ(Aᵢₖ · gₖ + ε)
+    pub fn gate_attention(&self, attn_weights: &mut [f32], energy: &[f32], seq_len: usize) {
+        assert_eq!(attn_weights.len(), seq_len * seq_len);
+        assert_eq!(energy.len(), seq_len);
+
+        let gate = compute_energy_gate(energy, self.alpha, self.tau);
+
+        for i in 0..seq_len {
+            let row_start = i * seq_len;
+            let mut row_sum = 0.0f32;
+
+            // Apply gate to each key position and compute sum
+            for j in 0..seq_len {
+                attn_weights[row_start + j] *= gate[j];
+                row_sum += attn_weights[row_start + j];
+            }
+
+            // Renormalize
+            let inv_sum = 1.0 / (row_sum + EPS);
+            for j in 0..seq_len {
+                attn_weights[row_start + j] *= inv_sum;
+            }
+        }
+    }
+}
+
+// ── Unit tests ────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sigmoid_bounds() {
+        for &x in &[-100.0, -10.0, -1.0, 0.0, 1.0, 10.0, 100.0] {
+            let s = sigmoid(x);
+            assert!((0.0..=1.0).contains(&s), "sigmoid({x}) = {s} out of [0,1]");
+        }
+    }
+
+    #[test]
+    fn sigmoid_symmetry() {
+        assert!((sigmoid(0.0) - 0.5).abs() < 1e-7);
+        assert!((sigmoid(2.0) + sigmoid(-2.0) - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn z_normalize_zero_variance() {
+        let mut scores = [3.0; 4];
+        z_normalize(&mut scores);
+        // All equal → should produce ~0 after normalization
+        for &s in &scores {
+            assert!(s.abs() < 1e-6, "expected ~0, got {s}");
+        }
+    }
+
+    #[test]
+    fn z_normalize_mean_zero() {
+        let mut scores = [1.0, 2.0, 3.0, 4.0, 5.0];
+        z_normalize(&mut scores);
+        let mean = scores.iter().sum::<f32>() / scores.len() as f32;
+        assert!(
+            mean.abs() < 1e-5,
+            "z-normalized mean should be ~0, got {mean}"
+        );
+    }
+
+    #[test]
+    fn ega_gate_parameter_count() {
+        let gate = EgaGate::new(64);
+        assert_eq!(gate.parameter_count(), 66); // 64 + 2
+    }
+
+    #[test]
+    fn ega_energy_scores_basic() {
+        let head_dim = 4;
+        let gate = EgaGate::new(head_dim);
+        // w_proj = [0.25; 4], x = [1,2,3,4] (seq_len=1, dim=4)
+        let x = vec![1.0, 2.0, 3.0, 4.0];
+        let energy = gate.energy_scores(&x, 1, head_dim);
+        assert_eq!(energy.len(), 1);
+        // dot product: 1*0.25 + 2*0.25 + 3*0.25 + 4*0.25 = 2.5
+        assert!((energy[0] - 2.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn ega_gate_attention_sums_to_one() {
+        let seq_len = 4;
+        let head_dim = 8;
+        let gate = EgaGate::new(head_dim);
+
+        // Uniform attention weights
+        let mut attn = vec![1.0 / seq_len as f32; seq_len * seq_len];
+        let energy = vec![1.0, 2.0, 3.0, 4.0];
+
+        gate.gate_attention(&mut attn, &energy, seq_len);
+
+        // Each row should sum to 1
+        for i in 0..seq_len {
+            let row_sum: f32 = attn[i * seq_len..(i + 1) * seq_len].iter().sum();
+            assert!((row_sum - 1.0).abs() < 1e-5, "row {i} sums to {row_sum}");
+        }
+    }
+}

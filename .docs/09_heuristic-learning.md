@@ -885,6 +885,57 @@ bandit.update(ctx, decision, reward);
 
 ---
 
+## Patch Regularization Principles
+
+The HL-ImageNet experiment revealed that code-as-model overfits by accumulating
+narrow, example-specific patches. This section documents the regularization
+criteria we use (or plan to use) to ensure compressed knowledge generalizes
+beyond training episodes.
+
+### Generalization Hierarchy
+
+Not all compression is equal. A key finding from Research 096 D1:
+
+> **Reranking generalizes better than verify rules.**
+
+In our architecture, `ScreeningPruner` reranks candidates (soft) while
+`AbsorbCompress` promotes arms to hard blocks (verify rules). This means:
+
+- `ScreeningPruner`-style patches (reranking) are the preferred generalization path
+- `AbsorbCompress`-style patches (hard blocks) are a last resort for arms with
+  overwhelming evidence of low reward
+- The existing `CompressConfig::min_visits` and `q_threshold` already enforce
+  conservative compression, keeping hard blocks rare
+
+Our bandit infrastructure naturally follows the reranking > verify rules pattern:
+the bandit explores and reranks arms continuously, while compression only fires
+when an arm has accumulated strong negative evidence.
+
+### Six Regularization Criteria (Research 096 D1)
+
+| Criterion | Description | Status |
+|-----------|-------------|--------|
+| **Support** | Min episode count before an arm is accepted | ✅ `CompressConfig::min_visits` |
+| **Precision** | Q-value threshold for compression | ✅ `CompressConfig::q_threshold` |
+| **Transfer** | Held-out split to test generalization | 🔜 Future |
+| **Complexity** | Branch/threshold budget to limit patch size | 🔜 Future |
+| **Locality** | `HotSwapPruner` isolation — patches don't leak | ✅ Already have |
+| **Cascade risk** | Compress phase handles stale arms | ✅ `AbsorbCompress` |
+
+Four of six criteria are already implemented. The remaining two (Transfer,
+Complexity) are documented for future instrumentation but are not part of this
+plan.
+
+### Cross-References
+
+- **Research 014** ([Learning Beyond Gradients](https://trinkle23897.github.io/learning-beyond-gradients/)):
+  establishes that inference-time search with bandit feedback can learn
+  beyond gradient-based optimization, motivating the HL approach
+- **HL-ImageNet experiment**: demonstrated overfitting in code-as-model
+  when patches accumulate without regularization, validating the need for
+  these criteria
+- **Research 096 D1**: formalized the six regularization criteria
+
 ## References
 
 - [Learning Beyond Gradients](https://trinkle23897.github.io/learning-beyond-gradients/) — Jiayi Weng, 2026
@@ -904,4 +955,6 @@ bandit.update(ctx, decision, reward);
 - Plan 071 T9: RubricPlayer (Bomber Arena)
 - Plan 071 T10: RubricFFTPlayer (FFT Tactics Arena)
 - Plan 112: SR²AM Configurator Bandit
+- Plan 135: Patch Regularization Principles
 - Research 14: HL Distillation
+- Research 96 D1: Six Regularization Criteria

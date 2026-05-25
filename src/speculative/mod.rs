@@ -26,6 +26,9 @@ pub mod diffusion_sampler;
 pub mod alpha;
 
 #[cfg(feature = "parallel_probe")]
+pub mod answer_extract;
+
+#[cfg(feature = "parallel_probe")]
 pub mod parallel_probe;
 
 // Re-exports — preserves existing import paths like `speculative::build_dd_tree`
@@ -162,5 +165,11 @@ pub use ppot::{
 // ── Parallel-Probe 2D Controller re-exports (Plan 133, feature: parallel_probe) ──
 #[cfg(feature = "parallel_probe")]
 pub use parallel_probe::{
-    BranchProbeState, ParallelProbeConfig, ParallelProbeController, ProbeDecision, ProbingMatrix,
+    BranchProbeState, ParallelProbeConfig, ParallelProbeController, ParallelProbeVerifier,
+    ProbeDecision, ProbingMatrix,
+};
+
+#[cfg(feature = "parallel_probe")]
+pub use answer_extract::{
+    AnswerExtractor, DiscreteActionExtractor, RegexAnswerExtractor, ThinkTokenExtractor,
 };

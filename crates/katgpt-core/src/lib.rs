@@ -60,3 +60,6 @@ pub use questbench::{
     CspDomain, MemoryTier, QuestBenchDecision, SyntheticCsp, UnderspecConfig, find_sufficient_set,
     generate_synthetic_csps, tier_from_score, underspecification_score,
 };
+
+#[cfg(feature = "tf_loop")]
+pub use types::{CacheStrategy, IterationMode, SubStepStrategy, TrainingFreeLoopConfig};

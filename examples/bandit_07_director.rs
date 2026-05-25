@@ -223,12 +223,10 @@ impl Director {
                 }
             }
             BanditStrategy::RandOptAdaptive {
-                density_threshold,
-                ..
+                density_threshold, ..
             } => {
                 if rng.uniform() < *density_threshold {
-                    (rng.uniform() * Encounter::ALL.len() as f32) as usize
-                        % Encounter::ALL.len()
+                    (rng.uniform() * Encounter::ALL.len() as f32) as usize % Encounter::ALL.len()
                 } else {
                     self.stats.best_arm()
                 }
@@ -242,6 +240,8 @@ impl Director {
                         .unwrap_or(std::cmp::Ordering::Equal)
                 })
                 .unwrap_or(0),
+            #[cfg(feature = "safe_bandit")]
+            BanditStrategy::SafePhased { .. } => self.stats.best_arm(),
         }
     }
 

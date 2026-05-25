@@ -958,6 +958,38 @@ pub fn cluster_map_from_embeddings(
 ///   logits = dot(proj_weight, K) // per-source score
 ///   weights = softmax(logits)    // routing weights
 ///   return residual + weighted_sum(weights, V)  // additive
+///
+/// ## Stability analysis (Plan 134, MGR paper §3.2 — arXiv:2605.23259)
+///
+/// The MGR paper proves that convex-combination residual updates (lerp gates)
+/// guarantee bounded activation norms: `x_{l+1} = (1-α)·x_l + α·f(x_l)`.
+///
+/// **Our routing is NOT a convex combination.** It is additive:
+/// `residual += Σ_i w_i · V_i`, where `w_i = softmax(...)` and `Σ w_i = 1`.
+/// Since softmax weights sum to 1 but are applied to arbitrary source vectors (not
+/// the residual itself), the MGR convex-combination stability guarantee does not
+/// formally apply.
+///
+/// Practical stability comes from two normalization mechanisms:
+/// - **RMSNorm** bounds the input scale to the routing logits, preventing
+///   exploding score magnitudes.
+/// - **Softmax normalization** ensures routing weights are non-negative and sum
+///   to 1, so the weighted sum cannot exceed the convex hull of source vectors.
+///
+/// Unlike MGR's convex lerp, norms *can* still grow layer-to-layer (each additive
+/// step contributes additional magnitude). However, empirical testing across 36+
+/// layers shows bounded growth: `‖x_L‖ ≤ 10 × ‖x_0‖` (see
+/// `proof_depth_route_norm_stability` test).
+///
+/// ## MGR Eq. 14 — lerp gate bias initialization
+///
+/// If a convex-combination lerp gate were ever added (e.g. for training), the
+/// MGR paper recommends initializing the gate bias as:
+///
+///   b_l = log(1 - 1/L)
+///
+/// where L is the total number of layers. For L=36, b_l ≈ -0.0285.
+/// This encourages near-identity routing at initialization.
 #[cfg(feature = "delta_routing")]
 #[allow(clippy::needless_range_loop)]
 #[inline(always)]
@@ -1489,13 +1521,13 @@ fn forward_coda<'a>(
         // Replaces: rmsnorm(x) + matmul_relu(hidden, w1, x)
         // hidden[i] = activation(dot(w1[i], O) * rstd)  — delayed RMS scale
         katgpt_core::coda::simd_matmul_rmsnorm_activation(
-            &mut ctx.hidden,                           // output
-            &layer_weights.mlp_w1,                     // weight
-            &ctx.x[..n],                               // input (O from kernel 1)
-            rstd,                                      // delayed RMS scale
+            &mut ctx.hidden,                         // output
+            &layer_weights.mlp_w1,                   // weight
+            &ctx.x[..n],                             // input (O from kernel 1)
+            rstd,                                    // delayed RMS scale
             katgpt_core::coda::GateActivation::Relu, // matches baseline matmul_relu
-            config.mlp_hidden,                         // rows
-            n,                                         // cols
+            config.mlp_hidden,                       // rows
+            n,                                       // cols
         );
 
         // CNA: modulate discovered circuit neurons (Plan 087)

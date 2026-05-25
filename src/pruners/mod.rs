@@ -49,6 +49,9 @@ pub mod review_metrics;
 #[cfg(feature = "bandit")]
 pub mod trial_log;
 
+#[cfg(feature = "safe_bandit")]
+pub mod safe_phased;
+
 #[cfg(feature = "sr2am_configurator")]
 pub mod configurator_bandit;
 
@@ -82,6 +85,9 @@ pub use regression::{GoldenTrace, RegressionResult, RegressionSuite, ReplayRewar
 
 #[cfg(feature = "bandit")]
 pub use trial_log::{SharedTrialLog, TrialLog, TrialRecord, TrialSummary};
+
+#[cfg(feature = "safe_bandit")]
+pub use safe_phased::SafePhasedState;
 
 #[cfg(feature = "sr2am_configurator")]
 pub use configurator_bandit::ConfiguratorBandit;

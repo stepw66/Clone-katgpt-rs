@@ -25,3 +25,4 @@ tiled_attention = []  # Tiled online-softmax flash attention for CPU SIMD (Plan 
 sr2am_configurator = []  # SR²AM Configurator Bandit — learned per-turn planning regulation (Plan 112, Research 076)
 data_gate = []  # Task-level data gating for self-play training stability (Plan 111, Research 075)
 questbench = []  # QuestBench underspecification scoring for modelless architecture (Plan 110, Research 008)
+tf_loop = ["lt2_looped"]  # Training-free loop wrapper — ODE-refined sub-stepping (Plan 136)

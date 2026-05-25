@@ -152,6 +152,17 @@ pub trait AbsorbCompress: ScreeningPruner {
 /// to hard blocks when compression thresholds are met.
 ///
 /// Compressed arms get `relevance() = 0.0` regardless of the inner pruner.
+///
+/// # Regularization Signal: `arm_visits` as Support
+///
+/// The per-arm `visits` count (accessible via [`arm_visits`](Self::arm_visits))
+/// implicitly tracks the **support** regularization criterion from Plan 135 / Research 096 D1.
+/// Each visit represents one episode where the arm was tried, so `arm_visits[arm]` is the
+/// episode count per arm — the exact signal needed for future regularization gates that
+/// reject arms with insufficient support.
+///
+/// No new fields or behavioral changes needed; the existing `arm_visits` field already
+/// provides this observability signal.
 pub struct AbsorbCompressLayer<P: ScreeningPruner> {
     inner: P,
     arm_reward_sums: Vec<f32>,

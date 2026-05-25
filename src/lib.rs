@@ -6,6 +6,8 @@ pub mod dash_attn;
 #[allow(clippy::too_many_lines)]
 #[allow(clippy::needless_range_loop)]
 pub mod dllm;
+#[cfg(feature = "ega_attn")]
+pub mod ega_attn;
 #[cfg(feature = "feedback")]
 pub mod feedback;
 #[cfg(feature = "gdn2_attention")]
@@ -35,6 +37,8 @@ pub mod spechop;
 #[cfg(feature = "spectral_quant")]
 pub mod spectralquant;
 pub mod speculative;
+#[cfg(feature = "stiff_anomaly")]
+pub mod stiff_anomaly;
 pub mod tokenizer;
 pub mod transformer;
 #[cfg(feature = "turboquant")]
@@ -54,3 +58,6 @@ static GLOBAL_ALLOC: alloc::TrackingAllocator = alloc::TrackingAllocator;
 
 #[cfg(feature = "validator")]
 pub mod validator;
+
+#[cfg(feature = "tf_loop")]
+pub mod tf_loop;

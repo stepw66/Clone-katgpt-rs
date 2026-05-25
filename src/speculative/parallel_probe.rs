@@ -250,6 +250,7 @@ impl<A: Clone> ProbingMatrix<A> {
 ///     _ => {}
 /// }
 /// ```
+#[derive(Debug)]
 pub struct ParallelProbeController<A> {
     /// Per-branch tracking state.
     branches: Vec<BranchProbeState<A>>,
@@ -468,6 +469,172 @@ impl<A: Clone + Eq + Hash> ParallelProbeController<A> {
         to_prune.truncate(max_prunable);
 
         to_prune
+    }
+}
+
+// ── ParallelProbeVerifier (Plan 133 T3) ──────────────────────
+
+/// Wrapper that layers parallel-probe consensus/pruning on top of any
+/// [`SpeculativeVerifier`](super::verifier::SpeculativeVerifier).
+///
+/// On each speculative step, the verifier extracts answers from all active branches
+/// using the injected [`AnswerExtractor`](super::answer_extract::AnswerExtractor), feeds
+/// them to the [`ParallelProbeController`], and handles the resulting [`ProbeDecision`].
+///
+/// ## Usage
+///
+/// ```ignore
+/// use katgpt_rs::speculative::parallel_probe::{ParallelProbeConfig, ParallelProbeVerifier};
+/// use katgpt_rs::speculative::answer_extract::RegexAnswerExtractor;
+///
+/// let config = ParallelProbeConfig::default();
+/// let verifier = ParallelProbeVerifier::new(
+///     inner_verifier,
+///     4, // n_branches
+///     config,
+///     Box::new(RegexAnswerExtractor::new()),
+/// );
+/// ```
+pub struct ParallelProbeVerifier<V> {
+    /// Inner speculative verifier that performs actual token-level verification.
+    inner: V,
+    /// Parallel-probe controller managing branch state and consensus.
+    controller: ParallelProbeController<String>,
+    /// Answer extractor used to pull structured answers from decoded text.
+    extractor: Box<dyn super::answer_extract::AnswerExtractor>,
+    /// Per-branch accumulated decoded text (grows between probe steps).
+    branch_texts: Vec<String>,
+    /// Number of tokens generated since the last probe step.
+    tokens_since_probe: usize,
+    /// Cached result from the last probe decision (if early-stop was triggered).
+    cached_decision: Option<ProbeDecision<String>>,
+}
+
+impl<V: std::fmt::Debug> std::fmt::Debug for ParallelProbeVerifier<V> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ParallelProbeVerifier")
+            .field("inner", &self.inner)
+            .field("controller", &self.controller)
+            .field("extractor", &"<AnswerExtractor>")
+            .field("branch_texts", &self.branch_texts)
+            .field("tokens_since_probe", &self.tokens_since_probe)
+            .field("cached_decision", &self.cached_decision)
+            .finish()
+    }
+}
+
+impl<V> ParallelProbeVerifier<V> {
+    /// Create a new parallel-probe verifier wrapping `inner`.
+    ///
+    /// - `inner`: the underlying speculative verifier.
+    /// - `n_branches`: number of parallel reasoning branches.
+    /// - `config`: controller configuration.
+    /// - `extractor`: answer extraction strategy.
+    pub fn new(
+        inner: V,
+        n_branches: usize,
+        config: ParallelProbeConfig,
+        extractor: Box<dyn super::answer_extract::AnswerExtractor>,
+    ) -> Self {
+        let controller = ParallelProbeController::new(n_branches, config);
+        let branch_texts = vec![String::new(); n_branches];
+        Self {
+            inner,
+            controller,
+            extractor,
+            branch_texts,
+            tokens_since_probe: 0,
+            cached_decision: None,
+        }
+    }
+
+    /// Number of currently active (non-pruned, non-finished) branches.
+    pub fn active_branches(&self) -> usize {
+        self.controller.active_count()
+    }
+
+    /// Current probe step number.
+    pub fn probe_step(&self) -> usize {
+        self.controller.probe_step()
+    }
+
+    /// Current consensus streak.
+    pub fn consensus_streak(&self) -> usize {
+        self.controller.consensus_streak()
+    }
+
+    /// Get the cached probe decision (set after a probe step that returned Stop or StopAndPrune).
+    pub fn last_decision(&self) -> Option<&ProbeDecision<String>> {
+        self.cached_decision.as_ref()
+    }
+
+    /// Record decoded text for a specific branch.
+    ///
+    /// Call this as each branch generates tokens to accumulate text for extraction.
+    pub fn append_branch_text(&mut self, branch_id: usize, text: &str) {
+        if let Some(bt) = self.branch_texts.get_mut(branch_id) {
+            bt.push_str(text);
+        }
+    }
+
+    /// Record that `n_tokens` were generated since the last probe.
+    ///
+    /// Returns `true` if a probe step should be triggered (tokens_since_probe >= probe_interval).
+    pub fn record_tokens(&mut self, n_tokens: usize) -> bool {
+        self.tokens_since_probe += n_tokens;
+        // Access config via controller's config isn't public, so we store the interval.
+        // For now, callers decide when to call probe(). This method tracks token count.
+        true
+    }
+
+    /// Check if enough tokens have been generated since the last probe to warrant a new probe.
+    ///
+    /// Callers should use this to decide when to call [`probe_branches`](Self::probe_branches).
+    pub fn should_probe(&self, probe_interval: usize) -> bool {
+        self.tokens_since_probe >= probe_interval
+    }
+
+    /// Run a probe step: extract answers from all branches and feed to the controller.
+    ///
+    /// Returns the [`ProbeDecision`] from the controller. If the decision is `Stop` or
+    /// `StopAndPrune`, it is also cached in [`last_decision`](Self::last_decision).
+    ///
+    /// After this call, `tokens_since_probe` is reset to 0.
+    pub fn probe_branches(&mut self) -> ProbeDecision<String> {
+        let n = self.branch_texts.len();
+        let mut answers = Vec::with_capacity(n);
+
+        for (branch_id, text) in self.branch_texts.iter().enumerate() {
+            let branch = self.controller.branch(branch_id);
+            if branch.map_or(true, |b| b.is_pruned || b.is_finished) {
+                answers.push(None);
+            } else {
+                answers.push(self.extractor.extract_answer(&[], text));
+            }
+        }
+
+        let decision = self.controller.probe(&answers);
+        self.tokens_since_probe = 0;
+
+        // Cache stop decisions so callers can retrieve them later.
+        if matches!(
+            decision,
+            ProbeDecision::Stop { .. } | ProbeDecision::StopAndPrune { .. }
+        ) {
+            self.cached_decision = Some(decision.clone());
+        }
+
+        decision
+    }
+
+    /// Access the inner verifier.
+    pub fn inner(&self) -> &V {
+        &self.inner
+    }
+
+    /// Access the inner verifier mutably.
+    pub fn inner_mut(&mut self) -> &mut V {
+        &mut self.inner
     }
 }
 

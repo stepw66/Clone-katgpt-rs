@@ -329,3 +329,85 @@ fn test_block_boundary_routing_fires() {
 
     println!("✅ Block boundary routing fires: 8 positions, all finite and distinct");
 }
+
+#[test]
+fn proof_depth_route_norm_stability() {
+    // GOAT proof (Plan 134): activation norms don't grow unboundedly
+    // through 36+ layers with depth_route enabled.
+    //
+    // MGR paper §3.2 (arXiv:2605.23259) proves bounded norms for convex-combination
+    // (lerp gate) routing. Our routing is additive (residual += weighted_sum), so the
+    // formal guarantee doesn't apply. This test checks empirical stability instead.
+    //
+    // Expected: ||x_L|| <= 10 * ||x_0|| for some reasonable constant C.
+    // This is an empirical stability check, not a formal proof.
+
+    let n_embd = 16;
+    let n_layers = 36;
+    let n_sources = 2;
+    let mut rng = Rng::new(42);
+
+    let norm = vec![1.0f32; n_embd];
+
+    // Start with a random initial residual ("x_0")
+    let initial: Vec<f32> = (0..n_embd).map(|_| rng.normal()).collect();
+    let mut residual = initial.clone();
+
+    let initial_norm: f32 = residual.iter().map(|x| x * x).sum::<f32>().sqrt();
+    println!("  Initial norm (L=0): {initial_norm:.6}");
+
+    let mut norms: Vec<f32> = vec![initial_norm];
+
+    // Simulate 36 additive routing steps (one per layer)
+    for layer in 0..n_layers {
+        // Generate random source deltas and query for this layer
+        let deltas: Vec<Vec<f32>> = (0..n_sources)
+            .map(|_| random_delta(n_embd, &mut rng))
+            .collect();
+        let source_refs: Vec<&[f32]> = deltas.iter().map(|d| d.as_slice()).collect();
+        let query = random_query(n_embd, &mut rng);
+
+        // Compute routing weights
+        let weights = depth_route_weights(&source_refs, &query, &norm, n_embd);
+
+        // Apply: residual += weighted_sum(weights, deltas)
+        for d in 0..n_embd {
+            let mut weighted = 0.0f32;
+            for (i, src) in source_refs.iter().enumerate() {
+                weighted += weights[i] * src[d];
+            }
+            residual[d] += weighted;
+        }
+
+        let norm_l: f32 = residual.iter().map(|x| x * x).sum::<f32>().sqrt();
+        norms.push(norm_l);
+
+        // Verify no NaN/Inf at any layer
+        assert!(
+            norm_l.is_finite(),
+            "Layer {layer}: norm is not finite ({norm_l})"
+        );
+    }
+
+    let final_norm = norms[n_layers];
+    let growth_ratio = final_norm / initial_norm;
+
+    println!("  Final norm (L={n_layers}): {final_norm:.6}");
+    println!("  Growth ratio: {growth_ratio:.6}x");
+    println!(
+        "  Max norm across layers: {}",
+        norms.iter().cloned().fold(f32::NEG_INFINITY, f32::max)
+    );
+    println!(
+        "  Min norm across layers: {}",
+        norms.iter().cloned().fold(f32::INFINITY, f32::min)
+    );
+
+    // Core assertion: norm grows at most 10x from initial
+    assert!(
+        growth_ratio <= 10.0,
+        "Growth ratio {growth_ratio:.6} exceeds 10x threshold (norm {initial_norm:.6} -> {final_norm:.6})"
+    );
+
+    println!("✅ Norm stability: {growth_ratio:.6}x growth over {n_layers} layers (≤ 10x)");
+}
