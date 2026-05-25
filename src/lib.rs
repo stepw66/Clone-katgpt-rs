@@ -30,6 +30,8 @@ pub mod rt_turbo;
 pub mod simd;
 #[cfg(feature = "sp_kv")]
 pub mod sp_kv;
+#[cfg(feature = "spechop")]
+pub mod spechop;
 #[cfg(feature = "spectral_quant")]
 pub mod spectralquant;
 pub mod speculative;
