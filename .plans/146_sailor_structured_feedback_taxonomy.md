@@ -32,7 +32,7 @@ This plan captures the two actionable distillations as future enhancement tasks.
 
 ## Task 1: Structured Feedback Enum for Exploration Outcomes (DEFERRED)
 
-**Scope:** Add a `ExplorationOutcome` enum to SR²AM's feedback classification
+- [ ] Add `ExplorationOutcome` enum to SR²AM feedback classification
 
 ```rust
 /// Structured exploration outcome — inspired by Sailor's feedback taxonomy
@@ -74,16 +74,7 @@ pub enum ExplorationOutcome {
 
 ## Task 2: Cross-Reference GOAT Pillar 2 Academic Validation (DOCUMENTATION)
 
-**Scope:** Add external validation reference to GOAT Pillar 2 documentation
-
-**Action:** Update `.docs/27_mmo_goat_pillars_decision_matrix.md` to note that Sailor (UCSB 2026) independently validated the three-phase pipeline pattern, strengthening Pillar 2's evidence:
-
-Under Pillar 2 row, add:
-```
-**External validation:** Sailor (UCSB 2026) proves the same three-phase pattern
-(static rules → exploration → concrete validation) discovers 379 real vulnerabilities
-at 6.8M LOC scale. Our WASM validators = Phase 1, Arena = Phase 3.
-```
+- [ ] Update `.docs/27_mmo_goat_pillars_decision_matrix.md` with Sailor external validation reference
 
 **This is a documentation-only change.** No code impact.
 

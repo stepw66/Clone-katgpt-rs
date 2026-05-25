@@ -39,7 +39,7 @@ fn edit_budget_at_step()                Game-specific prompt templates
 
 ## Tasks
 
-### T1: Generic Types & Traits (katgpt-rs, `skill_opt` feature)
+- [ ] **T1: Generic Types & Traits (katgpt-rs, `skill_opt` feature)**
 
 **Location:** `src/skill_opt/` (new module)
 
@@ -163,7 +163,7 @@ skill_opt = []
 
 ---
 
-### T2: Edit Application Engine (katgpt-rs, `skill_opt` feature)
+- [ ] **T2: Edit Application Engine (katgpt-rs, `skill_opt` feature)**
 
 **Location:** `src/skill_opt/apply.rs`
 
@@ -199,7 +199,7 @@ pub fn apply_edits(skill: &str, edits: &[SkillEdit], budget: usize) -> ApplyResu
 
 ---
 
-### T3: Rejected-Edit Buffer (katgpt-rs, `skill_opt` feature)
+- [ ] **T3: Rejected-Edit Buffer (katgpt-rs, `skill_opt` feature)**
 
 **Location:** `src/skill_opt/buffer.rs`
 
@@ -227,7 +227,7 @@ impl RejectedEditBuffer {
 
 ---
 
-### T4: Bomber Skill Optimizer (riir-ai, private) — SUPER GOAT 🔒
+- [ ] **T4: Bomber Skill Optimizer (riir-ai, private) — SUPER GOAT 🔒**
 
 **Location:** `crates/riir-games/src/bomber/skill_opt.rs` (new)
 
@@ -304,7 +304,7 @@ test_score = run_arena(bomber_ai, best_rules, seed_test)
 
 ---
 
-### T5: Slow/Meta Update Infrastructure (riir-ai, private) 🔒
+- [ ] **T5: Slow/Meta Update Infrastructure (riir-ai, private) 🔒**
 
 **Location:** `crates/riir-games/src/skill_opt/` (new)
 
@@ -341,7 +341,7 @@ fn compute_epoch_comparison(
 
 ---
 
-### T6: Skill Optimization Binary (riir-ai, private) 🔒
+- [ ] **T6: Skill Optimization Binary (riir-ai, private) 🔒**
 
 **Location:** `crates/riir-games/examples/bomber_skill_opt.rs`
 

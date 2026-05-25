@@ -30,7 +30,7 @@ Extract three search primitives from AlphaProof Nexus: (1) **Plackett-Luce Elo r
 
 ### Phase 1: Plackett-Luce Ranking Module (T1–T4)
 
-**T1: `PlackettLuceRating` struct**
+- [ ] **T1: `PlackettLuceRating` struct**
 
 ```rust
 /// Plackett-Luce model for ranking N candidates from relative orderings.
@@ -49,7 +49,7 @@ Key methods:
 - `thompson_sample(candidates: &[u64]) -> u64`: Sample from posterior for exploration
 - `top_k(k: usize) -> Vec<u64>`: Filter to top-K by Elo
 
-**T2: Gibbs sampler for posterior inference**
+- [ ] **T2: Gibbs sampler for posterior inference**
 
 Hierarchical prior: `λ_s | r_s ~ Gamma(1, r_s)`, `r_s ~ Gamma(1, 1)`
 
@@ -66,7 +66,7 @@ fn gibbs_update(
 }
 ```
 
-**T3: Integration with DDTree**
+- [ ] **T3: Integration with DDTree**
 
 Add optional Elo scores to DDTree frontier nodes:
 
@@ -80,7 +80,7 @@ pub struct DDTreeNode {
 }
 ```
 
-**T4: Multi-candidate rating for DDTree**
+- [ ] **T4: Multi-candidate rating for DDTree**
 
 When DDTree explores multiple partial solutions, rate them jointly:
 
@@ -100,7 +100,7 @@ fn rate_ddtree_frontier(
 
 ### Phase 2: P-UCB Sampling for SR²AM (T5–T7)
 
-**T5: P-UCB selector**
+- [ ] **T5: P-UCB selector**
 
 ```rust
 pub struct PUCBSelector {
@@ -118,7 +118,7 @@ impl PUCBSelector {
 }
 ```
 
-**T6: Integration with SR²AM ConfiguratorBandit**
+- [ ] **T6: Integration with SR²AM ConfiguratorBandit**
 
 ```rust
 #[cfg(feature = "nexus_elo")]
@@ -130,7 +130,7 @@ impl ConfiguratorBandit {
 }
 ```
 
-**T7: Adaptive exploration constant**
+- [ ] **T7: Adaptive exploration constant**
 
 ```rust
 // Start with c=0.2, anneal based on solve rate:
@@ -145,7 +145,7 @@ fn adaptive_c(solve_rate: f64, base_c: f64) -> f64 {
 
 ### Phase 3: Global Goal Cache for DDTree (T8–T10)
 
-**T8: `GoalCache` struct with deep hashing**
+- [ ] **T8: `GoalCache` struct with deep hashing**
 
 ```rust
 pub struct GoalCache {
@@ -166,7 +166,7 @@ pub enum GoalResult {
 }
 ```
 
-**T9: Deep hash computation**
+- [ ] **T9: Deep hash computation**
 
 ```rust
 fn goal_hash(state: &[u8], target: &[u8]) -> u64 {
@@ -175,7 +175,7 @@ fn goal_hash(state: &[u8], target: &[u8]) -> u64 {
 }
 ```
 
-**T10: Integration with DDTree exploration**
+- [ ] **T10: Integration with DDTree exploration**
 
 ```rust
 #[cfg(feature = "nexus_elo")]
@@ -199,7 +199,7 @@ impl DDTree {
 > ⚠️ This phase is the selling point. Feature-gate it separately.
 > If Percepta (Plan 064) is not active, this phase is a no-op.
 
-**T11: `EvolveBlock` markers for Percepta**
+- [ ] **T11: `EvolveBlock` markers for Percepta**
 
 ```rust
 #[cfg(all(feature = "nexus_elo", feature = "percepta"))]
@@ -216,7 +216,7 @@ pub enum MutationKind {
 }
 ```
 
-**T12: Population database for proof sketches**
+- [ ] **T12: Population database for proof sketches**
 
 ```rust
 #[cfg(all(feature = "nexus_elo", feature = "percepta"))]
@@ -240,7 +240,7 @@ impl ProofSketchPopulation {
 }
 ```
 
-**T13: Constrained mutation engine**
+- [ ] **T13: Constrained mutation engine**
 
 ```rust
 #[cfg(all(feature = "nexus_elo", feature = "percepta"))]
