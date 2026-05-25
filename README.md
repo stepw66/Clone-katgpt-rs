@@ -1295,6 +1295,70 @@ High-uncertainty states cap `draft_lookahead` at 2 (SR²AM finding: web tasks be
 
 📖 See [`.plans/112_sr2am_configurator_bandit.md`](.plans/112_sr2am_configurator_bandit.md) for full plan.
 
+## 🚀 SpecHop — Continuous Multi-Hop Speculation Pipeline (Plan 131)
+
+Hop-level speculative execution for multi-step tool-use agents. Based on [arXiv:2605.21965](https://arxiv.org/pdf/2605.21965) — continuous speculation at trajectory granularity (not token level).
+
+### How It Works
+
+```text
+Agent trajectory:  [hop₁] → [hop₂] → [hop₃] → [hop₄]
+                        ↘ spec    ↘ spec    ↘ spec
+                     Thread k=1   k=2       k=3       k=4
+                        ↓          ↓          ↓          ↓
+                  Verify earliest pending → Commit ✓ or Rollback ✗
+```
+
+The pipeline maintains **k speculative threads** that predict tool-call observations ahead of actual tool responses. When the target tool returns, a verifier checks equivalence → commit correct branch, rollback incorrect ones.
+
+### Theoretical Cost Model
+
+| Parameter | Meaning | Formula |
+|-----------|---------|---------|
+| α | Speculator latency ratio | `E[T_spec] / E[T_target]` |
+| β | Decode-to-tool ratio | `E[T_seg] / E[T_target]` |
+| p | Speculator hit rate | Fraction of correct predictions |
+| k* | Optimal threads | `⌈(1+β)/(α+β)⌉` (Theorem 2) |
+| RelLat* | Oracle latency | `1 − p(1−α)/(1+β)` (Theorem 3) |
+
+Example: α=0.2, β=0.15, p=0.7 → k*=4, RelLat*=0.513 (1.95× speedup).
+
+### SR²AM Integration
+
+`PlanningDecision::SpecHop { k }` arm added to the configurator bandit (Plan 112). Auto-activated when:
+- α < 0.3 (fast speculator)
+- β < 0.5 (tool-bound workload)
+- `reward = latency_reduction / α > 1.0`
+
+### Hop-Level DDTree
+
+`build_hop_dd_tree()` extends the token-level DDTree concept to hop granularity. Each node is an (action, observation) pair scored by speculator confidence. `verify_hop_tree()` wires `ObservationVerifier` for branch accept/reject.
+
+### Module Structure
+
+```text
+src/spechop/
+├── mod.rs              # Module index, re-exports, feature gate
+├── types.rs            # SpecHopConfig, HopObservation, SpecOutcome, HopState
+├── cost_model.rs       # α/β/p → k*, RelLat, starvation probability
+├── verifier.rs         # ObservationVerifier trait + RuleBasedVerifier
+├── speculator.rs       # HopSpeculator trait + CacheSpeculator + BanditSpeculator
+├── window.rs           # SpecWindow k-bounded thread manager
+├── pipeline.rs         # SpecHopPipeline continuous loop (Algorithm 1)
+└── hop_tree.rs         # Hop-level DDTree integration
+```
+
+### Examples
+
+```bash
+cargo run --example spechop_01_pipeline --features spechop   # 4-hop continuous speculation
+cargo run --example spechop_02_cost_model --features spechop  # α/β/p → k* and RelLat
+```
+
+🔧 Feature flag: `spechop = ["bandit"]` (**opt-in** — requires GOAT proof before default-on promotion)
+
+📖 See [`.plans/131_spechop_continuous_spec_pipeline.md`](.plans/131_spechop_continuous_spec_pipeline.md) for full plan (T1–T32, T40–T41 complete).
+
 ## 🌊 GFlowNet Modelless Distillation (Plan 052)
 
 Distills the GFlowNet shortest-path theorem — **minimize flow = shortest paths** — into the existing ScreeningPruner + BanditPruner + DDTree stack **without any neural network training**.
@@ -1879,6 +1943,7 @@ cargo clippy --all-targets --all-features --quiet
 | `subterranean` | Subterranean procedure compilation — user-defined token-rewriting procedures compiled to zero-cost native code (Plan 110, **default-on**). Requires `bandit` |
 | `sr2am_configurator` | SR²AM Configurator Bandit — per-turn planning regulation via UCB1 over PlanNew/PlanExtend/PlanSkip arms, entropy-aware horizon truncation (Research 76, Plan 112, 29 tests, **default-on**). Requires `bandit` |
 | `data_gate` | Data Gate — self-play stability via task-level filtering before solver, ε-Bernoulli relaxation, execution-based gating (Research 75, Plan 111, **default-on**). Requires `bandit` |
+| `spechop` | SpecHop — continuous multi-hop speculation pipeline for tool-use agents. Hop-level DDTree, ObservationVerifier, k-bounded window, SR²AM `SpecHop { k }` arm. 170+ tests (Plan 131, **opt-in**). Requires `bandit` |
 | `event_log` | Event-sourced game traces with fork-and-diff — append-only log, deterministic replay, structural diff, eval cache. Game wrappers: `BomberEventLog`, `GoEventLog` (Plan 124, GOAT 22/22 ✅) |
 | `full` | Enable all features (excludes `stepcode`, `sp_kv`) |
 
@@ -2183,6 +2248,7 @@ Every feature traced from research paper to implementation to benchmark. Separat
 | **Subterranean** (`subterranean`) | Plan 110 | User-defined token-rewriting procedures compiled to zero-cost native code. Default-on. Requires `bandit`. | Interpretation overhead for custom procedures |
 | **SR²AM Configurator** (`sr2am_configurator`) | Research 76, Plan 112 | Per-turn planning regulation via UCB1 over PlanNew/PlanExtend/PlanSkip arms, entropy-aware horizon truncation. 29 tests. Default-on. Requires `bandit`. | Fixed planning horizon |
 | **Data Gate** (`data_gate`) | Research 75, Plan 111 | Self-play stability via task-level filtering before solver, ε-Bernoulli relaxation, execution-based gating. Default-on. Requires `bandit`. | No task-level filtering; unstable self-play |
+| **SpecHop** (`spechop`) | arXiv:2605.21965, Plan 131 | Hop-level speculation for multi-step agents. α/β/p cost model, k-bounded window, RuleBasedVerifier, HopDDTree, SR²AM `SpecHop { k }` arm. 170+ tests. Opt-in. Requires `bandit`. | Token-level-only speculation; no hop-level prediction |
 
 ### 🔒 Gated Features (Opt-In, Proven)
 
