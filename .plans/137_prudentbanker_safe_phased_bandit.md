@@ -4,7 +4,7 @@
 > **Paper:** [arXiv:2605.23351](https://arxiv.org/abs/2605.23351) — Hu, Cai, Vlatakis-Gkaragkounis (2026)
 > **Depends:** Plan 030 (Multi-Armed Bandit ✅), Plan 049 (G-Zero ✅)
 > **Feature Gate:** `safe_bandit = ["bandit"]` (opt-in, NOT default-on)
-> **Status:** 🔲 Not started
+> **Status:** ✅ COMPLETE (T1-T18 done, GOAT 5/5)
 > **GOAT Pillar:** ❌ Not a pillar — secondary bet, enhances all 4 pillars via safer bandit exploration. See [MMO GOAT Pillars Decision Matrix](../../riir-ai/.docs/27_mmo_goat_pillars_decision_matrix.md).
 > **Domain:** `katgpt-rs` — generic safe-phased bandit strategy. Game-specific delay configs and per-game ξ tuning stay in `riir-ai`.
 
@@ -31,7 +31,7 @@ This is the **generic** (MIT) implementation. Game-specific delay configs (per-g
 
 ### Phase 1: Core Types (Modelless)
 
-- [ ] T1: Add `BanditStrategy::SafePhased` variant to `src/pruners/bandit.rs`
+- [x] T1: Add `BanditStrategy::SafePhased` variant to `src/pruners/bandit.rs`
   ```rust
   /// Phased aggression with safe baseline mixture (PrudentBanker-inspired).
   ///
@@ -48,7 +48,7 @@ This is the **generic** (MIT) implementation. Game-specific delay configs (per-g
       estimated_delay: u32,
   },
   ```
-- [ ] T2: Add `SafePhasedState` struct
+- [x] T2: Add `SafePhasedState` struct
   ```rust
   /// Internal state for SafePhased strategy.
   struct SafePhasedState {
@@ -66,37 +66,37 @@ This is the **generic** (MIT) implementation. Game-specific delay configs (per-g
       delay_slack: f32,
   }
   ```
-- [ ] T3: Implement `SafePhasedState::new()` and `SafePhasedState::compute_alpha()`
+- [x] T3: Implement `SafePhasedState::new()` and `SafePhasedState::compute_alpha()`
   - α₁ = min(1/R̂, 1), αₖ = min(2ᵏ⁻¹/R̂, 1)
   - R̂ = C · (√T + √(D̂ₛ · ln(D̂ₛ + 1))) where C ≈ 10√(C₁·C₂)
-- [ ] T4: Implement delay-slack computation
+- [x] T4: Implement delay-slack computation
   - `ξ(D̂ₛ) = (√(8·D̂ₛ + 1) - 1) / δ`
   - This is the key innovation from the paper — the "hidden debt buffer"
-- [ ] T5: Add `delay_credits: Vec<f32>` field to `BanditStats`
+- [x] T5: Add `delay_credits: Vec<f32>` field to `BanditStats`
   - Tracks pending (unobserved) feedback per round
   - When feedback arrives, credit is released; when missing, credit remains pending
   - Simple implementation: track count of pending observations
 
 ### Phase 2: Arm Selection with Safe Mixture (Modelless)
 
-- [ ] T6: Implement `select_arm_safe_phased()` in `BanditStats`
+- [x] T6: Implement `select_arm_safe_phased()` in `BanditStats`
   - Compute active arm via inner UCB1 (or any sub-strategy)
   - Mix: `if rng.f32() < alpha → active_arm, else → baseline_arm`
   - This is the core safe-mixture mechanism from PrudentBanker
-- [ ] T7: Wire `SafePhased` into `BanditStats::select_arm()` match arm
+- [x] T7: Wire `SafePhased` into `BanditStats::select_arm()` match arm
   - Call `select_arm_safe_phased()` when strategy is `SafePhased`
   - Pass through to existing arm selection for all other strategies
-- [ ] T8: Implement phase-gap accumulation in `BanditPruner::update()`
+- [x] T8: Implement phase-gap accumulation in `BanditPruner::update()`
   - When updating with reward, accumulate phase gap:
     `Δₖ(t) += reward(baseline_arm) - reward(selected_arm)` on arrived data
   - Compare against threshold: `2·R̂ + ξ(D̂ₛ)`
-- [ ] T9: Implement soft restart (phase transition)
+- [x] T9: Implement soft restart (phase transition)
   - If phase gap exceeds threshold AND α < 1:
     - Increment phase k → k+1
     - Recompute αₖ = min(2ᵏ⁻¹/R̂, 1)
     - Reset phase gap accumulator
     - Reset arm Q-values to uniform (soft restart)
-- [ ] T10: Implement hard restart (delay adaptation)
+- [x] T10: Implement hard restart (delay adaptation)
   - If accumulated delay exceeds current D̂ₛ estimate:
     - Double delay estimate: D̂ₛ → 2·D̂ₛ
     - Full reset: phase → 1, α → 1/R̂(new D̂ₛ)
@@ -104,37 +104,37 @@ This is the **generic** (MIT) implementation. Game-specific delay configs (per-g
 
 ### Phase 3: GOAT Proof (Modelless)
 
-- [ ] T11: `safe_phased_01_baseline_regret_bounded` test
+- [x] T11: `safe_phased_01_baseline_regret_bounded` test
   - Create 5-arm bandit with known safe baseline
   - Run 10000 episodes with SafePhased strategy
   - Assert: cumulative regret vs baseline ≤ O(log D) bound
   - Compare: UCB1 baseline regret grows unboundedly
-- [ ] T12: `safe_phased_02_worst_case_competitive` test
+- [x] T12: `safe_phased_02_worst_case_competitive` test
   - Same setup, measure worst-case regret vs optimal arm
   - Assert: SafePhased worst-case within 2× of UCB1 worst-case
   - This validates the Õ(√T) guarantee
-- [ ] T13: `safe_phased_03_no_delay_no_cost` test
+- [x] T13: `safe_phased_03_no_delay_no_cost` test
   - Run with D̂ₛ = 0 (no estimated delay)
   - Assert: SafePhased performance ≈ UCB1 performance (within 10%)
   - Validates the "no extra fees" claim
-- [ ] T14: `safe_phased_04_delay_robustness` test
+- [x] T14: `safe_phased_04_delay_robustness` test
   - Simulate delayed feedback (hold rewards for N rounds)
   - Assert: SafePhased with correct ξ(D) doesn't oscillate α
   - Compare: SafePhased without ξ(D) oscillates aggressively
-- [ ] T15: `safe_phased_05_phase_gap_correctness` test
+- [x] T15: `safe_phased_05_phase_gap_correctness` test
   - Verify phase gap accumulator matches hand-computed values
   - Verify soft restart triggers at correct threshold
   - Verify α sequence: 1/R̂, 2/R̂, 4/R̂, ..., 1
 
 ### Phase 4: Integration (Modelless)
 
-- [ ] T16: Add `safe_bandit` feature gate in `Cargo.toml`
+- [x] T16: Add `safe_bandit` feature gate in `Cargo.toml`
   - `safe_bandit = ["bandit"]`
   - All `SafePhased` code guarded by `#[cfg(feature = "safe_bandit")]`
-- [ ] T17: Add `BanditStrategy::SafePhased` to `BanditSession` orchestrator
+- [x] T17: Add `BanditStrategy::SafePhased` to `BanditSession` orchestrator
   - Handle phased aggression in episode loop
   - Track phase-gap accumulation across episodes
-- [ ] T18: Add example `bandit_08_safe_phased.rs`
+- [x] T18: Add example `bandit_08_safe_phased.rs`
   - Demo: 5-arm bandit, arm 0 is safe baseline (mean=0.5), arm 3 is best (mean=0.8)
   - Show α escalation over time
   - Show baseline regret stays bounded
@@ -149,11 +149,11 @@ This is the **generic** (MIT) implementation. Game-specific delay configs (per-g
 
 | Proof ID | What | Threshold | Status |
 |----------|------|-----------|--------|
-| G1 | Baseline regret bounded | ≤ C · log(T) for all T | 🔲 |
-| G2 | Worst-case competitive | ≤ 2× UCB1 regret | 🔲 |
-| G3 | No delay = no cost | ≤ 1.1× UCB1 when D̂=0 | 🔲 |
-| G4 | Delay robustness | α variance ≤ 50% of naive | 🔲 |
-| G5 | Phase gap correctness | Exact match on synthetic | 🔲 |
+| G1 | Baseline regret bounded | ≤ C · log(T) for all T | ✅ |
+| G2 | Worst-case competitive | ≤ 2× UCB1 regret | ✅ |
+| G3 | No delay = no cost | ≤ 1.1× UCB1 when D̂=0 | ✅ |
+| G4 | Delay robustness | α variance ≤ 50% of naive | ✅ |
+| G5 | Phase gap correctness | Exact match on synthetic | ✅ |
 
 ---
 
