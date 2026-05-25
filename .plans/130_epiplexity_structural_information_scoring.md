@@ -111,7 +111,7 @@ From epiplexity paper (arXiv:2601.03220): Structural information extractable by 
 - [x] Benchmark: `.benchmarks/041_epiplexity_structural_information_goat.md`
 - [x] Clippy pass: `cargo clippy --fix --allow-dirty` — zero warnings
 - [x] All tests pass: `cargo test --features epiplexity_scoring --test test_130_epiplexity_goat` — 48/48
-- [ ] Update `README.md` — add Epiplexity section (deferred — batch with next README update)
+- [x] Update `README.md` — add Epiplexity section (feature flags table entry)
 - [ ] Update `.docs/` if applicable (N/A)
 
 ## Architecture

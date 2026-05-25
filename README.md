@@ -1920,6 +1920,7 @@ cargo clippy --all-targets --all-features --quiet
 | `replaid_schedules` | RePlaid variance-minimized adaptive schedules — experimental, off by default (Plan 078) |
 | `elf_sde` | ELF SDE noise injection + logit-normal schedule — GOAT proved: 10-22× diversity (Plan 079, default-on) |
 | `cna_steering` | CNA Contrastive Neuron Attribution — sparse MLP circuit discovery + runtime modulation. GOAT proved (Bench 015). ~10µs/pair discovery, 163ns K=50 modulation, quality cosine 1.0 (Plan 087) |
+| `epiplexity_scoring` | Epiplexity structural information scoring — prequential coding estimator, `EpiplexityScreeningPruner<P>` wrapper, `FactorizationScorer` for game traces. 48 tests (Plan 130, **opt-in**) |
 | `tes_loop` | SimpleTES evaluation-driven scaling — RPUCG graph-based bandit + trajectory pruning + credit bridge. GOAT proved 8/8 (Bench 016+017). `BanditStrategy::Rpucg`, `SimpleTesLoop<E>`, `TrajectoryPruner`, `TrajectoryCredit` (Plan 086, **default-on**) |
 | `deep_manifold` | Deep Manifold fixed-point residual scoring — L2/KL residual traits + blended scorer (Research 51, Plan 085). **GOAT proved 6/6**, default-on |
 | `federation` | Deep Manifold federated boundary alignment — symmetric KL coupling between domain experts (Research 51, Plan 085). **GOAT proved 6/6**, default-on. Requires `bandit` |
