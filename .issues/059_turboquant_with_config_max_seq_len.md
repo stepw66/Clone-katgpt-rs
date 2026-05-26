@@ -1,6 +1,6 @@
 # Issue 059: TurboQuant `with_config` Uses `kv_dim` as `max_seq_len`
 
-> **Status**: Open
+> **Status**: Closed
 > **Severity**: Bug (data corruption / silent failure)
 > **Affected**: `src/turboquant/kv_cache.rs`, `src/turboquant/types.rs`
 
