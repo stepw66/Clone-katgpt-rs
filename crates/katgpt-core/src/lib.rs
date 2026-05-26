@@ -49,7 +49,9 @@ pub use coda::{
 };
 
 #[cfg(feature = "tiled_attention")]
-pub use attention::{tiled_attention_batched, tiled_attention_forward};
+pub use attention::{
+    tiled_attention_batched, tiled_attention_forward, tiled_attention_forward_with_scores,
+};
 
 pub use simd::SimdLevel;
 

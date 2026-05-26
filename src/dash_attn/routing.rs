@@ -6,7 +6,7 @@
 
 use crate::types::DashAttnConfig;
 
-use super::entmax::{entmax_1p5, entmax_gqa_aggregate, entmax_support};
+use super::entmax::{entmax_1p5_into, entmax_gqa_aggregate, entmax_support};
 
 /// Result of entmax routing for one query head.
 #[derive(Debug)]
@@ -25,34 +25,81 @@ pub struct RoutingResult {
 /// and chunk summaries, then applies α-entmax (α=1.5) to obtain an adaptive
 /// sparse distribution over chunks.
 pub fn score_blocks_entmax(
-    query: &[f32],          // [head_dim] per-head query
-    summaries: &[Vec<f32>], // [n_chunks][head_dim] chunk summaries
+    query: &[f32],
+    summaries: &[impl AsRef<[f32]>],
     config: &DashAttnConfig,
 ) -> RoutingResult {
+    let n = summaries.len();
+    let mut scratch = RoutingScratch::new(n, query.len());
+    score_blocks_entmax_into(query, summaries, config, &mut scratch)
+}
+
+/// Pre-allocated scratch buffers for entmax routing.
+pub struct RoutingScratch {
+    /// Logits buffer: [n_chunks].
+    logits: Vec<f32>,
+    /// Sorted indices buffer for entmax: Vec<(usize, f32)>.
+    sorted: Vec<(usize, f32)>,
+    /// Probabilities buffer for entmax: [n_chunks].
+    probs: Vec<f32>,
+}
+
+impl RoutingScratch {
+    /// Create scratch buffers sized for `n_chunks` chunks.
+    pub fn new(n_chunks: usize, _head_dim: usize) -> Self {
+        Self {
+            logits: vec![0.0; n_chunks],
+            sorted: Vec::with_capacity(n_chunks),
+            probs: vec![0.0; n_chunks],
+        }
+    }
+}
+
+/// Zero-alloc variant of [`score_blocks_entmax`].
+///
+/// Reuses scratch buffers across calls.
+pub fn score_blocks_entmax_into(
+    query: &[f32],
+    summaries: &[impl AsRef<[f32]>],
+    config: &DashAttnConfig,
+    scratch: &mut RoutingScratch,
+) -> RoutingResult {
     let hd = query.len();
+    let n = summaries.len();
+
+    // Grow buffers if needed
+    if scratch.logits.len() < n {
+        scratch.logits.resize(n, 0.0);
+    }
+    if scratch.probs.len() < n {
+        scratch.probs.resize(n, 0.0);
+    }
+    scratch.sorted.clear();
 
     // Compute chunk logits: z = q · k̄ / √d * γ
     let scale = 1.0 / (hd as f32).sqrt() * config.scaling_factor;
-    let logits: Vec<f32> = summaries
-        .iter()
-        .map(|s| {
-            let dot: f32 = query.iter().zip(s.iter()).map(|(a, b)| a * b).sum();
-            dot * scale
-        })
-        .collect();
+    for (i, s) in summaries.iter().enumerate() {
+        let s_ref = s.as_ref();
+        let dot: f32 = query.iter().zip(s_ref.iter()).map(|(a, b)| a * b).sum();
+        scratch.logits[i] = dot * scale;
+    }
 
-    // α-entmax routing
-    let (probs, _tau) = entmax_1p5(&logits);
+    // α-entmax routing into scratch buffers
+    entmax_1p5_into(
+        &scratch.logits[..n],
+        &mut scratch.sorted,
+        &mut scratch.probs[..n],
+    );
 
     // Extract support
-    let active_indices = entmax_support(&probs);
+    let active_indices = entmax_support(&scratch.probs[..n]);
 
     // Compute routing bias: (log w - μ) / σ on active indices
     let log_weights: Vec<f32> = active_indices
         .iter()
         .map(|&i| {
-            if probs[i] > 1e-10 {
-                probs[i].ln()
+            if scratch.probs[i] > 1e-10 {
+                scratch.probs[i].ln()
             } else {
                 -23.0 // ln(1e-10)
             }
@@ -80,6 +127,9 @@ pub fn score_blocks_entmax(
         .iter()
         .map(|&lw| (lw - mean_lw) / std_lw)
         .collect();
+
+    // Clone probs for the result since we may reuse the scratch buffer
+    let probs = scratch.probs[..n].to_vec();
 
     RoutingResult {
         active_indices,

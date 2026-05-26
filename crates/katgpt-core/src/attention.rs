@@ -49,6 +49,40 @@ pub fn tiled_attention_forward(
     head_dim: usize,
     scale: f32,
 ) {
+    tiled_attention_forward_impl(q, k, v, output, seq_len, head_dim, scale, None);
+}
+
+/// Implementation that accepts an optional pre-allocated scores scratch buffer.
+///
+/// When `scores_buf` is `Some`, it is used as scratch space for the fallback
+/// path (seq_len < TILED_ATTENTION_THRESHOLD), avoiding a per-call heap allocation.
+/// The buffer must be at least `seq_len * seq_len` elements.
+/// When `None`, the buffer is allocated on demand.
+#[cfg(feature = "tiled_attention")]
+pub fn tiled_attention_forward_with_scores(
+    q: &[f32],
+    k: &[f32],
+    v: &[f32],
+    output: &mut [f32],
+    seq_len: usize,
+    head_dim: usize,
+    scale: f32,
+    scores_buf: Option<&mut [f32]>,
+) {
+    tiled_attention_forward_impl(q, k, v, output, seq_len, head_dim, scale, scores_buf);
+}
+
+#[cfg(feature = "tiled_attention")]
+fn tiled_attention_forward_impl(
+    q: &[f32],
+    k: &[f32],
+    v: &[f32],
+    output: &mut [f32],
+    seq_len: usize,
+    head_dim: usize,
+    scale: f32,
+    mut scores_buf: Option<&mut [f32]>,
+) {
     let expected = seq_len * head_dim;
     debug_assert_eq!(q.len(), expected, "Q slice length mismatch");
     debug_assert_eq!(k.len(), expected, "K slice length mismatch");
@@ -58,7 +92,9 @@ pub fn tiled_attention_forward(
     match seq_len {
         0 => return,
         n if n < TILED_ATTENTION_THRESHOLD => {
-            attention_fallback(q, k, v, output, seq_len, head_dim, scale);
+            let needed = seq_len * seq_len;
+            let buf = scores_buf.as_deref_mut();
+            attention_fallback(q, k, v, output, seq_len, head_dim, scale, buf, needed);
             return;
         }
         _ => {}
@@ -93,14 +129,17 @@ fn tiled_attention_inner(
     let q_tiles = seq_len.div_ceil(BR);
     let k_tiles = seq_len.div_ceil(BC);
 
+    // Pre-allocate output tile outside loop — reuse across query tiles (zero alloc)
+    let tile_elems = BR * head_dim;
+    let mut o_tile = vec![0.0f32; tile_elems];
+
     for q_tile_idx in 0..q_tiles {
         let q_start = q_tile_idx * BR;
         let q_end = (q_start + BR).min(seq_len);
         let actual_br = q_end - q_start;
 
-        // Running accumulators for this query tile
-        let tile_elems = BR * head_dim;
-        let mut o_tile = vec![0.0f32; tile_elems];
+        // Reuse pre-allocated tile buffer
+        o_tile[..tile_elems].fill(0.0);
         let mut max_tile = [f32::NEG_INFINITY; BR];
         let mut norm_tile = [0.0f32; BR];
 
@@ -125,15 +164,15 @@ fn tiled_attention_inner(
             }
             // i >= actual_br: stays -inf (boundary query rows)
 
-            // 2. Row max for this tile + update running max
+            // 2. Row max for this tile + update running max (only actual rows)
             let mut max_new = max_tile;
-            for i in 0..BR {
-                let rm = crate::simd::simd_max_f32(&s_tile[i * BC..(i + 1) * BC]);
+            for i in 0..actual_br {
+                let rm = crate::simd::simd_max_f32(&s_tile[i * BC..i * BC + actual_bc]);
                 max_new[i] = max_tile[i].max(rm);
             }
 
-            // 3. Apply correction, compute P̃, accumulate
-            for i in 0..BR {
+            // 3. Apply correction, compute P̃, accumulate (only actual rows)
+            for i in 0..actual_br {
                 let m_old = max_tile[i];
                 let m_new = max_new[i];
 
@@ -191,13 +230,25 @@ fn attention_fallback(
     seq_len: usize,
     head_dim: usize,
     scale: f32,
+    scores_buf: Option<&mut [f32]>,
+    needed: usize,
 ) {
     if seq_len == 0 {
         return;
     }
 
     // 1. Compute scores = Q @ K.T (seq_len × seq_len)
-    let mut scores = vec![0.0f32; seq_len * seq_len];
+    let mut scores_local;
+    let scores: &mut [f32] = match scores_buf {
+        Some(buf) if buf.len() >= needed => {
+            buf[..needed].fill(0.0);
+            buf
+        }
+        _ => {
+            scores_local = vec![0.0f32; needed];
+            &mut scores_local
+        }
+    };
     for i in 0..seq_len {
         let q_off = i * head_dim;
         for j in 0..seq_len {
@@ -217,15 +268,17 @@ fn attention_fallback(
     }
 
     // 3. Compute output = scores @ V (seq_len × head_dim)
+    //    Loop order (i, j, d) for contiguous V row access and cache-friendly output accumulation
     for i in 0..seq_len {
         let scores_off = i * seq_len;
         let out_off = i * head_dim;
-        for d in 0..head_dim {
-            let mut sum = 0.0f32;
-            for j in 0..seq_len {
-                sum += scores[scores_off + j] * v[j * head_dim + d];
+        output[out_off..out_off + head_dim].fill(0.0);
+        for j in 0..seq_len {
+            let s = scores[scores_off + j];
+            let v_off = j * head_dim;
+            for d in 0..head_dim {
+                output[out_off + d] += s * v[v_off + d];
             }
-            output[out_off + d] = sum;
         }
     }
 }
@@ -265,12 +318,15 @@ pub fn tiled_attention_batched(
     }
 
     // Use par_chunks_mut to get disjoint &mut slices — avoids Fn mut borrow issue
+    // Pre-allocate a scores scratch buffer per parallel task to avoid per-call allocation.
+    let scores_buf_size = seq_len * seq_len;
     output
         .par_chunks_mut(head_size)
         .enumerate()
         .for_each(|(idx, out_chunk)| {
             let offset = idx * head_size;
-            tiled_attention_forward(
+            let mut scores_buf = vec![0.0f32; scores_buf_size];
+            tiled_attention_forward_with_scores(
                 &q[offset..offset + head_size],
                 &k[offset..offset + head_size],
                 &v[offset..offset + head_size],
@@ -278,6 +334,7 @@ pub fn tiled_attention_batched(
                 seq_len,
                 head_dim,
                 scale,
+                Some(&mut scores_buf),
             );
         });
 }

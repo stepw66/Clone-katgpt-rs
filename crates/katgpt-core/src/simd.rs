@@ -1826,16 +1826,17 @@ unsafe fn neon_ternary_matvec(w: &TernaryWeights, x: &[f32], y: &mut [f32]) {
                 }
 
                 // Handle remaining elements (0-3) scalar
+                let mut scalar_acc = 0.0f32;
                 for i in (chunks * 4)..remaining {
                     let c = base_col + i;
                     let bit_mask = 1u64 << i;
                     let pos = (pos_word & bit_mask) != 0;
                     let neg = (neg_word & bit_mask) != 0;
                     let sign = pos as u32 as f32 - neg as u32 as f32;
-                    let mut lanes = [0.0f32; 4];
-                    vst1q_f32(lanes.as_mut_ptr(), acc);
-                    lanes[0] += sign * x[c];
-                    acc = vld1q_f32(lanes.as_ptr());
+                    scalar_acc += sign * x[c];
+                }
+                if scalar_acc != 0.0 {
+                    acc = vaddq_f32(acc, vsetq_lane_f32(scalar_acc, vdupq_n_f32(0.0), 0));
                 }
             }
 
@@ -1918,16 +1919,20 @@ unsafe fn avx2_ternary_matvec(w: &TernaryWeights, x: &[f32], y: &mut [f32]) {
                 }
 
                 // Handle remaining elements (0-7) scalar
+                let mut scalar_acc = 0.0f32;
                 for i in (chunks * 8)..remaining {
                     let c = base_col + i;
                     let bit_mask = 1u64 << i;
                     let pos = (pos_word & bit_mask) != 0;
                     let neg = (neg_word & bit_mask) != 0;
                     let sign = pos as u32 as f32 - neg as u32 as f32;
-                    let mut lanes = [0.0f32; 8];
-                    _mm256_storeu_ps(lanes.as_mut_ptr(), acc);
-                    lanes[0] += sign * x[c];
-                    acc = _mm256_loadu_ps(lanes.as_ptr());
+                    scalar_acc += sign * x[c];
+                }
+                if scalar_acc != 0.0 {
+                    acc = _mm256_add_ps(
+                        acc,
+                        _mm256_setr_ps(scalar_acc, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+                    );
                 }
             }
 

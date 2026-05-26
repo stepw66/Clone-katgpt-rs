@@ -77,6 +77,7 @@ pub enum WeightDtype {
 
 /// Delta routing mode — cross-layer information flow via delta vectors.
 /// Research 061: Delta Attention Residuals (Plan 097).
+#[repr(u8)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum DeltaRoutingMode {
     /// No delta routing (default).
@@ -386,8 +387,12 @@ pub enum ConvergenceSelector {
 // ---------------------------------------------------------------------------
 
 /// Transformer model configuration — superset of both katgpt-rs and riir-engine.
+///
+/// Fields are ordered by descending alignment to minimize padding:
+/// usize/u64 → f64 → enums (usize-discriminant) → f32 → Vec → u16 → u8/bool.
 #[derive(Clone)]
 pub struct Config {
+    // --- usize / pointer-sized fields (8-byte aligned) ---
     pub vocab_size: usize,
     pub block_size: usize,
     pub n_embd: usize,
@@ -397,23 +402,11 @@ pub struct Config {
     pub n_layer: usize,
     pub n_kv_head: usize,
     pub bos_token: usize,
-    pub temperature: f32,
     pub draft_lookahead: usize,
     pub tree_budget: usize,
     pub parallel_threshold: usize,
-    // LoRA fields (Plan 008)
     pub lora_rank: usize,
-    pub lora_alpha: f32,
-    pub lora_dropout: f32,
-    pub lora_targets: Vec<String>,
-    // Screening Pruner (Plan 021)
-    pub screening_threshold: f32,
-    // Sparse MLP (Plan 022)
-    pub sparse_threshold: f32,
-    // Early exit (Plan 026: AutoTTS)
     pub early_exit_patience: usize,
-    pub early_exit_gap: f32,
-    // MTP Drafter thresholds (Plan 055: Gemma 4 MTP)
     pub mtp_activation_threshold: usize,
     pub mtp_cluster_vocab_threshold: usize,
     pub mtp_shared_kv_prompt_threshold: usize,
@@ -426,42 +419,62 @@ pub struct Config {
     /// When K > 1, compute logits for tokens in top-K clusters instead of just top-1.
     /// Default 1 = backward compatible (single cluster = current behavior).
     pub mtp_cluster_topk: usize,
+    pub mask_token: usize,
+    pub sp_kv_window: usize,
+    pub sp_kv_predictor_hidden: usize,
+    pub width_rollouts: usize,
+    pub d2f_block_size: usize,
+    /// Number of last layers to sum before LM head. 0 = disabled (standard).
+    /// (Plan 104: Research 68)
+    pub mls_layers: usize,
+
+    // --- f64 (8-byte aligned) ---
+    pub rms_norm_eps: f64,
+
+    // --- Enum types with usize discriminant (8-byte aligned) ---
     // HLA Attention (Plan 057: Higher-order Linear Attention)
     pub hla_mode: HlaMode,
-    pub hla_normalize: bool,
-    pub hla_decay: f32,
     // Gemma 2 architecture fields (Plan 087)
     pub model_arch: ModelArchitecture,
-    pub rms_norm_eps: f64,
-    pub rms_norm_offset: bool,
-    pub tied_embeddings: bool,
-    pub use_rope: bool,
-    pub rope_theta: f32,
-    pub post_norm: bool,
-    pub attn_logit_softcapping: f32,
-    pub final_logit_softcapping: f32,
-    pub weight_dtype: WeightDtype,
     // D2F Discrete Diffusion Forcing (Plan 066)
-    pub mask_token: usize,
     pub attention_mode: AttentionMode,
     // SP-KV self-pruned KV attention (Plan 070)
-    pub sp_kv_window: usize,
-    pub sp_kv_threshold: f32,
-    pub sp_kv_predictor_hidden: usize,
     pub sp_kv_predictor_lr_mult: f32,
-    // PTRM width scaling (Plan 083)
-    pub width_rollouts: usize,
-    pub early_stop_threshold: f32,
     // EqR Convergence Selection (Plan 119)
     pub convergence_selector: ConvergenceSelector,
-    // D2F block size for discrete diffusion forcing
-    pub d2f_block_size: usize,
-    // MLS Multi-Layer Sum aggregation (Plan 104: Research 68)
-    // Number of last layers to sum before LM head. 0 = disabled (standard).
-    pub mls_layers: usize,
     // LT2 Looped Inference Pipeline (Plan 108, Research 73)
     pub loop_mode: LoopMode,
     pub hybrid_pattern: HybridPattern,
+
+    // --- f32 (4-byte aligned) ---
+    pub temperature: f32,
+    pub lora_alpha: f32,
+    pub lora_dropout: f32,
+    // Screening Pruner (Plan 021)
+    pub screening_threshold: f32,
+    // Sparse MLP (Plan 022)
+    pub sparse_threshold: f32,
+    // Early exit (Plan 026: AutoTTS)
+    pub early_exit_gap: f32,
+    pub hla_decay: f32,
+    pub rope_theta: f32,
+    pub attn_logit_softcapping: f32,
+    pub final_logit_softcapping: f32,
+    pub sp_kv_threshold: f32,
+    pub early_stop_threshold: f32,
+
+    // --- WeightDtype (could be u8 or enum, place after f32s) ---
+    pub weight_dtype: WeightDtype,
+
+    // --- Vec (pointer-sized, 8-byte aligned) ---
+    pub lora_targets: Vec<String>,
+
+    // --- bool / u8 fields (1-byte aligned, tail-packed) ---
+    pub hla_normalize: bool,
+    pub rms_norm_offset: bool,
+    pub tied_embeddings: bool,
+    pub use_rope: bool,
+    pub post_norm: bool,
     pub gated_attn: bool,
 }
 
@@ -2056,6 +2069,7 @@ pub struct InferenceResult {
 
 /// Discriminator for different self-play task types.
 #[cfg(feature = "data_gate")]
+#[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TaskType {
     /// Python code output prediction

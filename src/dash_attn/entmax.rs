@@ -21,43 +21,63 @@
 /// The resulting probabilities are non-negative, sum to 1.0, and are
 /// exactly zero for scores below the threshold (sparse).
 pub fn entmax_1p5(scores: &[f32]) -> (Vec<f32>, f32) {
-    if scores.is_empty() {
+    let n = scores.len();
+    if n == 0 {
         return (vec![], 0.0);
     }
+    let mut sorted_buf = Vec::with_capacity(n);
+    let mut probs = vec![0.0f32; n];
+    let tau = entmax_1p5_into(scores, &mut sorted_buf, &mut probs);
+    (probs, tau)
+}
+
+/// Zero-alloc variant of [`entmax_1p5`].
+///
+/// Reuses `sorted_buf` (cleared and refilled) and `probs_buf` (overwritten).
+/// Returns the threshold τ.
+pub fn entmax_1p5_into(
+    scores: &[f32],
+    sorted_buf: &mut Vec<(usize, f32)>,
+    probs_buf: &mut [f32],
+) -> f32 {
+    if scores.is_empty() {
+        return 0.0;
+    }
     let n = scores.len();
-    let mut sorted: Vec<(usize, f32)> = scores.iter().copied().enumerate().collect();
-    sorted.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    debug_assert!(probs_buf.len() >= n);
+
+    sorted_buf.clear();
+    sorted_buf.extend(scores.iter().copied().enumerate());
+    sorted_buf.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
     let mut cumsum = 0.0f32;
     let mut tau = 0.0f32;
     let mut support_size = 0usize;
 
-    for (k, &(_, score)) in sorted.iter().enumerate() {
+    for (k, &(_, score)) in sorted_buf.iter().enumerate() {
         cumsum += score;
         let t = (cumsum - 1.0) / ((k + 1) as f32);
-        // Extend support while sorted[k] > threshold candidate τ_k.
-        // The last valid k gives the maximal support and final τ.
         if score > t {
             tau = t;
             support_size = k + 1;
         }
     }
 
-    let mut probs = vec![0.0f32; n];
-    for &(orig_idx, score) in sorted.iter().take(support_size) {
+    probs_buf[..n].fill(0.0);
+    for &(orig_idx, score) in sorted_buf.iter().take(support_size) {
         let v = 0.5 * score - 0.5 * tau;
-        probs[orig_idx] = v * v;
+        probs_buf[orig_idx] = v * v;
     }
 
     // Normalize to sum to 1
-    let sum: f32 = probs.iter().sum();
+    let sum: f32 = probs_buf[..n].iter().sum();
     if sum > 0.0 {
-        for p in probs.iter_mut() {
+        for p in probs_buf[..n].iter_mut() {
             *p /= sum;
         }
     }
 
-    (probs, tau)
+    tau
 }
 
 /// Extract active indices from entmax weights (positions where weight > ε).

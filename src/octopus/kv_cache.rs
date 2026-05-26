@@ -15,9 +15,10 @@
 
 use super::encode::{
     decode_vector_into, encode_vector, pack_triplet_indices, unpack_triplet_indices,
+    unpack_triplet_indices_into,
 };
 use super::triplet::n_triplets;
-use super::types::{OctopusCodebook, OctopusConfig, OctopusLayer};
+use super::types::{OctopusCodebook, OctopusConfig, OctopusLayer, TripletIndices};
 
 /// OCTOPUS compressed KV cache.
 ///
@@ -40,6 +41,8 @@ pub struct OctopusKVCache {
     val_norms: Vec<Vec<f32>>,
     /// Current write position.
     pos: usize,
+    /// Highest position ever written (for efficient reset).
+    max_used_pos: usize,
     /// Number of transformer layers.
     n_layers: usize,
     /// KV dimension (head_dim × n_kv_heads).
@@ -49,6 +52,7 @@ pub struct OctopusKVCache {
     /// Nominal bits per value coordinate.
     val_bits: u8,
     /// Maximum sequence length.
+    #[allow(dead_code)]
     max_seq_len: usize,
     /// Use joint 3×3 rounding in encoder.
     use_joint_rounding: bool,
@@ -59,6 +63,8 @@ pub struct OctopusKVCache {
     scratch_normalized: Vec<f32>,
     /// [n_triplets * 3] — rotated vector / decoded triplet vectors.
     scratch_workspace: Vec<f32>,
+    /// [n_triplets] — reusable buffer for unpacked triplet indices.
+    scratch_indices: Vec<TripletIndices>,
 }
 
 impl OctopusKVCache {
@@ -115,6 +121,7 @@ impl OctopusKVCache {
             val_packed: vec![vec![vec![0u8; packed_val_len]; cfg.max_seq_len]; cfg.n_layers],
             val_norms: vec![vec![0.0f32; cfg.max_seq_len]; cfg.n_layers],
             pos: 0,
+            max_used_pos: 0,
             n_layers: cfg.n_layers,
             kv_dim: cfg.kv_dim,
             key_bits: cfg.key_bits,
@@ -124,12 +131,14 @@ impl OctopusKVCache {
             n_triplets: n_tri,
             scratch_normalized: vec![0.0f32; cfg.kv_dim],
             scratch_workspace: vec![0.0f32; n_tri * 3],
+            scratch_indices: Vec::with_capacity(n_tri),
         }
     }
 
     /// Quantize and store a key vector at given layer and position.
     pub fn store_key(&mut self, layer: usize, pos: usize, key: &[f32]) {
         debug_assert_eq!(key.len(), self.kv_dim);
+        self.max_used_pos = self.max_used_pos.max(pos + 1);
         let norm: f32 = key.iter().map(|x| x * x).sum::<f32>().sqrt();
         self.key_norms[layer][pos] = norm;
 
@@ -163,6 +172,7 @@ impl OctopusKVCache {
     /// Quantize and store a value vector at given layer and position.
     pub fn store_value(&mut self, layer: usize, pos: usize, value: &[f32]) {
         debug_assert_eq!(value.len(), self.kv_dim);
+        self.max_used_pos = self.max_used_pos.max(pos + 1);
         let norm: f32 = value.iter().map(|x| x * x).sum::<f32>().sqrt();
         self.val_norms[layer][pos] = norm;
 
@@ -247,15 +257,16 @@ impl OctopusKVCache {
         }
 
         let cb = &self.layers[layer].key_codebook;
-        let indices = unpack_triplet_indices(
+        unpack_triplet_indices_into(
             &self.key_packed[layer][pos],
             self.n_triplets,
             cb.dir_bits,
             cb.nrm_bits,
+            &mut self.scratch_indices,
         );
 
         // Decode triplets into workspace
-        decode_vector_into(&indices, cb, &mut self.scratch_workspace);
+        decode_vector_into(&self.scratch_indices, cb, &mut self.scratch_workspace);
 
         // Inverse rotate: R^T · workspace[..kv_dim] → scratch_normalized
         mat_vec_t_into(
@@ -280,14 +291,15 @@ impl OctopusKVCache {
         }
 
         let cb = &self.layers[layer].val_codebook;
-        let indices = unpack_triplet_indices(
+        unpack_triplet_indices_into(
             &self.val_packed[layer][pos],
             self.n_triplets,
             cb.dir_bits,
             cb.nrm_bits,
+            &mut self.scratch_indices,
         );
 
-        decode_vector_into(&indices, cb, &mut self.scratch_workspace);
+        decode_vector_into(&self.scratch_indices, cb, &mut self.scratch_workspace);
 
         mat_vec_t_into(
             &self.layers[layer].rotation,
@@ -301,8 +313,9 @@ impl OctopusKVCache {
 
     /// Reset cache for a new sequence.
     pub fn reset(&mut self) {
+        let used = self.max_used_pos;
         for layer in 0..self.n_layers {
-            for pos in 0..self.max_seq_len {
+            for pos in 0..used {
                 self.key_packed[layer][pos].fill(0);
                 self.key_norms[layer][pos] = 0.0;
                 self.val_packed[layer][pos].fill(0);
@@ -310,6 +323,7 @@ impl OctopusKVCache {
             }
         }
         self.pos = 0;
+        self.max_used_pos = 0;
     }
 
     /// Bytes stored per token (K + V, all layers).
@@ -446,15 +460,14 @@ fn mat_vec_t(mat: &[f32], input: &[f32]) -> Vec<f32> {
 }
 
 /// Transpose matrix-vector multiply into pre-allocated buffer.
+///
+/// Uses SIMD dot product for the inner loop where possible.
 fn mat_vec_t_into(mat: &[f32], input: &[f32], out: &mut [f32]) {
     let dim = input.len();
+    debug_assert_eq!(out.len(), dim);
     for row in 0..dim {
-        let m = mat[row * dim..(row + 1) * dim].as_ref();
-        let mut sum = 0.0f32;
-        for col in 0..dim {
-            sum += m[col] * input[col];
-        }
-        out[row] = sum;
+        let m_row = &mat[row * dim..(row + 1) * dim];
+        out[row] = crate::simd::simd_dot_f32(m_row, input, dim);
     }
 }
 

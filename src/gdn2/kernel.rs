@@ -100,7 +100,7 @@ pub fn gdn2_recurrent_step(
         }
     }
     // S += k ⊗ delta using SIMD-accelerated outer product
-    simd_outer_product_acc(s, k, &delta, dk, dv);
+    simd_outer_product_acc(s, k, delta, dk, dv);
 
     // Step 4: Readout o = Sᵀ q
     for j in 0..dv {

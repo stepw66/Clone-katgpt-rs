@@ -21,6 +21,8 @@ pub struct ChunkSummaryQuery {
     pub head_cls: Vec<f32>,
     pub n_kv_head: usize,
     pub head_dim: usize,
+    /// Cached result of `is_zero_init()` to avoid scanning all elements every call.
+    zero_initialized: bool,
 }
 
 impl ChunkSummaryQuery {
@@ -30,6 +32,7 @@ impl ChunkSummaryQuery {
             head_cls: vec![0.0; n_kv_head * head_dim],
             n_kv_head,
             head_dim,
+            zero_initialized: true,
         }
     }
 
@@ -44,6 +47,7 @@ impl ChunkSummaryQuery {
             head_cls,
             n_kv_head,
             head_dim,
+            zero_initialized: false,
         }
     }
 
@@ -55,8 +59,10 @@ impl ChunkSummaryQuery {
     }
 
     /// Check if head_cls is effectively zero (mean-pooling mode).
+    ///
+    /// Returns a cached result computed at construction time.
     pub fn is_zero_init(&self) -> bool {
-        self.head_cls.iter().all(|&x| x.abs() < 1e-8)
+        self.zero_initialized
     }
 }
 
@@ -143,57 +149,92 @@ pub fn summarize_chunk(
     head_idx: usize,
     head_dim: usize,
 ) -> Vec<f32> {
+    let mut out = vec![0.0f32; head_dim];
+    let mut scores_buf = vec![0.0f32; chunk_size.max(1)];
+    summarize_chunk_into(
+        query,
+        chunk_keys,
+        chunk_size,
+        head_idx,
+        head_dim,
+        &mut out,
+        &mut scores_buf,
+    );
+    out
+}
+
+/// Zero-alloc variant of [`summarize_chunk`].
+///
+/// Writes the summary into `out[..head_dim]` and uses `scores_buf` as scratch.
+pub fn summarize_chunk_into(
+    query: &ChunkSummaryQuery,
+    chunk_keys: &[f32],
+    chunk_size: usize,
+    head_idx: usize,
+    head_dim: usize,
+    out: &mut [f32],
+    scores_buf: &mut [f32],
+) {
     let hd = head_dim;
     let q = query.head_query(head_idx);
 
     // Check if query is zero → mean pooling fallback
     let q_norm: f32 = q.iter().map(|&x| x * x).sum::<f32>().sqrt();
     if q_norm < 1e-8 {
-        return mean_pool_keys(chunk_keys, chunk_size, hd);
+        mean_pool_keys_into(chunk_keys, chunk_size, hd, out);
+        return;
     }
 
     // Compute attention scores: q · k_t / sqrt(d)
     let scale = 1.0 / (hd as f32).sqrt();
-    let mut scores = vec![0.0f32; chunk_size];
+    debug_assert!(scores_buf.len() >= chunk_size);
     for (t, key_chunk) in chunk_keys.chunks_exact(hd).enumerate() {
         let mut dot = 0.0f32;
         for d in 0..hd {
             dot += q[d] * key_chunk[d];
         }
-        scores[t] = dot * scale;
+        scores_buf[t] = dot * scale;
     }
 
     // Softmax (numerically stable)
-    softmax_inplace(&mut scores);
+    softmax_inplace(&mut scores_buf[..chunk_size]);
 
     // Weighted sum of keys → summary
-    let mut summary = vec![0.0f32; hd];
-    for (score, key_chunk) in scores.iter().zip(chunk_keys.chunks_exact(hd)) {
+    out[..hd].fill(0.0);
+    for (score, key_chunk) in scores_buf[..chunk_size]
+        .iter()
+        .zip(chunk_keys.chunks_exact(hd))
+    {
         for d in 0..hd {
-            summary[d] += score * key_chunk[d];
+            out[d] += score * key_chunk[d];
         }
     }
-
-    summary
 }
 
 /// Mean pooling over chunk keys (zero-init fallback).
+#[allow(dead_code)]
 fn mean_pool_keys(chunk_keys: &[f32], chunk_size: usize, head_dim: usize) -> Vec<f32> {
-    let mut summary = vec![0.0f32; head_dim];
+    let mut out = vec![0.0f32; head_dim];
+    mean_pool_keys_into(chunk_keys, chunk_size, head_dim, &mut out);
+    out
+}
+
+/// Zero-alloc mean pooling into pre-allocated buffer.
+fn mean_pool_keys_into(chunk_keys: &[f32], chunk_size: usize, head_dim: usize, out: &mut [f32]) {
+    out[..head_dim].fill(0.0);
     if chunk_size == 0 {
-        return summary;
+        return;
     }
     for t in 0..chunk_size {
         let k_start = t * head_dim;
         for d in 0..head_dim {
-            summary[d] += chunk_keys[k_start + d];
+            out[d] += chunk_keys[k_start + d];
         }
     }
     let inv = 1.0 / chunk_size as f32;
-    for d in &mut summary {
+    for d in out[..head_dim].iter_mut() {
         *d *= inv;
     }
-    summary
 }
 
 /// In-place softmax with max subtraction for numerical stability.

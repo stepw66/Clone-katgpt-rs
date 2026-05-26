@@ -402,6 +402,93 @@ struct ForwardActivations {
     logits: Vec<f32>,         // [seq_len * vocab_size]
 }
 
+/// Pre-allocated context for `forward_save`, avoiding per-call allocations.
+struct ForwardSaveContext {
+    seq_len: usize,
+    embeddings: Vec<f32>,
+    after_norm1: Vec<f32>,
+    after_norm2: Vec<f32>,
+    q_all: Vec<f32>,
+    k_all: Vec<f32>,
+    v_all: Vec<f32>,
+    attn_weights_all: Vec<f32>,
+    attn_out_all: Vec<f32>,
+    after_attn_res: Vec<f32>,
+    after_mlp_norm: Vec<f32>,
+    mlp_hidden_all: Vec<f32>,
+    hidden_final: Vec<f32>,
+    logits_all: Vec<f32>,
+    // Per-position scratch (reused each iteration)
+    x_buf: Vec<f32>,
+    x_proj_buf: Vec<f32>,
+    x_mlp_buf: Vec<f32>,
+    // Dimension constants cached from config
+    n: usize,
+    kvd: usize,
+    vocab_size: usize,
+    mlp_hidden: usize,
+    n_head: usize,
+}
+
+impl ForwardSaveContext {
+    fn new(config: &Config) -> Self {
+        let n = config.n_embd;
+        let kvd = kv_dim(config);
+        let bs = config.block_size;
+        Self {
+            seq_len: 0,
+            embeddings: vec![0.0f32; bs * n],
+            after_norm1: vec![0.0f32; bs * n],
+            after_norm2: vec![0.0f32; bs * n],
+            q_all: vec![0.0f32; bs * n],
+            k_all: vec![0.0f32; bs * kvd],
+            v_all: vec![0.0f32; bs * kvd],
+            attn_weights_all: vec![0.0f32; bs * config.n_head * bs],
+            attn_out_all: vec![0.0f32; bs * n],
+            after_attn_res: vec![0.0f32; bs * n],
+            after_mlp_norm: vec![0.0f32; bs * n],
+            mlp_hidden_all: vec![0.0f32; bs * config.mlp_hidden],
+            hidden_final: vec![0.0f32; bs * n],
+            logits_all: vec![0.0f32; bs * config.vocab_size],
+            x_buf: vec![0.0f32; n],
+            x_proj_buf: vec![0.0f32; n],
+            x_mlp_buf: vec![0.0f32; n],
+            n,
+            kvd,
+            vocab_size: config.vocab_size,
+            mlp_hidden: config.mlp_hidden,
+            n_head: config.n_head,
+        }
+    }
+
+    fn reset(&mut self, seq_len: usize) {
+        self.seq_len = seq_len;
+        let n = self.n;
+        let kvd = self.kvd;
+        let nh = self.n_head;
+        let mlp_h = self.mlp_hidden;
+        let vocab = self.vocab_size;
+
+        for buf in [
+            &mut self.embeddings,
+            &mut self.after_norm1,
+            &mut self.after_norm2,
+            &mut self.q_all,
+            &mut self.attn_out_all,
+            &mut self.after_attn_res,
+            &mut self.after_mlp_norm,
+            &mut self.hidden_final,
+        ] {
+            buf[..seq_len * n].fill(0.0);
+        }
+        self.k_all[..seq_len * kvd].fill(0.0);
+        self.v_all[..seq_len * kvd].fill(0.0);
+        self.attn_weights_all[..seq_len * nh * seq_len].fill(0.0);
+        self.mlp_hidden_all[..seq_len * mlp_h].fill(0.0);
+        self.logits_all[..seq_len * vocab].fill(0.0);
+    }
+}
+
 /// Gradient storage mirroring TransformerWeights layout.
 struct TrainingGradients {
     wte: Vec<f32>,
@@ -433,11 +520,42 @@ impl TrainingGradients {
     }
 }
 
+/// Pre-allocated context for `backward`, avoiding per-call allocations.
+struct BackwardContext {
+    d_logits: Vec<f32>,
+    d_hf: Vec<f32>,
+    d_mh: Vec<f32>,
+    d_amn: Vec<f32>,
+    d_raw: Vec<f32>,
+    d_an2: Vec<f32>,
+    d_an1: Vec<f32>,
+    d_after_attn_res_saved: Vec<f32>,
+    d_after_norm1_final: Vec<f32>,
+}
+
+impl BackwardContext {
+    fn new(config: &Config) -> Self {
+        let n = config.n_embd;
+        Self {
+            d_logits: vec![0.0f32; config.vocab_size],
+            d_hf: vec![0.0f32; n],
+            d_mh: vec![0.0f32; config.mlp_hidden],
+            d_amn: vec![0.0f32; n],
+            d_raw: vec![0.0f32; config.block_size],
+            d_an2: vec![0.0f32; n],
+            d_an1: vec![0.0f32; n],
+            d_after_attn_res_saved: vec![0.0f32; config.block_size * n],
+            d_after_norm1_final: vec![0.0f32; config.block_size * n],
+        }
+    }
+}
+
 /// Forward pass saving all activations for training.
 fn forward_save(
     weights: &TransformerWeights,
     tokens: &[usize],
     config: &Config,
+    ctx: &mut ForwardSaveContext,
 ) -> ForwardActivations {
     let n = config.n_embd;
     let hd = config.head_dim;
@@ -446,43 +564,42 @@ fn forward_save(
     let scale = 1.0 / (hd as f32).sqrt();
     let layer = &weights.layers[0];
 
-    let mut embeddings = vec![0.0f32; seq_len * n];
-    let mut after_norm1 = vec![0.0f32; seq_len * n];
-    let mut after_norm2 = vec![0.0f32; seq_len * n];
-    let mut q_all = vec![0.0f32; seq_len * n];
-    let mut k_all = vec![0.0f32; seq_len * kvd];
-    let mut v_all = vec![0.0f32; seq_len * kvd];
-    let mut attn_weights_all = vec![0.0f32; seq_len * config.n_head * seq_len];
-    let mut attn_out_all = vec![0.0f32; seq_len * n];
-    let mut after_attn_res = vec![0.0f32; seq_len * n];
-    let mut after_mlp_norm = vec![0.0f32; seq_len * n];
-    let mut mlp_hidden_all = vec![0.0f32; seq_len * config.mlp_hidden];
-    let mut hidden_final = vec![0.0f32; seq_len * n];
-    let mut logits_all = vec![0.0f32; seq_len * config.vocab_size];
+    ctx.reset(seq_len);
 
     // Phase A: Embeddings + K/V
     for (p, &token) in tokens.iter().enumerate().take(seq_len) {
         for i in 0..n {
-            embeddings[p * n + i] = weights.wte[token * n + i] + weights.wpe[p * n + i];
+            ctx.embeddings[p * n + i] = weights.wte[token * n + i] + weights.wpe[p * n + i];
         }
-        let mut x = vec![0.0f32; n];
-        x.copy_from_slice(&embeddings[p * n..(p + 1) * n]);
-        rmsnorm(&mut x);
-        after_norm1[p * n..(p + 1) * n].copy_from_slice(&x);
-        rmsnorm(&mut x);
-        after_norm2[p * n..(p + 1) * n].copy_from_slice(&x);
+        ctx.x_buf[..n].copy_from_slice(&ctx.embeddings[p * n..(p + 1) * n]);
+        rmsnorm(&mut ctx.x_buf);
+        ctx.after_norm1[p * n..(p + 1) * n].copy_from_slice(&ctx.x_buf[..n]);
+        rmsnorm(&mut ctx.x_buf);
+        ctx.after_norm2[p * n..(p + 1) * n].copy_from_slice(&ctx.x_buf[..n]);
 
-        matmul(&mut q_all[p * n..], &layer.attn_wq, &x, n, n);
-        matmul(&mut k_all[p * kvd..], &layer.attn_wk, &x, kvd, n);
-        matmul(&mut v_all[p * kvd..], &layer.attn_wv, &x, kvd, n);
+        matmul(&mut ctx.q_all[p * n..], &layer.attn_wq, &ctx.x_buf, n, n);
+        matmul(
+            &mut ctx.k_all[p * kvd..],
+            &layer.attn_wk,
+            &ctx.x_buf,
+            kvd,
+            n,
+        );
+        matmul(
+            &mut ctx.v_all[p * kvd..],
+            &layer.attn_wv,
+            &ctx.x_buf,
+            kvd,
+            n,
+        );
     }
 
     // Phase B: Bidirectional attention
     for p in 0..seq_len {
         let (ao, aw) = attention_forward_safe(
-            &q_all[p * n..(p + 1) * n],
-            &k_all,
-            &v_all,
+            &ctx.q_all[p * n..(p + 1) * n],
+            &ctx.k_all,
+            &ctx.v_all,
             config.n_head,
             config.n_kv_head,
             hd,
@@ -490,52 +607,60 @@ fn forward_save(
             seq_len,
             scale,
         );
-        attn_out_all[p * n..(p + 1) * n].copy_from_slice(&ao);
-        attn_weights_all[p * config.n_head * seq_len..(p + 1) * config.n_head * seq_len]
+        ctx.attn_out_all[p * n..(p + 1) * n].copy_from_slice(&ao);
+        ctx.attn_weights_all[p * config.n_head * seq_len..(p + 1) * config.n_head * seq_len]
             .copy_from_slice(&aw);
     }
 
     // Phase C: Output projection + residual + MLP
+    // Uses x_buf for xr2 temporary, x_proj_buf for rmsnorm I/O, x_mlp_buf for mlp output.
     for p in 0..seq_len {
-        let mut x_proj = vec![0.0f32; n];
+        // x_proj = wo @ attn_out
+        ctx.x_proj_buf[..n].fill(0.0);
         matmul(
-            &mut x_proj,
+            &mut ctx.x_proj_buf,
             &layer.attn_wo,
-            &attn_out_all[p * n..(p + 1) * n],
+            &ctx.attn_out_all[p * n..(p + 1) * n],
             n,
             n,
         );
+        // Add residual: x_proj += after_norm1
         for i in 0..n {
-            x_proj[i] += after_norm1[p * n + i]; // residual = xr
+            ctx.x_proj_buf[i] += ctx.after_norm1[p * n + i];
         }
-        after_attn_res[p * n..(p + 1) * n].copy_from_slice(&x_proj);
+        // after_attn_res = x_proj (the residual output)
+        ctx.after_attn_res[p * n..(p + 1) * n].copy_from_slice(&ctx.x_proj_buf[..n]);
 
-        let xr2 = x_proj.clone();
-        rmsnorm(&mut x_proj);
-        after_mlp_norm[p * n..(p + 1) * n].copy_from_slice(&x_proj);
+        // xr2 = x_proj (copy for later residual addition)
+        // Use x_buf as temporary storage for xr2
+        ctx.x_buf[..n].copy_from_slice(&ctx.x_proj_buf[..n]);
+        // rmsnorm(x_proj) in place
+        rmsnorm(&mut ctx.x_proj_buf);
+        ctx.after_mlp_norm[p * n..(p + 1) * n].copy_from_slice(&ctx.x_proj_buf);
         matmul_relu(
-            &mut mlp_hidden_all[p * config.mlp_hidden..],
+            &mut ctx.mlp_hidden_all[p * config.mlp_hidden..],
             &layer.mlp_w1,
-            &x_proj,
+            &ctx.x_proj_buf,
             config.mlp_hidden,
             n,
         );
-        let mut x_mlp = vec![0.0f32; n];
+        ctx.x_mlp_buf[..n].fill(0.0);
         matmul(
-            &mut x_mlp,
+            &mut ctx.x_mlp_buf,
             &layer.mlp_w2,
-            &mlp_hidden_all[p * config.mlp_hidden..],
+            &ctx.mlp_hidden_all[p * config.mlp_hidden..],
             n,
             config.mlp_hidden,
         );
+        // Add xr2 residual (stored in x_buf)
         for i in 0..n {
-            x_mlp[i] += xr2[i];
+            ctx.x_mlp_buf[i] += ctx.x_buf[i];
         }
-        hidden_final[p * n..(p + 1) * n].copy_from_slice(&x_mlp);
+        ctx.hidden_final[p * n..(p + 1) * n].copy_from_slice(&ctx.x_mlp_buf);
         matmul(
-            &mut logits_all[p * config.vocab_size..],
+            &mut ctx.logits_all[p * config.vocab_size..],
             &weights.lm_head,
-            &x_mlp,
+            &ctx.x_mlp_buf,
             config.vocab_size,
             n,
         );
@@ -543,19 +668,19 @@ fn forward_save(
 
     ForwardActivations {
         seq_len,
-        embeddings,
-        after_norm1,
-        after_norm2,
-        q: q_all,
-        k: k_all,
-        v: v_all,
-        attn_weights: attn_weights_all,
-        attn_out: attn_out_all,
-        after_attn_res,
-        after_mlp_norm,
-        mlp_hidden: mlp_hidden_all,
-        hidden_final,
-        logits: logits_all,
+        embeddings: ctx.embeddings[..seq_len * n].to_vec(),
+        after_norm1: ctx.after_norm1[..seq_len * n].to_vec(),
+        after_norm2: ctx.after_norm2[..seq_len * n].to_vec(),
+        q: ctx.q_all[..seq_len * n].to_vec(),
+        k: ctx.k_all[..seq_len * kvd].to_vec(),
+        v: ctx.v_all[..seq_len * kvd].to_vec(),
+        attn_weights: ctx.attn_weights_all[..seq_len * config.n_head * seq_len].to_vec(),
+        attn_out: ctx.attn_out_all[..seq_len * n].to_vec(),
+        after_attn_res: ctx.after_attn_res[..seq_len * n].to_vec(),
+        after_mlp_norm: ctx.after_mlp_norm[..seq_len * n].to_vec(),
+        mlp_hidden: ctx.mlp_hidden_all[..seq_len * config.mlp_hidden].to_vec(),
+        hidden_final: ctx.hidden_final[..seq_len * n].to_vec(),
+        logits: ctx.logits_all[..seq_len * config.vocab_size].to_vec(),
     }
 }
 
@@ -591,6 +716,7 @@ fn backward(
     tokens: &[usize],
     is_masked: &[bool],
     config: &Config,
+    bctx: &mut BackwardContext,
 ) -> TrainingGradients {
     let seq_len = act.seq_len;
     let n = config.n_embd;
@@ -605,13 +731,17 @@ fn backward(
 
     let mut grads = TrainingGradients::zeros(config);
 
-    // Intermediate gradient buffers
+    // Intermediate gradient buffers (once per call, not pre-allocated)
     let mut d_attn_out = vec![0.0f32; seq_len * n];
     let mut d_q = vec![0.0f32; seq_len * n];
     let mut d_k = vec![0.0f32; seq_len * kvd];
     let mut d_v = vec![0.0f32; seq_len * kvd];
     let mut d_after_norm2 = vec![0.0f32; seq_len * n];
-    let mut d_after_norm1 = vec![0.0f32; seq_len * n];
+
+    // Zero the saved accumulation buffers
+    bctx.d_after_attn_res_saved[..seq_len * n].fill(0.0);
+    bctx.d_after_norm1_final[..seq_len * n].fill(0.0);
+
     // ── Phase 1: LM Head → MLP → Attention output projection ──
     for p in 0..seq_len {
         if !is_masked[p] {
@@ -621,49 +751,49 @@ fn backward(
         // Cross-entropy backward: d_logit[i] = softmax(logit)[i] - (1 if i==target else 0)
         let logits_p = &act.logits[p * vocab..(p + 1) * vocab];
         let target = tokens[p];
-        let mut d_logits = vec![0.0f32; vocab];
+        bctx.d_logits[..vocab].fill(0.0);
         let max_l = logits_p.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
         let sum_exp: f32 = logits_p.iter().map(|l| (l - max_l).exp()).sum();
         for i in 0..vocab {
             let prob = (logits_p[i] - max_l).exp() / sum_exp;
-            d_logits[i] = prob - if i == target { 1.0 } else { 0.0 };
+            bctx.d_logits[i] = prob - if i == target { 1.0 } else { 0.0 };
         }
 
         // LM Head: d_lm_head += outer(d_logits, hidden_final)
         let hf = &act.hidden_final[p * n..(p + 1) * n];
         for i in 0..vocab {
             for j in 0..n {
-                grads.lm_head[i * n + j] += d_logits[i] * hf[j];
+                grads.lm_head[i * n + j] += bctx.d_logits[i] * hf[j];
             }
         }
 
         // d_hidden_final = lm_head^T @ d_logits
-        let mut d_hf = vec![0.0f32; n];
+        bctx.d_hf[..n].fill(0.0);
         for j in 0..n {
             for i in 0..vocab {
-                d_hf[j] += weights.lm_head[i * n + j] * d_logits[i];
+                bctx.d_hf[j] += weights.lm_head[i * n + j] * bctx.d_logits[i];
             }
         }
 
         // Residual: hidden_final = after_mlp + after_attn_res
-        // d_after_mlp = d_hf, d_after_attn_res = d_hf
-        let mut d_after_attn_res = d_hf.clone();
+        // d_after_mlp = d_hf, d_after_attn_res starts as d_hf
+        bctx.d_an1[..n].copy_from_slice(&bctx.d_hf[..n]); // reuse d_an1 as d_after_attn_res temporarily
 
         // MLP w2: d_w2 += outer(d_after_mlp, mlp_hidden)
         let mh = &act.mlp_hidden[p * mlp_h..(p + 1) * mlp_h];
         for i in 0..n {
             for j in 0..mlp_h {
-                grads.mlp_w2[i * mlp_h + j] += d_hf[i] * mh[j];
+                grads.mlp_w2[i * mlp_h + j] += bctx.d_hf[i] * mh[j];
             }
         }
         // d_mlp_hidden = w2^T @ d_after_mlp, then ReLU backward
-        let mut d_mh = vec![0.0f32; mlp_h];
+        bctx.d_mh[..mlp_h].fill(0.0);
         for j in 0..mlp_h {
             for i in 0..n {
-                d_mh[j] += layer.mlp_w2[i * mlp_h + j] * d_hf[i];
+                bctx.d_mh[j] += layer.mlp_w2[i * mlp_h + j] * bctx.d_hf[i];
             }
             if mh[j] <= 0.0 {
-                d_mh[j] = 0.0;
+                bctx.d_mh[j] = 0.0;
             } // ReLU backward
         }
 
@@ -671,35 +801,38 @@ fn backward(
         let amn = &act.after_mlp_norm[p * n..(p + 1) * n];
         for i in 0..mlp_h {
             for j in 0..n {
-                grads.mlp_w1[i * n + j] += d_mh[i] * amn[j];
+                grads.mlp_w1[i * n + j] += bctx.d_mh[i] * amn[j];
             }
         }
         // d_after_mlp_norm = w1^T @ d_mh
-        let mut d_amn = vec![0.0f32; n];
+        bctx.d_amn[..n].fill(0.0);
         for j in 0..n {
             for i in 0..mlp_h {
-                d_amn[j] += layer.mlp_w1[i * n + j] * d_mh[i];
+                bctx.d_amn[j] += layer.mlp_w1[i * n + j] * bctx.d_mh[i];
             }
         }
 
         // RMSNorm backward (after_attn_res → after_mlp_norm)
         let aar = &act.after_attn_res[p * n..(p + 1) * n];
-        let d_aar_from_mlp = rmsnorm_backward(aar, amn, &d_amn);
+        let d_aar_from_mlp = rmsnorm_backward(aar, amn, &bctx.d_amn);
         for i in 0..n {
-            d_after_attn_res[i] += d_aar_from_mlp[i];
+            bctx.d_an1[i] += d_aar_from_mlp[i]; // d_after_attn_res = d_hf + d_aar_from_mlp
         }
+
+        // Save d_after_attn_res for Phase 3
+        bctx.d_after_attn_res_saved[p * n..(p + 1) * n].copy_from_slice(&bctx.d_an1[..n]);
 
         // Attention output projection: d_wo += outer(d_after_attn_res, attn_out)
         let ao = &act.attn_out[p * n..(p + 1) * n];
         for i in 0..n {
             for j in 0..n {
-                grads.attn_wo[i * n + j] += d_after_attn_res[i] * ao[j];
+                grads.attn_wo[i * n + j] += bctx.d_an1[i] * ao[j];
             }
         }
         // d_attn_out = wo^T @ d_after_attn_res
         for j in 0..n {
             for i in 0..n {
-                d_attn_out[p * n + j] += layer.attn_wo[i * n + j] * d_after_attn_res[i];
+                d_attn_out[p * n + j] += layer.attn_wo[i * n + j] * bctx.d_an1[i];
             }
         }
     }
@@ -718,18 +851,18 @@ fn backward(
             let kv_off = kv_group * hd;
 
             // d_raw_weights[t] = dot(d_attn_out[h], v[t,h])
-            let mut d_raw = vec![0.0f32; seq_len];
+            bctx.d_raw[..seq_len].fill(0.0);
             for t in 0..seq_len {
                 let mut dot = 0.0f32;
                 for d in 0..hd {
                     dot += d_ao[q_off + d] * act.v[t * kvd + kv_off + d];
                 }
-                d_raw[t] = dot;
+                bctx.d_raw[t] = dot;
             }
 
             // Softmax backward
             let w_h = &aw[h * seq_len..(h + 1) * seq_len];
-            let d_scores = softmax_backward(w_h, &d_raw);
+            let d_scores = softmax_backward(w_h, &bctx.d_raw[..seq_len]);
 
             // d_v[t] += weights[t] * d_attn_out[h]
             for t in 0..seq_len {
@@ -778,108 +911,22 @@ fn backward(
         }
 
         // d_after_norm2 = wq^T @ d_q + wk^T @ d_k + wv^T @ d_v
-        let mut d_an2 = vec![0.0f32; n];
+        bctx.d_an2[..n].fill(0.0);
         for j in 0..n {
             for i in 0..n {
-                d_an2[j] += layer.attn_wq[i * n + j] * d_q[p * n + i];
+                bctx.d_an2[j] += layer.attn_wq[i * n + j] * d_q[p * n + i];
             }
             for i in 0..kvd {
-                d_an2[j] += layer.attn_wk[i * n + j] * d_k[p * kvd + i];
-                d_an2[j] += layer.attn_wv[i * n + j] * d_v[p * kvd + i];
+                bctx.d_an2[j] += layer.attn_wk[i * n + j] * d_k[p * kvd + i];
+                bctx.d_an2[j] += layer.attn_wv[i * n + j] * d_v[p * kvd + i];
             }
         }
-        d_after_norm2[p * n..(p + 1) * n].copy_from_slice(&d_an2);
-
-        // RMSNorm backward (after_norm1 → after_norm2)
-        let an1 = &act.after_norm1[p * n..(p + 1) * n];
-        let d_an1_from_n2 = rmsnorm_backward(an1, &act.after_norm2[p * n..], &d_an2);
-
-        // d_after_norm1 = d_xr + d_from_norm2
-        // d_xr = d_after_attn_res (from residual), but only for masked positions
-        let d_an1 = d_an1_from_n2;
-        if is_masked[p] {
-            // The residual xr = after_norm1 was added after attention projection
-            // d_after_attn_res was computed in Phase 1 and flows into d_after_norm1
-            // We need to recover d_after_attn_res[p] — it was d_hf + d_aar_from_mlp
-            // Simplification: compute d_xr = d_attn_out contribution through residual
-            // Actually, the residual path: after_attn_res = wo @ attn_out + xr = wo @ attn_out + after_norm1
-            // So d_after_norm1 += d_after_attn_res (from residual path)
-            // d_after_attn_res was local to Phase 1, but we can approximate:
-            // For correctness, we need to re-derive. The residual xr = after_norm1 flows
-            // directly to after_attn_res. So d_after_norm1 += d_after_attn_res.
-            // d_after_attn_res was d_hf + d_aar_from_mlp. We stored this locally.
-            // Since we only care about masked positions, let's just add the gradient.
-            // The issue is we didn't save d_after_attn_res globally. Let me fix this.
-        }
-
-        // Actually, let's handle this more carefully. The residual connection is:
-        // after_attn_res = wo @ attn_out + after_norm1
-        // d(after_norm1) from residual = d(after_attn_res) = d_hidden_final + d_aar_from_mlp
-        // But d_hidden_final = d_hf was local. For masked positions, d_hf = lm_head^T @ d_logits.
-        // This is already accounted for in d_attn_out via wo^T.
-        // The residual gradient flows directly: d_after_norm1 += d_after_attn_res.
-        // We need to track this separately.
-
-        d_after_norm1[p * n..(p + 1) * n].copy_from_slice(&d_an1);
+        d_after_norm2[p * n..(p + 1) * n].copy_from_slice(&bctx.d_an2[..n]);
     }
 
-    // Recompute d_after_attn_res for masked positions
-    let mut d_after_attn_res_global = vec![0.0f32; seq_len * n];
+    // Compute d_after_norm1 and d_embeddings using saved d_after_attn_res
     for p in 0..seq_len {
-        if !is_masked[p] {
-            continue;
-        }
-
-        // Recompute d_logits
-        let logits_p = &act.logits[p * vocab..(p + 1) * vocab];
-        let target = tokens[p];
-        let max_l = logits_p.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
-        let sum_exp: f32 = logits_p.iter().map(|l| (l - max_l).exp()).sum();
-        let mut d_logits = vec![0.0f32; vocab];
-        for i in 0..vocab {
-            let prob = (logits_p[i] - max_l).exp() / sum_exp;
-            d_logits[i] = prob - if i == target { 1.0 } else { 0.0 };
-        }
-
-        // d_hf = lm_head^T @ d_logits
-        let mut d_hf = vec![0.0f32; n];
-        for j in 0..n {
-            for i in 0..vocab {
-                d_hf[j] += weights.lm_head[i * n + j] * d_logits[i];
-            }
-        }
-
-        // MLP backward to get d_aar_from_mlp
-        let mh = &act.mlp_hidden[p * mlp_h..(p + 1) * mlp_h];
-        let mut d_mh = vec![0.0f32; mlp_h];
-        for j in 0..mlp_h {
-            for i in 0..n {
-                d_mh[j] += layer.mlp_w2[i * mlp_h + j] * d_hf[i];
-            }
-            if mh[j] <= 0.0 {
-                d_mh[j] = 0.0;
-            }
-        }
-        let mut d_amn = vec![0.0f32; n];
-        for j in 0..n {
-            for i in 0..mlp_h {
-                d_amn[j] += layer.mlp_w1[i * n + j] * d_mh[i];
-            }
-        }
-        let aar = &act.after_attn_res[p * n..(p + 1) * n];
-        let amn = &act.after_mlp_norm[p * n..(p + 1) * n];
-        let d_aar_from_mlp = rmsnorm_backward(aar, amn, &d_amn);
-
-        // d_after_attn_res = d_hf (residual) + d_aar_from_mlp (through MLP)
-        for i in 0..n {
-            d_after_attn_res_global[p * n + i] = d_hf[i] + d_aar_from_mlp[i];
-        }
-    }
-
-    // Now properly compute d_after_norm1 and d_embeddings
-    let mut d_after_norm1_final = vec![0.0f32; seq_len * n];
-    for p in 0..seq_len {
-        let mut d_an1 = vec![0.0f32; n];
+        bctx.d_an1[..n].fill(0.0);
 
         // From norm2 backward
         let an2_grad = &d_after_norm2[p * n..(p + 1) * n];
@@ -888,22 +935,22 @@ fn backward(
             let an2 = &act.after_norm2[p * n..(p + 1) * n];
             let d_from_n2 = rmsnorm_backward(an1, an2, an2_grad);
             for i in 0..n {
-                d_an1[i] += d_from_n2[i];
+                bctx.d_an1[i] += d_from_n2[i];
             }
         }
 
         // From residual: after_attn_res = wo @ attn_out + after_norm1
-        // d_after_norm1 += d_after_attn_res
+        // d_after_norm1 += d_after_attn_res (saved from Phase 1)
         for i in 0..n {
-            d_an1[i] += d_after_attn_res_global[p * n + i];
+            bctx.d_an1[i] += bctx.d_after_attn_res_saved[p * n + i];
         }
 
-        d_after_norm1_final[p * n..(p + 1) * n].copy_from_slice(&d_an1);
+        bctx.d_after_norm1_final[p * n..(p + 1) * n].copy_from_slice(&bctx.d_an1[..n]);
 
         // RMSNorm backward (embeddings → after_norm1)
         let emb = &act.embeddings[p * n..(p + 1) * n];
         let an1 = &act.after_norm1[p * n..(p + 1) * n];
-        let d_emb = rmsnorm_backward(emb, an1, &d_an1);
+        let d_emb = rmsnorm_backward(emb, an1, &bctx.d_an1);
 
         // d_wte[token] += d_emb, d_wpe[p] += d_emb
         let token = tokens[p];
@@ -1053,6 +1100,8 @@ pub fn train_mini_dllm(
     let mut rng = Rng::new(seed);
     let mut weights = TransformerWeights::new(config, &mut rng);
     let mut loss_history = Vec::new();
+    let mut fwd_ctx = ForwardSaveContext::new(config);
+    let mut bwd_ctx = BackwardContext::new(config);
 
     for epoch in 0..n_epochs {
         let mut epoch_loss = 0.0f32;
@@ -1075,7 +1124,7 @@ pub fn train_mini_dllm(
                 continue;
             }
 
-            let act = forward_save(&weights, &corrupted, config);
+            let act = forward_save(&weights, &corrupted, config, &mut fwd_ctx);
             let loss = masked_loss(
                 &act.logits,
                 tokens,
@@ -1083,7 +1132,7 @@ pub fn train_mini_dllm(
                 config.vocab_size,
                 LossAveraging::Global,
             );
-            let grads = backward(&act, &weights, tokens, &is_masked, config);
+            let grads = backward(&act, &weights, tokens, &is_masked, config, &mut bwd_ctx);
             sgd_update(&mut weights, &grads, lr);
 
             epoch_loss += loss;
@@ -1137,6 +1186,8 @@ pub fn train_mini_dllm_adaptive(
     let mut weights = TransformerWeights::new(config, &mut rng);
     let mut loss_history = Vec::new();
     let n_blocks = schedule.ratios().len().max(1);
+    let mut fwd_ctx = ForwardSaveContext::new(config);
+    let mut bwd_ctx = BackwardContext::new(config);
 
     for epoch in 0..n_epochs {
         let mut epoch_loss = 0.0f32;
@@ -1166,7 +1217,7 @@ pub fn train_mini_dllm_adaptive(
                 continue;
             }
 
-            let act = forward_save(&weights, &corrupted, config);
+            let act = forward_save(&weights, &corrupted, config, &mut fwd_ctx);
             let loss = masked_loss(
                 &act.logits,
                 tokens,
@@ -1178,7 +1229,7 @@ pub fn train_mini_dllm_adaptive(
             // Record per-block loss for adaptive schedule
             schedule.record_step_loss(block_idx, loss);
 
-            let grads = backward(&act, &weights, tokens, &is_masked, config);
+            let grads = backward(&act, &weights, tokens, &is_masked, config, &mut bwd_ctx);
             sgd_update(&mut weights, &grads, lr);
 
             epoch_loss += loss;
@@ -1866,11 +1917,13 @@ mod tests {
         let config = Config::micro_dllm();
         let mut rng = Rng::new(42);
         let weights = TransformerWeights::new(&config, &mut rng);
+        let mut fwd_ctx = ForwardSaveContext::new(&config);
+        let mut bwd_ctx = BackwardContext::new(&config);
 
         let tokens = vec![0, 1, 2, 3];
         let is_masked = vec![false, true, false, true]; // mask positions 1 and 3
 
-        let act = forward_save(&weights, &tokens, &config);
+        let act = forward_save(&weights, &tokens, &config, &mut fwd_ctx);
         let loss = masked_loss(
             &act.logits,
             &tokens,
@@ -1883,7 +1936,7 @@ mod tests {
             "Loss should be positive and finite: {loss}"
         );
 
-        let grads = backward(&act, &weights, &tokens, &is_masked, &config);
+        let grads = backward(&act, &weights, &tokens, &is_masked, &config, &mut bwd_ctx);
 
         // Gradients should be non-zero for weights that affect masked positions
         let has_wte_grad = grads.wte.iter().any(|&g| g != 0.0);
@@ -1900,12 +1953,14 @@ mod tests {
         let config = Config::micro_dllm();
         let mut rng = Rng::new(42);
         let mut weights = TransformerWeights::new(&config, &mut rng);
+        let mut fwd_ctx = ForwardSaveContext::new(&config);
+        let mut bwd_ctx = BackwardContext::new(&config);
 
         let tokens = vec![0, 1, 2, 3];
         let is_masked = vec![false, true, false, true];
 
         // Compute initial loss
-        let act0 = forward_save(&weights, &tokens, &config);
+        let act0 = forward_save(&weights, &tokens, &config, &mut fwd_ctx);
         let loss0 = masked_loss(
             &act0.logits,
             &tokens,
@@ -1915,11 +1970,11 @@ mod tests {
         );
 
         // One SGD step
-        let grads = backward(&act0, &weights, &tokens, &is_masked, &config);
+        let grads = backward(&act0, &weights, &tokens, &is_masked, &config, &mut bwd_ctx);
         sgd_update(&mut weights, &grads, 0.01);
 
         // Compute new loss
-        let act1 = forward_save(&weights, &tokens, &config);
+        let act1 = forward_save(&weights, &tokens, &config, &mut fwd_ctx);
         let loss1 = masked_loss(
             &act1.logits,
             &tokens,
@@ -2243,6 +2298,8 @@ mod replaid_tests {
         let mut rng_fixed = Rng::new(42);
         let mut weights_fixed = TransformerWeights::new(&config, &mut rng_fixed);
         let fixed_mask_ratio = 0.25f32;
+        let mut fwd_ctx = ForwardSaveContext::new(&config);
+        let mut bwd_ctx = BackwardContext::new(&config);
 
         let mut fixed_epoch_variances: Vec<f32> = Vec::new();
 
@@ -2261,7 +2318,7 @@ mod replaid_tests {
                 if !is_masked.iter().any(|&m| m) {
                     continue;
                 }
-                let act = forward_save(&weights_fixed, &corrupted, &config);
+                let act = forward_save(&weights_fixed, &corrupted, &config, &mut fwd_ctx);
                 let loss = masked_loss(
                     &act.logits,
                     tokens,
@@ -2269,7 +2326,14 @@ mod replaid_tests {
                     config.vocab_size,
                     LossAveraging::Global,
                 );
-                let grads = backward(&act, &weights_fixed, tokens, &is_masked, &config);
+                let grads = backward(
+                    &act,
+                    &weights_fixed,
+                    tokens,
+                    &is_masked,
+                    &config,
+                    &mut bwd_ctx,
+                );
                 sgd_update(&mut weights_fixed, &grads, lr);
                 step_losses.push(loss);
             }
@@ -2296,6 +2360,8 @@ mod replaid_tests {
         let mut schedule2 = AdaptiveNoiseSchedule::new(0.15, 0.35, n_blocks);
         let mut rng_adaptive = Rng::new(42);
         let mut weights_adaptive = TransformerWeights::new(&config, &mut rng_adaptive);
+        let mut fwd_ctx2 = ForwardSaveContext::new(&config);
+        let mut bwd_ctx2 = BackwardContext::new(&config);
 
         let mut adaptive_epoch_variances: Vec<f32> = Vec::new();
 
@@ -2319,7 +2385,7 @@ mod replaid_tests {
                     sample_counter += 1;
                     continue;
                 }
-                let act = forward_save(&weights_adaptive, &corrupted, &config);
+                let act = forward_save(&weights_adaptive, &corrupted, &config, &mut fwd_ctx2);
                 let loss = masked_loss(
                     &act.logits,
                     tokens,
@@ -2328,7 +2394,14 @@ mod replaid_tests {
                     LossAveraging::Global,
                 );
                 schedule2.record_step_loss(block_idx, loss);
-                let grads = backward(&act, &weights_adaptive, tokens, &is_masked, &config);
+                let grads = backward(
+                    &act,
+                    &weights_adaptive,
+                    tokens,
+                    &is_masked,
+                    &config,
+                    &mut bwd_ctx2,
+                );
                 sgd_update(&mut weights_adaptive, &grads, lr);
                 step_losses.push(loss);
                 sample_counter += 1;

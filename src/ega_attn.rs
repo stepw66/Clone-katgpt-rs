@@ -60,12 +60,21 @@ pub fn z_normalize(scores: &mut [f32]) {
 ///
 /// Returns g[j] = σ(α · (ẽ[j] - τ)) where ẽ is the z-normalized energy.
 pub fn compute_energy_gate(energy: &[f32], alpha: f32, tau: f32) -> Vec<f32> {
-    let mut normalized = energy.to_vec();
-    z_normalize(&mut normalized);
-    normalized
-        .iter()
-        .map(|&e| sigmoid(alpha * (e - tau)))
-        .collect()
+    let mut out = vec![0.0; energy.len()];
+    compute_energy_gate_into(energy, alpha, tau, &mut out);
+    out
+}
+
+/// Zero-alloc variant of [`compute_energy_gate`].
+///
+/// Writes the gate vector into `out[..energy.len()]`.
+pub fn compute_energy_gate_into(energy: &[f32], alpha: f32, tau: f32, out: &mut [f32]) {
+    let len = energy.len();
+    out[..len].copy_from_slice(energy);
+    z_normalize(&mut out[..len]);
+    for o in out[..len].iter_mut() {
+        *o = sigmoid(alpha * (*o - tau));
+    }
 }
 
 // ── EgaGate ───────────────────────────────────────────────────
@@ -115,18 +124,25 @@ impl EgaGate {
     ///
     /// Returns energy scores `[seq_len]`.
     pub fn energy_scores(&self, x: &[f32], seq_len: usize, dim: usize) -> Vec<f32> {
+        let mut out = vec![0.0; seq_len];
+        self.energy_scores_into(x, seq_len, dim, &mut out);
+        out
+    }
+
+    /// Zero-alloc variant of [`energy_scores`].
+    ///
+    /// Writes energy scores into `out[..seq_len]`.
+    pub fn energy_scores_into(&self, x: &[f32], seq_len: usize, dim: usize, out: &mut [f32]) {
         assert_eq!(x.len(), seq_len * dim, "x must have seq_len × dim elements");
         assert_eq!(dim, self.w_proj.len(), "dim must match w_proj length");
 
-        let mut energy = vec![0.0; seq_len];
         for i in 0..seq_len {
             let mut dot = 0.0f32;
             for j in 0..dim {
                 dot += x[i * dim + j] * self.w_proj[j];
             }
-            energy[i] = dot;
+            out[i] = dot;
         }
-        energy
     }
 
     /// Apply EGA gate to attention weights (in-place).
@@ -142,7 +158,8 @@ impl EgaGate {
         assert_eq!(attn_weights.len(), seq_len * seq_len);
         assert_eq!(energy.len(), seq_len);
 
-        let gate = compute_energy_gate(energy, self.alpha, self.tau);
+        let mut gate_buf = vec![0.0; seq_len];
+        compute_energy_gate_into(energy, self.alpha, self.tau, &mut gate_buf);
 
         for i in 0..seq_len {
             let row_start = i * seq_len;
@@ -150,7 +167,7 @@ impl EgaGate {
 
             // Apply gate to each key position and compute sum
             for j in 0..seq_len {
-                attn_weights[row_start + j] *= gate[j];
+                attn_weights[row_start + j] *= gate_buf[j];
                 row_sum += attn_weights[row_start + j];
             }
 

@@ -70,8 +70,8 @@ pub fn forward_dash_attn_prefill(
             if pos % dash_config.chunk_size == 0 {
                 let chunk_idx = pos / dash_config.chunk_size;
                 for h in 0..config.n_kv_head {
-                    let k_h = ctx.k[h * hd..(h + 1) * hd].to_vec();
-                    let summary = summarize_chunk(summary_query, &k_h, 1, h, hd);
+                    let k_h = &ctx.k[h * hd..(h + 1) * hd];
+                    let summary = summarize_chunk(summary_query, k_h, 1, h, hd);
                     if chunk_idx < summary_cache.n_chunks() {
                         summary_cache.summaries[chunk_idx][h] = summary;
                     }
@@ -155,14 +155,14 @@ pub fn forward_dash_attn_decode<'a>(
         if summary_cache.n_chunks() > 0 {
             let hd = config.head_dim;
             // Use first query head as representative for routing decision
-            let q_head = ctx.q[..hd].to_vec();
-            // Collect summaries for first KV head as routing proxy
-            let summaries: Vec<Vec<f32>> = summary_cache
+            let q_head = &ctx.q[..hd];
+            // Collect references to summaries for first KV head as routing proxy
+            let summaries: Vec<&Vec<f32>> = summary_cache
                 .summaries
                 .iter()
-                .map(|chunk| chunk[0].clone())
+                .map(|chunk| &chunk[0])
                 .collect();
-            let _routing = score_blocks_entmax(&q_head, &summaries, dash_config);
+            let _routing = score_blocks_entmax(q_head, &summaries, dash_config);
             // TODO: Use routing.active_indices to select sparse KV blocks
         }
 

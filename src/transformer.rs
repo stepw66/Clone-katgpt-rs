@@ -142,20 +142,23 @@ impl KVCache {
     }
 
     pub fn reset(&mut self) {
-        self.key.fill(0.0);
-        self.value.fill(0.0);
+        // No-op: each position is written before being read, so stale data
+        // from previous sequences is never observed. Avoids O(block_size × kv_dim) zeroing.
     }
 }
 
 /// Multi-layer KV cache: one KVCache per transformer layer.
 pub struct MultiLayerKVCache {
     pub layers: Vec<KVCache>,
+    /// Highest position written + 1 across all layers, for efficient snapshot.
+    fill_pos: usize,
 }
 
 impl MultiLayerKVCache {
     pub fn new(config: &Config) -> Self {
         Self {
             layers: (0..config.n_layer).map(|_| KVCache::new(config)).collect(),
+            fill_pos: 0,
         }
     }
 
@@ -163,6 +166,17 @@ impl MultiLayerKVCache {
         for layer in &mut self.layers {
             layer.reset();
         }
+        self.fill_pos = 0;
+    }
+
+    /// Update fill_pos tracker. Call after writing to the cache at a position.
+    pub fn advance_pos(&mut self, pos: usize) {
+        self.fill_pos = self.fill_pos.max(pos + 1);
+    }
+
+    /// Get the tracked fill position (highest position written + 1).
+    pub fn fill_pos(&self) -> usize {
+        self.fill_pos
     }
 
     /// Snapshot KV cache state up to position `pos`.
@@ -312,6 +326,14 @@ pub struct ForwardContext {
     tiled_v: Vec<f32>, // [block_size × kv_dim] repacked values per kv group
     #[cfg(feature = "tiled_attention")]
     tiled_out: Vec<f32>, // [block_size × n_embd] tiled output before transpose
+    // Clustered LM head scratch buffers (avoid per-forward-pass allocation)
+    cluster_scores_buf: Vec<f32>, // [vocab_size] upper-bound for cluster scores
+    topk_indexed_buf: Vec<(usize, f32)>, // [vocab_size] indexed pairs for select_topk
+    // GQA lookup: kv_group_lut[h] = h * n_kv_head / n_head (pre-computed once)
+    kv_group_lut: Vec<usize>, // [n_head]
+    // Delta routing: pre-allocated source_refs index buffer (stores block indices, not slices)
+    #[cfg(feature = "delta_routing")]
+    delta_source_indices: Vec<usize>, // pre-allocated capacity for max sources
 }
 
 impl ForwardContext {
@@ -365,6 +387,17 @@ impl ForwardContext {
             tiled_v: vec![0.0; config.block_size * kvd],
             #[cfg(feature = "tiled_attention")]
             tiled_out: vec![0.0; config.block_size * config.n_embd],
+            cluster_scores_buf: vec![0.0; config.vocab_size],
+            topk_indexed_buf: vec![(0usize, 0.0f32); config.vocab_size],
+            kv_group_lut: (0..config.n_head)
+                .map(|h| h * config.n_kv_head / config.n_head)
+                .collect(),
+            #[cfg(feature = "delta_routing")]
+            delta_source_indices: {
+                let block_size = 4; // Default B=4
+                let n_blocks = config.n_layer.div_ceil(block_size);
+                Vec::with_capacity(n_blocks + 1)
+            },
         }
     }
 
@@ -378,6 +411,42 @@ impl ForwardContext {
     #[cfg(feature = "turboquant")]
     pub fn reset_tq_dequant(&mut self) {
         self.reset_dequant();
+    }
+
+    /// Perform delta routing using pre-allocated index buffer (avoids Vec::new() per call).
+    /// Collects block delta indices, then calls depth_route_with_deltas.
+    #[cfg(feature = "delta_routing")]
+    pub(crate) fn depth_route_blocks(
+        &mut self,
+        block_idx: usize,
+        layer_idx: usize,
+        query_weight: &[f32],
+        norm_weight: &[f32],
+        n_embd: usize,
+        _weights: &TransformerWeights,
+    ) {
+        // Collect source indices (reuse pre-allocated buffer)
+        self.delta_source_indices.clear();
+        for prev_block in 0..=block_idx {
+            if prev_block < self.block_deltas.len() {
+                self.delta_source_indices.push(prev_block);
+            }
+        }
+
+        // Call depth_route directly using pre-gathered indices
+        depth_route_with_indices(
+            &mut self.x[..n_embd],
+            &self.block_deltas,
+            &self.delta_source_indices,
+            query_weight,
+            norm_weight,
+            &mut self.delta_routing_logits,
+            n_embd,
+        );
+
+        // Reset current block delta
+        self.block_deltas[block_idx].fill(0.0);
+        let _ = layer_idx; // suppress unused warning
     }
 }
 
@@ -498,6 +567,7 @@ pub fn forward<'a>(
     pos: usize,
     config: &Config,
 ) -> &'a mut [f32] {
+    cache.advance_pos(pos);
     #[cfg(feature = "coda_fusion")]
     {
         #[cfg(not(feature = "domain_latent"))]
@@ -536,6 +606,7 @@ pub fn forward_with_domain_latent<'a>(
     lora: Option<&crate::types::LoraAdapter>,
     domain_latent: Option<&crate::types::DomainLatent>,
 ) -> &'a mut [f32] {
+    cache.advance_pos(pos);
     #[cfg(feature = "coda_fusion")]
     {
         forward_coda(ctx, weights, cache, token, pos, config, lora, domain_latent)
@@ -562,6 +633,7 @@ pub fn forward_decode_stage<'a>(
     config: &Config,
     stage: DecodeStage,
 ) -> &'a mut [f32] {
+    cache.advance_pos(pos);
     match stage {
         DecodeStage::Draft => forward_draft(ctx, weights, cache, token, pos, config),
         DecodeStage::Verify => forward_verify(ctx, weights, cache, token, pos, config),
@@ -655,6 +727,7 @@ pub fn forward_looped<'a>(
     residual_gate: &crate::types::ResidualGate,
     sdpa_gate: &crate::types::SdpaOutputGate,
 ) -> &'a mut [f32] {
+    cache.advance_pos(pos);
     use crate::types::{HybridPattern, LoopMode};
 
     let n = config.n_embd;
@@ -728,7 +801,7 @@ pub fn forward_looped<'a>(
                 ctx.attn_out[..n].fill(0.0);
                 let t_n = pos + 1;
                 for h in 0..config.n_head {
-                    let kv_group = h * config.n_kv_head / config.n_head;
+                    let kv_group = ctx.kv_group_lut[h];
                     unsafe {
                         attention_head(
                             &ctx.q,
@@ -751,7 +824,7 @@ pub fn forward_looped<'a>(
                 ctx.attn_out[..n].fill(0.0);
 
                 for h in 0..config.n_head {
-                    let kv_group = h * config.n_kv_head / config.n_head;
+                    let kv_group = ctx.kv_group_lut[h];
                     let head_state = &mut ahla_layer.heads[h];
 
                     crate::hla::ahla_step(
@@ -862,6 +935,7 @@ pub fn forward_training_free_loop<'a>(
     config: &Config,
     tf_config: &TrainingFreeLoopConfig,
 ) -> &'a mut [f32] {
+    cache.advance_pos(pos);
     use crate::tf_loop::{anchor_blend, sub_step_damped_euler};
     use katgpt_core::types::{CacheStrategy, IterationMode, SubStepStrategy};
 
@@ -1073,7 +1147,7 @@ fn forward_single_layer(
     n: usize,
     hd: usize,
     kvd: usize,
-    n_kv: usize,
+    _n_kv: usize,
 ) {
     // Pre-attention: RMSNorm → save residual → RMSNorm
     types::rmsnorm(&mut ctx.x);
@@ -1105,7 +1179,7 @@ fn forward_single_layer(
     ctx.attn_out[..n].fill(0.0);
     let t_n = pos + 1;
     for h in 0..config.n_head {
-        let kv_group = h * n_kv / config.n_head;
+        let kv_group = ctx.kv_group_lut[h];
         unsafe {
             attention_head(
                 &ctx.q,
@@ -1169,7 +1243,6 @@ pub fn select_topk_indices(scores: &[f32], k: usize) -> Vec<usize> {
         return Vec::new();
     }
 
-    // Collect (index, score) pairs
     let mut indexed: Vec<(usize, f32)> = scores.iter().copied().enumerate().collect();
 
     // Partial sort to partition top K (unstable, O(N))
@@ -1181,6 +1254,34 @@ pub fn select_topk_indices(scores: &[f32], k: usize) -> Vec<usize> {
     indexed[..k].sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
     indexed[..k].iter().map(|(i, _)| *i).collect()
+}
+
+/// In-place variant of [`select_topk_indices`] that reuses a pre-allocated buffer.
+///
+/// `indexed_buf` is cleared and filled with `(index, score)` pairs.
+/// Returns indices sorted by score descending (highest first).
+pub fn select_topk_indices_into(
+    scores: &[f32],
+    k: usize,
+    indexed_buf: &mut Vec<(usize, f32)>,
+) -> Vec<usize> {
+    let k = k.min(scores.len());
+    if k == 0 {
+        return Vec::new();
+    }
+
+    indexed_buf.clear();
+    indexed_buf.extend(scores.iter().copied().enumerate());
+
+    // Partial sort to partition top K (unstable, O(N))
+    indexed_buf.select_nth_unstable_by(k - 1, |a, b| {
+        b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    // Sort the top K by score descending (O(K log K))
+    indexed_buf[..k].sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+    indexed_buf[..k].iter().map(|(i, _)| *i).collect()
 }
 
 /// Two-stage clustered LM head for large vocabularies.
@@ -1204,11 +1305,14 @@ fn clustered_lm_head(
     vocab_size: usize,
     n_embd: usize,
     topk: usize,
+    cluster_scores_buf: &mut [f32],
+    topk_indexed_buf: &mut Vec<(usize, f32)>,
 ) {
     let num_clusters = cluster_map.len();
 
-    // Stage 1: compute cluster scores
-    let mut cluster_scores = vec![0.0f32; num_clusters];
+    // Stage 1: compute cluster scores (reuse pre-allocated buffer)
+    let cluster_scores = &mut cluster_scores_buf[..num_clusters];
+    cluster_scores.fill(0.0f32);
     for (c, score) in cluster_scores.iter_mut().enumerate() {
         let row_off = c * n_embd;
         *score = crate::simd::simd_dot_f32(
@@ -1222,7 +1326,7 @@ fn clustered_lm_head(
     let selected_clusters: Vec<usize> = if topk >= num_clusters {
         (0..num_clusters).collect()
     } else {
-        select_topk_indices(&cluster_scores, topk)
+        select_topk_indices_into(cluster_scores, topk, topk_indexed_buf)
     };
 
     // Stage 2: fill all logits with -inf, then compute exact for selected clusters
@@ -1315,7 +1419,7 @@ pub fn cluster_map_from_embeddings(
 /// where L is the total number of layers. For L=36, b_l ≈ -0.0285.
 /// This encourages near-identity routing at initialization.
 #[cfg(feature = "delta_routing")]
-#[allow(clippy::needless_range_loop)]
+#[allow(dead_code, clippy::needless_range_loop)]
 #[inline(always)]
 fn depth_route(
     residual: &mut [f32],
@@ -1370,6 +1474,69 @@ fn depth_route(
         let mut weighted = 0.0f32;
         for (i, &src) in sources.iter().enumerate() {
             weighted += logits_buf[i] * inv_sum * src[d];
+        }
+        residual[d] += weighted;
+    }
+}
+
+/// Delta routing variant that takes block deltas and indices directly.
+/// Avoids allocating a `Vec<&[f32]>` for source_refs by indexing into `block_deltas`.
+#[cfg(feature = "delta_routing")]
+fn depth_route_with_indices(
+    residual: &mut [f32],
+    block_deltas: &[Vec<f32>],
+    source_indices: &[usize],
+    query_weight: &[f32],   // [n_embd] per-layer query
+    norm_weight: &[f32],    // [n_embd] RMSNorm gamma
+    logits_buf: &mut [f32], // [N] temp buffer
+    n_embd: usize,
+) {
+    let n_sources = source_indices.len();
+    if n_sources == 0 {
+        return;
+    }
+
+    // 1. RMSNorm each source and compute dot product with query
+    let eps = 1e-5f32;
+    let mut max_logit = f32::NEG_INFINITY;
+
+    for (i, &src_idx) in source_indices.iter().enumerate() {
+        let src = &block_deltas[src_idx];
+        // Compute RMSNorm of source
+        let mut sum_sq = 0.0f32;
+        for &val in src.iter() {
+            sum_sq += val * val;
+        }
+        let rms = (sum_sq / n_embd as f32 + eps).sqrt();
+        let inv_rms = 1.0 / rms;
+
+        // Dot product with query weight (on normalized source)
+        let mut logit = 0.0f32;
+        for ((&s, &nw), &qw) in src.iter().zip(norm_weight.iter()).zip(query_weight.iter()) {
+            let normalized = s * inv_rms * nw;
+            logit += qw * normalized;
+        }
+
+        logits_buf[i] = logit;
+        if logit > max_logit {
+            max_logit = logit;
+        }
+    }
+
+    // 2. Softmax (numerically stable)
+    let mut sum_exp = 0.0f32;
+    for val in logits_buf.iter_mut().take(n_sources) {
+        let exp_val = (*val - max_logit).exp();
+        *val = exp_val;
+        sum_exp += exp_val;
+    }
+    let inv_sum = 1.0 / sum_exp;
+
+    // 3. Weighted sum of sources, added to residual (additive routing)
+    for d in 0..n_embd {
+        let mut weighted = 0.0f32;
+        for (i, &src_idx) in source_indices.iter().enumerate() {
+            weighted += logits_buf[i] * inv_sum * block_deltas[src_idx][d];
         }
         residual[d] += weighted;
     }
@@ -1449,7 +1616,7 @@ fn forward_base<'a>(
     let n = config.n_embd;
     let hd = config.head_dim;
     let kvd = types::kv_dim(config);
-    let n_kv = config.n_kv_head;
+    let _n_kv = config.n_kv_head;
 
     // 1. Embedding: x = wte[token] + wpe[pos]
     let tok_off = token * n;
@@ -1520,7 +1687,7 @@ fn forward_base<'a>(
         let t_n = pos + 1;
 
         for h in 0..config.n_head {
-            let kv_group = h * n_kv / config.n_head;
+            let kv_group = ctx.kv_group_lut[h];
             unsafe {
                 attention_head(
                     &ctx.q,
@@ -1625,28 +1792,14 @@ fn forward_base<'a>(
 
             // At block boundary: route accumulated deltas from all completed blocks
             if pos_in_block == block_size - 1 && block_idx < ctx.block_deltas.len() {
-                let query = &weights.delta_routing_query[layer_idx];
-                let norm = &weights.delta_routing_norm[layer_idx];
-
-                // Sources: accumulated deltas from previous blocks + current block
-                let mut source_refs: Vec<&[f32]> = Vec::new();
-                for prev_block in 0..=block_idx {
-                    if prev_block < ctx.block_deltas.len() {
-                        source_refs.push(&ctx.block_deltas[prev_block]);
-                    }
-                }
-
-                depth_route(
-                    &mut ctx.x[..n],
-                    &source_refs,
-                    query,
-                    norm,
-                    &mut ctx.delta_routing_logits,
+                ctx.depth_route_blocks(
+                    block_idx,
+                    layer_idx,
+                    &weights.delta_routing_query[layer_idx],
+                    &weights.delta_routing_norm[layer_idx],
                     n,
+                    weights,
                 );
-
-                // Reset current block delta
-                ctx.block_deltas[block_idx].fill(0.0);
             }
         }
     }
@@ -1678,6 +1831,8 @@ fn forward_base<'a>(
             config.vocab_size,
             n,
             config.mtp_cluster_topk,
+            &mut ctx.cluster_scores_buf,
+            &mut ctx.topk_indexed_buf,
         );
     } else {
         standard_lm_head(
@@ -1691,6 +1846,10 @@ fn forward_base<'a>(
 
     &mut ctx.logits
 }
+
+// ---------------------------------------------------------------------------
+// MTP Target Activation Projection (Plan 055)
+// ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
 // CODA Fused Forward Pass (Plan 103)
@@ -1744,7 +1903,7 @@ fn forward_coda<'a>(
     let n = config.n_embd;
     let hd = config.head_dim;
     let kvd = types::kv_dim(config);
-    let n_kv = config.n_kv_head;
+    let _n_kv = config.n_kv_head;
 
     // 1. Embedding: x = wte[token] + wpe[pos]
     let tok_off = token * n;
@@ -1799,7 +1958,7 @@ fn forward_coda<'a>(
         let t_n = pos + 1;
 
         for h in 0..config.n_head {
-            let kv_group = h * n_kv / config.n_head;
+            let kv_group = ctx.kv_group_lut[h];
             unsafe {
                 attention_head(
                     &ctx.q,
@@ -1918,27 +2077,14 @@ fn forward_coda<'a>(
 
             // At block boundary: route accumulated deltas from all completed blocks
             if pos_in_block == block_size - 1 && block_idx < ctx.block_deltas.len() {
-                let query = &weights.delta_routing_query[layer_idx];
-                let norm = &weights.delta_routing_norm[layer_idx];
-
-                let mut source_refs: Vec<&[f32]> = Vec::new();
-                for prev_block in 0..=block_idx {
-                    if prev_block < ctx.block_deltas.len() {
-                        source_refs.push(&ctx.block_deltas[prev_block]);
-                    }
-                }
-
-                depth_route(
-                    &mut ctx.x[..n],
-                    &source_refs,
-                    query,
-                    norm,
-                    &mut ctx.delta_routing_logits,
+                ctx.depth_route_blocks(
+                    block_idx,
+                    layer_idx,
+                    &weights.delta_routing_query[layer_idx],
+                    &weights.delta_routing_norm[layer_idx],
                     n,
+                    weights,
                 );
-
-                // Reset current block delta
-                ctx.block_deltas[block_idx].fill(0.0);
             }
         }
     }
@@ -1960,6 +2106,8 @@ fn forward_coda<'a>(
             config.vocab_size,
             n,
             config.mtp_cluster_topk,
+            &mut ctx.cluster_scores_buf,
+            &mut ctx.topk_indexed_buf,
         );
     } else {
         standard_lm_head(
@@ -2318,10 +2466,13 @@ pub fn forward_prefill<'a>(
     #[cfg(feature = "domain_latent")] domain_latent: Option<&crate::types::DomainLatent>,
 ) -> &'a mut [f32] {
     let prompt_len = tokens.len().min(prefill.max_prompt_len);
+    if prompt_len > 0 {
+        cache.advance_pos(prompt_len - 1);
+    }
     let n = config.n_embd;
     let kvd = crate::types::kv_dim(config);
     let hd = config.head_dim;
-    let n_kv = config.n_kv_head;
+    let _n_kv = config.n_kv_head;
 
     assert!(prompt_len > 0, "prefill requires at least one token");
     assert!(
@@ -2445,7 +2596,7 @@ pub fn forward_prefill<'a>(
             }
             // Repack K/V with GQA expansion: (position, kv_group) → (head, position)
             for h in 0..config.n_head {
-                let kv_group = h * n_kv / config.n_head;
+                let kv_group = ctx.kv_group_lut[h];
                 for p in 0..prompt_len {
                     let kv_src = p * kvd + kv_group * hd;
                     let dst_off = h * prompt_len * hd + p * hd;
@@ -2502,7 +2653,7 @@ pub fn forward_prefill<'a>(
                     );
                 }
                 for h in 0..config.n_head {
-                    let kv_group = h * n_kv / config.n_head;
+                    let kv_group = ctx.kv_group_lut[h];
                     unsafe {
                         attention_head(
                             &ctx.q,
@@ -2532,7 +2683,7 @@ pub fn forward_prefill<'a>(
                     );
                 }
                 for h in 0..config.n_head {
-                    let kv_group = h * n_kv / config.n_head;
+                    let kv_group = ctx.kv_group_lut[h];
                     unsafe {
                         attention_head(
                             &ctx.q,
@@ -2623,28 +2774,14 @@ pub fn forward_prefill<'a>(
 
                 // At block boundary: route accumulated deltas from all completed blocks
                 if pos_in_block == block_size - 1 && block_idx < ctx.block_deltas.len() {
-                    let query = &weights.delta_routing_query[layer_idx];
-                    let norm = &weights.delta_routing_norm[layer_idx];
-
-                    // Sources: accumulated deltas from previous blocks + current block
-                    let mut source_refs: Vec<&[f32]> = Vec::new();
-                    for prev_block in 0..=block_idx {
-                        if prev_block < ctx.block_deltas.len() {
-                            source_refs.push(&ctx.block_deltas[prev_block]);
-                        }
-                    }
-
-                    depth_route(
-                        &mut ctx.x[..n],
-                        &source_refs,
-                        query,
-                        norm,
-                        &mut ctx.delta_routing_logits,
+                    ctx.depth_route_blocks(
+                        block_idx,
+                        layer_idx,
+                        &weights.delta_routing_query[layer_idx],
+                        &weights.delta_routing_norm[layer_idx],
                         n,
+                        weights,
                     );
-
-                    // Reset current block delta
-                    ctx.block_deltas[block_idx].fill(0.0);
                 }
             }
 
@@ -2821,7 +2958,7 @@ pub fn forward_paged<'a>(
     let n = config.n_embd;
     let hd = config.head_dim;
     let kvd = crate::types::kv_dim(config);
-    let n_kv = config.n_kv_head;
+    let _n_kv = config.n_kv_head;
 
     // Ensure pages allocated for this sequence up to pos
     paged_cache.ensure_pages(seq_idx, pos);
@@ -2829,10 +2966,8 @@ pub fn forward_paged<'a>(
     // Flat KV cache for attention computation (pre-allocated, reused from ForwardContext)
     let t_n = pos + 1;
     let flat_kv_len = t_n * kvd;
-    let flat_key = &mut ctx.paged_flat_key[..flat_kv_len];
-    let flat_value = &mut ctx.paged_flat_value[..flat_kv_len];
-    flat_key.fill(0.0);
-    flat_value.fill(0.0);
+    ctx.paged_flat_key[..flat_kv_len].fill(0.0);
+    ctx.paged_flat_value[..flat_kv_len].fill(0.0);
 
     // 1. Embedding: x = wte[token] + wpe[pos]
     let tok_off = token * n;
@@ -2859,32 +2994,36 @@ pub fn forward_paged<'a>(
         paged_cache.write_kv(layer_idx, seq_idx, pos, &ctx.k, &ctx.v);
 
         // Build flat KV from paged cache for attention
-        for t in 0..t_n {
-            let k_slice = &mut flat_key[t * kvd..(t + 1) * kvd];
-            let v_slice = &mut flat_value[t * kvd..(t + 1) * kvd];
-            paged_cache.read_kv(layer_idx, seq_idx, t, k_slice, v_slice);
-        }
+        {
+            let flat_key = &mut ctx.paged_flat_key[..flat_kv_len];
+            let flat_value = &mut ctx.paged_flat_value[..flat_kv_len];
+            for t in 0..t_n {
+                let k_slice = &mut flat_key[t * kvd..(t + 1) * kvd];
+                let v_slice = &mut flat_value[t * kvd..(t + 1) * kvd];
+                paged_cache.read_kv(layer_idx, seq_idx, t, k_slice, v_slice);
+            }
 
-        // Multi-head attention with GQA (reuse existing attention_head)
-        let scale = ctx.attn_scale;
-        ctx.attn_out[..n].fill(0.0);
+            // Multi-head attention with GQA (reuse existing attention_head)
+            let scale = ctx.attn_scale;
+            ctx.attn_out[..n].fill(0.0);
 
-        for h in 0..config.n_head {
-            let kv_group = h * n_kv / config.n_head;
-            unsafe {
-                attention_head(
-                    &ctx.q,
-                    flat_key,
-                    flat_value,
-                    &mut ctx.attn_out,
-                    &mut ctx.scores,
-                    h * hd,
-                    kv_group * hd,
-                    kvd,
-                    hd,
-                    t_n,
-                    scale,
-                );
+            for h in 0..config.n_head {
+                let kv_group = ctx.kv_group_lut[h];
+                unsafe {
+                    attention_head(
+                        &ctx.q,
+                        flat_key,
+                        flat_value,
+                        &mut ctx.attn_out,
+                        &mut ctx.scores,
+                        h * hd,
+                        kv_group * hd,
+                        kvd,
+                        hd,
+                        t_n,
+                        scale,
+                    );
+                }
             }
         }
 
@@ -2951,28 +3090,14 @@ pub fn forward_paged<'a>(
 
             // At block boundary: route accumulated deltas from all completed blocks
             if pos_in_block == block_size - 1 && block_idx < ctx.block_deltas.len() {
-                let query = &weights.delta_routing_query[layer_idx];
-                let norm = &weights.delta_routing_norm[layer_idx];
-
-                // Sources: accumulated deltas from previous blocks + current block
-                let mut source_refs: Vec<&[f32]> = Vec::new();
-                for prev_block in 0..=block_idx {
-                    if prev_block < ctx.block_deltas.len() {
-                        source_refs.push(&ctx.block_deltas[prev_block]);
-                    }
-                }
-
-                depth_route(
-                    &mut ctx.x[..n],
-                    &source_refs,
-                    query,
-                    norm,
-                    &mut ctx.delta_routing_logits,
+                ctx.depth_route_blocks(
+                    block_idx,
+                    layer_idx,
+                    &weights.delta_routing_query[layer_idx],
+                    &weights.delta_routing_norm[layer_idx],
                     n,
+                    weights,
                 );
-
-                // Reset current block delta
-                ctx.block_deltas[block_idx].fill(0.0);
             }
         }
     }
@@ -3533,7 +3658,7 @@ pub fn forward_raven<'a>(
     let n = config.n_embd;
     let hd = config.head_dim;
     let kvd = types::kv_dim(config);
-    let n_kv = config.n_kv_head;
+    let _n_kv = config.n_kv_head;
 
     // 1. Embedding: x = wte[token] + wpe[pos]
     let tok_off = token * n;
@@ -3605,7 +3730,7 @@ pub fn forward_raven<'a>(
             // Pad/reshape query to kv_dim for slot attention (reuse pre-allocated buffer)
             ctx.raven_query_buf.resize(kvd, 0.0);
             ctx.raven_query_buf.fill(0.0);
-            let kv_group = h * n_kv / config.n_head;
+            let kv_group = ctx.kv_group_lut[h];
             for (d, &hq) in head_query.iter().enumerate() {
                 ctx.raven_query_buf[kv_group * hd + d] = hq * scale;
             }
@@ -3691,28 +3816,14 @@ pub fn forward_raven<'a>(
 
             // At block boundary: route accumulated deltas from all completed blocks
             if pos_in_block == block_size - 1 && block_idx < ctx.block_deltas.len() {
-                let query = &weights.delta_routing_query[layer_idx];
-                let norm = &weights.delta_routing_norm[layer_idx];
-
-                // Sources: accumulated deltas from previous blocks + current block
-                let mut source_refs: Vec<&[f32]> = Vec::new();
-                for prev_block in 0..=block_idx {
-                    if prev_block < ctx.block_deltas.len() {
-                        source_refs.push(&ctx.block_deltas[prev_block]);
-                    }
-                }
-
-                depth_route(
-                    &mut ctx.x[..n],
-                    &source_refs,
-                    query,
-                    norm,
-                    &mut ctx.delta_routing_logits,
+                ctx.depth_route_blocks(
+                    block_idx,
+                    layer_idx,
+                    &weights.delta_routing_query[layer_idx],
+                    &weights.delta_routing_norm[layer_idx],
                     n,
+                    weights,
                 );
-
-                // Reset current block delta
-                ctx.block_deltas[block_idx].fill(0.0);
             }
         }
     }
@@ -3756,7 +3867,7 @@ pub fn forward_quantized<'a, C: types::QuantizedKVCache>(
     let n = config.n_embd;
     let hd = config.head_dim;
     let kvd = types::kv_dim(config);
-    let n_kv = config.n_kv_head;
+    let _n_kv = config.n_kv_head;
 
     // 1. Embedding: x = wte[token] + wpe[pos]
     let tok_off = token * n;
@@ -3823,7 +3934,7 @@ pub fn forward_quantized<'a, C: types::QuantizedKVCache>(
         ctx.attn_out[..n].fill(0.0);
 
         for h in 0..config.n_head {
-            let kv_group = h * n_kv / config.n_head;
+            let kv_group = ctx.kv_group_lut[h];
             unsafe {
                 attention_head(
                     &ctx.q,
@@ -3904,33 +4015,19 @@ pub fn forward_quantized<'a, C: types::QuantizedKVCache>(
 
             // At block boundary: route accumulated deltas from all completed blocks
             if pos_in_block == block_size - 1 && block_idx < ctx.block_deltas.len() {
-                let query = &weights.delta_routing_query[layer_idx];
-                let norm = &weights.delta_routing_norm[layer_idx];
-
-                // Sources: accumulated deltas from previous blocks + current block
-                let mut source_refs: Vec<&[f32]> = Vec::new();
-                for prev_block in 0..=block_idx {
-                    if prev_block < ctx.block_deltas.len() {
-                        source_refs.push(&ctx.block_deltas[prev_block]);
-                    }
-                }
-
-                depth_route(
-                    &mut ctx.x[..n],
-                    &source_refs,
-                    query,
-                    norm,
-                    &mut ctx.delta_routing_logits,
+                ctx.depth_route_blocks(
+                    block_idx,
+                    layer_idx,
+                    &weights.delta_routing_query[layer_idx],
+                    &weights.delta_routing_norm[layer_idx],
                     n,
+                    weights,
                 );
-
-                // Reset current block delta
-                ctx.block_deltas[block_idx].fill(0.0);
             }
         }
     }
 
-    // Snapshot hidden state (Plan 009 compatibility)
+    // Snapshot hidden state (for Plan 009 compatibility)
     ctx.hidden_state[..n].copy_from_slice(&ctx.x[..n]);
 
     // LM Head
@@ -6187,6 +6284,8 @@ mod tests {
             config.vocab_size,
             n,
             1, // topk=1: backward compat (single cluster selection)
+            &mut vec![0.0f32; config.vocab_size],
+            &mut vec![(0usize, 0.0f32); config.vocab_size],
         );
 
         // Find winning cluster (the one with finite logits)
@@ -6244,6 +6343,8 @@ mod tests {
             config.vocab_size,
             n,
             1, // topk=1: backward compat (single cluster selection)
+            &mut vec![0.0f32; config.vocab_size],
+            &mut vec![(0usize, 0.0f32); config.vocab_size],
         );
 
         // Find winning cluster

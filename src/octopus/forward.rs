@@ -200,7 +200,7 @@ pub fn per_coord_mse(original: &[f32], reconstructed: &[f32]) -> f32 {
 #[cfg(all(feature = "octopus", feature = "maxsim"))]
 pub fn maxsim_score_octopus(
     queries: &[f32],
-    cache: &super::kv_cache::OctopusKVCache,
+    cache: &mut super::kv_cache::OctopusKVCache,
     layer: usize,
     pos_range: std::ops::Range<usize>,
     dim: usize,
@@ -210,14 +210,15 @@ pub fn maxsim_score_octopus(
         return 0.0;
     }
 
+    let mut key_buf = vec![0.0f32; dim];
     let mut score = 0.0f32;
     for i in 0..lq {
         let q_row = &queries[i * dim..(i + 1) * dim];
         let mut my_max = f32::NEG_INFINITY;
         for t in pos_range.clone() {
-            // Lazy dequantize: only one key vector in memory at a time.
-            let key = cache.dequantize_key(layer, t);
-            let dot = crate::simd::simd_dot_f32(q_row, &key, dim);
+            // Zero-alloc lazy dequantize into reusable buffer.
+            cache.dequantize_key_into(layer, t, &mut key_buf);
+            let dot = crate::simd::simd_dot_f32(q_row, &key_buf, dim);
             my_max = my_max.max(dot);
         }
         score += my_max;

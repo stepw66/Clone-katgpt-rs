@@ -133,29 +133,17 @@ pub fn restore_cache_lengths(
 /// Unlike `snapshot_cache_lengths` which records total buffer sizes,
 /// this records how many positions are actually filled, which is more
 /// useful for tracking cache state during loop iterations.
+///
+/// Uses the `fill_pos` tracker on MultiLayerKVCache for O(1) per layer
+/// instead of scanning all positions for non-zero entries.
 pub fn snapshot_cache_positions(
     cache: &MultiLayerKVCache,
     layers: std::ops::Range<usize>,
-    config: &Config,
+    _config: &Config,
 ) -> Vec<usize> {
-    let kd = kv_dim(config);
+    let tracked = cache.fill_pos();
     layers
-        .map(|i| {
-            if i < cache.layers.len() {
-                // Find the last non-zero position
-                let key = &cache.layers[i].key;
-                let mut max_pos = 0;
-                for p in 0..config.block_size {
-                    let off = p * kd;
-                    if key[off..off + kd].iter().any(|&v| v != 0.0) {
-                        max_pos = p + 1;
-                    }
-                }
-                max_pos
-            } else {
-                0
-            }
-        })
+        .map(|i| if i < cache.layers.len() { tracked } else { 0 })
         .collect()
 }
 

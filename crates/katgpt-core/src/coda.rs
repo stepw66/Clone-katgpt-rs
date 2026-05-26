@@ -60,8 +60,9 @@ impl GateActivation {
                 x * sigmoid
             }
             Self::GegeluTanh => {
-                let sqrt_2_over_pi = (2.0f32 / std::f32::consts::PI).sqrt();
-                let inner = sqrt_2_over_pi * (x + 0.044715 * x * x * x);
+                // Precomputed: sqrt(2/π) ≈ 0.7978845608
+                const SQRT_2_OVER_PI: f32 = 0.7978845608028654;
+                let inner = SQRT_2_OVER_PI * (x + 0.044715 * x * x * x);
                 0.5 * x * (1.0 + inner.tanh())
             }
             Self::Gegelu => {
@@ -443,8 +444,15 @@ pub fn simd_matmul_rmsnorm_rope(
 
         // RoPE rotation: index into precomputed table
         let rope_idx = pos * head_dim + (i % head_dim);
-        let cos_val = cos_table.get(rope_idx).copied().unwrap_or(1.0);
-        let sin_val = sin_table.get(rope_idx).copied().unwrap_or(0.0);
+        debug_assert!(rope_idx < cos_table.len(), "RoPE cos index out of bounds");
+        debug_assert!(rope_idx < sin_table.len(), "RoPE sin index out of bounds");
+        // Safety: tables are pre-sized to max_seq_len × head_dim; index verified above
+        let (cos_val, sin_val) = unsafe {
+            (
+                *cos_table.get_unchecked(rope_idx),
+                *sin_table.get_unchecked(rope_idx),
+            )
+        };
 
         unsafe {
             *output.get_unchecked_mut(even_row) = q_even * cos_val - q_odd * sin_val;

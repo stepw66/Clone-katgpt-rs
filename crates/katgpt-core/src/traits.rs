@@ -311,18 +311,17 @@ impl ActionSpaceLog {
     }
 
     /// Average action space size for a specific player.
+    /// Single-pass accumulation — zero allocation.
     pub fn avg_action_space_for(&self, player_id: u8) -> f32 {
-        let filtered: Vec<_> = self
-            .entries
-            .iter()
-            .filter(|&&(_, pid, _)| pid == player_id)
-            .collect();
-        match filtered.is_empty() {
-            true => 0.0,
-            false => {
-                filtered.iter().map(|&&(_, _, n)| n as f32).sum::<f32>() / filtered.len() as f32
+        let mut sum = 0.0f32;
+        let mut count = 0usize;
+        for &(_, pid, n) in &self.entries {
+            if pid == player_id {
+                sum += n as f32;
+                count += 1;
             }
         }
+        if count == 0 { 0.0 } else { sum / count as f32 }
     }
 
     /// Peak (maximum) action space size recorded.

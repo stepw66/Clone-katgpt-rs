@@ -110,16 +110,29 @@ pub fn encode_vector(
     use_joint_rounding: bool,
 ) -> Vec<TripletIndices> {
     let triplets = decompose(rotated);
-    triplets
-        .iter()
-        .map(|t| {
-            if use_joint_rounding {
-                encode_triplet_joint(t, codebook)
-            } else {
-                encode_triplet_simple(t, codebook)
-            }
-        })
-        .collect()
+    let mut out = Vec::with_capacity(triplets.len());
+    encode_vector_into(&triplets, codebook, use_joint_rounding, &mut out);
+    out
+}
+
+/// Zero-alloc variant of [`encode_vector`].
+///
+/// Takes pre-decomposed triplets and writes into `out`.
+pub fn encode_vector_into(
+    triplets: &[Triplet],
+    codebook: &OctopusCodebook,
+    use_joint_rounding: bool,
+    out: &mut Vec<TripletIndices>,
+) {
+    out.clear();
+    out.reserve(triplets.len());
+    for t in triplets {
+        out.push(if use_joint_rounding {
+            encode_triplet_joint(t, codebook)
+        } else {
+            encode_triplet_simple(t, codebook)
+        });
+    }
 }
 
 /// Decode a single triplet's indices back to a 3-element vector.
@@ -234,6 +247,22 @@ pub fn unpack_triplet_indices(
     nrm_bits: u8,
 ) -> Vec<TripletIndices> {
     let mut indices = Vec::with_capacity(n_triplets);
+    unpack_triplet_indices_into(packed, n_triplets, dir_bits, nrm_bits, &mut indices);
+    indices
+}
+
+/// Zero-alloc variant of [`unpack_triplet_indices`].
+///
+/// Clears and fills `out` with unpacked `TripletIndices`.
+pub fn unpack_triplet_indices_into(
+    packed: &[u8],
+    n_triplets: usize,
+    dir_bits: u8,
+    nrm_bits: u8,
+    out: &mut Vec<TripletIndices>,
+) {
+    out.clear();
+    out.reserve(n_triplets);
     let mut bit_pos = 0usize;
 
     for _ in 0..n_triplets {
@@ -243,10 +272,8 @@ pub fn unpack_triplet_indices(
         bit_pos += dir_bits as usize;
         let i_rho = unpack_bits(packed, bit_pos, nrm_bits) as u16;
         bit_pos += nrm_bits as usize;
-        indices.push(TripletIndices { i_xi, i_eta, i_rho });
+        out.push(TripletIndices { i_xi, i_eta, i_rho });
     }
-
-    indices
 }
 
 /// Pack `n_bits` of `value` into `buf` starting at `bit_pos`.

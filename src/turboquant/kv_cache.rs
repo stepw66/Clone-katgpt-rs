@@ -28,6 +28,8 @@ pub struct TurboQuantKVCache {
     val_norms: Vec<Vec<f32>>,
     /// Current position.
     pos: usize,
+    /// Highest position ever written (for efficient reset).
+    max_used_pos: usize,
     /// Number of layers.
     n_layers: usize,
     /// KV dimension (n_kv_head * head_dim).
@@ -37,6 +39,7 @@ pub struct TurboQuantKVCache {
     /// Value bits per coordinate.
     val_bits: u8,
     /// Maximum sequence length.
+    #[allow(dead_code)]
     max_seq_len: usize,
     // ── Scratch buffers for zero-alloc hot path (Plan 051) ──
     /// Normalized input: [kv_dim]. Reused across store/dequantize calls.
@@ -78,6 +81,7 @@ impl TurboQuantKVCache {
             val_indices: vec![vec![vec![0u8; packed_val_len]; max_seq_len]; n_layers],
             val_norms: vec![vec![0.0f32; max_seq_len]; n_layers],
             pos: 0,
+            max_used_pos: 0,
             n_layers,
             kv_dim,
             key_bits,
@@ -129,6 +133,7 @@ impl TurboQuantKVCache {
             ],
             val_norms: vec![vec![0.0f32; tq_config.max_seq_len]; tq_config.n_layers],
             pos: 0,
+            max_used_pos: 0,
             n_layers: tq_config.n_layers,
             kv_dim: tq_config.kv_dim,
             key_bits: tq_config.key_bits,
@@ -143,6 +148,7 @@ impl TurboQuantKVCache {
     /// Quantize and store a key vector at given layer and position.
     pub fn store_key(&mut self, layer: usize, pos: usize, key: &[f32]) {
         debug_assert_eq!(key.len(), self.kv_dim);
+        self.max_used_pos = self.max_used_pos.max(pos + 1);
         let layer_state = &self.layers[layer];
 
         // Compute norm
@@ -184,6 +190,7 @@ impl TurboQuantKVCache {
     /// Quantize and store a value vector at given layer and position.
     pub fn store_value(&mut self, layer: usize, pos: usize, value: &[f32]) {
         debug_assert_eq!(value.len(), self.kv_dim);
+        self.max_used_pos = self.max_used_pos.max(pos + 1);
         let layer_state = &self.layers[layer];
 
         let norm: f32 = value.iter().map(|x| x * x).sum::<f32>().sqrt();
@@ -343,8 +350,9 @@ impl TurboQuantKVCache {
 
     /// Reset cache for new sequence.
     pub fn reset(&mut self) {
+        let used = self.max_used_pos;
         for layer in 0..self.n_layers {
-            for pos in 0..self.max_seq_len {
+            for pos in 0..used {
                 self.key_indices[layer][pos].fill(0);
                 self.key_norms[layer][pos] = 0.0;
                 self.val_indices[layer][pos].fill(0);
@@ -352,6 +360,7 @@ impl TurboQuantKVCache {
             }
         }
         self.pos = 0;
+        self.max_used_pos = 0;
     }
 
     /// Bytes stored per token (K + V, all layers).
@@ -443,7 +452,9 @@ fn mat_vec_t(m: &[f32], v: &[f32]) -> Vec<f32> {
 
 /// In-place transpose matrix-vector multiply: out = M^T * v (zero-alloc, Plan 051).
 ///
-/// TODO: Replace with SIMD transpose matmul once available in `crate::simd`.
+/// M is dim×dim row-major, so M^T * v = Σ_j M[j*dim + i] * v[j].
+/// SIMD dot product doesn't directly apply to column-wise access, so we keep
+/// the scalar loop but use unsafe for bounds-elision.
 fn mat_vec_t_into(m: &[f32], v: &[f32], out: &mut [f32]) {
     let dim = v.len();
     debug_assert_eq!(out.len(), dim);

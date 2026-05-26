@@ -415,24 +415,35 @@ pub fn find_sufficient_set(
         .filter(|&tok| pruner.is_valid(depth, tok, placed_tokens))
         .collect();
 
+    // Scratch buffers for sort comparison and count_valid_extensions
+    let mut ext_buf = placed_tokens.to_vec();
+    let mut ext_a = placed_tokens.to_vec();
+    let mut ext_b = placed_tokens.to_vec();
+
     // Sort by constraint tightness (tokens that appear in most constraints first)
     // Heuristic: prefer tokens that are valid at deeper depths
     candidate_tokens.sort_by(|&a, &b| {
-        let da = count_valid_extensions(pruner, depth + 1, a, placed_tokens);
-        let db = count_valid_extensions(pruner, depth + 1, b, placed_tokens);
+        ext_a.clear();
+        ext_a.extend_from_slice(placed_tokens);
+        ext_a.push(a);
+        ext_b.clear();
+        ext_b.extend_from_slice(placed_tokens);
+        ext_b.push(b);
+        let da = count_valid_extensions_with(pruner, depth + 1, &ext_a);
+        let db = count_valid_extensions_with(pruner, depth + 1, &ext_b);
         da.cmp(&db) // ascending = tighter constraints first
     });
 
-    let mut extended = placed_tokens.to_vec();
     for tok in candidate_tokens.iter().take(max_search_depth) {
-        extended.push(*tok);
+        ext_buf.clear();
+        ext_buf.extend_from_slice(placed_tokens);
+        ext_buf.push(*tok);
         let score =
-            underspecification_score(&score_relevance(pruner, depth + 1, &extended, vocab_size));
+            underspecification_score(&score_relevance(pruner, depth + 1, &ext_buf, vocab_size));
         if score < 0.5 {
             sufficient.push(*tok);
             break; // found 1-sufficient
         }
-        extended.pop();
     }
     sufficient
 }
@@ -446,11 +457,20 @@ fn count_valid_extensions(
 ) -> usize {
     let mut extended = placed_tokens.to_vec();
     extended.push(last_token);
+    count_valid_extensions_with(pruner, depth, &extended)
+}
+
+/// Count valid extensions using a pre-built extended token list (avoids allocation).
+fn count_valid_extensions_with(
+    pruner: &dyn crate::traits::ConstraintPruner,
+    depth: usize,
+    extended: &[usize],
+) -> usize {
     // Count valid tokens at this depth (sampling up to 256 for efficiency)
     let sample_size = 256;
     let mut count = 0;
     for tok in 0..sample_size {
-        if pruner.is_valid(depth, tok, &extended) {
+        if pruner.is_valid(depth, tok, extended) {
             count += 1;
         }
     }
@@ -561,8 +581,9 @@ struct NarrowingPruner {
     /// Valid tokens at the target depth (before narrowing).
     valid_at_depth: Vec<usize>,
     /// Map: token placed at depth D → valid tokens at depth D+1.
+    /// Indexed by token value; empty Vec means "use valid_at_depth".
     /// The "sufficient" token maps to a singleton, others map to many.
-    narrowing: Vec<(usize, Vec<usize>)>,
+    narrowing: Vec<Vec<usize>>,
 }
 
 impl crate::traits::ConstraintPruner for NarrowingPruner {
@@ -575,10 +596,8 @@ impl crate::traits::ConstraintPruner for NarrowingPruner {
             Some(&t) => t,
             None => return self.valid_at_depth.contains(&token_idx),
         };
-        for (placed, valid_next) in &self.narrowing {
-            if *placed == last {
-                return valid_next.contains(&token_idx);
-            }
+        if last < self.narrowing.len() && !self.narrowing[last].is_empty() {
+            return self.narrowing[last].contains(&token_idx);
         }
         // Default: allow if in valid_at_depth
         self.valid_at_depth.contains(&token_idx)
@@ -616,10 +635,11 @@ pub fn generate_synthetic_csps(count_per_domain: usize) -> Vec<SyntheticCsp> {
             .collect();
         // All other tokens lead to full valid set (no narrowing)
         let default_next: Vec<usize> = (0..vocab_size).collect();
-        let mut narrowing = vec![(key, adjacent)];
+        let mut narrowing = vec![Vec::new(); vocab_size];
+        narrowing[key] = adjacent;
         for v in &valid_at_depth {
             if *v != key {
-                narrowing.push((*v, default_next.clone()));
+                narrowing[*v] = default_next.clone();
             }
         }
         let pruner = NarrowingPruner {
@@ -647,10 +667,11 @@ pub fn generate_synthetic_csps(count_per_domain: usize) -> Vec<SyntheticCsp> {
         let narrow_next = vec![(key + 1) % vocab_size];
         // Other placements leave 4-5 valid positions
         let wide_next: Vec<usize> = (0..vocab_size).filter(|&c| c % 3 == 0).collect();
-        let mut narrowing = vec![(key, narrow_next)];
+        let mut narrowing = vec![Vec::new(); vocab_size];
+        narrowing[key] = narrow_next;
         for v in &valid_at_depth {
             if *v != key {
-                narrowing.push((*v, wide_next.clone()));
+                narrowing[*v] = wide_next.clone();
             }
         }
         let pruner = NarrowingPruner {
@@ -681,10 +702,11 @@ pub fn generate_synthetic_csps(count_per_domain: usize) -> Vec<SyntheticCsp> {
         let narrow_next = vec![partner];
         // Placing any other → all still valid
         let wide_next: Vec<usize> = (0..vocab_size).collect();
-        let mut narrowing = vec![(key, narrow_next)];
+        let mut narrowing = vec![Vec::new(); vocab_size];
+        narrowing[key] = narrow_next;
         for v in &valid_at_depth {
             if *v != key {
-                narrowing.push((*v, wide_next.clone()));
+                narrowing[*v] = wide_next.clone();
             }
         }
         let pruner = NarrowingPruner {
