@@ -13,6 +13,9 @@ pub mod ppot;
 #[cfg(feature = "bandit")]
 pub mod flow_pruner;
 
+#[cfg(feature = "peira_distill")]
+pub mod peira_pruner;
+
 #[cfg(feature = "dllm")]
 pub mod d2f;
 

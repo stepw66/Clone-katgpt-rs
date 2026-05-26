@@ -146,7 +146,8 @@ If PEIRA's auxiliary loss shows no improvement over existing distillation losses
 | `crates/katgpt-core/src/lib.rs` | `#[cfg(feature = "peira_distill")] pub mod peira;` |
 | `crates/katgpt-core/Cargo.toml` | `peira_distill` feature gate |
 | `src/distill/peira.rs` | New: `PeiraDistiller`, `peira_alignment_score` |
-| `src/distill/mod.rs` | `#[cfg(feature = "peira_distill")] pub mod peira;` |
+| `src/speculative/peira_pruner.rs` | New: `PeiraPruner<P>` — PEIRA alignment-modulated ScreeningPruner |
+| `src/speculative/mod.rs` | `#[cfg(feature = "peira_distill")] pub mod peira_pruner;` |
 | `examples/core_06_peira.rs` | Demo: init → train → alignment → GOAT gates |
 | `.benchmarks/046_peira_distill_goat.md` | NEW: GOAT benchmark vs GFlowNet/SDAR/VPD |
 
