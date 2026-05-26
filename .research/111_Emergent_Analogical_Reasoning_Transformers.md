@@ -160,6 +160,7 @@ From `27_mmo_goat_pillars_decision_matrix.md`:
 | Research 062 (SHINE) | Context→LoRA hypernet IS a functor in category-theory terms |
 | Research 070 (GDN2) | Linear attention recurrence could implement functor application |
 | Research 039 (SpectralQuant) | Eigenbasis alignment ≈ structural alignment in spectral domain |
+| riir-ai Research 010 (KG × HLA × Role Transport) | **Direct hit** — role transport operators ARE functors, HLA higher-order moments capture "relations between relations". Dirichlet Energy is the quality diagnostic for KG training. Plan 151 (riir-ai) implements the full pipeline. |
 
 ## External References
 
