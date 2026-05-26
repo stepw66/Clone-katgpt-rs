@@ -371,6 +371,15 @@ fn select_arm(
                     .unwrap_or(std::cmp::Ordering::Equal)
             })
             .unwrap_or(0),
+        #[cfg(feature = "safe_bandit")]
+        BanditStrategy::SafePhased { .. } => (0..combat_arms)
+            .max_by(|&a, &b| {
+                stats
+                    .ucb1_score(a)
+                    .partial_cmp(&stats.ucb1_score(b))
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .unwrap_or(0),
     }
 }
 
