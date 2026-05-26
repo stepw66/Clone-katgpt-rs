@@ -8,6 +8,14 @@
 
 ---
 
+## Task Index
+
+- [ ] T1: `effective_rank()` — Representation Dimensionality Metric
+- [ ] T2: `avg_cosine_similarity()` — Anisotropy Metric
+- [ ] T3: `representation_geometry_report()` — Combined Diagnostic
+- [ ] T4: GOAT Proof — Baseline Measurement
+- [ ] T5: Integration with `DataProbe` (Plan 141)
+
 ## Why This Plan Exists
 
 Research 113 (NITP) reveals that representation degeneration (low effective rank, high cosine similarity) is a measurable pathology of NTP training. Even without implementing NITP's training loss, we can monitor representation geometry as a **diagnostic** — if our LoRA-trained models show degeneration, that explains poor downstream quality and justifies adding NITP loss (riir-ai Plan 148).

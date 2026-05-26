@@ -7,6 +7,13 @@
 
 ---
 
+## Task Index
+
+- [ ] T1: `dirichlet_energy()` function — SIMD Dirichlet Energy computation
+- [ ] T2: Adjacency construction helpers — functor + game state adjacency
+- [ ] T3: Dirichlet Energy probe for KV cache — katgpt-rs `data_probe/`
+- [ ] T4: Generic integration test — synthetic structural alignment
+
 ## Goal
 
 Add Dirichlet Energy computation as a generic embedding diagnostic in katgpt-rs. This is the core measurable from Research 111 — it quantifies whether embeddings are **structurally aligned** across entities/positions, which is a prerequisite for analogical reasoning.

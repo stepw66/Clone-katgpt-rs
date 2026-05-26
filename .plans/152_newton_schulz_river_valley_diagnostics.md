@@ -8,6 +8,13 @@
 
 ---
 
+## Task Index
+
+- [ ] T1: Newton-Schulz Orthogonalization (feature: `newton_schulz`)
+- [ ] T2: River-Valley Diagnostic Metrics (feature: `river_valley`)
+- [ ] T3: Muon Momentum Buffer (feature: `newton_schulz`)
+- [ ] T4: Wire into D2F Training (feature: `newton_schulz`)
+
 ## Goal
 
 Extract two infrastructure components from AMUSE (Research 114) into katgpt-rs:

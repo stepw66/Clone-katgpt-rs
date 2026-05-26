@@ -11,6 +11,13 @@
 
 ---
 
+## Task Index
+
+- [ ] Task 1: Structured Feedback Enum for Exploration Outcomes (DEFERRED)
+- [ ] Task 2: Cross-Reference GOAT Pillar 2 Academic Validation (DOCUMENTATION)
+
+---
+
 ## Verdict
 
 Sailor independently discovered the same three-phase pipeline (modelless targeting → model-based synthesis → concrete validation) that our architecture already implements. **No new code is immediately required.** Two incremental enhancements are identified for future implementation.

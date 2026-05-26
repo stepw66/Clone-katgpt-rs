@@ -11,6 +11,14 @@
 
 ---
 
+## Task Index
+
+- [ ] Phase 1: RoPE-Removal Enhancement (T1–T6) — P1
+- [ ] Phase 2: Full Asymmetric Codec (T7–T16) — P2
+- [ ] Phase 3: Fused GPU Attention (T17–T21) — P3, riir-ai
+
+---
+
 ## Verdict
 
 Shard's asymmetric codec design (PCA on no-RoPE K + Hadamard+VQ on V) achieves 10–11× compression, roughly doubling our best result. The RoPE-removal insight is the single highest-value contribution — it can enhance our existing SpectralQuant with a drop-in change. The fused compressed attention is a novel capability for GPU paths.

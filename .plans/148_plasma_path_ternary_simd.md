@@ -6,6 +6,20 @@
 **Feature Gate:** `plasma_path` (opt-in, no default)
 **GOAT Gates:** 5 (see below)
 
+## Task Index
+
+- [ ] T1: TernaryWeights Type
+- [ ] T2: Scalar Ternary Matvec
+- [ ] T3: NEON Ternary Matvec
+- [ ] T4: AVX2 Ternary Matvec
+- [ ] T5: Dispatch Wrapper
+- [ ] T6: Batched Ternary Matmul
+- [ ] T7: `.bits` File Loader
+- [ ] T8: Forward Pass Dispatch
+- [ ] T9: Quantization Utility
+- [ ] T10: GOAT Proof Tests
+- [ ] T11: Benchmark Harness
+
 ## Summary
 
 Distill the core technique from [Cintu07/ciot](https://github.com/Cintu07/ciot) — bit-plane ternary weight encoding with branchless SIMD conditional accumulation — into `katgpt-core`. This adds a **Plasma** compute tier: multiplication-free ternary matvec using only SIMD add/subtract, targeting 2-3× throughput over our existing FP32 FMA path for CPU-bound speculative drafting.
