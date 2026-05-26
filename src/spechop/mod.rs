@@ -21,6 +21,9 @@ pub mod types;
 pub mod verifier;
 pub mod window;
 
+#[cfg(all(feature = "spechop", feature = "cache_prune"))]
+pub mod segment_match;
+
 pub use cost_model::{
     InferenceStats, bounded_rel_lat, compute_optimal_k, oracle_rel_lat, should_activate_spechop,
     spechop_configurator_reward, starvation_prob,
@@ -35,6 +38,9 @@ pub use speculator::{CacheSpeculator, HopSpeculator};
 pub use types::{HopObservation, HopState, SpecError, SpecHopConfig, SpecOutcome};
 pub use verifier::{ObservationVerifier, RuleBasedVerifier, token_set_jaccard};
 pub use window::SpecWindow;
+
+#[cfg(all(feature = "spechop", feature = "cache_prune"))]
+pub use segment_match::{HopSegmentIndex, IndexedSegment, SegmentMatch};
 
 #[cfg(feature = "bandit")]
 pub use speculator::BanditSpeculator;

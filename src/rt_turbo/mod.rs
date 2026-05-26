@@ -42,6 +42,9 @@ pub mod forward;
 pub mod projection;
 pub mod top_p;
 
+#[cfg(all(feature = "rt_turbo", feature = "cache_prune"))]
+pub mod sat_retrieval;
+
 pub use calibration::{
     CalibrationConfigSnapshot, HeadCalibration, HeadClassification, calibrate_from_scores,
     compute_all_retrieval_scores, compute_retrieval_score,
@@ -52,3 +55,6 @@ pub use forward::{
 };
 pub use projection::RetrievalProjection;
 pub use top_p::{select_top_p, select_top_p_blockwise};
+
+#[cfg(all(feature = "rt_turbo", feature = "cache_prune"))]
+pub use sat_retrieval::{compute_retrieval_scores_sat, identify_retrieval_heads_sat};

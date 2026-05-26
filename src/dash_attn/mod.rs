@@ -23,7 +23,13 @@ pub mod entmax;
 pub mod forward;
 pub mod routing;
 
+#[cfg(all(feature = "dash_attn", feature = "cache_prune"))]
+pub mod sat_analysis;
+
 pub use chunk_summary::{ChunkSummaryCache, ChunkSummaryQuery};
 pub use entmax::{entmax_1p5, entmax_gqa_aggregate, entmax_support};
 pub use forward::{forward_dash_attn_decode, forward_dash_attn_prefill};
 pub use routing::{compute_routing_bias, score_blocks_entmax};
+
+#[cfg(all(feature = "dash_attn", feature = "cache_prune"))]
+pub use sat_analysis::{HeadSparsityInfo, head_sparsity_profile};
