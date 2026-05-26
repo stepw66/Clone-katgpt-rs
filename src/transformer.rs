@@ -1638,6 +1638,12 @@ fn forward_base<'a>(
     for (layer_idx, layer_weights) in weights.layers.iter().enumerate() {
         let layer_cache = &mut cache.layers[layer_idx];
 
+        // MLS: save pre-layer state for delta computation (Plan 104)
+        #[cfg(feature = "mls_aggregate")]
+        if config.mls_layers > 0 && layer_idx >= weights.layers.len() - config.mls_layers {
+            ctx.hidden_state[..n].copy_from_slice(&ctx.x[..n]);
+        }
+
         // Pre-attention: RMSNorm → save residual → RMSNorm
         rmsnorm(&mut ctx.x);
         ctx.xr[..n].copy_from_slice(&ctx.x[..n]);
@@ -1765,11 +1771,13 @@ fn forward_base<'a>(
         }
         crate::simd::simd_add_inplace(&mut ctx.x[..n], &ctx.xr2[..n]);
 
-        // MLS: accumulate last K layer residuals (Plan 104)
+        // MLS: accumulate layer delta (Plan 104)
         #[cfg(feature = "mls_aggregate")]
         {
             if config.mls_layers > 0 && layer_idx >= weights.layers.len() - config.mls_layers {
-                crate::simd::simd_add_inplace(&mut ctx.mls_buf[..n], &ctx.x[..n]);
+                for d in 0..n {
+                    ctx.mls_buf[d] += ctx.x[d] - ctx.hidden_state[d];
+                }
                 ctx.mls_count += 1;
             }
         }
@@ -1804,14 +1812,13 @@ fn forward_base<'a>(
         }
     }
 
-    // MLS: replace ctx.x with aggregated buffer (Plan 104)
+    // MLS: blend averaged layer deltas into final hidden state (Plan 104)
     #[cfg(feature = "mls_aggregate")]
     if ctx.mls_count > 0 {
-        let inv_k = 1.0 / ctx.mls_count as f32;
-        for v in &mut ctx.mls_buf[..n] {
-            *v *= inv_k;
+        let scale = 1.0 / ctx.mls_count as f32;
+        for d in 0..n {
+            ctx.x[d] += ctx.mls_buf[d] * scale;
         }
-        ctx.x[..n].copy_from_slice(&ctx.mls_buf[..n]);
     }
 
     // Snapshot hidden state (for Plan 009 compatibility)
@@ -1914,9 +1921,22 @@ fn forward_coda<'a>(
         &weights.wpe[pos_off_emb..pos_off_emb + n],
     );
 
+    // MLS: reset accumulator at start of forward call (Plan 104)
+    #[cfg(feature = "mls_aggregate")]
+    {
+        ctx.mls_buf[..n].fill(0.0);
+        ctx.mls_count = 0;
+    }
+
     // 2. Layer loop with CODA-fused kernels
     for (layer_idx, layer_weights) in weights.layers.iter().enumerate() {
         let layer_cache = &mut cache.layers[layer_idx];
+
+        // MLS: save pre-layer state for delta computation (Plan 104)
+        #[cfg(feature = "mls_aggregate")]
+        if config.mls_layers > 0 && layer_idx >= weights.layers.len() - config.mls_layers {
+            ctx.hidden_state[..n].copy_from_slice(&ctx.x[..n]);
+        }
 
         // Pre-attention: RMSNorm → save residual → RMSNorm (same as baseline)
         rmsnorm(&mut ctx.x);
@@ -2060,6 +2080,17 @@ fn forward_coda<'a>(
             }
         }
 
+        // MLS: accumulate layer delta (Plan 104)
+        #[cfg(feature = "mls_aggregate")]
+        {
+            if config.mls_layers > 0 && layer_idx >= weights.layers.len() - config.mls_layers {
+                for d in 0..n {
+                    ctx.mls_buf[d] += ctx.x[d] - ctx.hidden_state[d];
+                }
+                ctx.mls_count += 1;
+            }
+        }
+
         // Delta routing: accumulate per-sublayer deltas, route at block boundaries (Plan 097)
         #[cfg(feature = "delta_routing")]
         {
@@ -2086,6 +2117,15 @@ fn forward_coda<'a>(
                     weights,
                 );
             }
+        }
+    }
+
+    // MLS: blend averaged layer deltas into final hidden state (Plan 104)
+    #[cfg(feature = "mls_aggregate")]
+    if ctx.mls_count > 0 {
+        let scale = 1.0 / ctx.mls_count as f32;
+        for d in 0..n {
+            ctx.x[d] += ctx.mls_buf[d] * scale;
         }
     }
 
