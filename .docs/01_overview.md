@@ -45,10 +45,13 @@ A from-scratch Rust implementation of a GPT-2 style transformer with speculative
 - Subterranean Procedure Compilation: user-defined token-rewriting procedures compiled to zero-cost native code (Plan 110, default-on)
 - SR²AM Configurator Bandit: per-turn planning regulation via UCB1 (Plan 112, default-on)
 - Data Gate: self-play stability via task-level filtering (Plan 111, default-on)
+- Plasma Path: ternary SIMD matvec with bit-plane ternary weights, GOAT 5/5 (Plan 117, default-on)
+- Parallel-Probe 2D: consensus-based parallel branch control for N branches, GOAT 7/7 (Plan 133, default-on)
+- Training-Free Loop: ODE-motivated damped sub-stepping for inference-time refinement, GOAT 4/4 (Plan 136, default-on)
 - Tiled Attention: tiled online-softmax flash attention for CPU SIMD (Plan 115)
 - CODA Fusion: fused SIMD kernels matmul+residual+rmsnorm+activation (Plan 103)
 - Hybrid OCT+PQ: default KV codec — OCT triplet + PlanarQuant 2D Givens rotation (Plan 101, default-on)
-- 320+ tests passing (47 test files), zero clippy warnings
+- 740+ tests passing (111 test files), zero clippy warnings
 - Shared `katgpt-core` crate: types (Config, enums, math utilities), SIMD kernels — extracted for multi-crate reuse
 
 ## Module Structure
@@ -386,6 +389,10 @@ src/
   📊 behind --features stability_metrics (default)
   ⎗+ behind --features decode_specialize
   ⓘ behind --features tri_mode (dllm)
+  ⊛- behind --features plasma_path   (default)
+  ⊛-- behind --features parallel_probe (default)
+  ⊛--- behind --features tf_loop      (default)
+  Plans 137-145 modules are opt-in, see Feature Flags table
 ```
 
 ## Feature Flags
@@ -457,14 +464,29 @@ src/
 | `decode_specialize` | — | Stage-specialized decode paths for speculative decoding (Plan 102) |
 | `tri_mode` | `dllm` | Tri-Mode inference — AR + Diffusion + Self-Speculation, D2F Drafter Verifier (Plan 089) |
 | `unit_distance` | — | Unit Distance GOAT proof — number-theoretic lattice constructions (Plan 090) |
+| `plasma_path` | `katgpt-core/plasma_path` | Ternary SIMD matvec — bit-plane ternary weights for SIMD-accelerated matmul (Plan 117, default-on, GOAT 5/5) |
+| `parallel_probe` | — | Parallel-Probe 2D — consensus-based parallel branch control for N parallel reasoning branches (Plan 133, default-on, GOAT 7/7) |
+| `tf_loop` | `katgpt-core/tf_loop`, `lt2_looped` | Training-Free Loop — pure inference-time mid-stack looping with ODE-motivated damped sub-stepping (Plan 136, default-on, GOAT 4/4) |
+| `safe_bandit` | `bandit` | PrudentBanker Safe-Phased Bandit — delay-calibrated safe exploration with bounded regret (Plan 137, opt-in) |
+| `stiff_anomaly` | — | Stiff/Soft Subspace Anomaly Gate — eigenvalue decomposition anomaly detection (Plan 138, opt-in) |
+| `ega_attn` | — | Energy-Gated Attention — spectral salience gating (Plan 139, opt-in) |
+| `cache_prune` | — | CachePrune — SAT + rolling hash + sensitivity masking for KV cache pruning (Plan 140, opt-in) |
+| `data_probe` | — | Data Probe Diagnostics — information-theoretic validation with Markov chain analysis (Plan 141, opt-in) |
+| `state_source` | `bandit` | State-Source Modelless Distillation — state-visitation tracking + P-UCB selector (Plan 142, opt-in) |
+| `skill_opt` | — | SkillOpt — text-space skill optimization framework (Plan 144, opt-in) |
+| `proof_cert` | — | Hierarchical GOAT Proof Certificates — formal verification methodology with certificate chains (Plan 145, opt-in) |
+| `nexus_elo` | `state_source`, `bandit` | Nexus Elo — Plackett-Luce + P-UCB + goal cache for DDTree/SR²AM (Plan 143, opt-in) |
+| `mech_attribution` | `cna_steering`, `ropd_rubric`, `bandit` | Mechanistic Data Attribution — catalyst pattern detection + influence proxy (Plan 111, opt-in) |
+| `event_log` | `bandit` | Event-sourced game traces with fork-and-diff (Plan 124, GOAT 22/22) |
+| `epiplexity_scoring` | `bandit` | Epiplexity structural information scoring — prequential coding estimator (Plan 130, opt-in) |
 | `full` | all above (excludes `stepcode`, `sp_kv`) | Enable all features |
 
-Default features: `sparse_mlp`, `domain_latent`, `ppot`, `bandit`, `bt_rank`, `spectral_quant`, `hybrid_oct_pq`, `elf_sde`, `cna_steering`, `deep_manifold`, `federation`, `tes_loop`, `lattice_deduction`, `delta_routing`, `stability_metrics`, `mls_aggregate`, `gdn2_attention`, `dash_attn`, `dreamer`, `lt2_looped`, `dmax_spd`, `eqr_convergence`, `subterranean`, `sr2am_configurator`, `data_gate` (production best perf + accuracy, Plans 051, 077-079, 085-089, 097, 099, 101-112, 119).
+Default features: `sparse_mlp`, `domain_latent`, `ppot`, `bandit`, `bt_rank`, `spectral_quant`, `hybrid_oct_pq`, `elf_sde`, `cna_steering`, `deep_manifold`, `federation`, `tes_loop`, `lattice_deduction`, `delta_routing`, `stability_metrics`, `mls_aggregate`, `gdn2_attention`, `dash_attn`, `dreamer`, `lt2_looped`, `dmax_spd`, `eqr_convergence`, `subterranean`, `sr2am_configurator`, `data_gate`, `plasma_path`, `parallel_probe`, `tf_loop` (production best perf + accuracy, Plans 051, 077-079, 085-089, 097, 099, 101-112, 119, 131, 133, 136).
 
 ## Quick Start
 
 ```bash
-cargo test --quiet --workspace --all-features   # Run all 320+ tests
+cargo test --quiet --workspace --all-features   # Run all 740+ tests
 cargo run --release                             # Run benchmark suite (includes Leviathan verification)
 cargo run --example hello_py2rs                                # BPE + bidirectional prefill demo
 cargo run --example sudoku_01_9x9 --features sudoku           # Sudoku streaming solver

@@ -1917,7 +1917,7 @@ cargo run --release --features sudoku
 # Run everything
 cargo run --release --all-features
 
-# Run all tests (47 test files, 320+ cases)
+# Run all tests (111 test files, 740+ cases)
 cargo test --quiet --workspace --all-features
 
 # Run Sudoku solver example
@@ -2289,8 +2289,8 @@ src/
   feedback.rs       TTT feedback (feature-gated feedback)
   benchmark.rs      BenchResult, run_all, save_results_csv, bench_hla_vs_flat_cache, bench_hla_memory, bench_hla_quality, bench_simd, bench_sparse_mlp
   plot.rs           PNG horizontal bar chart
-examples/           63 examples (sudoku, validator, bandit, bomber, monopoly, tactical, dungeon, go, fft, review, stepcode, cna)
-tests/              47 test files + 9 benchmark suites (TurboQuant, PFlash NIAH, SpectralQuant, SP-KV)
+examples/           82 examples (sudoku, validator, bandit, bomber, monopoly, tactical, dungeon, go, fft, review, stepcode, cna, spechop, questbench)
+tests/              110 test files + 9 benchmark suites (TurboQuant, PFlash NIAH, SpectralQuant, SP-KV)
 bench/              Auto-numbered PNG + CSV benchmark output
 ```
 
