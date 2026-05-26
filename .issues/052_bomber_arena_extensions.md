@@ -151,8 +151,8 @@ Build an outer orchestration loop that:
 | Task | Scope | Impact | Effort | Status |
 |------|-------|--------|--------|--------|
 | **B: Custom Maps** | Low | High (benchmark reproducibility) | Low | ✅ Done |
-| **A: Complex Bombs** | Medium | Medium (gameplay depth) | Medium — ECS extension + blast logic | Open |
-| **C: Agent Loop** | High | High (self-improving validators) | High — new orchestration layer | C1-C4 ✅, C5-C10 Open |
+| **A: Complex Bombs** | Medium | Medium (gameplay depth) | Medium — ECS extension + blast logic | ✅ Done |
+| **C: Agent Loop** | High | High (self-improving validators) | High — new orchestration layer | ✅ Done |
 
 **Recommended order:** A → C (B complete, gameplay next, then research)
 
