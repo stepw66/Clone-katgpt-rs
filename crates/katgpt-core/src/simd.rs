@@ -59,15 +59,18 @@ fn is_avx2_fma_available() -> bool {
     }
     #[cfg(not(target_feature = "avx2"))]
     {
-        // Runtime detection via cpuid
-        let cpuid1 = unsafe { core::arch::x86_64::__cpuid(1) };
-        let has_avx = (cpuid1.ecx & (1 << 28)) != 0;
-        let has_fma = (cpuid1.ecx & (1 << 12)) != 0;
-
-        let cpuid7 = unsafe { core::arch::x86_64::__cpuid(7) };
-        let has_avx2 = (cpuid7.ebx & (1 << 5)) != 0;
-
-        has_avx && has_fma && has_avx2
+        use std::sync::atomic::{AtomicBool, Ordering};
+        static CACHED: AtomicBool = AtomicBool::new(false);
+        static INIT: std::sync::Once = std::sync::Once::new();
+        INIT.call_once(|| {
+            let cpuid1 = unsafe { core::arch::x86_64::__cpuid(1) };
+            let has_avx = (cpuid1.ecx & (1 << 28)) != 0;
+            let has_fma = (cpuid1.ecx & (1 << 12)) != 0;
+            let cpuid7 = unsafe { core::arch::x86_64::__cpuid(7) };
+            let has_avx2 = (cpuid7.ebx & (1 << 5)) != 0;
+            CACHED.store(has_avx && has_fma && has_avx2, Ordering::Relaxed);
+        });
+        CACHED.load(Ordering::Relaxed)
     }
 }
 
@@ -146,7 +149,7 @@ unsafe fn neon_dot_f32(a: &[f32], b: &[f32], len: usize) -> f32 {
 #[cfg(target_arch = "x86_64")]
 #[inline]
 unsafe fn avx2_dot_f32(a: &[f32], b: &[f32], len: usize) -> f32 {
-    use core::arch::x86_64::{_mm256_add_ps, _mm256_loadu_ps, _mm256_mul_ps, _mm256_setzero_ps};
+    use core::arch::x86_64::{_mm256_fmadd_ps, _mm256_loadu_ps, _mm256_setzero_ps};
 
     unsafe {
         let mut acc = _mm256_setzero_ps();
@@ -156,8 +159,7 @@ unsafe fn avx2_dot_f32(a: &[f32], b: &[f32], len: usize) -> f32 {
         for _ in 0..chunks {
             let va = _mm256_loadu_ps(a.as_ptr().add(i));
             let vb = _mm256_loadu_ps(b.as_ptr().add(i));
-            let prod = _mm256_mul_ps(va, vb);
-            acc = _mm256_add_ps(acc, prod);
+            acc = _mm256_fmadd_ps(va, vb, acc);
             i += 8;
         }
 

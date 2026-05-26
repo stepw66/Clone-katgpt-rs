@@ -72,15 +72,8 @@ pub fn forward_gdn2<'a>(
         .map(|l| l.gate_config)
         .unwrap_or_default();
 
-    // Pre-allocate temp buffers once (reused across layers)
-    let mut out_buf = vec![0.0f32; hd];
-    let mut temp_buf = vec![0.0f32; hd];
-
     // Default gate values for MVP (no learned gate projections yet)
-    let erase_b = vec![0.5f32; hd]; // half-open erase gate
-    let decay_alpha = vec![0.99f32; hd]; // slow decay
     let write_w_scalar = 1.0f32; // scalar w for EraseOnly/Kda
-    let write_w_channel = vec![1.0f32; hd]; // channel w for Full
 
     // 1. Embedding: x = wte[token] + wpe[pos]
     let tok_off = token * n;
@@ -116,6 +109,10 @@ pub fn forward_gdn2<'a>(
 
         // ── GDN2: recurrent step per Q head (replaces KV store + attention loop) ──
 
+        // Reuse pre-allocated scratch buffers from cache (zero alloc in hot path)
+        layer_cache.out_buf.fill(0.0);
+        layer_cache.temp_buf.fill(0.0);
+
         ctx.attn_out[..n].fill(0.0);
         for h in 0..config.n_head {
             let kv_group = h * config.n_kv_head / config.n_head;
@@ -132,19 +129,20 @@ pub fn forward_gdn2<'a>(
                 v_h,
                 q_h,
                 s,
-                &decay_alpha,
-                &erase_b,
+                &layer_cache.decay_alpha,
+                &layer_cache.erase_b,
                 write_w_scalar,
-                &write_w_channel,
-                &mut out_buf,
-                &mut temp_buf,
+                &layer_cache.write_w_channel,
+                &mut layer_cache.out_buf,
+                &mut layer_cache.temp_buf,
+                &mut layer_cache.delta,
                 hd,
                 hd,
                 gate_config,
             );
 
             // Copy output to attn_out
-            ctx.attn_out[h * hd..(h + 1) * hd].copy_from_slice(&out_buf);
+            ctx.attn_out[h * hd..(h + 1) * hd].copy_from_slice(&layer_cache.out_buf);
         }
 
         // ── End GDN2 ──

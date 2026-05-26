@@ -30,6 +30,7 @@ use crate::simd::{simd_outer_product_acc, simd_scale_inplace};
 /// * `w` — Channel-wise write gate `[dv]` for `Full` mode, values in [0, 1]
 /// * `out` — Output buffer `[dv]`, written to
 /// * `temp` — Temporary buffer `[dv]`, used internally for the read step
+/// * `delta` — Delta buffer `[dv]`, used internally for the update step (pre-allocated)
 /// * `dk` — Key/query dimension (head_dim)
 /// * `dv` — Value dimension (head_dim)
 /// * `gate_config` — Which gate variant to use
@@ -45,6 +46,7 @@ pub fn gdn2_recurrent_step(
     w: &[f32],
     out: &mut [f32],
     temp: &mut [f32],
+    delta: &mut [f32],
     dk: usize,
     dv: usize,
     gate_config: Gdn2GateConfig,
@@ -58,6 +60,7 @@ pub fn gdn2_recurrent_step(
     debug_assert!(w.len() >= dv || gate_config != Gdn2GateConfig::Full);
     debug_assert_eq!(out.len(), dv);
     debug_assert_eq!(temp.len(), dv);
+    debug_assert_eq!(delta.len(), dv);
 
     // Step 1: Decay S *= Diag(alpha) — row-wise scale
     for (row, &alpha_row) in alpha.iter().enumerate() {
@@ -82,8 +85,8 @@ pub fn gdn2_recurrent_step(
     }
 
     // Step 3: Update S += k ⊗ (w⊙v − r)
-    // Compute delta = w⊙v − r, then outer product accumulate
-    let mut delta = vec![0.0f32; dv];
+    // Compute delta = w⊙v − r, then outer product accumulate (reuse pre-allocated buffer)
+    delta.fill(0.0);
     match gate_config {
         Gdn2GateConfig::EraseOnly | Gdn2GateConfig::Kda => {
             for j in 0..dv {
@@ -174,6 +177,7 @@ mod tests {
         let w_channel = vec![1.0; dv];
         let mut out = vec![0.0; dv];
         let mut temp = vec![0.0; dv];
+        let mut delta = vec![0.0; dv];
 
         gdn2_recurrent_step(
             &k,
@@ -186,6 +190,7 @@ mod tests {
             &w_channel,
             &mut out,
             &mut temp,
+            &mut delta,
             dk,
             dv,
             Gdn2GateConfig::EraseOnly,
@@ -209,6 +214,7 @@ mod tests {
         let w_channel = vec![0.9; dv];
         let mut out = vec![0.0; dv];
         let mut temp = vec![0.0; dv];
+        let mut delta = vec![0.0; dv];
 
         for gate_config in [
             Gdn2GateConfig::EraseOnly,
@@ -227,6 +233,7 @@ mod tests {
                 &w_channel,
                 &mut out,
                 &mut temp,
+                &mut delta,
                 dk,
                 dv,
                 gate_config,
@@ -255,6 +262,7 @@ mod tests {
         let w_channel = vec![1.0; dv];
         let mut out = vec![0.0; dv];
         let mut temp = vec![0.0; dv];
+        let mut delta = vec![0.0; dv];
 
         gdn2_recurrent_step(
             &k,
@@ -267,6 +275,7 @@ mod tests {
             &w_channel,
             &mut out,
             &mut temp,
+            &mut delta,
             dk,
             dv,
             Gdn2GateConfig::EraseOnly,
@@ -294,6 +303,7 @@ mod tests {
         let w_channel = vec![1.0; dv]; // open write gate
         let mut out = vec![0.0; dv];
         let mut temp = vec![0.0; dv];
+        let mut delta = vec![0.0; dv];
 
         gdn2_recurrent_step(
             &k,
@@ -306,6 +316,7 @@ mod tests {
             &w_channel,
             &mut out,
             &mut temp,
+            &mut delta,
             dk,
             dv,
             Gdn2GateConfig::EraseOnly,
@@ -331,6 +342,7 @@ mod tests {
         let w_channel = vec![1.0; dv];
         let mut out = vec![0.0; dv];
         let mut temp = vec![0.0; dv];
+        let mut delta = vec![0.0; dv];
 
         // Token 1: k = [1,0,0,0], v = [1,0,0,0]
         let k1 = vec![1.0, 0.0, 0.0, 0.0];
@@ -347,6 +359,7 @@ mod tests {
             &w_channel,
             &mut out,
             &mut temp,
+            &mut delta,
             dk,
             dv,
             Gdn2GateConfig::EraseOnly,
@@ -367,6 +380,7 @@ mod tests {
             &w_channel,
             &mut out,
             &mut temp,
+            &mut delta,
             dk,
             dv,
             Gdn2GateConfig::EraseOnly,

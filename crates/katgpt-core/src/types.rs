@@ -1812,15 +1812,11 @@ pub fn lora_apply(output: &mut [f32], lora: &LoraAdapter, input: &[f32], lora_bu
     // 1. hidden = A @ input  (rank × in_dim) @ [in_dim] → [rank]
     matmul(lora_buf, &lora.a, input, lora.rank, lora.in_dim);
 
-    // 2. output += scale × (B @ hidden)  — fused, no intermediate delta buffer
+    // 2. output += scale × (B @ hidden) — SIMD-accelerated per-row dot product
     for r in 0..lora.out_dim {
         let row_off = r * lora.rank;
-        let mut sum = 0.0f32;
-        for k in 0..lora.rank {
-            unsafe {
-                sum += *lora.b.get_unchecked(row_off + k) * *lora_buf.get_unchecked(k);
-            }
-        }
+        let sum =
+            crate::simd::simd_dot_f32(&lora.b[row_off..row_off + lora.rank], lora_buf, lora.rank);
         unsafe {
             *output.get_unchecked_mut(r) += scale * sum;
         }

@@ -267,6 +267,8 @@ pub struct ForwardContext {
     pub hidden_state: Vec<f32>,    // [n_embd] final hidden state (Plan 009 compat)
     /// LoRA intermediate buffer [lora_rank]. Pre-allocated, zero alloc in hot path.
     pub lora_buf: Vec<f32>,
+    /// Pre-computed attention scale: `1.0 / sqrt(head_dim)`. Constant per config.
+    attn_scale: f32,
     // CNA: contrastive neuron attribution runtime modulator (Plan 087)
     #[cfg(feature = "cna_steering")]
     pub cna_modulator: Option<crate::pruners::CnaModulator>,
@@ -329,6 +331,7 @@ impl ForwardContext {
             logits: vec![0.0; config.vocab_size],
             hidden_state: vec![0.0; config.n_embd],
             lora_buf: vec![0.0; config.lora_rank],
+            attn_scale: 1.0 / (config.head_dim as f32).sqrt(),
             #[cfg(feature = "cna_steering")]
             cna_modulator: None,
             #[cfg(feature = "sparse_mlp")]
@@ -721,7 +724,7 @@ pub fn forward_looped<'a>(
                 }
 
                 // Multi-head attention with GQA
-                let scale = 1.0 / (hd as f32).sqrt();
+                let scale = ctx.attn_scale;
                 ctx.attn_out[..n].fill(0.0);
                 let t_n = pos + 1;
                 for h in 0..config.n_head {
@@ -1098,7 +1101,7 @@ fn forward_single_layer(
     }
 
     // Multi-head attention with GQA
-    let scale = 1.0 / (hd as f32).sqrt();
+    let scale = ctx.attn_scale;
     ctx.attn_out[..n].fill(0.0);
     let t_n = pos + 1;
     for h in 0..config.n_head {
@@ -1512,7 +1515,7 @@ fn forward_base<'a>(
         }
 
         // Multi-head attention with GQA: fused score → softmax → weighted value per head
-        let scale = 1.0 / (hd as f32).sqrt();
+        let scale = ctx.attn_scale;
         ctx.attn_out[..n].fill(0.0);
         let t_n = pos + 1;
 
@@ -1791,7 +1794,7 @@ fn forward_coda<'a>(
         }
 
         // Multi-head attention with GQA: fused score → softmax → weighted value per head
-        let scale = 1.0 / (hd as f32).sqrt();
+        let scale = ctx.attn_scale;
         ctx.attn_out[..n].fill(0.0);
         let t_n = pos + 1;
 
@@ -2490,7 +2493,7 @@ pub fn forward_prefill<'a>(
                 }
             } else {
                 // Per-head attention for small prompts (below threshold)
-                let scale = 1.0 / (hd as f32).sqrt();
+                let scale = ctx.attn_scale;
                 unsafe {
                     std::ptr::copy_nonoverlapping(
                         prefill.queries.as_ptr().add(q_off),
@@ -2520,7 +2523,7 @@ pub fn forward_prefill<'a>(
 
             #[cfg(not(feature = "tiled_attention"))]
             {
-                let scale = 1.0 / (hd as f32).sqrt();
+                let scale = ctx.attn_scale;
                 unsafe {
                     std::ptr::copy_nonoverlapping(
                         prefill.queries.as_ptr().add(q_off),
@@ -2863,7 +2866,7 @@ pub fn forward_paged<'a>(
         }
 
         // Multi-head attention with GQA (reuse existing attention_head)
-        let scale = 1.0 / (hd as f32).sqrt();
+        let scale = ctx.attn_scale;
         ctx.attn_out[..n].fill(0.0);
 
         for h in 0..config.n_head {
@@ -3592,7 +3595,7 @@ pub fn forward_raven<'a>(
         );
 
         // Raven: readout via attention over fixed slots (O(num_slots) not O(pos))
-        let scale = 1.0 / (hd as f32).sqrt();
+        let scale = ctx.attn_scale;
         ctx.attn_out[..n].fill(0.0);
 
         for h in 0..config.n_head {
@@ -3816,7 +3819,7 @@ pub fn forward_quantized<'a, C: types::QuantizedKVCache>(
         ctx.dequant_pos[layer_idx] = pos;
 
         // Multi-head attention with GQA using dequantized flat cache
-        let scale = 1.0 / (hd as f32).sqrt();
+        let scale = ctx.attn_scale;
         ctx.attn_out[..n].fill(0.0);
 
         for h in 0..config.n_head {

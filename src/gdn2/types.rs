@@ -85,6 +85,20 @@ pub struct Gdn2LayerState {
     pub heads: Vec<Gdn2HeadState>,
     /// Gate configuration for this layer.
     pub gate_config: Gdn2GateConfig,
+
+    // ── Pre-allocated scratch buffers (zero alloc in hot path) ──
+    /// Output buffer `[head_dim]`, zeroed before each use.
+    pub out_buf: Vec<f32>,
+    /// Temporary buffer `[head_dim]`, zeroed before each use.
+    pub temp_buf: Vec<f32>,
+    /// Erase gate defaults `[head_dim]`, pre-filled with 0.5.
+    pub erase_b: Vec<f32>,
+    /// Per-channel decay `[head_dim]`, pre-filled with 0.99.
+    pub decay_alpha: Vec<f32>,
+    /// Channel-wise write gate `[head_dim]`, pre-filled with 1.0.
+    pub write_w_channel: Vec<f32>,
+    /// Delta buffer `[head_dim]`, zeroed before each use.
+    pub delta: Vec<f32>,
 }
 
 impl Gdn2LayerState {
@@ -97,10 +111,19 @@ impl Gdn2LayerState {
                 .map(|_| Gdn2HeadState::new(dk, dv))
                 .collect(),
             gate_config,
+            out_buf: vec![0.0; dv],
+            temp_buf: vec![0.0; dv],
+            erase_b: vec![0.5; dv],
+            decay_alpha: vec![0.99; dk],
+            write_w_channel: vec![1.0; dv],
+            delta: vec![0.0; dv],
         }
     }
 
     /// Reset to zeroed state (reuse allocations).
+    ///
+    /// Only resets the head state matrices; scratch buffers are zeroed
+    /// on each use so they don't need resetting here.
     pub fn reset(&mut self) {
         for h in &mut self.heads {
             h.reset();

@@ -196,13 +196,9 @@ fn compute_mse(boundaries: &[f32], centroids: &[f32], dim: usize) -> f32 {
 
 impl TurboQuantCodebook {
     /// Quantize a value using the codebook. Returns index in `[0, 2^bits)`.
+    /// Uses binary search on monotonic boundaries — O(log n) instead of O(n).
     pub fn quantize(&self, value: f32) -> u8 {
-        for (i, &b) in self.boundaries.iter().enumerate() {
-            if value < b {
-                return i as u8;
-            }
-        }
-        self.boundaries.len() as u8
+        self.boundaries.partition_point(|&b| value >= b) as u8
     }
 
     /// Dequantize an index back to the centroid value.
