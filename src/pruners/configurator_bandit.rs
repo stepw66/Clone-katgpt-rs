@@ -279,6 +279,62 @@ impl Default for ConfiguratorBandit {
     }
 }
 
+// ── Structured Feedback Taxonomy (Plan 146, Research 108: Sailor) ──
+
+/// Structured exploration outcome — inspired by Sailor's feedback taxonomy.
+///
+/// Sailor classifies symbolic execution feedback into:
+///   - "not reached" → target line not executed
+///   - "site reached" → target reached, no violation
+///   - "bug triggered" → concrete violation confirmed
+///
+/// Our analog for game-state exploration:
+///
+/// | Outcome | Sailor Analog | Action |
+/// |---------|--------------|--------|
+/// | `NotReached` | "not reached" | Adjust Q-values (negative reward) |
+/// | `StateReachedNoWin` | "site reached" | Neutral reward + log for tuning |
+/// | `WinConfirmed` | "bug triggered" | Positive reward + update GOAT proof |
+/// | `InvalidState` | "compilation error" | Zero reward + flag for validator check |
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExplorationOutcome {
+    /// Move sequence didn't reach target game state.
+    /// Sailor: "not reached" → LLM fixes driver/stubs.
+    /// Action: Adjust bandit Q-values (negative reward).
+    NotReached,
+    /// Target state reached but no win condition.
+    /// Sailor: "site reached" → LLM tightens constraints.
+    /// Action: Neutral reward + log for constraint tuning.
+    StateReachedNoWin,
+    /// Concrete win condition satisfied.
+    /// Sailor: "bug triggered" → confirmed vulnerability.
+    /// Action: Positive reward + update GOAT proof.
+    WinConfirmed,
+    /// Invalid game state detected.
+    /// Sailor: "compilation error" → fix harness.
+    /// Action: Zero reward + flag for WASM validator check.
+    InvalidState,
+}
+
+impl ExplorationOutcome {
+    /// Convert to a scalar reward for bandit Q-value updates.
+    ///
+    /// | Outcome | Reward |
+    /// |---------|--------|
+    /// | `WinConfirmed` | +1.0 |
+    /// | `StateReachedNoWin` | 0.0 |
+    /// | `NotReached` | -0.5 |
+    /// | `InvalidState` | -1.0 |
+    pub fn to_reward(&self) -> f32 {
+        match self {
+            Self::WinConfirmed => 1.0,
+            Self::StateReachedNoWin => 0.0,
+            Self::NotReached => -0.5,
+            Self::InvalidState => -1.0,
+        }
+    }
+}
+
 // ── Tests ─────────────────────────────────────────────────────
 
 #[cfg(test)]
