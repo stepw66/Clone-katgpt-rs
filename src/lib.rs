@@ -5,6 +5,8 @@ pub mod cache_prune;
 pub mod dash_attn;
 #[cfg(feature = "data_probe")]
 pub mod data_probe;
+#[cfg(feature = "peira_distill")]
+pub mod distill;
 #[cfg(feature = "dllm")]
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::too_many_lines)]
