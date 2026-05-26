@@ -1,7 +1,7 @@
-# Benchmark 110: QuestBench T6–T8 GOAT Proofs
+# Benchmark 047: QuestBench T6–T8 GOAT Proofs
 
 **Date:** 2026-05-25
-**Plan:** 110 (QuestBench — Underspecification Scoring, Tasks 6–8)
+**Plan:** 047 (QuestBench — Underspecification Scoring, Tasks 6–8)
 **Features:** `--features questbench`
 **Command:** `cargo test --features questbench --test questbench_csp -- --nocapture`
 **Source:** [QuestBench: LLMs can pose the right questions](https://arxiv.org/pdf/2503.22674)
@@ -82,7 +82,7 @@ Method: sweep `concentration` from 0 (uniform) to 1 (one-hot), generating releva
 | `test_empty_sufficient_set_for_uniform` | T7 | ✅ NoPruner → empty set |
 | **Total (integration test)** | | **12 tests** |
 
-Combined with 19 unit tests in `questbench.rs`, Plan 110 has **31 total tests** gated behind `#[cfg(feature = "questbench")]`.
+Combined with 19 unit tests in `questbench.rs`, Plan 047 has **31 total tests** gated behind `#[cfg(feature = "questbench")]`.
 
 ## Rollback
 
