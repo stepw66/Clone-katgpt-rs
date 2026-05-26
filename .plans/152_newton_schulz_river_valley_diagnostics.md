@@ -31,7 +31,7 @@ Newton-Schulz is a standard matrix operation. River-valley diagnostics are analy
 
 ## Task Breakdown
 
-### T1: Newton-Schulz Orthogonalization (feature: `newton_schulz`)
+- [ ] ### T1: Newton-Schulz Orthogonalization (feature: `newton_schulz`)
 
 **File:** `src/newton_schulz.rs`
 
@@ -57,7 +57,7 @@ pub fn newton_schulz5(g: &[f32], rows: usize, cols: usize, out: &mut [f32])
 - No dynamic allocation: work in pre-allocated buffers
 - Constants a=3.4445, b=-4.7750, c=2.0315 from the paper (converges for singular values in [0, 1])
 
-### T2: River-Valley Diagnostic Metrics (feature: `river_valley`)
+- [ ] ### T2: River-Valley Diagnostic Metrics (feature: `river_valley`)
 
 **File:** `src/river_valley.rs`
 
@@ -84,7 +84,7 @@ pub fn update_cosine_similarity(updates: &[[f32; D]]) -> f32
 - Test: Effective rank of identity matrix = full rank
 - Test: Update cosine similarity of constant direction = 1.0
 
-### T3: Muon Momentum Buffer (feature: `newton_schulz`)
+- [ ] ### T3: Muon Momentum Buffer (feature: `newton_schulz`)
 
 **File:** `src/newton_schulz.rs` (extend T1)
 
@@ -106,7 +106,7 @@ pub fn muon_update(
 - Test: Muon update on 64×64 matrix produces orthogonal output
 - Test: Momentum accumulation: 3 steps with same gradient → increasing magnitude
 
-### T4: Wire into D2F Training (feature: `newton_schulz`)
+- [ ] ### T4: Wire into D2F Training (feature: `newton_schulz`)
 
 **File:** `src/dllm.rs`
 
