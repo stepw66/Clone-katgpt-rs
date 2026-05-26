@@ -2248,7 +2248,7 @@ pub struct TernaryWeights {
 impl TernaryWeights {
     /// Create zeroed ternary weights.
     pub fn new(rows: usize, cols: usize) -> Self {
-        let blocks64 = (cols + 63) / 64;
+        let blocks64 = cols.div_ceil(64);
         Self {
             rows,
             cols,
@@ -2263,7 +2263,7 @@ impl TernaryWeights {
     pub fn set(&mut self, row: usize, col: usize, value: i8) {
         assert!(row < self.rows && col < self.cols, "index out of bounds");
         assert!(
-            value >= -1 && value <= 1,
+            (-1..=1).contains(&value),
             "ternary value must be -1, 0, or +1"
         );
         let block = col >> 6;

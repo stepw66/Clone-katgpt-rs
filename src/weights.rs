@@ -246,7 +246,7 @@ pub fn load_ternary_bits(path: &std::path::Path) -> std::io::Result<katgpt_core:
     let cols = u32::from_le_bytes(buf[12..16].try_into().unwrap()) as usize;
     let blocks64 = u32::from_le_bytes(buf[16..20].try_into().unwrap()) as usize;
 
-    let expected_blocks = (cols + 63) / 64;
+    let expected_blocks = cols.div_ceil(64);
     if blocks64 != expected_blocks {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
@@ -267,21 +267,21 @@ pub fn load_ternary_bits(path: &std::path::Path) -> std::io::Result<katgpt_core:
 
     let mut off = 20;
     let mut row_scale = vec![0.0f32; rows];
-    for r in 0..rows {
-        row_scale[r] = f32::from_le_bytes(buf[off..off + 4].try_into().unwrap());
+    for val in row_scale.iter_mut() {
+        *val = f32::from_le_bytes(buf[off..off + 4].try_into().unwrap());
         off += 4;
     }
 
     let pos_count = rows * blocks64;
     let mut pos_bits = vec![0u64; pos_count];
-    for i in 0..pos_count {
-        pos_bits[i] = u64::from_le_bytes(buf[off..off + 8].try_into().unwrap());
+    for val in pos_bits.iter_mut() {
+        *val = u64::from_le_bytes(buf[off..off + 8].try_into().unwrap());
         off += 8;
     }
 
     let mut neg_bits = vec![0u64; pos_count];
-    for i in 0..pos_count {
-        neg_bits[i] = u64::from_le_bytes(buf[off..off + 8].try_into().unwrap());
+    for val in neg_bits.iter_mut() {
+        *val = u64::from_le_bytes(buf[off..off + 8].try_into().unwrap());
         off += 8;
     }
 
