@@ -184,9 +184,9 @@ mod tests {
     /// Naive region sum by iterating over all elements.
     fn naive_region_sum(matrix: &[Vec<f32>], x1: usize, x2: usize, y1: usize, y2: usize) -> f32 {
         let mut sum = 0.0;
-        for i in x1..=x2 {
-            for j in y1..=y2 {
-                sum += matrix[i][j];
+        for row in &matrix[x1..=x2] {
+            for &val in &row[y1..=y2] {
+                sum += val;
             }
         }
         sum

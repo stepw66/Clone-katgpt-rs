@@ -72,13 +72,11 @@ fn stationary_distribution(transition: &[Vec<f32>], n_iters: usize) -> Vec<f32> 
 
 /// Compute entropy rate H(P) = -Σᵢ πᵢ Σⱼ Pᵢⱼ log₂(Pᵢⱼ).
 fn entropy_rate(transition: &[Vec<f32>], stationary: &[f32]) -> f32 {
-    let k = transition.len();
     let ln2 = std::f32::consts::LN_2;
     let mut h = 0.0f32;
-    for i in 0..k {
+    for (i, row) in transition.iter().enumerate() {
         let mut row_entropy = 0.0f32;
-        for j in 0..k {
-            let p = transition[i][j];
+        for &p in row {
             if p > 0.0 {
                 row_entropy -= p * (p.ln() / ln2);
             }
@@ -245,8 +243,8 @@ mod tests {
                 continue;
             }
             let mut row_h = 0.0f32;
-            for j in 0..k {
-                let p = transition_counts[i][j] as f32 / row_sum;
+            for &count in &transition_counts[i] {
+                let p = count as f32 / row_sum;
                 if p > 0.0 {
                     row_h -= p * (p.ln() / ln2);
                 }

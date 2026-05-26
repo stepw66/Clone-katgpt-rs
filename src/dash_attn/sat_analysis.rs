@@ -44,7 +44,7 @@ pub fn head_sparsity_profile(attention: &[Vec<f32>], head_count: usize) -> Vec<H
         attention[0].len()
     );
     assert!(
-        n % head_count == 0,
+        n.is_multiple_of(head_count),
         "matrix size ({n}) must be evenly divisible by head_count ({head_count})"
     );
 
@@ -91,29 +91,29 @@ mod tests {
         let mut m = vec![vec![0.0f32; n]; n];
 
         // Seg 0: uniform 0.25 in rows 0..3 (every column)
-        for i in 0..seg {
-            for j in 0..n {
-                m[i][j] = 0.25;
+        for row in &mut m[..seg] {
+            for val in row.iter_mut() {
+                *val = 0.25;
             }
         }
 
         // Seg 1: rows 4..7 attend only to cols 4..7 (self-contained block)
-        for i in seg..2 * seg {
-            for j in seg..2 * seg {
-                m[i][j] = 0.25;
+        for row in &mut m[seg..2 * seg] {
+            for val in row[seg..2 * seg].iter_mut() {
+                *val = 0.25;
             }
         }
 
         // Seg 2: rows 8..11 attend only to cols 0..3 (fully prefix)
-        for i in 2 * seg..3 * seg {
-            for j in 0..seg {
-                m[i][j] = 0.25;
+        for row in &mut m[2 * seg..3 * seg] {
+            for val in row[..seg].iter_mut() {
+                *val = 0.25;
             }
         }
 
         // Seg 3: diagonal-heavy — each row in 12..15 has 1.0 at its own column, 0 elsewhere
-        for i in 3 * seg..4 * seg {
-            m[i][i] = 1.0;
+        for (i, row) in m.iter_mut().enumerate().take(4 * seg).skip(3 * seg) {
+            row[i] = 1.0;
         }
 
         m

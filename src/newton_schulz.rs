@@ -263,7 +263,7 @@ mod tests {
 
         // Result is 12 × 6. Check X^T @ X ≈ I_6 (since cols < rows)
         // out is 12×6, compute X^T @ X (6×6)
-        let mut xt_x = vec![0.0f32; 36];
+        let mut xt_x = [0.0f32; 36];
         for i in 0..6 {
             for j in 0..6 {
                 let mut sum = 0.0f32;

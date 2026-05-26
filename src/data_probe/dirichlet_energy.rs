@@ -138,7 +138,7 @@ mod tests {
 
         let aligned: Vec<f32> = (0..n)
             .flat_map(|i| {
-                let base_vec = if i < 5 { &base } else { &base };
+                let base_vec = &base;
                 base_vec
                     .iter()
                     .zip(offset.iter())
