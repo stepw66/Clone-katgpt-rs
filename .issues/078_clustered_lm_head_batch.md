@@ -1,7 +1,7 @@
 # clustered_lm_head: batch per-token dot products via simd_matmul_rows
 
 ## Status
-⏸️ **DEFERRED** — Requires profiling to confirm dispatch overhead is significant. Optimization depends on actual cluster layout; scattered clusters may negate benefits of batching. Code has TODO comment documenting the optimization path.
+✅ **DONE** — Profiled: individual simd_dot_f32 calls are optimal for non-contiguous cluster tokens; batch approach infeasible.
 
 ## Severity
 🟡 MEDIUM — activated for large vocabularies
@@ -52,6 +52,6 @@ Alternatively, if clusters are contiguous in vocab (or can be made so), use `sim
 - Better instruction cache behavior
 
 ## Acceptance Criteria
-- [ ] Profile clustered LM head to confirm dispatch overhead is significant
-- [ ] If confirmed, batch dot products using `simd_matmul_rows` where possible
-- [ ] All clustered LM head tests pass
+- [x] Profile clustered LM head to confirm dispatch overhead is significant — **dispatch is negligible (inlined)**
+- [x] If confirmed, batch dot products using `simd_matmul_rows` where possible — **N/A: tokens are non-contiguous**
+- [x] All clustered LM head tests pass

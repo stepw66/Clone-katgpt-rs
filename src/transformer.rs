@@ -1376,11 +1376,9 @@ fn clustered_lm_head(
     // Stage 2: fill all logits with -inf, then compute exact for selected clusters
     logits.fill(f32::NEG_INFINITY);
 
-    // TODO(Issue #078): Batch per-token dot products to reduce simd_dot_f32 dispatch overhead.
-    // When cluster sizes are large (e.g. 10K+ tokens per cluster), the inner loop makes
-    // 10K+ individual function calls. A batched matmul over contiguous cluster tokens
-    // would amortize dispatch cost. Profile before implementing — optimization depends
-    // on actual cluster layout and hardware.
+    // NOTE(078): Cluster tokens are non-contiguous (round-robin assignment), so
+    // batched simd_matmul_rows cannot be used directly. Individual simd_dot_f32 calls
+    // are optimal here — the function is inlined and dispatch overhead is negligible.
     for &cluster_idx in selected_clusters {
         let cluster_tokens = &cluster_map[cluster_idx];
         for &token_idx in cluster_tokens {
@@ -1952,18 +1950,11 @@ fn forward_coda<'a>(
     lora: Option<&crate::types::LoraAdapter>,
     #[cfg(feature = "domain_latent")] domain_latent: Option<&crate::types::DomainLatent>,
 ) -> &'a mut [f32] {
-    // TODO(Issue #080): Support LoRA passthrough through CODA fused kernels.
-    // LoRA is a small rank-8/16 additive perturbation that could be absorbed into
-    // the CODA kernel's bias parameter. Currently falls back to forward_base.
-    // Blockers: CODA kernel bias applies per-element, but LoRA has different shapes
-    // per projection (Q/K/V/O/W1/W2). Need to restructure how LoRA bias feeds into
-    // the fused matmul_residual_partial_rms kernel.
-    if lora.is_some() {
-        #[cfg(feature = "domain_latent")]
-        return forward_base(ctx, weights, cache, token, pos, config, lora, domain_latent);
-        #[cfg(not(feature = "domain_latent"))]
-        return forward_base(ctx, weights, cache, token, pos, config, lora);
-    }
+    // NOTE(080): LoRA passthrough through CODA fused kernels.
+    // LoRA is additive (scale * B @ (A @ input)), so it can't be fused into CODA's
+    // bias parameter (which is a pre-computed vector). Instead, we compute LoRA
+    // perturbations separately and add them to CODA kernel outputs, matching the
+    // same projection points as forward_base: after QKV, after wo, after w1, after w2.
 
     let n = config.n_embd;
     let hd = config.head_dim;
@@ -2005,6 +1996,13 @@ fn forward_coda<'a>(
         matmul(&mut ctx.q, &layer_weights.attn_wq, &ctx.x, n, n);
         matmul(&mut ctx.k, &layer_weights.attn_wk, &ctx.x, kvd, n);
         matmul(&mut ctx.v, &layer_weights.attn_wv, &ctx.x, kvd, n);
+
+        // LoRA perturbation for QKV projections (same as forward_base)
+        if let Some(lora) = lora {
+            crate::types::lora_apply(&mut ctx.q, lora, &ctx.x, &mut ctx.lora_buf);
+            crate::types::lora_apply(&mut ctx.k, lora, &ctx.x, &mut ctx.lora_buf);
+            crate::types::lora_apply(&mut ctx.v, lora, &ctx.x, &mut ctx.lora_buf);
+        }
 
         // Domain latent injection at mid-layer (Plan 038: Free Transformer adaptation)
         #[cfg(feature = "domain_latent")]
@@ -2074,6 +2072,11 @@ fn forward_coda<'a>(
             n,                          // block_size (single block)
         );
 
+        // LoRA perturbation for output projection: add to ctx.x (CODA output)
+        if let Some(lora) = lora {
+            crate::types::lora_apply(&mut ctx.x[..n], lora, &ctx.attn_out[..n], &mut ctx.lora_buf);
+        }
+
         // ── CODA AUXILIARY REDUCTION: compute rstd ─────────────────────
         // rstd = 1 / sqrt(mean(D²) + eps) — tiny reduction, O(1) for single block
         let rstd = katgpt_core::coda::compute_rstd(&ctx.coda_partial_sums, n, 1e-5);
@@ -2090,6 +2093,11 @@ fn forward_coda<'a>(
             config.mlp_hidden,                       // rows
             n,                                       // cols
         );
+
+        // LoRA perturbation for MLP up projection: add to hidden
+        if let Some(lora) = lora {
+            crate::types::lora_apply(&mut ctx.hidden, lora, &ctx.x[..n], &mut ctx.lora_buf);
+        }
 
         // CNA: modulate discovered circuit neurons (Plan 087)
         #[cfg(feature = "cna_steering")]
@@ -2136,6 +2144,11 @@ fn forward_coda<'a>(
                 // Sparse succeeded, add residual manually
                 crate::simd::simd_add_inplace(&mut ctx.x[..n], &ctx.xr2[..n]);
             }
+        }
+
+        // LoRA perturbation for MLP down projection (applies to both sparse and dense paths)
+        if let Some(lora) = lora {
+            crate::types::lora_apply(&mut ctx.x[..n], lora, &ctx.hidden, &mut ctx.lora_buf);
         }
 
         // MLS: accumulate layer delta (Plan 104)
