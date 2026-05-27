@@ -2529,6 +2529,90 @@ unsafe fn avx2_fused_sub_acc(dst: &mut [f32], a: &[f32], b: &[f32], len: usize) 
     }
 }
 
+/// Fused scale-accumulate: `dst[i] += scale * src[i]` for `len` elements.
+///
+/// Used in attention value accumulation where a scalar weight broadcasts across a value row.
+/// NEON: fused via `vfmaq_f32`. AVX2: fused via `_mm256_fmadd_ps`.
+#[inline]
+pub fn simd_fused_scale_acc(dst: &mut [f32], src: &[f32], scale: f32, len: usize) {
+    #[cfg(target_arch = "aarch64")]
+    {
+        unsafe { neon_fused_scale_acc(dst, src, scale, len) }
+    }
+    #[cfg(target_arch = "x86_64")]
+    {
+        if is_avx2_fma_available() {
+            unsafe { avx2_fused_scale_acc(dst, src, scale, len) }
+        } else {
+            scalar_fused_scale_acc(dst, src, scale, len)
+        }
+    }
+    #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
+    {
+        scalar_fused_scale_acc(dst, src, scale, len)
+    }
+}
+
+#[inline]
+#[allow(dead_code)]
+fn scalar_fused_scale_acc(dst: &mut [f32], src: &[f32], scale: f32, len: usize) {
+    for i in 0..len {
+        unsafe {
+            *dst.get_unchecked_mut(i) += scale * *src.get_unchecked(i);
+        }
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+#[inline]
+unsafe fn neon_fused_scale_acc(dst: &mut [f32], src: &[f32], scale: f32, len: usize) {
+    use core::arch::aarch64::{vdupq_n_f32, vfmaq_f32, vld1q_f32, vst1q_f32};
+
+    unsafe {
+        let scale_vec = vdupq_n_f32(scale);
+        let mut i = 0;
+        let chunks = len / 4;
+
+        for _ in 0..chunks {
+            let s = vld1q_f32(src.as_ptr().add(i));
+            let d = vld1q_f32(dst.as_ptr().add(i));
+            let acc = vfmaq_f32(d, s, scale_vec);
+            vst1q_f32(dst.as_mut_ptr().add(i), acc);
+            i += 4;
+        }
+
+        while i < len {
+            *dst.get_unchecked_mut(i) += scale * *src.get_unchecked(i);
+            i += 1;
+        }
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[inline]
+unsafe fn avx2_fused_scale_acc(dst: &mut [f32], src: &[f32], scale: f32, len: usize) {
+    use core::arch::x86_64::{_mm256_fmadd_ps, _mm256_loadu_ps, _mm256_set1_ps, _mm256_storeu_ps};
+
+    unsafe {
+        let scale_vec = _mm256_set1_ps(scale);
+        let mut i = 0;
+        let chunks = len / 8;
+
+        for _ in 0..chunks {
+            let s = _mm256_loadu_ps(src.as_ptr().add(i));
+            let d = _mm256_loadu_ps(dst.as_ptr().add(i));
+            let acc = _mm256_fmadd_ps(scale_vec, s, d);
+            _mm256_storeu_ps(dst.as_mut_ptr().add(i), acc);
+            i += 8;
+        }
+
+        while i < len {
+            *dst.get_unchecked_mut(i) += scale * *src.get_unchecked(i);
+            i += 1;
+        }
+    }
+}
+
 // ── Tests ─────────────────────────────────────────────────────
 
 #[cfg(test)]
