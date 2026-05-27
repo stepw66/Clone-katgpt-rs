@@ -354,7 +354,9 @@ impl fmt::Display for ActionSpaceLog {
 //
 // LEO (Learn Everything All at Once) outputs Q-values for ALL goals
 // simultaneously instead of conditioning on a single goal (UVFA-style).
-// Ref: Matthews et al. (2026) "Learn Everything All at Once"
+// Ref: Matthews et al. (2026) "Goal-Conditioned Agents that Learn Everything
+//   All at Once", ICML 2026. arXiv:2605.23551
+//   https://github.com/MichaelTMatthews/purejaxgcrl
 //
 // Feature gates:
 //   leo_all_goals — LeoHead + AllGoalsUpdate + sigmoid_bounded_q
@@ -380,7 +382,8 @@ impl fmt::Display for ActionSpaceLog {
 // BatchNorm is insufficient; LayerNorm is acceptable but may underperform.
 //
 // Ref: Ioffe (2017) "Batch Renormalization" — arXiv:1702.03275
-// Ref: Matthews et al. (2026) "Learn Everything All at Once" — Section 5.1
+// Ref: Matthews et al. (2026) "Goal-Conditioned Agents that Learn Everything
+//   All at Once", ICML 2026. arXiv:2605.23551 — Section 5.1
 
 /// Bound Q-value estimates with sigmoid to prevent divergence.
 ///
@@ -399,7 +402,8 @@ pub fn sigmoid_bounded_q(raw_q: f32) -> f32 {
 /// Instead of conditioning on a goal (UVFA-style), this outputs Q-values
 /// for ALL goals simultaneously: Q(s) → R^{G×A}.
 ///
-/// Ref: Matthews et al. (2026) "Learn Everything All at Once"
+/// Ref: Matthews et al. (2026) "Goal-Conditioned Agents that Learn Everything
+///   All at Once", ICML 2026. arXiv:2605.23551
 #[cfg(feature = "leo_all_goals")]
 pub trait LeoHead {
     /// Compute Q-values for all goals × all actions from state.
@@ -650,7 +654,7 @@ pub trait DualLeoMixer {
 ///
 /// "We sample goals only from goals observed at least once in the past,
 /// to prevent completely out-of-reach goals being sampled."
-/// — Matthews et al. (2026)
+/// — Matthews et al. (2026), ICML 2026, arXiv:2605.23551
 #[cfg(feature = "dual_leo")]
 pub trait AutocurriculumSampler {
     /// Sample a goal uniformly from previously observed goals.
