@@ -43,6 +43,7 @@ pub fn sigmoid(x: f32) -> f32 {
 ///
 /// Handles the degenerate case where all values are equal (σ → 0)
 /// by producing all-zero output.
+#[inline]
 pub fn z_normalize(scores: &mut [f32]) {
     if scores.is_empty() {
         return;
@@ -137,11 +138,8 @@ impl EgaGate {
         assert_eq!(dim, self.w_proj.len(), "dim must match w_proj length");
 
         for i in 0..seq_len {
-            let mut dot = 0.0f32;
-            for j in 0..dim {
-                dot += x[i * dim + j] * self.w_proj[j];
-            }
-            out[i] = dot;
+            let row_off = i * dim;
+            out[i] = crate::simd::simd_dot_f32(&x[row_off..row_off + dim], &self.w_proj, dim);
         }
     }
 
@@ -154,12 +152,32 @@ impl EgaGate {
     ///
     /// After this call, `attn_weights` contains gated + renormalized weights:
     /// Âᵢⱼ = Aᵢⱼ · gⱼ / Σₖ(Aᵢₖ · gₖ + ε)
+    ///
+    /// **Note:** This allocates a gate buffer internally. For decode loops, prefer
+    /// [`gate_attention_into`] to avoid per-call heap allocation.
     pub fn gate_attention(&self, attn_weights: &mut [f32], energy: &[f32], seq_len: usize) {
         assert_eq!(attn_weights.len(), seq_len * seq_len);
         assert_eq!(energy.len(), seq_len);
 
         let mut gate_buf = vec![0.0; seq_len];
-        compute_energy_gate_into(energy, self.alpha, self.tau, &mut gate_buf);
+        self.gate_attention_into(attn_weights, energy, seq_len, &mut gate_buf);
+    }
+
+    /// Zero-alloc variant of [`gate_attention`] that reuses a pre-allocated gate buffer.
+    ///
+    /// Pass a `gate_buf` of length `>= seq_len` to avoid per-call `vec![0.0; seq_len]` allocation.
+    pub fn gate_attention_into(
+        &self,
+        attn_weights: &mut [f32],
+        energy: &[f32],
+        seq_len: usize,
+        gate_buf: &mut [f32],
+    ) {
+        assert_eq!(attn_weights.len(), seq_len * seq_len);
+        assert_eq!(energy.len(), seq_len);
+        assert!(gate_buf.len() >= seq_len);
+
+        compute_energy_gate_into(energy, self.alpha, self.tau, gate_buf);
 
         for i in 0..seq_len {
             let row_start = i * seq_len;

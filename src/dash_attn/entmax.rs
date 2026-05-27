@@ -108,8 +108,8 @@ pub fn entmax_support(probs: &[f32]) -> Vec<usize> {
 /// # Returns
 ///
 /// `[n_kv_heads][n_chunks]` aggregated routing probabilities
-pub fn entmax_gqa_aggregate(
-    head_probs: &[Vec<f32>],
+pub fn entmax_gqa_aggregate<T: AsRef<[f32]>>(
+    head_probs: &[T],
     n_query_heads: usize,
     n_kv_heads: usize,
     n_chunks: usize,
@@ -120,7 +120,7 @@ pub fn entmax_gqa_aggregate(
     for (h, head_prob) in head_probs.iter().enumerate() {
         let kv_group = h * n_kv_heads / n_query_heads;
         counts[kv_group] += 1;
-        for (c, &prob) in head_prob.iter().enumerate() {
+        for (c, &prob) in head_prob.as_ref().iter().enumerate() {
             result[kv_group][c] += prob;
         }
     }

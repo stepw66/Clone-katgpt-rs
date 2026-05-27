@@ -40,6 +40,7 @@ pub fn generate_givens_rotations(n_groups: usize, seed: u64) -> Vec<[f32; 2]> {
 /// `rotations` has ceil(dim/2) entries.
 /// `input` has `dim` elements.
 /// `output` must have `dim` elements (pre-allocated).
+#[inline]
 pub fn apply_rotation(rotations: &[[f32; 2]], input: &[f32], output: &mut [f32]) {
     let n_groups = rotations.len();
     for g in 0..n_groups {
@@ -64,6 +65,7 @@ pub fn apply_rotation(rotations: &[[f32; 2]], input: &[f32], output: &mut [f32])
 }
 
 /// Apply full vector inverse 2D rotation: inverse-rotate all pairs.
+#[inline]
 pub fn apply_inverse_rotation(rotations: &[[f32; 2]], input: &[f32], output: &mut [f32]) {
     let n_groups = rotations.len();
     for g in 0..n_groups {

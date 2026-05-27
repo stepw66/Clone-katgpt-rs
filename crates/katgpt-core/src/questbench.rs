@@ -499,6 +499,7 @@ fn score_relevance(
 
 /// Decision from underspecification score for planning.
 /// Maps to `PlanningDecision` in types.rs but lives here to avoid circular deps.
+#[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum QuestBenchDecision {
     PlanNew,
@@ -519,6 +520,7 @@ impl QuestBenchDecision {
 // ── T5: Four-Tier trigger ───────────────────────────────────────
 
 /// Which memory tier to consult based on underspecification score.
+#[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MemoryTier {
     Hot,    // CPU SIMD — standard decode
@@ -558,6 +560,7 @@ pub struct SyntheticCsp {
 }
 
 /// Domain kind for synthetic CSP generation.
+#[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CspDomain {
     /// Grid-based (Bomber-like): adjacency constraints on a 2D grid.

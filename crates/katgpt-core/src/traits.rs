@@ -505,6 +505,7 @@ pub trait AllGoalsUpdate {
 /// Controls how LEO (teacher) and UVFA (student) Q-values are combined
 /// for action selection. From JAX `DUAL_LEO_ACTING_MODE` config.
 #[cfg(feature = "dual_leo")]
+#[repr(u8)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ActingMode {
     /// Linear combination: Q = (1-α)·Q_UVFA + α·Q_LEO.
@@ -688,15 +689,20 @@ pub trait AutocurriculumSampler {
         current_mask: &[bool],
     ) -> Vec<bool> {
         let mut mask = current_mask.to_vec();
+        // Pre-compute goal norms once (avoid redundant recomputation per obs).
+        let norm_goals: Vec<f32> = all_goals
+            .iter()
+            .map(|goal_obs| goal_obs.iter().map(|x| x * x).sum::<f32>().sqrt())
+            .collect();
         for obs in obs_batch {
+            let norm_obs: f32 = obs.iter().map(|x| x * x).sum::<f32>().sqrt();
             for (g, goal_obs) in all_goals.iter().enumerate() {
                 if g < mask.len() && !mask[g] {
                     // Union matching: normalized cosine-like similarity.
                     // Threshold > 0.9 ensures only near-exact matches count.
                     // JAX uses binary match_sum > 0 on discretized observations.
                     let dot: f32 = obs.iter().zip(goal_obs.iter()).map(|(o, gi)| o * gi).sum();
-                    let norm_obs: f32 = obs.iter().map(|x| x * x).sum::<f32>().sqrt();
-                    let norm_goal: f32 = goal_obs.iter().map(|x| x * x).sum::<f32>().sqrt();
+                    let norm_goal = norm_goals[g];
                     let denom = norm_obs * norm_goal;
                     if denom > 0.0 && dot / denom > 0.9 {
                         mask[g] = true;

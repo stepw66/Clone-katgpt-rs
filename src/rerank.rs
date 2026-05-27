@@ -14,6 +14,7 @@ use crate::simd::{maxsim_score, simd_add_inplace, simd_dot_f32, simd_scale_inpla
 // ── Types ─────────────────────────────────────────────────────
 
 /// Reranking method for scoring query–document pairs.
+#[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RerankMethod {
     /// Cosine similarity on mean-pooled token embeddings.

@@ -24,6 +24,7 @@ use crate::pruners::variance_minimizer::{VarianceMinimizer, VarianceMinimizerCon
 /// Loss averaging strategy for masked positions in D2F training.
 ///
 /// Nemotron validates +2.12% accuracy with global averaging over per-sequence.
+#[repr(u8)]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum LossAveraging {
     /// Average loss across all masked positions in the batch (global).
@@ -196,21 +197,31 @@ impl AdaptiveNoiseSchedule {
     }
 }
 
-/// Corrupt a block of tokens by replacing some with the mask token.
-/// Returns (corrupted_tokens, is_masked indicators).
-pub fn corrupt_block(
+/// Corrupt a block of tokens by replacing some with the mask token (zero-alloc variant).
+///
+/// Writes into pre-allocated buffers to avoid per-call heap allocation.
+/// `corrupted` and `is_masked` are cleared and refilled; `positions` is used as scratch for Fisher-Yates.
+pub fn corrupt_block_into(
     tokens: &[usize],
     mask_ratio: f32,
     mask_token: usize,
     rng: &mut Rng,
-) -> (Vec<usize>, Vec<bool>) {
+    corrupted: &mut Vec<usize>,
+    is_masked: &mut Vec<bool>,
+    positions: &mut Vec<usize>,
+) {
     let len = tokens.len();
     let n_mask = ((len as f32 * mask_ratio).ceil() as usize).min(len);
-    let mut corrupted = tokens.to_vec();
-    let mut is_masked = vec![false; len];
+
+    // Reuse buffers: clear and refill
+    corrupted.clear();
+    corrupted.extend_from_slice(tokens);
+    is_masked.clear();
+    is_masked.resize(len, false);
+    positions.clear();
+    positions.extend(0..len);
 
     // Fisher-Yates shuffle to pick random positions
-    let mut positions: Vec<usize> = (0..len).collect();
     for i in (1..positions.len()).rev() {
         let j = (rng.next() as usize) % (i + 1);
         positions.swap(i, j);
@@ -220,13 +231,68 @@ pub fn corrupt_block(
         corrupted[pos] = mask_token;
         is_masked[pos] = true;
     }
+}
 
+/// Corrupt a block of tokens by replacing some with the mask token.
+/// Returns (corrupted_tokens, is_masked indicators).
+///
+/// **Note:** This allocates buffers internally. For training loops, prefer
+/// [`corrupt_block_into`] to avoid per-call heap allocation.
+pub fn corrupt_block(
+    tokens: &[usize],
+    mask_ratio: f32,
+    mask_token: usize,
+    rng: &mut Rng,
+) -> (Vec<usize>, Vec<bool>) {
+    let mut corrupted = Vec::new();
+    let mut is_masked = Vec::new();
+    let mut positions = Vec::new();
+    corrupt_block_into(
+        tokens,
+        mask_ratio,
+        mask_token,
+        rng,
+        &mut corrupted,
+        &mut is_masked,
+        &mut positions,
+    );
     (corrupted, is_masked)
 }
 
 // ═══════════════════════════════════════════════════════════════
 // Task 0.1: Bidirectional Attention Forward
 // ═══════════════════════════════════════════════════════════════
+
+/// Pre-allocated buffers for `forward_bidirectional_positions`, avoiding per-position Vec allocations.
+struct BidirectionalContext {
+    x: Vec<f32>,
+    q: Vec<f32>,
+    k: Vec<f32>,
+    v: Vec<f32>,
+    x_proj: Vec<f32>,
+    xr2: Vec<f32>,
+    hidden: Vec<f32>,
+    x_mlp: Vec<f32>,
+    logits: Vec<f32>,
+}
+
+impl BidirectionalContext {
+    fn new(config: &Config) -> Self {
+        let n = config.n_embd;
+        let kvd = kv_dim(config);
+        Self {
+            x: vec![0.0f32; n],
+            q: vec![0.0f32; n],
+            k: vec![0.0f32; kvd],
+            v: vec![0.0f32; kvd],
+            x_proj: vec![0.0f32; n],
+            xr2: vec![0.0f32; n],
+            hidden: vec![0.0f32; config.mlp_hidden],
+            x_mlp: vec![0.0f32; n],
+            logits: vec![0.0f32; config.vocab_size],
+        }
+    }
+}
 
 /// Bidirectional forward pass for all positions.
 /// Each position attends to ALL other positions (no causal mask).
@@ -242,6 +308,9 @@ pub fn forward_bidirectional_positions(
     let seq_len = tokens.len().min(config.block_size);
     let scale = 1.0 / (hd as f32).sqrt();
 
+    // Pre-allocate scratch buffers (reused across positions)
+    let mut bctx = BidirectionalContext::new(config);
+
     // Phase A: Compute K/V for all positions
     let mut k_cache = vec![0.0f32; seq_len * kvd];
     let mut v_cache = vec![0.0f32; seq_len * kvd];
@@ -251,22 +320,21 @@ pub fn forward_bidirectional_positions(
     let mut xr_all = vec![0.0f32; seq_len * n];
 
     for (p, &token) in tokens.iter().enumerate().take(seq_len) {
-        let mut x = vec![0.0f32; n];
         for i in 0..n {
-            x[i] = weights.wte[token * n + i] + weights.wpe[p * n + i];
+            bctx.x[i] = weights.wte[token * n + i] + weights.wpe[p * n + i];
         }
-        rmsnorm(&mut x);
-        xr_all[p * n..(p + 1) * n].copy_from_slice(&x);
-        rmsnorm(&mut x);
-        x_norm2_all[p * n..(p + 1) * n].copy_from_slice(&x);
+        rmsnorm(&mut bctx.x);
+        xr_all[p * n..(p + 1) * n].copy_from_slice(&bctx.x);
+        rmsnorm(&mut bctx.x);
+        x_norm2_all[p * n..(p + 1) * n].copy_from_slice(&bctx.x);
 
         let layer = &weights.layers[0];
-        let mut k = vec![0.0f32; kvd];
-        let mut v = vec![0.0f32; kvd];
-        matmul(&mut k, &layer.attn_wk, &x, kvd, n);
-        matmul(&mut v, &layer.attn_wv, &x, kvd, n);
-        k_cache[p * kvd..(p + 1) * kvd].copy_from_slice(&k);
-        v_cache[p * kvd..(p + 1) * kvd].copy_from_slice(&v);
+        bctx.k.fill(0.0);
+        bctx.v.fill(0.0);
+        matmul(&mut bctx.k, &layer.attn_wk, &bctx.x, kvd, n);
+        matmul(&mut bctx.v, &layer.attn_wv, &bctx.x, kvd, n);
+        k_cache[p * kvd..(p + 1) * kvd].copy_from_slice(&bctx.k);
+        v_cache[p * kvd..(p + 1) * kvd].copy_from_slice(&bctx.v);
     }
 
     // Phase B: Bidirectional attention for all positions
@@ -275,14 +343,13 @@ pub fn forward_bidirectional_positions(
     let layer = &weights.layers[0];
 
     for p in 0..seq_len {
-        let mut x = vec![0.0f32; n];
-        x.copy_from_slice(&x_norm2_all[p * n..(p + 1) * n]);
+        bctx.x.copy_from_slice(&x_norm2_all[p * n..(p + 1) * n]);
 
-        let mut q = vec![0.0f32; n];
-        matmul(&mut q, &layer.attn_wq, &x, n, n);
+        bctx.q.fill(0.0);
+        matmul(&mut bctx.q, &layer.attn_wq, &bctx.x, n, n);
 
         let (attn_out, attn_w) = attention_forward_safe(
-            &q,
+            &bctx.q,
             &k_cache,
             &v_cache,
             config.n_head,
@@ -293,26 +360,44 @@ pub fn forward_bidirectional_positions(
             scale,
         );
 
-        let mut x_proj = vec![0.0f32; n];
-        matmul(&mut x_proj, &layer.attn_wo, &attn_out, n, n);
+        bctx.x_proj.fill(0.0);
+        matmul(&mut bctx.x_proj, &layer.attn_wo, &attn_out, n, n);
         for i in 0..n {
-            x_proj[i] += xr_all[p * n + i];
+            bctx.x_proj[i] += xr_all[p * n + i];
         }
 
         // MLP
-        let xr2 = x_proj.clone();
-        rmsnorm(&mut x_proj);
-        let mut hidden = vec![0.0f32; config.mlp_hidden];
-        matmul_relu(&mut hidden, &layer.mlp_w1, &x_proj, config.mlp_hidden, n);
-        let mut x_mlp = vec![0.0f32; n];
-        matmul(&mut x_mlp, &layer.mlp_w2, &hidden, n, config.mlp_hidden);
+        bctx.xr2.copy_from_slice(&bctx.x_proj);
+        rmsnorm(&mut bctx.x_proj);
+        bctx.hidden.fill(0.0);
+        matmul_relu(
+            &mut bctx.hidden,
+            &layer.mlp_w1,
+            &bctx.x_proj,
+            config.mlp_hidden,
+            n,
+        );
+        bctx.x_mlp.fill(0.0);
+        matmul(
+            &mut bctx.x_mlp,
+            &layer.mlp_w2,
+            &bctx.hidden,
+            n,
+            config.mlp_hidden,
+        );
         for i in 0..n {
-            x_mlp[i] += xr2[i];
+            bctx.x_mlp[i] += bctx.xr2[i];
         }
 
-        let mut logits = vec![0.0f32; config.vocab_size];
-        matmul(&mut logits, &weights.lm_head, &x_mlp, config.vocab_size, n);
-        all_logits.push(logits);
+        bctx.logits.fill(0.0);
+        matmul(
+            &mut bctx.logits,
+            &weights.lm_head,
+            &bctx.x_mlp,
+            config.vocab_size,
+            n,
+        );
+        all_logits.push(bctx.logits.clone());
         all_attn_weights.push(attn_w);
     }
 
@@ -531,6 +616,10 @@ struct BackwardContext {
     d_an1: Vec<f32>,
     d_after_attn_res_saved: Vec<f32>,
     d_after_norm1_final: Vec<f32>,
+    /// Scratch buffer for rmsnorm_backward (avoids per-call allocation)
+    d_rmsnorm_buf: Vec<f32>,
+    /// Scratch buffer for softmax_backward (avoids per-call allocation)
+    d_softmax_buf: Vec<f32>,
 }
 
 impl BackwardContext {
@@ -546,6 +635,8 @@ impl BackwardContext {
             d_an1: vec![0.0f32; n],
             d_after_attn_res_saved: vec![0.0f32; config.block_size * n],
             d_after_norm1_final: vec![0.0f32; config.block_size * n],
+            d_rmsnorm_buf: vec![0.0f32; n],
+            d_softmax_buf: vec![0.0f32; config.block_size],
         }
     }
 }
@@ -687,26 +778,52 @@ fn forward_save(
 // ── Backward Helpers ──
 
 /// RMSNorm backward: dx = (dy - y * mean(dy * y)) / rms
+///
+/// Allocating wrapper. Prefer [`rmsnorm_backward_into`] in hot paths.
+#[allow(dead_code)]
+#[inline]
 fn rmsnorm_backward(x_input: &[f32], y_output: &[f32], dy: &[f32]) -> Vec<f32> {
     let n = x_input.len();
+    let mut out = vec![0.0f32; n];
+    rmsnorm_backward_into(x_input, y_output, dy, &mut out);
+    out
+}
+
+/// Zero-alloc variant of [`rmsnorm_backward`] that writes into a pre-allocated buffer.
+#[inline]
+fn rmsnorm_backward_into(x_input: &[f32], y_output: &[f32], dy: &[f32], out: &mut [f32]) {
+    let n = x_input.len();
+    debug_assert!(out.len() >= n);
     let sum_sq: f32 = x_input.iter().map(|x| x * x).sum();
     let rms = (sum_sq / n as f32 + 1e-5).sqrt();
     let dot_dy_y: f32 = dy.iter().zip(y_output.iter()).map(|(d, y)| d * y).sum();
     let mean_dy_y = dot_dy_y / n as f32;
-    dy.iter()
-        .zip(y_output.iter())
-        .map(|(d, y)| (d - y * mean_dy_y) / rms)
-        .collect()
+    for i in 0..n {
+        out[i] = (dy[i] - y_output[i] * mean_dy_y) / rms;
+    }
 }
 
 /// Softmax backward: dx = y * (dy - dot(dy, y))
+///
+/// Allocating wrapper. Prefer [`softmax_backward_into`] in hot paths.
+#[allow(dead_code)]
+#[inline]
 fn softmax_backward(weights: &[f32], dy: &[f32]) -> Vec<f32> {
+    let n = weights.len();
+    let mut out = vec![0.0f32; n];
+    softmax_backward_into(weights, dy, &mut out);
+    out
+}
+
+/// Zero-alloc variant of [`softmax_backward`] that writes into a pre-allocated buffer.
+#[inline]
+fn softmax_backward_into(weights: &[f32], dy: &[f32], out: &mut [f32]) {
+    let n = weights.len();
+    debug_assert!(out.len() >= n);
     let dot: f32 = weights.iter().zip(dy.iter()).map(|(w, d)| w * d).sum();
-    weights
-        .iter()
-        .zip(dy.iter())
-        .map(|(w, d)| w * (d - dot))
-        .collect()
+    for i in 0..n {
+        out[i] = weights[i] * (dy[i] - dot);
+    }
 }
 
 /// Backward pass: compute gradients from saved activations.
@@ -814,9 +931,9 @@ fn backward(
 
         // RMSNorm backward (after_attn_res → after_mlp_norm)
         let aar = &act.after_attn_res[p * n..(p + 1) * n];
-        let d_aar_from_mlp = rmsnorm_backward(aar, amn, &bctx.d_amn);
+        rmsnorm_backward_into(aar, amn, &bctx.d_amn, &mut bctx.d_rmsnorm_buf);
         for i in 0..n {
-            bctx.d_an1[i] += d_aar_from_mlp[i]; // d_after_attn_res = d_hf + d_aar_from_mlp
+            bctx.d_an1[i] += bctx.d_rmsnorm_buf[i]; // d_after_attn_res = d_hf + d_aar_from_mlp
         }
 
         // Save d_after_attn_res for Phase 3
@@ -862,7 +979,12 @@ fn backward(
 
             // Softmax backward
             let w_h = &aw[h * seq_len..(h + 1) * seq_len];
-            let d_scores = softmax_backward(w_h, &bctx.d_raw[..seq_len]);
+            softmax_backward_into(
+                w_h,
+                &bctx.d_raw[..seq_len],
+                &mut bctx.d_softmax_buf[..seq_len],
+            );
+            let d_scores = &bctx.d_softmax_buf[..seq_len];
 
             // d_v[t] += weights[t] * d_attn_out[h]
             for t in 0..seq_len {
@@ -933,9 +1055,9 @@ fn backward(
         if an2_grad.iter().any(|&g| g != 0.0) {
             let an1 = &act.after_norm1[p * n..(p + 1) * n];
             let an2 = &act.after_norm2[p * n..(p + 1) * n];
-            let d_from_n2 = rmsnorm_backward(an1, an2, an2_grad);
+            rmsnorm_backward_into(an1, an2, an2_grad, &mut bctx.d_rmsnorm_buf);
             for i in 0..n {
-                bctx.d_an1[i] += d_from_n2[i];
+                bctx.d_an1[i] += bctx.d_rmsnorm_buf[i];
             }
         }
 
@@ -950,13 +1072,13 @@ fn backward(
         // RMSNorm backward (embeddings → after_norm1)
         let emb = &act.embeddings[p * n..(p + 1) * n];
         let an1 = &act.after_norm1[p * n..(p + 1) * n];
-        let d_emb = rmsnorm_backward(emb, an1, &bctx.d_an1);
+        rmsnorm_backward_into(emb, an1, &bctx.d_an1, &mut bctx.d_rmsnorm_buf);
 
         // d_wte[token] += d_emb, d_wpe[p] += d_emb
         let token = tokens[p];
         for i in 0..n {
-            grads.wte[token * n + i] += d_emb[i];
-            grads.wpe[p * n + i] += d_emb[i];
+            grads.wte[token * n + i] += bctx.d_rmsnorm_buf[i];
+            grads.wpe[p * n + i] += bctx.d_rmsnorm_buf[i];
         }
     }
 

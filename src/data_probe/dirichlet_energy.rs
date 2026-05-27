@@ -194,7 +194,7 @@ mod tests {
     #[test]
     fn test_functor_adjacency_passthrough() {
         let pairs = vec![(0, 5), (1, 6), (2, 7)];
-        let adj = functor_adjacency(&pairs);
+        let adj = functor_adjacency(pairs.clone());
         assert_eq!(adj, pairs);
     }
 

@@ -14,6 +14,7 @@
 //! No nightly features, no external SIMD crates.
 
 /// SIMD capability level detected at runtime.
+#[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SimdLevel {
     /// No SIMD — scalar fallback.
@@ -80,7 +81,7 @@ fn is_avx2_fma_available() -> bool {
 ///
 /// Dispatches to NEON, AVX2, or scalar based on compile-time target and
 /// runtime CPU feature detection.
-#[inline]
+#[inline(always)]
 pub fn simd_dot_f32(a: &[f32], b: &[f32], len: usize) -> f32 {
     #[cfg(target_arch = "aarch64")]
     {
@@ -240,7 +241,7 @@ unsafe fn avx2_dot_f32(a: &[f32], b: &[f32], len: usize) -> f32 {
 ///
 /// Used for HLA rank-1 updates (SK += kkᵀ, CQV += qvᵀ, PKV += kvᵀ).
 /// `acc` is `[m × n]` row-major, `a` is `[m]`, `b` is `[n]`.
-#[inline]
+#[inline(always)]
 pub fn simd_outer_product_acc(acc: &mut [f32], a: &[f32], b: &[f32], m: usize, n: usize) {
     #[cfg(target_arch = "aarch64")]
     {
@@ -343,7 +344,7 @@ unsafe fn avx2_outer_product_acc(acc: &mut [f32], a: &[f32], b: &[f32], m: usize
 ///
 /// Used for HLA readout (qᵀ·SK, qᵀ·PKV, etc.).
 /// `mat` is `[rows × cols]` row-major, `vec` is `[cols]`, `acc` is `[rows]`.
-#[inline]
+#[inline(always)]
 pub fn simd_matvec(acc: &mut [f32], mat: &[f32], vec: &[f32], rows: usize, cols: usize) {
     for r in 0..rows {
         let row = &mat[r * cols..r * cols + cols];
@@ -783,7 +784,7 @@ pub fn simd_sparse_matmul_rows(
 /// TurboQuant normalize, and any bulk `*= scale` pattern.
 ///
 /// NEON: 4× f32 per op. AVX2: 8× f32 per op. Scalar fallback for remainder.
-#[inline]
+#[inline(always)]
 pub fn simd_scale_inplace(x: &mut [f32], scale: f32) {
     #[cfg(target_arch = "aarch64")]
     {
@@ -911,7 +912,7 @@ pub fn simd_fused_sub_scale_inplace(x: &mut [f32], sub: f32, scale: f32) {
 ///
 /// Used for softmax denominator computation (sum of exp-shifted scores).
 /// NEON: uses `vaddvq_f32` for 4-lane horizontal sum. AVX2: uses 8-lane reduce.
-#[inline]
+#[inline(always)]
 pub fn simd_sum_f32(x: &[f32]) -> f32 {
     if x.is_empty() {
         return 0.0;
@@ -1001,7 +1002,7 @@ pub fn simd_add_into(dst: &mut [f32], a: &[f32], b: &[f32]) {
 ///
 /// Used for softmax numerical stability (pass 1 max-finding).
 /// NEON: 4× f32 per `vmaxq_f32`. AVX2: 8× f32 per `_mm256_max_ps`.
-#[inline]
+#[inline(always)]
 pub fn simd_max_f32(x: &[f32]) -> f32 {
     if x.is_empty() {
         return f32::NEG_INFINITY;

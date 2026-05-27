@@ -281,9 +281,12 @@ fn attention_fallback(
         for j in 0..seq_len {
             let s = scores[scores_off + j];
             let v_off = j * head_dim;
-            for d in 0..head_dim {
-                output[out_off + d] += s * v[v_off + d];
-            }
+            crate::simd::simd_fused_scale_acc(
+                &mut output[out_off..out_off + head_dim],
+                &v[v_off..v_off + head_dim],
+                s,
+                head_dim,
+            );
         }
     }
 }

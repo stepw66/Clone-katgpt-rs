@@ -142,6 +142,9 @@ pub fn score_blocks_entmax_into(
 ///
 /// Runs per-query-head entmax routing, then averages probabilities across
 /// heads sharing the same KV group for consensus routing.
+///
+/// Uses `score_blocks_entmax_into` with a reusable scratch buffer to avoid
+/// per-head heap allocation in the routing hot path.
 pub fn compute_routing_bias(
     queries: &[Vec<f32>],   // [n_query_heads][head_dim]
     summaries: &[Vec<f32>], // [n_chunks][head_dim]
@@ -151,14 +154,17 @@ pub fn compute_routing_bias(
     let n_query_heads = queries.len();
     let n_chunks = summaries.len();
 
-    // Per-query-head routing
+    // Reuse scratch buffers across heads (zero-alloc routing)
+    let mut scratch = RoutingScratch::new(n_chunks, queries.first().map_or(0, |q| q.len()));
+
+    // Per-query-head routing using the _into variant
     let per_head: Vec<RoutingResult> = queries
         .iter()
-        .map(|q| score_blocks_entmax(q, summaries, config))
+        .map(|q| score_blocks_entmax_into(q, summaries, config, &mut scratch))
         .collect();
 
-    // GQA aggregation: merge probs across heads in same group
-    let head_probs: Vec<Vec<f32>> = per_head.iter().map(|r| r.probs.clone()).collect();
+    // GQA aggregation: reference probs without cloning
+    let head_probs: Vec<&[f32]> = per_head.iter().map(|r| r.probs.as_slice()).collect();
     let _agg_probs = entmax_gqa_aggregate(&head_probs, n_query_heads, n_kv_heads, n_chunks);
 
     per_head

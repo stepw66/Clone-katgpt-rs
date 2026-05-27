@@ -31,6 +31,7 @@ use crate::types::Config;
 /// - `EraseOnly`: channel-wise erase b + scalar write w. Recovers ~90% of full gain.
 /// - `Full`: channel-wise erase b + channel-wise write w. Maximum expressiveness.
 /// - `Kda`: single scalar β (tied gates). Simplest baseline.
+#[repr(u8)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Gdn2GateConfig {
     /// Erase-only: channel-wise b, scalar w. Recovers ~90% of full gain.
@@ -83,8 +84,6 @@ impl Gdn2HeadState {
 pub struct Gdn2LayerState {
     /// Per-KV-head recurrent states. GQA: shared across Q heads in same group.
     pub heads: Vec<Gdn2HeadState>,
-    /// Gate configuration for this layer.
-    pub gate_config: Gdn2GateConfig,
 
     // ── Pre-allocated scratch buffers (zero alloc in hot path) ──
     /// Output buffer `[head_dim]`, zeroed before each use.
@@ -99,6 +98,9 @@ pub struct Gdn2LayerState {
     pub write_w_channel: Vec<f32>,
     /// Delta buffer `[head_dim]`, zeroed before each use.
     pub delta: Vec<f32>,
+
+    /// Gate configuration for this layer.
+    pub gate_config: Gdn2GateConfig,
 }
 
 impl Gdn2LayerState {
@@ -106,10 +108,12 @@ impl Gdn2LayerState {
     pub fn new(config: &Config, gate_config: Gdn2GateConfig) -> Self {
         let dk = config.head_dim;
         let dv = config.head_dim;
+        let mut heads = Vec::with_capacity(config.n_kv_head);
+        for _ in 0..config.n_kv_head {
+            heads.push(Gdn2HeadState::new(dk, dv));
+        }
         Self {
-            heads: (0..config.n_kv_head)
-                .map(|_| Gdn2HeadState::new(dk, dv))
-                .collect(),
+            heads,
             gate_config,
             out_buf: vec![0.0; dv],
             temp_buf: vec![0.0; dv],

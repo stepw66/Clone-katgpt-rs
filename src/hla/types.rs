@@ -331,6 +331,7 @@ impl MultiLayerAhlaCache {
 // ── Memory Comparison Helper ──────────────────────────────────
 
 /// Cache variant for benchmark comparison.
+#[repr(u8)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HlaVariant {
     /// Symmetric second-order: A·Aᵀ·V, state 3hd² + 2hd per Q head + hd² per KV group.

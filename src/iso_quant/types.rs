@@ -1,6 +1,7 @@
 //! Core types for IsoQuant KV cache compression.
 
 /// IsoQuant rotation mode.
+#[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IsoQuantMode {
     /// T(v) = q_L * v * conj(q_R) — full SO(4), 6 DOF per block.

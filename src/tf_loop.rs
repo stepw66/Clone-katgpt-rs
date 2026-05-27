@@ -52,6 +52,7 @@ pub fn default_loop_window(n_layers: usize) -> (usize, usize) {
 /// # Panics
 /// Debug-asserts that `x` and `y` have the same length.
 /// When `k == 0`, this is a no-op (identity).
+#[inline]
 pub fn sub_step_damped_euler(x: &mut [f32], y: &[f32], k: usize) {
     debug_assert_eq!(x.len(), y.len(), "x and y must have the same length");
     if k == 0 {
@@ -73,6 +74,7 @@ pub fn sub_step_damped_euler(x: &mut [f32], y: &[f32], k: usize) {
 ///
 /// # Panics
 /// Debug-asserts that `x` and `anchor` have the same length.
+#[inline]
 pub fn anchor_blend(x: &mut [f32], anchor: &[f32], beta: f32) {
     debug_assert_eq!(
         x.len(),

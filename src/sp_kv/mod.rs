@@ -38,6 +38,6 @@ pub use types::{
     SpKvQuantCache, SpKvQuantLayerMeta, UtilityPredictorWeights,
 };
 pub use utility_predictor::{
-    UtilityAggregation, aggregate_utilities, hard_gate_bias, predict, predict_single_head,
-    soft_gate_bias, tahg_gate_bias,
+    UtilityAggregation, aggregate_utilities, hard_gate_bias, predict, predict_into,
+    predict_single_head, soft_gate_bias, tahg_gate_bias,
 };

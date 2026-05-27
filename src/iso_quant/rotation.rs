@@ -78,6 +78,7 @@ pub fn quat_left_inverse(q_l: &[f32; 4], v: &[f32; 4]) -> [f32; 4] {
 /// `q_left` has ceil(dim/4) entries.
 /// For full mode, `q_right` must be Some with same length.
 /// `input` has `dim` elements, `output` must have `dim` elements.
+#[inline]
 pub fn apply_rotation(
     q_left: &[[f32; 4]],
     q_right: Option<&[[f32; 4]]>,
@@ -110,6 +111,7 @@ pub fn apply_rotation(
 }
 
 /// Apply full vector inverse quaternion rotation.
+#[inline]
 pub fn apply_inverse_rotation(
     q_left: &[[f32; 4]],
     q_right: Option<&[[f32; 4]]>,

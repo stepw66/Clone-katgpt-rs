@@ -369,6 +369,7 @@ pub struct ConfiguratorContext {
 ///
 /// **Precondition:** `Top1Converged` is only reliable after landscape shaping
 /// (RI + NI training). See Research 079 (EqR) for theoretical justification.
+#[repr(u8)]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum ConvergenceSelector {
     /// Select rollout with highest cumulative relevance score (PTRM Q-head analog).
@@ -1438,6 +1439,7 @@ pub fn gegelu_tanh(hidden: &mut [f32], gate: &[f32], up: &[f32]) {
 /// Used in LLaMA, Mistral, and other LLaMA-family models for SwiGLU MLP.
 ///
 /// SIMD-accelerated: exp() computed via `simd_exp_inplace` on stack buffers.
+#[inline]
 pub fn silu(x: &mut [f32]) {
     const CHUNK: usize = 64;
     let mut buf = [0.0f32; CHUNK];
@@ -1466,6 +1468,7 @@ pub fn silu(x: &mut [f32]) {
 /// Result stored in `hidden`: hidden[i] = silu(gate[i]) * up[i]
 ///
 /// SIMD-accelerated: exp() computed via `simd_exp_inplace` on stack buffers.
+#[inline]
 pub fn swiglu(hidden: &mut [f32], gate: &[f32], up: &[f32]) {
     const CHUNK: usize = 64;
     let mut buf = [0.0f32; CHUNK];
@@ -1632,6 +1635,9 @@ pub fn sparse_matmul(
 ///
 /// Builds a prefix-sum (CDF) then uses binary search for O(log V) lookup
 /// instead of the O(V/2) average of a linear scan.
+///
+/// **Note:** This allocates a CDF Vec internally. For decode loops, prefer
+/// [`sample_token_into()`] to avoid per-token heap allocation.
 pub fn sample_token(probs: &[f32], rng: &mut Rng) -> usize {
     let r = rng.uniform();
     let n = probs.len();
@@ -1705,12 +1711,12 @@ pub struct LoraAdapter {
     pub b: Vec<f32>,
     /// LoRA rank.
     pub rank: usize,
-    /// Scaling factor (alpha / rank).
-    pub alpha: f32,
     /// Input dimension.
     pub in_dim: usize,
     /// Output dimension.
     pub out_dim: usize,
+    /// Scaling factor (alpha / rank).
+    pub alpha: f32,
 }
 
 impl LoraAdapter {

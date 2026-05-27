@@ -7,6 +7,7 @@ use rayon::prelude::*;
 /// - Verify: exact attention, full KV write, enable screening
 /// - Sample: SIMD-only, no attention needed
 #[cfg(feature = "decode_specialize")]
+#[repr(u8)]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum DecodeStage {
     /// Batch-friendly, attention-heavy, needs full KV write.
@@ -342,6 +343,15 @@ pub struct ForwardContext {
     // Delta routing: scratch buffer for SIMD scaling in depth_route (Issue 082)
     #[cfg(feature = "delta_routing")]
     delta_scaled_buf: Vec<f32>, // [n_embd] scratch for pre-scaled dot products
+    // Training-free loop: pre-allocated buffers for window iteration (Issue 091)
+    #[cfg(feature = "tf_loop")]
+    tf_x_pre_window: Vec<f32>, // [n_embd] saved state before window
+    #[cfg(feature = "tf_loop")]
+    tf_x_anchor: Vec<f32>, // [n_embd] anchor state
+    #[cfg(feature = "tf_loop")]
+    tf_y_buf: Vec<f32>, // [n_embd] temp buffer for window output
+    #[cfg(feature = "tf_loop")]
+    tf_stash_x: Vec<f32>, // [n_embd] stash for KV cache write
 }
 
 impl ForwardContext {
@@ -424,6 +434,14 @@ impl ForwardContext {
             },
             #[cfg(feature = "delta_routing")]
             delta_scaled_buf: vec![0.0f32; config.n_embd],
+            #[cfg(feature = "tf_loop")]
+            tf_x_pre_window: vec![0.0f32; config.n_embd],
+            #[cfg(feature = "tf_loop")]
+            tf_x_anchor: vec![0.0f32; config.n_embd],
+            #[cfg(feature = "tf_loop")]
+            tf_y_buf: vec![0.0f32; config.n_embd],
+            #[cfg(feature = "tf_loop")]
+            tf_stash_x: vec![0.0f32; config.n_embd],
         }
     }
 
@@ -997,10 +1015,10 @@ pub fn forward_training_free_loop<'a>(
     }
 
     // Save state before window for anchor computation
-    let x_pre_window = ctx.x[..n].to_vec();
+    ctx.tf_x_pre_window[..n].copy_from_slice(&ctx.x[..n]);
 
     // 3. Anchor: forward window once to get x_anchor
-    let x_anchor = if beta > 0.0 {
+    if beta > 0.0 {
         for layer_idx in window_start..=window_end {
             forward_single_layer(
                 ctx,
@@ -1014,16 +1032,13 @@ pub fn forward_training_free_loop<'a>(
                 n_kv,
             );
         }
-        let anchor = ctx.x[..n].to_vec();
+        ctx.tf_x_anchor[..n].copy_from_slice(&ctx.x[..n]);
         // Restore x to pre-window state for loop iterations
-        ctx.x[..n].copy_from_slice(&x_pre_window);
-        anchor
-    } else {
-        Vec::new() // no anchor needed when beta == 0
-    };
+        ctx.x[..n].copy_from_slice(&ctx.tf_x_pre_window[..n]);
+    }
 
-    // Temp buffer for window output
-    let mut y_buf = vec![0.0f32; n];
+    // Temp buffer for window output (pre-allocated on ForwardContext)
+    ctx.tf_y_buf[..n].fill(0.0);
 
     // 4. Loop K times over the window with sub-stepping
     match tf_config.iteration_mode {
@@ -1044,11 +1059,11 @@ pub fn forward_training_free_loop<'a>(
                     );
                 }
                 // Save window output
-                y_buf[..n].copy_from_slice(&ctx.x[..n]);
+                ctx.tf_y_buf[..n].copy_from_slice(&ctx.x[..n]);
                 // Restore x to pre-window for sub-step computation
-                ctx.x[..n].copy_from_slice(&x_pre_window);
+                ctx.x[..n].copy_from_slice(&ctx.tf_x_pre_window[..n]);
                 // Apply sub-step: x += (1/K)·(y − x)
-                sub_step_damped_euler(&mut ctx.x[..n], &y_buf[..n], k);
+                sub_step_damped_euler(&mut ctx.x[..n], &ctx.tf_y_buf[..n], k);
             }
         }
         IterationMode::Layer => {
@@ -1067,22 +1082,22 @@ pub fn forward_training_free_loop<'a>(
                         n_kv,
                     );
                     // Sub-step per layer
-                    y_buf[..n].copy_from_slice(&ctx.x[..n]);
-                    ctx.x[..n].copy_from_slice(&x_pre_window);
-                    sub_step_damped_euler(&mut ctx.x[..n], &y_buf[..n], k);
+                    ctx.tf_y_buf[..n].copy_from_slice(&ctx.x[..n]);
+                    ctx.x[..n].copy_from_slice(&ctx.tf_x_pre_window[..n]);
+                    sub_step_damped_euler(&mut ctx.x[..n], &ctx.tf_y_buf[..n], k);
                 }
             }
         }
     }
 
     // 5. Blend with anchor
-    if beta > 0.0 && !x_anchor.is_empty() {
-        anchor_blend(&mut ctx.x[..n], &x_anchor, beta);
+    if beta > 0.0 {
+        anchor_blend(&mut ctx.x[..n], &ctx.tf_x_anchor[..n], beta);
     }
 
     // 6. Stash: single forward through window writes canonical KV entries
     {
-        let stash_x = ctx.x[..n].to_vec();
+        ctx.tf_stash_x[..n].copy_from_slice(&ctx.x[..n]);
         match tf_config.cache_strategy {
             CacheStrategy::Last => {
                 // Forward with final state → writes KV
@@ -1102,7 +1117,7 @@ pub fn forward_training_free_loop<'a>(
             }
             CacheStrategy::First => {
                 // Forward with pre-window state → writes KV
-                ctx.x[..n].copy_from_slice(&x_pre_window);
+                ctx.x[..n].copy_from_slice(&ctx.tf_x_pre_window[..n]);
                 for layer_idx in window_start..=window_end {
                     forward_single_layer(
                         ctx,
@@ -1117,7 +1132,7 @@ pub fn forward_training_free_loop<'a>(
                     );
                 }
                 // Restore the blended state
-                ctx.x[..n].copy_from_slice(&stash_x);
+                ctx.x[..n].copy_from_slice(&ctx.tf_stash_x[..n]);
             }
         }
     }
@@ -1386,7 +1401,9 @@ fn clustered_lm_head(
 /// Deterministic, no training needed — simple baseline.
 pub fn cluster_map_round_robin(vocab_size: usize, cluster_size: usize) -> Vec<Vec<usize>> {
     let num_clusters = vocab_size.div_ceil(cluster_size);
-    let mut map: Vec<Vec<usize>> = vec![Vec::new(); num_clusters];
+    let mut map: Vec<Vec<usize>> = (0..num_clusters)
+        .map(|_| Vec::with_capacity(cluster_size))
+        .collect();
     for token_id in 0..vocab_size {
         let cluster_id = token_id / cluster_size;
         map[cluster_id].push(token_id);
@@ -1475,10 +1492,13 @@ fn depth_route(
         let rms = (sum_sq / n_embd as f32 + eps).sqrt();
         let inv_rms = 1.0 / rms;
 
-        // Scale src * inv_rms * norm_weight into scratch, then SIMD dot with query
-        for d in 0..n_embd {
-            scaled_buf[d] = src[d] * inv_rms * norm_weight[d];
-        }
+        // Scale src * inv_rms * norm_weight into scratch via fused SIMD, then dot with query
+        scaled_buf[..n_embd].copy_from_slice(&src[..n_embd]);
+        crate::simd::simd_scale_mul_inplace(
+            &mut scaled_buf[..n_embd],
+            &norm_weight[..n_embd],
+            inv_rms,
+        );
         let logit = crate::simd::simd_dot_f32(&scaled_buf[..n_embd], query_weight, n_embd);
 
         logits_buf[i] = logit;
@@ -1500,9 +1520,8 @@ fn depth_route(
     //    For each source: scale into scratch buf then SIMD-accumulate into residual
     for (i, &src) in sources.iter().enumerate() {
         let weight = logits_buf[i] * inv_sum;
-        for d in 0..n_embd {
-            scaled_buf[d] = weight * src[d];
-        }
+        scaled_buf[..n_embd].copy_from_slice(&src[..n_embd]);
+        crate::simd::simd_scale_inplace(&mut scaled_buf[..n_embd], weight);
         crate::simd::simd_add_inplace(&mut residual[..n_embd], &scaled_buf[..n_embd]);
     }
 }
@@ -1550,10 +1569,13 @@ fn depth_route_with_indices(args: DepthRouteIndicesArgs<'_>) {
         let rms = (sum_sq / n_embd as f32 + eps).sqrt();
         let inv_rms = 1.0 / rms;
 
-        // Scale src * inv_rms * norm_weight into scratch, then SIMD dot with query
-        for d in 0..n_embd {
-            scaled_buf[d] = src[d] * inv_rms * norm_weight[d];
-        }
+        // Scale src * inv_rms * norm_weight into scratch via fused SIMD, then dot with query
+        scaled_buf[..n_embd].copy_from_slice(&src[..n_embd]);
+        crate::simd::simd_scale_mul_inplace(
+            &mut scaled_buf[..n_embd],
+            &norm_weight[..n_embd],
+            inv_rms,
+        );
         let logit = crate::simd::simd_dot_f32(&scaled_buf[..n_embd], query_weight, n_embd);
 
         logits_buf[i] = logit;
@@ -1576,9 +1598,8 @@ fn depth_route_with_indices(args: DepthRouteIndicesArgs<'_>) {
     for (i, &src_idx) in source_indices.iter().enumerate() {
         let src = &block_deltas[src_idx];
         let weight = logits_buf[i] * inv_sum;
-        for d in 0..n_embd {
-            scaled_buf[d] = weight * src[d];
-        }
+        scaled_buf[..n_embd].copy_from_slice(&src[..n_embd]);
+        crate::simd::simd_scale_inplace(&mut scaled_buf[..n_embd], weight);
         crate::simd::simd_add_inplace(&mut residual[..n_embd], &scaled_buf[..n_embd]);
     }
 }
@@ -3342,6 +3363,10 @@ pub struct PagedKVCache {
     kv_dim: usize,
     /// Total pages ever allocated (monotonically increasing).
     total_pages: usize,
+    /// Reusable scratch: per-layer page deficits (cleared + refilled each call).
+    deficits: Vec<usize>,
+    /// Reusable scratch: per-layer new page indices (cleared + refilled each call).
+    new_pages: Vec<Vec<usize>>,
 }
 
 impl PagedKVCache {
@@ -3356,11 +3381,17 @@ impl PagedKVCache {
                 .map(|_| vec![0.0; PAGE_SIZE * kvd * 2])
                 .collect(),
             layer_page_tables: (0..config.n_layer)
-                .map(|_| (0..max_sequences).map(|_| Vec::new()).collect())
+                .map(|_| {
+                    (0..max_sequences)
+                        .map(|_| Vec::with_capacity(initial_pages_per_layer))
+                        .collect()
+                })
                 .collect(),
             free_pages: Vec::new(),
             kv_dim: kvd,
             total_pages: initial_pages_per_layer * config.n_layer,
+            deficits: Vec::with_capacity(config.n_layer),
+            new_pages: vec![Vec::new(); config.n_layer],
         }
     }
 
@@ -3391,22 +3422,32 @@ impl PagedKVCache {
             }
         }
 
-        // Collect how many new pages each layer needs
-        let deficits: Vec<usize> = self
-            .layer_page_tables
-            .iter()
-            .map(|lt| pages_needed.saturating_sub(lt[seq_idx].len()))
-            .collect();
+        // Collect how many new pages each layer needs (reuse scratch buffer)
+        self.deficits.clear();
+        for lt in &self.layer_page_tables {
+            self.deficits
+                .push(pages_needed.saturating_sub(lt[seq_idx].len()));
+        }
 
         // Allocate all pages upfront
-        let new_pages: Vec<Vec<usize>> = deficits
-            .into_iter()
-            .map(|n| (0..n).map(|_| self.alloc_page()).collect())
-            .collect();
+        let total_deficit: usize = self.deficits.iter().sum();
+        let mut all_new: Vec<usize> = Vec::with_capacity(total_deficit);
+        for _ in 0..total_deficit {
+            all_new.push(self.alloc_page());
+        }
+
+        // Partition into per-layer lists and assign
+        self.new_pages.resize_with(self.deficits.len(), Vec::new);
+        let mut offset = 0;
+        for (i, &deficit) in self.deficits.iter().enumerate() {
+            self.new_pages[i].clear();
+            self.new_pages[i].extend_from_slice(&all_new[offset..offset + deficit]);
+            offset += deficit;
+        }
 
         // Assign new pages to each layer's page table
-        for (layer_tables, pages) in self.layer_page_tables.iter_mut().zip(new_pages) {
-            layer_tables[seq_idx].extend(pages);
+        for (layer_tables, pages) in self.layer_page_tables.iter_mut().zip(self.new_pages.iter()) {
+            layer_tables[seq_idx].extend(pages.iter().copied());
         }
     }
 
@@ -3715,11 +3756,12 @@ pub fn raven_readout_into<'a>(
         for s in 0..num_slots {
             let weight = unsafe { *scores.get_unchecked(s) * inv_sum };
             let v_off = s * kv_dim;
-            for d in 0..kv_dim {
-                unsafe {
-                    *output.get_unchecked_mut(d) += weight * *values.get_unchecked(v_off + d);
-                }
-            }
+            crate::simd::simd_fused_scale_acc(
+                &mut output[..kv_dim],
+                &values[v_off..v_off + kv_dim],
+                weight,
+                kv_dim,
+            );
         }
     }
 

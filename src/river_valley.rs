@@ -11,10 +11,11 @@
 
 /// Dot product of two vectors.
 fn dot(a: &[f32], b: &[f32]) -> f32 {
-    a.iter().zip(b.iter()).map(|(&x, &y)| x * y).sum()
+    crate::simd::simd_dot_f32(a, b, a.len())
 }
 
 /// L2 norm of a vector.
+#[inline]
 fn l2_norm(v: &[f32]) -> f32 {
     dot(v, v).sqrt()
 }
@@ -74,25 +75,35 @@ pub fn effective_rank(matrix: &[f32], rows: usize, cols: usize) -> f32 {
         // G = M @ M^T  (rows × rows)
         let mut gram = vec![0.0f32; rows * rows];
         for i in 0..rows {
-            for j in 0..rows {
-                let mut sum = 0.0f32;
-                for k in 0..cols {
-                    sum += matrix[i * cols + k] * matrix[j * cols + k];
-                }
-                gram[i * rows + j] = sum;
+            for j in i..rows {
+                let dot = crate::simd::simd_dot_f32(
+                    &matrix[i * cols..(i + 1) * cols],
+                    &matrix[j * cols..(j + 1) * cols],
+                    cols,
+                );
+                gram[i * rows + j] = dot;
+                gram[j * rows + i] = dot;
             }
         }
         erank_from_gram(&gram, rows)
     } else {
         // G = M^T @ M  (cols × cols)
+        // Accumulate outer products row-by-row for SIMD-friendly contiguous access:
+        // G[i,j] = Σ_k M[k,i]·M[k,j] = Σ_k (row_k)_i · (row_k)_j
         let mut gram = vec![0.0f32; cols * cols];
-        for i in 0..cols {
-            for j in 0..cols {
-                let mut sum = 0.0f32;
-                for k in 0..rows {
-                    sum += matrix[k * cols + i] * matrix[k * cols + j];
+        for k in 0..rows {
+            let row = &matrix[k * cols..(k + 1) * cols];
+            for i in 0..cols {
+                let a = row[i];
+                for j in i..cols {
+                    gram[i * cols + j] += a * row[j];
                 }
-                gram[i * cols + j] = sum;
+            }
+        }
+        // Symmetrize
+        for i in 0..cols {
+            for j in (i + 1)..cols {
+                gram[j * cols + i] = gram[i * cols + j];
             }
         }
         erank_from_gram(&gram, cols)

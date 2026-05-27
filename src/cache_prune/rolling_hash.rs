@@ -220,7 +220,7 @@ impl KvSegmentPool {
     pub fn find_matches(&self, request_tokens: &[u32], roller: &RollingHash) -> Vec<MatchResult> {
         let request_prefixes = roller.prefix_hashes(request_tokens);
         let n = request_tokens.len();
-        let mut results = Vec::new();
+        let mut results = Vec::with_capacity(self.segments.len());
 
         // Group segments by length so we can reuse the sliding logic per
         // length class.
