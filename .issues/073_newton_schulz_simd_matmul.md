@@ -1,7 +1,7 @@
 # newton_schulz.rs: scalar O(n³) matrix operations
 
 ## Status
-🟡 **PARTIAL** — `matmul_xtx` uses `simd_dot_f32` with symmetry exploitation ✅. `matmul_ax` is still scalar.
+✅ **DONE** — `matmul_xtx` uses `simd_dot_f32` with symmetry exploitation ✅. `matmul_ax` transposes X and uses `simd_dot_f32` ✅. A@A in iteration loop transposes A and uses `simd_dot_f32` ✅.
 
 ## Severity
 🔴 HIGH — called per optimizer step for every parameter matrix
@@ -64,6 +64,6 @@ For large m, use a tiled/blocked approach to stay in L1 cache.
 ## Acceptance Criteria
 - [x] `matmul_xtx` uses `simd_dot_f32` for inner products
 - [x] `matmul_xtx` exploits symmetry (upper triangle + mirror)
-- [ ] `matmul_ax` uses `simd_dot_f32` for inner products — **still scalar**
+- [x] `matmul_ax` uses `simd_dot_f32` for inner products
 - [x] All Newton-Schulz tests pass
 - [x] Muon optimizer tests pass

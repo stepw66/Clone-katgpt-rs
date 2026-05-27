@@ -9,6 +9,578 @@
 //! All matrices are k×k where k is the representation dimension (typically
 //! 128–512), so inversion is O(k³) which is negligible on CPU. No GPU/WGSL
 //! needed.
+//!
+//! SIMD kernels use `float64x2_t` (NEON, 2-wide) or `__m256d` (AVX2, 4-wide)
+//! for the outer-product and dot-product hot loops.
+
+// ── SIMD f64 helpers (only used in this module) ──────────────────
+
+/// SIMD outer product + EMA update for f64 covariance tracking.
+///
+/// Computes for each (i,j):
+///   sigma_ij = s[i] * t[j]
+///   n_ij     = (s[i] * s[j] + t[i] * t[j]) / 2
+///
+/// Then applies EMA:
+///   dst_sigma[idx] = alpha * dst_sigma[idx] + (1 - alpha) * sigma_ij   (or sigma_ij if first_step)
+///   dst_n[idx]     = alpha * dst_n[idx]     + (1 - alpha) * n_ij       (or n_ij if first_step)
+#[inline]
+fn simd_outer_product_ema_f64(
+    dst_sigma: &mut [f64],
+    dst_n: &mut [f64],
+    student: &[f32],
+    teacher: &[f32],
+    k: usize,
+    alpha: f64,
+    first_step: bool,
+) {
+    #[cfg(target_arch = "aarch64")]
+    {
+        unsafe {
+            neon_outer_product_ema_f64(dst_sigma, dst_n, student, teacher, k, alpha, first_step)
+        }
+    }
+    #[cfg(target_arch = "x86_64")]
+    {
+        if crate::simd::simd_level() == crate::simd::SimdLevel::Avx2 {
+            unsafe {
+                avx2_outer_product_ema_f64(dst_sigma, dst_n, student, teacher, k, alpha, first_step)
+            }
+        } else {
+            scalar_outer_product_ema_f64(dst_sigma, dst_n, student, teacher, k, alpha, first_step)
+        }
+    }
+    #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
+    {
+        scalar_outer_product_ema_f64(dst_sigma, dst_n, student, teacher, k, alpha, first_step)
+    }
+}
+
+/// SIMD outer product (no EMA) for f64 sample covariance.
+///
+/// Computes for each (i,j):
+///   dst_sigma[i*k+j] = s[i] * t[j]
+///   dst_n[i*k+j]     = (s[i] * s[j] + t[i] * t[j]) / 2
+#[inline]
+fn simd_outer_product_f64(
+    dst_sigma: &mut [f64],
+    dst_n: &mut [f64],
+    student: &[f32],
+    teacher: &[f32],
+    k: usize,
+) {
+    #[cfg(target_arch = "aarch64")]
+    {
+        unsafe { neon_outer_product_f64(dst_sigma, dst_n, student, teacher, k) }
+    }
+    #[cfg(target_arch = "x86_64")]
+    {
+        if crate::simd::simd_level() == crate::simd::SimdLevel::Avx2 {
+            unsafe { avx2_outer_product_f64(dst_sigma, dst_n, student, teacher, k) }
+        } else {
+            scalar_outer_product_f64(dst_sigma, dst_n, student, teacher, k)
+        }
+    }
+    #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
+    {
+        scalar_outer_product_f64(dst_sigma, dst_n, student, teacher, k)
+    }
+}
+
+/// SIMD f64 dot product: `a · b` for length `len`.
+#[inline]
+fn simd_dot_f64(a: &[f64], b: &[f64], len: usize) -> f64 {
+    #[cfg(target_arch = "aarch64")]
+    {
+        unsafe { neon_dot_f64(a, b, len) }
+    }
+    #[cfg(target_arch = "x86_64")]
+    {
+        if crate::simd::simd_level() == crate::simd::SimdLevel::Avx2 {
+            unsafe { avx2_dot_f64(a, b, len) }
+        } else {
+            scalar_dot_f64(a, b, len)
+        }
+    }
+    #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
+    {
+        scalar_dot_f64(a, b, len)
+    }
+}
+
+// ── Scalar fallbacks ─────────────────────────────────────────────
+
+#[inline]
+#[allow(dead_code)]
+fn scalar_outer_product_ema_f64(
+    dst_sigma: &mut [f64],
+    dst_n: &mut [f64],
+    student: &[f32],
+    teacher: &[f32],
+    k: usize,
+    alpha: f64,
+    first_step: bool,
+) {
+    let one_minus_alpha = 1.0 - alpha;
+    for i in 0..k {
+        let si = student[i] as f64;
+        let ti = teacher[i] as f64;
+        for j in 0..k {
+            let sj = student[j] as f64;
+            let tj = teacher[j] as f64;
+            let sigma_ij = si * tj;
+            let n_ij = (si * sj + ti * tj) / 2.0;
+            let idx = i * k + j;
+            if first_step {
+                dst_sigma[idx] = sigma_ij;
+                dst_n[idx] = n_ij;
+            } else {
+                dst_sigma[idx] = alpha * dst_sigma[idx] + one_minus_alpha * sigma_ij;
+                dst_n[idx] = alpha * dst_n[idx] + one_minus_alpha * n_ij;
+            }
+        }
+    }
+}
+
+#[inline]
+#[allow(dead_code)]
+fn scalar_outer_product_f64(
+    dst_sigma: &mut [f64],
+    dst_n: &mut [f64],
+    student: &[f32],
+    teacher: &[f32],
+    k: usize,
+) {
+    for i in 0..k {
+        let si = student[i] as f64;
+        let ti = teacher[i] as f64;
+        for j in 0..k {
+            let sj = student[j] as f64;
+            let tj = teacher[j] as f64;
+            dst_sigma[i * k + j] = si * tj;
+            dst_n[i * k + j] = (si * sj + ti * tj) / 2.0;
+        }
+    }
+}
+
+#[inline]
+#[allow(dead_code)]
+fn scalar_dot_f64(a: &[f64], b: &[f64], len: usize) -> f64 {
+    let mut sum = 0.0f64;
+    for i in 0..len {
+        unsafe {
+            sum += *a.get_unchecked(i) * *b.get_unchecked(i);
+        }
+    }
+    sum
+}
+
+// ── NEON (aarch64) f64 SIMD ──────────────────────────────────────
+
+#[cfg(target_arch = "aarch64")]
+#[inline]
+unsafe fn neon_outer_product_ema_f64(
+    dst_sigma: &mut [f64],
+    dst_n: &mut [f64],
+    student: &[f32],
+    teacher: &[f32],
+    k: usize,
+    alpha: f64,
+    first_step: bool,
+) {
+    use core::arch::aarch64::{
+        vdupq_n_f64, vld1q_dup_f64, vld1q_f64, vmlaq_f64, vmulq_f64, vst1q_f64,
+    };
+
+    unsafe {
+        let one_minus_alpha = 1.0 - alpha;
+        let v_alpha = vdupq_n_f64(alpha);
+        let v_oma = vdupq_n_f64(one_minus_alpha);
+        let n_chunks = k / 2;
+
+        for i in 0..k {
+            let si = *student.get_unchecked(i) as f64;
+            let ti = *teacher.get_unchecked(i) as f64;
+            let v_si = vld1q_dup_f64(&si);
+            let v_ti = vld1q_dup_f64(&ti);
+
+            let row_sigma = dst_sigma.as_mut_ptr().add(i * k);
+            let row_n = dst_n.as_mut_ptr().add(i * k);
+
+            let mut j = 0;
+            for _ in 0..n_chunks {
+                // Load f32 pairs and convert to f64
+                let sj0 = *student.get_unchecked(j) as f64;
+                let sj1 = *student.get_unchecked(j + 1) as f64;
+                let v_sj = vld1q_f64([sj0, sj1].as_ptr());
+
+                let tj0 = *teacher.get_unchecked(j) as f64;
+                let tj1 = *teacher.get_unchecked(j + 1) as f64;
+                let v_tj = vld1q_f64([tj0, tj1].as_ptr());
+
+                // sigma_ij = si * tj
+                let v_sigma = vmulq_f64(v_si, v_tj);
+                // n_ij = (si * sj + ti * tj) / 2
+                let v_n = vmulq_f64(v_si, v_sj);
+                let v_n = vmlaq_f64(v_n, v_ti, v_tj);
+                let half = vdupq_n_f64(0.5);
+                let v_n = vmulq_f64(v_n, half);
+
+                if first_step {
+                    vst1q_f64(row_sigma.add(j), v_sigma);
+                    vst1q_f64(row_n.add(j), v_n);
+                } else {
+                    let v_old_sigma = vld1q_f64(row_sigma.add(j));
+                    let v_old_n = vld1q_f64(row_n.add(j));
+                    vst1q_f64(
+                        row_sigma.add(j),
+                        vmlaq_f64(vmulq_f64(v_alpha, v_old_sigma), v_oma, v_sigma),
+                    );
+                    vst1q_f64(
+                        row_n.add(j),
+                        vmlaq_f64(vmulq_f64(v_alpha, v_old_n), v_oma, v_n),
+                    );
+                }
+                j += 2;
+            }
+
+            // Scalar tail
+            while j < k {
+                let sj = *student.get_unchecked(j) as f64;
+                let tj = *teacher.get_unchecked(j) as f64;
+                let sigma_ij = si * tj;
+                let n_ij = (si * sj + ti * tj) * 0.5;
+                if first_step {
+                    *dst_sigma.get_unchecked_mut(i * k + j) = sigma_ij;
+                    *dst_n.get_unchecked_mut(i * k + j) = n_ij;
+                } else {
+                    let idx = i * k + j;
+                    *dst_sigma.get_unchecked_mut(idx) =
+                        alpha * *dst_sigma.get_unchecked(idx) + one_minus_alpha * sigma_ij;
+                    *dst_n.get_unchecked_mut(idx) =
+                        alpha * *dst_n.get_unchecked(idx) + one_minus_alpha * n_ij;
+                }
+                j += 1;
+            }
+        }
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+#[inline]
+unsafe fn neon_outer_product_f64(
+    dst_sigma: &mut [f64],
+    dst_n: &mut [f64],
+    student: &[f32],
+    teacher: &[f32],
+    k: usize,
+) {
+    use core::arch::aarch64::{
+        vaddq_f64, vdupq_n_f64, vld1q_dup_f64, vld1q_f64, vmulq_f64, vst1q_f64,
+    };
+
+    unsafe {
+        let n_chunks = k / 2;
+        let half = vdupq_n_f64(0.5);
+
+        for i in 0..k {
+            let si = *student.get_unchecked(i) as f64;
+            let ti = *teacher.get_unchecked(i) as f64;
+            let v_si = vld1q_dup_f64(&si);
+            let v_ti = vld1q_dup_f64(&ti);
+
+            let row_sigma = dst_sigma.as_mut_ptr().add(i * k);
+            let row_n = dst_n.as_mut_ptr().add(i * k);
+
+            let mut j = 0;
+            for _ in 0..n_chunks {
+                let sj0 = *student.get_unchecked(j) as f64;
+                let sj1 = *student.get_unchecked(j + 1) as f64;
+                let v_sj = vld1q_f64([sj0, sj1].as_ptr());
+
+                let tj0 = *teacher.get_unchecked(j) as f64;
+                let tj1 = *teacher.get_unchecked(j + 1) as f64;
+                let v_tj = vld1q_f64([tj0, tj1].as_ptr());
+
+                let v_sigma = vmulq_f64(v_si, v_tj);
+                // n = (si*sj + ti*tj) / 2
+                let v_n = vmulq_f64(v_si, v_sj);
+                let v_n = vaddq_f64(v_n, vmulq_f64(v_ti, v_tj));
+                let v_n = vmulq_f64(v_n, half);
+
+                vst1q_f64(row_sigma.add(j), v_sigma);
+                vst1q_f64(row_n.add(j), v_n);
+                j += 2;
+            }
+
+            while j < k {
+                let sj = *student.get_unchecked(j) as f64;
+                let tj = *teacher.get_unchecked(j) as f64;
+                *dst_sigma.get_unchecked_mut(i * k + j) = si * tj;
+                *dst_n.get_unchecked_mut(i * k + j) = (si * sj + ti * tj) * 0.5;
+                j += 1;
+            }
+        }
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+#[inline]
+unsafe fn neon_dot_f64(a: &[f64], b: &[f64], len: usize) -> f64 {
+    use core::arch::aarch64::{vaddq_f64, vaddvq_f64, vdupq_n_f64, vld1q_f64, vmulq_f64};
+
+    unsafe {
+        let n_chunks = len / 4; // accumulate 2 pairs of 2-wide
+        let mut acc0 = vdupq_n_f64(0.0);
+        let mut acc1 = vdupq_n_f64(0.0);
+
+        let mut i = 0;
+        for _ in 0..n_chunks {
+            let va0 = vld1q_f64(a.as_ptr().add(i));
+            let vb0 = vld1q_f64(b.as_ptr().add(i));
+            acc0 = vaddq_f64(acc0, vmulq_f64(va0, vb0));
+
+            let va1 = vld1q_f64(a.as_ptr().add(i + 2));
+            let vb1 = vld1q_f64(b.as_ptr().add(i + 2));
+            acc1 = vaddq_f64(acc1, vmulq_f64(va1, vb1));
+
+            i += 4;
+        }
+
+        let mut sum = vaddvq_f64(vaddq_f64(acc0, acc1));
+
+        while i < len {
+            sum += *a.get_unchecked(i) * *b.get_unchecked(i);
+            i += 1;
+        }
+        sum
+    }
+}
+
+// ── AVX2 (x86_64) f64 SIMD ──────────────────────────────────────
+
+#[cfg(target_arch = "x86_64")]
+#[inline]
+unsafe fn avx2_outer_product_ema_f64(
+    dst_sigma: &mut [f64],
+    dst_n: &mut [f64],
+    student: &[f32],
+    teacher: &[f32],
+    k: usize,
+    alpha: f64,
+    first_step: bool,
+) {
+    use core::arch::x86_64::{
+        _mm256_add_pd, _mm256_broadcast_sd, _mm256_loadu_pd, _mm256_mul_pd, _mm256_set1_pd,
+        _mm256_storeu_pd,
+    };
+
+    unsafe {
+        let one_minus_alpha = 1.0 - alpha;
+        let v_alpha = _mm256_set1_pd(alpha);
+        let v_oma = _mm256_set1_pd(one_minus_alpha);
+        let n_chunks = k / 4;
+
+        for i in 0..k {
+            let si = *student.get_unchecked(i) as f64;
+            let ti = *teacher.get_unchecked(i) as f64;
+            let v_si = _mm256_broadcast_sd(&si);
+            let v_ti = _mm256_broadcast_sd(&ti);
+
+            let row_sigma = dst_sigma.as_mut_ptr().add(i * k);
+            let row_n = dst_n.as_mut_ptr().add(i * k);
+
+            let mut j = 0;
+            for _ in 0..n_chunks {
+                // Load 4 student/teacher f32 values and broadcast to f64
+                let mut sj_buf = [0.0f64; 4];
+                let mut tj_buf = [0.0f64; 4];
+                for b in 0..4 {
+                    sj_buf[b] = *student.get_unchecked(j + b) as f64;
+                    tj_buf[b] = *teacher.get_unchecked(j + b) as f64;
+                }
+                let v_sj = _mm256_loadu_pd(sj_buf.as_ptr());
+                let v_tj = _mm256_loadu_pd(tj_buf.as_ptr());
+
+                // sigma_ij = si * tj
+                let v_sigma = _mm256_mul_pd(v_si, v_tj);
+                // n_ij = (si * sj + ti * tj) / 2
+                let v_n = _mm256_mul_pd(v_si, v_sj);
+                let v_n = _mm256_add_pd(v_n, _mm256_mul_pd(v_ti, v_tj));
+                let half = _mm256_set1_pd(0.5);
+                let v_n = _mm256_mul_pd(v_n, half);
+
+                if first_step {
+                    _mm256_storeu_pd(row_sigma.add(j), v_sigma);
+                    _mm256_storeu_pd(row_n.add(j), v_n);
+                } else {
+                    let v_old_sigma = _mm256_loadu_pd(row_sigma.add(j));
+                    let v_old_n = _mm256_loadu_pd(row_n.add(j));
+                    // EMA: alpha * old + (1-alpha) * new
+                    _mm256_storeu_pd(
+                        row_sigma.add(j),
+                        _mm256_add_pd(
+                            _mm256_mul_pd(v_alpha, v_old_sigma),
+                            _mm256_mul_pd(v_oma, v_sigma),
+                        ),
+                    );
+                    _mm256_storeu_pd(
+                        row_n.add(j),
+                        _mm256_add_pd(_mm256_mul_pd(v_alpha, v_old_n), _mm256_mul_pd(v_oma, v_n)),
+                    );
+                }
+                j += 4;
+            }
+
+            // Scalar tail
+            while j < k {
+                let sj = *student.get_unchecked(j) as f64;
+                let tj = *teacher.get_unchecked(j) as f64;
+                let sigma_ij = si * tj;
+                let n_ij = (si * sj + ti * tj) * 0.5;
+                if first_step {
+                    *dst_sigma.get_unchecked_mut(i * k + j) = sigma_ij;
+                    *dst_n.get_unchecked_mut(i * k + j) = n_ij;
+                } else {
+                    let idx = i * k + j;
+                    *dst_sigma.get_unchecked_mut(idx) =
+                        alpha * *dst_sigma.get_unchecked(idx) + one_minus_alpha * sigma_ij;
+                    *dst_n.get_unchecked_mut(idx) =
+                        alpha * *dst_n.get_unchecked(idx) + one_minus_alpha * n_ij;
+                }
+                j += 1;
+            }
+        }
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[inline]
+unsafe fn avx2_outer_product_f64(
+    dst_sigma: &mut [f64],
+    dst_n: &mut [f64],
+    student: &[f32],
+    teacher: &[f32],
+    k: usize,
+) {
+    use core::arch::x86_64::{
+        _mm256_add_pd, _mm256_broadcast_sd, _mm256_loadu_pd, _mm256_mul_pd, _mm256_set1_pd,
+        _mm256_storeu_pd,
+    };
+
+    unsafe {
+        let n_chunks = k / 4;
+        let half = _mm256_set1_pd(0.5);
+
+        for i in 0..k {
+            let si = *student.get_unchecked(i) as f64;
+            let ti = *teacher.get_unchecked(i) as f64;
+            let v_si = _mm256_broadcast_sd(&si);
+            let v_ti = _mm256_broadcast_sd(&ti);
+
+            let row_sigma = dst_sigma.as_mut_ptr().add(i * k);
+            let row_n = dst_n.as_mut_ptr().add(i * k);
+
+            let mut j = 0;
+            for _ in 0..n_chunks {
+                let mut sj_buf = [0.0f64; 4];
+                let mut tj_buf = [0.0f64; 4];
+                for b in 0..4 {
+                    sj_buf[b] = *student.get_unchecked(j + b) as f64;
+                    tj_buf[b] = *teacher.get_unchecked(j + b) as f64;
+                }
+                let v_sj = _mm256_loadu_pd(sj_buf.as_ptr());
+                let v_tj = _mm256_loadu_pd(tj_buf.as_ptr());
+
+                let v_sigma = _mm256_mul_pd(v_si, v_tj);
+                let v_n = _mm256_mul_pd(v_si, v_sj);
+                let v_n = _mm256_add_pd(v_n, _mm256_mul_pd(v_ti, v_tj));
+                let v_n = _mm256_mul_pd(v_n, half);
+
+                _mm256_storeu_pd(row_sigma.add(j), v_sigma);
+                _mm256_storeu_pd(row_n.add(j), v_n);
+                j += 4;
+            }
+
+            while j < k {
+                let sj = *student.get_unchecked(j) as f64;
+                let tj = *teacher.get_unchecked(j) as f64;
+                *dst_sigma.get_unchecked_mut(i * k + j) = si * tj;
+                *dst_n.get_unchecked_mut(i * k + j) = (si * sj + ti * tj) * 0.5;
+                j += 1;
+            }
+        }
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[inline]
+unsafe fn avx2_dot_f64(a: &[f64], b: &[f64], len: usize) -> f64 {
+    use core::arch::x86_64::{
+        _mm256_add_pd, _mm256_castpd256_pd128, _mm256_extractf128_pd, _mm256_loadu_pd,
+        _mm256_mul_pd,
+    };
+
+    unsafe {
+        let n_chunks = len / 8; // 2× __m256d accumulators
+        let mut acc0 = _mm256_setzero_pd();
+        let mut acc1 = _mm256_setzero_pd();
+
+        let mut i = 0;
+        for _ in 0..n_chunks {
+            let va0 = _mm256_loadu_pd(a.as_ptr().add(i));
+            let vb0 = _mm256_loadu_pd(b.as_ptr().add(i));
+            acc0 = _mm256_add_pd(acc0, _mm256_mul_pd(va0, vb0));
+
+            let va1 = _mm256_loadu_pd(a.as_ptr().add(i + 4));
+            let vb1 = _mm256_loadu_pd(b.as_ptr().add(i + 4));
+            acc1 = _mm256_add_pd(acc1, _mm256_mul_pd(va1, vb1));
+
+            i += 8;
+        }
+
+        // Handle remaining 4-wide chunks
+        let mut acc = _mm256_add_pd(acc0, acc1);
+        let n_rem4 = (len - i) / 4;
+        for _ in 0..n_rem4 {
+            let va = _mm256_loadu_pd(a.as_ptr().add(i));
+            let vb = _mm256_loadu_pd(b.as_ptr().add(i));
+            acc = _mm256_add_pd(acc, _mm256_mul_pd(va, vb));
+            i += 4;
+        }
+
+        // Horizontal sum of 4-wide accumulator
+        let mut sum = horizontal_sum_256d(acc);
+
+        // Scalar tail
+        while i < len {
+            sum += *a.get_unchecked(i) * *b.get_unchecked(i);
+            i += 1;
+        }
+        sum
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[inline]
+fn horizontal_sum_256d(v: core::arch::x86_64::__m256d) -> f64 {
+    use core::arch::x86_64::{
+        _mm_add_pd, _mm_add_sd, _mm_castpd_ps, _mm_cvtss_f32, _mm_unpackhi_pd,
+        _mm256_castpd256_pd128, _mm256_extractf128_pd,
+    };
+    unsafe {
+        let hi = _mm256_extractf128_pd(v, 1);
+        let lo = _mm256_castpd256_pd128(v);
+        let sum128 = _mm_add_pd(lo, hi);
+        // sum128 has [s0, s1], shuffle to get [s1, s1]
+        let shuf = _mm_unpackhi_pd(sum128, sum128);
+        let result = _mm_add_sd(sum128, shuf);
+        // Extract the lower f64
+        let mut dst = [0.0f64; 2];
+        core::arch::x86_64::_mm_storeu_pd(dst.as_mut_ptr(), result);
+        dst[0]
+    }
+}
 
 /// Configuration for PEIRA distillation.
 ///
@@ -130,29 +702,16 @@ impl PeiraCovariance {
 
         let alpha = self.config.ema_rate;
 
-        // Compute outer products and update EMA
-        for i in 0..k {
-            let si = student[i] as f64;
-            let ti = teacher[i] as f64;
-            for j in 0..k {
-                let sj = student[j] as f64;
-                let tj = teacher[j] as f64;
-
-                // Cross-view: Σ[i,j] = E[u_i * v_j]
-                let sigma_ij = si * tj;
-                // Within-view: N[i,j] = E[(u_i*u_j + v_i*v_j) / 2]
-                let n_ij = (si * sj + ti * tj) / 2.0;
-
-                let idx = i * k + j;
-                if self.step_count == 0 {
-                    self.sigma[idx] = sigma_ij;
-                    self.n[idx] = n_ij;
-                } else {
-                    self.sigma[idx] = alpha * self.sigma[idx] + (1.0 - alpha) * sigma_ij;
-                    self.n[idx] = alpha * self.n[idx] + (1.0 - alpha) * n_ij;
-                }
-            }
-        }
+        // SIMD-accelerated outer product + EMA update
+        simd_outer_product_ema_f64(
+            &mut self.sigma,
+            &mut self.n,
+            student,
+            teacher,
+            k,
+            alpha,
+            self.step_count == 0,
+        );
         self.step_count += 1;
     }
 
@@ -248,27 +807,12 @@ pub fn peira_aux_loss(
 
     // Compute sample cross-covariance: sigma_sample = u ⊗ v
     // and sample within-covariance: n_sample = (u ⊗ u + v ⊗ v) / 2
-    sigma_sample.fill(0.0);
-    n_sample.fill(0.0);
-
-    for i in 0..k {
-        let si = student[i] as f64;
-        let ti = teacher[i] as f64;
-        for j in 0..k {
-            let sj = student[j] as f64;
-            let tj = teacher[j] as f64;
-            sigma_sample[i * k + j] = si * tj;
-            n_sample[i * k + j] = (si * sj + ti * tj) / 2.0;
-        }
-    }
+    // SIMD-accelerated outer product
+    simd_outer_product_f64(sigma_sample, n_sample, student, teacher, k);
 
     // Term 1: -½ Tr(Σ_sample @ P*^T) = -½ Σ_{i,j} sigma_sample[i,j] * p_star[j,i]
     // In row-major: Tr(A @ B^T) = Σ_{i,j} A[i,j] * B[i,j] when both are row-major
-    let mut term1 = 0.0f64;
-    for i in 0..k * k {
-        term1 += sigma_sample[i] * p_star[i];
-    }
-    term1 *= -0.5;
+    let term1 = -0.5 * simd_dot_f64(sigma_sample, p_star, k * k);
 
     // Term 2: ¼ Tr(P* @ (N_sample + λI) @ P*^T)
     // = ¼ Tr(P* @ M @ P*^T) where M = N_sample + λI
@@ -290,11 +834,7 @@ pub fn peira_aux_loss(
     }
 
     // Tr(PM @ P^T) = Σ_{i,j} pm[i,j] * p_star[i,j]
-    let mut term2 = 0.0f64;
-    for i in 0..k * k {
-        term2 += pm[i] * p_star[i];
-    }
-    term2 *= 0.25;
+    let term2 = 0.25 * simd_dot_f64(pm, p_star, k * k);
 
     // Add the regularization penalty: + λ/2 (||u||² + ||v||²)
     let norm_sq_u: f64 = student.iter().map(|x| (*x as f64).powi(2)).sum();
@@ -363,15 +903,21 @@ fn invert_spd(mat: &[f64], k: usize) -> Vec<f64> {
 }
 
 /// Compute matrix product C = A @ B where all are k×k row-major.
+/// Uses SIMD f64 dot product for the inner accumulation loop.
 fn matmul(a: &[f64], b: &[f64], k: usize) -> Vec<f64> {
     let mut c = vec![0.0f64; k * k];
+    // Transpose B for sequential access in the inner loop
+    let mut bt = vec![0.0f64; k * k];
     for i in 0..k {
         for j in 0..k {
-            let mut sum = 0.0f64;
-            for l in 0..k {
-                sum += a[i * k + l] * b[l * k + j];
-            }
-            c[i * k + j] = sum;
+            bt[j * k + i] = b[i * k + j];
+        }
+    }
+    for i in 0..k {
+        let a_row = &a[i * k..i * k + k];
+        for j in 0..k {
+            let b_col = &bt[j * k..j * k + k];
+            c[i * k + j] = simd_dot_f64(a_row, b_col, k);
         }
     }
     c

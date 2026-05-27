@@ -44,14 +44,17 @@ fn matmul_xtx(x: &[f32], m: usize, n: usize, a: &mut [f32]) {
 }
 
 /// Compute `R = A * X` where A is `m × m` and X is `m × n`, result is `m × n`.
+/// Transposes X for contiguous inner-loop access, then uses SIMD dot products.
 fn matmul_ax(a: &[f32], x: &[f32], m: usize, n: usize, r: &mut [f32]) {
+    // Transpose X: columns become contiguous rows in xt (n × m).
+    let mut xt = vec![0.0f32; m * n];
+    transpose(x, m, n, &mut xt);
+
+    // r[i,j] = dot(a_row_i, xt_col_j) = dot(&a[i*m..], &xt[j*m..], m)
     for i in 0..m {
+        let a_row = &a[i * m..(i + 1) * m];
         for j in 0..n {
-            let mut sum = 0.0f32;
-            for k in 0..m {
-                sum += a[i * m + k] * x[k * n + j];
-            }
-            r[i * n + j] = sum;
+            r[i * n + j] = crate::simd::simd_dot_f32(a_row, &xt[j * m..(j + 1) * m], m);
         }
     }
 }
@@ -124,13 +127,13 @@ fn newton_schulz5_square(g: &[f32], m: usize, n: usize, out: &mut [f32]) {
         // A = X @ X^T
         matmul_xtx(&x, m, n, &mut a_mat);
 
-        // B = b*A + c*(A@A)
+        // B = b*A + c*(A@A) — transpose A so rows of A^T are contiguous
+        let mut at = vec![0.0f32; m * m];
+        transpose(&a_mat, m, m, &mut at);
         for i in 0..m {
+            let a_row = &a_mat[i * m..(i + 1) * m];
             for j in 0..m {
-                let mut a2_ij = 0.0f32;
-                for k in 0..m {
-                    a2_ij += a_mat[i * m + k] * a_mat[k * m + j];
-                }
+                let a2_ij = crate::simd::simd_dot_f32(a_row, &at[j * m..(j + 1) * m], m);
                 b_mat[i * m + j] = B * a_mat[i * m + j] + C * a2_ij;
             }
         }

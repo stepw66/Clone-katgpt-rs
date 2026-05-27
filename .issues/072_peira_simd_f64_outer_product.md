@@ -1,7 +1,7 @@
 # peira.rs: scalar f64 outer products + per-call allocations
 
 ## Status
-🟡 **PARTIAL** — Scratch buffers pre-allocated ✅. Cholesky inversion ✅ (Issue 079). Outer product loops and matmul in `update()`/`peira_aux_loss` are still scalar f64.
+✅ **DONE** — Scratch buffers pre-allocated ✅. Cholesky inversion ✅. SIMD f64 outer products in `update()` and `peira_aux_loss()` ✅. `matmul()` uses transposed B + `simd_dot_f64` ✅.
 
 ## Severity
 🔴 HIGH — O(k²) per update/loss call, called every training step
@@ -61,8 +61,8 @@ pub struct PeiraCovariance {
 - Benefit scales with k² (update) and k³ (loss)
 
 ## Acceptance Criteria
-- [ ] `update()` outer product uses SIMD f64 (NEON + AVX2 + scalar fallback) — **still scalar**
+- [x] `update()` outer product uses SIMD f64 (NEON + AVX2 + scalar fallback)
 - [x] `peira_aux_loss` scratch buffers pre-allocated in `PeiraCovariance`
-- [ ] `peira_aux_loss` P*@M matmul uses SIMD f64 dot product — **still scalar**
+- [x] `peira_aux_loss` P*@M matmul uses SIMD f64 dot product
 - [x] All existing PEIRA tests pass
 - [x] No new per-call allocations in hot path
