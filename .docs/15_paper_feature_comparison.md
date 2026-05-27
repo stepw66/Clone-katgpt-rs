@@ -27,20 +27,20 @@ Legend: ✓ = direct feature, ○ = partial/conceptual alignment, ✗ = not appl
 
 ## Our Work: katgpt-rs Feature Summary
 
-| Feature | Technique | Status |
-|---------|-----------|--------|
-| Speculative Decoding | DDTree + DFlash + Leviathan verification + Tri-Mode self-speculation | ✓ Implemented |
-| KV Optimization | **Hybrid OCT+PQ** (OCT triplet + PQ 2D Givens, best MSE all bits, 64× fewer FMAs, **primary default**, Plan 101), OCTOPUS (legacy, same encoding slower rotation), SpectralQuant (9.1×, 0.9917 cosine, calibrated alternative), SP-KV (3-10×), TurboQuant 3-bit (legacy) | ✓ Implemented |
-| Attention Innovation | **GDN2** (GOAT 14/14, **default-on**, 99.4% AHLA throughput, 87–98% memory savings), forward_hla / forward_ahla (88% memory savings), Percepta 2D Convex Hull, MaxSim, SHINE Alternating2D (90% FLOPs savings) | ✓ Implemented |
-| Noise Scheduling | ELF SDE noise injection (10-22× path diversity, **default**), GRAM validates approach | ✓ Implemented |
-| Distillation/Compression | LoRA adapters, SpectralQuant, BT pairwise ranking (**default**), MeMo reflections, ROPD rubric | ✓ Partial (ASFT/SLIME in riir-gpu, CISPO default GRPO variant) |
-| Test-Time Compute | SimpleTES RPUCG loop (GOAT 8/8, **default**), BanditPruner adaptive arms, GRAM width scaling | ✓ Implemented |
-| Routing/MoE | Raven slot memories, MoE+SD Amdahl cost model, TIES merging (MeMo), Delta Block cross-layer (**default**), SHINE context→LoRA routing | ✓ Implemented |
-| Diffusion/Denoising | dLLM D2F block-parallel denoising, Tri-Mode AR+Diffusion+Self-Speculation (GOAT 4/4) | ✓ Partial (untrained acceptance rate 1.0) |
-| Game/Self-Play | Sudoku, Go, Monopoly, Bomber, Unit Distance lattice constructions | ✓ Implemented |
-| SIMD/Perf | NEON SIMD matmul/HLA kernels, zero-alloc hot paths, Minkowski lattice embedding, LDT α-intersection (**default**), TileRT execution pipeline — contiguous weights + stability metrics + stage-specialized decode (GOAT 13/13, Plan 102), PlasmaPath bit-plane ternary SIMD matvec (**default**, Plan 148) | ✓ Implemented |
+| Feature | GOAT (default-on) | NO GOAT (opt-in / legacy) |
+|---------|-------------------|--------------------------|
+| Speculative Decoding | DDTree + DFlash + Leviathan verification | Tri-Mode self-speculation (untrained accept rate 1.0) |
+| KV Optimization | **Hybrid OCT+PQ** (OCT triplet + PQ 2D Givens, best MSE all bits, 64× fewer FMAs, Plan 101) | OCTOPUS (legacy, same encoding slower rotation), SpectralQuant (9.1×, 0.9917 cosine, calibrated alternative), SP-KV (3-10×), TurboQuant 3-bit (legacy) |
+| Attention Innovation | **GDN2** (GOAT 14/14, 99.4% AHLA throughput, 87–98% memory savings) | forward_hla / forward_ahla (88% memory savings), Percepta 2D Convex Hull, MaxSim, SHINE Alternating2D (90% FLOPs savings) |
+| Noise Scheduling | ELF SDE noise injection (10-22× path diversity) | GRAM learned-mean SDE (validates approach) |
+| Distillation/Compression | BT pairwise ranking, SpectralQuant | LoRA adapters, MeMo reflections, ROPD rubric, ASFT/SLIME (in riir-gpu) |
+| Test-Time Compute | SimpleTES RPUCG loop (GOAT 8/8), BanditPruner adaptive arms | GRAM width scaling |
+| Routing/MoE | Delta Block cross-layer residual routing | Raven slot memories, MoE+SD Amdahl cost model, TIES merging (MeMo), SHINE context→LoRA routing |
+| Diffusion/Denoising | — | dLLM D2F block-parallel denoising, Tri-Mode AR+Diffusion+Self-Speculation (GOAT 4/4, partial — untrained accept rate 1.0) |
+| Game/Self-Play | LEO all-goals Q-value trait framework (SUPER GOAT, Plan 155), Dual LEO teacher/student mixing (SUPER GOAT, Plan 155) | Sudoku, Go, Monopoly, Bomber, Unit Distance lattice constructions |
+| SIMD/Perf | LDT α-intersection, TileRT execution pipeline (GOAT 13/13, Plan 102), PlasmaPath bit-plane ternary SIMD matvec (GOAT 5/5, Plan 148) | NEON SIMD matmul/HLA kernels, zero-alloc hot paths, Minkowski lattice embedding |
 
-**Default feature set:** `sparse_mlp`, `domain_latent`, `ppot`, `bandit`, `bt_rank`, `spectral_quant`, `hybrid_oct_pq`, `elf_sde`, `cna_steering`, `deep_manifold`, `federation`, `tes_loop`, `lattice_deduction`, `delta_routing`, `stability_metrics`, `mls_aggregate`, `gdn2_attention`, `dash_attn`, `dreamer`, `lt2_looped`, `dmax_spd`, `eqr_convergence`, `subterranean`, `sr2am_configurator`, `data_gate`, `plasma_path`, `parallel_probe`, `tf_loop`
+**Default feature set:** `sparse_mlp`, `domain_latent`, `ppot`, `bandit`, `bt_rank`, `spectral_quant`, `hybrid_oct_pq`, `elf_sde`, `cna_steering`, `deep_manifold`, `federation`, `tes_loop`, `lattice_deduction`, `delta_routing`, `stability_metrics`, `mls_aggregate`, `gdn2_attention`, `dash_attn`, `dreamer`, `lt2_looped`, `dmax_spd`, `eqr_convergence`, `subterranean`, `sr2am_configurator`, `data_gate`, `plasma_path`, `parallel_probe`, `tf_loop`, `leo_all_goals`, `dual_leo`
 
 ---
 
@@ -162,6 +162,14 @@ Legend: ✓ = direct feature, ○ = partial/conceptual alignment, ✗ = not appl
 | 67 | CODA GEMM Epilogue Programming | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ |
 | 68 | RAEv2 Multi-Layer Representation Autoencoders | ✗ | ✗ | ○ | ✗ | ○ | ✗ | ✗ | ✗ | ✗ | ✗ |
 | 69 | AutoDreamer Offline Memory Consolidation | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ○ | ✗ | ✗ | ✗ |
+
+### Paper 155: LEO All-Goals Trait Framework
+
+| # | Paper / Feature | SD | KV | Attn | Noise | Distill | TTC | Route | Diff | Game | SIMD |
+|---|----------------|----|----|------|-------|---------|-----|-------|------|------|------|
+| 155 | LEO Learn Everything All at Once (Matthews 2026) | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ |
+
+**Feature gates:** `leo_all_goals` (LeoHead + AllGoalsUpdate + sigmoid_bounded_q), `dual_leo` (+ DualLeoMixer + AutocurriculumSampler, requires `leo_all_goals`). Both **default-on** — SUPER GOAT, zero perf overhead. Framework only — depends on riir-ai Plan 155 for game-specific implementations.
 
 ---
 
@@ -291,6 +299,7 @@ Top co-occurring pairs:
 | 60 MeMo | Reflection QA pipeline + TIES merging | `memo_reflections` feature |
 | 061 Delta Routing | Cross-layer residual delta routing | `delta_routing` feature |
 | 62 SHINE | Context→LoRA hypernetwork, alternating 2D attention | `shine_hypernet` / `shine_routing` features |
+| 155 LEO | All-goals Q-value trait framework (SUPER GOAT, **default-on**) | `leo_all_goals` + `dual_leo` features |
 
 ### 2. Strong Conceptual Alignment (Pattern Adopted, Different Mechanism)
 
@@ -352,7 +361,7 @@ Distillation          █████████████░░░░░░�
 Test-Time Compute     █████████████████░░░ 85%  (SimpleTES GOAT 8/8, BanditPruner, GRAM width scaling)
 Routing/MoE           ████████████████░░░░ 80%  (Raven, MoE+SD cost model, TIES merging, Delta Block, SHINE context routing)
 Diffusion/Denoising   ██████████░░░░░░░░░░ 50%  (D2F, Tri-Mode validates, RePlaid schedules experimental)
-Game/Self-Play        ██████████████████░░ 90%  (Sudoku, Go, Monopoly, Bomber, Unit Distance lattice)
+Game/Self-Play        ███████████████████░ 95%  (Sudoku, Go, Monopoly, Bomber, Unit Distance lattice, LEO all-goals Q-framework)
 SIMD/Perf             ████████████████████ 95%  (NEON, zero-alloc, Minkowski lattice embedding)
 ```
 
@@ -360,4 +369,4 @@ SIMD/Perf             ███████████████████�
 
 ## References
 
-All papers are located in `katgpt-rs/.research/` with filenames `{index}_{Title}.md` where index ranges from 00 to 73 (plus 061 for Delta Attention Residuals). See individual research files for full analysis, verdicts, and implementation details. Papers 63–69 added: OCTOPUS (63), LlamaWeb (64), RotorQuant (65), TileRT (66), CODA (67), RAEv2 MLS (68), AutoDreamer (69). Key post-69 papers: 70 (GDN2 recurrent attention), 71 (DashAttention sparse), 72 (DMax SPD), 73 (LT2 looped inference). Recent additions: Research 110 (PlasmaPath, Plan 148), Research 094 (Parallel-Probe, Plan 133), Research 073 / feature `tf_loop` (Training-Free Loop, Plan 136).
+All papers are located in `katgpt-rs/.research/` with filenames `{index}_{Title}.md` where index ranges from 00 to 73 (plus 061 for Delta Attention Residuals). See individual research files for full analysis, verdicts, and implementation details. Papers 63–69 added: OCTOPUS (63), LlamaWeb (64), RotorQuant (65), TileRT (66), CODA (67), RAEv2 MLS (68), AutoDreamer (69). Key post-69 papers: 70 (GDN2 recurrent attention), 71 (DashAttention sparse), 72 (DMax SPD), 73 (LT2 looped inference). Recent additions: Research 110 (PlasmaPath, Plan 148), Research 094 (Parallel-Probe, Plan 133), Research 073 / feature `tf_loop` (Training-Free Loop, Plan 136), Research 118 / Plan 155 (LEO All-Goals Trait Framework — Matthews et al. 2026).
