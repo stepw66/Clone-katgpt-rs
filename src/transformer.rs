@@ -278,6 +278,7 @@ pub struct ForwardContext {
     pub scores: Vec<f32>,          // [block_size] attention scores (max possible)
     pub(crate) hidden: Vec<f32>,   // [mlp_hidden] MLP hidden
     pub logits: Vec<f32>,          // [vocab_size] output logits
+    pub(crate) cdf: Vec<f32>,      // [vocab_size] pre-allocated CDF for sampling
     pub hidden_state: Vec<f32>,    // [n_embd] final hidden state (Plan 009 compat)
     /// LoRA intermediate buffer [lora_rank]. Pre-allocated, zero alloc in hot path.
     pub lora_buf: Vec<f32>,
@@ -358,6 +359,7 @@ impl ForwardContext {
             scores: vec![0.0; config.block_size],
             hidden: vec![0.0; config.mlp_hidden],
             logits: vec![0.0; config.vocab_size],
+            cdf: vec![0.0; config.vocab_size],
             hidden_state: vec![0.0; config.n_embd],
             lora_buf: vec![0.0; config.lora_rank],
             attn_scale: 1.0 / (config.head_dim as f32).sqrt(),
@@ -2960,7 +2962,7 @@ pub fn generate_with_prefill(
     // 2. Sample first generation token from prefill output
     // softmax_scaled fuses temperature + softmax in-place, avoiding logits.to_vec() allocation
     crate::types::softmax_scaled(logits, 1.0 / config.temperature);
-    let mut token = crate::types::sample_token(logits, rng);
+    let mut token = crate::types::sample_token_into(&ctx.logits, rng, &mut ctx.cdf);
 
     let mut generated = vec![token];
     let mut pos = prompt_tokens.len();
@@ -3003,7 +3005,7 @@ pub fn generate_with_prefill(
         }
         crate::types::softmax(logits);
 
-        token = crate::types::sample_token(logits, rng);
+        token = crate::types::sample_token_into(&ctx.logits, rng, &mut ctx.cdf);
         generated.push(token);
         pos += 1;
 
@@ -3245,11 +3247,12 @@ pub fn generate_into(
             token = config.bos_token;
         }
 
-        let logits = forward(ctx, weights, cache, token, pos, config);
+        {
+            let logits = forward(ctx, weights, cache, token, pos, config);
+            softmax_scaled(logits, 1.0 / config.temperature);
+        }
 
-        softmax_scaled(logits, 1.0 / config.temperature);
-
-        let next_token = sample_token(logits, rng);
+        let next_token = sample_token_into(&ctx.logits, rng, &mut ctx.cdf);
         tokens.push(next_token);
 
         if next_token == config.bos_token {

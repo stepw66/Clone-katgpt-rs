@@ -9,6 +9,8 @@
 
 #[cfg(feature = "tiled_attention")]
 use rayon::prelude::*;
+#[cfg(feature = "tiled_attention")]
+use std::cell::RefCell;
 
 /// Threshold: use tiled attention when N > 128 (score matrix > L1 cache).
 /// L1 ≈ 32 KB. Score = N × N × 4B. sqrt(32K / 4) ≈ 90, round up to 128.
@@ -179,10 +181,11 @@ fn tiled_attention_inner(
                 // Correction factor: exp2((m_old - m_new) * log2e_scale)
                 let correction = ((m_old - m_new) * log2e_scale).exp2();
 
-                // Apply correction to existing accumulators FIRST
-                for d in 0..head_dim {
-                    o_tile[i * head_dim + d] *= correction;
-                }
+                // Apply correction to existing accumulators FIRST (SIMD-accelerated)
+                crate::simd::simd_scale_inplace(
+                    &mut o_tile[i * head_dim..i * head_dim + head_dim],
+                    correction,
+                );
                 norm_tile[i] *= correction;
 
                 // Compute P̃ and accumulate new contributions
@@ -192,11 +195,14 @@ fn tiled_attention_inner(
                     let p = (val * log2e_scale).exp2();
                     rowsum += p;
 
-                    // Accumulate P̃[i][j] × V[j] into o_tile[i]
+                    // Accumulate P̃[i][j] × V[j] into o_tile[i] (SIMD-accelerated)
                     let v_off = (k_start + j) * head_dim;
-                    for d in 0..head_dim {
-                        o_tile[i * head_dim + d] += p * v[v_off + d];
-                    }
+                    crate::simd::simd_fused_scale_acc(
+                        &mut o_tile[i * head_dim..],
+                        &v[v_off..v_off + head_dim],
+                        p,
+                        head_dim,
+                    );
                 }
 
                 norm_tile[i] += rowsum;
@@ -206,14 +212,13 @@ fn tiled_attention_inner(
         }
 
         // 4. Final normalize: o_tile / norm_tile
-        #[allow(clippy::needless_range_loop)]
         for i in 0..actual_br {
             let inv_norm = 1.0 / norm_tile[i];
             let o_off = i * head_dim;
             let out_off = (q_start + i) * head_dim;
-            for d in 0..head_dim {
-                output[out_off + d] = o_tile[o_off + d] * inv_norm;
-            }
+            // SIMD-accelerated normalize
+            output[out_off..out_off + head_dim].copy_from_slice(&o_tile[o_off..o_off + head_dim]);
+            crate::simd::simd_scale_inplace(&mut output[out_off..out_off + head_dim], inv_norm);
         }
     }
 }
@@ -317,25 +322,36 @@ pub fn tiled_attention_batched(
         return;
     }
 
-    // Use par_chunks_mut to get disjoint &mut slices — avoids Fn mut borrow issue
-    // Pre-allocate a scores scratch buffer per parallel task to avoid per-call allocation.
+    // Use par_chunks_mut to get disjoint &mut slices — avoids Fn mut borrow issue.
+    // Reuse a grow-only scores scratch buffer per OS thread via thread_local.
     let scores_buf_size = seq_len * seq_len;
+    thread_local! {
+        static SCORES_BUF: RefCell<Vec<f32>> = RefCell::new(Vec::new());
+    }
+
     output
         .par_chunks_mut(head_size)
         .enumerate()
         .for_each(|(idx, out_chunk)| {
             let offset = idx * head_size;
-            let mut scores_buf = vec![0.0f32; scores_buf_size];
-            tiled_attention_forward_with_scores(
-                &q[offset..offset + head_size],
-                &k[offset..offset + head_size],
-                &v[offset..offset + head_size],
-                out_chunk,
-                seq_len,
-                head_dim,
-                scale,
-                Some(&mut scores_buf),
-            );
+            SCORES_BUF.with(|buf| {
+                let mut buf = buf.borrow_mut();
+                if buf.len() < scores_buf_size {
+                    buf.resize(scores_buf_size, 0.0);
+                } else {
+                    buf[..scores_buf_size].fill(0.0);
+                }
+                tiled_attention_forward_with_scores(
+                    &q[offset..offset + head_size],
+                    &k[offset..offset + head_size],
+                    &v[offset..offset + head_size],
+                    out_chunk,
+                    seq_len,
+                    head_dim,
+                    scale,
+                    Some(&mut buf[..scores_buf_size]),
+                );
+            });
         });
 }
 

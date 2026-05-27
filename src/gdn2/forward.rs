@@ -237,7 +237,7 @@ pub fn generate_gdn2_into(
     for pos in 0..n_tokens {
         let logits = forward_gdn2(ctx, weights, cache, token, pos, config);
         types::softmax_scaled(logits, 1.0 / config.temperature);
-        let next_token = types::sample_token(logits, rng);
+        let next_token = types::sample_token_into(&ctx.logits, rng, &mut ctx.cdf);
         tokens.push(next_token);
         token = next_token;
     }

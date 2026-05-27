@@ -1335,10 +1335,9 @@ pub fn softmax_scaled(x: &mut [f32], inv_temp: f32) {
     // Pass 1: find max for numerical stability (SIMD-accelerated)
     let max_val = crate::simd::simd_max_f32(x);
 
-    // Pass 2: shift and apply temperature (scalar, cheap)
-    for val in x.iter_mut() {
-        *val = (*val - max_val) * inv_temp;
-    }
+    // Pass 2: shift and apply temperature (SIMD-accelerated)
+    crate::simd::simd_add_scalar_inplace(x, -max_val);
+    crate::simd::simd_scale_inplace(x, inv_temp);
 
     // Pass 3: SIMD exp
     crate::simd::simd_exp_inplace(x);
@@ -1377,10 +1376,9 @@ pub fn gegelu(hidden: &mut [f32], gate: &[f32], up: &[f32]) {
 
     let mut i = 0;
     while i + CHUNK <= hidden.len() {
-        // buf[j] = -1.702 * gate[j]
-        for j in 0..CHUNK {
-            buf[j] = -1.702 * gate[i + j];
-        }
+        // buf[j] = -1.702 * gate[j] via copy + SIMD scale
+        buf[..CHUNK].copy_from_slice(&gate[i..i + CHUNK]);
+        crate::simd::simd_scale_inplace(&mut buf, -1.702);
         // buf[j] = exp(-1.702 * gate[j]) via SIMD
         crate::simd::simd_exp_inplace(&mut buf);
         // hidden[j] = gate[j] * sigmoid(1.702 * gate[j]) * up[j]
@@ -1401,10 +1399,35 @@ pub fn gegelu(hidden: &mut [f32], gate: &[f32], up: &[f32]) {
 /// GeGLU with tanh GELU approximation (Gemma 2 activation).
 /// tanh GELU: 0.5 * x * (1 + tanh(sqrt(2/π) * (x + 0.044715 * x³)))
 /// hidden[i] = gelu_tanh(gate[i]) * up[i]
+///
+/// SIMD-accelerated: exp() for tanh approximation computed via `simd_exp_inplace`.
 #[inline(always)]
 pub fn gegelu_tanh(hidden: &mut [f32], gate: &[f32], up: &[f32]) {
+    const CHUNK: usize = 64;
     let sqrt_2_over_pi = (2.0f32 / std::f32::consts::PI).sqrt(); // ≈0.7979
-    for i in 0..hidden.len() {
+    let mut buf = [0.0f32; CHUNK];
+
+    let mut i = 0;
+    while i + CHUNK <= hidden.len() {
+        // buf[j] = 2 * inner[j] for tanh approximation
+        for j in 0..CHUNK {
+            let g = gate[i + j];
+            buf[j] = 2.0 * sqrt_2_over_pi * (g + 0.044715 * g * g * g);
+        }
+        // buf[j] = exp(2*inner[j]) via SIMD
+        crate::simd::simd_exp_inplace(&mut buf);
+        // hidden[j] = 0.5 * gate[j] * (1 + tanh(inner[j])) * up[j]
+        // where tanh(inner) = (exp(2*inner) - 1) / (exp(2*inner) + 1)
+        for j in 0..CHUNK {
+            let exp_2inner = buf[j];
+            let tanh_val = (exp_2inner - 1.0) / (exp_2inner + 1.0);
+            let g = gate[i + j];
+            hidden[i + j] = 0.5 * g * (1.0 + tanh_val) * up[i + j];
+        }
+        i += CHUNK;
+    }
+    // Scalar remainder
+    for i in i..hidden.len() {
         let g = gate[i];
         let inner = sqrt_2_over_pi * (g + 0.044715 * g * g * g);
         let gelu_val = 0.5 * g * (1.0 + inner.tanh());
@@ -1422,10 +1445,9 @@ pub fn silu(x: &mut [f32]) {
 
     let mut i = 0;
     while i + CHUNK <= x.len() {
-        // buf[j] = -x[j]
-        for j in 0..CHUNK {
-            buf[j] = -x[i + j];
-        }
+        // buf[j] = -x[j] via copy + SIMD scale
+        buf[..CHUNK].copy_from_slice(&x[i..i + CHUNK]);
+        crate::simd::simd_scale_inplace(&mut buf, -1.0);
         // buf[j] = exp(-x[j]) via SIMD
         crate::simd::simd_exp_inplace(&mut buf);
         // x[j] = x[j] / (1 + exp(-x[j]))
@@ -1451,10 +1473,9 @@ pub fn swiglu(hidden: &mut [f32], gate: &[f32], up: &[f32]) {
 
     let mut i = 0;
     while i + CHUNK <= hidden.len() {
-        // buf[j] = -gate[j]
-        for j in 0..CHUNK {
-            buf[j] = -gate[i + j];
-        }
+        // buf[j] = -gate[j] via copy + SIMD scale
+        buf[..CHUNK].copy_from_slice(&gate[i..i + CHUNK]);
+        crate::simd::simd_scale_inplace(&mut buf, -1.0);
         // buf[j] = exp(-gate[j]) via SIMD
         crate::simd::simd_exp_inplace(&mut buf);
         // hidden[j] = gate[j] / (1 + exp(-gate[j])) * up[j]
@@ -1628,6 +1649,34 @@ pub fn sample_token(probs: &[f32], rng: &mut Rng) -> usize {
     }
 
     // Binary search: find the first index where cdf[i] > r
+    match cdf.binary_search_by(|&c| {
+        if c > r {
+            std::cmp::Ordering::Greater
+        } else {
+            std::cmp::Ordering::Less
+        }
+    }) {
+        Ok(i) | Err(i) => i.min(n - 1),
+    }
+}
+
+/// Zero-alloc variant of [`sample_token`] that reuses a pre-allocated CDF buffer.
+///
+/// Pass a `cdf` buffer (e.g. `ForwardContext::cdf`) to avoid a ~vocab_size allocation
+/// on every token decode. The buffer is cleared and refilled each call.
+pub fn sample_token_into(probs: &[f32], rng: &mut Rng, cdf: &mut Vec<f32>) -> usize {
+    cdf.clear();
+    cdf.reserve(probs.len());
+    let r = rng.uniform();
+    let n = probs.len();
+    if n == 0 {
+        return 0;
+    }
+    let mut sum = 0.0f32;
+    for &p in probs {
+        sum += p;
+        cdf.push(sum);
+    }
     match cdf.binary_search_by(|&c| {
         if c > r {
             std::cmp::Ordering::Greater
