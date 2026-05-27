@@ -1308,16 +1308,14 @@ pub fn softmax(x: &mut [f32]) {
     // Pass 1: find max for numerical stability (SIMD-accelerated)
     let max_val = crate::simd::simd_max_f32(x);
 
-    // Pass 2: subtract max (scalar, cheap)
-    for val in x.iter_mut() {
-        *val -= max_val;
-    }
+    // Pass 2: subtract max (SIMD-accelerated)
+    crate::simd::simd_add_scalar_inplace(x, -max_val);
 
     // Pass 3: SIMD exp
     crate::simd::simd_exp_inplace(x);
 
-    // Pass 4: sum + normalize
-    let sum: f32 = x.iter().copied().sum();
+    // Pass 4: sum + normalize (SIMD-accelerated sum)
+    let sum: f32 = crate::simd::simd_sum_f32(x);
     let inv_sum = 1.0 / sum;
     crate::simd::simd_scale_inplace(x, inv_sum);
 }
@@ -1345,8 +1343,8 @@ pub fn softmax_scaled(x: &mut [f32], inv_temp: f32) {
     // Pass 3: SIMD exp
     crate::simd::simd_exp_inplace(x);
 
-    // Pass 4: sum + normalize
-    let sum: f32 = x.iter().copied().sum();
+    // Pass 4: sum + normalize (SIMD-accelerated sum)
+    let sum: f32 = crate::simd::simd_sum_f32(x);
     let inv_sum = 1.0 / sum;
     crate::simd::simd_scale_inplace(x, inv_sum);
 }
@@ -1432,7 +1430,7 @@ pub fn silu(x: &mut [f32]) {
         crate::simd::simd_exp_inplace(&mut buf);
         // x[j] = x[j] / (1 + exp(-x[j]))
         for j in 0..CHUNK {
-            x[i + j] = x[i + j] / (1.0 + buf[j]);
+            x[i + j] /= 1.0 + buf[j];
         }
         i += CHUNK;
     }

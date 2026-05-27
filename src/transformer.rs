@@ -458,16 +458,16 @@ impl ForwardContext {
         }
 
         // Call depth_route directly using pre-gathered indices
-        depth_route_with_indices(
-            &mut self.x[..n_embd],
-            &self.block_deltas,
-            &self.delta_source_indices,
+        depth_route_with_indices(DepthRouteIndicesArgs {
+            residual: &mut self.x[..n_embd],
+            block_deltas: &self.block_deltas,
+            source_indices: &self.delta_source_indices,
             query_weight,
             norm_weight,
-            &mut self.delta_routing_logits,
-            &mut self.delta_scaled_buf,
+            logits_buf: &mut self.delta_routing_logits,
+            scaled_buf: &mut self.delta_scaled_buf,
             n_embd,
-        );
+        });
 
         // Reset current block delta
         self.block_deltas[block_idx].fill(0.0);
@@ -1508,16 +1508,30 @@ fn depth_route(
 /// Delta routing variant that takes block deltas and indices directly.
 /// Avoids allocating a `Vec<&[f32]>` for source_refs by indexing into `block_deltas`.
 #[cfg(feature = "delta_routing")]
-fn depth_route_with_indices(
-    residual: &mut [f32],
-    block_deltas: &[Vec<f32>],
-    source_indices: &[usize],
-    query_weight: &[f32],   // [n_embd] per-layer query
-    norm_weight: &[f32],    // [n_embd] RMSNorm gamma
-    logits_buf: &mut [f32], // [N] temp buffer
-    scaled_buf: &mut [f32], // [n_embd] scratch for SIMD dot
+struct DepthRouteIndicesArgs<'a> {
+    residual: &'a mut [f32],
+    block_deltas: &'a [Vec<f32>],
+    source_indices: &'a [usize],
+    query_weight: &'a [f32],   // [n_embd] per-layer query
+    norm_weight: &'a [f32],    // [n_embd] RMSNorm gamma
+    logits_buf: &'a mut [f32], // [N] temp buffer
+    scaled_buf: &'a mut [f32], // [n_embd] scratch for SIMD dot
     n_embd: usize,
-) {
+}
+
+#[cfg(feature = "delta_routing")]
+fn depth_route_with_indices(args: DepthRouteIndicesArgs<'_>) {
+    let DepthRouteIndicesArgs {
+        residual,
+        block_deltas,
+        source_indices,
+        query_weight,
+        norm_weight,
+        logits_buf,
+        scaled_buf,
+        n_embd,
+    } = args;
+
     let n_sources = source_indices.len();
     if n_sources == 0 {
         return;
