@@ -22,7 +22,7 @@
 
 ## Summary
 
-Distill the core technique from [Cintu07/ciot](https://github.com/Cintu07/ciot) — bit-plane ternary weight encoding with branchless SIMD conditional accumulation — into `katgpt-core`. This adds a **Plasma** compute tier: multiplication-free ternary matvec using only SIMD add/subtract, targeting 2-3× throughput over our existing FP32 FMA path for CPU-bound speculative drafting.
+Distill the core technique from [Cintu07/ciot](https://github.com/Cintu07/ciot) — bit-plane ternary weight encoding with branchless SIMD conditional accumulation — into `katgpt-core`. This adds a **Plasma** compute tier: multiplication-free ternary matvec using only SIMD add/subtract. **Measured: 7.57 Gop/s at 277µs/1024², 2.56× faster than scalar FP32 but 0.70× of NEON FMA** — Plasma's advantage is memory density (20× less traffic), not raw compute speed vs optimized FMA.
 
 ## Five-Tier Hierarchy (aligned with Issue 014)
 
@@ -36,7 +36,7 @@ Cold       Q4_K dequantize-on-read          4 bits/weight     ~1.2ms/1024²
 Freeze     Disk-backed (Turso/libSQL)       Variable          ~10ms+
 ```
 
-**Naming alignment:** Plasma is the "above Hot" tier — always in L1 cache / registers, never touches DRAM for weight reads (weights are bit-packed). Cold/Freeze map directly to Issue 014's Turso encrypted storage tiers.
+**Naming alignment:** Plasma is the "above Hot" tier — always in L1 cache / registers, never touches DRAM for weight reads (weights are bit-packed). **Note:** On aarch64 NEON, Plasma (277µs) is slower than Hot (193µs) in raw latency — Plasma's advantage is memory density (1.58 vs 32 bits/weight), not compute throughput. Cold/Freeze map directly to Issue 014's Turso encrypted storage tiers.
 
 ## Tasks
 

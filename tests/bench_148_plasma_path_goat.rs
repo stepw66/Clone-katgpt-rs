@@ -138,54 +138,122 @@ fn proof_g2_quantize_fidelity_1024() {
 
 // ── G3: Throughput ────────────────────────────────────────────
 
+/// Helper: force the compiler to not eliminate dead stores.
+#[inline(never)]
+fn consume_f32(v: f32) {
+    std::hint::black_box(v);
+}
+
 #[test]
 fn proof_g3_throughput_1024() {
+    use std::hint::black_box;
+
     let tw = TernaryWeights::quantize_from_f32(&make_random_weights(1024, 1024, 42), 1024, 1024);
     let x = make_random_vec(1024, 99);
-    let mut y = vec![0.0f32; 1024];
+    let mut y_ternary = vec![0.0f32; 1024];
 
-    // Warmup
-    for _ in 0..5 {
-        simd_ternary_matvec(&tw, &x, &mut y);
+    // Warmup ternary
+    for _ in 0..10 {
+        simd_ternary_matvec(&tw, &x, &mut y_ternary);
     }
+    black_box(&y_ternary);
 
-    // Ternary bench: 50 iterations
-    let iters = 50;
+    let iters = 100;
+
+    // Ternary bench
     let start = std::time::Instant::now();
     for _ in 0..iters {
-        simd_ternary_matvec(&tw, &x, &mut y);
+        simd_ternary_matvec(&tw, &x, &mut y_ternary);
+        black_box(y_ternary.as_ptr());
     }
     let ternary_elapsed = start.elapsed();
 
-    // FP32 scalar bench: same matrix as flat f32 weights, using row-wise dot
+    // FP32 SIMD dot bench: same matrix as flat f32 weights, using row-wise simd_dot_f32
     let f32_w = make_random_weights(1024, 1024, 42);
     let mut y_f32 = vec![0.0f32; 1024];
+
+    // Warmup FP32
+    for _ in 0..10 {
+        for r in 0..1024 {
+            y_f32[r] = katgpt_core::simd::simd_dot_f32(&f32_w[r * 1024..(r + 1) * 1024], &x, 1024);
+        }
+        black_box(y_f32.as_ptr());
+    }
+
     let start = std::time::Instant::now();
     for _ in 0..iters {
         for r in 0..1024 {
             y_f32[r] = katgpt_core::simd::simd_dot_f32(&f32_w[r * 1024..(r + 1) * 1024], &x, 1024);
         }
+        // Prevent dead-store elimination: checksum the output each iteration
+        consume_f32(y_f32.iter().sum::<f32>());
     }
     let f32_elapsed = start.elapsed();
 
+    // FP32 scalar (no SIMD) reference — raw loop baseline
+    let mut y_scalar = vec![0.0f32; 1024];
+    let start = std::time::Instant::now();
+    for _ in 0..iters {
+        for r in 0..1024 {
+            let mut sum = 0.0f32;
+            let row_off = r * 1024;
+            for c in 0..1024 {
+                sum += f32_w[row_off + c] * x[c];
+            }
+            y_scalar[r] = sum;
+        }
+        consume_f32(y_scalar.iter().sum::<f32>());
+    }
+    let scalar_elapsed = start.elapsed();
+
     let ternary_us = ternary_elapsed.as_micros() as f64 / iters as f64;
     let f32_us = f32_elapsed.as_micros() as f64 / iters as f64;
-    let speedup = f32_us / ternary_us;
+    let scalar_us = scalar_elapsed.as_micros() as f64 / iters as f64;
+    let speedup_vs_simd = f32_us / ternary_us;
+    let speedup_vs_scalar = scalar_us / ternary_us;
 
-    // Throughput in Gop/s: 1024*1024 = 1,048,576 ops (multiply-add = 2 ops per element, but ternary is add/sub = 2 ops)
+    // Throughput in Gop/s: 1024*1024 = 1,048,576 ops (multiply-add = 2 ops per element)
     let ternary_gops = (2.0 * 1024.0 * 1024.0) / (ternary_us * 1e-6) / 1e9;
     let f32_gops = (2.0 * 1024.0 * 1024.0) / (f32_us * 1e-6) / 1e9;
+    let scalar_gops = (2.0 * 1024.0 * 1024.0) / (scalar_us * 1e-6) / 1e9;
 
-    println!("G3 (1024×1024 hero):");
-    println!("  Ternary SIMD: {ternary_us:.1} µs/call ({ternary_gops:.2} Gop/s)");
-    println!("  FP32 simd_dot: {f32_us:.1} µs/call ({f32_gops:.2} Gop/s)");
-    println!("  Speedup: {speedup:.2}×");
+    println!("\nG3 (1024×1024 hero):");
+    println!("  Ternary SIMD:  {ternary_us:>8.1} µs/call ({ternary_gops:.2} Gop/s)");
+    println!("  FP32 simd_dot: {f32_us:>8.1} µs/call ({f32_gops:.2} Gop/s)");
+    println!("  FP32 scalar:   {scalar_us:>8.1} µs/call ({scalar_gops:.2} Gop/s)");
+    println!("  Speedup vs FP32 SIMD:   {speedup_vs_simd:.2}×");
+    println!("  Speedup vs FP32 scalar: {speedup_vs_scalar:.2}×");
+    println!("  Target: ≥ 1.5× vs FP32 SIMD in release");
 
-    // We require at least 1.5× over FP32 scalar dot
-    // Note: on debug builds this may not hit target — release is the real test
-    println!("  Target: ≥ 1.5× (debug builds may be slower — verify with --release)");
-    // Relaxed threshold for debug builds (0.8× is acceptable in debug, release should hit 1.5×)
-    assert!(speedup > 0.0, "speedup must be positive (got {speedup})");
+    // Sanity: scalar must be slower than SIMD dot (compiler didn't cheat)
+    assert!(
+        scalar_us > f32_us * 0.5,
+        "scalar baseline suspiciously fast: {scalar_us}µs vs simd {f32_us}µs — compiler may have vectorized it"
+    );
+
+    // Sanity: FP32 SIMD must take real time (> 10µs for 1024×1024)
+    assert!(
+        f32_us > 10.0,
+        "FP32 SIMD baseline too fast: {f32_us}µs — likely optimized away"
+    );
+
+    // Ternary should beat scalar reference
+    assert!(
+        speedup_vs_scalar > 0.5,
+        "ternary vs scalar speedup too low: {speedup_vs_scalar}×"
+    );
+
+    // Report honest assessment
+    if speedup_vs_simd >= 1.5 {
+        println!("  ✅ PASS — Ternary ≥ 1.5× faster than FP32 SIMD");
+    } else if speedup_vs_simd >= 1.0 {
+        println!(
+            "  ⚠️  MARGINAL — Ternary faster than FP32 SIMD but < 1.5× target ({speedup_vs_simd:.2}×)"
+        );
+    } else {
+        println!("  ❌ SLOWER — Ternary is {speedup_vs_simd:.2}× vs FP32 SIMD (slower)");
+        println!("     Note: ternary still wins on memory bandwidth (1.58 bits vs 32 bits/weight)");
+    }
 }
 
 // ── G4: Graceful Degradation ──────────────────────────────────
