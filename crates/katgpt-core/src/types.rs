@@ -1335,9 +1335,8 @@ pub fn softmax_scaled(x: &mut [f32], inv_temp: f32) {
     // Pass 1: find max for numerical stability (SIMD-accelerated)
     let max_val = crate::simd::simd_max_f32(x);
 
-    // Pass 2: shift and apply temperature (SIMD-accelerated)
-    crate::simd::simd_add_scalar_inplace(x, -max_val);
-    crate::simd::simd_scale_inplace(x, inv_temp);
+    // Pass 2: shift and apply temperature in one fused SIMD pass
+    crate::simd::simd_fused_sub_scale_inplace(x, max_val, inv_temp);
 
     // Pass 3: SIMD exp
     crate::simd::simd_exp_inplace(x);

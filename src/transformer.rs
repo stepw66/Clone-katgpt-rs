@@ -1612,10 +1612,9 @@ pub fn depth_route_weights(
         let rms = (sum_sq / n_embd as f32 + eps).sqrt();
         let inv_rms = 1.0 / rms;
 
-        // Scale src * inv_rms * norm_weight into scratch, then SIMD dot with query
-        for d in 0..n_embd {
-            scaled[d] = src[d] * inv_rms * norm_weight[d];
-        }
+        // Scale src * inv_rms * norm_weight into scratch via fused SIMD, then dot with query
+        scaled[..n_embd].copy_from_slice(&src[..n_embd]);
+        crate::simd::simd_scale_mul_inplace(&mut scaled[..n_embd], &norm_weight[..n_embd], inv_rms);
         let logit = crate::simd::simd_dot_f32(&scaled[..n_embd], query_weight, n_embd);
 
         logits[i] = logit;
@@ -1978,10 +1977,10 @@ fn forward_coda<'a>(
             ctx.hidden_state[..n].copy_from_slice(&ctx.x[..n]);
         }
 
-        // Pre-attention: RMSNorm → save residual → RMSNorm (same as baseline)
+        // Pre-attention: RMSNorm → save residual
+        // Note: CODA fused kernels handle delayed RMS internally, no second rmsnorm needed
         rmsnorm(&mut ctx.x);
         ctx.xr[..n].copy_from_slice(&ctx.x[..n]);
-        rmsnorm(&mut ctx.x);
 
         // QKV projections (same as baseline — attention needs separate Q, K, V)
         matmul(&mut ctx.q, &layer_weights.attn_wq, &ctx.x, n, n);
@@ -3187,11 +3186,13 @@ pub fn forward_paged<'a>(
             let pos_in_block = layer_idx % block_size;
 
             // Compute delta: current x minus pre-layer residual (xr was saved after first rmsnorm)
-            for d in 0..n {
-                let delta = ctx.x[d] - ctx.xr[d];
-                if block_idx < ctx.block_deltas.len() {
-                    ctx.block_deltas[block_idx][d] += delta;
-                }
+            if block_idx < ctx.block_deltas.len() {
+                crate::simd::simd_fused_sub_acc(
+                    &mut ctx.block_deltas[block_idx][..n],
+                    &ctx.x[..n],
+                    &ctx.xr[..n],
+                    n,
+                );
             }
 
             // At block boundary: route accumulated deltas from all completed blocks
@@ -3914,11 +3915,13 @@ pub fn forward_raven<'a>(
             let pos_in_block = layer_idx % block_size;
 
             // Compute delta: current x minus pre-layer residual (xr was saved after first rmsnorm)
-            for d in 0..n {
-                let delta = ctx.x[d] - ctx.xr[d];
-                if block_idx < ctx.block_deltas.len() {
-                    ctx.block_deltas[block_idx][d] += delta;
-                }
+            if block_idx < ctx.block_deltas.len() {
+                crate::simd::simd_fused_sub_acc(
+                    &mut ctx.block_deltas[block_idx][..n],
+                    &ctx.x[..n],
+                    &ctx.xr[..n],
+                    n,
+                );
             }
 
             // At block boundary: route accumulated deltas from all completed blocks
@@ -4111,11 +4114,13 @@ pub fn forward_quantized<'a, C: types::QuantizedKVCache>(
             let pos_in_block = layer_idx % block_size;
 
             // Compute delta: current x minus pre-layer residual (xr was saved after first rmsnorm)
-            for d in 0..n {
-                let delta = ctx.x[d] - ctx.xr[d];
-                if block_idx < ctx.block_deltas.len() {
-                    ctx.block_deltas[block_idx][d] += delta;
-                }
+            if block_idx < ctx.block_deltas.len() {
+                crate::simd::simd_fused_sub_acc(
+                    &mut ctx.block_deltas[block_idx][..n],
+                    &ctx.x[..n],
+                    &ctx.xr[..n],
+                    n,
+                );
             }
 
             // At block boundary: route accumulated deltas from all completed blocks

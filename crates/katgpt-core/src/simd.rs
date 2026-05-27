@@ -883,6 +883,30 @@ pub fn simd_add_scalar_inplace(x: &mut [f32], val: f32) {
     }
 }
 
+/// SIMD-accelerated fused subtract and scale: `x[i] = (x[i] - sub) * scale` for all `i`.
+///
+/// Fuses two operations into one pass, saving one full SIMD traversal vs separate
+/// `simd_add_scalar_inplace` + `simd_scale_inplace`.
+#[inline]
+pub fn simd_fused_sub_scale_inplace(x: &mut [f32], sub: f32, scale: f32) {
+    #[cfg(target_arch = "aarch64")]
+    {
+        unsafe { neon_fused_sub_scale_inplace(x, sub, scale) }
+    }
+    #[cfg(target_arch = "x86_64")]
+    {
+        if is_avx2_fma_available() {
+            unsafe { avx2_fused_sub_scale_inplace(x, sub, scale) }
+        } else {
+            scalar_fused_sub_scale_inplace(x, sub, scale)
+        }
+    }
+    #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
+    {
+        scalar_fused_sub_scale_inplace(x, sub, scale)
+    }
+}
+
 /// SIMD-accelerated horizontal sum: returns `x[0] + x[1] + ... + x[n-1]`.
 ///
 /// Used for softmax denominator computation (sum of exp-shifted scores).
@@ -1236,6 +1260,14 @@ fn scalar_add_scalar_inplace(x: &mut [f32], val: f32) {
     }
 }
 
+#[inline(always)]
+#[allow(dead_code)]
+fn scalar_fused_sub_scale_inplace(x: &mut [f32], sub: f32, scale: f32) {
+    for v in x.iter_mut() {
+        *v = (*v - sub) * scale;
+    }
+}
+
 #[inline]
 #[allow(dead_code)]
 fn scalar_sum_f32(x: &[f32]) -> f32 {
@@ -1371,6 +1403,29 @@ unsafe fn neon_add_scalar_inplace(x: &mut [f32], val: f32) {
         }
         while i < x.len() {
             *x.get_unchecked_mut(i) += val;
+            i += 1;
+        }
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+#[target_feature(enable = "neon")]
+#[inline]
+unsafe fn neon_fused_sub_scale_inplace(x: &mut [f32], sub: f32, scale: f32) {
+    use core::arch::aarch64::{vdupq_n_f32, vld1q_f32, vmulq_f32, vst1q_f32, vsubq_f32};
+    unsafe {
+        let sub_vec = vdupq_n_f32(sub);
+        let scale_vec = vdupq_n_f32(scale);
+        let mut i = 0;
+        let chunks = x.len() / 4;
+        for _ in 0..chunks {
+            let v = vld1q_f32(x.as_ptr().add(i));
+            let result = vmulq_f32(vsubq_f32(v, sub_vec), scale_vec);
+            vst1q_f32(x.as_mut_ptr().add(i), result);
+            i += 4;
+        }
+        while i < x.len() {
+            *x.get_unchecked_mut(i) = (*x.get_unchecked(i) - sub) * scale;
             i += 1;
         }
     }
@@ -1749,6 +1804,43 @@ unsafe fn avx2_add_scalar_inplace(x: &mut [f32], val: f32) {
         }
         while i < x.len() {
             *x.get_unchecked_mut(i) += val;
+            i += 1;
+        }
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2", enable = "fma")]
+#[inline]
+unsafe fn avx2_fused_sub_scale_inplace(x: &mut [f32], sub: f32, scale: f32) {
+    use core::arch::x86_64::{
+        _mm_loadu_ps, _mm_mul_ps, _mm_set1_ps, _mm_storeu_ps, _mm_sub_ps, _mm256_loadu_ps,
+        _mm256_mul_ps, _mm256_set1_ps, _mm256_storeu_ps, _mm256_sub_ps,
+    };
+    unsafe {
+        let sub_vec = _mm256_set1_ps(sub);
+        let scale_vec = _mm256_set1_ps(scale);
+        let mut i = 0;
+        let chunks = x.len() / 8;
+        for _ in 0..chunks {
+            let v = _mm256_loadu_ps(x.as_ptr().add(i));
+            let subbed = _mm256_sub_ps(v, sub_vec);
+            let result = _mm256_mul_ps(subbed, scale_vec);
+            _mm256_storeu_ps(x.as_mut_ptr().add(i), result);
+            i += 8;
+        }
+        // Handle remaining 4-element chunk with SSE
+        if i + 4 <= x.len() {
+            let sub_128 = _mm_set1_ps(sub);
+            let scale_128 = _mm_set1_ps(scale);
+            let v = _mm_loadu_ps(x.as_ptr().add(i));
+            let subbed = _mm_sub_ps(v, sub_128);
+            let result = _mm_mul_ps(subbed, scale_128);
+            _mm_storeu_ps(x.as_mut_ptr().add(i), result);
+            i += 4;
+        }
+        while i < x.len() {
+            *x.get_unchecked_mut(i) = (*x.get_unchecked(i) - sub) * scale;
             i += 1;
         }
     }

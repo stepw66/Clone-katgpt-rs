@@ -1,5 +1,8 @@
 # Issue 087: forward_prefill delta_routing uses scalar delta accumulation instead of simd_fused_sub_acc
 
+## Status: ✅ Fixed
+`forward_prefill` uses `simd_fused_sub_acc`. Also fixed `forward_paged`, `forward_raven`, `forward_quantized` scalar delta loops → `simd_fused_sub_acc`.
+
 ## Severity: Medium (under delta_routing + prefill path)
 
 ## Location

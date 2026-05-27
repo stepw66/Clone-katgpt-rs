@@ -1,5 +1,8 @@
 # Issue 082: depth_route uses scalar loops instead of SIMD kernels
 
+## Status: ✅ Fixed
+`depth_route` and `depth_route_with_indices` already use SIMD (`simd_sum_sq`, `simd_dot_f32`, `simd_add_inplace`). Fixed `depth_route_weights` scalar scale loop → `simd_scale_mul_inplace`.
+
 ## Severity: Medium-High (hot-path under delta_routing feature)
 
 ## Location

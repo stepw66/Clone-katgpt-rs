@@ -1,5 +1,8 @@
 # Issue 085: cosine_rerank_score_into uses scalar loops for mean-pooling
 
+## Status: ✅ Fixed
+`cosine_score` pre-computes `d_norms`. `cosine_rerank_score_into` uses `simd_add_inplace` and `simd_scale_inplace`.
+
 ## Severity: Medium (under maxsim feature — retrieval reranking hot path)
 
 ## Location

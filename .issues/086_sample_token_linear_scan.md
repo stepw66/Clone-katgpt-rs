@@ -1,5 +1,8 @@
 # Issue 086: sample_token uses O(V) linear scan — cache-unfriendly for large vocab
 
+## Status: ✅ Fixed
+Uses binary search CDF. `sample_token_into` with pre-allocated buffer added.
+
 ## Severity: Medium (called every decode step)
 
 ## Location

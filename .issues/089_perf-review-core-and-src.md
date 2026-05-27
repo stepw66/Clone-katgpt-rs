@@ -1,5 +1,8 @@
 # Performance Review: katgpt-core + src/
 
+## Status: ✅ Fixed
+#1 `sample_token_into` already exists with pre-allocated CDF. #2 softmax already uses `simd_sum_f32`. #3 softmax already uses `simd_add_scalar_inplace`. #7 added `simd_fused_sub_scale_inplace` for fused sub+scale in `softmax_scaled`. #8 removed redundant rmsnorm in `forward_coda`. Issues #4, #5, #6, #9, #10 are low priority or already addressed.
+
 Audited against `.contexts/optimization.md` guidelines.
 
 **Scope**: `crates/katgpt-core/src/` and `src/` (transformer, weights, types re-exports, simd re-exports).

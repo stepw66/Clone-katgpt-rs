@@ -1,5 +1,8 @@
 # Issue 083: newton_schulz allocates inside iteration loop
 
+## Status: ✅ Fixed
+`newton_schulz5_square` pre-allocates `at` and `xt_buf` outside the loop. `frobenius_norm` uses `simd_sum_sq`. `matmul_ax` takes `xt_buf` as parameter.
+
 ## Severity: Medium (under newton_schulz feature — training/offline path)
 
 ## Location

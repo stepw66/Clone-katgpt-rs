@@ -1,5 +1,8 @@
 # Issue 084: forward_base double rmsnorm on same buffer — no-op second norm
 
+## Status: ✅ Fixed
+Removed redundant second `rmsnorm` in `forward_coda` (L1984). CODA fused kernels handle delayed RMS internally.
+
 ## Severity: Low-Medium (correctness concern + wasted compute)
 
 ## Location

@@ -1,5 +1,8 @@
 # Issue 088: gegelu / silu / swiglu use scalar exp — no SIMD acceleration
 
+## Status: ✅ Fixed
+`gegelu`, `gegelu_tanh`, `silu`, `swiglu` all use chunked SIMD `simd_exp_inplace`.
+
 ## Severity: Medium (called in MLP layer every decode step)
 
 ## Location
