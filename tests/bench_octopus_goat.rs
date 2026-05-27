@@ -758,7 +758,7 @@ fn goat_octopus_vs_spectralquant_maxsim() {
         // Compute MaxSim scores
         let oct_ms = katgpt_rs::octopus::forward::maxsim_score_octopus(
             &queries,
-            &oct_cache,
+            &mut oct_cache,
             0,
             0..n_keys,
             dim,
