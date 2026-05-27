@@ -2408,6 +2408,7 @@ Every feature traced from research paper to implementation to benchmark. Separat
 | **Attractor Models** | [Attractor Research 35](https://arxiv.org/abs/2605.09959) | **Not implemented** | Fixed-point solver on DDTree already disproved (Plan 053). Bandit refinement serves propose+refine function. |
 | **rust-gpu** | [Rust GPU Feasibility Research 29](https://arxiv.org/abs/2605.09959) | **DEFERRED** | Nightly requirement, `spirv-std` API gaps, no CPU fallback. SIMD-first validated instead: ~3.6M tok/s on Apple M-series. |
 | **Dual-cutoff** | [FFO Research 30 P1](https://arxiv.org/abs/2605.09959) | **Harmful** | Cutoff=0.2 masks 17/27 arms (-49% relevance), eliminates exploration signal. UCB1 exploration bonus inflates low-Q scores. |
+| **KPop Binary KL** | [KPop Research 119](https://ringtech.notion.site/kpop) | **No gain — future reference** | Online RL (GRPO/PPO) train/infer mismatch technique for MoE. We don't do online RL, no MoE, no train/infer split. "70-80% tokens redundant" validates existing pruning philosophy. Stored for future if we add game LoRA online RL. |
 
 ### ⚠️ Potential Issues Found During Audit
 
