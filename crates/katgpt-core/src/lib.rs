@@ -87,3 +87,8 @@ pub mod dirichlet;
 pub use dirichlet::{
     consecutive_adjacency, dirichlet_energy, functor_adjacency, kv_cache_dirichlet_energy,
 };
+
+#[cfg(feature = "spectral_hierarchy")]
+pub mod spectral_hierarchy;
+#[cfg(feature = "spectral_hierarchy")]
+pub use spectral_hierarchy::{cauchy_interlacing_check, eigenspace_alignment, haar_wavelet_basis};
