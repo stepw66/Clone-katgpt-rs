@@ -360,6 +360,17 @@ The source uses **Batch Renormalization** (not standard BatchNorm or LayerNorm).
 
 ## References
 
+- **Matthews et al. (2026)** — "Goal-Conditioned Agents that Learn Everything All at Once", ICML 2026. [arXiv:2605.23551](https://arxiv.org/abs/2605.23551) | [GitHub](https://github.com/MichaelTMatthews/purejaxgcrl)
+
+```bibtex
+@inproceedings{matthews2026leo,
+  author = {Michael Matthews and Matthew Jackson and Michael Beukman and Thomas Foster and Alistair Letcher and Scott Fujimoto and Cédric Colas and Jakob Foerster},
+  title = {Goal-Conditioned Agents that Learn Everything All at Once},
+  booktitle = {International Conference on Machine Learning (ICML)},
+  year = {2026}
+}
+```
+
 - katgpt-rs Research 118 (full analysis)
 - riir-ai Research 012 (game-specific mapping + Super GOAT rationale)
 - 27_mmo_goat_pillars_decision_matrix.md (open/close boundary)
