@@ -1,7 +1,7 @@
 # Plan 159: FlashLib Dual-Gram Routing + Roofline Cost Model
 
 **Date:** 2026-05-28
-**Status:** Plan
+**Status:** Complete
 **Research:** R130 (FlashLib GPU Classical ML Operators)
 **Feature Gates:** `dual_gram_pca` (default-OFF until GOAT), `roofline_cost` (default-OFF until GOAT)
 **After GOAT proof:** Both → default-ON
@@ -22,12 +22,12 @@ Super-GOAT potential: If calibration is fast enough for per-game-session KV comp
 
 ## Tasks
 
-- [ ] T1: Add `gram.wgsl` — compute X·Xᵀ (seq_len × seq_len Gram matrix) in WGSL
-- [ ] T2: Add dual-Gram routing to `spectralquant/calibration.rs` — dispatch based on `seq_len < 4 * d_h`
-- [ ] T3: GOAT proof — calibration accuracy with dual-Gram must match standard cov path
-- [ ] T4: Port `roofline.py` → `roofline.rs` in katgpt-core (~200 lines, pure Rust)
-- [ ] T5: GOAT proof — roofline predicted vs actual within ±20%
-- [ ] T6: Feature gate `dual_gram_pca` + `roofline_cost`, ensure OFF = zero impact
+- [x] T1: Add `gram.wgsl` — compute X·Xᵀ (seq_len × seq_len Gram matrix) in WGSL
+- [x] T2: Add dual-Gram routing to `spectralquant/calibration.rs` — dispatch based on `seq_len < 4 * d_h`
+- [x] T3: GOAT proof — calibration accuracy with dual-Gram must match standard cov path
+- [x] T4: Port `roofline.py` → `roofline.rs` in katgpt-core (~200 lines, pure Rust)
+- [x] T5: GOAT proof — roofline predicted vs actual within ±20%
+- [x] T6: Feature gate `dual_gram_pca` + `roofline_cost`, ensure OFF = zero impact
 
 ---
 

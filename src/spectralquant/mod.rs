@@ -22,6 +22,8 @@ pub use forward::{
     par_dequantize_spectral_keys_flat, par_dequantize_spectral_values_flat,
 };
 pub use nonuniform_quant::{CompressedVector, NonUniformQuantizer};
+#[cfg(feature = "dual_gram_pca")]
+pub use spectral::calibrate_eigenbasis_dual_gram;
 pub use spectral::{
     BitAllocator, CalibrationResult, LloydMaxQuantizer, calibrate_eigenbasis,
     cumulative_variance_thresholds, generate_selective_qjl_signs, marginal_gain,

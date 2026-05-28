@@ -2861,6 +2861,44 @@ unsafe fn avx2_fused_scale_acc(dst: &mut [f32], src: &[f32], scale: f32, len: us
     }
 }
 
+/// SIMD-accelerated Gram matrix computation: G = X·Xᵀ where X is (seq_len × d_h).
+///
+/// For each pair (i, j), G[i*seq_len + j] = dot(X_row_i, X_row_j).
+/// Only computes upper triangle, then mirrors to lower triangle.
+/// Uses existing `simd_dot_f32` for each dot product.
+///
+/// `x` is row-major (seq_len × d_h), `gram_out` is row-major (seq_len × seq_len).
+pub fn simd_gram_f32(x: &[f32], seq_len: usize, d_h: usize, gram_out: &mut [f32]) {
+    assert!(
+        x.len() == seq_len * d_h,
+        "x.len() = {} but seq_len * d_h = {}",
+        x.len(),
+        seq_len * d_h
+    );
+    assert!(
+        gram_out.len() == seq_len * seq_len,
+        "gram_out.len() = {} but seq_len^2 = {}",
+        gram_out.len(),
+        seq_len * seq_len
+    );
+
+    for i in 0..seq_len {
+        let row_i = &x[i * d_h..(i + 1) * d_h];
+
+        // Diagonal: dot of row with itself
+        let diag = simd_dot_f32(row_i, row_i, d_h);
+        gram_out[i * seq_len + i] = diag;
+
+        // Upper triangle: j > i
+        for j in (i + 1)..seq_len {
+            let row_j = &x[j * d_h..(j + 1) * d_h];
+            let val = simd_dot_f32(row_i, row_j, d_h);
+            gram_out[i * seq_len + j] = val;
+            gram_out[j * seq_len + i] = val; // mirror to lower triangle
+        }
+    }
+}
+
 // ── Tests ─────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -4347,6 +4385,150 @@ mod tests {
             let bound = dim_sufficiency_bound(2, 100);
             assert!(bound > 0);
             assert!(bound <= 20);
+        }
+    }
+
+    // ── Gram matrix tests ─────────────────────────────────────
+
+    mod gram_tests {
+        use super::*;
+
+        #[test]
+        fn test_gram_identity() {
+            // Identity matrix X = I (3×3) → G = I·Iᵀ = I
+            let seq_len = 3;
+            let d_h = 3;
+            let x: Vec<f32> = vec![
+                1.0, 0.0, 0.0, // row 0
+                0.0, 1.0, 0.0, // row 1
+                0.0, 0.0, 1.0, // row 2
+            ];
+            let mut gram = vec![0.0f32; seq_len * seq_len];
+            simd_gram_f32(&x, seq_len, d_h, &mut gram);
+
+            // Expected: identity 3×3
+            let expected = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0];
+            for (i, (&g, &e)) in gram.iter().zip(expected.iter()).enumerate() {
+                assert!((g - e).abs() < 1e-5, "gram[{i}]={g}, expected={e}");
+            }
+        }
+
+        #[test]
+        fn test_gram_ones() {
+            // All-ones rows → G[i][j] = d_h for all i,j
+            let seq_len = 4;
+            let d_h = 8;
+            let x = vec![1.0f32; seq_len * d_h];
+            let mut gram = vec![0.0f32; seq_len * seq_len];
+            simd_gram_f32(&x, seq_len, d_h, &mut gram);
+
+            for (i, &g) in gram.iter().enumerate() {
+                assert!(
+                    (g - d_h as f32).abs() < 1e-4,
+                    "gram[{i}]={g}, expected={}",
+                    d_h
+                );
+            }
+        }
+
+        #[test]
+        fn test_gram_symmetric() {
+            let seq_len = 5;
+            let d_h = 8;
+            let x: Vec<f32> = (0..seq_len * d_h).map(|i| (i as f32 * 0.1).sin()).collect();
+            let mut gram = vec![0.0f32; seq_len * seq_len];
+            simd_gram_f32(&x, seq_len, d_h, &mut gram);
+
+            for i in 0..seq_len {
+                for j in 0..seq_len {
+                    let g_ij = gram[i * seq_len + j];
+                    let g_ji = gram[j * seq_len + i];
+                    assert!(
+                        (g_ij - g_ji).abs() < 1e-5,
+                        "G[{i}][{j}]={g_ij} != G[{j}][{i}]={g_ji}"
+                    );
+                }
+            }
+        }
+
+        #[test]
+        fn test_gram_upper_triangle_mirror() {
+            // Construct X so that each row has a distinct value
+            let seq_len = 3;
+            let d_h = 4;
+            let x: Vec<f32> = vec![
+                1.0, 2.0, 3.0, 4.0, // row 0
+                5.0, 6.0, 7.0, 8.0, // row 1
+                9.0, 10.0, 11.0, 12.0, // row 2
+            ];
+            let mut gram = vec![0.0f32; seq_len * seq_len];
+            simd_gram_f32(&x, seq_len, d_h, &mut gram);
+
+            // Verify G[i][j] == G[j][i] for all off-diagonal pairs
+            // G[0][1] = dot(row0, row1) = 1*5+2*6+3*7+4*8 = 5+12+21+32 = 70
+            // G[0][2] = dot(row0, row2) = 1*9+2*10+3*11+4*12 = 9+20+33+48 = 110
+            // G[1][2] = dot(row1, row2) = 5*9+6*10+7*11+8*12 = 45+60+77+96 = 278
+            assert!((gram[1] - 70.0).abs() < 1e-4, "G[0][1]={}", gram[1]);
+            assert!((gram[3] - 70.0).abs() < 1e-4, "G[1][0]={}", gram[3]);
+            assert!((gram[2] - 110.0).abs() < 1e-4, "G[0][2]={}", gram[2]);
+            assert!((gram[6] - 110.0).abs() < 1e-4, "G[2][0]={}", gram[6]);
+            assert!((gram[5] - 278.0).abs() < 1e-4, "G[1][2]={}", gram[5]);
+            assert!((gram[7] - 278.0).abs() < 1e-4, "G[2][1]={}", gram[7]);
+        }
+
+        #[test]
+        fn test_gram_2x3() {
+            // X = [[1, 0, 2], [3, 1, 0]]
+            let seq_len = 2;
+            let d_h = 3;
+            let x: Vec<f32> = vec![1.0, 0.0, 2.0, 3.0, 1.0, 0.0];
+            let mut gram = vec![0.0f32; seq_len * seq_len];
+            simd_gram_f32(&x, seq_len, d_h, &mut gram);
+
+            // G[0][0] = 1+0+4 = 5
+            // G[0][1] = 3+0+0 = 3
+            // G[1][1] = 9+1+0 = 10
+            assert!((gram[0] - 5.0).abs() < 1e-5, "G[0][0]={}", gram[0]);
+            assert!((gram[1] - 3.0).abs() < 1e-5, "G[0][1]={}", gram[1]);
+            assert!((gram[2] - 3.0).abs() < 1e-5, "G[1][0]={}", gram[2]);
+            assert!((gram[3] - 10.0).abs() < 1e-5, "G[1][1]={}", gram[3]);
+        }
+
+        #[test]
+        fn test_gram_matches_outer_product() {
+            let seq_len = 4;
+            let d_h = 8;
+            let x: Vec<f32> = (0..seq_len * d_h)
+                .map(|i| (i as f32 * 0.17).sin() * 0.5)
+                .collect();
+
+            // Compute gram via simd_gram_f32
+            let mut gram = vec![0.0f32; seq_len * seq_len];
+            simd_gram_f32(&x, seq_len, d_h, &mut gram);
+
+            // Compute gram via iterative outer product: G = X·Xᵀ = Σ_k X_ik * X_jk
+            let mut reference = vec![0.0f32; seq_len * seq_len];
+            for i in 0..seq_len {
+                for j in 0..seq_len {
+                    let mut sum = 0.0f32;
+                    for k in 0..d_h {
+                        sum += x[i * d_h + k] * x[j * d_h + k];
+                    }
+                    reference[i * seq_len + j] = sum;
+                }
+            }
+
+            for i in 0..seq_len {
+                for j in 0..seq_len {
+                    let idx = i * seq_len + j;
+                    assert!(
+                        (gram[idx] - reference[idx]).abs() < 1e-4,
+                        "G[{i}][{j}]: simd={}, reference={}",
+                        gram[idx],
+                        reference[idx]
+                    );
+                }
+            }
         }
     }
 }
