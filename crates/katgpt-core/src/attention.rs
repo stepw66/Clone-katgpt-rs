@@ -188,14 +188,19 @@ fn tiled_attention_inner(
                 );
                 norm_tile[i] *= correction;
 
-                // Compute P̃ and accumulate new contributions
-                let mut rowsum = 0.0f32;
-                for j in 0..actual_bc {
-                    let val = s_tile[i * BC + j] - m_new;
-                    let p = (val * log2e_scale).exp2();
-                    rowsum += p;
+                // Compute P̃ in-place on s_tile row: exp((s - m_new) * scale)
+                // Mathematically equivalent to exp2((s - m_new) * log2e_scale)
+                // since exp(x) = exp2(x * LOG2_E).
+                let p_row = &mut s_tile[i * BC..i * BC + actual_bc];
+                crate::simd::simd_fused_sub_scale_inplace(p_row, m_new, scale);
+                crate::simd::simd_exp_inplace(p_row);
 
-                    // Accumulate P̃[i][j] × V[j] into o_tile[i] (SIMD-accelerated)
+                // Rowsum via SIMD (single reduction vs scalar accumulator)
+                let rowsum = crate::simd::simd_sum_f32(p_row);
+
+                // Accumulate P̃[i][j] × V[j] into o_tile[i] (SIMD-accelerated)
+                for j in 0..actual_bc {
+                    let p = p_row[j];
                     let v_off = (k_start + j) * head_dim;
                     crate::simd::simd_fused_scale_acc(
                         &mut o_tile[i * head_dim..],
@@ -211,14 +216,17 @@ fn tiled_attention_inner(
             max_tile = max_new;
         }
 
-        // 4. Final normalize: o_tile / norm_tile
+        // 4. Final normalize: o_tile / norm_tile (fused copy+scale in single SIMD pass)
         for i in 0..actual_br {
             let inv_norm = 1.0 / norm_tile[i];
             let o_off = i * head_dim;
             let out_off = (q_start + i) * head_dim;
-            // SIMD-accelerated normalize
-            output[out_off..out_off + head_dim].copy_from_slice(&o_tile[o_off..o_off + head_dim]);
-            crate::simd::simd_scale_inplace(&mut output[out_off..out_off + head_dim], inv_norm);
+            crate::simd::simd_fused_decay_write(
+                &mut output[out_off..out_off + head_dim],
+                0.0,
+                &o_tile[o_off..o_off + head_dim],
+                inv_norm,
+            );
         }
     }
 }
