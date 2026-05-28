@@ -1405,27 +1405,29 @@ pub fn gegelu(hidden: &mut [f32], gate: &[f32], up: &[f32]) {
 pub fn gegelu_tanh(hidden: &mut [f32], gate: &[f32], up: &[f32]) {
     const CHUNK: usize = 64;
     let sqrt_2_over_pi = (2.0f32 / std::f32::consts::PI).sqrt(); // ≈0.7979
+    let scale_2 = 2.0 * sqrt_2_over_pi;
     let mut buf = [0.0f32; CHUNK];
+    let mut buf2 = [0.0f32; CHUNK];
 
     let mut i = 0;
     while i + CHUNK <= hidden.len() {
-        // buf[j] = 2 * sqrt(2/π) * (g + 0.044715 * g³)
-        // Use SIMD for the 0.044715 scale, then finish with scalar multiply-add
+        // buf[j] = 0.044715 * g² via SIMD copy + scale + element-wise mul
         buf[..CHUNK].copy_from_slice(&gate[i..i + CHUNK]);
-        crate::simd::simd_scale_inplace(&mut buf, 0.044715);
+        crate::simd::simd_scale_inplace(&mut buf, 0.044715); // buf = 0.044715 * g
+        crate::simd::simd_scale_mul_inplace(&mut buf, &gate[i..i + CHUNK], 1.0); // buf = 0.044715 * g²
+        // Finish cubic: 2*c*(g + 0.044715*g³) — only one scalar mul (g) remains
         for j in 0..CHUNK {
             let g = gate[i + j];
-            buf[j] = 2.0 * sqrt_2_over_pi * (g + buf[j] * g * g);
+            buf[j] = scale_2 * (g + buf[j] * g); // scale_2 * (g + 0.044715*g³)
         }
         // buf[j] = exp(2*inner[j]) via SIMD
         crate::simd::simd_exp_inplace(&mut buf);
-        // hidden[j] = 0.5 * gate[j] * (1 + tanh(inner[j])) * up[j]
-        // where tanh(inner) = (exp(2*inner) - 1) / (exp(2*inner) + 1)
+        // hidden[j] = g * exp(2x) / (exp(2x) + 1) * up[j]
+        // Compute denominator (exp + 1) via SIMD, then scalar div + mul
+        buf2[..CHUNK].copy_from_slice(&buf);
+        crate::simd::simd_add_scalar_inplace(&mut buf2, 1.0); // buf2 = exp + 1
         for j in 0..CHUNK {
-            let exp_2inner = buf[j];
-            let tanh_val = (exp_2inner - 1.0) / (exp_2inner + 1.0);
-            let g = gate[i + j];
-            hidden[i + j] = 0.5 * g * (1.0 + tanh_val) * up[i + j];
+            hidden[i + j] = gate[i + j] * up[i + j] * buf[j] / buf2[j];
         }
         i += CHUNK;
     }
