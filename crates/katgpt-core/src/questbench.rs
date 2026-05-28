@@ -595,12 +595,18 @@ pub enum CspDomain {
 /// Convert a list of token indices to a boolean bitmap.
 fn to_bitmap(indices: &[usize], vocab_size: usize) -> Vec<bool> {
     let mut bm = vec![false; vocab_size];
+    fill_bitmap(&mut bm, indices);
+    bm
+}
+
+/// Fill a pre-allocated bitmap buffer from a list of token indices.
+fn fill_bitmap(buf: &mut [bool], indices: &[usize]) {
+    buf.fill(false);
     for &idx in indices {
-        if idx < vocab_size {
-            bm[idx] = true;
+        if idx < buf.len() {
+            buf[idx] = true;
         }
     }
-    bm
 }
 
 /// Pruner where placing a specific "key" token at depth D reduces
@@ -666,15 +672,10 @@ pub fn generate_synthetic_csps(count_per_domain: usize) -> Vec<SyntheticCsp> {
             })
             .collect();
         let adjacent_bm = to_bitmap(&adjacent, vocab_size);
-        // All other tokens lead to full valid set (no narrowing)
-        let default_next_bm = vec![true; vocab_size];
-        let mut narrowing = vec![Vec::new(); vocab_size];
+        // Pre-fill narrowing: default is full-valid, then set key entry to adjacent
+        let mut narrowing: Vec<Vec<bool>> =
+            (0..vocab_size).map(|_| vec![true; vocab_size]).collect();
         narrowing[key] = adjacent_bm;
-        for v in 0..vocab_size {
-            if v != key {
-                narrowing[v] = default_next_bm.clone();
-            }
-        }
         let pruner = NarrowingPruner {
             _vocab_size: vocab_size,
             valid_at_depth,
@@ -702,13 +703,9 @@ pub fn generate_synthetic_csps(count_per_domain: usize) -> Vec<SyntheticCsp> {
         // Other placements leave 4-5 valid positions
         let wide_next: Vec<usize> = (0..vocab_size).filter(|&c| c % 3 == 0).collect();
         let wide_next_bm = to_bitmap(&wide_next, vocab_size);
-        let mut narrowing = vec![Vec::new(); vocab_size];
+        // Pre-fill narrowing: default is wide, then set key entry to narrow
+        let mut narrowing: Vec<Vec<bool>> = (0..vocab_size).map(|_| wide_next_bm.clone()).collect();
         narrowing[key] = narrow_next_bm;
-        for v in 0..vocab_size {
-            if v != key {
-                narrowing[v] = wide_next_bm.clone();
-            }
-        }
         let pruner = NarrowingPruner {
             _vocab_size: vocab_size,
             valid_at_depth,
@@ -736,15 +733,10 @@ pub fn generate_synthetic_csps(count_per_domain: usize) -> Vec<SyntheticCsp> {
         // Placing key → only partner survives at depth 1 (XOR resolution)
         let narrow_next = vec![partner];
         let narrow_next_bm = to_bitmap(&narrow_next, vocab_size);
-        // Placing any other → all still valid
-        let wide_next_bm = vec![true; vocab_size];
-        let mut narrowing = vec![Vec::new(); vocab_size];
+        // Pre-fill narrowing: default is full-valid, then set key entry to narrow
+        let mut narrowing: Vec<Vec<bool>> =
+            (0..vocab_size).map(|_| vec![true; vocab_size]).collect();
         narrowing[key] = narrow_next_bm;
-        for v in 0..vocab_size {
-            if v != key {
-                narrowing[v] = wide_next_bm.clone();
-            }
-        }
         let pruner = NarrowingPruner {
             _vocab_size: vocab_size,
             valid_at_depth,

@@ -3302,7 +3302,7 @@ pub fn generate(
 ) -> Vec<usize> {
     let mut ctx = ForwardContext::new(config);
     let mut cache = MultiLayerKVCache::new(config);
-    let mut tokens = Vec::new();
+    let mut tokens = Vec::with_capacity(n_tokens);
     generate_into(
         &mut ctx,
         &mut cache,
@@ -3374,8 +3374,8 @@ pub struct PagedKVCache {
     new_pages: Vec<Vec<usize>>,
     /// Reusable scratch: flat buffer for all newly allocated pages in `ensure_pages()`.
     all_new_buf: Vec<usize>,
-    /// Reusable scratch: set of page indices referenced by other sequences in `rollback()`.
-    rollback_set: std::collections::HashSet<usize>,
+    /// Per-page reference counts for O(1) rollback (replaces HashSet scan).
+    page_ref_counts: Vec<u32>,
     /// Reusable scratch: drained page indices awaiting recycle in `rollback()`.
     rollback_removed: Vec<usize>,
 }
@@ -3404,7 +3404,7 @@ impl PagedKVCache {
             deficits: Vec::with_capacity(config.n_layer),
             new_pages: vec![Vec::new(); config.n_layer],
             all_new_buf: Vec::new(),
-            rollback_set: std::collections::HashSet::new(),
+            page_ref_counts: vec![config.n_layer as u32; initial_pages_per_layer * config.n_layer],
             rollback_removed: Vec::new(),
         }
     }
@@ -3414,10 +3414,12 @@ impl PagedKVCache {
         match self.free_pages.pop() {
             Some(idx) => {
                 self.pages[idx].fill(0.0);
+                self.page_ref_counts[idx] = 1;
                 idx
             }
             None => {
                 self.pages.push(vec![0.0; PAGE_SIZE * self.kv_dim * 2]);
+                self.page_ref_counts.push(1);
                 let idx = self.total_pages;
                 self.total_pages += 1;
                 idx
@@ -3443,13 +3445,15 @@ impl PagedKVCache {
                 .push(pages_needed.saturating_sub(lt[seq_idx].len()));
         }
 
-        // Allocate all pages upfront (reuse scratch buffer)
+        // Allocate all pages upfront (reuse scratch buffer via take+put-back
+        // to avoid borrow conflict with alloc_page)
         let total_deficit: usize = self.deficits.iter().sum();
-        let pages: Vec<_> = (0..total_deficit).map(|_| self.alloc_page()).collect();
         let mut buf = std::mem::take(&mut self.all_new_buf);
         buf.clear();
         buf.reserve(total_deficit);
-        buf.extend(pages);
+        for _ in 0..total_deficit {
+            buf.push(self.alloc_page());
+        }
 
         // Partition into per-layer lists and assign
         self.new_pages.resize_with(self.deficits.len(), Vec::new);
@@ -3511,6 +3515,10 @@ impl PagedKVCache {
         for layer_tables in &mut self.layer_page_tables {
             let source = &layer_tables[seq_idx];
             let shared_pages = source[..fork_page.min(source.len())].to_vec();
+            // Increment ref counts for shared pages
+            for &pidx in &shared_pages {
+                self.page_ref_counts[pidx] += 1;
+            }
             layer_tables.push(shared_pages);
         }
 
@@ -3528,21 +3536,8 @@ impl PagedKVCache {
     pub fn rollback(&mut self, seq_idx: usize, rollback_to_pos: usize) {
         let keep_count = rollback_to_pos / PAGE_SIZE;
 
-        // Build set of page indices referenced by all OTHER sequences across all layers.
-        // Since page indices are globally unique (allocated from a single pool), a simple
-        // HashSet<usize> is sufficient — no need for (layer, page) tuples.
-        self.rollback_set.clear();
-        for layer_tables in self.layer_page_tables.iter() {
-            for (seq, table) in layer_tables.iter().enumerate() {
-                if seq != seq_idx {
-                    for &pidx in table {
-                        self.rollback_set.insert(pidx);
-                    }
-                }
-            }
-        }
-
-        // Truncate page tables and free exclusive pages
+        // Truncate page tables and decrement ref counts for dropped pages.
+        // Pages with ref count == 0 go to the free list.
         for layer_tables in &mut self.layer_page_tables {
             if seq_idx >= layer_tables.len() {
                 continue;
@@ -3551,7 +3546,8 @@ impl PagedKVCache {
             self.rollback_removed.clear();
             self.rollback_removed.extend(table.drain(keep_count..));
             for pidx in self.rollback_removed.drain(..) {
-                if !self.rollback_set.contains(&pidx) {
+                self.page_ref_counts[pidx] -= 1;
+                if self.page_ref_counts[pidx] == 0 {
                     self.free_pages.push(pidx);
                 }
             }
@@ -3565,6 +3561,8 @@ impl PagedKVCache {
                 self.free_pages.append(table);
             }
         }
+        // Reset all ref counts to 0
+        self.page_ref_counts.fill(0);
     }
 }
 

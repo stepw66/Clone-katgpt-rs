@@ -659,9 +659,11 @@ fn forward_save(
 
     // Phase A: Embeddings + K/V
     for (p, &token) in tokens.iter().enumerate().take(seq_len) {
-        for i in 0..n {
-            ctx.embeddings[p * n + i] = weights.wte[token * n + i] + weights.wpe[p * n + i];
-        }
+        crate::simd::simd_add_into(
+            &mut ctx.embeddings[p * n..(p + 1) * n],
+            &weights.wte[token * n..(token + 1) * n],
+            &weights.wpe[p * n..(p + 1) * n],
+        );
         ctx.x_buf[..n].copy_from_slice(&ctx.embeddings[p * n..(p + 1) * n]);
         rmsnorm(&mut ctx.x_buf);
         ctx.after_norm1[p * n..(p + 1) * n].copy_from_slice(&ctx.x_buf[..n]);
@@ -1155,10 +1157,21 @@ pub fn evaluate_accuracy(
 ) -> f32 {
     let mut correct = 0usize;
     let mut total = 0usize;
+    let mut corrupted_buf = Vec::new();
+    let mut is_masked_buf = Vec::new();
+    let mut positions_buf = Vec::new();
     for tokens in test_data {
-        let (corrupted, is_masked) = corrupt_block(tokens, mask_ratio, config.mask_token, rng);
-        let (logits_vec, _) = forward_bidirectional_positions(weights, &corrupted, config);
-        for (p, &masked) in is_masked.iter().enumerate() {
+        corrupt_block_into(
+            tokens,
+            mask_ratio,
+            config.mask_token,
+            rng,
+            &mut corrupted_buf,
+            &mut is_masked_buf,
+            &mut positions_buf,
+        );
+        let (logits_vec, _) = forward_bidirectional_positions(weights, &corrupted_buf, config);
+        for (p, &masked) in is_masked_buf.iter().enumerate() {
             if !masked {
                 continue;
             }
@@ -1224,6 +1237,9 @@ pub fn train_mini_dllm(
     let mut loss_history = Vec::new();
     let mut fwd_ctx = ForwardSaveContext::new(config);
     let mut bwd_ctx = BackwardContext::new(config);
+    let mut corrupted_buf = Vec::with_capacity(config.block_size);
+    let mut is_masked_buf = Vec::with_capacity(config.block_size);
+    let mut positions_buf = Vec::with_capacity(config.block_size);
 
     for epoch in 0..n_epochs {
         let mut epoch_loss = 0.0f32;
@@ -1238,23 +1254,30 @@ pub fn train_mini_dllm(
 
         for &idx in &indices {
             let tokens = &train_data[idx];
-            let (corrupted, is_masked) =
-                corrupt_block(tokens, mask_ratio, config.mask_token, &mut rng);
+            corrupt_block_into(
+                tokens,
+                mask_ratio,
+                config.mask_token,
+                &mut rng,
+                &mut corrupted_buf,
+                &mut is_masked_buf,
+                &mut positions_buf,
+            );
 
             // Skip if nothing masked
-            if !is_masked.iter().any(|&m| m) {
+            if !is_masked_buf.iter().any(|&m| m) {
                 continue;
             }
 
-            let act = forward_save(&weights, &corrupted, config, &mut fwd_ctx);
+            let act = forward_save(&weights, &corrupted_buf, config, &mut fwd_ctx);
             let loss = masked_loss(
                 &act.logits,
                 tokens,
-                &is_masked,
+                &is_masked_buf,
                 config.vocab_size,
                 LossAveraging::Global,
             );
-            let grads = backward(&act, &weights, tokens, &is_masked, config, &mut bwd_ctx);
+            let grads = backward(&act, &weights, tokens, &is_masked_buf, config, &mut bwd_ctx);
             sgd_update(&mut weights, &grads, lr);
 
             epoch_loss += loss;
@@ -1310,6 +1333,9 @@ pub fn train_mini_dllm_adaptive(
     let n_blocks = schedule.ratios().len().max(1);
     let mut fwd_ctx = ForwardSaveContext::new(config);
     let mut bwd_ctx = BackwardContext::new(config);
+    let mut corrupted_buf = Vec::with_capacity(config.block_size);
+    let mut is_masked_buf = Vec::with_capacity(config.block_size);
+    let mut positions_buf = Vec::with_capacity(config.block_size);
 
     for epoch in 0..n_epochs {
         let mut epoch_loss = 0.0f32;
@@ -1330,20 +1356,27 @@ pub fn train_mini_dllm_adaptive(
             let block_idx = sample_counter % n_blocks;
             let mask_ratio = schedule.ratios()[block_idx];
 
-            let (corrupted, is_masked) =
-                corrupt_block(tokens, mask_ratio, config.mask_token, &mut rng);
+            corrupt_block_into(
+                tokens,
+                mask_ratio,
+                config.mask_token,
+                &mut rng,
+                &mut corrupted_buf,
+                &mut is_masked_buf,
+                &mut positions_buf,
+            );
 
             // Skip if nothing masked
-            if !is_masked.iter().any(|&m| m) {
+            if !is_masked_buf.iter().any(|&m| m) {
                 sample_counter += 1;
                 continue;
             }
 
-            let act = forward_save(&weights, &corrupted, config, &mut fwd_ctx);
+            let act = forward_save(&weights, &corrupted_buf, config, &mut fwd_ctx);
             let loss = masked_loss(
                 &act.logits,
                 tokens,
-                &is_masked,
+                &is_masked_buf,
                 config.vocab_size,
                 LossAveraging::Global,
             );
@@ -1351,7 +1384,7 @@ pub fn train_mini_dllm_adaptive(
             // Record per-block loss for adaptive schedule
             schedule.record_step_loss(block_idx, loss);
 
-            let grads = backward(&act, &weights, tokens, &is_masked, config, &mut bwd_ctx);
+            let grads = backward(&act, &weights, tokens, &is_masked_buf, config, &mut bwd_ctx);
             sgd_update(&mut weights, &grads, lr);
 
             epoch_loss += loss;
@@ -2424,6 +2457,9 @@ mod replaid_tests {
         let mut bwd_ctx = BackwardContext::new(&config);
 
         let mut fixed_epoch_variances: Vec<f32> = Vec::new();
+        let mut corrupted_buf = Vec::with_capacity(config.block_size);
+        let mut is_masked_buf = Vec::with_capacity(config.block_size);
+        let mut positions_buf = Vec::with_capacity(config.block_size);
 
         for _epoch in 0..n_epochs {
             let mut indices: Vec<usize> = (0..train_data.len()).collect();
@@ -2435,16 +2471,23 @@ mod replaid_tests {
             let mut step_losses: Vec<f32> = Vec::new();
             for &idx in &indices {
                 let tokens = &train_data[idx];
-                let (corrupted, is_masked) =
-                    corrupt_block(tokens, fixed_mask_ratio, config.mask_token, &mut rng_fixed);
-                if !is_masked.iter().any(|&m| m) {
+                corrupt_block_into(
+                    tokens,
+                    fixed_mask_ratio,
+                    config.mask_token,
+                    &mut rng_fixed,
+                    &mut corrupted_buf,
+                    &mut is_masked_buf,
+                    &mut positions_buf,
+                );
+                if !is_masked_buf.iter().any(|&m| m) {
                     continue;
                 }
-                let act = forward_save(&weights_fixed, &corrupted, &config, &mut fwd_ctx);
+                let act = forward_save(&weights_fixed, &corrupted_buf, &config, &mut fwd_ctx);
                 let loss = masked_loss(
                     &act.logits,
                     tokens,
-                    &is_masked,
+                    &is_masked_buf,
                     config.vocab_size,
                     LossAveraging::Global,
                 );
@@ -2452,7 +2495,7 @@ mod replaid_tests {
                     &act,
                     &weights_fixed,
                     tokens,
-                    &is_masked,
+                    &is_masked_buf,
                     &config,
                     &mut bwd_ctx,
                 );
@@ -2486,6 +2529,9 @@ mod replaid_tests {
         let mut bwd_ctx2 = BackwardContext::new(&config);
 
         let mut adaptive_epoch_variances: Vec<f32> = Vec::new();
+        let mut corrupted_buf2 = Vec::with_capacity(config.block_size);
+        let mut is_masked_buf2 = Vec::with_capacity(config.block_size);
+        let mut positions_buf2 = Vec::with_capacity(config.block_size);
 
         for _epoch in 0..n_epochs {
             let mut indices: Vec<usize> = (0..train_data.len()).collect();
@@ -2501,17 +2547,24 @@ mod replaid_tests {
                 let block_idx = sample_counter % n_blocks;
                 let mask_ratio = schedule2.ratios()[block_idx];
 
-                let (corrupted, is_masked) =
-                    corrupt_block(tokens, mask_ratio, config.mask_token, &mut rng_adaptive);
-                if !is_masked.iter().any(|&m| m) {
+                corrupt_block_into(
+                    tokens,
+                    mask_ratio,
+                    config.mask_token,
+                    &mut rng_adaptive,
+                    &mut corrupted_buf2,
+                    &mut is_masked_buf2,
+                    &mut positions_buf2,
+                );
+                if !is_masked_buf2.iter().any(|&m| m) {
                     sample_counter += 1;
                     continue;
                 }
-                let act = forward_save(&weights_adaptive, &corrupted, &config, &mut fwd_ctx2);
+                let act = forward_save(&weights_adaptive, &corrupted_buf2, &config, &mut fwd_ctx2);
                 let loss = masked_loss(
                     &act.logits,
                     tokens,
-                    &is_masked,
+                    &is_masked_buf2,
                     config.vocab_size,
                     LossAveraging::Global,
                 );
@@ -2520,7 +2573,7 @@ mod replaid_tests {
                     &act,
                     &weights_adaptive,
                     tokens,
-                    &is_masked,
+                    &is_masked_buf2,
                     &config,
                     &mut bwd_ctx2,
                 );

@@ -199,8 +199,9 @@ pub trait GameState: Clone {
 
     /// Number of legal actions for `player_id`.
     ///
-    /// Default implementation calls [`available_actions().len()`](Self::available_actions).
-    /// Override if you can compute this cheaper than building the full vec.
+    /// **Override this** if you can compute the count without building the full action Vec.
+    /// The default implementation calls [`available_actions()`](Self::available_actions)
+    /// which allocates — expensive in tight MCTS loops.
     fn action_space_size(&self, player_id: u8) -> usize {
         self.available_actions(player_id).len()
     }
@@ -602,6 +603,13 @@ pub trait DualLeoMixer {
             .collect()
     }
 
+    /// Mix LEO and UVFA Q-values into a pre-allocated buffer, avoiding allocation.
+    fn mix_into(&self, out: &mut [f32], q_leo: &[f32], q_uvfa: &[f32], alpha: f32) {
+        for (o, (&ql, &qu)) in out.iter_mut().zip(q_leo.iter().zip(q_uvfa.iter())) {
+            *o = alpha * ql + (1.0 - alpha) * qu;
+        }
+    }
+
     /// Default α = 0.3 (from paper sweep on Craftax).
     fn default_alpha(&self) -> f32 {
         0.3
@@ -629,20 +637,27 @@ pub trait DualLeoMixer {
 
     /// Combine Q-values using the configured acting mode.
     fn combine(&self, q_leo: &[f32], q_uvfa: &[f32], alpha: f32) -> Vec<f32> {
+        let mut out = vec![0.0f32; q_leo.len()];
+        self.combine_into(&mut out, q_leo, q_uvfa, alpha);
+        out
+    }
+
+    /// Zero-alloc variant of [`combine`]: writes into a pre-allocated buffer.
+    fn combine_into(&self, out: &mut [f32], q_leo: &[f32], q_uvfa: &[f32], alpha: f32) {
         match self.acting_mode() {
-            ActingMode::Lc => self.mix(q_leo, q_uvfa, alpha),
-            ActingMode::LeoOnly => q_leo.to_vec(),
-            ActingMode::UvfaOnly => q_uvfa.to_vec(),
-            ActingMode::Max => q_leo
-                .iter()
-                .zip(q_uvfa.iter())
-                .map(|(&ql, &qu)| ql.max(qu))
-                .collect(),
-            ActingMode::Min => q_leo
-                .iter()
-                .zip(q_uvfa.iter())
-                .map(|(&ql, &qu)| ql.min(qu))
-                .collect(),
+            ActingMode::Lc => self.mix_into(out, q_leo, q_uvfa, alpha),
+            ActingMode::LeoOnly => out.copy_from_slice(q_leo),
+            ActingMode::UvfaOnly => out.copy_from_slice(q_uvfa),
+            ActingMode::Max => {
+                for (o, (&ql, &qu)) in out.iter_mut().zip(q_leo.iter().zip(q_uvfa.iter())) {
+                    *o = ql.max(qu);
+                }
+            }
+            ActingMode::Min => {
+                for (o, (&ql, &qu)) in out.iter_mut().zip(q_leo.iter().zip(q_uvfa.iter())) {
+                    *o = ql.min(qu);
+                }
+            }
         }
     }
 

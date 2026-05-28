@@ -665,6 +665,11 @@ pub struct PeiraCovariance {
     sigma_sample: Vec<f64>,
     n_sample: Vec<f64>,
     pm: Vec<f64>,
+    /// Pre-allocated scratch for invert_spd_into (L factor, L_inv)
+    inv_l_scratch: Vec<f64>,
+    inv_l_inv_scratch: Vec<f64>,
+    /// Pre-allocated scratch for matmul_into (transposed B)
+    matmul_bt_scratch: Vec<f64>,
 }
 
 impl PeiraCovariance {
@@ -679,6 +684,9 @@ impl PeiraCovariance {
             sigma_sample: vec![0.0; k * k],
             n_sample: vec![0.0; k * k],
             pm: vec![0.0; k * k],
+            inv_l_scratch: vec![0.0; k * k],
+            inv_l_inv_scratch: vec![0.0; k * k],
+            matmul_bt_scratch: vec![0.0; k * k],
         }
     }
 
@@ -731,11 +739,16 @@ impl PeiraCovariance {
             n_reg[i * k + i] += lambda;
         }
 
-        // Invert N + λI
-        let q_star = invert_spd(&n_reg, k);
+        // Invert N + λI (allocates scratch internally)
+        let mut q_star = vec![0.0f64; k * k];
+        let mut l_scratch = vec![0.0f64; k * k];
+        let mut l_inv_scratch = vec![0.0f64; k * k];
+        invert_spd_into(&mut q_star, &mut l_scratch, &mut l_inv_scratch, &n_reg, k);
 
         // P* = Σ @ Q*
-        let p_star = matmul(&self.sigma, &q_star, k);
+        let mut p_star = vec![0.0f64; k * k];
+        let mut bt_scratch = vec![0.0f64; k * k];
+        matmul_into(&mut p_star, &mut bt_scratch, &self.sigma, &q_star, k);
 
         (p_star, q_star)
     }
@@ -754,11 +767,25 @@ impl PeiraCovariance {
             self.pm[i * k + i] += lambda;
         }
 
-        // Invert N + λI
-        let q_star = invert_spd(&self.pm[..k * k], k);
+        // Invert N + λI using pre-allocated scratch
+        let mut q_star = vec![0.0f64; k * k];
+        invert_spd_into(
+            &mut q_star,
+            &mut self.inv_l_scratch,
+            &mut self.inv_l_inv_scratch,
+            &self.pm[..k * k],
+            k,
+        );
 
-        // P* = Σ @ Q*
-        let p_star = matmul(&self.sigma, &q_star, k);
+        // P* = Σ @ Q* using pre-allocated scratch
+        let mut p_star = vec![0.0f64; k * k];
+        matmul_into(
+            &mut p_star,
+            &mut self.matmul_bt_scratch,
+            &self.sigma,
+            &q_star,
+            k,
+        );
 
         (p_star, q_star)
     }
@@ -780,6 +807,9 @@ impl PeiraCovariance {
         self.sigma_sample.fill(0.0);
         self.n_sample.fill(0.0);
         self.pm.fill(0.0);
+        self.inv_l_scratch.fill(0.0);
+        self.inv_l_inv_scratch.fill(0.0);
+        self.matmul_bt_scratch.fill(0.0);
         self.step_count = 0;
     }
 }
@@ -872,79 +902,108 @@ pub fn peira_aux_loss(
 /// More efficient than Gauss-Jordan for SPD matrices: exploits symmetry,
 /// no partial pivoting needed, uses half the memory.
 fn invert_spd(mat: &[f64], k: usize) -> Vec<f64> {
-    // Step 1: Cholesky decomposition — L such that L * L^T = mat
+    let mut inv = vec![0.0f64; k * k];
     let mut l = vec![0.0f64; k * k];
+    let mut l_inv = vec![0.0f64; k * k];
+    invert_spd_into(&mut inv, &mut l, &mut l_inv, mat, k);
+    inv
+}
+
+/// Zero-alloc variant of [`invert_spd`]: writes into caller-provided scratch buffers.
+///
+/// - `inv`: output k×k inverse matrix
+/// - `l_scratch`: k×k scratch for Cholesky factor L
+/// - `l_inv_scratch`: k×k scratch for L⁻¹
+/// - `mat`: input k×k SPD matrix
+/// - `k`: matrix dimension
+fn invert_spd_into(
+    inv: &mut [f64],
+    l_scratch: &mut [f64],
+    l_inv_scratch: &mut [f64],
+    mat: &[f64],
+    k: usize,
+) {
+    // Step 1: Cholesky decomposition — L such that L * L^T = mat
+    l_scratch.fill(0.0);
     for j in 0..k {
         // Diagonal
         let mut sum = 0.0f64;
         for p in 0..j {
-            sum += l[j * k + p] * l[j * k + p];
+            sum += l_scratch[j * k + p] * l_scratch[j * k + p];
         }
         let diag = mat[j * k + j] - sum;
         assert!(
             diag > 0.0,
             "Matrix not positive definite in Cholesky decomposition"
         );
-        l[j * k + j] = diag.sqrt();
+        l_scratch[j * k + j] = diag.sqrt();
 
         // Off-diagonal (lower triangle only)
         for i in (j + 1)..k {
             let mut sum = 0.0f64;
             for p in 0..j {
-                sum += l[i * k + p] * l[j * k + p];
+                sum += l_scratch[i * k + p] * l_scratch[j * k + p];
             }
-            l[i * k + j] = (mat[i * k + j] - sum) / l[j * k + j];
+            l_scratch[i * k + j] = (mat[i * k + j] - sum) / l_scratch[j * k + j];
         }
     }
 
     // Step 2: Invert lower triangular L → L_inv
-    let mut l_inv = vec![0.0f64; k * k];
+    l_inv_scratch.fill(0.0);
     for i in 0..k {
-        l_inv[i * k + i] = 1.0 / l[i * k + i];
+        l_inv_scratch[i * k + i] = 1.0 / l_scratch[i * k + i];
         for j in 0..i {
             let mut sum = 0.0f64;
             for p in j..i {
-                sum += l[i * k + p] * l_inv[p * k + j];
+                sum += l_scratch[i * k + p] * l_inv_scratch[p * k + j];
             }
-            l_inv[i * k + j] = -sum / l[i * k + i];
+            l_inv_scratch[i * k + j] = -sum / l_scratch[i * k + i];
         }
     }
 
     // Step 3: M_inv = L_inv^T * L_inv (only lower triangle, then mirror)
-    let mut inv = vec![0.0f64; k * k];
+    inv.fill(0.0);
     for i in 0..k {
         for j in 0..=i {
             let mut sum = 0.0f64;
             for p in i..k {
-                sum += l_inv[p * k + i] * l_inv[p * k + j];
+                sum += l_inv_scratch[p * k + i] * l_inv_scratch[p * k + j];
             }
             inv[i * k + j] = sum;
             inv[j * k + i] = sum; // symmetric
         }
     }
-
-    inv
 }
 
 /// Compute matrix product C = A @ B where all are k×k row-major.
 /// Uses SIMD f64 dot product for the inner accumulation loop.
 fn matmul(a: &[f64], b: &[f64], k: usize) -> Vec<f64> {
     let mut c = vec![0.0f64; k * k];
-    // Transpose B for sequential access in the inner loop
     let mut bt = vec![0.0f64; k * k];
+    matmul_into(&mut c, &mut bt, a, b, k);
+    c
+}
+
+/// Zero-alloc variant of [`matmul`]: writes into caller-provided buffers.
+///
+/// - `c`: output k×k result matrix
+/// - `bt_scratch`: k×k scratch for transposed B
+/// - `a`, `b`: input k×k matrices
+/// - `k`: matrix dimension
+fn matmul_into(c: &mut [f64], bt_scratch: &mut [f64], a: &[f64], b: &[f64], k: usize) {
+    // Transpose B for sequential access in the inner loop
     for i in 0..k {
         for j in 0..k {
-            bt[j * k + i] = b[i * k + j];
+            bt_scratch[j * k + i] = b[i * k + j];
         }
     }
     for i in 0..k {
         let a_row = &a[i * k..i * k + k];
         for j in 0..k {
-            let b_col = &bt[j * k..j * k + k];
+            let b_col = &bt_scratch[j * k..j * k + k];
             c[i * k + j] = simd_dot_f64(a_row, b_col, k);
         }
     }
-    c
 }
 
 #[cfg(test)]
