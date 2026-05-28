@@ -185,12 +185,8 @@ pub fn cauchy_interlacing_check(eigenvalues: &[Vec<f32>]) -> bool {
 /// Returns eigenvectors sorted by eigenvalue descending.
 fn top_k_eigenvectors(mat: &[f32], n: usize, k: usize) -> Vec<Vec<f32>> {
     // Convert to flat f64 symmetric matrix.
-    let mut a = vec![0.0f64; n * n];
-    for i in 0..n {
-        for j in 0..n {
-            a[i * n + j] = mat[i * n + j] as f64;
-        }
-    }
+    let mut a: Vec<f64> = mat.iter().map(|&x| x as f64).collect();
+    debug_assert_eq!(a.len(), n * n);
 
     // Initialize eigenvector matrix as identity.
     let mut v = vec![0.0f64; n * n];
@@ -226,15 +222,19 @@ fn top_k_eigenvectors(mat: &[f32], n: usize, k: usize) -> Vec<Vec<f32>> {
                 // Compute rotation angle.
                 let app = a[p * n + p];
                 let aqq = a[q * n + q];
+                let diag_diff = app - aqq;
 
-                let theta = if (app - aqq).abs() < 1e-15 {
+                let theta = if diag_diff.abs() < 1e-15 {
                     std::f64::consts::FRAC_PI_4
                 } else {
-                    0.5 * (2.0 * apq / (app - aqq)).atan()
+                    0.5 * (2.0 * apq / diag_diff).atan()
                 };
 
                 let cos_t = theta.cos();
                 let sin_t = theta.sin();
+                let cos2 = cos_t * cos_t;
+                let sin2 = sin_t * sin_t;
+                let sin_cos = sin_t * cos_t;
 
                 // Rotate matrix.
                 for r in 0..n {
@@ -243,14 +243,16 @@ fn top_k_eigenvectors(mat: &[f32], n: usize, k: usize) -> Vec<Vec<f32>> {
                     }
                     let arp = a[r * n + p];
                     let arq = a[r * n + q];
-                    a[r * n + p] = cos_t * arp + sin_t * arq;
-                    a[p * n + r] = a[r * n + p];
-                    a[r * n + q] = -sin_t * arp + cos_t * arq;
-                    a[q * n + r] = a[r * n + q];
+                    let new_rp = cos_t * arp + sin_t * arq;
+                    let new_rq = -sin_t * arp + cos_t * arq;
+                    a[r * n + p] = new_rp;
+                    a[p * n + r] = new_rp;
+                    a[r * n + q] = new_rq;
+                    a[q * n + r] = new_rq;
                 }
 
-                let new_pp = cos_t * cos_t * app + 2.0 * sin_t * cos_t * apq + sin_t * sin_t * aqq;
-                let new_qq = sin_t * sin_t * app - 2.0 * sin_t * cos_t * apq + cos_t * cos_t * aqq;
+                let new_pp = cos2 * app + 2.0 * sin_cos * apq + sin2 * aqq;
+                let new_qq = sin2 * app - 2.0 * sin_cos * apq + cos2 * aqq;
                 a[p * n + p] = new_pp;
                 a[q * n + q] = new_qq;
                 a[p * n + q] = 0.0;
@@ -273,10 +275,15 @@ fn top_k_eigenvectors(mat: &[f32], n: usize, k: usize) -> Vec<Vec<f32>> {
 
     // Return top-k eigenvectors (columns of v).
     let k = k.min(n);
-    indexed[..k]
-        .iter()
-        .map(|&(col, _)| (0..n).map(|row| v[row * n + col] as f32).collect())
-        .collect()
+    let mut result = Vec::with_capacity(k);
+    for &(col, _) in &indexed[..k] {
+        let mut evec = Vec::with_capacity(n);
+        for row in 0..n {
+            evec.push(v[row * n + col] as f32);
+        }
+        result.push(evec);
+    }
+    result
 }
 
 /// Check if a slice is sorted in descending order.
