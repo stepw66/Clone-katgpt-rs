@@ -1669,8 +1669,8 @@ unsafe fn avx2_exp_inplace(x: &mut [f32]) {
 #[inline]
 unsafe fn neon_exp_inplace(x: &mut [f32]) {
     use core::arch::aarch64::{
-        vaddq_f32, vcvtq_s32_f32, vdupq_n_f32, vld1q_f32, vmulq_f32, vrndq_f32, vst1q_f32,
-        vsubq_f32,
+        vaddq_f32, vaddq_s32, vcvtq_s32_f32, vdupq_n_f32, vdupq_n_s32, vld1q_f32, vmaxq_s32,
+        vminq_s32, vmulq_f32, vreinterpretq_f32_s32, vrndq_f32, vshlq_n_s32, vst1q_f32, vsubq_f32,
     };
     unsafe {
         const LN2_HI: f32 = 6.931_457_5e-1;
@@ -1736,23 +1736,15 @@ unsafe fn neon_exp_inplace(x: &mut [f32]) {
                 ),
             );
 
-            // 2^n via scalar bit manipulation (NEON lacks direct float-to-bits cast)
-            let q_arr: [f32; 4] = core::mem::transmute(q);
-            let n_arr: [i32; 4] = core::mem::transmute(vn_i);
-            let mut result = [0.0f32; 4];
-            for j in 0..4 {
-                let n = n_arr[j];
-                if n < -126 {
-                    result[j] = 0.0;
-                } else if n > 127 {
-                    result[j] = f32::INFINITY;
-                } else {
-                    let bits = ((n + 127) as u32) << 23;
-                    let scale = f32::from_bits(bits);
-                    result[j] = scale * q_arr[j];
-                }
-            }
-            let vresult = vld1q_f32(result.as_ptr());
+            // 2^n via branchless NEON bit manipulation
+            // Clamp n to [-126, 127] to avoid IEEE overflow/underflow
+            let v127 = vdupq_n_s32(127);
+            let vneg126 = vdupq_n_s32(-126);
+            let vn_clamped = vmaxq_s32(vminq_s32(vn_i, v127), vneg126);
+            // Build 2^n: (n + 127) << 23 reinterpreted as f32
+            let v_bias = vdupq_n_s32(127);
+            let v_shifted = vreinterpretq_f32_s32(vshlq_n_s32::<23>(vaddq_s32(vn_clamped, v_bias)));
+            let vresult = vmulq_f32(v_shifted, q);
 
             vst1q_f32(x.as_mut_ptr().add(i), vresult);
             i += 4;
@@ -2381,18 +2373,24 @@ pub fn compute_retrieval_margin(
     let mut global_pos_min = f32::INFINITY;
     let mut global_neg_max = f32::NEG_INFINITY;
 
+    // Pre-allocate bitmap once, reuse per query
+    let mut pos_bitmap = vec![false; n_docs];
+
     for i in 0..n_queries {
         let q_row = &queries[i * dim..(i + 1) * dim];
 
-        // Build positive set for this query
+        // Build positive set for this query via bitmap
         let pos_start = i * k;
-        let pos_set: Vec<usize> = (pos_start..pos_start + k)
-            .map(|p| neighborhoods[p])
-            .collect();
+        pos_bitmap.fill(false);
+        for &idx in &neighborhoods[pos_start..pos_start + k] {
+            if idx < n_docs {
+                pos_bitmap[idx] = true;
+            }
+        }
 
         // min positive score
         let mut pos_min = f32::INFINITY;
-        for &j in &pos_set {
+        for &j in &neighborhoods[pos_start..pos_start + k] {
             let d_row = &documents[j * dim..(j + 1) * dim];
             let dot = simd_dot_f32(q_row, d_row, dim);
             pos_min = pos_min.min(dot);
@@ -2401,7 +2399,7 @@ pub fn compute_retrieval_margin(
         // max negative score (all docs not in pos_set)
         let mut neg_max = f32::NEG_INFINITY;
         for j in 0..n_docs {
-            if pos_set.contains(&j) {
+            if pos_bitmap[j] {
                 continue;
             }
             let d_row = &documents[j * dim..(j + 1) * dim];

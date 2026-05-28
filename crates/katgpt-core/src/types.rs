@@ -279,14 +279,12 @@ impl SdpaOutputGate {
         debug_assert!(self.w_gate.len() >= n * dim, "gate weights too small");
 
         // Step 1: Compute gate signal = sigmoid(W_gate @ attn_out)
-        for (i, gate_val) in temp.iter_mut().enumerate().take(n) {
+        for i in 0..n {
             let w_off = i * dim;
-            let dot: f32 = self.w_gate[w_off..w_off + dim]
-                .iter()
-                .zip(attn_out.iter())
-                .map(|(w, a)| w * a)
-                .sum();
-            *gate_val = 1.0 / (1.0 + (-dot).exp()); // sigmoid
+            let dot = crate::simd::simd_dot_f32(&self.w_gate[w_off..w_off + dim], attn_out, dim);
+            unsafe {
+                *temp.get_unchecked_mut(i) = 1.0 / (1.0 + (-dot).exp());
+            }
         }
 
         // Step 2: Apply gate elementwise
@@ -1411,10 +1409,13 @@ pub fn gegelu_tanh(hidden: &mut [f32], gate: &[f32], up: &[f32]) {
 
     let mut i = 0;
     while i + CHUNK <= hidden.len() {
-        // buf[j] = 2 * inner[j] for tanh approximation
+        // buf[j] = 2 * sqrt(2/π) * (g + 0.044715 * g³)
+        // Use SIMD for the 0.044715 scale, then finish with scalar multiply-add
+        buf[..CHUNK].copy_from_slice(&gate[i..i + CHUNK]);
+        crate::simd::simd_scale_inplace(&mut buf, 0.044715);
         for j in 0..CHUNK {
             let g = gate[i + j];
-            buf[j] = 2.0 * sqrt_2_over_pi * (g + 0.044715 * g * g * g);
+            buf[j] = 2.0 * sqrt_2_over_pi * (g + buf[j] * g * g);
         }
         // buf[j] = exp(2*inner[j]) via SIMD
         crate::simd::simd_exp_inplace(&mut buf);
