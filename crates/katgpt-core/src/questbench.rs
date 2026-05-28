@@ -411,21 +411,22 @@ pub fn find_sufficient_set(
     max_search_depth: usize,
 ) -> Vec<usize> {
     let mut sufficient = Vec::new();
-    let candidate_tokens: Vec<usize> = (0..vocab_size)
-        .filter(|&tok| pruner.is_valid(depth, tok, placed_tokens))
-        .collect();
 
     // Pre-compute extension counts for ALL candidates once (O(n × sample_size))
     // instead of per-comparison during sort (O(n log n × sample_size))
+    // Single pass: filter valid tokens AND compute extension counts, avoiding
+    // an intermediate Vec<usize> allocation.
     let mut ext_buf = placed_tokens.to_vec();
-    let mut counts: Vec<(usize, usize)> = candidate_tokens
-        .into_iter()
-        .map(|tok| {
+    let mut counts: Vec<(usize, usize)> = (0..vocab_size)
+        .filter_map(|tok| {
+            if !pruner.is_valid(depth, tok, placed_tokens) {
+                return None;
+            }
             ext_buf.clear();
             ext_buf.extend_from_slice(placed_tokens);
             ext_buf.push(tok);
-            let count = count_valid_extensions_with(pruner, depth + 1, &ext_buf);
-            (tok, count)
+            let count = count_valid_extensions_with(pruner, depth + 1, &ext_buf, vocab_size);
+            Some((tok, count))
         })
         .collect();
 
@@ -441,35 +442,26 @@ pub fn find_sufficient_set(
         score_relevance_into(pruner, depth + 1, &ext_buf, vocab_size, &mut relevance_buf);
         let score = underspecification_score(&relevance_buf);
         if score < 0.5 {
-            sufficient.push(*tok);
+            sufficient.push(tok);
             break; // found 1-sufficient
         }
     }
     sufficient
 }
 
-/// Count how many valid extensions exist at next depth after placing this token.
-fn count_valid_extensions(
-    pruner: &dyn crate::traits::ConstraintPruner,
-    depth: usize,
-    last_token: usize,
-    placed_tokens: &[usize],
-) -> usize {
-    let mut extended = placed_tokens.to_vec();
-    extended.push(last_token);
-    count_valid_extensions_with(pruner, depth, &extended)
-}
-
 /// Count valid extensions using a pre-built extended token list (avoids allocation).
+///
+/// Caps iteration at `min(256, vocab_size)` to avoid checking phantom tokens
+/// when the vocabulary is small.
 fn count_valid_extensions_with(
     pruner: &dyn crate::traits::ConstraintPruner,
     depth: usize,
     extended: &[usize],
+    vocab_size: usize,
 ) -> usize {
-    // Count valid tokens at this depth (sampling up to 256 for efficiency)
-    let sample_size = 256;
+    let limit = 256.min(vocab_size);
     let mut count = 0;
-    for tok in 0..sample_size {
+    for tok in 0..limit {
         if pruner.is_valid(depth, tok, extended) {
             count += 1;
         }
@@ -672,9 +664,9 @@ pub fn generate_synthetic_csps(count_per_domain: usize) -> Vec<SyntheticCsp> {
             })
             .collect();
         let adjacent_bm = to_bitmap(&adjacent, vocab_size);
-        // Pre-fill narrowing: default is full-valid, then set key entry to adjacent
-        let mut narrowing: Vec<Vec<bool>> =
-            (0..vocab_size).map(|_| vec![true; vocab_size]).collect();
+        // Only allocate the key-specific narrowing bitmap; non-key entries use empty
+        // Vec which falls through to valid_at_depth (all-true) in NarrowingPruner.
+        let mut narrowing: Vec<Vec<bool>> = vec![vec![]; vocab_size];
         narrowing[key] = adjacent_bm;
         let pruner = NarrowingPruner {
             _vocab_size: vocab_size,
@@ -733,9 +725,9 @@ pub fn generate_synthetic_csps(count_per_domain: usize) -> Vec<SyntheticCsp> {
         // Placing key → only partner survives at depth 1 (XOR resolution)
         let narrow_next = vec![partner];
         let narrow_next_bm = to_bitmap(&narrow_next, vocab_size);
-        // Pre-fill narrowing: default is full-valid, then set key entry to narrow
-        let mut narrowing: Vec<Vec<bool>> =
-            (0..vocab_size).map(|_| vec![true; vocab_size]).collect();
+        // Only allocate the key-specific narrowing bitmap; non-key entries use empty
+        // Vec which falls through to valid_at_depth (all-true) in NarrowingPruner.
+        let mut narrowing: Vec<Vec<bool>> = vec![vec![]; vocab_size];
         narrowing[key] = narrow_next_bm;
         let pruner = NarrowingPruner {
             _vocab_size: vocab_size,
