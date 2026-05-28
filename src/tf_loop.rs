@@ -19,6 +19,7 @@
 //!
 //! Run tests: `cargo test --features tf_loop`
 
+use crate::simd::simd_fused_decay_write;
 use crate::transformer::MultiLayerKVCache;
 use katgpt_core::types::Config;
 use katgpt_core::types::kv_dim;
@@ -59,9 +60,9 @@ pub fn sub_step_damped_euler(x: &mut [f32], y: &[f32], k: usize) {
         return;
     }
     let inv_k = 1.0f32 / k as f32;
-    for (xi, yi) in x.iter_mut().zip(y.iter()) {
-        *xi += inv_k * (*yi - *xi);
-    }
+    let n = x.len();
+    // x[i] = (1-inv_k)*x[i] + inv_k*y[i]
+    simd_fused_decay_write(&mut x[..n], 1.0 - inv_k, &y[..n], inv_k);
 }
 
 /// Blends `x` with an anchor state in-place.
@@ -81,10 +82,9 @@ pub fn anchor_blend(x: &mut [f32], anchor: &[f32], beta: f32) {
         anchor.len(),
         "x and anchor must have the same length"
     );
-    let one_minus_beta = 1.0 - beta;
-    for (xi, ai) in x.iter_mut().zip(anchor.iter()) {
-        *xi = beta * ai + one_minus_beta * *xi;
-    }
+    let n = x.len();
+    // x[i] = (1-beta)*x[i] + beta*anchor[i]
+    simd_fused_decay_write(&mut x[..n], 1.0 - beta, &anchor[..n], beta);
 }
 
 /// Records per-layer KV cache lengths for later restore.

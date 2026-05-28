@@ -740,6 +740,29 @@ impl PeiraCovariance {
         (p_star, q_star)
     }
 
+    /// Compute predictor matrices, reusing internal scratch buffer (zero-alloc for N).
+    ///
+    /// Same as [`predictor()`] but avoids cloning N by writing N + λI into the
+    /// `pm` scratch buffer, which is otherwise only used in [`peira_aux_loss`].
+    pub fn predictor_with_scratch(&mut self) -> (Vec<f64>, Vec<f64>) {
+        let k = self.config.dim;
+        let lambda = self.config.lambda;
+
+        // Build N + λI in scratch buffer (avoids clone)
+        self.pm[..k * k].copy_from_slice(&self.n);
+        for i in 0..k {
+            self.pm[i * k + i] += lambda;
+        }
+
+        // Invert N + λI
+        let q_star = invert_spd(&self.pm[..k * k], k);
+
+        // P* = Σ @ Q*
+        let p_star = matmul(&self.sigma, &q_star, k);
+
+        (p_star, q_star)
+    }
+
     /// Get a reference to the current Σ matrix (row-major).
     pub fn sigma(&self) -> &[f64] {
         &self.sigma

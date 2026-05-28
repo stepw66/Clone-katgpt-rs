@@ -325,37 +325,56 @@ pub fn tiled_attention_batched(
         return;
     }
 
-    // Use par_chunks_mut to get disjoint &mut slices — avoids Fn mut borrow issue.
-    // Reuse a grow-only scores scratch buffer per OS thread via thread_local.
     let scores_buf_size = seq_len * seq_len;
-    thread_local! {
-        static SCORES_BUF: RefCell<Vec<f32>> = RefCell::new(Vec::new());
-    }
 
-    output
-        .par_chunks_mut(head_size)
-        .enumerate()
-        .for_each(|(idx, out_chunk)| {
+    if total <= 2 || seq_len * head_dim < 1024 {
+        // Sequential fallback for tiny workloads — avoids Rayon scheduling overhead
+        let mut scores_buf = vec![0.0f32; scores_buf_size];
+        for idx in 0..total {
             let offset = idx * head_size;
-            SCORES_BUF.with(|buf| {
-                let mut buf = buf.borrow_mut();
-                if buf.len() < scores_buf_size {
-                    buf.resize(scores_buf_size, 0.0);
-                } else {
-                    buf[..scores_buf_size].fill(0.0);
-                }
-                tiled_attention_forward_with_scores(
-                    &q[offset..offset + head_size],
-                    &k[offset..offset + head_size],
-                    &v[offset..offset + head_size],
-                    out_chunk,
-                    seq_len,
-                    head_dim,
-                    scale,
-                    Some(&mut buf[..scores_buf_size]),
-                );
+            tiled_attention_forward_with_scores(
+                &q[offset..offset + head_size],
+                &k[offset..offset + head_size],
+                &v[offset..offset + head_size],
+                &mut output[offset..offset + head_size],
+                seq_len,
+                head_dim,
+                scale,
+                Some(&mut scores_buf[..scores_buf_size]),
+            );
+        }
+    } else {
+        // Parallel for larger workloads — Rayon overhead amortized
+        // Reuse a grow-only scores scratch buffer per OS thread via thread_local.
+        thread_local! {
+            static SCORES_BUF: RefCell<Vec<f32>> = RefCell::new(Vec::new());
+        }
+
+        output
+            .par_chunks_mut(head_size)
+            .enumerate()
+            .for_each(|(idx, out_chunk)| {
+                let offset = idx * head_size;
+                SCORES_BUF.with(|buf| {
+                    let mut buf = buf.borrow_mut();
+                    if buf.len() < scores_buf_size {
+                        buf.resize(scores_buf_size, 0.0);
+                    } else {
+                        buf[..scores_buf_size].fill(0.0);
+                    }
+                    tiled_attention_forward_with_scores(
+                        &q[offset..offset + head_size],
+                        &k[offset..offset + head_size],
+                        &v[offset..offset + head_size],
+                        out_chunk,
+                        seq_len,
+                        head_dim,
+                        scale,
+                        Some(&mut buf[..scores_buf_size]),
+                    );
+                });
             });
-        });
+    }
 }
 
 // ── Unit Tests ────────────────────────────────────────────────

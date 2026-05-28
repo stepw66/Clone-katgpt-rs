@@ -543,6 +543,7 @@ impl Default for AlphaSchedule {
 
 /// Behavioral cloning target source for BC regularization (PPO variant).
 #[cfg(feature = "dual_leo")]
+#[repr(u8)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum BcTarget {
     /// Follow LEO's greedy (argmax) action.

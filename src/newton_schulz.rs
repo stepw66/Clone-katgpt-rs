@@ -185,6 +185,202 @@ pub fn muon_update(
     }
 }
 
+// ── Zero-alloc API ───────────────────────────────────────────────
+
+/// Pre-allocated scratch buffers for Newton-Schulz, reused across calls.
+pub struct NewtonSchulzScratch {
+    x: Vec<f32>,
+    a_mat: Vec<f32>,
+    b_mat: Vec<f32>,
+    bx: Vec<f32>,
+    at: Vec<f32>,
+    xt_buf: Vec<f32>,
+    /// Also used for non-square transpose temporaries
+    gt_buf: Vec<f32>,
+    ort_buf: Vec<f32>,
+}
+
+impl NewtonSchulzScratch {
+    /// Create scratch space sized for matrices up to `max_m × max_n`.
+    pub fn new(max_m: usize, max_n: usize) -> Self {
+        let mn = max_m * max_n;
+        let mm = max_m * max_m;
+        Self {
+            x: vec![0.0; mn],
+            a_mat: vec![0.0; mm],
+            b_mat: vec![0.0; mm],
+            bx: vec![0.0; mn],
+            at: vec![0.0; mm],
+            xt_buf: vec![0.0; mn],
+            gt_buf: vec![0.0; mn],
+            ort_buf: vec![0.0; mn],
+        }
+    }
+
+    /// Ensure internal buffers are large enough for `m × n`.
+    pub fn ensure_capacity(&mut self, m: usize, n: usize) {
+        let mn = m * n;
+        let mm = m * m;
+        if self.x.len() < mn {
+            self.x.resize(mn, 0.0);
+        }
+        if self.a_mat.len() < mm {
+            self.a_mat.resize(mm, 0.0);
+        }
+        if self.b_mat.len() < mm {
+            self.b_mat.resize(mm, 0.0);
+        }
+        if self.bx.len() < mn {
+            self.bx.resize(mn, 0.0);
+        }
+        if self.at.len() < mm {
+            self.at.resize(mm, 0.0);
+        }
+        if self.xt_buf.len() < mn {
+            self.xt_buf.resize(mn, 0.0);
+        }
+        if self.gt_buf.len() < mn {
+            self.gt_buf.resize(mn, 0.0);
+        }
+        if self.ort_buf.len() < mn {
+            self.ort_buf.resize(mn, 0.0);
+        }
+    }
+}
+
+/// Newton-Schulz with pre-allocated scratch buffers (zero-alloc after first call).
+#[cfg(feature = "newton_schulz")]
+pub fn newton_schulz5_into(
+    g: &[f32],
+    rows: usize,
+    cols: usize,
+    out: &mut [f32],
+    scratch: &mut NewtonSchulzScratch,
+) {
+    assert_eq!(g.len(), rows * cols, "input matrix size mismatch");
+    assert_eq!(out.len(), rows * cols, "output buffer size mismatch");
+
+    if rows > cols {
+        let cr = cols * rows;
+        scratch.ensure_capacity(cols, rows);
+        transpose(g, rows, cols, &mut scratch.gt_buf[..cr]);
+        {
+            // Borrow scratch fields separately to avoid double-mut borrow.
+            let NewtonSchulzScratch {
+                x,
+                a_mat,
+                b_mat,
+                bx,
+                at,
+                xt_buf,
+                gt_buf,
+                ort_buf,
+            } = scratch;
+            newton_schulz5_square_into_raw(
+                &gt_buf[..cr],
+                cols,
+                rows,
+                &mut ort_buf[..cr],
+                x,
+                a_mat,
+                b_mat,
+                bx,
+                at,
+                xt_buf,
+            );
+        }
+        transpose(&scratch.ort_buf[..cr], cols, rows, out);
+        return;
+    }
+
+    scratch.ensure_capacity(rows, cols);
+    newton_schulz5_square_into(g, rows, cols, out, scratch);
+}
+
+/// Core Newton-Schulz with scratch reuse.
+fn newton_schulz5_square_into(
+    g: &[f32],
+    m: usize,
+    n: usize,
+    out: &mut [f32],
+    scratch: &mut NewtonSchulzScratch,
+) {
+    let mn = m * n;
+    let mm = m * m;
+    let NewtonSchulzScratch {
+        x,
+        a_mat,
+        b_mat,
+        bx,
+        at,
+        xt_buf,
+        ..
+    } = scratch;
+    newton_schulz5_square_into_raw(
+        g,
+        m,
+        n,
+        out,
+        &mut x[..mn],
+        &mut a_mat[..mm],
+        &mut b_mat[..mm],
+        &mut bx[..mn],
+        &mut at[..mm],
+        &mut xt_buf[..mn],
+    );
+}
+
+/// Raw implementation operating on individual scratch slices.
+fn newton_schulz5_square_into_raw(
+    g: &[f32],
+    m: usize,
+    n: usize,
+    out: &mut [f32],
+    x: &mut [f32],
+    a_mat: &mut [f32],
+    b_mat: &mut [f32],
+    bx: &mut [f32],
+    at: &mut [f32],
+    xt_buf: &mut [f32],
+) {
+    let mn = m * n;
+    let mm = m * m;
+
+    let norm = frobenius_norm(g);
+    if norm < 1e-12 {
+        out.fill(0.0);
+        return;
+    }
+    let inv_norm = 1.0 / norm;
+    for (i, &v) in g.iter().enumerate() {
+        x[i] = v * inv_norm;
+    }
+
+    let a_mat = &mut a_mat[..mm];
+    let b_mat = &mut b_mat[..mm];
+    let bx = &mut bx[..mn];
+    let at = &mut at[..mm];
+    let xt_buf = &mut xt_buf[..mn];
+
+    for _ in 0..ITERS {
+        matmul_xtx(x, m, n, a_mat);
+        transpose(a_mat, m, m, at);
+        for i in 0..m {
+            let a_row = &a_mat[i * m..(i + 1) * m];
+            for j in 0..m {
+                let a2_ij = crate::simd::simd_dot_f32(a_row, &at[j * m..(j + 1) * m], m);
+                b_mat[i * m + j] = B * a_mat[i * m + j] + C * a2_ij;
+            }
+        }
+        matmul_ax(b_mat, x, m, n, bx, xt_buf);
+        for i in 0..mn {
+            x[i] = A * x[i] + bx[i];
+        }
+    }
+
+    out.copy_from_slice(&x[..mn]);
+}
+
 // ── Tests ────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -311,6 +507,49 @@ mod tests {
             off_diag < 0.5,
             "Identity output should have small off-diagonal, max = {off_diag}"
         );
+    }
+
+    #[test]
+    fn test_newton_schulz5_into_matches_original() {
+        // The zero-alloc API should produce identical results to the original.
+        let g = seeded_random_matrix(42, 8, 8);
+        let mut out_alloc = vec![0.0f32; 64];
+        let mut out_scratch = vec![0.0f32; 64];
+
+        newton_schulz5(&g, 8, 8, &mut out_alloc);
+
+        let mut scratch = NewtonSchulzScratch::new(8, 8);
+        newton_schulz5_into(&g, 8, 8, &mut out_scratch, &mut scratch);
+
+        for i in 0..64 {
+            assert!(
+                (out_alloc[i] - out_scratch[i]).abs() < 1e-6,
+                "Mismatch at index {i}: alloc={}, scratch={}",
+                out_alloc[i],
+                out_scratch[i]
+            );
+        }
+    }
+
+    #[test]
+    fn test_newton_schulz5_into_nonsquare() {
+        let g = seeded_random_matrix(99, 12, 6);
+        let mut out_alloc = vec![0.0f32; 72];
+        let mut out_scratch = vec![0.0f32; 72];
+
+        newton_schulz5(&g, 12, 6, &mut out_alloc);
+
+        let mut scratch = NewtonSchulzScratch::new(12, 6);
+        newton_schulz5_into(&g, 12, 6, &mut out_scratch, &mut scratch);
+
+        for i in 0..72 {
+            assert!(
+                (out_alloc[i] - out_scratch[i]).abs() < 1e-6,
+                "Mismatch at index {i}: alloc={}, scratch={}",
+                out_alloc[i],
+                out_scratch[i]
+            );
+        }
     }
 
     #[test]

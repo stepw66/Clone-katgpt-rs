@@ -197,16 +197,13 @@ impl MultiLayerKVCache {
     }
 
     /// Restore KV cache from a snapshot.
-    /// Writes snapshot data back and zeros out positions [snapshot.pos..block_size).
+    /// Writes snapshot data back. No zeroing needed — each position is written before being read.
     pub fn restore(&mut self, snapshot: &KVSnapshot, config: &Config) {
         let kd = types::kv_dim(config);
         for (layer, snap_layer) in self.layers.iter_mut().zip(snapshot.layers.iter()) {
             let end = snapshot.pos * kd;
             layer.key[..end].copy_from_slice(&snap_layer.key);
             layer.value[..end].copy_from_slice(&snap_layer.value);
-            // Zero out positions [snapshot.pos..block_size) to prevent stale data
-            layer.key[end..].fill(0.0);
-            layer.value[end..].fill(0.0);
         }
     }
 }
@@ -297,7 +294,7 @@ pub struct ForwardContext {
     paged_flat_key: Vec<f32>,   // [block_size * kv_dim]
     paged_flat_value: Vec<f32>, // [block_size * kv_dim]
     // Raven: pre-allocated query buffer for per-head slot attention
-    raven_query_buf: Vec<f32>, // [kv_dim]
+    raven_query_buf: Vec<f32>, // [max(kv_dim, 64)]
     // MTP Drafter: pre-allocated projection buffer [n_embd] for target activation conditioning (Plan 055)
     pub mtp_context_buf: Vec<f32>,
     // Quantized KV cache incremental dequant: tracks last dequantized position per layer (Plan 068).
@@ -381,7 +378,7 @@ impl ForwardContext {
             active_values: vec![0.0; config.mlp_hidden],
             paged_flat_key: vec![0.0; block_kv],
             paged_flat_value: vec![0.0; block_kv],
-            raven_query_buf: vec![0.0; kvd],
+            raven_query_buf: vec![0.0; kvd.max(64)],
             mtp_context_buf: vec![0.0; config.n_embd],
             dequant_pos: vec![0; config.n_layer],
             #[cfg(feature = "delta_routing")]
@@ -916,9 +913,14 @@ pub fn forward_looped<'a>(
         if tau > 0 {
             let gate_offset = tau * n;
             if gate_offset + n <= residual_gate.gates.len() {
-                for d in 0..n {
-                    ctx.x[d] += residual_gate.gates[gate_offset + d] * ctx.prev_h[d];
-                }
+                // ctx.x += gates ⊙ prev_h  (element-wise fused multiply-accumulate)
+                ctx.hidden[..n].copy_from_slice(&ctx.prev_h[..n]);
+                crate::simd::simd_scale_mul_inplace(
+                    &mut ctx.hidden[..n],
+                    &residual_gate.gates[gate_offset..gate_offset + n],
+                    1.0,
+                );
+                crate::simd::simd_add_inplace(&mut ctx.x[..n], &ctx.hidden[..n]);
             }
         }
     }
@@ -3370,6 +3372,12 @@ pub struct PagedKVCache {
     deficits: Vec<usize>,
     /// Reusable scratch: per-layer new page indices (cleared + refilled each call).
     new_pages: Vec<Vec<usize>>,
+    /// Reusable scratch: flat buffer for all newly allocated pages in `ensure_pages()`.
+    all_new_buf: Vec<usize>,
+    /// Reusable scratch: set of page indices referenced by other sequences in `rollback()`.
+    rollback_set: std::collections::HashSet<usize>,
+    /// Reusable scratch: drained page indices awaiting recycle in `rollback()`.
+    rollback_removed: Vec<usize>,
 }
 
 impl PagedKVCache {
@@ -3395,6 +3403,9 @@ impl PagedKVCache {
             total_pages: initial_pages_per_layer * config.n_layer,
             deficits: Vec::with_capacity(config.n_layer),
             new_pages: vec![Vec::new(); config.n_layer],
+            all_new_buf: Vec::new(),
+            rollback_set: std::collections::HashSet::new(),
+            rollback_removed: Vec::new(),
         }
     }
 
@@ -3432,21 +3443,23 @@ impl PagedKVCache {
                 .push(pages_needed.saturating_sub(lt[seq_idx].len()));
         }
 
-        // Allocate all pages upfront
+        // Allocate all pages upfront (reuse scratch buffer)
         let total_deficit: usize = self.deficits.iter().sum();
-        let mut all_new: Vec<usize> = Vec::with_capacity(total_deficit);
-        for _ in 0..total_deficit {
-            all_new.push(self.alloc_page());
-        }
+        let pages: Vec<_> = (0..total_deficit).map(|_| self.alloc_page()).collect();
+        let mut buf = std::mem::take(&mut self.all_new_buf);
+        buf.clear();
+        buf.reserve(total_deficit);
+        buf.extend(pages);
 
         // Partition into per-layer lists and assign
         self.new_pages.resize_with(self.deficits.len(), Vec::new);
         let mut offset = 0;
         for (i, &deficit) in self.deficits.iter().enumerate() {
             self.new_pages[i].clear();
-            self.new_pages[i].extend_from_slice(&all_new[offset..offset + deficit]);
+            self.new_pages[i].extend_from_slice(&buf[offset..offset + deficit]);
             offset += deficit;
         }
+        self.all_new_buf = buf;
 
         // Assign new pages to each layer's page table
         for (layer_tables, pages) in self.layer_page_tables.iter_mut().zip(self.new_pages.iter()) {
@@ -3518,12 +3531,12 @@ impl PagedKVCache {
         // Build set of page indices referenced by all OTHER sequences across all layers.
         // Since page indices are globally unique (allocated from a single pool), a simple
         // HashSet<usize> is sufficient — no need for (layer, page) tuples.
-        let mut referenced_by_others = std::collections::HashSet::new();
+        self.rollback_set.clear();
         for layer_tables in self.layer_page_tables.iter() {
             for (seq, table) in layer_tables.iter().enumerate() {
                 if seq != seq_idx {
                     for &pidx in table {
-                        referenced_by_others.insert(pidx);
+                        self.rollback_set.insert(pidx);
                     }
                 }
             }
@@ -3535,9 +3548,10 @@ impl PagedKVCache {
                 continue;
             }
             let table = &mut layer_tables[seq_idx];
-            let removed: Vec<usize> = table.drain(keep_count..).collect();
-            for pidx in removed {
-                if !referenced_by_others.contains(&pidx) {
+            self.rollback_removed.clear();
+            self.rollback_removed.extend(table.drain(keep_count..));
+            for pidx in self.rollback_removed.drain(..) {
+                if !self.rollback_set.contains(&pidx) {
                     self.free_pages.push(pidx);
                 }
             }
@@ -3876,13 +3890,12 @@ pub fn forward_raven<'a>(
         let scale = ctx.attn_scale;
         ctx.attn_out[..n].fill(0.0);
 
+        ctx.raven_query_buf[..kvd].fill(0.0);
         for h in 0..config.n_head {
             let q_off = h * hd;
             // Each head reads from the slot memory using its query slice
             let head_query = &ctx.q[q_off..q_off + hd];
             // Pad/reshape query to kv_dim for slot attention (reuse pre-allocated buffer)
-            ctx.raven_query_buf.resize(kvd, 0.0);
-            ctx.raven_query_buf.fill(0.0);
             let kv_group = ctx.kv_group_lut[h];
             for (d, &hq) in head_query.iter().enumerate() {
                 ctx.raven_query_buf[kv_group * hd + d] = hq * scale;
@@ -4741,7 +4754,7 @@ mod tests {
     }
 
     #[test]
-    fn test_restore_zeros_stale_data() {
+    fn test_restore_preserves_snapshot_data() {
         let config = Config::micro();
         let mut rng = Rng::new(42);
         let weights = TransformerWeights::new(&config, &mut rng);
@@ -4759,15 +4772,19 @@ mod tests {
         // Restore
         cache.restore(&snapshot, &config);
 
-        // Verify positions after pos=3 are zeroed
+        // Verify snapshot data is correctly restored (Issue 097: no zeroing beyond snapshot)
         let kd = types::kv_dim(&config);
-        for layer in &cache.layers {
-            for val in &layer.key[3 * kd..] {
-                assert_eq!(*val, 0.0, "stale key data should be zeroed");
-            }
-            for val in &layer.value[3 * kd..] {
-                assert_eq!(*val, 0.0, "stale value data should be zeroed");
-            }
+        for (layer, snap_layer) in cache.layers.iter().zip(snapshot.layers.iter()) {
+            assert_eq!(
+                &layer.key[..3 * kd],
+                &snap_layer.key,
+                "key snapshot data mismatch"
+            );
+            assert_eq!(
+                &layer.value[..3 * kd],
+                &snap_layer.value,
+                "value snapshot data mismatch"
+            );
         }
     }
 

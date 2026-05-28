@@ -592,34 +592,47 @@ pub enum CspDomain {
 // The idea: at depth D, many tokens are valid. At depth D+1, placing
 // a specific "sufficient" token narrows the space dramatically.
 
+/// Convert a list of token indices to a boolean bitmap.
+fn to_bitmap(indices: &[usize], vocab_size: usize) -> Vec<bool> {
+    let mut bm = vec![false; vocab_size];
+    for &idx in indices {
+        if idx < vocab_size {
+            bm[idx] = true;
+        }
+    }
+    bm
+}
+
 /// Pruner where placing a specific "key" token at depth D reduces
 /// valid tokens at depth D+1 to just 1 (fully specified).
 struct NarrowingPruner {
     /// Total vocabulary size.
     _vocab_size: usize,
-    /// Valid tokens at the target depth (before narrowing).
-    valid_at_depth: Vec<usize>,
-    /// Map: token placed at depth D → valid tokens at depth D+1.
-    /// Indexed by token value; empty Vec means "use valid_at_depth".
-    /// The "sufficient" token maps to a singleton, others map to many.
-    narrowing: Vec<Vec<usize>>,
+    /// Bitmap: valid_at_depth[token] = true if valid at target depth.
+    valid_at_depth: Vec<bool>,
+    /// Bitmap per parent token: narrowing[parent][token] = true if valid at next depth.
+    /// Empty Vec means "use valid_at_depth" (no narrowing).
+    narrowing: Vec<Vec<bool>>,
 }
 
 impl crate::traits::ConstraintPruner for NarrowingPruner {
     fn is_valid(&self, depth: usize, token_idx: usize, parent_tokens: &[usize]) -> bool {
         if depth == 0 {
-            return self.valid_at_depth.contains(&token_idx);
+            return self.valid_at_depth.get(token_idx).copied().unwrap_or(false);
         }
         // depth > 0: validity depends on what was placed at depth-1
         let last = match parent_tokens.last() {
             Some(&t) => t,
-            None => return self.valid_at_depth.contains(&token_idx),
+            None => return self.valid_at_depth.get(token_idx).copied().unwrap_or(false),
         };
         if last < self.narrowing.len() && !self.narrowing[last].is_empty() {
-            return self.narrowing[last].contains(&token_idx);
+            return self.narrowing[last]
+                .get(token_idx)
+                .copied()
+                .unwrap_or(false);
         }
         // Default: allow if in valid_at_depth
-        self.valid_at_depth.contains(&token_idx)
+        self.valid_at_depth.get(token_idx).copied().unwrap_or(false)
     }
 }
 
@@ -639,7 +652,7 @@ pub fn generate_synthetic_csps(count_per_domain: usize) -> Vec<SyntheticCsp> {
         let vocab_size = 16;
         let key = i % vocab_size;
         // At depth 0: ALL cells are valid candidates (including key)
-        let valid_at_depth: Vec<usize> = (0..vocab_size).collect();
+        let valid_at_depth = vec![true; vocab_size];
         // Placing the key cell narrows to just adjacent cells at depth 1
         let row = key / 4;
         let col = key % 4;
@@ -652,13 +665,14 @@ pub fn generate_synthetic_csps(count_per_domain: usize) -> Vec<SyntheticCsp> {
                 dist == 1
             })
             .collect();
+        let adjacent_bm = to_bitmap(&adjacent, vocab_size);
         // All other tokens lead to full valid set (no narrowing)
-        let default_next: Vec<usize> = (0..vocab_size).collect();
+        let default_next_bm = vec![true; vocab_size];
         let mut narrowing = vec![Vec::new(); vocab_size];
-        narrowing[key] = adjacent;
-        for v in &valid_at_depth {
-            if *v != key {
-                narrowing[*v] = default_next.clone();
+        narrowing[key] = adjacent_bm;
+        for v in 0..vocab_size {
+            if v != key {
+                narrowing[v] = default_next_bm.clone();
             }
         }
         let pruner = NarrowingPruner {
@@ -680,17 +694,19 @@ pub fn generate_synthetic_csps(count_per_domain: usize) -> Vec<SyntheticCsp> {
     for i in 0..count_per_domain {
         let vocab_size = 12; // smaller board for tighter constraints
         let key = i % vocab_size;
-        let valid_at_depth: Vec<usize> = (0..vocab_size).collect();
+        let valid_at_depth = vec![true; vocab_size];
         // Placing the key stone at depth 0 leaves only 1 valid position at depth 1
         // (simulates a capture that fills all but one liberty)
         let narrow_next = vec![(key + 1) % vocab_size];
+        let narrow_next_bm = to_bitmap(&narrow_next, vocab_size);
         // Other placements leave 4-5 valid positions
         let wide_next: Vec<usize> = (0..vocab_size).filter(|&c| c % 3 == 0).collect();
+        let wide_next_bm = to_bitmap(&wide_next, vocab_size);
         let mut narrowing = vec![Vec::new(); vocab_size];
-        narrowing[key] = narrow_next;
-        for v in &valid_at_depth {
-            if *v != key {
-                narrowing[*v] = wide_next.clone();
+        narrowing[key] = narrow_next_bm;
+        for v in 0..vocab_size {
+            if v != key {
+                narrowing[v] = wide_next_bm.clone();
             }
         }
         let pruner = NarrowingPruner {
@@ -716,16 +732,17 @@ pub fn generate_synthetic_csps(count_per_domain: usize) -> Vec<SyntheticCsp> {
         let key = i % vocab_size;
         let partner = if key % 2 == 0 { key + 1 } else { key - 1 };
         // At depth 0: all propositions valid
-        let valid_at_depth: Vec<usize> = (0..vocab_size).collect();
+        let valid_at_depth = vec![true; vocab_size];
         // Placing key → only partner survives at depth 1 (XOR resolution)
         let narrow_next = vec![partner];
+        let narrow_next_bm = to_bitmap(&narrow_next, vocab_size);
         // Placing any other → all still valid
-        let wide_next: Vec<usize> = (0..vocab_size).collect();
+        let wide_next_bm = vec![true; vocab_size];
         let mut narrowing = vec![Vec::new(); vocab_size];
-        narrowing[key] = narrow_next;
-        for v in &valid_at_depth {
-            if *v != key {
-                narrowing[*v] = wide_next.clone();
+        narrowing[key] = narrow_next_bm;
+        for v in 0..vocab_size {
+            if v != key {
+                narrowing[v] = wide_next_bm.clone();
             }
         }
         let pruner = NarrowingPruner {
