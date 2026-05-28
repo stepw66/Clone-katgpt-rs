@@ -4,7 +4,7 @@
 > **Paper:** [arXiv:2605.26099](https://arxiv.org/abs/2605.26099) — Lee et al., May 2026
 > **Feature Gate:** `sleep_consolidation` (depends on `lt2_looped`, `gdn2_attention`)
 > **Priority:** MEDIUM — Infrastructure improvement, not blocking any GOAT pillar
-> **Status:** ✅ Infrastructure complete — pending GOAT proof (T10–T13)
+> **Status:** ✅ Complete — all 14 tasks done
 
 ## Summary
 
@@ -25,10 +25,10 @@ Key insight: Sleep moves LT2's wake-time looping to eviction-time consolidation.
 - [x] T7: Implement `eviction::HardEvict` — clear entire KV cache after sleep
 - [x] T8: Implement `eviction::SlidingWindow` — retain last L-1 tokens, evict older
 - [x] T9: Integrate sleep hook into LT2 forward pass (Plan 108) at eviction boundary
-- [ ] T10: GOAT proof — sleep (N=2,4) vs no-sleep on multi-hop reasoning (synthetic graph task)
-- [ ] T11: GOAT proof — sleep + TurboQuant hybrid vs TurboQuant-only on long-context task
-- [ ] T12: GOAT proof — sleep on game context (long Bomber session >2000 tokens, long NPC dialog)
-- [ ] T13: Benchmark — sleep overhead (N=2,4,6) vs no-sleep vs LT2 wake-time (tok/s, µs/step)
+- [x] T10: GOAT proof — sleep (N=2,4) vs no-sleep on multi-hop reasoning (synthetic graph task)
+- [x] T11: GOAT proof — sleep + TurboQuant hybrid vs TurboQuant-only on long-context task
+- [x] T12: GOAT proof — sleep on game context (long Bomber session >2000 tokens, long NPC dialog)
+- [x] T13: Benchmark — sleep overhead (N=2,4,6) vs no-sleep vs LT2 wake-time (tok/s, µs/step)
 - [x] T14: Update README + .docs with sleep consolidation section
 
 ---

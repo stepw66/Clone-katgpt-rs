@@ -13,6 +13,7 @@ use super::nll::average_nll;
 
 /// Regime classification based on NLL vs entropy rate.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
 pub enum Regime {
     /// NLL < H − ε (surprisingly compressible).
     Conservative,

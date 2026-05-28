@@ -8,6 +8,7 @@
 /// When multiple keys produce the same maximum dot product score,
 /// this determines how the value is resolved.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[repr(u8)]
 pub enum TieBreak {
     /// Return the average of all tied values.
     Average,

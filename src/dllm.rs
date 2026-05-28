@@ -24,8 +24,8 @@ use crate::pruners::variance_minimizer::{VarianceMinimizer, VarianceMinimizerCon
 /// Loss averaging strategy for masked positions in D2F training.
 ///
 /// Nemotron validates +2.12% accuracy with global averaging over per-sequence.
-#[repr(u8)]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[repr(u8)]
 pub enum LossAveraging {
     /// Average loss across all masked positions in the batch (global).
     /// `L = (1/(N*L_masked)) * Σ_n Σ_i ℓ_{n,i}`
@@ -45,17 +45,17 @@ pub enum LossAveraging {
 /// Produces monotonically increasing mask ratios for block-based corruption.
 #[derive(Debug, Clone)]
 pub struct NoiseSchedule {
+    pub n_blocks: usize,
     pub min_ratio: f32,
     pub max_ratio: f32,
-    pub n_blocks: usize,
 }
 
 impl NoiseSchedule {
     pub fn new(min_ratio: f32, max_ratio: f32, n_blocks: usize) -> Self {
         Self {
+            n_blocks,
             min_ratio,
             max_ratio,
-            n_blocks,
         }
     }
 
@@ -91,8 +91,6 @@ impl NoiseSchedule {
 #[derive(Debug, Clone)]
 pub struct AdaptiveNoiseSchedule {
     /// Base schedule parameters.
-    min_ratio: f32,
-    max_ratio: f32,
     n_blocks: usize,
     /// Per-step loss tracker (one VarianceMinimizer per block).
     step_trackers: Vec<VarianceMinimizer>,
@@ -100,6 +98,8 @@ pub struct AdaptiveNoiseSchedule {
     current_ratios: Vec<f32>,
     /// Number of adaptation steps performed.
     adaptations: u32,
+    min_ratio: f32,
+    max_ratio: f32,
 }
 
 #[cfg(feature = "replaid_schedules")]
@@ -123,12 +123,12 @@ impl AdaptiveNoiseSchedule {
             .collect();
 
         Self {
-            min_ratio,
-            max_ratio,
             n_blocks,
             step_trackers,
             current_ratios,
             adaptations: 0,
+            min_ratio,
+            max_ratio,
         }
     }
 
@@ -342,13 +342,19 @@ pub fn forward_bidirectional_positions(
     let mut all_attn_weights = Vec::with_capacity(seq_len);
     let layer = &weights.layers[0];
 
+    // Pre-allocate attention scratch buffers (reused across positions)
+    let n_embd = config.n_head * hd;
+    let mut attn_out_buf = vec![0.0f32; n_embd];
+    let mut attn_weights_buf = vec![0.0f32; config.n_head * seq_len];
+    let mut scores_buf = vec![0.0f32; seq_len];
+
     for p in 0..seq_len {
         bctx.x.copy_from_slice(&x_norm2_all[p * n..(p + 1) * n]);
 
         bctx.q.fill(0.0);
         matmul(&mut bctx.q, &layer.attn_wq, &bctx.x, n, n);
 
-        let (attn_out, attn_w) = attention_forward_safe(
+        attention_forward_safe_into(
             &bctx.q,
             &k_cache,
             &v_cache,
@@ -358,10 +364,13 @@ pub fn forward_bidirectional_positions(
             kvd,
             seq_len,
             scale,
+            &mut attn_out_buf,
+            &mut attn_weights_buf,
+            &mut scores_buf,
         );
 
         bctx.x_proj.fill(0.0);
-        matmul(&mut bctx.x_proj, &layer.attn_wo, &attn_out, n, n);
+        matmul(&mut bctx.x_proj, &layer.attn_wo, &attn_out_buf, n, n);
         for i in 0..n {
             bctx.x_proj[i] += xr_all[p * n + i];
         }
@@ -398,7 +407,7 @@ pub fn forward_bidirectional_positions(
             n,
         );
         all_logits.push(bctx.logits.clone());
-        all_attn_weights.push(attn_w);
+        all_attn_weights.push(attn_weights_buf.to_vec());
     }
 
     (all_logits, all_attn_weights)
@@ -406,7 +415,7 @@ pub fn forward_bidirectional_positions(
 
 /// Safe bidirectional attention for one query position.
 /// Returns (attn_output[n_embd], attn_weights[n_head * seq_len]).
-fn attention_forward_safe(
+fn attention_forward_safe_into(
     q: &[f32],
     k_all: &[f32],
     v_all: &[f32],
@@ -416,24 +425,29 @@ fn attention_forward_safe(
     kv_dim: usize,
     seq_len: usize,
     scale: f32,
-) -> (Vec<f32>, Vec<f32>) {
-    let n_embd = n_head * head_dim;
-    let mut attn_out = vec![0.0f32; n_embd];
-    let mut all_weights = vec![0.0f32; n_head * seq_len];
+    attn_out: &mut [f32],
+    all_weights: &mut [f32],
+    scores: &mut [f32],
+) {
+    debug_assert!(attn_out.len() >= n_head * head_dim);
+    debug_assert!(all_weights.len() >= n_head * seq_len);
+    debug_assert!(scores.len() >= seq_len);
+
+    attn_out[..n_head * head_dim].fill(0.0);
 
     for h in 0..n_head {
         let kv_group = h * n_kv_head / n_head;
         let q_off = h * head_dim;
         let kv_off = kv_group * head_dim;
 
-        // Compute scores
-        let mut scores = vec![0.0f32; seq_len];
+        // Compute scores (reuse buffer across heads)
         let mut max_score = f32::NEG_INFINITY;
         for t in 0..seq_len {
-            let mut dot = 0.0f32;
-            for d in 0..head_dim {
-                dot += q[q_off + d] * k_all[t * kv_dim + kv_off + d];
-            }
+            let dot = crate::simd::simd_dot_f32(
+                &q[q_off..q_off + head_dim],
+                &k_all[t * kv_dim + kv_off..t * kv_dim + kv_off + head_dim],
+                head_dim,
+            );
             scores[t] = dot * scale;
             if scores[t] > max_score {
                 max_score = scores[t];
@@ -461,7 +475,38 @@ fn attention_forward_safe(
             attn_out[q_off + d] = val;
         }
     }
+}
 
+/// Allocating wrapper — prefer `attention_forward_safe_into` in hot loops.
+fn attention_forward_safe(
+    q: &[f32],
+    k_all: &[f32],
+    v_all: &[f32],
+    n_head: usize,
+    n_kv_head: usize,
+    head_dim: usize,
+    kv_dim: usize,
+    seq_len: usize,
+    scale: f32,
+) -> (Vec<f32>, Vec<f32>) {
+    let n_embd = n_head * head_dim;
+    let mut attn_out = vec![0.0f32; n_embd];
+    let mut all_weights = vec![0.0f32; n_head * seq_len];
+    let mut scores = vec![0.0f32; seq_len];
+    attention_forward_safe_into(
+        q,
+        k_all,
+        v_all,
+        n_head,
+        n_kv_head,
+        head_dim,
+        kv_dim,
+        seq_len,
+        scale,
+        &mut attn_out,
+        &mut all_weights,
+        &mut scores,
+    );
     (attn_out, all_weights)
 }
 
@@ -1241,12 +1286,12 @@ pub fn train_mini_dllm(
     let mut is_masked_buf = Vec::with_capacity(config.block_size);
     let mut positions_buf = Vec::with_capacity(config.block_size);
 
+    let mut indices: Vec<usize> = (0..train_data.len()).collect();
     for epoch in 0..n_epochs {
         let mut epoch_loss = 0.0f32;
         let mut n_samples = 0usize;
 
-        // Shuffle training data
-        let mut indices: Vec<usize> = (0..train_data.len()).collect();
+        // Shuffle training data in-place
         for i in (1..indices.len()).rev() {
             let j = (rng.next() as usize) % (i + 1);
             indices.swap(i, j);
@@ -1337,13 +1382,13 @@ pub fn train_mini_dllm_adaptive(
     let mut is_masked_buf = Vec::with_capacity(config.block_size);
     let mut positions_buf = Vec::with_capacity(config.block_size);
 
+    let mut indices: Vec<usize> = (0..train_data.len()).collect();
     for epoch in 0..n_epochs {
         let mut epoch_loss = 0.0f32;
         let mut n_samples = 0usize;
         let mut sample_counter: usize = 0;
 
-        // Shuffle training data
-        let mut indices: Vec<usize> = (0..train_data.len()).collect();
+        // Shuffle training data in-place
         for i in (1..indices.len()).rev() {
             let j = (rng.next() as usize) % (i + 1);
             indices.swap(i, j);

@@ -217,6 +217,8 @@ fn compute_moa_gates(input: &[f32], gating: &[f32], d_model: usize) -> [f32; MOA
 }
 
 /// Apply k-th MoA activation from the dictionary.
+/// Note: For tight inner loops, prefer hoisting `MoaActivation::all()` outside the loop
+/// and calling `activations[k].activate(x)` directly to avoid repeated array construction.
 #[cfg(feature = "moa_inference")]
 #[inline(always)]
 fn moa_activate(k: usize, x: f32) -> f32 {
@@ -259,14 +261,15 @@ pub fn moa_swiglu(
 
     // Mixed activations: Σ_k ρ_k σ_k(y) ⊙ Σ_ℓ π_ℓ σ_ℓ(z)
     // Per-element to avoid extra allocation
+    let activations = MoaActivation::all();
     for i in 0..n {
         let y = gate_proj[i];
         let z = up_proj[i];
         let mut mixed_gate = 0.0f32;
         let mut mixed_up = 0.0f32;
         for j in 0..MOA_DICT_SIZE {
-            mixed_gate += gate_weights[j] * moa_activate(j, y);
-            mixed_up += up_weights[j] * moa_activate(j, z);
+            mixed_gate += gate_weights[j] * activations[j].activate(y);
+            mixed_up += up_weights[j] * activations[j].activate(z);
         }
         hidden[i] = mixed_gate * mixed_up;
     }
@@ -336,6 +339,7 @@ pub fn simd_matmul_rmsnorm_moa_swiglu(
     let gate_weights = compute_moa_gates(&input[..d], &moa.gate_gating, d);
     let up_weights = compute_moa_gates(&input[..d], &moa.up_gating, d);
 
+    let activations = MoaActivation::all();
     for i in 0..output_dim {
         // Gate projection: rows [0..output_dim]
         let gate_off = i * input_dim;
@@ -357,8 +361,8 @@ pub fn simd_matmul_rmsnorm_moa_swiglu(
         let mut mixed_gate = 0.0f32;
         let mut mixed_up = 0.0f32;
         for j in 0..MOA_DICT_SIZE {
-            mixed_gate += gate_weights[j] * moa_activate(j, gate_val);
-            mixed_up += up_weights[j] * moa_activate(j, up_val);
+            mixed_gate += gate_weights[j] * activations[j].activate(gate_val);
+            mixed_up += up_weights[j] * activations[j].activate(up_val);
         }
 
         unsafe {

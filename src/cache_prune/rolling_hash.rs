@@ -113,14 +113,14 @@ impl RollingHash {
 
 /// Multiply followed by Mersenne reduction.
 fn mersenne_mul(a: u64, b: u64, m: u64) -> u64 {
-    // For 2^61 - 1 we can use the simple identity:
-    //   a * b mod (2^61 - 1)  =  lo + hi  (then reduce once more if >= m)
-    // where a * b is split into the low 61 and high bits.
-    //
-    // Since `a, b < m < 2^61`, their product fits in 122 bits, well within
-    // u128.  A plain `% m` on the u128 product compiles to a single
-    // multiplication + reduction on most architectures, so this is fine.
-    ((a as u128) * (b as u128) % (m as u128)) as u64
+    // Fast Mersenne reduction for m = 2^61 - 1:
+    //   a * b mod (2^61 - 1) = lo + hi, then reduce once if >= m.
+    // This avoids the expensive u128 modulo and compiles to ~3 instructions.
+    let prod = (a as u128) * (b as u128);
+    let lo = (prod & ((1u128 << 61) - 1)) as u64;
+    let hi = (prod >> 61) as u64;
+    let sum = lo + hi;
+    if sum >= m { sum - m } else { sum }
 }
 
 /// Modular addition.

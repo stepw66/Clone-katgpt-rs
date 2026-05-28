@@ -40,6 +40,7 @@ pub struct Intervention {
 
 /// Verdict on claim validity.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
 pub enum ValidityVerdict {
     /// Claim confirmed with evidence of external generalization.
     TransferAccepted,

@@ -26,10 +26,10 @@ pub enum RerankMethod {
 /// A document with its reranking score and original index.
 #[derive(Debug, Clone)]
 pub struct RerankedDoc {
-    /// Index into the original `docs` slice.
-    pub doc_index: usize,
     /// Computed relevance score (higher = more relevant).
     pub score: f32,
+    /// Index into the original `docs` slice.
+    pub doc_index: usize,
 }
 
 // ── Core Functions ────────────────────────────────────────────
@@ -134,7 +134,17 @@ pub fn ndcg_at(ranking: &[RerankedDoc], ground_truth: &[f32], k: usize) -> f32 {
 ///
 /// For each `(q_i, d_j)` pair, computes `cosine = dot(q_i, d_j) / (|q_i| * |d_j|)`,
 /// then returns the average over all `lq * ld` pairs.
-pub fn cosine_score(queries: &[f32], documents: &[f32], lq: usize, ld: usize, dim: usize) -> f32 {
+///
+/// Pre-computes document norms into `d_norms` to avoid O(lq*ld) redundant computation.
+/// `d_norms` must have length `>= ld`.
+pub fn cosine_score_into(
+    queries: &[f32],
+    documents: &[f32],
+    lq: usize,
+    ld: usize,
+    dim: usize,
+    d_norms: &mut [f32],
+) -> f32 {
     if lq == 0 || ld == 0 || dim == 0 {
         return 0.0;
     }
@@ -142,13 +152,11 @@ pub fn cosine_score(queries: &[f32], documents: &[f32], lq: usize, ld: usize, di
     let mut total = 0.0f32;
     let mut count = 0usize;
 
-    // Pre-compute document norms once (O(ld) instead of O(lq*ld))
-    let d_norms: Vec<f32> = (0..ld)
-        .map(|j| {
-            let d_row = &documents[j * dim..(j + 1) * dim];
-            simd_dot_f32(d_row, d_row, dim).sqrt()
-        })
-        .collect();
+    // Pre-compute document norms once into caller-provided buffer
+    for j in 0..ld {
+        let d_row = &documents[j * dim..(j + 1) * dim];
+        d_norms[j] = simd_dot_f32(d_row, d_row, dim).sqrt();
+    }
 
     for i in 0..lq {
         let q_row = &queries[i * dim..(i + 1) * dim];
@@ -172,6 +180,12 @@ pub fn cosine_score(queries: &[f32], documents: &[f32], lq: usize, ld: usize, di
         0 => 0.0,
         _ => total / count as f32,
     }
+}
+
+/// Allocating wrapper — prefer `cosine_score_into` in hot paths.
+pub fn cosine_score(queries: &[f32], documents: &[f32], lq: usize, ld: usize, dim: usize) -> f32 {
+    let mut d_norms = vec![0.0f32; ld];
+    cosine_score_into(queries, documents, lq, ld, dim, &mut d_norms)
 }
 
 /// Compute mean cosine similarity between two multi-vector embeddings.

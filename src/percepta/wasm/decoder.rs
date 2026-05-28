@@ -352,6 +352,7 @@ pub struct FuncType {
 
 /// Import kind discriminator.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
 pub enum ImportKind {
     /// Function import (type index).
     Func,

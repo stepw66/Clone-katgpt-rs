@@ -525,6 +525,7 @@ pub enum ActingMode {
 
 /// Schedule for the mixing coefficient α over training.
 #[cfg(feature = "dual_leo")]
+#[repr(u8)]
 #[derive(Clone, Copy, Debug)]
 pub enum AlphaSchedule {
     /// Constant α throughout training (default).

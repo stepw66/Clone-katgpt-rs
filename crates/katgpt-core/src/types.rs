@@ -432,22 +432,8 @@ pub struct Config {
     // --- f64 (8-byte aligned) ---
     pub rms_norm_eps: f64,
 
-    // --- Enum types with usize discriminant (8-byte aligned) ---
-    // HLA Attention (Plan 057: Higher-order Linear Attention)
-    pub hla_mode: HlaMode,
-    // Gemma 2 architecture fields (Plan 087)
-    pub model_arch: ModelArchitecture,
-    // D2F Discrete Diffusion Forcing (Plan 066)
-    pub attention_mode: AttentionMode,
-    // SP-KV self-pruned KV attention (Plan 070)
-    pub sp_kv_predictor_lr_mult: f32,
-    // EqR Convergence Selection (Plan 119)
-    pub convergence_selector: ConvergenceSelector,
-    // LT2 Looped Inference Pipeline (Plan 108, Research 73)
-    pub loop_mode: LoopMode,
-    pub hybrid_pattern: HybridPattern,
-
     // --- f32 (4-byte aligned) ---
+    pub sp_kv_predictor_lr_mult: f32,
     pub temperature: f32,
     pub lora_alpha: f32,
     pub lora_dropout: f32,
@@ -464,13 +450,22 @@ pub struct Config {
     pub sp_kv_threshold: f32,
     pub early_stop_threshold: f32,
 
-    // --- WeightDtype (could be u8 or enum, place after f32s) ---
-    pub weight_dtype: WeightDtype,
-
     // --- Vec (pointer-sized, 8-byte aligned) ---
     pub lora_targets: Vec<String>,
 
-    // --- bool / u8 fields (1-byte aligned, tail-packed) ---
+    // --- #[repr(u8)] enums (1-byte) + bool fields (1-byte), tail-packed ---
+    // HLA Attention (Plan 057: Higher-order Linear Attention)
+    pub hla_mode: HlaMode,
+    // Gemma 2 architecture fields (Plan 087)
+    pub model_arch: ModelArchitecture,
+    // D2F Discrete Diffusion Forcing (Plan 066)
+    pub attention_mode: AttentionMode,
+    // EqR Convergence Selection (Plan 119)
+    pub convergence_selector: ConvergenceSelector,
+    // LT2 Looped Inference Pipeline (Plan 108, Research 73)
+    pub loop_mode: LoopMode,
+    pub hybrid_pattern: HybridPattern,
+    pub weight_dtype: WeightDtype,
     pub hla_normalize: bool,
     pub rms_norm_offset: bool,
     pub tied_embeddings: bool,
@@ -2173,28 +2168,28 @@ fn read_u16_le(data: &[u8], offset: &mut usize) -> Result<u16, String> {
 /// Output of a single inference pass, with reward signal for feedback loop.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct InferenceResult {
-    /// Domain that handled this inference.
-    pub domain: String,
-    /// Best-path reward (max relevance score from WasmPruner).
-    pub reward: f32,
-    /// Number of nodes explored in DDTree.
-    pub tree_budget_used: usize,
-    /// Inference budget level (0=cheap, 1=moderate, 2=expensive).
-    pub budget_level: u8,
     /// Input prompt hash (for dedup, not stored).
     pub prompt_hash: u64,
-    /// Generated output text.
-    pub output: String,
     /// Timestamp (Uuid v7 prefix).
     pub timestamp: i64,
-    /// Was this result screened out (reward below threshold)?
-    pub screened: bool,
-    /// SR²AM configurator planning decision for this turn (Plan 112).
-    #[cfg(feature = "sr2am_configurator")]
-    pub planning_decision: Option<PlanningDecision>,
+    /// Number of nodes explored in DDTree.
+    pub tree_budget_used: usize,
     /// Actual planning horizon used this turn (after entropy truncation, Plan 112 T13).
     #[cfg(feature = "sr2am_configurator")]
     pub plan_horizon_used: usize,
+    /// Domain that handled this inference.
+    pub domain: String,
+    /// Generated output text.
+    pub output: String,
+    /// SR²AM configurator planning decision for this turn (Plan 112).
+    #[cfg(feature = "sr2am_configurator")]
+    pub planning_decision: Option<PlanningDecision>,
+    /// Best-path reward (max relevance score from WasmPruner).
+    pub reward: f32,
+    /// Was this result screened out (reward below threshold)?
+    pub screened: bool,
+    /// Inference budget level (0=cheap, 1=moderate, 2=expensive).
+    pub budget_level: u8,
 }
 
 // ---------------------------------------------------------------------------
@@ -2273,6 +2268,7 @@ pub trait DataGate {
 /// Sub-step integration strategy for the training-free loop.
 ///
 /// Controls how intermediate loop outputs are combined with the running state.
+#[repr(u8)]
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub enum SubStepStrategy {
     /// Damped Euler: x ← x + (1/K)·(y − x)

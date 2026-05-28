@@ -229,7 +229,8 @@ fn bench_forward_pass(results: &mut Vec<BenchResult>) {
     // Benchmark
     let start = Instant::now();
     for _ in 0..iters {
-        let _ = forward(&mut ctx, &weights, &mut cache, token, pos, &config);
+        let logits = forward(&mut ctx, &weights, &mut cache, token, pos, &config);
+        std::hint::black_box(logits);
         cache.reset();
     }
     let elapsed = start.elapsed();
@@ -284,10 +285,8 @@ fn bench_lattice_lookup(results: &mut Vec<BenchResult>) {
         }
         let elapsed = start.elapsed();
 
-        // Prevent optimizer from removing the loop
-        if checksum == 0xDEAD_BEEF_CAFE_F00D {
-            println!("{}", lattice_idx[0]); // never happens, but keeps it alive
-        }
+        // Prevent optimizer from removing the computation
+        std::hint::black_box(checksum);
 
         let throughput = iters as f64 / elapsed.as_secs_f64();
         let latency_us = elapsed.as_micros() as f64 / iters as f64;

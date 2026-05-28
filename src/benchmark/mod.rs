@@ -68,6 +68,7 @@ use crate::types::{Config, Rng};
 /// Maps to the 10 feature dimensions from the Paper Feature Comparison Matrix
 /// (see `.docs/15_paper_feature_comparison.md`), plus legacy categories.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Hash)]
+#[repr(u8)]
 pub enum BenchCategory {
     // ── Legacy categories (backward compat) ──
     /// Speculative decoding: accepted tok/s, μs/step

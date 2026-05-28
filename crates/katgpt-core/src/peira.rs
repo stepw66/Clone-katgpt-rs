@@ -870,20 +870,15 @@ pub fn peira_aux_loss(
     // Term 2: ¼ Tr(P* @ (N_sample + λI) @ P*^T)
     // = ¼ Tr(P* @ M @ P*^T) where M = N_sample + λI
     // P* @ M is k×k, then (P* @ M) @ P*^T trace
-    pm.fill(0.0);
+    // Build M = N_sample + λI in-place (branch-free diagonal add)
     for i in 0..k {
-        for j in 0..k {
-            let mut sum = 0.0f64;
-            for l in 0..k {
-                let m_lj = if l == j {
-                    n_sample[l * k + j] + lambda
-                } else {
-                    n_sample[l * k + j]
-                };
-                sum += p_star[i * k + l] * m_lj;
-            }
-            pm[i * k + j] = sum;
-        }
+        n_sample[i * k + i] += lambda;
+    }
+    // P*M = matmul(P*, M) — SIMD-optimized, sigma_sample reused as bt_scratch
+    matmul_into(pm, sigma_sample, p_star, n_sample, k);
+    // Restore n_sample by subtracting λ from diagonal
+    for i in 0..k {
+        n_sample[i * k + i] -= lambda;
     }
 
     // Tr(PM @ P^T) = Σ_{i,j} pm[i,j] * p_star[i,j]

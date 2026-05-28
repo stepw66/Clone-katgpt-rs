@@ -9,6 +9,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Which resource bottleneck dominates the operation.
+#[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ComputeBound {
     /// Operation limited by FLOP throughput.
@@ -33,6 +34,7 @@ pub struct RooflineCost {
 }
 
 /// Data type for roofline estimation.
+#[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Dtype {
     F32,
@@ -40,6 +42,7 @@ pub enum Dtype {
 }
 
 /// Operator type for roofline estimation.
+#[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OpType {
     /// General matrix-vector multiply: (m × k) × (k,) → (m,)

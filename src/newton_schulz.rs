@@ -150,7 +150,10 @@ fn newton_schulz5_square(g: &[f32], m: usize, n: usize, out: &mut [f32]) {
     out.copy_from_slice(&x);
 }
 
-/// Muon-style momentum + orthogonalization step.
+/// Muon optimizer update: momentum + Newton-Schulz orthogonalization + scaling.
+///
+/// For hot paths (training loops), prefer [`muon_update_into`] which avoids
+/// per-call heap allocations when processing non-square matrices.
 ///
 /// Updates the momentum buffer: `m = β * m + grad`, then computes
 /// `update = newton_schulz5(m) * scaling` where `scaling = 1.0 / (rows as f32)`.
@@ -177,6 +180,37 @@ pub fn muon_update(
 
     // Orthogonalize the momentum
     newton_schulz5(momentum, rows, cols, out);
+
+    // Scale by 1/max(rows, cols) — standard Muon scaling
+    let scale = 1.0 / (rows.max(cols) as f32);
+    for v in out.iter_mut() {
+        *v *= scale;
+    }
+}
+
+/// Zero-alloc variant of [`muon_update`].
+/// Pass a pre-allocated [`NewtonSchulzScratch`] to avoid per-call heap allocations.
+#[cfg(feature = "newton_schulz")]
+pub fn muon_update_into(
+    grad: &[f32],
+    momentum: &mut [f32],
+    beta: f32,
+    rows: usize,
+    cols: usize,
+    out: &mut [f32],
+    scratch: &mut NewtonSchulzScratch,
+) {
+    assert_eq!(grad.len(), rows * cols, "grad size mismatch");
+    assert_eq!(momentum.len(), rows * cols, "momentum size mismatch");
+    assert_eq!(out.len(), rows * cols, "out size mismatch");
+
+    // Momentum accumulation: m = β * m + g
+    for (m, &g) in momentum.iter_mut().zip(grad.iter()) {
+        *m = beta * *m + g;
+    }
+
+    // Orthogonalize the momentum (zero-alloc)
+    newton_schulz5_into(momentum, rows, cols, out, scratch);
 
     // Scale by 1/max(rows, cols) — standard Muon scaling
     let scale = 1.0 / (rows.max(cols) as f32);

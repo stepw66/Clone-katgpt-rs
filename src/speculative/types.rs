@@ -511,6 +511,7 @@ pub enum DraftEvent {
 ///
 /// Use [`DecodeStrategy::recommend`] to auto-select based on task characteristics.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[repr(u8)]
 pub enum DecodeStrategy {
     /// Standard autoregressive: one token per step.
     #[default]
@@ -611,6 +612,7 @@ impl SdeConfig {
 
 /// Whether to apply block-sparse prefill compression.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[repr(u8)]
 pub enum PrefillMode {
     /// Never compress — use full prompt.
     #[default]
@@ -641,6 +643,7 @@ pub enum PrefillMode {
 /// MaxSim mode must match uncompressed `maxsim_score` within 1e-3.
 /// Latency overhead vs SoftmaxSum mode must be ≤5%.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[repr(u8)]
 pub enum ScoreReduction {
     /// Standard attention: softmax-weighted sum (existing behavior).
     #[default]
@@ -665,10 +668,10 @@ pub struct FlashPrefillConfig {
     pub window: usize,
     /// Number of final query blocks that get full attention.
     pub last_n_full: usize,
-    /// Importance threshold: keep blocks with score >= max_score * alpha.
-    pub alpha: f32,
     /// Number of tail blocks to use for importance scoring.
     pub tail_window: usize,
+    /// Importance threshold: keep blocks with score >= max_score * alpha.
+    pub alpha: f32,
     /// Score reduction mode for block pair scoring.
     /// When `maxsim` feature is disabled, always behaves as SoftmaxSum.
     pub score_reduction: ScoreReduction,
