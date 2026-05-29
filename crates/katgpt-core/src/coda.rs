@@ -1473,7 +1473,8 @@ mod tests {
         );
 
         // For element 1: y=-1.0, z=1.0
-        let expected_1 = -w0 * (-1.0f32) * (u0 * 1.0f32);
+        // mixed_gate ≈ w0 * Id(-1.0) = -w0, mixed_up ≈ u0 * Id(1.0) = u0
+        let expected_1 = (-w0) * u0;
         assert!(
             (hidden[1] - expected_1).abs() < 1e-3,
             "hidden[1] = {}, expected {}",
