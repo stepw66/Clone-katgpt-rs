@@ -266,23 +266,37 @@ pub fn load_ternary_bits(path: &std::path::Path) -> std::io::Result<katgpt_core:
     }
 
     let mut off = 20;
-    let row_scale: Vec<f32> = buf[off..off + rows * 4]
-        .chunks_exact(4)
-        .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
-        .collect();
+
+    // Bulk copy: the buffer is native little-endian, so we can reinterpret directly.
+    let mut row_scale = vec![0.0f32; rows];
+    unsafe {
+        std::ptr::copy_nonoverlapping(
+            buf[off..].as_ptr(),
+            row_scale.as_mut_ptr() as *mut u8,
+            rows * 4,
+        );
+    }
     off += rows * 4;
 
     let pos_count = rows * blocks64;
-    let pos_bits: Vec<u64> = buf[off..off + pos_count * 8]
-        .chunks_exact(8)
-        .map(|c| u64::from_le_bytes([c[0], c[1], c[2], c[3], c[4], c[5], c[6], c[7]]))
-        .collect();
+    let mut pos_bits = vec![0u64; pos_count];
+    unsafe {
+        std::ptr::copy_nonoverlapping(
+            buf[off..].as_ptr(),
+            pos_bits.as_mut_ptr() as *mut u8,
+            pos_count * 8,
+        );
+    }
     off += pos_count * 8;
 
-    let neg_bits: Vec<u64> = buf[off..off + pos_count * 8]
-        .chunks_exact(8)
-        .map(|c| u64::from_le_bytes([c[0], c[1], c[2], c[3], c[4], c[5], c[6], c[7]]))
-        .collect();
+    let mut neg_bits = vec![0u64; pos_count];
+    unsafe {
+        std::ptr::copy_nonoverlapping(
+            buf[off..].as_ptr(),
+            neg_bits.as_mut_ptr() as *mut u8,
+            pos_count * 8,
+        );
+    }
 
     Ok(katgpt_core::TernaryWeights {
         rows,

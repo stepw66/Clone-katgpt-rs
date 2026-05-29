@@ -303,7 +303,7 @@ pub fn forward_bidirectional_positions(
     weights: &TransformerWeights,
     tokens: &[usize],
     config: &Config,
-) -> (Vec<Vec<f32>>, Vec<Vec<f32>>) {
+) -> (Vec<f32>, Vec<f32>) {
     let n = config.n_embd;
     let hd = config.head_dim;
     let kvd = kv_dim(config);
@@ -342,8 +342,10 @@ pub fn forward_bidirectional_positions(
     }
 
     // Phase B: Bidirectional attention for all positions
-    let mut all_logits = Vec::with_capacity(seq_len);
-    let mut all_attn_weights = Vec::with_capacity(seq_len);
+    let vocab = config.vocab_size;
+    let n_heads = config.n_head;
+    let mut all_logits = vec![0.0f32; seq_len * vocab];
+    let mut all_attn_weights = vec![0.0f32; seq_len * n_heads * seq_len];
     let layer = &weights.layers[0];
 
     // Pre-allocate attention scratch buffers (reused across positions)
@@ -406,8 +408,9 @@ pub fn forward_bidirectional_positions(
             config.vocab_size,
             n,
         );
-        all_logits.push(bctx.logits.clone());
-        all_attn_weights.push(attn_weights_buf.to_vec());
+        all_logits[p * vocab..(p + 1) * vocab].copy_from_slice(&bctx.logits);
+        all_attn_weights[p * n_heads * seq_len..(p + 1) * n_heads * seq_len]
+            .copy_from_slice(&attn_weights_buf);
     }
 
     (all_logits, all_attn_weights)
@@ -1228,12 +1231,13 @@ pub fn evaluate_accuracy(
             &mut is_masked_buf,
             &mut positions_buf,
         );
-        let (logits_vec, _) = forward_bidirectional_positions(weights, &corrupted_buf, config);
+        let (logits_flat, _) = forward_bidirectional_positions(weights, &corrupted_buf, config);
+        let vocab = config.vocab_size;
         for (p, &masked) in is_masked_buf.iter().enumerate() {
             if !masked {
                 continue;
             }
-            let logits_p = &logits_vec[p];
+            let logits_p = &logits_flat[p * vocab..(p + 1) * vocab];
             let predicted = logits_p
                 .iter()
                 .enumerate()
@@ -1863,7 +1867,6 @@ pub fn denoise_loop(
     _rng: &mut Rng,
 ) -> (Vec<usize>, usize) {
     let seq_len = target_tokens.len().min(config.block_size);
-    let vocab = config.vocab_size;
     let mask = config.mask_token;
 
     // Initialize with mask tokens
@@ -1871,15 +1874,16 @@ pub fn denoise_loop(
     let mut converged_step = n_steps;
 
     for step in 0..n_steps {
-        let (logits_vec, _) = forward_bidirectional_positions(weights, &tokens, config);
+        let (logits_flat, _) = forward_bidirectional_positions(weights, &tokens, config);
         let mut any_changed = false;
+        let vocab = config.vocab_size;
 
         for p in 0..seq_len {
             if tokens[p] != mask {
                 continue;
             }
 
-            let logits_p = &logits_vec[p];
+            let logits_p = &logits_flat[p * vocab..(p + 1) * vocab];
             let max_l = crate::simd::simd_max_f32(logits_p);
             let sum_exp: f32 = logits_p.iter().map(|l| (l - max_l).exp()).sum();
             let inv_sum = 1.0 / sum_exp;
@@ -1948,11 +1952,12 @@ mod tests {
         let weights = TransformerWeights::new(&config, &mut rng);
         let tokens = vec![0, 1, 2, 3, 4, 5, 6, 7];
 
-        let (_, attn_weights) = forward_bidirectional_positions(&weights, &tokens, &config);
+        let (_, attn_flat) = forward_bidirectional_positions(&weights, &tokens, &config);
 
         // Each position should have valid attention weights per head
+        let attn_per_pos = config.n_head * tokens.len();
         for p in 0..tokens.len() {
-            let weights_p = &attn_weights[p];
+            let weights_p = &attn_flat[p * attn_per_pos..(p + 1) * attn_per_pos];
             for h in 0..config.n_head {
                 let head_weights = &weights_p[h * tokens.len()..(h + 1) * tokens.len()];
                 let sum: f32 = head_weights.iter().sum();
@@ -1980,9 +1985,11 @@ mod tests {
         // Same input at all positions should produce finite, non-degenerate logits
         let tokens = vec![0, 0, 0, 0];
         let (logits, _) = forward_bidirectional_positions(&weights, &tokens, &config);
+        let vocab = config.vocab_size;
 
-        assert_eq!(logits.len(), 4);
-        for (p, logits_p) in logits.iter().enumerate() {
+        assert_eq!(logits.len(), 4 * vocab);
+        for p in 0..4 {
+            let logits_p = &logits[p * vocab..(p + 1) * vocab];
             assert_eq!(
                 logits_p.len(),
                 config.vocab_size,
@@ -2002,13 +2009,15 @@ mod tests {
 
         // With different tokens at each position, attention should spread across positions
         let tokens = vec![0, 5, 10, 15, 20, 25, 1, 2];
-        let (_, attn_weights) = forward_bidirectional_positions(&weights, &tokens, &config);
+        let (_, attn_flat) = forward_bidirectional_positions(&weights, &tokens, &config);
+        let attn_per_pos = config.n_head * tokens.len();
 
         // Check that no attention weight is exactly 1.0 (concentrated on one position)
         // This would mean the model ignores other positions, which shouldn't happen with random weights
         for p in 0..tokens.len() {
+            let weights_p = &attn_flat[p * attn_per_pos..(p + 1) * attn_per_pos];
             for h in 0..config.n_head {
-                let max_w = attn_weights[p][h * tokens.len()..(h + 1) * tokens.len()]
+                let max_w = weights_p[h * tokens.len()..(h + 1) * tokens.len()]
                     .iter()
                     .cloned()
                     .fold(f32::NEG_INFINITY, f32::max);
@@ -2286,12 +2295,13 @@ mod tests {
             let (logits_bi, _) = forward_bidirectional_positions(&weights, &corrupted, &config);
             // Block-causal with block_size=4
             let (logits_bc, _) = forward_block_causal_positions(&weights, &corrupted, &config, 4);
+            let vocab = config.vocab_size;
 
             for (p, &masked) in is_masked.iter().enumerate() {
                 if !masked {
                     continue;
                 }
-                let pred_bi = logits_bi[p]
+                let pred_bi = logits_bi[p * vocab..(p + 1) * vocab]
                     .iter()
                     .enumerate()
                     .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
