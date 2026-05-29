@@ -17,7 +17,7 @@ half = "2"
 serde_json = "1"
 
 [features]
-default = ["sparse_mlp", "plasma_path", "leo_all_goals", "dual_leo", "sigmoid_margin"]
+default = ["sparse_mlp", "plasma_path", "leo_all_goals", "dual_leo", "sigmoid_margin", "spectral_hierarchy", "dual_gram_pca", "roofline_cost"]
 sparse_mlp = []
 domain_latent = []
 maxsim = []
