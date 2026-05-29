@@ -785,10 +785,10 @@ mod tests {
     /// Reference matmul: output[i] = dot(W_row[i], input)
     fn ref_matmul(weight: &[f32], input: &[f32], rows: usize, cols: usize) -> Vec<f32> {
         let mut output = vec![0.0; rows];
-        for i in 0..rows {
+        for (i, row) in output.iter_mut().enumerate() {
             let row_off = i * cols;
             for j in 0..cols {
-                output[i] += weight[row_off + j] * input[j];
+                *row += weight[row_off + j] * input[j];
             }
         }
         output
@@ -1144,10 +1144,10 @@ mod tests {
         let eps = 1e-5;
 
         let x: Vec<f32> = (0..n).map(|i| (i + 1) as f32 * 0.3).collect();
-        let w: Vec<f32> = (0..n * n).map(|i| (i as f32 * 0.1 - 0.4)).collect();
+        let w: Vec<f32> = (0..n * n).map(|i| i as f32 * 0.1 - 0.4).collect();
         let z: Vec<f32> = (0..n).map(|i| i as f32 * 0.05).collect();
         let gamma: Vec<f32> = (0..n).map(|i| 1.0 + i as f32 * 0.02).collect();
-        let w_prime: Vec<f32> = (0..n * n).map(|i| (i as f32 * 0.07 - 0.3)).collect();
+        let w_prime: Vec<f32> = (0..n * n).map(|i| i as f32 * 0.07 - 0.3).collect();
 
         // Baseline: RMSNorm(x@W + z) * gamma, then @ W'
         let mut d_baseline = ref_matmul(&w, &x, n, n);
@@ -1302,12 +1302,12 @@ mod tests {
         let gating = vec![0.0f32; MOA_DICT_SIZE * d];
         let input = vec![1.0f32; d];
         let weights = compute_moa_gates(&input, &gating, d);
-        for k in 0..MOA_DICT_SIZE {
+        for (k, &w) in weights.iter().enumerate() {
             assert!(
-                (weights[k] - 0.5).abs() < 1e-6,
+                (w - 0.5).abs() < 1e-6,
                 "weight[{}] = {}, expected 0.5",
                 k,
-                weights[k]
+                w
             );
         }
     }
@@ -1362,12 +1362,12 @@ mod tests {
         .sum();
         let expected = (0.5 * activations_on_one) * (0.5 * activations_on_one);
 
-        for i in 0..d_ffn {
+        for (i, &h) in hidden.iter().enumerate() {
             assert!(
-                (hidden[i] - expected).abs() < 1e-4,
+                (h - expected).abs() < 1e-4,
                 "hidden[{}] = {}, expected {}",
                 i,
-                hidden[i],
+                h,
                 expected
             );
         }
@@ -1410,12 +1410,12 @@ mod tests {
         let silu_3 = 3.0f32 / (1.0 + (-3.0f32).exp());
         let expected = silu_2 * silu_3;
 
-        for i in 0..d_ffn {
+        for (i, &h) in hidden.iter().enumerate() {
             assert!(
-                (hidden[i] - expected).abs() < 1e-3,
+                (h - expected).abs() < 1e-3,
                 "hidden[{}] = {}, expected {}",
                 i,
-                hidden[i],
+                h,
                 expected
             );
         }
@@ -1473,7 +1473,7 @@ mod tests {
         );
 
         // For element 1: y=-1.0, z=1.0
-        let expected_1 = (w0 * (-1.0f32)) * (u0 * 1.0f32);
+        let expected_1 = -w0 * (-1.0f32) * (u0 * 1.0f32);
         assert!(
             (hidden[1] - expected_1).abs() < 1e-3,
             "hidden[1] = {}, expected {}",

@@ -2129,7 +2129,7 @@ mod tests {
 
         let act = forward_save(&weights, &tokens, &config, &mut fwd_ctx);
         let loss = masked_loss(
-            &act.logits,
+            act.logits,
             &tokens,
             &is_masked,
             config.vocab_size,
@@ -2166,7 +2166,7 @@ mod tests {
         // Compute initial loss
         let act0 = forward_save(&weights, &tokens, &config, &mut fwd_ctx);
         let loss0 = masked_loss(
-            &act0.logits,
+            act0.logits,
             &tokens,
             &is_masked,
             config.vocab_size,
@@ -2180,7 +2180,7 @@ mod tests {
         // Compute new loss
         let act1 = forward_save(&weights, &tokens, &config, &mut fwd_ctx);
         let loss1 = masked_loss(
-            &act1.logits,
+            act1.logits,
             &tokens,
             &is_masked,
             config.vocab_size,
