@@ -283,14 +283,20 @@ impl SdpaOutputGate {
         // Step 1: Compute gate signal = sigmoid(W_gate @ attn_out)
         // Batch matvec then batch sigmoid avoids per-element loop overhead
         crate::simd::simd_matvec(temp, &self.w_gate, attn_out, n, dim);
+
+        // SIMD sigmoid: temp = -temp, exp, then 1/(1+exp)
+        crate::simd::simd_scale_inplace(&mut temp[..n], -1.0);
+        crate::simd::simd_exp_inplace(&mut temp[..n]);
+        crate::simd::simd_add_scalar_inplace(&mut temp[..n], 1.0);
+        // temp now = 1 + exp(-x), invert: temp = 1/temp = sigmoid
         for t in &mut temp[..n] {
-            *t = 1.0 / (1.0 + (-*t).exp());
+            *t = 1.0 / *t;
         }
 
-        // Step 2: Apply gate elementwise
-        for (attn, gate) in attn_out.iter_mut().zip(temp.iter()) {
-            *attn *= gate;
-        }
+        // Step 2: Apply gate elementwise via SIMD scale-mul (fused)
+        // attn_out[i] *= temp[i] is element-wise multiply
+        // Use simd_scale_mul_inplace with scale=1.0: attn[i] = temp[i] * attn[i] * 1.0
+        crate::simd::simd_scale_mul_inplace(attn_out, &temp[..n], 1.0);
     }
 }
 

@@ -351,20 +351,23 @@ mod tests {
 pub fn underspecification_score(relevance: &[f32]) -> f32 {
     // Two-pass: first accumulate sum, then compute entropy.
     // Uses explicit loops instead of iterator chain for better auto-vectorization.
+    // Branch-free positive masking via (r > 0.0) as usize avoids branch misprediction.
     let mut sum = 0.0f32;
-    let mut entropy = 0.0f32;
     for &r in relevance {
-        if r > 0.0 {
-            sum += r;
-        }
+        let mask = (r > 0.0) as u32 as f32;
+        sum += r * mask;
     }
     if sum <= 0.0 {
         return 1.0; // degenerate = underspecified
     }
 
+    let mut entropy = 0.0f32;
+    let inv_sum = 1.0 / sum;
     for &r in relevance {
-        if r > 0.0 {
-            let p = r / sum;
+        let mask = (r > 0.0) as u32 as f32;
+        let p = r * mask * inv_sum;
+        // log2(0) = -inf but 0 * -inf = 0, so branch-free is safe when mask=0
+        if p > 0.0 {
             entropy -= p * p.log2();
         }
     }
