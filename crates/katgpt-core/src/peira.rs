@@ -1012,50 +1012,58 @@ fn invert_spd_into(
     // Step 1: Cholesky decomposition — L such that L * L^T = mat
     l_scratch.fill(0.0);
     for j in 0..k {
+        let j_row = j * k;
+
         // Diagonal
         let mut sum = 0.0f64;
         for p in 0..j {
-            sum += l_scratch[j * k + p] * l_scratch[j * k + p];
+            let val = l_scratch[j_row + p];
+            sum += val * val;
         }
-        let diag = mat[j * k + j] - sum;
+        let diag = mat[j_row + j] - sum;
         assert!(
             diag > 0.0,
             "Matrix not positive definite in Cholesky decomposition"
         );
-        l_scratch[j * k + j] = diag.sqrt();
+        let diag_sqrt = diag.sqrt();
+        l_scratch[j_row + j] = diag_sqrt;
 
         // Off-diagonal (lower triangle only)
         for i in (j + 1)..k {
+            let i_row = i * k;
             let mut sum = 0.0f64;
             for p in 0..j {
-                sum += l_scratch[i * k + p] * l_scratch[j * k + p];
+                sum += l_scratch[i_row + p] * l_scratch[j_row + p];
             }
-            l_scratch[i * k + j] = (mat[i * k + j] - sum) / l_scratch[j * k + j];
+            l_scratch[i_row + j] = (mat[i_row + j] - sum) / diag_sqrt;
         }
     }
 
     // Step 2: Invert lower triangular L → L_inv
     l_inv_scratch.fill(0.0);
     for i in 0..k {
-        l_inv_scratch[i * k + i] = 1.0 / l_scratch[i * k + i];
+        let i_row = i * k;
+        let inv_diag = 1.0 / l_scratch[i_row + i];
+        l_inv_scratch[i_row + i] = inv_diag;
         for j in 0..i {
             let mut sum = 0.0f64;
             for p in j..i {
-                sum += l_scratch[i * k + p] * l_inv_scratch[p * k + j];
+                sum += l_scratch[i_row + p] * l_inv_scratch[p * k + j];
             }
-            l_inv_scratch[i * k + j] = -sum / l_scratch[i * k + i];
+            l_inv_scratch[i_row + j] = -sum * inv_diag;
         }
     }
 
     // Step 3: M_inv = L_inv^T * L_inv (only lower triangle, then mirror)
     inv.fill(0.0);
     for i in 0..k {
+        let i_row = i * k;
         for j in 0..=i {
             let mut sum = 0.0f64;
             for p in i..k {
                 sum += l_inv_scratch[p * k + i] * l_inv_scratch[p * k + j];
             }
-            inv[i * k + j] = sum;
+            inv[i_row + j] = sum;
             inv[j * k + i] = sum; // symmetric
         }
     }
@@ -1080,15 +1088,17 @@ fn matmul(a: &[f64], b: &[f64], k: usize) -> Vec<f64> {
 fn matmul_into(c: &mut [f64], bt_scratch: &mut [f64], a: &[f64], b: &[f64], k: usize) {
     // Transpose B for sequential access in the inner loop
     for i in 0..k {
+        let i_row = i * k;
         for j in 0..k {
-            bt_scratch[j * k + i] = b[i * k + j];
+            bt_scratch[j * k + i] = b[i_row + j];
         }
     }
     for i in 0..k {
-        let a_row = &a[i * k..i * k + k];
+        let i_row = i * k;
+        let a_row = &a[i_row..i_row + k];
         for j in 0..k {
             let b_col = &bt_scratch[j * k..j * k + k];
-            c[i * k + j] = simd_dot_f64(a_row, b_col, k);
+            c[i_row + j] = simd_dot_f64(a_row, b_col, k);
         }
     }
 }

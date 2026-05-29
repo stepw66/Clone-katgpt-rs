@@ -8,7 +8,7 @@
 use super::codebook::compute_codebook;
 use super::rotation::{generate_qjl_matrix, generate_rotation_matrix};
 use super::types::{TurboQuantKVCacheConfig, TurboQuantLayer};
-use crate::simd::simd_scale_inplace;
+use crate::simd::{simd_scale_inplace, simd_sum_sq};
 use crate::types;
 
 /// Compressed KV cache using TurboQuant quantization.
@@ -151,8 +151,8 @@ impl TurboQuantKVCache {
         self.max_used_pos = self.max_used_pos.max(pos + 1);
         let layer_state = &self.layers[layer];
 
-        // Compute norm
-        let norm: f32 = key.iter().map(|x| x * x).sum::<f32>().sqrt();
+        // Compute norm via SIMD (avoids scalar iteration)
+        let norm = simd_sum_sq(key, self.kv_dim).sqrt();
         self.key_norms[layer][pos] = norm;
 
         if norm < 1e-8 {
@@ -193,7 +193,8 @@ impl TurboQuantKVCache {
         self.max_used_pos = self.max_used_pos.max(pos + 1);
         let layer_state = &self.layers[layer];
 
-        let norm: f32 = value.iter().map(|x| x * x).sum::<f32>().sqrt();
+        // Compute norm via SIMD (avoids scalar iteration)
+        let norm = simd_sum_sq(value, self.kv_dim).sqrt();
         self.val_norms[layer][pos] = norm;
 
         if norm < 1e-8 {

@@ -12,7 +12,7 @@ use crate::transformer::{ForwardContext, MultiLayerKVCache, TransformerWeights};
 use crate::types::{self, Config, DashAttnConfig};
 
 use super::chunk_summary::{ChunkSummaryCache, ChunkSummaryQuery, summarize_chunk};
-use super::routing::score_blocks_entmax;
+use super::routing::score_blocks_entmax_into;
 
 // ---------------------------------------------------------------------------
 // Prefill (batch prompt processing)
@@ -132,10 +132,10 @@ pub fn forward_dash_attn_decode<'a>(
 
     // Pre-allocate summary references outside the layer loop to avoid
     // per-layer Vec allocation (summaries don't change between layers).
-    let mut summary_refs: Vec<&Vec<f32>> = Vec::new();
-    if summary_cache.n_chunks() > 0 {
-        summary_refs.reserve(summary_cache.n_chunks());
-    }
+    let mut summary_refs: Vec<&Vec<f32>> = Vec::with_capacity(summary_cache.n_chunks());
+    // Pre-allocate routing scratch outside the layer loop for reuse across layers
+    let mut routing_scratch =
+        super::routing::RoutingScratch::new(summary_cache.n_chunks(), config.head_dim);
 
     for layer_weights in &weights.layers {
         types::rmsnorm(&mut ctx.x);
@@ -168,7 +168,8 @@ pub fn forward_dash_attn_decode<'a>(
             for chunk in &summary_cache.summaries {
                 summary_refs.push(&chunk[0]);
             }
-            let _routing = score_blocks_entmax(q_head, &summary_refs, dash_config);
+            let _routing =
+                score_blocks_entmax_into(q_head, &summary_refs, dash_config, &mut routing_scratch);
             // TODO: Use routing.active_indices to select sparse KV blocks
         }
 

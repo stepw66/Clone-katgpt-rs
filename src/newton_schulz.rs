@@ -141,10 +141,10 @@ fn newton_schulz5_square(g: &[f32], m: usize, n: usize, out: &mut [f32]) {
         // BX = B @ X
         matmul_ax(&b_mat, &x, m, n, &mut bx, &mut xt_buf);
 
-        // X = a*X + BX
-        for i in 0..(m * n) {
-            x[i] = A * x[i] + bx[i];
-        }
+        // X = a*X + BX (fused SIMD scale-accumulate)
+        let mn = m * n;
+        crate::simd::simd_scale_inplace(&mut x[..mn], A);
+        crate::simd::simd_add_inplace(&mut x[..mn], &bx[..mn]);
     }
 
     out.copy_from_slice(&x);
@@ -173,19 +173,16 @@ pub fn muon_update(
     assert_eq!(momentum.len(), rows * cols, "momentum size mismatch");
     assert_eq!(out.len(), rows * cols, "out size mismatch");
 
-    // Momentum accumulation: m = β * m + g
-    for (m, &g) in momentum.iter_mut().zip(grad.iter()) {
-        *m = beta * *m + g;
-    }
+    // Momentum accumulation: m = β * m + g (SIMD fused scale-accumulate)
+    crate::simd::simd_scale_inplace(momentum, beta);
+    crate::simd::simd_add_inplace(momentum, grad);
 
     // Orthogonalize the momentum
     newton_schulz5(momentum, rows, cols, out);
 
     // Scale by 1/max(rows, cols) — standard Muon scaling
     let scale = 1.0 / (rows.max(cols) as f32);
-    for v in out.iter_mut() {
-        *v *= scale;
-    }
+    crate::simd::simd_scale_inplace(out, scale);
 }
 
 /// Zero-alloc variant of [`muon_update`].
@@ -204,19 +201,16 @@ pub fn muon_update_into(
     assert_eq!(momentum.len(), rows * cols, "momentum size mismatch");
     assert_eq!(out.len(), rows * cols, "out size mismatch");
 
-    // Momentum accumulation: m = β * m + g
-    for (m, &g) in momentum.iter_mut().zip(grad.iter()) {
-        *m = beta * *m + g;
-    }
+    // Momentum accumulation: m = β * m + g (SIMD fused scale-accumulate)
+    crate::simd::simd_scale_inplace(momentum, beta);
+    crate::simd::simd_add_inplace(momentum, grad);
 
     // Orthogonalize the momentum (zero-alloc)
     newton_schulz5_into(momentum, rows, cols, out, scratch);
 
     // Scale by 1/max(rows, cols) — standard Muon scaling
     let scale = 1.0 / (rows.max(cols) as f32);
-    for v in out.iter_mut() {
-        *v *= scale;
-    }
+    crate::simd::simd_scale_inplace(out, scale);
 }
 
 // ── Zero-alloc API ───────────────────────────────────────────────
@@ -408,9 +402,9 @@ fn newton_schulz5_square_into_raw(
             }
         }
         matmul_ax(b_mat, x, m, n, bx, xt_buf);
-        for i in 0..mn {
-            x[i] = A * x[i] + bx[i];
-        }
+        // X = a*X + BX (fused SIMD scale-accumulate)
+        crate::simd::simd_scale_inplace(&mut x[..mn], A);
+        crate::simd::simd_add_inplace(&mut x[..mn], &bx[..mn]);
     }
 
     out.copy_from_slice(&x[..mn]);

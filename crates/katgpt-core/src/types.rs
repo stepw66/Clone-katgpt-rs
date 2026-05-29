@@ -10,8 +10,8 @@
 /// - `Standard`: SDPA with KV cache (default, backward-compatible).
 /// - `Hla`: Symmetric second-order linear attention — O(1) per-token memory.
 /// - `Ahla`: Asymmetric second-order linear attention — lower state cost than symmetric.
-#[repr(u8)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[repr(u8)]
 pub enum HlaMode {
     #[default]
     Standard,
@@ -2475,6 +2475,8 @@ impl TernaryWeights {
             let threshold = 0.5 * tw.row_scale[r];
             let mut carry = 0.0f32;
 
+            // Inline bit manipulation to avoid per-element bounds checks in set()
+            let row_base = r * tw.blocks64;
             for (c, &val) in row.iter().enumerate() {
                 let adjusted = val + carry;
                 let q = if adjusted > threshold {
@@ -2484,7 +2486,16 @@ impl TernaryWeights {
                 } else {
                     0i8
                 };
-                tw.set(r, c, q);
+                let block = c >> 6;
+                let bit = c & 63;
+                let mask = 1u64 << bit;
+                let idx = row_base + block;
+                // Branch-free: clear both bits, then set the one that matches q
+                tw.pos_bits[idx] &= !mask;
+                tw.neg_bits[idx] &= !mask;
+                // q is 1 or -1 or 0; only set the relevant bit
+                tw.pos_bits[idx] |= (q == 1) as u64 * mask;
+                tw.neg_bits[idx] |= (q == -1) as u64 * mask;
                 carry = adjusted - (q as f32 * tw.row_scale[r]);
             }
         }

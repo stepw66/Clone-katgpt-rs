@@ -349,19 +349,25 @@ mod tests {
 ///
 /// This is a pure function over a relevance slice — no model inference needed.
 pub fn underspecification_score(relevance: &[f32]) -> f32 {
-    let sum: f32 = relevance.iter().sum();
+    // Two-pass: first accumulate sum, then compute entropy.
+    // Uses explicit loops instead of iterator chain for better auto-vectorization.
+    let mut sum = 0.0f32;
+    let mut entropy = 0.0f32;
+    for &r in relevance {
+        if r > 0.0 {
+            sum += r;
+        }
+    }
     if sum <= 0.0 {
         return 1.0; // degenerate = underspecified
     }
 
-    let entropy: f32 = relevance
-        .iter()
-        .filter(|&&r| r > 0.0)
-        .map(|&r| {
+    for &r in relevance {
+        if r > 0.0 {
             let p = r / sum;
-            -p * p.log2()
-        })
-        .sum();
+            entropy -= p * p.log2();
+        }
+    }
 
     let max_entropy = (relevance.len() as f32).log2();
     if max_entropy <= 0.0 {
@@ -418,14 +424,15 @@ pub fn find_sufficient_set(
     // Single pass: filter valid tokens AND compute extension counts, avoiding
     // an intermediate Vec<usize> allocation.
     let mut ext_buf = Vec::with_capacity(placed_tokens.len() + 1);
+    ext_buf.extend_from_slice(placed_tokens); // Pre-fill once; only last element changes per iteration
+    let base_len = placed_tokens.len();
+    ext_buf.push(0); // Reserve slot for the candidate token
     let mut counts: Vec<(usize, usize)> = (0..vocab_size)
         .filter_map(|tok| {
             if !pruner.is_valid(depth, tok, placed_tokens) {
                 return None;
             }
-            ext_buf.clear();
-            ext_buf.extend_from_slice(placed_tokens);
-            ext_buf.push(tok);
+            ext_buf[base_len] = tok; // Overwrite only the candidate slot
             let count = count_valid_extensions_with(pruner, depth + 1, &ext_buf, vocab_size);
             Some((tok, count))
         })
@@ -437,9 +444,7 @@ pub fn find_sufficient_set(
     let mut relevance_buf = vec![0.0f32; vocab_size.min(256)];
 
     for &(tok, _) in counts.iter().take(max_search_depth) {
-        ext_buf.clear();
-        ext_buf.extend_from_slice(placed_tokens);
-        ext_buf.push(tok);
+        ext_buf[base_len] = tok; // Overwrite only the candidate slot (avoids clear + extend)
         score_relevance_into(pruner, depth + 1, &ext_buf, vocab_size, &mut relevance_buf);
         let score = underspecification_score(&relevance_buf);
         if score < 0.5 {

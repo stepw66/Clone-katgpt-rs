@@ -150,6 +150,9 @@ pub fn forward_rt_turbo_decode(
     let sink_indices: Vec<usize> = (0..sink_count).collect();
 
     // Step 3: For each retrieval head, compute low-dim scores and select top-p
+    // Pre-allocate key cache buffer for extraction (reused across retrieval heads)
+    let mut k_cache_buf: Vec<f32> = vec![0.0f32; seq_len * head_dim];
+
     let mut selected_indices: Vec<Vec<usize>> = Vec::with_capacity(calibration.n_retrieval());
 
     for (retrieval_idx, &global_head) in calibration.retrieval_set.iter().enumerate() {
@@ -162,19 +165,17 @@ pub fn forward_rt_turbo_decode(
             q_pre.len(),
         );
 
-        // Extract pre-RoPE keys for this head from all positions.
+        // Extract pre-RoPE keys for this head from all positions into pre-allocated buffer.
         // key_pre_rope[pos] has shape [n_heads * head_dim];
         // keys for head h start at offset h * head_dim.
-        let k_cache: Vec<f32> = key_pre_rope
-            .iter()
-            .flat_map(|pos_keys| {
-                let offset = global_head * head_dim;
-                pos_keys[offset..offset + head_dim].to_vec()
-            })
-            .collect();
+        for (t, pos_keys) in key_pre_rope.iter().enumerate() {
+            let offset = global_head * head_dim;
+            k_cache_buf[t * head_dim..(t + 1) * head_dim]
+                .copy_from_slice(&pos_keys[offset..offset + head_dim]);
+        }
 
         // Compute low-dim scores via projection
-        let scores = projection.batch_project_scores(retrieval_idx, q_pre, &k_cache);
+        let scores = projection.batch_project_scores(retrieval_idx, q_pre, &k_cache_buf);
 
         // Select top-p tokens via blockwise selection
         let top_p_result = select_top_p_blockwise(&scores, config.top_p, config.block_size);

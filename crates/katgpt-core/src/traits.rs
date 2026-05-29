@@ -284,6 +284,15 @@ impl ActionSpaceLog {
         Self::default()
     }
 
+    /// Create an empty log with pre-allocated capacity.
+    /// Use this in hot paths (e.g., game rollouts) where the approximate
+    /// number of entries is known upfront.
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            entries: Vec::with_capacity(capacity),
+        }
+    }
+
     /// Record action space size for a player at the current tick.
     pub fn record<S: GameState>(&mut self, state: &S, player_id: u8) {
         self.entries

@@ -3637,9 +3637,16 @@ pub fn raven_compute_router_into(
     let top_k = top_k.min(num_slots);
 
     // Reuse pre-allocated buffers: clear + fill
+    // Batch sigmoid via SIMD: negate → SIMD exp → 1/(1+exp)
     scored.clear();
+    // Negate logits in-place into r_t scratch buffer
+    r_t.resize(num_slots, 0.0);
     for (i, &x) in raw_logits.iter().enumerate() {
-        scored.push((i, 1.0 / (1.0 + (-x).exp())));
+        r_t[i] = -x;
+    }
+    crate::simd::simd_exp_inplace(&mut r_t[..num_slots]);
+    for (i, &e) in r_t[..num_slots].iter().enumerate() {
+        scored.push((i, 1.0 / (1.0 + e)));
     }
 
     // Partial sort: find Top-K by descending score (O(n) average)
@@ -3649,8 +3656,8 @@ pub fn raven_compute_router_into(
         });
     }
 
-    r_t.clear();
-    r_t.resize(num_slots, 0.0);
+    // Fill r_t with zeros for final output
+    r_t[..num_slots].fill(0.0);
     let mut sum = 0.0f32;
 
     // Keep only Top-K (the last top_k elements after partial sort are the largest)

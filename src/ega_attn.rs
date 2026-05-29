@@ -43,18 +43,20 @@ pub fn sigmoid(x: f32) -> f32 {
 ///
 /// Handles the degenerate case where all values are equal (σ → 0)
 /// by producing all-zero output.
+/// Uses SIMD for sum-of-squares computation.
 #[inline]
 pub fn z_normalize(scores: &mut [f32]) {
     if scores.is_empty() {
         return;
     }
     let n = scores.len() as f32;
-    let mean = scores.iter().sum::<f32>() / n;
-    let variance = scores.iter().map(|&x| (x - mean) * (x - mean)).sum::<f32>() / n;
+    let mean = crate::simd::simd_sum_f32(scores) / n;
+    // Subtract mean in-place via SIMD
+    crate::simd::simd_add_scalar_inplace(scores, -mean);
+    // Compute variance via SIMD sum-of-squares
+    let variance = crate::simd::simd_sum_sq(scores, scores.len()) / n;
     let std_dev = variance.sqrt() + EPS;
-    for s in scores.iter_mut() {
-        *s = (*s - mean) / std_dev;
-    }
+    crate::simd::simd_scale_inplace(scores, 1.0 / std_dev);
 }
 
 /// Compute the energy gate vector g from energy scores.

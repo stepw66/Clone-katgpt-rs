@@ -576,10 +576,10 @@ impl DecodeStrategy {
 pub struct SdeConfig {
     /// Noise re-injection scale (ELF default: 1.0, our default: 0.0 = disabled).
     pub gamma: f32,
-    /// Whether to apply noise only to non-top-1 candidates (preserve best, diversify rest).
-    pub preserve_top1: bool,
     /// Minimum logit magnitude for noise application (skip very confident tokens).
     pub confidence_floor: f32,
+    /// Whether to apply noise only to non-top-1 candidates (preserve best, diversify rest).
+    pub preserve_top1: bool,
 }
 
 impl Default for SdeConfig {

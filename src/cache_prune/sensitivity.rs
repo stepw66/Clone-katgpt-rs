@@ -49,9 +49,9 @@ impl SensitivityDetector for OpenDetector {
 pub struct MaskedSegment {
     pub start: usize,
     pub end: usize,
-    pub is_reusable: bool,
-    pub contextualization_score: f32,
     pub recompute_indices: Vec<usize>,
+    pub contextualization_score: f32,
+    pub is_reusable: bool,
 }
 
 impl MaskedSegment {

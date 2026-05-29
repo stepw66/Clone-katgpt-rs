@@ -22,17 +22,17 @@ use crate::types;
 ///
 /// Returns `(flat_keys, pos_count)` where `flat_keys[pos * kv_dim..]`
 /// holds the reconstructed key for that position.
+///
+/// **Note:** Allocates a new Vec per call. For hot-path code, prefer
+/// [`dequantize_keys_flat_into`] which reuses a pre-allocated buffer.
 pub fn dequantize_keys_flat(
-    cache: &TurboQuantKVCache,
+    cache: &mut TurboQuantKVCache,
     layer: usize,
     pos: usize,
     kv_dim: usize,
 ) -> Vec<f32> {
     let mut flat = vec![0.0f32; (pos + 1) * kv_dim];
-    for t in 0..=pos {
-        let recon = cache.dequantize_key(layer, t);
-        flat[t * kv_dim..(t + 1) * kv_dim].copy_from_slice(&recon);
-    }
+    dequantize_keys_flat_into(cache, layer, pos, kv_dim, &mut flat);
     flat
 }
 
@@ -40,18 +40,62 @@ pub fn dequantize_keys_flat(
 ///
 /// Layout: `[block_size * kv_dim]` row-major, compatible with the
 /// [`attention_head`] kernel's expected `value_cache` layout.
+///
+/// **Note:** Allocates a new Vec per call. For hot-path code, prefer
+/// [`dequantize_values_flat_into`] which reuses a pre-allocated buffer.
 pub fn dequantize_values_flat(
-    cache: &TurboQuantKVCache,
+    cache: &mut TurboQuantKVCache,
     layer: usize,
     pos: usize,
     kv_dim: usize,
 ) -> Vec<f32> {
     let mut flat = vec![0.0f32; (pos + 1) * kv_dim];
-    for t in 0..=pos {
-        let recon = cache.dequantize_value(layer, t);
-        flat[t * kv_dim..(t + 1) * kv_dim].copy_from_slice(&recon);
-    }
+    dequantize_values_flat_into(cache, layer, pos, kv_dim, &mut flat);
     flat
+}
+
+/// Zero-alloc variant of [`dequantize_keys_flat`].
+///
+/// Writes into `buf`, which must have capacity `>= (pos + 1) * kv_dim`.
+/// Uses `dequantize_key_into` per position to avoid per-position Vec allocation.
+pub fn dequantize_keys_flat_into(
+    cache: &mut TurboQuantKVCache,
+    layer: usize,
+    pos: usize,
+    kv_dim: usize,
+    buf: &mut [f32],
+) {
+    let total = (pos + 1) * kv_dim;
+    debug_assert!(
+        buf.len() >= total,
+        "buffer too small: {} < {total}",
+        buf.len()
+    );
+    for t in 0..=pos {
+        cache.dequantize_key_into(layer, t, &mut buf[t * kv_dim..(t + 1) * kv_dim]);
+    }
+}
+
+/// Zero-alloc variant of [`dequantize_values_flat`].
+///
+/// Writes into `buf`, which must have capacity `>= (pos + 1) * kv_dim`.
+/// Uses `dequantize_value_into` per position to avoid per-position Vec allocation.
+pub fn dequantize_values_flat_into(
+    cache: &mut TurboQuantKVCache,
+    layer: usize,
+    pos: usize,
+    kv_dim: usize,
+    buf: &mut [f32],
+) {
+    let total = (pos + 1) * kv_dim;
+    debug_assert!(
+        buf.len() >= total,
+        "buffer too small: {} < {total}",
+        buf.len()
+    );
+    for t in 0..=pos {
+        cache.dequantize_value_into(layer, t, &mut buf[t * kv_dim..(t + 1) * kv_dim]);
+    }
 }
 
 /// Compute per-head attention scores using dequantized KV cache.
@@ -106,19 +150,24 @@ pub fn attention_turboquant(
     }
 
     // Pass 3: normalize + weighted value accumulation
+    // Loop order: t outer, d inner — contiguous value_cache row access, better cache locality.
+    // Previous d-outer/t-inner order touched a different cache line per t for each d.
     let inv_sum = 1.0 / sum;
-    for d in 0..head_dim {
-        let mut val = 0.0f32;
-        for t in 0..t_n {
-            unsafe {
-                val += *scores_buf.get_unchecked(t)
-                    * inv_sum
-                    * *flat_values.get_unchecked(t * kv_dim + kv_group_offset + d);
-            }
-        }
-        unsafe {
-            *attn_out.get_unchecked_mut(q_head_offset + d) = val;
-        }
+    attn_out[q_head_offset..q_head_offset + head_dim].fill(0.0);
+    for t in 0..t_n {
+        let weight = unsafe { *scores_buf.get_unchecked(t) * inv_sum };
+        let v_row = unsafe {
+            std::slice::from_raw_parts(
+                flat_values.as_ptr().add(t * kv_dim + kv_group_offset),
+                head_dim,
+            )
+        };
+        crate::simd::simd_fused_scale_acc(
+            &mut attn_out[q_head_offset..q_head_offset + head_dim],
+            v_row,
+            weight,
+            head_dim,
+        );
     }
 }
 
@@ -226,7 +275,7 @@ mod tests {
         cache.store_key(0, 0, &key);
         cache.store_key(0, 1, &key);
 
-        let flat = dequantize_keys_flat(&cache, 0, 1, kv_dim);
+        let flat = dequantize_keys_flat(&mut cache, 0, 1, kv_dim);
         assert_eq!(flat.len(), 2 * kv_dim);
         // Positions should reconstruct to similar vectors
         let cos = cosine_similarity(&flat[0..kv_dim], &flat[kv_dim..]);
@@ -255,8 +304,8 @@ mod tests {
             tq_cache.store_value(0, pos, &kv);
         }
 
-        let flat_keys = dequantize_keys_flat(&tq_cache, 0, 3, kv_dim);
-        let flat_values = dequantize_values_flat(&tq_cache, 0, 3, kv_dim);
+        let flat_keys = dequantize_keys_flat(&mut tq_cache, 0, 3, kv_dim);
+        let flat_values = dequantize_values_flat(&mut tq_cache, 0, 3, kv_dim);
 
         let q: Vec<f32> = (0..n_embd).map(|_| rng.normal()).collect();
         let mut attn_out = vec![0.0f32; n_embd];

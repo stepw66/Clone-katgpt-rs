@@ -45,9 +45,9 @@ pub enum LossAveraging {
 /// Produces monotonically increasing mask ratios for block-based corruption.
 #[derive(Debug, Clone)]
 pub struct NoiseSchedule {
-    pub n_blocks: usize,
     pub min_ratio: f32,
     pub max_ratio: f32,
+    pub n_blocks: usize,
 }
 
 impl NoiseSchedule {
@@ -1542,6 +1542,7 @@ pub fn forward_block_causal_positions(
     let mut hidden = vec![0.0f32; config.mlp_hidden];
     let mut x_mlp = vec![0.0f32; n];
     let mut logits = vec![0.0f32; config.vocab_size];
+    let mut xr2_buf = vec![0.0f32; n];
 
     for p in 0..seq_len {
         x_buf.copy_from_slice(&x_norm2_all[p * n..(p + 1) * n]);
@@ -1579,12 +1580,12 @@ pub fn forward_block_causal_positions(
             x_proj[i] += xr_all[p * n + i];
         }
 
-        let xr2 = x_proj.clone();
+        xr2_buf[..n].copy_from_slice(&x_proj[..n]);
         rmsnorm(&mut x_proj);
         matmul_relu(&mut hidden, &layer.mlp_w1, &x_proj, config.mlp_hidden, n);
         matmul(&mut x_mlp, &layer.mlp_w2, &hidden, n, config.mlp_hidden);
         for i in 0..n {
-            x_mlp[i] += xr2[i];
+            x_mlp[i] += xr2_buf[i];
         }
 
         matmul(&mut logits, &weights.lm_head, &x_mlp, config.vocab_size, n);
