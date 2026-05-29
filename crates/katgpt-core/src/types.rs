@@ -1201,15 +1201,15 @@ impl Config {
 ///
 /// See Plan 026 (AutoTTS Dynamic Inference Budget).
 #[derive(Debug, Clone, Default)]
+// Fields ordered by descending alignment to minimize padding:
+// Option<usize>/Option<PathBuf> (16/32 bytes) → Option<f32> (8 bytes) →
+// Option<#[repr(u8)] enum> (2 bytes).
 pub struct InferenceOverrides {
+    // --- Option<usize> (16 bytes each, 8-byte aligned) ---
     pub tree_budget: Option<usize>,
     pub draft_lookahead: Option<usize>,
     pub parallel_threshold: Option<usize>,
-    pub screening_threshold: Option<f32>,
-    pub temperature: Option<f32>,
-    pub sparse_threshold: Option<f32>,
     pub early_exit_patience: Option<usize>,
-    pub early_exit_gap: Option<f32>,
     // MTP Drafter overrides (Plan 055: Gemma 4 MTP)
     pub mtp_activation_threshold: Option<usize>,
     pub mtp_cluster_vocab_threshold: Option<usize>,
@@ -1221,19 +1221,29 @@ pub struct InferenceOverrides {
     /// Top-K cluster selection for clustered LM head (Plan 117 T22).
     /// When K > 1, compute logits for tokens in top-K clusters instead of just top-1.
     pub mtp_cluster_topk: Option<usize>,
-    // SP-KV inference-time threshold knob (Plan 070)
-    pub sp_kv_threshold: Option<f32>,
     // PTRM width scaling (Plan 083)
     pub width_rollouts: Option<usize>,
-    pub early_stop_threshold: Option<f32>,
-    // EqR Convergence Selection (Plan 119)
-    pub convergence_selector: Option<ConvergenceSelector>,
     // MLS Multi-Layer Sum override (Plan 104)
     pub mls_layers: Option<usize>,
-    // Drafter LoRA path (Plan 117: MTP LoRA Drafter)
-    pub drafter_lora_path: Option<std::path::PathBuf>,
     // SR²AM horizon truncation override (Plan 112 T11)
     pub max_plan_horizon: Option<usize>,
+
+    // --- Option<PathBuf> (32 bytes, 8-byte aligned) ---
+    // Drafter LoRA path (Plan 117: MTP LoRA Drafter)
+    pub drafter_lora_path: Option<std::path::PathBuf>,
+
+    // --- Option<f32> (8 bytes each, 4-byte aligned) ---
+    pub screening_threshold: Option<f32>,
+    pub temperature: Option<f32>,
+    pub sparse_threshold: Option<f32>,
+    pub early_exit_gap: Option<f32>,
+    // SP-KV inference-time threshold knob (Plan 070)
+    pub sp_kv_threshold: Option<f32>,
+    pub early_stop_threshold: Option<f32>,
+
+    // --- Option<#[repr(u8) enum> (2 bytes each, 1-byte aligned) ---
+    // EqR Convergence Selection (Plan 119)
+    pub convergence_selector: Option<ConvergenceSelector>,
 }
 
 impl Default for Config {
@@ -1708,17 +1718,19 @@ pub fn sample_token_into(probs: &[f32], rng: &mut Rng, cdf: &mut Vec<f32>) -> us
 /// and adapter_data = `[in_dim(4) | out_dim(4) | a_f32s | b_f32s]`
 ///
 /// Zero-copy: loaded once per domain, reference-passed during inference.
+///
+/// Fields ordered by descending alignment to minimize padding.
 pub struct LoraAdapter {
-    /// Down-projection: [rank × in_dim]
-    pub a: Vec<f32>,
-    /// Up-projection: [out_dim × rank]
-    pub b: Vec<f32>,
     /// LoRA rank.
     pub rank: usize,
     /// Input dimension.
     pub in_dim: usize,
     /// Output dimension.
     pub out_dim: usize,
+    /// Down-projection: [rank × in_dim]
+    pub a: Vec<f32>,
+    /// Up-projection: [out_dim × rank]
+    pub b: Vec<f32>,
     /// Scaling factor (alpha / rank).
     pub alpha: f32,
 }
@@ -2169,8 +2181,12 @@ fn read_u16_le(data: &[u8], offset: &mut usize) -> Result<u16, String> {
 // ---------------------------------------------------------------------------
 
 /// Output of a single inference pass, with reward signal for feedback loop.
+///
+/// Fields ordered by descending alignment to minimize padding:
+/// u64/i64/usize/String (8-byte) → f32 (4-byte) → Option<#[repr(u8)]> (2-byte) → u8/bool (1-byte).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct InferenceResult {
+    // --- 8-byte aligned ---
     /// Input prompt hash (for dedup, not stored).
     pub prompt_hash: u64,
     /// Timestamp (Uuid v7 prefix).
@@ -2184,11 +2200,17 @@ pub struct InferenceResult {
     pub domain: String,
     /// Generated output text.
     pub output: String,
+
+    // --- 4-byte aligned ---
+    /// Best-path reward (max relevance score from WasmPruner).
+    pub reward: f32,
+
+    // --- 2-byte aligned (Option<#[repr(u8)] enum>) ---
     /// SR²AM configurator planning decision for this turn (Plan 112).
     #[cfg(feature = "sr2am_configurator")]
     pub planning_decision: Option<PlanningDecision>,
-    /// Best-path reward (max relevance score from WasmPruner).
-    pub reward: f32,
+
+    // --- 1-byte fields (tail-packed) ---
     /// Was this result screened out (reward below threshold)?
     pub screened: bool,
     /// Inference budget level (0=cheap, 1=moderate, 2=expensive).

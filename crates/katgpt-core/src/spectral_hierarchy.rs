@@ -276,17 +276,12 @@ fn top_k_eigenvectors(mat: &[f32], n: usize, k: usize) -> Vec<Vec<f32>> {
     // Return top-k eigenvectors (columns of v).
     let k = k.min(n);
     let mut result = Vec::with_capacity(k);
-    // Pre-allocate a reuse buffer: fill + std::mem::take avoids clone.
-    let mut evec_buf = Vec::with_capacity(n);
     for &(col, _) in &indexed[..k] {
-        evec_buf.clear();
+        let mut evec = vec![0.0f32; n];
         for row in 0..n {
-            evec_buf.push(v[row * n + col] as f32);
+            evec[row] = v[row * n + col] as f32;
         }
-        // take() swaps the filled buffer into result, leaving an empty Vec
-        // that gets re-allocated on next iteration — same as clone but avoids
-        // the memcpy since the source is immediately cleared anyway.
-        result.push(std::mem::take(&mut evec_buf));
+        result.push(evec);
     }
     result
 }
