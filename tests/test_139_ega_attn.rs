@@ -65,7 +65,8 @@ fn proof_ega_gate_sums_to_one() {
     let mut attn = uniform_attention(seq_len);
     let energy = vec![0.5, 1.0, 1.5, 2.0, 2.5, 3.0];
 
-    gate.gate_attention(&mut attn, &energy, seq_len);
+    let mut gate_buf = vec![0.0; seq_len];
+    gate.gate_attention(&mut attn, &energy, seq_len, &mut gate_buf);
 
     for i in 0..seq_len {
         let row_sum: f32 = attn[i * seq_len..(i + 1) * seq_len].iter().sum();
@@ -92,7 +93,8 @@ fn proof_ega_low_energy_suppressed() {
     // Position 0 has very low energy, position 3 has high energy
     let energy = vec![-5.0, 0.0, 0.0, 5.0];
 
-    gate.gate_attention(&mut attn, &energy, seq_len);
+    let mut gate_buf = vec![0.0; seq_len];
+    gate.gate_attention(&mut attn, &energy, seq_len, &mut gate_buf);
 
     // Row 0: check that position 0 (low energy) has less weight than position 3 (high energy)
     let low_weight = attn[0]; // key position 0, query 0
@@ -119,9 +121,10 @@ fn proof_ega_high_energy_preserved() {
     let energy = vec![100.0, 100.0, 100.0];
 
     let original = attn.clone();
-    gate.gate_attention(&mut attn, &energy, seq_len);
+    let mut gate_buf = vec![0.0; seq_len];
+    gate.gate_attention(&mut attn, &energy, seq_len, &mut gate_buf);
 
-    // With all-equal energy, z-normalize gives all-zeros, sigmoid gives all 0.5,
+    // With all-equal energy, z-normalize gives all-zeros, sigmoid
     // so all weights are gated equally → attention stays uniform
     for i in 0..seq_len * seq_len {
         assert!(
@@ -190,7 +193,8 @@ fn proof_ega_zero_wproj_uniform() {
     // Attention weights remain uniform after gating
     let mut attn = uniform_attention(seq_len);
     let original = attn.clone();
-    gate.gate_attention(&mut attn, &energy, seq_len);
+    let mut gate_buf = vec![0.0; seq_len];
+    gate.gate_attention(&mut attn, &energy, seq_len, &mut gate_buf);
 
     for i in 0..seq_len * seq_len {
         assert!(

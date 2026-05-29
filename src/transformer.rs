@@ -266,6 +266,8 @@ pub struct KVLayerSnapshot {
 /// Pre-allocated buffers for zero-alloc forward passes.
 /// Create once, reuse across calls.
 pub struct ForwardContext {
+    // ── u64-aligned fields first (Vec, usize, arrays) ──────────────
+    // Grouped by alignment to eliminate inter-field padding.
     pub(crate) x: Vec<f32>,        // [n_embd] main activation
     pub(crate) xr: Vec<f32>,       // [n_embd] residual
     pub(crate) xr2: Vec<f32>,      // [n_embd] residual 2
@@ -280,8 +282,6 @@ pub struct ForwardContext {
     pub hidden_state: Vec<f32>,    // [n_embd] final hidden state (Plan 009 compat)
     /// LoRA intermediate buffer [lora_rank]. Pre-allocated, zero alloc in hot path.
     pub lora_buf: Vec<f32>,
-    /// Pre-computed attention scale: `1.0 / sqrt(head_dim)`. Constant per config.
-    attn_scale: f32,
     // CNA: contrastive neuron attribution runtime modulator (Plan 087)
     #[cfg(feature = "cna_steering")]
     pub cna_modulator: Option<crate::pruners::CnaModulator>,
@@ -312,8 +312,6 @@ pub struct ForwardContext {
     // MLS Multi-Layer Sum aggregation (Plan 104: Research 68)
     #[cfg(feature = "mls_aggregate")]
     mls_buf: Vec<f32>, // [n_embd] accumulator for last K layer residuals
-    #[cfg(feature = "mls_aggregate")]
-    mls_count: usize, // How many layers accumulated
     // Tiled attention: pre-allocated repacking buffers for forward_prefill (Plan 115)
     // Layout: [block_size × n_embd] (Q/out) or [block_size × kv_dim] (K/V)
     // Data is repacked from (position, head) → (head, position) for tiled_attention_batched
@@ -331,9 +329,6 @@ pub struct ForwardContext {
     topk_output_buf: Vec<usize>,  // [topk] output indices buffer
     // Loop residual: saves h^(τ-1) for residual gating across weight-shared loops
     pub(crate) prev_h: Vec<f32>, // [n_embd]
-    // GQA lookup: kv_group_lut[h] = h * n_kv_head / n_head (pre-computed once)
-    kv_group_lut: [usize; 64], // fixed-size LUT for GQA head→kv_group mapping
-    _kv_group_lut_count: usize, // actual number of heads (n_head)
     // Delta routing: pre-allocated source_refs index buffer (stores block indices, not slices)
     #[cfg(feature = "delta_routing")]
     delta_source_indices: Vec<usize>, // pre-allocated capacity for max sources
@@ -349,6 +344,14 @@ pub struct ForwardContext {
     tf_y_buf: Vec<f32>, // [n_embd] temp buffer for window output
     #[cfg(feature = "tf_loop")]
     tf_stash_x: Vec<f32>, // [n_embd] stash for KV cache write
+    // GQA lookup: kv_group_lut[h] = h * n_kv_head / n_head (pre-computed once)
+    kv_group_lut: [usize; 64], // fixed-size LUT for GQA head→kv_group mapping
+    _kv_group_lut_count: usize, // actual number of heads (n_head)
+    #[cfg(feature = "mls_aggregate")]
+    mls_count: usize, // How many layers accumulated
+    // ── f32 fields last (4-byte aligned, no padding before) ──────────
+    /// Pre-computed attention scale: `1.0 / sqrt(head_dim)`. Constant per config.
+    attn_scale: f32,
 }
 
 impl ForwardContext {
@@ -369,7 +372,6 @@ impl ForwardContext {
             cdf: vec![0.0; config.vocab_size],
             hidden_state: vec![0.0; config.n_embd],
             lora_buf: vec![0.0; config.lora_rank],
-            attn_scale: 1.0 / (config.head_dim as f32).sqrt(),
             #[cfg(feature = "cna_steering")]
             cna_modulator: None,
             #[cfg(feature = "sparse_mlp")]
@@ -393,8 +395,6 @@ impl ForwardContext {
             coda_partial_sums: vec![0.0; 1], // Single-block partial RMS (Plan 103)
             #[cfg(feature = "mls_aggregate")]
             mls_buf: vec![0.0; config.n_embd],
-            #[cfg(feature = "mls_aggregate")]
-            mls_count: 0,
             #[cfg(feature = "tiled_attention")]
             tiled_q: vec![0.0; config.block_size * config.n_embd],
             #[cfg(feature = "tiled_attention")]
@@ -403,7 +403,6 @@ impl ForwardContext {
             tiled_v: vec![0.0; config.block_size * kvd],
             #[cfg(feature = "tiled_attention")]
             tiled_out: vec![0.0; config.block_size * config.n_embd],
-            prev_h: vec![0.0; config.n_embd],
             cluster_scores_buf: vec![
                 0.0;
                 config.vocab_size.div_ceil(config.mtp_cluster_size.max(1))
@@ -413,16 +412,7 @@ impl ForwardContext {
                 config.vocab_size.div_ceil(config.mtp_cluster_size.max(1))
             ],
             topk_output_buf: Vec::new(),
-            kv_group_lut: {
-                let n_head = config.n_head;
-                let n_kv_head = config.n_kv_head;
-                let mut lut = [0usize; 64];
-                for (h, slot) in lut.iter_mut().enumerate().take(n_head.min(64)) {
-                    *slot = h * n_kv_head / n_head;
-                }
-                lut
-            },
-            _kv_group_lut_count: config.n_head,
+            prev_h: vec![0.0; config.n_embd],
             #[cfg(feature = "delta_routing")]
             delta_source_indices: {
                 let block_size = 4; // Default B=4
@@ -439,6 +429,19 @@ impl ForwardContext {
             tf_y_buf: vec![0.0f32; config.n_embd],
             #[cfg(feature = "tf_loop")]
             tf_stash_x: vec![0.0f32; config.n_embd],
+            kv_group_lut: {
+                let n_head = config.n_head;
+                let n_kv_head = config.n_kv_head;
+                let mut lut = [0usize; 64];
+                for (h, slot) in lut.iter_mut().enumerate().take(n_head.min(64)) {
+                    *slot = h * n_kv_head / n_head;
+                }
+                lut
+            },
+            _kv_group_lut_count: config.n_head,
+            #[cfg(feature = "mls_aggregate")]
+            mls_count: 0,
+            attn_scale: 1.0 / (config.head_dim as f32).sqrt(),
         }
     }
 
@@ -3614,8 +3617,10 @@ impl RavenKVCache {
     pub fn reset(&mut self) {
         self.keys.fill(0.0);
         self.values.fill(0.0);
-        self.router_scored.clear();
-        self.router_r_t.clear();
+        // Use fill() instead of clear() to preserve pre-allocated capacity.
+        // clear() drops len to 0, forcing reallocation on next use via resize.
+        self.router_scored.fill((0, 0.0));
+        self.router_r_t.fill(0.0);
         self.readout_scores.fill(0.0);
         self.readout_output.fill(0.0);
     }

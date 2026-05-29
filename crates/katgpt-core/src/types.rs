@@ -1660,16 +1660,19 @@ pub fn sample_token(probs: &[f32], rng: &mut Rng) -> usize {
         return 0;
     }
 
-    // Build cumulative sum array — pre-allocated to exact size
-    let mut cdf = Vec::with_capacity(n);
+    // Build cumulative sum array — pre-allocated, direct write avoids per-push bounds check
+    let mut cdf = vec![0.0f32; n];
     let mut sum = 0.0f32;
-    for &p in probs.iter() {
+    for (i, &p) in probs.iter().enumerate() {
         sum += p;
-        cdf.push(sum);
+        // SAFETY: cdf has length n, i < n by enumeration
+        unsafe {
+            *cdf.get_unchecked_mut(i) = sum;
+        }
     }
 
     // Binary search: find the first index where cdf[i] > r
-    match cdf.binary_search_by(|&c| {
+    match cdf[..n].binary_search_by(|&c| {
         if c > r {
             std::cmp::Ordering::Greater
         } else {
@@ -1729,12 +1732,12 @@ pub struct LoraAdapter {
     pub in_dim: usize,
     /// Output dimension.
     pub out_dim: usize,
+    /// Scaling factor (alpha / rank).
+    pub alpha: f32,
     /// Down-projection: [rank × in_dim]
     pub a: Vec<f32>,
     /// Up-projection: [out_dim × rank]
     pub b: Vec<f32>,
-    /// Scaling factor (alpha / rank).
-    pub alpha: f32,
 }
 
 impl LoraAdapter {
@@ -1807,12 +1810,12 @@ impl LoraAdapter {
             .collect();
 
         Ok(Self {
-            a,
-            b,
             rank,
-            alpha,
             in_dim,
             out_dim,
+            alpha,
+            a,
+            b,
         })
     }
 
@@ -1935,12 +1938,12 @@ impl LoraAdapter {
                 let out_dim = b_rows;
 
                 adapters.push(Self {
-                    a,
-                    b,
                     rank,
-                    alpha,
                     in_dim,
                     out_dim,
+                    alpha,
+                    a,
+                    b,
                 });
             }
         }
@@ -2076,7 +2079,7 @@ impl DomainLatent {
         ) as usize;
         offset += 4;
 
-        // Embedding data
+        // Embedding data — bulk copy on LE targets, element-by-element otherwise
         let embed_bytes = kv_dim * std::mem::size_of::<f32>();
         if offset + embed_bytes > payload_end {
             return Err(format!(
@@ -2084,10 +2087,28 @@ impl DomainLatent {
             ));
         }
 
-        let embedding: Vec<f32> = data[offset..offset + embed_bytes]
-            .chunks_exact(4)
-            .map(|c| f32::from_le_bytes(c.try_into().expect("chunk is 4 bytes")))
-            .collect();
+        let embedding: Vec<f32> = {
+            #[cfg(target_endian = "little")]
+            {
+                let mut v = Vec::with_capacity(kv_dim);
+                unsafe {
+                    std::ptr::copy_nonoverlapping(
+                        data[offset..].as_ptr(),
+                        v.as_mut_ptr() as *mut u8,
+                        embed_bytes,
+                    );
+                    v.set_len(kv_dim);
+                }
+                v
+            }
+            #[cfg(not(target_endian = "little"))]
+            {
+                data[offset..offset + embed_bytes]
+                    .chunks_exact(4)
+                    .map(|c| f32::from_le_bytes(c.try_into().expect("chunk is 4 bytes")))
+                    .collect()
+            }
+        };
 
         if embedding.len() != kv_dim {
             return Err(format!(
@@ -2109,8 +2130,21 @@ impl DomainLatent {
         buf.extend_from_slice(Self::MAGIC);
         buf.push(Self::VERSION);
         buf.extend_from_slice(&(kv_dim as u32).to_le_bytes());
-        for &val in &self.embedding {
-            buf.extend_from_slice(&val.to_le_bytes());
+        // Bulk write embedding data — avoids per-element extend_from_slice overhead.
+        // SAFETY: f32 is plain-old-data with no padding; to_ne_bytes gives [u8; 4] per f32.
+        // On LE targets (all Apple Silicon, all modern x86), to_ne_bytes == to_le_bytes.
+        #[cfg(target_endian = "little")]
+        {
+            let bytes = unsafe {
+                std::slice::from_raw_parts(self.embedding.as_ptr() as *const u8, embed_bytes)
+            };
+            buf.extend_from_slice(bytes);
+        }
+        #[cfg(not(target_endian = "little"))]
+        {
+            for &val in &self.embedding {
+                buf.extend_from_slice(&val.to_le_bytes());
+            }
         }
 
         let hash = blake3::hash(&buf);

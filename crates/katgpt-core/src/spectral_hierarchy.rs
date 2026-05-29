@@ -194,29 +194,24 @@ fn top_k_eigenvectors(mat: &[f32], n: usize, k: usize) -> Vec<Vec<f32>> {
         v[i * n + i] = 1.0;
     }
 
-    // Cyclic Jacobi iteration with convergence check + rotation fused.
+    // Cyclic Jacobi iteration with fused convergence check.
+    // Track max off-diagonal element during the sweep itself to avoid
+    // a separate O(n²) convergence scan per iteration.
     let max_sweeps = 100;
     for _ in 0..max_sweeps {
-        // Check convergence: max off-diagonal element.
-        let mut max_off = 0.0f64;
-        for i in 0..n {
-            for j in (i + 1)..n {
-                let val = a[i * n + j].abs();
-                if val > max_off {
-                    max_off = val;
-                }
-            }
-        }
-        if max_off < 1e-12 {
-            break;
-        }
-
         // Cyclic sweep: rotate all (p, q) pairs.
+        let mut max_off = 0.0f64;
         for p in 0..n {
             for q in (p + 1)..n {
                 let apq = a[p * n + q];
                 if apq.abs() < 1e-12 {
                     continue;
+                }
+
+                // Track max off-diagonal for convergence
+                let apq_abs = apq.abs();
+                if apq_abs > max_off {
+                    max_off = apq_abs;
                 }
 
                 let app = a[p * n + p];
@@ -265,6 +260,11 @@ fn top_k_eigenvectors(mat: &[f32], n: usize, k: usize) -> Vec<Vec<f32>> {
                     v[r * n + q] = -sin_t * vrp + cos_t * vrq;
                 }
             }
+        }
+
+        // Check convergence after sweep (max_off tracked during rotations)
+        if max_off < 1e-12 {
+            break;
         }
     }
 

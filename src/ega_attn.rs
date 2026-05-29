@@ -163,12 +163,18 @@ impl EgaGate {
     ///
     /// **Note:** This allocates a gate buffer internally. For decode loops, prefer
     /// [`gate_attention_into`] to avoid per-call heap allocation.
-    pub fn gate_attention(&self, attn_weights: &mut [f32], energy: &[f32], seq_len: usize) {
+    pub fn gate_attention(
+        &self,
+        attn_weights: &mut [f32],
+        energy: &[f32],
+        seq_len: usize,
+        gate_buf: &mut [f32],
+    ) {
         assert_eq!(attn_weights.len(), seq_len * seq_len);
         assert_eq!(energy.len(), seq_len);
+        assert!(gate_buf.len() >= seq_len);
 
-        let mut gate_buf = vec![0.0; seq_len];
-        self.gate_attention_into(attn_weights, energy, seq_len, &mut gate_buf);
+        self.gate_attention_into(attn_weights, energy, seq_len, gate_buf);
     }
 
     /// Zero-alloc variant of [`gate_attention`] that reuses a pre-allocated gate buffer.
@@ -275,7 +281,8 @@ mod tests {
         let mut attn = vec![1.0 / seq_len as f32; seq_len * seq_len];
         let energy = vec![1.0, 2.0, 3.0, 4.0];
 
-        gate.gate_attention(&mut attn, &energy, seq_len);
+        let mut gate_buf = vec![0.0; seq_len];
+        gate.gate_attention(&mut attn, &energy, seq_len, &mut gate_buf);
 
         // Each row should sum to 1
         for i in 0..seq_len {

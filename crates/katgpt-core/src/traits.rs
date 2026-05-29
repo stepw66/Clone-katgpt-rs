@@ -275,7 +275,8 @@ impl<S: GameState> RolloutPolicy<S> for RandomRolloutPolicy {
 #[derive(Clone, Debug, Default)]
 pub struct ActionSpaceLog {
     /// (tick, player_id, action_count) entries.
-    entries: Vec<(u32, u8, usize)>,
+    /// Field order: usize (8B) → u32 (4B) → u8 (1B) = 16B vs 24B with (u32, u8, usize).
+    entries: Vec<(usize, u32, u8)>,
 }
 
 impl ActionSpaceLog {
@@ -296,7 +297,7 @@ impl ActionSpaceLog {
     /// Record action space size for a player at the current tick.
     pub fn record<S: GameState>(&mut self, state: &S, player_id: u8) {
         self.entries
-            .push((state.tick(), player_id, state.action_space_size(player_id)));
+            .push((state.action_space_size(player_id), state.tick(), player_id));
     }
 
     /// Total number of recorded entries.
@@ -314,7 +315,7 @@ impl ActionSpaceLog {
         match self.entries.is_empty() {
             true => 0.0,
             false => {
-                self.entries.iter().map(|&(_, _, n)| n as f32).sum::<f32>()
+                self.entries.iter().map(|&(n, _, _)| n as f32).sum::<f32>()
                     / self.entries.len() as f32
             }
         }
@@ -325,7 +326,7 @@ impl ActionSpaceLog {
     pub fn avg_action_space_for(&self, player_id: u8) -> f32 {
         let mut sum = 0.0f32;
         let mut count = 0usize;
-        for &(_, pid, n) in &self.entries {
+        for &(n, _, pid) in &self.entries {
             if pid == player_id {
                 sum += n as f32;
                 count += 1;
@@ -336,7 +337,7 @@ impl ActionSpaceLog {
 
     /// Peak (maximum) action space size recorded.
     pub fn peak_action_space(&self) -> usize {
-        self.entries.iter().map(|&(_, _, n)| n).max().unwrap_or(0)
+        self.entries.iter().map(|&(n, _, _)| n).max().unwrap_or(0)
     }
 
     /// Clear all entries.

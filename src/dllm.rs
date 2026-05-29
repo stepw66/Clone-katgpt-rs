@@ -710,6 +710,11 @@ struct BackwardContext {
     d_k: Vec<f32>,
     d_v: Vec<f32>,
     d_after_norm2: Vec<f32>,
+    /// Pre-allocated gradient accumulator — cleared + reused per backward call
+    /// instead of allocating 9 Vecs each time.
+    grads: TrainingGradients,
+    /// Scratch buffer for masked_loss exp computation (avoids per-call allocation)
+    loss_exp_buf: Vec<f32>,
 }
 
 impl BackwardContext {
@@ -733,6 +738,8 @@ impl BackwardContext {
             d_k: vec![0.0f32; config.block_size * kvd],
             d_v: vec![0.0f32; config.block_size * kvd],
             d_after_norm2: vec![0.0f32; config.block_size * n],
+            grads: TrainingGradients::zeros(config),
+            loss_exp_buf: vec![0.0f32; config.vocab_size],
         }
     }
 }
@@ -932,7 +939,7 @@ fn backward(
     is_masked: &[bool],
     config: &Config,
     bctx: &mut BackwardContext,
-) -> TrainingGradients {
+) {
     let seq_len = act.seq_len;
     let n = config.n_embd;
     let hd = config.head_dim;
@@ -944,7 +951,17 @@ fn backward(
     let scale = 1.0 / (hd as f32).sqrt();
     let layer = &weights.layers[0];
 
-    let mut grads = TrainingGradients::zeros(config);
+    // Reuse pre-allocated gradient accumulator — clear instead of allocating 9 Vecs
+    let grads = &mut bctx.grads;
+    grads.wte.fill(0.0);
+    grads.wpe.fill(0.0);
+    grads.lm_head.fill(0.0);
+    grads.attn_wq.fill(0.0);
+    grads.attn_wk.fill(0.0);
+    grads.attn_wv.fill(0.0);
+    grads.attn_wo.fill(0.0);
+    grads.mlp_w1.fill(0.0);
+    grads.mlp_w2.fill(0.0);
 
     // Reuse pre-allocated intermediate gradient buffers (Issue 109)
     bctx.d_attn_out[..seq_len * n].fill(0.0);
@@ -1222,8 +1239,6 @@ fn backward(
         );
         crate::simd::simd_add_inplace(&mut grads.wpe[p * n..p * n + n], &bctx.d_rmsnorm_buf[..n]);
     }
-
-    grads
 }
 
 /// SGD update: w -= lr * grad
@@ -1243,17 +1258,17 @@ fn sgd_update(weights: &mut TransformerWeights, grads: &TrainingGradients, lr: f
 }
 
 /// Compute cross-entropy loss on masked positions.
-fn masked_loss(
+/// Uses pre-allocated scratch buffer from `bctx.loss_exp_buf` to avoid per-call allocation.
+fn masked_loss_into(
     logits: &[f32],
     targets: &[usize],
     is_masked: &[bool],
     vocab: usize,
     _averaging: LossAveraging,
+    exp_buf: &mut [f32],
 ) -> f32 {
     let mut total = 0.0f32;
     let mut count = 0usize;
-    // Pre-allocate scratch buffer for SIMD exp (reused across masked positions)
-    let mut exp_buf = vec![0.0f32; vocab];
     for (p, &masked) in is_masked.iter().enumerate() {
         if !masked {
             continue;
@@ -1274,6 +1289,18 @@ fn masked_loss(
     } else {
         total / count as f32
     }
+}
+
+/// Allocating wrapper — prefer `masked_loss_into` in hot paths.
+fn masked_loss(
+    logits: &[f32],
+    targets: &[usize],
+    is_masked: &[bool],
+    vocab: usize,
+    averaging: LossAveraging,
+) -> f32 {
+    let mut exp_buf = vec![0.0f32; vocab];
+    masked_loss_into(logits, targets, is_masked, vocab, averaging, &mut exp_buf)
 }
 
 /// Measure accuracy: fraction of correctly predicted masked tokens.
@@ -1400,15 +1427,16 @@ pub fn train_mini_dllm(
             }
 
             let act = forward_save(&weights, &corrupted_buf, config, &mut fwd_ctx);
-            let loss = masked_loss(
+            let loss = masked_loss_into(
                 act.logits,
                 tokens,
                 &is_masked_buf,
                 config.vocab_size,
                 LossAveraging::Global,
+                &mut bwd_ctx.loss_exp_buf,
             );
-            let grads = backward(&act, &weights, tokens, &is_masked_buf, config, &mut bwd_ctx);
-            sgd_update(&mut weights, &grads, lr);
+            backward(&act, &weights, tokens, &is_masked_buf, config, &mut bwd_ctx);
+            sgd_update(&mut weights, &bwd_ctx.grads, lr);
 
             epoch_loss += loss;
             n_samples += 1;
@@ -1503,19 +1531,20 @@ pub fn train_mini_dllm_adaptive(
             }
 
             let act = forward_save(&weights, &corrupted_buf, config, &mut fwd_ctx);
-            let loss = masked_loss(
+            let loss = masked_loss_into(
                 act.logits,
                 tokens,
                 &is_masked_buf,
                 config.vocab_size,
                 LossAveraging::Global,
+                &mut bwd_ctx.loss_exp_buf,
             );
 
             // Record per-block loss for adaptive schedule
             schedule.record_step_loss(block_idx, loss);
 
-            let grads = backward(&act, &weights, tokens, &is_masked_buf, config, &mut bwd_ctx);
-            sgd_update(&mut weights, &grads, lr);
+            backward(&act, &weights, tokens, &is_masked_buf, config, &mut bwd_ctx);
+            sgd_update(&mut weights, &bwd_ctx.grads, lr);
 
             epoch_loss += loss;
             n_samples += 1;
@@ -1915,14 +1944,18 @@ impl DenoiseConstraint for NoConstraint {
 }
 
 /// No-repeat constraint: tokens must be unique in the sequence.
+/// Uses branch-free `bool as usize` for the hot-path check instead of iterator scan.
 pub struct NoRepeatConstraint;
 
 impl DenoiseConstraint for NoRepeatConstraint {
     fn is_valid(&self, position: usize, token: usize, current_tokens: &[usize]) -> bool {
-        current_tokens
-            .iter()
-            .enumerate()
-            .all(|(i, t)| i == position || *t != token)
+        // Branch-free: count matches, valid only if the sole match is at our own position.
+        // Uses `bool as usize` to avoid branches in the inner loop.
+        let mut conflict = 0usize;
+        for (i, t) in current_tokens.iter().enumerate() {
+            conflict += ((*t == token) && (i != position)) as usize;
+        }
+        conflict == 0
     }
 }
 
@@ -2252,12 +2285,12 @@ mod tests {
             "Loss should be positive and finite: {loss}"
         );
 
-        let grads = backward(&act, &weights, &tokens, &is_masked, &config, &mut bwd_ctx);
+        backward(&act, &weights, &tokens, &is_masked, &config, &mut bwd_ctx);
 
         // Gradients should be non-zero for weights that affect masked positions
-        let has_wte_grad = grads.wte.iter().any(|&g| g != 0.0);
-        let has_lm_head_grad = grads.lm_head.iter().any(|&g| g != 0.0);
-        let has_wq_grad = grads.attn_wq.iter().any(|&g| g != 0.0);
+        let has_wte_grad = bwd_ctx.grads.wte.iter().any(|&g| g != 0.0);
+        let has_lm_head_grad = bwd_ctx.grads.lm_head.iter().any(|&g| g != 0.0);
+        let has_wq_grad = bwd_ctx.grads.attn_wq.iter().any(|&g| g != 0.0);
 
         assert!(has_wte_grad, "Embedding gradients should be non-zero");
         assert!(has_lm_head_grad, "LM head gradients should be non-zero");
@@ -2286,8 +2319,8 @@ mod tests {
         );
 
         // One SGD step
-        let grads = backward(&act0, &weights, &tokens, &is_masked, &config, &mut bwd_ctx);
-        sgd_update(&mut weights, &grads, 0.01);
+        backward(&act0, &weights, &tokens, &is_masked, &config, &mut bwd_ctx);
+        sgd_update(&mut weights, &bwd_ctx.grads, 0.01);
 
         // Compute new loss
         let act1 = forward_save(&weights, &tokens, &config, &mut fwd_ctx);
@@ -2653,7 +2686,7 @@ mod replaid_tests {
                     config.vocab_size,
                     LossAveraging::Global,
                 );
-                let grads = backward(
+                backward(
                     &act,
                     &weights_fixed,
                     tokens,
@@ -2661,7 +2694,7 @@ mod replaid_tests {
                     &config,
                     &mut bwd_ctx,
                 );
-                sgd_update(&mut weights_fixed, &grads, lr);
+                sgd_update(&mut weights_fixed, &bwd_ctx.grads, lr);
                 step_losses.push(loss);
             }
 
@@ -2731,7 +2764,7 @@ mod replaid_tests {
                     LossAveraging::Global,
                 );
                 schedule2.record_step_loss(block_idx, loss);
-                let grads = backward(
+                backward(
                     &act,
                     &weights_adaptive,
                     tokens,
@@ -2739,7 +2772,7 @@ mod replaid_tests {
                     &config,
                     &mut bwd_ctx2,
                 );
-                sgd_update(&mut weights_adaptive, &grads, lr);
+                sgd_update(&mut weights_adaptive, &bwd_ctx2.grads, lr);
                 step_losses.push(loss);
                 sample_counter += 1;
             }

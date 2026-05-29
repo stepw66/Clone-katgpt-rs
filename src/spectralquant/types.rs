@@ -48,10 +48,10 @@ pub struct WaterfillAllocation {
     pub use_water_fill: bool,
     /// Per-dim minimum bits.
     pub min_bits: u8,
-    /// Per-dim maximum bits (None = uncapped).
-    pub max_bits: Option<u8>,
     /// Formula version tag for serialization.
     pub formula_version: u8,
+    /// Per-dim maximum bits (None = uncapped).
+    pub max_bits: Option<u8>,
 }
 
 /// Per-layer SpectralQuant state: calibration + fitted codebooks.
@@ -94,16 +94,16 @@ pub struct SpectralQuantKVCacheConfig {
     pub kv_dim: usize,
     /// Maximum sequence length.
     pub max_seq_len: usize,
-    /// Average bits per coordinate across all dimensions.
-    pub avg_bits: f32,
+    /// Whether to use water-fill allocation (v2).
+    pub use_water_fill: bool,
     /// Minimum bits for tail dimensions.
     pub min_tail_bits: u8,
     /// Maximum bits per dimension.
     pub max_bits: u8,
-    /// Whether to use water-fill allocation (v2).
-    pub use_water_fill: bool,
     /// Water-fill minimum bits per dim.
     pub wf_min_bits: u8,
     /// Water-fill maximum bits per dim.
     pub wf_max_bits: u8,
+    /// Average bits per coordinate across all dimensions.
+    pub avg_bits: f32,
 }

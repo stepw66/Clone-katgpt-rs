@@ -215,7 +215,7 @@ pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
 #[cfg(all(feature = "turboquant", feature = "maxsim"))]
 pub fn maxsim_score_turboquant(
     queries: &[f32],
-    cache: &super::kv_cache::TurboQuantKVCache,
+    cache: &mut super::kv_cache::TurboQuantKVCache,
     layer: usize,
     pos_range: std::ops::Range<usize>,
     dim: usize,
@@ -225,17 +225,19 @@ pub fn maxsim_score_turboquant(
         return 0.0;
     }
 
+    // Pre-allocate a single scratch buffer for lazy dequantization.
+    // Avoids allocating a Vec<f32> per position in the inner loop.
+    let mut key_buf = vec![0.0f32; cache.kv_dim()];
+
     let mut score = 0.0f32;
     for i in 0..lq {
         let q_row = &queries[i * dim..(i + 1) * dim];
         let mut my_max = f32::NEG_INFINITY;
         for t in pos_range.clone() {
-            // Lazy dequantize: only one key vector in memory at a time.
-            // This is the "streaming over doc tokens" pattern from maxsim.metal —
-            // same O(dim) peak memory, but on CPU with simd_dot_f32 instead of
-            // Metal simdgroup_matrix.
-            let key = cache.dequantize_key(layer, t);
-            let dot = crate::simd::simd_dot_f32(q_row, &key, dim);
+            // Lazy dequantize into pre-allocated buffer: O(dim) peak memory,
+            // zero heap allocation per position. Matches maxsim.metal streaming pattern.
+            cache.dequantize_key_into(layer, t, &mut key_buf);
+            let dot = crate::simd::simd_dot_f32(q_row, &key_buf[..dim], dim);
             my_max = my_max.max(dot);
         }
         score += my_max;

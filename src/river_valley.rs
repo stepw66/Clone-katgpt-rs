@@ -122,8 +122,10 @@ pub fn effective_rank(matrix: &[f32], rows: usize, cols: usize) -> f32 {
 /// Uses a simple Jacobi eigenvalue iteration (sufficient for small matrices
 /// in diagnostic use-cases).
 fn erank_from_gram(gram: &[f32], n: usize) -> f32 {
-    // Extract eigenvalues via Jacobi rotation (simplified)
-    let eigenvalues = jacobi_eigenvalues(gram, n);
+    // Pre-allocate scratch + output, pass to jacobi to avoid double allocation
+    let mut eigenvalues = vec![0.0f32; n];
+    let mut scratch = vec![0.0f32; n * n];
+    jacobi_eigenvalues_into(gram, n, &mut eigenvalues, &mut scratch);
 
     // Sum of eigenvalues (= trace of gram = sum of squared singular values)
     let sum_ev: f32 = eigenvalues.iter().sum();
@@ -146,16 +148,21 @@ fn erank_from_gram(gram: &[f32], n: usize) -> f32 {
 /// Jacobi eigenvalue algorithm — returns eigenvalues of an n×n symmetric matrix.
 ///
 /// Runs a fixed number of sweeps (sufficient for convergence on small matrices).
-fn jacobi_eigenvalues(mat: &[f32], n: usize) -> Vec<f32> {
+///
+/// Writes eigenvalues into `out[..n]`. Caller provides `scratch[..n*n]` to avoid
+/// per-call allocation.
+fn jacobi_eigenvalues_into(mat: &[f32], n: usize, out: &mut [f32], scratch: &mut [f32]) {
     if n == 0 {
-        return Vec::new();
+        return;
     }
     if n == 1 {
-        return vec![mat[0]];
+        out[0] = mat[0];
+        return;
     }
 
-    // Work on a copy
-    let mut a = mat.to_vec();
+    // Work on a copy in caller-provided scratch
+    scratch[..n * n].copy_from_slice(&mat[..n * n]);
+    let a = &mut scratch[..n * n];
 
     // Jacobi rotations: 20 sweeps is plenty for small diagnostic matrices
     let sweeps = 20;
@@ -204,11 +211,17 @@ fn jacobi_eigenvalues(mat: &[f32], n: usize) -> Vec<f32> {
     }
 
     // Eigenvalues are on the diagonal
-    let mut eigenvalues = vec![0.0f32; n];
     for i in 0..n {
-        eigenvalues[i] = a[i * n + i].max(0.0);
+        out[i] = a[i * n + i].max(0.0);
     }
-    eigenvalues
+}
+
+/// Allocating wrapper — prefer `jacobi_eigenvalues_into` in hot paths.
+fn jacobi_eigenvalues(mat: &[f32], n: usize) -> Vec<f32> {
+    let mut out = vec![0.0f32; n];
+    let mut scratch = vec![0.0f32; n * n];
+    jacobi_eigenvalues_into(mat, n, &mut out, &mut scratch);
+    out
 }
 
 /// Average cosine similarity between consecutive updates.

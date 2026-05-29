@@ -408,6 +408,19 @@ impl Default for UnderspecConfig {
 
 // ── T3: SufficientSetFinder ──────────────────────────────────────
 
+/// Pre-computed identity index array [0, 1, 2, ..., 255].
+/// Used as the candidate token list for bounded-vocab (≤256) CSPs.
+/// Constructed once as a const instead of per-function `std::array::from_fn`.
+const CANDIDATE_INDICES: [usize; 256] = {
+    let mut arr = [0usize; 256];
+    let mut i = 0usize;
+    while i < 256 {
+        arr[i] = i;
+        i += 1;
+    }
+    arr
+};
+
 /// Find minimal set of additional tokens that, if known, would
 /// break underspecification for the target position.
 ///
@@ -424,8 +437,7 @@ pub fn find_sufficient_set(
 
     let limit = 256.min(vocab_size);
 
-    // Stack-allocated candidate index array — avoids heap allocation for bounded vocab.
-    let candidates: [usize; 256] = std::array::from_fn(|i| i);
+    // Pre-computed candidate index array — no per-call construction.
     let mut batch_buf = [false; 256];
 
     // Pre-compute extension counts for ALL candidates once (O(n × sample_size))
@@ -447,7 +459,7 @@ pub fn find_sufficient_set(
                 depth + 1,
                 &ext_buf,
                 vocab_size,
-                &candidates[..limit],
+                &CANDIDATE_INDICES[..limit],
                 &mut batch_buf[..limit],
             );
             Some((tok, count))
@@ -510,10 +522,9 @@ fn score_relevance_into(
     let limit = vocab_size.min(256).min(buf.len());
     // Use a stack-allocated bool buffer to batch the validation
     let mut valid = [false; 256];
-    let candidates: [usize; 256] = std::array::from_fn(|i| i);
     pruner.batch_is_valid(
         depth,
-        &candidates[..limit],
+        &CANDIDATE_INDICES[..limit],
         placed_tokens,
         &mut valid[..limit],
     );
