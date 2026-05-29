@@ -31,7 +31,7 @@ The key insight from the paper: each pre-norm transformer layer is a forward Eul
       KStageRK { beta: f32 },  // default β=0.5
   }
   ```
-- [ ] T1: Add `IterationMode` enum (block vs layer)
+- [x] T1: Add `IterationMode` enum (block vs layer)
   ```rust
   /// How loop iterations are applied to the window.
   #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
