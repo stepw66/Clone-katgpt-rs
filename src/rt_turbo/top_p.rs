@@ -73,20 +73,37 @@ pub struct DynamicTopPResult {
 /// - Empty input -> empty output.
 /// - All identical scores -> uniform distribution.
 /// - Very large scores (1e6+) -> handled via max-subtraction.
+fn softmax_scores_into(scores: &[f32], out: &mut [f32]) {
+    if scores.is_empty() {
+        return;
+    }
+
+    let max_val = scores.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+    let mut sum = 0.0f32;
+    for (i, &s) in scores.iter().enumerate() {
+        let e = (s - max_val).exp();
+        out[i] = e;
+        sum += e;
+    }
+    if sum > 0.0 {
+        let inv = 1.0 / sum;
+        for v in out.iter_mut() {
+            *v *= inv;
+        }
+    } else {
+        out.fill(0.0);
+    }
+}
+
+/// Allocating softmax — prefer `softmax_scores_into` in hot paths.
 fn softmax_scores(scores: &[f32]) -> Vec<f32> {
     if scores.is_empty() {
         return vec![];
     }
 
-    let max_val = scores.iter().copied().fold(f32::NEG_INFINITY, f32::max);
-
-    let exps: Vec<f32> = scores.iter().map(|&s| (s - max_val).exp()).collect();
-    let sum: f32 = exps.iter().copied().sum();
-
-    match sum {
-        s if s > 0.0 => exps.iter().map(|&e| e / s).collect(),
-        _ => vec![0.0; scores.len()],
-    }
+    let mut out = vec![0.0f32; scores.len()];
+    softmax_scores_into(scores, &mut out);
+    out
 }
 
 // ---------------------------------------------------------------------------
@@ -159,8 +176,8 @@ pub fn select_top_p(scores: &[f32], top_p: f32) -> DynamicTopPResult {
 
     // Accumulate until cumulative mass >= threshold
     let mut cumsum = 0.0f32;
-    let mut selected_indices = Vec::new();
-    let mut selected_probs = Vec::new();
+    let mut selected_indices = Vec::with_capacity(indexed.len());
+    let mut selected_probs = Vec::with_capacity(indexed.len());
 
     for entry in &indexed {
         selected_indices.push(entry.idx);
@@ -420,12 +437,15 @@ mod tests {
 
         // Verify: removing last selected token drops mass below threshold
         if result.selected_probs.len() > 1 {
-            let mass_without_last: f32 =
-                result.selected_probs[..result.selected_probs.len() - 1].iter().copied().sum();
+            let mass_without_last: f32 = result.selected_probs[..result.selected_probs.len() - 1]
+                .iter()
+                .copied()
+                .sum();
             assert!(
                 mass_without_last < threshold,
                 "Mass without last token ({}) should be < {}",
-                mass_without_last, threshold
+                mass_without_last,
+                threshold
             );
         }
 
@@ -474,21 +494,19 @@ mod tests {
         assert!(
             fine.cumulative_mass >= top_p - 1e-6,
             "Fine mass should be >= {}, got {}",
-            top_p, fine.cumulative_mass
+            top_p,
+            fine.cumulative_mass
         );
         assert!(
             block.cumulative_mass >= top_p - 1e-5,
             "Block mass should be >= {}, got {}",
-            top_p, block.cumulative_mass
+            top_p,
+            block.cumulative_mass
         );
 
         // Both should select at least 1 token but not more than total
-        assert!(
-            fine.selected_indices.len() >= 1 && fine.selected_indices.len() <= scores.len()
-        );
-        assert!(
-            block.selected_indices.len() >= 1 && block.selected_indices.len() <= scores.len()
-        );
+        assert!(fine.selected_indices.len() >= 1 && fine.selected_indices.len() <= scores.len());
+        assert!(block.selected_indices.len() >= 1 && block.selected_indices.len() <= scores.len());
 
         // All indices must be valid
         for &idx in &fine.selected_indices {
@@ -524,7 +542,8 @@ mod tests {
         assert!(
             block.cumulative_mass >= top_p - 1e-5,
             "Blockwise cumulative mass should be >= {}, got {}",
-            top_p, block.cumulative_mass
+            top_p,
+            block.cumulative_mass
         );
 
         for &idx in &block.selected_indices {

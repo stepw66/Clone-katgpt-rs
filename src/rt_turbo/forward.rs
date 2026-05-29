@@ -182,8 +182,9 @@ pub fn forward_rt_turbo_decode(
 
         // Merge with sink indices (union of top-p selected + sinks)
         let mut merged: Vec<usize> = top_p_result.selected_indices;
+        merged.sort_unstable();
         for &sink in &sink_indices {
-            if !merged.contains(&sink) {
+            if merged.binary_search(&sink).is_err() {
                 merged.push(sink);
             }
         }

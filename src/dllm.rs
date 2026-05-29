@@ -322,9 +322,11 @@ pub fn forward_bidirectional_positions(
     let mut xr_all = vec![0.0f32; seq_len * n];
 
     for (p, &token) in tokens.iter().enumerate().take(seq_len) {
-        for i in 0..n {
-            bctx.x[i] = weights.wte[token * n + i] + weights.wpe[p * n + i];
-        }
+        crate::simd::simd_add_into(
+            &mut bctx.x,
+            &weights.wte[token * n..(token + 1) * n],
+            &weights.wpe[p * n..(p + 1) * n],
+        );
         rmsnorm(&mut bctx.x);
         xr_all[p * n..(p + 1) * n].copy_from_slice(&bctx.x);
         rmsnorm(&mut bctx.x);
@@ -373,9 +375,7 @@ pub fn forward_bidirectional_positions(
 
         bctx.x_proj.fill(0.0);
         matmul(&mut bctx.x_proj, &layer.attn_wo, &attn_out_buf, n, n);
-        for i in 0..n {
-            bctx.x_proj[i] += xr_all[p * n + i];
-        }
+        crate::simd::simd_add_inplace(&mut bctx.x_proj, &xr_all[p * n..(p + 1) * n]);
 
         // MLP
         bctx.xr2.copy_from_slice(&bctx.x_proj);
@@ -396,9 +396,7 @@ pub fn forward_bidirectional_positions(
             n,
             config.mlp_hidden,
         );
-        for i in 0..n {
-            bctx.x_mlp[i] += bctx.xr2[i];
-        }
+        crate::simd::simd_add_inplace(&mut bctx.x_mlp, &bctx.xr2);
 
         bctx.logits.fill(0.0);
         matmul(
@@ -468,13 +466,18 @@ fn attention_forward_safe_into(
             all_weights[h * seq_len + t] = scores[t];
         }
 
-        // Weighted value sum
-        for d in 0..head_dim {
-            let mut val = 0.0f32;
-            for t in 0..seq_len {
-                val += scores[t] * v_all[t * kv_dim + kv_off + d];
-            }
-            attn_out[q_off + d] = val;
+        // Weighted value sum: accumulate per-position scaled value rows (SIMD-friendly)
+        // Loop order: t outer → contiguous v_all row access, better cache locality.
+        // Previous d-outer/t-inner order touched a different cache line per t for each d.
+        for t in 0..seq_len {
+            let s = scores[t];
+            let v_row = &v_all[t * kv_dim + kv_off..t * kv_dim + kv_off + head_dim];
+            crate::simd::simd_fused_scale_acc(
+                &mut attn_out[q_off..q_off + head_dim],
+                v_row,
+                s,
+                head_dim,
+            );
         }
     }
 }
@@ -790,9 +793,7 @@ fn forward_save<'a>(
             n,
         );
         // Add residual: x_proj += after_norm1
-        for i in 0..n {
-            ctx.x_proj_buf[i] += ctx.after_norm1[p * n + i];
-        }
+        crate::simd::simd_add_inplace(&mut ctx.x_proj_buf, &ctx.after_norm1[p * n..(p + 1) * n]);
         // after_attn_res = x_proj (the residual output)
         ctx.after_attn_res[p * n..(p + 1) * n].copy_from_slice(&ctx.x_proj_buf[..n]);
 
@@ -818,9 +819,7 @@ fn forward_save<'a>(
             config.mlp_hidden,
         );
         // Add xr2 residual (stored in x_buf)
-        for i in 0..n {
-            ctx.x_mlp_buf[i] += ctx.x_buf[i];
-        }
+        crate::simd::simd_add_inplace(&mut ctx.x_mlp_buf, &ctx.x_buf[..n]);
         ctx.hidden_final[p * n..(p + 1) * n].copy_from_slice(&ctx.x_mlp_buf);
         matmul(
             &mut ctx.logits_all[p * config.vocab_size..],
@@ -1515,9 +1514,11 @@ pub fn forward_block_causal_positions(
     let mut v_buf = vec![0.0f32; kvd];
 
     for (p, &token) in tokens.iter().enumerate().take(seq_len) {
-        for i in 0..n {
-            x_buf[i] = weights.wte[token * n + i] + weights.wpe[p * n + i];
-        }
+        crate::simd::simd_add_into(
+            &mut x_buf,
+            &weights.wte[token * n..(token + 1) * n],
+            &weights.wpe[p * n..(p + 1) * n],
+        );
         rmsnorm(&mut x_buf);
         xr_all[p * n..(p + 1) * n].copy_from_slice(&x_buf);
         rmsnorm(&mut x_buf);
@@ -1576,17 +1577,13 @@ pub fn forward_block_causal_positions(
         }
 
         matmul(&mut x_proj, &layer.attn_wo, &attn_out_buf, n, n);
-        for i in 0..n {
-            x_proj[i] += xr_all[p * n + i];
-        }
+        crate::simd::simd_add_inplace(&mut x_proj, &xr_all[p * n..(p + 1) * n]);
 
         xr2_buf[..n].copy_from_slice(&x_proj[..n]);
         rmsnorm(&mut x_proj);
         matmul_relu(&mut hidden, &layer.mlp_w1, &x_proj, config.mlp_hidden, n);
         matmul(&mut x_mlp, &layer.mlp_w2, &hidden, n, config.mlp_hidden);
-        for i in 0..n {
-            x_mlp[i] += xr2_buf[i];
-        }
+        crate::simd::simd_add_inplace(&mut x_mlp[..n], &xr2_buf[..n]);
 
         matmul(&mut logits, &weights.lm_head, &x_mlp, config.vocab_size, n);
         all_logits.push(logits.clone());
@@ -1735,9 +1732,11 @@ pub fn forward_block_causal_with(
     // Phase A: Fill K/V cache, x_norm, xr for UNCOMMITTED positions only
     for (p, &token) in tokens.iter().enumerate().take(seq_len).skip(committed) {
         // Embedding = wte[token] + wpe[position]
-        for i in 0..n {
-            ctx.x_buf[i] = weights.wte[token * n + i] + weights.wpe[p * n + i];
-        }
+        crate::simd::simd_add_into(
+            &mut ctx.x_buf,
+            &weights.wte[token * n..(token + 1) * n],
+            &weights.wpe[p * n..(p + 1) * n],
+        );
         // First rmsnorm → residual (xr)
         rmsnorm(&mut ctx.x_buf);
         ctx.xr[p * n..(p + 1) * n].copy_from_slice(&ctx.x_buf);
@@ -1782,9 +1781,7 @@ pub fn forward_block_causal_with(
 
         // Attention output projection + residual connection
         matmul(&mut ctx.x_proj_buf, &layer.attn_wo, &ctx.attn_out_buf, n, n);
-        for i in 0..n {
-            ctx.x_proj_buf[i] += ctx.xr[p * n + i];
-        }
+        crate::simd::simd_add_inplace(&mut ctx.x_proj_buf, &ctx.xr[p * n..(p + 1) * n]);
 
         // Save residual before rmsnorm by reusing x_buf (no longer needed this iteration)
         ctx.x_buf.copy_from_slice(&ctx.x_proj_buf);
@@ -1807,9 +1804,7 @@ pub fn forward_block_causal_with(
             n,
             config.mlp_hidden,
         );
-        for i in 0..n {
-            ctx.x_mlp_buf[i] += ctx.x_buf[i];
-        }
+        crate::simd::simd_add_inplace(&mut ctx.x_mlp_buf, &ctx.x_buf[..n]);
 
         // Logits
         matmul(
