@@ -62,14 +62,16 @@ impl NoiseSchedule {
     /// Returns mask ratios per block, monotonically increasing from min to max.
     pub fn monotonic_ratios(&self) -> Vec<f32> {
         match self.n_blocks {
-            0 => vec![],
+            0 => Vec::new(),
             1 => vec![(self.min_ratio + self.max_ratio) / 2.0],
-            _ => (0..self.n_blocks)
-                .map(|i| {
-                    let t = i as f32 / (self.n_blocks - 1) as f32;
-                    self.min_ratio + t * (self.max_ratio - self.min_ratio)
-                })
-                .collect(),
+            n => {
+                let mut ratios = Vec::with_capacity(n);
+                let step = (self.max_ratio - self.min_ratio) / (n - 1) as f32;
+                for i in 0..n {
+                    ratios.push(self.min_ratio + i as f32 * step);
+                }
+                ratios
+            }
         }
     }
 }
@@ -930,20 +932,23 @@ fn backward(
         let logits_p = &act.logits[p * vocab..(p + 1) * vocab];
         let target = tokens[p];
         bctx.d_logits[..vocab].fill(0.0);
-        let max_l = logits_p.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+        let max_l = crate::simd::simd_max_f32(logits_p);
         let sum_exp: f32 = logits_p.iter().map(|l| (l - max_l).exp()).sum();
+        let inv_sum = 1.0 / sum_exp;
         for i in 0..vocab {
-            let prob = (logits_p[i] - max_l).exp() / sum_exp;
+            let prob = (logits_p[i] - max_l).exp() * inv_sum;
             bctx.d_logits[i] = prob - if i == target { 1.0 } else { 0.0 };
         }
 
         // LM Head: d_lm_head += outer(d_logits, hidden_final)
         let hf = &act.hidden_final[p * n..(p + 1) * n];
-        for i in 0..vocab {
-            for j in 0..n {
-                grads.lm_head[i * n + j] += bctx.d_logits[i] * hf[j];
-            }
-        }
+        crate::simd::simd_outer_product_acc(
+            &mut grads.lm_head,
+            &bctx.d_logits[..vocab],
+            hf,
+            vocab,
+            n,
+        );
 
         // d_hidden_final = lm_head^T @ d_logits
         bctx.d_hf[..n].fill(0.0);
@@ -959,11 +964,7 @@ fn backward(
 
         // MLP w2: d_w2 += outer(d_after_mlp, mlp_hidden)
         let mh = &act.mlp_hidden[p * mlp_h..(p + 1) * mlp_h];
-        for i in 0..n {
-            for j in 0..mlp_h {
-                grads.mlp_w2[i * mlp_h + j] += bctx.d_hf[i] * mh[j];
-            }
-        }
+        crate::simd::simd_outer_product_acc(&mut grads.mlp_w2, &bctx.d_hf[..n], mh, n, mlp_h);
         // d_mlp_hidden = w2^T @ d_after_mlp, then ReLU backward
         bctx.d_mh[..mlp_h].fill(0.0);
         for j in 0..mlp_h {
@@ -977,11 +978,7 @@ fn backward(
 
         // MLP w1: d_w1 += outer(d_mh, after_mlp_norm)
         let amn = &act.after_mlp_norm[p * n..(p + 1) * n];
-        for i in 0..mlp_h {
-            for j in 0..n {
-                grads.mlp_w1[i * n + j] += bctx.d_mh[i] * amn[j];
-            }
-        }
+        crate::simd::simd_outer_product_acc(&mut grads.mlp_w1, &bctx.d_mh[..mlp_h], amn, mlp_h, n);
         // d_after_mlp_norm = w1^T @ d_mh
         bctx.d_amn[..n].fill(0.0);
         for j in 0..n {
@@ -993,20 +990,14 @@ fn backward(
         // RMSNorm backward (after_attn_res → after_mlp_norm)
         let aar = &act.after_attn_res[p * n..(p + 1) * n];
         rmsnorm_backward_into(aar, amn, &bctx.d_amn, &mut bctx.d_rmsnorm_buf);
-        for i in 0..n {
-            bctx.d_an1[i] += bctx.d_rmsnorm_buf[i]; // d_after_attn_res = d_hf + d_aar_from_mlp
-        }
+        crate::simd::simd_add_inplace(&mut bctx.d_an1[..n], &bctx.d_rmsnorm_buf[..n]); // d_after_attn_res = d_hf + d_aar_from_mlp
 
         // Save d_after_attn_res for Phase 3
         bctx.d_after_attn_res_saved[p * n..(p + 1) * n].copy_from_slice(&bctx.d_an1[..n]);
 
         // Attention output projection: d_wo += outer(d_after_attn_res, attn_out)
         let ao = &act.attn_out[p * n..(p + 1) * n];
-        for i in 0..n {
-            for j in 0..n {
-                grads.attn_wo[i * n + j] += bctx.d_an1[i] * ao[j];
-            }
-        }
+        crate::simd::simd_outer_product_acc(&mut grads.attn_wo, &bctx.d_an1[..n], ao, n, n);
         // d_attn_out = wo^T @ d_after_attn_res
         for j in 0..n {
             for i in 0..n {
@@ -1083,17 +1074,27 @@ fn backward(
 
         // d_wq, d_wk, d_wv
         let an2 = &act.after_norm2[p * n..(p + 1) * n];
-        for i in 0..n {
-            for j in 0..n {
-                grads.attn_wq[i * n + j] += bctx.d_q[p * n + i] * an2[j];
-            }
-        }
-        for i in 0..kvd {
-            for j in 0..n {
-                grads.attn_wk[i * n + j] += bctx.d_k[p * kvd + i] * an2[j];
-                grads.attn_wv[i * n + j] += bctx.d_v[p * kvd + i] * an2[j];
-            }
-        }
+        crate::simd::simd_outer_product_acc(
+            &mut grads.attn_wq,
+            &bctx.d_q[p * n..p * n + n],
+            an2,
+            n,
+            n,
+        );
+        crate::simd::simd_outer_product_acc(
+            &mut grads.attn_wk,
+            &bctx.d_k[p * kvd..p * kvd + kvd],
+            an2,
+            kvd,
+            n,
+        );
+        crate::simd::simd_outer_product_acc(
+            &mut grads.attn_wv,
+            &bctx.d_v[p * kvd..p * kvd + kvd],
+            an2,
+            kvd,
+            n,
+        );
 
         // d_after_norm2 = wq^T @ d_q + wk^T @ d_k + wv^T @ d_v
         bctx.d_an2[..n].fill(0.0);
@@ -1119,16 +1120,15 @@ fn backward(
             let an1 = &act.after_norm1[p * n..(p + 1) * n];
             let an2 = &act.after_norm2[p * n..(p + 1) * n];
             rmsnorm_backward_into(an1, an2, an2_grad, &mut bctx.d_rmsnorm_buf);
-            for i in 0..n {
-                bctx.d_an1[i] += bctx.d_rmsnorm_buf[i];
-            }
+            crate::simd::simd_add_inplace(&mut bctx.d_an1[..n], &bctx.d_rmsnorm_buf[..n]);
         }
 
         // From residual: after_attn_res = wo @ attn_out + after_norm1
         // d_after_norm1 += d_after_attn_res (saved from Phase 1)
-        for i in 0..n {
-            bctx.d_an1[i] += bctx.d_after_attn_res_saved[p * n + i];
-        }
+        crate::simd::simd_add_inplace(
+            &mut bctx.d_an1[..n],
+            &bctx.d_after_attn_res_saved[p * n..p * n + n],
+        );
 
         bctx.d_after_norm1_final[p * n..(p + 1) * n].copy_from_slice(&bctx.d_an1[..n]);
 
@@ -1139,10 +1139,11 @@ fn backward(
 
         // d_wte[token] += d_emb, d_wpe[p] += d_emb
         let token = tokens[p];
-        for i in 0..n {
-            grads.wte[token * n + i] += bctx.d_rmsnorm_buf[i];
-            grads.wpe[p * n + i] += bctx.d_rmsnorm_buf[i];
-        }
+        crate::simd::simd_add_inplace(
+            &mut grads.wte[token * n..token * n + n],
+            &bctx.d_rmsnorm_buf[..n],
+        );
+        crate::simd::simd_add_inplace(&mut grads.wpe[p * n..p * n + n], &bctx.d_rmsnorm_buf[..n]);
     }
 
     grads
@@ -1151,33 +1152,17 @@ fn backward(
 /// SGD update: w -= lr * grad
 fn sgd_update(weights: &mut TransformerWeights, grads: &TrainingGradients, lr: f32) {
     let layer = &mut weights.layers[0];
-    for (w, g) in weights.wte.iter_mut().zip(grads.wte.iter()) {
-        *w -= lr * g;
-    }
-    for (w, g) in weights.wpe.iter_mut().zip(grads.wpe.iter()) {
-        *w -= lr * g;
-    }
-    for (w, g) in weights.lm_head.iter_mut().zip(grads.lm_head.iter()) {
-        *w -= lr * g;
-    }
-    for (w, g) in layer.attn_wq.iter_mut().zip(grads.attn_wq.iter()) {
-        *w -= lr * g;
-    }
-    for (w, g) in layer.attn_wk.iter_mut().zip(grads.attn_wk.iter()) {
-        *w -= lr * g;
-    }
-    for (w, g) in layer.attn_wv.iter_mut().zip(grads.attn_wv.iter()) {
-        *w -= lr * g;
-    }
-    for (w, g) in layer.attn_wo.iter_mut().zip(grads.attn_wo.iter()) {
-        *w -= lr * g;
-    }
-    for (w, g) in layer.mlp_w1.iter_mut().zip(grads.mlp_w1.iter()) {
-        *w -= lr * g;
-    }
-    for (w, g) in layer.mlp_w2.iter_mut().zip(grads.mlp_w2.iter()) {
-        *w -= lr * g;
-    }
+    // SIMD-fused: w[i] = 1.0*w[i] + (-lr)*g[i] = w[i] - lr*g[i]
+    let neg_lr = -lr;
+    crate::simd::simd_fused_decay_write(&mut weights.wte, 1.0, &grads.wte, neg_lr);
+    crate::simd::simd_fused_decay_write(&mut weights.wpe, 1.0, &grads.wpe, neg_lr);
+    crate::simd::simd_fused_decay_write(&mut weights.lm_head, 1.0, &grads.lm_head, neg_lr);
+    crate::simd::simd_fused_decay_write(&mut layer.attn_wq, 1.0, &grads.attn_wq, neg_lr);
+    crate::simd::simd_fused_decay_write(&mut layer.attn_wk, 1.0, &grads.attn_wk, neg_lr);
+    crate::simd::simd_fused_decay_write(&mut layer.attn_wv, 1.0, &grads.attn_wv, neg_lr);
+    crate::simd::simd_fused_decay_write(&mut layer.attn_wo, 1.0, &grads.attn_wo, neg_lr);
+    crate::simd::simd_fused_decay_write(&mut layer.mlp_w1, 1.0, &grads.mlp_w1, neg_lr);
+    crate::simd::simd_fused_decay_write(&mut layer.mlp_w2, 1.0, &grads.mlp_w2, neg_lr);
 }
 
 /// Compute cross-entropy loss on masked positions.
@@ -1195,10 +1180,12 @@ fn masked_loss(
             continue;
         }
         let l = &logits[p * vocab..(p + 1) * vocab];
-        let max_l = l.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+        // Log-softmax: log_softmax[i] = x[i] - max - ln(Σ exp(x - max))
+        // Avoids the exp / sum / ln roundtrip of the naive formulation.
+        let max_l = crate::simd::simd_max_f32(l);
         let sum_exp: f32 = l.iter().map(|x| (x - max_l).exp()).sum();
-        let log_prob = (l[targets[p]] - max_l).exp() / sum_exp;
-        total -= log_prob.ln();
+        let log_sum_exp = sum_exp.ln();
+        total -= l[targets[p]] - max_l - log_sum_exp;
         count += 1;
     }
     if count == 0 {
@@ -1332,7 +1319,7 @@ pub fn train_mini_dllm(
 
             let act = forward_save(&weights, &corrupted_buf, config, &mut fwd_ctx);
             let loss = masked_loss(
-                &act.logits,
+                act.logits,
                 tokens,
                 &is_masked_buf,
                 config.vocab_size,
@@ -1435,7 +1422,7 @@ pub fn train_mini_dllm_adaptive(
 
             let act = forward_save(&weights, &corrupted_buf, config, &mut fwd_ctx);
             let loss = masked_loss(
-                &act.logits,
+                act.logits,
                 tokens,
                 &is_masked_buf,
                 config.vocab_size,
@@ -1865,8 +1852,9 @@ pub fn denoise_loop(
             }
 
             let logits_p = &logits_vec[p];
-            let max_l = logits_p.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+            let max_l = crate::simd::simd_max_f32(logits_p);
             let sum_exp: f32 = logits_p.iter().map(|l| (l - max_l).exp()).sum();
+            let inv_sum = 1.0 / sum_exp;
 
             // Find highest-confidence valid token
             let mut best_token = mask;
@@ -1878,7 +1866,7 @@ pub fn denoise_loop(
                 if !constraint.is_valid(p, t, &tokens) {
                     continue;
                 }
-                let prob = (logits_p[t] - max_l).exp() / sum_exp;
+                let prob = (logits_p[t] - max_l).exp() * inv_sum;
                 if prob > best_prob {
                     best_prob = prob;
                     best_token = t;
