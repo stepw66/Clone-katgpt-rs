@@ -17,5 +17,5 @@ pub mod rope;
 pub mod types;
 
 pub use kv_cache::ShardKVCache;
-pub use rope::{reapply_rope, undo_rope};
+pub use rope::{RopeFreqs, reapply_rope, undo_rope};
 pub use types::{ShardCalibration, ShardConfig, ShardLayer, VqCodebook};

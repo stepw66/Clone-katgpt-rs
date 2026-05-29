@@ -65,9 +65,12 @@ pub fn functor_adjacency(pairs: Vec<(usize, usize)>) -> Vec<(usize, usize)> {
 /// This is the default structural graph when no domain-specific adjacency
 /// is available.
 pub fn consecutive_adjacency(n_positions: usize) -> Vec<(usize, usize)> {
-    (0..n_positions.saturating_sub(1))
-        .map(|p| (p, p + 1))
-        .collect()
+    let n_edges = n_positions.saturating_sub(1);
+    let mut edges = Vec::with_capacity(n_edges);
+    for p in 0..n_edges {
+        edges.push((p, p + 1));
+    }
+    edges
 }
 
 // ── KV cache probe ────────────────────────────────────────────

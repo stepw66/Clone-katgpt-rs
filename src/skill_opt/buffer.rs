@@ -23,9 +23,14 @@ impl RejectedEditBuffer {
     /// Push a rejected edit into the buffer. Evicts the oldest entry if full (FIFO).
     pub fn push(&mut self, edit: RejectedEdit) {
         if self.edits.len() >= self.max_size {
-            self.edits.remove(0);
+            // Rotate left: move oldest to end, then overwrite.
+            if self.max_size > 0 {
+                self.edits.rotate_left(1);
+                *self.edits.last_mut().unwrap() = edit;
+            }
+        } else {
+            self.edits.push(edit);
         }
-        self.edits.push(edit);
     }
 
     /// Access the rejected edits as negative training examples.

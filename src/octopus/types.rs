@@ -26,10 +26,10 @@ pub struct OctopusConfig {
     pub kv_dim: usize,
     /// Maximum sequence length (block size).
     pub max_seq_len: usize,
-    /// Nominal bits per coordinate (actual split: dir=b+1, nrm=b-1).
-    pub key_bits: u8,
     /// Nominal bits per value coordinate.
     pub val_bits: u8,
+    /// Nominal bits per coordinate (actual split: dir=b+1, nrm=b-1).
+    pub key_bits: u8,
     /// Enable QJL 1-bit residual for score-attention (adds ~0.5 bpc).
     pub use_qjl_residual: bool,
     /// Enable joint 3×3 rounding in encoder (6-14% MSE gain, encoder-only).
@@ -149,6 +149,7 @@ pub struct OctopusLayer {
 ///
 /// Total index bits per triplet: `2·dir_bits + nrm_bits`.
 #[derive(Debug, Clone, Copy, Default)]
+#[repr(C)]
 pub struct TripletIndices {
     /// Oct-coordinate ξ index → oct codebook.
     pub i_xi: u16,

@@ -49,16 +49,19 @@ pub fn compute_retrieval_scores_sat(
         .map(|attn| {
             let n = attn.len();
             // Convert flat to 2D for SAT
-            let seq_len = if n > 0 { {
-                    let sq = (n as f64).sqrt() as usize;
-                    debug_assert_eq!(sq * sq, n, "attention matrix must be square (n² elements)");
-                    sq
-                } } else { 0 };
+            let seq_len = if n > 0 {
+                let sq = (n as f64).sqrt() as usize;
+                debug_assert_eq!(sq * sq, n, "attention matrix must be square (n² elements)");
+                sq
+            } else {
+                0
+            };
 
             if seq_len == 0 {
                 return 0.0;
             }
 
+            // Build SAT in-place using slices (avoids Vec<Vec<f32>> allocation)
             let mut matrix: Vec<Vec<f32>> = (0..seq_len)
                 .map(|i| attn[i * seq_len..(i + 1) * seq_len].to_vec())
                 .collect();
@@ -107,7 +110,12 @@ pub fn identify_retrieval_heads_sat(scores: &[f32], retrieval_ratio: f32) -> Vec
     let mut indexed: Vec<(usize, f32)> = scores.iter().copied().enumerate().collect();
     indexed.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
-    indexed[..n_retrieval].iter().map(|&(idx, _)| idx).collect()
+    // Pre-allocate and extract
+    let mut result = Vec::with_capacity(n_retrieval);
+    for &(idx, _) in &indexed[..n_retrieval] {
+        result.push(idx);
+    }
+    result
 }
 
 #[cfg(test)]

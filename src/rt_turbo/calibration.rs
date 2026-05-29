@@ -298,6 +298,7 @@ impl HeadCalibration {
     /// # Panics
     ///
     /// Panics if `head_idx` is out of bounds.
+    #[inline]
     pub fn role_of(&self, head_idx: usize) -> RetrievalHeadRole {
         self.classifications[head_idx].role
     }
@@ -307,26 +308,31 @@ impl HeadCalibration {
     /// # Panics
     ///
     /// Panics if `head_idx` is out of bounds.
+    #[inline]
     pub fn score_of(&self, head_idx: usize) -> f32 {
         self.classifications[head_idx].score
     }
 
     /// Check if a head is classified as retrieval.
+    #[inline]
     pub fn is_retrieval(&self, head_idx: usize) -> bool {
         self.role_of(head_idx) == RetrievalHeadRole::Retrieval
     }
 
     /// Number of retrieval heads.
+    #[inline]
     pub fn n_retrieval(&self) -> usize {
         self.retrieval_set.len()
     }
 
     /// Number of local heads.
+    #[inline]
     pub fn n_local(&self) -> usize {
         self.local_set.len()
     }
 
     /// Total number of heads.
+    #[inline]
     pub fn n_heads(&self) -> usize {
         self.classifications.len()
     }

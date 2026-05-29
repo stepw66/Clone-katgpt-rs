@@ -4,6 +4,7 @@
 Route — Time Series [sparse_mlp+domain_latent+ppot+bandit+g_zero+bt_rank+spectral_quant+hybrid_oct_pq+elf_sde+cna_steering+deep_manifold+tes_loop+lattice_deduction+delta_routing+gdn2_attention+dash_attn+dreamer+lt2_looped+plasma_path+tf_loop]
 </text>
 <line opacity="0.1" stroke="#000000" stroke-width="1" x1="102" y1="357" x2="102" y2="38"/>
+<line opacity="0.1" stroke="#000000" stroke-width="1" x1="604" y1="357" x2="604" y2="38"/>
 <line opacity="0.1" stroke="#000000" stroke-width="1" x1="1107" y1="357" x2="1107" y2="38"/>
 <line opacity="0.1" stroke="#000000" stroke-width="1" x1="102" y1="357" x2="1107" y2="357"/>
 <line opacity="0.1" stroke="#000000" stroke-width="1" x1="102" y1="354" x2="1107" y2="354"/>
@@ -102,6 +103,7 @@ Run
 Throughput
 </text>
 <line opacity="0.2" stroke="#000000" stroke-width="1" x1="102" y1="357" x2="102" y2="38"/>
+<line opacity="0.2" stroke="#000000" stroke-width="1" x1="604" y1="357" x2="604" y2="38"/>
 <line opacity="0.2" stroke="#000000" stroke-width="1" x1="1107" y1="357" x2="1107" y2="38"/>
 <line opacity="0.2" stroke="#000000" stroke-width="1" x1="102" y1="357" x2="1107" y2="357"/>
 <line opacity="0.2" stroke="#000000" stroke-width="1" x1="102" y1="321" x2="1107" y2="321"/>
@@ -154,8 +156,12 @@ Throughput
 11:48:55
 </text>
 <polyline fill="none" opacity="1" stroke="#000000" stroke-width="1" points="102,358 102,363 "/>
-<text x="1107" y="368" dy="0.76em" text-anchor="middle" font-family="sans-serif" font-size="7.258064516129032" opacity="1" fill="#000000">
+<text x="604" y="368" dy="0.76em" text-anchor="middle" font-family="sans-serif" font-size="7.258064516129032" opacity="1" fill="#000000">
 12:07:11
+</text>
+<polyline fill="none" opacity="1" stroke="#000000" stroke-width="1" points="604,358 604,363 "/>
+<text x="1107" y="368" dy="0.76em" text-anchor="middle" font-family="sans-serif" font-size="7.258064516129032" opacity="1" fill="#000000">
+15:50:47
 </text>
 <polyline fill="none" opacity="1" stroke="#000000" stroke-width="1" points="1107,358 1107,363 "/>
 <polyline fill="none" opacity="1" stroke="#000000" stroke-width="1" points="1108,38 1108,357 "/>
@@ -195,9 +201,10 @@ Throughput
 160000000.0
 </text>
 <polyline fill="none" opacity="1" stroke="#000000" stroke-width="1" points="1108,63 1113,63 "/>
-<polyline fill="none" opacity="1" stroke="#0000FF" stroke-width="1" points="102,80 1107,89 "/>
+<polyline fill="none" opacity="1" stroke="#0000FF" stroke-width="1" points="102,80 604,89 1107,105 "/>
 <circle cx="102" cy="80" r="3" opacity="1" fill="#0000FF" stroke="none" stroke-width="1"/>
-<circle cx="1107" cy="89" r="3" opacity="1" fill="#0000FF" stroke="none" stroke-width="1"/>
+<circle cx="604" cy="89" r="3" opacity="1" fill="#0000FF" stroke="none" stroke-width="1"/>
+<circle cx="1107" cy="105" r="3" opacity="1" fill="#0000FF" stroke="none" stroke-width="1"/>
 <text x="100" y="390" dy="0.76em" text-anchor="start" font-family="sans-serif" font-size="8.064516129032258" opacity="1" fill="#0000FF">
 ■ Delta routing (dim=4)
 </text>

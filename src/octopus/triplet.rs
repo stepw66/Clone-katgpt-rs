@@ -9,6 +9,7 @@
 
 /// A single triplet: norm + unit direction on S².
 #[derive(Debug, Clone, Copy)]
+#[repr(C)]
 pub struct Triplet {
     /// L2 norm of the triplet vector (ρ).
     pub norm: f32,

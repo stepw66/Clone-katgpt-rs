@@ -72,10 +72,17 @@ pub fn effective_rank(matrix: &[f32], rows: usize, cols: usize) -> f32 {
     // Compute Gram matrix M^T @ M (n × n) or M @ M^T (rows × rows),
     // whichever is smaller.
     if rows <= cols {
-        // G = M @ M^T  (rows × rows)
+        // G = M @ M^T  (rows × rows) — exploit symmetry
         let mut gram = vec![0.0f32; rows * rows];
         for i in 0..rows {
-            for j in i..rows {
+            // Diagonal
+            gram[i * rows + i] = crate::simd::simd_dot_f32(
+                &matrix[i * cols..(i + 1) * cols],
+                &matrix[i * cols..(i + 1) * cols],
+                cols,
+            );
+            // Upper triangle + mirror
+            for j in (i + 1)..rows {
                 let dot = crate::simd::simd_dot_f32(
                     &matrix[i * cols..(i + 1) * cols],
                     &matrix[j * cols..(j + 1) * cols],

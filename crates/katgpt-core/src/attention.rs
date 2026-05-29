@@ -136,6 +136,7 @@ fn tiled_attention_forward_impl(
 ///    f. Update: o_tile = correction * o_tile + P̃ @ v_tile
 /// 3. Final normalize: o_tile / norm_tile
 #[cfg(feature = "tiled_attention")]
+#[allow(clippy::too_many_arguments)]
 fn tiled_attention_inner(
     q: &[f32],
     k: &[f32],

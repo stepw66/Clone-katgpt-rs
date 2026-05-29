@@ -75,8 +75,14 @@ pub fn compute_energy_gate_into(energy: &[f32], alpha: f32, tau: f32, out: &mut 
     let len = energy.len();
     out[..len].copy_from_slice(energy);
     z_normalize(&mut out[..len]);
+    // Compute alpha * (z - tau) = alpha*z - alpha*tau in-place
+    crate::simd::simd_add_scalar_inplace(&mut out[..len], -tau);
+    crate::simd::simd_scale_inplace(&mut out[..len], alpha);
+    // sigmoid(x) = 1/(1+exp(-x)). Negate then exp for SIMD-friendly batch exp.
+    crate::simd::simd_scale_inplace(&mut out[..len], -1.0);
+    crate::simd::simd_exp_inplace(&mut out[..len]);
     for o in out[..len].iter_mut() {
-        *o = sigmoid(alpha * (*o - tau));
+        *o = 1.0 / (1.0 + *o);
     }
 }
 

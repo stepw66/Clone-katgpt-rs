@@ -137,6 +137,30 @@ pub struct GenerationResult {
     pub trace: Vec<f64>,
 }
 
+/// Pre-allocated scratch buffers for forward-step computation.
+///
+/// Created once per `generate` call, reused across all positions and layers.
+pub struct ForwardScratch {
+    qkv: Vec<f64>,
+    head_out: Vec<f64>,
+    sublayer_out: Vec<f64>,
+    ff: Vec<f64>,
+    gated: Vec<f64>,
+}
+
+impl ForwardScratch {
+    /// Allocate scratch buffers sized for the given config.
+    pub fn new(config: &TransformerConfig) -> Self {
+        Self {
+            qkv: vec![0.0f64; 3 * config.d_model],
+            head_out: vec![0.0f64; config.d_model],
+            sublayer_out: vec![0.0f64; config.d_model],
+            ff: vec![0.0f64; 2 * config.d_ffn],
+            gated: vec![0.0f64; config.d_ffn],
+        }
+    }
+}
+
 // ── VanillaTransformer ─────────────────────────────────────────
 
 /// Vanilla transformer with ReGLU FFN and CHT hull KV cache.
@@ -231,6 +255,9 @@ impl VanillaTransformer {
         let mut caches: Vec<HardAttentionHead> =
             (0..total_heads).map(|_| HardAttentionHead::new()).collect();
 
+        // Pre-allocated scratch buffers (reused across all positions and layers)
+        let mut scratch = ForwardScratch::new(&self.config);
+
         // Residual buffer (reused across positions)
         let mut residual = vec![0.0f64; d];
 
@@ -246,7 +273,7 @@ impl VanillaTransformer {
             add_position_encoding(&mut residual, pos);
 
             // Forward pass through all layers + prediction
-            let predicted = self.forward_step(&mut residual, pos, &mut caches);
+            let predicted = self.forward_step(&mut residual, pos, &mut caches, &mut scratch);
 
             // At the boundary, append predicted token
             if pos + 1 == token_ids.len() {
@@ -298,18 +325,16 @@ impl VanillaTransformer {
         residual: &mut [f64],
         pos: usize,
         caches: &mut [HardAttentionHead],
+        scratch: &mut ForwardScratch,
     ) -> usize {
         let d = self.config.d_model;
         let n_layers = self.config.n_layers;
         let n_heads = self.config.n_heads;
-        let d_ffn = self.config.d_ffn;
-
-        // Scratch buffers (allocated once per forward step, reused across layers)
-        let mut qkv = vec![0.0f64; 3 * d];
-        let mut head_out = vec![0.0f64; d];
-        let mut sublayer_out = vec![0.0f64; d];
-        let mut ff = vec![0.0f64; 2 * d_ffn];
-        let mut gated = vec![0.0f64; d_ffn];
+        let qkv = &mut scratch.qkv;
+        let head_out = &mut scratch.head_out;
+        let sublayer_out = &mut scratch.sublayer_out;
+        let ff = &mut scratch.ff;
+        let gated = &mut scratch.gated;
 
         for layer_idx in 0..n_layers {
             let seq = (pos * n_layers + layer_idx) as i64;
@@ -321,9 +346,9 @@ impl VanillaTransformer {
                 residual,
                 seq,
                 &mut caches[head_start..head_start + n_heads],
-                &mut qkv,
-                &mut head_out,
-                &mut sublayer_out,
+                qkv,
+                head_out,
+                sublayer_out,
             );
 
             // Residual connection
@@ -332,7 +357,7 @@ impl VanillaTransformer {
             }
 
             // FFN sublayer
-            self.apply_ffn(layer_idx, residual, &mut ff, &mut gated, &mut sublayer_out);
+            self.apply_ffn(layer_idx, residual, ff, gated, sublayer_out);
 
             // Residual connection
             for i in 0..d {
@@ -484,10 +509,7 @@ fn add_position_encoding(x: &mut [f64], pos: usize) {
 /// ReLU activation: `max(0, x)`.
 #[inline]
 fn relu(x: f64) -> f64 {
-    match x > 0.0 {
-        true => x,
-        false => 0.0,
-    }
+    x.max(0.0)
 }
 
 // ── Linear Algebra ─────────────────────────────────────────────

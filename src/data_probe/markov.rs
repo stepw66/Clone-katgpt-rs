@@ -24,21 +24,18 @@ pub struct MarkovChain {
 fn sample_dirichlet(k: usize, _alpha: f32, rng: &mut fastrand::Rng) -> Vec<f32> {
     let mut samples: Vec<f32> = (0..k)
         .map(|_| {
-            // Exponential(α) variate: α * (-ln(U)), but for symmetric Dirichlet
-            // the shared α cancels in normalization, so we use -ln(U) directly.
             let u = rng.f32();
-            // Guard against ln(0) = -inf.
             let u_safe = u.max(1e-10);
             -u_safe.ln()
         })
         .collect();
     let sum: f32 = samples.iter().sum();
     if sum > 0.0 {
+        let inv_sum = 1.0 / sum;
         for x in samples.iter_mut() {
-            *x /= sum;
+            *x *= inv_sum;
         }
     } else {
-        // Fallback: uniform.
         let v = 1.0 / k as f32;
         samples.fill(v);
     }
@@ -48,11 +45,13 @@ fn sample_dirichlet(k: usize, _alpha: f32, rng: &mut fastrand::Rng) -> Vec<f32> 
 /// Compute stationary distribution by power iteration.
 ///
 /// Starts with uniform π, then applies π ← π·P for `n_iters` iterations.
+/// Uses pre-allocated buffers and swap to avoid allocation inside the loop.
 fn stationary_distribution(transition: &[Vec<f32>], n_iters: usize) -> Vec<f32> {
     let k = transition.len();
-    let mut pi = vec![1.0 / k as f32; k];
+    let inv_k = 1.0 / k as f32;
+    let mut pi = vec![inv_k; k];
+    let mut new_pi = vec![0.0f32; k];
     for _ in 0..n_iters {
-        let mut new_pi = vec![0.0f32; k];
         for i in 0..k {
             for j in 0..k {
                 new_pi[j] += pi[i] * transition[i][j];
@@ -61,11 +60,13 @@ fn stationary_distribution(transition: &[Vec<f32>], n_iters: usize) -> Vec<f32> 
         // Renormalize to prevent drift.
         let sum: f32 = new_pi.iter().sum();
         if sum > 0.0 {
+            let inv_sum = 1.0 / sum;
             for x in new_pi.iter_mut() {
-                *x /= sum;
+                *x *= inv_sum;
             }
         }
-        pi = new_pi;
+        std::mem::swap(&mut pi, &mut new_pi);
+        new_pi.fill(0.0);
     }
     pi
 }

@@ -9,6 +9,8 @@
 //! - Token-set Jaccard similarity ≥ 0.55
 //! - Refusal pattern detection
 
+use std::collections::HashSet;
+
 /// Trait for verifying speculative observations against target observations.
 ///
 /// Paper Section 4: when the target tool returns, the verifier checks
@@ -198,10 +200,14 @@ fn numeric_consistent(target: &str, spec: &str) -> bool {
 }
 
 /// Tokenize text into a set of words (for Jaccard computation).
-fn tokenize_set(text: &str) -> Vec<&str> {
+/// Returns a `HashSet<&str>` for O(1) membership checks in Jaccard.
+fn tokenize_set<'a>(text: &'a str, scratch: &mut HashSet<&'a str>) {
+    scratch.clear();
     text.split_whitespace()
         .filter(|word| !STOPWORDS.contains(word))
-        .collect()
+        .for_each(|word| {
+            scratch.insert(word);
+        });
 }
 
 /// Compute token-set Jaccard similarity between two normalized texts.
@@ -210,24 +216,20 @@ fn tokenize_set(text: &str) -> Vec<&str> {
 ///
 /// Stopwords are removed before computing to focus on content words.
 pub fn token_set_jaccard(target: &str, spec: &str) -> f64 {
-    let target_tokens = tokenize_set(target);
-    let spec_tokens = tokenize_set(spec);
+    let mut target_set = HashSet::new();
+    tokenize_set(target, &mut target_set);
+    let mut spec_set = HashSet::new();
+    tokenize_set(spec, &mut spec_set);
 
-    if target_tokens.is_empty() && spec_tokens.is_empty() {
+    if target_set.is_empty() && spec_set.is_empty() {
         return 1.0; // Both empty → identical
     }
-    if target_tokens.is_empty() || spec_tokens.is_empty() {
+    if target_set.is_empty() || spec_set.is_empty() {
         return 0.0; // One empty, one not → no overlap
     }
 
-    let mut intersection = 0usize;
-    for t in &target_tokens {
-        if spec_tokens.contains(t) {
-            intersection += 1;
-        }
-    }
-
-    let union = target_tokens.len() + spec_tokens.len() - intersection;
+    let intersection = target_set.intersection(&spec_set).count();
+    let union = target_set.len() + spec_set.len() - intersection;
     if union == 0 {
         return 1.0;
     }

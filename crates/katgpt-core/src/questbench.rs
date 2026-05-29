@@ -419,6 +419,10 @@ pub fn find_sufficient_set(
 ) -> Vec<usize> {
     let mut sufficient = Vec::with_capacity(max_search_depth);
 
+    let limit = 256.min(vocab_size);
+    let candidates: Vec<usize> = (0..limit).collect();
+    let mut batch_buf = vec![false; limit];
+
     // Pre-compute extension counts for ALL candidates once (O(n × sample_size))
     // instead of per-comparison during sort (O(n log n × sample_size))
     // Single pass: filter valid tokens AND compute extension counts, avoiding
@@ -433,7 +437,14 @@ pub fn find_sufficient_set(
                 return None;
             }
             ext_buf[base_len] = tok; // Overwrite only the candidate slot
-            let count = count_valid_extensions_with(pruner, depth + 1, &ext_buf, vocab_size);
+            let count = count_valid_extensions_with(
+                pruner,
+                depth + 1,
+                &ext_buf,
+                vocab_size,
+                &candidates,
+                &mut batch_buf,
+            );
             Some((tok, count))
         })
         .collect();
@@ -441,7 +452,7 @@ pub fn find_sufficient_set(
     // Sort by pre-computed counts (ascending = tighter constraints first)
     counts.sort_by_key(|&(_, count)| count);
 
-    let mut relevance_buf = vec![0.0f32; vocab_size.min(256)];
+    let mut relevance_buf = vec![0.0f32; limit];
 
     for &(tok, _) in counts.iter().take(max_search_depth) {
         ext_buf[base_len] = tok; // Overwrite only the candidate slot (avoids clear + extend)
@@ -464,11 +475,20 @@ fn count_valid_extensions_with(
     depth: usize,
     extended: &[usize],
     vocab_size: usize,
+    candidates: &[usize],
+    batch_buf: &mut [bool],
 ) -> usize {
     let limit = 256.min(vocab_size);
+    batch_buf[..limit].fill(false);
+    pruner.batch_is_valid(
+        depth,
+        &candidates[..limit],
+        extended,
+        &mut batch_buf[..limit],
+    );
     let mut count = 0usize;
-    for tok in 0..limit {
-        count += pruner.is_valid(depth, tok, extended) as usize;
+    for &valid in &batch_buf[..limit] {
+        count += valid as usize;
     }
     count
 }
@@ -483,10 +503,18 @@ fn score_relevance_into(
     buf: &mut [f32],
 ) {
     let limit = vocab_size.min(256).min(buf.len());
-    for (tok, slot) in buf.iter_mut().enumerate().take(limit) {
-        *slot = pruner.is_valid(depth, tok, placed_tokens) as usize as f32;
+    // Use a stack-allocated bool buffer to batch the validation
+    let mut valid = [false; 256];
+    let candidates: [usize; 256] = std::array::from_fn(|i| i);
+    pruner.batch_is_valid(
+        depth,
+        &candidates[..limit],
+        placed_tokens,
+        &mut valid[..limit],
+    );
+    for (i, slot) in buf.iter_mut().enumerate().take(limit) {
+        *slot = valid[i] as usize as f32;
     }
-    // Zero remaining entries
     buf[limit..].fill(0.0);
 }
 

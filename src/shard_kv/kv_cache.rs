@@ -71,6 +71,9 @@ pub struct ShardKVCache {
     /// 0 means prefill not finalized — all positions use VQ.
     prefill_len: usize,
 
+    // ── Pre-built rotations (avoid clone per call) ──
+    k_rotations: Vec<SpectralRotation>,
+
     // ── Scratch buffers (zero-alloc hot path) ──
     scratch_normalized: Vec<f32>,
     scratch_rotated: Vec<f32>,
@@ -321,6 +324,11 @@ impl ShardKVCache {
             .map(|_| (0..raw_slots).map(|_| vec![0.0f32; kv_dim]).collect())
             .collect();
 
+        let k_rotations: Vec<SpectralRotation> = k_calibrations
+            .iter()
+            .map(|k_cal| SpectralRotation::new(k_cal.k_eigenvectors.clone(), k_cal.head_dim))
+            .collect();
+
         Self {
             layers,
             key_indices,
@@ -337,6 +345,7 @@ impl ShardKVCache {
             sink_tokens,
             window_tokens,
             prefill_len: 0,
+            k_rotations,
             scratch_normalized: vec![0.0f32; kv_dim],
             scratch_rotated: vec![0.0f32; kv_dim],
             scratch_unrotated: vec![0.0f32; kv_dim],
@@ -410,11 +419,8 @@ impl ShardKVCache {
             // 3. Undo RoPE
             undo_rope(&mut self.scratch_normalized, pos, self.head_dim);
 
-            // 4. PCA rotation
-            let rotation = SpectralRotation::new(
-                layer_state.calibration.k_eigenvectors.clone(),
-                layer_state.calibration.head_dim,
-            );
+            // 4. PCA rotation (use pre-built rotation, no clone)
+            let rotation = &self.k_rotations[layer];
             rotation.rotate(&self.scratch_normalized, &mut self.scratch_rotated);
 
             // 5. Quantize semantic dims
@@ -602,11 +608,8 @@ impl ShardKVCache {
                     dequantize_idx(self.scratch_indices[i], &tail_cb.centroids);
             }
 
-            // Inverse PCA rotation
-            let rotation = SpectralRotation::new(
-                layer_state.calibration.k_eigenvectors.clone(),
-                layer_state.calibration.head_dim,
-            );
+            // Inverse PCA rotation (use pre-built rotation, no clone)
+            let rotation = &self.k_rotations[layer];
             rotation.unrotate(&self.scratch_rotated, &mut self.scratch_unrotated);
 
             // Reapply RoPE
@@ -849,6 +852,8 @@ fn kmeans_fit(
     }
 
     let mut assignments = vec![0usize; n_points];
+    let mut sums = vec![0.0f32; k * dims];
+    let mut counts = vec![0usize; k];
 
     for _ in 0..max_iter {
         // Assign each point to nearest centroid
@@ -876,9 +881,9 @@ fn kmeans_fit(
             break;
         }
 
-        // Recompute centroids
-        let mut sums = vec![0.0f32; k * dims];
-        let mut counts = vec![0usize; k];
+        // Recompute centroids (reuse pre-allocated buffers)
+        sums.fill(0.0);
+        counts.fill(0);
         for p in 0..n_points {
             let c = assignments[p];
             counts[c] += 1;
@@ -888,8 +893,9 @@ fn kmeans_fit(
         }
         for c in 0..k {
             if counts[c] > 0 {
+                let inv_count = 1.0 / counts[c] as f32;
                 for d in 0..dims {
-                    centroids[c * dims + d] = sums[c * dims + d] / counts[c] as f32;
+                    centroids[c * dims + d] = sums[c * dims + d] * inv_count;
                 }
             }
         }

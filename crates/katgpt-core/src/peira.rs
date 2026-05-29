@@ -726,10 +726,6 @@ pub struct PeiraCovariance {
     sigma: Vec<f64>,
     /// Within-view covariance N (k×k), row-major.
     n: Vec<f64>,
-    /// Configuration.
-    config: PeiraConfig,
-    /// Number of EMA updates applied.
-    step_count: usize,
     /// Pre-allocated scratch for peira_aux_loss
     sigma_sample: Vec<f64>,
     n_sample: Vec<f64>,
@@ -742,6 +738,10 @@ pub struct PeiraCovariance {
     /// Pre-allocated output buffers for predictor_with_scratch
     q_star: Vec<f64>,
     p_star: Vec<f64>,
+    /// Configuration.
+    config: PeiraConfig,
+    /// Number of EMA updates applied.
+    step_count: usize,
 }
 
 impl PeiraCovariance {
@@ -751,8 +751,6 @@ impl PeiraCovariance {
         Self {
             sigma: vec![0.0; k * k],
             n: vec![0.0; k * k],
-            config,
-            step_count: 0,
             sigma_sample: vec![0.0; k * k],
             n_sample: vec![0.0; k * k],
             pm: vec![0.0; k * k],
@@ -761,6 +759,8 @@ impl PeiraCovariance {
             matmul_bt_scratch: vec![0.0; k * k],
             q_star: vec![0.0; k * k],
             p_star: vec![0.0; k * k],
+            config,
+            step_count: 0,
         }
     }
 

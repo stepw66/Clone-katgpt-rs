@@ -701,17 +701,22 @@ impl LloydMaxQuantizer {
     }
 
     fn nearest_centroid(&self, x: f32, centroids: &[f32]) -> usize {
-        centroids
-            .iter()
-            .enumerate()
-            .min_by(|(_, a), (_, b)| {
-                (x - *a)
-                    .abs()
-                    .partial_cmp(&(x - *b).abs())
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            })
-            .map(|(i, _)| i)
-            .unwrap_or(0)
+        // Centroids are sorted (from Lloyd-Max iteration on symmetric distributions).
+        // Binary search for O(log n) instead of O(n) scan.
+        if centroids.len() <= 1 {
+            return 0;
+        }
+        let idx = centroids.partition_point(|&c| c < x);
+        if idx == 0 {
+            return 0;
+        }
+        if idx >= centroids.len() {
+            return centroids.len() - 1;
+        }
+        // Compare distances to the two neighbors around x
+        let d_left = (x - centroids[idx - 1]).abs();
+        let d_right = (centroids[idx] - x).abs();
+        if d_left <= d_right { idx - 1 } else { idx }
     }
 }
 

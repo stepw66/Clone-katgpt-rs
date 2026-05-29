@@ -127,9 +127,10 @@ fn compute_centroids(boundaries: &[f32], dim: usize) -> Vec<f32> {
     let n_samples = 1000;
 
     // Interval edges: -1.0, boundary[0], boundary[1], ..., 1.0
-    let mut edges = vec![-1.0f32];
-    edges.extend_from_slice(boundaries);
-    edges.push(1.0);
+    let mut edges = vec![0.0f32; n + 1];
+    edges[0] = -1.0;
+    edges[1..=n - 1].copy_from_slice(boundaries);
+    edges[n] = 1.0;
 
     for i in 0..n {
         let lo = edges[i];
@@ -170,9 +171,10 @@ fn converged(old: &[f32], new: &[f32], tol: f32) -> bool {
 /// MSE = Σ_i ∫_{bin_i} (x - centroid[i])² · f(x) dx
 fn compute_mse(boundaries: &[f32], centroids: &[f32], dim: usize) -> f32 {
     let n = centroids.len();
-    let mut edges = vec![-1.0f32];
-    edges.extend_from_slice(boundaries);
-    edges.push(1.0);
+    let mut edges = vec![0.0f32; n + 1];
+    edges[0] = -1.0;
+    edges[1..=n - 1].copy_from_slice(boundaries);
+    edges[n] = 1.0;
 
     let n_samples = 500;
     let mut total_mse = 0.0f64;

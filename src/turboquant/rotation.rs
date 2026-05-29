@@ -17,29 +17,35 @@ pub fn generate_rotation_matrix(dim: usize, seed: u64) -> Vec<f32> {
 
     // QR decomposition via modified Gram-Schmidt (column-major for processing)
     let mut q = vec![0.0f32; dim * dim];
-    let mut v: Vec<Vec<f32>> = (0..dim).map(|_| vec![0.0f32; dim]).collect();
+    // Use a single flat buffer for column vectors instead of per-column Vec allocation.
+    // Column data stored at [col * dim + row] (column-major layout).
+    let mut v_flat = vec![0.0f32; dim * dim];
 
     // Fill column vectors from row-major random matrix
     for col in 0..dim {
         for row in 0..dim {
-            v[col][row] = mat[row * dim + col];
+            v_flat[col * dim + row] = mat[row * dim + col];
         }
     }
 
     for i in 0..dim {
         // Subtract projections onto previous columns
         for j in 0..i {
-            let dot: f32 = (0..dim).map(|k| q[k * dim + j] * v[i][k]).sum();
+            let dot: f32 = (0..dim).map(|k| q[k * dim + j] * v_flat[i * dim + k]).sum();
             for k in 0..dim {
-                v[i][k] -= dot * q[k * dim + j];
+                v_flat[i * dim + k] -= dot * q[k * dim + j];
             }
         }
 
         // Normalize column i to get q_i
-        let norm: f32 = v[i].iter().map(|x| x * x).sum::<f32>().sqrt();
+        let norm: f32 = v_flat[i * dim..i * dim + dim]
+            .iter()
+            .map(|x| x * x)
+            .sum::<f32>()
+            .sqrt();
         if norm > 1e-8 {
             for k in 0..dim {
-                q[k * dim + i] = v[i][k] / norm;
+                q[k * dim + i] = v_flat[i * dim + k] / norm;
             }
         }
     }

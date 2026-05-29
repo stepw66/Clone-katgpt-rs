@@ -195,7 +195,7 @@ impl NonUniformQuantizer {
         assert_eq!(x.len(), self.head_dim, "dimension mismatch");
 
         let mut semantic_indices = Vec::with_capacity(self.d_eff_int);
-        let mut tail_indices = Vec::with_capacity(self.head_dim - self.d_eff_int);
+        let mut tail_indices = Vec::with_capacity(self.head_dim.saturating_sub(self.d_eff_int));
 
         if self.use_water_fill {
             let quantizers = self.per_dim_semantic_quantizers.as_ref().unwrap();

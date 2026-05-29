@@ -102,30 +102,36 @@ Path-Aware:  100 nodes, 100 accumulated-valid (100.0%)
 
 ## 📊 Benchmark Results
 
-Run on Apple Silicon (single-threaded, `--release`, 50k iterations, **zero-alloc hot paths**).
+Run on Apple Silicon (single-threaded, `--release`, 2000 iterations + 50 warmup, **zero-alloc hot paths**). Latest run: **2026-05-29**, default features.
 
-**Models:** Target (embd=16, heads=4, mlp=64) · Draft (embd=4, heads=2, mlp=16) · Run `047`
+**Models:** Target (embd=16, heads=4, mlp=64) · Draft (embd=4, heads=2, mlp=16) · `cargo run --release`
 
 ```
 Method                         Throughput         μs/step  Avg Accept Len
 ───────────────────────────────────────────────────────────────────────────────
-Transformer AR                    900,464 tok/s       1.11            1.00
-DFlash                           4,231,267 tok/s       1.89            8.00
-DDTree Build                      430,911 trees/s      2.32            —
-Speculative (Simulated)          1,143,669 tok/s       4.37            5.00
-Speculative (AR Draft)           1,643,545 tok/s       4.26            7.00
-Leviathan (Algorithm 1)           114,387 tok/s      10.31            1.18
-Leviathan (w/ rollback)           206,605 tok/s       5.69            1.18
-Spec (conditioned)               1,157,438 tok/s       5.83            6.74
-Prefill (no compress)           19,425,142 tok/s       3.29           64.00
-Prefill (compressed)             1,962,114 tok/s       3.57            7.00
-DDTree (chain-seed)                447,251 trees/s      2.24           16.00
-DDTree (screened R=1.0)            338,390 trees/s      2.96           16.00
-forward_raven (16 slots)         1,617,183 trees/s      0.62            —
-raven_recall (1000 noise)        9,252,063 tok/s       0.11           63.21
+Transformer AR                  1,711,230 tok/s       0.58            1.00
+DFlash                            423,396 tok/s       2.36            8.00
+DDTree Build                      370,225 trees/s      2.70            —
+Speculative (Simulated)           854,281 tok/s       5.85            5.00
+Speculative (AR Draft)          1,144,103 tok/s       6.12            7.00
+Leviathan (Algorithm 1)         1,630,214 tok/s       0.61            1.00
+Leviathan (w/ rollback)           173,560 tok/s       6.75            1.17
+Spec (conditioned)                933,739 tok/s       7.23            6.75
+Prefill (no compress)             217,825 ops/s       4.59           64.00
+Prefill (compressed)              207,760 ops/s       4.81            7.00
+DDTree (chain-seed)               386,835 trees/s      2.58           16.00
+DDTree (screened R=1.0)           296,927 trees/s      3.37           16.00
+forward_raven (16 slots)        2,019,460 ops/s        0.49            —
+raven_recall (1000 noise)      22,944,726 ops/s        0.04           63.21
 ───────────────────────────────────────────────────────────────────────────────
-📈 Best speedup: 1.82x (Speculative AR Draft vs AR)
 ```
+
+> **Reading the gain honestly:** at this micro scale the target forward pass is so cheap that
+> plain AR has the highest raw `tok/s`. Speculative decoding's real win is the **avg accept
+> length** — 7–8 tokens verified per target pass (DFlash 8.0, AR-draft 7.0, conditioned 6.75) —
+> which is what amortizes a large target model. The headline `Speedup` line printed by `main.rs`
+> compares `raven_recall` ops/s against `forward(flat)` ops/s (mislabeled as "Speculative vs AR"),
+> so treat the per-row accept length, not that single number, as the speculative-decoding metric.
 
 ### GRAM Width-vs-Depth (`.benchmarks/019_gram_width_depth.md`)
 
@@ -2035,9 +2041,14 @@ cargo clippy --all-targets --all-features --quiet
 | `mech_attribution` | Mechanistic Data Attribution — catalyst pattern detection + influence proxy (Plan 111, **opt-in**). Requires `cna_steering`, `ropd_rubric`, `bandit` |
 | `newton_schulz` | Newton-Schulz orthogonalization + Muon momentum (Plan 152, Research 114). **opt-in** |
 | `river_valley` | River-valley diagnostic metrics — subspace ratios, effective rank, cosine similarity (Plan 152, Research 114). **opt-in** |
+| `sleep_consolidation` | Sleep-time offline recursive memory consolidation at KV eviction (Plan 154, Research 116). **opt-in**. Requires `lt2_looped`, `gdn2_attention` |
+| `spectral_hierarchy` | Spectral hierarchy diagnostic — eigenspace alignment, Haar wavelets, Cauchy interlacing (Plan 156). **opt-in** |
+| `moa_inference` | MoA Mixture of Activations — token-adaptive activation mixing over a 7-activation dictionary (Research 126, Plan 158, GOAT 7/7). **default-on**. Requires `coda_fusion` |
+| `dual_gram_pca` | Dual-Gram PCA routing for short-sequence calibration (Research R130, Plan 159). **opt-in** |
+| `roofline_cost` | Roofline cost model for GPU operator runtime prediction (Research R130, Plan 159). **opt-in** |
 | `full` | Enable all features (excludes `stepcode`, `sp_kv`, `newton_schulz`, `river_valley`, `shard_kv`, `peira_distill`, `dirichlet_energy`, `data_probe`, `rmsd_distill`, `safe_bandit`, `stiff_anomaly`, `state_source`, `nexus_elo`, `skill_opt`, `proof_cert`, `mech_attribution`, `ega_attn`, `event_log`, `spec_cost_model`, `spechop`, `rt_turbo`, `tf_loop`, `plasma_path`, `parallel_probe`) |
 
-> **Default features trade-off:** `default = ["sparse_mlp", "domain_latent", "ppot", "bandit", "bt_rank", "spectral_quant", "hybrid_oct_pq", "elf_sde", "cna_steering", "deep_manifold", "federation", "tes_loop", "lattice_deduction", "delta_routing", "stability_metrics", "mls_aggregate", "gdn2_attention", "dash_attn", "dreamer", "lt2_looped", "dmax_spd", "eqr_convergence", "subterranean", "sr2am_configurator", "data_gate", "plasma_path", "parallel_probe", "tf_loop", "leo_all_goals", "dual_leo", "sigmoid_margin"]` targets production accuracy + sparsity + pairwise ranking + hybrid KV compression (OCT triplet + PQ rotation) + neuron-level steering + fixed-point residual scoring + federated KL coupling + per-step latency observability + multi-layer sum aggregation + O(1) recurrent attention + adaptive sparse routing + offline memory consolidation + looped inference + soft parallel decode + EqR convergence selection + procedure compilation + per-turn planning regulation + task-level data gating + bit-plane ternary SIMD matvec + parallel-probe consensus control + training-free ODE-refined sub-stepping + all-goals Q-value trait framework + dual LEO teacher/student mixing + sigmoid margin loss + retrieval margin diagnostic. All 31 default features are GOAT-proved. `g_zero` is bench-only (Plan 049: Phase 1 ✅ T5 benchmarked, Phase 2 ✅ Plan 059 GRPO/DPO in `riir-gpu`) — run bench with `--features "g_zero,bomber"` to include heuristic learning. `g_zero` does NOT touch `forward()` hot path (zero hits in `transformer.rs`). Active features are logged in `bench/*_results.csv` and `bench/timeseries.csv` for regression tracking across feature-gate changes.
+> **Default features trade-off:** `default = ["sparse_mlp", "domain_latent", "ppot", "bandit", "bt_rank", "spectral_quant", "hybrid_oct_pq", "elf_sde", "cna_steering", "deep_manifold", "federation", "tes_loop", "lattice_deduction", "delta_routing", "stability_metrics", "mls_aggregate", "gdn2_attention", "dash_attn", "dreamer", "lt2_looped", "dmax_spd", "eqr_convergence", "subterranean", "sr2am_configurator", "data_gate", "plasma_path", "parallel_probe", "tf_loop", "leo_all_goals", "dual_leo", "sigmoid_margin", "moa_inference"]` targets production accuracy + sparsity + pairwise ranking + hybrid KV compression (OCT triplet + PQ rotation) + neuron-level steering + fixed-point residual scoring + federated KL coupling + per-step latency observability + multi-layer sum aggregation + O(1) recurrent attention + adaptive sparse routing + offline memory consolidation + looped inference + soft parallel decode + EqR convergence selection + procedure compilation + per-turn planning regulation + task-level data gating + bit-plane ternary SIMD matvec + parallel-probe consensus control + training-free ODE-refined sub-stepping + all-goals Q-value trait framework + dual LEO teacher/student mixing + sigmoid margin loss + retrieval margin diagnostic + token-adaptive Mixture-of-Activations SwiGLU. All 32 default features are GOAT-proved. `g_zero` is bench-only (Plan 049: Phase 1 ✅ T5 benchmarked, Phase 2 ✅ Plan 059 GRPO/DPO in `riir-gpu`) — run bench with `--features "g_zero,bomber"` to include heuristic learning. `g_zero` does NOT touch `forward()` hot path (zero hits in `transformer.rs`). Active features are logged in `bench/*_results.csv` and `bench/timeseries.csv` for regression tracking across feature-gate changes.
 
 > **Note:** `LeviathanVerifier` is always compiled (no feature gate) — it's part of `verifier.rs` and `benchmark.rs`. `Transformer AR`, `DFlash`, `Raven`, `TurboQuant`, and `PFlash` are also always available — they're zero-cost until their caches are instantiated.
 
@@ -2331,7 +2342,7 @@ Every feature traced from research paper to implementation to benchmark. Separat
 
 ### 🐐 Default GOAT (Production Stack)
 
-`default = ["sparse_mlp", "domain_latent", "ppot", "bandit", "bt_rank", "spectral_quant", "hybrid_oct_pq", "elf_sde", "cna_steering", "deep_manifold", "federation", "tes_loop", "lattice_deduction", "delta_routing", "stability_metrics", "mls_aggregate", "gdn2_attention", "dash_attn", "dreamer", "lt2_looped", "dmax_spd", "eqr_convergence", "subterranean", "sr2am_configurator", "data_gate", "plasma_path", "parallel_probe", "tf_loop", "leo_all_goals", "dual_leo"]`
+`default = ["sparse_mlp", "domain_latent", "ppot", "bandit", "bt_rank", "spectral_quant", "hybrid_oct_pq", "elf_sde", "cna_steering", "deep_manifold", "federation", "tes_loop", "lattice_deduction", "delta_routing", "stability_metrics", "mls_aggregate", "gdn2_attention", "dash_attn", "dreamer", "lt2_looped", "dmax_spd", "eqr_convergence", "subterranean", "sr2am_configurator", "data_gate", "plasma_path", "parallel_probe", "tf_loop", "leo_all_goals", "dual_leo", "sigmoid_margin", "moa_inference"]`
 
 | Feature | Source | Real Gain (from code) | Replaced |
 |---------|--------|-----------------------|----------|
@@ -2369,6 +2380,9 @@ Every feature traced from research paper to implementation to benchmark. Separat
 | **SpecHop** (`spechop`) | arXiv:2605.21965, Plan 131 | Hop-level speculation for multi-step agents. α/β/p cost model, k-bounded window, RuleBasedVerifier, HopDDTree, SR²AM `SpecHop { k }` arm. 170+ tests. Opt-in. Requires `bandit`. | Token-level-only speculation; no hop-level prediction |
 | **LEO All-Goals** (`leo_all_goals`) | [Matthews et al. 2026 "Learn Everything All at Once"](https://arxiv.org/abs/2605.09959) | All-goals Q-value trait framework: `LeoHead` (Q(s) → R^{G×A}), `AllGoalsUpdate` (vectorized Bellman), `sigmoid_bounded_q` (divergence guard). SUPER GOAT (Plan 155). Default-on. | Single-goal Q-value heads |
 | **Dual LEO** (`dual_leo`) | Matthews et al. 2026 §4 | `DualLeoMixer` (α-blended teacher/student Q-values, default α=0.3) + `AutocurriculumSampler` (observed-goal sampling). SUPER GOAT (Plan 155). Default-on. Requires `leo_all_goals`. | Single-model Q-value estimation |
+| **PlasmaPath** (`plasma_path`) | [Ciot Ternary CPU Inference](https://github.com/Cintu07/ciot) (Research 110) | **GOAT 5/5** (Plan 148, Bench 044). Bit-plane ternary weights {−1,0,+1} at **1.58 bits/weight**, branchless SIMD add/sub (no multiply). SIMD↔scalar checksum < 0.1‰. Quantize cosine 0.77 random / ≥0.92 real. **Honest:** at 7.57 Gop/s it is 0.70× of FP32 NEON `simd_dot` — the win is **20× less memory traffic**, not raw speed. Default-on. | Multiply-based dense matvec |
+| **Sigmoid Margin** (`sigmoid_margin`) | [Dimensionality Barrier for Retrieval (arXiv:2605.23556)](https://arxiv.org/abs/2605.23556) (Research 123, Plan 157) | **GOAT 7/7** (12 tests, Bench 048). Proves optimal retrieval margin needs only **d = Θ(k·log n)** (tight). SigLIP `softplus(t·(score−b)·sign)` reaches positive margin at d ≈ log n vs **InfoNCE's Θ(n^⅓)** (k=2: d≈6→9 over n=20→240 vs InfoNCE 10→23). `dim_sufficiency_bound` sizes embedding dims; Proof 6 confirms **no MaxSim regression**. Default-on, requires `maxsim`. | InfoNCE-only scoring without margin/dim guarantee |
+| **MoA Inference** (`moa_inference`) | [Mixture of Activations (arXiv:2605.26647)](https://arxiv.org/abs/2605.26647) — ByteDance Seed + PKU (Research 126, Plan 158) | **GOAT — 10/10 MoA tests pass** (after a test sign-error fix, 2026-05-29; Bench 049). Token-adaptive bi-MoA SwiGLU over {Id, ReLU, ReLU², LeakyReLU, GELU, SiLU, Tanh}; gating π_k = σ(u_kᵀx). Strict expressivity hierarchy **fixed ⊊ LA ⊊ MoA** (Thm 4.1/4.2); sigmoid gate > softmax. O(28·d) mixing ≪ O(d²) matmul; paper reports 1.03–1.13× wall-clock, memory unchanged. Fused kernel `simd_matmul_rmsnorm_moa_swiglu`. Default-on, requires `coda_fusion`. | Fixed single-activation SwiGLU |
 
 ### 🔒 Gated Features (Opt-In, Proven)
 

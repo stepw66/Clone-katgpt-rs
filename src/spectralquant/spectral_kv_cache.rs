@@ -10,7 +10,6 @@
 use super::spectral::{
     BitAllocator, LloydMaxQuantizer, generate_selective_qjl_signs, waterfill_bits,
 };
-use super::spectral_rotation::SpectralRotation;
 use super::types::{
     LloydMaxCodebook, SpectralQuantCalibration, SpectralQuantKVCacheConfig, SpectralQuantLayer,
     WaterfillAllocation,
@@ -377,12 +376,15 @@ impl SpectralQuantKVCache {
         self.scratch_normalized[..key.len()].copy_from_slice(key);
         simd_scale_inplace(&mut self.scratch_normalized, inv_norm);
 
-        // Rotate using eigenvectors
-        let rotation = SpectralRotation::new(
-            layer_state.calibration.eigenvectors.clone(),
-            layer_state.calibration.head_dim,
+        // Rotate using cached per-layer eigenvectors (no clone)
+        let eigenvectors = &layer_state.calibration.eigenvectors;
+        let head_dim = layer_state.calibration.head_dim;
+        rotate_into(
+            eigenvectors,
+            head_dim,
+            &self.scratch_normalized,
+            &mut self.scratch_rotated,
         );
-        rotation.rotate(&self.scratch_normalized, &mut self.scratch_rotated);
 
         // Quantize semantic dims
         if let Some(cb) = &layer_state.semantic_codebook {
@@ -446,11 +448,14 @@ impl SpectralQuantKVCache {
         self.scratch_normalized[..value.len()].copy_from_slice(value);
         simd_scale_inplace(&mut self.scratch_normalized, inv_norm);
 
-        let rotation = SpectralRotation::new(
-            layer_state.calibration.eigenvectors.clone(),
-            layer_state.calibration.head_dim,
+        let eigenvectors = &layer_state.calibration.eigenvectors;
+        let head_dim = layer_state.calibration.head_dim;
+        rotate_into(
+            eigenvectors,
+            head_dim,
+            &self.scratch_normalized,
+            &mut self.scratch_rotated,
         );
-        rotation.rotate(&self.scratch_normalized, &mut self.scratch_rotated);
 
         if let Some(cb) = &layer_state.semantic_codebook {
             for i in 0..d_eff {
@@ -536,12 +541,10 @@ impl SpectralQuantKVCache {
             rotated[i] = dequantize_idx(all_indices[i], &tail_cb.centroids);
         }
 
-        let rotation = SpectralRotation::new(
-            layer_state.calibration.eigenvectors.clone(),
-            layer_state.calibration.head_dim,
-        );
+        let eigenvectors = &layer_state.calibration.eigenvectors;
+        let head_dim = layer_state.calibration.head_dim;
         let mut normalized = vec![0.0f32; self.kv_dim];
-        rotation.unrotate(&rotated, &mut normalized);
+        unrotate_into(eigenvectors, head_dim, &rotated, &mut normalized);
 
         for v in &mut normalized {
             *v *= norm;
@@ -593,12 +596,10 @@ impl SpectralQuantKVCache {
             rotated[i] = dequantize_idx(all_indices[i], &tail_cb.centroids);
         }
 
-        let rotation = SpectralRotation::new(
-            layer_state.calibration.eigenvectors.clone(),
-            layer_state.calibration.head_dim,
-        );
+        let eigenvectors = &layer_state.calibration.eigenvectors;
+        let head_dim = layer_state.calibration.head_dim;
         let mut normalized = vec![0.0f32; self.kv_dim];
-        rotation.unrotate(&rotated, &mut normalized);
+        unrotate_into(eigenvectors, head_dim, &rotated, &mut normalized);
 
         normalized.iter().map(|x| x * norm).collect()
     }
@@ -653,12 +654,15 @@ impl SpectralQuantKVCache {
             *r = dequantize_idx(all_indices[i], &tail_cb.centroids);
         }
 
-        // Inverse rotate
-        let rotation = SpectralRotation::new(
-            layer_state.calibration.eigenvectors.clone(),
-            layer_state.calibration.head_dim,
+        // Inverse rotate (no clone)
+        let eigenvectors = &layer_state.calibration.eigenvectors;
+        let head_dim = layer_state.calibration.head_dim;
+        unrotate_into(
+            eigenvectors,
+            head_dim,
+            &self.scratch_rotated,
+            &mut self.scratch_unrotated,
         );
-        rotation.unrotate(&self.scratch_rotated, &mut self.scratch_unrotated);
 
         // Scale by norm → output
         out.copy_from_slice(&self.scratch_unrotated);
@@ -712,11 +716,14 @@ impl SpectralQuantKVCache {
             *r = dequantize_idx(all_indices[i], &tail_cb.centroids);
         }
 
-        let rotation = SpectralRotation::new(
-            layer_state.calibration.eigenvectors.clone(),
-            layer_state.calibration.head_dim,
+        let eigenvectors = &layer_state.calibration.eigenvectors;
+        let head_dim = layer_state.calibration.head_dim;
+        unrotate_into(
+            eigenvectors,
+            head_dim,
+            &self.scratch_rotated,
+            &mut self.scratch_unrotated,
         );
-        rotation.unrotate(&self.scratch_rotated, &mut self.scratch_unrotated);
 
         out.copy_from_slice(&self.scratch_unrotated);
         simd_scale_inplace(out, norm);
@@ -822,11 +829,14 @@ impl SpectralQuantKVCache {
             *r = dequantize_idx(all_indices[i], &tail_cb.centroids);
         }
 
-        let rotation = SpectralRotation::new(
-            layer_state.calibration.eigenvectors.clone(),
-            layer_state.calibration.head_dim,
+        let eigenvectors = &layer_state.calibration.eigenvectors;
+        let head_dim = layer_state.calibration.head_dim;
+        unrotate_into(
+            eigenvectors,
+            head_dim,
+            &scratch.rotated,
+            &mut scratch.unrotated,
         );
-        rotation.unrotate(&scratch.rotated, &mut scratch.unrotated);
 
         out.copy_from_slice(&scratch.unrotated);
         simd_scale_inplace(out, norm);
@@ -887,11 +897,14 @@ impl SpectralQuantKVCache {
             *r = dequantize_idx(all_indices[i], &tail_cb.centroids);
         }
 
-        let rotation = SpectralRotation::new(
-            layer_state.calibration.eigenvectors.clone(),
-            layer_state.calibration.head_dim,
+        let eigenvectors = &layer_state.calibration.eigenvectors;
+        let head_dim = layer_state.calibration.head_dim;
+        unrotate_into(
+            eigenvectors,
+            head_dim,
+            &scratch.rotated,
+            &mut scratch.unrotated,
         );
-        rotation.unrotate(&scratch.rotated, &mut scratch.unrotated);
 
         out.copy_from_slice(&scratch.unrotated);
         simd_scale_inplace(out, norm);
@@ -1026,6 +1039,33 @@ impl crate::types::QuantizedKVCache for SpectralQuantKVCache {
 // ── Helpers ─────────────────────────────────────────────────────────────
 
 /// Compute L2 norm of a vector.
+/// Inline forward rotation: out = V^T @ x, using raw eigenvector slice.
+/// Avoids allocating a `SpectralRotation` struct — zero-alloc for hot paths.
+#[inline]
+#[allow(clippy::needless_range_loop)]
+fn rotate_into(eigenvectors: &[f32], head_dim: usize, x: &[f32], out: &mut [f32]) {
+    for j in 0..head_dim {
+        let mut sum = 0.0f32;
+        for i in 0..head_dim {
+            sum += eigenvectors[i * head_dim + j] * x[i];
+        }
+        out[j] = sum;
+    }
+}
+
+/// Inline inverse rotation: out = V @ x, using raw eigenvector slice.
+#[inline]
+#[allow(clippy::needless_range_loop)]
+fn unrotate_into(eigenvectors: &[f32], head_dim: usize, x: &[f32], out: &mut [f32]) {
+    for i in 0..head_dim {
+        let mut sum = 0.0f32;
+        for j in 0..head_dim {
+            sum += eigenvectors[i * head_dim + j] * x[j];
+        }
+        out[i] = sum;
+    }
+}
+
 fn simd_norm(v: &[f32]) -> f32 {
     v.iter().map(|&x| x * x).sum::<f32>().sqrt()
 }
@@ -1080,18 +1120,42 @@ fn generate_random_rotation(dim: usize, seed: u64) -> Vec<f32> {
 }
 
 /// Find nearest centroid index for a value.
+///
+/// Uses binary search on the assumption that centroids are sorted ascending.
+/// This gives O(log n) instead of O(n) for the hot-path quantize loop.
 fn quantize_to_idx(value: f32, centroids: &[f32]) -> u8 {
-    centroids
-        .iter()
-        .enumerate()
-        .min_by(|(_, a), (_, b)| {
-            (value - *a)
-                .abs()
-                .partial_cmp(&(value - *b).abs())
-                .unwrap_or(std::cmp::Ordering::Equal)
-        })
-        .map(|(i, _)| i)
-        .unwrap_or(0) as u8
+    if centroids.is_empty() {
+        return 0;
+    }
+    if centroids.len() == 1 {
+        return 0;
+    }
+
+    // Binary search for insertion point
+    let mut lo = 0usize;
+    let mut hi = centroids.len() - 1;
+
+    // Clamp to range
+    if value <= centroids[lo] {
+        return lo as u8;
+    }
+    if value >= centroids[hi] {
+        return hi as u8;
+    }
+
+    while lo + 1 < hi {
+        let mid = lo + (hi - lo) / 2;
+        if centroids[mid] <= value {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+
+    // lo and lo+1 bracket the value; pick the closer one
+    let d_lo = (value - centroids[lo]).abs();
+    let d_hi = (centroids[hi] - value).abs();
+    if d_lo <= d_hi { lo as u8 } else { hi as u8 }
 }
 
 /// Dequantize an index back to centroid value.

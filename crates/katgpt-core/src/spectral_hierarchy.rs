@@ -189,12 +189,12 @@ fn top_k_eigenvectors(mat: &[f32], n: usize, k: usize) -> Vec<Vec<f32>> {
     debug_assert_eq!(a.len(), n * n);
 
     // Initialize eigenvector matrix as identity.
-    let mut v = vec![0.0f64; n * n];
+    let mut v: Vec<f64> = vec![0.0f64; n * n];
     for i in 0..n {
         v[i * n + i] = 1.0;
     }
 
-    // Cyclic Jacobi iteration.
+    // Cyclic Jacobi iteration with convergence check + rotation fused.
     let max_sweeps = 100;
     for _ in 0..max_sweeps {
         // Check convergence: max off-diagonal element.
@@ -219,7 +219,6 @@ fn top_k_eigenvectors(mat: &[f32], n: usize, k: usize) -> Vec<Vec<f32>> {
                     continue;
                 }
 
-                // Compute rotation angle.
                 let app = a[p * n + p];
                 let aqq = a[q * n + q];
                 let diag_diff = app - aqq;

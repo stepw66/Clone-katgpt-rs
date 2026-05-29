@@ -281,12 +281,10 @@ impl SdpaOutputGate {
         debug_assert!(self.w_gate.len() >= n * dim, "gate weights too small");
 
         // Step 1: Compute gate signal = sigmoid(W_gate @ attn_out)
-        for i in 0..n {
-            let w_off = i * dim;
-            let dot = crate::simd::simd_dot_f32(&self.w_gate[w_off..w_off + dim], attn_out, dim);
-            unsafe {
-                *temp.get_unchecked_mut(i) = 1.0 / (1.0 + (-dot).exp());
-            }
+        // Batch matvec then batch sigmoid avoids per-element loop overhead
+        crate::simd::simd_matvec(temp, &self.w_gate, attn_out, n, dim);
+        for t in &mut temp[..n] {
+            *t = 1.0 / (1.0 + (-*t).exp());
         }
 
         // Step 2: Apply gate elementwise
@@ -1656,14 +1654,12 @@ pub fn sample_token(probs: &[f32], rng: &mut Rng) -> usize {
         return 0;
     }
 
-    // Build cumulative sum array — pre-fill to avoid push overhead
-    let mut cdf = vec![0.0f32; n];
+    // Build cumulative sum array — pre-allocated to exact size
+    let mut cdf = Vec::with_capacity(n);
     let mut sum = 0.0f32;
-    for (i, &p) in probs.iter().enumerate() {
+    for &p in probs.iter() {
         sum += p;
-        unsafe {
-            *cdf.get_unchecked_mut(i) = sum;
-        }
+        cdf.push(sum);
     }
 
     // Binary search: find the first index where cdf[i] > r

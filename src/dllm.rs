@@ -870,12 +870,13 @@ fn rmsnorm_backward(x_input: &[f32], y_output: &[f32], dy: &[f32]) -> Vec<f32> {
 fn rmsnorm_backward_into(x_input: &[f32], y_output: &[f32], dy: &[f32], out: &mut [f32]) {
     let n = x_input.len();
     debug_assert!(out.len() >= n);
-    let sum_sq: f32 = x_input.iter().map(|x| x * x).sum();
+    let sum_sq = crate::simd::simd_sum_sq(x_input, n);
     let rms = (sum_sq / n as f32 + 1e-5).sqrt();
-    let dot_dy_y: f32 = dy.iter().zip(y_output.iter()).map(|(d, y)| d * y).sum();
+    let dot_dy_y = crate::simd::simd_dot_f32(dy, y_output, n);
     let mean_dy_y = dot_dy_y / n as f32;
+    let inv_rms = 1.0 / rms;
     for i in 0..n {
-        out[i] = (dy[i] - y_output[i] * mean_dy_y) / rms;
+        out[i] = (dy[i] - y_output[i] * mean_dy_y) * inv_rms;
     }
 }
 
@@ -896,7 +897,7 @@ fn softmax_backward(weights: &[f32], dy: &[f32]) -> Vec<f32> {
 fn softmax_backward_into(weights: &[f32], dy: &[f32], out: &mut [f32]) {
     let n = weights.len();
     debug_assert!(out.len() >= n);
-    let dot: f32 = weights.iter().zip(dy.iter()).map(|(w, d)| w * d).sum();
+    let dot = crate::simd::simd_dot_f32(weights, dy, n);
     for i in 0..n {
         out[i] = weights[i] * (dy[i] - dot);
     }
@@ -963,12 +964,16 @@ fn backward(
             n,
         );
 
-        // d_hidden_final = lm_head^T @ d_logits
+        // d_hidden_final = lm_head^T @ d_logits (row-wise dot products)
         bctx.d_hf[..n].fill(0.0);
-        for j in 0..n {
-            for i in 0..vocab {
-                bctx.d_hf[j] += weights.lm_head[i * n + j] * bctx.d_logits[i];
-            }
+        for i in 0..vocab {
+            let grad = bctx.d_logits[i];
+            crate::simd::simd_fused_scale_acc(
+                &mut bctx.d_hf[..n],
+                &weights.lm_head[i * n..(i + 1) * n],
+                grad,
+                n,
+            );
         }
 
         // Residual: hidden_final = after_mlp + after_attn_res
@@ -980,13 +985,20 @@ fn backward(
         crate::simd::simd_outer_product_acc(&mut grads.mlp_w2, &bctx.d_hf[..n], mh, n, mlp_h);
         // d_mlp_hidden = w2^T @ d_after_mlp, then ReLU backward
         bctx.d_mh[..mlp_h].fill(0.0);
+        for i in 0..n {
+            let grad = bctx.d_hf[i];
+            crate::simd::simd_fused_scale_acc(
+                &mut bctx.d_mh[..mlp_h],
+                &layer.mlp_w2[i * mlp_h..(i + 1) * mlp_h],
+                grad,
+                mlp_h,
+            );
+        }
+        // ReLU backward
         for j in 0..mlp_h {
-            for i in 0..n {
-                bctx.d_mh[j] += layer.mlp_w2[i * mlp_h + j] * bctx.d_hf[i];
-            }
             if mh[j] <= 0.0 {
                 bctx.d_mh[j] = 0.0;
-            } // ReLU backward
+            }
         }
 
         // MLP w1: d_w1 += outer(d_mh, after_mlp_norm)
@@ -994,10 +1006,14 @@ fn backward(
         crate::simd::simd_outer_product_acc(&mut grads.mlp_w1, &bctx.d_mh[..mlp_h], amn, mlp_h, n);
         // d_after_mlp_norm = w1^T @ d_mh
         bctx.d_amn[..n].fill(0.0);
-        for j in 0..n {
-            for i in 0..mlp_h {
-                bctx.d_amn[j] += layer.mlp_w1[i * n + j] * bctx.d_mh[i];
-            }
+        for i in 0..mlp_h {
+            let grad = bctx.d_mh[i];
+            crate::simd::simd_fused_scale_acc(
+                &mut bctx.d_amn[..n],
+                &layer.mlp_w1[i * n..(i + 1) * n],
+                grad,
+                n,
+            );
         }
 
         // RMSNorm backward (after_attn_res → after_mlp_norm)
@@ -1012,10 +1028,14 @@ fn backward(
         let ao = &act.attn_out[p * n..(p + 1) * n];
         crate::simd::simd_outer_product_acc(&mut grads.attn_wo, &bctx.d_an1[..n], ao, n, n);
         // d_attn_out = wo^T @ d_after_attn_res
-        for j in 0..n {
-            for i in 0..n {
-                bctx.d_attn_out[p * n + j] += layer.attn_wo[i * n + j] * bctx.d_an1[i];
-            }
+        for i in 0..n {
+            let grad = bctx.d_an1[i];
+            crate::simd::simd_fused_scale_acc(
+                &mut bctx.d_attn_out[p * n..(p + 1) * n],
+                &layer.attn_wo[i * n..(i + 1) * n],
+                grad,
+                n,
+            );
         }
     }
 
@@ -1035,11 +1055,11 @@ fn backward(
             // d_raw_weights[t] = dot(d_attn_out[h], v[t,h])
             bctx.d_raw[..seq_len].fill(0.0);
             for t in 0..seq_len {
-                let mut dot = 0.0f32;
-                for d in 0..hd {
-                    dot += d_ao[q_off + d] * act.v[t * kvd + kv_off + d];
-                }
-                bctx.d_raw[t] = dot;
+                bctx.d_raw[t] = crate::simd::simd_dot_f32(
+                    &d_ao[q_off..q_off + hd],
+                    &act.v[t * kvd + kv_off..t * kvd + kv_off + hd],
+                    hd,
+                );
             }
 
             // Softmax backward
@@ -1053,25 +1073,32 @@ fn backward(
 
             // d_v[t] += weights[t] * d_attn_out[h]
             for t in 0..seq_len {
-                for d in 0..hd {
-                    bctx.d_v[t * kvd + kv_off + d] += w_h[t] * d_ao[q_off + d];
-                }
+                crate::simd::simd_fused_scale_acc(
+                    &mut bctx.d_v[t * kvd + kv_off..t * kvd + kv_off + hd],
+                    &d_ao[q_off..q_off + hd],
+                    w_h[t],
+                    hd,
+                );
             }
 
             // d_q[h] += d_scores[t] * k[t,h] * scale
             for t in 0..seq_len {
-                for d in 0..hd {
-                    bctx.d_q[p * n + q_off + d] +=
-                        d_scores[t] * act.k[t * kvd + kv_off + d] * scale;
-                }
+                crate::simd::simd_fused_scale_acc(
+                    &mut bctx.d_q[p * n + q_off..p * n + q_off + hd],
+                    &act.k[t * kvd + kv_off..t * kvd + kv_off + hd],
+                    d_scores[t] * scale,
+                    hd,
+                );
             }
 
             // d_k[t,h] += d_scores[t] * q[p,h] * scale
             for t in 0..seq_len {
-                for d in 0..hd {
-                    bctx.d_k[t * kvd + kv_off + d] +=
-                        d_scores[t] * act.q[p * n + q_off + d] * scale;
-                }
+                crate::simd::simd_fused_scale_acc(
+                    &mut bctx.d_k[t * kvd + kv_off..t * kvd + kv_off + hd],
+                    &act.q[p * n + q_off..p * n + q_off + hd],
+                    d_scores[t] * scale,
+                    hd,
+                );
             }
         }
     }
@@ -1111,14 +1138,30 @@ fn backward(
 
         // d_after_norm2 = wq^T @ d_q + wk^T @ d_k + wv^T @ d_v
         bctx.d_an2[..n].fill(0.0);
-        for j in 0..n {
-            for i in 0..n {
-                bctx.d_an2[j] += layer.attn_wq[i * n + j] * bctx.d_q[p * n + i];
-            }
-            for i in 0..kvd {
-                bctx.d_an2[j] += layer.attn_wk[i * n + j] * bctx.d_k[p * kvd + i];
-                bctx.d_an2[j] += layer.attn_wv[i * n + j] * bctx.d_v[p * kvd + i];
-            }
+        for i in 0..n {
+            let grad = bctx.d_q[p * n + i];
+            crate::simd::simd_fused_scale_acc(
+                &mut bctx.d_an2[..n],
+                &layer.attn_wq[i * n..(i + 1) * n],
+                grad,
+                n,
+            );
+        }
+        for i in 0..kvd {
+            let gk = bctx.d_k[p * kvd + i];
+            let gv = bctx.d_v[p * kvd + i];
+            crate::simd::simd_fused_scale_acc(
+                &mut bctx.d_an2[..n],
+                &layer.attn_wk[i * n..(i + 1) * n],
+                gk,
+                n,
+            );
+            crate::simd::simd_fused_scale_acc(
+                &mut bctx.d_an2[..n],
+                &layer.attn_wv[i * n..(i + 1) * n],
+                gv,
+                n,
+            );
         }
         bctx.d_after_norm2[p * n..(p + 1) * n].copy_from_slice(&bctx.d_an2[..n]);
     }
@@ -1534,19 +1577,18 @@ pub fn forward_block_causal_positions(
     }
 
     // Phase B: Block-causal attention
-    let mut all_logits = Vec::with_capacity(seq_len);
-    let mut all_attn_weights = Vec::with_capacity(seq_len);
+    // Pre-allocate output buffers upfront (avoid per-position clone)
+    let mut all_logits = vec![vec![0.0f32; config.vocab_size]; seq_len];
+    let mut all_attn_weights = vec![vec![0.0f32; config.n_head * seq_len]; seq_len];
 
     // Pre-allocate Phase B scratch buffers (reused across positions)
     let mut q_buf = vec![0.0f32; n];
     let mut attn_out_buf = vec![0.0f32; n];
     let mut attn_w_buf = vec![0.0f32; config.n_head * seq_len];
     let mut scores_buf = vec![0.0f32; seq_len];
-    let mut padded_w = vec![0.0f32; config.n_head * seq_len];
     let mut x_proj = vec![0.0f32; n];
     let mut hidden = vec![0.0f32; config.mlp_hidden];
     let mut x_mlp = vec![0.0f32; n];
-    let mut logits = vec![0.0f32; config.vocab_size];
     let mut xr2_buf = vec![0.0f32; n];
 
     for p in 0..seq_len {
@@ -1572,11 +1614,11 @@ pub fn forward_block_causal_positions(
             &mut scores_buf,
         );
 
-        // Pad attn_w to seq_len for consistent output
-        padded_w[..config.n_head * seq_len].fill(0.0);
+        // Pad attn_w to seq_len for consistent output (write directly into output)
+        all_attn_weights[p][..config.n_head * seq_len].fill(0.0);
         for h in 0..config.n_head {
             for t in 0..t_n {
-                padded_w[h * seq_len + t] = attn_w_buf[h * t_n + t];
+                all_attn_weights[p][h * seq_len + t] = attn_w_buf[h * t_n + t];
             }
         }
 
@@ -1589,9 +1631,13 @@ pub fn forward_block_causal_positions(
         matmul(&mut x_mlp, &layer.mlp_w2, &hidden, n, config.mlp_hidden);
         crate::simd::simd_add_inplace(&mut x_mlp[..n], &xr2_buf[..n]);
 
-        matmul(&mut logits, &weights.lm_head, &x_mlp, config.vocab_size, n);
-        all_logits.push(logits.clone());
-        all_attn_weights.push(padded_w.clone());
+        matmul(
+            &mut all_logits[p],
+            &weights.lm_head,
+            &x_mlp,
+            config.vocab_size,
+            n,
+        );
     }
 
     (all_logits, all_attn_weights)

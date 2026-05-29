@@ -95,17 +95,6 @@ fn softmax_scores_into(scores: &[f32], out: &mut [f32]) {
     }
 }
 
-/// Allocating softmax — prefer `softmax_scores_into` in hot paths.
-fn softmax_scores(scores: &[f32]) -> Vec<f32> {
-    if scores.is_empty() {
-        return vec![];
-    }
-
-    let mut out = vec![0.0f32; scores.len()];
-    softmax_scores_into(scores, &mut out);
-    out
-}
-
 // ---------------------------------------------------------------------------
 // Top-P Selection (T11, T12)
 // ---------------------------------------------------------------------------
@@ -159,8 +148,9 @@ pub fn select_top_p(scores: &[f32], top_p: f32) -> DynamicTopPResult {
     // Clamp top_p to [0.0, 1.0]
     let threshold = top_p.clamp(0.0, 1.0);
 
-    // Compute softmax probabilities
-    let probs = softmax_scores(scores);
+    // Compute softmax probabilities into pre-allocated buffer
+    let mut probs = vec![0.0f32; n_total];
+    softmax_scores_into(scores, &mut probs);
 
     // Sort by probability descending, keeping original indices
     let mut indexed: Vec<IndexedScore> = probs
@@ -260,7 +250,8 @@ pub fn select_top_p_blockwise(scores: &[f32], top_p: f32, block_size: usize) -> 
     }
 
     // Stage 2: Softmax + top-p at block level
-    let block_probs = softmax_scores(&block_scores);
+    let mut block_probs = vec![0.0f32; n_blocks];
+    softmax_scores_into(&block_scores, &mut block_probs);
 
     let mut block_indexed: Vec<IndexedScore> = block_probs
         .iter()
@@ -307,7 +298,8 @@ pub fn select_top_p_blockwise(scores: &[f32], top_p: f32, block_size: usize) -> 
 
     // Stage 4: Fine-grained top-p on candidate scores
     let candidate_score_values: Vec<f32> = candidate_entries.iter().map(|&(_, s)| s).collect();
-    let candidate_probs = softmax_scores(&candidate_score_values);
+    let mut candidate_probs = vec![0.0f32; candidate_entries.len()];
+    softmax_scores_into(&candidate_score_values, &mut candidate_probs);
 
     let mut candidate_indexed: Vec<IndexedScore> = candidate_probs
         .iter()

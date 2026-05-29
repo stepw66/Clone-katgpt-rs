@@ -9,16 +9,50 @@
 //!
 //! These are exact algebraic inverses — roundtrip error is at most float epsilon.
 
-/// Compute RoPE inverse frequencies: inv_freq[i] = 1.0 / (10000^(2i/d_head)).
-fn compute_inv_freq(head_dim: usize) -> Vec<f32> {
-    let half = head_dim / 2;
-    let base: f32 = 10000.0;
-    (0..half)
-        .map(|i| {
-            let exp = 2.0 * i as f32 / head_dim as f32;
-            1.0 / base.powf(exp)
-        })
-        .collect()
+/// Pre-computed RoPE inverse frequencies for a given head_dim.
+///
+/// Caches `inv_freq[i] = 1.0 / (10000^(2i/d_head))` to avoid recomputing
+/// and reallocating on every rotation call.
+pub struct RopeFreqs {
+    inv_freq: Vec<f32>,
+    half: usize,
+}
+
+impl RopeFreqs {
+    /// Build inverse frequencies for the given head_dim.
+    pub fn new(head_dim: usize) -> Self {
+        let half = head_dim / 2;
+        let base: f32 = 10000.0;
+        let inv_freq: Vec<f32> = (0..half)
+            .map(|i| {
+                let exp = 2.0 * i as f32 / head_dim as f32;
+                1.0 / base.powf(exp)
+            })
+            .collect();
+        Self { inv_freq, half }
+    }
+
+    /// Apply position-dependent rotation to dim pairs in-place.
+    ///
+    /// For each pair (2i, 2i+1):
+    ///   θ = pos × inv_freq[i]
+    ///   [x0', x1'] = [[cos θ, -sin θ], [sin θ, cos θ]] @ [x0, x1]
+    ///
+    /// When `negate = true`, applies the inverse rotation (negated angle).
+    #[inline]
+    pub fn apply(&self, x: &mut [f32], pos: usize, negate: bool) {
+        let sign: f32 = if negate { -1.0 } else { 1.0 };
+        let pos_f = sign * pos as f32;
+
+        for i in 0..self.half {
+            let theta = pos_f * self.inv_freq[i];
+            let (sin_t, cos_t) = theta.sin_cos();
+            let x0 = x[2 * i];
+            let x1 = x[2 * i + 1];
+            x[2 * i] = cos_t * x0 - sin_t * x1;
+            x[2 * i + 1] = sin_t * x0 + cos_t * x1;
+        }
+    }
 }
 
 /// Apply position-dependent rotation to dim pairs in-place.
@@ -28,22 +62,12 @@ fn compute_inv_freq(head_dim: usize) -> Vec<f32> {
 ///   [x0', x1'] = [[cos θ, -sin θ], [sin θ, cos θ]] @ [x0, x1]
 ///
 /// When `negate = true`, applies the inverse rotation (negated angle).
+///
+/// Prefer [`RopeFreqs::apply`] in hot paths to avoid reallocating the
+/// frequency table on every call.
 fn apply_rotation(x: &mut [f32], pos: usize, head_dim: usize, negate: bool) {
-    let inv_freq = compute_inv_freq(head_dim);
-    let sign: f32 = if negate { -1.0 } else { 1.0 };
-    let half = head_dim / 2;
-
-    for i in 0..half {
-        let theta = sign * pos as f32 * inv_freq[i];
-        let cos_t = theta.cos();
-        let sin_t = theta.sin();
-        let x0 = x[2 * i];
-        let x1 = x[2 * i + 1];
-        x[2 * i] = cos_t * x0 - sin_t * x1;
-        x[2 * i + 1] = sin_t * x0 + cos_t * x1;
-    }
-
-    // Handle odd dimension: last dim is untouched
+    let freqs = RopeFreqs::new(head_dim);
+    freqs.apply(x, pos, negate);
 }
 
 /// Undo RoPE: apply the inverse position-dependent rotation.

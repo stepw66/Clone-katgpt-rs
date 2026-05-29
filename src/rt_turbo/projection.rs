@@ -253,6 +253,25 @@ impl RetrievalProjection {
         q_proj
     }
 
+    /// Project a pre-RoPE query vector into a pre-allocated buffer (zero-alloc).
+    ///
+    /// Same as [`project_query`](Self::project_query) but writes into `out`
+    /// instead of allocating. Use in hot loops like `batch_project_scores`.
+    pub fn project_query_into(&self, head_local_idx: usize, q_pre: &[f32], out: &mut [f32]) {
+        assert_eq!(q_pre.len(), self.head_dim, "q_pre dimension mismatch");
+        assert_eq!(out.len(), self.low_dim, "out dimension mismatch");
+        out.fill(0.0);
+        let w = self.w_q_for_head(head_local_idx);
+        #[allow(clippy::needless_range_loop)]
+        for i in 0..self.head_dim {
+            let qi = q_pre[i];
+            let row = i * self.low_dim;
+            for j in 0..self.low_dim {
+                out[j] += qi * w[row + j];
+            }
+        }
+    }
+
     /// Project a pre-RoPE key vector down to `low_dim` dimensions.
     ///
     /// Computes: `k_proj = k_pre^T @ W_K` → `[low_dim]`
@@ -357,8 +376,10 @@ impl RetrievalProjection {
             "k_cache length not divisible by head_dim"
         );
 
-        // Step 1: Project query once → q_proj [low_dim]
-        let q_proj = self.project_query(head_local_idx, q_pre);
+        // Step 1: Project query once into stack buffer (zero-alloc)
+        let mut q_proj = [0.0f32; 64]; // low_dim <= 64 for any practical config
+        let q_proj = &mut q_proj[..self.low_dim];
+        self.project_query_into(head_local_idx, q_pre, q_proj);
 
         // Step 2: For each key, project and dot with q_proj
         let w_k = self.w_k_for_head(head_local_idx);

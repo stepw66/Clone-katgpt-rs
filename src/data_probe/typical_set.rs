@@ -58,6 +58,9 @@ pub struct RegimeDistribution {
 }
 
 /// Compute regime distribution across a batch of sequences.
+///
+/// Computes average NLL once per non-empty sequence (avoids double-computing
+/// via `classify_regime` which would call `average_nll` internally).
 pub fn regime_distribution(
     chain: &MarkovChain,
     sequences: &[Vec<usize>],
@@ -69,16 +72,31 @@ pub fn regime_distribution(
     let mut total_nll = 0.0f32;
     let mut n_valid = 0usize;
 
+    // Pre-compute h_nats once for all sequences.
+    let h_nats = chain.entropy_rate * std::f32::consts::LN_2;
+
     for seq in sequences {
-        let regime = classify_regime(chain, seq, epsilon);
+        if seq.is_empty() {
+            n_conservative += 1;
+            continue;
+        }
+
+        let avg_nll = average_nll(chain, seq);
+        total_nll += avg_nll;
+        n_valid += 1;
+
+        let regime = if avg_nll < h_nats - epsilon {
+            Regime::Conservative
+        } else if avg_nll > h_nats + epsilon {
+            Regime::Uncertain
+        } else {
+            Regime::Typical
+        };
+
         match regime {
             Regime::Conservative => n_conservative += 1,
             Regime::Typical => n_typical += 1,
             Regime::Uncertain => n_uncertain += 1,
-        }
-        if !seq.is_empty() {
-            total_nll += average_nll(chain, seq);
-            n_valid += 1;
         }
     }
 

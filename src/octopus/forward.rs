@@ -133,19 +133,23 @@ pub fn attention_octopus(
     }
 
     // Pass 3: normalize + weighted value accumulation
+    // Loop order: t outer, d inner — contiguous value_cache row access, better cache locality.
     let inv_sum = 1.0 / sum;
-    for d in 0..head_dim {
-        let mut val = 0.0f32;
-        for t in 0..t_n {
-            unsafe {
-                val += *scores_buf.get_unchecked(t)
-                    * inv_sum
-                    * *flat_values.get_unchecked(t * kv_dim + kv_group_offset + d);
-            }
-        }
-        unsafe {
-            *attn_out.get_unchecked_mut(q_head_offset + d) = val;
-        }
+    attn_out[q_head_offset..q_head_offset + head_dim].fill(0.0);
+    for t in 0..t_n {
+        let weight = unsafe { *scores_buf.get_unchecked(t) * inv_sum };
+        let v_row = unsafe {
+            std::slice::from_raw_parts(
+                flat_values.as_ptr().add(t * kv_dim + kv_group_offset),
+                head_dim,
+            )
+        };
+        crate::simd::simd_fused_scale_acc(
+            &mut attn_out[q_head_offset..q_head_offset + head_dim],
+            v_row,
+            weight,
+            head_dim,
+        );
     }
 }
 

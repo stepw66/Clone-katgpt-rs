@@ -7,7 +7,7 @@
 
 use super::markov::MarkovChain;
 
-/// Average NLL of sequence against Markov chain: -log p(xⁿ)/n.
+/// Average NLL of sequence against Markov chain: -log p(x^n)/n.
 ///
 /// Returns `f32::INFINITY` for empty sequences.
 /// Uses natural log internally, matching information-theoretic convention.
@@ -15,8 +15,23 @@ pub fn average_nll(chain: &MarkovChain, sequence: &[usize]) -> f32 {
     if sequence.is_empty() {
         return f32::INFINITY;
     }
-    let total = nll_profile(chain, sequence);
-    total.iter().sum::<f32>() / total.len() as f32
+    let total: f32 = sequence
+        .iter()
+        .enumerate()
+        .map(|(t, &state)| {
+            let prob = if t == 0 {
+                chain.stationary[state]
+            } else {
+                chain.transition[sequence[t - 1]][state]
+            };
+            if prob > 0.0 {
+                -prob.ln()
+            } else {
+                f32::INFINITY
+            }
+        })
+        .sum();
+    total / sequence.len() as f32
 }
 
 /// Full NLL profile: per-position negative log-probabilities.

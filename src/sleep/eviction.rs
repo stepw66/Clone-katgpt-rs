@@ -48,20 +48,16 @@ fn sliding_window_evict(cache: &mut MultiLayerKVCache, config: &Config, retain: 
     }
 
     let evict_count = fill_pos - retain;
+    let src_start = evict_count * kvd;
+    let copy_len = retain * kvd;
+    let total_len = fill_pos * kvd;
 
     for layer in &mut cache.layers {
-        // Shift last `retain` entries to front
-        let src_start = evict_count * kvd;
-        let copy_len = retain * kvd;
-        let total_len = fill_pos * kvd;
-
-        // Copy to temp then back (avoid overlap issues)
-        let tail: Vec<f32> = layer.key[src_start..total_len].to_vec();
-        layer.key[..copy_len].copy_from_slice(&tail);
+        // Use copy_within for efficient overlapping shift (no temp allocation).
+        layer.key.copy_within(src_start..total_len, 0);
         layer.key[copy_len..].fill(0.0);
 
-        let tail: Vec<f32> = layer.value[src_start..total_len].to_vec();
-        layer.value[..copy_len].copy_from_slice(&tail);
+        layer.value.copy_within(src_start..total_len, 0);
         layer.value[copy_len..].fill(0.0);
     }
 
