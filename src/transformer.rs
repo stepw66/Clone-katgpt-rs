@@ -79,33 +79,62 @@ impl TransformerWeights {
         let layer_scale = (2.0 / (n as f32 * config.n_layer as f32)).sqrt();
 
         // Embeddings first (same order as original single-layer code)
-        let wte: Vec<f32> = (0..config.vocab_size * n)
-            .map(|_| rng.normal() * embd_scale)
-            .collect();
-        let wpe: Vec<f32> = (0..config.block_size * n)
-            .map(|_| rng.normal() * embd_scale)
-            .collect();
+        // Pre-allocate to avoid repeated re-allocation during collect().
+        let wte_len = config.vocab_size * n;
+        let mut wte = Vec::with_capacity(wte_len);
+        wte.extend((0..wte_len).map(|_| rng.normal() * embd_scale));
+
+        let wpe_len = config.block_size * n;
+        let mut wpe = Vec::with_capacity(wpe_len);
+        wpe.extend((0..wpe_len).map(|_| rng.normal() * embd_scale));
 
         // Per-layer weights: same field order as original per n_layer iterations
+        // Pre-allocate each weight vector to avoid repeated reallocation.
         let layers: Vec<LayerWeights> = (0..config.n_layer)
             .map(|_| LayerWeights {
-                attn_wq: (0..n * n).map(|_| rng.normal() * layer_scale).collect(),
-                attn_wk: (0..kvd * n).map(|_| rng.normal() * layer_scale).collect(),
-                attn_wv: (0..kvd * n).map(|_| rng.normal() * layer_scale).collect(),
-                attn_wo: (0..n * n).map(|_| rng.normal() * layer_scale).collect(),
-                mlp_w1: (0..config.mlp_hidden * n)
-                    .map(|_| rng.normal() * layer_scale)
-                    .collect(),
-                mlp_w2: (0..n * config.mlp_hidden)
-                    .map(|_| rng.normal() * layer_scale)
-                    .collect(),
+                attn_wq: {
+                    let len = n * n;
+                    let mut v = Vec::with_capacity(len);
+                    v.extend((0..len).map(|_| rng.normal() * layer_scale));
+                    v
+                },
+                attn_wk: {
+                    let len = kvd * n;
+                    let mut v = Vec::with_capacity(len);
+                    v.extend((0..len).map(|_| rng.normal() * layer_scale));
+                    v
+                },
+                attn_wv: {
+                    let len = kvd * n;
+                    let mut v = Vec::with_capacity(len);
+                    v.extend((0..len).map(|_| rng.normal() * layer_scale));
+                    v
+                },
+                attn_wo: {
+                    let len = n * n;
+                    let mut v = Vec::with_capacity(len);
+                    v.extend((0..len).map(|_| rng.normal() * layer_scale));
+                    v
+                },
+                mlp_w1: {
+                    let len = config.mlp_hidden * n;
+                    let mut v = Vec::with_capacity(len);
+                    v.extend((0..len).map(|_| rng.normal() * layer_scale));
+                    v
+                },
+                mlp_w2: {
+                    let len = n * config.mlp_hidden;
+                    let mut v = Vec::with_capacity(len);
+                    v.extend((0..len).map(|_| rng.normal() * layer_scale));
+                    v
+                },
             })
             .collect();
 
         // LM head last
-        let lm_head: Vec<f32> = (0..config.vocab_size * n)
-            .map(|_| rng.normal() * embd_scale)
-            .collect();
+        let lm_len = config.vocab_size * n;
+        let mut lm_head = Vec::with_capacity(lm_len);
+        lm_head.extend((0..lm_len).map(|_| rng.normal() * embd_scale));
 
         Self {
             wte,
@@ -253,8 +282,8 @@ pub fn preload_kv_cache(
 /// Cheap snapshot of KV cache state up to position `pos`.
 /// Only copies filled slots [0..pos) per layer, not the entire block_size buffer.
 pub struct KVSnapshot {
-    pub pos: usize,
     pub layers: Vec<KVLayerSnapshot>,
+    pub pos: usize,
 }
 
 /// Per-layer snapshot of KV cache data.
@@ -3679,8 +3708,9 @@ pub fn raven_compute_router_into(
 
 /// Backward-compatible wrapper that allocates fresh buffers.
 pub fn raven_compute_router(raw_logits: &[f32], top_k: usize) -> Vec<f32> {
-    let mut scored = Vec::new();
-    let mut r_t = Vec::new();
+    let n = raw_logits.len();
+    let mut scored = Vec::with_capacity(n);
+    let mut r_t = Vec::with_capacity(n);
     raven_compute_router_into(raw_logits, top_k, &mut scored, &mut r_t);
     r_t
 }
