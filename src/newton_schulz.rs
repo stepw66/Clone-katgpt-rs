@@ -21,6 +21,7 @@ const ITERS: usize = 5;
 
 /// Transpose `rows × cols` matrix stored row-major from `src` into `dst`.
 /// Processes 4 rows at a time for better auto-vectorization.
+#[inline]
 fn transpose(src: &[f32], rows: usize, cols: usize, dst: &mut [f32]) {
     let mut r = 0;
     while r + 4 <= rows {
@@ -47,6 +48,7 @@ fn transpose(src: &[f32], rows: usize, cols: usize, dst: &mut [f32]) {
 
 /// Compute `A = X * X^T` for an `m × n` matrix X, producing an `m × m` result.
 /// Uses SIMD dot products and exploits symmetry (upper triangle + mirror).
+#[inline]
 fn matmul_xtx(x: &[f32], m: usize, n: usize, a: &mut [f32]) {
     for i in 0..m {
         // Diagonal
@@ -63,6 +65,7 @@ fn matmul_xtx(x: &[f32], m: usize, n: usize, a: &mut [f32]) {
 /// Compute `R = A * X` where A is `m × m` and X is `m × n`, result is `m × n`.
 /// Transposes X for contiguous inner-loop access, then uses SIMD dot products.
 /// Caller provides `xt_buf` (`m * n` elements) to avoid per-call allocation.
+#[inline]
 fn matmul_ax(a: &[f32], x: &[f32], m: usize, n: usize, r: &mut [f32], xt_buf: &mut [f32]) {
     // Transpose X: columns become contiguous rows in xt (n × m).
     transpose(x, m, n, xt_buf);
@@ -77,6 +80,7 @@ fn matmul_ax(a: &[f32], x: &[f32], m: usize, n: usize, r: &mut [f32], xt_buf: &m
 }
 
 /// Frobenius norm of a flat matrix.
+#[inline]
 fn frobenius_norm(m: &[f32]) -> f32 {
     crate::simd::simd_sum_sq(m, m.len()).sqrt()
 }
@@ -350,17 +354,26 @@ fn newton_schulz5_square_into_raw(
     let a_mat = &mut a_mat[..mm];
     let b_mat = &mut b_mat[..mm];
     let bx = &mut bx[..mn];
-    let at = &mut at[..mm];
+    let _at = &mut at[..mm]; // unused: A is symmetric, no transpose needed
     let xt_buf = &mut xt_buf[..mn];
 
     for _ in 0..ITERS {
         matmul_xtx(x, m, n, a_mat);
-        transpose(a_mat, m, m, at);
+        // B = B·A + C·A², where A is symmetric (from X·Xᵀ), so A² is symmetric.
+        // Exploit symmetry: compute upper triangle + mirror instead of full matmul.
+        // No transpose needed since A is symmetric (A^T = A).
         for i in 0..m {
-            let a_row = &a_mat[i * m..(i + 1) * m];
-            for j in 0..m {
-                let a2_ij = crate::simd::simd_dot_f32(a_row, &at[j * m..(j + 1) * m], m);
-                b_mat[i * m + j] = B * a_mat[i * m + j] + C * a2_ij;
+            let a_row_i = &a_mat[i * m..(i + 1) * m];
+            // Diagonal
+            let a2_ii = crate::simd::simd_dot_f32(a_row_i, a_row_i, m);
+            b_mat[i * m + i] = B * a_mat[i * m + i] + C * a2_ii;
+            // Upper triangle + mirror
+            for j in (i + 1)..m {
+                let a_col_j = &a_mat[j * m..(j + 1) * m];
+                let a2_ij = crate::simd::simd_dot_f32(a_row_i, a_col_j, m);
+                let val = B * a_mat[i * m + j] + C * a2_ij;
+                b_mat[i * m + j] = val;
+                b_mat[j * m + i] = val;
             }
         }
         matmul_ax(b_mat, x, m, n, bx, xt_buf);
