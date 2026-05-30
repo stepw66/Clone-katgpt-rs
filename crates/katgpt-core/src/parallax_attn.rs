@@ -132,25 +132,36 @@ impl ParallaxScratch {
     pub fn ensure_capacity(&mut self, seq_len: usize, head_dim: usize) {
         let d = head_dim;
         let d2 = d * d;
+        let mut changed = false;
         if self.rho.len() != d {
             self.rho.resize(d, 0.0);
+            changed = true;
         }
         if self.col_sums.len() < seq_len {
             self.col_sums.resize(seq_len, 0.0);
+            changed = true;
         }
         if self.scores.len() < seq_len {
             self.scores.resize(seq_len, 0.0);
+            changed = true;
         }
         if self.sigma_kv.len() != d2 {
             self.sigma_kv.resize(d2, 0.0);
+            changed = true;
         }
         if self.pv_buf.len() != d {
             self.pv_buf.resize(d, 0.0);
+            changed = true;
         }
         if self.correction.len() != d {
             self.correction.resize(d, 0.0);
+            changed = true;
         }
-        self.reset();
+        // Only zero-fill when dimensions changed; caller resets specific buffers as needed.
+        // The hot path (tiled_attention_parallax_forward) writes to all buffers before reading.
+        if changed {
+            self.reset();
+        }
     }
 }
 
@@ -244,6 +255,10 @@ pub fn tiled_attention_parallax_forward(
     let d = head_dim;
     let n = seq_len;
 
+    // Zero column sums before accumulation — scratch may be reused across calls
+    scratch.col_sums[..n].fill(0.0);
+    scratch.sigma_kv[..d * d].fill(0.0);
+
     // Phase 1: Compute o_SA and accumulate column sums in one pass
     for i in 0..n {
         let q_off = i * d;
@@ -251,24 +266,20 @@ pub fn tiled_attention_parallax_forward(
         output[out_off..out_off + d].fill(0.0);
 
         // Compute scores for row i: scores[j] = q_i · k_j * scale
-        let mut max_score = f32::NEG_INFINITY;
         for j in 0..n {
             let k_off = j * d;
             scratch.scores[j] =
                 simd::simd_dot_f32(&q[q_off..q_off + d], &k[k_off..k_off + d], d) * scale;
-            max_score = max_score.max(scratch.scores[j]);
         }
 
-        // Softmax
-        let mut rowsum = 0.0f32;
-        for s in scratch.scores[..n].iter_mut() {
-            *s = (*s - max_score).exp();
-            rowsum += *s;
-        }
+        // Softmax — SIMD-accelerated via existing utilities
+        let row = &mut scratch.scores[..n];
+        let max_score = simd::simd_max_f32(row);
+        simd::simd_add_scalar_inplace(row, -max_score);
+        simd::simd_exp_inplace(row);
+        let rowsum = simd::simd_sum_f32(row);
         let inv_sum = 1.0 / rowsum;
-        for s in scratch.scores[..n].iter_mut() {
-            *s *= inv_sum;
-        }
+        simd::simd_scale_inplace(row, inv_sum);
 
         // Accumulate output: o_i = Σ_j p_ij · v_j
         for j in 0..n {
@@ -283,9 +294,8 @@ pub fn tiled_attention_parallax_forward(
         }
 
         // Accumulate column sums: c[j] += softmax(i,j)
-        for j in 0..n {
-            scratch.col_sums[j] += scratch.scores[j];
-        }
+        // (already in scratch.scores after softmax)
+        simd::simd_add_inplace(&mut scratch.col_sums[..n], &scratch.scores[..n]);
     }
 
     // Phase 2: Compute Σ_KV = Σ_j c_j · v_j ⊗ k_j^T
@@ -360,23 +370,19 @@ fn tiled_attention_core(
         output[out_off..out_off + d].fill(0.0);
 
         // Compute scores for row i
-        let mut max_score = f32::NEG_INFINITY;
         for j in 0..n {
             let k_off = j * d;
             scores[j] = simd::simd_dot_f32(&q[q_off..q_off + d], &k[k_off..k_off + d], d) * scale;
-            max_score = max_score.max(scores[j]);
         }
 
-        // Softmax
-        let mut rowsum = 0.0f32;
-        for s in scores.iter_mut() {
-            *s = (*s - max_score).exp();
-            rowsum += *s;
-        }
+        // Softmax — SIMD-accelerated via existing utilities
+        let row = &mut scores[..n];
+        let max_score = simd::simd_max_f32(row);
+        simd::simd_add_scalar_inplace(row, -max_score);
+        simd::simd_exp_inplace(row);
+        let rowsum = simd::simd_sum_f32(row);
         let inv_sum = 1.0 / rowsum;
-        for s in scores.iter_mut() {
-            *s *= inv_sum;
-        }
+        simd::simd_scale_inplace(row, inv_sum);
 
         // Accumulate output: o_i = Σ_j p_ij · v_j
         for j in 0..n {
