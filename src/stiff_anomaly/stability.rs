@@ -89,30 +89,57 @@ impl EigenvalueTracker {
         }
         let k = top_k.min(prev.len()).min(curr.len());
 
-        // Get top-k indices by value (both should be sorted descending, but
-        // we sort to be safe)
+        // Get top-k indices by value — sort full index arrays (both should be
+        // sorted descending, but we sort to be safe).
+        // Use partial sort: only the first k need to be in order, avoiding
+        // a full sort when n >> k.
         let mut prev_idx: Vec<usize> = (0..prev.len()).collect();
-        prev_idx.sort_by(|&a, &b| {
+        prev_idx.select_nth_unstable_by(k - 1, |&a, &b| {
             prev[b]
                 .partial_cmp(&prev[a])
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
-        let prev_top: std::collections::HashSet<usize> = prev_idx[..k].iter().copied().collect();
+        // Sort the top-k portion for consistent comparison
+        prev_idx[..k].sort_by(|&a, &b| {
+            prev[b]
+                .partial_cmp(&prev[a])
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
 
         let mut curr_idx: Vec<usize> = (0..curr.len()).collect();
-        curr_idx.sort_by(|&a, &b| {
+        curr_idx.select_nth_unstable_by(k - 1, |&a, &b| {
             curr[b]
                 .partial_cmp(&curr[a])
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
-        let curr_top: std::collections::HashSet<usize> = curr_idx[..k].iter().copied().collect();
+        curr_idx[..k].sort_by(|&a, &b| {
+            curr[b]
+                .partial_cmp(&curr[a])
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
 
-        let intersection = prev_top.intersection(&curr_top).count() as f32;
-        let union = prev_top.union(&curr_top).count() as f32;
-        if union < 1e-12 {
+        // Compute Jaccard via sorted intersection (avoids HashSet allocation)
+        let mut intersection = 0usize;
+        let mut i = 0usize;
+        let mut j = 0usize;
+        while i < k && j < k {
+            match prev_idx[i].cmp(&curr_idx[j]) {
+                std::cmp::Ordering::Less => i += 1,
+                std::cmp::Ordering::Greater => j += 1,
+                std::cmp::Ordering::Equal => {
+                    intersection += 1;
+                    i += 1;
+                    j += 1;
+                }
+            }
+        }
+
+        // Jaccard = |A ∩ B| / |A ∪ B| = intersection / (2*k - intersection)
+        let union = 2 * k - intersection;
+        if union == 0 {
             0.0
         } else {
-            intersection / union
+            intersection as f32 / union as f32
         }
     }
 
@@ -200,9 +227,10 @@ impl StiffAnomalyGate {
 
         // Check for stiff collision: any eigenvalue z-score below threshold
         if let Some(min_z) = z_scores.iter().cloned().reduce(f32::min)
-            && min_z < self.z_threshold {
-                return GateResult::StiffCollision { z_score: min_z };
-            }
+            && min_z < self.z_threshold
+        {
+            return GateResult::StiffCollision { z_score: min_z };
+        }
 
         // Compute soft alignment ratio
         let decomp = decompose(current.to_vec(), eigenvectors.to_vec(), trace_mass);
@@ -233,9 +261,10 @@ impl StiffAnomalyGate {
         for w in stable_windows {
             let z_scores = tracker.eigenspace_zscore(w);
             if let Some(min_z) = z_scores.iter().cloned().reduce(f32::min)
-                && min_z < self.z_threshold {
-                    false_positives += 1;
-                }
+                && min_z < self.z_threshold
+            {
+                false_positives += 1;
+            }
         }
         false_positives as f32 / stable_windows.len() as f32
     }
