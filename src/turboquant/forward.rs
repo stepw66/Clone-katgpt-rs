@@ -139,15 +139,11 @@ pub fn attention_turboquant(
         }
     }
 
-    // Pass 2: exp(scores - max) + sum
-    let mut sum = 0.0f32;
-    for t in 0..t_n {
-        let exp_val = unsafe { (*scores_buf.get_unchecked(t) - max_score).exp() };
-        unsafe {
-            *scores_buf.get_unchecked_mut(t) = exp_val;
-        }
-        sum += exp_val;
-    }
+    // Pass 2: exp(scores - max) + sum (SIMD batch)
+    let scores_slice = unsafe { std::slice::from_raw_parts_mut(scores_buf.as_mut_ptr(), t_n) };
+    crate::simd::simd_add_scalar_inplace(scores_slice, -max_score);
+    crate::simd::simd_exp_inplace(scores_slice);
+    let sum = crate::simd::simd_sum_f32(scores_slice);
 
     // Pass 3: normalize + weighted value accumulation
     // Loop order: t outer, d inner — contiguous value_cache row access, better cache locality.

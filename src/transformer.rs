@@ -521,6 +521,7 @@ pub struct PrefillContext {
     /// LoRA intermediate buffer. Size: [lora_rank].
     /// Reused for every LoRA application across all projections.
     lora_buf: Vec<f32>,
+    // usize fields after Vec fields to eliminate inter-field padding.
     /// Max prompt length this context supports (= config.block_size).
     max_prompt_len: usize,
 }
@@ -1521,13 +1522,10 @@ fn depth_route(
         }
     }
 
-    // 2. Softmax (numerically stable)
-    let mut sum_exp = 0.0f32;
-    for i in 0..n_sources {
-        let exp_val = (logits_buf[i] - max_logit).exp();
-        logits_buf[i] = exp_val;
-        sum_exp += exp_val;
-    }
+    // 2. Softmax (numerically stable, SIMD batch)
+    crate::simd::simd_add_scalar_inplace(&mut logits_buf[..n_sources], -max_logit);
+    crate::simd::simd_exp_inplace(&mut logits_buf[..n_sources]);
+    let sum_exp = crate::simd::simd_sum_f32(&logits_buf[..n_sources]);
     let inv_sum = 1.0 / sum_exp;
 
     // 3. Weighted sum of sources, added to residual (additive routing)
@@ -1598,13 +1596,10 @@ fn depth_route_with_indices(args: DepthRouteIndicesArgs<'_>) {
         }
     }
 
-    // 2. Softmax (numerically stable)
-    let mut sum_exp = 0.0f32;
-    for val in logits_buf.iter_mut().take(n_sources) {
-        let exp_val = (*val - max_logit).exp();
-        *val = exp_val;
-        sum_exp += exp_val;
-    }
+    // 2. Softmax (numerically stable, SIMD batch)
+    crate::simd::simd_add_scalar_inplace(&mut logits_buf[..n_sources], -max_logit);
+    crate::simd::simd_exp_inplace(&mut logits_buf[..n_sources]);
+    let sum_exp = crate::simd::simd_sum_f32(&logits_buf[..n_sources]);
     let inv_sum = 1.0 / sum_exp;
 
     // 3. Weighted sum of sources, added to residual (additive routing)
@@ -1658,16 +1653,12 @@ pub fn depth_route_weights(
         }
     }
 
-    // 2. Softmax
-    let mut sum_exp = 0.0f32;
-    for logit in &mut logits {
-        *logit = (*logit - max_logit).exp();
-        sum_exp += *logit;
-    }
+    // 2. Softmax (SIMD batch)
+    crate::simd::simd_add_scalar_inplace(&mut logits, -max_logit);
+    crate::simd::simd_exp_inplace(&mut logits);
+    let sum_exp = crate::simd::simd_sum_f32(&logits);
     let inv_sum = 1.0 / sum_exp;
-    for logit in &mut logits {
-        *logit *= inv_sum;
-    }
+    crate::simd::simd_scale_inplace(&mut logits, inv_sum);
 
     logits
 }
@@ -3767,16 +3758,11 @@ pub fn raven_readout_into<'a>(
         }
     }
 
-    // Pass 2: fused exp + accumulate + normalize
+    // Pass 2: fused exp + accumulate + normalize (SIMD batch)
     output[..kv_dim].fill(0.0);
-    let mut sum_exp = 0.0f32;
-    for s in 0..num_slots {
-        let exp_val = unsafe { (*scores.get_unchecked(s) - max_score).exp() };
-        unsafe {
-            *scores.get_unchecked_mut(s) = exp_val;
-        }
-        sum_exp += exp_val;
-    }
+    crate::simd::simd_add_scalar_inplace(&mut scores[..num_slots], -max_score);
+    crate::simd::simd_exp_inplace(&mut scores[..num_slots]);
+    let sum_exp = crate::simd::simd_sum_f32(&scores[..num_slots]);
 
     if sum_exp > 0.0 {
         let inv_sum = 1.0 / sum_exp;

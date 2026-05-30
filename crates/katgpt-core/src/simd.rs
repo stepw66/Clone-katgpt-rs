@@ -309,7 +309,7 @@ unsafe fn neon_outer_product_acc(acc: &mut [f32], a: &[f32], b: &[f32], m: usize
 #[inline]
 unsafe fn avx2_outer_product_acc(acc: &mut [f32], a: &[f32], b: &[f32], m: usize, n: usize) {
     use core::arch::x86_64::{
-        _mm256_add_ps, _mm256_broadcast_ss, _mm256_loadu_ps, _mm256_mul_ps, _mm256_storeu_ps,
+        _mm256_broadcast_ss, _mm256_fmadd_ps, _mm256_loadu_ps, _mm256_storeu_ps,
     };
 
     unsafe {
@@ -324,8 +324,7 @@ unsafe fn avx2_outer_product_acc(acc: &mut [f32], a: &[f32], b: &[f32], m: usize
             for _ in 0..n_chunks8 {
                 let vacc = _mm256_loadu_ps(row.as_ptr().add(j));
                 let vb = _mm256_loadu_ps(b.as_ptr().add(j));
-                let prod = _mm256_mul_ps(va, vb);
-                let vresult = _mm256_add_ps(vacc, prod);
+                let vresult = _mm256_fmadd_ps(va, vb, vacc);
                 _mm256_storeu_ps(row.as_mut_ptr().add(j), vresult);
                 j += 8;
             }
@@ -1479,13 +1478,12 @@ unsafe fn neon_fused_sub_scale_inplace(x: &mut [f32], sub: f32, scale: f32) {
 #[cfg(target_arch = "aarch64")]
 #[inline]
 unsafe fn neon_sum_f32(x: &[f32]) -> f32 {
-    use core::arch::aarch64::{vaddq_f32, vaddvq_f32, vld1q_f32};
+    use core::arch::aarch64::{vaddq_f32, vaddvq_f32, vdupq_n_f32, vld1q_f32};
     unsafe {
         let mut i = 0;
         let chunks = x.len() / 4;
         // Accumulate 4-element partial sums, then horizontal reduce
-        let partials = [0.0f32; 4];
-        let mut acc = vld1q_f32(partials.as_ptr());
+        let mut acc = vdupq_n_f32(0.0);
         for _ in 0..chunks {
             let vx = vld1q_f32(x.as_ptr().add(i));
             acc = vaddq_f32(acc, vx);
@@ -2024,8 +2022,9 @@ unsafe fn avx2_scale_mul_inplace(x: &mut [f32], gamma: &[f32], scale: f32) {
 // ── x86_64 Horizontal Max/Sum Helpers ─────────────────────────
 
 #[cfg(target_arch = "x86_64")]
-#[inline]
+#[inline(always)]
 fn horizontal_max_256(v: core::arch::x86_64::__m256) -> f32 {
+    // Safety: pure SIMD intrinsic computation, no memory access.
     use core::arch::x86_64::{
         _mm_cvtss_f32, _mm_max_ps, _mm_shuffle_ps, _mm256_castps256_ps128, _mm256_extractf128_ps,
     };
@@ -2045,8 +2044,9 @@ fn horizontal_max_256(v: core::arch::x86_64::__m256) -> f32 {
 // ── x86_64 Horizontal Sum Helpers ─────────────────────────────
 
 #[cfg(target_arch = "x86_64")]
-#[inline]
+#[inline(always)]
 fn horizontal_sum_256(v: core::arch::x86_64::__m256) -> f32 {
+    // Safety: pure SIMD intrinsic computation, no memory access.
     use core::arch::x86_64::{_mm_add_ps, _mm256_castps256_ps128, _mm256_extractf128_ps};
     unsafe {
         let hi = _mm256_extractf128_ps(v, 1);
@@ -2057,8 +2057,9 @@ fn horizontal_sum_256(v: core::arch::x86_64::__m256) -> f32 {
 }
 
 #[cfg(target_arch = "x86_64")]
-#[inline]
+#[inline(always)]
 fn horizontal_sum_128(v: core::arch::x86_64::__m128) -> f32 {
+    // Safety: pure SIMD intrinsic computation, no memory access.
     use core::arch::x86_64::{_mm_add_ps, _mm_add_ss, _mm_cvtss_f32, _mm_shuffle_ps};
     unsafe {
         let shuf = _mm_shuffle_ps(v, v, 0xB1);
@@ -3049,8 +3050,8 @@ pub fn simd_gram_f32(x: &[f32], seq_len: usize, d_h: usize, gram_out: &mut [f32]
     for i in 0..seq_len {
         let row_i = &x[i * d_h..(i + 1) * d_h];
 
-        // Diagonal: dot of row with itself
-        let diag = simd_dot_f32(row_i, row_i, d_h);
+        // Diagonal: sum of squares (one load instead of two)
+        let diag = simd_sum_sq(row_i, d_h);
         gram_out[i * seq_len + i] = diag;
 
         // Upper triangle: j > i

@@ -49,11 +49,8 @@ pub fn eigenspace_alignment(gram: &[f32], reference: &[f32], n: usize, k: usize)
 
     let mut alignment_sum = 0.0f64;
     for i in 0..k {
-        let dot: f64 = gram_evecs[i]
-            .iter()
-            .zip(ref_evecs[i].iter())
-            .map(|(&a, &b)| (a as f64) * (b as f64))
-            .sum();
+        // Use SIMD dot product for O(n) alignment with hardware acceleration
+        let dot = crate::simd::simd_dot_f32(&gram_evecs[i], &ref_evecs[i], n) as f64;
         alignment_sum += dot.abs();
     }
 
@@ -269,10 +266,12 @@ fn top_k_eigenvectors(mat: &[f32], n: usize, k: usize) -> Vec<Vec<f32>> {
     }
 
     // Extract eigenvalues and sort descending.
+    // Build index array via iterator — avoids per-push bounds checks.
     let mut indexed: Vec<(usize, f64)> = (0..n).map(|i| (i, a[i * n + i])).collect();
     indexed.sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
     // Return top-k eigenvectors (columns of v).
+    // Pre-allocate result with capacity and write in-place.
     let k = k.min(n);
     let mut result = Vec::with_capacity(k);
     for &(col, _) in &indexed[..k] {
@@ -305,8 +304,8 @@ mod tests {
     fn synthetic_tree_gram(depth: usize, alpha: f32, beta: f32) -> Vec<Vec<f32>> {
         let n = 1 << depth;
         let mut gram = vec![vec![0.0f32; n]; n];
-        for i in 0..n {
-            for j in 0..n {
+        for (i, row) in gram.iter_mut().enumerate() {
+            for (j, cell) in row.iter_mut().enumerate() {
                 // Tree distance = 2 × (depth - depth_of_LCA)
                 // depth_of_LCA = depth - number of leading shared bits
                 let dist = if i == j {
@@ -323,7 +322,7 @@ mod tests {
                     let lca_depth = leading_zeros_total.saturating_sub(32 - depth);
                     2 * (depth - lca_depth)
                 };
-                gram[i][j] = alpha * (-beta * dist as f32).exp();
+                *cell = alpha * (-beta * dist as f32).exp();
             }
         }
         gram

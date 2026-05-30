@@ -138,32 +138,31 @@ fn bench_confidence_thresholding() -> BenchResult {
 
     // Inline softmax + mask loop (avoids pulling in transformer types)
     let apply_threshold = |logits: &mut [f32], thresh: f32| -> usize {
-        // Softmax
+        // Softmax (SIMD batch)
         let max_val = logits.iter().copied().fold(f32::NEG_INFINITY, f32::max);
-        let mut sum = 0.0f32;
-        for v in logits.iter_mut() {
-            *v = (*v - max_val).exp();
-            sum += *v;
-        }
+        crate::simd::simd_add_scalar_inplace(logits, -max_val);
+        crate::simd::simd_exp_inplace(logits);
+        let sum = crate::simd::simd_sum_f32(logits);
         let inv_sum = 1.0 / sum;
-        for v in logits.iter_mut() {
-            *v *= inv_sum;
-        }
+        crate::simd::simd_scale_inplace(logits, inv_sum);
         // Count masked tokens (probability below threshold)
         logits.iter().filter(|&&p| p < thresh).count()
     };
 
+    // Pre-allocate reusable buffer to avoid per-iteration allocation
+    let mut base_logits_buf = base_logits.clone();
+
     // Warmup
     for _ in 0..warmup {
-        let mut logits = base_logits.clone();
-        let _ = apply_threshold(&mut logits, threshold);
+        base_logits_buf.copy_from_slice(&base_logits);
+        let _ = apply_threshold(&mut base_logits_buf, threshold);
     }
 
     // Bench
     let start = Instant::now();
     for _ in 0..iters {
-        let mut logits = base_logits.clone();
-        let _ = apply_threshold(&mut logits, threshold);
+        base_logits_buf.copy_from_slice(&base_logits);
+        let _ = apply_threshold(&mut base_logits_buf, threshold);
     }
     let elapsed = start.elapsed();
 
