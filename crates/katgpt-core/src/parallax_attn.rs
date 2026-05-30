@@ -86,6 +86,74 @@ pub fn parallax_correction(sigma_kv: &[f32], rho: &[f32], out: &mut [f32]) {
 
 // ── Fused tiled attention + Parallax ──────────────────────────────
 
+/// Scratch buffer sizes for [`tiled_attention_parallax_forward`].
+///
+/// Pre-compute once and reuse across calls to avoid per-call allocation.
+/// All buffers are flat `Vec<f32>` — clear + reuse across calls.
+pub struct ParallaxScratch {
+    /// ρ = W_R · x, length `head_dim`
+    pub rho: Vec<f32>,
+    /// Column sums c[j] = Σ_i softmax(i,j), length `seq_len`
+    pub col_sums: Vec<f32>,
+    /// Per-row score buffer, length `seq_len`
+    pub scores: Vec<f32>,
+    /// Σ_KV cross-covariance, length `head_dim * head_dim`
+    pub sigma_kv: Vec<f32>,
+    /// Scaled v row for outer product, length `head_dim`
+    pub pv_buf: Vec<f32>,
+    /// Correction output, length `head_dim`
+    pub correction: Vec<f32>,
+}
+
+impl ParallaxScratch {
+    /// Create scratch buffers sized for the given dimensions.
+    pub fn new(seq_len: usize, head_dim: usize) -> Self {
+        Self {
+            rho: vec![0.0; head_dim],
+            col_sums: vec![0.0; seq_len],
+            scores: vec![0.0; seq_len],
+            sigma_kv: vec![0.0; head_dim * head_dim],
+            pv_buf: vec![0.0; head_dim],
+            correction: vec![0.0; head_dim],
+        }
+    }
+
+    /// Reset all buffers for reuse (clear without deallocating).
+    pub fn reset(&mut self) {
+        self.rho.fill(0.0);
+        self.col_sums.fill(0.0);
+        self.scores.fill(0.0);
+        self.sigma_kv.fill(0.0);
+        self.pv_buf.fill(0.0);
+        self.correction.fill(0.0);
+    }
+
+    /// Resize buffers if dimensions changed (avoids reallocation when sizes match).
+    pub fn ensure_capacity(&mut self, seq_len: usize, head_dim: usize) {
+        let d = head_dim;
+        let d2 = d * d;
+        if self.rho.len() != d {
+            self.rho.resize(d, 0.0);
+        }
+        if self.col_sums.len() < seq_len {
+            self.col_sums.resize(seq_len, 0.0);
+        }
+        if self.scores.len() < seq_len {
+            self.scores.resize(seq_len, 0.0);
+        }
+        if self.sigma_kv.len() != d2 {
+            self.sigma_kv.resize(d2, 0.0);
+        }
+        if self.pv_buf.len() != d {
+            self.pv_buf.resize(d, 0.0);
+        }
+        if self.correction.len() != d {
+            self.correction.resize(d, 0.0);
+        }
+        self.reset();
+    }
+}
+
 /// Tiled online-softmax flash attention with Parallax covariance correction.
 ///
 /// Uses column-sum factorization to compute the KV cross-covariance:
@@ -109,6 +177,7 @@ pub fn parallax_correction(sigma_kv: &[f32], rho: &[f32], out: &mut [f32]) {
 /// * `r`            — R projection weights `[head_dim × head_dim]`, row-major
 /// * `x`            — layer input `[head_dim]`
 /// * `parallax_config` — gate scale and init config
+/// * `scratch`      — pre-allocated scratch buffers (pass `None` for one-shot allocation)
 #[allow(clippy::too_many_arguments)]
 pub fn tiled_attention_parallax_forward(
     q: &[f32],
@@ -121,6 +190,7 @@ pub fn tiled_attention_parallax_forward(
     r: &[f32],
     x: &[f32],
     parallax_config: &ParallaxConfig,
+    scratch: Option<&mut ParallaxScratch>,
 ) {
     let expected = seq_len * head_dim;
     debug_assert_eq!(q.len(), expected, "Q slice length mismatch");
@@ -138,27 +208,41 @@ pub fn tiled_attention_parallax_forward(
         return;
     }
 
-    // Compute ρ = W_R · x
-    let mut rho = vec![0.0f32; head_dim];
-    compute_rho(r, x, &mut rho);
+    // Allocate scratch on demand if caller didn't provide one
+    let mut local_scratch;
+    let scratch = match scratch {
+        Some(s) => {
+            s.ensure_capacity(seq_len, head_dim);
+            s
+        }
+        None => {
+            local_scratch = ParallaxScratch::new(seq_len, head_dim);
+            &mut local_scratch
+        }
+    };
+
+    // Compute ρ = W_R · x (reuse scratch buffer)
+    compute_rho(r, x, &mut scratch.rho);
 
     // If gate_scale is zero, or ρ is all zeros (zero_init with zeroed W_R),
     // plain softmax attention is sufficient.
-    let rho_is_zero = rho.iter().all(|&v| v == 0.0);
+    let rho_is_zero = scratch.rho.iter().all(|&v| v == 0.0);
     if parallax_config.gate_scale == 0.0 || rho_is_zero {
-        tiled_attention_core(q, k, v, output, seq_len, head_dim, scale, None);
+        tiled_attention_core(
+            q,
+            k,
+            v,
+            output,
+            seq_len,
+            head_dim,
+            scale,
+            Some(&mut scratch.scores),
+        );
         return;
     }
 
     let d = head_dim;
     let n = seq_len;
-
-    // Pre-allocate all scratch buffers (avoid allocation inside loops)
-    let mut col_sums = vec![0.0f32; n]; // c[j] = Σ_i softmax(i,j)
-    let mut scores = vec![0.0f32; n]; // reusable per-row score buffer
-    let mut sigma_kv = vec![0.0f32; d * d]; // [head_dim × head_dim]
-    let mut pv_buf = vec![0.0f32; d]; // scaled v row for outer product
-    let mut correction = vec![0.0f32; d];
 
     // Phase 1: Compute o_SA and accumulate column sums in one pass
     for i in 0..n {
@@ -170,24 +254,25 @@ pub fn tiled_attention_parallax_forward(
         let mut max_score = f32::NEG_INFINITY;
         for j in 0..n {
             let k_off = j * d;
-            scores[j] = simd::simd_dot_f32(&q[q_off..q_off + d], &k[k_off..k_off + d], d) * scale;
-            max_score = max_score.max(scores[j]);
+            scratch.scores[j] =
+                simd::simd_dot_f32(&q[q_off..q_off + d], &k[k_off..k_off + d], d) * scale;
+            max_score = max_score.max(scratch.scores[j]);
         }
 
         // Softmax
         let mut rowsum = 0.0f32;
-        for s in scores.iter_mut() {
+        for s in scratch.scores[..n].iter_mut() {
             *s = (*s - max_score).exp();
             rowsum += *s;
         }
         let inv_sum = 1.0 / rowsum;
-        for s in scores.iter_mut() {
+        for s in scratch.scores[..n].iter_mut() {
             *s *= inv_sum;
         }
 
         // Accumulate output: o_i = Σ_j p_ij · v_j
         for j in 0..n {
-            let p = scores[j];
+            let p = scratch.scores[j];
             let v_off = j * d;
             simd::simd_fused_scale_acc(
                 &mut output[out_off..out_off + d],
@@ -199,42 +284,49 @@ pub fn tiled_attention_parallax_forward(
 
         // Accumulate column sums: c[j] += softmax(i,j)
         for j in 0..n {
-            col_sums[j] += scores[j];
+            scratch.col_sums[j] += scratch.scores[j];
         }
     }
 
     // Phase 2: Compute Σ_KV = Σ_j c_j · v_j ⊗ k_j^T
     // Only N outer products instead of N² — the key optimization.
     for j in 0..n {
-        let c_j = col_sums[j];
+        let c_j = scratch.col_sums[j];
         if c_j == 0.0 {
             continue;
         }
         let v_off = j * d;
         let k_off = j * d;
-        pv_buf[..d].copy_from_slice(&v[v_off..v_off + d]);
-        simd::simd_scale_inplace(&mut pv_buf, c_j);
-        simd::simd_outer_product_acc(sigma_kv.as_mut(), &pv_buf, &k[k_off..k_off + d], d, d);
+        scratch.pv_buf[..d].copy_from_slice(&v[v_off..v_off + d]);
+        simd::simd_scale_inplace(&mut scratch.pv_buf, c_j);
+        simd::simd_outer_product_acc(
+            scratch.sigma_kv.as_mut(),
+            &scratch.pv_buf,
+            &k[k_off..k_off + d],
+            d,
+            d,
+        );
     }
 
     // Phase 3: Compute correction = Σ_KV · ρ
-    parallax_correction(&sigma_kv, &rho, &mut correction);
+    parallax_correction(&scratch.sigma_kv, &scratch.rho, &mut scratch.correction);
 
     // Phase 4: Apply correction — output[i] -= gate_scale * correction for all i
+    // Pre-scale correction by -gs once, then SIMD-add to each output row.
     let gs = parallax_config.gate_scale;
-    let scaled_correction = &correction[..];
+    simd::simd_scale_inplace(&mut scratch.correction, -gs);
     for i in 0..n {
         let off = i * d;
-        // SIMD-accelerated: output[off..] -= gs * correction
-        for j in 0..d {
-            output[off + j] -= gs * scaled_correction[j];
-        }
+        simd::simd_add_inplace(&mut output[off..off + d], &scratch.correction[..d]);
     }
 }
 
 // ── Core attention (no feature-flag dependency) ───────────────────
 
 /// Core softmax attention, used when Parallax correction is not needed.
+///
+/// Accepts an optional pre-allocated `scores` scratch buffer (length >= seq_len)
+/// to avoid per-call heap allocation. When `None`, allocates on demand.
 #[allow(clippy::too_many_arguments)]
 fn tiled_attention_core(
     q: &[f32],
@@ -244,13 +336,23 @@ fn tiled_attention_core(
     seq_len: usize,
     head_dim: usize,
     scale: f32,
-    _sigma_kv: Option<&mut [f32]>,
+    scores: Option<&mut [f32]>,
 ) {
     let d = head_dim;
     let n = seq_len;
 
-    // Pre-allocate reusable score buffer
-    let mut scores = vec![0.0f32; n];
+    // Use caller-provided scratch or allocate on demand
+    let mut local_scores;
+    let scores: &mut [f32] = match scores {
+        Some(s) if s.len() >= n => {
+            s[..n].fill(0.0);
+            s
+        }
+        _ => {
+            local_scores = vec![0.0f32; n];
+            &mut local_scores
+        }
+    };
 
     for i in 0..n {
         let q_off = i * d;
@@ -374,6 +476,7 @@ mod tests {
             &r,
             &x,
             &config,
+            None,
         );
 
         // Compute reference: standard softmax attention
@@ -424,6 +527,7 @@ mod tests {
             &r,
             &x,
             &config,
+            None,
         );
 
         // Compute reference: standard softmax attention

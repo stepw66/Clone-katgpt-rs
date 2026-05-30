@@ -68,7 +68,8 @@ pub use attention::{
 
 #[cfg(feature = "parallax_attn")]
 pub use parallax_attn::{
-    ParallaxConfig, compute_rho, parallax_correction, tiled_attention_parallax_forward,
+    ParallaxConfig, ParallaxScratch, compute_rho, parallax_correction,
+    tiled_attention_parallax_forward,
 };
 
 pub use simd::SimdLevel;

@@ -461,6 +461,11 @@ pub struct Config {
     pub final_logit_softcapping: f32,
     pub sp_kv_threshold: f32,
     pub early_stop_threshold: f32,
+    // Parallax Attention (Plan 135: Parameterized Local Linear Attention)
+    /// Parallax covariance correction gate scale. 0.0 = disabled (pure softmax),
+    /// 1.0 = full correction. Only meaningful when `parallax_attn` feature is enabled
+    /// and R projection weights are loaded.
+    pub parallax_gate_scale: f32,
 
     // --- Vec (pointer-sized, 8-byte aligned) ---
     pub lora_targets: Vec<String>,
@@ -484,11 +489,6 @@ pub struct Config {
     pub use_rope: bool,
     pub post_norm: bool,
     pub gated_attn: bool,
-    // Parallax Attention (Plan 135: Parameterized Local Linear Attention)
-    /// Parallax covariance correction gate scale. 0.0 = disabled (pure softmax),
-    /// 1.0 = full correction. Only meaningful when `parallax_attn` feature is enabled
-    /// and R projection weights are loaded.
-    pub parallax_gate_scale: f32,
     /// Whether W_R starts zeroed (true = recover exact softmax at init).
     pub parallax_zero_init: bool,
 }
@@ -1426,12 +1426,9 @@ pub fn gegelu(hidden: &mut [f32], gate: &[f32], up: &[f32]) {
         // hidden[j] = gate[j] * sigmoid(1.702 * gate[j]) * up[j]
         // SIMD: buf = 1 + buf, then buf = 1/buf (sigmoid), then fused gate*sigmoid*up
         crate::simd::simd_add_scalar_inplace(&mut buf, 1.0);
-        for t in &mut buf {
-            *t = 1.0 / *t;
-        }
-        // buf[j] = sigmoid; hidden[j] = gate[j] * sigmoid * up[j]
-        // Fused as: hidden = gate * up, then hidden *= sigmoid (elementwise)
+        // buf[j] = sigmoid; fused: hidden = gate * up, then scale-multiply by sigmoid
         for j in 0..CHUNK {
+            buf[j] = 1.0 / buf[j];
             hidden[i + j] = gate[i + j] * up[i + j];
         }
         crate::simd::simd_scale_mul_inplace(&mut hidden[i..i + CHUNK], &buf, 1.0);
@@ -1473,12 +1470,10 @@ pub fn gegelu_tanh(hidden: &mut [f32], gate: &[f32], up: &[f32]) {
         // Compute denominator (exp + 1) via SIMD, then SIMD tanh + fused mul
         buf2[..CHUNK].copy_from_slice(&buf);
         crate::simd::simd_add_scalar_inplace(&mut buf2, 1.0); // buf2 = exp + 1
-        // buf = exp(2x) / (exp(2x) + 1) = tanh(inner)
-        for j in 0..CHUNK {
-            buf[j] /= buf2[j];
-        }
         // hidden = gate * up, then hidden *= tanh(inner)
         for j in 0..CHUNK {
+            // Branch-free tanh: exp(2x) / (exp(2x) + 1) via division
+            buf[j] /= buf2[j];
             hidden[i + j] = gate[i + j] * up[i + j];
         }
         crate::simd::simd_scale_mul_inplace(&mut hidden[i..i + CHUNK], &buf, 1.0);
@@ -1542,13 +1537,11 @@ pub fn swiglu(hidden: &mut [f32], gate: &[f32], up: &[f32]) {
         // buf[j] = exp(-gate[j]) via SIMD
         crate::simd::simd_exp_inplace(&mut buf);
         // hidden[j] = gate[j] / (1 + exp(-gate[j])) * up[j]
-        // SIMD: buf = 1 + exp(-gate), then buf = 1/buf (sigmoid), then fused mul
+        // SIMD: buf = 1 + exp(-gate), then fused reciprocal + gate*up
         crate::simd::simd_add_scalar_inplace(&mut buf, 1.0);
-        for t in &mut buf {
-            *t = 1.0 / *t;
-        }
-        // hidden = gate * up, then hidden *= sigmoid(gate)
+        // hidden = gate * up, compute sigmoid via reciprocal in same loop
         for j in 0..CHUNK {
+            buf[j] = 1.0 / buf[j];
             hidden[i + j] = gate[i + j] * up[i + j];
         }
         crate::simd::simd_scale_mul_inplace(&mut hidden[i..i + CHUNK], &buf, 1.0);

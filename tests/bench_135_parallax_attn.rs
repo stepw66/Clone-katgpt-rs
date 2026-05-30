@@ -96,6 +96,7 @@ fn bench_parallax_cpu_decode_overhead() {
                 &r,
                 &x,
                 &parallax_config,
+                None,
             );
             black_box(&plx_out);
         }
@@ -114,6 +115,7 @@ fn bench_parallax_cpu_decode_overhead() {
                 &r,
                 &x,
                 &parallax_config,
+                None,
             );
             black_box(&plx_out);
         }
@@ -161,6 +163,7 @@ fn bench_parallax_zero_init_recovers_softmax() {
         &r,
         &x,
         &config,
+        None,
     );
 
     let sim = cos_sim(&sdpa_out, &plx_out);
@@ -215,6 +218,7 @@ fn bench_parallax_gate_zero_recovers_softmax() {
         &r,
         &x,
         &config,
+        None,
     );
 
     let sim = cos_sim(&sdpa_out, &plx_out);
@@ -256,6 +260,7 @@ fn bench_parallax_finite_output() {
             &r,
             &x,
             &config,
+            None,
         );
 
         for (i, &val) in output.iter().enumerate() {
@@ -306,6 +311,7 @@ fn bench_parallax_correction_magnitude() {
         &r,
         &x,
         &config,
+        None,
     );
 
     // Compute norms
