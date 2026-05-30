@@ -82,9 +82,10 @@ pub fn compute_energy_gate_into(energy: &[f32], alpha: f32, tau: f32, out: &mut 
     crate::simd::simd_scale_inplace(&mut out[..len], -1.0);
     crate::simd::simd_exp_inplace(&mut out[..len]);
     // Branch-free reciprocal: out[i] = 1.0 / (1.0 + out[i])
-    // No if/else — every iteration is the same.
+    // SIMD-accelerated +1.0, then scalar reciprocal (LLVM auto-vectorizes the branch-free div).
+    crate::simd::simd_add_scalar_inplace(&mut out[..len], 1.0);
     for o in out[..len].iter_mut() {
-        *o = 1.0 / (1.0 + *o);
+        *o = 1.0 / *o;
     }
 }
 
@@ -199,19 +200,15 @@ impl EgaGate {
 
         for i in 0..seq_len {
             let row_start = i * seq_len;
-            let mut row_sum = 0.0f32;
+            let row = &mut attn_weights[row_start..row_start + seq_len];
 
-            // Apply gate to each key position and compute sum
-            for j in 0..seq_len {
-                attn_weights[row_start + j] *= gate_buf[j];
-                row_sum += attn_weights[row_start + j];
-            }
+            // Apply gate to each key position and compute sum (SIMD)
+            crate::simd::simd_scale_mul_inplace(row, gate_buf, 1.0);
+            let row_sum = crate::simd::simd_sum_f32(row);
 
-            // Renormalize
+            // Renormalize (SIMD)
             let inv_sum = 1.0 / (row_sum + EPS);
-            for j in 0..seq_len {
-                attn_weights[row_start + j] *= inv_sum;
-            }
+            crate::simd::simd_scale_inplace(row, inv_sum);
         }
     }
 }

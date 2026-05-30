@@ -68,7 +68,11 @@ impl NoiseSchedule {
             1 => vec![(self.min_ratio + self.max_ratio) / 2.0],
             n => {
                 let step = (self.max_ratio - self.min_ratio) / (n - 1) as f32;
-                (0..n).map(|i| self.min_ratio + i as f32 * step).collect()
+                let mut out = Vec::with_capacity(n);
+                for i in 0..n {
+                    out.push(self.min_ratio + i as f32 * step);
+                }
+                out
             }
         }
     }
@@ -1053,11 +1057,9 @@ fn backward(
                 mlp_h,
             );
         }
-        // ReLU backward
+        // ReLU backward (branch-free: mask grad to zero when pre-activation ≤ 0)
         for j in 0..mlp_h {
-            if mh[j] <= 0.0 {
-                bctx.d_mh[j] = 0.0;
-            }
+            bctx.d_mh[j] *= (mh[j] > 0.0) as usize as f32;
         }
 
         // MLP w1: d_w1 += outer(d_mh, after_mlp_norm)
@@ -1389,15 +1391,16 @@ pub fn generate_pattern_dataset(
     seq_len: usize,
     effective_vocab: usize,
 ) -> Vec<Vec<usize>> {
-    (0..n_sequences)
-        .map(|_| {
-            let a = (rng.next() as usize) % effective_vocab;
-            let b = (rng.next() as usize) % effective_vocab;
-            (0..seq_len)
-                .map(|i| if i % 2 == 0 { a } else { b })
-                .collect()
-        })
-        .collect()
+    let mut out = Vec::with_capacity(n_sequences);
+    let mut seq = Vec::with_capacity(seq_len);
+    for _ in 0..n_sequences {
+        let a = (rng.next() as usize) % effective_vocab;
+        let b = (rng.next() as usize) % effective_vocab;
+        seq.clear();
+        seq.extend((0..seq_len).map(|i| if i % 2 == 0 { a } else { b }));
+        out.push(seq.clone());
+    }
+    out
 }
 
 /// Train mini dLLM and return (weights, loss_history).
