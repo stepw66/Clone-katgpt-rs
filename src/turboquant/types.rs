@@ -1,6 +1,9 @@
 //! Core types for TurboQuant KV cache compression.
 
 /// Lloyd-Max codebook for scalar quantization of Beta-distributed values.
+///
+/// Field order: Vec (24B, 8-aligned) → usize (8B) → f32 (4B) → u8 (1B)
+/// eliminates inter-field padding.
 #[derive(Debug, Clone)]
 pub struct TurboQuantCodebook {
     /// Centroid values (2^bits entries).

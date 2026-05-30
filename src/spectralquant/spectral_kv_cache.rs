@@ -25,6 +25,7 @@ use rayon::prelude::*;
 ///
 /// Zero-alloc hot path via scratch buffers.
 pub struct SpectralQuantKVCache {
+    // ── Vec fields first (24 bytes, 8-byte aligned) ──
     /// Per-layer calibration + codebooks.
     pub layers: Vec<SpectralQuantLayer>,
     /// Packed key indices: [layer][position] → variable-bit packed bytes.
@@ -35,11 +36,6 @@ pub struct SpectralQuantKVCache {
     val_indices: Vec<Vec<Vec<u8>>>,
     /// Per-position value norms.
     val_norms: Vec<Vec<f32>>,
-    /// Current write position.
-    pos: usize,
-    n_layers: usize,
-    kv_dim: usize,
-    max_seq_len: usize,
     // ── Scratch buffers (zero-alloc hot path) ──
     scratch_normalized: Vec<f32>,
     scratch_rotated: Vec<f32>,
@@ -48,6 +44,12 @@ pub struct SpectralQuantKVCache {
     scratch_tail_indices: Vec<u8>,
     scratch_all_indices: Vec<u8>,
     scratch_all_bits: Vec<u8>,
+    // ── usize fields (8-byte aligned, no padding between them) ──
+    /// Current write position.
+    pos: usize,
+    n_layers: usize,
+    kv_dim: usize,
+    max_seq_len: usize,
 }
 
 /// Per-thread scratch buffers for parallel dequantize operations.
@@ -56,6 +58,7 @@ pub struct SpectralQuantKVCache {
 /// contention on [`SpectralQuantKVCache`]'s internal scratch buffers.
 /// Enables `&self` parallel dequantize without requiring `&mut self`.
 pub struct DequantizeScratch {
+    // Vec fields first (8-byte aligned), then smaller types
     all_bits: Vec<u8>,
     all_indices: Vec<u8>,
     rotated: Vec<f32>,

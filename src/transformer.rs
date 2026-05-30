@@ -282,8 +282,8 @@ pub fn preload_kv_cache(
 /// Cheap snapshot of KV cache state up to position `pos`.
 /// Only copies filled slots [0..pos) per layer, not the entire block_size buffer.
 pub struct KVSnapshot {
-    pub layers: Vec<KVLayerSnapshot>,
     pub pos: usize,
+    pub layers: Vec<KVLayerSnapshot>,
 }
 
 /// Per-layer snapshot of KV cache data.
@@ -3603,12 +3603,7 @@ impl PagedKVCache {
 /// Unselected slots are completely frozen — perfect for preserving struct
 /// definitions and imports while churning through syntax tokens.
 pub struct RavenKVCache {
-    /// Number of memory slots
-    pub num_slots: usize,
-    /// Dimension of each KV entry (= kv_dim = n_kv_head × head_dim)
-    pub kv_dim: usize,
-    /// Top-K slots to update per token
-    pub top_k: usize,
+    // ── Vec fields first (ptr+len+cap = 24 bytes, 8-byte aligned) ──
     /// Key memory: [num_slots × kv_dim]
     pub keys: Vec<f32>,
     /// Value memory: [num_slots × kv_dim]
@@ -3620,6 +3615,14 @@ pub struct RavenKVCache {
     readout_scores: Vec<f32>,
     /// Pre-allocated output buffer for raven_readout_into [kv_dim]
     readout_output: Vec<f32>,
+    // ── usize fields (8-byte aligned, no padding after Vecs) ──
+    /// Number of memory slots
+    pub num_slots: usize,
+    /// Dimension of each KV entry (= kv_dim = n_kv_head × head_dim)
+    pub kv_dim: usize,
+    /// Top-K slots to update per token
+    pub top_k: usize,
+    // ── f32 field last (4-byte aligned, no trailing padding on 64-bit) ──
     /// Forget rate for gated update (negative = slower decay)
     pub forget_rate: f32,
 }

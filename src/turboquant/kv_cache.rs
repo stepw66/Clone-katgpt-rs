@@ -16,6 +16,7 @@ use crate::types;
 /// Each KV vector is: normalized → rotated → quantized → bit-packed.
 /// Reconstruction: unpack → dequantize → inverse rotate → rescale.
 pub struct TurboQuantKVCache {
+    // ── Vec fields first (24 bytes, 8-byte aligned) ──
     /// Per-layer quantization state (rotation matrix + codebooks).
     pub layers: Vec<TurboQuantLayer>,
     /// Bit-packed key indices: layers × positions × packed_coords.
@@ -26,6 +27,14 @@ pub struct TurboQuantKVCache {
     val_indices: Vec<Vec<Vec<u8>>>,
     /// Per-position value norms.
     val_norms: Vec<Vec<f32>>,
+    // ── Scratch buffers for zero-alloc hot path (Plan 051) ──
+    /// Normalized input: [kv_dim]. Reused across store/dequantize calls.
+    scratch_normalized: Vec<f32>,
+    /// Rotation output: [kv_dim]. Reused across store/dequantize calls.
+    scratch_rotated: Vec<f32>,
+    /// Quantized/unpacked indices: [kv_dim]. Reused across store/dequantize calls.
+    scratch_indices: Vec<u8>,
+    // ── usize fields (8-byte aligned, contiguous after Vecs) ──
     /// Current position.
     pos: usize,
     /// Highest position ever written (for efficient reset).
@@ -34,20 +43,14 @@ pub struct TurboQuantKVCache {
     n_layers: usize,
     /// KV dimension (n_kv_head * head_dim).
     kv_dim: usize,
+    /// Maximum sequence length.
+    #[allow(dead_code)]
+    max_seq_len: usize,
+    // ── u8 fields last (packed together, no inter-field padding) ──
     /// Key bits per coordinate.
     key_bits: u8,
     /// Value bits per coordinate.
     val_bits: u8,
-    /// Maximum sequence length.
-    #[allow(dead_code)]
-    max_seq_len: usize,
-    // ── Scratch buffers for zero-alloc hot path (Plan 051) ──
-    /// Normalized input: [kv_dim]. Reused across store/dequantize calls.
-    scratch_normalized: Vec<f32>,
-    /// Rotation output: [kv_dim]. Reused across store/dequantize calls.
-    scratch_rotated: Vec<f32>,
-    /// Quantized/unpacked indices: [kv_dim]. Reused across store/dequantize calls.
-    scratch_indices: Vec<u8>,
 }
 
 impl TurboQuantKVCache {

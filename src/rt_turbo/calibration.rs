@@ -58,12 +58,15 @@ pub struct HeadCalibration {
 }
 
 /// Minimal config snapshot stored with calibration for reproducibility.
+///
+/// Field order: usize (8B) before f32 (4B) eliminates 4 bytes of padding
+/// on 64-bit targets.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CalibrationConfigSnapshot {
-    /// Retrieval head ratio used (e.g., 0.15).
-    pub retrieval_head_ratio: f32,
     /// Total number of query heads calibrated.
     pub n_query_heads: usize,
+    /// Retrieval head ratio used (e.g., 0.15).
+    pub retrieval_head_ratio: f32,
 }
 
 // ---------------------------------------------------------------------------
