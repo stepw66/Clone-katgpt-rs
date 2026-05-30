@@ -33,9 +33,12 @@ fn simd_outer_product_ema_f64(
     k: usize,
     alpha: f64,
     first_step: bool,
+    s_scratch: &mut [f64],
+    t_scratch: &mut [f64],
 ) {
     #[cfg(target_arch = "aarch64")]
     {
+        let _ = (s_scratch, t_scratch); // unused in NEON path
         unsafe {
             neon_outer_product_ema_f64(dst_sigma, dst_n, student, teacher, k, alpha, first_step)
         }
@@ -43,16 +46,21 @@ fn simd_outer_product_ema_f64(
     #[cfg(target_arch = "x86_64")]
     {
         if crate::simd::simd_level() == crate::simd::SimdLevel::Avx2 {
+            let _ = (s_scratch, t_scratch); // unused in AVX2 path
             unsafe {
                 avx2_outer_product_ema_f64(dst_sigma, dst_n, student, teacher, k, alpha, first_step)
             }
         } else {
-            scalar_outer_product_ema_f64(dst_sigma, dst_n, student, teacher, k, alpha, first_step)
+            scalar_outer_product_ema_f64(
+                dst_sigma, dst_n, student, teacher, k, alpha, first_step, s_scratch, t_scratch,
+            )
         }
     }
     #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
     {
-        scalar_outer_product_ema_f64(dst_sigma, dst_n, student, teacher, k, alpha, first_step)
+        scalar_outer_product_ema_f64(
+            dst_sigma, dst_n, student, teacher, k, alpha, first_step, s_scratch, t_scratch,
+        )
     }
 }
 
@@ -68,22 +76,26 @@ fn simd_outer_product_f64(
     student: &[f32],
     teacher: &[f32],
     k: usize,
+    s_scratch: &mut [f64],
+    t_scratch: &mut [f64],
 ) {
     #[cfg(target_arch = "aarch64")]
     {
+        let _ = (s_scratch, t_scratch); // unused in NEON path
         unsafe { neon_outer_product_f64(dst_sigma, dst_n, student, teacher, k) }
     }
     #[cfg(target_arch = "x86_64")]
     {
         if crate::simd::simd_level() == crate::simd::SimdLevel::Avx2 {
+            let _ = (s_scratch, t_scratch); // unused in AVX2 path
             unsafe { avx2_outer_product_f64(dst_sigma, dst_n, student, teacher, k) }
         } else {
-            scalar_outer_product_f64(dst_sigma, dst_n, student, teacher, k)
+            scalar_outer_product_f64(dst_sigma, dst_n, student, teacher, k, s_scratch, t_scratch)
         }
     }
     #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
     {
-        scalar_outer_product_f64(dst_sigma, dst_n, student, teacher, k)
+        scalar_outer_product_f64(dst_sigma, dst_n, student, teacher, k, s_scratch, t_scratch)
     }
 }
 
@@ -120,16 +132,24 @@ fn scalar_outer_product_ema_f64(
     k: usize,
     alpha: f64,
     first_step: bool,
+    s_scratch: &mut [f64],
+    t_scratch: &mut [f64],
 ) {
+    // Pre-cast f32 → f64 into caller-provided scratch (avoids per-call Vec allocation).
+    for i in 0..k {
+        s_scratch[i] = student[i] as f64;
+        t_scratch[i] = teacher[i] as f64;
+    }
     if first_step {
         // First step: direct assignment (no EMA blending)
         for i in 0..k {
-            let si = student[i] as f64;
-            let ti = teacher[i] as f64;
+            let si = s_scratch[i];
+            let ti = t_scratch[i];
+            let row_off = i * k;
             for j in 0..k {
-                let sj = student[j] as f64;
-                let tj = teacher[j] as f64;
-                let idx = i * k + j;
+                let sj = s_scratch[j];
+                let tj = t_scratch[j];
+                let idx = row_off + j;
                 dst_sigma[idx] = si * tj;
                 dst_n[idx] = (si * sj + ti * tj) / 2.0;
             }
@@ -138,12 +158,13 @@ fn scalar_outer_product_ema_f64(
         // Subsequent steps: EMA blending
         let one_minus_alpha = 1.0 - alpha;
         for i in 0..k {
-            let si = student[i] as f64;
-            let ti = teacher[i] as f64;
+            let si = s_scratch[i];
+            let ti = t_scratch[i];
+            let row_off = i * k;
             for j in 0..k {
-                let sj = student[j] as f64;
-                let tj = teacher[j] as f64;
-                let idx = i * k + j;
+                let sj = s_scratch[j];
+                let tj = t_scratch[j];
+                let idx = row_off + j;
                 dst_sigma[idx] = alpha * dst_sigma[idx] + one_minus_alpha * (si * tj);
                 dst_n[idx] = alpha * dst_n[idx] + one_minus_alpha * ((si * sj + ti * tj) / 2.0);
             }
@@ -159,15 +180,23 @@ fn scalar_outer_product_f64(
     student: &[f32],
     teacher: &[f32],
     k: usize,
+    s_scratch: &mut [f64],
+    t_scratch: &mut [f64],
 ) {
+    // Pre-cast f32 → f64 into caller-provided scratch (avoids per-call Vec allocation).
     for i in 0..k {
-        let si = student[i] as f64;
-        let ti = teacher[i] as f64;
+        s_scratch[i] = student[i] as f64;
+        t_scratch[i] = teacher[i] as f64;
+    }
+    for i in 0..k {
+        let si = s_scratch[i];
+        let ti = t_scratch[i];
+        let row_off = i * k;
         for j in 0..k {
-            let sj = student[j] as f64;
-            let tj = teacher[j] as f64;
-            dst_sigma[i * k + j] = si * tj;
-            dst_n[i * k + j] = (si * sj + ti * tj) / 2.0;
+            let sj = s_scratch[j];
+            let tj = t_scratch[j];
+            dst_sigma[row_off + j] = si * tj;
+            dst_n[row_off + j] = (si * sj + ti * tj) / 2.0;
         }
     }
 }
@@ -742,6 +771,9 @@ pub struct PeiraCovariance {
     /// Pre-allocated output buffers for predictor_with_scratch
     q_star: Vec<f64>,
     p_star: Vec<f64>,
+    /// Pre-allocated scratch for f32→f64 conversion in scalar outer product paths.
+    s_scratch: Vec<f64>,
+    t_scratch: Vec<f64>,
 }
 
 impl PeiraCovariance {
@@ -761,6 +793,8 @@ impl PeiraCovariance {
             matmul_bt_scratch: vec![0.0; k * k],
             q_star: vec![0.0; k * k],
             p_star: vec![0.0; k * k],
+            s_scratch: vec![0.0; k],
+            t_scratch: vec![0.0; k],
         }
     }
 
@@ -793,6 +827,8 @@ impl PeiraCovariance {
             k,
             alpha,
             self.step_count == 0,
+            &mut self.s_scratch,
+            &mut self.t_scratch,
         );
         self.step_count += 1;
     }
@@ -914,6 +950,8 @@ impl PeiraCovariance {
             &mut self.sigma_sample,
             &mut self.n_sample,
             &mut self.pm,
+            &mut self.s_scratch,
+            &mut self.t_scratch,
         );
 
         (loss, &self.p_star, &self.q_star)
@@ -953,6 +991,8 @@ impl PeiraCovariance {
             &mut self.sigma_sample,
             &mut self.n_sample,
             &mut self.pm,
+            &mut self.s_scratch,
+            &mut self.t_scratch,
         )
     }
 
@@ -968,6 +1008,8 @@ impl PeiraCovariance {
         self.matmul_bt_scratch.fill(0.0);
         self.q_star.fill(0.0);
         self.p_star.fill(0.0);
+        self.s_scratch.fill(0.0);
+        self.t_scratch.fill(0.0);
         self.step_count = 0;
     }
 }
@@ -998,6 +1040,8 @@ pub fn peira_aux_loss(
     sigma_sample: &mut [f64],
     n_sample: &mut [f64],
     pm: &mut [f64],
+    s_scratch: &mut [f64],
+    t_scratch: &mut [f64],
 ) -> f64 {
     let k = student.len();
     assert_eq!(teacher.len(), k);
@@ -1006,6 +1050,8 @@ pub fn peira_aux_loss(
     assert_eq!(sigma_sample.len(), k * k);
     assert_eq!(n_sample.len(), k * k);
     assert_eq!(pm.len(), k * k);
+    assert_eq!(s_scratch.len(), k);
+    assert_eq!(t_scratch.len(), k);
 
     // Compute the auxiliary loss using the closed-form predictor:
     // L_aux = -½ Tr(Σ P*^T) + ¼ Tr(P* (N + λI) P*^T)
@@ -1020,7 +1066,15 @@ pub fn peira_aux_loss(
     // Compute sample cross-covariance: sigma_sample = u ⊗ v
     // and sample within-covariance: n_sample = (u ⊗ u + v ⊗ v) / 2
     // SIMD-accelerated outer product
-    simd_outer_product_f64(sigma_sample, n_sample, student, teacher, k);
+    simd_outer_product_f64(
+        sigma_sample,
+        n_sample,
+        student,
+        teacher,
+        k,
+        s_scratch,
+        t_scratch,
+    );
 
     // Term 1: -½ Tr(Σ_sample @ P*^T) = -½ Σ_{i,j} sigma_sample[i,j] * p_star[j,i]
     // In row-major: Tr(A @ B^T) = Σ_{i,j} A[i,j] * B[i,j] when both are row-major
@@ -1282,6 +1336,8 @@ mod tests {
         let mut sigma_sample = vec![0.0f64; k * k];
         let mut n_sample = vec![0.0f64; k * k];
         let mut pm = vec![0.0f64; k * k];
+        let mut s_scratch = vec![0.0f64; k];
+        let mut t_scratch = vec![0.0f64; k];
         let loss = peira_aux_loss(
             &[1.0, 0.5, -0.3, 0.0],
             &[0.8, 0.4, -0.2, 0.1],
@@ -1291,6 +1347,8 @@ mod tests {
             &mut sigma_sample,
             &mut n_sample,
             &mut pm,
+            &mut s_scratch,
+            &mut t_scratch,
         );
         assert!(loss.is_finite(), "Loss is not finite: {loss}");
     }
