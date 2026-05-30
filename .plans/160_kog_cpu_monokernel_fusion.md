@@ -1,7 +1,7 @@
 # Plan 160: Kog CPU Monokernel Fusion — RMSNorm Folding + QKV Interleaving
 
 **Date:** 2026-05-30
-**Status:** Planned
+**Status:** In Progress (11/14 tasks done, core optimization complete)
 **Research:** R139 (Kog Monokernel CPU Conceptual Mapping)
 **Cross-ref:** riir-ai P171 (GPU decode fusion — identical optimizations on GPU path)
 **Feature Gate:** `kog_cpu_fusion` (opt-in, GOAT proof required before default-ON)
