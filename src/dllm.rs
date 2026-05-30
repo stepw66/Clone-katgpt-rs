@@ -22,7 +22,9 @@ use crate::pruners::variance_minimizer::{VarianceMinimizer, VarianceMinimizerCon
 // ═══════════════════════════════════════════════════════════════
 
 /// Loss averaging strategy for masked positions in D2F training.
+/// How to average the loss across masked positions.
 ///
+/// `#[repr(u8)]` ensures 1-byte size for compact storage in hot-path structs.
 /// Nemotron validates +2.12% accuracy with global averaging over per-sequence.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[repr(u8)]
@@ -159,7 +161,8 @@ impl AdaptiveNoiseSchedule {
     ///
     /// Each tracker independently adjusts its ratio, then we sort
     /// to maintain monotonicity (RePlaid requires ordered schedules).
-    pub fn adapt_ratios(&mut self) -> Vec<f32> {
+    /// Returns `&self.current_ratios` after adaptation (avoids clone).
+    pub fn adapt_ratios(&mut self) -> &[f32] {
         for (i, tracker) in self.step_trackers.iter_mut().enumerate() {
             self.current_ratios[i] = tracker.adapt();
         }
@@ -167,7 +170,7 @@ impl AdaptiveNoiseSchedule {
         self.current_ratios
             .sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
         self.adaptations += 1;
-        self.current_ratios.clone()
+        &self.current_ratios
     }
 
     /// Current ratios (monotonic before first adaptation).
@@ -1398,7 +1401,12 @@ pub fn generate_pattern_dataset(
         let b = (rng.next() as usize) % effective_vocab;
         seq.clear();
         seq.extend((0..seq_len).map(|i| if i % 2 == 0 { a } else { b }));
-        out.push(seq.clone());
+        // Clone seq into output and reuse the allocation for next iteration.
+        // This avoids an extra allocation per iteration: the new Vec takes
+        // ownership of seq's allocation via std::mem::take, and seq gets a
+        // fresh (pre-reserved) empty Vec for the next loop iteration.
+        out.push(std::mem::take(&mut seq));
+        seq.reserve(seq_len);
     }
     out
 }
@@ -1584,10 +1592,11 @@ pub fn train_mini_dllm_adaptive(
         loss_history.push(avg_loss);
 
         // Adapt schedule ratios at epoch boundary
-        let adapted = schedule.adapt_ratios();
+        schedule.adapt_ratios();
 
         if epoch % 100 == 0 || epoch == n_epochs - 1 {
             // Use the mean adapted ratio for evaluation
+            let adapted = schedule.ratios();
             let eval_ratio = adapted.iter().copied().sum::<f32>() / adapted.len().max(1) as f32;
             let acc = evaluate_accuracy(&weights, test_data, config, eval_ratio, &mut rng);
             eprintln!(
