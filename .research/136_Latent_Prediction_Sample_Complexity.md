@@ -2,7 +2,18 @@
 
 **Source:** arXiv:2605.27734 (Korchinski, Favero, Wyart — EPFL/Cambridge/JHU)
 **Date:** 2026-05-28
-**Verdict:** ⚠️ THEORETICAL ONLY — Training paradigm, no inference gain
+**Verdict:** ✅ DISTILLABLE — ILC synonym pruning for DDTree search space reduction
+**Feature Gate:** `ilc_distill` (after GOAT proof → default-on if no perf hurt)
+**Cross-ref:** riir-ai Research 025 (training pipeline), Decision Matrix Plan 170
+
+## Tasks
+
+- [ ] T1: Implement `IlcClusterer` — k-means on cousin context vectors from episode data
+- [ ] T2: Implement `SynonymMap` — O(1) lookup for synonym cluster membership at inference time
+- [ ] T3: Wire `SynonymMap` into `ScreeningPruner::relevance()` — synonym-aware scoring
+- [ ] T4: Wire `SynonymMap` into DDTree — prune synonym branches (same cluster = explore one)
+- [ ] T5: GOAT proof — DDTree nodes explored with vs without synonym pruning (Bomber 1000 games)
+- [ ] T6: After GOAT — if no perf hurt, make `ilc_distill` default-on
 
 ## Core Finding
 
@@ -36,12 +47,56 @@ Latent-prediction SSL (data2vec, JEPA) requires only O(m³) samples — **expone
 - EMA teacher acts as "refreshed target" carrying learned latents
 - **H-JEPA stacking is redundant** — single data2vec already hierarchical
 
-## Why No Gain for katgpt-rs
+## What IS Distillable for katgpt-rs
 
-1. **Training paradigm, not inference**: The paper proves sample efficiency for *learning* representations. katgpt-rs is an inference engine — it doesn't train models. The training impact is in riir-ai (wgpu LoRA, ROPD, SDAR, SHINE pipeline).
-2. **No inference path impact**: Whether a model was trained with token-level or latent-prediction SSL doesn't change how inference works. The KV cache, attention, and speculation pipelines are identical.
-3. **Self-distillation already covered**: Our SDAR (Plan 073) and ROPD (Plan 072) in riir-ai already implement teacher-student distillation with latent targets. The paper validates this design but doesn't improve inference.
-4. **Screening pruner**: Synonym clustering could theoretically improve `ScreeningPruner::relevance()` by grouping semantically identical candidates, but the overhead of computing cousin context vectors at inference time violates optimization.md (no allocation in hot loops).
+The paper's Algorithm 1 (ILC) produces **synonym clusters** — groups of game states with identical context vectors. This has TWO concrete inference uses:
+
+### 1. DDTree Search Space Reduction
+
+If two DDTree branches lead to states in the same synonym cluster, they're equivalent — explore only one.
+This is the same principle as transposition tables in chess engines, but grounded in the paper's provable
+O(m³) synonym recovery.
+
+```text
+Without ILC: DDTree explores all N branches → N nodes
+With ILC:    DDTree explores only C < N unique clusters → C nodes (C ≤ N)
+```
+
+For hierarchical data with branching factor m, redundant branches scale as O(m^L). ILC collapses these to O(m³)
+unique clusters regardless of depth.
+
+### 2. Synonym-Aware ScreeningPruner
+
+Current `ScreeningPruner::relevance()` scores each candidate independently (pointwise). ILC adds a
+pairwise signal: candidates in the same synonym cluster get correlated scores. This is the same upgrade
+pattern as Bradley-Terry (pairwise > pointwise).
+
+### Architecture
+
+```text
+OFFLINE (once per game domain):
+  episode data → IlcClusterer → SynonymMap (lookup table)
+
+ONLINE (inference, hot path):
+  SynonymMap::lookup(state) → ClusterId    // O(1), no allocation
+  DDTree: skip branches in already-explored clusters
+  ScreeningPruner: boost relevance for diverse-cluster candidates
+```
+
+This follows the exact same pattern as:
+- Fourier spatial hashing: offline frequency tuning → online O(1) lookup
+- SpectralQuant: offline eigenvector calibration → online compressed attention
+- OCTOPUS: offline octahedral encoding → online KV compression
+
+### Why This Works (Paper Proof)
+
+Theorem 1 (informal): ILC recovers the full non-root hierarchy from O(vm³) samples with probability ≥ 1-δ.
+Key property: synonyms (same parent in hierarchy) have IDENTICAL cousin context vectors.
+Corollary: once synonym clusters are computed offline, online lookup is exact and O(1).
+
+## What STAYS in riir-ai (Training Pipeline)
+
+The training-time applications (latent-prediction loss for wgpu LoRA, ILC for game hierarchy discovery) live in riir-ai Research 025. The katgpt-rs distillation is the **offline clustering + online inference** path only.
 
 ## What We Already Have That This Validates
 
@@ -59,13 +114,66 @@ Latent-prediction SSL (data2vec, JEPA) requires only O(m³) samples — **expone
 - **Validates ROPD multi-criterion**: The ILC algorithm clusters by multi-dimensional context vectors. ROPD rubrics are multi-criterion evaluation → same principle.
 - **Validates local learning**: Stop-gradients between modules still work → our Freeze/Thaw's per-layer approach is theoretically sound.
 
+## Implementation Pattern
+
+Follows existing modelless distillation pattern (GFlowNet Plan 052, ROPD Plan 071, SDAR Plan 072):
+
+```rust
+// Feature-gated module: katgpt-rs-core/src/distill/ilc.rs
+#[cfg(feature = "ilc_distill")]
+pub mod ilc {
+    /// Offline: cluster episode data into synonym groups
+    pub struct IlcClusterer { vocab_size: usize, branching: usize, max_depth: usize }
+    
+    /// Online: O(1) synonym cluster lookup (precomputed, no allocation)
+    pub struct SynonymMap { centers: Vec<Vec<[f32; D]>>, labels: Vec<Vec<usize>> }
+    
+    impl SynonymMap {
+        pub fn lookup(&self, state: &[f32], level: usize) -> ClusterId { ... }
+        pub fn are_synonyms(&self, a: &[f32], b: &[f32], level: usize) -> bool { ... }
+    }
+}
+```
+
+Integration points:
+- `ScreeningPruner::relevance()` — boost diversity across clusters
+- DDTree `build_dd_tree` — skip synonym branches
+- `BanditPruner` — cluster-aware arm selection
+
 ## Open/Close Split
 
-- No code in katgpt-rs — purely theoretical validation
-- Game training applications → riir-ai Research 025 (private)
+```
+katgpt-rs (MIT)                    riir-ai (Private)
+─────────────────────              ─────────────────────
+trait IlcClusterer                 Per-game hierarchy depth configs
+SynonymMap (generic)               Per-game cousin context definitions
+kmeans utility                     Episode data → SynonymMap offline pipeline
+DDTree synonym pruning             Game-specific cluster-to-strategy mapping
+ScreeningPruner integration        Cross-game latent transfer weights
+```
+
+## Optimization Skill Alignment
+
+- ✅ Pre-compute lookup table: `SynonymMap` built offline, O(1) reads online
+- ✅ Fixed-size arrays: cluster centers `[f32; D]` where D is bounded by vocab_size
+- ✅ No hot-loop allocation: `SynonymMap::lookup()` is pure array indexing
+- ✅ Batch API: cluster multiple states in one pass (amortize k-means distance computation)
+
+## What We Already Have That This Validates
+
+| Paper Concept | katgpt-rs Equivalent | Status |
+|--------------|---------------------|--------|
+| Teacher-student EMA | SDAR gated distillation (Plan 072) | ✅ Implemented |
+| Hierarchical latent clustering | ROPD rubric criteria (Plan 071) | ✅ Implemented |
+| Contrastive clustering loss | Bradley-Terry pairwise ranking | ✅ Implemented |
+| Stop-gradient local learning | Freeze/Thaw pipeline (Plan 092) | ✅ Implemented |
+| data2vec = implicit hierarchy | VPD variational distillation | ✅ Implemented |
+| ILC synonym clusters | **NEW** — not yet implemented | ⏳ This plan |
 
 ## References
 
 - Related: Research 036 (ROPD), Research 038 (SDAR), Research 040 (Bradley-Terry), Research 080 (VPD)
-- Cross-ref: riir-ai Research 025 (game training application)
-- Paper Table 1: data2vec achieves m³ scaling confirmed experimentally for L=3..7
+- Cross-ref: riir-ai Research 025 (training pipeline application)
+- Paper Theorem 1: ILC recovers hierarchy from O(vm³) samples with probability ≥ 1-δ
+- Paper Algorithm 1: complete k-means ILC algorithm (Section 3)
+- Pattern: GFlowNet modelless (Plan 052), ROPD modelless (Plan 071), SDAR modelless (Plan 072)
