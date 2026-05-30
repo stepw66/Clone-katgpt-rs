@@ -193,7 +193,7 @@ impl MultiLayerKVCache {
                 value: layer.value[..end].to_vec(),
             })
             .collect();
-        KVSnapshot { layers, pos }
+        KVSnapshot { pos, layers }
     }
 
     /// Restore KV cache from a snapshot.
@@ -253,8 +253,8 @@ pub fn preload_kv_cache(
 /// Cheap snapshot of KV cache state up to position `pos`.
 /// Only copies filled slots [0..pos) per layer, not the entire block_size buffer.
 pub struct KVSnapshot {
-    pub layers: Vec<KVLayerSnapshot>,
     pub pos: usize,
+    pub layers: Vec<KVLayerSnapshot>,
 }
 
 /// Per-layer snapshot of KV cache data.
@@ -345,7 +345,7 @@ pub struct ForwardContext {
     #[cfg(feature = "tf_loop")]
     tf_stash_x: Vec<f32>, // [n_embd] stash for KV cache write
     // GQA lookup: kv_group_lut[h] = h * n_kv_head / n_head (pre-computed once)
-    kv_group_lut: [usize; 64], // fixed-size LUT for GQA head→kv_group mapping
+    kv_group_lut: [usize; 128], // fixed-size LUT for GQA head→kv_group mapping (up to 128 heads)
     _kv_group_lut_count: usize, // actual number of heads (n_head)
     #[cfg(feature = "mls_aggregate")]
     mls_count: usize, // How many layers accumulated
@@ -434,8 +434,12 @@ impl ForwardContext {
             kv_group_lut: {
                 let n_head = config.n_head;
                 let n_kv_head = config.n_kv_head;
-                let mut lut = [0usize; 64];
-                for (h, slot) in lut.iter_mut().enumerate().take(n_head.min(64)) {
+                assert!(
+                    n_head <= 128,
+                    "n_head ({n_head}) exceeds kv_group_lut capacity (128)"
+                );
+                let mut lut = [0usize; 128];
+                for (h, slot) in lut.iter_mut().enumerate().take(n_head) {
                     *slot = h * n_kv_head / n_head;
                 }
                 lut
