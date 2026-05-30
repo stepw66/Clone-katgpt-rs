@@ -194,16 +194,17 @@ fn jacobi_eigenvalues_into(mat: &[f32], n: usize, out: &mut [f32], scratch: &mut
                 a[p * n + q] = 0.0;
                 a[q * n + p] = 0.0;
 
-                // Update off-diagonal
+                // Update off-diagonal (branch-free: skip p/q via mask)
                 for r in 0..n {
-                    if r == p || r == q {
-                        continue;
-                    }
+                    let is_pq = (r == p) as usize | (r == q) as usize;
+                    // is_pq==0 → update, is_pq==1 → skip (keep old value)
                     let arp = a[r * n + p];
                     let arq = a[r * n + q];
-                    a[r * n + p] = c * arp - s * arq;
+                    let new_rp = c * arp - s * arq;
+                    let new_rq = s * arp + c * arq;
+                    a[r * n + p] = arp * is_pq as f32 + new_rp * (1.0 - is_pq as f32);
                     a[p * n + r] = a[r * n + p];
-                    a[r * n + q] = s * arp + c * arq;
+                    a[r * n + q] = arq * is_pq as f32 + new_rq * (1.0 - is_pq as f32);
                     a[q * n + r] = a[r * n + q];
                 }
             }
@@ -217,6 +218,7 @@ fn jacobi_eigenvalues_into(mat: &[f32], n: usize, out: &mut [f32], scratch: &mut
 }
 
 /// Allocating wrapper — prefer `jacobi_eigenvalues_into` in hot paths.
+#[allow(dead_code)]
 fn jacobi_eigenvalues(mat: &[f32], n: usize) -> Vec<f32> {
     let mut out = vec![0.0f32; n];
     let mut scratch = vec![0.0f32; n * n];

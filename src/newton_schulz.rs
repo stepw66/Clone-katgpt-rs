@@ -20,11 +20,28 @@ const ITERS: usize = 5;
 // ── Matrix helpers ──────────────────────────────────────────────
 
 /// Transpose `rows × cols` matrix stored row-major from `src` into `dst`.
+/// Processes 4 rows at a time for better auto-vectorization.
 fn transpose(src: &[f32], rows: usize, cols: usize, dst: &mut [f32]) {
-    for r in 0..rows {
+    let mut r = 0;
+    while r + 4 <= rows {
+        for c in 0..cols {
+            let sr0 = r * cols + c;
+            let sr1 = (r + 1) * cols + c;
+            let sr2 = (r + 2) * cols + c;
+            let sr3 = (r + 3) * cols + c;
+            dst[c * rows + r] = src[sr0];
+            dst[c * rows + r + 1] = src[sr1];
+            dst[c * rows + r + 2] = src[sr2];
+            dst[c * rows + r + 3] = src[sr3];
+        }
+        r += 4;
+    }
+    // Handle remaining rows
+    while r < rows {
         for c in 0..cols {
             dst[c * rows + r] = src[r * cols + c];
         }
+        r += 1;
     }
 }
 
@@ -327,9 +344,8 @@ fn newton_schulz5_square_into_raw(
         return;
     }
     let inv_norm = 1.0 / norm;
-    for (i, &v) in g.iter().enumerate() {
-        x[i] = v * inv_norm;
-    }
+    x[..mn].copy_from_slice(&g[..mn]);
+    crate::simd::simd_scale_inplace(&mut x[..mn], inv_norm);
 
     let a_mat = &mut a_mat[..mm];
     let b_mat = &mut b_mat[..mm];
