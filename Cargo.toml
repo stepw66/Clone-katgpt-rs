@@ -19,7 +19,7 @@ serde_json = "1"
 syn = { version = "2", features = ["full", "parsing"], optional = true }
 proc-macro2 = { version = "1", optional = true }
 bevy_ecs = { version = "0.15", optional = true }  # Standalone ECS (Plan 033)
-wasmtime = { version = "28", optional = true }     # WASM bomber validator (Plan 034)
+wasmi = { version = "1.0", optional = true }       # WASM bomber validator (Plan 034, wasmi migration Plan 167)
 papaya = { version = "0.2", optional = true }      # Lock-free concurrent HashMap (Plan 037)
 ordered-float = { version = "4", optional = true } # Ord wrapper for f64 — CHT breakpoints (Plan 064 TG-A)
 good_lp = { version = "1", optional = true, default-features = false, features = ["highs", "microlp"] } # MILP solver — scheduling (Plan 064 TG-D), highs primary + microlp fallback
@@ -93,7 +93,7 @@ bomber = ["bevy_ecs", "bandit"]  # Bomberman HL Arena (Plan 033)
 spechop = ["bandit"]  # SpecHop continuous multi-hop speculation pipeline (Plan 131, Research 091)
 parallel_probe = []  # Parallel-Probe 2D controller — consensus-based parallel branch control (Plan 133, Research 094)
 bomber-agent = ["bomber"]  # Coding agent validator loop (Issue 052, Tasks C9-C10)
-bomber-wasm = ["bomber", "wasmtime", "papaya"]  # WASM bomber validator loader (Plan 034) + batch pool (Plan 037)
+bomber-wasm = ["bomber", "wasmi", "papaya"]    # WASM bomber validator loader (Plan 034) + batch pool (Plan 037) + wasmi migration (Plan 167)
 game_state = ["bomber"]  # GameState forward model trait + generic MCTS (Plan 056)
 dual_gram_pca = ["katgpt-core/dual_gram_pca"]  # Dual-Gram PCA routing for short-sequence calibration (Research R130, Plan 159 GOAT) — default-ON
 roofline_cost = ["katgpt-core/roofline_cost"]  # Roofline cost model for GPU operator runtime prediction (Research R130, Plan 159 GOAT) — default-ON
