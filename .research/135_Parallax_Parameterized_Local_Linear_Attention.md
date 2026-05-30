@@ -62,7 +62,7 @@ Extra state: (d2, O2) alongside FA's (m, d1, O1). No extra HBM I/O per iteration
 | Attention mechanism | SDPA (default), HLA (O(1) cache), GDN2 (O(1) recurrent), DashAttention (sparse) | GOAT proved |
 | Streaming algorithm | PFlash block-sparse prefill, tiled_attention (CPU SIMD) | Available |
 | R projection | None | — |
-| Muon optimizer | `newton_schulz` feature flag (Plan 152) | opt-in, no GOAT yet |
+| Muon optimizer | `newton_schulz` feature flag (Plan 152) | GOAT proved 25/25 (Bench 050), still opt-in |
 
 ### Distillation Opportunities
 
@@ -120,13 +120,4 @@ The core idea (learned covariance correction) is sound and theoretically grounde
 
 **Recommendation:** Monitor. If Muon becomes our training optimizer (currently `newton_schulz` is opt-in), re-evaluate. The post-training adaptation path (W_R = 0 init + LoRA fine-tune) is viable for future LoRA distillation targets.
 
----
-
-## Tasks
-
-- [ ] Implement `parallax_attn` feature flag in `Cargo.toml` (opt-in, gated)
-- [ ] Add R projection to `Config` types (only when `parallax_attn` enabled)
-- [ ] Implement streaming covariance branch alongside SDPA in `tiled_attention`
-- [ ] AHLA covariance experiment: maintain Σ_KV in AHLA state as additional O(d·dv) statistics
-- [ ] Benchmark CPU decode overhead: SDPA vs SDPA+R projection (expect ~1.5–2× FLOPs)
-- [ ] If `newton_schulz` becomes default, re-run evaluation with Parallax LoRA adapter
+**Plan:** [`.plans/135_parallax_attn.md`](../.plans/135_parallax_attn.md)
