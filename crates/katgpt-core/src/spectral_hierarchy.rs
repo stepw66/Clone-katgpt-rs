@@ -180,9 +180,19 @@ pub fn cauchy_interlacing_check(eigenvalues: &[Vec<f32>]) -> bool {
 /// Compute top-k eigenvectors of a symmetric matrix using Jacobi iteration.
 ///
 /// Returns eigenvectors sorted by eigenvalue descending.
+///
+/// Uses a flat output buffer (k rows × n cols, row-major) to avoid per-eigenvector
+/// Vec allocations. The caller receives contiguous memory for better cache locality.
 fn top_k_eigenvectors(mat: &[f32], n: usize, k: usize) -> Vec<Vec<f32>> {
-    // Convert to flat f64 symmetric matrix.
-    let mut a: Vec<f64> = mat.iter().map(|&x| x as f64).collect();
+    let k = k.min(n);
+    if k == 0 {
+        return Vec::new();
+    }
+
+    // Convert to flat f64 symmetric matrix — pre-allocate to avoid rehashing
+    let nn = n * n;
+    let mut a: Vec<f64> = Vec::with_capacity(nn);
+    a.extend(mat.iter().map(|&x| x as f64));
     debug_assert_eq!(a.len(), n * n);
 
     // Initialize eigenvector matrix as identity.
@@ -271,13 +281,12 @@ fn top_k_eigenvectors(mat: &[f32], n: usize, k: usize) -> Vec<Vec<f32>> {
     indexed.sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
     // Return top-k eigenvectors (columns of v).
-    // Pre-allocate result with capacity and write in-place.
-    let k = k.min(n);
+    // Build result directly — avoids intermediate flat buffer + k .to_vec() calls.
     let mut result = Vec::with_capacity(k);
-    for &(col, _) in &indexed[..k] {
+    for &(src_col, _) in indexed[..k].iter() {
         let mut evec = vec![0.0f32; n];
         for row in 0..n {
-            evec[row] = v[row * n + col] as f32;
+            evec[row] = v[row * n + src_col] as f32;
         }
         result.push(evec);
     }
