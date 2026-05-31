@@ -114,10 +114,10 @@ struct TsRow {
     features: String,
     category: String,
     method: String,
+    feature_dim: String,
     throughput: f64,
     us_per_step: f64,
     avg_accept_len: f64,
-    feature_dim: String,
 }
 
 /// Parse `bench/timeseries.csv` into rows.
@@ -141,10 +141,10 @@ fn parse_timeseries_csv(path: &str) -> Result<Vec<TsRow>, Box<dyn std::error::Er
                 features: fields[2].to_string(),
                 category: fields[3].to_string(),
                 method: fields[4].to_string(),
+                feature_dim,
                 throughput: tp,
                 us_per_step: us,
                 avg_accept_len: aal,
-                feature_dim,
             }),
             _ => continue,
         }

@@ -15,6 +15,7 @@
 /// Support sets are heuristic defaults for character-level tokenizers.
 /// BPE tokenizers should override via [`PpotConfig::custom_support`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[repr(u8)]
 pub enum TokenRule {
     /// Digits `0-9`: token IDs 0–9 (character-level convention).
     Digit,

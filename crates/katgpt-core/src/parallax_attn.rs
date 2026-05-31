@@ -41,6 +41,7 @@ use crate::simd;
 /// Both produce normalized weights `p(i,j) ≥ 0, Σ_j p(i,j) = 1` that define
 /// a Nadaraya-Watson kernel regression estimator. The Parallax local-linear
 /// correction `o_LL = o_NW − Σ_KV · ρ` applies identically to both.
+#[repr(u8)]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum ParallaxActivation {
     /// Standard softmax: `p(i,j) = exp(q_i · k_j · s) / Σ_k exp(q_i · k_k · s)`.
@@ -102,9 +103,7 @@ fn normalize_attention_weights(row: &mut [f32], activation: ParallaxActivation) 
             simd::simd_exp_inplace(row);
             simd::simd_add_scalar_inplace(row, 1.0);
             // Invert elementwise: row = 1/(1+exp(−x)) = σ(x)
-            for t in row.iter_mut() {
-                *t = 1.0 / *t;
-            }
+            simd::simd_reciprocal_inplace(row);
             // Normalize so Σ_j p(j) = 1 (Nadaraya-Watson requirement)
             let rowsum = simd::simd_sum_f32(row);
             simd::simd_scale_inplace(row, 1.0 / rowsum);

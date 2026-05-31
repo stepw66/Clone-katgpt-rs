@@ -47,9 +47,9 @@ impl SensitivityDetector for OpenDetector {
 
 /// A segment of tokens bounded by sensitive tokens.
 pub struct MaskedSegment {
+    pub recompute_indices: Vec<usize>,
     pub start: usize,
     pub end: usize,
-    pub recompute_indices: Vec<usize>,
     pub contextualization_score: f32,
     pub is_reusable: bool,
 }

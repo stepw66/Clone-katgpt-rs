@@ -1011,13 +1011,15 @@ fn backward(
         // Cross-entropy backward: d_logit[i] = softmax(logit)[i] - (1 if i==target else 0)
         let logits_p = &act.logits[p * vocab..(p + 1) * vocab];
         let target = tokens[p];
-        bctx.d_logits[..vocab].fill(0.0);
         let max_l = crate::simd::simd_max_f32(logits_p);
-        let sum_exp: f32 = logits_p.iter().map(|l| (l - max_l).exp()).sum();
+        // Compute exp(logits - max) once into d_logits, then reuse for sum and gradient
+        for i in 0..vocab {
+            bctx.d_logits[i] = (logits_p[i] - max_l).exp();
+        }
+        let sum_exp = crate::simd::simd_sum_f32(&bctx.d_logits[..vocab]);
         let inv_sum = 1.0 / sum_exp;
         for i in 0..vocab {
-            let prob = (logits_p[i] - max_l).exp() * inv_sum;
-            bctx.d_logits[i] = prob - if i == target { 1.0 } else { 0.0 };
+            bctx.d_logits[i] = bctx.d_logits[i] * inv_sum - if i == target { 1.0 } else { 0.0 };
         }
 
         // LM Head: d_lm_head += outer(d_logits, hidden_final)

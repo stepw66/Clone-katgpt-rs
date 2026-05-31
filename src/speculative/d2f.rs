@@ -1297,6 +1297,7 @@ pub fn contiguous_prefix_promote(
 /// Convergence status for a D2F decode block.
 #[cfg(feature = "dmax_spd")]
 #[derive(Clone, Debug, PartialEq)]
+#[repr(u8)]
 pub enum BlockConvergence {
     /// Block has not converged, continue denoising.
     NotConverged,

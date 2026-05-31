@@ -2461,7 +2461,8 @@ pub fn sigmoid_margin_loss(
             let adj = adjacency[idx];
             // For positive pairs (adj=1): loss = softplus(-t·(score−b)), minimized when score → +∞
             // For negative pairs (adj=0): loss = softplus(+t·(score−b)), minimized when score → −∞
-            let sign = if adj > 0.5 { -1.0f32 } else { 1.0f32 };
+            // Branchless: 1.0 - 2.0 * (adj > 0.5) → -1.0 if positive, +1.0 if negative
+            let sign = 1.0 - 2.0 * (adj > 0.5) as u32 as f32;
             let x = temperature * (score - bias) * sign;
             total += softplus(x);
         }
@@ -3119,16 +3120,17 @@ pub fn simd_gram_f32(x: &[f32], seq_len: usize, d_h: usize, gram_out: &mut [f32]
 
     for i in 0..seq_len {
         let row_i = &x[i * d_h..(i + 1) * d_h];
+        let i_row_off = i * seq_len;
 
         // Diagonal: sum of squares (one load instead of two)
         let diag = simd_sum_sq(row_i, d_h);
-        gram_out[i * seq_len + i] = diag;
+        gram_out[i_row_off + i] = diag;
 
         // Upper triangle: j > i
         for j in (i + 1)..seq_len {
             let row_j = &x[j * d_h..(j + 1) * d_h];
             let val = simd_dot_f32(row_i, row_j, d_h);
-            gram_out[i * seq_len + j] = val;
+            gram_out[i_row_off + j] = val;
             gram_out[j * seq_len + i] = val; // mirror to lower triangle
         }
     }

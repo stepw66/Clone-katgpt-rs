@@ -12,11 +12,11 @@
 /// Combined representation geometry report for a set of hidden states.
 #[derive(Debug, Clone)]
 pub struct GeometryReport {
-    pub effective_rank: f32,
-    pub avg_cosine_sim: f32,
     pub layer_index: usize,
     pub n_tokens: usize,
     pub hidden_dim: usize,
+    pub effective_rank: f32,
+    pub avg_cosine_sim: f32,
 }
 
 // ── Core functions ──────────────────────────────────────────────

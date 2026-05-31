@@ -26,6 +26,7 @@ impl<T> SyncCell<T> {
 }
 
 /// Cache thermal state for E2E game timing.
+#[repr(u8)]
 #[derive(Clone, Copy, Debug)]
 enum CacheState {
     /// Fresh allocation, first generation. Simulates absolute cold start.

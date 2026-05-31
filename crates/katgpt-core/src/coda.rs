@@ -739,6 +739,7 @@ pub fn simd_matmul_rmsnorm_rope(
     );
 
     let half_rows = rows / 2;
+    let pos_base = pos * head_dim;
     for i in 0..half_rows {
         let even_row = 2 * i;
         let odd_row = 2 * i + 1;
@@ -759,7 +760,7 @@ pub fn simd_matmul_rmsnorm_rope(
         ) * rstd;
 
         // RoPE rotation: index into precomputed table
-        let rope_idx = pos * head_dim + (i % head_dim);
+        let rope_idx = pos_base + (i % head_dim);
         debug_assert!(rope_idx < cos_table.len(), "RoPE cos index out of bounds");
         debug_assert!(rope_idx < sin_table.len(), "RoPE sin index out of bounds");
         // Safety: tables are pre-sized to max_seq_len × head_dim; index verified above

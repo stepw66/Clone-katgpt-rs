@@ -11,10 +11,10 @@ pub struct MarkovChain {
     pub transition: Vec<Vec<f32>>,
     /// Stationary distribution π.
     pub stationary: Vec<f32>,
-    /// Computed entropy rate H(P) = -Σᵢ πᵢ Σⱼ Pᵢⱼ log Pᵢⱼ.
-    pub entropy_rate: f32,
     /// Number of states (= vocabulary size for probe-LLM).
     pub num_states: usize,
+    /// Computed entropy rate H(P) = -Σᵢ πᵢ Σⱼ Pᵢⱼ log Pᵢⱼ.
+    pub entropy_rate: f32,
 }
 
 /// Sample a single Dirichlet(α, …, α) variate of dimension `k`.
