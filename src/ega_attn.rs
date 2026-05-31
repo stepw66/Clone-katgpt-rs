@@ -126,6 +126,7 @@ impl EgaGate {
     }
 
     /// Total number of learnable parameters: head_dim + 2.
+    #[inline]
     pub fn parameter_count(&self) -> usize {
         self.w_proj.len() + 2
     }

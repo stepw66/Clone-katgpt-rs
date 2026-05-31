@@ -3780,6 +3780,7 @@ impl RavenKVCache {
 /// Unselected slots get 0.0 → completely frozen during update.
 ///
 /// Uses pre-allocated buffers to avoid heap allocations on the hot path.
+#[inline]
 pub fn raven_compute_router_into(
     raw_logits: &[f32],
     top_k: usize,
@@ -3845,6 +3846,7 @@ pub fn raven_compute_router(raw_logits: &[f32], top_k: usize) -> Vec<f32> {
 /// When `r_t[slot] == 0`: `decay = exp(0) = 1.0` → `H_new = H_old` (FROZEN)
 /// When `r_t[slot] > 0`: `decay < 1.0` → old content decays, new writes in
 #[allow(clippy::too_many_arguments)]
+#[inline]
 pub fn raven_update(
     keys: &mut [f32],
     values: &mut [f32],
@@ -3884,6 +3886,7 @@ pub fn raven_update(
 /// - Pass 2: exp(scores - max) + weighted value accumulation + normalize
 ///
 /// Returns `&mut output[..kv_dim]` (borrowed from the provided output buffer).
+#[inline]
 pub fn raven_readout_into<'a>(
     query: &[f32],
     keys: &[f32],

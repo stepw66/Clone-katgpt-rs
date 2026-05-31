@@ -2576,7 +2576,7 @@ pub fn dim_sufficiency_bound(k: usize, n: usize) -> usize {
 
 /// SIMD-accelerated sum of squares: `Σ x[i]²`.
 /// More efficient than `simd_dot_f32(x, x, len)` — loads data once instead of twice.
-#[inline]
+#[inline(always)]
 pub fn simd_sum_sq(x: &[f32], len: usize) -> f32 {
     #[cfg(target_arch = "aarch64")]
     {
@@ -2691,7 +2691,7 @@ unsafe fn avx2_sum_sq(x: &[f32], len: usize) -> f32 {
 // ── SIMD Sum-|x| (Issue 120) ───────────────────────────────
 
 /// SIMD-accelerated sum of absolute values: `Σ |x[i]|`.
-#[inline]
+#[inline(always)]
 pub fn simd_sum_abs_f32(x: &[f32]) -> f32 {
     if x.is_empty() {
         return 0.0;

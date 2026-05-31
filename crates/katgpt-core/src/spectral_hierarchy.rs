@@ -294,6 +294,7 @@ fn top_k_eigenvectors(mat: &[f32], n: usize, k: usize) -> Vec<f32> {
 }
 
 /// Check if a slice is sorted in descending order.
+#[inline]
 fn is_sorted_descending(vals: &[f32]) -> bool {
     vals.windows(2).all(|w| w[0] >= w[1] - 1e-6)
 }
