@@ -86,6 +86,7 @@ fn bench_ldt_lattice_deduction_goat_proof() {
             gated_attn: false,
             parallax_gate_scale: 0.0,
             parallax_zero_init: true,
+            emotion_desperation_threshold: 0.5,
         }
     }
 

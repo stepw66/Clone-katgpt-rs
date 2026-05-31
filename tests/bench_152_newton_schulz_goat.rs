@@ -21,7 +21,6 @@
 //!
 //! Run: `cargo test --features "newton_schulz,river_valley" --test bench_152_newton_schulz_goat -- --nocapture`
 
-use std::hint::black_box;
 use std::time::Instant;
 
 use katgpt_rs::newton_schulz::{
@@ -500,14 +499,14 @@ fn goat_t3_3_throughput_parity() {
     // Bench allocating API
     let start = Instant::now();
     for _ in 0..ITERS {
-        black_box(newton_schulz5(&g, 32, 32, &mut out));
+        newton_schulz5(&g, 32, 32, &mut out);
     }
     let alloc_time = start.elapsed();
 
     // Bench scratch API
     let start = Instant::now();
     for _ in 0..ITERS {
-        black_box(newton_schulz5_into(&g, 32, 32, &mut out, &mut scratch));
+        newton_schulz5_into(&g, 32, 32, &mut out, &mut scratch);
     }
     let scratch_time = start.elapsed();
 
@@ -539,15 +538,7 @@ fn goat_t3_3_muon_throughput() {
 
     let start = Instant::now();
     for _ in 0..ITERS {
-        black_box(muon_update_into(
-            &grad,
-            &mut momentum,
-            0.9,
-            16,
-            16,
-            &mut out,
-            &mut scratch,
-        ));
+        muon_update_into(&grad, &mut momentum, 0.9, 16, 16, &mut out, &mut scratch);
     }
     let elapsed = start.elapsed();
     let us_per_call = elapsed.as_secs_f64() * 1e6 / ITERS as f64;
