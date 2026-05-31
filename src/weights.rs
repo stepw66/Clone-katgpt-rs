@@ -225,7 +225,8 @@ impl ContiguousWeights {
 pub fn load_ternary_bits(path: &std::path::Path) -> std::io::Result<katgpt_core::TernaryWeights> {
     use std::io::Read;
     let mut f = std::fs::File::open(path)?;
-    let mut buf = Vec::new();
+    let file_len = f.metadata()?.len() as usize;
+    let mut buf = Vec::with_capacity(file_len);
     f.read_to_end(&mut buf)?;
 
     if buf.len() < 20 {

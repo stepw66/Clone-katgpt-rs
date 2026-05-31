@@ -21,10 +21,12 @@ impl MbuCounter {
         Self { bytes_read: 0 }
     }
 
+    #[inline]
     pub fn reset(&mut self) {
         self.bytes_read = 0;
     }
 
+    #[inline]
     pub fn add_bytes(&mut self, n: u64) {
         self.bytes_read += n;
     }

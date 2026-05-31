@@ -71,6 +71,7 @@ pub fn compute_energy_gate(energy: &[f32], alpha: f32, tau: f32) -> Vec<f32> {
 /// Zero-alloc variant of [`compute_energy_gate`].
 ///
 /// Writes the gate vector into `out[..energy.len()]`.
+#[inline]
 pub fn compute_energy_gate_into(energy: &[f32], alpha: f32, tau: f32, out: &mut [f32]) {
     let len = energy.len();
     out[..len].copy_from_slice(energy);

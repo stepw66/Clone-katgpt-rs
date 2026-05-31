@@ -3379,11 +3379,11 @@ pub fn forward_paged<'a>(
     // Snapshot hidden state
     ctx.hidden_state[..n].copy_from_slice(&ctx.x[..n]);
 
-    // LM Head
-    matmul(
+    // LM Head (uses matmul_parallel for large vocab)
+    standard_lm_head(
         &mut ctx.logits,
-        &weights.lm_head,
         &ctx.x,
+        &weights.lm_head,
         config.vocab_size,
         n,
     );
@@ -3614,6 +3614,7 @@ impl PagedKVCache {
 
     /// Write K and V for a token position in a specific layer.
     /// Layout per page: `[K_data | V_data]` where each is `PAGE_SIZE * kv_dim` floats.
+    #[inline]
     pub fn write_kv(&mut self, layer_idx: usize, seq_idx: usize, pos: usize, k: &[f32], v: &[f32]) {
         let page_local = pos % PAGE_SIZE;
         let page_list_idx = pos / PAGE_SIZE;
@@ -3627,6 +3628,7 @@ impl PagedKVCache {
     }
 
     /// Read K and V for a token position in a specific layer.
+    #[inline]
     pub fn read_kv(
         &self,
         layer_idx: usize,
@@ -4150,11 +4152,11 @@ pub fn forward_raven<'a>(
     // Snapshot hidden state
     ctx.hidden_state[..n].copy_from_slice(&ctx.x[..n]);
 
-    // LM Head
-    matmul(
+    // LM Head (uses matmul_parallel for large vocab)
+    standard_lm_head(
         &mut ctx.logits,
-        &weights.lm_head,
         &ctx.x,
+        &weights.lm_head,
         config.vocab_size,
         n,
     );
@@ -4349,11 +4351,11 @@ pub fn forward_quantized<'a, C: types::QuantizedKVCache>(
     // Snapshot hidden state (for Plan 009 compatibility)
     ctx.hidden_state[..n].copy_from_slice(&ctx.x[..n]);
 
-    // LM Head
-    matmul(
+    // LM Head (uses matmul_parallel for large vocab)
+    standard_lm_head(
         &mut ctx.logits,
-        &weights.lm_head,
         &ctx.x,
+        &weights.lm_head,
         config.vocab_size,
         n,
     );
