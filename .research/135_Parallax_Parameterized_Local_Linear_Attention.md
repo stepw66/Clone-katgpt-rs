@@ -121,3 +121,17 @@ The core idea (learned covariance correction) is sound and theoretically grounde
 **Recommendation:** `newton_schulz` is now default-on. Re-evaluate Parallax when a Muon-trained model is available. The post-training adaptation path (W_R = 0 init + LoRA fine-tune) is viable for future LoRA distillation targets.
 
 **Plan:** [`.plans/135_parallax_attn.md`](../.plans/135_parallax_attn.md)
+
+---
+
+## Update: Sigmoid Parallax AdamW Experiments (Plan 161)
+
+Plan 161 tested whether sigmoid Parallax resists AdamW's correction collapse (gate → 0.26 in Research 135 above).
+
+**Key finding:** On random and synthetic data, both sigmoid and softmax maintain COR ≈ 0.06 — far below the real-model range of 4–12. The collapse mechanism requires high baseline COR (the correction must be significant enough for AdamW to have leverage to suppress it). Random Q/K produce near-uniform attention that yields negligible correction regardless of activation.
+
+**Implication:** The optimizer dependence finding in Research 135 (Muon → COR 8–12, AdamW → COR <4) is a real-language-model phenomenon. It cannot be reproduced with synthetic data.
+
+**T3 real-data validation** (Gemma 2 2B) confirmed sigmoid produces higher COR capacity than softmax (2271% vs 1585%), consistent with its sink-free distributed weighting. **Sigmoid is now `ParallaxActivation::default()`** (Plan 161 T5). Softmax remains available via `ParallaxActivation::Softmax` for backward compatibility.
+
+See Plan 161 for full experiment data and T3 cross-reference analysis.

@@ -102,12 +102,12 @@ Phase 2 (Σ_KV from column sums), Phase 3 (Σ_KV · ρ), Phase 4 (apply correcti
 ## Implementation
 
 ```rust
-// Before (softmax only):
-let config = ParallaxConfig::default();
+// Sigmoid is now the default:
+let config = ParallaxConfig::default(); // uses ParallaxActivation::Sigmoid
 
-// After (sigmoid Parallax):
+// For backward-compatible softmax:
 let config = ParallaxConfig {
-    activation: ParallaxActivation::Sigmoid,
+    activation: ParallaxActivation::Softmax,
     ..Default::default()
 };
 ```
@@ -177,3 +177,32 @@ Nearly identical at ~0.1% difference. With random data, both capture similar cov
 | G4 | No sinks | sig_max ≤ sm_max | 0.0216 ≤ 0.0330 ✓ | ✅ PASS |
 | G5 | Different kernel | 0.9 < cos_sim < 0.9999 | 0.9885 | ✅ PASS |
 | G6 | Covariance parity | Within 5% of softmax | 0.1% | ✅ PASS |
+
+## AdamW Experiments (Plan 161)
+
+### T1: Random Data Baseline
+
+Both sigmoid and softmax Parallax converge identically under AdamW on random data. No COR divergence, no gate collapse. Expected — random Q/K have no positional bias.
+
+### T2: Synthetic Sink Injection
+
+Swept `sink_strength` ∈ {0.0, 0.5, 1.0, 2.0, 5.0} × `decay_rate` ∈ {2, 4, 8} = 15 configurations.
+
+**Result: No COR divergence.** COR ratio (sig/sm) range: 0.983–1.007. Gate dynamics identical (both converge to ~1.156). The correction branch stays equally active for both activations regardless of sink strength.
+
+**Notable finding:** Sigmoid achieves **3–4× lower reconstruction loss** at high sink strengths (≥ 2.0), but through the *base attention path*, not through COR changes. Sigmoid's distributed weights are less distorted by sinks, giving W_R a better residual to fit.
+
+**Implication:** The hypothesized AdamW collapse mechanism (softmax sinks → noisy correction → gate collapse) was not reproduced with synthetic positional bias alone. The mechanism likely requires structural Q/K/V correlations that emerge during real language model training. See Plan 161 for full data.
+
+### Verdict on Sigmoid vs Softmax for Parallax
+
+| Aspect | Evidence |
+|--------|----------|
+| Compute cost | Identical (G1: ≤ 3% difference) |
+| Numerical stability | Both stable (G2/G3) |
+| Attention sink resistance | Sigmoid better (G4: 34% lower max weight) |
+| COR under AdamW | No difference on random/synthetic data (T1/T2) |
+| Reconstruction loss under sinks | Sigmoid 3–4× better (T2, strength ≥ 2.0) |
+| Real-data COR (Gemma 2 2B) | Sigmoid higher COR capacity (2271% vs 1585%, T3) |
+
+**No evidence against sigmoid.** Sigmoid is at worst equivalent and at best more robust. T3 real-data validation confirmed sigmoid has higher COR capacity than softmax (2271% vs 1585%). **Sigmoid is now `ParallaxActivation::default()`** (Plan 161 T5).
