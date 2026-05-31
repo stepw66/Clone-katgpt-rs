@@ -34,7 +34,7 @@ fn main() {
     println!();
 
     // ── T4 + T8: PeiraDistiller SC-PEIRA loop + collapse-free ────
-    let mut distiller = PeiraDistiller::new(config.clone());
+    let mut distiller = PeiraDistiller::new(config);
     let mut rng = fastrand::Rng::with_seed(42);
 
     let mut min_norm = f64::MAX;

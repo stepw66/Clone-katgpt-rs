@@ -25,6 +25,7 @@
 ///   dst_sigma[idx] = alpha * dst_sigma[idx] + (1 - alpha) * sigma_ij   (or sigma_ij if first_step)
 ///   dst_n[idx]     = alpha * dst_n[idx]     + (1 - alpha) * n_ij       (or n_ij if first_step)
 #[inline]
+#[allow(clippy::too_many_arguments)]
 fn simd_outer_product_ema_f64(
     dst_sigma: &mut [f64],
     dst_n: &mut [f64],
@@ -124,6 +125,7 @@ fn simd_dot_f64(a: &[f64], b: &[f64], len: usize) -> f64 {
 
 #[inline]
 #[allow(dead_code)]
+#[allow(clippy::too_many_arguments)]
 fn scalar_outer_product_ema_f64(
     dst_sigma: &mut [f64],
     dst_n: &mut [f64],
@@ -1283,7 +1285,7 @@ mod tests {
         let k = 2;
         let mat = vec![2.0, 1.0, 1.0, 3.0];
         let inv = invert_spd(&mat, k);
-        let expected = vec![0.6, -0.2, -0.2, 0.4];
+        let expected = [0.6, -0.2, -0.2, 0.4];
         for i in 0..4 {
             assert!(
                 (inv[i] - expected[i]).abs() < 1e-10,
