@@ -9,7 +9,9 @@
 use std::hint::black_box;
 use std::time::Instant;
 
-use katgpt_core::{ParallaxConfig, tiled_attention_forward, tiled_attention_parallax_forward};
+use katgpt_core::{
+    ParallaxActivation, ParallaxConfig, tiled_attention_forward, tiled_attention_parallax_forward,
+};
 
 // ── Config ────────────────────────────────────────────────────
 
@@ -65,7 +67,7 @@ fn bench_parallax_cpu_decode_overhead() {
         let parallax_config = ParallaxConfig {
             gate_scale: 1.0,
             zero_init: false,
-            ..Default::default()
+            activation: ParallaxActivation::Softmax,
         };
 
         // ── Warmup SDPA ──
@@ -147,7 +149,7 @@ fn bench_parallax_zero_init_recovers_softmax() {
     let config = ParallaxConfig {
         gate_scale: 1.0,
         zero_init: true,
-        ..Default::default()
+        activation: ParallaxActivation::Softmax,
     };
 
     let mut sdpa_out = vec![0.0f32; head_size];
@@ -203,7 +205,7 @@ fn bench_parallax_gate_zero_recovers_softmax() {
     let config = ParallaxConfig {
         gate_scale: 0.0,
         zero_init: false,
-        ..Default::default()
+        activation: ParallaxActivation::Softmax,
     };
 
     let mut sdpa_out = vec![0.0f32; head_size];
@@ -249,7 +251,7 @@ fn bench_parallax_finite_output() {
         let config = ParallaxConfig {
             gate_scale: 1.0,
             zero_init: false,
-            ..Default::default()
+            activation: ParallaxActivation::Softmax,
         };
 
         let mut output = vec![0.0f32; head_size];
@@ -302,7 +304,7 @@ fn bench_parallax_correction_magnitude() {
     let config = ParallaxConfig {
         gate_scale: 1.0,
         zero_init: false,
-        ..Default::default()
+        activation: ParallaxActivation::Softmax,
     };
     let mut plx_out = vec![0.0f32; head_size];
     tiled_attention_parallax_forward(

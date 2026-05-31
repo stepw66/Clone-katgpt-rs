@@ -46,11 +46,12 @@ use crate::simd;
 pub enum ParallaxActivation {
     /// Standard softmax: `p(i,j) = exp(q_i · k_j · s) / Σ_k exp(q_i · k_k · s)`.
     /// Gaussian-like kernel with attention sinks.
-    #[default]
     Softmax,
     /// Normalized sigmoid: `p(i,j) = σ(q_i · k_j · s) / Σ_k σ(q_i · k_k · s)`.
     /// No attention sinks, better numerical stability, no exp overflow.
+    /// Higher COR capacity than softmax on real LM data (Plan 161 T3).
     /// Kernel: `K(x,y) = σ(x · y · s)`.
+    #[default]
     Sigmoid,
 }
 
@@ -64,8 +65,8 @@ pub struct ParallaxConfig {
     /// module is a no-op and recovers exact base attention.
     pub zero_init: bool,
     /// Activation function for attention weight normalization.
-    /// Default: Softmax (backward-compatible). Set to Sigmoid for sink-free
-    /// attention with the same covariance correction.
+    /// Default: Sigmoid (sink-free, higher COR capacity per Plan 161).
+    /// Set to Softmax for backward-compatible attention sinks.
     pub activation: ParallaxActivation,
 }
 
