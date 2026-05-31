@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use crate::benchmark::{BenchCategory, BenchResult, FEATURE_DIMS};
 use plotters::prelude::*;
 
@@ -233,14 +235,18 @@ pub fn plot_timeseries(
             continue;
         }
 
+        // Build HashMap index for O(1) run_idx lookup
+        let run_index: HashMap<&str, usize> = run_labels
+            .iter()
+            .enumerate()
+            .map(|(i, s)| (s.as_str(), i))
+            .collect();
+
         // Group by method
         let mut methods: std::collections::BTreeMap<&str, Vec<(usize, f64)>> =
             std::collections::BTreeMap::new();
         for r in &cat_rows {
-            let run_idx = run_labels
-                .iter()
-                .position(|l| *l == r.run_date)
-                .unwrap_or(0);
+            let run_idx = *run_index.get(r.run_date.as_str()).unwrap_or(&0);
             methods
                 .entry(&r.method)
                 .or_default()

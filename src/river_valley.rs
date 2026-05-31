@@ -36,8 +36,8 @@ fn l2_norm(v: &[f32]) -> f32 {
 /// `gradient`.
 #[cfg(feature = "river_valley")]
 pub fn subspace_ratios(gradient: &[f32], dominant_eigvecs: &[Vec<f32>]) -> (f32, f32) {
-    let g_norm = l2_norm(gradient);
-    if g_norm < 1e-12 || dominant_eigvecs.is_empty() {
+    let g_norm_sq = dot(gradient, gradient);
+    if g_norm_sq < 1e-24 || dominant_eigvecs.is_empty() {
         return (0.0, 1.0);
     }
 
@@ -50,7 +50,7 @@ pub fn subspace_ratios(gradient: &[f32], dominant_eigvecs: &[Vec<f32>]) -> (f32,
         })
         .sum();
 
-    let r_dom = (proj_norm_sq / (g_norm * g_norm)).sqrt();
+    let r_dom = (proj_norm_sq / g_norm_sq).sqrt();
     let r_dom_clamped = r_dom.min(1.0); // numerical safety
     let r_bulk = (1.0 - r_dom_clamped * r_dom_clamped).sqrt();
 
@@ -242,13 +242,12 @@ pub fn update_cosine_similarity(updates: &[Vec<f32>]) -> f32 {
     let mut total = 0.0f32;
     let mut count = 0usize;
 
+    let norms: Vec<f32> = updates.iter().map(|u| l2_norm(u)).collect();
     for i in 0..(updates.len() - 1) {
-        let na = l2_norm(&updates[i]);
-        let nb = l2_norm(&updates[i + 1]);
-        if na < 1e-12 || nb < 1e-12 {
+        if norms[i] < 1e-12 || norms[i + 1] < 1e-12 {
             continue;
         }
-        let cos = dot(&updates[i], &updates[i + 1]) / (na * nb);
+        let cos = dot(&updates[i], &updates[i + 1]) / (norms[i] * norms[i + 1]);
         total += cos;
         count += 1;
     }

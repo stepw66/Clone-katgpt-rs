@@ -218,7 +218,7 @@ pub fn corrupt_block_into(
     corrupted: &mut Vec<usize>,
     is_masked: &mut Vec<bool>,
     positions: &mut Vec<usize>,
-) {
+) -> usize {
     let len = tokens.len();
     let n_mask = ((len as f32 * mask_ratio).ceil() as usize).min(len);
 
@@ -240,6 +240,8 @@ pub fn corrupt_block_into(
         corrupted[pos] = mask_token;
         is_masked[pos] = true;
     }
+
+    n_mask
 }
 
 /// Corrupt a block of tokens by replacing some with the mask token.
@@ -256,7 +258,7 @@ pub fn corrupt_block(
     let mut corrupted = Vec::with_capacity(tokens.len());
     let mut is_masked = Vec::with_capacity(tokens.len());
     let mut positions = Vec::with_capacity(tokens.len());
-    corrupt_block_into(
+    let _n_mask = corrupt_block_into(
         tokens,
         mask_ratio,
         mask_token,
@@ -1348,7 +1350,7 @@ pub fn evaluate_accuracy(
     // OPT: pre-allocate bidirectional context to avoid per-sample heap allocation
     let mut bctx = BidirectionalContext::new(config);
     for tokens in test_data {
-        corrupt_block_into(
+        let _n_mask = corrupt_block_into(
             tokens,
             mask_ratio,
             config.mask_token,
@@ -1446,7 +1448,7 @@ pub fn train_mini_dllm(
 
         for &idx in &indices {
             let tokens = &train_data[idx];
-            corrupt_block_into(
+            let n_mask = corrupt_block_into(
                 tokens,
                 mask_ratio,
                 config.mask_token,
@@ -1457,7 +1459,7 @@ pub fn train_mini_dllm(
             );
 
             // Skip if nothing masked
-            if !is_masked_buf.iter().any(|&m| m) {
+            if n_mask == 0 {
                 continue;
             }
 
@@ -1549,7 +1551,7 @@ pub fn train_mini_dllm_adaptive(
             let block_idx = sample_counter % n_blocks;
             let mask_ratio = schedule.ratios()[block_idx];
 
-            corrupt_block_into(
+            let n_mask = corrupt_block_into(
                 tokens,
                 mask_ratio,
                 config.mask_token,
@@ -1560,7 +1562,7 @@ pub fn train_mini_dllm_adaptive(
             );
 
             // Skip if nothing masked
-            if !is_masked_buf.iter().any(|&m| m) {
+            if n_mask == 0 {
                 sample_counter += 1;
                 continue;
             }
@@ -1969,6 +1971,9 @@ pub fn forward_block_causal_with(
 pub trait DenoiseConstraint {
     /// Returns true if `token` is valid at `position` given `current_tokens`.
     fn is_valid(&self, position: usize, token: usize, current_tokens: &[usize]) -> bool;
+
+    /// Rebuild any internal state from the current tokens. Default is no-op.
+    fn rebuild(&mut self, _tokens: &[usize], _mask: usize) {}
 }
 
 /// No-op constraint that allows all tokens.
@@ -1981,18 +1986,45 @@ impl DenoiseConstraint for NoConstraint {
 }
 
 /// No-repeat constraint: tokens must be unique in the sequence.
-/// Uses branch-free `bool as usize` for the hot-path check instead of iterator scan.
-pub struct NoRepeatConstraint;
+/// Uses a precomputed `used` set for O(1) lookups instead of O(seq_len) scans.
+pub struct NoRepeatConstraint {
+    used: Vec<bool>,
+}
+
+impl Default for NoRepeatConstraint {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl NoRepeatConstraint {
+    pub fn new() -> Self {
+        Self { used: Vec::new() }
+    }
+
+    /// Rebuild the used-token set from current tokens.
+    pub fn rebuild(&mut self, tokens: &[usize], mask: usize) {
+        let max_token = tokens
+            .iter()
+            .copied()
+            .filter(|&t| t != mask)
+            .max()
+            .unwrap_or(0);
+        self.used.clear();
+        if self.used.len() <= max_token {
+            self.used.resize(max_token + 1, false);
+        }
+        for &t in tokens {
+            if t != mask && t < self.used.len() {
+                self.used[t] = true;
+            }
+        }
+    }
+}
 
 impl DenoiseConstraint for NoRepeatConstraint {
-    fn is_valid(&self, position: usize, token: usize, current_tokens: &[usize]) -> bool {
-        // Branch-free: count matches, valid only if the sole match is at our own position.
-        // Uses `bool as usize` to avoid branches in the inner loop.
-        let mut conflict = 0usize;
-        for (i, t) in current_tokens.iter().enumerate() {
-            conflict += ((*t == token) && (i != position)) as usize;
-        }
-        conflict == 0
+    fn is_valid(&self, _position: usize, token: usize, _current_tokens: &[usize]) -> bool {
+        !self.used.get(token).copied().unwrap_or(false)
     }
 }
 
@@ -2004,7 +2036,7 @@ pub fn denoise_loop(
     config: &Config,
     n_steps: usize,
     confidence_threshold: f32,
-    constraint: &dyn DenoiseConstraint,
+    constraint: &mut dyn DenoiseConstraint,
     _rng: &mut Rng,
 ) -> (Vec<usize>, usize) {
     let seq_len = target_tokens.len().min(config.block_size);
@@ -2016,11 +2048,15 @@ pub fn denoise_loop(
     // Initialize with mask tokens
     let mut tokens = vec![mask; seq_len];
     let mut converged_step = n_steps;
+    let mut remaining = seq_len;
 
     for step in 0..n_steps {
         let _ = forward_bidirectional_positions_into(weights, &tokens, config, &mut bctx);
         let mut any_changed = false;
         let vocab = config.vocab_size;
+
+        // Rebuild constraint used-token set once per step
+        constraint.rebuild(&tokens, mask);
 
         for p in 0..seq_len {
             if tokens[p] != mask {
@@ -2057,17 +2093,18 @@ pub fn denoise_loop(
             if best_prob >= confidence_threshold && best_token != mask {
                 tokens[p] = best_token;
                 any_changed = true;
+                remaining -= 1;
             }
         }
 
-        if !any_changed && tokens.iter().all(|&t| t != mask) {
+        if !any_changed && remaining == 0 {
             converged_step = step;
             break;
         }
     }
 
     // Check if all unmasked
-    if tokens.iter().all(|&t| t != mask) && converged_step == n_steps {
+    if remaining == 0 && converged_step == n_steps {
         converged_step = n_steps - 1;
     }
 
@@ -2516,8 +2553,15 @@ mod tests {
 
         // Test denoising on a pattern-consistent target [a, b, a, b]
         let target = vec![3, 7, 3, 7];
-        let (result, steps) =
-            denoise_loop(&weights, &target, &config, 10, 0.3, &NoConstraint, &mut rng);
+        let (result, steps) = denoise_loop(
+            &weights,
+            &target,
+            &config,
+            10,
+            0.3,
+            &mut NoConstraint,
+            &mut rng,
+        );
 
         // Should converge in ≤ 10 steps
         assert!(steps < 10, "Denoising didn't converge in 10 steps");
@@ -2554,18 +2598,19 @@ mod tests {
 
         for target in &test_targets {
             // Without constraint
-            let (result_nc, _) =
-                denoise_loop(&weights, target, &config, 10, 0.3, &NoConstraint, &mut rng);
-            // With no-repeat constraint
-            let (result_wc, _) = denoise_loop(
+            let (result_nc, _) = denoise_loop(
                 &weights,
                 target,
                 &config,
                 10,
                 0.3,
-                &NoRepeatConstraint,
+                &mut NoConstraint,
                 &mut rng,
             );
+            // With no-repeat constraint
+            let mut no_repeat = NoRepeatConstraint::new();
+            let (result_wc, _) =
+                denoise_loop(&weights, target, &config, 10, 0.3, &mut no_repeat, &mut rng);
 
             acc_no_constraint += denoising_accuracy(&result_nc, target);
             acc_with_constraint += denoising_accuracy(&result_wc, target);
@@ -2594,15 +2639,14 @@ mod tests {
 
     #[test]
     fn test_no_repeat_constraint() {
-        let constraint = NoRepeatConstraint;
+        let mut constraint = NoRepeatConstraint::new();
         let tokens = vec![1, 2, 3, 0]; // position 3 is "empty"/placeholder
+        constraint.rebuild(&tokens, 0); // treat 0 as mask
 
         // Token 1 should be invalid at position 3 (already at position 0)
         assert!(!constraint.is_valid(3, 1, &tokens));
         // Token 4 should be valid at position 3 (not in sequence)
         assert!(constraint.is_valid(3, 4, &tokens));
-        // Token 0 should be valid at position 3 (same position)
-        assert!(constraint.is_valid(3, 0, &tokens));
     }
 
     #[test]
@@ -2707,7 +2751,7 @@ mod replaid_tests {
             let mut step_losses: Vec<f32> = Vec::new();
             for &idx in &indices {
                 let tokens = &train_data[idx];
-                corrupt_block_into(
+                let n_mask = corrupt_block_into(
                     tokens,
                     fixed_mask_ratio,
                     config.mask_token,
@@ -2716,7 +2760,7 @@ mod replaid_tests {
                     &mut is_masked_buf,
                     &mut positions_buf,
                 );
-                if !is_masked_buf.iter().any(|&m| m) {
+                if n_mask == 0 {
                     continue;
                 }
                 let act = forward_save(&weights_fixed, &corrupted_buf, &config, &mut fwd_ctx);
@@ -2783,7 +2827,7 @@ mod replaid_tests {
                 let block_idx = sample_counter % n_blocks;
                 let mask_ratio = schedule2.ratios()[block_idx];
 
-                corrupt_block_into(
+                let n_mask = corrupt_block_into(
                     tokens,
                     mask_ratio,
                     config.mask_token,
@@ -2792,7 +2836,7 @@ mod replaid_tests {
                     &mut is_masked_buf2,
                     &mut positions_buf2,
                 );
-                if !is_masked_buf2.iter().any(|&m| m) {
+                if n_mask == 0 {
                     sample_counter += 1;
                     continue;
                 }
