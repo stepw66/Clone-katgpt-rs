@@ -814,10 +814,7 @@ pub fn speculative_step_with_configurator(
     // 2. Compute entropy and query configurator
     let entropy = marginals.first().map_or(0.0, |m| shannon_entropy(m));
     let entropy_bin = ConfiguratorBandit::entropy_bin(entropy);
-    let ctx = ConfiguratorContext {
-        domain: context.domain,
-        entropy_bin,
-    };
+    let ctx = ConfiguratorContext::new(context.domain, entropy_bin);
     let decision = configurator.select(ctx);
 
     match decision {

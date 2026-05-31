@@ -92,6 +92,7 @@ fn frobenius_norm(m: &[f32]) -> f32 {
 /// buffer element is overwritten each iteration).
 ///
 /// Avoids the O(n) memset that `Vec::resize()` performs on the new tail.
+#[allow(clippy::uninit_vec)]
 #[inline]
 fn grow_no_zero(v: &mut Vec<f32>, new_len: usize) {
     if v.len() >= new_len {

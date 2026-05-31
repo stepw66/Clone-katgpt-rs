@@ -360,6 +360,36 @@ pub struct ConfiguratorContext {
     pub domain: usize,
     /// Coarse entropy bin: `floor(entropy * 10.0)`, clamped to 0..9.
     pub entropy_bin: usize,
+    /// Coarse desperation bin: `floor(desperation * 10.0)`, clamped to 0..9.
+    /// Plan 162 T11: emotion vector desperation score as additional context.
+    /// 0 = not desperate, 9 = highly desperate.
+    pub desperation_bin: usize,
+}
+
+#[cfg(feature = "sr2am_configurator")]
+impl ConfiguratorContext {
+    /// Create context without desperation information (legacy compatibility).
+    ///
+    /// Sets `desperation_bin` to 0 (not desperate). Use `with_desperation()`
+    /// when emotion vector data is available.
+    pub fn new(domain: usize, entropy_bin: usize) -> Self {
+        Self {
+            domain,
+            entropy_bin,
+            desperation_bin: 0,
+        }
+    }
+
+    /// Set the desperation bin from a raw desperation score.
+    ///
+    /// `floor(desperation * 10.0)`, clamped to 0..9.
+    pub fn with_desperation(mut self, desperation: f32) -> Self {
+        self.desperation_bin = (desperation * 10.0).floor() as usize;
+        if self.desperation_bin > 9 {
+            self.desperation_bin = 9;
+        }
+        self
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -464,6 +494,10 @@ pub struct Config {
     /// 1.0 = full correction. Only meaningful when `parallax_attn` feature is enabled
     /// and R projection weights are loaded.
     pub parallax_gate_scale: f32,
+    /// Desperation score threshold for emotion-aware session flagging (Plan 162 T12).
+    /// When the mean desperation projection exceeds this value, `is_desperate_session()` returns true.
+    /// Default: 0.5 (moderate desperation). Range: [0.0, 1.0].
+    pub emotion_desperation_threshold: f32,
 
     // --- Vec (pointer-sized, 8-byte aligned) ---
     pub lora_targets: Vec<String>,
@@ -552,6 +586,7 @@ impl Config {
             hybrid_pattern: HybridPattern::Uniform,
             gated_attn: false,
             parallax_gate_scale: 0.0,
+            emotion_desperation_threshold: 0.5,
             parallax_zero_init: true,
         }
     }
@@ -653,6 +688,7 @@ impl Config {
             hybrid_pattern: HybridPattern::Uniform,
             gated_attn: false,
             parallax_gate_scale: 0.0,
+            emotion_desperation_threshold: 0.5,
             parallax_zero_init: true,
         }
     }
@@ -726,6 +762,7 @@ impl Config {
             hybrid_pattern: HybridPattern::Uniform,
             gated_attn: false,
             parallax_gate_scale: 0.0,
+            emotion_desperation_threshold: 0.5,
             parallax_zero_init: true,
         }
     }
@@ -789,6 +826,7 @@ impl Config {
             hybrid_pattern: HybridPattern::Uniform,
             gated_attn: false,
             parallax_gate_scale: 0.0,
+            emotion_desperation_threshold: 0.5,
             parallax_zero_init: true,
         }
     }
@@ -853,6 +891,7 @@ impl Config {
             hybrid_pattern: HybridPattern::Uniform,
             gated_attn: false,
             parallax_gate_scale: 0.0,
+            emotion_desperation_threshold: 0.5,
             parallax_zero_init: true,
         }
     }
@@ -915,6 +954,7 @@ impl Config {
             hybrid_pattern: HybridPattern::Uniform,
             gated_attn: false,
             parallax_gate_scale: 0.0,
+            emotion_desperation_threshold: 0.5,
             parallax_zero_init: true,
         }
     }
@@ -979,6 +1019,7 @@ impl Config {
             hybrid_pattern: HybridPattern::Uniform,
             gated_attn: false,
             parallax_gate_scale: 0.0,
+            emotion_desperation_threshold: 0.5,
             parallax_zero_init: true,
         }
     }
@@ -1042,6 +1083,7 @@ impl Config {
             hybrid_pattern: HybridPattern::Uniform,
             gated_attn: false,
             parallax_gate_scale: 0.0,
+            emotion_desperation_threshold: 0.5,
             parallax_zero_init: true,
         }
     }
@@ -1107,6 +1149,7 @@ impl Config {
             hybrid_pattern: HybridPattern::Uniform,
             gated_attn: false,
             parallax_gate_scale: 0.0,
+            emotion_desperation_threshold: 0.5,
             parallax_zero_init: true,
         }
     }

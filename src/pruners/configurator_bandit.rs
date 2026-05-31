@@ -140,8 +140,8 @@ impl ContextStats {
 /// normalizes token usage against budget.
 pub struct ConfiguratorBandit {
     /// Per-context Q-values and visit counts.
-    /// Key: `(domain, entropy_bin)`, Value: stats for 3 arms.
-    stats: HashMap<(usize, usize), ContextStats>,
+    /// Key: `(domain, entropy_bin, desperation_bin)`, Value: stats for 3 arms.
+    stats: HashMap<(usize, usize, usize), ContextStats>,
 }
 
 impl ConfiguratorBandit {
@@ -154,7 +154,7 @@ impl ConfiguratorBandit {
 
     /// Get or create stats for a given context.
     fn get_or_create_stats(&mut self, context: ConfiguratorContext) -> &mut ContextStats {
-        let key = (context.domain, context.entropy_bin);
+        let key = (context.domain, context.entropy_bin, context.desperation_bin);
         self.stats.entry(key).or_insert_with(ContextStats::new)
     }
 
@@ -246,7 +246,7 @@ impl ConfiguratorBandit {
     /// Get Q-value for a specific context and decision.
     /// Returns `None` if context has never been visited.
     pub fn q_value(&self, context: ConfiguratorContext, decision: PlanningDecision) -> Option<f32> {
-        let key = (context.domain, context.entropy_bin);
+        let key = (context.domain, context.entropy_bin, context.desperation_bin);
         self.stats
             .get(&key)
             .map(|s| s.q_values[arm_index(decision)])
@@ -255,7 +255,7 @@ impl ConfiguratorBandit {
     /// Get visit count for a specific context and decision.
     /// Returns `0` if context has never been visited.
     pub fn visit_count(&self, context: ConfiguratorContext, decision: PlanningDecision) -> usize {
-        let key = (context.domain, context.entropy_bin);
+        let key = (context.domain, context.entropy_bin, context.desperation_bin);
         match self.stats.get(&key) {
             Some(s) => s.visits[arm_index(decision)],
             None => 0,
@@ -265,7 +265,7 @@ impl ConfiguratorBandit {
     /// Get total pulls for a specific context.
     /// Returns `0` if context has never been visited.
     pub fn total_pulls(&self, context: ConfiguratorContext) -> usize {
-        let key = (context.domain, context.entropy_bin);
+        let key = (context.domain, context.entropy_bin, context.desperation_bin);
         match self.stats.get(&key) {
             Some(s) => s.total_pulls,
             None => 0,
@@ -417,10 +417,7 @@ mod tests {
     #[test]
     fn test_select_explores_all_arms_before_exploiting() {
         let mut bandit = ConfiguratorBandit::new();
-        let ctx = ConfiguratorContext {
-            domain: 0,
-            entropy_bin: 5,
-        };
+        let ctx = ConfiguratorContext::new(0, 5);
 
         // First 3 selects should visit each arm at least once (UCB1 gives f32::MAX to unvisited)
         let mut seen = [false; NUM_ARMS];
@@ -438,10 +435,7 @@ mod tests {
     #[test]
     fn test_select_converges_to_best_arm() {
         let mut bandit = ConfiguratorBandit::new();
-        let ctx = ConfiguratorContext {
-            domain: 0,
-            entropy_bin: 5,
-        };
+        let ctx = ConfiguratorContext::new(0, 5);
 
         // PlanSkip (arm 2) gets consistently high rewards
         // Others get low rewards
@@ -467,14 +461,8 @@ mod tests {
     #[test]
     fn test_context_isolation() {
         let mut bandit = ConfiguratorBandit::new();
-        let ctx_low = ConfiguratorContext {
-            domain: 0,
-            entropy_bin: 1,
-        };
-        let ctx_high = ConfiguratorContext {
-            domain: 0,
-            entropy_bin: 8,
-        };
+        let ctx_low = ConfiguratorContext::new(0, 1);
+        let ctx_high = ConfiguratorContext::new(0, 8);
 
         // Train low entropy context to prefer PlanSkip
         for _ in 0..50 {
@@ -526,10 +514,7 @@ mod tests {
     #[test]
     fn test_configurator_bandit_selects_plan_skip_at_low_entropy() {
         let mut bandit = ConfiguratorBandit::new();
-        let ctx = ConfiguratorContext {
-            domain: 0,
-            entropy_bin: 0,
-        }; // Very low entropy
+        let ctx = ConfiguratorContext::new(0, 0); // Very low entropy
 
         // Train: PlanSkip is best at low entropy
         for _ in 0..200 {
@@ -556,10 +541,7 @@ mod tests {
     #[test]
     fn test_configurator_bandit_selects_plan_new_at_high_entropy() {
         let mut bandit = ConfiguratorBandit::new();
-        let ctx = ConfiguratorContext {
-            domain: 0,
-            entropy_bin: 9,
-        }; // High entropy
+        let ctx = ConfiguratorContext::new(0, 9); // High entropy
 
         // Train: PlanNew is best at high entropy
         for _ in 0..200 {
@@ -586,10 +568,7 @@ mod tests {
     #[test]
     fn test_q_value_update_incremental_mean() {
         let mut bandit = ConfiguratorBandit::new();
-        let ctx = ConfiguratorContext {
-            domain: 0,
-            entropy_bin: 5,
-        };
+        let ctx = ConfiguratorContext::new(0, 5);
 
         bandit.update(ctx, PlanningDecision::PlanSkip, 1.0);
         assert!((bandit.q_value(ctx, PlanningDecision::PlanSkip).unwrap() - 1.0).abs() < 1e-6);
@@ -606,10 +585,7 @@ mod tests {
     #[test]
     fn test_unvisited_context_returns_none() {
         let bandit = ConfiguratorBandit::new();
-        let ctx = ConfiguratorContext {
-            domain: 99,
-            entropy_bin: 5,
-        };
+        let ctx = ConfiguratorContext::new(99, 5);
         assert_eq!(bandit.q_value(ctx, PlanningDecision::PlanNew), None);
         assert_eq!(bandit.visit_count(ctx, PlanningDecision::PlanNew), 0);
         assert_eq!(bandit.total_pulls(ctx), 0);
@@ -620,17 +596,11 @@ mod tests {
         let mut bandit = ConfiguratorBandit::new();
         assert_eq!(bandit.num_contexts(), 0);
 
-        let ctx1 = ConfiguratorContext {
-            domain: 0,
-            entropy_bin: 3,
-        };
+        let ctx1 = ConfiguratorContext::new(0, 3);
         bandit.update(ctx1, PlanningDecision::PlanNew, 0.5);
         assert_eq!(bandit.num_contexts(), 1);
 
-        let ctx2 = ConfiguratorContext {
-            domain: 1,
-            entropy_bin: 7,
-        };
+        let ctx2 = ConfiguratorContext::new(1, 7);
         bandit.update(ctx2, PlanningDecision::PlanSkip, 0.8);
         assert_eq!(bandit.num_contexts(), 2);
 

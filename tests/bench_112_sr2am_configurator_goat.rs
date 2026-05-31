@@ -49,10 +49,7 @@ fn proof_1_arm_selection_based_on_context() {
     for round in 0..ROUNDS {
         let entropy = (round as f32 / ROUNDS as f32).min(1.0);
         let entropy_bin = ConfiguratorBandit::entropy_bin(entropy);
-        let ctx = ConfiguratorContext {
-            domain: 0,
-            entropy_bin,
-        };
+        let ctx = ConfiguratorContext::new(0, entropy_bin);
 
         let decision = bandit.select(ctx);
         let (quality, cost) = simulate_turn(decision, entropy);
@@ -77,10 +74,7 @@ fn proof_1_arm_selection_based_on_context() {
 #[test]
 fn proof_2_low_entropy_prefers_skip() {
     let mut bandit = ConfiguratorBandit::new();
-    let ctx_low = ConfiguratorContext {
-        domain: 0,
-        entropy_bin: 0,
-    }; // entropy ≈ 0
+    let ctx_low = ConfiguratorContext::new(0, 0); // entropy ≈ 0
 
     // Train: PlanSkip is best at low entropy
     for _ in 0..500 {
@@ -115,10 +109,7 @@ fn proof_2_low_entropy_prefers_skip() {
 #[test]
 fn proof_3_high_entropy_prefers_new() {
     let mut bandit = ConfiguratorBandit::new();
-    let ctx_high = ConfiguratorContext {
-        domain: 0,
-        entropy_bin: 9,
-    }; // entropy ≈ 1.0
+    let ctx_high = ConfiguratorContext::new(0, 9); // entropy ≈ 1.0
 
     // Train: PlanNew is best at high entropy
     for _ in 0..500 {
@@ -186,14 +177,8 @@ fn proof_4_reward_signal_tradeoff() {
 #[test]
 fn proof_5_context_isolation() {
     let mut bandit = ConfiguratorBandit::new();
-    let ctx_game = ConfiguratorContext {
-        domain: 0,
-        entropy_bin: 5,
-    };
-    let ctx_code = ConfiguratorContext {
-        domain: 1,
-        entropy_bin: 5,
-    };
+    let ctx_game = ConfiguratorContext::new(0, 5);
+    let ctx_code = ConfiguratorContext::new(1, 5);
 
     // Train game domain: PlanSkip is best
     for _ in 0..200 {
@@ -264,10 +249,7 @@ fn proof_6_plan_skip_savings() {
             _ => 0.5,
         };
         let entropy_bin = ConfiguratorBandit::entropy_bin(entropy);
-        let ctx = ConfiguratorContext {
-            domain: 0,
-            entropy_bin,
-        };
+        let ctx = ConfiguratorContext::new(0, entropy_bin);
 
         let decision = bandit.select(ctx);
         match decision {

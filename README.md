@@ -1759,6 +1759,59 @@ tests/
 
 📖 See [`.research/093_Boosting_Weak_Reasoning_Committee_Search.md`](.research/093_Boosting_Weak_Reasoning_Committee_Search.md) for the paper distillation.
 
+## 🎭 Emotion Vector Inference Control (Plan 162)
+
+Modelless emotion reading from mid-layer activations during decode — zero extra forward pass, O(d) dot product per step. Based on [Anthropic Transformer Circuits Thread 2026](https://transformer-circuits.pub/) finding that emotion vectors causally drive behavior (desperation → 14× reward hacking increase).
+
+| Signal | What It Measures | Integration |
+|--------|-----------------|-------------|
+| **Valence** (PC1) | Happy/calm vs desperate/angry | `ReviewMetrics.emotion_profile_summary().valence` |
+| **Arousal** (PC2) | High vs low activation | `ReviewMetrics.emotion_profile_summary().arousal` |
+| **Desperation** | Reward-hacking-prone regimes | `ReviewMetrics.is_desperate_session(0.3)` |
+| **Calm** | Stable, confident regimes | `ReviewMetrics.emotion_profile_summary().calm` |
+
+### GOAT Proof Results
+
+Run: `cargo test --features bandit --test bench_emotion_vector_goat -- --nocapture`
+
+| Proof | Description | Verdict |
+|-------|-------------|--------|
+| G1 | Throughput: 4×O(d) dot products < 20% overhead at d=64 debug, <0.1% at production scale | ✅ |
+| G2 | Binary size: EmotionReading=16B, EmotionProfileSummary=40B, zero heap alloc | ✅ |
+| G3 | Information gain: desperation vs entropy r=-0.45, R²=0.20, 80% unexplained variance | ✅ |
+| G4 | Desperation predicts failure: r=0.99, `is_desperate_session()` correctly flags | ✅ |
+
+### Key API
+
+```rust,ignore
+use katgpt_rs::pruners::emotion_vector::EmotionDirections;
+use katgpt_rs::pruners::ReviewMetrics;
+
+// Load calibrated directions (once at model init)
+let dirs = EmotionDirections::zeros(d_model);
+let reading = dirs.read_emotions(&mid_layer_activation);
+
+// Record into review metrics (thread-safe, atomic)
+metrics.record_emotion(reading.valence, reading.arousal, reading.desperation, reading.calm);
+
+// Check desperation flag
+if metrics.is_desperate_session(0.3) {
+    // Trigger cautionary planning via SR²AM configurator
+}
+
+// Get full profile summary
+let profile = metrics.emotion_profile_summary();
+println!("valence={:.3} arousal={:.3} desperation={:.3} calm={:.3}",
+    profile.valence, profile.arousal, profile.desperation, profile.calm);
+```
+
+### SR²AM Integration
+
+`ConfiguratorContext` now includes `desperation_bin` (Plan 162 T11), allowing the SR²AM configurator bandit to learn different planning strategies for desperate vs calm sessions.
+
+**Default-on** — no feature gate needed. The `Config.emotion_desperation_threshold` defaults to `0.5`.
+
+
 ## 🧮 Deep Manifold: Fixed-Point Boundary Conditions (Research 51)
 
 Mathematical foundation from [Deep Manifold Part 2](https://arxiv.org/pdf/2512.06563) explaining WHY our three-layer trait stack works:

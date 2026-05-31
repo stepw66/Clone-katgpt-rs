@@ -534,10 +534,7 @@ impl BomberPlayer for Sr2amPlayer {
         // 3. Compute Shannon entropy → bin context for ConfiguratorBandit
         let entropy = shannon_entropy(&query_scores);
         let entropy_bin = ConfiguratorBandit::entropy_bin(entropy);
-        let context = ConfiguratorContext {
-            domain: SR2AM_DOMAIN,
-            entropy_bin,
-        };
+        let context = ConfiguratorContext::new(SR2AM_DOMAIN, entropy_bin);
 
         // 4. Query ConfiguratorBandit → PlanningDecision
         let decision = self.configurator.select(context);
