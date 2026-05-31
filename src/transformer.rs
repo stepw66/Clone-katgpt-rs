@@ -185,8 +185,8 @@ impl TransformerWeights {
             // (Safe: xr2 is saved before rmsnorm, so residual is pre-norm)
             let mlp_gamma = &layer.mlp_norm_gamma;
             for row in 0..config.mlp_hidden {
-                for col in 0..n {
-                    layer.mlp_w1[row * n + col] *= mlp_gamma[col];
+                for (col, g) in mlp_gamma.iter().enumerate() {
+                    layer.mlp_w1[row * n + col] *= g;
                 }
             }
             // Set mlp_norm_gamma to identity
@@ -7059,7 +7059,7 @@ mod tests {
         let config = Config::micro();
         let mut rng = Rng::new(42);
         let mut weights = TransformerWeights::new(&config, &mut rng);
-        drop(rng);
+        let _ = rng;
 
         let n = config.n_embd;
         let kvd = types::kv_dim(&config);
