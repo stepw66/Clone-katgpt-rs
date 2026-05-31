@@ -51,11 +51,13 @@ fn transpose(src: &[f32], rows: usize, cols: usize, dst: &mut [f32]) {
 #[inline]
 fn matmul_xtx(x: &[f32], m: usize, n: usize, a: &mut [f32]) {
     for i in 0..m {
+        let row_i = &x[i * n..(i + 1) * n];
         // Diagonal
-        a[i * m + i] = crate::simd::simd_dot_f32(&x[i * n..(i + 1) * n], &x[i * n..(i + 1) * n], n);
+        a[i * m + i] = crate::simd::simd_dot_f32(row_i, row_i, n);
         // Upper triangle + mirror
         for j in (i + 1)..m {
-            let dot = crate::simd::simd_dot_f32(&x[i * n..(i + 1) * n], &x[j * n..(j + 1) * n], n);
+            let row_j = &x[j * n..(j + 1) * n];
+            let dot = crate::simd::simd_dot_f32(row_i, row_j, n);
             a[i * m + j] = dot;
             a[j * m + i] = dot;
         }
@@ -73,8 +75,9 @@ fn matmul_ax(a: &[f32], x: &[f32], m: usize, n: usize, r: &mut [f32], xt_buf: &m
     // r[i,j] = dot(a_row_i, xt_col_j) = dot(&a[i*m..], &xt[j*m..], m)
     for i in 0..m {
         let a_row = &a[i * m..(i + 1) * m];
+        let r_row = &mut r[i * n..(i + 1) * n];
         for j in 0..n {
-            r[i * n + j] = crate::simd::simd_dot_f32(a_row, &xt_buf[j * m..(j + 1) * m], m);
+            r_row[j] = crate::simd::simd_dot_f32(a_row, &xt_buf[j * m..(j + 1) * m], m);
         }
     }
 }
@@ -303,6 +306,7 @@ pub fn newton_schulz5_into(
 }
 
 /// Core Newton-Schulz with scratch reuse.
+#[inline]
 fn newton_schulz5_square_into(
     g: &[f32],
     m: usize,
@@ -376,12 +380,12 @@ fn newton_schulz5_square_into_raw(
             let a_row_i = &a_mat[i * m..(i + 1) * m];
             // Diagonal
             let a2_ii = crate::simd::simd_dot_f32(a_row_i, a_row_i, m);
-            b_mat[i * m + i] = B * a_mat[i * m + i] + C * a2_ii;
+            b_mat[i * m + i] = B * a_row_i[i] + C * a2_ii;
             // Upper triangle + mirror
             for j in (i + 1)..m {
                 let a_col_j = &a_mat[j * m..(j + 1) * m];
                 let a2_ij = crate::simd::simd_dot_f32(a_row_i, a_col_j, m);
-                let val = B * a_mat[i * m + j] + C * a2_ij;
+                let val = B * a_row_i[j] + C * a2_ij;
                 b_mat[i * m + j] = val;
                 b_mat[j * m + i] = val;
             }

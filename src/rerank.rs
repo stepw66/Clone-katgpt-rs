@@ -204,6 +204,7 @@ pub fn mean_cosine_similarity(a: &[f32], b: &[f32], la: usize, lb: usize, dim: u
 
 /// Cosine similarity between mean-pooled query and mean-pooled document.
 /// Uses caller-provided scratch buffers to avoid per-call allocation.
+#[inline]
 fn cosine_rerank_score_into(
     query: &[f32],
     lq: usize,

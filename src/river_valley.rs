@@ -178,13 +178,9 @@ fn jacobi_eigenvalues_into(mat: &[f32], n: usize, out: &mut [f32], scratch: &mut
                 let app = a[p * n + p];
                 let aqq = a[q * n + q];
 
-                // Rotation angle
+                // Rotation angle (branch-free via copysign)
                 let tau = (aqq - app) / (2.0 * apq);
-                let t = if tau >= 0.0 {
-                    1.0 / (tau + (1.0 + tau * tau).sqrt())
-                } else {
-                    -1.0 / (-tau + (1.0 + tau * tau).sqrt())
-                };
+                let t = 1.0f32.copysign(tau) / (tau.abs() + (1.0 + tau * tau).sqrt());
 
                 let c = 1.0 / (1.0 + t * t).sqrt();
                 let s = t * c;

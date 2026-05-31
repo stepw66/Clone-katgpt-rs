@@ -148,6 +148,7 @@ impl EgaGate {
     /// Zero-alloc variant of [`energy_scores`].
     ///
     /// Writes energy scores into `out[..seq_len]`.
+    #[inline]
     pub fn energy_scores_into(&self, x: &[f32], seq_len: usize, dim: usize, out: &mut [f32]) {
         assert_eq!(x.len(), seq_len * dim, "x must have seq_len × dim elements");
         assert_eq!(dim, self.w_proj.len(), "dim must match w_proj length");
@@ -187,6 +188,7 @@ impl EgaGate {
     /// Zero-alloc variant of [`gate_attention`] that reuses a pre-allocated gate buffer.
     ///
     /// Pass a `gate_buf` of length `>= seq_len` to avoid per-call `vec![0.0; seq_len]` allocation.
+    #[inline]
     pub fn gate_attention_into(
         &self,
         attn_weights: &mut [f32],

@@ -33,6 +33,7 @@ use katgpt_core::types::kv_dim;
 /// - 12 layers → (4, 7)  (center ≈ 5.76)
 /// - 24 layers → (10, 13) (center ≈ 11.52)
 /// - 6 layers → (1, 4)   (center ≈ 2.88)
+#[inline]
 pub fn default_loop_window(n_layers: usize) -> (usize, usize) {
     if n_layers <= 4 {
         return (0, n_layers.saturating_sub(1));
@@ -91,6 +92,7 @@ pub fn anchor_blend(x: &mut [f32], anchor: &[f32], beta: f32) {
 ///
 /// For each layer in `layers`, records `key.len()` (which equals `block_size × kv_dim`).
 /// The snapshot can be restored via `restore_cache_lengths`.
+#[inline]
 pub fn snapshot_cache_lengths(
     cache: &MultiLayerKVCache,
     layers: std::ops::Range<usize>,
@@ -111,6 +113,7 @@ pub fn snapshot_cache_lengths(
 /// Zeros out entries beyond the snapshot length for each layer in `layers`.
 /// This effectively restores the cache to the state it was in when the snapshot was taken
 /// (assuming no entries were written beyond the snapshot boundary).
+#[inline]
 pub fn restore_cache_lengths(
     cache: &mut MultiLayerKVCache,
     layers: std::ops::Range<usize>,
@@ -138,6 +141,7 @@ pub fn restore_cache_lengths(
 ///
 /// Uses the `fill_pos` tracker on MultiLayerKVCache for O(1) per layer
 /// instead of scanning all positions for non-zero entries.
+#[inline]
 pub fn snapshot_cache_positions(
     cache: &MultiLayerKVCache,
     layers: std::ops::Range<usize>,
@@ -150,6 +154,7 @@ pub fn snapshot_cache_positions(
 }
 
 /// Restores KV cache to a snapshot of positions, zeroing beyond.
+#[inline]
 pub fn restore_cache_positions(
     cache: &mut MultiLayerKVCache,
     layers: std::ops::Range<usize>,

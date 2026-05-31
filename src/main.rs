@@ -198,12 +198,10 @@ fn main() {
         ),
     ];
 
+    let mut cat_results = Vec::with_capacity(results.len());
     for (cat, suffix, title, x_label) in &categories {
-        let cat_results: Vec<_> = results
-            .iter()
-            .filter(|r| r.category == *cat)
-            .cloned()
-            .collect();
+        cat_results.clear();
+        cat_results.extend(results.iter().filter(|r| r.category == *cat).cloned());
         if cat_results.is_empty() {
             continue;
         }
@@ -289,9 +287,10 @@ fn percepta_benchmark() {
 
         // Build convex parabolic key distribution (simulates execution trace)
         let mid = size as f32 / 2.0;
+        let scale = mid * 0.02;
         for i in 0..size {
             let x = i as f32;
-            let y = -((x - mid) / (mid * 0.02)).powi(2);
+            let y = -((x - mid) / scale).powi(2);
             cache.append(percepta::Vec2::new(x, y), i);
         }
 
@@ -366,12 +365,13 @@ fn percepta_cht_benchmark() {
 
     for &size in &trace_sizes {
         let mid = size as f32 / 2.0;
+        let scale = mid * 0.02;
 
-        // Build parabolic trace: y = -((x - mid) / (mid * 0.02))^2
+        // Build parabolic trace: y = -((x - mid) / scale)^2
         let points: Vec<(f32, f32)> = (0..size)
             .map(|i| {
                 let x = i as f32;
-                let y = -((x - mid) / (mid * 0.02)).powi(2);
+                let y = -((x - mid) / scale).powi(2);
                 (x, y)
             })
             .collect();

@@ -464,6 +464,7 @@ fn forward_bidirectional_positions_into(
 
 /// Safe bidirectional attention for one query position.
 /// Returns (attn_output[n_embd], attn_weights[n_head * seq_len]).
+#[inline]
 fn attention_forward_safe_into(
     q: &[f32],
     k_all: &[f32],
@@ -1272,6 +1273,7 @@ fn backward(
 }
 
 /// SGD update: w -= lr * grad
+#[inline]
 fn sgd_update(weights: &mut TransformerWeights, grads: &TrainingGradients, lr: f32) {
     let layer = &mut weights.layers[0];
     // SIMD-fused: w[i] = 1.0*w[i] + (-lr)*g[i] = w[i] - lr*g[i]
@@ -1289,6 +1291,7 @@ fn sgd_update(weights: &mut TransformerWeights, grads: &TrainingGradients, lr: f
 
 /// Compute cross-entropy loss on masked positions.
 /// Uses pre-allocated scratch buffer from `bctx.loss_exp_buf` to avoid per-call allocation.
+#[inline]
 fn masked_loss_into(
     logits: &[f32],
     targets: &[usize],
@@ -2050,10 +2053,11 @@ pub fn denoise_loop(
     let mut converged_step = n_steps;
     let mut remaining = seq_len;
 
+    let vocab = config.vocab_size;
+
     for step in 0..n_steps {
         let _ = forward_bidirectional_positions_into(weights, &tokens, config, &mut bctx);
         let mut any_changed = false;
-        let vocab = config.vocab_size;
 
         // Rebuild constraint used-token set once per step
         constraint.rebuild(&tokens, mask);
