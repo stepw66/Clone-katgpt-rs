@@ -24,6 +24,8 @@ pub mod hla;
 pub mod hybrid_oct_pq;
 #[cfg(feature = "iso_quant")]
 pub mod iso_quant;
+#[cfg(feature = "kog_cpu_fusion")]
+pub mod mbu;
 #[cfg(feature = "newton_schulz")]
 pub mod newton_schulz;
 #[cfg(feature = "octopus")]
