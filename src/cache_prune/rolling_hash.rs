@@ -112,6 +112,7 @@ impl RollingHash {
 // ---------------------------------------------------------------------------
 
 /// Multiply followed by Mersenne reduction.
+#[inline]
 fn mersenne_mul(a: u64, b: u64, m: u64) -> u64 {
     // Fast Mersenne reduction for m = 2^61 - 1:
     //   a * b mod (2^61 - 1) = lo + hi, then reduce once if >= m.
@@ -124,12 +125,14 @@ fn mersenne_mul(a: u64, b: u64, m: u64) -> u64 {
 }
 
 /// Modular addition.
+#[inline]
 fn mersenne_add(a: u64, b: u64, m: u64) -> u64 {
     let sum = a + b;
     if sum >= m { sum - m } else { sum }
 }
 
 /// Modular subtraction.
+#[inline]
 fn mersenne_sub(a: u64, b: u64, m: u64) -> u64 {
     if a >= b { a - b } else { m - b + a }
 }
@@ -157,6 +160,8 @@ pub struct KvSegmentPool {
     segments: Vec<CachedSegment>,
     /// prefix rolling hash → indices into `segments`.
     prefix_index: HashMap<u64, Vec<usize>>,
+    /// Pre-computed segment-length index (avoids per-query HashMap allocation).
+    by_len: HashMap<usize, Vec<usize>>,
 }
 
 /// Result of a segment match query.
@@ -180,6 +185,7 @@ impl KvSegmentPool {
         Self {
             segments: Vec::new(),
             prefix_index: HashMap::new(),
+            by_len: HashMap::new(),
         }
     }
 
@@ -192,14 +198,15 @@ impl KvSegmentPool {
         let prefixes = roller.prefix_hashes(tokens);
         let prefix_hash = roller.substring_hash(&prefixes, 0, prefix_len);
 
-        // blake3 of the full token sequence — hash the little-endian u32 bytes.
-        let mut hasher = blake3::Hasher::new();
+        // blake3 of the full token sequence — batch into contiguous byte buffer.
+        let mut buf = Vec::with_capacity(tokens.len() * 4);
         for &t in tokens {
-            hasher.update(&t.to_le_bytes());
+            buf.extend_from_slice(&t.to_le_bytes());
         }
-        let full_hash: [u8; 32] = hasher.finalize().into();
+        let full_hash: [u8; 32] = blake3::hash(&buf).into();
 
         let idx = self.segments.len();
+        let seg_len = tokens.len();
         self.segments.push(CachedSegment {
             token_hashes: tokens.to_vec(),
             prefix_hash,
@@ -209,6 +216,7 @@ impl KvSegmentPool {
         });
 
         self.prefix_index.entry(prefix_hash).or_default().push(idx);
+        self.by_len.entry(seg_len).or_default().push(idx);
     }
 
     /// Two-phase match: prefix-filter via rolling hash, then blake3
@@ -222,20 +230,18 @@ impl KvSegmentPool {
         let n = request_tokens.len();
         let mut results = Vec::with_capacity(self.segments.len());
 
-        // Group segments by length so we can reuse the sliding logic per
-        // length class.
-        let mut by_len: HashMap<usize, Vec<usize>> = HashMap::new();
-        for (i, seg) in self.segments.iter().enumerate() {
-            by_len.entry(seg.token_hashes.len()).or_default().push(i);
-        }
+        // Pre-allocate scratch buffer for blake3 hashing (reused across iterations).
+        let max_seg_bytes = self.segments.iter().map(|s| s.token_hashes.len() * 4).max().unwrap_or(0);
+        let mut hash_buf = Vec::with_capacity(max_seg_bytes);
 
-        for seg_len in by_len.keys() {
-            if *seg_len == 0 || *seg_len > n {
+        // Use pre-computed length index instead of rebuilding per query.
+        for (&seg_len, _indices) in &self.by_len {
+            if seg_len == 0 || seg_len > n {
                 continue;
             }
 
             // How many tokens to use for the prefix filter.
-            let prefix_len = PREFIX_WINDOW.min(*seg_len);
+            let prefix_len = PREFIX_WINDOW.min(seg_len);
 
             // Slide across the request tokens.
             for pos in 0..=(n - seg_len) {
@@ -243,18 +249,19 @@ impl KvSegmentPool {
                     roller.substring_hash(&request_prefixes, pos, pos + prefix_len);
 
                 if let Some(candidates) = self.prefix_index.get(&req_prefix_hash) {
-                    // Phase 2: blake3 verification.
+                    // Phase 2: blake3 verification — batch into contiguous bytes.
                     let window = &request_tokens[pos..pos + seg_len];
-                    let mut hasher = blake3::Hasher::new();
+                    hash_buf.clear();
+                    hash_buf.reserve(seg_len * 4);
                     for &t in window {
-                        hasher.update(&t.to_le_bytes());
+                        hash_buf.extend_from_slice(&t.to_le_bytes());
                     }
-                    let window_hash: [u8; 32] = hasher.finalize().into();
+                    let window_hash: [u8; 32] = blake3::hash(&hash_buf).into();
 
                     for &seg_idx in candidates {
                         // Only compare against segments of the right length.
                         let seg = &self.segments[seg_idx];
-                        if seg.token_hashes.len() != *seg_len {
+                        if seg.token_hashes.len() != seg_len {
                             continue;
                         }
                         let verified = seg.full_hash == window_hash;

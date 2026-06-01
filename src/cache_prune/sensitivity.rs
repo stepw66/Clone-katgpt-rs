@@ -20,9 +20,17 @@ pub trait SensitivityDetector: Send + Sync {
 }
 
 /// Default: strict masking (everything is sensitive).
+///
+/// Note: [`detect`](SensitivityDetector::detect) allocates a new `Vec` on each call.
+/// Production callers that need zero-alloc behaviour should pre-allocate a buffer
+/// and reuse it across calls.
 pub struct StrictDetector;
 
 /// Default: nothing is sensitive (open sharing).
+///
+/// Note: [`detect`](SensitivityDetector::detect) allocates a new `Vec` on each call.
+/// Production callers that need zero-alloc behaviour should pre-allocate a buffer
+/// and reuse it across calls.
 pub struct OpenDetector;
 
 impl SensitivityDetector for StrictDetector {

@@ -17,6 +17,9 @@
 /// Preprocesses an n×n attention matrix in-place in O(n²) time.
 /// After preprocessing, any rectangular region sum is O(1).
 pub struct SummedAreaTable<'a> {
+    // TODO(perf): Switch to a flat `&mut [f32]` layout (row-major) for better
+    // cache locality. The current `&mut [Vec<f32>]` (Vec of Vecs) causes
+    // pointer-chasing on each row access.
     data: &'a mut [Vec<f32>], // n×n, modified in-place
     n: usize,
 }
@@ -63,6 +66,7 @@ impl<'a> SummedAreaTable<'a> {
     /// # Panics
     ///
     /// Panics if indices are out of bounds or `x1 > x2` or `y1 > y2`.
+    #[inline]
     pub fn region_sum(&self, x1: usize, x2: usize, y1: usize, y2: usize) -> f32 {
         assert!(x1 <= x2, "x1 must be <= x2");
         assert!(y1 <= y2, "y1 must be <= y2");
