@@ -36,6 +36,8 @@ pub struct PlanarQuantKVCache {
     val_bits: u8,
     /// Maximum sequence length.
     max_seq_len: usize,
+    /// Highest position ever written (for efficient reset).
+    max_used_pos: usize,
     // ── Scratch buffers for zero-alloc hot path ──
     /// Normalized input: [kv_dim].
     scratch_normalized: Vec<f32>,
@@ -87,6 +89,7 @@ impl PlanarQuantKVCache {
             key_bits: config.key_bits,
             val_bits: config.val_bits,
             max_seq_len: config.max_seq_len,
+            max_used_pos: 0,
             scratch_normalized: vec![0.0f32; kv_dim_padded],
             scratch_rotated: vec![0.0f32; kv_dim_padded],
             scratch_indices: vec![0u8; kv_dim_padded],
@@ -97,6 +100,11 @@ impl PlanarQuantKVCache {
     pub fn store_key(&mut self, layer: usize, pos: usize, key: &[f32]) {
         debug_assert_eq!(key.len(), self.kv_dim);
         let layer_state = &self.layers[layer];
+
+        // Track highest used position for efficient reset
+        if pos > self.max_used_pos {
+            self.max_used_pos = pos;
+        }
 
         // Compute norm via SIMD (avoids scalar iteration)
         let norm = crate::simd::simd_sum_sq(key, key.len()).sqrt();
@@ -140,6 +148,11 @@ impl PlanarQuantKVCache {
     pub fn store_value(&mut self, layer: usize, pos: usize, value: &[f32]) {
         debug_assert_eq!(value.len(), self.kv_dim);
         let layer_state = &self.layers[layer];
+
+        // Track highest used position for efficient reset
+        if pos > self.max_used_pos {
+            self.max_used_pos = pos;
+        }
 
         let norm = crate::simd::simd_sum_sq(value, value.len()).sqrt();
         self.val_norms[layer][pos] = norm;
@@ -311,8 +324,10 @@ impl PlanarQuantKVCache {
 
     /// Reset cache for new sequence.
     pub fn reset(&mut self) {
+        // Only clear positions that were actually used
+        let limit = self.max_used_pos + 1;
         for layer in 0..self.n_layers {
-            for pos in 0..self.max_seq_len {
+            for pos in 0..limit {
                 self.key_indices[layer][pos].fill(0);
                 self.key_norms[layer][pos] = 0.0;
                 self.val_indices[layer][pos].fill(0);
@@ -320,6 +335,7 @@ impl PlanarQuantKVCache {
             }
         }
         self.pos = 0;
+        self.max_used_pos = 0;
     }
 
     /// Bytes stored per token (K + V, all layers).
@@ -388,13 +404,12 @@ impl crate::types::QuantizedKVCache for PlanarQuantKVCache {
 ///
 /// Returns index in `[0, boundaries.len()]`.
 #[inline]
+/// Quantize a value by finding its bucket via binary search.
+/// `partition_point` returns the first index where `value >= b` is false,
+/// i.e., the first boundary where `value < b` — equivalent to the linear scan.
+#[inline]
 fn quantize_index(value: f32, boundaries: &[f32]) -> u8 {
-    for (i, &b) in boundaries.iter().enumerate() {
-        if value < b {
-            return i as u8;
-        }
-    }
-    boundaries.len() as u8
+    boundaries.partition_point(|&b| value >= b) as u8
 }
 
 /// Dequantize an index back to centroid value.
@@ -420,21 +435,47 @@ fn pack_indices_into(indices: &[u8], bits: u8, out: &mut [u8]) {
     match bits {
         2 => {
             out.fill(0);
-            for (i, &idx) in indices.iter().enumerate() {
-                let byte = i / 4;
-                let shift = (i % 4) * 2;
+            let n = indices.len();
+            let full_quads = n / 4;
+            for q in 0..full_quads {
+                let base = q * 4;
                 unsafe {
-                    *out.get_unchecked_mut(byte) |= (idx & 0x3) << shift;
+                    let i0 = *indices.get_unchecked(base) & 0x3;
+                    let i1 = *indices.get_unchecked(base + 1) & 0x3;
+                    let i2 = *indices.get_unchecked(base + 2) & 0x3;
+                    let i3 = *indices.get_unchecked(base + 3) & 0x3;
+                    *out.get_unchecked_mut(q) = i0 | (i1 << 2) | (i2 << 4) | (i3 << 6);
+                }
+            }
+            let remainder = n % 4;
+            if remainder > 0 {
+                let base = full_quads * 4;
+                let mut byte = 0u8;
+                for i in 0..remainder {
+                    unsafe {
+                        byte |= (*indices.get_unchecked(base + i) & 0x3) << (i * 2);
+                    }
+                }
+                unsafe {
+                    *out.get_unchecked_mut(full_quads) = byte;
                 }
             }
         }
         3 | 4 => {
             out.fill(0);
-            for (i, &idx) in indices.iter().enumerate() {
-                let byte = i / 2;
-                let shift = (i % 2) * 4;
+            let n = indices.len();
+            let full_pairs = n / 2;
+            for p in 0..full_pairs {
+                let base = p * 2;
                 unsafe {
-                    *out.get_unchecked_mut(byte) |= (idx & 0xF) << shift;
+                    let lo = *indices.get_unchecked(base) & 0xF;
+                    let hi = *indices.get_unchecked(base + 1) & 0xF;
+                    *out.get_unchecked_mut(p) = lo | (hi << 4);
+                }
+            }
+            if n % 2 != 0 {
+                unsafe {
+                    *out.get_unchecked_mut(full_pairs) = *indices.get_unchecked(n - 1) & 0xF;
                 }
             }
         }
@@ -465,23 +506,42 @@ fn unpack_indices(packed: &[u8], bits: u8, n: usize) -> Vec<u8> {
     match bits {
         2 => {
             let mut indices = vec![0u8; n];
-            for (i, out) in indices.iter_mut().enumerate() {
-                let byte = i / 4;
-                let shift = (i % 4) * 2;
-                if byte < packed.len() {
-                    *out = (packed[byte] >> shift) & 0x3;
+            let full_quads = n / 4;
+            for q in 0..full_quads {
+                if q < packed.len() {
+                    let b = packed[q];
+                    let base = q * 4;
+                    indices[base] = b & 0x3;
+                    indices[base + 1] = (b >> 2) & 0x3;
+                    indices[base + 2] = (b >> 4) & 0x3;
+                    indices[base + 3] = (b >> 6) & 0x3;
+                }
+            }
+            let remainder = n % 4;
+            if remainder > 0 {
+                let base = full_quads * 4;
+                if full_quads < packed.len() {
+                    let b = packed[full_quads];
+                    for i in 0..remainder {
+                        indices[base + i] = (b >> (i * 2)) & 0x3;
+                    }
                 }
             }
             indices
         }
         3 | 4 => {
             let mut indices = vec![0u8; n];
-            for (i, out) in indices.iter_mut().enumerate() {
-                let byte = i / 2;
-                let shift = (i % 2) * 4;
-                if byte < packed.len() {
-                    *out = (packed[byte] >> shift) & 0xF;
+            let full_pairs = n / 2;
+            for p in 0..full_pairs {
+                if p < packed.len() {
+                    let b = packed[p];
+                    let base = p * 2;
+                    indices[base] = b & 0xF;
+                    indices[base + 1] = (b >> 4) & 0xF;
                 }
+            }
+            if n % 2 != 0 && full_pairs < packed.len() {
+                indices[n - 1] = packed[full_pairs] & 0xF;
             }
             indices
         }
@@ -516,31 +576,71 @@ fn unpack_indices_into(packed: &[u8], bits: u8, n: usize, out: &mut [u8]) {
     debug_assert!(out.len() >= n);
     match bits {
         2 => {
-            for i in 0..n {
-                let byte = i / 4;
-                let shift = (i % 4) * 2;
-                if byte < packed.len() {
+            let full_quads = n / 4;
+            for q in 0..full_quads {
+                let base = q * 4;
+                if q < packed.len() {
                     unsafe {
-                        *out.get_unchecked_mut(i) = (*packed.get_unchecked(byte) >> shift) & 0x3;
+                        let b = *packed.get_unchecked(q);
+                        *out.get_unchecked_mut(base) = b & 0x3;
+                        *out.get_unchecked_mut(base + 1) = (b >> 2) & 0x3;
+                        *out.get_unchecked_mut(base + 2) = (b >> 4) & 0x3;
+                        *out.get_unchecked_mut(base + 3) = (b >> 6) & 0x3;
                     }
                 } else {
                     unsafe {
-                        *out.get_unchecked_mut(i) = 0;
+                        *out.get_unchecked_mut(base) = 0;
+                        *out.get_unchecked_mut(base + 1) = 0;
+                        *out.get_unchecked_mut(base + 2) = 0;
+                        *out.get_unchecked_mut(base + 3) = 0;
+                    }
+                }
+            }
+            let remainder = n % 4;
+            if remainder > 0 {
+                let base = full_quads * 4;
+                if full_quads < packed.len() {
+                    unsafe {
+                        let b = *packed.get_unchecked(full_quads);
+                        for i in 0..remainder {
+                            *out.get_unchecked_mut(base + i) = (b >> (i * 2)) & 0x3;
+                        }
+                    }
+                } else {
+                    unsafe {
+                        for i in 0..remainder {
+                            *out.get_unchecked_mut(base + i) = 0;
+                        }
                     }
                 }
             }
         }
         3 | 4 => {
-            for i in 0..n {
-                let byte = i / 2;
-                let shift = (i % 2) * 4;
-                if byte < packed.len() {
+            let full_pairs = n / 2;
+            for p in 0..full_pairs {
+                let base = p * 2;
+                if p < packed.len() {
                     unsafe {
-                        *out.get_unchecked_mut(i) = (*packed.get_unchecked(byte) >> shift) & 0xF;
+                        let b = *packed.get_unchecked(p);
+                        *out.get_unchecked_mut(base) = b & 0xF;
+                        *out.get_unchecked_mut(base + 1) = (b >> 4) & 0xF;
                     }
                 } else {
                     unsafe {
-                        *out.get_unchecked_mut(i) = 0;
+                        *out.get_unchecked_mut(base) = 0;
+                        *out.get_unchecked_mut(base + 1) = 0;
+                    }
+                }
+            }
+            if n % 2 != 0 {
+                let last = n - 1;
+                if full_pairs < packed.len() {
+                    unsafe {
+                        *out.get_unchecked_mut(last) = *packed.get_unchecked(full_pairs) & 0xF;
+                    }
+                } else {
+                    unsafe {
+                        *out.get_unchecked_mut(last) = 0;
                     }
                 }
             }
