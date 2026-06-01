@@ -1,7 +1,7 @@
 # Plan 168: RecFM Recursive Cross-Scale Consistency (Research 150)
 
 **Source Research:** Research 150 — RecFM Recursive Cross-Scale Consistency for Modelless Inference
-**Status:** Code Complete — Tasks 1-4 done (15/18), Task 5 pending benchmarks/decision
+**Status:** Code Complete — Tasks 1-4 + T5 cross-repo integration done (18/21), GOAT benchmarks pending
 **Feature Gate:** `recfm` (opt-in initially, default-on after GOAT proof)
 **Depends on:** Plan 066 (D2F), Plan 136 (LT2), Plan 131 (SpecHop)
 
@@ -89,7 +89,8 @@ Implement recursive cross-scale consistency from RecFM as modelless inference im
 ## Deferred
 
 - **Recursive D2F**: Secondary denoising trajectory with cross-scale velocity blend. Requires 2× forward passes per step. Benchmark first to validate the cost-benefit tradeoff.
-- **Model-based RecFM**: Training-time velocity consistency for LoRA. Belongs in riir-ai (Plan TBD).
+- **Model-based RecFM**: Training-time velocity consistency for LoRA. Implemented in riir-ai Plan 185.
+- **Cross-Repo Integration**: Validated in `riir-examples/tests/test_recfm_cross_repo.rs` — Plan 168 modelless RecFM + Plan 185 model-based RecFM compose correctly with compound gain (smoother marginals → better velocity profiles → more effective branch pruning).
 
 ---
 
