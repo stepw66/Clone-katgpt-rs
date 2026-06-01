@@ -66,8 +66,10 @@ impl TurboQuantKVCache {
         let rotation = generate_rotation_matrix(kv_dim, 42);
         let qjl_matrix = generate_qjl_matrix(kv_dim, 43);
 
+        let rotation_t = transpose_matrix(&rotation, kv_dim);
         let layer = TurboQuantLayer {
             rotation,
+            rotation_t,
             qjl_matrix,
             key_codebook: key_codebook.clone(),
             val_codebook: val_codebook.clone(),
@@ -112,8 +114,10 @@ impl TurboQuantKVCache {
         let rotation = generate_rotation_matrix(tq_config.kv_dim, tq_config.seed);
         let qjl_matrix = generate_qjl_matrix(tq_config.kv_dim, tq_config.seed.wrapping_add(1));
 
+        let rotation_t = transpose_matrix(&rotation, tq_config.kv_dim);
         let layer = TurboQuantLayer {
             rotation,
+            rotation_t,
             qjl_matrix,
             key_codebook: key_codebook.clone(),
             val_codebook: val_codebook.clone(),
@@ -299,8 +303,10 @@ impl TurboQuantKVCache {
         }
 
         // Inverse rotate in-place: R^T * rotated → scratch_normalized
-        mat_vec_t_into(
-            &layer_state.rotation,
+        // Uses precomputed R^T stored row-major, enabling SIMD row-major multiply
+        // instead of scalar column-stride access on the original R.
+        mat_vec_into(
+            &layer_state.rotation_t,
             &self.scratch_rotated,
             &mut self.scratch_normalized,
         );
@@ -341,8 +347,10 @@ impl TurboQuantKVCache {
         }
 
         // Inverse rotate in-place: R^T * rotated → scratch_normalized
-        mat_vec_t_into(
-            &layer_state.rotation,
+        // Uses precomputed R^T stored row-major, enabling SIMD row-major multiply
+        // instead of scalar column-stride access on the original R.
+        mat_vec_into(
+            &layer_state.rotation_t,
             &self.scratch_rotated,
             &mut self.scratch_normalized,
         );
@@ -428,6 +436,18 @@ impl crate::types::QuantizedKVCache for TurboQuantKVCache {
 }
 
 // ── Matrix operations ────────────────────────────────────────
+
+/// Transpose a dim×dim row-major matrix.
+#[inline]
+fn transpose_matrix(m: &[f32], dim: usize) -> Vec<f32> {
+    let mut t = vec![0.0f32; dim * dim];
+    for i in 0..dim {
+        for j in 0..dim {
+            t[i * dim + j] = m[j * dim + i];
+        }
+    }
+    t
+}
 
 /// Matrix-vector multiply: result = M * v (M is dim×dim row-major).
 /// Backward-compat wrapper kept for tests. Hot path uses [`mat_vec_into`].
@@ -854,8 +874,17 @@ mod tests {
         cache.dequantize_key_into(0, 0, &mut buf);
 
         // Compare with allocating path (still &self)
+        // Allow small float tolerance: the _into path now uses SIMD row-major multiply
+        // on a precomputed transpose, which differs from the scalar column-stride path
+        // by ~1 ULP due to operation reordering.
         let direct = cache.dequantize_key(0, 0);
-        assert_eq!(buf, direct, "zero-alloc _into must match allocating path");
+        for (i, (a, b)) in buf.iter().zip(direct.iter()).enumerate() {
+            let diff = (a - b).abs();
+            assert!(
+                diff < 1e-5,
+                "zero-alloc _into differs from allocating path at [{i}]: {a} vs {b}"
+            );
+        }
     }
 
     #[test]

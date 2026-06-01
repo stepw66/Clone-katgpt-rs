@@ -54,7 +54,9 @@ impl GraphBuilder {
         let mut priced_edges: Vec<(VertexId, VertexId, ColourId)> = Vec::new();
 
         // Colour deduplication: byte-substring → ColourId
-        let mut colour_map: HashMap<Vec<u8>, ColourId> = HashMap::new();
+        // Use borrowed slices during construction to avoid allocating Vec<u8>
+        // for every substring. We build colour_bytes only for new colours.
+        let mut colour_map: HashMap<&[u8], ColourId> = HashMap::new();
         let mut colour_bytes: Vec<Vec<u8>> = Vec::new();
 
         // Track source and sink
@@ -83,14 +85,14 @@ impl GraphBuilder {
                 for end in (start + 2)..=max_end {
                     let from = VertexId(base_vertex + start as u32);
                     let to = VertexId(base_vertex + end as u32);
-                    let substring = pretoken[start..end].to_vec();
+                    let substring = &pretoken[start..end];
 
-                    let colour_id = match colour_map.get(&substring) {
+                    let colour_id = match colour_map.get(substring) {
                         Some(&cid) => cid,
                         None => {
                             let cid = ColourId(colour_bytes.len() as u32);
-                            colour_map.insert(substring.clone(), cid);
-                            colour_bytes.push(substring);
+                            colour_map.insert(substring, cid);
+                            colour_bytes.push(substring.to_vec());
                             cid
                         }
                     };

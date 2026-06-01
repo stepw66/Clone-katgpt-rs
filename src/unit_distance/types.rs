@@ -266,10 +266,12 @@ impl PointSet {
 /// within tolerance `eps`.
 pub fn count_unit_distances(points: &[C64], eps: f64) -> u64 {
     let mut count: u64 = 0;
+    // |d - 1| < eps ⟺ (1-eps)² < d² < (1+eps)² ⟺ |d² - 1| < 2·eps + eps²
+    let sq_eps = 2.0 * eps + eps * eps;
     for i in 0..points.len() {
         for j in (i + 1)..points.len() {
-            let d = (points[i] - points[j]).norm();
-            if (d - 1.0).abs() < eps {
+            let d_sq = (points[i] - points[j]).norm_sq();
+            if (d_sq - 1.0).abs() < sq_eps {
                 count += 1;
             }
         }

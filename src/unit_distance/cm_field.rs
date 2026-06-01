@@ -242,9 +242,10 @@ impl CmField {
     /// `eps` of 1.0. This is the defining property of the pigeonhole
     /// construction: |σ(u)| = 1 for all embeddings σ.
     pub fn verify_units_on_circle(&self, eps: f64) -> bool {
+        let sq_eps = 2.0 * eps + eps * eps;
         self.unit_elements
             .iter()
-            .all(|u| (u.norm() - 1.0).abs() < eps)
+            .all(|u| (u.norm_sq() - 1.0).abs() < sq_eps)
     }
 
     /// Verify projection injectivity.

@@ -23,6 +23,10 @@ pub struct TurboQuantCodebook {
 pub struct TurboQuantLayer {
     /// Random rotation matrix (dim × dim), stored row-major.
     pub rotation: Vec<f32>,
+    /// Transposed rotation matrix (dim × dim), stored row-major.
+    /// Precomputed so that inverse rotation uses SIMD row-major
+    /// `simd_matmul_rows` instead of scalar column-stride multiply.
+    pub rotation_t: Vec<f32>,
     /// QJL projection matrix for residual estimation.
     pub qjl_matrix: Vec<f32>,
     /// Codebook for key cache.

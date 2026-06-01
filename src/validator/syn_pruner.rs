@@ -3,6 +3,7 @@ use super::types::PruneResult;
 use crate::speculative::types::ConstraintPruner;
 use crate::tokenizer::BpeTokenizer;
 use crate::tokenizer::BpeTokenizerImpl;
+use std::sync::Mutex;
 use std::sync::Arc;
 
 /// Two-tier syntax pruner for Validator.
@@ -11,21 +12,21 @@ use std::sync::Arc;
 /// Tier 1: `syn` parse attempt — accurate, but expensive. Only called if Tier 0 passes.
 pub struct SynPruner {
     tokenizer: Arc<BpeTokenizer>,
-    parser: PartialParser,
+    parser: Mutex<PartialParser>,
 }
 
 impl SynPruner {
     pub fn new(tokenizer: Arc<BpeTokenizer>) -> Self {
         Self {
             tokenizer,
-            parser: PartialParser::new(),
+            parser: Mutex::new(PartialParser::new()),
         }
     }
 
     /// Validate a complete code string through both tiers.
-    pub fn validate(&mut self, code: &str) -> PruneResult {
+    pub fn validate(&self, code: &str) -> PruneResult {
         // Tier 0: Bracket balance
-        if !self.parser.is_valid(code) {
+        if !self.parser.lock().unwrap().is_valid(code) {
             return PruneResult {
                 is_valid: false,
                 error_kind: super::types::ErrorKind::UnbalancedBrackets,
@@ -46,8 +47,8 @@ impl SynPruner {
     }
 
     /// Quick Tier 0 check only (for DDTree hot path).
-    pub fn is_valid_quick(&mut self, code: &str) -> bool {
-        self.parser.is_valid(code)
+    pub fn is_valid_quick(&self, code: &str) -> bool {
+        self.parser.lock().unwrap().is_valid(code)
     }
 }
 
@@ -61,7 +62,8 @@ impl ConstraintPruner for SynPruner {
 
         // Only do Tier 0 (bracket balance) in the hot path.
         // Tier 1 (syn) is too expensive for every DDTree node.
-        let mut parser = PartialParser::new();
+        // Reuse the existing parser via Mutex to avoid per-call allocation.
+        let mut parser = self.parser.lock().unwrap();
         parser.is_valid(&code)
     }
 }

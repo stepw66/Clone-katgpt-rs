@@ -111,11 +111,17 @@ impl ToastTokenizerImpl {
 
     /// Decode token IDs back to string.
     pub fn decode(tokenizer: &ToastTokenizer, ids: &[usize]) -> String {
-        let bytes: Vec<u8> = ids
+        let total_bytes: usize = ids
             .iter()
-            .filter_map(|&id| tokenizer.id_to_vocab.get(id).cloned())
-            .flatten()
-            .collect();
+            .filter_map(|&id| tokenizer.id_to_vocab.get(id))
+            .map(|v| v.len())
+            .sum();
+        let mut bytes = Vec::with_capacity(total_bytes);
+        for &id in ids {
+            if let Some(vocab) = tokenizer.id_to_vocab.get(id) {
+                bytes.extend_from_slice(vocab);
+            }
+        }
         String::from_utf8_lossy(&bytes).into_owned()
     }
 }
