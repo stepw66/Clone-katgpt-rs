@@ -82,5 +82,5 @@ The equi-probability partitioning (partitioning by cumulative probability mass r
 
 ## Tasks
 
-- [ ] (Optional) Add equi-probability noise schedule to D2F context — minor quality improvement, low priority
-- [ ] Update D2F research (034) to reference DiffusionBlocks' partitioning strategy as related work
+- [x] (Optional) Add equi-probability noise schedule to D2F context — minor quality improvement, low priority
+- [x] Update D2F research (034) to reference DiffusionBlocks' partitioning strategy as related work

@@ -192,6 +192,15 @@ pub enum ScheduleKind {
     Uniform,
     /// Logit-normal distribution — concentrates steps near t=0 (ELF: μ=-1.5, σ=0.8).
     LogitNormal { mean: f32, std: f32 },
+    /// Equi-probability partitioning from DiffusionBlocks (arXiv:2506.14202).
+    ///
+    /// Partitions noise levels by equal cumulative probability mass under
+    /// log-normal, allocating more blocks to intermediate noise levels where
+    /// denoising is hardest. The boundary σ values are:
+    ///   σ_b = exp(P_mean + P_std · Φ⁻¹(q_b))  where q_b = q_min + (b/B)(q_max - q_min)
+    ///
+    /// This produces deterministic, evenly-spaced-in-CDF timesteps (no RNG needed).
+    EquiProbability { mean: f32, std: f32 },
 }
 
 impl ScheduleKind {
@@ -200,6 +209,15 @@ impl ScheduleKind {
         Self::LogitNormal {
             mean: -1.5,
             std: 0.8,
+        }
+    }
+
+    /// DiffusionBlocks (arXiv:2506.14202) equi-probability default.
+    /// Uses EDM-style P_mean=-1.2, P_std=1.2 for the log-normal prior.
+    pub fn diffusion_blocks_default() -> Self {
+        Self::EquiProbability {
+            mean: -1.2,
+            std: 1.2,
         }
     }
 
@@ -218,6 +236,7 @@ impl ScheduleKind {
                 }
             }
             Self::LogitNormal { mean, std } => logit_normal_schedule(n_steps, *mean, *std, rng),
+            Self::EquiProbability { mean, std } => equi_probability_schedule(n_steps, *mean, *std),
         }
     }
 }
@@ -252,6 +271,85 @@ fn logit_normal_schedule(n_steps: usize, mean: f32, std: f32, rng: &mut Rng) -> 
             steps.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
             steps
         }
+    }
+}
+
+/// Deterministic equi-probability schedule from DiffusionBlocks (arXiv:2506.14202).
+///
+/// Places timesteps at equal intervals along the cumulative distribution function
+/// of a log-normal distribution, so each interval carries equal probability mass.
+/// This concentrates timesteps where the model spends the most denoising effort.
+///
+/// σ_b = exp(mean + std · Φ⁻¹(q_b))  where q_b = b / (B+1)  (interior quantiles)
+///
+/// Returns values mapped to [0.0, 1.0] via sigmoid for compatibility with the
+/// denoising pipeline.
+fn equi_probability_schedule(n_steps: usize, mean: f32, std: f32) -> Vec<f32> {
+    match n_steps {
+        0 => vec![],
+        1 => vec![0.5],
+        _ => {
+            // Place quantiles at q_b = (b + 1) / (B + 1) for b = 0..B-1
+            // (interior points that avoid the extreme tails)
+            (0..n_steps)
+                .map(|b| {
+                    let q = (b + 1) as f32 / (n_steps + 1) as f32;
+                    let inv_cdf = mean + std * approx_inverse_normal_cdf(q);
+                    sigmoid(inv_cdf)
+                })
+                .collect()
+        }
+    }
+}
+
+/// Rational approximation of the inverse normal CDF (Φ⁻¹) using Peter Acklam's algorithm.
+/// Accurate to ~1.15e-9 in absolute value across the full range.
+fn approx_inverse_normal_cdf(p: f32) -> f32 {
+    // Coefficients for the rational approximation
+    const A1: f32 = -3.969683028665376e+01;
+    const A2: f32 = 2.209460984245205e+02;
+    const A3: f32 = -2.759285104469687e+02;
+    const A4: f32 = 1.383577518672690e+02;
+    const A5: f32 = -3.066479806614716e+01;
+    const A6: f32 = 2.506628277459239e+00;
+
+    const B1: f32 = -5.447609879822406e+01;
+    const B2: f32 = 1.615858368580409e+02;
+    const B3: f32 = -1.556989798598866e+02;
+    const B4: f32 = 6.680131188771972e+01;
+    const B5: f32 = -1.328068155288572e+01;
+
+    const C1: f32 = -7.784894002430293e-03;
+    const C2: f32 = -3.223964580411365e-01;
+    const C3: f32 = -2.400758277161838e+00;
+    const C4: f32 = -2.549732539343734e+00;
+    const C5: f32 = 4.374664141464968e+00;
+    const C6: f32 = 2.938163982698783e+00;
+
+    const D1: f32 = 7.784695709041462e-03;
+    const D2: f32 = 3.224671290700398e-01;
+    const D3: f32 = 2.445134137142996e+00;
+    const D4: f32 = 3.754408661907416e+00;
+
+    const P_LOW: f32 = 0.02425;
+    const P_HIGH: f32 = 1.0 - P_LOW;
+
+    if p < P_LOW {
+        // Rational approximation for lower region
+        let q = (-2.0 * p.ln()).sqrt();
+        (((((C1 * q + C2) * q + C3) * q + C4) * q + C5) * q + C6)
+            / ((((D1 * q + D2) * q + D3) * q + D4) * q + 1.0)
+    } else if p <= P_HIGH {
+        // Rational approximation for central region
+        let q = p - 0.5;
+        let r = q * q;
+        (((((A1 * r + A2) * r + A3) * r + A4) * r + A5) * r + A6) * q
+            / (((((B1 * r + B2) * r + B3) * r + B4) * r + B5) * r + 1.0)
+    } else {
+        // Rational approximation for upper region
+        let q = (-2.0 * (1.0 - p).ln()).sqrt();
+        -(((((C1 * q + C2) * q + C3) * q + C4) * q + C5) * q + C6)
+            / ((((D1 * q + D2) * q + D3) * q + D4) * q + 1.0)
     }
 }
 
