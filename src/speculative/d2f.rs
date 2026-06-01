@@ -304,32 +304,33 @@ fn equi_probability_schedule(n_steps: usize, mean: f32, std: f32) -> Vec<f32> {
 
 /// Rational approximation of the inverse normal CDF (Φ⁻¹) using Peter Acklam's algorithm.
 /// Accurate to ~1.15e-9 in absolute value across the full range.
+#[allow(clippy::excessive_precision)]
 fn approx_inverse_normal_cdf(p: f32) -> f32 {
     // Coefficients for the rational approximation
-    const A1: f32 = -3.969683028665376e+01;
-    const A2: f32 = 2.209460984245205e+02;
-    const A3: f32 = -2.759285104469687e+02;
-    const A4: f32 = 1.383577518672690e+02;
-    const A5: f32 = -3.066479806614716e+01;
-    const A6: f32 = 2.506628277459239e+00;
+    const A1: f32 = -3.9696830e+01;
+    const A2: f32 = 2.20946098e+02;
+    const A3: f32 = -2.75928510e+02;
+    const A4: f32 = 1.38357752e+02;
+    const A5: f32 = -3.06647980e+01;
+    const A6: f32 = 2.50662828e+00;
 
-    const B1: f32 = -5.447609879822406e+01;
-    const B2: f32 = 1.615858368580409e+02;
-    const B3: f32 = -1.556989798598866e+02;
-    const B4: f32 = 6.680131188771972e+01;
-    const B5: f32 = -1.328068155288572e+01;
+    const B1: f32 = -5.44760988e+01;
+    const B2: f32 = 1.61585837e+02;
+    const B3: f32 = -1.55698980e+02;
+    const B4: f32 = 6.68013119e+01;
+    const B5: f32 = -1.32806816e+01;
 
-    const C1: f32 = -7.784894002430293e-03;
-    const C2: f32 = -3.223964580411365e-01;
-    const C3: f32 = -2.400758277161838e+00;
-    const C4: f32 = -2.549732539343734e+00;
-    const C5: f32 = 4.374664141464968e+00;
-    const C6: f32 = 2.938163982698783e+00;
+    const C1: f32 = -7.78489400e-03;
+    const C2: f32 = -3.22396458e-01;
+    const C3: f32 = -2.40075828e+00;
+    const C4: f32 = -2.54973254e+00;
+    const C5: f32 = 4.37466414e+00;
+    const C6: f32 = 2.93816398e+00;
 
-    const D1: f32 = 7.784695709041462e-03;
-    const D2: f32 = 3.224671290700398e-01;
-    const D3: f32 = 2.445134137142996e+00;
-    const D4: f32 = 3.754408661907416e+00;
+    const D1: f32 = 7.78469571e-03;
+    const D2: f32 = 3.22467129e-01;
+    const D3: f32 = 2.44513414e+00;
+    const D4: f32 = 3.75440866e+00;
 
     const P_LOW: f32 = 0.02425;
     const P_HIGH: f32 = 1.0 - P_LOW;
