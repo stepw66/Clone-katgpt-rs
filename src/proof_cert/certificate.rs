@@ -81,6 +81,7 @@ impl ProofCertificate {
     }
 
     /// Is this certificate's result a pass?
+    #[inline]
     pub fn passed(&self) -> bool {
         matches!(&self.result, ProofResult::Full { value, threshold } if *value >= *threshold)
             || matches!(
@@ -90,6 +91,7 @@ impl ProofCertificate {
     }
 }
 
+#[inline]
 fn now_epoch_secs() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

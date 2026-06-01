@@ -67,7 +67,9 @@ fn topological_sort(certificates: &[ProofCertificate]) -> Vec<&ProofCertificate>
         .collect();
 
     let mut in_degree: Vec<usize> = vec![0; certificates.len()];
-    let mut adj: Vec<Vec<usize>> = vec![Vec::new(); certificates.len()];
+    let mut adj: Vec<Vec<usize>> = (0..certificates.len())
+        .map(|_| Vec::with_capacity(2))
+        .collect();
 
     for (i, cert) in certificates.iter().enumerate() {
         for prereq in &cert.prerequisites {
@@ -93,9 +95,10 @@ fn topological_sort(certificates: &[ProofCertificate]) -> Vec<&ProofCertificate>
         }
     }
 
-    // Add any remaining (cycle) items
+    // Add any remaining (cycle) items — O(n) with HashSet lookup
+    let added: HashSet<&str> = result.iter().map(|c| c.id.as_str()).collect();
     for cert in certificates {
-        if !result.iter().any(|c| c.id == cert.id) {
+        if !added.contains(cert.id.as_str()) {
             result.push(cert);
         }
     }

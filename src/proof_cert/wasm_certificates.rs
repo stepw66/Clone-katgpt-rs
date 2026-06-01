@@ -8,7 +8,7 @@ pub fn generate_wasm_validator_certificates(
     target_latency_us: u64,
     lora_wasm_delta: i32,
 ) -> Vec<ProofCertificate> {
-    let mut certs = Vec::new();
+    let mut certs = Vec::with_capacity(4);
 
     // P2.1: Deterministic correctness — 0 critical mismatches
     certs.push(ProofCertificate::new(
