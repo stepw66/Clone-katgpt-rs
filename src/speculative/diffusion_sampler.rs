@@ -1250,7 +1250,7 @@ mod tests {
         // AUC > 0.5 means the sampler learned something
         // (may be close to 0.5 with random weights, but should be finite)
         assert!(
-            auc >= 0.0 && auc <= 1.0,
+            (0.0..=1.0).contains(&auc),
             "AUC should be in [0, 1], got {auc}",
         );
     }
@@ -1298,7 +1298,7 @@ mod tests {
 
         let auc = sampler.evaluate_auc(&trajectories);
         assert!(
-            auc >= 0.0 && auc <= 1.0,
+            (0.0..=1.0).contains(&auc),
             "AUC should be in [0, 1], got {auc}",
         );
     }
@@ -1319,7 +1319,7 @@ mod tests {
         );
         assert!(loss.is_finite(), "loss should be finite, got {loss}",);
         assert!(
-            auc >= 0.0 && auc <= 1.0,
+            (0.0..=1.0).contains(&auc),
             "AUC should be in [0, 1], got {auc}",
         );
     }
@@ -1442,10 +1442,16 @@ mod tests {
         // This may not always differ (e.g., if training data is too easy),
         // so we only check that both produce valid confidence values.
         for &c in &result_fixed.confidence_history {
-            assert!(c >= 0.0 && c <= 1.0, "fixed confidence {c} out of [0,1]");
+            assert!(
+                (0.0..=1.0).contains(&c),
+                "fixed confidence {c} out of [0,1]"
+            );
         }
         for &c in &result_sampler.confidence_history {
-            assert!(c >= 0.0 && c <= 1.0, "sampler confidence {c} out of [0,1]",);
+            assert!(
+                (0.0..=1.0).contains(&c),
+                "sampler confidence {c} out of [0,1]",
+            );
         }
 
         // At minimum, steps_used should be positive for both

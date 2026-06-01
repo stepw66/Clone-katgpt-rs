@@ -105,10 +105,10 @@ impl PhraseTrie {
     pub fn advance(&self, active: &[usize], token_id: usize) -> Vec<usize> {
         let mut next = Vec::with_capacity(active.len() + 1);
         for &node_idx in active {
-            if let Some(child) = self.nodes[node_idx].children[token_id] {
-                if !next.contains(&child) {
-                    next.push(child);
-                }
+            if let Some(child) = self.nodes[node_idx].children[token_id]
+                && !next.contains(&child)
+            {
+                next.push(child);
             }
         }
         // Root (index 0) is always active — new phrases can start at any position.
@@ -147,7 +147,7 @@ mod tests {
         assert!(a1.contains(&1)); // first child of root for tok 3
 
         let a2 = trie.advance(&a1, 7);
-        assert!(a2.len() >= 1);
+        assert!(!a2.is_empty());
 
         let a3 = trie.advance(&a2, 11);
         assert!(trie.has_terminal(&a3));

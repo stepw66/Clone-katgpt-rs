@@ -175,7 +175,7 @@ pub fn find_path_multifloor(
             current_floor,
             current_pos,
             stair_from,
-            &floor_blocked,
+            floor_blocked,
         )?;
 
         // Add movement actions to reach stairs
@@ -195,7 +195,7 @@ pub fn find_path_multifloor(
     let empty = HashSet::new();
     let floor_blocked = blocked.get(&current_floor).unwrap_or(&empty);
     let final_path =
-        find_path_on_floor(dungeon, current_floor, current_pos, to_pos, &floor_blocked)?;
+        find_path_on_floor(dungeon, current_floor, current_pos, to_pos, floor_blocked)?;
 
     for action in final_path {
         actions.push(DungeonAction::Move(action));
@@ -310,7 +310,7 @@ fn find_best_stair(
         }
 
         // Compute distance to stair entrance; skip if unreachable
-        let dist = match find_distance(grid, current_pos, entrance_pos, &floor_blocked) {
+        let dist = match find_distance(grid, current_pos, entrance_pos, floor_blocked) {
             Some(d) => d,
             None => continue,
         };

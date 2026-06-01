@@ -320,7 +320,7 @@ impl ParetoConfigFrontier {
             if !e.occupied {
                 continue;
             }
-            if best.map_or(true, |b| e.reward > b.reward) {
+            if best.is_none_or(|b| e.reward > b.reward) {
                 best = Some(e);
             }
         }
@@ -337,7 +337,7 @@ impl ParetoConfigFrontier {
             if !e.occupied {
                 continue;
             }
-            if best.map_or(true, |b| e.cost < b.cost) {
+            if best.is_none_or(|b| e.cost < b.cost) {
                 best = Some(e);
             }
         }

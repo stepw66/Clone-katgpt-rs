@@ -31,7 +31,7 @@ fn xorshift64(state: &mut u64) -> u64 {
 }
 
 fn rand_f32(state: &mut u64) -> f32 {
-    (xorshift64(state) as f64 / u64::MAX as u64 as f64) as f32
+    (xorshift64(state) as f64 / u64::MAX as f64) as f32
 }
 
 /// Generate a DE matrix with `n_prompts` × `n_layers` entries.
@@ -82,11 +82,13 @@ fn generate_hidden_states(n_layers: usize, n_embd: usize, seed: u64) -> Vec<Vec<
 fn _make_profiles(values: &[(f32, f32, bool)]) -> Vec<HydraLayerProfile> {
     values
         .iter()
-        .map(|&(mean_de, backup_frequency, is_erasure)| HydraLayerProfile {
-            mean_de,
-            backup_frequency,
-            is_erasure,
-        })
+        .map(
+            |&(mean_de, backup_frequency, is_erasure)| HydraLayerProfile {
+                mean_de,
+                backup_frequency,
+                is_erasure,
+            },
+        )
         .collect()
 }
 
@@ -288,10 +290,7 @@ fn bench_165_hydra_budget_goat_proof() {
         // Without decode_specialize, just verify erasure layers are detected.
         let erasure_layers = detect_erasure_layers(&profiles_p2);
         let erasure_count = erasure_layers.len();
-        assert!(
-            erasure_count > 0,
-            "P2 FAILED: no erasure layers detected"
-        );
+        assert!(erasure_count > 0, "P2 FAILED: no erasure layers detected");
         println!("   Erasure layers detected: {erasure_count}");
         println!("   ✓ Erasure detection works — PASS");
     }
@@ -352,8 +351,15 @@ fn bench_165_hydra_budget_goat_proof() {
         0.0
     };
 
-    println!("   Layers skipped per pass: {}/{}", result_p3.skipped.len(), N_LAYERS);
-    println!("   Savings fraction:        {:.1}%", savings_fraction * 100.0);
+    println!(
+        "   Layers skipped per pass: {}/{}",
+        result_p3.skipped.len(),
+        N_LAYERS
+    );
+    println!(
+        "   Savings fraction:        {:.1}%",
+        savings_fraction * 100.0
+    );
     println!("   Total layers (full):     {total_layers_full}");
     println!("   Total layers (saved):    {layers_saved}");
     println!("   Skipped elapsed:         {skipped_elapsed:?}");
@@ -364,7 +370,10 @@ fn bench_165_hydra_budget_goat_proof() {
         savings_fraction > 0.0,
         "P3 FAILED: savings fraction is 0% — no layers being skipped"
     );
-    println!("   ✓ P3: Speedup {:.1}% > 0% — PASS", savings_fraction * 100.0);
+    println!(
+        "   ✓ P3: Speedup {:.1}% > 0% — PASS",
+        savings_fraction * 100.0
+    );
 
     // ════════════════════════════════════════════════════════════════
     // PROOF P4: Profile stability (top-k overlap ≥ 80% across seeds)
@@ -428,12 +437,8 @@ fn bench_165_hydra_budget_goat_proof() {
     println!("\n{}", "═".repeat(72));
     println!("🐐 GOAT PROOF SUMMARY");
     println!("{}", "═".repeat(72));
-    println!(
-        "   P1 (Skip Correctness):       Max cosine dist = {max_cosine_dist:.6}  ✓"
-    );
-    println!(
-        "   P2 (Erasure Skip):           Draft ≥ Verify skip count  ✓"
-    );
+    println!("   P1 (Skip Correctness):       Max cosine dist = {max_cosine_dist:.6}  ✓");
+    println!("   P2 (Erasure Skip):           Draft ≥ Verify skip count  ✓");
     println!(
         "   P3 (Speedup):                Savings = {:.1}% > 0%  ✓",
         savings_fraction * 100.0

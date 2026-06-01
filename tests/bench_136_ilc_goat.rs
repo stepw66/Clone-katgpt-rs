@@ -169,8 +169,8 @@ fn bench_136_ilc_goat_proof() {
         .map(|d| {
             let mut m = vec![0.01f32; config.vocab_size];
             // Make some tokens dominant
-            for i in 0..8.min(config.vocab_size) {
-                m[i] = 0.1 + 0.01 * (d as f32) + 0.005 * (i as f32);
+            for (i, v) in m.iter_mut().enumerate().take(8.min(config.vocab_size)) {
+                *v = 0.1 + 0.01 * (d as f32) + 0.005 * (i as f32);
             }
             // Normalize
             let sum: f32 = m.iter().sum();

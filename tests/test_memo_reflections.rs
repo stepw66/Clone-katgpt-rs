@@ -21,16 +21,16 @@ fn test_memo_reflections_goat_pair_count() {
                 y = (i * 3) % 11,
                 bombs = i % 4
             ),
-            action_description: Some(format!(
-                "{action}",
-                action = match i % 5 {
+            action_description: Some(
+                (match i % 5 {
                     0 => "move_up",
                     1 => "move_down",
                     2 => "move_left",
                     3 => "move_right",
                     _ => "place_bomb",
-                }
-            )),
+                })
+                .to_string(),
+            ),
             outcome_description: match i % 3 == 0 {
                 true => Some(format!("player_{id} eliminated at tick {i}", id = i % 4)),
                 false => None,

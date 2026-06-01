@@ -1812,13 +1812,13 @@ fn forward_base<'a>(
         // Modelless mode — zero overhead (single bool check on pre-computed plan).
         // When skipped, x passes through unchanged (z^l = z^{l-1}).
         #[cfg(feature = "hydra_budget")]
-        if let Some(ref skip_plan) = ctx.hydra_skip_plan {
-            if crate::pruners::should_skip_layer(skip_plan, layer_idx) {
-                // Skip this layer entirely — x passes through as-is.
-                // Still need to copy x → hidden_state for snapshot consistency.
-                ctx.hidden_state[..n].copy_from_slice(&ctx.x[..n]);
-                continue;
-            }
+        if let Some(ref skip_plan) = ctx.hydra_skip_plan
+            && crate::pruners::should_skip_layer(skip_plan, layer_idx)
+        {
+            // Skip this layer entirely — x passes through as-is.
+            // Still need to copy x → hidden_state for snapshot consistency.
+            ctx.hidden_state[..n].copy_from_slice(&ctx.x[..n]);
+            continue;
         }
 
         // MLS: save pre-layer state for delta computation (Plan 104)

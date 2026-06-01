@@ -148,8 +148,10 @@ pub fn dual_path_draft(
     v_confidences: &[f32],
 ) -> DualPathResult {
     let k = draft_width.min(MAX_DRAFT_WIDTH);
-    let mut result = DualPathResult::default();
-    result.len = k;
+    let mut result = DualPathResult {
+        len: k,
+        ..Default::default()
+    };
 
     for i in 0..k {
         result.h_tokens[i] = *h_tokens.get(i).unwrap_or(&0);
@@ -228,8 +230,10 @@ pub fn route_thermal_paths(
     config: &ConsensusConfig,
     len: usize,
 ) -> ConsensusResult {
-    let mut result = ConsensusResult::default();
-    result.len = len;
+    let mut result = ConsensusResult {
+        len,
+        ..Default::default()
+    };
 
     for i in 0..len.min(MAX_DRAFT_WIDTH) {
         let code = ternary[i];

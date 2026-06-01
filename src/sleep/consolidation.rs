@@ -76,7 +76,7 @@ pub fn consolidation_pass(
                 // Note: out_buf, temp_buf, delta are filled inside gdn2_recurrent_step
                 // before use, so pre-filling here would be redundant.
                 gdn2_recurrent_step(
-                    &k_normalized,
+                    k_normalized,
                     v_h,
                     q_h,
                     s,
@@ -191,7 +191,13 @@ mod tests {
             .sum();
 
         let mut k_normalized = vec![0.0f32; config.head_dim];
-        consolidation_pass(&kv_cache, &mut gdn2_cache, fill_pos, &config, &mut k_normalized);
+        consolidation_pass(
+            &kv_cache,
+            &mut gdn2_cache,
+            fill_pos,
+            &config,
+            &mut k_normalized,
+        );
 
         // GDN2 state should now be non-zero (consolidated from KV)
         let after_sum: f32 = gdn2_cache.layers[0].heads[0]
@@ -296,7 +302,13 @@ mod tests {
         // Run 1 pass
         let mut gdn2_cache_1 = MultiLayerGdn2Cache::new(&config);
         let mut k_normalized = vec![0.0f32; config.head_dim];
-        consolidation_pass(&kv_cache, &mut gdn2_cache_1, fill_pos, &config, &mut k_normalized);
+        consolidation_pass(
+            &kv_cache,
+            &mut gdn2_cache_1,
+            fill_pos,
+            &config,
+            &mut k_normalized,
+        );
         let sum_1: f32 = gdn2_cache_1.layers[0].heads[0]
             .s
             .iter()
@@ -307,7 +319,13 @@ mod tests {
         let mut gdn2_cache_4 = MultiLayerGdn2Cache::new(&config);
         let mut k_normalized = vec![0.0f32; config.head_dim];
         for _ in 0..4 {
-            consolidation_pass(&kv_cache, &mut gdn2_cache_4, fill_pos, &config, &mut k_normalized);
+            consolidation_pass(
+                &kv_cache,
+                &mut gdn2_cache_4,
+                fill_pos,
+                &config,
+                &mut k_normalized,
+            );
         }
         let sum_4: f32 = gdn2_cache_4.layers[0].heads[0]
             .s

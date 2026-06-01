@@ -266,8 +266,10 @@ impl PlanarQuantKVCache {
         self.scratch_rotated[self.kv_dim..].fill(0.0);
         for i in 0..self.kv_dim {
             unsafe {
-                *self.scratch_rotated.get_unchecked_mut(i) =
-                    dequantize_index(*self.scratch_indices.get_unchecked(i), &layer_state.key_centroids);
+                *self.scratch_rotated.get_unchecked_mut(i) = dequantize_index(
+                    *self.scratch_indices.get_unchecked(i),
+                    &layer_state.key_centroids,
+                );
             }
         }
 
@@ -307,8 +309,10 @@ impl PlanarQuantKVCache {
         self.scratch_rotated[self.kv_dim..].fill(0.0);
         for i in 0..self.kv_dim {
             unsafe {
-                *self.scratch_rotated.get_unchecked_mut(i) =
-                    dequantize_index(*self.scratch_indices.get_unchecked(i), &layer_state.val_centroids);
+                *self.scratch_rotated.get_unchecked_mut(i) = dequantize_index(
+                    *self.scratch_indices.get_unchecked(i),
+                    &layer_state.val_centroids,
+                );
             }
         }
 
@@ -484,7 +488,7 @@ fn pack_indices_into(indices: &[u8], bits: u8, out: &mut [u8]) {
                     *out.get_unchecked_mut(p) = lo | (hi << 4);
                 }
             }
-            if n % 2 != 0 {
+            if !n.is_multiple_of(2) {
                 unsafe {
                     *out.get_unchecked_mut(full_pairs) = *indices.get_unchecked(n - 1) & 0xF;
                 }
@@ -551,7 +555,7 @@ fn unpack_indices(packed: &[u8], bits: u8, n: usize) -> Vec<u8> {
                     indices[base + 1] = (b >> 4) & 0xF;
                 }
             }
-            if n % 2 != 0 && full_pairs < packed.len() {
+            if !n.is_multiple_of(2) && full_pairs < packed.len() {
                 indices[n - 1] = packed[full_pairs] & 0xF;
             }
             indices
@@ -643,7 +647,7 @@ fn unpack_indices_into(packed: &[u8], bits: u8, n: usize, out: &mut [u8]) {
                     }
                 }
             }
-            if n % 2 != 0 {
+            if !n.is_multiple_of(2) {
                 let last = n - 1;
                 if full_pairs < packed.len() {
                     unsafe {

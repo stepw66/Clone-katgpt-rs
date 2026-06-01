@@ -72,7 +72,7 @@ pub fn hydra_layer_skip(
     // Pre-compute cumulative DE for early exit.
     let mut cumulative_de = Vec::with_capacity(n);
     let mut running = 0.0f32;
-    for (_l, profile) in profiles.iter().enumerate() {
+    for profile in profiles.iter() {
         running += profile.mean_de.abs();
         cumulative_de.push(running);
     }

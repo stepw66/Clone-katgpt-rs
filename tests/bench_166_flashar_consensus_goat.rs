@@ -447,7 +447,7 @@ fn bench_t9_plasma_hit_rate() {
 
             // Random tokens — 50% chance of agreement
             let h_tok = (rng.next() % 10) as usize;
-            let v_tok = if rng.next() % 2 == 0 { h_tok } else { (rng.next() % 10) as usize };
+            let v_tok = if rng.next().is_multiple_of(2) { h_tok } else { (rng.next() % 10) as usize };
             // Note: we can't modify h_tokens/v_tokens since they're fixed-size
             // Use separate arrays
             let _ht = [h_tok; MAX_DRAFT_WIDTH];
