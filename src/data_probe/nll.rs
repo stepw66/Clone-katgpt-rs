@@ -40,25 +40,31 @@ pub fn average_nll(chain: &MarkovChain, sequence: &[usize]) -> f32 {
 /// Position t > 0 uses the transition P[x_{t-1}][x_t].
 /// Returns -ln(p) for each position.
 pub fn nll_profile(chain: &MarkovChain, sequence: &[usize]) -> Vec<f32> {
-    sequence
-        .iter()
-        .enumerate()
-        .map(|(t, &state)| {
-            let prob = if t == 0 {
-                // First token: stationary distribution prior.
-                chain.stationary[state]
-            } else {
-                // Subsequent tokens: transition probability.
-                let prev = sequence[t - 1];
-                chain.transition[prev][state]
-            };
-            if prob > 0.0 {
-                -prob.ln()
-            } else {
-                f32::INFINITY
-            }
-        })
-        .collect()
+    let mut out = vec![0.0f32; sequence.len()];
+    nll_profile_into(chain, sequence, &mut out);
+    out
+}
+
+/// Zero-alloc NLL profile: writes per-position -ln(p) into a pre-allocated buffer.
+///
+/// `out.len()` must equal `sequence.len()`.
+pub fn nll_profile_into(chain: &MarkovChain, sequence: &[usize], out: &mut [f32]) {
+    debug_assert_eq!(out.len(), sequence.len());
+    for (t, &state) in sequence.iter().enumerate() {
+        let prob = if t == 0 {
+            // First token: stationary distribution prior.
+            chain.stationary[state]
+        } else {
+            // Subsequent tokens: transition probability.
+            let prev = sequence[t - 1];
+            chain.transition[prev][state]
+        };
+        out[t] = if prob > 0.0 {
+            -prob.ln()
+        } else {
+            f32::INFINITY
+        };
+    }
 }
 
 #[cfg(test)]

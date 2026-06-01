@@ -26,6 +26,7 @@ pub enum Regime {
 /// Classify a single sequence's regime based on its average NLL vs entropy rate.
 ///
 /// Uses natural log internally. The `epsilon` parameter is in nats.
+#[inline]
 pub fn classify_regime(chain: &MarkovChain, sequence: &[usize], epsilon: f32) -> Regime {
     if sequence.is_empty() {
         // Empty sequences carry no information — classify as conservative.

@@ -184,6 +184,7 @@ pub fn representation_geometry_report(
 // matrix. Not optimized for large matrices — fine for diagnostic use on
 // covariance matrices up to ~256×256.
 
+#[inline]
 fn jacobi_eigenvalues(mat: &mut [f64], dim: usize, max_sweeps: usize) -> Vec<f64> {
     // Extract diagonal as initial eigenvalue estimates.
     let mut eigenvalues: Vec<f64> = (0..dim).map(|i| mat[i * dim + i]).collect();

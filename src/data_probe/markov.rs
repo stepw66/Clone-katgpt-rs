@@ -17,29 +17,38 @@ pub struct MarkovChain {
     pub entropy_rate: f32,
 }
 
-/// Sample a single Dirichlet(α, …, α) variate of dimension `k`.
+/// Sample a single Dirichlet(α, …, α) variate of dimension `k` into a pre-allocated buffer.
 ///
 /// Uses the Gamma→exponential trick: sample K exponential variates via
 /// `-ln(U)` where `U ~ Uniform(0,1)`, then normalize.
-fn sample_dirichlet(k: usize, _alpha: f32, rng: &mut fastrand::Rng) -> Vec<f32> {
-    let mut samples: Vec<f32> = (0..k)
-        .map(|_| {
-            let u = rng.f32();
-            let u_safe = u.max(1e-10);
-            -u_safe.ln()
-        })
-        .collect();
-    let sum: f32 = samples.iter().sum();
+///
+/// `buf.len()` must equal `k`. Reuses the buffer to avoid per-call allocation.
+fn sample_dirichlet_into(k: usize, _alpha: f32, rng: &mut fastrand::Rng, buf: &mut [f32]) {
+    debug_assert_eq!(buf.len(), k);
+    let mut sum = 0.0f32;
+    for x in buf.iter_mut() {
+        let u = rng.f32();
+        let u_safe = u.max(1e-10);
+        let v = -u_safe.ln();
+        *x = v;
+        sum += v;
+    }
     if sum > 0.0 {
         let inv_sum = 1.0 / sum;
-        for x in samples.iter_mut() {
+        for x in buf.iter_mut() {
             *x *= inv_sum;
         }
     } else {
         let v = 1.0 / k as f32;
-        samples.fill(v);
+        buf.fill(v);
     }
-    samples
+}
+
+/// Convenience wrapper: returns a new Vec for one-shot use.
+fn sample_dirichlet(k: usize, alpha: f32, rng: &mut fastrand::Rng) -> Vec<f32> {
+    let mut buf = vec![0.0f32; k];
+    sample_dirichlet_into(k, alpha, rng, &mut buf);
+    buf
 }
 
 /// Compute stationary distribution by power iteration.
@@ -101,20 +110,24 @@ pub fn generate_markov_chain(
     let mut best_chain: Option<MarkovChain> = None;
     let mut best_diff = f32::INFINITY;
 
-    for _ in 0..n_candidates {
-        // Sample a row-stochastic transition matrix from Dirichlet.
-        let transition: Vec<Vec<f32>> = (0..num_states)
-            .map(|_| sample_dirichlet(num_states, alpha, rng))
-            .collect();
+    // Pre-allocate transition matrix buffer, reused across candidates.
+    let mut transition_buf: Vec<Vec<f32>> =
+        (0..num_states).map(|_| vec![0.0f32; num_states]).collect();
 
-        let stationary = stationary_distribution(&transition, 100);
-        let h = entropy_rate(&transition, &stationary);
+    for _ in 0..n_candidates {
+        // Sample a row-stochastic transition matrix from Dirichlet into reused buffer.
+        for row in transition_buf.iter_mut() {
+            sample_dirichlet_into(num_states, alpha, rng, row);
+        }
+
+        let stationary = stationary_distribution(&transition_buf, 100);
+        let h = entropy_rate(&transition_buf, &stationary);
 
         let diff = (h - target_h).abs();
         if diff < best_diff {
             best_diff = diff;
             best_chain = Some(MarkovChain {
-                transition,
+                transition: transition_buf.clone(),
                 stationary,
                 entropy_rate: h,
                 num_states,
@@ -149,6 +162,7 @@ pub fn sample_sequence(chain: &MarkovChain, n: usize, rng: &mut fastrand::Rng) -
 }
 
 /// Sample from a categorical distribution given probabilities.
+#[inline]
 fn sample_categorical(probs: &[f32], rng: &mut fastrand::Rng) -> usize {
     let u = rng.f32();
     let mut cumsum = 0.0f32;
