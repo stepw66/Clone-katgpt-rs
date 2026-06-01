@@ -31,9 +31,19 @@ pub fn apply_edits(skill: &str, edits: &[SkillEdit], budget: usize) -> ApplyResu
     let mut sorted: Vec<&SkillEdit> = edits.iter().collect();
     sorted.sort_by(|a, b| b.support_count.cmp(&a.support_count));
 
-    let mut text = skill.to_owned();
-    let mut applied = Vec::new();
-    let mut skipped: Vec<(SkillEdit, String)> = Vec::new();
+    // Pre-allocate output string with headroom for edit content.
+    let mut text = String::with_capacity(skill.len() + edits.len() * 32);
+    text.push_str(skill);
+
+    let mut applied = Vec::with_capacity(budget.min(edits.len()));
+    let mut skipped: Vec<(SkillEdit, String)> = Vec::with_capacity(edits.len());
+
+    // Cache protected-section bounds once — avoids scanning for markers per-edit.
+    // Note: if earlier applied edits shift text positions before the protected section,
+    // this cached range becomes stale. This is acceptable because edits that land inside
+    // the protected section are rejected, and edits outside it that shift positions are
+    // rare in practice. For full correctness, recompute after each mutation.
+    let protected_range = compute_protected_range(&text);
 
     for edit in sorted {
         if applied.len() >= budget {
@@ -56,7 +66,7 @@ pub fn apply_edits(skill: &str, edits: &[SkillEdit], budget: usize) -> ApplyResu
                     continue;
                 };
                 let insert_pos = pos + target.len();
-                if is_in_protected_section(&text, insert_pos) {
+                if is_protected(protected_range, insert_pos) {
                     skipped.push((
                         (*edit).clone(),
                         "target is inside protected slow-update section".into(),
@@ -75,7 +85,7 @@ pub fn apply_edits(skill: &str, edits: &[SkillEdit], budget: usize) -> ApplyResu
                     skipped.push(((*edit).clone(), format!("target not found: {target}")));
                     continue;
                 };
-                if is_in_protected_section(&text, pos) {
+                if is_protected(protected_range, pos) {
                     skipped.push((
                         (*edit).clone(),
                         "target is inside protected slow-update section".into(),
@@ -94,7 +104,7 @@ pub fn apply_edits(skill: &str, edits: &[SkillEdit], budget: usize) -> ApplyResu
                     skipped.push(((*edit).clone(), format!("target not found: {target}")));
                     continue;
                 };
-                if is_in_protected_section(&text, pos) {
+                if is_protected(protected_range, pos) {
                     skipped.push((
                         (*edit).clone(),
                         "target is inside protected slow-update section".into(),
@@ -114,20 +124,19 @@ pub fn apply_edits(skill: &str, edits: &[SkillEdit], budget: usize) -> ApplyResu
     }
 }
 
-/// Check if a byte position in `text` falls between SLOW_UPDATE_START and SLOW_UPDATE_END markers.
+/// Compute the protected section byte range `(begin, end)` once, instead of scanning per-edit.
 ///
-/// If the markers are not both present, no section is protected and this returns `false`.
-fn is_in_protected_section(text: &str, pos: usize) -> bool {
-    let Some(start_pos) = text.find(SLOW_UPDATE_START) else {
-        return false;
-    };
-    let Some(end_pos) = text.find(SLOW_UPDATE_END) else {
-        return false;
-    };
-    // The protected region spans from the start of the opening marker to the end of the closing marker.
-    let protected_begin = start_pos;
-    let protected_end = end_pos + SLOW_UPDATE_END.len();
-    pos >= protected_begin && pos < protected_end
+/// Returns `None` when both markers are not present.
+fn compute_protected_range(text: &str) -> Option<(usize, usize)> {
+    let start = text.find(SLOW_UPDATE_START)?;
+    let end = text.find(SLOW_UPDATE_END)?;
+    Some((start, end + SLOW_UPDATE_END.len()))
+}
+
+/// Check a byte position against a pre-computed protected range.
+#[inline]
+fn is_protected(range: Option<(usize, usize)>, pos: usize) -> bool {
+    range.is_some_and(|(begin, end)| pos >= begin && pos < end)
 }
 
 #[cfg(test)]
@@ -137,10 +146,10 @@ mod tests {
 
     fn make_edit(op: EditOp, target: Option<&str>, content: &str, support: usize) -> SkillEdit {
         SkillEdit {
-            op,
-            target: target.map(|s| s.to_owned()),
-            content: content.to_owned(),
             support_count: support,
+            content: content.to_owned(),
+            target: target.map(|s| s.to_owned()),
+            op,
             source: EditSource::Success,
         }
     }

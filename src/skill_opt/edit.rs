@@ -31,16 +31,20 @@ pub enum EditSource {
 }
 
 /// A single proposed edit to a skill document.
+///
+/// Fields are ordered to minimise struct padding:
+/// `usize` (8-byte aligned) first, then `String`/`Option<String>` (pointer-sized),
+/// then `u8`-repr enums last.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SkillEdit {
-    /// Which edit operation to perform.
-    pub op: EditOp,
-    /// Target text to locate (None for Append).
-    pub target: Option<String>,
-    /// New content to insert/replace/append.
-    pub content: String,
     /// Number of trajectories supporting this edit (higher = more confident).
     pub support_count: usize,
+    /// New content to insert/replace/append.
+    pub content: String,
+    /// Target text to locate (None for Append).
+    pub target: Option<String>,
+    /// Which edit operation to perform.
+    pub op: EditOp,
     /// Where this edit came from.
     pub source: EditSource,
 }

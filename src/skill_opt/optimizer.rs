@@ -31,7 +31,7 @@ pub trait SkillOptimizer {
         trajectories: &[ScoredTrajectory],
         current_skill: &str,
         edit_budget: usize,
-        rejected_buffer: &[super::gate::RejectedEdit],
+        rejected_buffer: impl IntoIterator<Item = super::gate::RejectedEdit>,
     ) -> Vec<SkillEdit>;
 
     /// Validate a candidate skill against a benchmark and return the gate result.
