@@ -307,26 +307,31 @@ pub fn unpack_triplet_indices_into(
 
 /// Pack `n_bits` of `value` into `buf` starting at `bit_pos`.
 fn pack_bits(buf: &mut [u8], bit_pos: usize, value: u32, n_bits: u8) {
-    let n = n_bits as usize;
-    for i in 0..n {
-        if value & (1 << i) != 0 {
-            let pos = bit_pos + i;
-            buf[pos / 8] |= 1 << (pos % 8);
-        }
+    let byte_pos = bit_pos / 8;
+    let shift = bit_pos % 8;
+    let mask = (1u32 << n_bits as usize) - 1;
+    let v = (value & mask) << shift;
+    buf[byte_pos] |= v as u8;
+    if shift + n_bits as usize > 8 {
+        buf[byte_pos + 1] |= (v >> 8) as u8;
+    }
+    if shift + n_bits as usize > 16 {
+        buf[byte_pos + 2] |= (v >> 16) as u8;
     }
 }
 
 /// Unpack `n_bits` from `buf` starting at `bit_pos`.
 fn unpack_bits(buf: &[u8], bit_pos: usize, n_bits: u8) -> u32 {
-    let n = n_bits as usize;
-    let mut value = 0u32;
-    for i in 0..n {
-        let pos = bit_pos + i;
-        if buf[pos / 8] & (1 << (pos % 8)) != 0 {
-            value |= 1 << i;
-        }
+    let byte_pos = bit_pos / 8;
+    let shift = bit_pos % 8;
+    let mut raw = buf[byte_pos] as u32;
+    if byte_pos + 1 < buf.len() {
+        raw |= (buf[byte_pos + 1] as u32) << 8;
     }
-    value
+    if byte_pos + 2 < buf.len() && shift + n_bits as usize > 16 {
+        raw |= (buf[byte_pos + 2] as u32) << 16;
+    }
+    (raw >> shift) & ((1u32 << n_bits as usize) - 1)
 }
 
 #[cfg(test)]

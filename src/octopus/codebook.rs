@@ -315,11 +315,13 @@ fn ln_gamma(x: f64) -> f64 {
 impl ScalarCodebook {
     /// Quantize a value using nearest-centroid search. Returns index in `[0, 2^bits)`.
     /// Uses binary search on monotonic boundaries — O(log n) instead of O(n).
+    #[inline]
     pub fn quantize(&self, value: f32) -> u16 {
         self.boundaries.partition_point(|&b| value >= b) as u16
     }
 
     /// Dequantize an index back to the centroid value.
+    #[inline]
     pub fn dequantize(&self, index: u16) -> f32 {
         self.centroids.get(index as usize).copied().unwrap_or(0.0)
     }
