@@ -49,10 +49,12 @@ impl Default for MbuCounter {
 // ---------------------------------------------------------------------------
 
 /// Formatted MBU report for a benchmark run.
+///
+/// Field order: u64 pairs grouped before Duration (12 bytes) to eliminate padding.
 pub struct MbuReport {
     pub bytes_read: u64,
-    pub elapsed: std::time::Duration,
     pub tokens_generated: u64,
+    pub elapsed: std::time::Duration,
 }
 
 impl MbuReport {

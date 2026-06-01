@@ -57,14 +57,6 @@ pub fn subspace_ratios(gradient: &[f32], dominant_eigvecs: &[Vec<f32>]) -> (f32,
     (r_dom_clamped, r_bulk)
 }
 
-/// Effective rank of a matrix (entropy of normalized singular values).
-///
-/// Computes `erank = exp(H)` where `H = -Σ σ̃_i log(σ̃_i)` and
-/// `σ̃_i = σ_i / Σ σ_j` are the normalized eigenvalues of `M^T @ M`.
-///
-/// Uses power iteration to estimate the top singular values. For simplicity,
-/// we compute all eigenvalues of `M^T @ M` directly (O(n²m) for n ≤ m).
-
 /// Zero-alloc variant of [`effective_rank`].
 ///
 /// `gram_buf` must have `>= min(rows, cols)^2` elements.
@@ -129,6 +121,13 @@ pub fn effective_rank_into(
     }
 }
 
+/// Effective rank of a matrix (entropy of normalized singular values).
+///
+/// Computes `erank = exp(H)` where `H = -Σ σ̃_i log(σ̃_i)` and
+/// `σ̃_i = σ_i / Σ σ_j` are the normalized eigenvalues of `M^T @ M`.
+///
+/// Uses Jacobi eigenvalue iteration on the Gram matrix to compute all
+/// eigenvalues of `M^T @ M` directly (O(n²m) for n ≤ m).
 #[cfg(feature = "river_valley")]
 pub fn effective_rank(matrix: &[f32], rows: usize, cols: usize) -> f32 {
     assert_eq!(matrix.len(), rows * cols, "matrix size mismatch");
