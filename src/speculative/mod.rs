@@ -51,6 +51,10 @@ pub use dd_tree::{
 pub use dd_tree::ResidualTracker;
 #[cfg(feature = "sr2am_configurator")]
 pub use dd_tree::entropy_truncate_horizon;
+#[cfg(feature = "recfm")]
+pub use dd_tree::{
+    CrossScaleConfig, branch_velocity_at, build_dd_tree_screened_recfm, cross_scale_consistent,
+};
 #[cfg(feature = "elf_sde")]
 pub use dd_tree::{WidthScaleConfig, WidthSelectionMode, best_of_k_rollouts};
 pub use dflash::{

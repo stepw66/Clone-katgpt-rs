@@ -44,3 +44,6 @@ pub use segment_match::{HopSegmentIndex, IndexedSegment, SegmentMatch};
 
 #[cfg(feature = "bandit")]
 pub use speculator::BanditSpeculator;
+
+#[cfg(feature = "recfm")]
+pub use speculator::{CrossHopConfig, observation_velocity};
