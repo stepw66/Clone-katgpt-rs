@@ -181,6 +181,13 @@ pub use ppot::{
     rank_by_consistency, rank_by_consistency_weighted, select_best_variant, token_entropy,
 };
 
+// ── FlashAR Strided Anchor-Then-Fill (Plan 166 T11, feature: flashar_anchor) ──
+#[cfg(feature = "flashar_anchor")]
+pub mod flashar_anchor;
+
+#[cfg(feature = "flashar_anchor")]
+pub use flashar_anchor::{AnchorConfig, AnchorFillResult, anchor_then_fill};
+
 // ── FlashAR Consensus Tri-Mode re-exports (Plan 166, feature: flashar_consensus) ──
 #[cfg(feature = "flashar_consensus")]
 pub mod flashar_consensus;

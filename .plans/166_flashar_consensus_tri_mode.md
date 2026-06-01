@@ -1,7 +1,7 @@
 # Plan 166: FlashAR Consensus Tri-Mode with Ternary Thermal Paths
 
 **Source:** Research 149 — FlashAR Diagonal-Step Parallel Decoding
-**Status:** ✅ COMPLETE (T1-T10 done, promoted to default-on; T11 stretch goal pending under `flashar_anchor`)
+**Status:** ✅ COMPLETE (T1-T11 all done; promoted to default-on)
 **Feature Gate:** `flashar_consensus` (requires `tri_mode` + `dllm` + `plasma_path`)
 **Default:** On (promoted after GOAT proof passed)
 
@@ -130,10 +130,11 @@ FlashAR's fusion gate σ(MLP) per position is replaced by our ternary thermal pa
 
 ### Phase 5: Strided Anchor D2F (Stretch)
 
-- [ ] T11: Implement strided anchor-then-fill pattern under `flashar_anchor` feature gate
+- [x] T11: Implement strided anchor-then-fill pattern under `flashar_anchor` feature gate
   - Round 1: predict every S-th position via AR (diagonal analog)
   - Round 2: D2F decode remaining positions with anchor positions pre-filled
   - Measure: denoising iterations reduction with vs without anchors
+  - GOAT proof: 9 tests pass — anchor placement, step reduction, determinism, stride density
 
 ---
 
