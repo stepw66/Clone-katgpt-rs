@@ -35,8 +35,6 @@ pub(crate) const UCB1_C: f32 = 2.0;
 // ── Arm Index Mapping ─────────────────────────────────────────
 
 /// Map `PlanningDecision` to arm index for Q-value arrays.
-#[inline]
-/// Map `PlanningDecision` to arm index for Q-value arrays.
 /// Only maps the 4 base SR²AM arms. FeedbackBandit handles arms 4-5.
 #[inline]
 pub(crate) fn arm_index(decision: PlanningDecision) -> usize {
@@ -52,7 +50,6 @@ pub(crate) fn arm_index(decision: PlanningDecision) -> usize {
     }
 }
 
-/// Map arm index back to `PlanningDecision`.
 /// Map arm index back to `PlanningDecision` (base 4 arms only).
 #[inline]
 pub(crate) fn from_arm_index(idx: usize) -> PlanningDecision {
@@ -364,8 +361,11 @@ mod tests {
         assert_eq!(arm_index(PlanningDecision::SpecHop { k: 4 }), 3);
         #[cfg(feature = "sia_feedback")]
         {
-            assert_eq!(arm_index(PlanningDecision::HarnessUpdate), 4);
-            assert_eq!(arm_index(PlanningDecision::WeightUpdate), 5);
+            // FeedbackBandit arms are no longer mapped in ConfiguratorBandit (T20 decoupling).
+            // They are handled independently by FeedbackBandit's own UCB1.
+            // Verify they panic if accidentally routed to ConfiguratorBandit.
+            let result = std::panic::catch_unwind(|| arm_index(PlanningDecision::HarnessUpdate));
+            assert!(result.is_err(), "HarnessUpdate should not be routable to ConfiguratorBandit");
         }
 
         assert_eq!(from_arm_index(0), PlanningDecision::PlanNew);
@@ -375,11 +375,12 @@ mod tests {
             from_arm_index(3),
             PlanningDecision::SpecHop { .. }
         ));
+        // from_arm_index only handles base 4 arms; feedback arms are managed by FeedbackBandit
         #[cfg(feature = "sia_feedback")]
         {
-            assert!(matches!(from_arm_index(4), PlanningDecision::HarnessUpdate));
-            assert!(matches!(from_arm_index(5), PlanningDecision::WeightUpdate));
-            assert!(matches!(from_arm_index(99), PlanningDecision::WeightUpdate));
+            // Indices >= 4 map to SpecHop (fallback) — FeedbackBandit handles them separately
+            assert!(matches!(from_arm_index(4), PlanningDecision::SpecHop { .. }));
+            assert!(matches!(from_arm_index(99), PlanningDecision::SpecHop { .. }));
         }
     }
 
