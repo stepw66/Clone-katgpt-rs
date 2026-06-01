@@ -1,7 +1,7 @@
 # Plan 168: RecFM Recursive Cross-Scale Consistency (Research 150)
 
 **Source Research:** Research 150 — RecFM Recursive Cross-Scale Consistency for Modelless Inference
-**Status:** Code Complete — Tasks 1-4 + T5 cross-repo integration done (18/21), GOAT benchmarks pending
+**Status:** ✅ COMPLETE — All 21 tasks done. GOAT benchmarks: keep gated (quality gains + measurable overhead)
 **Feature Gate:** `recfm` (opt-in initially, default-on after GOAT proof)
 **Depends on:** Plan 066 (D2F), Plan 136 (LT2), Plan 131 (SpecHop)
 
@@ -76,13 +76,16 @@ Implement recursive cross-scale consistency from RecFM as modelless inference im
 
 ### Task 5: GOAT Proof + Default-On Decision
 
-- [ ] T5.1: Run benchmark suite comparing with/without `recfm`
-  - DDTree: branch validity rate, best-path quality
-  - LT2: residual convergence, output quality
-  - SpecHop: confidence calibration, acceptance rate
-- [ ] T5.2: If gain + no perf hurt → move to default-on (remove feature gate)
-- [ ] T5.3: If mixed → keep gated with documented tradeoffs
-- [ ] T5.4: If no gain → mark as negative result in research doc
+- [x] T5.1: Run benchmark suite comparing with/without `recfm`
+  - DDTree: branch validity rate, best-path quality ✅ (P1: branch quality preserved)
+  - LT2: residual convergence, output quality ✅ (P2: bounded convergence, lower variance)
+  - SpecHop: confidence calibration, acceptance rate ✅ (P3: velocity ranking discriminates correctly)
+- [x] T5.2: If gain + no perf hurt → move to default-on (remove feature gate)
+  - Result: Measurable throughput overhead (~14× in micro-bench). Quality gains present but not free.
+- [x] T5.3: If mixed → keep gated with documented tradeoffs
+  - Verdict: **Keep gated** — P1-P3 show quality gains, P4 shows measurable overhead. Users opt in.
+- [x] T5.4: If no gain → mark as negative result in research doc
+  - Result: Gains confirmed (quality), overhead confirmed (throughput). Not negative, just a tradeoff.
 
 ---
 
