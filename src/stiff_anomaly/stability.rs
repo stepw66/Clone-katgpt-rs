@@ -4,7 +4,9 @@
 //! Jaccard overlap and z-score gating. The anomaly gate classifies state
 //! changes as Normal, StiffCollision, or ElasticAbsorption.
 
-use crate::stiff_anomaly::subspace::{decompose, soft_alignment_ratio};
+use crate::stiff_anomaly::subspace::{
+    decompose_into, soft_alignment_ratio, StiffSoftDecomposition,
+};
 
 /// Track eigenvalue/eigenvector stability across temporal windows.
 ///
@@ -71,59 +73,105 @@ impl EigenvalueTracker {
     /// Returns a vector of z-scores: (current[i] - mean[i]) / std[i].
     /// Negative z-scores indicate eigenvalue collapse relative to baseline.
     pub fn eigenspace_zscore(&self, current: &[f32]) -> Vec<f32> {
-        current
-            .iter()
-            .zip(self.baseline_mean.iter())
-            .zip(self.baseline_std.iter())
-            .map(|((&c, &m), &s)| (c - m) / s)
-            .collect()
+        let mut out = Vec::with_capacity(current.len());
+        self.eigenspace_zscore_into(current, &mut out);
+        out
+    }
+
+    /// Zero-allocation variant of [`eigenspace_zscore`] that writes into `out`.
+    ///
+    /// `out` is cleared and filled. Callers can pre-allocate once and reuse.
+    pub fn eigenspace_zscore_into(&self, current: &[f32], out: &mut Vec<f32>) {
+        out.clear();
+        out.extend(
+            current
+                .iter()
+                .zip(self.baseline_mean.iter())
+                .zip(self.baseline_std.iter())
+                .map(|((&c, &m), &s)| (c - m) / s),
+        );
     }
 
     /// Jaccard overlap of top-k eigenvalue indices between two windows.
     ///
     /// Measures structural stability: which eigenvalue indices are in the
     /// top-k for both windows. Returns 1.0 for perfect overlap, 0.0 for none.
+    ///
+    /// Optimized path: when `sorted_desc` is true, both inputs are assumed to
+    /// already be sorted descending, so the top-k indices are simply `[0..k]`
+    /// and no sort is needed.
+    ///
+    /// When `sorted_desc` is false or inputs may not be pre-sorted, scratch
+    /// buffers `scratch_a` and `scratch_b` are used instead of allocating.
     pub fn eigenvalue_jaccard(prev: &[f32], curr: &[f32], top_k: usize) -> f32 {
+        let mut a = Vec::new();
+        let mut b = Vec::new();
+        Self::eigenvalue_jaccard_with_buffers(prev, curr, top_k, false, &mut a, &mut b)
+    }
+
+    /// Zero-allocation variant of [`eigenvalue_jaccard`] with reusable scratch buffers.
+    ///
+    /// When `sorted_desc` is true, eigenvalues are assumed already sorted
+    /// descending so the top-k indices are `[0..k]` (no sorting needed).
+    /// When false, `scratch_a` / `scratch_b` are used for partial sort.
+    pub fn eigenvalue_jaccard_with_buffers(
+        prev: &[f32],
+        curr: &[f32],
+        top_k: usize,
+        sorted_desc: bool,
+        scratch_a: &mut Vec<usize>,
+        scratch_b: &mut Vec<usize>,
+    ) -> f32 {
         if prev.is_empty() || curr.is_empty() || top_k == 0 {
             return 0.0;
         }
         let k = top_k.min(prev.len()).min(curr.len());
 
-        // Get top-k indices by value — sort full index arrays (both should be
-        // sorted descending, but we sort to be safe).
-        // Use partial sort: only the first k need to be in order, avoiding
-        // a full sort when n >> k.
-        let mut prev_idx: Vec<usize> = (0..prev.len()).collect();
-        prev_idx.select_nth_unstable_by(k - 1, |&a, &b| {
-            prev[b]
-                .partial_cmp(&prev[a])
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
-        // Sort the top-k portion for consistent comparison
-        prev_idx[..k].sort_by(|&a, &b| {
-            prev[b]
-                .partial_cmp(&prev[a])
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
+        let (prev_top, curr_top): (&[usize], &[usize]) = if sorted_desc {
+            // Eigenvalues already sorted descending: top-k indices are [0..k]
+            // Use the scratch buffers as temporary storage for a simple range.
+            scratch_a.clear();
+            scratch_a.extend(0..k);
+            scratch_b.clear();
+            scratch_b.extend(0..k);
+            (scratch_a, scratch_b)
+        } else {
+            // Fallback: partial sort to find top-k indices
+            scratch_a.clear();
+            scratch_a.extend(0..prev.len());
+            scratch_a.select_nth_unstable_by(k - 1, |&a, &b| {
+                prev[b]
+                    .partial_cmp(&prev[a])
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+            scratch_a[..k].sort_by(|&a, &b| {
+                prev[b]
+                    .partial_cmp(&prev[a])
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
 
-        let mut curr_idx: Vec<usize> = (0..curr.len()).collect();
-        curr_idx.select_nth_unstable_by(k - 1, |&a, &b| {
-            curr[b]
-                .partial_cmp(&curr[a])
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
-        curr_idx[..k].sort_by(|&a, &b| {
-            curr[b]
-                .partial_cmp(&curr[a])
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
+            scratch_b.clear();
+            scratch_b.extend(0..curr.len());
+            scratch_b.select_nth_unstable_by(k - 1, |&a, &b| {
+                curr[b]
+                    .partial_cmp(&curr[a])
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+            scratch_b[..k].sort_by(|&a, &b| {
+                curr[b]
+                    .partial_cmp(&curr[a])
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+
+            (scratch_a, scratch_b)
+        };
 
         // Compute Jaccard via sorted intersection (avoids HashSet allocation)
         let mut intersection = 0usize;
         let mut i = 0usize;
         let mut j = 0usize;
         while i < k && j < k {
-            match prev_idx[i].cmp(&curr_idx[j]) {
+            match prev_top[i].cmp(&curr_top[j]) {
                 std::cmp::Ordering::Less => i += 1,
                 std::cmp::Ordering::Greater => j += 1,
                 std::cmp::Ordering::Equal => {
@@ -167,6 +215,27 @@ pub enum GateResult {
     StiffCollision { z_score: f32 },
     /// Elastic absorption — delta_x is mostly in soft subspace.
     ElasticAbsorption { alpha: f32 },
+}
+
+/// Reusable buffers for zero-allocation [`StiffAnomalyGate::evaluate`] calls.
+///
+/// Create once and pass to [`StiffAnomalyGate::evaluate_with_buffers`] on each call.
+#[derive(Debug, Clone, Default)]
+pub struct EvaluateBuffers {
+    /// Z-score output buffer.
+    z_scores: Vec<f32>,
+    /// Decomposition buffer.
+    decomp: StiffSoftDecomposition,
+}
+
+impl EvaluateBuffers {
+    /// Pre-allocate buffers for `dim`-dimensional data.
+    pub fn with_capacity(dim: usize) -> Self {
+        Self {
+            z_scores: Vec::with_capacity(dim),
+            decomp: StiffSoftDecomposition::with_capacity(dim),
+        }
+    }
 }
 
 /// Anomaly gate with configurable thresholds.
@@ -215,6 +284,11 @@ impl StiffAnomalyGate {
     ///
     /// Uses z-scores from `tracker` for the `current` eigenvalue window
     /// and `delta_x` for soft alignment classification.
+    ///
+    /// This method allocates per call. For hot paths, use [`evaluate_with_buffers`]
+    /// with pre-allocated [`EvaluateBuffers`].
+    ///
+    /// [`evaluate_with_buffers`]: StiffAnomalyGate::evaluate_with_buffers
     pub fn evaluate(
         &self,
         tracker: &EigenvalueTracker,
@@ -223,18 +297,33 @@ impl StiffAnomalyGate {
         delta_x: &[f32],
         trace_mass: f32,
     ) -> GateResult {
-        let z_scores = tracker.eigenspace_zscore(current);
+        let dim = current.len();
+        let mut buf = EvaluateBuffers::with_capacity(dim);
+        self.evaluate_with_buffers(tracker, current, eigenvectors, delta_x, trace_mass, &mut buf)
+    }
+
+    /// Zero-allocation variant of [`evaluate`](Self::evaluate) using pre-allocated buffers.
+    pub fn evaluate_with_buffers(
+        &self,
+        tracker: &EigenvalueTracker,
+        current: &[f32],
+        eigenvectors: &[Vec<f32>],
+        delta_x: &[f32],
+        trace_mass: f32,
+        buf: &mut EvaluateBuffers,
+    ) -> GateResult {
+        tracker.eigenspace_zscore_into(current, &mut buf.z_scores);
 
         // Check for stiff collision: any eigenvalue z-score below threshold
-        if let Some(min_z) = z_scores.iter().cloned().reduce(f32::min)
+        if let Some(min_z) = buf.z_scores.iter().cloned().reduce(f32::min)
             && min_z < self.z_threshold
         {
             return GateResult::StiffCollision { z_score: min_z };
         }
 
-        // Compute soft alignment ratio
-        let decomp = decompose(current.to_vec(), eigenvectors.to_vec(), trace_mass);
-        let alpha = soft_alignment_ratio(&decomp, delta_x);
+        // Compute soft alignment ratio using reusable decomposition buffer
+        decompose_into(current, eigenvectors, trace_mass, &mut buf.decomp);
+        let alpha = soft_alignment_ratio(&buf.decomp, delta_x);
 
         if alpha >= self.alpha_threshold {
             GateResult::ElasticAbsorption { alpha }

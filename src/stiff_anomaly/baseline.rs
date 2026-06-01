@@ -42,15 +42,18 @@ where
 
     let mut null_scores: Vec<f32> = Vec::with_capacity(n_iterations);
 
+    // Pre-allocate reusable data buffer — cleared and refilled each iteration
+    let mut data: Vec<Vec<f32>> = (0..dim)
+        .map(|_| vec![0.0f32; dim])
+        .collect();
+
     for _ in 0..n_iterations {
-        // Generate random dataset: dim vectors of dimension dim
-        let data: Vec<Vec<f32>> = (0..dim)
-            .map(|_| {
-                (0..dim)
-                    .map(|_| rng.f32() * 2.0 - 1.0) // uniform [-1, 1)
-                    .collect()
-            })
-            .collect();
+        // Refill pre-allocated data buffer with random values
+        for row in &mut data {
+            for val in row.iter_mut() {
+                *val = rng.f32() * 2.0 - 1.0; // uniform [-1, 1)
+            }
+        }
 
         let score = pipeline(&data);
         null_scores.push(score);
@@ -73,14 +76,12 @@ where
         .fold(f32::NEG_INFINITY, f32::max);
 
     // Run pipeline on structured data (identity-like) for comparison
-    let structured: Vec<Vec<f32>> = (0..dim)
-        .map(|i| {
-            let mut v = vec![0.0f32; dim];
-            v[i] = 1.0;
-            v
-        })
-        .collect();
-    let real_score = pipeline(&structured) as f64;
+    // Reuse data buffer for structured input
+    for (i, row) in data.iter_mut().enumerate() {
+        row.fill(0.0);
+        row[i] = 1.0;
+    }
+    let real_score = pipeline(&data) as f64;
 
     let sigma_separation = if null_std > 1e-12 {
         ((real_score - null_mean) / null_std as f64) as f32

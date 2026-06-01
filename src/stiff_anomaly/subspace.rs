@@ -7,7 +7,7 @@
 //! collision (potential anomaly).
 
 /// Result of stiff/soft subspace decomposition on eigenvalues.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct StiffSoftDecomposition {
     /// Top-k eigenvalues by magnitude (stiff subspace).
     pub stiff_eigenvalues: Vec<f32>,
@@ -21,6 +21,32 @@ pub struct StiffSoftDecomposition {
     pub eigenvalues: Vec<f32>,
     /// Stiff dimension count.
     pub k: usize,
+}
+
+impl StiffSoftDecomposition {
+    /// Pre-allocate a reusable decomposition buffer for `dim`-sized data.
+    ///
+    /// Use with [`decompose_into`] to avoid per-call allocations.
+    pub fn with_capacity(dim: usize) -> Self {
+        Self {
+            stiff_eigenvalues: Vec::with_capacity(dim),
+            soft_eigenvalues: Vec::with_capacity(dim),
+            stiff_eigenvectors: Vec::with_capacity(dim),
+            soft_eigenvectors: Vec::with_capacity(dim),
+            eigenvalues: Vec::with_capacity(dim),
+            k: 0,
+        }
+    }
+
+    /// Clear all internal buffers, retaining capacity for reuse.
+    pub fn clear(&mut self) {
+        self.stiff_eigenvalues.clear();
+        self.soft_eigenvalues.clear();
+        self.stiff_eigenvectors.clear();
+        self.soft_eigenvectors.clear();
+        self.eigenvalues.clear();
+        self.k = 0;
+    }
 }
 
 /// Find invariant k at given trace mass threshold (e.g., 0.90).
@@ -48,6 +74,9 @@ pub fn stiff_subspace_k(eigenvalues: &[f32], trace_mass: f32) -> usize {
 /// where row i is the eigenvector corresponding to `eigenvalues[i]`.
 /// `trace_mass` is the fraction of total variance captured by the stiff
 /// subspace (e.g., 0.90).
+///
+/// Allocates a new [`StiffSoftDecomposition`]. For zero-alloc hot paths, use
+/// [`decompose_into`] instead.
 pub fn decompose(
     eigenvalues: Vec<f32>,
     eigenvectors: Vec<Vec<f32>>,
@@ -64,6 +93,28 @@ pub fn decompose(
         eigenvalues,
         k,
     }
+}
+
+/// Zero-allocation variant of [`decompose`] that writes into a pre-allocated buffer.
+///
+/// Populates `buf` in-place by copying slices from the borrowed inputs.
+/// Clears `buf` first, then extends from the input references.
+pub fn decompose_into(
+    eigenvalues: &[f32],
+    eigenvectors: &[Vec<f32>],
+    trace_mass: f32,
+    buf: &mut StiffSoftDecomposition,
+) {
+    buf.clear();
+    let k = stiff_subspace_k(eigenvalues, trace_mass);
+    buf.stiff_eigenvalues.extend_from_slice(&eigenvalues[..k]);
+    buf.soft_eigenvalues.extend_from_slice(&eigenvalues[k..]);
+    buf.stiff_eigenvectors
+        .extend(eigenvectors[..k].iter().cloned());
+    buf.soft_eigenvectors
+        .extend(eigenvectors[k..].iter().cloned());
+    buf.eigenvalues.extend_from_slice(eigenvalues);
+    buf.k = k;
 }
 
 /// Compute soft alignment ratio: how much of `delta_x` projects onto soft axes.
