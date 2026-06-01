@@ -2508,7 +2508,7 @@ Every feature traced from research paper to implementation to benchmark. Separat
 
 ### 🐐 Default GOAT (Production Stack)
 
-`default = ["sparse_mlp", "domain_latent", "ppot", "bandit", "bt_rank", "spectral_quant", "hybrid_oct_pq", "elf_sde", "cna_steering", "deep_manifold", "federation", "tes_loop", "lattice_deduction", "delta_routing", "stability_metrics", "mls_aggregate", "gdn2_attention", "dash_attn", "dreamer", "lt2_looped", "dmax_spd", "eqr_convergence", "subterranean", "sr2am_configurator", "data_gate", "plasma_path", "parallel_probe", "tf_loop", "leo_all_goals", "dual_leo", "sigmoid_margin", "moa_inference", "sleep_consolidation", "spectral_hierarchy", "dual_gram_pca", "roofline_cost", "newton_schulz", "river_valley"]` (38 default features)
+default = ["sparse_mlp", "domain_latent", "ppot", "bandit", "bt_rank", "spectral_quant", "hybrid_oct_pq", "elf_sde", "cna_steering", "deep_manifold", "federation", "tes_loop", "lattice_deduction", "delta_routing", "stability_metrics", "mls_aggregate", "gdn2_attention", "dash_attn", "dreamer", "lt2_looped", "dmax_spd", "eqr_convergence", "subterranean", "sr2am_configurator", "data_gate", "plasma_path", "parallel_probe", "tf_loop", "leo_all_goals", "dual_leo", "sigmoid_margin", "moa_inference", "sleep_consolidation", "spectral_hierarchy", "dual_gram_pca", "roofline_cost", "newton_schulz", "river_valley", "peira_distill", "kog_cpu_fusion", "gepa_reflective", "phrase_boost", "hydra_budget", "flashar_consensus", "budget_adaptation"]` (45 default features)
 
 | Feature | Source | Real Gain (from code) | Replaced |
 |---------|--------|-----------------------|----------|
@@ -2555,6 +2555,13 @@ Every feature traced from research paper to implementation to benchmark. Separat
 | **Spectral Hierarchy** (`spectral_hierarchy`) | Research 121, Plan 156 | **GOAT proved**. Validates hierarchical splitting geometry in co-occurrence Gram matrices: eigenspace alignment, Haar wavelet basis, Cauchy interlacing check. Default-on. | No Gram matrix structural validation |
 | **Dual-Gram PCA** (`dual_gram_pca`) | Research R130, Plan 159 | **GOAT proved**. Dual-Gram PCA routing for short-sequence calibration. SIMD-accelerated Gram matrix computation. Default-on. | No short-sequence calibration |
 | **Roofline Cost** (`roofline_cost`) | [FlashLib Roofline](https://github.com/flash-ai/flashlib) (Research R130, Plan 159) | **GOAT proved**. Roofline cost model for GPU operator runtime prediction. ~5µs CPU-only estimation replaces ~100ms GemvAutotune benchmarking. Compute/Memory/Launch bottleneck classification. Default-on. | Runtime benchmarking per operator |
+| **Kog CPU Fusion** (`kog_cpu_fusion`) | Research 139, Plan 160 | **GOAT 3/3** Gemma 2 scale. Monokernel CPU fusion: RMSNorm gamma folding + QKV interleaving in single-pass matmul. Default-on. | Separate RMSNorm + QKV matmul passes |
+| **PEIRA Distill** (`peira_distill`) | Research 115, Plan 153 | **GOAT 7/7**. Inter-view regressor alignment for collapse-free modelless distillation. Default-on. | Unaligned multi-view distillation |
+| **GEPA-D Reflective** (`gepa_reflective`) | Research 146, Plan 164 | **GOAT 4/4**. Pareto bandit config evolution via reflective distillation. Frontier insert 0.098µs, +2.1% overhead vs BanditPruner. Default-on. Requires `bandit`, `memo_reflections`. | Static bandit configuration |
+| **PhraseBoost** (`phrase_boost`) | Research 147, Plan 164 | **GOAT 5/5**. Context trie phrase boosting for DDTree. +60.4% acceptance rate (0%→60.4%), <1µs per step. Default-on. | No phrase-level context in DDTree |
+| **Hydra Budget** (`hydra_budget`) | Research 148, Plan 165 | **GOAT 4/4**. Emergent self-repair layer skipping. 34.4% compute savings, 100% profile stability across seeds. Default-on. | Fixed full-depth decode |
+| **FlashAR Consensus** (`flashar_consensus`) | Research 149, Plan 166 | **GOAT 9/9**. Dual-path ternary thermal routing for consensus tri-mode. Plasma hit rate 4.4%, Hot 45.5%, Warm 19.8%, Cold 30.4%. Default-on. Requires `tri_mode`, `plasma_path`. | Single-mode AR decode |
+| **Budget Adaptation** (`budget_adaptation`) | Research R050, Plan 167 | **GOAT 8/8**. Compression-adaptive decode budget: PFlash ratio scales DDTree budget [0.5×, 2.0×]. Simple prompts → less search. Complex → more. ~1.3µs overhead. Default-on. | Fixed tree budget per domain |
 
 ### 🔒 Gated Features (Opt-In, Proven)
 

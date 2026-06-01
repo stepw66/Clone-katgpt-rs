@@ -89,7 +89,7 @@ Episode → TrialLog → MeMo Reflection
 - [x] Feature gate: `gepa_reflective = ["bandit", "memo_reflections"]`
 - [x] Add to `Cargo.toml` features — **off by default**
 - [x] If GOAT proof shows gain with no perf hurt → switch to default-on
-- [ ] Update README with GEPA-D section
+- [x] Update README with GEPA-D section
 
 ---
 

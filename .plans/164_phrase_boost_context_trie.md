@@ -59,7 +59,7 @@ Implement a `PhraseBoostPruner` that wraps any `ScreeningPruner` and adds domain
 ### T6: Default-ON Decision (Post-GOAT)
 - [x] If T3 or T4 shows gain AND T5 shows no perf hurt → move to default-on
 - [x] Update `Cargo.toml` default features
-- [ ] Update README.md with phrase boosting section
+- [x] Update README.md with phrase boosting section
 
 ---
 

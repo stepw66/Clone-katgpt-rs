@@ -278,6 +278,25 @@ pub fn block_select(block_scores: &[f32], cfg: &FlashPrefillConfig) -> Vec<usize
     selected
 }
 
+/// Compute compression ratio from block scores: fraction of blocks passing alpha threshold.
+///
+/// This is the ratio r used by `adaptive_tree_budget()` to scale DDTree budget.
+/// It's a free byproduct of the same scoring that `block_select` already does —
+/// no additional compute required.
+///
+/// # Returns
+/// r ∈ (0, 1] where 1.0 = all blocks pass (complex prompt), low = simple prompt.
+pub fn block_compression_ratio(block_scores: &[f32], alpha: f32) -> f32 {
+    let num_blocks = block_scores.len();
+    if num_blocks == 0 {
+        return 1.0;
+    }
+    let max_score = block_scores.iter().cloned().fold(0.0f32, f32::max);
+    let threshold = max_score * alpha;
+    let passing = block_scores.iter().filter(|&&s| s >= threshold).count();
+    (passing as f32) / (num_blocks as f32)
+}
+
 /// Adaptive block selection using α-entmax (α=1.5) sparse routing.
 ///
 /// Unlike `block_select()` which uses fixed top-k via alpha threshold,

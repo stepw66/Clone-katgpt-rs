@@ -627,6 +627,28 @@ pub enum PrefillMode {
     Always,
 }
 
+/// Controls how the DDTree tree budget adapts per-prompt based on complexity signals.
+///
+/// When enabled, the compression ratio from PFlash attention scoring (a free byproduct
+/// of prefill) scales the tree budget: simple prompts → less search, complex → more.
+/// Budget is clamped to [base/2, base*2] regardless of signal.
+///
+/// # Feature flag
+/// `budget_adaptation` — Plan 167
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[repr(u8)]
+pub enum BudgetAdaptation {
+    /// Fixed budget — current behavior, no adaptation.
+    #[default]
+    Off,
+    /// Scale by compression ratio from attention scores.
+    /// r ∈ (0,1]: fraction of blocks that pass alpha threshold.
+    /// High r → complex → more budget. Low r → simple → less budget.
+    Compression,
+    /// Scale by first-marginal entropy (placeholder for future).
+    Entropy,
+}
+
 // ── Score Reduction Mode (Research 45, Plan 080) ──────────────
 
 /// Reduction mode for block/pair scoring and compressed attention.
@@ -679,6 +701,8 @@ pub struct FlashPrefillConfig {
     /// Score reduction mode for block pair scoring.
     /// When `maxsim` feature is disabled, always behaves as SoftmaxSum.
     pub score_reduction: ScoreReduction,
+    /// Budget adaptation mode for per-prompt tree budget scaling.
+    pub budget_adaptation: BudgetAdaptation,
 }
 
 impl Default for FlashPrefillConfig {
@@ -691,6 +715,7 @@ impl Default for FlashPrefillConfig {
             alpha: 0.15,
             tail_window: 4,
             score_reduction: ScoreReduction::default(),
+            budget_adaptation: BudgetAdaptation::default(),
         }
     }
 }
@@ -706,6 +731,7 @@ impl FlashPrefillConfig {
             alpha: 0.15,
             tail_window: 4,
             score_reduction: ScoreReduction::default(),
+            budget_adaptation: BudgetAdaptation::default(),
         }
     }
 
@@ -719,6 +745,7 @@ impl FlashPrefillConfig {
             alpha: 0.85,
             tail_window: 8,
             score_reduction: ScoreReduction::default(),
+            budget_adaptation: BudgetAdaptation::default(),
         }
     }
 
@@ -732,6 +759,7 @@ impl FlashPrefillConfig {
             alpha: 0.12,
             tail_window: 2,
             score_reduction: ScoreReduction::default(),
+            budget_adaptation: BudgetAdaptation::default(),
         }
     }
 }

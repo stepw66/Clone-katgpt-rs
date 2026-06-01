@@ -1,3 +1,4 @@
+pub mod budget_compat;
 pub mod dd_tree;
 pub mod dflash;
 pub mod drafter_lora;
@@ -6,6 +7,9 @@ pub mod sampling;
 pub mod step;
 pub mod types;
 pub mod verifier;
+
+#[cfg(feature = "budget_adaptation")]
+pub mod budget;
 
 #[cfg(feature = "ppot")]
 pub mod ppot;
@@ -63,9 +67,9 @@ pub use sampling::{
 };
 pub use step::{speculative_step, speculative_step_verifier};
 pub use types::{
-    BinaryScreeningPruner, BlockScores, ConstraintPruner, DDTreeBranchCache, DecodeStrategy,
-    DraftEvent, DraftResult, FlashPrefillConfig, NoPruner, NoScreeningPruner, PrefillMode,
-    RejectionReason, ScreeningPruner, SdeConfig, SpeculativeContext, TreeNode,
+    BinaryScreeningPruner, BlockScores, BudgetAdaptation, ConstraintPruner, DDTreeBranchCache,
+    DecodeStrategy, DraftEvent, DraftResult, FlashPrefillConfig, NoPruner, NoScreeningPruner,
+    PrefillMode, RejectionReason, ScreeningPruner, SdeConfig, SpeculativeContext, TreeNode,
 };
 
 #[cfg(feature = "elf_sde")]
@@ -153,6 +157,14 @@ pub use diffusion_sampler::{
 
 #[cfg(feature = "sudoku")]
 pub use crate::pruners::SudokuPruner;
+
+pub use budget_compat::{effective_tree_budget, scaled_draft_lookahead};
+
+// ── Budget Adaptation Re-exports (Plan 167, feature: budget_adaptation) ──
+#[cfg(feature = "budget_adaptation")]
+pub use budget::{adaptive_tree_budget, compression_ratio};
+#[cfg(feature = "budget_adaptation")]
+pub use prefill::block_compression_ratio;
 
 // ── PPoT Re-exports (Plan 026 + 027) ──────────────────────────
 #[cfg(feature = "ppot")]
