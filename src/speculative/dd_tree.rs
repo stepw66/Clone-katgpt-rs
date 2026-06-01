@@ -213,6 +213,25 @@ pub fn build_dd_tree_screened(
     std::mem::take(&mut builder.tree)
 }
 
+/// DDTree with RecFM cross-scale consistency filtering (Plan 168, Research 150).
+///
+/// Identical to [`build_dd_tree_screened`] but additionally prunes branches whose
+/// probability velocity violates cross-scale consistency.
+///
+/// When `recfm_config.enable == false`, delegates to [`build_dd_tree_screened`] unchanged.
+#[cfg(feature = "recfm")]
+pub fn build_dd_tree_screened_recfm(
+    marginals: &[&[f32]],
+    config: &crate::types::Config,
+    screener: &dyn ScreeningPruner,
+    chain_seed: bool,
+    recfm_config: &CrossScaleConfig,
+) -> Vec<TreeNode> {
+    let mut builder = TreeBuilder::new(config);
+    builder.build_screened_recfm(marginals, config, screener, chain_seed, recfm_config);
+    std::mem::take(&mut builder.tree)
+}
+
 /// DDTree with GFlowNet backward-weighted scoring (Plan 052).
 ///
 /// Generalization of [`build_dd_tree_screened`] with tunable backward weight
@@ -437,6 +456,85 @@ impl ResidualTracker {
     pub fn is_converged(&self, threshold: f32) -> bool {
         self.final_residual() < threshold
     }
+}
+
+// ── RecFM Cross-Scale Consistency (Plan 168) ─────────────────
+
+/// Configuration for RecFM recursive cross-scale consistency filtering (Research 150).
+///
+/// RecFM's Theorem 3.1 proves that consistency loss constrains trajectory acceleration
+/// ∂t_v, directly reducing discretization error. Applied to DDTree, this filters branches
+/// whose probability velocity violates cross-scale consistency.
+///
+/// When `enable` is `false`, all RecFM checks are no-ops (zero cost on hot path).
+#[cfg(feature = "recfm")]
+#[repr(C)]
+#[derive(Debug, Clone)]
+pub struct CrossScaleConfig {
+    /// Enable RecFM cross-scale consistency filtering.
+    pub enable: bool,
+    /// Scale factor α for velocity comparison: `|v₂ − α·v₁| ≤ threshold`.
+    /// RecFM default: 0.5 (geometric mean of scales).
+    pub scale_alpha: f32,
+    /// Consistency threshold — branches violating this are pruned.
+    /// RecFM default: 0.1 (loose enough to preserve diverse paths).
+    pub consistency_threshold: f32,
+}
+
+#[cfg(feature = "recfm")]
+impl Default for CrossScaleConfig {
+    fn default() -> Self {
+        Self {
+            enable: false,
+            scale_alpha: 0.5,
+            consistency_threshold: 0.1,
+        }
+    }
+}
+
+/// Compute discrete probability velocity at a given depth from marginal slices.
+///
+/// The velocity is the change in top-1 probability between consecutive depths:
+/// `v(depth) = marginal[depth][top1] − marginal[depth−1][top1]`
+///
+/// This is the discrete analog of RecFM's continuous velocity field.
+/// Zero-alloc: operates on existing marginal slices.
+///
+/// Returns 0.0 if `depth == 0` (no parent to compare against) or if slices are empty.
+#[cfg(feature = "recfm")]
+#[inline]
+pub fn branch_velocity_at(depth: usize, marginal_curr: &[f32], marginal_prev: &[f32]) -> f32 {
+    if depth == 0 || marginal_curr.is_empty() || marginal_prev.is_empty() {
+        return 0.0;
+    }
+    let top1_curr = marginal_curr
+        .iter()
+        .enumerate()
+        .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+        .map(|(_, &p)| p)
+        .unwrap_or(0.0);
+    let top1_prev = marginal_prev
+        .iter()
+        .enumerate()
+        .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+        .map(|(_, &p)| p)
+        .unwrap_or(0.0);
+    top1_curr - top1_prev
+}
+
+/// Check cross-scale consistency between two velocity measurements.
+///
+/// RecFM consistency: `|v₂ − α·v₁| ≤ threshold`
+///
+/// When consistent, the branch's velocity at scale 2 is proportional to scale 1,
+/// meaning the probability trajectory is smooth (low discretization error).
+/// Branches violating consistency have high curvature and are pruned.
+///
+/// Branch-free inline: returns `true` when consistent, `false` when violated.
+#[cfg(feature = "recfm")]
+#[inline]
+pub fn cross_scale_consistent(v1: f32, v2: f32, alpha: f32, threshold: f32) -> bool {
+    (v2 - alpha * v1).abs() <= threshold
 }
 
 /// Best-of-K rollouts: run K independent SDE-noised trees, select the best path.
@@ -1515,6 +1613,353 @@ impl TreeBuilder {
             scores,
             rest_weight,
         );
+        &self.tree
+    }
+
+    /// Build DDTree with graded relevance screening AND RecFM cross-scale consistency.
+    ///
+    /// Identical to [`build_screened`] but additionally filters branches whose
+    /// probability velocity violates cross-scale consistency (RecFM Theorem 3.1).
+    ///
+    /// Branches are pruned when `|v₂ − α·v₁| > threshold`, where:
+    /// - `v₁` = velocity at parent depth (change in top-1 probability)
+    /// - `v₂` = velocity at current depth
+    /// - `α` = scale factor from [`CrossScaleConfig::scale_alpha`]
+    ///
+    /// When `recfm_config.enable == false`, delegates to [`build_screened`] (zero overhead).
+    #[cfg(feature = "recfm")]
+    pub fn build_screened_recfm(
+        &mut self,
+        marginals: &[&[f32]],
+        config: &crate::types::Config,
+        screener: &dyn ScreeningPruner,
+        chain_seed: bool,
+        recfm_config: &CrossScaleConfig,
+    ) -> &[TreeNode] {
+        if !recfm_config.enable {
+            return self.build_screened(marginals, config, screener, chain_seed);
+        }
+
+        let threshold = config.screening_threshold;
+        self.heap.clear();
+        self.tree.clear();
+        self.chain_nodes.clear();
+        self.chain_parent_tokens.clear();
+
+        if marginals.is_empty() {
+            return &self.tree;
+        }
+
+        // Track velocity at each depth for cross-scale consistency checks
+        let mut prev_velocity: f32 = 0.0;
+
+        if chain_seed {
+            // ── Phase A: Build greedy chain backbone with screening + RecFM ──
+            let mut cumulative_score: f32 = 0.0;
+            let mut parent_path: u128 = 0;
+
+            for (depth, marginal) in marginals.iter().enumerate() {
+                if self.tree.len() >= config.tree_budget {
+                    break;
+                }
+
+                let best_token = marginal
+                    .iter()
+                    .enumerate()
+                    .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+                    .map(|(i, _)| i);
+
+                let Some(token_idx) = best_token else {
+                    break;
+                };
+                let prob = marginal[token_idx];
+
+                if prob <= 0.0 {
+                    break;
+                }
+
+                let relevance = screener.relevance(depth, token_idx, &self.chain_parent_tokens);
+                if relevance <= threshold {
+                    break;
+                }
+
+                // RecFM cross-scale consistency check
+                let marginal_prev = if depth > 0 { marginals[depth - 1] } else { &[] };
+                let velocity = branch_velocity_at(depth, marginal, marginal_prev);
+                if depth > 0
+                    && !cross_scale_consistent(
+                        prev_velocity,
+                        velocity,
+                        recfm_config.scale_alpha,
+                        recfm_config.consistency_threshold,
+                    )
+                {
+                    // Branch violates cross-scale consistency — prune
+                    break;
+                }
+                prev_velocity = velocity;
+
+                // Blended score: ln(P_llm) + ln(R)
+                cumulative_score += prob.ln() + relevance.ln();
+                let node_path = if depth == 0 {
+                    token_idx as u128
+                } else {
+                    (parent_path << 16) | (token_idx as u128)
+                };
+
+                let node = TreeNode {
+                    score: cumulative_score,
+                    depth,
+                    token_idx,
+                    parent_path: node_path,
+                };
+
+                self.tree.push(node);
+                self.chain_nodes.push(node);
+                parent_path = node_path;
+                self.chain_parent_tokens.push(token_idx);
+            }
+
+            // ── Phase B: Seed heap with siblings + last chain children ──
+            if self.chain_nodes.is_empty() {
+                if config.vocab_size > 256 {
+                    let nodes: Vec<TreeNode> = marginals[0]
+                        .par_iter()
+                        .enumerate()
+                        .filter_map(|(i, &prob)| {
+                            if prob <= 0.0 {
+                                return None;
+                            }
+                            let relevance = screener.relevance(0, i, &[]);
+                            if relevance <= threshold {
+                                return None;
+                            }
+                            Some(TreeNode {
+                                score: prob.ln() + relevance.ln(),
+                                depth: 0,
+                                token_idx: i,
+                                parent_path: i as u128,
+                            })
+                        })
+                        .collect();
+                    self.heap.extend(nodes);
+                } else {
+                    for (i, &prob) in marginals[0].iter().enumerate() {
+                        if prob <= 0.0 {
+                            continue;
+                        }
+                        let relevance = screener.relevance(0, i, &[]);
+                        if relevance <= threshold {
+                            continue;
+                        }
+                        self.heap.push(TreeNode {
+                            score: prob.ln() + relevance.ln(),
+                            depth: 0,
+                            token_idx: i,
+                            parent_path: i as u128,
+                        });
+                    }
+                }
+            } else {
+                for chain_node in &self.chain_nodes {
+                    let depth = chain_node.depth;
+                    let parent_chain_score = if depth == 0 {
+                        0.0f32
+                    } else {
+                        self.chain_nodes[depth - 1].score
+                    };
+
+                    let sibling_parent_tokens = extract_parent_tokens_into(
+                        chain_node.parent_path >> 16,
+                        depth,
+                        &mut self.parent_tokens_buf,
+                    );
+
+                    for (i, &prob) in marginals[depth].iter().enumerate() {
+                        if i == chain_node.token_idx {
+                            continue;
+                        }
+                        if prob <= 0.0 {
+                            continue;
+                        }
+                        let relevance = screener.relevance(depth, i, sibling_parent_tokens);
+                        if relevance <= threshold {
+                            continue;
+                        }
+                        let sibling_path = if depth == 0 {
+                            i as u128
+                        } else {
+                            let ancestor_path = chain_node.parent_path >> 16;
+                            (ancestor_path << 16) | (i as u128)
+                        };
+
+                        self.heap.push(TreeNode {
+                            score: parent_chain_score + prob.ln() + relevance.ln(),
+                            depth,
+                            token_idx: i,
+                            parent_path: sibling_path,
+                        });
+                    }
+                }
+
+                let last = self.chain_nodes.last().unwrap();
+                if last.depth + 1 < marginals.len() {
+                    let next_depth = last.depth + 1;
+                    let parent_tokens = extract_parent_tokens_into(
+                        last.parent_path,
+                        last.depth + 1,
+                        &mut self.parent_tokens_buf,
+                    );
+                    for (i, &prob) in marginals[next_depth].iter().enumerate() {
+                        if prob <= 0.0 {
+                            continue;
+                        }
+                        let relevance = screener.relevance(next_depth, i, parent_tokens);
+                        if relevance <= threshold {
+                            continue;
+                        }
+                        self.heap.push(TreeNode {
+                            score: last.score + prob.ln() + relevance.ln(),
+                            depth: next_depth,
+                            token_idx: i,
+                            parent_path: (last.parent_path << 16) | (i as u128),
+                        });
+                    }
+                }
+            }
+        } else {
+            // Original seeding with screening (no chain seed)
+            if config.vocab_size > 256 {
+                let nodes: Vec<TreeNode> = marginals[0]
+                    .par_iter()
+                    .enumerate()
+                    .filter_map(|(i, &prob)| {
+                        if prob <= 0.0 {
+                            return None;
+                        }
+                        let relevance = screener.relevance(0, i, &[]);
+                        if relevance <= threshold {
+                            return None;
+                        }
+                        Some(TreeNode {
+                            score: prob.ln() + relevance.ln(),
+                            depth: 0,
+                            token_idx: i,
+                            parent_path: i as u128,
+                        })
+                    })
+                    .collect();
+                self.heap.extend(nodes);
+            } else {
+                for (i, &prob) in marginals[0].iter().enumerate() {
+                    if prob <= 0.0 {
+                        continue;
+                    }
+                    let relevance = screener.relevance(0, i, &[]);
+                    if relevance <= threshold {
+                        continue;
+                    }
+                    self.heap.push(TreeNode {
+                        score: prob.ln() + relevance.ln(),
+                        depth: 0,
+                        token_idx: i,
+                        parent_path: i as u128,
+                    });
+                }
+            }
+        }
+
+        // ── Phase C: Best-first expansion with screening + RecFM ─────
+        let mut best_score: Option<f32> = None;
+        let mut second_best_score: Option<f32> = None;
+        let mut consecutive_dominant: usize = 0;
+        while self.tree.len() < config.tree_budget {
+            let Some(best) = self.heap.pop() else {
+                break;
+            };
+            self.tree.push(best);
+
+            // Confidence-gap early exit (Plan 026: AutoTTS)
+            let score = best.score;
+            match best_score {
+                None => {
+                    best_score = Some(score);
+                }
+                Some(bs) if score > bs => {
+                    second_best_score = Some(bs);
+                    best_score = Some(score);
+                    consecutive_dominant = 1;
+                }
+                Some(bs) => {
+                    second_best_score = Some(score);
+                    if bs - score > config.early_exit_gap {
+                        consecutive_dominant += 1;
+                    } else {
+                        consecutive_dominant = 0;
+                    }
+                }
+            }
+            if config.early_exit_patience > 0
+                && config.early_exit_gap > 0.0
+                && consecutive_dominant >= config.early_exit_patience
+                && best_score.unwrap_or(0.0) - second_best_score.unwrap_or(0.0)
+                    > config.early_exit_gap
+            {
+                break;
+            }
+
+            if best.depth + 1 < marginals.len() {
+                let next_depth = best.depth + 1;
+                let parent_tokens = extract_parent_tokens_into(
+                    best.parent_path,
+                    best.depth + 1,
+                    &mut self.parent_tokens_buf,
+                );
+
+                // RecFM: compute velocity from parent depth to this child depth
+                let parent_marginal = marginals[best.depth];
+                let child_marginal = marginals[next_depth];
+                let parent_velocity = branch_velocity_at(
+                    best.depth,
+                    parent_marginal,
+                    if best.depth > 0 {
+                        marginals[best.depth - 1]
+                    } else {
+                        &[]
+                    },
+                );
+
+                for (i, &prob) in child_marginal.iter().enumerate() {
+                    if prob <= 0.0 {
+                        continue;
+                    }
+                    let relevance = screener.relevance(next_depth, i, parent_tokens);
+                    if relevance <= threshold {
+                        continue;
+                    }
+
+                    // RecFM cross-scale consistency check for expansion branches
+                    let child_velocity =
+                        branch_velocity_at(next_depth, child_marginal, parent_marginal);
+                    if !cross_scale_consistent(
+                        parent_velocity,
+                        child_velocity,
+                        recfm_config.scale_alpha,
+                        recfm_config.consistency_threshold,
+                    ) {
+                        continue; // Prune inconsistent branch
+                    }
+
+                    self.heap.push(TreeNode {
+                        score: best.score + prob.ln() + relevance.ln(),
+                        depth: next_depth,
+                        token_idx: i,
+                        parent_path: (best.parent_path << 16) | (i as u128),
+                    });
+                }
+            }
+        }
+
         &self.tree
     }
 
