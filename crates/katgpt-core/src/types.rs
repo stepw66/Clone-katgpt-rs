@@ -59,6 +59,11 @@ pub enum ModelArchitecture {
     Generic,
     Gemma2,
     Llama,
+    /// Hybrid DeltaNet/Attention model (e.g., Qwen 3.5, Kimi Linear).
+    /// Uses per-layer config to determine DeltaNet vs standard attention.
+    /// Plan 182: Luce Megakernel Distill — DeltaNet GPU Inference.
+    #[cfg(feature = "deltanet_inference")]
+    QwenDeltaNet,
 }
 
 /// Weight storage dtype (affects loading and dequantization).
@@ -111,6 +116,23 @@ impl Default for DeltaRoutingConfig {
             mode: DeltaRoutingMode::Off,
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// DeltaNet Inference (Plan 182: Luce Megakernel Distill)
+// ---------------------------------------------------------------------------
+
+/// Per-layer type for hybrid DeltaNet/Attention models.
+/// Each layer is either a standard attention layer or a DeltaNet recurrent layer.
+#[cfg(feature = "deltanet_inference")]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[repr(u8)]
+pub enum DeltaNetLayerType {
+    /// Standard multi-head attention with KV cache.
+    #[default]
+    Attention,
+    /// DeltaNet linear recurrent layer (fast recurrent update, no KV cache needed).
+    DeltaNet,
 }
 
 impl DeltaRoutingConfig {
@@ -537,6 +559,19 @@ pub struct Config {
     /// Populated from calibration data via `calibrate_profiles()`.
     #[cfg(feature = "hydra_budget")]
     pub hydra_profiles: Vec<super::HydraLayerProfile>,
+
+    // --- DeltaNet Inference (Plan 182: Luce Megakernel Distill) ---
+    /// Per-layer type map: DeltaNet vs standard Attention.
+    /// Length = n_layer. Empty = all layers are Attention (backward compatible).
+    /// Only used when model_arch = QwenDeltaNet.
+    #[cfg(feature = "deltanet_inference")]
+    pub layer_types: Vec<DeltaNetLayerType>,
+    /// Depthwise conv kernel size for DeltaNet layers (typically 4).
+    #[cfg(feature = "deltanet_inference")]
+    pub deltanet_conv_kernel_size: usize,
+    /// Recurrence state dimension per head (key_dim * value_dim, typically 128*128 = 16384).
+    #[cfg(feature = "deltanet_inference")]
+    pub deltanet_state_dim: usize,
 }
 
 impl Config {
@@ -604,6 +639,12 @@ impl Config {
             parallax_zero_init: true,
             #[cfg(feature = "hydra_budget")]
             hydra_profiles: Vec::new(),
+            #[cfg(feature = "deltanet_inference")]
+            layer_types: Vec::new(),
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_conv_kernel_size: 0,
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_state_dim: 0,
         }
     }
 
@@ -708,6 +749,12 @@ impl Config {
             parallax_zero_init: true,
             #[cfg(feature = "hydra_budget")]
             hydra_profiles: Vec::new(),
+            #[cfg(feature = "deltanet_inference")]
+            layer_types: Vec::new(),
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_conv_kernel_size: 0,
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_state_dim: 0,
         }
     }
 
@@ -784,6 +831,12 @@ impl Config {
             parallax_zero_init: true,
             #[cfg(feature = "hydra_budget")]
             hydra_profiles: Vec::new(),
+            #[cfg(feature = "deltanet_inference")]
+            layer_types: Vec::new(),
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_conv_kernel_size: 0,
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_state_dim: 0,
         }
     }
 
@@ -850,6 +903,12 @@ impl Config {
             parallax_zero_init: true,
             #[cfg(feature = "hydra_budget")]
             hydra_profiles: Vec::new(),
+            #[cfg(feature = "deltanet_inference")]
+            layer_types: Vec::new(),
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_conv_kernel_size: 0,
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_state_dim: 0,
         }
     }
 
@@ -917,6 +976,12 @@ impl Config {
             parallax_zero_init: true,
             #[cfg(feature = "hydra_budget")]
             hydra_profiles: Vec::new(),
+            #[cfg(feature = "deltanet_inference")]
+            layer_types: Vec::new(),
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_conv_kernel_size: 0,
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_state_dim: 0,
         }
     }
 
@@ -982,6 +1047,12 @@ impl Config {
             parallax_zero_init: true,
             #[cfg(feature = "hydra_budget")]
             hydra_profiles: Vec::new(),
+            #[cfg(feature = "deltanet_inference")]
+            layer_types: Vec::new(),
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_conv_kernel_size: 0,
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_state_dim: 0,
         }
     }
 
@@ -1049,6 +1120,12 @@ impl Config {
             parallax_zero_init: true,
             #[cfg(feature = "hydra_budget")]
             hydra_profiles: Vec::new(),
+            #[cfg(feature = "deltanet_inference")]
+            layer_types: Vec::new(),
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_conv_kernel_size: 0,
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_state_dim: 0,
         }
     }
 
@@ -1115,6 +1192,12 @@ impl Config {
             parallax_zero_init: true,
             #[cfg(feature = "hydra_budget")]
             hydra_profiles: Vec::new(),
+            #[cfg(feature = "deltanet_inference")]
+            layer_types: Vec::new(),
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_conv_kernel_size: 0,
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_state_dim: 0,
         }
     }
 
@@ -1183,6 +1266,91 @@ impl Config {
             parallax_zero_init: true,
             #[cfg(feature = "hydra_budget")]
             hydra_profiles: Vec::new(),
+            #[cfg(feature = "deltanet_inference")]
+            layer_types: Vec::new(),
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_conv_kernel_size: 0,
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_state_dim: 0,
+        }
+    }
+
+    /// Config for Qwen 3.5-0.8B hybrid DeltaNet/Attention model (Plan 182).
+    ///
+    /// Typical layout: early layers use DeltaNet (linear recurrence, no KV cache),
+    /// later layers use standard attention. The `layer_types` vec specifies per-layer.
+    /// If `layer_types` is empty, all layers default to Attention (backward compatible).
+    #[cfg(feature = "deltanet_inference")]
+    pub fn qwen_deltanet(n_layer: usize, layer_types: Vec<DeltaNetLayerType>) -> Self {
+        let n_head = 16;
+        let head_dim = 128;
+        let n_embd = n_head * head_dim; // 2048
+        let mlp_hidden = n_embd * 4; // 8192 (SwiGLU: gate+up = 2× mlp_hidden)
+        let n_kv_head = n_head; // MHA (no GQA for 0.8B)
+
+        Self {
+            vocab_size: 151936,
+            block_size: 32768,
+            n_embd,
+            n_head,
+            head_dim,
+            mlp_hidden,
+            n_layer,
+            n_kv_head,
+            bos_token: 151643, // Qwen BOS
+            temperature: 0.8,
+            draft_lookahead: 0,
+            tree_budget: 0,
+            parallel_threshold: 8192,
+            lora_rank: 0,
+            lora_alpha: 1.0,
+            lora_dropout: 0.0,
+            lora_targets: Vec::new(),
+            screening_threshold: 0.0,
+            sparse_threshold: 0.0,
+            early_exit_patience: 0,
+            early_exit_gap: 0.0,
+            mtp_activation_threshold: 0,
+            mtp_cluster_vocab_threshold: 151936,
+            mtp_shared_kv_prompt_threshold: 32768,
+            mtp_cluster_size: 1024,
+            mtp_min_output_tokens: 16,
+            mtp_cluster_topk: 1,
+            hla_mode: HlaMode::Standard,
+            hla_normalize: false,
+            hla_decay: 1.0,
+            model_arch: ModelArchitecture::QwenDeltaNet,
+            rms_norm_eps: 1e-6,
+            rms_norm_offset: false,
+            tied_embeddings: false,
+            use_rope: true,
+            rope_theta: 10000.0,
+            post_norm: false,
+            attn_logit_softcapping: 0.0,
+            final_logit_softcapping: 0.0,
+            weight_dtype: WeightDtype::BF16,
+            mask_token: 0,
+            attention_mode: AttentionMode::Causal,
+            sp_kv_window: 128,
+            sp_kv_threshold: 0.5,
+            sp_kv_predictor_hidden: 0,
+            sp_kv_predictor_lr_mult: 5.0,
+            width_rollouts: 1,
+            early_stop_threshold: 0.0,
+            convergence_selector: ConvergenceSelector::default(),
+            d2f_block_size: 16,
+            mls_layers: 0,
+            loop_mode: LoopMode::None,
+            hybrid_pattern: HybridPattern::Uniform,
+            gated_attn: false,
+            parallax_gate_scale: 0.0,
+            emotion_desperation_threshold: 0.5,
+            parallax_zero_init: true,
+            #[cfg(feature = "hydra_budget")]
+            hydra_profiles: Vec::new(),
+            layer_types,
+            deltanet_conv_kernel_size: 4,
+            deltanet_state_dim: head_dim * head_dim, // 128 × 128 = 16384 per head
         }
     }
 
@@ -1196,9 +1364,36 @@ impl Config {
         }
         // Gemma 2 intentionally has q_dim != n_embd (e.g., 8*256=2048 != 2304)
         // LLaMA with GQA may also have q_dim != n_embd
-        if self.model_arch != ModelArchitecture::Gemma2
-            && self.model_arch != ModelArchitecture::Llama
-            && self.n_head * self.head_dim != self.n_embd
+        // QwenDeltaNet also has q_dim == n_embd but is excluded for forward compat
+        let arch_exempt = match self.model_arch {
+            ModelArchitecture::Gemma2 | ModelArchitecture::Llama => true,
+            _ => {
+                #[cfg(feature = "deltanet_inference")]
+                if self.model_arch == ModelArchitecture::QwenDeltaNet {
+                    // layer_types length must match n_layer when non-empty
+                    if !self.layer_types.is_empty() && self.layer_types.len() != self.n_layer {
+                        return Err(format!(
+                            "layer_types length ({}) must match n_layer ({})",
+                            self.layer_types.len(), self.n_layer
+                        ));
+                    }
+                    // deltanet_state_dim must be head_dim^2
+                    let expected = self.head_dim * self.head_dim;
+                    if self.deltanet_state_dim != expected {
+                        return Err(format!(
+                            "deltanet_state_dim ({}) must equal head_dim^2 ({})",
+                            self.deltanet_state_dim, expected
+                        ));
+                    }
+                    true
+                } else {
+                    false
+                }
+                #[cfg(not(feature = "deltanet_inference"))]
+                false
+            }
+        };
+        if !arch_exempt && self.n_head * self.head_dim != self.n_embd
         {
             return Err(format!(
                 "n_head ({}) * head_dim ({}) must equal n_embd ({})",
@@ -1755,15 +1950,16 @@ pub fn sparse_matmul(
     active_values: &mut [f32],
 ) -> usize {
     // Phase 1: Pack alive neurons (software TwELL formulation)
+    // Branch-free: mask = (val > 0.0) as usize avoids branch misprediction.
     let mut alive = 0;
     for c in 0..cols {
-        if unsafe { *input.get_unchecked(c) } > 0.0 {
-            unsafe {
-                *active_indices.get_unchecked_mut(alive) = c;
-                *active_values.get_unchecked_mut(alive) = *input.get_unchecked(c);
-            }
-            alive += 1;
+        let val = unsafe { *input.get_unchecked(c) };
+        let mask = (val > 0.0) as usize;
+        unsafe {
+            *active_indices.get_unchecked_mut(alive) = c;
+            *active_values.get_unchecked_mut(alive) = val;
         }
+        alive += mask;
     }
 
     // Phase 2: Sparse multiply — SIMD-accelerated (Plan 060 T5)
@@ -2812,12 +3008,12 @@ pub struct HydraLayerProfile {
 pub struct HydraBudgetConfig {
     /// Skip layers with |DE| below this threshold.
     pub skip_threshold: f32,
+    /// Early-terminate when cumulative DE reaches this fraction of total.
+    pub cumulative_threshold: f32,
     /// Use modelless mode (lookup) vs model-based (logit lens).
     pub modelless: bool,
     /// Skip erasure MLPs during draft stage.
     pub skip_erasure_draft: bool,
-    /// Early-terminate when cumulative DE reaches this fraction of total.
-    pub cumulative_threshold: f32,
 }
 
 #[cfg(feature = "hydra_budget")]
@@ -2825,9 +3021,9 @@ impl Default for HydraBudgetConfig {
     fn default() -> Self {
         Self {
             skip_threshold: 0.01,
+            cumulative_threshold: 0.95,
             modelless: true,
             skip_erasure_draft: false,
-            cumulative_threshold: 0.95,
         }
     }
 }
@@ -2895,6 +3091,10 @@ mod tests_types {
             // drafter_lora_path is consumed by the caller, not applied to Config
             drafter_lora_path: None,
             max_plan_horizon: Some(5),
+            #[cfg(feature = "hydra_budget")]
+            hydra_skip_threshold: None,
+            #[cfg(feature = "hydra_budget")]
+            hydra_skip_erasure_draft: None,
         };
         let result = config.with_overrides(&overrides);
         assert_eq!(result.tree_budget, 1);

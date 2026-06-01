@@ -112,7 +112,7 @@ pub fn simd_fma_row(weight_row: &[f32], input: &[f32], len: usize) -> f32 {
     simd_dot_f32(weight_row, input, len)
 }
 
-#[inline]
+#[inline(always)]
 #[allow(dead_code)]
 fn scalar_dot_f32(a: &[f32], b: &[f32], len: usize) -> f32 {
     let mut sum = 0.0f32;
@@ -276,7 +276,7 @@ pub fn simd_outer_product_acc(acc: &mut [f32], a: &[f32], b: &[f32], m: usize, n
     }
 }
 
-#[inline]
+#[inline(always)]
 #[allow(dead_code)]
 fn scalar_outer_product_acc(acc: &mut [f32], a: &[f32], b: &[f32], m: usize, n: usize) {
     for i in 0..m {
@@ -361,9 +361,13 @@ unsafe fn avx2_outer_product_acc(acc: &mut [f32], a: &[f32], b: &[f32], m: usize
 #[inline(always)]
 pub fn simd_matvec(acc: &mut [f32], mat: &[f32], vec: &[f32], rows: usize, cols: usize) {
     for r in 0..rows {
-        let row = &mat[r * cols..r * cols + cols];
+        let row_off = r * cols;
         unsafe {
-            *acc.get_unchecked_mut(r) = simd_dot_f32(row, vec, cols);
+            *acc.get_unchecked_mut(r) = simd_dot_f32(
+                &mat[row_off..row_off + cols],
+                vec,
+                cols,
+            );
         }
     }
 }
@@ -475,7 +479,7 @@ pub fn simd_dot_f16_f32(w_f16: &[half::f16], x_f32: &[f32], len: usize) -> f32 {
     }
 }
 
-#[inline]
+#[inline(always)]
 #[allow(dead_code)]
 fn scalar_dot_f16_f32(w: &[half::f16], x: &[f32], len: usize) -> f32 {
     let mut sum = 0.0f32;
@@ -673,6 +677,7 @@ pub fn simd_sparse_dot_f32(
     }
 }
 
+#[inline(always)]
 #[allow(dead_code)]
 fn scalar_sparse_dot_f32(
     weight: &[f32],
@@ -862,7 +867,7 @@ pub fn simd_scale_inplace(x: &mut [f32], scale: f32) {
     }
 }
 
-#[inline]
+#[inline(always)]
 #[allow(dead_code)]
 fn scalar_scale_inplace(x: &mut [f32], scale: f32) {
     for val in x.iter_mut() {
@@ -1196,7 +1201,7 @@ pub fn simd_reciprocal_inplace(x: &mut [f32]) {
     }
 }
 
-#[inline]
+#[inline(always)]
 #[allow(dead_code)]
 fn scalar_reciprocal_inplace(x: &mut [f32]) {
     for val in x.iter_mut() {
@@ -1372,7 +1377,7 @@ pub fn maxsim_score_packed(
 
 // ── Scalar Fallbacks (new primitives) ─────────────────────────
 
-#[inline]
+#[inline(always)]
 #[allow(dead_code)]
 fn scalar_add_inplace(dst: &mut [f32], src: &[f32]) {
     for i in 0..dst.len() {
@@ -1382,7 +1387,7 @@ fn scalar_add_inplace(dst: &mut [f32], src: &[f32]) {
     }
 }
 
-#[inline]
+#[inline(always)]
 #[allow(dead_code)]
 fn scalar_add_scalar_inplace(x: &mut [f32], val: f32) {
     for v in x.iter_mut() {
@@ -1398,7 +1403,7 @@ fn scalar_fused_sub_scale_inplace(x: &mut [f32], sub: f32, scale: f32) {
     }
 }
 
-#[inline]
+#[inline(always)]
 #[allow(dead_code)]
 fn scalar_sum_f32(x: &[f32]) -> f32 {
     let mut sum = 0.0f32;
@@ -1408,7 +1413,7 @@ fn scalar_sum_f32(x: &[f32]) -> f32 {
     sum
 }
 
-#[inline]
+#[inline(always)]
 #[allow(dead_code)]
 fn scalar_add_into(dst: &mut [f32], a: &[f32], b: &[f32]) {
     for i in 0..dst.len() {
@@ -1418,7 +1423,7 @@ fn scalar_add_into(dst: &mut [f32], a: &[f32], b: &[f32]) {
     }
 }
 
-#[inline]
+#[inline(always)]
 #[allow(dead_code)]
 fn scalar_max_f32(x: &[f32]) -> f32 {
     let mut max = x[0];
@@ -1431,7 +1436,7 @@ fn scalar_max_f32(x: &[f32]) -> f32 {
     max
 }
 
-#[inline]
+#[inline(always)]
 #[allow(dead_code)]
 fn scalar_fused_decay_write(dst: &mut [f32], decay: f32, src: &[f32], write: f32) {
     for i in 0..dst.len() {
@@ -1442,7 +1447,7 @@ fn scalar_fused_decay_write(dst: &mut [f32], decay: f32, src: &[f32], write: f32
     }
 }
 
-#[inline]
+#[inline(always)]
 #[allow(dead_code)]
 fn scalar_scale_mul_inplace(x: &mut [f32], gamma: &[f32], scale: f32) {
     for i in 0..x.len() {
@@ -1455,7 +1460,7 @@ fn scalar_scale_mul_inplace(x: &mut [f32], gamma: &[f32], scale: f32) {
 /// Scalar Cephes exp approximation: accurate to ~1 ULP for |x| < 88.
 /// Uses range reduction: exp(x) = exp(g) * 2^n where g = x - n*ln2, n = round(x/ln2).
 /// The reduced argument g is in [-0.5*ln2, 0.5*ln2] for minimal polynomial error.
-#[inline]
+#[inline(always)]
 fn cephes_exp_scalar(x: f32) -> f32 {
     // Range reduction: n = round(x / ln2)
     let n = (x * CEPHES_INV_LN2).round() as i32;
@@ -1482,7 +1487,7 @@ fn cephes_exp_scalar(x: f32) -> f32 {
     scale * q
 }
 
-#[inline]
+#[inline(always)]
 #[allow(dead_code)]
 fn scalar_exp_inplace(x: &mut [f32]) {
     for val in x.iter_mut() {
@@ -2605,7 +2610,7 @@ pub fn simd_sum_sq(x: &[f32], len: usize) -> f32 {
     }
 }
 
-#[inline]
+#[inline(always)]
 #[allow(dead_code)]
 fn scalar_sum_sq(x: &[f32], len: usize) -> f32 {
     let mut sum = 0.0f32;
@@ -2723,7 +2728,7 @@ pub fn simd_sum_abs_f32(x: &[f32]) -> f32 {
     }
 }
 
-#[inline]
+#[inline(always)]
 #[allow(dead_code)]
 fn scalar_sum_abs_f32(x: &[f32]) -> f32 {
     x.iter().map(|v| v.abs()).sum()
@@ -2823,7 +2828,7 @@ pub fn simd_dist_sq(a: &[f32], b: &[f32], len: usize) -> f32 {
     }
 }
 
-#[inline]
+#[inline(always)]
 #[allow(dead_code)]
 fn scalar_dist_sq(a: &[f32], b: &[f32], len: usize) -> f32 {
     let mut sum = 0.0f32;
@@ -2951,7 +2956,7 @@ pub fn simd_fused_sub_acc(dst: &mut [f32], a: &[f32], b: &[f32], len: usize) {
     }
 }
 
-#[inline]
+#[inline(always)]
 #[allow(dead_code)]
 fn scalar_fused_sub_acc(dst: &mut [f32], a: &[f32], b: &[f32], len: usize) {
     for i in 0..len {
@@ -3035,7 +3040,7 @@ pub fn simd_fused_scale_acc(dst: &mut [f32], src: &[f32], scale: f32, len: usize
     }
 }
 
-#[inline]
+#[inline(always)]
 #[allow(dead_code)]
 fn scalar_fused_scale_acc(dst: &mut [f32], src: &[f32], scale: f32, len: usize) {
     for i in 0..len {

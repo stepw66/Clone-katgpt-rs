@@ -59,6 +59,7 @@ pub fn dirichlet_energy(embeddings: &[f32], dim: usize, adjacency: &[(usize, usi
 ///
 /// Returns the pairs slice directly since `&[(usize, usize)]` is the
 /// adjacency type accepted by [`dirichlet_energy`].
+#[inline]
 pub fn functor_adjacency(pairs: &[(usize, usize)]) -> &[(usize, usize)] {
     pairs
 }

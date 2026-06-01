@@ -212,12 +212,12 @@ fn top_k_eigenvectors(mat: &[f32], n: usize, k: usize) -> Vec<f32> {
         for p in 0..n {
             for q in (p + 1)..n {
                 let apq = a[p * n + q];
-                if apq.abs() < 1e-12 {
+                let apq_abs = apq.abs();
+                if apq_abs < 1e-12 {
                     continue;
                 }
 
                 // Track max off-diagonal for convergence
-                let apq_abs = apq.abs();
                 if apq_abs > max_off {
                     max_off = apq_abs;
                 }
