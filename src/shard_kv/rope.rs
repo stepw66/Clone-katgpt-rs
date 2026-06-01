@@ -13,9 +13,18 @@
 ///
 /// Caches `inv_freq[i] = 1.0 / (10000^(2i/d_head))` to avoid recomputing
 /// and reallocating on every rotation call.
+///
+/// Also caches pre-computed sin/cos values per position to avoid redundant
+/// transcendental function calls when the same position is used across layers.
 pub struct RopeFreqs {
     inv_freq: Vec<f32>,
     half: usize,
+    /// Last position used to fill `sincos_buf`.
+    cached_pos: usize,
+    /// Whether `negate` was used for the cached values.
+    cached_negate: bool,
+    /// Pre-computed (sin, cos) for the cached position. Reused across layers.
+    sincos_buf: Vec<(f32, f32)>,
 }
 
 impl RopeFreqs {
@@ -29,7 +38,14 @@ impl RopeFreqs {
                 1.0 / base.powf(exp)
             })
             .collect();
-        Self { inv_freq, half }
+
+        Self {
+            inv_freq,
+            half,
+            cached_pos: usize::MAX,
+            cached_negate: false,
+            sincos_buf: vec![(0.0f32, 0.0f32); half],
+        }
     }
 
     /// Apply position-dependent rotation to dim pairs in-place.
@@ -39,14 +55,28 @@ impl RopeFreqs {
     ///   [x0', x1'] = [[cos θ, -sin θ], [sin θ, cos θ]] @ [x0, x1]
     ///
     /// When `negate = true`, applies the inverse rotation (negated angle).
+    ///
+    /// Caches sin/cos for the last `(pos, negate)` pair, so calling across
+    /// multiple layers with the same position reuses the cached values
+    /// and avoids `O(half)` transcendental function calls.
     #[inline]
-    pub fn apply(&self, x: &mut [f32], pos: usize, negate: bool) {
-        let sign: f32 = if negate { -1.0 } else { 1.0 };
-        let pos_f = sign * pos as f32;
+    pub fn apply(&mut self, x: &mut [f32], pos: usize, negate: bool) {
+        // Recompute sin/cos only when position or sign changes.
+        // This amortizes the cost across layers (same pos, different layers).
+        if pos != self.cached_pos || negate != self.cached_negate {
+            let sign: f32 = if negate { -1.0 } else { 1.0 };
+            let pos_f = sign * pos as f32;
+            for i in 0..self.half {
+                let theta = pos_f * self.inv_freq[i];
+                self.sincos_buf[i] = theta.sin_cos();
+            }
+            self.cached_pos = pos;
+            self.cached_negate = negate;
+        }
 
+        // Apply rotation using cached sin/cos — no transcendental calls.
         for i in 0..self.half {
-            let theta = pos_f * self.inv_freq[i];
-            let (sin_t, cos_t) = theta.sin_cos();
+            let (sin_t, cos_t) = self.sincos_buf[i];
             let x0 = x[2 * i];
             let x1 = x[2 * i + 1];
             x[2 * i] = cos_t * x0 - sin_t * x1;
@@ -66,7 +96,7 @@ impl RopeFreqs {
 /// Prefer [`RopeFreqs::apply`] in hot paths to avoid reallocating the
 /// frequency table on every call.
 fn apply_rotation(x: &mut [f32], pos: usize, head_dim: usize, negate: bool) {
-    let freqs = RopeFreqs::new(head_dim);
+    let mut freqs = RopeFreqs::new(head_dim);
     freqs.apply(x, pos, negate);
 }
 
@@ -181,6 +211,33 @@ mod tests {
                     (orig - rec).abs() < 1e-4,
                     "roundtrip failed at pos={pos}, [{i}]: {orig} vs {rec}"
                 );
+            }
+        }
+    }
+
+    #[test]
+    fn test_cached_apply_same_as_uncached() {
+        // Verify that the cached RopeFreqs::apply produces identical results
+        // to the uncached free functions.
+        let head_dim = 64;
+        let mut freqs = RopeFreqs::new(head_dim);
+
+        for pos in [0, 1, 7, 42, 255, 511] {
+            for negate in [false, true] {
+                let mut x_cached: Vec<f32> = (0..head_dim)
+                    .map(|i| (i as f32 + 1.0).sin() * 0.5)
+                    .collect();
+                let mut x_uncached = x_cached.clone();
+
+                freqs.apply(&mut x_cached, pos, negate);
+                apply_rotation(&mut x_uncached, pos, head_dim, negate);
+
+                for (i, (a, b)) in x_cached.iter().zip(x_uncached.iter()).enumerate() {
+                    assert!(
+                        (a - b).abs() < 1e-6,
+                        "cached vs uncached mismatch at pos={pos}, negate={negate}, [{i}]: {a} vs {b}"
+                    );
+                }
             }
         }
     }

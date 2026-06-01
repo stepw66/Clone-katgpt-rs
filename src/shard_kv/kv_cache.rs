@@ -28,7 +28,7 @@
 //!   - Last `window_tokens` positions: FP16 (recency window)
 //!   - Everything in between: compressed via K/V paths above
 
-use super::rope::{reapply_rope, undo_rope};
+use super::rope::RopeFreqs;
 use super::types::{ShardCalibration, ShardConfig, ShardLayer};
 use crate::simd::simd_scale_inplace;
 use crate::spectralquant::spectral::{BitAllocator, LloydMaxQuantizer, waterfill_bits};
@@ -40,11 +40,29 @@ use crate::spectralquant::types::LloydMaxCodebook;
 /// Sink + window tokens are stored as raw f32 (FP16-emulated via f32),
 /// while interior tokens use the asymmetric codec.
 pub struct ShardKVCache {
-    /// Per-layer state (calibration + codebooks).
+    // ── Position tracking (usize — group together for alignment) ──
+    pos: usize,
+    n_layers: usize,
+    kv_dim: usize,
+    head_dim: usize,
+    max_seq_len: usize,
+    sink_tokens: usize,
+    window_tokens: usize,
+    /// End of prefill positions. Positions >= this use 8-bit decode streaming.
+    /// 0 means prefill not finalized — all positions use VQ.
+    prefill_len: usize,
+
+    // ── Per-layer state (calibration + codebooks) ──
     pub layers: Vec<ShardLayer>,
+
+    // ── Pre-built rotations (avoid clone per call) ──
+    k_rotations: Vec<SpectralRotation>,
+    /// Pre-allocated RoPE frequencies for undo/reapply (avoids Vec alloc per call).
+    rope_freqs: RopeFreqs,
 
     // ── Compressed storage for interior tokens ──
     /// Packed K indices: [layer][position] → variable-bit packed bytes.
+    /// Inner Vecs are pre-allocated with `kv_dim` capacity to avoid decode-path allocation.
     key_indices: Vec<Vec<Vec<u8>>>,
     /// Per-position K norms.
     key_norms: Vec<Vec<f32>>,
@@ -59,27 +77,14 @@ pub struct ShardKVCache {
     /// FP16-equivalent sink + window V storage.
     val_raw: Vec<Vec<Vec<f32>>>,
 
-    // ── Position tracking ──
-    pos: usize,
-    n_layers: usize,
-    kv_dim: usize,
-    head_dim: usize,
-    max_seq_len: usize,
-    sink_tokens: usize,
-    window_tokens: usize,
-    /// End of prefill positions. Positions >= this use 8-bit decode streaming.
-    /// 0 means prefill not finalized — all positions use VQ.
-    prefill_len: usize,
-
-    // ── Pre-built rotations (avoid clone per call) ──
-    k_rotations: Vec<SpectralRotation>,
-
     // ── Scratch buffers (zero-alloc hot path) ──
     scratch_normalized: Vec<f32>,
     scratch_rotated: Vec<f32>,
     scratch_unrotated: Vec<f32>,
     scratch_indices: Vec<u8>,
     scratch_bits: Vec<u8>,
+    /// Scratch for VQ group indices in prefill V path (avoids `vec![0u8; n_groups]` per call).
+    scratch_vq_indices: Vec<u8>,
 }
 
 impl ShardKVCache {
@@ -306,13 +311,14 @@ impl ShardKVCache {
             layer.decode_v_codebook.centroids = decode_q.centroids().to_vec();
         }
 
-        // Allocate storage
+        // Allocate storage — inner Vecs pre-sized with `kv_dim` capacity to avoid
+        // allocation on the decode hot path (decode always writes exactly `kv_dim` bytes).
         let key_indices = (0..n_layers)
-            .map(|_| (0..max_seq_len).map(|_| Vec::new()).collect())
+            .map(|_| (0..max_seq_len).map(|_| Vec::with_capacity(kv_dim)).collect())
             .collect();
         let key_norms = (0..n_layers).map(|_| vec![0.0f32; max_seq_len]).collect();
         let val_indices = (0..n_layers)
-            .map(|_| (0..max_seq_len).map(|_| Vec::new()).collect())
+            .map(|_| (0..max_seq_len).map(|_| Vec::with_capacity(kv_dim)).collect())
             .collect();
         let val_norms = (0..n_layers).map(|_| vec![0.0f32; max_seq_len]).collect();
 
@@ -329,14 +335,11 @@ impl ShardKVCache {
             .map(|k_cal| SpectralRotation::new(k_cal.k_eigenvectors.clone(), k_cal.head_dim))
             .collect();
 
+        let rope_freqs = RopeFreqs::new(head_dim);
+
+        let n_vq_groups = kv_dim / config.v_vq_group_size;
+
         Self {
-            layers,
-            key_indices,
-            key_norms,
-            val_indices,
-            val_norms,
-            key_raw,
-            val_raw,
             pos: 0,
             n_layers,
             kv_dim,
@@ -345,12 +348,21 @@ impl ShardKVCache {
             sink_tokens,
             window_tokens,
             prefill_len: 0,
+            layers,
             k_rotations,
+            rope_freqs,
+            key_indices,
+            key_norms,
+            val_indices,
+            val_norms,
+            key_raw,
+            val_raw,
             scratch_normalized: vec![0.0f32; kv_dim],
             scratch_rotated: vec![0.0f32; kv_dim],
             scratch_unrotated: vec![0.0f32; kv_dim],
             scratch_indices: vec![0u8; kv_dim],
             scratch_bits: vec![0u8; kv_dim],
+            scratch_vq_indices: vec![0u8; n_vq_groups],
         }
     }
 
@@ -409,15 +421,18 @@ impl ShardKVCache {
                 self.scratch_indices[i] = quantize_to_idx(v, &cb.centroids);
             }
             // Store as raw bytes (8 bits = 1 byte per index)
-            self.key_indices[layer][pos] = self.scratch_indices[..self.kv_dim].to_vec();
+            // No allocation: inner Vec was pre-allocated with `kv_dim` capacity.
+            let buf = &mut self.key_indices[layer][pos];
+            buf.clear();
+            buf.extend_from_slice(&self.scratch_indices[..self.kv_dim]);
         } else {
             // Prefill: undo RoPE → PCA → quantize → pack
             let layer_state = &self.layers[layer];
             let d_eff = layer_state.d_eff;
             let k_b_low = layer_state.k_b_low.max(1);
 
-            // 3. Undo RoPE
-            undo_rope(&mut self.scratch_normalized, pos, self.head_dim);
+            // 3. Undo RoPE (uses cached RopeFreqs — no allocation)
+            self.rope_freqs.apply(&mut self.scratch_normalized, pos, true);
 
             // 4. PCA rotation (use pre-built rotation, no clone)
             let rotation = &self.k_rotations[layer];
@@ -502,13 +517,15 @@ impl ShardKVCache {
                 self.scratch_indices[i] = quantize_to_idx(v, &cb.centroids);
             }
             // Store as raw bytes (8 bits = 1 byte per index)
-            self.val_indices[layer][pos] = self.scratch_indices[..self.kv_dim].to_vec();
+            // No allocation: inner Vec was pre-allocated with `kv_dim` capacity.
+            let buf = &mut self.val_indices[layer][pos];
+            buf.clear();
+            buf.extend_from_slice(&self.scratch_indices[..self.kv_dim]);
         } else {
             // Prefill VQ: K-means VQ on groups of `group_size` channels
             let cb = &layer_state.v_vq_codebook;
             let gs = cb.group_size;
             let n_groups = self.kv_dim / gs;
-            let mut indices = vec![0u8; n_groups];
 
             for g in 0..n_groups {
                 let base = g * gs;
@@ -525,10 +542,13 @@ impl ShardKVCache {
                         best_idx = c as u8;
                     }
                 }
-                indices[g] = best_idx;
+                self.scratch_vq_indices[g] = best_idx;
             }
 
-            self.val_indices[layer][pos] = indices;
+            // No allocation: inner Vec was pre-allocated with `kv_dim` capacity.
+            let buf = &mut self.val_indices[layer][pos];
+            buf.clear();
+            buf.extend_from_slice(&self.scratch_vq_indices[..n_groups]);
         }
     }
 
@@ -612,8 +632,8 @@ impl ShardKVCache {
             let rotation = &self.k_rotations[layer];
             rotation.unrotate(&self.scratch_rotated, &mut self.scratch_unrotated);
 
-            // Reapply RoPE
-            reapply_rope(&mut self.scratch_unrotated, pos, self.head_dim);
+            // Reapply RoPE (uses cached RopeFreqs — no allocation)
+            self.rope_freqs.apply(&mut self.scratch_unrotated, pos, false);
 
             // Scale by norm → output
             out.copy_from_slice(&self.scratch_unrotated);
@@ -777,7 +797,16 @@ impl crate::types::QuantizedKVCache for ShardKVCache {
 // ── Internal helpers ──────────────────────────────────────────────────
 
 fn simd_norm(v: &[f32]) -> f32 {
-    v.iter().map(|&x| x * x).sum::<f32>().sqrt()
+    let mut sum = 0.0f32;
+    // Process in chunks of 4 to help auto-vectorization (most KV dims are multiples of 4).
+    let chunks = v.chunks_exact(4);
+    for c in chunks {
+        sum += c[0] * c[0] + c[1] * c[1] + c[2] * c[2] + c[3] * c[3];
+    }
+    for &x in v.chunks_exact(4).remainder() {
+        sum += x * x;
+    }
+    sum.sqrt()
 }
 
 /// In-place Walsh-Hadamard transform.
@@ -813,17 +842,20 @@ fn hadamard_transform_inplace(x: &mut [f32]) {
 }
 
 fn quantize_to_idx(value: f32, centroids: &[f32]) -> u8 {
-    centroids
-        .iter()
-        .enumerate()
-        .min_by(|(_, a), (_, b)| {
-            (value - *a)
-                .abs()
-                .partial_cmp(&(value - *b).abs())
-                .unwrap_or(std::cmp::Ordering::Equal)
-        })
-        .map(|(i, _)| i)
-        .unwrap_or(0) as u8
+    let n = centroids.len();
+    debug_assert!(n <= 256, "codebook too large for u8 index");
+    // Unrolled scan for small codebooks (common: 2, 4, 8, 16, 256 entries).
+    // Avoids iterator overhead and partial_cmp per element.
+    let mut best_idx = 0u8;
+    let mut best_dist = (value - centroids[0]).abs();
+    for i in 1..n {
+        let dist = (value - centroids[i]).abs();
+        if dist < best_dist {
+            best_dist = dist;
+            best_idx = i as u8;
+        }
+    }
+    best_idx
 }
 
 fn dequantize_idx(idx: u8, centroids: &[f32]) -> f32 {
