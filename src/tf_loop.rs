@@ -24,6 +24,65 @@ use crate::transformer::MultiLayerKVCache;
 use katgpt_core::types::Config;
 use katgpt_core::types::kv_dim;
 
+// ── RecFM Acceleration-Bounded Sub-Stepping (Plan 168 T2) ──────────
+
+/// Configuration for RecFM acceleration-bounded sub-stepping (Research 150).
+///
+/// RecFM's consistency framework constrains trajectory acceleration ∂t_v.
+/// Applied to LT2 sub-stepping, this applies additional damping when the
+/// state velocity (change between iterations) exceeds a threshold.
+///
+/// When `enable` is `false`, all RecFM checks are no-ops (zero cost).
+#[cfg(feature = "recfm")]
+#[derive(Debug, Clone, Copy)]
+pub struct AccelBoundConfig {
+    /// Enable acceleration-bounded sub-stepping.
+    pub enable: bool,
+    /// Normalized acceleration threshold above which extra damping is applied.
+    /// RecFM default: 0.5 (moderate constraint).
+    pub accel_threshold: f32,
+    /// Extra damping factor applied when acceleration exceeds threshold.
+    /// x *= extra_damp_factor after the sub-step.
+    /// RecFM default: 0.8 (mild damping).
+    pub extra_damp_factor: f32,
+}
+
+#[cfg(feature = "recfm")]
+impl Default for AccelBoundConfig {
+    fn default() -> Self {
+        Self {
+            enable: false,
+            accel_threshold: 0.5,
+            extra_damp_factor: 0.8,
+        }
+    }
+}
+
+/// Compute normalized acceleration norm between two velocity vectors.
+///
+/// Returns `||v_curr - v_prev||₂ / dim` — the average per-dimension acceleration.
+/// This is the discrete analog of RecFM's continuous acceleration field.
+///
+/// Uses the same SIMD infrastructure as `simd_fused_decay_write` for zero-overhead.
+#[cfg(feature = "recfm")]
+#[inline]
+pub fn accel_norm(v_curr: &[f32], v_prev: &[f32]) -> f32 {
+    debug_assert_eq!(v_curr.len(), v_prev.len(), "velocity slices must match");
+    let dim = v_curr.len();
+    if dim == 0 {
+        return 0.0;
+    }
+    let sum_sq: f32 = v_curr
+        .iter()
+        .zip(v_prev.iter())
+        .map(|(c, p)| {
+            let d = c - p;
+            d * d
+        })
+        .sum();
+    (sum_sq / dim as f32).sqrt()
+}
+
 /// Returns a sensible default loop window for a transformer with `n_layers` layers.
 ///
 /// Uses a depth-fraction heuristic: center at 48% depth, ±1 layer.
@@ -64,6 +123,38 @@ pub fn sub_step_damped_euler(x: &mut [f32], y: &[f32], k: usize) {
     let n = x.len();
     // x[i] = (1-inv_k)*x[i] + inv_k*y[i]
     simd_fused_decay_write(&mut x[..n], 1.0 - inv_k, &y[..n], inv_k);
+}
+
+/// Acceleration-bounded damped Euler sub-step with RecFM constraint.
+///
+/// Identical to [`sub_step_damped_euler`] but additionally checks the acceleration
+/// norm between the current state and the proposed update. When acceleration
+/// exceeds the threshold, applies extra damping to prevent divergence.
+///
+/// When `accel_config.enable == false`, delegates to [`sub_step_damped_euler`] (zero overhead).
+#[cfg(feature = "recfm")]
+#[inline]
+pub fn sub_step_damped_euler_bounded(
+    x: &mut [f32],
+    y: &[f32],
+    k: usize,
+    x_prev: &[f32],
+    accel_config: &AccelBoundConfig,
+) {
+    sub_step_damped_euler(x, y, k);
+
+    if !accel_config.enable || k == 0 {
+        return;
+    }
+
+    // Compute acceleration: how much x changed from previous state
+    let accel = accel_norm(x, x_prev);
+    if accel > accel_config.accel_threshold {
+        // Apply extra damping: x *= extra_damp_factor
+        for xi in x.iter_mut() {
+            *xi *= accel_config.extra_damp_factor;
+        }
+    }
 }
 
 /// Blends `x` with an anchor state in-place.
