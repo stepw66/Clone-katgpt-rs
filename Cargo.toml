@@ -58,6 +58,9 @@ g_zero = ["bandit"]  # G-Zero self-play distillation — Hint-δ gated absorb + 
 dreamer = ["bandit"]  # Auto-Dreamer offline memory consolidation scheduler (Plan 107, Research 69)
 sr2am_configurator = ["bandit", "g_zero", "katgpt-core/sr2am_configurator"]  # SR²AM Configurator Bandit — learned per-turn planning regulation (Plan 112, Research 076)
 sia_feedback = ["sr2am_configurator", "katgpt-core/sia_feedback"]  # FeedbackBandit — harness + weight co-evolution (Plan 163, Research 033)
+gepa_reflective = ["bandit", "memo_reflections"]  # GEPA-D Reflective Config Evolution — Pareto bandit config distillation (Research 146, Plan 164)
+phrase_boost = []  # PhraseBoost — context trie phrase boosting for DDTree (Research 147, Plan 164)
+hydra_budget = ["katgpt-core/hydra_budget"]  # Hydra-Aware Adaptive Layer Budget — emergent self-repair layer skipping (Research 148, Plan 165)
 data_gate = ["katgpt-core/data_gate", "bandit"]  # Task-level data gating for self-play training stability (Plan 111, Research 075)
 subterranean = ["bandit"]  # Procedure graph compilation — compiling workflows into weights (Plan 110, Research 074)
 ropd_rubric = ["bandit"]  # ROPD rubric modelless distillation — multi-criteria reward (Plan 071)
@@ -146,7 +149,7 @@ moa_inference = ["coda_fusion", "katgpt-core/moa_inference"]  # MoA Mixture of A
 gpu = []  # Placeholder — GPU training lives in riir-ai/riir-gpu
 kog_cpu_fusion = []  # Kog AI monokernel CPU fusion — RMSNorm gamma folding + QKV interleaving (Plan 160 GOAT 3/3 Gemma 2 scale, Research 139) — default-ON
 # LeviathanVerifier is always compiled (no gate needed) — verifier.rs, benchmark.rs
-full = ["sudoku", "validator", "ppot", "domain_latent", "bandit", "delta_mem", "g_zero", "fft", "bomber", "bomber-agent", "bomber-wasm", "game_state", "bandit_mcts", "hla_attention", "gdn2_attention", "lt2_looped", "dash_attn", "mls_aggregate", "dmax_spd", "dreamer", "monopoly", "go", "randopt_weight", "feedback", "rest", "embedding_router", "gpu", "game_domain", "language_domain", "percepta_compile", "dllm", "tri_mode", "bt_rank", "spectral_quant", "octopus", "turboquant", "planar_quant", "iso_quant", "hybrid_oct_pq", "replaid_schedules", "elf_sde", "maxsim", "cna_steering", "deep_manifold", "federation", "delta_routing", "decode_specialize", "lattice_deduction", "unit_distance", "memo_reflections", "eqr_convergence", "subterranean", "sr2am_configurator", "data_gate", "coda_fusion", "tiled_attention", "vpd_em_distill", "proof_sketch_evolution", "convex_tok", "opus_selection", "epiplexity_scoring", "committee_boost", "questbench", "cache_prune", "sleep_consolidation", "spectral_hierarchy", "newton_schulz", "river_valley", "peira_distill", "kog_cpu_fusion", "datrie_vocab"]
+full = ["sudoku", "validator", "ppot", "domain_latent", "bandit", "delta_mem", "g_zero", "fft", "bomber", "bomber-agent", "bomber-wasm", "game_state", "bandit_mcts", "hla_attention", "gdn2_attention", "lt2_looped", "dash_attn", "mls_aggregate", "dmax_spd", "dreamer", "monopoly", "go", "randopt_weight", "feedback", "rest", "embedding_router", "gpu", "game_domain", "language_domain", "percepta_compile", "dllm", "tri_mode", "bt_rank", "spectral_quant", "octopus", "turboquant", "planar_quant", "iso_quant", "hybrid_oct_pq", "replaid_schedules", "elf_sde", "maxsim", "cna_steering", "deep_manifold", "federation", "delta_routing", "decode_specialize", "lattice_deduction", "unit_distance", "memo_reflections", "eqr_convergence", "subterranean", "sr2am_configurator", "data_gate", "coda_fusion", "tiled_attention", "vpd_em_distill", "proof_sketch_evolution", "convex_tok", "opus_selection", "epiplexity_scoring", "committee_boost", "questbench", "cache_prune", "sleep_consolidation", "spectral_hierarchy", "newton_schulz", "river_valley", "peira_distill", "kog_cpu_fusion", "datrie_vocab", "gepa_reflective", "phrase_boost", "hydra_budget"]
 
 # ── Percepta transformer-VM ───────────────────────────────────
 
@@ -282,6 +285,10 @@ required-features = ["vpd_em_distill", "g_zero", "bomber"]
 name = "bomber_16_rmsd_tournament"
 required-features = ["rmsd_distill", "vpd_em_distill", "g_zero", "bomber"]
 
+[[example]]
+name = "bomber_17_feedback_goat"
+required-features = ["sia_feedback", "g_zero", "bomber"]
+
 # ── Monopoly FSM Arena ────────────────────────────────────────
 
 [[example]]
@@ -332,6 +339,10 @@ required-features = ["ropd_rubric", "g_zero", "fft"]
 [[example]]
 name = "fft_03_sdar_tournament"
 required-features = ["sdar_gate", "ropd_rubric", "g_zero", "fft"]
+
+[[example]]
+name = "fft_04_feedback_goat"
+required-features = ["g_zero", "fft"]
 
 # ── Blue Bear ──────────────────────────────────────────────────
 

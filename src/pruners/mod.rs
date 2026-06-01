@@ -363,6 +363,42 @@ pub use state_source::{
     adaptive_c,
 };
 
+// ── GEPA-D Reflective Config Evolution (Research 146, Plan 164) ──
+
+#[cfg(feature = "gepa_reflective")]
+pub mod gepa_reflective;
+
+#[cfg(feature = "gepa_reflective")]
+pub use gepa_reflective::{
+    ConfigVariant, ParetoConfigFrontier, ReflectionScore, ReflectiveBanditPruner,
+};
+
+// ── PhraseBoost Context Trie (Research 147, Plan 164) ──
+
+#[cfg(feature = "phrase_boost")]
+pub mod phrase_boost;
+
+#[cfg(feature = "phrase_boost")]
+pub mod phrase_trie;
+
+#[cfg(feature = "phrase_boost")]
+pub use phrase_boost::{DEFAULT_BOOST_SCORE, PhraseBoostPruner};
+
+#[cfg(feature = "phrase_boost")]
+pub use phrase_trie::PhraseTrie;
+
+// ── Hydra Adaptive Layer Budget (Research 148, Plan 165) ──
+
+#[cfg(feature = "hydra_budget")]
+pub mod hydra_budget;
+
+#[cfg(feature = "hydra_budget")]
+pub use hydra_budget::{
+    HydraBudgetResult, HydraSkipPlan, LogitLensScore, adaptive_depth_gate, calibrate_profiles,
+    detect_erasure_layers, hydra_adaptive_budget, hydra_layer_skip, logit_lens_score,
+    should_skip_layer,
+};
+
 #[cfg(feature = "mech_attribution")]
 pub mod mech_attribution;
 
