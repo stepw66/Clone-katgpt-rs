@@ -72,28 +72,28 @@ pub struct HydraBudgetConfig {
 
 ### Phase 1: Infrastructure
 
-- [ ] T1: Add `HydraLayerProfile` and `HydraBudgetConfig` to `katgpt-rs-core/src/types.rs`
-- [ ] T2: Add `hydra_budget` feature gate to `Cargo.toml`
-- [ ] T3: Add `HydraBudgetConfig` fields to `Config` and `InferenceOverrides`
-- [ ] T4: Add `Vec<HydraLayerProfile>` to `Config` (populated from calibration data or defaults)
+- [x] T1: Add `HydraLayerProfile` and `HydraBudgetConfig` to `katgpt-core/src/types.rs`
+- [x] T2: Add `hydra_budget` feature gate to `Cargo.toml`
+- [x] T3: Add `HydraBudgetConfig` fields to `Config` and `InferenceOverrides`
+- [x] T4: Add `Vec<HydraLayerProfile>` to `Config` (populated from calibration data or defaults)
 
 ### Phase 2: Modelless Layer Skip
 
-- [ ] T5: Implement `hydra_layer_skip()` function — given profiles and threshold, return set of layers to skip
-- [ ] T6: Integrate layer skip into `transformer.rs` forward pass — conditionally zero-out skipped layers
+- [x] T5: Implement `hydra_layer_skip()` function — given profiles and threshold, return set of layers to skip
+- [x] T6: Integrate layer skip into `transformer.rs` forward pass — conditionally zero-out skipped layers
 - [ ] T7: Add profile calibration tool — run logit lens on calibration data, output `HydraLayerProfile` per layer
 - [ ] T8: GOAT proof P4 — modelless profile stability test (profiles are consistent across seeds)
 
 ### Phase 3: Model-Based Logit Lens
 
-- [ ] T9: Implement per-layer logit lens scoring — `score_l = centered_logits(RMSNorm(z^l) @ W_U)` for top token
-- [ ] T10: Implement adaptive depth gate — cumulative DE convergence detection
+- [x] T9: Implement per-layer logit lens scoring — `score_l = centered_logits(RMSNorm(z^l) @ W_U)` for top token
+- [x] T10: Implement adaptive depth gate — cumulative DE convergence detection
 - [ ] T11: GOAT proof P1 — layer skip correctness (cosine sim > 0.99 vs baseline)
 - [ ] T12: GOAT proof P3 — adaptive budget speedup (throughput gain > 0%)
 
 ### Phase 4: Erasure-Aware Draft
 
-- [ ] T13: Implement erasure detection — identify MLP layers with negative mean DE
+- [x] T13: Implement erasure detection — identify MLP layers with negative mean DE
 - [ ] T14: Integrate erasure skip into `DecodeStage::Draft` — skip erasure MLPs during draft only
 - [ ] T15: GOAT proof P2 — erasure skip improves draft acceptance rate
 - [ ] T16: End-to-end GOAT proof — all 4 proofs pass, acceptance rate within 2% of baseline
