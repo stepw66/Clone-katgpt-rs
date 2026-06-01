@@ -64,20 +64,31 @@ pub fn subspace_ratios(gradient: &[f32], dominant_eigvecs: &[Vec<f32>]) -> (f32,
 ///
 /// Uses power iteration to estimate the top singular values. For simplicity,
 /// we compute all eigenvalues of `M^T @ M` directly (O(n²m) for n ≤ m).
+
+/// Zero-alloc variant of [`effective_rank`].
 ///
-/// `matrix` is `rows × cols` in row-major order.
+/// `gram_buf` must have `>= min(rows, cols)^2` elements.
+/// `eigenvalues_buf` must have `>= min(rows, cols)` elements.
+/// `scratch_buf` must have `>= min(rows, cols)^2` elements.
 #[cfg(feature = "river_valley")]
-pub fn effective_rank(matrix: &[f32], rows: usize, cols: usize) -> f32 {
+pub fn effective_rank_into(
+    matrix: &[f32],
+    rows: usize,
+    cols: usize,
+    gram_buf: &mut [f32],
+    eigenvalues_buf: &mut [f32],
+    scratch_buf: &mut [f32],
+) -> f32 {
     assert_eq!(matrix.len(), rows * cols, "matrix size mismatch");
 
     // Compute Gram matrix M^T @ M (n × n) or M @ M^T (rows × rows),
     // whichever is smaller.
     if rows <= cols {
         // G = M @ M^T  (rows × rows) — exploit symmetry
-        let mut gram = vec![0.0f32; rows * rows];
+        gram_buf[..rows * rows].fill(0.0);
         for i in 0..rows {
             // Diagonal
-            gram[i * rows + i] = crate::simd::simd_dot_f32(
+            gram_buf[i * rows + i] = crate::simd::simd_dot_f32(
                 &matrix[i * cols..(i + 1) * cols],
                 &matrix[i * cols..(i + 1) * cols],
                 cols,
@@ -89,54 +100,70 @@ pub fn effective_rank(matrix: &[f32], rows: usize, cols: usize) -> f32 {
                     &matrix[j * cols..(j + 1) * cols],
                     cols,
                 );
-                gram[i * rows + j] = dot;
-                gram[j * rows + i] = dot;
+                gram_buf[i * rows + j] = dot;
+                gram_buf[j * rows + i] = dot;
             }
         }
-        erank_from_gram(&gram, rows)
+        erank_from_gram_into(&gram_buf[..rows * rows], rows, eigenvalues_buf, scratch_buf)
     } else {
         // G = M^T @ M  (cols × cols)
         // Accumulate outer products row-by-row for SIMD-friendly contiguous access:
         // G[i,j] = Σ_k M[k,i]·M[k,j] = Σ_k (row_k)_i · (row_k)_j
-        let mut gram = vec![0.0f32; cols * cols];
+        gram_buf[..cols * cols].fill(0.0);
         for k in 0..rows {
             let row = &matrix[k * cols..(k + 1) * cols];
             for i in 0..cols {
                 let a = row[i];
                 for j in i..cols {
-                    gram[i * cols + j] += a * row[j];
+                    gram_buf[i * cols + j] += a * row[j];
                 }
             }
         }
         // Symmetrize
         for i in 0..cols {
             for j in (i + 1)..cols {
-                gram[j * cols + i] = gram[i * cols + j];
+                gram_buf[j * cols + i] = gram_buf[i * cols + j];
             }
         }
-        erank_from_gram(&gram, cols)
+        erank_from_gram_into(&gram_buf[..cols * cols], cols, eigenvalues_buf, scratch_buf)
     }
 }
 
-/// Compute effective rank from a Gram matrix via eigenvalue decomposition.
-///
-/// Uses a simple Jacobi eigenvalue iteration (sufficient for small matrices
-/// in diagnostic use-cases).
-fn erank_from_gram(gram: &[f32], n: usize) -> f32 {
-    // Pre-allocate scratch + output, pass to jacobi to avoid double allocation
-    let mut eigenvalues = vec![0.0f32; n];
-    let mut scratch = vec![0.0f32; n * n];
-    jacobi_eigenvalues_into(gram, n, &mut eigenvalues, &mut scratch);
+#[cfg(feature = "river_valley")]
+pub fn effective_rank(matrix: &[f32], rows: usize, cols: usize) -> f32 {
+    assert_eq!(matrix.len(), rows * cols, "matrix size mismatch");
+    let n = rows.min(cols);
+    let mut gram_buf = vec![0.0f32; n * n];
+    let mut eigenvalues_buf = vec![0.0f32; n];
+    let mut scratch_buf = vec![0.0f32; n * n];
+    effective_rank_into(
+        matrix,
+        rows,
+        cols,
+        &mut gram_buf,
+        &mut eigenvalues_buf,
+        &mut scratch_buf,
+    )
+}
 
-    // Sum of eigenvalues (= trace of gram = sum of squared singular values)
-    let sum_ev: f32 = eigenvalues.iter().sum();
+/// Zero-alloc variant of `erank_from_gram` — caller provides eigenvalues and scratch buffers.
+fn erank_from_gram_into(
+    gram: &[f32],
+    n: usize,
+    eigenvalues: &mut [f32],
+    scratch: &mut [f32],
+) -> f32 {
+    eigenvalues[..n].fill(0.0);
+    scratch[..n * n].fill(0.0);
+    jacobi_eigenvalues_into(gram, n, eigenvalues, scratch);
+
+    let sum_ev: f32 = eigenvalues[..n].iter().sum();
     if sum_ev < 1e-12 {
         return 0.0;
     }
 
-    // Normalize and compute entropy
     let mut entropy = 0.0f32;
-    for &ev in &eigenvalues {
+    for &ev in &eigenvalues[..n] {
         if ev > 1e-12 {
             let p = ev / sum_ev;
             entropy -= p * p.ln();
@@ -144,6 +171,14 @@ fn erank_from_gram(gram: &[f32], n: usize) -> f32 {
     }
 
     entropy.exp()
+}
+
+/// Allocating wrapper — prefer `erank_from_gram_into` in hot paths.
+#[allow(dead_code)]
+fn erank_from_gram(gram: &[f32], n: usize) -> f32 {
+    let mut eigenvalues = vec![0.0f32; n];
+    let mut scratch = vec![0.0f32; n * n];
+    erank_from_gram_into(gram, n, &mut eigenvalues, &mut scratch)
 }
 
 /// Jacobi eigenvalue algorithm — returns eigenvalues of an n×n symmetric matrix.

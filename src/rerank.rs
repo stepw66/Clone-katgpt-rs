@@ -1,7 +1,7 @@
 //! Reranking module — MaxSim vs Cosine similarity for retrieval reranking.
 //!
-//! Provides [`rerank`] with pluggable scoring methods and [`ndcg_at`] for
-//! retrieval quality evaluation (NDCG@k). Feature-gated behind `maxsim` (Plan 080).
+//! Provides [`rerank`] with pluggable scoring methods and [`ndcg_at`] / [`ndcg_at_into`]
+//! for retrieval quality evaluation (NDCG@k). Feature-gated behind `maxsim` (Plan 080).
 //!
 //! ## Deep Manifold: Symmetric Boundary Pair (Plan 085)
 //!
@@ -86,7 +86,9 @@ pub fn rerank(
         })
         .collect();
 
-    results.sort_by(|a, b| {
+    // sort_unstable_by is faster than sort_by for ranking — doesn't preserve
+    // equal-element order (fine for ranking) and avoids O(n) worst-case merges.
+    results.sort_unstable_by(|a, b| {
         b.score
             .partial_cmp(&a.score)
             .unwrap_or(std::cmp::Ordering::Equal)
@@ -94,17 +96,16 @@ pub fn rerank(
     results
 }
 
-/// Compute NDCG@k (Normalized Discounted Cumulative Gain at position k).
+/// Zero-alloc variant of [`ndcg_at`].
 ///
-/// NDCG = DCG@k / IDCG@k, where:
-/// - DCG@k = Σ_{i=0}^{k-1} (2^rel_i − 1) / log₂(i + 2)
-/// - IDCG@k = DCG@k under ideal (oracle) ranking
-///
-/// # Arguments
-/// - `ranking` — reranked documents (sorted by score, descending)
-/// - `ground_truth` — relevance score per document index, i.e. `ground_truth[doc_index]`
-/// - `k` — cutoff rank
-pub fn ndcg_at(ranking: &[RerankedDoc], ground_truth: &[f32], k: usize) -> f32 {
+/// `ideal_rels_buf` must have length `>= ground_truth.len()`.
+/// The buffer is used as scratch space for sorting ideal relevance scores.
+pub fn ndcg_at_into(
+    ranking: &[RerankedDoc],
+    ground_truth: &[f32],
+    k: usize,
+    ideal_rels_buf: &mut [f64],
+) -> f32 {
     let k = k.min(ranking.len());
     if k == 0 {
         return 0.0;
@@ -122,27 +123,28 @@ pub fn ndcg_at(ranking: &[RerankedDoc], ground_truth: &[f32], k: usize) -> f32 {
         .sum();
 
     // IDCG@k: ideal ranking from ground truth, sorted descending.
-    // Use partial sort when k < n to avoid sorting the full array.
-    let mut ideal_rels: Vec<f64> = Vec::with_capacity(ground_truth.len());
-    ideal_rels.extend(ground_truth.iter().map(|&r| r as f64));
-    let k_eff = k.min(ideal_rels.len());
-    if k_eff > 0 {
-        if k_eff < ideal_rels.len() {
-            // Partial sort O(n) — only partition top-k, then sort prefix O(k log k).
-            ideal_rels.select_nth_unstable_by(k_eff - 1, |a, b| {
-                b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal)
-            });
-        }
-        ideal_rels[..k_eff].sort_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
+    let n = ground_truth.len().min(ideal_rels_buf.len());
+    for i in 0..n {
+        ideal_rels_buf[i] = ground_truth[i] as f64;
     }
-    let idcg: f64 = (0..k_eff)
-        .map(|i| (2.0f64.powf(ideal_rels[i]) - 1.0) / (i as f64 + 2.0).log2())
+    ideal_rels_buf[..n]
+        .sort_unstable_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
+    let idcg: f64 = (0..k.min(n))
+        .map(|i| (2.0f64.powf(ideal_rels_buf[i]) - 1.0) / (i as f64 + 2.0).log2())
         .sum();
 
     match idcg > 0.0 {
         true => (dcg / idcg) as f32,
         false => 0.0,
     }
+}
+
+/// Compute NDCG@k (Normalized Discounted Cumulative Gain at position k).
+///
+/// Allocating wrapper — prefer [`ndcg_at_into`] in hot paths.
+pub fn ndcg_at(ranking: &[RerankedDoc], ground_truth: &[f32], k: usize) -> f32 {
+    let mut ideal_rels = vec![0.0f64; ground_truth.len()];
+    ndcg_at_into(ranking, ground_truth, k, &mut ideal_rels)
 }
 
 // ── Public Similarity Functions ───────────────────────────────
