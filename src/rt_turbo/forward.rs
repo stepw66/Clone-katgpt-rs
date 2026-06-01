@@ -204,6 +204,7 @@ pub fn forward_rt_turbo_decode(
 
 /// Grouped scratch buffers for [`forward_rt_turbo_decode_with_scratch`],
 /// pre-allocated and reused across decode calls.
+#[derive(Clone, Debug)]
 struct DecodeScratch {
     /// Key extraction buffer: `[seq_len * head_dim]`, reused across retrieval heads.
     k_cache_buf: Vec<f32>,
@@ -278,16 +279,15 @@ fn forward_rt_turbo_decode_with_scratch(
 
     // Step 2: Sink tokens — rebuild into pre-allocated buffer
     let sink_count = config.sink_tokens.min(seq_len);
-    sink_indices.clear();
-    sink_indices.extend(0..sink_count);
+    scratch.sink_indices.clear();
+    scratch.sink_indices.extend(0..sink_count);
 
     // Step 3: Resize key cache buffer if needed
     let needed = seq_len * head_dim;
-    if k_cache_buf.len() < needed {
-        k_cache_buf.resize(needed, 0.0f32);
+    if scratch.k_cache_buf.len() < needed {
+        scratch.k_cache_buf.resize(needed, 0.0f32);
     }
-    // Zero only the portion we'll read (handles shrink case via truncation)
-    k_cache_buf.truncate(needed);
+    scratch.k_cache_buf.truncate(needed);
 
     let mut selected_indices: Vec<Vec<usize>> = Vec::with_capacity(calibration.n_retrieval());
 
@@ -304,32 +304,32 @@ fn forward_rt_turbo_decode_with_scratch(
         // Extract pre-RoPE keys for this head from all positions into pre-allocated buffer.
         for (t, pos_keys) in key_pre_rope.iter().enumerate() {
             let offset = global_head * head_dim;
-            k_cache_buf[t * head_dim..(t + 1) * head_dim]
+            scratch.k_cache_buf[t * head_dim..(t + 1) * head_dim]
                 .copy_from_slice(&pos_keys[offset..offset + head_dim]);
         }
 
         // Compute low-dim scores via projection
-        let scores = projection.batch_project_scores(retrieval_idx, q_pre, k_cache_buf);
+        let scores = projection.batch_project_scores(retrieval_idx, q_pre, &scratch.k_cache_buf);
 
         // Select top-p tokens via blockwise selection
         let top_p_result = select_top_p_blockwise(&scores, config.top_p, config.block_size);
 
         // Merge with sink indices (union of top-p selected + sinks) into scratch buffer
-        merged_buf.clear();
-        merged_buf.extend_from_slice(&top_p_result.selected_indices);
-        merged_buf.sort_unstable();
-        for &sink in sink_indices.iter() {
-            if merged_buf.binary_search(&sink).is_err() {
-                merged_buf.push(sink);
+        scratch.merged_buf.clear();
+        scratch.merged_buf.extend_from_slice(&top_p_result.selected_indices);
+        scratch.merged_buf.sort_unstable();
+        for &sink in scratch.sink_indices.iter() {
+            if scratch.merged_buf.binary_search(&sink).is_err() {
+                scratch.merged_buf.push(sink);
             }
         }
-        merged_buf.sort_unstable();
+        scratch.merged_buf.sort_unstable();
 
-        selected_indices.push(merged_buf.clone());
+        selected_indices.push(scratch.merged_buf.clone());
     }
 
     // Clone sink_indices into result (it's our scratch buffer, caller keeps ownership)
-    let sink_indices_clone = sink_indices.clone();
+    let sink_indices_clone = scratch.sink_indices.clone();
 
     RtTurboDecodeResult {
         selected_indices,
@@ -413,13 +413,8 @@ pub struct RtTurboCache {
     pub last_selected_indices: Vec<Vec<usize>>,
     /// Layer index this cache is for.
     pub layer_idx: usize,
-    // -- Scratch buffers (reused across decode calls) --
-    /// Key extraction buffer: `[seq_len * head_dim]`, reused across retrieval heads.
-    k_cache_buf: Vec<f32>,
-    /// Cached sink indices, rebuilt only when seq_len changes.
-    sink_indices: Vec<usize>,
-    /// Scratch buffer for merging top-p results with sink indices.
-    merged_buf: Vec<usize>,
+    /// Pre-allocated scratch buffers reused across decode calls.
+    scratch: DecodeScratch,
 }
 
 impl RtTurboCache {
@@ -445,10 +440,7 @@ impl RtTurboCache {
             config,
             last_selected_indices: vec![vec![]; n_retrieval],
             layer_idx,
-            // Scratch buffers start empty; first decode call sizes them.
-            k_cache_buf: Vec::with_capacity(256 * head_dim),
-            sink_indices: Vec::with_capacity(config.sink_tokens),
-            merged_buf: Vec::with_capacity(256),
+            scratch: DecodeScratch::new(head_dim, config.sink_tokens),
         }
     }
 
@@ -472,9 +464,7 @@ impl RtTurboCache {
             kv_cache,
             query,
             key_pre_rope,
-            &mut self.k_cache_buf,
-            &mut self.sink_indices,
-            &mut self.merged_buf,
+            &mut self.scratch,
         )
     }
 
