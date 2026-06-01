@@ -223,6 +223,31 @@ pub struct FeedbackBandit {
     episode_count: usize,
 }
 
+/// Compute UCB1 score for a feedback arm with conservative unvisited penalty.
+///
+/// Unvisited feedback arms get `best_base_score - penalty` instead of `f32::MAX`,
+/// ensuring they're only explored after base arms converge. When stalled,
+/// the penalty is waived and feedback arms get `f32::MAX` for immediate exploration.
+#[inline]
+fn feedback_ucb1_score_conservative(
+    fb_stats: &FeedbackContextStats,
+    arm: usize,
+    base_total: usize,
+    best_base_score: f32,
+    penalty: f32,
+    stalled: bool,
+) -> f32 {
+    if fb_stats.visits[arm] == 0 {
+        if stalled {
+            f32::MAX
+        } else {
+            (best_base_score - penalty).max(f32::NEG_INFINITY)
+        }
+    } else {
+        fb_stats.ucb1_score(arm, base_total)
+    }
+}
+
 impl FeedbackBandit {
     /// Create a new FeedbackBandit with default configuration.
     pub fn new() -> Self {
@@ -291,35 +316,22 @@ impl FeedbackBandit {
     }
 
     /// 6-arm UCB1 selection combining inner bandit (arms 0-3) and feedback arms (4-5).
+    ///
+    /// Feedback arms use a **conservative exploration policy**:
+    /// - Unvisited feedback arms get score = best_base_score − penalty (not `f32::MAX`)
+    /// - Visited feedback arms use normal UCB1
+    /// - The penalty ensures feedback arms are only explored after base arms converge
+    /// - When stalled, the penalty is waived (feedback arms get `f32::MAX` for unvisited)
     fn select_6arm_ucb1(&mut self, context: ConfiguratorContext) -> PlanningDecision {
         let base_total = self.inner.total_pulls(context).max(1);
+        let stalled = self.trajectory.is_stalled(&self.config);
 
-        // Collect feedback arm scores first (avoids simultaneous borrow on self)
-        let fb_scores: [f32; 2] = {
-            let key = (context.domain, context.entropy_bin, context.desperation_bin);
-            let fb_stats = self.feedback_stats.entry(key).or_insert_with(FeedbackContextStats::new);
-            [
-                fb_stats.ucb1_score(0, base_total),
-                fb_stats.ucb1_score(1, base_total),
-            ]
-        };
-
-        // Score all 6 arms — compute first arm's score to seed best_score,
-        // avoiding f32::MAX > f32::MAX comparison (always false).
-        let first_decision = crate::pruners::configurator_bandit::from_arm_index(0);
-        let first_visits = self.inner.visit_count(context, first_decision);
+        // Score all base arms first
         let mut best_arm = 0;
-        let mut best_score = match first_visits {
-            0 => f32::MAX,
-            n => {
-                let q = self.inner.q_value(context, first_decision).unwrap_or(0.0);
-                let ln_total = (base_total.max(n) as f32).ln();
-                q + (UCB1_C * ln_total / n as f32).sqrt()
-            }
-        };
+        let mut best_score = f32::NEG_INFINITY;
+        let mut best_base_score = f32::NEG_INFINITY;
 
-        // Arms 1-3: read from inner ConfiguratorBandit
-        for arm in 1..4 {
+        for arm in 0..4 {
             let decision = crate::pruners::configurator_bandit::from_arm_index(arm);
             let visits = self.inner.visit_count(context, decision);
             let score = match visits {
@@ -334,9 +346,25 @@ impl FeedbackBandit {
                 best_score = score;
                 best_arm = arm;
             }
+            // Track best visited base arm score for feedback arm seeding
+            if visits > 0 && score > best_base_score {
+                best_base_score = score;
+            }
         }
 
-        // Arms 4-5: from pre-computed feedback scores
+        // Collect feedback arm scores
+        // Unvisited feedback arms: score = best_base_score − penalty (unless stalled)
+        // This prevents feedback arms from being explored before base arms converge.
+        let fb_penalty = 0.5; // Must be 0.5 better than best base arm to explore
+        let fb_scores: [f32; 2] = {
+            let key = (context.domain, context.entropy_bin, context.desperation_bin);
+            let fb_stats = self.feedback_stats.entry(key).or_insert_with(FeedbackContextStats::new);
+            [
+                feedback_ucb1_score_conservative(fb_stats, 0, base_total, best_base_score, fb_penalty, stalled),
+                feedback_ucb1_score_conservative(fb_stats, 1, base_total, best_base_score, fb_penalty, stalled),
+            ]
+        };
+
         for fb_arm in 0..2 {
             let arm = ARM_HARNESS + fb_arm;
             let score = fb_scores[fb_arm];
@@ -346,7 +374,6 @@ impl FeedbackBandit {
             }
         }
 
-        // Convert arm index to PlanningDecision
         match best_arm {
             0..=3 => crate::pruners::configurator_bandit::from_arm_index(best_arm),
             ARM_HARNESS => PlanningDecision::HarnessUpdate,
@@ -495,12 +522,18 @@ mod tests {
 
     #[test]
     fn test_feedback_bandit_select_explores_all_arms() {
-        let mut bandit = FeedbackBandit::new();
+        let config = FeedbackBanditConfig {
+            stall_patience: 5,
+            stall_epsilon: 0.01,
+            ..Default::default()
+        };
+        let mut bandit = FeedbackBandit::with_config(config);
         let ctx = make_context();
 
-        // Pull many times — UCB1 should explore all 6 arms
+        // First: give base arms low rewards to create stall condition,
+        // then feedback arms become eligible.
         let mut seen = [false; FB_NUM_ARMS];
-        for _ in 0..200 {
+        for i in 0..300 {
             let decision = bandit.select(ctx);
             let idx = match decision {
                 PlanningDecision::PlanNew => 0,
@@ -511,26 +544,31 @@ mod tests {
                 PlanningDecision::WeightUpdate => ARM_WEIGHT,
             };
             seen[idx] = true;
-            bandit.update(ctx, decision, 0.5);
+            // Low rewards to trigger stall → feedback arms become eligible
+            bandit.update(ctx, decision, 0.001);
         }
 
         // All arms should have been tried at least once
         for (i, s) in seen.iter().enumerate() {
-            assert!(*s, "arm {i} was never selected");
+            assert!(*s, "arm {i} was never selected after 300 pulls");
         }
     }
 
     #[test]
     fn test_weight_update_request_emitted() {
-        let mut bandit = FeedbackBandit::new();
+        let config = FeedbackBanditConfig {
+            stall_patience: 3,
+            stall_epsilon: 0.01,
+            ..Default::default()
+        };
+        let mut bandit = FeedbackBandit::with_config(config);
         let ctx = make_context();
 
-        // Force WeightUpdate selection by exhausting other arms' exploration bonus
-        // First, ensure we can get a WeightUpdate by selecting many times
+        // Create stall condition with low rewards, then WeightUpdate becomes eligible
         let mut got_weight_update = false;
-        for _ in 0..200 {
+        for _ in 0..500 {
             let decision = bandit.select(ctx);
-            bandit.update(ctx, decision, 0.1);
+            bandit.update(ctx, decision, 0.001); // Low reward → triggers stall
             if matches!(decision, PlanningDecision::WeightUpdate) {
                 got_weight_update = true;
                 let req = bandit.take_weight_request();
@@ -542,7 +580,7 @@ mod tests {
         }
         assert!(
             got_weight_update,
-            "WeightUpdate arm should have been selected"
+            "WeightUpdate arm should have been selected after stall"
         );
 
         // Request should be consumed
@@ -646,38 +684,36 @@ mod tests {
     /// Verify feedback arms are routed to their own Q-table, not the inner bandit.
     #[test]
     fn test_feedback_arms_use_separate_q_table() {
-        let mut bandit = FeedbackBandit::new();
+        let config = FeedbackBanditConfig {
+            stall_patience: 3,
+            stall_epsilon: 0.01,
+            ..Default::default()
+        };
+        let mut bandit = FeedbackBandit::with_config(config);
         let ctx = make_context();
 
-        // Force feedback arm selection by giving base arms terrible rewards
-        // and feedback arms good rewards
-        for _ in 0..50 {
+        // Create stall condition first (low rewards), then feedback arms become eligible
+        // Once stalled, give feedback arms good rewards
+        for _ in 0..100 {
             let decision = bandit.select(ctx);
             let reward = match decision {
                 PlanningDecision::HarnessUpdate | PlanningDecision::WeightUpdate => 1.0,
-                _ => -1.0, // punish base arms
+                _ => 0.001, // Low reward for base arms → triggers stall
             };
             bandit.update(ctx, decision, reward);
         }
 
-        // After punishing base arms, feedback arms should be selected more often
+        // Verify feedback arms were explored during stall
         let summary = bandit.trajectory_summary();
         let feedback_pulls = summary.arm_pulls[ARM_HARNESS] + summary.arm_pulls[ARM_WEIGHT];
-        let base_pulls: usize = summary.arm_pulls[0..4].iter().sum();
 
-        // Feedback arms should get significant pulls (UCB1 explores them after
-        // seeing base arms are bad). Not necessarily >50%, but should be >10%.
-        let fb_ratio = feedback_pulls as f32 / (feedback_pulls + base_pulls).max(1) as f32;
+        // Feedback arms should have been explored (stall condition enables them)
         assert!(
-            fb_ratio > 0.1,
-            "Feedback arms should get >10% of pulls when base arms are punished, got {:.1}% ({}/{})",
-            fb_ratio * 100.0, feedback_pulls, feedback_pulls + base_pulls
+            feedback_pulls > 0,
+            "Feedback arms should be explored during stall, got 0 pulls"
         );
 
         // Verify inner bandit doesn't have feedback arm data
-        // (q_value for HarnessUpdate should panic or return None — it shouldn't exist in inner)
-        // Since we made arm_index unreachable for feedback arms, the inner bandit
-        // should only have 4 arms' worth of data.
         let inner_contexts = bandit.inner().num_contexts();
         assert!(
             inner_contexts <= 2, // at most 2 contexts: normal + stalled
