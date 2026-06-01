@@ -876,6 +876,10 @@ pub fn forward_looped<'a>(
     config: &Config,
     residual_gate: &crate::types::ResidualGate,
     sdpa_gate: &crate::types::SdpaOutputGate,
+    #[cfg(feature = "sleep_consolidation")] gdn2_cache: Option<
+        &'a mut crate::gdn2::MultiLayerGdn2Cache,
+    >,
+    #[cfg(feature = "sleep_consolidation")] sleep_config: Option<&'a crate::sleep::SleepConfig>,
 ) -> &'a mut [f32] {
     cache.advance_pos(pos);
     use crate::types::{HybridPattern, LoopMode};
@@ -1048,6 +1052,17 @@ pub fn forward_looped<'a>(
         config.vocab_size,
         n,
     );
+
+    // ── Sleep consolidation hook (Plan 154: eviction boundary) ─────
+    // After the forward pass, if the KV cache is full, consolidate
+    // cached K/V into GDN2 fast-weight state and evict. This frees
+    // the cache for the next token while preserving context in S.
+    #[cfg(feature = "sleep_consolidation")]
+    if let (Some(gdn2), Some(sconf)) = (gdn2_cache, sleep_config)
+        && sconf.should_sleep(pos)
+    {
+        crate::sleep::sleep(ctx, weights, cache, gdn2, sconf, config);
+    }
 
     &mut ctx.logits
 }
@@ -3797,6 +3812,14 @@ impl RavenKVCache {
         self.router_r_t.fill(0.0);
         self.readout_scores.fill(0.0);
         self.readout_output.fill(0.0);
+    }
+
+    /// Export the current routing vector `r_t` (post-router, pre-update).
+    /// Returns the normalized Top-K routing weights for all slots.
+    /// Used by Phase 3 routed speculation to feed slot selection into anyrag.
+    #[inline]
+    pub fn r_t(&self) -> &[f32] {
+        &self.router_r_t
     }
 }
 

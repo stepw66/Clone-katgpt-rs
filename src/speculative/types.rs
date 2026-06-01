@@ -958,6 +958,9 @@ pub struct RoutingOverlapSnapshot {
     pub top_k: usize,
     /// Number of tokens in verification batch
     pub n_tokens: usize,
+    /// Raw routing vector from RavenKVCache (num_slots entries).
+    /// Non-zero entries indicate active slots — can be fed to anyrag `routed_search()`.
+    pub routing_vector: Vec<f32>,
 }
 
 // ── Amdahl Cost Model (Plan 096, Research 59) ────────────────

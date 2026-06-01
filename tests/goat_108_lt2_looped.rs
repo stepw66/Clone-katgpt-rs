@@ -544,6 +544,8 @@ fn proof_9_looped_logits_finite_t4() {
             &config,
             &residual_gate,
             &sdpa_gate,
+            None,
+            None,
         );
 
         for (i, &l) in logits.iter().enumerate() {
