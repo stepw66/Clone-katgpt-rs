@@ -572,6 +572,18 @@ pub struct Config {
     /// Recurrence state dimension per head (key_dim * value_dim, typically 128*128 = 16384).
     #[cfg(feature = "deltanet_inference")]
     pub deltanet_state_dim: usize,
+    /// Linear attention key/value head dimension (128 for Qwen 3.5).
+    /// Separate from `head_dim` which refers to full attention heads.
+    #[cfg(feature = "deltanet_inference")]
+    pub deltanet_linear_head_dim: usize,
+    /// Number of linear attention key heads (16 for Qwen 3.5).
+    /// Separate from `n_head` which refers to full attention heads.
+    #[cfg(feature = "deltanet_inference")]
+    pub deltanet_linear_n_heads: usize,
+    /// Number of linear attention value heads (16 for Qwen 3.5).
+    /// Usually equals `deltanet_linear_n_heads`.
+    #[cfg(feature = "deltanet_inference")]
+    pub deltanet_linear_n_value_heads: usize,
 }
 
 impl Config {
@@ -645,6 +657,12 @@ impl Config {
             deltanet_conv_kernel_size: 0,
             #[cfg(feature = "deltanet_inference")]
             deltanet_state_dim: 0,
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_linear_head_dim: 0,
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_linear_n_heads: 0,
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_linear_n_value_heads: 0,
         }
     }
 
@@ -755,6 +773,12 @@ impl Config {
             deltanet_conv_kernel_size: 0,
             #[cfg(feature = "deltanet_inference")]
             deltanet_state_dim: 0,
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_linear_head_dim: 0,
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_linear_n_heads: 0,
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_linear_n_value_heads: 0,
         }
     }
 
@@ -837,6 +861,12 @@ impl Config {
             deltanet_conv_kernel_size: 0,
             #[cfg(feature = "deltanet_inference")]
             deltanet_state_dim: 0,
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_linear_head_dim: 0,
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_linear_n_heads: 0,
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_linear_n_value_heads: 0,
         }
     }
 
@@ -909,6 +939,12 @@ impl Config {
             deltanet_conv_kernel_size: 0,
             #[cfg(feature = "deltanet_inference")]
             deltanet_state_dim: 0,
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_linear_head_dim: 0,
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_linear_n_heads: 0,
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_linear_n_value_heads: 0,
         }
     }
 
@@ -982,6 +1018,12 @@ impl Config {
             deltanet_conv_kernel_size: 0,
             #[cfg(feature = "deltanet_inference")]
             deltanet_state_dim: 0,
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_linear_head_dim: 0,
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_linear_n_heads: 0,
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_linear_n_value_heads: 0,
         }
     }
 
@@ -1053,6 +1095,12 @@ impl Config {
             deltanet_conv_kernel_size: 0,
             #[cfg(feature = "deltanet_inference")]
             deltanet_state_dim: 0,
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_linear_head_dim: 0,
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_linear_n_heads: 0,
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_linear_n_value_heads: 0,
         }
     }
 
@@ -1126,6 +1174,12 @@ impl Config {
             deltanet_conv_kernel_size: 0,
             #[cfg(feature = "deltanet_inference")]
             deltanet_state_dim: 0,
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_linear_head_dim: 0,
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_linear_n_heads: 0,
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_linear_n_value_heads: 0,
         }
     }
 
@@ -1198,6 +1252,12 @@ impl Config {
             deltanet_conv_kernel_size: 0,
             #[cfg(feature = "deltanet_inference")]
             deltanet_state_dim: 0,
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_linear_head_dim: 0,
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_linear_n_heads: 0,
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_linear_n_value_heads: 0,
         }
     }
 
@@ -1272,6 +1332,12 @@ impl Config {
             deltanet_conv_kernel_size: 0,
             #[cfg(feature = "deltanet_inference")]
             deltanet_state_dim: 0,
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_linear_head_dim: 0,
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_linear_n_heads: 0,
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_linear_n_value_heads: 0,
         }
     }
 
@@ -1351,6 +1417,9 @@ impl Config {
             layer_types,
             deltanet_conv_kernel_size: 4,
             deltanet_state_dim: head_dim * head_dim, // 128 × 128 = 16384 per head
+            deltanet_linear_head_dim: head_dim,
+            deltanet_linear_n_heads: n_head,
+            deltanet_linear_n_value_heads: n_kv_head,
         }
     }
 
