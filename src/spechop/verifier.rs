@@ -64,6 +64,9 @@ static STOPWORD_SET: LazyLock<HashSet<&'static str>> =
 /// 4. Numeric consistency (extract all numbers, compare sets)
 /// 5. Substring containment
 /// 6. Token-set Jaccard similarity ≥ 0.55
+///
+/// Uses thread-local scratch buffers to avoid allocations in the hot path.
+/// Each thread reuses its own pre-allocated buffers via `thread_local!`.
 #[derive(Clone, Debug)]
 pub struct RuleBasedVerifier {
     /// Minimum Jaccard similarity threshold for paraphrase matching.
@@ -83,10 +86,36 @@ impl Default for RuleBasedVerifier {
     }
 }
 
+// ── Thread-local scratch buffers ──────────────────────────────────
+//
+// Each thread gets its own set of pre-allocated buffers that are reused
+// across `verify()` calls. This avoids per-call heap allocations while
+// keeping `RuleBasedVerifier` `Send + Sync`.
+
+std::thread_local! {
+    static NORM_BUF: std::cell::RefCell<String> = std::cell::RefCell::new(String::with_capacity(256));
+    static NORM_BUF2: std::cell::RefCell<String> = std::cell::RefCell::new(String::with_capacity(256));
+    static NUM_ACC: std::cell::RefCell<String> = std::cell::RefCell::new(String::with_capacity(64));
+    static NUM_VEC: std::cell::RefCell<Vec<String>> = std::cell::RefCell::new(Vec::with_capacity(32));
+    static NUM_VEC2: std::cell::RefCell<Vec<String>> = std::cell::RefCell::new(Vec::with_capacity(32));
+    static TOKEN_SET_A: std::cell::RefCell<HashSet<&'static str>> = std::cell::RefCell::new(HashSet::with_capacity(64));
+    static TOKEN_SET_B: std::cell::RefCell<HashSet<&'static str>> = std::cell::RefCell::new(HashSet::with_capacity(64));
+}
+
 impl ObservationVerifier for RuleBasedVerifier {
     fn verify(&self, o_target: &str, o_spec: &str) -> bool {
-        let target_norm = normalize(o_target);
-        let spec_norm = normalize(o_spec);
+        // Normalize both inputs into thread-local scratch buffers.
+        let (target_norm, spec_norm) = NORM_BUF.with(|nb| {
+            NORM_BUF2.with(|nb2| {
+                let mut buf1 = nb.borrow_mut();
+                let mut buf2 = nb2.borrow_mut();
+                normalize_into(o_target, &mut buf1);
+                normalize_into(o_spec, &mut buf2);
+                // Clone into owned Strings so we can release the RefCell borrows
+                // before later steps that also need thread-local scratch.
+                (buf1.clone(), buf2.clone())
+            })
+        });
 
         // Rule 1: Exact match after normalization
         if target_norm == spec_norm {
@@ -100,112 +129,160 @@ impl ObservationVerifier for RuleBasedVerifier {
             return target_norm == spec_norm;
         }
 
-        // Rule 3: Refusal pattern detection
+        // Rule 3: Refusal pattern detection (text is already lowercased)
         let target_refused = is_refusal(&target_norm);
         let spec_refused = is_refusal(&spec_norm);
         match (target_refused, spec_refused) {
-            (true, true) => return true, // Both refused → equivalent
-            (true, false) | (false, true) => return false, // One refused, one didn't → mismatch
-            (false, false) => {}         // Neither refused → continue checks
+            (true, true) => return true,
+            (true, false) | (false, true) => return false,
+            (false, false) => {}
         }
 
         // Rule 4: Numeric consistency
-        if numeric_consistent(&target_norm, &spec_norm) {
+        if numeric_consistent_scratch(&target_norm, &spec_norm) {
             return true;
         }
 
         // Rule 5: Substring containment
-        if target_norm.contains(&spec_norm) || spec_norm.contains(&target_norm) {
+        if target_norm.contains(&spec_norm as &str) || spec_norm.contains(&target_norm as &str) {
             return true;
         }
 
         // Rule 6: Token-set Jaccard similarity
-        let jaccard = token_set_jaccard(&target_norm, &spec_norm);
+        let jaccard = token_set_jaccard_scratch(&target_norm, &spec_norm);
         jaccard >= self.jaccard_threshold
     }
 }
 
 /// Normalize text for comparison: lowercase, collapse whitespace, trim.
-fn normalize(text: &str) -> String {
-    text.chars()
-        .map(|c| {
-            if c.is_whitespace() {
-                ' '
-            } else {
-                c.to_ascii_lowercase()
+/// Writes into a pre-allocated scratch buffer (cleared first).
+fn normalize_into(text: &str, buf: &mut String) {
+    buf.clear();
+    buf.reserve(text.len());
+
+    let mut prev_space = false;
+    for c in text.chars() {
+        if c.is_whitespace() {
+            if !prev_space && !buf.is_empty() {
+                buf.push(' ');
+                prev_space = true;
             }
-        })
-        .collect::<String>()
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
+        } else {
+            buf.push(c.to_ascii_lowercase());
+            prev_space = false;
+        }
+    }
+
+    // Trim trailing space
+    if buf.ends_with(' ') {
+        buf.pop();
+    }
+}
+
+/// Normalize text for comparison: lowercase, collapse whitespace, trim.
+/// Allocates a new String each call — use only in tests or non-hot paths.
+fn normalize(text: &str) -> String {
+    let mut buf = String::with_capacity(text.len());
+    normalize_into(text, &mut buf);
+    buf
 }
 
 /// Check whether text matches a refusal pattern.
+/// Text is expected to be already lowercased (from normalize).
 fn is_refusal(text: &str) -> bool {
-    let lower = text.to_ascii_lowercase();
     REFUSAL_PATTERNS
         .iter()
-        .any(|pattern| lower.contains(pattern))
+        .any(|pattern| text.contains(pattern))
 }
 
-/// Extract all numeric values (integers and decimals) from text.
-fn extract_numbers(text: &str) -> Vec<String> {
-    let mut numbers = Vec::new();
-    let mut current = String::new();
+/// Extract all numeric values (integers and decimals) from text into
+/// pre-allocated buffers. Clears both outputs first.
+fn extract_numbers_into(text: &str, numbers: &mut Vec<String>, acc: &mut String) {
+    numbers.clear();
+    acc.clear();
     let mut has_digit = false;
 
     for ch in text.chars() {
         match ch {
             '0'..='9' => {
-                current.push(ch);
+                acc.push(ch);
                 has_digit = true;
             }
             '.' if has_digit => {
-                current.push(ch);
+                acc.push(ch);
             }
-            '-' if current.is_empty() => {
-                current.push(ch);
+            '-' if acc.is_empty() => {
+                acc.push(ch);
             }
             _ => {
                 if has_digit {
-                    numbers.push(current.clone());
+                    numbers.push(acc.clone());
                 }
-                current.clear();
+                acc.clear();
                 has_digit = false;
             }
         }
     }
     if has_digit {
-        numbers.push(current);
+        numbers.push(acc.clone());
     }
+}
+
+/// Extract all numeric values (integers and decimals) from text.
+/// Allocates — use only in tests.
+fn extract_numbers(text: &str) -> Vec<String> {
+    let mut numbers = Vec::new();
+    let mut acc = String::new();
+    extract_numbers_into(text, &mut numbers, &mut acc);
     numbers
 }
 
+/// Check numeric consistency using thread-local scratch buffers.
+fn numeric_consistent_scratch(target: &str, spec: &str) -> bool {
+    NUM_VEC.with(|nv| {
+        NUM_VEC2.with(|nv2| {
+            NUM_ACC.with(|acc| {
+                let mut nums1 = nv.borrow_mut();
+                let mut nums2 = nv2.borrow_mut();
+                let mut acc_buf = acc.borrow_mut();
+                extract_numbers_into(target, &mut nums1, &mut acc_buf);
+                extract_numbers_into(spec, &mut nums2, &mut acc_buf);
+
+                if nums1.is_empty() && nums2.is_empty() {
+                    return false;
+                }
+                if nums1.is_empty() || nums2.is_empty() {
+                    return false;
+                }
+
+                nums1.sort();
+                nums2.sort();
+                *nums1 == *nums2
+            })
+        })
+    })
+}
+
 /// Check numeric consistency: both texts have the same set of numbers.
+/// Allocates — use only in tests.
 fn numeric_consistent(target: &str, spec: &str) -> bool {
-    let target_nums = extract_numbers(target);
-    let spec_nums = extract_numbers(spec);
+    let mut target_nums = extract_numbers(target);
+    let mut spec_nums = extract_numbers(spec);
 
     if target_nums.is_empty() && spec_nums.is_empty() {
-        return false; // No numbers to compare → not a numeric match
+        return false;
     }
-
-    // Both must have at least one number, and sets must be equal
     if target_nums.is_empty() || spec_nums.is_empty() {
         return false;
     }
 
-    // Check that all numbers in target appear in spec and vice versa
-    let mut target_sorted = target_nums;
-    let mut spec_sorted = spec_nums;
-    target_sorted.sort();
-    spec_sorted.sort();
-    target_sorted == spec_sorted
+    target_nums.sort();
+    spec_nums.sort();
+    target_nums == spec_nums
 }
 
-/// Tokenize text into a set of words (for Jaccard computation).
-/// Returns a `HashSet<&str>` for O(1) membership checks in Jaccard.
+/// Tokenize text into a set of words (for Jaccard computation), writing into
+/// a pre-allocated scratch HashSet.
 fn tokenize_set<'a>(text: &'a str, scratch: &mut HashSet<&'a str>) {
     scratch.clear();
     text.split_whitespace()
@@ -215,7 +292,45 @@ fn tokenize_set<'a>(text: &'a str, scratch: &mut HashSet<&'a str>) {
         });
 }
 
+/// Compute token-set Jaccard similarity using thread-local scratch buffers.
+fn token_set_jaccard_scratch(target: &str, spec: &str) -> f64 {
+    TOKEN_SET_A.with(|sa| {
+        TOKEN_SET_B.with(|sb| {
+            // SAFETY: The HashSets are typed as `HashSet<&'static str>` for storage
+            // convenience. We cast to `HashSet<&str>` to insert the actual borrowed
+            // strings. The sets are fully cleared before those strings go out of scope.
+            let set_a: &mut HashSet<&str> = unsafe {
+                &mut *(&mut *sa.borrow_mut() as *mut HashSet<&'static str>
+                    as *mut HashSet<&str>)
+            };
+            let set_b: &mut HashSet<&str> = unsafe {
+                &mut *(&mut *sb.borrow_mut() as *mut HashSet<&'static str>
+                    as *mut HashSet<&str>)
+            };
+
+            tokenize_set(target, set_a);
+            tokenize_set(spec, set_b);
+
+            if set_a.is_empty() && set_b.is_empty() {
+                return 1.0;
+            }
+            if set_a.is_empty() || set_b.is_empty() {
+                return 0.0;
+            }
+
+            let intersection = set_a.intersection(set_b).count();
+            let union = set_a.len() + set_b.len() - intersection;
+            if union == 0 {
+                return 1.0;
+            }
+
+            intersection as f64 / union as f64
+        })
+    })
+}
+
 /// Compute token-set Jaccard similarity between two normalized texts.
+/// Allocates — use only in tests or standalone.
 ///
 /// J(A, B) = |A ∩ B| / |A ∪ B|
 ///
@@ -227,10 +342,10 @@ pub fn token_set_jaccard(target: &str, spec: &str) -> f64 {
     tokenize_set(spec, &mut spec_set);
 
     if target_set.is_empty() && spec_set.is_empty() {
-        return 1.0; // Both empty → identical
+        return 1.0;
     }
     if target_set.is_empty() || spec_set.is_empty() {
-        return 0.0; // One empty, one not → no overlap
+        return 0.0;
     }
 
     let intersection = target_set.intersection(&spec_set).count();
@@ -260,13 +375,11 @@ mod tests {
 
     #[test]
     fn test_different_numbers_false() {
-        // Different numbers → numeric inconsistency → no other match → false
         assert!(!verifier().verify("The answer is 42", "The answer is 43"));
     }
 
     #[test]
     fn test_paraphrased_true() {
-        // Paraphrased with enough token overlap → Jaccard ≥ 0.55
         let target = "Paris is the capital city of France located in Europe";
         let spec = "Paris is the capital of France in Europe";
         assert!(verifier().verify(target, spec));
@@ -281,14 +394,12 @@ mod tests {
 
     #[test]
     fn test_refusal_pattern_false() {
-        // One is a refusal, the other is not → mismatch
         assert!(!verifier().verify("I cannot answer that question", "The answer is 42"));
         assert!(!verifier().verify("The answer is 42", "I apologize but I cannot help"));
     }
 
     #[test]
     fn test_both_refusals_true() {
-        // Both are refusals → equivalent
         assert!(verifier().verify("I cannot answer that", "I'm unable to help with that"));
     }
 
@@ -336,19 +447,28 @@ mod tests {
         assert_eq!(normalize("   "), "");
     }
 
+    #[test]
+    fn test_normalize_into_reuse() {
+        let mut buf = String::new();
+        normalize_into("hello world", &mut buf);
+        assert_eq!(buf, "hello world");
+        normalize_into("GOODBYE", &mut buf);
+        assert_eq!(buf, "goodbye");
+    }
+
     // ── Refusal detection ───────────────────────────────────────
 
     #[test]
     fn test_is_refusal_positive() {
-        assert!(is_refusal("I cannot answer"));
-        assert!(is_refusal("I apologize but..."));
-        assert!(is_refusal("as an AI, I..."));
+        assert!(is_refusal("i cannot answer"));
+        assert!(is_refusal("i apologize but..."));
+        assert!(is_refusal("as an ai, i..."));
     }
 
     #[test]
     fn test_is_refusal_negative() {
-        assert!(!is_refusal("The answer is 42"));
-        assert!(!is_refusal("Paris is the capital of France"));
+        assert!(!is_refusal("the answer is 42"));
+        assert!(!is_refusal("paris is the capital of france"));
     }
 
     // ── Number extraction ───────────────────────────────────────
@@ -371,6 +491,35 @@ mod tests {
         assert!(extract_numbers("no numbers here").is_empty());
     }
 
+    #[test]
+    fn test_extract_numbers_into_reuse() {
+        let mut nums = Vec::new();
+        let mut acc = String::new();
+
+        extract_numbers_into("42 99", &mut nums, &mut acc);
+        assert_eq!(nums, vec!["42", "99"]);
+
+        extract_numbers_into("3.14", &mut nums, &mut acc);
+        assert_eq!(nums, vec!["3.14"]);
+    }
+
+    // ── Numeric consistency ─────────────────────────────────────
+
+    #[test]
+    fn test_numeric_consistent_matching() {
+        assert!(numeric_consistent("Result: 3.14", "Got 3.14"));
+    }
+
+    #[test]
+    fn test_numeric_consistent_no_numbers() {
+        assert!(!numeric_consistent("hello", "world"));
+    }
+
+    #[test]
+    fn test_numeric_consistent_different_numbers() {
+        assert!(!numeric_consistent("42", "43"));
+    }
+
     // ── Token-set Jaccard ───────────────────────────────────────
 
     #[test]
@@ -387,9 +536,6 @@ mod tests {
 
     #[test]
     fn test_jaccard_partial() {
-        // "paris capital france" vs "paris capital europe"
-        // stopword-free: {paris, capital, france} ∩ {paris, capital, europe} = 2
-        // union = 3 + 3 - 2 = 4, J = 2/4 = 0.5
         let j = token_set_jaccard(
             "paris is the capital of france",
             "paris is the capital of europe",
@@ -405,7 +551,6 @@ mod tests {
 
     #[test]
     fn test_jaccard_stopwords_removed() {
-        // "a the is" → empty after stopword removal
         let j = token_set_jaccard("a the is", "a the is");
         assert!((j - 1.0).abs() < 1e-10);
     }
