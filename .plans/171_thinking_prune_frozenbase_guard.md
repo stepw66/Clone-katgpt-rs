@@ -15,13 +15,13 @@ Applied to our SpecHop pipeline: intermediate hops should use `ScreeningPruner` 
 
 ## Tasks
 
-- [ ] T1: Add `hop_context` parameter to `build_dd_tree_screened()` — contains `(hop_index: usize, total_hops: usize)`
-- [ ] T2: Implement `FrozenBaseGuard` wrapper for `ScreeningPruner` — when `hop_index < total_hops - 1`, returns inner relevance unchanged; when final hop, delegates to full pipeline
-- [ ] T3: Add `PrunerSchedule` enum to SR²AM configurator with `Uniform` (current behavior) and `FrozenBaseGuard` (new default)
-- [ ] T4: Wire `FrozenBaseGuard` into SpecHop `HopDDTree` — intermediate hops skip ConstraintPruner, final hop applies both
-- [ ] T5: Wire `FrozenBaseGuard` into LT2 `LoopMode::TrainingFree` — intermediate loops use damped sub-stepping only (already implemented), final loop adds ConstraintPruner
-- [ ] T6: GOAT proof benchmark — SpecHop total latency with/without FrozenBaseGuard, same quality constraint
-- [ ] T7: Update README feature flags section with `thinking_prune` gate
+- [x] T1: Add `hop_context` parameter to `build_dd_tree_screened()` — contains `(hop_index: usize, total_hops: usize)`
+- [x] T2: Implement `FrozenBaseGuard` wrapper for `ScreeningPruner` — when `hop_index < total_hops - 1`, returns inner relevance unchanged; when final hop, delegates to full pipeline
+- [x] T3: Add `PrunerSchedule` enum to SR²AM configurator with `Uniform` (current behavior) and `FrozenBaseGuard` (new default)
+- [x] T4: Wire `FrozenBaseGuard` into SpecHop `HopDDTree` — intermediate hops skip ConstraintPruner, final hop applies both
+- [x] T5: Wire `FrozenBaseGuard` into LT2 `LoopMode::TrainingFree` — intermediate loops use damped sub-stepping only (already implemented), final loop adds ConstraintPruner
+- [x] T6: GOAT proof benchmark — SpecHop total latency with/without FrozenBaseGuard, same quality constraint
+- [x] T7: Update README feature flags section with `thinking_prune` gate
 
 ## Implementation Notes
 

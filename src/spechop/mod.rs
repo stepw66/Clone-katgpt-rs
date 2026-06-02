@@ -33,6 +33,9 @@ pub use hop_tree::{
     build_and_verify_hop_tree, build_hop_dd_tree, extract_best_hop_path, extract_deepest_hop_path,
     verify_hop_tree,
 };
+
+#[cfg(feature = "thinking_prune")]
+pub use hop_tree::build_hop_dd_tree_with_schedule;
 pub use pipeline::{PipelineResult, SpecHopPipeline, TrajectoryHop};
 pub use speculator::{CacheSpeculator, HopSpeculator};
 pub use types::{HopObservation, HopState, SpecError, SpecHopConfig, SpecOutcome};

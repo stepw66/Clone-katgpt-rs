@@ -266,6 +266,34 @@ pub fn restore_cache_positions(
     }
 }
 
+// ── Thinking Prune — FrozenBaseGuard for LT2 Loops (Plan 171) ──────
+
+/// Determine whether the current loop iteration should apply full screening.
+///
+/// In the Thinking Pixel framework (arXiv:2604.25299 §3.3), intermediate
+/// recursion steps should use lightweight processing only. Applied to LT2:
+/// intermediate loop iterations use damped sub-stepping only (no pruner),
+/// while the final iteration applies the full `ConstraintPruner`/`ScreeningPruner`.
+///
+/// # Arguments
+///
+/// * `iteration` — Current loop iteration (0-based)
+/// * `total_iterations` — Total number of loop iterations (K)
+/// * `schedule` — The pruner schedule to use
+///
+/// # Returns
+///
+/// `true` if full screening should be applied at this iteration.
+#[cfg(feature = "thinking_prune")]
+#[inline]
+pub fn should_apply_pruner_at_iteration(
+    iteration: usize,
+    total_iterations: usize,
+    schedule: crate::pruners::PrunerSchedule,
+) -> bool {
+    schedule.should_screen_full(iteration, total_iterations)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

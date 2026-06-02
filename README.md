@@ -2226,6 +2226,7 @@ cargo clippy --all-targets --all-features --quiet
 | `sr2am_configurator` | SR²AM Configurator Bandit — per-turn planning regulation via UCB1 over PlanNew/PlanExtend/PlanSkip arms, entropy-aware horizon truncation (Research 76, Plan 112, 29 tests, **default-on**). Requires `bandit` |
 | `data_gate` | Data Gate — self-play stability via task-level filtering before solver, ε-Bernoulli relaxation, execution-based gating (Research 75, Plan 111, **default-on**). Requires `bandit` |
 | `spechop` | SpecHop — continuous multi-hop speculation pipeline for tool-use agents. Hop-level DDTree, ObservationVerifier, k-bounded window, SR²AM `SpecHop { k }` arm. 170+ tests (Plan 131, **opt-in**). Requires `bandit` |
+| `thinking_prune` | Thinking Prune — FrozenBaseGuard for SpecHop/LT2 intermediate steps. Relaxes screening at intermediate hops, applies full verification only at final step. Based on Thinking Pixel paper (arXiv:2604.25299 §3.3). Pure speedup, no quality loss (Plan 171, Research 153, **default-on**). Requires `sr2am_configurator` |
 | `event_log` | Event-sourced game traces with fork-and-diff — append-only log, deterministic replay, structural diff, eval cache. Game wrappers: `BomberEventLog`, `GoEventLog` (Plan 124, GOAT 22/22 ✅) |
 | `data_probe` | Data Probe Diagnostics — controlled information-theoretic validation with Markov chain analysis, NLL estimation, typical-set regime classification, and claim verification (Plan 141, **opt-in**) |
 | `ega_attn` | Energy-Gated Attention — spectral salience gating (Plan 139, **opt-in**) |

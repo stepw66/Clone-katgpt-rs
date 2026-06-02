@@ -51,6 +51,7 @@ mod tests {
             eos_id: 2,
             pad_id: 0,
             unk_id: 3,
+            datrie_vocab: None,
         }
     }
 

@@ -485,7 +485,11 @@ struct ParityScreener;
 
 impl katgpt_rs::speculative::ScreeningPruner for ParityScreener {
     fn relevance(&self, _depth: usize, token_idx: usize, _parent_tokens: &[usize]) -> f32 {
-        if token_idx % 2 == 0 { 1.0 } else { 0.1 }
+        if token_idx.is_multiple_of(2) {
+            1.0
+        } else {
+            0.1
+        }
     }
 }
 
@@ -559,7 +563,7 @@ fn test_screening_pruner_zero_relevance_excludes_token() {
     struct BlockRangeScreener;
     impl katgpt_rs::speculative::ScreeningPruner for BlockRangeScreener {
         fn relevance(&self, _depth: usize, token_idx: usize, _parent_tokens: &[usize]) -> f32 {
-            if token_idx >= 3 && token_idx <= 6 {
+            if (3..=6).contains(&token_idx) {
                 0.0
             } else {
                 1.0
@@ -581,7 +585,7 @@ fn test_screening_pruner_zero_relevance_excludes_token() {
     for &t in &result.tokens {
         if t != config.mask_token {
             assert!(
-                t < 3 || t > 6,
+                !(3..=6).contains(&t),
                 "Token {t} should not appear (relevance=0.0 for tokens 3..6)"
             );
         }

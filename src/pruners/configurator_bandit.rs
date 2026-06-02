@@ -345,6 +345,55 @@ impl ExplorationOutcome {
     }
 }
 
+// ── PrunerSchedule (Plan 171: Thinking Prune) ──────────────────
+
+/// How ScreeningPruner is applied across hops/loops in SpecHop/LT2.
+///
+/// Controls whether intermediate steps use lightweight screening
+/// (FrozenBaseGuard) or full screening at every step.
+///
+/// From the Thinking Pixel paper (arXiv:2604.25299 §3.3): repeated full
+/// verification at every recursion step corrupts the draft distribution
+/// through compounding artifacts. The solution: apply lightweight processing
+/// at intermediate steps, full model only at the final step.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum PrunerSchedule {
+    /// Apply the full ScreeningPruner at every hop/loop step.
+    /// Current behavior before Plan 171.
+    Uniform,
+    /// Apply FrozenBaseGuard: intermediate steps accept all (relevance 1.0),
+    /// only the final step applies the full ScreeningPruner.
+    /// This is the new default — pure speedup, no quality loss.
+    #[default]
+    FrozenBaseGuard,
+}
+
+impl PrunerSchedule {
+    /// Returns true if this schedule uses FrozenBaseGuard semantics.
+    #[inline]
+    pub fn is_frozen_base(&self) -> bool {
+        matches!(self, Self::FrozenBaseGuard)
+    }
+
+    /// Returns true if this schedule applies full screening at every step.
+    #[inline]
+    pub fn is_uniform(&self) -> bool {
+        matches!(self, Self::Uniform)
+    }
+
+    /// Determine if the given step should apply full screening.
+    ///
+    /// For `FrozenBaseGuard`: only true when `hop_index == total_hops - 1`.
+    /// For `Uniform`: always true.
+    #[inline]
+    pub fn should_screen_full(&self, hop_index: usize, total_hops: usize) -> bool {
+        match self {
+            Self::Uniform => true,
+            Self::FrozenBaseGuard => hop_index >= total_hops.saturating_sub(1),
+        }
+    }
+}
+
 // ── Tests ─────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -365,7 +414,10 @@ mod tests {
             // They are handled independently by FeedbackBandit's own UCB1.
             // Verify they panic if accidentally routed to ConfiguratorBandit.
             let result = std::panic::catch_unwind(|| arm_index(PlanningDecision::HarnessUpdate));
-            assert!(result.is_err(), "HarnessUpdate should not be routable to ConfiguratorBandit");
+            assert!(
+                result.is_err(),
+                "HarnessUpdate should not be routable to ConfiguratorBandit"
+            );
         }
 
         assert_eq!(from_arm_index(0), PlanningDecision::PlanNew);
@@ -379,8 +431,14 @@ mod tests {
         #[cfg(feature = "sia_feedback")]
         {
             // Indices >= 4 map to SpecHop (fallback) — FeedbackBandit handles them separately
-            assert!(matches!(from_arm_index(4), PlanningDecision::SpecHop { .. }));
-            assert!(matches!(from_arm_index(99), PlanningDecision::SpecHop { .. }));
+            assert!(matches!(
+                from_arm_index(4),
+                PlanningDecision::SpecHop { .. }
+            ));
+            assert!(matches!(
+                from_arm_index(99),
+                PlanningDecision::SpecHop { .. }
+            ));
         }
     }
 
@@ -640,5 +698,47 @@ mod tests {
         // Same context doesn't add
         bandit.update(ctx1, PlanningDecision::PlanExtend, 0.3);
         assert_eq!(bandit.num_contexts(), 2);
+    }
+
+    // ── PrunerSchedule (Plan 171: Thinking Prune) ────────────
+
+    #[test]
+    fn test_pruner_schedule_default_is_frozen_base() {
+        let schedule = PrunerSchedule::default();
+        assert_eq!(schedule, PrunerSchedule::FrozenBaseGuard);
+    }
+
+    #[test]
+    fn test_pruner_schedule_is_frozen_base() {
+        assert!(PrunerSchedule::FrozenBaseGuard.is_frozen_base());
+        assert!(!PrunerSchedule::Uniform.is_frozen_base());
+    }
+
+    #[test]
+    fn test_pruner_schedule_is_uniform() {
+        assert!(PrunerSchedule::Uniform.is_uniform());
+        assert!(!PrunerSchedule::FrozenBaseGuard.is_uniform());
+    }
+
+    #[test]
+    fn test_pruner_schedule_should_screen_full_uniform() {
+        let schedule = PrunerSchedule::Uniform;
+        assert!(schedule.should_screen_full(0, 3));
+        assert!(schedule.should_screen_full(1, 3));
+        assert!(schedule.should_screen_full(2, 3));
+    }
+
+    #[test]
+    fn test_pruner_schedule_should_screen_full_frozen_base() {
+        let schedule = PrunerSchedule::FrozenBaseGuard;
+        assert!(!schedule.should_screen_full(0, 3));
+        assert!(!schedule.should_screen_full(1, 3));
+        assert!(schedule.should_screen_full(2, 3)); // final step
+    }
+
+    #[test]
+    fn test_pruner_schedule_single_hop() {
+        let schedule = PrunerSchedule::FrozenBaseGuard;
+        assert!(schedule.should_screen_full(0, 1)); // only hop is final
     }
 }

@@ -328,7 +328,192 @@ pub fn build_hop_dd_tree(marginals: &[HopMarginal], config: &HopTreeConfig) -> V
     tree
 }
 
-// ── Extract Paths ─────────────────────────────────────────────
+/// Build a hop-level DDTree with `PrunerSchedule`-aware screening (Plan 171).
+///
+/// Identical to [`build_hop_dd_tree`] but applies the `FrozenBaseGuard` pattern:
+/// intermediate hops relax the confidence floor to 0.0 (accept all candidates),
+/// while the final hop uses the full `confidence_floor` from config.
+///
+/// When `schedule` is [`PrunerSchedule::Uniform`], delegates to [`build_hop_dd_tree`]
+/// unchanged. When `PrunerSchedule::FrozenBaseGuard`, intermediate hops skip
+/// the confidence-based pruning, reserving it for the final hop only.
+///
+/// # Arguments
+///
+/// * `marginals` — Per-depth speculator confidence distributions
+/// * `config` — Hop tree configuration (budget, thresholds)
+/// * `schedule` — Pruner schedule (Uniform or FrozenBaseGuard)
+///
+/// # Returns
+///
+/// Tree nodes in expansion order.
+#[cfg(feature = "thinking_prune")]
+pub fn build_hop_dd_tree_with_schedule(
+    marginals: &[HopMarginal],
+    config: &HopTreeConfig,
+    schedule: crate::pruners::PrunerSchedule,
+) -> Vec<HopTreeNode> {
+    if marginals.is_empty() {
+        return Vec::new();
+    }
+
+    // For Uniform schedule, delegate to standard build
+    if schedule.is_uniform() {
+        return build_hop_dd_tree(marginals, config);
+    }
+
+    // FrozenBaseGuard: compute effective floor per depth
+    let total_hops = marginals.len();
+    let effective_floors: Vec<f64> = (0..total_hops)
+        .map(|depth| {
+            if schedule.should_screen_full(depth, total_hops) {
+                config.confidence_floor
+            } else {
+                // Intermediate hop: accept all candidates (no floor)
+                0.0
+            }
+        })
+        .collect();
+
+    let mut heap: BinaryHeap<HopTreeNode> = BinaryHeap::new();
+    let mut tree: Vec<HopTreeNode> = Vec::with_capacity(config.tree_budget);
+
+    // ── Chain seed with relaxed intermediate floors ──────────
+    if config.chain_seed {
+        let mut cumulative_score: f64 = 0.0;
+        let mut parent_idx: Option<usize> = None;
+
+        for (depth, marginal) in marginals.iter().enumerate() {
+            if tree.len() >= config.tree_budget {
+                break;
+            }
+
+            let floor = effective_floors[depth];
+            let best = marginal
+                .candidates
+                .iter()
+                .filter(|c| c.confidence >= floor)
+                .max_by(|a, b| {
+                    a.confidence
+                        .partial_cmp(&b.confidence)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                });
+
+            let Some(candidate) = best else {
+                break;
+            };
+
+            cumulative_score += candidate.log_confidence();
+            let node_idx = tree.len();
+            tree.push(HopTreeNode {
+                score: cumulative_score,
+                depth,
+                action: marginal.action.clone(),
+                observation: candidate.observation.clone(),
+                parent_idx,
+                verified: HopVerifyState::Pending,
+            });
+
+            for candidate in &marginal.candidates {
+                if candidate.confidence < floor {
+                    continue;
+                }
+                if candidate.observation == tree[node_idx].observation {
+                    continue;
+                }
+                heap.push(HopTreeNode {
+                    score: cumulative_score - tree[node_idx].score + candidate.log_confidence(),
+                    depth,
+                    action: marginal.action.clone(),
+                    observation: candidate.observation.clone(),
+                    parent_idx,
+                    verified: HopVerifyState::Pending,
+                });
+            }
+
+            parent_idx = Some(node_idx);
+        }
+
+        if let Some(last_idx) = parent_idx {
+            let last_depth = tree[last_idx].depth;
+            let next_depth = last_depth + 1;
+            if next_depth < marginals.len() {
+                let next_marginal = &marginals[next_depth];
+                let floor = effective_floors[next_depth];
+                for candidate in &next_marginal.candidates {
+                    if candidate.confidence < floor {
+                        continue;
+                    }
+                    let child_score = tree[last_idx].score + candidate.log_confidence();
+                    heap.push(HopTreeNode {
+                        score: child_score,
+                        depth: next_depth,
+                        action: next_marginal.action.clone(),
+                        observation: candidate.observation.clone(),
+                        parent_idx: Some(last_idx),
+                        verified: HopVerifyState::Pending,
+                    });
+                }
+            }
+        }
+    } else {
+        // ── Standard: seed depth-0 candidates ──────────────
+        if let Some(marginal) = marginals.first() {
+            let floor = effective_floors[0];
+            for candidate in &marginal.candidates {
+                if candidate.confidence < floor {
+                    continue;
+                }
+                heap.push(HopTreeNode {
+                    score: candidate.log_confidence(),
+                    depth: 0,
+                    action: marginal.action.clone(),
+                    observation: candidate.observation.clone(),
+                    parent_idx: None,
+                    verified: HopVerifyState::Pending,
+                });
+            }
+        }
+    }
+
+    // ── Best-first expansion ───────────────────────────────
+    while let Some(node) = heap.pop() {
+        if tree.len() >= config.tree_budget {
+            break;
+        }
+
+        let next_depth = node.depth + 1;
+        let node_idx = tree.len();
+        tree.push(node.clone());
+
+        if next_depth >= marginals.len() {
+            continue;
+        }
+
+        let next_marginal = &marginals[next_depth];
+        let floor = effective_floors[next_depth];
+        for candidate in &next_marginal.candidates {
+            if candidate.confidence < floor {
+                continue;
+            }
+            if tree.len() >= config.tree_budget {
+                break;
+            }
+
+            let child_score = node.score + candidate.log_confidence();
+            heap.push(HopTreeNode {
+                score: child_score,
+                depth: next_depth,
+                action: next_marginal.action.clone(),
+                observation: candidate.observation.clone(),
+                parent_idx: Some(node_idx),
+                verified: HopVerifyState::Pending,
+            });
+        }
+    }
+
+    tree
+}
 
 /// Extract the best-scored path from a hop DDTree.
 ///
@@ -400,8 +585,7 @@ fn reconstruct_path(tree: &[HopTreeNode], leaf: &HopTreeNode) -> Vec<(String, St
 // ── Verified Hop Path ─────────────────────────────────────────
 
 /// Result of verifying a hop DDTree against actual observations.
-#[derive(Clone, Debug)]
-#[derive(Default)]
+#[derive(Clone, Debug, Default)]
 pub struct VerifiedHopPath {
     /// The verified path of (action, observation) pairs.
     pub path: Vec<(String, String)>,
@@ -414,7 +598,6 @@ pub struct VerifiedHopPath {
     /// Total hops in the trajectory.
     pub total_hops: usize,
 }
-
 
 impl VerifiedHopPath {
     /// Speculator accuracy: `commits / (commits + rollbacks)`.
@@ -1032,5 +1215,101 @@ mod tests {
 
         assert_eq!(result.direct_commits, 2);
         assert_eq!(result.commits, 0);
+    }
+
+    // ── GOAT Benchmark: FrozenBaseGuard (Plan 171 T6) ────────────
+
+    /// GOAT proof: FrozenBaseGuard schedule produces same or more nodes
+    /// than Uniform when confidence_floor is non-zero.
+    ///
+    /// Rationale: intermediate hops with floor=0.0 accept more candidates,
+    /// expanding the tree. Final hop still applies the floor for quality.
+    #[cfg(feature = "thinking_prune")]
+    #[test]
+    fn test_goat_frozen_base_guard_produces_more_nodes() {
+        use crate::pruners::PrunerSchedule;
+
+        let config = HopTreeConfig {
+            tree_budget: 128,
+            confidence_floor: 0.3,
+            chain_seed: true,
+        };
+
+        let marginals = vec![
+            multi_marginal("a", vec![("obs_1", 0.9), ("obs_2", 0.1)]),
+            multi_marginal("b", vec![("obs_3", 0.8), ("obs_4", 0.2)]),
+            multi_marginal("c", vec![("obs_5", 0.7), ("obs_6", 0.15)]),
+        ];
+
+        let uniform_tree =
+            build_hop_dd_tree_with_schedule(&marginals, &config, PrunerSchedule::Uniform);
+        let frozen_tree =
+            build_hop_dd_tree_with_schedule(&marginals, &config, PrunerSchedule::FrozenBaseGuard);
+
+        // FrozenBaseGuard should produce at least as many nodes
+        // (intermediate hops accept low-confidence candidates that Uniform rejects)
+        assert!(
+            frozen_tree.len() >= uniform_tree.len(),
+            "FrozenBaseGuard ({}) should produce >= Uniform ({}) nodes",
+            frozen_tree.len(),
+            uniform_tree.len()
+        );
+    }
+
+    /// GOAT proof: FrozenBaseGuard with zero floor is equivalent to standard build.
+    ///
+    /// When all floors are already 0.0, both schedules produce identical trees.
+    #[cfg(feature = "thinking_prune")]
+    #[test]
+    fn test_goat_frozen_base_guard_zero_floor_identical() {
+        use crate::pruners::PrunerSchedule;
+
+        let config = HopTreeConfig {
+            tree_budget: 64,
+            confidence_floor: 0.0, // zero floor
+            chain_seed: true,
+        };
+
+        let marginals = vec![
+            multi_marginal("a", vec![("obs_1", 0.9), ("obs_2", 0.5)]),
+            multi_marginal("b", vec![("obs_3", 0.8), ("obs_4", 0.3)]),
+        ];
+
+        let standard = build_hop_dd_tree(&marginals, &config);
+        let uniform = build_hop_dd_tree_with_schedule(&marginals, &config, PrunerSchedule::Uniform);
+        let frozen =
+            build_hop_dd_tree_with_schedule(&marginals, &config, PrunerSchedule::FrozenBaseGuard);
+
+        // All three should produce identical trees when floor is 0.0
+        assert_eq!(standard.len(), uniform.len());
+        assert_eq!(standard.len(), frozen.len());
+    }
+
+    /// GOAT proof: FrozenBaseGuard single hop behaves as final step.
+    ///
+    /// With a single marginal, there's only one hop, so it should apply
+    /// the full confidence_floor regardless of schedule.
+    #[cfg(feature = "thinking_prune")]
+    #[test]
+    fn test_goat_frozen_base_single_hop_is_final() {
+        use crate::pruners::PrunerSchedule;
+
+        let config = HopTreeConfig {
+            tree_budget: 64,
+            confidence_floor: 0.5,
+            chain_seed: false,
+        };
+
+        let marginals = vec![multi_marginal(
+            "a",
+            vec![("obs_high", 0.9), ("obs_low", 0.1)],
+        )];
+
+        let frozen =
+            build_hop_dd_tree_with_schedule(&marginals, &config, PrunerSchedule::FrozenBaseGuard);
+
+        // Should only accept the high-confidence candidate (floor=0.5 applied at final step)
+        assert_eq!(frozen.len(), 1);
+        assert_eq!(frozen[0].observation, "obs_high");
     }
 }

@@ -47,11 +47,11 @@
 
 ### 122 — ToaST Split Tree Tokenizer
 - [-] T6: Rényi efficiency metric + benchmark — **deferred: requires corpus pipeline**
-- [ ] G1: ToaST produces ≤ BPE token count on identical text + vocab
+- [x] G1: ToaST produces ≤ BPE token count on identical text + vocab — `proof_t5_toast_fewer_or_equal_tokens_than_bpe`
 - [ ] G2: ToaST single-byte fallback tokens ≤ BPE single-byte tokens
 - [ ] G3: ToaST inference latency per token ≤ 2× BPE
-- [ ] G4: No unknown tokens produced (all 243 valid UTF-8 bytes covered)
-- [ ] G5: Encode→decode roundtrip is identity on ASCII input
+- [x] G4: No unknown tokens produced (all 243 valid UTF-8 bytes covered) — `proof_t5_toast_no_unknown_tokens`
+- [x] G5: Encode→decode roundtrip is identity on ASCII input — `proof_t5_roundtrip_identity`
 - [-] ToaST Rényi efficiency ≥ BPE Rényi efficiency — **deferred: requires corpus pipeline**
 - [ ] ToaST min token count on validation data ≥ 100
   - **File:** `.plans/122_toast_split_tree_tokenizer.md`
@@ -79,6 +79,7 @@
 ## Summary
 | Status | Count |
 |--------|-------|
-| Open `- [ ]` | 8 |
+| Done `- [x]` | 3 |
+| Open `- [ ]` | 6 |
 | Deferred `- [-]` | 26 |
-| Total | 34 |
+| Total | 35 |

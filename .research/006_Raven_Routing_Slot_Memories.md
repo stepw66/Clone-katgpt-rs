@@ -14,6 +14,34 @@ Raven replaces the growing KV cache (Transformer) and dense-overwrite SSM state 
 
 ---
 
+## Verdict: Is Raven the Production GOAT? (No — Parked, 2026-06)
+
+**No.** Raven is **not** the production draft/attention path and has **no GOAT proof** in this repo. It is a researched option held in reserve, not a winner.
+
+### Why it isn't GOAT here
+
+1. **No trained router → it would regress.** `forward_raven()` generates router logits from a *dummy* projection (recycles K-projection slices, see `transformer.rs:4056-4058`); there is no trained `W_route` in `TransformerWeights`. Raven's headline 99% recall numbers depend *entirely* on a learned router (paper: 4 GPUs × 30K steps). With the dummy router, slots misroute and freeze arbitrarily, so recall would be **worse** than the standard KV cache — not better. This is a CPU-first, training-free system with no GPU training loop to fix that.
+2. **Unwired by design.** The draft loop is hardcoded to `MultiLayerKVCache` via `SpeculativeContext`; `step.rs` never imports `forward_raven`/`RavenKVCache`. `DraftResult.routing_overlap` is always `None` (`dflash.rs:266`, `:309`). `forward_raven` is called only from benchmarks. See open issue 006 / Phase 1 checkbox.
+3. **Lossy, no hard invariant.** Raven is a lossy *approximation* of attention — this doc's own Verdict admits "learned routing can misroute" with "no hard invariant." Disqualifying for a correctness-verified pipeline.
+
+### What the production stack uses instead
+
+| Layer | Production default | Complexity |
+|---|---|---|
+| Attention | Standard softmax + GQA (`forward` → `forward_base`) | O(N)/step |
+| KV cache | `MultiLayerKVCache` (dense, CoW snapshots) | O(N) read |
+| Draft model | **DFlash** (autoregressive + MTP target-conditioning) | O(lookahead) |
+| Spec tree | **DDTree** (+ SDE noise, width×depth scaling) | O(K·T·log N) |
+| O(log N) attention | **Percepta** (2D convex-hull, ternary search) — feature-gated, 2D-embeddable domains | O(log N) |
+
+The speedup is **speculative decoding** (DFlash drafts → target verifies → DDTree branches), which is **lossless** (output identical to target), **training-free**, and **GOAT-proven**, plus **Percepta** for domains that embed cleanly in 2D.
+
+### Honest caveat
+
+For raw single-pass 16K–32K recall on a *trained GPU model*, Raven's architecture is genuinely strong and the production stack does not claim to beat it there. That is precisely why the integration plan below positions Raven as an **adaptive adversarial fallback** (`hull_valid → Percepta; else → Raven`), not a default. It's not "Raven lost" — it solves a problem this system doesn't currently have and can't be enabled without a trained router.
+
+---
+
 ## The Problem Space
 
 | Architecture | Memory | Per-Token Write | Recall Quality | Failure Mode |

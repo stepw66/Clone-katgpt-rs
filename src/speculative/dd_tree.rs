@@ -12,9 +12,9 @@ use std::collections::{BinaryHeap, HashMap};
 
 #[cfg(test)]
 use super::types::BinaryScreeningPruner;
-#[cfg(test)]
-use super::types::NoScreeningPruner;
-use super::types::{ConstraintPruner, NoPruner, ScreeningPruner, SdeConfig, TreeNode};
+use super::types::{
+    ConstraintPruner, NoPruner, NoScreeningPruner, ScreeningPruner, SdeConfig, TreeNode,
+};
 use crate::types::{InferenceResult, Rng};
 use rayon::prelude::*;
 
@@ -211,6 +211,52 @@ pub fn build_dd_tree_screened(
     let mut builder = TreeBuilder::new(config);
     builder.build_screened(marginals, config, screener, chain_seed);
     std::mem::take(&mut builder.tree)
+}
+
+/// DDTree with `PrunerSchedule`-aware screening (Plan 171: Thinking Prune).
+///
+/// Wraps `screener` based on `schedule` and hop context:
+/// - [`PrunerSchedule::Uniform`]: delegates to [`build_dd_tree_screened`] unchanged
+/// - [`PrunerSchedule::FrozenBaseGuard`]: intermediate hops return relevance 1.0
+///   (skipping expensive WASM/ConstraintPruner validation), final hop applies
+///   the full screener
+///
+/// This is the token-level DDTree analog of [`build_hop_dd_tree_with_schedule`](
+/// crate::spechop::build_hop_dd_tree_with_schedule). The real performance gain comes
+/// when the screener wraps an expensive validator (e.g., `WasmPruner`, `BanditPruner`)
+/// — intermediate hops skip those calls entirely.
+///
+/// # Arguments
+///
+/// * `marginals` — Per-depth token probability distributions
+/// * `config` — DDTree configuration
+/// * `screener` — Inner screening pruner (potentially expensive)
+/// * `chain_seed` — Whether to build greedy chain backbone first
+/// * `schedule` — Pruner schedule (Uniform or FrozenBaseGuard)
+/// * `hop_index` — Current hop index in the SpecHop pipeline
+/// * `total_hops` — Total number of hops in the SpecHop pipeline
+///
+/// # Returns
+///
+/// Tree nodes in expansion order.
+#[cfg(feature = "thinking_prune")]
+pub fn build_dd_tree_screened_with_schedule(
+    marginals: &[&[f32]],
+    config: &crate::types::Config,
+    screener: &dyn ScreeningPruner,
+    chain_seed: bool,
+    schedule: crate::pruners::PrunerSchedule,
+    hop_index: usize,
+    total_hops: usize,
+) -> Vec<TreeNode> {
+    if schedule.should_screen_full(hop_index, total_hops) {
+        // Final hop (or Uniform): apply full screening
+        build_dd_tree_screened(marginals, config, screener, chain_seed)
+    } else {
+        // Intermediate hop: use accept-all screener (relevance 1.0 everywhere)
+        // This skips all ScreeningPruner calls — the performance win.
+        build_dd_tree_screened(marginals, config, &NoScreeningPruner, chain_seed)
+    }
 }
 
 /// DDTree with RecFM cross-scale consistency filtering (Plan 168, Research 150).

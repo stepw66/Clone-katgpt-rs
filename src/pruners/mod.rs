@@ -27,6 +27,9 @@ pub mod freeze;
 
 pub mod emotion_vector;
 
+#[cfg(feature = "thinking_prune")]
+pub mod frozen_base_guard;
+
 #[cfg(feature = "sudoku")]
 pub mod sudoku_pruner;
 
@@ -97,7 +100,7 @@ pub use trial_log::{SharedTrialLog, TrialLog, TrialRecord, TrialSummary};
 pub use safe_phased::SafePhasedState;
 
 #[cfg(feature = "sr2am_configurator")]
-pub use configurator_bandit::{ConfiguratorBandit, ExplorationOutcome};
+pub use configurator_bandit::{ConfiguratorBandit, ExplorationOutcome, PrunerSchedule};
 
 #[cfg(feature = "sia_feedback")]
 pub use feedback_bandit::{
@@ -238,6 +241,9 @@ pub use bomber::{
 pub use game_state::{ActionSpaceLog, StateHeuristic, mcts_search};
 
 pub use freeze::{load_frozen, save_frozen};
+
+#[cfg(feature = "thinking_prune")]
+pub use frozen_base_guard::FrozenBaseGuard;
 
 #[cfg(feature = "gdsd_distill")]
 pub mod gdsd;
