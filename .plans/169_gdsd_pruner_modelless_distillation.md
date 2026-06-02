@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-02
 **Source:** Research 151 — GDSD Guided Denoiser Self-Distillation
-**Status:** Infrastructure Complete (GOAT Proven 8/8)
+**Status:** ❌ GOAT FAILED — structural tests pass (7/7), gain test missing (0/1). Infrastructure only.
 **Feature Gate:** `gdsd_distill`
 **Dependencies:** `bandit`
 
@@ -80,14 +80,27 @@ fn relevance(&self, depth: usize, token_idx: usize, parent_tokens: &[usize]) -> 
 - [x] T7: Convergence — GdsdPruner wrapping BanditPruner finds optimal arm (500 rounds)
 - [x] Summary test — `goat_169_summary` documents all results
 
-### Phase 5: Default-On Decision — Infrastructure Only
-- GDSD is **not promoted to default-on** — it's a generic wrapper that adds overhead
-  (~120% vs raw pruner) and the advantage signal quality depends on the domain.
-- Marked as **infrastructure-only** — available behind `gdsd_distill` feature for
-  domain-specific experiments (Bomber Arena, Go Arena).
-- Future: Bomber/Go Arena A/B benchmarks can determine if specific domains benefit.
+### Phase 5: GOAT Gain Proof — ❌ FAILED
+
+**The GOAT bar requires PROVEN GAIN, not just correctness.**
+
+| Gate | Requirement | Status |
+|------|-------------|--------|
+| G1 | Acceptance rate improvement ≥5% over base pruner in DDTree arena | ❌ FAIL (+0.00%) |
+| G2 | OR: Win rate improvement ≥3% in Bomber/Go arena A/B | ❌ NOT TESTED |
+| G3 | Overhead ≤ 20% on relevance() hot path | ❌ FAIL (+181.5%) |
+
+T1-T7 prove **correctness** (formula, integration, convergence) — not **gain**.
+No test measures whether GDSD actually improves acceptance rate, quality, or win rate
+over the base pruner. The overhead (120%) is measurable; the benefit is not.
+
+**Verdict: NO GOAT.** GdsdPruner is infrastructure — a correctly-implemented wrapper
+with no proven advantage over existing pruners. Available behind `gdsd_distill` for
+future domain-specific experiments that may demonstrate gain.
 
 ## GOAT Proof Results
+
+### Structural Tests (correctness, NOT gain)
 
 ```
 T1: Relevance overhead ...................... ✅ PASS (~120%, 3 relevance calls)
@@ -98,6 +111,16 @@ T5: Bandit integration ...................... ✅ PASS (GdsdPruner<BanditPruner>
 T6: Advantage functions ..................... ✅ PASS (4/4 valid trees)
 T7: Convergence ............................ ✅ PASS (optimal arm found)
 ```
+
+### Gain Tests (required for GOAT)
+
+```
+G1: Acceptance rate improvement ≥5% ......... ❌ FAIL (+0.00%, identical to baseline)
+G2: Arena win rate improvement ≥3% .......... ❌ NOT TESTED
+G3: Overhead ≤ 20% ......................... ❌ FAIL (+181.5%, nearly 3× cost)
+```
+
+**GOAT: 0/3 gain gates passed. ❌ NOT GOAT-PROVEN.**
 
 ## Optimization Compliance
 

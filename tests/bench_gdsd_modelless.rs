@@ -449,20 +449,174 @@ fn goat_169_t7_convergence() {
     println!("   ✅ PASS: Both converge to optimal arm 2");
 }
 
-// ── Summary ─────────────────────────────────────────────────────
+// ── Gain Tests (required for GOAT) ────────────────────────────
 
 #[cfg(feature = "gdsd_distill")]
 #[test]
+fn goat_169_g1_acceptance_rate() {
+    use katgpt_rs::pruners::{
+        BanditPruner, BanditStrategy, GdsdConfig, GdsdPruner, identity_advantage,
+    };
+    use katgpt_rs::speculative::types::{NoScreeningPruner, ScreeningPruner};
+    use katgpt_rs::speculative::{build_dd_tree_screened, extract_best_path};
+    use katgpt_rs::types::Config;
+
+    println!("\n🧪 GOAT 169 — G1: Acceptance Rate Gain");
+    println!("{}", "═".repeat(70));
+
+    let config = Config::default();
+    let vocab = config.vocab_size;
+    let lookahead = config.draft_lookahead;
+    let rounds = 200;
+    let num_arms = vocab.min(16);
+
+    // Structured marginals: a few tokens are much better than others
+    // This simulates a real decode scenario where marginals have peaks
+    let mut base_score: f64 = 0.0;
+    let mut gdsd_score: f64 = 0.0;
+
+    for round in 0..rounds {
+        // Create marginals with a clear best token that shifts per position
+        let marginals: Vec<Vec<f32>> = (0..lookahead)
+            .map(|pos| {
+                let mut m = vec![0.01f32; vocab];
+                // Best token shifts per position and round
+                let best = (pos + round) % vocab;
+                m[best] = 0.5;
+                // Second best
+                let second = (best + 1) % vocab;
+                m[second] = 0.3;
+                // Normalize
+                let sum: f32 = m.iter().sum();
+                m.iter_mut().for_each(|v| *v /= sum);
+                m
+            })
+            .collect();
+        let slices: Vec<&[f32]> = marginals.iter().map(|m| m.as_slice()).collect();
+
+        // Baseline: BanditPruner alone
+        let mut bandit = BanditPruner::new(NoScreeningPruner, BanditStrategy::Ucb1, num_arms);
+        // Pre-train bandit to simulate warm state
+        for arm in 0..num_arms {
+            let reward = if arm == 0 { 1.0 } else { 0.3 };
+            bandit.update(arm, reward);
+        }
+        let tree_base = build_dd_tree_screened(&slices, &config, &bandit, true);
+        let path_base = extract_best_path(&tree_base);
+        // Score: sum of marginals along best path (higher = better token selection)
+        for (depth, &token) in path_base.iter().enumerate() {
+            if depth < marginals.len() && token < vocab {
+                base_score += marginals[depth][token] as f64;
+            }
+        }
+
+        // GDSD: GdsdPruner wrapping BanditPruner
+        let inner = BanditPruner::new(NoScreeningPruner, BanditStrategy::Ucb1, num_arms);
+        let ref_pruner = BanditPruner::new(NoScreeningPruner, BanditStrategy::Ucb1, num_arms);
+        let mut gdsd =
+            GdsdPruner::with_config(inner, ref_pruner, identity_advantage, GdsdConfig::default());
+        // Pre-train inner bandit same as baseline
+        for arm in 0..num_arms {
+            let reward = if arm == 0 { 1.0 } else { 0.3 };
+            gdsd.inner_mut().update(arm, reward);
+        }
+        gdsd.update_advantage_mean(0.5);
+        let tree_gdsd = build_dd_tree_screened(&slices, &config, &gdsd, true);
+        let path_gdsd = extract_best_path(&tree_gdsd);
+        for (depth, &token) in path_gdsd.iter().enumerate() {
+            if depth < marginals.len() && token < vocab {
+                gdsd_score += marginals[depth][token] as f64;
+            }
+        }
+    }
+
+    let improvement = (gdsd_score - base_score) / base_score * 100.0;
+    println!("   Baseline (BanditPruner) path score:  {base_score:.2}");
+    println!("   GDSD path score:                      {gdsd_score:.2}");
+    println!("   Improvement:                          {improvement:+.2}%");
+
+    let pass = improvement >= 5.0;
+    assert!(
+        improvement >= 5.0,
+        "G1 FAIL: GDSD acceptance rate improvement must be ≥5%, got {improvement:.2}%"
+    );
+    println!("   ✅ G1 PASS: acceptance rate improvement ≥5%");
+}
+
+#[cfg(feature = "gdsd_distill")]
+#[test]
+fn goat_169_g3_overhead() {
+    use std::time::Instant;
+
+    use katgpt_rs::pruners::{GdsdPruner, identity_advantage};
+    use katgpt_rs::speculative::types::{NoScreeningPruner, ScreeningPruner};
+
+    println!("\n🧪 GOAT 169 — G3: Overhead ≤ 20%");
+    println!("{}", "═".repeat(70));
+
+    let warmup = 1000;
+    let iters = 100_000;
+
+    // Baseline
+    let baseline = NoScreeningPruner;
+    for i in 0..warmup {
+        let _ = baseline.relevance(0, i % 100, &[]);
+    }
+    let start = Instant::now();
+    for i in 0..iters {
+        let _ = baseline.relevance(0, i % 100, &[]);
+    }
+    let baseline_time = start.elapsed();
+
+    // GDSD
+    let mut gdsd = GdsdPruner::new(NoScreeningPruner, NoScreeningPruner, identity_advantage);
+    gdsd.update_advantage_mean(0.5);
+    for i in 0..warmup {
+        let _ = gdsd.relevance(0, i % 100, &[]);
+    }
+    let start = Instant::now();
+    for i in 0..iters {
+        let _ = gdsd.relevance(0, i % 100, &[]);
+    }
+    let gdsd_time = start.elapsed();
+
+    let overhead_pct =
+        (gdsd_time.as_nanos() as f64 / baseline_time.as_nanos() as f64 - 1.0) * 100.0;
+
+    println!("   NoScreeningPruner:  {baseline_time:?}");
+    println!("   GdsdPruner:         {gdsd_time:?}");
+    println!("   Overhead:           {overhead_pct:+.1}%");
+    println!("   Bar:                ≤ 20%");
+
+    if overhead_pct <= 20.0 {
+        println!("   ✅ G3 PASS: overhead ≤ 20%");
+    } else {
+        println!("   ❌ G3 FAIL: overhead {overhead_pct:.1}% > 20% bar");
+        panic!("G3 FAIL: GDSD overhead {overhead_pct:.1}% exceeds 20% bar");
+    }
+}
+
 fn goat_169_summary() {
     println!("\n📋 Plan 169: GDSD Advantage-Guided Pruner — GOAT Proof Summary");
     println!("{}", "═".repeat(70));
-    println!("   T1: Relevance overhead ...................... see goat_169_t1");
+    println!("   Structural Tests (correctness, NOT gain):");
+    println!("   T1: Relevance overhead ...................... see goat_169_t1 (~120% overhead)");
     println!("   T2: Teacher signal correctness .............. ✅ PASS");
     println!("   T3: TLC centralization ...................... ✅ PASS");
     println!("   T4: DDTree integration ...................... ✅ PASS");
     println!("   T5: Bandit integration ...................... see goat_169_t5");
     println!("   T6: Advantage functions ..................... ✅ PASS");
     println!("   T7: Convergence ............................ ✅ PASS");
+    println!();
+    println!("   Gain Tests (required for GOAT):");
+    println!(
+        "   G1: Acceptance rate improvement ≥5% ......... ❌ FAIL (+0.00%, identical to baseline)"
+    );
+    println!("   G2: Arena win rate improvement ≥3% .......... ❌ NOT TESTED");
+    println!("   G3: Overhead ≤ 20% ......................... ❌ FAIL (+181.5%, nearly 3x cost)");
+    println!();
+    println!("   ❌ GOAT: 0/3 gain gates passed. NOT GOAT-PROVEN.");
+    println!("   Overhead is real. Benefit is assumed, not proven.");
     println!();
     println!(
         "   Run: cargo test --features gdsd_distill --test bench_gdsd_modelless -- --nocapture"
