@@ -3,7 +3,7 @@
 > Auto-generated from `- [ ]` and `- [-]` items across `.plans/` and `.research/`
 > Last updated: 2026-06-02
 >
-> Legend: `- [ ]` open | `- [-]` deferred/blocked | `- [x]` done
+> Legend: `- [ ]` open | `- [-]` deferred/blocked | `- [x]` done (removed from tracker)
 
 ## Research (.research/)
 
@@ -24,11 +24,10 @@
 ## Plans (.plans/)
 
 ### 064 — Percepta Full RIIR
-- [-] Rust example programs compile via `cargo build --target wasm32-unknown-unknown` — **blocked: Rust→WASM compile pipeline**
 - [-] Output matches Python reference exactly — **deferred: needs Percepta Docker**
-- [-] Futamura specialization works — **deferred: needs full Rust→WASM pipeline**
+- [-] Futamura specialization works (output equivalence) — **deferred: specialized model output not yet verified against universal**
 - [-] Rust transformer is faster than Python transformer — **deferred: needs C-compiled WASM from Percepta Docker**
-- [-] Graph evaluator matches transformer output — **blocked: Rust→WASM pipeline**
+- [-] Graph evaluator matches transformer output — **deferred: H5 test has soft assertions only**
   - **File:** `.plans/064_percepta_full_riir.md`
 
 ### 081 — PGD Game Analytics (Modelless)
@@ -41,23 +40,20 @@
   - **File:** `.plans/090_unit_distance_goat.md`
 
 ### 094 — MeMo Reflections + TIES Merging
-- [-] Merged adapter retains >70% of best individual adapter's quality — **requires trained domain adapters**
-- [-] Compute saving ≥30% vs full retrain — **requires full retrain baseline**
+- [ ] Merged adapter retains >70% of best individual adapter's quality per domain — **requires trained domain adapters**
+- [ ] Compute saving ≥30% vs full retrain on union — **requires full retrain baseline**
   - **File:** `.plans/094_memo_reflections_ties_merging.md`
 
 ### 122 — ToaST Split Tree Tokenizer
 - [-] T6: Rényi efficiency metric + benchmark — **deferred: requires corpus pipeline**
-- [x] G1: ToaST produces ≤ BPE token count on identical text + vocab — `proof_t5_toast_fewer_or_equal_tokens_than_bpe`
 - [ ] G2: ToaST single-byte fallback tokens ≤ BPE single-byte tokens
 - [ ] G3: ToaST inference latency per token ≤ 2× BPE
-- [x] G4: No unknown tokens produced (all 243 valid UTF-8 bytes covered) — `proof_t5_toast_no_unknown_tokens`
-- [x] G5: Encode→decode roundtrip is identity on ASCII input — `proof_t5_roundtrip_identity`
 - [-] ToaST Rényi efficiency ≥ BPE Rényi efficiency — **deferred: requires corpus pipeline**
 - [ ] ToaST min token count on validation data ≥ 100
   - **File:** `.plans/122_toast_split_tree_tokenizer.md`
 
 ### 130 — Epiplexity Structural Information Scoring
-- [-] Out of scope: Sequential coding — **N/A**
+- [-] Out of scope: Requential coding — **N/A**
 - [-] Integration point: hook into existing `masked_loss()` — **deferred: requires dllm refactor**
 - [-] T4: SR²AM Context Extension (4 sub-items) — **deferred: requires Plan 112 internals**
 - [-] Integration with Event Log (Plan 124) trace format — **deferred: uses &[f32] for now**
@@ -79,7 +75,6 @@
 ## Summary
 | Status | Count |
 |--------|-------|
-| Done `- [x]` | 3 |
-| Open `- [ ]` | 6 |
-| Deferred `- [-]` | 26 |
-| Total | 35 |
+| Open `- [ ]` | 8 |
+| Deferred `- [-]` | 23 |
+| Total | 31 |
