@@ -20,10 +20,12 @@
 
 mod asymmetric;
 mod batch;
+#[cfg(feature = "dllm")]
 mod diffusion;
 mod distillation;
 mod games;
 mod heuristic;
+#[cfg(feature = "hla_attention")]
 mod hla;
 mod infrastructure;
 mod noise;
@@ -647,9 +649,12 @@ pub fn run_all(config: &Config) -> Vec<BenchResult> {
     cooldown(3);
 
     // ── Phase 12: Diffusion / Denoising ──
-    let diff_results = diffusion::bench_diffusion();
-    results.extend(diff_results);
-    cooldown(3);
+    #[cfg(feature = "dllm")]
+    {
+        let diff_results = diffusion::bench_diffusion();
+        results.extend(diff_results);
+        cooldown(3);
+    }
 
     // ── Phase 13: SIMD / Perf ──
     let simd_results = simd::bench_simd_perf();

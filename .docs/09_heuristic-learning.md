@@ -16,6 +16,18 @@
 >
 > **Status (Plan 032):** TrialLog, AbsorbCompressLayer, HotSwapPruner, and RegressionSuite are implemented behind `--features bandit`. See examples `hl_01_trial_log` and `hl_02_hotswap`.
 >
+> **Status (Plan 164, Research 146):** GEPA-D Reflective Config Evolution — Pareto bandit config evolution via reflective distillation. Evolves system-level configuration (rubric weights, template hints, bandit params) from MeMo trajectory reflection. No gradient updates, no LoRA, no model-based path. Config variants = bandit arms, reflection quality = reward. Behind `--features gepa_reflective` (implies `bandit`, `memo_reflections`). GOAT 4/4 proved. **Default-on.**
+>
+> **Status (Plan 164, Research 147):** PhraseBoost Context Trie Phrase Boosting — context trie phrase boosting for DDTree. `PhraseTrie` with O(1) child lookup, `PhraseBoostPruner` wraps `ScreeningPruner`. +60.4% acceptance rate (0%→60.4%), <1µs per step. Behind `--features phrase_boost`. GOAT 5/5 proved. **Default-on.**
+>
+> **Status (Plan 165, Research 148):** Hydra-Aware Adaptive Layer Budget — emergent self-repair layer skipping inspired by Hydra Effect (arXiv:2307.15771). Two modes: modelless (pre-computed profiles) and model-based (logit lens scoring). 34.4% compute savings, 100% profile stability across seeds. Behind `--features hydra_budget`. GOAT 4/4 proved. **Default-on.**
+>
+> **Status (Plan 166, Research 149):** FlashAR Consensus Tri-Mode — dual-path ternary thermal routing for consensus tri-mode. Plasma hit rate 4.4%, Hot 45.5%, Warm 19.8%, Cold 30.4%. Behind `--features flashar_consensus` (requires `tri_mode`, `plasma_path`). GOAT 9/9 proved. **Default-on.**
+>
+> **Status (Plan 167, Research R050):** Budget Adaptation — compression-adaptive decode budget: PFlash ratio scales DDTree budget [0.5×, 2.0×]. Simple prompts → less search, Complex → more. ~1.3µs overhead. Behind `--features budget_adaptation`. GOAT 8/8 proved. **Default-on.**
+>
+> **Status (ILC Distillation):** Iterative Latent Clustering — synonym-aware DDTree pruning. Offline clustering + online inference path. `IlcClusterer`, `SynonymMap`, `SynonymAwarePruner`. Behind `--features ilc_distill`.
+>
 > **Status (Plan 060):** MeMo Reflection QA Pipeline — 5-step compositional data synthesis from game replays. `ReflectionStep` (DirectExtraction, IndirectExtraction, Consolidation, Verification, EntitySurfacing, CrossGameSynthesis), `ReflectionQA`, `ReflectionDomain` behind `--features memo_reflections`. Consumed by BanditPruner for training signal enrichment. See `src/pruners/reflection.rs`.
 
 ## What is Heuristic Learning?
@@ -61,6 +73,12 @@ katgpt-rs is uniquely positioned for HL because of its **trait-based pruner arch
 | Width Scaling | `best_of_k_rollouts()` — K parallel SDE rollouts, select best (PTRM Plan 083) |
 | Early Stop Gate | `EarlyStopGate<P>` — depth-aware pruning when relevance < threshold (PTRM Plan 083) |
 | Width Selection | `WidthSelectionMode::{BestQ, MostFrequent, Top1Converged}` — rollout selection strategy (PTRM Plan 083, EqR Plan 119) |
+| Reflective Config Evolution | `GepaReflectiveBandit` — Pareto bandit config evolution from MeMo reflections (Plan 164, Research 146) |
+| Context Trie Phrase Boost | `PhraseTrie`, `PhraseBoostPruner` — O(1) phrase lookup wrapping `ScreeningPruner`, +60.4% acceptance (Plan 164, Research 147) |
+| Adaptive Layer Budget | `HydraBudget` — emergent self-repair layer skipping, modelless/model-based modes (Plan 165, Research 148) |
+| Consensus Tri-Mode Routing | `FlashArConsensus` — dual-path ternary thermal routing (Plasma/Hot/Warm/Cold) (Plan 166, Research 149) |
+| Budget Adaptation | `BudgetAdaptation` — PFlash ratio scales DDTree budget [0.5×, 2.0×], adaptive search depth (Plan 167, Research R050) |
+| Synonym-Aware Pruning | `IlcClusterer`, `SynonymMap`, `SynonymAwarePruner` — offline clustering + online synonym-aware DDTree pruning (ILC Distillation) |
 
 ---
 

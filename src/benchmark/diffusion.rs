@@ -13,7 +13,7 @@ use crate::dllm::D2fContext;
 #[cfg(feature = "dllm")]
 use crate::speculative::d2f::{D2fDecodeConfig, D2fPipeline, d2f_decode_block_with};
 #[cfg(feature = "dllm")]
-use crate::speculative::types::NoPruner as ConstraintPruner;
+use crate::speculative::types::{NoPruner as ConstraintPruner, NoScreeningPruner};
 #[cfg(feature = "dllm")]
 use crate::transformer::TransformerWeights;
 #[cfg(feature = "dllm")]
@@ -45,6 +45,7 @@ fn bench_d2f_block_decode() -> BenchResult {
             &config,
             &decode_config,
             &pruner,
+            &NoScreeningPruner,
             &mut rng,
         );
     }
@@ -57,6 +58,7 @@ fn bench_d2f_block_decode() -> BenchResult {
             &config,
             &decode_config,
             &pruner,
+            &NoScreeningPruner,
             &mut rng,
         );
     }
@@ -96,13 +98,13 @@ fn bench_d2f_pipeline() -> BenchResult {
 
     for _ in 0..warmup {
         let pipeline = D2fPipeline::new(&config, decode_config.clone(), total_len);
-        pipeline.decode_all(&weights, &pruner, &mut rng);
+        pipeline.decode_all(&weights, &pruner, &NoScreeningPruner, &mut rng);
     }
 
     let start = Instant::now();
     for _ in 0..iters {
         let pipeline = D2fPipeline::new(&config, decode_config.clone(), total_len);
-        pipeline.decode_all(&weights, &pruner, &mut rng);
+        pipeline.decode_all(&weights, &pruner, &NoScreeningPruner, &mut rng);
     }
     let elapsed = start.elapsed();
 

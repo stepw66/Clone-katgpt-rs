@@ -1331,7 +1331,7 @@ mod tests {
         use crate::dllm::D2fContext;
         use crate::dllm::{generate_pattern_dataset, train_mini_dllm};
         use crate::speculative::d2f::d2f_decode_block_with_sampler;
-        use crate::speculative::types::NoPruner;
+        use crate::speculative::types::{NoPruner, NoScreeningPruner};
 
         let config = make_config();
         let mut rng = Rng::new(42);
@@ -1358,6 +1358,7 @@ mod tests {
             &config,
             &decode_config,
             &NoPruner,
+            &NoScreeningPruner,
             &mut rng,
             Some(&sampler),
         );
@@ -1381,7 +1382,7 @@ mod tests {
         use crate::dllm::D2fContext;
         use crate::dllm::{generate_pattern_dataset, train_mini_dllm};
         use crate::speculative::d2f::d2f_decode_block_with_sampler;
-        use crate::speculative::types::NoPruner;
+        use crate::speculative::types::{NoPruner, NoScreeningPruner};
 
         let config = make_config();
         let mut rng = Rng::new(42);
@@ -1410,6 +1411,7 @@ mod tests {
             &config,
             &decode_config,
             &NoPruner,
+            &NoScreeningPruner,
             &mut rng_fixed,
             None,
         );
@@ -1423,6 +1425,7 @@ mod tests {
             &config,
             &decode_config,
             &NoPruner,
+            &NoScreeningPruner,
             &mut rng_sampler,
             Some(&sampler),
         );

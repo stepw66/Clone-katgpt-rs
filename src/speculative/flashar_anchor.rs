@@ -22,7 +22,7 @@
 
 use crate::dllm::D2fContext;
 use crate::speculative::d2f::{D2fBlockResult, D2fDecodeConfig};
-use crate::speculative::types::NoPruner;
+use crate::speculative::types::{NoPruner, NoScreeningPruner};
 use crate::transformer::{ForwardContext, MultiLayerKVCache, TransformerWeights, forward};
 use crate::types::{Config, Rng, softmax_scaled};
 
@@ -145,6 +145,7 @@ fn fill_with_anchors(
     prompt: &[usize],
     anchor_tokens: &[usize],
     pruner: &dyn crate::speculative::types::ConstraintPruner,
+    screener: &dyn crate::speculative::types::ScreeningPruner,
     rng: &mut Rng,
 ) -> D2fBlockResult {
     // Use the prompt + anchor-initialized block
@@ -200,7 +201,8 @@ fn fill_with_anchors(
                 if !pruner.is_valid(depth, t, parent_tokens) {
                     continue;
                 }
-                sum_exp += (logits_p[t] - max_logit).exp();
+                let relevance = screener.relevance(depth, t, parent_tokens);
+                sum_exp += (logits_p[t] - max_logit).exp() * relevance;
             }
 
             if sum_exp == 0.0 {
@@ -317,6 +319,7 @@ pub fn anchor_then_fill(
         &[],
         &anchor_buf,
         &NoPruner,
+        &NoScreeningPruner,
         rng,
     );
 
@@ -328,6 +331,7 @@ pub fn anchor_then_fill(
         decode_config,
         &[],
         &NoPruner,
+        &NoScreeningPruner,
         rng,
     );
 

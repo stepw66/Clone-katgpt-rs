@@ -2,7 +2,7 @@
 
 ## Overview
 
-A headless Bomberman arena using `bevy_ecs` standalone (not the full Bevy engine) for deterministic, tick-based simulation. Four AI players compete at progressively higher HL technology levels, proving that adaptive intelligence outperforms static rules.
+A headless Bomberman arena using `bevy_ecs` standalone (not the full Bevy engine) for deterministic, tick-based simulation. AI players compete across 6 core and 6 research technology levels, proving that adaptive intelligence outperforms static rules.
 
 The arena serves as the integration test bed for the HL thesis: **bandit-driven action selection + deterministic safety validation > pure heuristics or random baselines**.
 
@@ -101,7 +101,7 @@ enum GameEvent {
 }
 ```
 
-## Player Types (4 HL Tech Levels)
+## Player Types (6 Core + 6 Research Players)
 
 ### P1 🐰 RandomPlayer — Baseline
 
@@ -217,6 +217,58 @@ Game theory's Tit-for-Tat applied to bomberman. 2-state FSM with wall-aware prov
 - **Safety:** Always flees when in blast zone, even in Retaliatory mode.
 - **Feature gate:** `--features g_zero` (same as GZero).
 - **Mixed tournament result:** 58.4% survival, 3.1 avg score, 0.32 kills/rnd (highest kills, 2nd best score).
+
+### P7 🏷️ RubricPlayer — ROPD Rubric-Vector Bomber
+
+Rubric-pattern bandit player using multi-criteria rubric vectors instead of scalar rewards.
+
+- **Tech:** GZero base + `RubricBanditPruner` + `RubricGatedAbsorbCompress`.
+- **Bandit:** Multi-criteria rubric vectors (survival, kills, powerups, aggression) with reference gap scoring.
+- **Absorb:** Rubric-gated compression promotes arms when weighted rubric score approaches reference.
+- **Feature gate:** `--features ropd_rubric`.
+
+### P8 📊 SdarPlayer — SDAR Sigmoid-Gated Bomber
+
+SDAR (Sigmoid-gated Delta-Aware Reward) bandit player with smooth gating.
+
+- **Tech:** GZero base + `SdarBanditPruner` + `SdarGatedAbsorbCompress`.
+- **Bandit:** Sigmoid-gated δ-reward filtering — smoothly transitions between exploring and exploiting based on delta magnitude.
+- **Absorb:** SDAR-gated compression with smooth promotion threshold.
+- **Feature gate:** `--features sdar_gate`.
+
+### P9 🎛️ Sr2amPlayer — SR²AM Configurator Bomber
+
+SR²AM configurator-driven player with FeedbackBandit for planning decisions.
+
+- **Tech:** GZero base + `DeltaBanditPruner` + `DeltaGatedAbsorbCompress` + planning + FeedbackBandit.
+- **Planning:** Decides between plan_new, plan_extend, plan_skip per tick with FeedbackBandit.
+- **Freeze/Thaw:** Full `freeze()` → `BomberFrozenBandit` / `thaw()` cycle for cross-session persistence.
+- **Feature gate:** `--features sr2am_configurator`.
+
+### P10 🧪 VpdPlayer — VPD-EM Distillation Bomber
+
+Variational Posterior Distillation player using EM-cycle bandit updates.
+
+- **Tech:** GZero base + `SdarGatedAbsorbCompress` + `VpdEmCycle`.
+- **Bandit:** E-step/M-step cycle — periodic E-step reclusters templates, M-step updates per-template rewards from outcome EM.
+- **Configurable:** `VpdConfig` for E-step frequency and reward shaping.
+- **Feature gate:** `--features vpd_em_distill`.
+
+### P11 📐 RmsdPlayer — RMSD Relevance Distillation Bomber
+
+RMSD (Root Mean Square Deviation) filtering player that concentrates updates on most informative actions.
+
+- **Tech:** GZero base + `SdarBanditPruner` + `SdarGatedAbsorbCompress` + RMSD delta filtering.
+- **Bandit:** SDAR sigmoid-gated with RMSD-based delta concentration — filters high-variance updates for faster convergence.
+- **Feature gate:** `--features rmsd_distill`.
+
+### NN Players (in `players.rs`)
+
+Three additional players for neural network-based action selection:
+
+- **LoraPlayer** — LoRA adapter on top of heuristic base, applies trained LoRA weights to action scoring.
+- **LoraWasmPlayer** — LoRA + WASM batch validation, combines learned weights with WASM pruner.
+- **NNPlayer** — Pure WASM-based neural network player, delegates all scoring to WASM module.
 
 ## Shared AI Functions (`players.rs`)
 

@@ -47,6 +47,12 @@ Plan 009 (REST)              Plan 010 (Multi-Layer)        Plan 011 (GQA + Paged
 │                           MaxSim late-interaction scoring (maxsim),     │
 │                           block_select_grid for per-(q,k,head) scoring  │
 │                           ported from lucebox-hub C++/CUDA              │
+│                                                                         │
+│  Next-Gen Extensions (Plans 164/166/167)                                │
+│  Budget Adaptation ───── PFlash compression_ratio → DDTree budget       │
+│  FlashAR Anchor-Fill ─── two-round AR+D2F (anchor then denoise)         │
+│  FlashAR Consensus ───── dual-path H/V + ternary thermal routing         │
+│  PhraseBoost ─────────── context trie phrase boosting for DDTree        │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -578,7 +584,7 @@ pub struct TesNode { pub solution, score, metadata, parent_idx, visit_count, pro
 7. **TurboQuant is a separate module** — not extension of existing KV cache, lives in `src/turboquant/`
 8. **SpectralQuant is a separate module** — data-driven alternative to TurboQuant, lives in `src/spectralquant/`
 9. **PFlash uses FlashPrefillConfig** — config-driven, no feature flag for core path
-10. **Feature gates for research extensions** — `dash_attn` (entmax), `maxsim` (MaxSim scoring), `elf_sde` (noise injection), `dllm` / `dmax_spd` / `tri_mode` (decode strategies), `spectral_quant` (SpectralQuant), `domain_latent` / `spec_cost_model` / `stability_metrics` (telemetry)
+10. **Feature gates for research extensions** — `dash_attn` (entmax), `maxsim` (MaxSim scoring), `elf_sde` (noise injection), `dllm` / `dmax_spd` / `tri_mode` (decode strategies), `spectral_quant` (SpectralQuant), `domain_latent` / `spec_cost_model` / `stability_metrics` (telemetry), `budget_adaptation` (Plan 167), `flashar_anchor` (Plan 166), `phrase_boost` (Plan 164), `plasma_path` (Plan 148 ternary weights)
 
 ## Key References
 - [Luce-Org/lucebox-hub](https://github.com/Luce-Org/lucebox-hub/) — Open LLM Inference, Rewritten by Hand for One Specific Chip at a Time
@@ -587,3 +593,160 @@ pub struct TesNode { pub solution, score, metadata, parent_idx, visit_count, pro
 - [Cross-Family Speculative Prefill](https://arxiv.org/abs/2603.02631) — Liu et al., ICLR 2026
 - [FlashPrefill](https://arxiv.org/abs/2603.06199) — Fan et al., 2026
 - [TurboQuant: Online Vector Quantization with Near-Optimal Distortion Rate](https://arxiv.org/pdf/2504.19874) — Zandieh et al., 2025
+
+---
+
+## Next-Generation Lucebox Extensions
+
+Techniques that extend the core Lucebox ideas into new decode strategies, adaptive
+budgets, and domain-specific boosting. These are newer (Plans 164–167) and gated
+behind feature flags until validated by GOAT benchmarks.
+
+### Technique 9: Budget Adaptation (Plan 167)
+
+**Problem.** Fixed `tree_budget` over-spends on simple prompts and under-spends on
+complex ones. The PFlash pipeline already computes a *compression ratio* — the
+fraction of prompt blocks that pass the importance filter — but discards it after
+block selection.
+
+**Solution.** Feed the compression ratio back into the DDTree budget as a complexity
+signal. High ratio (many blocks selected) → complex prompt → more tree budget.
+Low ratio → simple → less budget. Budget is clamped to `[base/2, base*2]`.
+
+```rust
+pub fn adaptive_tree_budget(
+    base_budget: usize,
+    compression_ratio: f32,
+    mode: BudgetAdaptation,
+) -> usize {
+    match mode {
+        BudgetAdaptation::Off => base_budget,
+        BudgetAdaptation::Compression => {
+            let r = compression_ratio.clamp(0.0, 1.0);
+            let scale = 0.5 + 1.5 * r;
+            let adapted = (base_budget as f32 * scale) as usize;
+            adapted.max(base_budget / 2).min(base_budget * 2)
+        }
+        BudgetAdaptation::Entropy => base_budget, // TODO: future
+    }
+}
+```
+
+```rust
+pub enum BudgetAdaptation {
+    #[default]
+    Off,
+    Compression,  // Scale by PFlash compression ratio
+    Entropy,      // Placeholder for first-marginal entropy
+}
+```
+
+**Key property:** Zero additional cost — reuses a value already computed during
+PFlash block selection. Feature-gated behind `budget_adaptation`.
+
+**Source:** `speculative/budget.rs`, `speculative/budget_compat.rs`
+
+---
+
+### Technique 10: FlashAR Anchor-Then-Fill (Plan 166)
+
+**Problem.** Pure D2F denoising on large blocks requires many iterations because
+every position starts masked. The denoiser must simultaneously discover both local
+and global structure.
+
+**Solution.** Split decoding into two rounds:
+
+1. **Round 1 (Anchor):** AR predicts every S-th position (stride). A few AR
+   forward passes produce high-quality anchor tokens.
+2. **Round 2 (Fill):** D2F denoises the remaining positions with anchor tokens
+   pre-filled (unmasked). Reduced search space → fewer denoising steps.
+
+```rust
+pub struct AnchorConfig {
+    pub stride: usize,  // S=1 → pure AR, S=block_size → pure D2F
+}
+
+pub struct AnchorFillResult {
+    pub tokens: Vec<usize>,
+    pub n_anchors: usize,
+    pub fill_steps_used: usize,
+    pub baseline_steps_used: usize,
+    pub step_reduction: usize,
+}
+```
+
+**Key property:** Anchor positions start unmasked in Round 2, directly reducing
+the denoising search space. The `step_reduction` field quantifies the gain over
+baseline D2F. Feature-gated behind `flashar_anchor` (requires `dllm`).
+
+**Source:** `speculative/flashar_anchor.rs`
+
+---
+
+### Technique 11: FlashAR Consensus (Plan 166)
+
+**Problem.** Tri-mode's prefix-match acceptance is coarse — either both paths agree
+on the entire prefix or they don't. No per-position granularity, no confidence signal.
+
+**Solution.** Dual-path draft with per-position ternary consensus and thermal routing:
+
+- **Path H:** AR/MTP draft → tokens + confidence
+- **Path V:** D2F block draft → tokens + confidence
+
+Ternary consensus per position:
+
+```
+ +1 → H wins (conf_H > conf_V)
+  0 → AGREE (both same token) → PLASMA PATH (skip verify)
+ -1 → V wins (conf_V >= conf_H)
+```
+
+Thermal routing assigns a verification level based on consensus + confidence:
+
+```rust
+pub enum ThermalPath {
+    Plasma,  // Both agree, high conf → accept immediately (zero verify)
+    Hot,     // One wins, high conf → accept winner
+    Warm,    // One wins, mid conf → AR spot-check
+    Cold,    // Both low conf → fallback prefix-match
+}
+```
+
+**Key property:** `Plasma` positions skip verification entirely — a direct win when
+both paths converge. This uses Plasma Path ternary weights (Plan 148, `TernaryWeights`)
+for the underlying SIMD matvec. Feature-gated behind `plasma_path`.
+
+**Source:** `speculative/flashar_consensus.rs`, `crates/katgpt-core/src/simd.rs`
+
+---
+
+### Technique 12: PhraseBoost (Plan 164)
+
+**Problem.** DDTree screening pruners are generic — they score tokens by
+positional/entropy heuristics but have no domain vocabulary knowledge. For
+structured domains (code, medical, legal), known phrases should be boosted.
+
+**Solution.** Wrap any `ScreeningPruner` with a `PhraseBoostPruner` that layers
+context-trie phrase boosting on top of the base pruner's relevance scores.
+
+```rust
+pub struct PhraseBoostPruner<P: ScreeningPruner> {
+    inner: P,                                    // base pruner (preserved)
+    trie: PhraseTrie,                            // pre-built phrase trie
+    boost_score: f32,                            // raw boost value
+    active_states: RwLock<HashMap<u128, Vec<usize>>>,  // per-path trie states
+}
+```
+
+Boost is additive and normalized: `boost_score / (1.0 + boost_score)` ensures
+the result stays bounded. Default `boost_score = 5.0` → normalized ≈ 0.833.
+
+The trie tracks active states per DDTree path: after each token, only phrases
+that continue from the current context remain active. Zero training cost —
+phrases are provided at call site.
+
+**Key property:** Modeled after parakeet.cpp's phrase boosting, adapted to our
+DDTree pipeline. Feature-gated behind `phrase_boost` (default-OFF until GOAT
+proves gain).
+
+**Source:** `pruners/phrase_boost.rs`, `pruners/phrase_trie.rs`

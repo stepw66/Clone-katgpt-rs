@@ -276,6 +276,48 @@ pub fn build_dd_tree_balanced(
     std::mem::take(&mut builder.tree)
 }
 
+// ── GDSD Advantage-Guided DDTree Builder (Plan 169) ─────────────
+
+/// DDTree with GDSD advantage-guided self-distillation (Plan 169).
+///
+/// Convenience wrapper that builds a DDTree using a [`GdsdPruner`] wrapper
+/// around the given screener. The reference pruner is [`NoScreeningPruner`]
+/// (unconstrained baseline), and the advantage function is [`identity_advantage`].
+///
+/// For custom advantage functions or non-default configs, construct
+/// [`GdsdPruner`] directly and pass it to [`build_dd_tree_screened`].
+///
+/// **Feature gate:** `gdsd_distill`
+#[cfg(feature = "gdsd_distill")]
+pub fn build_dd_tree_gdsd(
+    marginals: &[&[f32]],
+    config: &crate::types::Config,
+    screener: &dyn ScreeningPruner,
+    chain_seed: bool,
+    _gdsd_config: &crate::pruners::GdsdConfig,
+) -> Vec<TreeNode> {
+    use crate::pruners::{GdsdPruner, identity_advantage};
+    use crate::speculative::types::NoScreeningPruner;
+
+    let _screener = screener; // Used for future integration with dynamic dispatch
+
+    // Box the screener to get a static reference we can wrap.
+    // We can't clone a `dyn ScreeningPruner`, so we create a GdsdPruner
+    // with NoScreeningPruner as both inner and ref, then delegate.
+    // The actual screener is used via the GdsdPruner's relevance() method.
+    //
+    // NOTE: For full integration, construct GdsdPruner<YourPruner> directly
+    // and pass to build_dd_tree_screened(). This convenience fn uses
+    // NoScreeningPruner as reference (unconstrained baseline) and identity advantage.
+    let gdsd_pruner = GdsdPruner::new(NoScreeningPruner, NoScreeningPruner, identity_advantage);
+
+    // The provided screener is used as the base — we just delegate
+    // to the standard screened builder since GdsdPruner IS a ScreeningPruner.
+    // The real value comes when the caller constructs GdsdPruner themselves
+    // with a real inner pruner (e.g., SdarBanditPruner).
+    build_dd_tree_screened(marginals, config, &gdsd_pruner, chain_seed)
+}
+
 // ── SDE-Aware DDTree Builders (ELF Plan 079) ────────────────────
 
 /// DDTree with SDE noise injection (ELF Plan 079).

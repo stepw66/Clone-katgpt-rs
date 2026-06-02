@@ -20,7 +20,7 @@
 #![allow(clippy::too_many_arguments, clippy::needless_range_loop)]
 
 use crate::dllm::{D2fContext, denoising_accuracy, forward_block_causal_with};
-use crate::speculative::types::ConstraintPruner;
+use crate::speculative::types::{ConstraintPruner, ScreeningPruner};
 use crate::transformer::TransformerWeights;
 use crate::types::Config;
 use crate::types::Rng;
@@ -392,10 +392,20 @@ pub fn d2f_decode_block(
     config: &Config,
     decode_config: &D2fDecodeConfig,
     pruner: &dyn ConstraintPruner,
+    screener: &dyn ScreeningPruner,
     rng: &mut Rng,
 ) -> D2fBlockResult {
     let mut ctx = D2fContext::new(config);
-    d2f_decode_block_with_prompt_with(&mut ctx, weights, config, decode_config, &[], pruner, rng)
+    d2f_decode_block_with_prompt_with(
+        &mut ctx,
+        weights,
+        config,
+        decode_config,
+        &[],
+        pruner,
+        screener,
+        rng,
+    )
 }
 
 /// Decode a single block with optional prompt context.
@@ -408,6 +418,7 @@ pub fn d2f_decode_block_with_prompt(
     decode_config: &D2fDecodeConfig,
     prompt: &[usize],
     pruner: &dyn ConstraintPruner,
+    screener: &dyn ScreeningPruner,
     rng: &mut Rng,
 ) -> D2fBlockResult {
     let mut ctx = D2fContext::new(config);
@@ -418,6 +429,7 @@ pub fn d2f_decode_block_with_prompt(
         decode_config,
         prompt,
         pruner,
+        screener,
         rng,
     )
 }
@@ -429,9 +441,10 @@ pub fn d2f_decode_block_with_target(
     decode_config: &D2fDecodeConfig,
     target_tokens: &[usize],
     pruner: &dyn ConstraintPruner,
+    screener: &dyn ScreeningPruner,
     rng: &mut Rng,
 ) -> D2fBlockResult {
-    let mut result = d2f_decode_block(weights, config, decode_config, pruner, rng);
+    let mut result = d2f_decode_block(weights, config, decode_config, pruner, screener, rng);
     result.accuracy = Some(denoising_accuracy(&result.tokens, target_tokens));
     result
 }
@@ -446,9 +459,19 @@ pub fn d2f_decode_block_with(
     config: &Config,
     decode_config: &D2fDecodeConfig,
     pruner: &dyn ConstraintPruner,
+    screener: &dyn ScreeningPruner,
     rng: &mut Rng,
 ) -> D2fBlockResult {
-    d2f_decode_block_with_prompt_with(dctx, weights, config, decode_config, &[], pruner, rng)
+    d2f_decode_block_with_prompt_with(
+        dctx,
+        weights,
+        config,
+        decode_config,
+        &[],
+        pruner,
+        screener,
+        rng,
+    )
 }
 
 /// Zero-alloc variant of [`d2f_decode_block_with_prompt`].
@@ -464,6 +487,7 @@ pub fn d2f_decode_block_with_prompt_with(
     decode_config: &D2fDecodeConfig,
     prompt: &[usize],
     pruner: &dyn ConstraintPruner,
+    screener: &dyn ScreeningPruner,
     rng: &mut Rng,
 ) -> D2fBlockResult {
     // Standalone decode — no persistent KV across calls
@@ -548,7 +572,9 @@ pub fn d2f_decode_block_with_prompt_with(
             let depth = p - block_start;
             let parent_tokens = &tokens[block_start..p];
 
-            // Compute softmax denominator over valid tokens only
+            // Compute relevance-weighted softmax denominator over valid tokens only.
+            // ScreeningPruner relevance ∈ [0.0, 1.0] multiplies the softmax exponent,
+            // boosting semantically relevant tokens and dampening irrelevant ones.
             let mut sum_exp = 0.0f32;
             for t in 0..vocab {
                 if t == mask {
@@ -557,7 +583,8 @@ pub fn d2f_decode_block_with_prompt_with(
                 if !pruner.is_valid(depth, t, parent_tokens) {
                     continue;
                 }
-                sum_exp += (logits_p[t] - max_logit).exp();
+                let relevance = screener.relevance(depth, t, parent_tokens);
+                sum_exp += (logits_p[t] - max_logit).exp() * relevance;
             }
 
             if sum_exp == 0.0 {
@@ -565,7 +592,7 @@ pub fn d2f_decode_block_with_prompt_with(
                 continue;
             }
 
-            // Temperature-scaled sampling from valid tokens
+            // Temperature-scaled sampling from valid tokens (relevance-weighted)
             let (chosen_token, chosen_prob) = if temperature > 0.0 && temperature != 1.0 {
                 sample_temperatured(
                     logits_p,
@@ -576,6 +603,7 @@ pub fn d2f_decode_block_with_prompt_with(
                     depth,
                     parent_tokens,
                     pruner,
+                    screener,
                     rng,
                 )
             } else {
@@ -588,6 +616,7 @@ pub fn d2f_decode_block_with_prompt_with(
                     depth,
                     parent_tokens,
                     pruner,
+                    screener,
                     rng,
                 )
             };
@@ -653,6 +682,7 @@ pub fn d2f_decode_block_with_prompt_with_sampler(
     decode_config: &D2fDecodeConfig,
     prompt: &[usize],
     pruner: &dyn ConstraintPruner,
+    screener: &dyn ScreeningPruner,
     rng: &mut Rng,
     sampler: Option<&DiffusionSampler>,
 ) -> D2fBlockResult {
@@ -732,7 +762,8 @@ pub fn d2f_decode_block_with_prompt_with_sampler(
                 if !pruner.is_valid(depth, t, parent_tokens) {
                     continue;
                 }
-                sum_exp += (logits_p[t] - max_logit).exp();
+                let relevance = screener.relevance(depth, t, parent_tokens);
+                sum_exp += (logits_p[t] - max_logit).exp() * relevance;
             }
 
             if sum_exp == 0.0 {
@@ -749,6 +780,7 @@ pub fn d2f_decode_block_with_prompt_with_sampler(
                     depth,
                     parent_tokens,
                     pruner,
+                    screener,
                     rng,
                 )
             } else {
@@ -761,6 +793,7 @@ pub fn d2f_decode_block_with_prompt_with_sampler(
                     depth,
                     parent_tokens,
                     pruner,
+                    screener,
                     rng,
                 )
             };
@@ -831,6 +864,7 @@ pub fn d2f_decode_block_with_sampler(
     config: &Config,
     decode_config: &D2fDecodeConfig,
     pruner: &dyn ConstraintPruner,
+    screener: &dyn ScreeningPruner,
     rng: &mut Rng,
     sampler: Option<&DiffusionSampler>,
 ) -> D2fBlockResult {
@@ -841,6 +875,7 @@ pub fn d2f_decode_block_with_sampler(
         decode_config,
         &[],
         pruner,
+        screener,
         rng,
         sampler,
     )
@@ -856,10 +891,19 @@ pub fn d2f_decode_block_with_target_with(
     decode_config: &D2fDecodeConfig,
     target_tokens: &[usize],
     pruner: &dyn ConstraintPruner,
+    screener: &dyn ScreeningPruner,
     rng: &mut Rng,
 ) -> D2fBlockResult {
-    let mut result =
-        d2f_decode_block_with_prompt_with(dctx, weights, config, decode_config, &[], pruner, rng);
+    let mut result = d2f_decode_block_with_prompt_with(
+        dctx,
+        weights,
+        config,
+        decode_config,
+        &[],
+        pruner,
+        screener,
+        rng,
+    );
     result.accuracy = Some(denoising_accuracy(&result.tokens, target_tokens));
     result
 }
@@ -879,17 +923,19 @@ fn sample_temperatured(
     depth: usize,
     parent_tokens: &[usize],
     pruner: &dyn ConstraintPruner,
+    screener: &dyn ScreeningPruner,
     rng: &mut Rng,
 ) -> (usize, f32) {
     let inv_temp = 1.0 / temperature;
 
-    // Compute scaled sum
+    // Compute relevance-weighted scaled sum
     let mut scaled_sum = 0.0f32;
     for t in 0..vocab {
         if t == mask || !pruner.is_valid(depth, t, parent_tokens) {
             continue;
         }
-        scaled_sum += ((logits[t] - max_logit) * inv_temp).exp();
+        let relevance = screener.relevance(depth, t, parent_tokens);
+        scaled_sum += ((logits[t] - max_logit) * inv_temp).exp() * relevance;
     }
 
     if scaled_sum == 0.0 {
@@ -903,7 +949,8 @@ fn sample_temperatured(
         if t == mask || !pruner.is_valid(depth, t, parent_tokens) {
             continue;
         }
-        let prob = ((logits[t] - max_logit) * inv_temp).exp() / scaled_sum;
+        let relevance = screener.relevance(depth, t, parent_tokens);
+        let prob = ((logits[t] - max_logit) * inv_temp).exp() * relevance / scaled_sum;
         cumsum += prob;
         if cumsum >= r {
             return (t, prob);
@@ -925,6 +972,7 @@ fn sample_greedy(
     depth: usize,
     parent_tokens: &[usize],
     pruner: &dyn ConstraintPruner,
+    _screener: &dyn ScreeningPruner,
     rng: &mut Rng,
 ) -> (usize, f32) {
     let r = (rng.next() as f64 / u64::MAX as f64) as f32;
@@ -1061,6 +1109,7 @@ impl<'a> D2fPipeline<'a> {
         self,
         weights: &TransformerWeights,
         pruner: &dyn ConstraintPruner,
+        screener: &dyn ScreeningPruner,
         rng: &mut Rng,
     ) -> D2fPipelineResult {
         let n_blocks = self.n_blocks();
@@ -1156,7 +1205,8 @@ impl<'a> D2fPipeline<'a> {
                         if t == mask || !pruner.is_valid(depth, t, parent_tokens) {
                             continue;
                         }
-                        sum_exp += (logits_p[t] - max_logit).exp();
+                        let relevance = screener.relevance(depth, t, parent_tokens);
+                        sum_exp += (logits_p[t] - max_logit).exp() * relevance;
                     }
 
                     if sum_exp == 0.0 {
@@ -1173,6 +1223,7 @@ impl<'a> D2fPipeline<'a> {
                             depth,
                             parent_tokens,
                             pruner,
+                            screener,
                             rng,
                         )
                     } else {
@@ -1185,6 +1236,7 @@ impl<'a> D2fPipeline<'a> {
                             depth,
                             parent_tokens,
                             pruner,
+                            screener,
                             rng,
                         )
                     };
@@ -1602,7 +1654,7 @@ pub fn d2f_decode_block_soft(
 mod tests {
     use super::*;
     use crate::dllm::{generate_pattern_dataset, train_mini_dllm};
-    use crate::speculative::types::NoPruner;
+    use crate::speculative::types::{NoPruner, NoScreeningPruner};
 
     #[test]
     fn test_block_state_transitions() {
@@ -1637,7 +1689,14 @@ mod tests {
 
         let weights = TransformerWeights::new(&config, &mut rng);
 
-        let result = d2f_decode_block(&weights, &config, &decode_config, &NoPruner, &mut rng);
+        let result = d2f_decode_block(
+            &weights,
+            &config,
+            &decode_config,
+            &NoPruner,
+            &NoScreeningPruner,
+            &mut rng,
+        );
 
         assert_eq!(result.tokens.len(), decode_config.block_size);
         assert!(result.steps_used <= decode_config.denoise_steps);
@@ -1659,6 +1718,7 @@ mod tests {
             &decode_config,
             &prompt,
             &NoPruner,
+            &NoScreeningPruner,
             &mut rng,
         );
 
@@ -1679,7 +1739,7 @@ mod tests {
         let pipeline = D2fPipeline::new(&config, decode_config, total_len);
         assert_eq!(pipeline.n_blocks(), 2);
 
-        let result = pipeline.decode_all(&weights, &NoPruner, &mut rng);
+        let result = pipeline.decode_all(&weights, &NoPruner, &NoScreeningPruner, &mut rng);
 
         assert_eq!(result.tokens.len(), total_len);
         assert_eq!(result.block_results.len(), 2);
@@ -1698,7 +1758,7 @@ mod tests {
         let prompt = vec![0, 1];
 
         let pipeline = D2fPipeline::with_prompt(&config, decode_config, total_len, &prompt);
-        let result = pipeline.decode_all(&weights, &NoPruner, &mut rng);
+        let result = pipeline.decode_all(&weights, &NoPruner, &NoScreeningPruner, &mut rng);
 
         // Tokens should be prompt + block
         assert_eq!(result.tokens.len(), prompt.len() + total_len);
@@ -1725,7 +1785,14 @@ mod tests {
             ..D2fDecodeConfig::default()
         };
 
-        let result = d2f_decode_block(&weights, &config, &decode_config, &NoPruner, &mut rng);
+        let result = d2f_decode_block(
+            &weights,
+            &config,
+            &decode_config,
+            &NoPruner,
+            &NoScreeningPruner,
+            &mut rng,
+        );
 
         let n_unmasked = result
             .tokens
@@ -1746,7 +1813,14 @@ mod tests {
 
         let weights = TransformerWeights::new(&config, &mut rng);
 
-        let result = d2f_decode_block(&weights, &config, &decode_config, &NoPruner, &mut rng);
+        let result = d2f_decode_block(
+            &weights,
+            &config,
+            &decode_config,
+            &NoPruner,
+            &NoScreeningPruner,
+            &mut rng,
+        );
 
         assert!(!result.confidence_history.is_empty());
         assert_eq!(result.confidence_history.len(), result.steps_used);
@@ -1764,7 +1838,14 @@ mod tests {
 
         let weights = TransformerWeights::new(&config, &mut rng);
 
-        let result = d2f_decode_block(&weights, &config, &decode_config, &NoPruner, &mut rng);
+        let result = d2f_decode_block(
+            &weights,
+            &config,
+            &decode_config,
+            &NoPruner,
+            &NoScreeningPruner,
+            &mut rng,
+        );
 
         assert_eq!(result.tokens.len(), decode_config.block_size);
         // All tokens should be valid vocab indices
@@ -1800,7 +1881,14 @@ mod tests {
             ..D2fDecodeConfig::default()
         };
 
-        let result = d2f_decode_block(&weights, &config, &multistep_config, &NoPruner, &mut rng);
+        let result = d2f_decode_block(
+            &weights,
+            &config,
+            &multistep_config,
+            &NoPruner,
+            &NoScreeningPruner,
+            &mut rng,
+        );
 
         let n_unmasked = result
             .tokens
@@ -1836,6 +1924,7 @@ mod tests {
             &config,
             &standard_config,
             &NoPruner,
+            &NoScreeningPruner,
             &mut Rng::new(42),
         );
         let result_multistep = d2f_decode_block(
@@ -1843,6 +1932,7 @@ mod tests {
             &config,
             &multistep_config,
             &NoPruner,
+            &NoScreeningPruner,
             &mut Rng::new(42),
         );
 
@@ -1880,7 +1970,7 @@ mod tests {
         let pipeline = D2fPipeline::with_prompt(&config, decode_config, 4, &[config.bos_token])
             .with_soft_config(soft_config);
 
-        let result = pipeline.decode_all(&weights, &NoPruner, &mut rng);
+        let result = pipeline.decode_all(&weights, &NoPruner, &NoScreeningPruner, &mut rng);
 
         // Should produce valid tokens (not all mask tokens)
         assert!(
@@ -1902,7 +1992,7 @@ mod tests {
 
         let pipeline = D2fPipeline::with_prompt(&config, decode_config, 4, &[config.bos_token]);
 
-        let result = pipeline.decode_all(&weights, &NoPruner, &mut rng);
+        let result = pipeline.decode_all(&weights, &NoPruner, &NoScreeningPruner, &mut rng);
 
         // Should produce valid tokens (not all mask tokens)
         assert!(
@@ -1927,7 +2017,7 @@ mod tests {
         let pipeline = D2fPipeline::with_prompt(&config, decode_config, 8, &[config.bos_token])
             .with_soft_config(soft_config);
 
-        let result = pipeline.decode_all(&weights, &NoPruner, &mut rng);
+        let result = pipeline.decode_all(&weights, &NoPruner, &NoScreeningPruner, &mut rng);
 
         // Should have 2 blocks
         assert_eq!(result.block_results.len(), 2, "should have 2 blocks");

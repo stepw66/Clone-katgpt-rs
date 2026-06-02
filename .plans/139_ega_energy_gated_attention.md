@@ -3,7 +3,7 @@
 > **Research:** [100 — EGA Energy-Gated Attention](../.research/100_EGA_Energy_Gated_Attention_Spectral_Salience.md)
 > **Paper:** [arXiv:2605.21842](https://arxiv.org/abs/2605.21842) — Spectral salience as inductive bias for transformer attention
 > **Feature Gate:** `ega_attn` (opt-in, NOT default-on)
-> **Status:** ✅ Phase 2 complete (GOAT proof examples)
+> **Status:** ✅ Phase 3 complete (riir-ai integration)
 > **GOAT Pillar:** ❌ Not a pillar — secondary bet, model-based, depends on LoRA quality. See [MMO GOAT Pillars Decision Matrix](../../riir-ai/.docs/27_mmo_goat_pillars_decision_matrix.md).
 > **Domain:** `katgpt-rs` — generic energy-gated attention. Game-specific τ tuning and per-domain w_proj LoRA stay in `riir-ai`.
 
@@ -134,9 +134,9 @@ Train micro config (L=6, H=8, d=256) with and without EGA on character-level dat
 - [x] T8: `ega_04_combined` example — EGA + DashAttn + SdpaOutputGate combined ablation
 
 ### Phase 3: riir-ai Integration (if GOAT passes)
-- [ ] T9: Game-domain τ discovery — run energy profiling on Bomber/Go/FFT game states
-- [ ] T10: Per-domain EGA LoRA adapter — `game_ega_lora.bin` as Secret A extension
-- [ ] T11: EGA-aware KV cache eviction in inference pipeline
+- [x] T9: Game-domain τ discovery — run energy profiling on Bomber/Go/FFT game states
+- [x] T10: Per-domain EGA LoRA adapter — `game_ega_lora.bin` as Secret A extension
+- [x] T11: EGA-aware KV cache eviction in inference pipeline
 
 ---
 

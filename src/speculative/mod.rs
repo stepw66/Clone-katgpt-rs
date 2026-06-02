@@ -47,6 +47,9 @@ pub use dd_tree::{
     par_find_shortest_sequence, par_find_valid_sequence,
 };
 
+#[cfg(feature = "gdsd_distill")]
+pub use dd_tree::build_dd_tree_gdsd;
+
 #[cfg(feature = "eqr_convergence")]
 pub use dd_tree::ResidualTracker;
 #[cfg(feature = "sr2am_configurator")]
@@ -94,9 +97,11 @@ pub use types::StabilitySnapshot;
 #[cfg(feature = "decode_specialize")]
 pub use crate::transformer::DecodeStage;
 
-// ── LDT Lattice Deduction Transformer re-exports (Plan 088) ──
+// ── LDT Lattice Deduction Transformer re-exports (Plan 088, Plan 170) ──
 #[cfg(feature = "lattice_deduction")]
-pub use alpha::{AlphaTarget, alpha_intersect, is_consistent};
+pub use alpha::{
+    AlphaScreeningPruner, AlphaTarget, ConflictClauseDB, alpha_intersect, is_consistent,
+};
 #[cfg(feature = "lattice_deduction")]
 pub use types::{ConflictDetector, EntropyConflictDetector, LDT_THETA_ELIM, LdtPruneConfig};
 

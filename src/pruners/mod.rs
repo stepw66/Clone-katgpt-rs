@@ -239,6 +239,15 @@ pub use game_state::{ActionSpaceLog, StateHeuristic, mcts_search};
 
 pub use freeze::{load_frozen, save_frozen};
 
+#[cfg(feature = "gdsd_distill")]
+pub mod gdsd;
+
+#[cfg(feature = "gdsd_distill")]
+pub use gdsd::{
+    GdsdConfig, GdsdPruner, clamped_advantage, identity_advantage, sigmoid_advantage,
+    tanh_advantage, token_logit_centralization,
+};
+
 #[cfg(all(feature = "game_state", feature = "bomber"))]
 pub use game_state::{BombSnapshot, BomberHeuristic, BomberState, PlayerSnapshot};
 

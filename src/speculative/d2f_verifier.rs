@@ -7,7 +7,7 @@
 use crate::dllm::D2fContext;
 use crate::speculative::d2f::{D2fDecodeConfig, d2f_decode_block_with_prompt_with};
 use crate::speculative::sampling::sample_from_distribution;
-use crate::speculative::types::NoPruner;
+use crate::speculative::types::{NoPruner, NoScreeningPruner};
 use crate::speculative::verifier::SpeculativeVerifier;
 use crate::transformer::TransformerWeights;
 use crate::transformer::{ForwardContext, MultiLayerKVCache, forward};
@@ -113,6 +113,7 @@ impl SpeculativeVerifier for D2fDrafterVerifier<'_> {
             &self.d2f_config,
             prompt,
             &NoPruner,
+            &NoScreeningPruner,
             rng,
         );
 
@@ -196,7 +197,8 @@ impl SpeculativeVerifier for D2fDrafterVerifier<'_> {
         // Safety: always return at least one token
         if self.accepted_buf.is_empty() {
             let p_dist = &self.p_distributions_flat[..vocab_size];
-            self.accepted_buf.push(sample_from_distribution(p_dist, rng));
+            self.accepted_buf
+                .push(sample_from_distribution(p_dist, rng));
         }
 
         // OPT: avoid clone — move buffer contents out, leaving empty Vec for next call

@@ -1,6 +1,6 @@
 # katgpt-rs: Model Adaptation Techniques
 
-Ten production techniques that adapt the transformer to different tasks and domains **without modifying base weights**. All are feature-gated, zero-copy, and backward-compatible.
+Fifteen production techniques that adapt the transformer to different tasks and domains **without modifying base weights**. All are feature-gated, zero-copy, and backward-compatible.
 
 | # | Technique | Plan | Feature Flag | What It Does |
 |---|-----------|------|-------------|--------------|
@@ -14,6 +14,11 @@ Ten production techniques that adapt the transformer to different tasks and doma
 | 8 | CNA Steering | 087 | `cna_steering` | Contrastive neuron circuit discovery + modulation |
 | 9 | Deep Manifold + Federation | 085 | `deep_manifold` / `federation` | Fixed-point residual scoring + federated KL coupling |
 | 10 | SimpleTES Loop (RPUCG) | 086 | `tes_loop` | Credit-guided trajectory search with RPUCG bandit |
+| 11 | GEPA-D Reflective Config Evolution | 164 | `gepa_reflective` | MeMo trajectory reflection → Pareto bandit config evolution |
+| 12 | PhraseBoost Context Trie | 164 | `phrase_boost` | Zero-cost phrase boosting for DDTree screening |
+| 13 | Hydra-Aware Adaptive Layer Budget | 165 | `hydra_budget` | Emergent self-repair layer skipping via logit lens |
+| 14 | FlashAR Consensus Tri-Mode | 166 | `flashar_consensus` | Dual-path ternary thermal routing for consensus decode |
+| 15 | Budget Adaptation | 167 | `budget_adaptation` | Compression-adaptive decode budget scaling |
 
 ## Adaptation Pipeline
 
@@ -28,6 +33,7 @@ Prompt tokens
 │           (no causal mask — code is non-linear)             │
 │           reader_lora active                                 │
 │           domain_latent injected at layer L/2               │
+│           hydra_budget: pre-computed layer importance        │
 └─────────────────────┬───────────────────────────────────────┘
                       │ KV cache populated
                       │ first generated token
@@ -38,6 +44,28 @@ Prompt tokens
 │  writer_lora active (reference swap, zero data movement)    │
 │  sparse_mlp: skip dead neurons in w2 @ hidden               │
 │  domain_latent still conditioned from prefill               │
+│  phrase_boost: trie-boosted phrase screening                │
+│  budget_adaptation: PFlash ratio scales DDTree budget       │
+└──────────────┬──────────────────────────────────────────────┘
+               │
+               ▼
+┌─────────────────────────────────────────────────────────────┐
+│                   SPECULATIVE TREE (DDTree)                  │
+│  elf_sde: SDE noise for diverse expansion                   │
+│  tes_loop: RPUCG credit-guided search                       │
+│  hydra_budget: adaptive layer skipping (modelless/modeled)  │
+│  flashar_consensus: dual-path ternary thermal routing       │
+│    Path H (AR/MTP) + Path V (D2F block)                     │
+│    PLASMA → HOT → WARM → COLD thermal states               │
+└─────────────────────┬───────────────────────────────────────┘
+                      │
+                      ▼
+┌─────────────────────────────────────────────────────────────┐
+│                  GEPA-D CONFIG EVOLUTION                     │
+│  MeMo trajectory reflection → config mutation               │
+│  Pareto-frontier bandit selection on (quality, cost)        │
+│  Evolves: rubric weights, template hints, bandit params     │
+│  No gradient updates, no LoRA                               │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -686,9 +714,192 @@ Wide budget (24×5×8) achieves 0.9988 quality vs narrow (2×8×30) at 0.8266 (s
 | Wide vs narrow | 0.9988 vs 0.8266 |
 | Feature flag | `tes_loop` (requires `bandit`) |
 
+## Technique 11: GEPA-D Reflective Config Evolution
+
+### Problem
+System-level configuration (rubric weights, template hints, bandit parameters) is hand-tuned and static. No feedback loop from inference trajectories back to config.
+
+### Solution
+GEPA-D (Plan 164, Research 146) evolves system-level configuration from MeMo trajectory reflection using Pareto-frontier bandit selection. Mutates rubric weights, template hints, and bandit params — no gradient updates, no LoRA.
+
+```rust
+// gepa/reflective.rs
+pub struct GepaReflectiveConfig {
+    pub bandit: BanditConfig,
+    pub memo_reflections: bool,
+    pub pareto_frontier_size: usize,
+}
+
+pub fn gepa_evolve_config(
+    trajectories: &[MeMoTrajectory],
+    config: &mut SystemConfig,
+    bandit: &mut ParetoBandit,
+) -> Vec<ConfigMutation> { ... }
+```
+
+### Design Decisions
+Operates entirely in config-space, not weight-space. Pareto-frontier bandit selects on (quality, cost) multi-objective. Composes with all other techniques since it only mutates configuration, not model internals.
+
+### Performance
+
+| Metric | Value |
+|--------|-------|
+| Feature flag | `gepa_reflective` (default-on, requires `bandit`, `memo_reflections`) |
+| Gradient updates | None |
+| LoRA required | No |
+
+## Technique 12: PhraseBoost Context Trie
+
+### Problem
+DDTree screening prunes candidates without domain-specific phrase awareness. Important phrase matches may be discarded early.
+
+### Solution
+PhraseBoost (Plan 164, Research 147) adds a context trie phrase boosting layer for DDTree. Zero training cost — phrases are provided at call site. `PhraseBoostPruner` wraps any `ScreeningPruner` and adds normalized boost for phrase matches.
+
+```rust
+// pruners/phrase_boost.rs
+pub struct PhraseBoostPruner<P: ScreeningPruner> {
+    inner: P,
+    phrase_trie: ContextTrie,
+    boost_weight: f32,
+}
+
+impl<P: ScreeningPruner> ScreeningPruner for PhraseBoostPruner<P> {
+    fn prune(&self, candidates: &[Candidate], context: &Context) -> Vec<Candidate> {
+        // Apply inner pruner, then boost scores for phrase matches
+    }
+}
+```
+
+### Zero Training Cost
+Phrases are injected at call site via `ContextTrie` — no pre-training, no fine-tuning. Wraps any existing `ScreeningPruner` as a decorator.
+
+### Performance
+
+| Metric | Value |
+|--------|-------|
+| Feature flag | `phrase_boost` (default-on) |
+| Training cost | Zero |
+| Wraps | Any `ScreeningPruner` |
+
+## Technique 13: Hydra-Aware Adaptive Layer Budget
+
+### Problem
+All transformer layers execute unconditionally. Some layers contribute disproportionately more to output quality; skipping low-importance layers saves compute without quality loss.
+
+### Solution
+Hydra Budget (Plan 165, Research 148) implements emergent self-repair layer skipping inspired by the Hydra Effect (arXiv:2307.15771). Two modes: modelless (pre-computed layer importance profiles) and model-based (per-layer logit lens scoring).
+
+```rust
+// hydra/budget.rs
+pub struct HydraBudgetConfig {
+    pub mode: HydraMode,
+    pub skip_threshold: f32,
+}
+
+pub enum HydraMode {
+    Modelless { importance_profile: Vec<f32> },
+    ModelBased { logit_lens: LogitLensConfig },
+}
+
+pub fn hydra_layer_decision(
+    layer_idx: usize,
+    hidden: &Tensor,
+    config: &HydraBudgetConfig,
+) -> bool { ... }
+```
+
+### Modelless vs Model-Based
+Modelless uses pre-computed per-layer importance profiles (no runtime overhead). Model-based uses per-layer logit lens scoring for dynamic skip decisions (higher quality, marginal cost).
+
+### Performance
+
+| Metric | Value |
+|--------|-------|
+| Feature flag | `hydra_budget` (default-on) |
+| Modes | Modelless (pre-computed), Model-based (logit lens) |
+| Inspiration | Hydra Effect (arXiv:2307.15771) |
+
+## Technique 14: FlashAR Consensus Tri-Mode
+
+### Problem
+Consensus decoding offers a single verification path. Complex speculative trees benefit from dual-path routing with thermal state awareness.
+
+### Solution
+FlashAR Consensus (Plan 166, Research 149) implements dual-path ternary thermal routing for consensus tri-mode decoding. Path H (AR/MTP) handles horizontal autoregressive + multi-token prediction. Path V (D2F block) handles vertical drafter-to-final verification. PLASMA/HOT/WARM/COLD thermal routing selects verification aggressiveness.
+
+```rust
+// flashar/consensus.rs
+pub struct FlashArConfig {
+    pub tri_mode: bool,
+    pub plasma_path: PathBuf,
+}
+
+pub enum ThermalState {
+    Plasma,  // Full verification, max quality
+    Hot,     // Aggressive verification
+    Warm,    // Moderate verification
+    Cold,    // Minimal verification, max speed
+}
+
+pub fn flashar_route(
+    token: &Token,
+    thermal: &ThermalState,
+    config: &FlashArConfig,
+) -> ConsensusPath { ... }
+```
+
+### Thermal Routing
+PLASMA → HOT → WARM → COLD transitions are driven by consensus confidence. High confidence → COLD (fast path). Low confidence → PLASMA/HOT (thorough verification).
+
+### Performance
+
+| Metric | Value |
+|--------|-------|
+| Feature flag | `flashar_consensus` (default-on, requires `tri_mode`, `plasma_path`) |
+| Paths | Path H (AR/MTP), Path V (D2F block) |
+| Thermal states | PLASMA / HOT / WARM / COLD |
+
+## Technique 15: Budget Adaptation
+
+### Problem
+Fixed decode budget wastes compute on simple prompts (over-searching) and under-serves complex prompts (under-searching).
+
+### Solution
+Budget Adaptation (Plan 167, Research R050) implements compression-adaptive decode budget: PFlash ratio scales DDTree budget within [0.5×, 2.0×]. Simple prompts get less search (0.5×), complex prompts get more (2.0×).
+
+```rust
+// budget/adaptation.rs
+pub struct BudgetAdaptationConfig {
+    pub min_scale: f32,  // 0.5
+    pub max_scale: f32,  // 2.0
+}
+
+pub fn adapt_decode_budget(
+    base_budget: usize,
+    pflash_ratio: f32,
+    config: &BudgetAdaptationConfig,
+) -> usize {
+    let scale = config.min_scale
+        + (config.max_scale - config.min_scale) * pflash_ratio;
+    (base_budget as f32 * scale) as usize
+}
+```
+
+### PFlash Ratio Signal
+PFlash ratio measures compression complexity of the prompt. High ratio → complex prompt → more DDTree budget. Low ratio → simple prompt → less budget. The [0.5×, 2.0×] range prevents pathological under/over-allocation.
+
+### Performance
+
+| Metric | Value |
+|--------|-------|
+| Feature flag | `budget_adaptation` (default-on) |
+| Budget range | [0.5×, 2.0×] base |
+| Signal | PFlash compression ratio |
+
 ## Interaction Matrix
 
-All ten techniques compose without conflicts:
+All fifteen techniques compose without conflicts:
 
 | Technique | Affects Prefill | Affects Decode | Feature Flag |
 |-----------|:-:|:-:|-------------|
@@ -704,6 +915,11 @@ All ten techniques compose without conflicts:
 | Deep Manifold | — | ✅ residual scoring | `deep_manifold` (default) |
 | Federation | — | ✅ expert alignment | `federation` (default) |
 | SimpleTES | — | ✅ credit-guided search | `tes_loop` |
+| GEPA-D Config Evolution | — | ✅ config mutation | `gepa_reflective` (default, requires `bandit`, `memo_reflections`) |
+| PhraseBoost | — | ✅ phrase screening | `phrase_boost` (default) |
+| Hydra Budget | ✅ layer importance | ✅ layer skipping | `hydra_budget` (default) |
+| FlashAR Consensus | — | ✅ thermal routing | `flashar_consensus` (default, requires `tri_mode`, `plasma_path`) |
+| Budget Adaptation | — | ✅ budget scaling | `budget_adaptation` (default) |
 
 All are additive and backward-compatible. Standard `forward()` with no features works exactly as before.
 
@@ -722,3 +938,6 @@ All are additive and backward-compatible. Standard `forward()` with no features 
 - [Deep Manifold Part 2](https://arxiv.org/pdf/2512.06563) — Fixed-point boundary conditions, federation (Plan 085)
 - [SimpleTES](https://arxiv.org/abs/2604.19341) — Credit-guided trajectory search (Plan 086)
 - [G-Zero](https://arxiv.org/pdf/2605.09959) — Self-play distillation, Hint-δ, GRPO+DPO (Plan 049)
+- [GEPA-D](https://arxiv.org/abs/2406.14289) — Reflective config evolution via MeMo trajectory reflection (Plan 164)
+- [Hydra Effect](https://arxiv.org/abs/2307.15771) — Emergent self-repair in layer skipping (Plan 165)
+- [FlashAR](https://arxiv.org/abs/2605.15730) — Dual-path ternary thermal consensus routing (Plan 166)

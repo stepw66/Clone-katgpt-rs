@@ -2,7 +2,7 @@
 
 ## Overview
 
-A headless Final Fantasy Tactics-inspired battle arena using pure Rust (no ECS framework) for deterministic, tick-based simulation. Up to 8 units (4v4) compete across 6 classes with ATB timing, 9 status effects, and 6 progressively smarter AI strategies.
+A headless Final Fantasy Tactics-inspired battle arena using pure Rust (no ECS framework) for deterministic, tick-based simulation. Up to 8 units (4v4) compete across 6 classes with ATB timing, 9 status effects, and 8 progressively smarter AI strategies.
 
 The arena serves as the third integration test bed for the HL thesis: **bandit-driven action selection + template-guided exploration + status effect awareness > static heuristics or random baselines** in a tactical RPG domain.
 
@@ -180,7 +180,7 @@ enum GameEvent {
 | `effective_mag_def(unit, effects)` | Returns `def × 1.5` if Shell active |
 | `effective_hit_rate(unit, effects)` | Returns `BASE_HIT_RATE × 0.5` if Blind active |
 
-## Player Types (6 AI Strategies)
+## Player Types (8 AI Strategies)
 
 ### P1 🎲 RandomPlayer — Baseline
 
@@ -339,6 +339,24 @@ struct UnitTftState {
 #### Key Insight: Clear Provocation Signal
 
 Unlike Bomberman where "who caused the blast" is ambiguous, FFT's `GameEvent::DamageDealt { attacker, target, damage }` provides crystal-clear provocation attribution. This makes TFT a much better fit for the FFT domain — every attack has a named source.
+
+### P7 🏷️ RubricFFTPlayer — ROPD Rubric-Vector Player
+
+Rubric-pattern bandit player using multi-criteria rubric vectors instead of scalar rewards.
+
+- **Tech:** GZero base (UCB1 template proposer) + `RubricBanditPruner` + `RubricGatedAbsorbCompress`.
+- **Bandit:** Multi-criteria rubric vectors with reference gap scoring — compares per-round rubric against perfect reference.
+- **Absorb:** Rubric-gated compression promotes arms when weighted rubric score approaches reference.
+- **Feature gate:** `--features ropd_rubric`.
+
+### P8 📊 SdarFFTPlayer — SDAR Sigmoid-Gated Player
+
+SDAR (Sigmoid-gated Delta-Aware Reward) bandit player with smooth gating.
+
+- **Tech:** GZero base (UCB1 template proposer) + `SdarBanditPruner` + `SdarGatedAbsorbCompress`.
+- **Bandit:** Sigmoid-gated δ-reward filtering — smoothly transitions between exploring and exploiting based on delta magnitude.
+- **Absorb:** SDAR-gated compression with smooth promotion threshold.
+- **Feature gate:** `--features sdar_gate`.
 
 ## Shared AI Functions (`players.rs`)
 

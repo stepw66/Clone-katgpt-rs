@@ -62,6 +62,11 @@ A from-scratch Rust implementation of a GPT-2 style transformer with speculative
 - Sigmoid Margin: SigLIP-style softplus margin loss + dimension sufficiency bound (Plan 157, default-on, GOAT 7/7)
 - Kog CPU Fusion: RMSNorm gamma folding + QKV interleaving for monokernel throughput (Plan 160, opt-in)
 - Hybrid OCT+PQ: default KV codec — OCT triplet + PlanarQuant 2D Givens rotation (Plan 101, default-on)
+- FlashAR Consensus: dual-path ternary thermal routing for consensus tri-mode (Plan 166, GOAT 9/9, default-on)
+- Budget Adaptation: compression-adaptive decode budget scaling (Plan 167, GOAT 8/8, default-on)
+- Hydra Budget: emergent self-repair layer skipping (Plan 165, GOAT 4/4, default-on)
+- GEPA-D Reflective: Pareto bandit config evolution (Plan 164, GOAT 4/4, default-on)
+- PhraseBoost: context trie phrase boosting for DDTree (Plan 164, GOAT 5/5, default-on)
 - 740+ tests passing (111 test files), zero clippy warnings
 - Shared `katgpt-core` crate: types (Config, enums, math utilities), SIMD kernels — extracted for multi-crate reuse
 
@@ -137,6 +142,7 @@ src/
   distill/          PEIRA distillation (Plan 153) ⚛:
     mod.rs          Module root (behind "peira_distill" feature)
     peira.rs        PEIRA inter-view regressor alignment — collapse-free modelless distillation
+    ilc.rs           ILC (Iterative Latent Clustering) Distillation — synonym-aware DDTree pruning (behind "ilc_distill" feature) ⚛+
   benchmark.rs      BenchCategory, BenchResult, run_all, run_all_parallel, save_results_csv, append_timeseries_csv, generate_batch, bench_hla_vs_flat_cache, bench_hla_memory, bench_hla_quality, bench_simd, bench_sparse_mlp
   plot.rs           plot_results → PNG, plot_timeseries
   rerank.rs         RerankMethod (Cosine/MaxSim), RerankedDoc, ndcg_at, SymmetricBoundaryPair (behind "maxsim" + "bt_rank" features)
@@ -161,6 +167,10 @@ src/
       resample.rs   ppot_resample, ppot_resample_with_support, ppot_resample_different_value, ppot_resample_multi_strategy, ppot_rescue, ppot_rescue_adaptive, ppot_rescue_reviewed
       knowledge.rs  RejectionInsight, ErrorKind, SessionKnowledge
       rank.rs       rank_by_consistency, rank_by_consistency_weighted, select_best_variant, select_best_variant_weighted
+      flashar_anchor.rs  FlashAR Strided Anchor-Then-Fill D2F Decoding (Plan 166 T11, behind "flashar_anchor" feature) ⚓
+      flashar_consensus.rs  FlashAR Consensus Tri-Mode with Ternary Thermal Paths (Plan 166, behind "flashar_consensus" feature) ⚖
+      budget.rs        Compression-adaptive decode budget (Plan 167, behind "budget_adaptation" feature) 💰
+      budget_compat.rs  Budget adaptation integration helpers (Plan 167 Phase 2)
 
   pruners/          Domain-specific constraint pruners:
     mod.rs          Re-exports
@@ -278,6 +288,10 @@ src/
     manifold_residual.rs  KlResidualScorer, L2ResidualScorer, ManifoldResidual, ResidualRelevanceScorer — Deep Manifold fixed-point scoring ∇
     boundary_alignment.rs  BoundaryAlignment trait, KlBoundaryAligner — federated KL coupling ≋
     tes_loop.rs      TesLoop trait, SimpleTesLoop<E>, TrajectoryPruner — SimpleTES RPUCG loop ⟳
+    hydra_budget.rs  Hydra-Aware Adaptive Layer Budget (behind "hydra_budget" feature) 🐉
+    gepa_reflective.rs  GEPA-D Reflective Config Evolution (behind "gepa_reflective" feature) 🪞
+    phrase_boost.rs  PhraseBoost context trie phrase boosting (behind "phrase_boost" feature) 📝
+    phrase_trie.rs   Compact token-level trie for phrase boosting (behind "phrase_boost" feature) 🌳
 
     sdar/            SDAR gated distillation — modelless (Plan 072):
       mod.rs           Module root + re-exports
@@ -368,6 +382,35 @@ src/
     minkowski.rs    Minkowski bound computations
     pigeonhole.rs   Pigeonhole principle proofs
 
+  data_probe/      Data Probe Diagnostics — information-theoretic validation (Plan 141, behind "data_probe" feature) 🔍:
+    mod.rs          Module root
+    markov.rs       Dirichlet-sampled Markov chain generator
+    nll.rs          NLL computation against known chain
+    typical_set.rs  Three-way regime classification
+    dirichlet_energy.rs  Dirichlet Energy structural alignment diagnostic
+    claim.rs        Claim card infrastructure for C1-C4 validation
+    geometry.rs     Representation geometry diagnostics (Plan 151)
+  skill_opt/       SkillOpt text-space skill optimization (Plan 144, behind "skill_opt" feature) ✎:
+    mod.rs          Module root
+    edit.rs         Edit operations and SkillEdit struct
+    apply.rs        Deterministic text patching engine
+    gate.rs         Validation gate
+    schedule.rs     Edit budget schedules
+    buffer.rs       FIFO ring buffer for rejected edits
+    optimizer.rs    SkillOptimizer trait
+  proof_cert/      Hierarchical GOAT Proof Certificates (Plan 145, behind "proof_cert" feature) 🏆:
+    mod.rs          Module root
+    certificate.rs  Certificate types (ProofCertificate, ProofEvidence, ProofProperty, ProofResult)
+    chain.rs        Certificate chain verification
+    macros.rs       Declarative proof macros
+    serde_impls.rs  Serde serialization + checksum
+    wasm_certificates.rs  WASM certificate generation
+  cache_prune/     CachePrune SAT + rolling hash + sensitivity (Plan 140, behind "cache_prune" feature) ✂:
+    mod.rs          Module root
+    rolling_hash.rs Rolling hash for O(n) variable-length segment matching
+    sat.rs          Summed-Area Table for O(1) rectangular attention queries
+    sensitivity.rs  Generic SensitivityDetector trait
+
   alloc.rs          Debug-only TrackingAllocator, reset_alloc_stats, get_alloc_stats (debug builds)
 
   * behind --features sudoku
@@ -432,9 +475,16 @@ src/
   ⎘ behind --features shard_kv        (opt-in)
   ☽ behind --features sleep_consolidation (default)
   ⚛ behind --features peira_distill   (opt-in)
+  ⚛+ behind --features ilc_distill
   ⊕ behind --features spectral_hierarchy (default)
   ⊏ behind --features roofline_cost    (default)
   ⊔ behind --features parallax_attn   (opt-in)
+  ⚓ behind --features flashar_anchor    (dllm)
+  ⚖ behind --features flashar_consensus (tri_mode, plasma_path)
+  💰 behind --features budget_adaptation
+  🐉 behind --features hydra_budget     (default)
+  🪞 behind --features gepa_reflective  (bandit, memo_reflections, default)
+  📝 behind --features phrase_boost     (default)
   Plans 137-145 modules are opt-in, see Feature Flags table
 ```
 
@@ -532,6 +582,13 @@ src/
 | `proof_sketch_evolution` | `bandit` | Proof Sketch Evolution — Elo-rated proof population + global goal cache for DDTree/SR²AM (Plan 128, Research 088, opt-in) |
 | `datrie_vocab` | — | Double-array trie vocab lookup — zero-alloc trie for ToaST tokenizer (Research 137, opt-in, pending benchmark) |
 | `kog_cpu_fusion` | — | Kog AI monokernel CPU fusion — RMSNorm gamma folding + QKV interleaving (Plan 160, Research 139, opt-in) |
+| `flashar_anchor` | `dllm` | FlashAR strided anchor-then-fill D2F decoding (Plan 166 T11, opt-in) |
+| `flashar_consensus` | `tri_mode`, `plasma_path` | FlashAR consensus tri-mode with ternary thermal paths (Plan 166, default-on) |
+| `budget_adaptation` | — | Compression-adaptive decode budget (Plan 167, default-on) |
+| `ilc_distill` | — | ILC iterative latent clustering distillation — synonym-aware DDTree pruning (opt-in) |
+| `hydra_budget` | — | Hydra-aware adaptive layer budget — emergent self-repair layer skipping (Plan 165, default-on) |
+| `gepa_reflective` | `bandit` | GEPA-D reflective config evolution — Pareto bandit config evolution (Plan 164, default-on) |
+| `phrase_boost` | — | PhraseBoost context trie phrase boosting for DDTree (Plan 164, default-on) |
 | `shard_kv` | `spectral_quant`, `turboquant` | ShardKV asymmetric K/V compression — undo RoPE + PCA K path, Hadamard + K-means V path (Plan 147, opt-in) |
 | `sleep_consolidation` | `lt2_looped`, `gdn2_attention` | Sleep Consolidation — offline recursive memory consolidation at KV eviction into GDN2 fast weights (Plan 154, default-on, GOAT 14/14) |
 | `spectral_hierarchy` | `katgpt-core/spectral_hierarchy` | Spectral hierarchy diagnostic — eigenspace alignment, Haar wavelets, Cauchy interlacing for KG extraction validation (Plan 156, default-on, GOAT) |
@@ -541,7 +598,7 @@ src/
 | `parallax_attn` | `tiled_attention`, `newton_schulz`, `katgpt-core/parallax_attn` | Parallax parameterized local linear attention — streaming covariance correction (Plan 135, opt-in) |
 | `full` | all above (excludes `stepcode`, `sp_kv`, `shard_kv`, `peira_distill`, `dirichlet_energy`, `data_probe`, `rmsd_distill`, `safe_bandit`, `stiff_anomaly`, `state_source`, `nexus_elo`, `skill_opt`, `proof_cert`, `mech_attribution`, `ega_attn`, `event_log`, `spec_cost_model`, `spechop`, `rt_turbo`, `tf_loop`, `plasma_path`, `parallel_probe`, `parallax_attn`, `sigmoid_margin`, `moa_inference`, `dual_gram_pca`, `roofline_cost`, `leo_all_goals`, `dual_leo`, `stability_metrics`, `asymmetric_kv`, `kog_cpu_fusion`) | Enable all features |
 
-Default features: `sparse_mlp`, `domain_latent`, `ppot`, `bandit`, `bt_rank`, `spectral_quant`, `hybrid_oct_pq`, `elf_sde`, `cna_steering`, `deep_manifold`, `federation`, `tes_loop`, `lattice_deduction`, `delta_routing`, `stability_metrics`, `mls_aggregate`, `gdn2_attention`, `dash_attn`, `dreamer`, `lt2_looped`, `dmax_spd`, `eqr_convergence`, `subterranean`, `sr2am_configurator`, `data_gate`, `plasma_path`, `parallel_probe`, `tf_loop`, `leo_all_goals`, `dual_leo`, `sigmoid_margin`, `moa_inference`, `sleep_consolidation`, `spectral_hierarchy`, `dual_gram_pca`, `roofline_cost`, `newton_schulz`, `river_valley` (38 default features — production best perf + accuracy, Plans 051, 077-079, 085-089, 097, 099, 101-112, 119, 131, 133, 136, 148, 152, 154-159).
+Default features: `sparse_mlp`, `domain_latent`, `ppot`, `bandit`, `bt_rank`, `spectral_quant`, `hybrid_oct_pq`, `elf_sde`, `cna_steering`, `deep_manifold`, `federation`, `tes_loop`, `lattice_deduction`, `delta_routing`, `stability_metrics`, `mls_aggregate`, `gdn2_attention`, `dash_attn`, `dreamer`, `lt2_looped`, `dmax_spd`, `eqr_convergence`, `subterranean`, `sr2am_configurator`, `data_gate`, `plasma_path`, `parallel_probe`, `tf_loop`, `leo_all_goals`, `dual_leo`, `sigmoid_margin`, `moa_inference`, `sleep_consolidation`, `spectral_hierarchy`, `dual_gram_pca`, `roofline_cost`, `newton_schulz`, `river_valley`, `peira_distill`, `kog_cpu_fusion`, `gepa_reflective`, `phrase_boost`, `hydra_budget`, `flashar_consensus`, `budget_adaptation` (45 default features — production best perf + accuracy, Plans 051, 077-079, 085-089, 097, 099, 101-112, 119, 131, 133, 136, 148, 152, 154-167).
 
 ## Quick Start
 

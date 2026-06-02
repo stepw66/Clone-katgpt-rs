@@ -23,7 +23,7 @@
 use crate::dllm::D2fContext;
 use crate::speculative::d2f::{D2fDecodeConfig, d2f_decode_block_with_prompt_with};
 use crate::speculative::sampling::sample_from_distribution;
-use crate::speculative::types::NoPruner;
+use crate::speculative::types::{NoPruner, NoScreeningPruner};
 use crate::speculative::verifier::SpeculativeVerifier;
 use crate::transformer::TransformerWeights;
 use crate::transformer::{ForwardContext, MultiLayerKVCache, forward};
@@ -398,6 +398,7 @@ impl SpeculativeVerifier for FlashARConsensusVerifier<'_> {
             &self.d2f_config,
             prompt,
             &NoPruner,
+            &NoScreeningPruner,
             rng,
         );
 

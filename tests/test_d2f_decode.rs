@@ -10,8 +10,8 @@
 
 use katgpt_rs::dllm::{generate_pattern_dataset, train_mini_dllm};
 use katgpt_rs::speculative::{
-    D2fDecodeConfig, D2fPipeline, NoPruner, d2f_decode_block, d2f_decode_block_with_prompt,
-    d2f_decode_block_with_target,
+    D2fDecodeConfig, D2fPipeline, NoPruner, NoScreeningPruner, d2f_decode_block,
+    d2f_decode_block_with_prompt, d2f_decode_block_with_target,
 };
 use katgpt_rs::transformer::TransformerWeights;
 use katgpt_rs::types::{Config, Rng};
@@ -47,7 +47,14 @@ fn test_d2f_decode_produces_non_mask_tokens() {
         ..D2fDecodeConfig::default()
     };
 
-    let result = d2f_decode_block(&weights, &config, &decode_config, &NoPruner, &mut rng);
+    let result = d2f_decode_block(
+        &weights,
+        &config,
+        &decode_config,
+        &NoPruner,
+        &NoScreeningPruner,
+        &mut rng,
+    );
 
     let n_unmasked = result
         .tokens
@@ -73,7 +80,14 @@ fn test_d2f_decode_convergence_curve() {
         ..D2fDecodeConfig::default()
     };
 
-    let result = d2f_decode_block(&weights, &config, &decode_config, &NoPruner, &mut rng);
+    let result = d2f_decode_block(
+        &weights,
+        &config,
+        &decode_config,
+        &NoPruner,
+        &NoScreeningPruner,
+        &mut rng,
+    );
 
     // Confidence should be non-decreasing (denoising makes progress)
     let history = &result.confidence_history;
@@ -119,6 +133,7 @@ fn test_d2f_decode_with_target_accuracy() {
         &decode_config,
         target,
         &NoPruner,
+        &NoScreeningPruner,
         &mut rng,
     );
 
@@ -157,6 +172,7 @@ fn test_d2f_decode_steps_vs_quality() {
                 &decode_config,
                 target,
                 &NoPruner,
+                &NoScreeningPruner,
                 &mut rng,
             );
             (steps, result.accuracy.unwrap_or(0.0))
@@ -189,12 +205,26 @@ fn test_d2f_decode_temperature_effects() {
     // Low temperature: more deterministic
     let mut cfg_low = decode_config_base.clone();
     cfg_low.temperature = 0.1;
-    let result_low = d2f_decode_block(&weights, &config, &cfg_low, &NoPruner, &mut rng);
+    let result_low = d2f_decode_block(
+        &weights,
+        &config,
+        &cfg_low,
+        &NoPruner,
+        &NoScreeningPruner,
+        &mut rng,
+    );
 
     // High temperature: more diverse
     let mut cfg_high = decode_config_base.clone();
     cfg_high.temperature = 2.0;
-    let result_high = d2f_decode_block(&weights, &config, &cfg_high, &NoPruner, &mut rng);
+    let result_high = d2f_decode_block(
+        &weights,
+        &config,
+        &cfg_high,
+        &NoPruner,
+        &NoScreeningPruner,
+        &mut rng,
+    );
 
     eprintln!(
         "  Low temp (0.1): {} unmasked, {} steps",
@@ -234,7 +264,14 @@ fn test_d2f_decode_prompt_conditioning() {
     };
 
     // No prompt
-    let result_no_prompt = d2f_decode_block(&weights, &config, &decode_config, &NoPruner, &mut rng);
+    let result_no_prompt = d2f_decode_block(
+        &weights,
+        &config,
+        &decode_config,
+        &NoPruner,
+        &NoScreeningPruner,
+        &mut rng,
+    );
 
     // With prompt
     let prompt = vec![0, 1, 0, 1];
@@ -244,6 +281,7 @@ fn test_d2f_decode_prompt_conditioning() {
         &decode_config,
         &prompt,
         &NoPruner,
+        &NoScreeningPruner,
         &mut rng,
     );
 
@@ -280,7 +318,7 @@ fn test_pipeline_multi_block_decode() {
     let pipeline = D2fPipeline::new(&config, decode_config, total_len);
     assert_eq!(pipeline.n_blocks(), 2);
 
-    let result = pipeline.decode_all(&weights, &NoPruner, &mut rng);
+    let result = pipeline.decode_all(&weights, &NoPruner, &NoScreeningPruner, &mut rng);
 
     assert_eq!(result.tokens.len(), total_len);
     assert_eq!(result.block_results.len(), 2);
@@ -319,7 +357,7 @@ fn test_pipeline_with_prompt_context() {
     };
 
     let pipeline = D2fPipeline::with_prompt(&config, decode_config, total_len, &prompt);
-    let result = pipeline.decode_all(&weights, &NoPruner, &mut rng);
+    let result = pipeline.decode_all(&weights, &NoPruner, &NoScreeningPruner, &mut rng);
 
     // Tokens = prompt + generated
     assert_eq!(result.tokens.len(), prompt.len() + total_len);
@@ -353,7 +391,7 @@ fn test_pipeline_partial_block() {
     let pipeline = D2fPipeline::new(&config, decode_config, total_len);
     assert_eq!(pipeline.n_blocks(), 2);
 
-    let result = pipeline.decode_all(&weights, &NoPruner, &mut rng);
+    let result = pipeline.decode_all(&weights, &NoPruner, &NoScreeningPruner, &mut rng);
 
     assert_eq!(result.tokens.len(), total_len);
     assert_eq!(result.block_results.len(), 2);
@@ -402,14 +440,28 @@ fn test_constraint_pruner_restricts_vocab() {
     };
 
     // Without constraint
-    let result_free = d2f_decode_block(&weights, &config, &decode_config, &NoPruner, &mut rng);
+    let result_free = d2f_decode_block(
+        &weights,
+        &config,
+        &decode_config,
+        &NoPruner,
+        &NoScreeningPruner,
+        &mut rng,
+    );
 
     // With constraint: only tokens 0..5 allowed
     let pruner = VocabRangePruner {
         min_token: 0,
         max_token: 5,
     };
-    let result_constrained = d2f_decode_block(&weights, &config, &decode_config, &pruner, &mut rng);
+    let result_constrained = d2f_decode_block(
+        &weights,
+        &config,
+        &decode_config,
+        &pruner,
+        &NoScreeningPruner,
+        &mut rng,
+    );
 
     // All non-mask tokens in constrained result should be in [0..5]
     for &t in &result_constrained.tokens {
@@ -420,6 +472,122 @@ fn test_constraint_pruner_restricts_vocab() {
 
     eprintln!("  Free tokens: {:?}", result_free.tokens);
     eprintln!("  Constrained tokens: {:?}", result_constrained.tokens);
+}
+
+// ---------------------------------------------------------------------------
+// ScreeningPruner Integration Tests
+// ---------------------------------------------------------------------------
+
+/// A screener that assigns relevance based on token parity:
+/// - Even tokens get relevance 1.0
+/// - Odd tokens get relevance 0.1 (heavily dampened)
+struct ParityScreener;
+
+impl katgpt_rs::speculative::ScreeningPruner for ParityScreener {
+    fn relevance(&self, _depth: usize, token_idx: usize, _parent_tokens: &[usize]) -> f32 {
+        if token_idx % 2 == 0 { 1.0 } else { 0.1 }
+    }
+}
+
+#[test]
+fn test_screening_pruner_biases_sampling() {
+    let config = Config::micro_dllm();
+    let mut rng = Rng::new(1100);
+    let (weights, _) = train_tiny_model(&config, &mut rng);
+
+    let decode_config = D2fDecodeConfig {
+        denoise_steps: 16,
+        confidence_threshold: 0.2, // lower threshold for more convergence
+        block_size: 4,
+        temperature: 0.8,
+        ..D2fDecodeConfig::default()
+    };
+
+    // Decode with parity screener: even tokens boosted, odd tokens dampened
+    let screener = ParityScreener;
+    let result = d2f_decode_block(
+        &weights,
+        &config,
+        &decode_config,
+        &NoPruner,
+        &screener,
+        &mut rng,
+    );
+
+    let non_mask: Vec<usize> = result
+        .tokens
+        .iter()
+        .filter(|&&t| t != config.mask_token)
+        .copied()
+        .collect();
+
+    // Count even vs odd tokens
+    let n_even = non_mask.iter().filter(|&&t| t % 2 == 0).count();
+    let n_odd = non_mask.iter().filter(|&&t| t % 2 != 0).count();
+
+    eprintln!(
+        "  Parity screener: non_mask={:?}, even={}, odd={}",
+        non_mask, n_even, n_odd
+    );
+
+    // With even-token relevance=1.0 and odd-token relevance=0.1,
+    // we expect a strong bias toward even tokens (if tokens were placed)
+    if !non_mask.is_empty() {
+        // At least some tokens should be even (high relevance)
+        assert!(
+            n_even > 0,
+            "Expected at least 1 even token with parity screener, got {n_even} even / {n_odd} odd"
+        );
+    }
+}
+
+#[test]
+fn test_screening_pruner_zero_relevance_excludes_token() {
+    let config = Config::micro_dllm();
+    let mut rng = Rng::new(1200);
+    let (weights, _) = train_tiny_model(&config, &mut rng);
+
+    let decode_config = D2fDecodeConfig {
+        denoise_steps: 16,
+        confidence_threshold: 0.2,
+        block_size: 4,
+        temperature: 0.8,
+        ..D2fDecodeConfig::default()
+    };
+
+    // Screener that gives relevance 0.0 to tokens 3..6
+    struct BlockRangeScreener;
+    impl katgpt_rs::speculative::ScreeningPruner for BlockRangeScreener {
+        fn relevance(&self, _depth: usize, token_idx: usize, _parent_tokens: &[usize]) -> f32 {
+            if token_idx >= 3 && token_idx <= 6 {
+                0.0
+            } else {
+                1.0
+            }
+        }
+    }
+
+    let screener = BlockRangeScreener;
+    let result = d2f_decode_block(
+        &weights,
+        &config,
+        &decode_config,
+        &NoPruner,
+        &screener,
+        &mut rng,
+    );
+
+    // Tokens 3..6 should never appear (relevance=0 effectively excludes them)
+    for &t in &result.tokens {
+        if t != config.mask_token {
+            assert!(
+                t < 3 || t > 6,
+                "Token {t} should not appear (relevance=0.0 for tokens 3..6)"
+            );
+        }
+    }
+
+    eprintln!("  Zero-relevance exclusion: {:?}", result.tokens);
 }
 
 /// No-repeat pruner implementing speculative::ConstraintPruner.
@@ -454,7 +622,14 @@ fn test_no_repeat_constraint_deduplicates() {
     let pruner = NoRepeatPruner {
         mask_token: config.mask_token,
     };
-    let result = d2f_decode_block(&weights, &config, &decode_config, &pruner, &mut rng);
+    let result = d2f_decode_block(
+        &weights,
+        &config,
+        &decode_config,
+        &pruner,
+        &NoScreeningPruner,
+        &mut rng,
+    );
 
     // Count non-mask tokens
     let non_mask: Vec<usize> = result
@@ -502,14 +677,28 @@ fn benchmark_d2f_decode_block() {
 
     // Warmup
     for _ in 0..3 {
-        let _ = d2f_decode_block(&weights, &config, &decode_config, &NoPruner, &mut rng);
+        let _ = d2f_decode_block(
+            &weights,
+            &config,
+            &decode_config,
+            &NoPruner,
+            &NoScreeningPruner,
+            &mut rng,
+        );
     }
 
     // Measure
     let n_iters = 50;
     let start = Instant::now();
     for _ in 0..n_iters {
-        let _ = d2f_decode_block(&weights, &config, &decode_config, &NoPruner, &mut rng);
+        let _ = d2f_decode_block(
+            &weights,
+            &config,
+            &decode_config,
+            &NoPruner,
+            &NoScreeningPruner,
+            &mut rng,
+        );
     }
     let elapsed = start.elapsed();
     let us_per_block = elapsed.as_micros() as f64 / n_iters as f64;
@@ -543,7 +732,7 @@ fn benchmark_d2f_pipeline() {
     // Warmup
     for _ in 0..3 {
         let pipeline = D2fPipeline::new(&config, decode_config.clone(), total_len);
-        let _ = pipeline.decode_all(&weights, &NoPruner, &mut rng);
+        let _ = pipeline.decode_all(&weights, &NoPruner, &NoScreeningPruner, &mut rng);
     }
 
     // Measure
@@ -551,7 +740,7 @@ fn benchmark_d2f_pipeline() {
     let start = Instant::now();
     for _ in 0..n_iters {
         let pipeline = D2fPipeline::new(&config, decode_config.clone(), total_len);
-        let _ = pipeline.decode_all(&weights, &NoPruner, &mut rng);
+        let _ = pipeline.decode_all(&weights, &NoPruner, &NoScreeningPruner, &mut rng);
     }
     let elapsed = start.elapsed();
     let us_per_pipeline = elapsed.as_micros() as f64 / n_iters as f64;
@@ -595,6 +784,7 @@ fn benchmark_d2f_steps_sweep() {
                 &decode_config,
                 target,
                 &NoPruner,
+                &NoScreeningPruner,
                 &mut rng,
             );
             last_acc = result.accuracy.unwrap_or(0.0);
@@ -626,7 +816,14 @@ fn benchmark_constraint_pruner_overhead() {
     let start = Instant::now();
     let n_iters = 30;
     for _ in 0..n_iters {
-        let _ = d2f_decode_block(&weights, &config, &decode_config, &NoPruner, &mut rng);
+        let _ = d2f_decode_block(
+            &weights,
+            &config,
+            &decode_config,
+            &NoPruner,
+            &NoScreeningPruner,
+            &mut rng,
+        );
     }
     let elapsed_no_pruner = start.elapsed();
 
@@ -637,7 +834,14 @@ fn benchmark_constraint_pruner_overhead() {
     };
     let start = Instant::now();
     for _ in 0..n_iters {
-        let _ = d2f_decode_block(&weights, &config, &decode_config, &pruner, &mut rng);
+        let _ = d2f_decode_block(
+            &weights,
+            &config,
+            &decode_config,
+            &pruner,
+            &NoScreeningPruner,
+            &mut rng,
+        );
     }
     let elapsed_with_pruner = start.elapsed();
 

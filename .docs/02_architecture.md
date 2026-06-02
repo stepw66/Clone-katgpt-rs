@@ -32,6 +32,8 @@ pub struct Config {
     pub mtp_cluster_vocab_threshold: usize, // enable cluster LM head when vocab_size >= this
     pub mtp_shared_kv_prompt_threshold: usize, // enable shared KV for prompt when pos >= this
     pub mtp_cluster_size: usize,            // cluster size for round-robin vocab mapping
+    pub mtp_min_output_tokens: usize,       // skip MTP when remaining tokens < threshold (Plan 117 T15)
+    pub mtp_cluster_topk: usize,            // compute logits for top-K clusters (Plan 117 T22)
     // HLA Attention (Plan 057: Higher-order Linear Attention)
     pub hla_mode: HlaMode,                  // Standard, Hla, Ahla
     pub hla_normalize: bool,                // normalize HLA output
@@ -68,6 +70,27 @@ pub struct Config {
     pub loop_mode: LoopMode,                // None or WeightShared { loop_count }
     pub hybrid_pattern: HybridPattern,      // Uniform, Interleave, Bookend
     pub gated_attn: bool,                   // whether to use SDPA output gate
+    // Parallax Attention (Plan 135)
+    pub parallax_gate_scale: f32,            // covariance correction gate scale (0.0=disabled)
+    pub parallax_zero_init: bool,            // whether W_R starts zeroed
+    // Emotion Vector (Plan 162, Research 144)
+    pub emotion_desperation_threshold: f32,  // desperation threshold for session flagging
+    // Hydra Adaptive Layer Budget (Research 148, Plan 165)
+    #[cfg(feature = "hydra_budget")]
+    pub hydra_profiles: Vec<HydraLayerProfile>, // per-layer importance profiles (empty = disabled)
+    // DeltaNet Inference (Plan 182)
+    #[cfg(feature = "deltanet_inference")]
+    pub layer_types: Vec<DeltaNetLayerType>,     // per-layer type: Attention vs DeltaNet
+    #[cfg(feature = "deltanet_inference")]
+    pub deltanet_conv_kernel_size: usize,        // depthwise conv kernel size (typically 4)
+    #[cfg(feature = "deltanet_inference")]
+    pub deltanet_state_dim: usize,               // recurrence state dim per head
+    #[cfg(feature = "deltanet_inference")]
+    pub deltanet_linear_head_dim: usize,         // linear attention key/value head dim
+    #[cfg(feature = "deltanet_inference")]
+    pub deltanet_linear_n_heads: usize,          // number of linear attention key heads
+    #[cfg(feature = "deltanet_inference")]
+    pub deltanet_linear_n_value_heads: usize,    // number of linear attention value heads
 }
 ```
 - All configs constructed via factory methods: `Config::micro()`, `Config::micro_lora()`, `Config::draft()`, `Config::game()`, `Config::game_go()`, `Config::gemma2_2b()`, `Config::micro_dllm()`, `Config::bpe()`, `Config::bpe_draft()`, `Config::small_target()`, `Config::gqa_draft()`
@@ -112,6 +135,7 @@ pub enum LoopMode {
     #[default]
     None,                                    // standard single-pass
     WeightShared { loop_count: usize },      // T-pass weight-shared loop
+    TrainingFree,                            // ODE-refined sub-stepping, no extra params (Plan 136)
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -136,15 +160,21 @@ pub struct ResidualGate {
 
 // Feature-gated: `sr2am_configurator`
 pub enum PlanningDecision {
-    PlanNew,      // reset tree, full budget (high uncertainty)
-    PlanExtend,   // keep tree, extend depth (moderate uncertainty)
-    PlanSkip,     // skip tree search, direct sample (low uncertainty)
+    PlanNew,                              // reset tree, full budget (high uncertainty)
+    PlanExtend,                           // keep tree, extend depth (moderate uncertainty)
+    PlanSkip,                             // skip tree search, direct sample (low uncertainty)
+    SpecHop { k: usize },                 // k speculative threads (Plan 131)
+    #[cfg(feature = "sia_feedback")]
+    HarnessUpdate,                        // AbsorbCompress promote + HotSwapPruner reload (Plan 163 T5)
+    #[cfg(feature = "sia_feedback")]
+    WeightUpdate,                         // trigger riir-gpu training step (Plan 163 T6)
 }
 
 // Feature-gated: `sr2am_configurator`
 pub struct ConfiguratorContext {
-    pub domain: usize,        // domain index from bandit infrastructure
-    pub entropy_bin: usize,   // coarse entropy bin: floor(entropy * 10.0), 0..9
+    pub domain: usize,           // domain index from bandit infrastructure
+    pub entropy_bin: usize,      // coarse entropy bin: floor(entropy * 10.0), 0..9
+    pub desperation_bin: usize,  // coarse desperation bin (Plan 162 T11): 0..9
 }
 ```
 
@@ -171,6 +201,9 @@ pub enum AttentionMode {
 pub enum ModelArchitecture {
     Generic,  // Default GPT-2 style
     Gemma2,   // Gemma 2 architecture (Plan 087)
+    Llama,    // Llama architecture
+    #[cfg(feature = "deltanet_inference")]
+    QwenDeltaNet, // Hybrid DeltaNet/Attention (Plan 182)
 }
 
 #[repr(u8)]
@@ -178,6 +211,27 @@ pub enum WeightDtype {
     F32,   // Full precision (default)
     F16,   // Half precision
     BF16,  // Bfloat16
+}
+```
+
+### Hydra Types (`crates/katgpt-core/src/types.rs`, Research 148, Plan 165)
+
+Feature-gated behind `hydra_budget`.
+
+```rust
+/// Per-layer Hydra profile entry (modelless mode).
+pub struct HydraLayerProfile {
+    pub mean_de: f32,           // mean absolute direct effect on top-token logit
+    pub backup_frequency: f32,  // fraction of prompts where this layer is a Hydra backup
+    pub is_erasure: bool,       // whether this layer acts as erasure (mean DE < 0 for MLP)
+}
+
+/// Hydra budget configuration.
+pub struct HydraBudgetConfig {
+    pub skip_threshold: f32,        // skip layers with |DE| below this (default 0.01)
+    pub cumulative_threshold: f32,  // early-terminate when cumulative DE reaches this fraction (default 0.95)
+    pub modelless: bool,            // use pre-computed profiles (true) vs logit lens scoring (false)
+    pub skip_erasure_draft: bool,   // skip erasure MLPs during draft stage
 }
 ```
 
@@ -215,6 +269,11 @@ pub struct InferenceOverrides {
     pub drafter_lora_path: Option<std::path::PathBuf>,
     // SR²AM horizon truncation override (Plan 112 T11)
     pub max_plan_horizon: Option<usize>,
+    // Hydra Adaptive Layer Budget (Research 148, Plan 165)
+    #[cfg(feature = "hydra_budget")]
+    pub hydra_skip_threshold: Option<f32>,       // override Hydra skip threshold
+    #[cfg(feature = "hydra_budget")]
+    pub hydra_skip_erasure_draft: Option<bool>,  // override erasure-skip-draft flag
 }
 ```
 
@@ -1157,3 +1216,305 @@ pub struct EmotionReading {
 - Phase 1 ✅ — Infrastructure complete (EmotionDirections, ReviewMetrics integration)
 - Phase 2 ⏳ — GOAT proof: T7 overhead (<0.1%), T8 desperation↔entropy correlation
 - Phase 3 📋 — Integrate into SR²AM ConfiguratorContext as feature input
+
+## FlashAR Anchor-Then-Fill (`src/speculative/flashar_anchor.rs`, Plan 166 T11)
+
+Two-round strided decoding inspired by FlashAR's diagonal-step parallel pattern. Feature-gated behind `flashar_anchor` (requires `dllm`).
+
+**Round 1 (Anchor):** AR predicts every S-th position (stride S). Few AR forward passes (`block_size / stride`) produce high-quality anchor tokens.
+
+**Round 2 (Fill):** D2F decodes remaining positions with anchors pre-filled. Anchor positions start unmasked, reducing the denoising search space → fewer iterations for convergence.
+
+```rust
+/// Configuration for strided anchor-then-fill decoding.
+pub struct AnchorConfig {
+    pub stride: usize,  // predict every S-th position via AR. S=1 → pure AR, S=block_size → pure D2F
+}
+
+/// Result of the two-round anchor-then-fill decode.
+pub struct AnchorFillResult { /* anchor tokens, fill tokens, iteration count */ }
+```
+
+| Method | Description |
+|--------|-------------|
+| `AnchorConfig::with_stride(S)` | Create config with stride (min 1) |
+| `anchor_then_fill_decode(...)` | Full two-round decode: AR anchors → D2F fill |
+
+**Stride Guidance:** S=2–4 for balanced anchor density. Higher S → more parallelism but lower anchor quality.
+
+## FlashAR Consensus (`src/speculative/flashar_consensus.rs`, Plan 166)
+
+Dual-path consensus with ternary thermal routing. Replaces tri_mode's prefix-match acceptance. Feature-gated behind `flashar_consensus` (requires `dllm`).
+
+**Architecture:**
+- Path H: AR/MTP draft → per-position tokens + confidence
+- Path V: D2F block draft → per-position tokens + confidence
+- Ternary consensus per position: +1 (H wins), 0 (AGREE → skip verify), -1 (V wins)
+
+```rust
+/// Thermal path assigned per position.
+pub enum ThermalPath {
+    Plasma,  // both agree, high confidence — accept immediately, zero verification
+    Hot,     // one path wins, high confidence — accept winner
+    Warm,    // one path wins, moderate confidence — AR spot-check
+    Cold,    // both low confidence — fallback prefix-match verification
+}
+
+/// Configuration for thermal path router.
+pub struct ConsensusConfig {
+    pub plasma_threshold: f32,     // confidence threshold for PLASMA (default 0.7)
+    pub hot_threshold: f32,       // confidence threshold for HOT (default 0.5)
+    pub warm_threshold: f32,      // confidence threshold for WARM (default 0.3)
+    pub use_ternary_gate: bool,   // use simd_ternary_matvec fusion gate (requires plasma_path)
+}
+```
+
+| Method | Description |
+|--------|-------------|
+| `consensus_decode_block(...)` | Full dual-path consensus decode |
+| `route_thermal_path(ternary, conf_h, conf_v, config)` → `ThermalPath` | Classify each position into thermal path |
+| `ternary_consensus(token_h, conf_h, token_v, conf_v)` → (i8, token) | Compute ternary signal + winner |
+
+## Budget Adaptation (`src/speculative/budget.rs`, Plan 167)
+
+Compression-adaptive decode budget — uses PFlash scoring ratio (a free byproduct of prefill) to dynamically scale DDTree budget per-prompt. Feature-gated behind `budget_adaptation`.
+
+```rust
+/// Controls how the DDTree tree budget adapts per-prompt.
+pub enum BudgetAdaptation {
+    Off,          // fixed budget (default)
+    Compression,  // scale by compression ratio r ∈ (0,1]: high r → complex → more budget
+    Entropy,      // scale by first-marginal entropy (placeholder)
+}
+```
+
+| Method | Description |
+|--------|-------------|
+| `adaptive_tree_budget(base, ratio, mode)` → usize | Derive per-prompt budget. Clamped to [base/2, base*2] |
+| `compression_ratio(total_blocks, selected_blocks)` → f32 | Fraction of blocks that passed importance filter |
+
+**Scaling curve (Compression mode):**
+```text
+r=0.0 → scale=0.5  (budget halved, simple prompt)
+r=0.5 → scale=1.25 (budget slightly above base)
+r=1.0 → scale=2.0  (budget doubled, complex prompt)
+```
+
+## ILC Distillation (`src/distill/ilc.rs`, Plan 164)
+
+Iterative Latent Clustering — synonym-aware DDTree pruning. Distilled from arXiv:2605.27734 (Korchinski, Favero, Wyart). Feature-gated behind `ilc_distill`.
+
+**Architecture:**
+- Offline: episode data → `IlcClusterer` (k-means on cousin context vectors) → `SynonymMap`
+- Online: `SynonymMap::lookup(state)` → ClusterId (O(1), no allocation) → DDTree skips synonym branches
+
+```rust
+/// Offline k-means clusterer for cousin context vectors.
+pub struct IlcClusterer { /* config: IlcConfig */ }
+
+/// O(1) cluster lookup at inference time.
+pub struct SynonymMap {
+    // centers[level][cluster_id] → centroid, assignment[level][hash(state)] → ClusterId
+}
+
+/// ScreeningPruner wrapper that boosts diversity across clusters.
+pub struct SynonymAwarePruner<P: ScreeningPruner> { inner: P, synonym_map: SynonymMap, /* ... */ }
+```
+
+| Method | Description |
+|--------|-------------|
+| `IlcClusterer::new(config)` | Create offline clusterer |
+| `IlcClusterer::fit(data)` → `SynonymMap` | Run level-by-level k-means (Algorithm 1) |
+| `SynonymMap::lookup(state, level)` → `ClusterId` | O(1) inference-time lookup |
+| `build_dd_tree_screened_synonyms(...)` | DDTree variant that skips synonym branches |
+
+## Data Probe (`src/data_probe/`, Plan 141)
+
+Controlled information-theoretic validation via a Markov chain with known ground-truth transition probabilities. Feature-gated behind `data_probe`.
+
+```text
+markov → nll → typical_set → claim
+                  ↓
+            dirichlet_energy
+                  ↓
+              geometry
+```
+
+| Module | Description |
+|--------|-------------|
+| `markov` | Dirichlet-sampled Markov chain generator with entropy rate targeting |
+| `nll` | NLL computation against known chain |
+| `typical_set` | Three-way regime classification (Conservative/Typical/Uncertain) |
+| `dirichlet_energy` | Dirichlet Energy structural alignment diagnostic |
+| `claim` | Claim card infrastructure for formal C1–C4 validation |
+| `geometry` | Representation geometry diagnostics (Plan 151, Research 113) |
+
+**Key types:** `MarkovChain`, `Regime` (Conservative/Typical/Uncertain), `ClaimCard`, `GeometryReport`, `ValidityVerdict`.
+
+## SkillOpt (`src/skill_opt/`, Plan 144)
+
+Text-space skill optimization: deterministic edit → apply → gate → buffer → optimizer pipeline. Feature-gated behind `skill_opt`.
+
+```text
+edit → apply → gate → buffer → optimizer
+       ↑                      |
+       └── protected section   └── JSONL persistence
+```
+
+| Module | Description |
+|--------|-------------|
+| `edit` | `EditOp`, `EditSource`, `SkillEdit` — edit operations |
+| `apply` | `apply_edits`, `ApplyResult` — deterministic text patching with budget + protected sections |
+| `gate` | `ValidationGate`, `RejectedEdit` — accept/reject by score delta |
+| `schedule` | `EditBudgetSchedule` — constant/linear/cosine/autonomous schedules |
+| `buffer` | `RejectedEditBuffer` — FIFO ring buffer for negative examples |
+| `optimizer` | `SkillOptimizer` trait, `Benchmark` trait, `ScoredTrajectory` |
+
+## Proof Certificates (`src/proof_cert/`, Plan 145)
+
+Hierarchical GOAT proof certificates with dependency chains, topological verification, and blake3 checksum integrity. Feature-gated behind `proof_cert`.
+
+```rust
+pub struct ProofCertificate { /* property, evidence, result, checksum */ }
+pub struct ProofEvidence { /* supporting data for a proof claim */ }
+pub enum ProofProperty { /* the property being verified */ }
+pub enum ProofResult { /* Pass, Fail, Inconclusive */ }
+```
+
+| Module | Description |
+|--------|-------------|
+| `certificate` | `ProofCertificate`, `ProofEvidence`, `ProofProperty`, `ProofResult` |
+| `chain` | `verify_proof_chain()` — topological verification of dependency chain |
+| `serde_impls` | `load_certificates`, `save_certificates`, `verify_checksum` (blake3) |
+| `macros` | Certificate generation macros |
+| `wasm_certificates` | `generate_wasm_validator_certificates` — WASM certificate generation |
+
+## CachePrune (`src/cache_prune/`, Plan 140)
+
+SAT + rolling hash + sensitivity masking for KV cache analysis. All modelless — no training, no model changes. Feature-gated behind `cache_prune`. Reference: arXiv:2605.23640.
+
+| Module | Description |
+|--------|-------------|
+| `sat` | `SummedAreaTable` — O(1) rectangular attention queries |
+| `rolling_hash` | `RollingHash`, `CachedSegment`, `KvSegmentPool` — O(n) variable-length segment matching |
+| `sensitivity` | `SensitivityDetector` trait, `StrictDetector`, `OpenDetector` — selective KV sharing |
+
+## Hydra Budget (`src/pruners/hydra_budget.rs`, Research 148, Plan 165)
+
+Hydra-Aware Adaptive Layer Budget — emergent self-repair layer skipping. Distills the Hydra Effect (arXiv:2307.15771, McGrath et al.) into adaptive layer skipping. Feature-gated behind `hydra_budget`.
+
+Two modes: **modelless** (pre-computed profiles, zero overhead) and **model-based** (per-layer logit lens scoring, one matmul per layer).
+
+```rust
+/// Pre-computed set of layers to skip.
+pub struct HydraSkipPlan {
+    pub skip_layers: Vec<bool>,    // bitmask: skip_layers[l] = true ⇒ skip layer l
+    pub cumulative_de: Vec<f32>,   // cumulative DE thresholds for early termination
+    pub total_de: f32,             // total DE across all layers
+}
+
+/// Result of adaptive budget computation.
+pub struct HydraBudgetResult {
+    pub skipped: Vec<usize>,             // layers to skip
+    pub early_exit_layer: Option<usize>, // early termination point
+    pub savings_fraction: f32,           // estimated compute savings
+}
+```
+
+| Method | Description |
+|--------|-------------|
+| `hydra_layer_skip(profiles, config)` → `HydraSkipPlan` | Compute skip plan from profiles |
+| `hydra_budget_result(plan, n_layers)` → `HydraBudgetResult` | Derive budget result |
+
+**Skip Rules:** Never skips layers with `backup_frequency > 0.1` (Hydra backups) or non-erasure layers with significant `mean_de`. Erasure MLPs skipped during draft if `skip_erasure_draft` is set.
+
+## GEPA-D Reflective (`src/pruners/gepa_reflective.rs`)
+
+Pareto bandit config evolution via reflective distillation. Evolves system-level config (rubric weights, template hints, bandit params) from MeMo trajectory reflection using Pareto-frontier bandit selection. Feature-gated behind `gepa_reflective` (requires `bandit`, `memo_reflections`).
+
+**No gradient updates. No LoRA.** Config variants = bandit arms, reflection quality = reward.
+
+```rust
+/// A point in configuration space — one bandit arm.
+pub struct ConfigVariant {
+    pub rubric_preset: u8,             // index into RUBRIC_PRESETS (4 presets)
+    pub epsilon_index: u8,             // quantised exploration rate (0.05..0.40)
+    pub template_hint: u8,             // template hint index
+    pub absorb_threshold_index: u8,    // quantised absorb threshold (0.1..0.7)
+}
+```
+
+Total arms = 4 × 4 × 4 × 4 = 256. Uses UCB1 selection. Rubric presets: balanced, relevance-heavy, novelty-heavy, uniform.
+
+## PhraseBoost (`src/pruners/phrase_boost.rs` + `phrase_trie.rs`, Plan 164)
+
+Context trie phrase boosting for DDTree. Zero training cost — phrases provided at call site. Feature-gated behind `phrase_boost`.
+
+```rust
+/// Compact token-level trie — O(1) child lookup via Vec<Option<usize>>.
+pub struct PhraseTrie { /* nodes: Vec<PhraseTrieNode>, vocab_size */ }
+
+/// Wraps ScreeningPruner and adds phrase-based token boosting.
+pub struct PhraseBoostPruner<P: ScreeningPruner> {
+    inner: P,
+    trie: PhraseTrie,
+    boost_score: f32,    // normalized via boost_score / (1 + boost_score)
+}
+```
+
+| Method | Description |
+|--------|-------------|
+| `PhraseTrie::new(vocab_size)` | Create empty trie |
+| `PhraseTrie::insert(&mut self, token_ids)` | Add phrase |
+| `PhraseTrie::advance(&self, states, token)` → `Vec<usize>` | Advance active states |
+| `PhraseBoostPruner::new(inner, trie, boost_score)` | Create wrapper |
+
+Boost is additive — inner pruner's relevance is preserved. Uses `RwLock<HashMap>` for interior mutability on the `&self` `relevance()` interface.
+
+## Speculative/Types Additions (`src/speculative/types.rs`)
+
+New types alongside the existing `DecodeStrategy`, `DraftEvent`, `RejectionReason`, etc.:
+
+```rust
+/// Controls DDTree budget adaptation per-prompt.
+pub enum BudgetAdaptation {
+    Off,          // fixed budget (default)
+    Compression,  // scale by compression ratio
+    Entropy,      // scale by entropy (placeholder)
+}
+
+/// Score reduction mode for block scoring.
+pub enum ScoreReduction {
+    SoftmaxSum,  // standard attention (default)
+    MaxSim,      // late-interaction scoring (requires maxsim feature)
+}
+
+/// Configuration for PFlash block-sparse prefill scoring.
+pub struct FlashPrefillConfig {
+    pub block_size: usize,
+    pub attention_sink: usize,
+    pub window: usize,
+    pub last_n_full: usize,
+    pub tail_window: usize,
+    pub alpha: f32,
+    pub score_reduction: ScoreReduction,
+    pub budget_adaptation: BudgetAdaptation,
+}
+
+/// Prefill compression mode.
+pub enum PrefillMode {
+    Off,     // never compress (default)
+    Auto,    // compress when prompt length >= threshold
+    Always,  // always compress
+}
+
+/// Block importance scores from PFlash scoring.
+pub struct BlockScores {
+    pub num_blocks: usize,
+    pub block_size: usize,
+    pub scores: Vec<f32>,
+    pub selected: Vec<usize>,
+}
+```
+
+`FlashPrefillConfig` provides named constructors: `default()`, `metal()`, `long_context()`, `short_context()`.

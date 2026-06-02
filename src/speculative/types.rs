@@ -843,15 +843,39 @@ pub trait ConflictDetector: Send + Sync {
         pruned_count: usize,
         total_candidates: usize,
     ) -> bool;
+
+    /// Check conflict with depth-aware escalation (Plan 170 F4).
+    ///
+    /// Default implementation delegates to [`is_conflicted`].
+    /// Implementors that support depth-adaptive thresholds should
+    /// override this method to tighten detection at deeper search depths.
+    ///
+    /// - `depth` — current search depth (0 = root, higher = more committed)
+    fn is_conflicted_at_depth(
+        &self,
+        marginals: &[&[f32]],
+        pruned_count: usize,
+        total_candidates: usize,
+        depth: usize,
+    ) -> bool {
+        let _ = depth;
+        self.is_conflicted(marginals, pruned_count, total_candidates)
+    }
 }
 
-/// Entropy-based conflict detector (T2).
+/// Entropy-based conflict detector (T2 + Plan 170 F4).
 ///
 /// Flags conflict when:
 /// 1. Pruning rate exceeds threshold (too aggressive = likely wrong path)
 /// 2. Any position has near-zero entropy (overconfident = probably hallucinating)
 ///
 /// LDT's conflict threshold θ_cls = 0.6 → analogous to 60% max prune rate.
+///
+/// F4 extension: threshold tightens with depth via `depth_escalation`.
+/// At depth 0, uses full `max_prune_rate`. At deeper depths, the effective
+/// threshold decreases: `effective = max_prune_rate - depth * depth_escalation`.
+/// This mirrors LDT's θ_eval_CLS > θ_train_CLS insight: conflict signals
+/// become more trustworthy as the state commits.
 #[cfg(feature = "lattice_deduction")]
 #[derive(Debug, Clone)]
 pub struct EntropyConflictDetector {
@@ -860,14 +884,19 @@ pub struct EntropyConflictDetector {
     pub max_prune_rate: f32,
     /// Minimum entropy per position (below = conflict signal).
     pub entropy_floor: f32,
+    /// Rate at which max_prune_rate decreases per search depth (Plan 170 F4).
+    /// Default: 0.02 (at depth 10, threshold drops by 0.2).
+    /// Effective threshold = max(max_prune_rate - depth * depth_escalation, 0.1).
+    pub depth_escalation: f32,
 }
 
 #[cfg(feature = "lattice_deduction")]
 impl Default for EntropyConflictDetector {
     fn default() -> Self {
         Self {
-            max_prune_rate: 0.6, // LDT θ_cls = 0.6 analog
-            entropy_floor: 0.01, // Near-deterministic = suspicious
+            max_prune_rate: 0.6,  // LDT θ_cls = 0.6 analog
+            entropy_floor: 0.01,  // Near-deterministic = suspicious
+            depth_escalation: 0.02, // F4: threshold tightens by 0.02 per depth
         }
     }
 }
@@ -880,14 +909,29 @@ impl ConflictDetector for EntropyConflictDetector {
         pruned_count: usize,
         total_candidates: usize,
     ) -> bool {
+        self.is_conflicted_at_depth(marginals, pruned_count, total_candidates, 0)
+    }
+
+    fn is_conflicted_at_depth(
+        &self,
+        marginals: &[&[f32]],
+        pruned_count: usize,
+        total_candidates: usize,
+        depth: usize,
+    ) -> bool {
         // Hard conflict: no candidates remain
         if total_candidates == 0 {
             return true;
         }
 
+        // F4: Depth-escalating threshold — tighter at deeper search
+        let effective_max = (self.max_prune_rate - depth as f32 * self.depth_escalation)
+            .max(0.1)
+            .min(self.max_prune_rate);
+
         // Check pruning rate: too aggressive = likely wrong path
         let prune_rate = pruned_count as f32 / total_candidates as f32;
-        if prune_rate > self.max_prune_rate {
+        if prune_rate > effective_max {
             return true;
         }
 
@@ -902,8 +946,6 @@ impl ConflictDetector for EntropyConflictDetector {
         false
     }
 }
-
-/// Compute Shannon entropy of a probability distribution.
 /// H(p) = -Σ p_i * ln(p_i)
 #[cfg(feature = "lattice_deduction")]
 fn compute_entropy(probs: &[f32]) -> f32 {

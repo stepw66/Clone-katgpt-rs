@@ -50,6 +50,9 @@ Token + Position
 | `alpha` | `"lattice_deduction"` | LDT α-operator for progressive multi-solution supervision |
 | `answer_extract` | `"parallel_probe"` | Answer extraction from token streams (regex, think tags, discrete actions) |
 | `parallel_probe` | `"parallel_probe"` | Multi-branch 2D controller with consensus + pruning |
+| `flashar_anchor` | `"flashar_anchor"` | FlashAR anchor-then-fill — AR predicts every S-th position, D2F fills remaining |
+| `flashar_consensus` | `"flashar_consensus"` | FlashAR consensus tri-mode — dual-path consensus + ternary thermal routing |
+| `budget` | `"budget_adaptation"` | Adaptive tree budget scaling based on compression ratio |
 
 ---
 
@@ -938,6 +941,80 @@ DFlash → DDTree → Verify
 
 ---
 
+## FlashAR Anchor-Then-Fill (`speculative/flashar_anchor.rs`, behind `"flashar_anchor"` feature)
+
+Requires `"dllm"` feature. Two-round decoding strategy that reduces the D2F denoising search space.
+
+### How It Works
+
+**Round 1 — Anchor:** The AR model predicts every S-th position (the "anchor" tokens) using standard autoregressive decoding. The stride S controls anchor density — a smaller stride means denser anchors and less work for the fill phase.
+
+**Round 2 — Fill:** D2F fills the remaining positions with the anchor tokens already pre-filled as constraints. Because the anchor tokens are fixed and correct (verified by the AR model), the denoising search space is dramatically reduced → fewer iterations needed → faster convergence.
+
+### Key Idea
+
+By constraining the D2F block with high-confidence anchor tokens at regular intervals, the fill phase converges in fewer denoising steps. The stride S controls the tradeoff:
+- Small S → more anchors → less D2F work, more AR work
+- Large S → fewer anchors → more D2F work, less AR work
+
+---
+
+## FlashAR Consensus Tri-Mode (`speculative/flashar_consensus.rs`, behind `"flashar_consensus"` feature)
+
+Requires `"tri_mode"` and `"plasma_path"` features. Replaces tri_mode's prefix-match acceptance with a dual-path consensus mechanism and ternary thermal routing.
+
+### Dual-Path Drafting
+
+| Path | Source | Output |
+|------|--------|--------|
+| H (Horizontal) | AR/MTP draft | Per-position tokens + confidence |
+| V (Vertical) | D2F block draft | Per-position tokens + confidence |
+
+### Ternary Consensus
+
+For each position, the two paths are compared and a ternary verdict is assigned:
+
+| Verdict | Meaning |
+|---------|---------|
+| +1 | H wins — AR/MTP token is more confident |
+| 0 | AGREE — both paths agree, PLASMA PATH skip verify |
+| -1 | V wins — D2F token is more confident |
+
+### Thermal Routing
+
+Based on the ternary verdict and confidence levels, each position is routed to one of four thermal modes:
+
+| Mode | Condition | Action |
+|------|-----------|--------|
+| PLASMA | ternary = 0, high confidence | Accept immediately (skip verification) |
+| HOT | ternary = ±1, high confidence | Accept the winning path's token |
+| WARM | ternary = ±1, mid confidence | AR spot-check the winning token |
+| COLD | both paths low confidence | Fallback to prefix-match verification |
+
+---
+
+## Budget Adaptation (`speculative/budget.rs`, behind `"budget_adaptation"` feature)
+
+Adaptive tree budget scaling based on compression ratio. The tree budget is dynamically adjusted within `[base/2, base*2]` to match the current workload characteristics.
+
+### Core Function
+
+`adaptive_tree_budget(base_budget, compression_ratio, mode)` → budget clamped to `[base/2, base*2]`
+
+Scaling curve (compression ratio r → scale factor):
+- r = 0.0 → scale = 0.5 (budget halved — low compression, less speculative benefit)
+- r = 0.5 → scale = 1.25 (moderate boost)
+- r = 1.0 → scale = 2.0 (budget doubled — high compression, speculative decoding very effective)
+
+### Integration Helpers (`budget_compat.rs`)
+
+| Function | Description |
+|----------|-------------|
+| `effective_tree_budget()` | Computes the adapted budget for the current context |
+| `scaled_draft_lookahead()` | Scales the draft lookahead depth in proportion to the adapted budget |
+
+---
+
 ## Feature Flags Summary
 
 | Flag | Enables |
@@ -963,6 +1040,9 @@ DFlash → DDTree → Verify
 | `"sudoku"` | `SudokuPruner` — constrained decoding for Sudoku |
 | `"rest"` | REST bridge test + `merge_retrieved_branches` (client in `riir-ai/riir-rest`) |
 | `"feedback"` | E2E feedback loop — sends `InferenceResult` to REST endpoint |
+| `flashar_anchor` | FlashAR anchor-then-fill — requires `dllm` (Plan 166 T11) |
+| `flashar_consensus` | FlashAR consensus tri-mode — requires `tri_mode`, `plasma_path` (Plan 166, Research 149) |
+| `budget_adaptation` | Adaptive tree budget scaling based on compression ratio (Plan 167, Research R050) |
 
 ---
 
