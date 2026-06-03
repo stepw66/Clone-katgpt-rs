@@ -1,6 +1,7 @@
-# Plan 175: ANE Inference Backend for katgpt-rs
+# Plan 176: ANE Inference Backend for katgpt-rs
 
 **Source:** [Research 155 — ANE Compute Backend Verdict](../.research/155_ANE_Compute_Backend_Verdict.md)
+**Related:** [Plan 175 — DDTree Residency Audit + RangeBudget + Soft-Route Bandit](175_ane_inspired_ddtree_improvements.md)
 **Status:** Active
 **Goal:** Use the Apple Neural Engine chip for transformer forward pass, freeing CPU for DDTree + ConstraintPruner
 
