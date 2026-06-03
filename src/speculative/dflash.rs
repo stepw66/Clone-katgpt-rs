@@ -314,6 +314,69 @@ pub fn dflash_predict_conditioned(
     }
 }
 
+// ── DFlare Marginal Fusion (Plan 174 T1, feature: dflare_fusion) ──
+
+/// Blend multiple marginal slices into a single fused marginal.
+///
+/// For each position k and vocab entry v:
+/// `fused[k][v] = Σ_i alpha_i * marginals_i[k][v]`
+///
+/// After blending, each position's fused marginal is re-normalized to sum to 1.0.
+///
+/// # Arguments
+/// * `sources` — marginal slices from each conditioning source, each `sources[i]` has shape
+///   `[max_steps * vocab_size]`
+/// * `alpha_weights` — blend weights, must sum to 1.0, same length as `sources`
+/// * `max_steps` — number of draft steps
+/// * `vocab_size` — vocabulary size
+///
+/// # Returns
+/// Fused marginals written into `output` (`[max_steps * vocab_size]`).
+#[cfg(feature = "dflare_fusion")]
+pub fn marginal_fusion_blend(
+    sources: &[&[f32]],
+    alpha_weights: &[f32],
+    max_steps: usize,
+    vocab_size: usize,
+    output: &mut [f32],
+) {
+    assert_eq!(
+        sources.len(),
+        alpha_weights.len(),
+        "source/alpha count mismatch"
+    );
+    assert!(
+        output.len() >= max_steps * vocab_size,
+        "output buffer too small"
+    );
+
+    output
+        .iter_mut()
+        .take(max_steps * vocab_size)
+        .for_each(|v| *v = 0.0);
+
+    for (src, &alpha) in sources.iter().zip(alpha_weights.iter()) {
+        let len = (max_steps * vocab_size).min(src.len());
+        for i in 0..len {
+            unsafe {
+                *output.get_unchecked_mut(i) += alpha * *src.get_unchecked(i);
+            }
+        }
+    }
+
+    // Re-normalize each position to sum to 1.0
+    for step in 0..max_steps {
+        let start = step * vocab_size;
+        let end = start + vocab_size;
+        let sum: f32 = output[start..end].iter().sum();
+        if sum > 0.0 {
+            for v in &mut output[start..end] {
+                *v /= sum;
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -661,6 +724,74 @@ mod tests {
                 (sum - 1.0).abs() < 1e-3,
                 "step {step} probabilities should sum to ~1.0, got {sum}"
             );
+        }
+    }
+
+    // ── DFlare Marginal Fusion blend tests (Plan 174 T1e) ──
+
+    #[cfg(feature = "dflare_fusion")]
+    mod dflare_fusion_blend {
+        use super::*;
+
+        #[test]
+        fn test_blend_is_weighted_average() {
+            // Two sources, each with 1 step, vocab=4
+            let src1: Vec<f32> = vec![1.0, 0.0, 0.0, 0.0]; // all mass on token 0
+            let src2: Vec<f32> = vec![0.0, 1.0, 0.0, 0.0]; // all mass on token 1
+            let alphas = vec![0.6, 0.4];
+            let mut output = vec![0.0f32; 4];
+
+            marginal_fusion_blend(&[&src1, &src2], &alphas, 1, 4, &mut output);
+
+            assert!(
+                (output[0] - 0.6).abs() < 1e-5,
+                "token 0 should be 0.6, got {}",
+                output[0]
+            );
+            assert!(
+                (output[1] - 0.4).abs() < 1e-5,
+                "token 1 should be 0.4, got {}",
+                output[1]
+            );
+            assert!(
+                (output[2] - 0.0).abs() < 1e-5,
+                "token 2 should be 0.0, got {}",
+                output[2]
+            );
+        }
+
+        #[test]
+        fn test_blend_sums_to_one() {
+            let src1: Vec<f32> = vec![0.25, 0.25, 0.25, 0.25];
+            let src2: Vec<f32> = vec![0.1, 0.4, 0.3, 0.2];
+            let alphas = vec![0.7, 0.3];
+            let mut output = vec![0.0f32; 4];
+
+            marginal_fusion_blend(&[&src1, &src2], &alphas, 1, 4, &mut output);
+
+            let sum: f32 = output.iter().sum();
+            assert!(
+                (sum - 1.0).abs() < 1e-4,
+                "blended output should sum to 1.0, got {sum}"
+            );
+        }
+
+        #[test]
+        fn test_blend_multi_step() {
+            let src1: Vec<f32> = vec![1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0]; // 2 steps
+            let src2: Vec<f32> = vec![0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0]; // 2 steps
+            let alphas = vec![0.5, 0.5];
+            let mut output = vec![0.0f32; 8];
+
+            marginal_fusion_blend(&[&src1, &src2], &alphas, 2, 4, &mut output);
+
+            // Step 0: 0.5 * [1,0,0,0] + 0.5 * [0,1,0,0] = [0.5, 0.5, 0, 0]
+            assert!((output[0] - 0.5).abs() < 1e-5);
+            assert!((output[1] - 0.5).abs() < 1e-5);
+            // Step 1: 0.5 * [0,1,0,0] + 0.5 * [0,0,1,0] = [0, 0.5, 0.5, 0]
+            assert!((output[4] - 0.0).abs() < 1e-5);
+            assert!((output[5] - 0.5).abs() < 1e-5);
+            assert!((output[6] - 0.5).abs() < 1e-5);
         }
     }
 }

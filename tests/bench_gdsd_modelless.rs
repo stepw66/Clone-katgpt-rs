@@ -596,7 +596,7 @@ fn goat_169_g3_overhead() {
     }
 }
 
-fn goat_169_summary() {
+fn _goat_169_summary() {
     println!("\n📋 Plan 169: GDSD Advantage-Guided Pruner — GOAT Proof Summary");
     println!("{}", "═".repeat(70));
     println!("   Structural Tests (correctness, NOT gain):");
