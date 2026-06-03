@@ -1,6 +1,9 @@
 use crate::types::{self, *};
 use rayon::prelude::*;
 
+#[cfg(feature = "wall_attention")]
+use crate::simd::{simd_add_inplace, simd_exp_inplace, simd_scale_inplace, simd_scale_mul_inplace};
+
 /// Decode stage for specialized forward paths (Plan 102: TileRT pipeline).
 /// Different stages have different optimization opportunities:
 /// - Draft: can skip screening, reduced KV writes, approximate attention
@@ -135,8 +138,9 @@ impl TransformerWeights {
 
         // Per-layer weights: same field order as original per n_layer iterations
         // Pre-allocate each weight vector to avoid repeated reallocation.
-        let layers: Vec<LayerWeights> = (0..config.n_layer)
-            .map(|_| LayerWeights {
+        let mut layers = Vec::with_capacity(config.n_layer);
+        for _ in 0..config.n_layer {
+            layers.push(LayerWeights {
                 attn_wq: {
                     let len = n * n;
                     let mut v = Vec::with_capacity(len);
@@ -178,8 +182,8 @@ impl TransformerWeights {
                 attn_qkv_fused: None,
                 #[cfg(feature = "wall_attention")]
                 attn_wg: vec![0.0; kvd], // Initialized to zeros; gate not active unless wall_config is Some
-            })
-            .collect();
+            });
+        }
 
         // LM head last
         let lm_len = config.vocab_size * n;
@@ -195,13 +199,21 @@ impl TransformerWeights {
             mtp_cluster_classifier: None,
             mtp_cluster_map: None,
             #[cfg(feature = "delta_routing")]
-            delta_routing_query: (0..config.n_layer)
-                .map(|_| vec![0.0; config.n_embd]) // Zero-init: safe additive start
-                .collect(),
+            delta_routing_query: {
+                let mut v = Vec::with_capacity(config.n_layer);
+                for _ in 0..config.n_layer {
+                    v.push(vec![0.0; config.n_embd]); // Zero-init: safe additive start
+                }
+                v
+            },
             #[cfg(feature = "delta_routing")]
-            delta_routing_norm: (0..config.n_layer)
-                .map(|_| (0..config.n_embd).map(|_| 1.0f32).collect()) // Ones: identity RMSNorm
-                .collect(),
+            delta_routing_norm: {
+                let mut v = Vec::with_capacity(config.n_layer);
+                for _ in 0..config.n_layer {
+                    v.push(vec![1.0f32; config.n_embd]); // Ones: identity RMSNorm
+                }
+                v
+            },
         }
     }
 
@@ -213,7 +225,9 @@ impl TransformerWeights {
         let kvd = types::kv_dim(config);
         let layer_scale = (2.0 / (config.n_embd as f32 * config.n_layer as f32)).sqrt();
         for layer in &mut self.layers {
-            layer.attn_wg = (0..kvd).map(|_| rng.normal() * layer_scale).collect();
+            let mut v = Vec::with_capacity(kvd);
+            v.extend((0..kvd).map(|_| rng.normal() * layer_scale));
+            layer.attn_wg = v;
         }
     }
 
@@ -307,8 +321,10 @@ pub struct MultiLayerKVCache {
 
 impl MultiLayerKVCache {
     pub fn new(config: &Config) -> Self {
+        let mut layers = Vec::with_capacity(config.n_layer);
+        layers.extend((0..config.n_layer).map(|_| KVCache::new(config)));
         Self {
-            layers: (0..config.n_layer).map(|_| KVCache::new(config)).collect(),
+            layers,
             fill_pos: 0,
         }
     }
@@ -783,6 +799,8 @@ pub struct WallPrefixState {
     prefix_sums: Vec<f32>,
     /// Gate projection buffer: [head_dim]. Pre-allocated, reused each token.
     gate_buf: Vec<f32>,
+    /// Temp buffer for exp operations: [head_dim]. Pre-allocated, reused each call.
+    gate_exp_buf: Vec<f32>,
     /// Number of KV heads.
     n_kv_head: usize,
     /// Head dimension.
@@ -797,6 +815,7 @@ impl WallPrefixState {
         Self {
             prefix_sums: vec![0.0; config.n_layer * n_kv * hd],
             gate_buf: vec![0.0; hd],
+            gate_exp_buf: vec![0.0; hd],
             n_kv_head: n_kv,
             head_dim: hd,
         }
@@ -823,9 +842,10 @@ impl WallPrefixState {
         let hd = self.head_dim;
         Self::compute_gate_from_key(&mut self.gate_buf[..hd], key, w_g, bias, gate_max);
         let offset = layer_idx * self.n_kv_head * hd + kv_head * hd;
-        for d in 0..hd {
-            self.prefix_sums[offset + d] += self.gate_buf[d];
-        }
+        simd_add_inplace(
+            &mut self.prefix_sums[offset..offset + hd],
+            &self.gate_buf[..hd],
+        );
     }
 
     /// Update prefix sum with new gate values for a given layer and KV head.
@@ -834,9 +854,8 @@ impl WallPrefixState {
     #[inline]
     pub fn update_prefix(&mut self, layer_idx: usize, kv_head: usize, gate: &[f32]) {
         let offset = layer_idx * self.n_kv_head * self.head_dim + kv_head * self.head_dim;
-        for (d, &g) in gate.iter().enumerate() {
-            self.prefix_sums[offset + d] += g;
-        }
+        let hd = self.head_dim;
+        simd_add_inplace(&mut self.prefix_sums[offset..offset + hd], &gate[..hd]);
     }
 
     /// Rescale query: q̃ = exp(P) ⊙ q for each query head.
@@ -845,7 +864,7 @@ impl WallPrefixState {
     /// kv_group_lut: maps Q head → KV head.
     #[inline]
     pub fn rescale_query(
-        &self,
+        &mut self,
         layer_idx: usize,
         q: &mut [f32],
         kv_group_lut: &[usize; 128],
@@ -856,24 +875,27 @@ impl WallPrefixState {
         for (h, &kv_h) in kv_group_lut.iter().enumerate().take(n_head) {
             let q_off = h * hd;
             let p_off = layer_off + kv_h * hd;
-            for d in 0..hd {
-                q[q_off + d] *= self.prefix_sums[p_off + d].exp();
-            }
+            // Copy prefix sums to temp buffer, exp in-place, then element-wise multiply.
+            self.gate_exp_buf[..hd].copy_from_slice(&self.prefix_sums[p_off..p_off + hd]);
+            simd_exp_inplace(&mut self.gate_exp_buf[..hd]);
+            simd_scale_mul_inplace(&mut q[q_off..q_off + hd], &self.gate_exp_buf[..hd], 1.0);
         }
     }
 
     /// Rescale key: k̃ = exp(-P) ⊙ k for each KV head.
     /// k: [kv_dim] key vector (all KV heads).
     #[inline]
-    pub fn rescale_key(&self, layer_idx: usize, k: &mut [f32]) {
+    pub fn rescale_key(&mut self, layer_idx: usize, k: &mut [f32]) {
         let hd = self.head_dim;
         let layer_off = layer_idx * self.n_kv_head * hd;
         for h in 0..self.n_kv_head {
             let k_off = h * hd;
             let p_off = layer_off + h * hd;
-            for d in 0..hd {
-                k[k_off + d] *= (-self.prefix_sums[p_off + d]).exp();
-            }
+            // Negate prefix sums into temp buffer, exp in-place, then element-wise multiply.
+            self.gate_exp_buf[..hd].copy_from_slice(&self.prefix_sums[p_off..p_off + hd]);
+            simd_scale_inplace(&mut self.gate_exp_buf[..hd], -1.0);
+            simd_exp_inplace(&mut self.gate_exp_buf[..hd]);
+            simd_scale_mul_inplace(&mut k[k_off..k_off + hd], &self.gate_exp_buf[..hd], 1.0);
         }
     }
 
@@ -883,7 +905,7 @@ impl WallPrefixState {
     /// w_g: [head_dim] gate projection weights for this head.
     /// bias: gate bias (default 6.0).
     /// gate_max: maximum clamp value (default 0.87).
-    #[inline]
+    #[inline(always)]
     pub fn compute_gate_from_key(
         gate_buf: &mut [f32],
         key: &[f32],

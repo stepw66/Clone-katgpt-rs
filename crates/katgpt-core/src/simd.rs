@@ -363,11 +363,7 @@ pub fn simd_matvec(acc: &mut [f32], mat: &[f32], vec: &[f32], rows: usize, cols:
     for r in 0..rows {
         let row_off = r * cols;
         unsafe {
-            *acc.get_unchecked_mut(r) = simd_dot_f32(
-                &mat[row_off..row_off + cols],
-                vec,
-                cols,
-            );
+            *acc.get_unchecked_mut(r) = simd_dot_f32(&mat[row_off..row_off + cols], vec, cols);
         }
     }
 }
@@ -639,7 +635,7 @@ pub fn simd_matmul_f16_f32_rows_parallel(
 ///
 /// Scalar fallback for alive ≤ 4 (gather overhead not worth it).
 /// NEON/AVX2 processes 4/8 elements per iteration for larger counts.
-#[inline]
+#[inline(always)]
 pub fn simd_sparse_dot_f32(
     weight: &[f32],
     row_off: usize,
