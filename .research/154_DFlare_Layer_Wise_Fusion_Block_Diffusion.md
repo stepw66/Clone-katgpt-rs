@@ -362,10 +362,29 @@ Does position-weighted DDTree expansion budget improve acceptance length?
 
 ## Tasks
 
-- [ ] (D2) Implement `dflare_fusion` feature gate — multi-conditioning marginal blend with K=2 sources
+- [x] (D2) Implement `dflare_fusion` feature gate — multi-conditioning marginal blend with K=2 sources → Plan 174 Task 1 ✅
 - [ ] (D2) Benchmark: acceptance length with K=2 vs K=1 conditioning, α ∈ {0.3, 0.5, 0.7}
-- [ ] (D3) Implement `dflare_kv_routing` feature gate — pruner-confidence-based KV source selection
+- [x] (D3) Implement `dflare_kv_routing` feature gate — pruner-confidence-based KV source selection → Plan 174 Task 2 ✅
 - [ ] (D3) Benchmark: per-position acceptance by pruner confidence quartile, with and without routing
-- [ ] (D4) Implement `dflare_progressive_budget` feature gate — `PositionWeightedBudget` struct for DDTree
+- [x] (D4) Implement `dflare_progressive_budget` feature gate — `PositionWeightedBudget` struct for DDTree → Plan 174 Task 3 ✅
 - [ ] (D4) Benchmark: acceptance length distribution with uniform vs weighted budget
 - [ ] (D1, D5) Document existing mechanisms as DFlare analogs in code comments (no code change needed)
+
+---
+
+## AngelSlim Source Verification
+
+Verified against AngelSlim official implementation (`.raw/AngelSlim/angelslim/compressor/speculative/train/models/draft/qwen_dflare.py`):
+
+| Aspect | Our Research | AngelSlim Actual | Match |
+|--------|-------------|-----------------|-------|
+| Target layers | 9 | 9 (`[1, 5, 9, 13, 17, 21, 25, 29, 33]` for Qwen3-4B 36 layers) | ✅ |
+| Fusion weight shape | D×T = 7×9 = 63 scalars | `nn.Parameter(D, T)` | ✅ |
+| Fusion init | Not specified | Diagonal spike: 0.0 everywhere, 2.0 at `t_idx = min(T-1, d*D/T)` | Applied to Plan 195 |
+| Heterogeneous KV | Separate Wk_t/Wv_t | Separate `k_proj_target`/`v_proj_target` Linear layers | ✅ |
+| Loss gamma | Progressive warmup | Fixed 7.0 by default, warmup optional | ✅ (our modelless uses different approach) |
+| Block size | — | 16 | ✅ |
+| Draft model | — | 7 layers, hidden_size=2560, 32 heads | ✅ |
+| Training reuse | — | Same `OnlineDFlashTrainer` for DFlash and DFlare | ✅ |
+| Production speedup | — | 5.52× on Qwen3-4B, 5.46× on Qwen3-8B, 3.91× on GPT-OSS-20B | Reference |
+| DFlare over DFlash | — | ~11%, 8%, 5% improvement respectively | Reference |
