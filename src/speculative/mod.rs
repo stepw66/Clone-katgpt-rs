@@ -220,15 +220,21 @@ pub use answer_extract::{
 
 // ── DFlare Modelless Inference re-exports (Plan 174, feature: dflare_fusion) ──
 #[cfg(feature = "dflare_fusion")]
+pub use dflash::dflash_predict_ar_with_fusion;
+#[cfg(feature = "dflare_fusion")]
 pub use dflash::marginal_fusion_blend;
 #[cfg(feature = "dflare_fusion")]
 pub use types::MarginalFusionConfig;
 
 // ── DFlare KV Routing re-exports (Plan 174, feature: dflare_kv_routing) ──
 #[cfg(feature = "dflare_kv_routing")]
+pub use dflash::dflash_predict_conditioned_with_routing;
+#[cfg(feature = "dflare_kv_routing")]
 pub use types::KvRoutingConfig;
 
 // ── DFlare Progressive Budget re-exports (Plan 174, feature: dflare_progressive_budget) ──
+#[cfg(feature = "dflare_progressive_budget")]
+pub use dd_tree::build_dd_tree_screened_progressive;
 #[cfg(feature = "dflare_progressive_budget")]
 pub use types::PositionWeightedBudget;
 

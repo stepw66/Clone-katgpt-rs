@@ -213,6 +213,38 @@ pub fn build_dd_tree_screened(
     std::mem::take(&mut builder.tree)
 }
 
+/// DDTree with progressive per-depth budget allocation (Plan 174 Task 3b).
+///
+/// Convenience wrapper around [`TreeBuilder::build_screened_progressive`].
+///
+/// When `budget_config` is `None` or `budget_config.enabled == false`,
+/// delegates to [`build_dd_tree_screened`] unchanged.
+///
+/// # Arguments
+///
+/// * `marginals` — Per-depth token probability distributions
+/// * `config` — DDTree configuration (tree_budget, screening_threshold, etc.)
+/// * `screener` — Screening pruner for relevance scoring
+/// * `chain_seed` — Whether to build greedy chain backbone first
+/// * `budget_config` — Optional progressive budget configuration. When `Some`
+///   and `enabled`, allocates more nodes to early depths and fewer to later depths.
+///
+/// # Returns
+///
+/// Tree nodes in expansion order.
+#[cfg(feature = "dflare_progressive_budget")]
+pub fn build_dd_tree_screened_progressive(
+    marginals: &[&[f32]],
+    config: &crate::types::Config,
+    screener: &dyn ScreeningPruner,
+    chain_seed: bool,
+    budget_config: Option<&super::types::PositionWeightedBudget>,
+) -> Vec<TreeNode> {
+    let mut builder = TreeBuilder::new(config);
+    builder.build_screened_progressive(marginals, config, screener, chain_seed, budget_config);
+    std::mem::take(&mut builder.tree)
+}
+
 /// DDTree with `PrunerSchedule`-aware screening (Plan 171: Thinking Prune).
 ///
 /// Wraps `screener` based on `schedule` and hop context:
@@ -1667,6 +1699,347 @@ impl TreeBuilder {
                         continue;
                     }
                     // SCREENING: ln(P_llm) + ln(R) blended score
+                    self.heap.push(TreeNode {
+                        score: best.score + prob.ln() + relevance.ln(),
+                        depth: next_depth,
+                        token_idx: i,
+                        parent_path: (best.parent_path << 16) | (i as u128),
+                    });
+                }
+            }
+        }
+
+        &self.tree
+    }
+
+    /// Build DDTree with progressive per-depth budget allocation (Plan 174 Task 3b).
+    ///
+    /// Identical to [`build_screened`] but allocates tree budget non-uniformly
+    /// across depths using [`PositionWeightedBudget`]. Early depths get more
+    /// nodes (higher weight), later depths get fewer (exponential decay).
+    ///
+    /// When `budget_config` is `None` or `budget_config.enabled == false`,
+    /// delegates to [`build_screened`] unchanged (zero overhead).
+    ///
+    /// The total node count stays within `config.tree_budget` regardless of
+    /// the per-depth allocation.
+    #[cfg(feature = "dflare_progressive_budget")]
+    pub fn build_screened_progressive(
+        &mut self,
+        marginals: &[&[f32]],
+        config: &crate::types::Config,
+        screener: &dyn ScreeningPruner,
+        chain_seed: bool,
+        budget_config: Option<&super::types::PositionWeightedBudget>,
+    ) -> &[TreeNode] {
+        // Delegate to original when feature is not active
+        let Some(bcfg) = budget_config else {
+            return self.build_screened(marginals, config, screener, chain_seed);
+        };
+        if !bcfg.enabled {
+            return self.build_screened(marginals, config, screener, chain_seed);
+        }
+
+        // Compute per-depth budget allocation
+        let depth_budgets = bcfg.allocate(config.tree_budget, marginals.len());
+        // Track how many nodes have been added at each depth
+        let mut depth_used: Vec<usize> = vec![0; depth_budgets.len()];
+
+        let threshold = config.screening_threshold;
+        self.heap.clear();
+        self.tree.clear();
+        self.chain_nodes.clear();
+        self.chain_parent_tokens.clear();
+
+        if marginals.is_empty() {
+            return &self.tree;
+        }
+
+        if chain_seed {
+            // ── Phase A: Build greedy chain backbone with progressive budget ──
+            let mut cumulative_score: f32 = 0.0;
+            let mut parent_path: u128 = 0;
+
+            for (depth, marginal) in marginals.iter().enumerate() {
+                if self.tree.len() >= config.tree_budget {
+                    break;
+                }
+                // Per-depth budget check for chain backbone
+                if depth_used[depth] >= depth_budgets[depth] {
+                    break;
+                }
+
+                let best_token = marginal
+                    .iter()
+                    .enumerate()
+                    .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+                    .map(|(i, _)| i);
+
+                let Some(token_idx) = best_token else {
+                    break;
+                };
+                let prob = marginal[token_idx];
+
+                if prob <= 0.0 {
+                    break;
+                }
+
+                let relevance = screener.relevance(depth, token_idx, &self.chain_parent_tokens);
+                if relevance <= threshold {
+                    break;
+                }
+
+                // Blended score: ln(P_llm) + ln(R)
+                cumulative_score += prob.ln() + relevance.ln();
+                let node_path = if depth == 0 {
+                    token_idx as u128
+                } else {
+                    (parent_path << 16) | (token_idx as u128)
+                };
+
+                let node = TreeNode {
+                    score: cumulative_score,
+                    depth,
+                    token_idx,
+                    parent_path: node_path,
+                };
+
+                self.tree.push(node);
+                depth_used[depth] += 1;
+                self.chain_nodes.push(node);
+                parent_path = node_path;
+                self.chain_parent_tokens.push(token_idx);
+            }
+
+            // ── Phase B: Seed heap with siblings + last chain children ──
+            if self.chain_nodes.is_empty() {
+                // Seed depth 0 — only add tokens within depth 0 budget
+                let budget_d0 = depth_budgets.first().copied().unwrap_or(config.tree_budget);
+                if config.vocab_size > 256 {
+                    let mut nodes: Vec<TreeNode> = marginals[0]
+                        .par_iter()
+                        .enumerate()
+                        .filter_map(|(i, &prob)| {
+                            if prob <= 0.0 {
+                                return None;
+                            }
+                            let relevance = screener.relevance(0, i, &[]);
+                            if relevance <= threshold {
+                                return None;
+                            }
+                            Some(TreeNode {
+                                score: prob.ln() + relevance.ln(),
+                                depth: 0,
+                                token_idx: i,
+                                parent_path: i as u128,
+                            })
+                        })
+                        .collect();
+                    nodes.truncate(budget_d0);
+                    self.heap.extend(nodes);
+                } else {
+                    for (i, &prob) in marginals[0].iter().enumerate() {
+                        if depth_used[0] >= budget_d0 {
+                            break;
+                        }
+                        if prob <= 0.0 {
+                            continue;
+                        }
+                        let relevance = screener.relevance(0, i, &[]);
+                        if relevance <= threshold {
+                            continue;
+                        }
+                        self.heap.push(TreeNode {
+                            score: prob.ln() + relevance.ln(),
+                            depth: 0,
+                            token_idx: i,
+                            parent_path: i as u128,
+                        });
+                    }
+                }
+            } else {
+                for chain_node in &self.chain_nodes {
+                    let depth = chain_node.depth;
+                    let parent_chain_score = if depth == 0 {
+                        0.0f32
+                    } else {
+                        self.chain_nodes[depth - 1].score
+                    };
+
+                    let sibling_parent_tokens = extract_parent_tokens_into(
+                        chain_node.parent_path >> 16,
+                        depth,
+                        &mut self.parent_tokens_buf,
+                    );
+
+                    for (i, &prob) in marginals[depth].iter().enumerate() {
+                        if i == chain_node.token_idx {
+                            continue;
+                        }
+                        if prob <= 0.0 {
+                            continue;
+                        }
+                        let relevance = screener.relevance(depth, i, sibling_parent_tokens);
+                        if relevance <= threshold {
+                            continue;
+                        }
+                        let sibling_path = if depth == 0 {
+                            i as u128
+                        } else {
+                            let ancestor_path = chain_node.parent_path >> 16;
+                            (ancestor_path << 16) | (i as u128)
+                        };
+
+                        self.heap.push(TreeNode {
+                            score: parent_chain_score + prob.ln() + relevance.ln(),
+                            depth,
+                            token_idx: i,
+                            parent_path: sibling_path,
+                        });
+                    }
+                }
+
+                let last = self.chain_nodes.last().unwrap();
+                if last.depth + 1 < marginals.len() {
+                    let next_depth = last.depth + 1;
+                    let parent_tokens = extract_parent_tokens_into(
+                        last.parent_path,
+                        last.depth + 1,
+                        &mut self.parent_tokens_buf,
+                    );
+                    for (i, &prob) in marginals[next_depth].iter().enumerate() {
+                        if prob <= 0.0 {
+                            continue;
+                        }
+                        let relevance = screener.relevance(next_depth, i, parent_tokens);
+                        if relevance <= threshold {
+                            continue;
+                        }
+                        self.heap.push(TreeNode {
+                            score: last.score + prob.ln() + relevance.ln(),
+                            depth: next_depth,
+                            token_idx: i,
+                            parent_path: (last.parent_path << 16) | (i as u128),
+                        });
+                    }
+                }
+            }
+        } else {
+            // Original seeding with progressive budget for depth 0
+            let budget_d0 = depth_budgets.first().copied().unwrap_or(config.tree_budget);
+            if config.vocab_size > 256 {
+                let mut nodes: Vec<TreeNode> = marginals[0]
+                    .par_iter()
+                    .enumerate()
+                    .filter_map(|(i, &prob)| {
+                        if prob <= 0.0 {
+                            return None;
+                        }
+                        let relevance = screener.relevance(0, i, &[]);
+                        if relevance <= threshold {
+                            return None;
+                        }
+                        Some(TreeNode {
+                            score: prob.ln() + relevance.ln(),
+                            depth: 0,
+                            token_idx: i,
+                            parent_path: i as u128,
+                        })
+                    })
+                    .collect();
+                nodes.truncate(budget_d0);
+                self.heap.extend(nodes);
+            } else {
+                for (i, &prob) in marginals[0].iter().enumerate() {
+                    if depth_used[0] >= budget_d0 {
+                        break;
+                    }
+                    if prob <= 0.0 {
+                        continue;
+                    }
+                    let relevance = screener.relevance(0, i, &[]);
+                    if relevance <= threshold {
+                        continue;
+                    }
+                    self.heap.push(TreeNode {
+                        score: prob.ln() + relevance.ln(),
+                        depth: 0,
+                        token_idx: i,
+                        parent_path: i as u128,
+                    });
+                }
+            }
+        }
+
+        // ── Phase C: Best-first expansion with progressive per-depth budget ──
+        let mut best_score: Option<f32> = None;
+        let mut second_best_score: Option<f32> = None;
+        let mut consecutive_dominant: usize = 0;
+        while self.tree.len() < config.tree_budget {
+            let Some(best) = self.heap.pop() else {
+                break;
+            };
+
+            // Per-depth budget check: skip nodes whose depth is exhausted
+            if best.depth < depth_budgets.len()
+                && depth_used[best.depth] >= depth_budgets[best.depth]
+            {
+                continue;
+            }
+
+            self.tree.push(best);
+            depth_used[best.depth] += 1;
+
+            // Confidence-gap early exit (Plan 026: AutoTTS)
+            let score = best.score;
+            match best_score {
+                None => {
+                    best_score = Some(score);
+                }
+                Some(bs) if score > bs => {
+                    second_best_score = Some(bs);
+                    best_score = Some(score);
+                    consecutive_dominant = 1;
+                }
+                Some(bs) => {
+                    second_best_score = Some(score);
+                    if bs - score > config.early_exit_gap {
+                        consecutive_dominant += 1;
+                    } else {
+                        consecutive_dominant = 0;
+                    }
+                }
+            }
+            if config.early_exit_patience > 0
+                && config.early_exit_gap > 0.0
+                && consecutive_dominant >= config.early_exit_patience
+                && best_score.unwrap_or(0.0) - second_best_score.unwrap_or(0.0)
+                    > config.early_exit_gap
+            {
+                break;
+            }
+
+            if best.depth + 1 < marginals.len() {
+                let next_depth = best.depth + 1;
+                // Skip expanding children into a depth that has exhausted its budget
+                if next_depth < depth_budgets.len()
+                    && depth_used[next_depth] >= depth_budgets[next_depth]
+                {
+                    continue;
+                }
+                let parent_tokens = extract_parent_tokens_into(
+                    best.parent_path,
+                    best.depth + 1,
+                    &mut self.parent_tokens_buf,
+                );
+                for (i, &prob) in marginals[next_depth].iter().enumerate() {
+                    if prob <= 0.0 {
+                        continue;
+                    }
+                    let relevance = screener.relevance(next_depth, i, parent_tokens);
+                    if relevance <= threshold {
+                        continue;
+                    }
                     self.heap.push(TreeNode {
                         score: best.score + prob.ln() + relevance.ln(),
                         depth: next_depth,
@@ -3887,5 +4260,235 @@ mod tests {
             speedup >= 1.3,
             "FrozenBaseGuard should be >= 1.3× faster, got {speedup:.2}×"
         );
+    }
+
+    // ── Progressive Budget Tests (Plan 174 Task 3b) ──────────────
+
+    #[cfg(feature = "dflare_progressive_budget")]
+    mod progressive_budget {
+        use super::*;
+        use crate::speculative::types::PositionWeightedBudget;
+
+        /// Helper: create marginals where every token has uniform positive probability.
+        fn make_uniform_marginals(config: &Config, num_depths: usize) -> Vec<Vec<f32>> {
+            (0..num_depths)
+                .map(|_| vec![0.1; config.vocab_size])
+                .collect()
+        }
+
+        #[test]
+        fn test_progressive_none_delegates_to_build_screened() {
+            let config = Config::draft();
+            let marginals = make_uniform_marginals(&config, 3);
+            let mv: Vec<&[f32]> = marginals.iter().map(|s| s.as_slice()).collect();
+            let screener = NoScreeningPruner;
+
+            let tree_baseline = build_dd_tree_screened(&mv, &config, &screener, false);
+            let tree_progressive =
+                build_dd_tree_screened_progressive(&mv, &config, &screener, false, None);
+
+            assert_eq!(
+                tree_baseline.len(),
+                tree_progressive.len(),
+                "None budget_config should delegate to build_screened"
+            );
+            for (a, b) in tree_baseline.iter().zip(tree_progressive.iter()) {
+                assert_eq!(a.token_idx, b.token_idx, "tokens should match");
+                assert_eq!(a.depth, b.depth, "depths should match");
+            }
+        }
+
+        #[test]
+        fn test_progressive_disabled_delegates_to_build_screened() {
+            let config = Config::draft();
+            let marginals = make_uniform_marginals(&config, 3);
+            let mv: Vec<&[f32]> = marginals.iter().map(|s| s.as_slice()).collect();
+            let screener = NoScreeningPruner;
+
+            let budget_config = PositionWeightedBudget {
+                enabled: false,
+                ..Default::default()
+            };
+
+            let tree_baseline = build_dd_tree_screened(&mv, &config, &screener, false);
+            let tree_progressive = build_dd_tree_screened_progressive(
+                &mv,
+                &config,
+                &screener,
+                false,
+                Some(&budget_config),
+            );
+
+            assert_eq!(
+                tree_baseline.len(),
+                tree_progressive.len(),
+                "disabled budget_config should delegate to build_screened"
+            );
+            for (a, b) in tree_baseline.iter().zip(tree_progressive.iter()) {
+                assert_eq!(a.token_idx, b.token_idx, "tokens should match");
+                assert_eq!(a.depth, b.depth, "depths should match");
+            }
+        }
+
+        #[test]
+        fn test_progressive_respects_total_budget() {
+            let config = Config::draft();
+            let marginals = make_uniform_marginals(&config, 4);
+            let mv: Vec<&[f32]> = marginals.iter().map(|s| s.as_slice()).collect();
+            let screener = NoScreeningPruner;
+
+            let budget_config = PositionWeightedBudget {
+                gamma: 4.0,
+                min_budget_per_depth: 1,
+                enabled: true,
+            };
+
+            let tree = build_dd_tree_screened_progressive(
+                &mv,
+                &config,
+                &screener,
+                false,
+                Some(&budget_config),
+            );
+
+            assert!(
+                tree.len() <= config.tree_budget,
+                "progressive tree size {} exceeds budget {}",
+                tree.len(),
+                config.tree_budget
+            );
+            assert!(!tree.is_empty(), "tree should have at least one node");
+        }
+
+        #[test]
+        fn test_progressive_front_loads_nodes() {
+            let config = Config::draft();
+            // Use multiple depths with enough budget to see the difference
+            let marginals = make_uniform_marginals(&config, 4);
+            let mv: Vec<&[f32]> = marginals.iter().map(|s| s.as_slice()).collect();
+            let screener = NoScreeningPruner;
+
+            let budget_config = PositionWeightedBudget {
+                gamma: 2.0, // Aggressive decay
+                min_budget_per_depth: 1,
+                enabled: true,
+            };
+
+            let tree = build_dd_tree_screened_progressive(
+                &mv,
+                &config,
+                &screener,
+                false,
+                Some(&budget_config),
+            );
+
+            // Count nodes at each depth
+            let max_depth = tree.iter().map(|n| n.depth).max().unwrap_or(0);
+            let mut depth_counts: Vec<usize> = vec![0; max_depth + 1];
+            for node in &tree {
+                depth_counts[node.depth] += 1;
+            }
+
+            // With aggressive decay (gamma=2), depth 0 should have the most nodes
+            if depth_counts.len() >= 2 {
+                assert!(
+                    depth_counts[0] >= depth_counts[depth_counts.len() - 1],
+                    "depth 0 ({}) should have >= nodes than depth {} ({})",
+                    depth_counts[0],
+                    depth_counts.len() - 1,
+                    depth_counts[depth_counts.len() - 1]
+                );
+            }
+        }
+
+        #[test]
+        fn test_progressive_per_depth_stays_within_allocation() {
+            let config = Config::draft();
+            let marginals = make_uniform_marginals(&config, 4);
+            let mv: Vec<&[f32]> = marginals.iter().map(|s| s.as_slice()).collect();
+            let screener = NoScreeningPruner;
+
+            let budget_config = PositionWeightedBudget {
+                gamma: 4.0,
+                min_budget_per_depth: 1,
+                enabled: true,
+            };
+
+            let allocations = budget_config.allocate(config.tree_budget, 4);
+            let tree = build_dd_tree_screened_progressive(
+                &mv,
+                &config,
+                &screener,
+                false,
+                Some(&budget_config),
+            );
+
+            let mut depth_counts: Vec<usize> = vec![0; 4];
+            for node in &tree {
+                depth_counts[node.depth] += 1;
+            }
+
+            for (depth, &count) in depth_counts.iter().enumerate() {
+                assert!(
+                    count <= allocations[depth],
+                    "depth {} has {} nodes but allocation is {}",
+                    depth,
+                    count,
+                    allocations[depth]
+                );
+            }
+        }
+
+        #[test]
+        fn test_progressive_chain_seed_respects_budget() {
+            let config = Config::draft();
+            let marginals = super::make_chain_marginals(&config);
+            let mv: Vec<&[f32]> = marginals.iter().map(|s| s.as_slice()).collect();
+            let screener = NoScreeningPruner;
+
+            let budget_config = PositionWeightedBudget {
+                gamma: 4.0,
+                min_budget_per_depth: 1,
+                enabled: true,
+            };
+
+            let tree = build_dd_tree_screened_progressive(
+                &mv,
+                &config,
+                &screener,
+                true,
+                Some(&budget_config),
+            );
+
+            assert!(
+                tree.len() <= config.tree_budget,
+                "chain-seed progressive tree size {} exceeds budget {}",
+                tree.len(),
+                config.tree_budget
+            );
+            assert!(!tree.is_empty(), "tree should have at least one node");
+        }
+
+        #[test]
+        fn test_progressive_empty_marginals() {
+            let config = Config::draft();
+            let screener = NoScreeningPruner;
+
+            let budget_config = PositionWeightedBudget {
+                gamma: 4.0,
+                min_budget_per_depth: 1,
+                enabled: true,
+            };
+
+            let tree = build_dd_tree_screened_progressive(
+                &[],
+                &config,
+                &screener,
+                false,
+                Some(&budget_config),
+            );
+
+            assert!(tree.is_empty(), "empty marginals should produce empty tree");
+        }
     }
 }
