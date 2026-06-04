@@ -52,7 +52,7 @@ impl fmt::Display for ComputeTier {
 // ---------------------------------------------------------------------------
 
 /// Configuration parameters that control tier promotion / demotion behaviour.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct TriggerGateConfig {
     /// Activate GPU when QPS exceeds this. Default: 10_000.0
     pub gpu_activate_qps: f64,
@@ -95,6 +95,27 @@ impl fmt::Display for TriggerGateConfig {
             self.latency_p99_trigger_us,
             self.min_tier_change_interval_ms,
         )
+    }
+}
+
+impl TriggerGateConfig {
+    /// Load config from a TOML string.
+    ///
+    /// ```toml
+    /// gpu_activate_qps = 15_000.0
+    /// ane_activate_qps = 150_000.0
+    /// hysteresis_factor = 0.7
+    /// queue_depth_trigger = 100
+    /// latency_p99_trigger_us = 5000
+    /// min_tier_change_interval_ms = 500
+    /// ```
+    pub fn from_toml(input: &str) -> Result<Self, toml::de::Error> {
+        toml::from_str(input)
+    }
+
+    /// Serialize config to a TOML string.
+    pub fn to_toml(&self) -> Result<String, toml::ser::Error> {
+        toml::to_string(self)
     }
 }
 
@@ -485,5 +506,42 @@ mod tests {
         assert_eq!(format!("{}", ComputeTier::CpuOnly), "CPU_ONLY");
         assert_eq!(format!("{}", ComputeTier::CpuGpu), "CPU+GPU");
         assert_eq!(format!("{}", ComputeTier::CpuGpuAne), "CPU+GPU+ANE");
+    }
+
+    // 11. TriggerGateConfig TOML round-trip.
+    #[test]
+    fn test_trigger_gate_config_toml_roundtrip() {
+        let cfg = TriggerGateConfig::default();
+        let toml_str = cfg.to_toml().expect("serialize to TOML");
+        let parsed = TriggerGateConfig::from_toml(&toml_str).expect("parse from TOML");
+        assert_eq!(cfg.gpu_activate_qps, parsed.gpu_activate_qps);
+        assert_eq!(cfg.ane_activate_qps, parsed.ane_activate_qps);
+        assert_eq!(cfg.hysteresis_factor, parsed.hysteresis_factor);
+        assert_eq!(cfg.queue_depth_trigger, parsed.queue_depth_trigger);
+        assert_eq!(cfg.latency_p99_trigger_us, parsed.latency_p99_trigger_us);
+        assert_eq!(
+            cfg.min_tier_change_interval_ms,
+            parsed.min_tier_change_interval_ms
+        );
+    }
+
+    // 12. TriggerGateConfig TOML parse with custom values.
+    #[test]
+    fn test_trigger_gate_config_toml_custom() {
+        let input = r#"
+gpu_activate_qps = 25000.0
+ane_activate_qps = 200000.0
+hysteresis_factor = 0.5
+queue_depth_trigger = 50
+latency_p99_trigger_us = 3000
+min_tier_change_interval_ms = 200
+"#;
+        let cfg = TriggerGateConfig::from_toml(input).expect("parse custom TOML");
+        assert_eq!(cfg.gpu_activate_qps, 25_000.0);
+        assert_eq!(cfg.ane_activate_qps, 200_000.0);
+        assert_eq!(cfg.hysteresis_factor, 0.5);
+        assert_eq!(cfg.queue_depth_trigger, 50);
+        assert_eq!(cfg.latency_p99_trigger_us, 3000);
+        assert_eq!(cfg.min_tier_change_interval_ms, 200);
     }
 }

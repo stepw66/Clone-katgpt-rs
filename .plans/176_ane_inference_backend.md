@@ -204,8 +204,8 @@ else:
 - [x] `--device cpu|gpu|ane|auto|gate` CLI flag (new: `gate` = trigger gate mode)
 - [ ] When `--device gate`: use `TriggerGate` + `InferenceRouter`
 - [x] When `--device auto/cpu/gpu/ane`: direct backend selection (existing behavior)
-- [ ] Log tier transitions: `"TriggerGate: CPU → CPU+GPU (QPS: 12K, queue: 150)"`
-- [ ] Expose `TriggerGateConfig` for tuning thresholds per deployment
+- [x] Log tier transitions: `"TriggerGate: CPU → CPU+GPU (QPS: 12K, queue: 150)"` — via log::info in InferenceRouter::forward()
+- [x] Expose `TriggerGateConfig` for tuning thresholds per deployment — serde + TOML support
 - [ ] Update bomber/Go arena to support `--device gate` mode
 
 ### Part 7: Benchmarks + GOAT Proof
