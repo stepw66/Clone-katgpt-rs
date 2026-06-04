@@ -10,6 +10,11 @@
 //! The variance normalization equalizes per-row and per-column standard deviations
 //! via iterative Sinkhorn-style log-space scaling, reducing quantization error from
 //! heterogenous magnitude distributions.
+//!
+//! Binary bloat verification:
+//!   cargo build --release 2>/dev/null && ls -la target/release/katgpt-rs
+//!   cargo build --release --features kvarn 2>/dev/null && ls -la target/release/katgpt-rs
+//!   The two binary sizes should be identical when kvarn is off by default.
 
 pub mod eval;
 pub mod hadamard;

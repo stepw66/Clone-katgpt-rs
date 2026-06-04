@@ -285,6 +285,51 @@ mod tests {
     }
 
     #[test]
+    fn test_pseudo_decode_accumulation_ratio_4bit() {
+        let kv_dim = 64;
+        let seq_len = 512;
+        let tile_size = 64;
+        let bits = 4;
+        let config = VarNormConfig {
+            tile_size,
+            iterations: 8,
+            ..Default::default()
+        };
+
+        let keys: Vec<Vec<f32>> = (0..seq_len)
+            .map(|i| make_random_vec(kv_dim, i as u64 * 100 + 1))
+            .collect();
+        let values: Vec<Vec<f32>> = (0..seq_len)
+            .map(|i| make_random_vec(kv_dim, i as u64 * 100 + 2))
+            .collect();
+
+        let result = pseudo_decode_eval(&keys, &values, tile_size, bits, &config);
+
+        // Accumulation ratio: last tile MSE / first tile MSE
+        // If ratio > 1, error accumulates (each tile's quantization hurts later tiles)
+        let first_tile_mse = result.per_tile_mse[0];
+        let last_tile_mse = *result.per_tile_mse.last().unwrap();
+        let accumulation_ratio = if first_tile_mse > 1e-10 {
+            last_tile_mse / first_tile_mse
+        } else {
+            1.0
+        };
+
+        eprintln!("KVarN 4-bit accumulation ratio: {accumulation_ratio:.3} (target < 1.5)");
+        eprintln!("  First tile MSE: {first_tile_mse:.6}");
+        eprintln!("  Last tile MSE:  {last_tile_mse:.6}");
+        eprintln!(
+            "  Cumulative MSE: {}",
+            result.cumulative_mse.last().unwrap_or(&0.0)
+        );
+
+        assert!(
+            accumulation_ratio < 1.5,
+            "Accumulation ratio too high: {accumulation_ratio:.3}, target < 1.5"
+        );
+    }
+
+    #[test]
     fn test_pseudo_decode_higher_bits_lower_error() {
         let kv_dim = 32;
         let seq_len = 8;

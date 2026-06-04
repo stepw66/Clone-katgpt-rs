@@ -361,4 +361,37 @@ mod tests {
         assert!(scales.s_col.is_empty());
         assert!(scales.s_row.is_empty());
     }
+
+    #[test]
+    fn test_variance_normalize_benchmark_128x128() {
+        // Generate random 128×128 tile
+        let rows = 128;
+        let cols = 128;
+        let mut tile = vec![0.0f32; rows * cols];
+        let mut seed: u64 = 42;
+        for v in tile.iter_mut() {
+            seed = seed
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            *v = ((seed >> 33) as i32 as f32) / (1i32 << 31) as f32;
+        }
+
+        let config = VarNormConfig {
+            iterations: 8,
+            ..Default::default()
+        };
+
+        let start = std::time::Instant::now();
+        let _scales = variance_normalize(&mut tile, rows, cols, &config);
+        let elapsed = start.elapsed();
+        let elapsed_us = elapsed.as_secs_f64() * 1e6;
+
+        eprintln!("VarN 128×128 8 iters: {elapsed_us:.0}μs");
+
+        // Relaxed CI bound — actual target is ≤50μs on Apple M2 SIMD
+        assert!(
+            elapsed.as_secs() < 5,
+            "VarN took too long: {elapsed_us:.0}μs"
+        );
+    }
 }
