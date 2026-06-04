@@ -97,15 +97,15 @@ impl InferenceRouter {
             log::info!("Router tier transition → {new_tier}");
             self.tier_transitions.fetch_add(1, Ordering::Relaxed);
             // Signal recompile to GPU/ANE backends when they exist.
-            if matches!(new_tier, ComputeTier::CpuGpu | ComputeTier::CpuGpuAne) {
-                if let Some(ref mut gpu) = self.gpu {
-                    gpu.recompile_hint();
-                }
+            if matches!(new_tier, ComputeTier::CpuGpu | ComputeTier::CpuGpuAne)
+                && let Some(ref mut gpu) = self.gpu
+            {
+                gpu.recompile_hint();
             }
-            if matches!(new_tier, ComputeTier::CpuGpuAne) {
-                if let Some(ref mut ane) = self.ane {
-                    ane.recompile_hint();
-                }
+            if matches!(new_tier, ComputeTier::CpuGpuAne)
+                && let Some(ref mut ane) = self.ane
+            {
+                ane.recompile_hint();
             }
         }
 
@@ -201,15 +201,15 @@ impl InferenceRouter {
         if let Some(new_tier) = self.gate.evaluate() {
             log::info!("Router batch tier transition → {new_tier}");
             self.tier_transitions.fetch_add(1, Ordering::Relaxed);
-            if matches!(new_tier, ComputeTier::CpuGpu | ComputeTier::CpuGpuAne) {
-                if let Some(ref mut gpu) = self.gpu {
-                    gpu.recompile_hint();
-                }
+            if matches!(new_tier, ComputeTier::CpuGpu | ComputeTier::CpuGpuAne)
+                && let Some(ref mut gpu) = self.gpu
+            {
+                gpu.recompile_hint();
             }
-            if matches!(new_tier, ComputeTier::CpuGpuAne) {
-                if let Some(ref mut ane) = self.ane {
-                    ane.recompile_hint();
-                }
+            if matches!(new_tier, ComputeTier::CpuGpuAne)
+                && let Some(ref mut ane) = self.ane
+            {
+                ane.recompile_hint();
             }
         }
 
