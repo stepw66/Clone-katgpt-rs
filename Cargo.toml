@@ -28,6 +28,9 @@ toml = "0.8"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 coreml-native = { version = "0.2", optional = true }  # Apple Neural Engine inference backend (Plan 176)
+coreml-proto = { version = "0.1", optional = true }  # CoreML protobuf spec builder for runtime compilation (Plan 176)
+prost = { version = "0.14", optional = true }  # Protobuf serialization for CoreML spec (Plan 176)
+metal = { version = "0.33", optional = true }  # GPU inference backend via Metal compute (Plan 176)
 
 [dev-dependencies]
 ratatui = "0.29"
@@ -164,10 +167,11 @@ thinking_prune = ["sr2am_configurator"]  # Thinking Prune — FrozenBaseGuard fo
 rim_slots = ["katgpt-core/rim_slots"]  # RiM Reasoning Buffer Slots — fixed latent workspace for DDTree (Plan 172, Research 192)
 budget_adaptation = []  # Compression-adaptive decode budget — PFlash complexity signal (Plan 167, Research R050)
 wall_attention = ["katgpt-core/wall_attention"]  # Wall Attention — diagonal forget gates replacing RoPE (Plan 173, Research Wall Attention) — opt-in, requires Wall-trained model weights
-ane = ["dep:coreml-native"]  # Apple Neural Engine inference backend (Plan 176)
-gpu_inference = []  # GPU inference backend via Metal compute pipelines (Plan 176, placeholder — pending metal crate integration)
+ane = ["dep:coreml-native", "dep:coreml-proto", "dep:prost"]  # Apple Neural Engine inference backend (Plan 176)
+gpu_inference = ["dep:metal"]  # GPU inference backend via Metal compute pipelines (Plan 176)
 inference_router = ["gpu_inference", "ane"]  # Full inference routing: TriggerGate + InferenceRouter + GPU + ANE (Plan 176)
 thinking_cot = ["rim_slots", "thinking_prune", "parallel_probe", "ppot", "bt_rank", "bandit"]  # Adaptive CoT thinking — self-learning when to think (Plan 194)
+spec_reconciliation = []  # Speculative Reconciliation Engine — verify offline trajectories against plausibility manifolds (Plan 177)
 # LeviathanVerifier is always compiled (no gate needed) — verifier.rs, benchmark.rs
 full = ["sudoku", "validator", "ppot", "domain_latent", "bandit", "delta_mem", "g_zero", "fft", "bomber", "bomber-agent", "bomber-wasm", "game_state", "bandit_mcts", "hla_attention", "gdn2_attention", "lt2_looped", "dash_attn", "mls_aggregate", "dmax_spd", "dreamer", "monopoly", "go", "randopt_weight", "feedback", "rest", "embedding_router", "gpu", "game_domain", "language_domain", "percepta_compile", "dllm", "tri_mode", "bt_rank", "spectral_quant", "octopus", "turboquant", "planar_quant", "iso_quant", "hybrid_oct_pq", "replaid_schedules", "elf_sde", "maxsim", "cna_steering", "deep_manifold", "federation", "delta_routing", "decode_specialize", "lattice_deduction", "unit_distance", "memo_reflections", "eqr_convergence", "subterranean", "sr2am_configurator", "data_gate", "coda_fusion", "tiled_attention", "vpd_em_distill", "proof_sketch_evolution", "convex_tok", "opus_selection", "epiplexity_scoring", "committee_boost", "questbench", "cache_prune", "sleep_consolidation", "spectral_hierarchy", "newton_schulz", "river_valley", "peira_distill", "kog_cpu_fusion", "datrie_vocab", "gepa_reflective", "phrase_boost", "hydra_budget", "budget_adaptation", "recfm", "ilc_distill", "thinking_prune", "rim_slots", "wall_attention", "ane", "inference_router", "thinking_cot"]
 
@@ -542,3 +546,7 @@ required-features = ["datrie_vocab"]
 [[example]]
 name = "thinking_cot_demo"
 required-features = ["thinking_cot"]
+
+[[example]]
+name = "spec_reconciliation_demo"
+required-features = ["spec_reconciliation"]

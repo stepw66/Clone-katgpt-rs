@@ -56,6 +56,8 @@ pub mod skill_opt;
 pub mod sleep;
 #[cfg(feature = "sp_kv")]
 pub mod sp_kv;
+#[cfg(feature = "spec_reconciliation")]
+pub mod spec_reconciliation;
 #[cfg(feature = "spechop")]
 pub mod spechop;
 #[cfg(feature = "spectral_quant")]
