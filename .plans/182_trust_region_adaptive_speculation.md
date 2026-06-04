@@ -43,55 +43,49 @@ graph TD
 ## Tasks
 
 - [x] T1: `TrustRegionVerifier` Trait — Extension Point
-- [ ] Add `trust_metric(&self) -> f32` — running average of P_accept
-- [ ] Add `adaptive_window(&self, base: usize) -> usize` — expand/shrink based on trust
-- [ ] Add `blend_sample(&mut self, beta: f32, rng: &mut Rng) -> usize` — TRB μ_β sampling
-- [ ] Feature-gate behind `trust_region_spec`
+- [x] Add `trust_metric(&self) -> f32` — running average of P_accept
+- [x] Add `adaptive_window(&self, base: usize) -> usize` — expand/shrink based on trust
+- [x] Add `blend_sample(&mut self, beta: f32, rng: &mut Rng) -> usize` — TRB μ_β sampling
+- [x] Feature-gate behind `trust_region_spec`
 
 - [x] T2: `TrustRegionLeviathanVerifier` — Implementation
-- [ ] Track running acceptance rate per decode call (sliding window of 16 tokens)
-- [ ] Adaptive window: trust > 0.85 → base_window × 1.5, trust < 0.5 → window = 1
-- [ ] Blend on rejection: compute β via binary search (10 iterations max), sample from μ_β
-- [ ] Zero additional allocation: reuse existing `SpeculativeContext` buffers
+- [x] Track running acceptance rate per decode call (sliding window of 16 tokens)
+- [x] Adaptive window: trust > 0.85 → base_window × 1.5, trust < 0.5 → window = 1
+- [x] Blend on rejection: compute β via binary search (10 iterations max), sample from μ_β
+- [x] Zero additional allocation: reuse existing `SpeculativeContext` buffers
 
 ### T3: Trust Signal → InferenceRouter Integration
 
-**Where:** `katgpt-rs/src/inference_router.rs`
-
-- [ ] Add `trust_signal: f32` to router state, updated from verifier
-- [ ] Low trust (< 0.4) triggers tier-up: CPU → GPU (if available)
-- [ ] High trust (> 0.8) allows tier-down: GPU → CPU (if load permits)
-- [ ] Wire through `forward()` method
-- [ ] Log trust-triggered tier transitions
+- [x] Add `trust_signal: f32` to router state, updated from verifier
+- [x] Low trust (< 0.4) triggers tier-up: CPU → GPU (if available)
+- [x] High trust (> 0.8) allows tier-down: GPU → CPU (if load permits)
+- [x] Wire through `forward()` method
+- [x] Log trust-triggered tier transitions
 
 ### T4: Trust Signal → ThinkingController Integration
 
-**Where:** `katgpt-rs/src/pruners/thinking.rs` (Plan 194)
-
-- [ ] Trust metric as additional signal for think/direct decision
-- [ ] Low trust → prefer thinking mode (PPoT resample or RiM buffer)
-- [ ] High trust → prefer direct mode (skip thinking)
-- [ ] Combine with existing entropy and bandit signals
+- [x] Trust metric as additional signal for think/direct decision
+- [x] Low trust → prefer thinking mode (PPoT resample or RiM buffer)
+- [x] High trust → prefer direct mode (skip thinking)
+- [x] Combine with existing entropy and bandit signals
 
 - [x] T5: Bandit Learning for Trust Patterns
-- [ ] Reward: successful decode (tokens accepted without quality regression)
-- [ ] Freeze/thaw: persist trust-bandit knowledge per domain
-- [ ] Self-improving: bandit adapts trust thresholds per query type
+- [x] Reward: successful decode (tokens accepted without quality regression)
+- [x] Freeze/thaw: persist trust-bandit knowledge per domain
+- [x] Self-improving: bandit adapts trust thresholds per query type
 
 - [x] T6: Test — Before/After Trust-Region Speculation
-- [ ] Test 2: TRAS adaptive window — measure acceptance rate + output quality
-- [ ] Assert: TRAS acceptance rate ≥ 15% higher than baseline
-- [ ] Assert: Output quality (valid sequences) not regressed
-- [ ] Print before/after comparison table
+- [x] Test 2: TRAS adaptive window — measure acceptance rate + output quality
+- [x] Assert: TRAS acceptance rate ≥ 15% higher than baseline
+- [x] Assert: Output quality (valid sequences) not regressed
+- [x] Print before/after comparison table
 
 ### T7: Bench — Micro-benchmark Blend Cost
 
-**Where:** `katgpt-rs/tests/bench_trust_region.rs` (new)
-
-- [ ] Benchmark blend computation: πS^(1-β)·πT^β for vocab_size tokens
-- [ ] Benchmark binary search for β: 10 iterations over KL computation
-- [ ] Assert: blend cost < 2μs (acceptable in speculative decode hot path)
-- [ ] Compare: total speculative decode time with and without TRAS
+- [x] Benchmark blend computation: πS^(1-β)·πT^β for vocab_size tokens
+- [x] Benchmark binary search for β: 10 iterations over KL computation
+- [x] Assert: blend cost < 2μs (acceptable in speculative decode hot path)
+- [x] Compare: total speculative decode time with and without TRAS
 
 ---
 
