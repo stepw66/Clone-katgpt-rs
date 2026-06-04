@@ -96,6 +96,9 @@ pub use regression::{GoldenTrace, RegressionResult, RegressionSuite, ReplayRewar
 #[cfg(feature = "bandit")]
 pub use trial_log::{SharedTrialLog, TrialLog, TrialRecord, TrialSummary};
 
+#[cfg(feature = "bandit_top_p")]
+pub use bandit::select_arms_top_p;
+
 #[cfg(feature = "safe_bandit")]
 pub use safe_phased::SafePhasedState;
 
@@ -151,6 +154,14 @@ pub use sdar_gate::{
     SDAR_BETA, SDAR_BETA_MAX, SDAR_BETA_MIN, sdar_benefit_gate, sdar_gate, sdar_gate_default,
     sdar_gated_reward, sdar_modulate, sdar_modulate_default, sdar_should_promote,
 };
+
+// ── SDPG Bandit — Modelless Self-Distilled Policy Gradient (Research 160, Plan 180) ──
+
+#[cfg(feature = "sdpg_bandit")]
+pub mod sdpg;
+
+#[cfg(feature = "sdpg_bandit")]
+pub use sdpg::{BetaSchedule, KlAnchor, SdpgBanditPruner, centered_log_ratio, softmax_scaled};
 
 #[cfg(feature = "vpd_em_distill")]
 pub mod vpd_em;
@@ -434,6 +445,18 @@ pub mod mux_bandit;
 
 #[cfg(feature = "mux_bandit_width")]
 pub use mux_bandit::MuxBanditWidth;
+
+#[cfg(feature = "mux_freeze_thaw")]
+pub mod mux_freeze_thaw;
+
+#[cfg(feature = "mux_freeze_thaw")]
+pub use mux_freeze_thaw::{DifficultyTier, MuxPatternStore, MuxTarget};
+
+#[cfg(feature = "mux_bfs")]
+pub mod mux_bfs;
+
+#[cfg(feature = "mux_bfs")]
+pub use mux_bfs::MuxBfs;
 
 #[cfg(feature = "mech_attribution")]
 pub mod mech_attribution;
