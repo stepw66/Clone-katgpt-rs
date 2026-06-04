@@ -22,6 +22,9 @@ pub mod gdn2;
 pub mod hla;
 #[cfg(feature = "hybrid_oct_pq")]
 pub mod hybrid_oct_pq;
+pub mod inference_backend;
+#[cfg(all(target_os = "macos", feature = "ane"))]
+pub mod ane_backend;
 #[cfg(feature = "iso_quant")]
 pub mod iso_quant;
 #[cfg(feature = "kog_cpu_fusion")]
