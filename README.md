@@ -173,6 +173,8 @@ graph LR
 | **Subterranean** | Token-rewriting procedures compiled to native code | `subterranean` |
 | **EqR Convergence** | Smallest marginal-change residual selection | `eqr_convergence` |
 | **Thinking Prune** | FrozenBaseGuard for intermediate steps | `thinking_prune` |
+| **Trigger Gate** | Three-way CPU/GPU/ANE tier promotion via QPS/latency/queue monitoring | `inference_router` |
+| **InferenceRouter** | Dynamic tier routing + batch forward with amortized compilation | `inference_router` |
 
 📖 **Full GOAT audit table** with research source, real gain, and replaced feature: See [`.docs/01_overview.md`](.docs/01_overview.md).
 
@@ -357,6 +359,53 @@ GOAT 6/6 proved. Default-on.
 
 📖 See [`.research/051_Deep_Manifold_Fixed_Point_Boundary_Conditions.md`](.research/051_Deep_Manifold_Fixed_Point_Boundary_Conditions.md).
 
+## ⚡ Trigger Gate + Three-Way Compute (Plan 176)
+
+Automatic tier promotion from CPU → GPU → ANE based on real-time load signals. CPU is always available as fallback.
+
+```mermaid
+graph LR
+    subgraph Per Inference
+        A[Token + Pos] --> B{TriggerGate Tier?}
+        B -->|CPU_ONLY| C[CPU SIMD Forward:::accent1]
+        B -->|CPU+GPU| D[GPU Metal Forward:::accent2]
+        B -->|CPU+GPU+ANE| E[ANE CoreML Forward:::accent0]
+    end
+```
+
+### Why
+
+At 30K CCU: `30K × 20Hz = 600K inferences/sec`. CPU handles forward, but also runs WASM validation, DDTree, bandit, MCTS. GPU and ANE sit idle while CPU chokes.
+
+### Architecture
+
+| Component | What | Status |
+|-----------|------|--------|
+| `TriggerGate` | QPS/latency/queue-depth → tier promotion with hysteresis | ✅ Core complete |
+| `InferenceRouter` | Routes to highest available tier, batch mode | ✅ Complete |
+| `TriggerGateConfig` | Serde + TOML tunable thresholds | ✅ Complete |
+| `CpuBackend` | Wraps `transformer::forward` | ✅ Complete |
+| GPU Backend | Metal compute pipeline from `TransformerWeights` | 🔧 Blocked on metal crate |
+| ANE Backend | CoreML runtime compilation from `TransformerWeights` | 🔧 Blocked on coreml-native API |
+
+### Expected Performance
+
+| Tier | Throughput | CPU Free | CCU Capacity |
+|------|-----------|----------|-------------|
+| CPU_ONLY | 600K tok/s | 0% | ~1K CCU |
+| CPU+GPU | 5M tok/s | 80% | ~10K CCU |
+| CPU+GPU+ANE | 15M tok/s | 95% | **30K+ CCU** |
+
+### Feature Gates
+
+```toml
+ane = ["dep:coreml-native"]           # ANE backend
+gpu_inference = []                    # GPU backend (placeholder)
+inference_router = ["gpu_inference", "ane"]  # Full routing stack
+```
+
+📖 Full detail: [`.plans/176_ane_inference_backend.md`](.plans/176_ane_inference_backend.md).
+
 ## 🏭 Productions
 
 KatGPT-RS is the **core inference library** — pure algorithms, zero side effects.
@@ -504,6 +553,9 @@ cargo clippy --all-targets --all-features --quiet   # Lint
 | `dflare_fusion` | DFlare Marginal Fusion — multi-source conditioning blend (Plan 174, opt-in) |
 | `dflare_kv_routing` | DFlare Pruner-Confidence KV Routing (Plan 174, opt-in) |
 | `dflare_progressive_budget` | DFlare Position-Weighted DDTree Budget (Plan 174, opt-in) |
+| `ane` | Apple Neural Engine inference backend (Plan 176, opt-in) |
+| `gpu_inference` | GPU inference backend via Metal compute pipelines (Plan 176, opt-in) |
+| `inference_router` | Full inference routing: TriggerGate + InferenceRouter + GPU + ANE (Plan 176, opt-in) |
 | `full` | Enable all features (excludes some opt-in) |
 
 </details>
@@ -516,6 +568,9 @@ src/
   lib.rs              Module index + debug tracking allocator
   main.rs             Entry point (proof → bench → plot)
   transformer.rs      Weights, KVCache (flat/paged/raven), forward/generate
+  inference_backend.rs  InferenceBackend trait + CpuBackend + auto-route
+  trigger_gate.rs     TriggerGate tier promotion + TriggerGateConfig
+  inference_router.rs InferenceRouter three-way routing + batch forward
   speculative/        DDTree, DFlash, Verifier, Prefill, D2F, budget, flashar
   pruners/            BanditPruner, TrialLog, HotSwap, BT Rank, CNA, G-Zero, Arena
   tokenizer/          BPE tokenizer

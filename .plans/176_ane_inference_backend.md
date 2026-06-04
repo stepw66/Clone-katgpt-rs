@@ -96,7 +96,7 @@ else:
 - [x] `CpuBackend` wrapping existing `transformer::forward`
 - [x] `auto_backend()` for CPU/ANE auto-route (legacy — will be replaced by TriggerGate)
 - [x] Unit tests: CpuBackend matches direct forward
-- [ ] Refactor `InferenceBackend` trait to accept `&TransformerWeights` + token + pos directly (remove indirection through `ForwardContext`)
+- [ ] Refactor `InferenceBackend` trait to accept `&TransformerWeights` + token + pos directly (remove indirection through `ForwardContext`) — **N/A**: `ForwardContext` contains pre-allocated scratch buffers required for zero-alloc forward pass. Removing it would violate the zero-alloc invariant.
 - [x] Add `fn compile(&mut self, weights: &TransformerWeights, config: &Config) -> Result<()>` for runtime weight compilation
 - [x] Add `fn is_compiled(&self) -> bool` to check if backend has valid compiled weights
 - [x] Add `fn recompile_hint(&mut self)` — called when LoRA weights change
@@ -231,8 +231,8 @@ else:
 - [x] `inference_router = ["gpu_inference", "ane"]` — pulls in everything
 - [x] Remove `.mlmodelc` file-loading code from `AneBackend`
 - [x] Remove `scripts/convert_to_coreml.py` (no longer needed — runtime compilation)
-- [ ] Default: all features off (CPU-only), opt-in GPU/ANE
-- [ ] Document trigger gate + three-way compute in README.md
+- [x] Default: all features off (CPU-only), opt-in GPU/ANE
+- [x] Document trigger gate + three-way compute in README.md
 
 ---
 
