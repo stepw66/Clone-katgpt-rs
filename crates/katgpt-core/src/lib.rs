@@ -123,3 +123,6 @@ pub use roofline::{
     ComputeBound, Dtype, HardwarePeaks, OpType, RooflineCost, gemm_cost, gemv_cost, gram_cost,
     roofline_estimate,
 };
+
+#[cfg(feature = "mux_pruner")]
+pub mod mux;
