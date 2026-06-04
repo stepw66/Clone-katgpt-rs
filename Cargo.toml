@@ -38,7 +38,7 @@ crossterm = "0.28"
 tempfile = "3"
 
 [features]
-default = ["sparse_mlp", "domain_latent", "ppot", "bandit", "bt_rank", "spectral_quant", "hybrid_oct_pq", "elf_sde", "cna_steering", "deep_manifold", "federation", "tes_loop", "lattice_deduction", "delta_routing", "stability_metrics", "mls_aggregate", "gdn2_attention", "dash_attn", "dreamer", "lt2_looped", "dmax_spd", "eqr_convergence", "subterranean", "sr2am_configurator", "data_gate", "plasma_path", "parallel_probe", "tf_loop", "leo_all_goals", "dual_leo", "sigmoid_margin", "moa_inference", "sleep_consolidation", "spectral_hierarchy", "dual_gram_pca", "roofline_cost", "newton_schulz", "river_valley", "peira_distill", "kog_cpu_fusion", "gepa_reflective", "phrase_boost", "hydra_budget", "flashar_consensus", "budget_adaptation", "ilc_distill", "thinking_prune", "rim_slots", "thinking_cot"]  # Production best perf + accuracy (Plan 051, bt_rank Plan 079, spectral_quant Plan 063, hybrid_oct_pq Plan 101 GOAT best MSE + 64x fewer FMAs vs OCT, elf_sde Plan 079, cna_steering Plan 087 GOAT, deep_manifold Plan 085 GOAT 6/6, federation Plan 085 GOAT 6/6, tes_loop Plan 086 GOAT 8/8, lattice_deduction Plan 088 GOAT 7/7, delta_routing Plan 097 GOAT 6/6, stability_metrics Plan 102 GOAT 13/13, mls_aggregate Plan 104 GOAT 6/6, gdn2_attention Plan 105 GOAT 14/14, dash_attn Plan 106 GOAT 9/9, dreamer Plan 107 GOAT 8/8, lt2_looped Plan 108 GOAT 8/8, dmax_spd Plan 109 GOAT 7/7, eqr_convergence Plan 119, subterranean Plan 110, sr2am_configurator Plan 112, data_gate Plan 111, plasma_path Plan 148 GOAT 5/5, parallel_probe Plan 133 26 unit tests, tf_loop Plan 136 GOAT 4/4, leo_all_goals Plan 155 SUPER GOAT, dual_leo Plan 155 SUPER GOAT, sigmoid_margin Plan 157 GOAT 7/7, moa_inference Plan 158 GOAT 3/3, sleep_consolidation Plan 154 GOAT 14/14, spectral_hierarchy Plan 156 GOAT, dual_gram_pca Plan 159 GOAT, roofline_cost Plan 159 GOAT, newton_schulz Plan 152 GOAT 25/25, river_valley Plan 152 GOAT 25/25, peira_distill Plan 153 GOAT 7/7, kog_cpu_fusion Plan 160 GOAT 3/3 Gemma2 scale, thinking_cot Plan 194 GOAT 7/7 adaptive CoT)
+default = ["sparse_mlp", "domain_latent", "ppot", "bandit", "bandit_top_p", "bt_rank", "spectral_quant", "hybrid_oct_pq", "elf_sde", "cna_steering", "deep_manifold", "federation", "tes_loop", "lattice_deduction", "delta_routing", "stability_metrics", "mls_aggregate", "gdn2_attention", "dash_attn", "dreamer", "lt2_looped", "dmax_spd", "eqr_convergence", "subterranean", "sr2am_configurator", "data_gate", "plasma_path", "parallel_probe", "tf_loop", "leo_all_goals", "dual_leo", "sigmoid_margin", "moa_inference", "sleep_consolidation", "spectral_hierarchy", "dual_gram_pca", "roofline_cost", "newton_schulz", "river_valley", "peira_distill", "kog_cpu_fusion", "gepa_reflective", "phrase_boost", "hydra_budget", "flashar_consensus", "budget_adaptation", "ilc_distill", "thinking_prune", "rim_slots", "thinking_cot"]  # Production best perf + accuracy (Plan 051, bt_rank Plan 079, spectral_quant Plan 063, hybrid_oct_pq Plan 101 GOAT best MSE + 64x fewer FMAs vs OCT, elf_sde Plan 079, cna_steering Plan 087 GOAT, deep_manifold Plan 085 GOAT 6/6, federation Plan 085 GOAT 6/6, tes_loop Plan 086 GOAT 8/8, lattice_deduction Plan 088 GOAT 7/7, delta_routing Plan 097 GOAT 6/6, stability_metrics Plan 102 GOAT 13/13, mls_aggregate Plan 104 GOAT 6/6, gdn2_attention Plan 105 GOAT 14/14, dash_attn Plan 106 GOAT 9/9, dreamer Plan 107 GOAT 8/8, lt2_looped Plan 108 GOAT 8/8, dmax_spd Plan 109 GOAT 7/7, eqr_convergence Plan 119, subterranean Plan 110, sr2am_configurator Plan 112, data_gate Plan 111, plasma_path Plan 148 GOAT 5/5, parallel_probe Plan 133 26 unit tests, tf_loop Plan 136 GOAT 4/4, leo_all_goals Plan 155 SUPER GOAT, dual_leo Plan 155 SUPER GOAT, sigmoid_margin Plan 157 GOAT 7/7, moa_inference Plan 158 GOAT 3/3, sleep_consolidation Plan 154 GOAT 14/14, spectral_hierarchy Plan 156 GOAT, dual_gram_pca Plan 159 GOAT, roofline_cost Plan 159 GOAT, newton_schulz Plan 152 GOAT 25/25, river_valley Plan 152 GOAT 25/25, peira_distill Plan 153 GOAT 7/7, kog_cpu_fusion Plan 160 GOAT 3/3 Gemma2 scale, thinking_cot Plan 194 GOAT 7/7 adaptive CoT, bandit_top_p Plan 181 dMoE adaptive top-p)
 data_probe = ["katgpt-core/dirichlet_energy"]  # Data Probe Diagnostics — controlled information-theoretic validation (Plan 141)
 dirichlet_energy = ["katgpt-core/dirichlet_energy"]  # Dirichlet Energy structural alignment diagnostic (Research 111, Plan 149)
 leo_all_goals = ["katgpt-core/leo_all_goals"]  # LEO all-goals Q-value framework — LeoHead + AllGoalsUpdate + sigmoid_bounded_q (Plan 155)
@@ -100,6 +100,7 @@ hybrid_oct_pq = ["planar_quant", "octopus"]  # Hybrid OCT encoding + PQ rotation
 bt_rank = []  # Bradley-Terry pairwise ranking for DDtree selection (OpenDeepThink distillation)
 fft = ["bandit", "sr2am_configurator"]     # FFT Tactics Arena — ATB battle engine with status effects (Plan 053)
 stepcode = ["bandit"]  # ⚠️ Plan 054 — NO GAIN proven. Infrastructure only. Off by default, not in `full`.
+sdpg_bandit = ["bandit"]  # SDPG bandit + KL anchoring (Plan 180, Research 160)
 gdsd_distill = ["bandit"]  # GDSD Advantage-Guided Pruner — modelless self-distillation (Plan 169)
 bomber = ["bevy_ecs", "bandit"]  # Bomberman HL Arena (Plan 033)
 spechop = ["bandit"]  # SpecHop continuous multi-hop speculation pipeline (Plan 131, Research 091)
@@ -171,10 +172,14 @@ ane = ["dep:coreml-native", "dep:coreml-proto", "dep:prost"]  # Apple Neural Eng
 gpu_inference = ["dep:metal"]  # GPU inference backend via Metal compute pipelines (Plan 176)
 inference_router = ["gpu_inference", "ane"]  # Full inference routing: TriggerGate + InferenceRouter + GPU + ANE (Plan 176)
 thinking_cot = ["rim_slots", "thinking_prune", "parallel_probe", "ppot", "bt_rank", "bandit"]  # Adaptive CoT thinking — self-learning when to think (Plan 194)
+bandit_top_p = ["bandit"]  # Adaptive top-p bandit arm selection (Plan 181, default ON candidate)
+vocab_coreset = []  # DDTree vocab coreset for speculative decode (Plan 181, opt-in)
 spec_reconciliation = []  # Speculative Reconciliation Engine — verify offline trajectories against plausibility manifolds (Plan 177)
 mux_pruner = []  # MuxSpanPruner — vocabulary simplex pruning (Research 158, MUX)
 mux_ddtree = ["mux_pruner"]  # MuxDdTree — superposition branch DDTree nodes (Research 158, MUX)
 mux_bandit_width = ["bandit"]  # MuxBanditWidth — adaptive superposition width (Research 158, MUX)
+mux_bfs = ["mux_ddtree"]  # MUX BFS — superposition-guided parallel tree search (Research 158)
+mux_freeze_thaw = ["mux_pruner"]  # MUX Freeze/Thaw — persistent superposition patterns (Research 158)
 mux_demux = []  # MuxDemux Verifier — deterministic superposition recovery (Research 158, MUX)
 kvarn = []  # KVarN variance-normalized KV-cache quantization (Research 159)
 # LeviathanVerifier is always compiled (no gate needed) — verifier.rs, benchmark.rs
@@ -553,5 +558,17 @@ name = "thinking_cot_demo"
 required-features = ["thinking_cot"]
 
 [[example]]
+name = "kvarn_goat_proof"
+required-features = ["kvarn"]
+
+[[example]]
+name = "kvarn_thinking_demo"
+required-features = ["kvarn", "thinking_cot"]
+
+[[example]]
 name = "spec_reconciliation_demo"
 required-features = ["spec_reconciliation"]
+
+[[example]]
+name = "octpq_kvarn_fusion"
+required-features = ["kvarn", "hybrid_oct_pq"]
