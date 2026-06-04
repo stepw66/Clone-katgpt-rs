@@ -4,6 +4,7 @@
 //! each using progressively more HL technology.
 
 pub mod arena;
+pub mod gate_player;
 pub mod players;
 pub mod replay;
 pub mod replay_backward;
@@ -36,6 +37,7 @@ pub mod wasm_state;
 pub mod event_log_player;
 
 pub use arena::ArenaGrid;
+pub use gate_player::GatePlayer;
 pub use players::{BomberPlayer, GreedyPlayer, HLPlayer, RandomPlayer, ValidatorPlayer};
 pub use replay_backward::{BackwardSample, BackwardWalkResult, ReplayBackwardWalker};
 
