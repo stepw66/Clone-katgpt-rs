@@ -102,6 +102,15 @@ fn select_arm(stats: &BanditStats, strategy: &BanditStrategy, rng: &mut Rng) -> 
                 stats.best_arm()
             }
         }
+        #[cfg(feature = "curvature_alloc")]
+        BanditStrategy::CurvatureInfluence { .. } => (0..NUM_ARMS)
+            .max_by(|&a, &b| {
+                stats
+                    .ucb1_score(a)
+                    .partial_cmp(&stats.ucb1_score(b))
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .unwrap_or(0),
         #[cfg(feature = "safe_bandit")]
         BanditStrategy::SafePhased { .. } => {
             // SafePhased uses UCB1 as active arm selector; for demo purposes use UCB1 fallback
