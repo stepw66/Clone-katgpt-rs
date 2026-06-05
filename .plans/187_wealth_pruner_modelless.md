@@ -42,25 +42,25 @@ graph LR
 
 ### Part 1: WealthBanditPruner Core
 
-- [ ] **T1: `WealthArm` struct** — Per-arm state: `wealth: f64`, `total_reward: f64`, `pulls: u32`, `q_value: f64`
+- [x] **T1: `WealthArm` struct** — Per-arm state: `wealth: f64`, `total_reward: f64`, `pulls: u32`, `q_value: f64`
   - File: `katgpt-rs/src/pruners/wealth_bandit.rs`
   - `WealthArm::new(initial_wealth: f64) -> Self`
   - `WealthArm::is_bankrupt(&self) -> bool` — wealth < 0.0
   - `WealthArm::rebirth_from(parent: &Self, sigma: f64) -> Self` — parent.q ± N(0,σ), reset wealth
 
-- [ ] **T2: `WealthBanditPruner<P>` struct** — Generic wrapper like `BanditPruner<P>`
+- [x] **T2: `WealthBanditPruner<P>` struct** — Generic wrapper like `BanditPruner<P>`
   - File: `katgpt-rs/src/pruners/wealth_bandit.rs`
   - Fields: `arms: Vec<WealthArm>`, `inner: P` (ScreeningPruner), `bid_alpha: f64` (default 0.1), `rent: f64` (default 0.0), `rent_interval: u32` (default 0), `episode_count: u32`
   - Implements `ScreeningPruner` trait: `relevance(&self, arm, context) -> f64` returns `q_value + wealth * bid_alpha`
   - `update(&mut self, arm, reward)` — arm.wealth += reward, arm.q_value update
   - `charge_rent(&mut self)` — drain rent from all arms, check bankruptcy
 
-- [ ] **T3: Bankruptcy + Rebirth** — Episode-end population maintenance
+- [x] **T3: Bankruptcy + Rebirth** — Episode-end population maintenance
   - `rebirth_bankrupt_arms(&mut self, sigma: f64)` — for each bankrupt arm, replace with mutation of richest arm
   - `richest_arm(&self) -> usize` — argmax wealth
   - `rebirth_count(&self) -> u32` — statistics
 
-- [ ] **T4: `WealthPrunerConfig`** — Configuration struct
+- [x] **T4: `WealthPrunerConfig`** — Configuration struct
   - File: `katgpt-rs/src/pruners/wealth_bandit.rs`
   - `initial_wealth: f64` (default 0.5)
   - `bid_alpha: f64` (default 0.1)
@@ -71,33 +71,33 @@ graph LR
 
 ### Part 2: ChainCreditAssigner
 
-- [ ] **T5: `ChainCreditAssigner` struct** — Rolling window credit assignment
+- [x] **T5: `ChainCreditAssigner` struct** — Rolling window credit assignment
   - File: `katgpt-rs/src/pruners/chain_credit.rs`
   - Fields: `window: Vec<usize>`, `window_size: usize` (default 3)
   - `record_arm(&mut self, arm: usize)` — push to window, trim to size
   - `distribute_reward(&mut self, reward: f64, arms: &mut [WealthArm])` — split reward across unique arms in window
   - O(W) per reward where W = window_size
 
-- [ ] **T6: Integrate into WealthBanditPruner** — Optional chain credit mode
+- [x] **T6: Integrate into WealthBanditPruner** — Optional chain credit mode
   - When `use_chain_credit = true`: use ChainCreditAssigner instead of direct reward
   - Zero overhead when disabled (feature-gated)
 
 ### Part 3: Tests
 
-- [ ] **T7: Unit tests** — WealthBanditPruner basic operations
+- [x] **T7: Unit tests** — WealthBanditPruner basic operations
   - File: `katgpt-rs/tests/test_wealth_bandit.rs`
   - test: arm creation, wealth tracking, bankruptcy detection
   - test: rebirth from richest arm preserves structure
   - test: relevance() = Q + wealth * alpha
   - test: rent charge triggers bankruptcy
 
-- [ ] **T8: Convergence test** — WealthPruner vs UCB1 convergence
+- [x] **T8: Convergence test** — WealthPruner vs UCB1 convergence
   - File: `katgpt-rs/tests/test_wealth_bandit.rs`
   - Simulate 1000 episodes with K=10 arms, one optimal arm
   - Compare: WealthPruner episodes to find optimal vs UCB1 episodes
   - Assert: WealthPruner finds optimal arm (may converge faster or slower — document result)
 
-- [ ] **T9: GOAT proof** — Bomber arena integration
+- [x] **T9: GOAT proof** — Bomber arena integration
   - File: `katgpt-rs/tests/test_wealth_bandit_goat.rs`
   - G1: WealthPruner has ≤1% overhead on relevance() vs BanditPruner (hot path)
   - G2: WealthPruner converges to best arm in ≤1000 episodes
@@ -107,11 +107,11 @@ graph LR
 
 ### Part 4: Feature Gate + Docs
 
-- [ ] **T10: Feature gate** — `wealth_pruner` in `Cargo.toml`
+- [x] **T10: Feature gate** — `wealth_pruner` in `Cargo.toml`
   - Depends on `bandit` feature
   - Gates: `wealth_bandit.rs`, `chain_credit.rs`, tests
 
-- [ ] **T11: README update** — Add WealthPruner to features table
+- [x] **T11: README update** — Add WealthPruner to features table
   - Short description: "Economic bandit arms via Hayek market selection (EoM-inspired)"
 
 ---

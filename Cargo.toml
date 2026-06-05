@@ -175,6 +175,7 @@ thinking_cot = ["rim_slots", "thinking_prune", "parallel_probe", "ppot", "bt_ran
 bandit_top_p = ["bandit"]  # Adaptive top-p bandit arm selection (Plan 181, default ON candidate)
 curvature_alloc = ["bandit"]  # Curvature-influence allocation — EoS proxy budget control (Plan 183)
 nds_proxy = ["bandit"]  # NDS curvature proxy — modelless inference budget control (Plan 186)
+wealth_pruner = ["bandit"]  # WealthPruner — economic bandit arms via Hayek market selection (Plan 187, Research 167)
 vocab_coreset = []  # DDTree vocab coreset for speculative decode (Plan 181, opt-in)
 trust_region_spec = ["bandit"]  # Trust-Region Adaptive Speculation — adaptive window + blend + routing (Plan 182, Research 162)
 spec_reconciliation = []  # Speculative Reconciliation Engine — verify offline trajectories against plausibility manifolds (Plan 177)
@@ -593,3 +594,7 @@ required-features = ["kv_share"]
 [[test]]
 name = "nds_proxy_goat"
 required-features = ["nds_proxy"]
+
+[[test]]
+name = "test_wealth_bandit"
+required-features = ["wealth_pruner"]

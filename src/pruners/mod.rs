@@ -489,6 +489,14 @@ pub use mech_attribution::{
     extract_template, generate_synthetic,
 };
 
+// ── WealthPruner — Economic Bandit Arms via Hayek Market Selection (Plan 187) ──
+
+#[cfg(feature = "wealth_pruner")]
+pub mod wealth_bandit;
+
+#[cfg(feature = "wealth_pruner")]
+pub use wealth_bandit::{ChainCreditAssigner, WealthArm, WealthBanditPruner, WealthPrunerConfig};
+
 // ── NDS Curvature Proxy — Modelless Inference-Time Budget Control (Plan 186) ──
 
 #[cfg(feature = "nds_proxy")]

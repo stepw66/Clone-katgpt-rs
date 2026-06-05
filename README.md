@@ -556,6 +556,7 @@ cargo clippy --all-targets --all-features --quiet   # Lint
 | `ane` | Apple Neural Engine inference backend (Plan 176, opt-in) |
 | `gpu_inference` | GPU inference backend via Metal compute pipelines (Plan 176, opt-in) |
 | `inference_router` | Full inference routing: TriggerGate + InferenceRouter + GPU + ANE (Plan 176, opt-in) |
+| `wealth_pruner` | WealthPruner — economic bandit arms via Hayek market selection (Plan 187, opt-in) |
 | `full` | Enable all features (excludes some opt-in) |
 
 </details>
