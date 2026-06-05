@@ -40,6 +40,8 @@ use super::idea_divergence::IdeaDivergence;
 use super::review_metrics::ReviewMetrics;
 #[cfg(feature = "safe_bandit")]
 use super::safe_phased::SafePhasedState;
+#[cfg(feature = "skill_lifecycle")]
+use super::skill_memory::{MemoryEntry, PrunerMemory};
 use super::trial_log::{TrialLog, TrialRecord};
 use crate::speculative::types::ScreeningPruner;
 use crate::types::Rng;
@@ -403,6 +405,10 @@ pub struct BanditPruner<P: ScreeningPruner> {
     /// Updated via `update_divergence()`, compared during `arm_bandit_score()`.
     #[cfg(feature = "idea_divergence")]
     arm_score_vectors: Vec<Vec<f32>>,
+    /// Per-pruner append-only memory for edge case accumulation.
+    /// Stores arm selections, rewards, and failure modes across sessions.
+    #[cfg(feature = "skill_lifecycle")]
+    memory: PrunerMemory,
 }
 
 impl<P: ScreeningPruner> BanditPruner<P> {
@@ -426,6 +432,8 @@ impl<P: ScreeningPruner> BanditPruner<P> {
             idea_divergence: None,
             #[cfg(feature = "idea_divergence")]
             arm_score_vectors: vec![vec![]; num_arms],
+            #[cfg(feature = "skill_lifecycle")]
+            memory: PrunerMemory::new(256, "bandit"),
         }
     }
 
@@ -456,6 +464,8 @@ impl<P: ScreeningPruner> BanditPruner<P> {
             idea_divergence: None,
             #[cfg(feature = "idea_divergence")]
             arm_score_vectors: vec![vec![]; num_arms],
+            #[cfg(feature = "skill_lifecycle")]
+            memory: PrunerMemory::new(256, "bandit"),
         }
     }
 
@@ -486,6 +496,8 @@ impl<P: ScreeningPruner> BanditPruner<P> {
             idea_divergence: None,
             #[cfg(feature = "idea_divergence")]
             arm_score_vectors: vec![vec![]; num_arms],
+            #[cfg(feature = "skill_lifecycle")]
+            memory: PrunerMemory::new(256, "bandit"),
         }
     }
 
@@ -516,6 +528,8 @@ impl<P: ScreeningPruner> BanditPruner<P> {
             partial_scorer: None,
             idea_divergence: Some(IdeaDivergence::new(threshold)),
             arm_score_vectors: vec![vec![]; num_arms],
+            #[cfg(feature = "skill_lifecycle")]
+            memory: PrunerMemory::new(256, "bandit"),
         }
     }
 
@@ -691,6 +705,27 @@ impl<P: ScreeningPruner> BanditPruner<P> {
     #[inline]
     pub fn update(&mut self, arm: usize, reward: f32) {
         self.update_arm(arm, reward);
+    }
+
+    /// Record an arm pull experience to the pruner's memory ring buffer.
+    /// Call after `update()` or `update_with_trace()`.
+    #[cfg(feature = "skill_lifecycle")]
+    pub fn record_experience(&self, arm: u16, reward: f32, is_edge_case: bool, is_failure: bool) {
+        let ts = self.memory.total_entries();
+        self.memory
+            .append(MemoryEntry::new(arm, reward, is_edge_case, is_failure, ts));
+    }
+
+    /// Retrieve the last K experiences from memory.
+    #[cfg(feature = "skill_lifecycle")]
+    pub fn recent_experiences(&self, k: usize) -> Vec<MemoryEntry> {
+        self.memory.recent(k)
+    }
+
+    /// Access the underlying PrunerMemory (for advanced use like identity verification).
+    #[cfg(feature = "skill_lifecycle")]
+    pub fn pruner_memory(&self) -> &PrunerMemory {
+        &self.memory
     }
 
     /// Decay epsilon after an episode (EpsilonGreedy only).
@@ -2940,6 +2975,61 @@ mod tests {
                 (score_0 - score_1).abs() < f32::EPSILON,
                 "without divergence, identical Q-values should get identical scores: {score_0} vs {score_1}"
             );
+        }
+    }
+
+    // ── Skill Lifecycle Tests ────────────────────────────────────
+
+    #[cfg(feature = "skill_lifecycle")]
+    mod skill_lifecycle_tests {
+        use super::*;
+        use crate::speculative::types::NoScreeningPruner;
+
+        #[test]
+        fn test_bandit_pruner_records_experience() {
+            let mut bp = BanditPruner::new(NoScreeningPruner, BanditStrategy::Ucb1, 5);
+
+            bp.update(0, 0.8);
+            bp.record_experience(0, 0.8, false, false);
+
+            bp.update(1, 0.1);
+            bp.record_experience(1, 0.1, false, true);
+
+            assert_eq!(bp.pruner_memory().total_entries(), 2);
+
+            let recent = bp.recent_experiences(2);
+            assert_eq!(recent.len(), 2);
+            assert_eq!(recent[0].arm, 0);
+            assert!((recent[0].reward - 0.8).abs() < f32::EPSILON);
+            assert!(!recent[0].is_failure);
+            assert_eq!(recent[1].arm, 1);
+            assert!(recent[1].is_failure);
+        }
+
+        #[test]
+        fn test_bandit_pruner_memory_bounded() {
+            let bp = BanditPruner::new(NoScreeningPruner, BanditStrategy::Ucb1, 5);
+            // Default capacity is 256 (rounded to next power of 2 = 256)
+            assert_eq!(bp.pruner_memory().capacity(), 256);
+
+            // Fill beyond capacity
+            for i in 0..300u64 {
+                bp.record_experience((i % 5) as u16, i as f32, false, false);
+            }
+
+            assert_eq!(bp.pruner_memory().total_entries(), 300);
+
+            // Only last 256 should be retrievable
+            let recent = bp.recent_experiences(300);
+            assert_eq!(recent.len(), 256);
+
+            // First entry should be arm for i=44 (300-256=44), 44%5=4
+            assert_eq!(recent[0].arm, 4);
+            // Last entry should be arm for i=299, 299%5=4
+            assert_eq!(recent[255].arm, 4);
+
+            // Verify identity
+            assert!(bp.pruner_memory().verify_identity("bandit"));
         }
     }
 }

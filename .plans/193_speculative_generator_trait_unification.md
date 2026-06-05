@@ -81,16 +81,16 @@ graph TD
 - [x] **T4:** Implement `TokenConstraintPruner` that wraps existing `ConstraintPruner`
   - Forwards `is_valid(logits)` to existing `ConstraintPruner::is_valid()`
 
-- [ ] **T5:** Wire `SpeculativeGenerator` into existing `DDTree` as generic parameter
+- [x] **T5:** Wire `SpeculativeGenerator` into existing `DDTree` as generic parameter
   - DDTree<SG: SpeculativeGenerator, P: GenerativeConstraintPruner<SG::Output>>
   - Existing `build_dd_tree_pruned()` still works, now generic
 
-- [ ] **T6:** Write test showing before/after equivalence
+- [x] **T6:** Write test showing before/after equivalence
   - Before: `build_dd_tree_pruned(&marginals, &config, &syn_pruner, false)`
   - After: `DDTree::build(&token_gen, &token_pruner, &config)`
   - Assert identical output for identical input
 
-- [ ] **T7:** Benchmark: assert zero perf regression (same-speed or faster)
+- [x] **T7:** Benchmark: assert zero perf regression (same-speed or faster)
   - `cargo test --features speculative_generator prof_bench -- --nocapture`
   - Compare P50/P99 latency before and after trait abstraction
 

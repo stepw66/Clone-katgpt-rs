@@ -168,10 +168,13 @@ pub struct SkillCatalog {
 
 ### Task 5: Example & Integration Test
 
-- [ ] Create example: `skill_lifecycle_demo` showing before/after
-  - Before: pruner without memory (re-derives edge cases each session)
-  - After: pruner with memory (accumulates edge cases, better arm selection)
-- [ ] Expected gain: fewer episodes to converge on bandit optimal arm
+- [x] Create example: `skill_lifecycle_demo` showing full MUSE lifecycle
+  - Phase 1: Learn — BanditPruner accumulates experiences in PrunerMemory (100 episodes)
+  - Phase 2: Validate — BomberTestGate validates against known game states
+  - Phase 3: Register — SkillCatalog registers validated skill
+  - Phase 4: Evolve — Simulated improvement and re-validation (Validated → Active)
+  - Phase 5: Summary with edge cases, failures, best arm Q-value
+- [x] Feature gate: `#![cfg(feature = "skill_lifecycle")]`
 - [ ] Integration test: full lifecycle — append memory → compress → test gate → catalog → bandit select → verify
 
 ## File Layout

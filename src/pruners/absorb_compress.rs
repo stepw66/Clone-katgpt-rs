@@ -36,6 +36,8 @@ use std::collections::HashSet;
 use crate::speculative::types::ScreeningPruner;
 
 use super::review_metrics::ReviewMetrics;
+#[cfg(feature = "skill_lifecycle")]
+use super::skill_memory::{MemoryEntry, PrunerMemory};
 
 // ── Config ──────────────────────────────────────────────────────
 
@@ -172,6 +174,9 @@ pub struct AbsorbCompressLayer<P: ScreeningPruner> {
     compressed_set: HashSet<usize>,
     config: CompressConfig,
     total_absorbed: usize,
+    /// Per-pruner memory for compression event tracking.
+    #[cfg(feature = "skill_lifecycle")]
+    memory: PrunerMemory,
 }
 
 impl<P: ScreeningPruner> AbsorbCompressLayer<P> {
@@ -185,6 +190,8 @@ impl<P: ScreeningPruner> AbsorbCompressLayer<P> {
             compressed_set: HashSet::new(),
             config,
             total_absorbed: 0,
+            #[cfg(feature = "skill_lifecycle")]
+            memory: PrunerMemory::new(128, "absorb_compress"),
         }
     }
 
