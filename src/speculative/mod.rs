@@ -188,6 +188,9 @@ pub use spec_generator::{
     MarginalTokenGenerator, TokenCondition, TokenConstraintPruner, TokenGenError, TokenOutput,
 };
 
+#[cfg(feature = "speculative_generator")]
+pub use dd_tree::build_dd_tree_speculative;
+
 // ── Budget Adaptation Re-exports (Plan 167, feature: budget_adaptation) ──
 #[cfg(feature = "budget_adaptation")]
 pub use budget::{adaptive_tree_budget, compression_ratio, entropy_signal, shannon_entropy};

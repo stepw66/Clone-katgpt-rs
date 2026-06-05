@@ -43,7 +43,7 @@ graph TD
 
 ### Phase 1: katgpt-rs — Trait Extraction (Modelless)
 
-- [ ] **T1:** Define `SpeculativeGenerator` trait in `katgpt-rs-core` or a new shared location
+- [x] **T1:** Define `SpeculativeGenerator` trait in `katgpt-rs-core` or a new shared location
   ```rust
   pub trait SpeculativeGenerator {
       type Condition;
@@ -60,7 +60,7 @@ graph TD
   }
   ```
 
-- [ ] **T2:** Define `GenerativeConstraintPruner` trait that extends `ConstraintPruner` for typed outputs
+- [x] **T2:** Define `GenerativeConstraintPruner` trait that extends `ConstraintPruner` for typed outputs
   ```rust
   pub trait GenerativeConstraintPruner<Output>: Send + Sync {
       /// Returns true if the output passes all constraints.
@@ -73,12 +73,12 @@ graph TD
   }
   ```
 
-- [ ] **T3:** Implement `TokenGenerator` that wraps existing `InferenceBackend` + `TransformerWeights`
+- [x] **T3:** Implement `TokenGenerator` that wraps existing `InferenceBackend` + `TransformerWeights`
   - Condition = token context
   - Output = logit vector
   - Delegates to existing `forward()` call
 
-- [ ] **T4:** Implement `TokenConstraintPruner` that wraps existing `ConstraintPruner`
+- [x] **T4:** Implement `TokenConstraintPruner` that wraps existing `ConstraintPruner`
   - Forwards `is_valid(logits)` to existing `ConstraintPruner::is_valid()`
 
 - [ ] **T5:** Wire `SpeculativeGenerator` into existing `DDTree` as generic parameter

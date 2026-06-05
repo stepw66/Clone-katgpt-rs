@@ -216,6 +216,77 @@ pub fn build_dd_tree_screened(
     std::mem::take(&mut builder.tree)
 }
 
+// ── SpeculativeGenerator Integration (Plan 193 T5) ──────────────────
+
+/// Build DDTree using [`SpeculativeGenerator`] for candidate generation.
+///
+/// For each depth, the generator produces candidates from the marginal
+/// distribution, the pruner filters invalid ones, and the surviving
+/// candidates form the tree branches.
+///
+/// When using `NoPruner` (all candidates valid) this produces identical
+/// output to [`build_dd_tree_screened`] — the generator is simply a
+/// passthrough that confirms candidates are valid.
+///
+/// Feature-gated behind `speculative_generator`.
+#[cfg(feature = "speculative_generator")]
+pub fn build_dd_tree_speculative<P>(
+    generator: &mut super::spec_generator::MarginalTokenGenerator,
+    pruner: &super::spec_generator::TokenConstraintPruner<P>,
+    marginals: &[&[f32]],
+    config: &crate::types::Config,
+    rng: &mut fastrand::Rng,
+) -> Vec<TreeNode>
+where
+    P: ConstraintPruner + Send + Sync,
+{
+    use super::spec_generator::TokenCondition;
+    use katgpt_core::{GenerativeConstraintPruner, SpeculativeGenerator};
+
+    let mut filtered_marginals: Vec<Vec<f32>> = Vec::with_capacity(marginals.len());
+
+    for (depth, marginal) in marginals.iter().enumerate() {
+        let condition = TokenCondition {
+            parent_tokens: vec![],
+            depth,
+            marginals: marginal.to_vec(),
+        };
+
+        let candidates = match generator.generate(&condition, rng) {
+            Ok(c) => c,
+            Err(_) => {
+                // Generator failed — use original marginals as fallback
+                filtered_marginals.push(marginal.to_vec());
+                continue;
+            }
+        };
+
+        // Keep marginals only for valid candidates
+        let mut filtered = vec![0.0f32; marginal.len()];
+        for candidate in &candidates {
+            if pruner.is_valid(candidate) && candidate.token_idx < filtered.len() {
+                filtered[candidate.token_idx] = marginal[candidate.token_idx];
+            }
+        }
+
+        // Re-normalize
+        let sum: f32 = filtered.iter().sum();
+        if sum > f32::EPSILON {
+            for v in &mut filtered {
+                *v /= sum;
+            }
+        } else {
+            // All filtered out — use original marginals as fallback
+            filtered = marginal.to_vec();
+        }
+
+        filtered_marginals.push(filtered);
+    }
+
+    let slices: Vec<&[f32]> = filtered_marginals.iter().map(|m| m.as_slice()).collect();
+    build_dd_tree_screened(&slices, config, &NoScreeningPruner, false)
+}
+
 /// DDTree with progressive per-depth budget allocation (Plan 174 Task 3b).
 ///
 /// Convenience wrapper around [`TreeBuilder::build_screened_progressive`].
@@ -4642,6 +4713,75 @@ mod tests {
                 false,
                 Some(&budget_config),
             );
+
+            assert!(tree.is_empty(), "empty marginals should produce empty tree");
+        }
+    }
+
+    // ── SpeculativeGenerator equivalence tests (Plan 193 T6) ────────
+    #[cfg(feature = "speculative_generator")]
+    mod speculative_gen {
+        use super::*;
+        use crate::speculative::spec_generator::{MarginalTokenGenerator, TokenConstraintPruner};
+        use katgpt_core::NoPruner;
+
+        #[test]
+        fn test_dd_tree_speculative_equivalence_no_pruner() {
+            // With NoPruner (all candidates valid), the speculative path
+            // should produce the same tree as build_dd_tree_screened.
+            let config = Config::draft();
+            let mut rng = fastrand::Rng::new();
+
+            let m1: Vec<f32> = vec![0.3, 0.5, 0.2];
+            let m2: Vec<f32> = vec![0.1, 0.4, 0.3, 0.2];
+            let slices: Vec<&[f32]> = vec![&m1, &m2];
+
+            // Standard path
+            let tree_standard = build_dd_tree_screened(&slices, &config, &NoScreeningPruner, false);
+
+            // SpeculativeGenerator path (NoPruner = all valid)
+            let mut generator = MarginalTokenGenerator { top_k: 10 };
+            let pruner = TokenConstraintPruner::new(NoPruner);
+            let tree_spec =
+                build_dd_tree_speculative(&mut generator, &pruner, &slices, &config, &mut rng);
+
+            // Same number of nodes
+            assert_eq!(
+                tree_standard.len(),
+                tree_spec.len(),
+                "speculative tree has {} nodes, standard has {}",
+                tree_spec.len(),
+                tree_standard.len(),
+            );
+
+            // Same token indices and scores (within float tolerance)
+            for (a, b) in tree_standard.iter().zip(tree_spec.iter()) {
+                assert_eq!(
+                    a.token_idx, b.token_idx,
+                    "token mismatch at depth {}",
+                    a.depth,
+                );
+                assert!(
+                    (a.score - b.score).abs() < 1e-4,
+                    "score mismatch: {} vs {} at depth {} token {}",
+                    a.score,
+                    b.score,
+                    a.depth,
+                    a.token_idx,
+                );
+            }
+        }
+
+        #[test]
+        fn test_dd_tree_speculative_empty_marginals() {
+            let config = Config::draft();
+            let mut rng = fastrand::Rng::new();
+            let empty: Vec<&[f32]> = vec![];
+
+            let mut generator = MarginalTokenGenerator { top_k: 10 };
+            let pruner = TokenConstraintPruner::new(NoPruner);
+            let tree =
+                build_dd_tree_speculative(&mut generator, &pruner, &empty, &config, &mut rng);
 
             assert!(tree.is_empty(), "empty marginals should produce empty tree");
         }

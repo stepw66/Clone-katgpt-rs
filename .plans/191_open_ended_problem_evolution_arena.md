@@ -96,13 +96,13 @@ graph TD
 
 ### Phase 4: Tests, Examples, Docs
 
-- [ ] **T4.1** Example: `partial_scoring_demo.rs` — before/after thinking vs non-thinking with partial scores
+- [x] **T4.1** Example: `partial_scoring_demo.rs` — before/after thinking vs non-thinking with partial scores
   - Shows bandit learning curve with partial reward vs binary reward
   - Prints per-episode score breakdown
-- [ ] **T4.2** Example: `problem_evolution_demo.rs` — config mutation → arena run → bandit update
+- [x] **T4.2** Example: `problem_evolution_demo.rs` — config mutation → arena run → bandit update
   - Shows 3 rounds of config mutation with difficulty progression
   - Prints arm diversity metrics
-- [ ] **T4.3** Example: `idea_divergence_demo.rs` — divergence filtering prevents collapse
+- [x] **T4.3** Example: `idea_divergence_demo.rs` — divergence filtering prevents collapse
   - Shows 10 arms converging without filter vs maintaining diversity with filter
   - Prints divergence matrix
 - [ ] **T4.4** CPU/GPU auto-route: `ThinkingController` integration
