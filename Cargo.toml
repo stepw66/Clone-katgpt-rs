@@ -596,6 +596,10 @@ name = "kv_share_goat"
 required-features = ["kv_share"]
 
 [[test]]
+name = "kv_shared_lora_compat"
+required-features = ["kv_share"]
+
+[[test]]
 name = "nds_proxy_goat"
 required-features = ["nds_proxy"]
 
