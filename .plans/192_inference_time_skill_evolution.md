@@ -143,7 +143,7 @@ pub struct SkillCatalog {
 - [x] Create `src/pruners/skill_test.rs` with `PrunerTestGate` trait and `TestCase`/`TestResult` types
 - [ ] Create `WasmTestGate` implementation — runs `validator.wasm` against known game states
 - [x] Create `BomberTestGate` — pre-built test cases for bomber arena (known-death states, known-safe states)
-- [ ] Integrate with `AbsorbCompress::compress()`: before promoting an arm, run test gate
+- [x] Integrate with `AbsorbCompress::compress()`: before promoting an arm, run test gate
   - Only promote if test passes AND q_threshold met
   - Log failure reasons for debugging
 - [ ] GOAT proof: bomber arena with test gate vs without (expect: test gate prevents ≥15% regression on edge cases)
