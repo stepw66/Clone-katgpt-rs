@@ -406,6 +406,12 @@ inference_router = ["gpu_inference", "ane"]  # Full routing stack
 
 📖 Full detail: [`.plans/176_ane_inference_backend.md`](.plans/176_ane_inference_backend.md).
 
+### AND-OR DDTree Decomposition (Plan 190)
+
+Hierarchical subgoal decomposition inspired by LEAP (arXiv 2606.03303). Generic `AndOrNode<G,S>` tree with relevance-triggered decomposition, blueprint pre-pass, and cache-memoized subgoals. Feature: `and_or_dtree`.
+
+📖 Plan: [`.plans/190_and_or_dtree_blueprint_decomposition.md`](.plans/190_and_or_dtree_blueprint_decomposition.md).
+
 ## 🏭 Productions
 
 KatGPT-RS is the **core inference library** — pure algorithms, zero side effects.

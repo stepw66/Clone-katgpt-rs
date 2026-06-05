@@ -212,9 +212,9 @@ GOAT proof criteria:
 
 **Where:** `katgpt-rs/examples/` + README update
 
-- [ ] Example: `and_or_sudoku.rs` — Sudoku with AND-OR decomposition (rows → cells)
-- [ ] Example: `and_or_code_gen.rs` — Code generation with subgoal decomposition
-- [ ] Update README with AND-OR DDTree section under "Key Features"
+- [x] Example: `and_or_sudoku.rs` — Sudoku with AND-OR decomposition (rows → cells)
+- [x] Example: `and_or_demo.rs` — API walkthrough for AndOrNode construction
+- [x] Update README with AND-OR DDTree section under "Key Features"
 - [ ] Benchmark report: `.benchmarks/040_and_or_dtree_goat.md`
 
 ---

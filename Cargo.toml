@@ -198,6 +198,16 @@ full = ["sudoku", "validator", "ppot", "domain_latent", "bandit", "delta_mem", "
 name = "percepta_phase0"
 required-features = ["percepta_compile"]
 
+# ── AND-OR DDTree Decomposition (Plan 190) ───────────────────────
+
+[[example]]
+name = "and_or_demo"
+required-features = ["and_or_dtree"]
+
+[[example]]
+name = "and_or_sudoku"
+required-features = ["and_or_dtree"]
+
 # ── Bandit (RL / Game Theory) ─────────────────────────────────
 
 [[example]]
