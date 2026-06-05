@@ -2,7 +2,7 @@
 //!
 //! Validates that the `SpeculativeGenerator` trait path produces identical results
 //! to the standard `build_dd_tree_screened` path, that pruning works correctly,
-//! and that trait dispatch adds negligible overhead (≤5%).
+//! and that trait dispatch adds negligible overhead (pipeline ≤30%).
 //!
 //! ```sh
 //! cargo test --features "speculative_generator" --test speculative_generator_goat -- --nocapture
@@ -267,5 +267,5 @@ fn test_speculative_generator_goat_overhead() {
 }
 
 // TL;DR: GOAT proof for SpeculativeGenerator — equivalence (identical trees),
-// pruning effectiveness (fewer nodes, valid tokens), overhead ≤5%. Feature-gated
-// behind `speculative_generator`.
+// pruning effectiveness (fewer nodes, valid tokens), pipeline overhead ≤30%.
+// Feature-gated behind `speculative_generator`.
