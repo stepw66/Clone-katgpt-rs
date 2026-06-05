@@ -68,7 +68,7 @@ graph TD
   - `GoalReweight`: territory vs capture weight
   - `ConstrainOutputs`: board size variation (9→13→19)
   - `GeneralizeInputs`: handicap variation (+1/+2/+3 opponent_count)
-- [ ] **T2.5** Integrate with arena scheduler — `ProblemMutator` feeds configs to round-robin
+- [x] **T2.5** Integrate with arena scheduler — `ProblemMutator` feeds configs to round-robin
   - New arena mode: `EvolutionArena` — mutates base config between rounds
   - Feature gate: `problem_mutator`
 - [ ] **T2.6** GOAT proof: mutated configs produce ≥1.5× arm diversity
@@ -82,11 +82,11 @@ graph TD
   - Score vector storage: `arm_scores: Vec<Vec<f32>>`
   - `fn divergence(arm_a, arm_b) -> f32` — normalized L2 distance (FrontierSmith eq. 3)
   - `fn is_novel(new_arm_scores) -> bool` — min divergence > threshold
-- [ ] **T3.2** Integrate `IdeaDivergence` into `BanditPruner` arm selection
+- [x] **T3.2** Integrate `IdeaDivergence` into `BanditPruner` arm selection
   - Before promoting new arm: check novelty against existing arms
   - Non-novel arms get ε-greedy exploration penalty (reduced selection probability)
   - Feature gate: `idea_divergence`
-- [ ] **T3.3** Integrate with MUSE `PrunerTestGate` (Plan 189)
+- [x] **T3.3** Integrate with MUSE `PrunerTestGate` (Plan 189)
   - `IdeaDivergence` becomes a gate in skill registration: new skills must be strategically novel
   - Prevents catalog pollution with near-duplicate skills
 - [ ] **T3.4** GOAT proof: bandit with divergence filter converges faster and to better optimum

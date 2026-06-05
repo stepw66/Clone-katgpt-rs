@@ -3,6 +3,8 @@
 //! - [`BomberConfigMutator`]: deterministic bomber config mutation
 //! - [`GoConfigMutator`]: Go-specific territory/capture mutation
 
+use std::collections::VecDeque;
+
 use katgpt_core::{GameConfig, MutantConfig, MutationKind, ProblemMutator};
 
 // ── BomberConfigMutator ──────────────────────────────────────────
@@ -120,6 +122,115 @@ impl ProblemMutator for GoConfigMutator {
 
         mutants
     }
+}
+
+// ── EvolutionArena ───────────────────────────────────────────────
+
+/// Arena scheduler that evolves game configs between rounds.
+///
+/// Takes a base `GameConfig` and a `ProblemMutator`, and produces
+/// a sequence of mutated configs for successive arena rounds.
+/// Each round gets a harder/different config, preventing the bandit
+/// from overfitting to a single fixed configuration.
+pub struct EvolutionArena {
+    /// Base config to mutate from.
+    base_config: GameConfig,
+    /// Mutator that generates variants.
+    mutator: Box<dyn ProblemMutator>,
+    /// Queue of pending mutated configs.
+    pending: VecDeque<GameConfig>,
+    /// Round counter.
+    round: u32,
+    /// Maximum rounds before recycling to base config.
+    max_rounds_per_cycle: u32,
+    /// Total configs generated so far.
+    total_generated: u32,
+}
+
+impl EvolutionArena {
+    /// Create a new evolution arena.
+    pub fn new(
+        base_config: GameConfig,
+        mutator: Box<dyn ProblemMutator>,
+        max_rounds_per_cycle: u32,
+    ) -> Self {
+        Self {
+            base_config,
+            mutator,
+            pending: VecDeque::new(),
+            round: 0,
+            max_rounds_per_cycle,
+            total_generated: 0,
+        }
+    }
+
+    /// Get the next config for a round.
+    ///
+    /// When the queue is exhausted, calls `mutator.mutate(&base_config)` to refill.
+    /// After `max_rounds_per_cycle`, cycles back to base config.
+    pub fn next_config(&mut self) -> GameConfig {
+        // Refill queue if empty
+        if self.pending.is_empty() {
+            self.refill();
+        }
+
+        // Cycle reset: after max_rounds_per_cycle, re-seed from base
+        if self.round > 0 && self.round % self.max_rounds_per_cycle == 0 {
+            self.pending.clear();
+            self.refill();
+        }
+
+        self.round += 1;
+        self.total_generated += 1;
+
+        self.pending
+            .pop_front()
+            .unwrap_or_else(|| self.base_config.clone())
+    }
+
+    /// Refill the pending queue with mutated configs + base config (control).
+    fn refill(&mut self) {
+        let mutants = self.mutator.mutate(&self.base_config);
+        // Push base config first as control
+        self.pending.push_back(self.base_config.clone());
+        // Then all mutated variants
+        for mutant in &mutants {
+            self.pending
+                .push_back(apply_mutation(&self.base_config, mutant));
+        }
+    }
+
+    /// Current round number.
+    pub fn round(&self) -> u32 {
+        self.round
+    }
+
+    /// Total configs generated so far.
+    pub fn total_generated(&self) -> u32 {
+        self.total_generated
+    }
+}
+
+/// Apply a `MutantConfig` delta to a base `GameConfig`, producing a concrete config.
+fn apply_mutation(base: &GameConfig, mutant: &MutantConfig) -> GameConfig {
+    let mut config = base.clone();
+    match mutant.mutation_kind {
+        MutationKind::GoalReweight => {
+            config.survival_weight =
+                (config.survival_weight + mutant.difficulty_delta).clamp(0.1, 0.9);
+            config.kill_weight = 1.0 - config.survival_weight;
+        }
+        MutationKind::ConstrainOutputs => {
+            config.max_steps =
+                ((config.max_steps as f32) * (1.0 + mutant.difficulty_delta * 0.5)) as u32;
+        }
+        MutationKind::GeneralizeInputs => {
+            config.grid_size =
+                (config.grid_size as f32 * (1.0 + mutant.difficulty_delta * 0.3)) as u32;
+            config.opponent_count += (mutant.difficulty_delta * 2.0) as u32;
+        }
+    }
+    config
 }
 
 #[cfg(test)]
@@ -299,7 +410,105 @@ mod tests {
         assert!(kinds.contains(&MutationKind::ConstrainOutputs));
         assert!(kinds.contains(&MutationKind::GeneralizeInputs));
     }
+
+    // ── EvolutionArena tests ──────────────────────────────────────
+
+    #[test]
+    fn test_evolution_arena_produces_diverse_configs() {
+        // Use a larger base config so GeneralizeInputs actually changes values
+        let base = GameConfig {
+            grid_size: 15,
+            opponent_count: 3,
+            max_steps: 500,
+            survival_weight: 0.4,
+            kill_weight: 0.6,
+        };
+        let mut arena = EvolutionArena::new(base, Box::new(BomberConfigMutator), 100);
+        let mut configs = Vec::new();
+        for _ in 0..10 {
+            configs.push(arena.next_config());
+        }
+        // Count distinct configs (base + 3 mutants = 4 unique per refill, cycling gives repeats)
+        let distinct: std::collections::HashSet<_> = configs
+            .iter()
+            .map(|c| {
+                (
+                    c.grid_size,
+                    c.opponent_count,
+                    c.max_steps,
+                    c.survival_weight.to_bits(),
+                )
+            })
+            .collect();
+        assert!(
+            distinct.len() >= 3,
+            "expected ≥3 distinct configs, got {}",
+            distinct.len()
+        );
+    }
+
+    #[test]
+    fn test_evolution_arena_cycles_back() {
+        let mut arena = EvolutionArena::new(
+            GameConfig::default(),
+            Box::new(BomberConfigMutator),
+            4, // base + 3 mutants = 4 per cycle
+        );
+        // First cycle: 4 rounds
+        let first_cycle_last = arena.next_config(); // base (control)
+        let _ = arena.next_config(); // mutant 1
+        let _ = arena.next_config(); // mutant 2
+        let _ = arena.next_config(); // mutant 3
+        // Round 5 triggers cycle reset → should get base config again
+        let after_cycle = arena.next_config();
+        assert_eq!(
+            first_cycle_last.grid_size, after_cycle.grid_size,
+            "after cycle reset should produce base-like config"
+        );
+    }
+
+    #[test]
+    fn test_evolution_arena_round_counter() {
+        let mut arena =
+            EvolutionArena::new(GameConfig::default(), Box::new(BomberConfigMutator), 100);
+        assert_eq!(arena.round(), 0);
+        assert_eq!(arena.total_generated(), 0);
+
+        arena.next_config();
+        assert_eq!(arena.round(), 1);
+        assert_eq!(arena.total_generated(), 1);
+
+        arena.next_config();
+        assert_eq!(arena.round(), 2);
+        assert_eq!(arena.total_generated(), 2);
+
+        for _ in 0..8 {
+            arena.next_config();
+        }
+        assert_eq!(arena.round(), 10);
+        assert_eq!(arena.total_generated(), 10);
+    }
+
+    #[test]
+    fn test_evolution_arena_with_bomber_mutator() {
+        let mut arena =
+            EvolutionArena::new(GameConfig::default(), Box::new(BomberConfigMutator), 10);
+        let configs: Vec<GameConfig> = (0..4).map(|_| arena.next_config()).collect();
+
+        // First config is always the base (control)
+        assert_eq!(configs[0].grid_size, GameConfig::default().grid_size);
+        assert_eq!(configs[0].max_steps, GameConfig::default().max_steps);
+
+        // At least one mutated config should differ from base
+        let has_mutation = configs[1..].iter().any(|c| {
+            c.grid_size != GameConfig::default().grid_size
+                || c.max_steps != GameConfig::default().max_steps
+                || c.survival_weight != GameConfig::default().survival_weight
+        });
+        assert!(has_mutation, "at least one config should be mutated");
+    }
 }
 
 // TL;DR: BomberConfigMutator produces 3 deterministic mutants (GoalReweight, GeneralizeInputs, ConstrainOutputs) from any GameConfig.
 // TL;DR: GoConfigMutator produces territory/capture reweights, board size variants, and handicap variants for Go game configs.
+// TL;DR: EvolutionArena queues mutated configs from ProblemMutator, refilling on exhaustion, cycling after max_rounds_per_cycle.
