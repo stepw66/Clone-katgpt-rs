@@ -143,6 +143,7 @@ nexus_elo = ["state_source", "proof_sketch_evolution"]  # Nexus Elo — Plackett
 skill_opt = []  # SkillOpt text-space skill optimization — generic framework for game rule optimization (Plan 144, Research 105)
 proof_cert = []  # Hierarchical GOAT Proof Certificates — formal verification methodology (Plan 145, Research 106)
 tf_loop = ["katgpt-core/tf_loop", "lt2_looped"]  # Training-free loop wrapper — ODE-refined sub-stepping (Plan 136)
+and_or_dtree = ["proof_sketch_evolution", "bandit", "katgpt-core/and_or_dtree"]  # AND-OR DDTree — blueprint-driven subgoal decomposition (Plan 190, Research 170)
 # ── Percepta (transformer-vm RIIR, Plan 064) ──────────────────
 percepta = ["ordered-float"]  # CHT hull cache: upper+lower, HullMeta, tie-break, cumsum (TG-A)
 percepta_gates = ["percepta"]  # + ReGLU, stepglu, multiply, persist primitives (TG-B)

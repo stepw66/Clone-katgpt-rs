@@ -57,6 +57,9 @@ pub use dd_tree::build_dd_tree_screened_with_schedule;
 #[cfg(feature = "gdsd_distill")]
 pub use dd_tree::build_dd_tree_gdsd;
 
+#[cfg(feature = "and_or_dtree")]
+pub use dd_tree::build_dd_tree_and_or;
+
 #[cfg(feature = "eqr_convergence")]
 pub use dd_tree::ResidualTracker;
 #[cfg(feature = "sr2am_configurator")]
@@ -257,9 +260,30 @@ pub mod vocab_coreset;
 #[cfg(feature = "vocab_coreset")]
 pub use vocab_coreset::{should_use_delta_sparse, vocab_coreset};
 
+// ── AND-OR DDTree Blueprint Decomposition (Plan 190, Research 170) ──
+#[cfg(feature = "and_or_dtree")]
+pub mod blueprint;
+
+#[cfg(feature = "and_or_dtree")]
+pub use blueprint::BlueprintPass;
+
+// ── AND-OR DDTree Builder (Plan 190 T2, feature: and_or_dtree) ────
+#[cfg(feature = "and_or_dtree")]
+pub mod and_or_builder;
+
+#[cfg(feature = "and_or_dtree")]
+pub use and_or_builder::{AndOrBuilder, Subgoal};
+
 // ── Trust-Region Adaptive Speculation (Plan 182, Research 162) ──
 #[cfg(feature = "trust_region_spec")]
 pub use trust_region::{
     TrustArm, TrustRegionConfig, TrustRegionState, TrustTracker, adaptive_window, blend_sample,
     find_blend_beta,
 };
+
+// ── AND-OR DDTree Decomposition (Plan 190, feature: and_or_dtree) ──
+#[cfg(feature = "and_or_dtree")]
+pub mod decomp_reviewer;
+
+#[cfg(feature = "and_or_dtree")]
+pub use decomp_reviewer::DecompositionReviewer;

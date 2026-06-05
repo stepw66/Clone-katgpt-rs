@@ -124,5 +124,10 @@ pub use roofline::{
     roofline_estimate,
 };
 
+#[cfg(feature = "and_or_dtree")]
+pub mod and_or;
+#[cfg(feature = "and_or_dtree")]
+pub use and_or::AndOrNode;
+
 #[cfg(feature = "mux_pruner")]
 pub mod mux;

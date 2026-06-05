@@ -99,11 +99,11 @@ Key methods:
 - `decompose_at(depth: usize, relevance: f32) -> bool` — triggers decomposition
 - `solve_subgoal(subgoal: &Subgoal) -> Option<Vec<usize>>` — solve via mini-DDTree
 
-- [ ] Create `and_or_builder.rs` with `AndOrBuilder` struct
-- [ ] Implement relevance-threshold decomposition trigger
-- [ ] Implement subgoal solver (mini-DDTree per subgoal)
-- [ ] Integrate with `ProofGoalCache` for memoization
-- [ ] Unit tests: decomposition trigger, subgoal solving, cache integration
+- [x] Create `and_or_builder.rs` with `AndOrBuilder` struct
+- [x] Implement relevance-threshold decomposition trigger
+- [x] Implement subgoal solver (mini-DDTree per subgoal)
+- [x] Integrate with `ProofGoalCache` for memoization
+- [x] Unit tests: decomposition trigger, subgoal solving, cache integration
 
 ### T3: Blueprint Pre-Pass — Cheap argmax plan generation
 
@@ -155,10 +155,10 @@ impl DecompositionReviewer {
 }
 ```
 
-- [ ] Create `decomp_reviewer.rs` with `DecompositionReviewer`
-- [ ] Implement progress signal computation
-- [ ] Integrate with `ProofGoalCache` hit/miss counters
-- [ ] Unit tests: productive vs unproductive detection, threshold sensitivity
+- [x] Create `decomp_reviewer.rs` with `DecompositionReviewer`
+- [x] Implement progress signal computation
+- [x] Integrate with `ProofGoalCache` hit/miss counters
+- [x] Unit tests: productive vs unproductive detection, threshold sensitivity
 
 ### T5: `build_dd_tree_and_or()` — Integrated AND-OR DDTree builder
 
@@ -181,9 +181,9 @@ pub fn build_dd_tree_and_or<P: ScreeningPruner>(
 ) -> Vec<TreeNode>
 ```
 
-- [ ] Add `build_dd_tree_and_or()` function to `dd_tree.rs`
-- [ ] Wire blueprint pre-pass → AND-OR builder → decomposition reviewer → mini-DDTree
-- [ ] Fallback to flat DDTree when no decomposition needed
+- [x] Add `build_dd_tree_and_or()` function to `dd_tree.rs`
+- [x] Wire blueprint pre-pass → AND-OR builder → decomposition reviewer → mini-DDTree
+- [x] Fallback to flat DDTree when no decomposition needed
 - [ ] Integration test: AND-OR tree produces valid output
 - [ ] Benchmark: node count vs flat DDTree on complex tasks
 

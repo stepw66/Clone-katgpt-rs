@@ -51,3 +51,4 @@ mux_bandit_width = []  # MuxBanditWidth — adaptive superposition width (Resear
 mux_bfs = ["mux_ddtree"]  # MUX BFS — superposition-guided parallel tree search (Research 158)
 mux_freeze_thaw = ["mux_pruner"]  # MUX Freeze/Thaw — persistent superposition patterns (Research 158)
 mux_demux = []  # MuxDemux Verifier — deterministic superposition recovery (Research 158, MUX)
+and_or_dtree = []  # AND-OR DDTree — generic AND-OR tree for hierarchical goal decomposition (Plan 190, Research 170)
