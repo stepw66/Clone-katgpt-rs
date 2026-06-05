@@ -22,10 +22,12 @@
 //! println!("Winner: {:?}", matrix.rankings[0]);
 //! ```
 
+pub mod bandit;
 pub mod fsm;
 pub mod payoff;
 pub mod types;
 
+pub use bandit::{RuliologyArm, RuliologyBandit};
 pub use fsm::{FsmEnumerator, FsmStrategy, MAX_STATES};
 pub use payoff::{matching_pennies, prisoners_dilemma};
 pub use types::{RuliologyPruner, SimpleProgram, WinMatrix};

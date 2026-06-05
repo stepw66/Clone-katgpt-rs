@@ -132,8 +132,8 @@ pub struct SkillCatalog {
   - Max entries bounded (configurable, default 1024)
   - O(1) append via `AtomicU32` cursor wrap, O(k) recent-k retrieval
   - blake3 hash of pruner identity for integrity check on thaw
-- [ ] Add `PrunerMemory` field to `BanditPruner` (behind `skill_lifecycle` feature)
-- [ ] Add `PrunerMemory` field to `AbsorbCompressLayer` (behind `skill_lifecycle` feature)
+- [x] Add `PrunerMemory` field to `BanditPruner` (behind `skill_lifecycle` feature)
+- [x] Add `PrunerMemory` field to `AbsorbCompressLayer` (behind `skill_lifecycle` feature)
 - [ ] Integrate with freeze/thaw: memory persists across sessions alongside bandit stats
 - [x] Unit tests: append, retrieve, ring-buffer wrap, freeze/thaw roundtrip, bounded eviction
 - [ ] Bench: append throughput (target: <10ns per append, no allocation)

@@ -17,19 +17,19 @@ Distill OSSM-PINN's oscillatory state-space principles into katgpt-rs as modelle
 
 ### Phase 1: FreqBandit — GOAT, Default On
 
-- [ ] Implement `FrequencyBandit` in `crates/katgpt-core/src/freq_bandit.rs`
+- [x] Implement `FrequencyBandit` in `src/freq_bandit.rs`
   - Arms: {low_freq, mid_freq, high_freq} — pre-defined temporal frequency bands
   - Reward: acceptance_rate × latency_improvement from speculative decode
   - Uses existing `BanditPruner` infrastructure
   - Bandit state: per-domain frequency profile (sigmoid activation, not softmax per constraints)
 
-- [ ] Add FFT spectral analysis of recent token streams
-  - `token_stream_spectrum(tokens: &[usize], config: &Config) -> FrequencyProfile`
+- [x] Add FFT spectral analysis of recent token streams
+  - `token_stream_spectrum(tokens: &[usize], window_size: usize) -> FrequencyProfile`
   - Pre-computed token embedding FFT for top-K modes
   - Low-cost: only analyze last N tokens (N=64 or 128)
 
-- [ ] Wire FreqBandit into speculative decode pipeline
-  - `FreqBandit` selects frequency band → maps to speculative decode config
+- [x] Wire FreqBandit into speculative decode pipeline
+  - `FrequencyBand::spec_config()` maps bands to SpecBandConfig
   - Low freq → larger draft tree, deeper lookahead
   - Mid freq → balanced draft tree
   - High freq → shallow draft tree, more verify iterations
@@ -39,11 +39,11 @@ Distill OSSM-PINN's oscillatory state-space principles into katgpt-rs as modelle
   - High-frequency queries → prefer GPU (faster verify)
   - Low-frequency queries → CPU acceptable (longer draft OK)
 
-- [ ] Feature gate: `freq_bandit` (default on)
+- [x] Feature gate: `freq_bandit` (default on)
   - Add to `Cargo.toml` features
   - Zero-cost when disabled: standard speculative decode
 
-- [ ] Tests: before/after speculative decode quality
+- [x] Tests: before/after speculative decode quality
   - Test cyclic input: repeated patterns (code loops, JSON arrays)
   - Test non-cyclic input: natural language prose
   - Expected: FreqBandit learns cyclic patterns → higher acceptance rate on cyclic input

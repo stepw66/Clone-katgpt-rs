@@ -38,6 +38,8 @@ use crate::speculative::types::ScreeningPruner;
 use super::review_metrics::ReviewMetrics;
 #[cfg(feature = "skill_lifecycle")]
 use super::skill_memory::{MemoryEntry, PrunerMemory};
+#[cfg(feature = "skill_lifecycle")]
+use super::skill_test::{PrunerTestGate, TestCase};
 
 // ── Config ──────────────────────────────────────────────────────
 
@@ -177,6 +179,13 @@ pub struct AbsorbCompressLayer<P: ScreeningPruner> {
     /// Per-pruner memory for compression event tracking.
     #[cfg(feature = "skill_lifecycle")]
     memory: PrunerMemory,
+    /// Test gate for arm promotion validation.
+    /// When set, arms must pass functional tests before promotion.
+    #[cfg(feature = "skill_lifecycle")]
+    test_gate: Option<Box<dyn PrunerTestGate>>,
+    /// Test cases used by the test gate for validation.
+    #[cfg(feature = "skill_lifecycle")]
+    test_cases: Vec<TestCase>,
 }
 
 impl<P: ScreeningPruner> AbsorbCompressLayer<P> {
@@ -192,6 +201,10 @@ impl<P: ScreeningPruner> AbsorbCompressLayer<P> {
             total_absorbed: 0,
             #[cfg(feature = "skill_lifecycle")]
             memory: PrunerMemory::new(128, "absorb_compress"),
+            #[cfg(feature = "skill_lifecycle")]
+            test_gate: None,
+            #[cfg(feature = "skill_lifecycle")]
+            test_cases: Vec::new(),
         }
     }
 
@@ -255,6 +268,32 @@ impl<P: ScreeningPruner> AbsorbCompressLayer<P> {
     pub fn pruner_memory(&self) -> &PrunerMemory {
         &self.memory
     }
+
+    /// Create an absorb-compress layer with a test gate for arm promotion validation.
+    ///
+    /// Arms must pass the gate's functional tests before they can be promoted
+    /// (compressed) to hard blocks. If the gate fails, promotion is blocked.
+    #[cfg(feature = "skill_lifecycle")]
+    pub fn with_test_gate(
+        inner: P,
+        gate: Box<dyn PrunerTestGate>,
+        test_cases: Vec<TestCase>,
+        num_arms: usize,
+        config: CompressConfig,
+    ) -> Self {
+        Self {
+            inner,
+            arm_reward_sums: vec![0.0; num_arms],
+            arm_visits: vec![0; num_arms],
+            compressed: Vec::new(),
+            compressed_set: HashSet::new(),
+            config,
+            total_absorbed: 0,
+            memory: PrunerMemory::new(128, "absorb_compress"),
+            test_gate: Some(gate),
+            test_cases,
+        }
+    }
 }
 
 impl<P: ScreeningPruner> ScreeningPruner for AbsorbCompressLayer<P> {
@@ -298,6 +337,21 @@ impl<P: ScreeningPruner> AbsorbCompress for AbsorbCompressLayer<P> {
             .take(self.config.promote_count)
             .map(|(arm, _)| arm)
             .collect();
+
+        // Test gate: validate before promotion.
+        // If the gate is set and validation fails, block all promotions.
+        #[cfg(feature = "skill_lifecycle")]
+        if let Some(ref gate) = self.test_gate {
+            let result = gate.validate(&self.test_cases);
+            if !result.passed {
+                eprintln!(
+                    "absorb_compress: test gate blocked promotion — {} failures, coverage {:.2}",
+                    result.failures.len(),
+                    result.coverage
+                );
+                return Vec::new();
+            }
+        }
 
         self.compressed_set.extend(promoted.iter().copied());
         self.compressed.extend_from_slice(&promoted);
@@ -534,6 +588,92 @@ mod tests {
             assert_eq!(recent[0].arm, 0);
             // Last entry: i=199, 199%3=1
             assert_eq!(recent[127].arm, 1);
+        }
+
+        // ── Test Gate Integration Tests ────────────────────────────
+
+        #[test]
+        fn test_absorb_compress_test_gate_blocks_bad_arm() {
+            use crate::pruners::skill_test::{SimpleTestGate, TestCase};
+
+            let config = CompressConfig::new(10, 0.05, 3, 100);
+
+            // Gate with failing test case: empty input triggers failure
+            let gate = SimpleTestGate::new();
+            let cases = vec![TestCase {
+                input: vec![],
+                expected_valid: vec![0],
+                description: "empty_input_must_fail".into(),
+            }];
+
+            let mut layer =
+                AbsorbCompressLayer::with_test_gate(AllowAll, Box::new(gate), cases, 5, config);
+
+            // Arm 0: low reward, many visits → would normally be promoted
+            for _ in 0..20 {
+                layer.absorb(0, 0.01);
+            }
+
+            let promoted = layer.compress();
+            assert!(promoted.is_empty(), "test gate should block promotion");
+            assert!(layer.compressed_arms().is_empty());
+        }
+
+        #[test]
+        fn test_absorb_compress_no_gate_promotes_normally() {
+            let config = CompressConfig::new(10, 0.05, 3, 100);
+            let mut layer = make_layer(5, config);
+
+            // Arm 0: low reward → should be promoted
+            for _ in 0..20 {
+                layer.absorb(0, 0.01);
+            }
+            // Arm 1: high reward → should NOT be promoted
+            for _ in 0..20 {
+                layer.absorb(1, 0.9);
+            }
+
+            let promoted = layer.compress();
+            assert_eq!(promoted, vec![0]);
+            assert!(layer.compressed_arms().contains(&0));
+            assert!(!layer.compressed_arms().contains(&1));
+        }
+
+        #[test]
+        fn test_absorb_compress_with_gate_constructor() {
+            use crate::pruners::skill_test::BomberTestGate;
+
+            let config = CompressConfig::new(10, 0.05, 3, 100);
+            let gate = BomberTestGate::new();
+            let cases = BomberTestGate::bomber_test_cases();
+
+            let layer =
+                AbsorbCompressLayer::with_test_gate(AllowAll, Box::new(gate), cases, 5, config);
+
+            assert_eq!(layer.num_arms(), 5);
+            assert_eq!(layer.total_absorbed(), 0);
+        }
+
+        #[test]
+        fn test_absorb_compress_passing_gate_allows_promotion() {
+            use crate::pruners::skill_test::BomberTestGate;
+
+            let config = CompressConfig::new(10, 0.05, 3, 100);
+            let gate = BomberTestGate::new();
+            let cases = BomberTestGate::bomber_test_cases();
+
+            let mut layer =
+                AbsorbCompressLayer::with_test_gate(AllowAll, Box::new(gate), cases, 5, config);
+
+            // Arm 0: low reward → candidate for promotion
+            for _ in 0..20 {
+                layer.absorb(0, 0.01);
+            }
+
+            // Gate passes (BomberTestGate with valid test cases) → promotion proceeds
+            let promoted = layer.compress();
+            assert_eq!(promoted, vec![0]);
+            assert!(layer.compressed_arms().contains(&0));
         }
     }
 }
