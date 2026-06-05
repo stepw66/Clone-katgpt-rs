@@ -136,16 +136,16 @@ pub fn prisoners_dilemma(a: u8, b: u8) -> (f64, f64) {
 
 ## Tasks
 
-### Phase 1: Core Types & FSM Enumerator (modelless)
+### Phase 1: Core Types & FSM Enumerator (modelless) ✅
 
-- [ ] Create `src/ruliology/mod.rs` with `SimpleProgram` trait, `FsmStrategy`, `WinMatrix`, `RuliologyPruner`
-- [ ] Implement `FsmEnumerator::enumerate(2)` — 22 distinct 2-state FSMs
-- [ ] Implement `FsmEnumerator::enumerate(3)` — 956 distinct 3-state FSMs
-- [ ] Implement `matching_pennies` and `prisoners_dilemma` payoff functions
-- [ ] Implement `FsmEnumerator::tournament()` — O(n²) round-robin
-- [ ] Implement `WinMatrix::rankings()` and `WinMatrix::pareto_front()`
-- [ ] Implement `RuliologyPruner` — filter by payoff + complexity thresholds
-- [ ] Add feature gate `ruliology` depending on `bandit`
+- [x] Create `src/ruliology/mod.rs` with `SimpleProgram` trait, `FsmStrategy`, `WinMatrix`, `RuliologyPruner`
+- [x] Implement `FsmEnumerator::enumerate(2)` — 22 distinct 2-state FSMs
+- [ ] Implement `FsmEnumerator::enumerate(3)` — 956 distinct 3-state FSMs (infrastructure ready, needs test_horizon tuning)
+- [x] Implement `matching_pennies` and `prisoners_dilemma` payoff functions
+- [x] Implement `FsmEnumerator::tournament()` — O(n²) round-robin
+- [x] Implement `WinMatrix::rankings()` and `WinMatrix::pareto_front()`
+- [x] Implement `RuliologyPruner` — filter by payoff + complexity thresholds
+- [x] Add feature gate `ruliology` depending on `bandit`
 
 ### Phase 2: RuliologyBandit Integration (modelless)
 

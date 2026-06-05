@@ -53,6 +53,8 @@ pub mod rerank;
 pub mod river_valley;
 #[cfg(feature = "rt_turbo")]
 pub mod rt_turbo;
+#[cfg(feature = "ruliology")]
+pub mod ruliology;
 #[cfg(feature = "shard_kv")]
 pub mod shard_kv;
 pub mod simd;

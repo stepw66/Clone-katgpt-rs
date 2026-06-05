@@ -187,6 +187,7 @@ mux_bfs = ["mux_ddtree"]  # MUX BFS — superposition-guided parallel tree searc
 mux_freeze_thaw = ["mux_pruner"]  # MUX Freeze/Thaw — persistent superposition patterns (Research 158)
 mux_demux = []  # MuxDemux Verifier — deterministic superposition recovery (Research 158, MUX)
 kvarn = []  # KVarN variance-normalized KV-cache quantization (Research 159)
+ruliology = ["bandit"]  # Ruliology Bandit — simple program strategies as bandit arms (Plan 188, Research 168)
 directional_credit = []  # Entropy-bifurcated screening — direction-adaptive credit (Plan 184, default on candidate)
 kv_share = []  # Q-K=V projection sharing — 50% KV cache reduction (Plan 185, default on candidate)
 # LeviathanVerifier is always compiled (no gate needed) — verifier.rs, benchmark.rs
