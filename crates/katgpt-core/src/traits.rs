@@ -785,9 +785,167 @@ pub trait AutocurriculumSampler {
     }
 }
 
+// ── SpeculativeGenerator (Plan 193 Phase 1) ──────────────────
+
+/// Generic trait for speculative generation of candidates.
+///
+/// Decouples the output format (tokens, actions, etc.) from the generation
+/// mechanism. Any domain implementing `generate() + validate()` can reuse
+/// the same DDTree + pruning + routing infrastructure.
+///
+/// This is the Generator Contract pattern: open for extension (new domains),
+/// closed for modification.
+pub trait SpeculativeGenerator {
+    /// Input condition type (e.g., token context, game state).
+    type Condition;
+    /// Output type (e.g., logit vector, game action).
+    type Output;
+    /// Error type.
+    type Error;
+
+    /// Generate candidate outputs given a condition.
+    fn generate(
+        &mut self,
+        condition: &Self::Condition,
+        rng: &mut fastrand::Rng,
+    ) -> Result<Vec<Self::Output>, Self::Error>;
+
+    /// Batch variant for GPU amortization.
+    #[inline]
+    fn generate_batch(
+        &mut self,
+        conditions: &[Self::Condition],
+        rng: &mut fastrand::Rng,
+    ) -> Result<Vec<Vec<Self::Output>>, Self::Error> {
+        conditions.iter().map(|c| self.generate(c, rng)).collect()
+    }
+}
+
+/// Typed constraint pruner for generic outputs.
+///
+/// Extends ConstraintPruner concept to typed output validation.
+pub trait GenerativeConstraintPruner<Output>: Send + Sync {
+    /// Returns true if the output passes all constraints.
+    fn is_valid(&self, output: &Output) -> bool;
+
+    /// Batch variant for amortization.
+    #[inline]
+    fn batch_is_valid(&self, outputs: &[Output]) -> Vec<bool> {
+        outputs.iter().map(|o| self.is_valid(o)).collect()
+    }
+}
+
+// ── Game Trace + Partial Scoring (Plan 191) ──────────────────────
+
+/// Minimal game trace for partial scoring.
+///
+/// Captures episode statistics needed for graduated reward computation.
+/// Lightweight: stack-friendly, no heap allocations in the struct itself.
+#[cfg(feature = "partial_scoring")]
+#[derive(Clone, Debug, Default)]
+pub struct GameTrace {
+    /// Ticks survived before termination.
+    pub survival_ticks: u32,
+    /// Opponents eliminated.
+    pub kills: u32,
+    /// Total actions taken during the episode.
+    pub actions_taken: u32,
+    /// Maximum possible ticks (episode budget).
+    pub max_ticks: u32,
+    /// Final reward from the game engine (binary: win=1.0, loss=0.0).
+    pub final_reward: f64,
+}
+
+/// Graduated reward scorer for game episodes.
+///
+/// Replaces binary win/loss with continuous [0.0, 1.0] reward,
+/// giving bandit algorithms richer signal for faster convergence.
+///
+/// Ref: FrontierCS (human 95 vs best model 29 on open-ended problems).
+#[cfg(feature = "partial_scoring")]
+pub trait PartialScorer: Send + Sync {
+    /// Compute graduated score from game trace.
+    fn partial_score(&self, trace: &GameTrace) -> f32;
+
+    /// Breakdown of per-criteria scores.
+    fn score_breakdown(&self, trace: &GameTrace) -> Vec<(&'static str, f32)> {
+        vec![("total", self.partial_score(trace))]
+    }
+}
+
+// ── Game Config + Problem Mutation (Plan 191) ────────────────────
+
+/// Generic game configuration for mutation.
+///
+/// Represents the tunable parameters of a game arena.
+/// Each field can be perturbed by a [`ProblemMutator`] to create
+/// harder variants for open-ended problem evolution.
+#[cfg(feature = "problem_mutator")]
+#[derive(Clone, Debug)]
+pub struct GameConfig {
+    /// Grid/board size (e.g., 9 for 9x9, 15 for 15x15).
+    pub grid_size: u32,
+    /// Number of opponents/NPCs.
+    pub opponent_count: u32,
+    /// Maximum steps per episode.
+    pub max_steps: u32,
+    /// Weight for survival objective in scoring.
+    pub survival_weight: f32,
+    /// Weight for kill/objective in scoring.
+    pub kill_weight: f32,
+}
+
+#[cfg(feature = "problem_mutator")]
+impl Default for GameConfig {
+    fn default() -> Self {
+        Self {
+            grid_size: 9,
+            opponent_count: 1,
+            max_steps: 200,
+            survival_weight: 0.5,
+            kill_weight: 0.5,
+        }
+    }
+}
+
+/// Mutation kind for game configs.
+#[cfg(feature = "problem_mutator")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub enum MutationKind {
+    /// Shift objective weights (e.g., survival vs kills).
+    GoalReweight,
+    /// Reduce action space or add constraints.
+    ConstrainOutputs,
+    /// Vary input parameters (grid size, opponent count).
+    GeneralizeInputs,
+}
+
+/// A mutated game config with estimated difficulty delta.
+#[cfg(feature = "problem_mutator")]
+#[derive(Clone, Debug)]
+pub struct MutantConfig {
+    /// Estimated difficulty increase over seed config.
+    pub difficulty_delta: f32,
+    /// Which mutation strategy was applied.
+    pub mutation_kind: MutationKind,
+    /// Human-readable description of the mutation.
+    pub description: String,
+}
+
+/// Trait for mutating game configs into harder variants.
+///
+/// Implements the FrontierSmith closed→open problem synthesis:
+/// take a base game config and produce progressively harder variants.
+/// The arena scheduler feeds these mutated configs to rounds.
+#[cfg(feature = "problem_mutator")]
+pub trait ProblemMutator: Send + Sync {
+    /// Mutate a seed config into variants.
+    fn mutate(&self, seed: &GameConfig) -> Vec<MutantConfig>;
+}
+
 // ── LEO Tests (Plan 155, T7) ────────────────────────────────────
 
-#[cfg(test)]
 mod tests_leo {
     #[allow(unused_imports)]
     use super::*;
@@ -1144,5 +1302,61 @@ mod tests_leo {
         let ac = SimpleAutocurriculum::new(5);
         assert_eq!(ac.goals_completed_this_episode(), 0);
         assert!(ac.only_sample_from_seen());
+    }
+}
+
+// ── SpeculativeGenerator trait-bound test (Plan 193 Phase 1) ──
+
+#[cfg(test)]
+mod tests_spec_gen {
+    use super::*;
+
+    /// Mock implementation to verify trait compiles and is object-safe.
+    struct MockGen;
+
+    impl SpeculativeGenerator for MockGen {
+        type Condition = ();
+        type Output = usize;
+        type Error = ();
+
+        fn generate(
+            &mut self,
+            _condition: &Self::Condition,
+            _rng: &mut fastrand::Rng,
+        ) -> Result<Vec<Self::Output>, Self::Error> {
+            Ok(vec![1, 2, 3])
+        }
+    }
+
+    /// Mock pruner to verify GenerativeConstraintPruner compiles.
+    struct MockPruner;
+
+    impl GenerativeConstraintPruner<usize> for MockPruner {
+        fn is_valid(&self, output: &usize) -> bool {
+            *output > 0
+        }
+    }
+
+    #[test]
+    fn test_speculative_generator_trait_bounds() {
+        let mut generator = MockGen;
+        let mut rng = fastrand::Rng::new();
+        let result = generator.generate(&(), &mut rng).unwrap();
+        assert_eq!(result, vec![1, 2, 3]);
+
+        // Batch uses default impl
+        let batch = generator.generate_batch(&[(), (), ()], &mut rng).unwrap();
+        assert_eq!(batch.len(), 3);
+        assert_eq!(batch[0], vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn test_generative_constraint_pruner_trait_bounds() {
+        let pruner = MockPruner;
+        assert!(pruner.is_valid(&1));
+        assert!(!pruner.is_valid(&0));
+
+        let results = pruner.batch_is_valid(&[0, 1, 2]);
+        assert_eq!(results, vec![false, true, true]);
     }
 }

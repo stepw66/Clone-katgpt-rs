@@ -179,6 +179,15 @@ pub use crate::pruners::SudokuPruner;
 
 pub use budget_compat::{effective_tree_budget, scaled_draft_lookahead};
 
+// ── SpeculativeGenerator Token-Domain (Plan 193 Phase 1) ────────
+#[cfg(feature = "speculative_generator")]
+pub mod spec_generator;
+
+#[cfg(feature = "speculative_generator")]
+pub use spec_generator::{
+    MarginalTokenGenerator, TokenCondition, TokenConstraintPruner, TokenGenError, TokenOutput,
+};
+
 // ── Budget Adaptation Re-exports (Plan 167, feature: budget_adaptation) ──
 #[cfg(feature = "budget_adaptation")]
 pub use budget::{adaptive_tree_budget, compression_ratio, entropy_signal, shannon_entropy};

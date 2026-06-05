@@ -52,3 +52,7 @@ mux_bfs = ["mux_ddtree"]  # MUX BFS — superposition-guided parallel tree searc
 mux_freeze_thaw = ["mux_pruner"]  # MUX Freeze/Thaw — persistent superposition patterns (Research 158)
 mux_demux = []  # MuxDemux Verifier — deterministic superposition recovery (Research 158, MUX)
 and_or_dtree = []  # AND-OR DDTree — generic AND-OR tree for hierarchical goal decomposition (Plan 190, Research 170)
+speculative_generator = []  # SpeculativeGenerator trait unification — generic generate+validate contract (Plan 193)
+partial_scoring = []  # PartialScorer graduated reward for game episodes (Plan 191, Research 171)
+problem_mutator = []  # ProblemMutator game config evolution (Plan 191, Research 171)
+idea_divergence = ["partial_scoring"]  # IdeaDivergence strategic novelty filter (Plan 191, Research 171)

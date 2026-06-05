@@ -22,6 +22,7 @@ pub use traits::{
     ActionSpaceLog, BinaryScreeningPruner, ConstraintPruner, GameState, NoPruner,
     NoScreeningPruner, RandomRolloutPolicy, RolloutPolicy, ScreeningPruner, StateHeuristic,
 };
+pub use traits::{GenerativeConstraintPruner, SpeculativeGenerator};
 
 #[cfg(feature = "dual_leo")]
 pub use traits::{
@@ -128,6 +129,12 @@ pub use roofline::{
 pub mod and_or;
 #[cfg(feature = "and_or_dtree")]
 pub use and_or::AndOrNode;
+
+#[cfg(feature = "partial_scoring")]
+pub use traits::{GameTrace, PartialScorer};
+
+#[cfg(feature = "problem_mutator")]
+pub use traits::{GameConfig, MutantConfig, MutationKind, ProblemMutator};
 
 #[cfg(feature = "mux_pruner")]
 pub mod mux;
