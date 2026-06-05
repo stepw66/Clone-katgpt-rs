@@ -419,6 +419,8 @@ pub fn build_dd_tree_gdsd(
 ///
 /// When no decomposition is needed, this is identical to
 /// [`build_dd_tree_screened`] with zero additional overhead.
+///
+/// TODO: Benchmark node count vs flat DDTree on complex tasks — pending real model weights.
 #[cfg(feature = "and_or_dtree")]
 pub fn build_dd_tree_and_or<P: ScreeningPruner>(
     marginals: &[&[f32]],

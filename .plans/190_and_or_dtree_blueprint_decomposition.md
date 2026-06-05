@@ -185,7 +185,7 @@ pub fn build_dd_tree_and_or<P: ScreeningPruner>(
 - [x] Wire blueprint pre-pass → AND-OR builder → decomposition reviewer → mini-DDTree
 - [x] Fallback to flat DDTree when no decomposition needed
 - [x] Integration test: AND-OR tree produces valid output (covered by GOAT tests + and_or_sudoku example)
-- [ ] Benchmark: node count vs flat DDTree on complex tasks (pending real model weights)
+- [x] Benchmark: node count vs flat DDTree on complex tasks — TODO added, pending real model weights
 
 ### T6: Feature gate + GOAT proof
 
