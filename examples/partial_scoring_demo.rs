@@ -5,6 +5,8 @@
 //!
 //! Run: `cargo run --features "partial_scoring" --example partial_scoring_demo`
 
+#![cfg(feature = "partial_scoring")]
+
 use katgpt_core::GameTrace;
 use katgpt_core::PartialScorer;
 use katgpt_rs::pruners::{BanditStats, BomberPartialScorer, WinLossScorer};

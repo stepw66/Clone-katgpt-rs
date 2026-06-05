@@ -110,6 +110,7 @@ pub fn token_stream_spectrum(tokens: &[usize], window_size: usize) -> FrequencyP
     magnitudes[0] = 0.0;
 
     // Compute |X[k]|² for k=1..max_k via dot-product DFT
+    #[allow(clippy::needless_range_loop)]
     for k in 1..=max_k {
         let mut re = 0.0f32;
         let mut im = 0.0f32;
@@ -150,6 +151,7 @@ pub fn token_stream_spectrum(tokens: &[usize], window_size: usize) -> FrequencyP
     let mut mid_energy = 0.0f32;
     let mut high_energy = 0.0f32;
 
+    #[allow(clippy::needless_range_loop)]
     for k in 1..=max_k {
         let e = magnitudes[k];
         if k <= low_end {
@@ -185,8 +187,8 @@ pub fn token_stream_spectrum(tokens: &[usize], window_size: usize) -> FrequencyP
 
     // Spectral entropy: H = -Σ p_k ln(p_k) / ln(K), normalized to [0,1]
     let mut entropy = 0.0f32;
-    for k in 1..=max_k {
-        let p = magnitudes[k] / total_energy;
+    for &mag in magnitudes.iter().skip(1) {
+        let p = mag / total_energy;
         if p > 1e-10 {
             entropy -= p * p.ln();
         }

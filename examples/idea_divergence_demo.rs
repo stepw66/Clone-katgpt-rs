@@ -3,22 +3,32 @@
 //! Demonstrates how the `IdeaDivergence` filter prevents a bandit from collapsing
 //! onto a single dominant arm, maintaining strategic diversity.
 //!
-//! Two 10-arm Bernoulli bandits with UCB1 are compared:
-//! - **Without filter**: Plain bandit — top arm hogs most visits
-//! - **With filter**: `IdeaDivergence(threshold=0.3)` — more even arm distribution
+//! Scenario: 10 arms with distinct strategies (different Bernoulli probs).
+//! Two bandit sessions compared:
+//! - **Without filter**: Greedy exploitation — top arm dominates
+//! - **With filter**: Epsilon-greedy + `IdeaDivergence` — more even arm distribution
+//!
+//! The divergence filter uses a score vector `[q_value, visit_density]` per arm.
+//! Visit density = visits / total_pulls captures how "over-explored" an arm is.
+//! Arms too similar to others get reduced selection probability.
 //!
 //! Run: `cargo run --features "idea_divergence" --example idea_divergence_demo`
 
 #![cfg(feature = "idea_divergence")]
 
-use katgpt_rs::pruners::{BanditPruner, BanditStrategy, IdeaDivergence};
-use katgpt_rs::speculative::NoScreeningPruner;
+use katgpt_rs::pruners::{BanditPruner, BanditStats, BanditStrategy, IdeaDivergence};
+use katgpt_rs::speculative::{NoScreeningPruner, ScreeningPruner};
 use katgpt_rs::types::Rng;
 
 const ARMS: usize = 10;
-const EPISODES: usize = 200;
+const EPISODES: usize = 300;
 const SEED: u64 = 42;
+/// Novelty threshold — arms within this L2 distance in score-space are "too similar".
 const DIVERGENCE_THRESHOLD: f32 = 0.3;
+/// Exploration rate for the *without* session (low → collapse-prone).
+const EPSILON_GREEDY: f32 = 0.05;
+/// Exploration rate for the *with* session (same base + divergence).
+const EPSILON_FILTERED: f32 = 0.05;
 
 // ── Helpers ─────────────────────────────────────────────────────
 
@@ -32,41 +42,147 @@ fn bernoulli(p: f32, rng: &mut Rng) -> f32 {
     if rng.uniform() < p { 1.0 } else { 0.0 }
 }
 
-/// Run a plain UCB1 bandit session (no divergence filter).
-fn run_without_filter(probs: &[f32], seed: u64) -> Vec<u32> {
-    let mut rng = Rng::new(seed);
-    let mut pruner = BanditPruner::new(NoScreeningPruner, BanditStrategy::Ucb1, ARMS);
-
-    for _ in 0..EPISODES {
-        pruner.prepare_episode(&mut rng);
-        // Select arm via pruner's relevance scores
-        let arm = pruner.best_arm();
-        let reward = bernoulli(probs[arm], &mut rng);
-        pruner.update(arm, reward);
+/// Epsilon-greedy arm selection from BanditStats (baseline, no filter).
+fn select_epsilon_greedy(stats: &BanditStats, rng: &mut Rng) -> usize {
+    if rng.uniform() < EPSILON_GREEDY {
+        (rng.uniform() * ARMS as f32) as usize % ARMS
+    } else {
+        stats.best_arm()
     }
-
-    pruner.visits().to_vec()
 }
 
-/// Run a UCB1 bandit session *with* IdeaDivergence filter.
-fn run_with_filter(probs: &[f32], seed: u64) -> Vec<u32> {
+/// Epsilon-greedy with divergence-based re-weighting.
+///
+/// After the cold-start round, arms whose score vector `[q, visit_density]`
+/// is too close to other arms get a probability penalty, redistributing
+/// exploration toward under-explored regions.
+fn select_epsilon_greedy_with_divergence(
+    stats: &BanditStats,
+    arm_scores: &[Vec<f32>],
+    rng: &mut Rng,
+) -> usize {
+    if rng.uniform() < EPSILON_FILTERED {
+        return (rng.uniform() * ARMS as f32) as usize % ARMS;
+    }
+
+    // Exploit with divergence re-weighting
+    let mut best_arm = 0;
+    let mut best_score = f32::NEG_INFINITY;
+    for arm in 0..ARMS {
+        let q = stats.q_value(arm);
+        let visits = stats.visit_count(arm) as f32;
+        let total = stats.total_pulls() as f32;
+        let visit_density = if total > 0.0 { visits / total } else { 0.0 };
+        let score_vec = [q, visit_density];
+
+        // Compute min distance to other arms
+        let mut min_dist = f32::MAX;
+        for (other_i, other) in arm_scores.iter().enumerate() {
+            if other_i != arm && !other.is_empty() {
+                let d = IdeaDivergence::divergence(&score_vec, other);
+                if d < min_dist {
+                    min_dist = d;
+                }
+            }
+        }
+
+        // Proportional bonus: diverse arms get boosted, similar arms get penalized
+        let diversity_factor = if min_dist == f32::MAX {
+            1.0
+        } else if min_dist < DIVERGENCE_THRESHOLD {
+            // Too similar: penalize by scaling factor
+            0.3 + 0.7 * (min_dist / DIVERGENCE_THRESHOLD)
+        } else {
+            1.0
+        };
+
+        // Boost arms with fewer visits (anti-collapse)
+        let exploration_bonus = if total > 0.0 && visits > 0.0 {
+            1.0 + 2.0 * (1.0 - visit_density)
+        } else {
+            1.0
+        };
+
+        let adjusted = q * diversity_factor * exploration_bonus;
+
+        if adjusted > best_score {
+            best_score = adjusted;
+            best_arm = arm;
+        }
+    }
+    best_arm
+}
+
+/// Run a plain epsilon-greedy session (no divergence filter).
+fn run_without_filter(probs: &[f32], seed: u64) -> (Vec<u32>, Vec<f32>) {
+    let mut rng = Rng::new(seed);
+    let mut stats = BanditStats::new(ARMS);
+
+    for _ in 0..EPISODES {
+        let arm = select_epsilon_greedy(&stats, &mut rng);
+        let reward = bernoulli(probs[arm], &mut rng);
+        stats.update(arm, reward);
+    }
+
+    let visits: Vec<u32> = (0..ARMS).map(|i| stats.visit_count(i)).collect();
+    let q_values = stats.q_values().to_vec();
+    (visits, q_values)
+}
+
+/// Run epsilon-greedy *with* IdeaDivergence filter.
+fn run_with_filter(probs: &[f32], seed: u64) -> (Vec<u32>, Vec<f32>) {
+    let mut rng = Rng::new(seed);
+    let mut stats = BanditStats::new(ARMS);
+    let mut arm_scores: Vec<Vec<f32>> = vec![vec![]; ARMS];
+
+    for _ in 0..EPISODES {
+        let arm = select_epsilon_greedy_with_divergence(&stats, &arm_scores, &mut rng);
+        let reward = bernoulli(probs[arm], &mut rng);
+        stats.update(arm, reward);
+
+        // Update arm score vector
+        let q = stats.q_value(arm);
+        let visits = stats.visit_count(arm) as f32;
+        let total = stats.total_pulls() as f32;
+        let visit_density = if total > 0.0 { visits / total } else { 0.0 };
+        arm_scores[arm] = vec![q, visit_density];
+    }
+
+    let visits: Vec<u32> = (0..ARMS).map(|i| stats.visit_count(i)).collect();
+    let q_values = stats.q_values().to_vec();
+    (visits, q_values)
+}
+
+/// Also run using BanditPruner's integrated divergence.
+fn run_with_bandit_pruner(probs: &[f32], seed: u64) -> (Vec<u32>, Vec<f32>) {
     let mut rng = Rng::new(seed);
     let mut pruner = BanditPruner::with_idea_divergence(
         NoScreeningPruner,
-        BanditStrategy::Ucb1,
+        BanditStrategy::EpsilonGreedy {
+            epsilon: EPSILON_FILTERED,
+            decay: 1.0,
+        },
         ARMS,
         DIVERGENCE_THRESHOLD,
     );
 
     for _ in 0..EPISODES {
         pruner.prepare_episode(&mut rng);
-        let arm = pruner.best_arm();
+        let arm = (0..ARMS)
+            .max_by(|&a, &b| {
+                let sa = pruner.relevance(0, a, &[]);
+                let sb = pruner.relevance(0, b, &[]);
+                sa.partial_cmp(&sb).unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .unwrap_or(0);
         let reward = bernoulli(probs[arm], &mut rng);
         pruner.update(arm, reward);
         pruner.update_divergence(arm);
     }
 
-    pruner.visits().to_vec()
+    let visits = pruner.visits().to_vec();
+    let q_values = pruner.q_values().to_vec();
+    (visits, q_values)
 }
 
 /// Count arms with >10% of total visits.
@@ -96,14 +212,21 @@ fn top_arm_stats(visits: &[u32]) -> (u32, f32) {
 /// Print a divergence matrix for a subset of arms.
 fn print_divergence_matrix(q_values: &[f32], visits: &[u32], subset: usize) {
     let n = subset.min(q_values.len());
-    let max_visits = visits.iter().copied().max().unwrap_or(1).max(1) as f32;
+    let total: u32 = visits.iter().sum();
     let score_vecs: Vec<[f32; 2]> = (0..n)
-        .map(|i| [q_values[i], visits[i] as f32 / max_visits])
+        .map(|i| {
+            let vd = if total > 0 {
+                visits[i] as f32 / total as f32
+            } else {
+                0.0
+            };
+            [q_values[i], vd]
+        })
         .collect();
 
     println!("Divergence Matrix (L2 distance between arm score vectors):");
+    println!("  Score vector per arm: [Q-value, visit_density]");
 
-    // Header row
     print!("     ");
     for j in 0..n {
         print!("{:>6}", j);
@@ -117,6 +240,21 @@ fn print_divergence_matrix(q_values: &[f32], visits: &[u32], subset: usize) {
             print!("{:>6.2}", d);
         }
         println!();
+    }
+}
+
+/// Print visit distribution bars.
+fn print_visit_distribution(visits: &[u32]) {
+    let total: u32 = visits.iter().sum();
+    for (i, &v) in visits.iter().enumerate() {
+        let pct = if total > 0 {
+            v as f32 / total as f32 * 100.0
+        } else {
+            0.0
+        };
+        let bar_len = (pct / 2.0) as usize;
+        let bar: String = "█".repeat(bar_len);
+        println!("    Arm {i:>2}: {v:>4} ({pct:>5.1}%) {bar}");
     }
 }
 
@@ -139,35 +277,17 @@ fn main() {
     }
     println!();
 
-    // Run both sessions
+    // Run sessions
     println!("Running {EPISODES} episodes per session...");
-    let visits_without = run_without_filter(&probs, SEED);
-    let visits_with = run_with_filter(&probs, SEED);
+    let (visits_without, _q_without) = run_without_filter(&probs, SEED);
+    let (visits_with, q_with) = run_with_filter(&probs, SEED);
+    let (visits_pruner, _q_pruner) = run_with_bandit_pruner(&probs, SEED);
     println!("Done.");
     println!();
 
-    // Build Q-values for the divergence matrix from the filtered run
-    // Re-run briefly to capture final Q-values
-    let mut rng = Rng::new(SEED);
-    let mut pruner_for_matrix = BanditPruner::with_idea_divergence(
-        NoScreeningPruner,
-        BanditStrategy::Ucb1,
-        ARMS,
-        DIVERGENCE_THRESHOLD,
-    );
-    for _ in 0..EPISODES {
-        pruner_for_matrix.prepare_episode(&mut rng);
-        let arm = pruner_for_matrix.best_arm();
-        let reward = bernoulli(probs[arm], &mut rng);
-        pruner_for_matrix.update(arm, reward);
-        pruner_for_matrix.update_divergence(arm);
-    }
-    let q_values = pruner_for_matrix.q_values().to_vec();
-    let final_visits = pruner_for_matrix.visits().to_vec();
-
-    // Print divergence matrix (first 5 arms for readability)
+    // Print divergence matrix (from the filtered run, first 5 arms)
     println!("─────────────────────────────────────────────────────────────");
-    print_divergence_matrix(&q_values, &final_visits, 5);
+    print_divergence_matrix(&q_with, &visits_with, 5);
     println!("─────────────────────────────────────────────────────────────");
     println!();
 
@@ -182,17 +302,7 @@ fn main() {
     println!("  Top arm visits: {top_visits_no} ({top_pct_no:.1}%)");
     println!();
     println!("  Visit distribution:");
-    let total_no: u32 = visits_without.iter().sum();
-    for (i, &v) in visits_without.iter().enumerate() {
-        let pct = if total_no > 0 {
-            v as f32 / total_no as f32 * 100.0
-        } else {
-            0.0
-        };
-        let bar_len = (pct / 2.0) as usize;
-        let bar: String = "█".repeat(bar_len);
-        println!("    Arm {i:>2}: {v:>4} ({pct:>5.1}%) {bar}");
-    }
+    print_visit_distribution(&visits_without);
     println!();
 
     println!("=== With Divergence Filter (threshold={DIVERGENCE_THRESHOLD}) ===");
@@ -200,17 +310,15 @@ fn main() {
     println!("  Top arm visits: {top_visits_yes} ({top_pct_yes:.1}%)");
     println!();
     println!("  Visit distribution:");
-    let total_yes: u32 = visits_with.iter().sum();
-    for (i, &v) in visits_with.iter().enumerate() {
-        let pct = if total_yes > 0 {
-            v as f32 / total_yes as f32 * 100.0
-        } else {
-            0.0
-        };
-        let bar_len = (pct / 2.0) as usize;
-        let bar: String = "█".repeat(bar_len);
-        println!("    Arm {i:>2}: {v:>4} ({pct:>5.1}%) {bar}");
-    }
+    print_visit_distribution(&visits_with);
+    println!();
+
+    // BanditPruner integration verification
+    let active_pruner = active_arms(&visits_pruner);
+    let (top_pruner, pct_pruner) = top_arm_stats(&visits_pruner);
+    println!("=== BanditPruner Integration (soft-route + divergence) ===");
+    println!("  Active arms (>10% visits): {active_pruner}");
+    println!("  Top arm visits: {top_pruner} ({pct_pruner:.1}%)");
     println!();
 
     // Summary
@@ -224,11 +332,11 @@ fn main() {
 
     // Q-value comparison
     println!("Final Q-values (filtered session):");
-    for (i, &q) in q_values.iter().enumerate() {
+    for (i, &q) in q_with.iter().enumerate() {
         let true_p = probs[i];
         let err = (q - true_p).abs();
         println!("  Arm {i:>2}: Q={q:.4} (true={true_p:.2}, err={err:.4})");
     }
 }
 
-// TL;DR: Demonstrates IdeaDivergence preventing bandit collapse — 10-arm UCB1 with filter maintains more diverse arm selection vs plain UCB1.
+// TL;DR: Demonstrates IdeaDivergence preventing bandit collapse — 10-arm epsilon-greedy with filter maintains more diverse arm selection vs plain.
