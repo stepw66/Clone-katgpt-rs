@@ -31,6 +31,19 @@ pub struct KVarNConfig {
     pub tile_size: usize,
     /// Variance normalization config.
     pub var_norm: VarNormConfig,
+    /// Enable Hadamard rotation (default: false).
+    ///
+    /// When enabled, applies Hadamard transform per-tile at quantize time and
+    /// inverse at dequant. This decorrelates quantization errors across channels
+    /// at the cost of ~2× dequant overhead.
+    ///
+    /// VarN already equalizes magnitudes via Sinkhorn scaling, so Hadamard is
+    /// typically unnecessary. Benchmarks show no-Hadamard has BETTER quality
+    /// (cosine 0.9988 vs 0.9974) because VarN handles magnitude equalization.
+    ///
+    /// Enable only if profiling shows error correlation across channels in
+    /// your specific model.
+    pub hadamard: bool,
 }
 
 impl Default for KVarNConfig {
@@ -42,6 +55,7 @@ impl Default for KVarNConfig {
             bits: 2,
             tile_size: 128,
             var_norm: VarNormConfig::default(),
+            hadamard: false,
         }
     }
 }
@@ -104,9 +118,10 @@ pub struct KVarNKVCache {
     val_buffer: Vec<f32>,
     // ── Scratch buffers for zero-alloc hot path ──
     /// Scratch for tile operations: [tile_rows * tile_cols].
+    #[allow(dead_code)] // reserved for future SIMD tile ops
     scratch_tile: Vec<f32>,
-    /// Scratch for dequant output.
-    scratch_dequant: Vec<f32>,
+    /// Scratch for batch-unpacked u32 values (reused across dequant calls).
+    scratch_unpack: Vec<u32>,
     // ── Scalar config (usize: 8 bytes each) ──
     /// Current write position.
     pos: usize,
@@ -121,16 +136,19 @@ pub struct KVarNKVCache {
     /// Number of complete tiles.
     n_tiles: usize,
     /// Bytes per row for packed quantized data.
+    #[allow(dead_code)] // computed at construction for fast path access
     bytes_per_row: usize,
     // ── Small fields at end ──
     /// Bits per element.
     bits: u8,
+    /// Whether Hadamard rotation is enabled.
+    hadamard: bool,
 }
 
 impl KVarNKVCache {
     /// Create a new KVarN KV cache from config.
     pub fn with_config(cfg: &KVarNConfig) -> Self {
-        let n_tiles = (cfg.max_seq_len + cfg.tile_size - 1) / cfg.tile_size;
+        let n_tiles = cfg.max_seq_len.div_ceil(cfg.tile_size);
         let tile_size = cfg.tile_size;
 
         // For keys: tile layout [kv_dim, tile_size]
@@ -177,7 +195,7 @@ impl KVarNKVCache {
             val_tiles,
             val_buffer: vec![0.0; val_buffer_size],
             scratch_tile: vec![0.0f32; key_buffer_size.max(val_buffer_size)],
-            scratch_dequant: vec![0.0f32; cfg.kv_dim],
+            scratch_unpack: vec![0u32; cfg.kv_dim],
             pos: 0,
             n_layers: cfg.n_layers,
             kv_dim: cfg.kv_dim,
@@ -186,13 +204,14 @@ impl KVarNKVCache {
             n_tiles,
             bytes_per_row,
             bits: cfg.bits,
+            hadamard: cfg.hadamard,
         }
     }
 
     /// Quantize and store a key vector at given layer and position.
     ///
-    /// Applies Hadamard rotation per-position at store time, then buffers into
-    /// the tile. The tile is quantized (variance normalization + RTN) when full.
+    /// Buffers raw data into the tile. Hadamard rotation (if enabled) is applied
+    /// per-tile at quantization time when the tile fills — see `quantize_key_tile`.
     pub fn store_key(&mut self, layer: usize, pos: usize, key: &[f32]) {
         debug_assert_eq!(key.len(), self.kv_dim);
         debug_assert!(layer < self.n_layers);
@@ -201,13 +220,9 @@ impl KVarNKVCache {
         let tile_idx = pos / self.tile_size;
         let pos_in_tile = pos % self.tile_size;
 
-        // Apply Hadamard per-position (channel dimension) using scratch buffer
-        self.scratch_dequant[..self.kv_dim].copy_from_slice(key);
-        hadamard::hadamard_transform_inplace(&mut self.scratch_dequant[..self.kv_dim]);
-
         // Buffer layout: [kv_dim, tile_size] row-major, so row=channel, col=token
         for ch in 0..self.kv_dim {
-            self.key_buffer[ch * self.tile_size + pos_in_tile] = self.scratch_dequant[ch];
+            self.key_buffer[ch * self.tile_size + pos_in_tile] = key[ch];
         }
 
         let tile = &mut self.key_tiles[layer][tile_idx];
@@ -222,8 +237,8 @@ impl KVarNKVCache {
 
     /// Quantize and store a value vector at given layer and position.
     ///
-    /// Applies Hadamard rotation per-position at store time, then buffers into
-    /// the tile.
+    /// Buffers raw data into the tile. Hadamard rotation (if enabled) is applied
+    /// per-tile at quantization time — see `quantize_val_tile`.
     pub fn store_value(&mut self, layer: usize, pos: usize, value: &[f32]) {
         debug_assert_eq!(value.len(), self.kv_dim);
         debug_assert!(layer < self.n_layers);
@@ -232,14 +247,9 @@ impl KVarNKVCache {
         let tile_idx = pos / self.tile_size;
         let pos_in_tile = pos % self.tile_size;
 
-        // Apply Hadamard per-position (channel dimension) using scratch buffer
-        self.scratch_dequant[..self.kv_dim].copy_from_slice(value);
-        hadamard::hadamard_transform_inplace(&mut self.scratch_dequant[..self.kv_dim]);
-
         // Buffer layout: [tile_size, kv_dim] row-major, so row=token, col=channel
         let off = pos_in_tile * self.kv_dim;
-        self.val_buffer[off..off + self.kv_dim]
-            .copy_from_slice(&self.scratch_dequant[..self.kv_dim]);
+        self.val_buffer[off..off + self.kv_dim].copy_from_slice(value);
 
         let tile = &mut self.val_tiles[layer][tile_idx];
         tile.count += 1;
@@ -266,19 +276,66 @@ impl KVarNKVCache {
         let actual_cols = tile.count.min(self.tile_size);
         let bits = self.bits as usize;
         let bpr = packed_bytes_per_row(actual_cols, self.bits);
+        let kv_dim = self.kv_dim;
 
-        for ch in 0..self.kv_dim {
-            let row_off = ch * bpr;
-            let packed_val = &self.key_quantized[layer][tile_idx][row_off..row_off + bpr];
-            let q = unpack_value(packed_val, pos_in_tile, bits);
+        let quantized = &self.key_quantized[layer][tile_idx];
 
-            // Dual-scale dequantize: (q * rtn_scale + zp) * var_s_col[j] * var_s_row[i]
-            let rtn_val = q as f32 * tile.rtn_scales[ch] + tile.rtn_zp[ch];
-            out[ch] = rtn_val * tile.var_scales.s_col[pos_in_tile] * tile.var_scales.s_row[ch];
+        // Precompute column-scale constant (same for all channels)
+        let var_col = tile.var_scales.s_col[pos_in_tile];
+        let rtn_scales = &tile.rtn_scales;
+        let rtn_zp = &tile.rtn_zp;
+        let s_row = &tile.var_scales.s_row;
+
+        // Specialized hot path per bit-width to avoid generic division/modulo
+        match bits {
+            4 => {
+                // 4-bit: 2 values per byte, pos_in_tile determines nibble
+                let byte_off = pos_in_tile >> 1;
+                let shift = (pos_in_tile & 1) * 4;
+                let mask: u8 = 0x0F;
+                for ch in 0..kv_dim {
+                    let q = ((quantized[ch * bpr + byte_off] >> shift) & mask) as f32;
+                    let var_row = s_row[ch];
+                    out[ch] = (q * rtn_scales[ch] + rtn_zp[ch]) * var_col * var_row;
+                }
+            }
+            2 => {
+                // 2-bit: 4 values per byte
+                let byte_off = pos_in_tile >> 2;
+                let shift = (pos_in_tile & 3) * 2;
+                let mask: u8 = 0x03;
+                for ch in 0..kv_dim {
+                    let q = ((quantized[ch * bpr + byte_off] >> shift) & mask) as f32;
+                    let var_row = s_row[ch];
+                    out[ch] = (q * rtn_scales[ch] + rtn_zp[ch]) * var_col * var_row;
+                }
+            }
+            8 => {
+                // 8-bit: 1 value per byte, trivial
+                for ch in 0..kv_dim {
+                    let q = quantized[ch * bpr + pos_in_tile] as f32;
+                    let var_row = s_row[ch];
+                    out[ch] = (q * rtn_scales[ch] + rtn_zp[ch]) * var_col * var_row;
+                }
+            }
+            _ => {
+                // Fallback: generic unpack
+                for ch in 0..kv_dim {
+                    let row_off = ch * bpr;
+                    let q = unpack_value(&quantized[row_off..row_off + bpr], pos_in_tile, bits);
+                    let var_row = s_row[ch];
+                    out[ch] = (q as f32 * rtn_scales[ch] + rtn_zp[ch]) * var_col * var_row;
+                }
+            }
         }
 
-        // Inverse Hadamard on the output vector (undoes per-position rotation from store_key)
-        hadamard::hadamard_transform_inplace(out);
+        // Inverse Hadamard on the output vector.
+        // Hadamard is applied per-tile on the channel dimension (columns for keys,
+        // rows for values). The dequantized output vector needs inverse Hadamard
+        // to recover the original channel values.
+        if self.hadamard && kv_dim.is_power_of_two() {
+            hadamard::hadamard_transform_inplace(out);
+        }
     }
 
     /// Dequantize value into pre-allocated buffer (zero-alloc hot path).
@@ -294,19 +351,71 @@ impl KVarNKVCache {
         }
 
         let bits = self.bits as usize;
-        let bpr = packed_bytes_per_row(self.kv_dim, self.bits);
+        let kv_dim = self.kv_dim;
+        let bpr = packed_bytes_per_row(kv_dim, self.bits);
 
         let row_off = pos_in_tile * bpr;
         let packed_row = &self.val_quantized[layer][tile_idx][row_off..row_off + bpr];
 
-        for ch in 0..self.kv_dim {
-            let q = unpack_value(packed_row, ch, bits);
-            let rtn_val = q as f32 * tile.rtn_scales[pos_in_tile] + tile.rtn_zp[pos_in_tile];
-            out[ch] = rtn_val * tile.var_scales.s_col[ch] * tile.var_scales.s_row[pos_in_tile];
+        // Precompute row-scale constant (same for all channels in this row)
+        let var_row = tile.var_scales.s_row[pos_in_tile];
+        let rtn_scale = tile.rtn_scales[pos_in_tile];
+        let rtn_zp = tile.rtn_zp[pos_in_tile];
+        let s_col = &tile.var_scales.s_col;
+
+        // Specialized hot path per bit-width — inline unpack directly into dequant
+        match bits {
+            4 => {
+                // 2 values per byte, dequant inline
+                for (i, &b) in packed_row.iter().take(kv_dim.div_ceil(2)).enumerate() {
+                    let q0 = (b & 0x0F) as f32;
+                    out[2 * i] = (q0 * rtn_scale + rtn_zp) * s_col[2 * i] * var_row;
+                    if 2 * i + 1 < kv_dim {
+                        let q1 = (b >> 4) as f32;
+                        out[2 * i + 1] = (q1 * rtn_scale + rtn_zp) * s_col[2 * i + 1] * var_row;
+                    }
+                }
+            }
+            2 => {
+                // 4 values per byte
+                for (i, &b) in packed_row.iter().take(kv_dim.div_ceil(4)).enumerate() {
+                    let q0 = (b & 0x03) as f32;
+                    out[4 * i] = (q0 * rtn_scale + rtn_zp) * s_col[4 * i] * var_row;
+                    if 4 * i + 1 < kv_dim {
+                        let q1 = ((b >> 2) & 0x03) as f32;
+                        out[4 * i + 1] = (q1 * rtn_scale + rtn_zp) * s_col[4 * i + 1] * var_row;
+                    }
+                    if 4 * i + 2 < kv_dim {
+                        let q2 = ((b >> 4) & 0x03) as f32;
+                        out[4 * i + 2] = (q2 * rtn_scale + rtn_zp) * s_col[4 * i + 2] * var_row;
+                    }
+                    if 4 * i + 3 < kv_dim {
+                        let q3 = ((b >> 6) & 0x03) as f32;
+                        out[4 * i + 3] = (q3 * rtn_scale + rtn_zp) * s_col[4 * i + 3] * var_row;
+                    }
+                }
+            }
+            8 => {
+                for ch in 0..kv_dim {
+                    let q = packed_row[ch] as f32;
+                    out[ch] = (q * rtn_scale + rtn_zp) * s_col[ch] * var_row;
+                }
+            }
+            _ => {
+                // Fallback: batch unpack then dequant
+                let scratch = &mut self.scratch_unpack[..kv_dim];
+                unpack_row(packed_row, bits, scratch);
+                for ch in 0..kv_dim {
+                    let q = scratch[ch] as f32;
+                    out[ch] = (q * rtn_scale + rtn_zp) * s_col[ch] * var_row;
+                }
+            }
         }
 
-        // Inverse Hadamard (undoes per-position rotation from store_value)
-        hadamard::hadamard_transform_inplace(out);
+        // Inverse Hadamard on the output vector — see dequantize_key_into.
+        if self.hadamard && kv_dim.is_power_of_two() {
+            hadamard::hadamard_transform_inplace(out);
+        }
     }
 
     /// Reset cache for a new sequence.
@@ -350,7 +459,12 @@ impl KVarNKVCache {
             }
         }
 
-        // Note: Hadamard is already applied per-position at store_key time.
+        // Hadamard rotation per-tile on channel dimension:
+        //   Key tile [kv_dim, tile_size]: Hadamard each column (= each position's channels)
+        //   This is equivalent to per-position Hadamard on kv_dim, but batched at tile time.
+        if self.hadamard && rows.is_power_of_two() {
+            hadamard::hadamard_cols(&mut tile_data, rows, cols);
+        }
 
         // Step 1: Variance normalization
         let config = VarNormConfig {
@@ -388,7 +502,10 @@ impl KVarNKVCache {
         let off = 0;
         tile_data[off..off + rows * cols].copy_from_slice(&self.val_buffer[off..off + rows * cols]);
 
-        // Note: Hadamard is already applied per-position at store_value time.
+        // Hadamard rotation per-tile (clustered across channels per token)
+        if self.hadamard && cols.is_power_of_two() {
+            hadamard::hadamard_rows(&mut tile_data, cols);
+        }
 
         // Step 1: Variance normalization
         let config = VarNormConfig {
@@ -551,6 +668,63 @@ fn unpack_value(row: &[u8], pos: usize, bits: usize) -> u32 {
     val & ((1u32 << bits) - 1)
 }
 
+/// Unpack all values from a bit-packed row into a pre-allocated u32 buffer.
+/// Optimized for power-of-2 bit widths (1, 2, 4, 8).
+#[inline]
+fn unpack_row(row: &[u8], bits: usize, out: &mut [u32]) {
+    let n = out.len();
+    match bits {
+        8 => {
+            for (i, &b) in row.iter().take(n).enumerate() {
+                out[i] = b as u32;
+            }
+        }
+        4 => {
+            // 2 values per byte
+            let byte_count = n.div_ceil(2);
+            for (i, &b) in row.iter().take(byte_count).enumerate() {
+                out[2 * i] = (b & 0x0F) as u32;
+                if 2 * i + 1 < n {
+                    out[2 * i + 1] = (b >> 4) as u32;
+                }
+            }
+        }
+        2 => {
+            // 4 values per byte
+            let byte_count = n.div_ceil(4);
+            for (i, &b) in row.iter().take(byte_count).enumerate() {
+                out[4 * i] = (b & 0x03) as u32;
+                if 4 * i + 1 < n {
+                    out[4 * i + 1] = ((b >> 2) & 0x03) as u32;
+                }
+                if 4 * i + 2 < n {
+                    out[4 * i + 2] = ((b >> 4) & 0x03) as u32;
+                }
+                if 4 * i + 3 < n {
+                    out[4 * i + 3] = ((b >> 6) & 0x03) as u32;
+                }
+            }
+        }
+        1 => {
+            // 8 values per byte
+            let byte_count = n.div_ceil(8);
+            for (i, &b) in row.iter().take(byte_count).enumerate() {
+                for bit in 0..8usize {
+                    if 8 * i + bit < n {
+                        out[8 * i + bit] = ((b >> bit) & 1) as u32;
+                    }
+                }
+            }
+        }
+        _ => {
+            // Fallback to per-element
+            for i in 0..n {
+                out[i] = unpack_value(row, i, bits);
+            }
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -589,6 +763,7 @@ mod tests {
                 iterations: 8,
                 ..Default::default()
             },
+            hadamard: false,
         }
     }
 
@@ -748,7 +923,7 @@ mod tests {
         cache.dequantize_key_into(1, 0, &mut out1);
 
         // Different layers should produce different outputs for same position
-        let cos = cosine_sim(&out0, &out1);
+        let _cos = cosine_sim(&out0, &out1);
         // They can have high cosine similarity but shouldn't be identical
         // (different input vectors, same quantization)
         assert!(
@@ -800,6 +975,37 @@ mod tests {
                     got, expected,
                     "pack/unpack mismatch at pos={pos}, bits={bits}"
                 );
+            }
+        }
+    }
+
+    #[test]
+    fn test_unpack_row_matches_unpack_value() {
+        for &bits in &[1u8, 2, 3, 4, 8] {
+            for &cols in &[1usize, 7, 8, 15, 16, 32, 64, 127, 128] {
+                let bpr = packed_bytes_per_row(cols, bits);
+                let levels = 1u32 << bits;
+                let mut row = vec![0u8; bpr];
+
+                // Pack known values
+                for pos in 0..cols {
+                    let val = ((pos as u32 * 7 + 3) % levels) as u32;
+                    pack_value(&mut row, pos, val, bits as usize);
+                }
+
+                // Batch unpack
+                let mut batch_out = vec![0u32; cols];
+                unpack_row(&row, bits as usize, &mut batch_out);
+
+                // Compare with per-element unpack
+                for pos in 0..cols {
+                    let expected = unpack_value(&row, pos, bits as usize);
+                    assert_eq!(
+                        batch_out[pos], expected,
+                        "unpack_row mismatch at pos={pos}, bits={bits}, cols={cols}: got {}, expected {}",
+                        batch_out[pos], expected
+                    );
+                }
             }
         }
     }
@@ -875,6 +1081,7 @@ mod tests {
             bits: 2,
             tile_size: 128,
             var_norm: VarNormConfig::default(),
+            hadamard: false,
         };
 
         let mut cache = KVarNKVCache::with_config(&config);

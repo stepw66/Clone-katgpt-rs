@@ -11,6 +11,9 @@
 /// O(n log n), no allocations. Each butterfly step multiplies by 1/√2,
 /// so the total normalization per application is 1/√n. This makes the
 /// transform self-inverse: H(H(x)) = x.
+///
+/// Uses unsafe pointer arithmetic to help LLVM auto-vectorize the butterfly
+/// loop by proving non-aliasing between the two halves.
 #[inline]
 pub fn hadamard_transform_inplace(x: &mut [f32]) {
     let n = x.len();
@@ -24,18 +27,25 @@ pub fn hadamard_transform_inplace(x: &mut [f32]) {
     }
 
     let inv_sqrt2 = std::f32::consts::FRAC_1_SQRT_2;
-    let mut step = 2;
-    while step <= n {
-        let half = step / 2;
-        for block_start in (0..n).step_by(step) {
-            for i in 0..half {
-                let a = x[block_start + i];
-                let b = x[block_start + half + i];
-                x[block_start + i] = (a + b) * inv_sqrt2;
-                x[block_start + half + i] = (a - b) * inv_sqrt2;
+    let ptr = x.as_mut_ptr();
+
+    // Safety: n is power-of-2 (verified above), all indices are in bounds.
+    unsafe {
+        let mut step = 2;
+        while step <= n {
+            let half = step / 2;
+            let mut block_start = 0;
+            while block_start < n {
+                for i in 0..half {
+                    let a = *ptr.add(block_start + i);
+                    let b = *ptr.add(block_start + half + i);
+                    *ptr.add(block_start + i) = (a + b) * inv_sqrt2;
+                    *ptr.add(block_start + half + i) = (a - b) * inv_sqrt2;
+                }
+                block_start += step;
             }
+            step *= 2;
         }
-        step *= 2;
     }
 }
 
@@ -49,6 +59,29 @@ pub fn hadamard_rows(tile: &mut [f32], cols: usize) {
     }
     for row in tile.chunks_exact_mut(cols) {
         hadamard_transform_inplace(row);
+    }
+}
+
+/// Apply Hadamard to each column of a 2D tile `[rows, cols]` stored row-major.
+///
+/// Each column must have power-of-2 length (`rows`). This is the common case
+/// since kv_dim is typically 64, 128, 256, etc.
+///
+/// Equivalent to per-column Hadamard: mixes values across rows within each column.
+pub fn hadamard_cols(tile: &mut [f32], rows: usize, cols: usize) {
+    if rows == 0 || cols == 0 || !rows.is_power_of_two() {
+        return;
+    }
+    // Process one column at a time: collect, transform, write back
+    let mut col_buf = vec![0.0f32; rows];
+    for j in 0..cols {
+        for i in 0..rows {
+            col_buf[i] = tile[i * cols + j];
+        }
+        hadamard_transform_inplace(&mut col_buf);
+        for i in 0..rows {
+            tile[i * cols + j] = col_buf[i];
+        }
     }
 }
 

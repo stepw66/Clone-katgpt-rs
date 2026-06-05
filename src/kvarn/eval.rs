@@ -71,9 +71,10 @@ pub fn pseudo_decode_eval(
         bits,
         tile_size,
         var_norm: config.clone(),
+        hadamard: false,
     };
 
-    let n_tiles = (seq_len + tile_size - 1) / tile_size;
+    let n_tiles = seq_len.div_ceil(tile_size);
     let mut per_tile_mse = Vec::with_capacity(n_tiles);
     let mut cumulative_mse = Vec::with_capacity(n_tiles);
     let mut per_tile_cosine = Vec::with_capacity(n_tiles);

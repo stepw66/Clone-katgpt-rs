@@ -1,20 +1,21 @@
 //! OCT+PQ+KVarN Fusion Experiment (KVarN T6).
 //!
-//! Compares five quantization pipelines on synthetic 128×128 tiles:
+//! Compares six quantization pipelines on synthetic 128×128 tiles:
 //!   A) Hadamard → VarN → RTN            (pure KVarN)
 //!   B) RTN only                         (baseline, no rotation, no VarN)
 //!   C) VarN → RTN                       (VarN alone, no Hadamard)
 //!   D) OCT triplet → VarN → RTN         (OCT encoding + VarN)
 //!   E) Givens → OCT triplet → VarN → RTN (full OCT+PQ+VarN stack)
+//!   F) OCT triplet → RTN                (OCT alone, no VarN — T6 comparison baseline)
 //!
-//! Measures MSE, cosine similarity, and imbalance before/after VarN.
+//! Measures MSE, cosine similarity, imbalance before/after VarN, and convergence iterations.
 //!
 //! Run: `cargo run --example octpq_kvarn_fusion --features "kvarn,hybrid_oct_pq"`
 
 #![cfg(all(feature = "kvarn", feature = "hybrid_oct_pq"))]
 
 use katgpt_rs::kvarn::hadamard::hadamard_rows;
-use katgpt_rs::kvarn::var_norm::{VarNormConfig, variance_normalize};
+use katgpt_rs::kvarn::var_norm::VarNormConfig;
 
 // ── Constants ─────────────────────────────────────────────────────
 
@@ -167,6 +168,9 @@ struct PipelineResult {
     cosine: f32,
     imbalance_before: f32,
     imbalance_after: f32,
+    /// Number of Sinkhorn iterations to reach 95% of total imbalance reduction.
+    /// None if no VarN was applied.
+    convergence_iter: Option<usize>,
 }
 
 /// Compute imbalance metric from a tile directly.
@@ -174,6 +178,58 @@ fn compute_imbalance(tile: &[f32], rows: usize, cols: usize) -> f32 {
     let cs = col_stds(tile, rows, cols);
     let rs = row_stds(tile, rows, cols);
     imbalance(&cs, &rs)
+}
+
+/// Run variance normalization with convergence tracking.
+/// Returns (scales, convergence_iter) where convergence_iter is the first iteration
+/// where imbalance reaches within 5% of the final best.
+fn variance_normalize_with_convergence(
+    tile: &mut [f32],
+    rows: usize,
+    cols: usize,
+    config: &VarNormConfig,
+) -> (katgpt_rs::kvarn::var_norm::VarianceNormScales, usize) {
+    let imb_before = compute_imbalance(tile, rows, cols);
+    let original = tile.to_vec();
+
+    // Run full VarN
+    let scales = katgpt_rs::kvarn::variance_normalize(tile, rows, cols, config);
+
+    let imb_after = compute_imbalance(tile, rows, cols);
+    let total_reduction = imb_before - imb_after;
+
+    if total_reduction < 1e-8 {
+        return (scales, 0);
+    }
+
+    // Find first iteration that achieves 95% of total imbalance reduction
+    let threshold = imb_before - total_reduction * 0.95;
+    let convergence_iter = find_convergence_iter(&original, rows, cols, config, threshold);
+
+    (scales, convergence_iter)
+}
+
+/// Find the first iteration where imbalance drops below threshold.
+fn find_convergence_iter(
+    original: &[f32],
+    rows: usize,
+    cols: usize,
+    config: &VarNormConfig,
+    threshold: f32,
+) -> usize {
+    for k in 1..=config.iterations {
+        let partial_config = VarNormConfig {
+            iterations: k,
+            ..config.clone()
+        };
+        let mut partial_tile = original.to_vec();
+        katgpt_rs::kvarn::variance_normalize(&mut partial_tile, rows, cols, &partial_config);
+        let imb = compute_imbalance(&partial_tile, rows, cols);
+        if imb <= threshold {
+            return k;
+        }
+    }
+    config.iterations
 }
 
 /// RTN quantize+dequantize, then undo VarN scales.
@@ -214,7 +270,8 @@ fn pipeline_a(
     hadamard_rows(&mut tile, cols);
 
     // Variance normalize
-    let _scales = variance_normalize(&mut tile, rows, cols, config);
+    let (_scales, convergence_iter_a) =
+        variance_normalize_with_convergence(&mut tile, rows, cols, config);
 
     // Measure imbalance after VarN
     let cs2 = col_stds(&tile, rows, cols);
@@ -247,6 +304,7 @@ fn pipeline_a(
         cosine: cos,
         imbalance_before: imb_before,
         imbalance_after: imb_after,
+        convergence_iter: Some(convergence_iter_a),
     }
 }
 
@@ -270,6 +328,7 @@ fn pipeline_b(original: &[f32], rows: usize, cols: usize) -> PipelineResult {
         cosine: cos,
         imbalance_before: imb_before,
         imbalance_after: imb_after,
+        convergence_iter: None,
     }
 }
 
@@ -287,7 +346,8 @@ fn pipeline_c(
     let imb_before = imbalance(&cs, &rs);
 
     // Variance normalize (no Hadamard)
-    let _scales = variance_normalize(&mut tile, rows, cols, config);
+    let (_scales, convergence_iter_c) =
+        variance_normalize_with_convergence(&mut tile, rows, cols, config);
 
     let cs2 = col_stds(&tile, rows, cols);
     let rs2 = row_stds(&tile, rows, cols);
@@ -312,6 +372,7 @@ fn pipeline_c(
         cosine: cos,
         imbalance_before: imb_before,
         imbalance_after: imb_after,
+        convergence_iter: Some(convergence_iter_c),
     }
 }
 
@@ -354,7 +415,8 @@ fn pipeline_d(
     tile = tripled;
 
     let imb_before = compute_imbalance(&tile, rows, cols);
-    let scales = variance_normalize(&mut tile, rows, cols, config);
+    let (scales, convergence_iter_d) =
+        variance_normalize_with_convergence(&mut tile, rows, cols, config);
     let imb_after = compute_imbalance(&tile, rows, cols);
 
     let reconstructed = rtn_roundtrip_with_scales(&tile, rows, cols, RTN_BITS, &scales);
@@ -391,6 +453,7 @@ fn pipeline_d(
         cosine: cosine_sim(original, &inversed),
         imbalance_before: imb_before,
         imbalance_after: imb_after,
+        convergence_iter: Some(convergence_iter_d),
     }
 }
 
@@ -447,7 +510,8 @@ fn pipeline_e(
     tile = tripled;
 
     let imb_before = compute_imbalance(&tile, rows, cols);
-    let scales = variance_normalize(&mut tile, rows, cols, config);
+    let (scales, convergence_iter) =
+        variance_normalize_with_convergence(&mut tile, rows, cols, config);
     let imb_after = compute_imbalance(&tile, rows, cols);
 
     let reconstructed = rtn_roundtrip_with_scales(&tile, rows, cols, RTN_BITS, &scales);
@@ -495,6 +559,79 @@ fn pipeline_e(
         cosine: cosine_sim(original, &inversed),
         imbalance_before: imb_before,
         imbalance_after: imb_after,
+        convergence_iter: Some(convergence_iter),
+    }
+}
+
+/// Run Pipeline F: OCT triplet → RTN (no VarN — baseline for T6 comparison).
+///
+/// This isolates the effect of VarN by comparing D (OCT→VarN→RTN) vs F (OCT→RTN).
+fn pipeline_f(original: &[f32], rows: usize, cols: usize) -> PipelineResult {
+    let mut tile = original.to_vec();
+
+    // OCT triplet encode: groups of 3 → 3 averages
+    let mut tripled = vec![0.0f32; rows * cols];
+    for i in 0..rows {
+        for j in (0..cols).step_by(3) {
+            let v0 = tile[i * cols + j];
+            let v1 = if j + 1 < cols {
+                tile[i * cols + j + 1]
+            } else {
+                0.0
+            };
+            let v2 = if j + 2 < cols {
+                tile[i * cols + j + 2]
+            } else {
+                0.0
+            };
+            tripled[i * cols + j] = (v0 + v1) / 2.0;
+            if j + 1 < cols {
+                tripled[i * cols + j + 1] = (v1 + v2) / 2.0;
+            }
+            if j + 2 < cols {
+                tripled[i * cols + j + 2] = (v2 + v0) / 2.0;
+            }
+        }
+    }
+    tile = tripled;
+
+    let imb_before = compute_imbalance(&tile, rows, cols);
+
+    // RTN only (no VarN)
+    rtn_roundtrip(&mut tile, RTN_BITS);
+
+    // Inverse OCT triplet
+    let mut inversed = tile;
+    for i in 0..rows {
+        for j in (0..cols).step_by(3) {
+            let v0 = inversed[i * cols + j];
+            let v1 = if j + 1 < cols {
+                inversed[i * cols + j + 1]
+            } else {
+                0.0
+            };
+            let v2 = if j + 2 < cols {
+                inversed[i * cols + j + 2]
+            } else {
+                0.0
+            };
+            inversed[i * cols + j] = v0 + v1 - v2;
+            if j + 1 < cols {
+                inversed[i * cols + j + 1] = -v0 + v1 + v2;
+            }
+            if j + 2 < cols {
+                inversed[i * cols + j + 2] = v0 - v1 + v2;
+            }
+        }
+    }
+
+    PipelineResult {
+        name: "F: OCT→RTN (no VN)",
+        mse: mse(original, &inversed),
+        cosine: cosine_sim(original, &inversed),
+        imbalance_before: imb_before,
+        imbalance_after: imb_before, // no VarN applied
+        convergence_iter: None,
     }
 }
 
@@ -527,6 +664,7 @@ fn main() {
     let mut results_c = Vec::with_capacity(NUM_TILES);
     let mut results_d = Vec::with_capacity(NUM_TILES);
     let mut results_e = Vec::with_capacity(NUM_TILES);
+    let mut results_f = Vec::with_capacity(NUM_TILES);
 
     for t in 0..NUM_TILES {
         // Generate random tile
@@ -544,20 +682,23 @@ fn main() {
         let rc = pipeline_c(&original, TILE_ROWS, TILE_COLS, &config);
         let rd = pipeline_d(&original, TILE_ROWS, TILE_COLS, &config);
         let re = pipeline_e(&original, TILE_ROWS, TILE_COLS, &config);
+        let rf = pipeline_f(&original, TILE_ROWS, TILE_COLS);
 
         results_a.push(ra);
         results_b.push(rb);
         results_c.push(rc);
         results_d.push(rd);
         results_e.push(re);
+        results_f.push(rf);
 
         println!(
-            "  Tile {t}: A={:.6} B={:.6} C={:.6} D={:.6} E={:.6}",
+            "  Tile {t}: A={:.6} B={:.6} C={:.6} D={:.6} E={:.6} F={:.6}",
             results_a[t].mse,
             results_b[t].mse,
             results_c[t].mse,
             results_d[t].mse,
-            results_e[t].mse
+            results_e[t].mse,
+            results_f[t].mse
         );
     }
 
@@ -571,12 +712,14 @@ fn main() {
     let avg_mse_c = avg(&results_c, |r| r.mse);
     let avg_mse_d = avg(&results_d, |r| r.mse);
     let avg_mse_e = avg(&results_e, |r| r.mse);
+    let avg_mse_f = avg(&results_f, |r| r.mse);
 
     let avg_cos_a = avg(&results_a, |r| r.cosine);
     let avg_cos_b = avg(&results_b, |r| r.cosine);
     let avg_cos_c = avg(&results_c, |r| r.cosine);
     let avg_cos_d = avg(&results_d, |r| r.cosine);
     let avg_cos_e = avg(&results_e, |r| r.cosine);
+    let avg_cos_f = avg(&results_f, |r| r.cosine);
 
     let avg_imb_before_a = avg(&results_a, |r| r.imbalance_before);
     let avg_imb_after_a = avg(&results_a, |r| r.imbalance_after);
@@ -614,6 +757,10 @@ fn main() {
     println!(
         "  │ E: Giv→OCT→VN→RTN│ {avg_mse_e:>10.6} │ {avg_cos_e:>10.6} │ {avg_imb_before_e:>10.2} │ {avg_imb_after_e:>10.2} │"
     );
+    let avg_imb_before_f = avg(&results_f, |r| r.imbalance_before);
+    println!(
+        "  │ F: OCT→RTN       │ {avg_mse_f:>10.6} │ {avg_cos_f:>10.6} │ {avg_imb_before_f:>10.2} │         N/A │"
+    );
     println!("  └──────────────────┴────────────┴────────────┴────────────┴────────────┘");
     println!();
 
@@ -623,6 +770,16 @@ fn main() {
     let mse_d_vs_b = (avg_mse_b - avg_mse_d) / avg_mse_b * 100.0;
     let mse_e_vs_b = (avg_mse_b - avg_mse_e) / avg_mse_b * 100.0;
     let mse_a_vs_c = (avg_mse_c - avg_mse_a) / avg_mse_c * 100.0;
+    let mse_d_vs_f = if avg_mse_f > 1e-10 {
+        (avg_mse_f - avg_mse_d) / avg_mse_f * 100.0
+    } else {
+        0.0
+    };
+    let mse_e_vs_f = if avg_mse_f > 1e-10 {
+        (avg_mse_f - avg_mse_e) / avg_mse_f * 100.0
+    } else {
+        0.0
+    };
 
     println!("  Relative MSE improvement over baseline (B):");
     println!("    A vs B: {mse_a_vs_b:+.2}%  (Had + VarN)");
@@ -630,6 +787,23 @@ fn main() {
     println!("    D vs B: {mse_d_vs_b:+.2}%  (OCT + VarN)");
     println!("    E vs B: {mse_e_vs_b:+.2}%  (Givens + OCT + VarN)");
     println!("    A vs C: {mse_a_vs_c:+.2}%  (added Hadamard)");
+    println!();
+
+    // ── T6: OCT+PQ+VarN vs OCT+PQ alone ────────────────────────
+    println!("  ┌─────────────────────────────────────────────────────────────┐");
+    println!("  │ T6: VarN effect on OCT pipelines (D vs F, E vs F)          │");
+    println!("  └─────────────────────────────────────────────────────────────┘");
+    println!();
+    println!("    OCT+VarN (D) vs OCT alone (F): {mse_d_vs_f:+.2}% MSE change");
+    println!("    Giv+OCT+VarN (E) vs OCT alone (F): {mse_e_vs_f:+.2}% MSE change");
+    let t6_d_pass = avg_mse_d <= avg_mse_f;
+    let t6_e_pass = avg_mse_e <= avg_mse_f;
+    if t6_d_pass || t6_e_pass {
+        println!("    ✓ VarN improves OCT pipeline quality");
+    } else {
+        println!("    ⚠ OCT pseudo-inverse is lossy — VarN may not improve quality");
+        println!("      with simplified OCT encoding. Real OCT codec needed.");
+    }
     println!();
 
     // ── Imbalance reduction ──────────────────────────────────────
@@ -651,6 +825,49 @@ fn main() {
     println!(
         "    Pipeline E: {imb_reduction_e:.1}%  ({avg_imb_before_e:.2} → {avg_imb_after_e:.2})"
     );
+    println!();
+
+    // ── Convergence analysis ───────────────────────────────────
+    let avg_convergence = |results: &[PipelineResult]| -> f32 {
+        let iters: Vec<f32> = results
+            .iter()
+            .filter_map(|r| r.convergence_iter)
+            .map(|k| k as f32)
+            .collect();
+        if iters.is_empty() {
+            return f32::NAN;
+        }
+        iters.iter().sum::<f32>() / iters.len() as f32
+    };
+
+    let conv_a = avg_convergence(&results_a);
+    let conv_c = avg_convergence(&results_c);
+    let conv_d = avg_convergence(&results_d);
+    let conv_e = avg_convergence(&results_e);
+
+    println!("  VarN convergence (iters to 95% of total imbalance reduction):");
+    if !conv_a.is_nan() {
+        println!("    Pipeline A (Had+VarN):   {conv_a:.1} iters (target ≤ 4)");
+    }
+    if !conv_c.is_nan() {
+        println!("    Pipeline C (VarN only):  {conv_c:.1} iters (target ≤ 4)");
+    }
+    if !conv_d.is_nan() {
+        println!("    Pipeline D (OCT+VarN):   {conv_d:.1} iters (target ≤ 4)");
+    }
+    if !conv_e.is_nan() {
+        println!("    Pipeline E (Giv+OCT+VN): {conv_e:.1} iters (target ≤ 4)");
+    }
+    let conv_target = 4.0;
+    let conv_pass = [conv_a, conv_c, conv_d, conv_e]
+        .iter()
+        .all(|c| c.is_nan() || *c <= conv_target);
+    if conv_pass {
+        println!("    ✓ T6 convergence target met: all pipelines ≤ 4 iters");
+    } else {
+        println!("    ⚠ Some pipelines need > 4 iters for 95% convergence");
+        println!("      Givens rotation provides partial equalization; VarN adds remaining.");
+    }
     println!();
 
     // ── Hypothesis check ─────────────────────────────────────────
@@ -694,6 +911,6 @@ fn main() {
     println!();
 
     println!("═══════════════════════════════════════════════════════════════════");
-    println!("  Experiment complete — {NUM_TILES} tiles × 5 pipelines");
+    println!("  Experiment complete — {NUM_TILES} tiles × 6 pipelines");
     println!("═══════════════════════════════════════════════════════════════════");
 }
