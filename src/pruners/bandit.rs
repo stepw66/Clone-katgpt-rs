@@ -387,6 +387,11 @@ pub struct BanditPruner<P: ScreeningPruner> {
     /// Temperature for softmax in soft-route mode. Higher = more uniform blending,
     /// lower = sharper (approaches hard-route as τ → 0).
     soft_route_tau: f32,
+    /// Graduated reward scorer for richer bandit signal.
+    ///
+    /// When `Some`, `update_with_trace` uses `partial_score` instead of binary reward.
+    #[cfg(feature = "partial_scoring")]
+    partial_scorer: Option<Box<dyn katgpt_core::PartialScorer>>,
 }
 
 impl<P: ScreeningPruner> BanditPruner<P> {
@@ -404,6 +409,8 @@ impl<P: ScreeningPruner> BanditPruner<P> {
             dual_cutoff: 0.0,
             soft_route: true,
             soft_route_tau: 1.0,
+            #[cfg(feature = "partial_scoring")]
+            partial_scorer: None,
         }
     }
 
@@ -428,7 +435,54 @@ impl<P: ScreeningPruner> BanditPruner<P> {
             dual_cutoff: 0.0,
             soft_route: true,
             soft_route_tau: 1.0,
+            #[cfg(feature = "partial_scoring")]
+            partial_scorer: None,
         }
+    }
+
+    // ── Partial Scoring (Plan 191 T1.4) ────────────────────────────
+
+    /// Create a bandit pruner with a graduated reward scorer.
+    ///
+    /// Uses `partial_score` for richer signal than binary win/loss.
+    #[cfg(feature = "partial_scoring")]
+    pub fn with_partial_scorer(
+        inner: P,
+        strategy: BanditStrategy,
+        num_arms: usize,
+        scorer: Box<dyn katgpt_core::PartialScorer>,
+    ) -> Self {
+        Self {
+            inner,
+            strategy,
+            stats: BanditStats::new(num_arms),
+            thompson_cache: vec![0.0; num_arms],
+            #[cfg(feature = "bandit")]
+            shared_stats: None,
+            dual_cutoff: 0.0,
+            soft_route: true,
+            soft_route_tau: 1.0,
+            partial_scorer: Some(scorer),
+        }
+    }
+
+    /// Update arm reward from a GameTrace using the PartialScorer.
+    ///
+    /// Falls back to binary final_reward when no scorer is set.
+    #[cfg(feature = "partial_scoring")]
+    #[inline]
+    pub fn update_with_trace(&mut self, arm: usize, trace: &katgpt_core::GameTrace) {
+        let reward = match &self.partial_scorer {
+            Some(scorer) => scorer.partial_score(trace),
+            None => {
+                if trace.final_reward > 0.0 {
+                    1.0
+                } else {
+                    0.0
+                }
+            }
+        };
+        self.update_arm(arm, reward);
     }
 
     // ── Shared Stats Accessors ─────────────────────────────────
@@ -2529,5 +2583,132 @@ mod tests {
             per_tree_ns < 500_000.0,
             "GOAT 175: per-tree overhead should be < 500µs, got {per_tree_ns:.0}ns"
         );
+    }
+
+    // ── Partial Scoring Tests (Plan 191 T1.4) ────────────────────
+
+    #[cfg(feature = "partial_scoring")]
+    mod partial_scoring {
+        use super::*;
+        use crate::pruners::BomberPartialScorer;
+        use katgpt_core::GameTrace;
+
+        fn win_trace() -> GameTrace {
+            GameTrace {
+                survival_ticks: 200,
+                kills: 3,
+                actions_taken: 50,
+                max_ticks: 200,
+                final_reward: 1.0,
+            }
+        }
+
+        fn loss_trace() -> GameTrace {
+            GameTrace {
+                survival_ticks: 30,
+                kills: 0,
+                actions_taken: 10,
+                max_ticks: 200,
+                final_reward: 0.0,
+            }
+        }
+
+        #[test]
+        fn test_update_with_trace_scorer_set() {
+            let scorer = Box::new(BomberPartialScorer { max_ticks: 200 });
+            let mut bp = BanditPruner::with_partial_scorer(
+                NoScreeningPruner,
+                BanditStrategy::Ucb1,
+                4,
+                scorer,
+            );
+            let trace = win_trace();
+            bp.update_with_trace(0, &trace);
+            // BomberPartialScorer on win_trace: survival=1.0, kills=1.0, efficiency=0.06
+            // score = 0.4*1.0 + 0.3*1.0 + 0.2*1.0 + 0.1*0.06 = 0.906
+            let q = bp.q_values()[0];
+            assert!(q > 0.8, "expected high score from scorer, got {q}");
+        }
+
+        #[test]
+        fn test_update_with_trace_no_scorer_binary_fallback() {
+            let mut bp = BanditPruner::new(NoScreeningPruner, BanditStrategy::Ucb1, 4);
+            let trace = loss_trace();
+            bp.update_with_trace(0, &trace);
+            let q = bp.q_values()[0];
+            assert!(
+                (q - 0.0).abs() < f32::EPSILON,
+                "expected 0.0 for loss, got {q}"
+            );
+
+            let trace_w = win_trace();
+            bp.update_with_trace(1, &trace_w);
+            let q = bp.q_values()[1];
+            assert!(
+                (q - 1.0).abs() < f32::EPSILON,
+                "expected 1.0 for win, got {q}"
+            );
+        }
+
+        #[test]
+        fn test_with_partial_scorer_constructor() {
+            let scorer = Box::new(BomberPartialScorer { max_ticks: 100 });
+            let bp = BanditPruner::with_partial_scorer(
+                NoScreeningPruner,
+                BanditStrategy::EpsilonGreedy {
+                    epsilon: 0.1,
+                    decay: 0.99,
+                },
+                8,
+                scorer,
+            );
+            // Verify it compiles and drops cleanly
+            drop(bp);
+            // Also suppress unused GameTrace lint
+            let _ = win_trace();
+            let _ = loss_trace();
+        }
+
+        #[test]
+        fn test_default_backward_compat() {
+            let mut bp = BanditPruner::new(NoScreeningPruner, BanditStrategy::Ucb1, 4);
+            // Default has no scorer — update_with_trace uses binary fallback
+            let trace = GameTrace {
+                survival_ticks: 100,
+                kills: 5,
+                actions_taken: 30,
+                max_ticks: 200,
+                final_reward: 1.0,
+            };
+            bp.update_with_trace(0, &trace);
+            assert!((bp.q_values()[0] - 1.0).abs() < f32::EPSILON);
+        }
+
+        #[test]
+        fn test_score_breakdown_via_update() {
+            let scorer = Box::new(BomberPartialScorer { max_ticks: 200 });
+            let mut bp = BanditPruner::with_partial_scorer(
+                NoScreeningPruner,
+                BanditStrategy::Ucb1,
+                4,
+                scorer,
+            );
+            // Partial loss: survived 100/200 ticks, no kills
+            let trace = GameTrace {
+                survival_ticks: 100,
+                kills: 0,
+                actions_taken: 40,
+                max_ticks: 200,
+                final_reward: 0.0,
+            };
+            bp.update_with_trace(0, &trace);
+            let q = bp.q_values()[0];
+            // survival=0.5, kills=0.0, safety=0.5, efficiency=0.0
+            // score = 0.4*0.5 + 0.3*0.0 + 0.2*0.5 + 0.1*0.0 = 0.3
+            assert!(
+                (q - 0.3).abs() < 0.01,
+                "expected ~0.3 for partial survival, got {q}"
+            );
+        }
     }
 }
