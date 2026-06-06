@@ -64,8 +64,8 @@ Distill OSSM-PINN's oscillatory state-space principles into katgpt-rs as modelle
   - Feature gate: `osc_kv` (opt-in, NOT default)
   - Only active when both `osc_kv` and `bandit` features enabled
 
-- [-] Benchmark: OscKV vs standard attention vs SpectralQuant
-  - **Deferred: needs real model weights and cyclic/non-cyclic benchmark corpus**
+- [x] Benchmark: OscKV vs standard attention vs SpectralQuant
+  - `tests/bench_189_osc_kv_goat.rs` — 6 GOAT tests (G1–G5 + summary), commit `a6f94054`
   - On cyclic sequences (code generation with loops)
   - On non-cyclic sequences (prose, dialogue)
   - Metric: per-token latency, quality (perplexity surrogate)
