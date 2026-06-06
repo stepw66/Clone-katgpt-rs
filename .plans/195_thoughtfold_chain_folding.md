@@ -41,48 +41,48 @@ ThinkingController (Plan 194)
 ## Tasks
 
 ### T1: Core Types
-- [ ] Create `src/fold/mod.rs` — module root
-- [ ] Create `src/fold/step_boundary.rs` — `StepBoundary` struct, `StepBoundaryTracker`
-  - Detects `\n\n`, `</think_*>` tag transitions as step boundaries
+- [x] Create `src/fold/mod.rs` — module root
+- [x] Create `src/fold/step_boundary.rs` — `StepBoundary` struct, `StepBoundaryTracker`
+  - Detects `\n\n`, `</think_* >` tag transitions as step boundaries
   - Maintains `Vec<(token_pos, step_index)>` mapping
-- [ ] Create `src/fold/types.rs` — `FoldDecision` enum (`Keep`, `Fold`, `Anchor`), `FoldResult` struct
+- [x] Create `src/fold/types.rs` — `FoldDecision` enum (`Keep`, `Fold`, `Anchor`), `FoldResult` struct
 
 ### T2: Attention Importance Scorer
-- [ ] Create `src/fold/attention_importance.rs`
+- [x] Create `src/fold/attention_importance.rs`
   - `AttentionImportance` struct
   - `fn score_steps(scores: &[f32], boundaries: &[StepBoundary]) -> Vec<f32>` — average attention per step
   - Uses `ForwardContext.scores` from middle transformer layer
   - O(n) scan over attention scores, grouped by step boundaries
 
 ### T3: ChainFolder (ScreeningPruner)
-- [ ] Create `src/fold/chain_folder.rs`
+- [x] Create `src/fold/chain_folder.rs`
   - `ChainFolder` implements `ScreeningPruner` trait
   - `fn relevance(&self, token_pos: usize, context: &FoldContext) -> f32`
     - Returns `1.0` for essential steps, `0.0` for foldable steps, `0.5` for anchor steps
   - `fn fold_budget(&self) -> f32` — fraction of steps to keep (from bandit)
-- [ ] Binary search fold logic:
+- [x] Binary search fold logic:
    - Start with all steps, binary search on retention ratio
   - At each iteration: prune bottom-k% steps by importance, verify via SpeculativeVerifier
   - If verification passes → accept fold, update z_best
   - If verification fails → reject, increase k
 
 ### T4: FoldCache (KV Rollback)
-- [ ] Create `src/fold/fold_cache.rs`
+- [x] Create `src/fold/fold_cache.rs`
   - `FoldCache` wraps `MultiLayerKVCache`
   - `fn truncate_to_step(step: usize)` — rollback KV cache to step boundary
   - `fn replay_essential(steps: &[usize], model: &mut dyn InferenceBackend)` — replay essential tokens
-- [ ] Ensure KV rollback doesn't corrupt subsequent generation (test with deterministic model)
+- [x] Ensure KV rollback doesn't corrupt subsequent generation (test with deterministic model)
 
 ### T5: Integration with ThinkingController
-- [ ] Extend `ThinkingMode::Latent` with `fold_budget: f32` field
-- [ ] Wire `ChainFolder` into the thinking pipeline (when `chain_fold` feature enabled)
-- [ ] Add fold statistics to `ThinkingFeedback` (tokens_saved, steps_folded)
+- [x] Extend `ThinkingMode::Latent` with `fold_budget: f32` field
+- [x] Wire `ChainFolder` into the thinking pipeline (when `chain_fold` feature enabled)
+- [x] Add fold statistics to `ThinkingFeedback` (tokens_saved, steps_folded)
 
 ### T6: Bandit Self-Tuning
-- [ ] Add `fold_budget` arm to `ThinkingBandit`
+- [x] Add `fold_budget` arm to `ThinkingBandit`
   - Reward: `acceptance_rate * token_reduction_ratio`
   - Penalty: `(1 - acceptance_rate) * accuracy_drop_penalty`
-- [ ] Thompson sampling for fold budget selection
+- [x] Thompson sampling for fold budget selection
 
 ### T7: GOAT Proof Tests
 - [ ] Create `tests/goat_195_chain_fold.rs`
@@ -95,7 +95,7 @@ ThinkingController (Plan 194)
   - Print token counts, step counts, accuracy
 
 ### T8: Feature Gate + Documentation
-- [ ] Add `chain_fold` feature to `Cargo.toml` (default-OFF)
+- [x] Add `chain_fold` feature to `Cargo.toml` (default-OFF)
 - [ ] Update README with ThoughtFold section
 - [ ] If GOAT passes all 4 criteria → flip to default-ON
 

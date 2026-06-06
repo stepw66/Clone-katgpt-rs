@@ -18,6 +18,8 @@ pub mod dllm;
 pub mod ega_attn;
 #[cfg(feature = "feedback")]
 pub mod feedback;
+#[cfg(feature = "chain_fold")]
+pub mod fold;
 #[cfg(feature = "freq_bandit")]
 pub mod freq_bandit;
 #[cfg(feature = "gdn2_attention")]
