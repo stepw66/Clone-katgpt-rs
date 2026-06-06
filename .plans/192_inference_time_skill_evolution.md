@@ -134,14 +134,14 @@ pub struct SkillCatalog {
   - blake3 hash of pruner identity for integrity check on thaw
 - [x] Add `PrunerMemory` field to `BanditPruner` (behind `skill_lifecycle` feature)
 - [x] Add `PrunerMemory` field to `AbsorbCompressLayer` (behind `skill_lifecycle` feature)
-- [ ] Integrate with freeze/thaw: memory persists across sessions alongside bandit stats
+- [x] Integrate with freeze/thaw: memory persists across sessions alongside bandit stats
 - [x] Unit tests: append, retrieve, ring-buffer wrap, freeze/thaw roundtrip, bounded eviction
 - [x] Bench: append throughput (target: <10ns per append, no allocation)
 
 ### Task 2: Test-Gated Registration (PrunerTestGate)
 
 - [x] Create `src/pruners/skill_test.rs` with `PrunerTestGate` trait and `TestCase`/`TestResult` types
-- [ ] Create `WasmTestGate` implementation — runs `validator.wasm` against known game states
+- [x] Create `WasmTestGate` implementation — runs `validator.wasm` against known game states
 - [x] Create `BomberTestGate` — pre-built test cases for bomber arena (known-death states, known-safe states)
 - [x] Integrate with `AbsorbCompress::compress()`: before promoting an arm, run test gate
   - Only promote if test passes AND q_threshold met
@@ -152,10 +152,10 @@ pub struct SkillCatalog {
 
 - [x] Create `src/pruners/skill_catalog.rs` with `SkillCatalog`, `SkillDescriptor`, `TestStatus`
 - [x] Catalog is always in memory — lightweight (name + description + arm_index per skill)
-- [ ] Full pruner loaded on-demand when bandit selects arm (lazy loading via `HotSwapPruner`)
-- [ ] Integration with `BanditPruner`: bandit selects from catalog descriptors, lazy-loads the winner
+- [x] Full pruner loaded on-demand when bandit selects arm (lazy loading via `HotSwapPruner`)
+- [x] Integration with `BanditPruner`: bandit selects from catalog descriptors, lazy-loads the winner
 - [x] Use papaya lock-free `HashMap` for catalog (no `Arc<RwLock<HashMap>>`) — optional dep, Vec fallback
-- [ ] Benchmark: measure KV cache pressure reduction with catalog (descriptors only) vs full loading
+- [-] Benchmark: measure KV cache pressure reduction with catalog (descriptors only) vs full loading
 
 ### Task 4: GOAT Proof & Default-On Gate
 

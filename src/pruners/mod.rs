@@ -517,7 +517,9 @@ pub use skill_test::{
 };
 
 #[cfg(feature = "skill_lifecycle")]
-pub use skill_catalog::{SkillCatalog, SkillDescriptor};
+pub use skill_catalog::{
+    FileSkillLoader, LazySkillLoader, SkillCatalog, SkillDescriptor, write_arm_data,
+};
 
 // ── NDS Curvature Proxy — Modelless Inference-Time Budget Control (Plan 186) ──
 
