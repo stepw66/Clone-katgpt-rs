@@ -112,6 +112,64 @@ pub fn dflash_predict_ar_with(
     max_steps
 }
 
+/// DFlash predict with Domino LoRA correction applied to logits.
+/// After base logits are computed, applies DominoAdapter correction ΔL.
+/// GRU state is maintained across positions in the draft block.
+#[cfg(feature = "domino_lora")]
+pub fn dflash_predict_ar_with_domino(
+    sctx: &mut SpeculativeContext,
+    draft_weights: &TransformerWeights,
+    draft_config: &Config,
+    token: usize,
+    pos: usize,
+    rng: &mut Rng,
+    domino: &mut super::domino_lora::DominoLoraCorrection,
+    gru_state: &mut [f32],
+) -> usize {
+    // NOTE: Caller is responsible for resetting sctx before calling this function.
+    let max_steps = draft_config
+        .draft_lookahead
+        .min(draft_config.block_size.saturating_sub(pos));
+    let vocab_size = draft_config.vocab_size;
+    let temperature = draft_config.temperature;
+    let n_embd = draft_config.n_embd;
+
+    let mut cur_token = token;
+    for step in 0..max_steps {
+        let _logits = forward(
+            &mut sctx.ctx,
+            draft_weights,
+            &mut sctx.cache,
+            cur_token,
+            pos + step,
+            draft_config,
+        );
+
+        // Apply Domino LoRA correction: ΔL += w_up @ relu(w_down @ [hidden; gru_state])
+        domino.correct(&sctx.ctx.hidden_state, gru_state, &mut sctx.ctx.logits);
+
+        // Update GRU state using the current token's embedding
+        let embed_offset = cur_token * n_embd;
+        let token_embed = &draft_weights.wte[embed_offset..embed_offset + n_embd];
+        // Use scratch buffer to avoid allocating — swap gru_state via gru_out
+        let mut new_gru = vec![0.0f32; domino.gru_hidden_size()];
+        domino.gru_step(token_embed, gru_state, &mut new_gru);
+        gru_state.copy_from_slice(&new_gru);
+
+        sctx.probs_buf.copy_from_slice(&sctx.ctx.logits);
+        softmax_scaled(&mut sctx.probs_buf, 1.0 / temperature);
+
+        let next_token = sample_from_distribution(&sctx.probs_buf, rng);
+        let start = step * vocab_size;
+        sctx.marginals_flat[start..start + vocab_size].copy_from_slice(&sctx.probs_buf);
+        sctx.sampled_tokens[step] = next_token;
+        cur_token = next_token;
+    }
+
+    sctx.steps_populated = max_steps;
+    max_steps
+}
+
 /// Zero-alloc variant of `dflash_predict_conditioned`.
 ///
 /// Reuses pre-allocated buffers from `SpeculativeContext`.

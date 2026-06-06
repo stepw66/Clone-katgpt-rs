@@ -1,6 +1,9 @@
 pub mod budget_compat;
+
 pub mod dd_tree;
 pub mod dflash;
+#[cfg(feature = "domino_lora")]
+pub mod domino_lora;
 pub mod drafter_lora;
 pub mod prefill;
 pub mod residency_audit;
@@ -245,8 +248,14 @@ pub use dflash::marginal_fusion_blend;
 pub use types::MarginalFusionConfig;
 
 // ── DFlare KV Routing re-exports (Plan 174, feature: dflare_kv_routing) ──
+
+// ── Domino LoRA correction re-exports (Plan 231, feature: domino_lora) ──
+#[cfg(feature = "domino_lora")]
+pub use dflash::dflash_predict_ar_with_domino;
 #[cfg(feature = "dflare_kv_routing")]
 pub use dflash::dflash_predict_conditioned_with_routing;
+#[cfg(feature = "domino_lora")]
+pub use domino_lora::DominoLoraCorrection;
 #[cfg(feature = "dflare_kv_routing")]
 pub use types::KvRoutingConfig;
 
