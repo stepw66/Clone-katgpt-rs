@@ -628,3 +628,7 @@ required-features = ["wealth_pruner"]
 [[test]]
 name = "and_or_goat"
 required-features = ["and_or_dtree"]
+
+[[test]]
+name = "freq_bandit_goat_proof"
+required-features = ["freq_bandit"]
