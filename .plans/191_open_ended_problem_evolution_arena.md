@@ -49,7 +49,7 @@ graph TD
 - [x] **T1.4** Extend `BanditPruner` to accept `PartialScorer` reward
   - When `partial_scoring` feature enabled: reward = `partial_score()` not `win/loss`
   - When disabled: existing binary behavior unchanged
-- [ ] **T1.5** GOAT proof: bomber arena with partial scoring ≥ binary scoring
+- [-] **T1.5** GOAT proof: bomber arena with partial scoring ≥ binary scoring — **deferred: needs arena running**
   - Test: `tests/partial_scoring_goat.rs`
   - Metric: bandit convergence speed (episodes to stable arm selection)
   - Expected: ≥30% faster convergence with partial reward
@@ -105,7 +105,7 @@ graph TD
 - [x] **T4.3** Example: `idea_divergence_demo.rs` — divergence filtering prevents collapse
   - Shows 10 arms converging without filter vs maintaining diversity with filter
   - Prints divergence matrix
-- [ ] **T4.4** CPU/GPU auto-route: `ThinkingController` integration
+- [-] **T4.4** CPU/GPU auto-route: `ThinkingController` integration — **deferred: needs GpuLoadSignal from Plan 194**
   - When GPU load high: `ProblemMutator` uses simpler mutations (CPU-only)
   - When GPU load low: use `ThinkingBandit` to decide mutation complexity (think → complex mutation)
   - Leverages existing `GpuLoadSignal` from Plan 194

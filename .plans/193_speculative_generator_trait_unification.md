@@ -94,9 +94,9 @@ graph TD
   - `cargo test --features speculative_generator prof_bench -- --nocapture`
   - Compare P50/P99 latency before and after trait abstraction
 
-### Phase 2: riir-ai — ActionGenerator Implementation (Model-based)
+### Phase 2: riir-ai — ActionGenerator Implementation (Model-based) — **DEFERRED: different repo (riir-ai)**
 
-- [ ] **T8:** Implement `ActionGenerator` in riir-engine
+- [-] **T8:** Implement `ActionGenerator` in riir-engine
   - Condition = GameState
   - Output = Action (position, velocity, intent)
   - Uses existing LoRA scoring or bandit selection as the generation mechanism
@@ -115,9 +115,9 @@ graph TD
   - After: DDTree exploration with WASM validation
   - Show valid-action ratio improvement
 
-### Phase 3: CPU/GPU Auto-Route (Cross-Cutting)
+### Phase 3: CPU/GPU Auto-Route (Cross-Cutting) — **DEFERRED: depends on Phase 2**
 
-- [ ] **T12:** Extend `InferenceRouter` to dispatch `SpeculativeGenerator::generate()`
+- [-] **T12:** Extend `InferenceRouter` to dispatch `SpeculativeGenerator::generate()`
   - `TokenGenerator` routes to CPU/GPU/ANE via existing `TriggerGate`
   - `ActionGenerator` routes to CPU (WASM validation is always CPU-bound)
 

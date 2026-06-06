@@ -146,7 +146,7 @@ pub struct SkillCatalog {
 - [x] Integrate with `AbsorbCompress::compress()`: before promoting an arm, run test gate
   - Only promote if test passes AND q_threshold met
   - Log failure reasons for debugging
-- [ ] GOAT proof: bomber arena with test gate vs without (expect: test gate prevents ≥15% regression on edge cases)
+- [-] GOAT proof: bomber arena with test gate vs without — **deferred: needs arena running**
 
 ### Task 3: Progressive Disclosure Catalog (SkillCatalog)
 
@@ -157,12 +157,12 @@ pub struct SkillCatalog {
 - [x] Use papaya lock-free `HashMap` for catalog (no `Arc<RwLock<HashMap>>`) — optional dep, Vec fallback
 - [-] Benchmark: measure KV cache pressure reduction with catalog (descriptors only) vs full loading
 
-### Task 4: GOAT Proof & Default-On Gate
+### Task 4: GOAT Proof & Default-On Gate — **DEFERRED: needs arena running**
 
-- [ ] Bomber arena: HL+Lifecycle vs HL vs HL+WASM (expect: HL+Lifecycle > HL > HL+WASM)
-- [ ] Go tournament: with and without test-gated validators (expect: fewer illegal moves, faster convergence)
-- [ ] Benchmark: bandit selection throughput with and without catalog overhead (target: <1% regression)
-- [ ] Benchmark: memory overhead per pruner with `PrunerMemory` (target: <64KB per pruner)
+- [-] Bomber arena: HL+Lifecycle vs HL vs HL+WASM (expect: HL+Lifecycle > HL > HL+WASM)
+- [-] Go tournament: with and without test-gated validators (expect: fewer illegal moves, faster convergence)
+- [-] Benchmark: bandit selection throughput with and without catalog overhead (target: <1% regression)
+- [-] Benchmark: memory overhead per pruner with `PrunerMemory` (target: <64KB per pruner)
 - [ ] If GOAT (no perf regression + accuracy gain): remove feature gate, make default
 - [ ] If NOT GOAT: keep behind `skill_lifecycle` feature flag, document regression
 

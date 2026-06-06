@@ -14,7 +14,10 @@
 //! Target: <10ns per append, zero allocation on append.
 //! All writes use `AtomicU32` cursor wrapping — no lock, no mutex.
 
+use std::path::Path;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+
+use crate::pruners::freeze::{load_frozen, save_frozen};
 
 // ── MemoryEntry ──────────────────────────────────────────────────
 
@@ -65,6 +68,16 @@ pub struct PrunerMemory {
     capacity: u32,
     /// Total entries written (monotonically increasing).
     total_written: AtomicU64,
+}
+
+impl std::fmt::Debug for PrunerMemory {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PrunerMemory")
+            .field("capacity", &self.capacity)
+            .field("total_written", &self.total_written)
+            .field("head", &self.head)
+            .finish_non_exhaustive()
+    }
 }
 
 impl PrunerMemory {
@@ -159,6 +172,153 @@ impl PrunerMemory {
 #[inline]
 pub fn compute_hash(id: &str) -> [u8; 32] {
     blake3::hash(id.as_bytes()).into()
+}
+
+// ── FrozenPrunerMemory ───────────────────────────────────────────
+
+/// On-disk representation of `PrunerMemory` for freeze/thaw persistence.
+///
+/// Uses a fixed-size array instead of `Box<[MemoryEntry]>` so the struct
+/// is fully `repr(C)` safe (no pointers). Magic + version validated on load.
+#[repr(C)]
+pub struct FrozenPrunerMemory {
+    magic: [u8; 4],
+    version: u32,
+    /// blake3 hash of pruner identity for integrity verification.
+    pruner_hash: [u8; 32],
+    /// Ring buffer capacity (must match entries.len()).
+    capacity: u32,
+    /// Write cursor at time of freeze.
+    head: u32,
+    /// Total entries written at time of freeze.
+    total_written: u64,
+    /// Actual number of entries stored (may be < capacity if not full).
+    entry_count: u32,
+    /// Fixed-size ring buffer storage (max 1024 entries).
+    entries: [MemoryEntry; Self::MAX_ENTRIES],
+}
+
+impl FrozenPrunerMemory {
+    const MAGIC: [u8; 4] = *b"PMEM";
+    const VERSION: u32 = 1;
+    const MAX_ENTRIES: usize = 1024;
+
+    /// Validate magic and version fields.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.magic != Self::MAGIC {
+            return Err(format!(
+                "FrozenPrunerMemory: bad magic {:?}, expected {:?}",
+                &self.magic,
+                &Self::MAGIC
+            ));
+        }
+        if self.version != Self::VERSION {
+            return Err(format!(
+                "FrozenPrunerMemory: version {} not supported (expected {})",
+                self.version,
+                Self::VERSION
+            ));
+        }
+        Ok(())
+    }
+}
+
+impl PrunerMemory {
+    /// Snapshot current state into a `repr(C)` safe frozen struct.
+    ///
+    /// Panics if capacity exceeds `FrozenPrunerMemory::MAX_ENTRIES` (1024).
+    pub fn freeze(&self) -> FrozenPrunerMemory {
+        assert!(
+            self.capacity as usize <= FrozenPrunerMemory::MAX_ENTRIES,
+            "PrunerMemory capacity {} exceeds FrozenPrunerMemory::MAX_ENTRIES {}",
+            self.capacity,
+            FrozenPrunerMemory::MAX_ENTRIES
+        );
+
+        let total = self.total_written.load(Ordering::Relaxed);
+        let head = self.head.load(Ordering::Relaxed) as usize;
+        let entry_count = (total.min(self.capacity as u64)) as u32;
+
+        let mut entries =
+            [MemoryEntry::new(0, 0.0, false, false, 0); FrozenPrunerMemory::MAX_ENTRIES];
+        // Copy entries from ring buffer to linear array (oldest first).
+        if entry_count > 0 {
+            let cap = self.capacity as usize;
+            let start = (head + cap - entry_count as usize) & (cap - 1);
+            for i in 0..entry_count as usize {
+                let src_idx = (start + i) & (cap - 1);
+                entries[i] = unsafe { *self.entries.as_ptr().add(src_idx) };
+            }
+        }
+
+        FrozenPrunerMemory {
+            magic: FrozenPrunerMemory::MAGIC,
+            version: FrozenPrunerMemory::VERSION,
+            pruner_hash: self.pruner_hash,
+            capacity: self.capacity,
+            head: head as u32,
+            total_written: total,
+            entry_count,
+            entries,
+        }
+    }
+
+    /// Restore from a frozen snapshot.
+    ///
+    /// Returns a new `PrunerMemory` with entries placed back into the ring buffer
+    /// in the same positions they occupied at freeze time.
+    pub fn thaw(frozen: &FrozenPrunerMemory) -> Result<Self, String> {
+        frozen.validate()?;
+
+        if frozen.capacity as usize > FrozenPrunerMemory::MAX_ENTRIES {
+            return Err(format!(
+                "FrozenPrunerMemory capacity {} exceeds MAX_ENTRIES {}",
+                frozen.capacity,
+                FrozenPrunerMemory::MAX_ENTRIES
+            ));
+        }
+
+        let cap = frozen.capacity.next_power_of_two() as usize;
+        let mut entries = vec![MemoryEntry::new(0, 0.0, false, false, 0); cap].into_boxed_slice();
+
+        // Restore entries into their ring-buffer positions.
+        for i in 0..frozen.entry_count as usize {
+            // In the frozen struct entries are stored oldest-first (0..entry_count).
+            // Compute the original ring-buffer position for each.
+            let ring_idx =
+                (frozen.head as usize + cap - frozen.entry_count as usize + i) & (cap - 1);
+            entries[ring_idx] = frozen.entries[i];
+        }
+
+        Ok(Self {
+            pruner_hash: frozen.pruner_hash,
+            entries,
+            head: AtomicU32::new(frozen.head),
+            capacity: cap as u32,
+            total_written: AtomicU64::new(frozen.total_written),
+        })
+    }
+
+    /// Convenience: freeze + save to disk.
+    pub fn save_to(&self, path: &Path) -> Result<(), String> {
+        let frozen = self.freeze();
+        save_frozen(path, &frozen)
+    }
+
+    /// Convenience: load from disk + thaw + verify identity.
+    ///
+    /// Fails if the loaded pruner_hash doesn't match `pruner_id`.
+    pub fn load_from(path: &Path, pruner_id: &str) -> Result<Self, String> {
+        let frozen: FrozenPrunerMemory = load_frozen(path)?;
+        let mem = Self::thaw(&frozen)?;
+        if !mem.verify_identity(pruner_id) {
+            return Err(format!(
+                "Identity mismatch: loaded memory does not match pruner_id {:?}",
+                pruner_id
+            ));
+        }
+        Ok(mem)
+    }
 }
 
 // ── Tests ────────────────────────────────────────────────────────
@@ -288,6 +448,111 @@ mod tests {
             "append should be <100ns, got {per_append:?}"
         );
     }
+
+    // ── Freeze/Thaw Tests ──────────────────────────────────────────
+
+    #[test]
+    fn test_freeze_thaw_roundtrip() {
+        let mem = PrunerMemory::new(16, "freeze_test");
+        for i in 0..10u64 {
+            mem.append(MemoryEntry::new(
+                i as u16,
+                i as f32 * 0.1,
+                i == 3,
+                i > 7,
+                i * 100,
+            ));
+        }
+
+        let frozen = mem.freeze();
+        assert_eq!(frozen.magic, *b"PMEM");
+        assert_eq!(frozen.version, 1);
+        assert_eq!(frozen.entry_count, 10);
+        assert_eq!(frozen.capacity, 16);
+
+        let restored = PrunerMemory::thaw(&frozen).unwrap();
+        assert_eq!(restored.capacity(), 16);
+        assert_eq!(restored.total_entries(), 10);
+        assert!(restored.verify_identity("freeze_test"));
+
+        let original_recent = mem.recent(10);
+        let restored_recent = restored.recent(10);
+        assert_eq!(original_recent.len(), restored_recent.len());
+        for (o, r) in original_recent.iter().zip(restored_recent.iter()) {
+            assert_eq!(o.arm, r.arm);
+            assert_eq!(o.reward.to_bits(), r.reward.to_bits());
+            assert_eq!(o.is_edge_case, r.is_edge_case);
+            assert_eq!(o.is_failure, r.is_failure);
+            assert_eq!(o.ts, r.ts);
+        }
+    }
+
+    #[test]
+    fn test_freeze_thaw_wrap() {
+        let mem = PrunerMemory::new(4, "wrap_freeze");
+        // Write 7 entries into capacity-4 buffer — oldest 3 overwritten.
+        for i in 0..7u64 {
+            mem.append(MemoryEntry::new(i as u16, i as f32, false, false, i));
+        }
+
+        let frozen = mem.freeze();
+        assert_eq!(frozen.entry_count, 4);
+
+        let restored = PrunerMemory::thaw(&frozen).unwrap();
+        assert_eq!(restored.total_entries(), 7);
+        let recent = restored.recent(4);
+        assert_eq!(recent.len(), 4);
+        // Arms 3, 4, 5, 6 survived (0, 1, 2 overwritten).
+        assert_eq!(recent[0].arm, 3);
+        assert_eq!(recent[3].arm, 6);
+    }
+
+    #[test]
+    fn test_save_load_roundtrip() {
+        use tempfile::tempdir;
+
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("memory.bin");
+
+        let mem = PrunerMemory::new(8, "disk_test");
+        for i in 0..5u64 {
+            mem.append(MemoryEntry::new(i as u16, 0.5, i == 2, i == 4, i));
+        }
+
+        mem.save_to(&path).unwrap();
+        assert!(path.exists());
+
+        let loaded = PrunerMemory::load_from(&path, "disk_test").unwrap();
+        assert_eq!(loaded.total_entries(), 5);
+        assert_eq!(loaded.capacity(), 8);
+
+        let recent = loaded.recent(5);
+        assert_eq!(recent.len(), 5);
+        assert_eq!(recent[0].arm, 0);
+        assert_eq!(recent[4].arm, 4);
+        assert!(recent[2].is_edge_case);
+        assert!(recent[4].is_failure);
+    }
+
+    #[test]
+    fn test_thaw_wrong_identity() {
+        use tempfile::tempdir;
+
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("memory.bin");
+
+        let mem = PrunerMemory::new(8, "correct_id");
+        mem.append(MemoryEntry::new(1, 0.9, false, false, 0));
+        mem.save_to(&path).unwrap();
+
+        let result = PrunerMemory::load_from(&path, "wrong_id");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("Identity mismatch"),
+            "expected identity mismatch error, got: {err}"
+        );
+    }
 }
 
-// TL;DR: PrunerMemory — lock-free append-only ring buffer with blake3 integrity hash. O(1) append via AtomicU32, O(k) recent retrieval. Capacity rounded to power of 2 for masking.
+// TL;DR: PrunerMemory — lock-free append-only ring buffer with blake3 integrity hash. O(1) append via AtomicU32, O(k) recent retrieval. Freeze/thaw via FrozenPrunerMemory (repr(C), fixed 1024-entry array) for disk persistence. Capacity rounded to power of 2 for masking.

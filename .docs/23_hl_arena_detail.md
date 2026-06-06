@@ -259,7 +259,7 @@ Go GameState with full game logic (simple ko, Tromp-Taylor scoring), REST API br
 | `GoGZeroSelfPlay` | G-Zero self-play with HintDelta + absorb-compress |
 | `AutoResearchLoop` | UCB1 bandit over config arms, early stopping, evolution |
 
-Feature gate: `go` (implies `bandit`, `reqwest`). 693 tests pass. 7 examples.
+Feature gate: `go` (implies `bandit`, `reqwest`). 10 examples (`go_00`–`go_09`; `go_09` also needs `memo_reflections`).
 
 Run: `cargo run --features go --example go_06_bench --release`
 

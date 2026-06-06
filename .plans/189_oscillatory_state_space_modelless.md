@@ -49,9 +49,9 @@ Distill OSSM-PINN's oscillatory state-space principles into katgpt-rs as modelle
   - Expected: FreqBandit learns cyclic patterns → higher acceptance rate on cyclic input
   - Expected: No regression on non-cyclic input (bandit falls back to standard)
 
-### Phase 2: OscKV — Conditional, Opt-In
+### Phase 2: OscKV — Conditional, Opt-In — **DEFERRED: complex, opt-in**
 
-- [ ] Implement `OscKVCache` struct in `src/osc_kv.rs`
+- [-] Implement `OscKVCache` struct in `src/osc_kv.rs`
   - `OscKVState { y: Vec<f32>, z: Vec<f32>, omega_sq: Vec<f32>, beta: Vec<f32> }`
   - IMEX discretization (symplectic, energy-preserving)
   - Bandit-learned ω from inference-time feedback
@@ -69,9 +69,9 @@ Distill OSSM-PINN's oscillatory state-space principles into katgpt-rs as modelle
   - On non-cyclic sequences (prose, dialogue)
   - Metric: per-token latency, quality (perplexity surrogate)
 
-### Phase 3: ModalSpec — Experimental
+### Phase 3: ModalSpec — Experimental — **DEFERRED: experimental, not production**
 
-- [ ] Implement LinOSS cell in `crates/katgpt-core/src/linoss.rs`
+- [-] Implement LinOSS cell in `crates/katgpt-core/src/linoss.rs`
   - `LinOSSCell { omega_sq: [f32; H], beta: [f32; H] }`
   - `LinOSSState { y: [f32; H], z: [f32; H] }`
   - `imex_step(state, forcing, dt) -> LinOSSState`
@@ -96,23 +96,23 @@ Distill OSSM-PINN's oscillatory state-space principles into katgpt-rs as modelle
 
 ---
 
-## GOAT Gate
+## GOAT Gate — **DEFERRED: needs Phase 2/3 for full benchmark**
 
 Before any phase is marked default-on:
 
-- [ ] Benchmark: no performance regression when feature enabled vs disabled on same commit
-- [ ] Arena proof: at least one arena showing improvement (e.g., code generation latency)
+- [-] Benchmark: no performance regression when feature enabled vs disabled on same commit
+- [-] Arena proof: at least one arena showing improvement (e.g., code generation latency)
 - [ ] If GOAT: feature becomes default
 - [ ] If not GOAT: feature stays opt-in, document why
 
 ---
 
-## CPU/GPU Auto-Route
+## CPU/GPU Auto-Route — **DONE via FreqTierAdapter**
 
-- [ ] FreqBandit feeds into `TriggerGate` for compute tier selection
-- [ ] High-frequency decode → prefer GPU (faster verify iterations)
-- [ ] Low-frequency decode → CPU acceptable (deeper draft tree)
-- [ ] Automatic tier promotion/demotion based on FreqBandit arm selection history
+- [x] FreqBandit feeds into `TriggerGate` for compute tier selection
+- [x] High-frequency decode → prefer GPU (faster verify iterations)
+- [x] Low-frequency decode → CPU acceptable (deeper draft tree)
+- [x] Automatic tier promotion/demotion based on FreqBandit arm selection history
 
 ---
 

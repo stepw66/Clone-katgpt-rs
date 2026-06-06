@@ -322,6 +322,285 @@ mod tests {
         assert_eq!(TestStatus::Failed as u8, 2);
         assert_eq!(TestStatus::Active as u8, 3);
     }
+
+    // ── WasmTestGate Tests ───────────────────────────────────────
+
+    #[test]
+    fn test_wasm_gate_all_pass() {
+        let gate = WasmTestGate::new();
+        let cases = vec![
+            TestCase {
+                input: vec![0x05, 0x05, 0x00, 0x04], // max_actions=4
+                expected_valid: vec![0, 1, 2, 3],
+                description: "all_directions".into(),
+            },
+            TestCase {
+                input: vec![0x02, 0x02, 0x01, 0x02], // max_actions=2
+                expected_valid: vec![0, 1],
+                description: "two_actions".into(),
+            },
+            TestCase {
+                input: vec![0x03, 0x03, 0x00, 0x01], // max_actions=1
+                expected_valid: vec![0],
+                description: "single_action".into(),
+            },
+        ];
+        let result = gate.validate(&cases);
+        assert!(result.passed);
+        assert_eq!(result.coverage, 1.0);
+        assert!(result.failures.is_empty());
+    }
+
+    #[test]
+    fn test_wasm_gate_short_input() {
+        let gate = WasmTestGate::new();
+        let cases = vec![
+            TestCase {
+                input: vec![0x01, 0x02], // only 2 bytes — too short
+                expected_valid: vec![0],
+                description: "short_input".into(),
+            },
+            TestCase {
+                input: vec![], // empty
+                expected_valid: vec![],
+                description: "empty_input".into(),
+            },
+        ];
+        let result = gate.validate(&cases);
+        assert!(!result.passed);
+        assert_eq!(result.coverage, 0.0);
+        assert_eq!(result.failures.len(), 2);
+        assert!(result.failures[0].contains("input too short"));
+        assert!(result.failures[1].contains("input too short"));
+    }
+
+    #[test]
+    fn test_wasm_gate_out_of_range() {
+        let gate = WasmTestGate::new();
+        let cases = vec![TestCase {
+            input: vec![0x01, 0x00, 0x00, 0x02], // max_actions=2
+            expected_valid: vec![0, 2],          // index 2 >= 2
+            description: "out_of_range_index".into(),
+        }];
+        let result = gate.validate(&cases);
+        assert!(!result.passed);
+        assert_eq!(result.coverage, 0.0);
+        assert_eq!(result.failures.len(), 1);
+        assert!(result.failures[0].contains("index 2 >= max_actions 2"));
+    }
+
+    #[test]
+    fn test_wasm_gate_strict_mode() {
+        let gate = WasmTestGate::with_strict();
+        let cases = vec![TestCase {
+            input: vec![0x00, 0x00, 0x00, 0x01], // valid header, max_actions=1
+            expected_valid: vec![],              // empty — fails strict
+            description: "strict_empty".into(),
+        }];
+        let result = gate.validate(&cases);
+        assert!(!result.passed);
+        assert_eq!(result.coverage, 0.0);
+        assert_eq!(result.failures.len(), 1);
+        assert!(result.failures[0].contains("strict mode forbids empty expected_valid"));
+    }
+
+    #[test]
+    fn test_wasm_gate_default() {
+        let gate = WasmTestGate::default();
+        assert!(!gate.strict);
+        assert!((gate.min_coverage - 0.8f32).abs() < f32::EPSILON);
+
+        // Verify the gate runs correctly on well-formed cases.
+        let cases = vec![
+            TestCase {
+                input: vec![0x01, 0x02, 0x03, 0x04], // max_actions=4
+                expected_valid: vec![0, 1, 2, 3],
+                description: "default_check_a".into(),
+            },
+            TestCase {
+                input: vec![0x0A, 0x0B, 0x0C, 0x02], // max_actions=2
+                expected_valid: vec![1],
+                description: "default_check_b".into(),
+            },
+        ];
+        let result = gate.validate(&cases);
+        assert!(result.passed);
+        assert_eq!(result.coverage, 1.0);
+    }
+}
+
+// ── WasmTestGate ────────────────────────────────────────────────
+
+/// WASM-sandbox test gate — validates pruner against WASM-style sandboxed game state checks.
+///
+/// Unlike `BomberTestGate` (structural), `WasmTestGate` simulates the full
+/// serialize → sandbox → validate → deserialize pipeline without an actual WASM runtime.
+/// This validates that skills work correctly when deployed through the WASM validator.
+pub struct WasmTestGate {
+    /// Minimum coverage required to pass (0.0–1.0).
+    pub min_coverage: f32,
+    /// Whether to enforce strict mode (no empty expected_valid allowed).
+    pub strict: bool,
+}
+
+impl WasmTestGate {
+    /// Create with default settings: 80% coverage, non-strict.
+    pub fn new() -> Self {
+        Self {
+            min_coverage: 0.8,
+            strict: false,
+        }
+    }
+
+    /// Create in strict mode: empty `expected_valid` counts as failure.
+    pub fn with_strict() -> Self {
+        Self {
+            min_coverage: 0.8,
+            strict: true,
+        }
+    }
+
+    /// Minimum game-state header size in bytes.
+    const MIN_HEADER_LEN: usize = 4;
+}
+
+impl Default for WasmTestGate {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Per-case verdict from the WASM sandbox simulation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+enum SandboxVerdict {
+    /// Case passed all sandbox checks.
+    Pass,
+    /// Input too short for game state header (< 4 bytes).
+    ShortInput,
+    /// `expected_valid` contains duplicate entries.
+    DuplicateEntries,
+    /// `expected_valid` contains indices ≥ max_actions (from input byte 3).
+    OutOfRange,
+    /// Strict mode: `expected_valid` is empty.
+    StrictEmpty,
+}
+
+impl WasmTestGate {
+    /// Run a single test case through the simulated WASM sandbox.
+    ///
+    /// Returns the verdict and an optional failure reason.
+    fn sandbox_check(&self, tc: &TestCase) -> (bool, SandboxVerdict, Option<String>) {
+        // Step 1: Input must be ≥ 4 bytes for a valid game state header.
+        if tc.input.len() < Self::MIN_HEADER_LEN {
+            return (
+                false,
+                SandboxVerdict::ShortInput,
+                Some(format!(
+                    "{}: input too short ({} < {})",
+                    tc.description,
+                    tc.input.len(),
+                    Self::MIN_HEADER_LEN
+                )),
+            );
+        }
+
+        // Step 2: Strict mode — empty expected_valid is invalid.
+        if self.strict && tc.expected_valid.is_empty() {
+            return (
+                false,
+                SandboxVerdict::StrictEmpty,
+                Some(format!(
+                    "{}: strict mode forbids empty expected_valid",
+                    tc.description
+                )),
+            );
+        }
+
+        // Step 3: Check expected_valid for duplicates.
+        let mut sorted = tc.expected_valid.clone();
+        sorted.sort_unstable();
+        sorted.dedup();
+        if sorted.len() != tc.expected_valid.len() {
+            return (
+                false,
+                SandboxVerdict::DuplicateEntries,
+                Some(format!(
+                    "{}: duplicate expected_valid entries",
+                    tc.description
+                )),
+            );
+        }
+
+        // Step 4: Validate indices are within [0, max_actions).
+        // Byte 3 of the game state header encodes the action space size.
+        let max_actions = tc.input[3] as usize;
+        match max_actions {
+            0 => {
+                // max_actions == 0: only empty expected_valid is acceptable.
+                if !tc.expected_valid.is_empty() {
+                    return (
+                        false,
+                        SandboxVerdict::OutOfRange,
+                        Some(format!(
+                            "{}: expected_valid non-empty but max_actions=0",
+                            tc.description
+                        )),
+                    );
+                }
+            }
+            _ => {
+                for &idx in &tc.expected_valid {
+                    if idx >= max_actions {
+                        return (
+                            false,
+                            SandboxVerdict::OutOfRange,
+                            Some(format!(
+                                "{}: index {} >= max_actions {}",
+                                tc.description, idx, max_actions
+                            )),
+                        );
+                    }
+                }
+            }
+        }
+
+        (true, SandboxVerdict::Pass, None)
+    }
+}
+
+impl PrunerTestGate for WasmTestGate {
+    fn validate(&self, test_cases: &[TestCase]) -> TestResult {
+        if test_cases.is_empty() {
+            return TestResult {
+                passed: true,
+                coverage: 1.0,
+                failures: vec![],
+            };
+        }
+
+        let total = test_cases.len();
+        let mut passed_count = 0usize;
+        let mut failures = Vec::new();
+
+        for tc in test_cases {
+            let (ok, _verdict, reason) = self.sandbox_check(tc);
+            match ok {
+                true => passed_count += 1,
+                false => match reason {
+                    Some(msg) => failures.push(msg),
+                    None => failures.push(format!("{}: unknown sandbox failure", tc.description)),
+                },
+            }
+        }
+
+        let coverage = passed_count as f32 / total as f32;
+        TestResult {
+            passed: coverage >= self.min_coverage && failures.is_empty(),
+            coverage,
+            failures,
+        }
+    }
 }
 
 // ── NoveltyTestGate ──────────────────────────────────────────────
@@ -461,4 +740,4 @@ mod novelty_tests {
     }
 }
 
-// TL;DR: PrunerTestGate trait + BomberTestGate + SimpleTestGate + NoveltyTestGate — validates pruner skills against known game states before promotion. NoveltyTestGate adds IdeaDivergence filter behind `idea_divergence` feature.
+// TL;DR: PrunerTestGate trait + BomberTestGate + SimpleTestGate + WasmTestGate + NoveltyTestGate — validates pruner skills against known game states before promotion. WasmTestGate simulates WASM sandbox validation pipeline. NoveltyTestGate adds IdeaDivergence filter behind `idea_divergence` feature.

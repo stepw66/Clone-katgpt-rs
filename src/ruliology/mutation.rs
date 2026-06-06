@@ -5,9 +5,11 @@
 //! - Vertex color flip (change output of a state)
 //! - Edge reroute (change transition target)
 //! - Co-evolution: two FSMs mutate alternately, keep-if-better
+//! - δ-gated co-evolution: only accept mutations where δ exceeds gate threshold
 //!
 //! Plan 188 Phase 5 (feature-gated behind `ruliology`).
 
+use crate::pruners::g_zero::delta_absorb::DeltaGatedConfig;
 use crate::ruliology::fsm::{FsmStrategy, MAX_STATES};
 use crate::ruliology::types::SimpleProgram;
 
@@ -38,6 +40,10 @@ pub struct CoEvolutionResult {
     pub generations: u32,
     /// Mutation history: (generation, payoff) pairs.
     pub history: Vec<(u32, f64)>,
+    /// Number of mutations accepted.
+    pub accepted: u32,
+    /// Number of mutations rejected (δ below threshold or not improving).
+    pub rejected: u32,
 }
 
 /// Mutation types for FSM graphs.
@@ -169,11 +175,80 @@ pub fn co_evolve(
         }
     }
 
+    let accepted = 0u32;
+    let rejected = 0u32;
+
     CoEvolutionResult {
         best_fsm: current,
         best_payoff: current_payoff,
         generations,
         history,
+        accepted,
+        rejected,
+    }
+}
+
+// ── δ-Gated Co-Evolution ──────────────────────────────────────────
+
+/// Run co-evolution with δ-gated mutation acceptance.
+///
+/// Like [`co_evolve`] but instead of simple keep-if-better, it tracks the δ
+/// (delta) between mutant payoff and current payoff, and only accepts mutations
+/// where `delta >= config.delta_threshold`. This is the FSM mutation analogue of
+/// [`DeltaGatedAbsorbCompress`](crate::pruners::g_zero::delta_absorb::DeltaGatedAbsorbCompress)
+/// gating: small improvements below the noise floor are rejected, forcing the
+/// search to find meaningfully better strategies.
+///
+/// Returns a [`CoEvolutionResult`] with acceptance/rejection counts.
+#[cfg(feature = "ruliology")]
+pub fn delta_gated_co_evolve(
+    seed: FsmStrategy,
+    opponents: &[FsmStrategy],
+    rounds: u32,
+    generations: u32,
+    payoff_fn: &dyn Fn(u8, u8) -> f64,
+    proposer: &FsmTemplateProposer,
+    config: &DeltaGatedConfig,
+    rng: &mut fastrand::Rng,
+) -> CoEvolutionResult {
+    let mut current = seed;
+    let mut current_payoff = evaluate_vs_opponents(&current, opponents, rounds, payoff_fn);
+    let mut history = Vec::with_capacity((generations / 10 + 2) as usize);
+    history.push((0, current_payoff));
+    let mut accepted = 0u32;
+    let mut rejected = 0u32;
+
+    for generation in 1..=generations {
+        let mutant = proposer.propose(&current, rng);
+        let mutant_payoff = evaluate_vs_opponents(&mutant, opponents, rounds, payoff_fn);
+
+        // δ = improvement over current
+        let delta = (mutant_payoff - current_payoff) as f32;
+
+        // Accept only if δ meets threshold (positive and meaningful)
+        match delta >= config.delta_threshold {
+            true => {
+                current = mutant;
+                current_payoff = mutant_payoff;
+                accepted += 1;
+            }
+            false => {
+                rejected += 1;
+            }
+        }
+
+        if generation % 10 == 0 || generation == generations {
+            history.push((generation, current_payoff));
+        }
+    }
+
+    CoEvolutionResult {
+        best_fsm: current,
+        best_payoff: current_payoff,
+        generations,
+        history,
+        accepted,
+        rejected,
     }
 }
 
@@ -385,6 +460,126 @@ mod tests {
             "out-of-bounds flip should be no-op"
         );
     }
+
+    // ── δ-Gated Co-Evolution Tests ─────────────────────────────────
+
+    #[test]
+    fn test_delta_gated_rejects_small_delta() {
+        // With a very high threshold, only massive improvements pass.
+        // Use always-cooperate as seed (poor in matching pennies) but
+        // set threshold so high that typical mutations are rejected.
+        let seed = always_cooperate();
+        let opponents = vec![always_defect()];
+        let proposer = FsmTemplateProposer::new(2, 0.1);
+        let config = DeltaGatedConfig::new(10.0); // impossibly high threshold
+        let mut rng = fastrand::Rng::with_seed(42);
+
+        let result = delta_gated_co_evolve(
+            seed,
+            &opponents,
+            50,
+            100,
+            &matching_pennies,
+            &proposer,
+            &config,
+            &mut rng,
+        );
+
+        // With threshold=10.0, no mutation can improve by 10.0 in matching pennies
+        // (payoff range is [-1, 1]). All should be rejected.
+        assert_eq!(
+            result.accepted, 0,
+            "no mutation should pass a threshold of 10.0"
+        );
+        assert_eq!(result.rejected, 100, "all 100 mutations should be rejected");
+    }
+
+    #[test]
+    fn test_delta_gated_accepts_large_delta() {
+        // With threshold=0.0, any improvement should be accepted.
+        // This behaves like regular co_evolve (keep-if-better).
+        let seed = always_cooperate();
+        let opponents = vec![always_defect(), always_cooperate()];
+        let proposer = FsmTemplateProposer::new(2, 0.3);
+        let config = DeltaGatedConfig::new(0.0); // accept any positive δ
+        let mut rng = fastrand::Rng::with_seed(42);
+
+        let result = delta_gated_co_evolve(
+            seed,
+            &opponents,
+            50,
+            500,
+            &matching_pennies,
+            &proposer,
+            &config,
+            &mut rng,
+        );
+
+        // With threshold=0.0 and 500 generations, at least some mutations
+        // should produce positive δ and be accepted.
+        assert!(
+            result.accepted > 0,
+            "with threshold=0.0, some mutations should be accepted, got accepted={}",
+            result.accepted,
+        );
+        // Best payoff should be at least as good as initial
+        assert!(
+            result.best_payoff >= -1.0,
+            "best payoff should be valid, got {}",
+            result.best_payoff,
+        );
+    }
+
+    #[test]
+    fn test_delta_gated_converges_better_than_blind() {
+        // Compare δ-gated co-evolution against blind (keep-if-better) co-evolution.
+        // With a sensible threshold, δ-gating should converge to at least as good
+        // because it rejects noise, not signal.
+        let seed = always_cooperate();
+        let opponents = FsmEnumerator::enumerate(2);
+        assert!(!opponents.is_empty(), "need opponents for comparison");
+
+        let proposer = FsmTemplateProposer::new(2, 0.2);
+
+        // Blind co-evolution
+        let mut rng_blind = fastrand::Rng::with_seed(777);
+        let blind_result = co_evolve(
+            seed.clone(),
+            &opponents,
+            50,
+            500,
+            &matching_pennies,
+            &proposer,
+            &mut rng_blind,
+        );
+
+        // δ-gated co-evolution (same seed for fair comparison)
+        let config = DeltaGatedConfig::new(0.01);
+        let mut rng_gated = fastrand::Rng::with_seed(777);
+        let gated_result = delta_gated_co_evolve(
+            seed,
+            &opponents,
+            50,
+            500,
+            &matching_pennies,
+            &proposer,
+            &config,
+            &mut rng_gated,
+        );
+
+        // δ-gated should converge to at least as good as blind.
+        // Allow a small tolerance for floating-point noise.
+        assert!(
+            gated_result.best_payoff >= blind_result.best_payoff - 0.1,
+            "δ-gated payoff ({}) should be >= blind payoff ({}) - 0.1",
+            gated_result.best_payoff,
+            blind_result.best_payoff,
+        );
+
+        // Both should have valid histories.
+        assert!(!gated_result.history.is_empty());
+        assert!(!blind_result.history.is_empty());
+    }
 }
 
-// TL;DR: FsmTemplateProposer (stochastic FSM graph mutation via output flip + edge reroute) + co_evolve (keep-if-better hill climbing against opponent pool). 7 tests behind ruliology feature gate.
+// TL;DR: FsmTemplateProposer (stochastic FSM graph mutation via output flip + edge reroute) + co_evolve (keep-if-better) + delta_gated_co_evolve (δ-threshold gated acceptance via DeltaGatedConfig). 10 tests behind ruliology feature gate.

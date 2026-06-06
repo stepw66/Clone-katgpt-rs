@@ -176,13 +176,13 @@ pub fn prisoners_dilemma(a: u8, b: u8) -> (f64, f64) {
 
 - [x] Implement `FsmTemplateProposer` — mutate FSM graphs (vertex color flip, edge reroute)
 - [x] Implement FSM co-evolution: two FSMs mutate alternately, keep-if-better
-- [ ] Connect to `DeltaGatedAbsorbCompress` — δ-gate FSM mutation acceptance
+- [x] Connect to `DeltaGatedAbsorbCompress` — δ-gate FSM mutation acceptance
 - [x] Example: evolve FSM from random to universal winner against 2-state opponents
 
 ### Phase 6: GOAT Proof
 
-- [ ] Arena proof: RuliologyBandit (with Pareto-filtered arms) vs static HL vs random in bomber
-- [ ] Arena proof: Cross-paradigm ranking in Go (FSM vs CA vs Bandit vs HL vs MCTS)
+- [-] Arena proof: RuliologyBandit (with Pareto-filtered arms) vs static HL vs random in bomber — **deferred: needs arena running**
+- [-] Arena proof: Cross-paradigm ranking in Go (FSM vs CA vs Bandit vs HL vs MCTS) — **deferred: needs Go arena running**
 - [x] Benchmark: enumeration time for N=2 (trivial), N=3 (sub-second), N=4 (measure)
 - [x] Benchmark: IrreducibilityGate overhead on hot path
 - [x] Verify: no perf regression when `ruliology` feature is disabled

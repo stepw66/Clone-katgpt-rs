@@ -45,7 +45,7 @@ LLM drafts logits → ConstraintPruner filters invalid → DDTree builds valid-o
 
 ```rust
 pub trait ConstraintPruner: Send + Sync {
-    fn is_valid(&self, depth: usize, token_idx: usize, parent_token: &[usize]) -> bool;
+    fn is_valid(&self, depth: usize, token_idx: usize, parent_tokens: &[usize]) -> bool;
 }
 
 pub trait ScreeningPruner: Send + Sync {
@@ -449,9 +449,9 @@ cargo clippy --all-targets --all-features --quiet   # Lint
 
 ### Feature Flags
 
-📖 **Complete feature flag table** (90+ flags with descriptions): See main README Feature Flags section → [`.docs/`](.docs/) for per-feature detail.
+📖 **Feature flags** (158 total in [`Cargo.toml`](Cargo.toml); the table below covers the user-facing subset): See [`.docs/`](.docs/) for per-feature detail.
 
-**Default features** (47, all GOAT-proved): `sparse_mlp`, `domain_latent`, `ppot`, `bandit`, `bt_rank`, `spectral_quant`, `hybrid_oct_pq`, `elf_sde`, `cna_steering`, `deep_manifold`, `federation`, `tes_loop`, `lattice_deduction`, `delta_routing`, `stability_metrics`, `mls_aggregate`, `gdn2_attention`, `dash_attn`, `dreamer`, `lt2_looped`, `dmax_spd`, `eqr_convergence`, `subterranean`, `sr2am_configurator`, `data_gate`, `plasma_path`, `parallel_probe`, `tf_loop`, `leo_all_goals`, `dual_leo`, `sigmoid_margin`, `moa_inference`, `sleep_consolidation`, `spectral_hierarchy`, `dual_gram_pca`, `roofline_cost`, `newton_schulz`, `river_valley`, `peira_distill`, `kog_cpu_fusion`, `gepa_reflective`, `phrase_boost`, `hydra_budget`, `flashar_consensus`, `budget_adaptation`, `ilc_distill`, `thinking_prune`, `rim_slots`.
+**Default features** (51, all GOAT-proved): `sparse_mlp`, `domain_latent`, `ppot`, `bandit`, `bandit_top_p`, `bt_rank`, `spectral_quant`, `hybrid_oct_pq`, `elf_sde`, `cna_steering`, `deep_manifold`, `federation`, `tes_loop`, `lattice_deduction`, `delta_routing`, `stability_metrics`, `mls_aggregate`, `gdn2_attention`, `dash_attn`, `dreamer`, `lt2_looped`, `dmax_spd`, `eqr_convergence`, `subterranean`, `sr2am_configurator`, `data_gate`, `plasma_path`, `parallel_probe`, `tf_loop`, `leo_all_goals`, `dual_leo`, `sigmoid_margin`, `moa_inference`, `sleep_consolidation`, `spectral_hierarchy`, `dual_gram_pca`, `roofline_cost`, `newton_schulz`, `river_valley`, `peira_distill`, `kog_cpu_fusion`, `gepa_reflective`, `phrase_boost`, `hydra_budget`, `flashar_consensus`, `budget_adaptation`, `ilc_distill`, `thinking_prune`, `rim_slots`, `thinking_cot`, `freq_bandit`.
 
 <details>
 <summary>📋 Full Feature Flag Table</summary>
@@ -569,6 +569,31 @@ cargo clippy --all-targets --all-features --quiet   # Lint
 | `ruliology` | Exhaustive FSM/CA/TM enumeration as bandit arms — depends on `bandit` (Plan 188, opt-in) |
 | `skill_lifecycle` | MUSE-style skill lifecycle: memory, test gate, catalog — depends on `bandit` (Plan 192, opt-in) |
 | `freq_bandit` | Frequency bandit for speculative decode (Plan 189, **default-on**) |
+| `bandit_top_p` | dMoE adaptive top-p vocabulary selection (Plan 181, **default-on**) |
+| `thinking_cot` | Adaptive CoT thinking vs non-thinking (Plan 194, **default-on**) |
+| `kvarn` | KVarN variance-normalized KV-cache quantization (Research 159, opt-in) |
+| `ega_attn` | Energy-Gated Attention spectral salience gating (Plan 139, opt-in) |
+| `stiff_anomaly` | Stiff/soft subspace eigenvalue anomaly gate (Plan 138, opt-in) |
+| `and_or_dtree` | AND-OR DDTree blueprint subgoal decomposition (Plan 190, opt-in) |
+| `directional_credit` | Entropy-bifurcated direction-adaptive screening (Plan 184, opt-in) |
+| `kv_share` | Q-K=V projection sharing — 50% KV cache reduction (Plan 185, opt-in) |
+| `spec_reconciliation` | Speculative reconciliation engine (Plan 177, opt-in) |
+| `randopt_weight` | RandOpt weight-space perturbation ensembling (Plan 121, opt-in) |
+| `rmsd_distill` | RMSD relevance-masked self-distillation (Plan 125, opt-in) |
+| `sdpg_bandit` | SDPG bandit + KL anchoring (Plan 180, opt-in) |
+| `gdsd_distill` | GDSD advantage-guided pruner self-distillation (Plan 169, opt-in) |
+| `sia_feedback` | FeedbackBandit harness + weight co-evolution (Plan 163, opt-in) |
+| `proof_sketch_evolution` | Elo-rated proof-sketch population + goal cache (Plan 128, opt-in) |
+| `state_source` | State-source modelless distillation (Plan 142, opt-in) |
+| `nexus_elo` | Nexus Elo — Plackett-Luce + P-UCB goal cache (Plan 143, opt-in) |
+| `skill_opt` | SkillOpt text-space skill optimization (Plan 144, opt-in) |
+| `skill_lifecycle` | MUSE skill lifecycle — memory + test gate + catalog (Plan 192, opt-in) |
+| `proof_cert` | Hierarchical GOAT proof certificates (Plan 145, opt-in) |
+| `mech_attribution` | Mechanistic data attribution (Plan 111, opt-in) |
+| `unit_distance` | Unit-distance number-theoretic GOAT proof (Plan 090, opt-in) |
+| `replaid_schedules` | RePlaid variance-minimized adaptive schedules (Plan 078, opt-in) |
+| `deltanet_inference` | DeltaNet GPU hybrid decode (Plan 182, opt-in) |
+| `turboquant` | TurboQuant rotation + uniform codebook (legacy baseline) |
 | `full` | Enable all features (excludes some opt-in) |
 
 </details>
@@ -596,11 +621,19 @@ src/
   hybrid_oct_pq/      Default KV codec (OCT + PlanarQuant)
   planar_quant/       2D Givens rotation
   spectralquant/      Calibrated eigenbasis compression
+  shard_kv/           Asymmetric K/V cache compression
+  kvarn/              Variance-normalized KV-cache quantization
+  spechop/            Continuous multi-hop speculation pipeline
+  rt_turbo/           Retrieval-head sparse decode
+  ruliology/          Simple-program strategy enumeration
+  skill_opt/          Text-space skill optimization
+  cache_prune/        SAT + rolling-hash cache pruning
+  stiff_anomaly/      Eigenvalue subspace anomaly gate
   sleep/              Sleep consolidation
   dllm.rs             D2F discrete diffusion
   tf_loop.rs          Training-free loop
-examples/            84 examples
-tests/               111 test files + 9 benchmark suites
+examples/            106 examples (see examples/README.md)
+tests/               163 integration test & benchmark files (~87 bench suites)
 ```
 
 📖 **Full file-level detail:** See original README Project Structure in git history.
@@ -632,7 +665,7 @@ tests/               111 test files + 9 benchmark suites
 | [`.docs/21_opt_in_features.md`](.docs/21_opt_in_features.md) | **Opt-in features** (D2F, GFlowNet, SpecHop, Committee Boost, etc.) |
 | [`.docs/22_percepta.md`](.docs/22_percepta.md) | **Percepta full detail** (module structure, compiler stack, verified properties) |
 | [`.docs/23_hl_arena_detail.md`](.docs/23_hl_arena_detail.md) | **HL & Arena detail** (all games, G-Zero, Freeze/Thaw, Emotion Vector, etc.) |
-| [`examples/README.md`](examples/README.md) | 84 examples grouped by category |
+| [`examples/README.md`](examples/README.md) | 106 examples grouped by category |
 
 ## 📦 Related Crates
 
