@@ -1020,3 +1020,172 @@ pub fn bench_mtp_shared_kv(warmup: usize, iters: usize) -> (BenchResult, BenchRe
 
     (off, on)
 }
+
+// ── Domino LoRA causal correction benchmarks (Plan 231, T7) ───────
+
+#[cfg(feature = "domino_lora")]
+pub fn bench_domino_lora_correction(warmup: usize, iters: usize) -> BenchResult {
+    use crate::speculative::domino_lora::DominoLoraCorrection;
+
+    let n_embd = 64;
+    let vocab_size = 256;
+    let rank = 16;
+    let gru_hidden = 32;
+
+    let mut domino =
+        DominoLoraCorrection::new_for_test(n_embd, vocab_size, rank, gru_hidden, n_embd);
+
+    let hidden = vec![1.0f32; n_embd];
+    let causal_state = vec![0.5f32; gru_hidden];
+    let mut logits = vec![0.0f32; vocab_size];
+
+    for _ in 0..warmup {
+        domino.correct(&hidden, &causal_state, &mut logits);
+        std::hint::black_box(&logits);
+    }
+
+    let start = Instant::now();
+    for _ in 0..iters {
+        domino.correct(&hidden, &causal_state, &mut logits);
+        std::hint::black_box(&logits);
+    }
+    let elapsed = start.elapsed();
+
+    let tps = iters as f64 / elapsed.as_secs_f64();
+    BenchResult {
+        label: "Domino LoRA correct()".into(),
+        throughput: tps,
+        time_per_step_us: elapsed.as_micros() as f64 / iters as f64,
+        avg_acceptance_len: 0.0,
+        color: (200, 50, 50),
+        category: BenchCategory::Speculative,
+        feature_dim: "SD".into(),
+    }
+}
+
+/// DFlash AR + Domino LoRA correction vs DFlash AR only.
+///
+/// A/B comparison measuring:
+/// - Draft steps/s throughput
+/// - Per-step latency (µs)
+/// - Simulated acceptance length with and without correction
+#[cfg(feature = "domino_lora")]
+pub fn bench_dflash_ar_domino_vs_baseline(
+    draft_weights: &TransformerWeights,
+    draft_config: &Config,
+    warmup: usize,
+    iters: usize,
+) -> (BenchResult, BenchResult) {
+    use crate::speculative::domino_lora::DominoLoraCorrection;
+
+    // ── Baseline: DFlash AR only (no domino correction) ──
+    let mut sctx_base = SpeculativeContext::new(draft_config);
+    let mut rng_base = Rng::new(99);
+
+    for _ in 0..warmup {
+        sctx_base.reset();
+        let _steps = dflash_predict_ar_with(
+            &mut sctx_base,
+            draft_weights,
+            draft_config,
+            0,
+            0,
+            &mut rng_base,
+            None,
+        );
+    }
+
+    let start = Instant::now();
+    let mut total_steps_base = 0usize;
+    for _ in 0..iters {
+        sctx_base.reset();
+        let steps = dflash_predict_ar_with(
+            &mut sctx_base,
+            draft_weights,
+            draft_config,
+            0,
+            0,
+            &mut rng_base,
+            None,
+        );
+        total_steps_base += steps;
+    }
+    let elapsed_base = start.elapsed();
+
+    let base_tps = total_steps_base as f64 / elapsed_base.as_secs_f64();
+    let base_br = BenchResult {
+        label: "DFlash AR (baseline)".into(),
+        throughput: base_tps,
+        time_per_step_us: elapsed_base.as_micros() as f64 / iters as f64,
+        avg_acceptance_len: total_steps_base as f64 / iters as f64,
+        color: (255, 99, 71),
+        category: BenchCategory::Speculative,
+        feature_dim: "SD".into(),
+    };
+
+    // ── Domino: DFlash AR + LoRA correction + GRU state ──
+    let n_embd = draft_config.n_embd;
+    let vocab_size = draft_config.vocab_size;
+    let rank = 16; // Smaller rank for bench perf (real adapter uses 256)
+    let gru_hidden = 32;
+
+    let mut domino =
+        DominoLoraCorrection::new_for_test(n_embd, vocab_size, rank, gru_hidden, n_embd);
+    let mut gru_state = vec![0.0f32; gru_hidden];
+
+    let mut sctx_dom = SpeculativeContext::new(draft_config);
+    let mut rng_dom = Rng::new(99);
+
+    for _ in 0..warmup {
+        sctx_dom.reset();
+        gru_state.fill(0.0);
+        let _steps = crate::speculative::dflash_predict_ar_with_domino(
+            &mut sctx_dom,
+            draft_weights,
+            draft_config,
+            0,
+            0,
+            &mut rng_dom,
+            &mut domino,
+            &mut gru_state,
+        );
+    }
+
+    let start = Instant::now();
+    let mut total_steps_dom = 0usize;
+    for _ in 0..iters {
+        sctx_dom.reset();
+        gru_state.fill(0.0);
+        let steps = crate::speculative::dflash_predict_ar_with_domino(
+            &mut sctx_dom,
+            draft_weights,
+            draft_config,
+            0,
+            0,
+            &mut rng_dom,
+            &mut domino,
+            &mut gru_state,
+        );
+        total_steps_dom += steps;
+    }
+    let elapsed_dom = start.elapsed();
+
+    let dom_tps = total_steps_dom as f64 / elapsed_dom.as_secs_f64();
+    let overhead_pct = (elapsed_dom.as_secs_f64() / elapsed_base.as_secs_f64() - 1.0) * 100.0;
+    println!(
+        "  Domino LoRA overhead: {:.1}% ({:.0} vs {:.0} steps/s, rank={}, gru_hidden={})",
+        overhead_pct, dom_tps, base_tps, rank, gru_hidden,
+    );
+
+    let dom_br = BenchResult {
+        label: "DFlash AR + Domino LoRA".into(),
+        throughput: dom_tps,
+        time_per_step_us: elapsed_dom.as_micros() as f64 / iters as f64,
+        avg_acceptance_len: total_steps_dom as f64 / iters as f64,
+        color: (200, 50, 50),
+        category: BenchCategory::Speculative,
+        feature_dim: "SD".into(),
+    };
+
+    (base_br, dom_br)
+}

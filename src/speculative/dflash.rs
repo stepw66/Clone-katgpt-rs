@@ -151,10 +151,13 @@ pub fn dflash_predict_ar_with_domino(
         // Update GRU state using the current token's embedding
         let embed_offset = cur_token * n_embd;
         let token_embed = &draft_weights.wte[embed_offset..embed_offset + n_embd];
-        // Use scratch buffer to avoid allocating — swap gru_state via gru_out
-        let mut new_gru = vec![0.0f32; domino.gru_hidden_size()];
-        domino.gru_step(token_embed, gru_state, &mut new_gru);
-        gru_state.copy_from_slice(&new_gru);
+        // Zero-alloc GRU step: reuse gru_state by swapping through a stack buffer
+        {
+            let mut tmp_gru = [0.0f32; 1024]; // Max GRU hidden size
+            let h = domino.gru_hidden_size().min(tmp_gru.len());
+            domino.gru_step(token_embed, &gru_state[..h], &mut tmp_gru[..h]);
+            gru_state[..h].copy_from_slice(&tmp_gru[..h]);
+        }
 
         sctx.probs_buf.copy_from_slice(&sctx.ctx.logits);
         softmax_scaled(&mut sctx.probs_buf, 1.0 / temperature);

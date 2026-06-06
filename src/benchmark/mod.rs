@@ -61,6 +61,8 @@ pub use speculative::{
     bench_ar, bench_ddtree_budget_sweep, bench_ddtree_chain_seed, bench_ddtree_screened,
     bench_dflash, bench_dflash_parallel, bench_speculative, bench_speculative_ar,
 };
+#[cfg(feature = "domino_lora")]
+pub use speculative::{bench_dflash_ar_domino_vs_baseline, bench_domino_lora_correction};
 
 use crate::transformer::TransformerWeights;
 use crate::types::{Config, Rng};

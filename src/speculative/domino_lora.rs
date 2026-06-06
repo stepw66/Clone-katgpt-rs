@@ -166,6 +166,44 @@ impl std::fmt::Debug for DominoLoraCorrection {
 }
 
 impl DominoLoraCorrection {
+    /// Create a new Domino LoRA correction adapter with the given dimensions.
+    ///
+    /// Weights are initialized with small random values for testing/benchmarking.
+    /// For production, use `load()` to load trained weights from a DMAD binary file.
+    pub fn new_for_test(
+        n_embd: usize,
+        vocab_size: usize,
+        adapter_rank: usize,
+        gru_hidden: usize,
+        embed_dim: usize,
+    ) -> Self {
+        let concat_dim = n_embd + gru_hidden;
+        Self {
+            w_down: vec![0.1; adapter_rank * concat_dim],
+            w_up: vec![0.1; vocab_size * adapter_rank],
+            gru: DominoGRU {
+                wz: vec![0.05; gru_hidden * (embed_dim + gru_hidden)],
+                bz: vec![0.0; gru_hidden],
+                wr: vec![0.05; gru_hidden * (embed_dim + gru_hidden)],
+                br: vec![0.0; gru_hidden],
+                wn: vec![0.05; gru_hidden * (embed_dim + gru_hidden)],
+                bn: vec![0.0; gru_hidden],
+                wo: vec![0.05; gru_hidden * gru_hidden],
+                bo: vec![0.0; gru_hidden],
+                input_size: embed_dim,
+                hidden_size: gru_hidden,
+            },
+            adapter_rank,
+            gru_hidden,
+            n_embd,
+            vocab_size,
+            concat_buf: vec![0.0; concat_dim],
+            down_buf: vec![0.0; adapter_rank],
+            gru_concat: vec![0.0; embed_dim + gru_hidden],
+            gru_gate: vec![0.0; gru_hidden],
+        }
+    }
+
     /// Load a Domino LoRA adapter from a DMAD binary file.
     ///
     /// The file format is:
