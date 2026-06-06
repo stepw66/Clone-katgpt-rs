@@ -197,11 +197,10 @@ impl<'a, P: ScreeningPruner> AndOrBuilder<'a, P> {
             .enumerate()
             .map(|(depth, marginal)| {
                 let top_k_indices = top_k_indices(marginal, k);
-                let min_rel = top_k_indices
+                top_k_indices
                     .iter()
                     .map(|&idx| self.pruner.relevance(depth, idx, &[]))
-                    .fold(f32::INFINITY, f32::min);
-                min_rel
+                    .fold(f32::INFINITY, f32::min)
             })
             .collect()
     }
@@ -631,7 +630,7 @@ mod tests {
         let _tree = builder.build(&refs);
 
         // Cache should have entries from subgoal solving.
-        assert!(cache.len() > 0);
+        assert!(!cache.is_empty());
     }
 
     #[test]

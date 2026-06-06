@@ -37,6 +37,7 @@ impl TrajectoryPoint {
 
     /// Create a trajectory point from named fields.
     #[inline]
+    #[allow(clippy::too_many_arguments)] // Named-field constructor for 8-axis trajectory point
     pub fn from_fields(
         pos_x: f32,
         pos_y: f32,
@@ -125,8 +126,8 @@ impl TrajectoryPoint {
     #[inline]
     pub fn delta_from(&self, prev: &Self) -> Self {
         let mut data = [0.0f32; 8];
-        for i in 0..8 {
-            data[i] = self.data[i] - prev.data[i];
+        for (dst, (&s, &p)) in data.iter_mut().zip(self.data.iter().zip(prev.data.iter())) {
+            *dst = s - p;
         }
         Self { data }
     }
@@ -249,7 +250,7 @@ mod tests {
     fn test_verdict_debug_clone() {
         let v = ReconciliationVerdict::Accept;
         assert_eq!(format!("{v:?}"), "Accept");
-        let v2 = v.clone();
+        let v2 = v;
         assert_eq!(v, v2);
     }
 
@@ -261,16 +262,20 @@ mod tests {
 
     #[test]
     fn test_config_validate_bad_k() {
-        let mut cfg = ReconciliationConfig::default();
-        cfg.k = 0;
+        let cfg = ReconciliationConfig {
+            k: 0,
+            ..Default::default()
+        };
         assert!(cfg.validate().is_err());
     }
 
     #[test]
     fn test_config_validate_bad_thresholds() {
-        let mut cfg = ReconciliationConfig::default();
-        cfg.accept_threshold = 0.3;
-        cfg.quarantine_threshold = 0.5;
+        let cfg = ReconciliationConfig {
+            accept_threshold: 0.3,
+            quarantine_threshold: 0.5,
+            ..Default::default()
+        };
         assert!(cfg.validate().is_err());
     }
 

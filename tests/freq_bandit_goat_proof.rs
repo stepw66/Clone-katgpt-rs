@@ -230,7 +230,7 @@ fn goat_sigmoid_not_softmax() {
     for x in [-100.0, -10.0, -1.0, 0.0, 1.0, 10.0, 100.0] {
         let s = sigmoid(x);
         assert!(
-            s >= 0.0 && s <= 1.0,
+            (0.0..=1.0).contains(&s),
             "sigmoid({}) = {} should be in [0,1]",
             x,
             s

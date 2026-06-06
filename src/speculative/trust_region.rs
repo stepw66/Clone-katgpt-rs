@@ -644,7 +644,7 @@ mod tests {
         let mut state = TrustRegionState::new(config);
 
         // Simulate 100 tokens with varying trust
-        let mut fixed_accepted = 0usize;
+        let mut _fixed_accepted = 0usize;
         let mut adaptive_accepted = 0usize;
         let base_window = 5;
         let mut rng = Rng::new(42);
@@ -662,7 +662,7 @@ mod tests {
 
             // Fixed window: always tries base_window tokens
             let fixed_win = base_window;
-            fixed_accepted += ((fixed_win as f32) * trust) as usize;
+            _fixed_accepted += ((fixed_win as f32) * trust) as usize;
 
             // Adaptive window: adjusts based on trust
             let adaptive_win = state.window(base_window);

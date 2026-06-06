@@ -101,7 +101,7 @@ impl<G, S> AndOrNode<G, S> {
     pub fn is_solved(&self) -> bool {
         match self {
             Self::Or { children, best, .. } => match best {
-                &Some(idx) => children.get(idx).map_or(false, |c| c.is_solved()),
+                &Some(idx) => children.get(idx).is_some_and(|c| c.is_solved()),
                 None => children.iter().any(|c| c.is_solved()),
             },
             Self::And {

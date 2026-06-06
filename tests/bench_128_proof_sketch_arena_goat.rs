@@ -28,7 +28,7 @@ use std::time::Instant;
 
 use katgpt_rs::pruners::proof::{
     DEFAULT_ELO, PlackettLuceConfig, PlackettLuceRater, PopulationConfig, ProofGoalCache,
-    ProofState, SketchSampler, SketchSamplerConfig,
+    ProofState, SketchSampler,
 };
 use katgpt_rs::pruners::{Goal, GoalResult, SketchEntry, SketchPopulation};
 
@@ -309,7 +309,7 @@ fn arena_goal_cache_hit_rate_60pct() {
     let mut verification_calls_with_cache: u64 = 0;
     let mut verification_calls_without_cache: u64 = 0;
 
-    for step in 0..N_ROUNDS {
+    for _step in 0..N_ROUNDS {
         let (indices, _new_count, _reused_count) =
             generate_step_constraints(&mut rng, &pool, prev_step_indices.as_deref());
 

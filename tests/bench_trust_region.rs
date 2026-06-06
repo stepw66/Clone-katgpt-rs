@@ -22,14 +22,14 @@ mod benches {
         let mut q = vec![0.0f32; 256];
         // Teacher: concentrated on token 0
         p[0] = 0.7;
-        for i in 1..256 {
-            p[i] = 0.3 / 255.0;
+        for val in p.iter_mut().skip(1) {
+            *val = 0.3 / 255.0;
         }
         // Student: concentrated on token 1
         q[1] = 0.6;
-        for i in 0..256 {
+        for (i, val) in q.iter_mut().enumerate() {
             if i != 1 {
-                q[i] = 0.4 / 255.0;
+                *val = 0.4 / 255.0;
             }
         }
 

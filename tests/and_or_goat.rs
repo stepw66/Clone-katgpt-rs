@@ -324,9 +324,9 @@ fn test_goat_5_cache_hit_rate() {
         let mut buf = Vec::with_capacity(16 + (end - start) * 8);
         buf.extend_from_slice(&(start as u64).to_le_bytes());
         buf.extend_from_slice(&(end as u64).to_le_bytes());
-        for d in start..end {
-            // argmax at depth d
-            let top = mrefs[d]
+        for (_d, mref) in mrefs.iter().enumerate().take(end).skip(start) {
+            // argmax at depth
+            let top = mref
                 .iter()
                 .enumerate()
                 .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))

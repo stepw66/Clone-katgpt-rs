@@ -313,7 +313,7 @@ impl<P: ScreeningPruner> WealthBanditPruner<P> {
         self.episode_count += 1;
 
         // Charge rent if interval is configured and due
-        if self.config.rent_interval > 0 && self.episode_count % self.config.rent_interval == 0 {
+        if self.config.rent_interval > 0 && self.episode_count.is_multiple_of(self.config.rent_interval) {
             self.charge_rent();
         }
 

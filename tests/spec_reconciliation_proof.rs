@@ -423,7 +423,7 @@ fn g5_latency_bound() {
         let iterations = 100;
         let mut total_us = 0u64;
         for iter in 0..iterations {
-            let mut r = Rng::new(iter as u64);
+            let mut r = Rng::new(iter);
             let start = Instant::now();
             let _ = reconciler.reconcile(&h, &client_traj, &[], client_steps, &mut r);
             total_us += start.elapsed().as_micros() as u64;

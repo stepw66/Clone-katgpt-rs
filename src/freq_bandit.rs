@@ -428,6 +428,41 @@ impl Default for FrequencyBandit {
     }
 }
 
+// ── FreqTierAdapter ────────────────────────────────────────────
+
+/// Adapter: feeds FreqBandit's spectral analysis into compute tier selection.
+///
+/// Analyzes token streams via spectral methods and translates the dominant
+/// frequency band into a [`ComputeTier`] recommendation suitable for
+/// [`InferenceRouter`](crate::inference_router::InferenceRouter).
+pub struct FreqTierAdapter {
+    bandit: FrequencyBandit,
+}
+
+impl FreqTierAdapter {
+    /// Create a new adapter wrapping an existing [`FrequencyBandit`].
+    pub fn new(bandit: FrequencyBandit) -> Self {
+        Self { bandit }
+    }
+
+    /// Analyze token stream and return tier recommendation.
+    pub fn recommend_tier(&mut self, tokens: &[usize], window_size: usize) -> ComputeTier {
+        let profile = token_stream_spectrum(tokens, window_size);
+        // Select the band and immediately query tier recommendation.
+        // Note: select requires an rng for UCB1 exploration, but we only
+        // need the deterministic tier mapping from the dominant band.
+        profile.dominant_band.recommended_tier()
+    }
+
+    /// Update the bandit with reward signal from last decode.
+    pub fn update_reward(&mut self, reward: f32) {
+        let band = self.bandit.last_selected();
+        if let Some(b) = band {
+            self.bandit.update(b, reward as f64)
+        }
+    }
+}
+
 // ── Tests ──────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -752,42 +787,6 @@ mod tests {
         let mut adapter = FreqTierAdapter::new(FrequencyBandit::new());
         let tier = adapter.recommend_tier(&tokens, 128);
         assert_eq!(tier, ComputeTier::CpuGpuAne);
-    }
-}
-
-// ── FreqTierAdapter ────────────────────────────────────────────
-
-/// Adapter: feeds FreqBandit's spectral analysis into compute tier selection.
-///
-/// Analyzes token streams via spectral methods and translates the dominant
-/// frequency band into a [`ComputeTier`] recommendation suitable for
-/// [`InferenceRouter`](crate::inference_router::InferenceRouter).
-pub struct FreqTierAdapter {
-    bandit: FrequencyBandit,
-}
-
-impl FreqTierAdapter {
-    /// Create a new adapter wrapping an existing [`FrequencyBandit`].
-    pub fn new(bandit: FrequencyBandit) -> Self {
-        Self { bandit }
-    }
-
-    /// Analyze token stream and return tier recommendation.
-    pub fn recommend_tier(&mut self, tokens: &[usize], window_size: usize) -> ComputeTier {
-        let profile = token_stream_spectrum(tokens, window_size);
-        // Select the band and immediately query tier recommendation.
-        // Note: select requires an rng for UCB1 exploration, but we only
-        // need the deterministic tier mapping from the dominant band.
-        profile.dominant_band.recommended_tier()
-    }
-
-    /// Update the bandit with reward signal from last decode.
-    pub fn update_reward(&mut self, reward: f32) {
-        let band = self.bandit.last_selected();
-        match band {
-            Some(b) => self.bandit.update(b, reward as f64),
-            None => {}
-        }
     }
 }
 

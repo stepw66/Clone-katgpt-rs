@@ -134,7 +134,7 @@ struct FilterMod3Pruner;
 
 impl ConstraintPruner for FilterMod3Pruner {
     fn is_valid(&self, _depth: usize, token_idx: usize, _parent_tokens: &[usize]) -> bool {
-        token_idx % 3 != 0
+        !token_idx.is_multiple_of(3)
     }
 }
 

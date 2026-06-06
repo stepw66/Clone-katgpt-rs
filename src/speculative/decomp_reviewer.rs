@@ -29,12 +29,15 @@ impl DecompositionReviewer {
             branch_misses: AtomicU64::new(0),
         }
     }
+}
 
-    /// Create with default threshold (0.3).
-    pub fn default() -> Self {
+impl Default for DecompositionReviewer {
+    fn default() -> Self {
         Self::new(0.3)
     }
+}
 
+impl DecompositionReviewer {
     /// Record a cache hit for the current branch.
     pub fn record_hit(&self) {
         self.branch_hits.fetch_add(1, Ordering::Relaxed);

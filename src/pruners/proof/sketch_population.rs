@@ -444,7 +444,7 @@ impl fmt::Display for SketchPopulation {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pruners::proof::sketch_types::{Goal, ProofState};
+    use crate::pruners::proof::sketch_types::ProofState;
 
     fn make_entry(elo: f64) -> SketchEntry {
         let state = ProofState::new(format!("state_{elo}").into_bytes());

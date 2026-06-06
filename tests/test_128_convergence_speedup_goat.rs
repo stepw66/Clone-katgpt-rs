@@ -170,7 +170,7 @@ fn convergence_elo_separation_speed() {
     let initial_elos: Vec<f64> = sketches.iter().map(|s| s.elo_rating).collect();
     elo_history.push(initial_elos);
 
-    for round in 1..=10 {
+    for _round in 1..=10 {
         // Generate rankings where dominant (index 0) always wins
         let mut rankings = Vec::new();
         for _ in 0..5 {
@@ -257,7 +257,7 @@ fn convergence_cache_hit_rate_grows() {
         if step > 0 {
             // 40% overlap ≈ 3 constraints from previous step (out of 8)
             let overlap = 3;
-            for i in 0..overlap {
+            for _i in 0..overlap {
                 let prev_idx = rng.usize(0..constraints.len());
                 step_constraints.push(&constraints[prev_idx]);
             }
