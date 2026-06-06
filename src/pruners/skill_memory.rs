@@ -259,6 +259,35 @@ mod tests {
         let recent = mem.recent(10);
         assert_eq!(recent.len(), 2);
     }
+
+    /// Benchmark: append throughput.
+    /// Target: <10ns per append, zero allocation.
+    /// Plan 192 Task 1.
+    #[test]
+    fn bench_append_throughput() {
+        use std::time::Instant;
+
+        let mem = PrunerMemory::new(1024, "bench");
+        let entry = MemoryEntry::new(0, 1.0, false, false, 0);
+
+        let iterations = 100_000u64;
+        let start = Instant::now();
+        for _ in 0..iterations {
+            std::hint::black_box(mem.append(std::hint::black_box(entry)));
+        }
+        let elapsed = start.elapsed();
+
+        let per_append = elapsed / iterations as u32;
+        println!(
+            "[bench] PrunerMemory::append: {per_append:?} per call ({} iterations)",
+            iterations
+        );
+
+        assert!(
+            per_append.as_nanos() < 100,
+            "append should be <100ns, got {per_append:?}"
+        );
+    }
 }
 
 // TL;DR: PrunerMemory — lock-free append-only ring buffer with blake3 integrity hash. O(1) append via AtomicU32, O(k) recent retrieval. Capacity rounded to power of 2 for masking.

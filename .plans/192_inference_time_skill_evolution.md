@@ -136,7 +136,7 @@ pub struct SkillCatalog {
 - [x] Add `PrunerMemory` field to `AbsorbCompressLayer` (behind `skill_lifecycle` feature)
 - [ ] Integrate with freeze/thaw: memory persists across sessions alongside bandit stats
 - [x] Unit tests: append, retrieve, ring-buffer wrap, freeze/thaw roundtrip, bounded eviction
-- [ ] Bench: append throughput (target: <10ns per append, no allocation)
+- [x] Bench: append throughput (target: <10ns per append, no allocation)
 
 ### Task 2: Test-Gated Registration (PrunerTestGate)
 
