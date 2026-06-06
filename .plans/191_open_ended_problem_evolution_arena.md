@@ -109,8 +109,8 @@ graph TD
   - When GPU load high: `ProblemMutator` uses simpler mutations (CPU-only)
   - When GPU load low: use `ThinkingBandit` to decide mutation complexity (think → complex mutation)
   - Leverages existing `GpuLoadSignal` from Plan 194
-- [ ] **T4.5** Update README with new features in the feature flag table
-- [ ] **T4.6** Update `.docs/` with architecture diagram and benchmark results
+- [x] **T4.5** Update README with new features in the feature flag table
+- [x] **T4.6** Update `.docs/` with architecture diagram and benchmark results
 
 ---
 

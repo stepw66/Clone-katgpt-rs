@@ -563,6 +563,12 @@ cargo clippy --all-targets --all-features --quiet   # Lint
 | `gpu_inference` | GPU inference backend via Metal compute pipelines (Plan 176, opt-in) |
 | `inference_router` | Full inference routing: TriggerGate + InferenceRouter + GPU + ANE (Plan 176, opt-in) |
 | `wealth_pruner` | WealthPruner — economic bandit arms via Hayek market selection (Plan 187, opt-in) |
+| `partial_scoring` | Graduated episode reward via PartialScorer trait — depends on `bandit` (Plan 191, opt-in) |
+| `problem_mutator` | Arena config evolution via ProblemMutator trait — depends on `bandit` (Plan 191, opt-in) |
+| `idea_divergence` | Strategic novelty filter for bandit arms — depends on `bandit`, `partial_scoring` (Plan 191, opt-in) |
+| `ruliology` | Exhaustive FSM/CA/TM enumeration as bandit arms — depends on `bandit` (Plan 188, opt-in) |
+| `skill_lifecycle` | MUSE-style skill lifecycle: memory, test gate, catalog — depends on `bandit` (Plan 192, opt-in) |
+| `freq_bandit` | Frequency bandit for speculative decode (Plan 189, **default-on**) |
 | `full` | Enable all features (excludes some opt-in) |
 
 </details>
