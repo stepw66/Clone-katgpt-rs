@@ -49,7 +49,7 @@
   - Demonstrate K=V × GQA compound savings
 
 - [x] **T7: Feature gate** — `kv_share = []` in Cargo.toml
-  - Feature: `kv_share` (default on)
+  - Feature: `kv_share` (default on ✅ GOAT 7/7 promoted)
   - Compile-time: `#[cfg(feature = "kv_share")]` on new code paths
   - Runtime: `config.attention_projection = SharedKV` to opt out
   - Verify no perf regression when feature is off

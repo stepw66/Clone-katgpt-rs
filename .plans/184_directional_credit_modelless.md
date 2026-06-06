@@ -1,7 +1,7 @@
 # Plan 184: Direction-Adaptive Credit — Entropy-Bifurcated Pruning (Modelless)
 
 > **Research:** 164 (DASD + RLRT)
-> **Feature gate:** `directional_credit` (default on)
+> **Feature gate:** `directional_credit` (default on ✅ GOAT 6/6 promoted)
 > **Dependencies:** Plan 171 (FrozenBaseGuard), Plan 112 (SR²AM Bandit), Plan 194 (Adaptive CoT)
 > **Status:** Planning
 

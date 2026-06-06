@@ -3,7 +3,7 @@
 > **Research:** [Research 167](../.research/167_Economy_of_Minds_Hayek_Market_Coordination.md)
 > **Depends On:** Plan 030 ✅ (BanditPruner), Plan 032 ✅ (AbsorbCompress)
 > **Feature gate:** `wealth_pruner` — depends on `bandit`
-> **Default-on:** After GOAT proof — must show ≥10% faster convergence than UCB1 in bomber arena
+> **Default-on:** ✅ GOAT promoted — default on in Cargo.toml
 > **Commercial alignment:** Per Verdict 003 — modelless inference primitive is MIT engine
 
 ---

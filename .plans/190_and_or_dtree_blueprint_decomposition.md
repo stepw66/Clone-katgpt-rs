@@ -3,7 +3,7 @@
 > **Research:** 170 (LEAP Blueprint DAG)
 > **Depends on:** Plan 128 (Proof Sketch Evolution ✅), Plan 030 (Multi-armed bandit ✅), Plan 021 (ScreeningPruner ✅)
 > **Feature gate:** `and_or_dtree` — depends on `proof_sketch_evolution`, `bandit_pruner`, `screening_pruner`
-> **Default-on:** After GOAT proof — if decomposition reduces nodes explored with no quality regression
+> **Default-on:** ✅ GOAT promoted — default on in Cargo.toml (reduces nodes, no quality regression)
 > **Commercial alignment:** Per Verdict 003 — generic AND-OR tree is MIT engine (katgpt-rs). Game-specific applications are riir-ai private SaaS.
 
 ---

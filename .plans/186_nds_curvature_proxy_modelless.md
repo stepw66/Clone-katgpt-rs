@@ -5,7 +5,7 @@
 > **Depends:** Plan 183 (CIAB 📋), Plan 030 (Bandit ✅), Plan 152 (Newton-Schulz ✅)
 > **Feature Gate:** `nds_proxy = ["bandit"]`
 > **Status:** Active
-> **Default-on:** Yes (after GOAT proof) — zero perf overhead, theoretically grounded
+> **Default-on:** Yes ✅ (GOAT 13/13 promoted) — zero perf overhead, theoretically grounded
 
 ---
 
