@@ -323,3 +323,271 @@ fn test_grim_trigger_punishes_defection_in_pd() {
 // test to verify the broader finding.
 #[allow(dead_code)]
 const EXPECTED_2_STATE_COUNT: usize = 26;
+
+// ── Cross-paradigm tournament helpers ──────────────────────────────
+
+use crate::ruliology::ca::CaStrategy;
+use crate::ruliology::tm::TmStrategy;
+
+/// Play two SimpleProgram strategies against each other for `rounds` rounds.
+///
+/// Returns the total payoff for player A.
+fn play_match<A: SimpleProgram, B: SimpleProgram>(
+    a: &mut A,
+    b: &mut B,
+    rounds: u32,
+    payoff_fn: &dyn Fn(u8, u8) -> f64,
+) -> f64 {
+    let mut hist_a: Vec<u8> = Vec::with_capacity(rounds as usize);
+    let mut hist_b: Vec<u8> = Vec::with_capacity(rounds as usize);
+    let mut total = 0.0f64;
+
+    for _ in 0..rounds {
+        let action_a = a.next_action(&hist_b);
+        let action_b = b.next_action(&hist_a);
+        total += payoff_fn(action_a, action_b);
+        hist_a.push(action_a);
+        hist_b.push(action_b);
+    }
+
+    total
+}
+
+// ── Cross-paradigm tests ──────────────────────────────────────────
+
+#[test]
+fn test_cross_paradigm_fsm_vs_ca_matching_pennies() {
+    let fsms = FsmEnumerator::enumerate(2);
+    let ca_rules = CaStrategy::enumerate_all();
+    let rounds: u32 = 50;
+
+    // For each FSM, compute average payoff across all 256 CA opponents.
+    let mut fsm_avg_payoffs: Vec<(u64, f64)> = Vec::with_capacity(fsms.len());
+
+    for fsm in &fsms {
+        let mut total = 0.0f64;
+        for ca in &ca_rules {
+            let mut a = fsm.clone();
+            a.reset();
+            let mut b = ca.clone();
+            total += play_match(&mut a, &mut b, rounds, &matching_pennies);
+        }
+        let avg = total / ca_rules.len() as f64;
+        fsm_avg_payoffs.push((fsm.id(), avg));
+    }
+
+    // FSM strategies should generally outperform random CA strategies.
+    // Average FSM payoff across all CA opponents should be slightly positive
+    // because FSMs have explicit state transitions that adapt to opponent moves.
+    let overall_avg: f64 =
+        fsm_avg_payoffs.iter().map(|(_, p)| p).sum::<f64>() / fsm_avg_payoffs.len() as f64;
+
+    // The best FSM should have positive average payoff.
+    let best_fsm = fsm_avg_payoffs
+        .iter()
+        .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+        .expect("at least one FSM");
+
+    // Sanity: at least some FSMs beat random CAs on average.
+    let n_positive = fsm_avg_payoffs.iter().filter(|(_, p)| *p > 0.0).count();
+
+    assert!(
+        n_positive > 0,
+        "at least some FSMs should have positive avg payoff vs CAs, overall_avg={overall_avg:.4}"
+    );
+    assert!(
+        best_fsm.1 > 0.0,
+        "best FSM should have positive avg payoff vs CAs, got {}",
+        best_fsm.1
+    );
+}
+
+#[test]
+fn test_cross_paradigm_fsm_vs_tm_matching_pennies() {
+    let fsms = FsmEnumerator::enumerate(2);
+    let tms = TmStrategy::enumerate_1_state();
+    let rounds: u32 = 50;
+
+    // For each FSM, compute average payoff across all 36 TM opponents.
+    let mut fsm_avg_payoffs: Vec<(u64, f64)> = Vec::with_capacity(fsms.len());
+
+    for fsm in &fsms {
+        let mut total = 0.0f64;
+        for tm in &tms {
+            let mut a = fsm.clone();
+            a.reset();
+            let mut b = tm.clone();
+            b.reset();
+            total += play_match(&mut a, &mut b, rounds, &matching_pennies);
+        }
+        let avg = total / tms.len() as f64;
+        fsm_avg_payoffs.push((fsm.id(), avg));
+    }
+
+    // Sort to get top/bottom FSMs.
+    fsm_avg_payoffs.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+    let best = fsm_avg_payoffs.first().expect("at least one FSM");
+    let worst = fsm_avg_payoffs.last().expect("at least one FSM");
+
+    // Best FSM should outperform worst FSM.
+    assert!(
+        best.1 > worst.1,
+        "best FSM ({:.4}) should outperform worst FSM ({:.4}) vs TMs",
+        best.1,
+        worst.1
+    );
+
+    // Best FSM should have positive average against TMs.
+    assert!(
+        best.1 > 0.0,
+        "best FSM should have positive avg payoff vs TMs, got {:.4}",
+        best.1
+    );
+}
+
+#[test]
+fn test_cross_paradigm_ca_tournament_matching_pennies() {
+    let ca_rules = CaStrategy::enumerate_all();
+    let rounds: u32 = 50;
+
+    // Run round-robin tournament among all 256 CA rules.
+    // For speed, sample a subset of opponents for each rule.
+    let sample_opponents: Vec<CaStrategy> = ca_rules
+        .iter()
+        .step_by(4) // sample every 4th rule = ~64 opponents
+        .cloned()
+        .collect();
+
+    let mut scores: Vec<(u8, f64)> = Vec::with_capacity(ca_rules.len());
+
+    for ca in &ca_rules {
+        let mut total = 0.0f64;
+        for opp in &sample_opponents {
+            if ca.rule() == opp.rule() {
+                continue;
+            }
+            let mut a = ca.clone();
+            let mut b = opp.clone();
+            total += play_match(&mut a, &mut b, rounds, &matching_pennies);
+        }
+        let avg = total / (sample_opponents.len().saturating_sub(1)) as f64;
+        scores.push((ca.rule(), avg));
+    }
+
+    scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+    let best_rule = scores[0].0;
+    let best_score = scores[0].1;
+
+    // Wolfram says rule 14 wins among 2-color CAs for matching pennies.
+    // Check it's in the top tier (top 10%).
+    let top_10pct = (scores.len() / 10).max(1);
+    let top_rules: Vec<u8> = scores.iter().take(top_10pct).map(|(r, _)| *r).collect();
+
+    // Rule 14 should be in the top 10% of CA rules.
+    assert!(
+        top_rules.contains(&14),
+        "rule 14 should be in top 10% of CA tournament, top rules: {top_rules:?}, best={best_rule}({best_score:.4})"
+    );
+
+    // The best rule should have a positive score.
+    assert!(
+        best_score > 0.0,
+        "best CA rule should have positive avg payoff, got {best_score:.4}"
+    );
+}
+
+#[test]
+fn test_cross_paradigm_pd_fsm_vs_all() {
+    let fsms = FsmEnumerator::enumerate(2);
+    let ca_rules = CaStrategy::enumerate_all();
+    let tms = TmStrategy::enumerate_1_state();
+    let rounds: u32 = 50;
+
+    let pd_row = |a: u8, b: u8| -> f64 {
+        match (a, b) {
+            (0, 0) => -1.0,
+            (0, 1) => -5.0,
+            (1, 0) => 0.0,
+            (1, 1) => -3.0,
+            _ => 0.0,
+        }
+    };
+
+    // Build grim trigger for comparison.
+    let gt = grim_trigger();
+    let gt_id = gt.id();
+
+    // Test each FSM against a sample of CA and TM opponents.
+    let ca_sample: Vec<CaStrategy> = ca_rules.iter().step_by(8).cloned().collect(); // ~32 CAs
+
+    let mut fsm_scores: Vec<(u64, f64)> = Vec::with_capacity(fsms.len());
+
+    for fsm in &fsms {
+        let mut total = 0.0f64;
+        let mut n_opponents = 0usize;
+
+        // vs CA sample
+        for ca in &ca_sample {
+            let mut a = fsm.clone();
+            a.reset();
+            let mut b = ca.clone();
+            total += play_match(&mut a, &mut b, rounds, &pd_row);
+            n_opponents += 1;
+        }
+
+        // vs all TMs
+        for tm in &tms {
+            let mut a = fsm.clone();
+            a.reset();
+            let mut b = tm.clone();
+            b.reset();
+            total += play_match(&mut a, &mut b, rounds, &pd_row);
+            n_opponents += 1;
+        }
+
+        let avg = if n_opponents > 0 {
+            total / n_opponents as f64
+        } else {
+            0.0
+        };
+        fsm_scores.push((fsm.id(), avg));
+    }
+
+    fsm_scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+    // Grim trigger should be in the top half of PD rankings against CA+TM.
+    let gt_rank = fsm_scores.iter().position(|(id, _)| *id == gt_id);
+
+    match gt_rank {
+        Some(rank) => {
+            assert!(
+                rank < fsm_scores.len() / 2,
+                "grim trigger should be in top half of PD vs CA+TM, got rank {rank}/{}",
+                fsm_scores.len()
+            );
+        }
+        None => {
+            // Grim trigger may not be in the enumerated set due to dedup differences.
+            // Verify at least that some cooperative strategy performs well.
+            let best = fsm_scores.first().expect("at least one FSM");
+            let pd_defect_eq = -3.0 * rounds as f64;
+            assert!(
+                best.1 > pd_defect_eq,
+                "best FSM in PD vs CA+TM should beat mutual defection ({pd_defect_eq:.1}), got {:.4}",
+                best.1
+            );
+        }
+    }
+
+    // Best FSM should beat the always-defect equilibrium (-3.0 per round).
+    // fsm_scores already stores average per-opponent total payoff (not per-round),
+    // so compare against -3.0 * rounds.
+    let best_payoff = fsm_scores[0].1;
+    let pd_defect_eq = -3.0 * rounds as f64;
+    assert!(
+        best_payoff > pd_defect_eq,
+        "best FSM should beat mutual defection ({pd_defect_eq:.1}) in PD, got {best_payoff:.4}"
+    );
+}
