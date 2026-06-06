@@ -175,6 +175,7 @@ graph LR
 | **Thinking Prune** | FrozenBaseGuard for intermediate steps | `thinking_prune` |
 | **Trigger Gate** | Three-way CPU/GPU/ANE tier promotion via QPS/latency/queue monitoring | `inference_router` |
 | **InferenceRouter** | Dynamic tier routing + batch forward with amortized compilation | `inference_router` |
+| **FreqBandit** | Oscillatory spectral bandit — cyclic pattern detection → adaptive speculative decode | `freq_bandit` |
 
 📖 **Full GOAT audit table** with research source, real gain, and replaced feature: See [`.docs/01_overview.md`](.docs/01_overview.md).
 
