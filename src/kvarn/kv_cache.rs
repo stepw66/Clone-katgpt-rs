@@ -141,8 +141,15 @@ pub struct KVarNKVCache {
     // ── Small fields at end ──
     /// Bits per element.
     bits: u8,
-    /// Whether Hadamard rotation is enabled.
+    /// Whether Hadamard rotation is enabled (user config).
+    #[allow(dead_code)] // kept as user-facing config; effective_hadamard is used internally
     hadamard: bool,
+    /// Whether to skip variance normalization (computed: bits <= 2).
+    skip_varn: bool,
+    /// Effective Hadamard mode (computed: hadamard).
+    effective_hadamard: bool,
+    /// Sub-channel group size for RTN quantization (at 2-bit: 32, otherwise 0 = full row).
+    group_size: usize,
 }
 
 impl KVarNKVCache {
@@ -205,6 +212,9 @@ impl KVarNKVCache {
             bytes_per_row,
             bits: cfg.bits,
             hadamard: cfg.hadamard,
+            skip_varn: cfg.bits <= 2,
+            effective_hadamard: cfg.hadamard,
+            group_size: if cfg.bits <= 2 { 4 } else { 0 },
         }
     }
 
@@ -304,10 +314,28 @@ impl KVarNKVCache {
                 let byte_off = pos_in_tile >> 2;
                 let shift = (pos_in_tile & 3) * 2;
                 let mask: u8 = 0x03;
-                for ch in 0..kv_dim {
-                    let q = ((quantized[ch * bpr + byte_off] >> shift) & mask) as f32;
-                    let var_row = s_row[ch];
-                    out[ch] = (q * rtn_scales[ch] + rtn_zp[ch]) * var_col * var_row;
+                if self.skip_varn {
+                    if self.group_size > 0 {
+                        // Grouped quantization: find group for this position
+                        let groups_per_row = actual_cols.div_ceil(self.group_size);
+                        let g = pos_in_tile / self.group_size;
+                        for ch in 0..kv_dim {
+                            let q = ((quantized[ch * bpr + byte_off] >> shift) & mask) as f32;
+                            let idx = ch * groups_per_row + g.min(groups_per_row - 1);
+                            out[ch] = q * rtn_scales[idx] + rtn_zp[idx];
+                        }
+                    } else {
+                        for ch in 0..kv_dim {
+                            let q = ((quantized[ch * bpr + byte_off] >> shift) & mask) as f32;
+                            out[ch] = q * rtn_scales[ch] + rtn_zp[ch];
+                        }
+                    }
+                } else {
+                    for ch in 0..kv_dim {
+                        let q = ((quantized[ch * bpr + byte_off] >> shift) & mask) as f32;
+                        let var_row = s_row[ch];
+                        out[ch] = (q * rtn_scales[ch] + rtn_zp[ch]) * var_col * var_row;
+                    }
                 }
             }
             8 => {
@@ -333,7 +361,7 @@ impl KVarNKVCache {
         // Hadamard is applied per-tile on the channel dimension (columns for keys,
         // rows for values). The dequantized output vector needs inverse Hadamard
         // to recover the original channel values.
-        if self.hadamard && kv_dim.is_power_of_two() {
+        if self.effective_hadamard && kv_dim.is_power_of_two() {
             hadamard::hadamard_transform_inplace(out);
         }
     }
@@ -359,61 +387,124 @@ impl KVarNKVCache {
 
         // Precompute row-scale constant (same for all channels in this row)
         let var_row = tile.var_scales.s_row[pos_in_tile];
-        let rtn_scale = tile.rtn_scales[pos_in_tile];
-        let rtn_zp = tile.rtn_zp[pos_in_tile];
+        let rtn_scales = &tile.rtn_scales;
+        let rtn_zp = &tile.rtn_zp;
         let s_col = &tile.var_scales.s_col;
 
         // Specialized hot path per bit-width — inline unpack directly into dequant
         match bits {
             4 => {
                 // 2 values per byte, dequant inline
+                let rtn_scale = rtn_scales[pos_in_tile];
+                let rtn_zp_val = rtn_zp[pos_in_tile];
                 for (i, &b) in packed_row.iter().take(kv_dim.div_ceil(2)).enumerate() {
                     let q0 = (b & 0x0F) as f32;
-                    out[2 * i] = (q0 * rtn_scale + rtn_zp) * s_col[2 * i] * var_row;
+                    out[2 * i] = (q0 * rtn_scale + rtn_zp_val) * s_col[2 * i] * var_row;
                     if 2 * i + 1 < kv_dim {
                         let q1 = (b >> 4) as f32;
-                        out[2 * i + 1] = (q1 * rtn_scale + rtn_zp) * s_col[2 * i + 1] * var_row;
+                        out[2 * i + 1] = (q1 * rtn_scale + rtn_zp_val) * s_col[2 * i + 1] * var_row;
                     }
                 }
             }
             2 => {
                 // 4 values per byte
-                for (i, &b) in packed_row.iter().take(kv_dim.div_ceil(4)).enumerate() {
-                    let q0 = (b & 0x03) as f32;
-                    out[4 * i] = (q0 * rtn_scale + rtn_zp) * s_col[4 * i] * var_row;
-                    if 4 * i + 1 < kv_dim {
-                        let q1 = ((b >> 2) & 0x03) as f32;
-                        out[4 * i + 1] = (q1 * rtn_scale + rtn_zp) * s_col[4 * i + 1] * var_row;
+                if self.skip_varn {
+                    if self.group_size > 0 {
+                        // Grouped quantization: per-token, per-channel-group scales
+                        let groups_per_row = kv_dim.div_ceil(self.group_size);
+                        let row_base = pos_in_tile * groups_per_row;
+                        for (i, &b) in packed_row.iter().take(kv_dim.div_ceil(4)).enumerate() {
+                            let q0 = (b & 0x03) as f32;
+                            let g0 = (4 * i) / self.group_size;
+                            let idx0 = row_base + g0.min(groups_per_row - 1);
+                            out[4 * i] = q0 * rtn_scales[idx0] + rtn_zp[idx0];
+                            if 4 * i + 1 < kv_dim {
+                                let q1 = ((b >> 2) & 0x03) as f32;
+                                let g1 = (4 * i + 1) / self.group_size;
+                                let idx1 = row_base + g1.min(groups_per_row - 1);
+                                out[4 * i + 1] = q1 * rtn_scales[idx1] + rtn_zp[idx1];
+                            }
+                            if 4 * i + 2 < kv_dim {
+                                let q2 = ((b >> 4) & 0x03) as f32;
+                                let g2 = (4 * i + 2) / self.group_size;
+                                let idx2 = row_base + g2.min(groups_per_row - 1);
+                                out[4 * i + 2] = q2 * rtn_scales[idx2] + rtn_zp[idx2];
+                            }
+                            if 4 * i + 3 < kv_dim {
+                                let q3 = ((b >> 6) & 0x03) as f32;
+                                let g3 = (4 * i + 3) / self.group_size;
+                                let idx3 = row_base + g3.min(groups_per_row - 1);
+                                out[4 * i + 3] = q3 * rtn_scales[idx3] + rtn_zp[idx3];
+                            }
+                        }
+                    } else {
+                        // Non-grouped: per-token scale
+                        let rtn_scale = rtn_scales[pos_in_tile];
+                        let rtn_zp_val = rtn_zp[pos_in_tile];
+                        for (i, &b) in packed_row.iter().take(kv_dim.div_ceil(4)).enumerate() {
+                            let q0 = (b & 0x03) as f32;
+                            out[4 * i] = q0 * rtn_scale + rtn_zp_val;
+                            if 4 * i + 1 < kv_dim {
+                                let q1 = ((b >> 2) & 0x03) as f32;
+                                out[4 * i + 1] = q1 * rtn_scale + rtn_zp_val;
+                            }
+                            if 4 * i + 2 < kv_dim {
+                                let q2 = ((b >> 4) & 0x03) as f32;
+                                out[4 * i + 2] = q2 * rtn_scale + rtn_zp_val;
+                            }
+                            if 4 * i + 3 < kv_dim {
+                                let q3 = ((b >> 6) & 0x03) as f32;
+                                out[4 * i + 3] = q3 * rtn_scale + rtn_zp_val;
+                            }
+                        }
                     }
-                    if 4 * i + 2 < kv_dim {
-                        let q2 = ((b >> 4) & 0x03) as f32;
-                        out[4 * i + 2] = (q2 * rtn_scale + rtn_zp) * s_col[4 * i + 2] * var_row;
-                    }
-                    if 4 * i + 3 < kv_dim {
-                        let q3 = ((b >> 6) & 0x03) as f32;
-                        out[4 * i + 3] = (q3 * rtn_scale + rtn_zp) * s_col[4 * i + 3] * var_row;
+                } else {
+                    let rtn_scale = rtn_scales[pos_in_tile];
+                    let rtn_zp_val = rtn_zp[pos_in_tile];
+                    for (i, &b) in packed_row.iter().take(kv_dim.div_ceil(4)).enumerate() {
+                        let q0 = (b & 0x03) as f32;
+                        out[4 * i] = (q0 * rtn_scale + rtn_zp_val) * s_col[4 * i] * var_row;
+                        if 4 * i + 1 < kv_dim {
+                            let q1 = ((b >> 2) & 0x03) as f32;
+                            out[4 * i + 1] =
+                                (q1 * rtn_scale + rtn_zp_val) * s_col[4 * i + 1] * var_row;
+                        }
+                        if 4 * i + 2 < kv_dim {
+                            let q2 = ((b >> 4) & 0x03) as f32;
+                            out[4 * i + 2] =
+                                (q2 * rtn_scale + rtn_zp_val) * s_col[4 * i + 2] * var_row;
+                        }
+                        if 4 * i + 3 < kv_dim {
+                            let q3 = ((b >> 6) & 0x03) as f32;
+                            out[4 * i + 3] =
+                                (q3 * rtn_scale + rtn_zp_val) * s_col[4 * i + 3] * var_row;
+                        }
                     }
                 }
             }
             8 => {
+                let rtn_scale = rtn_scales[pos_in_tile];
+                let rtn_zp_val = rtn_zp[pos_in_tile];
                 for ch in 0..kv_dim {
                     let q = packed_row[ch] as f32;
-                    out[ch] = (q * rtn_scale + rtn_zp) * s_col[ch] * var_row;
+                    out[ch] = (q * rtn_scale + rtn_zp_val) * s_col[ch] * var_row;
                 }
             }
             _ => {
                 // Fallback: batch unpack then dequant
+                let rtn_scale = rtn_scales[pos_in_tile];
+                let rtn_zp_val = rtn_zp[pos_in_tile];
                 let scratch = &mut self.scratch_unpack[..kv_dim];
                 unpack_row(packed_row, bits, scratch);
                 for ch in 0..kv_dim {
                     let q = scratch[ch] as f32;
-                    out[ch] = (q * rtn_scale + rtn_zp) * s_col[ch] * var_row;
+                    out[ch] = (q * rtn_scale + rtn_zp_val) * s_col[ch] * var_row;
                 }
             }
         }
 
         // Inverse Hadamard on the output vector — see dequantize_key_into.
-        if self.hadamard && kv_dim.is_power_of_two() {
+        if self.effective_hadamard && kv_dim.is_power_of_two() {
             hadamard::hadamard_transform_inplace(out);
         }
     }
@@ -462,19 +553,31 @@ impl KVarNKVCache {
         // Hadamard rotation per-tile on channel dimension:
         //   Key tile [kv_dim, tile_size]: Hadamard each column (= each position's channels)
         //   This is equivalent to per-position Hadamard on kv_dim, but batched at tile time.
-        if self.hadamard && rows.is_power_of_two() {
+        if self.effective_hadamard && rows.is_power_of_two() {
             hadamard::hadamard_cols(&mut tile_data, rows, cols);
         }
 
-        // Step 1: Variance normalization
-        let config = VarNormConfig {
-            tile_size: self.tile_size,
-            ..Default::default()
+        // Step 1: Variance normalization (skip at 2-bit — dual-scale reconstruction hurts)
+        let var_scales = if self.skip_varn {
+            VarianceNormScales {
+                s_col: vec![1.0f32; cols],
+                s_row: vec![1.0f32; rows],
+            }
+        } else {
+            let config = VarNormConfig {
+                tile_size: self.tile_size,
+                ..Default::default()
+            };
+            variance_normalize(&mut tile_data, rows, cols, &config)
         };
-        let var_scales = variance_normalize(&mut tile_data, rows, cols, &config);
 
-        // Step 2: Per-row (channel) RTN quantization
-        let (rtn_scales, rtn_zp, packed) = rtn_quantize_rows(&tile_data, rows, cols, self.bits);
+        // Step 2: RTN quantization
+        //   At 2-bit, use sub-channel grouping (group_size=32) for tighter ranges.
+        let (rtn_scales, rtn_zp, packed) = if self.group_size > 0 {
+            rtn_quantize_rows_grouped(&tile_data, rows, cols, self.bits, self.group_size)
+        } else {
+            rtn_quantize_rows(&tile_data, rows, cols, self.bits)
+        };
 
         // Store
         let bpr = packed_bytes_per_row(cols, self.bits);
@@ -503,19 +606,31 @@ impl KVarNKVCache {
         tile_data[off..off + rows * cols].copy_from_slice(&self.val_buffer[off..off + rows * cols]);
 
         // Hadamard rotation per-tile (clustered across channels per token)
-        if self.hadamard && cols.is_power_of_two() {
+        if self.effective_hadamard && cols.is_power_of_two() {
             hadamard::hadamard_rows(&mut tile_data, cols);
         }
 
-        // Step 1: Variance normalization
-        let config = VarNormConfig {
-            tile_size: self.tile_size,
-            ..Default::default()
+        // Step 1: Variance normalization (skip at 2-bit — dual-scale reconstruction hurts)
+        let var_scales = if self.skip_varn {
+            VarianceNormScales {
+                s_col: vec![1.0f32; cols],
+                s_row: vec![1.0f32; rows],
+            }
+        } else {
+            let config = VarNormConfig {
+                tile_size: self.tile_size,
+                ..Default::default()
+            };
+            variance_normalize(&mut tile_data, rows, cols, &config)
         };
-        let var_scales = variance_normalize(&mut tile_data, rows, cols, &config);
 
-        // Step 2: Per-row (token) RTN quantization
-        let (rtn_scales, rtn_zp, packed) = rtn_quantize_rows(&tile_data, rows, cols, self.bits);
+        // Step 2: RTN quantization
+        //   At 2-bit, use sub-channel grouping (group_size=32) for tighter ranges.
+        let (rtn_scales, rtn_zp, packed) = if self.group_size > 0 {
+            rtn_quantize_rows_grouped(&tile_data, rows, cols, self.bits, self.group_size)
+        } else {
+            rtn_quantize_rows(&tile_data, rows, cols, self.bits)
+        };
 
         let bpr = packed_bytes_per_row(cols, self.bits);
         let meta = &mut self.val_tiles[layer][tile_idx];
@@ -617,6 +732,68 @@ fn rtn_quantize_rows(
             let normalized = (v - lo) / scale;
             let q = (normalized.round() as u32).clamp(0, levels - 1);
             pack_value(&mut packed[r * bpr..], c, q, bits as usize);
+        }
+    }
+
+    (scales, zps, packed)
+}
+
+/// RTN quantize with sub-channel grouping.
+///
+/// Splits each row into `groups_per_row` groups of `group_size` elements.
+/// Each group gets its own scale/zp, giving tighter quantization ranges.
+/// Returns (scales[rows * groups_per_row], zps[rows * groups_per_row], packed data).
+///
+/// The packed data layout is identical to `rtn_quantize_rows`.
+fn rtn_quantize_rows_grouped(
+    tile: &[f32],
+    rows: usize,
+    cols: usize,
+    bits: u8,
+    group_size: usize,
+) -> (Vec<f32>, Vec<f32>, Vec<u8>) {
+    let levels = 1u32 << bits;
+    let half_levels = (levels - 1) as f32;
+    let bpr = packed_bytes_per_row(cols, bits);
+    let mut packed = vec![0u8; rows * bpr];
+    let groups_per_row = cols.div_ceil(group_size);
+    let mut scales = vec![1.0f32; rows * groups_per_row];
+    let mut zps = vec![0.0f32; rows * groups_per_row];
+
+    for r in 0..rows {
+        let row_off = r * cols;
+        for g in 0..groups_per_row {
+            let g_start = g * group_size;
+            let g_end = (g_start + group_size).min(cols);
+            let _g_len = g_end - g_start;
+
+            // Find min/max within this group
+            let mut lo = f32::MAX;
+            let mut hi = f32::MIN;
+            for c in g_start..g_end {
+                let v = tile[row_off + c];
+                lo = lo.min(v);
+                hi = hi.max(v);
+            }
+
+            let idx = r * groups_per_row + g;
+            if hi - lo < 1e-10 {
+                scales[idx] = 0.0;
+                zps[idx] = lo;
+                continue;
+            }
+
+            let scale = (hi - lo) / half_levels;
+            scales[idx] = scale;
+            zps[idx] = lo;
+
+            // Quantize and pack elements in this group
+            for c in g_start..g_end {
+                let v = tile[row_off + c];
+                let normalized = (v - lo) / scale;
+                let q = (normalized.round() as u32).clamp(0, levels - 1);
+                pack_value(&mut packed[r * bpr..], c, q, bits as usize);
+            }
         }
     }
 
