@@ -33,3 +33,22 @@ pub use routing::{compute_routing_bias, score_blocks_entmax};
 
 #[cfg(all(feature = "dash_attn", feature = "cache_prune"))]
 pub use sat_analysis::{HeadSparsityInfo, head_sparsity_profile};
+
+// VortexFlow composable sparse routing (Plan 196, default-OFF)
+#[cfg(feature = "vortex_flow")]
+pub mod block_topk;
+#[cfg(feature = "vortex_flow")]
+pub mod entmax_router;
+#[cfg(feature = "vortex_flow")]
+pub mod value_energy;
+#[cfg(feature = "vortex_flow")]
+pub mod vortex_flow;
+
+#[cfg(feature = "vortex_flow")]
+pub use block_topk::{BlockTopKCache, BlockTopKRouter};
+#[cfg(feature = "vortex_flow")]
+pub use entmax_router::{EntmaxCache, EntmaxRouter};
+#[cfg(feature = "vortex_flow")]
+pub use value_energy::{ValueEnergyCache, ValueEnergyRouter};
+#[cfg(feature = "vortex_flow")]
+pub use vortex_flow::{RoutingDecision, VortexFlow, VortexScratch};
