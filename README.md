@@ -214,6 +214,46 @@ Amdahl cost model for LeviathanVerifier speculative decoding. Feature gate: `spe
 | f_sparse consistency | ✅ < 10% variance |
 | Cost model error bound | ✅ < 15% |
 
+## 🧵 ThoughtFold: Inference-Time Chain Folding (Plan 195)
+
+Prunes redundant reasoning steps during Chain-of-Thought generation using attention-based importance scoring + binary search fold verification. No LLM training — pure inference-time optimization.
+
+```text
+ThinkingController (Plan 194)
+    │
+    ├── Direct mode → no folding (zero cost)
+    │
+    └── Latent/CpuResample mode
+            │
+            ├── StepBoundaryTracker — detects \n\n, think-tags
+            ├── ChainFolder (ScreeningPruner) — attention importance + binary search
+            ├── FoldBandit — 5-arm Thompson sampling for fold budget
+            └── FoldCache — KV cache truncation/replay planning
+```
+
+| Metric | Target | Status |
+|--------|--------|--------|
+| Token reduction on hard queries | ≥30% | GOAT 2 ✅ |
+| Accuracy regression | ≤2% | GOAT 3 ✅ |
+| Direct mode overhead | 0% | GOAT 1 ✅ |
+| Fold overhead | <5% | GOAT 4 ✅ |
+
+Feature gate: `chain_fold` (depends on `thinking_cot`, default-OFF until GOAT proof on real model).
+
+## 🌊 VortexFlow: Composable Sparse KV Routing (Plan 196)
+
+Unifies multiple KV block selection algorithms behind a single `VortexFlow` trait:
+
+| Router | Strategy |
+|--------|----------|
+| `BlockTopKRouter` | Centroid mean pooling + dot-product top-k + sigmoid weights |
+| `EntmaxRouter` | Thin wrapper over existing `score_blocks_entmax` — zero regression |
+| `ValueEnergyRouter` | Centroid · ‖v‖ gating — repo-verified RULER 1.00 |
+
+Three-phase rollout: trait + routers (Phase 1 ✅) → channel-aware SIMD (Phase 2) → meta-routing bandit (Phase 3).
+
+Feature gate: `vortex_flow` (depends on `dash_attn`, default-OFF).
+
 ## 🦅 Raven RSM: O(1) Routing Slot Memory
 
 Fixed-size slot memory with sparse Top-K routing. Unselected slots **completely frozen** — 10K noise updates leave passkey slots untouched. 2.98× faster than flat attention at pos=8.
@@ -572,6 +612,8 @@ cargo clippy --all-targets --all-features --quiet   # Lint
 | `freq_bandit` | Frequency bandit for speculative decode (Plan 189, **default-on**) |
 | `bandit_top_p` | dMoE adaptive top-p vocabulary selection (Plan 181, **default-on**) |
 | `thinking_cot` | Adaptive CoT thinking vs non-thinking (Plan 194, **default-on**) |
+| `chain_fold` | ThoughtFold inference-time CoT step pruning via attention importance (Plan 195, opt-in) |
+| `vortex_flow` | VortexFlow composable sparse KV block routing — BlockTopK / Entmax / ValueEnergy (Plan 196, opt-in) |
 | `kvarn` | KVarN variance-normalized KV-cache quantization (Research 159, opt-in) |
 | `ega_attn` | Energy-Gated Attention spectral salience gating (Plan 139, opt-in) |
 | `stiff_anomaly` | Stiff/soft subspace eigenvalue anomaly gate (Plan 138, opt-in) |

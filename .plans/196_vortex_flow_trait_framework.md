@@ -117,7 +117,7 @@ Data flow:
   - Repo-verified: `venergy_gated_centroid` achieves RULER 1.00 accuracy and competitive throughput on Qwen3-1.7B
   - This validates the VortexFlow trait supports multi-signal routing (not just single-dot-product)
 
-- [ ] **T7: Wire `VortexFlow` into decode path** (Phase 2 wiring)
+- [x] **T7: Wire `VortexFlow` into decode path** (Phase 2 wiring)
   - Add `vortex_router: Option<Box<dyn VortexFlow<Cache = DynRoutingCache>>>` to `Config` or `TransformerWeights`
   - In decode step: if `vortex_router.is_some()`, use `forward_indexer` for block selection instead of hardcoded DashAttention
   - If `None`: existing behavior (DashAttention hardcoded path)
@@ -130,7 +130,7 @@ Data flow:
   - Test `RoutingDecision` clear/reuse (no re-allocation)
   - Test `RoutingScratch` buffer reuse across calls
 
-- [ ] **T9: Example `examples/vortex_01_block_topk.rs`** (deferred)
+- [x] **T9: Example `examples/vortex_01_block_topk.rs`**
   - Simulate KV cache with synthetic blocks
   - `BlockTopKRouter` selects top-k blocks for a synthetic query
   - Compare selected blocks vs full attention — verify routing quality
