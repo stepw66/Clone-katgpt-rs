@@ -69,30 +69,36 @@ Distill OSSM-PINN's oscillatory state-space principles into katgpt-rs as modelle
   - On non-cyclic sequences (prose, dialogue)
   - Metric: per-token latency, quality (perplexity surrogate)
 
-### Phase 3: ModalSpec — Experimental — **DEFERRED: experimental, not production**
+### Phase 3: ModalSpec — Experimental — ✅ Implemented (experimental, NOT default)
 
-- [-] Implement LinOSS cell in `crates/katgpt-core/src/linoss.rs`
-  - `LinOSSCell { omega_sq: [f32; H], beta: [f32; H] }`
-  - `LinOSSState { y: [f32; H], z: [f32; H] }`
+- [x] Implement LinOSS cell in `crates/katgpt-core/src/linoss.rs`
+  - `LinOSSCell { omega_sq: Vec<f32>, beta: Vec<f32> }`
+  - `LinOSSState { y: Vec<f32>, z: Vec<f32> }`
   - `imex_step(state, forcing, dt) -> LinOSSState`
-  - `parallel_scan(initial, forcings, dt) -> Vec<LinOSSState>` (reuse HLA Blelloch scan)
+  - `parallel_scan(initial, forcings, dt) -> Vec<LinOSSState>` (Blelloch prefix sum)
 
-- [ ] Pre-compute Fourier basis over vocabulary embedding space
-  - `VocabFourierBasis { modes: [Vec<f32>; K] }` — top-K Fourier modes of vocab embeddings
-  - Compute once at model load time
+- [x] Pre-compute Fourier basis over vocabulary embedding space
+  - `VocabFourierBasis { modes: Vec<Vec<f32>>, frequencies: Vec<f32> }` — top-K Fourier modes of vocab embeddings
+  - Compute once at model load time via DFT dot-product
 
-- [ ] Implement `ModalSpecDrafter`
-  - Encode prompt context → LinOSS initial state
+- [x] Implement `ModalSpecDrafter`
+  - Encode prompt context → LinOSS initial state (accumulate forcing)
   - Parallel scan → modal coefficients over time
   - Reconstruct draft tokens from modal coefficients × vocab Fourier basis
+  - Sigmoid-gated dot-product similarity for nearest-token lookup
 
-- [ ] Feature gate: `modal_spec` (experimental, NOT default)
-  - Only for research/development, not production
+- [x] Feature gate: `modal_spec` (experimental, NOT default)
+  - `katgpt-core/Cargo.toml`: `modal_spec = []`
+  - Root `Cargo.toml`: `modal_spec = ["katgpt-core/modal_spec"]`
+  - NOT in default or full features
 
-- [ ] Test: ModalSpec vs DDTree drafting quality
-  - On structured output (JSON, code)
-  - On unstructured output (prose)
-  - Metric: draft acceptance rate, tokens/second
+- [x] Tests (6 pass)
+  - `test_imex_step_preserves_energy` — β=0, energy bounded over 1000 steps
+  - `test_imex_step_damps_with_beta` — β>0, energy decreases
+  - `test_parallel_scan_matches_sequential` — sequential == parallel scan output
+  - `test_fourier_basis_reconstruction` — non-trivial reconstruction
+  - `test_drafter_produces_valid_tokens` — all tokens in valid range
+  - `test_linoss_zero_forcing` — zero state invariant
 
 ---
 

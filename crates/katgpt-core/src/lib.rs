@@ -136,5 +136,7 @@ pub use traits::{GameTrace, PartialScorer};
 #[cfg(feature = "problem_mutator")]
 pub use traits::{GameConfig, MutantConfig, MutationKind, ProblemMutator};
 
+#[cfg(feature = "modal_spec")]
+pub mod linoss;
 #[cfg(feature = "mux_pruner")]
 pub mod mux;
