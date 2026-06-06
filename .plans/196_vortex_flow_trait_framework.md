@@ -80,7 +80,7 @@ Data flow:
 
 ### Tasks
 
-- [ ] **T1: Define `VortexFlow` trait in `src/dash_attn/vortex_flow.rs`**
+- [x] **T1: Define `VortexFlow` trait in `src/dash_attn/vortex_flow.rs`**
   - Associated type `Cache` for routing algorithm state
   - `fn forward_cache(&self, cache: &mut Self::Cache, keys: &[f32], block_idx: usize)`
   - `fn forward_indexer(&self, query: &[f32], cache: &Self::Cache, n_blocks: usize, top_k: usize, scratch: &mut RoutingScratch) -> RoutingDecision`
@@ -88,49 +88,49 @@ Data flow:
   - Trait is `Send + Sync`, no generic bounds beyond that
   - Behind `#[cfg(feature = "vortex_flow")]`
 
-- [ ] **T2: Define `RoutingDecision` struct**
+- [x] **T2: Define `RoutingDecision` struct**
   - `blocks: Vec<usize>` — selected block indices
   - `weights: Vec<f32>` — routing weights (from entmax, softmax, or sigmoid)
   - Both pre-allocated with capacity = top_k
   - `fn clear(&mut self)` for reuse across decode steps
 
-- [ ] **T3: Define `RoutingScratch` reusable buffer**
+- [x] **T3: Define `RoutingScratch` reusable buffer**
   - `scores: Vec<f32>` — block scores (capacity = max_blocks)
   - `indices: Vec<usize>` — top-k index buffer
   - Already partially exists in `dash_attn/routing.rs` — extract and formalize
 
-- [ ] **T4: Implement `BlockTopKRouter`**
+- [x] **T4: Implement `BlockTopKRouter`**
   - `forward_cache`: compute `Mean(keys[block_size])` → centroid per block. Store in `BlockTopKCache { centroids: Vec<f32> }` shape `[n_blocks, head_dim]`
   - `forward_indexer`: compute `dot(centroids[i], query)` for all blocks → `argtopk(scores, top_k)` → `RoutingDecision`
   - SIMD-optimize the centroid dot product using existing `simd_dot` or inline NEON/AVX2
   - This is the simplest possible VortexFlow impl — proves the trait works
 
-- [ ] **T5: Implement `EntmaxRouter` — wrap existing DashAttention**
+- [x] **T5: Implement `EntmaxRouter` — wrap existing DashAttention**
   - `forward_cache`: delegate to existing `ChunkSummaryCache::update()`
   - `forward_indexer`: delegate to existing `score_blocks_entmax()`, wrap result in `RoutingDecision`
   - No behavioral change — the router is a thin wrapper over existing code
   - Validates that VortexFlow doesn't regress DashAttention
 
-- [ ] **T6: Implement `ValueEnergyRouter` — centroid · ‖v‖ gating**
+- [x] **T6: Implement `ValueEnergyRouter` — centroid · ‖v‖ gating**
   - `forward_cache`: compute centroid + mean ‖V‖ per block. Store in `ValueEnergyCache { centroids: Vec<f32>, v_energy: Vec<f32> }`
   - `forward_indexer`: `dot(centroids[i], query) * v_energy[i]` → top-k
   - Repo-verified: `venergy_gated_centroid` achieves RULER 1.00 accuracy and competitive throughput on Qwen3-1.7B
   - This validates the VortexFlow trait supports multi-signal routing (not just single-dot-product)
 
-- [ ] **T7: Wire `VortexFlow` into decode path**
+- [ ] **T7: Wire `VortexFlow` into decode path** (Phase 2 wiring)
   - Add `vortex_router: Option<Box<dyn VortexFlow<Cache = DynRoutingCache>>>` to `Config` or `TransformerWeights`
   - In decode step: if `vortex_router.is_some()`, use `forward_indexer` for block selection instead of hardcoded DashAttention
   - If `None`: existing behavior (DashAttention hardcoded path)
   - Feature gate `vortex_flow` guards the new field
 
-- [ ] **T8: Unit tests for VortexFlow trait**
+- [x] **T8: Unit tests for VortexFlow trait**
   - Test `BlockTopKRouter`: known keys → known centroids → known top-k
   - Test `EntmaxRouter`: existing DashAttention tests still pass via wrapper
   - Test `ValueEnergyRouter`: verify v_energy=0 gates out block, v_energy>0 passes centroid dot product
   - Test `RoutingDecision` clear/reuse (no re-allocation)
   - Test `RoutingScratch` buffer reuse across calls
 
-- [ ] **T9: Example `examples/vortex_01_block_topk.rs`**
+- [ ] **T9: Example `examples/vortex_01_block_topk.rs`** (deferred)
   - Simulate KV cache with synthetic blocks
   - `BlockTopKRouter` selects top-k blocks for a synthetic query
   - Compare selected blocks vs full attention — verify routing quality
