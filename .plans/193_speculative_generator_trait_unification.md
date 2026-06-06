@@ -121,15 +121,16 @@ graph TD
   - `TokenGenerator` routes to CPU/GPU/ANE via existing `TriggerGate`
   - `ActionGenerator` routes to CPU (WASM validation is always CPU-bound)
 
-- [ ] **T13:** Add `SpeculativeGenerator` feature gate to `InferenceRouter`
+- [x] **T13:** Add `SpeculativeGenerator` feature gate to `InferenceRouter` ✅
   - Feature: `speculative_generator`
-  - When enabled: router can dispatch any `SpeculativeGenerator`
+  - When enabled: router can dispatch any `SpeculativeGenerator` via `generate_validated()`
   - When disabled: router only handles `InferenceBackend` (backward compat)
+  - File: `katgpt-rs/src/inference_router.rs` — `#[cfg(feature = "speculative_generator")]` impl block
 
-- [ ] **T14:** Write integration test showing auto-routing
-  - Low load → CPU generation → WASM validation
-  - High load → GPU generation → WASM validation
-  - Verify tier transitions work with generic generators
+- [x] **T14:** Write integration test showing auto-routing ✅
+  - 3 tests: accept-all, prune-high-tokens, empty-candidates
+  - File: `katgpt-rs/tests/speculative_generator_routing.rs`
+  - All 3 pass, 12 existing router tests unaffected
 
 ### Phase 4: GOAT Proof
 

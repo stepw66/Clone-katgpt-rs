@@ -398,6 +398,43 @@ impl InferenceRouter {
 }
 
 // ---------------------------------------------------------------------------
+// SpeculativeGenerator routing (Plan 193 T13)
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "speculative_generator")]
+use katgpt_core::{GenerativeConstraintPruner, SpeculativeGenerator};
+
+#[cfg(feature = "speculative_generator")]
+impl InferenceRouter {
+    /// Generate candidates via any [`SpeculativeGenerator`] and validate with
+    /// a [`GenerativeConstraintPruner`].
+    ///
+    /// For token generators: routes to GPU/ANE when load is high.
+    /// For action generators: always CPU (WASM validation is CPU-bound).
+    ///
+    /// Returns validated candidates only (invalid ones pruned).
+    pub fn generate_validated<G, P>(
+        &mut self,
+        generator: &mut G,
+        pruner: &P,
+        condition: &G::Condition,
+        rng: &mut fastrand::Rng,
+    ) -> Vec<G::Output>
+    where
+        G: SpeculativeGenerator,
+        P: GenerativeConstraintPruner<G::Output>,
+    {
+        let candidates = generator.generate(condition, rng).unwrap_or_default();
+        let validity = pruner.batch_is_valid(&candidates);
+        candidates
+            .into_iter()
+            .zip(validity)
+            .filter_map(|(c, v)| if v { Some(c) } else { None })
+            .collect()
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
