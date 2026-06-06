@@ -162,7 +162,7 @@ pub fn prisoners_dilemma(a: u8, b: u8) -> (f64, f64) {
 - [x] Cross-paradigm tournament: FSM vs CA vs TM in matching pennies
 - [x] Verify Wolfram result: rule 14 in top 10% of CA tournament
 - [x] Cross-paradigm tournament in PD
-- [ ] Example: `ruliology_demo` showing full enumeration + ranking
+- [x] Example: `ruliology_demo` showing full enumeration + ranking
 
 ### Phase 4: ComputationalIrreducibilityGate (modelless)
 
@@ -177,7 +177,7 @@ pub fn prisoners_dilemma(a: u8, b: u8) -> (f64, f64) {
 - [x] Implement `FsmTemplateProposer` — mutate FSM graphs (vertex color flip, edge reroute)
 - [x] Implement FSM co-evolution: two FSMs mutate alternately, keep-if-better
 - [ ] Connect to `DeltaGatedAbsorbCompress` — δ-gate FSM mutation acceptance
-- [ ] Example: evolve FSM from random to universal winner against 2-state opponents
+- [x] Example: evolve FSM from random to universal winner against 2-state opponents
 
 ### Phase 6: GOAT Proof
 

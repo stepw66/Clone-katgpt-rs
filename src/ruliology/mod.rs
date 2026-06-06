@@ -36,7 +36,7 @@ pub use bandit::{RuliologyAbsorbCompress, RuliologyArm, RuliologyBandit, Ruliolo
 pub use ca::CaStrategy;
 pub use fsm::{FsmEnumerator, FsmStrategy, MAX_STATES};
 pub use irreducibility::{IrreducibilityGate, IrreducibilityResult};
-pub use mutation::{CoEvolutionResult, FsmTemplateProposer, MutationType};
+pub use mutation::{CoEvolutionResult, FsmTemplateProposer, MutationType, co_evolve};
 pub use payoff::{matching_pennies, prisoners_dilemma};
 pub use tm::TmStrategy;
 pub use types::{RuliologyPruner, SimpleProgram, WinMatrix};
