@@ -1,7 +1,10 @@
 //! Ruliology Bandit — FSM strategies as UCB1 bandit arms.
 //!
 //! Pipeline: enumerate FSMs → tournament → Pareto filter → UCB1 selection.
+//! Includes AbsorbCompress-style promotion for stable high-payoff FSMs.
 //! Plan 188 Phase 2.
+
+use std::collections::HashSet;
 
 use crate::ruliology::fsm::{FsmEnumerator, FsmStrategy};
 use crate::ruliology::types::SimpleProgram;
@@ -72,8 +75,10 @@ pub struct RuliologyBandit {
     /// Total pulls across all arms.
     total_pulls: u32,
     /// Minimum payoff threshold for filtering.
+    #[allow(dead_code)]
     payoff_threshold: f64,
     /// Maximum complexity for filtering.
+    #[allow(dead_code)]
     complexity_threshold: f32,
 }
 
@@ -152,6 +157,29 @@ impl RuliologyBandit {
             .max_by(|(_, a), (_, b)| a.payoff().partial_cmp(&b.payoff()).unwrap())
             .map(|(i, _)| i)
             .unwrap_or(0)
+    }
+
+    /// Best arm by payoff, excluding already-promoted arms.
+    pub fn best_unpromoted_arm(&self, promoted: &HashSet<usize>) -> usize {
+        self.arms
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| !promoted.contains(i))
+            .max_by(|(_, a), (_, b)| a.payoff().partial_cmp(&b.payoff()).unwrap())
+            .map(|(i, _)| i)
+            .unwrap_or(0)
+    }
+
+    /// Get all arms.
+    #[inline]
+    pub fn arms(&self) -> &[RuliologyArm] {
+        &self.arms
+    }
+
+    /// Total pulls across all arms.
+    #[inline]
+    pub fn total_pulls(&self) -> u32 {
+        self.total_pulls
     }
 }
 
@@ -261,4 +289,258 @@ mod tests {
     }
 }
 
-// TL;DR: RuliologyArm (FSM-backed UCB1 arm) + RuliologyBandit (Pareto-filtered strategy selection pipeline). 5 tests behind ruliology feature gate.
+// ── RuliologyAbsorbCompress ─────────────────────────────────────
+
+/// Promotion config for ruliology absorb-compress.
+#[derive(Clone, Debug)]
+pub struct RuliologyPromoteConfig {
+    /// Minimum visits before an arm can be promoted.
+    pub min_visits: u32,
+    /// Minimum average payoff to be promoted (stable positive payoff).
+    pub payoff_threshold: f64,
+    /// Maximum number of arms to promote per compress() call.
+    pub max_promotions: usize,
+    /// How often to check for promotions (every N absorbs).
+    pub check_interval: u32,
+}
+
+impl Default for RuliologyPromoteConfig {
+    fn default() -> Self {
+        Self {
+            min_visits: 50,
+            payoff_threshold: 0.05,
+            max_promotions: 3,
+            check_interval: 100,
+        }
+    }
+}
+
+/// Absorb-compress adapter for RuliologyBandit.
+///
+/// Promotes FSM arms with stable positive payoff to "winner" status.
+/// The inverse of the standard AbsorbCompress (which blocks bad arms) —
+/// this identifies and locks in *good* arms.
+///
+/// Usage:
+/// ```ignore
+/// let mut ac = RuliologyAbsorbCompress::new(bandit, RuliologyPromoteConfig::default());
+/// // Each game episode:
+/// ac.absorb(arm_idx, reward);
+/// if ac.should_compress() {
+///     let promoted = ac.compress();
+///     // promoted arms have stable positive payoff
+/// }
+/// // Get the current best strategy:
+/// if let Some(idx) = ac.promoted_winner() {
+///     let strategy = ac.bandit().strategy(idx);
+/// }
+/// ```
+pub struct RuliologyAbsorbCompress {
+    /// Inner bandit.
+    bandit: RuliologyBandit,
+    /// Promotion config.
+    config: RuliologyPromoteConfig,
+    /// Total observations absorbed.
+    total_absorbed: u32,
+    /// Promoted arm indices (stable winners).
+    promoted: HashSet<usize>,
+}
+
+impl RuliologyAbsorbCompress {
+    /// Create new absorb-compress adapter wrapping a RuliologyBandit.
+    pub fn new(bandit: RuliologyBandit, config: RuliologyPromoteConfig) -> Self {
+        Self {
+            bandit,
+            config,
+            total_absorbed: 0,
+            promoted: HashSet::new(),
+        }
+    }
+
+    /// Absorb an observation: update arm payoff.
+    pub fn absorb(&mut self, arm: usize, reward: f64) {
+        self.bandit.update(arm, reward);
+        self.total_absorbed += 1;
+    }
+
+    /// Whether enough observations have been absorbed to trigger compression.
+    pub fn should_compress(&self) -> bool {
+        self.total_absorbed > 0 && self.total_absorbed % self.config.check_interval == 0
+    }
+
+    /// Promote arms with stable positive payoff.
+    ///
+    /// Returns indices of newly promoted arms.
+    pub fn compress(&mut self) -> Vec<usize> {
+        let mut newly_promoted = Vec::new();
+
+        for (i, arm) in self.bandit.arms().iter().enumerate() {
+            if self.promoted.contains(&i) {
+                continue;
+            }
+            if arm.pulls() < self.config.min_visits {
+                continue;
+            }
+            if arm.payoff() >= self.config.payoff_threshold {
+                self.promoted.insert(i);
+                newly_promoted.push(i);
+                if newly_promoted.len() >= self.config.max_promotions {
+                    break;
+                }
+            }
+        }
+
+        newly_promoted
+    }
+
+    /// Get the best promoted arm (winner), if any.
+    pub fn promoted_winner(&self) -> Option<usize> {
+        if self.promoted.is_empty() {
+            return None;
+        }
+        // Among promoted arms, find the one with highest payoff.
+        self.promoted
+            .iter()
+            .filter(|&&i| i < self.bandit.arms().len())
+            .max_by(|&&a, &&b| {
+                let pa = self.bandit.arms()[a].payoff();
+                let pb = self.bandit.arms()[b].payoff();
+                pa.partial_cmp(&pb).unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .copied()
+    }
+
+    /// Access the inner bandit.
+    pub fn bandit(&self) -> &RuliologyBandit {
+        &self.bandit
+    }
+
+    /// Mutable access to the inner bandit.
+    pub fn bandit_mut(&mut self) -> &mut RuliologyBandit {
+        &mut self.bandit
+    }
+
+    /// Promoted arm indices.
+    pub fn promoted_arms(&self) -> &HashSet<usize> {
+        &self.promoted
+    }
+
+    /// Total observations absorbed.
+    #[inline]
+    pub fn total_absorbed(&self) -> u32 {
+        self.total_absorbed
+    }
+}
+
+#[cfg(test)]
+mod absorb_compress_tests {
+    use super::*;
+    use crate::ruliology::payoff::matching_pennies;
+
+    fn make_test_bandit() -> RuliologyBandit {
+        let strategies = FsmEnumerator::enumerate(2);
+        RuliologyBandit::from_strategies(
+            &strategies,
+            100,
+            &matching_pennies,
+            f64::NEG_INFINITY,
+            f32::MAX,
+        )
+    }
+
+    #[test]
+    fn test_absorb_compress_no_initial_promotions() {
+        let bandit = make_test_bandit();
+        let ac = RuliologyAbsorbCompress::new(bandit, RuliologyPromoteConfig::default());
+        assert!(ac.promoted_arms().is_empty());
+        assert_eq!(ac.total_absorbed(), 0);
+        assert!(ac.promoted_winner().is_none());
+    }
+
+    #[test]
+    fn test_absorb_compress_promotes_after_min_visits() {
+        let bandit = make_test_bandit();
+        let config = RuliologyPromoteConfig {
+            min_visits: 10,
+            payoff_threshold: 0.5,
+            max_promotions: 5,
+            check_interval: 20,
+        };
+        let mut ac = RuliologyAbsorbCompress::new(bandit, config);
+
+        // Give arm 0 consistently positive rewards.
+        for _ in 0..15 {
+            ac.absorb(0, 1.0);
+        }
+
+        // Give other arms negative rewards.
+        for arm in 1..ac.bandit().num_arms() {
+            for _ in 0..15 {
+                ac.absorb(arm, -1.0);
+            }
+        }
+
+        // total_absorbed = 15 * num_arms. We need it to be a multiple of check_interval=20.
+        // Absorb a few more to reach a multiple of 20.
+        while !ac.should_compress() {
+            ac.absorb(0, 1.0);
+        }
+
+        let promoted = ac.compress();
+
+        assert!(!promoted.is_empty(), "arm 0 should be promoted");
+        assert!(promoted.contains(&0), "arm 0 should be in promoted list");
+        assert!(ac.promoted_winner().is_some());
+    }
+
+    #[test]
+    fn test_absorb_compress_no_promotion_below_visits() {
+        let bandit = make_test_bandit();
+        let config = RuliologyPromoteConfig {
+            min_visits: 100,
+            payoff_threshold: 0.5,
+            max_promotions: 5,
+            check_interval: 10,
+        };
+        let mut ac = RuliologyAbsorbCompress::new(bandit, config);
+
+        // Only 5 visits — below min_visits.
+        for _ in 0..5 {
+            ac.absorb(0, 1.0);
+        }
+
+        let promoted = ac.compress();
+        assert!(
+            promoted.is_empty(),
+            "no arm should be promoted with <100 visits"
+        );
+    }
+
+    #[test]
+    fn test_absorb_compress_max_promotions_limit() {
+        let bandit = make_test_bandit();
+        let config = RuliologyPromoteConfig {
+            min_visits: 5,
+            payoff_threshold: 0.3,
+            max_promotions: 2,
+            check_interval: 10,
+        };
+        let mut ac = RuliologyAbsorbCompress::new(bandit, config);
+
+        // Give all arms high rewards.
+        for arm in 0..ac.bandit().num_arms() {
+            for _ in 0..10 {
+                ac.absorb(arm, 1.0);
+            }
+        }
+
+        let promoted = ac.compress();
+        assert!(
+            promoted.len() <= 2,
+            "should promote at most 2 arms, got {}",
+            promoted.len()
+        );
+    }
+}
+
+// TL;DR: RuliologyArm (UCB1 arm) + RuliologyBandit (Pareto-filtered selection) + RuliologyAbsorbCompress (promote stable winners).
