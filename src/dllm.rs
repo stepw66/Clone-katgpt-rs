@@ -1368,10 +1368,9 @@ pub fn evaluate_accuracy(
                 continue;
             }
             let logits_p = &bctx.all_logits[p * vocab..(p + 1) * vocab];
-            // SIMD argmax: find max value via simd_max_f32, then linear scan
-            // for the first match — much faster than partial_cmp per element.
-            let max_val = crate::simd::simd_max_f32(logits_p);
-            let predicted = logits_p.iter().position(|&v| v == max_val).unwrap_or(0);
+            // Single-pass argmax: fuses max-finding and index-recovery into one
+            // traversal (vs the old two-pass simd_max_f32 + position scan).
+            let (predicted, _) = crate::simd::simd_argmax_f32(logits_p);
             if predicted == tokens[p] {
                 correct += 1;
             }
