@@ -50,6 +50,7 @@ impl BlockTopKCache {
 // ---------------------------------------------------------------------------
 
 /// BlockTopK router — routes via mean key centroids + dot product top-k.
+#[derive(Debug)]
 pub struct BlockTopKRouter {
     /// Apply `1/sqrt(head_dim)` scaling to dot products.
     pub scale: bool,

@@ -594,6 +594,10 @@ name = "thinking_cot_demo"
 required-features = ["thinking_cot"]
 
 [[example]]
+name = "chain_fold_demo"
+required-features = ["chain_fold"]
+
+[[example]]
 name = "kvarn_goat_proof"
 required-features = ["kvarn"]
 
@@ -608,6 +612,12 @@ required-features = ["spec_reconciliation"]
 [[example]]
 name = "octpq_kvarn_fusion"
 required-features = ["kvarn", "hybrid_oct_pq"]
+
+# ── VortexFlow (Plan 196) ───────────────────────────────────────
+
+[[example]]
+name = "vortex_01_block_topk"
+required-features = ["vortex_flow"]
 
 [[test]]
 name = "directional_credit_goat"

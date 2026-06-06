@@ -61,6 +61,7 @@ impl EntmaxCache {
 ///
 /// Uses α-entmax (α=1.5) for adaptive sparse block selection.
 /// This router validates that the VortexFlow trait doesn't regress DashAttention.
+#[derive(Debug)]
 pub struct EntmaxRouter {
     /// DashAttention config (controls scaling_factor, alpha, etc.).
     pub config: DashAttnConfig,

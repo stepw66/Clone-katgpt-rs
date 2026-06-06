@@ -8,6 +8,10 @@
 
 use std::fmt::Debug;
 
+use super::block_topk::{BlockTopKCache, BlockTopKRouter};
+use super::entmax_router::{EntmaxCache, EntmaxRouter};
+use super::value_energy::{ValueEnergyCache, ValueEnergyRouter};
+
 // ---------------------------------------------------------------------------
 // VortexFlow trait
 // ---------------------------------------------------------------------------
@@ -60,6 +64,197 @@ pub trait VortexFlow: Send + Sync {
 
     /// Create a new cache instance pre-allocated for `n_blocks_capacity` blocks.
     fn cache_new(&self, n_blocks_capacity: usize, head_dim: usize) -> Self::Cache;
+}
+
+// ---------------------------------------------------------------------------
+// VortexFlowConfig
+// ---------------------------------------------------------------------------
+
+/// Router selection for VortexFlow decode path.
+///
+/// `DashAttn` (default) preserves existing behavior.
+/// Other variants select a VortexFlow router implementation.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[repr(u8)]
+pub enum VortexFlowConfig {
+    /// Use existing DashAttention routing (default).
+    #[default]
+    DashAttn,
+    /// Use BlockTopK router (centroid + dot-product).
+    BlockTopK,
+    /// Use EntmaxRouter (wraps existing entmax scoring).
+    Entmax,
+    /// Use ValueEnergyRouter (centroid · ‖v‖ gating).
+    ValueEnergy,
+}
+
+// ---------------------------------------------------------------------------
+// VortexFlowExt — extension for DashAttnConfig (katgpt-rs only)
+// ---------------------------------------------------------------------------
+
+/// Extension to `DashAttnConfig` for VortexFlow router selection.
+///
+/// Since `DashAttnConfig` lives in `katgpt-core` (immutable from katgpt-rs),
+/// this wrapper carries the VortexFlow-specific configuration alongside
+/// the standard DashAttention config.
+#[derive(Debug, Clone)]
+pub struct VortexFlowExt {
+    /// Which router to use during decode.
+    pub config: VortexFlowConfig,
+}
+
+impl Default for VortexFlowExt {
+    fn default() -> Self {
+        Self {
+            config: VortexFlowConfig::default(),
+        }
+    }
+}
+
+impl VortexFlowExt {
+    /// Create extension with specific router config.
+    pub fn new(config: VortexFlowConfig) -> Self {
+        Self { config }
+    }
+
+    /// Whether VortexFlow routing should replace DashAttention routing.
+    #[inline]
+    pub fn is_vortex(&self) -> bool {
+        !matches!(self.config, VortexFlowConfig::DashAttn)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// VortexRouter — enum-based dispatch over all router types
+// ---------------------------------------------------------------------------
+
+/// Enum wrapper providing a single type for any VortexFlow router.
+///
+/// Avoids `Box<dyn VortexFlow<Cache = ?>>` — the Cache associated type
+/// differs per router, so dynamic dispatch requires either enum dispatch
+/// or a separate `DynRoutingCache` (Phase 3). This enum is the Phase 1 solution.
+#[derive(Debug)]
+pub enum VortexRouter {
+    /// BlockTopK router (centroid + dot-product top-k).
+    BlockTopK(BlockTopKRouter),
+    /// Entmax router (wraps existing DashAttention entmax).
+    Entmax(EntmaxRouter),
+    /// ValueEnergy router (centroid · ‖v‖ gating).
+    ValueEnergy(ValueEnergyRouter),
+}
+
+/// Cache storage for [`VortexRouter`] — mirrors the enum variants.
+#[derive(Debug)]
+pub enum VortexRouterCache {
+    /// BlockTopK cache.
+    BlockTopK(BlockTopKCache),
+    /// Entmax cache.
+    Entmax(EntmaxCache),
+    /// ValueEnergy cache.
+    ValueEnergy(ValueEnergyCache),
+}
+
+impl VortexRouterCache {
+    /// Number of blocks currently cached (variant-dependent).
+    pub fn n_blocks(&self) -> usize {
+        match self {
+            Self::BlockTopK(c) => c.n_blocks,
+            Self::Entmax(c) => c.summaries.len(),
+            Self::ValueEnergy(c) => c.n_blocks,
+        }
+    }
+}
+
+impl VortexRouter {
+    /// Build a router from config.
+    pub fn from_config(config: VortexFlowConfig) -> Self {
+        match config {
+            VortexFlowConfig::BlockTopK => Self::BlockTopK(BlockTopKRouter::new(true)),
+            VortexFlowConfig::Entmax => Self::Entmax(EntmaxRouter::default_router()),
+            VortexFlowConfig::ValueEnergy => Self::ValueEnergy(ValueEnergyRouter::new(true)),
+            VortexFlowConfig::DashAttn => {
+                unreachable!("DashAttn does not produce a VortexRouter; check is_vortex() first")
+            }
+        }
+    }
+}
+
+impl VortexFlow for VortexRouter {
+    type Cache = VortexRouterCache;
+
+    fn forward_cache(
+        &self,
+        cache: &mut Self::Cache,
+        keys: &[f32],
+        values: &[f32],
+        block_idx: usize,
+        head_dim: usize,
+    ) {
+        match (self, cache) {
+            (Self::BlockTopK(r), VortexRouterCache::BlockTopK(c)) => {
+                r.forward_cache(c, keys, values, block_idx, head_dim)
+            }
+            (Self::Entmax(r), VortexRouterCache::Entmax(c)) => {
+                r.forward_cache(c, keys, values, block_idx, head_dim)
+            }
+            (Self::ValueEnergy(r), VortexRouterCache::ValueEnergy(c)) => {
+                r.forward_cache(c, keys, values, block_idx, head_dim)
+            }
+            _ => panic!("VortexRouter/Cache variant mismatch"),
+        }
+    }
+
+    fn forward_indexer(
+        &self,
+        query: &[f32],
+        cache: &Self::Cache,
+        n_blocks: usize,
+        top_k: usize,
+        scratch: &mut VortexScratch,
+    ) -> RoutingDecision {
+        match (self, cache) {
+            (Self::BlockTopK(r), VortexRouterCache::BlockTopK(c)) => {
+                r.forward_indexer(query, c, n_blocks, top_k, scratch)
+            }
+            (Self::Entmax(r), VortexRouterCache::Entmax(c)) => {
+                r.forward_indexer(query, c, n_blocks, top_k, scratch)
+            }
+            (Self::ValueEnergy(r), VortexRouterCache::ValueEnergy(c)) => {
+                r.forward_indexer(query, c, n_blocks, top_k, scratch)
+            }
+            _ => panic!("VortexRouter/Cache variant mismatch"),
+        }
+    }
+
+    fn cache_new(&self, n_blocks_capacity: usize, head_dim: usize) -> Self::Cache {
+        match self {
+            Self::BlockTopK(r) => {
+                VortexRouterCache::BlockTopK(r.cache_new(n_blocks_capacity, head_dim))
+            }
+            Self::Entmax(r) => VortexRouterCache::Entmax(r.cache_new(n_blocks_capacity, head_dim)),
+            Self::ValueEnergy(r) => {
+                VortexRouterCache::ValueEnergy(r.cache_new(n_blocks_capacity, head_dim))
+            }
+        }
+    }
+}
+
+/// Build a `(VortexRouter, VortexRouterCache)` pair from config.
+///
+/// Convenience function for callers that need both the router and its cache.
+pub fn build_vortex_router(
+    config: VortexFlowConfig,
+    n_blocks_capacity: usize,
+    head_dim: usize,
+) -> Option<(VortexRouter, VortexRouterCache)> {
+    match config {
+        VortexFlowConfig::DashAttn => None,
+        _ => {
+            let router = VortexRouter::from_config(config);
+            let cache = router.cache_new(n_blocks_capacity, head_dim);
+            Some((router, cache))
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -226,5 +421,135 @@ mod tests {
         scratch.ensure_capacity(16);
         // Should not reallocate
         assert_eq!(scratch.scores.as_ptr(), scores_ptr);
+    }
+
+    // -----------------------------------------------------------------------
+    // VortexFlowConfig tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_vortex_flow_config_default_is_dash_attn() {
+        assert_eq!(VortexFlowConfig::default(), VortexFlowConfig::DashAttn);
+    }
+
+    // -----------------------------------------------------------------------
+    // VortexFlowExt tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_vortex_flow_ext_default_not_vortex() {
+        let ext = VortexFlowExt::default();
+        assert!(!ext.is_vortex());
+    }
+
+    #[test]
+    fn test_vortex_flow_ext_block_topk_is_vortex() {
+        let ext = VortexFlowExt::new(VortexFlowConfig::BlockTopK);
+        assert!(ext.is_vortex());
+    }
+
+    #[test]
+    fn test_vortex_flow_ext_entmax_is_vortex() {
+        let ext = VortexFlowExt::new(VortexFlowConfig::Entmax);
+        assert!(ext.is_vortex());
+    }
+
+    #[test]
+    fn test_vortex_flow_ext_value_energy_is_vortex() {
+        let ext = VortexFlowExt::new(VortexFlowConfig::ValueEnergy);
+        assert!(ext.is_vortex());
+    }
+
+    // -----------------------------------------------------------------------
+    // VortexRouter enum dispatch tests
+    // -----------------------------------------------------------------------
+
+    const HD: usize = 4;
+
+    #[test]
+    fn test_vortex_router_block_topk_dispatch() {
+        let router = VortexRouter::from_config(VortexFlowConfig::BlockTopK);
+        let mut cache = router.cache_new(2, HD);
+        let mut scratch = VortexScratch::new(2);
+
+        let keys = vec![1.0, 0.0, 0.0, 0.0];
+        let vals = vec![0.0; HD];
+        router.forward_cache(&mut cache, &keys, &vals, 0, HD);
+
+        let query = vec![1.0, 0.0, 0.0, 0.0];
+        let decision = router.forward_indexer(&query, &cache, 1, 1, &mut scratch);
+        assert_eq!(decision.blocks, vec![0]);
+    }
+
+    #[test]
+    fn test_vortex_router_entmax_dispatch() {
+        let router = VortexRouter::from_config(VortexFlowConfig::Entmax);
+        let mut cache = router.cache_new(2, HD);
+        let mut scratch = VortexScratch::new(2);
+
+        let keys = vec![1.0, 0.0, 0.0, 0.0];
+        let vals = vec![0.0; HD];
+        router.forward_cache(&mut cache, &keys, &vals, 0, HD);
+
+        let query = vec![1.0, 0.0, 0.0, 0.0];
+        let decision = router.forward_indexer(&query, &cache, 1, 1, &mut scratch);
+        assert_eq!(decision.blocks, vec![0]);
+    }
+
+    #[test]
+    fn test_vortex_router_value_energy_dispatch() {
+        let router = VortexRouter::from_config(VortexFlowConfig::ValueEnergy);
+        let mut cache = router.cache_new(2, HD);
+        let mut scratch = VortexScratch::new(2);
+
+        // Block 0: aligned centroid + non-zero energy
+        let keys0 = vec![1.0, 0.0, 0.0, 0.0];
+        let vals0 = vec![1.0, 1.0, 1.0, 1.0];
+        router.forward_cache(&mut cache, &keys0, &vals0, 0, HD);
+
+        // Block 1: orthogonal centroid
+        let keys1 = vec![0.0, 1.0, 0.0, 0.0];
+        let vals1 = vec![1.0, 1.0, 1.0, 1.0];
+        router.forward_cache(&mut cache, &keys1, &vals1, 1, HD);
+
+        let query = vec![1.0, 0.0, 0.0, 0.0];
+        let decision = router.forward_indexer(&query, &cache, 2, 1, &mut scratch);
+        assert_eq!(decision.blocks[0], 0);
+    }
+
+    #[test]
+    fn test_build_vortex_router_returns_none_for_dash_attn() {
+        let result = build_vortex_router(VortexFlowConfig::DashAttn, 4, HD);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_build_vortex_router_returns_some_for_block_topk() {
+        let (router, _cache) = build_vortex_router(VortexFlowConfig::BlockTopK, 4, HD)
+            .expect("BlockTopK should build");
+        match router {
+            VortexRouter::BlockTopK(_) => {}
+            _ => panic!("expected BlockTopK variant"),
+        }
+    }
+
+    #[test]
+    fn test_build_vortex_router_returns_some_for_entmax() {
+        let (router, _cache) =
+            build_vortex_router(VortexFlowConfig::Entmax, 4, HD).expect("Entmax should build");
+        match router {
+            VortexRouter::Entmax(_) => {}
+            _ => panic!("expected Entmax variant"),
+        }
+    }
+
+    #[test]
+    fn test_build_vortex_router_returns_some_for_value_energy() {
+        let (router, _cache) = build_vortex_router(VortexFlowConfig::ValueEnergy, 4, HD)
+            .expect("ValueEnergy should build");
+        match router {
+            VortexRouter::ValueEnergy(_) => {}
+            _ => panic!("expected ValueEnergy variant"),
+        }
     }
 }

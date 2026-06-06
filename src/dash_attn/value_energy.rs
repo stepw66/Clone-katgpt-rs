@@ -65,6 +65,7 @@ impl ValueEnergyCache {
 /// - `v_energy[i] > 0` → passes the centroid dot product through
 ///
 /// This validates that the VortexFlow trait supports multi-signal routing.
+#[derive(Debug)]
 pub struct ValueEnergyRouter {
     /// Apply `1/sqrt(head_dim)` scaling to dot products.
     pub scale: bool,

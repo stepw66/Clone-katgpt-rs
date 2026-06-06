@@ -14,6 +14,11 @@ use crate::types::{self, Config, DashAttnConfig};
 use super::chunk_summary::{ChunkSummaryCache, ChunkSummaryQuery, summarize_chunk_into};
 use super::routing::score_blocks_entmax_into;
 
+#[cfg(feature = "vortex_flow")]
+use super::vortex_flow::{
+    VortexFlow, VortexFlowExt, VortexRouter, VortexRouterCache, VortexScratch,
+};
+
 // ---------------------------------------------------------------------------
 // Prefill (batch prompt processing)
 // ---------------------------------------------------------------------------
@@ -228,6 +233,113 @@ pub fn forward_dash_attn_decode<'a>(
 
     ctx.hidden_state[..n].copy_from_slice(&ctx.x[..n]);
     // LM head: standard_lm_head is private, use matmul directly
+    types::matmul(
+        &mut ctx.logits,
+        &weights.lm_head,
+        &ctx.x,
+        config.vocab_size,
+        n,
+    );
+    &mut ctx.logits
+}
+
+// ---------------------------------------------------------------------------
+// Decode with VortexFlow router (feature-gated)
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "vortex_flow")]
+/// Forward pass for DashAttention in decode mode using a VortexFlow router.
+///
+/// Identical to [`forward_dash_attn_decode`] except that block selection
+/// uses the provided VortexFlow router instead of the hardcoded entmax path.
+/// This is the Phase 1 wiring — the router runs but attention is still dense.
+///
+/// # Arguments
+/// * `router` — VortexFlow router for block selection
+/// * `router_cache` — Router cache (populated during prefill via `forward_cache`)
+/// * `vortex_ext` — VortexFlow configuration (must have `is_vortex() == true`)
+#[allow(clippy::too_many_arguments)]
+pub fn forward_dash_attn_decode_vortex<'a>(
+    ctx: &'a mut ForwardContext,
+    weights: &TransformerWeights,
+    _cache: &mut MultiLayerKVCache,
+    token: usize,
+    pos: usize,
+    config: &Config,
+    _dash_config: &DashAttnConfig,
+    _summary_query: &ChunkSummaryQuery,
+    _summary_cache: &ChunkSummaryCache,
+    router: &VortexRouter,
+    router_cache: &VortexRouterCache,
+    _vortex_ext: &VortexFlowExt,
+) -> &'a mut [f32] {
+    let n = config.n_embd;
+    let hd = config.head_dim;
+    let tok_off = token * n;
+    let pos_off = pos * n;
+    ctx.x[..n].fill(0.0);
+    simd::simd_add_inplace(&mut ctx.x[..n], &weights.wte[tok_off..tok_off + n]);
+    simd::simd_add_inplace(&mut ctx.x[..n], &weights.wpe[pos_off..pos_off + n]);
+
+    // Pre-allocate VortexFlow scratch outside the layer loop for reuse
+    let n_blocks = router_cache.n_blocks();
+    let mut vortex_scratch = VortexScratch::new(n_blocks.max(1));
+    // Default top_k for routing (Phase 1: use chunk_size as proxy)
+    let top_k = n_blocks;
+
+    for layer_weights in &weights.layers {
+        types::rmsnorm(&mut ctx.x);
+        ctx.xr[..n].copy_from_slice(&ctx.x[..n]);
+        types::rmsnorm(&mut ctx.x);
+
+        types::matmul(&mut ctx.q, &layer_weights.attn_wq, &ctx.x, n, n);
+        types::matmul(
+            &mut ctx.k,
+            &layer_weights.attn_wk,
+            &ctx.x,
+            types::kv_dim(config),
+            n,
+        );
+        types::matmul(
+            &mut ctx.v,
+            &layer_weights.attn_wv,
+            &ctx.x,
+            types::kv_dim(config),
+            n,
+        );
+
+        // VortexFlow routing: use the router for block selection
+        if n_blocks > 0 {
+            let q_head = &ctx.q[..hd];
+            let _decision =
+                router.forward_indexer(q_head, router_cache, n_blocks, top_k, &mut vortex_scratch);
+            // TODO: Use decision.blocks to select sparse KV blocks
+        }
+
+        types::matmul(&mut ctx.attn_out, &layer_weights.attn_wo, &ctx.q, n, n);
+        simd::simd_add_inplace(&mut ctx.x[..n], &ctx.attn_out[..n]);
+        simd::simd_add_inplace(&mut ctx.x[..n], &ctx.xr[..n]);
+
+        ctx.xr2[..n].copy_from_slice(&ctx.x[..n]);
+        types::rmsnorm(&mut ctx.x);
+        types::matmul_relu(
+            &mut ctx.hidden,
+            &layer_weights.mlp_w1,
+            &ctx.x,
+            config.mlp_hidden,
+            n,
+        );
+        types::matmul(
+            &mut ctx.x,
+            &layer_weights.mlp_w2,
+            &ctx.hidden,
+            n,
+            config.mlp_hidden,
+        );
+        simd::simd_add_inplace(&mut ctx.x[..n], &ctx.xr2[..n]);
+    }
+
+    ctx.hidden_state[..n].copy_from_slice(&ctx.x[..n]);
     types::matmul(
         &mut ctx.logits,
         &weights.lm_head,
