@@ -223,6 +223,18 @@ Unnormalized KL regularization for bandit Q-values.
 
 - [x] T10: Run arena, verify SDPG > HL > Random — **NEGATIVE RESULT**: SDPG 12% win rate < HL 29.6%. Root cause: uniform teacher Q-values (no oracle data). Keep as opt-in infrastructure. See `.benchmarks/011_sdpg_bandit_arena.md`
 
+### Phase 8: Sigmoid + RawDelta Fix (post-mortem)
+
+Root cause analysis showed softmax-based KL has poor resolution for 5-10 bandit arms. Two alternative advantage modes added:
+
+- [x] T11: Add `sigmoid_advantage()` — per-arm σ(teacher/τ) - σ(student/τ), no cross-arm normalization
+- [x] T12: Add `raw_delta_advantage()` — simplest teacher_q - student_q per arm
+- [x] T13: Add `AdvantageMode` enum with `Sigmoid` as default (per AGENTS.md: use sigmoid not softmax)
+- [x] T14: Wire `AdvantageMode` into `SdpgBanditPruner::update()` dispatch
+- [x] T15: Add `from_replay()` constructor — loads teacher Q from replay JSONL via `ReplaySample::from_json`
+- [x] T16: Add `SdpgPlayer::with_replay()` — constructs player with oracle replay data
+- [x] T17: All 30 SDPG lib tests + 9 sdpg_player tests passing
+
 ---
 
 ## Files Modified

@@ -12,7 +12,9 @@ pub mod advantage;
 pub mod anchor;
 pub mod schedule;
 
-pub use advantage::{centered_log_ratio, softmax_scaled};
+pub use advantage::{
+    AdvantageMode, centered_log_ratio, raw_delta_advantage, sigmoid_advantage, softmax_scaled,
+};
 pub use anchor::KlAnchor;
 pub use schedule::BetaSchedule;
 
@@ -37,6 +39,8 @@ pub struct SdpgBanditPruner<P: ScreeningPruner> {
     anchor: KlAnchor,
     /// Softmax temperature τ.
     temperature: f32,
+    /// Advantage computation mode.
+    mode: AdvantageMode,
 }
 
 impl<P: ScreeningPruner> SdpgBanditPruner<P> {
@@ -48,12 +52,14 @@ impl<P: ScreeningPruner> SdpgBanditPruner<P> {
     /// * `schedule` — β warmup-decay schedule
     /// * `anchor` — KL anchoring variant (URKL recommended)
     /// * `temperature` — Softmax temperature τ for distribution matching
+    /// * `mode` — Advantage computation mode
     pub fn new(
         inner: BanditPruner<P>,
         teacher_q: Vec<f32>,
         schedule: BetaSchedule,
         anchor: KlAnchor,
         temperature: f32,
+        mode: AdvantageMode,
     ) -> Self {
         let num_arms = inner.q_values().len();
         assert_eq!(
@@ -73,6 +79,7 @@ impl<P: ScreeningPruner> SdpgBanditPruner<P> {
             schedule,
             anchor,
             temperature,
+            mode,
         }
     }
 
@@ -84,6 +91,7 @@ impl<P: ScreeningPruner> SdpgBanditPruner<P> {
             BetaSchedule::default_schedule(),
             KlAnchor::default_urkl(),
             1.0,
+            AdvantageMode::default(),
         )
     }
 
@@ -128,8 +136,18 @@ impl<P: ScreeningPruner> SdpgBanditPruner<P> {
         let beta = self.schedule.beta();
         let student_q = self.inner.q_values().to_vec();
 
-        // 1. Compute centered log-ratio advantage
-        let advantages = centered_log_ratio(&student_q, &self.teacher_q, self.temperature);
+        // 1. Compute advantage based on configured mode
+        let advantages = match &self.mode {
+            AdvantageMode::RawDelta => {
+                raw_delta_advantage(&student_q, &self.teacher_q, self.temperature)
+            }
+            AdvantageMode::Sigmoid => {
+                sigmoid_advantage(&student_q, &self.teacher_q, self.temperature)
+            }
+            AdvantageMode::CenteredLogRatio => {
+                centered_log_ratio(&student_q, &self.teacher_q, self.temperature)
+            }
+        };
 
         // 2. Positive-advantage gating: m_i = 1[arena_outcome > 0]
         let gated = match arena_outcome {
@@ -177,12 +195,79 @@ impl<P: ScreeningPruner> SdpgBanditPruner<P> {
     pub fn schedule_mut(&mut self) -> &mut BetaSchedule {
         &mut self.schedule
     }
+
+    /// Create SDPG Bandit with teacher Q-values from replay data.
+    ///
+    /// Aggregates per-template quality from replay JSONL samples.
+    /// Templates with no replay data get quality 0.0.
+    #[cfg(feature = "bomber")]
+    pub fn from_replay(
+        inner: BanditPruner<P>,
+        replay_path: &std::path::Path,
+        schedule: BetaSchedule,
+        anchor: KlAnchor,
+        temperature: f32,
+        mode: AdvantageMode,
+    ) -> std::io::Result<Self> {
+        let teacher_q = load_teacher_q_from_replay(replay_path, inner.q_values().len())?;
+        Ok(Self::new(
+            inner,
+            teacher_q,
+            schedule,
+            anchor,
+            temperature,
+            mode,
+        ))
+    }
 }
 
 impl<P: ScreeningPruner> ScreeningPruner for SdpgBanditPruner<P> {
     fn relevance(&self, depth: usize, token_idx: usize, parent_tokens: &[usize]) -> f32 {
         self.inner.relevance(depth, token_idx, parent_tokens)
     }
+}
+
+/// Load teacher Q-values from a replay JSONL file.
+///
+/// Aggregates quality scores by action (template) index.
+/// For each template: teacher_q[i] = mean(quality where action == i).
+/// Templates with no samples get 0.0.
+#[cfg(feature = "bomber")]
+fn load_teacher_q_from_replay(
+    path: &std::path::Path,
+    num_arms: usize,
+) -> std::io::Result<Vec<f32>> {
+    use std::fs::File;
+    use std::io::{BufRead, BufReader};
+
+    use crate::pruners::bomber::replay::ReplaySample;
+
+    let file = File::open(path)?;
+    let reader = BufReader::new(file);
+
+    let mut quality_sums = vec![0.0f32; num_arms];
+    let mut counts = vec![0u32; num_arms];
+
+    for line in reader.lines() {
+        let line = line?;
+        if let Ok(sample) = ReplaySample::from_json(&line) {
+            let action_idx = sample.action as usize;
+            if action_idx < num_arms {
+                quality_sums[action_idx] += sample.quality;
+                counts[action_idx] += 1;
+            }
+        }
+    }
+
+    Ok(quality_sums
+        .iter()
+        .zip(counts.iter())
+        .map(
+            |(&sum, &count)| {
+                if count > 0 { sum / count as f32 } else { 0.0 }
+            },
+        )
+        .collect())
 }
 
 #[cfg(test)]
@@ -251,7 +336,14 @@ mod tests {
             let bandit = BanditPruner::new(UnitPruner, BanditStrategy::Ucb1, 3);
             let teacher_q = vec![0.1, 0.1, 10.0];
             let schedule = BetaSchedule::new(0.1, 10, 100);
-            SdpgBanditPruner::new(bandit, teacher_q, schedule, KlAnchor::default_urkl(), 1.0)
+            SdpgBanditPruner::new(
+                bandit,
+                teacher_q,
+                schedule,
+                KlAnchor::default_urkl(),
+                1.0,
+                AdvantageMode::CenteredLogRatio,
+            )
         };
 
         // After schedule is fully decayed, β = 0

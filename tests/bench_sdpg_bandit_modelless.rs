@@ -11,6 +11,7 @@
 
 #[cfg(feature = "sdpg_bandit")]
 mod tests {
+    use katgpt_rs::pruners::sdpg::AdvantageMode;
     use katgpt_rs::pruners::{
         BanditPruner, BanditStrategy, BetaSchedule, KlAnchor, SdpgBanditPruner,
     };
@@ -73,7 +74,14 @@ mod tests {
         temperature: f32,
     ) -> SdpgBanditPruner<UnitPruner> {
         let bandit = make_plain_bandit(num_arms);
-        SdpgBanditPruner::new(bandit, teacher_q, schedule, anchor, temperature)
+        SdpgBanditPruner::new(
+            bandit,
+            teacher_q,
+            schedule,
+            anchor,
+            temperature,
+            AdvantageMode::CenteredLogRatio,
+        )
     }
 
     /// Select arm with highest UCB1 score from a plain BanditPruner.

@@ -33,6 +33,7 @@ use fastrand::Rng;
 use crate::pruners::absorb_compress::{AbsorbCompress, AbsorbCompressLayer, CompressConfig};
 use crate::pruners::bandit::{BanditPruner, BanditStrategy};
 use crate::pruners::g_zero::{BomberTemplate, BomberTemplateProposer, hint_score_override};
+use crate::pruners::sdpg::AdvantageMode;
 use crate::pruners::sdpg::SdpgBanditPruner;
 use crate::speculative::types::NoScreeningPruner;
 
@@ -278,6 +279,43 @@ impl SdpgPlayer {
             visits: [0; ACTION_COUNT],
             last_arena_outcome: None,
         }
+    }
+
+    /// Create SdpgPlayer with oracle teacher Q-values from replay data.
+    pub fn with_replay(id: u8, replay_path: &std::path::Path) -> std::io::Result<Self> {
+        let bandit_inner =
+            BanditPruner::new(NoScreeningPruner, BanditStrategy::Ucb1, NUM_TEMPLATES);
+
+        use crate::pruners::sdpg::{BetaSchedule, KlAnchor};
+        let sdpg_bandit = SdpgBanditPruner::from_replay(
+            bandit_inner,
+            replay_path,
+            BetaSchedule::default_schedule(),
+            KlAnchor::default_urkl(),
+            1.0,
+            AdvantageMode::Sigmoid,
+        )?;
+
+        let absorb =
+            AbsorbCompressLayer::new(NoScreeningPruner, NUM_TEMPLATES, CompressConfig::default());
+
+        Ok(Self {
+            _id: id,
+            known_bombs: Vec::new(),
+            known_powerups: Vec::new(),
+            known_opponents: Vec::new(),
+            last_dir: None,
+            alive: true,
+            powerups_collected: 0,
+            template_proposer: BomberTemplateProposer::new(),
+            sdpg_bandit,
+            absorb,
+            round_actions: Vec::new(),
+            round_template_ids: Vec::new(),
+            q_values: [0.0; ACTION_COUNT],
+            visits: [0; ACTION_COUNT],
+            last_arena_outcome: None,
+        })
     }
 
     /// Update Q-values from round outcome + feed outcome reward to SDPG bandit.

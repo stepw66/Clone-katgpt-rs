@@ -1,9 +1,29 @@
-//! SDPG Proposition 3.1: centered log-ratio advantage for bandits.
+//! SDPG advantage functions for bandits.
 //!
-//! A(a) = D̄ - log(p̄(a)/q̄(a)) where:
+//! Three modes:
+//! - `raw_delta`: simple Q-value difference
+//! - `sigmoid`: per-arm sigmoid difference (default, recommended)
+//! - `centered_log_ratio`: full KL(teacher || student) with softmax (Proposition 3.1)
+//!
+//! Centered log-ratio: A(a) = D̄ - log(p̄(a)/q̄(a)) where:
 //! - p̄ = softmax(teacher_q / τ)  [oracle-informed distribution]
 //! - q̄ = softmax(student_q / τ)  [bandit-learned distribution]
 //! - D̄ = KL(p̄ || q̄)            [centering constant]
+
+/// How to compute teacher-student advantage.
+#[derive(Clone, Debug, Default)]
+pub enum AdvantageMode {
+    /// Raw Q-value delta: advantage_i = teacher_q[i] - student_q[i]
+    /// Simplest oracle signal. No distribution assumption.
+    RawDelta,
+    /// Per-arm sigmoid: advantage_i = σ(teacher/τ) - σ(student/τ)
+    /// Independent per arm, no cross-arm normalization. Recommended default.
+    #[default]
+    Sigmoid,
+    /// Centered log-ratio from SDPG Proposition 3.1.
+    /// Full KL(teacher || student) with softmax. Best for large arm counts.
+    CenteredLogRatio,
+}
 
 /// Compute centered log-ratio advantage for each arm.
 ///
@@ -45,6 +65,54 @@ pub fn centered_log_ratio(student_q: &[f32], teacher_q: &[f32], temperature: f32
             };
             d_bar - log_ratio
         })
+        .collect()
+}
+
+/// Per-arm sigmoid advantage — independent arm credit without cross-arm normalization.
+///
+/// For each arm: advantage_i = σ(teacher_q[i] / τ) - σ(student_q[i] / τ)
+///
+/// Per AGENTS.md rule: "Use sigmoid not softmax" — sigmoid gives per-arm signal
+/// without requiring cross-arm normalization. No KL needed, no sum-to-1 constraint.
+/// Positive = teacher rates arm higher than student (should explore more).
+/// Negative = student overestimates arm (should explore less).
+///
+/// For bandits with few arms (5-10), this provides better signal-to-noise than
+/// softmax-based KL which collapses when arm count is small.
+pub fn sigmoid_advantage(student_q: &[f32], teacher_q: &[f32], temperature: f32) -> Vec<f32> {
+    assert_eq!(student_q.len(), teacher_q.len());
+    assert!(temperature > 0.0);
+
+    student_q
+        .iter()
+        .zip(teacher_q.iter())
+        .map(|(&s, &t)| {
+            let p_teacher = sigmoid(t / temperature);
+            let p_student = sigmoid(s / temperature);
+            p_teacher - p_student
+        })
+        .collect()
+}
+
+/// Scalar sigmoid: σ(x) = 1 / (1 + exp(-x))
+#[inline]
+fn sigmoid(x: f32) -> f32 {
+    1.0 / (1.0 + (-x).exp())
+}
+
+/// Raw Q-value delta advantage — simplest possible teacher signal.
+///
+/// advantage_i = teacher_q[i] - student_q[i]
+///
+/// No normalization, no temperature, no distribution assumption.
+/// Direct difference: if teacher knows arm i is better, advantage is positive.
+/// The simplest form of oracle-informed credit assignment.
+pub fn raw_delta_advantage(student_q: &[f32], teacher_q: &[f32], _temperature: f32) -> Vec<f32> {
+    assert_eq!(student_q.len(), teacher_q.len());
+    student_q
+        .iter()
+        .zip(teacher_q.iter())
+        .map(|(&s, &t)| t - s)
         .collect()
 }
 
@@ -189,6 +257,179 @@ mod tests {
             (sum - 1.0).abs() < 1e-5,
             "softmax should sum to 1, got {}",
             sum
+        );
+    }
+
+    // ── sigmoid_advantage tests ──────────────────────────────────────
+
+    #[test]
+    fn test_sigmoid_identical_q_zero_advantage() {
+        let q = vec![1.0, 2.0, 3.0];
+        let adv = sigmoid_advantage(&q, &q, 1.0);
+        for a in &adv {
+            assert!(
+                a.abs() < 1e-6,
+                "sigmoid advantage should be ~0 for identical Q, got {}",
+                a
+            );
+        }
+    }
+
+    #[test]
+    fn test_sigmoid_teacher_prefers_arm_positive() {
+        let student_q = vec![1.0, 1.0, 1.0];
+        let teacher_q = vec![10.0, 1.0, 1.0]; // Teacher strongly prefers arm 0
+        let adv = sigmoid_advantage(&student_q, &teacher_q, 1.0);
+        assert!(
+            adv[0] > 0.0,
+            "arm 0 should have positive advantage when teacher prefers it, got {}",
+            adv[0]
+        );
+        // Other arms: teacher and student agree → advantage ≈ 0
+        for i in 1..3 {
+            assert!(
+                adv[i].abs() < 1e-6,
+                "arm {} should have ~0 advantage, got {}",
+                i,
+                adv[i]
+            );
+        }
+    }
+
+    #[test]
+    fn test_sigmoid_student_prefers_arm_negative() {
+        let student_q = vec![10.0, 1.0, 1.0]; // Student strongly prefers arm 0
+        let teacher_q = vec![1.0, 1.0, 1.0];
+        let adv = sigmoid_advantage(&student_q, &teacher_q, 1.0);
+        assert!(
+            adv[0] < 0.0,
+            "arm 0 should have negative advantage when student overestimates, got {}",
+            adv[0]
+        );
+    }
+
+    #[test]
+    fn test_sigmoid_temperature_sensitivity() {
+        let student_q = vec![1.0, 1.0];
+        let teacher_q = vec![5.0, 1.0];
+        // Low temperature → sharper sigmoid → larger difference for the same Q gap
+        let adv_low_temp = sigmoid_advantage(&student_q, &teacher_q, 0.1);
+        let adv_high_temp = sigmoid_advantage(&student_q, &teacher_q, 10.0);
+        // At low temp, σ(5/0.1) ≈ 1.0 while σ(1/0.1) ≈ 1.0 → advantage ≈ 0
+        // At high temp, σ(5/10) ≈ 0.62 while σ(1/10) ≈ 0.52 → advantage ≈ 0.10
+        // So high temp actually shows more resolution here because low temp saturates both
+        assert!(
+            adv_high_temp[0].abs() > 1e-6,
+            "high temp should show non-trivial advantage, got {}",
+            adv_high_temp[0]
+        );
+        // Low temp saturates both sigmoids → advantage shrinks
+        assert!(
+            adv_low_temp[0] < adv_high_temp[0],
+            "low temp advantage ({}) should be < high temp advantage ({}) when Q gap is small relative to temp",
+            adv_low_temp[0],
+            adv_high_temp[0]
+        );
+    }
+
+    #[test]
+    fn test_sigmoid_sum_not_necessarily_zero() {
+        // Sigmoid advantages are independent per arm → sum is NOT constrained to 0
+        // This is the key difference from softmax-based approaches
+        let student_q = vec![1.0, 2.0];
+        let teacher_q = vec![5.0, 4.0];
+        let adv = sigmoid_advantage(&student_q, &teacher_q, 1.0);
+        let sum: f32 = adv.iter().sum();
+        // Both teacher Q > student Q → both advantages positive → sum > 0
+        assert!(
+            sum > 0.0,
+            "sum of sigmoid advantages should be > 0 when teacher prefers all arms, got {}",
+            sum
+        );
+        assert!(
+            adv[0] > 0.0 && adv[1] > 0.0,
+            "both arms should have positive advantage, got {:?}",
+            adv
+        );
+    }
+
+    #[test]
+    fn test_sigmoid_output_bounded() {
+        // Sigmoid advantage is bounded in [-1, 1] since σ ∈ (0, 1)
+        let student_q = vec![-100.0];
+        let teacher_q = vec![100.0];
+        let adv = sigmoid_advantage(&student_q, &teacher_q, 1.0);
+        assert!(
+            adv[0] > 0.0 && adv[0] <= 1.0,
+            "sigmoid advantage should be in (0, 1], got {}",
+            adv[0]
+        );
+        // Reverse: should be in [-1, 0)
+        let adv_rev = sigmoid_advantage(&teacher_q, &student_q, 1.0);
+        assert!(
+            adv_rev[0] < 0.0 && adv_rev[0] >= -1.0,
+            "reversed sigmoid advantage should be in [-1, 0), got {}",
+            adv_rev[0]
+        );
+    }
+
+    // ── raw_delta_advantage tests ────────────────────────────────────
+
+    #[test]
+    fn test_raw_delta_identical_q_zero() {
+        let q = vec![1.0, 2.0, 3.0];
+        let adv = raw_delta_advantage(&q, &q, 1.0);
+        for a in &adv {
+            assert!(
+                a.abs() < 1e-6,
+                "raw delta should be 0 for identical Q, got {}",
+                a
+            );
+        }
+    }
+
+    #[test]
+    fn test_raw_delta_direct_difference() {
+        let student_q = vec![1.0, 3.0, 5.0];
+        let teacher_q = vec![4.0, 2.0, 5.0];
+        let adv = raw_delta_advantage(&student_q, &teacher_q, 1.0);
+        assert!(
+            (adv[0] - 3.0).abs() < 1e-6,
+            "arm 0: expected 3.0, got {}",
+            adv[0]
+        );
+        assert!(
+            (adv[1] - (-1.0)).abs() < 1e-6,
+            "arm 1: expected -1.0, got {}",
+            adv[1]
+        );
+        assert!(
+            (adv[2] - 0.0).abs() < 1e-6,
+            "arm 2: expected 0.0, got {}",
+            adv[2]
+        );
+    }
+
+    #[test]
+    fn test_raw_delta_negative_q_values() {
+        let student_q = vec![-3.0, -1.0, 2.0];
+        let teacher_q = vec![-1.0, -4.0, 2.0];
+        let adv = raw_delta_advantage(&student_q, &teacher_q, 1.0);
+        // teacher - student
+        assert!(
+            (adv[0] - 2.0).abs() < 1e-6,
+            "arm 0: expected 2.0, got {}",
+            adv[0]
+        );
+        assert!(
+            (adv[1] - (-3.0)).abs() < 1e-6,
+            "arm 1: expected -3.0, got {}",
+            adv[1]
+        );
+        assert!(
+            (adv[2] - 0.0).abs() < 1e-6,
+            "arm 2: expected 0.0, got {}",
+            adv[2]
         );
     }
 }

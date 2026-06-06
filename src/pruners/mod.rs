@@ -161,7 +161,10 @@ pub use sdar_gate::{
 pub mod sdpg;
 
 #[cfg(feature = "sdpg_bandit")]
-pub use sdpg::{BetaSchedule, KlAnchor, SdpgBanditPruner, centered_log_ratio, softmax_scaled};
+pub use sdpg::{
+    AdvantageMode, BetaSchedule, KlAnchor, SdpgBanditPruner, centered_log_ratio,
+    raw_delta_advantage, sigmoid_advantage, softmax_scaled,
+};
 
 #[cfg(feature = "vpd_em_distill")]
 pub mod vpd_em;
