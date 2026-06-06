@@ -163,8 +163,8 @@ pub struct SkillCatalog {
 - [-] Go tournament: with and without test-gated validators (expect: fewer illegal moves, faster convergence)
 - [-] Benchmark: bandit selection throughput with and without catalog overhead (target: <1% regression)
 - [-] Benchmark: memory overhead per pruner with `PrunerMemory` (target: <64KB per pruner)
-- [ ] If GOAT (no perf regression + accuracy gain): remove feature gate, make default
-- [ ] If NOT GOAT: keep behind `skill_lifecycle` feature flag, document regression
+- [-] If GOAT (no perf regression + accuracy gain): remove feature gate, make default — **DEFERRED: depends on arena benchmarks**
+- [-] If NOT GOAT: keep behind `skill_lifecycle` feature flag, document regression — **DEFERRED: depends on arena benchmarks**
 
 ### Task 5: Example & Integration Test
 
