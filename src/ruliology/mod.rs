@@ -28,6 +28,7 @@ pub mod fsm;
 pub mod irreducibility;
 pub mod mutation;
 pub mod payoff;
+pub mod simulation_gate;
 pub mod tests;
 pub mod tm;
 pub mod types;
@@ -38,6 +39,9 @@ pub use fsm::{FsmEnumerator, FsmStrategy, MAX_STATES};
 pub use irreducibility::{IrreducibilityGate, IrreducibilityResult};
 pub use mutation::{CoEvolutionResult, FsmTemplateProposer, MutationType, co_evolve};
 pub use payoff::{matching_pennies, prisoners_dilemma};
+pub use simulation_gate::{
+    SimulationGate, SimulationGateConfig, SimulationGateResult, SimulationStrategy,
+};
 pub use tm::TmStrategy;
 pub use types::{RuliologyPruner, SimpleProgram, WinMatrix};
 

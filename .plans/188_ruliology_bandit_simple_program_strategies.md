@@ -167,8 +167,8 @@ pub fn prisoners_dilemma(a: u8, b: u8) -> (f64, f64) {
 ### Phase 4: ComputationalIrreducibilityGate (modelless)
 
 - [x] Implement `IrreducibilityGate` — Kolmogorov complexity proxy via compression ratio
-- [ ] Integration: when irreducibility is low (game is predictable), skip expensive simulation
-- [ ] Integration: when irreducibility is high, use full bandit/MCTS/rollout
+- [x] Integration: when irreducibility is low (game is predictable), skip expensive simulation
+- [x] Integration: when irreducibility is high, use full bandit/MCTS/rollout
 - [x] Benchmark: gate overhead vs full-simulation cost
 - [x] Test: verify gate correctly identifies simple games (matching pennies with 2-state FSMs = reducible)
 
@@ -199,9 +199,12 @@ src/ruliology/
 ├── payoff.rs           # matching_pennies, prisoners_dilemma
 ├── bandit.rs           # RuliologyBandit, RuliologyArm, RuliologyAbsorbCompress
 ├── irreducibility.rs   # IrreducibilityGate
+├── simulation_gate.rs  # SimulationGate (reducible→shortcut, irreducible→full sim)
 ├── mutation.rs         # FsmTemplateProposer, co-evolution
 └── tests/
-    └── wolfram_results.rs  # 12 integration tests (Wolfram + cross-paradigm)
+    ├── benchmarks.rs       # Phase 6 benchmarks (enumeration time, gate overhead)
+    ├── wolfram_results.rs  # 12 integration tests (Wolfram + cross-paradigm)
+    └── ...
 ```
 
 ## Expected Results
