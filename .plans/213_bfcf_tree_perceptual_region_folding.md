@@ -217,6 +217,32 @@ Feature flag ON → Run benchmark suite
 
 ---
 
+## Cross-Repo Alignment (riir-ai ↔ katgpt-rs)
+
+| riir-ai Plan | Relationship | Notes |
+|---|---|---|
+| **243** NS-CSG Polytope | Shared BFCP types | 243 defines `BfcpRegion { halfspaces: Vec<(Vec<f32>, f32)> }` for game state routing. 213 defines `BorelRegion { constraints: Vec<HalfSpace>, label, token_count }` for token pruning. These are the same abstraction. **Canonical type in katgpt-rs** (engine). riir-ai 243 re-exports or wraps with game-specific extensions (`LoRA adapter index`, `game_phase`). Do not duplicate. |
+| **210** F4 Reward Calibration | Pruner stability | BFCP partition depends on ScreeningPruner threshold crossings being stable. If 210 F4 or 214 is actively calibrating, the partition could shift mid-decode. **Solution:** snapshot pruner thresholds at partition construction time. Live calibration applies to the *next* partition, not the current one. |
+
+### Type Sharing Strategy
+
+- `BorelRegion` + `HalfSpace` + `RegionLabel` + `BFCP` in katgpt-rs `src/pruners/types.rs` are canonical engine types
+- riir-ai 243 imports via `katgpt-core` dependency behind `bfcf_tree` feature
+- Game-specific extensions: `GameBfcpRegion { region: BorelRegion, lora_adapter_idx: usize, game_phase: GamePhase }` — wrap, don't re-implement
+
+### Execution Order
+
+| Phase | Plan | Rationale |
+|-------|------|-----------|
+| 1 | 210 F4 (Reward Calibration) | Stabilizes pruner thresholds |
+| 2 | 212 (Collapse-Aware Thinking) | Independent |
+| 3 | 209 (FOL Inference) | Foundation |
+| 4 | 210 F1-F3 (Distillation) | Core novelty |
+| 5 | 211 (Three-Mode Router) | Consumer |
+| 6 | **213** (this plan) | Needs stable pruner calibration, highest upside but highest risk |
+
+---
+
 ## TL;DR
 
 BFCF Tree replaces O(vocab_size ≈ 128K) token-by-token screening with O(regions ≈ 50-100) region-level pruning. ScreeningPruner's threshold crossings naturally partition logit space into convex BFCP regions where all tokens are symbolically equivalent. Skip entire reject regions. Uniform-sample accept regions. Refine maybe regions via preimage lookahead. PWC bandit arms specialize per-region with formal B-PWC closure guarantee (NS-CSG Theorem 2). Symbolic percept router uses region count + label entropy (sigmoid, not softmax) for justified compute routing. All modelless. Feature-gated behind `bfcf_tree`. GOAT-gated: promote to default if benchmark confirms ≥5% throughput gain.

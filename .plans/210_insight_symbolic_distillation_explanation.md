@@ -411,6 +411,32 @@ F1 (SymbolicExpressionFitter) ────┤
 - Modelless: no LLM at runtime, no neural network training, no gradient descent.
 - F2 template grounding is LLM-optional during development only — never at inference time.
 
+## Cross-Repo Alignment (riir-ai ↔ katgpt-rs)
+
+| riir-ai Plan | Relationship | Notes |
+|---|---|---|
+| **240** EQL Symbolic LoRA | Type alignment required | 240's `EqlActivation` (Identity, Square, Cube, Constant, Product, Sum) is a superset of 210's `BasisFn` (Identity, Square, Cube, Sigmoid). 240's `EqlExpression` should serialize into 210's `SymbolicExpression` format for engine deployment. **Action:** 210 defines canonical engine-side expression types; 240 maps to them. |
+| **239** FOL Game Rules | Complementary | 239 extracts qualitative FOL rules from LoRA weights; 210 F1 fits quantitative expressions from DDTree traces. Both produce interpretable rules at different granularity. |
+
+### Type Sharing Strategy
+
+- `SymbolicExpression` in katgpt-rs `src/pruners/symbolic_expression.rs` is the canonical engine type
+- riir-ai 240's `EqlExpression` serializes to `SymbolicExpression` binary format via shared serde
+- Activation mapping: `EqlActivation::Constant → BasisFn::Identity(coeff=1.0)`, `EqlActivation::Product/Sum → expand as multi-term`
+- Feature gate: `eql_eval` in riir-engine depends on `katgpt-core` types behind `eql_eval` feature
+
+### Execution Order
+
+| Phase | Plan | Rationale |
+|-------|------|----------|
+| 1 | **210 F4** (this plan, Reward Calibration) | Formalizes existing AbsorbCompress — zero risk, ships first |
+| 2 | 212 (Collapse-Aware Thinking) | Independent, proven by S2F paper |
+| 3 | 209 (FOL Inference) | Foundation for 211's mode router |
+| 4 | **210 F1-F3** (this plan, Distillation + Explanation) | Core novelty |
+| 5 | 211 (Three-Mode Router) | Consumes 209 + 210 outputs |
+
+---
+
 ---
 
 TL;DR: Implement INSIGHT's explore→distill→explain pattern as four modelless fusions in katgpt-rs. F4 (reward-gated calibration) ships first — it formalizes the existing AbsorbCompress pattern. F1 (symbolic expression fitting from DDTree traces) is the core novelty. F2 (concept grounding) and F3 (decision explanation) add audit surfaces. All behind `insight_explain` feature flag. ~15 days. GOAT gate before default promotion.

@@ -1,4 +1,4 @@
-//! Self-Distilling Pruner Bandit — Episode-Guided Arm Selection (Plan 207).
+//! Self-Distilling Pruner Bandit — Episode-Guided Arm Selection (Plan 208).
 //!
 //! Wraps any `BanditPruner<P>` with episode-guided reward signal.
 //! After generation, compares output to episode reference, computes match reward,

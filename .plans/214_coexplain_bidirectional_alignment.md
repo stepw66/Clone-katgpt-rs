@@ -87,6 +87,27 @@ Implement CoExplain's Read/Write/Enhance cycle for the modelless inference pipel
 | Invalid tokens accepted | 10% | 5% | 2% |
 | Compilation success rate | ~60% | ~70% | ~85% |
 
+## Cross-Repo Alignment (riir-ai ↔ katgpt-rs)
+
+| riir-ai Plan | Relationship | Notes |
+|---|---|---|
+| **239** FOL Game Rules | Upstream — rules feed CoExplain | 239 T1 extracts game rules from trained LoRA. These rules become Curator input for 214's `EditableConstraintPruner`. Pipeline: 239 extracts → Curator reviews → 214 ingests → bandit refines. |
+| **244** Rule-Init LoRA + TED | Same concept, different lifecycle | 244 uses TED regularization (`L_topology ≈ ||ΔW - ΔW_rule||²`) during LoRA training. 214 uses `PrunerDivergence` (`threshold_divergence, topology_divergence, lambda_t`) during inference pruning. **Same `lambda_t` parameter name** — good consistency. **Metric difference documented:** 244 uses Frobenius norm (L2, standard for training). 214 uses Hamming distance (cheaper for inference). Both valid. |
+
+### Execution Order
+
+| Phase | Plan | Rationale |
+|-------|------|-----------|
+| 1 | 210 F4 (Reward Calibration) | Zero risk |
+| 2 | 212 (Collapse-Aware Thinking) | Independent |
+| 3 | 209 (FOL Inference) | Foundation |
+| 4 | 210 F1-F3 (Distillation) | Core novelty |
+| 5 | 211 (Three-Mode Router) | Consumer |
+| 6 | 213 (BFCF Tree) | Needs stable calibration |
+| 7 | **214** (this plan) | Curator marketplace enabler, depends on 239 rules |
+
+---
+
 ## Feature Gate Summary
 
 ```

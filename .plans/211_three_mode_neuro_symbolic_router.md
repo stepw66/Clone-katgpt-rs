@@ -284,3 +284,27 @@ BanditPruner ──────────────────┤
 - **Papaya for lock-free:** If `ThreeModeBandit` needs concurrent access (bandit update from verification thread), use papaya HashMap — not `Arc<RwLock<HashMap>>`.
 - **blake3 for audit:** Episode mining results should be blake3-hashed before insertion into ConstraintPruner — integrity check for auto-synthesized rules.
 - **Feature gate naming:** `three_mode_router` is the parent gate. `auto_constraint_synthesis` and `safe_exploration_budget` are independently gateable. F4 (grounding quality) is part of `three_mode_router` — no separate gate.
+
+---
+
+## Cross-Repo Alignment (riir-ai ↔ katgpt-rs)
+
+| riir-ai Plan | Relationship | Notes |
+|---|---|---|
+| **241** WASM Reward Shaping | Training-side complement | 241 shapes reward during LoRA training; 211 routes neuro-symbolic modes at inference. Training reward quality feeds into 211's `verif_success_rate` ModeFeature. |
+| **242** DeGRPO Training | Training-side collapse handling | 242's `CollapseMonitor` prevents training collapse; 212's `CollapseDetector` prevents inference collapse. Same concept, different lifecycle. |
+| **243** NS-CSG Polytope | Formal foundation for mode routing | 243 proves polytope routing has coverage guarantees; 211's mode selection could leverage polytope regions as ModeFeatures. Future integration point. |
+
+### DRI: DDTree Path → Human-Readable Rule
+
+**Decision:** 209 T4 (`DecisionTrace`) owns this. 211 F5 (Programmatic Policy Extraction) re-exports via `decision_trace` feature gate. Do not duplicate.
+
+### Execution Order
+
+| Phase | Plan | Rationale |
+|-------|------|----------|
+| 1 | 210 F4 (Reward Calibration) | Formalizes existing pattern |
+| 2 | 212 (Collapse-Aware Thinking) | Independent, proven |
+| 3 | 209 (FOL Inference) | Foundation for 211 |
+| 4 | 210 F1-F3 (Distillation) | Core novelty |
+| 5 | **211** (this plan) | Consumes 209 + 210 outputs |

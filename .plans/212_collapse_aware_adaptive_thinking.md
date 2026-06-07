@@ -168,4 +168,23 @@ graph TD
 4. Self-learning: EMA adapts threshold, no manual tuning
 5. Feature gate allows disable if regression detected
 
+---
+
+## Cross-Repo Alignment (riir-ai ↔ katgpt-rs)
+
+| riir-ai Plan | Relationship | Notes |
+|---|---|---|
+| **242** DeGRPO Game Training | Training-side twin | 242's `CollapseMonitor` detects NPC strategy loops during LoRA training. 212's `CollapseDetector` detects CoT hesitation during inference. **Shared threshold:** `CollapseMonitor.hesitation_budget` defaults should match `S2FCollapseDetector.threshold()` for train/infer consistency. |
+| **207** Lodestar | Budget integration | If `lodestar` feature enabled, initialize `ThinkingBudget.max_tokens` from `LodestarPruner::min_completion_distance()`. Add to T2 implementation note: "When lodestar is active, budget scales with completion distance." |
+
+### Execution Order
+
+| Phase | Plan | Rationale |
+|-------|------|----------|
+| 1 | 210 F4 (Reward Calibration) | Zero risk |
+| 2 | **212** (this plan) | Independent, high-impact, proven by S2F |
+| 3 | 209 (FOL Inference) | Foundation |
+| 4 | 210 F1-F3 (Distillation) | Core novelty |
+| 5 | 211 (Three-Mode Router) | Consumer |
+
 TL;DR: CollapseDetector is the missing mid-reasoning exit that existing infra lacks. S2F proves it works. DeGRPO proves the bandit can learn when to think. T2M prevents option shortcuts. All inference-time, zero training, zero perf hurt.

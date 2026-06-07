@@ -302,6 +302,24 @@ fol_lnn = ["fol_constraints", "rule_extraction", "reward_mem"]
 | Rust Concept Graph | MIT | Engine fuel — grows from community |
 | Episode DB of extracted rules | **Secret B** | Proprietary data flywheel |
 
+## Cross-Repo Alignment (riir-ai ↔ katgpt-rs)
+
+| riir-ai Plan | Relationship | Notes |
+|---|---|---|
+| **239** FOL Game Rule Extraction | Mirror — training-side rule extraction | 239 T1 extracts FOL from LoRA weights (training fuel); 209 T1 extracts FOL from prompts (inference engine). Different lifecycle stages, same logical representation. |
+| **240** EQL Symbolic LoRA | Complementary — quantitative rules | 240 produces EQL expressions (numeric); 209 produces FOL constraints (logical). Both feed 211's mode router. |
+| **211** Three-Mode Router | Consumer — 209 T4 DecisionTrace | **DRI decision:** 209 T4 (`DecisionTrace`) is the canonical home for "DDTree path → human-readable rule". 211 F5 re-exports via `decision_trace` feature. Do not duplicate. |
+
+### Execution Order
+
+| Phase | Plan | Rationale |
+|-------|------|-----------|
+| 1 | 210 F4 (Reward Calibration) | Formalizes existing AbsorbCompress — zero risk |
+| 2 | 212 (Collapse-Aware Thinking) | Independent, proven by S2F paper |
+| 3 | **209** (this plan) | Foundation for 211's mode router |
+| 4 | 210 F1-F3 (Distillation + Explanation) | Core novelty, needs 209 for grounding |
+| 5 | 211 (Three-Mode Router) | Consumes 209 + 210 outputs |
+
 ---
 
 ## TL;DR
