@@ -627,6 +627,9 @@ cargo clippy --all-targets --all-features --quiet   # Lint
 | `skill_lifecycle` | MUSE-style skill lifecycle: memory, test gate, catalog — depends on `bandit` (Plan 192, opt-in) |
 | `freq_bandit` | Frequency bandit for speculative decode (Plan 189, **default-on**) |
 | `bandit_top_p` | dMoE adaptive top-p vocabulary selection (Plan 181, **default-on**) |
+| `best_buddies` | Best Buddies mutual NN filter for speculative decoding (Plan 199, opt-in) |
+| `corr_budget` | Correlation-driven EMA depth budget for speculative decoding (Plan 200, opt-in) |
+| `rosetta_pruner` | Cross-domain meta-pruner from pruner agreement (Plan 201, opt-in) |
 | `thinking_cot` | Adaptive CoT thinking vs non-thinking (Plan 194, **default-on**) |
 | `chain_fold` | ThoughtFold inference-time CoT step pruning via attention importance (Plan 195, opt-in) |
 | `vortex_flow` | VortexFlow composable sparse KV block routing — BlockTopK / Entmax / ValueEnergy (Plan 196, opt-in) |

@@ -594,6 +594,10 @@ name = "datrie_01_bench"
 required-features = ["datrie_vocab"]
 
 [[example]]
+name = "best_buddies_01_bench"
+required-features = ["speculative_generator", "best_buddies"]
+
+[[example]]
 name = "thinking_cot_demo"
 required-features = ["thinking_cot"]
 

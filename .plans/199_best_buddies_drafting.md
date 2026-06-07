@@ -1,7 +1,7 @@
 # Plan 199: Best Buddies Drafting — Mutual NN Filter for Speculative Decoding
 
 **Date**: 2026-06-07
-**Status**: ✅ Core building blocks implemented
+**Status**: ✅ Complete (pending GOAT gate)
 **Research**: `.research/178_Rosetta_Neurons_Cross_Model_Alignment.md` (Section 2.1)
 **GOAT Rank**: #1 (highest impact × lowest effort)
 
@@ -50,9 +50,9 @@ pub trait BestBuddyAligner: Send + Sync {
 - [x] Integrate into `build_dd_tree_speculative`: filter marginals by mutual agreement before tree construction
 - [x] Add feature flag `best_buddies` (opt-in initially, default-on after GOAT proof)
 - [x] Write tests: pearson_correlation, best_buddies, MarginalBestBuddyAligner, integration (19 tests passing)
-- [ ] Write benchmark: measure Pearson + mutual NN overhead per decode step
+- [x] Write benchmark: measure Pearson + mutual NN overhead per decode step (Bench 023)
 - [ ] GOAT gate: measure acceptance rate delta. If ≥ 5% improvement → default-on.
-- [ ] Update README feature flags section
+- [x] Update README feature flags section
 
 ---
 
