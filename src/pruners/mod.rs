@@ -584,3 +584,14 @@ pub mod vr_loop;
 
 #[cfg(feature = "egcs")]
 pub use vr_loop::{VrGenerator, VrLoop, VrLoopResult, VrRoundFeedback, VrVerifier};
+
+// ── Self-Distilling Pruner Bandit — Episode-Guided Arm Selection (Plan 208) ──
+
+#[cfg(feature = "self_distilling_bandit")]
+pub mod self_distilling_bandit;
+
+#[cfg(feature = "self_distilling_bandit")]
+pub use self_distilling_bandit::{
+    ConvergenceMetrics, EpisodeRewardComputer, SelfDistillingBandit, SelfDistillingConfig,
+    compute_match_ratio,
+};
