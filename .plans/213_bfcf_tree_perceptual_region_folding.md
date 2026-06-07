@@ -126,14 +126,14 @@ pub trait PerceptRouter: Send + Sync {
 ## Tasks
 
 ### Phase 1: BFCP Region Abstraction
-- [ ] Add `BorelRegion`, `RegionLabel`, `HalfSpace`, `BFCP`, `PWCValueFunction` types to `src/pruners/types.rs`
-- [ ] Implement `BorelRegion::contains(&self, logits: &[f32]) -> bool` — half-space membership check
-- [ ] Implement `BorelRegion::intersect(&self, other: &Self) -> Option<Self>` — region intersection
-- [ ] Implement `BFCP::covers_all(&self, vocab_size: usize) -> bool` — partition completeness check
-- [ ] Implement `BFCP::reject_regions(&self) -> &[BorelRegion]` — filtered accessors
-- [ ] Extend `ScreeningPruner` trait with `fn partition(&self, logits: &[f32]) -> BFCP` behind `#[cfg(feature = "bfcf_tree")]`
-- [ ] Implement `BFCPPruner` wrapper that prunes by region (skip reject regions, sample accept regions)
-- [ ] Add `bfcf_tree` feature flag to `Cargo.toml`
+- [x] Add `BorelRegion`, `RegionLabel`, `HalfSpace`, `BFCP`, `PWCValueFunction` types to `src/pruners/bfcf_types.rs`
+- [x] Implement `BorelRegion::contains(&self, logits: &[f32]) -> bool` — half-space membership check
+- [x] Implement `BorelRegion::intersect(&self, other: &Self) -> Option<Self>` — region intersection
+- [x] Implement `BFCP::covers_all(&self, vocab_size: usize) -> bool` — partition completeness check
+- [x] Implement `BFCP::reject_regions(&self) -> &[BorelRegion]` — filtered accessors
+- [x] Extend `ScreeningPruner` trait with `fn partition(&self, logits: &[f32]) -> BFCP` behind `#[cfg(feature = "bfcf_tree")]`
+- [x] Implement `BFCPPruner` wrapper that prunes by region (skip reject regions, sample accept regions)
+- [x] Add `bfcf_tree` feature flag to `Cargo.toml`
 - [ ] Benchmark: region pruning vs token pruning on Sudoku domain
 
 ### Phase 2: Preimage Lookahead
