@@ -645,6 +645,18 @@ pub mod reward_mem_pruner;
 #[cfg(feature = "reward_mem")]
 pub use reward_mem_pruner::{CompileOutcome, PatternHasher, RewardMemPruner};
 
+// ── INSIGHT Symbolic Distillation & Explanation (Plan 210) ──────────
+//
+// A modelless explore→distill→explain pipeline:
+//   F1: Symbolic expression fitting from DDTree traces
+//   F2: Concept grounding for human-readable explanations
+//   F3: Perturbation-based decision explanation with sensitivity analysis
+//   F4: Reward-gated pruner calibration with absorption
+//
+// Feature gate: `insight_explain` (convenience parent)
+// Individual features: `symbolic_distill`, `concept_grounding`, `decision_explain`, `reward_calibrator`
+// All independently gateable, zero-cost when disabled.
+
 // ── Symbolic Expression Distillation (Plan 210 F1) ───────────────────────
 
 #[cfg(feature = "symbolic_distill")]

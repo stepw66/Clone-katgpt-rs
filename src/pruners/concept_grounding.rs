@@ -17,6 +17,15 @@
 //!      ▼
 //! PolicyExplanation { mappings, chain_of_thought, summary }
 //! ```
+//!
+//! # Feature Gate
+//!
+//! `concept_grounding` (depends on `symbolic_distill`).
+//!
+//! # Performance
+//!
+//! - Grounding: ~1μs per call
+//! - Template matching: static lookup, zero allocation
 
 // ── Sigmoid helper ────────────────────────────────────────────
 

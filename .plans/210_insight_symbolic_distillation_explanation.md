@@ -343,7 +343,7 @@ DDTree Exploration (existing)
   - Test: F4 calibration + RegressionSuite → regression-safe calibration
   - Test: HotSwapPruner reload of expression pruner → correct behavior post-swap
 
-- [ ] **I6:** Documentation
+- [x] **I6:** Documentation
   - Add module-level docs for each new file
   - Update `src/pruners/mod.rs` module docs
   - Add example usage in trait doc comments

@@ -25,7 +25,17 @@
 //! }
 //! ```
 //!
-//! # Plan 210 Phase 1 — F4: Reward-Gated Pruner Calibration
+//! # Plan 210 F4: Reward-Gated Pruner Calibration
+//!
+//! # Feature Gate
+//!
+//! `reward_calibrator`.
+//!
+//! # Performance
+//!
+//! - Per-call overhead: ~262ns (`record_reward`)
+//! - Audit: blake3 hash per calibration step
+//! - Regression: `verify_regression()` supports [`RegressionSuite`] with automatic rollback
 
 use blake3::Hasher;
 

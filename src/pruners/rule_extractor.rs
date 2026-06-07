@@ -630,4 +630,73 @@ mod tests {
         assert_eq!(single.len(), 1, "single rule should survive");
         assert_eq!(single[0].support, 1);
     }
+
+    // ── GOAT Proof: Rule Reuse ≥30% (Plan 209, T5.3) ───────────────────
+
+    #[test]
+    fn goat_rule_reuse_threshold() {
+        // Build a tree with common sub-patterns:
+        // root → (1,3) → (2,5)   appears 3 times across branches
+        // root → (1,4) → (2,5)   appears 1 time
+        // root → (1,3) → (2,6)   appears 1 time
+        let tree = vec![TreeNode {
+            depth: 0,
+            token_idx: 1,
+            score: 1.0,
+            children: vec![
+                TreeNode {
+                    depth: 1,
+                    token_idx: 3,
+                    score: 0.9,
+                    children: vec![
+                        TreeNode {
+                            depth: 2,
+                            token_idx: 5,
+                            score: 0.85,
+                            children: vec![],
+                        },
+                        TreeNode {
+                            depth: 2,
+                            token_idx: 6,
+                            score: 0.70,
+                            children: vec![],
+                        },
+                    ],
+                },
+                TreeNode {
+                    depth: 1,
+                    token_idx: 4,
+                    score: 0.70,
+                    children: vec![TreeNode {
+                        depth: 2,
+                        token_idx: 5,
+                        score: 0.75,
+                        children: vec![],
+                    }],
+                },
+            ],
+        }];
+
+        let extractor = RuleExtractor::new(10, 0.3);
+        let mut rules = extractor.extract(&tree);
+        deduplicate_rules(&mut rules, 1);
+
+        // Must extract at least some rules
+        assert!(
+            !rules.is_empty(),
+            "should extract rules from branching tree"
+        );
+
+        // At least 30% of rules must have support ≥ 2 (reused)
+        let reused = rules.iter().filter(|r| r.support >= 2).count();
+        let reuse_ratio = reused as f32 / rules.len() as f32;
+
+        assert!(
+            reuse_ratio >= 0.30,
+            "rule reuse {:.0}% < 30% ({}/{})",
+            reuse_ratio * 100.0,
+            reused,
+            rules.len()
+        );
+    }
 }

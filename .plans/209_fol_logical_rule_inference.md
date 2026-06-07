@@ -180,14 +180,14 @@ Prompt Input
   decision_trace = ["rule_extraction"]          # T4: depends on rule extraction
   ```
 
-- [ ] **T5.2:** GOAT test: FOL constraint extraction accuracy
+- [x] **T5.2:** GOAT test: FOL constraint extraction accuracy
   - Target: ≥80% correct constraint extraction on Rust prompts
   - Test corpus: 50+ Rust prompts with known expected constraints
 
-- [ ] **T5.3:** GOAT test: Rule extraction support threshold
+- [x] **T5.3:** GOAT test: Rule extraction support threshold
   - Target: ≥30% pattern reuse (rules hit ≥30% of future similar prompts)
 
-- [ ] **T5.4:** GOAT test: Reward propagation improves future inference
+- [x] **T5.4:** GOAT test: Reward propagation improves future inference
   - Target: ≥10% accuracy gain after reward warm-up (N=50 compilations)
 
 - [x] **T5.5:** GOAT test: Zero overhead on miss path

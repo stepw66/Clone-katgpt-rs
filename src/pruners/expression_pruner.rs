@@ -1,9 +1,15 @@
-//! ExpressionPruner — ScreeningPruner wrapper using a fitted SymbolicExpression.
+//! ExpressionPruner — ScreeningPruner backed by a fitted SymbolicExpression.
 //!
-//! Extracts features from (depth, token, parents, scores), evaluates a compact
-//! symbolic expression, and blends the result with an inner pruner's relevance.
+//! Wraps any inner [`ScreeningPruner`] and augments relevance scoring with
+//! a pre-fitted symbolic expression. Relevance is computed as:
+//! `0.5 * inner_relevance + 0.5 * expr_result`.
 //!
-//! **Feature gate:** `symbolic_distill`
+//! When `concept_grounding` is enabled, expression terms can be rendered as
+//! human-readable concept names via [`grounded_expression_string`](ExpressionPruner::grounded_expression_string).
+//!
+//! # Feature Gate
+//!
+//! `symbolic_distill`.
 
 use crate::speculative::types::ScreeningPruner;
 

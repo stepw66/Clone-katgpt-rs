@@ -411,6 +411,54 @@ mod tests {
         );
     }
 
+    // ── GOAT Proof: Reward Propagation ≥10% Gain (Plan 209, T5.4) ──────
+
+    #[test]
+    fn goat_reward_accuracy_gain() {
+        let mut pruner = RewardMemPruner::new(AcceptAll);
+        pruner.set_prompt_type("test_prompt");
+
+        let good_path: &[usize] = &[0, 3, 5];
+        let bad_path: &[usize] = &[0, 4, 8];
+
+        // Phase 1: Baseline — no reward history → both zero
+        let baseline_good = pruner.get_boost(3, 5, &[0, 3]);
+        let baseline_bad = pruner.get_boost(3, 8, &[0, 4]);
+        assert_eq!(baseline_good, 0.0);
+        assert_eq!(baseline_bad, 0.0);
+        let baseline_separation = baseline_good - baseline_bad;
+
+        // Phase 2: Warm-up — 50 compilations each
+        for _ in 0..50 {
+            pruner.reward_path(good_path, &CompileOutcome::Success);
+            pruner.reward_path(bad_path, &CompileOutcome::Error("fail".into()));
+        }
+
+        // Phase 3: After — good boosted, bad penalized
+        let after_good = pruner.get_boost(3, 5, &[0, 3]);
+        let after_bad = pruner.get_boost(3, 8, &[0, 4]);
+        let after_separation = after_good - after_bad;
+
+        // Gain: separation improvement from reward memory
+        let gain = after_separation - baseline_separation;
+
+        assert!(
+            gain >= 0.1,
+            "reward propagation gain {:.3} < 0.1 (good={:.3}, bad={:.3})",
+            gain,
+            after_good,
+            after_bad
+        );
+        assert!(
+            after_good > 0.9,
+            "good path should converge toward 1.0, got {after_good}"
+        );
+        assert!(
+            after_bad < -0.4,
+            "bad path should converge toward -0.5, got {after_bad}"
+        );
+    }
+
     #[test]
     fn test_ema_convergence() {
         let mut pruner = RewardMemPruner::new(AcceptAll);

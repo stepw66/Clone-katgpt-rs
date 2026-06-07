@@ -573,6 +573,110 @@ mod tests {
         assert!(results[5]); // Result → allowed
     }
 
+    // ── GOAT Proof: Constraint Extraction Accuracy ≥80% (Plan 209, T5.2) ──
+
+    #[test]
+    fn goat_constraint_extraction_accuracy() {
+        // Corpus: (prompt, expected_allowed_keywords)
+        // Keywords must exist in test_vocab() for resolution.
+        let corpus: &[(&str, &[&str])] = &[
+            ("async fn", &["async", "fn"]),
+            ("pub async fn", &["pub", "async", "fn"]),
+            ("fn main", &["fn"]),
+            ("struct Foo", &["struct"]),
+            ("enum Bar", &["enum"]),
+            ("impl Display", &["impl"]),
+            ("trait Send", &["trait"]),
+            ("match x", &["match"]),
+            ("if let Some", &["if", "let"]),
+            ("no unsafe", &["unsafe"]), // negation → disallowed
+            ("pub struct Config", &["pub", "struct"]),
+            (
+                "async function returning Result",
+                &["async", "fn", "Result"],
+            ),
+            ("impl Iterator", &["impl"]),
+            ("where T: Clone", &["where"]),
+            ("pub enum Error", &["pub", "enum"]),
+            ("async move", &["async", "move"]),
+            ("const MAX", &["const"]),
+            ("type Alias", &["type"]),
+            ("use std", &["use"]),
+            ("mod tests", &["mod"]),
+            ("pub trait", &["pub", "trait"]),
+            ("no unsafe code", &["unsafe"]), // negation
+            ("Result<T, E>", &["Result", "Ok", "Err"]),
+            ("Option<T>", &["Option", "Some", "None"]),
+            ("Vec<String>", &["Vec"]),
+            ("no panic", &["panic", "unwrap", "expect"]),
+            ("error handling", &["Result", "Ok", "Err", "?"]),
+            ("pub fn new", &["pub", "fn"]),
+            ("fn default", &["fn"]),
+            ("else branch", &["else"]),
+            ("mut x", &["mut"]),
+            ("return value", &["return"]),
+            ("let x", &["let"]),
+            ("impl FromStr", &["impl"]),
+            ("trait IntoIterator", &["trait"]),
+            ("pub async fn connect", &["pub", "async", "fn"]),
+            ("struct Config { verbose: bool }", &["struct"]),
+            ("enum Command", &["enum"]),
+            ("fn clone", &["fn"]),
+            ("no unwrap", &["unwrap"]),
+            ("no expect", &["expect"]),
+            ("no clone", &["clone"]),
+            ("#[test]", &["test"]),
+            ("HashMap", &[]), // not in test_vocab → no constraint
+            ("private", &[]), // pattern maps to empty tokens
+            ("tokio runtime", &["async", "await"]),
+            ("spawn task", &["spawn"]), // not in vocab → resolves empty
+            ("fn with_capacity", &["fn"]),
+            ("pub impl", &["pub", "impl"]),
+            ("pub mod", &["pub", "mod"]),
+            ("", &[]), // empty → no constraints
+        ];
+
+        let vocab = test_vocab();
+        let mut correct = 0;
+        let total = corpus.len();
+
+        for (prompt, expected) in corpus {
+            let constraints = extract_fol_constraints(prompt, &vocab);
+
+            if expected.is_empty() {
+                // Expect no constraints or all with empty allowed+disallowed
+                let any_meaningful = constraints
+                    .iter()
+                    .any(|c| !c.allowed.is_empty() || !c.disallowed.is_empty());
+                if !any_meaningful {
+                    correct += 1;
+                }
+            } else {
+                // Check each expected keyword appears in some constraint's allowed or disallowed
+                let all_found = expected.iter().all(|kw| {
+                    let idx = vocab.iter().position(|v| v == *kw);
+                    idx.map_or(false, |i| {
+                        constraints
+                            .iter()
+                            .any(|c| c.allowed.contains(&i) || c.disallowed.contains(&i))
+                    })
+                });
+                if all_found {
+                    correct += 1;
+                }
+            }
+        }
+
+        let accuracy = correct as f32 / total as f32;
+        assert!(
+            accuracy >= 0.80,
+            "constraint extraction accuracy {:.0}% < 80% ({}/{})",
+            accuracy * 100.0,
+            correct,
+            total
+        );
+    }
+
     #[cfg(feature = "fol_constraints")]
     #[test]
     fn test_fol_pruner_from_prompt() {

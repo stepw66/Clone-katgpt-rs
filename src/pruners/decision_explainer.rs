@@ -1,12 +1,26 @@
-//! Decision Explanation via Sensitivity Analysis (Plan 210 Phase 4, F3).
+//! Decision Explanation via Sensitivity Analysis (Plan 210 F3).
 //!
-//! Perturbation-based sensitivity analysis that attributes token choices to pruner scores.
-//! No gradients — purely post-inference computation. For each token choice, each pruner score
-//! is perturbed by ±δ and the accept/reject decision is re-evaluated. If the output changes,
-//! the sensitivity is `|change| / δ`; otherwise zero. Pruners are ranked by argmax sensitivity
-//! to identify the primary driver.
+//! Produces human-readable explanations of DDTree token choices by perturbing
+//! pruner scores and measuring sensitivity. Identifies the primary driver
+//! pruner for each token choice via argmax (not softmax).
 //!
-//! Feature-gated behind `decision_explain` — zero cost when disabled.
+//! No gradients — purely post-inference computation. For each token choice,
+//! each pruner score is perturbed by ±δ and the accept/reject decision is
+//! re-evaluated. If the output changes, the sensitivity is `|change| / δ`;
+//! otherwise zero.
+//!
+//! When `concept_grounding` is enabled, pruner names in attributions are
+//! automatically grounded to semantic labels via [`TemplateGrounding`].
+//!
+//! # Feature Gate
+//!
+//! `decision_explain` — zero-cost when disabled.
+//!
+//! # Performance
+//!
+//! - Sensitivity analysis: <1ms for 100 tokens × 4 pruners
+//! - Cached: [`SensitivityCache`] avoids recomputation for similar traces
+//!   via blake3 hash-based lookup
 
 // NOTE: The entire module body is compiled unconditionally so that `#[cfg(test)]` tests
 // can exercise it without the feature flag. Gate the *module declaration* in mod.rs instead.
