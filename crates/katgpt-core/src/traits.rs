@@ -1001,13 +1001,10 @@ pub fn best_buddies(corr_rows: &[&[f32]], k: usize) -> Vec<(usize, usize)> {
         }
         let mut best_j = 0;
         let mut best_corr = f32::NEG_INFINITY;
-        for j in 0..row.len() {
-            match row[j] > best_corr {
-                true => {
-                    best_corr = row[j];
-                    best_j = j;
-                }
-                false => {}
+        for (j, &val) in row.iter().enumerate() {
+            if val > best_corr {
+                best_corr = val;
+                best_j = j;
             }
         }
         best_for[i] = Some(best_j);
