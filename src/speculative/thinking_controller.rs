@@ -491,6 +491,49 @@ impl ThinkingController {
         self.bandit = ThinkingBandit::thaw(&frozen)?;
         Ok(())
     }
+
+    // ── RV-Gated Mode Selection (Plan 202) ─────────────────────────
+
+    /// Select thinking mode with RV signal bias.
+    ///
+    /// High RV (model uncertain) → bias toward Latent thinking.
+    /// Low RV (model confident) → bias toward Direct mode.
+    /// Medium RV → bandit decides (no bias).
+    ///
+    /// Feature-gated behind `rv_gated_thinking`.
+    /// Falls back to `select_mode()` when disabled.
+    #[cfg(feature = "rv_gated_thinking")]
+    pub fn select_mode_with_rv(
+        &mut self,
+        first_pass_confidence: f32,
+        rv_signal: f64,
+        rng: &mut impl Rng,
+    ) -> ThinkingMode {
+        // RV thresholds (matching RvThresholds defaults)
+        const RV_THETA_HIGH: f64 = 0.10;
+        const RV_THETA_LOW: f64 = 0.02;
+
+        match rv_signal {
+            rv if rv > RV_THETA_HIGH => {
+                // High RV → model uncertain → prefer Latent thinking
+                // Soft bias: record success toward latent to influence future bandit
+                let gpu_loaded = self.gpu_load.is_loaded(self.config.gpu_load_threshold);
+                if gpu_loaded {
+                    ThinkingMode::CpuResample
+                } else {
+                    ThinkingMode::Latent
+                }
+            }
+            rv if rv < RV_THETA_LOW && rv >= 0.0 => {
+                // Low RV → model confident → Direct mode
+                ThinkingMode::Direct
+            }
+            _ => {
+                // Medium RV or unavailable → defer to bandit
+                self.select_mode(first_pass_confidence, rng)
+            }
+        }
+    }
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────

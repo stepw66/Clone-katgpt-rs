@@ -420,6 +420,86 @@ impl FrequencyBandit {
     pub fn tier_recommendation(&self) -> ComputeTier {
         self.best_arm().recommended_tier()
     }
+
+    // ── RV Bandit Pruning (Plan 202, Phase 4) ─────────────────────
+
+    /// Compute per-arm reward variance using Welford online statistics.
+    ///
+    /// Returns `[f64; 3]` variances for [Low, Mid, High] arms.
+    /// Arms with < 2 samples have variance = 0.0.
+    #[cfg(feature = "rv_bandit_pruning")]
+    pub fn arm_variances(&self) -> [f64; 3] {
+        // Welford online variance from Q-value updates.
+        // Since we only track incremental mean (Q(a)), not raw samples,
+        // we use Q-value spread as a proxy: variance ≈ (Q(a) - Q_mean)².
+        let q_mean: f64 = self
+            .arm_q_values
+            .iter()
+            .copied()
+            .filter(|&q| q != 0.0)
+            .sum::<f64>()
+            / 3.0_f64;
+        let mut variances = [0.0; 3];
+        for (i, &q) in self.arm_q_values.iter().enumerate() {
+            match self.arm_counts[i] {
+                0 | 1 => variances[i] = 0.0,
+                _ => {
+                    let delta = q - q_mean;
+                    variances[i] = delta * delta;
+                }
+            }
+        }
+        variances
+    }
+
+    /// Suppress arms below the `(1 - ρ)` quantile of variance.
+    ///
+    /// RAGEN-2 proves nucleus-style filtering > top-k > no filter.
+    /// Suppressed arms are penalized (Q-value set to -∞) so UCB1 avoids them.
+    ///
+    /// # Arguments
+    /// * `rho` — retention fraction (0.0–1.0). 1.0 = no suppression.
+    #[cfg(feature = "rv_bandit_pruning")]
+    pub fn suppress_low_rv_arms(&mut self, rho: f32) {
+        let variances = self.arm_variances();
+
+        // Compute threshold at (1 - ρ) quantile
+        let threshold = match rho {
+            rho if rho >= 1.0 => return,        // No suppression
+            rho if rho <= 0.0 => f64::INFINITY, // Suppress all
+            _ => {
+                // Sort variances to find quantile
+                let mut sorted = variances;
+                sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+                // (1 - ρ) quantile index
+                let idx = ((1.0 - rho) * 2.0) as usize;
+                sorted[idx.min(2)]
+            }
+        };
+
+        // Suppress arms below threshold
+        for (i, &v) in variances.iter().enumerate() {
+            if v < threshold && self.arm_counts[i] > 0 {
+                self.arm_q_values[i] = f64::NEG_INFINITY;
+            }
+        }
+    }
+
+    /// Check if an arm is suppressed (Q = -∞).
+    #[cfg(feature = "rv_bandit_pruning")]
+    pub fn is_arm_suppressed(&self, band: FrequencyBand) -> bool {
+        self.arm_q_values[band.as_index()] == f64::NEG_INFINITY
+    }
+
+    /// Unsuppress all arms (reset Q-values from -∞ to 0).
+    #[cfg(feature = "rv_bandit_pruning")]
+    pub fn unsuppress_all(&mut self) {
+        for q in &mut self.arm_q_values {
+            if *q == f64::NEG_INFINITY {
+                *q = 0.0;
+            }
+        }
+    }
 }
 
 impl Default for FrequencyBandit {

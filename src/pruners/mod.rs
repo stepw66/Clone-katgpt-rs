@@ -559,3 +559,11 @@ pub mod rosetta;
 
 #[cfg(feature = "rosetta_pruner")]
 pub use rosetta::{ConstraintConcept, RosettaPruner};
+
+// ── RV-Gated Compute Routing — AcceptanceVarianceTracker (Plan 202) ──
+
+#[cfg(feature = "rv_gated_routing")]
+pub mod acceptance_variance;
+
+#[cfg(feature = "rv_gated_routing")]
+pub use acceptance_variance::AcceptanceVarianceTracker;

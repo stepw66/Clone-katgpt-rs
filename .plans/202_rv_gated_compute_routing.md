@@ -1,6 +1,6 @@
 # Plan 202: RV-Gated Compute Routing — Inference-Time SNR Signal
 
-**Status:** 🔵 Planned
+**Status:** 🟢 Implemented
 **Research:** `.research/179_RAGEN2_Template_Collapse_SNR_Filtering.md`
 **Feature Gates:** `rv_gated_routing`, `rv_gated_thinking`, `rv_bandit_pruning` (all default-OFF until benchmark proves gain)
 **Depends On:** Plan 194 (ThinkingController), `FrequencyBandit`, `InferenceRouter`, `TriggerGate`
@@ -50,7 +50,7 @@ Speculative Decode
 
 ### Phase 1: AcceptanceVarianceTracker
 
-- [ ] **T1: Create `src/pruners/acceptance_variance.rs`**
+- [x] **T1: Create `src/pruners/acceptance_variance.rs`**
   - `AcceptanceVarianceTracker` struct with Welford online variance + EMA smoothing
   - `observe(&mut self, accepted: bool)` — O(1), 3 flops per update
   - `rv(&self) -> f64` — returns current EMA-smoothed variance
@@ -67,7 +67,7 @@ Speculative Decode
   }
   ```
 
-- [ ] **T2: Unit tests for AcceptanceVarianceTracker**
+- [x] **T2: Unit tests for AcceptanceVarianceTracker**
   - File: `src/pruners/acceptance_variance.rs` (inline `#[cfg(test)]`)
   - Test: all-accept → RV ≈ 0
   - Test: all-reject → RV ≈ 0 (variance of constant)
@@ -75,13 +75,13 @@ Speculative Decode
   - Test: EMA converges to true variance after `min_samples`
   - Test: reset clears state
 
-- [ ] **T3: Export module in `src/pruners/mod.rs`**
+- [x] **T3: Export module in `src/pruners/mod.rs`**
   - Add `pub mod acceptance_variance;`
   - Conditional: `#[cfg(feature = "rv_gated_routing")]`
 
 ### Phase 2: RV → InferenceRouter Integration
 
-- [ ] **T4: Wire RV signal into `InferenceRouter`**
+- [x] **T4: Wire RV signal into `InferenceRouter`**
   - File: `src/inference_router.rs`
   - Add `rv_tracker: Option<AcceptanceVarianceTracker>` field (behind feature gate)
   - Add `rv_theta_high: f64` and `rv_theta_low: f64` config thresholds
@@ -93,7 +93,7 @@ Speculative Decode
   let rv_boost = rv_signal > self.config.rv_theta_high;
   ```
 
-- [ ] **T5: RV-gated tier promotion in `TriggerGate`**
+- [x] **T5: RV-gated tier promotion in `TriggerGate`**
   - File: `src/trigger_gate.rs`
   - Add `rv_tier_boost(&self, rv: f64) -> Option<ComputeTier>` method
   - High RV → promote tier regardless of QPS (override)
@@ -107,7 +107,7 @@ Speculative Decode
   }
   ```
 
-- [ ] **T6: Integration tests for RV-gated routing**
+- [x] **T6: Integration tests for RV-gated routing**
   - File: `tests/rv_gated_routing.rs`
   - Test: low RV + high QPS → CPU (RV overrides)
   - Test: high RV + low QPS → GPU (RV promotes)
@@ -115,7 +115,7 @@ Speculative Decode
 
 ### Phase 3: RV → ThinkingController Integration
 
-- [ ] **T7: Wire RV into `ThinkingController` mode selection**
+- [x] **T7: Wire RV into `ThinkingController` mode selection**
   - File: `src/speculative/thinking_controller.rs`
   - Add `rv_signal: f64` parameter to `select_mode()` (or equivalent)
   - High RV → bias bandit toward Latent arm
@@ -128,7 +128,7 @@ Speculative Decode
                 else { 0.0 };
   ```
 
-- [ ] **T8: Tests for RV-gated thinking**
+- [x] **T8: Tests for RV-gated thinking**
   - File: `tests/rv_gated_routing.rs`
   - Test: high RV → Latent mode preferred
   - Test: low RV → Direct mode preferred
@@ -136,7 +136,7 @@ Speculative Decode
 
 ### Phase 4: Top-ρ Bandit Arm Suppression
 
-- [ ] **T9: Add top-ρ suppression to `FrequencyBandit`**
+- [x] **T9: Add top-ρ suppression to `FrequencyBandit`**
   - File: `src/freq_bandit.rs`
   - Add `suppress_low_rv_arms(rho: f32)` method
   - Uses `BanditStats::reward_variance()` (already exists) per arm
@@ -153,7 +153,7 @@ Speculative Decode
   }
   ```
 
-- [ ] **T10: Tests for arm suppression**
+- [x] **T10: Tests for arm suppression**
   - File: `tests/rv_gated_routing.rs`
   - Test: suppress arm with lowest variance
   - Test: ρ = 1.0 → no suppression

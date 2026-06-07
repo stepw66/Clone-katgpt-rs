@@ -16,6 +16,12 @@ use crate::transformer::{ForwardContext, MultiLayerKVCache, TransformerWeights};
 use crate::trigger_gate::{ComputeTier, TriggerGate, TriggerGateConfig};
 use crate::types::{Config, Rng, sample_token_into, softmax_scaled};
 
+#[cfg(feature = "rv_gated_routing")]
+use crate::pruners::acceptance_variance::AcceptanceVarianceTracker;
+
+#[cfg(feature = "rv_gated_routing")]
+use crate::trigger_gate::RvThresholds;
+
 // ---------------------------------------------------------------------------
 // RouterStats
 // ---------------------------------------------------------------------------
@@ -35,6 +41,9 @@ pub struct RouterStats {
     pub tier_transitions: u64,
     /// Current trust signal (0.0 = low trust, 1.0 = high trust).
     pub trust_signal: f32,
+    /// Current RV signal (Plan 202). -1.0 if unavailable.
+    #[cfg(feature = "rv_gated_routing")]
+    pub rv_signal: f64,
 }
 
 // ---------------------------------------------------------------------------
@@ -60,6 +69,13 @@ pub struct InferenceRouter {
     /// Trust signal from speculative verification (0.0 = low trust, 1.0 = high trust).
     /// Updated externally via `update_trust()`. Influences tier transitions.
     trust_signal: f32,
+    /// RV tracker for acceptance variance signal (Plan 202).
+    /// `None` when `rv_gated_routing` feature is disabled → zero cost.
+    #[cfg(feature = "rv_gated_routing")]
+    rv_tracker: Option<AcceptanceVarianceTracker>,
+    /// RV thresholds for tier promotion/demotion (Plan 202).
+    #[cfg(feature = "rv_gated_routing")]
+    rv_thresholds: RvThresholds,
 }
 
 impl InferenceRouter {
@@ -94,6 +110,10 @@ impl InferenceRouter {
             tier_transitions: AtomicU64::new(0),
             last_backend: "CPU",
             trust_signal: 1.0,
+            #[cfg(feature = "rv_gated_routing")]
+            rv_tracker: Some(AcceptanceVarianceTracker::new()),
+            #[cfg(feature = "rv_gated_routing")]
+            rv_thresholds: RvThresholds::default(),
         }
     }
 
@@ -193,12 +213,32 @@ impl InferenceRouter {
             tier
         };
 
+        // RV-gated tier adjustment (Plan 202)
+        // Overrides trust/QPS routing when RV signal is available.
+        #[cfg(feature = "rv_gated_routing")]
+        let tier_after_rv = {
+            let rv_signal = self.rv_tracker.as_ref().map(|t| t.rv()).unwrap_or(-1.0);
+            match self.gate.rv_tier_boost(rv_signal, &self.rv_thresholds) {
+                Some(rv_tier) => {
+                    if rv_tier != tier_after_trust {
+                        log::info!(
+                            "Router RV-gated tier override: rv={rv_signal:.4}, {tier_after_trust}→{rv_tier}"
+                        );
+                    }
+                    rv_tier
+                }
+                None => tier_after_trust,
+            }
+        };
+        #[cfg(not(feature = "rv_gated_routing"))]
+        let tier_after_rv = tier_after_trust;
+
         // Route to the appropriate backend.
         //
         // We populate ctx.logits via forward(), then return a borrow of ctx.logits
         // (not from self) to satisfy the lifetime constraint that the returned slice
         // borrows from `ctx`.
-        let backend_name = match tier_after_trust {
+        let backend_name = match tier_after_rv {
             ComputeTier::CpuOnly => {
                 crate::transformer::forward(ctx, weights, cache, token, pos, &self.config);
                 "CPU"
@@ -228,6 +268,49 @@ impl InferenceRouter {
     /// Get current trust signal.
     pub fn trust_signal(&self) -> f32 {
         self.trust_signal
+    }
+
+    // ── RV-Gated Compute Routing API (Plan 202) ───────────────────
+
+    /// Observe an acceptance event for RV tracking.
+    ///
+    /// Call after each speculative decode verification.
+    /// No-op when `rv_gated_routing` is disabled.
+    #[cfg(feature = "rv_gated_routing")]
+    pub fn observe_acceptance(&mut self, accepted: bool) {
+        if let Some(ref mut tracker) = self.rv_tracker {
+            tracker.observe(accepted);
+        }
+    }
+
+    /// Get current RV signal. Returns -1.0 if tracking is unavailable.
+    ///
+    /// RV ∈ [0.0, 0.25] for Bernoulli acceptance data.
+    /// 0.0 = all accept/reject (confident). 0.25 = 50/50 (uncertain).
+    #[cfg(feature = "rv_gated_routing")]
+    pub fn rv_signal(&self) -> f64 {
+        self.rv_tracker.as_ref().map(|t| t.rv()).unwrap_or(-1.0)
+    }
+
+    /// Reset the RV tracker (call at query boundaries).
+    /// No-op when `rv_gated_routing` is disabled.
+    #[cfg(feature = "rv_gated_routing")]
+    pub fn reset_rv(&mut self) {
+        if let Some(ref mut tracker) = self.rv_tracker {
+            tracker.reset();
+        }
+    }
+
+    /// Update RV thresholds at runtime.
+    #[cfg(feature = "rv_gated_routing")]
+    pub fn set_rv_thresholds(&mut self, thresholds: RvThresholds) {
+        self.rv_thresholds = thresholds;
+    }
+
+    /// Get current RV thresholds.
+    #[cfg(feature = "rv_gated_routing")]
+    pub fn rv_thresholds(&self) -> &RvThresholds {
+        &self.rv_thresholds
     }
 
     /// Signal that weights have changed; GPU/ANE backends should recompile.
@@ -278,6 +361,8 @@ impl InferenceRouter {
             last_backend: self.last_backend,
             tier_transitions: self.tier_transitions.load(Ordering::Relaxed),
             trust_signal: self.trust_signal,
+            #[cfg(feature = "rv_gated_routing")]
+            rv_signal: self.rv_signal(),
         }
     }
 

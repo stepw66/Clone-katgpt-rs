@@ -119,6 +119,32 @@ impl TriggerGateConfig {
     }
 }
 
+// ── RV-Gated Tier Boost (Plan 202) ────────────────────────────────
+
+/// RV thresholds for tier promotion/demotion.
+///
+/// For Bernoulli acceptance: RV ∈ [0.0, 0.25].
+/// - High threshold: variance above this → model uncertain → promote to GPU.
+/// - Low threshold: variance below this → model confident → allow demotion to CPU.
+#[cfg(feature = "rv_gated_routing")]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct RvThresholds {
+    /// Variance above this → promote tier (GPU). Default: 0.10
+    pub rv_theta_high: f64,
+    /// Variance below this → allow demotion (CPU). Default: 0.02
+    pub rv_theta_low: f64,
+}
+
+#[cfg(feature = "rv_gated_routing")]
+impl Default for RvThresholds {
+    fn default() -> Self {
+        Self {
+            rv_theta_high: 0.10,
+            rv_theta_low: 0.02,
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // TriggerGate
 // ---------------------------------------------------------------------------
@@ -284,6 +310,24 @@ impl TriggerGate {
     /// Borrow the configuration.
     pub fn config(&self) -> &TriggerGateConfig {
         &self.config
+    }
+
+    // ── RV-Gated Tier Boost (Plan 202) ────────────────────────────
+
+    /// RV-gated tier promotion/demotion override.
+    ///
+    /// High RV (above `rv_theta_high`) → promote to GPU regardless of QPS.
+    /// Low RV (below `rv_theta_low`) → demote to CPU even under moderate load.
+    /// Returns `None` if RV is neutral (defer to QPS-based routing).
+    ///
+    /// Feature-gated behind `rv_gated_routing`. Zero cost when disabled.
+    #[cfg(feature = "rv_gated_routing")]
+    pub fn rv_tier_boost(&self, rv: f64, thresholds: &RvThresholds) -> Option<ComputeTier> {
+        match rv {
+            rv if rv > thresholds.rv_theta_high && self.gpu_available => Some(ComputeTier::CpuGpu),
+            rv if rv < thresholds.rv_theta_low => Some(ComputeTier::CpuOnly),
+            _ => None,
+        }
     }
 }
 
