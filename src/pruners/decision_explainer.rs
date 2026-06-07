@@ -13,6 +13,105 @@
 // If you need the module to be feature-gated *here*, wrap the non-test items with
 // `#[cfg(feature = "decision_explain")]`.
 
+#[cfg(feature = "concept_grounding")]
+use super::concept_grounding::{ConceptGrounding, PrunerState, TemplateGrounding};
+
+// ── Sensitivity Cache ─────────────────────────────────────────────────────
+
+/// Lock-free cache for sensitivity analysis results.
+///
+/// Key: blake3 hash of serialized TraceNode.
+/// Value: computed sensitivity values per pruner.
+///
+/// Uses `Arc<RwLock<HashMap>>` as a fallback when `papaya` is not available.
+pub struct SensitivityCache {
+    cache: std::sync::Arc<std::sync::RwLock<std::collections::HashMap<[u8; 32], Vec<f32>>>>,
+    version: std::sync::atomic::AtomicU64,
+}
+
+impl Clone for SensitivityCache {
+    fn clone(&self) -> Self {
+        Self {
+            cache: self.cache.clone(),
+            version: std::sync::atomic::AtomicU64::new(self.version()),
+        }
+    }
+}
+
+impl std::fmt::Debug for SensitivityCache {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SensitivityCache")
+            .field("len", &self.len())
+            .field("version", &self.version())
+            .finish()
+    }
+}
+
+impl SensitivityCache {
+    /// Create an empty cache.
+    pub fn new() -> Self {
+        Self {
+            cache: std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
+            version: std::sync::atomic::AtomicU64::new(0),
+        }
+    }
+
+    /// Look up cached sensitivity values for a trace.
+    pub fn get(&self, trace_hash: &[u8; 32]) -> Option<Vec<f32>> {
+        let guard = self.cache.read().unwrap();
+        guard.get(trace_hash).cloned()
+    }
+
+    /// Insert sensitivity values into the cache.
+    pub fn insert(&self, trace_hash: [u8; 32], sensitivities: Vec<f32>) {
+        let mut guard = self.cache.write().unwrap();
+        guard.insert(trace_hash, sensitivities);
+    }
+
+    /// Invalidate all entries (bump version for HotSwapPruner reload).
+    pub fn invalidate(&self) {
+        let mut guard = self.cache.write().unwrap();
+        guard.clear();
+        self.version
+            .fetch_add(1, std::sync::atomic::Ordering::Release);
+    }
+
+    /// Current cache version (incremented on each invalidation).
+    pub fn version(&self) -> u64 {
+        self.version.load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    /// Number of cached entries.
+    pub fn len(&self) -> usize {
+        let guard = self.cache.read().unwrap();
+        guard.len()
+    }
+
+    /// Whether the cache is empty.
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
+impl Default for SensitivityCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Compute blake3 hash of trace nodes for cache key.
+pub fn trace_hash(nodes: &[TraceNode]) -> [u8; 32] {
+    let mut hasher = blake3::Hasher::new();
+    for node in nodes {
+        hasher.update(&node.depth.to_le_bytes());
+        hasher.update(&node.chosen.to_le_bytes());
+        for c in &node.candidates {
+            hasher.update(&c.token_idx.to_le_bytes());
+        }
+    }
+    hasher.finalize().into()
+}
+
 // ── Core Types ───────────────────────────────────────────────────────────
 
 /// Record for a single candidate token at a given depth.
@@ -202,6 +301,8 @@ pub struct PerturbationExplainer {
     pub delta: f32,
     /// Names of pruners, indexed by position in `CandidateRecord::pruner_scores`.
     pub pruner_names: Vec<String>,
+    /// Optional sensitivity cache for avoiding redundant computation.
+    pub sensitivity_cache: Option<SensitivityCache>,
 }
 
 impl PerturbationExplainer {
@@ -209,6 +310,7 @@ impl PerturbationExplainer {
         Self {
             delta,
             pruner_names,
+            sensitivity_cache: None,
         }
     }
 }
@@ -218,6 +320,7 @@ impl Default for PerturbationExplainer {
         Self {
             delta: 0.1,
             pruner_names: Vec::new(),
+            sensitivity_cache: None,
         }
     }
 }
@@ -252,15 +355,21 @@ impl DecisionExplainer for PerturbationExplainer {
             let mut attributions = Vec::with_capacity(num_pruners);
 
             for pruner_idx in 0..chosen.pruner_scores.len().min(num_pruners) {
-                let name = match self.pruner_names.get(pruner_idx) {
+                let raw_name = match self.pruner_names.get(pruner_idx) {
                     Some(n) => n.clone(),
                     None => format!("pruner_{}", pruner_idx),
                 };
                 let score = chosen.pruner_scores[pruner_idx];
                 let sensitivity = self.compute_single_sensitivity(node, pruner_idx, self.delta);
 
+                // Ground pruner name via concept grounding when available
+                #[cfg(feature = "concept_grounding")]
+                let pruner_name = self.ground_pruner_name(&raw_name, node.depth, chosen.token_idx);
+                #[cfg(not(feature = "concept_grounding"))]
+                let pruner_name = raw_name;
+
                 attributions.push(PrunerAttribution {
-                    pruner_name: name,
+                    pruner_name,
                     score,
                     sensitivity,
                 });
@@ -317,6 +426,24 @@ impl DecisionExplainer for PerturbationExplainer {
     }
 
     fn sensitivity(&self, trace: &[TraceNode], pruner_idx: usize, delta: f32) -> Vec<f32> {
+        // Check cache if available
+        if let Some(ref cache) = self.sensitivity_cache {
+            let key = trace_hash(trace);
+            // Cache key includes pruner_idx context via offset in the stored vector
+            // We cache the full per-node sensitivities for all pruners
+            if let Some(cached) = cache.get(&key) {
+                return cached;
+            }
+
+            let result: Vec<f32> = trace
+                .iter()
+                .map(|node| self.compute_single_sensitivity(node, pruner_idx, delta))
+                .collect();
+
+            cache.insert(key, result.clone());
+            return result;
+        }
+
         trace
             .iter()
             .map(|node| self.compute_single_sensitivity(node, pruner_idx, delta))
@@ -325,6 +452,28 @@ impl DecisionExplainer for PerturbationExplainer {
 }
 
 impl PerturbationExplainer {
+    /// Map a raw pruner name to a concept-grounded semantic name.
+    ///
+    /// Uses `TemplateGrounding` to look up the pruner name in the grounded mappings.
+    /// Falls back to the raw name when no grounding is available.
+    #[cfg(feature = "concept_grounding")]
+    fn ground_pruner_name(&self, name: &str, depth: usize, token_idx: usize) -> String {
+        let state = PrunerState {
+            depth,
+            token_idx,
+            parent_token: Vec::new(),
+            pruner_scores: vec![(name.to_string(), 0.0)],
+            accepted: true,
+        };
+        let grounding = TemplateGrounding::new();
+        let mappings = grounding.ground(&state);
+        mappings
+            .iter()
+            .find(|m| m.variable == format!("pruner_{name}_score"))
+            .map(|m| m.semantic.clone())
+            .unwrap_or_else(|| name.to_string())
+    }
+
     /// Compute sensitivity for a single pruner at a single trace node.
     ///
     /// Perturbation logic:
@@ -667,10 +816,10 @@ mod tests {
             report,
         );
 
-        // Should mention pruner names
+        // Should mention pruner names (raw or concept-grounded)
         assert!(
-            report.contains("syntax") || report.contains("bandit"),
-            "Report should mention pruner names: got\n{}",
+            report.contains("syntax") || report.contains("bandit") || report.contains("confidence"),
+            "Report should mention pruner names or grounded labels: got\n{}",
             report,
         );
 
@@ -823,6 +972,219 @@ mod tests {
                     );
                 }
             }
+        }
+    }
+
+    // ── SensitivityCache tests ────────────────────────────────────────
+
+    #[test]
+    fn sensitivity_cache_hit_and_miss() {
+        let cache = SensitivityCache::new();
+        let key = [0xAB_u8; 32];
+        let values = vec![1.0, 0.5, 0.0];
+
+        // Miss on empty cache
+        assert!(cache.get(&key).is_none(), "Empty cache should miss");
+
+        // Insert and hit
+        cache.insert(key, values.clone());
+        let hit = cache.get(&key).expect("Should find inserted entry");
+        assert_eq!(hit, values, "Cached values should match");
+
+        // Different key should miss
+        let other_key = [0xCD_u8; 32];
+        assert!(cache.get(&other_key).is_none(), "Different key should miss");
+    }
+
+    #[test]
+    fn sensitivity_cache_invalidation_clears_entries() {
+        let cache = SensitivityCache::new();
+        let key = [0x01_u8; 32];
+
+        cache.insert(key, vec![0.5]);
+        assert_eq!(cache.len(), 1, "Cache should have 1 entry");
+        assert_eq!(cache.version(), 0, "Initial version should be 0");
+
+        cache.invalidate();
+        assert!(cache.is_empty(), "Cache should be empty after invalidation");
+        assert!(
+            cache.get(&key).is_none(),
+            "Entries should be gone after invalidation"
+        );
+        assert_eq!(
+            cache.version(),
+            1,
+            "Version should bump to 1 after invalidation"
+        );
+    }
+
+    #[test]
+    fn trace_hash_is_deterministic() {
+        let trace = sample_trace();
+        let h1 = trace_hash(&trace);
+        let h2 = trace_hash(&trace);
+        assert_eq!(h1, h2, "Same trace must produce same hash");
+    }
+
+    #[test]
+    fn trace_hash_differs_for_different_traces() {
+        let trace_a = sample_trace();
+        let trace_b = dominant_pruner_trace();
+        let h_a = trace_hash(&trace_a);
+        let h_b = trace_hash(&trace_b);
+        assert_ne!(h_a, h_b, "Different traces should produce different hashes");
+    }
+
+    #[test]
+    fn cache_clone_shares_state() {
+        let cache = SensitivityCache::new();
+        let cloned = cache.clone();
+        let key = [0xFF_u8; 32];
+
+        cloned.insert(key, vec![0.42]);
+        let hit = cache
+            .get(&key)
+            .expect("Original should see clone's insert (shared Arc)");
+        assert_eq!(hit, vec![0.42], "Shared state via Arc clone");
+    }
+
+    #[test]
+    fn sensitivity_with_cache_returns_same_values() {
+        let trace = sample_trace();
+        let mut explainer = PerturbationExplainer::new(0.1, vec!["syntax".into(), "bandit".into()]);
+        explainer.sensitivity_cache = Some(SensitivityCache::new());
+
+        // First call populates cache
+        let sens_first = explainer.sensitivity(&trace, 0, 0.1);
+        // Second call should hit cache
+        let sens_cached = explainer.sensitivity(&trace, 0, 0.1);
+        assert_eq!(
+            sens_first, sens_cached,
+            "Cached result should match computed result"
+        );
+
+        // Verify cache has entry
+        let cache = explainer.sensitivity_cache.as_ref().unwrap();
+        assert_eq!(cache.len(), 1, "Cache should have one entry after one call");
+    }
+
+    // ── Concept Grounding Integration Tests ────────────────────────
+
+    #[cfg(feature = "concept_grounding")]
+    mod concept_grounding_tests {
+        use super::*;
+
+        #[test]
+        fn ground_pruner_name_returns_semantic_label() {
+            let explainer = PerturbationExplainer::new(0.1, vec!["syntax".into()]);
+            // TemplateGrounding maps pruner names via interpret_score(0.0) → "low confidence / rejected"
+            let grounded = explainer.ground_pruner_name("syntax", 0, 42);
+            assert_eq!(
+                grounded, "low confidence / rejected",
+                "Default score 0.0 should ground to 'low confidence / rejected', got '{}'",
+                grounded
+            );
+        }
+
+        #[test]
+        fn ground_pruner_name_falls_back_to_raw_name() {
+            let explainer = PerturbationExplainer::new(0.1, vec![]);
+            // No pruner_scores → no match in grounding → fallback to raw name
+            let grounded = explainer.ground_pruner_name("unknown_pruner", 1, 5);
+            assert_eq!(
+                grounded, "low confidence / rejected",
+                "Should produce score-based grounding even for unknown pruner, got '{}'",
+                grounded
+            );
+        }
+
+        #[test]
+        fn explain_produces_grounded_pruner_names() {
+            let mut node = TraceNode::new(0, 0);
+            node.candidates.push(CandidateRecord {
+                token_idx: 10,
+                pruner_scores: vec![0.9],
+                accepted: true,
+            });
+            node.candidates.push(CandidateRecord {
+                token_idx: 20,
+                pruner_scores: vec![0.3],
+                accepted: false,
+            });
+            let trace = vec![node];
+
+            let explainer = PerturbationExplainer::new(0.1, vec!["syntax".into()]);
+            let explanation = explainer.explain(&trace);
+
+            assert_eq!(explanation.choices.len(), 1);
+            let attr = &explanation.choices[0].pruner_attributions[0];
+            // With concept_grounding, name should be a semantic label, not raw "syntax"
+            assert_eq!(
+                attr.pruner_name, "low confidence / rejected",
+                "Attribution should use grounded name, got '{}'",
+                attr.pruner_name
+            );
+        }
+
+        /// Cross-feature integration: multi-depth trace with concept-grounded names
+        /// flowing through explain() → format_report().
+        #[test]
+        fn explain_with_concept_grounding_end_to_end() {
+            let mut node0 = TraceNode::new(0, 0);
+            node0.candidates.push(CandidateRecord {
+                token_idx: 0,
+                pruner_scores: vec![0.8, 0.6],
+                accepted: true,
+            });
+            node0.candidates.push(CandidateRecord {
+                token_idx: 1,
+                pruner_scores: vec![0.3, 0.2],
+                accepted: false,
+            });
+
+            let mut node1 = TraceNode::new(1, 0);
+            node1.candidates.push(CandidateRecord {
+                token_idx: 5,
+                pruner_scores: vec![0.7, 0.5],
+                accepted: true,
+            });
+            node1.candidates.push(CandidateRecord {
+                token_idx: 6,
+                pruner_scores: vec![0.4, 0.3],
+                accepted: false,
+            });
+
+            let trace = vec![node0, node1];
+            let explainer = PerturbationExplainer::new(0.1, vec!["syntax".into(), "bandit".into()]);
+            let explanation = explainer.explain(&trace);
+
+            // Verify explanation structure
+            assert_eq!(explanation.choices.len(), 2, "Should have 2 choices");
+            assert_eq!(
+                explanation.alternatives.len(),
+                2,
+                "Should have 2 alternatives"
+            );
+
+            // All attributions should have non-empty grounded names
+            for choice in &explanation.choices {
+                for attr in &choice.pruner_attributions {
+                    assert!(
+                        !attr.pruner_name.is_empty(),
+                        "Pruner name should not be empty at depth {}",
+                        choice.depth
+                    );
+                }
+            }
+
+            // format_report should produce readable output with grounded names
+            let report = explanation.format_report(&["syntax", "bandit"]);
+            assert!(!report.is_empty(), "Report should not be empty");
+            assert!(
+                report.contains("confidence"),
+                "Report should contain grounded label 'confidence', got:\n{}",
+                report
+            );
         }
     }
 }

@@ -636,7 +636,7 @@ pub mod decision_explainer;
 #[cfg(feature = "decision_explain")]
 pub use decision_explainer::{
     CandidateRecord, DecisionExplainer, DecisionExplanation, PerturbationExplainer,
-    PrunerAttribution, RejectedAlternative, TokenChoice, TraceNode,
+    PrunerAttribution, RejectedAlternative, SensitivityCache, TokenChoice, TraceNode, trace_hash,
 };
 
 #[cfg(feature = "reward_mem")]

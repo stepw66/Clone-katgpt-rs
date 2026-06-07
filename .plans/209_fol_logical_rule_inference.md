@@ -109,7 +109,7 @@ Prompt Input
   - Test: deduplication merges similar paths
   - Test: min_score threshold filters low-quality rules
 
-- [ ] **T2.6:** Create `examples/rule_extraction_demo.rs`
+- [x] **T2.6:** Create `examples/rule_extraction_demo.rs`
   - Shows DDTree paths → extracted rules in human-readable format
 
 ### Phase 3: T3 — Reward-Weighted Branch Memorization
@@ -163,7 +163,7 @@ Prompt Input
     ```
   - Alternative rejection explanation with score comparison
 
-- [ ] **T4.3:** Example showing trace output
+- [x] **T4.3:** Example showing trace output
   - `decision_trace_demo.rs` with sample DDTree → trace output
 
 - [x] **T4.4:** Make opt-in (not default-on)
@@ -208,10 +208,10 @@ Prompt Input
 
 ### Phase 6: T6 — Documentation + Examples
 
-- [ ] **T6.1:** Create `examples/fol_constraint_demo.rs`
+- [x] **T6.1:** Create `examples/fol_constraint_demo.rs`
   - Prompt → FOL constraint extraction → FolPruner → DDTree search
 
-- [ ] **T6.2:** Create `examples/rule_extraction_demo.rs`
+- [x] **T6.2:** Create `examples/rule_extraction_demo.rs`
   - DDTree paths → extracted rules with human-readable output
 
 - [ ] **T6.3:** Update README with FOL-LNN section
@@ -219,7 +219,7 @@ Prompt Input
   - Feature gate documentation
   - Performance characteristics
 
-- [ ] **T6.4:** Create benchmark report `.benchmarks/209_fol_lnn_goat.md`
+- [x] **T6.4:** Create benchmark report `.benchmarks/209_fol_lnn_goat.md`
   - G1: Constraint extraction accuracy ≥80%
   - G2: Rule support threshold ≥30%
   - G3: Reward accuracy gain ≥10%

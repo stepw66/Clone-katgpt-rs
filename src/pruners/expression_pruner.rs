@@ -9,6 +9,15 @@ use crate::speculative::types::ScreeningPruner;
 
 use super::symbolic_expression::SymbolicExpression;
 
+#[cfg(feature = "symbolic_distill")]
+use super::absorb_compress::AbsorbCompress;
+
+#[cfg(feature = "symbolic_distill")]
+use super::review_metrics::ReviewMetrics;
+
+#[cfg(feature = "concept_grounding")]
+use super::concept_grounding::{ConceptGrounding, PrunerState, TemplateGrounding};
+
 // ── Feature Extractor ──────────────────────────────────────────
 
 /// Trait for extracting feature vectors from screening context.
@@ -105,6 +114,81 @@ impl<P: ScreeningPruner> ExpressionPruner<P> {
             expression,
             feature_extractor: extractor,
         }
+    }
+
+    /// Access the inner pruner.
+    pub fn inner(&self) -> &P {
+        &self.inner
+    }
+
+    /// Access the inner pruner mutably.
+    pub fn inner_mut(&mut self) -> &mut P {
+        &mut self.inner
+    }
+
+    /// Ground expression terms in human-readable concept names.
+    ///
+    /// Uses `TemplateGrounding` to map `feature_idx` → semantic concept name,
+    /// producing output like `"0.70 × sigmoid(syntax_validity)"` instead of
+    /// `"0.70 × σ(x₂)"`.
+    ///
+    /// Falls back to raw feature names when grounding is unavailable.
+    #[cfg(feature = "concept_grounding")]
+    pub fn grounded_expression_string(&self) -> String {
+        let raw_names = self.feature_extractor.feature_names();
+        let grounding = TemplateGrounding::new();
+
+        // Build grounded names by consulting TemplateGrounding for each feature
+        let grounded_names: Vec<String> = raw_names
+            .iter()
+            .enumerate()
+            .map(|(idx, &raw)| {
+                let state = PrunerState {
+                    depth: idx,
+                    token_idx: 0,
+                    parent_token: Vec::new(),
+                    pruner_scores: vec![(raw.to_string(), 0.5)],
+                    accepted: true,
+                };
+                let mappings = grounding.ground(&state);
+                mappings
+                    .iter()
+                    .find(|m| m.variable == raw)
+                    .map(|m| m.semantic.clone())
+                    .unwrap_or_else(|| raw.to_string())
+            })
+            .collect();
+
+        // Convert to &str slice for SymbolicExpression::to_string
+        let name_refs: Vec<&str> = grounded_names.iter().map(|s| s.as_str()).collect();
+        self.expression.to_string(&name_refs)
+    }
+}
+
+// ── AbsorbCompress Delegation ──────────────────────────────────
+
+/// Delegate `AbsorbCompress` to inner pruner so expression pruners can
+/// participate in the self-improving absorb-compress cycle (Plan 210, F1.7).
+#[cfg(feature = "symbolic_distill")]
+impl<P: ScreeningPruner + AbsorbCompress> AbsorbCompress for ExpressionPruner<P> {
+    fn absorb(&mut self, arm: usize, reward: f32) {
+        self.inner.absorb(arm, reward);
+    }
+
+    fn compress(&mut self) -> Vec<usize> {
+        self.inner.compress()
+    }
+
+    fn compressed_arms(&self) -> &[usize] {
+        self.inner.compressed_arms()
+    }
+
+    fn should_compress(&self) -> bool {
+        self.inner.should_compress()
+    }
+
+    fn should_compress_gated(&self, metrics: Option<&ReviewMetrics>) -> bool {
+        self.inner.should_compress_gated(metrics)
     }
 }
 
@@ -303,5 +387,248 @@ mod tests {
 
     fn sigmoid(x: f32) -> f32 {
         1.0 / (1.0 + (-x).exp())
+    }
+
+    // ── AbsorbCompress Delegation Tests ──────────────────────────
+
+    #[cfg(feature = "symbolic_distill")]
+    mod absorb_compress_tests {
+        use super::super::super::absorb_compress::{
+            AbsorbCompress, AbsorbCompressLayer, CompressConfig,
+        };
+        use super::*;
+
+        #[test]
+        fn test_absorb_compress_delegates_to_inner() {
+            let inner_layer = AbsorbCompressLayer::new(
+                FixedPruner(0.5),
+                4,
+                CompressConfig {
+                    min_visits: 2,
+                    q_threshold: 0.3,
+                    promote_count: 1,
+                    check_interval: 3, // should_compress checks total_absorbed % check_interval
+                    min_benefit_ratio: 0.0,
+                },
+            );
+
+            let expr = SymbolicExpression {
+                terms: vec![Term {
+                    basis: BasisFn::Identity,
+                    coefficient: 1.0,
+                    feature_idx: 0,
+                }],
+                bias: 0.0,
+            };
+
+            let mut pruner = ExpressionPruner::new(inner_layer, expr);
+
+            // Absorb low rewards for arm 0
+            pruner.absorb(0, 0.01);
+            assert!(
+                !pruner.should_compress(),
+                "total_absorbed=1, not multiple of 3"
+            );
+            pruner.absorb(0, 0.02);
+            assert!(
+                !pruner.should_compress(),
+                "total_absorbed=2, not multiple of 3"
+            );
+            pruner.absorb(1, 0.5); // total_absorbed=3 → triggers
+
+            // should_compress delegates to inner layer
+            assert!(pruner.should_compress(), "total_absorbed=3, multiple of 3");
+
+            // Compress should promote arm 0 (Q ≈ 0.015 < threshold 0.3)
+            let promoted = pruner.compress();
+            assert_eq!(promoted, vec![0], "arm 0 should be promoted");
+
+            // compressed_arms delegates correctly
+            assert_eq!(pruner.compressed_arms(), &[0]);
+        }
+
+        #[test]
+        fn test_absorb_compress_gated_delegates() {
+            let inner_layer = AbsorbCompressLayer::new(
+                FixedPruner(0.5),
+                2,
+                CompressConfig {
+                    min_visits: 1,
+                    q_threshold: 0.5,
+                    promote_count: 1,
+                    check_interval: 1,
+                    min_benefit_ratio: 0.6,
+                },
+            );
+
+            let expr = SymbolicExpression {
+                terms: Vec::new(),
+                bias: 0.0,
+            };
+
+            let mut pruner = ExpressionPruner::new(inner_layer, expr);
+
+            // Must absorb first so should_compress returns true
+            pruner.absorb(0, 0.1);
+
+            // No metrics → should fall through (inner returns true)
+            assert!(
+                pruner.should_compress_gated(None),
+                "no metrics should allow compression"
+            );
+        }
+    }
+
+    // ── Concept Grounding Integration Tests ────────────────────────
+
+    #[cfg(feature = "concept_grounding")]
+    mod concept_grounding_tests {
+        use super::*;
+
+        #[test]
+        fn grounded_expression_uses_feature_names() {
+            let expr = SymbolicExpression {
+                terms: vec![Term {
+                    basis: BasisFn::Identity,
+                    coefficient: 0.7,
+                    feature_idx: 0, // "depth"
+                }],
+                bias: 0.1,
+            };
+            let pruner = ExpressionPruner::new(FixedPruner(0.5), expr);
+            let grounded = pruner.grounded_expression_string();
+            // Should contain a readable representation — either grounded or raw name
+            assert!(
+                !grounded.is_empty(),
+                "Grounded expression should not be empty"
+            );
+            // The raw name "depth" may or may not be grounded by TemplateGrounding
+            // (depends on whether there's a mapping for it)
+            assert!(
+                grounded.contains("depth") || grounded.contains("top-level"),
+                "Grounded expression should reference the feature, got '{}'",
+                grounded
+            );
+        }
+
+        #[test]
+        fn grounded_expression_fallback_on_unknown_feature() {
+            // Custom extractor with unknown feature names
+            struct UnknownFeatureExtractor;
+            impl FeatureExtractor for UnknownFeatureExtractor {
+                fn extract(&self, _: usize, _: usize, _: &[usize], _: &[f32]) -> Vec<f32> {
+                    vec![1.0]
+                }
+                fn feature_names(&self) -> Vec<&str> {
+                    vec!["totally_unknown_feature"]
+                }
+            }
+
+            let expr = SymbolicExpression {
+                terms: vec![Term {
+                    basis: BasisFn::Sigmoid,
+                    coefficient: 1.0,
+                    feature_idx: 0,
+                }],
+                bias: 0.0,
+            };
+            let pruner = ExpressionPruner::with_extractor(
+                FixedPruner(0.5),
+                expr,
+                Box::new(UnknownFeatureExtractor),
+            );
+            let grounded = pruner.grounded_expression_string();
+            // Should fall back to raw name since TemplateGrounding won't have it
+            assert!(
+                grounded.contains("totally_unknown_feature"),
+                "Should fall back to raw feature name, got '{}'",
+                grounded
+            );
+        }
+
+        #[test]
+        fn grounded_expression_matches_raw_for_no_templates() {
+            let expr = SymbolicExpression {
+                terms: vec![Term {
+                    basis: BasisFn::Identity,
+                    coefficient: 1.0,
+                    feature_idx: 3, // "mean_score"
+                }],
+                bias: 0.0,
+            };
+            let pruner = ExpressionPruner::new(FixedPruner(0.0), expr);
+            let grounded = pruner.grounded_expression_string();
+            let raw = pruner.expression.to_string(&[
+                "depth",
+                "token",
+                "parent_count",
+                "mean_score",
+                "max_score",
+            ]);
+            // Both should produce non-empty output
+            assert!(!grounded.is_empty());
+            assert!(!raw.is_empty());
+        }
+
+        /// Cross-feature integration: ExpressionPruner with domain-specific feature names
+        /// grounded via TemplateGrounding.
+        #[test]
+        fn grounded_expression_with_custom_feature_extractor() {
+            // Domain-specific feature extractor with semantic names
+            struct DomainExtractor;
+            impl FeatureExtractor for DomainExtractor {
+                fn extract(
+                    &self,
+                    depth: usize,
+                    token: usize,
+                    parents: &[usize],
+                    scores: &[f32],
+                ) -> Vec<f32> {
+                    vec![
+                        depth as f32,
+                        token as f32,
+                        parents.len() as f32,
+                        scores.first().copied().unwrap_or(0.0),
+                    ]
+                }
+                fn feature_names(&self) -> Vec<&str> {
+                    vec!["depth_norm", "score_mean", "syntax_validity", "bandit_q"]
+                }
+            }
+
+            let expr = SymbolicExpression {
+                terms: vec![
+                    Term {
+                        basis: BasisFn::Identity,
+                        coefficient: 0.5,
+                        feature_idx: 0,
+                    },
+                    Term {
+                        basis: BasisFn::Sigmoid,
+                        coefficient: 0.3,
+                        feature_idx: 2,
+                    },
+                ],
+                bias: 0.1,
+            };
+            let pruner =
+                ExpressionPruner::with_extractor(FixedPruner(0.5), expr, Box::new(DomainExtractor));
+            let grounded = pruner.grounded_expression_string();
+
+            // Should produce non-empty grounded representation
+            assert!(
+                !grounded.is_empty(),
+                "Grounded expression should not be empty"
+            );
+            // Should reference domain-specific feature names or their grounded forms
+            assert!(
+                grounded.contains("depth_norm")
+                    || grounded.contains("score_mean")
+                    || grounded.contains("syntax_validity")
+                    || grounded.contains("bandit_q"),
+                "Grounded output should contain feature names, got '{}'",
+                grounded
+            );
+        }
     }
 }

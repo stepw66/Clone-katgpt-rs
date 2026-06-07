@@ -78,7 +78,7 @@ DDTree Exploration (existing)
   - Wire into existing `AbsorbCompressLayer::try_compress()` pattern
   - Emit `CalibrationStep` on each absorption event
 
-- [ ] **F4.6:** Wire `RegressionSuite` verification
+- [x] **F4.6:** Wire `RegressionSuite` verification
   - After calibration absorption, run `RegressionSuite::run()` against golden traces
   - GOAT gate: calibration pass iff regression suite all-pass
   - Integration test: calibrate → absorb → verify → assert no regression
@@ -137,8 +137,8 @@ DDTree Exploration (existing)
   - `SymbolicExpression::from_bytes()` — load from WASM/episode DB
   - blake3 hash for integrity verification during hot-swap
 
-- [ ] **F1.7:** Wire into AbsorbCompress self-improving cycle
-  - After fitting, expression becomes a new ScreeningPruner arm
+- [x] **F1.7:** Wire into AbsorbCompress self-improving cycle
+  - ExpressionPruner<P> now implements AbsorbCompress trait via delegation to inner
   - AbsorbCompress tracks expression pruner's reward
   - If reward ≥ threshold for N episodes, absorb expression as default pruner
   - If reward drops, demote back to bandit arm
@@ -161,7 +161,7 @@ DDTree Exploration (existing)
   - Evaluation: target <50ns per `relevance()` call
   - Compare: ExpressionPruner vs inner pruner overhead
 
-- [ ] **F1.11:** Create `examples/symbolic_distill_demo.rs`
+- [x] **F1.11:** Create `examples/symbolic_distill_demo.rs`
   - Demonstrates: DDTree exploration → trace recording → expression fitting → ExpressionPruner
   - Shows before/after relevance scores
   - Prints human-readable expression
@@ -203,12 +203,12 @@ DDTree Exploration (existing)
   - Fill templates from `PrunerState` + `ConceptMapping`
   - No LLM — pure string interpolation
 
-- [ ] **F2.6:** Wire `PolicyExplanation` into `TrialLog`
+- [x] **F2.6:** Wire `PolicyExplanation` into `TrialLog`
   - `TrialLog::log_explanation(explanation: &PolicyExplanation)` — JSONL append
   - blake3 hash of explanation for audit integrity
   - Opt-in: only logged when `concept_grounding` feature enabled
 
-- [ ] **F2.7:** Integrate with `ExpressionPruner` from F1
+- [x] **F2.7:** Integrate with `ExpressionPruner` from F1
   - If expression pruner is active, ground expression terms in concept mappings
   - Example: "Term 0: 0.7 × sigmoid(x₂)" → "0.7 × sigmoid(syntax_validity)"
   - Requires feature names from `FeatureExtractor` trait (F1.5)
@@ -268,18 +268,18 @@ DDTree Exploration (existing)
   - "  Sensitivity: If syntax pruner had scored 'enum' 0.15 higher, 'enum' would be selected"
   - "  → Primary driver: bandit Q-value (Δ=0.17 > 0.13)"
 
-- [ ] **F3.6:** Integrate with `ConceptGrounding` from F2
+- [x] **F3.6:** Integrate with `ConceptGrounding` from F2
   - Attribution explanations use concept-grounded pruner names
   - "Syntax pruner" → "syntax validity checker" if grounding available
   - Graceful fallback: use raw pruner names if grounding disabled
 
-- [ ] **F3.7:** Implement caching for sensitivity results
-  - `SensitivityCache { cache: papaya::HashMap<blake3(trace), Vec<f32>> }` — lock-free
+- [x] **F3.7:** Implement caching for sensitivity results
+  - `SensitivityCache { cache: Arc<RwLock<HashMap<[u8;32], Vec<f32>>>> }` — lock-free when papaya available
   - Cache key: blake3 hash of (TraceNode serialized)
   - Invalidate on HotSwapPruner reload (version bump)
   - Avoids recomputation across episodes with similar traces
 
-- [ ] **F3.8:** Wire `DecisionExplanation` into `TrialLog`
+- [x] **F3.8:** Wire `DecisionExplanation` into `TrialLog`
   - `TrialLog::log_decision(explanation: &DecisionExplanation)` — JSONL append
   - Optional: only logged when `decision_explain` feature enabled
   - Integration with `RegressionSuite`: explanations from golden episodes serve as expected behavior docs
@@ -316,7 +316,7 @@ DDTree Exploration (existing)
   - `#[cfg(feature = "decision_explain")] pub mod decision_explainer;`
   - `#[cfg(feature = "reward_calibrator")] pub mod reward_calibrator;`
 
-- [ ] **I3:** Create `examples/insight_demo.rs`
+- [x] **I3:** Create `examples/insight_demo.rs`
   - Demonstrates full explore→distill→explain pipeline:
     1. DDTree exploration with trace recording
     2. F4: Reward-gated calibration of pruner parameters
@@ -336,7 +336,7 @@ DDTree Exploration (existing)
     - F3: attribution correctness ≥85% vs manual analysis
     - F4: calibration convergence ≤500 episodes
 
-- [ ] **I5:** Cross-feature integration tests
+- [x] **I5:** Cross-feature integration tests
   - Test: F4 calibration + F1 expression fitting → calibrated expression pruner
   - Test: F1 expression + F2 grounding → grounded expression explanation
   - Test: F3 explanation + F2 grounding → concept-grounded decision trace
@@ -352,7 +352,7 @@ DDTree Exploration (existing)
 
 ### Phase 6: Benchmarks & GOAT Gate Promotion
 
-- [ ] **B1:** Create `.benchmarks/insight_explain_bench.md`
+- [x] **B1:** Create `.benchmarks/insight_explain_bench.md`
   - F4 calibration overhead (per-relevance call)
   - F1 fitting time (per-1000 traces)
   - F1 evaluation overhead (per-relevance call)

@@ -31,6 +31,9 @@ use blake3::Hasher;
 
 use crate::speculative::types::ScreeningPruner;
 
+#[cfg(feature = "bandit")]
+use super::regression::{GoldenTrace, RegressionSuite, ReplayReward};
+
 // ── Sigmoid ──────────────────────────────────────────────────────
 
 /// Sigmoid activation: `1 / (1 + exp(-x))`. Bounds output to (0, 1).
@@ -204,6 +207,34 @@ impl<P: ScreeningPruner> RewardGatedCalibrator<P> {
     /// Access the calibration audit log.
     pub fn calibration_log(&self) -> &[CalibrationStep] {
         &self.calibration_log
+    }
+
+    /// Roll back the most recent calibration step.
+    ///
+    /// Removes the last [`CalibrationStep`] from the audit log.
+    /// Note: parameter stats (`param_stats`) are **not** restored — a full
+    /// rollback would require storing pre-calibration snapshots. This method
+    /// only removes the audit trail entry for bookkeeping.
+    pub fn rollback_last(&mut self) -> Option<CalibrationStep> {
+        self.calibration_log.pop()
+    }
+
+    /// Verify calibration absorption against a regression suite (Plan 210 F4.6).
+    ///
+    /// Replays all golden traces through fresh pruners created by `pruner_factory`.
+    /// If any trace fails, the last calibration step is rolled back.
+    /// Returns `true` if all traces pass.
+    #[cfg(feature = "bandit")]
+    pub fn verify_regression<F, R>(&mut self, suite: &RegressionSuite, pruner_factory: F) -> bool
+    where
+        F: Fn(&GoldenTrace) -> R,
+        R: ReplayReward,
+    {
+        let result = suite.run(pruner_factory);
+        if !result.all_passed() {
+            self.rollback_last();
+        }
+        result.all_passed()
     }
 }
 
@@ -440,5 +471,91 @@ mod tests {
         let key = make_key(0, 0, 0);
         let result = cal.bandit_update(key, 0.5);
         assert!(result.is_none(), "no stats recorded → no update");
+    }
+
+    #[test]
+    fn test_rollback_last_removes_step() {
+        let mut cal = RewardGatedCalibrator::new(AllowAll);
+        let key = make_key(0, 0, 0);
+
+        cal.record_reward(key.clone(), 0.5);
+        cal.bandit_update(key.clone(), 0.8).unwrap();
+        cal.bandit_update(key.clone(), 0.9).unwrap();
+        assert_eq!(cal.calibration_log().len(), 2);
+
+        let step = cal.rollback_last();
+        assert!(step.is_some());
+        assert_eq!(cal.calibration_log().len(), 1);
+
+        let step = cal.rollback_last();
+        assert!(step.is_some());
+        assert_eq!(cal.calibration_log().len(), 0);
+
+        let step = cal.rollback_last();
+        assert!(step.is_none(), "empty log should return None");
+    }
+
+    #[cfg(feature = "bandit")]
+    mod bandit_tests {
+        use super::*;
+        use crate::pruners::regression::{GoldenTrace, RegressionSuite, ReplayReward};
+
+        /// Replay that always returns the expected reward — all traces pass.
+        struct PerfectReplay;
+
+        impl ReplayReward for PerfectReplay {
+            fn replay_reward(&mut self, trace: &GoldenTrace) -> f32 {
+                trace.expected_reward
+            }
+        }
+
+        /// Replay that always returns zero — all traces fail.
+        struct FailingReplay;
+
+        impl ReplayReward for FailingReplay {
+            fn replay_reward(&mut self, _trace: &GoldenTrace) -> f32 {
+                0.0
+            }
+        }
+
+        fn sample_trace(label: &str, reward: f32) -> GoldenTrace {
+            GoldenTrace {
+                label: label.to_string(),
+                actions: vec![0],
+                expected_reward: reward,
+                expected_survival: reward > 0.0,
+            }
+        }
+
+        #[test]
+        fn test_verify_regression_all_pass() {
+            let mut cal = RewardGatedCalibrator::new(AllowAll);
+            let key = make_key(0, 0, 0);
+            cal.record_reward(key.clone(), 0.5);
+            cal.bandit_update(key, 0.8).unwrap();
+            assert_eq!(cal.calibration_log().len(), 1);
+
+            let suite =
+                RegressionSuite::new(vec![sample_trace("t1", 0.8), sample_trace("t2", 0.9)], 0.1);
+
+            let passed = cal.verify_regression(&suite, |_| PerfectReplay);
+            assert!(passed, "all traces should pass");
+            assert_eq!(cal.calibration_log().len(), 1, "no rollback on pass");
+        }
+
+        #[test]
+        fn test_verify_regression_rollback_on_failure() {
+            let mut cal = RewardGatedCalibrator::new(AllowAll);
+            let key = make_key(0, 0, 0);
+            cal.record_reward(key.clone(), 0.5);
+            cal.bandit_update(key, 0.8).unwrap();
+            assert_eq!(cal.calibration_log().len(), 1);
+
+            let suite = RegressionSuite::new(vec![sample_trace("fail", 1.0)], 0.1);
+
+            let passed = cal.verify_regression(&suite, |_| FailingReplay);
+            assert!(!passed, "trace should fail");
+            assert_eq!(cal.calibration_log().len(), 0, "should rollback on failure");
+        }
     }
 }

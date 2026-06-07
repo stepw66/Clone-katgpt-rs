@@ -23,6 +23,12 @@ use serde::{Deserialize, Serialize};
 
 use super::review_metrics::{ReviewMetrics, ReviewSummary};
 
+#[cfg(feature = "concept_grounding")]
+use super::concept_grounding::PolicyExplanation;
+
+#[cfg(feature = "decision_explain")]
+use super::decision_explainer::DecisionExplanation;
+
 // ── AnchorTrace (StepCodeReasoner Plan 054) ─────────────────────
 
 /// Per-anchor verification trace for stepwise reward analysis.
@@ -256,6 +262,47 @@ impl TrialLog {
             avg_reward,
             avg_regret,
         }
+    }
+
+    // ── Plan 210 Explanation Logging ─────────────────────────────────
+
+    /// Append a policy explanation as a JSONL line (Plan 210 F2.6).
+    ///
+    /// Writes `{"type":"policy_explanation","hash":"<blake3>","data":{...}}`
+    /// where `data` is the JSON from [`PolicyExplanation::to_json`].
+    /// The blake3 hash covers the raw JSON for audit integrity.
+    #[cfg(feature = "concept_grounding")]
+    pub fn log_explanation(&mut self, explanation: &PolicyExplanation) -> Result<()> {
+        let data = explanation.to_json();
+        let hash = blake3::hash(data.as_bytes()).to_hex();
+        let line =
+            format!("{{\"type\":\"policy_explanation\",\"hash\":\"{hash}\",\"data\":{data}}}");
+        self.writer.write_all(line.as_bytes())?;
+        self.writer.write_all(b"\n")?;
+        self.count += 1;
+        Ok(())
+    }
+
+    /// Append a decision explanation as a JSONL line (Plan 210 F3.8).
+    ///
+    /// Writes `{"type":"decision_explanation","hash":"<blake3>","num_choices":N,"num_alternatives":M,"summary":"..."}`.
+    /// The blake3 hash covers the summary string for audit integrity.
+    #[cfg(feature = "decision_explain")]
+    pub fn log_decision(&mut self, explanation: &DecisionExplanation) -> Result<()> {
+        let hash = blake3::hash(explanation.summary.as_bytes()).to_hex();
+        let line = serde_json::json!({
+            "type": "decision_explanation",
+            "hash": hash.as_str(),
+            "num_choices": explanation.choices.len(),
+            "num_alternatives": explanation.alternatives.len(),
+            "summary": explanation.summary,
+        });
+        let line = serde_json::to_string(&line)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        self.writer.write_all(line.as_bytes())?;
+        self.writer.write_all(b"\n")?;
+        self.count += 1;
+        Ok(())
     }
 }
 
