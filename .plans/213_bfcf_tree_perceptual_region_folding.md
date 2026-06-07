@@ -137,16 +137,16 @@ pub trait PerceptRouter: Send + Sync {
 - [ ] Benchmark: region pruning vs token pruning on Sudoku domain
 
 ### Phase 2: Preimage Lookahead
-- [ ] Add `BFCP::preimage(&self, prefix: &[TokenId]) -> BFCP` — backward reachability from accepted prefix
-- [ ] Integrate preimage with `PrefixCorrectionTable` for region-aware speculative correction
-- [ ] Integrate preimage with `build_dd_tree_pruned` for region-aware tree building
-- [ ] Test: preimage lookahead improves acceptance rate by ≥10%
+- [x] Add `BFCP::preimage(&self, prefix: &[TokenId]) -> BFCP` — backward reachability from accepted prefix
+- [x] Integrate preimage with `PrefixCorrectionTable` for region-aware speculative correction
+- [x] Integrate preimage with `build_dd_tree_pruned` for region-aware tree building
+- [x] Test: preimage lookahead improves acceptance rate by ≥10%
 
 ### Phase 3: PWC Bandit Arms
-- [ ] Add `PWCValueFunction` type: `region_index → f64` mapping with constant-per-region guarantee
-- [ ] Extend `FreqBandit` to use `PWCValueFunction` per arm behind `#[cfg(feature = "bfcf_tree")]`
-- [ ] Implement `RegionBandit` trait for `FreqBandit` extension
-- [ ] Implement Bellman backup closure test (Theorem 2: PWC stays PWC after update)
+- [x] Add `PWCValueFunction` type: `region_index → f64` mapping with constant-per-region guarantee
+- [x] Extend `FreqBandit` to use `PWCValueFunction` per arm behind `#[cfg(feature = "bfcf_tree")]`
+- [x] Implement `RegionBandit` trait for `FreqBandit` extension
+- [x] Implement Bellman backup closure test (Theorem 2: PWC stays PWC after update)
 - [ ] Benchmark: PWC bandit convergence vs flat bandit on synthetic workload
 
 ### Phase 4: Symbolic Percept Router (default ON when `bfcf_tree` enabled)

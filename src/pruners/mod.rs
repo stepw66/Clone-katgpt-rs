@@ -753,3 +753,38 @@ pub mod constraint_miner;
 pub use constraint_miner::{
     ConstraintMiner, Pattern, SequenceConstraint, extract_frequent_sequences, mine_and_insert,
 };
+
+// ── BFCF Tree — Perceptual Region Folding (Plan 213) ──────────
+//
+// Replaces O(vocab_size) token-by-token screening with O(regions)
+// region-level pruning. ScreeningPruner threshold crossings partition
+// logit space into convex BFCP regions.
+//
+// Feature gate: `bfcf_tree`
+
+#[cfg(feature = "bfcf_tree")]
+pub mod bfcf_types;
+
+#[cfg(feature = "bfcf_tree")]
+pub use bfcf_types::{BFCP, BorelRegion, HalfSpace, PWCValueFunction, RegionLabel};
+
+#[cfg(feature = "bfcf_tree")]
+pub mod bfcp_pruner;
+
+#[cfg(feature = "bfcf_tree")]
+pub use bfcp_pruner::BFCPPruner;
+
+#[cfg(feature = "bfcf_tree")]
+pub mod bfcp_preimage;
+
+#[cfg(feature = "bfcf_tree")]
+pub use bfcp_preimage::{compute_preimage, refine_partition};
+
+#[cfg(feature = "bfcf_tree")]
+pub mod pwc_bandit;
+
+#[cfg(feature = "bfcf_tree")]
+pub use pwc_bandit::RegionBandit;
+
+#[cfg(feature = "bfcf_tree")]
+pub use bfcf_types::BfcpPartition;
