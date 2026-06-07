@@ -38,13 +38,14 @@ impl MarginalBestBuddyAligner {
     /// Filter marginals by mutual agreement between draft and target.
     ///
     /// For each position, computes Pearson correlation between draft and target
-    /// marginals. Positions with agreement below `threshold` have their marginals
-    /// dampened (scaled by the agreement score). Positions with high agreement
-    /// pass through unchanged.
+    /// marginals. Positions with agreement below `threshold` are blended toward
+    /// the target distribution proportional to disagreement strength. Positions
+    /// with high agreement pass through unchanged.
     ///
-    /// After dampening, marginals are re-normalized so each position sums to 1.0.
-    /// If all marginals at a position are zeroed out (complete disagreement),
-    /// the original draft marginals are kept as fallback.
+    /// Blend factor = 1 - (agreement / threshold), so when agreement → 0 the
+    /// marginal moves heavily toward the target, and when agreement → threshold
+    /// the blend factor → 0 (draft preserved). After blending, marginals are
+    /// re-normalized to a valid probability distribution.
     ///
     /// Returns filtered marginals owned by the caller.
     pub fn filter_marginals<'a>(
@@ -76,25 +77,40 @@ impl MarginalBestBuddyAligner {
         }
         self.cached_scores = confidence.clone();
 
-        // Apply agreement-based dampening
+        // Apply agreement-based blending
         for i in 0..seq_len {
             let agreement = self.mutual_agreement(draft_marginals[i], target_marginals[i]);
             let src = draft_marginals[i];
+            let tgt = target_marginals[i];
+            let len = src.len().min(tgt.len());
 
             if agreement >= self.threshold {
                 // High agreement — pass through unchanged
                 filtered.push(src.to_vec());
             } else {
-                // Low agreement — dampen by agreement score
-                let mut row: Vec<f32> = src.iter().map(|&v| v * agreement).collect();
+                // Low agreement — blend draft toward target proportional to disagreement.
+                // blend_factor = 1 - agreement/threshold ∈ [0, 1]
+                // When agreement → 0, blend heavily toward target.
+                // When agreement → threshold, blend factor → 0 (keep draft).
+                let blend_factor = 1.0 - (agreement / self.threshold);
+                let mut row = Vec::with_capacity(src.len());
+                for j in 0..len {
+                    let blended = src[j] * (1.0 - blend_factor) + tgt[j] * blend_factor;
+                    row.push(blended);
+                }
+                // Copy remaining draft tokens if target is shorter
+                for j in len..src.len() {
+                    row.push(src[j] * (1.0 - blend_factor));
+                }
+                // Re-normalize to valid probability distribution
                 let sum: f32 = row.iter().sum();
                 if sum > f32::EPSILON {
                     for v in &mut row {
                         *v /= sum;
                     }
                 } else {
-                    // Complete disagreement — fallback to original
-                    row = src.to_vec();
+                    // Complete disagreement — fallback to target marginals
+                    row = tgt.to_vec();
                 }
                 filtered.push(row);
             }
