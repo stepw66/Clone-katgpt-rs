@@ -102,23 +102,23 @@ graph TD
 - [ ] Integration point: `tf_loop.rs` — add early exit path alongside existing PPoT resample
 
 ### T5: T2M Option Stripper (Post-Verify)
-- [ ] Add `OptionStripper` wrapper around `ScreeningPruner`
+- [x] Add `OptionStripper` wrapper around `ScreeningPruner`
   ```rust
   pub struct OptionStripper<S: ScreeningPruner> {
       inner: S,
       options_stripped: bool,
   }
   ```
-- [ ] Two-pass verification:
+- [x] Two-pass verification:
   1. First pass: strip options from prompt, run `inner.relevance()` → pure reasoning score
   2. Second pass: re-add options, match answer → option-aligned score
   3. Final: `min(pure_score, matched_score)` — prevents option-matching shortcut
-- [ ] Only active when `ScreeningPruner` is configured
+- [x] Only active when `ScreeningPruner` is configured
 
 ### T6: Feature Gate + Freeze/Thaw
-- [ ] Feature gate: `collapse_aware_thinking` in `Cargo.toml`
+- [x] Feature gate: `collapse_aware_thinking` in `Cargo.toml`
   - Depends on: `selectivity_router`, `thinking_cot`, `bandit`
-- [ ] `CollapseDetectorFrozen` struct (16 bytes, `repr(C)`) for freeze/thaw persistence
+- [x] `CollapseDetectorFrozen` struct (16 bytes, `repr(C)`) for freeze/thaw persistence
   ```rust
   #[derive(Clone, Copy, Debug)]
   #[repr(C)]
@@ -129,7 +129,7 @@ graph TD
       pub gamma: f32,
   }
   ```
-- [ ] Serialize/deserialize via existing freeze infrastructure
+- [x] Serialize/deserialize via existing freeze infrastructure
 
 ### T7: GOAT Tests
 - [ ] Test: CollapseDetector triggers on repetitive "wait" pattern

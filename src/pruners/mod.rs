@@ -694,3 +694,26 @@ pub use concept_grounding::{
     ConceptGrounding, ConceptMapping, GroundingSource, PolicyExplanation, PrunerState,
     TemplateGrounding,
 };
+
+// ── Collapse-Aware Adaptive Thinking (Plan 212) ─────────────────────
+//
+// Three-layer adaptive thinking: Pre-Decide (SelectivityRouter) →
+// Mid-Think CollapseDetector (new) → Post-Verify T2M OptionStripper (new).
+// Monitors token stream during reasoning and triggers early exit when
+// reasoning collapse is detected (hesitation patterns, repetitive tokens).
+//
+// Feature gate: `collapse_aware_thinking` (convenience parent)
+
+#[cfg(feature = "collapse_aware_thinking")]
+pub mod collapse_detector;
+
+#[cfg(feature = "collapse_aware_thinking")]
+pub use collapse_detector::{CollapseDetectorFrozen, S2FCollapseDetector, efficiency_reward};
+
+// ── Collapse-Aware Adaptive Thinking — T2M Option Stripper (Plan 212 T5/T6) ──
+
+#[cfg(feature = "collapse_aware_thinking")]
+pub mod option_stripper;
+
+#[cfg(feature = "collapse_aware_thinking")]
+pub use option_stripper::OptionStripper;
