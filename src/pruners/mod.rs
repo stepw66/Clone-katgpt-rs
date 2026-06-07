@@ -717,3 +717,39 @@ pub mod option_stripper;
 
 #[cfg(feature = "collapse_aware_thinking")]
 pub use option_stripper::OptionStripper;
+
+// ── Three-Mode Neuro-Symbolic Bandit Router (Plan 211) ─────────────
+//
+// Dynamic mode selection between L4R, R4L, and LR neuro-symbolic modes
+// via 6-arm UCB1 bandit with sigmoid-gated mixing weights.
+//
+// Feature gate: `three_mode_router`
+
+#[cfg(feature = "three_mode_router")]
+pub mod three_mode_bandit;
+
+#[cfg(feature = "three_mode_router")]
+pub use three_mode_bandit::{
+    BanditArm, ModeFeatures, NeuroSymbolicMode, RollingWindow, ThreeModeBandit,
+    compute_mode_features, grounding_quality,
+};
+
+// ── Safe Exploration Budget (Plan 211 F3) ────────────────────
+
+#[cfg(feature = "safe_exploration_budget")]
+pub mod exploration_budget;
+
+#[cfg(feature = "safe_exploration_budget")]
+pub use exploration_budget::{
+    ExplorationBudget, ExplorationBudgetConfig, VerificationResult, VerificationTier, check_budget,
+};
+
+// ── Auto Constraint Synthesis (Plan 211 F2) ────────────────────
+
+#[cfg(feature = "auto_constraint_synthesis")]
+pub mod constraint_miner;
+
+#[cfg(feature = "auto_constraint_synthesis")]
+pub use constraint_miner::{
+    ConstraintMiner, Pattern, SequenceConstraint, extract_frequent_sequences, mine_and_insert,
+};
