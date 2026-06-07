@@ -256,6 +256,32 @@ ThinkingController (Plan 194)
 
 Feature gate: `chain_fold` (depends on `thinking_cot`, default-OFF until GOAT proof on real model).
 
+## 🛑 Collapse-Aware Adaptive Thinking (Plan 212)
+
+Detects reasoning collapse **at runtime** during Chain-of-Thought generation and triggers early exit — the missing mid-reasoning stop signal.
+
+Three-layer stack composes with existing infrastructure:
+1. **Pre-Decide** — SelectivityRouter kurtosis → Direct vs CoT (Plan 204)
+2. **Mid-Think** — CollapseDetector monitors hesitation patterns ("wait" frequency, repetitive tokens) → force fast answer when collapse predicted
+3. **Post-Verify** — T2M option stripping prevents option-matching shortcut
+
+```text
+Input → SelectivityRouter → ThinkingController → CollapseDetector → ConvergenceSelector
+              ↓                    ↓                    ↓
+         High kurtosis        Bandit: skip         wait_count > τ
+         → Direct mode        → Direct mode         → Force exit
+```
+
+| Metric | Target | Source |
+|--------|--------|--------|
+| Token savings on simple tasks | 50-90% | Thinkless (NeurIPS 2025) |
+| Accuracy on ambiguous tasks | +2-5pp | S2F (ICML 2026) |
+| Collapse detection overhead | <10ns/token | O(1) ring buffer |
+
+Feature gate: `collapse_aware_thinking` (depends on `selectivity_router`, `thinking_cot`, `bandit`, **default-ON**).
+
+📖 **Research:** [`.research/187_S2F_Slow_to_Fast_Adaptive_Reasoning.md`](.research/187_S2F_Slow_to_Fast_Adaptive_Reasoning.md).
+
 ## 🌊 VortexFlow: Composable Sparse KV Routing (Plan 196)
 
 Unifies multiple KV block selection algorithms behind a single `VortexFlow` trait:
@@ -780,3 +806,5 @@ tests/               167 integration test & benchmark files (~87 bench suites)
 - [Luce-Org/lucebox-hub](https://github.com/Luce-Org/lucebox-hub/) — Per-chip LLM inference
 - [Learning Beyond Gradients](https://trinkle23897.github.io/learning-beyond-gradients/) — Heuristic Learning paradigm
 - [LEAP: AND-OR Graph Decomposition](https://arxiv.org/abs/2606.03303) — Blueprint-driven subgoal decomposition for DDTree
+- [To Think or Not To Think](https://arxiv.org/abs/2602.10625) — S2F reasoning collapse + adaptive thinking (ICML 2026)
+- [Thinkless: LLM Learns When to Think](https://arxiv.org/abs/2505.13379) — DeGRPO decoupled hybrid reasoning (NeurIPS 2025)
