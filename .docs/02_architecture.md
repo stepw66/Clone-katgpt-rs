@@ -91,9 +91,19 @@ pub struct Config {
     pub deltanet_linear_n_heads: usize,          // number of linear attention key heads
     #[cfg(feature = "deltanet_inference")]
     pub deltanet_linear_n_value_heads: usize,    // number of linear attention value heads
+    // RiM Reasoning Buffer Slots (Plan 172, Research 192)
+    #[cfg(feature = "rim_slots")]
+    pub rim_block_count: usize,                 // number of reasoning buffer blocks (K in RiM paper), 0 = disabled
+    #[cfg(feature = "rim_slots")]
+    pub rim_tokens_per_block: usize,            // tokens per buffer block (M in RiM paper), default 2
+    #[cfg(feature = "rim_slots")]
+    pub rim_buffer_token: usize,                // token ID used for buffer positions (default: bos_token)
+    // Wall Attention (Plan 173)
+    #[cfg(feature = "wall_attention")]
+    pub wall_config: Option<WallConfig>,        // None = use RoPE/fallback
 }
 ```
-- All configs constructed via factory methods: `Config::micro()`, `Config::micro_lora()`, `Config::draft()`, `Config::game()`, `Config::game_go()`, `Config::gemma2_2b()`, `Config::micro_dllm()`, `Config::bpe()`, `Config::bpe_draft()`, `Config::small_target()`, `Config::gqa_draft()`
+- All configs constructed via factory methods: `Config::micro()`, `Config::micro_lora()`, `Config::draft()`, `Config::game()`, `Config::game_go()`, `Config::gemma2_2b()`, `Config::micro_dllm()`, `Config::bpe()`, `Config::bpe_draft()`, `Config::small_target()`, `Config::gqa_draft()`, `Config::qwen_deltanet()` (requires `deltanet_inference` feature)
 - Validation: `n_head % n_kv_head == 0`, `n_embd == n_head * head_dim`
 - `kv_dim()` helper returns `n_kv_head * head_dim`
 
@@ -212,7 +222,71 @@ pub enum WeightDtype {
     F16,   // Half precision
     BF16,  // Bfloat16
 }
+
+// --- Attention projection variant (SharedKV cache reduction) ---
+pub enum AttentionProjection {
+    Full,      // Standard Q, K, V (3 projections, full KV cache)
+    SharedKV,  // Q-K=V: K and V share projection (2 projections, K-only cache). 50% KV cache reduction.
+}
+
+pub enum CacheLayout {
+    KV,  // Store both K and V (standard)
+    K,   // Store K only, V = K at read (SharedKV)
+}
+
+pub enum RetrievalHeadRole {
+    Local,      // Local head — sliding window + sink tokens only, no full KV scan
+    Retrieval,  // Retrieval head — low-dim projection + dynamic top-p token selection
+}
+
+// --- Training-Free Loop sub-step types (Plan 136) ---
+pub enum SubStepStrategy {
+    DampedEuler,                              // x ← x + (1/K)·(y − x)
+    KStageRK { beta: f32 },                   // x ← β·y + (1−β)·x
+}
+
+pub enum IterationMode {
+    Block,   // Apply the full window [a, b] as one block per sub-step
+    Layer,   // Apply each layer in the window individually per sub-step
+}
+
+pub enum CacheStrategy {
+    Last,   // Use the final loop iteration's hidden state for KV cache
+    First,  // Use the pre-loop hidden state for KV cache (first iteration)
+}
+
+// --- Data Gate types (Plan 141, feature `data_gate`) ---
+pub enum TaskType {
+    CodeIO,       // Python code output prediction
+    DslExpr,      // DSL expression evaluation
+    GameAction,   // Game action (Bomber, Go, FFT, Monopoly)
+    OpenEnded,    // Open-ended generation
+}
+
+pub enum GateDecision {
+    Admit,           // Task passes the gate — admitted to training pool
+    Reject(String),  // Task rejected with reason
+}
 ```
+
+### Wall Attention (`crates/katgpt-core/src/types.rs`, Plan 173)
+
+Feature-gated behind `wall_attention`.
+
+```rust
+pub struct WallConfig {
+    pub gate_bias: f32,            // gate bias initialization. Default 6.0 = open gate (vanilla attention)
+    pub gate_max: f32,             // maximum gate log-sigmoid clamp. Default 0.87
+    pub use_key_projected: bool,   // derive gate from K projection (preferred: zero KV cache overhead)
+}
+```
+
+### RiM Reasoning Buffer Slots (`crates/katgpt-core/src/types.rs`, Plan 172, Research 192)
+
+Feature-gated behind `rim_slots`. Fields on `Config`:
+- `rim_block_count: usize` — number of reasoning buffer blocks (K in RiM paper), 0 = disabled
+- `rim_tokens_per_block: usize` — tokens per buffer block (M), default 2
+- `rim_buffer_token: usize` — token ID used for buffer positions (default: bos_token)
 
 ### Hydra Types (`crates/katgpt-core/src/types.rs`, Research 148, Plan 165)
 
@@ -232,6 +306,61 @@ pub struct HydraBudgetConfig {
     pub cumulative_threshold: f32,  // early-terminate when cumulative DE reaches this fraction (default 0.95)
     pub modelless: bool,            // use pre-computed profiles (true) vs logit lens scoring (false)
     pub skip_erasure_draft: bool,   // skip erasure MLPs during draft stage
+}
+```
+
+### Training-Free Loop (`crates/katgpt-core/src/types.rs`, Plan 136)
+
+Used when `Config.loop_mode = TrainingFree`.
+
+```rust
+pub struct TrainingFreeLoopConfig {
+    pub window_start: usize,        // start of the loop window (inclusive layer index)
+    pub window_end: usize,          // end of the loop window (inclusive layer index)
+    pub loop_count: usize,          // number of loop iterations (K in the paper)
+    pub strategy: SubStepStrategy,  // sub-step integration strategy
+    pub iteration_mode: IterationMode, // block vs layer-wise
+    pub cache_strategy: CacheStrategy, // KV cache write strategy
+}
+```
+
+### Problem Mutator (`crates/katgpt-core/src/traits.rs`, feature `problem_mutator`)
+
+FrontierSmith closed→open problem synthesis: mutate game configs into harder variants.
+
+```rust
+pub struct GameConfig {
+    pub grid_size: u32,          // board size (e.g., 9 for 9x9)
+    pub opponent_count: u32,     // number of opponents/NPCs
+    pub max_steps: u32,          // maximum steps per episode
+    pub survival_weight: f32,    // weight for survival objective
+    pub kill_weight: f32,        // weight for kill/objective
+}
+
+pub enum MutationKind {
+    GoalReweight,       // shift objective weights
+    ConstrainOutputs,   // reduce action space or add constraints
+    GeneralizeInputs,   // vary input parameters
+}
+
+pub struct MutantConfig {
+    pub difficulty_delta: f32,       // estimated difficulty increase over seed
+    pub mutation_kind: MutationKind, // which mutation strategy was applied
+    pub description: String,        // human-readable description
+}
+```
+
+### Data Gate (`crates/katgpt-core/src/types.rs`, feature `data_gate`)
+
+Task-level admission gate for self-play training pool.
+
+```rust
+pub struct ProposerTask {
+    pub id: usize,                      // task identifier for diagnostics
+    pub query: String,                  // the problem/query text
+    pub program: Option<String>,        // optional code or DSL expression to execute
+    pub program_input: Option<String>,  // optional input for the program
+    pub task_type: TaskType,            // task type discriminator
 }
 ```
 

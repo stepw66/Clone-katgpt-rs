@@ -18,6 +18,10 @@ Inspired by [microgpt-c](https://github.com/nicholasgasior/microgpt-c), [talos-v
 - **BPE Tokenizer** — Train/encode/decode with Config::bpe() preset for code generation.
 - **Bomberman Arena** — 4-player HL proof: adaptive intelligence (+177) > greedy (+131) > static rules (-30) > random (-55).
 - **G-Zero Self-Play** — Verifier-free Hint-δ intrinsic reward — no external LLM judge needed.
+- **katgpt-core** — Shared crate with decoupled types (`types.rs`), trait definitions (`traits.rs`), and SIMD kernels (`simd.rs`).
+- **QwenDeltaNet** — Model architecture support for DeltaNet-style hybrid decode.
+- **150+ Feature Flags** — Granular feature gates for every subsystem; 65+ default-on (all GOAT-proved).
+- **Tactical Grid Game & Dungeon Crawler** — Arena examples for game AI research.
 
 📖 **Deep dives:** [`.docs/`](.docs/) for architecture, speculative decoding, performance, sudoku, validator, HL, arena, and all research detail.
 
@@ -34,6 +38,9 @@ Matching the talos-vs-macbook reference model:
 | `mlp_hidden` | 64 (4×) |
 | `n_layer` | 1 |
 | `temperature` | 0.5 |
+| `ModelArchitecture` | `NanoGpt`, `QwenDeltaNet` |
+| `AttentionMode` | `Standard`, `SpKvQuant`, `DashAttn` |
+| `WeightDtype` | `F32`, `F16`, `BF16` |
 
 ### Core Pipeline
 
@@ -44,22 +51,31 @@ LLM drafts logits → ConstraintPruner filters invalid → DDTree builds valid-o
 ### Key Traits
 
 ```rust
+// From katgpt-core
 pub trait ConstraintPruner: Send + Sync {
-    fn is_valid(&self, depth: usize, token_idx: usize, parent_tokens: &[usize]) -> bool;
+    fn is_valid(&self, token: usize) -> bool;
+    fn batch_is_valid(&self, tokens: &[usize], out: &mut [bool]);
 }
 
-pub trait ScreeningPruner: Send + Sync {
-    fn relevance(&self, depth: usize, token_idx: usize, parent_tokens: &[usize]) -> f32;
+pub trait ScreeningPruner<P>: Send + Sync {
+    fn relevance(&self, token: usize, ctx: &P) -> f32;
 }
 
-pub trait SpeculativeVerifier: Send + Sync {
-    fn speculate(&mut self, draft_weights, draft_config, token, pos, rng) -> Vec<usize>;
+pub trait SpeculativeGenerator: Send + Sync {
+    fn generate(&mut self, ...) -> Vec<usize>;
+    fn generate_batch(&mut self, ...) -> Vec<Vec<usize>>;
 }
 ```
 
+Additional core traits:
+- **`GameState`** — Forward model trait for game tree search (MCTS, bandit rollout).
+- **`RolloutPolicy`** — Generic rollout selection for arena play.
+- **`LeoHead`** / **`DualLeoMixer`** — LEO all-goals Q-value head and teacher-student mixing.
+
 ### Routing & Conditioning
 
-- **Prompt Router** — `KeywordRouter` scores prompt against domain keywords, `ExpertRegistry` selects `ScreeningPruner` + LoRA.
+- **Prompt Router** — `KeywordRouter` scores prompt against domain keywords, `ExpertRegistry` selects `ScreeningPruner` + LoRA. `InferenceBackend` trait + `CpuBackend` for backend abstraction.
+- **TriggerGate** — Adaptive tier promotion: CPU → GPU → ANE based on workload complexity.
 - **Embedding Router** — Three-tier fallback: embedding search → domain classify → keyword (local).
 - **Bidirectional Prefill** — Prompt tokens attend to ALL other prompt tokens (no causal mask during prefill).
 - **Modality LoRA Switching** — `reader_lora` active during prefill, `writer_lora` active during decode. Reference swap, zero data movement.
@@ -490,9 +506,9 @@ cargo clippy --all-targets --all-features --quiet   # Lint
 
 ### Feature Flags
 
-📖 **Feature flags** (158 total in [`Cargo.toml`](Cargo.toml); the table below covers the user-facing subset): See [`.docs/`](.docs/) for per-feature detail.
+📖 **Feature flags** (163 total in [`Cargo.toml`](Cargo.toml); the table below covers the user-facing subset): See [`.docs/`](.docs/) for per-feature detail.
 
-**Default features** (51, all GOAT-proved): `sparse_mlp`, `domain_latent`, `ppot`, `bandit`, `bandit_top_p`, `bt_rank`, `spectral_quant`, `hybrid_oct_pq`, `elf_sde`, `cna_steering`, `deep_manifold`, `federation`, `tes_loop`, `lattice_deduction`, `delta_routing`, `stability_metrics`, `mls_aggregate`, `gdn2_attention`, `dash_attn`, `dreamer`, `lt2_looped`, `dmax_spd`, `eqr_convergence`, `subterranean`, `sr2am_configurator`, `data_gate`, `plasma_path`, `parallel_probe`, `tf_loop`, `leo_all_goals`, `dual_leo`, `sigmoid_margin`, `moa_inference`, `sleep_consolidation`, `spectral_hierarchy`, `dual_gram_pca`, `roofline_cost`, `newton_schulz`, `river_valley`, `peira_distill`, `kog_cpu_fusion`, `gepa_reflective`, `phrase_boost`, `hydra_budget`, `flashar_consensus`, `budget_adaptation`, `ilc_distill`, `thinking_prune`, `rim_slots`, `thinking_cot`, `freq_bandit`.
+**Default features** (65+, all GOAT-proved): `sparse_mlp`, `domain_latent`, `ppot`, `bandit`, `bandit_top_p`, `bt_rank`, `spectral_quant`, `hybrid_oct_pq`, `elf_sde`, `cna_steering`, `deep_manifold`, `federation`, `tes_loop`, `lattice_deduction`, `delta_routing`, `stability_metrics`, `mls_aggregate`, `gdn2_attention`, `dash_attn`, `dreamer`, `lt2_looped`, `dmax_spd`, `eqr_convergence`, `subterranean`, `sr2am_configurator`, `data_gate`, `plasma_path`, `parallel_probe`, `tf_loop`, `leo_all_goals`, `dual_leo`, `sigmoid_margin`, `moa_inference`, `sleep_consolidation`, `spectral_hierarchy`, `dual_gram_pca`, `roofline_cost`, `newton_schulz`, `river_valley`, `peira_distill`, `kog_cpu_fusion`, `gepa_reflective`, `phrase_boost`, `hydra_budget`, `flashar_consensus`, `budget_adaptation`, `ilc_distill`, `thinking_prune`, `rim_slots`, `thinking_cot`, `freq_bandit`, `spec_reconciliation`, `trust_region_spec`, `curvature_alloc`, `directional_credit`, `kv_share`, `nds_proxy`, `wealth_pruner`, `speculative_generator`, `kvarn`, `and_or_dtree`.
 
 <details>
 <summary>📋 Full Feature Flag Table</summary>
@@ -614,13 +630,26 @@ cargo clippy --all-targets --all-features --quiet   # Lint
 | `thinking_cot` | Adaptive CoT thinking vs non-thinking (Plan 194, **default-on**) |
 | `chain_fold` | ThoughtFold inference-time CoT step pruning via attention importance (Plan 195, opt-in) |
 | `vortex_flow` | VortexFlow composable sparse KV block routing — BlockTopK / Entmax / ValueEnergy (Plan 196, opt-in) |
-| `kvarn` | KVarN variance-normalized KV-cache quantization (Research 159, opt-in) |
+| `kvarn` | KVarN variance-normalized KV-cache quantization (Research 159, **default-on**) |
+| `mux_pruner` | MuxSpanPruner vocabulary simplex pruning (Research 158, opt-in) |
+| `mux_ddtree` | MuxDdTree superposition DD-tree nodes (Research 158, opt-in) |
+| `mux_bfs` | MUX BFS parallel tree search (Research 158, opt-in) |
+| `mux_bandit_width` | MuxBanditWidth adaptive superposition width (Research 158, opt-in) |
+| `mux_freeze_thaw` | MUX freeze/thaw persistent patterns (Research 158, opt-in) |
+| `mux_demux` | MuxDemux verifier — deterministic superposition recovery (Research 158, opt-in) |
+| `modal_spec` | LinOSS cell + Fourier basis speculative decoding (Plan 189 Phase 3, opt-in) |
+| `speculative_generator` | SpeculativeGenerator trait unification — generic generate+validate contract (Plan 193, **default-on**) |
+| `partial_scoring` | PartialScorer graduated reward for game episodes (Plan 191, opt-in) |
+| `problem_mutator` | ProblemMutator game config evolution (Plan 191, opt-in) |
+| `idea_divergence` | IdeaDivergence strategic novelty filter (Plan 191, opt-in) |
+| `wall_attention` | Diagonal forget gates replacing RoPE (Plan 173, opt-in) |
+| `rim_slots` | RiM reasoning buffer slots for DDTree (Plan 172, **default-on**) |
 | `ega_attn` | Energy-Gated Attention spectral salience gating (Plan 139, opt-in) |
 | `stiff_anomaly` | Stiff/soft subspace eigenvalue anomaly gate (Plan 138, opt-in) |
 | `and_or_dtree` | AND-OR DDTree blueprint subgoal decomposition (Plan 190, opt-in) |
-| `directional_credit` | Entropy-bifurcated direction-adaptive screening (Plan 184, opt-in) |
-| `kv_share` | Q-K=V projection sharing — 50% KV cache reduction (Plan 185, opt-in) |
-| `spec_reconciliation` | Speculative reconciliation engine (Plan 177, opt-in) |
+| `directional_credit` | Entropy-bifurcated direction-adaptive screening (Plan 184, **default-on**) |
+| `kv_share` | Q-K=V projection sharing — 50% KV cache reduction (Plan 185, **default-on**) |
+| `spec_reconciliation` | Speculative reconciliation engine — verify offline trajectories against plausibility manifolds (Plan 177, **default-on**) |
 | `randopt_weight` | RandOpt weight-space perturbation ensembling (Plan 121, opt-in) |
 | `rmsd_distill` | RMSD relevance-masked self-distillation (Plan 125, opt-in) |
 | `sdpg_bandit` | SDPG bandit + KL anchoring (Plan 180, opt-in) |
@@ -644,15 +673,32 @@ cargo clippy --all-targets --all-features --quiet   # Lint
 ## 📁 Project Structure
 
 ```
-crates/katgpt-core/   Shared types & SIMD kernels
+crates/katgpt-core/   Shared types + SIMD kernels
+  types.rs            Decoupled structs & impls
+  traits.rs           Core trait definitions (ConstraintPruner, ScreeningPruner, SpeculativeGenerator)
+  simd.rs             SIMD kernel implementations
+  attention.rs        Attention mode implementations
+  coda.rs             CODA fused kernels
+  parallax_attn.rs    Parallax parameterized local linear attention
+  questbench.rs       QuestBench underspecification scoring
+  peira.rs            PEIRA inter-view regressor
+  dirichlet.rs        Dirichlet energy diagnostic
+  spectral_hierarchy.rs  Spectral hierarchy diagnostic
+  roofline.rs         Roofline cost model
+  linoss.rs           LinOSS cell for modal speculative decoding
+  and_or/             AND-OR DDTree decomposition
+  mux/                MUX superposition pruning
 src/
   lib.rs              Module index + debug tracking allocator
   main.rs             Entry point (proof → bench → plot)
   transformer.rs      Weights, KVCache (flat/paged/raven), forward/generate
+  weights.rs          ContiguousWeights weight layout abstraction
+  types.rs            Project-level type definitions
   inference_backend.rs  InferenceBackend trait + CpuBackend + auto-route
   trigger_gate.rs     TriggerGate tier promotion + TriggerGateConfig
   inference_router.rs InferenceRouter three-way routing + batch forward
   speculative/        DDTree, DFlash, Verifier, Prefill, D2F, budget, flashar
+  spec_reconciliation/  Speculative reconciliation engine
   pruners/            BanditPruner, TrialLog, HotSwap, BT Rank, CNA, G-Zero, Arena
   tokenizer/          BPE tokenizer
   validator/          SynPruner + PartialParser
@@ -673,10 +719,11 @@ src/
   cache_prune/        SAT + rolling-hash cache pruning
   stiff_anomaly/      Eigenvalue subspace anomaly gate
   sleep/              Sleep consolidation
+  fold/               ThoughtFold chain folding
   dllm.rs             D2F discrete diffusion
   tf_loop.rs          Training-free loop
-examples/            106 examples (see examples/README.md)
-tests/               163 integration test & benchmark files (~87 bench suites)
+examples/            111 examples (see examples/README.md)
+tests/               167 integration test & benchmark files (~87 bench suites)
 ```
 
 📖 **Full file-level detail:** See original README Project Structure in git history.
@@ -708,7 +755,8 @@ tests/               163 integration test & benchmark files (~87 bench suites)
 | [`.docs/21_opt_in_features.md`](.docs/21_opt_in_features.md) | **Opt-in features** (D2F, GFlowNet, SpecHop, Committee Boost, etc.) |
 | [`.docs/22_percepta.md`](.docs/22_percepta.md) | **Percepta full detail** (module structure, compiler stack, verified properties) |
 | [`.docs/23_hl_arena_detail.md`](.docs/23_hl_arena_detail.md) | **HL & Arena detail** (all games, G-Zero, Freeze/Thaw, Emotion Vector, etc.) |
-| [`examples/README.md`](examples/README.md) | 106 examples grouped by category |
+| [`.docs/191_open_ended_problem_evolution_arena.md`](.docs/191_open_ended_problem_evolution_arena.md) | **Open-ended problem evolution arena** (ProblemMutator, IdeaDivergence, PartialScorer) |
+| [`examples/README.md`](examples/README.md) | 111 examples grouped by category |
 
 ## 📦 Related Crates
 
@@ -727,3 +775,4 @@ tests/               163 integration test & benchmark files (~87 bench suites)
 - [Deep Manifold Part 2](https://arxiv.org/pdf/2512.06563) — Fixed-point boundary conditions
 - [Luce-Org/lucebox-hub](https://github.com/Luce-Org/lucebox-hub/) — Per-chip LLM inference
 - [Learning Beyond Gradients](https://trinkle23897.github.io/learning-beyond-gradients/) — Heuristic Learning paradigm
+- [LEAP: AND-OR Graph Decomposition](https://arxiv.org/abs/2606.03303) — Blueprint-driven subgoal decomposition for DDTree

@@ -67,18 +67,25 @@ A from-scratch Rust implementation of a GPT-2 style transformer with speculative
 - Hydra Budget: emergent self-repair layer skipping (Plan 165, GOAT 4/4, default-on)
 - GEPA-D Reflective: Pareto bandit config evolution (Plan 164, GOAT 4/4, default-on)
 - PhraseBoost: context trie phrase boosting for DDTree (Plan 164, GOAT 5/5, default-on)
-- 740+ tests passing (111 test files), zero clippy warnings
+- 740+ tests passing (111 test files), zero clippy warnings, 111 examples across 24 groups
 - Shared `katgpt-core` crate: types (Config, enums, math utilities), SIMD kernels — extracted for multi-crate reuse
+- `QwenDeltaNet` model architecture: hybrid DeltaNet/Attention per-layer config (Plan 182)
+- AND-OR DDTree decomposition: relevance-signal hierarchical goal decomposition with memoized subgoals (Plan 190)
+- MUX superposition tree search: MuxSpanPruner + MuxDdTree + MuxBfs + mux_demux verifier + MuxBanditWidth arm selector (mux_pruner, mux_ddtree, mux_bfs, mux_demux features)
+- LinOSS + ModalSpec drafter: oscillatory state-space cell + Fourier modal speculative drafting (modal_spec feature)
+- RiM reasoning buffer slots: K×M reasoning blocks prepended to input, zero-cost slot reuse (rim_slots feature, Plan 172)
+- Wall attention: W_g gate projection per KV head dimension, sigmoid-gated attention bypass (wall_attention feature, Plan 173)
+- `traits.rs` module in katgpt-core: GameState, RolloutPolicy, StateHeuristic, ActionSpaceLog, ConstraintPruner, ScreeningPruner, SpeculativeGenerator traits
 
 ## Module Structure
 
 ```
 crates/
   katgpt-core/    Shared types + SIMD kernels (multi-crate reuse):
-    types.rs        Config (all presets + with_overrides + validate), Rng, HlaMode, AttentionMode (Causal/Bidirectional/BlockCausal/SpKv/SpKvQuant/DashAttn), ModelArchitecture (Generic/Gemma2), WeightDtype (F32/F16/BF16), InferenceOverrides, InferenceResult, DashAttnConfig, DeltaRoutingConfig, DeltaRoutingMode, ConvergenceSelector, LoopMode, HybridPattern, SdpaOutputGate, ResidualGate, PlanningDecision, ConfiguratorContext, DataGate, GateDecision, ProposerTask, TaskType, kv_dim, softmax, softmax_scaled, rmsnorm, rmsnorm_with_gamma, rmsnorm_with_gamma_eps, gegelu, gegelu_tanh, matmul, matmul_relu, sparse_matmul, sample_token, LoraAdapter, LoraPair, DomainLatent
+    types.rs        Config (all presets + with_overrides + validate), Rng, HlaMode, AttentionMode (Causal/Bidirectional/BlockCausal/SpKv/SpKvQuant/DashAttn), ModelArchitecture (Generic/Gemma2/Llama/QwenDeltaNet), WeightDtype (F32/F16/BF16), InferenceOverrides, InferenceResult, DashAttnConfig, DeltaRoutingConfig, DeltaRoutingMode, ConvergenceSelector, LoopMode, HybridPattern, SdpaOutputGate, ResidualGate, PlanningDecision, ConfiguratorContext, DataGate, GateDecision, ProposerTask, TaskType, kv_dim, softmax, softmax_scaled, rmsnorm, rmsnorm_with_gamma, rmsnorm_with_gamma_eps, gegelu, gegelu_tanh, matmul, matmul_relu, sparse_matmul, sample_token, LoraAdapter, LoraPair, DomainLatent
     simd.rs         SimdLevel (Scalar/Neon/Avx2), simd_level(), simd_dot_f32, simd_dot_f16_f32, simd_fma_row, simd_outer_product_acc, simd_matvec, simd_matmul_rows, simd_matmul_rows_parallel, simd_matmul_relu_rows, simd_matmul_f16_f32_rows, simd_matmul_f16_f32_rows_parallel, simd_sparse_dot_f32, simd_sparse_matmul_rows, simd_scale_inplace, simd_fused_decay_write, simd_scale_mul_inplace, simd_exp_inplace, maxsim_score, maxsim_score_packed
-    lib.rs          Feature gates: tiled_attention, coda_fusion, parallax_attn, leo_all_goals, dual_leo, questbench, tf_loop, plasma_path, peira_distill, dirichlet_energy, spectral_hierarchy, sigmoid_margin, dual_gram_pca, roofline_cost, domain_latent, sr2am_configurator, data_gate, sparse_mlp
-    traits.rs       ConstraintPruner, ScreeningPruner, GameState, StateHeuristic, RolloutPolicy, NoPruner, NoScreeningPruner, BinaryScreeningPruner, RandomRolloutPolicy, ActionSpaceLog (Plan 107 Phase 0, consolidated from both crates)
+    lib.rs          Feature gates: tiled_attention, coda_fusion, parallax_attn, leo_all_goals, dual_leo, questbench, tf_loop, plasma_path, peira_distill, dirichlet_energy, spectral_hierarchy, sigmoid_margin, dual_gram_pca, roofline_cost, domain_latent, sr2am_configurator, data_gate, sparse_mlp, modal_spec, mux_pruner, and_or_dtree, rim_slots, wall_attention
+    traits.rs       ConstraintPruner, ScreeningPruner, GameState, StateHeuristic, RolloutPolicy, SpeculativeGenerator, NoPruner, NoScreeningPruner, BinaryScreeningPruner, RandomRolloutPolicy, ActionSpaceLog (Plan 107 Phase 0, consolidated from both crates)
     attention.rs    Tiled online-softmax flash attention for CPU SIMD (Plan 115, behind "tiled_attention" feature)
     coda.rs         CODA fused SIMD kernels: simd_matmul_rmsnorm_swiglu, simd_matmul_residual, simd_matmul_rmsnorm_rope, simd_matmul_rmsnorm_activation, GateActivation (Plan 103, behind "coda_fusion" feature)
     peira.rs        PEIRA inter-view regressor alignment — EMA cross-view/within-view covariance, closed-form predictor (Plan 153, behind "peira_distill" feature) ⚛
@@ -87,6 +94,19 @@ crates/
     questbench.rs   QuestBench underspecification scoring — normalized entropy from ScreeningPruner relevance (Plan 110)
     roofline.rs     Roofline cost model — GPU operator runtime prediction via calibrated peak throughput (Plan 159, behind "roofline_cost" feature) ⊏
     parallax_attn.rs Parallax parameterized local linear attention — streaming covariance correction (Plan 135, behind "parallax_attn" feature) ⊔
+    linoss.rs        LinOSS oscillatory state-space cell + ModalSpec drafter — Fourier modal speculative drafting (behind "modal_spec" feature)
+    and_or/          AND-OR tree module — AndOrNode<G,S> generic AND-OR tree for hierarchical goal decomposition (behind "and_or_dtree" feature)
+      mod.rs        Module root, re-exports AndOrNode
+      types.rs      AndOrNode enum (Or/And/Leaf), is_solved, push_child, set_best, set_solution
+    mux/             MUX superposition tree search — superposition DD-tree with BFS frontier (behind "mux_pruner" feature)
+      mod.rs        Module root — mux_pruner, mux_ddtree, mux_bfs, mux_demux, mux_bandit_width sub-features
+      span_pruner.rs  MuxSpanPruner — superposition span validation
+      top_k.rs      extract_top_k_peaks — top-K peak extraction from logit distributions
+      dd_tree.rs    MuxDdTree, MuxNode — superposition DD-tree with hypothesis coverage
+      bfs.rs        MuxBfs — dynamic-width BFS frontier expansion
+      demux.rs      mux_demux — deterministic superposition recovery verifier
+      bandit_width.rs  MuxBanditWidth — UCB1 arm selector for tree width
+      freeze_thaw.rs   MuxTarget, MuxPatternStore — freeze/thaw for superposition patterns
 
 src/
   lib.rs            Module index + debug tracking allocator
@@ -637,6 +657,7 @@ cargo run --example go_06_bench --features go --release       # Go benchmark sui
 | `gqa_draft` | 4096 | 64 | 8 | 4 | 256 | GQA draft (n_kv_head=2) |
 | `micro_dllm` | 27 | 16 | 4 | 1 | 64 | D2F discrete diffusion (bidirectional) |
 | `game_go` | 85 | 32 | 4 | 1 | 128 | Go board 9×9 + action (~16K params) |
+| `qwen_deltanet` | 151936 | 2048 | 16 | 4 | 8192 | QwenDeltaNet hybrid DeltaNet/Attention (kv_heads=8, head_dim=128, Plan 182) |
 | `gemma2_2b` | 256000 | 2304 | 8 | 26 | 9216 | Gemma 2 2B architecture (kv_heads=4, head_dim=256) |
 
 ## Key Design Principles
