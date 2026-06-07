@@ -149,6 +149,9 @@ pub use step::{
     speculative_step_rollback_with,
 };
 
+#[cfg(feature = "selectivity_router")]
+pub use step::{speculative_step_conditioned_with_router, speculative_step_rollback_with_router};
+
 #[cfg(feature = "sr2am_configurator")]
 pub use step::speculative_step_with_configurator;
 

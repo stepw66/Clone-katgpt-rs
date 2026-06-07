@@ -170,11 +170,15 @@ crates/katgpt-core/src/
 
 ### Integration
 
-- [ ] Add integration point: after each speculative decode, call `router.observe(position, excess_kurtosis(logits))` with computed kurtosis
-- [ ] Add integration point: before generation, check `router.should_think(position)` → route direct vs CoT
-- [ ] Wire `recommend_route()` into CPU/GPU dispatch (if applicable to current inference pipeline)
-
-> **Note**: Integration points deferred — requires downstream pipeline wiring beyond the scope of this plan's standalone module.
+- [x] Add integration point: after each speculative decode, call `router.observe(position, excess_kurtosis(logits))` with computed kurtosis
+  - `speculative_step_rollback_with_router()` in `step.rs` — observes kurtosis from draft marginals, then routes
+  - `speculative_step_conditioned_with_router()` in `step.rs` — same for conditioned draft path
+  - Both re-exported from `speculative/mod.rs` behind `selectivity_router` feature
+- [x] Add integration point: before generation, check `router.should_think(position)` → route direct vs CoT
+  - Router guard in both `_with_router` functions: high kurtosis → skip tree, sample direct from first marginal
+  - Low kurtosis → build DDTree (needs exploration/CoT)
+- [x] Wire `recommend_route()` into CPU/GPU dispatch (if applicable to current inference pipeline)
+  - `ComputeRoute::CpuSpeculative` / `GpuAutoregressive` mapped from `should_think()` in both step functions
 
 ### Persistence
 
@@ -189,7 +193,7 @@ crates/katgpt-core/src/
 - [x] Add `selectivity_router = []` feature to `Cargo.toml`
 - [x] All new types behind `#[cfg(feature = "selectivity_router")]` (module + re-exports in `mod.rs`)
 - [x] Add to `full` bundle feature
-- [ ] GOAT gate: default-on after verification (see below)
+- [x] GOAT gate: default-on after verification (see below)
 
 ### Tests
 
@@ -216,10 +220,13 @@ crates/katgpt-core/src/
 
 ### Example
 
-- [ ] Add example: `examples/selectivity_router_demo.rs`
-  - Simulate N inference requests with varying kurtosis patterns
-  - Show before/after: thinking tokens used vs without router
-  - Print routing convergence over time
+- [x] Add example: `examples/selectivity_router_demo.rs`
+  - [x] Simulate N inference requests with varying kurtosis patterns
+  - [x] Show before/after: thinking tokens used vs without router
+  - [x] Print routing convergence over time
+  - [x] Compute route distribution (CpuSpeculative vs GpuAutoregressive)
+  - [x] Persistence roundtrip (serialize → deserialize → verify)
+  - [x] ASCII convergence plot showing adaptation over time
 
 ---
 

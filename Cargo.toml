@@ -609,6 +609,10 @@ name = "thinking_cot_demo"
 required-features = ["thinking_cot"]
 
 [[example]]
+name = "selectivity_router_demo"
+required-features = ["selectivity_router", "kurtosis_gate"]
+
+[[example]]
 name = "chain_fold_demo"
 required-features = ["chain_fold"]
 
