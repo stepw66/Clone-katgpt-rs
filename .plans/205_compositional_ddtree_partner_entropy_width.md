@@ -34,12 +34,14 @@ The insight: entropy of the draft distribution is the "partner norm" for the val
   
 - [x] Add unit test: `comp_width_zero_entropy_returns_min` — zero entropy gives width 1
   
-- [ ] Add GOAT gate proof: benchmark before/after on multi-peak token distributions
-  - Use existing DDTree test harness
-  - Compare: fixed width vs PEAK_DOMINANCE_RATIO vs compositional_width
-  - Expected: compositional_width matches or beats both in acceptance rate per total compute
+- [x] Add GOAT gate proof: benchmark before/after on multi-peak token distributions
+  - G1: acceptance/compute ≥ binary across 5 distributions — PASS
+  - G2: continuous adaptation (monotonic + intermediate values) — PASS
+  - G3: overhead < 200ns debug (~3ns release) — PASS
+  - Result: `.benchmarks/202_comp_width_goat.md` (3/3 PASS)
   
-- [ ] Add benchmark: overhead of entropy calculation (should be negligible — already computed)
+- [x] Add benchmark: overhead of entropy calculation (should be negligible — already computed)
+  - G3 in GOAT proof measures this: ~96ns debug, ~3-5ns release estimate
 
 ## Implementation Notes
 
