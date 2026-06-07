@@ -19,8 +19,9 @@ pub mod types;
 
 // Re-export consolidated traits (Plan 107 Phase 0)
 pub use traits::{
-    ActionSpaceLog, BinaryScreeningPruner, ConstraintPruner, GameState, NoPruner,
+    ActionSpaceLog, BestBuddyAligner, BinaryScreeningPruner, ConstraintPruner, GameState, NoPruner,
     NoScreeningPruner, RandomRolloutPolicy, RolloutPolicy, ScreeningPruner, StateHeuristic,
+    best_buddies, pearson_correlation,
 };
 pub use traits::{GenerativeConstraintPruner, SpeculativeGenerator};
 

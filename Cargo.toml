@@ -110,6 +110,7 @@ parallel_probe = []  # Parallel-Probe 2D controller — consensus-based parallel
 dflare_fusion = []  # DFlare Marginal Fusion — multi-source conditioning blend (Plan 174, Research 154)
 dflare_kv_routing = []  # DFlare Pruner-Confidence KV Routing — confidence-gated KV selection (Plan 174, Research 154)
 dflare_progressive_budget = []  # DFlare Position-Weighted DDTree Budget — exponential decay allocation (Plan 174, Research 154)
+corr_budget = []  # Correlation Budget Allocation — EMA-driven speculative depth budget (Plan 200)
 bomber-agent = ["bomber"]  # Coding agent validator loop (Issue 052, Tasks C9-C10)
 bomber-wasm = ["bomber", "wasmi", "papaya"]    # WASM bomber validator loader (Plan 034) + batch pool (Plan 037) + wasmi migration (Plan 167)
 game_state = ["bomber"]  # GameState forward model trait + generic MCTS (Plan 056)
@@ -200,7 +201,9 @@ kvarn = []  # KVarN variance-normalized KV-cache quantization (Research 159)
 ruliology = ["bandit"]  # Ruliology Bandit — simple program strategies as bandit arms (Plan 188, Research 168)
 directional_credit = []  # Entropy-bifurcated screening — direction-adaptive credit (Plan 184, default on candidate)
 kv_share = []  # Q-K=V projection sharing — 50% KV cache reduction (Plan 185, default on candidate)
+rosetta_pruner = ["papaya"]  # Rosetta Pruners — universal cross-domain meta-pruner (Plan 201)
 domino_lora = []  # Domino LoRA causal correction adapter for speculative decoding (Plan 231)
+best_buddies = []  # Best Buddies Drafting — mutual NN filter for speculative decoding (Plan 199)
 # LeviathanVerifier is always compiled (no gate needed) — verifier.rs, benchmark.rs
 full = ["sudoku", "validator", "ppot", "domain_latent", "bandit", "delta_mem", "g_zero", "fft", "bomber", "bomber-agent", "bomber-wasm", "game_state", "bandit_mcts", "hla_attention", "gdn2_attention", "lt2_looped", "dash_attn", "mls_aggregate", "dmax_spd", "dreamer", "monopoly", "go", "randopt_weight", "feedback", "rest", "embedding_router", "gpu", "game_domain", "language_domain", "percepta_compile", "dllm", "tri_mode", "bt_rank", "spectral_quant", "octopus", "turboquant", "planar_quant", "iso_quant", "hybrid_oct_pq", "replaid_schedules", "elf_sde", "maxsim", "cna_steering", "deep_manifold", "federation", "delta_routing", "decode_specialize", "lattice_deduction", "unit_distance", "memo_reflections", "eqr_convergence", "subterranean", "sr2am_configurator", "data_gate", "coda_fusion", "tiled_attention", "vpd_em_distill", "proof_sketch_evolution", "convex_tok", "opus_selection", "epiplexity_scoring", "committee_boost", "questbench", "cache_prune", "sleep_consolidation", "spectral_hierarchy", "newton_schulz", "river_valley", "peira_distill", "kog_cpu_fusion", "datrie_vocab", "gepa_reflective", "phrase_boost", "hydra_budget", "budget_adaptation", "recfm", "ilc_distill", "thinking_prune", "rim_slots", "wall_attention", "ane", "inference_router", "thinking_cot", "kvarn", "freq_bandit", "directional_credit", "kv_share", "nds_proxy", "wealth_pruner", "and_or_dtree", "speculative_generator"]
 

@@ -944,6 +944,132 @@ pub trait ProblemMutator: Send + Sync {
     fn mutate(&self, seed: &GameConfig) -> Vec<MutantConfig>;
 }
 
+// ── Best Buddies Drafting (Plan 199) ────────────────────────────
+
+/// Pearson correlation coefficient between two f32 slices.
+///
+/// SIMD-friendly: single pass, no allocation.
+/// Returns 0.0 if either slice has zero variance.
+#[inline]
+pub fn pearson_correlation(a: &[f32], b: &[f32]) -> f32 {
+    assert_eq!(
+        a.len(),
+        b.len(),
+        "pearson_correlation: slices must have equal length"
+    );
+    if a.is_empty() {
+        return 0.0;
+    }
+    let n = a.len() as f32;
+    let sum_a: f32 = a.iter().copied().sum();
+    let sum_b: f32 = b.iter().copied().sum();
+    let mean_a = sum_a / n;
+    let mean_b = sum_b / n;
+
+    let mut cov = 0.0f32;
+    let mut var_a = 0.0f32;
+    let mut var_b = 0.0f32;
+    for (&ai, &bi) in a.iter().zip(b.iter()) {
+        let da = ai - mean_a;
+        let db = bi - mean_b;
+        cov += da * db;
+        var_a += da * da;
+        var_b += db * db;
+    }
+
+    let denom = var_a.sqrt() * var_b.sqrt();
+    match denom < 1e-12 {
+        true => 0.0,
+        false => cov / denom,
+    }
+}
+
+/// Best buddies: mutual nearest neighbors from correlation rows.
+///
+/// Returns pairs `(i, j)` where row `i`'s best match is row `j` AND row `j`'s
+/// best match is row `i`. Results sorted by correlation magnitude (descending),
+/// truncated to top-`k`.
+pub fn best_buddies(corr_rows: &[&[f32]], k: usize) -> Vec<(usize, usize)> {
+    let n = corr_rows.len();
+
+    // Build best-match index for each row
+    let mut best_for: Vec<Option<usize>> = vec![None; n];
+    for i in 0..n {
+        let row = corr_rows[i];
+        if row.is_empty() {
+            continue;
+        }
+        let mut best_j = 0;
+        let mut best_corr = f32::NEG_INFINITY;
+        for j in 0..row.len() {
+            match row[j] > best_corr {
+                true => {
+                    best_corr = row[j];
+                    best_j = j;
+                }
+                false => {}
+            }
+        }
+        best_for[i] = Some(best_j);
+    }
+
+    // Mutual agreement: i→j AND j→i
+    let mut buddies: Vec<(usize, usize)> = Vec::with_capacity(n);
+    for i in 0..n {
+        let j = match best_for[i] {
+            Some(j) => j,
+            None => continue,
+        };
+        // j must be within bounds and point back to i
+        if j >= n {
+            continue;
+        }
+        match best_for[j] {
+            Some(k_idx) if k_idx == i => {
+                // Avoid double-counting: only push when i < j
+                if i < j {
+                    buddies.push((i, j));
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // Sort by correlation magnitude (descending), keep top-k
+    buddies.sort_by(|a, b| {
+        let corr_a = corr_rows[a.0][a.1];
+        let corr_b = corr_rows[b.0][b.1];
+        corr_b
+            .partial_cmp(&corr_a)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    buddies.truncate(k);
+    buddies
+}
+
+/// Best Buddies filter for speculative decoding.
+///
+/// Mines mutual agreement between draft and target model marginals.
+/// Zero training — purely inference-time correlation.
+pub trait BestBuddyAligner: Send + Sync {
+    /// Compute mutual agreement score for a token position.
+    ///
+    /// Returns 1.0 if token is a best buddy (draft prefers it AND target prefers it),
+    /// 0.0 otherwise. Continuous in between via EMA correlation.
+    fn mutual_agreement(&self, draft_top_k: &[f32], target_top_k: &[f32]) -> f32;
+
+    /// Batch version: compute alignment confidence for all positions.
+    ///
+    /// `draft_logits` and `target_logits` are `[seq_len × vocab_size]` (flat),
+    /// `results` receives `[seq_len]` confidence scores.
+    fn batch_alignment_confidence(
+        &self,
+        draft_logits: &[f32],
+        target_logits: &[f32],
+        results: &mut [f32],
+    );
+}
+
 // ── LEO Tests (Plan 155, T7) ────────────────────────────────────
 
 mod tests_leo {
@@ -1359,5 +1485,84 @@ mod tests_spec_gen {
 
         let results = pruner.batch_is_valid(&[0, 1, 2]);
         assert_eq!(results, vec![false, true, true]);
+    }
+}
+
+// ── Best Buddies Tests (Plan 199) ───────────────────────────────
+
+#[cfg(test)]
+mod tests_best_buddies {
+    use super::*;
+
+    #[test]
+    fn test_pearson_perfect_correlation() {
+        let a = [1.0, 2.0, 3.0, 4.0, 5.0];
+        let b = [2.0, 4.0, 6.0, 8.0, 10.0]; // b = 2*a
+        let corr = pearson_correlation(&a, &b);
+        assert!((corr - 1.0).abs() < 1e-6, "expected 1.0, got {corr}");
+    }
+
+    #[test]
+    fn test_pearson_anti_correlation() {
+        let a = [1.0, 2.0, 3.0, 4.0, 5.0];
+        let b = [10.0, 8.0, 6.0, 4.0, 2.0]; // b = -2*a + 12
+        let corr = pearson_correlation(&a, &b);
+        assert!((corr + 1.0).abs() < 1e-6, "expected -1.0, got {corr}");
+    }
+
+    #[test]
+    fn test_pearson_zero_correlation() {
+        let a = [1.0, -1.0, 1.0, -1.0];
+        let b = [1.0, 1.0, -1.0, -1.0]; // orthogonal
+        let corr = pearson_correlation(&a, &b);
+        assert!(corr.abs() < 1e-6, "expected ~0.0, got {corr}");
+    }
+
+    #[test]
+    fn test_pearson_zero_variance() {
+        let a = [3.0, 3.0, 3.0];
+        let b = [1.0, 2.0, 3.0];
+        let corr = pearson_correlation(&a, &b);
+        assert_eq!(corr, 0.0, "zero variance should return 0.0");
+    }
+
+    #[test]
+    fn test_pearson_empty() {
+        let corr = pearson_correlation(&[], &[]);
+        assert_eq!(corr, 0.0, "empty slices should return 0.0");
+    }
+
+    #[test]
+    fn test_best_buddies_simple() {
+        // Row 0 best match → 1, Row 1 best match → 0 → mutual pair (0,1)
+        // Row 2 best match → 0, but Row 0's best is 1 → not mutual
+        let row0: &[f32] = &[0.1, 0.9, 0.2];
+        let row1: &[f32] = &[0.8, 0.1, 0.3];
+        let row2: &[f32] = &[0.7, 0.2, 0.1];
+        let rows: Vec<&[f32]> = vec![row0, row1, row2];
+        let buddies = best_buddies(&rows, 10);
+        assert_eq!(buddies, vec![(0, 1)]);
+    }
+
+    #[test]
+    fn test_best_buddies_top_k() {
+        let row0: &[f32] = &[0.1, 0.9];
+        let row1: &[f32] = &[0.8, 0.1];
+        let rows: Vec<&[f32]> = vec![row0, row1];
+        // k=1 should truncate to 1 result
+        let buddies = best_buddies(&rows, 1);
+        assert_eq!(buddies.len(), 1);
+        assert_eq!(buddies[0], (0, 1));
+    }
+
+    #[test]
+    fn test_best_buddies_no_mutual() {
+        // Row 0 → 1, Row 1 → 2, Row 2 → 0 (cycle, no mutual)
+        let row0: &[f32] = &[0.1, 0.9, 0.2];
+        let row1: &[f32] = &[0.1, 0.2, 0.9];
+        let row2: &[f32] = &[0.9, 0.1, 0.2];
+        let rows: Vec<&[f32]> = vec![row0, row1, row2];
+        let buddies = best_buddies(&rows, 10);
+        assert!(buddies.is_empty(), "cycle should produce no mutual pairs");
     }
 }

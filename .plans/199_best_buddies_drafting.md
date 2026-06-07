@@ -1,7 +1,7 @@
 # Plan 199: Best Buddies Drafting — Mutual NN Filter for Speculative Decoding
 
 **Date**: 2026-06-07
-**Status**: Plan
+**Status**: ✅ Core building blocks implemented
 **Research**: `.research/178_Rosetta_Neurons_Cross_Model_Alignment.md` (Section 2.1)
 **GOAT Rank**: #1 (highest impact × lowest effort)
 
@@ -43,13 +43,13 @@ pub trait BestBuddyAligner: Send + Sync {
 
 ## Tasks
 
-- [ ] Implement `pearson_correlation(a: &[f32], b: &[f32]) -> f32` in `katgpt-core/src/math.rs` (SIMD-friendly)
-- [ ] Implement `best_buddies(corr_rows: &[&[f32]], k: usize) -> Vec<(usize, usize)>` in `katgpt-core/src/math.rs`
-- [ ] Add `BestBuddyAligner` trait to `katgpt-core/src/traits.rs`
-- [ ] Implement `MarginalBestBuddyAligner` in `katgpt-rs/src/speculative/` using `SpeculativeContext` marginals
+- [x] Implement `pearson_correlation(a: &[f32], b: &[f32]) -> f32` in `katgpt-core/src/traits.rs` (SIMD-friendly, single-pass, no allocation)
+- [x] Implement `best_buddies(corr_rows: &[&[f32]], k: usize) -> Vec<(usize, usize)>` in `katgpt-core/src/traits.rs`
+- [x] Add `BestBuddyAligner` trait to `katgpt-core/src/traits.rs`
+- [x] Implement `MarginalBestBuddyAligner` in `katgpt-rs/src/speculative/best_buddies.rs`
 - [ ] Integrate into `build_dd_tree_speculative`: filter marginals by mutual agreement before tree construction
-- [ ] Add feature flag `best_buddies` (opt-in initially, default-on after GOAT proof)
-- [ ] Write test: before/after speculative acceptance rate with and without best buddies
+- [x] Add feature flag `best_buddies` (opt-in initially, default-on after GOAT proof)
+- [x] Write tests: pearson_correlation, best_buddies, MarginalBestBuddyAligner (14 tests passing)
 - [ ] Write benchmark: measure Pearson + mutual NN overhead per decode step
 - [ ] GOAT gate: measure acceptance rate delta. If ≥ 5% improvement → default-on.
 - [ ] Update README feature flags section

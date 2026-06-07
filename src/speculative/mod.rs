@@ -91,6 +91,13 @@ pub use types::{
     PrefillMode, RejectionReason, ScreeningPruner, SdeConfig, SpeculativeContext, TreeNode,
 };
 
+// ── Best Buddies Drafting (Plan 199, feature: best_buddies) ──────
+#[cfg(feature = "best_buddies")]
+pub mod best_buddies;
+
+#[cfg(feature = "best_buddies")]
+pub use best_buddies::MarginalBestBuddyAligner;
+
 #[cfg(feature = "elf_sde")]
 pub use types::EarlyStopGate;
 
@@ -306,3 +313,10 @@ pub mod decomp_reviewer;
 
 #[cfg(feature = "and_or_dtree")]
 pub use decomp_reviewer::DecompositionReviewer;
+
+// ── Correlation Budget Allocation (Plan 200, feature: corr_budget) ──
+#[cfg(feature = "corr_budget")]
+pub mod correlation_budget;
+
+#[cfg(feature = "corr_budget")]
+pub use correlation_budget::CorrelationBudgetAllocator;
