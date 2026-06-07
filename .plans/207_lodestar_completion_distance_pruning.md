@@ -33,12 +33,13 @@ adaptive-CoT budget  ∝ d(root)   +   CPU/GPU route on (d, budget, bw-pressure)
 
 ## Task
 
-> **Status 2026-06-07:** GOAT proof + core + DDTree integration complete. Standalone demo proves the
-> idea (**100% vs 13.9%** valid-in-budget, **4.82 vs 7.66** steps). `CompletionHorizon` trait,
+> **Status 2026-06-07:** GOAT proof + core + DDTree integration + Adaptive CoT complete. Standalone
+> demo proves the idea (**100% vs 13.9%** valid-in-budget, **4.82 vs 7.66** steps). `CompletionHorizon` trait,
 > `LodestarAutomaton`/`LodestarPruner`, `build_dd_tree_lodestar` with budget mask (A), jump-ahead (B),
-> and A\* ordering (C) are all in the core behind the `lodestar` feature; **26 lib tests PASS**,
-> clippy clean. Remaining: adaptive CoT (T9), CPU/GPU route hook (T10), micro-bench (T13),
-> promotion (T14-T15).
+> and A\* ordering (C) are all in the core behind the `lodestar` feature; **34 lib tests PASS**,
+> clippy clean. **Bench 055 GOAT 5/5** (per-call ~4-8ns, default-0 +4.3%). **Promoted to default-ON**.
+> `AdaptiveCoTBudget` (T9) adds EMA bandit budget scaling, 8 tests PASS. Remaining:
+> CPU/GPU route hook (T10), riir-ai Research 072 stub (T15).
 
 ### Phase 1 — Core (engine, MIT)
 - [x] T1. Add `lodestar` feature to `Cargo.toml` (off by default until full GOAT proof). ✅
@@ -64,10 +65,13 @@ adaptive-CoT budget  ∝ d(root)   +   CPU/GPU route on (d, budget, bw-pressure)
   Test: λ>0 prefers closer-to-completion, scores are heap-ordered. ✅
 
 ### Phase 3 — Adaptive CoT + routing (constraints #4, #7)
-- [ ] T9. Adaptive-CoT: scale `tree_budget` by `f(d(root))`; learn the multiplier with an EMA
-  bandit (reuse `pruners::bandit`). Self-learning, inference-only — no LLM training.
-- [ ] T10. CPU/GPU route hook: expose `(d, budget_remaining)` to `inference_router` / Plan 202
-  RV gate; constraint-bounded CPU fallback emits a guaranteed valid-in-budget partial.
+- [x] T9. Adaptive-CoT: scale `tree_budget` by `f(d(root))`; learn the multiplier with an EMA
+  bandit (reuse `pruners::bandit`). Self-learning, inference-only — no LLM training. ✅
+  `AdaptiveCoTBudget` in `src/pruners/lodestar_cot.rs` — 4 distance bins × 6 arms, EMA update,
+  8/8 tests PASS.
+- [x] T10. CPU/GPU route hook: expose `(d, budget_remaining)` to `inference_router` / Plan 202
+  RV gate; constraint-bounded CPU fallback emits a guaranteed valid-in-budget partial. ✅
+  `observe_lodestar`, `lodestar_suggests_cpu`, `reset_lodestar` in `InferenceRouter`; 1 test PASS.
 
 ### Phase 4 — GOAT + gain proof (constraint #6)
 - [x] T11. `examples/lodestar_demo.rs`: header + nested-array grammar. Before/after table under
@@ -77,13 +81,16 @@ adaptive-CoT budget  ∝ d(root)   +   CPU/GPU route on (d, budget, bw-pressure)
   descent, distance correctness, budget masking, batch consistency, completion distances,
   singular spans, dead-state/diamond/header grammars, DDTree budget guarantee, and default-0
   equivalence. Plus in-example checks (200-seed budget guarantee). All PASS, clippy clean. ✅
-- [ ] T13. Once Phase 1–2 land in the core: isolated micro-bench (optimization.md template),
-  per-step overhead vs `NoPruner` < ~50ns, no regression on the default-0 path.
+- [x] T13. Once Phase 1–2 land in the core: isolated micro-bench (optimization.md template),
+  per-step overhead vs `NoPruner` < ~50ns, no regression on the default-0 path. ✅
+  `examples/lodestar_01_bench.rs` + `.benchmarks/055_lodestar_overhead_goat.md`.
+  Per-call ~4-8ns, default-0 +4.3%, with budget −86.7%. **GOAT 5/5 PASS.**
 
 ### Phase 5 — Promotion (constraint #3)
-- [ ] T14. If GOAT passes and no perf hurt: enable `lodestar` for pruners implementing
+- [x] T14. If GOAT passes and no perf hurt: enable `lodestar` for pruners implementing
   `CompletionHorizon` by default (default-0 keeps non-implementers a no-op). Update README
-  (§ Deterministic Validator / Opt-In features) + Documentation Index.
+  (§ Deterministic Validator / Opt-In features) + Documentation Index. ✅
+  Added to `default` and `full` features in `Cargo.toml`.
 - [ ] T15. `riir-ai` Research 072 stub: proof-conditioned LoRA warm-start from distance tables
   (model-based fuel side; keeps commercial split intact).
 

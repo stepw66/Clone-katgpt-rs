@@ -44,6 +44,12 @@ pub struct RouterStats {
     /// Current RV signal (Plan 202). -1.0 if unavailable.
     #[cfg(feature = "rv_gated_routing")]
     pub rv_signal: f64,
+    /// Current Lodestar completion distance (0 if never observed).
+    #[cfg(feature = "lodestar")]
+    pub lodestar_distance: u32,
+    /// Current Lodestar budget remaining (-1 if unavailable).
+    #[cfg(feature = "lodestar")]
+    pub lodestar_budget_remaining: i32,
 }
 
 // ---------------------------------------------------------------------------
@@ -76,6 +82,12 @@ pub struct InferenceRouter {
     /// RV thresholds for tier promotion/demotion (Plan 202).
     #[cfg(feature = "rv_gated_routing")]
     rv_thresholds: RvThresholds,
+    /// Last observed Lodestar completion distance d(root) (Plan 207).
+    #[cfg(feature = "lodestar")]
+    lodestar_distance: u32,
+    /// Last observed Lodestar budget remaining (Plan 207).
+    #[cfg(feature = "lodestar")]
+    lodestar_budget_remaining: i32,
 }
 
 impl InferenceRouter {
@@ -114,6 +126,10 @@ impl InferenceRouter {
             rv_tracker: Some(AcceptanceVarianceTracker::new()),
             #[cfg(feature = "rv_gated_routing")]
             rv_thresholds: RvThresholds::default(),
+            #[cfg(feature = "lodestar")]
+            lodestar_distance: 0,
+            #[cfg(feature = "lodestar")]
+            lodestar_budget_remaining: -1,
         }
     }
 
@@ -313,6 +329,59 @@ impl InferenceRouter {
         &self.rv_thresholds
     }
 
+    // ── Lodestar Distance/Budget Routing Hook (Plan 207) ────────────
+
+    /// Observe Lodestar distance and budget for routing decisions.
+    ///
+    /// Call after each tree build with the root distance and remaining budget.
+    /// High d + tight budget → prefer CPU for deterministic guarantee.
+    #[cfg(feature = "lodestar")]
+    #[inline]
+    pub fn observe_lodestar(&mut self, d_root: u32, budget_remaining: usize) {
+        self.lodestar_distance = d_root;
+        self.lodestar_budget_remaining = budget_remaining as i32;
+    }
+
+    /// Get current Lodestar distance (0 if never observed).
+    #[cfg(feature = "lodestar")]
+    #[inline]
+    pub fn lodestar_distance(&self) -> u32 {
+        self.lodestar_distance
+    }
+
+    /// Get current Lodestar budget remaining (-1 if never observed).
+    #[cfg(feature = "lodestar")]
+    #[inline]
+    pub fn lodestar_budget_remaining(&self) -> i32 {
+        self.lodestar_budget_remaining
+    }
+
+    /// Whether Lodestar suggests CPU fallback.
+    ///
+    /// Returns `true` when completion is far and budget is tight:
+    /// `d_root > 4 && budget_remaining < d_root * 2`
+    ///
+    /// This means: we're far from done AND we don't have 2× the minimum
+    /// budget needed — so the deterministic CPU path is safer.
+    #[cfg(feature = "lodestar")]
+    #[inline]
+    pub fn lodestar_suggests_cpu(&self) -> bool {
+        if self.lodestar_budget_remaining < 0 {
+            return false;
+        }
+        let d = self.lodestar_distance;
+        let br = self.lodestar_budget_remaining;
+        d > 4 && br < (d as i32 * 2)
+    }
+
+    /// Reset Lodestar state (call at query boundaries).
+    #[cfg(feature = "lodestar")]
+    #[inline]
+    pub fn reset_lodestar(&mut self) {
+        self.lodestar_distance = 0;
+        self.lodestar_budget_remaining = -1;
+    }
+
     /// Signal that weights have changed; GPU/ANE backends should recompile.
     pub fn update_weights(&mut self, _weights: &TransformerWeights) {
         if let Some(ref mut gpu) = self.gpu {
@@ -363,6 +432,10 @@ impl InferenceRouter {
             trust_signal: self.trust_signal,
             #[cfg(feature = "rv_gated_routing")]
             rv_signal: self.rv_signal(),
+            #[cfg(feature = "lodestar")]
+            lodestar_distance: self.lodestar_distance,
+            #[cfg(feature = "lodestar")]
+            lodestar_budget_remaining: self.lodestar_budget_remaining,
         }
     }
 
@@ -769,5 +842,43 @@ mod tests {
         let _ = router.forward_batch(&mut ctx, &weights, &mut cache, &batch);
 
         assert_eq!(router.stats().total_inferences, 4);
+    }
+
+    #[cfg(feature = "lodestar")]
+    #[test]
+    fn test_lodestar_route_hook_observe_and_query() {
+        let mut router = InferenceRouter::new(
+            TriggerGateConfig::default(),
+            Config::default(),
+            false,
+            false,
+        );
+        // Before any observation
+        assert_eq!(router.lodestar_distance(), 0);
+        assert_eq!(router.lodestar_budget_remaining(), -1);
+        assert!(!router.lodestar_suggests_cpu());
+
+        // Observe near completion (d=2, budget=10)
+        router.observe_lodestar(2, 10);
+        assert_eq!(router.lodestar_distance(), 2);
+        assert_eq!(router.lodestar_budget_remaining(), 10);
+        assert!(!router.lodestar_suggests_cpu()); // d <= 4, not far
+
+        // Observe far completion with tight budget (d=6, budget=8)
+        router.observe_lodestar(6, 8);
+        assert_eq!(router.lodestar_distance(), 6);
+        assert_eq!(router.lodestar_budget_remaining(), 8);
+        // 8 < 6*2=12, so suggests CPU
+        assert!(router.lodestar_suggests_cpu());
+
+        // Observe far completion with ample budget (d=6, budget=20)
+        router.observe_lodestar(6, 20);
+        assert!(!router.lodestar_suggests_cpu()); // 20 >= 12
+
+        // Reset
+        router.reset_lodestar();
+        assert_eq!(router.lodestar_distance(), 0);
+        assert_eq!(router.lodestar_budget_remaining(), -1);
+        assert!(!router.lodestar_suggests_cpu());
     }
 }
