@@ -394,8 +394,8 @@ fn test_bandit_pruner_partial_scoring_integration() {
     // Verify Q-value ordering: Q(0) > Q(1) > Q(2) > Q(3)
     let q = bandit.q_values();
     println!("\n── BanditPruner Integration Q-values ──");
-    for i in 0..N_ARMS {
-        println!("   Arm {i}: Q={:.4}, visits={}", q[i], bandit.visits()[i]);
+    for (i, qi) in q.iter().enumerate() {
+        println!("   Arm {i}: Q={qi:.4}, visits={}", bandit.visits()[i]);
     }
 
     assert!(q[0] > q[1], "Q[0] ({}) should > Q[1] ({})", q[0], q[1]);

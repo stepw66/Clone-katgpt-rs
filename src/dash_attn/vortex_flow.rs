@@ -142,7 +142,7 @@ pub enum VortexRouter {
     /// Channel-aware router (SIMD-optimized routing over critical channels).
     ChannelAware(ChannelAwareRouter),
     /// Meta-router (bandit-based policy selection over multiple routers).
-    Meta(MetaRouter),
+    Meta(Box<MetaRouter>),
 }
 
 /// Cache storage for [`VortexRouter`] — mirrors the enum variants.
@@ -181,11 +181,11 @@ impl VortexRouter {
             VortexFlowConfig::Entmax => Self::Entmax(EntmaxRouter::default_router()),
             VortexFlowConfig::ValueEnergy => Self::ValueEnergy(ValueEnergyRouter::new(true)),
             VortexFlowConfig::ChannelAware => Self::ChannelAware(ChannelAwareRouter::new(true)),
-            VortexFlowConfig::Meta => Self::Meta(MetaRouter::new_default(vec![
+            VortexFlowConfig::Meta => Self::Meta(Box::new(MetaRouter::new_default(vec![
                 DynPolicy::BlockTopK(BlockTopKRouter::new(true)),
                 DynPolicy::Entmax(EntmaxRouter::default_router()),
                 DynPolicy::ValueEnergy(ValueEnergyRouter::new(true)),
-            ])),
+            ]))),
             VortexFlowConfig::DashAttn => {
                 unreachable!("DashAttn does not produce a VortexRouter; check is_vortex() first")
             }

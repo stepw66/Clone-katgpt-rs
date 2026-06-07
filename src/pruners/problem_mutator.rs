@@ -175,7 +175,7 @@ impl EvolutionArena {
         }
 
         // Cycle reset: after max_rounds_per_cycle, re-seed from base
-        if self.round > 0 && self.round % self.max_rounds_per_cycle == 0 {
+        if self.round > 0 && self.round.is_multiple_of(self.max_rounds_per_cycle) {
             self.pending.clear();
             self.refill();
         }

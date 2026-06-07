@@ -98,8 +98,7 @@ fn count_active_arms(visits: &[u32], total_pulls: u32, threshold: f32) -> usize 
 fn optimal_arm_for_config(config: &GameConfig) -> usize {
     let mut best_arm = 0;
     let mut best_reward = f32::NEG_INFINITY;
-    for arm in 0..N_ARMS {
-        let (base, survival_aff, kill_aff, steps_aff) = ARM_PROFILES[arm];
+    for (arm, &(base, survival_aff, kill_aff, steps_aff)) in ARM_PROFILES.iter().enumerate() {
         let mut reward = base;
         reward += (config.survival_weight - 0.5) * 2.0 * survival_aff;
         reward += (config.kill_weight - 0.5) * 2.0 * kill_aff;
