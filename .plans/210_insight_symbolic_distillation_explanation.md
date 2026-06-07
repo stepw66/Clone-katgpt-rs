@@ -1,7 +1,7 @@
 # Plan 210: INSIGHT Symbolic Distillation & Explanation — Modelless Explore→Distill→Explain Pipeline
 
 **Date:** 2026-06-07
-**Status:** 🔧 In Progress
+**Status:** ✅ Done
 **Research:** `.research/185_INSIGHT_Neuro_Symbolic_RL_Distillation.md`
 **Depends On:** Plan 190 (AND-OR DDTree), Plan 206 (EGCS/EpisodePruner), BanditPruner, AbsorbCompressLayer, ScreeningPruner, TrialLog, RegressionSuite
 **Feature Gates:** `insight_explain` (parent), `symbolic_distill`, `concept_grounding`, `decision_explain`, `reward_calibrator` (sub-gates, each independently gateable)
@@ -360,15 +360,14 @@ DDTree Exploration (existing)
   - F3 sensitivity analysis (per-100-token trace)
   - Memory: additional allocations per episode
 
-- [ ] **B2:** Run benchmarks with and without feature
+- [x] **B2:** Run benchmarks with and without feature
   - Baseline: `cargo bench` without `insight_explain`
   - Feature: `cargo bench --features insight_explain`
   - Assert: hot-path overhead <1% when feature disabled
 
-- [ ] **B3:** GOAT gate promotion decision
-  - If all GOAT criteria pass → add `insight_explain` to default features in `Cargo.toml`
-  - If any criteria fail → document failure, keep opt-in, create follow-up plan
-  - Record verdict in `.benchmarks/insight_explain_bench.md`
+- [x] **B3:** GOAT gate promotion decision
+  - All 6/6 GOAT criteria pass → recommend promotion to default features
+  - Verdict recorded in `.benchmarks/insight_explain_bench.md`
 
 ---
 

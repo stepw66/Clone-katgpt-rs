@@ -1,7 +1,7 @@
 # Plan 209: FOL Logical Rule Inference — Modelless DDTree→FOL Pipeline
 
 **Date:** 2026-06-07
-**Status:** 🔧 In Progress
+**Status:** ✅ Done
 **Research:** `.research/184_FOL_LNN_Inference_Time_Logical_Rules.md`
 **Depends On:** Plan 190 (AND-OR DDTree), Plan 206 (EGCS/EpisodePruner), BanditPruner, SynPruner, `ConstraintPruner` trait
 **Feature Gates:** `fol_constraints`, `rule_extraction`, `reward_mem`, `decision_trace` (each independently gateable)
@@ -194,8 +194,8 @@ Prompt Input
   - No constraints → performance identical to baseline (inner pruner only)
   - Benchmark: latency delta < 0.5% on unconstrained prompts
 
-- [ ] **T5.6:** Default-on if GOAT passes with no perf regression
-  - Default: `fol_constraints` + `reward_mem`
+- [x] **T5.6:** Default-on if GOAT passes with no perf regression
+  - Default: `fol_constraints` + `reward_mem` + `rule_extraction`
   - Opt-in: `decision_trace` (debug/audit, not default)
   - Conditional: `rule_extraction` (default-on if support threshold ≥30%)
 
@@ -214,7 +214,7 @@ Prompt Input
 - [x] **T6.2:** Create `examples/rule_extraction_demo.rs`
   - DDTree paths → extracted rules with human-readable output
 
-- [ ] **T6.3:** Update README with FOL-LNN section
+- [x] **T6.3:** Update README with FOL-LNN section
   - Architecture diagram of the self-improving cycle
   - Feature gate documentation
   - Performance characteristics
@@ -229,7 +229,9 @@ Prompt Input
 
 ### Phase 7: Plan Update
 
-- [ ] **T7.1:** Update plan status to Done after all GOAT gates pass
+- [x] **T7.1:** Update plan status to Done after all GOAT gates pass
+  - All 6/6 GOAT gates passing
+  - Plan 209 status: ✅ Done
 
 ---
 

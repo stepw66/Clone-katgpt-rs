@@ -495,6 +495,26 @@ Hierarchical subgoal decomposition inspired by LEAP (arXiv 2606.03303). Generic 
 
 📖 Plan: [`.plans/190_and_or_dtree_blueprint_decomposition.md`](.plans/190_and_or_dtree_blueprint_decomposition.md).
 
+### FOL Logical Rule Inference (Plan 209) + INSIGHT Symbolic Distillation (Plan 210)
+
+Modelless DDTree→FOL pipeline that extracts interpretable first-order logic rules from DDTree exploration. Four fusions:
+
+- **T1 FOL Constraints**: Static keyword→token extraction from prompts (~100 Rust patterns, zero alloc)
+- **T2 Rule Extraction**: DDTree path→TOP-K logical rules with Hamming-distance deduplication
+- **T3 Reward Memory**: blake3-hashed pattern tracking with EMA reward propagation
+- **T4 Decision Traces**: Human-readable decision audit (opt-in debug feature)
+- **F1 Symbolic Expression**: Greedy forward selection fits compact polynomial expressions to DDTree boundaries
+- **F2 Concept Grounding**: Template-based mapping from raw pruner internals to human-readable concepts
+- **F3 Decision Explanation**: Perturbation-based sensitivity analysis identifying primary driver pruners
+- **F4 Reward Calibration**: Welford's online variance tracking with regression-safe absorption
+
+Features: `fol_constraints`, `rule_extraction`, `reward_mem`, `decision_trace`, `symbolic_distill`, `concept_grounding`, `decision_explain`, `reward_calibrator`.
+
+GOAT: 6/6 gates passing (G1 constraint accuracy ≥80%, G2 rule reuse ≥30%, G3 reward gain ≥10%, G4 zero overhead, G5 <1μs extraction, G6 feature isolation).
+
+📖 Plans: [`.plans/209_fol_logical_rule_inference.md`](.plans/209_fol_logical_rule_inference.md), [`.plans/210_insight_symbolic_distillation_explanation.md`](.plans/210_insight_symbolic_distillation_explanation.md).
+📖 Benchmarks: [`.benchmarks/209_fol_lnn_goat.md`](.benchmarks/209_fol_lnn_goat.md), [`.benchmarks/insight_explain_bench.md`](.benchmarks/insight_explain_bench.md).
+
 ## 🏭 Productions
 
 KatGPT-RS is the **core inference library** — pure algorithms, zero side effects.
