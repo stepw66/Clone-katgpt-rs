@@ -47,9 +47,9 @@ pub trait BestBuddyAligner: Send + Sync {
 - [x] Implement `best_buddies(corr_rows: &[&[f32]], k: usize) -> Vec<(usize, usize)>` in `katgpt-core/src/traits.rs`
 - [x] Add `BestBuddyAligner` trait to `katgpt-core/src/traits.rs`
 - [x] Implement `MarginalBestBuddyAligner` in `katgpt-rs/src/speculative/best_buddies.rs`
-- [ ] Integrate into `build_dd_tree_speculative`: filter marginals by mutual agreement before tree construction
+- [x] Integrate into `build_dd_tree_speculative`: filter marginals by mutual agreement before tree construction
 - [x] Add feature flag `best_buddies` (opt-in initially, default-on after GOAT proof)
-- [x] Write tests: pearson_correlation, best_buddies, MarginalBestBuddyAligner (14 tests passing)
+- [x] Write tests: pearson_correlation, best_buddies, MarginalBestBuddyAligner, integration (19 tests passing)
 - [ ] Write benchmark: measure Pearson + mutual NN overhead per decode step
 - [ ] GOAT gate: measure acceptance rate delta. If ≥ 5% improvement → default-on.
 - [ ] Update README feature flags section

@@ -18,7 +18,6 @@ pub struct MarginalBestBuddyAligner {
     /// EMA alpha for smoothing agreement scores across steps. Default: 0.1
     pub ema_alpha: f32,
     /// Cached agreement scores from previous step (for EMA smoothing)
-    #[allow(dead_code)] // Used by future EMA integration into build_dd_tree_speculative
     cached_scores: Vec<f32>,
 }
 
@@ -34,6 +33,74 @@ impl MarginalBestBuddyAligner {
     pub fn with_ema_alpha(mut self, alpha: f32) -> Self {
         self.ema_alpha = alpha;
         self
+    }
+
+    /// Filter marginals by mutual agreement between draft and target.
+    ///
+    /// For each position, computes Pearson correlation between draft and target
+    /// marginals. Positions with agreement below `threshold` have their marginals
+    /// dampened (scaled by the agreement score). Positions with high agreement
+    /// pass through unchanged.
+    ///
+    /// After dampening, marginals are re-normalized so each position sums to 1.0.
+    /// If all marginals at a position are zeroed out (complete disagreement),
+    /// the original draft marginals are kept as fallback.
+    ///
+    /// Returns filtered marginals owned by the caller.
+    pub fn filter_marginals<'a>(
+        &mut self,
+        draft_marginals: &[&[f32]],
+        target_marginals: &[&[f32]],
+    ) -> Vec<Vec<f32>> {
+        let seq_len = draft_marginals.len().min(target_marginals.len());
+        let mut filtered = Vec::with_capacity(seq_len);
+
+        // Compute per-position alignment confidence
+        let mut confidence = vec![0.0f32; seq_len];
+        for i in 0..seq_len {
+            let len = draft_marginals[i].len().min(target_marginals[i].len());
+            if len == 0 {
+                continue;
+            }
+            confidence[i] =
+                pearson_correlation(&draft_marginals[i][..len], &target_marginals[i][..len]);
+        }
+
+        // EMA-smooth with cached scores from previous step
+        if !self.cached_scores.is_empty() {
+            let prev_len = self.cached_scores.len().min(seq_len);
+            for i in 0..prev_len {
+                confidence[i] =
+                    self.ema_alpha * confidence[i] + (1.0 - self.ema_alpha) * self.cached_scores[i];
+            }
+        }
+        self.cached_scores = confidence.clone();
+
+        // Apply agreement-based dampening
+        for i in 0..seq_len {
+            let agreement = self.mutual_agreement(draft_marginals[i], target_marginals[i]);
+            let src = draft_marginals[i];
+
+            if agreement >= self.threshold {
+                // High agreement — pass through unchanged
+                filtered.push(src.to_vec());
+            } else {
+                // Low agreement — dampen by agreement score
+                let mut row: Vec<f32> = src.iter().map(|&v| v * agreement).collect();
+                let sum: f32 = row.iter().sum();
+                if sum > f32::EPSILON {
+                    for v in &mut row {
+                        *v /= sum;
+                    }
+                } else {
+                    // Complete disagreement — fallback to original
+                    row = src.to_vec();
+                }
+                filtered.push(row);
+            }
+        }
+
+        filtered
     }
 }
 

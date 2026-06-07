@@ -98,6 +98,9 @@ pub mod best_buddies;
 #[cfg(feature = "best_buddies")]
 pub use best_buddies::MarginalBestBuddyAligner;
 
+#[cfg(all(feature = "speculative_generator", feature = "best_buddies"))]
+pub use dd_tree::build_dd_tree_speculative_best_buddies;
+
 #[cfg(feature = "elf_sde")]
 pub use types::EarlyStopGate;
 

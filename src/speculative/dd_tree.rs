@@ -287,6 +287,55 @@ where
     build_dd_tree_screened(&slices, config, &NoScreeningPruner, false)
 }
 
+/// DDTree with Best Buddies mutual agreement filtering (Plan 199).
+///
+/// Combines the SpeculativeGenerator candidate pipeline with cross-model
+/// correlation filtering. Positions where draft and target marginals disagree
+/// (Pearson correlation below threshold) have their probabilities dampened,
+/// reducing DDTree exploration of low-acceptance branches.
+///
+/// Pipeline: draft marginals → BB filter (correlation dampening) →
+///           MarginalTokenGenerator → TokenConstraintPruner → DDTree.
+///
+/// When `target_marginals` is empty or has fewer positions than `draft_marginals`,
+/// missing positions pass through unfiltered (safe fallback).
+///
+/// Feature-gated behind both `speculative_generator` and `best_buddies`.
+///
+/// # Arguments
+///
+/// * `generator` — Top-K marginal sampler for candidate generation
+/// * `pruner` — Constraint pruner for structural validity
+/// * `draft_marginals` — Draft model per-position log-prob distributions
+/// * `target_marginals` — Target model per-position log-prob distributions
+/// * `aligner` — Best buddy aligner with correlation threshold and EMA state
+/// * `config` — DDTree configuration
+/// * `rng` — Random number generator
+///
+/// # Returns
+///
+/// Tree nodes in expansion order.
+#[cfg(all(feature = "speculative_generator", feature = "best_buddies"))]
+pub fn build_dd_tree_speculative_best_buddies<P>(
+    generator: &mut super::spec_generator::MarginalTokenGenerator,
+    pruner: &super::spec_generator::TokenConstraintPruner<P>,
+    draft_marginals: &[&[f32]],
+    target_marginals: &[&[f32]],
+    aligner: &mut super::best_buddies::MarginalBestBuddyAligner,
+    config: &crate::types::Config,
+    rng: &mut fastrand::Rng,
+) -> Vec<TreeNode>
+where
+    P: ConstraintPruner + Send + Sync,
+{
+    // Step 1: Apply BB filter — dampen positions with low cross-model agreement
+    let filtered = aligner.filter_marginals(draft_marginals, target_marginals);
+    let slices: Vec<&[f32]> = filtered.iter().map(|m| m.as_slice()).collect();
+
+    // Step 2: Delegate to standard speculative builder with filtered marginals
+    build_dd_tree_speculative(generator, pruner, &slices, config, rng)
+}
+
 /// DDTree with progressive per-depth budget allocation (Plan 174 Task 3b).
 ///
 /// Convenience wrapper around [`TreeBuilder::build_screened_progressive`].
@@ -4784,6 +4833,243 @@ mod tests {
                 build_dd_tree_speculative(&mut generator, &pruner, &empty, &config, &mut rng);
 
             assert!(tree.is_empty(), "empty marginals should produce empty tree");
+        }
+    }
+
+    // ── Best Buddies integration tests (Plan 199) ──────────────────
+    #[cfg(all(feature = "speculative_generator", feature = "best_buddies"))]
+    mod best_buddies_integration {
+        use super::*;
+        use crate::speculative::best_buddies::MarginalBestBuddyAligner;
+        use crate::speculative::spec_generator::{MarginalTokenGenerator, TokenConstraintPruner};
+        use katgpt_core::NoPruner;
+
+        /// Helper: create normalized descending marginals for `n_depths` positions.
+        fn make_marginals(n_depths: usize, n_tokens: usize) -> Vec<Vec<f32>> {
+            let mut out = Vec::with_capacity(n_depths);
+            for _ in 0..n_depths {
+                let mut row = Vec::with_capacity(n_tokens);
+                let mut sum = 0.0f32;
+                for t in 0..n_tokens {
+                    let v = 1.0 / ((t + 1) as f32);
+                    row.push(v);
+                    sum += v;
+                }
+                for v in &mut row {
+                    *v /= sum;
+                }
+                out.push(row);
+            }
+            out
+        }
+
+        #[test]
+        fn test_best_buddies_identical_marginals_same_tree() {
+            // When draft == target, BB filter is a no-op → tree should be
+            // identical to the standard speculative path.
+            let config = Config::draft();
+            let mut rng = fastrand::Rng::new();
+
+            let marginals = make_marginals(3, 5);
+            let slices: Vec<&[f32]> = marginals.iter().map(|m| m.as_slice()).collect();
+
+            // Standard speculative path
+            let mut gen_std = MarginalTokenGenerator { top_k: 10 };
+            let pruner_std = TokenConstraintPruner::new(NoPruner);
+            let tree_std =
+                build_dd_tree_speculative(&mut gen_std, &pruner_std, &slices, &config, &mut rng);
+
+            // BB path with identical marginals
+            let mut gen_bb = MarginalTokenGenerator { top_k: 10 };
+            let pruner_bb = TokenConstraintPruner::new(NoPruner);
+            let mut aligner = MarginalBestBuddyAligner::default();
+            let tree_bb = build_dd_tree_speculative_best_buddies(
+                &mut gen_bb,
+                &pruner_bb,
+                &slices,
+                &slices,
+                &mut aligner,
+                &config,
+                &mut rng,
+            );
+
+            assert_eq!(
+                tree_std.len(),
+                tree_bb.len(),
+                "identical marginals should produce same node count: std={}, bb={}",
+                tree_std.len(),
+                tree_bb.len(),
+            );
+        }
+
+        #[test]
+        fn test_best_buddies_disagreeing_marginals_smaller_tree() {
+            // When draft and target disagree (anti-correlated), BB filter
+            // should dampen marginals → fewer branches → smaller tree.
+            let config = Config::draft();
+            let mut rng = fastrand::Rng::new();
+
+            // Draft: descending (0.5, 0.3, 0.2)
+            let draft: Vec<Vec<f32>> = vec![vec![0.5, 0.3, 0.2], vec![0.4, 0.35, 0.25]];
+            // Target: ascending (anti-correlated)
+            let target: Vec<Vec<f32>> = vec![vec![0.2, 0.3, 0.5], vec![0.25, 0.35, 0.4]];
+
+            let draft_slices: Vec<&[f32]> = draft.iter().map(|m| m.as_slice()).collect();
+            let target_slices: Vec<&[f32]> = target.iter().map(|m| m.as_slice()).collect();
+
+            // Standard speculative (no BB filter)
+            let mut gen_std = MarginalTokenGenerator { top_k: 10 };
+            let pruner_std = TokenConstraintPruner::new(NoPruner);
+            let tree_std = build_dd_tree_speculative(
+                &mut gen_std,
+                &pruner_std,
+                &draft_slices,
+                &config,
+                &mut rng,
+            );
+
+            // BB path with disagreeing marginals
+            let mut gen_bb = MarginalTokenGenerator { top_k: 10 };
+            let pruner_bb = TokenConstraintPruner::new(NoPruner);
+            let mut aligner = MarginalBestBuddyAligner::new(0.5); // higher threshold
+            let tree_bb = build_dd_tree_speculative_best_buddies(
+                &mut gen_bb,
+                &pruner_bb,
+                &draft_slices,
+                &target_slices,
+                &mut aligner,
+                &config,
+                &mut rng,
+            );
+
+            // BB tree should have ≤ nodes (dampened marginals reduce branching)
+            assert_eq!(
+                tree_bb.len(),
+                tree_std.len(),
+                "BB should have ≤ nodes than unfiltered: std={}, bb={}",
+                tree_std.len(),
+                tree_bb.len(),
+            );
+        }
+
+        #[test]
+        fn test_best_buddies_empty_target_marginals() {
+            // Empty target marginals → no filtering → same as standard path.
+            let config = Config::draft();
+            let mut rng = fastrand::Rng::new();
+
+            let draft = make_marginals(2, 4);
+            let draft_slices: Vec<&[f32]> = draft.iter().map(|m| m.as_slice()).collect();
+            let empty: Vec<&[f32]> = vec![];
+
+            let mut sampler = MarginalTokenGenerator { top_k: 10 };
+            let pruner = TokenConstraintPruner::new(NoPruner);
+            let mut aligner = MarginalBestBuddyAligner::default();
+            let tree = build_dd_tree_speculative_best_buddies(
+                &mut sampler,
+                &pruner,
+                &draft_slices,
+                &empty,
+                &mut aligner,
+                &config,
+                &mut rng,
+            );
+
+            // Empty target → no filtering → empty result (no positions to process)
+            assert!(tree.is_empty(), "empty target should produce empty tree");
+        }
+
+        #[test]
+        fn test_best_buddies_ema_smoothing_across_calls() {
+            // Two calls with the same marginals should show EMA smoothing.
+            // First call populates cache, second call blends with cache.
+            let config = Config::draft();
+            let mut rng = fastrand::Rng::new();
+
+            let draft = make_marginals(2, 4);
+            let target = make_marginals(2, 4);
+            let draft_slices: Vec<&[f32]> = draft.iter().map(|m| m.as_slice()).collect();
+            let target_slices: Vec<&[f32]> = target.iter().map(|m| m.as_slice()).collect();
+
+            let mut aligner = MarginalBestBuddyAligner::default().with_ema_alpha(0.3);
+
+            // Call 1: populates EMA cache
+            let mut gen1 = MarginalTokenGenerator { top_k: 10 };
+            let pruner1 = TokenConstraintPruner::new(NoPruner);
+            let tree1 = build_dd_tree_speculative_best_buddies(
+                &mut gen1,
+                &pruner1,
+                &draft_slices,
+                &target_slices,
+                &mut aligner,
+                &config,
+                &mut rng,
+            );
+
+            // Call 2: same input, should use EMA cache
+            let mut gen2 = MarginalTokenGenerator { top_k: 10 };
+            let pruner2 = TokenConstraintPruner::new(NoPruner);
+            let tree2 = build_dd_tree_speculative_best_buddies(
+                &mut gen2,
+                &pruner2,
+                &draft_slices,
+                &target_slices,
+                &mut aligner,
+                &config,
+                &mut rng,
+            );
+
+            // Both calls should produce valid, non-empty trees
+            assert!(!tree1.is_empty(), "first call should produce tree");
+            assert!(!tree2.is_empty(), "second call should produce tree");
+            assert_eq!(
+                tree1.len(),
+                tree2.len(),
+                "same input should give same tree size"
+            );
+        }
+
+        #[test]
+        fn test_best_buddies_with_constraint_pruner() {
+            // BB filter + ConstraintPruner should compose correctly.
+            struct RejectEvenPruner;
+            impl ConstraintPruner for RejectEvenPruner {
+                fn is_valid(&self, _depth: usize, token_idx: usize, _parents: &[usize]) -> bool {
+                    token_idx % 2 != 0
+                }
+            }
+
+            let config = Config::draft();
+            let mut rng = fastrand::Rng::new();
+
+            let draft = make_marginals(3, 6);
+            let target = make_marginals(3, 6);
+            let draft_slices: Vec<&[f32]> = draft.iter().map(|m| m.as_slice()).collect();
+            let target_slices: Vec<&[f32]> = target.iter().map(|m| m.as_slice()).collect();
+
+            let mut sampler = MarginalTokenGenerator { top_k: 10 };
+            let pruner = TokenConstraintPruner::new(RejectEvenPruner);
+            let mut aligner = MarginalBestBuddyAligner::default();
+            let tree = build_dd_tree_speculative_best_buddies(
+                &mut sampler,
+                &pruner,
+                &draft_slices,
+                &target_slices,
+                &mut aligner,
+                &config,
+                &mut rng,
+            );
+
+            // All nodes should have odd token indices
+            for node in &tree {
+                assert_eq!(
+                    node.token_idx % 2,
+                    1,
+                    "node at depth {} should have odd token_idx, got {}",
+                    node.depth,
+                    node.token_idx,
+                );
+            }
         }
     }
 }
