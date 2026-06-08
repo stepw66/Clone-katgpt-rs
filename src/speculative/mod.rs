@@ -377,6 +377,13 @@ pub use kurtosis_gate::{KurtosisGate, excess_kurtosis};
 #[cfg(all(feature = "speculative_generator", feature = "kurtosis_gate"))]
 pub use dd_tree::build_dd_tree_speculative_kurtosis;
 
+// ── Precision-Aware Speculative Generator (Plan 227 Phase 4, feature: precision_aware_draft) ──
+#[cfg(all(feature = "precision_aware_draft", feature = "speculative_generator"))]
+pub mod precision_aware_generator;
+
+#[cfg(all(feature = "precision_aware_draft", feature = "speculative_generator"))]
+pub use precision_aware_generator::PrecisionAwareGenerator;
+
 // ── Domino Causal Correction re-exports (Plan 197, feature: domino_correction) ──
 #[cfg(feature = "domino_correction")]
 pub use dd_tree::build_dd_tree_domino;
