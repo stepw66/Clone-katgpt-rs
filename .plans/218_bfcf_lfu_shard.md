@@ -175,7 +175,7 @@ pub trait RegionBatching: Send + Sync {
 - [x] Implement shard assignment: Hot → dedicated shard, Warm → round-robin, Cold → lazy
 - [x] Implement `rebalance()` — promote/demote shards when FreqTier transitions
 - [x] Implement `min_regions_for_shard()` — only shard when regions > 30 (below: sequential)
-- [ ] Integrate `FreqTier` derivation from FreqBandit (reuse Plan 189 `FrequencyBandit`) — deferred to Phase 5
+- [x] Integrate `FreqTier` derivation from FreqBandit (reuse Plan 189 `FrequencyBandit`) — done, `ShardTierBandit`
 - [x] Test: shard assignment correctness for all (label, tier) combinations
 - [x] Test: rebalance correctly migrates regions on tier transitions
 - [x] Test: sequential fallback when region count < threshold

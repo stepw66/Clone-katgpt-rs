@@ -859,6 +859,9 @@ pub mod roaring_membership;
 #[cfg(feature = "bfcf_lfu_shard")]
 pub use bfcp_lfu_shard::{BfcpLfuShard, freq_aware_complexity};
 
+#[cfg(all(feature = "bfcf_lfu_shard", feature = "freq_bandit"))]
+pub use bfcp_lfu_shard::ShardTierBandit;
+
 // ── LSH Approximate Cache — SimHash near-miss cache layer (Plan 220) ──
 //
 // Three-level hierarchy: L0 exact (BLAKE3) → L1 LSH (SimHash) → compute.

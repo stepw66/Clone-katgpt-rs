@@ -4,11 +4,130 @@
 //! Thread-safe via papaya lock-free internals in BfcpRegionCache and RegionShardMap.
 //!
 //! Also provides `freq_aware_complexity` for extending PerceptRouter with frequency tier.
+//!
+//! With `freq_bandit` feature: `ShardTierBandit` adapts tier decisions via UCB1
+//! based on cache hit rewards, overriding static frequency thresholds.
 
 use super::bfcf_types::{BFCP, BorelRegion};
 use super::bfcp_region_cache::{BfcpRegionCache, FreqTier, blake3_logit_hash};
 use super::region_batch::{RegionBatcher, RegionBatching};
 use super::region_shard_map::RegionShardMap;
+
+#[cfg(feature = "freq_bandit")]
+use crate::freq_bandit::FrequencyBandit;
+
+// ── ShardTierBandit (freq_bandit integration, Plan 218 Phase 5) ────
+
+/// UCB1 bandit that adapts shard tier decisions based on cache hit rewards.
+///
+/// Arms: `[Hot, Warm, Cold]` (indices 0, 1, 2 matching `FreqTier` repr).
+/// The bandit starts with no preference and learns which tier assignment
+/// yields the best cache performance over time.
+///
+/// Usage: after computing the static `FreqTier` from LFU frequency counts,
+/// feed the reward signal (hit/miss) to `update_reward`, then use
+/// `refine_tier` to let the bandit promote or demote the tier.
+#[cfg(feature = "freq_bandit")]
+pub struct ShardTierBandit {
+    bandit: FrequencyBandit,
+}
+
+#[cfg(feature = "freq_bandit")]
+impl ShardTierBandit {
+    /// Create a new shard tier bandit with default exploration constant.
+    pub fn new() -> Self {
+        Self {
+            bandit: FrequencyBandit::new(),
+        }
+    }
+
+    /// Refine the static tier using bandit knowledge.
+    ///
+    /// If the bandit has learned that a different tier performs better
+    /// (based on accumulated reward signals), it may promote or demote.
+    /// The static tier serves as a prior — the bandit can only shift by
+    /// one tier level at a time to avoid erratic jumping.
+    ///
+    /// Returns the (possibly adjusted) tier.
+    pub fn refine_tier(&self, static_tier: FreqTier) -> FreqTier {
+        // If the bandit hasn't been trained yet, trust the static classification.
+        if self.bandit.total_pulls() == 0 {
+            return static_tier;
+        }
+
+        let best_tier = self.bandit_best_tier();
+
+        // Allow at most one tier shift per call to prevent oscillation.
+        match (static_tier, best_tier) {
+            // Agreement — no change.
+            (FreqTier::Hot, FreqTier::Hot)
+            | (FreqTier::Warm, FreqTier::Warm)
+            | (FreqTier::Cold, FreqTier::Cold) => static_tier,
+
+            // Promotion by one level.
+            (FreqTier::Warm, FreqTier::Hot) => FreqTier::Hot,
+            (FreqTier::Cold, FreqTier::Warm) => FreqTier::Warm,
+
+            // Demotion by one level.
+            (FreqTier::Hot, FreqTier::Warm) => FreqTier::Warm,
+            (FreqTier::Warm, FreqTier::Cold) => FreqTier::Cold,
+
+            // Two-level shift: only move one step toward bandit recommendation.
+            (FreqTier::Cold, FreqTier::Hot) => FreqTier::Warm,
+            (FreqTier::Hot, FreqTier::Cold) => FreqTier::Warm,
+        }
+    }
+
+    /// Feed reward signal from cache hit (1.0) or miss (0.0), or any [0, 1] value.
+    pub fn update_reward(&mut self, tier: FreqTier, reward: f64) {
+        self.bandit.update(tier.into(), reward);
+    }
+
+    /// Number of reward updates across all arms.
+    pub fn total_pulls(&self) -> u32 {
+        self.bandit.total_pulls()
+    }
+
+    /// Best tier according to accumulated Q-values.
+    fn bandit_best_tier(&self) -> FreqTier {
+        let best = self.bandit.best_arm();
+        best.into()
+    }
+}
+
+#[cfg(feature = "freq_bandit")]
+impl Default for ShardTierBandit {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ── FreqTier ↔ FrequencyBand conversion ───────────────────────────
+
+/// Map `FreqTier` arm index to `FrequencyBand` for the shared bandit core.
+/// `FreqTier` repr: Hot=0, Warm=1, Cold=2 → maps to FrequencyBand indices.
+#[cfg(feature = "freq_bandit")]
+impl From<FreqTier> for crate::freq_bandit::FrequencyBand {
+    fn from(tier: FreqTier) -> Self {
+        match tier {
+            FreqTier::Hot => Self::High, // Hot cache hit rate = high frequency access
+            FreqTier::Warm => Self::Mid,
+            FreqTier::Cold => Self::Low,
+        }
+    }
+}
+
+/// Map `FrequencyBand` back to `FreqTier`.
+#[cfg(feature = "freq_bandit")]
+impl From<crate::freq_bandit::FrequencyBand> for FreqTier {
+    fn from(band: crate::freq_bandit::FrequencyBand) -> Self {
+        match band {
+            crate::freq_bandit::FrequencyBand::High => FreqTier::Hot,
+            crate::freq_bandit::FrequencyBand::Mid => FreqTier::Warm,
+            crate::freq_bandit::FrequencyBand::Low => FreqTier::Cold,
+        }
+    }
+}
 
 // ── BfcpLfuShard ─────────────────────────────────────────────────
 
@@ -19,6 +138,9 @@ pub struct BfcpLfuShard {
     cache: BfcpRegionCache,
     shard_map: RegionShardMap,
     batcher: RegionBatcher,
+    /// Optional bandit for adaptive tier refinement (Plan 189 integration).
+    #[cfg(feature = "freq_bandit")]
+    tier_bandit: ShardTierBandit,
 }
 
 impl BfcpLfuShard {
@@ -28,6 +150,8 @@ impl BfcpLfuShard {
             cache: BfcpRegionCache::new(cache_capacity),
             shard_map: RegionShardMap::new(num_shards),
             batcher: RegionBatcher::new(),
+            #[cfg(feature = "freq_bandit")]
+            tier_bandit: ShardTierBandit::new(),
         }
     }
 
@@ -49,6 +173,9 @@ impl BfcpLfuShard {
     /// Like `process` but also returns shard assignments for each region.
     ///
     /// Returns `(partition, Vec<(shard_index, FreqTier)>)`.
+    ///
+    /// With `freq_bandit` feature: after deriving the static tier from LFU
+    /// counts, the bandit may refine the tier based on learned rewards.
     pub fn process_and_shard(
         &mut self,
         logits: &[f32],
@@ -58,7 +185,13 @@ impl BfcpLfuShard {
         let hash = blake3_logit_hash(logits);
 
         // Derive frequency tier from cache for each region.
-        let tier = self.cache.freq_tier(&hash).unwrap_or(FreqTier::Cold);
+        let static_tier = self.cache.freq_tier(&hash).unwrap_or(FreqTier::Cold);
+
+        // Bandit-refined tier (no-op without freq_bandit feature).
+        #[cfg(feature = "freq_bandit")]
+        let tier = self.tier_bandit.refine_tier(static_tier);
+        #[cfg(not(feature = "freq_bandit"))]
+        let tier = static_tier;
 
         let assignments: Vec<(usize, FreqTier)> = partition
             .regions
@@ -93,6 +226,20 @@ impl BfcpLfuShard {
         self.cache.decay(lambda);
     }
 
+    /// Feed reward signal to the tier bandit (hit=1.0, miss=0.0, or any [0,1]).
+    ///
+    /// Only available with `freq_bandit` feature. No-op otherwise.
+    #[cfg(feature = "freq_bandit")]
+    pub fn update_bandit_reward(&mut self, tier: FreqTier, reward: f64) {
+        self.tier_bandit.update_reward(tier, reward);
+    }
+
+    /// Access the tier bandit (for direct queries like `total_pulls`).
+    #[cfg(feature = "freq_bandit")]
+    pub fn tier_bandit(&self) -> &ShardTierBandit {
+        &self.tier_bandit
+    }
+
     /// Access the underlying LFU cache.
     pub fn cache(&self) -> &BfcpRegionCache {
         &self.cache
@@ -106,6 +253,23 @@ impl BfcpLfuShard {
     /// Access the underlying batcher.
     pub fn batcher(&self) -> &RegionBatcher {
         &self.batcher
+    }
+
+    /// Derive `FreqTier` from cache, optionally refined by bandit.
+    ///
+    /// With `freq_bandit`: returns bandit-refined tier.
+    /// Without: returns static tier directly.
+    pub fn derive_tier(&self, hash: &[u8; 32]) -> FreqTier {
+        let static_tier = self.cache.freq_tier(hash).unwrap_or(FreqTier::Cold);
+
+        #[cfg(feature = "freq_bandit")]
+        {
+            self.tier_bandit.refine_tier(static_tier)
+        }
+        #[cfg(not(feature = "freq_bandit"))]
+        {
+            static_tier
+        }
     }
 }
 
@@ -284,6 +448,137 @@ mod tests {
 
         // Cache should still contain the entry (not evicted, just frequency reduced).
         assert_eq!(lfu.cache().len(), 1);
+    }
+
+    // ── Bandit integration tests (freq_bandit feature) ───────────
+
+    #[cfg(feature = "freq_bandit")]
+    #[test]
+    fn test_bandit_refine_tier_no_pulls_returns_static() {
+        use super::ShardTierBandit;
+        let bandit = ShardTierBandit::new();
+
+        // No reward updates yet — must return the static tier unchanged.
+        assert_eq!(bandit.refine_tier(FreqTier::Hot), FreqTier::Hot);
+        assert_eq!(bandit.refine_tier(FreqTier::Warm), FreqTier::Warm);
+        assert_eq!(bandit.refine_tier(FreqTier::Cold), FreqTier::Cold);
+    }
+
+    #[cfg(feature = "freq_bandit")]
+    #[test]
+    fn test_bandit_refine_tier_promotes_on_high_reward() {
+        use super::ShardTierBandit;
+        let mut bandit = ShardTierBandit::new();
+
+        // Train: Hot tier gets high reward, Cold gets low reward.
+        for _ in 0..10 {
+            bandit.update_reward(FreqTier::Hot, 1.0);
+            bandit.update_reward(FreqTier::Cold, 0.1);
+        }
+
+        // Warm should be promoted toward Hot (bandit prefers Hot).
+        let refined = bandit.refine_tier(FreqTier::Warm);
+        assert_eq!(refined, FreqTier::Hot, "Warm should be promoted to Hot");
+    }
+
+    #[cfg(feature = "freq_bandit")]
+    #[test]
+    fn test_bandit_refine_tier_demotes_on_low_reward() {
+        use super::ShardTierBandit;
+        let mut bandit = ShardTierBandit::new();
+
+        // Train: Cold tier gets high reward, Hot gets low reward.
+        for _ in 0..10 {
+            bandit.update_reward(FreqTier::Cold, 1.0);
+            bandit.update_reward(FreqTier::Hot, 0.1);
+        }
+
+        // Warm should be demoted toward Cold (bandit prefers Cold).
+        let refined = bandit.refine_tier(FreqTier::Warm);
+        assert_eq!(refined, FreqTier::Cold, "Warm should be demoted to Cold");
+    }
+
+    #[cfg(feature = "freq_bandit")]
+    #[test]
+    fn test_bandit_two_level_shift_clamped() {
+        use super::ShardTierBandit;
+        let mut bandit = ShardTierBandit::new();
+
+        // Train: Hot gets high reward, Cold gets low.
+        for _ in 0..10 {
+            bandit.update_reward(FreqTier::Hot, 1.0);
+            bandit.update_reward(FreqTier::Cold, 0.0);
+        }
+
+        // Cold → Hot is a 2-level jump; bandit should clamp to Warm (one step).
+        let refined = bandit.refine_tier(FreqTier::Cold);
+        assert_eq!(
+            refined,
+            FreqTier::Warm,
+            "2-level shift should be clamped to 1 step"
+        );
+    }
+
+    #[cfg(feature = "freq_bandit")]
+    #[test]
+    fn test_bandit_integration_with_lfu_shard() {
+        let mut lfu = BfcpLfuShard::new(10, 4);
+        let logits = [1.0f32, 2.0, 3.0];
+
+        // First process — miss, inserts Cold tier.
+        let (partition, assignments) =
+            lfu.process_and_shard(&logits, |_| make_partition(50, 30, 20));
+
+        assert_eq!(partition.region_count(), 3);
+        for &(shard, tier) in &assignments {
+            assert!(shard < 4, "shard {shard} must be < 4");
+            // Bandit hasn't been trained yet, so tier is static Cold.
+            assert_eq!(
+                tier,
+                FreqTier::Cold,
+                "untrained bandit should return static tier"
+            );
+        }
+
+        // Train the bandit: Hot tier gets high rewards.
+        for _ in 0..5 {
+            lfu.update_bandit_reward(FreqTier::Hot, 1.0);
+            lfu.update_bandit_reward(FreqTier::Cold, 0.2);
+        }
+
+        assert!(
+            lfu.tier_bandit().total_pulls() > 0,
+            "bandit should have pulls"
+        );
+    }
+
+    #[cfg(feature = "freq_bandit")]
+    #[test]
+    fn test_derive_tier_with_bandit() {
+        let mut lfu = BfcpLfuShard::new(10, 4);
+        let logits = [1.0f32, 2.0, 3.0];
+
+        // Process to populate cache.
+        let _ = lfu.process(&logits, |_| make_partition(50, 30, 20));
+        let hash = blake3_logit_hash(&logits);
+
+        // Before bandit training: derive_tier returns static classification.
+        let tier = lfu.derive_tier(&hash);
+        assert_eq!(tier, FreqTier::Cold, "untrained should be Cold");
+
+        // Train bandit heavily toward Hot.
+        for _ in 0..20 {
+            lfu.update_bandit_reward(FreqTier::Hot, 1.0);
+        }
+
+        // derive_tier should now refine based on bandit.
+        let refined = lfu.derive_tier(&hash);
+        // Static is Cold, bandit prefers Hot → 2-level shift clamped to Warm.
+        assert_eq!(
+            refined,
+            FreqTier::Warm,
+            "bandit should shift Cold toward Hot, clamped to Warm"
+        );
     }
 
     // Helper for tests — mirrors the module-level sigmoid.
