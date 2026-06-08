@@ -157,7 +157,7 @@ Per [27_mmo_goat_pillars_decision_matrix.md](../../riir-ai/.docs/27_mmo_goat_pil
 - **Research 071 (DashAttention):** Intra/inter attention ratio is complementary to α-entmax routing
 - **Research 086 (RTPurbo):** SAT for O(1) retrieval head importance scoring
 - **Research 091 (SpecHop):** Rolling hash for multi-hop sub-prompt matching
-- **Research 083 (Asymmetric KV):** Token-granularity sharing could use asymmetric K/V compression per sensitivity level
+- **Research 199 (Asymmetric KV):** Token-granularity sharing could use asymmetric K/V compression per sensitivity level
 - **Research 066 (TileRT):** SAT fits as a pre-tile analysis step
 - **Plan 124 (Event Log):** Sensitivity masking directly applicable to game trace sharing
 
