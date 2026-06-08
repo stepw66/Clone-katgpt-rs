@@ -22,7 +22,7 @@ pub enum VerifyTier {
 pub struct LlmExecGuardConfig {
     /// Sigmoid steepness for confidence computation. Default: 2.0.
     pub steepness: f32,
-    /// Entropy threshold below which we skip verification. Default: 0.3.
+    /// Confidence threshold above which we skip verification. Default: 0.65.
     pub skip_threshold: f32,
     /// Entropy threshold above which we full-verify. Default: 0.7.
     pub full_verify_threshold: f32,
@@ -34,7 +34,7 @@ impl Default for LlmExecGuardConfig {
     fn default() -> Self {
         Self {
             steepness: 2.0,
-            skip_threshold: 0.3,
+            skip_threshold: 0.65,
             full_verify_threshold: 0.7,
             max_depth: 8.0,
         }
@@ -55,7 +55,7 @@ pub fn llmexec_confidence(entropy: f32, depth: usize, config: &LlmExecGuardConfi
 /// Route to verification tier based on confidence.
 #[inline]
 pub fn route_verify_tier(confidence: f32, config: &LlmExecGuardConfig) -> VerifyTier {
-    if confidence > (1.0 - config.skip_threshold) {
+    if confidence > config.skip_threshold {
         VerifyTier::Skip
     } else if confidence < (1.0 - config.full_verify_threshold) {
         VerifyTier::FullVerify
