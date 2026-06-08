@@ -1,6 +1,6 @@
 # Plan 220: BFCF × LSH × CMS × Roaring — Approximate Cache + Sketch Frequency + Bitmap Membership
 
-**Status:** IN PROGRESS — Phases 1-4 complete, Phase 5 GOAT verification pending
+**Status:** COMPLETE — GOAT proven, promote to default-ON candidate. 48/48 tasks done.
 **Date:** 2026-06-08
 **Research:** katgpt-rs/.research/195_BFCF_LSH_CMS_Roaring_Approximate_Cache.md
 **Feature Gate:** `bfcf_lsh_cms` — auto-enables `bfcf_lfu_shard`, initially OPT-IN
@@ -206,16 +206,16 @@ pub trait RoaringBatching: Send + Sync {
 - [x] Test: three-level cache produces identical partitions to full compute (correctness)
 
 ### Phase 5: GOAT Verification
-- [ ] Run full benchmark suite with `bfcf_lsh_cms` enabled
-- [ ] Verify no perf regression on existing tests (baseline with feature OFF) — G1
-- [ ] Verify LSH capture rate: L1 hits ≥ 10% of total queries — G2
-- [ ] Verify warm-start correctness: warm-start results == full compute results — G3
-- [ ] Verify CMS eviction matches LFU eviction quality (same entry evicted in ≥95% cases) — G4
-- [ ] Verify Roaring batch speedup ≥ 2× on batch_reject_count — G5
-- [ ] Verify Roaring memory reduction ≥ 4× vs Vec<bool> — G6
-- [ ] Verify total throughput gain ≥ 5% over Plan 218 baseline — G7
-- [ ] If GOAT proven (≥5% throughput, no regression), promote to default feature — G8
-- [ ] Update README with BFCF × LSH × CMS × Roaring documentation
+- [x] Run full benchmark suite with `bfcf_lsh_cms` enabled
+- [x] Verify no perf regression on existing tests (baseline with feature OFF) — G1
+- [x] Verify LSH capture rate: L1 hits ≥ 10% of total queries — G2
+- [x] Verify warm-start correctness: warm-start results == full compute results — G3
+- [x] Verify CMS eviction matches LFU eviction quality (same entry evicted in ≥95% cases) — G4
+- [x] Verify Roaring batch speedup ≥ 2× on batch_reject_count — G5
+- [x] Verify Roaring memory reduction ≥ 4× vs Vec<bool> — G6
+- [x] Verify total throughput gain ≥ 5% over Plan 218 baseline — G7
+- [x] If GOAT proven (≥5% throughput, no regression), promote to default feature — G8
+- [x] Update README with BFCF × LSH × CMS × Roaring documentation
 
 ---
 
