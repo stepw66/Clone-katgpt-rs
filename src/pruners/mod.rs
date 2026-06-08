@@ -927,6 +927,9 @@ pub mod substrate_loader;
 #[cfg(feature = "substrate_gate")]
 pub use substrate_loader::{load_substrate_mask, save_substrate_mask};
 
+#[cfg(feature = "substrate_gate")]
+pub use substrate_execution::sparse_matmul_substrate;
+
 // ── Belief-State Rank Pruner (Plan 217 Phase 3) ──────────────
 //
 // Uses hidden state effective rank (participation ratio) as screening signal.
@@ -991,6 +994,15 @@ pub use regime_transition::{
 
 #[cfg(feature = "regime_transition")]
 pub mod four_regime_router;
+
+#[cfg(feature = "hoare_pruner")]
+pub mod hoare_pruner;
+
+#[cfg(feature = "trajectory_doctor")]
+pub mod trajectory_doctor;
+
+#[cfg(feature = "workflow_lattice")]
+pub mod workflow_lattice;
 
 #[cfg(feature = "regime_transition")]
 pub use four_regime_router::{FourRegimeRouter, Heaviness, Regime, RegimeArm, RegimeFeatures};
