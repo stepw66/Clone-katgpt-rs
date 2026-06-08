@@ -798,6 +798,41 @@ pub use percept_router::{ComputePath, PerceptRouter, PerceptRouterConfig, Sigmoi
 #[cfg(feature = "bfcf_tree")]
 pub use bfcf_types::BfcpPartition;
 
+// ── SubstrateGate — Inference-Time Capability Substrate Routing (Plan 216) ──
+//
+// Pre-computed per-capability MLP channel masks intersected with ReLU
+// activation masks for dual sparsity. DDTree branches route through
+// different capability substrates.
+//
+// Feature gate: `substrate_gate`
+
+#[cfg(feature = "substrate_gate")]
+pub mod substrate_types;
+
+#[cfg(feature = "substrate_gate")]
+pub use substrate_types::{SubstrateMask, SubstrateConfig, SubstrateRouter, NoSubstrateRouter};
+
+#[cfg(feature = "substrate_gate")]
+pub mod substrate_execution;
+
+#[cfg(feature = "substrate_gate")]
+pub mod substrate_ddtree;
+
+#[cfg(feature = "substrate_gate")]
+pub use substrate_ddtree::{SubstrateBranch, substrate_branch_score};
+
+#[cfg(feature = "substrate_gate")]
+pub mod substrate_pruner;
+
+#[cfg(feature = "substrate_gate")]
+pub use substrate_pruner::SubstrateScreeningPruner;
+
+#[cfg(feature = "substrate_gate")]
+pub mod substrate_loader;
+
+#[cfg(feature = "substrate_gate")]
+pub use substrate_loader::{load_substrate_mask, save_substrate_mask};
+
 // ── CoExplain Bidirectional Alignment (Plan 214) ──────────────
 //
 // Read/Write/Enhance cycle for self-refining pruners.
