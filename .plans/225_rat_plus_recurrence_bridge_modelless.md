@@ -1,6 +1,6 @@
 # Plan 225: RAT+ Recurrence Bridge — Modelless Dilated Inference
 
-**Status**: 🔧 Phase 2-3 Complete
+**Status**: 🔧 Phase 4 Complete
 **Research**: `.research/201_RAT_Plus_Train_Dense_Infer_Sparse.md`
 **Feature Gate**: `rat_plus_bridge` (default-off → GOAT gate → default-on if proved)
 **Dependencies**: `gdn2_attention`, `dash_attn`, `vortex_flow`
@@ -101,18 +101,18 @@ Wire existing GDN2 recurrent state as a "bridge" for dilated sparse attention du
 
 ### Phase 4: Adaptive Dilation Routing
 
-- [ ] **T4.1** Add dilation selection to `TriggerGate`
+- [x] **T4.1** Add dilation selection to `TriggerGate`
   - Low QPS → D=1 (dense), High QPS → D=16 or D=64
-  - New config field: `dilation_thresholds: Vec<(qps_threshold, DilationConfig)>`
+  - Standalone `select_dilation()` function in `dilation_router.rs`
 
-- [ ] **T4.2** Add River Valley per-layer dilation in selectivity router
+- [x] **T4.2** Add River Valley per-layer dilation in `DilationRouter`
   - High RV (peaked) layers → tolerate D=16
   - Low RV (flat) layers → stay at D=1
-  - Use existing `rv_gated_routing` feature gate
+  - `DilationRouter` struct with per-layer RV scores + QPS thresholds
 
-- [ ] **T4.3** Add dilation arm to `MetaRouter` (VortexFlow)
-  - New `DilationBridge` variant in `VortexRouter` enum
-  - Bandit learns when dilation bridge outperforms other routers
+- [x] **T4.3** Register `dilation_router` module in `rat_bridge/mod.rs`
+  - Feature-gated behind `rat_plus_bridge`
+  - Re-exported via `pub use dilation_router::*`
 
 ### Phase 5: VortexFlow Integration
 

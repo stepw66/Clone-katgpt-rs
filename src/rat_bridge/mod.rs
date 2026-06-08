@@ -14,8 +14,13 @@ mod dilated_kv;
 mod fuse;
 
 #[cfg(feature = "rat_plus_bridge")]
+mod dilation_router;
+
+#[cfg(feature = "rat_plus_bridge")]
 pub use bridge::*;
 #[cfg(feature = "rat_plus_bridge")]
 pub use dilated_kv::*;
+#[cfg(feature = "rat_plus_bridge")]
+pub use dilation_router::*;
 #[cfg(feature = "rat_plus_bridge")]
 pub use fuse::*;
