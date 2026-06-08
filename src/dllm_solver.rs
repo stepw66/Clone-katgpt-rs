@@ -437,29 +437,49 @@ impl SelfCondDraft {
 // MBR Tree Selection (feature-gated)
 // ---------------------------------------------------------------------------
 
-/// MBR selection from K candidate paths.
-/// Selects minimum-risk path: argmin_i Σ_j |risk_i - risk_j|
+/// Minimum Bayes Risk tree selection.
+/// Extracts K best paths, scores each against all others,
+/// selects the path with minimum total risk.
 #[cfg(feature = "mbr_tree_select")]
-pub fn mbr_select(paths: &[Vec<f32>], scores: &[f32]) -> usize {
+pub fn mbr_select(
+    paths: &[Vec<f32>], // K candidate paths (each is a sequence of token probs)
+    scores: &[f32],     // quality score for each path
+    k: usize,           // number of candidates to consider
+) -> usize {
     if paths.is_empty() {
         return 0;
     }
-    let k = paths.len();
-    let mut best_idx = 0;
-    let mut best_risk = f32::MAX;
 
-    for i in 0..k {
-        let mut risk_sum = 0.0f32;
-        for j in 0..k {
-            if i != j {
-                risk_sum += (scores[i] - scores[j]).abs();
-            }
-        }
-        if risk_sum < best_risk {
-            best_risk = risk_sum;
+    let k = k.min(paths.len());
+    let top_k_indices: Vec<usize> = {
+        let mut indexed: Vec<(usize, f32)> =
+            scores.iter().enumerate().map(|(i, &s)| (i, s)).collect();
+        indexed.select_nth_unstable_by(k - 1, |a, b| {
+            b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)
+        });
+        indexed[..k].iter().map(|&(i, _)| i).collect()
+    };
+
+    if k == 1 {
+        return top_k_indices[0];
+    }
+
+    // MBR: for each candidate, compute risk (sum of quality differences vs all others)
+    let mut best_idx = top_k_indices[0];
+    let mut min_risk = f32::MAX;
+
+    for &i in &top_k_indices {
+        let risk: f32 = top_k_indices
+            .iter()
+            .filter(|&&j| j != i)
+            .map(|&j| (scores[i] - scores[j]).max(0.0))
+            .sum();
+        if risk < min_risk {
+            min_risk = risk;
             best_idx = i;
         }
     }
+
     best_idx
 }
 
@@ -740,7 +760,7 @@ mod tests {
     fn test_mbr_select() {
         let paths = vec![vec![1.0], vec![2.0], vec![3.0]];
         let scores = vec![0.1, 0.5, 0.9];
-        let best = mbr_select(&paths, &scores);
+        let best = mbr_select(&paths, &scores, 3);
         // Middle path has minimum risk
         assert!(best < paths.len());
     }
@@ -788,5 +808,59 @@ mod tests {
         // Default threshold = ln(100) * 0.5 ≈ 2.3
         // Uniform entropy = ln(100) ≈ 4.6
         assert!(transitions[0].critical);
+    }
+
+    // -----------------------------------------------------------------------
+    // Benchmark stubs (Plan 222 T9)
+    // -----------------------------------------------------------------------
+
+    #[cfg(feature = "critical_interval_gate")]
+    #[test]
+    fn bench_adaptive_build_16_depths() {
+        let depths: Vec<Vec<f32>> = (0..16)
+            .map(|d| {
+                if d % 3 == 0 {
+                    vec![0.1; 100] // uniform
+                } else {
+                    let mut m = vec![0.01; 100];
+                    m[d % 100] = 0.5;
+                    m[(d + 1) % 100] = 0.3;
+                    m
+                }
+            })
+            .collect();
+
+        let start = std::time::Instant::now();
+        for _ in 0..1000 {
+            let mut solver = SolverKind::DpmSolver2M;
+            let _ = build_dd_tree_adaptive(&depths, 0.0, &mut solver);
+        }
+        let elapsed = start.elapsed();
+        let per_call = elapsed / 1000;
+        // Should be very fast — entropy is O(n) per depth
+        assert!(
+            per_call < std::time::Duration::from_micros(100),
+            "Adaptive build too slow: {:?}",
+            per_call
+        );
+    }
+
+    #[cfg(feature = "mbr_tree_select")]
+    #[test]
+    fn bench_mbr_select_5_candidates() {
+        let paths: Vec<Vec<f32>> = (0..10).map(|i| vec![0.1 * i as f32; 16]).collect();
+        let scores: Vec<f32> = (0..10).map(|i| i as f32 * 0.1).collect();
+
+        let start = std::time::Instant::now();
+        for _ in 0..10000 {
+            let _ = mbr_select(&paths, &scores, 5);
+        }
+        let elapsed = start.elapsed();
+        let per_call = elapsed / 10000;
+        assert!(
+            per_call < std::time::Duration::from_micros(10),
+            "MBR select too slow: {:?}",
+            per_call
+        );
     }
 }

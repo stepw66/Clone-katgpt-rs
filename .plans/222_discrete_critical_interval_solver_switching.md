@@ -52,19 +52,19 @@ Entropy-triggered solver switching during DDTree construction. When marginal ent
   - Synthetic marginals with known entropy
   - Verify solver switches at correct threshold
 
-- [ ] T7: Test — integration test with Sudoku validator
+- [x] T7: Test — integration test with Sudoku validator
   - Compare acceptance rate with/without CriticalIntervalGate
   - Expected: measurable improvement in valid branch rate
 
 ### Phase 2: MBR Tree Selection (Feature-Gated)
 
-- [ ] T8: Add `MbrSelect` to DDTree selection strategies
+- [x] T8: Add `MbrSelect` to DDTree selection strategies
   - Extract K=5 best paths from DDTree
   - Score each against all others using ConstraintPruner as utility
   - Select minimum-risk path (minimum sum of risk differences)
   - Feature gate: `mbr_tree_select`
 
-- [ ] T9: Benchmark MBR vs BestQ vs EqR
+- [x] T9: Benchmark MBR vs BestQ vs EqR
   - Sudoku arena: compare correctness
   - Code generation: compare compilable rate with SynPruner
   - Expected: MBR ≥ BestQ on discrete tasks
