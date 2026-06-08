@@ -82,6 +82,79 @@ pub fn shannon_entropy(marginals: &[f32]) -> f32 {
 }
 
 // ---------------------------------------------------------------------------
+// Adaptive DDTree Build with Critical Interval Solver Switching (Plan 222 T4)
+// ---------------------------------------------------------------------------
+
+/// Log entry for solver transitions during DDTree build.
+#[cfg(feature = "critical_interval_gate")]
+#[derive(Debug, Clone)]
+pub struct SolverTransition {
+    pub depth: usize,
+    pub entropy: f64,
+    pub solver_before: SolverKind,
+    pub solver_after: SolverKind,
+    pub critical: bool,
+}
+
+/// Adaptive DDTree build with critical interval solver switching.
+/// Per-depth entropy check → solver switch between DpmSolver2M and QSample.
+/// Returns solver transition log for diagnostics.
+///
+/// Zero-allocation entropy computation (no extra Vecs).
+#[cfg(feature = "critical_interval_gate")]
+pub fn build_dd_tree_adaptive(
+    marginals_per_depth: &[Vec<f32>],
+    h_critical: f64,
+    solver_kind: &mut SolverKind,
+) -> Vec<SolverTransition> {
+    let mut transitions = Vec::with_capacity(marginals_per_depth.len());
+    let vocab_size = marginals_per_depth.first().map(|m| m.len()).unwrap_or(0);
+    let default_h_critical = if h_critical > 0.0 {
+        h_critical
+    } else {
+        (vocab_size as f64).ln() * 0.5
+    };
+
+    for (depth, marginals) in marginals_per_depth.iter().enumerate() {
+        // Compute Shannon entropy of marginals (zero-alloc: no extra Vec)
+        let entropy: f64 = marginals
+            .iter()
+            .map(|&p| {
+                let p = p as f64;
+                if p > 0.0 { -p * p.ln() } else { 0.0 }
+            })
+            .sum();
+
+        let prev_solver = *solver_kind;
+
+        if entropy >= default_h_critical {
+            // Critical interval — switch to q-sampling if available
+            #[cfg(feature = "q_sample_solver")]
+            {
+                *solver_kind = SolverKind::QSample;
+            }
+            #[cfg(not(feature = "q_sample_solver"))]
+            {
+                *solver_kind = SolverKind::DpmSolver2M;
+            }
+        } else {
+            // Below threshold — use fast solver
+            *solver_kind = SolverKind::DpmSolver2M;
+        }
+
+        transitions.push(SolverTransition {
+            depth,
+            entropy,
+            solver_before: prev_solver,
+            solver_after: *solver_kind,
+            critical: entropy >= default_h_critical,
+        });
+    }
+
+    transitions
+}
+
+// ---------------------------------------------------------------------------
 // Q-Sampling Solver (feature-gated: q_sample_solver)
 // ---------------------------------------------------------------------------
 
@@ -670,5 +743,50 @@ mod tests {
         let best = mbr_select(&paths, &scores);
         // Middle path has minimum risk
         assert!(best < paths.len());
+    }
+
+    // -----------------------------------------------------------------------
+    // Adaptive DDTree build tests (Plan 222 T4)
+    // -----------------------------------------------------------------------
+
+    #[cfg(feature = "critical_interval_gate")]
+    #[test]
+    fn test_adaptive_solver_switches_on_high_entropy() {
+        // High entropy marginals (uniform distribution)
+        let uniform = vec![0.1f32; 10];
+        // Low entropy marginals (peaked distribution)
+        let peaked = {
+            let mut m = vec![0.01f32; 10];
+            m[0] = 0.91;
+            m
+        };
+
+        let depths = vec![uniform.clone(), peaked.clone(), uniform.clone()];
+        let mut solver = SolverKind::DpmSolver2M;
+
+        let transitions = build_dd_tree_adaptive(&depths, 1.0, &mut solver);
+
+        assert_eq!(transitions.len(), 3);
+        assert!(transitions[0].critical); // uniform → high entropy
+        assert!(!transitions[1].critical); // peaked → low entropy
+        assert!(transitions[2].critical); // uniform → high entropy
+
+        // Solver should have switched during high entropy
+        #[cfg(feature = "q_sample_solver")]
+        assert_eq!(solver, SolverKind::QSample); // last depth was critical
+    }
+
+    #[cfg(feature = "critical_interval_gate")]
+    #[test]
+    fn test_adaptive_default_threshold() {
+        let uniform = vec![0.1f32; 100]; // 100 tokens, uniform
+        let depths = vec![uniform];
+        let mut solver = SolverKind::DpmSolver2M;
+
+        let transitions = build_dd_tree_adaptive(&depths, 0.0, &mut solver);
+
+        // Default threshold = ln(100) * 0.5 ≈ 2.3
+        // Uniform entropy = ln(100) ≈ 4.6
+        assert!(transitions[0].critical);
     }
 }

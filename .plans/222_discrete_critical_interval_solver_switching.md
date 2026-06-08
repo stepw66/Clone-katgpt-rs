@@ -39,7 +39,7 @@ Entropy-triggered solver switching during DDTree construction. When marginal ent
     ```
   - Feature gate: `q_sample_solver`
 
-- [ ] T4: Wire CriticalIntervalGate into DDTree build loop
+- [x] T4: Wire CriticalIntervalGate into DDTree build loop
   - `build_dd_tree_sde()` or new `build_dd_tree_adaptive()`
   - Per-depth entropy check → solver switch
   - Log solver transitions for diagnostics

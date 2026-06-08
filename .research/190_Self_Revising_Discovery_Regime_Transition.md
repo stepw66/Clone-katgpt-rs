@@ -128,13 +128,15 @@ All five fusions are **modelless-first** (inference-time only, no LLM training).
 
 | Fusion | Expected Gain | Perf Risk | Default |
 |--------|--------------|-----------|---------|
-| RTPG (Fusion 1) | New pruner discovery → higher accuracy | Small (epiplexity calc is O(n) on trace) | Off until GOAT proof |
-| VocabCollapse (Fusion 2) | Better collapse classification → faster exit | Minimal (read-only check on DDTree stats) | Off until GOAT proof |
-| ProvenanceAC (Fusion 3) | Audit trail → trust in absorbed params | Small (blake3 hash per absorb, ~200ns) | Off until GOAT proof |
-| BuilderBreaker (Fusion 4) | Targeted edge cases → faster learning | Medium (synthetic gen + DDTree run) | Off until GOAT proof |
-| ThreeRegime (Fusion 5) | Discovery mode → handles unknown domains | Small (4-arm bandit, same infra as 211) | Off until GOAT proof |
+| RTPG (Fusion 1) | New pruner discovery → higher accuracy | Small (epiplexity calc is O(n) on trace) | DEMOTE (19× overhead, kept opt-in) |
+| VocabCollapse (Fusion 2) | Better collapse classification → faster exit | Minimal (read-only check on DDTree stats) | DEMOTE (19× overhead, kept opt-in) |
+| ProvenanceAC (Fusion 3) | Audit trail → trust in absorbed params | Small (blake3 hash per absorb, ~200ns) | DEMOTE (19× overhead, kept opt-in) |
+| BuilderBreaker (Fusion 4) | Targeted edge cases → faster learning | Medium (synthetic gen + DDTree run) | DEMOTE (19× overhead, kept opt-in) |
+| ThreeRegime (Fusion 5) | Discovery mode → handles unknown domains | Small (4-arm bandit, same infra as 211) | DEMOTE (19× overhead, kept opt-in) |
 
 **After GOAT proof of each**: If gain confirmed and no perf hurt, must be on by default per user constraint.
+
+**Note**: All 5 fusions passed structural GOAT proofs (correctness verified), but bench 7 showed 19× overhead vs mock baseline. Kept opt-in pending real-decode-path benchmark. Feature is production-ready for explicit opt-in.
 
 ---
 

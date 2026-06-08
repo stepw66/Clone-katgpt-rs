@@ -94,7 +94,61 @@ Additional core traits:
 
 ## 🔄 E2E Inference Flow — Default GOAT Stack
 
-The default production stack flows through these layers. Each item is default-on, GOAT-proved.
+The default production stack has **~70 GOAT-proved features** enabled, but they don't all run on every token. The architecture uses **layered gating** — most features are bandit-driven, Option-gated, or compile-time-only.
+
+```mermaid
+flowchart TD
+    subgraph HOT["🔴 Always-On Hot Path — 12 features per token"]
+        KOG["kog_cpu_fusion\nFused RMSNorm+QKV kernel"]
+        SPARSE["sparse_mlp\nTwELL sparse matmul"]
+        DELTA["delta_routing\nBlock-boundary delta accumulate"]
+        MLS["mls_aggregate\nMulti-layer residual sum"]
+        DOMAIN["domain_latent\nMid-layer K/V inject"]
+        PPOT["ppot\nCPU resampling"]
+        SPECTRAL["spectral_quant + hybrid_oct_pq\nKV cache storage format"]
+        KVARNS["kvarn + kv_share\nVariance-norm KV + Q-K=V sharing"]
+        ATTNS["gdn2_attention + lt2_looped\nO(1) decode recurrent attention"]
+        ELF["elf_sde\nDDTree noise injection"]
+    end
+
+    subgraph GATED["🟡 Conditional — ~30 features, 1 check each"]
+        BANDIT["Bandit-driven arm select\nbandit, bandit_top_p, freq_bandit\nsr2am, curvature_alloc, wealth_pruner\nrosetta, directional_credit, self_distilling"]
+        OPTION["Option-gated\nhydra_budget, cna_steering\nkurtosis_gate, domino_correction"]
+        THINK["Thinking mode only\nthinking_cot, chain_fold\nthinking_prune, parallel_probe"]
+        SPEC["Speculative pipeline\nbt_rank, lodestar, best_buddies\ntrust_region_spec, corr_budget\nbelief_drafter, bfcf_tree"]
+    end
+
+    subgraph OFFLINE["🔵 Offline — ~8 features, not in forward pass"]
+        DIAG["Training/diagnostics\nnewton_schulz, river_valley\nspectral_hierarchy, roofline_cost\nsigmoid_margin, stability_metrics"]
+        BG["Background\nsleep_consolidation\ndreamer"]
+    end
+
+    HOT --> GATED
+    HOT -.->|"post-token"| BG
+    GATED -.->|"offline"| DIAG
+    GATED -.->|"between sessions"| BG
+```
+
+### 🔴 Always-On Hot Path (12 Features)
+
+These execute unconditionally on every token — they replace kernels, formats, or accumulate state. No `if` check, no dispatch:
+
+| Feature | What | Why Always-On |
+|---------|------|---------------|
+| **`sparse_mlp`** | Skip dead ReLU in w2 matmul | Replaces dense matmul kernel |
+| **`kog_cpu_fusion`** | RMSNorm gamma folding + QKV interleaving | Fused kernel replacement |
+| **`delta_routing`** | Cross-layer residual delta routing at block boundary | Accumulates per-layer, routes at block edge |
+| **`mls_aggregate`** | Average last K layer residuals before LM head | Structural blend into final logits |
+| **`domain_latent`** | Mid-layer K/V injection | `Option`-gated inject at `n_layer/2` |
+| **`spectral_quant`** | Calibrated eigenbasis + water-fill KV codec | Storage format, not conditional |
+| **`hybrid_oct_pq`** | OCT triplet + PQ 2D Givens KV compression | Replaces quantization codec |
+| **`kvarn`** | Variance-normalized KV cache quantization | Cache format when selected |
+| **`kv_share`** | Q-K=V projection sharing, 50% KV reduction | Weight merge at load time |
+| **`gdn2_attention`** | Gated DeltaNet-2 O(1) decode | Replaces KV cache with fixed state matrix |
+| **`lt2_looped`** | Weight-shared T-pass loop + AHLA | Changes forward function signature |
+| **`elf_sde`** | Logit-normal noise injection for DDTree diversity | Applied during draft tree build |
+
+### Simplified Inference Flow
 
 ```mermaid
 graph LR

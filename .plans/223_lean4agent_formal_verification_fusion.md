@@ -34,11 +34,11 @@ graph TD
 
 ### Phase 1: LLMExecGuard (Default-On, GOAT)
 
-- [ ] Implement `llmexec_confidence(entropy, depth) -> f32` using sigmoid
-- [ ] Integrate with existing entropy collapse detection (Plan 212)
-- [ ] Add 3-tier routing: high confidence (skip), low (full verify), medium (screening)
-- [ ] Add feature gate `llmexec_guard` — **default on**
-- [ ] Write test: before/after comparison on synthetic entropy distributions
+- [x] Implement `llmexec_confidence(entropy, depth) -> f32` using sigmoid
+- [x] Integrate with existing entropy collapse detection (Plan 212)
+- [x] Add 3-tier routing: high confidence (skip), low (full verify), medium (screening)
+- [x] Add feature gate `llmexec_guard` — **default on**
+- [x] Write test: before/after comparison on synthetic entropy distributions
 - [ ] Benchmark: measure overhead with guard ON vs OFF on DDTree expansion
 
 ### Phase 2: HoarePruner (Feature-Gated)

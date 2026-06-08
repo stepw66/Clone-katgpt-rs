@@ -32,7 +32,7 @@ graph TD
 ## Tasks
 
 ### T1: OutlierGuardConfig — Modelless Config
-- [ ] Add `OutlierGuardConfig` to `katgpt-core/src/types.rs`
+- [x] Add `OutlierGuardConfig` to `katgpt-core/src/types.rs`
   ```rust
   /// Configuration for the outlier-aware quantization guard.
   /// Runs once at model load time to detect outlier injection attacks.
@@ -62,11 +62,11 @@ graph TD
       Silent,
   }
   ```
-- [ ] `OutlierGuardConfig::default()` returns `Warn` with `ks_threshold: 0.15`
-- [ ] `#[serde(default)]` for TOML config support
+- [x] `OutlierGuardConfig::default()` returns `Warn` with `ks_threshold: 0.15`
+- [x] `#[serde(default)]` for TOML config support
 
 ### T2: KS D-Statistic Computation — Zero-Allocation
-- [ ] Add `ks_d_statistic` to `katgpt-rs/src/spectralquant/spectral.rs` (shared math infra)
+- [x] Add `ks_d_statistic` to `katgpt-rs/src/spectralquant/spectral.rs` (shared math infra)
   ```rust
   /// Compute Kolmogorov-Smirnov D-statistic between a weight distribution
   /// and a Gaussian reference N(μ, σ). O(n) single pass, zero allocation.
@@ -81,11 +81,11 @@ graph TD
       // 4. Return max |F_empirical(x) - F_gaussian(x)|
   }
   ```
-- [ ] Zero-allocation: accept `&mut [f32]` scratch buffer for sorting
-- [ ] SIMD-eligible: comparison loop is branch-free
+- [x] Zero-allocation: accept `&mut [f32]` scratch buffer for sorting
+- [x] SIMD-eligible: comparison loop is branch-free
 
 ### T3: OutlierGuard — Per-Layer Scanner
-- [ ] Add `outlier_guard.rs` to `katgpt-rs/src/spectralquant/`
+- [x] Add `outlier_guard.rs` to `katgpt-rs/src/spectralquant/`
   ```rust
   pub struct OutlierGuard {
       config: OutlierGuardConfig,
@@ -100,18 +100,18 @@ graph TD
       pub stiffsoft_crosscheck: Option<bool>, // if Plan 138 available
   }
   ```
-- [ ] `OutlierGuard::scan_layer(&mut self, weights: &[f32], layer_idx: usize, name: &str)`
+- [x] `OutlierGuard::scan_layer(&mut self, weights: &[f32], layer_idx: usize, name: &str)`
   - Calls `ks_d_statistic` with pre-allocated scratch buffer
   - If `ks_d > config.ks_threshold`, flag the layer
   - If `use_stiffsoft_crosscheck` and `stiff_anomaly` feature enabled, cross-check eigenvalue distribution
-- [ ] `OutlierGuard::scan_model(&mut self, model: &ModelWeights)` — iterate all layers
-- [ ] `OutlierGuard::report(&self) -> &OutlierGuardReport` — summary with per-layer details
+- [x] `OutlierGuard::scan_model(&mut self, model: &ModelWeights)` — iterate all layers
+- [x] `OutlierGuard::report(&self) -> &OutlierGuardReport` — summary with per-layer details
 
 ### T4: Integration at Model Load Time
-- [ ] In model loading path (wherever weights are deserialized), call `OutlierGuard::scan_layer` per weight matrix
-- [ ] Behind feature gate `outlier_guard`
-- [ ] If `OutlierAction::Reject` and any layer flagged, return error before inference starts
-- [ ] Emit metrics: `outlier_guard_layers_scanned`, `outlier_guard_layers_flagged`, `max_ks_d`
+- [x] In model loading path (wherever weights are deserialized), call `OutlierGuard::scan_layer` per weight matrix
+- [x] Behind feature gate `outlier_guard`
+- [x] If `OutlierAction::Reject` and any layer flagged, return error before inference starts
+- [x] Emit metrics: `outlier_guard_layers_scanned`, `outlier_guard_layers_flagged`, `max_ks_d`
 
 ### T5: StiffSoft Cross-Check Integration (Optional)
 - [ ] Behind `stiff_anomaly` feature gate
@@ -120,12 +120,12 @@ graph TD
 - [ ] When only StiffSoft flags (no KS), log "MEDIUM CONFIDENCE — eigenvalue anomaly"
 
 ### T6: GOAT Tests
-- [ ] Test: `ks_d_statistic` returns <0.1 for Gaussian-distributed weights
-- [ ] Test: `ks_d_statistic` returns >0.25 for outlier-injected weights (synthetic: inject 1 outlier per 32 weights with c=512)
-- [ ] Test: `OutlierGuard::scan_layer` correctly flags synthetic attacked layer
-- [ ] Test: `OutlierGuard` with `Reject` action returns error on flagged model
-- [ ] Test: `OutlierGuard` with `Warn` action logs but continues
-- [ ] Test: Zero-allocation: no heap allocations in `ks_d_statistic` hot path
+- [x] Test: `ks_d_statistic` returns <0.1 for Gaussian-distributed weights
+- [x] Test: `ks_d_statistic` returns >0.25 for outlier-injected weights (synthetic: inject 1 outlier per 32 weights with c=512)
+- [x] Test: `OutlierGuard::scan_layer` correctly flags synthetic attacked layer
+- [x] Test: `OutlierGuard` with `Reject` action returns error on flagged model
+- [x] Test: `OutlierGuard` with `Warn` action logs but continues
+- [x] Test: Zero-allocation: no heap allocations in `ks_d_statistic` hot path
 - [ ] Test: Feature gate: all tests pass with and without `outlier_guard`
 - [ ] Test: Cross-check: when both KS and StiffSoft available, dual signal works
 

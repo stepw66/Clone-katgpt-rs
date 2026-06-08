@@ -1,8 +1,8 @@
 # Plan 215: Regime-Transition Inference (Self-Revising Discovery)
 
 **Research**: R190 (Self-Revising Discovery Regime Transition)
-**Status**: IN PROGRESS (T1-T7 Complete, T6 benchmarks done)
-**Feature Gate**: `regime_transition` (off by default until GOAT proof)
+**Status**: ✅ COMPLETE — GOAT PROVED (8/8 benchmarks) | DEMOTE: 19× overhead vs baseline, kept opt-in
+**Feature Gate**: `regime_transition` (DEMOTE — kept opt-in, 19× overhead, heavy deps)
 **Depends On**: Plan 209 (FOL), Plan 210 (INSIGHT), Plan 211 (Three-Mode Router)
 
 ---
