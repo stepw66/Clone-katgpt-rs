@@ -430,8 +430,8 @@ mod tests {
     fn test_zero_copy_alignment_tile_boundaries() {
         let tile_size: usize = 128; // KVarN tile_size
 
-        // Valid segment sizes that are tile-aligned
-        for &seg_size in &[64, 128, 256, 512] {
+        // Valid segment sizes that are tile-aligned (multiples of 128)
+        for &seg_size in &[128, 256, 512] {
             assert_eq!(
                 seg_size % tile_size,
                 0,
@@ -446,8 +446,7 @@ mod tests {
         assert_eq!(store.segment_size() % tile_size, 0);
 
         // Non-aligned sizes must fail
-        let bad_sizes: &[usize] = &[100, 127, 200, 300];
-        for &bad in bad_sizes {
+        for &bad in &[64, 100, 127, 200, 300] {
             assert_ne!(
                 bad % tile_size,
                 0,

@@ -135,12 +135,12 @@ Segment boundaries align with KVarN tile_size (128) for zero-copy checkpoints.
 ### Phase 5: Tests & Benchmarks
 
 #### Task 9: Unit Tests
-- [ ] Test SegmentStore insert/get/eviction
-- [ ] Test GRM gate computation (sigmoid, not softmax)
-- [ ] Test top-k segment selection (correct ranking)
-- [ ] Test checkpoint emission at segment boundaries
-- [ ] Test retrieval with 0, 1, and N segments
-- [ ] Test zero-copy alignment with KVarN tile boundaries
+- [x] Test SegmentStore insert/get/eviction
+- [x] Test GRM gate computation (sigmoid, not softmax)
+- [x] Test top-k segment selection (correct ranking)
+- [x] Test checkpoint emission at segment boundaries
+- [x] Test retrieval with 0, 1, and N segments
+- [x] Test zero-copy alignment with KVarN tile boundaries
 
 #### Task 10: Before/After Benchmarks
 - [ ] Benchmark: NIAH-style retrieval with and without segment checkpointing
@@ -156,9 +156,9 @@ Segment boundaries align with KVarN tile_size (128) for zero-copy checkpoints.
 ### Phase 6: CPU/GPU Auto-Route
 
 #### Task 11: Auto-Route Integration
-- [ ] When `inference_router` detects high load (QPS > threshold), switch to SSC with lower k
-- [ ] When load is low, use GRM with full segment retrieval for best accuracy
-- [ ] Dynamic segment_size adjustment: shorter segments (64) at low load, longer (256) at high load
+- [x] When `inference_router` detects high load (QPS > threshold), switch to SSC with lower k
+- [x] When load is low, use GRM with full segment retrieval for best accuracy
+- [x] Dynamic segment_size adjustment: shorter segments (64) at low load, longer (256) at high load
 
 ---
 
