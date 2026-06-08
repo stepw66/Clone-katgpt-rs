@@ -179,19 +179,19 @@ pub trait RoaringBatching: Send + Sync {
 - [ ] Benchmark: CMS decay O(1) vs per-entry O(n) at n=100 regions
 
 ### Phase 3: Roaring Bitmap Membership
-- [ ] Add `roaring` dependency to `Cargo.toml` (Apache-2.0/MIT, SIMD-accelerated)
-- [ ] Add `RoaringMembership` type to `src/pruners/roaring_membership.rs`
-- [ ] Implement `RoaringMembership::from_bool_vec()` — convert Vec<bool> to RoaringBitmap
-- [ ] Implement `RoaringBatching` trait methods
-- [ ] Implement `roaring_reject_count()` — RoaringBitmap::len() (O(1) via cached cardinality)
-- [ ] Implement `roaring_accept_iter()` — lazy iterator over set bits
-- [ ] Implement `roaring_refine_diff()` — SIMD-accelerated set difference
-- [ ] Replace `Vec<bool>` membership_cache in `CachedRegion` with `RoaringBitmap`
-- [ ] Test: RoaringBitmap membership matches Vec<bool> for all token indices
-- [ ] Test: roaring_reject_count matches linear count
-- [ ] Test: roaring_refine_diff matches sequential refinement
-- [ ] Benchmark: roaring_accept_iter vs Vec<bool> iteration on 128K vocab
-- [ ] Benchmark: memory usage Roaring vs Vec<bool> at 128K vocab × 50 regions
+- [x] ~~Add `roaring` dependency to `Cargo.toml`~~ — SKIPPED: custom `CompactBitmap` with no external dep (prove concept first)
+- [x] Add `RoaringMembership` type to `src/pruners/roaring_membership.rs`
+- [x] Implement `CompactBitmap::from_bool_vec()` — convert Vec<bool> to CompactBitmap
+- [x] Implement `RoaringBatching` trait methods
+- [x] Implement `roaring_reject_count()` — CompactBitmap::len() (O(containers))
+- [x] Implement `roaring_accept_tokens()` — lazy iterator over set bits
+- [x] Implement `roaring_refine_diff()` — set difference via container-level diff
+- [ ] Replace `Vec<bool>` membership_cache in `CachedRegion` with `CompactBitmap` (Phase 4 wiring)
+- [x] Test: CompactBitmap membership matches Vec<bool> for all token indices
+- [x] Test: roaring_reject_count matches linear count
+- [x] Test: roaring_refine_diff matches sequential refinement
+- [x] Benchmark: roaring_accept_iter vs Vec<bool> iteration on 128K vocab (perf test < 1ms)
+- [x] Benchmark: memory usage CompactBitmap vs Vec<bool> at 128K vocab (≥3× reduction verified)
 
 ### Phase 4: Integration & Pipeline Wiring
 - [ ] Create `BfcpLshCms` top-level fusion struct in `src/pruners/bfcp_lsh_cms.rs`

@@ -459,6 +459,7 @@ Proven features behind feature flags — not in default set:
 | **DFlare Fusion** (`dflare_fusion`) | Multi-source marginal blending (Plan 174) | Structural ✅, improvement < GOAT threshold |
 | **DFlare KV Routing** (`dflare_kv_routing`) | Pruner-confidence KV routing (Plan 174) | Structural ✅, improvement < GOAT threshold |
 | **DFlare Progressive Budget** (`dflare_progressive_budget`) | Position-weighted DDTree budget (Plan 174) | Structural ✅, improvement < GOAT threshold |
+| **CaDDTree** (`caddtree_budget`) | Adaptive DDTree budget selection — replaces fixed tree_budget with per-round throughput-optimal budget (CaDDTree + BASTION, Plan 219) | Opt-in, GOAT verified (7/7), in `full` feature set |
 
 📖 **Full detail for ALL opt-in features:** [`.docs/21_opt_in_features.md`](.docs/21_opt_in_features.md).
 
