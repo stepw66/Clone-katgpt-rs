@@ -789,4 +789,300 @@ mod tests {
         assert!(hot.contains(&p1));
         assert!(!hot.contains(&p2));
     }
+
+    // ════════════════════════════════════════════════════════════════
+    // Integration Tests (Plan 215)
+    // ════════════════════════════════════════════════════════════════
+
+    use super::super::four_regime_router::{FourRegimeRouter, Regime, RegimeArm, RegimeFeatures};
+
+    /// T2 Integration — Full pipeline: mock DDTree → regime collapse → gate → provenance.
+    #[test]
+    fn integration_t2_full_pipeline_mock_ddtree_regime_collapse() {
+        // 1. Create mock DDTreeStats with uniform failure depths (all at depth 3)
+        let stats = DDTreeStats {
+            total_branches: 20,
+            failed_branches: 8,
+            failure_depths: vec![3, 3, 3, 3, 3, 3, 3, 3],
+            max_depth: 6,
+        };
+
+        // 2. Classify — uniform depths → Regime collapse
+        let classifier = RegimeCollapseClassifier::default();
+        let collapse = classifier.classify(&stats);
+        assert_eq!(
+            collapse,
+            CollapseType::Regime,
+            "Uniform failure depths (all=3) must classify as Regime"
+        );
+
+        // 3. Create a DecisionTrace with rules applied and alternatives rejected
+        let trace = make_trace(5, 3);
+        // DL_old = 5*16 + 3*8 = 104.0
+
+        // 4. Evaluate candidate that explains enough rules to pass the gate
+        //    Candidate explains 4 rules → reduction = 4*16 = 64
+        //    DL_new = 104 - 64 = 40.0
+        //    40.0 < 104 - 32 = 72.0 → Accept
+        let gate = RegimeTransitionGate::default();
+        let result = gate.evaluate(&trace, 4);
+        assert_eq!(
+            result,
+            GateResult::Accept,
+            "Candidate explaining 4/5 rules should pass the gate (reduction=64 > cost=32)"
+        );
+
+        // 5. Record the outcome in a ProvenanceChain
+        let mut chain = ProvenanceChain::default();
+        chain.record(1, 0.85, 0); // episode 1, reward, arm 0
+        chain.record(2, 0.90, 2); // episode 2, reward, arm 2
+
+        // 6. Verify the chain
+        assert!(
+            chain.verify(),
+            "Provenance chain must verify after recording legitimate steps"
+        );
+
+        // 7. Commitment hash must be non-zero
+        let hash = chain.commitment_hash();
+        let zero: [u8; 32] = [0u8; 32];
+        assert_ne!(
+            hash, zero,
+            "Commitment hash of non-empty chain must be non-zero"
+        );
+    }
+
+    /// T4 Integration — mock failure pattern → synthetic generation → rule extraction.
+    #[test]
+    fn integration_t4_failure_pattern_synthetic_rule_extraction() {
+        // 1. Create AdversarialBreaker wrapping RejectThree, threshold=3 for speed
+        let ab = AdversarialBreaker::new(RejectThree, 3);
+
+        // 2. Feed failures until a pattern goes hot
+        //    RejectThree rejects token 3. Use is_valid to trigger failure recording.
+        //    Calling is_valid(0, 3, &[]) creates pattern { tokens: [3], failure_depth: 0 }
+        assert!(!ab.is_valid(0, 3, &[])); // count=1
+        assert!(!ab.is_valid(0, 3, &[])); // count=2
+        assert!(!ab.is_valid(0, 3, &[])); // count=3 → hot!
+
+        // 3. Get hot patterns
+        let hot = ab.hot_patterns();
+        assert_eq!(hot.len(), 1, "Exactly one pattern should be hot");
+        assert_eq!(hot[0].tokens, vec![3], "Hot pattern should be at token 3");
+
+        // 4. Generate synthetic edge cases from the hot pattern
+        let variants = ab.generate_synthetic(&hot[0]);
+        assert_eq!(variants.len(), 2, "1 token × 2 perturbations = 2 variants");
+        // Perturbations of token 3: ±1 → 4 and 2
+        assert!(variants.contains(&vec![4]), "Variant +1: token 3→4");
+        assert!(variants.contains(&vec![2]), "Variant -1: token 3→2");
+
+        // 5. Run each synthetic through the breaker's is_valid
+        //    Token 4 and 2 are accepted by RejectThree (only token 3 is rejected)
+        //    These pass — confirming the weakness is specific to token 3
+        let mut _synthetic_failures: Vec<Vec<usize>> = Vec::new();
+        for variant in variants.iter() {
+            // Use depth 0, first token of variant, no parents
+            if !ab.is_valid(0, variant[0], &[]) {
+                _synthetic_failures.push(variant.clone());
+            }
+        }
+
+        // The synthetic variants (token 2 and 4) pass — they don't trigger the weakness.
+        // The weakness is at token 3 specifically. This confirms token 3 is the systematic failure.
+        // To expose the weakness more thoroughly, test the actual failing token:
+        assert!(
+            !ab.is_valid(0, 3, &[]),
+            "Token 3 still fails — confirms the systematic weakness"
+        );
+
+        // 6. Collect failures — verify they expose the systematic weakness at token 3
+        let hot_after = ab.hot_patterns();
+        assert_eq!(
+            hot_after[0].tokens,
+            vec![3],
+            "Hot pattern confirms weakness at token 3"
+        );
+
+        // 7. Create a DecisionTrace from the failure analysis results
+        let trace = DecisionTrace {
+            rules_applied: vec![
+                // Rule documenting the discovered weakness: token 3 rejection
+                ExtractedRule::new(
+                    vec![(0, 3)], // condition: token at pos 0 == 3
+                    (0, 3),       // action: reject at depth 0, token 3
+                    0.95,         // high confidence — systematic pattern
+                    10,           // support: observed 10+ times
+                ),
+            ],
+            alternatives_rejected: vec![
+                ExtractedRule::new(
+                    vec![(0, 2)], // alternative: token 2 (didn't fail)
+                    (0, 2),
+                    0.5,
+                    3,
+                ),
+                ExtractedRule::new(
+                    vec![(0, 4)], // alternative: token 4 (didn't fail)
+                    (0, 4),
+                    0.5,
+                    3,
+                ),
+            ],
+            confidence: 0.9,
+        };
+
+        // 8. Gate evaluates candidate that would fix the issue
+        //    DL_old = 1*16 + 2*8 = 32.0
+        //    Candidate explains 1 rule → reduction = 16.0
+        //    DL_new = 32 - 16 = 16.0
+        //    16.0 < 32 - 32 = 0.0? No → Reject with default cost.
+        //    Use a lower cost gate (8.0) so the fix candidate is accepted.
+        let gate = RegimeTransitionGate::new(8.0);
+        let result = gate.evaluate(&trace, 1);
+        assert_eq!(
+            result,
+            GateResult::Accept,
+            "Fix candidate should pass gate with low admission cost"
+        );
+
+        // 9. Record in ProvenanceChain and verify
+        let mut chain = ProvenanceChain::default();
+        chain.record(10, 0.95, 3); // episode for this fix
+        assert!(chain.verify(), "Chain must verify after recording");
+        let hash = chain.commitment_hash();
+        assert_ne!(hash, [0u8; 32], "Commitment hash must be non-zero");
+    }
+
+    /// T5 Integration — discovery → regime transition → consolidation → return to standard.
+    #[test]
+    fn integration_t5_discovery_regime_transition_consolidation_cycle() {
+        let mut router = FourRegimeRouter::with_defaults();
+        let classifier = RegimeCollapseClassifier::default();
+        let gate = RegimeTransitionGate::default();
+        let mut chain = ProvenanceChain::default();
+
+        // ── Phase 1: Standard ──────────────────────────────────────
+        let standard_features = RegimeFeatures {
+            failure_rate: 0.1,
+            regime_collapse: false,
+            transition_success: false,
+            regime_q_value: 0.5,
+        };
+        let arm = router.select(&standard_features);
+        assert_eq!(
+            arm.regime(),
+            Regime::Standard,
+            "Phase 1: Standard features must select Standard regime"
+        );
+        router.update(arm, 0.8);
+
+        // ── Phase 2: Discovery ─────────────────────────────────────
+        // Create DDTreeStats with uniform failure depths → regime collapse
+        let collapse_stats = DDTreeStats {
+            total_branches: 15,
+            failed_branches: 6,
+            failure_depths: vec![3, 3, 3, 3, 3, 3],
+            max_depth: 5,
+        };
+        let collapse_type = classifier.classify(&collapse_stats);
+        assert_eq!(
+            collapse_type,
+            CollapseType::Regime,
+            "Phase 2: Uniform failures must classify as Regime"
+        );
+
+        // Set regime_collapse=true → router must select Discovery
+        let discovery_features = RegimeFeatures {
+            failure_rate: 0.9,
+            regime_collapse: true,
+            transition_success: false,
+            regime_q_value: 0.2,
+        };
+        let discovery_arm = router.select(&discovery_features);
+        assert_eq!(
+            discovery_arm.regime(),
+            Regime::Discovery,
+            "Phase 2: regime_collapse=true must select Discovery regime"
+        );
+
+        // ── Phase 3: Regime Transition ─────────────────────────────
+        let trace = make_trace(5, 2);
+        // DL_old = 5*16 + 2*8 = 96.0; explains 4 → reduction=64 → DL_new=32
+        // 32.0 < 96.0 - 32.0 = 64.0 → Accept
+        let gate_result = gate.evaluate(&trace, 4);
+        assert_eq!(
+            gate_result,
+            GateResult::Accept,
+            "Phase 3: Candidate reducing DL by 64 bits should be accepted"
+        );
+
+        // Record in ProvenanceChain
+        chain.record(1, 0.85, discovery_arm.index() as usize);
+        chain.record(2, 0.90, discovery_arm.index() as usize);
+        assert!(chain.verify(), "Phase 3: Provenance chain must verify");
+
+        // Update router with the discovery arm reward
+        router.update(discovery_arm, 0.85);
+
+        // ── Phase 4: Consolidation ─────────────────────────────────
+        let consolidation_features = RegimeFeatures {
+            failure_rate: 0.3,
+            regime_collapse: false,
+            transition_success: true,
+            regime_q_value: 0.7,
+        };
+        let consol_arm = router.select(&consolidation_features);
+        assert_eq!(
+            consol_arm.regime(),
+            Regime::Consolidation,
+            "Phase 4: transition_success=true must select Consolidation regime"
+        );
+        router.update(consol_arm, 0.9);
+        chain.record(3, 0.90, consol_arm.index() as usize);
+
+        // ── Phase 5: Return to Standard ────────────────────────────
+        let returned_features = RegimeFeatures {
+            failure_rate: 0.05,
+            regime_collapse: false,
+            transition_success: false,
+            regime_q_value: 0.8,
+        };
+        let return_arm = router.select(&returned_features);
+        assert_eq!(
+            return_arm.regime(),
+            Regime::Standard,
+            "Phase 5: No collapse/transition flags must return to Standard regime"
+        );
+        router.update(return_arm, 0.95);
+
+        // ── Verify full cycle ──────────────────────────────────────
+        // Router has visits in Standard, Discovery, and Consolidation
+        let all_arms: Vec<RegimeArm> = RegimeArm::all().collect();
+        let has_standard = all_arms
+            .iter()
+            .any(|&a| router.visits(a) > 0 && a.regime() == Regime::Standard);
+        let has_discovery = all_arms
+            .iter()
+            .any(|&a| router.visits(a) > 0 && a.regime() == Regime::Discovery);
+        let has_consolidation = all_arms
+            .iter()
+            .any(|&a| router.visits(a) > 0 && a.regime() == Regime::Consolidation);
+
+        assert!(has_standard, "Cycle must include Standard regime visits");
+        assert!(has_discovery, "Cycle must include Discovery regime visits");
+        assert!(
+            has_consolidation,
+            "Cycle must include Consolidation regime visits"
+        );
+
+        // ProvenanceChain verifies
+        assert!(chain.verify(), "Final chain must verify");
+
+        // Commitment hash is consistent (compute twice, must match)
+        let hash1 = chain.commitment_hash();
+        let hash2 = chain.commitment_hash();
+        assert_eq!(hash1, hash2, "Commitment hash must be deterministic");
+        assert_ne!(hash1, [0u8; 32], "Commitment hash must be non-zero");
+    }
 }

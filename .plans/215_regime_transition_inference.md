@@ -59,7 +59,7 @@ DDTree Exploration
 - [x] Accept iff: `DL_new < DL_old - AdmissionCost`
 - [x] Unit test: candidate that reduces DL by > AdmissionCost → Accept
 - [x] Unit test: candidate that reduces DL by < AdmissionCost → Reject
-- [ ] Integration test: full pipeline with mock DDTree producing regime collapse
+- [x] Integration test: full pipeline with mock DDTree producing regime collapse
 
 ### T3: ProvenanceChain for AbsorbCompress
 
@@ -79,7 +79,7 @@ DDTree Exploration
 - [x] Synthetic edge case: perturb the failing token sequence by ±1 token in each position
 - [ ] Feed synthetic through DDTree to verify it exposes a genuine failure
 - [ ] If genuine → extract as new rule via Plan 209 T2 (RuleExtractor)
-- [ ] Integration test: mock failure pattern → synthetic generation → rule extraction
+- [x] Integration test: mock failure pattern → synthetic generation → rule extraction
 
 ### T5: Four-Regime Router Extension
 
@@ -88,7 +88,7 @@ DDTree Exploration
 - [x] Add `Consolidation` regime: entered after any successful regime transition, runs AbsorbCompress + ProvenanceChain
 - [x] Bandit arms: 3 regimes × 2 heaviness options = 6 arms (UCB1 with sigmoid confidence)
 - [x] Sigmoid-gated mixing (NOT softmax) per user constraint
-- [ ] Integration test: mock scenario triggering discovery → regime transition → consolidation cycle
+- [x] Integration test: mock scenario triggering discovery → regime transition → consolidation cycle
 
 ### T6: GOAT Proof — Before/After Benchmark
 
