@@ -85,6 +85,8 @@ pub mod speculative;
 pub mod static_cal;
 #[cfg(feature = "stiff_anomaly")]
 pub mod stiff_anomaly;
+#[cfg(feature = "targeted_precision")]
+pub mod targeted_precision;
 pub mod tokenizer;
 pub mod transformer;
 pub mod trigger_gate;

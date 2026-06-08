@@ -37,13 +37,13 @@ Apply Gemma 4 QAT's fundamental insight (*optimize for the precision you'll depl
 
 ### Phase 2: Targeted Precision Budget (TPB) — Per-head bit allocation
 
-- [ ] Create `src/targeted_precision.rs` with `PrecisionBudget` struct
+- [x] Create `src/targeted_precision.rs` with `PrecisionBudget` struct
   - `head_bits: Vec<u8>` — bits per attention head
   - `budget: f32` — total bits budget (average)
   - `compute_budget(model: &Model, calibration_data: &[Tensor]) -> PrecisionBudget`
-- [ ] Add `targeted_precision` feature flag
-- [ ] Implement sensitivity analysis: for each head, measure perplexity impact of quantization noise
-- [ ] Implement bit allocation: constrained optimization (total bits = budget, minimize perplexity)
+- [x] Add `targeted_precision` feature flag
+- [x] Implement sensitivity analysis: for each head, measure perplexity impact of quantization noise
+- [x] Implement bit allocation: constrained optimization (total bits = budget, minimize perplexity)
   - Use greedy: sort heads by sensitivity, allocate budget to most sensitive first
 - [ ] Wire into KVarN: use per-head bit-width from `PrecisionBudget` instead of uniform
 - [ ] Write `tests/targeted_precision_goat.rs` benchmark:
