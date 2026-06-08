@@ -54,13 +54,13 @@ Apply Gemma 4 QAT's fundamental insight (*optimize for the precision you'll depl
 
 ### Phase 3: Modality-Pruned Context Loading — Pipeline pruning
 
-- [ ] Create `src/pipeline_pruner.rs` with `PipelineConfig` enum
+- [x] Create `src/pipeline_pruner.rs` with `PipelineConfig` enum
   - `Simple` — direct decode only
   - `Code` — DDTree + SynPruner, no KV compression
   - `LongContext` — VortexFlow + KV compression, no speculative
   - `Reasoning` — Adaptive CoT + ThoughtFold, full precision
-- [ ] Add `modality_pruned_load` feature flag
-- [ ] Implement query classifier: use River Valley signal + Lodestar distance to classify queries
+- [x] Add `modality_pruned_load` feature flag
+- [x] Implement query classifier: use River Valley signal + Lodestar distance to classify queries
   - Simple: low entropy, short expected output
   - Code: syntactic patterns (brackets, semicolons)
   - LongContext: input length > threshold
