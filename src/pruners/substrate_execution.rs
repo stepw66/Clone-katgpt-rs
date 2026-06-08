@@ -8,9 +8,10 @@
 
 use super::substrate_types::{SubstrateMask, SubstrateRouter};
 
-// ── sigmoid helper ──────────────────────────────────────────────
+// ── sigmoid helper (used by other substrate modules) ──────────
 
 #[inline]
+#[allow(dead_code)]
 fn sigmoid(x: f32) -> f32 {
     1.0 / (1.0 + (-x).exp())
 }
@@ -118,6 +119,8 @@ pub fn flops_reduction_ratio(mask: &SubstrateMask, active_ratio: f32) -> f32 {
 pub struct SubstrateExecutionContext<R: SubstrateRouter> {
     router: R,
     /// Currently selected mask for this sequence (cached).
+    /// TODO: wire up mask index caching once router exposes index selection.
+    #[allow(dead_code)]
     selected_mask_idx: Option<usize>,
 }
 

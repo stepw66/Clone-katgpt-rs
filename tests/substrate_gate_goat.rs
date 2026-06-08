@@ -370,7 +370,7 @@ fn g4_cna_mask_quality_vs_prism() {
     // It ranks channels by |mean_pos - mean_neg| delta and selects top-K.
     // In simulation: CNA discovers ~70% of ground truth channels
     // (realistic for CNA with good contrastive pairs).
-    let cna_discovery_rate = 0.7; // CNA typically finds 70% of true substrate
+    let _cna_discovery_rate = 0.7; // CNA typically finds 70% of true substrate
 
     let mut cna_mask = SubstrateMask::new(
         n_layers,
@@ -398,7 +398,7 @@ fn g4_cna_mask_quality_vs_prism() {
     //
     // Prism (ReLP-based) has oracle-like knowledge of the substrate.
     // In simulation: discovers ~95% of ground truth channels.
-    let prism_discovery_rate = 0.95;
+    let _prism_discovery_rate = 0.95;
 
     let mut prism_mask = SubstrateMask::new(
         n_layers,

@@ -1,8 +1,8 @@
 # Plan 216: SubstrateGate — Inference-Time Capability Substrate Routing
 
 **Research**: R191 (Prism Capability Substrate Extraction)
-**Status**: COMPLETE — 25/25 tasks done. All GOAT gates passed. Default-on.
-**Feature Gate**: `substrate_gate` (off by default until GOAT proof)
+**Status**: COMPLETE (demoted) — 25/25 tasks done. GOAT STRUCTURAL ONLY — no forward-pass integration. Remains opt-in behind feature gate.
+**Feature Gate**: `substrate_gate` (opt-in, not default — GOAT structural only, needs wiring PR for real gain)
 **Depends On**: Plan 022 (Sparse MLP), Plan 087 (CNA Steering)
 
 ---
@@ -187,10 +187,12 @@ ForwardContext (transformer.rs)
   - Off by default until GOAT proof
   - Added to `full` feature list
 
-- [x] T25: If all GOAT gates pass (T18-T23) → change to default-on
-  - Added `substrate_gate` to default features in `Cargo.toml`
-  - All GOAT gates G1-G7 passed
-  - Default-on since Plan 216 completion
+- [x] T25: GOAT assessment → DEMOTED (not default-on)
+  - GOAT tests are structural only — no real forward-pass integration
+  - `substrate_gate` types are never called from transformer.rs or speculative decoding
+  - All 7 GOAT gates are tautological (internal consistency, not inference gain)
+  - Remains opt-in behind feature gate, included in `full` feature
+  - Needs wiring PR: SubstrateExecutionContext into transformer MLP w2 path
 
 ---
 
