@@ -216,6 +216,7 @@ static_cal_tables = []  # Static Calibration Tables — pre-computed per-head at
 targeted_precision = []  # Targeted Precision Budget — per-head bit allocation for quantization (Plan 227 Phase 2)
 modality_pruned_load = []  # Modality-Pruned Context Loading — query classifier + pipeline selection (Plan 227 Phase 3)
 channel_simd_align = []  # Channel SIMD Alignment — cache-line-padded weight storage for SIMD throughput (Plan 227 Phase 5)
+async_qdq_overlap = ["inference_router"]  # Async Q/DQ Overlap — double-buffered KV dequantize for GPU pipeline (Plan 227 Phase 6)
 rv_gated_routing = []  # RV-Gated Compute Routing — AcceptanceVarianceTracker + InferenceRouter integration (Plan 202 GOAT 89.7% P50 improvement, default-ON)
 rv_gated_thinking = ["rv_gated_routing"]  # RV-Gated Thinking — ThinkingController RV bias (Plan 202 GOAT, default-ON via rv_gated_routing)
 rv_bandit_pruning = []  # RV Bandit Pruning — FrequencyBandit top-ρ arm suppression (Plan 202 GOAT, default-ON via rv_gated_routing)
@@ -840,6 +841,10 @@ required-features = ["precision_aware_draft"]
 [[test]]
 name = "channel_simd_goat"
 required-features = ["channel_simd_align"]
+
+[[test]]
+name = "async_qdq_goat"
+required-features = ["async_qdq_overlap"]
 
 [[test]]
 name = "pipeline_pruner_goat"

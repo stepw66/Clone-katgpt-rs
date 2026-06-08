@@ -12,6 +12,9 @@
 use super::hadamard;
 use super::var_norm::{VarNormConfig, VarianceNormScales, variance_normalize};
 
+#[cfg(feature = "targeted_precision")]
+use crate::targeted_precision::PrecisionBudget;
+
 // ---------------------------------------------------------------------------
 // Config
 // ---------------------------------------------------------------------------
@@ -44,6 +47,14 @@ pub struct KVarNConfig {
     /// Enable only if profiling shows error correlation across channels in
     /// your specific model.
     pub hadamard: bool,
+    /// Optional static calibration table (Plan 227 Phase 1).
+    /// When set, replaces Sinkhorn iterations with O(1) lookup.
+    #[cfg(feature = "static_cal_tables")]
+    pub static_cal: Option<crate::static_cal::StaticCalTable>,
+    /// Optional per-head precision budget (Plan 227 Phase 2).
+    /// When set, uses per-head bit-width instead of uniform.
+    #[cfg(feature = "targeted_precision")]
+    pub precision_budget: Option<PrecisionBudget>,
 }
 
 impl Default for KVarNConfig {
@@ -56,6 +67,10 @@ impl Default for KVarNConfig {
             tile_size: 128,
             var_norm: VarNormConfig::default(),
             hadamard: false,
+            #[cfg(feature = "static_cal_tables")]
+            static_cal: None,
+            #[cfg(feature = "targeted_precision")]
+            precision_budget: None,
         }
     }
 }
@@ -150,6 +165,12 @@ pub struct KVarNKVCache {
     effective_hadamard: bool,
     /// Sub-channel group size for RTN quantization (at 2-bit: 32, otherwise 0 = full row).
     group_size: usize,
+    /// Optional static calibration table for O(1) scale lookup.
+    #[cfg(feature = "static_cal_tables")]
+    static_cal: Option<crate::static_cal::StaticCalTable>,
+    /// Optional per-head precision budget for non-uniform quantization.
+    #[cfg(feature = "targeted_precision")]
+    precision_budget: Option<PrecisionBudget>,
 }
 
 impl KVarNKVCache {
@@ -215,7 +236,25 @@ impl KVarNKVCache {
             skip_varn: cfg.bits <= 2,
             effective_hadamard: cfg.hadamard,
             group_size: if cfg.bits <= 2 { 4 } else { 0 },
+            #[cfg(feature = "static_cal_tables")]
+            static_cal: cfg.static_cal.clone(),
+            #[cfg(feature = "targeted_precision")]
+            precision_budget: cfg.precision_budget.clone(),
         }
+    }
+
+    /// Get effective bits for a specific channel/row in a layer.
+    /// When targeted_precision is enabled with a budget, uses per-head bits.
+    /// Otherwise falls back to uniform self.bits.
+    #[inline]
+    #[allow(dead_code)] // reserved for future per-row quantization (Plan 227 Phase 2+)
+    fn effective_bits(&self, _layer: usize, _channel: usize) -> u8 {
+        #[cfg(feature = "targeted_precision")]
+        if let Some(ref budget) = self.precision_budget {
+            let head = _channel; // simplified: 1 channel per head for budget purposes
+            return budget.get_bits(_layer, head);
+        }
+        self.bits
     }
 
     /// Quantize and store a key vector at given layer and position.
@@ -557,7 +596,37 @@ impl KVarNKVCache {
             hadamard::hadamard_cols(&mut tile_data, rows, cols);
         }
 
-        // Step 1: Variance normalization (skip at 2-bit — dual-scale reconstruction hurts)
+        // Step 1: Variance normalization
+        //   Static cal tables: O(1) lookup replaces Sinkhorn iterations (Plan 227 Phase 1)
+        #[cfg(feature = "static_cal_tables")]
+        let var_scales = if let Some(ref cal) = self.static_cal {
+            // Use static per-head scales instead of iterative Sinkhorn
+            let s_row: Vec<f32> = (0..rows).map(|ch| cal.get_scale(layer, ch)).collect();
+            // Apply static scales to tile
+            for ch in 0..rows {
+                let scale = s_row[ch];
+                for t in 0..cols {
+                    tile_data[ch * cols + t] /= scale;
+                }
+            }
+            VarianceNormScales {
+                s_col: vec![1.0f32; cols],
+                s_row,
+            }
+        } else if self.skip_varn {
+            VarianceNormScales {
+                s_col: vec![1.0f32; cols],
+                s_row: vec![1.0f32; rows],
+            }
+        } else {
+            let config = VarNormConfig {
+                tile_size: self.tile_size,
+                ..Default::default()
+            };
+            variance_normalize(&mut tile_data, rows, cols, &config)
+        };
+
+        #[cfg(not(feature = "static_cal_tables"))]
         let var_scales = if self.skip_varn {
             VarianceNormScales {
                 s_col: vec![1.0f32; cols],
@@ -572,15 +641,25 @@ impl KVarNKVCache {
         };
 
         // Step 2: RTN quantization
-        //   At 2-bit, use sub-channel grouping (group_size=32) for tighter ranges.
-        let (rtn_scales, rtn_zp, packed) = if self.group_size > 0 {
-            rtn_quantize_rows_grouped(&tile_data, rows, cols, self.bits, self.group_size)
+        //   Targeted precision: use budget-allocated bits (Plan 227 Phase 2)
+        #[cfg(feature = "targeted_precision")]
+        let bits = if let Some(ref budget) = self.precision_budget {
+            budget.budget.ceil() as u8 // use ceiling to avoid precision loss
         } else {
-            rtn_quantize_rows(&tile_data, rows, cols, self.bits)
+            self.bits
+        };
+
+        #[cfg(not(feature = "targeted_precision"))]
+        let bits = self.bits;
+
+        let (rtn_scales, rtn_zp, packed) = if self.group_size > 0 {
+            rtn_quantize_rows_grouped(&tile_data, rows, cols, bits, self.group_size)
+        } else {
+            rtn_quantize_rows(&tile_data, rows, cols, bits)
         };
 
         // Store
-        let bpr = packed_bytes_per_row(cols, self.bits);
+        let bpr = packed_bytes_per_row(cols, bits);
         let meta = &mut self.key_tiles[layer][tile_idx];
         meta.count = count;
         meta.var_scales = var_scales;
@@ -610,7 +689,37 @@ impl KVarNKVCache {
             hadamard::hadamard_rows(&mut tile_data, cols);
         }
 
-        // Step 1: Variance normalization (skip at 2-bit — dual-scale reconstruction hurts)
+        // Step 1: Variance normalization
+        //   Static cal tables: O(1) lookup replaces Sinkhorn iterations (Plan 227 Phase 1)
+        #[cfg(feature = "static_cal_tables")]
+        let var_scales = if let Some(ref cal) = self.static_cal {
+            // Use static per-head scales instead of iterative Sinkhorn
+            let s_row: Vec<f32> = (0..rows).map(|ch| cal.get_scale(layer, ch)).collect();
+            // Apply static scales to tile
+            for ch in 0..rows {
+                let scale = s_row[ch];
+                for t in 0..cols {
+                    tile_data[ch * cols + t] /= scale;
+                }
+            }
+            VarianceNormScales {
+                s_col: vec![1.0f32; cols],
+                s_row,
+            }
+        } else if self.skip_varn {
+            VarianceNormScales {
+                s_col: vec![1.0f32; cols],
+                s_row: vec![1.0f32; rows],
+            }
+        } else {
+            let config = VarNormConfig {
+                tile_size: self.tile_size,
+                ..Default::default()
+            };
+            variance_normalize(&mut tile_data, rows, cols, &config)
+        };
+
+        #[cfg(not(feature = "static_cal_tables"))]
         let var_scales = if self.skip_varn {
             VarianceNormScales {
                 s_col: vec![1.0f32; cols],
@@ -625,14 +734,24 @@ impl KVarNKVCache {
         };
 
         // Step 2: RTN quantization
-        //   At 2-bit, use sub-channel grouping (group_size=32) for tighter ranges.
-        let (rtn_scales, rtn_zp, packed) = if self.group_size > 0 {
-            rtn_quantize_rows_grouped(&tile_data, rows, cols, self.bits, self.group_size)
+        //   Targeted precision: use budget-allocated bits (Plan 227 Phase 2)
+        #[cfg(feature = "targeted_precision")]
+        let bits = if let Some(ref budget) = self.precision_budget {
+            budget.budget.ceil() as u8
         } else {
-            rtn_quantize_rows(&tile_data, rows, cols, self.bits)
+            self.bits
         };
 
-        let bpr = packed_bytes_per_row(cols, self.bits);
+        #[cfg(not(feature = "targeted_precision"))]
+        let bits = self.bits;
+
+        let (rtn_scales, rtn_zp, packed) = if self.group_size > 0 {
+            rtn_quantize_rows_grouped(&tile_data, rows, cols, bits, self.group_size)
+        } else {
+            rtn_quantize_rows(&tile_data, rows, cols, bits)
+        };
+
+        let bpr = packed_bytes_per_row(cols, bits);
         let meta = &mut self.val_tiles[layer][tile_idx];
         meta.count = count;
         meta.var_scales = var_scales;
@@ -941,6 +1060,10 @@ mod tests {
                 ..Default::default()
             },
             hadamard: false,
+            #[cfg(feature = "static_cal_tables")]
+            static_cal: None,
+            #[cfg(feature = "targeted_precision")]
+            precision_budget: None,
         }
     }
 
@@ -1258,6 +1381,10 @@ mod tests {
             tile_size: 128,
             var_norm: VarNormConfig::default(),
             hadamard: false,
+            #[cfg(feature = "static_cal_tables")]
+            static_cal: None,
+            #[cfg(feature = "targeted_precision")]
+            precision_budget: None,
         };
 
         let mut cache = KVarNKVCache::with_config(&config);

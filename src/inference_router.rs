@@ -22,6 +22,9 @@ use crate::pruners::acceptance_variance::AcceptanceVarianceTracker;
 #[cfg(feature = "rv_gated_routing")]
 use crate::trigger_gate::RvThresholds;
 
+#[cfg(feature = "modality_pruned_load")]
+use crate::pipeline_pruner::QueryClassifier;
+
 // ---------------------------------------------------------------------------
 // RouterStats
 // ---------------------------------------------------------------------------
@@ -88,6 +91,9 @@ pub struct InferenceRouter {
     /// Last observed Lodestar budget remaining (Plan 207).
     #[cfg(feature = "lodestar")]
     lodestar_budget_remaining: i32,
+    /// Query classifier for modality-pruned pipeline selection (Plan 227 Phase 3).
+    #[cfg(feature = "modality_pruned_load")]
+    query_classifier: QueryClassifier,
 }
 
 impl InferenceRouter {
@@ -130,6 +136,8 @@ impl InferenceRouter {
             lodestar_distance: 0,
             #[cfg(feature = "lodestar")]
             lodestar_budget_remaining: -1,
+            #[cfg(feature = "modality_pruned_load")]
+            query_classifier: QueryClassifier::new(),
         }
     }
 
@@ -510,6 +518,14 @@ impl InferenceRouter {
     /// Delegate queue-depth recording to the gate.
     pub fn record_queue_depth(&self, depth: usize) {
         self.gate.record_queue_depth(depth);
+    }
+
+    /// Classify a query and select the optimal pipeline configuration (Plan 227 Phase 3).
+    /// Only available when `modality_pruned_load` feature is enabled.
+    #[cfg(feature = "modality_pruned_load")]
+    #[inline]
+    pub fn select_pipeline(&self, prompt: &str) -> crate::pipeline_pruner::PipelineConfig {
+        self.query_classifier.classify_prompt(prompt)
     }
 
     /// Generate tokens autoregressively using the routed forward path.

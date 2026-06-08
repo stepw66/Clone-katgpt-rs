@@ -1,5 +1,7 @@
 #[cfg(all(target_os = "macos", feature = "ane"))]
 pub mod ane_backend;
+#[cfg(feature = "async_qdq_overlap")]
+pub mod async_qdq;
 pub mod benchmark;
 #[cfg(feature = "cache_prune")]
 pub mod cache_prune;

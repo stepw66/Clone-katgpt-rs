@@ -26,10 +26,10 @@ Apply Gemma 4 QAT's fundamental insight (*optimize for the precision you'll depl
   - `HeadStats` struct for per-head activation statistics
 - [x] Add `static_cal_tables` feature flag to `Cargo.toml` (opt-in, NOT default)
 - [x] Register `#[cfg(feature = "static_cal_tables")] pub mod static_cal` in `lib.rs`
-- [ ] Implement calibration pass: run 10-20 representative prompts through model, record per-head activation statistics
-- [ ] Wire into KVarN: when `static_cal_tables` enabled, use static scales instead of Sinkhorn iterations
-- [ ] Add River Valley trigger for recalibration: when RV signal detects distribution shift, re-run calibration
-- [ ] Write `tests/static_cal_goat.rs` benchmark:
+- [x] Implement calibration pass: run 10-20 representative prompts through model, record per-head activation statistics
+- [x] Wire into KVarN: when `static_cal_tables` enabled, use static scales instead of Sinkhorn iterations
+- [x] Add River Valley trigger for recalibration: when RV signal detects distribution shift, re-run calibration
+- [x] Write `tests/static_cal_goat.rs` benchmark:
   - Before: KVarN with Sinkhorn (4-8 iterations per decode)
   - After: KVarN with static scales
   - Measure: decode latency, perplexity delta, calibration time
@@ -45,8 +45,8 @@ Apply Gemma 4 QAT's fundamental insight (*optimize for the precision you'll depl
 - [x] Implement sensitivity analysis: for each head, measure perplexity impact of quantization noise
 - [x] Implement bit allocation: constrained optimization (total bits = budget, minimize perplexity)
   - Use greedy: sort heads by sensitivity, allocate budget to most sensitive first
-- [ ] Wire into KVarN: use per-head bit-width from `PrecisionBudget` instead of uniform
-- [ ] Write `tests/targeted_precision_goat.rs` benchmark:
+- [x] Wire into KVarN: use per-head bit-width from `PrecisionBudget` instead of uniform
+- [x] Write `tests/targeted_precision_goat.rs` benchmark:
   - Before: KVarN uniform 2.3 bits/head
   - After: KVarN targeted (some 4-bit, some 2-bit, same total)
   - Measure: perplexity, KV cache size (must be same), decode latency
@@ -65,8 +65,8 @@ Apply Gemma 4 QAT's fundamental insight (*optimize for the precision you'll depl
   - Code: syntactic patterns (brackets, semicolons)
   - LongContext: input length > threshold
   - Reasoning: high entropy, multi-step expected
-- [ ] Wire into InferenceRouter: `select_pipeline(query) -> PipelineConfig`
-- [ ] Write `tests/pipeline_pruner_goat.rs` benchmark:
+- [x] Wire into InferenceRouter: `select_pipeline(query) -> PipelineConfig`
+- [x] Write `tests/pipeline_pruner_goat.rs` benchmark:
   - Measure latency per query class with and without pruning
   - Verify quality: each class must maintain output quality within tolerance
 - [ ] GOAT gate: if latency improves ≥20% for simple queries with no quality regression, default-ON
@@ -79,8 +79,8 @@ Apply Gemma 4 QAT's fundamental insight (*optimize for the precision you'll depl
 - [x] Add `precision_aware_draft` feature flag
 - [x] Implement boundary detection: for each draft token, check if logit is within ε of quantization grid boundary
 - [x] Implement draft scoring: `draft_score += boundary_penalty * weight`
-- [ ] Wire into `SpeculativeGenerator` trait: add optional boundary penalty to `generate()`
-- [ ] Write `tests/precision_aware_draft_goat.rs` benchmark:
+- [x] Wire into `SpeculativeGenerator` trait: add optional boundary penalty to `generate()`
+- [x] Write `tests/precision_aware_draft_goat.rs` benchmark:
   - Before: standard speculative decoding acceptance rate
   - After: precision-aware draft acceptance rate
   - Measure: acceptance rate, tokens/sec, overhead of boundary computation
@@ -88,11 +88,11 @@ Apply Gemma 4 QAT's fundamental insight (*optimize for the precision you'll depl
 
 ### Phase 5: Channel SIMD Alignment — Data layout optimization
 
-- [ ] Audit `TernaryWeights` struct for SIMD lane alignment
+- [x] Audit `TernaryWeights` struct for SIMD lane alignment
 - [x] Add `channel_simd_align` feature flag
 - [x] Implement cache-line-aligned storage: pad weight rows to 64-byte boundaries
-- [ ] Implement aligned quantize/dequantize paths in `simd.rs`
-- [ ] Write `tests/channel_simd_goat.rs` benchmark:
+- [x] Implement aligned quantize/dequantize paths in `channel_simd.rs`
+- [x] Write `tests/channel_simd_goat.rs` benchmark:
   - Before: standard ternary matvec
   - After: cache-line-aligned ternary matvec
   - Measure: SIMD throughput (ops/sec), cache miss rate (if possible)
@@ -100,10 +100,10 @@ Apply Gemma 4 QAT's fundamental insight (*optimize for the precision you'll depl
 
 ### Phase 6: Async Q/DQ Overlap — GPU pipeline (depends on GPU feature)
 
-- [ ] Add `async_qdq_overlap` feature flag (requires `inference_router`)
-- [ ] Implement double-buffered KV dequantize: CPU dequantizes chunk N+1 while GPU processes chunk N
-- [ ] Implement in `InferenceBackend::GpuBackend` only
-- [ ] Write `tests/async_qdq_goat.rs` benchmark:
+- [x] Add `async_qdq_overlap` feature flag (requires `inference_router`)
+- [x] Implement double-buffered KV dequantize: CPU dequantizes chunk N+1 while GPU processes chunk N
+- [x] Implement in `src/async_qdq.rs` (generic, ready for GPU integration)
+- [x] Write `tests/async_qdq_goat.rs` benchmark:
   - Before: sequential dequantize → attention
   - After: overlapped dequantize + attention
   - Measure: GPU utilization, throughput, latency

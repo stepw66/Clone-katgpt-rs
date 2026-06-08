@@ -25,13 +25,15 @@ impl StaticCalTable {
     /// All scales initialize to 1.0 (neutral — no correction).
     pub fn new(num_layers: usize, num_heads: usize) -> Self {
         let total = num_layers * num_heads;
-        Self {
+        let mut table = Self {
             scales: vec![1.0; total],
             num_layers,
             num_heads,
             calibration_prompts: 0,
             commitment: [0u8; 32],
-        }
+        };
+        table.commit();
+        table
     }
 
     /// O(1) lookup for a specific head's scale.
@@ -110,6 +112,36 @@ pub struct HeadStats {
 #[inline]
 fn sigmoid(x: f32) -> f32 {
     1.0 / (1.0 + (-x).exp())
+}
+
+/// Run calibration pass over representative prompts.
+/// Takes a closure that simulates model forward pass and returns per-head activation stats.
+/// The closure receives (prompt_index) and should return Vec<HeadStats>.
+pub fn run_calibration_pass<F>(table: &mut StaticCalTable, num_prompts: usize, forward_fn: F)
+where
+    F: Fn(usize) -> Vec<HeadStats>,
+{
+    for i in 0..num_prompts {
+        let stats = forward_fn(i);
+        table.calibrate_from_stats(&stats);
+    }
+}
+
+/// RV-triggered recalibration: checks if the RV signal exceeds threshold
+/// and triggers recalibration if so.
+pub fn check_rv_recalibration(
+    table: &mut StaticCalTable,
+    rv_variance: f64,
+    threshold: f64,
+    forward_fn: impl Fn() -> Vec<HeadStats>,
+) -> bool {
+    if rv_variance > threshold {
+        let stats = forward_fn();
+        table.calibrate_from_stats(&stats);
+        true
+    } else {
+        false
+    }
 }
 
 #[cfg(test)]

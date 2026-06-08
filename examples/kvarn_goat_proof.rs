@@ -358,6 +358,10 @@ fn main() {
         tile_size,
         var_norm: config.clone(),
         hadamard: false,
+        #[cfg(feature = "static_cal_tables")]
+        static_cal: None,
+        #[cfg(feature = "targeted_precision")]
+        precision_budget: None,
     };
 
     let mut cache = KVarNKVCache::with_config(&bench_config);
@@ -436,6 +440,10 @@ fn main() {
         tile_size,
         var_norm: config.clone(),
         hadamard: true,
+        #[cfg(feature = "static_cal_tables")]
+        static_cal: None,
+        #[cfg(feature = "targeted_precision")]
+        precision_budget: None,
     };
     let mut had_cache = KVarNKVCache::with_config(&had_config);
     for pos in 0..bench_seq_len {
