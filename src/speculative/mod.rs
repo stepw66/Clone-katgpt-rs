@@ -350,6 +350,16 @@ pub use correlation_budget::CorrelationBudgetAllocator;
 #[cfg(feature = "corr_budget")]
 pub use dd_tree::build_dd_tree_screened_corr;
 
+// ── CaDDTree — Cost-Aware Adaptive DDTree Budget Selection (Plan 219) ──
+#[cfg(feature = "caddtree_budget")]
+pub mod caddtree_budget;
+
+#[cfg(feature = "caddtree_budget")]
+pub use caddtree_budget::{
+    AcceptanceSurrogate, BudgetSelector, LatencyEstimator, build_dd_tree_adaptive,
+    build_dd_tree_adaptive_screened,
+};
+
 // ── Self-Learning Selectivity Router (Plan 204, feature: selectivity_router) ──
 #[cfg(feature = "selectivity_router")]
 pub mod selectivity_router;
