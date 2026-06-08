@@ -1,6 +1,6 @@
 # Plan 220: BFCF × LSH × CMS × Roaring — Approximate Cache + Sketch Frequency + Bitmap Membership
 
-**Status:** PLAN — Awaiting Implementation
+**Status:** IN PROGRESS — Phases 1-4 complete, Phase 5 GOAT verification pending
 **Date:** 2026-06-08
 **Research:** katgpt-rs/.research/195_BFCF_LSH_CMS_Roaring_Approximate_Cache.md
 **Feature Gate:** `bfcf_lsh_cms` — auto-enables `bfcf_lfu_shard`, initially OPT-IN
@@ -148,35 +148,35 @@ pub trait RoaringBatching: Send + Sync {
 ## Tasks
 
 ### Phase 1: LSH SimHash Approximate Cache
-- [ ] Add `SimHashFingerprint`, `LshBucket`, `LshApproximateCache` types to `src/pruners/lsh_cache.rs`
-- [ ] Implement `SimHashFingerprint::from_logits()` — random projection R ∈ {-1,+1}^(d×64) → sign(R^T·x) → u64
-- [ ] Implement `LshApproximateCache::new()` — 4096 buckets, configurable capacity per bucket
-- [ ] Implement `LshApproximateCache::lookup()` — compute SimHash, find bucket, check Hamming distance ≤ radius
-- [ ] Implement `LshApproximateCache::insert()` — add (fingerprint, partition) to bucket, FIFO eviction if full
-- [ ] Implement `ApproximateCaching` trait for `BfcpLshCache`
-- [ ] Implement `BfcpLshCache::process()` — three-level pipeline: L0 exact → L1 LSH → full compute
-- [ ] Implement warm-start diff recompute: identify changed regions between cached and new partition, only recompute those
-- [ ] Test: SimHash produces same fingerprint for identical logits
-- [ ] Test: SimHash produces nearby fingerprints (low Hamming distance) for ε-different logits
-- [ ] Test: LSH bucket hit/miss on synthetic logit sequence with gradual drift
-- [ ] Test: warm-start produces same result as full compute (correctness)
-- [ ] Test: three-level hit rates on synthetic 100-step decode (target: L0 ~80%, L1 ~15%, miss ~5%)
-- [ ] Benchmark: LSH warm-start vs full compute on realistic decode sequence
+- [x] Add `SimHashFingerprint`, `LshBucket`, `LshApproximateCache` types to `src/pruners/lsh_cache.rs`
+- [x] Implement `SimHashFingerprint::from_logits()` — random projection R ∈ {-1,+1}^(d×64) → sign(R^T·x) → u64
+- [x] Implement `LshApproximateCache::new()` — 4096 buckets, configurable capacity per bucket
+- [x] Implement `LshApproximateCache::lookup()` — compute SimHash, find bucket, check Hamming distance ≤ radius
+- [x] Implement `LshApproximateCache::insert()` — add (fingerprint, partition) to bucket, FIFO eviction if full
+- [x] Implement `ApproximateCaching` trait for `BfcpLshCache`
+- [x] Implement `BfcpLshCache::process()` — three-level pipeline: L0 exact → L1 LSH → full compute
+- [x] Implement warm-start diff recompute: identify changed regions between cached and new partition, only recompute those
+- [x] Test: SimHash produces same fingerprint for identical logits
+- [x] Test: SimHash produces nearby fingerprints (low Hamming distance) for ε-different logits
+- [x] Test: LSH bucket hit/miss on synthetic logit sequence with gradual drift
+- [x] Test: warm-start produces same result as full compute (correctness)
+- [x] Test: three-level hit rates on synthetic 100-step decode (target: L0 ~80%, L1 ~15%, miss ~5%)
+- [x] Benchmark: LSH warm-start vs full compute on realistic decode sequence
 
 ### Phase 2: Count-Min Sketch Frequency
-- [ ] Add `CountMinSketch` type to `src/pruners/count_min_sketch.rs`
-- [ ] Implement `CountMinSketch::new()` — 4 rows × 256 cols, BLAKE3-derived seeds
-- [ ] Implement `CountMinSketch::update()` — increment counters for each row
-- [ ] Implement `CountMinSketch::estimate()` — min across rows (one-sided overestimate)
-- [ ] Implement `CountMinSketch::decay()` — multiply all counters by λ (O(1024) constant)
-- [ ] Implement `SketchFrequency` trait for `BfcpLshCache`
-- [ ] Wire CMS into `BfcpRegionCache` eviction: replace `entry.freq` with `cms.estimate(hash)`
-- [ ] Wire CMS into `BfcpRegionCache::decay()`: replace O(n) entry scan with O(1) CMS decay
-- [ ] Test: CMS estimate ≥ true count (one-sided overestimate property)
-- [ ] Test: CMS decay reduces all estimates proportionally
-- [ ] Test: CMS-based eviction evicts lowest-estimated entry
-- [ ] Test: CMS FreqTier matches per-entry FreqTier for typical workloads (±5% tolerance)
-- [ ] Benchmark: CMS decay O(1) vs per-entry O(n) at n=100 regions
+- [x] Add `CountMinSketch` type to `src/pruners/count_min_sketch.rs`
+- [x] Implement `CountMinSketch::new()` — 4 rows × 256 cols, BLAKE3-derived seeds
+- [x] Implement `CountMinSketch::update()` — increment counters for each row
+- [x] Implement `CountMinSketch::estimate()` — min across rows (one-sided overestimate)
+- [x] Implement `CountMinSketch::decay()` — multiply all counters by λ (O(1024) constant)
+- [x] Implement `SketchFrequency` trait for `BfcpLshCache`
+- [x] Wire CMS into `BfcpRegionCache` eviction: replace `entry.freq` with `cms.estimate(hash)`
+- [x] Wire CMS into `BfcpRegionCache::decay()`: replace O(n) entry scan with O(1) CMS decay
+- [x] Test: CMS estimate ≥ true count (one-sided overestimate property)
+- [x] Test: CMS decay reduces all estimates proportionally
+- [x] Test: CMS-based eviction evicts lowest-estimated entry
+- [x] Test: CMS FreqTier matches per-entry FreqTier for typical workloads (±5% tolerance)
+- [x] Benchmark: CMS decay O(1) vs per-entry O(n) at n=100 regions
 
 ### Phase 3: Roaring Bitmap Membership
 - [x] ~~Add `roaring` dependency to `Cargo.toml`~~ — SKIPPED: custom `CompactBitmap` with no external dep (prove concept first)
@@ -186,7 +186,7 @@ pub trait RoaringBatching: Send + Sync {
 - [x] Implement `roaring_reject_count()` — CompactBitmap::len() (O(containers))
 - [x] Implement `roaring_accept_tokens()` — lazy iterator over set bits
 - [x] Implement `roaring_refine_diff()` — set difference via container-level diff
-- [ ] Replace `Vec<bool>` membership_cache in `CachedRegion` with `CompactBitmap` (Phase 4 wiring)
+- [x] Replace `Vec<bool>` membership_cache in `CachedRegion` with `CompactBitmap` (Phase 4 wiring)
 - [x] Test: CompactBitmap membership matches Vec<bool> for all token indices
 - [x] Test: roaring_reject_count matches linear count
 - [x] Test: roaring_refine_diff matches sequential refinement
@@ -194,16 +194,16 @@ pub trait RoaringBatching: Send + Sync {
 - [x] Benchmark: memory usage CompactBitmap vs Vec<bool> at 128K vocab (≥3× reduction verified)
 
 ### Phase 4: Integration & Pipeline Wiring
-- [ ] Create `BfcpLshCms` top-level fusion struct in `src/pruners/bfcp_lsh_cms.rs`
-- [ ] Wire: process() → L0 exact lookup → L1 LSH lookup → full compute → insert both → CMS update
-- [ ] Wire: eviction uses CMS estimate, not per-entry freq
-- [ ] Wire: decay uses CMS O(1) decay, not per-entry scan
-- [ ] Wire: batch operations use Roaring bitmaps, not Vec<bool>
-- [ ] Extend `PerceptRouter` with LSH tier info for frequency-aware routing
-- [ ] Add `bfcf_lsh_cms` feature flag to `Cargo.toml` (auto-enables `bfcf_lfu_shard`)
-- [ ] Test: end-to-end pipeline with `bfcf_lsh_cms` feature enabled
-- [ ] Test: feature OFF produces same results as Plan 218 baseline (no regression)
-- [ ] Test: three-level cache produces identical partitions to full compute (correctness)
+- [x] Create `BfcpLshCms` top-level fusion struct in `src/pruners/bfcp_lsh_cms.rs`
+- [x] Wire: process() → L0 exact lookup → L1 LSH lookup → full compute → insert both → CMS update
+- [x] Wire: eviction uses CMS estimate, not per-entry freq
+- [x] Wire: decay uses CMS O(1) decay, not per-entry scan
+- [x] Wire: batch operations use Roaring bitmaps, not Vec<bool>
+- [x] Extend `PerceptRouter` with LSH tier info for frequency-aware routing
+- [x] Add `bfcf_lsh_cms` feature flag to `Cargo.toml` (auto-enables `bfcf_lfu_shard`)
+- [x] Test: end-to-end pipeline with `bfcf_lsh_cms` feature enabled
+- [x] Test: feature OFF produces same results as Plan 218 baseline (no regression)
+- [x] Test: three-level cache produces identical partitions to full compute (correctness)
 
 ### Phase 5: GOAT Verification
 - [ ] Run full benchmark suite with `bfcf_lsh_cms` enabled
