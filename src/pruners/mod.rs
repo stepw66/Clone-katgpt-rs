@@ -839,6 +839,18 @@ pub mod region_batch;
 #[cfg(feature = "bfcf_lfu_shard")]
 pub use region_batch::{RegionBatcher, RegionBatching};
 
+// ── BFCF × LFU × Sharding — Fusion Integration (Plan 218 Phase 5) ────────
+//
+// Top-level fusion: LFU cache + shard map + batcher.
+// Pipeline: lookup → cache miss → compute → insert → shard → batch.
+// freq_aware_complexity extends PerceptRouter with frequency tier.
+
+#[cfg(feature = "bfcf_lfu_shard")]
+pub mod bfcp_lfu_shard;
+
+#[cfg(feature = "bfcf_lfu_shard")]
+pub use bfcp_lfu_shard::{BfcpLfuShard, freq_aware_complexity};
+
 // ── SubstrateGate — Inference-Time Capability Substrate Routing (Plan 216) ──
 //
 // Pre-computed per-capability MLP channel masks intersected with ReLU

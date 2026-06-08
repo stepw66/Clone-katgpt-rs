@@ -198,11 +198,11 @@ pub trait RegionBatching: Send + Sync {
 - [x] Test: emotion-aware eviction evicts calm-cold before excited-hot
 
 ### Phase 5: Integration & PerceptRouter Extension
-- [ ] Extend `PerceptRouter` to incorporate frequency tier in routing decision
-- [ ] Extend `SigmoidPerceptRouter` complexity measure: `sigmoid(region_count × entropy × freq_factor)`
-- [ ] Integrate `BfcpLfuShard` into BFCPPruner pipeline (lookup → cache miss → compute → insert → shard → batch)
+- [x] Extend `PerceptRouter` to incorporate frequency tier in routing decision
+- [x] Extend `SigmoidPerceptRouter` complexity measure: `sigmoid(region_count × entropy × freq_factor)`
+- [x] Integrate `BfcpLfuShard` into BFCPPruner pipeline (lookup → cache miss → compute → insert → shard → batch)
 - [ ] Wire `BfcpLfuShard` into `InferenceRouter` for CPU/GPU auto-route
-- [ ] Test: end-to-end pipeline with `bfcf_lfu_shard` feature enabled
+- [x] Test: end-to-end pipeline with `bfcf_lfu_shard` feature enabled
 
 ### Phase 6: GOAT Verification
 - [ ] Run full benchmark suite with `bfcf_lfu_shard` enabled
