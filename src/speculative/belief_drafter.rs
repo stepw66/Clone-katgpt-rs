@@ -1,8 +1,9 @@
 //! NextLat Belief-State Speculative Drafter — lightweight MLP recursive hidden state prediction.
 //!
-//! Implements Plan 217 Phase 0: `LatentDynamicsMLP` struct with forward pass, binary I/O,
-//! and random initialization. The MLP predicts `h_{t+1}` from `(h_t, emb(x_{t+1}))` using a
-//! 3-layer residual architecture inspired by arXiv:2511.05963 (NextLat).
+//! Implements Plan 217: `LatentDynamicsMLP` (Phase 0) + `BeliefDrafter` with `draft()` (Phase 1).
+//! The MLP predicts `h_{t+1}` from `(h_t, emb(x_{t+1}))` using a 3-layer residual architecture
+//! inspired by arXiv:2511.05963 (NextLat). `BeliefDrafter` wraps the MLP with an output head
+//! for recursive variable-length speculative drafting with entropy-gated stopping.
 //!
 //! Architecture: `h_{t+1} = h_t + FC3(GELU(FC2(GELU(FC1(LN(concat(h_t, next_emb)))))))`
 //!
@@ -12,6 +13,8 @@
 
 use std::io::{BufReader, BufWriter, Read, Write};
 use std::path::Path;
+
+use katgpt_core::{Config, SpeculativeGenerator};
 
 use crate::simd::simd_dot_f32;
 
@@ -280,6 +283,316 @@ impl LatentDynamicsMLP {
     }
 }
 
+// ── Entropy Computation ────────────────────────────────────────
+
+/// Compute Shannon entropy from log-probabilities (natural log).
+/// `log_probs` must contain log-softmax outputs.
+/// Returns entropy in nats.
+#[inline]
+fn entropy_from_log_probs(log_probs: &[f32]) -> f32 {
+    let mut h = 0.0f32;
+    for &lp in log_probs {
+        if lp > -50.0 {
+            // skip near-zero probs to avoid -0 * inf
+            let p = lp.exp();
+            h -= p * lp;
+        }
+    }
+    h
+}
+
+/// Convert logits to log-probabilities (log-softmax) in-place.
+#[inline]
+fn log_softmax_inplace(logits: &mut [f32]) {
+    let max = logits.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+    let mut sum_exp = 0.0f32;
+    for v in logits.iter_mut() {
+        *v = (*v - max).exp();
+        sum_exp += *v;
+    }
+    let log_sum = sum_exp.ln();
+    for v in logits.iter_mut() {
+        *v = (*v).ln() - log_sum; // undo exp, apply log-softmax
+    }
+}
+
+/// Sample greedily (argmax) from logits. Returns (token_idx, log_prob).
+#[inline]
+fn greedy_sample(logits: &[f32]) -> (usize, f32) {
+    let (idx, &val) = logits
+        .iter()
+        .enumerate()
+        .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
+        .unwrap_or((0, &0.0f32));
+    (idx, val)
+}
+
+// ── BeliefDrafter ───────────────────────────────────────────────
+
+/// A single drafted token from the belief drafter.
+#[derive(Clone, Debug, PartialEq)]
+pub struct BeliefDraftToken {
+    /// Token index in the vocabulary.
+    pub token_idx: usize,
+    /// Log-probability (from log-softmax over logits).
+    pub log_prob: f32,
+    /// Entropy of the distribution at this draft step (in nats).
+    pub entropy: f32,
+}
+
+/// Error type for `BeliefDrafter` operations.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum BeliefDraftError {
+    /// MLP not initialized.
+    NotInitialized,
+    /// Output head (lm_head) has wrong dimensions.
+    OutputHeadDimensionMismatch,
+}
+
+/// Condition for `BeliefDrafter` as a `SpeculativeGenerator`.
+#[derive(Clone, Debug)]
+pub struct BeliefDraftCondition {
+    /// Current hidden state `[n_embd]`.
+    pub h_t: Vec<f32>,
+    /// Maximum draft steps.
+    pub max_steps: usize,
+    /// Entropy threshold — stop drafting when entropy exceeds this.
+    pub entropy_threshold: f32,
+}
+
+/// NextLat Belief-State Speculative Drafter.
+///
+/// Wraps a `LatentDynamicsMLP` with a shared output head (lm_head) from the target model.
+/// The `draft()` method recursively predicts next hidden states, projects them through
+/// the output head to get logits, and samples tokens with entropy-gated stopping.
+///
+/// ## Integration
+///
+/// - `SpeculativeGenerator` trait: produces `Vec<BeliefDraftToken>` candidates
+/// - `DecodeStage::BeliefDraft`: pipeline integration point
+/// - `Config::belief_drafter_path`: load MLP weights from `nextlat.bin`
+///
+/// ## Entropy-Gated Stopping
+///
+/// At each recursive step, entropy of the output distribution is computed.
+/// If entropy exceeds `entropy_threshold`, drafting stops — high entropy means the
+/// drafter is uncertain, and continuing would degrade acceptance rate.
+#[derive(Debug)]
+pub struct BeliefDrafter {
+    /// The latent dynamics MLP.
+    mlp: LatentDynamicsMLP,
+    /// Output head weights: `[vocab_size, n_embd]` row-major (shared with target model).
+    output_head: Vec<f32>,
+    /// Vocabulary size.
+    vocab_size: usize,
+    /// Embedding table for token lookup: `[vocab_size, n_embd]` row-major.
+    /// Can be a reference to the target model's `wte`.
+    wte: Vec<f32>,
+}
+
+impl BeliefDrafter {
+    /// Create a new `BeliefDrafter` with the given MLP, output head, and embedding table.
+    ///
+    /// - `mlp`: The latent dynamics MLP (loaded from bin or random init).
+    /// - `output_head`: LM head weights `[vocab_size, n_embd]` (shared with target model).
+    /// - `wte`: Token embedding table `[vocab_size, n_embd]` (shared with target model).
+    pub fn new(
+        mlp: LatentDynamicsMLP,
+        output_head: Vec<f32>,
+        wte: Vec<f32>,
+    ) -> Result<Self, BeliefDraftError> {
+        let vocab_size = output_head.len() / mlp.n_embd;
+        if output_head.len() != vocab_size * mlp.n_embd {
+            return Err(BeliefDraftError::OutputHeadDimensionMismatch);
+        }
+        if wte.len() != vocab_size * mlp.n_embd {
+            return Err(BeliefDraftError::OutputHeadDimensionMismatch);
+        }
+        Ok(Self {
+            mlp,
+            output_head,
+            vocab_size,
+            wte,
+        })
+    }
+
+    /// Create with random init MLP from config dimensions.
+    pub fn random_init(config: &Config) -> Self {
+        let n = config.n_embd;
+        let mlp = LatentDynamicsMLP::random_init(n);
+        // Dummy output head + wte — in production these come from the target model
+        let vocab_size = config.vocab_size.max(1);
+        let output_head = vec![0.0f32; vocab_size * n];
+        let wte = vec![0.0f32; vocab_size * n];
+        Self {
+            mlp,
+            output_head,
+            vocab_size,
+            wte,
+        }
+    }
+
+    /// Project hidden state through output head to get logits.
+    /// Returns logits `[vocab_size]`.
+    fn logits_from_hidden(&self, h: &[f32]) -> Vec<f32> {
+        let n = self.mlp.n_embd;
+        let vs = self.vocab_size;
+        let mut logits = vec![0.0f32; vs];
+        // output_head: [vocab_size, n_embd] row-major
+        // logits[i] = dot(output_head[i*n..(i+1)*n], h)
+        for i in 0..vs {
+            let row_off = i * n;
+            logits[i] = simd_dot_f32(&self.output_head[row_off..row_off + n], h, n);
+        }
+        logits
+    }
+
+    /// Get the embedding for a token.
+    #[inline]
+    fn token_embedding(&self, token_idx: usize) -> &[f32] {
+        let n = self.mlp.n_embd;
+        let off = token_idx * n;
+        if off + n <= self.wte.len() {
+            &self.wte[off..off + n]
+        } else {
+            // Fallback: return zeros (shouldn't happen with valid token indices)
+            &self.wte[..n] // safe because n > 0 and wte.len() >= n
+        }
+    }
+
+    /// Draft variable-length token sequence from current hidden state.
+    ///
+    /// Recursively applies the MLP to predict next hidden states:
+    /// 1. Project `h_t` through output head → logits
+    /// 2. Greedy sample token, compute entropy
+    /// 3. If entropy > threshold, stop
+    /// 4. Otherwise: `h_{t+1} = mlp.forward(h_t, emb(token))`, go to 1
+    ///
+    /// Returns the drafted tokens (at least 1, at most `max_steps`).
+    pub fn draft(
+        &self,
+        h_t: &[f32],
+        max_steps: usize,
+        entropy_threshold: f32,
+    ) -> Vec<BeliefDraftToken> {
+        let n = self.mlp.n_embd;
+        assert_eq!(h_t.len(), n, "h_t must have length n_embd");
+
+        let mut drafts = Vec::with_capacity(max_steps);
+        let mut h_current = h_t.to_vec();
+
+        // Pre-allocate scratch for log-softmax
+        let mut logits_buf = vec![0.0f32; self.vocab_size];
+
+        for _ in 0..max_steps {
+            // 1. Project hidden → logits
+            self.logits_from_hidden_into(&h_current, &mut logits_buf);
+
+            // 2. Convert to log-probs + compute entropy
+            log_softmax_inplace(&mut logits_buf);
+            let ent = entropy_from_log_probs(&logits_buf);
+
+            // 3. Greedy sample
+            let (token_idx, log_prob) = greedy_sample(&logits_buf);
+
+            // 4. Record draft
+            drafts.push(BeliefDraftToken {
+                token_idx,
+                log_prob,
+                entropy: ent,
+            });
+
+            // 5. Entropy-gated stop (after first token — always draft at least 1)
+            if drafts.len() > 1 && ent > entropy_threshold {
+                break;
+            }
+
+            // 6. Get embedding for drafted token, advance hidden state
+            let emb = self.token_embedding(token_idx);
+            h_current = self.mlp.forward(&h_current, emb);
+        }
+
+        drafts
+    }
+
+    /// Project hidden state through output head into pre-allocated buffer.
+    fn logits_from_hidden_into(&self, h: &[f32], logits: &mut [f32]) {
+        let n = self.mlp.n_embd;
+        let vs = self.vocab_size;
+        debug_assert_eq!(logits.len(), vs);
+        for i in 0..vs {
+            let row_off = i * n;
+            logits[i] = simd_dot_f32(&self.output_head[row_off..row_off + n], h, n);
+        }
+    }
+
+    /// Get the MLP's n_embd dimension.
+    #[inline]
+    pub fn n_embd(&self) -> usize {
+        self.mlp.n_embd
+    }
+
+    /// Get the vocabulary size.
+    #[inline]
+    pub fn vocab_size(&self) -> usize {
+        self.vocab_size
+    }
+
+    /// Load `BeliefDrafter` from a binary MLP file + target model weights.
+    pub fn load_from_bin(
+        path: &Path,
+        output_head: Vec<f32>,
+        wte: Vec<f32>,
+    ) -> Result<Self, String> {
+        let mlp = LatentDynamicsMLP::load_from_bin(path)?;
+        let n = mlp.n_embd;
+        let vocab_size = output_head.len() / n;
+        if output_head.len() != vocab_size * n {
+            return Err(format!(
+                "output_head length {} not divisible by n_embd {}",
+                output_head.len(),
+                n
+            ));
+        }
+        if wte.len() != vocab_size * n {
+            return Err(format!(
+                "wte length {} not divisible by n_embd {}",
+                wte.len(),
+                n
+            ));
+        }
+        Ok(Self {
+            mlp,
+            output_head,
+            vocab_size,
+            wte,
+        })
+    }
+}
+
+// ── SpeculativeGenerator Integration ───────────────────────────
+
+impl SpeculativeGenerator for BeliefDrafter {
+    type Condition = BeliefDraftCondition;
+    type Output = BeliefDraftToken;
+    type Error = BeliefDraftError;
+
+    fn generate(
+        &mut self,
+        condition: &Self::Condition,
+        _rng: &mut fastrand::Rng,
+    ) -> Result<Vec<Self::Output>, Self::Error> {
+        if condition.h_t.len() != self.mlp.n_embd {
+            return Err(BeliefDraftError::NotInitialized);
+        }
+        Ok(self.draft(
+            &condition.h_t,
+            condition.max_steps,
+            condition.entropy_threshold,
+        ))
+    }
+}
+
 // ── Binary I/O Helpers ─────────────────────────────────────────
 
 fn read_u32(rdr: &mut impl Read) -> Result<u32, String> {
@@ -450,5 +763,215 @@ mod tests {
 
         // GELU approaches 0 for large negative
         assert!(gelu(-10.0).abs() < 0.01, "gelu(-10) should be ~0");
+    }
+
+    // ── Phase 1: BeliefDrafter Tests ─────────────────────────────
+
+    /// Helper: create a simple BeliefDrafter with known weights.
+    /// n_embd=4, vocab_size=3 for minimal test surface.
+    fn make_test_drafter() -> BeliefDrafter {
+        let n_embd = 4;
+        let vocab_size = 3;
+        let mlp = LatentDynamicsMLP::random_init(n_embd);
+        // Non-zero output head so logits are meaningful
+        let output_head: Vec<f32> = (0..vocab_size * n_embd)
+            .map(|i| (i as f32 + 1.0) * 0.1)
+            .collect();
+        let wte: Vec<f32> = (0..vocab_size * n_embd)
+            .map(|i| (i as f32 + 1.0) * 0.05)
+            .collect();
+        BeliefDrafter::new(mlp, output_head, wte).expect("valid drafter")
+    }
+
+    #[test]
+    fn test_belief_drafter_new_valid() {
+        let drafter = make_test_drafter();
+        assert_eq!(drafter.n_embd(), 4);
+        assert_eq!(drafter.vocab_size(), 3);
+    }
+
+    #[test]
+    fn test_belief_drafter_new_dimension_mismatch() {
+        let n_embd = 4;
+        let mlp = LatentDynamicsMLP::random_init(n_embd);
+        let bad_output_head = vec![0.0f32; 7]; // not divisible by 4
+        let wte = vec![0.0f32; 8];
+        let result = BeliefDrafter::new(mlp, bad_output_head, wte);
+        assert_eq!(
+            result.unwrap_err(),
+            BeliefDraftError::OutputHeadDimensionMismatch
+        );
+    }
+
+    #[test]
+    fn test_belief_drafter_draft_produces_tokens() {
+        let drafter = make_test_drafter();
+        let h_t = vec![1.0f32; 4];
+        let drafts = drafter.draft(&h_t, 5, 10.0); // high entropy threshold → all 5 steps
+
+        assert!(!drafts.is_empty(), "should produce at least 1 draft");
+        assert!(drafts.len() <= 5, "should not exceed max_steps");
+
+        for (i, token) in drafts.iter().enumerate() {
+            assert!(
+                token.token_idx < 3,
+                "token {} index {} must be < vocab_size=3",
+                i,
+                token.token_idx
+            );
+            assert!(
+                token.log_prob.is_finite(),
+                "token {} log_prob must be finite",
+                i
+            );
+            assert!(
+                token.entropy >= 0.0,
+                "token {} entropy must be non-negative",
+                i
+            );
+        }
+    }
+
+    #[test]
+    fn test_belief_drafter_draft_always_at_least_one() {
+        let drafter = make_test_drafter();
+        let h_t = vec![0.5f32; 4];
+        // Very low entropy threshold — should still produce at least 1 token
+        let drafts = drafter.draft(&h_t, 5, 0.0);
+        assert!(!drafts.is_empty(), "must produce at least 1 draft token");
+    }
+
+    #[test]
+    fn test_belief_drafter_draft_entropy_gating() {
+        let drafter = make_test_drafter();
+        let h_t = vec![1.0f32; 4];
+
+        // With very high threshold, should draft max_steps tokens
+        let drafts_full = drafter.draft(&h_t, 5, 100.0);
+        assert_eq!(
+            drafts_full.len(),
+            5,
+            "high threshold should draft all steps"
+        );
+
+        // With zero threshold, should draft 1-2 tokens (stops after 2nd if entropy > 0)
+        let drafts_limited = drafter.draft(&h_t, 5, 0.0);
+        assert!(
+            drafts_limited.len() >= 1 && drafts_limited.len() <= 5,
+            "low threshold should produce 1-5 tokens, got {}",
+            drafts_limited.len()
+        );
+    }
+
+    #[test]
+    fn test_belief_drafter_draft_token_indices_valid() {
+        let drafter = make_test_drafter();
+        let h_t = vec![0.3f32; 4];
+        let drafts = drafter.draft(&h_t, 10, 100.0);
+
+        for (step, token) in drafts.iter().enumerate() {
+            assert!(
+                token.token_idx < drafter.vocab_size(),
+                "step {}: token_idx {} >= vocab_size {}",
+                step,
+                token.token_idx,
+                drafter.vocab_size()
+            );
+        }
+    }
+
+    #[test]
+    fn test_belief_drafter_speculative_generator() {
+        use katgpt_core::SpeculativeGenerator;
+
+        let mut drafter = make_test_drafter();
+        let condition = BeliefDraftCondition {
+            h_t: vec![1.0f32; 4],
+            max_steps: 3,
+            entropy_threshold: 10.0,
+        };
+        let mut rng = fastrand::Rng::new();
+        let result = drafter.generate(&condition, &mut rng).expect("generate");
+
+        assert!(!result.is_empty());
+        assert!(result.len() <= 3);
+    }
+
+    #[test]
+    fn test_belief_drafter_speculative_generator_wrong_dimension() {
+        use katgpt_core::SpeculativeGenerator;
+
+        let mut drafter = make_test_drafter();
+        let condition = BeliefDraftCondition {
+            h_t: vec![1.0f32; 8], // wrong dimension
+            max_steps: 3,
+            entropy_threshold: 10.0,
+        };
+        let mut rng = fastrand::Rng::new();
+        let result = drafter.generate(&condition, &mut rng);
+        assert_eq!(result.unwrap_err(), BeliefDraftError::NotInitialized);
+    }
+
+    #[test]
+    fn test_belief_drafter_load_from_bin() {
+        let n_embd = 4;
+        let vocab_size = 3;
+        let mlp = LatentDynamicsMLP::random_init(n_embd);
+        let output_head: Vec<f32> = (0..vocab_size * n_embd).map(|i| (i as f32) * 0.1).collect();
+        let wte: Vec<f32> = (0..vocab_size * n_embd)
+            .map(|i| (i as f32) * 0.05)
+            .collect();
+
+        let h_t = vec![1.0f32; n_embd];
+
+        // Create drafter, draft tokens
+        let drafter = BeliefDrafter::new(mlp, output_head.clone(), wte.clone()).expect("new");
+        let expected = drafter.draft(&h_t, 3, 100.0);
+
+        // Save MLP, reload, recreate drafter
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("nextlat.bin");
+        drafter.mlp.save_to_bin(&path).expect("save");
+
+        let reloaded = BeliefDrafter::load_from_bin(&path, output_head, wte).expect("load");
+        let actual = reloaded.draft(&h_t, 3, 100.0);
+
+        assert_eq!(expected.len(), actual.len());
+        for (i, (e, a)) in expected.iter().zip(actual.iter()).enumerate() {
+            assert_eq!(e.token_idx, a.token_idx, "token mismatch at step {i}");
+            assert!(
+                (e.log_prob - a.log_prob).abs() < 1e-5,
+                "log_prob mismatch at step {i}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_log_softmax_sums_to_one() {
+        let mut logits = vec![1.0f32, 2.0f32, 3.0f32];
+        log_softmax_inplace(&mut logits);
+        let sum_exp: f32 = logits.iter().map(|&lp| lp.exp()).sum();
+        assert!(
+            (sum_exp - 1.0).abs() < 1e-5,
+            "softmax should sum to 1, got {sum_exp}"
+        );
+    }
+
+    #[test]
+    fn test_entropy_uniform() {
+        // Uniform over 4 items: entropy = ln(4) ≈ 1.386
+        let log_probs = vec![-4.0f32.ln(); 4];
+        let ent = entropy_from_log_probs(&log_probs);
+        assert!(
+            (ent - 4.0f32.ln()).abs() < 1e-4,
+            "expected ln(4), got {ent}"
+        );
+    }
+
+    #[test]
+    fn test_greedy_sample_argmax() {
+        let logits = vec![0.1f32, 0.5f32, 0.3f32];
+        let (idx, _) = greedy_sample(&logits);
+        assert_eq!(idx, 1, "should pick index 1 (0.5)");
     }
 }

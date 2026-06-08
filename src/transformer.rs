@@ -12,6 +12,7 @@ use crate::simd::{
 /// - Draft: can skip screening, reduced KV writes, approximate attention
 /// - Verify: exact attention, full KV write, enable screening
 /// - Sample: SIMD-only, no attention needed
+/// - BeliefDraft: MLP-only forward via BeliefDrafter, no attention needed (Plan 217)
 #[cfg(feature = "decode_specialize")]
 #[repr(u8)]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -24,6 +25,10 @@ pub enum DecodeStage {
     Verify,
     /// SIMD-only, no attention needed.
     Sample,
+    /// MLP-only forward via BeliefDrafter — no attention, no KV (Plan 217).
+    /// The belief drafter uses a lightweight MLP to predict next hidden states
+    /// instead of running the full transformer forward pass.
+    BeliefDraft,
 }
 
 /// Per-layer transformer weights.
@@ -1035,6 +1040,19 @@ pub fn forward_decode_stage<'a>(
         DecodeStage::Verify => forward_verify(ctx, weights, cache, token, pos, config),
         DecodeStage::Prefill | DecodeStage::Sample => {
             // Fall through to standard forward — prefill/sample don't benefit from specialization
+            #[cfg(not(feature = "domain_latent"))]
+            {
+                forward_base(ctx, weights, cache, token, pos, config, None)
+            }
+            #[cfg(feature = "domain_latent")]
+            {
+                forward_base(ctx, weights, cache, token, pos, config, None, None)
+            }
+        }
+        // BeliefDraft falls through to standard forward for now — the BeliefDrafter
+        // operates at the speculative layer (draft() method), not the transformer
+        // forward layer. This variant exists for stage-aware profiling and routing.
+        DecodeStage::BeliefDraft => {
             #[cfg(not(feature = "domain_latent"))]
             {
                 forward_base(ctx, weights, cache, token, pos, config, None)

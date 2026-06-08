@@ -214,6 +214,10 @@ pub use spec_generator::{
 #[cfg(feature = "speculative_generator")]
 pub use dd_tree::build_dd_tree_speculative;
 
+// ── Belief Drafter Re-exports (Plan 217, feature: belief_drafter) ──
+#[cfg(feature = "belief_drafter")]
+pub use belief_drafter::{BeliefDraftCondition, BeliefDraftError, BeliefDraftToken, BeliefDrafter};
+
 // ── Budget Adaptation Re-exports (Plan 167, feature: budget_adaptation) ──
 #[cfg(feature = "budget_adaptation")]
 pub use budget::{adaptive_tree_budget, compression_ratio, entropy_signal, shannon_entropy};

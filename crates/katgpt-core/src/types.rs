@@ -704,6 +704,16 @@ pub struct Config {
     /// Per-instance adaptive budget for collapse-aware thinking.
     #[cfg(feature = "collapse_aware_thinking")]
     pub collapse_budget: ThinkingBudget,
+
+    // --- NextLat Belief-State Speculative Drafter (Plan 217) ---
+    /// Path to `nextlat.bin` MLP weights. None = random init.
+    #[cfg(feature = "belief_drafter")]
+    pub belief_drafter_path: Option<String>,
+    /// Entropy threshold for belief drafter variable-length stopping.
+    /// Lower = more conservative drafts. Higher = more aggressive.
+    /// Default: 2.0. Only used when `belief_drafter` feature is enabled.
+    #[cfg(feature = "belief_drafter")]
+    pub belief_drafter_entropy_threshold: f32,
 }
 
 impl Config {
@@ -793,6 +803,10 @@ impl Config {
             wall_config: None,
             #[cfg(feature = "collapse_aware_thinking")]
             collapse_budget: ThinkingBudget::default(),
+            #[cfg(feature = "belief_drafter")]
+            belief_drafter_path: None,
+            #[cfg(feature = "belief_drafter")]
+            belief_drafter_entropy_threshold: 2.0,
         }
     }
 
@@ -919,6 +933,10 @@ impl Config {
             wall_config: None,
             #[cfg(feature = "collapse_aware_thinking")]
             collapse_budget: ThinkingBudget::default(),
+            #[cfg(feature = "belief_drafter")]
+            belief_drafter_path: None,
+            #[cfg(feature = "belief_drafter")]
+            belief_drafter_entropy_threshold: 2.0,
         }
     }
 
@@ -1017,6 +1035,10 @@ impl Config {
             wall_config: None,
             #[cfg(feature = "collapse_aware_thinking")]
             collapse_budget: ThinkingBudget::default(),
+            #[cfg(feature = "belief_drafter")]
+            belief_drafter_path: None,
+            #[cfg(feature = "belief_drafter")]
+            belief_drafter_entropy_threshold: 2.0,
         }
     }
 
@@ -1105,6 +1127,10 @@ impl Config {
             wall_config: None,
             #[cfg(feature = "collapse_aware_thinking")]
             collapse_budget: ThinkingBudget::default(),
+            #[cfg(feature = "belief_drafter")]
+            belief_drafter_path: None,
+            #[cfg(feature = "belief_drafter")]
+            belief_drafter_entropy_threshold: 2.0,
         }
     }
 
@@ -1194,6 +1220,10 @@ impl Config {
             wall_config: None,
             #[cfg(feature = "collapse_aware_thinking")]
             collapse_budget: ThinkingBudget::default(),
+            #[cfg(feature = "belief_drafter")]
+            belief_drafter_path: None,
+            #[cfg(feature = "belief_drafter")]
+            belief_drafter_entropy_threshold: 2.0,
         }
     }
 
@@ -1281,6 +1311,10 @@ impl Config {
             wall_config: None,
             #[cfg(feature = "collapse_aware_thinking")]
             collapse_budget: ThinkingBudget::default(),
+            #[cfg(feature = "belief_drafter")]
+            belief_drafter_path: None,
+            #[cfg(feature = "belief_drafter")]
+            belief_drafter_entropy_threshold: 2.0,
         }
     }
 
@@ -1370,6 +1404,10 @@ impl Config {
             wall_config: None,
             #[cfg(feature = "collapse_aware_thinking")]
             collapse_budget: ThinkingBudget::default(),
+            #[cfg(feature = "belief_drafter")]
+            belief_drafter_path: None,
+            #[cfg(feature = "belief_drafter")]
+            belief_drafter_entropy_threshold: 2.0,
         }
     }
 
@@ -1458,6 +1496,10 @@ impl Config {
             wall_config: None,
             #[cfg(feature = "collapse_aware_thinking")]
             collapse_budget: ThinkingBudget::default(),
+            #[cfg(feature = "belief_drafter")]
+            belief_drafter_path: None,
+            #[cfg(feature = "belief_drafter")]
+            belief_drafter_entropy_threshold: 2.0,
         }
     }
 
@@ -1548,6 +1590,10 @@ impl Config {
             wall_config: None,
             #[cfg(feature = "collapse_aware_thinking")]
             collapse_budget: ThinkingBudget::default(),
+            #[cfg(feature = "belief_drafter")]
+            belief_drafter_path: None,
+            #[cfg(feature = "belief_drafter")]
+            belief_drafter_entropy_threshold: 2.0,
         }
     }
 
@@ -1640,6 +1686,10 @@ impl Config {
             wall_config: None,
             #[cfg(feature = "collapse_aware_thinking")]
             collapse_budget: ThinkingBudget::default(),
+            #[cfg(feature = "belief_drafter")]
+            belief_drafter_path: None,
+            #[cfg(feature = "belief_drafter")]
+            belief_drafter_entropy_threshold: 2.0,
         }
     }
 

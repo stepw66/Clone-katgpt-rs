@@ -166,6 +166,10 @@ pub fn should_skip_layer_stage(
             de_ratio > 0.90
         }
         DecodeStage::Prefill | DecodeStage::Verify | DecodeStage::Sample => base_skip,
+        DecodeStage::BeliefDraft => {
+            // BeliefDraft is MLP-only — no transformer layers needed, skip all.
+            true
+        }
     }
 }
 

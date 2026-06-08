@@ -109,9 +109,14 @@ fn bench_ldt_lattice_deduction_goat_proof() {
             wall_config: None,
             #[cfg(feature = "collapse_aware_thinking")]
             collapse_budget: katgpt_rs::types::ThinkingBudget::default(),
+            #[cfg(feature = "belief_drafter")]
+            belief_drafter_path: None,
+            #[cfg(feature = "belief_drafter")]
+            belief_drafter_entropy_threshold: 2.0,
         }
     }
 
+    /// Check if the lattice_deduction feature is present
     println!("═══════════════════════════════════════════════════════════");
     println!("  LDT Lattice Deduction — GOAT Proof (Plan 088)");
     println!("═══════════════════════════════════════════════════════════");

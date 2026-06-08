@@ -1,7 +1,7 @@
 # Plan 217: NextLat Belief-State Speculative Drafter
 
 **Research**: R192 (NextLat Belief-State Latent Dynamics)
-**Status**: Phase 0 COMPLETE (feature gate wired, 7 tests passing). Phase 1+ pending.
+**Status**: Phase 0 COMPLETE, Phase 1 COMPLETE (19 tests passing). Phase 2+ pending.
 **Feature Gate**: `belief_drafter` (off by default until GOAT proof)
 **Depends on**: Plan 055 (MTP Drafter infrastructure), Plan 195 (ThoughtFold), Plan 212 (Collapse-Aware Adaptive Thinking)
 
@@ -85,12 +85,12 @@ For Config::micro (embd=16): MLP has ~1.5K params. For Config::bpe (embd=32): ~6
 - [x] Unit test: MLP forward shape correctness for all config presets
 
 ### Phase 1: Belief Drafter Integration
-- [ ] Add `BeliefDrafter` struct wrapping MLP + output head reference
-- [ ] Implement `draft()` method with entropy-gated variable-length stopping
-- [ ] Integrate into `SpeculativeGenerator` trait as new drafter variant
-- [ ] Add `DecodeStage::BeliefDraft` variant to forward pipeline
-- [ ] Add `belief_drafter_path` to `Config` / `InferenceOverrides`
-- [ ] Integration test: belief drafter produces valid token sequences
+- [x] Add `BeliefDrafter` struct wrapping MLP + output head reference
+- [x] Implement `draft()` method with entropy-gated variable-length stopping
+- [x] Integrate into `SpeculativeGenerator` trait as new drafter variant
+- [x] Add `DecodeStage::BeliefDraft` variant to forward pipeline
+- [x] Add `belief_drafter_path` to `Config` / `InferenceOverrides`
+- [x] Integration test: belief drafter produces valid token sequences
 
 ### Phase 2: DDTree Fusion
 - [ ] Wire BeliefDrafter output into DDTree branch initialization
