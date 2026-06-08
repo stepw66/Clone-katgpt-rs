@@ -798,6 +798,19 @@ pub use percept_router::{ComputePath, PerceptRouter, PerceptRouterConfig, Sigmoi
 #[cfg(feature = "bfcf_tree")]
 pub use bfcf_types::BfcpPartition;
 
+// ── BFCF × LFU × Sharding — Region Cache (Plan 218 Phase 1) ──────────────
+//
+// LFU cache for BFCP partitions with BLAKE3 commitment, sigmoid-gated admission,
+// and Hot/Warm/Cold frequency tiers. papaya lock-free HashMap for concurrent access.
+//
+// Feature gate: `bfcf_lfu_shard`
+
+#[cfg(feature = "bfcf_lfu_shard")]
+pub mod bfcp_region_cache;
+
+#[cfg(feature = "bfcf_lfu_shard")]
+pub use bfcp_region_cache::{BfcpRegionCache, FreqTier, RegionCaching};
+
 // ── SubstrateGate — Inference-Time Capability Substrate Routing (Plan 216) ──
 //
 // Pre-computed per-capability MLP channel masks intersected with ReLU
