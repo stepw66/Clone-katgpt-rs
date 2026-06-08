@@ -52,12 +52,12 @@ fn g7_no_substrate_router_returns_none() {
 
 #[test]
 fn g7_branch_score_uses_sigmoid() {
-    // Score = logprob × sigmoid(recovery) × constraint_validity
-    // sigmoid(0) = 0.5, so score with recovery=0 should be 0.5 of logprob * validity
-    let score = substrate_branch_score(1.0, 0.0, 1.0);
+    // Score = logprob × sigmoid(recovery * 10 - 5) × constraint_validity
+    // sigmoid(0) = 0.5, so recovery=0.5 gives sigmoid(0) = 0.5
+    let score = substrate_branch_score(1.0, 0.5, 1.0);
     assert!(
         (score - 0.5).abs() < 0.01,
-        "sigmoid(0)=0.5, score should be ~0.5, got {}",
+        "sigmoid(0.5*10-5=0) = 0.5, score should be ~0.5, got {}",
         score
     );
 
