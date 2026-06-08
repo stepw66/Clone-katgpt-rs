@@ -5,13 +5,13 @@
 //!
 //! Run: `cargo run --features decision_trace --example decision_trace_demo`
 
-#![cfg(feature = "decision_trace")]
-
+#[cfg(feature = "decision_trace")]
 use katgpt_rs::pruners::{DecisionTraceBuilder, ExtractedRule};
 
 // ── Helpers ──────────────────────────────────────────────────────
 
 /// Small Rust-token vocabulary for human-readable output.
+#[cfg(feature = "decision_trace")]
 fn vocab() -> Vec<String> {
     vec![
         "fn".into(),
@@ -25,6 +25,7 @@ fn vocab() -> Vec<String> {
 }
 
 /// Shorthand to build a rule with conditions.
+#[cfg(feature = "decision_trace")]
 fn rule(
     conditions: Vec<(usize, usize)>,
     action: (usize, usize),
@@ -34,12 +35,14 @@ fn rule(
     ExtractedRule::new(conditions, action, score, support)
 }
 
+#[cfg(feature = "decision_trace")]
 fn separator(title: &str) {
     println!("\n── {title} ──\n");
 }
 
 // ── Main ─────────────────────────────────────────────────────────
 
+#[cfg(feature = "decision_trace")]
 fn main() {
     let vocab = vocab();
     println!("=== DecisionTrace Demo (Plan 209 T4.3) ===");
@@ -121,4 +124,10 @@ fn main() {
     println!("  4. Low-confidence trace (sigmoid(-3.5) ≈ 0.03)");
     println!("  5. Alternatives-only trace (no rules applied)");
     println!("\nConfidence is sigmoid-bounded ∈ [0, 1], never softmax.");
+}
+
+#[cfg(not(feature = "decision_trace"))]
+fn main() {
+    eprintln!("This example requires the `decision_trace` feature.");
+    eprintln!("Run: cargo run --example decision_trace_demo --features decision_trace");
 }

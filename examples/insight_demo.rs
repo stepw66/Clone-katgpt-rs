@@ -8,8 +8,7 @@
 //!
 //! Run: `cargo run --features insight_explain --example insight_demo`
 
-#![cfg(feature = "insight_explain")]
-
+#[cfg(feature = "insight_explain")]
 use katgpt_rs::pruners::{
     // F4: Reward Calibration
     CalibratorConfig,
@@ -29,8 +28,10 @@ use katgpt_rs::pruners::{
     TraceNode,
     TraceRecorder,
 };
+#[cfg(feature = "insight_explain")]
 use katgpt_rs::speculative::NoScreeningPruner;
 
+#[cfg(feature = "insight_explain")]
 const FEATURE_NAMES: &[&str] = &[
     "depth_norm",
     "score_mean",
@@ -42,6 +43,7 @@ const FEATURE_NAMES: &[&str] = &[
     "freq",
 ];
 
+#[cfg(feature = "insight_explain")]
 fn main() {
     println!("═══ INSIGHT Pipeline Demo (Plan 210, I3) ═══\n");
 
@@ -198,4 +200,10 @@ fn main() {
     println!("  F2: {} concepts grounded", mappings.len());
     println!("  F3: {} choices explained", explanation.choices.len());
     println!("  F4: {} calibration steps", cal.calibration_log().len());
+}
+
+#[cfg(not(feature = "insight_explain"))]
+fn main() {
+    eprintln!("This example requires the `insight_explain` feature.");
+    eprintln!("Run: cargo run --example insight_demo --features insight_explain");
 }

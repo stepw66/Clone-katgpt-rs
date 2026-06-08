@@ -1,4 +1,3 @@
-#![cfg(feature = "bfcf_lsh_cms")]
 //! Count-Min Sketch for O(1) frequency estimation — Plan 220 Phase 2.
 //!
 //! 4-row × 256-col (2KB) CMS with saturating u16 counters. Provides one-sided

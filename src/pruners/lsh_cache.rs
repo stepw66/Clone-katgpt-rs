@@ -1,4 +1,3 @@
-#![cfg(feature = "bfcf_lsh_cms")]
 //! LSH SimHash Approximate Cache Layer — locality-sensitive hashing for near-miss BFCP lookup.
 //!
 //! Three-level cache hierarchy: L0 exact (BLAKE3) → L1 LSH (SimHash) → compute.
@@ -448,7 +447,7 @@ mod tests {
     fn test_three_level_pipeline() {
         let mut cache = BfcpLshCache::new(100, 8, 16, 4, 3);
         let logits = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0f32];
-        let partition = make_partition();
+        let _partition = make_partition();
         let compute_count = AtomicU64::new(0);
 
         let compute = |_: &[f32]| {
@@ -498,7 +497,7 @@ mod tests {
         }
 
         let (l0_rate, l1_rate, miss_rate) = cache.hit_rates();
-        let total = step as f64;
+        let _total = step as f64;
 
         // After warm-up (first round = 10 inserts), subsequent rounds should
         // mostly hit L0 (exact repeats) and L1 (drifted variants).

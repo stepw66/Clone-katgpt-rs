@@ -5,10 +5,10 @@
 //!
 //! Run: `cargo run --features symbolic_distill --example symbolic_distill_demo`
 
-#![cfg(feature = "symbolic_distill")]
-
+#[cfg(feature = "symbolic_distill")]
 use katgpt_rs::pruners::{SymbolicExpression, SymbolicExpressionFitter, TraceDataset};
 
+#[cfg(feature = "symbolic_distill")]
 const FEATURE_NAMES: &[&str] = &[
     "depth_norm",
     "score_mean",
@@ -21,11 +21,13 @@ const FEATURE_NAMES: &[&str] = &[
 ];
 
 /// Ground-truth rule: accept when feature 0 > 0.5 AND feature 2 < 0.3.
+#[cfg(feature = "symbolic_distill")]
 fn ground_truth(features: &[f32]) -> bool {
     features[0] > 0.5 && features[2] < 0.3
 }
 
 /// Generate synthetic trace dataset following the known rule.
+#[cfg(feature = "symbolic_distill")]
 fn make_dataset(n: usize) -> TraceDataset {
     let mut features = Vec::with_capacity(n);
     let mut labels = Vec::with_capacity(n);
@@ -41,6 +43,7 @@ fn make_dataset(n: usize) -> TraceDataset {
     TraceDataset { features, labels }
 }
 
+#[cfg(feature = "symbolic_distill")]
 fn main() {
     println!("═══ Symbolic Distillation Demo (Plan 210 F1.11) ═══\n");
 
@@ -130,4 +133,10 @@ fn main() {
     println!("\n═══ Summary ═══");
     println!("  Fitter recovers the ground-truth pattern from synthetic traces");
     println!("  Expression is human-readable, compact, and blake3-integrity-protected");
+}
+
+#[cfg(not(feature = "symbolic_distill"))]
+fn main() {
+    eprintln!("This example requires the `symbolic_distill` feature.");
+    eprintln!("Run: cargo run --example symbolic_distill_demo --features symbolic_distill");
 }

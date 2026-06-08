@@ -1,4 +1,3 @@
-#![cfg(feature = "bfcf_lsh_cms")]
 //! Roaring bitmap-backed region membership (Plan 220 Phase 3).
 //!
 //! Custom lightweight Roaring-like bitmap (`CompactBitmap`) that mimics the
@@ -93,14 +92,14 @@ impl BitmapContainer {
 
     /// Promote array → bits if cardinality exceeds threshold.
     fn maybe_promote(&mut self) {
-        if let BitmapContainer::Array(a) = self {
-            if a.len() > ARRAY_MAX_CARDINALITY {
-                let mut bits = Box::new([0u64; 1024]);
-                for &lo in a.iter() {
-                    bits[lo as usize / 64] |= 1u64 << (lo as usize % 64);
-                }
-                *self = BitmapContainer::Bits(bits);
+        if let BitmapContainer::Array(a) = self
+            && a.len() > ARRAY_MAX_CARDINALITY
+        {
+            let mut bits = Box::new([0u64; 1024]);
+            for &lo in a.iter() {
+                bits[lo as usize / 64] |= 1u64 << (lo as usize % 64);
             }
+            *self = BitmapContainer::Bits(bits);
         }
     }
 
@@ -475,9 +474,9 @@ mod tests {
         // 128K vocab, ~30% fill (38400 true values spread across the range).
         let vocab_size = 131_072;
         let mut bools = vec![false; vocab_size];
-        for i in 0..vocab_size {
+        for (i, b) in bools.iter_mut().enumerate() {
             if i % 3 == 0 || i % 7 == 0 {
-                bools[i] = true;
+                *b = true;
             }
         }
 

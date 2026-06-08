@@ -7,14 +7,15 @@
 //!
 //! Run: `cargo run --features fol_constraints --example fol_constraint_demo`
 
-#![cfg(feature = "fol_constraints")]
-
+#[cfg(feature = "fol_constraints")]
 use katgpt_rs::pruners::{FolConstraint, FolPruner, extract_fol_constraints};
+#[cfg(feature = "fol_constraints")]
 use katgpt_rs::speculative::{ConstraintPruner, NoPruner};
 
 // ── Vocabulary ─────────────────────────────────────────────────────
 
 /// 20 common Rust tokens used for constraint resolution.
+#[cfg(feature = "fol_constraints")]
 fn build_vocab() -> Vec<String> {
     [
         "fn", "async", "pub", "struct", "enum", "match", "if", "else", "Result", "Option",
@@ -26,6 +27,7 @@ fn build_vocab() -> Vec<String> {
 
 // ── Helpers ────────────────────────────────────────────────────────
 
+#[cfg(feature = "fol_constraints")]
 fn print_constraints(constraints: &[FolConstraint], vocab: &[String]) {
     if constraints.is_empty() {
         println!("    (no constraints extracted)");
@@ -47,6 +49,7 @@ fn print_constraints(constraints: &[FolConstraint], vocab: &[String]) {
 
 // ── Main ───────────────────────────────────────────────────────────
 
+#[cfg(feature = "fol_constraints")]
 fn main() {
     println!("╔══════════════════════════════════════════════════════════════╗");
     println!("║   FOL Constraint Demo — Prompt→Constraint Extraction       ║");
@@ -145,6 +148,12 @@ fn main() {
     println!("  ✓ Empty prompt → zero constraints → delegates to inner (miss path)");
     println!("  ✓ Negation patterns (\"no unsafe\") produce disallowed tokens");
     println!();
+}
+
+#[cfg(not(feature = "fol_constraints"))]
+fn main() {
+    eprintln!("This example requires the `fol_constraints` feature.");
+    eprintln!("Run: cargo run --example fol_constraint_demo --features fol_constraints");
 }
 
 // TL;DR: Demonstrates the FOL constraint extraction pipeline — prompt keyword→token index resolution, FolPruner wrapping NoPruner with extracted constraints, and zero-cost miss path on empty prompts.

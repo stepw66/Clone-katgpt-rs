@@ -1,12 +1,9 @@
-#![cfg(feature = "bfcf_lsh_cms")]
 //! Top-level fusion: LSH approximate cache + Count-Min Sketch + Roaring membership.
 //!
 //! Pipeline: L0 exact → L1 LSH approximate → compute → insert → CMS update.
 //! Batch operations use CompactBitmap (Roaring-like) for SIMD-friendly membership.
 //!
 //! Plan 220 Phase 4.
-
-use std::sync::atomic::Ordering;
 
 use super::bfcf_types::{BFCP, RegionLabel};
 use super::bfcp_region_cache::{FreqTier, blake3_logit_hash};
@@ -269,8 +266,7 @@ mod tests {
         });
 
         // Membership bitmaps should have been built.
-        let count = lsh.batch_reject_count();
-        assert!(count >= 0, "batch_reject_count should return non-negative");
+        let _count = lsh.batch_reject_count();
     }
 
     #[test]

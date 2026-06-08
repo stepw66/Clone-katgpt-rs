@@ -8,12 +8,12 @@
 //!
 //! Run: `cargo run --features rule_extraction --example rule_extraction_demo`
 
-#![cfg(feature = "rule_extraction")]
-
+#[cfg(feature = "rule_extraction")]
 use katgpt_rs::pruners::{ExtractedRule, RuleExtractor, TreeNode, deduplicate_rules};
 
 // ── Tree construction ──────────────────────────────────────────
 
+#[cfg(feature = "rule_extraction")]
 fn build_demo_tree() -> TreeNode {
     // Leaf A1: high-score path Root→A→A1
     let a1 = TreeNode {
@@ -76,6 +76,7 @@ fn build_demo_tree() -> TreeNode {
     }
 }
 
+#[cfg(feature = "rule_extraction")]
 fn print_tree(node: &TreeNode, indent: &str) {
     let branch = if indent.is_empty() { "" } else { "├── " };
     println!(
@@ -87,6 +88,7 @@ fn print_tree(node: &TreeNode, indent: &str) {
     }
 }
 
+#[cfg(feature = "rule_extraction")]
 fn print_rule(idx: usize, rule: &ExtractedRule) {
     let conds: Vec<String> = rule
         .conditions
@@ -105,6 +107,7 @@ fn print_rule(idx: usize, rule: &ExtractedRule) {
 
 // ── Main ───────────────────────────────────────────────────────
 
+#[cfg(feature = "rule_extraction")]
 fn main() {
     println!("=== DDTree Rule Extraction Demo ===\n");
 
@@ -148,4 +151,10 @@ fn main() {
     }
 
     println!("\n=== Done ===");
+}
+
+#[cfg(not(feature = "rule_extraction"))]
+fn main() {
+    eprintln!("This example requires the `rule_extraction` feature.");
+    eprintln!("Run: cargo run --example rule_extraction_demo --features rule_extraction");
 }

@@ -1,4 +1,3 @@
-#![cfg(feature = "bfcf_lsh_cms")]
 //! GOAT Verification tests for Plan 220: BFCF × LSH × CMS × Roaring
 //!
 //! Gates:
@@ -390,15 +389,15 @@ fn g8_sigmoid_only_no_softmax() {
 
     let (l0, l1, miss) = lsh.hit_rates();
     assert!(
-        l0 >= 0.0 && l0 <= 1.0,
+        (0.0..=1.0).contains(&l0),
         "L0 rate should be in [0,1], got {l0}"
     );
     assert!(
-        l1 >= 0.0 && l1 <= 1.0,
+        (0.0..=1.0).contains(&l1),
         "L1 rate should be in [0,1], got {l1}"
     );
     assert!(
-        miss >= 0.0 && miss <= 1.0,
+        (0.0..=1.0).contains(&miss),
         "Miss rate should be in [0,1], got {miss}"
     );
     assert!(
@@ -411,8 +410,8 @@ fn g8_sigmoid_only_no_softmax() {
     let projection: Vec<[f32; 64]> = (0..8)
         .map(|_| {
             let mut row = [0.0f32; 64];
-            for j in 0..64 {
-                row[j] = if j % 2 == 0 { 1.0 } else { -1.0 };
+            for (j, slot) in row.iter_mut().enumerate() {
+                *slot = if j % 2 == 0 { 1.0 } else { -1.0 };
             }
             row
         })
