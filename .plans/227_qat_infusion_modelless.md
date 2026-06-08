@@ -73,12 +73,12 @@ Apply Gemma 4 QAT's fundamental insight (*optimize for the precision you'll depl
 
 ### Phase 4: Precision-Aware Speculative Drafting (PASD)
 
-- [ ] Create `src/precision_aware_draft.rs` with `BoundaryPenalty` struct
+- [x] Create `src/precision_aware_draft.rs` with `BoundaryPenalty` struct
   - `compute_boundary_score(token_logits: &[f32], quant_scale: f32) -> f32`
   - Scores how close logits are to quantization boundaries
-- [ ] Add `precision_aware_draft` feature flag
-- [ ] Implement boundary detection: for each draft token, check if logit is within ε of quantization grid boundary
-- [ ] Implement draft scoring: `draft_score += boundary_penalty * weight`
+- [x] Add `precision_aware_draft` feature flag
+- [x] Implement boundary detection: for each draft token, check if logit is within ε of quantization grid boundary
+- [x] Implement draft scoring: `draft_score += boundary_penalty * weight`
 - [ ] Wire into `SpeculativeGenerator` trait: add optional boundary penalty to `generate()`
 - [ ] Write `tests/precision_aware_draft_goat.rs` benchmark:
   - Before: standard speculative decoding acceptance rate
@@ -89,8 +89,8 @@ Apply Gemma 4 QAT's fundamental insight (*optimize for the precision you'll depl
 ### Phase 5: Channel SIMD Alignment — Data layout optimization
 
 - [ ] Audit `TernaryWeights` struct for SIMD lane alignment
-- [ ] Add `channel_simd_align` feature flag
-- [ ] Implement cache-line-aligned storage: pad weight rows to 64-byte boundaries
+- [x] Add `channel_simd_align` feature flag
+- [x] Implement cache-line-aligned storage: pad weight rows to 64-byte boundaries
 - [ ] Implement aligned quantize/dequantize paths in `simd.rs`
 - [ ] Write `tests/channel_simd_goat.rs` benchmark:
   - Before: standard ternary matvec

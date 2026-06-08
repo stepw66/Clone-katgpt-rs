@@ -3,6 +3,8 @@ pub mod ane_backend;
 pub mod benchmark;
 #[cfg(feature = "cache_prune")]
 pub mod cache_prune;
+#[cfg(feature = "channel_simd_align")]
+pub mod channel_simd;
 #[cfg(feature = "dash_attn")]
 pub mod dash_attn;
 #[cfg(feature = "data_probe")]
@@ -53,6 +55,8 @@ pub mod pipeline_pruner;
 #[cfg(feature = "planar_quant")]
 pub mod planar_quant;
 pub mod plot;
+#[cfg(feature = "precision_aware_draft")]
+pub mod precision_aware_draft;
 #[cfg(feature = "proof_cert")]
 pub mod proof_cert;
 pub mod pruners;

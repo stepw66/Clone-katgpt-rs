@@ -97,6 +97,7 @@ turboquant = []  # TurboQuant rotation + uniform codebook — legacy baseline fo
 asymmetric_kv = ["turboquant"]  # Asymmetric K/V cache compression benchmarks (Plan 123, Research 081)
 shard_kv = ["spectral_quant", "turboquant"]  # ShardKV asymmetric K/V compression — undo RoPE + PCA K path, Hadamard V path (Plan 147, Research 109)
 planar_quant = ["turboquant"]  # PlanarQuant 2D Givens rotation KV cache — O(d) vs TQ O(d²), 256 FMAs for d=128
+precision_aware_draft = []  # PASD boundary-aware draft scoring — penalizes tokens near quantization boundaries (Plan 227 Phase 4)
 iso_quant = ["turboquant"]  # IsoQuant 4D quaternion rotation KV cache — O(d) vs TQ O(d²), 512 FMAs for d=128
 hybrid_oct_pq = ["planar_quant", "octopus"]  # Hybrid OCT encoding + PQ rotation (Plan 101)
 bt_rank = []  # Bradley-Terry pairwise ranking for DDtree selection (OpenDeepThink distillation)
@@ -214,6 +215,7 @@ domino_lora = []  # Domino LoRA causal correction adapter for speculative decodi
 static_cal_tables = []  # Static Calibration Tables — pre-computed per-head attention scales (Plan 227 Phase 1)
 targeted_precision = []  # Targeted Precision Budget — per-head bit allocation for quantization (Plan 227 Phase 2)
 modality_pruned_load = []  # Modality-Pruned Context Loading — query classifier + pipeline selection (Plan 227 Phase 3)
+channel_simd_align = []  # Channel SIMD Alignment — cache-line-padded weight storage for SIMD throughput (Plan 227 Phase 5)
 rv_gated_routing = []  # RV-Gated Compute Routing — AcceptanceVarianceTracker + InferenceRouter integration (Plan 202 GOAT 89.7% P50 improvement, default-ON)
 rv_gated_thinking = ["rv_gated_routing"]  # RV-Gated Thinking — ThinkingController RV bias (Plan 202 GOAT, default-ON via rv_gated_routing)
 rv_bandit_pruning = []  # RV Bandit Pruning — FrequencyBandit top-ρ arm suppression (Plan 202 GOAT, default-ON via rv_gated_routing)
