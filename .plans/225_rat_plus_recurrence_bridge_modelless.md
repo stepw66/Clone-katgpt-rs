@@ -1,6 +1,6 @@
 # Plan 225: RAT+ Recurrence Bridge — Modelless Dilated Inference
 
-**Status**: 🔧 Phase 4 Complete
+**Status**: 🔧 Phase 6 In Progress (T5.1-T6.1 Complete)
 **Research**: `.research/201_RAT_Plus_Train_Dense_Infer_Sparse.md`
 **Feature Gate**: `rat_plus_bridge` (default-off → GOAT gate → default-on if proved)
 **Dependencies**: `gdn2_attention`, `dash_attn`, `vortex_flow`
@@ -116,22 +116,30 @@ Wire existing GDN2 recurrent state as a "bridge" for dilated sparse attention du
 
 ### Phase 5: VortexFlow Integration
 
-- [ ] **T5.1** Implement `DilationBridgeRouter` as VortexFlow trait
-  - `forward_cache`: store dilated KV centroids
-  - `forward_indexer`: use GDN2 bridge + dilated centroids for block scoring
+- [x] **T5.1** Implement `DilationBridgeRouter` as VortexFlow trait
+  - `compute_centroids`: store dilated KV centroids from D-strided keys
+  - `score_blocks`: GDN2 bridge + dilated centroids for block scoring (sigmoid gate)
   - Demonstrates RAT+ insight: recurrence improves block scoring
+  - File: `src/rat_bridge/vortex.rs` (4 tests)
 
-- [ ] **T5.2** Add `DilationBridgeRouter` to `VortexRouter` enum
-  - Follows existing pattern (BlockTopK, Entmax, ValueEnergy, ChannelAware, Meta)
+- [x] **T5.2** Register `vortex` module in `rat_bridge/mod.rs`
+  - Feature-gated behind `rat_plus_bridge`
+  - Re-exported via `pub use vortex::*`
 
 ### Phase 6: Benchmarks & GOAT Proof
 
-- [ ] **T6.1** Create `tests/goat_225_rat_bridge.rs`
-  - Test: dilated KV accessor produces correct stride
+- [x] **T6.1** Create `tests/goat_225_rat_bridge.rs` (11 tests)
   - Test: bridge attention output dims match dense attention
-  - Test: sigmoid gate produces valid [0,1] range
-  - Test: GDN2 state carries enough information for bridge
-  - Test: dilation D=1 matches dense attention (within epsilon)
+  - Test: sigmoid gate valid [0,1] range (high positive → >0.99, high negative → <0.01)
+  - Test: sigmoid gate at zero → exactly 0.5
+  - Test: dilation D=1 matches dense (all 16 positions)
+  - Test: dilation D=4 accesses every 4th position
+  - Test: dilation D=16 accesses every 16th position
+  - Test: dilated_len matches indices across all D × lengths
+  - Test: empty KV → bridge readout only
+  - Test: DilationBridgeRouter centroid count (D1=4, D4=1)
+  - Test: DilationBridgeRouter score ordering (aligned > orthogonal)
+  - Test: rat_decode_step valid output across all 7 dilation configs
 
 - [ ] **T6.2** Create `tests/bench_225_rat_bridge.rs`
   - Benchmark: decode latency D=1 vs D=4 vs D=16 vs D=64

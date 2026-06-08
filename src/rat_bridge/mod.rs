@@ -15,6 +15,8 @@ mod fuse;
 
 #[cfg(feature = "rat_plus_bridge")]
 mod dilation_router;
+#[cfg(feature = "rat_plus_bridge")]
+mod vortex;
 
 #[cfg(feature = "rat_plus_bridge")]
 pub use bridge::*;
@@ -24,3 +26,5 @@ pub use dilated_kv::*;
 pub use dilation_router::*;
 #[cfg(feature = "rat_plus_bridge")]
 pub use fuse::*;
+#[cfg(feature = "rat_plus_bridge")]
+pub use vortex::*;
