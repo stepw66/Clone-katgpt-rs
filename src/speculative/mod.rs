@@ -1,5 +1,7 @@
 pub mod budget_compat;
 
+#[cfg(feature = "belief_drafter")]
+pub mod belief_drafter;
 pub mod dd_tree;
 pub mod dflash;
 #[cfg(feature = "domino_correction")]
