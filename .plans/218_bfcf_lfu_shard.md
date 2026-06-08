@@ -190,12 +190,12 @@ pub trait RegionBatching: Send + Sync {
 - [x] Test: batch_refine produces same result as sequential refinement
 
 ### Phase 4: Latent Extensions (Creative Fusion)
-- [ ] Add `NeuronShardRegionKey` — BLAKE3 hash of NeuronShard + region constraints
-- [ ] Implement shard-aware region routing: hot NeuronShard stays with hot regions
-- [ ] Add emotion-aware eviction priority: `priority = 1 / (freq × arousal)` instead of `1 / freq`
-- [ ] Implement region transition KG triple emission: `(step, region_idx, old_label) → (step+1, region_idx, new_label)`
-- [ ] Test: NeuronShard compound cache key produces different hashes for different shards
-- [ ] Test: emotion-aware eviction evicts calm-cold before excited-hot
+- [x] Add `NeuronShardRegionKey` — BLAKE3 hash of NeuronShard + region constraints
+- [x] Implement shard-aware region routing: hot NeuronShard stays with hot regions
+- [x] Add emotion-aware eviction priority: `priority = freq × (1 + arousal)` instead of `1 / freq`
+- [x] Implement region transition KG triple emission: `(step, region_idx, old_label) → (step+1, region_idx, new_label)`
+- [x] Test: NeuronShard compound cache key produces different hashes for different shards
+- [x] Test: emotion-aware eviction evicts calm-cold before excited-hot
 
 ### Phase 5: Integration & PerceptRouter Extension
 - [ ] Extend `PerceptRouter` to incorporate frequency tier in routing decision

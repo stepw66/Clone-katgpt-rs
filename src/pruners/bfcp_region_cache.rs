@@ -244,6 +244,93 @@ impl RegionCaching for BfcpRegionCache {
     }
 }
 
+// ── NeuronShardRegionKey (Plan 218 Phase 4) ─────────────────
+
+/// Compound cache key: BLAKE3 hash of (NeuronShard weights + region constraints).
+/// Provides shard-aware caching — different NeuronShards produce different cache entries
+/// for the same logit vector, enabling latent-space aware caching.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct NeuronShardRegionKey([u8; 32]);
+
+impl NeuronShardRegionKey {
+    /// Create a compound key from shard weights and logit vector.
+    /// BLAKE3(shard_weights || logits) — deterministic, collision-resistant.
+    pub fn from_shard_and_logits(shard_weights: &[f32], logits: &[f32]) -> Self {
+        let mut hasher = blake3::Hasher::new();
+        // SAFETY: reading byte representation of &[f32] — no alignment issues on
+        // x86/ARM since f32 and u8 share address boundaries. Read-only.
+        unsafe {
+            let shard_bytes = std::slice::from_raw_parts(
+                shard_weights.as_ptr() as *const u8,
+                shard_weights.len() * std::mem::size_of::<f32>(),
+            );
+            hasher.update(shard_bytes);
+            let logit_bytes = std::slice::from_raw_parts(
+                logits.as_ptr() as *const u8,
+                logits.len() * std::mem::size_of::<f32>(),
+            );
+            hasher.update(logit_bytes);
+        }
+        let hash = hasher.finalize();
+        let mut key = [0u8; 32];
+        key.copy_from_slice(hash.as_bytes());
+        Self(key)
+    }
+
+    /// Get the raw 32-byte hash.
+    pub fn as_bytes(&self) -> &[u8; 32] {
+        &self.0
+    }
+}
+
+// ── Emotion-Aware Eviction Priority (Plan 218 Phase 4) ───────
+
+/// Compute emotion-aware eviction priority for a cached region.
+/// Higher priority = less likely to be evicted.
+/// Uses arousal from emotion vector: excited regions are more important.
+/// priority = freq × (1 + arousal), so excited-hot gets priority boost.
+pub fn emotion_aware_priority(freq: u32, arousal: f32) -> f32 {
+    freq as f32 * (1.0 + arousal.max(0.0))
+}
+
+// ── Region Transition KG Triple (Plan 218 Phase 4) ──────────
+
+use super::bfcf_types::RegionLabel;
+
+/// KG triple emitted when a region transitions between labels across decode steps.
+/// (step, region_idx, old_label) → (step+1, region_idx, new_label)
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RegionTransition {
+    pub step: u32,
+    pub region_idx: u32,
+    pub old_label: RegionLabel,
+    pub new_label: RegionLabel,
+}
+
+/// Detect region transitions between two partitions.
+/// Compares regions at the same index and emits a KG triple for each label change.
+pub fn detect_region_transitions(
+    old_partition: &BFCP,
+    new_partition: &BFCP,
+    step: u32,
+) -> Vec<RegionTransition> {
+    let mut transitions = Vec::new();
+    let min_regions = old_partition.regions.len().min(new_partition.regions.len());
+    for i in 0..min_regions {
+        let old_label = old_partition.regions[i].label;
+        let new_label = new_partition.regions[i].label;
+        if old_label != new_label {
+            transitions.push(RegionTransition {
+                step,
+                region_idx: i as u32,
+                old_label,
+                new_label,
+            });
+        }
+    }
+    transitions
+}
+
 // ── Tests ─────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -443,6 +530,112 @@ mod tests {
 
         let s_neg = sigmoid(-100.0);
         assert!(s_neg < 0.01, "sigmoid(-100) should be ~0.0, got {s_neg}");
+    }
+
+    // ── Phase 4 Tests ─────────────────────────────────────────
+
+    #[test]
+    fn test_neuron_shard_key_different_shards() {
+        let shard_a: Vec<f32> = vec![1.0, 0.0, 0.0];
+        let shard_b: Vec<f32> = vec![0.0, 1.0, 0.0];
+        let logits: Vec<f32> = vec![0.5, 0.3, 0.8];
+
+        let key_a = NeuronShardRegionKey::from_shard_and_logits(&shard_a, &logits);
+        let key_b = NeuronShardRegionKey::from_shard_and_logits(&shard_b, &logits);
+
+        assert_ne!(
+            key_a, key_b,
+            "different shard weights should produce different keys"
+        );
+    }
+
+    #[test]
+    fn test_neuron_shard_key_same_inputs() {
+        let shard: Vec<f32> = vec![1.0, 2.0, 3.0];
+        let logits: Vec<f32> = vec![0.5, 0.3, 0.8];
+
+        let key1 = NeuronShardRegionKey::from_shard_and_logits(&shard, &logits);
+        let key2 = NeuronShardRegionKey::from_shard_and_logits(&shard, &logits);
+
+        assert_eq!(key1, key2, "same inputs should produce same key");
+    }
+
+    #[test]
+    fn test_emotion_aware_priority_arousal_boost() {
+        let freq = 10u32;
+        let p_calm = emotion_aware_priority(freq, 0.0);
+        let p_excited = emotion_aware_priority(freq, 0.5);
+
+        assert!(
+            p_excited > p_calm,
+            "higher arousal should yield higher priority: excited={p_excited} vs calm={p_calm}"
+        );
+        assert!(
+            (p_calm - 10.0).abs() < 1e-6,
+            "calm priority should equal freq: {p_calm}"
+        );
+        assert!(
+            (p_excited - 15.0).abs() < 1e-6,
+            "excited priority should be freq*(1+0.5)=15: {p_excited}"
+        );
+    }
+
+    #[test]
+    fn test_emotion_aware_priority_zero_arousal() {
+        let freq = 5u32;
+        let p = emotion_aware_priority(freq, 0.0);
+        assert!(
+            (p - 5.0).abs() < 1e-6,
+            "zero arousal → priority = freq: {p}"
+        );
+    }
+
+    #[test]
+    fn test_detect_transitions_label_change() {
+        let old = BFCP::from_regions(vec![
+            BorelRegion::new(RegionLabel::Accept, vec![], 10),
+            BorelRegion::new(RegionLabel::Reject, vec![], 20),
+        ]);
+        let new = BFCP::from_regions(vec![
+            BorelRegion::new(RegionLabel::Reject, vec![], 10), // Accept→Reject
+            BorelRegion::new(RegionLabel::Reject, vec![], 20), // unchanged
+        ]);
+
+        let transitions = detect_region_transitions(&old, &new, 5);
+        assert_eq!(transitions.len(), 1);
+        assert_eq!(transitions[0].step, 5);
+        assert_eq!(transitions[0].region_idx, 0);
+        assert_eq!(transitions[0].old_label, RegionLabel::Accept);
+        assert_eq!(transitions[0].new_label, RegionLabel::Reject);
+    }
+
+    #[test]
+    fn test_detect_transitions_no_change() {
+        let old = BFCP::from_regions(vec![
+            BorelRegion::new(RegionLabel::Accept, vec![], 10),
+            BorelRegion::new(RegionLabel::Reject, vec![], 20),
+        ]);
+        let transitions = detect_region_transitions(&old, &old, 0);
+        assert!(
+            transitions.is_empty(),
+            "identical partitions should produce no transitions"
+        );
+    }
+
+    #[test]
+    fn test_detect_transitions_different_lengths() {
+        let old = BFCP::from_regions(vec![
+            BorelRegion::new(RegionLabel::Accept, vec![], 10),
+            BorelRegion::new(RegionLabel::Reject, vec![], 20),
+        ]);
+        let new = BFCP::from_regions(vec![
+            BorelRegion::new(RegionLabel::Reject, vec![], 10), // Accept→Reject
+                                                               // second region missing — only compare up to min(2,1) = 1
+        ]);
+
+        let transitions = detect_region_transitions(&old, &new, 3);
+        assert_eq!(transitions.len(), 1);
+        assert_eq!(transitions[0].region_idx, 0);
     }
 }
 

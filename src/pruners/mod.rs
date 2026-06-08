@@ -809,7 +809,10 @@ pub use bfcf_types::BfcpPartition;
 pub mod bfcp_region_cache;
 
 #[cfg(feature = "bfcf_lfu_shard")]
-pub use bfcp_region_cache::{BfcpRegionCache, FreqTier, RegionCaching, blake3_logit_hash};
+pub use bfcp_region_cache::{
+    BfcpRegionCache, FreqTier, NeuronShardRegionKey, RegionCaching, RegionTransition,
+    blake3_logit_hash, detect_region_transitions, emotion_aware_priority,
+};
 
 // ── BFCF × LFU × Sharding — Region Shard Map (Plan 218 Phase 2) ────────────
 //
