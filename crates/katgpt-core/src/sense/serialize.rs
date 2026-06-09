@@ -12,7 +12,10 @@ pub fn save_module(module: &SenseModule, mut w: impl Write) -> io::Result<()> {
     w.write_all(&[VERSION])?;
     w.write_all(&[module.kind as u8])?;
     let bytes: &[u8] = unsafe {
-        std::slice::from_raw_parts(module as *const SenseModule as *const u8, std::mem::size_of::<SenseModule>())
+        std::slice::from_raw_parts(
+            module as *const SenseModule as *const u8,
+            std::mem::size_of::<SenseModule>(),
+        )
     };
     w.write_all(bytes)?;
     Ok(())
@@ -23,12 +26,18 @@ pub fn load_module(mut r: impl Read) -> io::Result<SenseModule> {
     let mut magic = [0u8; 4];
     r.read_exact(&mut magic)?;
     if &magic != MAGIC {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "invalid SNSE magic"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "invalid SNSE magic",
+        ));
     }
     let mut ver = [0u8; 1];
     r.read_exact(&mut ver)?;
     if ver[0] != VERSION {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "unsupported SNSE version"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "unsupported SNSE version",
+        ));
     }
     let mut kind_buf = [0u8; 1];
     r.read_exact(&mut kind_buf)?;
@@ -36,10 +45,14 @@ pub fn load_module(mut r: impl Read) -> io::Result<SenseModule> {
     let mut module_bytes = vec![0u8; std::mem::size_of::<SenseModule>()];
     r.read_exact(&mut module_bytes)?;
 
-    let module: SenseModule = unsafe { std::ptr::read(module_bytes.as_ptr() as *const SenseModule) };
+    let module: SenseModule =
+        unsafe { std::ptr::read(module_bytes.as_ptr() as *const SenseModule) };
 
     if !module.verify() {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "BLAKE3 checksum mismatch"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "BLAKE3 checksum mismatch",
+        ));
     }
     Ok(module)
 }
@@ -58,6 +71,7 @@ mod tests {
             relation_hash: 7,
             embedding: [0.5, -0.3, 0.2, 0.0, 0.0, 0.0, 0.0, 0.0],
             sign: true,
+            confidence: 1.0,
         };
         let original = builder.build(SenseKind::FighterSense, &[emb]);
 

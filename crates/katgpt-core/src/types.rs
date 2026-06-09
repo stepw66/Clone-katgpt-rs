@@ -3661,6 +3661,21 @@ impl TernaryDir {
             row_scale: 0.0,
         }
     }
+
+    /// Zero padding bytes for deterministic hashing.
+    /// TernaryDir is 20 logical bytes but 24 with alignment padding.
+    /// This zeroes the 4 trailing padding bytes.
+    pub fn zero_padding(&mut self) {
+        // Write zeros to the padding region (bytes 20..24)
+        unsafe {
+            let ptr = self as *mut Self as *mut u8;
+            let padding_start = 20;
+            let padding_end = std::mem::size_of::<Self>();
+            for i in padding_start..padding_end {
+                *ptr.add(i) = 0;
+            }
+        }
+    }
 }
 
 /// Fixed-size sense module: KG latent octree + ternary direction vectors.
@@ -3730,9 +3745,14 @@ impl SenseModule {
     }
 
     /// Compute and store BLAKE3 commitment.
+    /// Zeros TernaryDir padding bytes first for deterministic hashing.
     pub fn commit(&mut self) {
         // Zero commitment before hashing
         self.commitment = [0u8; 32];
+        // Zero padding in direction vectors for deterministic hash
+        for dir in &mut self.directions {
+            dir.zero_padding();
+        }
         let bytes: &[u8] = unsafe {
             std::slice::from_raw_parts(
                 self as *const Self as *const u8,
@@ -3743,21 +3763,22 @@ impl SenseModule {
     }
 
     /// Verify BLAKE3 commitment.
-    /// Avoids cloning the full struct by zeroing commitment in a stack copy
-    /// of the pre-commitment bytes.
+    /// Zeros TernaryDir padding bytes before comparing to match commit() behavior.
     pub fn verify(&self) -> bool {
-        // Hash only the data fields (excluding commitment)
-        let data_bytes: &[u8] = unsafe {
+        // Clone to avoid mutating self, then zero padding + commitment
+        let mut copy = self.clone();
+        copy.commitment = [0u8; 32];
+        for dir in &mut copy.directions {
+            dir.zero_padding();
+        }
+        let bytes: &[u8] = unsafe {
             std::slice::from_raw_parts(
-                self as *const Self as *const u8,
+                &copy as *const Self as *const u8,
                 std::mem::size_of::<Self>() - 32,
             )
         };
-        let mut commitment_copy = [0u8; 32];
-        commitment_copy.copy_from_slice(&self.commitment);
-        // Compute expected hash (commitment was zeroed during commit())
-        let expected = blake3::hash(data_bytes);
-        commitment_copy == *expected.as_bytes()
+        let expected = blake3::hash(bytes);
+        self.commitment == *expected.as_bytes()
     }
 }
 

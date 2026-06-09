@@ -123,6 +123,7 @@ mod tests {
             relation_hash: 1,
             embedding: [0.8, 0.2, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
             sign: true,
+            confidence: 1.0,
         };
         builder.build(SenseKind::FighterSense, &[emb])
     }
@@ -134,6 +135,7 @@ mod tests {
             relation_hash: 2,
             embedding: [0.3, 0.7, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
             sign: true,
+            confidence: 1.0,
         };
         builder.build(SenseKind::SpatialSense, &[emb])
     }

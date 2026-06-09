@@ -15,18 +15,21 @@ fn main() {
         relation_hash: 1,
         embedding: [0.8, 0.2, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
         sign: true,
+        confidence: 1.0,
     };
     let spatial_emb = KgEmbedding {
         entity_hash: 2,
         relation_hash: 2,
         embedding: [0.3, 0.7, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
         sign: true,
+        confidence: 1.0,
     };
     let social_emb = KgEmbedding {
         entity_hash: 3,
         relation_hash: 3,
         embedding: [0.1, 0.1, 0.6, 0.0, 0.0, 0.0, 0.0, 0.0],
         sign: true,
+        confidence: 1.0,
     };
 
     let fighter = builder.build(SenseKind::FighterSense, &[fighter_emb]);

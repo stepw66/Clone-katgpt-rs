@@ -43,6 +43,7 @@ mod tests {
                 relation_hash: 1,
                 embedding: [0.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
                 sign: true,
+                confidence: 1.0,
             }],
         );
 

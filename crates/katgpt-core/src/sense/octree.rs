@@ -11,6 +11,10 @@ pub struct KgEmbedding {
     pub relation_hash: u64,
     pub embedding: [f32; 8],
     pub sign: bool,
+    /// KG triple confidence from extraction pipeline.
+    /// Flows into SenseModule via builder, used to weight projection.
+    /// Default 1.0 = no attenuation (backward compatible).
+    pub confidence: f32,
 }
 
 /// Builds octree bit-planes from KG embeddings.
@@ -26,7 +30,18 @@ impl SenseOctreeBuilder {
     }
 
     /// Build a SenseModule from KG embeddings.
+    ///
+    /// Module confidence = mean of embedding confidences (KG weight bridge).
+    /// Falls back to 0.5 when embeddings exist but have no confidence signal.
     pub fn build(&self, kind: SenseKind, embeddings: &[KgEmbedding]) -> SenseModule {
+        let module_confidence = if embeddings.is_empty() {
+            0.0
+        } else {
+            let mean: f32 =
+                embeddings.iter().map(|e| e.confidence).sum::<f32>() / embeddings.len() as f32;
+            if mean <= 0.0 { 0.5 } else { mean }
+        };
+
         let mut module = SenseModule {
             kind,
             version: 1,
@@ -35,7 +50,7 @@ impl SenseOctreeBuilder {
             _reserved: 0,
             octree_bits: [0; 4],
             directions: [TernaryDir::zero(); 8],
-            confidence: if embeddings.is_empty() { 0.0 } else { 0.5 },
+            confidence: module_confidence,
             commitment: [0u8; 32],
         };
 
@@ -125,6 +140,7 @@ mod tests {
             relation_hash: 2,
             embedding: [0.5, -0.3, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
             sign: true,
+            confidence: 1.0,
         };
         let module = builder.build(SenseKind::SpatialSense, &[emb]);
         assert_eq!(module.n_directions, 1);
@@ -140,6 +156,7 @@ mod tests {
                 relation_hash: i as u64 * 2,
                 embedding: [i as f32 * 0.1, -0.1, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
                 sign: i % 2 == 0,
+                confidence: 1.0,
             })
             .collect();
         let module = builder.build(SenseKind::FighterSense, &embeddings);

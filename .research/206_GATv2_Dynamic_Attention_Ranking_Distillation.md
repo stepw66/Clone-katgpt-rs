@@ -293,6 +293,7 @@ The `DynamicPairRouter` should be implemented as an extension to `PolytopeLoraRo
 | 197 DominoPruner | ✅ GOAT | DominoPruner is already dynamic — the correction pattern to reuse |
 | 243 Polytope Router | Phase 2 | **Primary target** for riir-ai — currently static routing |
 | 203 FrameExpertCoreset | Done | Frame-level coreset — could also benefit from dynamic routing |
+| 221 KG Confidence Bridge | ✅ Done | **Prerequisite for DynamicPairRouter** — KG confidence now flows from KgEmbedding → SenseModule.confidence → project() scaling. Same HLA + different confidence → different sense ranking (GATv2 dynamic property proven in T5). |
 
 ---
 
@@ -305,6 +306,8 @@ The `DynamicPairRouter` should be implemented as an extension to `PolytopeLoraRo
 3. **BanditPruner may already be dynamic enough**: While Q-values are per-arm (static), the `soft_route` blending across arms introduces some context-dependence. The diagnostic will reveal whether this is sufficient.
 
 4. **LoRA routing gain depends on adapter diversity**: If all LoRA adapters learn similar behaviors, dynamic routing has nothing to discriminate. The gain requires meaningful adapter specialization, which depends on training quality.
+
+5. **KG confidence bridge is infrastructure, not payoff**: The confidence-weighted projection (`confidence * sigmoid(dot)`) is a static scaling — the same triple always has the same confidence. The GATv2 dynamic property emerges when DIFFERENT zones/contexts have different confidence vectors, flipping the argsort. This was proven in bench_221 T5. The real payoff requires DynamicPairRouter (Plan 206 Priority 2) to dynamically select based on (state, confidence_vector) pairs.
 
 ---
 
@@ -342,3 +345,5 @@ The `DynamicPairRouter` should be implemented as an extension to `PolytopeLoraRo
 **For riir-ai**: PolytopeLoraRouter routes on input alone (static). Add target-conditioned pair routing via small LoRA parameters. Higher potential gain (game AI has clear multi-objective structure), but higher cost and risk.
 
 **Verdict: GOAT** — both are worth implementing behind feature gates. katgpt-rs diagnostic first (quick win / learning), riir-ai pair routing second (higher ceiling). Neither changes existing APIs.
+
+KG confidence bridge (Plan 221 T13) closes the extraction→inference gap — confidence now flows to projection output. Unblocks DynamicPairRouter.

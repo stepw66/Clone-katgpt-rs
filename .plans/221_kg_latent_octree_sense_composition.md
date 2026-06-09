@@ -157,6 +157,17 @@ Compress game domain knowledge into fixed-type ternary bit-plane sense modules (
   - Shows confidence evolution over N episodes
   - Print: initial vs final confidence, direction weight changes, locked module status
 
+### Phase 5: KG Confidence Weight Bridge (Plan 221 extension)
+
+- [x] **T13: KG confidence flows from KgEmbedding → SenseModule** (`crates/katgpt-core/src/sense/octree.rs`, `types.rs`)
+  - Add `confidence: f32` field to `KgEmbedding` — carries KG triple confidence from extraction pipeline
+  - `SenseOctreeBuilder::build()` sets `SenseModule.confidence` = mean of embedding confidences
+  - `SenseModule::project()` scales output: `confidence * sigmoid(dot)` — KG weight bridge
+  - Default `confidence: 1.0` = backward compatible (no behavior change)
+  - Fix pre-existing BLAKE3 padding bug: `TernaryDir::zero_padding()` zeros alignment bytes before hashing
+  - Fix `SenseModule::verify()` to zero padding before comparison (clone + zero pattern)
+  - Tests: 9/9 GOAT bench_221_kg_confidence_weight_goat — confidence flow, scaling, backward compat, BLAKE3, argsort reversal (GATv2 dynamic property), NpcBrain E2E, serialization roundtrip, bandit decay
+
 ---
 
 ## Dependency Graph
@@ -184,7 +195,7 @@ graph TD
 
 | Feature | Dependencies | Tasks | Default |
 |---------|-------------|-------|---------|
-| `sense_composition` | `plasma_path`, `domain_latent`, `bandit` | T1-T12 | **Opt-in**. Default-on only after GOAT proof with no perf regression. |
+| `sense_composition` | `plasma_path`, `domain_latent`, `bandit` | T1-T13 | **Opt-in**. Default-on only after GOAT proof with no perf regression. |
 
 **One gate.** No `sense_octree` + `sense_wasm` + `sense_bandit` split. 480 features is already too many.
 
@@ -322,4 +333,4 @@ examples/
 
 ## TL;DR
 
-12 tasks across 4 phases. **Single feature gate.** Phase 1 (T1-T4): core types + octree + serialization. Phase 2 (T5-T7): NpcBrain + GM override + WASM pool + batch. Phase 3 (T8-T9): bandit self-learning + hot-swap with module lock. Phase 4 (T10-T12): **internal-only** Sense API (MCP action codes `0x20-0x27`, no new auth/transport) + examples. **GM always wins over autonomous behavior.** Zero human-in-the-loop by default — MCP agents handle routine, SSH GM for narrative only. Not AGI — compressed statistics that augment game design, not replace it.
+13 tasks across 5 phases. **Single feature gate.** Phase 1 (T1-T4): core types + octree + serialization. Phase 2 (T5-T7): NpcBrain + GM override + WASM pool + batch. Phase 3 (T8-T9): bandit self-learning + hot-swap with module lock. Phase 4 (T10-T12): **internal-only** Sense API (MCP action codes `0x20-0x27`, no new auth/transport) + examples. Phase 5 (T13): **KG confidence bridge** — `KgEmbedding.confidence` flows through `SenseModule`, scaling `sigmoid(dot)` output; BLAKE3 padding fix included. **GM always wins over autonomous behavior.** Zero human-in-the-loop by default — MCP agents handle routine, SSH GM for narrative only. Not AGI — compressed statistics that augment game design, not replace it.
