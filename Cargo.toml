@@ -285,6 +285,10 @@ full = ["sudoku", "validator", "ppot", "domain_latent", "bandit", "delta_mem", "
 name = "goat_234_manifold_pruner"
 required-features = ["manifold_pruner"]
 
+[[test]]
+name = "bench_231_union_bound_goat"
+required-features = ["union_bound_confidence"]
+
 # ── SegmentCheckpoint (Plan 223b) ───────────────────────────────
 
 [[example]]
@@ -868,6 +872,10 @@ name = "async_qdq_goat"
 required-features = ["async_qdq_overlap", "union_bound_confidence", "pathway_tracker", "federation_composer"]
 
 [[test]]
+name = "bench_231_pathway_tracker_goat"
+required-features = ["pathway_tracker"]
+
+[[test]]
 name = "nf_flow_goat"
 required-features = ["nf_flow_score"]
 
@@ -886,6 +894,10 @@ required-features = ["dynamic_rank", "bandit"]
 [[test]]
 name = "bench_232_dynamic_rank_acceptance"
 required-features = ["bandit"]
+
+[[test]]
+name = "bench_231_federation_composer_goat"
+required-features = ["federation_composer"]
 
 [[example]]
 name = "vocab_channel_pruner_demo"

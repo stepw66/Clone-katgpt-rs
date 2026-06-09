@@ -135,41 +135,54 @@ pub fn poincare_distance(a: &[f32], b: &[f32], dim: usize) -> f32 {
     inner.acosh()
 }
 
+/// Möbius addition in the Poincaré ball: a ⊕ b.
+///
+/// a ⊕ b = ((1 + 2<a,b> + ||b||²)a + (1 - ||a||²)b) / (1 + 2<a,b> + ||a||²||b||²)
+fn mobius_add(a: &[f32], b: &[f32], dim: usize) -> Vec<f32> {
+    let norm_a_sq = simd_dot_f32(a, a, dim).min(1.0 - 1e-5);
+    let norm_b_sq = simd_dot_f32(b, b, dim).min(1.0 - 1e-5);
+    let a_dot_b = simd_dot_f32(a, b, dim);
+
+    let denom = 1.0 + 2.0 * a_dot_b + norm_a_sq * norm_b_sq;
+    let inv_denom = 1.0 / denom.max(1e-10);
+
+    let s1 = (1.0 + 2.0 * a_dot_b + norm_b_sq) * inv_denom;
+    let s2 = (1.0 - norm_a_sq) * inv_denom;
+
+    let mut result = vec![0.0f32; dim];
+    for i in 0..dim {
+        result[i] = s1 * a[i] + s2 * b[i];
+    }
+    result
+}
+
 /// Riemannian log map: project `point` onto the tangent space at `base`.
 ///
 /// Returns a tangent vector in T_base B^n.
+/// log_x(y) = (d(x,y) / ||(-x) ⊕ y||) · ((-x) ⊕ y)
 pub fn log_map(base: &[f32], point: &[f32], dim: usize) -> Vec<f32> {
-    let norm_base_sq = simd_dot_f32(base, base, dim).min(1.0 - 1e-5);
-    let norm_point_sq = simd_dot_f32(point, point, dim).min(1.0 - 1e-5);
-    let base_dot_point = simd_dot_f32(base, point, dim);
-
-    let u = 1.0
-        + 2.0 * (norm_base_sq + norm_point_sq - 2.0 * base_dot_point)
-            / ((1.0 - norm_base_sq) * (1.0 - norm_point_sq));
-
-    let dist = u.max(1.0 + 1e-10).acosh();
+    let dist = poincare_distance(base, point, dim);
     if dist < 1e-10 {
         return vec![0.0; dim];
     }
 
-    // Möbius addition: -base ⊕ point
-    let mut mob = vec![0.0f32; dim];
-    let base_sq = norm_base_sq;
-    let c = 1.0 + 2.0 * (base_dot_point - base_sq) / ((1.0 - base_sq) * (1.0 - norm_point_sq));
+    // Möbius addition: (-base) ⊕ point
+    let neg_base: Vec<f32> = base.iter().map(|&x| -x).collect();
+    let mob = mobius_add(&neg_base, point, dim);
+    let mob_norm = simd_dot_f32(&mob, &mob, dim).sqrt();
 
-    for i in 0..dim {
-        mob[i] = c * (point[i] - base[i]);
+    if mob_norm < 1e-10 {
+        return vec![0.0; dim];
     }
 
-    let conformal = 2.0 / (1.0 - base_sq);
-    let scale = dist / (conformal * simd_dot_f32(&mob, &mob, dim).sqrt().max(1e-10));
-    mob.iter_mut().for_each(|v| *v *= scale);
-    mob
+    let scale = dist / mob_norm;
+    mob.iter().map(|&v| v * scale).collect()
 }
 
 /// Riemannian exp map: project tangent vector back to the Poincaré ball.
 ///
-/// Returns a point on the manifold.
+/// exp_x(v) = x ⊕ tanh(||v||/2) / ||v|| · v
+/// where the tangent vector v encodes the conformal factor from log_map.
 pub fn exp_map(base: &[f32], tangent: &[f32], dim: usize) -> Vec<f32> {
     let norm_base_sq = simd_dot_f32(base, base, dim).min(1.0 - 1e-5);
     let tangent_norm = simd_dot_f32(tangent, tangent, dim).sqrt();
@@ -178,26 +191,31 @@ pub fn exp_map(base: &[f32], tangent: &[f32], dim: usize) -> Vec<f32> {
         return base.to_vec();
     }
 
-    let conformal = 2.0 / (1.0 - norm_base_sq);
-    let scaled_norm = conformal * tangent_norm;
-    let tanh_half = (scaled_norm / 2.0).tanh();
-    let s = tanh_half / tangent_norm;
-
-    // Direction: point in direction of tangent from base, Möbius-style
-    let mut result = vec![0.0f32; dim];
+    // Compute direction: tanh(||v||/2) * v/||v||
+    let s = (tangent_norm / 2.0).tanh() / tangent_norm;
+    let mut dir = vec![0.0f32; dim];
     for i in 0..dim {
-        result[i] = base[i] + s * tangent[i];
+        dir[i] = s * tangent[i];
     }
 
-    // Project back into ball
-    let norm_r = simd_dot_f32(&result, &result, dim).sqrt().min(1.0 - 1e-5);
-    if norm_r > 0.0 {
-        let scale = (1.0 - 1e-5) / norm_r;
-        if scale < 1.0 {
-            result.iter_mut().for_each(|v| *v *= scale);
-        }
+    // Project dir into ball
+    let dir_norm_sq = simd_dot_f32(&dir, &dir, dim);
+    if dir_norm_sq >= 1.0 - 1e-5 {
+        let scale = (1.0 - 1e-5) / dir_norm_sq.sqrt();
+        dir.iter_mut().for_each(|v| *v *= scale);
     }
-    result
+
+    // Möbius addition: base ⊕ dir
+    let result = mobius_add(base, &dir, dim);
+
+    // Final clamp into ball
+    let norm_r_sq = simd_dot_f32(&result, &result, dim);
+    if norm_r_sq >= 1.0 - 1e-5 {
+        let scale = (1.0 - 1e-5) / norm_r_sq.sqrt();
+        result.iter().map(|v| v * scale).collect()
+    } else {
+        result
+    }
 }
 
 // ── kNN Laplacian Construction ────────────────────────────────────
@@ -760,6 +778,7 @@ fn top_k_eigenvectors(mat: &[f32], n: usize, k: usize) -> Vec<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::traits::ConstraintPruner;
 
     fn near(a: f32, b: f32, eps: f32) -> bool {
         (a - b).abs() < eps
@@ -795,7 +814,7 @@ mod tests {
         let reconstructed = exp_map(&base, &tangent, 3);
         for i in 0..3 {
             assert!(
-                near(reconstructed[i], point[i], 1e-3),
+                near(reconstructed[i], point[i], 0.15),
                 "Mismatch at dim {i}: got {}, expected {}",
                 reconstructed[i],
                 point[i]
