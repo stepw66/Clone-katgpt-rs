@@ -194,28 +194,86 @@ impl BomberState {
             .any(|b| self.is_pos_in_blast(pos, b.pos, b.range))
     }
 
+    /// Pre-compute the full blast zone grid (169 cells) for all bombs.
+    ///
+    /// Each cell is `true` if it falls within any bomb's blast range,
+    /// accounting for wall blocking (same rules as `is_pos_in_blast`).
+    /// O(bombs × range) once, then O(1) lookups.
+    fn compute_blast_zone(&self) -> [bool; ARENA_W * ARENA_H] {
+        let mut zone = [false; ARENA_W * ARENA_H];
+        for bomb in &self.bombs {
+            let bx = bomb.pos.0;
+            let by = bomb.pos.1;
+
+            // Mark bomb cell itself
+            if bx >= 0 && (bx as usize) < ARENA_W && by >= 0 && (by as usize) < ARENA_H {
+                zone[by as usize * ARENA_W + bx as usize] = true;
+            }
+
+            // Propagate in 4 cardinal directions
+            for &(dx, dy) in &DIRECTIONS {
+                for dist in 1..=bomb.range as i32 {
+                    let cx = bx + dx * dist;
+                    let cy = by + dy * dist;
+                    if cx < 0 || (cx as usize) >= ARENA_W || cy < 0 || (cy as usize) >= ARENA_H {
+                        break;
+                    }
+                    let ci = cy as usize * ARENA_W + cx as usize;
+                    match self.cells[ci] {
+                        Cell::FixedWall => break,
+                        Cell::DestructibleWall | Cell::PowerUpHidden(_) => {
+                            zone[ci] = true;
+                            break;
+                        }
+                        Cell::Floor => zone[ci] = true,
+                    }
+                }
+            }
+        }
+        zone
+    }
+
     /// BFS escape distance from blast zone. Returns `None` if trapped.
+    ///
+    /// Uses pre-computed blast zone (O(bombs×range) once) and flat bitset
+    /// visited array instead of HashSet.
     pub fn escape_distance(&self, pos: (i32, i32)) -> Option<i32> {
-        if !self.is_in_blast_zone(pos) {
+        let blast = self.compute_blast_zone();
+        self.escape_distance_with_blast(pos, &blast)
+    }
+
+    /// BFS escape using a pre-computed blast zone grid.
+    fn escape_distance_with_blast(
+        &self,
+        pos: (i32, i32),
+        blast: &[bool; ARENA_W * ARENA_H],
+    ) -> Option<i32> {
+        let pi = pos.1 as usize * ARENA_W + pos.0 as usize;
+        if !blast[pi] {
             return Some(0);
         }
 
-        let mut visited = HashSet::new();
+        let mut visited = [false; ARENA_W * ARENA_H];
         let mut queue = VecDeque::new();
 
-        visited.insert(pos);
+        visited[pi] = true;
         queue.push_back((pos, 0));
 
         while let Some(((cx, cy), dist)) = queue.pop_front() {
             for (nx, ny) in [(cx, cy - 1), (cx, cy + 1), (cx - 1, cy), (cx + 1, cy)] {
-                if !visited.insert((nx, ny)) {
+                if nx < 0 || (nx as usize) >= ARENA_W || ny < 0 || (ny as usize) >= ARENA_H {
                     continue;
                 }
+                let ni = ny as usize * ARENA_W + nx as usize;
+                if visited[ni] {
+                    continue;
+                }
+                visited[ni] = true;
                 if !self.is_walkable(nx, ny) {
                     continue;
                 }
                 let next_dist = dist + 1;
-                if !self.is_in_blast_zone((nx, ny)) {
+                if !blast[ni] {
                     return Some(next_dist);
                 }
                 queue.push_back(((nx, ny), next_dist));
@@ -514,9 +572,13 @@ impl StateHeuristic<BomberState> for BomberHeuristic {
 
         let mut score = 0.0;
 
+        // Pre-compute blast zone once — shared for safety check + escape distance
+        let blast = state.compute_blast_zone();
+        let pi = player.pos.1 as usize * ARENA_W + player.pos.0 as usize;
+
         // Safety: penalize blast zone exposure
-        if state.is_in_blast_zone(player.pos) {
-            match state.escape_distance(player.pos) {
+        if blast[pi] {
+            match state.escape_distance_with_blast(player.pos, &blast) {
                 Some(d) => score -= 5.0 + d as f32 * 0.5,
                 None => return -0.8, // Trapped = nearly dead
             }

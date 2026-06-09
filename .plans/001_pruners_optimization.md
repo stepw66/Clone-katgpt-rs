@@ -23,11 +23,11 @@ Implementation of `.issues/001_pruners_optimization.md` findings.
 - [ ] **H-12**: `bfcp_preimage` sigmoid waste → simple comparison
 - [ ] **H-13**: `roaring_membership` len() iterates → cache cardinality
 - [ ] **H-14**: `phrase_trie` O(n²) dedup → HashSet
-- [ ] **H-16**: `lsh_cache` column-major → row-major iteration
-- [ ] **H-17**: MCTSNode children/unexpanded Vecs → SmallVec
+- [x] **H-16**: `lsh_cache` column-major → row-major iteration
+- [x] **H-17**: MCTSNode children/unexpanded Vecs → SmallVec (pre-allocated with `Vec::with_capacity(8)`)
 - [ ] **H-19**: Bomber `softmax()` in players.rs → sigmoid
-- [ ] **H-24**: Bomber blast zone → pre-compute grid
-- [ ] **H-25**: Bomber `escape_distance()` HashSet → bitset
+- [x] **H-24**: Bomber blast zone → pre-compute grid
+- [x] **H-25**: Bomber `escape_distance()` HashSet → bitset
 
 ### MEDIUM
 - [ ] Remaining MEDIUM items from issue
