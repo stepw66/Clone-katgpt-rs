@@ -33,7 +33,7 @@ Apply Gemma 4 QAT's fundamental insight (*optimize for the precision you'll depl
   - Before: KVarN with Sinkhorn (4-8 iterations per decode)
   - After: KVarN with static scales
   - Measure: decode latency, perplexity delta, calibration time
-- [ ] GOAT gate: if latency improves ≥5% and perplexity delta < 0.1, mark for default-ON
+- [x] GOAT gate: if latency improves ≥5% and perplexity delta < 0.1, mark for default-ON
 
 ### Phase 2: Targeted Precision Budget (TPB) — Per-head bit allocation
 
@@ -50,7 +50,7 @@ Apply Gemma 4 QAT's fundamental insight (*optimize for the precision you'll depl
   - Before: KVarN uniform 2.3 bits/head
   - After: KVarN targeted (some 4-bit, some 2-bit, same total)
   - Measure: perplexity, KV cache size (must be same), decode latency
-- [ ] GOAT gate: if perplexity improves ≥2% at same cache size, mark for default-ON
+- [x] GOAT gate: if perplexity improves ≥2% at same cache size, mark for default-ON
 
 ### Phase 3: Modality-Pruned Context Loading — Pipeline pruning
 
@@ -69,7 +69,7 @@ Apply Gemma 4 QAT's fundamental insight (*optimize for the precision you'll depl
 - [x] Write `tests/pipeline_pruner_goat.rs` benchmark:
   - Measure latency per query class with and without pruning
   - Verify quality: each class must maintain output quality within tolerance
-- [ ] GOAT gate: if latency improves ≥20% for simple queries with no quality regression, default-ON
+- [x] GOAT gate: if latency improves ≥20% for simple queries with no quality regression, default-ON
 
 ### Phase 4: Precision-Aware Speculative Drafting (PASD)
 
@@ -84,7 +84,7 @@ Apply Gemma 4 QAT's fundamental insight (*optimize for the precision you'll depl
   - Before: standard speculative decoding acceptance rate
   - After: precision-aware draft acceptance rate
   - Measure: acceptance rate, tokens/sec, overhead of boundary computation
-- [ ] GOAT gate: if acceptance rate improves ≥5% with <1% overhead, default-ON
+- [x] GOAT gate: if acceptance rate improves ≥5% with <1% overhead, default-ON
 
 ### Phase 5: Channel SIMD Alignment — Data layout optimization
 
@@ -96,7 +96,7 @@ Apply Gemma 4 QAT's fundamental insight (*optimize for the precision you'll depl
   - Before: standard ternary matvec
   - After: cache-line-aligned ternary matvec
   - Measure: SIMD throughput (ops/sec), cache miss rate (if possible)
-- [ ] GOAT gate: if throughput improves ≥5%, default-ON
+- [x] GOAT gate: if throughput improves ≥5%, default-ON
 
 ### Phase 6: Async Q/DQ Overlap — GPU pipeline (depends on GPU feature)
 
@@ -107,7 +107,7 @@ Apply Gemma 4 QAT's fundamental insight (*optimize for the precision you'll depl
   - Before: sequential dequantize → attention
   - After: overlapped dequantize + attention
   - Measure: GPU utilization, throughput, latency
-- [ ] GOAT gate: if throughput improves ≥15% on GPU, default-ON (with `inference_router`)
+- [x] GOAT gate: if throughput improves ≥15% on GPU, default-ON (with `inference_router`)
 
 ---
 

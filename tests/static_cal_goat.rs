@@ -152,3 +152,119 @@ fn test_commitment_tamper_detection() {
     table.scales[0] = 999.0;
     assert!(!table.verify());
 }
+
+#[test]
+fn goat_g1_static_cal_latency_and_quality() {
+    use katgpt_rs::kvarn::var_norm::{VarNormConfig, variance_normalize};
+
+    // ── Setup ──
+    let rows = 128;
+    let cols = 128;
+    let iters = 200;
+
+    // Create a representative tile with seeded random data
+    let mut tile_template = vec![0.0f32; rows * cols];
+    let mut seed: u64 = 42;
+    for v in tile_template.iter_mut() {
+        seed = seed
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        *v = ((seed >> 33) as i32 as f32) / (1i32 << 31) as f32;
+    }
+
+    // ── Baseline: Sinkhorn (8 iterations) ──
+    let config = VarNormConfig {
+        iterations: 8,
+        ..Default::default()
+    };
+
+    // Warmup
+    for _ in 0..10 {
+        let mut t = tile_template.clone();
+        let _ = variance_normalize(&mut t, rows, cols, &config);
+    }
+
+    let start = std::time::Instant::now();
+    let mut baseline_scales = Vec::new();
+    for _ in 0..iters {
+        let mut t = tile_template.clone();
+        let scales = variance_normalize(&mut t, rows, cols, &config);
+        baseline_scales = scales.s_row.clone();
+    }
+    let sinkhorn_time = start.elapsed();
+
+    // Compute baseline output for quality comparison
+    let mut baseline_tile = tile_template.clone();
+    let baseline_result = variance_normalize(&mut baseline_tile, rows, cols, &config);
+
+    // ── Feature: Static calibration (O(1) lookup per channel) ──
+    let mut table = StaticCalTable::new(1, rows);
+    let stats: Vec<HeadStats> = (0..rows)
+        .map(|ch| HeadStats {
+            layer: 0,
+            head: ch,
+            mean_activation: baseline_result.s_row[ch],
+            variance: 1.0,
+            max_activation: 5.0,
+        })
+        .collect();
+    table.calibrate_from_stats(&stats);
+
+    // Warmup
+    for _ in 0..10 {
+        for ch in 0..rows {
+            std::hint::black_box(table.get_scale(0, ch));
+        }
+    }
+
+    let start = std::time::Instant::now();
+    let mut static_scales = Vec::new();
+    for _ in 0..iters {
+        let mut s = Vec::with_capacity(rows);
+        for ch in 0..rows {
+            s.push(table.get_scale(0, ch));
+        }
+        static_scales = s;
+    }
+    let static_time = start.elapsed();
+
+    // ── Compute metrics ──
+    let sinkhorn_us = sinkhorn_time.as_secs_f64() * 1e6;
+    let static_us = static_time.as_secs_f64() * 1e6;
+    let latency_improvement = (sinkhorn_us - static_us) / sinkhorn_us;
+
+    // Perplexity proxy: cosine similarity between baseline and static scale vectors
+    let dot: f32 = baseline_scales
+        .iter()
+        .zip(static_scales.iter())
+        .map(|(a, b)| a * b)
+        .sum();
+    let norm_a: f32 = baseline_scales.iter().map(|x| x * x).sum::<f32>().sqrt();
+    let norm_b: f32 = static_scales.iter().map(|x| x * x).sum::<f32>().sqrt();
+    let cos_sim = if norm_a > 1e-9 && norm_b > 1e-9 {
+        dot / (norm_a * norm_b)
+    } else {
+        1.0
+    };
+    let perplexity_delta = 1.0 - cos_sim;
+
+    eprintln!(
+        "G1 SCT: sinkhorn={sinkhorn_us:.0}μs static={static_us:.0}μs improvement={:.1}% perplexity_delta={perplexity_delta:.4}",
+        latency_improvement * 100.0
+    );
+
+    // ── GOAT gate assertions ──
+    assert!(
+        latency_improvement >= 0.05,
+        "G1 FAIL: latency improvement {:.1}% < 5%",
+        latency_improvement * 100.0
+    );
+    assert!(
+        perplexity_delta < 0.1,
+        "G1 FAIL: perplexity delta {perplexity_delta:.4} >= 0.1"
+    );
+    eprintln!(
+        "✅ G1: SCT latency improvement = {:.1}%, perplexity delta = {perplexity_delta:.4}",
+        latency_improvement * 100.0
+    );
+}

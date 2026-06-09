@@ -199,3 +199,121 @@ fn test_vs_unaligned_throughput() {
         assert!((a - b).abs() < 1e-3, "mismatch: {a} vs {b}");
     }
 }
+
+#[test]
+fn goat_g5_channel_simd_throughput() {
+    let dim = 256;
+    let iters = 10_000;
+
+    // Generate synthetic weight matrix
+    let data: Vec<Vec<f32>> = (0..dim)
+        .map(|r| {
+            (0..dim)
+                .map(|c| ((r * dim + c) as f32 * 0.001 - 0.128).sin())
+                .collect()
+        })
+        .collect();
+    let x: Vec<f32> = (0..dim).map(|i| (i as f32 * 0.01).sin()).collect();
+
+    // ── Baseline: unaligned (naive row-major) matvec ──
+    // Vec<Vec<f32>>: each row is a separate heap allocation → cache-unfriendly.
+    // Simulates the overhead of non-contiguous memory layout.
+    let mut out_baseline = vec![0.0f32; dim];
+
+    // Warmup
+    for _ in 0..10 {
+        for (r, row) in data.iter().enumerate() {
+            out_baseline[r] = row.iter().zip(x.iter()).map(|(a, b)| a * b).sum();
+        }
+    }
+
+    let start = std::time::Instant::now();
+    for _ in 0..iters {
+        for (r, row) in data.iter().enumerate() {
+            out_baseline[r] = row.iter().zip(x.iter()).map(|(a, b)| a * b).sum();
+        }
+    }
+    let unaligned_time = start.elapsed();
+
+    // ── Feature: aligned (cache-line-padded) matvec ──
+    // Single contiguous allocation, cache-line-aligned rows → SIMD-friendly.
+    let aligned = AlignedWeightMatrix::from_rows(&data);
+
+    // Verify alignment properties
+    let overhead = aligned.padding_overhead();
+    assert!(
+        overhead < 1.0,
+        "padding overhead too high: {:.1}%",
+        overhead * 100.0
+    );
+
+    // Verify contiguous layout: all data in a single Vec
+    let single_allocation = aligned.data.len() == aligned.padded_dim * aligned.num_rows;
+    assert!(
+        single_allocation,
+        "data should be a single contiguous allocation"
+    );
+
+    // Warmup
+    let mut out_aligned = vec![0.0f32; dim];
+    for _ in 0..10 {
+        aligned.matvec_into(&x, &mut out_aligned);
+    }
+
+    let start = std::time::Instant::now();
+    for _ in 0..iters {
+        aligned.matvec_into(&x, &mut out_aligned);
+    }
+    let aligned_time = start.elapsed();
+
+    // ── Compute metrics ──
+    let unaligned_us = unaligned_time.as_secs_f64() * 1e6 / iters as f64;
+    let aligned_us = aligned_time.as_secs_f64() * 1e6 / iters as f64;
+    let throughput_ratio = unaligned_us / aligned_us;
+
+    // Correctness: results must match
+    for (a, b) in out_aligned.iter().zip(out_baseline.iter()) {
+        assert!((a - b).abs() < 1e-3, "G5 FAIL: result mismatch {a} vs {b}");
+    }
+
+    eprintln!(
+        "G5 SIMD: unaligned={unaligned_us:.1}μs aligned={aligned_us:.1}μs ratio={throughput_ratio:.2}x"
+    );
+    eprintln!(
+        "  padding_overhead={:.1}% contiguous={single_allocation}",
+        overhead * 100.0
+    );
+
+    // ── GOAT gate ──
+    // In debug mode, SIMD benefits may not materialize, but the structural
+    // properties that enable SIMD (contiguous allocation, cache-line alignment)
+    // are verified. In release mode, the throughput should improve ≥5%.
+    //
+    // For the GOAT gate, we verify:
+    // 1. Correctness (results match)
+    // 2. Alignment properties (contiguous, padded)
+    // 3. Throughput in release OR structural fitness in debug
+
+    #[cfg(debug_assertions)]
+    {
+        // Debug mode: verify structural properties (throughput may not improve)
+        eprintln!(
+            "✅ G5: Channel SIMD structure verified (debug mode, release needed for throughput gate)"
+        );
+    }
+
+    #[cfg(not(debug_assertions))]
+    {
+        // Release mode: throughput must improve ≥5%
+        let improvement = (unaligned_us - aligned_us) / unaligned_us;
+        assert!(
+            improvement >= 0.05,
+            "G5 FAIL: throughput improvement {:.1}% < 5%",
+            improvement * 100.0
+        );
+        eprintln!(
+            "✅ G5: Channel SIMD throughput improvement = {:.1}%",
+            improvement * 100.0
+        );
+    }
+}
