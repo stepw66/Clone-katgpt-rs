@@ -6,6 +6,7 @@
 //! Zero training required — pure modelless inference enhancement.
 
 pub mod auto_route;
+pub mod bench;
 pub mod gating;
 
 #[cfg(feature = "ssc_spec_draft")]
