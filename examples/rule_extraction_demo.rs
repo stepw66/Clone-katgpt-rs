@@ -99,7 +99,7 @@ fn print_rule(idx: usize, rule: &ExtractedRule) {
         "  Rule {}: {} → action {} | score={:.4} support={}",
         idx + 1,
         conds.join(" ∧ "),
-        format!("(d={},t={})", rule.action.0, rule.action.1),
+        format_args!("(d={},t={})", rule.action.0, rule.action.1),
         rule.score,
         rule.support,
     );

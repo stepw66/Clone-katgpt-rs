@@ -1,4 +1,3 @@
-#![cfg(feature = "substrate_gate")]
 //! SubstrateGate dual sparsity execution — ReLU ∩ substrate mask intersection (Plan 216 T4-T5).
 //!
 //! After ReLU activation and before the w2 down-projection, intersects the sparse
@@ -119,6 +118,7 @@ pub fn flops_reduction_ratio(mask: &SubstrateMask, active_ratio: f32) -> f32 {
 /// Same weight layout as `sparse_matmul`: weight[row * cols + col].
 ///
 /// Returns the post-intersection alive count.
+#[allow(clippy::too_many_arguments)]
 pub fn sparse_matmul_substrate(
     output: &mut [f32],
     weight: &[f32],
@@ -132,8 +132,7 @@ pub fn sparse_matmul_substrate(
 ) -> usize {
     // Phase 1: Pack ReLU-active neuron indices and values
     let mut relu_alive = 0usize;
-    for c in 0..cols {
-        let val = input[c];
+    for (c, &val) in input.iter().enumerate().take(cols) {
         if val > 0.0 {
             active_indices[relu_alive] = c;
             active_values[relu_alive] = val;
@@ -336,6 +335,7 @@ pub fn gpu_batch_substrate_matmul(
 /// * `layer_idx` — transformer layer index
 /// * `gpu_available` — whether GPU is available
 /// * `n_branches` — number of branches for batch consideration
+#[allow(clippy::too_many_arguments)]
 pub fn auto_route_substrate(
     active_indices: &[usize],
     active_values: &[f32],
@@ -531,9 +531,7 @@ mod tests {
             .map(|i| {
                 let ch = i / 4;
                 let col = i % 4;
-                if ch == 0 && col == 0 {
-                    1.0
-                } else if ch == 3 && col == 3 {
+                if (ch == 0 && col == 0) || (ch == 3 && col == 3) {
                     1.0
                 } else {
                     0.0

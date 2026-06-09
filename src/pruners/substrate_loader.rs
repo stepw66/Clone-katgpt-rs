@@ -1,4 +1,3 @@
-#![cfg(feature = "substrate_gate")]
 //! SubstrateGate mask loader — `.mask` file format for capability substrates (Plan 216 T9-T10).
 //!
 //! Loads and saves substrate masks in a portable format.
@@ -90,12 +89,12 @@ pub fn load_substrate_mask(json: &str) -> Option<SubstrateMask> {
 
     // Reconstruct flat bitmask from per-layer bitmasks
     let total_channels = file.n_layers * file.mlp_hidden;
-    let word_count = (total_channels + 63) / 64;
+    let word_count = total_channels.div_ceil(64);
     let mut bitmask = vec![0u64; word_count];
 
     for (layer_idx, layer_words) in file.layer_bitmasks.iter().enumerate() {
         let base_word = (layer_idx * file.mlp_hidden) / 64;
-        let layer_word_count = (file.mlp_hidden + 63) / 64;
+        let layer_word_count = file.mlp_hidden.div_ceil(64);
 
         for (w, &word) in layer_words.iter().enumerate().take(layer_word_count) {
             let dst = base_word + w;
@@ -122,7 +121,7 @@ pub fn load_substrate_mask(json: &str) -> Option<SubstrateMask> {
 
     for layer in 0..file.n_layers {
         let base_word = (layer * file.mlp_hidden) / 64;
-        let layer_word_count = (file.mlp_hidden + 63) / 64;
+        let layer_word_count = file.mlp_hidden.div_ceil(64);
         for w in 0..layer_word_count {
             let word = bitmask.get(base_word + w).copied().unwrap_or(0);
             for bit in 0..64 {
@@ -192,7 +191,7 @@ fn compute_blake3(bitmask: &[u64]) -> [u8; 32] {
     let bytes: &[u8] = unsafe {
         std::slice::from_raw_parts(
             bitmask.as_ptr() as *const u8,
-            bitmask.len() * std::mem::size_of::<u64>(),
+            std::mem::size_of_val(bitmask),
         )
     };
     let mut hasher = blake3::Hasher::new();

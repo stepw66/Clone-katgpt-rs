@@ -206,8 +206,8 @@ fn goat_g6_async_qdq_throughput() {
     // Overlapping: dequantize hides behind GPU attention
     // First chunk: gpu_attention only (no prefetch benefit)
     // Remaining chunks: max(gpu_attention, cpu_dequantize) per chunk
-    let overlap_us = gpu_attention_us
-        + (total_chunks - 1) as f64 * gpu_attention_us.max(cpu_dequantize_us) as f64;
+    let overlap_us =
+        gpu_attention_us + (total_chunks - 1) as f64 * gpu_attention_us.max(cpu_dequantize_us);
 
     let throughput_improvement = (baseline_us - overlap_us) / baseline_us;
 

@@ -1,4 +1,3 @@
-#![cfg(feature = "substrate_gate")]
 //! SubstrateGate core types — capability substrate masks for inference-time routing (Plan 216).
 //!
 //! Pre-computed per-capability MLP channel masks intersected with ReLU activation masks
@@ -65,7 +64,7 @@ impl SubstrateMask {
         model_id: String,
     ) -> Self {
         let total_channels = n_layers * mlp_hidden;
-        let word_count = (total_channels + 63) / 64;
+        let word_count = total_channels.div_ceil(64);
         Self {
             bitmask: vec![0u64; word_count],
             n_layers,
@@ -155,15 +154,15 @@ impl SubstrateMask {
         bitmask.resize(self.bitmask.len(), 0);
 
         // Recount per-layer active
-        for layer in 0..self.n_layers {
+        for (layer, layer_active) in per_layer_active.iter_mut().enumerate().take(self.n_layers) {
             let base = layer * self.mlp_hidden;
             let mut count = 0usize;
-            let layer_words = (self.mlp_hidden + 63) / 64;
+            let layer_words = self.mlp_hidden.div_ceil(64);
             for w in 0..layer_words {
                 let word_idx = (base / 64) + w;
                 count += bitmask.get(word_idx).copied().unwrap_or(0).count_ones() as usize;
             }
-            per_layer_active[layer] = count;
+            *layer_active = count;
         }
 
         let mut result = Self {
@@ -188,7 +187,7 @@ impl SubstrateMask {
             return &[];
         }
         let base_word = (layer * self.mlp_hidden) / 64;
-        let layer_words = (self.mlp_hidden + 63) / 64;
+        let layer_words = self.mlp_hidden.div_ceil(64);
         let end = (base_word + layer_words).min(self.bitmask.len());
         &self.bitmask[base_word..end]
     }
@@ -238,7 +237,7 @@ fn compute_blake3(bitmask: &[u64]) -> [u8; 32] {
     let bytes: &[u8] = unsafe {
         std::slice::from_raw_parts(
             bitmask.as_ptr() as *const u8,
-            bitmask.len() * std::mem::size_of::<u64>(),
+            std::mem::size_of_val(bitmask),
         )
     };
     let mut hasher = Hasher::new();
@@ -346,10 +345,10 @@ impl SubstrateRouter for SimpleSubstrateRouter {
         _config: &crate::types::Config,
     ) -> Option<&SubstrateMask> {
         // Return cached if available
-        if let Some(idx) = self.cached_idx {
-            if idx < self.masks.len() {
-                return Some(&self.masks[idx].1);
-            }
+        if let Some(idx) = self.cached_idx
+            && idx < self.masks.len()
+        {
+            return Some(&self.masks[idx].1);
         }
 
         // Select mask with highest recovery above threshold

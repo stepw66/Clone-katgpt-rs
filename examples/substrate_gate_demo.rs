@@ -8,9 +8,7 @@
 
 #![cfg(feature = "substrate_gate")]
 
-use katgpt_rs::pruners::{
-    NoSubstrateRouter, SubstrateConfig, SubstrateMask, SubstrateRouter, substrate_branch_score,
-};
+use katgpt_rs::pruners::{SubstrateMask, substrate_branch_score};
 
 fn main() {
     println!("=== SubstrateGate Demo (Plan 216) ===\n");

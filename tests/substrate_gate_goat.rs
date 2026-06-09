@@ -561,8 +561,8 @@ fn g4_cna_mask_from_activation_patterns() {
 
     let mut overlap_count = 0usize;
     let mut total_truth = 0usize;
-    for layer in 0..n_layers {
-        for &ch in &ground_truth_channels[layer] {
+    for (layer, truth_channels) in ground_truth_channels.iter().enumerate() {
+        for &ch in truth_channels {
             total_truth += 1;
             if cna_mask.get(layer, ch) {
                 overlap_count += 1;

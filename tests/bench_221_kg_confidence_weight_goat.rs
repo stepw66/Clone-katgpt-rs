@@ -6,8 +6,10 @@
 //! Plan 221 extension — closes the KG extraction → inference confidence gap.
 //!
 //! ```sh
-//! cargo test -p katgpt-rs --test bench_221_kg_confidence_weight_goat -- --nocapture
+//! cargo test -p katgpt-rs --test bench_221_kg_confidence_weight_goat --features sense_composition -- --nocapture
 //! ```
+
+#![cfg(feature = "sense_composition")]
 
 use katgpt_core::sense::brain::NpcBrain;
 use katgpt_core::sense::octree::{KgEmbedding, SenseOctreeBuilder};

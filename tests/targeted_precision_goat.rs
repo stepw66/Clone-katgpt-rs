@@ -55,8 +55,8 @@ fn test_kv_cache_size_same_as_uniform() {
 fn test_sensitivity_gradient() {
     // Create a clear sensitivity gradient
     let mut sensitivity = vec![0.0; 16];
-    for i in 0..16 {
-        sensitivity[i] = i as f32 / 15.0;
+    for (i, val) in sensitivity.iter_mut().enumerate() {
+        *val = i as f32 / 15.0;
     }
 
     let budget = PrecisionBudget::compute_budget(2, 8, &sensitivity, 3.0);

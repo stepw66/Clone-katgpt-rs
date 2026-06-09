@@ -1,4 +1,3 @@
-#![cfg(feature = "substrate_gate")]
 //! SubstrateGate DDTree integration — capability-aware branch scoring (Plan 216 T6-T7).
 //!
 //! Extends DDTree branch scoring with substrate recovery:

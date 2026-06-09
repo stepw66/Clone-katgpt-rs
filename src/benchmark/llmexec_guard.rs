@@ -3,12 +3,13 @@
 //! Measures the cost of `verify_tier()` calls vs a no-guard baseline.
 //! LLMExecGuard should be zero-cost or negative-cost (by skipping verification).
 
-use crate::llmexec_guard::{LlmExecGuardConfig, VerifyTier, verify_tier};
+use crate::llmexec_guard::{LlmExecGuardConfig, verify_tier};
 use std::hint::black_box;
 use std::time::Instant;
 
 /// Synthetic entropy/depth pairs for benchmark.
 /// Covers the full range: low/medium/high entropy at shallow/deep DDTree depths.
+#[allow(dead_code)]
 const BENCH_INPUTS: &[(f32, usize)] = &[
     (0.05, 0),
     (0.15, 2),
@@ -22,6 +23,7 @@ const BENCH_INPUTS: &[(f32, usize)] = &[
 
 /// Benchmark: measure `verify_tier()` throughput.
 /// Returns (ns_per_call_guard, ns_per_call_noop, tier_distribution).
+#[allow(dead_code)]
 pub fn bench_llmexec_guard_overhead(iters: usize) -> (f64, f64, [usize; 3]) {
     let config = LlmExecGuardConfig::default();
     let n_inputs = BENCH_INPUTS.len();
@@ -62,6 +64,7 @@ pub fn bench_llmexec_guard_overhead(iters: usize) -> (f64, f64, [usize; 3]) {
 }
 
 /// Print a formatted benchmark report.
+#[allow(dead_code)]
 pub fn print_llmexec_guard_bench(iters: usize) {
     let (ns_guard, ns_noop, tiers) = bench_llmexec_guard_overhead(iters);
     let total = tiers.iter().sum::<usize>() as f64;

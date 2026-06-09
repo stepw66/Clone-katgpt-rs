@@ -275,15 +275,13 @@ impl<P: ConstraintPruner> FolPruner<P> {
 impl<P: ConstraintPruner> ConstraintPruner for FolPruner<P> {
     fn is_valid(&self, depth: usize, token_idx: usize, parent_tokens: &[usize]) -> bool {
         // Fast path: no constraints → delegate to inner only
-        match self.constraints.is_empty() {
-            true => return self.inner.is_valid(depth, token_idx, parent_tokens),
-            false => {}
+        if self.constraints.is_empty() {
+            return self.inner.is_valid(depth, token_idx, parent_tokens);
         }
 
         // Check FOL constraints first
-        match self.is_rejected_by_constraints(depth, token_idx) {
-            true => return false,
-            false => {}
+        if self.is_rejected_by_constraints(depth, token_idx) {
+            return false;
         }
 
         // Delegate to inner
@@ -302,9 +300,8 @@ impl<P: ConstraintPruner> ConstraintPruner for FolPruner<P> {
             .batch_is_valid(depth, candidates, parent_tokens, results);
 
         // Fast path: no constraints → inner results are final
-        match self.constraints.is_empty() {
-            true => return,
-            false => {}
+        if self.constraints.is_empty() {
+            return;
         }
 
         // Apply FOL constraints in batch
@@ -655,7 +652,7 @@ mod tests {
                 // Check each expected keyword appears in some constraint's allowed or disallowed
                 let all_found = expected.iter().all(|kw| {
                     let idx = vocab.iter().position(|v| v == *kw);
-                    idx.map_or(false, |i| {
+                    idx.is_some_and(|i| {
                         constraints
                             .iter()
                             .any(|c| c.allowed.contains(&i) || c.disallowed.contains(&i))

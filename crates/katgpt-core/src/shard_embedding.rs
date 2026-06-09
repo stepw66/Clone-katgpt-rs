@@ -42,10 +42,11 @@ impl JlProjectionMatrix {
         // Generate random rows, then Gram-Schmidt orthogonalize
         for i in 0..EMBED_DIM {
             // Random init
-            for j in 0..STYLE_DIM {
-                rows[i][j] = rng();
+            for val in rows[i].iter_mut() {
+                *val = rng();
             }
             // Subtract projections onto previous rows (SIMD-accelerated dot)
+            #[allow(clippy::needless_range_loop)]
             for k in 0..i {
                 let dot = crate::simd::simd_dot_f32(&rows[i], &rows[k], STYLE_DIM);
                 for j in 0..STYLE_DIM {
@@ -57,17 +58,17 @@ impl JlProjectionMatrix {
             let norm = norm_sq.sqrt();
             if norm > 1e-8 {
                 let inv_norm = 1.0 / norm;
-                for j in 0..STYLE_DIM {
-                    rows[i][j] *= inv_norm;
+                for val in rows[i].iter_mut() {
+                    *val *= inv_norm;
                 }
             }
         }
 
         // Scale by 1/sqrt(d_out) per JL lemma
         let scale = 1.0 / (EMBED_DIM as f32).sqrt();
-        for i in 0..EMBED_DIM {
-            for j in 0..STYLE_DIM {
-                rows[i][j] *= scale;
+        for row in rows.iter_mut() {
+            for val in row.iter_mut() {
+                *val *= scale;
             }
         }
 
@@ -86,8 +87,8 @@ impl JlProjectionMatrix {
     #[inline]
     pub fn project(&self, style_weights: &[f32; STYLE_DIM]) -> ShardEmbedding {
         let mut result = [0.0f32; EMBED_DIM];
-        for i in 0..EMBED_DIM {
-            result[i] = crate::simd::simd_dot_f32(&self.rows[i], style_weights, STYLE_DIM);
+        for (i, slot) in result.iter_mut().enumerate() {
+            *slot = crate::simd::simd_dot_f32(&self.rows[i], style_weights, STYLE_DIM);
         }
         ShardEmbedding(result)
     }

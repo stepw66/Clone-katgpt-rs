@@ -106,7 +106,7 @@ mod tests {
         let bp = BoundaryPenalty::default();
         let logits = vec![0.5, 0.3, 0.7, 0.1];
         let score = bp.compute_boundary_score(&logits);
-        assert!(score >= 0.0 && score <= 1.0);
+        assert!((0.0..=1.0).contains(&score));
     }
 
     #[test]

@@ -126,9 +126,8 @@ impl RuleExtractor {
     /// - `support` = 1 (newly extracted, not yet deduplicated)
     pub fn extract(&self, trees: &[TreeNode]) -> Vec<ExtractedRule> {
         // Early return: empty forest → no rules.
-        match trees.is_empty() {
-            true => return Vec::new(),
-            false => {}
+        if trees.is_empty() {
+            return Vec::new();
         }
 
         let mut paths: Vec<PathAccumulator> = Vec::new();
@@ -252,26 +251,21 @@ pub fn deduplicate_rules(rules: &mut Vec<ExtractedRule>, hamming_threshold: usiz
     let mut consumed = vec![false; rules.len()];
 
     for i in 0..rules.len() {
-        match consumed[i] {
-            true => continue,
-            false => {}
+        if consumed[i] {
+            continue;
         }
 
         let mut rule = rules[i].clone();
 
         for j in (i + 1)..rules.len() {
-            match consumed[j] {
-                true => continue,
-                false => {}
+            if consumed[j] {
+                continue;
             }
 
             let dist = hamming_distance(&rule.conditions, &rules[j].conditions);
-            match dist <= hamming_threshold {
-                true => {
-                    rule.support += rules[j].support;
-                    consumed[j] = true;
-                }
-                false => {}
+            if dist <= hamming_threshold {
+                rule.support += rules[j].support;
+                consumed[j] = true;
             }
         }
 

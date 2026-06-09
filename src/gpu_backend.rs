@@ -248,7 +248,7 @@ struct GpuWeightBuffers {
 
 /// Upload a `Vec<f32>` to a new Metal buffer with shared memory.
 fn upload_buffer(device: &metal::DeviceRef, data: &[f32]) -> Buffer {
-    let byte_len = (data.len() * mem::size_of::<f32>()) as u64;
+    let byte_len = std::mem::size_of_val(data) as u64;
     let buffer = device.new_buffer(byte_len, MTLResourceOptions::StorageModeShared);
     let contents = buffer.contents();
     unsafe {
@@ -387,7 +387,7 @@ impl InferenceBackend for GpuBackend {
         let mlp_hidden = config.mlp_hidden;
         let vocab_size = config.vocab_size;
         let eps = config.rms_norm_eps as f32;
-        let scale = (1.0f32 / (head_dim as f32).sqrt()) as f32;
+        let scale = 1.0f32 / (head_dim as f32).sqrt();
         let seq_len = pos + 1; // number of cached positions
 
         // Shortcut references to scratch buffers
@@ -410,7 +410,7 @@ impl InferenceBackend for GpuBackend {
             |encoder: &metal::ComputeCommandEncoderRef, pipeline: &ComputePipelineState, n: u64| {
                 encoder.set_compute_pipeline_state(pipeline);
                 let tg_size = pipeline.thread_execution_width();
-                let threadgroup_count = MTLSize::new((n + tg_size - 1) / tg_size, 1, 1);
+                let threadgroup_count = MTLSize::new(n.div_ceil(tg_size), 1, 1);
                 let threads_per_tg = MTLSize::new(tg_size, 1, 1);
                 encoder.dispatch_thread_groups(threadgroup_count, threads_per_tg);
             };
@@ -456,6 +456,7 @@ impl InferenceBackend for GpuBackend {
         }
 
         // ── Step 2: Per-layer transformer block ──
+        #[allow(clippy::needless_range_loop)]
         for layer_idx in 0..config.n_layer {
             let cmd_buffer = command_queue.new_command_buffer();
             let encoder = cmd_buffer.new_compute_command_encoder();

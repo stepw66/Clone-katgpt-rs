@@ -1028,9 +1028,9 @@ mod tests {
     fn test_critical_entropy_updates_last_observed() {
         let mut router = fast_router(false, false);
         assert_eq!(router.last_critical_entropy(), 0.0);
-        router.observe_critical_entropy(3.14);
-        assert!((router.last_critical_entropy() - 3.14).abs() < 1e-6);
-        router.observe_critical_entropy(2.71);
-        assert!((router.last_critical_entropy() - 2.71).abs() < 1e-6);
+        router.observe_critical_entropy(3.15);
+        assert!((router.last_critical_entropy() - 3.15).abs() < 1e-6);
+        router.observe_critical_entropy(2.72);
+        assert!((router.last_critical_entropy() - 2.72).abs() < 1e-6);
     }
 }

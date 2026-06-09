@@ -175,9 +175,9 @@ impl CheckpointPolicy {
     /// Should we checkpoint at this segment boundary?
     pub fn should_checkpoint(&self, segment_index: usize) -> bool {
         match self {
-            Self::Lazy => segment_index % 4 == 0, // every 4th boundary
-            Self::Normal => true,                 // every boundary
-            Self::Eager => true,                  // every boundary + pre-compute
+            Self::Lazy => segment_index.is_multiple_of(4), // every 4th boundary
+            Self::Normal => true,                          // every boundary
+            Self::Eager => true,                           // every boundary + pre-compute
         }
     }
 

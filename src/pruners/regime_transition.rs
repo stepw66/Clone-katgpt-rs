@@ -15,8 +15,6 @@
 //! Entire module is behind `#[cfg(feature = "regime_transition")]`.
 //! Depends on: `and_or_dtree`, `bandit`, `decision_trace`, `fol_constraints`, `rule_extraction`.
 
-#![cfg(feature = "regime_transition")]
-
 use blake3::Hasher;
 
 use super::decision_trace::DecisionTrace;
@@ -1184,8 +1182,8 @@ mod tests {
         );
 
         // Record in ProvenanceChain
-        chain.record(1, 0.85, discovery_arm.index() as usize);
-        chain.record(2, 0.90, discovery_arm.index() as usize);
+        chain.record(1, 0.85, discovery_arm.index());
+        chain.record(2, 0.90, discovery_arm.index());
         assert!(chain.verify(), "Phase 3: Provenance chain must verify");
 
         // Update router with the discovery arm reward
@@ -1205,7 +1203,7 @@ mod tests {
             "Phase 4: transition_success=true must select Consolidation regime"
         );
         router.update(consol_arm, 0.9);
-        chain.record(3, 0.90, consol_arm.index() as usize);
+        chain.record(3, 0.90, consol_arm.index());
 
         // ── Phase 5: Return to Standard ────────────────────────────
         let returned_features = RegimeFeatures {

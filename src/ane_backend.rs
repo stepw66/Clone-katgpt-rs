@@ -109,6 +109,12 @@ impl std::error::Error for AneError {
     }
 }
 
+impl Default for AneBackend {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AneBackend {
     /// Create a new uncompiled ANE backend.
     pub fn new() -> Self {
@@ -208,10 +214,10 @@ impl InferenceBackend for AneBackend {
 
         // If we have a compiled CoreML model, run the lm_head on ANE and
         // override the CPU-computed logits. This proves the pipeline works.
-        if let Some(ref model) = self.model {
-            if let Ok(ane_logits) = run_lm_head(model, &ctx.x[..config.n_embd], config) {
-                ctx.logits[..config.vocab_size].copy_from_slice(&ane_logits);
-            }
+        if let Some(ref model) = self.model
+            && let Ok(ane_logits) = run_lm_head(model, &ctx.x[..config.n_embd], config)
+        {
+            ctx.logits[..config.vocab_size].copy_from_slice(&ane_logits);
         }
 
         &mut ctx.logits
@@ -252,13 +258,11 @@ fn build_linear_model_spec(
                 name: "input".into(),
                 short_description: "Input tensor".into(),
                 r#type: Some(multi_array_type(&[in_dim as i64, 1, 1])),
-                ..Default::default()
             }],
             output: vec![FeatureDescription {
                 name: "output".into(),
                 short_description: "Output tensor".into(),
                 r#type: Some(multi_array_type(&[out_dim as i64, 1, 1])),
-                ..Default::default()
             }],
             ..Default::default()
         }),
@@ -349,8 +353,8 @@ pub fn build_transformer_model_spec(weights: &TransformerWeights, config: &Confi
         let pre_attn_norm = format!("layer_{i}_pre_attn_norm");
         layers.push(nn_layer(
             &format!("layer_{i}_rmsnorm_attn"),
-            &[cur.clone()],
-            &[pre_attn_norm.clone()],
+            std::slice::from_ref(&cur),
+            std::slice::from_ref(&pre_attn_norm),
             LayerKind::Scale(ScaleLayerParams {
                 shape_scale: vec![n_embd as u64],
                 scale: Some(WeightParams {
@@ -367,8 +371,8 @@ pub fn build_transformer_model_spec(weights: &TransformerWeights, config: &Confi
         let q_out = format!("layer_{i}_q");
         layers.push(nn_layer(
             &format!("layer_{i}_wq"),
-            &[pre_attn_norm.clone()],
-            &[q_out.clone()],
+            std::slice::from_ref(&pre_attn_norm),
+            std::slice::from_ref(&q_out),
             LayerKind::InnerProduct(InnerProductLayerParams {
                 input_channels: n_embd as u64,
                 output_channels: n_embd as u64,
@@ -386,8 +390,8 @@ pub fn build_transformer_model_spec(weights: &TransformerWeights, config: &Confi
         let k_out = format!("layer_{i}_k");
         layers.push(nn_layer(
             &format!("layer_{i}_wk"),
-            &[pre_attn_norm.clone()],
-            &[k_out.clone()],
+            std::slice::from_ref(&pre_attn_norm),
+            std::slice::from_ref(&k_out),
             LayerKind::InnerProduct(InnerProductLayerParams {
                 input_channels: n_embd as u64,
                 output_channels: kv_dim as u64,
@@ -405,8 +409,8 @@ pub fn build_transformer_model_spec(weights: &TransformerWeights, config: &Confi
         let v_out = format!("layer_{i}_v");
         layers.push(nn_layer(
             &format!("layer_{i}_wv"),
-            &[pre_attn_norm],
-            &[v_out.clone()],
+            std::slice::from_ref(&pre_attn_norm),
+            std::slice::from_ref(&v_out),
             LayerKind::InnerProduct(InnerProductLayerParams {
                 input_channels: n_embd as u64,
                 output_channels: kv_dim as u64,
@@ -426,7 +430,7 @@ pub fn build_transformer_model_spec(weights: &TransformerWeights, config: &Confi
         layers.push(nn_layer(
             &format!("layer_{i}_attn_dot"),
             &[q_out, k_out],
-            &[attn_score.clone()],
+            std::slice::from_ref(&attn_score),
             LayerKind::Dot(DotProductLayerParams {
                 cosine_similarity: false,
             }),
@@ -436,7 +440,7 @@ pub fn build_transformer_model_spec(weights: &TransformerWeights, config: &Confi
         layers.push(nn_layer(
             &format!("layer_{i}_attn_softmax"),
             &[attn_score],
-            &[attn_weights.clone()],
+            std::slice::from_ref(&attn_weights),
             LayerKind::Softmax(SoftmaxLayerParams {}),
         ));
 
@@ -444,7 +448,7 @@ pub fn build_transformer_model_spec(weights: &TransformerWeights, config: &Confi
         layers.push(nn_layer(
             &format!("layer_{i}_attn_mul"),
             &[attn_weights, v_out],
-            &[attn_out.clone()],
+            std::slice::from_ref(&attn_out),
             LayerKind::Multiply(MultiplyLayerParams { alpha: 1.0 }),
         ));
 
@@ -453,7 +457,7 @@ pub fn build_transformer_model_spec(weights: &TransformerWeights, config: &Confi
         layers.push(nn_layer(
             &format!("layer_{i}_wo"),
             &[attn_out],
-            &[wo_out.clone()],
+            std::slice::from_ref(&wo_out),
             LayerKind::InnerProduct(InnerProductLayerParams {
                 input_channels: n_embd as u64,
                 output_channels: n_embd as u64,
@@ -472,7 +476,7 @@ pub fn build_transformer_model_spec(weights: &TransformerWeights, config: &Confi
         layers.push(nn_layer(
             &format!("layer_{i}_resid_add_attn"),
             &[wo_out, cur],
-            &[resid_attn.clone()],
+            std::slice::from_ref(&resid_attn),
             LayerKind::Add(AddLayerParams { alpha: 1.0 }),
         ));
 
@@ -481,7 +485,7 @@ pub fn build_transformer_model_spec(weights: &TransformerWeights, config: &Confi
         layers.push(nn_layer(
             &format!("layer_{i}_rmsnorm_mlp"),
             &[resid_attn],
-            &[pre_mlp_norm.clone()],
+            std::slice::from_ref(&pre_mlp_norm),
             LayerKind::Scale(ScaleLayerParams {
                 shape_scale: vec![n_embd as u64],
                 scale: Some(WeightParams {
@@ -499,7 +503,7 @@ pub fn build_transformer_model_spec(weights: &TransformerWeights, config: &Confi
         layers.push(nn_layer(
             &format!("layer_{i}_mlp_w1"),
             &[pre_mlp_norm],
-            &[mlp_up.clone()],
+            std::slice::from_ref(&mlp_up),
             LayerKind::InnerProduct(InnerProductLayerParams {
                 input_channels: n_embd as u64,
                 output_channels: mlp_hidden as u64,
@@ -518,7 +522,7 @@ pub fn build_transformer_model_spec(weights: &TransformerWeights, config: &Confi
         layers.push(nn_layer(
             &format!("layer_{i}_mlp_relu"),
             &[mlp_up],
-            &[mlp_activated.clone()],
+            std::slice::from_ref(&mlp_activated),
             LayerKind::Activation(ActivationParams {
                 nonlinearity_type: Some(ActivationKind::ReLu(ActivationReLu {})),
             }),
@@ -529,7 +533,7 @@ pub fn build_transformer_model_spec(weights: &TransformerWeights, config: &Confi
         layers.push(nn_layer(
             &format!("layer_{i}_mlp_w2"),
             &[mlp_activated],
-            &[mlp_down.clone()],
+            std::slice::from_ref(&mlp_down),
             LayerKind::InnerProduct(InnerProductLayerParams {
                 input_channels: mlp_hidden as u64,
                 output_channels: n_embd as u64,
@@ -548,7 +552,7 @@ pub fn build_transformer_model_spec(weights: &TransformerWeights, config: &Confi
         layers.push(nn_layer(
             &format!("layer_{i}_resid_add_mlp"),
             &[mlp_down, format!("layer_{i}_resid_attn")],
-            &[cur.clone()],
+            std::slice::from_ref(&cur),
             LayerKind::Add(AddLayerParams { alpha: 1.0 }),
         ));
     }
@@ -578,13 +582,11 @@ pub fn build_transformer_model_spec(weights: &TransformerWeights, config: &Confi
                 name: "input".into(),
                 short_description: "Token input tensor".into(),
                 r#type: Some(multi_array_type(&[vocab_size as i64, 1, 1])),
-                ..Default::default()
             }],
             output: vec![FeatureDescription {
                 name: "output".into(),
                 short_description: "Logits output".into(),
                 r#type: Some(multi_array_type(&[vocab_size as i64, 1, 1])),
-                ..Default::default()
             }],
             ..Default::default()
         }),
@@ -622,13 +624,11 @@ pub fn build_conv2d_linear_model_spec(
                 name: "input".into(),
                 short_description: "Input tensor (NCHW)".into(),
                 r#type: Some(multi_array_type(&[1, in_dim as i64, 1, 1])),
-                ..Default::default()
             }],
             output: vec![FeatureDescription {
                 name: "output".into(),
                 short_description: "Output tensor (NCHW)".into(),
                 r#type: Some(multi_array_type(&[1, out_dim as i64, 1, 1])),
-                ..Default::default()
             }],
             ..Default::default()
         }),
@@ -1146,20 +1146,20 @@ mod tests {
 
     /// Helper: extract weight float_value from the InnerProduct layer of a spec.
     fn extract_inner_product_weights(spec: &Model) -> Vec<f32> {
-        if let Some(ModelType::NeuralNetwork(nn)) = &spec.r#type {
-            if let Some(LayerKind::InnerProduct(ip)) = &nn.layers[0].layer {
-                return ip.weights.as_ref().unwrap().float_value.clone();
-            }
+        if let Some(ModelType::NeuralNetwork(nn)) = &spec.r#type
+            && let Some(LayerKind::InnerProduct(ip)) = &nn.layers[0].layer
+        {
+            return ip.weights.as_ref().unwrap().float_value.clone();
         }
         vec![]
     }
 
     /// Helper: extract weight float_value from the Convolution layer of a spec.
     fn extract_conv2d_weights(spec: &Model) -> Vec<f32> {
-        if let Some(ModelType::NeuralNetwork(nn)) = &spec.r#type {
-            if let Some(LayerKind::Convolution(conv)) = &nn.layers[0].layer {
-                return conv.weights.as_ref().unwrap().float_value.clone();
-            }
+        if let Some(ModelType::NeuralNetwork(nn)) = &spec.r#type
+            && let Some(LayerKind::Convolution(conv)) = &nn.layers[0].layer
+        {
+            return conv.weights.as_ref().unwrap().float_value.clone();
         }
         vec![]
     }

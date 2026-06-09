@@ -1,4 +1,3 @@
-#![cfg(feature = "substrate_gate")]
 //! SubstrateGate ScreeningPruner extension — recovery-aware token screening (Plan 216 T8).
 //!
 //! Uses substrate mask's activation concentration as a relevance signal.

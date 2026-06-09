@@ -1,3 +1,4 @@
+#![allow(unexpected_cfgs)]
 #[cfg(all(target_os = "macos", feature = "ane"))]
 pub mod ane_backend;
 #[cfg(feature = "async_qdq_overlap")]

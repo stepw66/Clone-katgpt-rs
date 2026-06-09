@@ -16,7 +16,7 @@ fn main() {
             let weights: Vec<f32> = (0..512)
                 .map(|i| {
                     let x = i as f32 / 512.0;
-                    (x * 6.28 * (layer as f32 + 1.0)).sin() * 0.3
+                    (x * std::f32::consts::TAU * (layer as f32 + 1.0)).sin() * 0.3
                 })
                 .collect();
             let d = guard.scan_layer(&weights, layer, &format!("layer{}.ffn.up", layer));
@@ -39,7 +39,7 @@ fn main() {
             let mut weights: Vec<f32> = (0..512)
                 .map(|i| {
                     let x = i as f32 / 512.0;
-                    (x * 6.28).sin() * 0.3
+                    (x * std::f32::consts::TAU).sin() * 0.3
                 })
                 .collect();
             // Inject outliers in layer 2
