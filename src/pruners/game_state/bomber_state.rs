@@ -61,8 +61,8 @@ pub struct BombSnapshot {
 /// The arena converts `World → BomberState` once per tick.
 #[derive(Clone, Debug)]
 pub struct BomberState {
-    /// 13×13 grid: `cells[y][x]`
-    pub cells: Vec<Vec<Cell>>,
+    /// 13×13 flat grid: `cells[y * ARENA_W + x]`
+    pub cells: [Cell; ARENA_W * ARENA_H],
     pub players: [PlayerSnapshot; 4],
     pub bombs: Vec<BombSnapshot>,
     /// Power-ups revealed by blast (waiting to be collected).
@@ -84,8 +84,15 @@ impl BomberState {
             ..PlayerSnapshot::default()
         });
 
+        let mut cells = [Cell::FixedWall; ARENA_W * ARENA_H];
+        for y in 0..ARENA_H {
+            for x in 0..ARENA_W {
+                cells[y * ARENA_W + x] = grid.cells[y][x];
+            }
+        }
+
         Self {
-            cells: grid.cells.clone(),
+            cells,
             players,
             bombs: Vec::new(),
             revealed_powerups: Vec::new(),
@@ -104,14 +111,14 @@ impl BomberState {
         if x < 0 || (x as usize) >= ARENA_W || y < 0 || (y as usize) >= ARENA_H {
             Cell::FixedWall
         } else {
-            self.cells[y as usize][x as usize]
+            self.cells[y as usize * ARENA_W + x as usize]
         }
     }
 
     /// Set cell at (x, y). No-op for out-of-bounds.
     fn set_cell(&mut self, x: i32, y: i32, cell: Cell) {
         if x >= 0 && (x as usize) < ARENA_W && y >= 0 && (y as usize) < ARENA_H {
-            self.cells[y as usize][x as usize] = cell;
+            self.cells[y as usize * ARENA_W + x as usize] = cell;
         }
     }
 
@@ -120,7 +127,7 @@ impl BomberState {
         if x < 0 || (x as usize) >= ARENA_W || y < 0 || (y as usize) >= ARENA_H {
             return false;
         }
-        matches!(self.cells[y as usize][x as usize], Cell::Floor)
+        matches!(self.cells[y as usize * ARENA_W + x as usize], Cell::Floor)
             && !self.bombs.iter().any(|b| b.pos == (x, y))
     }
 
@@ -926,7 +933,7 @@ mod tests {
         let mut state = BomberState::from_grid(&grid);
 
         // Manually place a PowerUpHidden wall in blast range
-        state.cells[1][3] = Cell::PowerUpHidden(PowerUpKind::BombUp);
+        state.cells[1 * ARENA_W + 3] = Cell::PowerUpHidden(PowerUpKind::BombUp);
         state.players[0].pos = (5, 1);
         state.bombs.push(BombSnapshot {
             pos: (1, 1),
@@ -937,7 +944,7 @@ mod tests {
 
         let next = state.advance(&BomberAction::Wait, 0);
         // Wall destroyed, power-up revealed
-        assert_eq!(next.cells[1][3], Cell::Floor);
+        assert_eq!(next.cells[1 * ARENA_W + 3], Cell::Floor);
         assert_eq!(next.revealed_powerups.len(), 1);
         assert_eq!(next.revealed_powerups[0], ((3, 1), PowerUpKind::BombUp));
     }
@@ -1056,8 +1063,8 @@ mod tests {
             owner: 1,
         });
         // Block all exits
-        state.cells[1][2] = Cell::DestructibleWall;
-        state.cells[2][1] = Cell::DestructibleWall;
+        state.cells[1 * ARENA_W + 2] = Cell::DestructibleWall;
+        state.cells[2 * ARENA_W + 1] = Cell::DestructibleWall;
 
         let h = BomberHeuristic;
         let value = h.evaluate(&state, 0);
