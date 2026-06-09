@@ -43,6 +43,8 @@ use super::safe_phased::SafePhasedState;
 #[cfg(feature = "skill_lifecycle")]
 use super::skill_memory::{MemoryEntry, PrunerMemory};
 use super::trial_log::{TrialLog, TrialRecord};
+#[cfg(feature = "dynamic_rank")]
+use crate::pruners::dynamic_rank::DynamicRankPruner;
 use crate::speculative::types::ScreeningPruner;
 use crate::types::Rng;
 
@@ -920,6 +922,14 @@ impl<P: ScreeningPruner> BanditPruner<P> {
             / weight_sum;
 
         (domain * blended).clamp(0.0, 1.0)
+    }
+
+    /// Wrap this BanditPruner with static ranking detection and correction.
+    /// GATv2 insight: BanditPruner Q-values are per-arm (no parent conditioning) → static ranking.
+    /// This wrapper detects that and applies context-dependent corrections.
+    #[cfg(feature = "dynamic_rank")]
+    pub fn with_dynamic_rank(self, vocab_size: usize) -> DynamicRankPruner<Self> {
+        DynamicRankPruner::new(self, vocab_size)
     }
 }
 

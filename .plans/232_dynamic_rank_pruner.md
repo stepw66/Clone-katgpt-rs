@@ -2,7 +2,7 @@
 
 > **Source:** Research 206 — GATv2 Dynamic Attention Ranking Distillation
 > **Date:** 2026-06
-> **Status:** 🧪 GOAT Proof Passed (5/5)
+> **Status:** 📋 Diagnostic Only — No Acceptance Gain
 > **Feature Gate:** `dynamic_rank` (default-off until GOAT proof passes)
 > **Related:** Plan 197 (DominoPruner GOAT 25/25), Plan 030 (BanditPruner), Plan 033 (Bomber Arena)
 
@@ -132,6 +132,23 @@ If G1 fails (no ≥2% gain) and G2 fails (BanditPruner IS static but correction 
 
 ---
 
+## Acceptance Rate Benchmark (2026-06-09)
+
+| Metric | Baseline | Wrapped | Delta |
+|--------|----------|---------|-------|
+| Acceptance rate | 7.58% | 7.57% | -0.01pp |
+| Total reward | 680.1 | 678.2 | -1.9 |
+
+**Result: NO GAIN.** Marginals dominate tree structure; correction learning rate too small to shift branches.
+
+### Promotion Decision
+- ❌ NOT promoted to default
+- ❌ NOT added to `full` feature
+- ✅ Remains as diagnostic tool (detects static pruners)
+- ✅ Feature gate `dynamic_rank` stays default-OFF
+
+---
+
 ## TL;DR
 
-Wrap `BanditPruner` with a diagnostic that detects static ranking (GATv2 insight: argsort invariant across parent contexts). If static detected, apply DominoPruner-style prefix correction. If already dynamic, zero overhead passthrough. Feature-gated `dynamic_rank`, default-off. GOAT gate: ≥2% acceptance rate improvement on bomber arena OR proof that BanditPruner is already dynamic.
+Wrap `BanditPruner` with a diagnostic that detects static ranking (GATv2 insight: argsort invariant across parent contexts). If static detected, apply DominoPruner-style prefix correction. If already dynamic, zero overhead passthrough. Feature-gated `dynamic_rank`, default-off. **Acceptance rate benchmark (2026-06-09): NO GAIN** (-0.01pp). Demoted to diagnostic-only tool — correction too weak to shift branches dominated by marginals. Feature stays default-OFF.

@@ -308,6 +308,31 @@ The `DynamicPairRouter` should be implemented as an extension to `PolytopeLoraRo
 
 ---
 
+## 10. Acceptance Rate Benchmark Results (2026-06-09)
+
+**Verdict: NO GAIN — Diagnostic only, do NOT promote to default.**
+
+| Metric | BanditPruner Baseline | DynamicRankPruner Wrapped | Delta |
+|--------|----------------------|---------------------------|-------|
+| Tree nodes | 16,000 | 16,000 | +0 |
+| Accepted tokens | 1,212 | 1,211 | -1 |
+| **Acceptance rate** | **7.58%** | **7.57%** | **-0.01pp** |
+| Total reward | 680.1 | 678.2 | -1.9 |
+
+**Root cause:** Marginals dominate tree structure, not pruner scores. The `0.01` correction learning rate is too small to shift which branches survive. Static detection is correct, but correction is too weak.
+
+### Promotion Decision
+
+| Gate | Criterion | Result |
+|------|-----------|--------|
+| Detection GOAT | Diagnostic identifies static pruners | ✅ PASS (5/5) |
+| Acceptance rate gain | ≥2% improvement | ❌ FAIL (-0.01pp) |
+| Safe (no regression) | ≤10% degradation | ✅ PASS (-0.08% relative) |
+
+**Outcome: DEMOTE to diagnostic tool.** Keep `dynamic_rank` feature gate, default-OFF. Do NOT add to `full` or `default`. The diagnostic value (knowing which pruners are static) is real, but the correction mechanism does not produce measurable gain.
+
+---
+
 ## TL;DR
 
 **GATv2's insight**: composition order (linear-then-nonlinearity vs nonlinearity-then-linear) determines whether scoring is static (same ranking for all queries) or dynamic (ranking conditioned on query). Apply the diagnostic: does argsort change when you change the query?
