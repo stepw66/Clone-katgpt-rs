@@ -126,14 +126,14 @@ graph TD
 - [x] Test: `OutlierGuard` with `Reject` action returns error on flagged model
 - [x] Test: `OutlierGuard` with `Warn` action logs but continues
 - [x] Test: Zero-allocation: no heap allocations in `ks_d_statistic` hot path
-- [ ] Test: Feature gate: all tests pass with and without `outlier_guard`
-- [ ] Test: Cross-check: when both KS and StiffSoft available, dual signal works
+- [x] Test: Feature gate: all tests pass with and without `outlier_guard`
+- [x] Test: Cross-check: when both KS and StiffSoft available, dual signal works
 
 ### T7: Benchmark — Overhead Measurement
-- [ ] Benchmark: time to scan one layer (expected: <1ms for typical FFN weight matrix)
-- [ ] Benchmark: total model scan time (expected: <50ms for 32-layer model)
-- [ ] Benchmark: zero impact on inference throughput (scan runs before inference starts)
-- [ ] Example: `outlier_guard_demo` showing normal vs attacked model detection
+- [x] Benchmark: time to scan one layer (expected: <1ms for typical FFN weight matrix)
+- [x] Benchmark: total model scan time (expected: <50ms for 32-layer model)
+- [x] Benchmark: zero impact on inference throughput (scan runs before inference starts)
+- [x] Example: `outlier_guard_demo` showing normal vs attacked model detection
 
 ## Expected Results
 

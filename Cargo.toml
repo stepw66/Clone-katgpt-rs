@@ -858,6 +858,10 @@ name = "nf_flow_goat"
 required-features = ["nf_flow_score"]
 
 [[test]]
+name = "bench_224_outlier_guard_goat"
+required-features = ["outlier_guard"]
+
+[[test]]
 name = "pipeline_pruner_goat"
 required-features = ["modality_pruned_load"]
 
