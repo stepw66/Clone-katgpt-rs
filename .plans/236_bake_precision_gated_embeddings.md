@@ -1,6 +1,6 @@
 # Plan 236: BAKE Precision-Gated KG Embedding Evolution
 
-**Status:** 🟡 Opt-In (GOAT 10/10, marginal drift)
+**Status:** ✅ Complete (GOAT 10/10, Phase 3 implemented)
 **Date:** 2026-06-09
 **Research:** `.research/209_BAKE_Bayesian_Continual_KG_Embedding.md`
 **Feature Gate:** `bake_precision` (opt-in, GOAT 10/10)
