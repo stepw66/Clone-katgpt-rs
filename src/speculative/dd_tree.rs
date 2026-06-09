@@ -843,6 +843,54 @@ pub fn build_dd_tree_screened_corr(
     std::mem::take(&mut builder.tree)
 }
 
+/// DDTree with flow-score-based per-depth budget allocation (Plan 229 T4).
+///
+/// Uses [`FlowBudgetAllocator`] to distribute `tree_budget` across depths
+/// proportional to per-depth flow scores. High-flow-score branches get more
+/// speculative depth; low-score branches get early termination.
+///
+/// This composes with (not replaces) the existing budget system —
+/// `allocate_budget()` returns per-depth node caps within `tree_budget`.
+///
+/// Requires `nf_flow_budget` feature.
+#[cfg(feature = "nf_flow_budget")]
+pub fn build_dd_tree_screened_flow_budget(
+    marginals: &[&[f32]],
+    config: &crate::types::Config,
+    screener: &dyn ScreeningPruner,
+    chain_seed: bool,
+    allocator: &mut super::nf_flow_budget::FlowBudgetAllocator,
+) -> Vec<TreeNode> {
+    // Compute per-depth entropy as allocation signal.
+    // Low entropy (peaked) → confident → less budget needed.
+    // High entropy (uniform) → uncertain → more budget for exploration.
+    let depth_scores: Vec<f32> = marginals
+        .iter()
+        .map(|dist| {
+            // Shannon entropy: H = -Σ p_i * log(p_i)
+            let mut h = 0.0f32;
+            for &p in dist.iter() {
+                if p > 1e-10 {
+                    h -= p * p.ln();
+                }
+            }
+            h
+        })
+        .collect();
+
+    let depth_budgets = allocator.allocate(&depth_scores, config.tree_budget);
+
+    let mut builder = TreeBuilder::new(config);
+    builder.build_screened_with_depth_budgets(
+        marginals,
+        config,
+        screener,
+        chain_seed,
+        &depth_budgets,
+    );
+    std::mem::take(&mut builder.tree)
+}
+
 /// DDTree with `PrunerSchedule`-aware screening (Plan 171: Thinking Prune).
 ///
 /// Wraps `screener` based on `schedule` and hop context:
@@ -2811,7 +2859,7 @@ impl TreeBuilder {
     /// This is the integration point for `CorrelationBudgetAllocator` — the allocator
     /// produces `depth_budgets` from EMA-tracked agreement rates, and this method
     /// enforces them during tree expansion.
-    #[cfg(feature = "corr_budget")]
+    #[cfg(any(feature = "corr_budget", feature = "nf_flow_budget"))]
     pub fn build_screened_with_depth_budgets(
         &mut self,
         marginals: &[&[f32]],

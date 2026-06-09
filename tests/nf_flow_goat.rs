@@ -520,6 +520,265 @@ fn test_goat_flow_score_entropy_discrimination() {
     );
 }
 
+// ── Test 7: Benchmark — FlowScore Selection vs Max-Prob Selection (Plan 229 T2) ──
+
+/// Compute total log-probability of a candidate trajectory: Σ log P(token_i).
+fn total_log_prob(marginals: &[Vec<f32>], selected: &[usize]) -> f32 {
+    let len = marginals.len().min(selected.len());
+    let mut s = 0.0f32;
+    for i in 0..len {
+        let p = marginals[i].get(selected[i]).copied().unwrap_or(1e-10);
+        s += p.max(1e-10).ln();
+    }
+    s
+}
+
+#[test]
+fn test_bench_flow_score_vs_max_prob_selection() {
+    let vocab = 100;
+    let n_candidates = 20;
+
+    eprintln!("═══ GOAT T2: FlowScore Selection vs Max-Prob Selection ═══");
+    eprintln!(
+        "  Key insight: for fixed marginals, log_det is constant across candidates, \
+         so flow_score ranking = base_logprob ranking."
+    );
+    eprintln!(
+        "  Meaningful comparison requires varying marginals per candidate (different contexts)."
+    );
+
+    // ── Phase 1: Verify agreement on fixed marginals (structural correctness) ──
+    {
+        let positions = 10;
+        let scenarios: Vec<(&str, Vec<Vec<f32>>)> = vec![
+            ("peaked", make_peaked_marginals(positions, vocab)),
+            ("uniform", make_uniform_marginals(positions, vocab)),
+            ("medium", make_medium_marginals(positions, vocab)),
+            ("sin_pattern", make_marginals(positions, vocab)),
+        ];
+
+        eprintln!("\n  Phase 1: Fixed marginals (expect 100% agreement):");
+        let mut agreements = 0;
+        for (name, marginals) in &scenarios {
+            let candidates = random_candidates(n_candidates, positions, vocab);
+
+            let best_flow = select_best(marginals, &candidates);
+
+            let mut best_max_idx = 0usize;
+            let mut best_max_lp = f32::NEG_INFINITY;
+            for (ci, sel) in candidates.iter().enumerate() {
+                let lp = total_log_prob(marginals, sel);
+                if lp > best_max_lp {
+                    best_max_lp = lp;
+                    best_max_idx = ci;
+                }
+            }
+
+            let agree = best_flow == best_max_idx;
+            if agree {
+                agreements += 1;
+            }
+            eprintln!(
+                "    {}: flow=#{} max=#{} agree={}",
+                name, best_flow, best_max_idx, agree
+            );
+        }
+        assert_eq!(
+            agreements,
+            scenarios.len(),
+            "Phase 1: fixed marginals should give 100% agreement (log_det is per-position constant)"
+        );
+    }
+
+    // ── Phase 2: Controlled comparison — log_det flips ranking when base_logprobs are close ──
+    // Construct two candidates with near-identical base_logprob but different entropy profiles.
+    // Flow_score should prefer the candidate with higher log_det (more confident context).
+    {
+        eprintln!("\n  Phase 2: Controlled base_logprob match, different entropy:");
+
+        // Candidate A: peaked marginals, selecting the dominant token (token 0, p=0.99)
+        //   base_logprob = 5 * log(0.99) ≈ -0.0503
+        //   log_det = 5 * log(sigmoid(low_entropy)) ≈ very negative
+        let marginals_a = make_peaked_marginals(5, vocab);
+        let selected_a: Vec<usize> = vec![0, 0, 0, 0, 0]; // always picks the peak
+        let (base_a, det_a) = flow_components(&marginals_a, &selected_a);
+        let flow_a = base_a + det_a;
+        let logprob_a = total_log_prob(&marginals_a, &selected_a);
+
+        // Candidate B: peaked marginals, selecting the dominant token, but with
+        // slightly reduced peak (0.95 instead of 0.99) → higher entropy → higher log_det
+        let mut marginals_b: Vec<Vec<f32>> = Vec::new();
+        for _ in 0..5 {
+            let mut dist = vec![0.01 / (vocab - 1) as f32; vocab];
+            dist[0] = 0.95; // slightly less peaked → more entropy
+            // renormalize
+            let sum: f32 = dist.iter().sum();
+            for p in &mut dist {
+                *p /= sum;
+            }
+            marginals_b.push(dist);
+        }
+        let selected_b: Vec<usize> = vec![0, 0, 0, 0, 0];
+        let (base_b, det_b) = flow_components(&marginals_b, &selected_b);
+        let flow_b = base_b + det_b;
+        let logprob_b = total_log_prob(&marginals_b, &selected_b);
+
+        eprintln!(
+            "    A (p=0.99): base={:.6} det={:.6} flow={:.6} logprob={:.6}",
+            base_a, det_a, flow_a, logprob_a
+        );
+        eprintln!(
+            "    B (p=0.95): base={:.6} det={:.6} flow={:.6} logprob={:.6}",
+            base_b, det_b, flow_b, logprob_b
+        );
+
+        // max-prob prefers A (p=0.99 > p=0.95)
+        let maxprob_prefers_a = logprob_a > logprob_b;
+        assert!(
+            maxprob_prefers_a,
+            "max-prob should prefer p=0.99 over p=0.95"
+        );
+
+        // flow_score may prefer B if log_det improvement outweighs base_logprob loss
+        // log_det for B should be less negative than A (more entropy → sigmoid closer to 1 → log closer to 0)
+        assert!(
+            det_b > det_a,
+            "log_det(B) should be > log_det(A): {} vs {}",
+            det_b,
+            det_a
+        );
+        eprintln!(
+            "    ✓ log_det discriminates: det_B ({:.6}) > det_A ({:.6}), diff={:.6}",
+            det_b,
+            det_a,
+            det_b - det_a
+        );
+
+        // Report which flow_score prefers
+        let flow_prefers = if flow_a > flow_b { 'A' } else { 'B' };
+        let maxprob_prefers = if logprob_a > logprob_b { 'A' } else { 'B' };
+        eprintln!(
+            "    flow_score prefers: {} | max-prob prefers: {}",
+            flow_prefers, maxprob_prefers
+        );
+
+        if flow_prefers != maxprob_prefers {
+            eprintln!(
+                "    ✓ Ranking disagreement: flow_score prefers {}, max-prob prefers {}",
+                flow_prefers, maxprob_prefers
+            );
+        } else {
+            eprintln!(
+                "    Both prefer {} — base_logprob gap ({:.4}) dominates log_det gap ({:.4})",
+                flow_prefers,
+                (base_a - base_b).abs(),
+                (det_b - det_a).abs()
+            );
+        }
+    }
+
+    // ── Phase 3: Forced ranking flip via base_logprob equalization ──
+    // Construct two candidates where base_logprob is EXACTLY equal but entropy differs.
+    // Then flow_score ranking is purely determined by log_det.
+    {
+        eprintln!(
+            "\n  Phase 3: Equal base_logprob, different entropy (log_det determines ranking):"
+        );
+
+        // Candidate X: uniform marginals, selecting any token
+        // All tokens have equal prob → base_logprob = T * log(1/V)
+        // Entropy is maximal → sigmoid(H_max) ≈ 1.0 → log_det ≈ 0
+        let positions = 5;
+        let v = 10; // small vocab for clear signal
+        let marginals_x = make_uniform_marginals(positions, v);
+        let selected_x: Vec<usize> = vec![0, 0, 0, 0, 0];
+        let (base_x, det_x) = flow_components(&marginals_x, &selected_x);
+
+        // Candidate Y: custom marginals with same P(token=0) but different entropy
+        // Set P(token=0) = 1/v (same as uniform) but redistribute remaining mass unevenly
+        let mut marginals_y: Vec<Vec<f32>> = Vec::new();
+        for _ in 0..positions {
+            let mut dist = vec![0.0f32; v];
+            dist[0] = 1.0 / v as f32; // same P(0) as uniform
+            // Redistribute remaining mass: one token gets most, rest get tiny
+            let remaining = 1.0 - 1.0 / v as f32;
+            dist[1] = remaining * 0.99;
+            for j in 2..v {
+                dist[j] = remaining * 0.01 / (v - 2) as f32;
+            }
+            marginals_y.push(dist);
+        }
+        let selected_y: Vec<usize> = vec![0, 0, 0, 0, 0]; // same selection
+        let (base_y, det_y) = flow_components(&marginals_y, &selected_y);
+
+        eprintln!(
+            "    X (uniform): base={:.6} det={:.6} flow={:.6}",
+            base_x,
+            det_x,
+            base_x + det_x
+        );
+        eprintln!(
+            "    Y (custom):  base={:.6} det={:.6} flow={:.6}",
+            base_y,
+            det_y,
+            base_y + det_y
+        );
+
+        // Same P(token=0) → same base_logprob
+        let base_diff = (base_x - base_y).abs();
+        assert!(
+            base_diff < 0.001,
+            "base_logprobs should be equal: X={} vs Y={}",
+            base_x,
+            base_y
+        );
+
+        // Y has lower entropy (mass concentrated on token 1) → lower sigmoid → more negative log_det
+        let entropy_x: f32 = marginals_x[0]
+            .iter()
+            .map(|&p| if p > 1e-10 { -p * p.ln() } else { 0.0 })
+            .sum();
+        let entropy_y: f32 = marginals_y[0]
+            .iter()
+            .map(|&p| if p > 1e-10 { -p * p.ln() } else { 0.0 })
+            .sum();
+        eprintln!(
+            "    entropy_x={:.4} entropy_y={:.4} diff={:.4}",
+            entropy_x,
+            entropy_y,
+            entropy_x - entropy_y
+        );
+
+        // X (uniform) should have higher entropy → higher sigmoid → higher log_det → higher flow_score
+        assert!(
+            det_x > det_y,
+            "log_det(X) should be > log_det(Y): {} vs {}",
+            det_x,
+            det_y
+        );
+        assert!(
+            base_x + det_x > base_y + det_y,
+            "flow_score(X) should be > flow_score(Y) when base_logprobs are equal"
+        );
+
+        eprintln!("    ✓ Flow_score ranking determined by log_det when base_logprobs are equal");
+        eprintln!(
+            "    ✓ Uniform (high entropy) gets flow_score advantage: {:.4}",
+            det_x - det_y
+        );
+    }
+
+    eprintln!(
+        "\n  Summary: within fixed marginals, flow_score ranking = max-prob ranking (Phase 1)."
+    );
+    eprintln!(
+        "  Across contexts, log_det adds discriminative power when base_logprobs are close (Phase 2)."
+    );
+    eprintln!(
+        "  When base_logprobs are equal, flow_score ranking is purely determined by log_det (Phase 3)."
+    );
+}
+
 // TL;DR: Six GOAT benchmarks proving NF FlowScore is production-ready.
 // Overhead <1%, entropy discrimination validated, gate/budget work correctly,
 // numerically stable on extreme inputs. Feature: `nf_flow_score`.

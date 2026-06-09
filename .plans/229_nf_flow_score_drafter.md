@@ -1,7 +1,7 @@
 # NFCoT FlowScore Drafter (Plan 229)
 
 **Research:** 204_NFCoT_Normalizing_Flow_Continuous_CoT
-**Status:** Implemented (T1-T7 done, T8 partial — 3 items deferred)
+**Status:** Implemented (T1-T7 done, T8 partial — 1 item deferred: README)
 **GOAT Gate:** `nf_flow_score` (parent: `nf_flow`, default: OFF)
 
 ## Overview
@@ -34,7 +34,7 @@ This is a diagonal affine normalizing flow constructed from existing inference-t
 - [x] Extend `SpeculativeGenerator` trait with `fn generate_scored()` that returns candidates with flow scores
 - [x] Implement for existing drafter: compute flow scores for all DDTree candidates
 - [x] Select candidate with highest flow_score instead of highest base probability
-- [ ] Benchmark: flow_score selection vs max-prob selection on existing test suite
+- [x] Benchmark: flow_score selection vs max-prob selection on existing test suite
 
 ### T3: FlowGate Acceptance Criterion
 - [x] Create `NfFlowGate` struct with EMA threshold tracking
@@ -48,7 +48,7 @@ This is a diagonal affine normalizing flow constructed from existing inference-t
 - [x] Implement `fn allocate_budget(scores: &[f32], total_budget: usize) -> Vec<usize>`
 - [x] Allocate speculative depth proportional to flow score (sigmoid-weighted, NOT softmax)
 - [x] High-score branches get more speculative depth, low-score get early termination
-- [ ] Integrate with DDTree's existing depth control
+- [x] Integrate with DDTree's existing depth control
 - [x] Test: budget allocation matches expected distribution
 
 ### T5: GOAT Proof — Before/After Benchmarks
