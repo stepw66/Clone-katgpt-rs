@@ -110,6 +110,14 @@ pub use feedback_bandit::{
     FeedbackBandit, FeedbackBanditConfig, RlAlgorithmHint, TrajectorySummary, WeightUpdateRequest,
 };
 
+#[cfg(feature = "posterior_evolution")]
+pub mod posterior;
+
+#[cfg(feature = "posterior_evolution")]
+pub use posterior::{
+    LifecycleAction, PosteriorEvidence, PrecisionPolicy, PrecisionVector, SurpriseComputer,
+};
+
 #[cfg(feature = "g_zero")]
 pub mod g_zero;
 
