@@ -5,7 +5,7 @@
 
 use crate::mux::dd_tree::MuxDdTree;
 #[cfg(not(feature = "comp_width"))]
-use crate::mux::top_k::extract_top_k_peaks;
+use crate::mux::top_k::{MAX_TOP_K, extract_top_k_into};
 
 #[cfg(not(feature = "comp_width"))]
 /// Ratio threshold for deciding peaked vs multi-peak distribution.
@@ -27,7 +27,7 @@ impl MuxBfs {
     ///
     /// With `comp_width` feature: delegates to `MuxDdTree::detect_width`
     /// which uses continuous partner-entropy scaling.
-    /// Without: binary threshold on top-1 dominance ratio.
+    /// Without: binary threshold on top-1 dominance ratio. Zero-alloc.
     pub fn detect_width(&self, logits: &[f32]) -> usize {
         #[cfg(feature = "comp_width")]
         {
@@ -37,7 +37,8 @@ impl MuxBfs {
 
         #[cfg(not(feature = "comp_width"))]
         {
-            let peaks = extract_top_k_peaks(logits, self.k);
+            let mut buf = [0.0f32; MAX_TOP_K];
+            let peaks = extract_top_k_into(logits, self.k, &mut buf);
             if peaks.len() < 2 {
                 return 1;
             }

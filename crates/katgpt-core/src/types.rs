@@ -3673,20 +3673,23 @@ impl TernaryDir {
 
 /// Fixed-size sense module: KG latent octree + ternary direction vectors.
 /// ~232 bytes. BLAKE3 committed.
+///
+/// Field ordering: u64-aligned first, then f32, then u8 tail.
+/// `commitment` must remain LAST for the hash-until-end-of-struct pattern.
 #[derive(Clone, Debug)]
 #[repr(C)]
 pub struct SenseModule {
-    pub kind: SenseKind,
-    pub version: u8,
-    pub octree_depth: u8,
-    pub n_directions: u8,
-    pub _reserved: u8,
     /// Octree occupancy bit-planes (up to depth 3 → 128 nodes in 2×u64).
     pub octree_bits: [u64; 4],
     /// Ternary direction vectors for projection.
     pub directions: [TernaryDir; 8],
     /// Module confidence [0, 1].
     pub confidence: f32,
+    pub kind: SenseKind,
+    pub version: u8,
+    pub octree_depth: u8,
+    pub n_directions: u8,
+    pub _reserved: u8,
     /// BLAKE3 commitment over all preceding fields.
     pub commitment: [u8; 32],
 }
@@ -3763,14 +3766,14 @@ impl SenseModule {
 impl Default for SenseModule {
     fn default() -> Self {
         Self {
+            octree_bits: [0; 4],
+            directions: [TernaryDir::zero(); 8],
+            confidence: 0.0,
             kind: SenseKind::default(),
             version: 1,
             octree_depth: 3,
             n_directions: 0,
             _reserved: 0,
-            octree_bits: [0; 4],
-            directions: [TernaryDir::zero(); 8],
-            confidence: 0.0,
             commitment: [0u8; 32],
         }
     }

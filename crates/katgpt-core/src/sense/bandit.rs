@@ -5,11 +5,11 @@ use crate::types::{SenseKind, SenseModule};
 /// A single sense trial for bandit feedback.
 #[derive(Clone, Debug)]
 pub struct SenseTrial {
-    pub npc_id: u32,
     pub sense_kind: SenseKind,
     pub activation: f32,
-    pub action_taken: u32,
     pub reward: f32,
+    pub npc_id: u32,
+    pub action_taken: u32,
 }
 
 /// Trial log for sense module self-learning.
@@ -23,17 +23,18 @@ impl SenseTrialLog {
         self.trials.push(trial);
     }
 
+    /// Compute average reward for a sense kind — single pass, zero allocation.
     pub fn average_reward(&self, kind: SenseKind) -> f32 {
-        let rewards: Vec<f32> = self
+        let (sum, count) = self
             .trials
             .iter()
             .filter(|t| t.sense_kind == kind)
-            .map(|t| t.reward)
-            .collect();
-        if rewards.is_empty() {
-            return 0.0;
+            .fold((0.0f32, 0usize), |(s, c), t| (s + t.reward, c + 1));
+        if count == 0 {
+            0.0
+        } else {
+            sum / count as f32
         }
-        rewards.iter().sum::<f32>() / rewards.len() as f32
     }
 }
 
@@ -85,5 +86,36 @@ mod tests {
         };
         decay_direction(&mut module, &trial, 0.5);
         assert!(module.confidence < 0.8);
+    }
+
+    #[test]
+    fn test_average_reward_zero_alloc() {
+        let mut log = SenseTrialLog::default();
+        log.record(SenseTrial {
+            npc_id: 1,
+            sense_kind: SenseKind::FighterSense,
+            activation: 0.5,
+            action_taken: 0,
+            reward: 0.8,
+        });
+        log.record(SenseTrial {
+            npc_id: 2,
+            sense_kind: SenseKind::FighterSense,
+            activation: 0.3,
+            action_taken: 1,
+            reward: 0.6,
+        });
+        log.record(SenseTrial {
+            npc_id: 3,
+            sense_kind: SenseKind::SpatialSense,
+            activation: 0.4,
+            action_taken: 0,
+            reward: 0.2,
+        });
+
+        let avg = log.average_reward(SenseKind::FighterSense);
+        assert!((avg - 0.7).abs() < 1e-6);
+        assert!((log.average_reward(SenseKind::SpatialSense) - 0.2).abs() < 1e-6);
+        assert!((log.average_reward(SenseKind::CommonSense)).abs() < 1e-6);
     }
 }

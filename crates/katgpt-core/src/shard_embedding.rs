@@ -80,29 +80,12 @@ impl JlProjectionMatrix {
     /// Project a 64-dim style_weights vector to 8-dim embedding.
     ///
     /// O(STYLE_DIM × EMBED_DIM) = O(512) multiply-adds.
-    /// SIMD-friendly: chunked 8-wide dot products.
+    /// Uses `simd_dot_f32` for SIMD-accelerated dot products when available.
     #[inline]
     pub fn project(&self, style_weights: &[f32; STYLE_DIM]) -> ShardEmbedding {
         let mut result = [0.0f32; EMBED_DIM];
         for i in 0..EMBED_DIM {
-            // Chunked dot product for SIMD auto-vectorization (8-wide)
-            const CHUNK: usize = 8;
-            let mut sum = 0.0f32;
-            let mut j = 0;
-            while j + CHUNK <= STYLE_DIM {
-                let mut chunk_sum = 0.0f32;
-                for c in 0..CHUNK {
-                    chunk_sum += self.rows[i][j + c] * style_weights[j + c];
-                }
-                sum += chunk_sum;
-                j += CHUNK;
-            }
-            // Remainder
-            while j < STYLE_DIM {
-                sum += self.rows[i][j] * style_weights[j];
-                j += 1;
-            }
-            result[i] = sum;
+            result[i] = crate::simd::simd_dot_f32(&self.rows[i], style_weights, STYLE_DIM);
         }
         ShardEmbedding(result)
     }

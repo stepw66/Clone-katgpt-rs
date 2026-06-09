@@ -6,7 +6,7 @@ use crate::sense::brain::NpcBrain;
 pub fn batch_project_all(brains: &[NpcBrain], results: &mut [Vec<f32>]) {
     assert_eq!(brains.len(), results.len());
     for (brain, result) in brains.iter().zip(results.iter_mut()) {
-        *result = brain.project_all();
+        brain.project_all_into(result);
     }
 }
 
@@ -16,9 +16,12 @@ pub fn batch_project_all_par(brains: &[NpcBrain], results: &mut [Vec<f32>]) {
     use rayon::prelude::*;
     assert_eq!(brains.len(), results.len());
     if brains.len() > 64 {
-        brains.par_iter().zip(results.par_iter_mut()).for_each(|(brain, result)| {
-            *result = brain.project_all();
-        });
+        brains
+            .par_iter()
+            .zip(results.par_iter_mut())
+            .for_each(|(brain, result)| {
+                brain.project_all_into(result);
+            });
     } else {
         batch_project_all(brains, results);
     }
@@ -33,11 +36,15 @@ mod tests {
     #[test]
     fn test_batch_matches_individual() {
         let builder = SenseOctreeBuilder::new(3);
-        let module = builder.build(SenseKind::SpatialSense, &[KgEmbedding {
-            entity_hash: 1, relation_hash: 1,
-            embedding: [0.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-            sign: true,
-        }]);
+        let module = builder.build(
+            SenseKind::SpatialSense,
+            &[KgEmbedding {
+                entity_hash: 1,
+                relation_hash: 1,
+                embedding: [0.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                sign: true,
+            }],
+        );
 
         let brains = vec![NpcBrain::compose(vec![module.clone()]); 5];
         let mut results = vec![vec![]; 5];

@@ -3,7 +3,7 @@
 //! A valid superposition exhibits geometric decay among the top-K peaks:
 //! each successive peak must be no larger than `decay_rate` times the previous.
 
-use crate::mux::top_k::extract_top_k_peaks;
+use crate::mux::top_k::{MAX_TOP_K, extract_top_k_into};
 
 /// Minimum ratio between consecutive peaks for geometric decay.
 const DEFAULT_DECAY_RATE: f32 = 0.5;
@@ -28,8 +28,10 @@ impl MuxSpanPruner {
 
     /// Returns `true` if the logit distribution exhibits geometric decay
     /// among its top-K peaks, indicating a valid superposition.
+    /// Zero-alloc: uses stack buffer for top-K extraction.
     pub fn is_valid(&self, logits: &[f32], _depth: usize) -> bool {
-        let peaks = extract_top_k_peaks(logits, self.k);
+        let mut buf = [0.0f32; MAX_TOP_K];
+        let peaks = extract_top_k_into(logits, self.k, &mut buf);
         if peaks.len() < MIN_PEAKS {
             return false;
         }

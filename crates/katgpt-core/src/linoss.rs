@@ -47,6 +47,8 @@ impl LinOSSCell {
     /// One IMEX step (symplectic, energy-preserving when β=0).
     /// y' = y + dt * z   (explicit)
     /// z' = z + dt * (-ω² * y' - β * z + forcing)   (implicit on y')
+    ///
+    /// Allocating version — see `imex_step_inplace` for zero-alloc alternative.
     #[inline]
     pub fn imex_step(&self, state: &LinOSSState, forcing: &[f32], dt: f32) -> LinOSSState {
         let h = self.hidden_dim;
@@ -62,6 +64,32 @@ impl LinOSSCell {
                 state.z[i] + dt * (-self.omega_sq[i] * y_new[i] - self.beta[i] * state.z[i] + f);
         }
         LinOSSState { y: y_new, z: z_new }
+    }
+
+    /// In-place IMEX step — writes y_new and z_new into pre-allocated buffers.
+    /// Returns (y_new, z_new) slices. Zero allocation.
+    #[inline]
+    pub fn imex_step_inplace<'a>(
+        &self,
+        y_in: &[f32],
+        z_in: &[f32],
+        forcing: &[f32],
+        dt: f32,
+        y_out: &'a mut [f32],
+        z_out: &'a mut [f32],
+    ) -> (&'a [f32], &'a [f32]) {
+        let h = self.hidden_dim;
+        debug_assert_eq!(y_in.len(), h);
+        debug_assert_eq!(z_in.len(), h);
+        debug_assert!(y_out.len() >= h);
+        debug_assert!(z_out.len() >= h);
+        debug_assert!(forcing.is_empty() || forcing.len() == h);
+        for i in 0..h {
+            y_out[i] = y_in[i] + dt * z_in[i];
+            let f = if forcing.is_empty() { 0.0 } else { forcing[i] };
+            z_out[i] = z_in[i] + dt * (-self.omega_sq[i] * y_out[i] - self.beta[i] * z_in[i] + f);
+        }
+        (&y_out[..h], &z_out[..h])
     }
 
     /// Parallel scan (Blelloch prefix sum) for training/parallel mode.
@@ -254,19 +282,32 @@ impl VocabFourierBasis {
     }
 
     /// Reconstruct: token ≈ Σ_k coefficient[k] * mode[k]
+    ///
+    /// Allocating version — see `reconstruct_into` for zero-alloc alternative.
     #[inline]
     pub fn reconstruct(&self, coefficients: &[f32]) -> Vec<f32> {
         if self.k == 0 {
             return vec![];
         }
         let mut result = vec![0.0f32; self.vocab_dim];
+        self.reconstruct_into(coefficients, &mut result);
+        result
+    }
+
+    /// Zero-alloc reconstruct into pre-allocated buffer.
+    #[inline]
+    pub fn reconstruct_into(&self, coefficients: &[f32], result: &mut [f32]) {
+        if self.k == 0 {
+            return;
+        }
+        let vd = self.vocab_dim.min(result.len());
+        result[..vd].fill(0.0);
         for (ki, mode) in self.modes.iter().enumerate() {
             let c = coefficients.get(ki).copied().unwrap_or(0.0);
-            for d in 0..self.vocab_dim {
+            for d in 0..vd {
                 result[d] += c * mode[d];
             }
         }
-        result
     }
 
     #[inline]
@@ -317,6 +358,8 @@ impl ModalSpecDrafter {
     }
 
     /// Draft tokens: encode prompt → LinOSS oscillation → Fourier reconstruct → nearest vocab.
+    ///
+    /// Allocating version — see `draft_into` for zero-alloc alternative.
     pub fn draft(&self, prompt_tokens: &[usize], n_draft: usize) -> Vec<usize> {
         if n_draft == 0 || self.embeddings.is_empty() {
             return vec![];
@@ -342,19 +385,79 @@ impl ModalSpecDrafter {
         draft
     }
 
+    /// Zero-alloc draft into pre-allocated output buffer.
+    ///
+    /// Uses double-buffered scratch (y_a/z_a, y_b/z_b) to avoid allocation per timestep.
+    /// Returns the number of drafted tokens written to `out`.
+    pub fn draft_into(&self, prompt_tokens: &[usize], out: &mut [usize]) -> usize {
+        let n_draft = out.len();
+        if n_draft == 0 || self.embeddings.is_empty() {
+            return 0;
+        }
+        let h = self.hidden_dim;
+        let vocab_dim = self.basis.vocab_dim();
+        let k = self.basis.k();
+
+        // Pre-allocate all scratch buffers once
+        let mut y_a = vec![0.0f32; h];
+        let mut z_a = vec![0.0f32; h];
+        let mut y_b = vec![0.0f32; h];
+        let mut z_b = vec![0.0f32; h];
+        let mut forcing = vec![0.0f32; h];
+        let mut coeffs = vec![0.0f32; k];
+        let mut reconstructed = vec![0.0f32; vocab_dim];
+
+        // Prompt encoding
+        for &tok in prompt_tokens {
+            if tok < self.embeddings.len() {
+                self.project_to_hidden_into(&self.embeddings[tok], vocab_dim, &mut forcing);
+                let (y_new, z_new) = self
+                    .cell
+                    .imex_step_inplace(&y_a, &z_a, &forcing, self.dt, &mut y_b, &mut z_b);
+                y_a[..h].copy_from_slice(y_new);
+                z_a[..h].copy_from_slice(z_new);
+            }
+        }
+
+        // Draft loop — zero alloc per iteration
+        forcing.fill(0.0);
+        let mut drafted = 0;
+        for i in 0..n_draft {
+            let (y_new, z_new) = self
+                .cell
+                .imex_step_inplace(&y_a, &z_a, &forcing, self.dt, &mut y_b, &mut z_b);
+            y_a[..h].copy_from_slice(y_new);
+            z_a[..h].copy_from_slice(z_new);
+
+            self.extract_coefficients_into(&y_a, k, &mut coeffs);
+            self.basis.reconstruct_into(&coeffs, &mut reconstructed);
+            out[i] = self.nearest_token(&reconstructed);
+            drafted += 1;
+        }
+        drafted
+    }
+
     #[inline]
     fn project_to_hidden(&self, vec: &[f32], vocab_dim: usize) -> Vec<f32> {
         let h = self.hidden_dim;
         let mut result = vec![0.0f32; h];
+        self.project_to_hidden_into(vec, vocab_dim, &mut result);
+        result
+    }
+
+    #[inline]
+    fn project_to_hidden_into(&self, vec: &[f32], vocab_dim: usize, result: &mut [f32]) {
+        let h = self.hidden_dim;
         let ratio = vocab_dim as f32 / h as f32;
         for i in 0..h {
             let start = ((i as f32 * ratio) as usize).min(vocab_dim);
             let end = (((i + 1) as f32 * ratio) as usize).min(vocab_dim);
             if start < end {
                 result[i] = vec[start..end].iter().sum::<f32>() / (end - start) as f32;
+            } else {
+                result[i] = 0.0;
             }
         }
-        result
     }
 
     /// Extract first k elements of y (position) as modal coefficients.
@@ -364,6 +467,14 @@ impl ModalSpecDrafter {
         let mut coeffs = vec![0.0f32; k];
         coeffs[..n].copy_from_slice(&state.y[..n]);
         coeffs
+    }
+
+    /// Zero-alloc coefficient extraction into pre-allocated buffer.
+    #[inline]
+    fn extract_coefficients_into(&self, y: &[f32], k: usize, coeffs: &mut [f32]) {
+        let n = k.min(y.len()).min(coeffs.len());
+        coeffs[..n].copy_from_slice(&y[..n]);
+        coeffs[n..].fill(0.0);
     }
 
     /// Find nearest token via sigmoid-gated dot-product (NOT softmax).

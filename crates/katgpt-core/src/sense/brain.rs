@@ -38,14 +38,23 @@ impl NpcBrain {
     }
 
     /// Project HLA state onto all loaded modules. GM override wins.
+    /// Allocating version — see `project_all_into` for zero-alloc alternative.
     pub fn project_all(&self) -> Vec<f32> {
-        self.modules
-            .iter()
-            .map(|m| {
-                self.project_kind(m.kind)
-                    .unwrap_or_else(|| m.project(&self.hla_state))
-            })
-            .collect()
+        let mut result = Vec::with_capacity(self.modules.len());
+        self.project_all_into(&mut result);
+        result
+    }
+
+    /// Zero-alloc projection into pre-allocated buffer.
+    /// Clears `result` and fills with projected values for each module.
+    pub fn project_all_into(&self, result: &mut Vec<f32>) {
+        result.clear();
+        for m in &self.modules {
+            let val = self
+                .project_kind(m.kind)
+                .unwrap_or_else(|| m.project(&self.hla_state));
+            result.push(val);
+        }
     }
 
     /// Project a single sense kind, respecting GM override.
@@ -138,6 +147,15 @@ mod tests {
         for r in &results {
             assert!(*r > 0.0 && *r < 1.0);
         }
+    }
+
+    #[test]
+    fn test_project_all_into_matches_allocating() {
+        let brain = NpcBrain::compose(vec![make_fighter_module(), make_spatial_module()]);
+        let expected = brain.project_all();
+        let mut buf = Vec::new();
+        brain.project_all_into(&mut buf);
+        assert_eq!(expected, buf);
     }
 
     #[test]
