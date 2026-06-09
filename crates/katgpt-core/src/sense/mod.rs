@@ -9,6 +9,8 @@ pub mod brain;
 pub mod gm;
 pub mod hotswap;
 pub mod octree;
+#[cfg(feature = "schema_centroid")]
+pub mod schema_centroid;
 pub mod serialize;
 
 pub use bandit::{SenseTrial, SenseTrialLog};
@@ -17,3 +19,7 @@ pub(crate) use gm::dispatch_gm_action;
 pub use gm::{NpcBrainSnapshot, SenseError};
 pub use hotswap::SenseHotSwap;
 pub use octree::{KgEmbedding, SenseOctreeBuilder};
+#[cfg(feature = "schema_centroid")]
+pub use schema_centroid::{
+    CentroidStats, SchemaCentroidCache, compute_centroid, schema_init_entity,
+};

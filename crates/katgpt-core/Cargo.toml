@@ -12,6 +12,7 @@ log = "0.4"
 blake3 = "1"
 serde = { version = "1", features = ["derive"] }
 half = "2"
+papaya = { version = "0.2", optional = true }
 
 [dev-dependencies]
 serde_json = "1"
@@ -63,3 +64,4 @@ substrate_gate = []  # SubstrateGate passthrough — inference-time capability s
 belief_drafter = []  # NextLat Belief-State Speculative Drafter — entropy threshold config (Plan 217)
 sense_composition = ["plasma_path", "domain_latent"]  # KG Latent Octree Sense Composition (Plan 221)
 rat_plus_bridge = []  # RAT+ Recurrence Bridge — modelless dilated inference via GDN2 state (Plan 225)
+schema_centroid = ["dep:papaya"]  # Schema-Centroid Informed KG Embedding Initialization (Plan 237)

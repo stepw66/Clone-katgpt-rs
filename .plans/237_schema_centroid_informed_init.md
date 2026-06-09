@@ -36,15 +36,15 @@ graph TD
 
 ### Phase 1: Core Infrastructure
 
-- [ ] Create `SchemaCentroidCache` struct
+- [x] Create `SchemaCentroidCache` struct
   - `centroids: papaya::HashMap<u64, CentroidStats>` — keyed by class hash (blake3)
   - `CentroidStats { mean: [f32; 8], std_dev: [f32; 8], count: usize }`
-  - `fn compute_from_embeddings(class_hash: u64, embeddings: &[KgEmbedding]) -> CentroidStats`
-  - `fn get(&self, class_hash: u64) -> Option<&CentroidStats>`
+  - `fn compute_and_insert(class_hash: u64, embeddings: &[KgEmbedding]) -> bool`
+  - `fn get(&self, class_hash: u64) -> Option<CentroidStats>`
   - Pre-computed once per KG snapshot update, O(d·|E_c|) per class
-  - File: `crates/katgpt-core/src/sense/schema_centroid.rs` (new file)
+  - File: `crates/katgpt-core/src/sense/schema_centroid.rs` (new file, 457 lines)
 
-- [ ] Implement `schema_init_entity()` function
+- [x] Implement `schema_init_entity()` function
   - Signature: `fn schema_init_entity(classes: &[u64], cache: &SchemaCentroidCache, gamma: f32, rng: &mut Rng) -> [f32; 8]`
   - For each class the entity belongs to, look up centroid + std_dev
   - Average centroids: `μ = (1/|C|) Σ_c (v_c + γ·σ_c ⊙ r_c)`
@@ -52,10 +52,11 @@ graph TD
   - Fallback: if class not in cache, use random init (graceful degradation)
   - File: `crates/katgpt-core/src/sense/schema_centroid.rs`
 
-- [ ] Add feature gate `schema_centroid` to Cargo.toml
-  - Add to `[features]`: `schema_centroid = []`
+- [x] Add feature gate `schema_centroid` to Cargo.toml
+  - `schema_centroid = ["dep:papaya"]` in katgpt-core + `schema_centroid = ["katgpt-core/schema_centroid", "sense_composition"]` in main crate
   - Gate all new code with `#[cfg(feature = "schema_centroid")]`
   - NOT default-on until GOAT passes
+  - 12/12 unit tests pass
 
 ### Phase 2: BAKE Integration (Informed Prior)
 
