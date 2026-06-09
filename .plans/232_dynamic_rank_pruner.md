@@ -26,7 +26,7 @@ GATv2 (ICLR 2022) proves that GAT computes **static attention** — the ranking 
 - [x] T1: `static_ranking_diagnostic()` — ✅ DONE (in `dynamic_rank.rs`, 50+ LOC with Kendall tau)
 - [x] T2: `DynamicRankPruner<P>` wrapper — ✅ DONE (struct with papaya corrections table)
 - [x] T3: `ScreeningPruner` impl — ✅ DONE (zero-overhead passthrough when dynamic)
-- [ ] T4: Integration with `BanditPruner` — add `with_dynamic_rank(self) -> DynamicRankPruner<Self>` builder method. Feature-gated under `dynamic_rank`.
+- [x] T4: Integration with `BanditPruner` — ✅ DONE (`with_dynamic_rank(self, vocab_size)` builder method, feature-gated)
 - [x] T5: GOAT proof test — ✅ DONE (5/5 GOAT proofs pass)
 - [x] T6: Feature gate — ✅ DONE (`dynamic_rank = ["papaya"]` in Cargo.toml)
 - [x] T7: Module glue — ✅ DONE (`#[cfg(feature = "dynamic_rank")] pub mod dynamic_rank;` in mod.rs)
