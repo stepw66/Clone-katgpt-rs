@@ -89,6 +89,46 @@ impl SenseOctreeBuilder {
         }
     }
 
+    /// Build a SenseModule seeded from schema class centroids.
+    ///
+    /// Uses centroid-based embedding initialization (Plan 237) instead of
+    /// raw embeddings. The centroid is quantized to ternary direction vectors.
+    /// Falls back to random directions if no centroid is available.
+    #[cfg(feature = "schema_centroid")]
+    pub fn build_from_centroid(
+        &self,
+        kind: SenseKind,
+        class_hashes: &[u64],
+        cache: &super::schema_centroid::SchemaCentroidCache,
+        rng: &mut fastrand::Rng,
+    ) -> SenseModule {
+        use super::schema_centroid::schema_init_entity;
+
+        let embedding = schema_init_entity(class_hashes, cache, 0.3, rng);
+        let module_confidence = 0.5; // Default for centroid-seeded modules
+
+        let mut module = SenseModule {
+            kind,
+            version: 1,
+            octree_depth: self.max_depth,
+            n_directions: 1,
+            _reserved: 0,
+            octree_bits: [0; 4],
+            directions: [TernaryDir::zero(); 8],
+            confidence: module_confidence,
+            commitment: [0u8; 32],
+        };
+
+        // Use centroid-derived embedding as the primary direction
+        module.directions[0] = Self::embedding_to_ternary(&embedding);
+
+        // Mark occupancy from the centroid embedding
+        self.insert_embedding(&mut module.octree_bits, &embedding, true);
+
+        module.commit();
+        module
+    }
+
     fn embedding_to_ternary(embedding: &[f32; 8]) -> TernaryDir {
         let mut pos_bits = 0u64;
         let mut neg_bits = 0u64;
@@ -143,6 +183,55 @@ mod tests {
             confidence: 1.0,
         };
         let module = builder.build(SenseKind::SpatialSense, &[emb]);
+        assert_eq!(module.n_directions, 1);
+        assert!(module.verify());
+    }
+
+    #[cfg(feature = "schema_centroid")]
+    #[test]
+    fn test_build_from_centroid() {
+        use super::super::schema_centroid::{SchemaCentroidCache, schema_init_entity};
+
+        let cache = SchemaCentroidCache::new();
+        let class_hash = 42u64;
+        let embs: Vec<KgEmbedding> = (0..5)
+            .map(|i| KgEmbedding {
+                entity_hash: i as u64,
+                relation_hash: 0,
+                embedding: [1.0, -0.5, 0.3, 0.0, 0.0, 0.0, 0.0, 0.0],
+                sign: true,
+                confidence: 1.0,
+            })
+            .collect();
+        cache.compute_and_insert(class_hash, &embs);
+
+        let builder = SenseOctreeBuilder::new(3);
+        let mut rng = fastrand::Rng::with_seed(42);
+        let module =
+            builder.build_from_centroid(SenseKind::FighterSense, &[class_hash], &cache, &mut rng);
+
+        assert_eq!(module.n_directions, 1);
+        assert_eq!(module.kind, SenseKind::FighterSense);
+        assert!(module.verify());
+    }
+
+    #[cfg(feature = "schema_centroid")]
+    #[test]
+    fn test_build_from_centroid_fallback() {
+        use super::super::schema_centroid::SchemaCentroidCache;
+
+        let cache = SchemaCentroidCache::new();
+        // No centroids cached → should fall back to random init
+
+        let builder = SenseOctreeBuilder::new(3);
+        let mut rng = fastrand::Rng::with_seed(99);
+        let module = builder.build_from_centroid(
+            SenseKind::SpatialSense,
+            &[404u64], // unknown class
+            &cache,
+            &mut rng,
+        );
+
         assert_eq!(module.n_directions, 1);
         assert!(module.verify());
     }

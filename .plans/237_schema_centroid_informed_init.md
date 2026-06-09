@@ -1,6 +1,6 @@
 # Plan 237: Schema-Centroid Informed KG Embedding Initialization
 
-**Status:** 🟢 GOAT Passed
+**Status:** 🟢 Complete — GOAT 7/7 PASS, promoted to default-ON
 **Date:** 2026-06-09
 **Research:** `.research/210_Schema_Centroid_Informed_Init.md`
 **Feature Gate:** `schema_centroid` (opt-in, GOAT gate before default)

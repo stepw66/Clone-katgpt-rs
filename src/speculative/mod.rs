@@ -456,3 +456,10 @@ pub mod nf_flow_fold;
 
 #[cfg(all(feature = "nf_flow_score", feature = "chain_fold"))]
 pub use nf_flow_fold::{FoldDecision, evaluate_fold, evaluate_fold_batch};
+
+// ── Deep Manifold Part 2 — Plan 231 (Research 205) ──
+#[cfg(feature = "union_bound_confidence")]
+pub mod branch_confidence;
+
+#[cfg(feature = "pathway_tracker")]
+pub mod pathway_tracker;

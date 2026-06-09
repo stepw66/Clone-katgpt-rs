@@ -1007,5 +1007,8 @@ pub mod workflow_lattice;
 #[cfg(feature = "dynamic_rank")]
 pub mod dynamic_rank;
 
+#[cfg(feature = "federation_composer")]
+pub mod federation_composer;
+
 #[cfg(feature = "regime_transition")]
 pub use four_regime_router::{FourRegimeRouter, Heaviness, Regime, RegimeArm, RegimeFeatures};
