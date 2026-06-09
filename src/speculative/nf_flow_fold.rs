@@ -162,8 +162,8 @@ mod tests {
         // Uniform → peaked: compare actual scores
         let uniform_m = uniform_marginals();
         let uniform_s = vec![0, 1, 2];
-        let uniform_score = flow_score(&uniform_m, &uniform_s);
-        let peaked_score = flow_score(&peaked_m, &peaked_s);
+        let _uniform_score = flow_score(&uniform_m, &uniform_s);
+        let _peaked_score = flow_score(&peaked_m, &peaked_s);
         // Both are negative; peaked is less negative (higher) → Accept when original is uniform
         let accept = evaluate_fold(&uniform_m, &uniform_s, &peaked_m, &peaked_s, 0.9);
         match &accept {
