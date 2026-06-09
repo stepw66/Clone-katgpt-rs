@@ -115,8 +115,9 @@ pub mod posterior;
 
 #[cfg(feature = "posterior_evolution")]
 pub use posterior::{
-    LifecycleAction, PosteriorEvidence, PosteriorGuidedPruner, PrecisionPolicy,
-    PrecisionPolicyConfig, PrecisionVector, SurpriseComputer,
+    EvidenceContext, EvidenceOutcome, FailureMode, LifecycleAction, PosteriorEvidence,
+    PosteriorGuidedPruner, PrecisionPolicy, PrecisionPolicyConfig, PrecisionVector,
+    SurpriseComputer,
 };
 
 #[cfg(feature = "g_zero")]

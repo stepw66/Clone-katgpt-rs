@@ -1,6 +1,6 @@
 # Plan 238: Posterior-Guided Pruner Evolution (PGPE)
 
-**Status:** Phase 1-5 Complete, Phase 6 Next
+**Status:** Phase 1-6 Complete, Phase 7 (GOAT Proof) Remaining
 **Research:** R211 (Bayesian-Agent distillation), R209 (BAKE precision), R172/P192 (MUSE lifecycle)
 **Feature Gate:** `posterior_evolution` (opt-in, default OFF until GOAT proven)
 
@@ -57,12 +57,13 @@ Fuse BAKE precision vectors with MUSE skill lifecycle to create posterior-guided
 - [x] Safety guarantee: precision can only INCREASE alpha (max of phase-based and precision-gated), never decrease
 - [x] Unit tests: None returns phase alpha, high precision → ~1.0, low precision → phase alpha, monotone, threshold at 0.5, never decreases phase alpha
 
-### Phase 6: Example / Proof
-- [ ] Create `examples/posterior_evolution_demo.rs` — shows before/after precision evolution over 100 tasks
-- [ ] Demo scenario: 3 pruner arms, known success rates (0.9, 0.5, 0.1), verify posterior converges correctly
-- [ ] Show surprise-triggered PATCH firing on the 0.1 arm
-- [ ] Show precision-gated RETIRE on the 0.1 arm after enough evidence
-- [ ] Show COMPRESS on the 0.9 arm when precision is high
+### Phase 6: Example / Proof ✅ COMPLETE
+- [x] Create `examples/posterior_evolution_demo.rs` — shows before/after precision evolution over 100 tasks
+- [x] Demo scenario: 3 pruner arms, known success rates (0.9, 0.5, 0.1), verify posterior converges correctly
+- [x] Show surprise-triggered PATCH firing on the medium arm
+- [x] Show precision-gated RETIRE on the 0.1 arm after enough evidence
+- [x] Show COMPRESS on the 0.9 arm early on (10 episodes), then PATCH as surprise grows
+- [x] Re-export `EvidenceOutcome`, `EvidenceContext`, `FailureMode` from posterior module for external use
 
 ### Phase 7: GOAT Proof
 - [ ] Benchmark: PosteriorGuidedPruner vs baseline BanditPruner on bomber arena (50+ matches)

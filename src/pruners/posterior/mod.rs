@@ -16,5 +16,5 @@ pub mod wrapper;
 pub use policy::{LifecycleAction, PrecisionPolicy, PrecisionPolicyConfig};
 pub use precision::PrecisionVector;
 pub use surprise::SurpriseComputer;
-pub use types::PosteriorEvidence;
+pub use types::{EvidenceContext, EvidenceOutcome, FailureMode, PosteriorEvidence};
 pub use wrapper::PosteriorGuidedPruner;
