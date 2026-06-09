@@ -544,10 +544,10 @@ Proven features behind feature flags — not in default set:
 | **Percepta** (full) | Transformer-VM with WASM interpreter in weights | Research-grade |
 | **SP-KV** | Self-pruned KV attention with learned utility | Requires joint training |
 | **MaxSim** | Late-interaction scoring, 7.46× SIMD | Amplifies quantization error |
-| **DFlare Fusion** (`dflare_fusion`) | Multi-source marginal blending (Plan 174) | Structural ✅, improvement < GOAT threshold |
-| **DFlare KV Routing** (`dflare_kv_routing`) | Pruner-confidence KV routing (Plan 174) | Structural ✅, improvement < GOAT threshold |
-| **DFlare Progressive Budget** (`dflare_progressive_budget`) | Position-weighted DDTree budget (Plan 174) | Structural ✅, improvement < GOAT threshold |
-| **CaDDTree** (`caddtree_budget`) | Adaptive DDTree budget selection — replaces fixed tree_budget with per-round throughput-optimal budget (CaDDTree + BASTION, Plan 219) | Opt-in, GOAT verified (7/7), in `full` feature set |
+| **DFlare Fusion** (`dflare_fusion`) | Multi-source marginal blending (Plan 174) | 🪦 IMPROVEMENT GOAT FAILED — no measurable acceptance gain |
+| **DFlare KV Routing** (`dflare_kv_routing`) | Pruner-confidence KV routing (Plan 174) | 🪦 IMPROVEMENT GOAT FAILED — no gain over static |
+| **DFlare Progressive Budget** (`dflare_progressive_budget`) | Position-weighted DDTree budget (Plan 174) | 🪦 IMPROVEMENT GOAT FAILED — no gain over uniform |
+| **BAKE Precision** (`bake_precision`) | Per-dimension Bayesian precision tracking for KG embeddings (Plan 236) | GOAT 10/10, drift marginal (4.7%), oscillation at threshold (50%) |
 | **NFCoT FlowScore** (`nf_flow`) | Modelless normalizing flow density scoring for speculative candidates — zero training, O(vocab) per position (Plan 229) | GOAT ⚠️ MARGINAL, all sub-features default OFF |
 
 📖 **Full detail for ALL opt-in features:** [`.docs/21_opt_in_features.md`](.docs/21_opt_in_features.md).
@@ -575,6 +575,9 @@ Default: **Hybrid OCT+PQ** (OCTOPUS triplet encoding + PlanarQuant 2D Givens rot
 | SDAR Arena | **Negative result** | ELO 954 ≈ Rubric 955 — no improvement |
 | RMSD (Plan 125) | **NO GOAT** | 46/46 structural proofs pass but no arena improvement |
 | TurboQuant | **Demoted** | SQ/OCT dominate at all quality metrics |
+| DFlare Fusion (Plan 174) | **IMPROVEMENT GOAT FAILED** | Structural ✅ but no measurable acceptance gain |
+| DFlare KV Routing (Plan 174) | **IMPROVEMENT GOAT FAILED** | No gain over static routing |
+| DFlare Progressive Budget (Plan 174) | **IMPROVEMENT GOAT FAILED** | No gain over uniform budget |
 
 📖 **Full negative result detail + replaced feature audit:** [`.docs/20_negative_results.md`](.docs/20_negative_results.md).
 
