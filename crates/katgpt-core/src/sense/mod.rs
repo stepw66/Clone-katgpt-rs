@@ -14,6 +14,8 @@ pub mod octree;
 pub mod schema_centroid;
 pub mod serialize;
 
+#[cfg(feature = "bake_precision")]
+pub use bake::{BakePrecisionStore, BakeSession, PrecisionEntry};
 pub use bake::{
     DEFAULT_OBS_PRECISION, UNINFORMATIVE_PRECISION, bake_regularize, bake_update, bake_update_mean,
     bake_update_precision, exploration_priority, informed_prior_precision, precision_to_confidence,

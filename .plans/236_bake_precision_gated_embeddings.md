@@ -78,16 +78,19 @@ graph TD
 
 ### Phase 3: Session-Level Evolution
 
-- [ ] Persistent precision storage in BFCF × LFU shard
-  - When embeddings are evicted from LFU cache, store precision alongside
-  - When re-loaded, restore precision vector
-  - File: `src/shard_kv/` (wherever BFCF × LFU sharding lives)
+- [x] Persistent precision storage in BFCF × LFU shard
+  - `BakePrecisionStore` using papaya lock-free HashMap
+  - Key: `u64` entity_hash, Value: `PrecisionEntry { mean, precision }`
+  - Methods: `new`, `get`, `update`, `snapshot_mean`, `remove`, `len`, `is_empty`
+  - All behind `#[cfg(feature = "bake_precision")]`
+  - File: `crates/katgpt-core/src/sense/bake.rs` ✓
 
-- [ ] Session boundary Bayesian update
-  - On session start: load embeddings + precision from persistent cache
-  - On session end: apply Bayesian update with session observations
-  - New entities: uninformative prior `precision = [0.1; 8]`
-  - File: `crates/katgpt-core/src/sense/bake.rs`
+- [x] Session boundary Bayesian update
+  - `BakeSession` with `begin`/`observe`/`end`/`is_active` lifecycle
+  - Batch Bayesian update at session end: accumulates observations, computes mean, applies single update
+  - New entities use uninformative prior `precision = [0.1; 8]`
+  - 7 tests: store insert/get, missing, eviction, monotonic, session lifecycle, new entity, empty noop
+  - File: `crates/katgpt-core/src/sense/bake.rs` ✓
 
 ### Phase 4: GOAT Proof + Benchmarks
 
