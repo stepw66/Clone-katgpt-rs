@@ -155,6 +155,36 @@ impl OutlierGuard {
     pub fn config(&self) -> &OutlierGuardConfig {
         &self.config
     }
+
+    /// Scan all weight matrices in a `TransformerWeights` instance.
+    /// Returns a reference to the finalized report.
+    ///
+    /// This is the primary integration point for model load time.
+    /// Call after `TransformerWeights::new()` or after deserializing weights.
+    pub fn scan_transformer_weights(
+        &mut self,
+        weights: &crate::transformer::TransformerWeights,
+    ) -> &OutlierGuardReport {
+        // Scan embedding table
+        self.scan_layer(&weights.wte, 0, "embedding.wte");
+        self.scan_layer(&weights.wpe, 0, "embedding.wpe");
+        self.scan_layer(&weights.lm_head, 0, "lm_head");
+
+        // Scan per-layer weights
+        for (idx, layer) in weights.layers.iter().enumerate() {
+            self.scan_layer(&layer.attn_wq, idx, &format!("layer{idx}.attn.wq"));
+            self.scan_layer(&layer.attn_wk, idx, &format!("layer{idx}.attn.wk"));
+            self.scan_layer(&layer.attn_wv, idx, &format!("layer{idx}.attn.wv"));
+            self.scan_layer(&layer.attn_wo, idx, &format!("layer{idx}.attn.wo"));
+            self.scan_layer(&layer.mlp_w1, idx, &format!("layer{idx}.mlp.w1"));
+            self.scan_layer(&layer.mlp_w2, idx, &format!("layer{idx}.mlp.w2"));
+            if let Some(ref fused) = layer.attn_qkv_fused {
+                self.scan_layer(fused, idx, &format!("layer{idx}.attn.qkv_fused"));
+            }
+        }
+
+        self.report()
+    }
 }
 
 /// Confidence level from dual-signal outlier detection.
