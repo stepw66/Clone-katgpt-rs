@@ -6,7 +6,7 @@
 //!
 //! Feature gate: `vortex_flow` (Plan 196, Phase 2, default-OFF).
 
-use super::block_topk::{BlockTopKRouter, argtopk, sigmoid};
+use super::block_topk::{BlockTopKRouter, argtopk, argtopk_with_scratch, sigmoid};
 use super::vortex_flow::{RoutingDecision, VortexFlow, VortexScratch};
 
 // ---------------------------------------------------------------------------
@@ -418,15 +418,16 @@ impl VortexFlow for ChannelAwareRouter {
                 let routing_channels = &cache.routing_channels;
                 let routing_dim = cache.routing_dim;
 
-                // Extract routing channels from query
-                let mut routing_query = vec![0.0f32; routing_dim];
+                // Extract routing channels from query into scratch buffer
+                scratch.routing_query_buf.resize(routing_dim, 0.0);
                 for (ri, &ch) in routing_channels.iter().enumerate() {
-                    routing_query[ri] = query[ch];
+                    scratch.routing_query_buf[ri] = query[ch];
                 }
 
                 for (i, score) in scores.iter_mut().enumerate().take(n_blocks) {
                     let routing_key = cache.routing_key(i);
-                    *score = simd_dot_f32(&routing_query, routing_key) * scale;
+                    *score = simd_dot_f32(&scratch.routing_query_buf[..routing_dim], routing_key)
+                        * scale;
                 }
             }
         }
@@ -434,7 +435,7 @@ impl VortexFlow for ChannelAwareRouter {
         // Partial sort to find top-k
         let k = top_k.min(n_blocks);
         scratch.indices.clear();
-        argtopk(scores, k, &mut scratch.indices);
+        argtopk_with_scratch(scores, k, &mut scratch.indices, &mut scratch.argtopk_pairs);
 
         // Build routing decision with sigmoid weights
         let mut decision = RoutingDecision::with_capacity(k);

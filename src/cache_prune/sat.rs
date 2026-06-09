@@ -16,73 +16,123 @@
 ///
 /// Preprocesses an n×n attention matrix in-place in O(n²) time.
 /// After preprocessing, any rectangular region sum is O(1).
-pub struct SummedAreaTable<'a> {
-    // TODO(perf): Switch to a flat `&mut [f32]` layout (row-major) for better
-    // cache locality. The current `&mut [Vec<f32>]` (Vec of Vecs) causes
-    // pointer-chasing on each row access.
-    data: &'a mut [Vec<f32>], // n×n, modified in-place
+///
+/// Supports both flat `&mut [f32]` (row-major) and legacy `&mut [Vec<f32>]` layouts.
+pub enum SummedAreaTable<'a> {
+    /// Flat row-major layout: `[n * n]` — preferred for cache locality.
+    Flat(FlatSat<'a>),
+    /// Legacy Vec-of-Vecs layout — pointer-chasing per row, but backward-compatible.
+    Nested(NestedSat<'a>),
+}
+
+/// Flat SAT over a contiguous `&mut [f32]` buffer (row-major).
+pub struct FlatSat<'a> {
+    data: &'a mut [f32],
+    n: usize,
+}
+
+/// Nested SAT over `&mut [Vec<f32>]` (legacy, backward-compatible).
+pub struct NestedSat<'a> {
+    data: &'a mut [Vec<f32>],
     n: usize,
 }
 
 impl<'a> SummedAreaTable<'a> {
-    /// Build SAT in-place from an n×n attention matrix.
+    /// Build SAT from a flat row-major `&mut [f32]` buffer (preferred).
     ///
-    /// Uses the standard SAT recurrence:
-    /// ```text
-    /// sat[i][j] = attention[i][j] + sat[i-1][j] + sat[i][j-1] - sat[i-1][j-1]
-    /// ```
-    ///
+    /// The buffer must be `n * n` elements. Modifies in-place.
     /// Time: O(n²)
-    pub fn build(attention: &'a mut [Vec<f32>]) -> Self {
-        let n = attention.len();
-        let sat = Self { data: attention, n };
+    pub fn build_flat(data: &'a mut [f32]) -> Self {
+        let n = (data.len() as f64).sqrt() as usize;
+        debug_assert_eq!(n * n, data.len(), "flat buffer must be a perfect square");
 
-        for i in 0..sat.n {
-            for j in 0..sat.n {
-                let val = sat.data[i][j];
-                let up = if i > 0 { sat.data[i - 1][j] } else { 0.0 };
-                let left = if j > 0 { sat.data[i][j - 1] } else { 0.0 };
+        for i in 0..n {
+            for j in 0..n {
+                let val = data[i * n + j];
+                let up = if i > 0 { data[(i - 1) * n + j] } else { 0.0 };
+                let left = if j > 0 { data[i * n + j - 1] } else { 0.0 };
                 let up_left = if i > 0 && j > 0 {
-                    sat.data[i - 1][j - 1]
+                    data[(i - 1) * n + j - 1]
                 } else {
                     0.0
                 };
-                sat.data[i][j] = val + up + left - up_left;
+                data[i * n + j] = val + up + left - up_left;
             }
         }
 
-        sat
+        Self::Flat(FlatSat { data, n })
+    }
+
+    /// Build SAT from nested `&mut [Vec<f32>]` (legacy, backward-compatible).
+    ///
+    /// Uses the standard SAT recurrence.
+    /// Time: O(n²)
+    pub fn build(attention: &'a mut [Vec<f32>]) -> Self {
+        let n = attention.len();
+
+        for i in 0..n {
+            for j in 0..n {
+                let val = attention[i][j];
+                let up = if i > 0 { attention[i - 1][j] } else { 0.0 };
+                let left = if j > 0 { attention[i][j - 1] } else { 0.0 };
+                let up_left = if i > 0 && j > 0 {
+                    attention[i - 1][j - 1]
+                } else {
+                    0.0
+                };
+                attention[i][j] = val + up + left - up_left;
+            }
+        }
+
+        Self::Nested(NestedSat { data: attention, n })
     }
 
     /// Query sum of rectangular region `[x1..=x2] × [y1..=y2]`.
     ///
-    /// Uses inclusion-exclusion:
-    /// ```text
-    /// sum = sat[x2][y2] - sat[x1-1][y2] - sat[x2][y1-1] + sat[x1-1][y1-1]
-    /// ```
-    ///
     /// Time: O(1)
-    ///
-    /// # Panics
-    ///
-    /// Panics if indices are out of bounds or `x1 > x2` or `y1 > y2`.
     #[inline]
     pub fn region_sum(&self, x1: usize, x2: usize, y1: usize, y2: usize) -> f32 {
         assert!(x1 <= x2, "x1 must be <= x2");
         assert!(y1 <= y2, "y1 must be <= y2");
-        assert!(x2 < self.n, "x2 out of bounds");
-        assert!(y2 < self.n, "y2 out of bounds");
 
-        let full = self.data[x2][y2];
-        let top = if x1 > 0 { self.data[x1 - 1][y2] } else { 0.0 };
-        let left = if y1 > 0 { self.data[x2][y1 - 1] } else { 0.0 };
-        let top_left = if x1 > 0 && y1 > 0 {
-            self.data[x1 - 1][y1 - 1]
-        } else {
-            0.0
-        };
-
-        full - top - left + top_left
+        match self {
+            Self::Flat(flat) => {
+                assert!(x2 < flat.n, "x2 out of bounds");
+                assert!(y2 < flat.n, "y2 out of bounds");
+                let n = flat.n;
+                let full = flat.data[x2 * n + y2];
+                let top = if x1 > 0 {
+                    flat.data[(x1 - 1) * n + y2]
+                } else {
+                    0.0
+                };
+                let left = if y1 > 0 {
+                    flat.data[x2 * n + y1 - 1]
+                } else {
+                    0.0
+                };
+                let top_left = if x1 > 0 && y1 > 0 {
+                    flat.data[(x1 - 1) * n + y1 - 1]
+                } else {
+                    0.0
+                };
+                full - top - left + top_left
+            }
+            Self::Nested(nested) => {
+                let n = nested.n;
+                assert!(x2 < n, "x2 out of bounds");
+                assert!(y2 < n, "y2 out of bounds");
+                let full = nested.data[x2][y2];
+                let top = if x1 > 0 { nested.data[x1 - 1][y2] } else { 0.0 };
+                let left = if y1 > 0 { nested.data[x2][y1 - 1] } else { 0.0 };
+                let top_left = if x1 > 0 && y1 > 0 {
+                    nested.data[x1 - 1][y1 - 1]
+                } else {
+                    0.0
+                };
+                full - top - left + top_left
+            }
+        }
     }
 
     /// Sum of attention from positions `l..r` to positions `l..r` (intra-segment).

@@ -16,5 +16,5 @@ pub mod sat;
 pub mod sensitivity;
 
 pub use rolling_hash::{CachedSegment, KvSegmentPool, MatchResult, RollingHash};
-pub use sat::SummedAreaTable;
+pub use sat::{FlatSat, NestedSat, SummedAreaTable};
 pub use sensitivity::{MaskedSegment, OpenDetector, SensitivityDetector, StrictDetector};

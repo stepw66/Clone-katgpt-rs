@@ -141,7 +141,11 @@ pub fn score_blocks_entmax_into(
             .map(|&lw| (lw - mean_lw) / std_lw),
     );
 
-    // Clone probs for the result since we may reuse the scratch buffer
+    // Build result: clone from scratch buffers.
+    // Note: scratch.active_indices and scratch.bias are reused across calls
+    // (sorted, logits, probs are the expensive scratch to preserve).
+    // The active_indices/bias are small (typically ≤ num_chunks), so cloning
+    // them is cheaper than reallocating the sorted/probs buffers.
     let probs = scratch.probs[..n].to_vec();
 
     RoutingResult {

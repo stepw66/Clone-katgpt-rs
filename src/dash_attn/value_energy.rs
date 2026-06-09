@@ -4,7 +4,6 @@
 //! v_energy=0 gates out a block entirely; v_energy>0 passes the centroid dot product.
 //! Feature gate: `vortex_flow` (Plan 196, Phase 1).
 
-use super::block_topk::argtopk;
 use super::vortex_flow::{RoutingDecision, VortexFlow, VortexScratch};
 
 // ---------------------------------------------------------------------------
@@ -117,9 +116,24 @@ impl VortexFlow for ValueEnergyRouter {
                 let mut energy = 0.0f32;
                 for t in 0..block_size {
                     let v_start = t * head_dim;
-                    let norm_sq: f32 = (0..head_dim)
-                        .map(|d| values[v_start + d] * values[v_start + d])
-                        .sum();
+                    // Fused norm computation (chunked for auto-vectorization)
+                    let mut n0 = 0.0f32;
+                    let mut n1 = 0.0f32;
+                    let mut n2 = 0.0f32;
+                    let mut n3 = 0.0f32;
+                    let chunks = head_dim / 4;
+                    for c in 0..chunks {
+                        let base = v_start + c * 4;
+                        n0 += values[base] * values[base];
+                        n1 += values[base + 1] * values[base + 1];
+                        n2 += values[base + 2] * values[base + 2];
+                        n3 += values[base + 3] * values[base + 3];
+                    }
+                    let mut norm_sq = n0 + n1 + n2 + n3;
+                    let rem = head_dim % 4;
+                    for d in (head_dim - rem)..head_dim {
+                        norm_sq += values[v_start + d] * values[v_start + d];
+                    }
                     energy += norm_sq.sqrt();
                 }
                 cache.v_energy[block_idx] = energy / block_size as f32;
@@ -151,16 +165,39 @@ impl VortexFlow for ValueEnergyRouter {
         let scores = &mut scratch.scores[..n_blocks];
 
         // Compute gated scores: dot(centroid, query) * v_energy
+        // Fused loop: accumulate dot product without intermediate Vec
         for (i, score) in scores.iter_mut().enumerate().take(n_blocks) {
             let centroid = cache.centroid(i);
-            let dot: f32 = query.iter().zip(centroid.iter()).map(|(a, b)| a * b).sum();
+            // Fused dot product with chunked accumulation for auto-vectorization
+            let mut dot0 = 0.0f32;
+            let mut dot1 = 0.0f32;
+            let mut dot2 = 0.0f32;
+            let mut dot3 = 0.0f32;
+            let chunks = hd / 4;
+            for c in 0..chunks {
+                let base = c * 4;
+                dot0 += query[base] * centroid[base];
+                dot1 += query[base + 1] * centroid[base + 1];
+                dot2 += query[base + 2] * centroid[base + 2];
+                dot3 += query[base + 3] * centroid[base + 3];
+            }
+            let mut dot = dot0 + dot1 + dot2 + dot3;
+            let rem = hd % 4;
+            for d in (hd - rem)..hd {
+                dot += query[d] * centroid[d];
+            }
             *score = dot * scale * cache.v_energy[i];
         }
 
-        // Partial sort to find top-k
+        // Partial sort to find top-k (reuses scratch buffer)
         let k = top_k.min(n_blocks);
         scratch.indices.clear();
-        argtopk(scores, k, &mut scratch.indices);
+        super::block_topk::argtopk_with_scratch(
+            scores,
+            k,
+            &mut scratch.indices,
+            &mut scratch.argtopk_pairs,
+        );
 
         // Build routing decision with sigmoid weights
         let mut decision = RoutingDecision::with_capacity(k);

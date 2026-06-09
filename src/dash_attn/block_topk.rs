@@ -124,16 +124,33 @@ impl VortexFlow for BlockTopKRouter {
         let scores = &mut scratch.scores[..n_blocks];
 
         // Compute dot(query, centroid[i]) for each block
+        // Chunked accumulation for auto-vectorization
         for (i, score) in scores.iter_mut().enumerate().take(n_blocks) {
             let centroid = cache.centroid(i);
-            let dot: f32 = query.iter().zip(centroid.iter()).map(|(a, b)| a * b).sum();
+            let mut dot0 = 0.0f32;
+            let mut dot1 = 0.0f32;
+            let mut dot2 = 0.0f32;
+            let mut dot3 = 0.0f32;
+            let chunks = hd / 4;
+            for c in 0..chunks {
+                let base = c * 4;
+                dot0 += query[base] * centroid[base];
+                dot1 += query[base + 1] * centroid[base + 1];
+                dot2 += query[base + 2] * centroid[base + 2];
+                dot3 += query[base + 3] * centroid[base + 3];
+            }
+            let mut dot = dot0 + dot1 + dot2 + dot3;
+            let rem = hd % 4;
+            for d in (hd - rem)..hd {
+                dot += query[d] * centroid[d];
+            }
             *score = dot * scale;
         }
 
-        // Partial sort to find top-k
+        // Partial sort to find top-k (reuses scratch buffer)
         let k = top_k.min(n_blocks);
         scratch.indices.clear();
-        argtopk(scores, k, &mut scratch.indices);
+        argtopk_with_scratch(scores, k, &mut scratch.indices, &mut scratch.argtopk_pairs);
 
         // Build routing decision with sigmoid weights
         let mut decision = RoutingDecision::with_capacity(k);
@@ -158,7 +175,19 @@ impl VortexFlow for BlockTopKRouter {
 
 /// Find top-k indices from scores (partial sort, descending).
 /// Uses a simple selection-based approach — O(n*k) which is fine for small k.
+///
+/// Reuses `pairs` scratch buffer across calls to avoid per-call allocation.
 pub fn argtopk(scores: &[f32], k: usize, indices: &mut Vec<usize>) {
+    argtopk_with_scratch(scores, k, indices, &mut Vec::new());
+}
+
+/// Zero-alloc variant of [`argtopk`] — reuses `pairs` scratch buffer.
+pub fn argtopk_with_scratch(
+    scores: &[f32],
+    k: usize,
+    indices: &mut Vec<usize>,
+    pairs: &mut Vec<(usize, f32)>,
+) {
     indices.clear();
     let n = scores.len();
     let k = k.min(n);
@@ -166,12 +195,12 @@ pub fn argtopk(scores: &[f32], k: usize, indices: &mut Vec<usize>) {
         return;
     }
 
-    // Build (index, score) pairs and partial sort
-    let mut pairs: Vec<(usize, f32)> = (0..n).map(|i| (i, scores[i])).collect();
+    // Reuse pairs buffer: clear + fill in-place
+    pairs.clear();
+    pairs.extend((0..n).map(|i| (i, scores[i])));
 
     // Selection sort the top-k (in-place, O(n*k))
     for i in 0..k {
-        // Find max in remaining unsorted portion
         let mut best = i;
         for j in (i + 1)..n {
             if pairs[j].1 > pairs[best].1 {

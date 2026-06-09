@@ -351,6 +351,10 @@ pub struct VortexScratch {
     pub scores: Vec<f32>,
     /// Top-k index buffer.
     pub indices: Vec<usize>,
+    /// Top-k pairs scratch buffer (reused across argtopk calls).
+    pub argtopk_pairs: Vec<(usize, f32)>,
+    /// Routing query buffer for channel-aware routing (reused across calls).
+    pub routing_query_buf: Vec<f32>,
 }
 
 impl VortexScratch {
@@ -359,6 +363,8 @@ impl VortexScratch {
         Self {
             scores: vec![0.0; max_blocks],
             indices: Vec::with_capacity(max_blocks),
+            argtopk_pairs: Vec::with_capacity(max_blocks),
+            routing_query_buf: Vec::new(),
         }
     }
 
@@ -371,6 +377,10 @@ impl VortexScratch {
             // Reserve enough for n total elements
             let additional = n.saturating_sub(self.indices.len());
             self.indices.reserve(additional);
+        }
+        if self.argtopk_pairs.capacity() < n {
+            self.argtopk_pairs
+                .reserve(n.saturating_sub(self.argtopk_pairs.capacity()));
         }
     }
 }
