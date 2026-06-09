@@ -415,6 +415,7 @@ mod tests {
                     promote_count: 1,
                     check_interval: 3, // should_compress checks total_absorbed % check_interval
                     min_benefit_ratio: 0.0,
+                    ..Default::default()
                 },
             );
 
@@ -464,6 +465,7 @@ mod tests {
                     promote_count: 1,
                     check_interval: 1,
                     min_benefit_ratio: 0.6,
+                    ..Default::default()
                 },
             );
 

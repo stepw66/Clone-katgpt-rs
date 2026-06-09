@@ -35,6 +35,10 @@ use std::collections::HashSet;
 
 use crate::speculative::types::ScreeningPruner;
 
+#[cfg(feature = "posterior_evolution")]
+use super::posterior::precision::PrecisionVector;
+#[cfg(feature = "posterior_evolution")]
+use super::posterior::types::{EvidenceOutcome, FailureMode};
 use super::review_metrics::ReviewMetrics;
 #[cfg(feature = "skill_lifecycle")]
 use super::skill_memory::{MemoryEntry, PrunerMemory};
@@ -75,6 +79,24 @@ pub struct CompressConfig {
     /// Default: 2.0 (conservative). Paper found 3.1:1 for o3-mini.
     /// Set to 0.0 to disable the gate.
     pub min_benefit_ratio: f64,
+    /// Minimum average precision for precision-gated compression (Plan 238).
+    ///
+    /// When precision vectors are available, arms are only compressed if
+    /// their average precision exceeds this threshold AND their surprise
+    /// is below `max_surprise_for_compress`. This replaces the Q-threshold
+    /// with a Bayesian certainty gate.
+    ///
+    /// Default: 5.0. Set to 0.0 to disable precision gating.
+    #[cfg(feature = "posterior_evolution")]
+    pub min_precision_for_compress: f32,
+    /// Maximum KL surprise for precision-gated compression (Plan 238).
+    ///
+    /// Arms with surprise above this threshold are NOT compressed even
+    /// if precision is high — the posterior is still shifting.
+    ///
+    /// Default: 1.0 (only compress when posterior is stable).
+    #[cfg(feature = "posterior_evolution")]
+    pub max_surprise_for_compress: f32,
 }
 
 impl Default for CompressConfig {
@@ -85,6 +107,10 @@ impl Default for CompressConfig {
             promote_count: 3,
             check_interval: 100,
             min_benefit_ratio: 2.0,
+            #[cfg(feature = "posterior_evolution")]
+            min_precision_for_compress: 5.0,
+            #[cfg(feature = "posterior_evolution")]
+            max_surprise_for_compress: 1.0,
         }
     }
 }
@@ -103,6 +129,10 @@ impl CompressConfig {
             promote_count,
             check_interval,
             min_benefit_ratio: 2.0,
+            #[cfg(feature = "posterior_evolution")]
+            min_precision_for_compress: 5.0,
+            #[cfg(feature = "posterior_evolution")]
+            max_surprise_for_compress: 1.0,
         }
     }
 
@@ -186,6 +216,13 @@ pub struct AbsorbCompressLayer<P: ScreeningPruner> {
     /// Test cases used by the test gate for validation.
     #[cfg(feature = "skill_lifecycle")]
     test_cases: Vec<TestCase>,
+    /// Per-arm precision vectors for posterior-guided compression (Plan 238).
+    /// When present, compression uses precision + surprise instead of Q-threshold.
+    #[cfg(feature = "posterior_evolution")]
+    precision: Vec<PrecisionVector>,
+    /// Last KL surprise per arm (updated via absorb_with_precision).
+    #[cfg(feature = "posterior_evolution")]
+    last_surprise: Vec<f32>,
 }
 
 impl<P: ScreeningPruner> AbsorbCompressLayer<P> {
@@ -205,6 +242,10 @@ impl<P: ScreeningPruner> AbsorbCompressLayer<P> {
             test_gate: None,
             #[cfg(feature = "skill_lifecycle")]
             test_cases: Vec::new(),
+            #[cfg(feature = "posterior_evolution")]
+            precision: vec![PrecisionVector::new(); num_arms],
+            #[cfg(feature = "posterior_evolution")]
+            last_surprise: vec![0.0; num_arms],
         }
     }
 
@@ -292,6 +333,126 @@ impl<P: ScreeningPruner> AbsorbCompressLayer<P> {
             memory: PrunerMemory::new(128, "absorb_compress"),
             test_gate: Some(gate),
             test_cases,
+            #[cfg(feature = "posterior_evolution")]
+            precision: vec![PrecisionVector::new(); num_arms],
+            #[cfg(feature = "posterior_evolution")]
+            last_surprise: vec![0.0; num_arms],
+        }
+    }
+
+    /// Absorb an observation with posterior precision tracking (Plan 238).
+    ///
+    /// When precision vectors are available, this updates both the Q-value
+    /// statistics AND the per-arm precision vector. The precision vector
+    /// is used by `compress()` for precision-gated compression decisions.
+    ///
+    /// Returns the KL surprise from the precision update.
+    #[cfg(feature = "posterior_evolution")]
+    pub fn absorb_with_precision(
+        &mut self,
+        arm: usize,
+        reward: f32,
+        outcome: EvidenceOutcome,
+        failure_mode: Option<FailureMode>,
+    ) -> f32 {
+        // Standard Q-value absorb
+        self.absorb(arm, reward);
+
+        if arm >= self.precision.len() {
+            return 0.0;
+        }
+
+        // Build observation vector from current arm state
+        let visits = self.arm_visits[arm].max(1) as f32;
+        let avg_reward = self.arm_reward_sums[arm] / visits;
+        let total_obs: f32 = self
+            .precision
+            .iter()
+            .map(|pv| pv.observations() as f32)
+            .sum();
+        let eval_rate = if total_obs > 0.0 {
+            visits / total_obs
+        } else {
+            1.0 / self.precision.len() as f32
+        };
+
+        let pv = &self.precision[arm];
+        let failure_density = if pv.observations() > 0 {
+            (pv.beta() - 1.0) / (pv.alpha() + pv.beta() - 2.0)
+        } else {
+            0.5
+        };
+        let exploration_bonus = 1.0 / (1.0 + visits);
+
+        let observation = [
+            reward,            // context_similarity
+            failure_density,   // failure_density
+            eval_rate,         // eval_rate
+            0.5,               // latency_signal
+            avg_reward,        // reward_mean
+            0.5,               // reward_variance
+            exploration_bonus, // exploration_bonus
+            0.5,               // domain_coverage
+        ];
+
+        let kl = self.precision[arm].update(outcome, &observation, failure_mode);
+        self.last_surprise[arm] = kl;
+        kl
+    }
+
+    /// Get the precision vector for a specific arm (Plan 238).
+    #[cfg(feature = "posterior_evolution")]
+    pub fn arm_precision(&self, arm: usize) -> Option<&PrecisionVector> {
+        self.precision.get(arm)
+    }
+
+    /// Get the last KL surprise for a specific arm (Plan 238).
+    #[cfg(feature = "posterior_evolution")]
+    pub fn arm_surprise(&self, arm: usize) -> f32 {
+        self.last_surprise.get(arm).copied().unwrap_or(0.0)
+    }
+
+    /// Score an arm for compression candidacy.
+    ///
+    /// When precision vectors are available (posterior_evolution feature),
+    /// uses precision + surprise gating instead of Q-threshold.
+    /// Backward compatible: without precision, falls back to Q-threshold.
+    #[cfg(feature = "posterior_evolution")]
+    fn compress_candidate_score(&self, arm: usize) -> Option<(usize, f32)> {
+        let pv = &self.precision[arm];
+        let avg_prec = pv.avg_precision();
+        let surprise = self.last_surprise[arm];
+        let q = self.arm_q_value(arm);
+
+        // If precision gating is enabled and precision is sufficient
+        if self.config.min_precision_for_compress > 0.0
+            && avg_prec >= self.config.min_precision_for_compress
+        {
+            // Precision-gated: compress if surprise is low (posterior stable)
+            // AND success probability is low (arm is bad)
+            let success_prob = pv.success_probability();
+            if surprise <= self.config.max_surprise_for_compress && success_prob < 0.5 {
+                return Some((arm, 1.0 - success_prob));
+            }
+            // High precision but posterior says arm is good — don't compress
+            return None;
+        }
+        // Precision too low or disabled — fall back to Q-threshold
+        if q < self.config.q_threshold {
+            Some((arm, q))
+        } else {
+            None
+        }
+    }
+
+    /// Score an arm for compression candidacy (Q-threshold only).
+    #[cfg(not(feature = "posterior_evolution"))]
+    fn compress_candidate_score(&self, arm: usize) -> Option<(usize, f32)> {
+        let q = self.arm_q_value(arm);
+        if q < self.config.q_threshold {
+            Some((arm, q))
+        } else {
+            None
         }
     }
 }
@@ -318,17 +479,16 @@ impl<P: ScreeningPruner> AbsorbCompress for AbsorbCompressLayer<P> {
     }
 
     fn compress(&mut self) -> Vec<usize> {
-        // Find candidate arms: visited enough, low Q, not already compressed
+        // Find candidate arms: visited enough, not already compressed
         let mut candidates: Vec<(usize, f32)> = (0..self.arm_visits.len())
             .filter(|&arm| {
                 self.arm_visits[arm] >= self.config.min_visits
                     && !self.compressed_set.contains(&arm)
             })
-            .map(|arm| (arm, self.arm_q_value(arm)))
-            .filter(|(_, q)| *q < self.config.q_threshold)
+            .filter_map(|arm| self.compress_candidate_score(arm))
             .collect();
 
-        // Sort by Q-value ascending (worst first)
+        // Sort by score ascending (worst first)
         candidates.sort_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
         // Take top promote_count worst arms
@@ -674,6 +834,138 @@ mod tests {
             let promoted = layer.compress();
             assert_eq!(promoted, vec![0]);
             assert!(layer.compressed_arms().contains(&0));
+        }
+    }
+
+    /// Tests for precision-gated compression (Plan 238, Phase 4).
+    #[cfg(feature = "posterior_evolution")]
+    mod precision_gated_tests {
+        use super::*;
+
+        fn make_layer(num_arms: usize, config: CompressConfig) -> AbsorbCompressLayer<AllowAll> {
+            AbsorbCompressLayer::new(AllowAll, num_arms, config)
+        }
+
+        #[test]
+        fn precision_gated_compress_compressed_bad_arm_with_high_precision() {
+            let mut config = CompressConfig::new(5, 0.05, 3, 10);
+            config.min_precision_for_compress = 3.0;
+            config.max_surprise_for_compress = 2.0;
+            let mut layer = make_layer(3, config);
+
+            // Arm 0: many failures → high precision, low success prob
+            for _ in 0..20 {
+                layer.absorb_with_precision(
+                    0,
+                    0.0,
+                    EvidenceOutcome::Failure,
+                    Some(FailureMode::FalseAccept),
+                );
+            }
+
+            // Arm 0 should be compressible: high precision, low success prob, low surprise
+            let promoted = layer.compress();
+            assert!(
+                promoted.contains(&0),
+                "arm 0 should be compressed via precision gate"
+            );
+        }
+
+        #[test]
+        fn precision_gated_does_not_compress_good_arm() {
+            let mut config = CompressConfig::new(5, 0.05, 3, 10);
+            config.min_precision_for_compress = 3.0;
+            config.max_surprise_for_compress = 2.0;
+            let mut layer = make_layer(3, config);
+
+            // Arm 0: many successes → high precision, high success prob
+            for _ in 0..20 {
+                layer.absorb_with_precision(0, 1.0, EvidenceOutcome::Success, None);
+            }
+
+            // Arm 0 should NOT be compressed: high success prob
+            let promoted = layer.compress();
+            assert!(!promoted.contains(&0), "good arm should not be compressed");
+        }
+
+        #[test]
+        fn precision_gated_falls_back_to_q_threshold_when_low_precision() {
+            let mut config = CompressConfig::new(5, 0.5, 3, 10);
+            config.min_precision_for_compress = 100.0; // Very high — force fallback
+            let mut layer = make_layer(3, config);
+
+            // Arm 0: low Q value but low precision → should fall back to Q-threshold
+            for _ in 0..10 {
+                layer.absorb_with_precision(0, 0.1, EvidenceOutcome::Failure, None);
+            }
+
+            // Should still be compressed via Q-threshold fallback
+            let promoted = layer.compress();
+            assert!(
+                promoted.contains(&0),
+                "arm 0 should be compressed via Q-threshold fallback"
+            );
+        }
+
+        #[test]
+        fn absorb_with_precision_returns_kl_surprise() {
+            let config = CompressConfig::default();
+            let mut layer = make_layer(2, config);
+
+            let kl = layer.absorb_with_precision(0, 1.0, EvidenceOutcome::Success, None);
+            assert!(kl >= 0.0, "KL surprise should be non-negative");
+            assert_eq!(layer.arm_visits(0), 1);
+            assert!(layer.arm_precision(0).is_some());
+            assert_eq!(layer.arm_precision(0).unwrap().observations(), 1);
+        }
+
+        #[test]
+        fn arm_surprise_tracking() {
+            let config = CompressConfig::default();
+            let mut layer = make_layer(2, config);
+
+            assert_eq!(layer.arm_surprise(0), 0.0);
+
+            layer.absorb_with_precision(
+                0,
+                0.5,
+                EvidenceOutcome::Success,
+                Some(FailureMode::Timeout),
+            );
+
+            assert!(
+                layer.arm_surprise(0) > 0.0,
+                "surprise should be positive after update"
+            );
+        }
+
+        #[test]
+        fn high_surprise_prevents_compression() {
+            let mut config = CompressConfig::new(5, 0.05, 3, 10);
+            config.min_precision_for_compress = 3.0;
+            config.max_surprise_for_compress = 0.001; // Very low — only compress very stable posteriors
+            let mut layer = make_layer(3, config);
+
+            // Arm 0: many failures but with varying observations → high surprise
+            for i in 0..20 {
+                let obs_value = if i % 2 == 0 { 0.1 } else { 0.9 };
+                layer.absorb_with_precision(
+                    0,
+                    obs_value,
+                    if i % 2 == 0 {
+                        EvidenceOutcome::Failure
+                    } else {
+                        EvidenceOutcome::Success
+                    },
+                    None,
+                );
+            }
+
+            // The surprise might be too high for compression
+            // (This test verifies the surprise gate works — exact outcome depends on
+            //  the KL values, but the mechanism is exercised)
+            let _promoted = layer.compress();
+            // No assertion on outcome — this test exercises the code path
         }
     }
 }

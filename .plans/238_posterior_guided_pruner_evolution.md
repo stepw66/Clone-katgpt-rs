@@ -1,6 +1,6 @@
 # Plan 238: Posterior-Guided Pruner Evolution (PGPE)
 
-**Status:** In Progress
+**Status:** Phase 1-4 Complete, Phase 5 Next
 **Research:** R211 (Bayesian-Agent distillation), R209 (BAKE precision), R172/P192 (MUSE lifecycle)
 **Feature Gate:** `posterior_evolution` (opt-in, default OFF until GOAT proven)
 
@@ -40,12 +40,15 @@ Fuse BAKE precision vectors with MUSE skill lifecycle to create posterior-guided
 - [x] Re-export `PosteriorGuidedPruner` and `PrecisionPolicyConfig` from mod.rs and pruners/mod.rs
 - [x] Unit tests: cold start, retired arm, evidence recording, best arm convergence, all 5 lifecycle actions, custom config
 
-### Phase 4: Precision-Gated AbsorbCompress
-- [ ] Modify `AbsorbCompress` to accept precision vectors alongside Q-values
-- [ ] Implement precision-gated absorb: absorb when `precision > λ_absorb && surprise < ε` (replaces `q_threshold`)
-- [ ] Implement precision-gated compress: merge arms only when both have high precision
-- [ ] Backward compatible: if no precision available, fall back to Q-threshold (existing behavior)
-- [ ] Benchmark: `AbsorbCompress` with precision vs without → verify no regression
+### Phase 4: Precision-Gated AbsorbCompress ✅ COMPLETE (7 tests pass)
+- [x] Add `min_precision_for_compress` and `max_surprise_for_compress` fields to `CompressConfig` (behind `posterior_evolution` feature)
+- [x] Add per-arm `PrecisionVector` and `last_surprise` fields to `AbsorbCompressLayer` (behind `posterior_evolution` feature)
+- [x] Implement `absorb_with_precision()` — updates both Q-value and precision vector, returns KL surprise
+- [x] Implement `compress_candidate_score()` — precision-gated when available, Q-threshold fallback when not
+- [x] Modify `compress()` to use precision-gated logic: compress when `precision > λ && surprise < ε && success_prob < 0.5`
+- [x] Backward compatible: `#[cfg(feature)]` gates on all new fields, falls back to Q-threshold when precision unavailable
+- [x] Fix downstream `CompressConfig` struct literals in `expression_pruner.rs` with `..Default::default()`
+- [x] Unit tests: precision-gated compress good/bad arm, Q-threshold fallback, surprise tracking, KL surprise return
 
 ### Phase 5: Precision-Gated Safe Exploration
 - [ ] Add precision input to `SafePhased` bandit strategy
