@@ -184,7 +184,7 @@ graph TD
 ### Competition Analysis
 
 - `stiff_anomaly` (Plan 138): **Complementary** — eigenvalue signal, OFF by default
-- `lora_outlier_guard` (Plan 252): **Complementary** — training-time LoRA deltas, different lifecycle
+- `lora_outlier_guard` (Plan 252): **Complementary** — training-time LoRA deltas, different lifecycle. Note: Plan 252's experimental MPNS sub-feature (T5) failed arena GOAT — react weights collapse, no quantization robustness gain. Stays EXPERIMENTAL/OFF.
 - Zero feature conflicts or overlaps
 
 ### Integration Status
