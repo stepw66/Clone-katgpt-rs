@@ -2,7 +2,7 @@
 
 > **Source:** Research 207 — ManifoldE Point-to-Manifold Principle
 > **Date:** 2026-06
-> **Status:** 📋 Plan
+> **Status:** 🔨 Implemented (Phases 1–6)
 > **Feature Gate:** `manifold_pruner` (opt-in, promote to default if GOAT)
 > **Related:** Plan 207 (Lodestar Completion Distance Pruning), Plan 201 (Rosetta Pruner), Plan 232 (DynamicRankPruner)
 
@@ -82,47 +82,47 @@ ManifoldE embeds knowledge graph triples as points near a manifold (sphere/hyper
 
 ### Phase 1: Trait Extensions (Backward Compatible)
 
-- [ ] Add `manifold_score(&self, depth: usize, token_idx: usize, prefix: &[usize]) -> f32` default method to `ConstraintPruner` trait in `crates/katgpt-core/src/traits.rs`. Default: `if self.is_valid(depth, token_idx, prefix) { 1.0 } else { 0.0 }`. Zero cost if not overridden.
-- [ ] Add `constraint_vector(&self, depth: usize, prefix: &[usize]) -> Option<(&[f32], f32)>` optional method to `ConstraintPruner` trait. Returns `(normal_vector, threshold)` for half-space constraint. Default: `None` (fall back to `is_valid()`).
-- [ ] Add `KernelKind` enum: `Linear`, `Gaussian { sigma: f32 }`, `Polynomial { degree: f32, c: f32 }`.
-- [ ] Test: default `manifold_score()` returns 1.0 for valid, 0.0 for invalid tokens (backward compat)
-- [ ] Test: default `constraint_vector()` returns `None` (backward compat)
+- [x] Add `manifold_score(&self, depth: usize, token_idx: usize, prefix: &[usize]) -> f32` default method to `ConstraintPruner` trait in `crates/katgpt-core/src/traits.rs`. Default: `if self.is_valid(depth, token_idx, prefix) { 1.0 } else { 0.0 }`. Zero cost if not overridden.
+- [x] Add `constraint_vector(&self, depth: usize, prefix: &[usize]) -> Option<(&[f32], f32)>` optional method to `ConstraintPruner` trait. Returns `(normal_vector, threshold)` for half-space constraint. Default: `None` (fall back to `is_valid()`).
+- [x] Add `KernelKind` enum: `Linear`, `Gaussian { sigma: f32 }`, `Polynomial { degree: f32, c: f32 }`.
+- [x] Test: default `manifold_score()` returns 1.0 for valid, 0.0 for invalid tokens (backward compat)
+- [x] Test: default `constraint_vector()` returns `None` (backward compat)
 
 ### Phase 2: HyperplanePruner — Geometric Constraint Intersection (P0)
 
-- [ ] Create `src/pruners/hyperplane_pruner.rs` behind `#[cfg(feature = "manifold_pruner")]`
-- [ ] Implement `HyperplanePruner` struct that takes a slice of `&dyn ConstraintPruner` and composes their constraint vectors via half-space intersection
-- [ ] Half-space intersection: for each pruner returning `Some((normal, threshold))`, compute `normal · token_embedding >= threshold`. Valid = intersection of all half-spaces.
-- [ ] For pruners returning `None`, fall back to `is_valid()` boolean check
-- [ ] `manifold_score()` implementation: `product of sigmoid(-distance_to_boundary / temperature)` for each constraint
+- [x] Create `src/pruners/hyperplane_pruner.rs` behind `#[cfg(feature = "manifold_pruner")]`
+- [x] Implement `HyperplanePruner` struct that takes a slice of `&dyn ConstraintPruner` and composes their constraint vectors via half-space intersection
+- [x] Half-space intersection: for each pruner returning `Some((normal, threshold))`, compute `normal · token_embedding >= threshold`. Valid = intersection of all half-spaces.
+- [x] For pruners returning `None`, fall back to `is_valid()` boolean check
+- [x] `manifold_score()` implementation: `product of sigmoid(-distance_to_boundary / temperature)` for each constraint
 - [ ] SIMD batch: `batch_manifold_score()` processes all candidates in one pass
-- [ ] Test: single pruner with constraint vector → HyperplanePruner matches its constraint
-- [ ] Test: two pruners with non-parallel normals → intersection is stricter than either alone
-- [ ] Test: two pruners with parallel normals → intersection = stricter of the two
-- [ ] Test: pruner returning `None` → falls back to boolean AND correctly
+- [x] Test: single pruner with constraint vector → HyperplanePruner matches its constraint
+- [x] Test: two pruners with non-parallel normals → intersection is stricter than either alone
+- [x] Test: two pruners with parallel normals → intersection = stricter of the two
+- [x] Test: pruner returning `None` → falls back to boolean AND correctly
 
 ### Phase 3: ManifoldPruner — Soft Validity Scoring (P1)
 
-- [ ] Create `src/pruners/manifold_pruner.rs` behind `#[cfg(feature = "manifold_pruner")]`
-- [ ] Implement `ManifoldPruner` wrapper that converts any `ConstraintPruner` into a soft scorer via temperature-controlled sigmoid
-- [ ] `manifold_score()` returns `sigmoid(-distance / temperature)` where distance is derived from `is_valid()` boundary proximity
-- [ ] For pruners with `constraint_vector()`: distance = `|normal · token - threshold|`
-- [ ] For pruners without: distance = `0.0` if valid, `∞` if invalid → sigmoid → `{1.0, 0.0}` fallback
+- [x] Create `src/pruners/manifold_pruner.rs` behind `#[cfg(feature = "manifold_pruner")]`
+- [x] Implement `ManifoldPruner` wrapper that converts any `ConstraintPruner` into a soft scorer via temperature-controlled sigmoid
+- [x] `manifold_score()` returns `sigmoid(-distance / temperature)` where distance is derived from `is_valid()` boundary proximity
+- [x] For pruners with `constraint_vector()`: distance = `|normal · token - threshold|`
+- [x] For pruners without: distance = `0.0` if valid, `∞` if invalid → sigmoid → `{1.0, 0.0}` fallback
 - [ ] Wire into DDTree: use `manifold_score` instead of `is_valid` when feature enabled, expand children with score > 0.5
-- [ ] Test: ManifoldPruner with high temperature → nearly uniform scores (permissive)
-- [ ] Test: ManifoldPruner with low temperature → near-binary scores (conservative)
+- [x] Test: ManifoldPruner with high temperature → nearly uniform scores (permissive)
+- [x] Test: ManifoldPruner with low temperature → near-binary scores (conservative)
 - [ ] Test: DDTree expansion with ManifoldPruner captures boundary tokens that binary pruner misses
 
 ### Phase 4: Kernel-Tricked Relevance (P1)
 
-- [ ] Create `src/pruners/kernel_scoring.rs` with kernel scoring functions
-- [ ] `kernel_score(query: &[f32], candidate: &[f32], kind: KernelKind) -> f32`:
+- [x] Create `src/pruners/kernel_scoring.rs` with kernel scoring functions
+- [x] `kernel_score(query: &[f32], candidate: &[f32], kind: KernelKind) -> f32`:
   - Linear: `dot(query, candidate)`
   - Gaussian: `exp(-||q-c||²/σ²)` — SIMD-accelerated (chunked f32, 4 or 8 per iteration)
   - Polynomial: `(dot(q,c) + c)^degree`
-- [ ] Implement `KernelScreeningPruner<P>` that wraps any `ScreeningPruner` and applies kernel transformation
-- [ ] Test: Gaussian kernel returns 1.0 for identical vectors, ~0.0 for distant
-- [ ] Test: Polynomial kernel preserves sign of dot product
+- [x] Implement `KernelScreeningPruner<P>` that wraps any `ScreeningPruner` and applies kernel transformation
+- [x] Test: Gaussian kernel returns 1.0 for identical vectors, ~0.0 for distant
+- [x] Test: Polynomial kernel preserves sign of dot product
 - [ ] Benchmark: `kernel_score` SIMD vs scalar on 256-dim vectors
 
 ### Phase 5: BFCP Region Radius Adaptation (P2)
@@ -137,9 +137,9 @@ ManifoldE embeds knowledge graph triples as points near a manifold (sphere/hyper
 
 ### Phase 6: GOAT Proof + Benchmark
 
-- [ ] Create benchmark: `cargo test --features manifold_pruner --release -- --nocapture`
-- [ ] Benchmark 1: HyperplanePruner vs boolean AND composition — measure valid candidate count and downstream DDTree acceptance rate
-- [ ] Benchmark 2: KernelScreeningPruner (Gaussian) vs linear ScreeningPruner — measure ranking quality (Kendall τ)
+- [x] Create benchmark: `cargo test --features manifold_pruner --release -- --nocapture`
+- [x] Benchmark 1: HyperplanePruner vs boolean AND composition — measure valid candidate count and downstream DDTree acceptance rate
+- [x] Benchmark 2: KernelScreeningPruner (Gaussian) vs linear ScreeningPruner — measure ranking quality (Kendall τ)
 - [ ] Benchmark 3: BFCP region radius adaptation — measure throughput vs fixed threshold
 - [ ] GOAT gate: promote `manifold_pruner` to default if ≥3% improvement in DDTree acceptance rate without throughput regression
 - [ ] If GOAT fails: document negative result, keep as opt-in, demote in README
