@@ -245,14 +245,20 @@ impl GoState {
     /// Does NOT include pass — use [`GoAction::Pass`] separately.
     pub fn legal_moves(&self) -> Vec<(usize, usize)> {
         let mut moves = Vec::new();
+        self.legal_moves_into(&mut moves);
+        moves
+    }
+
+    /// Fill `buf` with legal moves, clearing it first. No intermediate allocation.
+    pub fn legal_moves_into(&self, buf: &mut Vec<(usize, usize)>) {
+        buf.clear();
         for r in 0..self.size {
             for c in 0..self.size {
                 if self.is_legal(r, c) {
-                    moves.push((r, c));
+                    buf.push((r, c));
                 }
             }
         }
-        moves
     }
 
     /// Count legal moves without allocating a vec.
@@ -505,14 +511,29 @@ impl GameState for GoState {
     fn available_actions(&self, _player_id: u8) -> Vec<GoAction> {
         // Go is alternating-turn: only current player (to_play) has legal moves.
         // player_id is ignored — MCTS must call this for the correct turn.
-        let mut actions: Vec<GoAction> = self
-            .legal_moves()
-            .into_iter()
-            .map(|(r, c)| GoAction::Place(r, c))
-            .collect();
+        let mut buf = Vec::new();
+        self.available_actions_into(_player_id, &mut buf);
+        buf
+    }
+
+    fn available_actions_into(&self, _player_id: u8, buf: &mut Vec<GoAction>) {
+        buf.clear();
+        // Reuse a scratch buffer for legal positions, then map to GoAction.
+        // We can't hold both borrows, so iterate manually.
+        for r in 0..self.size {
+            for c in 0..self.size {
+                if self.is_legal(r, c) {
+                    buf.push(GoAction::Place(r, c));
+                }
+            }
+        }
         // Pass is always legal
-        actions.push(GoAction::Pass);
-        actions
+        buf.push(GoAction::Pass);
+    }
+
+    fn action_space_size(&self, _player_id: u8) -> usize {
+        // legal_move_count + 1 for pass
+        self.legal_move_count() + 1
     }
 
     fn advance(&self, action: &GoAction, _player_id: u8) -> Self {
@@ -639,47 +660,58 @@ impl GoHeuristic {
     }
 
     /// Influence: count empty cells whose closest stone is ours.
+    /// Uses multi-source BFS — two O(area) passes instead of O(empty × area).
     fn influence(&self, state: &GoState, color: GoCell) -> f32 {
         let opponent = color.opponent();
+        let area = state.size * state.size;
+
+        // Multi-source BFS from all our stones → distance to nearest friendly for every cell
+        let mut our_dist = vec![usize::MAX; area];
+        let mut queue = std::collections::VecDeque::new();
+        for idx in 0..area {
+            if state.board[idx] == color {
+                our_dist[idx] = 0;
+                queue.push_back(idx);
+            }
+        }
+        while let Some(pos) = queue.pop_front() {
+            let d = our_dist[pos];
+            for &n in state.neighbors(pos) {
+                if our_dist[n] == usize::MAX {
+                    our_dist[n] = d + 1;
+                    queue.push_back(n);
+                }
+            }
+        }
+
+        // Multi-source BFS from all opponent stones (reusing the same queue)
+        let mut opp_dist = vec![usize::MAX; area];
+        debug_assert!(queue.is_empty());
+        for idx in 0..area {
+            if state.board[idx] == opponent {
+                opp_dist[idx] = 0;
+                queue.push_back(idx);
+            }
+        }
+        while let Some(pos) = queue.pop_front() {
+            let d = opp_dist[pos];
+            for &n in state.neighbors(pos) {
+                if opp_dist[n] == usize::MAX {
+                    opp_dist[n] = d + 1;
+                    queue.push_back(n);
+                }
+            }
+        }
+
+        // Count empty cells closer to us than to opponent
         let mut our_influence = 0usize;
         let mut total_empty = 0usize;
-
-        for idx in 0..state.size * state.size {
+        for idx in 0..area {
             if state.board[idx] != GoCell::Empty {
                 continue;
             }
             total_empty += 1;
-
-            // BFS to find closest stone of each color
-            let mut our_dist = usize::MAX;
-            let mut opp_dist = usize::MAX;
-            let mut visited = vec![false; state.size * state.size];
-            let mut queue = std::collections::VecDeque::new();
-            queue.push_back((idx, 0usize));
-            visited[idx] = true;
-
-            while let Some((pos, dist)) = queue.pop_front() {
-                if state.board[pos] == color && dist < our_dist {
-                    our_dist = dist;
-                } else if state.board[pos] == opponent && dist < opp_dist {
-                    opp_dist = dist;
-                }
-                // Early exit if both found at same distance
-                if our_dist <= dist && opp_dist <= dist {
-                    break;
-                }
-                if dist > our_dist.min(opp_dist) {
-                    break;
-                }
-                for &n in state.neighbors(pos) {
-                    if !visited[n] {
-                        visited[n] = true;
-                        queue.push_back((n, dist + 1));
-                    }
-                }
-            }
-
-            if our_dist < opp_dist {
+            if our_dist[idx] < opp_dist[idx] {
                 our_influence += 1;
             }
         }
@@ -687,7 +719,7 @@ impl GoHeuristic {
         if total_empty == 0 {
             return 0.0;
         }
-        (our_influence as f32 / total_empty as f32) * 2.0 - 1.0 // Normalize to [-1, 1]
+        (our_influence as f32 / total_empty as f32) * 2.0 - 1.0
     }
 
     fn opening_phase(&self, state: &GoState) -> OpeningPhase {

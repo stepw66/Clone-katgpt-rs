@@ -478,12 +478,17 @@ impl GameState for BomberState {
     type Action = BomberAction;
 
     fn available_actions(&self, player_id: u8) -> Vec<Self::Action> {
+        let mut buf = Vec::with_capacity(6);
+        self.available_actions_into(player_id, &mut buf);
+        buf
+    }
+
+    fn available_actions_into(&self, player_id: u8, buf: &mut Vec<Self::Action>) {
+        buf.clear();
         let player = &self.players[player_id as usize];
         if !player.alive {
-            return Vec::new();
+            return;
         }
-
-        let mut actions = Vec::with_capacity(6);
 
         // Movement: check walkability (cell type + bomb blocking)
         for &action in &[
@@ -494,20 +499,49 @@ impl GameState for BomberState {
         ] {
             let target = Self::move_target(action, player.pos);
             if self.is_walkable(target.0, target.1) {
-                actions.push(action);
+                buf.push(action);
             }
         }
 
         // Bomb: check capacity and no bomb at current position
         if player.active_bombs < player.max_bombs && !self.bombs.iter().any(|b| b.pos == player.pos)
         {
-            actions.push(BomberAction::Bomb);
+            buf.push(BomberAction::Bomb);
         }
 
         // Wait: always legal when alive
-        actions.push(BomberAction::Wait);
+        buf.push(BomberAction::Wait);
+    }
 
-        actions
+    fn action_space_size(&self, player_id: u8) -> usize {
+        let player = &self.players[player_id as usize];
+        if !player.alive {
+            return 0;
+        }
+
+        // Wait is always legal
+        let mut count = 1;
+
+        // Movement directions
+        for &action in &[
+            BomberAction::Up,
+            BomberAction::Down,
+            BomberAction::Left,
+            BomberAction::Right,
+        ] {
+            let target = Self::move_target(action, player.pos);
+            if self.is_walkable(target.0, target.1) {
+                count += 1;
+            }
+        }
+
+        // Bomb
+        if player.active_bombs < player.max_bombs && !self.bombs.iter().any(|b| b.pos == player.pos)
+        {
+            count += 1;
+        }
+
+        count
     }
 
     fn advance(&self, action: &Self::Action, player_id: u8) -> Self {
