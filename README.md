@@ -478,7 +478,7 @@ Makes modelless HL smarter with Hint-δ intrinsic reward — no external verifie
 δ(q, h, a_hard) = (1/T) Σ [log πG(at | q, h, a<t) − log πG(at | q, a<t)]
 ```
 
-Two phases: **Phase 1** (modelless — δ → AbsorbCompress + BanditPruner, no gradients) → **Phase 2** (model-based — GRPO + DPO in riir-gpu).
+Two phases: **Phase 1** (modelless — δ → AbsorbCompress + BanditPruner, no gradients) → **Phase 2** (model-based — gradient optimization with self-play reward).
 
 📖 **Full detail:** [`.docs/23_hl_arena_detail.md`](.docs/23_hl_arena_detail.md) §11.
 
@@ -821,19 +821,11 @@ GOAT: 6/6 gates passing (G1 constraint accuracy ≥80%, G2 rule reuse ≥30%, G3
 
 KatGPT-RS is the **core inference library** — pure algorithms, zero side effects.
 
-```
-RAG Engine (anyrag) → Training Pipeline (riir-burner) → Service Layer (riir-ai)
-```
-
-| Layer | Repo | What | License |
-|-------|------|------|---------|
-| Engine | katgpt-rs | DDTree, zero-alloc, pruner traits | MIT |
-| Validator | katgpt-rs | SynPruner + PartialParser | MIT |
-| RAG Engine | anyrag | Plugin ingestion, episodic memory, Turso/SQLite | MIT |
-| Training | riir-burner | LoRA fine-tuning (Gemma 4 E4B) | MIT |
-| WASM SDK | riir-ai | Validator trait + export macro | Private |
-| GPU Training | riir-ai | wgpu pipeline (26 WGSL kernels), DPO+GRPO | Private |
-| Router | riir-ai | Keyword + Embedding routing, ExpertRegistry | Private |
+| Layer | What | License |
+|-------|------|--------|
+| Engine | DDTree, zero-alloc, pruner traits, SynPruner + PartialParser | MIT |
+| Inference | Speculative decoding, constraint pruning, adaptive test-time scaling | MIT |
+| Extensions | Domain-specific validation, custom pruners, arena proofs | MIT |
 
 ## 🛠️ Getting Started
 
