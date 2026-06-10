@@ -27,20 +27,26 @@ Legend: ✓ = direct feature, ○ = partial/conceptual alignment, ✗ = not appl
 
 ## Our Work: katgpt-rs Feature Summary
 
-| Feature | Technique | Status |
-|---------|-----------|--------|
-| Speculative Decoding | DDTree + DFlash + Leviathan verification + Tri-Mode self-speculation | ✓ Implemented |
-| KV Optimization | **Hybrid OCT+PQ** (OCT triplet + PQ 2D Givens, best MSE all bits, 64× fewer FMAs, **primary default**, Plan 101), OCTOPUS (legacy, same encoding slower rotation), SpectralQuant (9.1×, 0.9917 cosine, calibrated alternative), SP-KV (3-10×), TurboQuant 3-bit (legacy) | ✓ Implemented |
-| Attention Innovation | **GDN2** (GOAT 14/14, **default-on**, 99.4% AHLA throughput, 87–98% memory savings), forward_hla / forward_ahla (88% memory savings), Percepta 2D Convex Hull, MaxSim, SHINE Alternating2D (90% FLOPs savings) | ✓ Implemented |
-| Noise Scheduling | ELF SDE noise injection (10-22× path diversity, **default**), GRAM validates approach | ✓ Implemented |
-| Distillation/Compression | LoRA adapters, SpectralQuant, BT pairwise ranking (**default**), MeMo reflections, ROPD rubric | ✓ Partial (ASFT/SLIME in riir-gpu, CISPO default GRPO variant) |
-| Test-Time Compute | SimpleTES RPUCG loop (GOAT 8/8, **default**), BanditPruner adaptive arms, GRAM width scaling | ✓ Implemented |
-| Routing/MoE | Raven slot memories, MoE+SD Amdahl cost model, TIES merging (MeMo), Delta Block cross-layer (**default**), SHINE context→LoRA routing | ✓ Implemented |
-| Diffusion/Denoising | dLLM D2F block-parallel denoising, Tri-Mode AR+Diffusion+Self-Speculation (GOAT 4/4) | ✓ Partial (untrained acceptance rate 1.0) |
-| Game/Self-Play | Sudoku, Go, Monopoly, Bomber, Unit Distance lattice constructions | ✓ Implemented |
-| SIMD/Perf | NEON SIMD matmul/HLA kernels, zero-alloc hot paths, Minkowski lattice embedding, LDT α-intersection (**default**), TileRT execution pipeline — contiguous weights + stability metrics + stage-specialized decode (GOAT 12/12, Plan 102) | ✓ Implemented |
+| Feature | GOAT (default-on) | Gain | NO GOAT (opt-in / legacy) |
+|---------|-------------------|------|--------------------------|
+| Speculative Decoding | • DDTree + DFlash<br>• Leviathan verification | Always ≥1 token/step | • Tri-Mode self-speculation (untrained accept rate 1.0) |
+| Phrase Boost | • **PhraseBoost** (Plan 165) | DDTree phrase-level match +SD recall | — |
+| KV Optimization | • **Hybrid OCT+PQ** (Plan 101) | Best MSE all bits, 64× fewer FMAs | • OCTOPUS (legacy)<br>• SpectralQuant (9.1×, 0.9917 cosine)<br>• SP-KV (3-10×)<br>• TurboQuant 3-bit (legacy) |
+| Attention Innovation | • **GDN2** (GOAT 14/14) | 99.4% AHLA throughput, 87-98% memory savings | • HLA / AHLA (88% memory savings)<br>• Percepta 2D Convex Hull<br>• MaxSim<br>• SHINE Alternating2D (90% FLOPs savings) |
+| Noise Scheduling | • ELF SDE noise injection | 10-22× path diversity | • GRAM learned-mean SDE (validates approach) |
+| Distillation / Compression | • BT pairwise ranking<br>• SpectralQuant | +10.6pp over pointwise; 9.1× compression | • LoRA adapters<br>• MeMo reflections<br>• ROPD rubric<br>• ASFT/SLIME (in riir-gpu) |
+| Reflective Distillation | • **GEPA-D Reflective** (Plan 164) | TTC-aware distill loop with self-correction | — |
+| Test-Time Compute | • SimpleTES RPUCG loop (GOAT 8/8)<br>• BanditPruner adaptive arms | RPUCG 42.8% vs greedy 10.6% wins | • GRAM width scaling |
+| Adaptive Compute | • **Hydra Budget** (Plan 166) | Dynamic multi-head compute allocation | — |
+| Budget Adaptation | • **Budget Adaptation** (Plan 167) | Per-prompt adaptive budget scaling | — |
+| Routing / MoE | • Delta Block cross-layer residual routing | Zero throughput overhead (0.97×) | • Raven slot memories<br>• MoE+SD Amdahl cost model<br>• TIES merging (MeMo)<br>• SHINE context→LoRA routing |
+| Diffusion / Denoising | — | — | • dLLM D2F block-parallel denoising<br>• Tri-Mode AR+Diffusion+Self-Speculation (GOAT 4/4, partial) |
+| Dual-Path Consensus | • **FlashAR Consensus** (Plan 167) | AR + diffusion dual-path consensus decode | — |
+| Game / Self-Play | • LEO all-goals Q-framework (Plan 155)<br>• Dual LEO teacher/student (Plan 155) | SUPER GOAT; all-goals Q(s)→R^{G×A} | • Sudoku, Go, Monopoly, Bomber<br>• Unit Distance lattice constructions |
+| SIMD / Perf | • LDT α-intersection<br>• TileRT pipeline (GOAT 13/13, Plan 102)<br>• PlasmaPath bit-plane (GOAT 5/5, Plan 148) | +0.6% overhead → full observability; multiplication-free matvec | • NEON SIMD matmul/HLA kernels<br>• zero-alloc hot paths<br>• Minkowski lattice embedding |
+| ManifoldPruner (Plan 234) | Soft Validity | • ConstraintPruner manifold_score<br>• KernelScreeningPruner | G2 PASS: Gaussian 10/10 recall | • BFCP region radius adaptation (opt-in) |
 
-**Default feature set:** `sparse_mlp`, `domain_latent`, `ppot`, `bandit`, `bt_rank`, `spectral_quant`, `hybrid_oct_pq`, `elf_sde`, `cna_steering`, `deep_manifold`, `federation`, `tes_loop`, `lattice_deduction`, `delta_routing`, `stability_metrics`, `mls_aggregate`, `gdn2_attention`, `dash_attn`, `dreamer`, `lt2_looped`, `dmax_spd`
+**Default feature set:** `sparse_mlp`, `domain_latent`, `ppot`, `bandit`, `bt_rank`, `spectral_quant`, `hybrid_oct_pq`, `elf_sde`, `cna_steering`, `deep_manifold`, `federation`, `tes_loop`, `lattice_deduction`, `delta_routing`, `stability_metrics`, `mls_aggregate`, `gdn2_attention`, `dash_attn`, `dreamer`, `lt2_looped`, `dmax_spd`, `eqr_convergence`, `subterranean`, `sr2am_configurator`, `data_gate`, `plasma_path`, `parallel_probe`, `tf_loop`, `leo_all_goals`, `dual_leo`, `sigmoid_margin`, `moa_inference`, `sleep_consolidation`, `spectral_hierarchy`, `dual_gram_pca`, `roofline_cost`, `gepa_reflective`, `phrase_boost`, `hydra_budget`, `flashar_consensus`, `budget_adaptation`
 
 ---
 
@@ -163,6 +169,28 @@ Legend: ✓ = direct feature, ○ = partial/conceptual alignment, ✗ = not appl
 | 68 | RAEv2 Multi-Layer Representation Autoencoders | ✗ | ✗ | ○ | ✗ | ○ | ✗ | ✗ | ✗ | ✗ | ✗ |
 | 69 | AutoDreamer Offline Memory Consolidation | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ○ | ✗ | ✗ | ✗ |
 
+### Paper 155: LEO All-Goals Trait Framework
+
+| # | Paper / Feature | SD | KV | Attn | Noise | Distill | TTC | Route | Diff | Game | SIMD |
+|---|----------------|----|----|------|-------|---------|-----|-------|------|------|------|
+| 155 | LEO Learn Everything All at Once (Matthews 2026) | ✗ | ✗ | ✗ | ✗ | ✗ | ✓ | ✗ | ✗ | ✓ | ✗ |
+
+**Feature gates:** `leo_all_goals` (LeoHead + AllGoalsUpdate + sigmoid_bounded_q), `dual_leo` (+ DualLeoMixer + AutocurriculumSampler, requires `leo_all_goals`). Both **default-on** — SUPER GOAT, zero perf overhead. Framework only — depends on riir-ai Plan 155 for game-specific implementations.
+
+### Papers 142–144: Diffusion Training, Retrieval Representations, Functional Emotions
+
+| Paper | Title | Feature Match |
+|-------|-------|--------------|
+| R142 | JLT: Clean-Latent Prediction in Latent Diffusion Transformers (Fu et al. 2026) | D2F clean prediction (CE), LT2 layer loop (TF-Loop), EMA alignment |
+| R143 | Latent Terms: Dense Retrievers Contain Extractable BM25-Ready Vocabularies (Clavié et al. 2026) | MaxSim (validates Plan 080 > Latent Terms), ScreeningPruner |
+| R144 | Functional Emotions as Linear Representations (Sofroniew et al. / Anthropic 2026) | Emotion Vector Inference (Plan 162), ReviewMetrics desperation monitor |
+
+**R142 — JLT:** Validates our D2F clean prediction (CE on original tokens is the correct target parameterization; v-prediction is strictly harder per Var(v|z) = Var(x|z)/(1-t)²). Also validates LT2 layer loop — JLT uses identical `loop_indices/loop_count` pattern independently. **Decision: NO NEW PLAN** — existing D2F and LT2 already implement the validated techniques.
+
+**R143 — Latent Terms:** Shows dense retrievers contain BM25-searchable latent vocabularies extractable via SAE. MaxSim (Plan 080) outperforms Latent Terms for multi-vector models (GTE-MC: MaxSim 0.547 vs LT 0.500). No gain for speculative decoding pipeline — SAE→BM25 is document-retrieval-specific. **Decision: NO GAIN** — validates MaxSim choice.
+
+**R144 — Functional Emotions:** 171 emotion concepts with linear representations in Claude Sonnet 4.5 activation space (valence PC1, arousal PC2). Causal steering: desperation +0.1 → 14× reward-hacking increase. `calm` direction is protective (0% blackmail). Operationalized as `EmotionDirections` / `EmotionReading` in Plan 162 for zero-cost decode-time desperation monitoring.
+
 ---
 
 ## Feature Intersection Heatmap (Count per Dimension)
@@ -206,6 +234,7 @@ Papers that intersect with 4 or more feature dimensions:
 | **55** | Nemotron Tri-Mode | SD✓ Attn✓ Diff✓ TTC○ | Dual-stream AR+Diffusion, 2.4-3.3× acceptance vs Eagle3, 76.5% SOL headroom |
 | **60** | MeMo Memory as a Model | KV✓ Distill✓ Route✓ | O(1) retrieval, TIES merging at ρ=0.3, reflection QA pipeline |
 | **62** | SHINE Scalable In-Context Hypernetwork | Attn✓ Distill✓ Route✓ | Context→LoRA single forward pass, alternating 2D attention (90% FLOPs savings), M2P Transformer |
+| **R144** | Functional Emotions as Linear Representations (Sofroniew et al. / Anthropic 2026) | Distill○ TTC○ Route○ | Emotion vector inference (Plan 162), zero-cost desperation monitoring via linear probes in activation space |
 
 ---
 
@@ -291,6 +320,7 @@ Top co-occurring pairs:
 | 60 MeMo | Reflection QA pipeline + TIES merging | `memo_reflections` feature |
 | 061 Delta Routing | Cross-layer residual delta routing | `delta_routing` feature |
 | 62 SHINE | Context→LoRA hypernetwork, alternating 2D attention | `shine_hypernet` / `shine_routing` features |
+| 155 LEO | All-goals Q-value trait framework (SUPER GOAT, **default-on**) | `leo_all_goals` + `dual_leo` features |
 
 ### 2. Strong Conceptual Alignment (Pattern Adopted, Different Mechanism)
 
@@ -352,7 +382,7 @@ Distillation          █████████████░░░░░░�
 Test-Time Compute     █████████████████░░░ 85%  (SimpleTES GOAT 8/8, BanditPruner, GRAM width scaling)
 Routing/MoE           ████████████████░░░░ 80%  (Raven, MoE+SD cost model, TIES merging, Delta Block, SHINE context routing)
 Diffusion/Denoising   ██████████░░░░░░░░░░ 50%  (D2F, Tri-Mode validates, RePlaid schedules experimental)
-Game/Self-Play        ██████████████████░░ 90%  (Sudoku, Go, Monopoly, Bomber, Unit Distance lattice)
+Game/Self-Play        ███████████████████░ 95%  (Sudoku, Go, Monopoly, Bomber, Unit Distance lattice, LEO all-goals Q-framework)
 SIMD/Perf             ████████████████████ 95%  (NEON, zero-alloc, Minkowski lattice embedding)
 ```
 
@@ -360,4 +390,8 @@ SIMD/Perf             ███████████████████�
 
 ## References
 
-All papers are located in `katgpt-rs/.research/` with filenames `{index}_{Title}.md` where index ranges from 00 to 73 (plus 061 for Delta Attention Residuals). See individual research files for full analysis, verdicts, and implementation details. Papers 63–69 added: OCTOPUS (63), LlamaWeb (64), RotorQuant (65), TileRT (66), CODA (67), RAEv2 MLS (68), AutoDreamer (69). Key post-69 papers: 70 (GDN2 recurrent attention), 71 (DashAttention sparse), 72 (DMax SPD), 73 (LT2 looped inference).
+All papers are located in `katgpt-rs/.research/` with filenames `{index}_{Title}.md` where index ranges from 00 to 73 (plus 061 for Delta Attention Residuals). See individual research files for full analysis, verdicts, and implementation details. Papers 63–69 added: OCTOPUS (63), LlamaWeb (64), RotorQuant (65), TileRT (66), CODA (67), RAEv2 MLS (68), AutoDreamer (69). Key post-69 papers: 70 (GDN2 recurrent attention), 71 (DashAttention sparse), 72 (DMax SPD), 73 (LT2 looped inference). Recent additions: Research 110 (PlasmaPath, Plan 148), Research 094 (Parallel-Probe, Plan 133), Research 073 / feature `tf_loop` (Training-Free Loop, Plan 136), Research 118 / Plan 155 (LEO All-Goals Trait Framework — Matthews et al. 2026).
+
+- R142: Fu et al. (2026) — JLT: Clean-Latent Prediction in Latent Diffusion Transformers. arXiv:2605.27102
+- R143: Clavié et al. (2026) — Latent Terms: Dense Retrievers Contain Extractable BM25-Ready Vocabularies. arXiv:2605.29384
+- R144: Sofroniew et al. / Anthropic (2026) — Emotion Concepts and their Function in a Large Language Model (Transformer Circuits Thread)

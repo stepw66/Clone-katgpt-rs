@@ -2,7 +2,7 @@
 
 ## Overview
 
-A headless Bomberman arena using `bevy_ecs` standalone (not the full Bevy engine) for deterministic, tick-based simulation. Four AI players compete at progressively higher HL technology levels, proving that adaptive intelligence outperforms static rules.
+A headless Bomberman arena using `bevy_ecs` standalone (not the full Bevy engine) for deterministic, tick-based simulation. AI players compete across 6 core and 6 research technology levels, proving that adaptive intelligence outperforms static rules.
 
 The arena serves as the integration test bed for the HL thesis: **bandit-driven action selection + deterministic safety validation > pure heuristics or random baselines**.
 
@@ -18,13 +18,17 @@ init_world(seed)
   ├─ GameRng, TickCounter, ScoreBoard   → resources
   └─ Events<GameEvent>                  → event bus
 
+init_world_with_arena(arena)            → alternative: pre-built ArenaGrid (fixed template)
+
 spawn_players(world)
   └─ 4 entities at corner spawns with Player, GridPos, BombCount, BombRange, Speed, Alive
 
 run_tick(world, actions) → bool         // returns false when round ends
-  ├─ tick_bomb_fuses()                  → countdown, collect expired
-  ├─ process_explosions()               → blast propagation (cardinal, wall-blocking)
+  ├─ tick_bomb_fuses()                  → countdown (skips Remote/Landmine), collect expired
+  ├─ detonate_remote_bombs()            → player-triggered Detonate action
+  ├─ process_explosions()               → blast propagation (cardinal, wall-blocking, piercing)
   ├─ apply_movement()                   → move players, wall/bomb collision
+  ├─ trigger_landmines()                → proximity-based landmine detonation (after movement)
   ├─ place_bombs()                      → spawn bomb entities if action=Bomb
   ├─ collect_powerups()                 → walk over revealed power-ups
   └─ cleanup_and_check()                → kill players in blast, check round end
@@ -52,16 +56,27 @@ Standard Bomberman layout generated from seed:
 ## ECS Components & Resources
 
 | Component | Purpose |
-|-----------|---------|
+|-----------|--------|
 | `Player { id }` | Player identity (0–3) |
 | `GridPos { x, y }` | Position on grid |
-| `Bomb`, `BombFuse`, `BombRange` | Bomb entity with countdown and blast radius |
+| `Bomb { bomb_type: BombType }` | Bomb entity with type (Timed, Piercing, Remote, Landmine) |
+| `BombFuse { owner, ticks_remaining }` | Fuse countdown; Remote/Landmine skip fuse tick |
+| `BombRange { cells }` | Blast radius |
 | `BombCount { max, active }` | Per-player bomb limit tracking |
 | `Speed { cells_per_tick }` | Movement speed |
 | `Alive` | Marker component (removed on death) |
 | `DestructibleWall` | Destructible wall entity |
 | `PowerUp { kind }` | Collectible power-up |
 | `Blast` | Visual blast marker (1-tick lifetime) |
+
+**BombType** enum (4 variants):
+
+| Variant | Behavior |
+|---------|----------|
+| `Timed` (default) | Fuse-based, stops at walls |
+| `Piercing` | Blast continues through destructible walls |
+| `Remote` | Detonates on player `Detonate` action, ignores fuse |
+| `Landmine` | Invisible until stepped on, 1-range instant blast |
 
 | Resource | Purpose |
 |----------|---------|
@@ -79,24 +94,24 @@ enum GameEvent {
     BombPlaced { player, pos },
     BombExploded { pos, range },
     PlayerKilled { victim, killer },
-    PowerUpCollected { player, kind },
+    PowerUpCollected { player, kind, pos },
     PowerUpRevealed { pos, kind },
     WallDestroyed { pos },
     RoundEnd { survivors },
 }
 ```
 
-## Player Types (4 HL Tech Levels)
+## Player Types (6 Core + 6 Research Players)
 
 ### P1 🐰 RandomPlayer — Baseline
 
-- **Tech:** None. Random selection from safe moves.
-- **Safety:** Avoids walls and known blast zones. Never places bombs.
+- **Tech:** None. Random selection from all 7 actions with equal probability.
+- **Safety:** Only avoids walking into walls (up to 3 re-rolls, then Wait). No blast zone avoidance.
 - **No learning, no memory, no model.** Pure baseline for comparison.
 
 ### P2 🐱 GreedyPlayer — Heuristic
 
-- **Tech:** Heuristic scoring of all 6 actions.
+- **Tech:** Heuristic scoring of all 7 actions (Up/Down/Left/Right/Bomb/Wait/Detonate).
 - **Selection:** Scores by proximity to power-ups (+3.0 step on, +2.0 toward), wall density (+0.3 per wall in range 3), adjacent wall bonus (+1.0), center bias (+0.2).
 - **Safety:** Penalizes blast zones. 20% ε-greedy safe exploration.
 - **No opponent tracking, no safety validation.**
@@ -155,6 +170,8 @@ type KnownOpponent = (u8, (i32, i32), Option<(i32, i32)>);
 - **ε-greedy:** 10% explore, 90% exploit (safe moves only, filtered by blast zone)
 - **Absorb-Compress:** Every 100 rounds, arms with `visits ≥ 20 && Q < 0.1` get hard-blocked
 - **Reward shaping:** `+1.0 survive, -1.0 die, +0.5 kill, +0.2/powerup`
+- **Shared stats:** `with_shared_stats()` enables multi-agent cooperative learning via `SharedBanditStats` + `SharedTrialLog` (feature: `bandit`)
+- **Freeze/Thaw:** `freeze()` → `BomberFrozenBandit` for disk persistence; `thaw()` restores Q-values/visits/compressed across sessions (Plan 092)
 
 ### P5 🤖 GZeroPlayer — G-Zero Self-Play (Plan 052)
 
@@ -201,6 +218,58 @@ Game theory's Tit-for-Tat applied to bomberman. 2-state FSM with wall-aware prov
 - **Feature gate:** `--features g_zero` (same as GZero).
 - **Mixed tournament result:** 58.4% survival, 3.1 avg score, 0.32 kills/rnd (highest kills, 2nd best score).
 
+### P7 🏷️ RubricPlayer — ROPD Rubric-Vector Bomber
+
+Rubric-pattern bandit player using multi-criteria rubric vectors instead of scalar rewards.
+
+- **Tech:** GZero base + `RubricBanditPruner` + `RubricGatedAbsorbCompress`.
+- **Bandit:** Multi-criteria rubric vectors (survival, kills, powerups, aggression) with reference gap scoring.
+- **Absorb:** Rubric-gated compression promotes arms when weighted rubric score approaches reference.
+- **Feature gate:** `--features ropd_rubric`.
+
+### P8 📊 SdarPlayer — SDAR Sigmoid-Gated Bomber
+
+SDAR (Sigmoid-gated Delta-Aware Reward) bandit player with smooth gating.
+
+- **Tech:** GZero base + `SdarBanditPruner` + `SdarGatedAbsorbCompress`.
+- **Bandit:** Sigmoid-gated δ-reward filtering — smoothly transitions between exploring and exploiting based on delta magnitude.
+- **Absorb:** SDAR-gated compression with smooth promotion threshold.
+- **Feature gate:** `--features sdar_gate`.
+
+### P9 🎛️ Sr2amPlayer — SR²AM Configurator Bomber
+
+SR²AM configurator-driven player with FeedbackBandit for planning decisions.
+
+- **Tech:** GZero base + `DeltaBanditPruner` + `DeltaGatedAbsorbCompress` + planning + FeedbackBandit.
+- **Planning:** Decides between plan_new, plan_extend, plan_skip per tick with FeedbackBandit.
+- **Freeze/Thaw:** Full `freeze()` → `BomberFrozenBandit` / `thaw()` cycle for cross-session persistence.
+- **Feature gate:** `--features sr2am_configurator`.
+
+### P10 🧪 VpdPlayer — VPD-EM Distillation Bomber
+
+Variational Posterior Distillation player using EM-cycle bandit updates.
+
+- **Tech:** GZero base + `SdarGatedAbsorbCompress` + `VpdEmCycle`.
+- **Bandit:** E-step/M-step cycle — periodic E-step reclusters templates, M-step updates per-template rewards from outcome EM.
+- **Configurable:** `VpdConfig` for E-step frequency and reward shaping.
+- **Feature gate:** `--features vpd_em_distill`.
+
+### P11 📐 RmsdPlayer — RMSD Relevance Distillation Bomber (❌ NO GOAT)
+
+RMSD (Root Mean Square Deviation) filtering player that concentrates updates on most informative actions. **Negative arena result** — no improvement over SDAR in tournament play. Kept for infrastructure reuse.
+
+- **Tech:** GZero base + `SdarBanditPruner` + `SdarGatedAbsorbCompress` + RMSD delta filtering.
+- **Bandit:** SDAR sigmoid-gated with RMSD-based delta concentration — filters high-variance updates for faster convergence.
+- **Feature gate:** `--features rmsd_distill`.
+
+### NN Players (in `players.rs`)
+
+Three additional players for neural network-based action selection:
+
+- **LoraPlayer** — LoRA adapter on top of heuristic base, applies trained LoRA weights to action scoring.
+- **LoraWasmPlayer** — LoRA + WASM batch validation, combines learned weights with WASM pruner.
+- **NNPlayer** — Pure WASM-based neural network player, delegates all scoring to WASM module.
+
 ## Shared AI Functions (`players.rs`)
 
 These utility functions are used by multiple player types:
@@ -218,23 +287,43 @@ These utility functions are used by multiple player types:
 ## Key Files
 
 | File | Lines | Purpose |
-|------|-------|---------|
-| `src/pruners/bomber/mod.rs` | 310 | Module index: enums, components, resources, events, constants |
-| `src/pruners/bomber/arena.rs` | 195 | Procedural 13×13 grid generation with `ArenaGrid::generate(seed)` |
-| `src/pruners/bomber/replay.rs` | 290 | `ReplaySample`, `ReplayWriter`, board/bomb/powerup serialization (Plan 039) |
-| `src/pruners/bomber/systems.rs` | 559 | World-based ECS systems: `init_world`, `spawn_players`, `run_tick` |
-| `src/pruners/bomber/players.rs` | 1447 | `BomberPlayer` trait + 7 implementations (Random, Greedy, Validator, HL, LoraPlayer, LoraWasmPlayer, NNPlayer) + shared AI functions |
-| `src/pruners/bomber/g_zero_player.rs` | 775 | `GZeroPlayer` — G-Zero self-play with template hints + Hint-δ (Plan 052) |
-| `src/pruners/bomber/tft_player.rs` | 640 | `TftPlayer` — game theory Tit-for-Tat bomber (Issue 056) |
-| `src/pruners/bomber/wasm_pruner.rs` | — | `BomberWasmPruner` — WASM-based batch validation with `BatchResult` (Plan 034) |
-| `src/pruners/bomber/wasm_state.rs` | — | `serialize_game_state`, `ZeroCopyStateBuffer` — efficient ECS→WASM state transfer |
-| `src/pruners/bomber/replay_backward.rs` | — | `BackwardSample`, `ReplayBackwardWalker` — GFlowNet-inspired backward policy extraction |
+|------|-------|--------|
+| `src/pruners/bomber/mod.rs` | 498 | Module index: enums, components, resources, events, constants, `BombType`, `BomberFrozenBandit` |
+| `src/pruners/bomber/arena.rs` | 457 | Procedural 13×13 grid generation with `ArenaGrid::generate(seed)`, fixed templates |
+| `src/pruners/bomber/systems.rs` | 1389 | World-based ECS systems: `init_world`, `spawn_players`, `run_tick` (with remote/landmine/piercing) |
+| `src/pruners/bomber/players.rs` | 2388 | `BomberPlayer` trait + 7 implementations (Random, Greedy, Validator, HL, LoraPlayer, LoraWasmPlayer, NNPlayer) + shared AI functions |
+| `src/pruners/bomber/arena_runner.rs` | 482 | `BomberArenaConfig`, `BomberRoundResult`, `run_bomber_game`, `run_bomber_matchup` |
+| `src/pruners/bomber/replay.rs` | 598 | `ReplaySample`, `ReplayWriter`, board/bomb/powerup serialization (Plan 039) |
+| `src/pruners/bomber/replay_backward.rs` | 386 | `BackwardSample`, `ReplayBackwardWalker` — GFlowNet-inspired backward policy extraction |
+| `src/pruners/bomber/g_zero_player.rs` | 826 | `GZeroPlayer` — G-Zero self-play with template hints + Hint-δ (Plan 052) |
+| `src/pruners/bomber/tft_player.rs` | 657 | `TftPlayer` — game theory Tit-for-Tat bomber (Issue 056) |
+| `src/pruners/bomber/rubric_player.rs` | 824 | `RubricPlayer` — ROPD rubric-pattern bomber (feature: `ropd_rubric`) |
+| `src/pruners/bomber/sdar_player.rs` | 788 | `SdarPlayer` — SDAR-gated bomber (feature: `sdar_gate`) |
+| `src/pruners/bomber/sr2am_player.rs` | 1014 | `Sr2amPlayer` — SR2AM configurator bomber (feature: `sr2am_configurator`) |
+| `src/pruners/bomber/vpd_player.rs` | 872 | `VpdPlayer` — VPD-EM distillation bomber (feature: `vpd_em_distill`) |
+| `src/pruners/bomber/rmsd_player.rs` | 811 | `RmsdPlayer` — RMSD relevance distillation bomber (feature: `rmsd_distill`) |
+| `src/pruners/bomber/validator_agent.rs` | 1144 | `AgentLoop`, `ValidatorCandidate`, `RulePlayer` — auto-eval validator search (feature: `bomber-agent`) |
+| `src/pruners/bomber/event_log_player.rs` | 320 | `BomberEventLog`, `BomberForkDiff` — event-log-backed replay player (feature: `event_log`) |
+| `src/pruners/bomber/wasm_pruner.rs` | 950 | `BomberWasmPruner` — WASM-based batch validation with `BatchResult` (feature: `bomber-wasm`) |
+| `src/pruners/bomber/wasm_state.rs` | 697 | `serialize_into_buffer`, `ZeroCopyStateBuffer` — efficient ECS→WASM state transfer (feature: `bomber-wasm`) |
 | `src/pruners/g_zero/bomber_templates.rs` | — | `BomberTemplate` + `BomberTemplateProposer` — 8 strategy archetypes |
-| `examples/bomber_01_arena.rs` | 350 | Headless 100-round tournament runner + `--replay-dir` dump |
-| `examples/bomber_02_tui.rs` | 509 | Animated ratatui TUI replay with emoji rendering |
-| `examples/bomber_03_hl_proof.rs` | 580 | 1000-round HL proof with golden traces + `--replay-dir` filtered dump |
-| `examples/bomber_04_replay_gen.rs` | 309 | Dedicated replay generator for training data (Plan 039) |
-| `tests/bench_bomber_arena.rs` | ~100 | 4 benchmark tests |
+| `examples/bomber_01_arena.rs` | 443 | Headless 100-round tournament runner + `--replay-dir` dump |
+| `examples/bomber_02_tui.rs` | 576 | Animated ratatui TUI replay with emoji rendering |
+| `examples/bomber_03_hl_proof.rs` | 632 | 1000-round HL proof with golden traces + `--replay-dir` filtered dump |
+| `examples/bomber_04_nn.rs` | 430 | NN player (LoRA/WASM) tournament runner |
+| `examples/bomber_05_replay_gen.rs` | 357 | Dedicated replay generator for training data (Plan 039) |
+| `examples/bomber_06_replay_gen_v2.rs` | 499 | V2 replay generator with backward walker |
+| `examples/bomber_07_bomb_types.rs` | 197 | Bomb types showcase (Piercing, Remote, Landmine) |
+| `examples/bomber_08_agent_loop.rs` | 83 | Agent loop runner (feature: `bomber-agent`) |
+| `examples/bomber_09_rubric_tournament.rs` | 353 | Rubric player tournament |
+| `examples/bomber_10_sdar_tournament.rs` | 370 | SDAR player tournament |
+| `examples/bomber_11_bt_rank_tournament.rs` | 11 | Bradley-Terry ranking tournament |
+| `examples/bomber_12_self_play_freeze.rs` | 475 | Self-play with freeze/thaw cycle |
+| `examples/bomber_13_reflection_qa.rs` | 76 | Memo reflection QA runner |
+| `examples/bomber_14_sr2am_tournament.rs` | 373 | SR2AM player tournament |
+| `examples/bomber_15_vpd_tournament.rs` | 389 | VPD player tournament |
+| `examples/bomber_16_rmsd_tournament.rs` | 394 | RMSD player tournament |
+| `tests/bench_bomber_arena.rs` | 744 | Benchmark tests |
 
 ## Results
 
@@ -348,7 +437,7 @@ The arena can dump tick-level training data as JSONL for downstream LoRA trainin
 ### Data Flow
 
 ```text
-bomber_04_replay_gen (1000 rounds)
+bomber_05_replay_gen (1000 rounds)
   │  At each tick, for P3/P4 alive players:
   │    serialize(board_state, action_taken, player_type)
   │
@@ -390,7 +479,7 @@ Each line is one `(board_state, action, quality)` sample:
 | `player_id` | `u8` | Player index (0-3) |
 | `bombs` | `Vec<[u8; 4]>` | Active bombs: (x, y, blast_range, fuse_ticks) |
 | `powerups` | `Vec<[u8; 2]>` | Active powerup positions: (x, y) |
-| `action` | `u8` | 0=Up, 1=Down, 2=Left, 3=Right, 4=Bomb, 5=Wait |
+| `action` | `u8` | 0=Up, 1=Down, 2=Left, 3=Right, 4=Bomb, 5=Wait, 6=Detonate |
 | `quality` | `f32` | 0.0 (death) → 0.5 (survived) → 1.0 (winner) + bonuses |
 | `player_type` | `String` | "Random", "Greedy", "Validator", "HL" |
 
@@ -405,9 +494,10 @@ Each line is one `(board_state, action, quality)` sample:
 ### Key Files
 
 | File | Purpose |
-|------|---------|
+|------|--------|
 | `src/pruners/bomber/replay.rs` | `ReplaySample`, `ReplayWriter`, board/bomb/powerup serialization |
-| `examples/bomber_04_replay_gen.rs` | Dedicated replay generator (1000 rounds, filtered P3/P4) |
+| `examples/bomber_05_replay_gen.rs` | Dedicated replay generator (1000 rounds, filtered P3/P4) |
+| `examples/bomber_06_replay_gen_v2.rs` | V2 replay generator with backward walker |
 | `examples/bomber_01_arena.rs` | `--replay-dir` flag for optional replay dump |
 | `examples/bomber_03_hl_proof.rs` | `--replay-dir` flag with P3/P4 quality filtering |
 
@@ -415,10 +505,13 @@ Each line is one `(board_state, action, quality)` sample:
 
 ```bash
 # Generate replay data (1000 rounds, filtered P3/P4 winning episodes)
-cargo run --example bomber_04_replay_gen --features bomber
+cargo run --example bomber_05_replay_gen --features bomber
 
 # Generate with custom output dir
-cargo run --example bomber_04_replay_gen --features bomber -- output/my_replays
+cargo run --example bomber_05_replay_gen --features bomber -- output/my_replays
+
+# V2 replay generator with backward walker
+cargo run --example bomber_06_replay_gen_v2 --features bomber
 
 # Arena with optional replay dump (all players, all samples)
 cargo run --example bomber_01_arena --features bomber -- --replay-dir output/replays

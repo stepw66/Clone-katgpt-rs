@@ -187,29 +187,31 @@ fn compute_game_delta(
     }
 }
 
-/// Compute Shannon entropy on softmax-normalized scores (only valid actions).
+/// Compute Shannon entropy on sigmoid-normalized scores (only valid actions).
+///
+/// Uses per-element sigmoid instead of softmax per project rule.
+/// Sigmoid scores are then normalized by their sum to form a probability
+/// distribution for entropy computation.
 fn shannon_entropy(scores: &[f32; ACTION_COUNT]) -> f32 {
-    let max_val = scores.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
-    let exps: Vec<f32> = scores
+    let sigs: Vec<f32> = scores
         .iter()
         .map(|&s| {
             if s <= f32::NEG_INFINITY {
                 0.0
             } else {
-                (s - max_val).exp()
+                1.0 / (1.0 + (-s).exp())
             }
         })
         .collect();
-    let sum: f32 = exps.iter().sum();
+    let sum: f32 = sigs.iter().sum();
     if sum <= 0.0 {
         return 0.0;
     }
-    let entropy: f32 = exps
+    let entropy: f32 = sigs
         .iter()
-        .zip(scores.iter())
-        .filter(|(e, _)| **e > 0.0)
-        .map(|(e, _)| {
-            let p = *e / sum;
+        .filter(|&&s| s > 0.0)
+        .map(|&s| {
+            let p = s / sum;
             -p * p.ln()
         })
         .sum();
@@ -222,6 +224,11 @@ fn planning_cost(decision: PlanningDecision) -> f32 {
         PlanningDecision::PlanNew => 1.0,
         PlanningDecision::PlanExtend => 0.3,
         PlanningDecision::PlanSkip => 0.0,
+        PlanningDecision::SpecHop { k } => 0.1 * (k.min(8) as f32),
+        #[cfg(feature = "sia_feedback")]
+        PlanningDecision::HarnessUpdate => 0.5,
+        #[cfg(feature = "sia_feedback")]
+        PlanningDecision::WeightUpdate => 2.0, // Training is expensive
     }
 }
 
@@ -251,13 +258,21 @@ pub struct Sr2amPlayer {
     q_values: [f32; ACTION_COUNT],
     visits: [u32; ACTION_COUNT],
     // SR²AM additions
+    #[cfg(not(feature = "sia_feedback"))]
     configurator: ConfiguratorBandit,
+    #[cfg(feature = "sia_feedback")]
+    configurator: crate::pruners::feedback_bandit::FeedbackBandit,
     last_template: Option<BomberTemplate>,
     last_template_id: Option<usize>,
     decision_history: Vec<PlanningDecision>,
     plan_skip_count: usize,
     plan_new_count: usize,
     plan_extend_count: usize,
+    plan_spechop_count: usize,
+    #[cfg(feature = "sia_feedback")]
+    plan_harness_count: usize,
+    #[cfg(feature = "sia_feedback")]
+    plan_weight_count: usize,
 }
 
 impl Sr2amPlayer {
@@ -286,13 +301,21 @@ impl Sr2amPlayer {
             round_template_ids: Vec::new(),
             q_values: [0.0; ACTION_COUNT],
             visits: [0; ACTION_COUNT],
+            #[cfg(not(feature = "sia_feedback"))]
             configurator: ConfiguratorBandit::new(),
+            #[cfg(feature = "sia_feedback")]
+            configurator: crate::pruners::feedback_bandit::FeedbackBandit::new(),
             last_template: None,
             last_template_id: None,
             decision_history: Vec::new(),
             plan_skip_count: 0,
             plan_new_count: 0,
             plan_extend_count: 0,
+            plan_spechop_count: 0,
+            #[cfg(feature = "sia_feedback")]
+            plan_harness_count: 0,
+            #[cfg(feature = "sia_feedback")]
+            plan_weight_count: 0,
         }
     }
 
@@ -395,23 +418,38 @@ impl Sr2amPlayer {
             round_template_ids: Vec::new(),
             q_values: frozen.q_values,
             visits: frozen.visits,
+            #[cfg(not(feature = "sia_feedback"))]
             configurator: ConfiguratorBandit::new(),
+            #[cfg(feature = "sia_feedback")]
+            configurator: crate::pruners::feedback_bandit::FeedbackBandit::new(),
             last_template: None,
             last_template_id: None,
             decision_history: Vec::new(),
             plan_skip_count: 0,
             plan_new_count: 0,
             plan_extend_count: 0,
+            plan_spechop_count: 0,
+            #[cfg(feature = "sia_feedback")]
+            plan_harness_count: 0,
+            #[cfg(feature = "sia_feedback")]
+            plan_weight_count: 0,
         })
     }
 
-    /// Get planning decision distribution: (plan_new, plan_extend, plan_skip) counts.
-    pub fn decision_stats(&self) -> (usize, usize, usize) {
+    /// Get planning decision distribution: (plan_new, plan_extend, plan_skip, spechop, harness, weight) counts.
+    pub fn decision_stats(&self) -> (usize, usize, usize, usize) {
         (
             self.plan_new_count,
             self.plan_extend_count,
             self.plan_skip_count,
+            self.plan_spechop_count,
         )
+    }
+
+    /// Get FeedbackBandit decision counts: (harness, weight).
+    #[cfg(feature = "sia_feedback")]
+    pub fn feedback_decision_stats(&self) -> (usize, usize) {
+        (self.plan_harness_count, self.plan_weight_count)
     }
 
     /// Compute query_scores — weak heuristic baseline (same as GZero).
@@ -529,10 +567,7 @@ impl BomberPlayer for Sr2amPlayer {
         // 3. Compute Shannon entropy → bin context for ConfiguratorBandit
         let entropy = shannon_entropy(&query_scores);
         let entropy_bin = ConfiguratorBandit::entropy_bin(entropy);
-        let context = ConfiguratorContext {
-            domain: SR2AM_DOMAIN,
-            entropy_bin,
-        };
+        let context = ConfiguratorContext::new(SR2AM_DOMAIN, entropy_bin);
 
         // 4. Query ConfiguratorBandit → PlanningDecision
         let decision = self.configurator.select(context);
@@ -591,6 +626,37 @@ impl BomberPlayer for Sr2amPlayer {
                 // hinted_scores = query_scores (no template modification)
                 (query_scores, None)
             }
+            PlanningDecision::SpecHop { .. } => {
+                // SpecHop operates at hop level (Plan 131) — skip template search here.
+                // The speculator handles prediction independently; use query_scores as base.
+                (query_scores, None)
+            }
+            #[cfg(feature = "sia_feedback")]
+            PlanningDecision::HarnessUpdate => {
+                // HarnessUpdate: use current best template (like PlanExtend)
+                // AbsorbCompress promote + HotSwapPruner reload handled by caller.
+                match self.last_template {
+                    Some(template) => {
+                        let tid = self.last_template_id.unwrap_or(0);
+                        self.round_template_ids.push(tid);
+                        let hinted = Self::apply_template_hints(
+                            template,
+                            &query_scores,
+                            pos,
+                            &bomb_positions,
+                            &opponent_positions,
+                        );
+                        (hinted, Some(tid))
+                    }
+                    None => (query_scores, None),
+                }
+            }
+            #[cfg(feature = "sia_feedback")]
+            PlanningDecision::WeightUpdate => {
+                // WeightUpdate: defer to Q-values (no template search)
+                // Training trigger handled by caller via WeightUpdateRequest event.
+                (query_scores, None)
+            }
         };
 
         // 6. Compute δ (game-domain Hint-δ)
@@ -615,6 +681,11 @@ impl BomberPlayer for Sr2amPlayer {
             PlanningDecision::PlanNew => self.plan_new_count += 1,
             PlanningDecision::PlanExtend => self.plan_extend_count += 1,
             PlanningDecision::PlanSkip => self.plan_skip_count += 1,
+            PlanningDecision::SpecHop { .. } => self.plan_spechop_count += 1,
+            #[cfg(feature = "sia_feedback")]
+            PlanningDecision::HarnessUpdate => self.plan_harness_count += 1,
+            #[cfg(feature = "sia_feedback")]
+            PlanningDecision::WeightUpdate => self.plan_weight_count += 1,
         }
         self.decision_history.push(decision);
 
@@ -775,10 +846,11 @@ mod tests {
         assert_eq!(player.q_values, [0.0; ACTION_COUNT]);
         assert_eq!(player.visits, [0; ACTION_COUNT]);
         // SR²AM additions start at zero
-        let (new, extend, skip) = player.decision_stats();
+        let (new, extend, skip, spechop) = player.decision_stats();
         assert_eq!(new, 0);
         assert_eq!(extend, 0);
         assert_eq!(skip, 0);
+        assert_eq!(spechop, 0);
     }
 
     #[test]
@@ -813,8 +885,8 @@ mod tests {
             player.select_action(&grid, pos, &[], &mut rng);
         }
 
-        let (new, extend, skip) = player.decision_stats();
-        let total = new + extend + skip;
+        let (new, extend, skip, spechop) = player.decision_stats();
+        let total = new + extend + skip + spechop;
         assert_eq!(total, 30, "all 30 ticks should have a decision recorded");
         // UCB1 explores all arms, so we expect at least some of each type
         assert!(new > 0, "PlanNew should be selected at least once");
@@ -833,13 +905,17 @@ mod tests {
     }
 
     #[test]
-    fn test_sr2am_entropy_single_low() {
-        // Single dominant score → low entropy (one action clearly best)
-        let scores = [100.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
-        let entropy = shannon_entropy(&scores);
+    fn test_sr2am_entropy_single_dominant_lower_than_uniform() {
+        // With sigmoid normalization, a single dominant score produces lower
+        // entropy than uniform scores, but not near-zero (sigmoid doesn't
+        // flatten differences as aggressively as softmax).
+        let uniform = [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0];
+        let dominant = [100.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+        let entropy_uniform = shannon_entropy(&uniform);
+        let entropy_dominant = shannon_entropy(&dominant);
         assert!(
-            entropy < 0.5,
-            "single dominant score should have low entropy, got {entropy}"
+            entropy_dominant < entropy_uniform,
+            "dominant score entropy ({entropy_dominant}) should be < uniform ({entropy_uniform})"
         );
     }
 
@@ -907,7 +983,7 @@ mod tests {
         // Q-values persist
         assert_eq!(player.q_values, [0.0; ACTION_COUNT]);
         // Decision stats persist across reset
-        let (new, _extend, _skip) = player.decision_stats();
+        let (new, _extend, _skip, _spechop) = player.decision_stats();
         assert_eq!(new, 0);
     }
 
@@ -938,6 +1014,13 @@ mod tests {
         assert_eq!(planning_cost(PlanningDecision::PlanNew), 1.0);
         assert_eq!(planning_cost(PlanningDecision::PlanExtend), 0.3);
         assert_eq!(planning_cost(PlanningDecision::PlanSkip), 0.0);
+        assert!((planning_cost(PlanningDecision::SpecHop { k: 4 }) - 0.4).abs() < f32::EPSILON);
+        assert!((planning_cost(PlanningDecision::SpecHop { k: 8 }) - 0.8).abs() < f32::EPSILON);
+        #[cfg(feature = "sia_feedback")]
+        {
+            assert!((planning_cost(PlanningDecision::HarnessUpdate) - 0.5).abs() < f32::EPSILON);
+            assert!((planning_cost(PlanningDecision::WeightUpdate) - 2.0).abs() < f32::EPSILON);
+        }
     }
 
     #[test]

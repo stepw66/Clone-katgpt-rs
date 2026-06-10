@@ -320,31 +320,56 @@ pub fn synthesize_cross_game(
 
     let mut cross = Vec::new();
 
-    let pattern = match verified.is_empty() {
-        true => "general play".to_string(),
-        false => verified[0].answer.clone(),
+    // Collect diverse source facts — deduplicate by answer prefix to get varied patterns.
+    // Use up to 8 verified sources and all surfaced entities.
+    let mut seen_prefixes: Vec<String> = Vec::new();
+    let mut diverse_verified: Vec<&ReflectionQA> = Vec::new();
+    for v in verified {
+        let prefix: String = v.answer.chars().take(30).collect();
+        if !seen_prefixes.iter().any(|p| p == &prefix) {
+            seen_prefixes.push(prefix);
+            diverse_verified.push(v);
+        }
+        if diverse_verified.len() >= 8 {
+            break;
+        }
+    }
+
+    // Converging clues: each verified fact yields a cross-domain question.
+    // Different source facts produce distinct cross-game connections.
+    let other_domains = match domain {
+        ReflectionDomain::Bomber => vec!["Go", "FFT"],
+        ReflectionDomain::Go => vec!["Bomber", "FFT"],
+        ReflectionDomain::FFT => vec!["Bomber", "Go"],
+        ReflectionDomain::CrossGame => vec![],
     };
 
-    // Converging clues: both domains reward similar patterns
-    cross.push(ReflectionQA {
-        question: format!(
-            "What strategic concept is shared between {domain} and other game domains when considering pattern: \"{pattern}\"?",
-            domain = domain,
-            pattern = pattern
-        ),
-        answer: format!(
-            "Both {domain} and other domains reward timing and positional awareness. In {domain}, the key pattern is: {pattern}.",
-            domain = domain,
-            pattern = pattern
-        ),
-        step: ReflectionStep::CrossGameSynthesis,
-        domain: ReflectionDomain::CrossGame,
-        consolidation_count: verified_count + surfaced_count,
-        verified: true,
-    });
+    for source in &diverse_verified {
+        for other in &other_domains {
+            let pattern_short: String = source.answer.chars().take(60).collect();
+            cross.push(ReflectionQA {
+                question: format!(
+                    "What strategic concept is shared between {domain} and {other} when considering pattern: \"{pattern}\"?",
+                    domain = domain,
+                    other = other,
+                    pattern = pattern_short
+                ),
+                answer: format!(
+                    "Both {domain} and {other} reward timing and positional awareness. In {domain}, the key pattern is: {full}",
+                    domain = domain,
+                    other = other,
+                    full = source.answer
+                ),
+                step: ReflectionStep::CrossGameSynthesis,
+                domain: ReflectionDomain::CrossGame,
+                consolidation_count: source.consolidation_count,
+                verified: true,
+            });
+        }
+    }
 
-    // Parallel properties: specific strategy analogies from surfaced entities
-    if let Some(pair) = surfaced.first() {
+    // Parallel properties: surfaced entity pairs yield cross-domain analogies.
+    for pair in surfaced.iter().take(4) {
         let concept_short: String = pair.answer.chars().take(80).collect();
         let concept_long: String = pair.answer.chars().take(120).collect();
 

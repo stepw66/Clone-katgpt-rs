@@ -108,6 +108,15 @@ impl MinkowskiLattice {
         v.iter().map(|z| z.norm()).fold(0.0_f64, f64::max)
     }
 
+    /// Squared sup-norm of a vector in C^f.
+    ///
+    /// sup_norm_sq(z) = max_j |z_j|². Use instead of `sup_norm` for
+    /// comparisons to avoid computing square roots.
+    #[inline]
+    pub fn sup_norm_sq(v: &[C64]) -> f64 {
+        v.iter().map(|z| z.norm_sq()).fold(0.0_f64, f64::max)
+    }
+
     /// Compute lattice point: sum of basis[i] * integer_coeffs[i].
     ///
     /// Evaluates Λ(a) = Σ a_i · b_i where b_i are basis vectors.
@@ -122,6 +131,23 @@ impl MinkowskiLattice {
             }
         }
         point
+    }
+
+    /// Compute lattice point into a pre-allocated buffer.
+    ///
+    /// Same as `lattice_point` but writes into `out` instead of allocating.
+    #[inline]
+    pub fn lattice_point_into(&self, coeffs: &[i64], out: &mut [C64]) {
+        debug_assert_eq!(coeffs.len(), self.dim, "coeffs must have dim elements");
+        debug_assert_eq!(out.len(), self.dim, "out must have dim elements");
+        out.fill(C64::ZERO);
+        for (i, &c) in coeffs.iter().enumerate() {
+            let cf = c as f64;
+            let basis_row = &self.basis[i * self.dim..(i + 1) * self.dim];
+            for (pj, &bv) in out.iter_mut().zip(basis_row) {
+                *pj = *pj + bv * cf;
+            }
+        }
     }
 
     /// Upper bound on packing number: max |X| of D-separated points in B_R.
@@ -175,18 +201,23 @@ impl MinkowskiLattice {
 
         // Collect nonzero basis vector components at this coordinate.
         // Zero components don't affect the projected value — they can be ignored.
-        let nonzero: Vec<C64> = (0..self.dim)
-            .map(|i| self.basis[i * self.dim + coord])
-            .filter(|v| v.norm() > 1e-15)
-            .collect();
+        let mut nonzero: [C64; 16] = [C64::ZERO; 16];
+        let mut nonzero_count = 0usize;
+        for i in 0..self.dim {
+            let v = self.basis[i * self.dim + coord];
+            if v.norm_sq() > 1e-30 {
+                nonzero[nonzero_count] = v;
+                nonzero_count += 1;
+            }
+        }
 
         // All zero → projection is constant → not injective
-        if nonzero.is_empty() {
+        if nonzero_count == 0 {
             return false;
         }
 
         // Single nonzero value → trivially injective (different coefficients give different values)
-        if nonzero.len() == 1 {
+        if nonzero_count == 1 {
             return true;
         }
 
@@ -194,8 +225,8 @@ impl MinkowskiLattice {
         // If two values are equal or negatives, some integer combination gives zero.
         // For our constructions with identity-like bases using irrational generators
         // (e.g., 1 and φ), the ratios are irrational, ensuring Q-linear independence.
-        for i in 0..nonzero.len() {
-            for j in (i + 1)..nonzero.len() {
+        for i in 0..nonzero_count {
+            for j in (i + 1)..nonzero_count {
                 let diff_re = (nonzero[i].re - nonzero[j].re).abs();
                 let diff_im = (nonzero[i].im - nonzero[j].im).abs();
                 let sum_re = (nonzero[i].re + nonzero[j].re).abs();
@@ -220,14 +251,18 @@ impl MinkowskiLattice {
         }
 
         let range = (radius / self.min_sep).ceil() as i64 + 1;
-        let mut points = Vec::new();
+        let radius_sq = radius * radius;
+        let mut buf = vec![C64::ZERO; self.dim];
+        let mut points = Vec::with_capacity(self.polydisc_count(radius).max(1));
 
         // For dim=1, simple iteration
         if self.dim == 1 {
+            let bv = self.basis[0];
             for c in -range..=range {
-                let pt = self.lattice_point(&[c]);
-                if Self::sup_norm(&pt) <= radius {
-                    points.push(pt);
+                let cf = c as f64;
+                let p0 = bv * cf;
+                if p0.norm_sq() <= radius_sq {
+                    points.push(vec![p0]);
                 }
             }
             return points;
@@ -235,11 +270,19 @@ impl MinkowskiLattice {
 
         // For dim=2, double loop
         if self.dim == 2 {
+            let b00 = self.basis[0];
+            let b01 = self.basis[1];
+            let b10 = self.basis[2];
+            let b11 = self.basis[3];
             for c0 in -range..=range {
+                let cf0 = c0 as f64;
                 for c1 in -range..=range {
-                    let pt = self.lattice_point(&[c0, c1]);
-                    if Self::sup_norm(&pt) <= radius {
-                        points.push(pt);
+                    let cf1 = c1 as f64;
+                    let p0 = b00 * cf0 + b01 * cf1;
+                    let p1 = b10 * cf0 + b11 * cf1;
+                    let ns = p0.norm_sq().max(p1.norm_sq());
+                    if ns <= radius_sq {
+                        points.push(vec![p0, p1]);
                     }
                 }
             }
@@ -248,7 +291,7 @@ impl MinkowskiLattice {
 
         // General case: recursive enumeration
         let mut coeffs = vec![0i64; self.dim];
-        self.enumerate_polydisc(&mut coeffs, 0, range, radius, &mut points);
+        self.enumerate_polydisc(&mut coeffs, 0, range, radius_sq, &mut points, &mut buf);
         points
     }
 
@@ -258,21 +301,20 @@ impl MinkowskiLattice {
         coeffs: &mut [i64],
         depth: usize,
         range: i64,
-        radius: f64,
+        radius_sq: f64,
         points: &mut Vec<Vec<C64>>,
+        buf: &mut [C64],
     ) {
         if depth == self.dim {
-            let pt = self.lattice_point(coeffs);
-            if Self::sup_norm(&pt) <= radius {
-                points.push(pt);
+            self.lattice_point_into(coeffs, buf);
+            if Self::sup_norm_sq(buf) <= radius_sq {
+                points.push(buf.to_vec());
             }
             return;
         }
         for c in -range..=range {
             coeffs[depth] = c;
-            // Early pruning: check partial point
-            let partial_radius = radius;
-            self.enumerate_polydisc(coeffs, depth + 1, range, partial_radius, points);
+            self.enumerate_polydisc(coeffs, depth + 1, range, radius_sq, points, buf);
         }
     }
 

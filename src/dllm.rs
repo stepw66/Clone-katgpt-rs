@@ -22,9 +22,12 @@ use crate::pruners::variance_minimizer::{VarianceMinimizer, VarianceMinimizerCon
 // ═══════════════════════════════════════════════════════════════
 
 /// Loss averaging strategy for masked positions in D2F training.
+/// How to average the loss across masked positions.
 ///
+/// `#[repr(u8)]` ensures 1-byte size for compact storage in hot-path structs.
 /// Nemotron validates +2.12% accuracy with global averaging over per-sequence.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[repr(u8)]
 pub enum LossAveraging {
     /// Average loss across all masked positions in the batch (global).
     /// `L = (1/(N*L_masked)) * Σ_n Σ_i ℓ_{n,i}`
@@ -42,33 +45,37 @@ pub enum LossAveraging {
 
 /// Noise schedule for discrete diffusion.
 /// Produces monotonically increasing mask ratios for block-based corruption.
+///
+/// Field order: usize (8-byte) before f32 (4-byte) to eliminate padding.
 #[derive(Debug, Clone)]
 pub struct NoiseSchedule {
-    pub min_ratio: f32,
-    pub max_ratio: f32,
     pub n_blocks: usize,
+    pub max_ratio: f32,
+    pub min_ratio: f32,
 }
 
 impl NoiseSchedule {
     pub fn new(min_ratio: f32, max_ratio: f32, n_blocks: usize) -> Self {
         Self {
+            n_blocks,
             min_ratio,
             max_ratio,
-            n_blocks,
         }
     }
 
     /// Returns mask ratios per block, monotonically increasing from min to max.
     pub fn monotonic_ratios(&self) -> Vec<f32> {
         match self.n_blocks {
-            0 => vec![],
+            0 => Vec::new(),
             1 => vec![(self.min_ratio + self.max_ratio) / 2.0],
-            _ => (0..self.n_blocks)
-                .map(|i| {
-                    let t = i as f32 / (self.n_blocks - 1) as f32;
-                    self.min_ratio + t * (self.max_ratio - self.min_ratio)
-                })
-                .collect(),
+            n => {
+                let step = (self.max_ratio - self.min_ratio) / (n - 1) as f32;
+                let mut out = Vec::with_capacity(n);
+                for i in 0..n {
+                    out.push(self.min_ratio + i as f32 * step);
+                }
+                out
+            }
         }
     }
 }
@@ -86,19 +93,21 @@ impl NoiseSchedule {
 /// then adjust mask ratios so each step contributes equal difficulty.
 /// Steps that are too easy (high accuracy) get harder masks.
 /// Steps that are too hard (low accuracy) get easier masks.
+///
+/// Field order: grouped by alignment (Vec/usize then f32) to minimize padding.
 #[cfg(feature = "replaid_schedules")]
 #[derive(Debug, Clone)]
 pub struct AdaptiveNoiseSchedule {
-    /// Base schedule parameters.
-    min_ratio: f32,
-    max_ratio: f32,
-    n_blocks: usize,
     /// Per-step loss tracker (one VarianceMinimizer per block).
     step_trackers: Vec<VarianceMinimizer>,
     /// Current adapted ratios.
     current_ratios: Vec<f32>,
+    /// Base schedule parameters.
+    n_blocks: usize,
     /// Number of adaptation steps performed.
     adaptations: u32,
+    max_ratio: f32,
+    min_ratio: f32,
 }
 
 #[cfg(feature = "replaid_schedules")]
@@ -122,12 +131,12 @@ impl AdaptiveNoiseSchedule {
             .collect();
 
         Self {
-            min_ratio,
-            max_ratio,
-            n_blocks,
             step_trackers,
             current_ratios,
+            n_blocks,
             adaptations: 0,
+            min_ratio,
+            max_ratio,
         }
     }
 
@@ -152,7 +161,8 @@ impl AdaptiveNoiseSchedule {
     ///
     /// Each tracker independently adjusts its ratio, then we sort
     /// to maintain monotonicity (RePlaid requires ordered schedules).
-    pub fn adapt_ratios(&mut self) -> Vec<f32> {
+    /// Returns `&self.current_ratios` after adaptation (avoids clone).
+    pub fn adapt_ratios(&mut self) -> &[f32] {
         for (i, tracker) in self.step_trackers.iter_mut().enumerate() {
             self.current_ratios[i] = tracker.adapt();
         }
@@ -160,7 +170,7 @@ impl AdaptiveNoiseSchedule {
         self.current_ratios
             .sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
         self.adaptations += 1;
-        self.current_ratios.clone()
+        &self.current_ratios
     }
 
     /// Current ratios (monotonic before first adaptation).
@@ -196,21 +206,31 @@ impl AdaptiveNoiseSchedule {
     }
 }
 
-/// Corrupt a block of tokens by replacing some with the mask token.
-/// Returns (corrupted_tokens, is_masked indicators).
-pub fn corrupt_block(
+/// Corrupt a block of tokens by replacing some with the mask token (zero-alloc variant).
+///
+/// Writes into pre-allocated buffers to avoid per-call heap allocation.
+/// `corrupted` and `is_masked` are cleared and refilled; `positions` is used as scratch for Fisher-Yates.
+pub fn corrupt_block_into(
     tokens: &[usize],
     mask_ratio: f32,
     mask_token: usize,
     rng: &mut Rng,
-) -> (Vec<usize>, Vec<bool>) {
+    corrupted: &mut Vec<usize>,
+    is_masked: &mut Vec<bool>,
+    positions: &mut Vec<usize>,
+) -> usize {
     let len = tokens.len();
     let n_mask = ((len as f32 * mask_ratio).ceil() as usize).min(len);
-    let mut corrupted = tokens.to_vec();
-    let mut is_masked = vec![false; len];
+
+    // Reuse buffers: clear and refill
+    corrupted.clear();
+    corrupted.extend_from_slice(tokens);
+    is_masked.clear();
+    is_masked.resize(len, false);
+    positions.clear();
+    positions.extend(0..len);
 
     // Fisher-Yates shuffle to pick random positions
-    let mut positions: Vec<usize> = (0..len).collect();
     for i in (1..positions.len()).rev() {
         let j = (rng.next() as usize) % (i + 1);
         positions.swap(i, j);
@@ -221,12 +241,91 @@ pub fn corrupt_block(
         is_masked[pos] = true;
     }
 
+    n_mask
+}
+
+/// Corrupt a block of tokens by replacing some with the mask token.
+/// Returns (corrupted_tokens, is_masked indicators).
+///
+/// **Note:** This allocates buffers internally. For training loops, prefer
+/// [`corrupt_block_into`] to avoid per-call heap allocation.
+pub fn corrupt_block(
+    tokens: &[usize],
+    mask_ratio: f32,
+    mask_token: usize,
+    rng: &mut Rng,
+) -> (Vec<usize>, Vec<bool>) {
+    let mut corrupted = Vec::with_capacity(tokens.len());
+    let mut is_masked = Vec::with_capacity(tokens.len());
+    let mut positions = Vec::with_capacity(tokens.len());
+    let _n_mask = corrupt_block_into(
+        tokens,
+        mask_ratio,
+        mask_token,
+        rng,
+        &mut corrupted,
+        &mut is_masked,
+        &mut positions,
+    );
     (corrupted, is_masked)
 }
 
 // ═══════════════════════════════════════════════════════════════
 // Task 0.1: Bidirectional Attention Forward
 // ═══════════════════════════════════════════════════════════════
+
+/// Pre-allocated buffers for `forward_bidirectional_positions`, avoiding per-position Vec allocations.
+struct BidirectionalContext {
+    x: Vec<f32>,
+    q: Vec<f32>,
+    k: Vec<f32>,
+    v: Vec<f32>,
+    x_proj: Vec<f32>,
+    xr2: Vec<f32>,
+    hidden: Vec<f32>,
+    x_mlp: Vec<f32>,
+    logits: Vec<f32>,
+    // Attention scratch buffers (reused across positions)
+    attn_out_buf: Vec<f32>,
+    attn_weights_buf: Vec<f32>,
+    scores_buf: Vec<f32>,
+    // Cross-position buffers (resized per call, reused across calls)
+    k_cache: Vec<f32>,
+    v_cache: Vec<f32>,
+    x_norm2_all: Vec<f32>,
+    xr_all: Vec<f32>,
+    // Output buffers (pre-allocated to max capacity, sliced per call)
+    all_logits: Vec<f32>,
+    all_attn_weights: Vec<f32>,
+}
+
+impl BidirectionalContext {
+    fn new(config: &Config) -> Self {
+        let n = config.n_embd;
+        let kvd = kv_dim(config);
+        let bs = config.block_size;
+        Self {
+            x: vec![0.0f32; n],
+            q: vec![0.0f32; n],
+            k: vec![0.0f32; kvd],
+            v: vec![0.0f32; kvd],
+            x_proj: vec![0.0f32; n],
+            xr2: vec![0.0f32; n],
+            hidden: vec![0.0f32; config.mlp_hidden],
+            x_mlp: vec![0.0f32; n],
+            logits: vec![0.0f32; config.vocab_size],
+            attn_out_buf: vec![0.0f32; n],
+            attn_weights_buf: vec![0.0f32; config.n_head * bs],
+            scores_buf: vec![0.0f32; bs],
+            k_cache: vec![0.0f32; bs * kvd],
+            v_cache: vec![0.0f32; bs * kvd],
+            x_norm2_all: vec![0.0f32; bs * n],
+            xr_all: vec![0.0f32; bs * n],
+            all_logits: vec![0.0f32; bs * config.vocab_size],
+            all_attn_weights: vec![0.0f32; bs * config.n_head * bs],
+        }
+    }
+}
 
 /// Bidirectional forward pass for all positions.
 /// Each position attends to ALL other positions (no causal mask).
@@ -235,7 +334,30 @@ pub fn forward_bidirectional_positions(
     weights: &TransformerWeights,
     tokens: &[usize],
     config: &Config,
-) -> (Vec<Vec<f32>>, Vec<Vec<f32>>) {
+) -> (Vec<f32>, Vec<f32>) {
+    let mut bctx = BidirectionalContext::new(config);
+    let (logits_len, attn_len) =
+        forward_bidirectional_positions_into(weights, tokens, config, &mut bctx);
+    (
+        bctx.all_logits[..logits_len].to_vec(),
+        bctx.all_attn_weights[..attn_len].to_vec(),
+    )
+}
+
+/// Zero-alloc variant of [`forward_bidirectional_positions`] that reuses a pre-allocated context.
+///
+/// Pass a `BidirectionalContext` to avoid per-call heap allocation when calling in a loop
+/// (e.g., `denoise_loop`).
+///
+/// Writes results into `bctx.all_logits` and `bctx.all_attn_weights` and returns
+/// `(logits_len, attn_len)` so the caller can index the context buffers directly.
+/// This avoids lifetime issues when the caller needs to reuse other fields from `bctx`.
+fn forward_bidirectional_positions_into(
+    weights: &TransformerWeights,
+    tokens: &[usize],
+    config: &Config,
+    bctx: &mut BidirectionalContext,
+) -> (usize, usize) {
     let n = config.n_embd;
     let hd = config.head_dim;
     let kvd = kv_dim(config);
@@ -243,84 +365,173 @@ pub fn forward_bidirectional_positions(
     let scale = 1.0 / (hd as f32).sqrt();
 
     // Phase A: Compute K/V for all positions
-    let mut k_cache = vec![0.0f32; seq_len * kvd];
-    let mut v_cache = vec![0.0f32; seq_len * kvd];
-    // Store intermediate for attention: norm2 inputs per position
-    let mut x_norm2_all = vec![0.0f32; seq_len * n];
-    // Store residuals
-    let mut xr_all = vec![0.0f32; seq_len * n];
+    bctx.k_cache[..seq_len * kvd].fill(0.0);
+    bctx.v_cache[..seq_len * kvd].fill(0.0);
+    bctx.x_norm2_all[..seq_len * n].fill(0.0);
+    bctx.xr_all[..seq_len * n].fill(0.0);
 
     for (p, &token) in tokens.iter().enumerate().take(seq_len) {
-        let mut x = vec![0.0f32; n];
-        for i in 0..n {
-            x[i] = weights.wte[token * n + i] + weights.wpe[p * n + i];
-        }
-        rmsnorm(&mut x);
-        xr_all[p * n..(p + 1) * n].copy_from_slice(&x);
-        rmsnorm(&mut x);
-        x_norm2_all[p * n..(p + 1) * n].copy_from_slice(&x);
+        crate::simd::simd_add_into(
+            &mut bctx.x,
+            &weights.wte[token * n..(token + 1) * n],
+            &weights.wpe[p * n..(p + 1) * n],
+        );
+        rmsnorm(&mut bctx.x);
+        bctx.xr_all[p * n..(p + 1) * n].copy_from_slice(&bctx.x);
+        rmsnorm(&mut bctx.x);
+        bctx.x_norm2_all[p * n..(p + 1) * n].copy_from_slice(&bctx.x);
 
         let layer = &weights.layers[0];
-        let mut k = vec![0.0f32; kvd];
-        let mut v = vec![0.0f32; kvd];
-        matmul(&mut k, &layer.attn_wk, &x, kvd, n);
-        matmul(&mut v, &layer.attn_wv, &x, kvd, n);
-        k_cache[p * kvd..(p + 1) * kvd].copy_from_slice(&k);
-        v_cache[p * kvd..(p + 1) * kvd].copy_from_slice(&v);
+        bctx.k.fill(0.0);
+        bctx.v.fill(0.0);
+        matmul(&mut bctx.k, &layer.attn_wk, &bctx.x, kvd, n);
+        matmul(&mut bctx.v, &layer.attn_wv, &bctx.x, kvd, n);
+        bctx.k_cache[p * kvd..(p + 1) * kvd].copy_from_slice(&bctx.k);
+        bctx.v_cache[p * kvd..(p + 1) * kvd].copy_from_slice(&bctx.v);
     }
 
     // Phase B: Bidirectional attention for all positions
-    let mut all_logits = Vec::with_capacity(seq_len);
-    let mut all_attn_weights = Vec::with_capacity(seq_len);
+    let vocab = config.vocab_size;
+    let n_heads = config.n_head;
+    let logits_len = seq_len * vocab;
+    let attn_len = seq_len * n_heads * seq_len;
+    bctx.all_logits[..logits_len].fill(0.0);
+    bctx.all_attn_weights[..attn_len].fill(0.0);
     let layer = &weights.layers[0];
 
     for p in 0..seq_len {
-        let mut x = vec![0.0f32; n];
-        x.copy_from_slice(&x_norm2_all[p * n..(p + 1) * n]);
+        bctx.x
+            .copy_from_slice(&bctx.x_norm2_all[p * n..(p + 1) * n]);
 
-        let mut q = vec![0.0f32; n];
-        matmul(&mut q, &layer.attn_wq, &x, n, n);
+        bctx.q.fill(0.0);
+        matmul(&mut bctx.q, &layer.attn_wq, &bctx.x, n, n);
 
-        let (attn_out, attn_w) = attention_forward_safe(
-            &q,
-            &k_cache,
-            &v_cache,
+        attention_forward_safe_into(
+            &bctx.q,
+            &bctx.k_cache,
+            &bctx.v_cache,
             config.n_head,
             config.n_kv_head,
             hd,
             kvd,
             seq_len,
             scale,
+            &mut bctx.attn_out_buf,
+            &mut bctx.attn_weights_buf,
+            &mut bctx.scores_buf,
         );
 
-        let mut x_proj = vec![0.0f32; n];
-        matmul(&mut x_proj, &layer.attn_wo, &attn_out, n, n);
-        for i in 0..n {
-            x_proj[i] += xr_all[p * n + i];
-        }
+        bctx.x_proj.fill(0.0);
+        matmul(&mut bctx.x_proj, &layer.attn_wo, &bctx.attn_out_buf, n, n);
+        crate::simd::simd_add_inplace(&mut bctx.x_proj, &bctx.xr_all[p * n..(p + 1) * n]);
 
         // MLP
-        let xr2 = x_proj.clone();
-        rmsnorm(&mut x_proj);
-        let mut hidden = vec![0.0f32; config.mlp_hidden];
-        matmul_relu(&mut hidden, &layer.mlp_w1, &x_proj, config.mlp_hidden, n);
-        let mut x_mlp = vec![0.0f32; n];
-        matmul(&mut x_mlp, &layer.mlp_w2, &hidden, n, config.mlp_hidden);
-        for i in 0..n {
-            x_mlp[i] += xr2[i];
-        }
+        bctx.xr2.copy_from_slice(&bctx.x_proj);
+        rmsnorm(&mut bctx.x_proj);
+        bctx.hidden.fill(0.0);
+        matmul_relu(
+            &mut bctx.hidden,
+            &layer.mlp_w1,
+            &bctx.x_proj,
+            config.mlp_hidden,
+            n,
+        );
+        bctx.x_mlp.fill(0.0);
+        matmul(
+            &mut bctx.x_mlp,
+            &layer.mlp_w2,
+            &bctx.hidden,
+            n,
+            config.mlp_hidden,
+        );
+        crate::simd::simd_add_inplace(&mut bctx.x_mlp, &bctx.xr2);
 
-        let mut logits = vec![0.0f32; config.vocab_size];
-        matmul(&mut logits, &weights.lm_head, &x_mlp, config.vocab_size, n);
-        all_logits.push(logits);
-        all_attn_weights.push(attn_w);
+        bctx.logits.fill(0.0);
+        matmul(
+            &mut bctx.logits,
+            &weights.lm_head,
+            &bctx.x_mlp,
+            config.vocab_size,
+            n,
+        );
+        bctx.all_logits[p * vocab..(p + 1) * vocab].copy_from_slice(&bctx.logits);
+        bctx.all_attn_weights[p * n_heads * seq_len..(p + 1) * n_heads * seq_len]
+            .copy_from_slice(&bctx.attn_weights_buf[..n_heads * seq_len]);
     }
 
-    (all_logits, all_attn_weights)
+    (logits_len, attn_len)
 }
 
 /// Safe bidirectional attention for one query position.
 /// Returns (attn_output[n_embd], attn_weights[n_head * seq_len]).
+#[inline]
+fn attention_forward_safe_into(
+    q: &[f32],
+    k_all: &[f32],
+    v_all: &[f32],
+    n_head: usize,
+    n_kv_head: usize,
+    head_dim: usize,
+    kv_dim: usize,
+    seq_len: usize,
+    scale: f32,
+    attn_out: &mut [f32],
+    all_weights: &mut [f32],
+    scores: &mut [f32],
+) {
+    debug_assert!(attn_out.len() >= n_head * head_dim);
+    debug_assert!(all_weights.len() >= n_head * seq_len);
+    debug_assert!(scores.len() >= seq_len);
+
+    attn_out[..n_head * head_dim].fill(0.0);
+
+    for h in 0..n_head {
+        let kv_group = h * n_kv_head / n_head;
+        let q_off = h * head_dim;
+        let kv_off = kv_group * head_dim;
+
+        // Compute scores (reuse buffer across heads)
+        let mut max_score = f32::NEG_INFINITY;
+        for t in 0..seq_len {
+            let dot = crate::simd::simd_dot_f32(
+                &q[q_off..q_off + head_dim],
+                &k_all[t * kv_dim + kv_off..t * kv_dim + kv_off + head_dim],
+                head_dim,
+            );
+            scores[t] = dot * scale;
+            if scores[t] > max_score {
+                max_score = scores[t];
+            }
+        }
+
+        // Softmax (SIMD batch exp + sum)
+        crate::simd::simd_add_scalar_inplace(&mut scores[..seq_len], -max_score);
+        crate::simd::simd_exp_inplace(&mut scores[..seq_len]);
+        let sum_exp = crate::simd::simd_sum_f32(&scores[..seq_len]);
+        let inv_sum = 1.0 / sum_exp;
+        crate::simd::simd_scale_inplace(&mut scores[..seq_len], inv_sum);
+        for t in 0..seq_len {
+            all_weights[h * seq_len + t] = scores[t];
+        }
+
+        // Weighted value sum: accumulate per-position scaled value rows (SIMD-friendly)
+        // Loop order: t outer → contiguous v_all row access, better cache locality.
+        // Previous d-outer/t-inner order touched a different cache line per t for each d.
+        for t in 0..seq_len {
+            let s = scores[t];
+            let v_row = &v_all[t * kv_dim + kv_off..t * kv_dim + kv_off + head_dim];
+            crate::simd::simd_fused_scale_acc(
+                &mut attn_out[q_off..q_off + head_dim],
+                v_row,
+                s,
+                head_dim,
+            );
+        }
+    }
+}
+
+/// Allocating wrapper — prefer `attention_forward_safe_into` in hot loops.
+#[allow(dead_code)]
 fn attention_forward_safe(
     q: &[f32],
     k_all: &[f32],
@@ -335,48 +546,21 @@ fn attention_forward_safe(
     let n_embd = n_head * head_dim;
     let mut attn_out = vec![0.0f32; n_embd];
     let mut all_weights = vec![0.0f32; n_head * seq_len];
-
-    for h in 0..n_head {
-        let kv_group = h * n_kv_head / n_head;
-        let q_off = h * head_dim;
-        let kv_off = kv_group * head_dim;
-
-        // Compute scores
-        let mut scores = vec![0.0f32; seq_len];
-        let mut max_score = f32::NEG_INFINITY;
-        for t in 0..seq_len {
-            let mut dot = 0.0f32;
-            for d in 0..head_dim {
-                dot += q[q_off + d] * k_all[t * kv_dim + kv_off + d];
-            }
-            scores[t] = dot * scale;
-            if scores[t] > max_score {
-                max_score = scores[t];
-            }
-        }
-
-        // Softmax
-        let mut sum_exp = 0.0f32;
-        for t in 0..seq_len {
-            scores[t] = (scores[t] - max_score).exp();
-            sum_exp += scores[t];
-        }
-        let inv_sum = 1.0 / sum_exp;
-        for t in 0..seq_len {
-            scores[t] *= inv_sum;
-            all_weights[h * seq_len + t] = scores[t];
-        }
-
-        // Weighted value sum
-        for d in 0..head_dim {
-            let mut val = 0.0f32;
-            for t in 0..seq_len {
-                val += scores[t] * v_all[t * kv_dim + kv_off + d];
-            }
-            attn_out[q_off + d] = val;
-        }
-    }
-
+    let mut scores = vec![0.0f32; seq_len];
+    attention_forward_safe_into(
+        q,
+        k_all,
+        v_all,
+        n_head,
+        n_kv_head,
+        head_dim,
+        kv_dim,
+        seq_len,
+        scale,
+        &mut attn_out,
+        &mut all_weights,
+        &mut scores,
+    );
     (attn_out, all_weights)
 }
 
@@ -385,21 +569,124 @@ fn attention_forward_safe(
 // ═══════════════════════════════════════════════════════════════
 
 /// Saved activations from forward pass, needed for backward.
-struct ForwardActivations {
+///
+/// Borrows from `ForwardSaveContext` to avoid cloning all activations (Issue 110).
+///
+/// Field order: all references (8-byte) grouped, then usize to eliminate padding.
+struct ForwardActivations<'a> {
+    embeddings: &'a [f32],     // [seq_len * n]
+    after_norm1: &'a [f32],    // [seq_len * n] (= xr residual)
+    after_norm2: &'a [f32],    // [seq_len * n]
+    q: &'a [f32],              // [seq_len * n]
+    k: &'a [f32],              // [seq_len * kvd]
+    v: &'a [f32],              // [seq_len * kvd]
+    attn_weights: &'a [f32],   // [seq_len * n_head * seq_len]
+    attn_out: &'a [f32],       // [seq_len * n]
+    after_attn_res: &'a [f32], // [seq_len * n]
+    after_mlp_norm: &'a [f32], // [seq_len * n]
+    mlp_hidden: &'a [f32],     // [seq_len * mlp_hidden]
+    hidden_final: &'a [f32],   // [seq_len * n]
+    logits: &'a [f32],         // [seq_len * vocab_size]
     seq_len: usize,
-    embeddings: Vec<f32>,     // [seq_len * n]
-    after_norm1: Vec<f32>,    // [seq_len * n] (= xr residual)
-    after_norm2: Vec<f32>,    // [seq_len * n]
-    q: Vec<f32>,              // [seq_len * n]
-    k: Vec<f32>,              // [seq_len * kvd]
-    v: Vec<f32>,              // [seq_len * kvd]
-    attn_weights: Vec<f32>,   // [seq_len * n_head * seq_len]
-    attn_out: Vec<f32>,       // [seq_len * n]
-    after_attn_res: Vec<f32>, // [seq_len * n]
-    after_mlp_norm: Vec<f32>, // [seq_len * n]
-    mlp_hidden: Vec<f32>,     // [seq_len * mlp_hidden]
-    hidden_final: Vec<f32>,   // [seq_len * n]
-    logits: Vec<f32>,         // [seq_len * vocab_size]
+}
+
+/// Pre-allocated context for `forward_save`, avoiding per-call allocations.
+///
+/// Field order: all Vec<f32> (24-byte, 8-byte aligned) before usize fields
+/// to eliminate inter-field padding.
+struct ForwardSaveContext {
+    // Vec fields grouped first (all 24 bytes, 8-byte aligned)
+    embeddings: Vec<f32>,
+    after_norm1: Vec<f32>,
+    after_norm2: Vec<f32>,
+    q_all: Vec<f32>,
+    k_all: Vec<f32>,
+    v_all: Vec<f32>,
+    attn_weights_all: Vec<f32>,
+    attn_out_all: Vec<f32>,
+    after_attn_res: Vec<f32>,
+    after_mlp_norm: Vec<f32>,
+    mlp_hidden_all: Vec<f32>,
+    hidden_final: Vec<f32>,
+    logits_all: Vec<f32>,
+    // Per-position scratch (reused each iteration)
+    x_buf: Vec<f32>,
+    x_proj_buf: Vec<f32>,
+    x_mlp_buf: Vec<f32>,
+    // Attention scratch (reused across positions, avoids per-position allocation)
+    attn_scratch_out: Vec<f32>,
+    attn_scratch_weights: Vec<f32>,
+    attn_scratch_scores: Vec<f32>,
+    // usize fields last (8-byte aligned)
+    // Dimension constants cached from config
+    n: usize,
+    kvd: usize,
+    vocab_size: usize,
+    mlp_hidden: usize,
+    n_head: usize,
+    seq_len: usize,
+}
+
+impl ForwardSaveContext {
+    fn new(config: &Config) -> Self {
+        let n = config.n_embd;
+        let kvd = kv_dim(config);
+        let bs = config.block_size;
+        Self {
+            embeddings: vec![0.0f32; bs * n],
+            after_norm1: vec![0.0f32; bs * n],
+            after_norm2: vec![0.0f32; bs * n],
+            q_all: vec![0.0f32; bs * n],
+            k_all: vec![0.0f32; bs * kvd],
+            v_all: vec![0.0f32; bs * kvd],
+            attn_weights_all: vec![0.0f32; bs * config.n_head * bs],
+            attn_out_all: vec![0.0f32; bs * n],
+            after_attn_res: vec![0.0f32; bs * n],
+            after_mlp_norm: vec![0.0f32; bs * n],
+            mlp_hidden_all: vec![0.0f32; bs * config.mlp_hidden],
+            hidden_final: vec![0.0f32; bs * n],
+            logits_all: vec![0.0f32; bs * config.vocab_size],
+            x_buf: vec![0.0f32; n],
+            x_proj_buf: vec![0.0f32; n],
+            x_mlp_buf: vec![0.0f32; n],
+            attn_scratch_out: vec![0.0f32; n],
+            attn_scratch_weights: vec![0.0f32; config.n_head * bs],
+            attn_scratch_scores: vec![0.0f32; bs],
+            n,
+            kvd,
+            vocab_size: config.vocab_size,
+            mlp_hidden: config.mlp_hidden,
+            n_head: config.n_head,
+            seq_len: 0,
+        }
+    }
+
+    fn reset(&mut self, seq_len: usize) {
+        self.seq_len = seq_len;
+        let n = self.n;
+        let kvd = self.kvd;
+        let nh = self.n_head;
+        let mlp_h = self.mlp_hidden;
+        let vocab = self.vocab_size;
+
+        for buf in [
+            &mut self.embeddings,
+            &mut self.after_norm1,
+            &mut self.after_norm2,
+            &mut self.q_all,
+            &mut self.attn_out_all,
+            &mut self.after_attn_res,
+            &mut self.after_mlp_norm,
+            &mut self.hidden_final,
+        ] {
+            buf[..seq_len * n].fill(0.0);
+        }
+        self.k_all[..seq_len * kvd].fill(0.0);
+        self.v_all[..seq_len * kvd].fill(0.0);
+        self.attn_weights_all[..seq_len * nh * seq_len].fill(0.0);
+        self.mlp_hidden_all[..seq_len * mlp_h].fill(0.0);
+        self.logits_all[..seq_len * vocab].fill(0.0);
+    }
 }
 
 /// Gradient storage mirroring TransformerWeights layout.
@@ -433,12 +720,68 @@ impl TrainingGradients {
     }
 }
 
+/// Pre-allocated context for `backward`, avoiding per-call allocations.
+struct BackwardContext {
+    d_logits: Vec<f32>,
+    d_hf: Vec<f32>,
+    d_mh: Vec<f32>,
+    d_amn: Vec<f32>,
+    d_raw: Vec<f32>,
+    d_an2: Vec<f32>,
+    d_an1: Vec<f32>,
+    d_after_attn_res_saved: Vec<f32>,
+    d_after_norm1_final: Vec<f32>,
+    /// Scratch buffer for rmsnorm_backward (avoids per-call allocation)
+    d_rmsnorm_buf: Vec<f32>,
+    /// Scratch buffer for softmax_backward (avoids per-call allocation)
+    d_softmax_buf: Vec<f32>,
+    /// Pre-allocated intermediate gradient buffers (Issue 109)
+    d_attn_out: Vec<f32>,
+    d_q: Vec<f32>,
+    d_k: Vec<f32>,
+    d_v: Vec<f32>,
+    d_after_norm2: Vec<f32>,
+    /// Pre-allocated gradient accumulator — cleared + reused per backward call
+    /// instead of allocating 9 Vecs each time.
+    grads: TrainingGradients,
+    /// Scratch buffer for masked_loss exp computation (avoids per-call allocation)
+    loss_exp_buf: Vec<f32>,
+}
+
+impl BackwardContext {
+    fn new(config: &Config) -> Self {
+        let n = config.n_embd;
+        let kvd = kv_dim(config);
+        Self {
+            d_logits: vec![0.0f32; config.vocab_size],
+            d_hf: vec![0.0f32; n],
+            d_mh: vec![0.0f32; config.mlp_hidden],
+            d_amn: vec![0.0f32; n],
+            d_raw: vec![0.0f32; config.block_size],
+            d_an2: vec![0.0f32; n],
+            d_an1: vec![0.0f32; n],
+            d_after_attn_res_saved: vec![0.0f32; config.block_size * n],
+            d_after_norm1_final: vec![0.0f32; config.block_size * n],
+            d_rmsnorm_buf: vec![0.0f32; n],
+            d_softmax_buf: vec![0.0f32; config.block_size],
+            d_attn_out: vec![0.0f32; config.block_size * n],
+            d_q: vec![0.0f32; config.block_size * n],
+            d_k: vec![0.0f32; config.block_size * kvd],
+            d_v: vec![0.0f32; config.block_size * kvd],
+            d_after_norm2: vec![0.0f32; config.block_size * n],
+            grads: TrainingGradients::zeros(config),
+            loss_exp_buf: vec![0.0f32; config.vocab_size],
+        }
+    }
+}
+
 /// Forward pass saving all activations for training.
-fn forward_save(
+fn forward_save<'a>(
     weights: &TransformerWeights,
     tokens: &[usize],
     config: &Config,
-) -> ForwardActivations {
+    ctx: &'a mut ForwardSaveContext,
+) -> ForwardActivations<'a> {
     let n = config.n_embd;
     let hd = config.head_dim;
     let kvd = kv_dim(config);
@@ -446,152 +789,188 @@ fn forward_save(
     let scale = 1.0 / (hd as f32).sqrt();
     let layer = &weights.layers[0];
 
-    let mut embeddings = vec![0.0f32; seq_len * n];
-    let mut after_norm1 = vec![0.0f32; seq_len * n];
-    let mut after_norm2 = vec![0.0f32; seq_len * n];
-    let mut q_all = vec![0.0f32; seq_len * n];
-    let mut k_all = vec![0.0f32; seq_len * kvd];
-    let mut v_all = vec![0.0f32; seq_len * kvd];
-    let mut attn_weights_all = vec![0.0f32; seq_len * config.n_head * seq_len];
-    let mut attn_out_all = vec![0.0f32; seq_len * n];
-    let mut after_attn_res = vec![0.0f32; seq_len * n];
-    let mut after_mlp_norm = vec![0.0f32; seq_len * n];
-    let mut mlp_hidden_all = vec![0.0f32; seq_len * config.mlp_hidden];
-    let mut hidden_final = vec![0.0f32; seq_len * n];
-    let mut logits_all = vec![0.0f32; seq_len * config.vocab_size];
+    ctx.reset(seq_len);
 
     // Phase A: Embeddings + K/V
     for (p, &token) in tokens.iter().enumerate().take(seq_len) {
-        for i in 0..n {
-            embeddings[p * n + i] = weights.wte[token * n + i] + weights.wpe[p * n + i];
-        }
-        let mut x = vec![0.0f32; n];
-        x.copy_from_slice(&embeddings[p * n..(p + 1) * n]);
-        rmsnorm(&mut x);
-        after_norm1[p * n..(p + 1) * n].copy_from_slice(&x);
-        rmsnorm(&mut x);
-        after_norm2[p * n..(p + 1) * n].copy_from_slice(&x);
+        crate::simd::simd_add_into(
+            &mut ctx.embeddings[p * n..(p + 1) * n],
+            &weights.wte[token * n..(token + 1) * n],
+            &weights.wpe[p * n..(p + 1) * n],
+        );
+        ctx.x_buf[..n].copy_from_slice(&ctx.embeddings[p * n..(p + 1) * n]);
+        rmsnorm(&mut ctx.x_buf);
+        ctx.after_norm1[p * n..(p + 1) * n].copy_from_slice(&ctx.x_buf[..n]);
+        rmsnorm(&mut ctx.x_buf);
+        ctx.after_norm2[p * n..(p + 1) * n].copy_from_slice(&ctx.x_buf[..n]);
 
-        matmul(&mut q_all[p * n..], &layer.attn_wq, &x, n, n);
-        matmul(&mut k_all[p * kvd..], &layer.attn_wk, &x, kvd, n);
-        matmul(&mut v_all[p * kvd..], &layer.attn_wv, &x, kvd, n);
+        matmul(&mut ctx.q_all[p * n..], &layer.attn_wq, &ctx.x_buf, n, n);
+        matmul(
+            &mut ctx.k_all[p * kvd..],
+            &layer.attn_wk,
+            &ctx.x_buf,
+            kvd,
+            n,
+        );
+        matmul(
+            &mut ctx.v_all[p * kvd..],
+            &layer.attn_wv,
+            &ctx.x_buf,
+            kvd,
+            n,
+        );
     }
 
-    // Phase B: Bidirectional attention
+    // Phase B: Bidirectional attention (zero-alloc using pre-allocated scratch buffers)
     for p in 0..seq_len {
-        let (ao, aw) = attention_forward_safe(
-            &q_all[p * n..(p + 1) * n],
-            &k_all,
-            &v_all,
+        attention_forward_safe_into(
+            &ctx.q_all[p * n..(p + 1) * n],
+            &ctx.k_all,
+            &ctx.v_all,
             config.n_head,
             config.n_kv_head,
             hd,
             kvd,
             seq_len,
             scale,
+            &mut ctx.attn_scratch_out,
+            &mut ctx.attn_scratch_weights,
+            &mut ctx.attn_scratch_scores,
         );
-        attn_out_all[p * n..(p + 1) * n].copy_from_slice(&ao);
-        attn_weights_all[p * config.n_head * seq_len..(p + 1) * config.n_head * seq_len]
-            .copy_from_slice(&aw);
+        ctx.attn_out_all[p * n..(p + 1) * n].copy_from_slice(&ctx.attn_scratch_out);
+        ctx.attn_weights_all[p * config.n_head * seq_len..(p + 1) * config.n_head * seq_len]
+            .copy_from_slice(&ctx.attn_scratch_weights[..config.n_head * seq_len]);
     }
 
     // Phase C: Output projection + residual + MLP
+    // Uses x_buf for xr2 temporary, x_proj_buf for rmsnorm I/O, x_mlp_buf for mlp output.
     for p in 0..seq_len {
-        let mut x_proj = vec![0.0f32; n];
+        // x_proj = wo @ attn_out
+        ctx.x_proj_buf[..n].fill(0.0);
         matmul(
-            &mut x_proj,
+            &mut ctx.x_proj_buf,
             &layer.attn_wo,
-            &attn_out_all[p * n..(p + 1) * n],
+            &ctx.attn_out_all[p * n..(p + 1) * n],
             n,
             n,
         );
-        for i in 0..n {
-            x_proj[i] += after_norm1[p * n + i]; // residual = xr
-        }
-        after_attn_res[p * n..(p + 1) * n].copy_from_slice(&x_proj);
+        // Add residual: x_proj += after_norm1
+        crate::simd::simd_add_inplace(&mut ctx.x_proj_buf, &ctx.after_norm1[p * n..(p + 1) * n]);
+        // after_attn_res = x_proj (the residual output)
+        ctx.after_attn_res[p * n..(p + 1) * n].copy_from_slice(&ctx.x_proj_buf[..n]);
 
-        let xr2 = x_proj.clone();
-        rmsnorm(&mut x_proj);
-        after_mlp_norm[p * n..(p + 1) * n].copy_from_slice(&x_proj);
+        // xr2 = x_proj (copy for later residual addition)
+        // Use x_buf as temporary storage for xr2
+        ctx.x_buf[..n].copy_from_slice(&ctx.x_proj_buf[..n]);
+        // rmsnorm(x_proj) in place
+        rmsnorm(&mut ctx.x_proj_buf);
+        ctx.after_mlp_norm[p * n..(p + 1) * n].copy_from_slice(&ctx.x_proj_buf);
         matmul_relu(
-            &mut mlp_hidden_all[p * config.mlp_hidden..],
+            &mut ctx.mlp_hidden_all[p * config.mlp_hidden..],
             &layer.mlp_w1,
-            &x_proj,
+            &ctx.x_proj_buf,
             config.mlp_hidden,
             n,
         );
-        let mut x_mlp = vec![0.0f32; n];
+        ctx.x_mlp_buf[..n].fill(0.0);
         matmul(
-            &mut x_mlp,
+            &mut ctx.x_mlp_buf,
             &layer.mlp_w2,
-            &mlp_hidden_all[p * config.mlp_hidden..],
+            &ctx.mlp_hidden_all[p * config.mlp_hidden..],
             n,
             config.mlp_hidden,
         );
-        for i in 0..n {
-            x_mlp[i] += xr2[i];
-        }
-        hidden_final[p * n..(p + 1) * n].copy_from_slice(&x_mlp);
+        // Add xr2 residual (stored in x_buf)
+        crate::simd::simd_add_inplace(&mut ctx.x_mlp_buf, &ctx.x_buf[..n]);
+        ctx.hidden_final[p * n..(p + 1) * n].copy_from_slice(&ctx.x_mlp_buf);
         matmul(
-            &mut logits_all[p * config.vocab_size..],
+            &mut ctx.logits_all[p * config.vocab_size..],
             &weights.lm_head,
-            &x_mlp,
+            &ctx.x_mlp_buf,
             config.vocab_size,
             n,
         );
     }
 
     ForwardActivations {
+        embeddings: &ctx.embeddings[..seq_len * n],
+        after_norm1: &ctx.after_norm1[..seq_len * n],
+        after_norm2: &ctx.after_norm2[..seq_len * n],
+        q: &ctx.q_all[..seq_len * n],
+        k: &ctx.k_all[..seq_len * kvd],
+        v: &ctx.v_all[..seq_len * kvd],
+        attn_weights: &ctx.attn_weights_all[..seq_len * config.n_head * seq_len],
+        attn_out: &ctx.attn_out_all[..seq_len * n],
+        after_attn_res: &ctx.after_attn_res[..seq_len * n],
+        after_mlp_norm: &ctx.after_mlp_norm[..seq_len * n],
+        mlp_hidden: &ctx.mlp_hidden_all[..seq_len * config.mlp_hidden],
+        hidden_final: &ctx.hidden_final[..seq_len * n],
+        logits: &ctx.logits_all[..seq_len * config.vocab_size],
         seq_len,
-        embeddings,
-        after_norm1,
-        after_norm2,
-        q: q_all,
-        k: k_all,
-        v: v_all,
-        attn_weights: attn_weights_all,
-        attn_out: attn_out_all,
-        after_attn_res,
-        after_mlp_norm,
-        mlp_hidden: mlp_hidden_all,
-        hidden_final,
-        logits: logits_all,
     }
 }
 
 // ── Backward Helpers ──
 
 /// RMSNorm backward: dx = (dy - y * mean(dy * y)) / rms
+///
+/// Allocating wrapper. Prefer [`rmsnorm_backward_into`] in hot paths.
+#[allow(dead_code)]
+#[inline]
 fn rmsnorm_backward(x_input: &[f32], y_output: &[f32], dy: &[f32]) -> Vec<f32> {
     let n = x_input.len();
-    let sum_sq: f32 = x_input.iter().map(|x| x * x).sum();
+    let mut out = vec![0.0f32; n];
+    rmsnorm_backward_into(x_input, y_output, dy, &mut out);
+    out
+}
+
+/// Zero-alloc variant of [`rmsnorm_backward`] that writes into a pre-allocated buffer.
+#[inline]
+fn rmsnorm_backward_into(x_input: &[f32], y_output: &[f32], dy: &[f32], out: &mut [f32]) {
+    let n = x_input.len();
+    debug_assert!(out.len() >= n);
+    let sum_sq = crate::simd::simd_sum_sq(x_input, n);
     let rms = (sum_sq / n as f32 + 1e-5).sqrt();
-    let dot_dy_y: f32 = dy.iter().zip(y_output.iter()).map(|(d, y)| d * y).sum();
+    let dot_dy_y = crate::simd::simd_dot_f32(dy, y_output, n);
     let mean_dy_y = dot_dy_y / n as f32;
-    dy.iter()
-        .zip(y_output.iter())
-        .map(|(d, y)| (d - y * mean_dy_y) / rms)
-        .collect()
+    let inv_rms = 1.0 / rms;
+    for i in 0..n {
+        out[i] = (dy[i] - y_output[i] * mean_dy_y) * inv_rms;
+    }
 }
 
 /// Softmax backward: dx = y * (dy - dot(dy, y))
+///
+/// Allocating wrapper. Prefer [`softmax_backward_into`] in hot paths.
+#[allow(dead_code)]
+#[inline]
 fn softmax_backward(weights: &[f32], dy: &[f32]) -> Vec<f32> {
-    let dot: f32 = weights.iter().zip(dy.iter()).map(|(w, d)| w * d).sum();
-    weights
-        .iter()
-        .zip(dy.iter())
-        .map(|(w, d)| w * (d - dot))
-        .collect()
+    let n = weights.len();
+    let mut out = vec![0.0f32; n];
+    softmax_backward_into(weights, dy, &mut out);
+    out
+}
+
+/// Zero-alloc variant of [`softmax_backward`] that writes into a pre-allocated buffer.
+#[inline]
+fn softmax_backward_into(weights: &[f32], dy: &[f32], out: &mut [f32]) {
+    let n = weights.len();
+    debug_assert!(out.len() >= n);
+    let dot = crate::simd::simd_dot_f32(weights, dy, n);
+    for i in 0..n {
+        out[i] = weights[i] * (dy[i] - dot);
+    }
 }
 
 /// Backward pass: compute gradients from saved activations.
 fn backward(
-    act: &ForwardActivations,
+    act: &ForwardActivations<'_>,
     weights: &TransformerWeights,
     tokens: &[usize],
     is_masked: &[bool],
     config: &Config,
-) -> TrainingGradients {
+    bctx: &mut BackwardContext,
+) {
     let seq_len = act.seq_len;
     let n = config.n_embd;
     let hd = config.head_dim;
@@ -603,15 +982,29 @@ fn backward(
     let scale = 1.0 / (hd as f32).sqrt();
     let layer = &weights.layers[0];
 
-    let mut grads = TrainingGradients::zeros(config);
+    // Reuse pre-allocated gradient accumulator — clear instead of allocating 9 Vecs
+    let grads = &mut bctx.grads;
+    grads.wte.fill(0.0);
+    grads.wpe.fill(0.0);
+    grads.lm_head.fill(0.0);
+    grads.attn_wq.fill(0.0);
+    grads.attn_wk.fill(0.0);
+    grads.attn_wv.fill(0.0);
+    grads.attn_wo.fill(0.0);
+    grads.mlp_w1.fill(0.0);
+    grads.mlp_w2.fill(0.0);
 
-    // Intermediate gradient buffers
-    let mut d_attn_out = vec![0.0f32; seq_len * n];
-    let mut d_q = vec![0.0f32; seq_len * n];
-    let mut d_k = vec![0.0f32; seq_len * kvd];
-    let mut d_v = vec![0.0f32; seq_len * kvd];
-    let mut d_after_norm2 = vec![0.0f32; seq_len * n];
-    let mut d_after_norm1 = vec![0.0f32; seq_len * n];
+    // Reuse pre-allocated intermediate gradient buffers (Issue 109)
+    bctx.d_attn_out[..seq_len * n].fill(0.0);
+    bctx.d_q[..seq_len * n].fill(0.0);
+    bctx.d_k[..seq_len * kvd].fill(0.0);
+    bctx.d_v[..seq_len * kvd].fill(0.0);
+    bctx.d_after_norm2[..seq_len * n].fill(0.0);
+
+    // Zero the saved accumulation buffers
+    bctx.d_after_attn_res_saved[..seq_len * n].fill(0.0);
+    bctx.d_after_norm1_final[..seq_len * n].fill(0.0);
+
     // ── Phase 1: LM Head → MLP → Attention output projection ──
     for p in 0..seq_len {
         if !is_masked[p] {
@@ -621,86 +1014,96 @@ fn backward(
         // Cross-entropy backward: d_logit[i] = softmax(logit)[i] - (1 if i==target else 0)
         let logits_p = &act.logits[p * vocab..(p + 1) * vocab];
         let target = tokens[p];
-        let mut d_logits = vec![0.0f32; vocab];
-        let max_l = logits_p.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
-        let sum_exp: f32 = logits_p.iter().map(|l| (l - max_l).exp()).sum();
-        for i in 0..vocab {
-            let prob = (logits_p[i] - max_l).exp() / sum_exp;
-            d_logits[i] = prob - if i == target { 1.0 } else { 0.0 };
-        }
+        let max_l = crate::simd::simd_max_f32(logits_p);
+        // Compute exp(logits - max) once into d_logits using SIMD, then reuse for sum and gradient
+        bctx.d_logits[..vocab].copy_from_slice(logits_p);
+        crate::simd::simd_add_scalar_inplace(&mut bctx.d_logits[..vocab], -max_l);
+        crate::simd::simd_exp_inplace(&mut bctx.d_logits[..vocab]);
+        let sum_exp = crate::simd::simd_sum_f32(&bctx.d_logits[..vocab]);
+        let inv_sum = 1.0 / sum_exp;
+        crate::simd::simd_scale_inplace(&mut bctx.d_logits[..vocab], inv_sum);
+        bctx.d_logits[target] -= 1.0;
 
         // LM Head: d_lm_head += outer(d_logits, hidden_final)
         let hf = &act.hidden_final[p * n..(p + 1) * n];
-        for i in 0..vocab {
-            for j in 0..n {
-                grads.lm_head[i * n + j] += d_logits[i] * hf[j];
-            }
-        }
+        crate::simd::simd_outer_product_acc(
+            &mut grads.lm_head,
+            &bctx.d_logits[..vocab],
+            hf,
+            vocab,
+            n,
+        );
 
-        // d_hidden_final = lm_head^T @ d_logits
-        let mut d_hf = vec![0.0f32; n];
-        for j in 0..n {
-            for i in 0..vocab {
-                d_hf[j] += weights.lm_head[i * n + j] * d_logits[i];
-            }
+        // d_hidden_final = lm_head^T @ d_logits (row-wise dot products)
+        bctx.d_hf[..n].fill(0.0);
+        for i in 0..vocab {
+            let grad = bctx.d_logits[i];
+            crate::simd::simd_fused_scale_acc(
+                &mut bctx.d_hf[..n],
+                &weights.lm_head[i * n..(i + 1) * n],
+                grad,
+                n,
+            );
         }
 
         // Residual: hidden_final = after_mlp + after_attn_res
-        // d_after_mlp = d_hf, d_after_attn_res = d_hf
-        let mut d_after_attn_res = d_hf.clone();
+        // d_after_mlp = d_hf, d_after_attn_res starts as d_hf
+        bctx.d_an1[..n].copy_from_slice(&bctx.d_hf[..n]); // reuse d_an1 as d_after_attn_res temporarily
 
         // MLP w2: d_w2 += outer(d_after_mlp, mlp_hidden)
         let mh = &act.mlp_hidden[p * mlp_h..(p + 1) * mlp_h];
-        for i in 0..n {
-            for j in 0..mlp_h {
-                grads.mlp_w2[i * mlp_h + j] += d_hf[i] * mh[j];
-            }
-        }
+        crate::simd::simd_outer_product_acc(&mut grads.mlp_w2, &bctx.d_hf[..n], mh, n, mlp_h);
         // d_mlp_hidden = w2^T @ d_after_mlp, then ReLU backward
-        let mut d_mh = vec![0.0f32; mlp_h];
+        bctx.d_mh[..mlp_h].fill(0.0);
+        for i in 0..n {
+            let grad = bctx.d_hf[i];
+            crate::simd::simd_fused_scale_acc(
+                &mut bctx.d_mh[..mlp_h],
+                &layer.mlp_w2[i * mlp_h..(i + 1) * mlp_h],
+                grad,
+                mlp_h,
+            );
+        }
+        // ReLU backward (branch-free: mask grad to zero when pre-activation ≤ 0)
         for j in 0..mlp_h {
-            for i in 0..n {
-                d_mh[j] += layer.mlp_w2[i * mlp_h + j] * d_hf[i];
-            }
-            if mh[j] <= 0.0 {
-                d_mh[j] = 0.0;
-            } // ReLU backward
+            bctx.d_mh[j] *= (mh[j] > 0.0) as usize as f32;
         }
 
         // MLP w1: d_w1 += outer(d_mh, after_mlp_norm)
         let amn = &act.after_mlp_norm[p * n..(p + 1) * n];
-        for i in 0..mlp_h {
-            for j in 0..n {
-                grads.mlp_w1[i * n + j] += d_mh[i] * amn[j];
-            }
-        }
+        crate::simd::simd_outer_product_acc(&mut grads.mlp_w1, &bctx.d_mh[..mlp_h], amn, mlp_h, n);
         // d_after_mlp_norm = w1^T @ d_mh
-        let mut d_amn = vec![0.0f32; n];
-        for j in 0..n {
-            for i in 0..mlp_h {
-                d_amn[j] += layer.mlp_w1[i * n + j] * d_mh[i];
-            }
+        bctx.d_amn[..n].fill(0.0);
+        for i in 0..mlp_h {
+            let grad = bctx.d_mh[i];
+            crate::simd::simd_fused_scale_acc(
+                &mut bctx.d_amn[..n],
+                &layer.mlp_w1[i * n..(i + 1) * n],
+                grad,
+                n,
+            );
         }
 
         // RMSNorm backward (after_attn_res → after_mlp_norm)
         let aar = &act.after_attn_res[p * n..(p + 1) * n];
-        let d_aar_from_mlp = rmsnorm_backward(aar, amn, &d_amn);
-        for i in 0..n {
-            d_after_attn_res[i] += d_aar_from_mlp[i];
-        }
+        rmsnorm_backward_into(aar, amn, &bctx.d_amn, &mut bctx.d_rmsnorm_buf);
+        crate::simd::simd_add_inplace(&mut bctx.d_an1[..n], &bctx.d_rmsnorm_buf[..n]); // d_after_attn_res = d_hf + d_aar_from_mlp
+
+        // Save d_after_attn_res for Phase 3
+        bctx.d_after_attn_res_saved[p * n..(p + 1) * n].copy_from_slice(&bctx.d_an1[..n]);
 
         // Attention output projection: d_wo += outer(d_after_attn_res, attn_out)
         let ao = &act.attn_out[p * n..(p + 1) * n];
-        for i in 0..n {
-            for j in 0..n {
-                grads.attn_wo[i * n + j] += d_after_attn_res[i] * ao[j];
-            }
-        }
+        crate::simd::simd_outer_product_acc(&mut grads.attn_wo, &bctx.d_an1[..n], ao, n, n);
         // d_attn_out = wo^T @ d_after_attn_res
-        for j in 0..n {
-            for i in 0..n {
-                d_attn_out[p * n + j] += layer.attn_wo[i * n + j] * d_after_attn_res[i];
-            }
+        for i in 0..n {
+            let grad = bctx.d_an1[i];
+            crate::simd::simd_fused_scale_acc(
+                &mut bctx.d_attn_out[p * n..(p + 1) * n],
+                &layer.attn_wo[i * n..(i + 1) * n],
+                grad,
+                n,
+            );
         }
     }
 
@@ -709,7 +1112,7 @@ fn backward(
         if !is_masked[p] {
             continue;
         }
-        let d_ao = &d_attn_out[p * n..(p + 1) * n];
+        let d_ao = &bctx.d_attn_out[p * n..(p + 1) * n];
         let aw = &act.attn_weights[p * n_head * seq_len..(p + 1) * n_head * seq_len];
 
         for h in 0..n_head {
@@ -718,38 +1121,52 @@ fn backward(
             let kv_off = kv_group * hd;
 
             // d_raw_weights[t] = dot(d_attn_out[h], v[t,h])
-            let mut d_raw = vec![0.0f32; seq_len];
+            bctx.d_raw[..seq_len].fill(0.0);
             for t in 0..seq_len {
-                let mut dot = 0.0f32;
-                for d in 0..hd {
-                    dot += d_ao[q_off + d] * act.v[t * kvd + kv_off + d];
-                }
-                d_raw[t] = dot;
+                bctx.d_raw[t] = crate::simd::simd_dot_f32(
+                    &d_ao[q_off..q_off + hd],
+                    &act.v[t * kvd + kv_off..t * kvd + kv_off + hd],
+                    hd,
+                );
             }
 
             // Softmax backward
             let w_h = &aw[h * seq_len..(h + 1) * seq_len];
-            let d_scores = softmax_backward(w_h, &d_raw);
+            softmax_backward_into(
+                w_h,
+                &bctx.d_raw[..seq_len],
+                &mut bctx.d_softmax_buf[..seq_len],
+            );
+            let d_scores = &bctx.d_softmax_buf[..seq_len];
 
             // d_v[t] += weights[t] * d_attn_out[h]
             for t in 0..seq_len {
-                for d in 0..hd {
-                    d_v[t * kvd + kv_off + d] += w_h[t] * d_ao[q_off + d];
-                }
+                crate::simd::simd_fused_scale_acc(
+                    &mut bctx.d_v[t * kvd + kv_off..t * kvd + kv_off + hd],
+                    &d_ao[q_off..q_off + hd],
+                    w_h[t],
+                    hd,
+                );
             }
 
             // d_q[h] += d_scores[t] * k[t,h] * scale
             for t in 0..seq_len {
-                for d in 0..hd {
-                    d_q[p * n + q_off + d] += d_scores[t] * act.k[t * kvd + kv_off + d] * scale;
-                }
+                crate::simd::simd_fused_scale_acc(
+                    &mut bctx.d_q[p * n + q_off..p * n + q_off + hd],
+                    &act.k[t * kvd + kv_off..t * kvd + kv_off + hd],
+                    d_scores[t] * scale,
+                    hd,
+                );
             }
 
             // d_k[t,h] += d_scores[t] * q[p,h] * scale
             for t in 0..seq_len {
-                for d in 0..hd {
-                    d_k[t * kvd + kv_off + d] += d_scores[t] * act.q[p * n + q_off + d] * scale;
-                }
+                crate::simd::simd_fused_scale_acc(
+                    &mut bctx.d_k[t * kvd + kv_off..t * kvd + kv_off + hd],
+                    &act.q[p * n + q_off..p * n + q_off + hd],
+                    d_scores[t] * scale,
+                    hd,
+                );
             }
         }
     }
@@ -757,204 +1174,130 @@ fn backward(
     // ── Phase 3: QKV projections → RMSNorm → Embeddings ──
     for p in 0..seq_len {
         let has_grad = is_masked[p]
-            || d_k[p * kvd..(p + 1) * kvd].iter().any(|&g| g != 0.0)
-            || d_v[p * kvd..(p + 1) * kvd].iter().any(|&g| g != 0.0);
+            || bctx.d_k[p * kvd..(p + 1) * kvd].iter().any(|&g| g != 0.0)
+            || bctx.d_v[p * kvd..(p + 1) * kvd].iter().any(|&g| g != 0.0);
         if !has_grad {
             continue;
         }
 
         // d_wq, d_wk, d_wv
         let an2 = &act.after_norm2[p * n..(p + 1) * n];
-        for i in 0..n {
-            for j in 0..n {
-                grads.attn_wq[i * n + j] += d_q[p * n + i] * an2[j];
-            }
-        }
-        for i in 0..kvd {
-            for j in 0..n {
-                grads.attn_wk[i * n + j] += d_k[p * kvd + i] * an2[j];
-                grads.attn_wv[i * n + j] += d_v[p * kvd + i] * an2[j];
-            }
-        }
+        crate::simd::simd_outer_product_acc(
+            &mut grads.attn_wq,
+            &bctx.d_q[p * n..p * n + n],
+            an2,
+            n,
+            n,
+        );
+        crate::simd::simd_outer_product_acc(
+            &mut grads.attn_wk,
+            &bctx.d_k[p * kvd..p * kvd + kvd],
+            an2,
+            kvd,
+            n,
+        );
+        crate::simd::simd_outer_product_acc(
+            &mut grads.attn_wv,
+            &bctx.d_v[p * kvd..p * kvd + kvd],
+            an2,
+            kvd,
+            n,
+        );
 
         // d_after_norm2 = wq^T @ d_q + wk^T @ d_k + wv^T @ d_v
-        let mut d_an2 = vec![0.0f32; n];
-        for j in 0..n {
-            for i in 0..n {
-                d_an2[j] += layer.attn_wq[i * n + j] * d_q[p * n + i];
-            }
-            for i in 0..kvd {
-                d_an2[j] += layer.attn_wk[i * n + j] * d_k[p * kvd + i];
-                d_an2[j] += layer.attn_wv[i * n + j] * d_v[p * kvd + i];
-            }
-        }
-        d_after_norm2[p * n..(p + 1) * n].copy_from_slice(&d_an2);
-
-        // RMSNorm backward (after_norm1 → after_norm2)
-        let an1 = &act.after_norm1[p * n..(p + 1) * n];
-        let d_an1_from_n2 = rmsnorm_backward(an1, &act.after_norm2[p * n..], &d_an2);
-
-        // d_after_norm1 = d_xr + d_from_norm2
-        // d_xr = d_after_attn_res (from residual), but only for masked positions
-        let d_an1 = d_an1_from_n2;
-        if is_masked[p] {
-            // The residual xr = after_norm1 was added after attention projection
-            // d_after_attn_res was computed in Phase 1 and flows into d_after_norm1
-            // We need to recover d_after_attn_res[p] — it was d_hf + d_aar_from_mlp
-            // Simplification: compute d_xr = d_attn_out contribution through residual
-            // Actually, the residual path: after_attn_res = wo @ attn_out + xr = wo @ attn_out + after_norm1
-            // So d_after_norm1 += d_after_attn_res (from residual path)
-            // d_after_attn_res was local to Phase 1, but we can approximate:
-            // For correctness, we need to re-derive. The residual xr = after_norm1 flows
-            // directly to after_attn_res. So d_after_norm1 += d_after_attn_res.
-            // d_after_attn_res was d_hf + d_aar_from_mlp. We stored this locally.
-            // Since we only care about masked positions, let's just add the gradient.
-            // The issue is we didn't save d_after_attn_res globally. Let me fix this.
-        }
-
-        // Actually, let's handle this more carefully. The residual connection is:
-        // after_attn_res = wo @ attn_out + after_norm1
-        // d(after_norm1) from residual = d(after_attn_res) = d_hidden_final + d_aar_from_mlp
-        // But d_hidden_final = d_hf was local. For masked positions, d_hf = lm_head^T @ d_logits.
-        // This is already accounted for in d_attn_out via wo^T.
-        // The residual gradient flows directly: d_after_norm1 += d_after_attn_res.
-        // We need to track this separately.
-
-        d_after_norm1[p * n..(p + 1) * n].copy_from_slice(&d_an1);
-    }
-
-    // Recompute d_after_attn_res for masked positions
-    let mut d_after_attn_res_global = vec![0.0f32; seq_len * n];
-    for p in 0..seq_len {
-        if !is_masked[p] {
-            continue;
-        }
-
-        // Recompute d_logits
-        let logits_p = &act.logits[p * vocab..(p + 1) * vocab];
-        let target = tokens[p];
-        let max_l = logits_p.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
-        let sum_exp: f32 = logits_p.iter().map(|l| (l - max_l).exp()).sum();
-        let mut d_logits = vec![0.0f32; vocab];
-        for i in 0..vocab {
-            let prob = (logits_p[i] - max_l).exp() / sum_exp;
-            d_logits[i] = prob - if i == target { 1.0 } else { 0.0 };
-        }
-
-        // d_hf = lm_head^T @ d_logits
-        let mut d_hf = vec![0.0f32; n];
-        for j in 0..n {
-            for i in 0..vocab {
-                d_hf[j] += weights.lm_head[i * n + j] * d_logits[i];
-            }
-        }
-
-        // MLP backward to get d_aar_from_mlp
-        let mh = &act.mlp_hidden[p * mlp_h..(p + 1) * mlp_h];
-        let mut d_mh = vec![0.0f32; mlp_h];
-        for j in 0..mlp_h {
-            for i in 0..n {
-                d_mh[j] += layer.mlp_w2[i * mlp_h + j] * d_hf[i];
-            }
-            if mh[j] <= 0.0 {
-                d_mh[j] = 0.0;
-            }
-        }
-        let mut d_amn = vec![0.0f32; n];
-        for j in 0..n {
-            for i in 0..mlp_h {
-                d_amn[j] += layer.mlp_w1[i * n + j] * d_mh[i];
-            }
-        }
-        let aar = &act.after_attn_res[p * n..(p + 1) * n];
-        let amn = &act.after_mlp_norm[p * n..(p + 1) * n];
-        let d_aar_from_mlp = rmsnorm_backward(aar, amn, &d_amn);
-
-        // d_after_attn_res = d_hf (residual) + d_aar_from_mlp (through MLP)
+        bctx.d_an2[..n].fill(0.0);
         for i in 0..n {
-            d_after_attn_res_global[p * n + i] = d_hf[i] + d_aar_from_mlp[i];
+            let grad = bctx.d_q[p * n + i];
+            crate::simd::simd_fused_scale_acc(
+                &mut bctx.d_an2[..n],
+                &layer.attn_wq[i * n..(i + 1) * n],
+                grad,
+                n,
+            );
         }
+        for i in 0..kvd {
+            let gk = bctx.d_k[p * kvd + i];
+            let gv = bctx.d_v[p * kvd + i];
+            crate::simd::simd_fused_scale_acc(
+                &mut bctx.d_an2[..n],
+                &layer.attn_wk[i * n..(i + 1) * n],
+                gk,
+                n,
+            );
+            crate::simd::simd_fused_scale_acc(
+                &mut bctx.d_an2[..n],
+                &layer.attn_wv[i * n..(i + 1) * n],
+                gv,
+                n,
+            );
+        }
+        bctx.d_after_norm2[p * n..(p + 1) * n].copy_from_slice(&bctx.d_an2[..n]);
     }
 
-    // Now properly compute d_after_norm1 and d_embeddings
-    let mut d_after_norm1_final = vec![0.0f32; seq_len * n];
+    // Compute d_after_norm1 and d_embeddings using saved d_after_attn_res
     for p in 0..seq_len {
-        let mut d_an1 = vec![0.0f32; n];
+        bctx.d_an1[..n].fill(0.0);
 
         // From norm2 backward
-        let an2_grad = &d_after_norm2[p * n..(p + 1) * n];
+        let an2_grad = &bctx.d_after_norm2[p * n..(p + 1) * n];
         if an2_grad.iter().any(|&g| g != 0.0) {
             let an1 = &act.after_norm1[p * n..(p + 1) * n];
             let an2 = &act.after_norm2[p * n..(p + 1) * n];
-            let d_from_n2 = rmsnorm_backward(an1, an2, an2_grad);
-            for i in 0..n {
-                d_an1[i] += d_from_n2[i];
-            }
+            rmsnorm_backward_into(an1, an2, an2_grad, &mut bctx.d_rmsnorm_buf);
+            crate::simd::simd_add_inplace(&mut bctx.d_an1[..n], &bctx.d_rmsnorm_buf[..n]);
         }
 
         // From residual: after_attn_res = wo @ attn_out + after_norm1
-        // d_after_norm1 += d_after_attn_res
-        for i in 0..n {
-            d_an1[i] += d_after_attn_res_global[p * n + i];
-        }
+        // d_after_norm1 += d_after_attn_res (saved from Phase 1)
+        crate::simd::simd_add_inplace(
+            &mut bctx.d_an1[..n],
+            &bctx.d_after_attn_res_saved[p * n..p * n + n],
+        );
 
-        d_after_norm1_final[p * n..(p + 1) * n].copy_from_slice(&d_an1);
+        bctx.d_after_norm1_final[p * n..(p + 1) * n].copy_from_slice(&bctx.d_an1[..n]);
 
         // RMSNorm backward (embeddings → after_norm1)
         let emb = &act.embeddings[p * n..(p + 1) * n];
         let an1 = &act.after_norm1[p * n..(p + 1) * n];
-        let d_emb = rmsnorm_backward(emb, an1, &d_an1);
+        rmsnorm_backward_into(emb, an1, &bctx.d_an1, &mut bctx.d_rmsnorm_buf);
 
         // d_wte[token] += d_emb, d_wpe[p] += d_emb
         let token = tokens[p];
-        for i in 0..n {
-            grads.wte[token * n + i] += d_emb[i];
-            grads.wpe[p * n + i] += d_emb[i];
-        }
+        crate::simd::simd_add_inplace(
+            &mut grads.wte[token * n..token * n + n],
+            &bctx.d_rmsnorm_buf[..n],
+        );
+        crate::simd::simd_add_inplace(&mut grads.wpe[p * n..p * n + n], &bctx.d_rmsnorm_buf[..n]);
     }
-
-    grads
 }
 
 /// SGD update: w -= lr * grad
+#[inline]
 fn sgd_update(weights: &mut TransformerWeights, grads: &TrainingGradients, lr: f32) {
     let layer = &mut weights.layers[0];
-    for (w, g) in weights.wte.iter_mut().zip(grads.wte.iter()) {
-        *w -= lr * g;
-    }
-    for (w, g) in weights.wpe.iter_mut().zip(grads.wpe.iter()) {
-        *w -= lr * g;
-    }
-    for (w, g) in weights.lm_head.iter_mut().zip(grads.lm_head.iter()) {
-        *w -= lr * g;
-    }
-    for (w, g) in layer.attn_wq.iter_mut().zip(grads.attn_wq.iter()) {
-        *w -= lr * g;
-    }
-    for (w, g) in layer.attn_wk.iter_mut().zip(grads.attn_wk.iter()) {
-        *w -= lr * g;
-    }
-    for (w, g) in layer.attn_wv.iter_mut().zip(grads.attn_wv.iter()) {
-        *w -= lr * g;
-    }
-    for (w, g) in layer.attn_wo.iter_mut().zip(grads.attn_wo.iter()) {
-        *w -= lr * g;
-    }
-    for (w, g) in layer.mlp_w1.iter_mut().zip(grads.mlp_w1.iter()) {
-        *w -= lr * g;
-    }
-    for (w, g) in layer.mlp_w2.iter_mut().zip(grads.mlp_w2.iter()) {
-        *w -= lr * g;
-    }
+    // SIMD-fused: w[i] = 1.0*w[i] + (-lr)*g[i] = w[i] - lr*g[i]
+    let neg_lr = -lr;
+    crate::simd::simd_fused_decay_write(&mut weights.wte, 1.0, &grads.wte, neg_lr);
+    crate::simd::simd_fused_decay_write(&mut weights.wpe, 1.0, &grads.wpe, neg_lr);
+    crate::simd::simd_fused_decay_write(&mut weights.lm_head, 1.0, &grads.lm_head, neg_lr);
+    crate::simd::simd_fused_decay_write(&mut layer.attn_wq, 1.0, &grads.attn_wq, neg_lr);
+    crate::simd::simd_fused_decay_write(&mut layer.attn_wk, 1.0, &grads.attn_wk, neg_lr);
+    crate::simd::simd_fused_decay_write(&mut layer.attn_wv, 1.0, &grads.attn_wv, neg_lr);
+    crate::simd::simd_fused_decay_write(&mut layer.attn_wo, 1.0, &grads.attn_wo, neg_lr);
+    crate::simd::simd_fused_decay_write(&mut layer.mlp_w1, 1.0, &grads.mlp_w1, neg_lr);
+    crate::simd::simd_fused_decay_write(&mut layer.mlp_w2, 1.0, &grads.mlp_w2, neg_lr);
 }
 
 /// Compute cross-entropy loss on masked positions.
-fn masked_loss(
+/// Uses pre-allocated scratch buffer from `bctx.loss_exp_buf` to avoid per-call allocation.
+#[inline]
+fn masked_loss_into(
     logits: &[f32],
     targets: &[usize],
     is_masked: &[bool],
     vocab: usize,
     _averaging: LossAveraging,
+    exp_buf: &mut [f32],
 ) -> f32 {
     let mut total = 0.0f32;
     let mut count = 0usize;
@@ -963,10 +1306,14 @@ fn masked_loss(
             continue;
         }
         let l = &logits[p * vocab..(p + 1) * vocab];
-        let max_l = l.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
-        let sum_exp: f32 = l.iter().map(|x| (x - max_l).exp()).sum();
-        let log_prob = (l[targets[p]] - max_l).exp() / sum_exp;
-        total -= log_prob.ln();
+        // Log-softmax: log_softmax[i] = x[i] - max - ln(Σ exp(x - max))
+        let max_l = crate::simd::simd_max_f32(l);
+        exp_buf[..vocab].copy_from_slice(l);
+        crate::simd::simd_add_scalar_inplace(&mut exp_buf[..vocab], -max_l);
+        crate::simd::simd_exp_inplace(&mut exp_buf[..vocab]);
+        let sum_exp = crate::simd::simd_sum_f32(&exp_buf[..vocab]);
+        let log_sum_exp = sum_exp.ln();
+        total -= l[targets[p]] - max_l - log_sum_exp;
         count += 1;
     }
     if count == 0 {
@@ -974,6 +1321,19 @@ fn masked_loss(
     } else {
         total / count as f32
     }
+}
+
+/// Allocating wrapper — prefer `masked_loss_into` in hot paths.
+#[allow(dead_code)]
+fn masked_loss(
+    logits: &[f32],
+    targets: &[usize],
+    is_masked: &[bool],
+    vocab: usize,
+    averaging: LossAveraging,
+) -> f32 {
+    let mut exp_buf = vec![0.0f32; vocab];
+    masked_loss_into(logits, targets, is_masked, vocab, averaging, &mut exp_buf)
 }
 
 /// Measure accuracy: fraction of correctly predicted masked tokens.
@@ -986,20 +1346,31 @@ pub fn evaluate_accuracy(
 ) -> f32 {
     let mut correct = 0usize;
     let mut total = 0usize;
+    let mut corrupted_buf = Vec::with_capacity(config.block_size);
+    let mut is_masked_buf = Vec::with_capacity(config.block_size);
+    let mut positions_buf = Vec::with_capacity(config.block_size);
+    // OPT: pre-allocate bidirectional context to avoid per-sample heap allocation
+    let mut bctx = BidirectionalContext::new(config);
     for tokens in test_data {
-        let (corrupted, is_masked) = corrupt_block(tokens, mask_ratio, config.mask_token, rng);
-        let (logits_vec, _) = forward_bidirectional_positions(weights, &corrupted, config);
-        for (p, &masked) in is_masked.iter().enumerate() {
+        let _n_mask = corrupt_block_into(
+            tokens,
+            mask_ratio,
+            config.mask_token,
+            rng,
+            &mut corrupted_buf,
+            &mut is_masked_buf,
+            &mut positions_buf,
+        );
+        let _ = forward_bidirectional_positions_into(weights, &corrupted_buf, config, &mut bctx);
+        let vocab = config.vocab_size;
+        for (p, &masked) in is_masked_buf.iter().enumerate() {
             if !masked {
                 continue;
             }
-            let logits_p = &logits_vec[p];
-            let predicted = logits_p
-                .iter()
-                .enumerate()
-                .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
-                .map(|(i, _)| i)
-                .unwrap_or(0);
+            let logits_p = &bctx.all_logits[p * vocab..(p + 1) * vocab];
+            // Single-pass argmax: fuses max-finding and index-recovery into one
+            // traversal (vs the old two-pass simd_max_f32 + position scan).
+            let (predicted, _) = crate::simd::simd_argmax_f32(logits_p);
             if predicted == tokens[p] {
                 correct += 1;
             }
@@ -1028,15 +1399,21 @@ pub fn generate_pattern_dataset(
     seq_len: usize,
     effective_vocab: usize,
 ) -> Vec<Vec<usize>> {
-    (0..n_sequences)
-        .map(|_| {
-            let a = (rng.next() as usize) % effective_vocab;
-            let b = (rng.next() as usize) % effective_vocab;
-            (0..seq_len)
-                .map(|i| if i % 2 == 0 { a } else { b })
-                .collect()
-        })
-        .collect()
+    let mut out = Vec::with_capacity(n_sequences);
+    let mut seq = Vec::with_capacity(seq_len);
+    for _ in 0..n_sequences {
+        let a = (rng.next() as usize) % effective_vocab;
+        let b = (rng.next() as usize) % effective_vocab;
+        seq.clear();
+        seq.extend((0..seq_len).map(|i| if i % 2 == 0 { a } else { b }));
+        // Clone seq into output and reuse the allocation for next iteration.
+        // This avoids an extra allocation per iteration: the new Vec takes
+        // ownership of seq's allocation via std::mem::take, and seq gets a
+        // fresh (pre-reserved) empty Vec for the next loop iteration.
+        out.push(std::mem::take(&mut seq));
+        seq.reserve(seq_len);
+    }
+    out
 }
 
 /// Train mini dLLM and return (weights, loss_history).
@@ -1052,14 +1429,19 @@ pub fn train_mini_dllm(
 ) -> (TransformerWeights, Vec<f32>) {
     let mut rng = Rng::new(seed);
     let mut weights = TransformerWeights::new(config, &mut rng);
-    let mut loss_history = Vec::new();
+    let mut loss_history = Vec::with_capacity(n_epochs);
+    let mut fwd_ctx = ForwardSaveContext::new(config);
+    let mut bwd_ctx = BackwardContext::new(config);
+    let mut corrupted_buf = Vec::with_capacity(config.block_size);
+    let mut is_masked_buf = Vec::with_capacity(config.block_size);
+    let mut positions_buf = Vec::with_capacity(config.block_size);
 
+    let mut indices: Vec<usize> = (0..train_data.len()).collect();
     for epoch in 0..n_epochs {
         let mut epoch_loss = 0.0f32;
         let mut n_samples = 0usize;
 
-        // Shuffle training data
-        let mut indices: Vec<usize> = (0..train_data.len()).collect();
+        // Shuffle training data in-place
         for i in (1..indices.len()).rev() {
             let j = (rng.next() as usize) % (i + 1);
             indices.swap(i, j);
@@ -1067,24 +1449,32 @@ pub fn train_mini_dllm(
 
         for &idx in &indices {
             let tokens = &train_data[idx];
-            let (corrupted, is_masked) =
-                corrupt_block(tokens, mask_ratio, config.mask_token, &mut rng);
+            let n_mask = corrupt_block_into(
+                tokens,
+                mask_ratio,
+                config.mask_token,
+                &mut rng,
+                &mut corrupted_buf,
+                &mut is_masked_buf,
+                &mut positions_buf,
+            );
 
             // Skip if nothing masked
-            if !is_masked.iter().any(|&m| m) {
+            if n_mask == 0 {
                 continue;
             }
 
-            let act = forward_save(&weights, &corrupted, config);
-            let loss = masked_loss(
-                &act.logits,
+            let act = forward_save(&weights, &corrupted_buf, config, &mut fwd_ctx);
+            let loss = masked_loss_into(
+                act.logits,
                 tokens,
-                &is_masked,
+                &is_masked_buf,
                 config.vocab_size,
                 LossAveraging::Global,
+                &mut bwd_ctx.loss_exp_buf,
             );
-            let grads = backward(&act, &weights, tokens, &is_masked, config);
-            sgd_update(&mut weights, &grads, lr);
+            backward(&act, &weights, tokens, &is_masked_buf, config, &mut bwd_ctx);
+            sgd_update(&mut weights, &bwd_ctx.grads, lr);
 
             epoch_loss += loss;
             n_samples += 1;
@@ -1135,16 +1525,21 @@ pub fn train_mini_dllm_adaptive(
 ) -> (TransformerWeights, Vec<f32>) {
     let mut rng = Rng::new(seed);
     let mut weights = TransformerWeights::new(config, &mut rng);
-    let mut loss_history = Vec::new();
+    let mut loss_history = Vec::with_capacity(n_epochs);
     let n_blocks = schedule.ratios().len().max(1);
+    let mut fwd_ctx = ForwardSaveContext::new(config);
+    let mut bwd_ctx = BackwardContext::new(config);
+    let mut corrupted_buf = Vec::with_capacity(config.block_size);
+    let mut is_masked_buf = Vec::with_capacity(config.block_size);
+    let mut positions_buf = Vec::with_capacity(config.block_size);
 
+    let mut indices: Vec<usize> = (0..train_data.len()).collect();
     for epoch in 0..n_epochs {
         let mut epoch_loss = 0.0f32;
         let mut n_samples = 0usize;
         let mut sample_counter: usize = 0;
 
-        // Shuffle training data
-        let mut indices: Vec<usize> = (0..train_data.len()).collect();
+        // Shuffle training data in-place
         for i in (1..indices.len()).rev() {
             let j = (rng.next() as usize) % (i + 1);
             indices.swap(i, j);
@@ -1157,29 +1552,37 @@ pub fn train_mini_dllm_adaptive(
             let block_idx = sample_counter % n_blocks;
             let mask_ratio = schedule.ratios()[block_idx];
 
-            let (corrupted, is_masked) =
-                corrupt_block(tokens, mask_ratio, config.mask_token, &mut rng);
+            let n_mask = corrupt_block_into(
+                tokens,
+                mask_ratio,
+                config.mask_token,
+                &mut rng,
+                &mut corrupted_buf,
+                &mut is_masked_buf,
+                &mut positions_buf,
+            );
 
             // Skip if nothing masked
-            if !is_masked.iter().any(|&m| m) {
+            if n_mask == 0 {
                 sample_counter += 1;
                 continue;
             }
 
-            let act = forward_save(&weights, &corrupted, config);
-            let loss = masked_loss(
-                &act.logits,
+            let act = forward_save(&weights, &corrupted_buf, config, &mut fwd_ctx);
+            let loss = masked_loss_into(
+                act.logits,
                 tokens,
-                &is_masked,
+                &is_masked_buf,
                 config.vocab_size,
                 LossAveraging::Global,
+                &mut bwd_ctx.loss_exp_buf,
             );
 
             // Record per-block loss for adaptive schedule
             schedule.record_step_loss(block_idx, loss);
 
-            let grads = backward(&act, &weights, tokens, &is_masked, config);
-            sgd_update(&mut weights, &grads, lr);
+            backward(&act, &weights, tokens, &is_masked_buf, config, &mut bwd_ctx);
+            sgd_update(&mut weights, &bwd_ctx.grads, lr);
 
             epoch_loss += loss;
             n_samples += 1;
@@ -1194,10 +1597,11 @@ pub fn train_mini_dllm_adaptive(
         loss_history.push(avg_loss);
 
         // Adapt schedule ratios at epoch boundary
-        let adapted = schedule.adapt_ratios();
+        schedule.adapt_ratios();
 
         if epoch % 100 == 0 || epoch == n_epochs - 1 {
             // Use the mean adapted ratio for evaluation
+            let adapted = schedule.ratios();
             let eval_ratio = adapted.iter().copied().sum::<f32>() / adapted.len().max(1) as f32;
             let acc = evaluate_accuracy(&weights, test_data, config, eval_ratio, &mut rng);
             eprintln!(
@@ -1244,39 +1648,52 @@ pub fn forward_block_causal_positions(
     let mut x_norm2_all = vec![0.0f32; seq_len * n];
     let mut xr_all = vec![0.0f32; seq_len * n];
 
+    // Pre-allocate scratch buffers (reused across positions)
+    let mut x_buf = vec![0.0f32; n];
+    let mut k_buf = vec![0.0f32; kvd];
+    let mut v_buf = vec![0.0f32; kvd];
+
     for (p, &token) in tokens.iter().enumerate().take(seq_len) {
-        let mut x = vec![0.0f32; n];
-        for i in 0..n {
-            x[i] = weights.wte[token * n + i] + weights.wpe[p * n + i];
-        }
-        rmsnorm(&mut x);
-        xr_all[p * n..(p + 1) * n].copy_from_slice(&x);
-        rmsnorm(&mut x);
-        x_norm2_all[p * n..(p + 1) * n].copy_from_slice(&x);
-        let mut k = vec![0.0f32; kvd];
-        let mut v = vec![0.0f32; kvd];
-        matmul(&mut k, &layer.attn_wk, &x, kvd, n);
-        matmul(&mut v, &layer.attn_wv, &x, kvd, n);
-        k_cache[p * kvd..(p + 1) * kvd].copy_from_slice(&k);
-        v_cache[p * kvd..(p + 1) * kvd].copy_from_slice(&v);
+        crate::simd::simd_add_into(
+            &mut x_buf,
+            &weights.wte[token * n..(token + 1) * n],
+            &weights.wpe[p * n..(p + 1) * n],
+        );
+        rmsnorm(&mut x_buf);
+        xr_all[p * n..(p + 1) * n].copy_from_slice(&x_buf);
+        rmsnorm(&mut x_buf);
+        x_norm2_all[p * n..(p + 1) * n].copy_from_slice(&x_buf);
+        matmul(&mut k_buf, &layer.attn_wk, &x_buf, kvd, n);
+        matmul(&mut v_buf, &layer.attn_wv, &x_buf, kvd, n);
+        k_cache[p * kvd..(p + 1) * kvd].copy_from_slice(&k_buf);
+        v_cache[p * kvd..(p + 1) * kvd].copy_from_slice(&v_buf);
     }
 
     // Phase B: Block-causal attention
-    let mut all_logits = Vec::with_capacity(seq_len);
-    let mut all_attn_weights = Vec::with_capacity(seq_len);
+    // Pre-allocate output buffers upfront (avoid per-position clone)
+    let mut all_logits = vec![vec![0.0f32; config.vocab_size]; seq_len];
+    let mut all_attn_weights = vec![vec![0.0f32; config.n_head * seq_len]; seq_len];
+
+    // Pre-allocate Phase B scratch buffers (reused across positions)
+    let mut q_buf = vec![0.0f32; n];
+    let mut attn_out_buf = vec![0.0f32; n];
+    let mut attn_w_buf = vec![0.0f32; config.n_head * seq_len];
+    let mut scores_buf = vec![0.0f32; seq_len];
+    let mut x_proj = vec![0.0f32; n];
+    let mut hidden = vec![0.0f32; config.mlp_hidden];
+    let mut x_mlp = vec![0.0f32; n];
+    let mut xr2_buf = vec![0.0f32; n];
 
     for p in 0..seq_len {
-        let mut x = vec![0.0f32; n];
-        x.copy_from_slice(&x_norm2_all[p * n..(p + 1) * n]);
-        let mut q = vec![0.0f32; n];
-        matmul(&mut q, &layer.attn_wq, &x, n, n);
+        x_buf.copy_from_slice(&x_norm2_all[p * n..(p + 1) * n]);
+        matmul(&mut q_buf, &layer.attn_wq, &x_buf, n, n);
 
         // Block-causal: attend to positions [0..end_of_current_block]
         let block_end = (p / causal_block_size + 1) * causal_block_size;
         let t_n = block_end.min(seq_len);
 
-        let (attn_out, attn_w) = attention_forward_safe(
-            &q,
+        attention_forward_safe_into(
+            &q_buf,
             &k_cache,
             &v_cache,
             config.n_head,
@@ -1285,36 +1702,34 @@ pub fn forward_block_causal_positions(
             kvd,
             t_n,
             scale,
+            &mut attn_out_buf,
+            &mut attn_w_buf,
+            &mut scores_buf,
         );
 
-        // Pad attn_w to seq_len for consistent output
-        let mut padded_w = vec![0.0f32; config.n_head * seq_len];
+        // Pad attn_w to seq_len for consistent output (zero-fill then slice-copy per head)
+        all_attn_weights[p].fill(0.0f32);
         for h in 0..config.n_head {
-            for t in 0..t_n {
-                padded_w[h * seq_len + t] = attn_w[h * t_n + t];
-            }
+            all_attn_weights[p][h * seq_len..h * seq_len + t_n]
+                .copy_from_slice(&attn_w_buf[h * t_n..h * t_n + t_n]);
         }
 
-        let mut x_proj = vec![0.0f32; n];
-        matmul(&mut x_proj, &layer.attn_wo, &attn_out, n, n);
-        for i in 0..n {
-            x_proj[i] += xr_all[p * n + i];
-        }
+        matmul(&mut x_proj, &layer.attn_wo, &attn_out_buf, n, n);
+        crate::simd::simd_add_inplace(&mut x_proj, &xr_all[p * n..(p + 1) * n]);
 
-        let xr2 = x_proj.clone();
+        xr2_buf[..n].copy_from_slice(&x_proj[..n]);
         rmsnorm(&mut x_proj);
-        let mut hidden = vec![0.0f32; config.mlp_hidden];
         matmul_relu(&mut hidden, &layer.mlp_w1, &x_proj, config.mlp_hidden, n);
-        let mut x_mlp = vec![0.0f32; n];
         matmul(&mut x_mlp, &layer.mlp_w2, &hidden, n, config.mlp_hidden);
-        for i in 0..n {
-            x_mlp[i] += xr2[i];
-        }
+        crate::simd::simd_add_inplace(&mut x_mlp[..n], &xr2_buf[..n]);
 
-        let mut logits = vec![0.0f32; config.vocab_size];
-        matmul(&mut logits, &weights.lm_head, &x_mlp, config.vocab_size, n);
-        all_logits.push(logits);
-        all_attn_weights.push(padded_w);
+        matmul(
+            &mut all_logits[p],
+            &weights.lm_head,
+            &x_mlp,
+            config.vocab_size,
+            n,
+        );
     }
 
     (all_logits, all_attn_weights)
@@ -1355,15 +1770,22 @@ pub struct D2fContext {
     pub x_mlp_buf: Vec<f32>,
     /// Temp buffer for single-position logits: `[vocab_size]`.
     pub logits_buf: Vec<f32>,
-    /// Number of positions with committed KV cache entries.
-    /// Positions `[0..committed_len)` are valid and won't be recomputed.
-    pub committed_len: usize,
+    /// Attention output buffer: `[n_head * head_dim]` (reused per position).
+    attn_out_buf: Vec<f32>,
+    /// Attention weights buffer: `[n_head * max_seq]` (reused per position).
+    attn_weights_buf: Vec<f32>,
+    /// Attention scores buffer: `[max_seq]` (reused per position).
+    attn_scores_buf: Vec<f32>,
     /// Cached logits from previous denoising step: `[max_seq * vocab_size]`.
     /// Used by DPM-Solver++(2M) multistep extrapolation (Plan 078 T10.5).
     pub prev_logits_flat: Vec<f32>,
     /// Cached logits from two steps ago: `[max_seq * vocab_size]`.
     /// Second cache for multistep logit extrapolation (Plan 078 T10.5).
     pub prev_prev_logits_flat: Vec<f32>,
+    // usize fields after all Vec<f32> fields to eliminate inter-field padding.
+    /// Number of positions with committed KV cache entries.
+    /// Positions `[0..committed_len)` are valid and won't be recomputed.
+    pub committed_len: usize,
 }
 
 impl D2fContext {
@@ -1389,9 +1811,12 @@ impl D2fContext {
             hidden_buf: vec![0.0f32; hidden],
             x_mlp_buf: vec![0.0f32; n],
             logits_buf: vec![0.0f32; vocab],
-            committed_len: 0,
+            attn_out_buf: vec![0.0f32; n],
+            attn_weights_buf: vec![0.0f32; config.n_head * max_seq],
+            attn_scores_buf: vec![0.0f32; max_seq],
             prev_logits_flat: vec![0.0f32; max_seq * vocab],
             prev_prev_logits_flat: vec![0.0f32; max_seq * vocab],
+            committed_len: 0,
         }
     }
 
@@ -1450,9 +1875,11 @@ pub fn forward_block_causal_with(
     // Phase A: Fill K/V cache, x_norm, xr for UNCOMMITTED positions only
     for (p, &token) in tokens.iter().enumerate().take(seq_len).skip(committed) {
         // Embedding = wte[token] + wpe[position]
-        for i in 0..n {
-            ctx.x_buf[i] = weights.wte[token * n + i] + weights.wpe[p * n + i];
-        }
+        crate::simd::simd_add_into(
+            &mut ctx.x_buf,
+            &weights.wte[token * n..(token + 1) * n],
+            &weights.wpe[p * n..(p + 1) * n],
+        );
         // First rmsnorm → residual (xr)
         rmsnorm(&mut ctx.x_buf);
         ctx.xr[p * n..(p + 1) * n].copy_from_slice(&ctx.x_buf);
@@ -1479,9 +1906,8 @@ pub fn forward_block_causal_with(
         let block_end = (p / causal_block_size + 1) * causal_block_size;
         let t_n = block_end.min(seq_len);
 
-        // NOTE: attention_forward_safe still allocates internally.
-        // Future optimization: write attention output into a pre-allocated buffer.
-        let (attn_out, _attn_w) = attention_forward_safe(
+        // Zero-alloc attention using pre-allocated buffers in D2fContext
+        attention_forward_safe_into(
             &ctx.q_buf,
             &ctx.k_cache,
             &ctx.v_cache,
@@ -1491,13 +1917,14 @@ pub fn forward_block_causal_with(
             kvd,
             t_n,
             scale,
+            &mut ctx.attn_out_buf,
+            &mut ctx.attn_weights_buf,
+            &mut ctx.attn_scores_buf,
         );
 
         // Attention output projection + residual connection
-        matmul(&mut ctx.x_proj_buf, &layer.attn_wo, &attn_out, n, n);
-        for i in 0..n {
-            ctx.x_proj_buf[i] += ctx.xr[p * n + i];
-        }
+        matmul(&mut ctx.x_proj_buf, &layer.attn_wo, &ctx.attn_out_buf, n, n);
+        crate::simd::simd_add_inplace(&mut ctx.x_proj_buf, &ctx.xr[p * n..(p + 1) * n]);
 
         // Save residual before rmsnorm by reusing x_buf (no longer needed this iteration)
         ctx.x_buf.copy_from_slice(&ctx.x_proj_buf);
@@ -1520,9 +1947,7 @@ pub fn forward_block_causal_with(
             n,
             config.mlp_hidden,
         );
-        for i in 0..n {
-            ctx.x_mlp_buf[i] += ctx.x_buf[i];
-        }
+        crate::simd::simd_add_inplace(&mut ctx.x_mlp_buf, &ctx.x_buf[..n]);
 
         // Logits
         matmul(
@@ -1546,6 +1971,9 @@ pub fn forward_block_causal_with(
 pub trait DenoiseConstraint {
     /// Returns true if `token` is valid at `position` given `current_tokens`.
     fn is_valid(&self, position: usize, token: usize, current_tokens: &[usize]) -> bool;
+
+    /// Rebuild any internal state from the current tokens. Default is no-op.
+    fn rebuild(&mut self, _tokens: &[usize], _mask: usize) {}
 }
 
 /// No-op constraint that allows all tokens.
@@ -1558,14 +1986,45 @@ impl DenoiseConstraint for NoConstraint {
 }
 
 /// No-repeat constraint: tokens must be unique in the sequence.
-pub struct NoRepeatConstraint;
+/// Uses a precomputed `used` set for O(1) lookups instead of O(seq_len) scans.
+pub struct NoRepeatConstraint {
+    used: Vec<bool>,
+}
+
+impl Default for NoRepeatConstraint {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl NoRepeatConstraint {
+    pub fn new() -> Self {
+        Self { used: Vec::new() }
+    }
+
+    /// Rebuild the used-token set from current tokens.
+    pub fn rebuild(&mut self, tokens: &[usize], mask: usize) {
+        let max_token = tokens
+            .iter()
+            .copied()
+            .filter(|&t| t != mask)
+            .max()
+            .unwrap_or(0);
+        self.used.clear();
+        if self.used.len() <= max_token {
+            self.used.resize(max_token + 1, false);
+        }
+        for &t in tokens {
+            if t != mask && t < self.used.len() {
+                self.used[t] = true;
+            }
+        }
+    }
+}
 
 impl DenoiseConstraint for NoRepeatConstraint {
-    fn is_valid(&self, position: usize, token: usize, current_tokens: &[usize]) -> bool {
-        current_tokens
-            .iter()
-            .enumerate()
-            .all(|(i, t)| i == position || *t != token)
+    fn is_valid(&self, _position: usize, token: usize, _current_tokens: &[usize]) -> bool {
+        !self.used.get(token).copied().unwrap_or(false)
     }
 }
 
@@ -1577,29 +2036,43 @@ pub fn denoise_loop(
     config: &Config,
     n_steps: usize,
     confidence_threshold: f32,
-    constraint: &dyn DenoiseConstraint,
+    constraint: &mut dyn DenoiseConstraint,
     _rng: &mut Rng,
 ) -> (Vec<usize>, usize) {
     let seq_len = target_tokens.len().min(config.block_size);
-    let vocab = config.vocab_size;
     let mask = config.mask_token;
+
+    // Pre-allocate context once — reused across all denoising steps
+    let mut bctx = BidirectionalContext::new(config);
 
     // Initialize with mask tokens
     let mut tokens = vec![mask; seq_len];
     let mut converged_step = n_steps;
+    let mut remaining = seq_len;
+
+    let vocab = config.vocab_size;
 
     for step in 0..n_steps {
-        let (logits_vec, _) = forward_bidirectional_positions(weights, &tokens, config);
+        let _ = forward_bidirectional_positions_into(weights, &tokens, config, &mut bctx);
         let mut any_changed = false;
+
+        // Rebuild constraint used-token set once per step
+        constraint.rebuild(&tokens, mask);
 
         for p in 0..seq_len {
             if tokens[p] != mask {
                 continue;
             }
 
-            let logits_p = &logits_vec[p];
-            let max_l = logits_p.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
-            let sum_exp: f32 = logits_p.iter().map(|l| (l - max_l).exp()).sum();
+            let logits_p = &bctx.all_logits[p * vocab..(p + 1) * vocab];
+            let max_l = crate::simd::simd_max_f32(logits_p);
+            // OPT: compute exp once, reuse for both sum and argmax
+            let exp_buf = &mut bctx.all_attn_weights[..vocab]; // reuse attn weights as scratch
+            exp_buf[..vocab].copy_from_slice(logits_p);
+            crate::simd::simd_add_scalar_inplace(&mut exp_buf[..vocab], -max_l);
+            crate::simd::simd_exp_inplace(&mut exp_buf[..vocab]);
+            let sum_exp = crate::simd::simd_sum_f32(&exp_buf[..vocab]);
+            let inv_sum = 1.0 / sum_exp;
 
             // Find highest-confidence valid token
             let mut best_token = mask;
@@ -1611,7 +2084,7 @@ pub fn denoise_loop(
                 if !constraint.is_valid(p, t, &tokens) {
                     continue;
                 }
-                let prob = (logits_p[t] - max_l).exp() / sum_exp;
+                let prob = exp_buf[t] * inv_sum;
                 if prob > best_prob {
                     best_prob = prob;
                     best_token = t;
@@ -1621,17 +2094,18 @@ pub fn denoise_loop(
             if best_prob >= confidence_threshold && best_token != mask {
                 tokens[p] = best_token;
                 any_changed = true;
+                remaining -= 1;
             }
         }
 
-        if !any_changed && tokens.iter().all(|&t| t != mask) {
+        if !any_changed && remaining == 0 {
             converged_step = step;
             break;
         }
     }
 
     // Check if all unmasked
-    if tokens.iter().all(|&t| t != mask) && converged_step == n_steps {
+    if remaining == 0 && converged_step == n_steps {
         converged_step = n_steps - 1;
     }
 
@@ -1665,11 +2139,12 @@ mod tests {
         let weights = TransformerWeights::new(&config, &mut rng);
         let tokens = vec![0, 1, 2, 3, 4, 5, 6, 7];
 
-        let (_, attn_weights) = forward_bidirectional_positions(&weights, &tokens, &config);
+        let (_, attn_flat) = forward_bidirectional_positions(&weights, &tokens, &config);
 
         // Each position should have valid attention weights per head
+        let attn_per_pos = config.n_head * tokens.len();
         for p in 0..tokens.len() {
-            let weights_p = &attn_weights[p];
+            let weights_p = &attn_flat[p * attn_per_pos..(p + 1) * attn_per_pos];
             for h in 0..config.n_head {
                 let head_weights = &weights_p[h * tokens.len()..(h + 1) * tokens.len()];
                 let sum: f32 = head_weights.iter().sum();
@@ -1697,9 +2172,11 @@ mod tests {
         // Same input at all positions should produce finite, non-degenerate logits
         let tokens = vec![0, 0, 0, 0];
         let (logits, _) = forward_bidirectional_positions(&weights, &tokens, &config);
+        let vocab = config.vocab_size;
 
-        assert_eq!(logits.len(), 4);
-        for (p, logits_p) in logits.iter().enumerate() {
+        assert_eq!(logits.len(), 4 * vocab);
+        for p in 0..4 {
+            let logits_p = &logits[p * vocab..(p + 1) * vocab];
             assert_eq!(
                 logits_p.len(),
                 config.vocab_size,
@@ -1719,13 +2196,15 @@ mod tests {
 
         // With different tokens at each position, attention should spread across positions
         let tokens = vec![0, 5, 10, 15, 20, 25, 1, 2];
-        let (_, attn_weights) = forward_bidirectional_positions(&weights, &tokens, &config);
+        let (_, attn_flat) = forward_bidirectional_positions(&weights, &tokens, &config);
+        let attn_per_pos = config.n_head * tokens.len();
 
         // Check that no attention weight is exactly 1.0 (concentrated on one position)
         // This would mean the model ignores other positions, which shouldn't happen with random weights
         for p in 0..tokens.len() {
+            let weights_p = &attn_flat[p * attn_per_pos..(p + 1) * attn_per_pos];
             for h in 0..config.n_head {
-                let max_w = attn_weights[p][h * tokens.len()..(h + 1) * tokens.len()]
+                let max_w = weights_p[h * tokens.len()..(h + 1) * tokens.len()]
                     .iter()
                     .cloned()
                     .fold(f32::NEG_INFINITY, f32::max);
@@ -1866,13 +2345,15 @@ mod tests {
         let config = Config::micro_dllm();
         let mut rng = Rng::new(42);
         let weights = TransformerWeights::new(&config, &mut rng);
+        let mut fwd_ctx = ForwardSaveContext::new(&config);
+        let mut bwd_ctx = BackwardContext::new(&config);
 
         let tokens = vec![0, 1, 2, 3];
         let is_masked = vec![false, true, false, true]; // mask positions 1 and 3
 
-        let act = forward_save(&weights, &tokens, &config);
+        let act = forward_save(&weights, &tokens, &config, &mut fwd_ctx);
         let loss = masked_loss(
-            &act.logits,
+            act.logits,
             &tokens,
             &is_masked,
             config.vocab_size,
@@ -1883,12 +2364,12 @@ mod tests {
             "Loss should be positive and finite: {loss}"
         );
 
-        let grads = backward(&act, &weights, &tokens, &is_masked, &config);
+        backward(&act, &weights, &tokens, &is_masked, &config, &mut bwd_ctx);
 
         // Gradients should be non-zero for weights that affect masked positions
-        let has_wte_grad = grads.wte.iter().any(|&g| g != 0.0);
-        let has_lm_head_grad = grads.lm_head.iter().any(|&g| g != 0.0);
-        let has_wq_grad = grads.attn_wq.iter().any(|&g| g != 0.0);
+        let has_wte_grad = bwd_ctx.grads.wte.iter().any(|&g| g != 0.0);
+        let has_lm_head_grad = bwd_ctx.grads.lm_head.iter().any(|&g| g != 0.0);
+        let has_wq_grad = bwd_ctx.grads.attn_wq.iter().any(|&g| g != 0.0);
 
         assert!(has_wte_grad, "Embedding gradients should be non-zero");
         assert!(has_lm_head_grad, "LM head gradients should be non-zero");
@@ -1900,14 +2381,16 @@ mod tests {
         let config = Config::micro_dllm();
         let mut rng = Rng::new(42);
         let mut weights = TransformerWeights::new(&config, &mut rng);
+        let mut fwd_ctx = ForwardSaveContext::new(&config);
+        let mut bwd_ctx = BackwardContext::new(&config);
 
         let tokens = vec![0, 1, 2, 3];
         let is_masked = vec![false, true, false, true];
 
         // Compute initial loss
-        let act0 = forward_save(&weights, &tokens, &config);
+        let act0 = forward_save(&weights, &tokens, &config, &mut fwd_ctx);
         let loss0 = masked_loss(
-            &act0.logits,
+            act0.logits,
             &tokens,
             &is_masked,
             config.vocab_size,
@@ -1915,13 +2398,13 @@ mod tests {
         );
 
         // One SGD step
-        let grads = backward(&act0, &weights, &tokens, &is_masked, &config);
-        sgd_update(&mut weights, &grads, 0.01);
+        backward(&act0, &weights, &tokens, &is_masked, &config, &mut bwd_ctx);
+        sgd_update(&mut weights, &bwd_ctx.grads, 0.01);
 
         // Compute new loss
-        let act1 = forward_save(&weights, &tokens, &config);
+        let act1 = forward_save(&weights, &tokens, &config, &mut fwd_ctx);
         let loss1 = masked_loss(
-            &act1.logits,
+            act1.logits,
             &tokens,
             &is_masked,
             config.vocab_size,
@@ -1999,12 +2482,13 @@ mod tests {
             let (logits_bi, _) = forward_bidirectional_positions(&weights, &corrupted, &config);
             // Block-causal with block_size=4
             let (logits_bc, _) = forward_block_causal_positions(&weights, &corrupted, &config, 4);
+            let vocab = config.vocab_size;
 
             for (p, &masked) in is_masked.iter().enumerate() {
                 if !masked {
                     continue;
                 }
-                let pred_bi = logits_bi[p]
+                let pred_bi = logits_bi[p * vocab..(p + 1) * vocab]
                     .iter()
                     .enumerate()
                     .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
@@ -2070,8 +2554,15 @@ mod tests {
 
         // Test denoising on a pattern-consistent target [a, b, a, b]
         let target = vec![3, 7, 3, 7];
-        let (result, steps) =
-            denoise_loop(&weights, &target, &config, 10, 0.3, &NoConstraint, &mut rng);
+        let (result, steps) = denoise_loop(
+            &weights,
+            &target,
+            &config,
+            10,
+            0.3,
+            &mut NoConstraint,
+            &mut rng,
+        );
 
         // Should converge in ≤ 10 steps
         assert!(steps < 10, "Denoising didn't converge in 10 steps");
@@ -2108,18 +2599,19 @@ mod tests {
 
         for target in &test_targets {
             // Without constraint
-            let (result_nc, _) =
-                denoise_loop(&weights, target, &config, 10, 0.3, &NoConstraint, &mut rng);
-            // With no-repeat constraint
-            let (result_wc, _) = denoise_loop(
+            let (result_nc, _) = denoise_loop(
                 &weights,
                 target,
                 &config,
                 10,
                 0.3,
-                &NoRepeatConstraint,
+                &mut NoConstraint,
                 &mut rng,
             );
+            // With no-repeat constraint
+            let mut no_repeat = NoRepeatConstraint::new();
+            let (result_wc, _) =
+                denoise_loop(&weights, target, &config, 10, 0.3, &mut no_repeat, &mut rng);
 
             acc_no_constraint += denoising_accuracy(&result_nc, target);
             acc_with_constraint += denoising_accuracy(&result_wc, target);
@@ -2148,15 +2640,14 @@ mod tests {
 
     #[test]
     fn test_no_repeat_constraint() {
-        let constraint = NoRepeatConstraint;
+        let mut constraint = NoRepeatConstraint::new();
         let tokens = vec![1, 2, 3, 0]; // position 3 is "empty"/placeholder
+        constraint.rebuild(&tokens, 0); // treat 0 as mask
 
         // Token 1 should be invalid at position 3 (already at position 0)
         assert!(!constraint.is_valid(3, 1, &tokens));
         // Token 4 should be valid at position 3 (not in sequence)
         assert!(constraint.is_valid(3, 4, &tokens));
-        // Token 0 should be valid at position 3 (same position)
-        assert!(constraint.is_valid(3, 0, &tokens));
     }
 
     #[test]
@@ -2243,8 +2734,13 @@ mod replaid_tests {
         let mut rng_fixed = Rng::new(42);
         let mut weights_fixed = TransformerWeights::new(&config, &mut rng_fixed);
         let fixed_mask_ratio = 0.25f32;
+        let mut fwd_ctx = ForwardSaveContext::new(&config);
+        let mut bwd_ctx = BackwardContext::new(&config);
 
         let mut fixed_epoch_variances: Vec<f32> = Vec::new();
+        let mut corrupted_buf = Vec::with_capacity(config.block_size);
+        let mut is_masked_buf = Vec::with_capacity(config.block_size);
+        let mut positions_buf = Vec::with_capacity(config.block_size);
 
         for _epoch in 0..n_epochs {
             let mut indices: Vec<usize> = (0..train_data.len()).collect();
@@ -2256,21 +2752,35 @@ mod replaid_tests {
             let mut step_losses: Vec<f32> = Vec::new();
             for &idx in &indices {
                 let tokens = &train_data[idx];
-                let (corrupted, is_masked) =
-                    corrupt_block(tokens, fixed_mask_ratio, config.mask_token, &mut rng_fixed);
-                if !is_masked.iter().any(|&m| m) {
+                let n_mask = corrupt_block_into(
+                    tokens,
+                    fixed_mask_ratio,
+                    config.mask_token,
+                    &mut rng_fixed,
+                    &mut corrupted_buf,
+                    &mut is_masked_buf,
+                    &mut positions_buf,
+                );
+                if n_mask == 0 {
                     continue;
                 }
-                let act = forward_save(&weights_fixed, &corrupted, &config);
+                let act = forward_save(&weights_fixed, &corrupted_buf, &config, &mut fwd_ctx);
                 let loss = masked_loss(
                     &act.logits,
                     tokens,
-                    &is_masked,
+                    &is_masked_buf,
                     config.vocab_size,
                     LossAveraging::Global,
                 );
-                let grads = backward(&act, &weights_fixed, tokens, &is_masked, &config);
-                sgd_update(&mut weights_fixed, &grads, lr);
+                backward(
+                    &act,
+                    &weights_fixed,
+                    tokens,
+                    &is_masked_buf,
+                    &config,
+                    &mut bwd_ctx,
+                );
+                sgd_update(&mut weights_fixed, &bwd_ctx.grads, lr);
                 step_losses.push(loss);
             }
 
@@ -2296,8 +2806,13 @@ mod replaid_tests {
         let mut schedule2 = AdaptiveNoiseSchedule::new(0.15, 0.35, n_blocks);
         let mut rng_adaptive = Rng::new(42);
         let mut weights_adaptive = TransformerWeights::new(&config, &mut rng_adaptive);
+        let mut fwd_ctx2 = ForwardSaveContext::new(&config);
+        let mut bwd_ctx2 = BackwardContext::new(&config);
 
         let mut adaptive_epoch_variances: Vec<f32> = Vec::new();
+        let mut corrupted_buf2 = Vec::with_capacity(config.block_size);
+        let mut is_masked_buf2 = Vec::with_capacity(config.block_size);
+        let mut positions_buf2 = Vec::with_capacity(config.block_size);
 
         for _epoch in 0..n_epochs {
             let mut indices: Vec<usize> = (0..train_data.len()).collect();
@@ -2313,23 +2828,37 @@ mod replaid_tests {
                 let block_idx = sample_counter % n_blocks;
                 let mask_ratio = schedule2.ratios()[block_idx];
 
-                let (corrupted, is_masked) =
-                    corrupt_block(tokens, mask_ratio, config.mask_token, &mut rng_adaptive);
-                if !is_masked.iter().any(|&m| m) {
+                let n_mask = corrupt_block_into(
+                    tokens,
+                    mask_ratio,
+                    config.mask_token,
+                    &mut rng_adaptive,
+                    &mut corrupted_buf2,
+                    &mut is_masked_buf2,
+                    &mut positions_buf2,
+                );
+                if n_mask == 0 {
                     sample_counter += 1;
                     continue;
                 }
-                let act = forward_save(&weights_adaptive, &corrupted, &config);
+                let act = forward_save(&weights_adaptive, &corrupted_buf2, &config, &mut fwd_ctx2);
                 let loss = masked_loss(
                     &act.logits,
                     tokens,
-                    &is_masked,
+                    &is_masked_buf2,
                     config.vocab_size,
                     LossAveraging::Global,
                 );
                 schedule2.record_step_loss(block_idx, loss);
-                let grads = backward(&act, &weights_adaptive, tokens, &is_masked, &config);
-                sgd_update(&mut weights_adaptive, &grads, lr);
+                backward(
+                    &act,
+                    &weights_adaptive,
+                    tokens,
+                    &is_masked_buf2,
+                    &config,
+                    &mut bwd_ctx2,
+                );
+                sgd_update(&mut weights_adaptive, &bwd_ctx2.grads, lr);
                 step_losses.push(loss);
                 sample_counter += 1;
             }

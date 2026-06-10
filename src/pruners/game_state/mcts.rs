@@ -41,17 +41,19 @@ const MAX_TREE_SIZE: usize = 10_000;
 /// for cache-friendly traversal. Action indices refer to the parent
 /// node's `available_actions()` list — the inline state tracker
 /// maintains the correct action list at each level.
+///
+/// Fields ordered by size/alignment (u32 → usize → Vec → Option) to minimize padding.
 struct MCTSNode {
+    /// Accumulated reward from backpropagation.
+    total_reward: f32,
+    /// Number of visits through this node.
+    visits: usize,
     /// Action index that led to this node (None for root).
     action_index: Option<usize>,
     /// Parent node index (None for root).
     parent: Option<usize>,
     /// Child node indices.
     children: Vec<usize>,
-    /// Accumulated reward from backpropagation.
-    total_reward: f32,
-    /// Number of visits through this node.
-    visits: usize,
     /// Indices of actions not yet expanded into children.
     unexpanded: Vec<usize>,
 }
@@ -64,7 +66,11 @@ impl MCTSNode {
             children: Vec::with_capacity(action_count),
             total_reward: 0.0,
             visits: 0,
-            unexpanded: (0..action_count).collect(),
+            unexpanded: {
+                let mut v = Vec::with_capacity(action_count);
+                v.extend(0..action_count);
+                v
+            },
         }
     }
 
@@ -75,7 +81,11 @@ impl MCTSNode {
             children: Vec::with_capacity(action_count),
             total_reward: 0.0,
             visits: 0,
-            unexpanded: (0..action_count).collect(),
+            unexpanded: {
+                let mut v = Vec::with_capacity(action_count);
+                v.extend(0..action_count);
+                v
+            },
         }
     }
 
@@ -101,17 +111,23 @@ fn mcts_search_impl<S: GameState>(
     policy: &mut dyn RolloutPolicy<S>,
     rng: &mut Rng,
 ) -> S::Action {
-    let actions = state.available_actions(player_id);
-    assert!(!actions.is_empty(), "mcts_search: no available actions");
+    // Pre-allocate action buffers — reused across all MCTS iterations to avoid
+    // per-call Vec allocation. Capacity 8 covers most board-game action spaces.
+    let mut action_buf = Vec::with_capacity(8);
+    let mut rollout_buf = Vec::with_capacity(8);
+
+    state.available_actions_into(player_id, &mut action_buf);
+    assert!(!action_buf.is_empty(), "mcts_search: no available actions");
 
     // Single action — no search needed
-    if actions.len() == 1 {
-        return actions[0].clone();
+    if action_buf.len() == 1 {
+        return action_buf[0].clone();
     }
 
     // Initialize tree with root node
+    let root_action_count = action_buf.len();
     let mut nodes = Vec::with_capacity(256);
-    nodes.push(MCTSNode::new_root(actions.len()));
+    nodes.push(MCTSNode::new_root(root_action_count));
 
     let mut fm_calls = 0usize;
 
@@ -121,7 +137,7 @@ fn mcts_search_impl<S: GameState>(
         fm_calls += 1;
 
         // ── 1. Selection: walk tree, tracking state inline ──────
-        let (leaf_idx, leaf_state, leaf_actions) = select_inline(&nodes, state, player_id);
+        let (leaf_idx, leaf_state) = select_inline(&nodes, state, player_id, &mut action_buf);
 
         // ── 2. Expand + Rollout, or Terminal ────────────────────
         let (eval_idx, reward) = if leaf_state.is_terminal() {
@@ -133,7 +149,7 @@ fn mcts_search_impl<S: GameState>(
                 &mut nodes,
                 leaf_idx,
                 &leaf_state,
-                &leaf_actions,
+                &action_buf,
                 player_id,
                 rollout_depth,
                 heuristic,
@@ -141,6 +157,7 @@ fn mcts_search_impl<S: GameState>(
                 rng,
                 &mut fm_calls,
                 budget,
+                &mut rollout_buf,
             )
         } else {
             // Fully expanded leaf with no children (edge case)
@@ -153,6 +170,7 @@ fn mcts_search_impl<S: GameState>(
                 rng,
                 &mut fm_calls,
                 budget,
+                &mut rollout_buf,
             );
             (leaf_idx, reward)
         };
@@ -162,10 +180,13 @@ fn mcts_search_impl<S: GameState>(
     }
 
     // ── 4. Select best action by visit count ────────────────────
+    // Re-fetch root actions for best-action lookup (action_buf still holds them).
+    state.available_actions_into(player_id, &mut action_buf);
+
     let root = &nodes[0];
     if root.children.is_empty() {
         // No search performed (budget=0) — fallback to first action
-        return actions[0].clone();
+        return action_buf[0].clone();
     }
 
     let best_child = root
@@ -176,7 +197,7 @@ fn mcts_search_impl<S: GameState>(
         .expect("root children non-empty");
 
     let best_action_idx = nodes[best_child].action_index.unwrap();
-    actions[best_action_idx].clone()
+    action_buf[best_action_idx].clone()
 }
 
 // ── MCTS Search — Public API ──────────────────────────────────
@@ -276,22 +297,23 @@ fn select_inline<S: GameState>(
     nodes: &[MCTSNode],
     root_state: &S,
     player_id: u8,
-) -> (usize, S, Vec<S::Action>) {
+    action_buf: &mut Vec<S::Action>,
+) -> (usize, S) {
     let mut idx = 0;
     let mut state = root_state.clone();
-    let mut actions = state.available_actions(player_id);
+    state.available_actions_into(player_id, action_buf);
 
     loop {
         let node = &nodes[idx];
 
         // Terminal or not fully expanded → this is our leaf
         if state.is_terminal() || !node.is_fully_expanded() {
-            return (idx, state, actions);
+            return (idx, state);
         }
 
         // Fully expanded but no children → edge case, stop here
         if node.children.is_empty() {
-            return (idx, state, actions);
+            return (idx, state);
         }
 
         // Fully expanded with children → select best child by UCB1
@@ -309,8 +331,8 @@ fn select_inline<S: GameState>(
 
         // Advance state to the selected child using parent's action list
         let action_idx = nodes[best_child].action_index.unwrap();
-        state = state.advance(&actions[action_idx], player_id);
-        actions = state.available_actions(player_id);
+        state = state.advance(&action_buf[action_idx], player_id);
+        state.available_actions_into(player_id, action_buf);
         idx = best_child;
     }
 }
@@ -336,6 +358,7 @@ fn expand_and_rollout<S: GameState>(
     rng: &mut Rng,
     fm_calls: &mut usize,
     budget: usize,
+    rollout_buf: &mut Vec<S::Action>,
 ) -> (usize, f32) {
     // Pick a random unexpanded action (expansion order is random)
     let node = &mut nodes[leaf_idx];
@@ -347,8 +370,8 @@ fn expand_and_rollout<S: GameState>(
     let child_state = leaf_state.advance(action, player_id);
     *fm_calls += 1;
 
-    // Create child node
-    let child_actions_len = child_state.available_actions(player_id).len();
+    // Create child node — use action_space_size to avoid allocating
+    let child_actions_len = child_state.action_space_size(player_id);
     let child_idx = nodes.len();
     nodes.push(MCTSNode::new_child(action_idx, leaf_idx, child_actions_len));
     nodes[leaf_idx].children.push(child_idx);
@@ -366,6 +389,7 @@ fn expand_and_rollout<S: GameState>(
             rng,
             fm_calls,
             budget,
+            rollout_buf,
         )
     };
 
@@ -386,6 +410,7 @@ fn rollout<S: GameState>(
     rng: &mut Rng,
     fm_calls: &mut usize,
     budget: usize,
+    action_buf: &mut Vec<S::Action>,
 ) -> f32 {
     let mut current = state.clone();
 
@@ -394,13 +419,13 @@ fn rollout<S: GameState>(
             break;
         }
 
-        let actions = current.available_actions(player_id);
-        if actions.is_empty() {
+        current.available_actions_into(player_id, action_buf);
+        if action_buf.is_empty() {
             break;
         }
 
-        let pick = policy.select(&current, &actions, player_id, rng);
-        current = current.advance(&actions[pick], player_id);
+        let pick = policy.select(&current, action_buf, player_id, rng);
+        current = current.advance(&action_buf[pick], player_id);
         *fm_calls += 1;
     }
 

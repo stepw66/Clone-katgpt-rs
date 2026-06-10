@@ -15,6 +15,9 @@ pub mod spectral_kv_cache;
 pub mod spectral_rotation;
 pub mod types;
 
+#[cfg(feature = "outlier_guard")]
+pub mod outlier_guard;
+
 #[cfg(all(feature = "spectral_quant", feature = "maxsim"))]
 pub use forward::par_maxsim_score_spectralquant;
 pub use forward::{
@@ -22,6 +25,12 @@ pub use forward::{
     par_dequantize_spectral_keys_flat, par_dequantize_spectral_values_flat,
 };
 pub use nonuniform_quant::{CompressedVector, NonUniformQuantizer};
+#[cfg(all(feature = "outlier_guard", feature = "stiff_anomaly"))]
+pub use outlier_guard::StiffSoftCrossCheck;
+#[cfg(feature = "outlier_guard")]
+pub use outlier_guard::{ConfidenceLevel, LayerReport, OutlierGuard, OutlierGuardReport};
+#[cfg(feature = "dual_gram_pca")]
+pub use spectral::calibrate_eigenbasis_dual_gram;
 pub use spectral::{
     BitAllocator, CalibrationResult, LloydMaxQuantizer, calibrate_eigenbasis,
     cumulative_variance_thresholds, generate_selective_qjl_signs, marginal_gain,

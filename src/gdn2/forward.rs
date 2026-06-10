@@ -20,7 +20,7 @@
 //! Reference: "Gated DeltaNet" (2024). See `.research/` for derivation.
 //! Plan 105: GDN2 module.
 
-use crate::gdn2::kernel::{gdn2_recurrent_step, l2_normalize};
+use crate::gdn2::kernel::{gdn2_state_readout, gdn2_state_update, l2_normalize};
 use crate::gdn2::types::MultiLayerGdn2Cache;
 use crate::transformer::{ForwardContext, TransformerWeights};
 use crate::types::{self, Config};
@@ -72,15 +72,8 @@ pub fn forward_gdn2<'a>(
         .map(|l| l.gate_config)
         .unwrap_or_default();
 
-    // Pre-allocate temp buffers once (reused across layers)
-    let mut out_buf = vec![0.0f32; hd];
-    let mut temp_buf = vec![0.0f32; hd];
-
     // Default gate values for MVP (no learned gate projections yet)
-    let erase_b = vec![0.5f32; hd]; // half-open erase gate
-    let decay_alpha = vec![0.99f32; hd]; // slow decay
     let write_w_scalar = 1.0f32; // scalar w for EraseOnly/Kda
-    let write_w_channel = vec![1.0f32; hd]; // channel w for Full
 
     // 1. Embedding: x = wte[token] + wpe[pos]
     let tok_off = token * n;
@@ -114,37 +107,38 @@ pub fn forward_gdn2<'a>(
             l2_normalize(&mut ctx.k[h * hd..(h + 1) * hd]);
         }
 
-        // ── GDN2: recurrent step per Q head (replaces KV store + attention loop) ──
+        // ── GDN2: recurrent step (replaces KV store + attention loop) ──
+        // With GQA, state update is identical for heads sharing a KV group.
+        // Split into: (1) update state once per KV group, (2) readout per Q head.
 
-        ctx.attn_out[..n].fill(0.0);
-        for h in 0..config.n_head {
-            let kv_group = h * config.n_kv_head / config.n_head;
-            let s = &mut layer_cache.heads[kv_group].s;
-
-            // Extract per-head slices
-            let q_h = &ctx.q[h * hd..(h + 1) * hd];
-            let k_h = &ctx.k[kv_group * hd..(kv_group + 1) * hd];
-            let v_h = &ctx.v[kv_group * hd..(kv_group + 1) * hd];
-
-            // Recurrent step: updates S in-place, writes output
-            gdn2_recurrent_step(
+        // Update state: once per KV group (decay + read + outer-product)
+        for g in 0..config.n_kv_head {
+            let s = &mut layer_cache.heads[g].s;
+            let k_h = &ctx.k[g * hd..(g + 1) * hd];
+            let v_h = &ctx.v[g * hd..(g + 1) * hd];
+            gdn2_state_update(
+                s,
                 k_h,
                 v_h,
-                q_h,
-                s,
-                &decay_alpha,
-                &erase_b,
+                &layer_cache.decay_alpha,
+                &layer_cache.erase_b,
                 write_w_scalar,
-                &write_w_channel,
-                &mut out_buf,
-                &mut temp_buf,
+                &layer_cache.write_w_channel,
+                &mut layer_cache.temp_buf,
+                &mut layer_cache.delta,
                 hd,
                 hd,
                 gate_config,
             );
+        }
 
-            // Copy output to attn_out
-            ctx.attn_out[h * hd..(h + 1) * hd].copy_from_slice(&out_buf);
+        // Readout: once per Q head (state is shared within KV group)
+        for h in 0..config.n_head {
+            let kv_group = h * config.n_kv_head / config.n_head;
+            let s = &layer_cache.heads[kv_group].s;
+            let q_h = &ctx.q[h * hd..(h + 1) * hd];
+            gdn2_state_readout(s, q_h, &mut layer_cache.out_buf, hd, hd);
+            ctx.attn_out[h * hd..(h + 1) * hd].copy_from_slice(&layer_cache.out_buf);
         }
 
         // ── End GDN2 ──
@@ -234,12 +228,13 @@ pub fn generate_gdn2_into(
     tokens: &mut Vec<usize>,
 ) {
     tokens.clear();
+    tokens.reserve(n_tokens);
     let mut token = config.bos_token;
 
     for pos in 0..n_tokens {
         let logits = forward_gdn2(ctx, weights, cache, token, pos, config);
         types::softmax_scaled(logits, 1.0 / config.temperature);
-        let next_token = types::sample_token(logits, rng);
+        let next_token = types::sample_token_into(&ctx.logits, rng, &mut ctx.cdf);
         tokens.push(next_token);
         token = next_token;
     }

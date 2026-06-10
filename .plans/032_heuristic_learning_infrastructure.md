@@ -1,5 +1,7 @@
 # Plan 032: Heuristic Learning Infrastructure
 
+> **Status:** ✅ SUPERSEDED — All core tasks complete. Only remaining unchecked item (multi-agent HL) deferred to Issue 051. Proven by Plan 033 (HL thesis: +177 vs Greedy +131).
+
 **Branch:** `develop/feature/032_heuristic_learning_infrastructure`
 **Depends on:** Plan 030 (bandit feature in katgpt-rs), Plan 021 (ScreeningPruner)
 **Research:** `.research/014_Learning_Beyond_Gradients.md`
@@ -183,7 +185,7 @@ src/pruners/
 ## Out of Scope
 
 - ~~[-] Coding agent integration (LLM writing new validators — future work, no LLM code-gen infrastructure)~~
-- [ ] ~~Multi-agent HL (multiple bandit pruners coordinating — Bomberman Plan 033 ✅ complete, pattern proven with HLPlayer)~~ Deferred — Bomberman Plan 033 ✅ complete pattern proven with HLPlayer, tracked separately in Issue 051
+- [-] ~~Multi-agent HL (multiple bandit pruners coordinating — Bomberman Plan 033 ✅ complete, pattern proven with HLPlayer)~~ Deferred — Bomberman Plan 033 ✅ complete pattern proven with HLPlayer, tracked separately in Issue 051
 - ~~[-] Contextual bandits (feature vectors per arm — no ContextualBandit implementation exists)~~
 - ~~[-] WASM validator auto-generation from failure traces (depends on coding agent above)~~
 

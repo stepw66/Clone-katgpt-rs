@@ -5,7 +5,11 @@
 //!
 //! With `--replay-dir <path>`, dumps per-round JSONL replay files for all players.
 //!
+//! With `--device gate`, P4 uses InferenceRouter + TriggerGate for routed inference
+//! instead of the default HLPlayer (bandit-based learning).
+//!
 //! Run: `cargo run --example bomber_01_arena --features bomber`
+//! Gate: `cargo run --example bomber_01_arena --features bomber -- --device gate`
 //! Replay: `cargo run --example bomber_01_arena --features bomber -- --replay-dir output/replays`
 
 use std::path::PathBuf;
@@ -28,10 +32,18 @@ const TICK_LIMIT: u32 = 200;
 
 // ── CLI ────────────────────────────────────────────────────────
 
-fn parse_map_arg() -> (Option<&'static str>, u64) {
+/// Parsed CLI arguments.
+struct CliArgs {
+    map_preset: Option<&'static str>,
+    seed: u64,
+    device_gate: bool,
+}
+
+fn parse_args() -> CliArgs {
     let args: Vec<String> = std::env::args().collect();
     let mut map_preset = None;
     let mut seed = 42u64;
+    let mut device_gate = false;
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
@@ -54,11 +66,26 @@ fn parse_map_arg() -> (Option<&'static str>, u64) {
                     std::process::exit(1);
                 });
             }
+            "--device" if i + 1 < args.len() => {
+                i += 1;
+                match args[i].as_str() {
+                    "cpu" => device_gate = false,
+                    "gate" => device_gate = true,
+                    other => {
+                        eprintln!("Unknown device: {other}. Use: cpu, gate");
+                        std::process::exit(1);
+                    }
+                }
+            }
             _ => {}
         }
         i += 1;
     }
-    (map_preset, seed)
+    CliArgs {
+        map_preset,
+        seed,
+        device_gate,
+    }
 }
 
 // ── Pending Capture ────────────────────────────────────────────
@@ -80,20 +107,36 @@ fn main() {
         std::fs::create_dir_all(dir).ok();
     }
 
-    let (map_preset, default_seed) = parse_map_arg();
+    let cli = parse_args();
+    let default_seed = cli.seed;
     let mut rng = Rng::with_seed(default_seed);
+
+    // Build player roster. When --device gate, P4 becomes GatePlayer.
     let mut players: Vec<Box<dyn BomberPlayer>> = vec![
         Box::new(RandomPlayer::new(0)),
         Box::new(GreedyPlayer::new(1)),
         Box::new(ValidatorPlayer::new(2)),
-        Box::new(HLPlayer::new(3)),
     ];
+    if cli.device_gate {
+        players.push(Box::new(katgpt_rs::pruners::bomber::GatePlayer::new(3)));
+    } else {
+        players.push(Box::new(HLPlayer::new(3)));
+    }
+
+    let p4_name = if cli.device_gate { "Gate" } else { "HL" };
+    let p4_emoji = if cli.device_gate { "🚀" } else { "🐵" };
 
     println!("╔═══ Bomberman HL Arena ═══════════════════════════════════╗");
-    println!("║  P1 🐰 Random  |  P2 🐱 Greedy  |  P3 🐶 Validator  |  P4 🐵 HL  ║");
-    match map_preset {
+    println!(
+        "║  P1 🐰 Random  |  P2 🐱 Greedy  |  P3 🐶 Validator  |  P4 {} {}  ║",
+        p4_emoji, p4_name
+    );
+    match cli.map_preset {
         Some(_) => println!("║  Map: fixed preset                                      ║"),
         None => println!("║  Map: procedural (seed={default_seed:<35})  ║"),
+    }
+    if cli.device_gate {
+        println!("║  Device: gate (InferenceRouter + TriggerGate)           ║");
     }
     if let Some(ref dir) = replay_dir {
         println!("║  Replay dir: {:<42}║", dir.display());
@@ -119,7 +162,7 @@ fn main() {
         let seed = default_seed + round as u64;
         let result = run_round(
             seed,
-            map_preset,
+            cli.map_preset,
             &mut players,
             &mut rng,
             round as u32,
@@ -164,7 +207,7 @@ fn main() {
         }
 
         // Print round result
-        let emoji = ["🐰", "🐱", "🐶", "🐵"];
+        let emoji = ["🐰", "🐱", "🐶", p4_emoji];
         let winner_str = match result.winner {
             Some(w) => format!("{} P{}", emoji[w as usize], w),
             None => "Draw".to_string(),
@@ -187,8 +230,8 @@ fn main() {
     // Final standings
     println!();
     println!("═══ Final Standings ({ROUNDS} rounds) ═══");
-    let emoji = ["🐰", "🐱", "🐶", "🐵"];
-    let names = ["Random", "Greedy", "Validator", "HL"];
+    let emoji = ["🐰", "🐱", "🐶", p4_emoji];
+    let names = ["Random", "Greedy", "Validator", p4_name];
     let mut ranking: Vec<(usize, i32)> = scores.iter().copied().enumerate().collect();
     ranking.sort_by(|a, b| b.1.cmp(&a.1));
 
@@ -216,11 +259,11 @@ fn main() {
     for i in 0..4 {
         let total_kills: u32 = kill_matrix[i].iter().sum();
         print!("  {} {:<6}", emoji[i], names[i]);
-        for j in 0..4 {
+        for (j, &kills) in kill_matrix[i].iter().enumerate() {
             if i == j {
                 print!("    ---   ");
             } else {
-                print!("  {:>8} ", kill_matrix[i][j]);
+                print!("  {kills:>8} ");
             }
         }
         println!("  {}", total_kills);
@@ -230,6 +273,23 @@ fn main() {
     if replay_dir.is_some() {
         println!();
         println!("  Replay: {total_replay_samples} total samples written");
+    }
+
+    // Router stats (gate mode only)
+    if cli.device_gate
+        && let Some(gate_player) = players[3]
+            .as_any()
+            .downcast_ref::<katgpt_rs::pruners::bomber::GatePlayer>()
+    {
+            let stats = gate_player.router_stats();
+            println!();
+            println!("═══ InferenceRouter Stats ═══");
+            println!("  Tier: {}", stats.current_tier);
+            println!("  Total inferences: {}", stats.total_inferences);
+            println!("  Estimated QPS: {:.1}", stats.estimated_qps);
+            println!("  Tier transitions: {}", stats.tier_transitions);
+            println!("  Last backend: {}", stats.last_backend);
+            println!("  Total routed calls: {}", gate_player.total_routed());
     }
 }
 
@@ -309,8 +369,7 @@ fn run_round(
 
         // Capture replay data for all alive players
         if capture_replay {
-            let board =
-                serialize_board(world.resource::<katgpt_rs::pruners::bomber::ArenaGrid>());
+            let board = serialize_board(world.resource::<katgpt_rs::pruners::bomber::ArenaGrid>());
             let bombs = serialize_bombs(&mut world);
             let powerups = serialize_powerups(&mut world);
             let tick = world
@@ -342,6 +401,7 @@ fn run_round(
                             danger_level: 0,            // backfilled later
                             nearest_opponent_dist: 255, // backfilled later
                             escape_routes: 0,           // backfilled later
+                            template_id: 255,           // not set (non-template player)
                         },
                     });
                 }

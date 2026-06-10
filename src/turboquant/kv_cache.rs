@@ -8,7 +8,7 @@
 use super::codebook::compute_codebook;
 use super::rotation::{generate_qjl_matrix, generate_rotation_matrix};
 use super::types::{TurboQuantKVCacheConfig, TurboQuantLayer};
-use crate::simd::simd_scale_inplace;
+use crate::simd::{simd_scale_inplace, simd_sum_sq};
 use crate::types;
 
 /// Compressed KV cache using TurboQuant quantization.
@@ -16,6 +16,7 @@ use crate::types;
 /// Each KV vector is: normalized → rotated → quantized → bit-packed.
 /// Reconstruction: unpack → dequantize → inverse rotate → rescale.
 pub struct TurboQuantKVCache {
+    // ── Vec fields first (24 bytes, 8-byte aligned) ──
     /// Per-layer quantization state (rotation matrix + codebooks).
     pub layers: Vec<TurboQuantLayer>,
     /// Bit-packed key indices: layers × positions × packed_coords.
@@ -26,18 +27,6 @@ pub struct TurboQuantKVCache {
     val_indices: Vec<Vec<Vec<u8>>>,
     /// Per-position value norms.
     val_norms: Vec<Vec<f32>>,
-    /// Current position.
-    pos: usize,
-    /// Number of layers.
-    n_layers: usize,
-    /// KV dimension (n_kv_head * head_dim).
-    kv_dim: usize,
-    /// Key bits per coordinate.
-    key_bits: u8,
-    /// Value bits per coordinate.
-    val_bits: u8,
-    /// Maximum sequence length.
-    max_seq_len: usize,
     // ── Scratch buffers for zero-alloc hot path (Plan 051) ──
     /// Normalized input: [kv_dim]. Reused across store/dequantize calls.
     scratch_normalized: Vec<f32>,
@@ -45,6 +34,23 @@ pub struct TurboQuantKVCache {
     scratch_rotated: Vec<f32>,
     /// Quantized/unpacked indices: [kv_dim]. Reused across store/dequantize calls.
     scratch_indices: Vec<u8>,
+    // ── usize fields (8-byte aligned, contiguous after Vecs) ──
+    /// Current position.
+    pos: usize,
+    /// Highest position ever written (for efficient reset).
+    max_used_pos: usize,
+    /// Number of layers.
+    n_layers: usize,
+    /// KV dimension (n_kv_head * head_dim).
+    kv_dim: usize,
+    /// Maximum sequence length.
+    #[allow(dead_code)]
+    max_seq_len: usize,
+    // ── u8 fields last (packed together, no inter-field padding) ──
+    /// Key bits per coordinate.
+    key_bits: u8,
+    /// Value bits per coordinate.
+    val_bits: u8,
 }
 
 impl TurboQuantKVCache {
@@ -60,8 +66,10 @@ impl TurboQuantKVCache {
         let rotation = generate_rotation_matrix(kv_dim, 42);
         let qjl_matrix = generate_qjl_matrix(kv_dim, 43);
 
+        let rotation_t = transpose_matrix(&rotation, kv_dim);
         let layer = TurboQuantLayer {
             rotation,
+            rotation_t,
             qjl_matrix,
             key_codebook: key_codebook.clone(),
             val_codebook: val_codebook.clone(),
@@ -78,6 +86,7 @@ impl TurboQuantKVCache {
             val_indices: vec![vec![vec![0u8; packed_val_len]; max_seq_len]; n_layers],
             val_norms: vec![vec![0.0f32; max_seq_len]; n_layers],
             pos: 0,
+            max_used_pos: 0,
             n_layers,
             kv_dim,
             key_bits,
@@ -89,6 +98,15 @@ impl TurboQuantKVCache {
         }
     }
 
+    /// Recommended asymmetric config from Research 081.
+    ///
+    /// V compression is quality-free (softmax amplifies K errors O(e^ε),
+    /// V errors only O(w·ε)). Default: key_bits=8, val_bits=3.
+    #[cfg(feature = "asymmetric_kv")]
+    pub fn new_asymmetric(config: &types::Config) -> Self {
+        Self::new(config, 8, 3)
+    }
+
     /// Create from explicit config struct.
     pub fn with_config(tq_config: &TurboQuantKVCacheConfig) -> Self {
         let key_codebook = compute_codebook(tq_config.kv_dim, tq_config.key_bits);
@@ -96,8 +114,10 @@ impl TurboQuantKVCache {
         let rotation = generate_rotation_matrix(tq_config.kv_dim, tq_config.seed);
         let qjl_matrix = generate_qjl_matrix(tq_config.kv_dim, tq_config.seed.wrapping_add(1));
 
+        let rotation_t = transpose_matrix(&rotation, tq_config.kv_dim);
         let layer = TurboQuantLayer {
             rotation,
+            rotation_t,
             qjl_matrix,
             key_codebook: key_codebook.clone(),
             val_codebook: val_codebook.clone(),
@@ -120,6 +140,7 @@ impl TurboQuantKVCache {
             ],
             val_norms: vec![vec![0.0f32; tq_config.max_seq_len]; tq_config.n_layers],
             pos: 0,
+            max_used_pos: 0,
             n_layers: tq_config.n_layers,
             kv_dim: tq_config.kv_dim,
             key_bits: tq_config.key_bits,
@@ -134,10 +155,11 @@ impl TurboQuantKVCache {
     /// Quantize and store a key vector at given layer and position.
     pub fn store_key(&mut self, layer: usize, pos: usize, key: &[f32]) {
         debug_assert_eq!(key.len(), self.kv_dim);
+        self.max_used_pos = self.max_used_pos.max(pos + 1);
         let layer_state = &self.layers[layer];
 
-        // Compute norm
-        let norm: f32 = key.iter().map(|x| x * x).sum::<f32>().sqrt();
+        // Compute norm via SIMD (avoids scalar iteration)
+        let norm = simd_sum_sq(key, self.kv_dim).sqrt();
         self.key_norms[layer][pos] = norm;
 
         if norm < 1e-8 {
@@ -175,9 +197,11 @@ impl TurboQuantKVCache {
     /// Quantize and store a value vector at given layer and position.
     pub fn store_value(&mut self, layer: usize, pos: usize, value: &[f32]) {
         debug_assert_eq!(value.len(), self.kv_dim);
+        self.max_used_pos = self.max_used_pos.max(pos + 1);
         let layer_state = &self.layers[layer];
 
-        let norm: f32 = value.iter().map(|x| x * x).sum::<f32>().sqrt();
+        // Compute norm via SIMD (avoids scalar iteration)
+        let norm = simd_sum_sq(value, self.kv_dim).sqrt();
         self.val_norms[layer][pos] = norm;
 
         if norm < 1e-8 {
@@ -279,8 +303,10 @@ impl TurboQuantKVCache {
         }
 
         // Inverse rotate in-place: R^T * rotated → scratch_normalized
-        mat_vec_t_into(
-            &layer_state.rotation,
+        // Uses precomputed R^T stored row-major, enabling SIMD row-major multiply
+        // instead of scalar column-stride access on the original R.
+        mat_vec_into(
+            &layer_state.rotation_t,
             &self.scratch_rotated,
             &mut self.scratch_normalized,
         );
@@ -321,8 +347,10 @@ impl TurboQuantKVCache {
         }
 
         // Inverse rotate in-place: R^T * rotated → scratch_normalized
-        mat_vec_t_into(
-            &layer_state.rotation,
+        // Uses precomputed R^T stored row-major, enabling SIMD row-major multiply
+        // instead of scalar column-stride access on the original R.
+        mat_vec_into(
+            &layer_state.rotation_t,
             &self.scratch_rotated,
             &mut self.scratch_normalized,
         );
@@ -334,8 +362,9 @@ impl TurboQuantKVCache {
 
     /// Reset cache for new sequence.
     pub fn reset(&mut self) {
+        let used = self.max_used_pos;
         for layer in 0..self.n_layers {
-            for pos in 0..self.max_seq_len {
+            for pos in 0..used {
                 self.key_indices[layer][pos].fill(0);
                 self.key_norms[layer][pos] = 0.0;
                 self.val_indices[layer][pos].fill(0);
@@ -343,6 +372,7 @@ impl TurboQuantKVCache {
             }
         }
         self.pos = 0;
+        self.max_used_pos = 0;
     }
 
     /// Bytes stored per token (K + V, all layers).
@@ -407,6 +437,18 @@ impl crate::types::QuantizedKVCache for TurboQuantKVCache {
 
 // ── Matrix operations ────────────────────────────────────────
 
+/// Transpose a dim×dim row-major matrix.
+#[inline]
+fn transpose_matrix(m: &[f32], dim: usize) -> Vec<f32> {
+    let mut t = vec![0.0f32; dim * dim];
+    for i in 0..dim {
+        for j in 0..dim {
+            t[i * dim + j] = m[j * dim + i];
+        }
+    }
+    t
+}
+
 /// Matrix-vector multiply: result = M * v (M is dim×dim row-major).
 /// Backward-compat wrapper kept for tests. Hot path uses [`mat_vec_into`].
 #[allow(dead_code)]
@@ -418,6 +460,7 @@ fn mat_vec(m: &[f32], v: &[f32]) -> Vec<f32> {
 }
 
 /// In-place matrix-vector multiply: out = M * v (zero-alloc, Plan 051).
+#[inline]
 fn mat_vec_into(m: &[f32], v: &[f32], out: &mut [f32]) {
     let dim = v.len();
     debug_assert_eq!(out.len(), dim);
@@ -434,7 +477,10 @@ fn mat_vec_t(m: &[f32], v: &[f32]) -> Vec<f32> {
 
 /// In-place transpose matrix-vector multiply: out = M^T * v (zero-alloc, Plan 051).
 ///
-/// TODO: Replace with SIMD transpose matmul once available in `crate::simd`.
+/// M is dim×dim row-major, so M^T * v = Σ_j M[j*dim + i] * v[j].
+/// SIMD dot product doesn't directly apply to column-wise access, so we keep
+/// the scalar loop but use unsafe for bounds-elision.
+#[inline]
 fn mat_vec_t_into(m: &[f32], v: &[f32], out: &mut [f32]) {
     let dim = v.len();
     debug_assert_eq!(out.len(), dim);
@@ -452,6 +498,7 @@ fn mat_vec_t_into(m: &[f32], v: &[f32], out: &mut [f32]) {
 // ── Bit packing ──────────────────────────────────────────────
 
 /// Packed byte length for n values at given bits per value.
+#[inline]
 fn packed_len(n: usize, bits: u8) -> usize {
     match bits {
         2 => n.div_ceil(4),
@@ -509,6 +556,7 @@ fn pack_indices(indices: &[u8], bits: u8) -> Vec<u8> {
 }
 
 /// Pack indices into pre-allocated buffer (zero-alloc, Plan 051).
+#[inline]
 fn pack_indices_into(indices: &[u8], bits: u8, out: &mut [u8]) {
     match bits {
         2 => {
@@ -606,6 +654,7 @@ fn unpack_indices(packed: &[u8], bits: u8, n: usize) -> Vec<u8> {
 }
 
 /// Unpack indices into pre-allocated buffer (zero-alloc, Plan 051).
+#[inline]
 fn unpack_indices_into(packed: &[u8], bits: u8, n: usize, out: &mut [u8]) {
     debug_assert!(out.len() >= n);
     match bits {
@@ -613,14 +662,8 @@ fn unpack_indices_into(packed: &[u8], bits: u8, n: usize, out: &mut [u8]) {
             for i in 0..n {
                 let byte = i / 4;
                 let shift = (i % 4) * 2;
-                if byte < packed.len() {
-                    unsafe {
-                        *out.get_unchecked_mut(i) = (*packed.get_unchecked(byte) >> shift) & 0x3;
-                    }
-                } else {
-                    unsafe {
-                        *out.get_unchecked_mut(i) = 0;
-                    }
+                unsafe {
+                    *out.get_unchecked_mut(i) = (*packed.get_unchecked(byte) >> shift) & 0x3;
                 }
             }
         }
@@ -628,14 +671,8 @@ fn unpack_indices_into(packed: &[u8], bits: u8, n: usize, out: &mut [u8]) {
             for i in 0..n {
                 let byte = i / 2;
                 let shift = (i % 2) * 4;
-                if byte < packed.len() {
-                    unsafe {
-                        *out.get_unchecked_mut(i) = (*packed.get_unchecked(byte) >> shift) & 0xF;
-                    }
-                } else {
-                    unsafe {
-                        *out.get_unchecked_mut(i) = 0;
-                    }
+                unsafe {
+                    *out.get_unchecked_mut(i) = (*packed.get_unchecked(byte) >> shift) & 0xF;
                 }
             }
         }
@@ -650,18 +687,12 @@ fn unpack_indices_into(packed: &[u8], bits: u8, n: usize, out: &mut [u8]) {
             for i in 0..n {
                 let byte_pos = bit_pos / 8;
                 let shift = bit_pos % 8;
-                if byte_pos < packed.len() {
-                    unsafe {
-                        *out.get_unchecked_mut(i) =
-                            (*packed.get_unchecked(byte_pos) >> shift) & mask;
-                        if shift + bits as usize > 8 && byte_pos + 1 < packed.len() {
-                            *out.get_unchecked_mut(i) |=
-                                (*packed.get_unchecked(byte_pos + 1) << (8 - shift)) & mask;
-                        }
-                    }
-                } else {
-                    unsafe {
-                        *out.get_unchecked_mut(i) = 0;
+                unsafe {
+                    *out.get_unchecked_mut(i) =
+                        (*packed.get_unchecked(byte_pos) >> shift) & mask;
+                    if shift + bits as usize > 8 {
+                        *out.get_unchecked_mut(i) |=
+                            (*packed.get_unchecked(byte_pos + 1) << (8 - shift)) & mask;
                     }
                 }
                 bit_pos += bits as usize;
@@ -825,8 +856,17 @@ mod tests {
         cache.dequantize_key_into(0, 0, &mut buf);
 
         // Compare with allocating path (still &self)
+        // Allow small float tolerance: the _into path now uses SIMD row-major multiply
+        // on a precomputed transpose, which differs from the scalar column-stride path
+        // by ~1 ULP due to operation reordering.
         let direct = cache.dequantize_key(0, 0);
-        assert_eq!(buf, direct, "zero-alloc _into must match allocating path");
+        for (i, (a, b)) in buf.iter().zip(direct.iter()).enumerate() {
+            let diff = (a - b).abs();
+            assert!(
+                diff < 1e-5,
+                "zero-alloc _into differs from allocating path at [{i}]: {a} vs {b}"
+            );
+        }
     }
 
     #[test]

@@ -263,6 +263,18 @@ This allows config-driven strategy selection without manual branching.
 
 ---
 
+## 7.1 Related Work: DiffusionBlocks (Research 131)
+
+[DiffusionBlocks](https://arxiv.org/pdf/2506.14202) (Shing et al., ICLR 2026) independently validates D2F's block-partitioned approach from a diffusion-theoretic perspective:
+
+- **Residual connections as diffusion steps**: The paper proves that transformer residual updates are discretized steps of a reverse diffusion ODE, which is the same insight underlying D2F's monotonic noise schedule across blocks.
+- **Equi-probability partitioning**: DiffusionBlocks introduces partitioning noise levels by equal cumulative probability mass under a log-normal prior (via inverse normal CDF), rather than uniform spacing. This allocates more capacity to intermediate noise levels where denoising is hardest. Table 7 shows FID 38.03 vs 42.37 for the best uniform partition — a meaningful quality gap.
+- **Implementation**: Added as `ScheduleKind::EquiProbability` with `diffusion_blocks_default()` using EDM-style parameters (P_mean=-1.2, P_std=1.2). Deterministic (no RNG) since quantiles are computed analytically via Acklam's inverse normal CDF approximation.
+
+**Verdict**: The equi-probability schedule is a minor quality improvement that can be absorbed into D2F's existing schedule infrastructure. The block-wise training technique (B× memory reduction) is training-only and not applicable to katgpt-rs.
+
+---
+
 ## 7. Paper Metadata
 
 - **arXiv**: 2508.09192v1

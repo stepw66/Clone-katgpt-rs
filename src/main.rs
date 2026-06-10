@@ -70,10 +70,21 @@ fn main() {
 
     for r in &results {
         let unit = match r.category {
-            BenchCategory::Speculative => "tok/s",
-            BenchCategory::TreeBuild => "ops/s",
-            BenchCategory::Infrastructure => "ops/s",
-            BenchCategory::HeuristicLearning => "ops/s",
+            BenchCategory::Speculative
+            | BenchCategory::SpecDecoding
+            | BenchCategory::Game
+            | BenchCategory::E2EGame => "tok/s",
+            BenchCategory::TreeBuild
+            | BenchCategory::Infrastructure
+            | BenchCategory::HeuristicLearning
+            | BenchCategory::KvOptimization
+            | BenchCategory::Attention
+            | BenchCategory::Noise
+            | BenchCategory::Distillation
+            | BenchCategory::TestTimeCompute
+            | BenchCategory::Routing
+            | BenchCategory::Diffusion
+            | BenchCategory::SimdPerf => "ops/s",
         };
         println!(
             "  {:<20} {:>12.0} {:>3} {:>12.2} {:>15.2}",
@@ -95,9 +106,52 @@ fn main() {
 
     let categories = [
         (
-            BenchCategory::Speculative,
+            BenchCategory::SpecDecoding,
             "speculative",
             "Speculative Decoding Throughput",
+            "Accepted tok/s",
+        ),
+        (
+            BenchCategory::KvOptimization,
+            "kv_optimization",
+            "KV Optimization Performance",
+            "Operations/s",
+        ),
+        (
+            BenchCategory::Attention,
+            "attention",
+            "Attention Innovation Performance",
+            "Operations/s",
+        ),
+        (
+            BenchCategory::Noise,
+            "noise",
+            "Noise / SDE Scheduling Performance",
+            "Operations/s",
+        ),
+        (
+            BenchCategory::Game,
+            "game",
+            "Game / Self-Play Performance",
+            "Operations/s",
+        ),
+        (
+            BenchCategory::SimdPerf,
+            "simd",
+            "SIMD / Perf Performance",
+            "Operations/s",
+        ),
+        (
+            BenchCategory::E2EGame,
+            "e2e_game",
+            "E2E Game Timing (Plasma/Hot/Warm/Cold)",
+            "tok/s",
+        ),
+        // Legacy categories for backward compat
+        (
+            BenchCategory::Speculative,
+            "speculative_legacy",
+            "Speculative Decoding Throughput (Legacy)",
             "Accepted tok/s",
         ),
         (
@@ -118,18 +172,40 @@ fn main() {
             "G-Zero Heuristic Learning (Plan 049)",
             "Operations/s",
         ),
+        (
+            BenchCategory::Distillation,
+            "distillation",
+            "Distillation / Compression",
+            "Operations/s",
+        ),
+        (
+            BenchCategory::TestTimeCompute,
+            "ttc",
+            "Test-Time Compute",
+            "Operations/s",
+        ),
+        (
+            BenchCategory::Routing,
+            "routing",
+            "Routing / MoE",
+            "Operations/s",
+        ),
+        (
+            BenchCategory::Diffusion,
+            "diffusion",
+            "Diffusion / Denoising",
+            "Operations/s",
+        ),
     ];
 
+    let mut cat_results = Vec::with_capacity(results.len());
     for (cat, suffix, title, x_label) in &categories {
-        let cat_results: Vec<_> = results
-            .iter()
-            .filter(|r| r.category == *cat)
-            .cloned()
-            .collect();
+        cat_results.clear();
+        cat_results.extend(results.iter().filter(|r| r.category == *cat).cloned());
         if cat_results.is_empty() {
             continue;
         }
-        let plot_path = format!("bench/{:03}_{suffix}.png", index);
+        let plot_path = format!("bench/{:03}_{suffix}.svg", index);
         match plot::plot_results(&cat_results, &plot_path, title, x_label) {
             Ok(()) => println!("📈 {title} chart saved to: {plot_path}"),
             Err(e) => eprintln!("⚠️  Plot failed for {title}: {e}"),
@@ -150,7 +226,7 @@ fn main() {
     }
     match plot::plot_timeseries("bench/timeseries.csv", "bench") {
         Ok(regressions) => {
-            println!("📈 Time series charts saved to bench/timeseries_*.png");
+            println!("📈 Time series charts saved to bench/timeseries_*.svg");
             for msg in &regressions {
                 println!("{msg}");
             }
@@ -166,9 +242,9 @@ fn main() {
     let mut draft_rng = types::Rng::new(99);
     let draft_weights = transformer::TransformerWeights::new(&draft_config, &mut draft_rng);
 
-    let budgets = [4, 8, 12, 16, 20, 24, 32, 48, 64];
+    let budgets = [4, 8, 16, 32, 64];
     let sweep_results =
-        benchmark::bench_ddtree_budget_sweep(&draft_weights, &draft_config, &budgets, 100, 10000);
+        benchmark::bench_ddtree_budget_sweep(&draft_weights, &draft_config, &budgets, 50, 2_000);
 
     println!(
         "  {:<30} {:>12} {:>12} {:>12}",
@@ -211,9 +287,10 @@ fn percepta_benchmark() {
 
         // Build convex parabolic key distribution (simulates execution trace)
         let mid = size as f32 / 2.0;
+        let scale = mid * 0.02;
         for i in 0..size {
             let x = i as f32;
-            let y = -((x - mid) / (mid * 0.02)).powi(2);
+            let y = -((x - mid) / scale).powi(2);
             cache.append(percepta::Vec2::new(x, y), i);
         }
 
@@ -288,12 +365,13 @@ fn percepta_cht_benchmark() {
 
     for &size in &trace_sizes {
         let mid = size as f32 / 2.0;
+        let scale = mid * 0.02;
 
-        // Build parabolic trace: y = -((x - mid) / (mid * 0.02))^2
+        // Build parabolic trace: y = -((x - mid) / scale)^2
         let points: Vec<(f32, f32)> = (0..size)
             .map(|i| {
                 let x = i as f32;
-                let y = -((x - mid) / (mid * 0.02)).powi(2);
+                let y = -((x - mid) / scale).powi(2);
                 (x, y)
             })
             .collect();

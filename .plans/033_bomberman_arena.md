@@ -1,5 +1,7 @@
 # Plan 033: Bomberman HL Arena — 4-Player Heuristic Learning Proof
 
+> **Status:** ✅ SUPERSEDED — HL thesis proven (+177 vs Greedy +131 vs Validator -30 vs Random -55). All arena tasks complete. Remaining unchecked items are explicitly out-of-scope, tracked in Issue 052.
+
 **Branch:** `develop/feature/033_bomberman_arena`
 **Depends on:** Plan 032 (HL Infrastructure), Plan 030 (Bandit), Plan 021 (ScreeningPruner)
 **Research:** `.research/014_Learning_Beyond_Gradients.md`
@@ -547,9 +549,9 @@ After 1000 rounds, P4's absorb-compress should show:
 
 - ~~[-]~~ Real-time multiplayer (human keyboard input — future: add bevy_input)
 - ~~[-]~~ Network play
-- [ ] ~~Complex bomb types (remote, landmine, piercing)~~ Tracked in Issue 052 Task A
-- [ ] ~~Custom maps (fixed arena for reproducibility)~~ Tracked in Issue 052 Task B
-- [ ] ~~Coding agent writing validators~~ Tracked in Issue 052 Task C
+- [-] ~~Complex bomb types (remote, landmine, piercing)~~ Tracked in Issue 052 Task A
+- [-] ~~Custom maps (fixed arena for reproducibility)~~ Tracked in Issue 052 Task B
+- [-] ~~Coding agent writing validators~~ Tracked in Issue 052 Task C
 - ~~[-]~~ Full Bevy renderer (intentional: staying with ratatui TUI)
 - ~~[-]~~ bevy_audio (intentional: staying silent)
 

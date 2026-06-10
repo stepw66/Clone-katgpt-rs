@@ -59,28 +59,16 @@ fn test_planning_decision_debug_format() {
 
 #[test]
 fn test_configurator_context_fields() {
-    let ctx = ConfiguratorContext {
-        domain: 3,
-        entropy_bin: 7,
-    };
+    let ctx = ConfiguratorContext::new(3, 7);
     assert_eq!(ctx.domain, 3);
     assert_eq!(ctx.entropy_bin, 7);
 }
 
 #[test]
 fn test_configurator_context_equality() {
-    let ctx1 = ConfiguratorContext {
-        domain: 0,
-        entropy_bin: 5,
-    };
-    let ctx2 = ConfiguratorContext {
-        domain: 0,
-        entropy_bin: 5,
-    };
-    let ctx3 = ConfiguratorContext {
-        domain: 1,
-        entropy_bin: 5,
-    };
+    let ctx1 = ConfiguratorContext::new(0, 5);
+    let ctx2 = ConfiguratorContext::new(0, 5);
+    let ctx3 = ConfiguratorContext::new(1, 5);
 
     assert_eq!(ctx1, ctx2);
     assert_ne!(ctx1, ctx3);
@@ -90,10 +78,7 @@ fn test_configurator_context_equality() {
 fn test_configurator_context_hashable() {
     use std::collections::HashMap;
 
-    let ctx = ConfiguratorContext {
-        domain: 0,
-        entropy_bin: 3,
-    };
+    let ctx = ConfiguratorContext::new(0, 3);
     let mut map = HashMap::new();
     map.insert(ctx, PlanningDecision::PlanSkip);
     assert_eq!(map.get(&ctx), Some(&PlanningDecision::PlanSkip));
@@ -214,22 +199,25 @@ fn test_configurator_bandit_default() {
 #[test]
 fn test_configurator_bandit_explores_all_arms() {
     let mut bandit = ConfiguratorBandit::new();
-    let ctx = ConfiguratorContext {
-        domain: 0,
-        entropy_bin: 5,
-    };
+    let ctx = ConfiguratorContext::new(0, 5);
 
     // UCB1 gives f32::MAX to unvisited arms, so first 3 selects cover all arms
     let mut seen_new = false;
     let mut seen_extend = false;
     let mut seen_skip = false;
+    let mut seen_spechop = false;
 
-    for _ in 0..3 {
+    for _ in 0..4 {
         let decision = bandit.select(ctx);
         match decision {
             PlanningDecision::PlanNew => seen_new = true,
             PlanningDecision::PlanExtend => seen_extend = true,
             PlanningDecision::PlanSkip => seen_skip = true,
+            PlanningDecision::SpecHop { .. } => seen_spechop = true,
+            #[cfg(feature = "sia_feedback")]
+            PlanningDecision::HarnessUpdate => {}
+            #[cfg(feature = "sia_feedback")]
+            PlanningDecision::WeightUpdate => {}
         }
         bandit.update(ctx, decision, 0.5);
     }
@@ -237,15 +225,13 @@ fn test_configurator_bandit_explores_all_arms() {
     assert!(seen_new, "should have tried PlanNew");
     assert!(seen_extend, "should have tried PlanExtend");
     assert!(seen_skip, "should have tried PlanSkip");
+    assert!(seen_spechop, "should have tried SpecHop");
 }
 
 #[test]
 fn test_configurator_bandit_converges_to_best_arm() {
     let mut bandit = ConfiguratorBandit::new();
-    let ctx = ConfiguratorContext {
-        domain: 0,
-        entropy_bin: 5,
-    };
+    let ctx = ConfiguratorContext::new(0, 5);
 
     // PlanSkip gets consistently high rewards
     for _ in 0..100 {
@@ -267,10 +253,7 @@ fn test_configurator_bandit_converges_to_best_arm() {
 #[test]
 fn test_configurator_bandit_selects_plan_skip_at_low_entropy() {
     let mut bandit = ConfiguratorBandit::new();
-    let ctx = ConfiguratorContext {
-        domain: 0,
-        entropy_bin: 0,
-    };
+    let ctx = ConfiguratorContext::new(0, 0);
 
     // Train: PlanSkip is best at low entropy
     for _ in 0..200 {
@@ -279,6 +262,11 @@ fn test_configurator_bandit_selects_plan_skip_at_low_entropy() {
             PlanningDecision::PlanSkip => 0.9,
             PlanningDecision::PlanExtend => 0.3,
             PlanningDecision::PlanNew => 0.1,
+            PlanningDecision::SpecHop { .. } => 0.2,
+            #[cfg(feature = "sia_feedback")]
+            PlanningDecision::HarnessUpdate => 0.2,
+            #[cfg(feature = "sia_feedback")]
+            PlanningDecision::WeightUpdate => 0.1,
         };
         bandit.update(ctx, decision, reward);
     }
@@ -294,10 +282,7 @@ fn test_configurator_bandit_selects_plan_skip_at_low_entropy() {
 #[test]
 fn test_configurator_bandit_selects_plan_new_at_high_entropy() {
     let mut bandit = ConfiguratorBandit::new();
-    let ctx = ConfiguratorContext {
-        domain: 0,
-        entropy_bin: 9,
-    };
+    let ctx = ConfiguratorContext::new(0, 9);
 
     // Train: PlanNew is best at high entropy
     for _ in 0..200 {
@@ -306,6 +291,11 @@ fn test_configurator_bandit_selects_plan_new_at_high_entropy() {
             PlanningDecision::PlanNew => 0.9,
             PlanningDecision::PlanExtend => 0.3,
             PlanningDecision::PlanSkip => 0.1,
+            PlanningDecision::SpecHop { .. } => 0.2,
+            #[cfg(feature = "sia_feedback")]
+            PlanningDecision::HarnessUpdate => 0.2,
+            #[cfg(feature = "sia_feedback")]
+            PlanningDecision::WeightUpdate => 0.1,
         };
         bandit.update(ctx, decision, reward);
     }
@@ -323,14 +313,8 @@ fn test_configurator_bandit_selects_plan_new_at_high_entropy() {
 #[test]
 fn test_configurator_bandit_context_isolation() {
     let mut bandit = ConfiguratorBandit::new();
-    let ctx_low = ConfiguratorContext {
-        domain: 0,
-        entropy_bin: 1,
-    };
-    let ctx_high = ConfiguratorContext {
-        domain: 0,
-        entropy_bin: 8,
-    };
+    let ctx_low = ConfiguratorContext::new(0, 1);
+    let ctx_high = ConfiguratorContext::new(0, 8);
 
     // Train low entropy to prefer PlanSkip
     for _ in 0..50 {
@@ -379,14 +363,8 @@ fn test_configurator_bandit_context_isolation() {
 #[test]
 fn test_configurator_bandit_domain_isolation() {
     let mut bandit = ConfiguratorBandit::new();
-    let ctx_a = ConfiguratorContext {
-        domain: 0,
-        entropy_bin: 5,
-    };
-    let ctx_b = ConfiguratorContext {
-        domain: 1,
-        entropy_bin: 5,
-    };
+    let ctx_a = ConfiguratorContext::new(0, 5);
+    let ctx_b = ConfiguratorContext::new(1, 5);
 
     // Same entropy bin, different domain
     bandit.update(ctx_a, PlanningDecision::PlanNew, 1.0);
@@ -408,10 +386,7 @@ fn test_configurator_bandit_domain_isolation() {
 #[test]
 fn test_q_value_incremental_mean() {
     let mut bandit = ConfiguratorBandit::new();
-    let ctx = ConfiguratorContext {
-        domain: 0,
-        entropy_bin: 5,
-    };
+    let ctx = ConfiguratorContext::new(0, 5);
 
     bandit.update(ctx, PlanningDecision::PlanSkip, 1.0);
     let q = bandit.q_value(ctx, PlanningDecision::PlanSkip).unwrap();
@@ -432,10 +407,7 @@ fn test_q_value_incremental_mean() {
 #[test]
 fn test_unvisited_context_returns_defaults() {
     let bandit = ConfiguratorBandit::new();
-    let ctx = ConfiguratorContext {
-        domain: 99,
-        entropy_bin: 5,
-    };
+    let ctx = ConfiguratorContext::new(99, 5);
 
     assert_eq!(bandit.q_value(ctx, PlanningDecision::PlanNew), None);
     assert_eq!(bandit.visit_count(ctx, PlanningDecision::PlanNew), 0);
@@ -447,17 +419,11 @@ fn test_num_contexts_tracks_entries() {
     let mut bandit = ConfiguratorBandit::new();
     assert_eq!(bandit.num_contexts(), 0);
 
-    let ctx1 = ConfiguratorContext {
-        domain: 0,
-        entropy_bin: 3,
-    };
+    let ctx1 = ConfiguratorContext::new(0, 3);
     bandit.update(ctx1, PlanningDecision::PlanNew, 0.5);
     assert_eq!(bandit.num_contexts(), 1);
 
-    let ctx2 = ConfiguratorContext {
-        domain: 1,
-        entropy_bin: 7,
-    };
+    let ctx2 = ConfiguratorContext::new(1, 7);
     bandit.update(ctx2, PlanningDecision::PlanSkip, 0.8);
     assert_eq!(bandit.num_contexts(), 2);
 
@@ -471,10 +437,7 @@ fn test_num_contexts_tracks_entries() {
 #[test]
 fn test_visit_counts_per_arm() {
     let mut bandit = ConfiguratorBandit::new();
-    let ctx = ConfiguratorContext {
-        domain: 0,
-        entropy_bin: 5,
-    };
+    let ctx = ConfiguratorContext::new(0, 5);
 
     bandit.update(ctx, PlanningDecision::PlanNew, 0.5);
     bandit.update(ctx, PlanningDecision::PlanNew, 0.6);

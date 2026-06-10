@@ -17,7 +17,7 @@ use katgpt_rs::speculative::d2f_decode_block_with_sampler;
 use katgpt_rs::speculative::diffusion_sampler::{
     DiffusionSampler, SamplerVariant, collect_trajectories, train_logistic_on_patterns,
 };
-use katgpt_rs::speculative::types::NoPruner;
+use katgpt_rs::speculative::types::{NoPruner, NoScreeningPruner};
 use katgpt_rs::types::{Config, Rng};
 use std::time::Instant;
 
@@ -79,6 +79,7 @@ fn run_bench(
                 config,
                 decode_config,
                 &NoPruner,
+                &NoScreeningPruner,
                 &mut rng,
                 sampler,
             );

@@ -78,63 +78,148 @@ pub fn quat_left_inverse(q_l: &[f32; 4], v: &[f32; 4]) -> [f32; 4] {
 /// `q_left` has ceil(dim/4) entries.
 /// For full mode, `q_right` must be Some with same length.
 /// `input` has `dim` elements, `output` must have `dim` elements.
+#[inline]
 pub fn apply_rotation(
     q_left: &[[f32; 4]],
     q_right: Option<&[[f32; 4]]>,
     input: &[f32],
     output: &mut [f32],
 ) {
-    let n_groups = q_left.len();
-    for g in 0..n_groups {
-        // Extract 4D block (zero-pad if needed)
-        let mut v = [0.0f32; 4];
-        for (j, v_slot) in v.iter_mut().enumerate() {
-            let idx = g * 4 + j;
-            if idx < input.len() {
-                *v_slot = input[idx];
+    let dim = input.len();
+    debug_assert_eq!(output.len(), dim);
+    let _n_groups = q_left.len();
+    let n_full_groups = dim / 4;
+
+    match q_right {
+        Some(qr) => {
+            // Main loop: no bounds checks for full groups
+            for g in 0..n_full_groups {
+                let base = g * 4;
+                let v = [
+                    input[base],
+                    input[base + 1],
+                    input[base + 2],
+                    input[base + 3],
+                ];
+                let r = quat_sandwich_forward(&q_left[g], &v, &qr[g]);
+                output[base] = r[0];
+                output[base + 1] = r[1];
+                output[base + 2] = r[2];
+                output[base + 3] = r[3];
+            }
+            // Tail: partial last group (zero-padded)
+            if dim % 4 != 0 {
+                let g = n_full_groups;
+                let base = g * 4;
+                let mut v = [0.0f32; 4];
+                for j in 0..dim - base {
+                    v[j] = input[base + j];
+                }
+                let r = quat_sandwich_forward(&q_left[g], &v, &qr[g]);
+                for j in 0..dim - base {
+                    output[base + j] = r[j];
+                }
             }
         }
-
-        let r = match q_right {
-            Some(qr) => quat_sandwich_forward(&q_left[g], &v, &qr[g]),
-            None => quat_left_forward(&q_left[g], &v),
-        };
-
-        for (j, &r_val) in r.iter().enumerate() {
-            let idx = g * 4 + j;
-            if idx < output.len() {
-                output[idx] = r_val;
+        None => {
+            for g in 0..n_full_groups {
+                let base = g * 4;
+                let v = [
+                    input[base],
+                    input[base + 1],
+                    input[base + 2],
+                    input[base + 3],
+                ];
+                let r = quat_left_forward(&q_left[g], &v);
+                output[base] = r[0];
+                output[base + 1] = r[1];
+                output[base + 2] = r[2];
+                output[base + 3] = r[3];
+            }
+            if dim % 4 != 0 {
+                let g = n_full_groups;
+                let base = g * 4;
+                let mut v = [0.0f32; 4];
+                for j in 0..dim - base {
+                    v[j] = input[base + j];
+                }
+                let r = quat_left_forward(&q_left[g], &v);
+                for j in 0..dim - base {
+                    output[base + j] = r[j];
+                }
             }
         }
     }
 }
 
 /// Apply full vector inverse quaternion rotation.
+#[inline]
 pub fn apply_inverse_rotation(
     q_left: &[[f32; 4]],
     q_right: Option<&[[f32; 4]]>,
     input: &[f32],
     output: &mut [f32],
 ) {
-    let n_groups = q_left.len();
-    for g in 0..n_groups {
-        let mut v = [0.0f32; 4];
-        for (j, v_slot) in v.iter_mut().enumerate() {
-            let idx = g * 4 + j;
-            if idx < input.len() {
-                *v_slot = input[idx];
+    let dim = input.len();
+    debug_assert_eq!(output.len(), dim);
+    let _n_groups = q_left.len();
+    let n_full_groups = dim / 4;
+
+    match q_right {
+        Some(qr) => {
+            for g in 0..n_full_groups {
+                let base = g * 4;
+                let v = [
+                    input[base],
+                    input[base + 1],
+                    input[base + 2],
+                    input[base + 3],
+                ];
+                let r = quat_sandwich_inverse(&q_left[g], &v, &qr[g]);
+                output[base] = r[0];
+                output[base + 1] = r[1];
+                output[base + 2] = r[2];
+                output[base + 3] = r[3];
+            }
+            if dim % 4 != 0 {
+                let g = n_full_groups;
+                let base = g * 4;
+                let mut v = [0.0f32; 4];
+                for j in 0..dim - base {
+                    v[j] = input[base + j];
+                }
+                let r = quat_sandwich_inverse(&q_left[g], &v, &qr[g]);
+                for j in 0..dim - base {
+                    output[base + j] = r[j];
+                }
             }
         }
-
-        let r = match q_right {
-            Some(qr) => quat_sandwich_inverse(&q_left[g], &v, &qr[g]),
-            None => quat_left_inverse(&q_left[g], &v),
-        };
-
-        for (j, &r_val) in r.iter().enumerate() {
-            let idx = g * 4 + j;
-            if idx < output.len() {
-                output[idx] = r_val;
+        None => {
+            for g in 0..n_full_groups {
+                let base = g * 4;
+                let v = [
+                    input[base],
+                    input[base + 1],
+                    input[base + 2],
+                    input[base + 3],
+                ];
+                let r = quat_left_inverse(&q_left[g], &v);
+                output[base] = r[0];
+                output[base + 1] = r[1];
+                output[base + 2] = r[2];
+                output[base + 3] = r[3];
+            }
+            if dim % 4 != 0 {
+                let g = n_full_groups;
+                let base = g * 4;
+                let mut v = [0.0f32; 4];
+                for j in 0..dim - base {
+                    v[j] = input[base + j];
+                }
+                let r = quat_left_inverse(&q_left[g], &v);
+                for j in 0..dim - base {
+                    output[base + j] = r[j];
+                }
             }
         }
     }

@@ -20,16 +20,14 @@ use super::kv_cache::OctopusKVCache;
 ///
 /// Returns `(flat_keys, pos_count)`.
 pub fn dequantize_keys_flat(
-    cache: &OctopusKVCache,
+    cache: &mut OctopusKVCache,
     layer: usize,
     pos: usize,
     kv_dim: usize,
 ) -> Vec<f32> {
     let mut flat = vec![0.0f32; (pos + 1) * kv_dim];
-    for t in 0..=pos {
-        let recon = cache.dequantize_key(layer, t);
-        flat[t * kv_dim..(t + 1) * kv_dim].copy_from_slice(&recon);
-    }
+    // OPT: use _into variant to avoid per-position Vec allocation
+    dequantize_keys_flat_into(cache, layer, pos, kv_dim, &mut flat);
     flat
 }
 
@@ -38,16 +36,14 @@ pub fn dequantize_keys_flat(
 /// Layout: `[(pos + 1) * kv_dim]` row-major, compatible with the
 /// attention kernel's expected `value_cache` layout.
 pub fn dequantize_values_flat(
-    cache: &OctopusKVCache,
+    cache: &mut OctopusKVCache,
     layer: usize,
     pos: usize,
     kv_dim: usize,
 ) -> Vec<f32> {
     let mut flat = vec![0.0f32; (pos + 1) * kv_dim];
-    for t in 0..=pos {
-        let recon = cache.dequantize_value(layer, t);
-        flat[t * kv_dim..(t + 1) * kv_dim].copy_from_slice(&recon);
-    }
+    // OPT: use _into variant to avoid per-position Vec allocation
+    dequantize_values_flat_into(cache, layer, pos, kv_dim, &mut flat);
     flat
 }
 
@@ -117,9 +113,7 @@ pub fn attention_octopus(
         unsafe {
             *scores_buf.get_unchecked_mut(t) = score;
         }
-        if score > max_score {
-            max_score = score;
-        }
+        max_score = max_score.max(score);
     }
 
     // Pass 2: exp(scores - max) + sum
@@ -133,19 +127,23 @@ pub fn attention_octopus(
     }
 
     // Pass 3: normalize + weighted value accumulation
+    // Loop order: t outer, d inner — contiguous value_cache row access, better cache locality.
     let inv_sum = 1.0 / sum;
-    for d in 0..head_dim {
-        let mut val = 0.0f32;
-        for t in 0..t_n {
-            unsafe {
-                val += *scores_buf.get_unchecked(t)
-                    * inv_sum
-                    * *flat_values.get_unchecked(t * kv_dim + kv_group_offset + d);
-            }
-        }
-        unsafe {
-            *attn_out.get_unchecked_mut(q_head_offset + d) = val;
-        }
+    attn_out[q_head_offset..q_head_offset + head_dim].fill(0.0);
+    for t in 0..t_n {
+        let weight = unsafe { *scores_buf.get_unchecked(t) * inv_sum };
+        let v_row = unsafe {
+            std::slice::from_raw_parts(
+                flat_values.as_ptr().add(t * kv_dim + kv_group_offset),
+                head_dim,
+            )
+        };
+        crate::simd::simd_fused_scale_acc(
+            &mut attn_out[q_head_offset..q_head_offset + head_dim],
+            v_row,
+            weight,
+            head_dim,
+        );
     }
 }
 
@@ -200,7 +198,7 @@ pub fn per_coord_mse(original: &[f32], reconstructed: &[f32]) -> f32 {
 #[cfg(all(feature = "octopus", feature = "maxsim"))]
 pub fn maxsim_score_octopus(
     queries: &[f32],
-    cache: &super::kv_cache::OctopusKVCache,
+    cache: &mut super::kv_cache::OctopusKVCache,
     layer: usize,
     pos_range: std::ops::Range<usize>,
     dim: usize,
@@ -210,14 +208,15 @@ pub fn maxsim_score_octopus(
         return 0.0;
     }
 
+    let mut key_buf = vec![0.0f32; dim];
     let mut score = 0.0f32;
     for i in 0..lq {
         let q_row = &queries[i * dim..(i + 1) * dim];
         let mut my_max = f32::NEG_INFINITY;
         for t in pos_range.clone() {
-            // Lazy dequantize: only one key vector in memory at a time.
-            let key = cache.dequantize_key(layer, t);
-            let dot = crate::simd::simd_dot_f32(q_row, &key, dim);
+            // Zero-alloc lazy dequantize into reusable buffer.
+            cache.dequantize_key_into(layer, t, &mut key_buf);
+            let dot = crate::simd::simd_dot_f32(q_row, &key_buf, dim);
             my_max = my_max.max(dot);
         }
         score += my_max;
@@ -264,7 +263,7 @@ mod tests {
         cache.store_key(0, 0, &key);
         cache.store_key(0, 1, &key);
 
-        let flat = dequantize_keys_flat(&cache, 0, 1, kv_dim);
+        let flat = dequantize_keys_flat(&mut cache, 0, 1, kv_dim);
         assert_eq!(flat.len(), 2 * kv_dim);
         // Same key should reconstruct to similar vectors
         let cos = cosine_similarity(&flat[0..kv_dim], &flat[kv_dim..]);
@@ -293,8 +292,8 @@ mod tests {
         dequantize_values_flat_into(&mut cache, 0, 1, kv_dim, &mut flat_vals);
 
         // Compare with non-into versions
-        let ref_keys = dequantize_keys_flat(&cache, 0, 1, kv_dim);
-        let ref_vals = dequantize_values_flat(&cache, 0, 1, kv_dim);
+        let ref_keys = dequantize_keys_flat(&mut cache, 0, 1, kv_dim);
+        let ref_vals = dequantize_values_flat(&mut cache, 0, 1, kv_dim);
 
         for i in 0..flat_keys.len() {
             assert!(
@@ -326,8 +325,8 @@ mod tests {
             cache.store_value(0, pos, &kv);
         }
 
-        let flat_keys = dequantize_keys_flat(&cache, 0, 3, kv_dim);
-        let flat_values = dequantize_values_flat(&cache, 0, 3, kv_dim);
+        let flat_keys = dequantize_keys_flat(&mut cache, 0, 3, kv_dim);
+        let flat_values = dequantize_values_flat(&mut cache, 0, 3, kv_dim);
 
         let q: Vec<f32> = (0..n_embd).map(|i| (i as f32 * 0.03).sin()).collect();
         let mut attn_out = vec![0.0f32; n_embd];
@@ -409,8 +408,8 @@ mod tests {
             cache.store_value(0, pos, &value);
         }
 
-        let flat_keys = dequantize_keys_flat(&cache, 0, 3, kv_dim);
-        let flat_values = dequantize_values_flat(&cache, 0, 3, kv_dim);
+        let flat_keys = dequantize_keys_flat(&mut cache, 0, 3, kv_dim);
+        let flat_values = dequantize_values_flat(&mut cache, 0, 3, kv_dim);
 
         let q = vec![0.5f32; n_embd];
         let mut attn_out = vec![0.0f32; n_embd];

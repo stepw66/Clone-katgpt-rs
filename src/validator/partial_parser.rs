@@ -35,20 +35,22 @@ impl PartialParser {
     pub fn is_valid(&mut self, code: &str) -> bool {
         self.reset();
 
-        let chars: Vec<char> = code.chars().collect();
-        let len = chars.len();
+        // All delimiters we care about are ASCII, so we can iterate bytes
+        // directly — avoids the Vec<char> allocation from .chars().collect().
+        let bytes = code.as_bytes();
+        let len = bytes.len();
         let mut i = 0;
 
         while i < len {
-            let ch = chars[i];
+            let b = bytes[i];
 
             // Skip characters inside strings
             if self.in_string {
-                match ch {
-                    '\\' => {
+                match b {
+                    b'\\' => {
                         i += 1;
                     } // Skip escaped char
-                    '"' => {
+                    b'"' => {
                         self.in_string = false;
                     }
                     _ => {}
@@ -59,11 +61,11 @@ impl PartialParser {
 
             // Skip characters inside char literals
             if self.in_char {
-                match ch {
-                    '\\' => {
+                match b {
+                    b'\\' => {
                         i += 1;
                     }
-                    '\'' => {
+                    b'\'' => {
                         self.in_char = false;
                     }
                     _ => {}
@@ -74,7 +76,7 @@ impl PartialParser {
 
             // Handle comments
             if self.in_line_comment {
-                if ch == '\n' {
+                if b == b'\n' {
                     self.in_line_comment = false;
                 }
                 i += 1;
@@ -82,7 +84,7 @@ impl PartialParser {
             }
 
             if self.in_block_comment {
-                if ch == '*' && i + 1 < len && chars[i + 1] == '/' {
+                if b == b'*' && i + 1 < len && bytes[i + 1] == b'/' {
                     self.in_block_comment = false;
                     i += 2;
                     continue;
@@ -92,14 +94,14 @@ impl PartialParser {
             }
 
             // Check for comment starts
-            if ch == '/' && i + 1 < len {
-                match chars[i + 1] {
-                    '/' => {
+            if b == b'/' && i + 1 < len {
+                match bytes[i + 1] {
+                    b'/' => {
                         self.in_line_comment = true;
                         i += 2;
                         continue;
                     }
-                    '*' => {
+                    b'*' => {
                         self.in_block_comment = true;
                         i += 2;
                         continue;
@@ -109,46 +111,42 @@ impl PartialParser {
             }
 
             // Track bracket depth
-            match ch {
-                '(' => self.paren_depth += 1,
-                ')' => {
+            match b {
+                b'(' => self.paren_depth += 1,
+                b')' => {
                     self.paren_depth -= 1;
                     if self.paren_depth < 0 {
                         return false;
                     }
                 }
-                '{' => self.brace_depth += 1,
-                '}' => {
+                b'{' => self.brace_depth += 1,
+                b'}' => {
                     self.brace_depth -= 1;
                     if self.brace_depth < 0 {
                         return false;
                     }
                 }
-                '[' => self.bracket_depth += 1,
-                ']' => {
+                b'[' => self.bracket_depth += 1,
+                b']' => {
                     self.bracket_depth -= 1;
                     if self.bracket_depth < 0 {
                         return false;
                     }
                 }
-                '<' => {
-                    // Only count as angle bracket if not comparison
-                    // Simple heuristic: count if preceded by identifier or closing bracket
+                b'<' => {
                     self.angle_depth += 1;
                 }
-                '>' => {
-                    self.angle_depth -= 1;
-                    if self.angle_depth < 0 {
-                        self.angle_depth = 0; // Don't reject on angle bracket mismatch
-                    }
+                b'>' => {
+                    self.angle_depth = (self.angle_depth - 1).max(0);
                 }
-                '"' => self.in_string = true,
-                '\'' => {
-                    // Could be char literal or lifetime
+                b'"' => self.in_string = true,
+                b'\'' => {
                     // Heuristic: if followed by a char then ', it's a char literal
-                    if i + 2 < len && chars[i + 2] == '\'' {
+                    if i + 2 < len && bytes[i + 2] == b'\'' {
                         self.in_char = true;
-                    } else if i + 1 < len && (chars[i + 1].is_alphabetic() || chars[i + 1] == '_') {
+                    } else if i + 1 < len
+                        && (bytes[i + 1].is_ascii_alphabetic() || bytes[i + 1] == b'_')
+                    {
                         // Likely a lifetime — don't count as char literal
                     } else {
                         self.in_char = true;
@@ -180,6 +178,11 @@ impl PartialParser {
     /// Check if brackets are balanced (all depths zero).
     pub fn is_balanced(&self) -> bool {
         self.paren_depth == 0 && self.brace_depth == 0 && self.bracket_depth == 0
+    }
+
+    /// Total open bracket depth across all bracket types.
+    pub fn total_depth(&self) -> i32 {
+        self.paren_depth + self.brace_depth + self.bracket_depth
     }
 }
 

@@ -1,5 +1,7 @@
 # Plan 038: Free Transformer — Domain Latent Mid-Layer Injection
 
+> **Status:** ⏸️ STALE — Blocked on `DomainLatentAdamWStep` in riir-burner pipeline (Issue 053). No path forward without upstream burn infrastructure. Core idea validated in Research 018 but implementation requires training pipeline that doesn't exist.
+
 **Branch:** `feature/038_free_tf_domain_latent`
 **Depends on:** Plan 025 (Bidirectional Prefill + LoRA), Plan 023 (Expert Registry)
 **Research:** `.research/018_The_Free_Transformer_Latent_Injection.md`
@@ -137,7 +139,7 @@ Cost: 2 × kv_dim additions. Zero allocations, zero RNG calls.
   - CPU fallback when no GPU available
   - 4 tests: zeros init, from_vec roundtrip, export format, AdamW convergence
 
-- [ ] ~~**Task 5b: riir-burner training support (language domain)**~~ Deferred — riir-burner domain_latent training path blocked; tracked in Issue 053 Section C
+- [-] ~~**Task 5b: riir-burner training support (language domain)**~~ Deferred — riir-burner domain_latent training path blocked; tracked in Issue 053 Section C
   - For larger language models (4B+ params) that need Python training pipeline
   - ~~LoRA training pipeline has matured (riir-burner supports Gemma 2/4 LoRA) — but no domain_latent training path exists yet~~
   - Needs: `DomainLatentAdamWStep` equivalent added to burn pipeline (riir-gpu has it, riir-burner does not)

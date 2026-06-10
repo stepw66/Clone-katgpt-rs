@@ -43,12 +43,18 @@ impl FeatureHasher {
     /// Hash to L2-normalized key/query vector.
     /// `L2_norm(tanh(projection · features))` — same as paper Eq 4.
     pub fn hash_key(&self, features: &[f32]) -> Vec<f32> {
-        let projected = self.project(features);
-        // tanh activation (same as paper)
-        let tanhed: Vec<f32> = projected.iter().map(|&x| x.tanh()).collect();
+        let mut buf = self.project(features);
+        // tanh activation in-place (same as paper)
+        for x in buf.iter_mut() {
+            *x = x.tanh();
+        }
         // L2 normalize (prevents state explosion — verified from source)
-        let norm: f32 = tanhed.iter().map(|x| x * x).sum::<f32>().sqrt().max(1e-8);
-        tanhed.iter().map(|&x| x / norm).collect()
+        let norm: f32 = buf.iter().map(|x| x * x).sum::<f32>().sqrt().max(1e-8);
+        let inv_norm = 1.0 / norm;
+        for x in buf.iter_mut() {
+            *x *= inv_norm;
+        }
+        buf
     }
 
     /// Hash to raw value vector (no normalization, same as paper).
@@ -59,17 +65,16 @@ impl FeatureHasher {
 
     /// Matrix-vector multiply: projection · features
     fn project(&self, features: &[f32]) -> Vec<f32> {
-        let dim = features.len();
         let mut result = vec![0.0; self.rank];
-        for i in 0..self.rank {
+        for (i, result_slot) in result.iter_mut().enumerate().take(self.rank) {
             let mut sum = 0.0f32;
-            for j in 0..dim {
+            for (j, feat) in features.iter().enumerate() {
                 if j * self.rank + i < self.projection.len() {
                     // Column-major access for projection[i, j]
-                    sum += self.projection[j * self.rank + i] * features[j];
+                    sum += self.projection[j * self.rank + i] * feat;
                 }
             }
-            result[i] = sum;
+            *result_slot = sum;
         }
         result
     }

@@ -4,6 +4,24 @@
 //! Failures are silently ignored — never block inference on cache writes.
 
 use crate::types::InferenceResult;
+use std::sync::OnceLock;
+use std::sync::mpsc::Sender;
+
+/// Background worker sender — initialized once, reused for all feedback calls.
+/// Avoids ~10-50μs `thread::spawn` overhead per call.
+static FEEDBACK_SENDER: OnceLock<Sender<String>> = OnceLock::new();
+
+fn get_feedback_sender() -> &'static Sender<String> {
+    FEEDBACK_SENDER.get_or_init(|| {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            while let Ok(msg) = rx.recv() {
+                log::debug!("Feedback: {:.100}...", msg);
+            }
+        });
+        tx
+    })
+}
 
 /// Configuration for feedback loop.
 #[derive(Debug, Clone)]
@@ -27,7 +45,7 @@ impl Default for FeedbackConfig {
 /// Fire-and-forget: send InferenceResult to cache endpoint.
 /// Returns immediately. Errors are logged but ignored.
 pub fn send_feedback(config: &FeedbackConfig, result: &InferenceResult) {
-    let Some(url) = &config.url else {
+    let Some(_url) = &config.url else {
         return; // Feedback disabled
     };
 
@@ -40,16 +58,8 @@ pub fn send_feedback(config: &FeedbackConfig, result: &InferenceResult) {
         return;
     };
 
-    // Fire-and-forget: spawn a thread that makes the HTTP POST.
-    // We don't use reqwest/tokio to avoid adding heavy deps.
-    // In production, this would use the REST feature's client.
-    let url = url.clone();
-    std::thread::spawn(move || {
-        // Placeholder: in production, use reqwest::blocking or the rest feature.
-        // For now, log that we would send.
-        log::debug!("Feedback POST to {url}: {:.100}...", json);
-        let _ = (url, json); // Suppress unused warnings
-    });
+    // Send to background worker thread via channel — avoids thread::spawn per call.
+    let _ = get_feedback_sender().send(json);
 }
 
 #[cfg(test)]

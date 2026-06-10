@@ -24,6 +24,12 @@ use crate::speculative::types::{DDTreeBranchCache, NoPruner, SpeculativeContext}
 #[cfg(feature = "sr2am_configurator")]
 use crate::types::{ConfiguratorContext, PlanningDecision};
 
+// Selectivity Router imports (Plan 204)
+#[cfg(feature = "selectivity_router")]
+use crate::speculative::kurtosis_gate::excess_kurtosis;
+#[cfg(feature = "selectivity_router")]
+use crate::speculative::selectivity_router::SelectivityRouter;
+
 /// Speculative decoding step with a custom verifier.
 /// Pass any `SpeculativeVerifier` to control how drafts are verified.
 pub fn speculative_step_verifier(
@@ -328,16 +334,15 @@ pub fn speculative_step_rollback_with(
     rng: &mut Rng,
 ) -> (Vec<usize>, usize) {
     // 1. Draft marginals via DFlash (zero-alloc into draft_sctx flat buffer)
-    let num_steps = dflash_predict_with(draft_sctx, draft_weights, draft_config, token, pos);
+    let _num_steps = dflash_predict_with(draft_sctx, draft_weights, draft_config, token, pos);
     let vocab_size = draft_config.vocab_size;
 
-    // Convert flat marginals to Vec<&[f32]> for tree builder (borrowed slices, no alloc)
-    let marginals: Vec<&[f32]> = (0..num_steps)
-        .map(|step| draft_sctx.marginal_slice(step, vocab_size))
-        .collect();
+    // OPT: stack-allocated marginals view (avoids Vec allocation per call)
+    let mut marginals_buf: [&[f32]; 64] = [&[]; 64];
+    let marginals = draft_sctx.marginals_into(&mut marginals_buf, vocab_size);
 
     // 2. Build DDTree (reuses pre-allocated heap/tree buffers)
-    let tree = tree_builder.build(&marginals, draft_config, &NoPruner, false);
+    let tree = tree_builder.build(marginals, draft_config, &NoPruner, false);
 
     // 3. Extract candidate paths (top-3 root branches)
     let paths = extract_ddtree_paths(tree);
@@ -411,6 +416,138 @@ pub fn speculative_step_rollback_with(
     }
 
     // All paths exhausted: restore and sample from target
+    target_cache.restore(&snapshot, target_config);
+    let logits = forward(
+        target_ctx,
+        target_weights,
+        target_cache,
+        token,
+        pos,
+        target_config,
+    );
+    probs_buf.copy_from_slice(logits);
+    softmax_scaled(probs_buf, 1.0 / target_config.temperature);
+    let fallback = sample_from_distribution(probs_buf, rng);
+    (vec![fallback], 1)
+}
+
+/// Selectivity-router variant of [`speculative_step_rollback_with`].
+///
+/// After draft marginals are computed, observes per-position kurtosis into the
+/// router (EMA update). If the router signals direct mode for the start position,
+/// skips tree construction entirely and samples directly from the first marginal.
+///
+/// This is the primary integration point for Plan 204's adaptive CoT routing.
+#[cfg(feature = "selectivity_router")]
+#[allow(clippy::too_many_arguments)]
+pub fn speculative_step_rollback_with_router(
+    draft_sctx: &mut SpeculativeContext,
+    tree_builder: &mut TreeBuilder,
+    draft_weights: &TransformerWeights,
+    draft_config: &Config,
+    target_weights: &TransformerWeights,
+    target_config: &Config,
+    target_ctx: &mut ForwardContext,
+    target_cache: &mut MultiLayerKVCache,
+    probs_buf: &mut [f32],
+    residual_buf: &mut [f32],
+    token: usize,
+    pos: usize,
+    rng: &mut Rng,
+    router: &mut SelectivityRouter,
+) -> (Vec<usize>, usize) {
+    // 1. Draft marginals via DFlash
+    let _num_steps = dflash_predict_with(draft_sctx, draft_weights, draft_config, token, pos);
+    let vocab_size = draft_config.vocab_size;
+
+    // 2. Build marginals view
+    let mut marginals_buf: [&[f32]; 64] = [&[]; 64];
+    let marginals = draft_sctx.marginals_into(&mut marginals_buf, vocab_size);
+
+    // 3. Observe kurtosis at each drafted position → router EMA update
+    for (depth, marginal) in marginals.iter().enumerate() {
+        let k = excess_kurtosis(marginal);
+        router.observe(pos + depth, k);
+    }
+
+    // 4. Router guard: if high kurtosis at start position → skip tree, sample direct
+    if !router.should_think(pos) {
+        let sample = sample_from_distribution(marginals.first().copied().unwrap_or(&[1.0]), rng);
+        return (vec![sample], 1);
+    }
+
+    // 5. Low kurtosis → build DDTree (needs CoT/exploration)
+    let tree = tree_builder.build(marginals, draft_config, &NoPruner, false);
+    let paths = extract_ddtree_paths(tree);
+
+    if paths.is_empty() {
+        let fallback = sample_from_distribution(marginals.first().copied().unwrap_or(&[1.0]), rng);
+        return (vec![fallback], 1);
+    }
+
+    // 6. Snapshot target KV cache
+    let snapshot = target_cache.snapshot(pos, target_config);
+
+    // 7. Try each candidate path with rollback on rejection
+    for path in &paths {
+        target_cache.restore(&snapshot, target_config);
+
+        let mut accepted = Vec::with_capacity(path.len());
+        let mut all_accepted = true;
+
+        let logits = forward(
+            target_ctx,
+            target_weights,
+            target_cache,
+            token,
+            pos,
+            target_config,
+        );
+        probs_buf.copy_from_slice(logits);
+        softmax_scaled(probs_buf, 1.0 / target_config.temperature);
+
+        for (i, &draft_tok) in path.iter().enumerate() {
+            let q_dist = marginals.get(i).copied().unwrap_or(&[]);
+            let q_i = q_dist.get(draft_tok).copied().unwrap_or(0.0);
+            let p_i = probs_buf.get(draft_tok).copied().unwrap_or(0.0);
+
+            let acceptance_prob = if q_i > 0.0 { (p_i / q_i).min(1.0) } else { 1.0 };
+
+            if rng.uniform() <= acceptance_prob {
+                accepted.push(draft_tok);
+                if i + 1 < path.len() {
+                    let logits = forward(
+                        target_ctx,
+                        target_weights,
+                        target_cache,
+                        draft_tok,
+                        pos + 1 + i,
+                        target_config,
+                    );
+                    probs_buf.copy_from_slice(logits);
+                    softmax_scaled(probs_buf, 1.0 / target_config.temperature);
+                }
+            } else {
+                let replacement =
+                    sample_residual_distribution_into(probs_buf, q_dist, residual_buf, rng);
+                accepted.push(replacement);
+                all_accepted = false;
+                break;
+            }
+        }
+
+        if all_accepted && !probs_buf.is_empty() {
+            let bonus = sample_from_distribution(probs_buf, rng);
+            accepted.push(bonus);
+        }
+
+        if !accepted.is_empty() {
+            let len = accepted.len();
+            return (accepted, len);
+        }
+    }
+
+    // All paths exhausted
     target_cache.restore(&snapshot, target_config);
     let logits = forward(
         target_ctx,
@@ -636,7 +773,7 @@ pub fn speculative_step_conditioned_with(
 
     // 2. Conditioned draft using target hidden state (no clone — borrow directly)
     let hidden = &target_ctx.hidden_state;
-    let num_steps = dflash_predict_conditioned_with(
+    let _num_steps = dflash_predict_conditioned_with(
         draft_sctx,
         draft_weights,
         draft_config,
@@ -647,17 +784,16 @@ pub fn speculative_step_conditioned_with(
     );
     let vocab_size = draft_config.vocab_size;
 
-    // Convert flat marginals to Vec<&[f32]> for tree builder (borrowed slices, no alloc)
-    let marginals: Vec<&[f32]> = (0..num_steps)
-        .map(|step| draft_sctx.marginal_slice(step, vocab_size))
-        .collect();
+    // OPT: stack-allocated marginals view (avoids Vec allocation per call)
+    let mut marginals_buf: [&[f32]; 64] = [&[]; 64];
+    let marginals = draft_sctx.marginals_into(&mut marginals_buf, vocab_size);
 
     // Pre-extract marginals info before releasing immutable borrow on draft_sctx
     let has_marginals = !marginals.is_empty();
     let last_marginal = marginals.last().copied().unwrap_or(&[]);
 
     // 3. Build DDTree (reuses pre-allocated heap/tree buffers)
-    let tree = tree_builder.build(&marginals, draft_config, &NoPruner, false);
+    let tree = tree_builder.build(marginals, draft_config, &NoPruner, false);
 
     // Extract best path (small Vec alloc acceptable — avoids borrow conflict with marginals)
     let path = extract_best_path(tree);
@@ -685,6 +821,97 @@ pub fn speculative_step_conditioned_with(
     (accepted, len)
 }
 
+/// Selectivity-router variant of [`speculative_step_conditioned_with`].
+///
+/// Observes per-position kurtosis from conditioned draft marginals, then
+/// routes between direct sampling (high kurtosis) and DDTree construction
+/// (low kurtosis, needs CoT/exploration).
+#[cfg(feature = "selectivity_router")]
+#[allow(clippy::too_many_arguments)]
+pub fn speculative_step_conditioned_with_router(
+    draft_sctx: &mut SpeculativeContext,
+    tree_builder: &mut TreeBuilder,
+    draft_weights: &TransformerWeights,
+    draft_config: &Config,
+    target_weights: &TransformerWeights,
+    target_config: &Config,
+    target_ctx: &mut ForwardContext,
+    target_cache: &mut MultiLayerKVCache,
+    probs_buf: &mut [f32],
+    token: usize,
+    pos: usize,
+    rng: &mut Rng,
+    router: &mut SelectivityRouter,
+) -> (Vec<usize>, usize) {
+    // 1. Run target forward to get logits
+    let logits = forward(
+        target_ctx,
+        target_weights,
+        target_cache,
+        token,
+        pos,
+        target_config,
+    );
+    probs_buf.copy_from_slice(logits);
+    softmax_scaled(probs_buf, 1.0 / target_config.temperature);
+
+    // 2. Conditioned draft using target hidden state
+    let hidden = &target_ctx.hidden_state;
+    let _num_steps = dflash_predict_conditioned_with(
+        draft_sctx,
+        draft_weights,
+        draft_config,
+        token,
+        pos,
+        hidden,
+        rng,
+    );
+    let vocab_size = draft_config.vocab_size;
+
+    let mut marginals_buf: [&[f32]; 64] = [&[]; 64];
+    let marginals = draft_sctx.marginals_into(&mut marginals_buf, vocab_size);
+
+    // 3. Observe kurtosis at each drafted position → router EMA update
+    for (depth, marginal) in marginals.iter().enumerate() {
+        let k = excess_kurtosis(marginal);
+        router.observe(pos + depth, k);
+    }
+
+    // 4. Router guard: high kurtosis → direct sample, skip tree
+    if !router.should_think(pos) {
+        let sample = sample_from_distribution(probs_buf, rng);
+        return (vec![sample], 1);
+    }
+
+    // 5. Low kurtosis → build DDTree
+    let has_marginals = !marginals.is_empty();
+    let last_marginal = marginals.last().copied().unwrap_or(&[]);
+    let tree = tree_builder.build(marginals, draft_config, &NoPruner, false);
+    let path = extract_best_path(tree);
+
+    if path.is_empty() {
+        let fallback = sample_from_distribution(probs_buf, rng);
+        return (vec![fallback], 1);
+    }
+
+    // 6. Simulated acceptance (75% cap)
+    let acceptance_rate = 0.75;
+    let max_accept = ((path.len() as f32) * acceptance_rate).ceil() as usize;
+    let accepted: Vec<usize> = path.into_iter().take(max_accept.max(1)).collect();
+
+    // 7. Bonus token if all accepted
+    if accepted.len() == max_accept && has_marginals {
+        let bonus = sample_from_distribution(last_marginal, rng);
+        let mut result = accepted;
+        result.push(bonus);
+        let len = result.len();
+        return (result, len);
+    }
+
+    let len = accepted.len();
+    (accepted, len)
+}
+
 // ---------------------------------------------------------------------------
 /// Extract candidate verification paths from DDTree (top-3 root branches).
 /// Each branch follows the best child at subsequent depths.
@@ -695,19 +922,37 @@ fn extract_ddtree_paths(tree: &[crate::speculative::types::TreeNode]) -> Vec<Vec
         return Vec::new();
     }
 
-    // Build depth index: O(N) single pass instead of O(D×N) repeated scans
-    let mut by_depth: HashMap<usize, Vec<&crate::speculative::types::TreeNode>> = HashMap::new();
+    // Single pass: find roots, compute max depth, and build parent-path → node index
+    // for O(1) child lookups instead of O(N) linear scans per depth.
+    //
+    // For each node at depth > 0, index by (parent_path >> 16) so we can
+    // look up children by the parent's parent_path value.
+    let mut max_depth: usize = 0;
+    let mut roots: Vec<&crate::speculative::types::TreeNode> = Vec::new();
+    // Index: (depth, parent_path >> 16) → best node (highest score)
+    let mut child_index: HashMap<(usize, u128), &crate::speculative::types::TreeNode> =
+        HashMap::new();
+
     for node in tree.iter() {
-        by_depth.entry(node.depth).or_default().push(node);
+        if node.depth > max_depth {
+            max_depth = node.depth;
+        }
+        if node.depth == 0 {
+            roots.push(node);
+        } else {
+            let key = (node.depth, node.parent_path >> 16);
+            child_index
+                .entry(key)
+                .and_modify(|existing| {
+                    if node.score > existing.score {
+                        *existing = node;
+                    }
+                })
+                .or_insert(node);
+        }
     }
 
-    let max_depth = *by_depth.keys().max().unwrap_or(&0);
-
-    // Collect root nodes (depth 0), sorted by score descending
-    let mut roots: Vec<_> = match by_depth.get(&0) {
-        Some(nodes) => nodes.clone(),
-        None => return Vec::new(),
-    };
+    // Sort roots by score descending, keep top 3
     roots.sort_by(|a, b| {
         b.score
             .partial_cmp(&a.score)
@@ -721,16 +966,9 @@ fn extract_ddtree_paths(tree: &[crate::speculative::types::TreeNode]) -> Vec<Vec
         let mut path = vec![root.token_idx];
         let mut current_path = root.parent_path;
 
+        // O(1) lookup per depth instead of O(N) linear scan
         for depth in 1..=max_depth {
-            let child = match by_depth.get(&depth) {
-                Some(nodes) => nodes
-                    .iter()
-                    .filter(|n| n.parent_path >> 16 == current_path)
-                    .max_by_key(|n| (n.score * 1e6) as i64),
-                None => break,
-            };
-
-            match child {
+            match child_index.get(&(depth, current_path)) {
                 Some(node) => {
                     path.push(node.token_idx);
                     current_path = node.parent_path;
@@ -797,7 +1035,7 @@ pub fn speculative_step_with_configurator(
     let num_steps = dflash_predict_with(draft_sctx, draft_weights, draft_config, token, pos);
     let vocab_size = draft_config.vocab_size;
 
-    // Convert flat marginals to Vec<&[f32]> for entropy + tree builder
+    // Build marginals view — Vec needed to avoid borrow conflict with draft_sctx.accepted_buf
     let marginals: Vec<&[f32]> = (0..num_steps)
         .map(|step| draft_sctx.marginal_slice(step, vocab_size))
         .collect();
@@ -805,10 +1043,7 @@ pub fn speculative_step_with_configurator(
     // 2. Compute entropy and query configurator
     let entropy = marginals.first().map_or(0.0, |m| shannon_entropy(m));
     let entropy_bin = ConfiguratorBandit::entropy_bin(entropy);
-    let ctx = ConfiguratorContext {
-        domain: context.domain,
-        entropy_bin,
-    };
+    let ctx = ConfiguratorContext::new(context.domain, entropy_bin);
     let decision = configurator.select(ctx);
 
     match decision {

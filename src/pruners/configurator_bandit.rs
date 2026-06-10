@@ -12,8 +12,15 @@ use katgpt_core::{ConfiguratorContext, PlanningDecision};
 
 // ── Constants ─────────────────────────────────────────────────
 
-/// Number of arms in the configurator bandit (PlanNew, PlanExtend, PlanSkip).
-const NUM_ARMS: usize = 3;
+/// Number of arms in the configurator bandit (PlanNew, PlanExtend, PlanSkip, SpecHop).
+///
+/// Always 4 — FeedbackBandit manages its own extended arm set (arms 4-5)
+/// independently, keeping the base bandit's convergence behavior unchanged
+/// when the `sia_feedback` feature is enabled.
+const NUM_ARMS: usize = 4;
+
+/// Default k (speculative thread count) when SpecHop is selected.
+const DEFAULT_SPECHOP_K: usize = 4;
 
 /// Number of entropy bins (0..10, coarse discretization).
 const NUM_ENTROPY_BINS: usize = 10;
@@ -23,26 +30,36 @@ const NUM_ENTROPY_BINS: usize = 10;
 const DEFAULT_BETA: f32 = 0.1;
 
 /// UCB1 exploration constant (sqrt(2) from Auer et al.).
-const UCB1_C: f32 = 2.0;
+pub(crate) const UCB1_C: f32 = 2.0;
 
 // ── Arm Index Mapping ─────────────────────────────────────────
 
 /// Map `PlanningDecision` to arm index for Q-value arrays.
+/// Only maps the 4 base SR²AM arms. FeedbackBandit handles arms 4-5.
 #[inline]
-fn arm_index(decision: PlanningDecision) -> usize {
+pub(crate) fn arm_index(decision: PlanningDecision) -> usize {
     match decision {
         PlanningDecision::PlanNew => 0,
         PlanningDecision::PlanExtend => 1,
         PlanningDecision::PlanSkip => 2,
+        PlanningDecision::SpecHop { .. } => 3,
+        #[cfg(feature = "sia_feedback")]
+        PlanningDecision::HarnessUpdate | PlanningDecision::WeightUpdate => {
+            unreachable!("FeedbackBandit arms should not be routed to ConfiguratorBandit")
+        }
     }
 }
 
-/// Map arm index back to `PlanningDecision`.
-fn from_arm_index(idx: usize) -> PlanningDecision {
+/// Map arm index back to `PlanningDecision` (base 4 arms only).
+#[inline]
+pub(crate) fn from_arm_index(idx: usize) -> PlanningDecision {
     match idx {
         0 => PlanningDecision::PlanNew,
         1 => PlanningDecision::PlanExtend,
-        _ => PlanningDecision::PlanSkip,
+        2 => PlanningDecision::PlanSkip,
+        _ => PlanningDecision::SpecHop {
+            k: DEFAULT_SPECHOP_K,
+        },
     }
 }
 
@@ -133,8 +150,8 @@ impl ContextStats {
 /// normalizes token usage against budget.
 pub struct ConfiguratorBandit {
     /// Per-context Q-values and visit counts.
-    /// Key: `(domain, entropy_bin)`, Value: stats for 3 arms.
-    stats: HashMap<(usize, usize), ContextStats>,
+    /// Key: `(domain, entropy_bin, desperation_bin)`, Value: stats for 3 arms.
+    stats: HashMap<(usize, usize, usize), ContextStats>,
 }
 
 impl ConfiguratorBandit {
@@ -147,7 +164,7 @@ impl ConfiguratorBandit {
 
     /// Get or create stats for a given context.
     fn get_or_create_stats(&mut self, context: ConfiguratorContext) -> &mut ContextStats {
-        let key = (context.domain, context.entropy_bin);
+        let key = (context.domain, context.entropy_bin, context.desperation_bin);
         self.stats.entry(key).or_insert_with(ContextStats::new)
     }
 
@@ -239,7 +256,7 @@ impl ConfiguratorBandit {
     /// Get Q-value for a specific context and decision.
     /// Returns `None` if context has never been visited.
     pub fn q_value(&self, context: ConfiguratorContext, decision: PlanningDecision) -> Option<f32> {
-        let key = (context.domain, context.entropy_bin);
+        let key = (context.domain, context.entropy_bin, context.desperation_bin);
         self.stats
             .get(&key)
             .map(|s| s.q_values[arm_index(decision)])
@@ -248,7 +265,7 @@ impl ConfiguratorBandit {
     /// Get visit count for a specific context and decision.
     /// Returns `0` if context has never been visited.
     pub fn visit_count(&self, context: ConfiguratorContext, decision: PlanningDecision) -> usize {
-        let key = (context.domain, context.entropy_bin);
+        let key = (context.domain, context.entropy_bin, context.desperation_bin);
         match self.stats.get(&key) {
             Some(s) => s.visits[arm_index(decision)],
             None => 0,
@@ -258,7 +275,7 @@ impl ConfiguratorBandit {
     /// Get total pulls for a specific context.
     /// Returns `0` if context has never been visited.
     pub fn total_pulls(&self, context: ConfiguratorContext) -> usize {
-        let key = (context.domain, context.entropy_bin);
+        let key = (context.domain, context.entropy_bin, context.desperation_bin);
         match self.stats.get(&key) {
             Some(s) => s.total_pulls,
             None => 0,
@@ -269,6 +286,138 @@ impl ConfiguratorBandit {
 impl Default for ConfiguratorBandit {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+// ── Structured Feedback Taxonomy (Plan 146, Research 108: Sailor) ──
+
+/// Structured exploration outcome — inspired by Sailor's feedback taxonomy.
+///
+/// Sailor classifies symbolic execution feedback into:
+///   - "not reached" → target line not executed
+///   - "site reached" → target reached, no violation
+///   - "bug triggered" → concrete violation confirmed
+///
+/// Our analog for game-state exploration:
+///
+/// | Outcome | Sailor Analog | Action |
+/// |---------|--------------|--------|
+/// | `NotReached` | "not reached" | Adjust Q-values (negative reward) |
+/// | `StateReachedNoWin` | "site reached" | Neutral reward + log for tuning |
+/// | `WinConfirmed` | "bug triggered" | Positive reward + update GOAT proof |
+/// | `InvalidState` | "compilation error" | Zero reward + flag for validator check |
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExplorationOutcome {
+    /// Move sequence didn't reach target game state.
+    /// Sailor: "not reached" → LLM fixes driver/stubs.
+    /// Action: Adjust bandit Q-values (negative reward).
+    NotReached,
+    /// Target state reached but no win condition.
+    /// Sailor: "site reached" → LLM tightens constraints.
+    /// Action: Neutral reward + log for constraint tuning.
+    StateReachedNoWin,
+    /// Concrete win condition satisfied.
+    /// Sailor: "bug triggered" → confirmed vulnerability.
+    /// Action: Positive reward + update GOAT proof.
+    WinConfirmed,
+    /// Invalid game state detected.
+    /// Sailor: "compilation error" → fix harness.
+    /// Action: Zero reward + flag for WASM validator check.
+    InvalidState,
+}
+
+impl ExplorationOutcome {
+    /// Convert to a scalar reward for bandit Q-value updates.
+    ///
+    /// | Outcome | Reward |
+    /// |---------|--------|
+    /// | `WinConfirmed` | +1.0 |
+    /// | `StateReachedNoWin` | 0.0 |
+    /// | `NotReached` | -0.5 |
+    /// | `InvalidState` | -1.0 |
+    pub fn to_reward(&self) -> f32 {
+        match self {
+            Self::WinConfirmed => 1.0,
+            Self::StateReachedNoWin => 0.0,
+            Self::NotReached => -0.5,
+            Self::InvalidState => -1.0,
+        }
+    }
+}
+
+// ── PrunerSchedule (Plan 171: Thinking Prune) ──────────────────
+
+/// How ScreeningPruner is applied across hops/loops in SpecHop/LT2.
+///
+/// Controls whether intermediate steps use lightweight screening
+/// (FrozenBaseGuard) or full screening at every step.
+///
+/// From the Thinking Pixel paper (arXiv:2604.25299 §3.3): repeated full
+/// verification at every recursion step corrupts the draft distribution
+/// through compounding artifacts. The solution: apply lightweight processing
+/// at intermediate steps, full model only at the final step.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum PrunerSchedule {
+    /// Apply the full ScreeningPruner at every hop/loop step.
+    /// Current behavior before Plan 171.
+    Uniform,
+    /// Apply FrozenBaseGuard: intermediate steps accept all (relevance 1.0),
+    /// only the final step applies the full ScreeningPruner.
+    /// This is the new default — pure speedup, no quality loss.
+    #[default]
+    FrozenBaseGuard,
+    /// Route by per-token entropy: high-entropy → relaxed, low-entropy → tight.
+    /// Uses same threshold as EntropyBifurcatedPruner.
+    /// Stored as `u32` bits for `Eq`/`Hash` compatibility; use `threshold_f32()` to decode.
+    #[cfg(feature = "directional_credit")]
+    EntropyRouted { threshold: u32 },
+}
+
+impl PrunerSchedule {
+    /// Returns true if this schedule uses FrozenBaseGuard semantics.
+    #[inline]
+    pub fn is_frozen_base(&self) -> bool {
+        matches!(self, Self::FrozenBaseGuard)
+    }
+
+    /// Returns true if this schedule applies full screening at every step.
+    #[inline]
+    pub fn is_uniform(&self) -> bool {
+        matches!(self, Self::Uniform)
+    }
+
+    /// Determine if the given step should apply full screening.
+    ///
+    /// For `FrozenBaseGuard`: only true when `hop_index == total_hops - 1`.
+    /// For `Uniform`: always true.
+    /// For `EntropyRouted`: always true (routing happens at pruner level).
+    #[inline]
+    pub fn should_screen_full(&self, hop_index: usize, total_hops: usize) -> bool {
+        match self {
+            Self::Uniform => true,
+            Self::FrozenBaseGuard => hop_index >= total_hops.saturating_sub(1),
+            #[cfg(feature = "directional_credit")]
+            Self::EntropyRouted { .. } => true,
+        }
+    }
+
+    /// Get the entropy threshold as `f32` (only meaningful for `EntropyRouted`).
+    #[cfg(feature = "directional_credit")]
+    #[inline]
+    pub fn threshold_f32(&self) -> Option<f32> {
+        match self {
+            Self::EntropyRouted { threshold } => Some(f32::from_bits(*threshold)),
+            _ => None,
+        }
+    }
+
+    /// Construct an `EntropyRouted` schedule from an `f32` threshold.
+    #[cfg(feature = "directional_credit")]
+    #[inline]
+    pub fn entropy_routed(threshold: f32) -> Self {
+        Self::EntropyRouted {
+            threshold: threshold.to_bits(),
+        }
     }
 }
 
@@ -285,10 +434,39 @@ mod tests {
         assert_eq!(arm_index(PlanningDecision::PlanNew), 0);
         assert_eq!(arm_index(PlanningDecision::PlanExtend), 1);
         assert_eq!(arm_index(PlanningDecision::PlanSkip), 2);
+        assert_eq!(arm_index(PlanningDecision::SpecHop { k: 4 }), 3);
+        #[cfg(feature = "sia_feedback")]
+        {
+            // FeedbackBandit arms are no longer mapped in ConfiguratorBandit (T20 decoupling).
+            // They are handled independently by FeedbackBandit's own UCB1.
+            // Verify they panic if accidentally routed to ConfiguratorBandit.
+            let result = std::panic::catch_unwind(|| arm_index(PlanningDecision::HarnessUpdate));
+            assert!(
+                result.is_err(),
+                "HarnessUpdate should not be routable to ConfiguratorBandit"
+            );
+        }
 
         assert_eq!(from_arm_index(0), PlanningDecision::PlanNew);
         assert_eq!(from_arm_index(1), PlanningDecision::PlanExtend);
         assert_eq!(from_arm_index(2), PlanningDecision::PlanSkip);
+        assert!(matches!(
+            from_arm_index(3),
+            PlanningDecision::SpecHop { .. }
+        ));
+        // from_arm_index only handles base 4 arms; feedback arms are managed by FeedbackBandit
+        #[cfg(feature = "sia_feedback")]
+        {
+            // Indices >= 4 map to SpecHop (fallback) — FeedbackBandit handles them separately
+            assert!(matches!(
+                from_arm_index(4),
+                PlanningDecision::SpecHop { .. }
+            ));
+            assert!(matches!(
+                from_arm_index(99),
+                PlanningDecision::SpecHop { .. }
+            ));
+        }
     }
 
     // ── Entropy binning ───────────────────────────────────────
@@ -349,10 +527,7 @@ mod tests {
     #[test]
     fn test_select_explores_all_arms_before_exploiting() {
         let mut bandit = ConfiguratorBandit::new();
-        let ctx = ConfiguratorContext {
-            domain: 0,
-            entropy_bin: 5,
-        };
+        let ctx = ConfiguratorContext::new(0, 5);
 
         // First 3 selects should visit each arm at least once (UCB1 gives f32::MAX to unvisited)
         let mut seen = [false; NUM_ARMS];
@@ -370,10 +545,7 @@ mod tests {
     #[test]
     fn test_select_converges_to_best_arm() {
         let mut bandit = ConfiguratorBandit::new();
-        let ctx = ConfiguratorContext {
-            domain: 0,
-            entropy_bin: 5,
-        };
+        let ctx = ConfiguratorContext::new(0, 5);
 
         // PlanSkip (arm 2) gets consistently high rewards
         // Others get low rewards
@@ -399,14 +571,8 @@ mod tests {
     #[test]
     fn test_context_isolation() {
         let mut bandit = ConfiguratorBandit::new();
-        let ctx_low = ConfiguratorContext {
-            domain: 0,
-            entropy_bin: 1,
-        };
-        let ctx_high = ConfiguratorContext {
-            domain: 0,
-            entropy_bin: 8,
-        };
+        let ctx_low = ConfiguratorContext::new(0, 1);
+        let ctx_high = ConfiguratorContext::new(0, 8);
 
         // Train low entropy context to prefer PlanSkip
         for _ in 0..50 {
@@ -458,10 +624,7 @@ mod tests {
     #[test]
     fn test_configurator_bandit_selects_plan_skip_at_low_entropy() {
         let mut bandit = ConfiguratorBandit::new();
-        let ctx = ConfiguratorContext {
-            domain: 0,
-            entropy_bin: 0,
-        }; // Very low entropy
+        let ctx = ConfiguratorContext::new(0, 0); // Very low entropy
 
         // Train: PlanSkip is best at low entropy
         for _ in 0..200 {
@@ -470,6 +633,11 @@ mod tests {
                 PlanningDecision::PlanSkip => 0.9,
                 PlanningDecision::PlanExtend => 0.3,
                 PlanningDecision::PlanNew => 0.1,
+                PlanningDecision::SpecHop { .. } => 0.2,
+                #[cfg(feature = "sia_feedback")]
+                PlanningDecision::HarnessUpdate => 0.2,
+                #[cfg(feature = "sia_feedback")]
+                PlanningDecision::WeightUpdate => 0.1,
             };
             bandit.update(ctx, decision, reward);
         }
@@ -487,10 +655,7 @@ mod tests {
     #[test]
     fn test_configurator_bandit_selects_plan_new_at_high_entropy() {
         let mut bandit = ConfiguratorBandit::new();
-        let ctx = ConfiguratorContext {
-            domain: 0,
-            entropy_bin: 9,
-        }; // High entropy
+        let ctx = ConfiguratorContext::new(0, 9); // High entropy
 
         // Train: PlanNew is best at high entropy
         for _ in 0..200 {
@@ -499,6 +664,11 @@ mod tests {
                 PlanningDecision::PlanNew => 0.9,
                 PlanningDecision::PlanExtend => 0.3,
                 PlanningDecision::PlanSkip => 0.1,
+                PlanningDecision::SpecHop { .. } => 0.2,
+                #[cfg(feature = "sia_feedback")]
+                PlanningDecision::HarnessUpdate => 0.2,
+                #[cfg(feature = "sia_feedback")]
+                PlanningDecision::WeightUpdate => 0.1,
             };
             bandit.update(ctx, decision, reward);
         }
@@ -516,10 +686,7 @@ mod tests {
     #[test]
     fn test_q_value_update_incremental_mean() {
         let mut bandit = ConfiguratorBandit::new();
-        let ctx = ConfiguratorContext {
-            domain: 0,
-            entropy_bin: 5,
-        };
+        let ctx = ConfiguratorContext::new(0, 5);
 
         bandit.update(ctx, PlanningDecision::PlanSkip, 1.0);
         assert!((bandit.q_value(ctx, PlanningDecision::PlanSkip).unwrap() - 1.0).abs() < 1e-6);
@@ -536,10 +703,7 @@ mod tests {
     #[test]
     fn test_unvisited_context_returns_none() {
         let bandit = ConfiguratorBandit::new();
-        let ctx = ConfiguratorContext {
-            domain: 99,
-            entropy_bin: 5,
-        };
+        let ctx = ConfiguratorContext::new(99, 5);
         assert_eq!(bandit.q_value(ctx, PlanningDecision::PlanNew), None);
         assert_eq!(bandit.visit_count(ctx, PlanningDecision::PlanNew), 0);
         assert_eq!(bandit.total_pulls(ctx), 0);
@@ -550,22 +714,58 @@ mod tests {
         let mut bandit = ConfiguratorBandit::new();
         assert_eq!(bandit.num_contexts(), 0);
 
-        let ctx1 = ConfiguratorContext {
-            domain: 0,
-            entropy_bin: 3,
-        };
+        let ctx1 = ConfiguratorContext::new(0, 3);
         bandit.update(ctx1, PlanningDecision::PlanNew, 0.5);
         assert_eq!(bandit.num_contexts(), 1);
 
-        let ctx2 = ConfiguratorContext {
-            domain: 1,
-            entropy_bin: 7,
-        };
+        let ctx2 = ConfiguratorContext::new(1, 7);
         bandit.update(ctx2, PlanningDecision::PlanSkip, 0.8);
         assert_eq!(bandit.num_contexts(), 2);
 
         // Same context doesn't add
         bandit.update(ctx1, PlanningDecision::PlanExtend, 0.3);
         assert_eq!(bandit.num_contexts(), 2);
+    }
+
+    // ── PrunerSchedule (Plan 171: Thinking Prune) ────────────
+
+    #[test]
+    fn test_pruner_schedule_default_is_frozen_base() {
+        let schedule = PrunerSchedule::default();
+        assert_eq!(schedule, PrunerSchedule::FrozenBaseGuard);
+    }
+
+    #[test]
+    fn test_pruner_schedule_is_frozen_base() {
+        assert!(PrunerSchedule::FrozenBaseGuard.is_frozen_base());
+        assert!(!PrunerSchedule::Uniform.is_frozen_base());
+    }
+
+    #[test]
+    fn test_pruner_schedule_is_uniform() {
+        assert!(PrunerSchedule::Uniform.is_uniform());
+        assert!(!PrunerSchedule::FrozenBaseGuard.is_uniform());
+    }
+
+    #[test]
+    fn test_pruner_schedule_should_screen_full_uniform() {
+        let schedule = PrunerSchedule::Uniform;
+        assert!(schedule.should_screen_full(0, 3));
+        assert!(schedule.should_screen_full(1, 3));
+        assert!(schedule.should_screen_full(2, 3));
+    }
+
+    #[test]
+    fn test_pruner_schedule_should_screen_full_frozen_base() {
+        let schedule = PrunerSchedule::FrozenBaseGuard;
+        assert!(!schedule.should_screen_full(0, 3));
+        assert!(!schedule.should_screen_full(1, 3));
+        assert!(schedule.should_screen_full(2, 3)); // final step
+    }
+
+    #[test]
+    fn test_pruner_schedule_single_hop() {
+        let schedule = PrunerSchedule::FrozenBaseGuard;
+        assert!(schedule.should_screen_full(0, 1)); // only hop is final
     }
 }

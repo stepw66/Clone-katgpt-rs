@@ -211,6 +211,25 @@ impl BomberTemplateProposer {
             .map(|(i, &t)| (t, self.stats[i].pulls as f32 / total))
             .collect()
     }
+
+    /// Get UCB1 score for a specific template (exposes private TemplateStats method).
+    pub fn ucb1_score(&self, template_id: usize, total_pulls: u32) -> f32 {
+        self.stats
+            .get(template_id)
+            .map(|s| s.ucb1_score(total_pulls))
+            .unwrap_or(f32::MAX)
+    }
+
+    /// Record a template pull without going through `select()`.
+    ///
+    /// Used when template selection is overridden by EM-guided logic.
+    pub fn record_pull(&mut self, template_id: usize) {
+        if template_id >= 8 {
+            return;
+        }
+        self.stats[template_id].pulls += 1;
+        self.total_pulls += 1;
+    }
 }
 
 impl Default for BomberTemplateProposer {

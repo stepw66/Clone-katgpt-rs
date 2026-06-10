@@ -10,7 +10,6 @@
 use super::spectral::{
     BitAllocator, LloydMaxQuantizer, generate_selective_qjl_signs, waterfill_bits,
 };
-use super::spectral_rotation::SpectralRotation;
 use super::types::{
     LloydMaxCodebook, SpectralQuantCalibration, SpectralQuantKVCacheConfig, SpectralQuantLayer,
     WaterfillAllocation,
@@ -26,6 +25,7 @@ use rayon::prelude::*;
 ///
 /// Zero-alloc hot path via scratch buffers.
 pub struct SpectralQuantKVCache {
+    // ── Vec fields first (24 bytes, 8-byte aligned) ──
     /// Per-layer calibration + codebooks.
     pub layers: Vec<SpectralQuantLayer>,
     /// Packed key indices: [layer][position] → variable-bit packed bytes.
@@ -36,11 +36,6 @@ pub struct SpectralQuantKVCache {
     val_indices: Vec<Vec<Vec<u8>>>,
     /// Per-position value norms.
     val_norms: Vec<Vec<f32>>,
-    /// Current write position.
-    pos: usize,
-    n_layers: usize,
-    kv_dim: usize,
-    max_seq_len: usize,
     // ── Scratch buffers (zero-alloc hot path) ──
     scratch_normalized: Vec<f32>,
     scratch_rotated: Vec<f32>,
@@ -49,6 +44,12 @@ pub struct SpectralQuantKVCache {
     scratch_tail_indices: Vec<u8>,
     scratch_all_indices: Vec<u8>,
     scratch_all_bits: Vec<u8>,
+    // ── usize fields (8-byte aligned, no padding between them) ──
+    /// Current write position.
+    pos: usize,
+    n_layers: usize,
+    kv_dim: usize,
+    max_seq_len: usize,
 }
 
 /// Per-thread scratch buffers for parallel dequantize operations.
@@ -57,6 +58,7 @@ pub struct SpectralQuantKVCache {
 /// contention on [`SpectralQuantKVCache`]'s internal scratch buffers.
 /// Enables `&self` parallel dequantize without requiring `&mut self`.
 pub struct DequantizeScratch {
+    // Vec fields first (8-byte aligned), then smaller types
     all_bits: Vec<u8>,
     all_indices: Vec<u8>,
     rotated: Vec<f32>,
@@ -73,6 +75,12 @@ impl DequantizeScratch {
             unrotated: vec![0.0f32; kv_dim],
         }
     }
+}
+
+/// Discriminant for whether `store_vector` writes to key or value storage.
+enum StoreTarget {
+    Key,
+    Value,
 }
 
 impl SpectralQuantKVCache {
@@ -217,27 +225,31 @@ impl SpectralQuantKVCache {
             //   1. Random vector ~ N(0, I)
             //   2. Normalize to unit norm (‖x‖ = 1)
             //   3. Rotate by V^T (eigenvector transpose)
-            let synthetic_rotated: Vec<Vec<f32>> = (0..n_synthetic)
-                .map(|_| {
-                    // Step 1: random vector
-                    let mut x: Vec<f32> = (0..head_dim).map(|_| rng.normal()).collect();
-                    // Step 2: normalize to unit norm
-                    let norm = x.iter().map(|v| v * v).sum::<f32>().sqrt().max(1e-8);
-                    for v in x.iter_mut() {
-                        *v /= norm;
-                    }
-                    // Step 3: rotate by V^T — output[j] = Σ_i x[i] * V[i*head_dim+j]
-                    let mut rotated = vec![0.0f32; head_dim];
+            //
+            // Pre-allocate scratch buffers outside the loop to avoid per-iteration alloc.
+            let mut scratch_x = vec![0.0f32; head_dim];
+            let mut scratch_rotated = vec![0.0f32; head_dim];
+            let mut synthetic_rotated: Vec<Vec<f32>> = Vec::with_capacity(n_synthetic);
+            for _ in 0..n_synthetic {
+                // Step 1: random vector
+                for v in scratch_x.iter_mut() {
+                    *v = rng.normal();
+                }
+                // Step 2: normalize to unit norm
+                let norm = crate::simd::simd_sum_sq(&scratch_x, head_dim).sqrt().max(1e-8);
+                crate::simd::simd_scale_inplace(&mut scratch_x, 1.0 / norm);
+                // Step 3: rotate by V^T — output[j] = Σ_i x[i] * V[i*head_dim+j]
+                // Same transpose-and-accumulate pattern as SpectralRotation::rotate().
+                scratch_rotated.fill(0.0);
+                for i in 0..head_dim {
+                    let xi = scratch_x[i];
+                    let row = &eigenvectors[i * head_dim..i * head_dim + head_dim];
                     for j in 0..head_dim {
-                        let mut sum = 0.0f32;
-                        for i in 0..head_dim {
-                            sum += x[i] * eigenvectors[i * head_dim + j];
-                        }
-                        rotated[j] = sum;
+                        scratch_rotated[j] += row[j] * xi;
                     }
-                    rotated
-                })
-                .collect();
+                }
+                synthetic_rotated.push(scratch_rotated.clone());
+            }
 
             // Fit tail codebook from tail dims (d_eff..head_dim)
             let tail_data: Vec<f32> = synthetic_rotated
@@ -359,30 +371,51 @@ impl SpectralQuantKVCache {
 
     /// Quantize and store a key vector at given layer and position.
     pub fn store_key(&mut self, layer: usize, pos: usize, key: &[f32]) {
-        debug_assert_eq!(key.len(), self.kv_dim);
+        self.store_vector(layer, pos, key, StoreTarget::Key);
+    }
+
+    /// Quantize and store a value vector at given layer and position.
+    pub fn store_value(&mut self, layer: usize, pos: usize, value: &[f32]) {
+        self.store_vector(layer, pos, value, StoreTarget::Value);
+    }
+
+    /// Shared quantize-and-store logic for both keys and values.
+    ///
+    /// Pipeline: norm → normalize → rotate(V^T) → quantize(semantic+tail) → pack.
+    fn store_vector(&mut self, layer: usize, pos: usize, vec: &[f32], target: StoreTarget) {
+        debug_assert_eq!(vec.len(), self.kv_dim);
         let layer_state = &self.layers[layer];
         let d_eff = layer_state.d_eff;
         let b_low = layer_state.b_low.max(1);
 
         // Compute norm
-        let norm = simd_norm(key);
+        let norm = simd_norm(vec);
         if norm < 1e-8 {
-            self.key_norms[layer][pos] = 0.0;
+            match target {
+                StoreTarget::Key => self.key_norms[layer][pos] = 0.0,
+                StoreTarget::Value => self.val_norms[layer][pos] = 0.0,
+            }
             return;
         }
-        self.key_norms[layer][pos] = norm;
+        match target {
+            StoreTarget::Key => self.key_norms[layer][pos] = norm,
+            StoreTarget::Value => self.val_norms[layer][pos] = norm,
+        }
 
         // Normalize into scratch buffer
         let inv_norm = 1.0 / norm;
-        self.scratch_normalized[..key.len()].copy_from_slice(key);
+        self.scratch_normalized[..vec.len()].copy_from_slice(vec);
         simd_scale_inplace(&mut self.scratch_normalized, inv_norm);
 
-        // Rotate using eigenvectors
-        let rotation = SpectralRotation::new(
-            layer_state.calibration.eigenvectors.clone(),
-            layer_state.calibration.head_dim,
+        // Rotate using cached per-layer eigenvectors (no clone)
+        let eigenvectors = &layer_state.calibration.eigenvectors;
+        let head_dim = layer_state.calibration.head_dim;
+        rotate_into(
+            eigenvectors,
+            head_dim,
+            &self.scratch_normalized,
+            &mut self.scratch_rotated,
         );
-        rotation.rotate(&self.scratch_normalized, &mut self.scratch_rotated);
 
         // Quantize semantic dims
         if let Some(cb) = &layer_state.semantic_codebook {
@@ -421,72 +454,11 @@ impl SpectralQuantKVCache {
         all_indices[d_eff..self.kv_dim].copy_from_slice(&self.scratch_tail_indices[..tail_len]);
 
         // Pack variable bits into storage
-        pack_variable_bits(
-            &all_indices[..self.kv_dim],
-            &all_bits[..self.kv_dim],
-            &mut self.key_indices[layer][pos],
-        );
-    }
-
-    /// Quantize and store a value vector at given layer and position.
-    pub fn store_value(&mut self, layer: usize, pos: usize, value: &[f32]) {
-        debug_assert_eq!(value.len(), self.kv_dim);
-        let layer_state = &self.layers[layer];
-        let d_eff = layer_state.d_eff;
-        let b_low = layer_state.b_low.max(1);
-
-        let norm = simd_norm(value);
-        if norm < 1e-8 {
-            self.val_norms[layer][pos] = 0.0;
-            return;
-        }
-        self.val_norms[layer][pos] = norm;
-
-        let inv_norm = 1.0 / norm;
-        self.scratch_normalized[..value.len()].copy_from_slice(value);
-        simd_scale_inplace(&mut self.scratch_normalized, inv_norm);
-
-        let rotation = SpectralRotation::new(
-            layer_state.calibration.eigenvectors.clone(),
-            layer_state.calibration.head_dim,
-        );
-        rotation.rotate(&self.scratch_normalized, &mut self.scratch_rotated);
-
-        if let Some(cb) = &layer_state.semantic_codebook {
-            for i in 0..d_eff {
-                self.scratch_semantic_indices[i] =
-                    quantize_to_idx(self.scratch_rotated[i], &cb.centroids);
-            }
-        } else if let Some(per_dim) = &layer_state.per_dim_semantic_codebooks {
-            for (i, cb) in per_dim.iter().enumerate().take(d_eff) {
-                self.scratch_semantic_indices[i] =
-                    quantize_to_idx(self.scratch_rotated[i], &cb.centroids);
-            }
-        }
-
-        let tail_cb = &layer_state.tail_codebook;
-        for (i, &v) in self.scratch_rotated.iter().enumerate().skip(d_eff) {
-            self.scratch_tail_indices[i - d_eff] = quantize_to_idx(v, &tail_cb.centroids);
-        }
-
-        let all_bits = &mut self.scratch_all_bits;
-        if let Some(ref bits) = layer_state.semantic_bits_per_dim {
-            all_bits[..d_eff].copy_from_slice(&bits[..d_eff.min(bits.len())]);
-        } else {
-            all_bits[..d_eff].fill(layer_state.b_high);
-        }
-        all_bits[d_eff..self.kv_dim].fill(b_low);
-
-        let all_indices = &mut self.scratch_all_indices;
-        all_indices[..d_eff].copy_from_slice(&self.scratch_semantic_indices[..d_eff]);
-        let tail_len = self.kv_dim - d_eff;
-        all_indices[d_eff..self.kv_dim].copy_from_slice(&self.scratch_tail_indices[..tail_len]);
-
-        pack_variable_bits(
-            &all_indices[..self.kv_dim],
-            &all_bits[..self.kv_dim],
-            &mut self.val_indices[layer][pos],
-        );
+        let packed = match target {
+            StoreTarget::Key => &mut self.key_indices[layer][pos],
+            StoreTarget::Value => &mut self.val_indices[layer][pos],
+        };
+        pack_variable_bits(&all_indices[..self.kv_dim], &all_bits[..self.kv_dim], packed);
     }
 
     /// Dequantize a key at position into a new vector.
@@ -536,12 +508,10 @@ impl SpectralQuantKVCache {
             rotated[i] = dequantize_idx(all_indices[i], &tail_cb.centroids);
         }
 
-        let rotation = SpectralRotation::new(
-            layer_state.calibration.eigenvectors.clone(),
-            layer_state.calibration.head_dim,
-        );
+        let eigenvectors = &layer_state.calibration.eigenvectors;
+        let head_dim = layer_state.calibration.head_dim;
         let mut normalized = vec![0.0f32; self.kv_dim];
-        rotation.unrotate(&rotated, &mut normalized);
+        unrotate_into(eigenvectors, head_dim, &rotated, &mut normalized);
 
         for v in &mut normalized {
             *v *= norm;
@@ -593,12 +563,10 @@ impl SpectralQuantKVCache {
             rotated[i] = dequantize_idx(all_indices[i], &tail_cb.centroids);
         }
 
-        let rotation = SpectralRotation::new(
-            layer_state.calibration.eigenvectors.clone(),
-            layer_state.calibration.head_dim,
-        );
+        let eigenvectors = &layer_state.calibration.eigenvectors;
+        let head_dim = layer_state.calibration.head_dim;
         let mut normalized = vec![0.0f32; self.kv_dim];
-        rotation.unrotate(&rotated, &mut normalized);
+        unrotate_into(eigenvectors, head_dim, &rotated, &mut normalized);
 
         normalized.iter().map(|x| x * norm).collect()
     }
@@ -653,12 +621,15 @@ impl SpectralQuantKVCache {
             *r = dequantize_idx(all_indices[i], &tail_cb.centroids);
         }
 
-        // Inverse rotate
-        let rotation = SpectralRotation::new(
-            layer_state.calibration.eigenvectors.clone(),
-            layer_state.calibration.head_dim,
+        // Inverse rotate (no clone)
+        let eigenvectors = &layer_state.calibration.eigenvectors;
+        let head_dim = layer_state.calibration.head_dim;
+        unrotate_into(
+            eigenvectors,
+            head_dim,
+            &self.scratch_rotated,
+            &mut self.scratch_unrotated,
         );
-        rotation.unrotate(&self.scratch_rotated, &mut self.scratch_unrotated);
 
         // Scale by norm → output
         out.copy_from_slice(&self.scratch_unrotated);
@@ -712,11 +683,14 @@ impl SpectralQuantKVCache {
             *r = dequantize_idx(all_indices[i], &tail_cb.centroids);
         }
 
-        let rotation = SpectralRotation::new(
-            layer_state.calibration.eigenvectors.clone(),
-            layer_state.calibration.head_dim,
+        let eigenvectors = &layer_state.calibration.eigenvectors;
+        let head_dim = layer_state.calibration.head_dim;
+        unrotate_into(
+            eigenvectors,
+            head_dim,
+            &self.scratch_rotated,
+            &mut self.scratch_unrotated,
         );
-        rotation.unrotate(&self.scratch_rotated, &mut self.scratch_unrotated);
 
         out.copy_from_slice(&self.scratch_unrotated);
         simd_scale_inplace(out, norm);
@@ -822,11 +796,14 @@ impl SpectralQuantKVCache {
             *r = dequantize_idx(all_indices[i], &tail_cb.centroids);
         }
 
-        let rotation = SpectralRotation::new(
-            layer_state.calibration.eigenvectors.clone(),
-            layer_state.calibration.head_dim,
+        let eigenvectors = &layer_state.calibration.eigenvectors;
+        let head_dim = layer_state.calibration.head_dim;
+        unrotate_into(
+            eigenvectors,
+            head_dim,
+            &scratch.rotated,
+            &mut scratch.unrotated,
         );
-        rotation.unrotate(&scratch.rotated, &mut scratch.unrotated);
 
         out.copy_from_slice(&scratch.unrotated);
         simd_scale_inplace(out, norm);
@@ -887,11 +864,14 @@ impl SpectralQuantKVCache {
             *r = dequantize_idx(all_indices[i], &tail_cb.centroids);
         }
 
-        let rotation = SpectralRotation::new(
-            layer_state.calibration.eigenvectors.clone(),
-            layer_state.calibration.head_dim,
+        let eigenvectors = &layer_state.calibration.eigenvectors;
+        let head_dim = layer_state.calibration.head_dim;
+        unrotate_into(
+            eigenvectors,
+            head_dim,
+            &scratch.rotated,
+            &mut scratch.unrotated,
         );
-        rotation.unrotate(&scratch.rotated, &mut scratch.unrotated);
 
         out.copy_from_slice(&scratch.unrotated);
         simd_scale_inplace(out, norm);
@@ -927,22 +907,16 @@ impl SpectralQuantKVCache {
             return flat;
         }
 
-        // Parallel: each rayon worker gets its own scratch + output buffer
-        let rows: Vec<Vec<f32>> = (0..n)
-            .into_par_iter()
-            .map_init(
-                || (DequantizeScratch::new(kv_dim), vec![0.0f32; kv_dim]),
-                |(scratch, buf), t| {
-                    self.dequantize_key_into_with_scratch(layer, t, scratch, buf);
-                    buf.clone()
-                },
-            )
-            .collect();
-
-        let mut flat = Vec::with_capacity(n * kv_dim);
-        for row in rows {
-            flat.extend_from_slice(&row);
-        }
+        // Parallel: pre-allocate flat output, write directly from rayon workers.
+        // Each worker dequantizes into a per-thread scratch buffer then copies
+        // into its disjoint row of the flat output — avoids Vec<Vec<f32>> allocation.
+        let mut flat = vec![0.0f32; n * kv_dim];
+        flat.par_chunks_mut(kv_dim).enumerate().for_each_init(
+            || DequantizeScratch::new(kv_dim),
+            |scratch, (t, row)| {
+                self.dequantize_key_into_with_scratch(layer, t, scratch, row);
+            },
+        );
         flat
     }
 
@@ -974,21 +948,14 @@ impl SpectralQuantKVCache {
             return flat;
         }
 
-        let rows: Vec<Vec<f32>> = (0..n)
-            .into_par_iter()
-            .map_init(
-                || (DequantizeScratch::new(kv_dim), vec![0.0f32; kv_dim]),
-                |(scratch, buf), t| {
-                    self.dequantize_value_into_with_scratch(layer, t, scratch, buf);
-                    buf.clone()
-                },
-            )
-            .collect();
-
-        let mut flat = Vec::with_capacity(n * kv_dim);
-        for row in rows {
-            flat.extend_from_slice(&row);
-        }
+        // Parallel: pre-allocate flat output, write directly from rayon workers.
+        let mut flat = vec![0.0f32; n * kv_dim];
+        flat.par_chunks_mut(kv_dim).enumerate().for_each_init(
+            || DequantizeScratch::new(kv_dim),
+            |scratch, (t, row)| {
+                self.dequantize_value_into_with_scratch(layer, t, scratch, row);
+            },
+        );
         flat
     }
 }
@@ -1026,8 +993,35 @@ impl crate::types::QuantizedKVCache for SpectralQuantKVCache {
 // ── Helpers ─────────────────────────────────────────────────────────────
 
 /// Compute L2 norm of a vector.
+/// Inline forward rotation: out = V^T @ x, using raw eigenvector slice.
+/// Avoids allocating a `SpectralRotation` struct — zero-alloc for hot paths.
+///
+/// Uses transpose-and-accumulate for contiguous reads (V rows) and contiguous
+/// writes to `out`, which is cache-friendly and auto-vectorizer-friendly.
+#[inline]
+fn rotate_into(eigenvectors: &[f32], head_dim: usize, x: &[f32], out: &mut [f32]) {
+    out.fill(0.0);
+    for i in 0..head_dim {
+        let xi = x[i];
+        let row = &eigenvectors[i * head_dim..i * head_dim + head_dim];
+        for j in 0..head_dim {
+            unsafe {
+                *out.get_unchecked_mut(j) += *row.get_unchecked(j) * xi;
+            }
+        }
+    }
+}
+
+/// Inline inverse rotation: out = V @ x, using raw eigenvector slice.
+#[inline]
+#[allow(clippy::needless_range_loop)]
+fn unrotate_into(eigenvectors: &[f32], head_dim: usize, x: &[f32], out: &mut [f32]) {
+    // out[i] = dot(eigenvectors row i, x) — row-major access, SIMD-friendly
+    crate::simd::simd_matmul_rows(out, eigenvectors, x, head_dim, head_dim);
+}
+
 fn simd_norm(v: &[f32]) -> f32 {
-    v.iter().map(|&x| x * x).sum::<f32>().sqrt()
+    crate::simd::simd_sum_sq(v, v.len()).sqrt()
 }
 
 /// Check if a matrix is the identity matrix (diagonal 1s, off-diagonal 0s).
@@ -1080,18 +1074,42 @@ fn generate_random_rotation(dim: usize, seed: u64) -> Vec<f32> {
 }
 
 /// Find nearest centroid index for a value.
+///
+/// Uses binary search on the assumption that centroids are sorted ascending.
+/// This gives O(log n) instead of O(n) for the hot-path quantize loop.
 fn quantize_to_idx(value: f32, centroids: &[f32]) -> u8 {
-    centroids
-        .iter()
-        .enumerate()
-        .min_by(|(_, a), (_, b)| {
-            (value - *a)
-                .abs()
-                .partial_cmp(&(value - *b).abs())
-                .unwrap_or(std::cmp::Ordering::Equal)
-        })
-        .map(|(i, _)| i)
-        .unwrap_or(0) as u8
+    if centroids.is_empty() {
+        return 0;
+    }
+    if centroids.len() == 1 {
+        return 0;
+    }
+
+    // Binary search for insertion point
+    let mut lo = 0usize;
+    let mut hi = centroids.len() - 1;
+
+    // Clamp to range
+    if value <= centroids[lo] {
+        return lo as u8;
+    }
+    if value >= centroids[hi] {
+        return hi as u8;
+    }
+
+    while lo + 1 < hi {
+        let mid = lo + (hi - lo) / 2;
+        if centroids[mid] <= value {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+
+    // lo and lo+1 bracket the value; pick the closer one
+    let d_lo = (value - centroids[lo]).abs();
+    let d_hi = (centroids[hi] - value).abs();
+    if d_lo <= d_hi { lo as u8 } else { hi as u8 }
 }
 
 /// Dequantize an index back to centroid value.
@@ -1104,6 +1122,12 @@ fn dequantize_idx(idx: u8, centroids: &[f32]) -> f32 {
 /// Each index uses `bits_per_dim[i]` bits. Output is written LSB-first.
 fn pack_variable_bits(indices: &[u8], bits_per_dim: &[u8], out: &mut Vec<u8>) {
     out.clear();
+    let total_bits: usize = indices
+        .iter()
+        .enumerate()
+        .map(|(i, _)| bits_per_dim.get(i).copied().unwrap_or(1) as usize)
+        .sum();
+    out.reserve(total_bits.div_ceil(8));
     let mut bit_buffer = 0u64;
     let mut bits_in_buffer = 0u32;
 

@@ -1,6 +1,6 @@
 //! WASM bomber validator with batch API, zero-copy, and papaya instance pool.
 //!
-//! Wraps a wasmtime instance that validates bomber actions against game state.
+//! Wraps a wasmi instance that validates bomber actions against game state.
 //! The WASM module runs sandboxed with no WASI access and fuel-limited execution.
 //!
 //! # Architecture
@@ -41,7 +41,7 @@ use std::sync::{Arc, Mutex};
 use std::thread::ThreadId;
 
 use papaya::HashMap;
-use wasmtime::{Config, Engine, Linker, Memory, Module, Store, TypedFunc};
+use wasmi::{Config, Engine, Linker, Memory, Module, Store, TypedFunc};
 
 use super::ArenaGrid;
 use super::wasm_state::ZeroCopyStateBuffer;
@@ -135,7 +135,7 @@ fn read_cstring(
 /// mutability — but the lock is per-thread and uncontended.
 #[expect(
     clippy::type_complexity,
-    reason = "wasmtime TypedFunc API requires many params"
+    reason = "wasmi TypedFunc API requires many params"
 )]
 struct BomberInner {
     store: Store<()>,
@@ -155,33 +155,30 @@ impl BomberInner {
         let mut store = Store::new(engine, ());
 
         let instance = linker
-            .instantiate(&mut store, module)
+            .instantiate_and_start(&mut store, module)
             .map_err(|e| format!("failed to instantiate WASM module: {e}"))?;
 
         // Required exports
         let memory = instance
-            .get_memory(&mut store, abi::MEMORY)
+            .get_memory(&store, abi::MEMORY)
             .ok_or_else(|| format!("missing required export: '{}'", abi::MEMORY))?;
 
         let is_valid_fn: TypedFunc<(u32, u32, u32, u32), u32> = instance
-            .get_typed_func(&mut store, abi::IS_VALID)
+            .get_typed_func(&store, abi::IS_VALID)
             .map_err(|e| format!("missing required export '{}': {e}", abi::IS_VALID))?;
 
         // Optional exports
         let relevance_fn = instance
-            .get_typed_func::<(u32, u32, u32, u32), u32>(&mut store, abi::RELEVANCE)
+            .get_typed_func::<(u32, u32, u32, u32), u32>(&store, abi::RELEVANCE)
             .ok();
 
         let batch_is_valid_fn = instance
-            .get_typed_func::<(u32, u32, u32, u32, u32, u32, u32), u32>(
-                &mut store,
-                abi::BATCH_IS_VALID,
-            )
+            .get_typed_func::<(u32, u32, u32, u32, u32, u32, u32), u32>(&store, abi::BATCH_IS_VALID)
             .ok();
 
         let batch_relevance_fn = instance
             .get_typed_func::<(u32, u32, u32, u32, u32, u32, u32), u32>(
-                &mut store,
+                &store,
                 abi::BATCH_RELEVANCE,
             )
             .ok();
@@ -595,7 +592,7 @@ impl BatchRelevanceResult {
 ///
 /// Uses a lock-free `papaya::HashMap` to store per-thread WASM instances,
 /// eliminating global Mutex contention. Each thread gets its own `BomberInner`
-/// on first access, with an uncontended `Mutex` wrapping the `wasmtime::Store`
+/// on first access, with an uncontended `Mutex` wrapping the `wasmi::Store`
 /// (required because `Store` needs `&mut` for all operations).
 ///
 /// # Thread Safety
@@ -626,14 +623,13 @@ impl BomberWasmPruner {
 
     /// Load a WASM bomber validator from bytes.
     ///
-    /// Creates a sandboxed wasmtime instance with fuel consumption enabled.
+    /// Creates a sandboxed wasmi instance with fuel consumption enabled.
     /// Extracts required exports and optional batch exports.
     pub fn load(wasm_bytes: &[u8]) -> Result<Self, String> {
         // 1. Engine with fuel
-        let mut config = Config::new();
+        let mut config = Config::default();
         config.consume_fuel(true);
-        let engine =
-            Arc::new(Engine::new(&config).map_err(|e| format!("engine creation failed: {e}"))?);
+        let engine = Arc::new(Engine::new(&config));
 
         // 2. Compile module
         let module = Arc::new(
@@ -645,15 +641,15 @@ impl BomberWasmPruner {
         let linker = Linker::new(&engine);
         let mut store = Store::new(&engine, ());
         let instance = linker
-            .instantiate(&mut store, &module)
+            .instantiate_and_start(&mut store, &module)
             .map_err(|e| format!("metadata instantiation failed: {e}"))?;
         let memory = instance
-            .get_memory(&mut store, abi::MEMORY)
+            .get_memory(&store, abi::MEMORY)
             .ok_or_else(|| format!("missing export: '{}'", abi::MEMORY))?;
 
         // Extract name
         let name_fn: TypedFunc<(), u32> = instance
-            .get_typed_func(&mut store, abi::NAME)
+            .get_typed_func(&store, abi::NAME)
             .map_err(|e| format!("missing export '{}': {e}", abi::NAME))?;
         store
             .set_fuel(FUEL_PER_CALL)
@@ -665,7 +661,7 @@ impl BomberWasmPruner {
 
         // Extract version
         let version_fn: TypedFunc<(), u32> = instance
-            .get_typed_func(&mut store, abi::VERSION)
+            .get_typed_func(&store, abi::VERSION)
             .map_err(|e| format!("missing export '{}': {e}", abi::VERSION))?;
         store
             .set_fuel(FUEL_PER_CALL)

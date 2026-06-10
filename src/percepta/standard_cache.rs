@@ -65,38 +65,49 @@ impl StandardCache {
     /// Query with softmax attention.
     ///
     /// Returns the softmax-weighted average of values, or `[0.0, 0.0]` if empty.
+    ///
+    /// Uses online softmax: single pass with running max correction for
+    /// numerical stability. Equivalent to the two-pass approach but avoids
+    /// iterating twice over the entries.
     pub fn query(&self, query: &Vec2) -> [f64; 2] {
         if self.entries.is_empty() {
             return [0.0, 0.0];
         }
 
-        // Compute scores: dot(query, key) for each entry
-        let scores: Vec<f64> = self.entries.iter().map(|e| query.dot(&e.key)).collect();
+        // Online softmax: maintain running max and correction factor
+        let mut max_score = f64::NEG_INFINITY;
+        let mut sum_exp = 0.0f64;
+        let mut out = [0.0f64; 2];
 
-        // Softmax: exp(score - max_score) for numerical stability
-        let max_score = scores.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+        for e in &self.entries {
+            let s = query.dot(&e.key);
+            let new_max = max_score.max(s);
+            // Rescale accumulated values when max changes
+            let correction = (max_score - new_max).exp();
+            sum_exp *= correction;
+            out[0] *= correction;
+            out[1] *= correction;
 
-        let exps: Vec<f64> = scores.iter().map(|&s| (s - max_score).exp()).collect();
-        let sum_exp: f64 = exps.iter().sum();
+            let exp_val = (s - new_max).exp();
+            sum_exp += exp_val;
+            out[0] += exp_val * e.val[0];
+            out[1] += exp_val * e.val[1];
+            max_score = new_max;
+        }
 
         if sum_exp == 0.0 {
             return [0.0, 0.0];
         }
 
-        // Weighted average
-        let mut out = [0.0, 0.0];
-        for (i, &e) in exps.iter().enumerate() {
-            let w = e / sum_exp;
-            out[0] += w * self.entries[i].val[0];
-            out[1] += w * self.entries[i].val[1];
-        }
-        out
+        [out[0] / sum_exp, out[1] / sum_exp]
     }
 
     /// Query with scaled softmax attention (temperature parameter).
     ///
     /// `temperature` > 1.0 makes the distribution sharper (closer to hard attention),
     /// `temperature` < 1.0 makes it smoother.
+    ///
+    /// Uses online softmax: single pass with running max correction.
     pub fn query_scaled(&self, query: &Vec2, temperature: f64) -> [f64; 2] {
         if self.entries.is_empty() {
             return [0.0, 0.0];
@@ -104,28 +115,32 @@ impl StandardCache {
 
         let inv_temp = 1.0 / temperature;
 
-        let scores: Vec<f64> = self
-            .entries
-            .iter()
-            .map(|e| query.dot(&e.key) * inv_temp)
-            .collect();
+        // Online softmax: maintain running max and correction factor
+        let mut max_score = f64::NEG_INFINITY;
+        let mut sum_exp = 0.0f64;
+        let mut out = [0.0f64; 2];
 
-        let max_score = scores.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+        for e in &self.entries {
+            let s = query.dot(&e.key) * inv_temp;
+            let new_max = max_score.max(s);
+            // Rescale accumulated values when max changes
+            let correction = (max_score - new_max).exp();
+            sum_exp *= correction;
+            out[0] *= correction;
+            out[1] *= correction;
 
-        let exps: Vec<f64> = scores.iter().map(|&s| (s - max_score).exp()).collect();
-        let sum_exp: f64 = exps.iter().sum();
+            let exp_val = (s - new_max).exp();
+            sum_exp += exp_val;
+            out[0] += exp_val * e.val[0];
+            out[1] += exp_val * e.val[1];
+            max_score = new_max;
+        }
 
         if sum_exp == 0.0 {
             return [0.0, 0.0];
         }
 
-        let mut out = [0.0, 0.0];
-        for (i, &e) in exps.iter().enumerate() {
-            let w = e / sum_exp;
-            out[0] += w * self.entries[i].val[0];
-            out[1] += w * self.entries[i].val[1];
-        }
-        out
+        [out[0] / sum_exp, out[1] / sum_exp]
     }
 
     /// Query with hard attention (argmax).

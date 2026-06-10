@@ -1,7 +1,7 @@
 //! Reranking module — MaxSim vs Cosine similarity for retrieval reranking.
 //!
-//! Provides [`rerank`] with pluggable scoring methods and [`ndcg_at`] for
-//! retrieval quality evaluation (NDCG@k). Feature-gated behind `maxsim` (Plan 080).
+//! Provides [`rerank`] with pluggable scoring methods and [`ndcg_at`] / [`ndcg_at_into`]
+//! for retrieval quality evaluation (NDCG@k). Feature-gated behind `maxsim` (Plan 080).
 //!
 //! ## Deep Manifold: Symmetric Boundary Pair (Plan 085)
 //!
@@ -9,11 +9,12 @@
 //! based on Deep Manifold Part 2 (arXiv:2512.06563, §2.6.2).
 //! Feature-gated behind `bt_rank`.
 
-use crate::simd::{maxsim_score, simd_dot_f32};
+use crate::simd::{maxsim_score, simd_add_inplace, simd_dot_f32, simd_scale_inplace};
 
 // ── Types ─────────────────────────────────────────────────────
 
 /// Reranking method for scoring query–document pairs.
+#[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RerankMethod {
     /// Cosine similarity on mean-pooled token embeddings.
@@ -23,6 +24,9 @@ pub enum RerankMethod {
 }
 
 /// A document with its reranking score and original index.
+///
+/// Field order: usize (8-byte aligned) before f32 (4-byte aligned)
+/// eliminates 4 bytes of padding on 64-bit targets.
 #[derive(Debug, Clone)]
 pub struct RerankedDoc {
     /// Index into the original `docs` slice.
@@ -57,13 +61,22 @@ pub fn rerank(
 
     let lq = query.len() / dim;
 
+    // Pre-allocate scratch buffers for cosine rerank (avoids per-doc allocation).
+    // MaxSim path doesn't need these — skip 2 heap allocations.
+    let (mut q_mean, mut d_mean) = match method {
+        RerankMethod::Cosine => (vec![0.0f32; dim], vec![0.0f32; dim]),
+        RerankMethod::MaxSim => (Vec::new(), Vec::new()),
+    };
+
     let mut results: Vec<RerankedDoc> = docs
         .iter()
         .enumerate()
         .map(|(i, doc_data)| {
             let ld = doc_lengths[i];
             let score = match method {
-                RerankMethod::Cosine => cosine_rerank_score(query, lq, doc_data, ld, dim),
+                RerankMethod::Cosine => {
+                    cosine_rerank_score_into(query, lq, doc_data, ld, dim, &mut q_mean, &mut d_mean)
+                }
                 RerankMethod::MaxSim => maxsim_score(query, doc_data, lq, ld, dim),
             };
             RerankedDoc {
@@ -73,7 +86,9 @@ pub fn rerank(
         })
         .collect();
 
-    results.sort_by(|a, b| {
+    // sort_unstable_by is faster than sort_by for ranking — doesn't preserve
+    // equal-element order (fine for ranking) and avoids O(n) worst-case merges.
+    results.sort_unstable_by(|a, b| {
         b.score
             .partial_cmp(&a.score)
             .unwrap_or(std::cmp::Ordering::Equal)
@@ -81,17 +96,16 @@ pub fn rerank(
     results
 }
 
-/// Compute NDCG@k (Normalized Discounted Cumulative Gain at position k).
+/// Zero-alloc variant of [`ndcg_at`].
 ///
-/// NDCG = DCG@k / IDCG@k, where:
-/// - DCG@k = Σ_{i=0}^{k-1} (2^rel_i − 1) / log₂(i + 2)
-/// - IDCG@k = DCG@k under ideal (oracle) ranking
-///
-/// # Arguments
-/// - `ranking` — reranked documents (sorted by score, descending)
-/// - `ground_truth` — relevance score per document index, i.e. `ground_truth[doc_index]`
-/// - `k` — cutoff rank
-pub fn ndcg_at(ranking: &[RerankedDoc], ground_truth: &[f32], k: usize) -> f32 {
+/// `ideal_rels_buf` must have length `>= ground_truth.len()`.
+/// The buffer is used as scratch space for sorting ideal relevance scores.
+pub fn ndcg_at_into(
+    ranking: &[RerankedDoc],
+    ground_truth: &[f32],
+    k: usize,
+    ideal_rels_buf: &mut [f64],
+) -> f32 {
     let k = k.min(ranking.len());
     if k == 0 {
         return 0.0;
@@ -109,10 +123,14 @@ pub fn ndcg_at(ranking: &[RerankedDoc], ground_truth: &[f32], k: usize) -> f32 {
         .sum();
 
     // IDCG@k: ideal ranking from ground truth, sorted descending.
-    let mut ideal_rels: Vec<f64> = ground_truth.iter().map(|&r| r as f64).collect();
-    ideal_rels.sort_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
-    let idcg: f64 = (0..k.min(ideal_rels.len()))
-        .map(|i| (2.0f64.powf(ideal_rels[i]) - 1.0) / (i as f64 + 2.0).log2())
+    let n = ground_truth.len().min(ideal_rels_buf.len());
+    for i in 0..n {
+        ideal_rels_buf[i] = ground_truth[i] as f64;
+    }
+    ideal_rels_buf[..n]
+        .sort_unstable_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
+    let idcg: f64 = (0..k.min(n))
+        .map(|i| (2.0f64.powf(ideal_rels_buf[i]) - 1.0) / (i as f64 + 2.0).log2())
         .sum();
 
     match idcg > 0.0 {
@@ -121,19 +139,43 @@ pub fn ndcg_at(ranking: &[RerankedDoc], ground_truth: &[f32], k: usize) -> f32 {
     }
 }
 
+/// Compute NDCG@k (Normalized Discounted Cumulative Gain at position k).
+///
+/// Allocating wrapper — prefer [`ndcg_at_into`] in hot paths.
+pub fn ndcg_at(ranking: &[RerankedDoc], ground_truth: &[f32], k: usize) -> f32 {
+    let mut ideal_rels = vec![0.0f64; ground_truth.len()];
+    ndcg_at_into(ranking, ground_truth, k, &mut ideal_rels)
+}
+
 // ── Public Similarity Functions ───────────────────────────────
 
 /// Compute mean cosine similarity across all query–document token pairs.
 ///
 /// For each `(q_i, d_j)` pair, computes `cosine = dot(q_i, d_j) / (|q_i| * |d_j|)`,
 /// then returns the average over all `lq * ld` pairs.
-pub fn cosine_score(queries: &[f32], documents: &[f32], lq: usize, ld: usize, dim: usize) -> f32 {
+///
+/// Pre-computes document norms into `d_norms` to avoid O(lq*ld) redundant computation.
+/// `d_norms` must have length `>= ld`.
+pub fn cosine_score_into(
+    queries: &[f32],
+    documents: &[f32],
+    lq: usize,
+    ld: usize,
+    dim: usize,
+    d_norms: &mut [f32],
+) -> f32 {
     if lq == 0 || ld == 0 || dim == 0 {
         return 0.0;
     }
 
     let mut total = 0.0f32;
     let mut count = 0usize;
+
+    // Pre-compute document norms once into caller-provided buffer
+    for j in 0..ld {
+        let d_row = &documents[j * dim..(j + 1) * dim];
+        d_norms[j] = simd_dot_f32(d_row, d_row, dim).sqrt();
+    }
 
     for i in 0..lq {
         let q_row = &queries[i * dim..(i + 1) * dim];
@@ -143,7 +185,7 @@ pub fn cosine_score(queries: &[f32], documents: &[f32], lq: usize, ld: usize, di
         }
         for j in 0..ld {
             let d_row = &documents[j * dim..(j + 1) * dim];
-            let d_norm = simd_dot_f32(d_row, d_row, dim).sqrt();
+            let d_norm = d_norms[j];
             if d_norm < 1e-12 {
                 continue;
             }
@@ -159,6 +201,12 @@ pub fn cosine_score(queries: &[f32], documents: &[f32], lq: usize, ld: usize, di
     }
 }
 
+/// Allocating wrapper — prefer `cosine_score_into` in hot paths.
+pub fn cosine_score(queries: &[f32], documents: &[f32], lq: usize, ld: usize, dim: usize) -> f32 {
+    let mut d_norms = vec![0.0f32; ld];
+    cosine_score_into(queries, documents, lq, ld, dim, &mut d_norms)
+}
+
 /// Compute mean cosine similarity between two multi-vector embeddings.
 ///
 /// Generic version operating on two flat buffers with `la` / `lb` token counts
@@ -170,41 +218,43 @@ pub fn mean_cosine_similarity(a: &[f32], b: &[f32], la: usize, lb: usize, dim: u
 // ── Internal Helpers ──────────────────────────────────────────
 
 /// Cosine similarity between mean-pooled query and mean-pooled document.
-fn cosine_rerank_score(query: &[f32], lq: usize, doc: &[f32], ld: usize, dim: usize) -> f32 {
+/// Uses caller-provided scratch buffers to avoid per-call allocation.
+#[inline]
+fn cosine_rerank_score_into(
+    query: &[f32],
+    lq: usize,
+    doc: &[f32],
+    ld: usize,
+    dim: usize,
+    q_mean: &mut [f32],
+    d_mean: &mut [f32],
+) -> f32 {
     if ld == 0 || lq == 0 {
         return 0.0;
     }
 
     // Mean-pool query tokens into `q_mean`.
-    let mut q_mean = vec![0.0f32; dim];
+    q_mean[..dim].fill(0.0);
     for t in 0..lq {
         let offset = t * dim;
-        for d in 0..dim {
-            q_mean[d] += query[offset + d];
-        }
+        simd_add_inplace(&mut q_mean[..dim], &query[offset..offset + dim]);
     }
     let inv_lq = 1.0 / lq as f32;
-    for v in q_mean.iter_mut() {
-        *v *= inv_lq;
-    }
+    simd_scale_inplace(&mut q_mean[..dim], inv_lq);
 
     // Mean-pool document tokens into `d_mean`.
-    let mut d_mean = vec![0.0f32; dim];
+    d_mean[..dim].fill(0.0);
     for t in 0..ld {
         let offset = t * dim;
-        for d in 0..dim {
-            d_mean[d] += doc[offset + d];
-        }
+        simd_add_inplace(&mut d_mean[..dim], &doc[offset..offset + dim]);
     }
     let inv_ld = 1.0 / ld as f32;
-    for v in d_mean.iter_mut() {
-        *v *= inv_ld;
-    }
+    simd_scale_inplace(&mut d_mean[..dim], inv_ld);
 
     // Cosine similarity = dot(a, b) / (|a| × |b|)
-    let dot = simd_dot_f32(&q_mean, &d_mean, dim);
-    let q_norm = simd_dot_f32(&q_mean, &q_mean, dim).sqrt();
-    let d_norm = simd_dot_f32(&d_mean, &d_mean, dim).sqrt();
+    let dot = simd_dot_f32(&q_mean[..dim], &d_mean[..dim], dim);
+    let q_norm = simd_dot_f32(&q_mean[..dim], &q_mean[..dim], dim).sqrt();
+    let d_norm = simd_dot_f32(&d_mean[..dim], &d_mean[..dim], dim).sqrt();
 
     match q_norm < 1e-12 || d_norm < 1e-12 {
         true => 0.0,

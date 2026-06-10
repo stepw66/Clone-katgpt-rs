@@ -68,6 +68,7 @@ impl OpKey {
 
 /// Phase within a 4-phase transformer layer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
 pub enum Phase {
     /// Phase 0: Attention (LookUp) operations.
     Attention,

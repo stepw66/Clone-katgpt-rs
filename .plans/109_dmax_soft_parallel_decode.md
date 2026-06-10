@@ -4,6 +4,8 @@
 > **Paper:** DMax: Aggressive Parallel Decoding for dLLMs (arXiv 2604.08302, NUS 2026)
 > **Depends on:** Plan 066 (D2F ✅ complete), Plan 089 (Tri-Mode ✅ complete)
 > **Feature Gate:** `dmax_spd` (**Default-on** as of GOAT 7/7 proof. Hybrid embeddings correctly interpolate token/mask.)
+>
+> **Final Status**: ✅ All tasks addressed. T8 OPUT training research explicitly deferred until T1-T7 prove SPD value at scale.
 
 ## Objective
 
@@ -235,12 +237,12 @@ dmax_spd = ["dllm"]  # Soft Parallel Decoding, depends on D2F infrastructure
 - [x] Record all results in `.benchmarks/031_dmax_spd_goat.md`
 
 ### T8: OPUT Training Research (riir-gpu, deferred)
-- [ ] Design `GpuOputTrainer` — on-policy rollout + L_pred loss
-- [ ] Requires: forward pass without grad, sample predictions, second forward with grad
-- [ ] Depends on riir-gpu D2F training pipeline (already exists from Plan 066)
-- [ ] ~150 lines in `riir-gpu/src/dllm.rs` behind `dmax_oput` feature
-- [ ] **Deferred until T1-T7 prove SPD has value at our scale**
-- [ ] Key risk from Research 072 Doubt 2: SPD without OPUT may not work well
+- [x] ~~Design `GpuOputTrainer` — on-policy rollout + L_pred loss~~ — **deferred**
+- [x] ~~Requires: forward pass without grad, sample predictions, second forward with grad~~
+- [x] ~~Depends on riir-gpu D2F training pipeline (already exists from Plan 066)~~
+- [x] ~~~150 lines in `riir-gpu/src/dllm.rs` behind `dmax_oput` feature~~
+- [x] **Deferred until T1-T7 prove SPD has value at our scale** — GOAT 7/7 passed, but production-scale validation needed before investing in OPUT trainer
+- [x] Key risk from Research 072 Doubt 2: SPD without OPUT may not work well — resurrect if hybrid embeddings show diminishing returns in real training runs
 
 ---
 

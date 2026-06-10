@@ -122,6 +122,7 @@ pub struct CompiledProgram {
 // ── Label Frame ────────────────────────────────────────────────
 
 /// Kind of structured control flow block.
+#[repr(u8)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum LabelKind {
     Block,

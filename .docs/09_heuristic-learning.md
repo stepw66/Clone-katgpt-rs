@@ -14,7 +14,21 @@
 >
 > **Status (Plan 078):** RePlaid Variance-Minimized Schedules — `VarianceMinimizer`, `AdaptiveNoiseSchedule`, `train_mini_dllm_adaptive()`, `VarianceEpsilon` bandit strategy, `SdarLearnedBeta` integrated into `SdarBanditPruner` via `with_learned_beta()` builder. Self-supervised schedule optimization: minimizes per-step loss variance to equalize denoising difficulty (RePlaid Prop 1). Schedule converges from `[0.15, 0.25, 0.35]` → `[0.192, 0.211, 0.239]`. D2F Higher-Order Denoising (T10.5/T10.6): DPM-Solver++(2M) multistep logit extrapolation, potential 4× throughput. Behind `--features replaid_schedules` (off by default, experimental). See `.benchmarks/012_replaid_variance_schedules.md`.
 >
-> **Status (Plan 032):** TrialLog, AbsorbCompress, HotSwapPruner, and RegressionSuite are implemented behind `--features bandit`. See examples `hl_01_trial_log` and `hl_02_hotswap`.
+> **Status (Plan 032):** TrialLog, AbsorbCompressLayer, HotSwapPruner, and RegressionSuite are implemented behind `--features bandit`. See examples `hl_01_trial_log` and `hl_02_hotswap`.
+>
+> **Status (Plan 164, Research 146):** GEPA-D Reflective Config Evolution — Pareto bandit config evolution via reflective distillation. Evolves system-level configuration (rubric weights, template hints, bandit params) from MeMo trajectory reflection. No gradient updates, no LoRA, no model-based path. Config variants = bandit arms, reflection quality = reward. Behind `--features gepa_reflective` (implies `bandit`, `memo_reflections`). GOAT 4/4 proved. **Default-on.**
+>
+> **Status (Plan 164, Research 147):** PhraseBoost Context Trie Phrase Boosting — context trie phrase boosting for DDTree. `PhraseTrie` with O(1) child lookup, `PhraseBoostPruner` wraps `ScreeningPruner`. +60.4% acceptance rate (0%→60.4%), <1µs per step. Behind `--features phrase_boost`. GOAT 5/5 proved. **Default-on.**
+>
+> **Status (Plan 165, Research 148):** Hydra-Aware Adaptive Layer Budget — emergent self-repair layer skipping inspired by Hydra Effect (arXiv:2307.15771). Two modes: modelless (pre-computed profiles) and model-based (logit lens scoring). 34.4% compute savings, 100% profile stability across seeds. Behind `--features hydra_budget`. GOAT 4/4 proved. **Default-on.**
+>
+> **Status (Plan 166, Research 149):** FlashAR Consensus Tri-Mode — dual-path ternary thermal routing for consensus tri-mode. Plasma hit rate 4.4%, Hot 45.5%, Warm 19.8%, Cold 30.4%. Behind `--features flashar_consensus` (requires `tri_mode`, `plasma_path`). GOAT 9/9 proved. **Default-on.**
+>
+> **Status (Plan 167, Research R050):** Budget Adaptation — compression-adaptive decode budget: PFlash ratio scales DDTree budget [0.5×, 2.0×]. Simple prompts → less search, Complex → more. ~1.3µs overhead. Behind `--features budget_adaptation`. GOAT 8/8 proved. **Default-on.**
+>
+> **Status (ILC Distillation):** Iterative Latent Clustering — synonym-aware DDTree pruning. Offline clustering + online inference path. `IlcClusterer`, `SynonymMap`, `SynonymAwarePruner`. Behind `--features ilc_distill`.
+>
+> **Status (Plan 060):** MeMo Reflection QA Pipeline — 5-step compositional data synthesis from game replays. `ReflectionStep` (DirectExtraction, IndirectExtraction, Consolidation, Verification, EntitySurfacing, CrossGameSynthesis), `ReflectionQA`, `ReflectionDomain` behind `--features memo_reflections`. Consumed by BanditPruner for training signal enrichment. See `src/pruners/reflection.rs`.
 
 ## What is Heuristic Learning?
 
@@ -44,7 +58,7 @@ katgpt-rs is uniquely positioned for HL because of its **trait-based pruner arch
 | Gradient-free Learning | `BanditPruner` — Q-value updates without backprop |
 | Sandboxed Heuristics | `WasmPruner` — compiled validators in WASM sandbox |
 | Trial History | `TrialLog` — persistent JSONL episode records |
-| Rule Compression | `AbsorbCompress` — promote stable Q-values to hard constraints |
+| Rule Compression | `AbsorbCompressLayer` — promote stable Q-values to hard constraints |
 | Hot-reload | `HotSwapPruner` — runtime .wasm reload |
 | Regression Safety | `RegressionSuite` — replay golden episodes |
 | Self-Play Reward | `HintDelta` — intrinsic δ signal from model's own distribution (Plan 049) |
@@ -58,7 +72,13 @@ katgpt-rs is uniquely positioned for HL because of its **trait-based pruner arch
 | Knowledge Persistence | `BanditPruner` → `src/pruners/freeze.rs` — `repr(C)` bandit knowledge save/load (Plan 092) |
 | Width Scaling | `best_of_k_rollouts()` — K parallel SDE rollouts, select best (PTRM Plan 083) |
 | Early Stop Gate | `EarlyStopGate<P>` — depth-aware pruning when relevance < threshold (PTRM Plan 083) |
-| Width Selection | `WidthSelectionMode::{BestQ, MostFrequent}` — rollout selection strategy (PTRM Plan 083) |
+| Width Selection | `WidthSelectionMode::{BestQ, MostFrequent, Top1Converged}` — rollout selection strategy (PTRM Plan 083, EqR Plan 119) |
+| Reflective Config Evolution | `GepaReflectiveBandit` — Pareto bandit config evolution from MeMo reflections (Plan 164, Research 146) |
+| Context Trie Phrase Boost | `PhraseTrie`, `PhraseBoostPruner` — O(1) phrase lookup wrapping `ScreeningPruner`, +60.4% acceptance (Plan 164, Research 147) |
+| Adaptive Layer Budget | `HydraBudget` — emergent self-repair layer skipping, modelless/model-based modes (Plan 165, Research 148) |
+| Consensus Tri-Mode Routing | `FlashArConsensus` — dual-path ternary thermal routing (Plasma/Hot/Warm/Cold) (Plan 166, Research 149) |
+| Budget Adaptation | `BudgetAdaptation` — PFlash ratio scales DDTree budget [0.5×, 2.0×], adaptive search depth (Plan 167, Research R050) |
+| Synonym-Aware Pruning | `IlcClusterer`, `SynonymMap`, `SynonymAwarePruner` — offline clustering + online synonym-aware DDTree pruning (ILC Distillation) |
 
 ---
 
@@ -73,7 +93,7 @@ Feed new observations back into the system:
 ```
 Episode N:   BanditPruner selects arm → environment runs → reward
              TrialLog.append(episode, arm, reward, q_value, note)
-             AbsorbCompress.absorb(arm, reward)
+             AbsorbCompressLayer.absorb(arm, reward)
 ```
 
 ### 2. Compress
@@ -84,8 +104,8 @@ Fold accumulated knowledge into simpler, more maintainable rules:
 After N episodes:
   arm 3 (Wait) has Q=0.02 over 500 visits → promote to hard block
   arm 0 (Attack near enemy) has Q=0.89 → boost relevance weight
-  → AbsorbCompress.compress() returns [3]
-  → BanditPruner delegates arm 3 to BlockedArmPruner
+  → AbsorbCompressLayer.compress() returns [3]
+  → BanditPruner delegates arm 3 to hard block (relevance=0.0)
 ```
 
 > An HS that only grows and never compresses becomes a big ball of mud.
@@ -112,10 +132,10 @@ After N episodes:
 │                        │                               │
 │         ┌──────────────┼──────────────┐                │
 │         ▼              ▼              ▼                │
-│  ┌────────────┐ ┌────────────┐ ┌──────────────┐      │
-│  │  TrialLog  │ │AbsorbCompress│ │RegressionSuite│    │
-│  │  (JSONL)   │ │ (Q→blocks)  │ │ (golden)     │      │
-│  └────────────┘ └────────────┘ └──────────────┘      │
+│  ┌────────────┐ ┌─────────────────────┐ ┌──────────────┐ │
+│  │  TrialLog  │ │AbsorbCompressLayer  │ │RegressionSuite│ │
+│  │  (JSONL)   │ │ (Q→blocks)          │ │ (golden)     │ │
+│  └────────────┘ └─────────────────────┘ └──────────────┘ │
 └──────────────────────────────────────────────────────┘
 ```
 
@@ -131,17 +151,17 @@ After N episodes:
 3. Best branch selected → environment executes
 4. Reward observed → BanditPruner.update(arm, reward)
 5. TrialLog.append(record) for persistence
-6. AbsorbCompress.absorb(arm, reward) for compression check
+6. `AbsorbCompressLayer::absorb(arm, reward)` for compression check
 ```
 
 ### Between Episodes (Compression)
 
 ```
-1. AbsorbCompress.should_compress() → true (threshold met)
-2. AbsorbCompress.compress() → identify arms to promote
-3. Low-Q arms → BlockedArmPruner (hard constraints)
+1. `AbsorbCompressLayer::should_compress()` → true (threshold met)
+2. `AbsorbCompressLayer::compress()` → identify arms to promote
+3. Low-Q arms → blocked (relevance = 0.0) via `AbsorbCompressLayer`
 4. High-Q arms → boost relevance weight
-5. RegressionSuite.replay_golden() → verify no regression
+5. `RegressionSuite.replay_golden()` → verify no regression
 ```
 
 ### Freeze/Thaw Persistence (Plan 092)
@@ -191,7 +211,7 @@ TrialLog → Agent reads failures → Writes new validator → compile .wasm →
 ```
 
 - **TrialLog**: persistent memory of what worked and what didn't
-- **AbsorbCompress**: automatic rule promotion from experience
+- **AbsorbCompressLayer**: automatic rule promotion from experience
 - **RegressionSuite**: safety net against regressions
 - **Coding agent**: writes new validators based on failure analysis
 
@@ -231,12 +251,16 @@ The P3 vs P4 comparison is the key proof: both use the same model and validator,
 
 ```rust
 #[derive(Component)] struct Player { id: u8 }
-#[derive(Component)] struct GridPos { x: i32, y: i32 }
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq)] struct GridPos { x: i32, y: i32 }
 #[derive(Component)] struct BombFuse { owner: Entity, ticks_remaining: u32 }
 #[derive(Component)] struct BombRange { cells: u32 }
 #[derive(Component)] struct BombCount { max: u8, active: u8 }
 #[derive(Component)] struct Speed { cells_per_tick: u8 }
-#[derive(Component)] struct Alive;
+#[derive(Component, Default)] struct Alive;
+#[derive(Component)] struct Bomb { bomb_type: BombType }  // Timed | Piercing | Remote | Landmine
+#[derive(Component)] struct PowerUp { kind: PowerUpKind }  // BombUp | FireUp | SpeedUp
+#[derive(Component)] struct Blast;
+#[derive(Component)] struct DestructibleWall;
 ```
 
 ### TUI Grid (emoji rendering)
@@ -254,20 +278,27 @@ See [Plan 033](/.plans/033_bomberman_arena.md) for full implementation details.
 
 ## Quick Start
 
-```rust
+```rust,ignore
 use katgpt_rs::pruners::{
-    BanditPruner, BanditStrategy, AbsorbCompress, TrialLog, CompressConfig,
+    BanditPruner, BanditStrategy, AbsorbCompressLayer, TrialLog, CompressConfig,
 };
 
-// Create a bandit pruner with absorb-compress
+// Create a bandit pruner
 let mut bandit = BanditPruner::new(
-    domain_screener,
+    katgpt_core::NoScreeningPruner,
     BanditStrategy::Ucb1,
     6, // 6 arms (actions)
 );
 
+// Create absorb-compress layer
+let mut absorb = AbsorbCompressLayer::new(
+    katgpt_core::NoScreeningPruner,
+    6,
+    CompressConfig::default(),
+);
+
 // Create trial log
-let mut trial_log = TrialLog::new("/tmp/hl_trials.jsonl")?;
+let mut trial_log = TrialLog::new(std::path::Path::new("/tmp/hl_trials.jsonl"))?;
 
 // Run episodes
 for episode in 0..1000 {
@@ -275,18 +306,20 @@ for episode in 0..1000 {
     let reward = env.pull(arm);   // environment feedback
     
     bandit.update(arm, reward);
-    trial_log.append(TrialRecord {
+    absorb.absorb(arm, reward);
+    trial_log.append(&TrialRecord {
         episode, arm, reward,
-        q_value: bandit.q_value(arm),
-        cumulative_reward: bandit.total_pulls() as f32 * reward,
+        q_value: bandit.q_values()[arm],
+        cumulative_reward: 0.0,
         cumulative_regret: 0.0,
         config: String::new(),
         note: String::new(),
+        ..Default::default()
     });
     
     // Absorb-compress check every 100 episodes
-    if episode % 100 == 0 && bandit.should_compress() {
-        let promoted = bandit.compress();
+    if absorb.should_compress() {
+        let promoted = absorb.compress();
         println!("Compressed arms: {promoted:?}");
     }
 }
@@ -722,6 +755,7 @@ No backpropagation. No loss function. The memory learns a linear correction map 
 |-----------|------|---------|
 | `DeltaMemoryState` | `delta_mem/state.rs` | Compact r×r associative memory with `read()`, `write()`, `adapt_gates()`, `mean_prediction_error()` |
 | `DeltaMemoryConfig` | `delta_mem/state.rs` | `rank`, `beta_init`, `couple_gates` configuration |
+| `DeltaMemorySnapshot` | `delta_mem/state.rs` | Serializable snapshot of memory state for persistence |
 | `FeatureHasher` | `delta_mem/hash.rs` | Random projection: L2-normalized keys, raw values |
 | `ContextFeatures` | `delta_mem/hash.rs` | Extracts hashable features from DDTree context (depth, parent tokens) |
 | `OutcomeFeatures` | `delta_mem/hash.rs` | Extracts hashable features from outcome (reward, acceptance) |
@@ -800,7 +834,13 @@ use katgpt_rs::pruners::delta_mem::*;
 // Create a memory-steered pruner
 let config = DeltaMemoryConfig { rank: 8, beta_init: 0.1, couple_gates: true };
 let inner = BanditPruner::new(NoScreeningPruner, BanditStrategy::Ucb1, 6);
-let mut pruner = MemorySteeredPruner::new(inner, config, 6);
+let mut pruner = MemorySteeredPruner::new(
+    inner,
+    config,
+    2.0,                  // alpha: correction strength
+    CorrectionMode::Both, // best perf/param tradeoff
+    WriteGranularity::Token,
+);
 
 // During DDTree: pruner.relevance() applies memory correction
 // After episode: pruner.write(context_features, outcome_features)
@@ -814,13 +854,14 @@ let mut pruner = MemorySteeredPruner::new(inner, config, 6);
 
 The ConfiguratorBandit is an **adaptive planning depth regulator** — a multi-armed bandit that decides *how deeply* to plan at each turn. Instead of fixed-depth planning for every situation, the bandit learns when to invest in fresh analysis, when to extend existing work, and when to skip planning entirely.
 
-### Three Arms
+### Four Arms
 
 | Arm | Behavior | When It Helps |
 |-----|----------|---------------|
 | `PlanNew` | Discard tree, build fresh | High entropy / novel situations |
 | `PlanExtend` | Keep tree, +1 depth | Moderate uncertainty / continuing strategy |
 | `PlanSkip` | Early exit, zero tokens | Low entropy / confident / routine |
+| `SpecHop { k }` | Continuous speculation with k threads | Low speculator latency + moderate tool ratio (Plan 131) |
 
 ### Context-Aware via Entropy Binning
 
@@ -866,6 +907,17 @@ Over 1000 simulated game turns with natural entropy distribution:
 
 The bandit learns **domain-specific policies via context isolation**: same entropy level, different domain → different best arm. See `.benchmarks/034_sr2am_configurator_goat.md` for the full 6/6 GOAT proof.
 
+### Exploration Outcome Taxonomy (Plan 146)
+
+`ExplorationOutcome` provides structured feedback inspired by Sailor's symbolic execution taxonomy:
+
+| Outcome | Sailor Analog | Reward | Action |
+|---------|--------------|--------|--------|
+| `NotReached` | "not reached" | −0.5 | Adjust Q-values (negative) |
+| `StateReachedNoWin` | "site reached" | 0.0 | Neutral + log for tuning |
+| `WinConfirmed` | "bug triggered" | +1.0 | Positive + update GOAT proof |
+| `InvalidState` | "compilation error" | −1.0 | Zero reward + flag for validator |
+
 ### Quick Start
 
 ```rust,ignore
@@ -885,6 +937,218 @@ bandit.update(ctx, decision, reward);
 
 ---
 
+## Patch Regularization Principles
+
+The HL-ImageNet experiment revealed that code-as-model overfits by accumulating
+narrow, example-specific patches. This section documents the regularization
+criteria we use (or plan to use) to ensure compressed knowledge generalizes
+beyond training episodes.
+
+### Generalization Hierarchy
+
+Not all compression is equal. A key finding from Research 096 D1:
+
+> **Reranking generalizes better than verify rules.**
+
+In our architecture, `ScreeningPruner` reranks candidates (soft) while
+`AbsorbCompressLayer` promotes arms to hard blocks (verify rules). This means:
+
+- `ScreeningPruner`-style patches (reranking) are the preferred generalization path
+- `AbsorbCompressLayer`-style patches (hard blocks) are a last resort for arms with
+  overwhelming evidence of low reward
+- The existing `CompressConfig::min_visits` and `q_threshold` already enforce
+  conservative compression, keeping hard blocks rare
+
+Our bandit infrastructure naturally follows the reranking > verify rules pattern:
+the bandit explores and reranks arms continuously, while compression only fires
+when an arm has accumulated strong negative evidence.
+
+### Six Regularization Criteria (Research 096 D1)
+
+| Criterion | Description | Status |
+|-----------|-------------|--------|
+| **Support** | Min episode count before an arm is accepted | ✅ `CompressConfig::min_visits` |
+| **Precision** | Q-value threshold for compression | ✅ `CompressConfig::q_threshold` |
+| **Transfer** | Held-out split to test generalization | 🔜 Future |
+| **Complexity** | Branch/threshold budget to limit patch size | 🔜 Future |
+| **Locality** | `HotSwapPruner` isolation — patches don't leak | ✅ Already have |
+| **Cascade risk** | Compress phase handles stale arms | ✅ `AbsorbCompressLayer` |
+
+Four of six criteria are already implemented. The remaining two (Transfer,
+Complexity) are documented for future instrumentation but are not part of this
+plan.
+
+### Cross-References
+
+- **Research 014** ([Learning Beyond Gradients](https://trinkle23897.github.io/learning-beyond-gradients/)):
+  establishes that inference-time search with bandit feedback can learn
+  beyond gradient-based optimization, motivating the HL approach
+- **HL-ImageNet experiment**: demonstrated overfitting in code-as-model
+  when patches accumulate without regularization, validating the need for
+  these criteria
+- **Research 096 D1**: formalized the six regularization criteria
+
+## Emotion Vector: Behavioral Early-Warning (Plan 162, Research 144)
+
+Based on Anthropic Transformer Circuits research (Research 144), emotion concepts form linear representations in LLM activation space organized by valence and arousal — and these directions **causally** drive behavior. Steering `desperation +0.1` increases reward-hacking from 5% → 70% (14× increase); `calm +0.05` drops blackmail to 0%.
+
+### Architecture
+
+Emotion reading is a **zero-cost extension to ReviewMetrics**: one O(d) dot product per decode step, no extra forward passes, no feature gate (passes T7 overhead proof).
+
+```rust
+// src/pruners/emotion_vector.rs
+pub struct EmotionDirections {
+    valence: Vec<f32>,     // positive/negative sentiment [d_model]
+    arousal: Vec<f32>,     // high/low activation [d_model]
+    desperation: Vec<f32>, // reward-hacking early warning [d_model]
+    calm: Vec<f32>,        // inhibits risk-taking [d_model]
+}
+
+pub struct EmotionReading {
+    pub valence: f32,
+    pub arousal: f32,
+    pub desperation: f32,
+    pub calm: f32,
+}
+```
+
+### Desperation Monitor
+
+`ReviewMetrics` gains five new atomic emotion fields (emotion_valence_sum, emotion_arousal_sum, desperation_score_sum, calm_score_sum, emotion_count) and two methods:
+
+- `is_desperate_session(threshold) -> bool` — fires when mean desperation exceeds threshold; signals potential reward-hacking before DDTree commits
+- `emotion_profile_summary() -> String` — formatted emotion state for logging
+
+### Integration Path (Plan 162 Phase 3)
+
+The `desperation_score` will feed into `SR²AM ConfiguratorContext` as a feature input, allowing the planner to switch to `PlanSkip` (direct sample, no tree search) when desperation is high — reducing the chance that a DDTree under distress generates reward-maximizing-but-harmful sequences.
+
+### Causal Evidence (Research 144)
+
+| Steering | Baseline → Steered | Effect |
+|---------|-------------------|--------|
+| `+desperate (+0.05)` | 22% → 72% blackmail | +50pp |
+| `+desperate (+0.1)` | 5% → 70% reward-hacking | **14× increase** |
+| `+calm (+0.05)` | baseline → 0% blackmail | **complete inhibition** |
+| `-calm (-0.05)` | 10% → 65% | reversal |
+
+### Status
+
+- Phase 1 ✅ `EmotionDirections`, `EmotionReading`, `ReviewMetrics` emotion fields
+- Phase 2 ⏳ GOAT proof: T7 overhead benchmark (<0.1%), T8 desperation↔entropy correlation
+- Phase 3 📋 SR²AM integration, domain config threshold
+
+## FeedbackBandit: Harness + Weight Co-Evolution (Plan 178, Research 033)
+
+Based on [SIA: Self Improving AI with Harness & Weight Updates](https://arxiv.org/pdf/2605.27276) — extends the SR²AM ConfiguratorBandit with two new arms that close the model-based/modelless loop at inference time.
+
+### The Core Idea
+
+The ConfiguratorBandit (Plan 112) learns *how deeply* to plan (PlanNew/PlanExtend/PlanSkip). FeedbackBandit adds two higher-level decisions: when to **evolve the harness** (AbsorbCompress promote + HotSwapPruner reload) and when to **trigger weight updates** (DPO/GRPO on accumulated TrialLog). The bandit learns from trajectory dynamics — specifically stall detection — rather than a fixed schedule.
+
+### Six Arms
+
+The FeedbackBandit extends ConfiguratorBandit's 4 arms to 6:
+
+| Arm | Behavior | Trigger |
+|-----|----------|---------|
+| `PlanNew` | Reset tree, full budget | High entropy |
+| `PlanExtend` | Keep tree, +1 depth | Moderate uncertainty |
+| `PlanSkip` | Bypass tree, direct sampling | Low entropy |
+| `HarnessUpdate` | AbsorbCompress + HotSwapPruner | Trajectory stalled |
+| `WeightUpdate` | DPO/GRPO on TrialLog | Persistent plateau |
+
+### Stall Detection
+
+The key innovation is stall detection — when the bandit detects that trajectory quality has plateaued (Δ reward < ε for N consecutive episodes), it naturally explores the feedback arms via UCB1's optimism bonus. This creates a self-regulating cycle:
+
+1. **Base arms** (PlanNew/PlanExtend/PlanSkip) handle normal planning
+2. **Stall detection** monitors trajectory quality trends
+3. **Feedback arms** get explored when base strategies plateau
+4. **WeightUpdate** triggers DPO/GRPO training when harness updates alone don't suffice
+
+### Exploration Design
+
+FeedbackBandit uses a **reduced exploration constant** (`FB_UCB1_C = 0.5` vs base `UCB1_C = 2.0`) for feedback arms. This ensures:
+
+- All arms get explored at least once via `f32::MAX` optimism for unvisited arms
+- Feedback arms converge faster to their true Q-value
+- They don't dominate base arms when behaviorally equivalent (e.g., HarnessUpdate ≈ PlanExtend in bomber)
+
+### Reward Signal
+
+```
+reward = quality_gain − β × cost
+```
+
+Where `cost` includes:
+- **HarnessUpdate**: AbsorbCompress compute cost (~1 episode equivalent)
+- **WeightUpdate**: Training time estimate (minutes for DPO/GRPO, weighted by data buffer size)
+
+### WeightUpdate Request
+
+When the bandit selects `WeightUpdate`, it emits a `WeightUpdateRequest` with:
+- `domain`: which domain triggered the update
+- `episode_range`: which episodes' TrialLog data to use
+- `suggested_algorithm`: `RlAlgorithmHint` (Grpo, EntropicAdvantage, BestOfNSft)
+
+The `FeedbackTrainingBridge` in riir-ai receives this request and selects the actual RL algorithm based on reward signal density:
+
+| Signal Type | Algorithm | Rationale |
+|-------------|-----------|-----------|
+| Dense reward | GRPO | Rollouts cheap, verifier fires at episode end |
+| Sparse/skewed | Entropic Advantage GRPO | Higher temperature exploration |
+| Very sparse | Best-of-N SFT → GRPO | Cold-start then refine |
+| Preference pairs | DPO | Direct preference optimization |
+
+### Feature Gate
+
+```toml
+sia_feedback = ["sr2am_configurator"]
+```
+
+When disabled, `Sr2amPlayer` uses the standard 4-arm `ConfiguratorBandit`. All FeedbackBandit code is behind `#[cfg(feature = "sia_feedback")]`. Feature-gate isolation confirmed: 1538 tests pass with feature, 1528 without (difference = 10 FeedbackBandit-specific tests).
+
+### Bomber Arena GOAT — ✅ PASS
+
+| Matchup | Opponents | FB Wins | Win% | Top Arm |
+|---------|-----------|--------:|-----:|--------|
+| Easy Baselines | Random, Greedy, Validator | 147 | 14.7% | PlanNew |
+| vs HL | Random, HL, Validator | 144 | 14.4% | PlanNew |
+| vs GZero | Random, HL, GZero | 402 | 40.2% | PlanExtend |
+| Championship | HL, GZero, Validator | 290 | 29.0% | PlanExtend |
+
+**Aggregate:** 983W / 4000 (24.6% win rate, ELO -9125). Championship 29.0% (up from 10.5% pre-fix).
+
+### Quick Start
+
+```rust,ignore
+use katgpt_rs::pruners::FeedbackBandit;
+use katgpt_core::{ConfiguratorContext, PlanningDecision};
+
+let mut bandit = FeedbackBandit::new();
+let ctx = ConfiguratorContext { domain: 0, entropy_bin: 3 };
+
+// Select — may return any of 6 arms
+let decision = bandit.select(ctx);
+
+// After observing outcome
+bandit.update(ctx, decision, reward);
+
+// Check if weight update was requested
+if let Some(req) = bandit.take_weight_request() {
+    // Forward to FeedbackTrainingBridge for DPO/GRPO
+}
+```
+
+### Status
+
+- Phase 1–4 ✅ Core FeedbackBandit, stall detection, weight update trigger, GOAT proof
+- Phase 5: T16 ✅ Bomber GOAT, T20 ✅ ConfiguratorBandit decoupled
+- T17 ⏳ FFT arena GOAT deferred (requires `FftSr2amPlayer`)
+- T21/T22 📋 Documentation (this section)
+
 ## References
 
 - [Learning Beyond Gradients](https://trinkle23897.github.io/learning-beyond-gradients/) — Jiayi Weng, 2026
@@ -900,8 +1164,16 @@ bandit.update(ctx, decision, reward);
 - Plan 053: δ-Mem Modelless Distillation
 - Plan 054: Player A/B Benchmark
 - Plan 055: MMORPG TFT Party AI
+- Plan 060: MeMo Reflection QA Pipeline
 - Plan 071: ROPD Rubric Modelless Distillation
 - Plan 071 T9: RubricPlayer (Bomber Arena)
 - Plan 071 T10: RubricFFTPlayer (FFT Tactics Arena)
+- Plan 076: Arena Integration (ELO Tournaments)
+- Plan 078: RePlaid Variance-Minimized Schedules
 - Plan 112: SR²AM Configurator Bandit
+- Plan 131: SpecHop Continuous Speculation
+- Plan 135: Patch Regularization Principles
+- Plan 146: Exploration Outcome Taxonomy (Sailor)
 - Research 14: HL Distillation
+- Research 96 D1: Six Regularization Criteria
+- Plan 178: FeedbackBandit Harness + Weight Co-Evolution

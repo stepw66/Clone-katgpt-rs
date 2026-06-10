@@ -8,6 +8,7 @@
 /// When multiple keys produce the same maximum dot product score,
 /// this determines how the value is resolved.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[repr(u8)]
 pub enum TieBreak {
     /// Return the average of all tied values.
     Average,
@@ -28,10 +29,10 @@ pub struct HullMeta {
     pub vsum: [f64; 2],
     /// Most recent value by sequence number.
     pub vlast: [f64; 2],
-    /// Number of merged points.
-    pub count: usize,
     /// Highest sequence number seen.
     pub last_seq: i64,
+    /// Number of merged points.
+    pub count: usize,
 }
 
 impl Default for HullMeta {
@@ -52,6 +53,7 @@ impl HullMeta {
     }
 
     /// Merge a new value with the given sequence number.
+    #[inline]
     pub fn add(&mut self, val: [f64; 2], seq: i64) {
         self.vsum[0] += val[0];
         self.vsum[1] += val[1];
@@ -63,6 +65,7 @@ impl HullMeta {
     }
 
     /// Merge another `HullMeta` into this one.
+    #[inline]
     pub fn merge(&mut self, other: &HullMeta) {
         self.vsum[0] += other.vsum[0];
         self.vsum[1] += other.vsum[1];
@@ -76,6 +79,7 @@ impl HullMeta {
     /// Resolve the aggregated value using the given tie-breaking mode.
     ///
     /// Returns `[0.0, 0.0]` if no values have been added.
+    #[inline]
     pub fn resolve(&self, tb: TieBreak) -> [f64; 2] {
         if self.count == 0 {
             return [0.0, 0.0];
@@ -90,6 +94,7 @@ impl HullMeta {
     }
 
     /// Whether any values have been added.
+    #[inline]
     pub fn is_empty(&self) -> bool {
         self.count == 0
     }

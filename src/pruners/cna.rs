@@ -25,6 +25,8 @@
 //! cna_modulate(&mut hidden, layer_idx, &modulator);
 //! ```
 
+use std::collections::{HashMap, HashSet};
+
 use crate::speculative::types::ScreeningPruner;
 
 // ── Types ───────────────────────────────────────────────────────
@@ -45,8 +47,14 @@ pub struct CnaNeuron {
 pub struct CnaCircuit {
     /// Sparse set of neurons, sorted by `|delta|` descending.
     pub neurons: Vec<CnaNeuron>,
+    /// Secondary index for O(1) membership checks on `(layer, index)`.
+    pub neuron_set: HashSet<(usize, usize)>,
+    /// Pre-computed layer → neuron indices within `neurons` vec for O(k_layer) modulation.
+    pub layer_index: HashMap<usize, Vec<usize>>,
     /// Universal neurons filtered out `(layer, index)` — fired in ≥80% of diverse prompts.
     pub universal_excluded: Vec<(usize, usize)>,
+    /// Secondary index for O(1) universal exclusion checks.
+    pub universal_excluded_set: HashSet<(usize, usize)>,
     /// Number of positive prompts used in discovery.
     pub n_positive: usize,
     /// Number of negative prompts used in discovery.
@@ -185,7 +193,16 @@ pub fn cna_discover(
     });
     candidates.truncate(k);
 
+    // Build layer → neuron-indices lookup for O(k_layer) modulation.
+    let mut layer_index: HashMap<usize, Vec<usize>> = HashMap::new();
+    for (i, neuron) in candidates.iter().enumerate() {
+        layer_index.entry(neuron.layer).or_default().push(i);
+    }
+
     CnaCircuit {
+        neuron_set: candidates.iter().map(|n| (n.layer, n.index)).collect(),
+        layer_index,
+        universal_excluded_set: HashSet::new(),
         neurons: candidates,
         universal_excluded: Vec::new(),
         n_positive: positive_activations.len(),
@@ -242,9 +259,20 @@ pub fn detect_universal_neurons(
             }
         }
 
-        // Sort by activation magnitude descending, take top-0.1%.
-        scored.sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-        for &(slot, _) in scored.iter().take(top_k) {
+        // Partial-sort for top-0.1% by activation magnitude descending.
+        // select_nth_unstable_by partitions around the k-th element in O(n),
+        // then we truncate to keep only the top-k.
+        if top_k < scored.len() {
+            scored.select_nth_unstable_by(top_k, |a, b| {
+                b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)
+            });
+            scored.truncate(top_k);
+        } else {
+            scored.sort_unstable_by(|a, b| {
+                b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)
+            });
+        }
+        for &(slot, _) in &scored {
             appearance_count[slot] += 1;
         }
     }
@@ -270,15 +298,18 @@ pub fn detect_universal_neurons(
 /// Call this between `matmul_relu` and `matmul(w2)` in `forward_base()`.
 ///
 /// If `multiplier == 1.0`, returns immediately (baseline, no-op).
-/// O(k) where k = number of circuit neurons for this layer.
+/// O(k_layer) where k_layer = number of circuit neurons for this layer only.
 #[inline]
 pub fn cna_modulate(hidden: &mut [f32], layer_idx: usize, modulator: &CnaModulator) {
     if modulator.multiplier == 1.0 {
         return;
     }
-    for neuron in &modulator.circuit.neurons {
-        if neuron.layer == layer_idx && neuron.index < hidden.len() {
-            hidden[neuron.index] *= modulator.multiplier;
+    if let Some(indices) = modulator.circuit.layer_index.get(&layer_idx) {
+        for &ni in indices {
+            let neuron = &modulator.circuit.neurons[ni];
+            if neuron.index < hidden.len() {
+                hidden[neuron.index] *= modulator.multiplier;
+            }
         }
     }
 }
@@ -307,21 +338,14 @@ impl CnaScreeningPruner {
 
     /// Check if a given neuron `(layer, index)` is part of the discovered circuit.
     pub fn is_circuit_neuron(&self, layer: usize, index: usize) -> bool {
-        self.circuit
-            .neurons
-            .binary_search_by(|n| match n.layer.cmp(&layer) {
-                std::cmp::Ordering::Equal => n.index.cmp(&index),
-                ord => ord,
-            })
-            .is_ok()
+        self.circuit.neuron_set.contains(&(layer, index))
     }
 
     /// Check if a given neuron `(layer, index)` was excluded as universal.
     pub fn is_universal_excluded(&self, layer: usize, index: usize) -> bool {
         self.circuit
-            .universal_excluded
-            .iter()
-            .any(|&(l, i)| l == layer && i == index)
+            .universal_excluded_set
+            .contains(&(layer, index))
     }
 }
 
@@ -519,6 +543,7 @@ pub mod go_pairs {
 #[cfg(feature = "bomber")]
 pub mod bomber_pairs {
     use super::ContrastivePairProvider;
+    use crate::pruners::bomber::{ARENA_H, ARENA_W};
     use crate::pruners::game_state::{BomberHeuristic, BomberState, StateHeuristic};
 
     const POSITIVE_THRESHOLD: f32 = 0.5;
@@ -568,9 +593,7 @@ pub mod bomber_pairs {
 
         /// Extract features as 3 pseudo-activation layers.
         fn extract_features(&self, state: &BomberState) -> [Vec<f32>; BOMBER_FEATURE_LAYERS] {
-            let grid_h = state.cells.len();
-            let grid_w = if grid_h > 0 { state.cells[0].len() } else { 0 };
-            let dim = grid_h * grid_w;
+            let dim = ARENA_W * ARENA_H;
 
             // Layer 0: cell types
             let mut cells = vec![0.0f32; dim];
@@ -579,11 +602,11 @@ pub mod bomber_pairs {
             // Layer 2: blast zones
             let mut blast = vec![0.0f32; dim];
 
-            for r in 0..grid_h {
-                for c in 0..grid_w {
-                    let idx = r * grid_w + c;
+            for r in 0..ARENA_H {
+                for c in 0..ARENA_W {
+                    let idx = r * ARENA_W + c;
                     // Cell type encoding
-                    cells[idx] = match state.cells[r][c] {
+                    cells[idx] = match state.cells[idx] {
                         crate::pruners::bomber::Cell::Floor => 0.0,
                         crate::pruners::bomber::Cell::FixedWall => -1.0,
                         crate::pruners::bomber::Cell::DestructibleWall => -0.5,
@@ -600,8 +623,8 @@ pub mod bomber_pairs {
             for (i, player) in state.players.iter().enumerate() {
                 if player.alive {
                     let (px, py) = (player.pos.0 as usize, player.pos.1 as usize);
-                    if py < grid_h && px < grid_w {
-                        let idx = py * grid_w + px;
+                    if py < ARENA_H && px < ARENA_W {
+                        let idx = py * ARENA_W + px;
                         players[idx] = if i == 0 { 1.0 } else { -0.5 };
                     }
                 }
@@ -807,6 +830,14 @@ pub mod fft_pairs {
 mod tests {
     use super::*;
 
+    fn build_layer_index(neurons: &[CnaNeuron]) -> HashMap<usize, Vec<usize>> {
+        let mut idx: HashMap<usize, Vec<usize>> = HashMap::new();
+        for (i, n) in neurons.iter().enumerate() {
+            idx.entry(n.layer).or_default().push(i);
+        }
+        idx
+    }
+
     fn make_neuron(layer: usize, index: usize, delta: f32) -> CnaNeuron {
         CnaNeuron {
             layer,
@@ -822,9 +853,18 @@ mod tests {
             make_neuron(1, 3, 0.7),
             make_neuron(0, 10, 0.3),
         ];
+        let neuron_set: HashSet<(usize, usize)> =
+            neurons.iter().map(|n| (n.layer, n.index)).collect();
         let circuit = CnaCircuit {
             neurons,
+            neuron_set,
+            layer_index: build_layer_index(&[
+                make_neuron(2, 5, 0.9),
+                make_neuron(1, 3, 0.7),
+                make_neuron(0, 10, 0.3),
+            ]),
             universal_excluded: vec![(0, 1)],
+            universal_excluded_set: HashSet::from_iter([(0, 1)]),
             n_positive: 5,
             n_negative: 5,
             total_mlp_activations: 6 * 64,
@@ -867,9 +907,13 @@ mod tests {
 
     #[test]
     fn test_modulate_baseline() {
+        let neurons = vec![make_neuron(0, 0, 1.0)];
         let circuit = CnaCircuit {
-            neurons: vec![make_neuron(0, 0, 1.0)],
+            neuron_set: neurons.iter().map(|n| (n.layer, n.index)).collect(),
+            layer_index: build_layer_index(&neurons),
+            neurons,
             universal_excluded: vec![],
+            universal_excluded_set: HashSet::new(),
             n_positive: 1,
             n_negative: 1,
             total_mlp_activations: 4,
@@ -888,9 +932,13 @@ mod tests {
 
     #[test]
     fn test_modulate_ablate() {
+        let neurons = vec![make_neuron(0, 0, 1.0), make_neuron(0, 2, 0.5)];
         let circuit = CnaCircuit {
-            neurons: vec![make_neuron(0, 0, 1.0), make_neuron(0, 2, 0.5)],
+            neuron_set: neurons.iter().map(|n| (n.layer, n.index)).collect(),
+            layer_index: build_layer_index(&neurons),
+            neurons,
             universal_excluded: vec![],
+            universal_excluded_set: HashSet::new(),
             n_positive: 1,
             n_negative: 1,
             total_mlp_activations: 4,
@@ -909,9 +957,13 @@ mod tests {
 
     #[test]
     fn test_modulate_amplify() {
+        let neurons = vec![make_neuron(0, 1, 0.8)];
         let circuit = CnaCircuit {
-            neurons: vec![make_neuron(0, 1, 0.8)],
+            neuron_set: neurons.iter().map(|n| (n.layer, n.index)).collect(),
+            layer_index: build_layer_index(&neurons),
+            neurons,
             universal_excluded: vec![],
+            universal_excluded_set: HashSet::new(),
             n_positive: 1,
             n_negative: 1,
             total_mlp_activations: 4,
@@ -962,7 +1014,10 @@ mod tests {
     fn test_empty_circuit() {
         let circuit = CnaCircuit {
             neurons: vec![],
+            neuron_set: HashSet::new(),
+            layer_index: HashMap::new(),
             universal_excluded: vec![],
+            universal_excluded_set: HashSet::new(),
             n_positive: 0,
             n_negative: 0,
             total_mlp_activations: 4,
@@ -1005,9 +1060,13 @@ mod tests {
 
     #[test]
     fn test_screening_pruner_relevance() {
+        let neurons = vec![make_neuron(0, 0, 1.0)];
         let circuit = CnaCircuit {
-            neurons: vec![make_neuron(0, 0, 1.0)],
+            neuron_set: neurons.iter().map(|n| (n.layer, n.index)).collect(),
+            layer_index: build_layer_index(&neurons),
+            neurons,
             universal_excluded: vec![],
+            universal_excluded_set: HashSet::new(),
             n_positive: 1,
             n_negative: 1,
             total_mlp_activations: 4,
@@ -1021,9 +1080,13 @@ mod tests {
 
     #[test]
     fn test_modulate_different_layer() {
+        let neurons = vec![make_neuron(1, 0, 1.0)]; // layer 1
         let circuit = CnaCircuit {
-            neurons: vec![make_neuron(1, 0, 1.0)], // layer 1
+            neuron_set: neurons.iter().map(|n| (n.layer, n.index)).collect(),
+            layer_index: build_layer_index(&neurons),
+            neurons,
             universal_excluded: vec![],
+            universal_excluded_set: HashSet::new(),
             n_positive: 1,
             n_negative: 1,
             total_mlp_activations: 8,

@@ -320,6 +320,8 @@ fn bench_lt2_ahla_loop() {
                 &config,
                 &residual_gate,
                 &sdpa_gate,
+                None,
+                None,
             );
         }
     }
@@ -341,6 +343,8 @@ fn bench_lt2_ahla_loop() {
                 &config,
                 &residual_gate,
                 &sdpa_gate,
+                None,
+                None,
             ));
         }
     }
@@ -405,6 +409,8 @@ fn bench_lt2_hybrid() {
                 &config,
                 &residual_gate,
                 &sdpa_gate,
+                None,
+                None,
             );
         }
     }
@@ -426,6 +432,8 @@ fn bench_lt2_hybrid() {
                 &config,
                 &residual_gate,
                 &sdpa_gate,
+                None,
+                None,
             ));
         }
     }
@@ -533,6 +541,8 @@ fn proof_lt2_hybrid_throughput() {
                 &hybrid_config,
                 &residual_gate,
                 &sdpa_gate,
+                None,
+                None,
             );
         }
     }
@@ -554,6 +564,8 @@ fn proof_lt2_hybrid_throughput() {
                 &hybrid_config,
                 &residual_gate,
                 &sdpa_gate,
+                None,
+                None,
             ));
         }
     }

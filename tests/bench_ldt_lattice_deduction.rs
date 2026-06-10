@@ -10,6 +10,7 @@
 //! - T5: Maze-style: α-target improves convergence vs single-path
 //! - T6: MCTS-style: conflict cutoff reduces wasted expansion
 //! - T7: Feature gate audit: zero impact on default build
+//! - F4: Depth-escalating conflict threshold tightens with search depth
 //!
 //! Run: cargo test --features lattice_deduction --test bench_ldt_lattice_deduction -- --nocapture
 
@@ -84,9 +85,38 @@ fn bench_ldt_lattice_deduction_goat_proof() {
             loop_mode: katgpt_rs::types::LoopMode::None,
             hybrid_pattern: katgpt_rs::types::HybridPattern::Uniform,
             gated_attn: false,
+            parallax_gate_scale: 0.0,
+            parallax_zero_init: true,
+            emotion_desperation_threshold: 0.5,
+            rim_block_count: 0,
+            rim_tokens_per_block: 2,
+            rim_buffer_token: 0,
+            #[cfg(feature = "hydra_budget")]
+            hydra_profiles: vec![],
+            #[cfg(feature = "deltanet_inference")]
+            layer_types: vec![],
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_conv_kernel_size: 0,
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_state_dim: 0,
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_linear_head_dim: 0,
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_linear_n_heads: 0,
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_linear_n_value_heads: 0,
+            #[cfg(feature = "wall_attention")]
+            wall_config: None,
+            #[cfg(feature = "collapse_aware_thinking")]
+            collapse_budget: katgpt_rs::types::ThinkingBudget::default(),
+            #[cfg(feature = "belief_drafter")]
+            belief_drafter_path: None,
+            #[cfg(feature = "belief_drafter")]
+            belief_drafter_entropy_threshold: 2.0,
         }
     }
 
+    // Check if the lattice_deduction feature is present
     println!("═══════════════════════════════════════════════════════════");
     println!("  LDT Lattice Deduction — GOAT Proof (Plan 088)");
     println!("═══════════════════════════════════════════════════════════");
@@ -457,10 +487,12 @@ fn bench_ldt_lattice_deduction_goat_proof() {
     let detector_strict = EntropyConflictDetector {
         max_prune_rate: 0.4,
         entropy_floor: 0.05,
+        depth_escalation: 0.02,
     };
     let detector_loose = EntropyConflictDetector {
         max_prune_rate: 0.8,
         entropy_floor: 0.001,
+        depth_escalation: 0.02,
     };
 
     // Scenario 1: Conflicted state (many tokens pruned by constraint)
@@ -583,6 +615,136 @@ fn bench_ldt_lattice_deduction_goat_proof() {
     println!("  T5: Maze-style: α-target excludes impossible tokens ✓");
     println!("  T6: MCTS cutoff: ≤ baseline expansions ✓");
     println!("  T7: Feature gate audit: all APIs consistent ✓");
+    println!("═══════════════════════════════════════════════════════════");
+}
+
+/// GOAT Proof: LDT Phase 2 — Lattice State Fusion (Plan 170)
+///
+/// Proves F1-F4 are correct and performant.
+#[cfg(feature = "lattice_deduction")]
+#[test]
+fn bench_ldt_phase2_goat_proof() {
+    use katgpt_rs::speculative::{
+        AlphaScreeningPruner, AlphaTarget, ConflictClauseDB, ConflictDetector,
+        EntropyConflictDetector, ScreeningPruner,
+    };
+    use std::collections::HashSet;
+
+    println!("═══════════════════════════════════════════════════════════");
+    println!("  LDT Phase 2 — GOAT Proof (Plan 170)");
+    println!("═══════════════════════════════════════════════════════════");
+
+    // ── F1: AlphaScreeningPruner ────────────────────────────────
+    {
+        let solutions = vec![vec![0, 1], vec![0, 2], vec![3, 1]];
+        let target = AlphaTarget::new(2, solutions);
+        let pruner = AlphaScreeningPruner::new(target);
+
+        // Sound by construction: tokens in solutions get relevance 1.0
+        assert_eq!(pruner.relevance(0, 0, &[]), 1.0); // in [0,1],[0,2]
+        assert_eq!(pruner.relevance(0, 3, &[]), 1.0); // in [3,1]
+        assert_eq!(pruner.relevance(0, 9, &[]), 0.0); // not in any
+
+        // After committing pos 0 to value 0, token 3 is pruned
+        pruner.target().lock().unwrap().commit(0, 0);
+        assert_eq!(pruner.relevance(0, 3, &[]), 0.0); // eliminated
+        assert_eq!(pruner.relevance(1, 1, &[]), 1.0); // still in [0,1]
+
+        println!("  F1: AlphaScreeningPruner: sound pruning by construction ✓");
+    }
+
+    // ── F2: ConflictClauseDB ────────────────────────────────────
+    {
+        let mut db = ConflictClauseDB::new(4);
+        assert!(db.is_empty());
+
+        // Learn: (0,5) AND (1,3) → conflict
+        db.learn(HashSet::from([(0, 5), (1, 3)]));
+        assert_eq!(db.len(), 1);
+
+        // Superset of clause → violated
+        assert!(db.is_violated(&[(0, 5), (1, 3)]));
+        assert!(db.is_violated(&[(0, 5), (1, 3), (2, 7)]));
+
+        // Subset → not violated
+        assert!(!db.is_violated(&[(0, 5)]));
+        assert!(!db.is_violated(&[(1, 3)]));
+
+        // FIFO eviction
+        db.learn(HashSet::from([(0, 0)]));
+        db.learn(HashSet::from([(0, 1)]));
+        db.learn(HashSet::from([(0, 2)])); // evicts first
+        assert_eq!(db.len(), 4);
+        assert!(db.is_violated(&[(0, 5), (1, 3)])); // still present (2nd slot)
+
+        println!("  F2: ConflictClauseDB: clause learning + FIFO eviction ✓");
+    }
+
+    // ── F3: Cached ŷ_prev ──────────────────────────────────────
+    {
+        let solutions = vec![vec![0, 1], vec![0, 2]];
+        let mut target = AlphaTarget::new(2, solutions);
+
+        // Get initial target
+        let t0 = target.target();
+        assert_eq!(t0[1], HashSet::from([1, 2]));
+
+        // Commit consistent value
+        target.commit(0, 0);
+        let t1 = target.target();
+        assert_eq!(t1[1], HashSet::from([1, 2]));
+
+        // Commit INCONSISTENT value → no solution survives
+        target.commit(1, 99);
+        let t2 = target.target();
+
+        // F3: Returns cached previous target, not empty
+        assert!(!t2[0].is_empty());
+        assert!(!t2[1].is_empty());
+
+        println!("  F3: Cached ŷ_prev: stable target after conflict ✓");
+    }
+
+    // ── F4: Depth-Escalating Conflict Threshold ────────────────
+    {
+        let detector = EntropyConflictDetector::default();
+        assert_eq!(detector.max_prune_rate, 0.6);
+        assert_eq!(detector.depth_escalation, 0.02);
+
+        // Normal marginals — no conflict
+        let normal = vec![vec![0.3, 0.3, 0.4]; 4];
+        let normal_refs: Vec<&[f32]> = normal.iter().map(|s| s.as_slice()).collect();
+
+        // At depth 0: max_prune_rate = 0.6, prune_rate = 2/12 ≈ 0.167 < 0.6 → no conflict
+        assert!(!detector.is_conflicted_at_depth(&normal_refs, 2, 12, 0));
+
+        // At depth 20: effective_max = 0.6 - 20*0.02 = 0.2, prune_rate = 0.167 < 0.2 → no conflict
+        assert!(!detector.is_conflicted_at_depth(&normal_refs, 2, 12, 20));
+
+        // At depth 0: prune_rate = 0.5, effective_max = 0.6 → no conflict
+        assert!(!detector.is_conflicted_at_depth(&normal_refs, 5, 10, 0));
+
+        // At depth 20: prune_rate = 0.5, effective_max = 0.2 → CONFLICT (0.5 > 0.2)
+        assert!(detector.is_conflicted_at_depth(&normal_refs, 5, 10, 20));
+
+        // Zero candidates always conflicts
+        assert!(detector.is_conflicted_at_depth(&normal_refs, 0, 0, 0));
+
+        // depth_escalation = 0 still works (backwards compatible)
+        let flat = EntropyConflictDetector {
+            max_prune_rate: 0.6,
+            entropy_floor: 0.01,
+            depth_escalation: 0.0,
+        };
+        // Same result at all depths
+        assert!(!flat.is_conflicted_at_depth(&normal_refs, 5, 10, 0));
+        assert!(!flat.is_conflicted_at_depth(&normal_refs, 5, 10, 100));
+
+        println!("  F4: Depth-escalating threshold: tighter at depth 20 vs depth 0 ✓");
+    }
+
+    println!("═══════════════════════════════════════════════════════════");
+    println!("  GOAT PROOF COMPLETE — All 4 fusions verified");
     println!("═══════════════════════════════════════════════════════════");
 }
 

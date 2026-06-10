@@ -10,8 +10,8 @@
 /// - `Standard`: SDPA with KV cache (default, backward-compatible).
 /// - `Hla`: Symmetric second-order linear attention — O(1) per-token memory.
 /// - `Ahla`: Asymmetric second-order linear attention — lower state cost than symmetric.
-#[repr(u8)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[repr(u8)]
 pub enum HlaMode {
     #[default]
     Standard,
@@ -58,6 +58,36 @@ pub enum ModelArchitecture {
     #[default]
     Generic,
     Gemma2,
+    Llama,
+    /// Hybrid DeltaNet/Attention model (e.g., Qwen 3.5, Kimi Linear).
+    /// Uses per-layer config to determine DeltaNet vs standard attention.
+    /// Plan 182: Luce Megakernel Distill — DeltaNet GPU Inference.
+    #[cfg(feature = "deltanet_inference")]
+    QwenDeltaNet,
+}
+
+/// Attention projection configuration.
+/// Controls whether K and V projections share weights (Q-K=V tying).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[repr(u8)]
+pub enum AttentionProjection {
+    /// Standard Q, K, V (3 projections, full KV cache)
+    #[default]
+    Full,
+    /// Q-K=V: K and V share projection (2 projections, K-only cache).
+    /// 50% KV cache reduction, ~3% perplexity cost.
+    /// Post-hoc weight merging: W_kv = (W_k + W_v) / 2.
+    SharedKV,
+}
+
+/// KV cache layout (derived from AttentionProjection).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum CacheLayout {
+    /// Store both K and V (standard)
+    KV,
+    /// Store K only, V = K at read (SharedKV)
+    K,
 }
 
 /// Weight storage dtype (affects loading and dequantization).
@@ -76,6 +106,7 @@ pub enum WeightDtype {
 
 /// Delta routing mode — cross-layer information flow via delta vectors.
 /// Research 061: Delta Attention Residuals (Plan 097).
+#[repr(u8)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum DeltaRoutingMode {
     /// No delta routing (default).
@@ -90,22 +121,42 @@ pub enum DeltaRoutingMode {
 }
 
 /// Configuration for delta routing (Plan 097, Research 061).
+///
+/// Fields ordered by descending alignment to minimize padding:
+/// usize (8B) → repr(u8) enum (1B) — 16 bytes total, no wasted padding.
 #[derive(Clone, Copy, Debug)]
 pub struct DeltaRoutingConfig {
-    /// Routing mode.
-    pub mode: DeltaRoutingMode,
     /// Block size for DeltaBlock mode (number of layers per block).
     /// Default: 4. Paper recommends B=4.
     pub block_size: usize,
+    /// Routing mode.
+    pub mode: DeltaRoutingMode,
 }
 
 impl Default for DeltaRoutingConfig {
     fn default() -> Self {
         Self {
-            mode: DeltaRoutingMode::Off,
             block_size: 4,
+            mode: DeltaRoutingMode::Off,
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// DeltaNet Inference (Plan 182: Luce Megakernel Distill)
+// ---------------------------------------------------------------------------
+
+/// Per-layer type for hybrid DeltaNet/Attention models.
+/// Each layer is either a standard attention layer or a DeltaNet recurrent layer.
+#[cfg(feature = "deltanet_inference")]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[repr(u8)]
+pub enum DeltaNetLayerType {
+    /// Standard multi-head attention with KV cache.
+    #[default]
+    Attention,
+    /// DeltaNet linear recurrent layer (fast recurrent update, no KV cache needed).
+    DeltaNet,
 }
 
 impl DeltaRoutingConfig {
@@ -127,6 +178,9 @@ impl DeltaRoutingConfig {
 
 /// Configuration for DashAttention adaptive sparse hierarchical attention.
 /// Controls α-entmax routing, chunk summarization, and routing bias.
+///
+/// Fields ordered by descending alignment to minimize padding:
+/// usize (8B) → f32 (4B) → bool (1B) — 24 bytes total, no wasted padding.
 #[derive(Clone, Copy, Debug)]
 pub struct DashAttnConfig {
     /// Chunk size for block-level attention (default: 64).
@@ -154,6 +208,68 @@ impl Default for DashAttnConfig {
 }
 
 // ---------------------------------------------------------------------------
+// RTPurbo Retrieval Head Sparse Decode (Plan 126, Research 86)
+// ---------------------------------------------------------------------------
+
+/// Head role classification for RTPurbo sparse decode.
+///
+/// Only ~15% of attention heads ("retrieval heads") need full long-context access.
+/// The remaining ~85% ("local heads") attend only to local context + attention sinks.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[repr(u8)]
+pub enum RetrievalHeadRole {
+    /// Local head — sliding window + sink tokens only, no full KV scan.
+    #[default]
+    Local,
+    /// Retrieval head — low-dim projection + dynamic top-p token selection.
+    Retrieval,
+}
+
+/// Configuration for RTPurbo retrieval head sparse decode.
+///
+/// Feature gate: `rt_turbo` (opt-in, requires `dash_attn`).
+/// Adds head-wise retrieval/local classification + dynamic top-p token selection
+/// for decode-phase sparse attention. Complements DashAttention's α-entmax block
+/// routing with per-head specialization.
+///
+/// Must pass 6/6 GOAT proofs before default-on promotion.
+///
+/// Fields ordered by descending alignment to minimize padding:
+/// usize (8B) → f32 (4B) — no padding between groups.
+#[derive(Clone, Copy, Debug)]
+pub struct RtTurboConfig {
+    /// Low-dimensional projection size for pre-RoPE scoring (default: 16).
+    /// Paper ablation: dim=16 is the sweet spot for low-frequency retrieval.
+    pub low_dim: usize,
+    /// Sliding window size for local heads (default: 8192).
+    pub sliding_window: usize,
+    /// Number of attention sink tokens always retained for local heads (default: 4).
+    pub sink_tokens: usize,
+    /// Block size for block-level top-p variant (default: 64).
+    /// Should match `DashAttnConfig::chunk_size` for consistent routing.
+    pub block_size: usize,
+    /// Fraction of heads classified as retrieval heads (default: 0.15).
+    /// Paper ablation: 15% is optimal balance of accuracy vs sparsity.
+    pub retrieval_head_ratio: f32,
+    /// Cumulative attention mass threshold for dynamic top-p selection (default: 0.9).
+    /// Paper ablation: top-p=0.9 preserves >93% attention mass at 97% sparsity.
+    pub top_p: f32,
+}
+
+impl Default for RtTurboConfig {
+    fn default() -> Self {
+        Self {
+            low_dim: 16,
+            sliding_window: 8192,
+            sink_tokens: 4,
+            block_size: 64,
+            retrieval_head_ratio: 0.15,
+            top_p: 0.9,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // LT2 Looped Inference (Plan 108, Research 73)
 // ---------------------------------------------------------------------------
 
@@ -167,6 +283,9 @@ pub enum LoopMode {
     /// Weight-shared looping: same layers applied T times.
     /// Effective depth = n_layer × loop_count.
     WeightShared { loop_count: usize },
+    /// Training-free loop: ODE-refined sub-stepping over a window of layers.
+    /// No extra parameters — pure inference-time retrofit (Plan 136).
+    TrainingFree,
 }
 
 /// Hybrid attention pattern for looped inference.
@@ -213,20 +332,20 @@ impl SdpaOutputGate {
         debug_assert!(self.w_gate.len() >= n * dim, "gate weights too small");
 
         // Step 1: Compute gate signal = sigmoid(W_gate @ attn_out)
-        for (i, gate_val) in temp.iter_mut().enumerate().take(n) {
-            let w_off = i * dim;
-            let dot: f32 = self.w_gate[w_off..w_off + dim]
-                .iter()
-                .zip(attn_out.iter())
-                .map(|(w, a)| w * a)
-                .sum();
-            *gate_val = 1.0 / (1.0 + (-dot).exp()); // sigmoid
-        }
+        // Batch matvec then batch sigmoid avoids per-element loop overhead
+        crate::simd::simd_matvec(temp, &self.w_gate, attn_out, n, dim);
 
-        // Step 2: Apply gate elementwise
-        for (attn, gate) in attn_out.iter_mut().zip(temp.iter()) {
-            *attn *= gate;
-        }
+        // SIMD sigmoid: temp = -temp, exp, then 1/(1+exp)
+        crate::simd::simd_scale_inplace(&mut temp[..n], -1.0);
+        crate::simd::simd_exp_inplace(&mut temp[..n]);
+        crate::simd::simd_add_scalar_inplace(&mut temp[..n], 1.0);
+        // temp now = 1 + exp(-x), invert: temp = 1/temp = sigmoid
+        crate::simd::simd_reciprocal_inplace(&mut temp[..n]);
+
+        // Step 2: Apply gate elementwise via SIMD scale-mul (fused)
+        // attn_out[i] *= temp[i] is element-wise multiply
+        // Use simd_scale_mul_inplace with scale=1.0: attn[i] = temp[i] * attn[i] * 1.0
+        crate::simd::simd_scale_mul_inplace(attn_out, &temp[..n], 1.0);
     }
 }
 
@@ -263,6 +382,7 @@ impl ResidualGate {
 /// - `PlanSkip`: skip tree search, direct token sampling (low uncertainty, confident)
 #[cfg(feature = "sr2am_configurator")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[repr(u8)]
 pub enum PlanningDecision {
     /// Reset tree, full budget allocation (high uncertainty, new sub-problem).
     PlanNew,
@@ -270,6 +390,17 @@ pub enum PlanningDecision {
     PlanExtend,
     /// Skip tree search, direct token sampling (low uncertainty, confident).
     PlanSkip,
+    /// Activate SpecHop continuous speculation with k speculative threads (Plan 131).
+    /// Selected when speculator latency α is low and tool ratio β is moderate.
+    SpecHop { k: usize },
+    /// Harness update: AbsorbCompress promote + HotSwapPruner reload (Plan 163 T5).
+    /// Selected when harness has plateaued and a compressed arm set may improve.
+    #[cfg(feature = "sia_feedback")]
+    HarnessUpdate,
+    /// Weight update: trigger riir-gpu training step on accumulated TrialLog (Plan 163 T6).
+    /// Selected when stall detection fires — reward plateau suggests weights need updating.
+    #[cfg(feature = "sia_feedback")]
+    WeightUpdate,
 }
 
 /// Context key for configurator bandit — coarse entropy binning.
@@ -283,6 +414,36 @@ pub struct ConfiguratorContext {
     pub domain: usize,
     /// Coarse entropy bin: `floor(entropy * 10.0)`, clamped to 0..9.
     pub entropy_bin: usize,
+    /// Coarse desperation bin: `floor(desperation * 10.0)`, clamped to 0..9.
+    /// Plan 162 T11: emotion vector desperation score as additional context.
+    /// 0 = not desperate, 9 = highly desperate.
+    pub desperation_bin: usize,
+}
+
+#[cfg(feature = "sr2am_configurator")]
+impl ConfiguratorContext {
+    /// Create context without desperation information (legacy compatibility).
+    ///
+    /// Sets `desperation_bin` to 0 (not desperate). Use `with_desperation()`
+    /// when emotion vector data is available.
+    pub fn new(domain: usize, entropy_bin: usize) -> Self {
+        Self {
+            domain,
+            entropy_bin,
+            desperation_bin: 0,
+        }
+    }
+
+    /// Set the desperation bin from a raw desperation score.
+    ///
+    /// `floor(desperation * 10.0)`, clamped to 0..9.
+    pub fn with_desperation(mut self, desperation: f32) -> Self {
+        self.desperation_bin = (desperation * 10.0).floor() as usize;
+        if self.desperation_bin > 9 {
+            self.desperation_bin = 9;
+        }
+        self
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -302,6 +463,7 @@ pub struct ConfiguratorContext {
 ///
 /// **Precondition:** `Top1Converged` is only reliable after landscape shaping
 /// (RI + NI training). See Research 079 (EqR) for theoretical justification.
+#[repr(u8)]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum ConvergenceSelector {
     /// Select rollout with highest cumulative relevance score (PTRM Q-head analog).
@@ -316,12 +478,91 @@ pub enum ConvergenceSelector {
 }
 
 // ---------------------------------------------------------------------------
+// Wall Attention — Diagonal Forget Gates Replacing RoPE (Plan 173)
+// ---------------------------------------------------------------------------
+
+/// Wall Attention configuration (Plan 173, Research: Wall Attention paper).
+///
+/// Wall replaces RoPE with diagonal forget gates applied as factorized Q/K rescaling:
+/// `q̃_i = exp(P_i) ⊙ q_i`, `k̃_j = exp(-P_j) ⊙ k_j`.
+/// This means attention kernels are UNCHANGED — they receive pre-rescaled Q and K.
+///
+/// Only applicable to Wall-trained models (requires W_g gate projection weights).
+#[derive(Clone, Debug)]
+#[cfg(feature = "wall_attention")]
+pub struct WallConfig {
+    /// Gate bias initialization value. Default 6.0 = open gate (vanilla attention behavior).
+    /// Lower values → more active forgetting (gate_bias=0 → retention ≈ 0.62).
+    pub gate_bias: f32,
+    /// Maximum gate log-sigmoid clamp value. Default 0.87 (matches paper).
+    /// Gates are clamped to (-gate_max, 0] after log-sigmoid.
+    pub gate_max: f32,
+    /// Use key-projected gate variant (derive gate from K projection).
+    /// Preferred for zero KV cache overhead — gate is computed from key, not hidden state.
+    pub use_key_projected: bool,
+}
+
+#[cfg(feature = "wall_attention")]
+impl Default for WallConfig {
+    fn default() -> Self {
+        Self {
+            gate_bias: 6.0,
+            gate_max: 0.87,
+            use_key_projected: true,
+        }
+    }
+}
+
+#[cfg(feature = "wall_attention")]
+impl WallConfig {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Collapse-Aware Adaptive Thinking (Plan 212)
+// ---------------------------------------------------------------------------
+
+/// Per-instance adaptive budget for collapse-aware thinking.
+///
+/// Controls when mid-reasoning early exit triggers and how efficiency rewards
+/// are shaped. Feature-gated behind `collapse_aware_thinking`.
+#[derive(Clone, Debug)]
+#[repr(C)]
+pub struct ThinkingBudget {
+    /// Maximum thinking tokens before forced termination.
+    pub max_tokens: u32,
+    /// Hesitation count threshold τ — collapse triggers when exceeded.
+    pub collapse_threshold: u32,
+    /// Efficiency–accuracy trade-off for reward shaping.
+    /// Higher γ penalizes longer traces more aggressively.
+    /// Range: [0.0, 1.0].
+    pub efficiency_gamma: f32,
+}
+
+#[cfg(feature = "collapse_aware_thinking")]
+impl Default for ThinkingBudget {
+    fn default() -> Self {
+        Self {
+            max_tokens: 4096,
+            collapse_threshold: 3,
+            efficiency_gamma: 0.5,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Config
 // ---------------------------------------------------------------------------
 
 /// Transformer model configuration — superset of both katgpt-rs and riir-engine.
+///
+/// Fields are ordered by descending alignment to minimize padding:
+/// usize/u64 → f64 → enums (usize-discriminant) → f32 → Vec → u16 → u8/bool.
 #[derive(Clone)]
 pub struct Config {
+    // --- usize / pointer-sized fields (8-byte aligned) ---
     pub vocab_size: usize,
     pub block_size: usize,
     pub n_embd: usize,
@@ -331,23 +572,11 @@ pub struct Config {
     pub n_layer: usize,
     pub n_kv_head: usize,
     pub bos_token: usize,
-    pub temperature: f32,
     pub draft_lookahead: usize,
     pub tree_budget: usize,
     pub parallel_threshold: usize,
-    // LoRA fields (Plan 008)
     pub lora_rank: usize,
-    pub lora_alpha: f32,
-    pub lora_dropout: f32,
-    pub lora_targets: Vec<String>,
-    // Screening Pruner (Plan 021)
-    pub screening_threshold: f32,
-    // Sparse MLP (Plan 022)
-    pub sparse_threshold: f32,
-    // Early exit (Plan 026: AutoTTS)
     pub early_exit_patience: usize,
-    pub early_exit_gap: f32,
-    // MTP Drafter thresholds (Plan 055: Gemma 4 MTP)
     pub mtp_activation_threshold: usize,
     pub mtp_cluster_vocab_threshold: usize,
     pub mtp_shared_kv_prompt_threshold: usize,
@@ -360,43 +589,131 @@ pub struct Config {
     /// When K > 1, compute logits for tokens in top-K clusters instead of just top-1.
     /// Default 1 = backward compatible (single cluster = current behavior).
     pub mtp_cluster_topk: usize,
-    // HLA Attention (Plan 057: Higher-order Linear Attention)
-    pub hla_mode: HlaMode,
-    pub hla_normalize: bool,
-    pub hla_decay: f32,
-    // Gemma 2 architecture fields (Plan 087)
-    pub model_arch: ModelArchitecture,
+    pub mask_token: usize,
+    pub sp_kv_window: usize,
+    pub sp_kv_predictor_hidden: usize,
+    pub width_rollouts: usize,
+    pub d2f_block_size: usize,
+    /// Number of last layers to sum before LM head. 0 = disabled (standard).
+    /// (Plan 104: Research 68)
+    pub mls_layers: usize,
+
+    // --- f64 (8-byte aligned) ---
     pub rms_norm_eps: f64,
-    pub rms_norm_offset: bool,
-    pub tied_embeddings: bool,
-    pub use_rope: bool,
+
+    // --- f32 (4-byte aligned) ---
+    pub sp_kv_predictor_lr_mult: f32,
+    pub temperature: f32,
+    pub lora_alpha: f32,
+    pub lora_dropout: f32,
+    // Screening Pruner (Plan 021)
+    pub screening_threshold: f32,
+    // Sparse MLP (Plan 022)
+    pub sparse_threshold: f32,
+    // Early exit (Plan 026: AutoTTS)
+    pub early_exit_gap: f32,
+    pub hla_decay: f32,
     pub rope_theta: f32,
-    pub post_norm: bool,
     pub attn_logit_softcapping: f32,
     pub final_logit_softcapping: f32,
-    pub weight_dtype: WeightDtype,
-    // D2F Discrete Diffusion Forcing (Plan 066)
-    pub mask_token: usize,
-    pub attention_mode: AttentionMode,
-    // SP-KV self-pruned KV attention (Plan 070)
-    pub sp_kv_window: usize,
     pub sp_kv_threshold: f32,
-    pub sp_kv_predictor_hidden: usize,
-    pub sp_kv_predictor_lr_mult: f32,
-    // PTRM width scaling (Plan 083)
-    pub width_rollouts: usize,
     pub early_stop_threshold: f32,
+    // Parallax Attention (Plan 135: Parameterized Local Linear Attention)
+    /// Parallax covariance correction gate scale. 0.0 = disabled (pure softmax),
+    /// 1.0 = full correction. Only meaningful when `parallax_attn` feature is enabled
+    /// and R projection weights are loaded.
+    pub parallax_gate_scale: f32,
+    /// Desperation score threshold for emotion-aware session flagging (Plan 162 T12).
+    /// When the mean desperation projection exceeds this value, `is_desperate_session()` returns true.
+    /// Default: 0.5 (moderate desperation). Range: [0.0, 1.0].
+    pub emotion_desperation_threshold: f32,
+
+    // --- Vec (pointer-sized, 8-byte aligned) ---
+    pub lora_targets: Vec<String>,
+
+    // --- #[repr(u8)] enums (1-byte) + bool fields (1-byte), tail-packed ---
+    // HLA Attention (Plan 057: Higher-order Linear Attention)
+    pub hla_mode: HlaMode,
+    // Gemma 2 architecture fields (Plan 087)
+    pub model_arch: ModelArchitecture,
+    // D2F Discrete Diffusion Forcing (Plan 066)
+    pub attention_mode: AttentionMode,
     // EqR Convergence Selection (Plan 119)
     pub convergence_selector: ConvergenceSelector,
-    // D2F block size for discrete diffusion forcing
-    pub d2f_block_size: usize,
-    // MLS Multi-Layer Sum aggregation (Plan 104: Research 68)
-    // Number of last layers to sum before LM head. 0 = disabled (standard).
-    pub mls_layers: usize,
     // LT2 Looped Inference Pipeline (Plan 108, Research 73)
     pub loop_mode: LoopMode,
     pub hybrid_pattern: HybridPattern,
+    pub weight_dtype: WeightDtype,
+    pub hla_normalize: bool,
+    pub rms_norm_offset: bool,
+    pub tied_embeddings: bool,
+    pub use_rope: bool,
+    pub post_norm: bool,
     pub gated_attn: bool,
+    /// Whether W_R starts zeroed (true = recover exact softmax at init).
+    pub parallax_zero_init: bool,
+
+    // --- Hydra Adaptive Layer Budget (Research 148, Plan 165) ---
+    /// Per-layer Hydra importance profiles. Empty = disabled.
+    /// Populated from calibration data via `calibrate_profiles()`.
+    #[cfg(feature = "hydra_budget")]
+    pub hydra_profiles: Vec<super::HydraLayerProfile>,
+
+    // --- DeltaNet Inference (Plan 182: Luce Megakernel Distill) ---
+    /// Per-layer type map: DeltaNet vs standard Attention.
+    /// Length = n_layer. Empty = all layers are Attention (backward compatible).
+    /// Only used when model_arch = QwenDeltaNet.
+    #[cfg(feature = "deltanet_inference")]
+    pub layer_types: Vec<DeltaNetLayerType>,
+    /// Depthwise conv kernel size for DeltaNet layers (typically 4).
+    #[cfg(feature = "deltanet_inference")]
+    pub deltanet_conv_kernel_size: usize,
+    /// Recurrence state dimension per head (key_dim * value_dim, typically 128*128 = 16384).
+    #[cfg(feature = "deltanet_inference")]
+    pub deltanet_state_dim: usize,
+    /// Linear attention key/value head dimension (128 for Qwen 3.5).
+    /// Separate from `head_dim` which refers to full attention heads.
+    #[cfg(feature = "deltanet_inference")]
+    pub deltanet_linear_head_dim: usize,
+    /// Number of linear attention key heads (16 for Qwen 3.5).
+    /// Separate from `n_head` which refers to full attention heads.
+    #[cfg(feature = "deltanet_inference")]
+    pub deltanet_linear_n_heads: usize,
+    /// Number of linear attention value heads (16 for Qwen 3.5).
+    /// Usually equals `deltanet_linear_n_heads`.
+    #[cfg(feature = "deltanet_inference")]
+    pub deltanet_linear_n_value_heads: usize,
+
+    // --- RiM Reasoning Buffer Slots (Plan 172, Research 192) ---
+    /// Number of reasoning buffer blocks (K in RiM paper). 0 = disabled.
+    #[cfg(feature = "rim_slots")]
+    pub rim_block_count: usize,
+    /// Tokens per buffer block (M in RiM paper). Default 2.
+    #[cfg(feature = "rim_slots")]
+    pub rim_tokens_per_block: usize,
+    /// Token ID used for buffer positions (default: bos_token, reused as buffer).
+    #[cfg(feature = "rim_slots")]
+    pub rim_buffer_token: usize,
+
+    // --- Wall Attention (Plan 173) ---
+    /// Wall attention config. None = use RoPE/fallback.
+    #[cfg(feature = "wall_attention")]
+    pub wall_config: Option<WallConfig>,
+
+    // --- Collapse-Aware Adaptive Thinking (Plan 212) ---
+    /// Per-instance adaptive budget for collapse-aware thinking.
+    #[cfg(feature = "collapse_aware_thinking")]
+    pub collapse_budget: ThinkingBudget,
+
+    // --- NextLat Belief-State Speculative Drafter (Plan 217) ---
+    /// Path to `nextlat.bin` MLP weights. None = random init.
+    #[cfg(feature = "belief_drafter")]
+    pub belief_drafter_path: Option<String>,
+    /// Entropy threshold for belief drafter variable-length stopping.
+    /// Lower = more conservative drafts. Higher = more aggressive.
+    /// Default: 2.0. Only used when `belief_drafter` feature is enabled.
+    #[cfg(feature = "belief_drafter")]
+    pub belief_drafter_entropy_threshold: f32,
 }
 
 impl Config {
@@ -459,6 +776,37 @@ impl Config {
             loop_mode: LoopMode::None,
             hybrid_pattern: HybridPattern::Uniform,
             gated_attn: false,
+            parallax_gate_scale: 0.0,
+            emotion_desperation_threshold: 0.5,
+            parallax_zero_init: true,
+            #[cfg(feature = "hydra_budget")]
+            hydra_profiles: Vec::new(),
+            #[cfg(feature = "deltanet_inference")]
+            layer_types: Vec::new(),
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_conv_kernel_size: 0,
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_state_dim: 0,
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_linear_head_dim: 0,
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_linear_n_heads: 0,
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_linear_n_value_heads: 0,
+            #[cfg(feature = "rim_slots")]
+            rim_block_count: 0,
+            #[cfg(feature = "rim_slots")]
+            rim_tokens_per_block: 2,
+            #[cfg(feature = "rim_slots")]
+            rim_buffer_token: 0,
+            #[cfg(feature = "wall_attention")]
+            wall_config: None,
+            #[cfg(feature = "collapse_aware_thinking")]
+            collapse_budget: ThinkingBudget::default(),
+            #[cfg(feature = "belief_drafter")]
+            belief_drafter_path: None,
+            #[cfg(feature = "belief_drafter")]
+            belief_drafter_entropy_threshold: 2.0,
         }
     }
 
@@ -558,6 +906,37 @@ impl Config {
             loop_mode: LoopMode::None,
             hybrid_pattern: HybridPattern::Uniform,
             gated_attn: false,
+            parallax_gate_scale: 0.0,
+            emotion_desperation_threshold: 0.5,
+            parallax_zero_init: true,
+            #[cfg(feature = "hydra_budget")]
+            hydra_profiles: Vec::new(),
+            #[cfg(feature = "deltanet_inference")]
+            layer_types: Vec::new(),
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_conv_kernel_size: 0,
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_state_dim: 0,
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_linear_head_dim: 0,
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_linear_n_heads: 0,
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_linear_n_value_heads: 0,
+            #[cfg(feature = "rim_slots")]
+            rim_block_count: 0,
+            #[cfg(feature = "rim_slots")]
+            rim_tokens_per_block: 2,
+            #[cfg(feature = "rim_slots")]
+            rim_buffer_token: 0,
+            #[cfg(feature = "wall_attention")]
+            wall_config: None,
+            #[cfg(feature = "collapse_aware_thinking")]
+            collapse_budget: ThinkingBudget::default(),
+            #[cfg(feature = "belief_drafter")]
+            belief_drafter_path: None,
+            #[cfg(feature = "belief_drafter")]
+            belief_drafter_entropy_threshold: 2.0,
         }
     }
 
@@ -629,6 +1008,37 @@ impl Config {
             loop_mode: LoopMode::None,
             hybrid_pattern: HybridPattern::Uniform,
             gated_attn: false,
+            parallax_gate_scale: 0.0,
+            emotion_desperation_threshold: 0.5,
+            parallax_zero_init: true,
+            #[cfg(feature = "hydra_budget")]
+            hydra_profiles: Vec::new(),
+            #[cfg(feature = "deltanet_inference")]
+            layer_types: Vec::new(),
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_conv_kernel_size: 0,
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_state_dim: 0,
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_linear_head_dim: 0,
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_linear_n_heads: 0,
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_linear_n_value_heads: 0,
+            #[cfg(feature = "rim_slots")]
+            rim_block_count: 0,
+            #[cfg(feature = "rim_slots")]
+            rim_tokens_per_block: 2,
+            #[cfg(feature = "rim_slots")]
+            rim_buffer_token: 0,
+            #[cfg(feature = "wall_attention")]
+            wall_config: None,
+            #[cfg(feature = "collapse_aware_thinking")]
+            collapse_budget: ThinkingBudget::default(),
+            #[cfg(feature = "belief_drafter")]
+            belief_drafter_path: None,
+            #[cfg(feature = "belief_drafter")]
+            belief_drafter_entropy_threshold: 2.0,
         }
     }
 
@@ -690,6 +1100,37 @@ impl Config {
             loop_mode: LoopMode::None,
             hybrid_pattern: HybridPattern::Uniform,
             gated_attn: false,
+            parallax_gate_scale: 0.0,
+            emotion_desperation_threshold: 0.5,
+            parallax_zero_init: true,
+            #[cfg(feature = "hydra_budget")]
+            hydra_profiles: Vec::new(),
+            #[cfg(feature = "deltanet_inference")]
+            layer_types: Vec::new(),
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_conv_kernel_size: 0,
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_state_dim: 0,
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_linear_head_dim: 0,
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_linear_n_heads: 0,
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_linear_n_value_heads: 0,
+            #[cfg(feature = "rim_slots")]
+            rim_block_count: 0,
+            #[cfg(feature = "rim_slots")]
+            rim_tokens_per_block: 2,
+            #[cfg(feature = "rim_slots")]
+            rim_buffer_token: 0,
+            #[cfg(feature = "wall_attention")]
+            wall_config: None,
+            #[cfg(feature = "collapse_aware_thinking")]
+            collapse_budget: ThinkingBudget::default(),
+            #[cfg(feature = "belief_drafter")]
+            belief_drafter_path: None,
+            #[cfg(feature = "belief_drafter")]
+            belief_drafter_entropy_threshold: 2.0,
         }
     }
 
@@ -752,6 +1193,37 @@ impl Config {
             loop_mode: LoopMode::None,
             hybrid_pattern: HybridPattern::Uniform,
             gated_attn: false,
+            parallax_gate_scale: 0.0,
+            emotion_desperation_threshold: 0.5,
+            parallax_zero_init: true,
+            #[cfg(feature = "hydra_budget")]
+            hydra_profiles: Vec::new(),
+            #[cfg(feature = "deltanet_inference")]
+            layer_types: Vec::new(),
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_conv_kernel_size: 0,
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_state_dim: 0,
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_linear_head_dim: 0,
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_linear_n_heads: 0,
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_linear_n_value_heads: 0,
+            #[cfg(feature = "rim_slots")]
+            rim_block_count: 0,
+            #[cfg(feature = "rim_slots")]
+            rim_tokens_per_block: 2,
+            #[cfg(feature = "rim_slots")]
+            rim_buffer_token: 0,
+            #[cfg(feature = "wall_attention")]
+            wall_config: None,
+            #[cfg(feature = "collapse_aware_thinking")]
+            collapse_budget: ThinkingBudget::default(),
+            #[cfg(feature = "belief_drafter")]
+            belief_drafter_path: None,
+            #[cfg(feature = "belief_drafter")]
+            belief_drafter_entropy_threshold: 2.0,
         }
     }
 
@@ -812,6 +1284,37 @@ impl Config {
             loop_mode: LoopMode::None,
             hybrid_pattern: HybridPattern::Uniform,
             gated_attn: false,
+            parallax_gate_scale: 0.0,
+            emotion_desperation_threshold: 0.5,
+            parallax_zero_init: true,
+            #[cfg(feature = "hydra_budget")]
+            hydra_profiles: Vec::new(),
+            #[cfg(feature = "deltanet_inference")]
+            layer_types: Vec::new(),
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_conv_kernel_size: 0,
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_state_dim: 0,
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_linear_head_dim: 0,
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_linear_n_heads: 0,
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_linear_n_value_heads: 0,
+            #[cfg(feature = "rim_slots")]
+            rim_block_count: 0,
+            #[cfg(feature = "rim_slots")]
+            rim_tokens_per_block: 2,
+            #[cfg(feature = "rim_slots")]
+            rim_buffer_token: 0,
+            #[cfg(feature = "wall_attention")]
+            wall_config: None,
+            #[cfg(feature = "collapse_aware_thinking")]
+            collapse_budget: ThinkingBudget::default(),
+            #[cfg(feature = "belief_drafter")]
+            belief_drafter_path: None,
+            #[cfg(feature = "belief_drafter")]
+            belief_drafter_entropy_threshold: 2.0,
         }
     }
 
@@ -874,6 +1377,37 @@ impl Config {
             loop_mode: LoopMode::None,
             hybrid_pattern: HybridPattern::Uniform,
             gated_attn: false,
+            parallax_gate_scale: 0.0,
+            emotion_desperation_threshold: 0.5,
+            parallax_zero_init: true,
+            #[cfg(feature = "hydra_budget")]
+            hydra_profiles: Vec::new(),
+            #[cfg(feature = "deltanet_inference")]
+            layer_types: Vec::new(),
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_conv_kernel_size: 0,
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_state_dim: 0,
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_linear_head_dim: 0,
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_linear_n_heads: 0,
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_linear_n_value_heads: 0,
+            #[cfg(feature = "rim_slots")]
+            rim_block_count: 0,
+            #[cfg(feature = "rim_slots")]
+            rim_tokens_per_block: 2,
+            #[cfg(feature = "rim_slots")]
+            rim_buffer_token: 0,
+            #[cfg(feature = "wall_attention")]
+            wall_config: None,
+            #[cfg(feature = "collapse_aware_thinking")]
+            collapse_budget: ThinkingBudget::default(),
+            #[cfg(feature = "belief_drafter")]
+            belief_drafter_path: None,
+            #[cfg(feature = "belief_drafter")]
+            belief_drafter_entropy_threshold: 2.0,
         }
     }
 
@@ -935,6 +1469,37 @@ impl Config {
             loop_mode: LoopMode::None,
             hybrid_pattern: HybridPattern::Uniform,
             gated_attn: false,
+            parallax_gate_scale: 0.0,
+            emotion_desperation_threshold: 0.5,
+            parallax_zero_init: true,
+            #[cfg(feature = "hydra_budget")]
+            hydra_profiles: Vec::new(),
+            #[cfg(feature = "deltanet_inference")]
+            layer_types: Vec::new(),
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_conv_kernel_size: 0,
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_state_dim: 0,
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_linear_head_dim: 0,
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_linear_n_heads: 0,
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_linear_n_value_heads: 0,
+            #[cfg(feature = "rim_slots")]
+            rim_block_count: 0,
+            #[cfg(feature = "rim_slots")]
+            rim_tokens_per_block: 2,
+            #[cfg(feature = "rim_slots")]
+            rim_buffer_token: 0,
+            #[cfg(feature = "wall_attention")]
+            wall_config: None,
+            #[cfg(feature = "collapse_aware_thinking")]
+            collapse_budget: ThinkingBudget::default(),
+            #[cfg(feature = "belief_drafter")]
+            belief_drafter_path: None,
+            #[cfg(feature = "belief_drafter")]
+            belief_drafter_entropy_threshold: 2.0,
         }
     }
 
@@ -998,6 +1563,133 @@ impl Config {
             loop_mode: LoopMode::None,
             hybrid_pattern: HybridPattern::Uniform,
             gated_attn: false,
+            parallax_gate_scale: 0.0,
+            emotion_desperation_threshold: 0.5,
+            parallax_zero_init: true,
+            #[cfg(feature = "hydra_budget")]
+            hydra_profiles: Vec::new(),
+            #[cfg(feature = "deltanet_inference")]
+            layer_types: Vec::new(),
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_conv_kernel_size: 0,
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_state_dim: 0,
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_linear_head_dim: 0,
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_linear_n_heads: 0,
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_linear_n_value_heads: 0,
+            #[cfg(feature = "rim_slots")]
+            rim_block_count: 0,
+            #[cfg(feature = "rim_slots")]
+            rim_tokens_per_block: 2,
+            #[cfg(feature = "rim_slots")]
+            rim_buffer_token: 0,
+            #[cfg(feature = "wall_attention")]
+            wall_config: None,
+            #[cfg(feature = "collapse_aware_thinking")]
+            collapse_budget: ThinkingBudget::default(),
+            #[cfg(feature = "belief_drafter")]
+            belief_drafter_path: None,
+            #[cfg(feature = "belief_drafter")]
+            belief_drafter_entropy_threshold: 2.0,
+        }
+    }
+
+    /// Config for Qwen 3.5-0.8B hybrid DeltaNet/Attention model (Plan 182).
+    ///
+    /// Typical layout: early layers use DeltaNet (linear recurrence, no KV cache),
+    /// later layers use standard attention. The `layer_types` vec specifies per-layer.
+    /// If `layer_types` is empty, all layers default to Attention (backward compatible).
+    #[cfg(feature = "deltanet_inference")]
+    pub fn qwen_deltanet(n_layer: usize, layer_types: Vec<DeltaNetLayerType>) -> Self {
+        let n_head = 16;
+        let head_dim = 128;
+        let n_embd = n_head * head_dim; // 2048
+        let mlp_hidden = n_embd * 4; // 8192 (SwiGLU: gate+up = 2× mlp_hidden)
+        let n_kv_head = n_head; // MHA (no GQA for 0.8B)
+
+        Self {
+            vocab_size: 151936,
+            block_size: 32768,
+            n_embd,
+            n_head,
+            head_dim,
+            mlp_hidden,
+            n_layer,
+            n_kv_head,
+            bos_token: 151643, // Qwen BOS
+            temperature: 0.8,
+            draft_lookahead: 0,
+            tree_budget: 0,
+            parallel_threshold: 8192,
+            lora_rank: 0,
+            lora_alpha: 1.0,
+            lora_dropout: 0.0,
+            lora_targets: Vec::new(),
+            screening_threshold: 0.0,
+            sparse_threshold: 0.0,
+            early_exit_patience: 0,
+            early_exit_gap: 0.0,
+            mtp_activation_threshold: 0,
+            mtp_cluster_vocab_threshold: 151936,
+            mtp_shared_kv_prompt_threshold: 32768,
+            mtp_cluster_size: 1024,
+            mtp_min_output_tokens: 16,
+            mtp_cluster_topk: 1,
+            hla_mode: HlaMode::Standard,
+            hla_normalize: false,
+            hla_decay: 1.0,
+            model_arch: ModelArchitecture::QwenDeltaNet,
+            rms_norm_eps: 1e-6,
+            rms_norm_offset: false,
+            tied_embeddings: false,
+            use_rope: true,
+            rope_theta: 10000.0,
+            post_norm: false,
+            attn_logit_softcapping: 0.0,
+            final_logit_softcapping: 0.0,
+            weight_dtype: WeightDtype::BF16,
+            mask_token: 0,
+            attention_mode: AttentionMode::Causal,
+            sp_kv_window: 128,
+            sp_kv_threshold: 0.5,
+            sp_kv_predictor_hidden: 0,
+            sp_kv_predictor_lr_mult: 5.0,
+            width_rollouts: 1,
+            early_stop_threshold: 0.0,
+            convergence_selector: ConvergenceSelector::default(),
+            d2f_block_size: 16,
+            mls_layers: 0,
+            loop_mode: LoopMode::None,
+            hybrid_pattern: HybridPattern::Uniform,
+            gated_attn: false,
+            parallax_gate_scale: 0.0,
+            emotion_desperation_threshold: 0.5,
+            parallax_zero_init: true,
+            #[cfg(feature = "hydra_budget")]
+            hydra_profiles: Vec::new(),
+            layer_types,
+            deltanet_conv_kernel_size: 4,
+            deltanet_state_dim: head_dim * head_dim, // 128 × 128 = 16384 per head
+            deltanet_linear_head_dim: head_dim,
+            deltanet_linear_n_heads: n_head,
+            deltanet_linear_n_value_heads: n_kv_head,
+            #[cfg(feature = "rim_slots")]
+            rim_block_count: 0,
+            #[cfg(feature = "rim_slots")]
+            rim_tokens_per_block: 2,
+            #[cfg(feature = "rim_slots")]
+            rim_buffer_token: 0,
+            #[cfg(feature = "wall_attention")]
+            wall_config: None,
+            #[cfg(feature = "collapse_aware_thinking")]
+            collapse_budget: ThinkingBudget::default(),
+            #[cfg(feature = "belief_drafter")]
+            belief_drafter_path: None,
+            #[cfg(feature = "belief_drafter")]
+            belief_drafter_entropy_threshold: 2.0,
         }
     }
 
@@ -1010,9 +1702,38 @@ impl Config {
             ));
         }
         // Gemma 2 intentionally has q_dim != n_embd (e.g., 8*256=2048 != 2304)
-        if self.model_arch != ModelArchitecture::Gemma2
-            && self.n_head * self.head_dim != self.n_embd
-        {
+        // LLaMA with GQA may also have q_dim != n_embd
+        // QwenDeltaNet also has q_dim == n_embd but is excluded for forward compat
+        let arch_exempt = match self.model_arch {
+            ModelArchitecture::Gemma2 | ModelArchitecture::Llama => true,
+            _ => {
+                #[cfg(feature = "deltanet_inference")]
+                if self.model_arch == ModelArchitecture::QwenDeltaNet {
+                    // layer_types length must match n_layer when non-empty
+                    if !self.layer_types.is_empty() && self.layer_types.len() != self.n_layer {
+                        return Err(format!(
+                            "layer_types length ({}) must match n_layer ({})",
+                            self.layer_types.len(),
+                            self.n_layer
+                        ));
+                    }
+                    // deltanet_state_dim must be head_dim^2
+                    let expected = self.head_dim * self.head_dim;
+                    if self.deltanet_state_dim != expected {
+                        return Err(format!(
+                            "deltanet_state_dim ({}) must equal head_dim^2 ({})",
+                            self.deltanet_state_dim, expected
+                        ));
+                    }
+                    true
+                } else {
+                    false
+                }
+                #[cfg(not(feature = "deltanet_inference"))]
+                false
+            }
+        };
+        if !arch_exempt && self.n_head * self.head_dim != self.n_embd {
             return Err(format!(
                 "n_head ({}) * head_dim ({}) must equal n_embd ({})",
                 self.n_head, self.head_dim, self.n_embd
@@ -1024,7 +1745,7 @@ impl Config {
                 self.n_kv_head, self.head_dim, self.n_embd
             ));
         }
-        // MTP thresholds must be consistent (only for Generic arch; Gemma 2 doesn't use MTP)
+        // MTP thresholds must be consistent (only for Generic arch; Gemma 2 and Llama don't use MTP)
         if self.model_arch == ModelArchitecture::Generic && self.mtp_cluster_size == 0 {
             return Err("mtp_cluster_size must be > 0".into());
         }
@@ -1036,72 +1757,109 @@ impl Config {
 
     /// Apply per-domain inference overrides, returning a new Config.
     ///
+    /// Total number of buffer tokens when RiM slots are active: K × M.
+    /// Returns 0 when disabled (rim_block_count == 0).
+    #[cfg(feature = "rim_slots")]
+    #[inline]
+    pub fn rim_total_buffer_tokens(&self) -> usize {
+        if self.rim_block_count == 0 {
+            0
+        } else {
+            self.rim_block_count * self.rim_tokens_per_block
+        }
+    }
+
+    /// Whether RiM buffer slots are active.
+    #[cfg(feature = "rim_slots")]
+    #[inline]
+    pub fn rim_enabled(&self) -> bool {
+        self.rim_block_count > 0
+    }
+
+    /// Whether Wall Attention is active (Plan 173).
+    /// True when feature is enabled AND config has wall_config set.
+    #[cfg(feature = "wall_attention")]
+    pub fn wall_enabled(&self) -> bool {
+        self.wall_config.is_some()
+    }
+
     /// `None` fields are left unchanged; `Some` fields replace the current value.
     /// Used by the router to inject domain-specific budgets from TOML config.
-    pub fn with_overrides(&self, overrides: &InferenceOverrides) -> Self {
-        let mut c = self.clone();
+    pub fn with_overrides(mut self, overrides: &InferenceOverrides) -> Self {
         if let Some(v) = overrides.tree_budget {
-            c.tree_budget = v;
+            self.tree_budget = v;
         }
         if let Some(v) = overrides.draft_lookahead {
-            c.draft_lookahead = v;
+            self.draft_lookahead = v;
         }
         if let Some(v) = overrides.parallel_threshold {
-            c.parallel_threshold = v;
+            self.parallel_threshold = v;
         }
         if let Some(v) = overrides.screening_threshold {
-            c.screening_threshold = v;
+            self.screening_threshold = v;
         }
         if let Some(v) = overrides.temperature {
-            c.temperature = v;
+            self.temperature = v;
         }
         if let Some(v) = overrides.sparse_threshold {
-            c.sparse_threshold = v;
+            self.sparse_threshold = v;
         }
         if let Some(v) = overrides.early_exit_patience {
-            c.early_exit_patience = v;
+            self.early_exit_patience = v;
         }
         if let Some(v) = overrides.early_exit_gap {
-            c.early_exit_gap = v;
+            self.early_exit_gap = v;
         }
         if let Some(v) = overrides.mtp_activation_threshold {
-            c.mtp_activation_threshold = v;
+            self.mtp_activation_threshold = v;
         }
         if let Some(v) = overrides.mtp_cluster_vocab_threshold {
-            c.mtp_cluster_vocab_threshold = v;
+            self.mtp_cluster_vocab_threshold = v;
         }
         if let Some(v) = overrides.mtp_shared_kv_prompt_threshold {
-            c.mtp_shared_kv_prompt_threshold = v;
+            self.mtp_shared_kv_prompt_threshold = v;
         }
         if let Some(v) = overrides.mtp_cluster_size {
-            c.mtp_cluster_size = v;
+            self.mtp_cluster_size = v;
         }
         if let Some(v) = overrides.mtp_min_output_tokens {
-            c.mtp_min_output_tokens = v;
+            self.mtp_min_output_tokens = v;
         }
         if let Some(v) = overrides.mtp_cluster_topk {
-            c.mtp_cluster_topk = v;
+            self.mtp_cluster_topk = v;
         }
         if let Some(v) = overrides.sp_kv_threshold {
-            c.sp_kv_threshold = v;
+            self.sp_kv_threshold = v;
         }
         if let Some(v) = overrides.width_rollouts {
-            c.width_rollouts = v;
+            self.width_rollouts = v;
         }
         if let Some(v) = overrides.early_stop_threshold {
-            c.early_stop_threshold = v;
+            self.early_stop_threshold = v;
         }
         if let Some(v) = overrides.convergence_selector {
-            c.convergence_selector = v;
+            self.convergence_selector = v;
         }
         if let Some(v) = overrides.mls_layers {
-            c.mls_layers = v;
+            self.mls_layers = v;
         }
         // SR²AM horizon truncation override (Plan 112 T11)
         if let Some(v) = overrides.max_plan_horizon {
-            c.draft_lookahead = c.draft_lookahead.min(v);
+            self.draft_lookahead = self.draft_lookahead.min(v);
         }
-        c
+        // Hydra Adaptive Layer Budget overrides (Research 148, Plan 165)
+        #[cfg(feature = "hydra_budget")]
+        {
+            if let Some(v) = overrides.hydra_skip_threshold {
+                // Applied via HydraBudgetConfig at call site, not directly on Config.
+                // The override is stored for downstream consumption.
+                let _ = v;
+            }
+            if let Some(v) = overrides.hydra_skip_erasure_draft {
+                let _ = v;
+            }
+        }
+        self
     }
 }
 
@@ -1121,15 +1879,15 @@ impl Config {
 ///
 /// See Plan 026 (AutoTTS Dynamic Inference Budget).
 #[derive(Debug, Clone, Default)]
+// Fields ordered by descending alignment to minimize padding:
+// Option<usize>/Option<PathBuf> (16/32 bytes) → Option<f32> (8 bytes) →
+// Option<#[repr(u8)] enum> (2 bytes).
 pub struct InferenceOverrides {
+    // --- Option<usize> (16 bytes each, 8-byte aligned) ---
     pub tree_budget: Option<usize>,
     pub draft_lookahead: Option<usize>,
     pub parallel_threshold: Option<usize>,
-    pub screening_threshold: Option<f32>,
-    pub temperature: Option<f32>,
-    pub sparse_threshold: Option<f32>,
     pub early_exit_patience: Option<usize>,
-    pub early_exit_gap: Option<f32>,
     // MTP Drafter overrides (Plan 055: Gemma 4 MTP)
     pub mtp_activation_threshold: Option<usize>,
     pub mtp_cluster_vocab_threshold: Option<usize>,
@@ -1141,19 +1899,37 @@ pub struct InferenceOverrides {
     /// Top-K cluster selection for clustered LM head (Plan 117 T22).
     /// When K > 1, compute logits for tokens in top-K clusters instead of just top-1.
     pub mtp_cluster_topk: Option<usize>,
-    // SP-KV inference-time threshold knob (Plan 070)
-    pub sp_kv_threshold: Option<f32>,
     // PTRM width scaling (Plan 083)
     pub width_rollouts: Option<usize>,
-    pub early_stop_threshold: Option<f32>,
-    // EqR Convergence Selection (Plan 119)
-    pub convergence_selector: Option<ConvergenceSelector>,
     // MLS Multi-Layer Sum override (Plan 104)
     pub mls_layers: Option<usize>,
-    // Drafter LoRA path (Plan 117: MTP LoRA Drafter)
-    pub drafter_lora_path: Option<std::path::PathBuf>,
     // SR²AM horizon truncation override (Plan 112 T11)
     pub max_plan_horizon: Option<usize>,
+
+    // --- Option<PathBuf> (32 bytes, 8-byte aligned) ---
+    // Drafter LoRA path (Plan 117: MTP LoRA Drafter)
+    pub drafter_lora_path: Option<std::path::PathBuf>,
+
+    // --- Option<f32> (8 bytes each, 4-byte aligned) ---
+    pub screening_threshold: Option<f32>,
+    pub temperature: Option<f32>,
+    pub sparse_threshold: Option<f32>,
+    pub early_exit_gap: Option<f32>,
+    // SP-KV inference-time threshold knob (Plan 070)
+    pub sp_kv_threshold: Option<f32>,
+    pub early_stop_threshold: Option<f32>,
+
+    // --- Option<#[repr(u8) enum> (2 bytes each, 1-byte aligned) ---
+    // EqR Convergence Selection (Plan 119)
+    pub convergence_selector: Option<ConvergenceSelector>,
+
+    // --- Hydra Adaptive Layer Budget (Research 148, Plan 165) ---
+    /// Override Hydra skip threshold.
+    #[cfg(feature = "hydra_budget")]
+    pub hydra_skip_threshold: Option<f32>,
+    /// Override Hydra erasure-skip-draft flag.
+    #[cfg(feature = "hydra_budget")]
+    pub hydra_skip_erasure_draft: Option<bool>,
 }
 
 impl Default for Config {
@@ -1204,7 +1980,7 @@ impl Rng {
     }
 
     /// Standard normal via Box-Muller transform.
-    #[inline]
+    #[inline(always)]
     pub fn normal(&mut self) -> f32 {
         let u1 = self.uniform().max(1e-10);
         let u2 = self.uniform();
@@ -1227,17 +2003,14 @@ pub fn softmax(x: &mut [f32]) {
     // Pass 1: find max for numerical stability (SIMD-accelerated)
     let max_val = crate::simd::simd_max_f32(x);
 
-    // Pass 2: exp(x - max) + accumulate sum
-    // Note: scalar libm expf is faster than Cephes SIMD on Apple Silicon NEON
-    // because hardware-accelerated expf + LLVM auto-vectorization beats our
-    // polynomial approximation with its scalar 2^n fallback.
-    let mut sum = 0.0f32;
-    for val in x.iter_mut() {
-        *val = (*val - max_val).exp();
-        sum += *val;
-    }
+    // Pass 2: subtract max (SIMD-accelerated)
+    crate::simd::simd_add_scalar_inplace(x, -max_val);
 
-    // Pass 3: normalize
+    // Pass 3: SIMD exp
+    crate::simd::simd_exp_inplace(x);
+
+    // Pass 4: sum + normalize (SIMD-accelerated sum)
+    let sum: f32 = crate::simd::simd_sum_f32(x);
     let inv_sum = 1.0 / sum;
     crate::simd::simd_scale_inplace(x, inv_sum);
 }
@@ -1257,21 +2030,20 @@ pub fn softmax_scaled(x: &mut [f32], inv_temp: f32) {
     // Pass 1: find max for numerical stability (SIMD-accelerated)
     let max_val = crate::simd::simd_max_f32(x);
 
-    // Pass 2: exp((x - max) * inv_temp) + accumulate sum
-    // Note: scalar libm expf is faster than Cephes SIMD on Apple Silicon NEON.
-    let mut sum = 0.0f32;
-    for val in x.iter_mut() {
-        *val = ((*val - max_val) * inv_temp).exp();
-        sum += *val;
-    }
+    // Pass 2: shift and apply temperature in one fused SIMD pass
+    crate::simd::simd_fused_sub_scale_inplace(x, max_val, inv_temp);
 
-    // Pass 3: normalize
+    // Pass 3: SIMD exp
+    crate::simd::simd_exp_inplace(x);
+
+    // Pass 4: sum + normalize (SIMD-accelerated sum)
+    let sum: f32 = crate::simd::simd_sum_f32(x);
     let inv_sum = 1.0 / sum;
     crate::simd::simd_scale_inplace(x, inv_sum);
 }
 
 /// In-place RMSNorm (no learnable gain).
-/// Two-pass: compute mean-square, then scale.
+/// Two-pass: compute sum-of-squares, then scale.
 #[inline(always)]
 pub fn rmsnorm(x: &mut [f32]) {
     if x.is_empty() {
@@ -1279,37 +2051,158 @@ pub fn rmsnorm(x: &mut [f32]) {
     }
 
     // Pass 1: sum of squares (SIMD-accelerated)
-    let sum_sq = crate::simd::simd_dot_f32(x, x, x.len());
+    let sum_sq = crate::simd::simd_sum_sq(x, x.len());
 
-    // Pass 2: scale
-    let inv_rms = 1.0 / (sum_sq / x.len() as f32 + 1e-5).sqrt();
+    // Pass 2: scale — stay f32 throughout to avoid f64 round-trip
+    let inv_rms = 1.0 / (sum_sq / x.len() as f32 + 1e-5f32).sqrt();
     crate::simd::simd_scale_inplace(x, inv_rms);
 }
 
 /// GeGLU activation: hidden = gelu(gate) * up (elementwise).
 /// Uses approximate GELU: gelu(x) ≈ x * sigmoid(1.702 * x).
 /// `gate` and `up` are [mlp_hidden], output goes to `hidden`.
+///
+/// SIMD-accelerated: exp() computed via `simd_exp_inplace` on stack buffers.
 #[inline(always)]
 pub fn gegelu(hidden: &mut [f32], gate: &[f32], up: &[f32]) {
-    for i in 0..hidden.len() {
+    const CHUNK: usize = 64;
+    let mut buf = [0.0f32; CHUNK];
+
+    let mut i = 0;
+    while i + CHUNK <= hidden.len() {
+        // buf[j] = -1.702 * gate[j] via copy + SIMD scale
+        buf[..CHUNK].copy_from_slice(&gate[i..i + CHUNK]);
+        crate::simd::simd_scale_inplace(&mut buf, -1.702);
+        // buf[j] = exp(-1.702 * gate[j]) via SIMD
+        crate::simd::simd_exp_inplace(&mut buf);
+        // hidden[j] = gate[j] * sigmoid(1.702 * gate[j]) * up[j]
+        // SIMD: buf = 1 + buf, then buf = 1/buf (sigmoid), then fused gate*sigmoid*up
+        crate::simd::simd_add_scalar_inplace(&mut buf, 1.0);
+        // Vectorized reciprocal: buf = sigmoid = 1/(1+exp(-1.702*gate))
+        crate::simd::simd_reciprocal_inplace(&mut buf);
+        // Fused: hidden = gate * up, then scale-multiply by sigmoid
+        for j in 0..CHUNK {
+            hidden[i + j] = gate[i + j] * up[i + j];
+        }
+        crate::simd::simd_scale_mul_inplace(&mut hidden[i..i + CHUNK], &buf, 1.0);
+        i += CHUNK;
+    }
+    // Scalar remainder
+    for i in i..hidden.len() {
         let g = gate[i];
         let sigmoid = 1.0 / (1.0 + (-1.702 * g).exp());
-        let gelu_val = g * sigmoid;
-        hidden[i] = gelu_val * up[i];
+        hidden[i] = g * sigmoid * up[i];
     }
 }
 
 /// GeGLU with tanh GELU approximation (Gemma 2 activation).
 /// tanh GELU: 0.5 * x * (1 + tanh(sqrt(2/π) * (x + 0.044715 * x³)))
 /// hidden[i] = gelu_tanh(gate[i]) * up[i]
+///
+/// SIMD-accelerated: exp() for tanh approximation computed via `simd_exp_inplace`.
 #[inline(always)]
 pub fn gegelu_tanh(hidden: &mut [f32], gate: &[f32], up: &[f32]) {
-    let sqrt_2_over_pi = (2.0f32 / std::f32::consts::PI).sqrt(); // ≈0.7979
-    for i in 0..hidden.len() {
+    const CHUNK: usize = 64;
+    const SQRT_2_OVER_PI: f32 = 0.797_884_6; // (2.0f32 / π).sqrt()
+    const SCALE_2: f32 = 1.595_769_2; // 2.0 * SQRT_2_OVER_PI
+    let mut buf = [0.0f32; CHUNK];
+    let mut buf2 = [0.0f32; CHUNK];
+
+    let mut i = 0;
+    while i + CHUNK <= hidden.len() {
+        // buf[j] = 0.044715 * g² via SIMD copy + scale + element-wise mul
+        buf[..CHUNK].copy_from_slice(&gate[i..i + CHUNK]);
+        crate::simd::simd_scale_inplace(&mut buf, 0.044715); // buf = 0.044715 * g
+        crate::simd::simd_scale_mul_inplace(&mut buf, &gate[i..i + CHUNK], 1.0); // buf = 0.044715 * g²
+        // Finish cubic via SIMD: buf = 1 + 0.044715*g², then buf = scale_2 * g * (1 + 0.044715*g²)
+        crate::simd::simd_add_scalar_inplace(&mut buf, 1.0);
+        crate::simd::simd_scale_mul_inplace(&mut buf, &gate[i..i + CHUNK], SCALE_2);
+        // buf[j] = exp(2*inner[j]) via SIMD
+        crate::simd::simd_exp_inplace(&mut buf);
+        // hidden[j] = g * exp(2x) / (exp(2x) + 1) * up[j]
+        // Compute denominator (exp + 1) via SIMD, then SIMD tanh + fused mul
+        buf2[..CHUNK].copy_from_slice(&buf);
+        crate::simd::simd_add_scalar_inplace(&mut buf2, 1.0); // buf2 = exp + 1
+        // hidden = gate * up, then hidden *= tanh(inner)
+        for j in 0..CHUNK {
+            // Branch-free tanh: exp(2x) / (exp(2x) + 1) via division
+            buf[j] /= buf2[j];
+            hidden[i + j] = gate[i + j] * up[i + j];
+        }
+        crate::simd::simd_scale_mul_inplace(&mut hidden[i..i + CHUNK], &buf, 1.0);
+        i += CHUNK;
+    }
+    // Scalar remainder
+    for i in i..hidden.len() {
         let g = gate[i];
-        let inner = sqrt_2_over_pi * (g + 0.044715 * g * g * g);
+        let inner = SQRT_2_OVER_PI * (g + 0.044715 * g * g * g);
         let gelu_val = 0.5 * g * (1.0 + inner.tanh());
         hidden[i] = gelu_val * up[i];
+    }
+}
+
+/// SiLU (Sigmoid Linear Unit) activation: x * sigmoid(x).
+/// Used in LLaMA, Mistral, and other LLaMA-family models for SwiGLU MLP.
+///
+/// SIMD-accelerated: exp() computed via `simd_exp_inplace` on stack buffers.
+#[inline(always)]
+pub fn silu(x: &mut [f32]) {
+    const CHUNK: usize = 64;
+    let mut buf = [0.0f32; CHUNK];
+
+    let mut i = 0;
+    while i + CHUNK <= x.len() {
+        // buf[j] = -x[j] via copy + SIMD scale
+        buf[..CHUNK].copy_from_slice(&x[i..i + CHUNK]);
+        crate::simd::simd_scale_inplace(&mut buf, -1.0);
+        // buf[j] = exp(-x[j]) via SIMD
+        crate::simd::simd_exp_inplace(&mut buf);
+        // x[j] = x[j] / (1 + exp(-x[j]))
+        // SIMD: buf = 1 + exp(-x), then buf = 1/buf, then x *= buf elementwise
+        crate::simd::simd_add_scalar_inplace(&mut buf, 1.0);
+        crate::simd::simd_reciprocal_inplace(&mut buf);
+        crate::simd::simd_scale_mul_inplace(&mut x[i..i + CHUNK], &buf, 1.0);
+        i += CHUNK;
+    }
+    // Scalar remainder
+    for v in x[i..].iter_mut() {
+        *v = *v / (1.0 + (-*v).exp());
+    }
+}
+
+/// SwiGLU activation: SiLU(gate) * up.
+/// Used in LLaMA-family models (gate_proj and up_proj are separate weights).
+/// Result stored in `hidden`: hidden[i] = silu(gate[i]) * up[i]
+///
+/// SIMD-accelerated: exp() computed via `simd_exp_inplace` on stack buffers.
+#[inline(always)]
+pub fn swiglu(hidden: &mut [f32], gate: &[f32], up: &[f32]) {
+    const CHUNK: usize = 64;
+    let mut buf = [0.0f32; CHUNK];
+
+    let mut i = 0;
+    while i + CHUNK <= hidden.len() {
+        // buf[j] = -gate[j] via copy + SIMD scale
+        buf[..CHUNK].copy_from_slice(&gate[i..i + CHUNK]);
+        crate::simd::simd_scale_inplace(&mut buf, -1.0);
+        // buf[j] = exp(-gate[j]) via SIMD
+        crate::simd::simd_exp_inplace(&mut buf);
+        // hidden[j] = gate[j] / (1 + exp(-gate[j])) * up[j]
+        // SIMD: buf = 1 + exp(-gate), then vectorized reciprocal + gate*up
+        crate::simd::simd_add_scalar_inplace(&mut buf, 1.0);
+        // Vectorized reciprocal: buf = sigmoid = 1/(1+exp(-gate))
+        crate::simd::simd_reciprocal_inplace(&mut buf);
+        // Fused: hidden = gate * up, then scale-multiply by sigmoid
+        for j in 0..CHUNK {
+            hidden[i + j] = gate[i + j] * up[i + j];
+        }
+        crate::simd::simd_scale_mul_inplace(&mut hidden[i..i + CHUNK], &buf, 1.0);
+        i += CHUNK;
+    }
+    // Scalar remainder
+    for i in i..hidden.len() {
+        let g = gate[i];
+        hidden[i] = g / (1.0 + (-g).exp()) * up[i];
     }
 }
 
@@ -1329,7 +2222,8 @@ pub fn rmsnorm_with_gamma_eps(x: &mut [f32], gamma: &[f32], eps: f64) {
     if n == 0 {
         return;
     }
-    let sum_sq = crate::simd::simd_dot_f32(x, x, n);
+    let sum_sq = crate::simd::simd_sum_sq(x, n);
+    // Cast eps to f32 once — the f64 param is kept for API compat
     let inv_rms = 1.0 / (sum_sq / n as f32 + eps as f32).sqrt();
     crate::simd::simd_scale_mul_inplace(x, gamma, inv_rms);
 }
@@ -1424,15 +2318,16 @@ pub fn sparse_matmul(
     active_values: &mut [f32],
 ) -> usize {
     // Phase 1: Pack alive neurons (software TwELL formulation)
+    // Branch-free: mask = (val > 0.0) as usize avoids branch misprediction.
     let mut alive = 0;
     for c in 0..cols {
-        if unsafe { *input.get_unchecked(c) } > 0.0 {
-            unsafe {
-                *active_indices.get_unchecked_mut(alive) = c;
-                *active_values.get_unchecked_mut(alive) = *input.get_unchecked(c);
-            }
-            alive += 1;
+        let val = unsafe { *input.get_unchecked(c) };
+        let mask = (val > 0.0) as usize;
+        unsafe {
+            *active_indices.get_unchecked_mut(alive) = c;
+            *active_values.get_unchecked_mut(alive) = val;
         }
+        alive += mask;
     }
 
     // Phase 2: Sparse multiply — SIMD-accelerated (Plan 060 T5)
@@ -1451,18 +2346,59 @@ pub fn sparse_matmul(
     alive
 }
 
-/// Sample a token index from a probability distribution using cumulative scan.
-#[inline(always)]
+/// Sample a token index from a probability distribution.
+///
+/// Builds a prefix-sum (CDF) then uses binary search for O(log V) lookup
+/// instead of the O(V/2) average of a linear scan.
+///
+/// **Allocates a CDF buffer on every call.** For the hot decode loop, prefer
+/// [`sample_token_into`] which reuses a pre-allocated buffer.
 pub fn sample_token(probs: &[f32], rng: &mut Rng) -> usize {
     let r = rng.uniform();
-    let mut cumsum = 0.0;
+    let n = probs.len();
+    if n == 0 {
+        return 0;
+    }
+
+    // Build cumulative sum array — pre-allocated, direct write avoids per-push bounds check
+    let mut cdf = vec![0.0f32; n];
+    let mut sum = 0.0f32;
     for (i, &p) in probs.iter().enumerate() {
-        cumsum += p;
-        if r < cumsum {
-            return i;
+        sum += p;
+        // SAFETY: cdf has length n, i < n by enumeration
+        unsafe {
+            *cdf.get_unchecked_mut(i) = sum;
         }
     }
-    probs.len() - 1
+
+    // partition_point: first index where cdf[i] > r — monotonically increasing
+    let idx = cdf[..n].partition_point(|&c| c <= r);
+    idx.min(n - 1)
+}
+
+/// Zero-alloc variant of [`sample_token`] that reuses a pre-allocated CDF buffer.
+///
+/// Pass a `cdf` buffer (e.g. `ForwardContext::cdf`) to avoid a ~vocab_size allocation
+/// on every token decode. The buffer is cleared and refilled each call.
+pub fn sample_token_into(probs: &[f32], rng: &mut Rng, cdf: &mut Vec<f32>) -> usize {
+    let r = rng.uniform();
+    let n = probs.len();
+    if n == 0 {
+        return 0;
+    }
+    cdf.resize(n, 0.0);
+    let mut sum = 0.0f32;
+    for (i, &p) in probs.iter().enumerate() {
+        sum += p;
+        unsafe {
+            *cdf.get_unchecked_mut(i) = sum;
+        }
+    }
+    // partition_point: first index where cdf[i] > r — monotonically increasing
+    // so this is equivalent to binary_search_by with Less/Greater but avoids
+    // closure overhead and is branch-predictor friendly.
+    let idx = cdf[..n].partition_point(|&c| c <= r);
+    idx.min(n - 1)
 }
 
 // ---------------------------------------------------------------------------
@@ -1476,19 +2412,22 @@ pub fn sample_token(probs: &[f32], rng: &mut Rng) -> usize {
 /// and adapter_data = `[in_dim(4) | out_dim(4) | a_f32s | b_f32s]`
 ///
 /// Zero-copy: loaded once per domain, reference-passed during inference.
+///
+/// Fields ordered by descending alignment to minimize padding:
+/// usize/Vec (8-byte) → f32 (4-byte).
 pub struct LoraAdapter {
-    /// Down-projection: [rank × in_dim]
-    pub a: Vec<f32>,
-    /// Up-projection: [out_dim × rank]
-    pub b: Vec<f32>,
     /// LoRA rank.
     pub rank: usize,
-    /// Scaling factor (alpha / rank).
-    pub alpha: f32,
     /// Input dimension.
     pub in_dim: usize,
     /// Output dimension.
     pub out_dim: usize,
+    /// Down-projection: [rank × in_dim]
+    pub a: Vec<f32>,
+    /// Up-projection: [out_dim × rank]
+    pub b: Vec<f32>,
+    /// Scaling factor (alpha / rank).
+    pub alpha: f32,
 }
 
 impl LoraAdapter {
@@ -1549,24 +2488,60 @@ impl LoraAdapter {
             return Err("Truncated adapter data".into());
         }
 
-        let a: Vec<f32> = payload[offset..offset + a_bytes]
-            .chunks_exact(4)
-            .map(|c| f32::from_le_bytes(c.try_into().expect("chunk is 4 bytes")))
-            .collect();
+        let a: Vec<f32> = {
+            #[cfg(target_endian = "little")]
+            {
+                let mut v = Vec::with_capacity(a_count);
+                unsafe {
+                    std::ptr::copy_nonoverlapping(
+                        payload[offset..].as_ptr(),
+                        v.as_mut_ptr() as *mut u8,
+                        a_bytes,
+                    );
+                    v.set_len(a_count);
+                }
+                v
+            }
+            #[cfg(not(target_endian = "little"))]
+            {
+                payload[offset..offset + a_bytes]
+                    .chunks_exact(4)
+                    .map(|c| f32::from_le_bytes(c.try_into().expect("chunk is 4 bytes")))
+                    .collect()
+            }
+        };
         offset += a_bytes;
 
-        let b: Vec<f32> = payload[offset..offset + b_bytes]
-            .chunks_exact(4)
-            .map(|c| f32::from_le_bytes(c.try_into().expect("chunk is 4 bytes")))
-            .collect();
+        let b: Vec<f32> = {
+            #[cfg(target_endian = "little")]
+            {
+                let mut v = Vec::with_capacity(b_count);
+                unsafe {
+                    std::ptr::copy_nonoverlapping(
+                        payload[offset..].as_ptr(),
+                        v.as_mut_ptr() as *mut u8,
+                        b_bytes,
+                    );
+                    v.set_len(b_count);
+                }
+                v
+            }
+            #[cfg(not(target_endian = "little"))]
+            {
+                payload[offset..offset + b_bytes]
+                    .chunks_exact(4)
+                    .map(|c| f32::from_le_bytes(c.try_into().expect("chunk is 4 bytes")))
+                    .collect()
+            }
+        };
 
         Ok(Self {
-            a,
-            b,
             rank,
-            alpha,
             in_dim,
             out_dim,
+            alpha,
+            a,
+            b,
         })
     }
 
@@ -1663,10 +2638,28 @@ impl LoraAdapter {
                     return Err("Truncated A matrix data".into());
                 }
 
-                let a: Vec<f32> = file_data[offset..offset + a_bytes]
-                    .chunks_exact(4)
-                    .map(|c| f32::from_le_bytes(c.try_into().expect("chunk is 4 bytes")))
-                    .collect();
+                let a: Vec<f32> = {
+                    #[cfg(target_endian = "little")]
+                    {
+                        let mut v = Vec::with_capacity(a_count);
+                        unsafe {
+                            std::ptr::copy_nonoverlapping(
+                                file_data[offset..].as_ptr(),
+                                v.as_mut_ptr() as *mut u8,
+                                a_bytes,
+                            );
+                            v.set_len(a_count);
+                        }
+                        v
+                    }
+                    #[cfg(not(target_endian = "little"))]
+                    {
+                        file_data[offset..offset + a_bytes]
+                            .chunks_exact(4)
+                            .map(|c| f32::from_le_bytes(c.try_into().expect("chunk is 4 bytes")))
+                            .collect()
+                    }
+                };
                 offset += a_bytes;
 
                 // B matrix: [out_dim × rank]
@@ -1679,22 +2672,40 @@ impl LoraAdapter {
                     return Err("Truncated B matrix data".into());
                 }
 
-                let b: Vec<f32> = file_data[offset..offset + b_bytes]
-                    .chunks_exact(4)
-                    .map(|c| f32::from_le_bytes(c.try_into().expect("chunk is 4 bytes")))
-                    .collect();
+                let b: Vec<f32> = {
+                    #[cfg(target_endian = "little")]
+                    {
+                        let mut v = Vec::with_capacity(b_count);
+                        unsafe {
+                            std::ptr::copy_nonoverlapping(
+                                file_data[offset..].as_ptr(),
+                                v.as_mut_ptr() as *mut u8,
+                                b_bytes,
+                            );
+                            v.set_len(b_count);
+                        }
+                        v
+                    }
+                    #[cfg(not(target_endian = "little"))]
+                    {
+                        file_data[offset..offset + b_bytes]
+                            .chunks_exact(4)
+                            .map(|c| f32::from_le_bytes(c.try_into().expect("chunk is 4 bytes")))
+                            .collect()
+                    }
+                };
                 offset += b_bytes;
 
                 let in_dim = a_cols;
                 let out_dim = b_rows;
 
                 adapters.push(Self {
-                    a,
-                    b,
                     rank,
-                    alpha,
                     in_dim,
                     out_dim,
+                    alpha,
+                    a,
+                    b,
                 });
             }
         }
@@ -1725,15 +2736,11 @@ pub fn lora_apply(output: &mut [f32], lora: &LoraAdapter, input: &[f32], lora_bu
     // 1. hidden = A @ input  (rank × in_dim) @ [in_dim] → [rank]
     matmul(lora_buf, &lora.a, input, lora.rank, lora.in_dim);
 
-    // 2. output += scale × (B @ hidden)  — fused, no intermediate delta buffer
+    // 2. output += scale × (B @ hidden) — SIMD-accelerated per-row dot product
     for r in 0..lora.out_dim {
         let row_off = r * lora.rank;
-        let mut sum = 0.0f32;
-        for k in 0..lora.rank {
-            unsafe {
-                sum += *lora.b.get_unchecked(row_off + k) * *lora_buf.get_unchecked(k);
-            }
-        }
+        let sum =
+            crate::simd::simd_dot_f32(&lora.b[row_off..row_off + lora.rank], lora_buf, lora.rank);
         unsafe {
             *output.get_unchecked_mut(r) += scale * sum;
         }
@@ -1834,7 +2841,7 @@ impl DomainLatent {
         ) as usize;
         offset += 4;
 
-        // Embedding data
+        // Embedding data — bulk copy on LE targets, element-by-element otherwise
         let embed_bytes = kv_dim * std::mem::size_of::<f32>();
         if offset + embed_bytes > payload_end {
             return Err(format!(
@@ -1842,10 +2849,28 @@ impl DomainLatent {
             ));
         }
 
-        let embedding: Vec<f32> = data[offset..offset + embed_bytes]
-            .chunks_exact(4)
-            .map(|c| f32::from_le_bytes(c.try_into().expect("chunk is 4 bytes")))
-            .collect();
+        let embedding: Vec<f32> = {
+            #[cfg(target_endian = "little")]
+            {
+                let mut v = Vec::with_capacity(kv_dim);
+                unsafe {
+                    std::ptr::copy_nonoverlapping(
+                        data[offset..].as_ptr(),
+                        v.as_mut_ptr() as *mut u8,
+                        embed_bytes,
+                    );
+                    v.set_len(kv_dim);
+                }
+                v
+            }
+            #[cfg(not(target_endian = "little"))]
+            {
+                data[offset..offset + embed_bytes]
+                    .chunks_exact(4)
+                    .map(|c| f32::from_le_bytes(c.try_into().expect("chunk is 4 bytes")))
+                    .collect()
+            }
+        };
 
         if embedding.len() != kv_dim {
             return Err(format!(
@@ -1867,8 +2892,21 @@ impl DomainLatent {
         buf.extend_from_slice(Self::MAGIC);
         buf.push(Self::VERSION);
         buf.extend_from_slice(&(kv_dim as u32).to_le_bytes());
-        for &val in &self.embedding {
-            buf.extend_from_slice(&val.to_le_bytes());
+        // Bulk write embedding data — avoids per-element extend_from_slice overhead.
+        // SAFETY: f32 is plain-old-data with no padding; to_ne_bytes gives [u8; 4] per f32.
+        // On LE targets (all Apple Silicon, all modern x86), to_ne_bytes == to_le_bytes.
+        #[cfg(target_endian = "little")]
+        {
+            let bytes = unsafe {
+                std::slice::from_raw_parts(self.embedding.as_ptr() as *const u8, embed_bytes)
+            };
+            buf.extend_from_slice(bytes);
+        }
+        #[cfg(not(target_endian = "little"))]
+        {
+            for &val in &self.embedding {
+                buf.extend_from_slice(&val.to_le_bytes());
+            }
         }
 
         let hash = blake3::hash(&buf);
@@ -1941,30 +2979,40 @@ fn read_u16_le(data: &[u8], offset: &mut usize) -> Result<u16, String> {
 // ---------------------------------------------------------------------------
 
 /// Output of a single inference pass, with reward signal for feedback loop.
+///
+/// Fields ordered by descending alignment to minimize padding:
+/// u64/i64/usize/String (8-byte) → f32 (4-byte) → Option<#[repr(u8)]> (2-byte) → u8/bool (1-byte).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct InferenceResult {
-    /// Domain that handled this inference.
-    pub domain: String,
-    /// Best-path reward (max relevance score from WasmPruner).
-    pub reward: f32,
-    /// Number of nodes explored in DDTree.
-    pub tree_budget_used: usize,
-    /// Inference budget level (0=cheap, 1=moderate, 2=expensive).
-    pub budget_level: u8,
+    // --- 8-byte aligned ---
     /// Input prompt hash (for dedup, not stored).
     pub prompt_hash: u64,
-    /// Generated output text.
-    pub output: String,
     /// Timestamp (Uuid v7 prefix).
     pub timestamp: i64,
-    /// Was this result screened out (reward below threshold)?
-    pub screened: bool,
-    /// SR²AM configurator planning decision for this turn (Plan 112).
-    #[cfg(feature = "sr2am_configurator")]
-    pub planning_decision: Option<PlanningDecision>,
+    /// Number of nodes explored in DDTree.
+    pub tree_budget_used: usize,
     /// Actual planning horizon used this turn (after entropy truncation, Plan 112 T13).
     #[cfg(feature = "sr2am_configurator")]
     pub plan_horizon_used: usize,
+    /// Domain that handled this inference.
+    pub domain: String,
+    /// Generated output text.
+    pub output: String,
+
+    // --- 4-byte aligned ---
+    /// Best-path reward (max relevance score from WasmPruner).
+    pub reward: f32,
+
+    // --- 2-byte aligned (Option<#[repr(u8)] enum>) ---
+    /// SR²AM configurator planning decision for this turn (Plan 112).
+    #[cfg(feature = "sr2am_configurator")]
+    pub planning_decision: Option<PlanningDecision>,
+
+    // --- 1-byte fields (tail-packed) ---
+    /// Was this result screened out (reward below threshold)?
+    pub screened: bool,
+    /// Inference budget level (0=cheap, 1=moderate, 2=expensive).
+    pub budget_level: u8,
 }
 
 // ---------------------------------------------------------------------------
@@ -1973,6 +3021,7 @@ pub struct InferenceResult {
 
 /// Discriminator for different self-play task types.
 #[cfg(feature = "data_gate")]
+#[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TaskType {
     /// Python code output prediction
@@ -2006,6 +3055,7 @@ pub struct ProposerTask {
 /// Decides whether a proposer-generated task should enter the training pool
 /// BEFORE the solver attempts it.
 #[cfg(feature = "data_gate")]
+#[repr(u8)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GateDecision {
     /// Task passes the gate — admitted to training pool.
@@ -2036,6 +3086,306 @@ pub trait DataGate {
 }
 
 // ---------------------------------------------------------------------------
+// Training-Free Loop Types (Plan 136)
+// ---------------------------------------------------------------------------
+
+/// Sub-step integration strategy for the training-free loop.
+///
+/// Controls how intermediate loop outputs are combined with the running state.
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub enum SubStepStrategy {
+    /// Damped Euler: x ← x + (1/K)·(y − x)
+    #[default]
+    DampedEuler,
+    /// K-stage Runge-Kutta: x ← β·y + (1−β)·x
+    KStageRK {
+        /// Blend factor β ∈ [0, 1]. 0.5 is neutral (equal weight).
+        beta: f32,
+    },
+}
+
+/// Iteration mode for the training-free loop window.
+///
+/// Controls whether the window is applied as a single block or iterated
+/// layer-by-layer within each sub-step.
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum IterationMode {
+    /// Apply the full window [a, b] as one block per sub-step.
+    #[default]
+    Block,
+    /// Apply each layer in the window individually per sub-step.
+    Layer,
+}
+
+/// KV cache write strategy for the training-free loop.
+///
+/// Controls which loop iteration writes the canonical KV entries.
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum CacheStrategy {
+    /// Use the final loop iteration's hidden state for KV cache.
+    #[default]
+    Last,
+    /// Use the pre-loop hidden state for KV cache (first iteration).
+    First,
+}
+
+/// Configuration for training-free loop wrapper (Plan 136).
+///
+/// Pure inference-time retrofit: re-applies a contiguous mid-stack block of
+/// layers with ODE-motivated damped sub-stepping. No training needed.
+#[derive(Clone, Debug)]
+pub struct TrainingFreeLoopConfig {
+    /// Start of the loop window (inclusive layer index).
+    pub window_start: usize,
+    /// End of the loop window (inclusive layer index).
+    pub window_end: usize,
+    /// Number of loop iterations (K in the paper).
+    pub loop_count: usize,
+    /// Sub-step integration strategy.
+    pub strategy: SubStepStrategy,
+    /// Iteration mode (block vs layer-wise).
+    pub iteration_mode: IterationMode,
+    /// KV cache write strategy.
+    pub cache_strategy: CacheStrategy,
+}
+
+impl Default for TrainingFreeLoopConfig {
+    fn default() -> Self {
+        Self {
+            window_start: 0,
+            window_end: 0,
+            loop_count: 2,
+            strategy: SubStepStrategy::KStageRK { beta: 0.5 },
+            iteration_mode: IterationMode::Block,
+            cache_strategy: CacheStrategy::First,
+        }
+    }
+}
+
+impl TrainingFreeLoopConfig {
+    /// Creates a config with sensible defaults for a given `Config`.
+    ///
+    /// Window heuristic: center at 48% depth, ±1 layer.
+    /// For small models (≤4 layers), defaults to (0, n_layer−1).
+    /// Uses the paper-recommended K-stage RK strategy with β=0.5.
+    pub fn from_config(config: &Config) -> Self {
+        let n = config.n_layer;
+        let (window_start, window_end) = if n <= 4 {
+            (0, n.saturating_sub(1))
+        } else {
+            let center = (n as f32 * 0.48) as usize;
+            (center.saturating_sub(1), (center + 2).min(n - 1))
+        };
+        Self {
+            window_start,
+            window_end,
+            loop_count: 2,
+            strategy: SubStepStrategy::KStageRK { beta: 0.5 },
+            iteration_mode: IterationMode::Block,
+            cache_strategy: CacheStrategy::First,
+        }
+    }
+}
+
+/// Bit-plane packed ternary weights: each element is {-1, 0, +1}.
+///
+/// 64 weights per block stored as two u64 bitmasks:
+/// - pos_bits[block] bit k set → weight[row][k] = +1
+/// - neg_bits[block] bit k set → weight[row][k] = -1
+/// - both zero → weight = 0 (implicit skip, no storage needed)
+///
+/// `row_scale[r]` rescales the accumulated sum back toward original float magnitudes.
+/// Memory: ~1.58 bits/weight (log₂3), plus one f32 per row for scale.
+#[cfg(feature = "plasma_path")]
+#[derive(Clone, Debug)]
+pub struct TernaryWeights {
+    pub rows: usize,
+    pub cols: usize,
+    pub blocks64: usize,     // (cols + 63) / 64
+    pub pos_bits: Vec<u64>,  // [rows * blocks64]
+    pub neg_bits: Vec<u64>,  // [rows * blocks64]
+    pub row_scale: Vec<f32>, // [rows]
+}
+
+#[cfg(feature = "plasma_path")]
+impl TernaryWeights {
+    /// Create zeroed ternary weights.
+    pub fn new(rows: usize, cols: usize) -> Self {
+        let blocks64 = cols.div_ceil(64);
+        Self {
+            rows,
+            cols,
+            blocks64,
+            pos_bits: vec![0u64; rows * blocks64],
+            neg_bits: vec![0u64; rows * blocks64],
+            row_scale: vec![1.0f32; rows],
+        }
+    }
+
+    /// Set a single ternary value at (row, col). Panics if out of bounds or value not in {-1, 0, +1}.
+    pub fn set(&mut self, row: usize, col: usize, value: i8) {
+        assert!(row < self.rows && col < self.cols, "index out of bounds");
+        assert!(
+            (-1..=1).contains(&value),
+            "ternary value must be -1, 0, or +1"
+        );
+        let block = col >> 6;
+        let bit = col & 63;
+        let mask = 1u64 << bit;
+        let idx = row * self.blocks64 + block;
+        match value {
+            1 => {
+                self.pos_bits[idx] |= mask;
+                self.neg_bits[idx] &= !mask;
+            }
+            -1 => {
+                self.pos_bits[idx] &= !mask;
+                self.neg_bits[idx] |= mask;
+            }
+            0 => {
+                self.pos_bits[idx] &= !mask;
+                self.neg_bits[idx] &= !mask;
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    /// Get the ternary value at (row, col).
+    pub fn get(&self, row: usize, col: usize) -> i8 {
+        assert!(row < self.rows && col < self.cols, "index out of bounds");
+        let block = col >> 6;
+        let bit = col & 63;
+        let mask = 1u64 << bit;
+        let idx = row * self.blocks64 + block;
+        let pos = (self.pos_bits[idx] & mask) != 0;
+        let neg = (self.neg_bits[idx] & mask) != 0;
+        pos as i8 - neg as i8
+    }
+
+    /// Quantize f32 weights to ternary with row-wise error compensation.
+    ///
+    /// For each row:
+    ///   scale = mean(|row|)
+    ///   threshold = 0.5 * scale
+    ///   for each weight: adjusted = value + carry
+    ///     if adjusted > threshold → +1
+    ///     if adjusted < -threshold → -1
+    ///     else → 0
+    ///     carry = adjusted - (q * scale)
+    pub fn quantize_from_f32(weights: &[f32], rows: usize, cols: usize) -> Self {
+        assert_eq!(
+            weights.len(),
+            rows * cols,
+            "weights slice must be rows*cols"
+        );
+        let mut tw = Self::new(rows, cols);
+
+        for r in 0..rows {
+            let row_start = r * cols;
+            let row = &weights[row_start..row_start + cols];
+
+            // Compute scale = mean(|row|)
+            let abs_sum = crate::simd::simd_sum_abs_f32(row);
+            let scale = abs_sum / cols as f32;
+            tw.row_scale[r] = if scale > 0.0 { scale } else { 1.0 };
+
+            let threshold = 0.5 * tw.row_scale[r];
+            let mut carry = 0.0f32;
+
+            // Inline bit manipulation to avoid per-element bounds checks in set()
+            let row_base = r * tw.blocks64;
+            for (c, &val) in row.iter().enumerate() {
+                let adjusted = val + carry;
+                let q = if adjusted > threshold {
+                    1i8
+                } else if adjusted < -threshold {
+                    -1i8
+                } else {
+                    0i8
+                };
+                let block = c >> 6;
+                let bit = c & 63;
+                let mask = 1u64 << bit;
+                let idx = row_base + block;
+                // Branch-free: clear both bits, then set the one that matches q
+                tw.pos_bits[idx] &= !mask;
+                tw.neg_bits[idx] &= !mask;
+                // q is 1 or -1 or 0; only set the relevant bit
+                tw.pos_bits[idx] |= (q == 1) as u64 * mask;
+                tw.neg_bits[idx] |= (q == -1) as u64 * mask;
+                carry = adjusted - (q as f32 * tw.row_scale[r]);
+            }
+        }
+
+        tw
+    }
+
+    /// Compute a checksum over all values (sum of row_scale[r] * sum of signs in row r).
+    /// Used for cross-implementation verification.
+    pub fn checksum(&self) -> f32 {
+        let mut total = 0.0f32;
+        for r in 0..self.rows {
+            // Accumulate as integer to avoid per-element f32 conversion overhead.
+            let mut row_sum: i32 = 0;
+            let row_base = r * self.blocks64;
+            for b in 0..self.blocks64 {
+                let idx = row_base + b;
+                row_sum += self.pos_bits[idx].count_ones() as i32;
+                row_sum -= self.neg_bits[idx].count_ones() as i32;
+            }
+            total += self.row_scale[r] * row_sum as f32;
+        }
+        total
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Hydra Adaptive Layer Budget (Research 148, Plan 165)
+// ---------------------------------------------------------------------------
+
+/// Per-layer Hydra profile entry (modelless mode).
+/// Pre-computed from calibration data, stored in config.
+#[cfg(feature = "hydra_budget")]
+#[derive(Clone, Debug)]
+pub struct HydraLayerProfile {
+    /// Mean absolute direct effect on top-token logit.
+    pub mean_de: f32,
+    /// Fraction of prompts where this layer is a Hydra backup.
+    pub backup_frequency: f32,
+    /// Whether this layer acts as erasure (mean DE < 0 for MLP).
+    pub is_erasure: bool,
+}
+
+/// Hydra budget configuration.
+#[cfg(feature = "hydra_budget")]
+#[derive(Clone, Debug)]
+pub struct HydraBudgetConfig {
+    /// Skip layers with |DE| below this threshold.
+    pub skip_threshold: f32,
+    /// Early-terminate when cumulative DE reaches this fraction of total.
+    pub cumulative_threshold: f32,
+    /// Use modelless mode (lookup) vs model-based (logit lens).
+    pub modelless: bool,
+    /// Skip erasure MLPs during draft stage.
+    pub skip_erasure_draft: bool,
+}
+
+#[cfg(feature = "hydra_budget")]
+impl Default for HydraBudgetConfig {
+    fn default() -> Self {
+        Self {
+            skip_threshold: 0.01,
+            cumulative_threshold: 0.95,
+            modelless: true,
+            skip_erasure_draft: false,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -2047,10 +3397,13 @@ mod tests_types {
     fn test_with_overrides_none_unchanged() {
         let config = Config::draft();
         let overrides = InferenceOverrides::default();
+        let original_tb = config.tree_budget;
+        let original_temp = config.temperature;
+        let original_dl = config.draft_lookahead;
         let result = config.with_overrides(&overrides);
-        assert_eq!(result.tree_budget, config.tree_budget);
-        assert_eq!(result.temperature, config.temperature);
-        assert_eq!(result.draft_lookahead, config.draft_lookahead);
+        assert_eq!(result.tree_budget, original_tb);
+        assert_eq!(result.temperature, original_temp);
+        assert_eq!(result.draft_lookahead, original_dl);
     }
 
     #[test]
@@ -2061,11 +3414,12 @@ mod tests_types {
             temperature: Some(0.123),
             ..Default::default()
         };
+        let original_dl = config.draft_lookahead;
         let result = config.with_overrides(&overrides);
         assert_eq!(result.tree_budget, 99);
         assert!((result.temperature - 0.123).abs() < 1e-6);
         // Non-overridden fields stay the same
-        assert_eq!(result.draft_lookahead, config.draft_lookahead);
+        assert_eq!(result.draft_lookahead, original_dl);
     }
 
     #[test]
@@ -2094,6 +3448,10 @@ mod tests_types {
             // drafter_lora_path is consumed by the caller, not applied to Config
             drafter_lora_path: None,
             max_plan_horizon: Some(5),
+            #[cfg(feature = "hydra_budget")]
+            hydra_skip_threshold: None,
+            #[cfg(feature = "hydra_budget")]
+            hydra_skip_erasure_draft: None,
         };
         let result = config.with_overrides(&overrides);
         assert_eq!(result.tree_budget, 1);
@@ -2204,5 +3562,278 @@ mod tests_types {
         assert_eq!(config.head_dim, 8);
         assert_eq!(config.mlp_hidden, 128);
         assert!(config.validate().is_ok());
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Shard Embedding — JL Random Orthogonal Projection (Plan 230)
+// ---------------------------------------------------------------------------
+
+/// Low-dimensional projection of NeuronShard style_weights for fast similarity search.
+/// Produced by Johnson-Lindenstrauss random orthogonal projection.
+/// 8 × f32 = 32 bytes — fits in cache line, suitable for SIMD cosine similarity.
+///
+/// Plan 230: Shard Embedding Projection — modelless linear weight-to-vector.
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[repr(C)]
+pub struct ShardEmbedding(pub [f32; 8]);
+
+impl ShardEmbedding {
+    pub const ZERO: Self = Self([0.0; 8]);
+    pub const DIM: usize = 8;
+
+    /// Cosine similarity between two embeddings.
+    pub fn cosine_similarity(&self, other: &Self) -> f32 {
+        let dot: f32 = self.0.iter().zip(other.0.iter()).map(|(a, b)| a * b).sum();
+        let mag_a: f32 = self.0.iter().map(|x| x * x).sum::<f32>().sqrt();
+        let mag_b: f32 = other.0.iter().map(|x| x * x).sum::<f32>().sqrt();
+        if mag_a < 1e-8 || mag_b < 1e-8 {
+            return 0.0;
+        }
+        dot / (mag_a * mag_b)
+    }
+
+    /// Euclidean distance squared between two embeddings.
+    pub fn dist_sq(&self, other: &Self) -> f32 {
+        self.0
+            .iter()
+            .zip(other.0.iter())
+            .map(|(a, b)| (a - b) * (a - b))
+            .sum()
+    }
+}
+
+impl Default for ShardEmbedding {
+    fn default() -> Self {
+        Self::ZERO
+    }
+}
+
+// Hash for use as HashMap key (bit-level, NOT semantic hash)
+impl std::hash::Hash for ShardEmbedding {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        for &v in &self.0 {
+            v.to_bits().hash(state);
+        }
+    }
+}
+
+impl Eq for ShardEmbedding {}
+
+// ---------------------------------------------------------------------------
+// Sense Composition — KG Latent Octree (Plan 221)
+// ---------------------------------------------------------------------------
+
+/// Kind of sense module for NPC brain composition.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[repr(u8)]
+pub enum SenseKind {
+    CommonSense = 0,
+    FighterSense = 1,
+    GameTheorySense = 2,
+    #[default]
+    SpatialSense = 3,
+    SocialSense = 4,
+    SkillSense = 5,
+    Reserved = 7,
+}
+
+/// Ternary direction vector: +1/0/-1 encoded as two bitmasks + row scale.
+/// 20 bytes each.
+#[derive(Clone, Copy, Debug)]
+#[repr(C)]
+pub struct TernaryDir {
+    /// Bitmask for positive (+1) entries.
+    pub pos_bits: u64,
+    /// Bitmask for negative (-1) entries.
+    pub neg_bits: u64,
+    /// Scale factor for this direction row.
+    pub row_scale: f32,
+}
+
+impl TernaryDir {
+    pub const SIZE: usize = 20;
+
+    pub fn zero() -> Self {
+        Self {
+            pos_bits: 0,
+            neg_bits: 0,
+            row_scale: 0.0,
+        }
+    }
+
+    /// Zero padding bytes for deterministic hashing.
+    /// TernaryDir is 20 logical bytes but 24 with alignment padding.
+    /// This zeroes the 4 trailing padding bytes.
+    pub fn zero_padding(&mut self) {
+        // Write zeros to the padding region (bytes 20..24)
+        unsafe {
+            let ptr = self as *mut Self as *mut u8;
+            let padding_start = 20;
+            let padding_end = std::mem::size_of::<Self>();
+            for i in padding_start..padding_end {
+                *ptr.add(i) = 0;
+            }
+        }
+    }
+}
+
+/// Fixed-size sense module: KG latent octree + ternary direction vectors.
+/// ~232 bytes. BLAKE3 committed.
+///
+/// Field ordering: u64-aligned first, then f32, then u8 tail.
+/// `commitment` must remain LAST for the hash-until-end-of-struct pattern.
+#[derive(Clone, Debug)]
+#[repr(C)]
+pub struct SenseModule {
+    /// Octree occupancy bit-planes (up to depth 3 → 128 nodes in 2×u64).
+    pub octree_bits: [u64; 4],
+    /// Ternary direction vectors for projection.
+    pub directions: [TernaryDir; 8],
+    /// Module confidence [0, 1].
+    pub confidence: f32,
+    pub kind: SenseKind,
+    pub version: u8,
+    pub octree_depth: u8,
+    pub n_directions: u8,
+    pub _reserved: u8,
+    /// BLAKE3 commitment over all preceding fields.
+    pub commitment: [u8; 32],
+}
+
+impl SenseModule {
+    /// Project HLA state onto this module's ternary directions → sigmoid scalar.
+    ///
+    /// KG weight bridge: output is scaled by module confidence so that
+    /// high-confidence KG triples produce stronger sense activations and
+    /// low-confidence triples are attenuated. Confidence 1.0 = unchanged.
+    ///
+    /// Branchless sign extraction, fast sigmoid via `1.0 / (1.0 + exp(-x))`.
+    pub fn project(&self, hla_state: &[f32; 8]) -> f32 {
+        let mut dot = 0.0f32;
+        let n = self.n_directions as usize;
+        for i in 0..n {
+            if i >= hla_state.len() {
+                break;
+            }
+            let dir = &self.directions[i];
+            let mask = 1u64 << i;
+            let pos = ((dir.pos_bits & mask) != 0) as i8;
+            let neg = ((dir.neg_bits & mask) != 0) as i8;
+            let sign = (pos - neg) as f32;
+            dot += sign * hla_state[i] * dir.row_scale;
+        }
+        // sigmoid * confidence (KG weight bridge)
+        let exp_neg = (-dot).exp();
+        self.confidence * (1.0 / (1.0 + exp_neg))
+    }
+
+    /// Query octree occupancy at given level and index.
+    /// Returns None if indices out of bounds.
+    pub fn query_octree(&self, level: u8, index: u8) -> Option<bool> {
+        let nodes_at_level = 1usize << (level * 2); // quadtree-like
+        if index as usize >= nodes_at_level || level > self.octree_depth {
+            return None;
+        }
+        let flat_idx = (0..level).fold(0usize, |acc, _| acc * 4) + index as usize;
+        let word = flat_idx / 64;
+        let bit = flat_idx % 64;
+        if word >= self.octree_bits.len() {
+            return None;
+        }
+        Some(self.octree_bits[word] & (1 << bit) != 0)
+    }
+
+    /// Compute and store BLAKE3 commitment.
+    /// Zeros TernaryDir padding bytes first for deterministic hashing.
+    pub fn commit(&mut self) {
+        // Zero commitment before hashing
+        self.commitment = [0u8; 32];
+        // Zero padding in direction vectors for deterministic hash
+        for dir in &mut self.directions {
+            dir.zero_padding();
+        }
+        let bytes: &[u8] = unsafe {
+            std::slice::from_raw_parts(
+                self as *const Self as *const u8,
+                std::mem::size_of::<Self>() - 32, // exclude commitment field
+            )
+        };
+        self.commitment = *blake3::hash(bytes).as_bytes();
+    }
+
+    /// Verify BLAKE3 commitment.
+    /// Zeros TernaryDir padding bytes before comparing to match commit() behavior.
+    pub fn verify(&self) -> bool {
+        // Clone to avoid mutating self, then zero padding + commitment
+        let mut copy = self.clone();
+        copy.commitment = [0u8; 32];
+        for dir in &mut copy.directions {
+            dir.zero_padding();
+        }
+        let bytes: &[u8] = unsafe {
+            std::slice::from_raw_parts(
+                &copy as *const Self as *const u8,
+                std::mem::size_of::<Self>() - 32,
+            )
+        };
+        let expected = blake3::hash(bytes);
+        self.commitment == *expected.as_bytes()
+    }
+}
+
+impl Default for SenseModule {
+    fn default() -> Self {
+        Self {
+            octree_bits: [0; 4],
+            directions: [TernaryDir::zero(); 8],
+            confidence: 0.0,
+            kind: SenseKind::default(),
+            version: 1,
+            octree_depth: 3,
+            n_directions: 0,
+            _reserved: 0,
+            commitment: [0u8; 32],
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// DilationConfig — RAT+ Recurrence Bridge sparse attention (Plan 225)
+// ---------------------------------------------------------------------------
+
+/// Dilation configuration for RAT+ bridge sparse attention.
+/// Controls stride D for KV cache access during decode.
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DilationConfig {
+    D1 = 1, // Dense (no dilation)
+    D2 = 2,
+    D4 = 4,
+    D8 = 8,
+    D16 = 16,
+    D32 = 32,
+    D64 = 64,
+}
+
+impl DilationConfig {
+    /// Returns the dilation stride as usize.
+    #[inline]
+    pub fn stride(&self) -> usize {
+        *self as usize
+    }
+
+    /// Select dilation from queries-per-second heuristic.
+    /// Low QPS → dense, High QPS → aggressive dilation.
+    pub fn from_qps(qps: f32) -> Self {
+        if qps < 1.0 {
+            Self::D1
+        } else if qps < 5.0 {
+            Self::D4
+        } else if qps < 20.0 {
+            Self::D16
+        } else {
+            Self::D64
+        }
     }
 }

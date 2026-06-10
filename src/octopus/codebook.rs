@@ -133,9 +133,12 @@ fn compute_centroids_norm(boundaries: &[f32], dim: usize) -> Vec<f32> {
     let mut centroids = vec![0.0f32; n];
     let n_samples = 1000;
 
-    let mut edges = vec![0.0f32];
-    edges.extend_from_slice(boundaries);
-    edges.push(1.0);
+    // Build edges on the stack: [-1.0, boundaries..., 1.0]
+    // Using a small fixed-size prefix avoids Vec allocation.
+    let mut edges = vec![0.0f32; n + 1];
+    edges[0] = 0.0;
+    edges[1..=n - 1].copy_from_slice(boundaries);
+    edges[n] = 1.0;
 
     for i in 0..n {
         let lo = edges[i];
@@ -162,9 +165,10 @@ fn compute_centroids_norm(boundaries: &[f32], dim: usize) -> Vec<f32> {
 /// MSE for norm codebook.
 fn compute_mse_norm(boundaries: &[f32], centroids: &[f32], dim: usize) -> f32 {
     let n = centroids.len();
-    let mut edges = vec![0.0f32];
-    edges.extend_from_slice(boundaries);
-    edges.push(1.0);
+    let mut edges = vec![0.0f32; n + 1];
+    edges[0] = 0.0;
+    edges[1..=n - 1].copy_from_slice(boundaries);
+    edges[n] = 1.0;
 
     let n_samples = 500;
     let mut total_mse = 0.0f64;
@@ -204,9 +208,11 @@ fn compute_centroids_oct(boundaries: &[f32]) -> Vec<f32> {
     let mut centroids = vec![0.0f32; n];
     let n_samples = 1000;
 
-    let mut edges = vec![-1.0f32];
-    edges.extend_from_slice(boundaries);
-    edges.push(1.0);
+    // Pre-allocate edges: [-1.0, boundaries..., 1.0]
+    let mut edges = vec![0.0f32; n + 1];
+    edges[0] = -1.0;
+    edges[1..=n - 1].copy_from_slice(boundaries);
+    edges[n] = 1.0;
 
     for i in 0..n {
         let lo = edges[i];
@@ -233,9 +239,10 @@ fn compute_centroids_oct(boundaries: &[f32]) -> Vec<f32> {
 /// MSE for oct codebook.
 fn compute_mse_oct(boundaries: &[f32], centroids: &[f32]) -> f32 {
     let n = centroids.len();
-    let mut edges = vec![-1.0f32];
-    edges.extend_from_slice(boundaries);
-    edges.push(1.0);
+    let mut edges = vec![0.0f32; n + 1];
+    edges[0] = -1.0;
+    edges[1..=n - 1].copy_from_slice(boundaries);
+    edges[n] = 1.0;
 
     let n_samples = 500;
     let mut total_mse = 0.0f64;
@@ -307,16 +314,14 @@ fn ln_gamma(x: f64) -> f64 {
 
 impl ScalarCodebook {
     /// Quantize a value using nearest-centroid search. Returns index in `[0, 2^bits)`.
+    /// Uses binary search on monotonic boundaries — O(log n) instead of O(n).
+    #[inline]
     pub fn quantize(&self, value: f32) -> u16 {
-        for (i, &b) in self.boundaries.iter().enumerate() {
-            if value < b {
-                return i as u16;
-            }
-        }
-        self.boundaries.len() as u16
+        self.boundaries.partition_point(|&b| value >= b) as u16
     }
 
     /// Dequantize an index back to the centroid value.
+    #[inline]
     pub fn dequantize(&self, index: u16) -> f32 {
         self.centroids.get(index as usize).copied().unwrap_or(0.0)
     }

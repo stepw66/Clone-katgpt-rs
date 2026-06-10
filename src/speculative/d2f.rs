@@ -20,7 +20,7 @@
 #![allow(clippy::too_many_arguments, clippy::needless_range_loop)]
 
 use crate::dllm::{D2fContext, denoising_accuracy, forward_block_causal_with};
-use crate::speculative::types::ConstraintPruner;
+use crate::speculative::types::{ConstraintPruner, ScreeningPruner};
 use crate::transformer::TransformerWeights;
 use crate::types::Config;
 use crate::types::Rng;
@@ -192,6 +192,15 @@ pub enum ScheduleKind {
     Uniform,
     /// Logit-normal distribution — concentrates steps near t=0 (ELF: μ=-1.5, σ=0.8).
     LogitNormal { mean: f32, std: f32 },
+    /// Equi-probability partitioning from DiffusionBlocks (arXiv:2506.14202).
+    ///
+    /// Partitions noise levels by equal cumulative probability mass under
+    /// log-normal, allocating more blocks to intermediate noise levels where
+    /// denoising is hardest. The boundary σ values are:
+    ///   σ_b = exp(P_mean + P_std · Φ⁻¹(q_b))  where q_b = q_min + (b/B)(q_max - q_min)
+    ///
+    /// This produces deterministic, evenly-spaced-in-CDF timesteps (no RNG needed).
+    EquiProbability { mean: f32, std: f32 },
 }
 
 impl ScheduleKind {
@@ -200,6 +209,15 @@ impl ScheduleKind {
         Self::LogitNormal {
             mean: -1.5,
             std: 0.8,
+        }
+    }
+
+    /// DiffusionBlocks (arXiv:2506.14202) equi-probability default.
+    /// Uses EDM-style P_mean=-1.2, P_std=1.2 for the log-normal prior.
+    pub fn diffusion_blocks_default() -> Self {
+        Self::EquiProbability {
+            mean: -1.2,
+            std: 1.2,
         }
     }
 
@@ -218,6 +236,7 @@ impl ScheduleKind {
                 }
             }
             Self::LogitNormal { mean, std } => logit_normal_schedule(n_steps, *mean, *std, rng),
+            Self::EquiProbability { mean, std } => equi_probability_schedule(n_steps, *mean, *std),
         }
     }
 }
@@ -252,6 +271,86 @@ fn logit_normal_schedule(n_steps: usize, mean: f32, std: f32, rng: &mut Rng) -> 
             steps.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
             steps
         }
+    }
+}
+
+/// Deterministic equi-probability schedule from DiffusionBlocks (arXiv:2506.14202).
+///
+/// Places timesteps at equal intervals along the cumulative distribution function
+/// of a log-normal distribution, so each interval carries equal probability mass.
+/// This concentrates timesteps where the model spends the most denoising effort.
+///
+/// σ_b = exp(mean + std · Φ⁻¹(q_b))  where q_b = b / (B+1)  (interior quantiles)
+///
+/// Returns values mapped to [0.0, 1.0] via sigmoid for compatibility with the
+/// denoising pipeline.
+fn equi_probability_schedule(n_steps: usize, mean: f32, std: f32) -> Vec<f32> {
+    match n_steps {
+        0 => vec![],
+        1 => vec![0.5],
+        _ => {
+            // Place quantiles at q_b = (b + 1) / (B + 1) for b = 0..B-1
+            // (interior points that avoid the extreme tails)
+            (0..n_steps)
+                .map(|b| {
+                    let q = (b + 1) as f32 / (n_steps + 1) as f32;
+                    let inv_cdf = mean + std * approx_inverse_normal_cdf(q);
+                    sigmoid(inv_cdf)
+                })
+                .collect()
+        }
+    }
+}
+
+/// Rational approximation of the inverse normal CDF (Φ⁻¹) using Peter Acklam's algorithm.
+/// Accurate to ~1.15e-9 in absolute value across the full range.
+#[allow(clippy::excessive_precision)]
+fn approx_inverse_normal_cdf(p: f32) -> f32 {
+    // Coefficients for the rational approximation
+    const A1: f32 = -3.9696830e+01;
+    const A2: f32 = 2.20946098e+02;
+    const A3: f32 = -2.75928510e+02;
+    const A4: f32 = 1.38357752e+02;
+    const A5: f32 = -3.06647980e+01;
+    const A6: f32 = 2.50662828e+00;
+
+    const B1: f32 = -5.44760988e+01;
+    const B2: f32 = 1.61585837e+02;
+    const B3: f32 = -1.55698980e+02;
+    const B4: f32 = 6.68013119e+01;
+    const B5: f32 = -1.32806816e+01;
+
+    const C1: f32 = -7.78489400e-03;
+    const C2: f32 = -3.22396458e-01;
+    const C3: f32 = -2.40075828e+00;
+    const C4: f32 = -2.54973254e+00;
+    const C5: f32 = 4.37466414e+00;
+    const C6: f32 = 2.93816398e+00;
+
+    const D1: f32 = 7.78469571e-03;
+    const D2: f32 = 3.22467129e-01;
+    const D3: f32 = 2.44513414e+00;
+    const D4: f32 = 3.75440866e+00;
+
+    const P_LOW: f32 = 0.02425;
+    const P_HIGH: f32 = 1.0 - P_LOW;
+
+    if p < P_LOW {
+        // Rational approximation for lower region
+        let q = (-2.0 * p.ln()).sqrt();
+        (((((C1 * q + C2) * q + C3) * q + C4) * q + C5) * q + C6)
+            / ((((D1 * q + D2) * q + D3) * q + D4) * q + 1.0)
+    } else if p <= P_HIGH {
+        // Rational approximation for central region
+        let q = p - 0.5;
+        let r = q * q;
+        (((((A1 * r + A2) * r + A3) * r + A4) * r + A5) * r + A6) * q
+            / (((((B1 * r + B2) * r + B3) * r + B4) * r + B5) * r + 1.0)
+    } else {
+        // Rational approximation for upper region
+        let q = (-2.0 * (1.0 - p).ln()).sqrt();
+        -(((((C1 * q + C2) * q + C3) * q + C4) * q + C5) * q + C6)
+            / ((((D1 * q + D2) * q + D3) * q + D4) * q + 1.0)
     }
 }
 
@@ -293,10 +392,20 @@ pub fn d2f_decode_block(
     config: &Config,
     decode_config: &D2fDecodeConfig,
     pruner: &dyn ConstraintPruner,
+    screener: &dyn ScreeningPruner,
     rng: &mut Rng,
 ) -> D2fBlockResult {
     let mut ctx = D2fContext::new(config);
-    d2f_decode_block_with_prompt_with(&mut ctx, weights, config, decode_config, &[], pruner, rng)
+    d2f_decode_block_with_prompt_with(
+        &mut ctx,
+        weights,
+        config,
+        decode_config,
+        &[],
+        pruner,
+        screener,
+        rng,
+    )
 }
 
 /// Decode a single block with optional prompt context.
@@ -309,6 +418,7 @@ pub fn d2f_decode_block_with_prompt(
     decode_config: &D2fDecodeConfig,
     prompt: &[usize],
     pruner: &dyn ConstraintPruner,
+    screener: &dyn ScreeningPruner,
     rng: &mut Rng,
 ) -> D2fBlockResult {
     let mut ctx = D2fContext::new(config);
@@ -319,6 +429,7 @@ pub fn d2f_decode_block_with_prompt(
         decode_config,
         prompt,
         pruner,
+        screener,
         rng,
     )
 }
@@ -330,9 +441,10 @@ pub fn d2f_decode_block_with_target(
     decode_config: &D2fDecodeConfig,
     target_tokens: &[usize],
     pruner: &dyn ConstraintPruner,
+    screener: &dyn ScreeningPruner,
     rng: &mut Rng,
 ) -> D2fBlockResult {
-    let mut result = d2f_decode_block(weights, config, decode_config, pruner, rng);
+    let mut result = d2f_decode_block(weights, config, decode_config, pruner, screener, rng);
     result.accuracy = Some(denoising_accuracy(&result.tokens, target_tokens));
     result
 }
@@ -347,9 +459,19 @@ pub fn d2f_decode_block_with(
     config: &Config,
     decode_config: &D2fDecodeConfig,
     pruner: &dyn ConstraintPruner,
+    screener: &dyn ScreeningPruner,
     rng: &mut Rng,
 ) -> D2fBlockResult {
-    d2f_decode_block_with_prompt_with(dctx, weights, config, decode_config, &[], pruner, rng)
+    d2f_decode_block_with_prompt_with(
+        dctx,
+        weights,
+        config,
+        decode_config,
+        &[],
+        pruner,
+        screener,
+        rng,
+    )
 }
 
 /// Zero-alloc variant of [`d2f_decode_block_with_prompt`].
@@ -365,6 +487,7 @@ pub fn d2f_decode_block_with_prompt_with(
     decode_config: &D2fDecodeConfig,
     prompt: &[usize],
     pruner: &dyn ConstraintPruner,
+    screener: &dyn ScreeningPruner,
     rng: &mut Rng,
 ) -> D2fBlockResult {
     // Standalone decode — no persistent KV across calls
@@ -449,7 +572,9 @@ pub fn d2f_decode_block_with_prompt_with(
             let depth = p - block_start;
             let parent_tokens = &tokens[block_start..p];
 
-            // Compute softmax denominator over valid tokens only
+            // Compute relevance-weighted softmax denominator over valid tokens only.
+            // ScreeningPruner relevance ∈ [0.0, 1.0] multiplies the softmax exponent,
+            // boosting semantically relevant tokens and dampening irrelevant ones.
             let mut sum_exp = 0.0f32;
             for t in 0..vocab {
                 if t == mask {
@@ -458,7 +583,8 @@ pub fn d2f_decode_block_with_prompt_with(
                 if !pruner.is_valid(depth, t, parent_tokens) {
                     continue;
                 }
-                sum_exp += (logits_p[t] - max_logit).exp();
+                let relevance = screener.relevance(depth, t, parent_tokens);
+                sum_exp += (logits_p[t] - max_logit).exp() * relevance;
             }
 
             if sum_exp == 0.0 {
@@ -466,7 +592,7 @@ pub fn d2f_decode_block_with_prompt_with(
                 continue;
             }
 
-            // Temperature-scaled sampling from valid tokens
+            // Temperature-scaled sampling from valid tokens (relevance-weighted)
             let (chosen_token, chosen_prob) = if temperature > 0.0 && temperature != 1.0 {
                 sample_temperatured(
                     logits_p,
@@ -477,6 +603,7 @@ pub fn d2f_decode_block_with_prompt_with(
                     depth,
                     parent_tokens,
                     pruner,
+                    screener,
                     rng,
                 )
             } else {
@@ -489,6 +616,7 @@ pub fn d2f_decode_block_with_prompt_with(
                     depth,
                     parent_tokens,
                     pruner,
+                    screener,
                     rng,
                 )
             };
@@ -554,6 +682,7 @@ pub fn d2f_decode_block_with_prompt_with_sampler(
     decode_config: &D2fDecodeConfig,
     prompt: &[usize],
     pruner: &dyn ConstraintPruner,
+    screener: &dyn ScreeningPruner,
     rng: &mut Rng,
     sampler: Option<&DiffusionSampler>,
 ) -> D2fBlockResult {
@@ -633,7 +762,8 @@ pub fn d2f_decode_block_with_prompt_with_sampler(
                 if !pruner.is_valid(depth, t, parent_tokens) {
                     continue;
                 }
-                sum_exp += (logits_p[t] - max_logit).exp();
+                let relevance = screener.relevance(depth, t, parent_tokens);
+                sum_exp += (logits_p[t] - max_logit).exp() * relevance;
             }
 
             if sum_exp == 0.0 {
@@ -650,6 +780,7 @@ pub fn d2f_decode_block_with_prompt_with_sampler(
                     depth,
                     parent_tokens,
                     pruner,
+                    screener,
                     rng,
                 )
             } else {
@@ -662,6 +793,7 @@ pub fn d2f_decode_block_with_prompt_with_sampler(
                     depth,
                     parent_tokens,
                     pruner,
+                    screener,
                     rng,
                 )
             };
@@ -732,6 +864,7 @@ pub fn d2f_decode_block_with_sampler(
     config: &Config,
     decode_config: &D2fDecodeConfig,
     pruner: &dyn ConstraintPruner,
+    screener: &dyn ScreeningPruner,
     rng: &mut Rng,
     sampler: Option<&DiffusionSampler>,
 ) -> D2fBlockResult {
@@ -742,6 +875,7 @@ pub fn d2f_decode_block_with_sampler(
         decode_config,
         &[],
         pruner,
+        screener,
         rng,
         sampler,
     )
@@ -757,10 +891,19 @@ pub fn d2f_decode_block_with_target_with(
     decode_config: &D2fDecodeConfig,
     target_tokens: &[usize],
     pruner: &dyn ConstraintPruner,
+    screener: &dyn ScreeningPruner,
     rng: &mut Rng,
 ) -> D2fBlockResult {
-    let mut result =
-        d2f_decode_block_with_prompt_with(dctx, weights, config, decode_config, &[], pruner, rng);
+    let mut result = d2f_decode_block_with_prompt_with(
+        dctx,
+        weights,
+        config,
+        decode_config,
+        &[],
+        pruner,
+        screener,
+        rng,
+    );
     result.accuracy = Some(denoising_accuracy(&result.tokens, target_tokens));
     result
 }
@@ -780,17 +923,19 @@ fn sample_temperatured(
     depth: usize,
     parent_tokens: &[usize],
     pruner: &dyn ConstraintPruner,
+    screener: &dyn ScreeningPruner,
     rng: &mut Rng,
 ) -> (usize, f32) {
     let inv_temp = 1.0 / temperature;
 
-    // Compute scaled sum
+    // Compute relevance-weighted scaled sum
     let mut scaled_sum = 0.0f32;
     for t in 0..vocab {
         if t == mask || !pruner.is_valid(depth, t, parent_tokens) {
             continue;
         }
-        scaled_sum += ((logits[t] - max_logit) * inv_temp).exp();
+        let relevance = screener.relevance(depth, t, parent_tokens);
+        scaled_sum += ((logits[t] - max_logit) * inv_temp).exp() * relevance;
     }
 
     if scaled_sum == 0.0 {
@@ -804,7 +949,8 @@ fn sample_temperatured(
         if t == mask || !pruner.is_valid(depth, t, parent_tokens) {
             continue;
         }
-        let prob = ((logits[t] - max_logit) * inv_temp).exp() / scaled_sum;
+        let relevance = screener.relevance(depth, t, parent_tokens);
+        let prob = ((logits[t] - max_logit) * inv_temp).exp() * relevance / scaled_sum;
         cumsum += prob;
         if cumsum >= r {
             return (t, prob);
@@ -826,6 +972,7 @@ fn sample_greedy(
     depth: usize,
     parent_tokens: &[usize],
     pruner: &dyn ConstraintPruner,
+    _screener: &dyn ScreeningPruner,
     rng: &mut Rng,
 ) -> (usize, f32) {
     let r = (rng.next() as f64 / u64::MAX as f64) as f32;
@@ -962,6 +1109,7 @@ impl<'a> D2fPipeline<'a> {
         self,
         weights: &TransformerWeights,
         pruner: &dyn ConstraintPruner,
+        screener: &dyn ScreeningPruner,
         rng: &mut Rng,
     ) -> D2fPipelineResult {
         let n_blocks = self.n_blocks();
@@ -1057,7 +1205,8 @@ impl<'a> D2fPipeline<'a> {
                         if t == mask || !pruner.is_valid(depth, t, parent_tokens) {
                             continue;
                         }
-                        sum_exp += (logits_p[t] - max_logit).exp();
+                        let relevance = screener.relevance(depth, t, parent_tokens);
+                        sum_exp += (logits_p[t] - max_logit).exp() * relevance;
                     }
 
                     if sum_exp == 0.0 {
@@ -1074,6 +1223,7 @@ impl<'a> D2fPipeline<'a> {
                             depth,
                             parent_tokens,
                             pruner,
+                            screener,
                             rng,
                         )
                     } else {
@@ -1086,6 +1236,7 @@ impl<'a> D2fPipeline<'a> {
                             depth,
                             parent_tokens,
                             pruner,
+                            screener,
                             rng,
                         )
                     };
@@ -1297,6 +1448,7 @@ pub fn contiguous_prefix_promote(
 /// Convergence status for a D2F decode block.
 #[cfg(feature = "dmax_spd")]
 #[derive(Clone, Debug, PartialEq)]
+#[repr(u8)]
 pub enum BlockConvergence {
     /// Block has not converged, continue denoising.
     NotConverged,
@@ -1502,7 +1654,7 @@ pub fn d2f_decode_block_soft(
 mod tests {
     use super::*;
     use crate::dllm::{generate_pattern_dataset, train_mini_dllm};
-    use crate::speculative::types::NoPruner;
+    use crate::speculative::types::{NoPruner, NoScreeningPruner};
 
     #[test]
     fn test_block_state_transitions() {
@@ -1537,7 +1689,14 @@ mod tests {
 
         let weights = TransformerWeights::new(&config, &mut rng);
 
-        let result = d2f_decode_block(&weights, &config, &decode_config, &NoPruner, &mut rng);
+        let result = d2f_decode_block(
+            &weights,
+            &config,
+            &decode_config,
+            &NoPruner,
+            &NoScreeningPruner,
+            &mut rng,
+        );
 
         assert_eq!(result.tokens.len(), decode_config.block_size);
         assert!(result.steps_used <= decode_config.denoise_steps);
@@ -1559,6 +1718,7 @@ mod tests {
             &decode_config,
             &prompt,
             &NoPruner,
+            &NoScreeningPruner,
             &mut rng,
         );
 
@@ -1579,7 +1739,7 @@ mod tests {
         let pipeline = D2fPipeline::new(&config, decode_config, total_len);
         assert_eq!(pipeline.n_blocks(), 2);
 
-        let result = pipeline.decode_all(&weights, &NoPruner, &mut rng);
+        let result = pipeline.decode_all(&weights, &NoPruner, &NoScreeningPruner, &mut rng);
 
         assert_eq!(result.tokens.len(), total_len);
         assert_eq!(result.block_results.len(), 2);
@@ -1598,7 +1758,7 @@ mod tests {
         let prompt = vec![0, 1];
 
         let pipeline = D2fPipeline::with_prompt(&config, decode_config, total_len, &prompt);
-        let result = pipeline.decode_all(&weights, &NoPruner, &mut rng);
+        let result = pipeline.decode_all(&weights, &NoPruner, &NoScreeningPruner, &mut rng);
 
         // Tokens should be prompt + block
         assert_eq!(result.tokens.len(), prompt.len() + total_len);
@@ -1625,7 +1785,14 @@ mod tests {
             ..D2fDecodeConfig::default()
         };
 
-        let result = d2f_decode_block(&weights, &config, &decode_config, &NoPruner, &mut rng);
+        let result = d2f_decode_block(
+            &weights,
+            &config,
+            &decode_config,
+            &NoPruner,
+            &NoScreeningPruner,
+            &mut rng,
+        );
 
         let n_unmasked = result
             .tokens
@@ -1646,7 +1813,14 @@ mod tests {
 
         let weights = TransformerWeights::new(&config, &mut rng);
 
-        let result = d2f_decode_block(&weights, &config, &decode_config, &NoPruner, &mut rng);
+        let result = d2f_decode_block(
+            &weights,
+            &config,
+            &decode_config,
+            &NoPruner,
+            &NoScreeningPruner,
+            &mut rng,
+        );
 
         assert!(!result.confidence_history.is_empty());
         assert_eq!(result.confidence_history.len(), result.steps_used);
@@ -1664,7 +1838,14 @@ mod tests {
 
         let weights = TransformerWeights::new(&config, &mut rng);
 
-        let result = d2f_decode_block(&weights, &config, &decode_config, &NoPruner, &mut rng);
+        let result = d2f_decode_block(
+            &weights,
+            &config,
+            &decode_config,
+            &NoPruner,
+            &NoScreeningPruner,
+            &mut rng,
+        );
 
         assert_eq!(result.tokens.len(), decode_config.block_size);
         // All tokens should be valid vocab indices
@@ -1700,7 +1881,14 @@ mod tests {
             ..D2fDecodeConfig::default()
         };
 
-        let result = d2f_decode_block(&weights, &config, &multistep_config, &NoPruner, &mut rng);
+        let result = d2f_decode_block(
+            &weights,
+            &config,
+            &multistep_config,
+            &NoPruner,
+            &NoScreeningPruner,
+            &mut rng,
+        );
 
         let n_unmasked = result
             .tokens
@@ -1736,6 +1924,7 @@ mod tests {
             &config,
             &standard_config,
             &NoPruner,
+            &NoScreeningPruner,
             &mut Rng::new(42),
         );
         let result_multistep = d2f_decode_block(
@@ -1743,6 +1932,7 @@ mod tests {
             &config,
             &multistep_config,
             &NoPruner,
+            &NoScreeningPruner,
             &mut Rng::new(42),
         );
 
@@ -1780,7 +1970,7 @@ mod tests {
         let pipeline = D2fPipeline::with_prompt(&config, decode_config, 4, &[config.bos_token])
             .with_soft_config(soft_config);
 
-        let result = pipeline.decode_all(&weights, &NoPruner, &mut rng);
+        let result = pipeline.decode_all(&weights, &NoPruner, &NoScreeningPruner, &mut rng);
 
         // Should produce valid tokens (not all mask tokens)
         assert!(
@@ -1802,7 +1992,7 @@ mod tests {
 
         let pipeline = D2fPipeline::with_prompt(&config, decode_config, 4, &[config.bos_token]);
 
-        let result = pipeline.decode_all(&weights, &NoPruner, &mut rng);
+        let result = pipeline.decode_all(&weights, &NoPruner, &NoScreeningPruner, &mut rng);
 
         // Should produce valid tokens (not all mask tokens)
         assert!(
@@ -1827,7 +2017,7 @@ mod tests {
         let pipeline = D2fPipeline::with_prompt(&config, decode_config, 8, &[config.bos_token])
             .with_soft_config(soft_config);
 
-        let result = pipeline.decode_all(&weights, &NoPruner, &mut rng);
+        let result = pipeline.decode_all(&weights, &NoPruner, &NoScreeningPruner, &mut rng);
 
         // Should have 2 blocks
         assert_eq!(result.block_results.len(), 2, "should have 2 blocks");

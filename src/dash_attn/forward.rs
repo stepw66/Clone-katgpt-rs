@@ -11,8 +11,13 @@ use crate::simd;
 use crate::transformer::{ForwardContext, MultiLayerKVCache, TransformerWeights};
 use crate::types::{self, Config, DashAttnConfig};
 
-use super::chunk_summary::{ChunkSummaryCache, ChunkSummaryQuery, summarize_chunk};
-use super::routing::score_blocks_entmax;
+use super::chunk_summary::{ChunkSummaryCache, ChunkSummaryQuery, summarize_chunk_into};
+use super::routing::score_blocks_entmax_into;
+
+#[cfg(feature = "vortex_flow")]
+use super::vortex_flow::{
+    VortexFlow, VortexFlowExt, VortexRouter, VortexRouterCache, VortexScratch,
+};
 
 // ---------------------------------------------------------------------------
 // Prefill (batch prompt processing)
@@ -37,6 +42,12 @@ pub fn forward_dash_attn_prefill(
 ) {
     let n = config.n_embd;
     let hd = config.head_dim;
+
+    // Cache once — avoids O(n_kv_head * head_dim) scan per position per head per layer
+    let zero_init = summary_query.is_zero_init();
+    // Pre-allocate scratch buffers for the non-zero-init summarize path
+    let mut summarize_out = vec![0.0f32; hd];
+    let mut summarize_scores_buf = vec![0.0f32; 1]; // chunk_size=1 at boundaries
 
     for (pos, &token) in tokens.iter().enumerate() {
         let tok_off = token * n;
@@ -69,11 +80,35 @@ pub fn forward_dash_attn_prefill(
             // Compute chunk summaries at chunk boundaries
             if pos % dash_config.chunk_size == 0 {
                 let chunk_idx = pos / dash_config.chunk_size;
-                for h in 0..config.n_kv_head {
-                    let k_h = ctx.k[h * hd..(h + 1) * hd].to_vec();
-                    let summary = summarize_chunk(summary_query, &k_h, 1, h, hd);
-                    if chunk_idx < summary_cache.n_chunks() {
-                        summary_cache.summaries[chunk_idx][h] = summary;
+                if chunk_idx < summary_cache.n_chunks() {
+                    for h in 0..config.n_kv_head {
+                        let k_h = &ctx.k[h * hd..(h + 1) * hd];
+                        // Reuse per-head Vecs: clear + write in-place avoids realloc
+                        let slot = &mut summary_cache.summaries[chunk_idx][h];
+                        slot.resize(hd, 0.0);
+                        if zero_init {
+                            // Inline mean-pool for the common zero-init case (avoids alloc)
+                            let inv = if k_h.len() == hd && hd > 0 {
+                                1.0 / hd as f32
+                            } else {
+                                1.0
+                            };
+                            slot[..hd].copy_from_slice(k_h);
+                            for v in slot[..hd].iter_mut() {
+                                *v *= inv;
+                            }
+                        } else {
+                            summarize_chunk_into(
+                                summary_query,
+                                k_h,
+                                1,
+                                h,
+                                hd,
+                                &mut summarize_out,
+                                &mut summarize_scores_buf,
+                            );
+                            slot[..hd].copy_from_slice(&summarize_out[..hd]);
+                        }
                     }
                 }
             }
@@ -130,6 +165,13 @@ pub fn forward_dash_attn_decode<'a>(
     simd::simd_add_inplace(&mut ctx.x[..n], &weights.wte[tok_off..tok_off + n]);
     simd::simd_add_inplace(&mut ctx.x[..n], &weights.wpe[pos_off..pos_off + n]);
 
+    // Pre-allocate summary references outside the layer loop to avoid
+    // per-layer Vec allocation (summaries don't change between layers).
+    let mut summary_refs: Vec<&Vec<f32>> = Vec::with_capacity(summary_cache.n_chunks());
+    // Pre-allocate routing scratch outside the layer loop for reuse across layers
+    let mut routing_scratch =
+        super::routing::RoutingScratch::new(summary_cache.n_chunks(), config.head_dim);
+
     for layer_weights in &weights.layers {
         types::rmsnorm(&mut ctx.x);
         ctx.xr[..n].copy_from_slice(&ctx.x[..n]);
@@ -155,14 +197,14 @@ pub fn forward_dash_attn_decode<'a>(
         if summary_cache.n_chunks() > 0 {
             let hd = config.head_dim;
             // Use first query head as representative for routing decision
-            let q_head = ctx.q[..hd].to_vec();
-            // Collect summaries for first KV head as routing proxy
-            let summaries: Vec<Vec<f32>> = summary_cache
-                .summaries
-                .iter()
-                .map(|chunk| chunk[0].clone())
-                .collect();
-            let _routing = score_blocks_entmax(&q_head, &summaries, dash_config);
+            let q_head = &ctx.q[..hd];
+            // Reuse pre-allocated summary reference buffer
+            summary_refs.clear();
+            for chunk in &summary_cache.summaries {
+                summary_refs.push(&chunk[0]);
+            }
+            let _routing =
+                score_blocks_entmax_into(q_head, &summary_refs, dash_config, &mut routing_scratch);
             // TODO: Use routing.active_indices to select sparse KV blocks
         }
 
@@ -191,6 +233,113 @@ pub fn forward_dash_attn_decode<'a>(
 
     ctx.hidden_state[..n].copy_from_slice(&ctx.x[..n]);
     // LM head: standard_lm_head is private, use matmul directly
+    types::matmul(
+        &mut ctx.logits,
+        &weights.lm_head,
+        &ctx.x,
+        config.vocab_size,
+        n,
+    );
+    &mut ctx.logits
+}
+
+// ---------------------------------------------------------------------------
+// Decode with VortexFlow router (feature-gated)
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "vortex_flow")]
+/// Forward pass for DashAttention in decode mode using a VortexFlow router.
+///
+/// Identical to [`forward_dash_attn_decode`] except that block selection
+/// uses the provided VortexFlow router instead of the hardcoded entmax path.
+/// This is the Phase 1 wiring — the router runs but attention is still dense.
+///
+/// # Arguments
+/// * `router` — VortexFlow router for block selection
+/// * `router_cache` — Router cache (populated during prefill via `forward_cache`)
+/// * `vortex_ext` — VortexFlow configuration (must have `is_vortex() == true`)
+#[allow(clippy::too_many_arguments)]
+pub fn forward_dash_attn_decode_vortex<'a>(
+    ctx: &'a mut ForwardContext,
+    weights: &TransformerWeights,
+    _cache: &mut MultiLayerKVCache,
+    token: usize,
+    pos: usize,
+    config: &Config,
+    _dash_config: &DashAttnConfig,
+    _summary_query: &ChunkSummaryQuery,
+    _summary_cache: &ChunkSummaryCache,
+    router: &VortexRouter,
+    router_cache: &VortexRouterCache,
+    _vortex_ext: &VortexFlowExt,
+) -> &'a mut [f32] {
+    let n = config.n_embd;
+    let hd = config.head_dim;
+    let tok_off = token * n;
+    let pos_off = pos * n;
+    ctx.x[..n].fill(0.0);
+    simd::simd_add_inplace(&mut ctx.x[..n], &weights.wte[tok_off..tok_off + n]);
+    simd::simd_add_inplace(&mut ctx.x[..n], &weights.wpe[pos_off..pos_off + n]);
+
+    // Pre-allocate VortexFlow scratch outside the layer loop for reuse
+    let n_blocks = router_cache.n_blocks();
+    let mut vortex_scratch = VortexScratch::new(n_blocks.max(1));
+    // Default top_k for routing (Phase 1: use chunk_size as proxy)
+    let top_k = n_blocks;
+
+    for layer_weights in &weights.layers {
+        types::rmsnorm(&mut ctx.x);
+        ctx.xr[..n].copy_from_slice(&ctx.x[..n]);
+        types::rmsnorm(&mut ctx.x);
+
+        types::matmul(&mut ctx.q, &layer_weights.attn_wq, &ctx.x, n, n);
+        types::matmul(
+            &mut ctx.k,
+            &layer_weights.attn_wk,
+            &ctx.x,
+            types::kv_dim(config),
+            n,
+        );
+        types::matmul(
+            &mut ctx.v,
+            &layer_weights.attn_wv,
+            &ctx.x,
+            types::kv_dim(config),
+            n,
+        );
+
+        // VortexFlow routing: use the router for block selection
+        if n_blocks > 0 {
+            let q_head = &ctx.q[..hd];
+            let _decision =
+                router.forward_indexer(q_head, router_cache, n_blocks, top_k, &mut vortex_scratch);
+            // TODO: Use decision.blocks to select sparse KV blocks
+        }
+
+        types::matmul(&mut ctx.attn_out, &layer_weights.attn_wo, &ctx.q, n, n);
+        simd::simd_add_inplace(&mut ctx.x[..n], &ctx.attn_out[..n]);
+        simd::simd_add_inplace(&mut ctx.x[..n], &ctx.xr[..n]);
+
+        ctx.xr2[..n].copy_from_slice(&ctx.x[..n]);
+        types::rmsnorm(&mut ctx.x);
+        types::matmul_relu(
+            &mut ctx.hidden,
+            &layer_weights.mlp_w1,
+            &ctx.x,
+            config.mlp_hidden,
+            n,
+        );
+        types::matmul(
+            &mut ctx.x,
+            &layer_weights.mlp_w2,
+            &ctx.hidden,
+            n,
+            config.mlp_hidden,
+        );
+        simd::simd_add_inplace(&mut ctx.x[..n], &ctx.xr2[..n]);
+    }
+
+    ctx.hidden_state[..n].copy_from_slice(&ctx.x[..n]);
     types::matmul(
         &mut ctx.logits,
         &weights.lm_head,

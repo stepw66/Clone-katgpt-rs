@@ -12,7 +12,8 @@ use crate::pruners::bandit::BanditStrategy;
 // into katgpt-core/src/traits.rs to eliminate duplication with riir-engine.
 
 pub use katgpt_core::traits::{
-    BinaryScreeningPruner, ConstraintPruner, NoPruner, NoScreeningPruner, ScreeningPruner,
+    BinaryScreeningPruner, CompletionHorizon, ConstraintPruner, DominoPruner, NoPruner,
+    NoScreeningPruner, ScreeningPruner,
 };
 
 /// Depth-aware early stopping gate (PTRM Plan 083).
@@ -67,12 +68,15 @@ impl<P: Default + ScreeningPruner> Default for EarlyStopGate<P> {
 // ── DDTree Node ────────────────────────────────────────────────
 
 /// DDTree node for Best-First Search.
+///
+/// Field order: largest alignment first (u128, usize) → f32 last.
+/// Eliminates 4 bytes of padding between `score` and `depth` on 64-bit targets.
 #[derive(Copy, Clone, PartialEq)]
 pub struct TreeNode {
-    pub score: f32,
+    pub parent_path: u128,
     pub depth: usize,
     pub token_idx: usize,
-    pub parent_path: u128,
+    pub score: f32,
 }
 
 impl Eq for TreeNode {}
@@ -439,6 +443,7 @@ impl DDTreeBranchCache {
 
 /// Reason a drafted branch was rejected during verification.
 #[derive(Debug, Clone, PartialEq)]
+#[repr(u8)]
 pub enum RejectionReason {
     /// Token probability below acceptance threshold.
     LowProbability,
@@ -448,6 +453,14 @@ pub enum RejectionReason {
     LowRelevance { score: f32 },
     /// Branch diverged from target model's preference.
     DivergedFromTarget,
+    /// Kurtosis gate rejected — draft distribution too flat for speculation (Plan 203b).
+    #[cfg(feature = "kurtosis_gate")]
+    KurtosisRejection {
+        /// Excess kurtosis of draft marginal at this position.
+        kurtosis: f32,
+        /// Threshold that was not met.
+        threshold: f32,
+    },
 }
 
 /// Streaming event emitted during speculative decoding steps.
@@ -511,6 +524,7 @@ pub enum DraftEvent {
 ///
 /// Use [`DecodeStrategy::recommend`] to auto-select based on task characteristics.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[repr(u8)]
 pub enum DecodeStrategy {
     /// Standard autoregressive: one token per step.
     #[default]
@@ -575,10 +589,10 @@ impl DecodeStrategy {
 pub struct SdeConfig {
     /// Noise re-injection scale (ELF default: 1.0, our default: 0.0 = disabled).
     pub gamma: f32,
-    /// Whether to apply noise only to non-top-1 candidates (preserve best, diversify rest).
-    pub preserve_top1: bool,
     /// Minimum logit magnitude for noise application (skip very confident tokens).
     pub confidence_floor: f32,
+    /// Whether to apply noise only to non-top-1 candidates (preserve best, diversify rest).
+    pub preserve_top1: bool,
 }
 
 impl Default for SdeConfig {
@@ -607,10 +621,230 @@ impl SdeConfig {
     }
 }
 
+// ── DFlare Marginal Fusion (Plan 174 T1, feature: dflare_fusion) ──
+
+/// Configuration for marginal fusion: blending marginals from multiple conditioning sources.
+///
+/// Each conditioning source extracts hidden states from a different set of target layers,
+/// producing independent marginals. These are blended with alpha weights to produce
+/// the final fused marginals: `fused[k][v] = Σ_i alpha_i * marginals_i[k][v]`.
+///
+/// This is modelless — no training required. Alpha weights must sum to 1.0.
+#[cfg(feature = "dflare_fusion")]
+#[derive(Debug, Clone)]
+pub struct MarginalFusionConfig {
+    /// Per-conditioning-source blend weights. Must sum to 1.0.
+    pub alpha_weights: Vec<f32>,
+    /// Which target layers to extract per conditioning source.
+    /// `condition_layer_ids[i]` = layer indices for source i.
+    pub condition_layer_ids: Vec<Vec<usize>>,
+    /// Whether marginal fusion is enabled.
+    pub enabled: bool,
+}
+
+#[cfg(feature = "dflare_fusion")]
+impl MarginalFusionConfig {
+    /// Create a disabled config (fusion inactive).
+    pub fn disabled() -> Self {
+        Self {
+            alpha_weights: vec![],
+            condition_layer_ids: vec![],
+            enabled: false,
+        }
+    }
+
+    /// Create a two-source config with equal weights (0.5/0.5).
+    ///
+    /// Source 0: early target layers (first third).
+    /// Source 1: late target layers (last third).
+    pub fn balanced(num_target_layers: usize) -> Self {
+        let n = num_target_layers;
+        // Need at least 2 layers to split into two non-empty sources.
+        if n < 2 {
+            return Self::disabled();
+        }
+        let mid = n / 2;
+        Self {
+            alpha_weights: vec![0.5, 0.5],
+            condition_layer_ids: vec![(0..mid).collect(), (mid..n).collect()],
+            enabled: true,
+        }
+    }
+
+    /// Validate that alpha weights sum to ~1.0 and layer IDs are non-empty.
+    pub fn validate(&self) -> Result<(), String> {
+        if !self.enabled {
+            return Ok(());
+        }
+        if self.alpha_weights.len() != self.condition_layer_ids.len() {
+            return Err(format!(
+                "alpha_weights len ({}) != condition_layer_ids len ({})",
+                self.alpha_weights.len(),
+                self.condition_layer_ids.len()
+            ));
+        }
+        let sum: f32 = self.alpha_weights.iter().sum();
+        if (sum - 1.0).abs() > 0.01 {
+            return Err(format!("alpha weights sum to {sum:.4}, expected 1.0"));
+        }
+        for (i, ids) in self.condition_layer_ids.iter().enumerate() {
+            if ids.is_empty() {
+                return Err(format!("condition_layer_ids[{i}] is empty"));
+            }
+        }
+        Ok(())
+    }
+}
+
+// ── DFlare KV Routing (Plan 174 T2, feature: dflare_kv_routing) ──
+
+/// Configuration for pruner-confidence KV routing.
+///
+/// Routes between target-conditioned and unconditioned KV based on pruner
+/// confidence at each step:
+/// - High confidence (> high_threshold): use conditioned KV
+/// - Low confidence (< low_threshold): use unconditioned KV
+/// - Medium: blend proportional to confidence
+#[cfg(feature = "dflare_kv_routing")]
+#[derive(Debug, Clone)]
+pub struct KvRoutingConfig {
+    /// Above this pruner relevance, use fully conditioned KV.
+    pub high_confidence_threshold: f32,
+    /// Below this pruner relevance, use fully unconditioned KV.
+    pub low_confidence_threshold: f32,
+    /// Whether KV routing is enabled.
+    pub enabled: bool,
+}
+
+#[cfg(feature = "dflare_kv_routing")]
+impl Default for KvRoutingConfig {
+    fn default() -> Self {
+        Self {
+            high_confidence_threshold: 0.8,
+            low_confidence_threshold: 0.3,
+            enabled: false,
+        }
+    }
+}
+
+#[cfg(feature = "dflare_kv_routing")]
+impl KvRoutingConfig {
+    /// Compute blend factor for conditioned vs unconditioned KV.
+    ///
+    /// Returns 0.0 = fully unconditioned, 1.0 = fully conditioned.
+    pub fn blend_factor(&self, pruner_relevance: f32) -> f32 {
+        if !self.enabled {
+            return 1.0; // default: conditioned
+        }
+        if pruner_relevance >= self.high_confidence_threshold {
+            1.0
+        } else if pruner_relevance <= self.low_confidence_threshold {
+            0.0
+        } else {
+            // Linear interpolation in medium range
+            let range = self.high_confidence_threshold - self.low_confidence_threshold;
+            (pruner_relevance - self.low_confidence_threshold) / range
+        }
+    }
+}
+
+// ── DFlare Position-Weighted Budget (Plan 174 T3, feature: dflare_progressive_budget) ──
+
+/// Configuration for position-weighted DDTree budget allocation.
+///
+/// Biases DDTree expansion toward early positions using exponential decay:
+/// `weight(depth) = exp(-depth / gamma)`. More nodes at early depths,
+/// fewer at later depths. Total budget stays the same.
+#[cfg(feature = "dflare_progressive_budget")]
+#[derive(Debug, Clone)]
+pub struct PositionWeightedBudget {
+    /// Exponential decay rate. Higher = more front-loaded.
+    /// Typical values: 2, 4, 8.
+    pub gamma: f32,
+    /// Minimum budget per depth level (floor).
+    pub min_budget_per_depth: usize,
+    /// Whether progressive budget is enabled.
+    pub enabled: bool,
+}
+
+#[cfg(feature = "dflare_progressive_budget")]
+impl Default for PositionWeightedBudget {
+    fn default() -> Self {
+        Self {
+            gamma: 4.0,
+            min_budget_per_depth: 1,
+            enabled: false,
+        }
+    }
+}
+
+#[cfg(feature = "dflare_progressive_budget")]
+impl PositionWeightedBudget {
+    /// Compute position weight for a given depth.
+    ///
+    /// `w(d) = exp(-d / gamma)`, clamped to [0, 1].
+    pub fn weight(&self, depth: usize) -> f32 {
+        (-(depth as f32) / self.gamma).exp()
+    }
+
+    /// Allocate total budget across depths proportional to position weights.
+    ///
+    /// Returns `Vec<usize>` of length `max_depth` where each element is the
+    /// number of tree nodes allocated to that depth. Sum equals `total_budget`.
+    /// Each depth gets at least `min_budget_per_depth`.
+    pub fn allocate(&self, total_budget: usize, max_depth: usize) -> Vec<usize> {
+        if max_depth == 0 {
+            return vec![];
+        }
+
+        let weights: Vec<f32> = (0..max_depth).map(|d| self.weight(d)).collect();
+        let weight_sum: f32 = weights.iter().sum();
+
+        // First pass: allocate proportional, floor to min_budget_per_depth
+        let mut allocation: Vec<usize> = weights
+            .iter()
+            .map(|&w| (w / weight_sum * total_budget as f32).floor() as usize)
+            .collect();
+
+        // Enforce minimum
+        for a in &mut allocation {
+            *a = (*a).max(self.min_budget_per_depth);
+        }
+
+        // Adjust to match total_budget exactly
+        let current_total: usize = allocation.iter().sum();
+        if current_total < total_budget {
+            let mut remaining = total_budget - current_total;
+            // Distribute remainder to earliest depths (highest weight)
+            for i in 0..max_depth {
+                if remaining == 0 {
+                    break;
+                }
+                allocation[i] += 1;
+                remaining -= 1;
+            }
+        } else if current_total > total_budget {
+            // Trim from latest depths (lowest weight) if we over-allocated
+            let mut excess = current_total - total_budget;
+            for i in (0..max_depth).rev() {
+                if excess == 0 {
+                    break;
+                }
+                let trim = excess.min(allocation[i].saturating_sub(self.min_budget_per_depth));
+                allocation[i] -= trim;
+                excess -= trim;
+            }
+        }
+
+        allocation
+    }
+}
+
 // ── PFlash Block-Sparse Prefill (Plan 044) ─────────────────────
 
 /// Whether to apply block-sparse prefill compression.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[repr(u8)]
 pub enum PrefillMode {
     /// Never compress — use full prompt.
     #[default]
@@ -619,6 +853,28 @@ pub enum PrefillMode {
     Auto,
     /// Always compress (even short prompts).
     Always,
+}
+
+/// Controls how the DDTree tree budget adapts per-prompt based on complexity signals.
+///
+/// When enabled, the compression ratio from PFlash attention scoring (a free byproduct
+/// of prefill) scales the tree budget: simple prompts → less search, complex → more.
+/// Budget is clamped to [base/2, base*2] regardless of signal.
+///
+/// # Feature flag
+/// `budget_adaptation` — Plan 167
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[repr(u8)]
+pub enum BudgetAdaptation {
+    /// Fixed budget — current behavior, no adaptation.
+    #[default]
+    Off,
+    /// Scale by compression ratio from attention scores.
+    /// r ∈ (0,1]: fraction of blocks that pass alpha threshold.
+    /// High r → complex → more budget. Low r → simple → less budget.
+    Compression,
+    /// Scale by first-marginal entropy (placeholder for future).
+    Entropy,
 }
 
 // ── Score Reduction Mode (Research 45, Plan 080) ──────────────
@@ -641,6 +897,7 @@ pub enum PrefillMode {
 /// MaxSim mode must match uncompressed `maxsim_score` within 1e-3.
 /// Latency overhead vs SoftmaxSum mode must be ≤5%.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[repr(u8)]
 pub enum ScoreReduction {
     /// Standard attention: softmax-weighted sum (existing behavior).
     #[default]
@@ -665,13 +922,15 @@ pub struct FlashPrefillConfig {
     pub window: usize,
     /// Number of final query blocks that get full attention.
     pub last_n_full: usize,
-    /// Importance threshold: keep blocks with score >= max_score * alpha.
-    pub alpha: f32,
     /// Number of tail blocks to use for importance scoring.
     pub tail_window: usize,
+    /// Importance threshold: keep blocks with score >= max_score * alpha.
+    pub alpha: f32,
     /// Score reduction mode for block pair scoring.
     /// When `maxsim` feature is disabled, always behaves as SoftmaxSum.
     pub score_reduction: ScoreReduction,
+    /// Budget adaptation mode for per-prompt tree budget scaling.
+    pub budget_adaptation: BudgetAdaptation,
 }
 
 impl Default for FlashPrefillConfig {
@@ -684,6 +943,7 @@ impl Default for FlashPrefillConfig {
             alpha: 0.15,
             tail_window: 4,
             score_reduction: ScoreReduction::default(),
+            budget_adaptation: BudgetAdaptation::default(),
         }
     }
 }
@@ -699,6 +959,7 @@ impl FlashPrefillConfig {
             alpha: 0.15,
             tail_window: 4,
             score_reduction: ScoreReduction::default(),
+            budget_adaptation: BudgetAdaptation::default(),
         }
     }
 
@@ -712,6 +973,7 @@ impl FlashPrefillConfig {
             alpha: 0.85,
             tail_window: 8,
             score_reduction: ScoreReduction::default(),
+            budget_adaptation: BudgetAdaptation::default(),
         }
     }
 
@@ -725,6 +987,7 @@ impl FlashPrefillConfig {
             alpha: 0.12,
             tail_window: 2,
             score_reduction: ScoreReduction::default(),
+            budget_adaptation: BudgetAdaptation::default(),
         }
     }
 }
@@ -808,15 +1071,39 @@ pub trait ConflictDetector: Send + Sync {
         pruned_count: usize,
         total_candidates: usize,
     ) -> bool;
+
+    /// Check conflict with depth-aware escalation (Plan 170 F4).
+    ///
+    /// Default implementation delegates to [`is_conflicted`].
+    /// Implementors that support depth-adaptive thresholds should
+    /// override this method to tighten detection at deeper search depths.
+    ///
+    /// - `depth` — current search depth (0 = root, higher = more committed)
+    fn is_conflicted_at_depth(
+        &self,
+        marginals: &[&[f32]],
+        pruned_count: usize,
+        total_candidates: usize,
+        depth: usize,
+    ) -> bool {
+        let _ = depth;
+        self.is_conflicted(marginals, pruned_count, total_candidates)
+    }
 }
 
-/// Entropy-based conflict detector (T2).
+/// Entropy-based conflict detector (T2 + Plan 170 F4).
 ///
 /// Flags conflict when:
 /// 1. Pruning rate exceeds threshold (too aggressive = likely wrong path)
 /// 2. Any position has near-zero entropy (overconfident = probably hallucinating)
 ///
 /// LDT's conflict threshold θ_cls = 0.6 → analogous to 60% max prune rate.
+///
+/// F4 extension: threshold tightens with depth via `depth_escalation`.
+/// At depth 0, uses full `max_prune_rate`. At deeper depths, the effective
+/// threshold decreases: `effective = max_prune_rate - depth * depth_escalation`.
+/// This mirrors LDT's θ_eval_CLS > θ_train_CLS insight: conflict signals
+/// become more trustworthy as the state commits.
 #[cfg(feature = "lattice_deduction")]
 #[derive(Debug, Clone)]
 pub struct EntropyConflictDetector {
@@ -825,14 +1112,19 @@ pub struct EntropyConflictDetector {
     pub max_prune_rate: f32,
     /// Minimum entropy per position (below = conflict signal).
     pub entropy_floor: f32,
+    /// Rate at which max_prune_rate decreases per search depth (Plan 170 F4).
+    /// Default: 0.02 (at depth 10, threshold drops by 0.2).
+    /// Effective threshold = max(max_prune_rate - depth * depth_escalation, 0.1).
+    pub depth_escalation: f32,
 }
 
 #[cfg(feature = "lattice_deduction")]
 impl Default for EntropyConflictDetector {
     fn default() -> Self {
         Self {
-            max_prune_rate: 0.6, // LDT θ_cls = 0.6 analog
-            entropy_floor: 0.01, // Near-deterministic = suspicious
+            max_prune_rate: 0.6,    // LDT θ_cls = 0.6 analog
+            entropy_floor: 0.01,    // Near-deterministic = suspicious
+            depth_escalation: 0.02, // F4: threshold tightens by 0.02 per depth
         }
     }
 }
@@ -845,14 +1137,29 @@ impl ConflictDetector for EntropyConflictDetector {
         pruned_count: usize,
         total_candidates: usize,
     ) -> bool {
+        self.is_conflicted_at_depth(marginals, pruned_count, total_candidates, 0)
+    }
+
+    fn is_conflicted_at_depth(
+        &self,
+        marginals: &[&[f32]],
+        pruned_count: usize,
+        total_candidates: usize,
+        depth: usize,
+    ) -> bool {
         // Hard conflict: no candidates remain
         if total_candidates == 0 {
             return true;
         }
 
+        // F4: Depth-escalating threshold — tighter at deeper search
+        let effective_max = (self.max_prune_rate - depth as f32 * self.depth_escalation)
+            .max(0.1)
+            .min(self.max_prune_rate);
+
         // Check pruning rate: too aggressive = likely wrong path
         let prune_rate = pruned_count as f32 / total_candidates as f32;
-        if prune_rate > self.max_prune_rate {
+        if prune_rate > effective_max {
             return true;
         }
 
@@ -867,8 +1174,6 @@ impl ConflictDetector for EntropyConflictDetector {
         false
     }
 }
-
-/// Compute Shannon entropy of a probability distribution.
 /// H(p) = -Σ p_i * ln(p_i)
 #[cfg(feature = "lattice_deduction")]
 fn compute_entropy(probs: &[f32]) -> f32 {
@@ -923,6 +1228,9 @@ pub struct RoutingOverlapSnapshot {
     pub top_k: usize,
     /// Number of tokens in verification batch
     pub n_tokens: usize,
+    /// Raw routing vector from RavenKVCache (num_slots entries).
+    /// Non-zero entries indicate active slots — can be fed to anyrag `routed_search()`.
+    pub routing_vector: Vec<f32>,
 }
 
 // ── Amdahl Cost Model (Plan 096, Research 59) ────────────────
@@ -1269,13 +1577,21 @@ mod tests {
 
     #[test]
     fn test_rejection_reason_variants() {
-        let reasons = [
+        let mut reasons = vec![
             RejectionReason::LowProbability,
             RejectionReason::ConstraintViolation,
             RejectionReason::LowRelevance { score: 0.0 },
             RejectionReason::DivergedFromTarget,
         ];
+        #[cfg(feature = "kurtosis_gate")]
+        reasons.push(RejectionReason::KurtosisRejection {
+            kurtosis: -1.0,
+            threshold: 0.0,
+        });
+        #[cfg(not(feature = "kurtosis_gate"))]
         assert_eq!(reasons.len(), 4);
+        #[cfg(feature = "kurtosis_gate")]
+        assert_eq!(reasons.len(), 5);
     }
 
     // ── DecodeStrategy Tests (Plan 066 Phase 3.1) ──────────────
@@ -1470,6 +1786,173 @@ mod tests {
         // NoScreeningPruner always returns 1.0, which is >= any threshold
         assert!((gate.relevance(0, 0, &[]) - 1.0).abs() < 1e-6);
         assert!((gate.relevance(5, 0, &[]) - 1.0).abs() < 1e-6);
+    }
+    // ── DFlare Marginal Fusion tests (Plan 174 T1e) ──
+
+    #[cfg(feature = "dflare_fusion")]
+    mod dflare_fusion {
+        use super::*;
+
+        #[test]
+        fn test_marginal_fusion_balanced_config() {
+            let config = MarginalFusionConfig::balanced(28);
+            assert_eq!(config.alpha_weights, vec![0.5, 0.5]);
+            assert_eq!(config.condition_layer_ids.len(), 2);
+            assert!(config.validate().is_ok());
+        }
+
+        #[test]
+        fn test_marginal_fusion_weights_sum_to_one() {
+            let config = MarginalFusionConfig::balanced(28);
+            let sum: f32 = config.alpha_weights.iter().sum();
+            assert!((sum - 1.0).abs() < 0.001, "alpha weights sum to {sum}");
+        }
+
+        #[test]
+        fn test_marginal_fusion_rejects_bad_weights() {
+            let config = MarginalFusionConfig {
+                alpha_weights: vec![0.3, 0.3],
+                condition_layer_ids: vec![vec![1], vec![2]],
+                enabled: true,
+            };
+            assert!(config.validate().is_err());
+        }
+
+        #[test]
+        fn test_marginal_fusion_disabled_always_valid() {
+            let config = MarginalFusionConfig {
+                alpha_weights: vec![],
+                condition_layer_ids: vec![],
+                enabled: false,
+            };
+            assert!(config.validate().is_ok());
+        }
+    }
+
+    #[cfg(feature = "dflare_kv_routing")]
+    mod dflare_kv_routing {
+        use super::*;
+
+        fn enabled_config() -> KvRoutingConfig {
+            KvRoutingConfig {
+                high_confidence_threshold: 0.8,
+                low_confidence_threshold: 0.3,
+                enabled: true,
+            }
+        }
+
+        #[test]
+        fn test_kv_routing_high_confidence() {
+            let config = enabled_config();
+            let blend = config.blend_factor(0.9);
+            assert!(
+                (blend - 1.0).abs() < 0.001,
+                "high confidence should blend=1.0, got {blend}"
+            );
+        }
+
+        #[test]
+        fn test_kv_routing_low_confidence() {
+            let config = enabled_config();
+            let blend = config.blend_factor(0.1);
+            assert!(
+                (blend - 0.0).abs() < 0.001,
+                "low confidence should blend=0.0, got {blend}"
+            );
+        }
+
+        #[test]
+        fn test_kv_routing_medium_confidence() {
+            let config = enabled_config();
+            // 0.3 threshold, 0.8 threshold, range=0.5
+            // pruner_relevance=0.5 → (0.5-0.3)/0.5 = 0.4
+            let blend = config.blend_factor(0.5);
+            assert!(
+                (blend - 0.4).abs() < 0.001,
+                "medium should blend=0.4, got {blend}"
+            );
+        }
+
+        #[test]
+        fn test_kv_routing_disabled_returns_one() {
+            let config = KvRoutingConfig {
+                enabled: false,
+                ..Default::default()
+            };
+            let blend = config.blend_factor(0.0);
+            assert!(
+                (blend - 1.0).abs() < 0.001,
+                "disabled should always return 1.0"
+            );
+        }
+    }
+
+    #[cfg(feature = "dflare_progressive_budget")]
+    mod dflare_progressive_budget {
+        use super::*;
+
+        #[test]
+        fn test_position_weight_exponential_decay() {
+            let config = PositionWeightedBudget::default();
+            let w0 = config.weight(0);
+            let w1 = config.weight(1);
+            let w2 = config.weight(2);
+            assert!(
+                (w0 - 1.0).abs() < 0.001,
+                "depth 0 weight should be 1.0, got {w0}"
+            );
+            assert!(w1 < w0, "weight should decrease with depth");
+            assert!(w2 < w1, "weight should decrease with depth");
+        }
+
+        #[test]
+        fn test_allocate_sums_to_budget() {
+            let config = PositionWeightedBudget {
+                gamma: 4.0,
+                min_budget_per_depth: 1,
+                enabled: true,
+            };
+            let alloc = config.allocate(100, 8);
+            let total: usize = alloc.iter().sum();
+            assert_eq!(total, 100, "allocation should sum to budget");
+        }
+
+        #[test]
+        fn test_allocate_front_loaded() {
+            let config = PositionWeightedBudget {
+                gamma: 2.0,
+                min_budget_per_depth: 1,
+                enabled: true,
+            };
+            let alloc = config.allocate(100, 8);
+            // Early depths should get more nodes than later depths
+            assert!(
+                alloc[0] > alloc[7],
+                "depth 0 ({}) should exceed depth 7 ({})",
+                alloc[0],
+                alloc[7]
+            );
+        }
+
+        #[test]
+        fn test_allocate_respects_minimum() {
+            let config = PositionWeightedBudget {
+                gamma: 4.0,
+                min_budget_per_depth: 3,
+                enabled: true,
+            };
+            let alloc = config.allocate(100, 8);
+            for (i, &a) in alloc.iter().enumerate() {
+                assert!(a >= 3, "depth {i} allocation {a} below minimum 3");
+            }
+        }
+
+        #[test]
+        fn test_allocate_empty_depth() {
+            let config = PositionWeightedBudget::default();
+            let alloc = config.allocate(100, 0);
+            assert!(alloc.is_empty());
+        }
     }
 }
 

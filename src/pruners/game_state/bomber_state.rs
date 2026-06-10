@@ -61,8 +61,8 @@ pub struct BombSnapshot {
 /// The arena converts `World → BomberState` once per tick.
 #[derive(Clone, Debug)]
 pub struct BomberState {
-    /// 13×13 grid: `cells[y][x]`
-    pub cells: Vec<Vec<Cell>>,
+    /// 13×13 flat grid: `cells[y * ARENA_W + x]`
+    pub cells: [Cell; ARENA_W * ARENA_H],
     pub players: [PlayerSnapshot; 4],
     pub bombs: Vec<BombSnapshot>,
     /// Power-ups revealed by blast (waiting to be collected).
@@ -84,8 +84,15 @@ impl BomberState {
             ..PlayerSnapshot::default()
         });
 
+        let mut cells = [Cell::FixedWall; ARENA_W * ARENA_H];
+        for y in 0..ARENA_H {
+            for x in 0..ARENA_W {
+                cells[y * ARENA_W + x] = grid.cells[y][x];
+            }
+        }
+
         Self {
-            cells: grid.cells.clone(),
+            cells,
             players,
             bombs: Vec::new(),
             revealed_powerups: Vec::new(),
@@ -104,14 +111,14 @@ impl BomberState {
         if x < 0 || (x as usize) >= ARENA_W || y < 0 || (y as usize) >= ARENA_H {
             Cell::FixedWall
         } else {
-            self.cells[y as usize][x as usize]
+            self.cells[y as usize * ARENA_W + x as usize]
         }
     }
 
     /// Set cell at (x, y). No-op for out-of-bounds.
     fn set_cell(&mut self, x: i32, y: i32, cell: Cell) {
         if x >= 0 && (x as usize) < ARENA_W && y >= 0 && (y as usize) < ARENA_H {
-            self.cells[y as usize][x as usize] = cell;
+            self.cells[y as usize * ARENA_W + x as usize] = cell;
         }
     }
 
@@ -120,7 +127,7 @@ impl BomberState {
         if x < 0 || (x as usize) >= ARENA_W || y < 0 || (y as usize) >= ARENA_H {
             return false;
         }
-        matches!(self.cells[y as usize][x as usize], Cell::Floor)
+        matches!(self.cells[y as usize * ARENA_W + x as usize], Cell::Floor)
             && !self.bombs.iter().any(|b| b.pos == (x, y))
     }
 
@@ -187,28 +194,86 @@ impl BomberState {
             .any(|b| self.is_pos_in_blast(pos, b.pos, b.range))
     }
 
+    /// Pre-compute the full blast zone grid (169 cells) for all bombs.
+    ///
+    /// Each cell is `true` if it falls within any bomb's blast range,
+    /// accounting for wall blocking (same rules as `is_pos_in_blast`).
+    /// O(bombs × range) once, then O(1) lookups.
+    fn compute_blast_zone(&self) -> [bool; ARENA_W * ARENA_H] {
+        let mut zone = [false; ARENA_W * ARENA_H];
+        for bomb in &self.bombs {
+            let bx = bomb.pos.0;
+            let by = bomb.pos.1;
+
+            // Mark bomb cell itself
+            if bx >= 0 && (bx as usize) < ARENA_W && by >= 0 && (by as usize) < ARENA_H {
+                zone[by as usize * ARENA_W + bx as usize] = true;
+            }
+
+            // Propagate in 4 cardinal directions
+            for &(dx, dy) in &DIRECTIONS {
+                for dist in 1..=bomb.range as i32 {
+                    let cx = bx + dx * dist;
+                    let cy = by + dy * dist;
+                    if cx < 0 || (cx as usize) >= ARENA_W || cy < 0 || (cy as usize) >= ARENA_H {
+                        break;
+                    }
+                    let ci = cy as usize * ARENA_W + cx as usize;
+                    match self.cells[ci] {
+                        Cell::FixedWall => break,
+                        Cell::DestructibleWall | Cell::PowerUpHidden(_) => {
+                            zone[ci] = true;
+                            break;
+                        }
+                        Cell::Floor => zone[ci] = true,
+                    }
+                }
+            }
+        }
+        zone
+    }
+
     /// BFS escape distance from blast zone. Returns `None` if trapped.
+    ///
+    /// Uses pre-computed blast zone (O(bombs×range) once) and flat bitset
+    /// visited array instead of HashSet.
     pub fn escape_distance(&self, pos: (i32, i32)) -> Option<i32> {
-        if !self.is_in_blast_zone(pos) {
+        let blast = self.compute_blast_zone();
+        self.escape_distance_with_blast(pos, &blast)
+    }
+
+    /// BFS escape using a pre-computed blast zone grid.
+    fn escape_distance_with_blast(
+        &self,
+        pos: (i32, i32),
+        blast: &[bool; ARENA_W * ARENA_H],
+    ) -> Option<i32> {
+        let pi = pos.1 as usize * ARENA_W + pos.0 as usize;
+        if !blast[pi] {
             return Some(0);
         }
 
-        let mut visited = HashSet::new();
+        let mut visited = [false; ARENA_W * ARENA_H];
         let mut queue = VecDeque::new();
 
-        visited.insert(pos);
+        visited[pi] = true;
         queue.push_back((pos, 0));
 
         while let Some(((cx, cy), dist)) = queue.pop_front() {
             for (nx, ny) in [(cx, cy - 1), (cx, cy + 1), (cx - 1, cy), (cx + 1, cy)] {
-                if !visited.insert((nx, ny)) {
+                if nx < 0 || (nx as usize) >= ARENA_W || ny < 0 || (ny as usize) >= ARENA_H {
                     continue;
                 }
+                let ni = ny as usize * ARENA_W + nx as usize;
+                if visited[ni] {
+                    continue;
+                }
+                visited[ni] = true;
                 if !self.is_walkable(nx, ny) {
                     continue;
                 }
                 let next_dist = dist + 1;
-                if !self.is_in_blast_zone((nx, ny)) {
+                if !blast[ni] {
                     return Some(next_dist);
                 }
                 queue.push_back(((nx, ny), next_dist));
@@ -413,12 +478,17 @@ impl GameState for BomberState {
     type Action = BomberAction;
 
     fn available_actions(&self, player_id: u8) -> Vec<Self::Action> {
+        let mut buf = Vec::with_capacity(6);
+        self.available_actions_into(player_id, &mut buf);
+        buf
+    }
+
+    fn available_actions_into(&self, player_id: u8, buf: &mut Vec<Self::Action>) {
+        buf.clear();
         let player = &self.players[player_id as usize];
         if !player.alive {
-            return Vec::new();
+            return;
         }
-
-        let mut actions = Vec::with_capacity(6);
 
         // Movement: check walkability (cell type + bomb blocking)
         for &action in &[
@@ -429,20 +499,49 @@ impl GameState for BomberState {
         ] {
             let target = Self::move_target(action, player.pos);
             if self.is_walkable(target.0, target.1) {
-                actions.push(action);
+                buf.push(action);
             }
         }
 
         // Bomb: check capacity and no bomb at current position
         if player.active_bombs < player.max_bombs && !self.bombs.iter().any(|b| b.pos == player.pos)
         {
-            actions.push(BomberAction::Bomb);
+            buf.push(BomberAction::Bomb);
         }
 
         // Wait: always legal when alive
-        actions.push(BomberAction::Wait);
+        buf.push(BomberAction::Wait);
+    }
 
-        actions
+    fn action_space_size(&self, player_id: u8) -> usize {
+        let player = &self.players[player_id as usize];
+        if !player.alive {
+            return 0;
+        }
+
+        // Wait is always legal
+        let mut count = 1;
+
+        // Movement directions
+        for &action in &[
+            BomberAction::Up,
+            BomberAction::Down,
+            BomberAction::Left,
+            BomberAction::Right,
+        ] {
+            let target = Self::move_target(action, player.pos);
+            if self.is_walkable(target.0, target.1) {
+                count += 1;
+            }
+        }
+
+        // Bomb
+        if player.active_bombs < player.max_bombs && !self.bombs.iter().any(|b| b.pos == player.pos)
+        {
+            count += 1;
+        }
+
+        count
     }
 
     fn advance(&self, action: &Self::Action, player_id: u8) -> Self {
@@ -507,9 +606,13 @@ impl StateHeuristic<BomberState> for BomberHeuristic {
 
         let mut score = 0.0;
 
+        // Pre-compute blast zone once — shared for safety check + escape distance
+        let blast = state.compute_blast_zone();
+        let pi = player.pos.1 as usize * ARENA_W + player.pos.0 as usize;
+
         // Safety: penalize blast zone exposure
-        if state.is_in_blast_zone(player.pos) {
-            match state.escape_distance(player.pos) {
+        if blast[pi] {
+            match state.escape_distance_with_blast(player.pos, &blast) {
                 Some(d) => score -= 5.0 + d as f32 * 0.5,
                 None => return -0.8, // Trapped = nearly dead
             }
@@ -926,7 +1029,7 @@ mod tests {
         let mut state = BomberState::from_grid(&grid);
 
         // Manually place a PowerUpHidden wall in blast range
-        state.cells[1][3] = Cell::PowerUpHidden(PowerUpKind::BombUp);
+        state.cells[1 * ARENA_W + 3] = Cell::PowerUpHidden(PowerUpKind::BombUp);
         state.players[0].pos = (5, 1);
         state.bombs.push(BombSnapshot {
             pos: (1, 1),
@@ -937,7 +1040,7 @@ mod tests {
 
         let next = state.advance(&BomberAction::Wait, 0);
         // Wall destroyed, power-up revealed
-        assert_eq!(next.cells[1][3], Cell::Floor);
+        assert_eq!(next.cells[1 * ARENA_W + 3], Cell::Floor);
         assert_eq!(next.revealed_powerups.len(), 1);
         assert_eq!(next.revealed_powerups[0], ((3, 1), PowerUpKind::BombUp));
     }
@@ -1056,8 +1159,8 @@ mod tests {
             owner: 1,
         });
         // Block all exits
-        state.cells[1][2] = Cell::DestructibleWall;
-        state.cells[2][1] = Cell::DestructibleWall;
+        state.cells[1 * ARENA_W + 2] = Cell::DestructibleWall;
+        state.cells[2 * ARENA_W + 1] = Cell::DestructibleWall;
 
         let h = BomberHeuristic;
         let value = h.evaluate(&state, 0);

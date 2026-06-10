@@ -199,6 +199,7 @@ fn proof_4_recurrent_step_output_finite() {
         out.fill(0.0);
         temp.fill(0.0);
 
+        let mut delta = vec![0.0f32; dv];
         gdn2_recurrent_step(
             &k,
             &v,
@@ -210,6 +211,7 @@ fn proof_4_recurrent_step_output_finite() {
             &w_channel,
             &mut out,
             &mut temp,
+            &mut delta,
             dk,
             dv,
             gate_config,
@@ -421,6 +423,7 @@ fn proof_8_outer_product_write() {
     let w_channel = vec![1.0f32; dv]; // open write gate
     let mut out = vec![0.0f32; dv];
     let mut temp = vec![0.0f32; dv];
+    let mut delta = vec![0.0f32; dv];
 
     gdn2_recurrent_step(
         &k,
@@ -433,6 +436,7 @@ fn proof_8_outer_product_write() {
         &w_channel,
         &mut out,
         &mut temp,
+        &mut delta,
         dk,
         dv,
         Gdn2GateConfig::EraseOnly,
@@ -477,6 +481,7 @@ fn proof_8_outer_product_write() {
     let q2 = vec![1.0f32; dk];
     let mut out2 = vec![0.0f32; dv];
     let mut temp2 = vec![0.0f32; dv];
+    let mut delta2 = vec![0.0f32; dv];
 
     gdn2_recurrent_step(
         &k2,
@@ -489,6 +494,7 @@ fn proof_8_outer_product_write() {
         &w_channel,
         &mut out2,
         &mut temp2,
+        &mut delta2,
         dk,
         dv,
         Gdn2GateConfig::EraseOnly,

@@ -25,7 +25,7 @@ fn sigmoid(x: f32) -> f32 {
     1.0 / (1.0 + (-x).exp())
 }
 
-/// Predict per-KV-head utility from hidden state.
+/// Predict utility for each KV head from a hidden state (zero-alloc variant).
 ///
 /// # Arguments
 /// * `weights` - Predictor weights for one layer
@@ -34,9 +34,7 @@ fn sigmoid(x: f32) -> f32 {
 /// * `hidden` - Predictor hidden dimension
 /// * `n_kv_heads` - Number of KV heads (GQA groups)
 /// * `buf` - Pre-allocated scratch buffer [hidden] for intermediate activations
-///
-/// # Returns
-/// Utilities in (0, 1) for each KV head. Higher = more likely to be useful.
+/// * `out` - Output buffer [n_kv_heads] for utilities
 ///
 /// # Layout
 /// ```text
@@ -45,21 +43,27 @@ fn sigmoid(x: f32) -> f32 {
 /// b1: [hidden]
 /// b2: [n_kv_heads]  (initialized to +5.0)
 /// ```
+///
+/// Zero-alloc variant of [`predict`] that writes utilities into a pre-allocated buffer.
+///
+/// Use in decode loops to avoid per-call `vec![0.0f32; n_kv_heads]` heap allocation.
 #[allow(clippy::needless_range_loop)]
-pub fn predict(
+pub fn predict_into(
     weights: &UtilityPredictorWeights,
     h: &[f32],
     d_model: usize,
     hidden: usize,
     n_kv_heads: usize,
     buf: &mut [f32],
-) -> Vec<f32> {
+    out: &mut [f32],
+) {
     debug_assert_eq!(h.len(), d_model);
     debug_assert_eq!(weights.w1.len(), hidden * d_model);
     debug_assert_eq!(weights.b1.len(), hidden);
     debug_assert_eq!(weights.w2.len(), n_kv_heads * hidden);
     debug_assert_eq!(weights.b2.len(), n_kv_heads);
     debug_assert!(buf.len() >= hidden);
+    debug_assert!(out.len() >= n_kv_heads);
 
     // Layer 1: hidden = SiLU(W1 · h + b1)
     for i in 0..hidden {
@@ -69,7 +73,6 @@ pub fn predict(
     }
 
     // Layer 2: u = sigmoid(W2 · hidden + b2)
-    let mut utilities = vec![0.0f32; n_kv_heads];
     for k in 0..n_kv_heads {
         let row_off = k * hidden;
         let dot = crate::simd::simd_dot_f32(
@@ -77,9 +80,25 @@ pub fn predict(
             &buf[..hidden],
             hidden,
         );
-        utilities[k] = sigmoid(dot + weights.b2[k]);
+        out[k] = sigmoid(dot + weights.b2[k]);
     }
+}
 
+/// Allocating wrapper around [`predict_into`].
+///
+/// **Note:** This allocates a utilities Vec internally. For decode loops, prefer
+/// [`predict_into`] to avoid per-call heap allocation.
+#[allow(clippy::needless_range_loop)]
+pub fn predict(
+    weights: &UtilityPredictorWeights,
+    h: &[f32],
+    d_model: usize,
+    hidden: usize,
+    n_kv_heads: usize,
+    buf: &mut [f32],
+) -> Vec<f32> {
+    let mut utilities = vec![0.0f32; n_kv_heads];
+    predict_into(weights, h, d_model, hidden, n_kv_heads, buf, &mut utilities);
     utilities
 }
 
@@ -157,6 +176,7 @@ pub fn tahg_gate_bias(utility: f32, threshold: f32, alpha: f32) -> f32 {
 ///
 /// For cache write decisions, we need one value per position.
 /// Options: max (keep if any head needs it), mean (democratic), or first (GQA broadcast).
+#[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum UtilityAggregation {
     /// Maximum utility across all KV heads.

@@ -242,9 +242,10 @@ impl CmField {
     /// `eps` of 1.0. This is the defining property of the pigeonhole
     /// construction: |σ(u)| = 1 for all embeddings σ.
     pub fn verify_units_on_circle(&self, eps: f64) -> bool {
+        let sq_eps = 2.0 * eps + eps * eps;
         self.unit_elements
             .iter()
-            .all(|u| (u.norm() - 1.0).abs() < eps)
+            .all(|u| (u.norm_sq() - 1.0).abs() < sq_eps)
     }
 
     /// Verify projection injectivity.
@@ -305,6 +306,15 @@ pub struct FieldVerification {
     /// Name of the field.
     pub field_name: String,
 
+    /// The computed δ value (if δ > 0).
+    pub delta_value: Option<f64>,
+
+    /// Number of generated unit elements.
+    pub unit_count: usize,
+
+    /// Pigeonhole lower bound on unit elements.
+    pub unit_lower_bound: u64,
+
     /// All split primes are ≡ 1 (mod 4).
     pub split_primes_valid: bool,
 
@@ -319,15 +329,6 @@ pub struct FieldVerification {
 
     /// δ > 0 (construction yields counterexample).
     pub delta_positive: bool,
-
-    /// The computed δ value (if δ > 0).
-    pub delta_value: Option<f64>,
-
-    /// Number of generated unit elements.
-    pub unit_count: usize,
-
-    /// Pigeonhole lower bound on unit elements.
-    pub unit_lower_bound: u64,
 
     /// Whether all checks passed.
     pub all_passed: bool,

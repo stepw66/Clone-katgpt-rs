@@ -6,7 +6,7 @@
 
 use crate::types::DashAttnConfig;
 
-use super::entmax::{entmax_1p5, entmax_gqa_aggregate, entmax_support};
+use super::entmax::{entmax_1p5_into, entmax_gqa_aggregate, entmax_support_into};
 
 /// Result of entmax routing for one query head.
 #[derive(Debug)]
@@ -25,65 +25,132 @@ pub struct RoutingResult {
 /// and chunk summaries, then applies α-entmax (α=1.5) to obtain an adaptive
 /// sparse distribution over chunks.
 pub fn score_blocks_entmax(
-    query: &[f32],          // [head_dim] per-head query
-    summaries: &[Vec<f32>], // [n_chunks][head_dim] chunk summaries
+    query: &[f32],
+    summaries: &[impl AsRef<[f32]>],
     config: &DashAttnConfig,
 ) -> RoutingResult {
+    let n = summaries.len();
+    let mut scratch = RoutingScratch::new(n, query.len());
+    score_blocks_entmax_into(query, summaries, config, &mut scratch)
+}
+
+/// Pre-allocated scratch buffers for entmax routing.
+pub struct RoutingScratch {
+    /// Logits buffer: [n_chunks].
+    logits: Vec<f32>,
+    /// Sorted indices buffer for entmax: Vec<(usize, f32)>.
+    sorted: Vec<(usize, f32)>,
+    /// Probabilities buffer for entmax: [n_chunks].
+    probs: Vec<f32>,
+    /// Log-weights buffer for active indices (reused across calls).
+    log_weights: Vec<f32>,
+    /// Active indices buffer (reused across calls).
+    active_indices: Vec<usize>,
+    /// Bias buffer (reused across calls).
+    bias: Vec<f32>,
+}
+
+impl RoutingScratch {
+    /// Create scratch buffers sized for `n_chunks` chunks.
+    pub fn new(n_chunks: usize, _head_dim: usize) -> Self {
+        Self {
+            logits: vec![0.0; n_chunks],
+            sorted: Vec::with_capacity(n_chunks),
+            probs: vec![0.0; n_chunks],
+            log_weights: Vec::with_capacity(n_chunks),
+            active_indices: Vec::with_capacity(n_chunks),
+            bias: Vec::with_capacity(n_chunks),
+        }
+    }
+}
+
+/// Zero-alloc variant of [`score_blocks_entmax`].
+///
+/// Reuses scratch buffers across calls.
+pub fn score_blocks_entmax_into(
+    query: &[f32],
+    summaries: &[impl AsRef<[f32]>],
+    config: &DashAttnConfig,
+    scratch: &mut RoutingScratch,
+) -> RoutingResult {
     let hd = query.len();
+    let n = summaries.len();
+
+    // Grow buffers if needed
+    if scratch.logits.len() < n {
+        scratch.logits.resize(n, 0.0);
+    }
+    if scratch.probs.len() < n {
+        scratch.probs.resize(n, 0.0);
+    }
+    scratch.sorted.clear();
 
     // Compute chunk logits: z = q · k̄ / √d * γ
     let scale = 1.0 / (hd as f32).sqrt() * config.scaling_factor;
-    let logits: Vec<f32> = summaries
-        .iter()
-        .map(|s| {
-            let dot: f32 = query.iter().zip(s.iter()).map(|(a, b)| a * b).sum();
-            dot * scale
-        })
-        .collect();
+    for (i, s) in summaries.iter().enumerate() {
+        let s_ref = s.as_ref();
+        let dot: f32 = query.iter().zip(s_ref.iter()).map(|(a, b)| a * b).sum();
+        scratch.logits[i] = dot * scale;
+    }
 
-    // α-entmax routing
-    let (probs, _tau) = entmax_1p5(&logits);
+    // α-entmax routing into scratch buffers
+    entmax_1p5_into(
+        &scratch.logits[..n],
+        &mut scratch.sorted,
+        &mut scratch.probs[..n],
+    );
 
-    // Extract support
-    let active_indices = entmax_support(&probs);
+    // Extract support into pre-allocated buffer
+    entmax_support_into(&scratch.probs[..n], &mut scratch.active_indices);
 
     // Compute routing bias: (log w - μ) / σ on active indices
-    let log_weights: Vec<f32> = active_indices
-        .iter()
-        .map(|&i| {
-            if probs[i] > 1e-10 {
-                probs[i].ln()
+    scratch.log_weights.clear();
+    scratch
+        .log_weights
+        .extend(scratch.active_indices.iter().map(|&i| {
+            if scratch.probs[i] > 1e-10 {
+                scratch.probs[i].ln()
             } else {
                 -23.0 // ln(1e-10)
             }
-        })
-        .collect();
+        }));
 
-    let mean_lw = if log_weights.is_empty() {
+    let mean_lw = if scratch.log_weights.is_empty() {
         0.0
     } else {
-        log_weights.iter().sum::<f32>() / log_weights.len() as f32
+        scratch.log_weights.iter().sum::<f32>() / scratch.log_weights.len() as f32
     };
 
-    let var_lw: f32 = if log_weights.len() <= 1 {
+    let var_lw: f32 = if scratch.log_weights.len() <= 1 {
         1.0
     } else {
-        log_weights
+        scratch
+            .log_weights
             .iter()
             .map(|&x| (x - mean_lw).powi(2))
             .sum::<f32>()
-            / (log_weights.len() - 1) as f32
+            / (scratch.log_weights.len() - 1) as f32
     };
     let std_lw = var_lw.sqrt().max(1e-6);
 
-    let bias: Vec<f32> = log_weights
-        .iter()
-        .map(|&lw| (lw - mean_lw) / std_lw)
-        .collect();
+    scratch.bias.clear();
+    scratch.bias.extend(
+        scratch
+            .log_weights
+            .iter()
+            .map(|&lw| (lw - mean_lw) / std_lw),
+    );
+
+    // Build result: clone from scratch buffers.
+    // Note: scratch.active_indices and scratch.bias are reused across calls
+    // (sorted, logits, probs are the expensive scratch to preserve).
+    // The active_indices/bias are small (typically ≤ num_chunks), so cloning
+    // them is cheaper than reallocating the sorted/probs buffers.
+    let probs = scratch.probs[..n].to_vec();
 
     RoutingResult {
-        active_indices,
-        bias,
+        active_indices: scratch.active_indices.clone(),
+        bias: scratch.bias.clone(),
         probs,
     }
 }
@@ -92,6 +159,9 @@ pub fn score_blocks_entmax(
 ///
 /// Runs per-query-head entmax routing, then averages probabilities across
 /// heads sharing the same KV group for consensus routing.
+///
+/// Uses `score_blocks_entmax_into` with a reusable scratch buffer to avoid
+/// per-head heap allocation in the routing hot path.
 pub fn compute_routing_bias(
     queries: &[Vec<f32>],   // [n_query_heads][head_dim]
     summaries: &[Vec<f32>], // [n_chunks][head_dim]
@@ -101,14 +171,43 @@ pub fn compute_routing_bias(
     let n_query_heads = queries.len();
     let n_chunks = summaries.len();
 
-    // Per-query-head routing
+    // Reuse scratch buffers across heads (zero-alloc routing)
+    let mut scratch = RoutingScratch::new(n_chunks, queries.first().map_or(0, |q| q.len()));
+
+    // Per-query-head routing using the _into variant
     let per_head: Vec<RoutingResult> = queries
         .iter()
-        .map(|q| score_blocks_entmax(q, summaries, config))
+        .map(|q| score_blocks_entmax_into(q, summaries, config, &mut scratch))
         .collect();
 
-    // GQA aggregation: merge probs across heads in same group
-    let head_probs: Vec<Vec<f32>> = per_head.iter().map(|r| r.probs.clone()).collect();
+    // GQA aggregation: reference probs without cloning
+    let head_probs: Vec<&[f32]> = per_head.iter().map(|r| r.probs.as_slice()).collect();
+    let _agg_probs = entmax_gqa_aggregate(&head_probs, n_query_heads, n_kv_heads, n_chunks);
+
+    per_head
+}
+
+/// Zero-alloc variant of [`compute_routing_bias`].
+///
+/// Accepts a reusable scratch buffer to avoid per-call heap allocation.
+/// The returned `RoutingResult`s still own their data (cloned from scratch)
+/// for API simplicity.
+pub fn compute_routing_bias_into(
+    queries: &[Vec<f32>],
+    summaries: &[Vec<f32>],
+    n_kv_heads: usize,
+    config: &DashAttnConfig,
+    scratch: &mut RoutingScratch,
+) -> Vec<RoutingResult> {
+    let n_query_heads = queries.len();
+    let n_chunks = summaries.len();
+
+    let per_head: Vec<RoutingResult> = queries
+        .iter()
+        .map(|q| score_blocks_entmax_into(q, summaries, config, scratch))
+        .collect();
+
+    let head_probs: Vec<&[f32]> = per_head.iter().map(|r| r.probs.as_slice()).collect();
     let _agg_probs = entmax_gqa_aggregate(&head_probs, n_query_heads, n_kv_heads, n_chunks);
 
     per_head

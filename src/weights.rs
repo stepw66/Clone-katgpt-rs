@@ -52,6 +52,7 @@ fn align_up(offset: usize) -> usize {
 }
 
 /// Write weight data into buffer at offset, returning the slice descriptor.
+#[inline]
 fn write_weight(buffer: &mut [f32], offset: usize, data: &[f32]) -> WeightSlice {
     buffer[offset..offset + data.len()].copy_from_slice(data);
     WeightSlice {
@@ -208,6 +209,105 @@ impl ContiguousWeights {
     pub fn buffer_bytes(&self) -> usize {
         self.buffer.len() * size_of::<f32>()
     }
+}
+
+/// Load a ciot-format .bits ternary weight file.
+///
+/// Format (little-endian):
+///   magic      8 bytes  b"CIOTBIT1"
+///   rows       u32
+///   cols       u32
+///   blocks64   u32
+///   row_scale  rows × f32
+///   pos_bits   rows × blocks64 × u64
+///   neg_bits   rows × blocks64 × u64
+#[cfg(feature = "plasma_path")]
+pub fn load_ternary_bits(path: &std::path::Path) -> std::io::Result<katgpt_core::TernaryWeights> {
+    use std::io::Read;
+    let mut f = std::fs::File::open(path)?;
+    let file_len = f.metadata()?.len() as usize;
+    let mut buf = Vec::with_capacity(file_len);
+    f.read_to_end(&mut buf)?;
+
+    if buf.len() < 20 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "file too small for header",
+        ));
+    }
+
+    // Magic
+    if &buf[0..8] != b"CIOTBIT1" {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "invalid magic",
+        ));
+    }
+
+    let rows = u32::from_le_bytes(buf[8..12].try_into().unwrap()) as usize;
+    let cols = u32::from_le_bytes(buf[12..16].try_into().unwrap()) as usize;
+    let blocks64 = u32::from_le_bytes(buf[16..20].try_into().unwrap()) as usize;
+
+    let expected_blocks = cols.div_ceil(64);
+    if blocks64 != expected_blocks {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("blocks64 mismatch: header={blocks64}, expected={expected_blocks}"),
+        ));
+    }
+
+    let scale_bytes = rows * 4;
+    let pos_bytes = rows * blocks64 * 8;
+    let neg_bytes = rows * blocks64 * 8;
+    let expected_len = 20 + scale_bytes + pos_bytes + neg_bytes;
+    if buf.len() < expected_len {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "file truncated",
+        ));
+    }
+
+    let mut off = 20;
+
+    // Bulk copy: the buffer is native little-endian, so we can reinterpret directly.
+    let mut row_scale = vec![0.0f32; rows];
+    unsafe {
+        std::ptr::copy_nonoverlapping(
+            buf[off..].as_ptr(),
+            row_scale.as_mut_ptr() as *mut u8,
+            rows * 4,
+        );
+    }
+    off += rows * 4;
+
+    let pos_count = rows * blocks64;
+    let mut pos_bits = vec![0u64; pos_count];
+    unsafe {
+        std::ptr::copy_nonoverlapping(
+            buf[off..].as_ptr(),
+            pos_bits.as_mut_ptr() as *mut u8,
+            pos_count * 8,
+        );
+    }
+    off += pos_count * 8;
+
+    let mut neg_bits = vec![0u64; pos_count];
+    unsafe {
+        std::ptr::copy_nonoverlapping(
+            buf[off..].as_ptr(),
+            neg_bits.as_mut_ptr() as *mut u8,
+            pos_count * 8,
+        );
+    }
+
+    Ok(katgpt_core::TernaryWeights {
+        rows,
+        cols,
+        blocks64,
+        pos_bits,
+        neg_bits,
+        row_scale,
+    })
 }
 
 #[cfg(test)]

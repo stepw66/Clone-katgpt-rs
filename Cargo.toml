@@ -19,12 +19,19 @@ serde_json = "1"
 syn = { version = "2", features = ["full", "parsing"], optional = true }
 proc-macro2 = { version = "1", optional = true }
 bevy_ecs = { version = "0.15", optional = true }  # Standalone ECS (Plan 033)
-wasmtime = { version = "28", optional = true }     # WASM bomber validator (Plan 034)
+wasmi = { version = "1.0", optional = true }       # WASM bomber validator (Plan 034, wasmi migration Plan 167)
 papaya = { version = "0.2", optional = true }      # Lock-free concurrent HashMap (Plan 037)
 ordered-float = { version = "4", optional = true } # Ord wrapper for f64 — CHT breakpoints (Plan 064 TG-A)
 good_lp = { version = "1", optional = true, default-features = false, features = ["highs", "microlp"] } # MILP solver — scheduling (Plan 064 TG-D), highs primary + microlp fallback
 reqwest = { version = "0.12", features = ["blocking", "json"], optional = true } # AutoGo REST API client (Plan 065)
 toml = "0.8"
+bytemuck = "1"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+coreml-native = { version = "0.2", optional = true }  # Apple Neural Engine inference backend (Plan 176)
+coreml-proto = { version = "0.1", optional = true }  # CoreML protobuf spec builder for runtime compilation (Plan 176)
+prost = { version = "0.14", optional = true }  # Protobuf serialization for CoreML spec (Plan 176)
+metal = { version = "0.33", optional = true }  # GPU inference backend via Metal compute (Plan 176)
 
 [dev-dependencies]
 ratatui = "0.29"
@@ -32,10 +39,18 @@ crossterm = "0.28"
 tempfile = "3"
 
 [features]
-default = ["sparse_mlp", "domain_latent", "ppot", "bandit", "bt_rank", "spectral_quant", "hybrid_oct_pq", "elf_sde", "cna_steering", "deep_manifold", "federation", "tes_loop", "lattice_deduction", "delta_routing", "stability_metrics", "mls_aggregate", "gdn2_attention", "dash_attn", "dreamer", "lt2_looped", "dmax_spd", "eqr_convergence", "subterranean", "sr2am_configurator", "data_gate"]  # Production best perf + accuracy (Plan 051, bt_rank Plan 079, spectral_quant Plan 063, hybrid_oct_pq Plan 101 GOAT best MSE + 64x fewer FMAs vs OCT, elf_sde Plan 079, cna_steering Plan 087 GOAT, deep_manifold Plan 085 GOAT 6/6, federation Plan 085 GOAT 6/6, tes_loop Plan 086 GOAT 8/8, lattice_deduction Plan 088 GOAT 7/7, delta_routing Plan 097 GOAT 6/6, stability_metrics Plan 102 GOAT 13/13, mls_aggregate Plan 104 GOAT 6/6, gdn2_attention Plan 105 GOAT 14/14, dash_attn Plan 106 GOAT 9/9, dreamer Plan 107 GOAT 8/8, lt2_looped Plan 108 GOAT 8/8, dmax_spd Plan 109 GOAT 7/7, eqr_convergence Plan 119, subterranean Plan 110, sr2am_configurator Plan 112, data_gate Plan 111)
+default = ["sparse_mlp", "domain_latent", "ppot", "bandit", "bandit_top_p", "bt_rank", "spectral_quant", "hybrid_oct_pq", "elf_sde", "cna_steering", "deep_manifold", "federation", "tes_loop", "lattice_deduction", "delta_routing", "stability_metrics", "mls_aggregate", "gdn2_attention", "dash_attn", "dreamer", "lt2_looped", "dmax_spd", "eqr_convergence", "subterranean", "sr2am_configurator", "data_gate", "plasma_path", "parallel_probe", "tf_loop", "leo_all_goals", "dual_leo", "sigmoid_margin", "moa_inference", "sleep_consolidation", "spectral_hierarchy", "dual_gram_pca", "roofline_cost", "newton_schulz", "river_valley", "peira_distill", "kog_cpu_fusion", "gepa_reflective", "phrase_boost", "hydra_budget", "flashar_consensus", "budget_adaptation", "ilc_distill", "thinking_prune", "rim_slots", "thinking_cot", "freq_bandit", "spec_reconciliation", "trust_region_spec", "curvature_alloc", "directional_credit", "kv_share", "nds_proxy", "wealth_pruner", "and_or_dtree", "speculative_generator", "kurtosis_gate", "kvarn", "chain_fold", "vortex_flow", "domino_correction", "corr_budget", "best_buddies", "rosetta_pruner", "rv_gated_routing", "partial_scoring", "problem_mutator", "idea_divergence", "self_distilling_bandit", "lodestar", "bfcf_tree", "bfcf_lfu_shard", "bfcf_lsh_cms", "belief_drafter", "substrate_gate", "critical_interval_gate", "llmexec_guard", "outlier_guard", "segment_checkpoint", "regime_transition", "static_cal_tables", "targeted_precision", "modality_pruned_load", "precision_aware_draft", "async_qdq_overlap", "schema_centroid", "egcs", "reward_mem", "symbolic_distill", "collapse_aware_thinking", "three_mode_router", "auto_constraint_synthesis", "union_bound_confidence", "pathway_tracker", "federation_composer", "slod", "caddtree_budget", "concept_grounding", "reward_calibrator", "decision_explain", "posterior_evolution", "mux_latent_context"]  # Production best perf + accuracy (Plan 051, bt_rank Plan 079, spectral_quant Plan 063, hybrid_oct_pq Plan 101 GOAT best MSE + 64x fewer FMAs vs OCT, elf_sde Plan 079, cna_steering Plan 087 GOAT, deep_manifold Plan 085 GOAT 6/6, federation Plan 085 GOAT 6/6, tes_loop Plan 086 GOAT 8/8, lattice_deduction Plan 088 GOAT 7/7, delta_routing Plan 097 GOAT 6/6, stability_metrics Plan 102 GOAT 13/13, mls_aggregate Plan 104 GOAT 6/6, gdn2_attention Plan 105 GOAT 14/14, dash_attn Plan 106 GOAT 9/9, dreamer Plan 107 GOAT 8/8, lt2_looped Plan 108 GOAT 8/8, dmax_spd Plan 109 GOAT 7/7, eqr_convergence Plan 119, subterranean Plan 110, sr2am_configurator Plan 112, data_gate Plan 111, plasma_path Plan 148 GOAT 5/5, parallel_probe Plan 133 26 unit tests, tf_loop Plan 136 GOAT 4/4, leo_all_goals Plan 155 SUPER GOAT, dual_leo Plan 155 SUPER GOAT, sigmoid_margin Plan 157 GOAT 7/7, moa_inference Plan 158 GOAT 3/3, sleep_consolidation Plan 154 GOAT 14/14, spectral_hierarchy Plan 156 GOAT, dual_gram_pca Plan 159 GOAT, roofline_cost Plan 159 GOAT, newton_schulz Plan 152 GOAT 25/25, river_valley Plan 152 GOAT 25/25, peira_distill Plan 153 GOAT 7/7, kog_cpu_fusion Plan 160 GOAT 3/3 Gemma2 scale, thinking_cot Plan 194 GOAT 7/7 adaptive CoT, bandit_top_p Plan 181 dMoE adaptive top-p, trust_region_spec Plan 182 GOAT T1-T7, directional_credit Plan 184 GOAT 6/6, kv_share Plan 185 GOAT 7/7, nds_proxy Plan 186 GOAT 13/13, wealth_pruner Plan 187 GOAT, and_or_dtree Plan 190 GOAT, speculative_generator Plan 193 GOAT, chain_fold Plan 195 GOAT 16/16 validated by Plan 228, kvarn Plan 179 GOAT ALL PASS, partial_scoring Plan 191 GOAT 5/5, problem_mutator Plan 191 GOAT 2/2, idea_divergence Plan 191 GOAT 1/1)
+data_probe = ["katgpt-core/dirichlet_energy"]  # Data Probe Diagnostics — controlled information-theoretic validation (Plan 141)
+dirichlet_energy = ["katgpt-core/dirichlet_energy"]  # Dirichlet Energy structural alignment diagnostic (Research 111, Plan 149)
+leo_all_goals = ["katgpt-core/leo_all_goals"]  # LEO all-goals Q-value framework — LeoHead + AllGoalsUpdate + sigmoid_bounded_q (Plan 155)
+dual_leo = ["leo_all_goals", "katgpt-core/dual_leo"]  # Dual LEO teacher-student — + DualLeoMixer + AutocurriculumSampler (Plan 155)
+ega_attn = []  # Energy-Gated Attention spectral salience gating (Plan 139)
 sp_kv = []  # SP-KV self-pruned key-value attention (Plan 070)
 tiled_attention = ["katgpt-core/tiled_attention"]  # Tiled online-softmax flash attention for CPU SIMD (Plan 115)
+parallax_attn = ["tiled_attention", "newton_schulz", "katgpt-core/parallax_attn"]  # Parallax parameterized local linear attention — R projection + covariance correction (Plan 135, Research 135) — opt-in, requires Muon-trained weights
 dash_attn = []  # DashAttention adaptive sparse hierarchical attention via α-entmax routing (Plan 106, Research 68)
+vortex_flow = ["dash_attn"]  # VortexFlow composable sparse routing (Plan 196 GOAT 72/72, default-ON)
+rt_turbo = ["dash_attn"]  # RTPurbo retrieval head sparse decode via low-dim indexing (Plan 126, Research 86)
 mls_aggregate = []  # MLS Multi-Layer Sum aggregation of last K layer residuals (Plan 104, Research 68)
 dllm = []  # D2F Discrete Diffusion Forcing — mini dLLM research (Plan 066)
 dmax_spd = ["dllm"]  # DMax Soft Parallel Decode — hybrid embedding D2F enhancement (Plan 109, Research 72)
@@ -50,6 +65,11 @@ delta_mem = ["bandit"]  # δ-Mem modelless distillation — associative bandit m
 g_zero = ["bandit"]  # G-Zero self-play distillation — Hint-δ gated absorb + bandit (Plan 049)
 dreamer = ["bandit"]  # Auto-Dreamer offline memory consolidation scheduler (Plan 107, Research 69)
 sr2am_configurator = ["bandit", "g_zero", "katgpt-core/sr2am_configurator"]  # SR²AM Configurator Bandit — learned per-turn planning regulation (Plan 112, Research 076)
+sia_feedback = ["sr2am_configurator", "katgpt-core/sia_feedback"]  # FeedbackBandit — harness + weight co-evolution (Plan 163, Research 033)
+gepa_reflective = ["bandit", "memo_reflections"]  # GEPA-D Reflective Config Evolution — Pareto bandit config distillation (Research 146, Plan 164)
+phrase_boost = []  # PhraseBoost — context trie phrase boosting for DDTree (Research 147, Plan 164)
+hydra_budget = ["katgpt-core/hydra_budget"]  # Hydra-Aware Adaptive Layer Budget — emergent self-repair layer skipping (Research 148, Plan 165)
+deltanet_inference = ["katgpt-core/deltanet_inference"]  # DeltaNet GPU inference — hybrid DeltaNet/Attention decode (Plan 182, Research R036)
 data_gate = ["katgpt-core/data_gate", "bandit"]  # Task-level data gating for self-play training stability (Plan 111, Research 075)
 subterranean = ["bandit"]  # Procedure graph compilation — compiling workflows into weights (Plan 110, Research 074)
 ropd_rubric = ["bandit"]  # ROPD rubric modelless distillation — multi-criteria reward (Plan 071)
@@ -62,6 +82,7 @@ decode_specialize = []  # Stage-specialized decode paths for speculative decodin
 lattice_deduction = []  # LDT Lattice Deduction Transformer — asymmetric pruning + conflict detection + α-operator (Plan 088, GOAT 7/7, default-on)
 unit_distance = []  # Unit Distance GOAT proof — number-theoretic lattice constructions (Plan 090)
 sdar_gate = []  # SDAR sigmoid gating for modelless distillation signals (Plan 072)
+rmsd_distill = ["sdar_gate", "bandit"]  # RMSD relevance-masked self-distillation (Plan 125, Research 081)
 memo_reflections = ["bandit"]  # MeMo Reflection QA pipeline — 5-step compositional data synthesis (Research 60, Plan 094)
 replaid_schedules = []  # RePlaid variance-minimized adaptive schedules (Plan 078) — experimental, off by default
 elf_sde = []  # ELF SDE noise injection + logit-normal schedule (Plan 079) — GOAT proved: 10-22× diversity, default-on
@@ -73,36 +94,237 @@ maxsim = ["katgpt-core/maxsim"]  # MaxSim late-interaction scoring (Research 45,
 spectral_quant = []  # SpectralQuant calibrated eigenbasis + water-fill (Plan 077) — default-on, 9.1× compression vs TQ 5.3×, cosine 0.9917 vs TQ 0.9692 (Bench 013)
 octopus = []  # OCTOPUS octahedral triplet codec — data-oblivious, dominates SQ at all bit widths: -22% to -49% MSE (Bench 022, Plan 099, default-on)
 turboquant = []  # TurboQuant rotation + uniform codebook — legacy baseline for bench/educate only (Plan 063)
+asymmetric_kv = ["turboquant"]  # Asymmetric K/V cache compression benchmarks (Plan 123, Research 081)
+shard_kv = ["spectral_quant", "turboquant"]  # ShardKV asymmetric K/V compression — undo RoPE + PCA K path, Hadamard V path (Plan 147, Research 109)
 planar_quant = ["turboquant"]  # PlanarQuant 2D Givens rotation KV cache — O(d) vs TQ O(d²), 256 FMAs for d=128
+precision_aware_draft = []  # PASD boundary-aware draft scoring — penalizes tokens near quantization boundaries (Plan 227 Phase 4, GOAT 12.5% acceptance, default-ON)
 iso_quant = ["turboquant"]  # IsoQuant 4D quaternion rotation KV cache — O(d) vs TQ O(d²), 512 FMAs for d=128
 hybrid_oct_pq = ["planar_quant", "octopus"]  # Hybrid OCT encoding + PQ rotation (Plan 101)
 bt_rank = []  # Bradley-Terry pairwise ranking for DDtree selection (OpenDeepThink distillation)
-fft = ["bandit"]     # FFT Tactics Arena — ATB battle engine with status effects (Plan 053)
+fft = ["bandit", "sr2am_configurator"]     # FFT Tactics Arena — ATB battle engine with status effects (Plan 053)
 stepcode = ["bandit"]  # ⚠️ Plan 054 — NO GAIN proven. Infrastructure only. Off by default, not in `full`.
+skill_lifecycle = ["bandit"]  # Inference-Time Skill Evolution — per-pruner memory + test-gated registration + progressive disclosure catalog (Plan 192, Research 172)
+sense_composition = ["katgpt-core/sense_composition", "bandit"]  # KG Latent Octree Sense Composition (Plan 221)
+schema_centroid = ["katgpt-core/schema_centroid", "sense_composition"]  # Schema-Centroid Informed KG Embedding Initialization (Plan 237, GOAT 7/7, default-ON)
+slod = ["katgpt-core/slod", "spectral_hierarchy"]  # SLoD Spectral Level-of-Detail Pruner (Plan 235, GOAT G1-G6 all pass, default-ON)
+bake_precision = ["katgpt-core/bake_precision", "sense_composition"]  # BAKE Precision-Gated Bayesian Embedding Update (Plan 236, GOAT 10/10 but marginal drift 4.7% vs 30% target — opt-in loser)
+rat_plus_bridge = ["katgpt-core/rat_plus_bridge"]  # RAT+ Recurrence Bridge — modelless dilated inference via GDN2 state (Plan 225)
+sdpg_bandit = ["bandit"]  # SDPG bandit + KL anchoring (Plan 180, Research 160)
+gdsd_distill = ["bandit"]  # GDSD Advantage-Guided Pruner — modelless self-distillation (Plan 169)
 bomber = ["bevy_ecs", "bandit"]  # Bomberman HL Arena (Plan 033)
+spechop = ["bandit"]  # SpecHop continuous multi-hop speculation pipeline (Plan 131, Research 091)
+parallel_probe = []  # Parallel-Probe 2D controller — consensus-based parallel branch control (Plan 133, Research 094)
+dflare_fusion = []  # DFlare Marginal Fusion — multi-source conditioning blend (Plan 174, 🪦 IMPROVEMENT GOAT FAILED — no measurable acceptance gain, research-only)
+dflare_kv_routing = []  # DFlare Pruner-Confidence KV Routing — confidence-gated KV selection (Plan 174, 🪦 IMPROVEMENT GOAT FAILED — no gain over static, research-only)
+dflare_progressive_budget = []  # DFlare Position-Weighted DDTree Budget — exponential decay allocation (Plan 174, 🪦 IMPROVEMENT GOAT FAILED — no gain over uniform, research-only)
+corr_budget = []  # Correlation Budget Allocation — EMA-driven speculative depth budget (Plan 200 GOAT 10/10, default-ON)
+caddtree_budget = ["spec_cost_model"]  # CaDDTree — Cost-Aware Adaptive DDTree Budget Selection (Plan 219, GOAT 7/7, default-ON)
 bomber-agent = ["bomber"]  # Coding agent validator loop (Issue 052, Tasks C9-C10)
-bomber-wasm = ["bomber", "wasmtime", "papaya"]  # WASM bomber validator loader (Plan 034) + batch pool (Plan 037)
+bomber-wasm = ["bomber", "wasmi", "papaya"]    # WASM bomber validator loader (Plan 034) + batch pool (Plan 037) + wasmi migration (Plan 167)
 game_state = ["bomber"]  # GameState forward model trait + generic MCTS (Plan 056)
+dual_gram_pca = ["katgpt-core/dual_gram_pca"]  # Dual-Gram PCA routing for short-sequence calibration (Research R130, Plan 159 GOAT) — default-ON
+roofline_cost = ["katgpt-core/roofline_cost"]  # Roofline cost model for GPU operator runtime prediction (Research R130, Plan 159 GOAT) — default-ON
 bandit_mcts = ["game_state"]  # Bandit-guided MCTS rollout policy — NFSP/MCTS duality (Plan 067)
 hla_attention = []  # Higher-order Linear Attention — O(1) inference cache (Plan 057)
 gdn2_attention = []  # Gated DeltaNet-2 recurrent attention — O(1) decode (Plan 105, Research 70)
 lt2_looped = ["hla_attention"]  # LT2 looped inference pipeline — weight-shared T-pass loop (Plan 108, Research 73)
+sleep_consolidation = ["lt2_looped", "gdn2_attention"]  # Sleep-time offline recursive memory consolidation at eviction (Plan 154 GOAT 14/14, Research 116) — default-ON
+plasma_path = ["katgpt-core/plasma_path"]  # Bit-plane ternary SIMD matvec — multiplication-free CPU inference (Plan 148, Research 110)
+peira_distill = ["katgpt-core/peira_distill", "bandit"]  # PEIRA inter-view regressor alignment — collapse-free modelless distillation (Plan 153 GOAT 7/7, Research 115) — default-ON
+ilc_distill = ["bandit"]  # ILC Iterative Latent Clustering — synonym-aware DDTree pruning (Research 136 GOAT 6/6, arXiv:2605.27734) — default-ON
 monopoly = ["bevy_ecs", "bandit"]  # Monopoly Board Game Engine (Plan 034)
 go = ["bandit", "dep:reqwest"]  # AutoGo API bridge + Go GameState (Plan 065)
+randopt_weight = ["bandit"]  # RandOpt weight-space perturbation ensembling (Plan 121, Research 080)
+toast_tokenizer = []  # ToaST split-tree tokenization (Plan 122, Research 081)
+convex_tok = ["dep:good_lp", "toast_tokenizer"]  # ConvexTok LP vocabulary optimizer (Plan 127, Research 087)
+datrie_vocab = ["toast_tokenizer"]  # Alias: enables toast_tokenizer (datrie is auto-routed) + benchmark examples (Research 137)
+event_log = []  # Event-sourced game traces with fork-and-diff (Plan 124, Research 081)
+vpd_em_distill = ["sdar_gate", "bandit"]  # VPD EM-style co-evolutionary distillation (Plan 120, Research 080)
+proof_sketch_evolution = ["bandit"]  # Proof Sketch Evolution — Elo-rated population + global goal cache (Plan 128, Research 088)
+opus_selection = ["bandit"]  # OPUS Boltzmann + redundancy selection — CountSketch + softmax sampling (Plan 129, Research 089)
+epiplexity_scoring = []  # Epiplexity structural information scoring — loss-curve area above final (Plan 130, Research 090)
+questbench = ["katgpt-core/questbench"]  # QuestBench underspecification scoring for modelless architecture (Plan 110, Research 008)
+committee_boost = ["bt_rank", "bandit"]  # Committee Boost — oracle-gap recovery, debiased BtRank, budget sizing (Plan 132, Research 093)
+mech_attribution = ["cna_steering", "ropd_rubric", "bandit"]  # Mechanistic Data Attribution — catalyst pattern detection + influence proxy (Plan 111, Research 009). GOAT: 6/6 (P1-P6). NOT default-on pending full integration.
+safe_bandit = ["bandit"]  # PrudentBanker Safe-Phased Bandit — delay-calibrated safe exploration (Plan 137)
+stiff_anomaly = []  # Stiff/Soft Subspace Anomaly Gate — generic eigenvalue decomposition anomaly detection (Plan 138)
+cache_prune = []  # CachePrune SAT + rolling hash + sensitivity masking (Plan 140, Research 101)
+state_source = ["bandit"]  # State-Source Modelless Distillation — state-visitation tracking + P-UCB + retention (Plan 142, Research 103)
+nexus_elo = ["state_source", "proof_sketch_evolution"]  # Nexus Elo — Plackett-Luce + P-UCB + goal cache for DDTree/SR²AM (Plan 143, Research 104)
+skill_opt = []  # SkillOpt text-space skill optimization — generic framework for game rule optimization (Plan 144, Research 105)
+proof_cert = []  # Hierarchical GOAT Proof Certificates — formal verification methodology (Plan 145, Research 106)
+tf_loop = ["katgpt-core/tf_loop", "lt2_looped"]  # Training-free loop wrapper — ODE-refined sub-stepping (Plan 136)
+and_or_dtree = ["proof_sketch_evolution", "bandit", "katgpt-core/and_or_dtree"]  # AND-OR DDTree — blueprint-driven subgoal decomposition (Plan 190, Research 170)
+partial_scoring = ["bandit", "katgpt-core/partial_scoring"]  # PartialScorer graduated reward for game episodes (Plan 191, Research 171)
+problem_mutator = ["bandit", "katgpt-core/problem_mutator"]  # ProblemMutator game config evolution (Plan 191, Research 171)
+idea_divergence = ["bandit", "partial_scoring", "katgpt-core/idea_divergence"]  # IdeaDivergence strategic novelty filter (Plan 191, Research 171)
+speculative_generator = ["katgpt-core/speculative_generator"]  # SpeculativeGenerator trait unification — generic generate+validate contract (Plan 193 Phase 1)
+comp_width = ["mux_bfs", "katgpt-core/comp_width"]  # Compositional DDTree partner-entropy width — continuous replacement for PEAK_DOMINANCE_RATIO (Plan 205, Research 181)
 # ── Percepta (transformer-vm RIIR, Plan 064) ──────────────────
 percepta = ["ordered-float"]  # CHT hull cache: upper+lower, HullMeta, tie-break, cumsum (TG-A)
 percepta_gates = ["percepta"]  # + ReGLU, stepglu, multiply, persist primitives (TG-B)
 percepta_graph = ["percepta_gates"]  # + Expression/Dimension DSL, ProgramGraph (TG-C)
 percepta_wasm = ["percepta_graph"]  # + WASM decoder + lowering + interpreter — pure Rust, NOT wasmtime (TG-E+F)
-percepta_compile = ["percepta_wasm", "good_lp"]  # + MILP + weights + transformer + Futamura + CLI (TG-D+G-J)
+percepta_compile = ["percepta_wasm", "dep:good_lp"]  # + MILP + weights + transformer + Futamura + CLI (TG-D+G-J)
 feedback = []  # E2E feedback loop — sends inference results to REST endpoint (Plan 042, requires consumer in riir-gpu)
 rest = []  # REST bridge test + merge stub (Plan 009, client lives in riir-ai/riir-rest)
 embedding_router = []  # Semantic embedding routing (Plan 024, not yet started)
 game_domain = ["domain_latent"]  # Alias for domain_latent — game-specific Config presets (Plan 040)
 language_domain = []  # Language domain: BPE vocab, LLM models (Plan 040, future)
+newton_schulz = []  # Newton-Schulz orthogonalization + Muon momentum (Plan 152, Research 114, GOAT 25/25 Bench 050) — default-ON
+river_valley = []  # River-valley diagnostic metrics — subspace ratios, effective rank, cosine similarity (Plan 152, Research 114, GOAT 25/25 Bench 050) — default-ON
+spectral_hierarchy = ["katgpt-core/spectral_hierarchy"]  # Spectral hierarchy diagnostic — eigenspace alignment, Haar wavelets, Cauchy interlacing (Plan 156 GOAT) — default-ON
+sigmoid_margin = ["katgpt-core/sigmoid_margin"]  # Sigmoid margin loss + retrieval margin diagnostic (Research 123, Plan 157)
+moa_inference = ["coda_fusion", "katgpt-core/moa_inference"]  # MoA Mixture of Activations — token-adaptive activation mixing (Research 126, Plan 158)
 gpu = []  # Placeholder — GPU training lives in riir-ai/riir-gpu
+kog_cpu_fusion = []  # Kog AI monokernel CPU fusion — RMSNorm gamma folding + QKV interleaving (Plan 160 GOAT 3/3 Gemma 2 scale, Research 139) — default-ON
+flashar_consensus = ["tri_mode", "plasma_path"]  # FlashAR Consensus Tri-Mode with Ternary Thermal Paths (Plan 166, Research 149)
+flashar_anchor = ["dllm"]  # FlashAR strided anchor-then-fill D2F (Plan 166 stretch, Research 149)
+recfm = []  # RecFM recursive cross-scale consistency — DDTree + LT2 + SpecHop (Plan 168, Research 150)
+thinking_prune = ["sr2am_configurator"]  # Thinking Prune — FrozenBaseGuard for SpecHop/LT2 intermediate steps (Plan 171, Research 153)
+rim_slots = ["katgpt-core/rim_slots"]  # RiM Reasoning Buffer Slots — fixed latent workspace for DDTree (Plan 172, Research 192)
+budget_adaptation = []  # Compression-adaptive decode budget — PFlash complexity signal (Plan 167, Research R050)
+wall_attention = ["katgpt-core/wall_attention"]  # Wall Attention — diagonal forget gates replacing RoPE (Plan 173, Research Wall Attention) — opt-in, requires Wall-trained model weights
+ane = ["dep:coreml-native", "dep:coreml-proto", "dep:prost"]  # Apple Neural Engine inference backend (Plan 176)
+gpu_inference = ["dep:metal"]  # GPU inference backend via Metal compute pipelines (Plan 176)
+inference_router = ["gpu_inference", "ane"]  # Full inference routing: TriggerGate + InferenceRouter + GPU + ANE (Plan 176)
+thinking_cot = ["rim_slots", "thinking_prune", "parallel_probe", "ppot", "bt_rank", "bandit"]  # Adaptive CoT thinking — self-learning when to think (Plan 194)
+chain_fold = ["thinking_cot"]  # ThoughtFold chain folding — inference-time CoT step pruning (Plan 195 GOAT 16/16, validated by Plan 228 78% reduction)
+bandit_top_p = ["bandit"]  # Adaptive top-p bandit arm selection (Plan 181, default ON candidate)
+curvature_alloc = ["bandit"]  # Curvature-influence allocation — EoS proxy budget control (Plan 183)
+nds_proxy = ["bandit"]  # NDS curvature proxy — modelless inference budget control (Plan 186)
+wealth_pruner = ["bandit"]  # WealthPruner — economic bandit arms via Hayek market selection (Plan 187, Research 167)
+freq_bandit = ["bandit"]  # FreqBandit — oscillatory state-space modelless distillation Phase 1 (Plan 189)
+modal_spec = ["katgpt-core/modal_spec"]  # ModalSpec drafter — LinOSS cell + Fourier basis speculative decoding (Plan 189 Phase 3, experimental)
+osc_kv = ["bandit", "freq_bandit"]  # OscKV — oscillatory KV cache with IMEX discretization (Plan 189 Phase 2, opt-in)
+vocab_coreset = []  # DDTree vocab coreset for speculative decode (Plan 181, opt-in)
+trust_region_spec = ["bandit"]  # Trust-Region Adaptive Speculation — adaptive window + blend + routing (Plan 182, Research 162)
+spec_reconciliation = []  # Speculative Reconciliation Engine — verify offline trajectories against plausibility manifolds (Plan 177)
+mux_pruner = []  # MuxSpanPruner — vocabulary simplex pruning (Research 158, MUX)
+mux_ddtree = ["mux_pruner"]  # MuxDdTree — superposition branch DDTree nodes (Research 158, MUX)
+mux_bandit_width = ["bandit"]  # MuxBanditWidth — adaptive superposition width (Research 158, MUX)
+mux_bfs = ["mux_ddtree"]  # MUX BFS — superposition-guided parallel tree search (Research 158)
+mux_freeze_thaw = ["mux_pruner"]  # MUX Freeze/Thaw — persistent superposition patterns (Research 158)
+mux_demux = []  # MuxDemux Verifier — deterministic superposition recovery (Research 158, MUX)
+mux_latent_context = []  # MUX-Latent Context Compression — inference-time context compression via vocabulary superposition (Research 211, Plan 238, GOAT G1 14-29× TTFT reduction, default-ON)
+lclm_adaptive_lod = ["mux_latent_context"]  # LCLM Adaptive LOD — spectral energy-based adaptive compression ratio (Research 211, Plan 238 Phase 4, opt-in)
+kvarn = []  # KVarN variance-normalized KV-cache quantization (Research 159)
+selectivity_router = []  # Self-Learning Selectivity Router — adaptive CoT via per-position EMA kurtosis (Plan 204, default-OFF until GOAT proof)
+ruliology = ["bandit"]  # Ruliology Bandit — simple program strategies as bandit arms (Plan 188, Research 168)
+directional_credit = []  # Entropy-bifurcated screening — direction-adaptive credit (Plan 184, default on candidate)
+kv_share = []  # Q-K=V projection sharing — 50% KV cache reduction (Plan 185, default on candidate)
+rosetta_pruner = ["papaya"]  # Rosetta Pruners — universal cross-domain meta-pruner (Plan 201 GOAT 39-55% node reduction, default-ON)
+domino_correction = []  # Domino Causal Correction — modelless decoupled pattern: PrefixCorrectionTable + domino_score + DominoPruner (Plan 197 GOAT 25/25 -22.8% build time, Research 177, default-ON)
+dynamic_rank = ["papaya"]  # Dynamic Rank Pruner — GATv2-inspired static ranking detection & correction (Plan 232, Research 206)
+kurtosis_gate = []  # Kurtosis Gate — polarization-driven speculative decoding (Plan 203b, default ON, zero perf cost)
+domino_lora = []  # Domino LoRA causal correction adapter for speculative decoding (Plan 231)
+nf_flow_score = []  # NFCoT FlowScore Drafter — modelless normalizing flow density scoring (Plan 229 T1, GOAT gate, default OFF)
+nf_flow_budget = []  # NFCoT FlowBudget — sigmoid-weighted speculative depth allocation (Plan 229 T4, GOAT gate, default OFF)
+nf_flow_gate = []  # NFCoT FlowGate — adaptive acceptance criterion (Plan 229 T3, GOAT gate, default OFF)
+nf_flow = ["nf_flow_score", "nf_flow_gate", "nf_flow_budget"]  # NFCoT parent feature — all modelless flow components (Plan 229, default OFF until GOAT)
+nf_flow_mux = ["nf_flow_score", "mux_pruner"]  # NFCoT FlowMUX — flow scoring for MUX trajectories (Plan 229 T6, default OFF)
+nf_flow_fold = ["nf_flow_score", "chain_fold"]  # NFCoT FlowFold — confidence-gated chain folding (Plan 229 T7, default OFF)
+static_cal_tables = []  # Static Calibration Tables — pre-computed per-head attention scales (Plan 227 Phase 1, GOAT 100% latency, default-ON)
+targeted_precision = []  # Targeted Precision Budget — per-head bit allocation for quantization (Plan 227 Phase 2, GOAT 21.3% ppl, default-ON)
+modality_pruned_load = []  # Modality-Pruned Context Loading — query classifier + pipeline selection (Plan 227 Phase 3, GOAT 97.6% latency simple queries, default-ON)
+channel_simd_align = []  # Channel SIMD Alignment — cache-line-padded weight storage for SIMD throughput (Plan 227 Phase 5)
+async_qdq_overlap = ["inference_router"]  # Async Q/DQ Overlap — double-buffered KV dequantize for GPU pipeline (Plan 227 Phase 6, GOAT 37.5% throughput, default-ON)
+rv_gated_routing = []  # RV-Gated Compute Routing — AcceptanceVarianceTracker + InferenceRouter integration (Plan 202 GOAT 89.7% P50 improvement, default-ON)
+rv_gated_thinking = ["rv_gated_routing"]  # RV-Gated Thinking — ThinkingController RV bias (Plan 202 GOAT, default-ON via rv_gated_routing)
+rv_bandit_pruning = []  # RV Bandit Pruning — FrequencyBandit top-ρ arm suppression (Plan 202 GOAT, default-ON via rv_gated_routing)
+best_buddies = []  # Best Buddies Drafting — mutual NN filter for speculative decoding (Plan 199 GOAT +32.19% acceptance, default-ON)
+egcs = []  # Episode-Guided Constraint Synthesis — reference-based structural constraint injection (Plan 206, GOAT 4/4, default-ON)
+self_distilling_bandit = ["egcs"]  # Self-Distilling Pruner Bandit — episode-guided arm selection (Plan 208 GOAT 4/4, default-ON)
+lodestar = []  # Lodestar Completion-Distance Pruning — shortest-accepting-distance powers budget-aware masking + jump-ahead + A* termination (Plan 207, Research 183, GOAT 5/5 Bench 055, default-ON)
+reward_calibrator = []  # Reward-Gated Pruner Calibration — sigmoid-bounded Q-values + Welford variance + blake3 audit (Plan 210 F4, GOAT 6/6, default-ON)
+reward_mem = ["egcs", "bandit"]  # Reward-Weighted Branch Memorization — blake3 pattern hashing + EMA reward tracking (Plan 209 T3, GOAT 6/6, default-ON)
+fol_constraints = []  # FOL constraint extraction from prompts — keyword table + FolPruner (Plan 209 T1)
+rule_extraction = []  # Logical rule extraction from DDTree paths — ExtractedRule + RuleExtractor (Plan 209 T2)
+decision_trace = ["rule_extraction"]  # Interpretable decision traces — opt-in debug/audit (Plan 209 T4)
+symbolic_distill = []  # Symbolic Expression Distillation — compact polynomial expressions for DDTree boundaries (Plan 210 F1, GOAT 6/6, default-ON)
+decision_explain = ["papaya"]  # Perturbation-based decision explanation via sensitivity analysis (Plan 210 Phase 4, GOAT 6/6, default-ON)
+concept_grounding = ["symbolic_distill"]  # Concept Grounding — template-based pruner rule explanation (Plan 210 F2, GOAT 6/6, default-ON)
+insight_explain = ["symbolic_distill", "concept_grounding", "decision_explain", "posterior_evolution", "mux_latent_context", "reward_calibrator"]  # INSIGHT Symbolic Distillation & Explanation (Plan 210)
+fol_lnn = ["fol_constraints", "rule_extraction", "reward_mem"]  # FOL-LNN all fusions convenience (Plan 209)
+collapse_aware_thinking = ["selectivity_router", "thinking_cot", "bandit", "katgpt-core/collapse_aware_thinking"]  # Collapse-Aware Adaptive Thinking — S2F mid-reasoning early exit (Plan 212, GOAT 6/6, default-ON)
+three_mode_router = ["and_or_dtree", "bandit"]  # Three-Mode Neuro-Symbolic Bandit Router — 6-arm UCB1 mode selection (Plan 211, GOAT 6/6, default-ON)
+auto_constraint_synthesis = ["three_mode_router", "egcs"]  # Auto Constraint Synthesis — mine episodes for recurring token patterns (Plan 211 F2, GOAT proven, default-ON)
+safe_exploration_budget = ["three_mode_router"]  # Safe Exploration Budget — configurable verification tier limits (Plan 211 F3, opt-in)
+percept_route = []  # Symbolic Percept Router — compute routing from BFCP complexity (Plan 213 P4)
+bfcf_tree = ["and_or_dtree", "bandit", "percept_route"]  # BFCF Tree — perceptual region folding for O(regions) pruning (Plan 213, GOAT candidate)
+substrate_gate = ["sparse_mlp", "cna_steering"]  # SubstrateGate — inference-time capability substrate routing (Plan 216, GOAT candidate)
+belief_drafter = ["katgpt-core/belief_drafter", "papaya"]  # NextLat Belief-State Speculative Drafter — lightweight MLP recursive hidden state prediction (Plan 217, GOAT 43 tests + 7 benchmarks, default-on)
+ted_lite = []  # TED-Lite Divergence Metric — pruner drift measurement (Plan 214 P1)
+coexplain_pruner = ["ted_lite", "bandit"]  # Self-Refining + Editable ConstraintPruner (Plan 214 P2+3)
+coexplain_riir = ["coexplain_pruner"]  # RIIR Feedback Loop — Curator marketplace enabler (Plan 214 P4)
+bfcf_lfu_shard = ["bfcf_tree", "papaya"]  # BFCF × LFU × Sharding — region-level cache with frequency-aware eviction (Plan 218, GOAT 44 tests + 10 benchmarks, default-on)
+bfcf_lsh_cms = ["bfcf_lfu_shard"]  # BFCF × LSH × CMS — SimHash approximate cache + Count-Min Sketch (Plan 220, GOAT 10/10, default-ON)
+critical_interval_gate = []  # Default-on: entropy-triggered solver switch (Plan 222)
+vocab_channel_pruner = []  # ROTATE-Derived ConstraintPruner — load-time weight decomposition → per-neuron token reachability (Plan 228, GOAT candidate)
+q_sample_solver = ["critical_interval_gate"]  # Opt-in: q-sampling for critical steps
+mbr_tree_select = []  # Opt-in: MBR selection from DDTree
+self_cond_draft = []  # Opt-in: 2-pass self-conditioned speculative draft
+outlier_guard = []  # ON BY DEFAULT — KS D-statistic outlier detection at model load (Plan 224)
+regime_transition = ["and_or_dtree", "bandit", "decision_trace", "fol_constraints", "rule_extraction"]  # ON BY DEFAULT — Regime-Transition Inference, self-revising discovery (Plan 215, GOAT PROVED -0.3% overhead vs real decode)
+segment_checkpoint = []  # ON BY DEFAULT — core GRM segment caching (Plan 223b)
+ssc_spec_draft = ["segment_checkpoint", "regime_transition"]  # Opt-in — SSC sparse speculative drafting
+memory_soup_dtree = ["segment_checkpoint", "regime_transition"]  # Opt-in — experimental DDTree branch merging
+llmexec_guard = []  # Default-on: entropy-driven verification budgeting (Plan 223)
+hoare_pruner = ["llmexec_guard"]  # Opt-in: predicate propagation (Plan 223)
+trajectory_doctor = ["hoare_pruner"]  # Opt-in: failure localization (Plan 223)
+workflow_lattice = ["hoare_pruner"]  # Opt-in: sigmoid-graded relevance (Plan 223)
+wasm_proof_witness = []  # Opt-in: proof certificates (Plan 223)
+posterior_evolution = ["bandit"]  # Posterior-Guided Pruner Evolution — BAKE precision + MUSE lifecycle (Plan 239, Research 211, GOAT 8/8, default-ON)
+shard_embedding = []  # Shard Embedding Projection — JL random orthogonal projection for shard similarity (Plan 230, GOAT candidate)
+manifold_pruner = []  # ManifoldE point-to-manifold soft validity scoring (Research 207, Plan 234, GOAT G1 FAIL — demoted, keep opt-in)
+union_bound_confidence = []  # Union bound additive branch confidence (Research 205, Plan 231, GOAT 6/6, default-ON)
+pathway_tracker = []  # Intrinsic pathway stability detection (Research 205, Plan 231, GOAT 7/7, default-ON)
+federation_composer = ["bandit"]  # Explicit Model→Agent→Tool pipeline with residual checking (Research 205, Plan 231, GOAT 7/7, default-ON)
+# dynamic_rank: defined above with papaya dep (Plan 232)
 # LeviathanVerifier is always compiled (no gate needed) — verifier.rs, benchmark.rs
-full = ["sudoku", "validator", "ppot", "domain_latent", "bandit", "delta_mem", "g_zero", "fft", "bomber", "bomber-agent", "bomber-wasm", "game_state", "bandit_mcts", "hla_attention", "gdn2_attention", "lt2_looped", "dash_attn", "mls_aggregate", "dmax_spd", "dreamer", "monopoly", "go", "feedback", "rest", "embedding_router", "gpu", "game_domain", "language_domain", "percepta_compile", "dllm", "tri_mode", "bt_rank", "spectral_quant", "octopus", "turboquant", "planar_quant", "iso_quant", "hybrid_oct_pq", "replaid_schedules", "elf_sde", "maxsim", "cna_steering", "deep_manifold", "federation", "delta_routing", "decode_specialize", "lattice_deduction", "unit_distance", "memo_reflections", "eqr_convergence", "subterranean", "sr2am_configurator", "data_gate", "coda_fusion", "tiled_attention"]
+full = ["sudoku", "validator", "ppot", "domain_latent", "bandit", "delta_mem", "g_zero", "fft", "bomber", "bomber-agent", "bomber-wasm", "game_state", "bandit_mcts", "hla_attention", "gdn2_attention", "lt2_looped", "dash_attn", "mls_aggregate", "dmax_spd", "dreamer", "monopoly", "go", "randopt_weight", "feedback", "rest", "embedding_router", "gpu", "game_domain", "language_domain", "percepta_compile", "dllm", "tri_mode", "bt_rank", "spectral_quant", "octopus", "turboquant", "planar_quant", "iso_quant", "hybrid_oct_pq", "replaid_schedules", "elf_sde", "maxsim", "cna_steering", "deep_manifold", "federation", "delta_routing", "decode_specialize", "lattice_deduction", "unit_distance", "memo_reflections", "eqr_convergence", "subterranean", "sr2am_configurator", "data_gate", "coda_fusion", "tiled_attention", "vpd_em_distill", "proof_sketch_evolution", "convex_tok", "opus_selection", "epiplexity_scoring", "committee_boost", "questbench", "cache_prune", "sleep_consolidation", "spectral_hierarchy", "newton_schulz", "river_valley", "peira_distill", "kog_cpu_fusion", "datrie_vocab", "gepa_reflective", "phrase_boost", "hydra_budget", "budget_adaptation", "recfm", "ilc_distill", "thinking_prune", "rim_slots", "wall_attention", "ane", "inference_router", "thinking_cot", "kvarn", "freq_bandit", "directional_credit", "kv_share", "nds_proxy", "wealth_pruner", "and_or_dtree", "speculative_generator", "selectivity_router", "lodestar", "collapse_aware_thinking", "three_mode_router", "auto_constraint_synthesis", "safe_exploration_budget", "substrate_gate", "bfcf_tree", "bfcf_lfu_shard", "bfcf_lsh_cms", "ted_lite", "coexplain_pruner", "coexplain_riir", "caddtree_budget", "belief_drafter", "llmexec_guard", "hoare_pruner", "trajectory_doctor", "workflow_lattice", "segment_checkpoint", "regime_transition", "ssc_spec_draft", "memory_soup_dtree", "static_cal_tables", "targeted_precision", "modality_pruned_load", "precision_aware_draft", "async_qdq_overlap", "union_bound_confidence", "pathway_tracker", "federation_composer", "manifold_pruner", "schema_centroid", "slod"]
+
+[[test]]
+name = "goat_234_manifold_pruner"
+required-features = ["manifold_pruner"]
+
+[[test]]
+name = "bench_239_posterior_evolution_goat"
+required-features = ["posterior_evolution", "mux_latent_context"]
+
+[[test]]
+name = "bench_231_union_bound_goat"
+required-features = ["union_bound_confidence"]
+
+[[test]]
+name = "bench_001_pruners_goat"
+required-features = ["bomber", "go"]
+
+[[test]]
+name = "bench_001_pruners_goat_proof"
+required-features = ["bomber", "go"]
+
+# ── SegmentCheckpoint (Plan 223b) ───────────────────────────────
+
+[[example]]
+name = "segment_checkpoint_demo"
+required-features = ["segment_checkpoint", "regime_transition"]
+
+# ── Percepta transformer-VM ───────────────────────────────────
+
+[[example]]
+name = "percepta_phase0"
+required-features = ["percepta_compile"]
+
+# ── AND-OR DDTree Decomposition (Plan 190) ───────────────────────
+
+[[example]]
+name = "and_or_demo"
+required-features = ["and_or_dtree"]
+
+[[example]]
+name = "and_or_sudoku"
+required-features = ["and_or_dtree"]
 
 # ── Bandit (RL / Game Theory) ─────────────────────────────────
 
@@ -133,6 +355,16 @@ required-features = ["bandit"]
 [[example]]
 name = "bandit_07_director"
 required-features = ["bandit"]
+
+# ── SpecHop ───────────────────────────────────────────────────
+
+[[example]]
+name = "spechop_01_pipeline"
+required-features = ["spechop"]
+
+[[example]]
+name = "spechop_02_cost_model"
+required-features = ["spechop"]
 
 # ── Heuristic Learning ────────────────────────────────────────
 
@@ -214,6 +446,22 @@ required-features = ["memo_reflections"]
 name = "bomber_14_sr2am_tournament"
 required-features = ["sr2am_configurator", "bomber"]
 
+[[example]]
+name = "bomber_15_vpd_tournament"
+required-features = ["vpd_em_distill", "g_zero", "bomber"]
+
+[[example]]
+name = "bomber_16_rmsd_tournament"
+required-features = ["rmsd_distill", "vpd_em_distill", "g_zero", "bomber"]
+
+[[example]]
+name = "bomber_17_feedback_goat"
+required-features = ["sia_feedback", "g_zero", "bomber"]
+
+[[example]]
+name = "bomber_18_sdpg_tournament"
+required-features = ["sdpg_bandit", "sdar_gate", "ropd_rubric", "g_zero", "bomber"]
+
 # ── Monopoly FSM Arena ────────────────────────────────────────
 
 [[example]]
@@ -242,6 +490,16 @@ required-features = ["game_state"]
 name = "game_state_02_bomber_gvg"
 required-features = ["game_state"]
 
+# ── RTPurbo ────────────────────────────────────────────────────
+
+[[example]]
+name = "rt_turbo_01_calibration"
+required-features = ["rt_turbo"]
+
+[[example]]
+name = "rt_turbo_02_decode_bench"
+required-features = ["rt_turbo"]
+
 # ── FFT Tactics Arena ────────────────────────────────────────
 
 [[example]]
@@ -254,6 +512,10 @@ required-features = ["ropd_rubric", "g_zero", "fft"]
 [[example]]
 name = "fft_03_sdar_tournament"
 required-features = ["sdar_gate", "ropd_rubric", "g_zero", "fft"]
+
+[[example]]
+name = "fft_04_feedback_goat"
+required-features = ["g_zero", "fft"]
 
 # ── Blue Bear ──────────────────────────────────────────────────
 
@@ -282,6 +544,10 @@ name = "core_04_prefill"
 [[example]]
 name = "core_05_maxsim"
 required-features = ["maxsim"]
+
+[[example]]
+name = "core_06_peira"
+required-features = ["peira_distill"]
 
 # ── Dungeon ────────────────────────────────────────────────────
 
@@ -352,6 +618,10 @@ required-features = ["go"]
 name = "go_09_reflection_qa"
 required-features = ["memo_reflections", "go"]
 
+[[example]]
+name = "go_10_sdpg_tournament"
+required-features = ["go", "sdpg_bandit"]
+
 # ── Tactical AI ────────────────────────────────────────────────
 
 [[example]]
@@ -385,3 +655,273 @@ required-features = ["cna_steering"]
 [[example]]
 name = "cna_03_go_circuit"
 required-features = ["cna_steering", "go"]
+
+[[example]]
+name = "stiff_anomaly_demo"
+required-features = ["stiff_anomaly"]
+
+[[example]]
+name = "randopt_01_basic"
+required-features = ["randopt_weight"]
+
+# ── CachePrune (Plan 140) ──────────────────────────────────────
+
+[[example]]
+name = "cache_prune_01_sat_bench"
+required-features = ["cache_prune"]
+
+[[example]]
+name = "cache_prune_02_segment_match"
+required-features = ["cache_prune"]
+
+# ── EGA Energy-Gated Attention (Plan 139) ────────────────────────
+
+[[example]]
+name = "ega_01_quality"
+required-features = ["ega_attn"]
+
+[[example]]
+name = "ega_02_energy_profile"
+required-features = ["ega_attn"]
+
+[[example]]
+name = "ega_03_eviction"
+required-features = ["ega_attn"]
+
+[[example]]
+name = "ega_04_combined"
+required-features = ["ega_attn"]
+
+[[example]]
+name = "datrie_01_bench"
+required-features = ["datrie_vocab"]
+
+[[example]]
+name = "best_buddies_01_bench"
+required-features = ["speculative_generator", "best_buddies"]
+
+[[example]]
+name = "thinking_cot_demo"
+required-features = ["thinking_cot"]
+
+[[example]]
+name = "selectivity_router_demo"
+required-features = ["selectivity_router", "kurtosis_gate"]
+
+[[example]]
+name = "chain_fold_demo"
+required-features = ["chain_fold"]
+
+[[example]]
+name = "kvarn_goat_proof"
+required-features = ["kvarn"]
+
+[[example]]
+name = "kvarn_thinking_demo"
+required-features = ["kvarn", "thinking_cot"]
+
+[[example]]
+name = "spec_reconciliation_demo"
+required-features = ["spec_reconciliation"]
+
+[[example]]
+name = "octpq_kvarn_fusion"
+required-features = ["kvarn", "hybrid_oct_pq"]
+
+# ── VortexFlow (Plan 196) ───────────────────────────────────────
+
+[[example]]
+name = "rosetta_01_bench"
+required-features = ["rosetta_pruner"]
+
+[[example]]
+name = "rosetta_sudoku"
+required-features = ["rosetta_pruner", "sudoku"]
+
+[[example]]
+name = "corr_budget_01_bench"
+required-features = ["corr_budget"]
+
+[[example]]
+name = "vortex_01_block_topk"
+required-features = ["vortex_flow"]
+
+[[example]]
+name = "vortex_02_channel_discovery"
+required-features = ["vortex_flow"]
+
+[[example]]
+name = "vortex_03_meta_router"
+required-features = ["vortex_flow"]
+
+[[test]]
+name = "directional_credit_goat"
+required-features = ["directional_credit"]
+
+[[test]]
+name = "proof_curvature_alloc_goat"
+required-features = ["curvature_alloc"]
+
+[[test]]
+name = "kv_share_goat"
+required-features = ["kv_share"]
+
+[[test]]
+name = "kv_shared_lora_compat"
+required-features = ["kv_share"]
+
+[[test]]
+name = "nds_proxy_goat"
+required-features = ["nds_proxy"]
+
+[[test]]
+name = "test_wealth_bandit"
+required-features = ["wealth_pruner"]
+
+[[test]]
+name = "and_or_goat"
+required-features = ["and_or_dtree"]
+
+[[test]]
+name = "freq_bandit_goat_proof"
+required-features = ["freq_bandit"]
+
+[[example]]
+name = "egcs_demo"
+required-features = ["egcs"]
+
+[[example]]
+name = "self_distilling_demo"
+required-features = ["self_distilling_bandit"]
+
+[[example]]
+name = "lodestar_demo"
+required-features = ["lodestar"]
+
+[[example]]
+name = "lodestar_01_bench"
+required-features = ["lodestar"]
+
+[[example]]
+name = "collapse_aware_thinking_demo"
+required-features = ["collapse_aware_thinking"]
+
+[[example]]
+name = "three_mode_router_demo"
+required-features = ["three_mode_router"]
+
+[[test]]
+name = "three_mode_router_goat"
+required-features = ["three_mode_router"]
+
+[[example]]
+name = "bfcf_tree_demo"
+required-features = ["bfcf_tree"]
+
+[[test]]
+name = "bfcf_tree_goat"
+required-features = ["bfcf_tree"]
+
+[[test]]
+name = "substrate_gate_goat"
+required-features = ["substrate_gate"]
+
+[[example]]
+name = "substrate_gate_demo"
+required-features = ["substrate_gate"]
+
+[[test]]
+name = "coexplain_goat"
+required-features = ["coexplain_riir"]
+
+[[test]]
+name = "bench_218_bfcf_lfu_shard"
+required-features = ["bfcf_lfu_shard", "speculative_generator"]
+
+[[test]]
+name = "bfcf_lfu_shard_goat"
+required-features = ["bfcf_lfu_shard"]
+
+[[example]]
+name = "coexplain_demo"
+required-features = ["coexplain_riir"]
+
+[[example]]
+name = "sense_composition"
+required-features = ["sense_composition"]
+
+[[example]]
+name = "sense_bandit_demo"
+required-features = ["sense_composition"]
+
+[[example]]
+name = "critical_interval_demo"
+required-features = ["critical_interval_gate"]
+
+[[example]]
+name = "outlier_guard_demo"
+required-features = ["outlier_guard"]
+
+[[example]]
+name = "llmexec_guard_demo"
+required-features = ["llmexec_guard"]
+
+[[test]]
+name = "static_cal_goat"
+required-features = ["static_cal_tables", "kvarn"]
+
+[[test]]
+name = "targeted_precision_goat"
+required-features = ["targeted_precision"]
+
+[[test]]
+name = "precision_aware_draft_goat"
+required-features = ["precision_aware_draft"]
+
+[[test]]
+name = "channel_simd_goat"
+required-features = ["channel_simd_align"]
+
+[[test]]
+name = "async_qdq_goat"
+required-features = ["async_qdq_overlap", "union_bound_confidence", "pathway_tracker", "federation_composer"]
+
+[[test]]
+name = "bench_231_pathway_tracker_goat"
+required-features = ["pathway_tracker"]
+
+[[test]]
+name = "nf_flow_goat"
+required-features = ["nf_flow_score"]
+
+[[test]]
+name = "bench_224_outlier_guard_goat"
+required-features = ["outlier_guard"]
+
+[[test]]
+name = "pipeline_pruner_goat"
+required-features = ["modality_pruned_load"]
+
+[[test]]
+name = "goat_232_dynamic_rank"
+required-features = ["dynamic_rank", "bandit"]
+
+[[test]]
+name = "bench_232_dynamic_rank_acceptance"
+required-features = ["bandit"]
+
+[[test]]
+name = "bench_231_federation_composer_goat"
+required-features = ["federation_composer"]
+
+[[test]]
+name = "bench_238_mux_latent_goat"
+required-features = ["mux_latent_context"]
+
+[[test]]
+name = "bench_238_mux_latent_model_goat"
+required-features = ["mux_latent_context", "domain_latent"]
+
+[[example]]
+name = "vocab_channel_pruner_demo"
+required-features = ["vocab_channel_pruner"]

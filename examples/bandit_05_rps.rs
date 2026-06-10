@@ -93,6 +93,35 @@ fn select_arm(stats: &BanditStats, strategy: &BanditStrategy, rng: &mut Rng) -> 
                     .unwrap_or(std::cmp::Ordering::Equal)
             })
             .unwrap_or(0),
+        BanditStrategy::RandOptAdaptive {
+            density_threshold, ..
+        } => {
+            if rng.uniform() < *density_threshold {
+                (rng.uniform() * NUM_ARMS as f32) as usize % NUM_ARMS
+            } else {
+                stats.best_arm()
+            }
+        }
+        BanditStrategy::CurvatureInfluence { .. } => (0..NUM_ARMS)
+            .max_by(|&a, &b| {
+                stats
+                    .ucb1_score(a)
+                    .partial_cmp(&stats.ucb1_score(b))
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .unwrap_or(0),
+        #[cfg(feature = "safe_bandit")]
+        BanditStrategy::SafePhased { .. } => {
+            // SafePhased uses UCB1 as active arm selector; for demo purposes use UCB1 fallback
+            (0..NUM_ARMS)
+                .max_by(|&a, &b| {
+                    stats
+                        .ucb1_score(a)
+                        .partial_cmp(&stats.ucb1_score(b))
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
+                .unwrap_or(0)
+        }
     }
 }
 

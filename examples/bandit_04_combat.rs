@@ -353,8 +353,34 @@ fn select_arm(
                 stats.best_arm()
             }
         }
+        BanditStrategy::RandOptAdaptive {
+            density_threshold, ..
+        } => {
+            if rng.uniform() < *density_threshold {
+                (rng.uniform() * combat_arms as f32) as usize % combat_arms
+            } else {
+                stats.best_arm()
+            }
+        }
         #[cfg(feature = "tes_loop")]
         BanditStrategy::Rpucg { .. } => (0..combat_arms)
+            .max_by(|&a, &b| {
+                stats
+                    .ucb1_score(a)
+                    .partial_cmp(&stats.ucb1_score(b))
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .unwrap_or(0),
+        BanditStrategy::CurvatureInfluence { .. } => (0..combat_arms)
+            .max_by(|&a, &b| {
+                stats
+                    .ucb1_score(a)
+                    .partial_cmp(&stats.ucb1_score(b))
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .unwrap_or(0),
+        #[cfg(feature = "safe_bandit")]
+        BanditStrategy::SafePhased { .. } => (0..combat_arms)
             .max_by(|&a, &b| {
                 stats
                     .ucb1_score(a)

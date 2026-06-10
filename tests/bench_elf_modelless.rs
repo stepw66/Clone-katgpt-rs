@@ -279,7 +279,7 @@ fn bench_logit_normal_schedule_overhead() {
 #[test]
 fn bench_d2f_schedule_comparison() {
     use katgpt_rs::speculative::d2f::d2f_decode_block;
-    use katgpt_rs::speculative::types::NoPruner;
+    use katgpt_rs::speculative::types::{NoPruner, NoScreeningPruner};
     use katgpt_rs::types::Rng;
 
     println!("\n🧪 D2F Schedule Comparison: Uniform vs Logit-Normal");
@@ -304,7 +304,7 @@ fn bench_d2f_schedule_comparison() {
         let mut fully_activated = 0usize;
 
         for _ in 0..n_trials {
-            let result = d2f_decode_block(&weights, &config, &decode_config, &NoPruner, &mut rng);
+            let result = d2f_decode_block(&weights, &config, &decode_config, &NoPruner, &NoScreeningPruner, &mut rng);
             total_steps += result.steps_used;
             total_confidence += result.confidence_history.last().copied().unwrap_or(0.0);
             if result.state.is_fully_activated() {

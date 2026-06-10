@@ -131,7 +131,7 @@ Implemented in `riir-ai/crates/riir-gpu` (Plan 068).
 ### Task 2.2: ConstraintPruner Integration
 - [x] At each denoising step, call `pruner.is_valid(depth, token, path)` for each candidate — `sample_greedy()` and `sample_temperatured()` both filter via pruner
 - [x] Invalid tokens excluded from softmax denominator (skipped in `sum_exp` computation, effectively -inf)
-- [ ] For `ScreeningPruner`: use relevance score to weight sampling probabilities — deferred (needs relevance API integration)
+- [x] For `ScreeningPruner`: use relevance score to weight sampling probabilities — relevance ∈ [0.0, 1.0] multiplies softmax exponent, boosting semantically relevant tokens and dampening/excluding irrelevant ones
 - [x] Benchmark: denoising quality with vs without pruner — `benchmark_constraint_pruner_overhead` in `tests/test_d2f_decode.rs`
 
 ### Task 2.3: Benchmark Suite ✅
@@ -141,7 +141,7 @@ Implemented in `riir-ai/crates/riir-gpu` (Plan 068).
   - b) Throughput: D2F decode block + pipeline — `benchmark_d2f_decode_block`, `benchmark_d2f_pipeline`
   - c) Quality: accuracy with trained model, prompt conditioning — `test_d2f_decode_with_target_accuracy`, `test_d2f_decode_steps_vs_quality`
   - d) ConstraintPruner impact: overhead measurement — `benchmark_constraint_pruner_overhead`, `test_constraint_pruner_restricts_vocab`
-- [ ] Compare against DFlash+DDTree baseline on identical tasks — deferred (requires comparable model/config)
+- [-] Compare against DFlash+DDTree baseline on identical tasks — deferred (requires comparable model/config)
 
 ---
 

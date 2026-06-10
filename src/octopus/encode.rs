@@ -110,16 +110,29 @@ pub fn encode_vector(
     use_joint_rounding: bool,
 ) -> Vec<TripletIndices> {
     let triplets = decompose(rotated);
-    triplets
-        .iter()
-        .map(|t| {
-            if use_joint_rounding {
-                encode_triplet_joint(t, codebook)
-            } else {
-                encode_triplet_simple(t, codebook)
-            }
-        })
-        .collect()
+    let mut out = Vec::with_capacity(triplets.len());
+    encode_vector_into(&triplets, codebook, use_joint_rounding, &mut out);
+    out
+}
+
+/// Zero-alloc variant of [`encode_vector`].
+///
+/// Takes pre-decomposed triplets and writes into `out`.
+pub fn encode_vector_into(
+    triplets: &[Triplet],
+    codebook: &OctopusCodebook,
+    use_joint_rounding: bool,
+    out: &mut Vec<TripletIndices>,
+) {
+    out.clear();
+    out.reserve(triplets.len());
+    for t in triplets {
+        out.push(if use_joint_rounding {
+            encode_triplet_joint(t, codebook)
+        } else {
+            encode_triplet_simple(t, codebook)
+        });
+    }
 }
 
 /// Decode a single triplet's indices back to a 3-element vector.
@@ -201,27 +214,84 @@ pub fn triplet_mse(
 ///
 /// Returns the packed byte buffer.
 pub fn pack_triplet_indices(indices: &[TripletIndices], dir_bits: u8, nrm_bits: u8) -> Vec<u8> {
-    let bits_per_triplet = 2 * dir_bits as usize + nrm_bits as usize;
+    let dir_bits_usize = dir_bits as usize;
+    let bits_per_triplet = 2 * dir_bits_usize + nrm_bits as usize;
     let total_bits = indices.len() * bits_per_triplet;
     let mut packed = vec![0u8; total_bits.div_ceil(8)];
-    let mut bit_pos = 0usize;
 
     let dir_mask = ((1u16 << dir_bits) - 1) as u32;
     let nrm_mask = ((1u16 << nrm_bits) - 1) as u32;
+    let total_mask = (1u32 << bits_per_triplet) - 1;
 
+    let mut bit_pos = 0usize;
     for idx in indices {
-        // Pack i_xi
-        pack_bits(&mut packed, bit_pos, idx.i_xi as u32 & dir_mask, dir_bits);
-        bit_pos += dir_bits as usize;
-        // Pack i_eta
-        pack_bits(&mut packed, bit_pos, idx.i_eta as u32 & dir_mask, dir_bits);
-        bit_pos += dir_bits as usize;
-        // Pack i_rho
-        pack_bits(&mut packed, bit_pos, idx.i_rho as u32 & nrm_mask, nrm_bits);
-        bit_pos += nrm_bits as usize;
+        // Combine all 3 indices into a single value and pack at once
+        let combined = (idx.i_xi as u32 & dir_mask)
+            | ((idx.i_eta as u32 & dir_mask) << dir_bits_usize)
+            | ((idx.i_rho as u32 & nrm_mask) << (2 * dir_bits_usize));
+        let byte_pos = bit_pos / 8;
+        let shift = bit_pos % 8;
+        let v = (combined & total_mask) << shift;
+        packed[byte_pos] |= v as u8;
+        if shift + bits_per_triplet > 8 {
+            packed[byte_pos + 1] |= (v >> 8) as u8;
+        }
+        if shift + bits_per_triplet > 16 {
+            packed[byte_pos + 2] |= (v >> 16) as u8;
+        }
+        if shift + bits_per_triplet > 24 {
+            packed[byte_pos + 3] |= (v >> 24) as u8;
+        }
+        bit_pos += bits_per_triplet;
     }
 
     packed
+}
+
+/// Pack triplet indices into a pre-allocated byte buffer (zero-alloc hot path).
+///
+/// Clears and resizes `out` as needed. Equivalent to [`pack_triplet_indices`] but avoids allocation.
+///
+/// Optimized: combines all 3 indices into a single u32 and writes once per triplet
+/// instead of 3 separate pack_bits calls.
+pub fn pack_triplet_indices_into(
+    indices: &[TripletIndices],
+    dir_bits: u8,
+    nrm_bits: u8,
+    out: &mut Vec<u8>,
+) {
+    let dir_bits_usize = dir_bits as usize;
+    let bits_per_triplet = 2 * dir_bits_usize + nrm_bits as usize;
+    let total_bits = indices.len() * bits_per_triplet;
+    let byte_len = total_bits.div_ceil(8);
+    out.clear();
+    out.resize(byte_len, 0);
+
+    let dir_mask = ((1u16 << dir_bits) - 1) as u32;
+    let nrm_mask = ((1u16 << nrm_bits) - 1) as u32;
+    let total_mask = (1u32 << bits_per_triplet) - 1;
+
+    let mut bit_pos = 0usize;
+    for idx in indices {
+        // Combine all 3 indices into a single value and pack at once
+        let combined = (idx.i_xi as u32 & dir_mask)
+            | ((idx.i_eta as u32 & dir_mask) << dir_bits_usize)
+            | ((idx.i_rho as u32 & nrm_mask) << (2 * dir_bits_usize));
+        let byte_pos = bit_pos / 8;
+        let shift = bit_pos % 8;
+        let v = (combined & total_mask) << shift;
+        out[byte_pos] |= v as u8;
+        if shift + bits_per_triplet > 8 {
+            out[byte_pos + 1] |= (v >> 8) as u8;
+        }
+        if shift + bits_per_triplet > 16 {
+            out[byte_pos + 2] |= (v >> 16) as u8;
+        }
+        if shift + bits_per_triplet > 24 {
+            out[byte_pos + 3] |= (v >> 24) as u8;
+        }
+        bit_pos += bits_per_triplet;
+    }
 }
 
 /// Unpack triplet indices from a flat byte buffer.
@@ -234,43 +304,85 @@ pub fn unpack_triplet_indices(
     nrm_bits: u8,
 ) -> Vec<TripletIndices> {
     let mut indices = Vec::with_capacity(n_triplets);
-    let mut bit_pos = 0usize;
-
-    for _ in 0..n_triplets {
-        let i_xi = unpack_bits(packed, bit_pos, dir_bits) as u16;
-        bit_pos += dir_bits as usize;
-        let i_eta = unpack_bits(packed, bit_pos, dir_bits) as u16;
-        bit_pos += dir_bits as usize;
-        let i_rho = unpack_bits(packed, bit_pos, nrm_bits) as u16;
-        bit_pos += nrm_bits as usize;
-        indices.push(TripletIndices { i_xi, i_eta, i_rho });
-    }
-
+    unpack_triplet_indices_into(packed, n_triplets, dir_bits, nrm_bits, &mut indices);
     indices
 }
 
-/// Pack `n_bits` of `value` into `buf` starting at `bit_pos`.
-fn pack_bits(buf: &mut [u8], bit_pos: usize, value: u32, n_bits: u8) {
-    let n = n_bits as usize;
-    for i in 0..n {
-        if value & (1 << i) != 0 {
-            let pos = bit_pos + i;
-            buf[pos / 8] |= 1 << (pos % 8);
+/// Zero-alloc variant of [`unpack_triplet_indices`].
+///
+/// Clears and fills `out` with unpacked `TripletIndices`.
+///
+/// Optimized: reads all 3 indices in a single combined u32 and extracts fields,
+/// avoiding 3 separate unpack_bits calls per triplet.
+pub fn unpack_triplet_indices_into(
+    packed: &[u8],
+    n_triplets: usize,
+    dir_bits: u8,
+    nrm_bits: u8,
+    out: &mut Vec<TripletIndices>,
+) {
+    out.clear();
+    out.reserve(n_triplets);
+    let dir_bits_usize = dir_bits as usize;
+    let bits_per_triplet = 2 * dir_bits_usize + nrm_bits as usize;
+    let dir_mask = ((1u16 << dir_bits) - 1) as u32;
+    let nrm_mask = ((1u16 << nrm_bits) - 1) as u32;
+
+    let mut bit_pos = 0usize;
+    for _ in 0..n_triplets {
+        let byte_pos = bit_pos / 8;
+        let shift = bit_pos % 8;
+        // Read up to 4 bytes and assemble combined value
+        let mut raw = packed[byte_pos] as u32;
+        if byte_pos + 1 < packed.len() {
+            raw |= (packed[byte_pos + 1] as u32) << 8;
         }
+        if byte_pos + 2 < packed.len() {
+            raw |= (packed[byte_pos + 2] as u32) << 16;
+        }
+        if byte_pos + 3 < packed.len() && shift + bits_per_triplet > 24 {
+            raw |= (packed[byte_pos + 3] as u32) << 24;
+        }
+        let combined = (raw >> shift) & ((1u32 << bits_per_triplet) - 1);
+
+        out.push(TripletIndices {
+            i_xi: (combined & dir_mask) as u16,
+            i_eta: ((combined >> dir_bits_usize) & dir_mask) as u16,
+            i_rho: ((combined >> (2 * dir_bits_usize)) & nrm_mask) as u16,
+        });
+        bit_pos += bits_per_triplet;
+    }
+}
+
+/// Pack `n_bits` of `value` into `buf` starting at `bit_pos`.
+#[allow(dead_code)]
+fn pack_bits(buf: &mut [u8], bit_pos: usize, value: u32, n_bits: u8) {
+    let byte_pos = bit_pos / 8;
+    let shift = bit_pos % 8;
+    let mask = (1u32 << n_bits as usize) - 1;
+    let v = (value & mask) << shift;
+    buf[byte_pos] |= v as u8;
+    if shift + n_bits as usize > 8 {
+        buf[byte_pos + 1] |= (v >> 8) as u8;
+    }
+    if shift + n_bits as usize > 16 {
+        buf[byte_pos + 2] |= (v >> 16) as u8;
     }
 }
 
 /// Unpack `n_bits` from `buf` starting at `bit_pos`.
+#[allow(dead_code)]
 fn unpack_bits(buf: &[u8], bit_pos: usize, n_bits: u8) -> u32 {
-    let n = n_bits as usize;
-    let mut value = 0u32;
-    for i in 0..n {
-        let pos = bit_pos + i;
-        if buf[pos / 8] & (1 << (pos % 8)) != 0 {
-            value |= 1 << i;
-        }
+    let byte_pos = bit_pos / 8;
+    let shift = bit_pos % 8;
+    let mut raw = buf[byte_pos] as u32;
+    if byte_pos + 1 < buf.len() {
+        raw |= (buf[byte_pos + 1] as u32) << 8;
     }
-    value
+    if byte_pos + 2 < buf.len() && shift + n_bits as usize > 16 {
+        raw |= (buf[byte_pos + 2] as u32) << 16;
+    }
+    (raw >> shift) & ((1u32 << n_bits as usize) - 1)
 }
 
 #[cfg(test)]

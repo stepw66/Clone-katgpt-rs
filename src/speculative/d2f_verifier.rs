@@ -7,7 +7,7 @@
 use crate::dllm::D2fContext;
 use crate::speculative::d2f::{D2fDecodeConfig, d2f_decode_block_with_prompt_with};
 use crate::speculative::sampling::sample_from_distribution;
-use crate::speculative::types::NoPruner;
+use crate::speculative::types::{NoPruner, NoScreeningPruner};
 use crate::speculative::verifier::SpeculativeVerifier;
 use crate::transformer::TransformerWeights;
 use crate::transformer::{ForwardContext, MultiLayerKVCache, forward};
@@ -33,6 +33,12 @@ pub struct D2fDrafterVerifier<'a> {
     d2f_ctx: D2fContext,
     // Buffer for target probability distribution
     probs_buf: Vec<f32>,
+    // Flat p-distributions buffer: `[(draft_width + 1) * vocab_size]`.
+    // Pre-allocated once, reused across speculate() calls (zero-alloc hot path).
+    p_distributions_flat: Vec<f32>,
+    // Pre-allocated accepted tokens buffer: `[draft_width + 1]`.
+    // Cleared + reused across speculate() calls.
+    accepted_buf: Vec<usize>,
 }
 
 impl<'a> D2fDrafterVerifier<'a> {
@@ -52,6 +58,7 @@ impl<'a> D2fDrafterVerifier<'a> {
             block_size,
             ..d2f_config
         };
+        let vocab_size = target_config.vocab_size;
         Self {
             target_weights,
             target_config,
@@ -60,7 +67,9 @@ impl<'a> D2fDrafterVerifier<'a> {
             target_ctx: ForwardContext::new(target_config),
             target_cache: MultiLayerKVCache::new(target_config),
             d2f_ctx: D2fContext::new(target_config),
-            probs_buf: vec![0.0f32; target_config.vocab_size],
+            probs_buf: vec![0.0f32; vocab_size],
+            p_distributions_flat: vec![0.0f32; (draft_width + 1) * vocab_size],
+            accepted_buf: Vec::with_capacity(draft_width + 1),
         }
     }
 }
@@ -76,6 +85,7 @@ impl SpeculativeVerifier for D2fDrafterVerifier<'_> {
         rng: &mut Rng,
     ) -> Vec<usize> {
         let target_temp = self.target_config.temperature;
+        let vocab_size = self.target_config.vocab_size;
         let draft_width = self.draft_width;
 
         // ── Phase 0: Score initial token with target model ──────────
@@ -103,6 +113,7 @@ impl SpeculativeVerifier for D2fDrafterVerifier<'_> {
             &self.d2f_config,
             prompt,
             &NoPruner,
+            &NoScreeningPruner,
             rng,
         );
 
@@ -119,10 +130,8 @@ impl SpeculativeVerifier for D2fDrafterVerifier<'_> {
         let k_bounded = k.min(token_stack.len());
         token_stack[..k_bounded].copy_from_slice(&draft_tokens[..k_bounded]);
 
-        // Store p_distributions for each draft position (including position 0 from Phase 0)
-        let mut p_distributions: Vec<Vec<f32>> = Vec::with_capacity(k_bounded + 1);
-        // p_dist[0] from Phase 0 — target distribution at initial position
-        p_distributions.push(self.probs_buf.clone());
+        // Store p_dist[0] from Phase 0 into flat buffer (no allocation)
+        self.p_distributions_flat[..vocab_size].copy_from_slice(&self.probs_buf);
 
         // ── Phase 2: Target scoring of draft tokens ─────────────────
         // Score each drafted token through the target AR model to get p_dist[i+1].
@@ -137,19 +146,21 @@ impl SpeculativeVerifier for D2fDrafterVerifier<'_> {
             );
             self.probs_buf.copy_from_slice(logits);
             softmax_scaled(&mut self.probs_buf, 1.0 / target_temp);
-            p_distributions.push(self.probs_buf.clone());
+            let start = (i + 1) * vocab_size;
+            self.p_distributions_flat[start..start + vocab_size].copy_from_slice(&self.probs_buf);
         }
 
         // ── Phase 3: Rejection sampling with argmax comparison ──────
         // For D2F drafter, we use simple prefix matching:
         // Compare draft[i] with argmax of target p_dist[i+1].
         // Accept longest matching prefix + bonus token at first mismatch.
-        let mut accepted = Vec::with_capacity(k_bounded + 1);
+        self.accepted_buf.clear();
         let mut all_accepted = true;
 
         for i in 0..k_bounded {
             let draft_tok = token_stack[i];
-            let p_dist = &p_distributions[i + 1]; // target distribution at this position
+            let offset = (i + 1) * vocab_size;
+            let p_dist = &self.p_distributions_flat[offset..offset + vocab_size];
 
             // Argmax of target distribution = target's preferred token
             let target_tok = p_dist
@@ -160,10 +171,10 @@ impl SpeculativeVerifier for D2fDrafterVerifier<'_> {
                 .unwrap_or(0);
 
             if draft_tok == target_tok {
-                accepted.push(draft_tok);
+                self.accepted_buf.push(draft_tok);
             } else {
                 // Mismatch: take target's preferred token (bonus at rejection point)
-                accepted.push(target_tok);
+                self.accepted_buf.push(target_tok);
                 all_accepted = false;
                 break;
             }
@@ -171,17 +182,27 @@ impl SpeculativeVerifier for D2fDrafterVerifier<'_> {
 
         // ── Phase 4: Bonus token if all accepted ────────────────────
         if all_accepted {
-            let bonus_dist = &p_distributions[k_bounded];
-            let bonus = sample_from_distribution(bonus_dist, rng);
-            accepted.push(bonus);
+            let bonus_start = k_bounded * vocab_size;
+            let bonus_end = bonus_start + vocab_size;
+            let bonus = if bonus_end <= self.p_distributions_flat.len() {
+                let bonus_dist = &self.p_distributions_flat[bonus_start..bonus_end];
+                sample_from_distribution(bonus_dist, rng)
+            } else {
+                // Fallback if buffer too small (shouldn't happen with correct sizing)
+                sample_from_distribution(&self.probs_buf, rng)
+            };
+            self.accepted_buf.push(bonus);
         }
 
         // Safety: always return at least one token
-        if accepted.is_empty() {
-            accepted.push(sample_from_distribution(&p_distributions[0], rng));
+        if self.accepted_buf.is_empty() {
+            let p_dist = &self.p_distributions_flat[..vocab_size];
+            self.accepted_buf
+                .push(sample_from_distribution(p_dist, rng));
         }
 
-        accepted
+        // OPT: avoid clone — move buffer contents out, leaving empty Vec for next call
+        std::mem::take(&mut self.accepted_buf)
     }
 }
 

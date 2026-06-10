@@ -29,11 +29,11 @@ use crate::types::{LoraAdapter, lora_apply};
 
 // ── Constants ──────────────────────────────────────────────────
 
-const ACTION_COUNT: usize = 7;
-const DEFAULT_BLAST_RANGE: u32 = 2;
-const BOMB_FUSE_TICKS: u32 = super::BOMB_FUSE_TICKS;
+pub(crate) const ACTION_COUNT: usize = 7;
+pub(crate) const DEFAULT_BLAST_RANGE: u32 = 2;
+pub(crate) const BOMB_FUSE_TICKS: u32 = super::BOMB_FUSE_TICKS;
 
-const ALL_ACTIONS: [BomberAction; ACTION_COUNT] = [
+pub(crate) const ALL_ACTIONS: [BomberAction; ACTION_COUNT] = [
     BomberAction::Up,
     BomberAction::Down,
     BomberAction::Left,
@@ -44,7 +44,7 @@ const ALL_ACTIONS: [BomberAction; ACTION_COUNT] = [
 ];
 
 /// Tracked bomb: (position, blast_range, fuse_ticks_remaining).
-type KnownBomb = ((i32, i32), u32, u32);
+pub(crate) type KnownBomb = ((i32, i32), u32, u32);
 
 /// Tracked opponent: (player_id, current_pos, prev_pos).
 type KnownOpponent = (u8, (i32, i32), Option<(i32, i32)>);
@@ -154,7 +154,12 @@ pub(crate) fn in_blast_zone(pos: GridPos, grid: &ArenaGrid, bombs: &[KnownBomb])
 }
 
 /// Check if position is in the blast zone of a single bomb (with wall blocking).
-fn is_in_single_blast(pos: GridPos, grid: &ArenaGrid, bomb_pos: (i32, i32), range: u32) -> bool {
+pub(crate) fn is_in_single_blast(
+    pos: GridPos,
+    grid: &ArenaGrid,
+    bomb_pos: (i32, i32),
+    range: u32,
+) -> bool {
     use super::Cell;
     let bx = bomb_pos.0;
     let by = bomb_pos.1;
@@ -206,7 +211,7 @@ fn is_in_single_blast(pos: GridPos, grid: &ArenaGrid, bomb_pos: (i32, i32), rang
 }
 
 /// Update known bomb list from events.
-fn update_bombs(bombs: &mut Vec<KnownBomb>, events: &[GameEvent]) {
+pub(crate) fn update_bombs(bombs: &mut Vec<KnownBomb>, events: &[GameEvent]) {
     // Decrement fuses each tick (called once per select_action)
     for bomb in bombs.iter_mut() {
         bomb.2 = bomb.2.saturating_sub(1);
@@ -227,7 +232,7 @@ fn update_bombs(bombs: &mut Vec<KnownBomb>, events: &[GameEvent]) {
 }
 
 /// Update known power-up list from events (revealed/collected).
-fn update_powerups(powerups: &mut Vec<(i32, i32)>, events: &[GameEvent]) {
+pub(crate) fn update_powerups(powerups: &mut Vec<(i32, i32)>, events: &[GameEvent]) {
     for event in events {
         match event {
             GameEvent::PowerUpRevealed { pos, .. } => {
@@ -716,14 +721,15 @@ pub(crate) fn score_action(
 
 // ── LoRA Inference Helpers ─────────────────────────────────────
 
-/// Softmax over logits, producing probability distribution.
+/// Per-element sigmoid scoring (independent scores in [0,1]).
+///
+/// Replaces softmax per project rule: "Use sigmoid not softmax".
+/// Unlike softmax (which produces a probability distribution summing to 1),
+/// sigmoid gives independent scores — each action is scored on its own merit.
 #[cfg(feature = "bomber-wasm")]
 #[allow(dead_code)]
-fn softmax(logits: &[f32]) -> Vec<f32> {
-    let max_val = logits.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
-    let exps: Vec<f32> = logits.iter().map(|&x| (x - max_val).exp()).collect();
-    let sum: f32 = exps.iter().sum();
-    exps.iter().map(|&x| x / sum).collect()
+fn sigmoid_scores(logits: &[f32]) -> Vec<f32> {
+    logits.iter().map(|&s| 1.0 / (1.0 + (-s).exp())).collect()
 }
 
 /// Count walkable adjacent cells (for board feature encoding).

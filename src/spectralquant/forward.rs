@@ -77,35 +77,33 @@ pub fn attention_spectralquant(
         unsafe {
             *scores_buf.get_unchecked_mut(t) = score;
         }
-        if score > max_score {
-            max_score = score;
-        }
+        max_score = max_score.max(score);
     }
 
-    // Pass 2: exp(scores - max) + sum
-    let mut sum = 0.0f32;
-    for t in 0..t_n {
-        let exp_val = unsafe { (*scores_buf.get_unchecked(t) - max_score).exp() };
-        unsafe {
-            *scores_buf.get_unchecked_mut(t) = exp_val;
-        }
-        sum += exp_val;
-    }
+    // Pass 2: exp(scores - max) + sum (SIMD batch)
+    let scores_slice = unsafe { std::slice::from_raw_parts_mut(scores_buf.as_mut_ptr(), t_n) };
+    crate::simd::simd_add_scalar_inplace(scores_slice, -max_score);
+    crate::simd::simd_exp_inplace(scores_slice);
+    let sum = crate::simd::simd_sum_f32(scores_slice);
 
     // Pass 3: normalize + weighted value accumulation
+    // Loop order: t outer, d inner — contiguous value_cache row access, better cache locality.
     let inv_sum = 1.0 / sum;
-    for d in 0..head_dim {
-        let mut val = 0.0f32;
-        for t in 0..t_n {
-            unsafe {
-                val += *scores_buf.get_unchecked(t)
-                    * inv_sum
-                    * *flat_values.get_unchecked(t * kv_dim + kv_group_offset + d);
-            }
-        }
-        unsafe {
-            *attn_out.get_unchecked_mut(q_head_offset + d) = val;
-        }
+    attn_out[q_head_offset..q_head_offset + head_dim].fill(0.0);
+    for t in 0..t_n {
+        let weight = unsafe { *scores_buf.get_unchecked(t) * inv_sum };
+        let v_row = unsafe {
+            std::slice::from_raw_parts(
+                flat_values.as_ptr().add(t * kv_dim + kv_group_offset),
+                head_dim,
+            )
+        };
+        crate::simd::simd_fused_scale_acc(
+            &mut attn_out[q_head_offset..q_head_offset + head_dim],
+            v_row,
+            weight,
+            head_dim,
+        );
     }
 }
 
