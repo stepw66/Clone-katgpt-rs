@@ -136,6 +136,8 @@ fn kind_from_u8(raw: u8) -> Option<SenseKind> {
         3 => Some(SenseKind::SpatialSense),
         4 => Some(SenseKind::SocialSense),
         5 => Some(SenseKind::SkillSense),
+        #[cfg(feature = "spectral_threat")]
+        6 => Some(SenseKind::SpectralThreat),
         7 => Some(SenseKind::Reserved),
         _ => None,
     }

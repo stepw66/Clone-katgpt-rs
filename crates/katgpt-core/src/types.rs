@@ -3635,6 +3635,9 @@ pub enum SenseKind {
     SpatialSense = 3,
     SocialSense = 4,
     SkillSense = 5,
+    /// LinOSS Modal Threat Prediction (Plan 241). Requires `spectral_threat` feature.
+    #[cfg(feature = "spectral_threat")]
+    SpectralThreat = 6,
     Reserved = 7,
 }
 

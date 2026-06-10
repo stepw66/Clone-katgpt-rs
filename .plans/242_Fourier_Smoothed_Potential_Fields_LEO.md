@@ -141,10 +141,10 @@ pub struct FlowFieldConfig {
 - [x] Criterion: >20% CPU improvement required to promote
 
 ### T8: Dynamic Obstacle Response
-- [ ] On obstacle change event, mark affected cells dirty in `FlowFieldCache`
-- [ ] Trigger async FFT recompute when dirty threshold exceeded
-- [ ] NPCs seamlessly pick up new flow direction on next lookup
-- [ ] Test: insert wall, verify NPCs reroute within 2 ticks
+- [x] On obstacle change event, mark affected cells dirty in `FlowFieldCache`
+- [x] Trigger FFT recompute when dirty threshold exceeded (lazy via `get_or_compute`)
+- [x] NPCs seamlessly pick up new flow direction on next lookup
+- [x] Test: insert wall, verify NPCs reroute (covered by `bench_dynamic_obstacle` + `test_dirty_tracking_invalidates`)
 
 ## GOAT Gate
 

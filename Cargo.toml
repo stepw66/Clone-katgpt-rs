@@ -108,6 +108,7 @@ skill_lifecycle = ["bandit"]  # Inference-Time Skill Evolution — per-pruner me
 sense_composition = ["katgpt-core/sense_composition", "bandit"]  # KG Latent Octree Sense Composition (Plan 221)
 schema_centroid = ["katgpt-core/schema_centroid", "sense_composition"]  # Schema-Centroid Informed KG Embedding Initialization (Plan 237, GOAT 7/7, default-ON)
 slod = ["katgpt-core/slod", "spectral_hierarchy"]  # SLoD Spectral Level-of-Detail Pruner (Plan 235, GOAT G1-G6 all pass, default-ON)
+spectral_threat = ["katgpt-core/spectral_threat", "sense_composition"]  # LinOSS Modal Threat Prediction (Plan 241, GOAT-gated)
 sense_lod = ["katgpt-core/sense_lod", "sense_composition", "slod"]  # Spectral NPC Perception Compression (Plan 240, GOAT-gated)
 bake_precision = ["katgpt-core/bake_precision", "sense_composition"]  # BAKE Precision-Gated Bayesian Embedding Update (Plan 236, GOAT 10/10 but marginal drift 4.7% vs 30% target — opt-in loser)
 rat_plus_bridge = ["katgpt-core/rat_plus_bridge"]  # RAT+ Recurrence Bridge — modelless dilated inference via GDN2 state (Plan 225)
@@ -853,6 +854,10 @@ name = "sense_bandit_demo"
 required-features = ["sense_composition"]
 
 [[example]]
+name = "spectral_threat_arena"
+required-features = ["spectral_threat"]
+
+[[example]]
 name = "critical_interval_demo"
 required-features = ["critical_interval_gate"]
 
@@ -928,6 +933,18 @@ required-features = ["mux_latent_context", "domain_latent"]
 name = "bench_238_adaptive_lod_bench"
 required-features = ["mux_latent_context"]
 
+[[test]]
+name = "bench_243_mux_latent_wire_goat"
+required-features = ["mux_latent_wire"]
+
 [[example]]
 name = "vocab_channel_pruner_demo"
 required-features = ["vocab_channel_pruner"]
+
+[[example]]
+name = "mux_latent_wire_patch"
+required-features = ["mux_latent_wire"]
+
+[[example]]
+name = "mux_latent_octree_bridge"
+required-features = ["mux_latent_wire"]
