@@ -105,6 +105,9 @@ pub use safe_phased::SafePhasedState;
 #[cfg(feature = "sr2am_configurator")]
 pub use configurator_bandit::{ConfiguratorBandit, ExplorationOutcome, PrunerSchedule};
 
+#[cfg(feature = "epiplexity_bandit")]
+pub use configurator_bandit::EpiplexityArmHeuristic;
+
 #[cfg(feature = "sia_feedback")]
 pub use feedback_bandit::{
     FeedbackBandit, FeedbackBanditConfig, RlAlgorithmHint, TrajectorySummary, WeightUpdateRequest,

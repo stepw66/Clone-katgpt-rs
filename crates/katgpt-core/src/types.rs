@@ -418,6 +418,10 @@ pub struct ConfiguratorContext {
     /// Plan 162 T11: emotion vector desperation score as additional context.
     /// 0 = not desperate, 9 = highly desperate.
     pub desperation_bin: usize,
+    /// Coarse epiplexity bin: `floor(epiplexity * 10.0)`, clamped to 0..9.
+    /// Plan 130 T4: structural information content (S_T) as additional context.
+    /// 0 = no structure detectable, 9 = highly structured.
+    pub epiplexity_bin: u8,
 }
 
 #[cfg(feature = "sr2am_configurator")]
@@ -431,6 +435,7 @@ impl ConfiguratorContext {
             domain,
             entropy_bin,
             desperation_bin: 0,
+            epiplexity_bin: 0,
         }
     }
 
@@ -443,6 +448,47 @@ impl ConfiguratorContext {
             self.desperation_bin = 9;
         }
         self
+    }
+
+    /// Set the epiplexity bin from a raw epiplexity score (S_T).
+    ///
+    /// `floor(epiplexity * 10.0)`, clamped to 0..9.
+    /// S_T measures structural information content — higher values indicate
+    /// more structure that a bounded observer can extract from the data.
+    pub fn with_epiplexity(mut self, epiplexity: f32) -> Self {
+        let bin = (epiplexity * 10.0).floor() as u8;
+        self.epiplexity_bin = if bin > 9 { 9 } else { bin };
+        self
+    }
+
+    /// Create context from entropy and epiplexity signals.
+    ///
+    /// Convenience constructor that bins both entropy (H_T proxy) and
+    /// epiplexity (S_T structural information) in one call.
+    /// `desperation_bin` defaults to 0.
+    pub fn from_entropy_epiplexity(domain: usize, entropy: f32, epiplexity: f32) -> Self {
+        let entropy_bin = {
+            let bin = (entropy * 10.0).floor() as usize;
+            if bin > 9 { 9 } else { bin }
+        };
+        let epiplexity_bin = {
+            let bin = (epiplexity * 10.0).floor() as u8;
+            if bin > 9 { 9 } else { bin }
+        };
+        Self {
+            domain,
+            entropy_bin,
+            desperation_bin: 0,
+            epiplexity_bin,
+        }
+    }
+
+    /// Discretize epiplexity (S_T) into a coarse bin index.
+    ///
+    /// `floor(epiplexity * 10.0)`, clamped to 0..9.
+    pub fn epiplexity_bin(epiplexity: f32) -> u8 {
+        let bin = (epiplexity * 10.0).floor() as u8;
+        if bin > 9 { 9 } else { bin }
     }
 }
 

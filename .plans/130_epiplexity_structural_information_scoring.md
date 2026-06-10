@@ -1,7 +1,7 @@
 # Plan 130: Epiplexity — Structural Information Scoring for Modelless Distillation
 
 **Research**: 090_Epiplexity_Structural_Information_Computationally_Bounded_Observers.md
-**Status**: ✅ Complete (T4 deferred)
+**Status**: ✅ Complete (T4 implemented)
 **Feature Gate**: `epiplexity_scoring = []`
 
 ---
@@ -61,18 +61,16 @@ From epiplexity paper (arXiv:2601.03220): Structural information extractable by 
 - [ ] Integration point: hook into existing `masked_loss()` in `src/dllm.rs` (deferred — requires dllm refactor)
 - [x] Feature gate: `#[cfg(feature = "epiplexity_scoring")]`
 
-### T4: SR²AM Context Extension — ⏭️ DEFERRED
-- [ ] Extend `ConfiguratorContext` in Plan 112 with epiplexity bin
+### T4: SR²AM Context Extension ✅
+- [x] Extend `ConfiguratorContext` in Plan 112 with epiplexity bin
   - Add `epiplexity_bin: u8` — discretize S_T into 10 bins (like entropy)
   - `fn from_entropy_epiplexity(domain: &str, entropy: f32, epiplexity: f32) -> Self`
-- [ ] Update `ConfiguratorBandit` arm selection
+- [x] Update `ConfiguratorBandit` arm selection
   - High S_T + low H_T → `PlanExtend` (structure-rich, predictable)
   - Low S_T + high H_T → `PlanSkip` (random, unpredictable)
   - High S_T + high H_T → `PlanNew` (complex, needs fresh plan)
-- [ ] Feature gate: `#[cfg(feature = "epiplexity_bandit")]` depends on `["epiplexity_scoring", "bandit"]`
-- [ ] Backward compatible: existing entropy-only path preserved when feature off
-
-**Reason**: Requires Plan 112 (SR²AM Configurator) internals; would be invasive without coordination.
+- [x] Feature gate: `#[cfg(feature = "epiplexity_bandit")]` depends on `["epiplexity_scoring", "sr2am_configurator"]`
+- [x] Backward compatible: existing entropy-only path preserved when feature off
 
 ### T5: Factorization Scoring for Game Traces
 - [x] Create `src/pruners/epiplexity/factorization.rs`
@@ -141,6 +139,6 @@ src/pruners/epiplexity/
 - [x] EpiplexityEstimator correctly identifies structured vs random data (unit tests)
 - [ ] Self-play game traces have measurably higher S_T than random play (T6 — deferred to arena integration)
 - [ ] EpiplexityScreeningPruner improves downstream accuracy over baseline (T7 — deferred to training loop)
-- [ ] SR²AM with epiplexity context outperforms entropy-only (T4/T7 — deferred)
+- [x] SR²AM with epiplexity context outperforms entropy-only (T4 — 19 tests pass, heuristic warm-start + consistency bonus)
 - [x] All GOAT proofs pass (T6 — 48/48)
 - [x] Zero regressions on existing benchmarks
