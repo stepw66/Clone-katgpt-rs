@@ -974,17 +974,17 @@ mod tests {
             );
 
             // The sensitivity from explain() for the first choice should match
-            if let Some(choice) = explanation.choices.first() {
-                if let Some(attr) = choice.pruner_attributions.get(pruner_idx) {
-                    assert!(
-                        (sens[0] - attr.sensitivity).abs() < 1e-5,
-                        "sensitivity()[{}] = {} should match explain() attribution {} = {}",
-                        pruner_idx,
-                        sens[0],
-                        attr.pruner_name,
-                        attr.sensitivity,
-                    );
-                }
+            if let Some(choice) = explanation.choices.first()
+                && let Some(attr) = choice.pruner_attributions.get(pruner_idx)
+            {
+                assert!(
+                    (sens[0] - attr.sensitivity).abs() < 1e-5,
+                    "sensitivity()[{}] = {} should match explain() attribution {} = {}",
+                    pruner_idx,
+                    sens[0],
+                    attr.pruner_name,
+                    attr.sensitivity,
+                );
             }
         }
     }
