@@ -773,6 +773,18 @@ At 30K CCU: `30K × 20Hz = 600K inferences/sec`. CPU handles forward, but also r
 | GPU Backend | Metal compute pipeline from `TransformerWeights` | 🔧 Blocked on metal crate |
 | ANE Backend | CoreML runtime compilation from `TransformerWeights` | 🔧 Blocked on coreml-native API |
 
+### Benchmarked Performance (Bench 176, micro model, release)
+
+| Metric | Result |
+|--------|--------|
+| `TriggerGate::evaluate()` | 0.008 µs/call |
+| `TriggerGate::record_inference()` | 0.002 µs/call |
+| `InferenceRouter::forward()` (CPU tier) | 0.85 µs/call (−24.6% vs baseline — router amortizes timing) |
+| `forward_batch` (batch=8) | 0.83 µs/token (+3.3% overhead) |
+| Router under load (2000 iters) | 1.22M calls/sec, 0 tier transitions |
+
+> GPU and ANE tiers blocked on backend crates. CPU-only numbers are real. Run `cargo test --test bench_176_trigger_gate --release -- --nocapture` to reproduce.
+
 ### Feature Gates
 
 ```toml
