@@ -19,6 +19,7 @@ pub mod autoresearch;
 pub mod g_zero_player;
 pub mod players;
 pub mod replay;
+pub mod replay_writer;
 pub mod state;
 pub mod tournament;
 pub mod types;
@@ -54,6 +55,9 @@ pub use analytics::{
     GoGameAnalytics, RawGoAction, RawGoSample, compute_analytics, samples_to_replay,
     split_samples_into_games,
 };
+
+// Replay Writer (Plan 271 T2.1)
+pub use replay_writer::{GameSampleCollector, GoActionType, GoReplayWriter, JsonlGoSample};
 
 // G-Zero Self-Play
 pub use g_zero_player::{
