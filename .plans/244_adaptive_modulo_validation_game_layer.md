@@ -1,6 +1,6 @@
 # Plan 244: Adaptive Modulo Validation — Game-Layer Only
 
-**Status:** 🔨 IMPLEMENTING (Phase 1-5 done. Phase 6 examples remaining.)
+**Status:** ✅ COMPLETE (All phases done. GOAT-promoted.)
 **Date:** 2026-06-10
 **Research:** `.research/212_Gemini_Fourier_LatCal_Fusion_Verdict.md` (Pillar 5: L2L)
 **Depends On:** `game_sync_cache` (Plan 210), `mux_latent_wire` (Plan 243), riir-chain `chain_penalty` (Plan 212)
@@ -306,11 +306,11 @@ Cold (chain — FORBIDDEN)
 - [x] Catch-up test: inject cheat on unchecked tick, verify caught at next check tick
 - [x] GOAT gate: promote to default if ≥ 2× dense-zone perf + zero chain-layer bypass — 5.91× dense-zone + zero bypass, PROMOTED ✅
 
-### Phase 6: Examples & Docs
-- [ ] Example: `adaptive_validation_demo` — show mod 1/2/4/8 throughput
-- [ ] Example: `adaptive_validation_cheat_catch` — cheat on unchecked tick, caught at check
-- [ ] Update `.docs/42_game_state_sync_flow.md` with adaptive validation section
-- [ ] Update Plan 243 README section to reference adaptive modulo for latent patches
+### Phase 6: Examples & Docs ✅ DONE
+- [x] Example: `adaptive_validation_demo` — show mod 1/2/4/8 throughput
+- [x] Example: `adaptive_validation_cheat_catch` — cheat on unchecked tick, caught at check
+- [x] Update `.docs/42_game_state_sync_flow.md` with adaptive validation section
+- [x] Update Plan 243 README section to reference adaptive modulo for latent patches
 
 ---
 

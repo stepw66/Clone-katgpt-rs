@@ -109,6 +109,12 @@ pub struct LatentPatch {
 /// Chain-bound patches MUST use full validation (mod 1) — this type
 /// should NOT be used in riir-chain code paths. Use ChainServer::process_tx()
 /// for chain-layer validation instead.
+///
+/// **Implemented**: `LatentPatchBatch` now implements `GameLayerValidation` in
+/// `riir-games/src/game_sync/adaptive_validation.rs`. Use `validate_adaptive()`
+/// to get `FullValidation` or `LightValidation` per tick. The `validation_mod`
+/// field below is set by `AdaptiveModConfig::resolve()` but the actual validation
+/// decision is made by calling `validate_adaptive(&batch, tick, config, zone_players, trust, LatentPatch)`.
 #[derive(Debug, Clone)]
 pub struct LatentPatchBatch {
     pub patches: Vec<LatentPatch>,
@@ -261,7 +267,7 @@ Spectral LOD (Plan 238 Phase 4) already controls this — high-energy windows ge
 - [ ] Integration with `LatentBatchProcessor` SIMD pipeline
 - [ ] Cold-tier persistence: patch log for deterministic replay
 - [ ] 4-tier flow: Plasma (encode) → Hot (dirty) → Warm (quorum) → Cold (commit)
-- [ ] Adaptive modulo integration (Plan 244): `validation_mod` field gates Fourier check. `tick % validation_mod == 0` → full Fourier. Otherwise → BLAKE3 + nonce only (game-layer)
+- [ ] Adaptive modulo integration (Plan 244): `validation_mod` field gates Fourier check. `tick % validation_mod == 0` → full Fourier. Otherwise → BLAKE3 + nonce only (game-layer). **Note**: `LatentPatchBatch` already implements `GameLayerValidation` in riir-games (Plan 244 Phase 3). The `validate_adaptive()` function handles mod resolution. This Phase 4 item covers wiring it into the Fourier shell pipeline in riir-chain.
 - [ ] Chain-forbidden guard: assert `validation_mod == 1` for chain-bound patches. Panic if `validation_mod > 1` in chain context
 
 ### Phase 5: GOAT Proof ✅ DONE (11/11 tests)
