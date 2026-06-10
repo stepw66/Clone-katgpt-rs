@@ -1,6 +1,6 @@
 //! Posterior-Guided Pruner Evolution Demo — BAKE Precision + MUSE Lifecycle
 //!
-//! Demonstrates posterior-guided pruner evolution (Plan 238) on a simulated
+//! Demonstrates posterior-guided pruner evolution (Plan 239) on a simulated
 //! 3-armed bandit with known success rates:
 //! - Arm 0: strong (p=0.9)
 //! - Arm 1: medium (p=0.5)

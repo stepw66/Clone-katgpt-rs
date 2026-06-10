@@ -79,7 +79,7 @@ pub struct CompressConfig {
     /// Default: 2.0 (conservative). Paper found 3.1:1 for o3-mini.
     /// Set to 0.0 to disable the gate.
     pub min_benefit_ratio: f64,
-    /// Minimum average precision for precision-gated compression (Plan 238).
+    /// Minimum average precision for precision-gated compression (Plan 239).
     ///
     /// When precision vectors are available, arms are only compressed if
     /// their average precision exceeds this threshold AND their surprise
@@ -89,7 +89,7 @@ pub struct CompressConfig {
     /// Default: 5.0. Set to 0.0 to disable precision gating.
     #[cfg(feature = "posterior_evolution")]
     pub min_precision_for_compress: f32,
-    /// Maximum KL surprise for precision-gated compression (Plan 238).
+    /// Maximum KL surprise for precision-gated compression (Plan 239).
     ///
     /// Arms with surprise above this threshold are NOT compressed even
     /// if precision is high — the posterior is still shifting.
@@ -216,7 +216,7 @@ pub struct AbsorbCompressLayer<P: ScreeningPruner> {
     /// Test cases used by the test gate for validation.
     #[cfg(feature = "skill_lifecycle")]
     test_cases: Vec<TestCase>,
-    /// Per-arm precision vectors for posterior-guided compression (Plan 238).
+    /// Per-arm precision vectors for posterior-guided compression (Plan 239).
     /// When present, compression uses precision + surprise instead of Q-threshold.
     #[cfg(feature = "posterior_evolution")]
     precision: Vec<PrecisionVector>,
@@ -340,7 +340,7 @@ impl<P: ScreeningPruner> AbsorbCompressLayer<P> {
         }
     }
 
-    /// Absorb an observation with posterior precision tracking (Plan 238).
+    /// Absorb an observation with posterior precision tracking (Plan 239).
     ///
     /// When precision vectors are available, this updates both the Q-value
     /// statistics AND the per-arm precision vector. The precision vector
@@ -400,13 +400,13 @@ impl<P: ScreeningPruner> AbsorbCompressLayer<P> {
         kl
     }
 
-    /// Get the precision vector for a specific arm (Plan 238).
+    /// Get the precision vector for a specific arm (Plan 239).
     #[cfg(feature = "posterior_evolution")]
     pub fn arm_precision(&self, arm: usize) -> Option<&PrecisionVector> {
         self.precision.get(arm)
     }
 
-    /// Get the last KL surprise for a specific arm (Plan 238).
+    /// Get the last KL surprise for a specific arm (Plan 239).
     #[cfg(feature = "posterior_evolution")]
     pub fn arm_surprise(&self, arm: usize) -> f32 {
         self.last_surprise.get(arm).copied().unwrap_or(0.0)
@@ -837,7 +837,7 @@ mod tests {
         }
     }
 
-    /// Tests for precision-gated compression (Plan 238, Phase 4).
+    /// Tests for precision-gated compression (Plan 239, Phase 4).
     #[cfg(feature = "posterior_evolution")]
     mod precision_gated_tests {
         use super::*;

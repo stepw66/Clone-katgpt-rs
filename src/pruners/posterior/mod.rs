@@ -5,7 +5,7 @@
 //! Explore, Patch, Split, Compress, Retire.
 //!
 //! Research: R211 (Bayesian-Agent distillation), R209 (BAKE precision)
-//! Plan: 238
+//! Plan: 239
 
 pub mod policy;
 pub mod precision;

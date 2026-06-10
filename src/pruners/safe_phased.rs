@@ -124,7 +124,7 @@ impl SafePhasedState {
         self.alpha
     }
 
-    /// Compute precision-gated alpha (Plan 238).
+    /// Compute precision-gated alpha (Plan 239).
     ///
     /// When precision is available, α = sigmoid(λ × (precision - threshold)).
     /// This replaces phase-gap escalation with Bayesian certainty gating:
@@ -738,7 +738,7 @@ mod tests {
         );
     }
 
-    /// Tests for precision-gated alpha (Plan 238, Phase 5).
+    /// Tests for precision-gated alpha (Plan 239, Phase 5).
     #[cfg(feature = "posterior_evolution")]
     mod precision_gated_alpha_tests {
         use super::*;
