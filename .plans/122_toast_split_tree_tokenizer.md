@@ -243,8 +243,8 @@ Benchmark file: `katgpt-rs/tests/bench_120_toast_compression.rs`
 
 ### GOAT Criteria (must pass all)
 - [x] **G1:** ToaST produces ≤ BPE token count on identical text + vocab — `proof_t5_toast_fewer_or_equal_tokens_than_bpe`
-- [ ] **G2:** ToaST single-byte fallback tokens ≤ BPE single-byte tokens
-- [ ] **G3:** Inference latency per token ≤ 2× BPE (tree lookup vs merge search)
+- [x] **G2:** ToaST single-byte fallback tokens ≤ BPE single-byte tokens
+- [x] **G3:** Inference latency per token ≤ 2× BPE (tree lookup vs merge search)
 - [x] **G4:** No unknown tokens produced (all 243 valid UTF-8 bytes covered) — `proof_t5_toast_no_unknown_tokens`
 - [x] **G5:** Encode→decode roundtrip is identity on ASCII input — `proof_t5_roundtrip_identity`
 
