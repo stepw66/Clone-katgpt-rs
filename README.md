@@ -773,17 +773,21 @@ At 30K CCU: `30K × 20Hz = 600K inferences/sec`. CPU handles forward, but also r
 | GPU Backend | 8 Metal MSL kernels, full forward pass, cosine ≥ 0.999 vs CPU | ✅ Complete |
 | ANE Backend | CoreML runtime compilation + hybrid lm_head, full transformer spec | ✅ Complete (lm_head only, MIL spec future) |
 
-### Benchmarked Performance (Bench 176, micro model, release)
+### Benchmarked Performance (Bench 176 + GPU/ANE, micro model, release)
 
 | Metric | Result |
 |--------|--------|
 | `TriggerGate::evaluate()` | 0.008 µs/call |
 | `TriggerGate::record_inference()` | 0.002 µs/call |
-| `InferenceRouter::forward()` (CPU tier) | 0.85 µs/call (−24.6% vs baseline — router amortizes timing) |
+| `InferenceRouter::forward()` (CPU tier) | 0.85 µs/token (−24.6% vs baseline) |
 | `forward_batch` (batch=8) | 0.83 µs/token (+3.3% overhead) |
-| Router under load (2000 iters) | 1.22M calls/sec, 0 tier transitions |
+| Router under load (2000 iters) | 1.22M calls/sec |
+| GPU forward (8 Metal MSL kernels) | 1937 µs/token, cosine ≥ 0.999 vs CPU |
+| ANE forward (CoreML hybrid lm_head) | 137 µs/token, 0.02× vs CPU |
+| GPU tier-up latency | 62 ms (compile + first forward) |
+| ANE compilation | 59 ms |
 
-> CPU-only numbers shown. GPU/ANE tiers require `--features inference_router` on macOS. Run `cargo test --test bench_176_trigger_gate --release -- --nocapture` to reproduce.
+> GPU/ANE are slower than CPU on micro model — expected for n_embd=16. Overhead amortizes at production model sizes. Run `cargo test --test bench_176_trigger_gate --release -- --nocapture` and `cargo test --lib gpu_backend ane_backend --features gpu_inference,ane --release -- --nocapture bench` to reproduce.
 
 ### Feature Gates
 
