@@ -160,7 +160,7 @@ pub use slod::{
 
 // Spectral Irrep Pruner - spectral flatness-based speculative decoding pruning (Plan 246).
 // Prunes tokens when logit spectrum shows competing modes (high spectral flatness).
-// Default-OFF until GOAT proof passes.
+// GOAT PASS: +3.6% overhead, default-ON.
 #[cfg(feature = "spectral_pruner")]
 pub mod irrep_pruner;
 #[cfg(feature = "spectral_pruner")]

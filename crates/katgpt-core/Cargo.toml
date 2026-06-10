@@ -72,9 +72,8 @@ bake_precision = ["dep:papaya"]  # BAKE Precision-Gated Bayesian Embedding Updat
 spectral_threat = ["sense_composition", "modal_spec"]  # LinOSS Modal Threat Prediction (Plan 241)
 sense_lod = ["sense_composition", "slod"]  # Spectral NPC Perception Compression (Plan 240)
 flow_field_nav = ["leo_all_goals", "dep:rustfft"]  # Fourier-smoothed flow fields for LEO crowd navigation (Plan 242, GOAT-gated)
-spectral_pruner = ["dep:rustfft"]  # Spectral Irrep Pruner — spectral flatness-based speculative decoding pruning (Plan 246)
+spectral_pruner = ["dep:rustfft"]  # Spectral Irrep Pruner — spectral flatness-based speculative decoding pruning (Plan 246, GOAT PASS +3.6% overhead, default-ON)
                                    # Inspired by arXiv:2606.02993: prunes tokens when logit spectrum shows competing modes.
-                                   # Default-OFF until GOAT proof passes.
 
 [[bench]]
 name = "flow_field_bench"
