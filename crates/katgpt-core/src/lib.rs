@@ -158,6 +158,16 @@ pub use slod::{
     heat_kernel_weights, log_map, poincare_distance,
 };
 
+// Spectral Irrep Pruner - spectral flatness-based speculative decoding pruning (Plan 246).
+// Prunes tokens when logit spectrum shows competing modes (high spectral flatness).
+// Default-OFF until GOAT proof passes.
+#[cfg(feature = "spectral_pruner")]
+pub mod irrep_pruner;
+#[cfg(feature = "spectral_pruner")]
+pub use irrep_pruner::{
+    IrrepPruner, IrrepPrunerConfig, irrep_pruner_from_config, spectral_flatness,
+};
+
 #[cfg(feature = "flow_field_nav")]
 pub mod flow;
 #[cfg(feature = "flow_field_nav")]

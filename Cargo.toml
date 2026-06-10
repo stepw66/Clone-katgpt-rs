@@ -26,6 +26,7 @@ good_lp = { version = "1", optional = true, default-features = false, features =
 reqwest = { version = "0.12", features = ["blocking", "json"], optional = true } # AutoGo REST API client (Plan 065)
 toml = "0.8"
 bytemuck = "1"
+half = "2"  # f16 compact KV cache storage (Plan 245 StillKV)
 
 [target.'cfg(target_os = "macos")'.dependencies]
 coreml-native = { version = "0.2", optional = true }  # Apple Neural Engine inference backend (Plan 176)
@@ -110,6 +111,7 @@ schema_centroid = ["katgpt-core/schema_centroid", "sense_composition"]  # Schema
 slod = ["katgpt-core/slod", "spectral_hierarchy"]  # SLoD Spectral Level-of-Detail Pruner (Plan 235, GOAT G1-G6 all pass, default-ON)
 spectral_threat = ["katgpt-core/spectral_threat", "sense_composition"]  # LinOSS Modal Threat Prediction (Plan 241, GOAT PASS 46.9%)
 sense_lod = ["katgpt-core/sense_lod", "sense_composition", "slod"]  # Spectral NPC Perception Compression (Plan 240, GOAT PASS 46.9%)
+spectral_pruner = ["katgpt-core/spectral_pruner"]  # Spectral Irrep Pruner — spectral flatness-based speculative decoding pruning (Plan 246, GOAT-gated)
 bake_precision = ["katgpt-core/bake_precision", "sense_composition"]  # BAKE Precision-Gated Bayesian Embedding Update (Plan 236, GOAT 10/10 but marginal drift 4.7% vs 30% target — opt-in loser)
 rat_plus_bridge = ["katgpt-core/rat_plus_bridge"]  # RAT+ Recurrence Bridge — modelless dilated inference via GDN2 state (Plan 225)
 sdpg_bandit = ["bandit"]  # SDPG bandit + KL anchoring (Plan 180, Research 160)
@@ -151,6 +153,7 @@ committee_boost = ["bt_rank", "bandit"]  # Committee Boost — oracle-gap recove
 mech_attribution = ["cna_steering", "ropd_rubric", "bandit"]  # Mechanistic Data Attribution — catalyst pattern detection + influence proxy (Plan 111, Research 009). GOAT: 6/6 (P1-P6). NOT default-on pending full integration.
 safe_bandit = ["bandit"]  # PrudentBanker Safe-Phased Bandit — delay-calibrated safe exploration (Plan 137)
 stiff_anomaly = []  # Stiff/Soft Subspace Anomaly Gate — generic eigenvalue decomposition anomaly detection (Plan 138)
+still_kv = []  # StillKV perceiver-based KV cache compaction — modelless (Plan 245)
 cache_prune = []  # CachePrune SAT + rolling hash + sensitivity masking (Plan 140, Research 101)
 state_source = ["bandit"]  # State-Source Modelless Distillation — state-visitation tracking + P-UCB + retention (Plan 142, Research 103)
 nexus_elo = ["state_source", "proof_sketch_evolution"]  # Nexus Elo — Plackett-Luce + P-UCB + goal cache for DDTree/SR²AM (Plan 143, Research 104)

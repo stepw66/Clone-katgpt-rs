@@ -1649,6 +1649,7 @@ dependencies = [
  "crossterm",
  "fastrand",
  "good_lp",
+ "half",
  "katgpt-core",
  "log",
  "metal",
