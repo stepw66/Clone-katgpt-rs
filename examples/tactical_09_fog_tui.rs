@@ -14,7 +14,8 @@
 //!   3. Pull levers in correct order (opens bridge)
 //!   4. Cross bridge, open boxes, reach goal
 //!
-//! Run: `cargo run --example tactical_09_fog`
+//! Run: `cargo run --example tactical_09_fog_tui`
+//!      `cargo run --example tactical_09_fog_tui -- --headless`
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::{self, Stdout};
@@ -334,7 +335,14 @@ impl StrategicGame {
             lower_floors.swap(i, j);
         }
 
-        let boss_start = upper_floors[0];
+        // Boss spawns in the middle rows of the upper half (not beside the player)
+        let mid_row = bridge_row / 2; // center between top and bridge
+        let boss_start = upper_floors
+            .iter()
+            .filter(|(r, _)| (*r as isize - mid_row as isize).unsigned_abs() <= 2)
+            .copied()
+            .next()
+            .unwrap_or(upper_floors[0]);
         let mut levers = vec![upper_floors[1], upper_floors[2], upper_floors[3]];
         let traps: HashSet<_> = [upper_floors[4], upper_floors[5]].into_iter().collect();
         let mut keys = vec![upper_floors[6], upper_floors[7]];
@@ -376,7 +384,10 @@ impl StrategicGame {
             key_mapping.swap(0, 1);
         }
 
-        let target_lever_mask = ((next() as usize) % 6 + 1) as u8;
+        // Only masks with exactly 2 of 3 levers ON (popcount = 2)
+        // Valid: 0b011=3, 0b101=5, 0b110=6
+        const TWO_LEVER_MASKS: [u8; 3] = [0b011, 0b101, 0b110];
+        let target_lever_mask = TWO_LEVER_MASKS[(next() as usize) % 3];
         (key_mapping, target_lever_mask)
     }
 
@@ -405,7 +416,7 @@ impl StrategicGame {
         }
     }
 
-    /// Boss AI: line-of-sight chase, investigate last known, or idle.
+    /// Boss AI: line-of-sight chase, investigate last known, or patrol.
     fn boss_next_move(&self, state: &mut StrategicState) -> (usize, usize) {
         if !state.boss_alive {
             return (state.boss_r, state.boss_c);
@@ -416,8 +427,13 @@ impl StrategicGame {
             return boss_pos;
         }
 
-        // Compute boss's vision from its position
-        let boss_vision = compute_visible(&self.grid, boss_pos, state.bridge_open, &self.bridge);
+        // Compute boss's vision from its position (same radius as player)
+        let boss_vision = compute_visible(
+            &self.grid,
+            boss_pos,
+            state.bridge_open,
+            &self.bridge,
+        );
 
         if boss_vision.contains(&player_pos) {
             // CHASE: player is visible → remember position, BFS toward player
@@ -427,15 +443,66 @@ impl StrategicGame {
             if last_seen == boss_pos {
                 // Reached last known position, can't see player → go idle
                 state.boss_last_seen_player = None;
-                boss_pos
+                self.boss_patrol_step(boss_pos, state.total_cost as u64)
             } else {
                 // INVESTIGATE: move toward last known player position
                 self.bfs_boss_step(boss_pos, last_seen)
             }
         } else {
-            // IDLE: no player info → stay put
-            boss_pos
+            // PATROL: no player info → wander toward player's side of the map
+            self.boss_patrol_step(boss_pos, state.total_cost as u64)
         }
+    }
+
+    /// Patrol: pick a reachable floor tile in the upper half and wander toward it.
+    /// Falls back to adjacent tile if no good target found.
+    fn boss_patrol_step(&self, boss_pos: (usize, usize), tick: u64) -> (usize, usize) {
+        let bridge_row = self
+            .bridge
+            .iter()
+            .map(|&(r, _)| r)
+            .min()
+            .unwrap_or(8);
+
+        // Collect floor tiles above the bridge for patrol targets
+        let mut rng_s = boss_pos.0 as u64 * 1000 + boss_pos.1 as u64 + tick;
+        let mut candidates = Vec::new();
+        for r in 1..bridge_row {
+            for c in 1..self.cols() - 1 {
+                let pos = (r, c);
+                if self.grid[r][c] == '.' && pos != boss_pos && !self.bridge.contains(&pos) {
+                    candidates.push(pos);
+                }
+            }
+        }
+
+        if !candidates.is_empty() {
+            rng_s = rng_s.wrapping_mul(6364136223846793005).wrapping_add(1);
+            let target = candidates[(rng_s as usize) % candidates.len()];
+            let step = self.bfs_boss_step(boss_pos, target);
+            if step != boss_pos {
+                return step;
+            }
+        }
+
+        // Fallback: step to any adjacent floor tile
+        for &(dr, dc) in &DIR_DELTA {
+            let nr = boss_pos.0 as isize + dr;
+            let nc = boss_pos.1 as isize + dc;
+            if nr < 0 || nc < 0 || nr >= self.rows() as isize || nc >= self.cols() as isize {
+                continue;
+            }
+            let next = (nr as usize, nc as usize);
+            if self.grid[next.0][next.1] == '#' {
+                continue;
+            }
+            if self.bridge.contains(&next) {
+                continue;
+            }
+            return next;
+        }
+
+        boss_pos
     }
 
     /// BFS from boss toward target. Boss does NOT avoid traps — it can be lured!
@@ -677,6 +744,10 @@ fn bfs_first_action(
             if game.bridge.contains(&next) && !state.bridge_open {
                 continue;
             }
+            // Avoid lever tiles that aren't the target to prevent accidental toggling
+            if game.levers.contains(&next) && !targets.contains(&next) {
+                continue;
+            }
 
             visited.insert(next);
             came_from.insert(next, (pos, action));
@@ -718,6 +789,10 @@ fn any_passable_action(
             continue;
         }
         if discovered_traps.contains(&next) {
+            continue;
+        }
+        // Avoid lever tiles when bridge is already open
+        if state.bridge_open && game.levers.contains(&next) {
             continue;
         }
         return Some(action);
@@ -849,28 +924,7 @@ fn navigate_to_known_target(
         return Some(a);
     }
 
-    // 2. Levers (bridge not open)
-    if !state.bridge_open {
-        let levers: HashSet<_> = game
-            .levers
-            .iter()
-            .enumerate()
-            .filter(|(l, _)| fog.discovered_levers[*l])
-            .map(|(_, &pos)| pos)
-            .collect();
-        if !levers.is_empty()
-            && let Some(a) = bfs_first_action(
-                game,
-                (state.r, state.c),
-                &levers,
-                &fog.seen,
-                state,
-                &fog.discovered_traps,
-            )
-        {
-            return Some(a);
-        }
-    }
+    // 2. Levers — handled per-explorer (lever-state BFS / smart targeting)
 
     // 3. Unopened boxes (if holding keys)
     if state.keys_held != 0 {
@@ -957,8 +1011,20 @@ fn navigate_to_known_target(
 
 // ── BfExplorer ─────────────────────────────────────────────────
 
-/// Brute-force explorer: BFS to nearest frontier.
-struct BfExplorer;
+/// Brute-force explorer: BFS to nearest frontier + lever-state BFS.
+struct BfExplorer {
+    lever_states_tried: HashSet<u8>,
+    prev_discovered_count: usize,
+}
+
+impl BfExplorer {
+    fn new() -> Self {
+        Self {
+            lever_states_tried: HashSet::new(),
+            prev_discovered_count: 0,
+        }
+    }
+}
 
 impl Explorer for BfExplorer {
     fn choose_action(
@@ -967,6 +1033,7 @@ impl Explorer for BfExplorer {
         state: &StrategicState,
         fog: &FogState,
     ) -> Option<usize> {
+        // 1. Explore frontiers — discover more of the map
         let frontiers = fog.frontier_tiles(&game.grid);
 
         if !frontiers.is_empty() {
@@ -983,6 +1050,45 @@ impl Explorer for BfExplorer {
             }
         }
 
+        // 2. Lever-state BFS — try combinations without knowing target_lever_mask
+        if !state.bridge_open {
+            let discovered: Vec<usize> = (0..game.levers.len())
+                .filter(|l| fog.discovered_levers[*l])
+                .collect();
+
+            // Reset tried states when new levers are discovered
+            let count = discovered.len();
+            if count != self.prev_discovered_count {
+                self.lever_states_tried.clear();
+                self.prev_discovered_count = count;
+            }
+
+            if !discovered.is_empty() {
+                // Record current lever state as visited
+                self.lever_states_tried.insert(state.lever_state);
+
+                // BFS: find a lever whose toggle leads to an untried state
+                for &l in &discovered {
+                    let next_state = state.lever_state ^ (1 << l);
+                    if !self.lever_states_tried.contains(&next_state) {
+                        let lever_pos = game.levers[l];
+                        let targets = HashSet::from([lever_pos]);
+                        if let Some(action) = bfs_first_action(
+                            game,
+                            (state.r, state.c),
+                            &targets,
+                            &fog.seen,
+                            state,
+                            &fog.discovered_traps,
+                        ) {
+                            return Some(action);
+                        }
+                    }
+                }
+            }
+        }
+
+        // 3. Navigate to known targets (keys, boxes, goal)
         navigate_to_known_target(game, state, fog)
     }
 }
@@ -1210,6 +1316,32 @@ impl Explorer for AiExplorer {
             }
         }
 
+        // Smart lever targeting: only toggle levers whose bit doesn't match target
+        if !state.bridge_open {
+            let levers: HashSet<_> = game
+                .levers
+                .iter()
+                .enumerate()
+                .filter(|(l, _)| {
+                    fog.discovered_levers[*l]
+                        && (state.lever_state & (1 << l)) != (game.target_lever_mask & (1 << l))
+                })
+                .map(|(_, &pos)| pos)
+                .collect();
+            if !levers.is_empty()
+                && let Some(a) = bfs_first_action(
+                    game,
+                    (state.r, state.c),
+                    &levers,
+                    &fog.seen,
+                    state,
+                    &fog.discovered_traps,
+                )
+            {
+                return Some(dodge_boss_if_adjacent(game, state, fog, a));
+            }
+        }
+
         navigate_to_known_target(game, state, fog)
     }
 }
@@ -1301,6 +1433,32 @@ impl Explorer for HybridExplorer {
                 &fog.discovered_traps,
             ) {
                 return Some(dodge_boss_if_adjacent(game, state, fog, action));
+            }
+        }
+
+        // Smart lever targeting: only toggle levers whose bit doesn't match target
+        if !state.bridge_open {
+            let levers: HashSet<_> = game
+                .levers
+                .iter()
+                .enumerate()
+                .filter(|(l, _)| {
+                    fog.discovered_levers[*l]
+                        && (state.lever_state & (1 << l)) != (game.target_lever_mask & (1 << l))
+                })
+                .map(|(_, &pos)| pos)
+                .collect();
+            if !levers.is_empty()
+                && let Some(a) = bfs_first_action(
+                    game,
+                    (state.r, state.c),
+                    &levers,
+                    &fog.seen,
+                    state,
+                    &fog.discovered_traps,
+                )
+            {
+                return Some(dodge_boss_if_adjacent(game, state, fog, a));
             }
         }
 
@@ -1493,7 +1651,7 @@ impl App {
 
         let (game, bf, ai, hybrid) = loop {
             let game = StrategicGame::new(MAP, seed);
-            let mut bf_explorer = BfExplorer;
+            let mut bf_explorer = BfExplorer::new();
             let bf = solve_exploring(&game, &mut bf_explorer);
             let mut ai_explorer = AiExplorer;
             let ai = solve_exploring(&game, &mut ai_explorer);
@@ -1605,6 +1763,8 @@ impl App {
 // ── Main ───────────────────────────────────────────────────────
 
 fn main() -> io::Result<()> {
+    let headless = std::env::args().any(|a| a == "--headless" || a == "--non-tui");
+
     let mut seed = 42u64;
     let (game, bf, ai, hybrid) = loop {
         let game = StrategicGame::new(MAP, seed);
@@ -1613,7 +1773,7 @@ fn main() -> io::Result<()> {
             game.key_mapping, game.target_lever_mask,
         );
 
-        let mut bf_explorer = BfExplorer;
+        let mut bf_explorer = BfExplorer::new();
         let bf = solve_exploring(&game, &mut bf_explorer);
         eprintln!(
             "🐻 BF: {} steps · {}ms · {}",
@@ -1647,6 +1807,10 @@ fn main() -> io::Result<()> {
         seed = seed.wrapping_add(1);
     };
     eprintln!();
+
+    if headless {
+        return Ok(());
+    }
 
     let mut terminal = setup()?;
     let mut app = App::new(game, bf, ai, hybrid, seed);
@@ -1737,6 +1901,24 @@ fn handle_key(app: &mut App, code: KeyCode) -> KeyAction {
                 }
             }
         }
+        KeyCode::Char('1') => {
+            app.mode = SolveMode::BruteForce;
+            app.current = 0;
+            app.anim = None;
+            app.auto_play = true;
+        }
+        KeyCode::Char('2') => {
+            app.mode = SolveMode::Ai;
+            app.current = 0;
+            app.anim = None;
+            app.auto_play = true;
+        }
+        KeyCode::Char('3') => {
+            app.mode = SolveMode::Hybrid;
+            app.current = 0;
+            app.anim = None;
+            app.auto_play = true;
+        }
         KeyCode::Home => {
             app.anim = None;
             app.auto_play = false;
@@ -1811,7 +1993,7 @@ fn draw_title(f: &mut Frame, area: Rect, app: &App) {
             Style::default().fg(Color::Cyan),
         ),
         Span::styled(
-            " ← → Space · R New · Q Quit ",
+            " ← → Space · 1 🐻 2 🐰 3 🦊 · R New · Q Quit ",
             Style::default().fg(Color::DarkGray),
         ),
     ]);
