@@ -365,8 +365,10 @@ mod tests {
         }
 
         let patterns = extract_frequent_sequences(&paths, 10);
-        let mut miner = ConstraintMiner::default();
-        miner.min_acceptance = 0.90;
+        let miner = ConstraintMiner {
+            min_acceptance: 0.90,
+            ..Default::default()
+        };
 
         let mut constraints = Vec::new();
         for pattern in &patterns {

@@ -277,17 +277,15 @@ impl LatentContextBuffer {
     fn evict_segments(&mut self, indices: &[usize]) {
         let mut latent_count = 0usize;
         for &idx in indices {
-            if let Some(seg) = self.context.segments.get(idx) {
-                if let LatentSegment::Compressed {
-                    original_tokens, ..
-                } = seg
-                {
-                    let tokens = original_tokens.clone();
-                    // Account for the raw tokens this will add to decoder budget
-                    // (1 slot per raw token instead of 1 latent slot)
-                    self.context.segments[idx] = LatentSegment::Raw { tokens };
-                    latent_count += 1;
-                }
+            if let Some(LatentSegment::Compressed {
+                original_tokens, ..
+            }) = self.context.segments.get(idx)
+            {
+                let tokens = original_tokens.clone();
+                // Account for the raw tokens this will add to decoder budget
+                // (1 slot per raw token instead of 1 latent slot)
+                self.context.segments[idx] = LatentSegment::Raw { tokens };
+                latent_count += 1;
             }
         }
         self.context.latent_slot_count -= latent_count;
@@ -417,7 +415,7 @@ mod tests {
 
         // 12 tokens → 3 segments at X4, but budget is 2 → oldest evicted to raw
         let tokens = make_tokens(12);
-        let mut buf = LatentContextBuffer::new(&tokens, config);
+        let buf = LatentContextBuffer::new(&tokens, config);
 
         let stats = buf.stats();
         assert!(

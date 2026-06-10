@@ -128,7 +128,6 @@ fn g2_compute_savings() {
     let easy_ratio = 0.70f64;
 
     let easy_count = (total_queries as f64 * easy_ratio).round() as usize;
-    let hard_count = total_queries - easy_count;
 
     let candidates: Vec<usize> = (0..100).collect();
 

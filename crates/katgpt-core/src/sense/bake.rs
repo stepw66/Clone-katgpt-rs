@@ -323,12 +323,12 @@ mod tests {
         let lambda_old = [0.01f32; 8];
         let obs = [1.0f32; 8];
         let (mu_new, _) = bake_update(&mu_old, &lambda_old, &obs, 10.0);
-        for d in 0..8 {
+        (0..8).for_each(|d| {
             assert!(
                 (mu_new[d] - 1.0).abs() < 0.01,
                 "should absorb observation when precision is low"
             );
-        }
+        });
     }
 
     #[test]
@@ -337,13 +337,13 @@ mod tests {
         let lambda_old = [100.0f32; 8];
         let obs = [1.0f32; 8];
         let (mu_new, _) = bake_update(&mu_old, &lambda_old, &obs, 1.0);
-        for d in 0..8 {
+        (0..8).for_each(|d| {
             assert!(
                 mu_new[d].abs() < 0.02,
                 "should resist change when precision is high, got {}",
                 mu_new[d]
             );
-        }
+        });
     }
 
     #[test]

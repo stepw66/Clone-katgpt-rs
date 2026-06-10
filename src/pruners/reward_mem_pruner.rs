@@ -277,7 +277,7 @@ mod tests {
         pruner.set_prompt_type("rust_fn");
 
         // Reward one path
-        pruner.reward_path(&vec![10, 20], &CompileOutcome::Success);
+        pruner.reward_path(&[10, 20], &CompileOutcome::Success);
 
         // Lookup a completely different path — should be 0.0
         let boost = pruner.get_boost(2, 99, &[42]);

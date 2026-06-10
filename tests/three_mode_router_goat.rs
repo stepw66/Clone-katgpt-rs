@@ -113,7 +113,7 @@ fn goat_mode_selection_accuracy() {
 #[cfg(feature = "auto_constraint_synthesis")]
 #[test]
 fn goat_constraint_miner_quality() {
-    use katgpt_rs::pruners::{ConstraintMiner, extract_frequent_sequences, mine_and_insert};
+    use katgpt_rs::pruners::{ConstraintMiner, mine_and_insert};
 
     let mut rng = fastrand::Rng::new();
 

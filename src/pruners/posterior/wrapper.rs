@@ -571,8 +571,10 @@ mod tests {
 
     #[test]
     fn with_custom_policy_config() {
-        let mut config = PrecisionPolicyConfig::default();
-        config.retire_min_beta = 100.0; // Very high threshold
+        let config = PrecisionPolicyConfig {
+            retire_min_beta: 100.0,
+            ..Default::default()
+        }; // Very high threshold
 
         let inner = FixedPruner::new(vec![1.0]);
         let mut pgp =

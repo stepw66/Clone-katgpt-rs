@@ -236,11 +236,11 @@ fn part4_persistence() {
 
     // Verify identical routing decisions
     let mut mismatches = 0;
-    for pos in 0..NUM_POSITIONS {
+    (0..NUM_POSITIONS).for_each(|pos| {
         if restored.should_think(pos) != original_decisions[pos] {
             mismatches += 1;
         }
-    }
+    });
 
     let match_pct = (NUM_POSITIONS - mismatches) as f64 / NUM_POSITIONS as f64 * 100.0;
     println!("  Restored decisions:      {match_pct:.0}% match ({mismatches} mismatches)");

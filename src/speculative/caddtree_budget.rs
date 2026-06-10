@@ -459,7 +459,7 @@ mod tests {
         // Sigmoid always in [0, 1] for any finite input (exact 0/1 at extreme underflow).
         for x in [-100.0_f32, -1.0, 0.0, 1.0, 100.0] {
             let s = sigmoid(x);
-            assert!(s >= 0.0 && s <= 1.0, "sigmoid({x}) = {s} out of [0,1]");
+            assert!((0.0..=1.0).contains(&s), "sigmoid({x}) = {s} out of [0,1]");
         }
         // At moderate inputs, sigmoid is strictly in (0, 1).
         for x in [-5.0_f32, -1.0, 0.0, 1.0, 5.0] {
@@ -607,7 +607,7 @@ mod tests {
         // Greedy search should find the same or better.
         let greedy_b = selector.select_budget(&marginals, 10, 5);
         assert!(
-            greedy_b >= 1 && greedy_b <= 10,
+            (1..=10).contains(&greedy_b),
             "greedy_b = {greedy_b} out of range"
         );
         // The greedy result's throughput should be within 1% of true peak.
@@ -638,7 +638,7 @@ mod tests {
 
         let selected = selector.select_budget(&marginals, 20, 10);
         assert!(
-            selected >= 1 && selected <= 20,
+            (1..=20).contains(&selected),
             "selected = {selected} out of range"
         );
     }

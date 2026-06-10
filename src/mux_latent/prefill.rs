@@ -152,7 +152,7 @@ mod tests {
         let plan = forward_prefill_with_compression(&seq);
 
         // First 8 entries are raw, rest are latent
-        assert!(plan.compression.latent_indices.len() > 0);
+        assert!(!plan.compression.latent_indices.is_empty());
         // Latent indices should all be >= 8
         for &idx in &plan.compression.latent_indices {
             assert!(idx >= 8, "Latent index {idx} should be >= 8");

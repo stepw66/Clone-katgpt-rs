@@ -421,7 +421,7 @@ mod tests {
             collapse_threshold: 5,
             efficiency_gamma: 0.7,
         };
-        let mut detector = S2FCollapseDetector::new(vec![42], &budget);
+        let detector = S2FCollapseDetector::new(vec![42], &budget);
 
         // Freeze.
         detector.freeze(&path).expect("freeze");

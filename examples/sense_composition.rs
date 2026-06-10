@@ -53,7 +53,7 @@ fn main() {
     let results = brain.project_all();
     println!(
         "  FighterSense: {:.4} (pinned)",
-        results.get(0).unwrap_or(&0.0)
+        results.first().unwrap_or(&0.0)
     );
     for (i, val) in results.iter().enumerate() {
         println!("  Module {}: activation = {:.4}", i, val);

@@ -81,7 +81,7 @@ fn g1_posterior_convergence() {
     }
 
     println!("🐐 G1 PASS: posterior converged within tolerance after {num_episodes} episodes");
-    for arm in 0..rates.len() {
+    (0..rates.len()).for_each(|arm| {
         let pv = pruner.precision(arm).unwrap();
         println!(
             "   arm {arm}: true={:.1}, estimated={:.3}, observations={}",
@@ -89,7 +89,7 @@ fn g1_posterior_convergence() {
             pv.success_probability(),
             pv.observations()
         );
-    }
+    });
 }
 
 // ── G2: Surprise-Triggered PATCH ────────────────────────────────────────────
@@ -234,10 +234,7 @@ fn g5_hot_path_overhead() {
     for i in 0..n_rel {
         let _ = pruner.relevance(0, (i % 256) as usize, &[]);
     }
-    let posterior_rel_ns = {
-        let total = start.elapsed().as_nanos() as f64 / n_rel as f64;
-        total
-    };
+    let posterior_rel_ns = { start.elapsed().as_nanos() as f64 / n_rel as f64 };
 
     let start = Instant::now();
     for i in 0..n_rel {

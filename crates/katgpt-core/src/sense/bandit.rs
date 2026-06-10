@@ -71,8 +71,10 @@ mod tests {
 
     #[test]
     fn test_high_reward_increases_confidence() {
-        let mut module = SenseModule::default();
-        module.confidence = 0.3;
+        let mut module = SenseModule {
+            confidence: 0.3,
+            ..Default::default()
+        };
         module.commit();
 
         let trial = SenseTrial {
@@ -88,8 +90,10 @@ mod tests {
 
     #[test]
     fn test_low_reward_decreases_confidence() {
-        let mut module = SenseModule::default();
-        module.confidence = 0.8;
+        let mut module = SenseModule {
+            confidence: 0.8,
+            ..Default::default()
+        };
         module.commit();
 
         let trial = SenseTrial {

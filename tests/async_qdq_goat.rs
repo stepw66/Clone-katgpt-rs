@@ -232,7 +232,7 @@ fn goat_g6_async_qdq_throughput() {
         let _ = scheduler.key_buffer.active();
         processed += 1;
         scheduler.prefetch_next(|idx, buf| {
-            for (i, v) in buf.iter_mut().enumerate() {
+            for v in buf.iter_mut() {
                 *v = idx as f32;
             }
         });

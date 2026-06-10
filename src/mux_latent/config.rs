@@ -1,11 +1,12 @@
 //! Configuration for MUX-Latent Context Compression.
 
 /// Compression ratio determines how many input tokens map to one latent slot.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CompressionRatio {
     /// 4 input tokens → 1 latent slot
     X4 = 4,
     /// 8 input tokens → 1 latent slot
+    #[default]
     X8 = 8,
     /// 16 input tokens → 1 latent slot
     X16 = 16,
@@ -15,12 +16,6 @@ impl CompressionRatio {
     /// Number of input tokens per latent slot.
     pub fn span_size(&self) -> usize {
         *self as usize
-    }
-}
-
-impl Default for CompressionRatio {
-    fn default() -> Self {
-        Self::X8
     }
 }
 
