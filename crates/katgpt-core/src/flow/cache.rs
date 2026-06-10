@@ -136,17 +136,16 @@ impl FlowFieldCache {
         let mut grid = LeoPotentialGrid::from_q_values(grid_w, grid_h, goal_q, actions_per_cell);
 
         // Inflate obstacles before FFT to prevent flow into walls.
-        let total_cells = (grid_w as usize) * (grid_h as usize);
-        let blocked_words = (total_cells + 63) / 64;
-        let mut blocked_bits = vec![0u64; blocked_words];
+        // inflate_obstacles expects row-major layout: words_per_row × grid_h words.
+        let words_per_row = ((grid_w as usize) + 63) / 64;
+        let mut blocked_bits = vec![0u64; words_per_row * (grid_h as usize)];
 
         // Copy blocked state into bitfield for inflation.
         for y in 0..grid_h {
             for x in 0..grid_w {
                 if grid.is_blocked(x, y) {
-                    let idx = (y as usize) * (grid_w as usize) + (x as usize);
-                    let word = idx / 64;
-                    let bit = idx % 64;
+                    let word = (y as usize) * words_per_row + (x as usize) / 64;
+                    let bit = (x as usize) % 64;
                     blocked_bits[word] |= 1u64 << bit;
                 }
             }
@@ -162,9 +161,8 @@ impl FlowFieldCache {
         // Apply inflated obstacles back to the grid.
         for y in 0..grid_h {
             for x in 0..grid_w {
-                let idx = (y as usize) * (grid_w as usize) + (x as usize);
-                let word = idx / 64;
-                let bit = idx % 64;
+                let word = (y as usize) * words_per_row + (x as usize) / 64;
+                let bit = (x as usize) % 64;
                 if blocked_bits[word] & (1u64 << bit) != 0 {
                     grid.mark_blocked(x, y);
                 }
@@ -277,7 +275,8 @@ mod tests {
         }
 
         fn action_count(&self) -> usize {
-            self.actions
+            // Total elements per goal = cells × actions_per_cell.
+            self.cells() * self.actions
         }
 
         /// Override to return the full spatial Q-slice for a goal
