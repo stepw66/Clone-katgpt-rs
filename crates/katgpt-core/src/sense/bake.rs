@@ -15,8 +15,8 @@ pub const DEFAULT_OBS_PRECISION: f32 = 1.0;
 #[inline]
 pub fn bake_update_precision(lambda_old: &[f32; 8], lambda_obs: f32) -> [f32; 8] {
     let mut lambda_new = *lambda_old;
-    for d in 0..8 {
-        lambda_new[d] += lambda_obs;
+    for val in lambda_new.iter_mut() {
+        *val += lambda_obs;
     }
     lambda_new
 }
@@ -135,6 +135,12 @@ mod bake_store {
         entries: papaya::HashMap<u64, PrecisionEntry>,
     }
 
+    impl Default for BakePrecisionStore {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
+
     impl BakePrecisionStore {
         /// Create an empty precision store.
         pub fn new() -> Self {
@@ -235,8 +241,8 @@ mod bake_store {
 
         /// Accumulate an observation (running sum, zero-alloc).
         pub fn observe(&mut self, observation: &[f32; 8]) {
-            for d in 0..8 {
-                self.accumulated_obs_sum[d] += observation[d];
+            for (d, obs) in observation.iter().enumerate() {
+                self.accumulated_obs_sum[d] += obs;
             }
             self.observation_count += 1;
         }
@@ -262,8 +268,8 @@ mod bake_store {
 
             let count = self.observation_count as f32;
             let mut mean_obs = [0.0f32; 8];
-            for d in 0..8 {
-                mean_obs[d] = self.accumulated_obs_sum[d] / count;
+            for (d, mean) in mean_obs.iter_mut().enumerate() {
+                *mean = self.accumulated_obs_sum[d] / count;
             }
 
             let effective_lambda = DEFAULT_OBS_PRECISION * count;

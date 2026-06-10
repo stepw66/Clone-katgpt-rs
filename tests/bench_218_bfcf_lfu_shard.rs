@@ -4,6 +4,8 @@
 
 #![cfg(all(feature = "bfcf_lfu_shard", feature = "speculative_generator"))]
 
+use std::sync::Arc;
+
 use katgpt_rs::pruners::{
     BFCP, BfcpRegionCache, BorelRegion, HalfSpace, RegionLabel, blake3_logit_hash,
 };
@@ -63,7 +65,7 @@ fn b1_cache_hit_rate_synthetic_100_steps() {
             None => {
                 // Cache miss — recompute partition and insert.
                 let partition = make_partition(n_regions, step);
-                cache.insert(hash, partition);
+                cache.insert(hash, Arc::new(partition));
             }
         }
     }

@@ -4,13 +4,18 @@
 //! printing compression ratio, KV savings, estimated TTFT reduction,
 //! and adaptive LOD with mixed content.
 
-#![cfg(feature = "mux_latent_context")]
-
+#[cfg(feature = "mux_latent_context")]
 use katgpt_rs::mux_latent::{
     CompressionRatio, CompressionSummary, LatentContextBuffer, LatentPrefillAdapter,
     MuxLatentConfig, MuxLatentEncoder, SpectralLOD, forward_prefill_with_compression,
 };
 
+#[cfg(not(feature = "mux_latent_context"))]
+fn main() {
+    eprintln!("This example requires --features mux_latent_context");
+}
+
+#[cfg(feature = "mux_latent_context")]
 fn main() {
     println!("=== MUX-Latent Context Compression Demo (Plan 238) ===\n");
 

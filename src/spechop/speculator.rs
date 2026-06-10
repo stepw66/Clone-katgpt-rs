@@ -63,7 +63,7 @@ pub fn observation_velocity(obs_k: &str, obs_k1: &str) -> f32 {
         return 1.0;
     }
     // Simple character overlap ratio: count matching characters in shortest common prefix
-    let min_len = obs_k.len().min(obs_k1.len());
+    let _min_len = obs_k.len().min(obs_k1.len());
     let max_len = obs_k.len().max(obs_k1.len());
     let matching = obs_k
         .chars()

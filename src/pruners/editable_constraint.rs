@@ -9,8 +9,6 @@
 //!
 //! All code behind `#[cfg(feature = "coexplain_pruner")]`.
 
-#![cfg(feature = "coexplain_pruner")]
-
 use super::self_refining::TopologyAction;
 use super::ted_lite::PrunerDivergence;
 

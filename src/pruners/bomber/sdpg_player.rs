@@ -23,8 +23,6 @@
 //!
 //! # Plan 180
 
-#![cfg(feature = "sdpg_bandit")]
-
 use std::any::Any;
 use std::cmp::Ordering;
 

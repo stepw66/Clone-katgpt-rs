@@ -1,4 +1,3 @@
-#![cfg(feature = "three_mode_router")]
 //! Three-Mode Neuro-Symbolic Bandit Router — Plan 211.
 //!
 //! UCB1 bandit over neuro-symbolic modes (L4R, R4L, LR) with sigmoid-gated mixing.

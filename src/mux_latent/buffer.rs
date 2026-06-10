@@ -45,6 +45,7 @@ pub struct BufferStats {
 /// and query-based segment retrieval. This is what the decoder-side injection
 /// path consumes during prefill.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct LatentContextBuffer {
     /// Current compressed context.
     context: CompressedContext,
@@ -83,7 +84,7 @@ impl LatentContextBuffer {
     #[cfg(feature = "lclm_adaptive_lod")]
     pub fn new_adaptive(tokens: &[u32], config: MuxLatentConfig, slod: SpectralLOD) -> Self {
         let window_size = config.window_size;
-        let span_size = config.compression_ratio.span_size();
+        let _span_size = config.compression_ratio.span_size();
 
         // Split tokens into windows and determine per-window compression
         let windows: Vec<&[u32]> = tokens.chunks(window_size).collect();

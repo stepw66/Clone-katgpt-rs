@@ -1,4 +1,3 @@
-#![cfg(feature = "safe_exploration_budget")]
 //! Safe Exploration Budget — configurable verification tier limits (Plan 211 F3).
 //!
 //! Limits how many Tier 0 (DFA), Tier 1 (AST parse), and Tier 2 (cargo check)

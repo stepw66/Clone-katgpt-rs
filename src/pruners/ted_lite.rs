@@ -13,8 +13,6 @@
 //!
 //! All code behind `#[cfg(feature = "ted_lite")]`.
 
-#![cfg(feature = "ted_lite")]
-
 /// Divergence metrics for a single pruner.
 #[derive(Debug, Clone)]
 pub struct PrunerDivergence {

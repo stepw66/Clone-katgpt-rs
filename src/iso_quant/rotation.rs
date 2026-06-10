@@ -87,7 +87,7 @@ pub fn apply_rotation(
 ) {
     let dim = input.len();
     debug_assert_eq!(output.len(), dim);
-    let n_groups = q_left.len();
+    let _n_groups = q_left.len();
     let n_full_groups = dim / 4;
 
     match q_right {
@@ -95,7 +95,12 @@ pub fn apply_rotation(
             // Main loop: no bounds checks for full groups
             for g in 0..n_full_groups {
                 let base = g * 4;
-                let v = [input[base], input[base + 1], input[base + 2], input[base + 3]];
+                let v = [
+                    input[base],
+                    input[base + 1],
+                    input[base + 2],
+                    input[base + 3],
+                ];
                 let r = quat_sandwich_forward(&q_left[g], &v, &qr[g]);
                 output[base] = r[0];
                 output[base + 1] = r[1];
@@ -119,7 +124,12 @@ pub fn apply_rotation(
         None => {
             for g in 0..n_full_groups {
                 let base = g * 4;
-                let v = [input[base], input[base + 1], input[base + 2], input[base + 3]];
+                let v = [
+                    input[base],
+                    input[base + 1],
+                    input[base + 2],
+                    input[base + 3],
+                ];
                 let r = quat_left_forward(&q_left[g], &v);
                 output[base] = r[0];
                 output[base + 1] = r[1];
@@ -152,14 +162,19 @@ pub fn apply_inverse_rotation(
 ) {
     let dim = input.len();
     debug_assert_eq!(output.len(), dim);
-    let n_groups = q_left.len();
+    let _n_groups = q_left.len();
     let n_full_groups = dim / 4;
 
     match q_right {
         Some(qr) => {
             for g in 0..n_full_groups {
                 let base = g * 4;
-                let v = [input[base], input[base + 1], input[base + 2], input[base + 3]];
+                let v = [
+                    input[base],
+                    input[base + 1],
+                    input[base + 2],
+                    input[base + 3],
+                ];
                 let r = quat_sandwich_inverse(&q_left[g], &v, &qr[g]);
                 output[base] = r[0];
                 output[base + 1] = r[1];
@@ -182,7 +197,12 @@ pub fn apply_inverse_rotation(
         None => {
             for g in 0..n_full_groups {
                 let base = g * 4;
-                let v = [input[base], input[base + 1], input[base + 2], input[base + 3]];
+                let v = [
+                    input[base],
+                    input[base + 1],
+                    input[base + 2],
+                    input[base + 3],
+                ];
                 let r = quat_left_inverse(&q_left[g], &v);
                 output[base] = r[0];
                 output[base + 1] = r[1];

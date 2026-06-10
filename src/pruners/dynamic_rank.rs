@@ -10,8 +10,6 @@
 //!
 //! Feature-gated under `dynamic_rank`. Zero overhead when inner pruner is already dynamic.
 
-#![cfg(feature = "dynamic_rank")]
-
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use katgpt_core::traits::ScreeningPruner;

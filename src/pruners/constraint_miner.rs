@@ -366,7 +366,6 @@ mod tests {
 
         let patterns = extract_frequent_sequences(&paths, 10);
         let mut miner = ConstraintMiner::default();
-        #[allow(clippy::field_reassign_with_default)]
         miner.min_acceptance = 0.90;
 
         let mut constraints = Vec::new();

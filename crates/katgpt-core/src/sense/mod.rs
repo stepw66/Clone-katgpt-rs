@@ -22,7 +22,6 @@ pub use bake::{
 };
 pub use bandit::{SenseTrial, SenseTrialLog};
 pub use brain::{NpcBrain, SenseOverride};
-pub(crate) use gm::dispatch_gm_action;
 pub use gm::{NpcBrainSnapshot, SenseError};
 pub use hotswap::SenseHotSwap;
 pub use octree::{KgEmbedding, SenseOctreeBuilder};

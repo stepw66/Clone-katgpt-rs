@@ -86,8 +86,6 @@ impl HopSegmentIndex {
     ///
     /// Computes the rolling hash and blake3 digest, then stores the segment
     /// for future matching queries.
-
-
     pub fn index_observation(&mut self, hop_idx: usize, tokens: &[u32]) {
         let prefixes = self.roller.prefix_hashes(tokens);
         let rolling_hash = self.roller.substring_hash(&prefixes, 0, tokens.len());
@@ -189,7 +187,11 @@ impl HopSegmentIndex {
     /// looking for any window that matches a contiguous sub-range of the
     /// segment. Returns the first match found (by segment order, longest
     /// match preferred).
-    pub fn find_substring_match(&mut self, tokens: &[u32], min_length: usize) -> Option<SegmentMatch> {
+    pub fn find_substring_match(
+        &mut self,
+        tokens: &[u32],
+        min_length: usize,
+    ) -> Option<SegmentMatch> {
         if tokens.len() < min_length || self.pool.is_empty() {
             return None;
         }

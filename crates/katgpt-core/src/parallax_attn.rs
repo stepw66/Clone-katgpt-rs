@@ -441,9 +441,9 @@ fn tiled_attention_core(
         output[out_off..out_off + d].fill(0.0);
 
         // Compute scores for row i
-        for j in 0..n {
+        for (j, score_slot) in scores.iter_mut().enumerate().take(n) {
             let k_off = j * d;
-            scores[j] = simd::simd_dot_f32(&q[q_off..q_off + d], &k[k_off..k_off + d], d) * scale;
+            *score_slot = simd::simd_dot_f32(&q[q_off..q_off + d], &k[k_off..k_off + d], d) * scale;
         }
 
         // Normalize attention weights (softmax or sigmoid)
@@ -451,8 +451,7 @@ fn tiled_attention_core(
         normalize_attention_weights(row, activation);
 
         // Accumulate output: o_i = Σ_j p_ij · v_j
-        for j in 0..n {
-            let p = scores[j];
+        for (j, &p) in scores.iter().enumerate().take(n) {
             let v_off = j * d;
             simd::simd_fused_scale_acc(
                 &mut output[out_off..out_off + d],

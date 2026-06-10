@@ -19,7 +19,7 @@ fn bench_cna_steering_goat_proof() {
         cna_modulate, detect_universal_neurons,
     };
     use katgpt_rs::speculative::types::ScreeningPruner;
-    use std::collections::HashSet;
+    use std::collections::{HashMap, HashSet};
     use std::hint::black_box;
     use std::time::Instant;
 
@@ -172,6 +172,13 @@ fn bench_cna_steering_goat_proof() {
 
         let circuit = CnaCircuit {
             neuron_set: neurons.iter().map(|n| (n.layer, n.index)).collect(),
+            layer_index: {
+                let mut idx: HashMap<usize, Vec<usize>> = HashMap::new();
+                for (i, n) in neurons.iter().enumerate() {
+                    idx.entry(n.layer).or_default().push(i);
+                }
+                idx
+            },
             neurons,
             universal_excluded: vec![],
             universal_excluded_set: HashSet::new(),
@@ -231,6 +238,13 @@ fn bench_cna_steering_goat_proof() {
         .collect();
     let circuit = CnaCircuit {
         neuron_set: circuit_neurons.iter().map(|n| (n.layer, n.index)).collect(),
+        layer_index: {
+            let mut idx: HashMap<usize, Vec<usize>> = HashMap::new();
+            for (i, n) in circuit_neurons.iter().enumerate() {
+                idx.entry(n.layer).or_default().push(i);
+            }
+            idx
+        },
         neurons: circuit_neurons,
         universal_excluded: vec![],
         universal_excluded_set: HashSet::new(),

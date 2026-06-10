@@ -467,8 +467,8 @@ pub fn find_sufficient_set(
     // Single pass: filter valid tokens AND compute extension counts, avoiding
     // an intermediate Vec<usize> allocation.
     let mut counts: Vec<(usize, usize)> = Vec::with_capacity(limit);
-    for tok in 0..check_limit {
-        if !valid_buf[tok] {
+    for (tok, &valid) in valid_buf.iter().enumerate().take(check_limit) {
+        if !valid {
             continue;
         }
         ext_buf[base_len] = tok; // Overwrite only the candidate slot
@@ -540,8 +540,8 @@ fn count_valid_extensions_with(
         count += bytes[i + 7] as usize;
         i += 8;
     }
-    for j in i..limit {
-        count += bytes[j] as usize;
+    for &byte in bytes.iter().take(limit).skip(i) {
+        count += byte as usize;
     }
     count
 }
@@ -761,12 +761,12 @@ pub fn generate_synthetic_csps(count_per_domain: usize) -> Vec<SyntheticCsp> {
         let col = key % 4;
         // Branch-free Manhattan distance check — reuse scratch buffer
         adjacent_buf.fill(false);
-        for c in 0..vocab_size {
+        for (c, adj_slot) in adjacent_buf.iter_mut().enumerate().take(vocab_size) {
             let dr = (c / 4) as i32 - row as i32;
             let dc = (c % 4) as i32 - col as i32;
             // dist = |dr| + |dc| == 1 is equivalent to (dr^2 + dc^2 == 1)
             let dist_sq = dr * dr + dc * dc;
-            adjacent_buf[c] = dist_sq == 1;
+            *adj_slot = dist_sq == 1;
         }
         // Build narrowing directly — only the key slot is non-empty, avoiding
         // cloning 16 empty Vecs from grid_base_narrowing.

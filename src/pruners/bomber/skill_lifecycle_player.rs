@@ -16,8 +16,6 @@
 //! - **Failed** arms: -1.0 penalty (known failure modes)
 //! - **Untested** arms: neutral (no bonus/penalty)
 
-#![cfg(feature = "skill_lifecycle")]
-
 use std::any::Any;
 
 use fastrand::Rng;

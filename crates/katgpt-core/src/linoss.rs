@@ -118,9 +118,8 @@ impl LinOSSCell {
         let bias_y = vec![0.0f32; n * h];
         let mut bias_z = vec![0.0f32; n * h];
 
-        for step in 0..n {
+        for (step, f) in forcings.iter().enumerate().take(n) {
             let base = step * h;
-            let f = forcings[step];
             for j in 0..h {
                 a[base + j] = 1.0;
                 b[base + j] = dt;
@@ -182,8 +181,8 @@ impl LinOSSCell {
         let n = forcings.len();
         let mut results = Vec::with_capacity(n);
         let mut state = initial.clone();
-        for i in 0..n {
-            state = self.imex_step(&state, forcings[i], dt);
+        for forcing in forcings.iter().take(n) {
+            state = self.imex_step(&state, forcing, dt);
             results.push(state.clone());
         }
         results
@@ -249,13 +248,13 @@ impl VocabFourierBasis {
             let mut cos_mode = vec![0.0f32; vocab_dim];
             for (i, emb) in embeddings.iter().enumerate() {
                 let cos_w = (omega * i as f32).cos();
-                for d in 0..vocab_dim {
-                    cos_mode[d] += emb[d] * cos_w;
+                for (d, cos_slot) in cos_mode.iter_mut().enumerate().take(vocab_dim) {
+                    *cos_slot += emb[d] * cos_w;
                 }
             }
             let inv_n = 1.0 / n as f32;
-            for d in 0..vocab_dim {
-                cos_mode[d] *= inv_n;
+            for val in cos_mode.iter_mut().take(vocab_dim) {
+                *val *= inv_n;
             }
             let mag: f32 = cos_mode.iter().map(|v| v * v).sum::<f32>().sqrt();
             candidates.push((mag, cos_mode));
@@ -422,7 +421,7 @@ impl ModalSpecDrafter {
         // Draft loop — zero alloc per iteration
         forcing.fill(0.0);
         let mut drafted = 0;
-        for i in 0..n_draft {
+        for out_slot in out.iter_mut().take(n_draft) {
             let (y_new, z_new) = self
                 .cell
                 .imex_step_inplace(&y_a, &z_a, &forcing, self.dt, &mut y_b, &mut z_b);
@@ -431,7 +430,7 @@ impl ModalSpecDrafter {
 
             self.extract_coefficients_into(&y_a, k, &mut coeffs);
             self.basis.reconstruct_into(&coeffs, &mut reconstructed);
-            out[i] = self.nearest_token(&reconstructed);
+            *out_slot = self.nearest_token(&reconstructed);
             drafted += 1;
         }
         drafted
@@ -449,13 +448,13 @@ impl ModalSpecDrafter {
     fn project_to_hidden_into(&self, vec: &[f32], vocab_dim: usize, result: &mut [f32]) {
         let h = self.hidden_dim;
         let ratio = vocab_dim as f32 / h as f32;
-        for i in 0..h {
+        for (i, result_slot) in result.iter_mut().enumerate().take(h) {
             let start = ((i as f32 * ratio) as usize).min(vocab_dim);
             let end = (((i + 1) as f32 * ratio) as usize).min(vocab_dim);
             if start < end {
-                result[i] = vec[start..end].iter().sum::<f32>() / (end - start) as f32;
+                *result_slot = vec[start..end].iter().sum::<f32>() / (end - start) as f32;
             } else {
-                result[i] = 0.0;
+                *result_slot = 0.0;
             }
         }
     }

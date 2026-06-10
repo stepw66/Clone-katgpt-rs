@@ -2,7 +2,9 @@
 
 A neuro-symbolic micro-Transformer with speculative decoding, constraint pruning, recurrent attention, and adaptive test-time scaling — built in Rust.
 
-Inspired by [microgpt-c](https://github.com/nicholasgasior/microgpt-c), [talos-vs-macbook](https://github.com/AlexCheema/talos-vs-macbook), and [Luce-Org/lucebox-hub](https://github.com/Luce-Org/lucebox-hub/).
+Inspired by [Andrej Karpathy's microgpt](https://karpathy.github.io/2026/02/12/microgpt/).
+
+<img width="580" height="385" alt="tactical_09_fog_tui" src="https://github.com/user-attachments/assets/57bdc3e1-1c3e-4843-b428-a43070f8ac36" />
 
 ## 🚀 Key Features
 
@@ -12,7 +14,7 @@ Inspired by [microgpt-c](https://github.com/nicholasgasior/microgpt-c), [talos-v
 - **ConstraintPruner** — Pluggable trait for neuro-symbolic intercept: deterministic rules engine prunes invalid branches before target verification.
 - **ScreeningPruner** — Upgraded binary pruning to graded relevance (`R ∈ [0.0, 1.0]`) with blended score formula.
 - **SpeculativeVerifier** — Swappable verification via trait: `SimulatedVerifier` (fast) or `LeviathanVerifier` (real p/q rejection sampling).
-- **Raven RSM** — O(1) KV cache replacement with sparse Top-K routing. Unselected slots completely frozen.
+- **O(1) Attention Alternatives** — GDN2 recurrent state, Raven RSM fixed-slot memory, LT2 looped inference (opt-in forward paths).
 - **Hybrid OCT+PQ KV Cache** — Default codec: OCTOPUS triplet encoding + PlanarQuant 2D Givens rotation. Best MSE + 64× fewer rotation FMAs (Bench 024, Plan 101).
 - **PFlash Block-Sparse Prefill** — Up to 21× sequence reduction with 100% NIAH needle retrieval.
 - **BPE Tokenizer** — Train/encode/decode with Config::bpe() preset for code generation.
@@ -20,7 +22,7 @@ Inspired by [microgpt-c](https://github.com/nicholasgasior/microgpt-c), [talos-v
 - **G-Zero Self-Play** — Verifier-free Hint-δ intrinsic reward — no external LLM judge needed.
 - **katgpt-core** — Shared crate with decoupled types (`types.rs`), trait definitions (`traits.rs`), SIMD kernels (`simd.rs`), tiled attention, CODA fusion, parallax attention, QuestBench, PEIRA, Dirichlet energy, spectral hierarchy, roofline cost model, LinOSS modal spec, AND-OR DDTree, MUX superposition pruning, NPC sense composition (KG latent octree), SLoD spectral level-of-detail pruner, shard embedding (JL projection), schema centroid init, and BAKE precision-gated embeddings.
 - **QwenDeltaNet** — Model architecture support for DeltaNet-style hybrid decode.
-- **150+ Feature Flags** — Granular feature gates for every subsystem; 80+ default-on (all GOAT-proved).
+- **150+ Feature Flags** — Granular feature gates for every subsystem; 106 default-on (all GOAT-proved).
 - **Tactical Grid Game & Dungeon Crawler** — Arena examples for game AI research.
 
 📖 **Deep dives:** [`.docs/`](.docs/) for architecture, speculative decoding, performance, sudoku, validator, HL, arena, and all research detail.
@@ -159,7 +161,7 @@ graph LR
     end
     subgraph Model
         B --> C[Transformer Forward]
-        C --> D[Raven RSM]
+        C --> D[Delta Routing]
         C --> E[Hybrid OCT+PQ KV]
         C --> F[Sparse MLP]
         C --> G[MLS Aggregate]
@@ -191,7 +193,7 @@ graph LR
 | Component | What | Gate |
 |-----------|------|------|
 | **Sparse MLP** | Skip dead ReLU neurons in w2 matmul | `sparse_mlp` |
-| **Raven RSM** | O(1) KV cache with 16-slot Top-K routing | always |
+| **Delta Routing** | Cross-layer residual delta routing at block boundary | `delta_routing` |
 | **Hybrid OCT+PQ** | Default KV codec — OCT triplet + PQ 2D Givens, best MSE | `hybrid_oct_pq` |
 | **SpectralQuant** | Calibrated eigenbasis + water-fill (secondary) | `spectral_quant` |
 | **MLS Aggregate** | Average last K layer residuals before LM head | `mls_aggregate` |
@@ -361,9 +363,11 @@ Three-phase rollout: trait + routers (Phase 1 ✅) → channel-aware SIMD (Phase
 
 Feature gate: `vortex_flow` (depends on `dash_attn`, default-OFF).
 
-## 🦅 Raven RSM: O(1) Routing Slot Memory
+## 🦅 Raven RSM: O(1) Routing Slot Memory (Opt-In)
 
 Fixed-size slot memory with sparse Top-K routing. Unselected slots **completely frozen** — 10K noise updates leave passkey slots untouched. 2.98× faster than flat attention at pos=8.
+
+> **⚠️ Opt-in alternative forward path** — not in the default `forward()` call chain. Use `forward_raven()` with `RavenKVCache` explicitly. The default hot path uses standard O(N) softmax attention via `forward_base()`.
 
 | Property | Evidence |
 |----------|----------|
@@ -371,7 +375,7 @@ Fixed-size slot memory with sparse Top-K routing. Unselected slots **completely 
 | O(1) stays flat | Raven stays 1.0× while flat grows 1.1× from pos 16→240 |
 | 2.98× faster | 62,653 tok/s (Raven) vs 21,019 tok/s (flat) |
 
-📖 See [`.docs/08_lucebox_techniques.md`](.docs/08_lucebox_techniques.md).
+📖 See [`.docs/08_lucebox_techniques.md`](.docs/08_lucebox_techniques.md) and [`.docs/25_raven_rsm.md`](.docs/25_raven_rsm.md).
 
 ## 🔬 Percepta: Transformer-VM in Rust
 

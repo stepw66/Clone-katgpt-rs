@@ -8,8 +8,6 @@
 //!
 //! All code behind `#[cfg(feature = "coexplain_riir")]`.
 
-#![cfg(feature = "coexplain_riir")]
-
 use std::collections::HashMap;
 
 // ── TranslationRule ─────────────────────────────────────────────────

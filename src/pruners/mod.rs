@@ -274,8 +274,8 @@ pub mod gdsd;
 
 #[cfg(feature = "gdsd_distill")]
 pub use gdsd::{
-    GdsdConfig, GdsdPruner, clamped_advantage, identity_advantage, sigmoid_advantage,
-    tanh_advantage, token_logit_centralization,
+    GdsdConfig, GdsdPruner, clamped_advantage, identity_advantage, tanh_advantage,
+    token_logit_centralization,
 };
 
 #[cfg(all(feature = "game_state", feature = "bomber"))]
@@ -389,7 +389,7 @@ pub mod committee_boost;
 #[cfg(feature = "committee_boost")]
 pub use committee_boost::{
     BlindSpotEstimate, BudgetError, CommitteeBudget, ConvergenceFit, CoverageAction,
-    CoverageDiagnostic, DebiasedComparator, FailureMode, OracleGapRecovery, committee_budget,
+    CoverageDiagnostic, DebiasedComparator, OracleGapRecovery, committee_budget,
     coverage_diagnostic, debiased_compare, estimate_blind_spot_floor, fit_convergence,
 };
 

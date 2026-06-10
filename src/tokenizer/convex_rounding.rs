@@ -160,13 +160,14 @@ fn dag_shortest_path(graph: &TokenisationGraph, selected_set: &[bool]) -> f64 {
     for &(from, _) in &graph.free_edges {
         out_deg[from.0 as usize] += 1;
     }
-    for &(from, to, colour) in &graph.priced_edges {
+    for &(from, _to, colour) in &graph.priced_edges {
         let colour_idx = colour.0 as usize;
         if selected_set.get(colour_idx).copied() == Some(true) {
             out_deg[from.0 as usize] += 1;
         }
     }
-    let mut adj: Vec<Vec<(usize, f64)>> = out_deg.into_iter().map(|d| Vec::with_capacity(d)).collect();
+    let mut adj: Vec<Vec<(usize, f64)>> =
+        out_deg.into_iter().map(|d| Vec::with_capacity(d)).collect();
 
     // Free edges: always cost 1
     for &(from, to) in &graph.free_edges {
