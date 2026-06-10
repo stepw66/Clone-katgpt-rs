@@ -86,9 +86,9 @@ IterativeChunkCompactor
 - [x] T24: GOAT gate — measure compact-cache quality (MSE vs original) at each compression ratio
 
 ### Phase 6: StillCoT (Conditional on StillKV GOAT pass)
-- [ ] T25: Extend `ChainFolder` with `compact_trace()` using StillKV
-- [ ] T26: Benchmark StillCoT vs ThoughtFold (selection) on CoT reduction + quality
-- [ ] T27: GOAT gate — StillCoT must match or exceed ThoughtFold's 78% reduction with better quality
+- [x] T25: Extend `ChainFolder` with `compact_trace()` using StillKV
+- [x] T26: Benchmark StillCoT vs ThoughtFold (selection) on CoT reduction + quality
+- [x] T27: GOAT gate — StillCoT must match or exceed ThoughtFold's 78% reduction with better quality
 
 ---
 

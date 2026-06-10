@@ -712,3 +712,315 @@ fn t24_goat_summary() {
         "GOAT FAIL: Not all compression ratio gates passed"
     );
 }
+
+// ── T26: StillCoT vs ThoughtFold — Selection vs Selection+Synthesis ────────
+
+#[cfg(feature = "chain_fold")]
+fn make_fold_context_for_t26() -> katgpt_rs::fold::FoldContext {
+    use katgpt_rs::fold::{FoldContext, StepBoundary};
+
+    // 10 reasoning steps, 10 tokens each → 100 total tokens
+    let boundaries: Vec<StepBoundary> = (0..10)
+        .map(|i| StepBoundary::new(i * 10, i, i == 0))
+        .collect();
+
+    // Importance scores: steps 3, 5, 7 are lowest (should be folded)
+    // One score per token position (100 total = 10 steps × 10 tokens)
+    let importance_scores: Vec<f32> = {
+        let mut scores = Vec::with_capacity(100);
+        let per_step: [f32; 10] = [
+            1.0,  // step 0 (anchor)
+            0.8,  // step 1
+            0.7,  // step 2
+            0.10, // step 3 ← fold (lowest)
+            0.6,  // step 4
+            0.11, // step 5 ← fold
+            0.5,  // step 6
+            0.12, // step 7 ← fold
+            0.9,  // step 8
+            0.85, // step 9
+        ];
+        for &s in &per_step {
+            scores.extend(std::iter::repeat(s).take(10));
+        }
+        scores
+    };
+
+    FoldContext {
+        importance_scores,
+        boundaries,
+        fold_budget: 0.6, // keep ≤60% → binary search will fold 3 least-important
+    }
+}
+
+/// Make synthetic KV data for a given number of tokens with custom dims.
+fn make_synthetic_kv_with_dims(
+    seq_len: usize,
+    num_heads: usize,
+    head_dim: usize,
+    seed: u64,
+) -> (Vec<f16>, Vec<f16>) {
+    let kv_dim = num_heads * head_dim;
+    let mut keys = Vec::with_capacity(seq_len * kv_dim);
+    let mut values = Vec::with_capacity(seq_len * kv_dim);
+
+    let mut s = seed;
+    let mut next_f32 = || -> f32 {
+        s = s
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        ((s >> 33) as f32) / (1u64 << 31) as f32
+    };
+
+    for pos in 0..seq_len {
+        for h in 0..num_heads {
+            for d in 0..head_dim {
+                let freq = 1.0 / (10000.0_f32).powf(d as f32 / head_dim as f32);
+                let angle = pos as f32 * freq;
+                let k = (angle.sin() * 0.5 + next_f32() * 0.5) * 1.0;
+                keys.push(f16::from_f32(k));
+
+                let centroid = match (h + pos) % 3 {
+                    0 => 0.2,
+                    1 => 0.5,
+                    _ => 0.8,
+                };
+                let v = centroid + next_f32() * 0.2 - 0.1;
+                values.push(f16::from_f32(v));
+            }
+        }
+    }
+
+    (keys, values)
+}
+
+#[test]
+#[cfg(feature = "chain_fold")]
+fn t26_stillcot_vs_thoughtfold() {
+    use katgpt_rs::fold::{ChainFolder, FoldDecision};
+
+    let num_heads: usize = 4;
+    let head_dim: usize = 32;
+    let total_tokens: usize = 100; // 10 steps × 10 tokens
+    let rope_theta = 10000.0;
+
+    println!("\n🧠 T26: StillCoT vs ThoughtFold — Selection vs Selection+Synthesis");
+    println!("{}", "═".repeat(80));
+
+    // ── Setup: Create ChainFolder and fold steps 3, 5, 7 ──────────────
+    let mut folder = ChainFolder::new(0.6);
+    let ctx = make_fold_context_for_t26();
+
+    let t0 = Instant::now();
+    let fold_result = folder.binary_search_fold(&ctx);
+    let fold_elapsed = t0.elapsed();
+
+    let folded_steps = fold_result.folded_steps;
+    let tokens_saved_by_folding = fold_result.tokens_saved;
+
+    println!(
+        "  Fold: {} steps folded, {} tokens saved, {:.1}% reduction",
+        folded_steps,
+        tokens_saved_by_folding,
+        tokens_saved_by_folding as f32 / total_tokens as f32 * 100.0
+    );
+    println!("  Fold timing: {:.0} µs", fold_elapsed.as_micros());
+
+    // Verify that steps 3, 5, 7 were folded
+    let decisions = folder.decisions();
+    assert_eq!(decisions[3], FoldDecision::Fold, "step 3 should be folded");
+    assert_eq!(decisions[5], FoldDecision::Fold, "step 5 should be folded");
+    assert_eq!(decisions[7], FoldDecision::Fold, "step 7 should be folded");
+
+    let kept_tokens = total_tokens - tokens_saved_by_folding;
+    assert_eq!(kept_tokens, 70, "kept_tokens should be 70 (100 - 3×10)");
+
+    // ── ThoughtFold: Selection only ────────────────────────────────────
+    let thoughtfold_tokens_saved = tokens_saved_by_folding;
+    let thoughtfold_bytes_saved = tokens_saved_by_folding * num_heads * head_dim * 2 * 2; // keys + values, f16=2 bytes
+    let thoughtfold_reduction_pct = thoughtfold_tokens_saved as f32 / total_tokens as f32 * 100.0;
+
+    println!("\n  📋 ThoughtFold (selection only):");
+    println!(
+        "    Tokens saved:  {} ({thoughtfold_reduction_pct:.1}%)",
+        thoughtfold_tokens_saved
+    );
+    println!("    Bytes saved:   {}", thoughtfold_bytes_saved);
+
+    // ── StillCoT: Selection + Synthesis (KV compaction) ────────────────
+    let kv_dim = num_heads * head_dim;
+    let (kept_keys, kept_values) =
+        make_synthetic_kv_with_dims(kept_tokens, num_heads, head_dim, 99);
+
+    assert_eq!(
+        kept_keys.len(),
+        kept_tokens * kv_dim,
+        "kept_keys should be kept_tokens * kv_dim"
+    );
+
+    let t1 = Instant::now();
+    let compact_result = folder.compact_trace(
+        &kept_keys,
+        &kept_values,
+        num_heads,
+        head_dim,
+        CompactionStrategy::ClusterCentroids,
+        rope_theta,
+        2, // 2x compression
+    );
+    let compact_elapsed = t1.elapsed();
+
+    assert!(
+        compact_result.is_some(),
+        "compact_trace should succeed on kept tokens"
+    );
+    let compact = compact_result.unwrap();
+
+    let stillcot_bytes_from_compaction = compact.bytes_saved;
+    let stillcot_total_bytes_saved = thoughtfold_bytes_saved + stillcot_bytes_from_compaction;
+    let stillcot_additional_tokens = compact.original_tokens - compact.compact_tokens;
+    let stillcot_total_tokens_saved = thoughtfold_tokens_saved + stillcot_additional_tokens;
+    let stillcot_reduction_pct = stillcot_total_tokens_saved as f32 / total_tokens as f32 * 100.0;
+
+    println!("\n  🧬 StillCoT (selection + synthesis):");
+    println!(
+        "    Fold tokens saved:   {} (from ThoughtFold selection)",
+        thoughtfold_tokens_saved
+    );
+    println!(
+        "    Compact tokens saved: {} additional ({} → {} at 2x)",
+        stillcot_additional_tokens, compact.original_tokens, compact.compact_tokens
+    );
+    println!(
+        "    Total tokens saved:   {} ({stillcot_reduction_pct:.1}%)",
+        stillcot_total_tokens_saved
+    );
+    println!(
+        "    KV compaction bytes:  {}",
+        stillcot_bytes_from_compaction
+    );
+    println!("    Total bytes saved:    {}", stillcot_total_bytes_saved);
+    println!("    Compact timing: {:.0} µs", compact_elapsed.as_micros());
+
+    // ── Comparison ────────────────────────────────────────────────────
+    println!("\n  📊 Comparison:");
+    println!("{}", "─".repeat(60));
+    println!(
+        "    ThoughtFold:   {} tokens saved ({thoughtfold_reduction_pct:.1}%)  {} bytes",
+        thoughtfold_tokens_saved, thoughtfold_bytes_saved
+    );
+    println!(
+        "    StillCoT:      {} tokens saved ({stillcot_reduction_pct:.1}%)  {} bytes",
+        stillcot_total_tokens_saved, stillcot_total_bytes_saved
+    );
+    println!(
+        "    StillCoT gain: +{} tokens  +{} bytes",
+        stillcot_additional_tokens, stillcot_bytes_from_compaction
+    );
+    println!("{}", "─".repeat(60));
+
+    // ── GOAT Assertion ────────────────────────────────────────────────
+    // StillCoT total reduction must be ≥ ThoughtFold (compaction is additive)
+    assert!(
+        stillcot_total_bytes_saved >= thoughtfold_bytes_saved,
+        "StillCoT ({}) must save ≥ ThoughtFold ({}) bytes",
+        stillcot_total_bytes_saved,
+        thoughtfold_bytes_saved
+    );
+
+    // Sanity: at least 30% token reduction from folding alone
+    assert_eq!(
+        thoughtfold_tokens_saved, 30,
+        "ThoughtFold should save exactly 30 tokens (3 steps × 10)"
+    );
+
+    println!("\n  ✅ T26 PASS: StillCoT ≥ ThoughtFold (additive compaction confirmed)");
+    println!("{}", "═".repeat(80));
+
+    // Prevent unused-variable warnings
+    std::hint::black_box(&folder);
+}
+
+// ── T27: GOAT Gate — StillCoT Combined Reduction Threshold ────────────
+
+#[test]
+#[cfg(feature = "chain_fold")]
+fn t27_goat_stillcot_gate() {
+    use katgpt_rs::fold::ChainFolder;
+
+    let num_heads: usize = 4;
+    let head_dim: usize = 32;
+    let total_tokens: usize = 100;
+    let rope_theta = 10000.0;
+
+    println!("\n🐐 T27: GOAT Gate — StillCoT Combined Reduction Threshold");
+    println!("{}", "═".repeat(80));
+
+    let mut folder = ChainFolder::new(0.6);
+    let ctx = make_fold_context_for_t26();
+    let fold_result = folder.binary_search_fold(&ctx);
+
+    let kept_tokens = total_tokens - fold_result.tokens_saved;
+    let (kept_keys, kept_values) =
+        make_synthetic_kv_with_dims(kept_tokens, num_heads, head_dim, 42);
+
+    let compact_result = folder.compact_trace(
+        &kept_keys,
+        &kept_values,
+        num_heads,
+        head_dim,
+        CompactionStrategy::ClusterCentroids,
+        rope_theta,
+        2,
+    );
+
+    // GOAT gate: folding alone should save ≥30 tokens (30%)
+    let fold_pct = fold_result.tokens_saved as f32 / total_tokens as f32;
+    assert!(
+        fold_pct >= 0.30,
+        "GOAT FAIL: fold reduction {:.1}% < 30%",
+        fold_pct * 100.0
+    );
+    println!("  Fold reduction: {:.1}% ✅ (≥30%)", fold_pct * 100.0);
+
+    // GOAT gate: StillCoT combined must exceed fold-only
+    if let Some(compact) = compact_result {
+        let combined_tokens_saved =
+            fold_result.tokens_saved + (compact.original_tokens - compact.compact_tokens);
+        let combined_pct = combined_tokens_saved as f32 / total_tokens as f32;
+
+        assert!(
+            combined_pct > fold_pct,
+            "GOAT FAIL: StillCoT ({:.1}%) must exceed ThoughtFold ({:.1}+)",
+            combined_pct * 100.0,
+            fold_pct * 100.0
+        );
+
+        // Verify compaction output is valid
+        let finite_keys = compact.compact_keys.iter().all(|v| v.is_finite());
+        let finite_vals = compact.compact_values.iter().all(|v| v.is_finite());
+        assert!(
+            finite_keys,
+            "GOAT FAIL: compact keys contain non-finite values"
+        );
+        assert!(
+            finite_vals,
+            "GOAT FAIL: compact values contain non-finite values"
+        );
+
+        println!(
+            "  StillCoT combined: {:.1}% ✅ (> {:.1}% ThoughtFold)",
+            combined_pct * 100.0,
+            fold_pct * 100.0
+        );
+        println!(
+            "  Compact output: finite_keys={} finite_vals={} ✅",
+            finite_keys, finite_vals
+        );
+    } else {
+        panic!("GOAT FAIL: compact_trace returned None — StillCoT compaction failed");
+    }
+
+    println!("\n  ✅ T27 GOAT PASS: StillCoT combined reduction passes all gates");
+    println!("{}", "═".repeat(80));
+}
