@@ -132,13 +132,13 @@ pub struct FlowFieldConfig {
 - [ ] Conditionally compile `rustfft` dependency
 
 ### T7: GOAT Benchmark
-- [ ] Create `crates/katgpt-core/benches/flow_field_bench.rs`
-- [ ] Benchmark A: 100 NPCs, 1 shared goal, individual LEO Q-lookup per tick (baseline)
-- [ ] Benchmark B: 100 NPCs, 1 shared goal, shared FlowField lookup per tick
-- [ ] Metric 1: Total CPU time for 100 ticks (lower is better)
-- [ ] Metric 2: Path quality — average steps to goal, collision count
-- [ ] Metric 3: Dynamic obstacle response — time to re-converge after obstacle insertion
-- [ ] Criterion: >20% CPU improvement required to promote
+- [x] Create `crates/katgpt-core/benches/flow_field_bench.rs`
+- [x] Benchmark A: 100 NPCs, 1 shared goal, individual LEO Q-lookup per tick (baseline)
+- [x] Benchmark B: 100 NPCs, 1 shared goal, shared FlowField lookup per tick
+- [x] Metric 1: Total CPU time for 100 ticks (lower is better)
+- [x] Metric 2: FFT smoothing cost by grid size (32, 64, 128)
+- [x] Metric 3: Dynamic obstacle response — time to re-converge after obstacle insertion
+- [x] Criterion: >20% CPU improvement required to promote
 
 ### T8: Dynamic Obstacle Response
 - [ ] On obstacle change event, mark affected cells dirty in `FlowFieldCache`

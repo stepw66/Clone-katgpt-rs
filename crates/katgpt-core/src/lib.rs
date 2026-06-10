@@ -157,3 +157,11 @@ pub use slod::{
     ScaleBoundary, SlodConfig, SlodOperator, SlodPruner, exp_map, frechet_mean,
     heat_kernel_weights, log_map, poincare_distance,
 };
+
+#[cfg(feature = "flow_field_nav")]
+pub mod flow;
+#[cfg(feature = "flow_field_nav")]
+pub use flow::{
+    FlowField, FlowFieldCache, FlowFieldConfig, LeoPotentialGrid, blend_steering, fft_smooth,
+    flow_steering, inflate_obstacles, should_use_flow_field,
+};
