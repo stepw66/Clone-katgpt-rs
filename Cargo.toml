@@ -944,6 +944,10 @@ required-features = ["mux_latent_wire"]
 name = "integration_243_mux_latent_wire"
 required-features = ["mux_latent_wire"]
 
+[[test]]
+name = "bench_245_still_kv_goat"
+required-features = ["still_kv"]
+
 [[example]]
 name = "vocab_channel_pruner_demo"
 required-features = ["vocab_channel_pruner"]

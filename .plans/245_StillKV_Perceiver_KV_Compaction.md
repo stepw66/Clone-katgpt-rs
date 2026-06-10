@@ -81,9 +81,9 @@ IterativeChunkCompactor
 - [x] T19: Unit test — position-free compaction round-trip (un-rotate → compact → re-rotate ≈ original)
 - [x] T20: Unit test — compact_into produces correct budget size
 - [x] T21: Unit test — iterative compaction produces linear growth at rate 1/c
-- [ ] T22: Benchmark — StillKV vs MUX-Latent at 8x, 16x, 32x compression on synthetic KV data
-- [ ] T23: Benchmark — StillKV synthesis vs selection (H2O-style) quality comparison
-- [ ] T24: GOAT gate — measure compact-cache quality (MSE vs original) at each compression ratio
+- [x] T22: Benchmark — StillKV vs MUX-Latent at 8x, 16x, 32x compression on synthetic KV data
+- [x] T23: Benchmark — StillKV synthesis vs selection (H2O-style) quality comparison
+- [x] T24: GOAT gate — measure compact-cache quality (MSE vs original) at each compression ratio
 
 ### Phase 6: StillCoT (Conditional on StillKV GOAT pass)
 - [ ] T25: Extend `ChainFolder` with `compact_trace()` using StillKV
