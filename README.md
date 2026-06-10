@@ -312,6 +312,43 @@ Enables latent-to-latent streaming, freeze/thaw patching, federated context, and
 
 📖 Plan: [`.plans/238_mux_latent_superposition_fusion.md`](.plans/238_mux_latent_superposition_fusion.md).
 
+#### MUX-Latent Wire Patch (Plan 243)
+
+Latent-to-latent patching over the wire — no decompress/recompress round-trip. Patches MUX latent slots as KG octree leaf nodes. 68-byte wire format (4B segment_id + 32B weights + 32B BLAKE3). SIMD batch at ≥100K/sec. Feature gate: `mux_latent_wire`.
+
+```
+Client (Plasma/Hot)           Wire (Fourier Shell)         Server (Warm/Cold)
+─────────────────────         ────────────────────         ──────────────────
+MUX encode 256 tokens → 32 slots
+    │
+    ├─ Dirty check → 3 slots changed
+    │
+    └─ LatentPatchBatch ──────► Fourier shell encodes ──────► SIMD 4-wide BLAKE3 verify
+       {patches: [(sid, δ, blake3)×3]}                       │
+                                                              ├─ Patch CompressedContext
+                                                              ├─ Reinject via DomainLatent
+                                                              │
+                                    ◄── PatchReceipt ─────────┘
+                                        {committed: [sid×3]}
+```
+
+| Metric | Target |
+|--------|--------|
+| Single patch encode | ≤ 50ns |
+| SIMD batch 256 verify | ≤ 10μs |
+| E2E round-trip | ≤ 500μs |
+| Throughput | ≥ 100K patches/sec |
+
+**Security:** BLAKE3 commitment + scalar projections only on wire (no 64-dim HLA). Fourier shell on write path. Chain-layer: full validation (mod 1).
+
+```sh
+cargo run --example mux_latent_wire_patch --features mux_latent_wire
+cargo run --example mux_latent_octree_bridge --features mux_latent_wire
+cargo test --features mux_latent_wire --test bench_243_mux_latent_wire_goat -- --nocapture
+```
+
+📖 Plan: [`.plans/243_mux_latent_wire_patch.md`](.plans/243_mux_latent_wire_patch.md).
+
 ### 🧵 ThoughtFold: Inference-Time Chain Folding (Plan 195)
 
 Prunes redundant reasoning steps during CoT generation using attention-based importance scoring + binary search fold verification. No LLM training — pure inference-time optimization.
@@ -475,6 +512,7 @@ Default: **Hybrid OCT+PQ** (OCTOPUS triplet encoding + PlanarQuant 2D Givens rot
 | **Shard Embedding** (`shard_embedding`) | JL random orthogonal projection [f32;64]→[f32;8] | Always compiled in `katgpt-core` |
 | **DFlare** (Plan 174) | Marginal fusion + KV routing + progressive budget | 🪦 GOAT FAILED on all 3 sub-features |
 | **ManifoldPruner** (Plan 234) | ManifoldE point-to-manifold soft validity | 🪦 GOAT G1 FAIL |
+| **MUX-Latent Wire** (`mux_latent_wire`) | Latent-to-latent patching over wire, 68B format, SIMD batch | Opt-in — awaiting GOAT proof |
 
 📖 **Full detail for ALL opt-in features + complete feature flag reference:** [`.docs/21_opt_in_features.md`](.docs/21_opt_in_features.md) and [`Cargo.toml`](Cargo.toml).
 

@@ -1,6 +1,6 @@
 # Plan 243: MUX-Latent × KG Octree Wire Patch — Latent-to-Latent on the Wire
 
-**Status:** 🏗️ Phase 1-3,5,6 DONE · Phase 4 (Fourier Shell) deferred to riir-chain
+**Status:** 🏗️ Phase 1-3,5,6 DONE · Phase 4 (Fourier Shell) deferred to riir-chain · G3 fix + integration tests + README
 **Date:** 2026-06-10
 **Research:** `.research/212_Gemini_Fourier_LatCal_Fusion_Verdict.md` (Pillar 5: L2L ✅ ALREADY IMPLEMENTED)
 **Depends On:** `mux_latent_context` (Plan 238, default-ON), `sense_composition` (Plan 221), riir-chain `chain_batch_matrix` (Plan 223), `chain_shell` (Plan 223 T8–T12), `game_adaptive_validation` (Plan 244)
@@ -273,7 +273,7 @@ Spectral LOD (Plan 238 Phase 4) already controls this — high-energy windows ge
 ### Phase 5: GOAT Proof ✅ DONE (11/11 tests)
 - [x] Benchmark: single-patch latency (target ≤ 50ns)
 - [x] Benchmark: SIMD batch 256 patches (target ≤ 10μs)
-- [x] Benchmark: end-to-end round-trip client→server→receipt (target ≤ 500μs)
+- [x] Benchmark: end-to-end round-trip client→server→receipt (target ≤ 500μs) — fixed G3 infinite loop (window_size=0 bug)
 - [x] Benchmark: throughput sustained (target ≥ 100K patches/sec)
 - [x] Security test: BLAKE3 tamper detection (corrupt 1 bit → rejection)
 - [ ] Security test: Fourier shell validation (wrong E₁ → TamperDetected) — deferred to Phase 4
@@ -282,8 +282,8 @@ Spectral LOD (Plan 238 Phase 4) already controls this — high-energy windows ge
 ### Phase 6: Examples & Integration ✅ DONE
 - [x] Example: `mux_latent_wire_patch` — patch 3 segments, show before/after KV
 - [x] Example: `mux_latent_octree_bridge` — octree leaf → latent patch → wire → reinject
-- [ ] Integration test: compress → patch → reinject → verify output quality — deferred to Phase 4
-- [ ] Update README with wire protocol diagram — deferred
+- [x] Integration test: compress → patch → reinject → verify output quality (20 tests in `tests/integration_243_mux_latent_wire.rs`)
+- [x] Update README with wire protocol diagram
 
 ---
 

@@ -98,6 +98,7 @@ fn g2_batch_256_patches_latency() {
 fn g3_end_to_end_round_trip() {
     // Small encode: 32 tokens → 4 latent slots at X8
     let config = MuxLatentConfig {
+        window_size: 1024,
         compression_ratio: CompressionRatio::X8,
         preserve_instructions: false,
         ..Default::default()

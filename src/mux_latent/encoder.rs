@@ -44,7 +44,12 @@ impl MuxLatentEncoder {
     /// kept as raw tokens.
     pub fn encode(&self, tokens: &[u32]) -> CompressedContext {
         let span_size = self.config.compression_ratio.span_size();
-        let window_size = self.config.window_size;
+        // window_size=0 means no windowing — encode all tokens in one pass.
+        let window_size = if self.config.window_size == 0 {
+            tokens.len()
+        } else {
+            self.config.window_size
+        };
         let original_count = tokens.len();
 
         let mut segments = Vec::new();
