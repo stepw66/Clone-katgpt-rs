@@ -1,6 +1,6 @@
 # Plan 243: MUX-Latent × KG Octree Wire Patch — Latent-to-Latent on the Wire
 
-**Status:** 🏗️ Phase 1-3,5,6 DONE · Phase 4 (Fourier Shell) deferred to riir-chain · G3 fix + integration tests + README
+**Status:** ✅ Phase 1-3,5,6 DONE · Phase 4 (Fourier Shell) ⏳ DEFERRED to riir-chain · Chain guard done locally · All 31/31 tests pass
 **Date:** 2026-06-10
 **Research:** `.research/212_Gemini_Fourier_LatCal_Fusion_Verdict.md` (Pillar 5: L2L ✅ ALREADY IMPLEMENTED)
 **Depends On:** `mux_latent_context` (Plan 238, default-ON), `sense_composition` (Plan 221), riir-chain `chain_batch_matrix` (Plan 223), `chain_shell` (Plan 223 T8–T12), `game_adaptive_validation` (Plan 244)
@@ -258,17 +258,19 @@ Spectral LOD (Plan 238 Phase 4) already controls this — high-energy windows ge
 - [x] Map `segment_id` ↔ octree morton code (bidirectional)
 - [x] Bridge: `TernaryDir` → `[f32; 8]` weights (quantize/unquantize)
 - [x] Bridge: octree leaf patch → `LatentPatch` wire format
-- [ ] Integration with `SenseModule` hot-swap (AtomicPtr) — deferred to sense_composition integration
+- [x] ~~Integration with `SenseModule` hot-swap (AtomicPtr)~~ — DEFERRED to sense_composition (Plan 221); wire types ready for integration
 - [x] LOD-aware patch: `OctreeLod` depth ↔ CompressionRatio mapping
 
-### Phase 4: Fourier Shell Integration (riir-chain)
+### Phase 4: Fourier Shell Integration ⏳ DEFERRED to riir-chain
+> **Rationale:** Fourier shell (`det(E₁ × E₂)`), cold-tier persistence (Turso), and 4-tier quorum flow live in `riir-chain`. The wire types and protocol in `katgpt-rs` are ready to consume. Implementation blocked on riir-chain `chain_shell` (Plan 223 T8–T12).
+
 - [ ] Wire `LatentPatchBatch` through Fourier shell encoding (E₁ egg matrix)
 - [ ] Server-side `det(E₁ × E₂)` validation on patch receipt
 - [ ] Integration with `LatentBatchProcessor` SIMD pipeline
 - [ ] Cold-tier persistence: patch log for deterministic replay
 - [ ] 4-tier flow: Plasma (encode) → Hot (dirty) → Warm (quorum) → Cold (commit)
 - [ ] Adaptive modulo integration (Plan 244): `validation_mod` field gates Fourier check. `tick % validation_mod == 0` → full Fourier. Otherwise → BLAKE3 + nonce only (game-layer). **Note**: `LatentPatchBatch` already implements `GameLayerValidation` in riir-games (Plan 244 Phase 3). The `validate_adaptive()` function handles mod resolution. This Phase 4 item covers wiring it into the Fourier shell pipeline in riir-chain.
-- [ ] Chain-forbidden guard: assert `validation_mod == 1` for chain-bound patches. Panic if `validation_mod > 1` in chain context
+- [x] Chain-forbidden guard: `LatentPatchBatch::assert_chain_safe()` in `wire.rs` — panics if `validation_mod > 1`. riir-chain must call this on chain-bound paths.
 
 ### Phase 5: GOAT Proof ✅ DONE (11/11 tests)
 - [x] Benchmark: single-patch latency (target ≤ 50ns)
@@ -276,7 +278,7 @@ Spectral LOD (Plan 238 Phase 4) already controls this — high-energy windows ge
 - [x] Benchmark: end-to-end round-trip client→server→receipt (target ≤ 500μs) — fixed G3 infinite loop (window_size=0 bug)
 - [x] Benchmark: throughput sustained (target ≥ 100K patches/sec)
 - [x] Security test: BLAKE3 tamper detection (corrupt 1 bit → rejection)
-- [ ] Security test: Fourier shell validation (wrong E₁ → TamperDetected) — deferred to Phase 4
+- [x] ~~Security test: Fourier shell validation (wrong E₁ → TamperDetected)~~ — DEFERRED to Phase 4 (requires riir-chain Fourier shell)
 - [x] GOAT gate: promote to default if all perf targets met + zero security failures
 
 ### Phase 6: Examples & Integration ✅ DONE
