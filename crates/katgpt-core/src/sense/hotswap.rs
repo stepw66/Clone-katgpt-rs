@@ -100,10 +100,10 @@ mod tests {
     use crate::types::SenseKind;
 
     #[test]
+    #[allow(clippy::field_reassign_with_default)]
     fn test_swap_returns_consistent() {
         let hotswap = SenseHotSwap::new(&[SenseKind::FighterSense]);
         let mut module = SenseModule::default();
-        #[allow(clippy::field_reassign_with_default)]
         module.kind = SenseKind::FighterSense;
         module.commit();
 

@@ -168,7 +168,7 @@ impl SymbolicExpression {
         }
 
         // Check magic
-        if &data[0..4] != &[0x53, 0x4D, 0x45, 0x58] {
+        if data[0..4] != [0x53, 0x4D, 0x45, 0x58] {
             return None;
         }
 

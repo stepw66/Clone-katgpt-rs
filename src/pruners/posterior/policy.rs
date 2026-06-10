@@ -127,19 +127,23 @@ impl PrecisionPolicy {
         // 3. PATCH: repeated failure mode with surprise
         let (max_fm, max_fm_count) = precision.max_failure_mode_count();
         if max_fm_count >= self.config.patch_min_failure_count {
-            let (_, gate) = self.surprise_computer.compute_surprise(precision, surprise_kl);
+            let (_, gate) = self
+                .surprise_computer
+                .compute_surprise(precision, surprise_kl);
             if gate > self.config.patch_surprise_threshold {
-                return LifecycleAction::Patch { failure_mode: max_fm };
+                return LifecycleAction::Patch {
+                    failure_mode: max_fm,
+                };
             }
         }
 
         // 4. SPLIT: precision diverges from peers
-        if precision.observations() >= self.config.split_min_observations {
-            if let Some(peer) = peer_precision {
-                let divergence = precision.precision_divergence(peer);
-                if divergence > self.config.split_divergence_threshold {
-                    return LifecycleAction::Split;
-                }
+        if precision.observations() >= self.config.split_min_observations
+            && let Some(peer) = peer_precision
+        {
+            let divergence = precision.precision_divergence(peer);
+            if divergence > self.config.split_divergence_threshold {
+                return LifecycleAction::Split;
             }
         }
 
@@ -166,6 +170,7 @@ impl PrecisionPolicy {
 }
 
 #[cfg(test)]
+#[allow(clippy::op_ref)]
 mod tests {
     use super::*;
     use crate::pruners::posterior::types::EvidenceOutcome;
@@ -223,7 +228,12 @@ mod tests {
         // 5 successes, 3 failures all FalseAccept → p = 6/10 = 0.6 (not retire)
         let pv = make_precision_with_failure(5, 3, FailureMode::FalseAccept);
         let action = policy.decide(&pv, 5.0, None); // High KL = surprising
-        assert!(matches!(action, LifecycleAction::Patch { failure_mode: FailureMode::FalseAccept }));
+        assert!(matches!(
+            action,
+            LifecycleAction::Patch {
+                failure_mode: FailureMode::FalseAccept
+            }
+        ));
     }
 
     #[test]
@@ -247,8 +257,10 @@ mod tests {
 
     #[test]
     fn split_on_divergence() {
-        let mut config = PrecisionPolicyConfig::default();
-        config.compress_precision_threshold = 1000.0; // Prevent compress from firing first
+        let config = PrecisionPolicyConfig {
+            compress_precision_threshold: 1000.0, // Prevent compress from firing first
+            ..PrecisionPolicyConfig::default()
+        };
         let policy = PrecisionPolicy::new(config);
 
         let mut pv1 = PrecisionVector::new();

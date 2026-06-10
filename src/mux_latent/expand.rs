@@ -28,14 +28,13 @@ pub fn expand_segment(ctx: &CompressedContext, segment_id: u32) -> Option<Expand
             weights,
             original_tokens,
         } = seg
+            && *id == segment_id
         {
-            if *id == segment_id {
-                return Some(ExpandedSegment {
-                    segment_id: *id,
-                    tokens: original_tokens.clone(),
-                    weights: weights.clone(),
-                });
-            }
+            return Some(ExpandedSegment {
+                segment_id: *id,
+                tokens: original_tokens.clone(),
+                weights: weights.clone(),
+            });
         }
     }
     None

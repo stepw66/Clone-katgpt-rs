@@ -78,13 +78,11 @@ impl SpectralLOD {
         // When variance ≈ 0 (repetitive tokens), concentration should be low.
         // When variance is high relative to diff_var, concentration should be high.
         // Use the ratio variance/(variance + diff_var + ε) to normalize to [0, 1].
-        let concentration = if variance < 1e-6 && diff_var < 1e-6 {
+        if variance < 1e-6 && diff_var < 1e-6 {
             0.0 // Perfectly constant tokens → no information
         } else {
             sigmoid(variance / (diff_var + 1.0))
-        };
-
-        concentration
+        }
     }
 
     /// Determine the optimal compression ratio for a window based on spectral energy.

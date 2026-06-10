@@ -131,7 +131,7 @@ impl<P: ConstraintPruner> RewardMemPruner<P> {
         let parent_slice = if depth <= parents.len() {
             &parents[..depth]
         } else {
-            &parents[..]
+            parents
         };
         full_path.extend_from_slice(parent_slice);
         full_path.push(token_idx);
@@ -187,6 +187,7 @@ impl<P: ConstraintPruner> ConstraintPruner for RewardMemPruner<P> {
 // ── Tests ──────────────────────────────────────────────────────────
 
 #[cfg(test)]
+#[allow(clippy::collapsible_if, clippy::collapsible_match, clippy::len_zero)]
 mod tests {
     use super::*;
 
@@ -340,7 +341,7 @@ mod tests {
     fn test_reset_clears_state() {
         let mut pruner = RewardMemPruner::new(AcceptAll);
         pruner.set_prompt_type("test");
-        pruner.reward_path(&vec![1], &CompileOutcome::Success);
+        pruner.reward_path(&[1], &CompileOutcome::Success);
         assert_eq!(pruner.pattern_count(), 1);
 
         pruner.reset();
@@ -464,7 +465,7 @@ mod tests {
         let mut pruner = RewardMemPruner::new(AcceptAll);
         pruner.set_prompt_type("test");
 
-        let path = vec![5];
+        let path = [5];
         // 50 successes → should converge very close to 1.0
         for _ in 0..50 {
             pruner.reward_path(&path, &CompileOutcome::Success);

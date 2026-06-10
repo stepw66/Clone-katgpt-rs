@@ -92,7 +92,7 @@ impl LatentContextBuffer {
 
         // Re-encode with adaptive ratios per window
         let mut segments = Vec::new();
-        let mut segment_id: u32 = 0;
+        let mut segment_id = 0u32;
         let mut pos = 0;
 
         for (window_tokens, ratio) in &adaptive {

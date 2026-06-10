@@ -64,14 +64,11 @@ impl FeatureExtractor for DefaultFeatureExtractor {
             false => inner_scores.iter().sum::<f32>() / inner_scores.len() as f32,
         };
 
-        let max_score = match inner_scores
+        let max_score = inner_scores
             .iter()
             .copied()
             .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
-        {
-            Some(v) => v,
-            None => 0.0,
-        };
+            .unwrap_or(0.0);
 
         vec![
             depth as f32,

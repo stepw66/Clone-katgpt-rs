@@ -268,8 +268,8 @@ fn t6_is_valid_consistent_with_batch() {
         tier_pruners: vec![Box::new(NoPruner)],
     };
 
-    let candidates = vec![0, 1, 2, 3, 4];
-    let mut batch_results = vec![false; 5];
+    let candidates = [0, 1, 2, 3, 4];
+    let mut batch_results = [false; 5];
 
     // Check individual
     let individual: Vec<bool> = candidates
@@ -307,8 +307,8 @@ fn t6_empty_tiers_accepts_all() {
     assert!(pruner.is_valid(0, 42, &[]));
     assert!(pruner.is_valid(100, 0, &[]));
 
-    let candidates = vec![0, 1, 2];
-    let mut results = vec![false; 3];
+    let candidates = [0, 1, 2];
+    let mut results = [false; 3];
     pruner.batch_is_valid(0, &candidates, &[], &mut results);
     assert!(
         results.iter().all(|&r| r),
@@ -478,7 +478,7 @@ fn g2_hsbm_boundary_recovery() {
 
     assert!(!evals.is_empty(), "eigenvalues should not be empty");
     assert!(
-        boundaries.len() >= 1,
+        !boundaries.is_empty(),
         "HSBM hierarchy should detect ≥ 1 boundary, got {}",
         boundaries.len()
     );

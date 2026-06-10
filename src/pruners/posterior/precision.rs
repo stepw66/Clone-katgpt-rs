@@ -34,14 +34,15 @@ pub struct PrecisionVector {
     mean: [f32; PRECISION_DIM],
     /// Total observations recorded.
     total_observations: u32,
-    /// Success count for Beta-Bernoulli summary (compatible with paper).
+    /// Beta distribution alpha (success pseudo-count).
     alpha: f32,
-    /// Failure count for Beta-Bernoulli summary.
+    /// Beta distribution beta (failure pseudo-count).
     beta: f32,
     /// Per-failure-mode observation counts.
     failure_mode_counts: [u32; FailureMode::COUNT],
 }
 
+#[allow(clippy::derivable_impls)]
 impl Default for PrecisionVector {
     fn default() -> Self {
         Self::new()
@@ -100,17 +101,22 @@ impl PrecisionVector {
         let mut total_kl = 0.0f32;
         let obs_weight = 1.0; // Uniform observation weight
 
-        for i in 0..PRECISION_DIM {
-            let prior_precision = self.precision[i];
-            let prior_mean = self.mean[i];
+        for ((prec, mean), obs) in self
+            .precision
+            .iter_mut()
+            .zip(self.mean.iter_mut())
+            .zip(observation.iter())
+        {
+            let prior_precision = *prec;
+            let prior_mean = *mean;
 
             // Update precision
-            self.precision[i] += obs_weight;
-            let posterior_precision = self.precision[i];
+            *prec += obs_weight;
+            let posterior_precision = *prec;
 
             // Update mean (precision-weighted)
-            let innovation = observation[i] - prior_mean;
-            self.mean[i] = prior_mean + innovation * (obs_weight / posterior_precision);
+            let innovation = obs - prior_mean;
+            *mean = prior_mean + innovation * (obs_weight / posterior_precision);
 
             // KL divergence contribution (Gaussian approximation):
             // KL = 0.5 * (precision_ratio - 1 - ln(precision_ratio))
