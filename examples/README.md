@@ -5,7 +5,7 @@ exact flag is listed per example and in the catalog below. Examples that gate
 themselves internally (`#![cfg(feature = ...)]`) print a hint and exit cleanly if the
 flag is missing.
 
-**106 examples** across 24 groups. Full feature definitions live in
+**106 examples** across 25 groups. Full feature definitions live in
 [`Cargo.toml`](../Cargo.toml) and the [README Feature Flags](../README.md#feature-flags) section.
 
 ## Catalog
@@ -118,6 +118,8 @@ flag is missing.
 | `spec_reconciliation_demo` | Misc | `spec_reconciliation` | Verify offline trajectories vs plausibility manifolds (Plan 177) |
 | `percepta_phase0` | Misc | `percepta_compile` | Transformer-VM-in-the-browser feasibility proof (Plan 064) |
 | `thinking_cot_demo` | Misc | `thinking_cot` | Adaptive CoT thinking vs non-thinking quality (Plan 194) |
+| `mux_latent_compress` | MUX-Latent | `mux_latent_context` | Compress 4k tokens at X4/X8/X16, show KV savings, TTFT, adaptive LOD (Plan 238) |
+| `mux_latent_expand` | MUX-Latent | `mux_latent_context` | Compress then selectively expand segments, query-based retrieval (Plan 238) |
 
 ---
 
@@ -413,6 +415,8 @@ cargo run --example datrie_01_bench --features datrie_vocab
 cargo run --example spec_reconciliation_demo --features spec_reconciliation
 cargo run --example percepta_phase0 --features percepta_compile
 cargo run --example thinking_cot_demo --features thinking_cot
+cargo run --example mux_latent_compress --features mux_latent_context
+cargo run --example mux_latent_expand --features mux_latent_context
 ```
 
 ---
@@ -459,6 +463,7 @@ and the [README Feature Flags](../README.md#feature-flags) section.
 | `stiff_anomaly` / `randopt_weight` / `datrie_vocab` | Plan 138 / 121 / Research 137 demos |
 | `spec_reconciliation` | Speculative reconciliation engine (Plan 177) |
 | `percepta_compile` | Full Percepta transformer-VM stack (Plan 064) |
+| `mux_latent_context` | MUX-Latent zero-training context compression (Plan 238, default-ON) |
 | `full` | Everything default-on (see `Cargo.toml`) |
 
 ```bash
