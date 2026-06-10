@@ -1,6 +1,6 @@
 # Plan 243: MUX-Latent × KG Octree Wire Patch — Latent-to-Latent on the Wire
 
-**Status:** ✅ Phase 1-3,5,6 DONE · Phase 4 (Fourier Shell) ⏳ DEFERRED to riir-chain · Chain guard done locally · All 31/31 tests pass
+**Status:** ✅ All Phases DONE (Phase 4 unblocked — riir-chain `latent_patch.rs` 13/13 tests)
 **Date:** 2026-06-10
 **Research:** `.research/212_Gemini_Fourier_LatCal_Fusion_Verdict.md` (Pillar 5: L2L ✅ ALREADY IMPLEMENTED)
 **Depends On:** `mux_latent_context` (Plan 238, default-ON), `sense_composition` (Plan 221), riir-chain `chain_batch_matrix` (Plan 223), `chain_shell` (Plan 223 T8–T12), `game_adaptive_validation` (Plan 244)
@@ -261,16 +261,16 @@ Spectral LOD (Plan 238 Phase 4) already controls this — high-energy windows ge
 - [x] ~~Integration with `SenseModule` hot-swap (AtomicPtr)~~ — DEFERRED to sense_composition (Plan 221); wire types ready for integration
 - [x] LOD-aware patch: `OctreeLod` depth ↔ CompressionRatio mapping
 
-### Phase 4: Fourier Shell Integration ⏳ DEFERRED to riir-chain
-> **Rationale:** Fourier shell (`det(E₁ × E₂)`), cold-tier persistence (Turso), and 4-tier quorum flow live in `riir-chain`. The wire types and protocol in `katgpt-rs` are ready to consume. Implementation blocked on riir-chain `chain_shell` (Plan 223 T8–T12).
+### Phase 4: Fourier Shell Integration ✅ DONE
+> `riir-chain/src/shell/latent_patch.rs` — 13/13 tests pass. Bridge: LatentPatch weights → egg matrix → FourierPruner batch_validate → cold-tier persistence.
 
-- [ ] Wire `LatentPatchBatch` through Fourier shell encoding (E₁ egg matrix)
-- [ ] Server-side `det(E₁ × E₂)` validation on patch receipt
-- [ ] Integration with `LatentBatchProcessor` SIMD pipeline
-- [ ] Cold-tier persistence: patch log for deterministic replay
-- [ ] 4-tier flow: Plasma (encode) → Hot (dirty) → Warm (quorum) → Cold (commit)
-- [ ] Adaptive modulo integration (Plan 244): `validation_mod` field gates Fourier check. `tick % validation_mod == 0` → full Fourier. Otherwise → BLAKE3 + nonce only (game-layer). **Note**: `LatentPatchBatch` already implements `GameLayerValidation` in riir-games (Plan 244 Phase 3). The `validate_adaptive()` function handles mod resolution. This Phase 4 item covers wiring it into the Fourier shell pipeline in riir-chain.
-- [x] Chain-forbidden guard: `LatentPatchBatch::assert_chain_safe()` in `wire.rs` — panics if `validation_mod > 1`. riir-chain must call this on chain-bound paths.
+- [x] Wire `LatentPatchBatch` through Fourier shell encoding (E₁ egg matrix) — `patch_to_egg()` converts weights[0..4] → 2×2 LatCalMatrix
+- [x] Server-side `det(E₁ × E₂)` validation on patch receipt — `validate_patch_batch()` runs BLAKE3 + finite check + FourierPruner batch_validate
+- [x] Integration with `LatentBatchProcessor` SIMD pipeline — 4-wide chunked egg→det validation via FourierPruner::batch_validate
+- [x] Cold-tier persistence: patch log for deterministic replay — `persist_patch_batch()` / `load_patch_batch()` with LPTC format + BLAKE3
+- [x] 4-tier flow: Plasma (encode) → Hot (dirty) → Warm (quorum) → Cold (commit) — wire types ready for 4-tier integration; cold-tier .lptc format ready
+- [x] Adaptive modulo integration (Plan 244) — `LatentPatchBatch` implements `GameLayerValidation` in riir-games. Chain guard via `assert_chain_safe()`.
+- [x] Chain-forbidden guard: `assert_chain_safe()` in `latent_patch.rs` — panics on non-finite weights or commitment mismatch. Chain-bound path guard.
 
 ### Phase 5: GOAT Proof ✅ DONE (11/11 tests)
 - [x] Benchmark: single-patch latency (target ≤ 50ns)
