@@ -3,9 +3,10 @@
 **Status:** 📋 PLAN
 **Date:** 2026-06-10
 **Research:** `.research/212_Gemini_Fourier_LatCal_Fusion_Verdict.md` (Pillar 5: L2L ✅ ALREADY IMPLEMENTED)
-**Depends On:** `mux_latent_context` (Plan 238, default-ON), `sense_composition` (Plan 221), riir-chain `chain_batch_matrix` (Plan 223), `chain_shell` (Plan 223 T8–T12)
+**Depends On:** `mux_latent_context` (Plan 238, default-ON), `sense_composition` (Plan 221), riir-chain `chain_batch_matrix` (Plan 223), `chain_shell` (Plan 223 T8–T12), `game_adaptive_validation` (Plan 244)
 **Feature Gate:** `mux_latent_wire` (opt-in, depends on `mux_latent_context` + `domain_latent`)
 **GOAT Criteria:** Latent patch throughput ≥ 100K patches/sec SIMD, ≤ 50ns per patch decode, zero raw-token round-trip
+**Constraint:** Chain-layer patches MUST use full validation (mod 1). Adaptive modulo (Plan 244) is game-layer only. `LatentPatchBatch` implements `GameLayerValidation` — chain-bound patches bypass adaptive path entirely.
 
 ---
 
@@ -103,6 +104,11 @@ pub struct LatentPatch {
 }
 
 /// Batch of patches — SIMD-friendly.
+///
+/// Implements `GameLayerValidation` (Plan 244) for adaptive modulo.
+/// Chain-bound patches MUST use full validation (mod 1) — this type
+/// should NOT be used in riir-chain code paths. Use ChainServer::process_tx()
+/// for chain-layer validation instead.
 #[derive(Debug, Clone)]
 pub struct LatentPatchBatch {
     pub patches: Vec<LatentPatch>,
@@ -110,6 +116,12 @@ pub struct LatentPatchBatch {
     pub total_segments: u32,
     /// Compression ratio used.
     pub compression_ratio: CompressionRatio,
+    /// Tick number for adaptive modulo (Plan 244).
+    pub tick: u64,
+    /// Effective modulo for this batch (1 = full validation, 2+ = adaptive).
+    /// Set by `AdaptiveModConfig::resolve()` on game layer.
+    /// Chain layer: always 1 (enforced by `GameLayerValidation` trait bound).
+    pub validation_mod: usize,
 }
 
 /// Server-side patch receipt.
@@ -249,6 +261,8 @@ Spectral LOD (Plan 238 Phase 4) already controls this — high-energy windows ge
 - [ ] Integration with `LatentBatchProcessor` SIMD pipeline
 - [ ] Cold-tier persistence: patch log for deterministic replay
 - [ ] 4-tier flow: Plasma (encode) → Hot (dirty) → Warm (quorum) → Cold (commit)
+- [ ] Adaptive modulo integration (Plan 244): `validation_mod` field gates Fourier check. `tick % validation_mod == 0` → full Fourier. Otherwise → BLAKE3 + nonce only (game-layer)
+- [ ] Chain-forbidden guard: assert `validation_mod == 1` for chain-bound patches. Panic if `validation_mod > 1` in chain context
 
 ### Phase 5: GOAT Proof
 - [ ] Benchmark: single-patch latency (target ≤ 50ns)
