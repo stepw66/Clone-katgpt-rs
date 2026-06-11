@@ -12,6 +12,7 @@ pub mod hotswap;
 #[cfg(feature = "sense_lod")]
 pub mod lod;
 pub mod octree;
+pub mod reconstruction;
 #[cfg(feature = "schema_centroid")]
 pub mod schema_centroid;
 pub mod serialize;
@@ -29,6 +30,10 @@ pub use brain::{NpcBrain, SenseOverride};
 pub use gm::{NpcBrainSnapshot, SenseError};
 pub use hotswap::SenseHotSwap;
 pub use octree::{KgEmbedding, SenseOctreeBuilder};
+pub use reconstruction::{
+    OctreeNodeId, ReconstructionConfig, ReconstructionResult, ReconstructionState, TraversalAction,
+    TripleEvidence, compare_reconstruction,
+};
 #[cfg(all(feature = "schema_centroid", feature = "bake_precision"))]
 pub use schema_centroid::schema_init_with_precision;
 #[cfg(feature = "schema_centroid")]
