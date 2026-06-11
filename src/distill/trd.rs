@@ -985,28 +985,35 @@ mod tests {
     fn test_negative_reward_for_budget_exceeded() {
         let pruner = MockPruner::new(vec![]);
         let config = TrdConfig {
-            latency_budget_us: 1,
+            latency_budget_us: 1, // 1μs budget — exceeded by any real work
             ..TrdConfig::default()
         };
         let mut trd = TrajectoryRefinedDraft::new(config, &pruner);
 
-        let raw = vec![0usize, 1, 2];
+        // Use enough tokens that re-draft loop takes measurable time.
+        // Small marginals (3 entries) can complete in <1μs on fast machines,
+        // causing flaky failures. 100 entries ensures the loop exceeds 1μs.
+        let n = 100;
+        let raw: Vec<usize> = (0..n).collect();
         let failure = FailurePoint {
             token_idx: 1,
             entropy: 1.0,
             reason: RejectionReason::ArgmaxMismatch,
         };
 
-        let m0: Vec<f32> = vec![0.5, 0.3, 0.2];
-        let m1: Vec<f32> = vec![0.4, 0.4, 0.2];
-        let m2: Vec<f32> = vec![0.3, 0.3, 0.4];
-        let marginals: Vec<&[f32]> = vec![&m0, &m1, &m2];
+        let marginals: Vec<Vec<f32>> = (0..n)
+            .map(|i| {
+                let mut m = vec![0.001f32; n];
+                m[i % n] = 0.7;
+                m[(i + 1) % n] = 0.2;
+                m
+            })
+            .collect();
+        let marginals_ref: Vec<&[f32]> = marginals.iter().map(|m| m.as_slice()).collect();
 
         let mut rng = Rng::new(99);
 
-        std::thread::sleep(std::time::Duration::from_micros(10));
-
-        trd.refine_branch(&raw, &failure, &marginals, &mut rng);
+        trd.refine_branch(&raw, &failure, &marginals_ref, &mut rng);
 
         // Check bandit got negative reward
         let stats = trd.bandit_stats();
