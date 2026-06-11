@@ -39,11 +39,11 @@ The key insight: topology determines WHERE information flows (fixed), learning d
 
 ### Phase 3: Hodge Decomposition
 
-- [ ] T14: Implement `hodge_decompose()` → (exact, harmonic, coexact) projection
-- [ ] T15: Implement `betti_numbers()` → count zero eigenvalues of Δₖ
-- [ ] T16: Implement `harmonic_projector()` → P_harm = projection onto ker(Δₖ)
+- [x] T14: Implement `hodge_decompose()` → (exact, harmonic, coexact) projection
+- [x] T15: Implement `betti_numbers()` → count zero eigenvalues of Δₖ
+- [x] T16: Implement `harmonic_projector()` → P_harm = projection onto ker(Δₖ)
 - [ ] T17: Extend `spectral_hierarchy.rs` with Hodge spectrum computation
-- [ ] T18: Write tests: decomposition reconstructs original, components orthogonal
+- [x] T18: Write tests: decomposition reconstructs original, components orthogonal
 - [ ] T19: Write benchmark: Hodge decomposition on game-sized maps (256×256)
 
 ### Phase 4: Game Integration (DecFlowField)
