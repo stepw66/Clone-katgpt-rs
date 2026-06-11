@@ -48,13 +48,13 @@ The key insight: topology determines WHERE information flows (fixed), learning d
 
 ### Phase 4: Game Integration (DecFlowField)
 
-- [ ] T20: Implement `DecFlowField` — Hodge-decomposed navigation field
-- [ ] T21: Implement exact channel navigation (gradient of distance potential)
-- [ ] T22: Implement coexact channel navigation (patrol/circulation behavior)
-- [ ] T23: Implement harmonic channel navigation (topologically guaranteed routes)
-- [ ] T24: Bridge `DecFlowField` → existing `FlowField` API for backward compat
-- [ ] T25: Write arena proof: DEC flow vs naive gradient on Bomber map
-- [ ] T26: Write benchmark: DEC navigation vs LeoPotentialGrid::gradient()
+- [x] T20: Implement `DecFlowField` — Hodge-decomposed navigation field
+- [x] T21: Implement exact channel navigation (gradient of distance potential)
+- [x] T22: Implement coexact channel navigation (patrol/circulation behavior)
+- [x] T23: Implement harmonic channel navigation (topologically guaranteed routes)
+- [x] T24: Bridge `DecFlowField` → existing `FlowField` API for backward compat
+- [x] T25: Write arena proof: DEC flow vs naive gradient on Bomber map
+- [x] T26: Write benchmark: DEC navigation vs LeoPotentialGrid::gradient()
 
 ### Phase 5: DEC Pruner Features & Dirichlet Extension
 

@@ -33,10 +33,12 @@
 //! let curl = exterior_derivative(&cx, &gradient);
 //! ```
 
+pub mod flow;
 pub mod hodge;
 pub mod operators;
 pub mod types;
 
+pub use flow::{DecFlowField, coexact_flow, exact_flow, harmonic_flow};
 pub use hodge::{HodgeComponents, betti_numbers, harmonic_projector, hodge_decompose};
 pub use operators::{codifferential, exterior_derivative, graph_laplacian, hodge_laplacian};
 pub use types::{CellComplex, CochainField, MAX_RANK};
