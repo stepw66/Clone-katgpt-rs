@@ -42,7 +42,7 @@ pub fn load_module(mut r: impl Read) -> io::Result<SenseModule> {
     let mut kind_buf = [0u8; 1];
     r.read_exact(&mut kind_buf)?;
 
-    let mut module_bytes = vec![0u8; std::mem::size_of::<SenseModule>()];
+    let mut module_bytes = [0u8; std::mem::size_of::<SenseModule>()];
     r.read_exact(&mut module_bytes)?;
 
     let module: SenseModule =

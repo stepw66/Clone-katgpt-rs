@@ -76,15 +76,10 @@ impl SenseOctreeBuilder {
     }
 
     fn insert_embedding(&self, bits: &mut [u64; 4], embedding: &[f32; 8], _sign: bool) {
-        // Simple spatial partition: use first 2 dims for quadtree-like indexing
-        // Mark nodes as occupied based on embedding magnitude
+        // dim 0..7 → word=0, bit=dim (8 dims fit in one u64)
         for (dim, &val) in embedding.iter().enumerate() {
             if val.abs() > 0.1 {
-                let word = dim / 64;
-                let bit = dim % 64;
-                if word < bits.len() {
-                    bits[word] |= 1u64 << bit;
-                }
+                bits[0] |= 1u64 << dim;
             }
         }
     }

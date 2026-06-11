@@ -97,15 +97,19 @@ pub struct SenseLodMask {
 }
 
 impl SenseLodMask {
+    /// Pre-computed masks — one per LOD level, built once.
+    const MASKS: [Self; 3] = [
+        // Full: all 6 active
+        Self { mask: [true, true, true, true, true, true] },
+        // Compressed: Common(0), Fighter(1), Spatial(3)
+        Self { mask: [true, true, false, true, false, false] },
+        // Minimal: Spatial(3) only
+        Self { mask: [false, false, false, true, false, false] },
+    ];
+
+    #[inline]
     pub fn from_level(level: SenseLodLevel) -> Self {
-        let mut mask = [false; 6];
-        for &kind in level.module_mask() {
-            let idx = kind as usize;
-            if idx < 6 {
-                mask[idx] = true;
-            }
-        }
-        Self { mask }
+        Self::MASKS[level as usize]
     }
 
     pub fn is_active(&self, kind: SenseKind) -> bool {

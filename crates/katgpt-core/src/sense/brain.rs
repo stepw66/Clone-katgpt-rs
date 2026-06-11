@@ -214,12 +214,17 @@ impl NpcBrain {
         }
     }
 
-    /// Update HLA state with fixed-size delta — no bounds check.
+    /// Update HLA state with fixed-size delta — fully unrolled for SIMD add.
     #[inline]
     pub fn update_hla_fixed(&mut self, delta: &[f32; 8]) {
-        for i in 0..8 {
-            self.hla_state[i] += delta[i];
-        }
+        self.hla_state[0] += delta[0];
+        self.hla_state[1] += delta[1];
+        self.hla_state[2] += delta[2];
+        self.hla_state[3] += delta[3];
+        self.hla_state[4] += delta[4];
+        self.hla_state[5] += delta[5];
+        self.hla_state[6] += delta[6];
+        self.hla_state[7] += delta[7];
     }
 
     /// GM pins a sense activation. Rebuilds O(1) lookup table.
