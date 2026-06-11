@@ -25,6 +25,7 @@ pub struct CentroidStats {
 /// Compute centroid statistics from a slice of KgEmbedding values belonging to the same class.
 ///
 /// Returns `None` if `embeddings` is empty (degenerate class).
+/// Uses Welford's online algorithm for single-pass mean + variance.
 /// O(d·|E_c|) — pure arithmetic, zero allocation beyond the return value.
 #[inline]
 pub fn compute_centroid(embeddings: &[KgEmbedding]) -> Option<CentroidStats> {
@@ -32,38 +33,29 @@ pub fn compute_centroid(embeddings: &[KgEmbedding]) -> Option<CentroidStats> {
         return None;
     }
 
-    let n = embeddings.len();
-    let inv_n = 1.0 / n as f32;
-
-    // Pass 1: sum (SIMD-friendly, no division in inner loop)
     let mut mean = [0.0f32; 8];
-    for emb in embeddings {
-        for d in 0..8 {
-            mean[d] += emb.embedding[d];
-        }
-    }
-    for d in 0..8 {
-        mean[d] *= inv_n;
-    }
+    let mut m2 = [0.0f32; 8];
 
-    // Pass 2: variance
-    let mut var = [0.0f32; 8];
-    for emb in embeddings {
+    for (k, emb) in embeddings.iter().enumerate() {
+        let inv_k_plus_1 = 1.0 / (k as f32 + 1.0);
         for d in 0..8 {
-            let diff = emb.embedding[d] - mean[d];
-            var[d] += diff * diff;
+            let delta = emb.embedding[d] - mean[d];
+            mean[d] += delta * inv_k_plus_1;
+            let delta2 = emb.embedding[d] - mean[d];
+            m2[d] += delta * delta2;
         }
     }
 
+    let n = embeddings.len() as f32;
     let mut std_dev = [0.0f32; 8];
     for d in 0..8 {
-        std_dev[d] = (var[d] * inv_n).sqrt();
+        std_dev[d] = (m2[d] / n).sqrt();
     }
 
     Some(CentroidStats {
         mean,
         std_dev,
-        count: n,
+        count: embeddings.len(),
     })
 }
 
@@ -195,6 +187,8 @@ pub fn schema_init_entity(
 ///
 /// This upgrades BAKE's "uninformative prior" to an "informed prior" —
 /// the entity starts closer to optimal, so BAKE converges faster.
+///
+/// Uses a single papaya pin to collect all class stats, avoiding double lookups.
 #[cfg(feature = "bake_precision")]
 pub fn schema_init_with_precision(
     classes: &[u64],
@@ -204,27 +198,44 @@ pub fn schema_init_with_precision(
 ) -> ([f32; 8], [f32; 8]) {
     use crate::sense::bake::informed_prior_precision;
 
-    // Get embedding from schema centroid
-    let embedding = schema_init_entity(classes, cache, gamma, rng);
-
-    // Compute informed prior precision from class density
-    // Use the average count across found classes
-    let mut total_count = 0usize;
+    // Single pin — collect all class stats in one pass
+    let guard = cache.centroids.pin();
+    let mut found_stats: [Option<CentroidStats>; 8] = [None; 8];
     let mut found_count = 0usize;
-    for &class_hash in classes {
-        if let Some(stats) = cache.get(class_hash) {
-            total_count += stats.count;
+    for &class_hash in classes.iter().take(8) {
+        if let Some(stats) = guard.get(&class_hash).cloned() {
+            found_stats[found_count] = Some(stats);
             found_count += 1;
         }
     }
+    drop(guard);
 
-    let precision = if found_count > 0 {
-        let avg_count = total_count / found_count;
-        informed_prior_precision(avg_count)
-    } else {
-        // Fallback: uninformative prior
-        [crate::sense::bake::UNINFORMATIVE_PRECISION; 8]
-    };
+    // Fallback: random init + uninformative prior
+    if found_count == 0 {
+        let embedding = random_init(rng);
+        let precision = [crate::sense::bake::UNINFORMATIVE_PRECISION; 8];
+        return (embedding, precision);
+    }
+
+    let n_found = found_count as f32;
+    let mut embedding = [0.0f32; 8];
+    let mut total_count = 0usize;
+
+    for i in 0..found_count {
+        let stats = found_stats[i].expect("found_stats[i] invariant: index < found_count");
+        total_count += stats.count;
+        for d in 0..8 {
+            let noise = rng.f32() * 2.0 - 1.0;
+            embedding[d] += stats.mean[d] + gamma * stats.std_dev[d] * noise;
+        }
+    }
+
+    for d in 0..8 {
+        embedding[d] /= n_found;
+    }
+
+    let avg_count = total_count / found_count;
+    let precision = informed_prior_precision(avg_count);
 
     (embedding, precision)
 }
