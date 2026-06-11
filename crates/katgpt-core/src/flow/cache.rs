@@ -128,7 +128,7 @@ impl FlowFieldCache {
             None => true,
         };
         if !needs_recompute {
-            return self.fields.get(&goal_id).map(|c| &c.field);
+            return Some(&self.fields.get(&goal_id)?.field);
         }
 
         // Validate goal index.

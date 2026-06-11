@@ -293,17 +293,11 @@ impl IrrepPruner {
         let k = self.valid_count.min(n);
         if k < n {
             // Partial sort: partition into top-k and rest
-            self.sorted_indices.select_nth_unstable_by(k, |&a, &b| {
-                self.logits[b]
-                    .partial_cmp(&self.logits[a])
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            });
+            self.sorted_indices
+                .select_nth_unstable_by(k, |&a, &b| self.logits[b].total_cmp(&self.logits[a]));
             // Sort just the top-k portion for determinism
-            self.sorted_indices[..k].sort_unstable_by(|&a, &b| {
-                self.logits[b]
-                    .partial_cmp(&self.logits[a])
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            });
+            self.sorted_indices[..k]
+                .sort_unstable_by(|&a, &b| self.logits[b].total_cmp(&self.logits[a]));
         }
 
         // Build bitset from sorted top-k.
@@ -355,9 +349,8 @@ impl ConstraintPruner for IrrepPruner {
     ) {
         // If no logits set, allow everything
         if self.logits.is_empty() {
-            let len = candidates.len();
-            let cap = results.len();
-            results[..len.min(cap)].fill(true);
+            let len = candidates.len().min(results.len());
+            results[..len].fill(true);
             return;
         }
 
@@ -365,19 +358,19 @@ impl ConstraintPruner for IrrepPruner {
             // Converged: all in-range valid
             true => {
                 let len = candidates.len().min(results.len());
-                for (i, r) in results.iter_mut().enumerate().take(len) {
-                    *r = candidates[i] < self.logits.len();
+                for i in 0..len {
+                    results[i] = candidates[i] < self.logits.len();
                 }
             }
             // Uncertain: check top-k membership via O(1) bitset
             false => {
                 let len = candidates.len().min(results.len());
                 let n_words = self.top_k_bits.len();
-                for (i, r) in results.iter_mut().enumerate().take(len) {
+                for i in 0..len {
                     let idx = candidates[i];
                     let word = idx >> 6;
                     let bit = idx & 63;
-                    *r = word < n_words
+                    results[i] = word < n_words
                         && unsafe { *self.top_k_bits.get_unchecked(word) & (1u64 << bit) != 0 };
                 }
             }

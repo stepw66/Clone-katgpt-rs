@@ -88,7 +88,7 @@ impl SenseLodRouter {
 /// Fast boolean mask for sense module activation, indexed by `SenseKind` discriminant.
 #[derive(Clone, Copy, Debug)]
 pub struct SenseLodMask {
-    mask: [bool; 6],
+    mask: [bool; 8],
     active_count: u8,
 }
 
@@ -97,17 +97,17 @@ impl SenseLodMask {
     const MASKS: [Self; 3] = [
         // Full: all 6 active
         Self {
-            mask: [true, true, true, true, true, true],
+            mask: [true, true, true, true, true, true, false, false],
             active_count: 6,
         },
         // Compressed: Common(0), Fighter(1), Spatial(3)
         Self {
-            mask: [true, true, false, true, false, false],
+            mask: [true, true, false, true, false, false, false, false],
             active_count: 3,
         },
         // Minimal: Spatial(3) only
         Self {
-            mask: [false, false, false, true, false, false],
+            mask: [false, false, false, true, false, false, false, false],
             active_count: 1,
         },
     ];
@@ -117,13 +117,11 @@ impl SenseLodMask {
         Self::MASKS[level as usize]
     }
 
+    #[inline]
     pub fn is_active(&self, kind: SenseKind) -> bool {
         let idx = kind as usize;
-        if idx < self.mask.len() {
-            self.mask[idx]
-        } else {
-            false
-        }
+        // SenseKind is #[repr(u8)] with discriminants 0..7, mask covers all 8.
+        unsafe { *self.mask.get_unchecked(idx) }
     }
 
     #[inline]

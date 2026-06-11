@@ -241,25 +241,18 @@ impl NpcBrain {
     }
 
     /// Update HLA state with delta (dynamic slice, bounds-checked).
-    /// Direct indexing avoids zip().take() iterator overhead; LLVM unrolls better.
+    /// Direct indexing avoids iterator overhead; LLVM unrolls for fixed sizes.
     pub fn update_hla(&mut self, delta: &[f32]) {
         let len = delta.len().min(8);
-        for (i, &d) in delta.iter().enumerate().take(len) {
-            self.hla_state[i] += d;
+        for (i, val) in delta.iter().copied().enumerate().take(len) {
+            self.hla_state[i] += val;
         }
     }
 
-    /// Update HLA state with fixed-size delta — fully unrolled for SIMD add.
+    /// Update HLA state with fixed-size delta — delegates to SIMD add.
     #[inline]
     pub fn update_hla_fixed(&mut self, delta: &[f32; 8]) {
-        self.hla_state[0] += delta[0];
-        self.hla_state[1] += delta[1];
-        self.hla_state[2] += delta[2];
-        self.hla_state[3] += delta[3];
-        self.hla_state[4] += delta[4];
-        self.hla_state[5] += delta[5];
-        self.hla_state[6] += delta[6];
-        self.hla_state[7] += delta[7];
+        crate::simd::simd_add_inplace(&mut self.hla_state, delta);
     }
 
     /// GM pins a sense activation. Updates O(1) lookup directly — no full rebuild.

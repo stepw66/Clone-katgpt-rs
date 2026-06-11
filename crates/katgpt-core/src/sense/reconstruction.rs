@@ -954,8 +954,10 @@ mod tests {
 
     #[test]
     fn triple_evidence_entropy_uniform() {
-        let mut ev = TripleEvidence::default();
-        ev.kind_activations = [0.5, 0.5, 0.5, 0.5, 0.5, 0.5];
+        let ev = TripleEvidence {
+            kind_activations: [0.5, 0.5, 0.5, 0.5, 0.5, 0.5],
+            ..Default::default()
+        };
         let entropy = ev.activation_entropy();
         assert!(
             entropy > 0.5,
@@ -1270,14 +1272,20 @@ mod tests {
         use crate::sense::brain::NpcBrain;
         use crate::types::{SenseKind, SenseModule, TernaryDir};
 
-        let mut m1 = SenseModule::default();
-        m1.kind = SenseKind::FighterSense;
-        m1.confidence = 0.8;
-        m1.n_directions = 8;
-        m1.directions[0] = TernaryDir {
-            pos_bits: 0xFF,
-            neg_bits: 0,
-            row_scale: 1.0,
+        let mut m1 = SenseModule {
+            kind: SenseKind::FighterSense,
+            confidence: 0.8,
+            n_directions: 8,
+            directions: {
+                let mut dirs = [TernaryDir::zero(); 8];
+                dirs[0] = TernaryDir {
+                    pos_bits: 0xFF,
+                    neg_bits: 0,
+                    row_scale: 1.0,
+                };
+                dirs
+            },
+            ..Default::default()
         };
         m1.commit();
 
