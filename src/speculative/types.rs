@@ -875,6 +875,12 @@ pub enum BudgetAdaptation {
     Compression,
     /// Scale by first-marginal entropy (placeholder for future).
     Entropy,
+    /// Scale by ECHO prediction consistency entropy (Plan 247 T5).
+    /// Low inter-branch entropy → confident → contract budget.
+    /// High inter-branch entropy → uncertain → expand budget.
+    /// Signal is the consistency gate entropy, scaled by its own threshold.
+    #[cfg(feature = "echo_env_predictor")]
+    EchoConsistency,
 }
 
 // ── Score Reduction Mode (Research 45, Plan 080) ──────────────

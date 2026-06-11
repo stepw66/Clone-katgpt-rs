@@ -13,6 +13,8 @@ pub mod domino_lora;
 pub mod drafter_lora;
 #[cfg(feature = "echo_env_predictor")]
 pub mod echo_env;
+#[cfg(feature = "echo_env_predictor")]
+pub mod echo_env_integration;
 pub mod prefill;
 pub mod residency_audit;
 pub mod sampling;

@@ -37,38 +37,38 @@ graph LR
 ## Tasks
 
 ### T1: Types — `src/speculative/echo_env.rs`
-- [ ] Define `PredictedOutcome` struct: `{ state_features: Vec<f32>, confidence: f32, entropy: f32 }`
-- [ ] Define `EnvPredictorConfig` with λ thresholds, bandit arms, consistency gate params
-- [ ] Define `PredictionRecord` for prediction-vs-reality tracking across branches
+- [x] Define `PredictedOutcome` struct: `{ state_features: Vec<f32>, confidence: f32, entropy: f32 }`
+- [x] Define `EnvPredictorConfig` with λ thresholds, bandit arms, consistency gate params
+- [x] Define `PredictionRecord` for prediction-vs-reality tracking across branches
 
 ### T2: `EnvPredictorPruner` — ScreeningPruner Implementation
-- [ ] Implement `ScreeningPruner<GameState>` trait for `EnvPredictorPruner`
-- [ ] `relevance(token, ctx) → f32`: score candidate action by predicted outcome quality
-- [ ] Uses game forward model (deterministic) to predict next state from (state, action)
-- [ ] Score = `sigmoid(dot(predicted_features, historical_avg_features))` — how "expected" is the outcome
-- [ ] Bandit-driven: tracks which environments benefit from prediction scoring vs not
-- [ ] Feature-gated behind `echo_env_predictor`
+- [x] Implement `ScreeningPruner<GameState>` trait for `EnvPredictorPruner`
+- [x] `relevance(token, ctx) → f32`: score candidate action by predicted outcome quality
+- [x] Uses game forward model (deterministic) to predict next state from (state, action)
+- [x] Score = `sigmoid(dot(predicted_features, historical_avg_features))` — how "expected" is the outcome
+- [x] Bandit-driven: tracks which environments benefit from prediction scoring vs not
+- [x] Feature-gated behind `echo_env_predictor`
 
 ### T3: `PredictionVerifier` — Post-Verification Scoring
-- [ ] Implement prediction-vs-reality comparison after LeviathanVerifier
-- [ ] Compare predicted outcome features against actual outcome features
-- [ ] Score = `1.0 - cosine_distance(predicted, actual)` clamped to [0, 1]
-- [ ] Feed score into BanditPruner as additional reward signal
-- [ ] Log `PredictionRecord` for AbsorbCompress promotion
-- [ ] Pure post-hoc computation — no forward pass overhead
+- [x] Implement prediction-vs-reality comparison after LeviathanVerifier
+- [x] Compare predicted outcome features against actual outcome features
+- [x] Score = `1.0 - cosine_distance(predicted, actual)` clamped to [0, 1]
+- [x] Feed score into BanditPruner as additional reward signal
+- [x] Log `PredictionRecord` for AbsorbCompress promotion
+- [x] Pure post-hoc computation — no forward pass overhead
 
 ### T4: `PredictionConsistencyGate` — Entropy-Based Confidence
-- [ ] Compute entropy across DDTree branch predictions
-- [ ] If inter-branch entropy is LOW → high confidence → can reduce budget
-- [ ] If inter-branch entropy is HIGH → low confidence → expand budget for exploration
-- [ ] Wire into `budget_adaptation` (existing Plan 167 feature)
-- [ ] Threshold-gated: only activate when `entropy > consistency_threshold`
+- [x] Compute entropy across DDTree branch predictions
+- [x] If inter-branch entropy is LOW → high confidence → can reduce budget
+- [x] If inter-branch entropy is HIGH → low confidence → expand budget for exploration
+- [x] Wire into `budget_adaptation` (existing Plan 167 feature)
+- [x] Threshold-gated: only activate when `entropy > consistency_threshold`
 
 ### T5: Integration with Existing Pipeline
-- [ ] Wire `EnvPredictorPruner` as optional ScreeningPruner in BanditPruner arms
-- [ ] Wire `PredictionVerifier` into DDTree verification path (post-LeviathanVerifier)
-- [ ] Wire `PredictionConsistencyGate` into budget allocation
-- [ ] Ensure zero overhead when feature flag is OFF (compile-time gating)
+- [x] Wire `EnvPredictorPruner` as optional ScreeningPruner in BanditPruner arms
+- [x] Wire `PredictionVerifier` into DDTree verification path (post-LeviathanVerifier)
+- [x] Wire `PredictionConsistencyGate` into budget allocation
+- [x] Ensure zero overhead when feature flag is OFF (compile-time gating)
 
 ### T6: GOAT Proof Tests
 - [ ] `test_echo_predictor_no_regression`: Bomber HL arena, echo ON vs OFF, score ≥ baseline
