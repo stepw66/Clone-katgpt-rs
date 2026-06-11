@@ -3,6 +3,9 @@
 //! Given a set of weighted token hypotheses, verifies that they can be
 //! uniquely recovered (demultiplexed) from their index.
 
+/// Maximum supported superposition width for stack-allocated demux.
+const MAX_DEMUX_K: usize = 32;
+
 /// Result of demultiplexing a superposition back to concrete token IDs.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DemuxResult {
@@ -28,14 +31,39 @@ impl MuxDemuxVerifier {
     /// return them sorted by weight (descending) and verify uniqueness.
     pub fn demux(&self, tokens: &[u32], weights: &[f32]) -> DemuxResult {
         assert_eq!(tokens.len(), weights.len());
-        let mut pairs: Vec<(u32, f32)> = tokens.iter().zip(weights.iter()).map(|(&t, &w)| (t, w)).collect();
-        pairs.sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        let n = tokens.len();
+        if n == 0 {
+            return DemuxResult {
+                tokens: Vec::new(),
+                is_unique: true,
+            };
+        }
 
-        let sorted_tokens: Vec<u32> = pairs.iter().map(|(t, _)| *t).collect();
-        let is_unique = {
-            let mut seen = std::collections::HashSet::new();
-            sorted_tokens.iter().all(|t| seen.insert(*t))
-        };
+        // Stack-allocated sort: copy to stack, sort descending by weight.
+        let mut pairs: [(u32, f32); MAX_DEMUX_K] = [(0, 0.0); MAX_DEMUX_K];
+        let len = n.min(MAX_DEMUX_K);
+        for i in 0..len {
+            pairs[i] = (tokens[i], weights[i]);
+        }
+        pairs[..len]
+            .sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+        // Extract sorted tokens + inline duplicate check (no HashSet).
+        let mut sorted_tokens = Vec::with_capacity(len);
+        let mut is_unique = true;
+        for i in 0..len {
+            let token = pairs[i].0;
+            // Check for duplicate against all previous — O(k^2) but k ≤ 32.
+            if is_unique {
+                for j in 0..i {
+                    if pairs[j].0 == token {
+                        is_unique = false;
+                        break;
+                    }
+                }
+            }
+            sorted_tokens.push(token);
+        }
 
         DemuxResult {
             tokens: sorted_tokens,

@@ -173,5 +173,5 @@ pub mod flow;
 #[cfg(feature = "flow_field_nav")]
 pub use flow::{
     FlowField, FlowFieldCache, FlowFieldConfig, LeoPotentialGrid, blend_steering, fft_smooth,
-    flow_steering, inflate_obstacles, should_use_flow_field,
+    fft_smooth_into, flow_steering, inflate_obstacles, should_use_flow_field,
 };

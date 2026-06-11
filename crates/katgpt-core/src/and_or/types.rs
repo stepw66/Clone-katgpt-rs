@@ -313,6 +313,29 @@ impl<G, S> AndOrNode<G, S> {
             }
         }
     }
+
+    /// Fused `(solved_count, unsolved_count)` in a single traversal.
+    ///
+    /// Equivalent to `(self.solved_count(), self.unsolved_count())` but only
+    /// walks the tree once.
+    pub fn leaf_stats(&self) -> (usize, usize) {
+        match self {
+            Self::Or { children, .. } | Self::And { children, .. } => {
+                let mut solved = 0usize;
+                let mut unsolved = 0usize;
+                for child in children {
+                    let (s, u) = child.leaf_stats();
+                    solved += s;
+                    unsolved += u;
+                }
+                (solved, unsolved)
+            }
+            Self::Leaf { solution, .. } => match solution.is_some() {
+                true => (1, 0),
+                false => (0, 1),
+            },
+        }
+    }
 }
 
 impl<G: fmt::Debug, S: fmt::Debug> fmt::Display for AndOrNode<G, S> {
@@ -553,6 +576,19 @@ mod tests {
         root.push_child(AndOrNode::solved_leaf(g("c"), sol(&[3])));
         assert_eq!(root.solved_count(), 2);
         assert_eq!(root.unsolved_count(), 1);
+    }
+
+    #[test]
+    fn test_leaf_stats_matches_individual() {
+        let mut root: AndOrNode<Goal, Solution> = AndOrNode::or(g("root"));
+        root.push_child(AndOrNode::solved_leaf(g("a"), sol(&[1])));
+        root.push_child(AndOrNode::unsolved_leaf(g("b")));
+        root.push_child(AndOrNode::solved_leaf(g("c"), sol(&[3])));
+
+        let (s, u) = root.leaf_stats();
+        assert_eq!(s, root.solved_count());
+        assert_eq!(u, root.unsolved_count());
+        assert_eq!((s, u), (2, 1));
     }
 
     // ── Goal access ───────────────────────────────────────────────

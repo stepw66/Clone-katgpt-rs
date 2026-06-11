@@ -9,7 +9,7 @@ mod fft;
 pub mod steering;
 
 pub use cache::FlowFieldCache;
-pub use fft::{fft_smooth, inflate_obstacles};
+pub use fft::{fft_smooth, fft_smooth_into, inflate_obstacles};
 pub use steering::{blend_steering, flow_steering, should_use_flow_field};
 
 // ---------------------------------------------------------------------------
@@ -205,54 +205,50 @@ impl LeoPotentialGrid {
     pub fn gradient(&self) -> FlowField {
         let w = self.w as usize;
         let h = self.h as usize;
+        let pot = &self.potential;
         let mut field = FlowField::new(self.w, self.h);
 
         for y in 0..h {
+            let row = y * w;
             for x in 0..w {
-                let xu = x as u16;
-                let yu = y as u16;
-
                 // Blocked → zero flow
-                if self.is_blocked(xu, yu) {
+                let cell = row + x;
+                let word = cell / 64;
+                let bit = cell % 64;
+                if self.blocked[word] & (1u64 << bit) != 0 {
                     continue;
                 }
 
-                // Central differences with boundary fallback
-                let vx_left = match x {
-                    0 => self.potential(xu, yu),
-                    _ => self.potential(xu - 1, yu),
+                let v_center = pot[cell];
+
+                // Central differences with boundary fallback (direct index, no bounds check)
+                let vx_left = if x > 0 { pot[row + x - 1] } else { v_center };
+                let vx_right = if x + 1 < w {
+                    pot[row + x + 1]
+                } else {
+                    v_center
                 };
-                let vx_right = match x + 1 >= w {
-                    true => self.potential(xu, yu),
-                    false => self.potential(xu + 1, yu),
-                };
-                let vy_up = match y {
-                    0 => self.potential(xu, yu),
-                    _ => self.potential(xu, yu - 1),
-                };
-                let vy_down = match y + 1 >= h {
-                    true => self.potential(xu, yu),
-                    false => self.potential(xu, yu + 1),
+                let vy_up = if y > 0 { pot[row - w + x] } else { v_center };
+                let vy_down = if y + 1 < h {
+                    pot[row + w + x]
+                } else {
+                    v_center
                 };
 
-                // Gradient (we want to flow toward higher potential)
-                let mut dx = vx_right - vx_left;
-                let mut dy = vy_down - vy_up;
+                // Gradient (flow toward higher potential)
+                let dx = vx_right - vx_left;
+                let dy = vy_down - vy_up;
 
-                // Normalise to unit vector
+                // Branch-free normalization
                 let len = (dx * dx + dy * dy).sqrt();
-                match len > 1e-8 {
-                    true => {
-                        dx /= len;
-                        dy /= len;
-                    }
-                    false => {
-                        dx = 0.0;
-                        dy = 0.0;
-                    }
-                }
+                let scale = 1.0 / len.max(1e-8);
+                let is_zero = (len <= 1e-8) as u8 as f32;
+                let ndx = dx * scale * (1.0 - is_zero);
+                let ndy = dy * scale * (1.0 - is_zero);
 
-                field.set_flow(xu, yu, dx, dy);
+                let idx = cell * 2;
+                field.flow[idx] = ndx;
+                field.flow[idx + 1] = ndy;
             }
         }
 

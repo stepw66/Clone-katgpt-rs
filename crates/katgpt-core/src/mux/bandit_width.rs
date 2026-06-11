@@ -79,8 +79,9 @@ impl MuxBanditWidth {
 
     /// Update the arm for `width` with the observed `reward`.
     pub fn update(&mut self, width: usize, reward: f32) {
-        if let Some(arm) = self.arms.iter_mut().find(|a| a.width == width) {
-            arm.update(reward);
+        if width >= 1 && width <= self.arms.len() {
+            // Arms are created as (1..=k), so arm index = width - 1.
+            self.arms[width - 1].update(reward);
         }
     }
 }

@@ -8,7 +8,7 @@
 //! peaks simultaneously.
 
 use crate::mux::span_pruner::MuxSpanPruner;
-use crate::mux::top_k::extract_top_k_peaks;
+use crate::mux::top_k::{MAX_TOP_K, extract_top_k_into};
 
 /// Default superposition width (number of tokens per node).
 pub const DEFAULT_K: usize = 4;
@@ -120,9 +120,11 @@ impl MuxDdTree {
 
     /// Initialize the root with an initial superposition from logit distribution.
     pub fn init_root(&mut self, logits: &[f32]) {
-        let peaks = extract_top_k_peaks(logits, self.k);
+        let mut buf = [0.0f32; MAX_TOP_K];
+        let peaks = extract_top_k_into(logits, self.k, &mut buf);
         let tokens: Vec<u32> = (0..peaks.len() as u32).collect();
-        self.root = MuxNode::new(tokens, peaks);
+        let weights = peaks.to_vec();
+        self.root = MuxNode::new(tokens, weights);
         self.depth = 0;
     }
 
@@ -149,7 +151,8 @@ impl MuxDdTree {
     /// Creates `width` children, each with top-K tokens from `logits`.
     pub fn expand_node(&mut self, path: &[usize], logits: &[f32], width: usize) {
         let node = Self::get_node_mut(&mut self.root, path);
-        let peaks = extract_top_k_peaks(logits, self.k);
+        let mut buf = [0.0f32; MAX_TOP_K];
+        let peaks = extract_top_k_into(logits, self.k, &mut buf);
         let effective_width = width.min(peaks.len()).max(1);
 
         for i in 0..effective_width {
@@ -200,7 +203,8 @@ impl MuxDdTree {
     /// derived from Compositional Muon's isotropic approximation.
     /// Without: falls back to binary PEAK_DOMINANCE_RATIO threshold.
     pub fn detect_width(&self, logits: &[f32]) -> usize {
-        let peaks = extract_top_k_peaks(logits, self.k);
+        let mut buf = [0.0f32; MAX_TOP_K];
+        let peaks = extract_top_k_into(logits, self.k, &mut buf);
         if peaks.len() < 2 {
             return 1;
         }
@@ -256,6 +260,13 @@ impl MuxDdTree {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mux::top_k::{MAX_TOP_K, extract_top_k_into};
+
+    /// Helper: extract top-k peaks for test code (zero-alloc wrapper).
+    fn top_k_peaks(logits: &[f32], k: usize) -> Vec<f32> {
+        let mut buf = [0.0f32; MAX_TOP_K];
+        extract_top_k_into(logits, k, &mut buf).to_vec()
+    }
 
     #[test]
     fn init_root_and_leaf_count() {
@@ -478,7 +489,7 @@ mod tests {
         println!("  {}", "─".repeat(72));
 
         for (name, logits) in &distributions {
-            let peaks = extract_top_k_peaks(logits, base);
+            let peaks = top_k_peaks(logits, base);
 
             let w_fixed = fixed_width(&peaks, base);
             let w_binary = binary_width(&peaks);
@@ -539,7 +550,7 @@ mod tests {
         println!("  {}", "─".repeat(38));
 
         for (name, logits) in &distributions {
-            let peaks = extract_top_k_peaks(logits, base);
+            let peaks = top_k_peaks(logits, base);
             let w = compositional_width(&peaks, base).max(1);
             let w_binary = binary_width(&peaks);
 

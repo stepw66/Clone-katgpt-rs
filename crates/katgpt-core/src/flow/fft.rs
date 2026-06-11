@@ -56,25 +56,23 @@ pub fn fft_smooth(grid: &mut [f32], w: usize, h: usize, cutoff: f32) {
     let cutoff_r = cutoff * min_half;
     let cutoff_r_sq = cutoff_r * cutoff_r;
 
+    let h_f = h as f32;
+    let w_f = w as f32;
     for fy in 0..h {
         let fy_centered = {
             let raw = fy as f32;
-            match raw >= half_h {
-                true => raw - h as f32,
-                false => raw,
-            }
+            raw - h_f * (raw >= half_h) as u32 as f32
         };
+        let fyc_sq = fy_centered * fy_centered;
+        let row_off = fy * w;
         for fx in 0..w {
             let fx_centered = {
                 let raw = fx as f32;
-                match raw >= half_w {
-                    true => raw - w as f32,
-                    false => raw,
-                }
+                raw - w_f * (raw >= half_w) as u32 as f32
             };
-            let r_sq = fx_centered * fx_centered + fy_centered * fy_centered;
+            let r_sq = fx_centered * fx_centered + fyc_sq;
             if r_sq > cutoff_r_sq {
-                buf[fy * w + fx] = Complex::new(0.0, 0.0);
+                buf[row_off + fx] = Complex::new(0.0, 0.0);
             }
         }
     }
@@ -90,6 +88,117 @@ pub fn fft_smooth(grid: &mut [f32], w: usize, h: usize, cutoff: f32) {
             col_buf.push(buf[y * w + x]);
         }
         col_inv.process(&mut col_buf);
+        for y in 0..h {
+            buf[y * w + x] = col_buf[y];
+        }
+    }
+
+    // Inverse rows
+    for y in 0..h {
+        row_inv.process(&mut buf[y * w..(y + 1) * w]);
+    }
+
+    // Write real parts back, normalised by n
+    let scale = 1.0 / n as f32;
+    for i in 0..n {
+        grid[i] = buf[i].re * scale;
+    }
+}
+
+/// Pre-allocated variant of [`fft_smooth`].
+///
+/// Callers that invoke FFT smoothing repeatedly with the same grid
+/// dimensions can reuse scratch buffers across calls to avoid per-call
+/// allocation. The `buf` must have capacity `>= w * h` and `col_buf`
+/// must have capacity `>= h`; both are cleared and refilled internally.
+pub fn fft_smooth_into(
+    grid: &mut [f32],
+    w: usize,
+    h: usize,
+    cutoff: f32,
+    buf: &mut Vec<Complex<f32>>,
+    col_buf: &mut Vec<Complex<f32>>,
+) {
+    assert!(
+        grid.len() == w * h,
+        "grid length {} != w*h ({}*{}={})",
+        grid.len(),
+        w,
+        h,
+        w * h
+    );
+    if w == 0 || h == 0 {
+        return;
+    }
+
+    let n = w * h;
+
+    // Reuse buf — resize and fill from grid.
+    buf.clear();
+    buf.extend(grid.iter().map(|&v| Complex::new(v, 0.0)));
+
+    // --- 2D FFT: rows then columns ---
+    let mut planner = FftPlanner::new();
+    let row_fwd = planner.plan_fft_forward(w);
+    let col_fwd = planner.plan_fft_forward(h);
+
+    // Transform rows (in-place, each row is contiguous)
+    for y in 0..h {
+        row_fwd.process(&mut buf[y * w..(y + 1) * w]);
+    }
+
+    // Transform columns (strided — copy, transform, write back)
+    col_buf.clear();
+    for x in 0..w {
+        col_buf.clear();
+        for y in 0..h {
+            col_buf.push(buf[y * w + x]);
+        }
+        col_fwd.process(col_buf);
+        for y in 0..h {
+            buf[y * w + x] = col_buf[y];
+        }
+    }
+
+    // --- Low-pass filter ---
+    let half_w = w as f32 * 0.5;
+    let half_h = h as f32 * 0.5;
+    let min_half = half_w.min(half_h);
+    let cutoff_r = cutoff * min_half;
+    let cutoff_r_sq = cutoff_r * cutoff_r;
+
+    let h_f = h as f32;
+    let w_f = w as f32;
+    for fy in 0..h {
+        let fy_centered = {
+            let raw = fy as f32;
+            raw - h_f * (raw >= half_h) as u32 as f32
+        };
+        let fyc_sq = fy_centered * fy_centered;
+        let row_off = fy * w;
+        for fx in 0..w {
+            let fx_centered = {
+                let raw = fx as f32;
+                raw - w_f * (raw >= half_w) as u32 as f32
+            };
+            let r_sq = fx_centered * fx_centered + fyc_sq;
+            if r_sq > cutoff_r_sq {
+                buf[row_off + fx] = Complex::new(0.0, 0.0);
+            }
+        }
+    }
+
+    // --- Inverse 2D FFT ---
+    let row_inv = planner.plan_fft_inverse(w);
+    let col_inv = planner.plan_fft_inverse(h);
+
+    // Inverse columns
+    for x in 0..w {
+        col_buf.clear();
+        for y in 0..h {
+            col_buf.push(buf[y * w + x]);
+        }
+        col_inv.process(col_buf);
         for y in 0..h {
             buf[y * w + x] = col_buf[y];
         }
@@ -236,6 +345,44 @@ mod tests {
         // All values should be finite
         for &v in &grid {
             assert!(v.is_finite(), "value should be finite: {v}");
+        }
+    }
+
+    #[test]
+    fn fft_smooth_into_matches_fft_smooth() {
+        let w = 16usize;
+        let h = 16usize;
+        let mut grid_a = vec![0.0f32; w * h];
+        let cx = w / 2;
+        let cy = h / 2;
+        for y in 0..h {
+            for x in 0..w {
+                let dx = x as f32 - cx as f32;
+                let dy = y as f32 - cy as f32;
+                grid_a[y * w + x] = 10.0 - (dx * dx + dy * dy).sqrt();
+            }
+        }
+        let mut grid_b = grid_a.clone();
+
+        fft_smooth(&mut grid_a, w, h, 0.25);
+
+        let mut buf = Vec::with_capacity(w * h);
+        let mut col_buf = Vec::with_capacity(h);
+        fft_smooth_into(&mut grid_b, w, h, 0.25, &mut buf, &mut col_buf);
+
+        // Must produce identical output.
+        for (i, (a, b)) in grid_a.iter().zip(grid_b.iter()).enumerate() {
+            assert!((a - b).abs() < 1e-6, "mismatch at index {i}: {a} vs {b}");
+        }
+
+        // Verify buffer reuse across calls.
+        let mut grid_c = grid_a.clone();
+        fft_smooth_into(&mut grid_c, w, h, 0.25, &mut buf, &mut col_buf);
+        for (i, (a, c)) in grid_a.iter().zip(grid_c.iter()).enumerate() {
+            assert!(
+                (a - c).abs() < 1e-6,
+                "reuse mismatch at index {i}: {a} vs {c}"
+            );
         }
     }
 
