@@ -173,7 +173,7 @@ pub fn schema_init_entity(
     let mut result = [0.0f32; 8];
 
     for i in 0..found_count {
-        let (mean, std_dev) = found[i].unwrap();
+        let (mean, std_dev) = found[i].expect("found[i] invariant: index < found_count");
         for d in 0..8 {
             let noise = rng.f32() * 2.0 - 1.0; // ∈ [-1, 1]
             result[d] += mean[d] + gamma * std_dev[d] * noise;

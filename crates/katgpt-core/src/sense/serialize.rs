@@ -11,21 +11,24 @@ pub fn save_module(module: &SenseModule, mut w: impl Write) -> io::Result<()> {
     w.write_all(MAGIC)?;
     w.write_all(&[VERSION])?;
     w.write_all(&[module.kind as u8])?;
-    // Clone + zero padding so the raw bytes have no uninitialized holes.
-    // TernaryDir is 20 logical bytes but 24 with alignment padding.
-    let mut copy = module.clone();
-    for dir in &mut copy.directions {
-        dir.zero_padding();
-    }
-    // SAFETY: copy is fully initialized (all fields set, padding zeroed).
-    // SenseModule is repr(C) so layout is deterministic.
-    let bytes: &[u8] = unsafe {
-        std::slice::from_raw_parts(
-            &copy as *const SenseModule as *const u8,
+    // Stack buffer to zero padding — avoids cloning the full SenseModule.
+    let mut copy: std::mem::MaybeUninit<SenseModule> = std::mem::MaybeUninit::uninit();
+    unsafe {
+        std::ptr::copy_nonoverlapping(module, copy.as_mut_ptr(), 1);
+        // SAFETY: copy is now a valid SenseModule. Zero padding in directions.
+        let copy_ref = copy.assume_init_mut();
+        for dir in &mut copy_ref.directions {
+            dir.zero_padding();
+        }
+        let bytes: &[u8] = std::slice::from_raw_parts(
+            copy_ref as *const SenseModule as *const u8,
             std::mem::size_of::<SenseModule>(),
-        )
-    };
-    w.write_all(bytes)?;
+        );
+        w.write_all(bytes)?;
+        // Don't run SenseModule destructor — it has no Drop impl and fields are Copy-like.
+        // But formally we should forget the MaybeUninit copy to avoid double-drop.
+        std::mem::forget(copy.assume_init());
+    }
     Ok(())
 }
 

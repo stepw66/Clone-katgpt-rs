@@ -139,10 +139,12 @@ fn cg_solve_scalar(
         out.copy_from_slice(&ax_field.data);
     };
 
-    // CG iterations: r = b - A·x, p = r, iterate
+    // CG iterations: r = b, p = r, iterate
     x_out.fill(0.0f32);
-    let mut r = b.clone();
-    let mut p = r.clone();
+    let mut r = vec![0.0f32; n];
+    r.copy_from_slice(&b);
+    let mut p = vec![0.0f32; n];
+    p.copy_from_slice(&r);
     let mut ap = vec![0.0f32; n];
 
     let mut rs_old = dot(&r, &r);
@@ -187,14 +189,12 @@ fn cg_solve_scalar(
     }
 }
 
-/// Dot product of two slices.
+/// Dot product of two slices — SIMD-accelerated.
 #[inline]
 fn dot(a: &[f32], b: &[f32]) -> f32 {
-    let mut s = 0.0f32;
-    for i in 0..a.len() {
-        s += a[i] * b[i];
-    }
-    s
+    debug_assert_eq!(a.len(), b.len());
+    let len = a.len().min(b.len());
+    crate::simd::simd_dot_f32(&a[..len], &b[..len], len)
 }
 
 // ---------------------------------------------------------------------------

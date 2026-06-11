@@ -85,15 +85,7 @@ pub fn bake_regularize(
 /// Higher average precision → higher confidence.
 #[inline]
 pub fn precision_to_confidence(lambda: &[f32; 8]) -> f32 {
-    let mean_lambda = (lambda[0]
-        + lambda[1]
-        + lambda[2]
-        + lambda[3]
-        + lambda[4]
-        + lambda[5]
-        + lambda[6]
-        + lambda[7])
-        * 0.125;
+    let mean_lambda = crate::simd::simd_sum_f32(lambda) * 0.125;
     1.0 / (1.0 + (-(mean_lambda - 1.0)).exp()) // sigmoid
 }
 

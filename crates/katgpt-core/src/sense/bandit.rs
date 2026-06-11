@@ -15,11 +15,11 @@ struct KindAggregate {
 /// A single sense trial for bandit feedback.
 #[derive(Clone, Debug)]
 pub struct SenseTrial {
-    pub sense_kind: SenseKind,
-    pub activation: f32,
-    pub reward: f32,
     pub npc_id: u32,
     pub action_taken: u32,
+    pub activation: f32,
+    pub reward: f32,
+    pub sense_kind: SenseKind,
 }
 
 /// Trial log for sense module self-learning.
@@ -115,10 +115,10 @@ mod tests {
 
         let trial = SenseTrial {
             npc_id: 1,
-            sense_kind: module.kind,
-            activation: 0.5,
             action_taken: 0,
+            activation: 0.5,
             reward: 0.9,
+            sense_kind: module.kind,
         };
         decay_direction(&mut module, &trial, 0.5);
         assert!(module.confidence > 0.3);
@@ -134,10 +134,10 @@ mod tests {
 
         let trial = SenseTrial {
             npc_id: 1,
-            sense_kind: module.kind,
-            activation: 0.5,
             action_taken: 0,
+            activation: 0.5,
             reward: 0.1,
+            sense_kind: module.kind,
         };
         decay_direction(&mut module, &trial, 0.5);
         assert!(module.confidence < 0.8);
@@ -148,24 +148,24 @@ mod tests {
         let mut log = SenseTrialLog::default();
         log.record(SenseTrial {
             npc_id: 1,
-            sense_kind: SenseKind::FighterSense,
-            activation: 0.5,
             action_taken: 0,
+            activation: 0.5,
             reward: 0.8,
+            sense_kind: SenseKind::FighterSense,
         });
         log.record(SenseTrial {
             npc_id: 2,
-            sense_kind: SenseKind::FighterSense,
-            activation: 0.3,
             action_taken: 1,
+            activation: 0.3,
             reward: 0.6,
+            sense_kind: SenseKind::FighterSense,
         });
         log.record(SenseTrial {
             npc_id: 3,
-            sense_kind: SenseKind::SpatialSense,
-            activation: 0.4,
             action_taken: 0,
+            activation: 0.4,
             reward: 0.2,
+            sense_kind: SenseKind::SpatialSense,
         });
 
         let avg = log.average_reward(SenseKind::FighterSense);

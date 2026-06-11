@@ -479,7 +479,10 @@ impl ReconstructionState {
         if self.cached_weights.is_none() {
             self.cached_weights = Some(ProjectionWeights::from_brain(brain));
         }
-        let weights = self.cached_weights.as_ref().unwrap();
+        let weights = self
+            .cached_weights
+            .as_ref()
+            .expect("cached_weights initialized above");
         self.expand_with_weights(weights)
     }
 

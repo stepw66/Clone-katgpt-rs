@@ -73,14 +73,10 @@ fn sigmoid(x: f32) -> f32 {
 
 /// Per-participant LinOSS hidden state for combat rhythm tracking.
 struct LabeledRhythm {
-    /// Entity ID (source of damage / tracked participant).
-    entity_id: u8,
     /// LinOSS cell with pre-tuned ω² and β.
     cell: LinOSSCell,
     /// Hidden state (y, z) — oscillates with damage impulses.
     state: LinOSSState,
-    /// Number of damage events ingested for this participant.
-    event_count: u32,
     /// Pre-allocated forcing buffer — fixed-size to avoid heap alloc.
     forcing: [f32; HIDDEN_DIM],
     /// Pre-allocated scratch for in-place y output.
@@ -89,8 +85,12 @@ struct LabeledRhythm {
     z_buf: [f32; HIDDEN_DIM],
     /// Observed damage tick timestamps for auto-calibration.
     damage_timestamps: [u32; MAX_TIMESTAMPS],
+    /// Number of damage events ingested for this participant.
+    event_count: u32,
     /// Number of valid entries in `damage_timestamps`.
     damage_timestamp_count: usize,
+    /// Entity ID (source of damage / tracked participant).
+    entity_id: u8,
 }
 
 // ── Constants ──────────────────────────────────────────────────
@@ -109,10 +109,10 @@ const MAX_TIMESTAMPS: usize = 16;
 pub struct CombatRhythmTracker {
     /// Per-participant cells. Fixed-size array (max 8).
     cells: [Option<LabeledRhythm>; HIDDEN_DIM],
-    /// Number of valid entries in `cells`.
-    cell_count: usize,
     /// Direct-indexed LUT: entity_id → slot index. u8::MAX = not registered.
     entity_lut: [u8; 256],
+    /// Number of valid entries in `cells`.
+    cell_count: usize,
     /// Hidden dimension — always HIDDEN_DIM. Kept for API compat.
     hidden_dim: usize,
     /// Timestep for imex_step (derived from tick rate, e.g. 16ms → 0.016).
@@ -182,15 +182,15 @@ impl CombatRhythmTracker {
 
         self.entity_lut[entity_id as usize] = self.cell_count as u8;
         self.cells[self.cell_count] = Some(LabeledRhythm {
-            entity_id,
             cell,
             state: LinOSSState::zeros(HIDDEN_DIM),
-            event_count: 0,
             forcing: [0.0; HIDDEN_DIM],
             y_buf: [0.0; HIDDEN_DIM],
             z_buf: [0.0; HIDDEN_DIM],
             damage_timestamps: [0u32; MAX_TIMESTAMPS],
+            event_count: 0,
             damage_timestamp_count: 0,
+            entity_id,
         });
         self.cell_count += 1;
     }
@@ -207,7 +207,9 @@ impl CombatRhythmTracker {
             Some(s) => s,
             None => return,
         };
-        let rhythm = self.cells[slot].as_mut().unwrap();
+        let rhythm = self.cells[slot]
+            .as_mut()
+            .expect("slot_for returned valid slot but cell is empty");
 
         // Convert damage to forcing vector: normalized impulse across all dims
         let normalized = amount / self.max_damage;
@@ -253,7 +255,9 @@ impl CombatRhythmTracker {
     #[inline(always)]
     pub fn extract_features(&self, entity_id: u8) -> SpectralThreatFeatures {
         let rhythm = match self.slot_for(entity_id) {
-            Some(i) => self.cells[i].as_ref().unwrap(),
+            Some(i) => self.cells[i]
+                .as_ref()
+                .expect("slot_for returned valid slot but cell is empty"),
             None => return Self::DEFAULT_FEATURES,
         };
 
@@ -311,7 +315,9 @@ impl CombatRhythmTracker {
             Some(i) => i,
             None => return,
         };
-        let rhythm = self.cells[rhythm].as_mut().unwrap();
+        let rhythm = self.cells[rhythm]
+            .as_mut()
+            .expect("slot_for returned valid slot but cell is empty");
         let ts_count = rhythm.damage_timestamp_count;
         if ts_count < 3 {
             return;
@@ -379,7 +385,9 @@ impl CombatRhythmTracker {
     /// Reset state for a participant (new encounter).
     pub fn reset(&mut self, entity_id: u8) {
         if let Some(i) = self.slot_for(entity_id) {
-            let rhythm = self.cells[i].as_mut().unwrap();
+            let rhythm = self.cells[i]
+                .as_mut()
+                .expect("slot_for returned valid slot but cell is empty");
             rhythm.state = LinOSSState::zeros(HIDDEN_DIM);
             rhythm.event_count = 0;
             rhythm.damage_timestamp_count = 0;
