@@ -488,23 +488,33 @@ mod tests {
 
     #[test]
     fn test_is_amortized_flips() {
-        let tracker = BreakevenTracker::new(100);
-        tracker.observe_baseline(100);
-        tracker.observe_baseline(100);
-        tracker.observe_baseline(100);
-        tracker.observe_tier(50);
-        tracker.observe_tier(50);
-        tracker.observe_tier(50);
+        // Upfront = 10_000, baseline ≈ 100, tier ≈ 50
+        // N* ≈ 10_000 / (100 - 50) = 200
+        let tracker = BreakevenTracker::new(10_000);
+        // Feed enough baselines for EMA to converge to ~100
+        for _ in 0..50 {
+            tracker.observe_baseline(100);
+        }
+        // Feed a few tier observations at 50 — only 3 tokens, not yet amortized
+        for _ in 0..3 {
+            tracker.observe_tier(50);
+        }
 
-        // Feed enough tokens to amortize
-        assert!(!tracker.is_amortized());
+        // Not amortized yet (3 tokens << N* ≈ 200)
+        assert!(
+            !tracker.is_amortized(),
+            "should not be amortized with only 3 tokens vs N*≈200"
+        );
 
-        // Feed many more tokens
+        // Feed enough tokens to amortize (1003 >> 200)
         for _ in 0..1000 {
             tracker.observe_tier(50);
         }
 
-        assert!(tracker.is_amortized());
+        assert!(
+            tracker.is_amortized(),
+            "should be amortized after 1003 tokens vs N*≈200"
+        );
     }
 
     #[test]
@@ -537,27 +547,30 @@ mod tests {
 
     #[test]
     fn test_amortization_confidence_sigmoid() {
-        let tracker = BreakevenTracker::new(100);
-        tracker.observe_baseline(100);
-        tracker.observe_baseline(100);
-        tracker.observe_tier(50);
-        tracker.observe_tier(50);
-
-        // Before amortization: confidence < 0.5
+        // Use a large upfront cost to make N* bigger (N* ≈ 10_000 / 50 = 200)
+        let tracker = BreakevenTracker::new(10_000);
+        // Feed enough baselines for EMA to converge to ~100
+        for _ in 0..50 {
+            tracker.observe_baseline(100);
+        }
+        for _ in 0..3 {
+            tracker.observe_tier(50);
+        }
+        // N* ≈ 10_000 / (100-50) = 200, only 3 tokens → not amortized
         let conf_before = tracker.amortization_confidence(0.01);
         assert!(
             conf_before < 0.5,
-            "Confidence should be < 0.5 before amortization"
+            "Confidence should be < 0.5 before amortization, got {conf_before}"
         );
 
         // After many tokens: confidence > 0.5
-        for _ in 0..500 {
+        for _ in 0..1000 {
             tracker.observe_tier(50);
         }
         let conf_after = tracker.amortization_confidence(0.01);
         assert!(
             conf_after > 0.5,
-            "Confidence should be > 0.5 after amortization"
+            "Confidence should be > 0.5 after amortization, got {conf_after}"
         );
     }
 

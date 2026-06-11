@@ -90,7 +90,7 @@ graph TD
 
 ### Phase 5: Arena Proof + Benchmark
 
-- [ ] Create `.benchmarks/049_trd_refined_draft_goat.md` benchmark file
+- [x] Create `.benchmarks/049_trd_refined_draft_goat.md` benchmark file
 - [ ] GOAT proof: Bomber arena — TRDraft player vs baseline DDTree player, measure win rate delta
 - [ ] GOAT proof: Speculative acceptance rate on hard queries — target >5% improvement over baseline
 - [ ] GOAT proof: Latency P50 regression — target ±0% (BanditPruner skips easy queries)
