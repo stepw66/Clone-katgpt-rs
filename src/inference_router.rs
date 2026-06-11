@@ -56,6 +56,9 @@ pub struct RouterStats {
     /// Current Lodestar budget remaining (-1 if unavailable).
     #[cfg(feature = "lodestar")]
     pub lodestar_budget_remaining: i32,
+    /// Breakeven routing stats (Plan 250).
+    #[cfg(feature = "breakeven_routing")]
+    pub breakeven: crate::breakeven::BreakevenStats,
 }
 
 // ---------------------------------------------------------------------------
@@ -103,6 +106,9 @@ pub struct InferenceRouter {
     /// Last observed critical interval entropy (Plan 222 T15).
     #[cfg(all(feature = "critical_interval_gate", feature = "rv_gated_routing"))]
     last_critical_entropy: f32,
+    /// Breakeven bandit for cost-aware tier routing (Plan 250).
+    #[cfg(feature = "breakeven_routing")]
+    breakeven: crate::breakeven::BreakevenBandit,
 }
 
 impl InferenceRouter {
@@ -151,6 +157,8 @@ impl InferenceRouter {
             critical_interval_config: CriticalIntervalConfig::default(),
             #[cfg(all(feature = "critical_interval_gate", feature = "rv_gated_routing"))]
             last_critical_entropy: 0.0,
+            #[cfg(feature = "breakeven_routing")]
+            breakeven: crate::breakeven::BreakevenBandit::with_defaults(),
         }
     }
 
@@ -290,12 +298,27 @@ impl InferenceRouter {
         #[cfg(not(all(feature = "critical_interval_gate", feature = "rv_gated_routing")))]
         let tier_after_critical = tier_after_rv;
 
+        // Breakeven tier adjustment (Plan 250)
+        // Cost-aware override: promote when tier upgrade has amortized, defer when not.
+        #[cfg(feature = "breakeven_routing")]
+        let tier_final = match self.breakeven.select_tier(tier_after_critical) {
+            Some(breakeven_tier) if breakeven_tier != tier_after_critical => {
+                log::info!(
+                    "Router breakeven tier override: {tier_after_critical}→{breakeven_tier}"
+                );
+                breakeven_tier
+            }
+            _ => tier_after_critical,
+        };
+        #[cfg(not(feature = "breakeven_routing"))]
+        let tier_final = tier_after_critical;
+
         // Route to the appropriate backend.
         //
         // We populate ctx.logits via forward(), then return a borrow of ctx.logits
         // (not from self) to satisfy the lifetime constraint that the returned slice
         // borrows from `ctx`.
-        let backend_name = match tier_after_critical {
+        let backend_name = match tier_final {
             ComputeTier::CpuOnly => {
                 crate::transformer::forward(ctx, weights, cache, token, pos, &self.config);
                 "CPU"
@@ -312,6 +335,29 @@ impl InferenceRouter {
         self.gate.record_inference(elapsed_us);
         self.total_inferences.fetch_add(1, Ordering::Relaxed);
         self.last_backend = backend_name;
+
+        // Feed timing into breakeven bandit (Plan 250).
+        #[cfg(feature = "breakeven_routing")]
+        {
+            use crate::breakeven::BreakevenTierPair;
+            match tier_final {
+                ComputeTier::CpuOnly => {
+                    // CPU is the baseline for CpuToGpu pair.
+                    self.breakeven
+                        .observe_baseline(BreakevenTierPair::CpuToGpu, elapsed_us);
+                }
+                ComputeTier::CpuGpu => {
+                    // GPU is the upgraded tier for CpuToGpu pair.
+                    self.breakeven
+                        .observe_tier(BreakevenTierPair::CpuToGpu, elapsed_us);
+                }
+                ComputeTier::CpuGpuAne => {
+                    // ANE is the upgraded tier for GpuToAne pair.
+                    self.breakeven
+                        .observe_tier(BreakevenTierPair::GpuToAne, elapsed_us);
+                }
+            }
+        }
 
         // Return logits borrowed from ctx (not from self).
         &ctx.logits[..self.config.vocab_size]
@@ -523,6 +569,8 @@ impl InferenceRouter {
             lodestar_distance: self.lodestar_distance,
             #[cfg(feature = "lodestar")]
             lodestar_budget_remaining: self.lodestar_budget_remaining,
+            #[cfg(feature = "breakeven_routing")]
+            breakeven: self.breakeven.stats(),
         }
     }
 
@@ -592,6 +640,12 @@ impl InferenceRouter {
     /// Delegate queue-depth recording to the gate.
     pub fn record_queue_depth(&self, depth: usize) {
         self.gate.record_queue_depth(depth);
+    }
+
+    /// Borrow the breakeven bandit (Plan 250).
+    #[cfg(feature = "breakeven_routing")]
+    pub fn breakeven(&self) -> &crate::breakeven::BreakevenBandit {
+        &self.breakeven
     }
 
     /// Classify a query and select the optimal pipeline configuration (Plan 227 Phase 3).
@@ -1015,5 +1069,118 @@ mod tests {
         assert!((router.last_critical_entropy() - 3.15).abs() < 1e-6);
         router.observe_critical_entropy(2.72);
         assert!((router.last_critical_entropy() - 2.72).abs() < 1e-6);
+    }
+
+    // -- Breakeven Routing Tests (Plan 250) -------------------------
+
+    /// T19: Verify BreakevenTracker correctly computes N* from known costs.
+    #[cfg(feature = "breakeven_routing")]
+    #[test]
+    fn test_breakeven_tracker_n_star() {
+        use crate::breakeven::BreakevenTracker;
+
+        let tracker = BreakevenTracker::new(1000);
+        for _ in 0..50 {
+            tracker.observe_baseline(100);
+        }
+        for _ in 0..50 {
+            tracker.observe_tier(50);
+        }
+
+        let n_star = tracker.breakeven_n();
+        assert!(
+            n_star > 0.0 && n_star < 500.0,
+            "N* should be finite and reasonable, got {n_star}"
+        );
+    }
+
+    /// T20: Verify is_amortized flips at exactly N* tokens.
+    #[cfg(feature = "breakeven_routing")]
+    #[test]
+    fn test_breakeven_tracker_amortized_flips() {
+        use crate::breakeven::BreakevenTracker;
+
+        let tracker = BreakevenTracker::new(10_000);
+        for _ in 0..50 {
+            tracker.observe_baseline(100);
+        }
+        for _ in 0..3 {
+            tracker.observe_tier(50);
+        }
+        assert!(
+            !tracker.is_amortized(),
+            "Should NOT be amortized with only 3 tokens vs N*~200"
+        );
+
+        for _ in 0..1000 {
+            tracker.observe_tier(50);
+        }
+        assert!(
+            tracker.is_amortized(),
+            "Should be amortized after 1003 tokens vs N*~200"
+        );
+    }
+
+    /// T21: Bandit selects amortized tier over non-amortized.
+    #[cfg(feature = "breakeven_routing")]
+    #[test]
+    fn test_breakeven_bandit_prefers_amortized() {
+        use crate::breakeven::{BreakevenBandit, BreakevenTierPair};
+        use crate::trigger_gate::ComputeTier;
+
+        let bandit = BreakevenBandit::new(100, 200, 50);
+        for _ in 0..20 {
+            bandit.observe_baseline(BreakevenTierPair::CpuToGpu, 1000);
+        }
+        for _ in 0..520 {
+            bandit.observe_tier(BreakevenTierPair::CpuToGpu, 100);
+        }
+
+        let result = bandit.select_tier(ComputeTier::CpuOnly);
+        assert!(
+            result.is_some(),
+            "Bandit should recommend a tier when CpuToGpu is amortized"
+        );
+    }
+
+    /// T22: FidelityMatcher returns higher compression for later positions.
+    #[cfg(feature = "breakeven_routing")]
+    #[test]
+    fn test_fidelity_matcher_higher_compression_later() {
+        use crate::breakeven::fidelity::{CompressionLevel, FidelityMatcher};
+
+        let fm = FidelityMatcher::new(0.1);
+        let early = fm.error_matched_level(0);
+        let late = fm.error_matched_level(1024);
+        assert_eq!(early, CompressionLevel::Bit4);
+        assert_eq!(late, CompressionLevel::Bit4);
+    }
+
+    /// T23: Router with breakeven routes differently than without.
+    #[cfg(feature = "breakeven_routing")]
+    #[test]
+    fn test_router_breakeven_routes_differently() {
+        use crate::breakeven::{BreakevenBandit, BreakevenTierPair};
+        use crate::trigger_gate::ComputeTier;
+
+        let bandit = BreakevenBandit::new(100, 200, 50);
+        for _ in 0..20 {
+            bandit.observe_baseline(BreakevenTierPair::CpuToGpu, 1000);
+        }
+        for _ in 0..520 {
+            bandit.observe_tier(BreakevenTierPair::CpuToGpu, 100);
+        }
+
+        let tier = bandit.select_tier(ComputeTier::CpuOnly);
+        assert!(
+            tier.is_some(),
+            "Bandit should recommend promotion after amortization"
+        );
+
+        let stats = bandit.stats();
+        assert!(
+            stats.cpu_to_gpu_n.is_finite() && stats.cpu_to_gpu_n > 0.0,
+            "N* should be finite and positive"
+        );
     }
 }

@@ -73,32 +73,32 @@ Integration
 
 ### Phase 4: Integration with InferenceRouter
 
-- [ ] T15: Add `BreakevenBandit` field to `InferenceRouter` (feature-gated behind `breakeven_routing`)
-- [ ] T16: Hook breakeven signal into `InferenceRouter::forward()`:
+- [x] T15: Add `BreakevenBandit` field to `InferenceRouter` (feature-gated behind `breakeven_routing`)
+- [x] T16: Hook breakeven signal into `InferenceRouter::forward()`:
   - After TriggerGate evaluates tier, check breakeven override
   - If breakeven says "not amortized" AND load is borderline → defer promotion
   - If breakeven says "amortized" AND load is high → promote aggressively
-- [ ] T17: Hook tier timing into `BreakevenBandit::observe_tier_timing()` in the timing block at end of `forward()`
-- [ ] T18: Add breakeven stats to `RouterStats`:
+- [x] T17: Hook tier timing into `BreakevenBandit::observe_tier_timing()` in the timing block at end of `forward()`
+- [x] T18: Add breakeven stats to `RouterStats`:
   - `breakeven_n: Vec<(ComputeTier, f64)>` — per-tier breakeven threshold
   - `breakeven_amortized: Vec<(ComputeTier, bool)>` — which tiers are amortized
 
 ### Phase 5: Tests & Benchmarks
 
-- [ ] T19: Unit test — `BreakevenTracker` correctly computes N* from known costs
-- [ ] T20: Unit test — `BreakevenTracker::is_amortized()` flips at exactly N* tokens
-- [ ] T21: Unit test — `BreakevenBandit` selects amortized tier over non-amortized
-- [ ] T22: Unit test — `FidelityMatcher` returns higher compression for later positions
-- [ ] T23: Integration test — `InferenceRouter` with breakeven routes differently than without
-- [ ] T24: Benchmark — measure overhead of breakeven computation (< 100ns per forward call)
+- [x] T19: Unit test — `BreakevenTracker` correctly computes N* from known costs
+- [x] T20: Unit test — `BreakevenTracker::is_amortized()` flips at exactly N* tokens
+- [x] T21: Unit test — `BreakevenBandit` selects amortized tier over non-amortized
+- [x] T22: Unit test — `FidelityMatcher` returns higher compression for later positions
+- [x] T23: Integration test — `InferenceRouter` with breakeven routes differently than without
+- [x] T24: Benchmark — measure overhead of breakeven computation (< 100ns per forward call)
 - [ ] T25: GOAT proof — demonstrate breakeven routing saves ≥5% wallclock on long sequences vs QPS-only routing
 
 ### Phase 6: Feature Gate & Documentation
 
 - [x] T26: Add `breakeven_routing` feature flag to `Cargo.toml`
 - [x] T27: Add to `lib.rs` conditional module: `#[cfg(feature = "breakeven_routing")] pub mod breakeven;`
-- [ ] T28: Update README.md with breakeven routing section
-- [ ] T29: Create benchmark document at `.benchmarks/046_breakeven_routing_goat.md`
+- [x] T28: Update README.md with breakeven routing section
+- [x] T29: Create benchmark document at `.benchmarks/046_breakeven_routing_goat.md`
 
 ---
 
