@@ -26,6 +26,9 @@ pub struct FlowField {
     pub w: u16,
     /// Height in cells.
     pub h: u16,
+    /// Pre-computed row stride in flow elements: `w as usize * 2`.
+    /// Avoids recomputing `w * 2` on every lookup/set/is_blocked call.
+    stride: usize,
     /// Flow vectors: `[w * h * 2]` — `(dx, dy)` per cell, row-major.
     /// Normalised to unit length or zero for blocked cells.
     flow: Vec<f32>,
@@ -34,10 +37,12 @@ pub struct FlowField {
 impl FlowField {
     /// Create a zero-initialised flow field.
     pub fn new(w: u16, h: u16) -> Self {
-        let len = (w as usize) * (h as usize) * 2;
+        let stride = (w as usize) * 2;
+        let len = stride * (h as usize);
         Self {
             w,
             h,
+            stride,
             flow: vec![0.0f32; len],
         }
     }
@@ -47,10 +52,24 @@ impl FlowField {
     pub fn lookup(&self, x: u16, y: u16) -> (f32, f32) {
         match (x < self.w, y < self.h) {
             (true, true) => {
-                let idx = ((y as usize) * (self.w as usize) + (x as usize)) * 2;
+                let idx = (y as usize) * self.stride + (x as usize) * 2;
                 (self.flow[idx], self.flow[idx + 1])
             }
             _ => (0.0, 0.0),
+        }
+    }
+
+    /// O(1) flow-vector lookup without bounds checks.
+    ///
+    /// **Safety**: Caller must guarantee `x < self.w` and `y < self.h`.
+    #[inline]
+    pub(crate) unsafe fn lookup_unchecked(&self, x: u16, y: u16) -> (f32, f32) {
+        let idx = (y as usize) * self.stride + (x as usize) * 2;
+        unsafe {
+            (
+                *self.flow.get_unchecked(idx),
+                *self.flow.get_unchecked(idx + 1),
+            )
         }
     }
 
@@ -59,7 +78,7 @@ impl FlowField {
     pub fn set_flow(&mut self, x: u16, y: u16, dx: f32, dy: f32) {
         match (x < self.w, y < self.h) {
             (true, true) => {
-                let idx = ((y as usize) * (self.w as usize) + (x as usize)) * 2;
+                let idx = (y as usize) * self.stride + (x as usize) * 2;
                 self.flow[idx] = dx;
                 self.flow[idx + 1] = dy;
             }
@@ -70,8 +89,11 @@ impl FlowField {
     /// A cell is blocked when its flow vector is zero.
     #[inline]
     pub fn is_blocked(&self, x: u16, y: u16) -> bool {
-        let (dx, dy) = self.lookup(x, y);
-        dx == 0.0 && dy == 0.0
+        if x >= self.w || y >= self.h {
+            return true;
+        }
+        let idx = (y as usize) * self.stride + (x as usize) * 2;
+        self.flow[idx] == 0.0 && self.flow[idx + 1] == 0.0
     }
 
     #[inline]
@@ -130,7 +152,7 @@ impl LeoPotentialGrid {
         );
         let words = (cells + 63) / 64;
 
-        let mut potential = Vec::with_capacity(cells);
+        let mut potential = vec![f32::NEG_INFINITY; cells];
         for cell_idx in 0..cells {
             let start = cell_idx * actions_per_cell;
             let mut max_q = f32::NEG_INFINITY;
@@ -141,7 +163,7 @@ impl LeoPotentialGrid {
                     max_q = val;
                 }
             }
-            potential.push(max_q);
+            potential[cell_idx] = max_q;
         }
 
         Self {
@@ -158,8 +180,8 @@ impl LeoPotentialGrid {
         match (x < self.w, y < self.h) {
             (true, true) => {
                 let cell = (y as usize) * (self.w as usize) + (x as usize);
-                let word = cell / 64;
-                let bit = cell % 64;
+                let word = cell >> 6;
+                let bit = cell & 63;
                 self.blocked[word] |= 1u64 << bit;
             }
             _ => {}
@@ -172,8 +194,8 @@ impl LeoPotentialGrid {
         match (x < self.w, y < self.h) {
             (true, true) => {
                 let cell = (y as usize) * (self.w as usize) + (x as usize);
-                let word = cell / 64;
-                let bit = cell % 64;
+                let word = cell >> 6;
+                let bit = cell & 63;
                 self.blocked[word] & (1u64 << bit) != 0
             }
             _ => false,
@@ -211,17 +233,27 @@ impl LeoPotentialGrid {
         let pot = &self.potential;
         let mut field = FlowField::new(self.w, self.h);
 
+        // Running word/bit counters for blocked bitfield — avoids division per cell.
+        let mut word = 0usize;
+        let mut bit = 0usize;
         for y in 0..h {
             let row = y * w;
             for x in 0..w {
-                // Blocked → zero flow
-                let cell = row + x;
-                let word = cell / 64;
-                let bit = cell % 64;
-                if self.blocked[word] & (1u64 << bit) != 0 {
+                // Blocked → zero flow (using running counters)
+                let is_set = self.blocked[word] & (1u64 << bit) != 0;
+
+                // Advance running counters
+                bit += 1;
+                if bit == 64 {
+                    bit = 0;
+                    word += 1;
+                }
+
+                if is_set {
                     continue;
                 }
 
+                let cell = row + x;
                 let v_center = pot[cell];
 
                 // Central differences with boundary fallback (direct index, no bounds check)
@@ -288,7 +320,7 @@ impl LeoPotentialGrid {
 // ---------------------------------------------------------------------------
 
 /// FFT smoothing parameters.
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub struct FlowFieldConfig {
     /// Low-pass cutoff frequency (fraction of Nyquist). Default: 0.25.
     pub cutoff: f32,

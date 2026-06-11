@@ -73,12 +73,18 @@ pub fn fft_smooth_into(
     // Transform columns (strided — copy, transform, write back)
     col_buf.resize(h, Complex::new(0.0, 0.0));
     for x in 0..w {
+        // Gather column via stride arithmetic
+        let mut idx = x;
         for y in 0..h {
-            col_buf[y] = buf[y * w + x];
+            col_buf[y] = buf[idx];
+            idx += w;
         }
         col_fwd.process(col_buf);
+        // Scatter column back
+        idx = x;
         for y in 0..h {
-            buf[y * w + x] = col_buf[y];
+            buf[idx] = col_buf[y];
+            idx += w;
         }
     }
 
@@ -92,17 +98,14 @@ pub fn fft_smooth_into(
     let h_f = h as f32;
     let w_f = w as f32;
     for fy in 0..h {
-        let fy_centered = {
-            let raw = fy as f32;
-            if raw >= half_h { raw - h_f } else { raw }
-        };
+        // Branch-free centered coordinate: raw - dim * (raw >= half_dim)
+        let fy_raw = fy as f32;
+        let fy_centered = fy_raw - h_f * ((fy_raw >= half_h) as u32 as f32);
         let fyc_sq = fy_centered * fy_centered;
         let row_off = fy * w;
         for fx in 0..w {
-            let fx_centered = {
-                let raw = fx as f32;
-                if raw >= half_w { raw - w_f } else { raw }
-            };
+            let fx_raw = fx as f32;
+            let fx_centered = fx_raw - w_f * ((fx_raw >= half_w) as u32 as f32);
             let r_sq = fx_centered * fx_centered + fyc_sq;
             if r_sq > cutoff_r_sq {
                 buf[row_off + fx] = Complex::new(0.0, 0.0);
@@ -116,12 +119,16 @@ pub fn fft_smooth_into(
 
     // Inverse columns
     for x in 0..w {
+        let mut idx = x;
         for y in 0..h {
-            col_buf[y] = buf[y * w + x];
+            col_buf[y] = buf[idx];
+            idx += w;
         }
         col_inv.process(col_buf);
+        idx = x;
         for y in 0..h {
-            buf[y * w + x] = col_buf[y];
+            buf[idx] = col_buf[y];
+            idx += w;
         }
     }
 
@@ -130,11 +137,11 @@ pub fn fft_smooth_into(
         row_inv.process(&mut buf[y * w..(y + 1) * w]);
     }
 
-    // Write real parts back, normalised by n
+    // Write real parts back, normalised by n — zip avoids bounds checks
     let scale = 1.0 / n as f32;
-    for i in 0..n {
-        grid[i] = buf[i].re * scale;
-    }
+    grid.iter_mut()
+        .zip(buf.iter())
+        .for_each(|(g, b)| *g = b.re * scale);
 }
 
 /// Morphological dilation of blocked cells by `radius`.
@@ -167,8 +174,8 @@ pub fn inflate_obstacles_with_snapshot(
 
     for y in 0..hu {
         for x in 0..wu {
-            let word_idx = y * words_per_row + x / 64;
-            let bit = x % 64;
+            let word_idx = y * words_per_row + (x >> 6);
+            let bit = x & 63;
             if snapshot[word_idx] & (1u64 << bit) != 0 {
                 // Already blocked — expand neighbors
                 let y_min = (y as i32 - r).max(0) as usize;
@@ -177,8 +184,8 @@ pub fn inflate_obstacles_with_snapshot(
                 let x_max = (x as i32 + r).min(wu as i32 - 1) as usize;
                 for ny in y_min..=y_max {
                     for nx in x_min..=x_max {
-                        let nw_idx = ny * words_per_row + nx / 64;
-                        blocked[nw_idx] |= 1u64 << (nx % 64);
+                        let nw_idx = ny * words_per_row + (nx >> 6);
+                        blocked[nw_idx] |= 1u64 << (nx & 63);
                     }
                 }
             }

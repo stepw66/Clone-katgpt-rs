@@ -45,6 +45,12 @@ impl LeafPaths {
     pub fn iter(&self) -> impl Iterator<Item = &[usize]> {
         (0..self.len()).map(move |i| self.path(i))
     }
+
+    /// Clear internal buffers for reuse, retaining allocated capacity.
+    pub fn clear(&mut self) {
+        self.buf.clear();
+        self.offsets.clear();
+    }
 }
 
 /// A node in the DD-tree that carries K tokens as a weighted span.
@@ -191,14 +197,18 @@ impl MuxDdTree {
 
         // Hoist shared weights allocation outside the loop — identical for every child.
         let child_weights: Vec<f32> = peaks.iter().take(self.k).copied().collect();
+        let child_len = peaks.len().min(self.k);
         node.children.reserve(effective_width);
+        // Pre-allocate child_tokens outside the loop — clear() + refill each iteration
+        // avoids per-iteration heap allocation for small k (≤16).
+        let mut child_tokens: Vec<u32> = Vec::with_capacity(child_len);
         for i in 0..effective_width {
             // Distribute peaks across children: each child gets a shifted view
             let offset = (i * self.k / effective_width).min(peaks.len());
-            let child_tokens: Vec<u32> =
-                (offset as u32..(offset + peaks.len().min(self.k)) as u32).collect();
+            child_tokens.clear();
+            child_tokens.extend(offset as u32..(offset + child_len) as u32);
             node.children
-                .push(MuxNode::new(child_tokens, child_weights.clone()));
+                .push(MuxNode::new(child_tokens.clone(), child_weights.clone()));
         }
 
         // Track maximum depth
@@ -217,18 +227,18 @@ impl MuxDdTree {
     where
         F: AsRef<[f32]>,
     {
-        let leaves = self.collect_leaf_paths();
+        let leaves = self.collect_leaf_paths_flat();
         assert_eq!(
             leaves.len(),
             logits_by_leaf.len(),
             "must provide logits for every leaf"
         );
 
-        for (path, logits) in leaves.into_iter().zip(logits_by_leaf.iter()) {
-            let logits = logits.as_ref();
+        for i in 0..leaves.len() {
+            let logits = logits_by_leaf[i].as_ref();
             let width = self.detect_width(logits);
             if width > 0 && self.pruner.is_valid(logits, depth) {
-                self.expand_node(&path, logits, width);
+                self.expand_node(leaves.path(i), logits, width);
             }
         }
     }
@@ -281,9 +291,21 @@ impl MuxDdTree {
             buf: Vec::with_capacity(estimated_leaves * self.depth.max(1)),
             offsets: Vec::with_capacity(estimated_leaves + 1),
         };
-        // Stack-based BFS: each entry is (depth, path_indices_start_in_buf, node)
-        // We store pending paths contiguously in buf.
-        let mut stack: Vec<(*const MuxNode, usize, usize)> = vec![(&self.root as *const _, 0, 0)];
+        self.collect_leaf_paths_flat_into(&mut paths);
+        paths
+    }
+
+    /// Zero-alloc variant of `collect_leaf_paths_flat` that reuses a caller-provided buffer.
+    ///
+    /// Clears `paths` and refills it. Retains heap capacity from prior calls,
+    /// eliminating per-step allocation in the BFS hot loop.
+    pub fn collect_leaf_paths_flat_into(&self, paths: &mut LeafPaths) {
+        paths.clear();
+        // Pre-size stack: worst case is root with all children (branching factor ≤ K).
+        // Start with 1 entry; the stack grows as needed but this avoids the initial
+        // vec![...] heap allocation for small trees.
+        let mut stack: Vec<(*const MuxNode, usize, usize)> = Vec::with_capacity(self.k.max(1));
+        stack.push((&self.root as *const _, 0, 0));
         paths.offsets.push(0);
 
         while let Some((node_ptr, path_start, path_len)) = stack.pop() {
@@ -306,8 +328,6 @@ impl MuxDdTree {
                 }
             }
         }
-
-        paths
     }
 
     /// Collect paths to all leaf nodes (BFS order).

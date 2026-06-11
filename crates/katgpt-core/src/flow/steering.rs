@@ -38,11 +38,11 @@ pub fn flow_steering(field: &FlowField, pos: (f32, f32)) -> (f32, f32) {
     let dx = (fx - x0 as f32).clamp(0.0, 1.0);
     let dy = (fy - y0 as f32).clamp(0.0, 1.0);
 
-    // Four corner flow vectors.
-    let (dx00, dy00) = field.lookup(x0, y0);
-    let (dx10, dy10) = field.lookup(x1, y0);
-    let (dx01, dy01) = field.lookup(x0, y1);
-    let (dx11, dy11) = field.lookup(x1, y1);
+    // Four corner flow vectors — bounds already validated above, use unchecked.
+    let (dx00, dy00) = unsafe { field.lookup_unchecked(x0, y0) };
+    let (dx10, dy10) = unsafe { field.lookup_unchecked(x1, y0) };
+    let (dx01, dy01) = unsafe { field.lookup_unchecked(x0, y1) };
+    let (dx11, dy11) = unsafe { field.lookup_unchecked(x1, y1) };
 
     // Bilinear interpolation (pre-compute complement weights to avoid redundant subtractions).
     let omx = 1.0 - dx;

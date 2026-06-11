@@ -72,6 +72,32 @@ impl MuxBfs {
             }
         }
     }
+
+    /// Zero-alloc variant of `step` that reuses a caller-provided `LeafPaths` buffer.
+    ///
+    /// The `leaves` buffer is cleared and refilled each call, retaining its heap
+    /// capacity across BFS steps — the biggest allocation hot-spot in the BFS loop.
+    pub fn step_into(
+        &self,
+        tree: &mut MuxDdTree,
+        depth: usize,
+        logits_by_leaf: &[Vec<f32>],
+        leaves: &mut crate::mux::dd_tree::LeafPaths,
+    ) {
+        tree.collect_leaf_paths_flat_into(leaves);
+        assert_eq!(
+            leaves.len(),
+            logits_by_leaf.len(),
+            "logits count must match leaf count"
+        );
+
+        for i in 0..leaves.len() {
+            let width = self.detect_width(&logits_by_leaf[i]);
+            if tree.pruner.is_valid(&logits_by_leaf[i], depth) {
+                tree.expand_node(leaves.path(i), &logits_by_leaf[i], width);
+            }
+        }
+    }
 }
 
 #[cfg(test)]

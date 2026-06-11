@@ -65,11 +65,14 @@ impl MuxDemuxVerifier {
             }
         }
 
-        // Single allocation: collect sorted-by-weight tokens into result Vec.
-        let mut out_tokens = Vec::with_capacity(len);
+        // Single allocation: collect sorted-by-weight tokens into result Vec
+        // via stack buffer + extend_from_slice — avoids per-element push overhead.
+        let mut tmp: [u32; MAX_DEMUX_K] = [0; MAX_DEMUX_K];
         for i in 0..len {
-            out_tokens.push(pairs[i].0);
+            tmp[i] = pairs[i].0;
         }
+        let mut out_tokens = Vec::with_capacity(len);
+        out_tokens.extend_from_slice(&tmp[..len]);
 
         DemuxResult {
             tokens: out_tokens,
@@ -119,11 +122,14 @@ impl MuxDemuxVerifier {
             }
         }
 
-        // Extract sorted-by-weight tokens into caller buffer.
-        out_tokens.clear();
+        // Extract sorted-by-weight tokens into caller buffer
+        // via stack buffer + extend_from_slice — avoids per-element push overhead.
+        let mut tmp: [u32; MAX_DEMUX_K] = [0; MAX_DEMUX_K];
         for i in 0..len {
-            out_tokens.push(pairs[i].0);
+            tmp[i] = pairs[i].0;
         }
+        out_tokens.clear();
+        out_tokens.extend_from_slice(&tmp[..len]);
 
         DemuxResult {
             tokens: out_tokens.clone(),

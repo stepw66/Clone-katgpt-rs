@@ -39,13 +39,14 @@ pub enum AndOrNode<G, S> {
     /// AND node: all children must succeed. Represents a decomposition.
     And {
         goal: G,
-        /// Partial solution assuming subgoals succeed.
-        sketch: Option<S>,
         children: Vec<AndOrNode<G, S>>,
         /// Bitfield: bit i = child i is solved. Avoids heap allocation for ≤64 children.
         solved_bits: u64,
         /// Number of set bits in `solved_bits`. Maintained incrementally for O(1) `is_solved`.
-        solved_count: usize,
+        /// u8 suffices: `solved_bits` is u64 so count ≤ 64.
+        solved_count: u8,
+        /// Partial solution assuming subgoals succeed.
+        sketch: Option<S>,
     },
     /// Leaf: a solved or unsolved atomic goal.
     Leaf { goal: G, solution: Option<S> },
@@ -69,10 +70,10 @@ impl<G, S> AndOrNode<G, S> {
     pub fn and(goal: G) -> Self {
         Self::And {
             goal,
-            sketch: None,
             children: Vec::new(),
             solved_bits: 0,
             solved_count: 0,
+            sketch: None,
         }
     }
 
@@ -105,7 +106,17 @@ impl<G, S> AndOrNode<G, S> {
     pub fn is_solved(&self) -> bool {
         match self {
             Self::Or { children, best, .. } => match best {
-                &Some(idx) => children.get(idx).is_some_and(|c| c.is_solved()),
+                &Some(idx) => {
+                    // `best` is maintained as always `< children.len()` when Some.
+                    // Use unchecked access on the hot path; fall back to safe only if
+                    // the invariant is somehow violated.
+                    if idx < children.len() {
+                        // SAFETY: idx < children.len() per structural invariant.
+                        unsafe { children.get_unchecked(idx).is_solved() }
+                    } else {
+                        children.get(idx).is_some_and(|c| c.is_solved())
+                    }
+                }
                 None => children.iter().any(|c| c.is_solved()),
             },
             Self::And {
@@ -116,7 +127,7 @@ impl<G, S> AndOrNode<G, S> {
                 if children.is_empty() {
                     return false;
                 }
-                *solved_count == children.len()
+                *solved_count as usize == children.len()
             }
             Self::Leaf { solution, .. } => solution.is_some(),
         }
@@ -180,18 +191,18 @@ impl<G, S> AndOrNode<G, S> {
     pub fn push_child(&mut self, child: AndOrNode<G, S>) {
         match self {
             Self::Or { children, .. } => {
+                children.reserve(1);
                 children.push(child);
             }
             Self::And {
                 children,
                 solved_bits: _,
-                solved_count,
+                solved_count: _,
                 ..
             } => {
                 children.push(child);
                 // solved_bits bit for new child is 0 (unsolved) by default.
                 // solved_count unchanged — new child is unsolved.
-                let _ = solved_count;
             }
             Self::Leaf { .. } => {}
         }
@@ -277,11 +288,15 @@ impl<G, S> AndOrNode<G, S> {
     /// Total number of nodes in this subtree (including self).
     #[inline]
     pub fn node_count(&self) -> usize {
-        1 + match self {
+        match self {
             Self::Or { children, .. } | Self::And { children, .. } => {
-                children.iter().map(|c| c.node_count()).sum::<usize>()
+                let mut total = 1usize;
+                for child in children {
+                    total += child.node_count();
+                }
+                total
             }
-            Self::Leaf { .. } => 0,
+            Self::Leaf { .. } => 1,
         }
     }
 
@@ -289,11 +304,19 @@ impl<G, S> AndOrNode<G, S> {
     #[inline]
     pub fn depth(&self) -> usize {
         match self {
-            Self::Or { children, .. } | Self::And { children, .. } => children
-                .iter()
-                .map(|c| c.depth())
-                .max()
-                .map_or(0, |d| 1 + d),
+            Self::Or { children, .. } | Self::And { children, .. } => {
+                if children.is_empty() {
+                    return 0;
+                }
+                let mut max_d = 0usize;
+                for child in children {
+                    let d = child.depth();
+                    if d > max_d {
+                        max_d = d;
+                    }
+                }
+                1 + max_d
+            }
             Self::Leaf { .. } => 0,
         }
     }
@@ -306,7 +329,11 @@ impl<G, S> AndOrNode<G, S> {
     pub fn solved_count(&self) -> usize {
         match self {
             Self::Or { children, .. } | Self::And { children, .. } => {
-                children.iter().map(|c| c.solved_count()).sum()
+                let mut count = 0usize;
+                for child in children {
+                    count += child.solved_count();
+                }
+                count
             }
             Self::Leaf { solution, .. } => solution.is_some() as usize,
         }
@@ -320,7 +347,11 @@ impl<G, S> AndOrNode<G, S> {
     pub fn unsolved_count(&self) -> usize {
         match self {
             Self::Or { children, .. } | Self::And { children, .. } => {
-                children.iter().map(|c| c.unsolved_count()).sum()
+                let mut count = 0usize;
+                for child in children {
+                    count += child.unsolved_count();
+                }
+                count
             }
             Self::Leaf { solution, .. } => solution.is_none() as usize,
         }

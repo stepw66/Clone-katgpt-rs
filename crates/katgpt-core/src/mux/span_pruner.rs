@@ -35,8 +35,9 @@ impl MuxSpanPruner {
         if peaks.len() < MIN_PEAKS {
             return false;
         }
-        for window in peaks.windows(2) {
-            if window[1] < window[0] * self.decay_rate {
+        // Manual indexed loop — avoids windows(2) iterator overhead for tiny k (≤16).
+        for i in 0..peaks.len() - 1 {
+            if peaks[i + 1] < peaks[i] * self.decay_rate {
                 return false;
             }
         }

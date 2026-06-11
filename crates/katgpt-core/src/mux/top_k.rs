@@ -50,8 +50,10 @@ pub fn extract_top_k_into<'a>(
         while pos < k && buf[pos] >= val {
             pos += 1;
         }
-        // Shift elements down
-        buf.copy_within(pos..k - 1, pos + 1);
+        // Shift elements down (skip if inserting at last position — no copy needed).
+        if pos < k - 1 {
+            buf.copy_within(pos..k - 1, pos + 1);
+        }
         buf[pos] = val;
     }
     &buf[..k]

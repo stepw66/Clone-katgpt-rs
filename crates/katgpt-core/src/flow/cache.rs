@@ -173,17 +173,39 @@ impl FlowFieldCache {
             let copy_len = words_per_row * hu;
             self.blocked_buf[..copy_len].copy_from_slice(&grid_blocked[..copy_len]);
         } else {
-            // Unaligned: per-cell copy needed
+            // Unaligned: word-at-a-time copy from flat source to row-aligned dest.
+            // Source bit layout: cell (x,y) → flat bit index y*w+x → word (y*w+x)/64.
+            // Dest bit layout:   cell (x,y) → word y*words_per_row + x/64, bit x%64.
+            let grid_blocked = grid.blocked();
+            let grid_words = grid_blocked.len();
             for y in 0..hu {
-                let grid_row_off = y * wu;
-                let buf_row_off = y * words_per_row;
-                for x in 0..wu {
-                    let cell = grid_row_off + x;
-                    let word = cell / 64;
-                    let bit = cell % 64;
-                    if grid.blocked()[word] & (1u64 << bit) != 0 {
-                        self.blocked_buf[buf_row_off + x / 64] |= 1u64 << (x % 64);
+                for wp in 0..words_per_row {
+                    let dest_idx = y * words_per_row + wp;
+                    let x_start = wp * 64;
+                    let x_end = (x_start + 64).min(wu);
+                    let cells_in_word = x_end - x_start;
+
+                    // Source flat bit position for start of this chunk
+                    let src_bit_start = y * wu + x_start;
+                    let src_word = src_bit_start / 64;
+                    let src_bit = (src_bit_start % 64) as u32;
+
+                    // Extract bits from source — may span two source words
+                    let mut w = if src_word < grid_words {
+                        grid_blocked[src_word] >> src_bit
+                    } else {
+                        0
+                    };
+                    if src_bit + (cells_in_word as u32) > 64 && src_word + 1 < grid_words {
+                        w |= grid_blocked[src_word + 1] << (64 - src_bit);
                     }
+
+                    // Mask to only the valid cells in this word
+                    if cells_in_word < 64 {
+                        w &= (1u64 << cells_in_word) - 1;
+                    }
+
+                    self.blocked_buf[dest_idx] = w;
                 }
             }
         }
@@ -208,14 +230,37 @@ impl FlowFieldCache {
                 grid_blocked[i] |= self.blocked_buf[i];
             }
         } else {
-            // Unaligned: per-cell copy needed
+            // Unaligned: word-at-a-time copy from row-aligned source back to flat dest.
+            // Reverse of the above: dest is flat bitstream, source is row-aligned.
+            let grid_blocked = grid.blocked_mut();
+            let grid_words = grid_blocked.len();
+            // Clear dest before OR-ing bits in
+            grid_blocked[..grid_words].fill(0);
             for y in 0..hu {
-                let grid_row_off = y * wu;
-                let buf_row_off = y * words_per_row;
-                for x in 0..wu {
-                    if self.blocked_buf[buf_row_off + x / 64] & (1u64 << (x % 64)) != 0 {
-                        let cell = grid_row_off + x;
-                        grid.blocked_mut()[cell / 64] |= 1u64 << (cell % 64);
+                for wp in 0..words_per_row {
+                    let src_idx = y * words_per_row + wp;
+                    let src_word = self.blocked_buf[src_idx];
+                    if src_word == 0 {
+                        continue; // Skip empty words
+                    }
+                    let x_start = wp * 64;
+                    let x_end = (x_start + 64).min(wu);
+                    let cells_in_word = x_end - x_start;
+
+                    // Dest flat bit position for start of this chunk
+                    let dst_bit_start = y * wu + x_start;
+                    let dst_word = dst_bit_start / 64;
+                    let dst_bit = (dst_bit_start % 64) as u32;
+
+                    // Write bits into dest — may span two dest words
+                    let masked = if cells_in_word < 64 {
+                        src_word & ((1u64 << cells_in_word) - 1)
+                    } else {
+                        src_word
+                    };
+                    grid_blocked[dst_word] |= masked << dst_bit;
+                    if dst_bit + (cells_in_word as u32) > 64 && dst_word + 1 < grid_words {
+                        grid_blocked[dst_word + 1] |= masked >> (64 - dst_bit);
                     }
                 }
             }
