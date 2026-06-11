@@ -386,6 +386,7 @@ impl<'a, P: ConstraintPruner> TrajectoryRefinedDraft<'a, P> {
     }
 
     /// Select refinement depth via UCB1 bandit (no context).
+    #[allow(dead_code)]
     fn select_refinement_depth(&self) -> usize {
         self.select_refinement_depth_with_context(true)
     }
