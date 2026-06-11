@@ -58,11 +58,11 @@ Implementation of `.issues/001_pruners_optimization.md` findings.
 - [ ] `lodestar` Bellman-Ford O(S²Σ) → BFS O(SΣ)
 - [ ] `curvature_alloc` lazy recompute for `recompute_influence`
 - [ ] `bfcp_region_cache` LFU eviction O(n) → min-heap/TinyLFU
-- [ ] `go/g_zero_player` `compute_go_delta` board_tokens Vec
+- [x] `go/g_zero_player` `compute_go_delta` board_tokens Vec
 - [ ] `go/state` `legal_moves()` accept pre-allocated buffer (caller `legal_moves_into` already exists)
 - [ ] `monopoly/systems` `build_ctx` → reusable DecisionContext buffer
 - [ ] `monopoly/mod` `square_kind()` → const lookup table (already `const fn` — no change needed)
-- [ ] `dungeon_pathfinder` pre-compute floor adjacency on construction
+- [x] `dungeon_pathfinder` pre-compute floor adjacency on construction
 - [x] `cna` `is_universal_excluded()` → HashSet (already uses HashSet)
 - [x] `decision_explainer` recompute totals per sensitivity (totals computed inline — minimal impact)
 - [x] `bfcf_types` BorelRegion field reordering (8-byte savings — not worth diff noise)

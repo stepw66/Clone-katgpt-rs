@@ -37,10 +37,33 @@ pub struct StairConnection {
 pub struct DungeonMap {
     pub floors: Vec<FloorGrid>,
     pub stairs: Vec<StairConnection>,
+    /// Pre-computed floor adjacency: `floor_adj[f]` = list of floors reachable from `f` via stairs.
+    /// Built once at construction time, avoiding O(|stairs|) rebuild per `bfs_floor_sequence` call.
+    pub floor_adj: Vec<Vec<usize>>,
     pub start: (usize, usize, usize),          // (floor, r, c)
     pub goal: (usize, usize, usize),           // (floor, r, c)
     pub monsters: Vec<(usize, usize, usize)>,  // (floor, r, c)
     pub treasures: Vec<(usize, usize, usize)>, // (floor, r, c)
+}
+
+/// Build floor adjacency list from stair connections.
+///
+/// Returns a Vec where `adj[f]` contains all floors directly reachable from floor `f`.
+pub(crate) fn build_floor_adj(num_floors: usize, stairs: &[StairConnection]) -> Vec<Vec<usize>> {
+    let mut adj = vec![Vec::new(); num_floors];
+    for stair in stairs {
+        let a = stair.from.0;
+        let b = stair.to.0;
+        if a < num_floors && b < num_floors {
+            if !adj[a].contains(&b) {
+                adj[a].push(b);
+            }
+            if !adj[b].contains(&a) {
+                adj[b].push(a);
+            }
+        }
+    }
+    adj
 }
 
 impl DungeonMap {
@@ -100,9 +123,13 @@ impl DungeonMap {
             floors.push(grid);
         }
 
+        // Build floor adjacency from stairs
+        let floor_adj = build_floor_adj(floors.len(), &stairs);
+
         Self {
             floors,
             stairs,
+            floor_adj,
             start,
             goal,
             monsters,
