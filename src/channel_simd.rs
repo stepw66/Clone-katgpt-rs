@@ -78,11 +78,8 @@ impl AlignedWeightMatrix {
     /// Dot product of a vector with row i, using only the original (unpadded) dimensions.
     pub fn dot_row(&self, vec: &[f32], row_idx: usize) -> f32 {
         let row = self.row(row_idx);
-        vec.iter()
-            .zip(row.iter())
-            .take(self.row_dim)
-            .map(|(v, r)| v * r)
-            .sum()
+        let len = self.row_dim.min(vec.len());
+        crate::simd::simd_dot_f32(&vec[..len], &row[..len], len)
     }
 
     /// Matrix-vector multiply: y = A * x.
@@ -93,20 +90,18 @@ impl AlignedWeightMatrix {
     /// Quantize a float row into the aligned matrix.
     /// Uses cache-line-aligned writes for SIMD-friendly layout.
     pub fn quantize_row(&mut self, row_idx: usize, data: &[f32]) {
-        assert!(row_idx < self.num_rows, "row index out of bounds");
+        debug_assert!(row_idx < self.num_rows, "row index out of bounds");
         let start = self.offsets[row_idx];
         let copy_len = data.len().min(self.row_dim);
         self.data[start..start + copy_len].copy_from_slice(&data[..copy_len]);
         // Zero-pad remainder
-        for i in copy_len..self.padded_dim {
-            self.data[start + i] = 0.0;
-        }
+        self.data[start + copy_len..start + self.padded_dim].fill(0.0);
     }
 
     /// Dequantize a row from the aligned matrix back to a target buffer.
     /// Only copies the original (unpadded) dimensions.
     pub fn dequantize_row(&self, row_idx: usize, out: &mut [f32]) {
-        assert!(row_idx < self.num_rows, "row index out of bounds");
+        debug_assert!(row_idx < self.num_rows, "row index out of bounds");
         let start = self.offsets[row_idx];
         let copy_len = out.len().min(self.row_dim);
         out[..copy_len].copy_from_slice(&self.data[start..start + copy_len]);
@@ -114,7 +109,7 @@ impl AlignedWeightMatrix {
 
     /// Batch matvec with pre-allocated output buffer (zero-alloc on repeated calls).
     pub fn matvec_into(&self, x: &[f32], out: &mut [f32]) {
-        assert_eq!(out.len(), self.num_rows, "output length mismatch");
+        debug_assert_eq!(out.len(), self.num_rows, "output length mismatch");
         for i in 0..self.num_rows {
             out[i] = self.dot_row(x, i);
         }

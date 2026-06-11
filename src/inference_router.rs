@@ -186,6 +186,19 @@ impl InferenceRouter {
         None
     }
 
+    fn signal_recompile_for_tier(&mut self, tier: ComputeTier) {
+        if matches!(tier, ComputeTier::CpuGpu | ComputeTier::CpuGpuAne)
+            && let Some(ref mut gpu) = self.gpu
+        {
+            gpu.recompile_hint();
+        }
+        if matches!(tier, ComputeTier::CpuGpuAne)
+            && let Some(ref mut ane) = self.ane
+        {
+            ane.recompile_hint();
+        }
+    }
+
     /// Run one forward pass, routing to the appropriate backend.
     ///
     /// Checks the [`TriggerGate`] for tier changes, selects the backend, and
@@ -202,17 +215,7 @@ impl InferenceRouter {
         if let Some(new_tier) = self.gate.evaluate() {
             log::info!("Router tier transition → {new_tier}");
             self.tier_transitions.fetch_add(1, Ordering::Relaxed);
-            // Signal recompile to GPU/ANE backends when they exist.
-            if matches!(new_tier, ComputeTier::CpuGpu | ComputeTier::CpuGpuAne)
-                && let Some(ref mut gpu) = self.gpu
-            {
-                gpu.recompile_hint();
-            }
-            if matches!(new_tier, ComputeTier::CpuGpuAne)
-                && let Some(ref mut ane) = self.ane
-            {
-                ane.recompile_hint();
-            }
+            self.signal_recompile_for_tier(new_tier);
         }
 
         let start = Instant::now();
@@ -529,16 +532,18 @@ impl InferenceRouter {
     /// tokens, reducing per-inference overhead. On CPU, this is equivalent to calling
     /// `forward()` in a loop but with a single tier evaluation.
     ///
-    /// Returns a vector of logit vectors, one per `(token, pos)` pair.
+    /// Returns a flat buffer of logits with `vocab_size` stride per token.
     /// Unlike `forward()`, this returns owned `Vec<f32>` because the borrow checker
     /// doesn't allow holding multiple mutable borrows of `ctx` across loop iterations.
+    ///
+    /// Layout: `[token0_logits, token1_logits, ...]` where each segment is `config.vocab_size` elements.
     pub fn forward_batch(
         &mut self,
         ctx: &mut ForwardContext,
         weights: &TransformerWeights,
         cache: &mut MultiLayerKVCache,
         tokens: &[(usize, usize)],
-    ) -> Vec<Vec<f32>> {
+    ) -> Vec<f32> {
         if tokens.is_empty() {
             return Vec::new();
         }
@@ -547,21 +552,14 @@ impl InferenceRouter {
         if let Some(new_tier) = self.gate.evaluate() {
             log::info!("Router batch tier transition → {new_tier}");
             self.tier_transitions.fetch_add(1, Ordering::Relaxed);
-            if matches!(new_tier, ComputeTier::CpuGpu | ComputeTier::CpuGpuAne)
-                && let Some(ref mut gpu) = self.gpu
-            {
-                gpu.recompile_hint();
-            }
-            if matches!(new_tier, ComputeTier::CpuGpuAne)
-                && let Some(ref mut ane) = self.ane
-            {
-                ane.recompile_hint();
-            }
+            self.signal_recompile_for_tier(new_tier);
         }
 
         let tier = self.gate.current_tier();
         let config = &self.config;
-        let mut results = Vec::with_capacity(tokens.len());
+        let vocab_size = config.vocab_size;
+        let batch_len = tokens.len();
+        let mut flat = Vec::with_capacity(batch_len * vocab_size);
 
         match tier {
             ComputeTier::CpuOnly | ComputeTier::CpuGpu | ComputeTier::CpuGpuAne => {
@@ -571,7 +569,7 @@ impl InferenceRouter {
                 for &(token, pos) in tokens {
                     let logits =
                         crate::transformer::forward(ctx, weights, cache, token, pos, config);
-                    results.push(logits.to_vec());
+                    flat.extend_from_slice(&logits[..vocab_size]);
                 }
                 let elapsed_us = batch_start.elapsed().as_micros() as u64;
                 // Record total batch time as a single inference for QPS estimation.
@@ -580,10 +578,10 @@ impl InferenceRouter {
         }
 
         self.total_inferences
-            .fetch_add(tokens.len() as u64, Ordering::Relaxed);
+            .fetch_add(batch_len as u64, Ordering::Relaxed);
         self.last_backend = "CPU";
 
-        results
+        flat
     }
 
     /// Borrow the inner [`TriggerGate`].
@@ -850,8 +848,7 @@ mod tests {
         let mut router = fast_router(false, false);
 
         let results = router.forward_batch(&mut ctx, &weights, &mut cache, &[(0, 0)]);
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0].len(), config.vocab_size);
+        assert_eq!(results.len(), config.vocab_size);
         assert_eq!(router.stats().total_inferences, 1);
     }
 
@@ -869,15 +866,7 @@ mod tests {
         let batch: Vec<(usize, usize)> = (0..5).map(|i| (i, i)).collect();
         let results = router.forward_batch(&mut ctx, &weights, &mut cache, &batch);
 
-        assert_eq!(results.len(), 5);
-        for (i, logits) in results.iter().enumerate() {
-            assert_eq!(
-                logits.len(),
-                config.vocab_size,
-                "logits[{}] wrong length",
-                i
-            );
-        }
+        assert_eq!(results.len(), 5 * config.vocab_size);
         assert_eq!(router.stats().total_inferences, 5);
     }
 
@@ -891,10 +880,10 @@ mod tests {
         let mut ctx1 = ForwardContext::new(&config);
         let mut cache1 = MultiLayerKVCache::new(&config);
         let mut router1 = fast_router(false, false);
-        let mut sequential_logits = Vec::new();
+        let mut sequential_flat = Vec::new();
         for i in 0..3 {
             let logits = router1.forward(&mut ctx1, &weights, &mut cache1, i, i);
-            sequential_logits.push(logits.to_vec());
+            sequential_flat.extend_from_slice(logits);
         }
 
         // Batch forward.
@@ -904,18 +893,12 @@ mod tests {
         let batch: Vec<(usize, usize)> = (0..3).map(|i| (i, i)).collect();
         let batch_logits = router2.forward_batch(&mut ctx2, &weights, &mut cache2, &batch);
 
-        assert_eq!(sequential_logits.len(), batch_logits.len());
-        for (i, (seq, batch)) in sequential_logits
-            .iter()
-            .zip(batch_logits.iter())
-            .enumerate()
-        {
-            for (j, (a, b)) in seq.iter().zip(batch.iter()).enumerate() {
-                assert!(
-                    (a - b).abs() < 1e-6,
-                    "logits mismatch at [{i}][{j}]: {a} vs {b}"
-                );
-            }
+        assert_eq!(sequential_flat.len(), batch_logits.len());
+        for (i, (a, b)) in sequential_flat.iter().zip(batch_logits.iter()).enumerate() {
+            assert!(
+                (a - b).abs() < 1e-6,
+                "logits mismatch at flat[{i}]: {a} vs {b}"
+            );
         }
     }
 

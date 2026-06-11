@@ -1352,7 +1352,7 @@ pub fn evaluate_accuracy(
     // OPT: pre-allocate bidirectional context to avoid per-sample heap allocation
     let mut bctx = BidirectionalContext::new(config);
     for tokens in test_data {
-        let _n_mask = corrupt_block_into(
+        let n_mask = corrupt_block_into(
             tokens,
             mask_ratio,
             config.mask_token,
@@ -1361,7 +1361,10 @@ pub fn evaluate_accuracy(
             &mut is_masked_buf,
             &mut positions_buf,
         );
-        let _ = forward_bidirectional_positions_into(weights, &corrupted_buf, config, &mut bctx);
+        if n_mask == 0 {
+            continue;
+        }
+        forward_bidirectional_positions_into(weights, &corrupted_buf, config, &mut bctx);
         let vocab = config.vocab_size;
         for (p, &masked) in is_masked_buf.iter().enumerate() {
             if !masked {
@@ -2053,7 +2056,7 @@ pub fn denoise_loop(
     let vocab = config.vocab_size;
 
     for step in 0..n_steps {
-        let _ = forward_bidirectional_positions_into(weights, &tokens, config, &mut bctx);
+        forward_bidirectional_positions_into(weights, &tokens, config, &mut bctx);
         let mut any_changed = false;
 
         // Rebuild constraint used-token set once per step

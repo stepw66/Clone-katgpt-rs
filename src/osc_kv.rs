@@ -103,28 +103,7 @@ impl OscKVCache {
         debug_assert_eq!(key.len(), self.kv_dim);
         debug_assert!(layer < self.n_layers);
         debug_assert!(pos < self.max_seq_len);
-
-        let l = &mut self.key_layers[layer];
-        let base = pos * self.kv_dim;
-        let dt = self.dt;
-
-        // IMEX step — per-channel damped harmonic oscillator
-        for i in 0..self.kv_dim {
-            let y_n = l.y[base + i];
-            let z_n = l.z[base + i];
-            let omega_sq = l.omega_sq[i];
-            let beta = l.beta[i];
-            let f = key[i];
-
-            // Explicit position update
-            let y_new = y_n + dt * z_n;
-
-            // Implicit velocity update: z_{n+1} = z_n + dt*(-ω²y_{n+1} - βz_n + f)
-            let z_new = z_n + dt * (-omega_sq * y_new - beta * z_n + f);
-
-            l.y[base + i] = y_new;
-            l.z[base + i] = z_new;
-        }
+        Self::store_into_layer(&mut self.key_layers[layer], pos, key, self.kv_dim, self.dt);
     }
 
     /// Store a value vector via IMEX step.
@@ -133,17 +112,25 @@ impl OscKVCache {
         debug_assert_eq!(value.len(), self.kv_dim);
         debug_assert!(layer < self.n_layers);
         debug_assert!(pos < self.max_seq_len);
+        Self::store_into_layer(
+            &mut self.val_layers[layer],
+            pos,
+            value,
+            self.kv_dim,
+            self.dt,
+        );
+    }
 
-        let l = &mut self.val_layers[layer];
-        let base = pos * self.kv_dim;
-        let dt = self.dt;
-
-        for i in 0..self.kv_dim {
+    /// IMEX step — per-channel damped harmonic oscillator.
+    #[inline]
+    fn store_into_layer(l: &mut OscKVLayer, pos: usize, data: &[f32], kv_dim: usize, dt: f32) {
+        let base = pos * kv_dim;
+        for i in 0..kv_dim {
             let y_n = l.y[base + i];
             let z_n = l.z[base + i];
             let omega_sq = l.omega_sq[i];
             let beta = l.beta[i];
-            let f = value[i];
+            let f = data[i];
 
             let y_new = y_n + dt * z_n;
             let z_new = z_n + dt * (-omega_sq * y_new - beta * z_n + f);
@@ -158,14 +145,7 @@ impl OscKVCache {
     pub fn dequantize_key_into(&mut self, layer: usize, pos: usize, out: &mut [f32]) {
         debug_assert_eq!(out.len(), self.kv_dim);
         debug_assert!(layer < self.n_layers);
-
-        let l = &self.key_layers[layer];
-        let base = pos * self.kv_dim;
-
-        for i in 0..self.kv_dim {
-            // Primary reconstruction from position, small velocity blend for fidelity
-            out[i] = l.y[base + i] + 0.1 * l.z[base + i];
-        }
+        Self::dequantize_from_layer(&self.key_layers[layer], pos, out, self.kv_dim);
     }
 
     /// Reconstruct value from position `y` with small velocity blend.
@@ -173,11 +153,13 @@ impl OscKVCache {
     pub fn dequantize_value_into(&mut self, layer: usize, pos: usize, out: &mut [f32]) {
         debug_assert_eq!(out.len(), self.kv_dim);
         debug_assert!(layer < self.n_layers);
+        Self::dequantize_from_layer(&self.val_layers[layer], pos, out, self.kv_dim);
+    }
 
-        let l = &self.val_layers[layer];
-        let base = pos * self.kv_dim;
-
-        for i in 0..self.kv_dim {
+    #[inline]
+    fn dequantize_from_layer(l: &OscKVLayer, pos: usize, out: &mut [f32], kv_dim: usize) {
+        let base = pos * kv_dim;
+        for i in 0..kv_dim {
             out[i] = l.y[base + i] + 0.1 * l.z[base + i];
         }
     }

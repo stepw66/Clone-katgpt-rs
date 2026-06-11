@@ -4,6 +4,8 @@ pub mod ane_backend;
 #[cfg(feature = "async_qdq_overlap")]
 pub mod async_qdq;
 pub mod benchmark;
+#[cfg(feature = "breakeven_routing")]
+pub mod breakeven;
 #[cfg(feature = "cache_prune")]
 pub mod cache_prune;
 #[cfg(feature = "channel_simd_align")]
@@ -131,6 +133,9 @@ pub mod llmexec_guard;
 
 #[cfg(feature = "validator")]
 pub mod validator;
+
+#[cfg(feature = "breakeven_routing")]
+pub use breakeven::{BreakevenBandit, BreakevenStats, BreakevenTierPair, BreakevenTracker};
 
 #[cfg(feature = "tf_loop")]
 pub mod tf_loop;

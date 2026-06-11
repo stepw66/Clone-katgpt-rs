@@ -86,14 +86,20 @@ impl StaticCalTable {
 
     /// Compute BLAKE3 commitment hash over all scales.
     pub fn commit(&mut self) {
-        let bytes: Vec<u8> = self.scales.iter().flat_map(|f| f.to_le_bytes()).collect();
-        self.commitment = blake3::hash(&bytes).into();
+        let mut hasher = blake3::Hasher::new();
+        for &scale in &self.scales {
+            hasher.update(&scale.to_le_bytes());
+        }
+        self.commitment = hasher.finalize().into();
     }
 
     /// Verify BLAKE3 commitment matches current scales.
     pub fn verify(&self) -> bool {
-        let bytes: Vec<u8> = self.scales.iter().flat_map(|f| f.to_le_bytes()).collect();
-        let expected: [u8; 32] = blake3::hash(&bytes).into();
+        let mut hasher = blake3::Hasher::new();
+        for &scale in &self.scales {
+            hasher.update(&scale.to_le_bytes());
+        }
+        let expected: [u8; 32] = hasher.finalize().into();
         self.commitment == expected
     }
 }

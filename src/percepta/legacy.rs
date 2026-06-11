@@ -513,7 +513,7 @@ impl StreamingSolver {
         self.cht_head.insert(
             [self.step as f64, filled as f64],
             [self.step as f64, 0.0],
-            self.step as i64,
+            self.step as i32,
         );
 
         self.step += 1;

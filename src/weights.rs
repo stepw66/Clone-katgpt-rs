@@ -12,6 +12,7 @@ use std::mem::size_of;
 use crate::transformer::TransformerWeights;
 
 /// Offset + length into the contiguous weight buffer for one weight matrix.
+#[repr(C)]
 #[derive(Debug, Clone, Copy)]
 struct WeightSlice {
     offset: usize,
@@ -19,6 +20,7 @@ struct WeightSlice {
 }
 
 /// Per-layer weight slice descriptors (offsets into the contiguous buffer).
+#[repr(C)]
 #[derive(Debug, Clone, Copy)]
 struct LayerSlices {
     wq: WeightSlice,
@@ -244,9 +246,21 @@ pub fn load_ternary_bits(path: &std::path::Path) -> std::io::Result<katgpt_core:
         ));
     }
 
-    let rows = u32::from_le_bytes(buf[8..12].try_into().unwrap()) as usize;
-    let cols = u32::from_le_bytes(buf[12..16].try_into().unwrap()) as usize;
-    let blocks64 = u32::from_le_bytes(buf[16..20].try_into().unwrap()) as usize;
+    let rows = u32::from_le_bytes(
+        buf[8..12]
+            .try_into()
+            .expect("header length validated above"),
+    ) as usize;
+    let cols = u32::from_le_bytes(
+        buf[12..16]
+            .try_into()
+            .expect("header length validated above"),
+    ) as usize;
+    let blocks64 = u32::from_le_bytes(
+        buf[16..20]
+            .try_into()
+            .expect("header length validated above"),
+    ) as usize;
 
     let expected_blocks = cols.div_ceil(64);
     if blocks64 != expected_blocks {

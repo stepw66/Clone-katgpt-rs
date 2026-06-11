@@ -48,7 +48,7 @@ pub struct TransformerConfig {
     /// FFN hidden dimension.
     pub d_ffn: usize,
     /// Stop token name (e.g., `"halt"`).
-    pub stop_token: String,
+    pub stop_token: &'static str,
     /// Maximum tokens to generate (safety limit).
     pub max_gen: usize,
 }
@@ -60,7 +60,7 @@ impl Default for TransformerConfig {
             n_heads: 18,
             n_layers: 7,
             d_ffn: 36,
-            stop_token: "halt".to_string(),
+            stop_token: "halt",
             max_gen: 5000,
         }
     }
@@ -337,7 +337,7 @@ impl VanillaTransformer {
         let gated = &mut scratch.gated;
 
         for layer_idx in 0..n_layers {
-            let seq = (pos * n_layers + layer_idx) as i64;
+            let seq = (pos * n_layers + layer_idx) as i32;
             let head_start = layer_idx * n_heads;
 
             // Attention sublayer
@@ -379,7 +379,7 @@ impl VanillaTransformer {
         &self,
         layer_idx: usize,
         residual: &[f64],
-        seq: i64,
+        seq: i32,
         heads: &mut [HardAttentionHead],
         qkv: &mut [f64],
         head_out: &mut [f64],
@@ -867,7 +867,7 @@ mod tests {
             n_heads: 2,
             n_layers: 1,
             d_ffn: 4,
-            stop_token: "halt".to_string(),
+            stop_token: "halt",
             max_gen: 10,
         };
         let vocab = TransformerVocab::new(
@@ -894,7 +894,7 @@ mod tests {
             n_heads,
             n_layers,
             d_ffn,
-            stop_token: "halt".to_string(),
+            stop_token: "halt",
             max_gen: 10,
         };
         let vocab = TransformerVocab::new(
@@ -921,7 +921,7 @@ mod tests {
             n_heads: 2,
             n_layers: 1,
             d_ffn: d,
-            stop_token: "halt".to_string(),
+            stop_token: "halt",
             max_gen: 5,
         };
         let vocab = TransformerVocab::new(vec!["halt".to_string(), "a".to_string()], "halt");
@@ -939,7 +939,7 @@ mod tests {
             n_heads: 2,
             n_layers: 1,
             d_ffn: 4,
-            stop_token: "halt".to_string(),
+            stop_token: "halt",
             max_gen: 10,
         };
         let vocab = TransformerVocab::new(vec!["halt".to_string()], "halt");
@@ -963,7 +963,7 @@ mod tests {
             n_heads: 2,
             n_layers: 1,
             d_ffn: d,
-            stop_token: "c".to_string(),
+            stop_token: "c",
             max_gen: 10,
         };
         let vocab = TransformerVocab::new(
@@ -984,7 +984,7 @@ mod tests {
             n_heads: 2,
             n_layers: 1,
             d_ffn: 4,
-            stop_token: "halt".to_string(),
+            stop_token: "halt",
             max_gen: 10,
         };
         let vocab = TransformerVocab::new(vec!["halt".to_string()], "halt");
@@ -1003,7 +1003,7 @@ mod tests {
             n_heads: 2,
             n_layers: 1,
             d_ffn: 4,
-            stop_token: "halt".to_string(),
+            stop_token: "halt",
             max_gen: 10,
         };
         let vocab = TransformerVocab::new(vec!["halt".to_string()], "halt");
@@ -1020,7 +1020,7 @@ mod tests {
             n_heads: 2,
             n_layers: 1,
             d_ffn: 4,
-            stop_token: "halt".to_string(),
+            stop_token: "halt",
             max_gen: 10,
         };
         let vocab = TransformerVocab::new(vec!["halt".to_string()], "halt");

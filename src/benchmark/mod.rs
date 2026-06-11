@@ -173,13 +173,13 @@ pub fn bench_category_title(cat: BenchCategory) -> &'static str {
 /// Single benchmark result.
 #[derive(Clone, Default)]
 pub struct BenchResult {
+    pub throughput: f64,
+    pub time_per_step_us: f64,
+    pub avg_acceptance_len: f64,
     pub label: String,
     /// Feature dimension tag (e.g. "SD", "KV", "Attn") for grouped plotting.
     /// Maps to the 10 feature dimensions from the Paper Feature Comparison Matrix.
     pub feature_dim: String,
-    pub throughput: f64,
-    pub time_per_step_us: f64,
-    pub avg_acceptance_len: f64,
     pub category: BenchCategory,
     pub color: (u8, u8, u8),
 }

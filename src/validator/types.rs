@@ -6,6 +6,7 @@ pub struct PruneResult {
 }
 
 /// Category of syntax error found during pruning.
+#[repr(u8)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum ErrorKind {
     /// No error — the sequence is valid.

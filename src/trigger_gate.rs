@@ -216,7 +216,10 @@ impl TriggerGate {
         if count == 0 {
             return 0.0;
         }
-        let start = self.window_start.lock().unwrap();
+        let start = self
+            .window_start
+            .lock()
+            .expect("window_start lock poisoned");
         let elapsed = start.elapsed().as_secs_f64();
         if elapsed < f64::EPSILON {
             return 0.0;
@@ -272,12 +275,55 @@ impl TriggerGate {
     /// Returns `Some(new_tier)` if a change is recommended, `None` otherwise.
     /// On a recommended change the internal counters are reset and the tier is updated.
     pub fn evaluate(&self) -> Option<ComputeTier> {
-        let mut last = self.last_tier_change.lock().unwrap();
+        let mut last = self
+            .last_tier_change
+            .lock()
+            .expect("last_tier_change lock poisoned");
         let min_interval =
             std::time::Duration::from_millis(self.config.min_tier_change_interval_ms);
 
+        // Compute QPS once to avoid double Mutex acquisition.
+        let qps = self.estimated_qps();
+        let depth = self.current_queue_depth.load(Ordering::Relaxed) as usize;
+        let current = self.current_tier();
+
         // Try promotion first — more conservative (prefer extra compute over dropped requests).
-        let candidate = self.should_promote().or_else(|| self.should_demote())?;
+        let candidate = match current {
+            ComputeTier::CpuOnly if self.gpu_available => {
+                if qps >= self.config.gpu_activate_qps || depth >= self.config.queue_depth_trigger {
+                    Some(ComputeTier::CpuGpu)
+                } else {
+                    None
+                }
+            }
+            ComputeTier::CpuGpu if self.ane_available => {
+                if qps >= self.config.ane_activate_qps
+                    || depth >= self.config.queue_depth_trigger * 2
+                {
+                    Some(ComputeTier::CpuGpuAne)
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+        .or_else(|| match current {
+            ComputeTier::CpuGpuAne => {
+                if qps < self.config.ane_activate_qps * self.config.hysteresis_factor {
+                    Some(ComputeTier::CpuGpu)
+                } else {
+                    None
+                }
+            }
+            ComputeTier::CpuGpu => {
+                if qps < self.config.gpu_activate_qps * self.config.hysteresis_factor {
+                    Some(ComputeTier::CpuOnly)
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        })?;
 
         // Enforce minimum interval between tier changes.
         if last.elapsed() < min_interval {
@@ -291,7 +337,10 @@ impl TriggerGate {
         // Reset measurement window.
         self.inference_count.store(0, Ordering::Relaxed);
         self.latency_sum_us.store(0, Ordering::Relaxed);
-        let mut window = self.window_start.lock().unwrap();
+        let mut window = self
+            .window_start
+            .lock()
+            .expect("window_start lock poisoned");
         *window = Instant::now();
 
         Some(candidate)
@@ -367,7 +416,7 @@ impl TriggerGateMonitor {
                     if stop_clone.load(Ordering::Acquire) {
                         break;
                     }
-                    let guard = gate_clone.lock().unwrap();
+                    let guard = gate_clone.lock().expect("gate lock poisoned");
                     let old_tier = guard.current_tier();
                     if let Some(new_tier) = guard.evaluate() {
                         log::info!(

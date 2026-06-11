@@ -185,7 +185,7 @@ fn apply_noise_schedule(
         let t = step as f32 / n_steps as f32;
         sigma = schedule_fn(t);
         // Consume RNG to simulate realistic noise application
-        let _ = rng.f32();
+        rng.f32();
     }
     sigma
 }

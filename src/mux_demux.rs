@@ -47,13 +47,15 @@ pub fn mux_demux(logits: &[f32], k: usize, decay: f32) -> Option<Vec<usize>> {
     let top_val = peaks[0].1;
 
     // Verify geometric decay ordering with 50% tolerance
+    let mut decay_acc = decay;
     for i in 1..peaks.len() {
-        let expected = top_val * decay.powi(i as i32);
+        let expected = top_val * decay_acc;
         let actual = peaks[i].1;
         let tolerance = expected.abs() * 0.5;
         if (actual - expected).abs() > tolerance {
             return None;
         }
+        decay_acc *= decay;
     }
 
     // Reject collapse: top peak should not be >20x the second
@@ -135,7 +137,7 @@ fn extract_top_k(data: &[f32], k: usize) -> Vec<(usize, f32)> {
     for (idx, &val) in data.iter().enumerate() {
         if top.len() < k {
             insert_sorted(&mut top, idx, val);
-        } else if val > top.last().unwrap().1 {
+        } else if val > top[k - 1].1 {
             let last = top.len() - 1;
             top[last] = (idx, val);
             bubble_up(&mut top, last);

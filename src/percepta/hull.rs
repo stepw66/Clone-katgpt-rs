@@ -63,7 +63,7 @@ impl HullHalf {
     /// Insert a key–value point `(kx, ky) → val` with sequence number.
     ///
     /// For the lower hull, the line is negated so `argmax` finds the minimum.
-    pub fn insert(&mut self, kx: f64, ky: f64, val: [f64; 2], seq: i64) {
+    pub fn insert(&mut self, kx: f64, ky: f64, val: [f64; 2], seq: i32) {
         let mut meta = HullMeta::new();
         meta.add(val, seq);
         match self.is_upper {
@@ -261,7 +261,7 @@ impl HardAttentionHead {
     ///
     /// The key is a 2D point `[kx, ky]`; the value is `[v0, v1]`.
     /// The sequence number is used for "latest" tie-breaking.
-    pub fn insert(&mut self, key: [f64; 2], val: [f64; 2], seq: i64) {
+    pub fn insert(&mut self, key: [f64; 2], val: [f64; 2], seq: i32) {
         let kx = key[0];
         let ky = key[1];
 
@@ -333,7 +333,7 @@ struct BruteEntry {
     kx: f64,
     ky: f64,
     val: [f64; 2],
-    seq: i64,
+    seq: i32,
 }
 
 impl Default for BruteAttentionHead {
@@ -373,7 +373,7 @@ impl BruteAttentionHead {
     }
 
     /// Insert a key–value pair with sequence number.
-    pub fn insert(&mut self, key: [f64; 2], val: [f64; 2], seq: i64) {
+    pub fn insert(&mut self, key: [f64; 2], val: [f64; 2], seq: i32) {
         self.entries.push(BruteEntry {
             kx: key[0],
             ky: key[1],
@@ -440,7 +440,7 @@ mod tests {
         };
 
         // Insert 50 random entries
-        for seq in 0..50i64 {
+        for seq in 0..50i32 {
             let kx = f64_range(&mut rng, -10.0, 10.0);
             let ky = f64_range(&mut rng, -10.0, 10.0);
             let v0 = f64_range(&mut rng, -1.0, 1.0);

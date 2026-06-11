@@ -213,7 +213,6 @@ pub struct NewtonSchulzScratch {
     a_mat: Vec<f32>,
     b_mat: Vec<f32>,
     bx: Vec<f32>,
-    at: Vec<f32>,
     xt_buf: Vec<f32>,
     /// Also used for non-square transpose temporaries
     gt_buf: Vec<f32>,
@@ -230,7 +229,6 @@ impl NewtonSchulzScratch {
             a_mat: vec![0.0; mm],
             b_mat: vec![0.0; mm],
             bx: vec![0.0; mn],
-            at: vec![0.0; mm],
             xt_buf: vec![0.0; mn],
             gt_buf: vec![0.0; mn],
             ort_buf: vec![0.0; mn],
@@ -249,7 +247,6 @@ impl NewtonSchulzScratch {
         grow_no_zero(&mut self.a_mat, mm);
         grow_no_zero(&mut self.b_mat, mm);
         grow_no_zero(&mut self.bx, mn);
-        grow_no_zero(&mut self.at, mm);
         grow_no_zero(&mut self.xt_buf, mn);
         grow_no_zero(&mut self.gt_buf, mn);
         grow_no_zero(&mut self.ort_buf, mn);
@@ -279,7 +276,6 @@ pub fn newton_schulz5_into(
                 a_mat,
                 b_mat,
                 bx,
-                at,
                 xt_buf,
                 gt_buf,
                 ort_buf,
@@ -293,7 +289,6 @@ pub fn newton_schulz5_into(
                 a_mat,
                 b_mat,
                 bx,
-                at,
                 xt_buf,
             );
         }
@@ -321,7 +316,6 @@ fn newton_schulz5_square_into(
         a_mat,
         b_mat,
         bx,
-        at,
         xt_buf,
         ..
     } = scratch;
@@ -334,7 +328,6 @@ fn newton_schulz5_square_into(
         &mut a_mat[..mm],
         &mut b_mat[..mm],
         &mut bx[..mn],
-        &mut at[..mm],
         &mut xt_buf[..mn],
     );
 }
@@ -350,7 +343,6 @@ fn newton_schulz5_square_into_raw(
     a_mat: &mut [f32],
     b_mat: &mut [f32],
     bx: &mut [f32],
-    at: &mut [f32],
     xt_buf: &mut [f32],
 ) {
     let mn = m * n;
@@ -368,7 +360,6 @@ fn newton_schulz5_square_into_raw(
     let a_mat = &mut a_mat[..mm];
     let b_mat = &mut b_mat[..mm];
     let bx = &mut bx[..mn];
-    let _at = &mut at[..mm]; // unused: A is symmetric, no transpose needed
     let xt_buf = &mut xt_buf[..mn];
 
     for _ in 0..ITERS {

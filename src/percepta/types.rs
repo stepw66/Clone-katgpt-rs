@@ -30,9 +30,9 @@ pub struct HullMeta {
     /// Most recent value by sequence number.
     pub vlast: [f64; 2],
     /// Highest sequence number seen.
-    pub last_seq: i64,
+    pub last_seq: i32,
     /// Number of merged points.
-    pub count: usize,
+    pub count: u32,
 }
 
 impl Default for HullMeta {
@@ -54,7 +54,7 @@ impl HullMeta {
 
     /// Merge a new value with the given sequence number.
     #[inline]
-    pub fn add(&mut self, val: [f64; 2], seq: i64) {
+    pub fn add(&mut self, val: [f64; 2], seq: i32) {
         self.vsum[0] += val[0];
         self.vsum[1] += val[1];
         self.count += 1;

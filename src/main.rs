@@ -397,7 +397,7 @@ fn percepta_cht_benchmark() {
         let mut cht = HardAttentionHead::new();
         let start = std::time::Instant::now();
         for (i, (x, y)) in points.iter().enumerate() {
-            cht.insert([*x as f64, *y as f64], [i as f64, 0.0], i as i64);
+            cht.insert([*x as f64, *y as f64], [i as f64, 0.0], i as i32);
         }
         let cht_insert = start.elapsed();
 
@@ -442,8 +442,10 @@ fn next_bench_index() -> u32 {
             entries
                 .filter_map(|e| e.ok())
                 .filter_map(|e| {
-                    let name = e.file_name().to_string_lossy().to_string();
-                    name.split('_').next().and_then(|n| n.parse::<u32>().ok())
+                    e.file_name()
+                        .to_str()
+                        .and_then(|name| name.split('_').next())
+                        .and_then(|n| n.parse::<u32>().ok())
                 })
                 .max()
                 .map(|n| n + 1)
