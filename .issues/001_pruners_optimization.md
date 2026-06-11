@@ -177,7 +177,7 @@ and identified cross-cutting themes.
 - [x] `decision_explainer.rs:511-536` — Recomputed totals per sensitivity call (pre-compute threshold, early return)
 - [x] `lodestar.rs:262-296` — Bellman-Ford O(S²Σ) → BFS O(SΣ)
 - [x] `curvature_alloc.rs:129` — Softmax scratch Vec alloc → pre-allocate
-- [ ] `curvature_alloc.rs:83-95` — Lazy recompute for `recompute_influence`
+- [x] `curvature_alloc.rs:83-95` — Lazy recompute for `recompute_influence` (ensure_influence with dirty flag)
 - [x] `count_min_sketch.rs:84-90` — f32 decay → integer math with shift
 - [x] `opus/types.rs:134` — Nested `Vec<Vec<f32>>` → flat with stride
 - [x] `opus/types.rs:357` — `unique_selected()` clone+sort+dedup → HashSet/bitmap
@@ -192,7 +192,7 @@ and identified cross-cutting themes.
 - [x] `go/state.rs:246-256` — `legal_moves()` → accept pre-allocated buffer (_into variant exists, callers migrated)
 - [x] `go/state.rs:405-432` — `flood_empty` HashSet for 2 values → bool pair
 - [x] `monopoly/systems.rs:70-151` — `build_ctx` → reusable DecisionContext buffer
-- [ ] `monopoly/mod.rs:532-576` — `square_kind()` → const lookup table
+- [x] `monopoly/mod.rs:532-576` — `square_kind()` → const lookup table (already const fn match, inlined by compiler)
 - [ ] `monopoly/group_squares` → return `&'static [u8]`
 - [ ] `dungeon_pathfinder.rs:225-231` — Pre-compute floor adjacency on construction
 - [x] `region_batch.rs:108` — `Vec::new()` → `Vec::with_capacity`
