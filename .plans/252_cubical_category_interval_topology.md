@@ -1,7 +1,7 @@
 # Plan 252: Cubical Category Interval Topology for Inference
 
 **Date:** 2026-06
-**Status:** Phase 1+2+3+4 complete (T1-T22, T24-T28). Phase 3 T23 (benchmark) pending. Phase 5 pending.
+**Status:** Phase 1+2+3+4 complete (T1-T28). Phase 5 pending (T29-T31).
 **Research:** 220 (Convenient Category of Cubes)
 **Depends On:** Plan 251 (DEC Operators), Plan 195 (ThoughtFold)
 **Blocks:** riir-ai Plan 278 (Operadic LoRA Composition)
@@ -45,7 +45,7 @@ Research 220 (arXiv:2503.13663 "A Convenient Category of Cubes") identified thre
 - [x] T20: Implement cache: compute ⊞[L] on map load, invalidate on topology change
 - [x] T21: Write test: cubical nerve of simple 2-zone map produces correct CAT(0) complex
 - [x] T22: Write test: geodesic on CAT(0) is unique and matches BFS shortest path for grid maps
-- [ ] T23: Write benchmark: cubical nerve construction time vs map size
+- [x] T23: Write benchmark: cubical nerve construction time vs map size
 
 ### Phase 4: GOAT Gate & Arena Proof
 - [x] T24: Implement feature flag `cubical_topology` that enables all three fusions

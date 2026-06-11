@@ -395,4 +395,60 @@ mod tests {
             }
         }
     }
+
+    // Helper: bushy poset where zone 0 < zone i for all i > 0.
+    // Creates many covering pairs (0, i) from the root.
+    fn bushy_poset(n: usize) -> ZonePoset {
+        let zones: Vec<ZoneId> = (0..n).map(za).collect();
+        let pairs: Vec<(ZoneId, ZoneId)> = (1..n).map(|i| (za(0), za(i))).collect();
+        ZonePoset::from_edges(zones, pairs)
+    }
+
+    /// Benchmarks cubical nerve construction time vs map size.
+    ///
+    /// Tests two poset topologies:
+    /// - **Chain**: worst case for Warshall transitive closure (linear order).
+    /// - **Bushy**: zone 0 < zone i for all i, maximising covering pairs.
+    ///
+    /// Asserts 100-zone chain construction < 100ms as a generous bound.
+    #[test]
+    fn bench_cubical_nerve_construction() {
+        let sizes = [10, 50, 100, 500];
+
+        // --- Chain poset (worst case for transitive closure) ---
+        for &n in &sizes {
+            let poset = chain_poset(n);
+            let start = std::time::Instant::now();
+            let _complex = std::hint::black_box(cubical_nerve(&poset));
+            let elapsed = start.elapsed();
+            println!("cubical_nerve(chain {} zones): {:?}", n, elapsed);
+        }
+
+        // --- Bushy poset (many covering pairs from single root) ---
+        for &n in &sizes {
+            let poset = bushy_poset(n);
+            let start = std::time::Instant::now();
+            let _complex = std::hint::black_box(cubical_nerve(&poset));
+            let elapsed = start.elapsed();
+            println!("cubical_nerve(bushy {} zones): {:?}", n, elapsed);
+        }
+
+        // Assert 100-zone chain completes within generous 100ms bound.
+        let poset = chain_poset(100);
+        let start = std::time::Instant::now();
+        let _ = cubical_nerve(&poset);
+        assert!(
+            start.elapsed().as_millis() < 100,
+            "100-zone chain construction took too long"
+        );
+
+        // Assert 100-zone bushy completes within generous 100ms bound.
+        let poset = bushy_poset(100);
+        let start = std::time::Instant::now();
+        let _ = cubical_nerve(&poset);
+        assert!(
+            start.elapsed().as_millis() < 100,
+            "100-zone bushy construction took too long"
+        );
+    }
 }
