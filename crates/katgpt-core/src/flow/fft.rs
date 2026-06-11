@@ -25,7 +25,8 @@ pub fn fft_smooth(grid: &mut [f32], w: usize, h: usize, cutoff: f32) {
     let n = w * h;
     let mut buf: Vec<Complex<f32>> = Vec::with_capacity(n);
     let mut col_buf: Vec<Complex<f32>> = Vec::with_capacity(h);
-    fft_smooth_into(grid, w, h, cutoff, &mut buf, &mut col_buf);
+    let mut planner = FftPlanner::new();
+    fft_smooth_into(grid, w, h, cutoff, &mut buf, &mut col_buf, &mut planner);
 }
 
 /// Pre-allocated variant of [`fft_smooth`].
@@ -34,6 +35,7 @@ pub fn fft_smooth(grid: &mut [f32], w: usize, h: usize, cutoff: f32) {
 /// dimensions can reuse scratch buffers across calls to avoid per-call
 /// allocation. The `buf` must have capacity `>= w * h` and `col_buf`
 /// must have capacity `>= h`; both are cleared and refilled internally.
+/// `planner` is reused across calls for cached FFT plan lookup.
 pub fn fft_smooth_into(
     grid: &mut [f32],
     w: usize,
@@ -41,6 +43,7 @@ pub fn fft_smooth_into(
     cutoff: f32,
     buf: &mut Vec<Complex<f32>>,
     col_buf: &mut Vec<Complex<f32>>,
+    planner: &mut FftPlanner<f32>,
 ) {
     assert!(
         grid.len() == w * h,
@@ -61,7 +64,6 @@ pub fn fft_smooth_into(
     buf.extend(grid.iter().map(|&v| Complex::new(v, 0.0)));
 
     // --- 2D FFT: rows then columns ---
-    let mut planner = FftPlanner::new();
     let row_fwd = planner.plan_fft_forward(w);
     let col_fwd = planner.plan_fft_forward(h);
 
@@ -306,7 +308,16 @@ mod tests {
 
         let mut buf = Vec::with_capacity(w * h);
         let mut col_buf = Vec::with_capacity(h);
-        fft_smooth_into(&mut grid_b, w, h, 0.25, &mut buf, &mut col_buf);
+        let mut planner = FftPlanner::new();
+        fft_smooth_into(
+            &mut grid_b,
+            w,
+            h,
+            0.25,
+            &mut buf,
+            &mut col_buf,
+            &mut planner,
+        );
 
         // Must produce identical output.
         for (i, (a, b)) in grid_a.iter().zip(grid_b.iter()).enumerate() {
@@ -315,7 +326,15 @@ mod tests {
 
         // Verify buffer reuse across calls.
         let mut grid_c = grid_a.clone();
-        fft_smooth_into(&mut grid_c, w, h, 0.25, &mut buf, &mut col_buf);
+        fft_smooth_into(
+            &mut grid_c,
+            w,
+            h,
+            0.25,
+            &mut buf,
+            &mut col_buf,
+            &mut planner,
+        );
         for (i, (a, c)) in grid_a.iter().zip(grid_c.iter()).enumerate() {
             assert!(
                 (a - c).abs() < 1e-6,

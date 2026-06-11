@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 
-use rustfft::num_complex::Complex;
+use rustfft::{FftPlanner, num_complex::Complex};
 
 use super::{
     FlowField, FlowFieldConfig, LeoPotentialGrid, fft_smooth_into, inflate_obstacles_with_snapshot,
@@ -30,6 +30,8 @@ pub struct FlowFieldCache {
     /// `goal_id → (FlowField, dirty_count, last_computed_tick)`.
     fields: HashMap<u64, CachedField>,
     config: FlowFieldConfig,
+    /// Pre-allocated FFT planner — reused across calls for cached FFT plans.
+    fft_planner: FftPlanner<f32>,
     /// Pre-allocated FFT scratch buffers — reused across calls to avoid per-compute allocation.
     fft_buf: Vec<Complex<f32>>,
     fft_col_buf: Vec<Complex<f32>>,
@@ -49,6 +51,7 @@ impl FlowFieldCache {
         Self {
             fields: HashMap::new(),
             config,
+            fft_planner: FftPlanner::new(),
             min_npcs: 1,
             fft_buf: Vec::new(),
             fft_col_buf: Vec::new(),
@@ -277,6 +280,7 @@ impl FlowFieldCache {
             self.config.cutoff,
             &mut self.fft_buf,
             &mut self.fft_col_buf,
+            &mut self.fft_planner,
         );
 
         // Write smoothed values back (bulk copy — same layout).
