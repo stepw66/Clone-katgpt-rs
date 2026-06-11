@@ -844,6 +844,7 @@ impl ConstraintPruner for ComposedPruner {
             .all(|p| p.is_valid(depth, token_idx, parent_tokens))
     }
 
+    #[cfg(not(feature = "lattice_operad"))]
     fn batch_is_valid(
         &self,
         depth: usize,
@@ -855,7 +856,7 @@ impl ConstraintPruner for ComposedPruner {
         // Initialize: all valid
         results[..len].fill(true);
 
-        // AND-reduce across all pruners
+        // AND-reduce across all pruners (ad-hoc)
         let mut buf = vec![false; len];
         for pruner in &self.pruners {
             pruner.batch_is_valid(depth, candidates, parent_tokens, &mut buf);
@@ -863,6 +864,73 @@ impl ConstraintPruner for ComposedPruner {
                 results[i] = results[i] && buf[i];
             }
         }
+    }
+
+    /// When `lattice_operad` feature is on, use canonical PrunerExpr composition
+    /// for batch evaluation. This builds a balanced AND-tree expression,
+    /// canonicalizes it (eliminating redundant evaluations via absorption/idempotency),
+    /// and evaluates per-candidate. For pure AND composition, the result is identical
+    /// to the ad-hoc loop, but the canonical form enables future OR/AND mixtures.
+    #[cfg(feature = "lattice_operad")]
+    fn batch_is_valid(
+        &self,
+        depth: usize,
+        candidates: &[usize],
+        parent_tokens: &[usize],
+        results: &mut [bool],
+    ) {
+        use crate::lattice_operad::{ComposedPruner as LatticeComposedPruner, PrunerExpr};
+
+        let len = candidates.len().min(results.len());
+        if len == 0 {
+            return;
+        }
+
+        // Build a balanced AND-tree expression from all sub-pruners
+        let expr = build_and_tree(self.pruners.len());
+        let pruner_refs: Vec<&dyn ConstraintPruner> =
+            self.pruners.iter().map(|p| p.as_ref()).collect();
+        let lattice_pruner = LatticeComposedPruner::from_expr(expr, pruner_refs);
+
+        // Delegate to lattice operad's batch eval
+        lattice_pruner.batch_is_valid(
+            depth,
+            &candidates[..len],
+            parent_tokens,
+            &mut results[..len],
+        );
+    }
+}
+
+/// Build a balanced AND-tree PrunerExpr from N atoms.
+///
+/// For N=1: Atom(0)
+/// For N=2: And(Atom(0), Atom(1))
+/// For N=4: And(And(Atom(0), Atom(1)), And(Atom(2), Atom(3)))
+///
+/// Balanced trees give better short-circuit behavior than left-chained.
+#[cfg(feature = "lattice_operad")]
+fn build_and_tree(n: usize) -> PrunerExpr {
+    match n {
+        0 => PrunerExpr::Atom(0), // degenerate: single atom, always valid
+        1 => PrunerExpr::Atom(0),
+        _ => build_and_tree_range(0, n),
+    }
+}
+
+#[cfg(feature = "lattice_operad")]
+fn build_and_tree_range(start: usize, end: usize) -> PrunerExpr {
+    let len = end - start;
+    if len == 1 {
+        PrunerExpr::Atom(start)
+    } else if len == 2 {
+        PrunerExpr::and(PrunerExpr::Atom(start), PrunerExpr::Atom(start + 1))
+    } else {
+        let mid = start + len / 2;
+        PrunerExpr::and(
+            build_and_tree_range(start, mid),
+            build_and_tree_range(mid, end),
+        )
     }
 }
 
