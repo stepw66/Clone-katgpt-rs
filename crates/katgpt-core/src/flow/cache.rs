@@ -7,7 +7,9 @@ use std::collections::HashMap;
 
 use rustfft::num_complex::Complex;
 
-use super::{FlowField, FlowFieldConfig, LeoPotentialGrid, fft_smooth_into, inflate_obstacles};
+use super::{
+    FlowField, FlowFieldConfig, LeoPotentialGrid, fft_smooth_into, inflate_obstacles_with_snapshot,
+};
 use crate::traits::LeoHead;
 
 /// Per-goal cached flow field with dirty-tracking metadata.
@@ -37,6 +39,8 @@ pub struct FlowFieldCache {
     potential_buf: Vec<f32>,
     /// Pre-allocated blocked bitfield buffer.
     blocked_buf: Vec<u64>,
+    /// Pre-allocated snapshot buffer for obstacle inflation (avoids per-call allocation).
+    snapshot_buf: Vec<u64>,
 }
 
 impl FlowFieldCache {
@@ -50,6 +54,7 @@ impl FlowFieldCache {
             fft_col_buf: Vec::new(),
             potential_buf: Vec::new(),
             blocked_buf: Vec::new(),
+            snapshot_buf: Vec::new(),
         }
     }
 
@@ -167,8 +172,12 @@ impl FlowFieldCache {
             }
         }
 
-        inflate_obstacles(
+        // Resize snapshot buffer in lockstep with blocked_buf.
+        self.snapshot_buf.resize(blocked_words, 0u64);
+
+        inflate_obstacles_with_snapshot(
             &mut self.blocked_buf,
+            &mut self.snapshot_buf,
             grid_w,
             grid_h,
             self.config.obstacle_radius,
@@ -189,7 +198,8 @@ impl FlowFieldCache {
         self.potential_buf.resize(total_cells, 0.0);
         for y in 0..grid_h {
             for x in 0..grid_w {
-                self.potential_buf[(y as usize) * (grid_w as usize) + (x as usize)] = grid.potential(x, y);
+                self.potential_buf[(y as usize) * (grid_w as usize) + (x as usize)] =
+                    grid.potential(x, y);
             }
         }
 

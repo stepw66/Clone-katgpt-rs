@@ -217,18 +217,24 @@ pub fn fft_smooth_into(
 }
 
 /// Morphological dilation of blocked cells by `radius`.
+/// Inflate obstacles with a caller-provided snapshot buffer (zero-allocation on hot path).
 ///
-/// Expands obstacle regions so the FFT-smoothed gradient never points
-/// into a wall. Operates on a bitfield stored as `u64` words
-/// (64 cells per word, row-major).
-///
-/// Uses double-buffer to avoid order-dependent dilation without allocation.
-pub fn inflate_obstacles(blocked: &mut [u64], w: u16, h: u16, radius: u8) {
+/// `snapshot` must have the same length as `blocked`. The original blocked state is
+/// copied into `snapshot` at the start, then read from `snapshot` while writing to `blocked`.
+/// This avoids per-call heap allocation when the caller reuses a pre-allocated buffer.
+pub fn inflate_obstacles_with_snapshot(
+    blocked: &mut [u64],
+    snapshot: &mut [u64],
+    w: u16,
+    h: u16,
+    radius: u8,
+) {
     let wu = w as usize;
     let hu = h as usize;
     let words_per_row = (wu + 63) / 64;
     let total_words = words_per_row * hu;
     assert!(blocked.len() >= total_words, "blocked bitfield too small");
+    assert!(snapshot.len() >= total_words, "snapshot bitfield too small");
 
     let r = radius as i32;
     if r == 0 {
@@ -236,13 +242,13 @@ pub fn inflate_obstacles(blocked: &mut [u64], w: u16, h: u16, radius: u8) {
     }
 
     // Snapshot original state to avoid order-dependent dilation.
-    let src = blocked.to_vec();
+    snapshot[..total_words].copy_from_slice(&blocked[..total_words]);
 
     for y in 0..hu {
         for x in 0..wu {
             let word_idx = y * words_per_row + x / 64;
             let bit = x % 64;
-            if src[word_idx] & (1u64 << bit) != 0 {
+            if snapshot[word_idx] & (1u64 << bit) != 0 {
                 // Already blocked — expand neighbors
                 let y_min = (y as i32 - r).max(0) as usize;
                 let y_max = (y as i32 + r).min(hu as i32 - 1) as usize;
@@ -257,6 +263,18 @@ pub fn inflate_obstacles(blocked: &mut [u64], w: u16, h: u16, radius: u8) {
             }
         }
     }
+}
+
+/// Convenience wrapper that allocates a snapshot internally (backward compatible).
+pub fn inflate_obstacles(blocked: &mut [u64], w: u16, h: u16, radius: u8) {
+    let wu = w as usize;
+    let hu = h as usize;
+    let words_per_row = (wu + 63) / 64;
+    let total_words = words_per_row * hu;
+    assert!(blocked.len() >= total_words, "blocked bitfield too small");
+
+    let mut snapshot = blocked.to_vec();
+    inflate_obstacles_with_snapshot(blocked, &mut snapshot, w, h, radius);
 }
 
 #[cfg(test)]

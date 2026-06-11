@@ -58,7 +58,7 @@ impl MuxBfs {
     /// Run one BFS expansion step on the tree: expand all leaves with
     /// the provided per-leaf logit distributions.
     pub fn step(&self, tree: &mut MuxDdTree, depth: usize, logits_by_leaf: &[Vec<f32>]) {
-        let leaves = tree.collect_leaf_paths();
+        let leaves = tree.collect_leaf_paths_flat();
         assert_eq!(
             leaves.len(),
             logits_by_leaf.len(),
@@ -68,7 +68,7 @@ impl MuxBfs {
         for i in 0..leaves.len() {
             let width = self.detect_width(&logits_by_leaf[i]);
             if tree.pruner.is_valid(&logits_by_leaf[i], depth) {
-                tree.expand_node(&leaves[i], &logits_by_leaf[i], width);
+                tree.expand_node(leaves.path(i), &logits_by_leaf[i], width);
             }
         }
     }

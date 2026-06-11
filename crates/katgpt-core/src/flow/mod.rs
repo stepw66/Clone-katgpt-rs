@@ -9,7 +9,7 @@ mod fft;
 pub mod steering;
 
 pub use cache::FlowFieldCache;
-pub use fft::{fft_smooth, fft_smooth_into, inflate_obstacles};
+pub use fft::{fft_smooth, fft_smooth_into, inflate_obstacles, inflate_obstacles_with_snapshot};
 pub use steering::{blend_steering, flow_steering, should_use_flow_field};
 
 // ---------------------------------------------------------------------------
@@ -254,13 +254,13 @@ impl LeoPotentialGrid {
                 // Gradient (flow toward higher potential)
                 let dx = vx_right - vx_left;
                 let dy = vy_down - vy_up;
-
-                // Branch-free normalization
-                let len = (dx * dx + dy * dy).sqrt();
-                let scale = 1.0 / len.max(1e-8);
-                let is_zero = (len <= 1e-8) as u8 as f32;
-                let ndx = dx * scale * (1.0 - is_zero);
-                let ndy = dy * scale * (1.0 - is_zero);
+                let len_sq = dx * dx + dy * dy;
+                if len_sq < 1e-8f32 {
+                    continue; // flat gradient — leave as (0, 0)
+                }
+                let len = len_sq.sqrt();
+                let ndx = dx / len;
+                let ndy = dy / len;
 
                 let idx = cell * 2;
                 field.flow[idx] = ndx;

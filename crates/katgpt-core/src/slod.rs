@@ -123,6 +123,14 @@ pub fn poincare_distance(a: &[f32], b: &[f32], dim: usize) -> f32 {
 ///
 /// a ⊕ b = ((1 + 2<a,b> + ||b||²)a + (1 - ||a||²)b) / (1 + 2<a,b> + ||a||²||b||²)
 fn mobius_add(a: &[f32], b: &[f32], dim: usize) -> Vec<f32> {
+    let mut result = vec![0.0f32; dim];
+    mobius_add_into(&mut result, a, b, dim);
+    result
+}
+
+/// In-place Möbius addition — zero-allocation hot path.
+#[inline]
+fn mobius_add_into(result: &mut [f32], a: &[f32], b: &[f32], dim: usize) {
     let norm_a_sq = simd_dot_f32(a, a, dim).min(1.0 - 1e-5);
     let norm_b_sq = simd_dot_f32(b, b, dim).min(1.0 - 1e-5);
     let a_dot_b = simd_dot_f32(a, b, dim);
@@ -133,11 +141,9 @@ fn mobius_add(a: &[f32], b: &[f32], dim: usize) -> Vec<f32> {
     let s1 = (1.0 + 2.0 * a_dot_b + norm_b_sq) * inv_denom;
     let s2 = (1.0 - norm_a_sq) * inv_denom;
 
-    let mut result = vec![0.0f32; dim];
     for i in 0..dim {
         result[i] = s1 * a[i] + s2 * b[i];
     }
-    result
 }
 
 /// Riemannian log map: project `point` onto the tangent space at `base`.
@@ -145,22 +151,48 @@ fn mobius_add(a: &[f32], b: &[f32], dim: usize) -> Vec<f32> {
 /// Returns a tangent vector in T_base B^n.
 /// log_x(y) = (d(x,y) / ||(-x) ⊕ y||) · ((-x) ⊕ y)
 pub fn log_map(base: &[f32], point: &[f32], dim: usize) -> Vec<f32> {
+    let mut out = vec![0.0f32; dim];
+    let mut neg_base = vec![0.0f32; dim];
+    let mut mob_result = vec![0.0f32; dim];
+    log_map_into(&mut out, &mut neg_base, &mut mob_result, base, point, dim);
+    out
+}
+
+/// In-place log map — zero-allocation hot path.
+///
+/// Scratch buffers: `neg_base[dim]`, `mob_result[dim]`.
+#[inline]
+pub fn log_map_into(
+    out: &mut [f32],
+    neg_base: &mut [f32],
+    mob_result: &mut [f32],
+    base: &[f32],
+    point: &[f32],
+    dim: usize,
+) {
     let dist = poincare_distance(base, point, dim);
     if dist < 1e-10 {
-        return vec![0.0; dim];
+        out[..dim].fill(0.0);
+        return;
     }
 
-    // Möbius addition: (-base) ⊕ point
-    let neg_base: Vec<f32> = base.iter().map(|&x| -x).collect();
-    let mob = mobius_add(&neg_base, point, dim);
-    let mob_norm = simd_dot_f32(&mob, &mob, dim).sqrt();
+    // neg_base = -base
+    for i in 0..dim {
+        neg_base[i] = -base[i];
+    }
+
+    mobius_add_into(mob_result, neg_base, point, dim);
+    let mob_norm = simd_dot_f32(mob_result, mob_result, dim).sqrt();
 
     if mob_norm < 1e-10 {
-        return vec![0.0; dim];
+        out[..dim].fill(0.0);
+        return;
     }
 
     let scale = dist / mob_norm;
-    mob.iter().map(|&v| v * scale).collect()
+    for i in 0..dim {
+        out[i] = mob_result[i] * scale;
+    }
 }
 
 /// Riemannian exp map: project tangent vector back to the Poincaré ball.
@@ -168,37 +200,60 @@ pub fn log_map(base: &[f32], point: &[f32], dim: usize) -> Vec<f32> {
 /// exp_x(v) = x ⊕ tanh(||v||/2) / ||v|| · v
 /// where the tangent vector v encodes the conformal factor from log_map.
 pub fn exp_map(base: &[f32], tangent: &[f32], dim: usize) -> Vec<f32> {
+    let mut out = vec![0.0f32; dim];
+    let mut dir = vec![0.0f32; dim];
+    let mut mob_result = vec![0.0f32; dim];
+    exp_map_into(&mut out, &mut dir, &mut mob_result, base, tangent, dim);
+    out
+}
+
+/// In-place exp map — zero-allocation hot path.
+///
+/// Scratch buffers: `dir[dim]`, `mob_result[dim]`.
+#[inline]
+pub fn exp_map_into(
+    out: &mut [f32],
+    dir: &mut [f32],
+    mob_result: &mut [f32],
+    base: &[f32],
+    tangent: &[f32],
+    dim: usize,
+) {
     let _norm_base_sq = simd_dot_f32(base, base, dim).min(1.0 - 1e-5);
     let tangent_norm = simd_dot_f32(tangent, tangent, dim).sqrt();
 
     if tangent_norm < 1e-10 {
-        return base.to_vec();
+        out[..dim].copy_from_slice(&base[..dim]);
+        return;
     }
 
     // Compute direction: tanh(||v||/2) * v/||v||
     let s = (tangent_norm / 2.0).tanh() / tangent_norm;
-    let mut dir = vec![0.0f32; dim];
     for i in 0..dim {
         dir[i] = s * tangent[i];
     }
 
     // Project dir into ball
-    let dir_norm_sq = simd_dot_f32(&dir, &dir, dim);
+    let dir_norm_sq = simd_dot_f32(dir, dir, dim);
     if dir_norm_sq >= 1.0 - 1e-5 {
         let scale = (1.0 - 1e-5) / dir_norm_sq.sqrt();
-        dir.iter_mut().for_each(|v| *v *= scale);
+        for i in 0..dim {
+            dir[i] *= scale;
+        }
     }
 
     // Möbius addition: base ⊕ dir
-    let result = mobius_add(base, &dir, dim);
+    mobius_add_into(mob_result, base, dir, dim);
 
     // Final clamp into ball
-    let norm_r_sq = simd_dot_f32(&result, &result, dim);
+    let norm_r_sq = simd_dot_f32(mob_result, mob_result, dim);
     if norm_r_sq >= 1.0 - 1e-5 {
         let scale = (1.0 - 1e-5) / norm_r_sq.sqrt();
-        result.iter().map(|v| v * scale).collect()
+        for i in 0..dim {
+            out[i] = mob_result[i] * scale;
+        }
     } else {
-        result
+        out[..dim].copy_from_slice(&mob_result[..dim]);
     }
 }
 
@@ -227,17 +282,20 @@ impl SlodOperator {
 
         // Build kNN adjacency + weight matrix
         let mut w = vec![0.0f32; n * n];
+        // Pre-allocate distance buffer — reused across iterations
+        let mut dists: Vec<(usize, f32)> = Vec::with_capacity(n);
 
         for i in 0..n {
             let a_i = &embeddings[i * dim..(i + 1) * dim];
             // Compute distances to all other points
-            let mut dists: Vec<(usize, f32)> = (0..n)
-                .filter(|&j| j != i)
-                .map(|j| {
-                    let a_j = &embeddings[j * dim..(j + 1) * dim];
-                    (j, poincare_distance(a_i, a_j, dim))
-                })
-                .collect();
+            dists.clear();
+            for j in 0..n {
+                if j == i {
+                    continue;
+                }
+                let a_j = &embeddings[j * dim..(j + 1) * dim];
+                dists.push((j, poincare_distance(a_i, a_j, dim)));
+            }
             dists.sort_unstable_by(|a, b| {
                 a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal)
             });
@@ -277,10 +335,12 @@ impl SlodOperator {
         // top_k_eigenvectors returns [k_eigs * n] row-major eigenvectors
         // We need eigenvalues too — compute from Lap * v = λ * v
         let mut eigenvalues = Vec::with_capacity(k_eigs);
+        // Pre-allocate Lv buffer — reused across eigenvectors
+        let mut lv = vec![0.0f32; n];
         for eig_idx in 0..k_eigs {
+            lv[..n].fill(0.0);
             let v = &eigvecs[eig_idx * n..(eig_idx + 1) * n];
             // Compute Lv
-            let mut lv = vec![0.0f32; n];
             crate::simd::simd_matvec(&mut lv, &lap, v, n, n);
             // λ = (v^T Lv) / (v^T v)
             let numerator = simd_dot_f32(v, &lv, n);
@@ -357,10 +417,12 @@ impl SlodOperator {
         let mut v_signal = vec![0.0f32; n_sigma];
         let mut d_signal = vec![0.0f32; n_sigma];
         let mut c_signal = vec![0.0f32; n_sigma];
+        // Pre-allocate weights — reused across sigma iterations
+        let mut weights = vec![0.0f32; n];
 
         for (si, &sigma) in sigmas.iter().enumerate() {
             // Compute heat kernel weights for each node
-            let mut weights = vec![0.0f32; n];
+            weights[..n].fill(0.0);
             let mut _total_energy = 0.0f32;
 
             for k in 0..k_eigs {
@@ -412,10 +474,12 @@ impl SlodOperator {
         zscore_into(&d_signal, &mut z_d);
         zscore_into(&c_signal, &mut z_c);
 
-        // Composite score
-        let composite: Vec<f32> = (0..n_sigma)
-            .map(|i| config.alpha[0] * z_v[i] + config.alpha[1] * z_d[i] + config.alpha[2] * z_c[i])
-            .collect();
+        // Composite score (pre-allocated)
+        let mut composite = vec![0.0f32; n_sigma];
+        for i in 0..n_sigma {
+            composite[i] =
+                config.alpha[0] * z_v[i] + config.alpha[1] * z_d[i] + config.alpha[2] * z_c[i];
+        }
 
         // MAD peak picker
         mad_peak_picker(&composite, &sigmas, eigenvalues, config)
@@ -450,36 +514,58 @@ pub fn heat_kernel_weights(
     n: usize,
     dim: usize,
 ) -> Vec<f32> {
+    let mut weights = vec![0.0f32; n];
+    heat_kernel_weights_into(
+        &mut weights,
+        eigenvalues,
+        eigenvectors,
+        query,
+        sigma,
+        n,
+        dim,
+    );
+    weights
+}
+
+/// In-place heat kernel weights — zero-allocation hot path.
+#[inline]
+pub fn heat_kernel_weights_into(
+    weights: &mut [f32],
+    eigenvalues: &[f32],
+    eigenvectors: &[f32],
+    query: &[f32],
+    sigma: f32,
+    n: usize,
+    dim: usize,
+) {
     let k_eigs = eigenvalues.len();
     if k_eigs == 0 || n == 0 {
-        return vec![0.0; n];
+        return;
     }
 
     // Project query onto eigenvectors: ⟨φ_k, query⟩
     // query has dimension `dim`, but eigenvectors have dimension `n`
     // We use the first min(dim, n) components
     let proj_dim = dim.min(n);
-    let mut query_coeffs = vec![0.0f32; k_eigs];
-    for k in 0..k_eigs {
-        let v = &eigenvectors[k * n..(k + 1) * n];
-        if proj_dim > 0 && proj_dim <= n {
-            query_coeffs[k] = simd_dot_f32(&query[..proj_dim], &v[..proj_dim], proj_dim);
-        }
+    if proj_dim == 0 {
+        return;
     }
 
-    // Accumulate weights
-    let mut weights = vec![0.0f32; n];
+    weights[..n].fill(0.0);
+
     for k in 0..k_eigs {
-        let decay = (-eigenvalues[k] * sigma).exp();
-        let coeff_sq = query_coeffs[k] * query_coeffs[k];
-        let amp = decay * coeff_sq;
         let v = &eigenvectors[k * n..(k + 1) * n];
+        let coeff = if proj_dim <= n {
+            simd_dot_f32(&query[..proj_dim], &v[..proj_dim], proj_dim)
+        } else {
+            0.0
+        };
+        let decay = (-eigenvalues[k] * sigma).exp();
+        let amp = decay * coeff * coeff;
         for i in 0..n {
             weights[i] += amp * v[i];
         }
     }
-
-    weights
 }
 
 // ── Fréchet Mean (SIMD-accelerated) ───────────────────────────────
@@ -523,18 +609,34 @@ pub fn frechet_mean(
 
     let weight_sum: f32 = weights.iter().sum();
 
+    // Pre-allocate scratch buffers once — reused across iterations
+    let mut avg_tangent = vec![0.0f32; dim];
+    let mut log_neg_base = vec![0.0f32; dim];
+    let mut log_mob = vec![0.0f32; dim];
+    let mut log_out = vec![0.0f32; dim];
+    let mut exp_dir = vec![0.0f32; dim];
+    let mut exp_mob = vec![0.0f32; dim];
+    let mut exp_out = vec![0.0f32; dim];
+
     for _ in 0..config.max_iterations {
         // Weighted average of log-maps in tangent space
-        let mut avg_tangent = vec![0.0f32; dim];
+        avg_tangent[..dim].fill(0.0);
 
         for i in 0..n {
             if weights[i] < 1e-10 {
                 continue;
             }
             let point = &embeddings[i * dim..(i + 1) * dim];
-            let tangent = log_map(&mu, point, dim);
+            log_map_into(
+                &mut log_out,
+                &mut log_neg_base,
+                &mut log_mob,
+                &mu,
+                point,
+                dim,
+            );
             for d in 0..dim {
-                avg_tangent[d] += weights[i] * tangent[d];
+                avg_tangent[d] += weights[i] * log_out[d];
             }
         }
 
@@ -550,9 +652,21 @@ pub fn frechet_mean(
             break;
         }
 
-        // Exp step
-        let step_tangent: Vec<f32> = avg_tangent.iter().map(|&v| v * config.step_size).collect();
-        mu = exp_map(&mu, &step_tangent, dim);
+        // Scale in-place instead of allocating step_tangent
+        for v in avg_tangent.iter_mut() {
+            *v *= config.step_size;
+        }
+
+        // Exp step — result goes into exp_out, then copy to mu
+        exp_map_into(
+            &mut exp_out,
+            &mut exp_dir,
+            &mut exp_mob,
+            &mu,
+            &avg_tangent,
+            dim,
+        );
+        mu[..dim].copy_from_slice(&exp_out[..dim]);
     }
 
     mu

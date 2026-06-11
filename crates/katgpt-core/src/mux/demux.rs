@@ -30,6 +30,21 @@ impl MuxDemuxVerifier {
     /// Demultiplex a superposition: given token IDs and weights,
     /// return them sorted by weight (descending) and verify uniqueness.
     pub fn demux(&self, tokens: &[u32], weights: &[f32]) -> DemuxResult {
+        let mut buf = Vec::with_capacity(tokens.len());
+        self.demux_into(tokens, weights, &mut buf)
+    }
+
+    /// Zero-alloc demultiplexing into a caller-provided buffer.
+    ///
+    /// `out_tokens` must have capacity >= `tokens.len()`.
+    /// Returns a `DemuxResult` whose `tokens` field is a clone of the written
+    /// slice (so the caller retains ownership of the buffer).
+    pub fn demux_into(
+        &self,
+        tokens: &[u32],
+        weights: &[f32],
+        out_tokens: &mut Vec<u32>,
+    ) -> DemuxResult {
         assert_eq!(tokens.len(), weights.len());
         let n = tokens.len();
         if n == 0 {
@@ -48,9 +63,9 @@ impl MuxDemuxVerifier {
         pairs[..len]
             .sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
-        // Extract sorted tokens + inline duplicate check.
+        // Extract sorted tokens into caller buffer + inline duplicate check.
         // O(k²) scan is fine for k ≤ 32 — trivially fits in L1 cache.
-        let mut sorted_tokens = Vec::with_capacity(len);
+        out_tokens.clear();
         let mut is_unique = true;
         for i in 0..len {
             let token = pairs[i].0;
@@ -62,11 +77,11 @@ impl MuxDemuxVerifier {
                     }
                 }
             }
-            sorted_tokens.push(token);
+            out_tokens.push(token);
         }
 
         DemuxResult {
-            tokens: sorted_tokens,
+            tokens: out_tokens.clone(),
             is_unique,
         }
     }

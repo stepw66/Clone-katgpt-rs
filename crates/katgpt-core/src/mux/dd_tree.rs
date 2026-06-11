@@ -189,6 +189,7 @@ impl MuxDdTree {
         let peaks = extract_top_k_into(logits, self.k, &mut buf);
         let effective_width = width.min(peaks.len()).max(1);
 
+        node.children.reserve(effective_width);
         for i in 0..effective_width {
             // Distribute peaks across children: each child gets a shifted view
             let offset = (i * self.k / effective_width).min(peaks.len());
@@ -286,13 +287,17 @@ impl MuxDdTree {
             // SAFETY: node_ptr comes from valid tree references that outlive this fn.
             let node = unsafe { &*node_ptr };
             if node.is_leaf() {
-                paths.buf.extend_from_within(path_start..path_start + path_len);
+                paths
+                    .buf
+                    .extend_from_within(path_start..path_start + path_len);
                 paths.offsets.push(paths.buf.len());
             } else {
                 for (i, child) in node.children.iter().enumerate().rev() {
                     let child_path_start = paths.buf.len();
                     // Append parent path + this child index
-                    paths.buf.extend_from_within(path_start..path_start + path_len);
+                    paths
+                        .buf
+                        .extend_from_within(path_start..path_start + path_len);
                     paths.buf.push(i);
                     stack.push((child as *const _, child_path_start, path_len + 1));
                 }
