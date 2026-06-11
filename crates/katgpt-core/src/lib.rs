@@ -11,6 +11,8 @@
 pub mod attention;
 #[cfg(feature = "coda_fusion")]
 pub mod coda;
+#[cfg(feature = "dec_operators")]
+pub mod dec;
 #[cfg(feature = "parallax_attn")]
 pub mod parallax_attn;
 pub mod shard_embedding;
