@@ -136,6 +136,59 @@ impl PlackettLuceConfig {
     }
 }
 
+// ── GibbsScratch ──────────────────────────────────────────────
+
+/// Pre-allocated scratch buffers for Gibbs sampling.
+/// Reuse across `rate()` calls to avoid per-call heap allocation.
+/// Call `prepare(n)` before each call to ensure buffers are sized correctly.
+///
+/// # Usage
+///
+/// ```rust,ignore
+/// let mut scratch = GibbsScratch::new();
+/// let elos = rater.rate(&sketches, &rankings, &mut rng, Some(&mut scratch));
+/// // scratch reused for next call — no reallocation if n <= previous n
+/// ```
+pub struct GibbsScratch {
+    lambda: Vec<f64>,
+    r: Vec<f64>,
+    lambda_sum: Vec<f64>,
+    appearances: Vec<Vec<(usize, usize)>>,
+}
+
+impl GibbsScratch {
+    /// Create empty scratch space (no allocation until first `prepare()`).
+    pub fn new() -> Self {
+        Self {
+            lambda: Vec::new(),
+            r: Vec::new(),
+            lambda_sum: Vec::new(),
+            appearances: Vec::new(),
+        }
+    }
+
+    /// Ensure all buffers are sized for `n` sketches.
+    /// Grows if needed; never shrinks (reuse across calls).
+    fn prepare(&mut self, n: usize) {
+        self.lambda.resize(n, 1.0);
+        self.r.resize(n, 1.0);
+        self.lambda_sum.resize(n, 0.0);
+        // Appearances inner vecs must be cleared but capacity preserved.
+        if self.appearances.len() < n {
+            self.appearances.resize_with(n, Vec::new);
+        }
+        for vec in &mut self.appearances[..n] {
+            vec.clear();
+        }
+    }
+}
+
+impl Default for GibbsScratch {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 // ── PlackettLuceRater ──────────────────────────────────────────
 
 /// Plackett-Luce rater — converts multi-item rankings to Elo via Gibbs sampling.
@@ -212,6 +265,20 @@ impl PlackettLuceRater {
         rankings: &[Vec<usize>],
         rng: &mut Rng,
     ) -> HashMap<SketchId, f64> {
+        self.rate_with_scratch(sketches, rankings, rng, None)
+    }
+
+    /// Rate sketches with optional pre-allocated scratch buffers.
+    ///
+    /// Pass `Some(&mut GibbsScratch)` to reuse buffers across calls.
+    /// First call allocates; subsequent calls with `n <= previous_n` reuse.
+    pub fn rate_with_scratch(
+        &self,
+        sketches: &[SketchEntry],
+        rankings: &[Vec<usize>],
+        rng: &mut Rng,
+        scratch: Option<&mut GibbsScratch>,
+    ) -> HashMap<SketchId, f64> {
         let n = sketches.len();
         if n == 0 {
             return HashMap::new();
@@ -227,21 +294,28 @@ impl PlackettLuceRater {
             }
         }
 
-        // Initialize λ and r from prior
-        let mut lambda = vec![1.0f64; n];
-        let mut r = vec![1.0f64; n];
+        // Use scratch if provided, otherwise allocate fresh.
+        let mut owned_scratch;
+        let buf: &mut GibbsScratch = match scratch {
+            Some(s) => s,
+            None => {
+                owned_scratch = GibbsScratch::new();
+                &mut owned_scratch
+            }
+        };
+        buf.prepare(n);
+
+        let lambda = &mut buf.lambda[..n];
+        let r = &mut buf.r[..n];
+        let lambda_sum = &mut buf.lambda_sum[..n];
+        let sketch_appearances = &mut buf.appearances[..n];
 
         // Pre-compute sketch appearances in rankings
-        // sketch_appearances[s] = [(ranking_idx, position_in_ranking), ...]
-        let mut sketch_appearances: Vec<Vec<(usize, usize)>> = vec![Vec::new(); n];
         for (r_idx, ranking) in rankings.iter().enumerate() {
             for (pos_in_ranking, &sketch_idx) in ranking.iter().enumerate() {
                 sketch_appearances[sketch_idx].push((r_idx, pos_in_ranking));
             }
         }
-
-        // Accumulator for post-burn-in λ samples
-        let mut lambda_sum = vec![0.0f64; n];
 
         // Gibbs sampling
         let effective_samples = self.config.effective_samples() as f64;
@@ -250,7 +324,7 @@ impl PlackettLuceRater {
             // Update each λ_s
             for s in 0..n {
                 let (wins, exposure) =
-                    self.compute_stats(s, &sketch_appearances[s], rankings, &lambda);
+                    self.compute_stats(s, &sketch_appearances[s], rankings, lambda);
 
                 // λ_s | data, r_s ~ Gamma(1 + wins, r_s + exposure)
                 let shape = 1.0 + wins as f64;

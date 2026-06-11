@@ -21,7 +21,7 @@ pub use goal_cache::{GoalHash, GoalResult, ProofGoalCache, ProofGoalSnapshot};
 pub use parallelism::{
     ParallelismGuard, SketchSelectionStrategy, select_strategy, should_use_population,
 };
-pub use plackett_luce::{PlackettLuceConfig, PlackettLuceRater};
+pub use plackett_luce::{GibbsScratch, PlackettLuceConfig, PlackettLuceRater};
 pub use sketch_population::{EvictionReport, PopulationConfig, SketchPopulation};
 pub use sketch_sampler::{
     DEFAULT_EPSILON, DEFAULT_EXPLORATION_C, SketchSampler, SketchSamplerConfig,

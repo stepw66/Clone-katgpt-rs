@@ -16,11 +16,61 @@ use katgpt_core::{HydraBudgetConfig, HydraLayerProfile};
 #[allow(dead_code)]
 const MAX_LAYERS: usize = 128;
 
+/// Fixed-size bitmask for layer skip decisions.
+/// `[u64; 2]` covers up to 128 layers (matching `MAX_LAYERS`).
+/// Bit `l` set ⇒ skip layer `l`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SkipBitmask {
+    bits: [u64; 2],
+}
+
+impl SkipBitmask {
+    /// All-zero bitmask (no layers skipped).
+    #[inline]
+    pub const fn new() -> Self {
+        Self { bits: [0; 2] }
+    }
+
+    /// Set bit `l` (skip layer `l`).
+    #[inline]
+    pub fn set(&mut self, l: usize) {
+        let word = l / 64;
+        if word < 2 {
+            self.bits[word] |= 1 << (l % 64);
+        }
+    }
+
+    /// Check bit `l`. Returns `false` for out-of-bounds indices.
+    #[inline]
+    pub fn get(&self, l: usize) -> bool {
+        let word = l / 64;
+        if word < 2 {
+            (self.bits[word] >> (l % 64)) & 1 != 0
+        } else {
+            false
+        }
+    }
+
+    /// Count set bits (number of skipped layers).
+    #[inline]
+    pub fn count(&self) -> usize {
+        self.bits.iter().map(|w| w.count_ones() as usize).sum()
+    }
+
+    /// Total number of addressable layers.
+    #[inline]
+    pub const fn capacity(&self) -> usize {
+        128
+    }
+}
+
 /// Pre-computed set of layers to skip, derived from HydraLayerProfile calibration.
 #[derive(Clone, Debug)]
 pub struct HydraSkipPlan {
-    /// Bitmask: skip_layers[l] = true ⇒ skip layer l.
-    pub skip_layers: Vec<bool>,
+    /// Bitmask: bit `l` set ⇒ skip layer `l`.
+    pub skip_layers: SkipBitmask,
+    /// Number of layers in the model (determines valid bit range).
+    pub n_layers: usize,
     /// Cumulative DE thresholds for early termination.
     pub cumulative_de: Vec<f32>,
     /// Total DE across all layers.
@@ -47,7 +97,7 @@ pub fn hydra_layer_skip(
     config: &HydraBudgetConfig,
 ) -> HydraSkipPlan {
     let n = profiles.len();
-    let mut skip_layers = vec![false; n];
+    let mut skip_layers = SkipBitmask::new();
 
     for (l, profile) in profiles.iter().enumerate() {
         // Never skip Hydra backup layers — they self-repair other layers' damage.
@@ -60,12 +110,12 @@ pub fn hydra_layer_skip(
         }
         // Skip erasure MLPs during draft if configured.
         if config.skip_erasure_draft && profile.is_erasure {
-            skip_layers[l] = true;
+            skip_layers.set(l);
             continue;
         }
         // Skip layers with negligible |DE|.
         if profile.mean_de.abs() < config.skip_threshold {
-            skip_layers[l] = true;
+            skip_layers.set(l);
         }
     }
 
@@ -80,6 +130,7 @@ pub fn hydra_layer_skip(
 
     HydraSkipPlan {
         skip_layers,
+        n_layers: n,
         cumulative_de,
         total_de,
     }
@@ -87,11 +138,11 @@ pub fn hydra_layer_skip(
 
 /// Compute which layers to skip based on plan, and determine early exit point.
 pub fn hydra_adaptive_budget(skip_plan: &HydraSkipPlan, num_layers: usize) -> HydraBudgetResult {
-    let n = skip_plan.skip_layers.len().min(num_layers);
+    let n = skip_plan.n_layers.min(num_layers);
     let mut skipped = Vec::new();
 
     for l in 0..n {
-        if skip_plan.skip_layers[l] {
+        if skip_plan.skip_layers.get(l) {
             skipped.push(l);
         }
     }
@@ -125,11 +176,7 @@ pub fn hydra_adaptive_budget(skip_plan: &HydraSkipPlan, num_layers: usize) -> Hy
 /// Single array index + bool check — zero allocation, suitable for hot path.
 #[inline]
 pub fn should_skip_layer(skip_plan: &HydraSkipPlan, layer_idx: usize) -> bool {
-    skip_plan
-        .skip_layers
-        .get(layer_idx)
-        .copied()
-        .unwrap_or(false)
+    skip_plan.skip_layers.get(layer_idx)
 }
 
 // ── Stage-Aware Skip (T14, Plan 165) ─────────────────────────
@@ -380,8 +427,14 @@ mod tests {
         let config = HydraBudgetConfig::default();
         let plan = hydra_layer_skip(&profiles, &config);
 
-        assert!(!plan.skip_layers[0], "backup layer should NOT be skipped");
-        assert!(plan.skip_layers[1], "negligible layer should be skipped");
+        assert!(
+            !plan.skip_layers.get(0),
+            "backup layer should NOT be skipped"
+        );
+        assert!(
+            plan.skip_layers.get(1),
+            "negligible layer should be skipped"
+        );
     }
 
     #[test]

@@ -7,6 +7,7 @@
 
 use super::bfcf_types::{BFCP, BorelRegion, RegionLabel};
 use crate::speculative::types::ScreeningPruner;
+use std::sync::Arc;
 
 // ── compute_preimage ────────────────────────────────────────────
 
@@ -41,37 +42,37 @@ pub fn compute_preimage(
 
                 if accept_count > 0 && reject_count == 0 {
                     // All tokens pass → upgrade to Accept
-                    refined.push(BorelRegion::new(
+                    refined.push(BorelRegion::from_arc(
                         RegionLabel::Accept,
-                        region.constraints.clone(),
+                        Arc::clone(&region.constraints),
                         accept_count,
                     ));
                 } else if reject_count > 0 && accept_count == 0 {
                     // All tokens fail → downgrade to Reject
-                    refined.push(BorelRegion::new(
+                    refined.push(BorelRegion::from_arc(
                         RegionLabel::Reject,
-                        region.constraints.clone(),
+                        Arc::clone(&region.constraints),
                         reject_count,
                     ));
                 } else if accept_count > 0 {
                     // Split: both accept and reject tokens exist
                     // Accept sub-region
-                    refined.push(BorelRegion::new(
+                    refined.push(BorelRegion::from_arc(
                         RegionLabel::Accept,
-                        region.constraints.clone(),
+                        Arc::clone(&region.constraints),
                         accept_count,
                     ));
                     // Reject sub-region
-                    refined.push(BorelRegion::new(
+                    refined.push(BorelRegion::from_arc(
                         RegionLabel::Reject,
-                        region.constraints.clone(),
+                        Arc::clone(&region.constraints),
                         reject_count,
                     ));
                 } else {
                     // No tokens in region (edge case) → Reject
-                    refined.push(BorelRegion::new(
+                    refined.push(BorelRegion::from_arc(
                         RegionLabel::Reject,
-                        region.constraints.clone(),
+                        Arc::clone(&region.constraints),
                         0,
                     ));
                 }
