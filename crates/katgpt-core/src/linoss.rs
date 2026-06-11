@@ -42,7 +42,8 @@ impl LinOSSCell {
     /// y' = y + dt * z   (explicit)
     /// z' = z + dt * (-ω² * y' - β * z + forcing)   (implicit on y')
     ///
-    /// Allocating version — see `imex_step_inplace` for zero-alloc alternative.
+    /// **Note**: This allocates two `Vec<f32>` per call. Prefer `imex_step_inplace`
+    /// on hot paths (inference loops, speculative decoding) to reuse pre-allocated buffers.
     #[inline]
     pub fn imex_step(&self, state: &LinOSSState, forcing: &[f32], dt: f32) -> LinOSSState {
         let h = self.hidden_dim;
@@ -187,26 +188,32 @@ impl LinOSSCell {
             }
         }
 
-        // Apply each prefix to initial state.
-        let mut results = Vec::with_capacity(n);
+        // Pre-allocate all result states upfront — batch allocation, write in-place.
+        let mut results: Vec<LinOSSState> = (0..n)
+            .map(|_| LinOSSState {
+                y: vec![0.0f32; h],
+                z: vec![0.0f32; h],
+            })
+            .collect();
         for step in 0..n {
             let base = step * h;
-            let mut y = vec![0.0f32; h];
-            let mut z = vec![0.0f32; h];
+            let state = &mut results[step];
             for j in 0..h {
-                y[j] = scratch.pa[base + j] * initial.y[j]
+                state.y[j] = scratch.pa[base + j] * initial.y[j]
                     + scratch.pb[base + j] * initial.z[j]
                     + scratch.pby[base + j];
-                z[j] = scratch.pc[base + j] * initial.y[j]
+                state.z[j] = scratch.pc[base + j] * initial.y[j]
                     + scratch.pd[base + j] * initial.z[j]
                     + scratch.pbz[base + j];
             }
-            results.push(LinOSSState { y, z });
         }
         results
     }
 
     /// Sequential scan — simple loop for correctness reference and small sequences.
+    ///
+    /// Pre-allocates all result states upfront, writes directly via `split_at_mut`
+    /// to avoid double-buffer overhead and initial state clone.
     #[inline]
     fn sequential_scan(
         &self,
@@ -216,23 +223,44 @@ impl LinOSSCell {
     ) -> Vec<LinOSSState> {
         let h = self.hidden_dim;
         let n = forcings.len();
-        let mut results = Vec::with_capacity(n);
-        // Pre-allocate double buffers for ping-pong (avoids 2 allocs per step).
-        let mut y_buf = vec![0.0f32; h];
-        let mut z_buf = vec![0.0f32; h];
-        let mut y_cur = initial.y.clone();
-        let mut z_cur = initial.z.clone();
-
-        for forcing in forcings.iter().take(n) {
-            self.imex_step_inplace(&y_cur, &z_cur, forcing, dt, &mut y_buf, &mut z_buf);
-            // Clone buf into results (unavoidable — LinOSSState owns its Vec).
-            results.push(LinOSSState {
-                y: y_buf.clone(),
-                z: z_buf.clone(),
-            });
-            // Swap buffers for next iteration.
-            std::mem::swap(&mut y_cur, &mut y_buf);
-            std::mem::swap(&mut z_cur, &mut z_buf);
+        if n == 0 {
+            return vec![];
+        }
+        // Pre-allocate all result states upfront — batch allocation, write in-place.
+        let mut results: Vec<LinOSSState> = (0..n)
+            .map(|_| LinOSSState {
+                y: vec![0.0f32; h],
+                z: vec![0.0f32; h],
+            })
+            .collect();
+        // Step 0: from initial state directly into results[0].
+        //
+        // imex_step_inplace needs &mut y and &mut z of the same LinOSSState.
+        // We can't borrow fields of results[0] mutably at the same time, so
+        // we destructure the struct to get disjoint mutable references.
+        {
+            let LinOSSState {
+                y: ref mut y_out,
+                z: ref mut z_out,
+            } = results[0];
+            self.imex_step_inplace(&initial.y, &initial.z, forcings[0], dt, y_out, z_out);
+        }
+        // Steps 1..n: read results[i-1], write results[i].
+        // split_at_mut provides disjoint borrows to satisfy borrow checker.
+        for step in 1..n {
+            let (prev, cur) = results.split_at_mut(step);
+            let LinOSSState {
+                y: ref mut y_out,
+                z: ref mut z_out,
+            } = cur[0];
+            self.imex_step_inplace(
+                &prev[step - 1].y,
+                &prev[step - 1].z,
+                forcings[step],
+                dt,
+                y_out,
+                z_out,
+            );
         }
         results
     }
@@ -343,6 +371,10 @@ pub struct VocabFourierBasis {
 
 impl VocabFourierBasis {
     /// Compute top-K Fourier modes from vocabulary embeddings via DFT dot-product.
+    ///
+    /// Two-phase approach: compute magnitudes for all candidates with a single
+    /// pre-allocated scratch buffer, then recompute modes only for top-K.
+    /// Avoids storing n_candidates full mode vectors during sorting.
     pub fn from_embeddings(embeddings: &[&[f32]], k: usize) -> Self {
         if embeddings.is_empty() {
             return Self {
@@ -355,14 +387,40 @@ impl VocabFourierBasis {
 
         let n = embeddings.len();
         let vocab_dim = embeddings[0].len();
-
-        // Candidate frequencies: sample across Nyquist range.
         let n_candidates = (n * 2).min(256);
-        let mut candidates: Vec<(f32, Vec<f32>)> = Vec::with_capacity(n_candidates);
+
+        // Phase 1: compute magnitudes with single pre-allocated scratch buffer.
+        let mut cos_mode = vec![0.0f32; vocab_dim];
+        let mut magnitudes: Vec<(f32, usize)> = Vec::with_capacity(n_candidates);
 
         for ci in 0..n_candidates {
             let omega = std::f32::consts::PI * (ci as f32 + 1.0) / n as f32;
-            let mut cos_mode = vec![0.0f32; vocab_dim];
+            cos_mode.fill(0.0);
+            for (i, emb) in embeddings.iter().enumerate() {
+                let cos_w = (omega * i as f32).cos();
+                for (d, cos_slot) in cos_mode.iter_mut().enumerate().take(vocab_dim) {
+                    *cos_slot += emb[d] * cos_w;
+                }
+            }
+            let inv_n = 1.0 / n as f32;
+            let mut mag_sq = 0.0f32;
+            for val in cos_mode.iter_mut().take(vocab_dim) {
+                *val *= inv_n;
+                mag_sq += *val * *val;
+            }
+            magnitudes.push((mag_sq.sqrt(), ci));
+        }
+
+        // Sort by magnitude descending, take top-K indices.
+        magnitudes.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+        magnitudes.truncate(k);
+
+        // Phase 2: compute modes only for top-K (reuse cos_mode buffer).
+        let mut modes = Vec::with_capacity(magnitudes.len());
+        let mut frequencies = Vec::with_capacity(magnitudes.len());
+        for &(_mag, ci) in &magnitudes {
+            let omega = std::f32::consts::PI * (ci as f32 + 1.0) / n as f32;
+            cos_mode.fill(0.0);
             for (i, emb) in embeddings.iter().enumerate() {
                 let cos_w = (omega * i as f32).cos();
                 for (d, cos_slot) in cos_mode.iter_mut().enumerate().take(vocab_dim) {
@@ -373,20 +431,9 @@ impl VocabFourierBasis {
             for val in cos_mode.iter_mut().take(vocab_dim) {
                 *val *= inv_n;
             }
-            let mag: f32 = cos_mode.iter().map(|v| v * v).sum::<f32>().sqrt();
-            candidates.push((mag, cos_mode));
+            modes.push(cos_mode.clone());
+            frequencies.push(omega);
         }
-
-        // Sort by magnitude descending, take top-K.
-        candidates.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
-        candidates.truncate(k);
-
-        let modes: Vec<Vec<f32>> = candidates.iter().map(|(_, mode)| mode.clone()).collect();
-        let frequencies: Vec<f32> = candidates
-            .iter()
-            .enumerate()
-            .map(|(i, _)| std::f32::consts::PI * (i as f32 + 1.0) / n as f32)
-            .collect();
         let k = modes.len();
 
         Self {
@@ -448,6 +495,8 @@ pub struct ModalSpecDrafter {
     hidden_dim: usize,
     /// Stored embeddings for nearest-token lookup.
     embeddings: Vec<Vec<f32>>,
+    /// Pre-allocated zero-forcing buffer reused across `draft` calls.
+    zero_forcing: Vec<f32>,
 }
 
 impl ModalSpecDrafter {
@@ -463,6 +512,8 @@ impl ModalSpecDrafter {
 
         // Store embeddings for nearest-token lookup.
         let embeddings: Vec<Vec<f32>> = vocab_embeddings.iter().map(|e| e.to_vec()).collect();
+        // Pre-allocate zero-forcing buffer — reused across draft() calls.
+        let zero_forcing = vec![0.0f32; hidden_dim];
 
         Self {
             cell,
@@ -470,12 +521,14 @@ impl ModalSpecDrafter {
             dt: 0.1, // Default timestep — can be tuned per model.
             hidden_dim,
             embeddings,
+            zero_forcing,
         }
     }
 
     /// Draft tokens: encode prompt → LinOSS oscillation → Fourier reconstruct → nearest vocab.
     ///
     /// Allocating version — see `draft_into` for zero-alloc alternative.
+    /// Uses pre-allocated `zero_forcing` buffer from self.
     pub fn draft(&self, prompt_tokens: &[usize], n_draft: usize) -> Vec<usize> {
         if n_draft == 0 || self.embeddings.is_empty() {
             return vec![];
@@ -490,10 +543,9 @@ impl ModalSpecDrafter {
                 state = self.cell.imex_step(&state, &forcing, self.dt);
             }
         }
-        let zero_forcing = vec![0.0f32; h];
         let mut draft = Vec::with_capacity(n_draft);
         for _ in 0..n_draft {
-            state = self.cell.imex_step(&state, &zero_forcing, self.dt);
+            state = self.cell.imex_step(&state, &self.zero_forcing, self.dt);
             let coeffs = self.extract_coefficients(&state, k);
             let reconstructed = self.basis.reconstruct(&coeffs);
             draft.push(self.nearest_token(&reconstructed));

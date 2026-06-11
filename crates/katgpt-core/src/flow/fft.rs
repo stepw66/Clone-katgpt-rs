@@ -22,87 +22,10 @@ pub fn fft_smooth(grid: &mut [f32], w: usize, h: usize, cutoff: f32) {
     if w == 0 || h == 0 {
         return;
     }
-
     let n = w * h;
-    let mut buf: Vec<Complex<f32>> = grid.iter().map(|&v| Complex::new(v, 0.0)).collect();
-
-    // --- 2D FFT: rows then columns ---
-    let mut planner = FftPlanner::new();
-    let row_fwd = planner.plan_fft_forward(w);
-    let col_fwd = planner.plan_fft_forward(h);
-
-    // Transform rows (in-place, each row is contiguous)
-    for y in 0..h {
-        row_fwd.process(&mut buf[y * w..(y + 1) * w]);
-    }
-
-    // Transform columns (strided — copy, transform, write back)
+    let mut buf: Vec<Complex<f32>> = Vec::with_capacity(n);
     let mut col_buf: Vec<Complex<f32>> = Vec::with_capacity(h);
-    for x in 0..w {
-        col_buf.clear();
-        for y in 0..h {
-            col_buf.push(buf[y * w + x]);
-        }
-        col_fwd.process(&mut col_buf);
-        for y in 0..h {
-            buf[y * w + x] = col_buf[y];
-        }
-    }
-
-    // --- Low-pass filter ---
-    let half_w = w as f32 * 0.5;
-    let half_h = h as f32 * 0.5;
-    let min_half = half_w.min(half_h);
-    let cutoff_r = cutoff * min_half;
-    let cutoff_r_sq = cutoff_r * cutoff_r;
-
-    let h_f = h as f32;
-    let w_f = w as f32;
-    for fy in 0..h {
-        let fy_centered = {
-            let raw = fy as f32;
-            raw - h_f * (raw >= half_h) as u32 as f32
-        };
-        let fyc_sq = fy_centered * fy_centered;
-        let row_off = fy * w;
-        for fx in 0..w {
-            let fx_centered = {
-                let raw = fx as f32;
-                raw - w_f * (raw >= half_w) as u32 as f32
-            };
-            let r_sq = fx_centered * fx_centered + fyc_sq;
-            if r_sq > cutoff_r_sq {
-                buf[row_off + fx] = Complex::new(0.0, 0.0);
-            }
-        }
-    }
-
-    // --- Inverse 2D FFT ---
-    let row_inv = planner.plan_fft_inverse(w);
-    let col_inv = planner.plan_fft_inverse(h);
-
-    // Inverse columns
-    for x in 0..w {
-        col_buf.clear();
-        for y in 0..h {
-            col_buf.push(buf[y * w + x]);
-        }
-        col_inv.process(&mut col_buf);
-        for y in 0..h {
-            buf[y * w + x] = col_buf[y];
-        }
-    }
-
-    // Inverse rows
-    for y in 0..h {
-        row_inv.process(&mut buf[y * w..(y + 1) * w]);
-    }
-
-    // Write real parts back, normalised by n
-    let scale = 1.0 / n as f32;
-    for i in 0..n {
-        grid[i] = buf[i].re * scale;
-    }
+    fft_smooth_into(grid, w, h, cutoff, &mut buf, &mut col_buf);
 }
 
 /// Pre-allocated variant of [`fft_smooth`].
@@ -148,11 +71,10 @@ pub fn fft_smooth_into(
     }
 
     // Transform columns (strided — copy, transform, write back)
-    col_buf.clear();
+    col_buf.resize(h, Complex::new(0.0, 0.0));
     for x in 0..w {
-        col_buf.clear();
         for y in 0..h {
-            col_buf.push(buf[y * w + x]);
+            col_buf[y] = buf[y * w + x];
         }
         col_fwd.process(col_buf);
         for y in 0..h {
@@ -194,9 +116,8 @@ pub fn fft_smooth_into(
 
     // Inverse columns
     for x in 0..w {
-        col_buf.clear();
         for y in 0..h {
-            col_buf.push(buf[y * w + x]);
+            col_buf[y] = buf[y * w + x];
         }
         col_inv.process(col_buf);
         for y in 0..h {

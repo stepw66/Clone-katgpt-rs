@@ -35,11 +35,6 @@ pub fn flow_steering(field: &FlowField, pos: (f32, f32)) -> (f32, f32) {
         _ => return field.lookup(x0.min(field.w - 1), y0.min(field.h - 1)),
     };
 
-    // Edge case: x0 or y0 already at boundary.
-    if x0 >= field.w || y0 >= field.h {
-        return field.lookup(x0.min(field.w - 1), y0.min(field.h - 1));
-    }
-
     let dx = (fx - x0 as f32).clamp(0.0, 1.0);
     let dy = (fy - y0 as f32).clamp(0.0, 1.0);
 
@@ -89,6 +84,10 @@ pub fn should_use_flow_field(
     min_npcs: u16,
 ) -> bool {
     if npc_count_for_goal < min_npcs {
+        return false;
+    }
+    // Negative positions are out of bounds — saturating cast gives 0, but explicit check is clearer.
+    if pos.0 < 0.0 || pos.1 < 0.0 {
         return false;
     }
     let x = pos.0 as u16;
@@ -218,6 +217,13 @@ mod tests {
     fn test_should_use_flow_field_out_of_bounds() {
         let field = uniform_field(10, 10, 1.0, 0.0);
         assert!(!should_use_flow_field(&field, (15.0, 5.0), 10, 3));
+    }
+
+    #[test]
+    fn test_should_use_flow_field_negative_pos() {
+        let field = uniform_field(10, 10, 1.0, 0.0);
+        assert!(!should_use_flow_field(&field, (-1.0, 5.0), 10, 3));
+        assert!(!should_use_flow_field(&field, (5.0, -1.0), 10, 3));
     }
 
     #[test]

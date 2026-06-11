@@ -130,30 +130,11 @@ impl LeoPotentialGrid {
         );
         let words = (cells + 63) / 64;
 
-        // Process chunks of 4 cells at a time to help LLVM auto-vectorize the max reduction.
         let mut potential = Vec::with_capacity(cells);
-        let chunks = cells / 4;
-        for chunk in 0..chunks {
-            let base = chunk * 4;
-            for i in 0..4 {
-                let cell_idx = base + i;
-                let start = cell_idx * actions_per_cell;
-                let end = start + actions_per_cell;
-                let max_q = q_values[start..end]
-                    .iter()
-                    .copied()
-                    .fold(f32::NEG_INFINITY, f32::max);
-                potential.push(max_q);
-            }
-        }
-        // Remaining cells (0..3)
-        for cell_idx in (chunks * 4)..cells {
+        for cell_idx in 0..cells {
             let start = cell_idx * actions_per_cell;
-            let end = start + actions_per_cell;
-            let max_q = q_values[start..end]
-                .iter()
-                .copied()
-                .fold(f32::NEG_INFINITY, f32::max);
+            let slice = &q_values[start..start + actions_per_cell];
+            let max_q = slice.iter().copied().fold(f32::NEG_INFINITY, f32::max);
             potential.push(max_q);
         }
 
@@ -301,24 +282,25 @@ impl LeoPotentialGrid {
 // ---------------------------------------------------------------------------
 
 /// FFT smoothing parameters.
+#[derive(Clone)]
 pub struct FlowFieldConfig {
     /// Low-pass cutoff frequency (fraction of Nyquist). Default: 0.25.
     pub cutoff: f32,
-    /// Obstacle inflation radius (cells). Default: 1.
-    pub obstacle_radius: u8,
     /// Minimum gradient magnitude to produce a flow vector. Default: 1e-4.
     pub min_gradient: f32,
     /// Recompute threshold: how many cells must change to trigger FFT. Default: 5.
     pub dirty_threshold: u16,
+    /// Obstacle inflation radius (cells). Default: 1.
+    pub obstacle_radius: u8,
 }
 
 impl Default for FlowFieldConfig {
     fn default() -> Self {
         Self {
             cutoff: 0.25,
-            obstacle_radius: 1,
             min_gradient: 1e-4,
             dirty_threshold: 5,
+            obstacle_radius: 1,
         }
     }
 }

@@ -235,14 +235,34 @@ impl NpcBrain {
         self.hla_state[7] += delta[7];
     }
 
-    /// GM pins a sense activation. Rebuilds O(1) lookup table.
+    /// GM pins a sense activation. Updates O(1) lookup directly — no full rebuild.
     pub fn pin_sense(&mut self, kind: SenseKind, value: f32) {
-        if let Some(entry) = self.overrides.pinned.iter_mut().find(|(k, _)| *k == kind) {
-            entry.1 = value;
-        } else if self.overrides.pinned.len() < MAX_OVERRIDES {
-            self.overrides.pinned.push((kind, value));
+        let idx = kind as usize;
+        if idx < SENSE_KIND_COUNT {
+            // Fast path: O(1) check via pin_lookup
+            if self.overrides.pin_lookup[idx].is_some() {
+                // Already pinned — update Vec entry and lookup in-place
+                for entry in &mut self.overrides.pinned {
+                    if entry.0 == kind {
+                        entry.1 = value;
+                        break;
+                    }
+                }
+                self.overrides.pin_lookup[idx] = Some(value);
+            } else if self.overrides.pinned.len() < MAX_OVERRIDES {
+                // New pin — append to Vec and update single lookup slot
+                self.overrides.pinned.push((kind, value));
+                self.overrides.pin_lookup[idx] = Some(value);
+            }
+        } else {
+            // Unknown discriminant — fall back to linear scan
+            if let Some(entry) = self.overrides.pinned.iter_mut().find(|(k, _)| *k == kind) {
+                entry.1 = value;
+            } else if self.overrides.pinned.len() < MAX_OVERRIDES {
+                self.overrides.pinned.push((kind, value));
+            }
+            self.overrides.rebuild_pin_lookup();
         }
-        self.overrides.rebuild_pin_lookup();
     }
 
     /// Enter scripted mode — disable all autonomous behavior.

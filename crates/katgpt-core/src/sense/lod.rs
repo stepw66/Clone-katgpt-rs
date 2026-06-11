@@ -37,19 +37,13 @@ impl SenseLodLevel {
 /// Routes distances to LOD levels using spectral scale boundaries.
 #[derive(Clone, Debug)]
 pub struct SenseLodRouter {
-    #[allow(dead_code)] // Reserved for future spectral boundary lookups
-    boundaries: Vec<ScaleBoundary>,
     sigma1: f32,
     sigma2: f32,
 }
 
 impl SenseLodRouter {
-    pub fn new(boundaries: Vec<ScaleBoundary>, sigma1: f32, sigma2: f32) -> Self {
-        Self {
-            boundaries,
-            sigma1,
-            sigma2,
-        }
+    pub fn new(_boundaries: Vec<ScaleBoundary>, sigma1: f32, sigma2: f32) -> Self {
+        Self { sigma1, sigma2 }
     }
 
     pub fn route(&self, distance: f32) -> SenseLodLevel {
@@ -67,7 +61,6 @@ impl SenseLodRouter {
             return None;
         }
         Some(Self {
-            boundaries: Vec::new(), // dead code — avoid allocation
             sigma1: boundaries[0].sigma,
             sigma2: boundaries[1].sigma,
         })

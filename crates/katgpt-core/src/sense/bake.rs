@@ -85,11 +85,23 @@ pub fn precision_to_confidence(lambda: &[f32; 8]) -> f32 {
 #[inline]
 pub fn exploration_priority(lambda: &[f32; 8], dimension: usize) -> f32 {
     debug_assert!(dimension < 8, "dimension must be 0..7");
-    let max_lambda = lambda.iter().cloned().fold(0.0f32, f32::max);
-    if max_lambda < 1e-6 {
+    exploration_priority_with_max(lambda, dimension, max_lambda(lambda))
+}
+
+/// Pre-compute max lambda for batch calls to `exploration_priority_with_max`.
+#[inline]
+pub fn max_lambda(lambda: &[f32; 8]) -> f32 {
+    lambda.iter().cloned().fold(0.0f32, f32::max)
+}
+
+/// Exploration priority with pre-computed max_lambda — avoids O(8) scan per call.
+#[inline]
+pub fn exploration_priority_with_max(lambda: &[f32; 8], dimension: usize, max_lam: f32) -> f32 {
+    debug_assert!(dimension < 8, "dimension must be 0..7");
+    if max_lam < 1e-6 {
         return 1.0;
     }
-    1.0 - lambda[dimension] / max_lambda
+    1.0 - lambda[dimension] / max_lam
 }
 
 /// Informed prior precision from schema class density.
@@ -241,8 +253,9 @@ mod bake_store {
 
         /// Accumulate an observation (running sum, zero-alloc).
         pub fn observe(&mut self, observation: &[f32; 8]) {
-            for (d, obs) in observation.iter().enumerate() {
-                self.accumulated_obs_sum[d] += obs;
+            // Direct indexing for fixed-size array — LLVM unrolls fully.
+            for d in 0..8 {
+                self.accumulated_obs_sum[d] += observation[d];
             }
             self.observation_count += 1;
         }
@@ -268,8 +281,8 @@ mod bake_store {
 
             let count = self.observation_count as f32;
             let mut mean_obs = [0.0f32; 8];
-            for (d, mean) in mean_obs.iter_mut().enumerate() {
-                *mean = self.accumulated_obs_sum[d] / count;
+            for d in 0..8 {
+                mean_obs[d] = self.accumulated_obs_sum[d] / count;
             }
 
             let effective_lambda = DEFAULT_OBS_PRECISION * count;

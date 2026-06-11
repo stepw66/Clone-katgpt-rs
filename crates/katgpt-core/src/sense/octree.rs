@@ -129,15 +129,15 @@ impl SenseOctreeBuilder {
         let mut neg_bits = 0u64;
         let mut scale_sum = 0.0f32;
 
-        for (i, &val) in embedding.iter().enumerate() {
+        // Branchless: use bool-as-u64 to conditionally apply masks
+        for i in 0..8 {
+            let val = embedding[i];
             let mask = 1u64 << i;
-            if val > 0.01 {
-                pos_bits |= mask;
-                scale_sum += val;
-            } else if val < -0.01 {
-                neg_bits |= mask;
-                scale_sum += val.abs();
-            }
+            let is_pos = (val > 0.01) as u64;
+            let is_neg = (val < -0.01) as u64;
+            pos_bits |= mask & is_pos.wrapping_neg();
+            neg_bits |= mask & is_neg.wrapping_neg();
+            scale_sum += val.abs() * (is_pos | is_neg) as u8 as f32;
         }
 
         let row_scale = if scale_sum > 0.0 {

@@ -40,6 +40,7 @@ impl SenseTrialLog {
 
 /// Compute exploration-weighted reward for sense trial.
 /// Dimensions with low precision get boosted exploration reward.
+/// Pre-computes max_lambda once — O(8) scan instead of O(8×N).
 #[cfg(feature = "bake_precision")]
 pub fn precision_weighted_reward(
     base_reward: f32,
@@ -49,9 +50,10 @@ pub fn precision_weighted_reward(
     if activated_dims.is_empty() {
         return base_reward;
     }
+    let max_lam = crate::sense::bake::max_lambda(precision);
     let mut sum = 0.0f32;
     for &d in activated_dims {
-        sum += crate::sense::bake::exploration_priority(precision, d);
+        sum += crate::sense::bake::exploration_priority_with_max(precision, d, max_lam);
     }
     let avg_priority = sum / activated_dims.len() as f32;
     base_reward * (1.0 + avg_priority)

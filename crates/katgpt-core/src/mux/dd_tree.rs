@@ -309,14 +309,21 @@ impl MuxDdTree {
 
     /// Collect paths to all leaf nodes (BFS order).
     pub fn collect_leaf_paths(&self) -> Vec<Vec<usize>> {
-        let mut result = Vec::new();
-        let mut queue: Vec<(Vec<usize>, &MuxNode)> = vec![(Vec::new(), &self.root)];
+        let leaf_count = self.leaf_count();
+        let mut result = Vec::with_capacity(leaf_count);
+        let mut queue: Vec<(Vec<usize>, &MuxNode)> = Vec::with_capacity(leaf_count * 2);
+        queue.push((Vec::new(), &self.root));
         while let Some((path, node)) = queue.pop() {
             if node.is_leaf() {
                 result.push(path);
             } else {
+                let child_count = node.children.len();
+                if queue.capacity() < queue.len() + child_count {
+                    queue.reserve(child_count);
+                }
                 for (i, child) in node.children.iter().enumerate() {
                     let mut child_path = path.clone();
+                    child_path.reserve(1);
                     child_path.push(i);
                     queue.push((child_path, child));
                 }

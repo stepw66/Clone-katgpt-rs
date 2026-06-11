@@ -45,10 +45,11 @@ pub fn extract_top_k_into<'a>(
         if val <= buf[k - 1] {
             continue; // Skip if not in top-k
         }
-        // Find insertion position (descending order)
-        let pos = match buf[..k].binary_search_by(|probe| val.total_cmp(probe)) {
-            Ok(idx) | Err(idx) => idx.min(k - 1),
-        };
+        // Linear scan for insertion position (faster than binary search for k ≤ 16)
+        let mut pos = 0;
+        while pos < k && buf[pos] >= val {
+            pos += 1;
+        }
         // Shift elements down
         buf.copy_within(pos..k - 1, pos + 1);
         buf[pos] = val;

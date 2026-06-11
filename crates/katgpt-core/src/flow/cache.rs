@@ -165,15 +165,25 @@ impl FlowFieldCache {
         // NOTE: Grid stores blocked as (w*h+63)/64 words (flat), while we use
         // (w+63)/64*h words (row-aligned). Layouts differ when w is not a
         // multiple of 64, so per-cell copy is required.
-        for y in 0..grid_h {
-            let grid_row_off = (y as usize) * (grid_w as usize);
-            let buf_row_off = (y as usize) * words_per_row;
-            for x in 0..grid_w {
-                let cell = grid_row_off + x as usize;
-                let word = cell / 64;
-                let bit = cell % 64;
-                if grid.blocked()[word] & (1u64 << bit) != 0 {
-                    self.blocked_buf[buf_row_off + x as usize / 64] |= 1u64 << (x as usize % 64);
+        let wu = grid_w as usize;
+        let hu = grid_h as usize;
+        if wu % 64 == 0 && wu > 0 {
+            // Fast path: identical layout, bulk copy
+            let grid_blocked = grid.blocked();
+            let copy_len = words_per_row * hu;
+            self.blocked_buf[..copy_len].copy_from_slice(&grid_blocked[..copy_len]);
+        } else {
+            // Unaligned: per-cell copy needed
+            for y in 0..hu {
+                let grid_row_off = y * wu;
+                let buf_row_off = y * words_per_row;
+                for x in 0..wu {
+                    let cell = grid_row_off + x;
+                    let word = cell / 64;
+                    let bit = cell % 64;
+                    if grid.blocked()[word] & (1u64 << bit) != 0 {
+                        self.blocked_buf[buf_row_off + x / 64] |= 1u64 << (x % 64);
+                    }
                 }
             }
         }
@@ -190,15 +200,23 @@ impl FlowFieldCache {
         );
 
         // Apply inflated obstacles back to the grid (same layout mismatch as above).
-        for y in 0..grid_h {
-            let grid_row_off = (y as usize) * (grid_w as usize);
-            let buf_row_off = (y as usize) * words_per_row;
-            for x in 0..grid_w {
-                if self.blocked_buf[buf_row_off + x as usize / 64] & (1u64 << (x as usize % 64))
-                    != 0
-                {
-                    let cell = grid_row_off + x as usize;
-                    grid.blocked_mut()[cell / 64] |= 1u64 << (cell % 64);
+        if wu % 64 == 0 && wu > 0 {
+            // Fast path: identical layout, bitwise OR bulk copy
+            let grid_blocked = grid.blocked_mut();
+            let copy_len = words_per_row * hu;
+            for i in 0..copy_len {
+                grid_blocked[i] |= self.blocked_buf[i];
+            }
+        } else {
+            // Unaligned: per-cell copy needed
+            for y in 0..hu {
+                let grid_row_off = y * wu;
+                let buf_row_off = y * words_per_row;
+                for x in 0..wu {
+                    if self.blocked_buf[buf_row_off + x / 64] & (1u64 << (x % 64)) != 0 {
+                        let cell = grid_row_off + x;
+                        grid.blocked_mut()[cell / 64] |= 1u64 << (cell % 64);
+                    }
                 }
             }
         }
@@ -317,9 +335,9 @@ mod tests {
     fn test_config() -> FlowFieldConfig {
         FlowFieldConfig {
             cutoff: 0.25,
-            obstacle_radius: 1,
             min_gradient: 1e-4,
             dirty_threshold: 5,
+            obstacle_radius: 1,
         }
     }
 

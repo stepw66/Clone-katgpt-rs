@@ -753,10 +753,6 @@ impl PeiraConfig {
 /// Both are k×k matrices stored in row-major flat layout.
 #[derive(Debug, Clone)]
 pub struct PeiraCovariance {
-    /// Configuration.
-    config: PeiraConfig,
-    /// Number of EMA updates applied.
-    step_count: usize,
     /// Cross-view covariance Σ (k×k), row-major.
     sigma: Vec<f64>,
     /// Within-view covariance N (k×k), row-major.
@@ -765,9 +761,10 @@ pub struct PeiraCovariance {
     sigma_sample: Vec<f64>,
     n_sample: Vec<f64>,
     pm: Vec<f64>,
-    /// Pre-allocated scratch for invert_spd_into (L factor, L_inv)
+    /// Pre-allocated scratch for invert_spd_into (L factor, L_inv, matmul bt)
     inv_l_scratch: Vec<f64>,
     inv_l_inv_scratch: Vec<f64>,
+    inv_matmul_bt_scratch: Vec<f64>,
     /// Pre-allocated scratch for matmul_into (transposed B)
     matmul_bt_scratch: Vec<f64>,
     /// Pre-allocated output buffers for predictor_with_scratch
@@ -776,6 +773,10 @@ pub struct PeiraCovariance {
     /// Pre-allocated scratch for f32→f64 conversion in scalar outer product paths.
     s_scratch: Vec<f64>,
     t_scratch: Vec<f64>,
+    /// Configuration.
+    config: PeiraConfig,
+    /// Number of EMA updates applied.
+    step_count: usize,
 }
 
 impl PeiraCovariance {
@@ -783,8 +784,6 @@ impl PeiraCovariance {
     pub fn new(config: PeiraConfig) -> Self {
         let k = config.dim;
         Self {
-            config,
-            step_count: 0,
             sigma: vec![0.0; k * k],
             n: vec![0.0; k * k],
             sigma_sample: vec![0.0; k * k],
@@ -792,11 +791,14 @@ impl PeiraCovariance {
             pm: vec![0.0; k * k],
             inv_l_scratch: vec![0.0; k * k],
             inv_l_inv_scratch: vec![0.0; k * k],
+            inv_matmul_bt_scratch: vec![0.0; k * k],
             matmul_bt_scratch: vec![0.0; k * k],
             q_star: vec![0.0; k * k],
             p_star: vec![0.0; k * k],
             s_scratch: vec![0.0; k],
             t_scratch: vec![0.0; k],
+            config,
+            step_count: 0,
         }
     }
 
@@ -863,7 +865,15 @@ impl PeiraCovariance {
         let mut q_star = vec![0.0f64; k * k];
         let mut l_scratch = vec![0.0f64; k * k];
         let mut l_inv_scratch = vec![0.0f64; k * k];
-        invert_spd_into(&mut q_star, &mut l_scratch, &mut l_inv_scratch, &n_reg, k);
+        let mut bt_scratch = vec![0.0f64; k * k];
+        invert_spd_into(
+            &mut q_star,
+            &mut l_scratch,
+            &mut l_inv_scratch,
+            &mut bt_scratch,
+            &n_reg,
+            k,
+        );
 
         // P* = Σ @ Q*
         let mut p_star = vec![0.0f64; k * k];
@@ -892,6 +902,7 @@ impl PeiraCovariance {
             &mut self.q_star,
             &mut self.inv_l_scratch,
             &mut self.inv_l_inv_scratch,
+            &mut self.inv_matmul_bt_scratch,
             &self.pm[..k * k],
             k,
         );
@@ -929,6 +940,7 @@ impl PeiraCovariance {
             &mut self.q_star,
             &mut self.inv_l_scratch,
             &mut self.inv_l_inv_scratch,
+            &mut self.inv_matmul_bt_scratch,
             &self.pm[..k * k],
             k,
         );
@@ -1008,6 +1020,7 @@ impl PeiraCovariance {
         self.pm.fill(0.0);
         self.inv_l_scratch.fill(0.0);
         self.inv_l_inv_scratch.fill(0.0);
+        self.inv_matmul_bt_scratch.fill(0.0);
         self.matmul_bt_scratch.fill(0.0);
         self.q_star.fill(0.0);
         self.p_star.fill(0.0);
@@ -1118,7 +1131,8 @@ fn invert_spd(mat: &[f64], k: usize) -> Vec<f64> {
     let mut inv = vec![0.0f64; k * k];
     let mut l = vec![0.0f64; k * k];
     let mut l_inv = vec![0.0f64; k * k];
-    invert_spd_into(&mut inv, &mut l, &mut l_inv, mat, k);
+    let mut bt = vec![0.0f64; k * k];
+    invert_spd_into(&mut inv, &mut l, &mut l_inv, &mut bt, mat, k);
     inv
 }
 
@@ -1127,6 +1141,7 @@ fn invert_spd(mat: &[f64], k: usize) -> Vec<f64> {
 /// - `inv`: output k×k inverse matrix
 /// - `l_scratch`: k×k scratch for Cholesky factor L
 /// - `l_inv_scratch`: k×k scratch for L⁻¹
+/// - `matmul_bt_scratch`: k×k scratch for transposed matrix in Step 3
 /// - `mat`: input k×k SPD matrix
 /// - `k`: matrix dimension
 #[inline]
@@ -1134,6 +1149,7 @@ fn invert_spd_into(
     inv: &mut [f64],
     l_scratch: &mut [f64],
     l_inv_scratch: &mut [f64],
+    matmul_bt_scratch: &mut [f64],
     mat: &[f64],
     k: usize,
 ) {
@@ -1193,19 +1209,17 @@ fn invert_spd_into(
         }
     }
 
-    // Step 3: M_inv = L_inv^T * L_inv (only lower triangle, then mirror)
-    inv.fill(0.0);
+    // Step 3: M_inv = L_inv^T * L_inv
+    // Transpose L_inv into l_scratch (Cholesky L no longer needed), then
+    // use matmul_into which transposes B internally and uses simd_dot_f64.
     for i in 0..k {
         let i_row = i * k;
-        for j in 0..=i {
-            let mut sum = 0.0f64;
-            for p in i..k {
-                sum += l_inv_scratch[p * k + i] * l_inv_scratch[p * k + j];
-            }
-            inv[i_row + j] = sum;
-            inv[j * k + i] = sum; // symmetric
+        for j in 0..k {
+            l_scratch[j * k + i] = l_inv_scratch[i_row + j];
         }
     }
+    // inv = l_scratch @ l_inv_scratch = L_inv^T @ L_inv
+    matmul_into(inv, matmul_bt_scratch, l_scratch, l_inv_scratch, k);
 }
 
 /// Compute matrix product C = A @ B where all are k×k row-major.

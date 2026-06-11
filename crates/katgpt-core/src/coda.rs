@@ -62,7 +62,9 @@ impl GateActivation {
             Self::GegeluTanh => {
                 // Precomputed: sqrt(2/π) ≈ 0.7978845608
                 const SQRT_2_OVER_PI: f32 = 0.797_884_6;
-                let inner = SQRT_2_OVER_PI * (x + 0.044715 * x * x * x);
+                // x * (x * x) makes the dependency chain explicit for FMA pipelining
+                let x_sq = x * x;
+                let inner = SQRT_2_OVER_PI * (x + 0.044715 * x * x_sq);
                 0.5 * x * (1.0 + inner.tanh())
             }
             Self::Gegelu => {
@@ -275,11 +277,21 @@ pub fn moa_swiglu(
     for i in 0..n {
         let y = gate_proj[i];
         let z = up_proj[i];
+
+        // Pre-compute all activated values into stack arrays,
+        // separating activation dispatch from accumulation for better pipelining.
+        let mut activated_gate = [0.0f32; MOA_DICT_SIZE];
+        let mut activated_up = [0.0f32; MOA_DICT_SIZE];
+        for j in 0..MOA_DICT_SIZE {
+            activated_gate[j] = activations[j].activate(y);
+            activated_up[j] = activations[j].activate(z);
+        }
+
         let mut mixed_gate = 0.0f32;
         let mut mixed_up = 0.0f32;
         for j in 0..MOA_DICT_SIZE {
-            mixed_gate += gate_weights[j] * activations[j].activate(y);
-            mixed_up += up_weights[j] * activations[j].activate(z);
+            mixed_gate += gate_weights[j] * activated_gate[j];
+            mixed_up += up_weights[j] * activated_up[j];
         }
         hidden[i] = mixed_gate * mixed_up;
     }

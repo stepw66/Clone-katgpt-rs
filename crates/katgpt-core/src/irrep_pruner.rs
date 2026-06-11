@@ -91,11 +91,11 @@ pub fn spectral_flatness(
         return 0.0; // all-zero spectrum beyond DC = smooth input = uncertain
     }
 
+    // flatness = geo_mean / arith_mean = exp(log_geo_mean - ln(arith_mean))
+    // Single exp avoids intermediate overflow from geo_mean when magnitudes are large.
     let log_geo_mean = log_sum / count as f64;
-    let geo_mean = log_geo_mean.exp();
     let arith_mean = sum / count as f64;
-
-    let flatness = geo_mean / arith_mean;
+    let flatness = (log_geo_mean - arith_mean.ln()).exp();
     // Clamp to [0, 1] — numerical noise can push slightly above 1.0
     flatness.clamp(0.0, 1.0) as f32
 }
@@ -111,19 +111,10 @@ pub fn spectral_flatness(
 ///
 /// Inspired by arXiv:2606.02993: converged neurons encode single irreps.
 pub struct IrrepPruner {
-    /// Threshold below which a step is considered "uncertain" (prune aggressively).
-    /// Default: 0.3. When spectral flatness < threshold → uncertain → top-k only.
-    /// Higher = more aggressive pruning.
-    pub convergence_threshold: f32,
-    /// Number of top-k tokens to keep when distribution is uncertain.
-    /// When flatness < threshold, only tokens ranked in top-k by logit value are valid.
-    pub top_k_when_uncertain: usize,
-    /// Pre-allocated scratch buffer for FFT.
-    scratch: Vec<Complex<f64>>,
     /// Cached FFT planner (avoids per-call allocation).
     planner: FftPlanner<f64>,
-    /// Current spectral flatness (updated by set_logits).
-    current_flatness: f32,
+    /// Pre-allocated scratch buffer for FFT.
+    scratch: Vec<Complex<f64>>,
     /// Cached logits for rank-based gating.
     logits: Vec<f32>,
     /// Cached sorted indices (descending by logit value), updated by set_logits.
@@ -133,6 +124,15 @@ pub struct IrrepPruner {
     top_k_bitmap: Vec<bool>,
     /// How many tokens from sorted_indices are "valid" given current flatness.
     valid_count: usize,
+    /// Number of top-k tokens to keep when distribution is uncertain.
+    /// When flatness < threshold, only tokens ranked in top-k by logit value are valid.
+    pub top_k_when_uncertain: usize,
+    /// Threshold below which a step is considered "uncertain" (prune aggressively).
+    /// Default: 0.3. When spectral flatness < threshold → uncertain → top-k only.
+    /// Higher = more aggressive pruning.
+    pub convergence_threshold: f32,
+    /// Current spectral flatness (updated by set_logits).
+    current_flatness: f32,
 }
 
 /// Configuration for [`IrrepPruner`].
@@ -187,15 +187,15 @@ impl IrrepPruner {
         max_vocab: usize,
     ) -> Self {
         Self {
-            convergence_threshold,
-            top_k_when_uncertain,
-            scratch: Vec::with_capacity(max_vocab),
             planner: FftPlanner::new(),
-            current_flatness: 0.0,
+            scratch: Vec::with_capacity(max_vocab),
             logits: Vec::with_capacity(max_vocab),
             sorted_indices: Vec::with_capacity(max_vocab),
             top_k_bitmap: Vec::with_capacity(max_vocab),
             valid_count: 0,
+            top_k_when_uncertain,
+            convergence_threshold,
+            current_flatness: 0.0,
         }
     }
 
@@ -223,9 +223,13 @@ impl IrrepPruner {
         // Compute spectral flatness
         self.current_flatness = spectral_flatness(logits, &mut self.scratch, &mut self.planner);
 
-        // Cache logits
-        self.logits.clear();
-        self.logits.extend_from_slice(logits);
+        // Cache logits — reuse allocation when size matches, resize+copy otherwise
+        if self.logits.len() == logits.len() {
+            self.logits.copy_from_slice(logits);
+        } else {
+            self.logits.clear();
+            self.logits.extend_from_slice(logits);
+        }
 
         // Determine valid count based on flatness
         // High flatness = converged = allow all tokens
@@ -259,9 +263,20 @@ impl IrrepPruner {
 
     /// Check if a token_idx is in the top-k set (only meaningful when uncertain).
     /// O(1) bitmap lookup.
+    ///
+    /// # Safety
+    /// Caller must ensure `token_idx < top_k_bitmap.len()` (guaranteed by is_valid's
+    /// out-of-range check and the fact that top_k_bitmap is always >= logits.len()).
     #[inline]
     fn is_in_top_k(&self, token_idx: usize) -> bool {
-        self.top_k_bitmap.get(token_idx).copied().unwrap_or(false)
+        debug_assert!(
+            token_idx < self.top_k_bitmap.len(),
+            "is_in_top_k: token_idx {token_idx} >= bitmap len {}",
+            self.top_k_bitmap.len()
+        );
+        // SAFETY: is_valid already checks token_idx < logits.len(), and
+        // rebuild_sorted_indices ensures top_k_bitmap.len() == logits.len().
+        unsafe { *self.top_k_bitmap.get_unchecked(token_idx) }
     }
 
     /// Rebuild sorted indices by descending logit value using partial sort for top-k.
@@ -288,9 +303,21 @@ impl IrrepPruner {
             });
         }
 
-        // Build bitmap from sorted top-k
-        self.top_k_bitmap.clear();
-        self.top_k_bitmap.resize(n, false);
+        // Build bitmap from sorted top-k.
+        // Only clear entries that were set last time (tracked by prev_valid_count)
+        // to avoid re-zeroing the entire buffer.
+        let prev_valid_count = self.valid_count.min(self.top_k_bitmap.len());
+        for &idx in &self.sorted_indices[..prev_valid_count] {
+            // SAFETY: sorted_indices entries are < n by construction
+            unsafe {
+                if idx < self.top_k_bitmap.len() {
+                    *self.top_k_bitmap.get_unchecked_mut(idx) = false;
+                }
+            }
+        }
+        if self.top_k_bitmap.len() < n {
+            self.top_k_bitmap.resize(n, false);
+        }
         for &idx in &self.sorted_indices[..k] {
             // SAFETY: idx < n by construction
             unsafe {
@@ -346,12 +373,10 @@ impl ConstraintPruner for IrrepPruner {
             // Uncertain: check top-k membership via O(1) bitmap
             false => {
                 let len = candidates.len().min(results.len());
+                let bitmap_len = self.top_k_bitmap.len();
                 for (i, r) in results.iter_mut().enumerate().take(len) {
-                    *r = self
-                        .top_k_bitmap
-                        .get(candidates[i])
-                        .copied()
-                        .unwrap_or(false);
+                    let idx = candidates[i];
+                    *r = idx < bitmap_len && unsafe { *self.top_k_bitmap.get_unchecked(idx) };
                 }
             }
         }
