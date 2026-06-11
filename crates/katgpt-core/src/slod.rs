@@ -287,15 +287,20 @@ impl SlodOperator {
                 dists.push((j, poincare_distance(a_i, a_j, dim)));
             }
             // Partial sort: O(n) to partition top-k nearest, then sort just those
-            dists.select_nth_unstable_by(k, |a, b| {
+            // Clamp k to dists.len() since we skipped self (dists has n-1 elements)
+            let k_eff = k.min(dists.len());
+            if k_eff == 0 {
+                continue;
+            }
+            dists.select_nth_unstable_by(k_eff - 1, |a, b| {
                 a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal)
             });
-            dists[..k].sort_unstable_by(|a, b| {
+            dists[..k_eff].sort_unstable_by(|a, b| {
                 a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal)
             });
 
             // Take top-k nearest neighbors
-            for &(j, d) in dists.iter().take(k) {
+            for &(j, d) in dists.iter().take(k_eff) {
                 let weight = (-d).exp();
                 w[i * n + j] = weight;
                 w[j * n + i] = weight; // symmetrize
