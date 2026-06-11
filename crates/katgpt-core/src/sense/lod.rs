@@ -78,6 +78,16 @@ impl SenseLodRouter {
     pub fn assign_lods(&self, distances: &[f32]) -> Vec<SenseLodLevel> {
         distances.iter().map(|&d| self.route(d)).collect()
     }
+
+    /// Zero-alloc variant: writes LOD levels into a pre-allocated output buffer.
+    ///
+    /// `out` must have the same length as `distances`. Panics if lengths differ.
+    pub fn assign_lods_into(&self, distances: &[f32], out: &mut [SenseLodLevel]) {
+        assert_eq!(distances.len(), out.len(), "assign_lods_into: length mismatch");
+        for (i, &d) in distances.iter().enumerate() {
+            out[i] = self.route(d);
+        }
+    }
 }
 
 /// Fast boolean mask for sense module activation, indexed by `SenseKind` discriminant.
@@ -107,7 +117,7 @@ impl SenseLodMask {
     }
 
     pub fn active_count(&self) -> usize {
-        self.mask.iter().filter(|&&b| b).count()
+        self.mask.iter().map(|&b| b as usize).sum()
     }
 }
 

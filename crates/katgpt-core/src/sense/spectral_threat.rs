@@ -44,7 +44,7 @@ impl SpectralThreatFeatures {
     ///
     /// The gain factor (5.0) amplifies the raw signal so that moderate
     /// confidence + phase near 0 produces urgency > 0.7.
-    #[inline]
+    #[inline(always)]
     pub fn dodge_urgency(&self) -> f32 {
         let raw =
             self.combo_frequency * (1.0 - 2.0 * self.vulnerability_phase) * self.rhythm_confidence;
@@ -55,7 +55,7 @@ impl SpectralThreatFeatures {
     ///
     /// Best counter window: high frequency + phase near 0.5 (cooldown trough).
     /// Inverse of urgency — when to attack rather than dodge.
-    #[inline]
+    #[inline(always)]
     pub fn counter_window(&self) -> f32 {
         let raw =
             self.combo_frequency * (2.0 * self.vulnerability_phase - 1.0) * self.rhythm_confidence;
@@ -81,15 +81,22 @@ struct LabeledRhythm {
     state: LinOSSState,
     /// Number of damage events ingested for this participant.
     event_count: u32,
-    /// Pre-allocated forcing buffer (zero-alloc hot path).
-    forcing: Vec<f32>,
+    /// Pre-allocated forcing buffer — fixed-size to avoid heap alloc.
+    forcing: [f32; HIDDEN_DIM],
     /// Pre-allocated scratch for in-place y output.
-    y_buf: Vec<f32>,
+    y_buf: [f32; HIDDEN_DIM],
     /// Pre-allocated scratch for in-place z output.
-    z_buf: Vec<f32>,
+    z_buf: [f32; HIDDEN_DIM],
     /// Observed damage tick timestamps for auto-calibration.
     damage_timestamps: Vec<u32>,
 }
+
+// ── Constants ──────────────────────────────────────────────────
+
+/// Canonical hidden dimension for combat LinOSS cells.
+const HIDDEN_DIM: usize = 8;
+/// Max damage timestamps stored per participant (determines stack array size).
+const MAX_TIMESTAMPS: usize = 16;
 
 // ── CombatRhythmTracker ────────────────────────────────────────
 
@@ -117,7 +124,7 @@ impl CombatRhythmTracker {
     /// `dt` = derived from game tick rate (e.g., 16ms → 0.016).
     pub fn new(hidden_dim: usize, dt: f32) -> Self {
         Self {
-            cells: Vec::with_capacity(8),
+            cells: Vec::with_capacity(HIDDEN_DIM),
             hidden_dim,
             dt,
             max_damage: 50.0,
@@ -131,37 +138,32 @@ impl CombatRhythmTracker {
     /// slow heavy attacks to fast flurries. β = 0.1 (light damping,
     /// oscillation persists between hits to maintain phase info).
     pub fn with_combat_frequencies(dt: f32) -> Self {
-        let tracker = Self::new(8, dt);
-        // The frequencies will be applied when participants are registered.
-        // Store 8 as the canonical combat hidden_dim.
-        debug_assert_eq!(tracker.hidden_dim, 8);
+        let tracker = Self::new(HIDDEN_DIM, dt);
+        debug_assert_eq!(tracker.hidden_dim, HIDDEN_DIM);
         tracker
     }
 
     /// Pre-tuned combat ω² values — covers slow heavy to fast flurry.
-    const COMBAT_OMEGA_SQ: [f32; 8] = [0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 4.0, 6.0];
+    const COMBAT_OMEGA_SQ: [f32; HIDDEN_DIM] = [0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 4.0, 6.0];
     /// Light damping — oscillation persists between hits.
     const COMBAT_BETA: f32 = 0.1;
 
     /// Register a new participant for tracking. No-op if already registered.
+    #[inline]
     pub fn register(&mut self, entity_id: u8) {
         if self.cells.iter().any(|c| c.entity_id == entity_id) {
             return;
         }
-        if self.cells.len() >= 8 {
+        if self.cells.len() >= HIDDEN_DIM {
             return; // max tracked participants
         }
 
         let mut cell = LinOSSCell::new(self.hidden_dim);
         // Apply combat frequencies if hidden_dim matches
-        if self.hidden_dim == 8 {
-            for (i, &omega) in Self::COMBAT_OMEGA_SQ.iter().enumerate() {
-                cell.omega_sq[i] = omega;
-            }
+        if self.hidden_dim == HIDDEN_DIM {
+            cell.omega_sq.copy_from_slice(&Self::COMBAT_OMEGA_SQ);
         }
-        for b in cell.beta.iter_mut() {
-            *b = Self::COMBAT_BETA;
-        }
+        cell.beta.fill(Self::COMBAT_BETA);
 
         let h = self.hidden_dim;
         self.cells.push(LabeledRhythm {
@@ -169,9 +171,9 @@ impl CombatRhythmTracker {
             cell,
             state: LinOSSState::zeros(h),
             event_count: 0,
-            forcing: vec![0.0; h],
-            y_buf: vec![0.0; h],
-            z_buf: vec![0.0; h],
+            forcing: [0.0; HIDDEN_DIM],
+            y_buf: [0.0; HIDDEN_DIM],
+            z_buf: [0.0; HIDDEN_DIM],
             damage_timestamps: Vec::with_capacity(16),
         });
     }
@@ -182,6 +184,7 @@ impl CombatRhythmTracker {
     /// one IMEX step. The hidden state (y, z) now reflects the impulse.
     /// Zero-amount events advance the oscillator state (natural decay) but
     /// do not increment event_count (only real impulses build confidence).
+    #[inline(always)]
     pub fn ingest_damage(&mut self, source_id: u8, amount: f32, _tick: u32) {
         let slot = match self.cells.iter().position(|c| c.entity_id == source_id) {
             Some(i) => i,
@@ -191,9 +194,7 @@ impl CombatRhythmTracker {
 
         // Convert damage to forcing vector: normalized impulse across all dims
         let normalized = amount / self.max_damage;
-        for f in rhythm.forcing.iter_mut() {
-            *f = normalized;
-        }
+        rhythm.forcing.fill(normalized);
 
         // Zero-alloc in-place IMEX step
         let h = self.hidden_dim;
@@ -221,7 +222,9 @@ impl CombatRhythmTracker {
     ///
     /// Returns `SpectralThreatFeatures::default()` if participant not found.
     /// No allocation on this path.
+    #[inline(always)]
     pub fn extract_features(&self, entity_id: u8) -> SpectralThreatFeatures {
+        // Linear scan on max-8 entries (<64 bytes) — fits in cache line.
         let rhythm = match self.cells.iter().find(|c| c.entity_id == entity_id) {
             Some(r) => r,
             None => return SpectralThreatFeatures::default(),
@@ -275,6 +278,7 @@ impl CombatRhythmTracker {
     /// Snaps the nearest pre-tuned mode to the exact observed combo frequency,
     /// and sets a second mode to the sub-harmonic (half frequency).
     /// Requires at least 3 timestamps (2 intervals) to produce valid calibration.
+    #[inline]
     pub fn auto_calibrate(&mut self, entity_id: u8) {
         let rhythm = match self.cells.iter_mut().find(|c| c.entity_id == entity_id) {
             Some(r) => r,
@@ -285,17 +289,22 @@ impl CombatRhythmTracker {
             return;
         }
 
-        // Compute intervals, filter zero-length (same-tick double hits)
-        let mut intervals: Vec<u32> = ts
-            .windows(2)
-            .map(|w| w[1] - w[0])
-            .filter(|&d| d > 0)
-            .collect();
-        if intervals.is_empty() {
+        // Compute intervals into fixed-size stack array (max 16 timestamps → 15 intervals)
+        let mut intervals = [0u32; MAX_TIMESTAMPS];
+        let mut interval_count = 0usize;
+        for w in ts.windows(2) {
+            let d = w[1] - w[0];
+            if d > 0 {
+                intervals[interval_count] = d;
+                interval_count += 1;
+            }
+        }
+        if interval_count == 0 {
             return;
         }
 
         // Dominant interval = mode with ±5 tick tolerance
+        let intervals = &mut intervals[..interval_count];
         intervals.sort_unstable();
         let mut best_val = intervals[0];
         let mut best_count = 1u32;
@@ -456,7 +465,7 @@ mod tests {
 
     #[test]
     fn test_tracker_unknown_entity_returns_default() {
-        let tracker = CombatRhythmTracker::new(8, 0.016);
+        let tracker = CombatRhythmTracker::new(HIDDEN_DIM, 0.016);
         let features = tracker.extract_features(99);
         assert_eq!(features.combo_frequency, 0.0);
     }
@@ -509,19 +518,19 @@ mod tests {
     #[test]
     fn test_combat_frequencies_cover_range() {
         let tracker = CombatRhythmTracker::with_combat_frequencies(0.016);
-        assert_eq!(tracker.hidden_dim, 8);
+        assert_eq!(tracker.hidden_dim, HIDDEN_DIM);
     }
 
     #[test]
     fn test_max_tracked_participants() {
-        let mut tracker = CombatRhythmTracker::new(8, 0.016);
+        let mut tracker = CombatRhythmTracker::new(HIDDEN_DIM, 0.016);
         // Register 8 participants (max)
-        for id in 0..8u8 {
+        for id in 0..HIDDEN_DIM as u8 {
             tracker.register(id);
         }
         // 9th should be ignored
-        tracker.register(8);
-        assert_eq!(tracker.cells.len(), 8);
+        tracker.register(HIDDEN_DIM as u8);
+        assert_eq!(tracker.cells.len(), HIDDEN_DIM);
     }
 
     #[test]

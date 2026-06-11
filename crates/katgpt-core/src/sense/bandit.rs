@@ -23,13 +23,15 @@ impl SenseTrialLog {
         self.trials.push(trial);
     }
 
-    /// Compute average reward for a sense kind — single pass, zero allocation.
+    /// Compute average reward for a sense kind — branchless single pass, zero allocation.
     pub fn average_reward(&self, kind: SenseKind) -> f32 {
-        let (sum, count) = self
-            .trials
-            .iter()
-            .filter(|t| t.sense_kind == kind)
-            .fold((0.0f32, 0usize), |(s, c), t| (s + t.reward, c + 1));
+        let mut sum = 0.0f32;
+        let mut count = 0usize;
+        for t in &self.trials {
+            let matches = (t.sense_kind == kind) as usize;
+            sum += matches as f32 * t.reward;
+            count += matches;
+        }
         if count == 0 { 0.0 } else { sum / count as f32 }
     }
 }

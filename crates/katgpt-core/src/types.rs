@@ -3758,18 +3758,20 @@ impl SenseModule {
     /// low-confidence triples are attenuated. Confidence 1.0 = unchanged.
     ///
     /// Branchless sign extraction, fast sigmoid via `1.0 / (1.0 + exp(-x))`.
+    #[inline(always)]
     pub fn project(&self, hla_state: &[f32; 8]) -> f32 {
         let mut dot = 0.0f32;
         let n = self.n_directions as usize;
+        // directions is [SenseDirection; 8], hla_state is [f32; 8] — both fixed-size.
+        // n_directions <= 8 guaranteed by construction, so bounds check is dead code.
+        let dirs = &self.directions[..n];
         for i in 0..n {
-            if i >= hla_state.len() {
-                break;
-            }
-            let dir = &self.directions[i];
+            let dir = &dirs[i];
             let mask = 1u64 << i;
-            let pos = ((dir.pos_bits & mask) != 0) as i8;
-            let neg = ((dir.neg_bits & mask) != 0) as i8;
-            let sign = (pos - neg) as f32;
+            // Branchless: bool→f32 via `as f32` (false=0.0, true=1.0)
+            let pos = ((dir.pos_bits & mask) != 0) as u32 as f32;
+            let neg = ((dir.neg_bits & mask) != 0) as u32 as f32;
+            let sign = pos - neg;
             dot += sign * hla_state[i] * dir.row_scale;
         }
         // sigmoid * confidence (KG weight bridge)

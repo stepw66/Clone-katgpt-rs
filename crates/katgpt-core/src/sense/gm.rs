@@ -72,6 +72,7 @@ pub(crate) trait GmSenseApi {
 // Binary payload helpers
 // ---------------------------------------------------------------------------
 
+#[inline]
 #[allow(dead_code)]
 fn read_u32(payload: &[u8], offset: usize) -> Option<(u32, usize)> {
     if offset + 4 > payload.len() {
@@ -86,6 +87,7 @@ fn read_u32(payload: &[u8], offset: usize) -> Option<(u32, usize)> {
     Some((val, offset + 4))
 }
 
+#[inline]
 #[allow(dead_code)]
 fn read_u64(payload: &[u8], offset: usize) -> Option<(u64, usize)> {
     if offset + 8 > payload.len() {
@@ -104,6 +106,7 @@ fn read_u64(payload: &[u8], offset: usize) -> Option<(u64, usize)> {
     Some((val, offset + 8))
 }
 
+#[inline]
 #[allow(dead_code)]
 fn read_f32(payload: &[u8], offset: usize) -> Option<(f32, usize)> {
     if offset + 4 > payload.len() {
@@ -118,6 +121,7 @@ fn read_f32(payload: &[u8], offset: usize) -> Option<(f32, usize)> {
     Some((val, offset + 4))
 }
 
+#[inline]
 #[allow(dead_code)]
 fn read_u8(payload: &[u8], offset: usize) -> Option<(u8, usize)> {
     if offset >= payload.len() {
@@ -127,6 +131,7 @@ fn read_u8(payload: &[u8], offset: usize) -> Option<(u8, usize)> {
 }
 
 /// Convert raw u8 to SenseKind. Returns None for unknown discriminants.
+#[inline]
 #[allow(dead_code)]
 fn kind_from_u8(raw: u8) -> Option<SenseKind> {
     match raw {
@@ -672,8 +677,8 @@ mod tests {
     #[test]
     fn test_dispatch_invalid_sense_kind() {
         let mut api = MockGmSenseApi::new();
-        // kind=6 is not a valid SenseKind
-        let payload = make_pin_payload(1, 6, 0.5);
+        // kind=99 is not a valid SenseKind (7=Reserved exists, anything >7 is invalid)
+        let payload = make_pin_payload(1, 99, 0.5);
         let result = dispatch_gm_action(&mut api, 0x20, &payload);
         assert_eq!(result.unwrap_err(), SenseError::InvalidKind);
     }

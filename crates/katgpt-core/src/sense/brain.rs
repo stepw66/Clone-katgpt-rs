@@ -112,16 +112,32 @@ impl NpcBrain {
     pub fn project_all_into(&self, result: &mut Vec<f32>) {
         let len = self.modules.len();
         result.clear();
-        result.resize(len, 0.0);
 
         #[cfg(feature = "sense_lod")]
         match self.active_lod {
-            SenseLodLevel::Full => self.project_full(result),
-            SenseLodLevel::Compressed => self.project_compressed(result),
-            SenseLodLevel::Minimal => self.project_minimal(result),
+            SenseLodLevel::Full => {
+                // Full writes every element — skip zero-fill.
+                result.reserve(len);
+                unsafe { result.set_len(len); }
+                self.project_full(result);
+            }
+            SenseLodLevel::Compressed | SenseLodLevel::Minimal => {
+                // Compressed/Minimal only write specific indices — zero-fill first.
+                result.resize(len, 0.0);
+                match self.active_lod {
+                    SenseLodLevel::Compressed => self.project_compressed(result),
+                    SenseLodLevel::Minimal => self.project_minimal(result),
+                    _ => unreachable!(),
+                }
+            }
         }
         #[cfg(not(feature = "sense_lod"))]
-        self.project_full(result);
+        {
+            // Full writes every element — skip zero-fill.
+            result.reserve(len);
+            unsafe { result.set_len(len); }
+            self.project_full(result);
+        }
     }
 
     /// Full projection: iterate all modules, project each.
@@ -190,12 +206,19 @@ impl NpcBrain {
         }
     }
 
-    /// Update HLA state with delta.
+    /// Update HLA state with delta (dynamic slice, bounds-checked).
     pub fn update_hla(&mut self, delta: &[f32]) {
-        for (i, &d) in delta.iter().enumerate() {
-            if i < self.hla_state.len() {
-                self.hla_state[i] += d;
-            }
+        let len = delta.len().min(self.hla_state.len());
+        for i in 0..len {
+            self.hla_state[i] += delta[i];
+        }
+    }
+
+    /// Update HLA state with fixed-size delta — no bounds check.
+    #[inline]
+    pub fn update_hla_fixed(&mut self, delta: &[f32; 8]) {
+        for i in 0..8 {
+            self.hla_state[i] += delta[i];
         }
     }
 

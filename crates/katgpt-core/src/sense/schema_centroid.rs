@@ -26,6 +26,7 @@ pub struct CentroidStats {
 ///
 /// Returns `None` if `embeddings` is empty (degenerate class).
 /// O(d·|E_c|) — pure arithmetic, zero allocation beyond the return value.
+#[inline]
 pub fn compute_centroid(embeddings: &[KgEmbedding]) -> Option<CentroidStats> {
     if embeddings.is_empty() {
         return None;
@@ -147,23 +148,29 @@ pub fn schema_init_entity(
     gamma: f32,
     rng: &mut fastrand::Rng,
 ) -> [f32; 8] {
-    // Collect (mean, std_dev) for classes found in cache
-    let mut found: Vec<([f32; 8], [f32; 8])> = Vec::new();
+    // Collect (mean, std_dev) for classes found in cache — stack-allocated, max 8 classes
+    let mut found: [Option<([f32; 8], [f32; 8])>; 8] = [None; 8];
+    let mut found_count = 0usize;
     for &class_hash in classes {
+        if found_count >= 8 {
+            break;
+        }
         if let Some(stats) = cache.get(class_hash) {
-            found.push((stats.mean, stats.std_dev));
+            found[found_count] = Some((stats.mean, stats.std_dev));
+            found_count += 1;
         }
     }
 
     // Fallback: random init in [-0.5, 0.5]
-    if found.is_empty() {
+    if found_count == 0 {
         return random_init(rng);
     }
 
-    let n_found = found.len() as f32;
+    let n_found = found_count as f32;
     let mut result = [0.0f32; 8];
 
-    for (mean, std_dev) in &found {
+    for i in 0..found_count {
+        let (mean, std_dev) = found[i].unwrap();
         for d in 0..8 {
             let noise = rng.f32() * 2.0 - 1.0; // ∈ [-1, 1]
             result[d] += mean[d] + gamma * std_dev[d] * noise;
