@@ -130,8 +130,7 @@ impl SenseOctreeBuilder {
         let mut scale_sum = 0.0f32;
 
         // Branchless: use bool-as-u64 to conditionally apply masks
-        for i in 0..8 {
-            let val = embedding[i];
+        for (i, &val) in embedding.iter().enumerate() {
             let mask = 1u64 << i;
             let is_pos = (val > 0.01) as u64;
             let is_neg = (val < -0.01) as u64;

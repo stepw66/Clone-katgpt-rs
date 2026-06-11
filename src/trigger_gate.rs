@@ -307,7 +307,7 @@ impl TriggerGate {
             }
             _ => None,
         }
-        .or_else(|| match current {
+        .or(match current {
             ComputeTier::CpuGpuAne => {
                 if qps < self.config.ane_activate_qps * self.config.hysteresis_factor {
                     Some(ComputeTier::CpuGpu)

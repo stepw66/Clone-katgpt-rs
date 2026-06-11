@@ -592,13 +592,10 @@ fn find_valid_token<P: ConstraintPruner>(
     }
 
     // Check validity in probability order (highest first)
-    for &idx in &top_indices {
-        if pruner.is_valid(depth, idx, parent_tokens) {
-            return Some(idx);
-        }
-    }
-
-    None
+    top_indices
+        .iter()
+        .find(|&&idx| pruner.is_valid(depth, idx, parent_tokens))
+        .copied()
 }
 
 /// Scalar top-k scan — O(n * K) with per-element min comparison.

@@ -3624,10 +3624,12 @@ impl ShardEmbedding {
     pub const DIM: usize = 8;
 
     /// Cosine similarity between two embeddings.
+    /// Uses SIMD-accelerated dot product and sum-of-squares.
+    #[inline]
     pub fn cosine_similarity(&self, other: &Self) -> f32 {
-        let dot: f32 = self.0.iter().zip(other.0.iter()).map(|(a, b)| a * b).sum();
-        let mag_a: f32 = self.0.iter().map(|x| x * x).sum::<f32>().sqrt();
-        let mag_b: f32 = other.0.iter().map(|x| x * x).sum::<f32>().sqrt();
+        let dot = crate::simd::simd_dot_f32(&self.0, &other.0, 8);
+        let mag_a = crate::simd::simd_sum_sq(&self.0, 8).sqrt();
+        let mag_b = crate::simd::simd_sum_sq(&other.0, 8).sqrt();
         if mag_a < 1e-8 || mag_b < 1e-8 {
             return 0.0;
         }
@@ -3635,12 +3637,10 @@ impl ShardEmbedding {
     }
 
     /// Euclidean distance squared between two embeddings.
+    /// Uses SIMD-accelerated fused-subtract-accumulate.
+    #[inline]
     pub fn dist_sq(&self, other: &Self) -> f32 {
-        self.0
-            .iter()
-            .zip(other.0.iter())
-            .map(|(a, b)| (a - b) * (a - b))
-            .sum()
+        crate::simd::simd_dist_sq(&self.0, &other.0, 8)
     }
 }
 
@@ -3766,12 +3766,12 @@ impl SenseModule {
 
         // Unrolled-friendly flat loop: extract ternary sign per-dim, FMA into dot.
         // bool-as-u32 then cast to f32 is zero-extend (no int-to-float conversion).
-        for i in 0..n {
+        for (i, hla_val) in hla_state.iter().enumerate().take(n) {
             let dir = &self.directions[i];
             let pos = ((dir.pos_bits >> i) & 1) as u32 as f32;
             let neg = ((dir.neg_bits >> i) & 1) as u32 as f32;
             // sign ∈ {-1, 0, +1} — FMA: dot += sign * hla * scale
-            dot += (pos - neg) * hla_state[i] * dir.row_scale;
+            dot += (pos - neg) * hla_val * dir.row_scale;
         }
 
         // Fast sigmoid * confidence

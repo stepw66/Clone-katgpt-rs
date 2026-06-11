@@ -229,15 +229,11 @@ fn goat_p10_forward_batch_valid_logits() {
     let batch: Vec<(usize, usize)> = (0..5).map(|i| (i, i)).collect();
     let results = router.forward_batch(&mut ctx, &weights, &mut cache, &batch);
 
-    assert_eq!(results.len(), 5);
-    for (i, logits) in results.iter().enumerate() {
-        assert_eq!(
-            logits.len(),
-            Config::micro().vocab_size,
-            "batch logits[{}] wrong length",
-            i
-        );
-        for (j, &v) in logits.iter().enumerate() {
+    let vocab = Config::micro().vocab_size;
+    assert_eq!(results.len(), batch.len() * vocab);
+    for (i, chunk) in results.chunks(vocab).enumerate() {
+        assert_eq!(chunk.len(), vocab, "batch logits[{}] wrong length", i);
+        for (j, &v) in chunk.iter().enumerate() {
             assert!(
                 v.is_finite(),
                 "batch logits[{}][{}] not finite: {}",
@@ -270,13 +266,17 @@ fn goat_p11_forward_batch_matches_sequential() {
     // Batch forward.
     let mut ctx2 = ForwardContext::new(&config);
     let mut cache2 = MultiLayerKVCache::new(&config);
+    let vocab = config.vocab_size;
     let mut router2 = InferenceRouter::new(fast_gate_config(), config, false, false);
     let batch: Vec<(usize, usize)> = (0..4).map(|i| (i, i)).collect();
     let batch_results = router2.forward_batch(&mut ctx2, &weights, &mut cache2, &batch);
-
-    assert_eq!(sequential.len(), batch_results.len());
-    for (i, (seq, batch)) in sequential.iter().zip(batch_results.iter()).enumerate() {
-        for (j, (a, b)) in seq.iter().zip(batch.iter()).enumerate() {
+    assert_eq!(batch_results.len(), sequential.len() * vocab);
+    for (i, (seq, chunk)) in sequential
+        .iter()
+        .zip(batch_results.chunks(vocab))
+        .enumerate()
+    {
+        for (j, (a, b)) in seq.iter().zip(chunk.iter()).enumerate() {
             assert!(
                 (a - b).abs() < 1e-6,
                 "batch mismatch at [{i}][{j}]: {a} vs {b}"

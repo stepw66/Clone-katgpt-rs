@@ -216,7 +216,6 @@ pub fn exp_map_into(
     tangent: &[f32],
     dim: usize,
 ) {
-    let _norm_base_sq = simd_dot_f32(base, base, dim).min(1.0 - 1e-5);
     let tangent_norm = simd_dot_f32(tangent, tangent, dim).sqrt();
 
     if tangent_norm < 1e-10 {
@@ -421,7 +420,7 @@ impl SlodOperator {
         for (si, &sigma) in sigmas.iter().enumerate() {
             // Compute heat kernel weights for each node
             weights[..n].fill(0.0);
-            let mut _total_energy = 0.0f32;
+            let mut total_energy = 0.0f32;
 
             for k in 0..k_eigs {
                 let decay = (-eigenvalues[k] * sigma).exp();
@@ -431,8 +430,9 @@ impl SlodOperator {
                 for i in 0..n {
                     weights[i] += amp * v[i] * v[i];
                 }
-                _total_energy += amp;
+                total_energy += amp;
             }
+            let _ = total_energy;
 
             // V(σ): participation — effective number of active nodes
             let w_sum = crate::simd::simd_sum_f32(&weights[..n]).max(1e-10);
@@ -594,11 +594,10 @@ pub fn frechet_mean(
 
     let mut mu = embeddings[start_idx * dim..(start_idx + 1) * dim].to_vec();
 
-    // Clamp initial point into ball
+    // Clamp initial point into ball (SIMD-accelerated)
     let norm_sq = simd_dot_f32(&mu, &mu, dim);
     if norm_sq >= 1.0 - 1e-5 {
-        let scale = (1.0 - 1e-5) / norm_sq.sqrt();
-        mu.iter_mut().for_each(|v| *v *= scale);
+        crate::simd::simd_scale_inplace(&mut mu, (1.0 - 1e-5) / norm_sq.sqrt());
     }
 
     let weight_sum: f32 = weights.iter().sum();
@@ -629,16 +628,18 @@ pub fn frechet_mean(
                 point,
                 dim,
             );
-            for d in 0..dim {
-                avg_tangent[d] += weights[i] * log_out[d];
-            }
+            // SIMD fused scale-accumulate: avg_tangent += weights[i] * log_out
+            crate::simd::simd_fused_scale_acc(
+                &mut avg_tangent[..dim],
+                &log_out[..dim],
+                weights[i],
+                dim,
+            );
         }
 
-        // Normalize by total weight
+        // Normalize by total weight (SIMD-accelerated)
         let norm = weight_sum.max(1e-10);
-        for v in avg_tangent.iter_mut() {
-            *v /= norm;
-        }
+        crate::simd::simd_scale_inplace(&mut avg_tangent[..dim], 1.0 / norm);
 
         // Check convergence
         let tangent_norm = simd_dot_f32(&avg_tangent, &avg_tangent, dim).sqrt();
@@ -646,10 +647,8 @@ pub fn frechet_mean(
             break;
         }
 
-        // Scale in-place instead of allocating step_tangent
-        for v in avg_tangent.iter_mut() {
-            *v *= config.step_size;
-        }
+        // Scale in-place instead of allocating step_tangent (SIMD-accelerated)
+        crate::simd::simd_scale_inplace(&mut avg_tangent[..dim], config.step_size);
 
         // Exp step — result goes into exp_out, then copy to mu
         exp_map_into(

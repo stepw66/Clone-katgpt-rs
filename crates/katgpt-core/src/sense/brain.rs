@@ -244,8 +244,8 @@ impl NpcBrain {
     /// Direct indexing avoids zip().take() iterator overhead; LLVM unrolls better.
     pub fn update_hla(&mut self, delta: &[f32]) {
         let len = delta.len().min(8);
-        for i in 0..len {
-            self.hla_state[i] += delta[i];
+        for (i, &d) in delta.iter().enumerate().take(len) {
+            self.hla_state[i] += d;
         }
     }
 
@@ -349,8 +349,8 @@ impl NpcBrain {
 
         // Compute HLA delta
         let mut hla_delta = [0.0f32; 8];
-        for i in 0..8 {
-            hla_delta[i] = state.hla()[i] - self.hla_state[i];
+        for (i, (h, s)) in state.hla().iter().zip(self.hla_state.iter()).enumerate() {
+            hla_delta[i] = h - s;
         }
 
         ReconstructionResult {

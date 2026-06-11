@@ -190,7 +190,7 @@ impl IrrepPruner {
         top_k_when_uncertain: usize,
         max_vocab: usize,
     ) -> Self {
-        let bitset_words = (max_vocab + 63) / 64;
+        let bitset_words = max_vocab.div_ceil(64);
         Self {
             planner: FftPlanner::new(),
             scratch: Vec::with_capacity(max_vocab),
@@ -309,7 +309,7 @@ impl IrrepPruner {
         // Build bitset from sorted top-k.
         // Each u64 word holds 64 bits — 8× fewer cachelines than Vec<bool>.
         self.vocab_len = n;
-        let n_words = (n + 63) / 64;
+        let n_words = n.div_ceil(64);
         if self.top_k_bits.len() < n_words {
             self.top_k_bits.resize(n_words, 0);
         }

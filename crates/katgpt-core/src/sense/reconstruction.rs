@@ -35,14 +35,12 @@ impl OctreeNodeId {
             return 0;
         }
         // For octree: node 0=depth 0, nodes 1-8=depth 1, nodes 9-72=depth 2, etc.
-        // Use iterative approach for correctness
-        let mut n = self.0;
-        let mut d = 0u8;
-        while n > 0 {
-            n = (n - 1) / 8;
-            d += 1;
-        }
-        d
+        // Depth d has 8^d nodes. Cumulative nodes through depth d = (8^(d+1) - 1) / 7.
+        // Node n has depth = floor(log_8(n * 7 + 1)) via leading zeros.
+        let v = self.0.wrapping_mul(7).wrapping_add(1);
+        // ilog gives floor(log_8(v)) via log2(v)/3
+        let log2 = 32 - v.leading_zeros() - 1; // floor(log2(v))
+        log2 as u8 / 3
     }
 
     /// Parent node ID, or None for root.
@@ -436,11 +434,11 @@ impl ReconstructionState {
 
             // Build sign × scale vector: sign_scaled[i] = sign_i * directions[i].row_scale
             let mut sign_scaled = [0.0f32; 8];
-            for i in 0..n {
+            for (i, item) in sign_scaled.iter_mut().enumerate().take(n) {
                 let dir = &module.directions[i];
                 let pos = ((dir.pos_bits >> i) & 1) as u32 as f32;
                 let neg = ((dir.neg_bits >> i) & 1) as u32 as f32;
-                sign_scaled[i] = (pos - neg) * dir.row_scale;
+                *item = (pos - neg) * dir.row_scale;
             }
 
             // SIMD dot: sign_scaled · hla
@@ -673,9 +671,9 @@ impl ReconstructionState {
         crate::simd::simd_fused_sub_scale_inplace(&mut delta, sub_val, scale);
 
         // Clamp delta and apply to HLA
-        for i in 0..8 {
-            delta[i] = delta[i].clamp(-max_delta, max_delta);
-            self.hla[i] = (self.hla[i] + delta[i]).clamp(-1.0, 1.0);
+        for (d, h) in delta.iter_mut().zip(self.hla.iter_mut()) {
+            *d = d.clamp(-max_delta, max_delta);
+            *h = (*h + *d).clamp(-1.0, 1.0);
         }
     }
 
@@ -773,12 +771,11 @@ impl ReconstructionState {
     /// inner matvec with an ANE dispatch. This is left as future work for
     /// the Metal backend in riir-engine.
     pub fn reconstruct_auto(&mut self, brain: &crate::sense::brain::NpcBrain) -> [f32; 6] {
-        let result = if self.config.simd_beneficial() {
+        if self.config.simd_beneficial() {
             self.reconstruct_inner(brain, true)
         } else {
             self.reconstruct_inner(brain, false)
-        };
-        result
+        }
     }
 
     /// Shared inner loop — dispatches to SIMD `evolve_hla_simd()` when available.
