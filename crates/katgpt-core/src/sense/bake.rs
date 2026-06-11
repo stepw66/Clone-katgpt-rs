@@ -101,7 +101,7 @@ pub fn exploration_priority(lambda: &[f32; 8], dimension: usize) -> f32 {
 /// Pre-compute max lambda for batch calls to `exploration_priority_with_max`.
 #[inline]
 pub fn max_lambda(lambda: &[f32; 8]) -> f32 {
-    lambda.iter().cloned().fold(0.0f32, f32::max)
+    crate::simd::simd_max_f32(lambda)
 }
 
 /// Exploration priority with pre-computed max_lambda — avoids O(8) scan per call.
@@ -179,20 +179,19 @@ mod bake_store {
         /// Apply BAKE update and store result.
         ///
         /// If entity is not tracked, creates an entry with uninformative prior first,
-        /// then applies the update.
+        /// then applies the update. Uses a single papaya pin to avoid double epoch
+        /// overhead.
         pub fn update(&self, entity_hash: u64, observation: &[f32; 8], lambda_obs: f32) {
             let guard = self.entries.pin();
             let entry = guard
                 .get(&entity_hash)
                 .copied()
                 .unwrap_or_else(PrecisionEntry::uninformative);
-            // Release guard before mutation (papaya returns a local guard).
-            drop(guard);
 
             let (new_mean, new_precision) =
                 bake_update(&entry.mean, &entry.precision, observation, lambda_obs);
 
-            self.entries.pin().insert(
+            guard.insert(
                 entity_hash,
                 PrecisionEntry {
                     mean: new_mean,

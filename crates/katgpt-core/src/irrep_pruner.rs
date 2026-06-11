@@ -55,7 +55,7 @@ pub fn spectral_flatness(
     let n = logits.len();
     assert!(n > 0, "spectral_flatness requires non-empty input");
 
-    // Prepare scratch buffer: resize if needed, then fill
+    // Prepare scratch buffer: resize if needed, then copy logits
     if scratch.len() < n {
         scratch.resize(n, Complex::new(0.0, 0.0));
     }
@@ -230,12 +230,8 @@ impl IrrepPruner {
         self.current_flatness = spectral_flatness(logits, &mut self.scratch, &mut self.planner);
 
         // Cache logits — reuse allocation when size matches, resize+copy otherwise
-        if self.logits.len() == logits.len() {
-            self.logits.copy_from_slice(logits);
-        } else {
-            self.logits.clear();
-            self.logits.extend_from_slice(logits);
-        }
+        self.logits.resize(logits.len(), 0.0);
+        self.logits.copy_from_slice(logits);
 
         // Determine valid count based on flatness
         // High flatness = converged = allow all tokens

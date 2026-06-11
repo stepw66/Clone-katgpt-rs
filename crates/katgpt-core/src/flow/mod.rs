@@ -21,16 +21,16 @@ pub use steering::{blend_steering, flow_steering, should_use_flow_field};
 /// One per goal (or per goal-group for shared goals).
 /// Vectors are stored row-major as `[w * h * 2]` with `(dx, dy)` pairs.
 pub struct FlowField {
-    /// Width in cells.
-    pub w: u16,
-    /// Height in cells.
-    pub h: u16,
     /// Pre-computed row stride in flow elements: `w as usize * 2`.
     /// Avoids recomputing `w * 2` on every lookup/set/is_blocked call.
     stride: usize,
     /// Flow vectors: `[w * h * 2]` — `(dx, dy)` per cell, row-major.
     /// Normalised to unit length or zero for blocked cells.
     flow: Vec<f32>,
+    /// Width in cells.
+    pub w: u16,
+    /// Height in cells.
+    pub h: u16,
 }
 
 impl FlowField {
@@ -39,10 +39,10 @@ impl FlowField {
         let stride = (w as usize) * 2;
         let len = stride * (h as usize);
         Self {
-            w,
-            h,
             stride,
             flow: vec![0.0f32; len],
+            w,
+            h,
         }
     }
 
@@ -115,14 +115,14 @@ impl FlowField {
 /// Intermediate structure — consumed by FFT smoothing then turned into a
 /// [`FlowField`] via [`Self::gradient`].
 pub struct LeoPotentialGrid {
-    /// Width in cells.
-    pub w: u16,
-    /// Height in cells.
-    pub h: u16,
     /// Q-values: `[w * h]` — max-Q or expected value per cell for one goal.
     potential: Vec<f32>,
     /// Blocked cells (obstacles, walls). Bitfield, 1 = blocked.
     blocked: Vec<u64>,
+    /// Width in cells.
+    pub w: u16,
+    /// Height in cells.
+    pub h: u16,
 }
 
 impl LeoPotentialGrid {
@@ -131,10 +131,10 @@ impl LeoPotentialGrid {
         let cells = (w as usize) * (h as usize);
         let words = (cells + 63) / 64;
         Self {
-            w,
-            h,
             potential: vec![0.0f32; cells],
             blocked: vec![0u64; words],
+            w,
+            h,
         }
     }
 
@@ -166,10 +166,10 @@ impl LeoPotentialGrid {
         }
 
         Self {
-            w,
-            h,
             potential,
             blocked: vec![0u64; words],
+            w,
+            h,
         }
     }
 

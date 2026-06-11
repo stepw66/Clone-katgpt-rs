@@ -6,7 +6,7 @@ use crate::types::{SenseKind, SenseModule};
 const AGGREGATE_KINDS: usize = 8;
 
 /// Per-kind aggregate for O(1) average_reward.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 struct KindAggregate {
     sum: f32,
     count: u32,
@@ -32,6 +32,14 @@ pub struct SenseTrialLog {
 }
 
 impl SenseTrialLog {
+    /// Create a new trial log with pre-allocated capacity.
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            trials: Vec::with_capacity(capacity),
+            aggregates: [KindAggregate::default(); AGGREGATE_KINDS],
+        }
+    }
+
     pub fn record(&mut self, trial: SenseTrial) {
         // Update per-kind aggregate (O(1))
         let idx = trial.sense_kind as usize;

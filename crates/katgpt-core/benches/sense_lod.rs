@@ -73,7 +73,7 @@ fn make_distances(n: usize) -> Vec<f32> {
 
 fn router() -> SenseLodRouter {
     SenseLodRouter::new(
-        vec![
+        &[
             ScaleBoundary {
                 sigma: SIGMA1,
                 k_star: 4,

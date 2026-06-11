@@ -42,7 +42,7 @@ pub struct SenseLodRouter {
 }
 
 impl SenseLodRouter {
-    pub fn new(_boundaries: Vec<ScaleBoundary>, sigma1: f32, sigma2: f32) -> Self {
+    pub fn new(_boundaries: &[ScaleBoundary], sigma1: f32, sigma2: f32) -> Self {
         Self { sigma1, sigma2 }
     }
 
@@ -136,7 +136,7 @@ mod tests {
     use crate::slod::ScaleBoundary;
 
     fn router() -> SenseLodRouter {
-        SenseLodRouter::new(vec![boundary(10.0), boundary(50.0)], 10.0, 50.0)
+        SenseLodRouter::new(&[boundary(10.0), boundary(50.0)], 10.0, 50.0)
     }
 
     fn boundary(sigma: f32) -> ScaleBoundary {

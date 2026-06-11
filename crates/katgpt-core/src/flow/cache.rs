@@ -30,8 +30,6 @@ pub struct FlowFieldCache {
     /// `goal_id → (FlowField, dirty_count, last_computed_tick)`.
     fields: HashMap<u64, CachedField>,
     config: FlowFieldConfig,
-    /// Minimum NPCs sharing a goal to warrant a flow field.
-    min_npcs: u16,
     /// Pre-allocated FFT scratch buffers — reused across calls to avoid per-compute allocation.
     fft_buf: Vec<Complex<f32>>,
     fft_col_buf: Vec<Complex<f32>>,
@@ -41,6 +39,8 @@ pub struct FlowFieldCache {
     blocked_buf: Vec<u64>,
     /// Pre-allocated snapshot buffer for obstacle inflation (avoids per-call allocation).
     snapshot_buf: Vec<u64>,
+    /// Minimum NPCs sharing a goal to warrant a flow field.
+    min_npcs: u16,
 }
 
 impl FlowFieldCache {
@@ -128,7 +128,7 @@ impl FlowFieldCache {
             None => true,
         };
         if !needs_recompute {
-            return Some(&self.fields.get(&goal_id)?.field);
+            return Some(&self.fields[&goal_id].field);
         }
 
         // Validate goal index.
@@ -159,7 +159,6 @@ impl FlowFieldCache {
 
         // Resize scratch buffers if grid dimensions changed.
         self.blocked_buf.resize(blocked_words, 0u64);
-        self.blocked_buf[..blocked_words].fill(0);
 
         // Copy blocked state into bitfield for inflation.
         // NOTE: Grid stores blocked as (w*h+63)/64 words (flat), while we use
@@ -296,7 +295,7 @@ impl FlowFieldCache {
             },
         );
 
-        self.fields.get(&goal_id).map(|c| &c.field)
+        Some(&self.fields[&goal_id].field)
     }
 
     /// Invalidate a specific goal's cached flow field.
