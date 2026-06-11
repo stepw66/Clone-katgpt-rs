@@ -23,7 +23,10 @@ pub mod perceiver;
 pub mod position_free;
 pub mod query_bank;
 
-pub use beta_bias::{BetaBias, BetaStrategy, compute_beta_mass_matching, compute_beta_vortex_flow};
+pub use beta_bias::{
+    AttentionDistribution, BetaBias, BetaStrategy, compute_beta_mass_matching,
+    compute_beta_vortex_flow,
+};
 pub use compact_cache::{CompactKVCache, CompactionMeta, CompactionStrategy};
 pub use iterative::{IterativeChunkCompactor, KVChunk};
 pub use perceiver::{StillPerceiver, StillPerceiverConfig};
@@ -319,7 +322,29 @@ mod integration_tests {
         chunk_size: usize,
         strategy: CompactionStrategy,
     ) -> (Vec<f32>, Vec<f32>, std::time::Duration) {
-        let _kv_dim = num_heads * head_dim;
+        run_compaction_with_beta(
+            keys_f16,
+            values_f16,
+            num_heads,
+            head_dim,
+            compression_ratio,
+            chunk_size,
+            strategy,
+            BetaStrategy::MassMatching,
+        )
+    }
+
+    /// Run compaction with a specific β strategy.
+    fn run_compaction_with_beta(
+        keys_f16: &[f16],
+        values_f16: &[f16],
+        num_heads: usize,
+        head_dim: usize,
+        compression_ratio: usize,
+        chunk_size: usize,
+        strategy: CompactionStrategy,
+        beta_strategy: BetaStrategy,
+    ) -> (Vec<f32>, Vec<f32>, std::time::Duration) {
         let compactor = IterativeChunkCompactor::new(
             chunk_size,
             0,
@@ -328,7 +353,8 @@ mod integration_tests {
             strategy,
             10000.0,
             compression_ratio,
-        );
+        )
+        .with_beta_strategy(beta_strategy);
 
         let chunks = compactor.split_into_chunks(keys_f16, values_f16, 0);
         let budget = compactor.compact_budget();
@@ -337,9 +363,16 @@ mod integration_tests {
         let compacted = compactor.compact_chunk(&chunks[0], chunks.get(1), budget);
         let elapsed = start.elapsed();
 
-        // Convert compact output to f32 for quality measurement
-        let compact_keys_f32: Vec<f32> = compacted.keys.iter().map(|v| v.to_f32()).collect();
-        let compact_values_f32: Vec<f32> = compacted.values.iter().map(|v| v.to_f32()).collect();
+        let compact_keys_f32: Vec<f32> = compacted
+            .keys
+            .iter()
+            .map(|v: &half::f16| v.to_f32())
+            .collect();
+        let compact_values_f32: Vec<f32> = compacted
+            .values
+            .iter()
+            .map(|v: &half::f16| v.to_f32())
+            .collect();
 
         (compact_keys_f32, compact_values_f32, elapsed)
     }
@@ -679,5 +712,289 @@ mod integration_tests {
         if all_pass {
             println!("\nGOAT gate PASSED: All quality thresholds met.");
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // Issue 003: Heuristic β benchmark and verification
+    // -----------------------------------------------------------------------
+
+    /// T25: Benchmark — Compare β-A (MassMatching) vs β-D (VortexFlow).
+    ///
+    /// Measures per-latent attention mass, entropy, max dominance for each
+    /// β strategy at multiple compression ratios.
+    #[test]
+    fn bench_t25_beta_strategies() {
+        let seq_len = 1024;
+        let num_heads = 8;
+        let head_dim = 64;
+        let kv_dim = num_heads * head_dim;
+        let chunk_size = 256;
+
+        let (keys_f16, values_f16) = generate_synthetic_kv(seq_len, num_heads, head_dim);
+        let keys_f32: Vec<f32> = keys_f16[..chunk_size * kv_dim]
+            .iter()
+            .map(|v| v.to_f32())
+            .collect();
+        let orig_mean = mean_across_tokens(&keys_f32, chunk_size, kv_dim);
+
+        let beta_strategies = [
+            (BetaStrategy::MassMatching, "\u{03b2}-A: MassMatching"),
+            (BetaStrategy::VortexFlowRouting, "\u{03b2}-D: VortexFlow"),
+        ];
+        let compaction_strategies = [
+            CompactionStrategy::ClusterCentroids,
+            CompactionStrategy::MuxSuperposition,
+        ];
+        let ratios = [8usize, 16, 32];
+
+        println!(
+            "\n=== T25: Beta Strategy Benchmark ({} tokens x {} heads x {} dim) ===",
+            seq_len, num_heads, head_dim
+        );
+        println!(
+            "{:>20} | {:>15} | {:>4}x | {:>10} | {:>8} | {:>8} | {:>8}",
+            "Compaction", "Beta Strategy", "Rx", "CosSim", "MaxMass", "Entropy", "NormEnt"
+        );
+        println!("{}", "-".repeat(100));
+
+        for &comp_strategy in &compaction_strategies {
+            for &(beta_strat, beta_name) in &beta_strategies {
+                for &ratio in &ratios {
+                    let (ck, _cv, elapsed) = run_compaction_with_beta(
+                        &keys_f16,
+                        &values_f16,
+                        num_heads,
+                        head_dim,
+                        ratio,
+                        chunk_size,
+                        comp_strategy,
+                        beta_strat,
+                    );
+
+                    let compact_tokens = ck.len() / kv_dim;
+                    let compact_mean = mean_across_tokens(&ck, compact_tokens, kv_dim);
+                    let cos_sim = cosine_similarity(&orig_mean, &compact_mean);
+
+                    // Compute beta and analyze distribution
+                    let beta = match beta_strat {
+                        BetaStrategy::MassMatching => {
+                            compute_beta_mass_matching(chunk_size, compact_tokens)
+                        }
+                        BetaStrategy::VortexFlowRouting => {
+                            // Re-run perceiver for cross-attn weights
+                            let pos_free = PositionFreeCompactor::new(10000.0, kv_dim);
+                            let unrotated =
+                                pos_free.un_rotate_keys(&keys_f16[..chunk_size * kv_dim], 0);
+                            let values_f32: Vec<f32> = values_f16[..chunk_size * kv_dim]
+                                .iter()
+                                .map(|v| v.to_f32())
+                                .collect();
+                            let input_2d = {
+                                let d = kv_dim;
+                                let n = unrotated.len() / d;
+                                let mut out = Vec::with_capacity(n * d * 2);
+                                for t in 0..n {
+                                    out.extend_from_slice(&unrotated[t * d..(t + 1) * d]);
+                                    out.extend_from_slice(&values_f32[t * d..(t + 1) * d]);
+                                }
+                                out
+                            };
+                            let input_dim_2d = kv_dim * 2;
+                            let qb = crate::still_kv::query_bank::create_query_bank(
+                                comp_strategy,
+                                input_dim_2d,
+                            );
+                            let queries = qb.generate_queries(&input_2d, compact_tokens);
+                            if queries.is_empty() {
+                                compute_beta_mass_matching(chunk_size, compact_tokens)
+                            } else {
+                                let perceiver =
+                                    StillPerceiver::new(StillPerceiverConfig::with_kv_dim(
+                                        input_dim_2d,
+                                        compact_tokens,
+                                        input_dim_2d,
+                                    ));
+                                let (_latents, weights) =
+                                    perceiver.forward_with_weights(&input_2d, &queries);
+                                compute_beta_vortex_flow(&weights, chunk_size, compact_tokens)
+                            }
+                        }
+                    };
+
+                    // Analyze beta distribution
+                    let total_beta: f32 = beta.biases.iter().copied().map(|b| b.abs()).sum();
+                    let per_latent_mass: Vec<f32> = if total_beta > 1e-12 {
+                        beta.biases.iter().map(|b| b.abs() / total_beta).collect()
+                    } else {
+                        vec![1.0 / compact_tokens as f32; compact_tokens]
+                    };
+
+                    let max_mass = per_latent_mass.iter().copied().fold(0.0f32, f32::max);
+                    let mut entropy = 0.0f32;
+                    for &p in &per_latent_mass {
+                        if p > 1e-12 {
+                            entropy -= p * p.ln();
+                        }
+                    }
+                    let max_entropy = (compact_tokens as f32).ln();
+                    let norm_entropy = if max_entropy > 1e-12 {
+                        entropy / max_entropy
+                    } else {
+                        1.0
+                    };
+
+                    println!(
+                        "{:>20} | {:>15} | {:>4}x | {:>10.4} | {:>8.4} | {:>8.4} | {:>8.4} | {:.2}ms",
+                        format!("{:?}", comp_strategy),
+                        beta_name,
+                        ratio,
+                        cos_sim,
+                        max_mass,
+                        entropy,
+                        norm_entropy,
+                        elapsed.as_secs_f64() * 1000.0
+                    );
+                }
+            }
+        }
+    }
+
+    /// T26: Verify non-degenerate attention — no single latent dominates >50%.
+    #[test]
+    fn verify_t26_non_degenerate_attention() {
+        let compact_len = 32;
+        let original_len = 256;
+
+        // Case 1: Uniform distribution — should be non-degenerate
+        let uniform_weights: Vec<f32> = vec![1.0 / original_len as f32; compact_len * original_len];
+        let dist =
+            AttentionDistribution::from_cross_attn(&uniform_weights, original_len, compact_len);
+        assert!(
+            dist.is_non_degenerate(),
+            "Uniform attention should be non-degenerate: max_mass={}",
+            dist.max_mass
+        );
+
+        // Case 2: Single latent dominates — should be degenerate
+        let mut dominant_weights = vec![0.0f32; compact_len * original_len];
+        for j in 0..original_len {
+            dominant_weights[j] = 1.0 / original_len as f32;
+        }
+        let dist_dominant =
+            AttentionDistribution::from_cross_attn(&dominant_weights, original_len, compact_len);
+        assert!(
+            !dist_dominant.is_non_degenerate(),
+            "Single-dominant latent should be degenerate: max_mass={}",
+            dist_dominant.max_mass
+        );
+        assert!(
+            dist_dominant.max_mass > 0.5,
+            "Dominant latent should have >50% mass: max_mass={}",
+            dist_dominant.max_mass
+        );
+
+        // Case 3: Spread across 3 latents — should be non-degenerate
+        let mut spread_weights = vec![0.0f32; compact_len * original_len];
+        for i in 0..3 {
+            for j in 0..original_len {
+                spread_weights[i * original_len + j] = 1.0 / (3.0 * original_len as f32);
+            }
+        }
+        let dist_spread =
+            AttentionDistribution::from_cross_attn(&spread_weights, original_len, compact_len);
+        assert!(
+            dist_spread.is_non_degenerate(),
+            "3-latent spread should be non-degenerate: max_mass={}",
+            dist_spread.max_mass
+        );
+
+        println!("\nT26: Non-degenerate attention verification PASSED");
+        println!(
+            "  Uniform: max_mass={:.4}, non-degenerate={}",
+            dist.max_mass,
+            dist.is_non_degenerate()
+        );
+        println!(
+            "  Dominant: max_mass={:.4}, non-degenerate={}",
+            dist_dominant.max_mass,
+            dist_dominant.is_non_degenerate()
+        );
+        println!(
+            "  Spread:   max_mass={:.4}, non-degenerate={}",
+            dist_spread.max_mass,
+            dist_spread.is_non_degenerate()
+        );
+    }
+
+    /// T27: Verify no attention collapse — entropy < max_entropy * 0.8.
+    ///
+    /// Uniform attention (all latents equal mass) is "collapsed".
+    /// Asymmetric attention (some latents attract more mass) is not collapsed.
+    #[test]
+    fn verify_t27_no_attention_collapse() {
+        let compact_len = 16;
+        let original_len = 128;
+
+        // Case 1: Uniform cross-attn -> uniform mass -> collapsed
+        let uniform_weights: Vec<f32> = vec![1.0 / original_len as f32; compact_len * original_len];
+        let dist_uniform =
+            AttentionDistribution::from_cross_attn(&uniform_weights, original_len, compact_len);
+        assert!(
+            !dist_uniform.is_not_collapsed(),
+            "Uniform attention should be collapsed (high entropy): norm_ent={}",
+            dist_uniform.normalized_entropy
+        );
+
+        // Case 2: Asymmetric concentration -> not collapsed
+        let mut asymmetric_weights = vec![0.0f32; compact_len * original_len];
+        for i in 0..compact_len {
+            let concentration = if i == 0 {
+                0.8
+            } else {
+                0.2 / (compact_len - 1) as f32
+            };
+            for j in 0..original_len {
+                asymmetric_weights[i * original_len + j] = concentration / original_len as f32
+                    * if j < original_len / 2 { 3.0 } else { 1.0 };
+            }
+        }
+        let dist_asym =
+            AttentionDistribution::from_cross_attn(&asymmetric_weights, original_len, compact_len);
+        assert!(
+            dist_asym.is_not_collapsed(),
+            "Asymmetric attention should not be collapsed: norm_ent={}",
+            dist_asym.normalized_entropy
+        );
+
+        // Case 3: beta-D produces different biases with asymmetric attn
+        let beta_d = compute_beta_vortex_flow(&asymmetric_weights, original_len, compact_len);
+        let first = beta_d.biases[0];
+        let all_same = beta_d.biases.iter().all(|&b| (b - first).abs() < 1e-6);
+        assert!(
+            !all_same,
+            "beta-D with asymmetric attention should differentiate"
+        );
+
+        // Case 4: beta-A always produces identical biases
+        let beta_a = compute_beta_mass_matching(original_len, compact_len);
+        let first_a = beta_a.biases[0];
+        let all_same_a = beta_a.biases.iter().all(|&b| (b - first_a).abs() < 1e-6);
+        assert!(all_same_a, "beta-A should produce identical biases");
+
+        println!("\nT27: No-collapse verification PASSED");
+        println!(
+            "  Uniform: norm_entropy={:.4}, collapsed={}",
+            dist_uniform.normalized_entropy,
+            !dist_uniform.is_not_collapsed()
+        );
+        println!(
+            "  Asymmetric: norm_entropy={:.4}, not_collapsed={}",
+            dist_asym.normalized_entropy,
+            dist_asym.is_not_collapsed()
+        );
+        println!(
+            "  beta-A all_same={}, beta-D all_same={}",
+            all_same_a, all_same
+        );
     }
 }

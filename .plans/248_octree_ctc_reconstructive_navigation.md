@@ -14,37 +14,39 @@ Implement multi-step active reconstruction over KG-Latent-Octree, replacing sing
 
 ## Tasks
 
-### Phase 1: Core Types
-- [ ] Create `ReconstructionState` struct in `katgpt-core/src/sense/reconstruction.rs`
+### Phase 1: Core Types — DONE (commit e8f05926)
+- [x] Create `ReconstructionState` struct in `katgpt-core/src/sense/reconstruction.rs`
   - `hla: [f32; 8]` — evolving HLA state
-  - `active_nodes: ArrayVec<OctreeNodeId, 8>` — Z(t) active set
-  - `accumulated: Vec<KgTriple>` — H(t) evidence
+  - `active_nodes: [Option<OctreeNodeId>; 8]` — Z(t) active set (fixed-size, zero-alloc)
+  - `evidence: TripleEvidence` — H(t) evidence
   - `step: u8` — current traversal step
   - `max_steps: u8` — budget (default 3)
   - `entropy_threshold: f32` — early stop threshold
-- [ ] Create `OctreeNodeId` newtype (`u32` morton code)
-- [ ] Create `TraversalAction` enum: `Forward { tag_idx: u8 }`, `Reverse { content_idx: u8 }`, `Halt`
-- [ ] Create `ReconstructionConfig` with serde support
+- [x] Create `OctreeNodeId` newtype (`u32` morton code) with depth/parent/child
+- [x] Create `TraversalAction` enum: `Forward { tag_idx: u8 }`, `Reverse { content_idx: u8 }`, `Halt`
+- [x] Create `ReconstructionConfig` with defaults
   - `max_steps: u8` (default 3)
   - `hla_learning_rate: f32` (default 0.1)
   - `entropy_threshold: f32` (default 0.05)
   - `lod_adaptive: bool` (default true)
+  - `max_hla_delta: f32` (default 0.3)
 
-### Phase 2: Reconstruction Loop
-- [ ] Implement `ReconstructionState::expand()` — traverse octree children from active nodes
-- [ ] Implement `ReconstructionState::route()` — entropy-gated bandit selection (reuse `SenseBandit`)
-- [ ] Implement `ReconstructionState::accumulate()` — collect KG triples from selected content
-- [ ] Implement `ReconstructionState::evolve_hla()` — bridge function: accumulated triples → HLA update
-  - Must be: dot-product projection + sigmoid (per AGENTS.md)
-  - Must be: zero-allocation, clamp to valid range
+### Phase 2: Reconstruction Loop — DONE (commit e8f05926)
+- [x] Implement `ReconstructionState::expand()` — traverse octree children from active nodes
+- [x] Implement `ReconstructionState::route()` — entropy-gated selection
+- [x] Implement `ReconstructionState::accumulate()` — collect KG triples from selected content
+- [x] Implement `ReconstructionState::evolve_hla()` — bridge function: accumulated triples → HLA update
+  - Uses dot-product projection + sigmoid (per AGENTS.md)
+  - Zero-allocation, clamp to valid range
   - Max delta per step bounded by `hla_learning_rate`
-- [ ] Implement `ReconstructionState::sufficient()` — entropy-based early stopping
-- [ ] Implement `ReconstructionState::reconstruct()` — main loop combining above methods
+- [x] Implement `ReconstructionState::sufficient()` — entropy-based early stopping
+- [x] Implement `ReconstructionState::reconstruct()` — main loop combining above methods
 
-### Phase 3: NpcBrain Integration
-- [ ] Add `reconstruct()` method to `NpcBrain` (behind `octree_ctc` feature gate)
-- [ ] Existing `project_all()` remains default behavior (backward compat)
-- [ ] Add `project_reconstruct()` that uses `ReconstructionState` internally
+### Phase 3: NpcBrain Integration — PARTIAL (3 remaining tasks)
+- [x] Add `reconstruct()` method to `NpcBrain` (behind `sense_composition` feature)
+- [x] Existing `project_all()` remains default behavior (backward compat)
+- [x] Add `SenseModule::project_reconstruction()` wrapper for reconstruction loop
+- [x] Add `NpcBrain::project_reconstruct()` that uses `ReconstructionState` internally
 - [ ] Wire `SenseBandit` trial logging for reconstruction steps
 
 ### Phase 4: SIMD Optimization

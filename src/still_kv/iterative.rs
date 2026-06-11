@@ -114,6 +114,12 @@ impl IterativeChunkCompactor {
         }
     }
 
+    /// Set the beta strategy for additive attention bias computation.
+    pub fn with_beta_strategy(mut self, strategy: BetaStrategy) -> Self {
+        self.beta_strategy = strategy;
+        self
+    }
+
     /// Compute the budget (number of compact tokens) per chunk.
     ///
     /// `budget = chunk_size / compression_ratio`

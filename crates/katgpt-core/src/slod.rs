@@ -177,10 +177,8 @@ pub fn log_map_into(
         return;
     }
 
-    // neg_base = -base
-    for i in 0..dim {
-        neg_base[i] = -base[i];
-    }
+    // neg_base = -base (SIMD-accelerated negate)
+    crate::simd::simd_fused_decay_write(&mut neg_base[..dim], 0.0, &base[..dim], -1.0);
 
     mobius_add_into(mob_result, neg_base, point, dim);
     let mob_norm = simd_dot_f32(mob_result, mob_result, dim).sqrt();
@@ -191,9 +189,7 @@ pub fn log_map_into(
     }
 
     let scale = dist / mob_norm;
-    for i in 0..dim {
-        out[i] = mob_result[i] * scale;
-    }
+    crate::simd::simd_fused_decay_write(&mut out[..dim], 0.0, &mob_result[..dim], scale);
 }
 
 /// Riemannian exp map: project tangent vector back to the Poincaré ball.
@@ -230,15 +226,13 @@ pub fn exp_map_into(
 
     // Compute direction: tanh(||v||/2) * v/||v||
     let s = (tangent_norm / 2.0).tanh() / tangent_norm;
-    for i in 0..dim {
-        dir[i] = s * tangent[i];
-    }
+    crate::simd::simd_fused_decay_write(&mut dir[..dim], 0.0, &tangent[..dim], s);
 
     // Project dir into ball
     let dir_norm_sq = simd_dot_f32(dir, dir, dim);
     if dir_norm_sq >= 1.0 - 1e-5 {
         let scale = (1.0 - 1e-5) / dir_norm_sq.sqrt();
-        dir.iter_mut().for_each(|v| *v *= scale);
+        crate::simd::simd_scale_inplace(&mut dir[..dim], scale);
     }
 
     // Möbius addition: base ⊕ dir
@@ -248,9 +242,7 @@ pub fn exp_map_into(
     let norm_r_sq = simd_dot_f32(mob_result, mob_result, dim);
     if norm_r_sq >= 1.0 - 1e-5 {
         let scale = (1.0 - 1e-5) / norm_r_sq.sqrt();
-        for i in 0..dim {
-            out[i] = mob_result[i] * scale;
-        }
+        crate::simd::simd_fused_decay_write(&mut out[..dim], 0.0, &mob_result[..dim], scale);
     } else {
         out[..dim].copy_from_slice(&mob_result[..dim]);
     }

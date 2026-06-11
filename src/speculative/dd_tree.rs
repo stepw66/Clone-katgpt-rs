@@ -1189,7 +1189,7 @@ where
             solved_count,
             ..
         } => {
-            if *solved_count < children.len() {
+            if usize::from(*solved_count) < children.len() {
                 return Vec::new();
             }
             let mut combined = Vec::new();

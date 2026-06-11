@@ -1,5 +1,8 @@
 //! NpcBrain — composable sense modules with GM override.
 
+use crate::sense::reconstruction::{
+    ReconstructionConfig, ReconstructionResult, ReconstructionState,
+};
 use crate::types::{SenseKind, SenseModule};
 
 #[cfg(feature = "sense_lod")]
@@ -308,6 +311,67 @@ impl NpcBrain {
         self.overrides.autonomous_disabled = false;
         self.overrides.script_id = None;
     }
+
+    // -- Reconstruction integration (Phase 3) --
+
+    /// Multi-step reconstructive projection — active retrieval with HLA evolution.
+    ///
+    /// Unlike `project_all()` which does single-shot passive retrieval,
+    /// this uses iterative reconstruction: the HLA state evolves based on
+    /// accumulated evidence across multiple traversal steps.
+    ///
+    /// Returns `ReconstructionResult` with passive baseline, active reconstructed
+    /// activations, and the HLA delta from evolution.
+    pub fn project_reconstruct(&self) -> ReconstructionResult {
+        self.project_reconstruct_with_config(ReconstructionConfig::default())
+    }
+
+    /// Multi-step reconstructive projection with custom config.
+    pub fn project_reconstruct_with_config(
+        &self,
+        config: ReconstructionConfig,
+    ) -> ReconstructionResult {
+        // Passive: single-shot projection for baseline comparison
+        let passive = {
+            let mut acts = [0.0f32; 6];
+            for module in &self.modules {
+                let idx = module.kind as usize;
+                if idx < 6 {
+                    acts[idx] = module.project(&self.hla_state);
+                }
+            }
+            acts
+        };
+
+        // Active: multi-step reconstruction
+        let mut state = ReconstructionState::with_config(self.hla_state, config);
+        let active = state.reconstruct(self);
+
+        // Compute HLA delta
+        let mut hla_delta = [0.0f32; 8];
+        for i in 0..8 {
+            hla_delta[i] = state.hla()[i] - self.hla_state[i];
+        }
+
+        ReconstructionResult {
+            passive,
+            active,
+            steps: state.step(),
+            evidence: state.evidence().clone(),
+            hla_delta,
+        }
+    }
+
+    /// Zero-alloc multi-step reconstruction into pre-allocated state.
+    /// Reuses the `ReconstructionState` across calls to avoid allocation.
+    pub fn reconstruct_into(&self, state: &mut ReconstructionState) {
+        state.reconstruct(self);
+    }
+
+    /// Compare single-shot vs reconstructive projection for diagnostics.
+    pub fn compare_projection_modes(&self) -> ReconstructionResult {
+        self.project_reconstruct()
+    }
 }
 
 #[cfg(test)]
@@ -386,6 +450,60 @@ mod tests {
 
         brain.enable_autonomous();
         assert!(!brain.overrides.autonomous_disabled);
+    }
+
+    #[test]
+    fn test_project_reconstruct_returns_valid_result() {
+        let brain = NpcBrain::compose(vec![make_fighter_module(), make_spatial_module()]);
+        let result = brain.project_reconstruct();
+        // Passive activations should be valid f32 values
+        for &a in &result.passive {
+            assert!(
+                a.is_finite(),
+                "Passive activation should be finite, got {a}"
+            );
+        }
+        // Active activations should be valid f32 values
+        for &a in &result.active {
+            assert!(a.is_finite(), "Active activation should be finite, got {a}");
+        }
+        // Steps used should be <= default max_steps (3)
+        assert!(
+            result.steps <= 3,
+            "Steps should be <= 3, got {}",
+            result.steps
+        );
+        // HLA delta should be valid
+        for &d in &result.hla_delta {
+            assert!(d.is_finite(), "HLA delta should be finite, got {d}");
+        }
+    }
+
+    #[test]
+    fn test_project_reconstruct_with_config() {
+        let config = ReconstructionConfig {
+            max_steps: 1,
+            ..Default::default()
+        };
+        let brain = NpcBrain::compose(vec![make_fighter_module()]);
+        let result = brain.project_reconstruct_with_config(config);
+        // With max_steps=1, should only do 1 step
+        assert!(
+            result.steps <= 1,
+            "Steps should be <= 1, got {}",
+            result.steps
+        );
+    }
+
+    #[test]
+    fn test_reconstruct_into_reuses_state() {
+        let brain = NpcBrain::compose(vec![make_fighter_module()]);
+        let mut state = ReconstructionState::new(brain.hla_state);
+        brain.reconstruct_into(&mut state);
+        assert!(state.step() > 0, "Should have taken at least 1 step");
+        // Second call reuses the same state
+        brain.reconstruct_into(&mut state);
+        assert!(state.step() > 1, "Should have progressed further");
     }
 }
 

@@ -172,6 +172,108 @@ fn sigmoid(x: f32) -> f32 {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Attention distribution analysis
+// ---------------------------------------------------------------------------
+
+/// Result of analyzing attention distribution over compact slots.
+#[derive(Debug, Clone)]
+pub struct AttentionDistribution {
+    /// Per-latent attention mass: what fraction of total attention each latent received.
+    /// Shape: `[compact_len]`. Sums to ~1.0.
+    pub per_latent_mass: Vec<f32>,
+    /// Maximum attention mass on any single latent.
+    pub max_mass: f32,
+    /// Shannon entropy of the distribution (nats).
+    pub entropy: f32,
+    /// Maximum possible entropy = ln(compact_len) (uniform distribution).
+    pub max_entropy: f32,
+    /// Normalized entropy = entropy / max_entropy. 1.0 = uniform, 0.0 = concentrated.
+    pub normalized_entropy: f32,
+}
+
+impl AttentionDistribution {
+    /// Analyze attention distribution from cross-attention weights.
+    ///
+    /// # Arguments
+    /// * `cross_attn_weights` - Shape `[compact_len * original_len]` (row-major)
+    /// * `original_len` - T, number of original tokens
+    /// * `compact_len` - t, number of latent tokens
+    pub fn from_cross_attn(
+        cross_attn_weights: &[f32],
+        original_len: usize,
+        compact_len: usize,
+    ) -> Self {
+        if compact_len == 0 || original_len == 0 {
+            return Self {
+                per_latent_mass: Vec::new(),
+                max_mass: 0.0,
+                entropy: 0.0,
+                max_entropy: 0.0,
+                normalized_entropy: 0.0,
+            };
+        }
+
+        // Per-latent mass: sum of attention weights across original tokens
+        let mut per_latent_mass = vec![0.0f32; compact_len];
+        for i in 0..compact_len {
+            let row_start = i * original_len;
+            let row_end = row_start + original_len;
+            if row_end <= cross_attn_weights.len() {
+                let mut sum = 0.0f32;
+                for &w in &cross_attn_weights[row_start..row_end] {
+                    sum += w;
+                }
+                per_latent_mass[i] = sum;
+            }
+        }
+
+        // Normalize to probability distribution
+        let total: f32 = per_latent_mass.iter().copied().sum();
+        if total > 1e-12 {
+            for m in per_latent_mass.iter_mut() {
+                *m /= total;
+            }
+        }
+
+        let max_mass = per_latent_mass.iter().copied().fold(0.0f32, f32::max);
+
+        // Shannon entropy: H = -sum(p_i * ln(p_i))
+        let mut entropy = 0.0f32;
+        for &p in &per_latent_mass {
+            if p > 1e-12 {
+                entropy -= p * p.ln();
+            }
+        }
+
+        let max_entropy = (compact_len as f32).ln();
+        let normalized_entropy = if max_entropy > 1e-12 {
+            entropy / max_entropy
+        } else {
+            1.0
+        };
+
+        Self {
+            per_latent_mass,
+            max_mass,
+            entropy,
+            max_entropy,
+            normalized_entropy,
+        }
+    }
+
+    /// Check: no single latent dominates >50% of attention mass.
+    pub fn is_non_degenerate(&self) -> bool {
+        self.max_mass < 0.5
+    }
+
+    /// Check: attention not uniformly distributed (entropy < max_entropy * 0.8).
+    /// Uniform distribution = collapse, meaning beta isn't differentiating.
+    pub fn is_not_collapsed(&self) -> bool {
+        self.normalized_entropy < 0.8
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
