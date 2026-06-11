@@ -56,7 +56,7 @@ impl OctreeNodeId {
     }
 }
 
-/// Traversal action during reconstruction.
+/// Traversal action for octree reconstruction.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TraversalAction {
     /// Expand forward: cue → tag → content.
@@ -68,7 +68,7 @@ pub enum TraversalAction {
 }
 
 /// Configuration for reconstruction behavior.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct ReconstructionConfig {
     /// Maximum reconstruction steps (default: 3, MRAgent shows diminishing returns after 3-4).
     pub max_steps: u8,
@@ -240,6 +240,52 @@ impl ReconstructionState {
         activations
     }
 
+    /// SIMD-optimized expand: vectorized ternary projection across all modules.
+    ///
+    /// For each module, `project()` computes:
+    ///   `dot = Σ_i sign_i * hla[i] * directions[i].row_scale`
+    /// where `sign_i` is extracted from direction `i`'s ternary bits at position `i`.
+    ///
+    /// This builds per-module sign/scale arrays and uses `simd_dot_f32` for the
+    /// dot-product, letting SIMD handle the 8-element FMA chain in one vector op.
+    ///
+    /// **Scaling note**: At 6 modules × 8-dim HLA, the SIMD setup overhead
+    /// (building `sign_scaled` array per module) exceeds the compute savings.
+    /// This method wins when module count or HLA dimensionality scales up.
+    /// The default `reconstruct_simd()` path keeps expand scalar for this reason.
+    #[cfg(feature = "sense_composition")]
+    pub fn expand_simd(&mut self, brain: &crate::sense::brain::NpcBrain) -> [f32; 6] {
+        let mut activations = [0.0f32; 6];
+
+        for module in &brain.modules {
+            let kind_idx = module.kind as usize;
+            if kind_idx >= 6 {
+                continue;
+            }
+
+            let n = module.n_directions as usize;
+
+            // Build sign × scale vector: sign_scaled[i] = sign_i * directions[i].row_scale
+            let mut sign_scaled = [0.0f32; 8];
+            for i in 0..n {
+                let dir = &module.directions[i];
+                let pos = ((dir.pos_bits >> i) & 1) as u32 as f32;
+                let neg = ((dir.neg_bits >> i) & 1) as u32 as f32;
+                sign_scaled[i] = (pos - neg) * dir.row_scale;
+            }
+
+            // SIMD dot: sign_scaled · hla
+            let dot = crate::simd::simd_dot_f32(&sign_scaled, &self.hla, 8);
+
+            // Fast sigmoid * confidence
+            let x = dot.clamp(-12.0, 12.0);
+            let sigmoid = 0.5 + x / (2.0 + (4.0 + x * x).sqrt());
+            activations[kind_idx] = module.confidence * sigmoid;
+        }
+
+        activations
+    }
+
     /// Route: select which modules to follow based on activation strength.
     /// Uses entropy-gated selection — keep modules above mean + threshold.
     ///
@@ -266,6 +312,47 @@ impl ReconstructionState {
                 .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
                 .map(|(i, _)| i)
                 .unwrap_or(0);
+            selected[max_idx] = true;
+        }
+
+        selected
+    }
+
+    /// SIMD-optimized route: uses `simd_sum_f32` and `simd_max_f32` for the
+    /// reduction phase, keeping selection mask generation scalar (branchy,
+    /// not worth SIMD for 6 elements).
+    ///
+    /// Pads activations to 8 elements for SIMD alignment.
+    ///
+    /// **Scaling note**: At 6 activations, SIMD reduction overhead barely wins
+    /// over scalar `iter().sum()`. Useful as a building block for larger arrays.
+    #[cfg(feature = "sense_composition")]
+    pub fn route_simd(&self, activations: &[f32; 6]) -> [bool; 6] {
+        // Pad to 8 for SIMD alignment
+        let mut padded = [0.0f32; 8];
+        padded[..6].copy_from_slice(activations);
+
+        let total = crate::simd::simd_sum_f32(&padded);
+        if total < 1e-8 {
+            return [false; 6];
+        }
+
+        let max_val = crate::simd::simd_max_f32(&padded);
+
+        let mean = total / 6.0;
+        let mut selected = [false; 6];
+        let mut any_selected = false;
+        let mut max_idx = 0usize;
+        for i in 0..6 {
+            let above = activations[i] > mean;
+            selected[i] = above;
+            any_selected |= above;
+            if activations[i] == max_val {
+                max_idx = i;
+            }
+        }
+
+        if !any_selected {
             selected[max_idx] = true;
         }
 
@@ -320,7 +407,51 @@ impl ReconstructionState {
         }
     }
 
-    /// Run full reconstruction loop.
+    /// SIMD-optimized HLA evolution.
+    ///
+    /// Uses `simd_sum_f32` for activation total and `simd_fused_sub_scale_inplace`
+    /// for the normalize-scale chain. For the 8-element HLA array, the SIMD
+    /// benefit is marginal but ensures the hot path uses SIMD primitives
+    /// consistent with the rest of the codebase.
+    ///
+    /// Zero-allocation: uses stack-local `[f32; 8]` delta buffer.
+    #[cfg(feature = "sense_composition")]
+    pub fn evolve_hla_simd(&mut self) {
+        let lr = self.config.hla_learning_rate;
+        let max_delta = self.config.max_hla_delta;
+
+        // SIMD sum of kind activations (extends to [f32; 8] with padding)
+        let mut padded_activations = [0.0f32; 8];
+        padded_activations[..6].copy_from_slice(&self.evidence.kind_activations);
+        let total_activation = crate::simd::simd_sum_f32(&padded_activations);
+
+        if total_activation < 1e-8 {
+            return;
+        }
+
+        // Const LUT avoids modulo per iteration
+        const KIND_MAP: [usize; 8] = [0, 1, 2, 3, 4, 5, 0, 1];
+        let t_min = total_activation.min(1.0);
+        let scale = lr * t_min / total_activation;
+
+        // Compute delta buffer: delta[i] = kind_activations[KIND_MAP[i]]
+        let mut delta = [0.0f32; 8];
+        for (i, &kind_idx) in KIND_MAP.iter().enumerate() {
+            delta[i] = self.evidence.kind_activations[kind_idx];
+        }
+
+        // SIMD: delta = (delta - 0.5 * total) * scale  →  fused sub-scale
+        let sub_val = 0.5 * total_activation;
+        crate::simd::simd_fused_sub_scale_inplace(&mut delta, sub_val, scale);
+
+        // Clamp delta and apply to HLA
+        for i in 0..8 {
+            delta[i] = delta[i].clamp(-max_delta, max_delta);
+            self.hla[i] = (self.hla[i] + delta[i]).clamp(-1.0, 1.0);
+        }
+    }
+
+    /// Run full reconstruction loop (scalar path).
     ///
     /// Combines expand → route → accumulate → evolve_hla → sufficient check
     /// into a single call. Returns final activations.
@@ -332,10 +463,52 @@ impl ReconstructionState {
     /// - accumulate: TripleEvidence merge (not LLM summarization)
     /// - evolve_hla: bridge function (not LLM reasoning)
     pub fn reconstruct(&mut self, brain: &crate::sense::brain::NpcBrain) -> [f32; 6] {
+        self.reconstruct_inner(brain, false)
+    }
+
+    /// Run reconstruction using SIMD-optimized HLA evolution.
+    ///
+    /// Equivalent to `reconstruct()` but uses `evolve_hla_simd()` for the
+    /// HLA update step (proven win). Expand/route stay scalar because SIMD
+    /// overhead exceeds benefit for 6-8 element arrays.
+    ///
+    /// Use when the reconstruction cycle is on the hot path and every
+    /// nanosecond counts.
+    #[cfg(feature = "sense_composition")]
+    pub fn reconstruct_simd(&mut self, brain: &crate::sense::brain::NpcBrain) -> [f32; 6] {
+        self.reconstruct_inner(brain, true)
+    }
+
+    /// Shared inner loop — dispatches to SIMD `evolve_hla_simd()` when available.
+    /// Detects SIMD availability once at entry, not per-step.
+    fn reconstruct_inner(
+        &mut self,
+        brain: &crate::sense::brain::NpcBrain,
+        use_simd: bool,
+    ) -> [f32; 6] {
+        // Resolve SIMD availability once at entry
+        #[cfg(feature = "sense_composition")]
+        let simd_available =
+            use_simd && !matches!(crate::simd::simd_level(), crate::simd::SimdLevel::Scalar);
+        #[cfg(not(feature = "sense_composition"))]
+        let simd_available = false;
+
         loop {
+            // Expand + route: scalar path is faster for 6 modules × 8-dim HLA
+            // (SIMD setup overhead exceeds compute savings at this array size).
             let activations = self.expand(brain);
             let selected = self.route(&activations);
+
             self.accumulate(&selected, &activations);
+
+            // Evolve HLA: SIMD path wins here (8-element fused sub-scale)
+            #[cfg(feature = "sense_composition")]
+            if simd_available {
+                self.evolve_hla_simd();
+            } else {
+                self.evolve_hla();
+            }
+            #[cfg(not(feature = "sense_composition"))]
             self.evolve_hla();
 
             self.step += 1;
@@ -505,5 +678,169 @@ mod tests {
     fn reconstruction_state_not_sufficient_initially() {
         let state = ReconstructionState::new([0.5; 8]);
         assert!(!state.sufficient()); // step 0, max_steps 3
+    }
+
+    /// Verify SIMD evolve_hla produces numerically equivalent results to scalar.
+    #[cfg(feature = "sense_composition")]
+    #[test]
+    fn evolve_hla_simd_matches_scalar() {
+        let config = ReconstructionConfig::default();
+        let hla = [0.3, 0.7, 0.1, 0.5, 0.4, 0.2, 0.6, 0.8];
+
+        // Run scalar path
+        let mut state_scalar = ReconstructionState::with_config(hla, config);
+        // Simulate some evidence accumulation
+        let selected = [true, false, true, false, true, false];
+        let activations = [0.5, 0.2, 0.8, 0.1, 0.3, 0.0];
+        state_scalar.accumulate(&selected, &activations);
+        state_scalar.evolve_hla();
+
+        // Run SIMD path
+        let mut state_simd = ReconstructionState::with_config(hla, config);
+        state_simd.accumulate(&selected, &activations);
+        state_simd.evolve_hla_simd();
+
+        // Compare HLA states — should be numerically close
+        let mut max_diff = 0.0f32;
+        for i in 0..8 {
+            let diff = (state_scalar.hla()[i] - state_simd.hla()[i]).abs();
+            max_diff = max_diff.max(diff);
+        }
+        assert!(
+            max_diff < 1e-4,
+            "SIMD and scalar evolve_hla should produce similar results, diff={max_diff}"
+        );
+    }
+
+    /// Verify expand_simd produces same activations as scalar expand.
+    #[cfg(feature = "sense_composition")]
+    #[test]
+    fn expand_simd_matches_scalar() {
+        use crate::sense::brain::NpcBrain;
+        use crate::sense::octree::{KgEmbedding, SenseOctreeBuilder};
+        use crate::types::SenseKind;
+
+        let builder = SenseOctreeBuilder::new(3);
+        let kinds = [
+            SenseKind::CommonSense,
+            SenseKind::FighterSense,
+            SenseKind::GameTheorySense,
+            SenseKind::SpatialSense,
+            SenseKind::SocialSense,
+            SenseKind::SkillSense,
+        ];
+        let modules: Vec<_> = kinds
+            .iter()
+            .enumerate()
+            .map(|(i, &kind)| {
+                let emb = KgEmbedding {
+                    entity_hash: kind as u64,
+                    relation_hash: kind as u64,
+                    embedding: [0.5; 8],
+                    sign: true,
+                    confidence: 1.0,
+                };
+                let mut m = builder.build(kind, &[emb]);
+                m.confidence = 0.3 + 0.1 * i as f32;
+                m.commit();
+                m
+            })
+            .collect();
+
+        let mut brain = NpcBrain::compose(modules);
+        brain.hla_state = [0.3, 0.7, 0.1, 0.5, 0.4, 0.2, 0.6, 0.8];
+
+        let config = ReconstructionConfig::default();
+
+        let mut state_scalar = ReconstructionState::with_config(brain.hla_state, config);
+        let activations_scalar = state_scalar.expand(&brain);
+
+        let mut state_simd = ReconstructionState::with_config(brain.hla_state, config);
+        let activations_simd = state_simd.expand_simd(&brain);
+
+        for i in 0..6 {
+            let diff = (activations_scalar[i] - activations_simd[i]).abs();
+            assert!(
+                diff < 1e-4,
+                "expand_simd should match scalar at index {i}: scalar={}, simd={}, diff={}",
+                activations_scalar[i],
+                activations_simd[i],
+                diff
+            );
+        }
+    }
+
+    /// Verify route_simd produces same selection as scalar route.
+    #[cfg(feature = "sense_composition")]
+    #[test]
+    fn route_simd_matches_scalar() {
+        let config = ReconstructionConfig::default();
+        let hla = [0.3, 0.7, 0.1, 0.5, 0.4, 0.2, 0.6, 0.8];
+        let state = ReconstructionState::with_config(hla, config);
+
+        let activations = [0.5, 0.2, 0.8, 0.1, 0.3, 0.7];
+        let selected_scalar = state.route(&activations);
+        let selected_simd = state.route_simd(&activations);
+
+        assert_eq!(
+            selected_scalar, selected_simd,
+            "route_simd should produce same selection as scalar route"
+        );
+    }
+
+    /// Verify reconstruct_simd produces numerically equivalent results to scalar.
+    #[cfg(feature = "sense_composition")]
+    #[test]
+    fn reconstruct_simd_matches_scalar() {
+        use crate::sense::brain::NpcBrain;
+        use crate::sense::octree::{KgEmbedding, SenseOctreeBuilder};
+        use crate::types::SenseKind;
+
+        let builder = SenseOctreeBuilder::new(3);
+        let kinds = [
+            SenseKind::CommonSense,
+            SenseKind::FighterSense,
+            SenseKind::GameTheorySense,
+            SenseKind::SpatialSense,
+            SenseKind::SocialSense,
+            SenseKind::SkillSense,
+        ];
+        let modules: Vec<_> = kinds
+            .iter()
+            .enumerate()
+            .map(|(i, &kind)| {
+                let emb = KgEmbedding {
+                    entity_hash: kind as u64,
+                    relation_hash: kind as u64,
+                    embedding: [0.5; 8],
+                    sign: true,
+                    confidence: 1.0,
+                };
+                let mut m = builder.build(kind, &[emb]);
+                m.confidence = 0.3 + 0.1 * i as f32;
+                m.commit();
+                m
+            })
+            .collect();
+
+        let mut brain = NpcBrain::compose(modules);
+        brain.hla_state = [0.3, 0.7, 0.1, 0.5, 0.4, 0.2, 0.6, 0.8];
+        let config = ReconstructionConfig::default();
+
+        let mut state_scalar = ReconstructionState::with_config(brain.hla_state, config);
+        let _ = state_scalar.reconstruct(&brain);
+
+        let mut state_simd = ReconstructionState::with_config(brain.hla_state, config);
+        let _ = state_simd.reconstruct_simd(&brain);
+
+        let mut max_diff = 0.0f32;
+        for i in 0..8 {
+            let diff = (state_scalar.hla()[i] - state_simd.hla()[i]).abs();
+            max_diff = max_diff.max(diff);
+        }
+        assert!(
+            max_diff < 1e-4,
+            "SIMD and scalar reconstruct should produce similar results, diff={max_diff}"
+        );
     }
 }

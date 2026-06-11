@@ -73,6 +73,7 @@ spectral_threat = ["sense_composition", "modal_spec"]  # LinOSS Modal Threat Pre
 sense_lod = ["sense_composition", "slod"]  # Spectral NPC Perception Compression (Plan 240)
 flow_field_nav = ["leo_all_goals", "dep:rustfft"]  # Fourier-smoothed flow fields for LEO crowd navigation (Plan 242, GOAT-gated)
 spectral_pruner = ["dep:rustfft"]  # Spectral Irrep Pruner — spectral flatness-based speculative decoding pruning (Plan 246, GOAT PASS +3.6% overhead, default-ON)
+octree_ctc = ["sense_composition"]  # OctreeCTC Reconstructive Memory Navigation (Plan 248, GOAT-gated)
                                    # Inspired by arXiv:2606.02993: prunes tokens when logit spectrum shows competing modes.
 
 [[bench]]
@@ -84,3 +85,8 @@ required-features = ["flow_field_nav"]
 name = "sense_lod"
 harness = false
 required-features = ["sense_lod"]
+
+[[bench]]
+name = "reconstruction_bench"
+harness = false
+required-features = ["sense_composition"]
