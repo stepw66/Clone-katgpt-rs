@@ -609,9 +609,11 @@ fn play_internal_game(
     let max_moves = board_size * board_size * 3;
     let mut state = GoState::new(board_size);
     let mut moves_played = 0usize;
+    let mut legal_buf = Vec::with_capacity(board_size * board_size);
 
     while !state.is_terminal() && moves_played < max_moves {
-        let legal_moves = state.legal_moves();
+        state.legal_moves_into(&mut legal_buf);
+        let legal_moves = &legal_buf;
 
         if legal_moves.is_empty() {
             state.play_pass();

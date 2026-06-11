@@ -75,7 +75,7 @@ Implementation of `.issues/001_pruners_optimization.md` findings.
 - [x] `lodestar` Vec<bool> → BitVec
 - [x] `sketch_types` Debug/Display hex formatting optimization (write! directly, no String intermediate)
 - [x] `gepa_reflective` linear scan for empty slot → free list (Vec<usize> stack)
-- [ ] `sdar_absorb` diagnostic-only Vec alloc
+- [x] `sdar_absorb` diagnostic-only Vec alloc (gated behind debug_assertions)
 - [ ] `go/autoresearch` config.label() String → fmt (dynamic values, can't be &'static)
 - [x] `go/tournament` three-pass count → single pass (single loop with match)
 - [x] `bomber/systems` `[Option<(i32,i32)>; 4]` for player positions (fixed-size array replaces Vec)

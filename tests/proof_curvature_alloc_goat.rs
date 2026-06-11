@@ -12,7 +12,7 @@ use katgpt_rs::pruners::{CurvatureInfluenceScorer, CurvatureWeightedBudget, EosP
 #[test]
 fn g1_scorer_initializes_zero_influence() {
     let num_groups = 7;
-    let scorer = EosProxyScorer::new(num_groups, 0.1);
+    let mut scorer = EosProxyScorer::new(num_groups, 0.1);
     assert_eq!(scorer.num_groups(), num_groups);
 
     for k in 0..num_groups {
@@ -65,21 +65,21 @@ fn g2_influence_in_bounds_after_updates() {
 
 #[test]
 fn g3_budget_allocation_sums_to_total() {
-    let scorer = EosProxyScorer::new(5, 0.1);
+    let mut scorer = EosProxyScorer::new(5, 0.1);
     let budget = CurvatureWeightedBudget::new();
 
     for total in [50, 100, 997, 1] {
-        let alloc = budget.allocate(total, 5, &scorer);
+        let alloc = budget.allocate(total, 5, &mut scorer);
         let sum: usize = alloc.iter().sum();
         assert_eq!(sum, total, "Allocation should sum to {total}, got {sum}");
     }
 
     // Edge case: zero budget
-    let alloc = budget.allocate(0, 5, &scorer);
+    let alloc = budget.allocate(0, 5, &mut scorer);
     assert!(alloc.is_empty(), "Zero budget should return empty");
 
     // Edge case: zero depth
-    let alloc = budget.allocate(100, 0, &scorer);
+    let alloc = budget.allocate(100, 0, &mut scorer);
     assert!(alloc.is_empty(), "Zero depth should return empty");
 }
 
@@ -111,7 +111,7 @@ fn g4_high_influence_gets_more_budget() {
         floor_ratio: 0.1,
         max_boost: 2.0, // Allow significant variation
     };
-    let alloc = budget.allocate(100, 4, &scorer);
+    let alloc = budget.allocate(100, 4, &mut scorer);
 
     assert!(
         alloc[3] > alloc[1],
@@ -144,7 +144,7 @@ fn g5_floor_guarantee() {
         floor_ratio: 0.15,
         max_boost: 0.5,
     };
-    let alloc = budget.allocate(200, 8, &scorer);
+    let alloc = budget.allocate(200, 8, &mut scorer);
 
     // Every position should get at least 1 (floor_ratio guarantees a minimum weight)
     for (i, &a) in alloc.iter().enumerate() {
