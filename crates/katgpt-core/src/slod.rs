@@ -99,17 +99,6 @@ pub struct SlodOperator {
 
 // clamp_norm removed — was unused
 
-/// Compute squared Euclidean distance.
-#[inline]
-fn sq_dist(a: &[f32], b: &[f32], dim: usize) -> f32 {
-    let mut s = 0.0f32;
-    for i in 0..dim {
-        let d = a[i] - b[i];
-        s += d * d;
-    }
-    s
-}
-
 /// Hyperbolic distance in the Poincaré ball model.
 ///
 /// d(a, b) = arcosh(1 + 2·||a - b||² / ((1 - ||a||²)(1 - ||b||²)))
@@ -123,7 +112,7 @@ pub fn poincare_distance(a: &[f32], b: &[f32], dim: usize) -> f32 {
     let norm_a_sq = norm_a_sq.min(1.0 - 1e-5);
     let norm_b_sq = norm_b_sq.min(1.0 - 1e-5);
 
-    let diff_sq = sq_dist(a, b, dim);
+    let diff_sq = crate::simd::simd_dist_sq(a, b, dim);
     let denom = (1.0 - norm_a_sq) * (1.0 - norm_b_sq);
 
     let inner = 1.0 + 2.0 * diff_sq / denom;
@@ -422,10 +411,13 @@ impl SlodOperator {
             c_signal[si] = c_energy / (c_total * c_total);
         }
 
-        // Z-score normalize each signal
-        let z_v = zscore(&v_signal);
-        let z_d = zscore(&d_signal);
-        let z_c = zscore(&c_signal);
+        // Z-score normalize each signal (pre-allocated scratch buffers)
+        let mut z_v = vec![0.0f32; n_sigma];
+        let mut z_d = vec![0.0f32; n_sigma];
+        let mut z_c = vec![0.0f32; n_sigma];
+        zscore_into(&v_signal, &mut z_v);
+        zscore_into(&d_signal, &mut z_d);
+        zscore_into(&c_signal, &mut z_c);
 
         // Composite score
         let composite: Vec<f32> = (0..n_sigma)
@@ -675,15 +667,40 @@ impl crate::traits::ConstraintPruner for SlodPruner {
 // ── Helper Functions ──────────────────────────────────────────────
 
 /// Z-score normalize a signal. Returns zero-centered signal.
+///
+/// Convenience wrapper that allocates — prefer [`zscore_into`] in hot paths.
 fn zscore(signal: &[f32]) -> Vec<f32> {
     if signal.is_empty() {
         return Vec::new();
     }
-    let mean: f32 = signal.iter().sum::<f32>() / signal.len() as f32;
-    let variance: f32 =
-        signal.iter().map(|x| (x - mean) * (x - mean)).sum::<f32>() / signal.len() as f32;
+    let mut out = vec![0.0f32; signal.len()];
+    zscore_into(signal, &mut out);
+    out
+}
+
+/// Z-score normalize into a pre-allocated buffer (zero-allocation hot path).
+fn zscore_into(signal: &[f32], out: &mut [f32]) {
+    if signal.is_empty() {
+        return;
+    }
+    let n = signal.len().min(out.len());
+    if n == 0 {
+        return;
+    }
+    // Use SIMD sum for mean
+    let mean: f32 = crate::simd::simd_sum_f32(&signal[..n]) / n as f32;
+    // Compute variance
+    let mut variance = 0.0f32;
+    for i in 0..n {
+        let d = signal[i] - mean;
+        variance += d * d;
+    }
+    variance /= n as f32;
     let std = variance.sqrt().max(1e-10);
-    signal.iter().map(|&x| (x - mean) / std).collect()
+    let inv_std = 1.0 / std;
+    for i in 0..n {
+        out[i] = (signal[i] - mean) * inv_std;
+    }
 }
 
 /// MAD (Median Absolute Deviation) peak picker.
@@ -701,16 +718,20 @@ fn mad_peak_picker(
         return Vec::new();
     }
 
-    // Compute median
+    // Compute median (O(n) via select_nth_unstable_by)
     let mut sorted = composite.to_vec();
-    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    let median = sorted[n / 2];
+    let mid = n / 2;
+    sorted.select_nth_unstable_by(mid, |a, b| {
+        a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
+    });
+    let median = sorted[mid];
 
-    // Compute MAD
-    let deviations: Vec<f32> = composite.iter().map(|&x| (x - median).abs()).collect();
-    let mut sorted_dev = deviations;
-    sorted_dev.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    let mad = sorted_dev[n / 2].max(1e-10);
+    // Compute MAD (O(n) via select_nth_unstable_by)
+    let mut deviations: Vec<f32> = composite.iter().map(|&x| (x - median).abs()).collect();
+    deviations.select_nth_unstable_by(mid, |a, b| {
+        a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
+    });
+    let mad = deviations[mid].max(1e-10);
 
     // Find peaks where composite > median + β * MAD * 1.4826
     // (1.4826 is the consistency constant for normal distribution)

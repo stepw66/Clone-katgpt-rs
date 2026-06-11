@@ -22,12 +22,6 @@ pub struct LinOSSState {
     pub z: Vec<f32>,
 }
 
-/// Sigmoid activation (NOT softmax per project constraints).
-#[inline]
-fn sigmoid(x: f32) -> f32 {
-    1.0 / (1.0 + (-x).exp())
-}
-
 impl LinOSSCell {
     /// Create with unit frequency (ω²=1), undamped (β=0).
     #[inline]
@@ -100,6 +94,19 @@ impl LinOSSCell {
         forcings: &[&[f32]],
         dt: f32,
     ) -> Vec<LinOSSState> {
+        let mut scratch = ParallelScanScratch::new();
+        self.parallel_scan_with_scratch(initial, forcings, dt, &mut scratch)
+    }
+
+    /// Zero-alloc parallel scan using pre-allocated scratch buffers.
+    /// Reuse `ParallelScanScratch` across calls to avoid repeated allocation.
+    pub fn parallel_scan_with_scratch(
+        &self,
+        initial: &LinOSSState,
+        forcings: &[&[f32]],
+        dt: f32,
+        scratch: &mut ParallelScanScratch,
+    ) -> Vec<LinOSSState> {
         let n = forcings.len();
         if n == 0 {
             return vec![];
@@ -110,48 +117,73 @@ impl LinOSSCell {
         }
 
         let h = self.hidden_dim;
-        // Per-step transfer matrix: [[1, dt], [-ω²dt, 1]] with bias [0, dt*f]
-        let mut a = vec![0.0f32; n * h];
-        let mut b = vec![0.0f32; n * h];
-        let mut c = vec![0.0f32; n * h];
-        let mut d = vec![0.0f32; n * h];
-        let bias_y = vec![0.0f32; n * h];
-        let mut bias_z = vec![0.0f32; n * h];
+        let total = n * h;
+        scratch.ensure_capacity(total);
 
+        // Zero-fill used portions
+        for buf in [
+            &mut scratch.a,
+            &mut scratch.b,
+            &mut scratch.c,
+            &mut scratch.d,
+            &mut scratch.bias_y,
+            &mut scratch.bias_z,
+            &mut scratch.pa,
+            &mut scratch.pb,
+            &mut scratch.pc,
+            &mut scratch.pd,
+            &mut scratch.pby,
+            &mut scratch.pbz,
+        ] {
+            buf[..total].fill(0.0);
+        }
+
+        // Per-step transfer matrix: [[1, dt], [-ω²dt, 1]] with bias [0, dt*f]
         for (step, f) in forcings.iter().enumerate().take(n) {
             let base = step * h;
             for j in 0..h {
-                a[base + j] = 1.0;
-                b[base + j] = dt;
-                c[base + j] = -self.omega_sq[j] * dt;
-                d[base + j] = 1.0;
-                bias_z[base + j] = dt * f[j]; // bias_y stays 0
+                scratch.a[base + j] = 1.0;
+                scratch.b[base + j] = dt;
+                scratch.c[base + j] = -self.omega_sq[j] * dt;
+                scratch.d[base + j] = 1.0;
+                scratch.bias_z[base + j] = dt * f[j]; // bias_y stays 0
             }
         }
 
         // Inclusive prefix scan: prefix[i] = M_i * M_{i-1} * ... * M_0
         // NOTE: Replace with Blelloch up-sweep/down-sweep for true parallelism.
-        let mut pa = a.clone();
-        let mut pb = b.clone();
-        let mut pc = c.clone();
-        let mut pd = d.clone();
-        let mut pby = bias_y.clone();
-        let mut pbz = bias_z.clone();
+        // Copy a→pa, b→pb, etc. using copy_from_slice instead of clone
+        scratch.pa[..total].copy_from_slice(&scratch.a[..total]);
+        scratch.pb[..total].copy_from_slice(&scratch.b[..total]);
+        scratch.pc[..total].copy_from_slice(&scratch.c[..total]);
+        scratch.pd[..total].copy_from_slice(&scratch.d[..total]);
+        scratch.pby[..total].copy_from_slice(&scratch.bias_y[..total]);
+        scratch.pbz[..total].copy_from_slice(&scratch.bias_z[..total]);
 
         for step in 1..n {
             let prev = (step - 1) * h;
             let base = step * h;
             for j in 0..h {
-                let (pa0, pb0, pc0, pd0) = (pa[prev + j], pb[prev + j], pc[prev + j], pd[prev + j]);
-                let (pby0, pbz0) = (pby[prev + j], pbz[prev + j]);
-                let (ma, mb, mc, md) = (a[base + j], b[base + j], c[base + j], d[base + j]);
-                let (mby, mbz) = (bias_y[base + j], bias_z[base + j]);
-                pa[base + j] = pa0 * ma + pb0 * mc;
-                pb[base + j] = pa0 * mb + pb0 * md;
-                pc[base + j] = pc0 * ma + pd0 * mc;
-                pd[base + j] = pc0 * mb + pd0 * md;
-                pby[base + j] = pa0 * mby + pb0 * mbz + pby0;
-                pbz[base + j] = pc0 * mby + pd0 * mbz + pbz0;
+                let (pa0, pb0, pc0, pd0) = (
+                    scratch.pa[prev + j],
+                    scratch.pb[prev + j],
+                    scratch.pc[prev + j],
+                    scratch.pd[prev + j],
+                );
+                let (pby0, pbz0) = (scratch.pby[prev + j], scratch.pbz[prev + j]);
+                let (ma, mb, mc, md) = (
+                    scratch.a[base + j],
+                    scratch.b[base + j],
+                    scratch.c[base + j],
+                    scratch.d[base + j],
+                );
+                let (mby, mbz) = (scratch.bias_y[base + j], scratch.bias_z[base + j]);
+                scratch.pa[base + j] = pa0 * ma + pb0 * mc;
+                scratch.pb[base + j] = pa0 * mb + pb0 * md;
+                scratch.pc[base + j] = pc0 * ma + pd0 * mc;
+                scratch.pd[base + j] = pc0 * mb + pd0 * md;
+                scratch.pby[base + j] = pa0 * mby + pb0 * mbz + pby0;
+                scratch.pbz[base + j] = pc0 * mby + pd0 * mbz + pbz0;
             }
         }
 
@@ -162,8 +194,12 @@ impl LinOSSCell {
             let mut y = vec![0.0f32; h];
             let mut z = vec![0.0f32; h];
             for j in 0..h {
-                y[j] = pa[base + j] * initial.y[j] + pb[base + j] * initial.z[j] + pby[base + j];
-                z[j] = pc[base + j] * initial.y[j] + pd[base + j] * initial.z[j] + pbz[base + j];
+                y[j] = scratch.pa[base + j] * initial.y[j]
+                    + scratch.pb[base + j] * initial.z[j]
+                    + scratch.pby[base + j];
+                z[j] = scratch.pc[base + j] * initial.y[j]
+                    + scratch.pd[base + j] * initial.z[j]
+                    + scratch.pbz[base + j];
             }
             results.push(LinOSSState { y, z });
         }
@@ -206,6 +242,74 @@ impl LinOSSState {
             y: vec![0.0; hidden_dim],
             z: vec![0.0; hidden_dim],
         }
+    }
+}
+
+// ── Scratch buffers for parallel scan ──
+
+/// Pre-allocated scratch buffers for [`LinOSSCell::parallel_scan_with_scratch`].
+/// Reuse across calls to avoid repeated allocation.
+pub struct ParallelScanScratch {
+    a: Vec<f32>,
+    b: Vec<f32>,
+    c: Vec<f32>,
+    d: Vec<f32>,
+    bias_y: Vec<f32>,
+    bias_z: Vec<f32>,
+    pa: Vec<f32>,
+    pb: Vec<f32>,
+    pc: Vec<f32>,
+    pd: Vec<f32>,
+    pby: Vec<f32>,
+    pbz: Vec<f32>,
+}
+
+impl ParallelScanScratch {
+    /// Create empty scratch buffers. Call [`ensure_capacity`] before first use.
+    pub fn new() -> Self {
+        Self {
+            a: Vec::new(),
+            b: Vec::new(),
+            c: Vec::new(),
+            d: Vec::new(),
+            bias_y: Vec::new(),
+            bias_z: Vec::new(),
+            pa: Vec::new(),
+            pb: Vec::new(),
+            pc: Vec::new(),
+            pd: Vec::new(),
+            pby: Vec::new(),
+            pbz: Vec::new(),
+        }
+    }
+
+    /// Grow buffers to `total` elements if needed. No shrinking on reuse.
+    fn ensure_capacity(&mut self, total: usize) {
+        macro_rules! ensure {
+            ($buf:ident) => {
+                if self.$buf.len() < total {
+                    self.$buf.resize(total, 0.0);
+                }
+            };
+        }
+        ensure!(a);
+        ensure!(b);
+        ensure!(c);
+        ensure!(d);
+        ensure!(bias_y);
+        ensure!(bias_z);
+        ensure!(pa);
+        ensure!(pb);
+        ensure!(pc);
+        ensure!(pd);
+        ensure!(pby);
+        ensure!(pbz);
+    }
+}
+
+impl Default for ParallelScanScratch {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -476,16 +580,17 @@ impl ModalSpecDrafter {
         coeffs[n..].fill(0.0);
     }
 
-    /// Find nearest token via sigmoid-gated dot-product (NOT softmax).
+    /// Find nearest token via dot-product argmax.
+    /// Sigmoid is monotonic so argmax(dot) == argmax(sigmoid(dot)); skip it.
     #[inline]
     fn nearest_token(&self, query: &[f32]) -> usize {
+        let dim = query.len();
         let mut best_idx = 0;
-        let mut best_score = f32::NEG_INFINITY;
+        let mut best_dot = f32::NEG_INFINITY;
         for (i, emb) in self.embeddings.iter().enumerate() {
-            let dot: f32 = emb.iter().zip(query.iter()).map(|(e, q)| e * q).sum();
-            let score = sigmoid(dot);
-            if score > best_score {
-                best_score = score;
+            let dot = crate::simd::simd_dot_f32(emb, query, dim.min(emb.len()));
+            if dot > best_dot {
+                best_dot = dot;
                 best_idx = i;
             }
         }

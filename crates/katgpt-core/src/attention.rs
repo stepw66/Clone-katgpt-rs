@@ -165,17 +165,14 @@ fn tiled_attention_inner(
         let mut max_tile = [f32::NEG_INFINITY; BR];
         let mut norm_tile = [0.0f32; BR];
 
+        // s_tile initialized to -inf so padding columns (j >= actual_bc) are masked.
+        // The used region [0..actual_br, 0..actual_bc] is fully overwritten each k_tile
+        // by the score computation below — no need to re-clear.
         let mut s_tile = [f32::NEG_INFINITY; BR * BC];
         for k_tile_idx in 0..k_tiles {
             let k_start = k_tile_idx * BC;
             let k_end = (k_start + BC).min(seq_len);
             let actual_bc = k_end - k_start;
-
-            for i in 0..actual_br {
-                for j in 0..actual_bc {
-                    s_tile[i * BC + j] = f32::NEG_INFINITY;
-                }
-            }
 
             // 1. Score tile: S = q_tile @ k_tile.T (BR × BC)
             for i in 0..actual_br {

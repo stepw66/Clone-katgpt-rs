@@ -47,7 +47,11 @@ use rustfft::{FftPlanner, num_complex::Complex};
 /// # Panics
 ///
 /// Panics if `logits` is empty.
-pub fn spectral_flatness(logits: &[f32], scratch: &mut Vec<Complex<f64>>) -> f32 {
+pub fn spectral_flatness(
+    logits: &[f32],
+    scratch: &mut Vec<Complex<f64>>,
+    planner: &mut FftPlanner<f64>,
+) -> f32 {
     let n = logits.len();
     assert!(n > 0, "spectral_flatness requires non-empty input");
 
@@ -59,8 +63,7 @@ pub fn spectral_flatness(logits: &[f32], scratch: &mut Vec<Complex<f64>>) -> f32
         scratch[i] = Complex::new(v as f64, 0.0);
     }
 
-    // 1D FFT
-    let mut planner = FftPlanner::new();
+    // 1D FFT (reuses cached planner)
     let fft = planner.plan_fft_forward(n);
     fft.process(&mut scratch[..n]);
 
@@ -117,6 +120,8 @@ pub struct IrrepPruner {
     pub top_k_when_uncertain: usize,
     /// Pre-allocated scratch buffer for FFT.
     scratch: Vec<Complex<f64>>,
+    /// Cached FFT planner (avoids per-call allocation).
+    planner: FftPlanner<f64>,
     /// Current spectral flatness (updated by set_logits).
     current_flatness: f32,
     /// Cached logits for rank-based gating.
@@ -124,6 +129,8 @@ pub struct IrrepPruner {
     /// Cached sorted indices (descending by logit value), updated by set_logits.
     /// Used for top-k gating when uncertain.
     sorted_indices: Vec<usize>,
+    /// O(1) bitmap for top-k membership checks.
+    top_k_bitmap: Vec<bool>,
     /// How many tokens from sorted_indices are "valid" given current flatness.
     valid_count: usize,
 }
@@ -183,9 +190,11 @@ impl IrrepPruner {
             convergence_threshold,
             top_k_when_uncertain,
             scratch: Vec::with_capacity(max_vocab),
+            planner: FftPlanner::new(),
             current_flatness: 0.0,
             logits: Vec::with_capacity(max_vocab),
             sorted_indices: Vec::with_capacity(max_vocab),
+            top_k_bitmap: Vec::with_capacity(max_vocab),
             valid_count: 0,
         }
     }
@@ -212,7 +221,7 @@ impl IrrepPruner {
         }
 
         // Compute spectral flatness
-        self.current_flatness = spectral_flatness(logits, &mut self.scratch);
+        self.current_flatness = spectral_flatness(logits, &mut self.scratch, &mut self.planner);
 
         // Cache logits
         self.logits.clear();
@@ -229,8 +238,8 @@ impl IrrepPruner {
             false => {
                 // Uncertain: only top-k tokens valid
                 let k = self.top_k_when_uncertain.min(logits.len());
-                self.rebuild_sorted_indices();
                 self.valid_count = k;
+                self.rebuild_sorted_indices();
             }
         }
     }
@@ -249,32 +258,45 @@ impl IrrepPruner {
     }
 
     /// Check if a token_idx is in the top-k set (only meaningful when uncertain).
+    /// O(1) bitmap lookup.
+    #[inline]
     fn is_in_top_k(&self, token_idx: usize) -> bool {
-        if token_idx >= self.logits.len() {
-            return false;
-        }
-        let limit = self.valid_count.min(self.sorted_indices.len());
-        for i in 0..limit {
-            if self.sorted_indices[i] == token_idx {
-                return true;
-            }
-        }
-        false
+        self.top_k_bitmap.get(token_idx).copied().unwrap_or(false)
     }
 
-    /// Rebuild sorted indices by descending logit value.
+    /// Rebuild sorted indices by descending logit value using partial sort for top-k.
+    /// Builds O(1) bitmap for membership checks.
     fn rebuild_sorted_indices(&mut self) {
+        let n = self.logits.len();
         self.sorted_indices.clear();
-        for i in 0..self.logits.len() {
-            self.sorted_indices.push(i);
+        // SAFETY: indices are in-bounds by construction
+        self.sorted_indices.extend(0..n);
+
+        let k = self.valid_count.min(n);
+        if k < n {
+            // Partial sort: partition into top-k and rest
+            self.sorted_indices.select_nth_unstable_by(k, |&a, &b| {
+                self.logits[b]
+                    .partial_cmp(&self.logits[a])
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+            // Sort just the top-k portion for determinism
+            self.sorted_indices[..k].sort_unstable_by(|&a, &b| {
+                self.logits[b]
+                    .partial_cmp(&self.logits[a])
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
         }
-        // Full sort by descending logit value.
-        // TODO: replace with select_nth_unstable for large vocab (only need top-k).
-        self.sorted_indices.sort_unstable_by(|&a, &b| {
-            self.logits[b]
-                .partial_cmp(&self.logits[a])
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
+
+        // Build bitmap from sorted top-k
+        self.top_k_bitmap.clear();
+        self.top_k_bitmap.resize(n, false);
+        for &idx in &self.sorted_indices[..k] {
+            // SAFETY: idx < n by construction
+            unsafe {
+                *self.top_k_bitmap.get_unchecked_mut(idx) = true;
+            }
+        }
     }
 }
 
@@ -321,11 +343,15 @@ impl ConstraintPruner for IrrepPruner {
                     *r = candidates[i] < self.logits.len();
                 }
             }
-            // Uncertain: check top-k membership
+            // Uncertain: check top-k membership via O(1) bitmap
             false => {
                 let len = candidates.len().min(results.len());
                 for (i, r) in results.iter_mut().enumerate().take(len) {
-                    *r = self.is_in_top_k(candidates[i]);
+                    *r = self
+                        .top_k_bitmap
+                        .get(candidates[i])
+                        .copied()
+                        .unwrap_or(false);
                 }
             }
         }
@@ -349,7 +375,8 @@ mod tests {
         let mut logits = vec![0.01f32; 64];
         logits[0] = 10.0;
         let mut scratch = Vec::new();
-        let flatness = spectral_flatness(&logits, &mut scratch);
+        let mut planner = FftPlanner::new();
+        let flatness = spectral_flatness(&logits, &mut scratch, &mut planner);
         assert!(
             flatness > 0.7,
             "peaked logit vector should have high flatness (spread FFT), got {flatness}"
@@ -361,7 +388,8 @@ mod tests {
     fn flatness_flat_spectrum() {
         let logits = vec![1.0f32; 64];
         let mut scratch = Vec::new();
-        let flatness = spectral_flatness(&logits, &mut scratch);
+        let mut planner = FftPlanner::new();
+        let flatness = spectral_flatness(&logits, &mut scratch, &mut planner);
         // Uniform input: all energy in DC (which we skip), remaining bins ≈ 0
         assert!(
             flatness < 0.3,
@@ -379,7 +407,8 @@ mod tests {
         logits[99] = 2.5;
         logits[7] = 1.5;
         let mut scratch = Vec::new();
-        let flatness = spectral_flatness(&logits, &mut scratch);
+        let mut planner = FftPlanner::new();
+        let flatness = spectral_flatness(&logits, &mut scratch, &mut planner);
         assert!(
             (0.0..1.0).contains(&flatness),
             "realistic logits should have flatness in (0, 1), got {flatness}"
@@ -479,11 +508,12 @@ mod tests {
     #[test]
     fn scratch_buffer_reuse() {
         let mut scratch = Vec::new();
+        let mut planner = FftPlanner::new();
         let logits1 = vec![1.0f32; 32];
         let logits2 = vec![0.5f32; 64]; // larger
 
-        let f1 = spectral_flatness(&logits1, &mut scratch);
-        let f2 = spectral_flatness(&logits2, &mut scratch);
+        let f1 = spectral_flatness(&logits1, &mut scratch, &mut planner);
+        let f2 = spectral_flatness(&logits2, &mut scratch, &mut planner);
 
         assert!(f1.is_finite());
         assert!(f2.is_finite());
