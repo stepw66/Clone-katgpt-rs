@@ -425,7 +425,6 @@ impl SlodOperator {
         for (si, &sigma) in sigmas.iter().enumerate() {
             // Compute heat kernel weights for each node
             weights[..n].fill(0.0);
-            let mut total_energy = 0.0f32;
 
             for k in 0..k_eigs {
                 let decay = (-eigenvalues[k] * sigma).exp();
@@ -435,9 +434,7 @@ impl SlodOperator {
                 for i in 0..n {
                     weights[i] += amp * v[i] * v[i];
                 }
-                total_energy += amp;
             }
-            let _ = total_energy;
 
             // V(σ): participation — effective number of active nodes
             let w_sum = crate::simd::simd_sum_f32(&weights[..n]).max(1e-10);

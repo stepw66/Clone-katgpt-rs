@@ -3785,7 +3785,9 @@ impl SenseModule {
         if index as usize >= nodes_at_level || level > self.octree_depth {
             return None;
         }
-        let flat_idx = (0..level).fold(0usize, |acc, _| acc * 4) + index as usize;
+        // flat_idx = 0 for all levels in this simplified indexing;
+        // the fold computes 0 * 4^level = 0, so flat_idx = index.
+        let flat_idx = index as usize;
         let word = flat_idx / 64;
         let bit = flat_idx % 64;
         if word >= self.octree_bits.len() {

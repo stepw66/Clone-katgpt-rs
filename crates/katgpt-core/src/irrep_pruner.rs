@@ -240,17 +240,14 @@ impl IrrepPruner {
         // Determine valid count based on flatness
         // High flatness = converged = allow all tokens
         // Low flatness = uncertain = only top-k
-        match self.current_flatness >= self.convergence_threshold {
-            true => {
-                // Converged: all tokens valid
-                self.valid_count = logits.len();
-            }
-            false => {
-                // Uncertain: only top-k tokens valid
-                let k = self.top_k_when_uncertain.min(logits.len());
-                self.valid_count = k;
-                self.rebuild_sorted_indices();
-            }
+        if self.current_flatness >= self.convergence_threshold {
+            // Converged: all tokens valid
+            self.valid_count = logits.len();
+        } else {
+            // Uncertain: only top-k tokens valid
+            let k = self.top_k_when_uncertain.min(logits.len());
+            self.valid_count = k;
+            self.rebuild_sorted_indices();
         }
     }
 
@@ -332,11 +329,12 @@ impl ConstraintPruner for IrrepPruner {
             return false;
         }
 
-        match self.current_flatness >= self.convergence_threshold {
-            // Converged (high flatness): all tokens valid
-            true => true,
+        // Converged (high flatness): all tokens valid
+        if self.current_flatness >= self.convergence_threshold {
+            true
+        } else {
             // Uncertain (low flatness): only top-k tokens valid
-            false => self.is_in_top_k(token_idx),
+            self.is_in_top_k(token_idx)
         }
     }
 
@@ -354,25 +352,22 @@ impl ConstraintPruner for IrrepPruner {
             return;
         }
 
-        match self.current_flatness >= self.convergence_threshold {
-            // Converged: all in-range valid
-            true => {
-                let len = candidates.len().min(results.len());
-                for i in 0..len {
-                    results[i] = candidates[i] < self.logits.len();
-                }
+        // Converged: all in-range valid
+        if self.current_flatness >= self.convergence_threshold {
+            let len = candidates.len().min(results.len());
+            for i in 0..len {
+                results[i] = candidates[i] < self.logits.len();
             }
+        } else {
             // Uncertain: check top-k membership via O(1) bitset
-            false => {
-                let len = candidates.len().min(results.len());
-                let n_words = self.top_k_bits.len();
-                for i in 0..len {
-                    let idx = candidates[i];
-                    let word = idx >> 6;
-                    let bit = idx & 63;
-                    results[i] = word < n_words
-                        && unsafe { *self.top_k_bits.get_unchecked(word) & (1u64 << bit) != 0 };
-                }
+            let len = candidates.len().min(results.len());
+            let n_words = self.top_k_bits.len();
+            for i in 0..len {
+                let idx = candidates[i];
+                let word = idx >> 6;
+                let bit = idx & 63;
+                results[i] = word < n_words
+                    && unsafe { *self.top_k_bits.get_unchecked(word) & (1u64 << bit) != 0 };
             }
         }
     }
