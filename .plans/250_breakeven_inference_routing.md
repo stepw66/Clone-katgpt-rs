@@ -68,8 +68,8 @@ Integration
   - Per-compression-level perplexity at each position (computed once)
   - Mapping: position → optimal compression level
 - [x] T12: Implement `FidelityMatcher::error_matched_level(pos, target_perplexity_delta) -> CompressionLevel`
-- [ ] T13: Implement calibration procedure: run forward pass with full attention, record per-position perplexity as baseline
-- [ ] T14: Implement compression sweep: run with each compression level, record per-position perplexity delta
+- [x] T13: Implement calibration procedure: run forward pass with full attention, record per-position perplexity as baseline
+- [x] T14: Implement compression sweep: run with each compression level, record per-position perplexity delta
 
 ### Phase 4: Integration with InferenceRouter
 
