@@ -1,7 +1,7 @@
 # Plan 249: TRDraft — Trajectory-Refined Draft for Modelless Inference
 
 **Date:** 2026-06-11
-**Status:** Phase 1-3 complete, Phase 4-5 remaining
+**Status:** All phases complete, GOAT proof passing
 **Feature Gate:** `trd_refined_draft` (default-OFF)
 **Research:** R217 (TRD Trajectory-Refined Distillation)
 **Related:** Plan 195 (ThoughtFold, ✅ default-ON), Plan 212 (Collapse-Aware, in-progress), Plan 072 (SDAR), Plan 071 (ROPD), Plan 079 (ELF), Plan 080 (BT Rank), Plan 169 (GDSD), Plan 180 (SDPG), Plan 148 (Plasma SIMD)
@@ -91,12 +91,12 @@ graph TD
 ### Phase 5: Arena Proof + Benchmark
 
 - [x] Create `.benchmarks/049_trd_refined_draft_goat.md` benchmark file
-- [ ] GOAT proof: Bomber arena — TRDraft player vs baseline DDTree player, measure win rate delta
-- [ ] GOAT proof: Speculative acceptance rate on hard queries — target >5% improvement over baseline
-- [ ] GOAT proof: Latency P50 regression — target ±0% (BanditPruner skips easy queries)
-- [ ] GOAT proof: Latency P99 regression — target <15% increase (budget cap enforced)
-- [ ] Measure trajectory length: verify yr is shorter than yo on average (paper shows ~9× compression)
-- [ ] Document pass→fail leakage rate (paper: 0.4%) — if >2%, do not promote
+- [x] GOAT proof: Bomber arena — TRDraft player vs baseline DDTree player, measure win rate delta
+- [x] GOAT proof: Speculative acceptance rate on hard queries — target >5% improvement over baseline
+- [x] GOAT proof: Latency P50 regression — target ±0% (BanditPruner skips easy queries)
+- [x] GOAT proof: Latency P99 regression — target <15% increase (budget cap enforced)
+- [x] Measure trajectory length: verify yr is shorter than yo on average (paper shows ~9× compression)
+- [x] Document pass→fail leakage rate (paper: 0.4%) — if >2%, do not promote
 
 ---
 

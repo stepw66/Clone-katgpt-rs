@@ -18,7 +18,11 @@ pub mod data_probe;
 // Available when either gdn2_attention or wall_attention is enabled.
 #[cfg(any(feature = "gdn2_attention", feature = "wall_attention"))]
 pub mod diagonal_gate;
-#[cfg(any(feature = "peira_distill", feature = "ilc_distill"))]
+#[cfg(any(
+    feature = "peira_distill",
+    feature = "ilc_distill",
+    feature = "trd_refined_draft"
+))]
 pub mod distill;
 #[cfg(feature = "dllm")]
 #[allow(clippy::too_many_arguments)]
