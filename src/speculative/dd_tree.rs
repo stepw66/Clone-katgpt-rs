@@ -1185,9 +1185,11 @@ where
             }
         },
         AndOrNode::And {
-            children, solved, ..
+            children,
+            solved_count,
+            ..
         } => {
-            if !solved.iter().all(|&s| s) {
+            if *solved_count < children.len() {
                 return Vec::new();
             }
             let mut combined = Vec::new();

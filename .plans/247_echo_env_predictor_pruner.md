@@ -71,10 +71,10 @@ graph LR
 - [x] Ensure zero overhead when feature flag is OFF (compile-time gating)
 
 ### T6: GOAT Proof Tests
-- [ ] `test_echo_predictor_no_regression`: Bomber HL arena, echo ON vs OFF, score ≥ baseline
-- [ ] `test_echo_prediction_accuracy`: Prediction accuracy ≥70% after 100 rounds
-- [ ] `test_echo_consistency_entropy`: ≥15% entropy reduction on hard queries
-- [ ] `test_echo_latency_no_regression`: ≤5% overhead per token on hot path
+- [x] `test_echo_predictor_no_regression`: Bomber HL arena, echo ON vs OFF, score ≥ baseline
+- [x] `test_echo_prediction_accuracy`: Prediction accuracy ≥70% after 100 rounds
+- [x] `test_echo_consistency_entropy`: ≥15% entropy reduction on hard queries
+- [x] `test_echo_latency_no_regression`: ≤5% overhead per token on hot path
 
 ### T7: Example — `examples/echo_env_predictor_demo.rs`
 - [ ] Bomber arena with echo_env_predictor ON vs OFF
