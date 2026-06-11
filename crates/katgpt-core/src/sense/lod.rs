@@ -66,12 +66,10 @@ impl SenseLodRouter {
         if boundaries.len() < 2 {
             return None;
         }
-        let sigma1 = boundaries[0].sigma;
-        let sigma2 = boundaries[1].sigma;
         Some(Self {
-            boundaries: boundaries.to_vec(),
-            sigma1,
-            sigma2,
+            boundaries: Vec::new(), // dead code — avoid allocation
+            sigma1: boundaries[0].sigma,
+            sigma2: boundaries[1].sigma,
         })
     }
 
@@ -88,8 +86,8 @@ impl SenseLodRouter {
             out.len(),
             "assign_lods_into: length mismatch"
         );
-        for (i, &d) in distances.iter().enumerate() {
-            out[i] = self.route(d);
+        for (out_val, &d) in out.iter_mut().zip(distances.iter()) {
+            *out_val = self.route(d);
         }
     }
 }
@@ -127,11 +125,7 @@ impl SenseLodMask {
     }
 
     pub fn is_active(&self, kind: SenseKind) -> bool {
-        let idx = kind as usize;
-        if idx < 6 {
-            return self.mask[idx];
-        }
-        false
+        self.mask.get(kind as usize).copied().unwrap_or(false)
     }
 
     #[inline]

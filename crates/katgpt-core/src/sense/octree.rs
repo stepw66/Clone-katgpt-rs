@@ -78,9 +78,9 @@ impl SenseOctreeBuilder {
     fn insert_embedding(&self, bits: &mut [u64; 4], embedding: &[f32; 8], _sign: bool) {
         // dim 0..7 → word=0, bit=dim (8 dims fit in one u64)
         for (dim, &val) in embedding.iter().enumerate() {
-            if val.abs() > 0.1 {
-                bits[0] |= 1u64 << dim;
-            }
+            let mask = 1u64 << dim;
+            // Branchless: set bit when |val| > 0.1
+            bits[0] |= mask & ((val.abs() > 0.1) as u64).wrapping_neg();
         }
     }
 

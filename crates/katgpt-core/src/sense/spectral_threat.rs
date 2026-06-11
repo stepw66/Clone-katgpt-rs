@@ -111,7 +111,9 @@ pub struct CombatRhythmTracker {
     cells: [Option<LabeledRhythm>; HIDDEN_DIM],
     /// Number of valid entries in `cells`.
     cell_count: usize,
-    /// Hidden dimension for LinOSS cells.
+    /// Direct-indexed LUT: entity_id → slot index. u8::MAX = not registered.
+    entity_lut: [u8; 256],
+    /// Hidden dimension — always HIDDEN_DIM. Kept for API compat.
     hidden_dim: usize,
     /// Timestep for imex_step (derived from tick rate, e.g. 16ms → 0.016).
     dt: f32,
@@ -127,9 +129,11 @@ impl CombatRhythmTracker {
     /// `hidden_dim` = 8 (matches HLA dimension for simplicity).
     /// `dt` = derived from game tick rate (e.g., 16ms → 0.016).
     pub fn new(hidden_dim: usize, dt: f32) -> Self {
+        debug_assert_eq!(hidden_dim, HIDDEN_DIM);
         Self {
             cells: [const { None }; HIDDEN_DIM],
             cell_count: 0,
+            entity_lut: [u8::MAX; 256],
             hidden_dim,
             dt,
             max_damage: 50.0,
@@ -143,9 +147,7 @@ impl CombatRhythmTracker {
     /// slow heavy attacks to fast flurries. β = 0.1 (light damping,
     /// oscillation persists between hits to maintain phase info).
     pub fn with_combat_frequencies(dt: f32) -> Self {
-        let tracker = Self::new(HIDDEN_DIM, dt);
-        debug_assert_eq!(tracker.hidden_dim, HIDDEN_DIM);
-        tracker
+        Self::new(HIDDEN_DIM, dt)
     }
 
     /// Pre-tuned combat ω² values — covers slow heavy to fast flurry.
@@ -153,32 +155,36 @@ impl CombatRhythmTracker {
     /// Light damping — oscillation persists between hits.
     const COMBAT_BETA: f32 = 0.1;
 
+    /// O(1) entity_id → slot index lookup via direct-indexed LUT.
+    #[inline(always)]
+    fn slot_for(&self, entity_id: u8) -> Option<usize> {
+        let slot = self.entity_lut[entity_id as usize];
+        if slot == u8::MAX {
+            None
+        } else {
+            Some(slot as usize)
+        }
+    }
+
     /// Register a new participant for tracking. No-op if already registered.
     #[inline]
     pub fn register(&mut self, entity_id: u8) {
-        for i in 0..self.cell_count {
-            if let Some(c) = &self.cells[i] {
-                if c.entity_id == entity_id {
-                    return;
-                }
-            }
+        if self.slot_for(entity_id).is_some() {
+            return;
         }
         if self.cell_count >= HIDDEN_DIM {
             return; // max tracked participants
         }
 
-        let mut cell = LinOSSCell::new(self.hidden_dim);
-        // Apply combat frequencies if hidden_dim matches
-        if self.hidden_dim == HIDDEN_DIM {
-            cell.omega_sq.copy_from_slice(&Self::COMBAT_OMEGA_SQ);
-        }
+        let mut cell = LinOSSCell::new(HIDDEN_DIM);
+        cell.omega_sq.copy_from_slice(&Self::COMBAT_OMEGA_SQ);
         cell.beta.fill(Self::COMBAT_BETA);
 
-        let h = self.hidden_dim;
+        self.entity_lut[entity_id as usize] = self.cell_count as u8;
         self.cells[self.cell_count] = Some(LabeledRhythm {
             entity_id,
             cell,
-            state: LinOSSState::zeros(h),
+            state: LinOSSState::zeros(HIDDEN_DIM),
             event_count: 0,
             forcing: [0.0; HIDDEN_DIM],
             y_buf: [0.0; HIDDEN_DIM],
@@ -197,20 +203,9 @@ impl CombatRhythmTracker {
     /// do not increment event_count (only real impulses build confidence).
     #[inline(always)]
     pub fn ingest_damage(&mut self, source_id: u8, amount: f32, _tick: u32) {
-        let slot = {
-            let mut found = None;
-            for i in 0..self.cell_count {
-                if let Some(c) = &self.cells[i] {
-                    if c.entity_id == source_id {
-                        found = Some(i);
-                        break;
-                    }
-                }
-            }
-            match found {
-                Some(i) => i,
-                None => return,
-            }
+        let slot = match self.slot_for(source_id) {
+            Some(s) => s,
+            None => return,
         };
         let rhythm = self.cells[slot].as_mut().unwrap();
 
@@ -219,7 +214,7 @@ impl CombatRhythmTracker {
         rhythm.forcing.fill(normalized);
 
         // Zero-alloc in-place IMEX step
-        let h = self.hidden_dim;
+        let h = HIDDEN_DIM;
         rhythm.cell.imex_step_inplace(
             &rhythm.state.y,
             &rhythm.state.z,
@@ -247,31 +242,27 @@ impl CombatRhythmTracker {
     ///
     /// Returns `SpectralThreatFeatures::default()` if participant not found.
     /// No allocation on this path.
+    /// Const default — avoids repeated Default trait calls on hot path.
+    const DEFAULT_FEATURES: SpectralThreatFeatures = SpectralThreatFeatures {
+        combo_frequency: 0.0,
+        vulnerability_phase: 0.0,
+        burst_decay: 0.0,
+        rhythm_confidence: 0.0,
+    };
+
     #[inline(always)]
     pub fn extract_features(&self, entity_id: u8) -> SpectralThreatFeatures {
-        // Linear scan on max-8 entries (<64 bytes) — fits in cache line.
-        let rhythm = {
-            let mut found = None;
-            for i in 0..self.cell_count {
-                if let Some(c) = &self.cells[i] {
-                    if c.entity_id == entity_id {
-                        found = Some(i);
-                        break;
-                    }
-                }
-            }
-            match found {
-                Some(i) => self.cells[i].as_ref().unwrap(),
-                None => return SpectralThreatFeatures::default(),
-            }
+        let rhythm = match self.slot_for(entity_id) {
+            Some(i) => self.cells[i].as_ref().unwrap(),
+            None => return Self::DEFAULT_FEATURES,
         };
 
         if rhythm.event_count == 0 {
-            return SpectralThreatFeatures::default();
+            return Self::DEFAULT_FEATURES;
         }
 
         // Find dominant mode: argmax of |y[i]| (branch-free abs)
-        let h = self.hidden_dim;
+        let h = HIDDEN_DIM;
         let mut dominant = 0usize;
         let mut max_amp = rhythm.state.y[0].abs();
         for i in 1..h {
@@ -317,20 +308,9 @@ impl CombatRhythmTracker {
     /// Requires at least 3 timestamps (2 intervals) to produce valid calibration.
     #[inline]
     pub fn auto_calibrate(&mut self, entity_id: u8) {
-        let rhythm = {
-            let mut found = None;
-            for i in 0..self.cell_count {
-                if let Some(c) = &self.cells[i] {
-                    if c.entity_id == entity_id {
-                        found = Some(i);
-                        break;
-                    }
-                }
-            }
-            match found {
-                Some(i) => i,
-                None => return,
-            }
+        let rhythm = match self.slot_for(entity_id) {
+            Some(i) => i,
+            None => return,
         };
         let rhythm = self.cells[rhythm].as_mut().unwrap();
         let ts_count = rhythm.damage_timestamp_count;
@@ -399,17 +379,11 @@ impl CombatRhythmTracker {
 
     /// Reset state for a participant (new encounter).
     pub fn reset(&mut self, entity_id: u8) {
-        for i in 0..self.cell_count {
-            if let Some(c) = &self.cells[i] {
-                if c.entity_id == entity_id {
-                    let rhythm = self.cells[i].as_mut().unwrap();
-                    let h = self.hidden_dim;
-                    rhythm.state = LinOSSState::zeros(h);
-                    rhythm.event_count = 0;
-                    rhythm.damage_timestamp_count = 0;
-                    return;
-                }
-            }
+        if let Some(i) = self.slot_for(entity_id) {
+            let rhythm = self.cells[i].as_mut().unwrap();
+            rhythm.state = LinOSSState::zeros(HIDDEN_DIM);
+            rhythm.event_count = 0;
+            rhythm.damage_timestamp_count = 0;
         }
     }
 }

@@ -11,9 +11,17 @@ pub fn save_module(module: &SenseModule, mut w: impl Write) -> io::Result<()> {
     w.write_all(MAGIC)?;
     w.write_all(&[VERSION])?;
     w.write_all(&[module.kind as u8])?;
+    // Clone + zero padding so the raw bytes have no uninitialized holes.
+    // TernaryDir is 20 logical bytes but 24 with alignment padding.
+    let mut copy = module.clone();
+    for dir in &mut copy.directions {
+        dir.zero_padding();
+    }
+    // SAFETY: copy is fully initialized (all fields set, padding zeroed).
+    // SenseModule is repr(C) so layout is deterministic.
     let bytes: &[u8] = unsafe {
         std::slice::from_raw_parts(
-            module as *const SenseModule as *const u8,
+            &copy as *const SenseModule as *const u8,
             std::mem::size_of::<SenseModule>(),
         )
     };
@@ -45,6 +53,9 @@ pub fn load_module(mut r: impl Read) -> io::Result<SenseModule> {
     let mut module_bytes = [0u8; std::mem::size_of::<SenseModule>()];
     r.read_exact(&mut module_bytes)?;
 
+    // SAFETY: buffer is zero-initialized (covers padding), SenseModule is
+    // repr(C) so field layout matches the byte offsets. All fields are
+    // valid for any bit pattern (integers, f32, arrays).
     let module: SenseModule =
         unsafe { std::ptr::read(module_bytes.as_ptr() as *const SenseModule) };
 

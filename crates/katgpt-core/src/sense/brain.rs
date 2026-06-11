@@ -139,8 +139,17 @@ impl NpcBrain {
     }
 
     /// Full projection: iterate all modules, project each.
+    /// Fast-path skips per-module override checks when no overrides are active.
     #[inline]
     fn project_full(&self, result: &mut [f32]) {
+        // Fast path: no overrides active
+        if self.overrides.pinned.is_empty() && !self.overrides.autonomous_disabled {
+            for (i, m) in self.modules.iter().enumerate() {
+                result[i] = m.project(&self.hla_state);
+            }
+            return;
+        }
+        // Slow path: check overrides per module
         for (i, m) in self.modules.iter().enumerate() {
             result[i] = match self.overrides.pinned_value(m.kind) {
                 Some(v) => v,
@@ -205,10 +214,11 @@ impl NpcBrain {
     }
 
     /// Update HLA state with delta (dynamic slice, bounds-checked).
+    /// Direct indexing avoids zip().take() iterator overhead; LLVM unrolls better.
     pub fn update_hla(&mut self, delta: &[f32]) {
-        let len = delta.len().min(self.hla_state.len());
-        for (s, d) in self.hla_state.iter_mut().zip(delta.iter()).take(len) {
-            *s += d;
+        let len = delta.len().min(8);
+        for i in 0..len {
+            self.hla_state[i] += delta[i];
         }
     }
 

@@ -23,14 +23,16 @@ impl SenseTrialLog {
         self.trials.push(trial);
     }
 
-    /// Compute average reward for a sense kind — branchless single pass, zero allocation.
+    /// Compute average reward for a sense kind — branch-predicted single pass, zero allocation.
+    /// Early continue avoids touching `t.reward` for non-matching trials, saving memory bandwidth.
     pub fn average_reward(&self, kind: SenseKind) -> f32 {
         let mut sum = 0.0f32;
         let mut count = 0usize;
         for t in &self.trials {
-            let matches = (t.sense_kind == kind) as usize;
-            sum += matches as f32 * t.reward;
-            count += matches;
+            if t.sense_kind == kind {
+                sum += t.reward;
+                count += 1;
+            }
         }
         if count == 0 { 0.0 } else { sum / count as f32 }
     }
@@ -47,11 +49,11 @@ pub fn precision_weighted_reward(
     if activated_dims.is_empty() {
         return base_reward;
     }
-    let avg_priority: f32 = activated_dims
-        .iter()
-        .map(|&d| crate::sense::bake::exploration_priority(precision, d))
-        .sum::<f32>()
-        / activated_dims.len() as f32;
+    let mut sum = 0.0f32;
+    for &d in activated_dims {
+        sum += crate::sense::bake::exploration_priority(precision, d);
+    }
+    let avg_priority = sum / activated_dims.len() as f32;
     base_reward * (1.0 + avg_priority)
 }
 

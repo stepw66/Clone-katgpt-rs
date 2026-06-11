@@ -75,50 +75,22 @@ pub(crate) trait GmSenseApi {
 #[inline]
 #[allow(dead_code)]
 fn read_u32(payload: &[u8], offset: usize) -> Option<(u32, usize)> {
-    if offset + 4 > payload.len() {
-        return None;
-    }
-    let val = u32::from_le_bytes([
-        payload[offset],
-        payload[offset + 1],
-        payload[offset + 2],
-        payload[offset + 3],
-    ]);
-    Some((val, offset + 4))
+    let bytes: [u8; 4] = payload.get(offset..offset + 4)?.try_into().ok()?;
+    Some((u32::from_le_bytes(bytes), offset + 4))
 }
 
 #[inline]
 #[allow(dead_code)]
 fn read_u64(payload: &[u8], offset: usize) -> Option<(u64, usize)> {
-    if offset + 8 > payload.len() {
-        return None;
-    }
-    let val = u64::from_le_bytes([
-        payload[offset],
-        payload[offset + 1],
-        payload[offset + 2],
-        payload[offset + 3],
-        payload[offset + 4],
-        payload[offset + 5],
-        payload[offset + 6],
-        payload[offset + 7],
-    ]);
-    Some((val, offset + 8))
+    let bytes: [u8; 8] = payload.get(offset..offset + 8)?.try_into().ok()?;
+    Some((u64::from_le_bytes(bytes), offset + 8))
 }
 
 #[inline]
 #[allow(dead_code)]
 fn read_f32(payload: &[u8], offset: usize) -> Option<(f32, usize)> {
-    if offset + 4 > payload.len() {
-        return None;
-    }
-    let val = f32::from_le_bytes([
-        payload[offset],
-        payload[offset + 1],
-        payload[offset + 2],
-        payload[offset + 3],
-    ]);
-    Some((val, offset + 4))
+    let bytes: [u8; 4] = payload.get(offset..offset + 4)?.try_into().ok()?;
+    Some((f32::from_le_bytes(bytes), offset + 4))
 }
 
 #[inline]
