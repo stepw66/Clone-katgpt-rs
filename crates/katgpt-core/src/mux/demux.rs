@@ -30,8 +30,8 @@ impl MuxDemuxVerifier {
     /// Demultiplex a superposition: given token IDs and weights,
     /// return them sorted by weight (descending) and verify uniqueness.
     ///
-    /// Performs a single allocation (no intermediate buffer), unlike `demux_into`
-    /// which clones into the result for caller buffer reuse.
+    /// Performs a single allocation (no intermediate buffer).
+    /// For zero-alloc path, use `demux_into`.
     pub fn demux(&self, tokens: &[u32], weights: &[f32]) -> DemuxResult {
         assert_eq!(tokens.len(), weights.len());
         let n = tokens.len();
@@ -83,21 +83,14 @@ impl MuxDemuxVerifier {
     /// Zero-alloc demultiplexing into a caller-provided buffer.
     ///
     /// `out_tokens` must have capacity >= `tokens.len()`.
-    /// Returns a `DemuxResult` whose `tokens` field is a clone of the written
-    /// slice (so the caller retains ownership of the buffer).
-    pub fn demux_into(
-        &self,
-        tokens: &[u32],
-        weights: &[f32],
-        out_tokens: &mut Vec<u32>,
-    ) -> DemuxResult {
+    /// Returns `is_unique` and writes sorted tokens into `out_tokens`.
+    /// Caller reads the result directly from `out_tokens` — no clone.
+    pub fn demux_into(&self, tokens: &[u32], weights: &[f32], out_tokens: &mut Vec<u32>) -> bool {
         assert_eq!(tokens.len(), weights.len());
         let n = tokens.len();
         if n == 0 {
-            return DemuxResult {
-                tokens: Vec::new(),
-                is_unique: true,
-            };
+            out_tokens.clear();
+            return true;
         }
 
         // Stack-allocated sort: copy to stack, sort descending by weight.
@@ -122,8 +115,7 @@ impl MuxDemuxVerifier {
             }
         }
 
-        // Extract sorted-by-weight tokens into caller buffer
-        // via stack buffer + extend_from_slice — avoids per-element push overhead.
+        // Extract sorted-by-weight tokens into caller buffer.
         let mut tmp: [u32; MAX_DEMUX_K] = [0; MAX_DEMUX_K];
         for i in 0..len {
             tmp[i] = pairs[i].0;
@@ -131,10 +123,7 @@ impl MuxDemuxVerifier {
         out_tokens.clear();
         out_tokens.extend_from_slice(&tmp[..len]);
 
-        DemuxResult {
-            tokens: out_tokens.clone(),
-            is_unique,
-        }
+        is_unique
     }
 }
 
