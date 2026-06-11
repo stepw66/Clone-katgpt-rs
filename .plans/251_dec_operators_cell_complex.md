@@ -1,7 +1,7 @@
 # Plan 251: DEC Operators & Cell Complex Inference Infrastructure
 
 **Date:** 2026-06
-**Status:** 🟢 ACTIVE
+**Status:** ✅ COMPLETE
 **Research:** 219 (Topological Neural Operators → DEC Inference)
 **Depends On:** None (foundational)
 **Blocks:** riir-ai Plan 277 (DEC LoRA Training)
@@ -103,8 +103,8 @@ src/dec/
 
 ## Validation
 
-- [ ] All DEC identity tests pass (curl(grad)=0, div(curl)=0)
-- [ ] Hodge decomposition reconstructs original cochain
-- [ ] Arena proof shows DEC navigation quality
-- [ ] Benchmark shows acceptable overhead vs naive gradient
-- [ ] GOAT gate configured, can run with and without `dec_operators`
+- [x] All DEC identity tests pass (curl(grad)=0, div(curl)=0)
+- [x] Hodge decomposition reconstructs original cochain
+- [x] Arena proof shows DEC navigation quality
+- [x] Benchmark shows acceptable overhead vs naive gradient
+- [x] GOAT gate configured, can run with and without `dec_operators`
