@@ -38,7 +38,10 @@ pub struct MuxBanditWidth {
 impl MuxBanditWidth {
     /// Create a new bandit with arms for widths 1..=k.
     pub fn new(k: usize) -> Self {
-        let arms = (1..=k).map(Arm::new).collect();
+        let mut arms = Vec::with_capacity(k);
+        for width in 1..=k {
+            arms.push(Arm::new(width));
+        }
         Self {
             arms,
             exploration: 1.0,

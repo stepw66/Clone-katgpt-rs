@@ -7,6 +7,8 @@
 //! effective width (number of valid superposition peaks), and expands all
 //! peaks simultaneously.
 
+use std::sync::Arc;
+
 use crate::mux::span_pruner::MuxSpanPruner;
 use crate::mux::top_k::{MAX_TOP_K, extract_top_k_into};
 
@@ -59,13 +61,14 @@ pub struct MuxNode {
     /// Token IDs held in superposition at this node.
     pub tokens: Vec<u32>,
     /// Corresponding weights (logit values) for each token.
-    pub weights: Vec<f32>,
+    pub weights: Arc<[f32]>,
     /// Child nodes (branching factor = width at this depth).
     pub children: Vec<MuxNode>,
 }
 
 impl MuxNode {
-    pub fn new(tokens: Vec<u32>, weights: Vec<f32>) -> Self {
+    pub fn new(tokens: Vec<u32>, weights: impl Into<Arc<[f32]>>) -> Self {
+        let weights = weights.into();
         assert_eq!(tokens.len(), weights.len());
         Self {
             tokens,
@@ -196,7 +199,7 @@ impl MuxDdTree {
         let effective_width = width.min(peaks.len()).max(1);
 
         // Hoist shared weights allocation outside the loop — identical for every child.
-        let child_weights: Vec<f32> = peaks.iter().take(self.k).copied().collect();
+        let child_weights: Arc<[f32]> = peaks.iter().take(self.k).copied().collect();
         let child_len = peaks.len().min(self.k);
         node.children.reserve(effective_width);
         // Pre-allocate child_tokens outside the loop — clear() + refill each iteration
@@ -285,11 +288,10 @@ impl MuxDdTree {
     /// For trees with depth ≤ ~20 and branching factor ≤ K, the total allocation
     /// is ~leaf_count × depth elements — one contiguous Vec instead of one Vec per leaf.
     pub fn collect_leaf_paths_flat(&self) -> LeafPaths {
-        let estimated_leaves = self.leaf_count();
         let mut paths = LeafPaths {
-            // Pre-allocate: each leaf path is at most `depth` elements.
-            buf: Vec::with_capacity(estimated_leaves * self.depth.max(1)),
-            offsets: Vec::with_capacity(estimated_leaves + 1),
+            // Reasonable initial capacity; the vector grows as needed.
+            buf: Vec::with_capacity(self.depth.max(1) * 4),
+            offsets: Vec::with_capacity(8),
         };
         self.collect_leaf_paths_flat_into(&mut paths);
         paths

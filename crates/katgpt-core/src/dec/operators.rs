@@ -218,55 +218,31 @@ pub fn hodge_laplacian(cx: &CellComplex, input: &CochainField) -> CochainField {
 pub fn graph_laplacian(
     cx: &CellComplex,
     potential: &CochainField,
-    scratch: &mut [f32],
+    _scratch: &mut [f32],
 ) -> CochainField {
     debug_assert_eq!(potential.rank, 0, "graph_laplacian requires rank-0 cochain");
     let dim = potential.dim;
-    let n_edges = cx.n_edges();
-    debug_assert!(scratch.len() >= n_edges * dim, "scratch buffer too small");
 
-    // Step 1: d₀ (gradient) into scratch — edge cochain
+    // Single-pass graph Laplacian: boundary entries are stored as adjacent pairs
+    // (v_tail, e, -1), (v_head, e, +1) for each edge. Process each pair to compute
+    // Δ₀[v] = degree(v)*potential[v] - Σ potential[neighbor] directly.
     let entries = cx.boundary_entries(0);
-    // Zero the scratch
-    scratch[..n_edges * dim].fill(0.0f32);
-
-    for &(v_cell, e_cell, sign) in entries {
-        let src_start = v_cell * dim;
-        let dst_start = e_cell * dim;
-        match sign {
-            1 => {
-                for d in 0..dim {
-                    scratch[dst_start + d] += potential.data[src_start + d];
-                }
-            }
-            -1 => {
-                for d in 0..dim {
-                    scratch[dst_start + d] -= potential.data[src_start + d];
-                }
-            }
-            _ => {}
-        }
-    }
-
-    // Step 2: δ₁ = B₁ applied to edge cochain → vertex cochain
     let n_vertices = cx.n_vertices();
     let mut output = CochainField::zeros(0, n_vertices, dim);
 
-    for &(v_cell, e_cell, sign) in entries {
-        let src_start = e_cell * dim;
-        let dst_start = v_cell * dim;
-        match sign {
-            1 => {
-                for d in 0..dim {
-                    output.data[dst_start + d] += scratch[src_start + d];
-                }
-            }
-            -1 => {
-                for d in 0..dim {
-                    output.data[dst_start + d] -= scratch[src_start + d];
-                }
-            }
-            _ => {}
+    // Entries come in pairs for each edge: (v_tail, e, -1), (v_head, e, +1).
+    for pair in entries.chunks_exact(2) {
+        let (v_tail, _e, _sign_t) = pair[0];
+        let (v_head, _e, _sign_h) = pair[1];
+        let tail_start = v_tail * dim;
+        let head_start = v_head * dim;
+        // Laplacian contribution for edge (tail, head):
+        //   output[tail] += potential[tail] - potential[head]
+        //   output[head] += potential[head] - potential[tail]
+        for d in 0..dim {
+            let diff = potential.data[tail_start + d] - potential.data[head_start + d];
+            output.data[tail_start + d] += diff;
+            output.data[head_start + d] -= diff;
         }
     }
 
