@@ -1340,8 +1340,14 @@ pub fn forward_looped<'a>(
         // Save h^(τ-1) for residual gate
         ctx.prev_h[..n].copy_from_slice(&ctx.x[..n]);
 
+        // Adaptive Depth Tier: cap layer count at inference time (Plan 284 T10).
+        // Composes with Hydra: tier sets upper bound, Hydra skips within that bound.
+        let max_layer = ctx
+            .depth_tier
+            .map_or(config.n_layer, |t| t.max_layers(config.n_layer));
+
         // 3. Inner loop: weight-shared layer pass
-        for (layer_idx, layer_weights) in weights.layers.iter().enumerate() {
+        for (layer_idx, layer_weights) in weights.layers.iter().enumerate().take(max_layer) {
             let layer_cache = &mut cache.layers[layer_idx];
 
             // Determine if this layer uses full SDPA or linear attention
@@ -1538,9 +1544,13 @@ pub fn forward_training_free_loop<'a>(
     let hd = config.head_dim;
     let kvd = types::kv_dim(config);
     let n_kv = config.n_kv_head;
-    let n_layer = weights.layers.len();
+    // Adaptive Depth Tier: cap effective layer count (Plan 284 T10).
+    let max_layer = ctx
+        .depth_tier
+        .map_or(weights.layers.len(), |t| t.max_layers(config.n_layer));
+    let n_layer = max_layer;
     let window_start = tf_config.window_start.min(n_layer);
-    let window_end = tf_config.window_end.min(n_layer - 1);
+    let window_end = tf_config.window_end.min(n_layer.saturating_sub(1));
     let k = tf_config.loop_count;
     let beta = match tf_config.strategy {
         SubStepStrategy::DampedEuler => 0.0, // no anchor blend for pure Euler
@@ -2675,8 +2685,13 @@ fn forward_coda<'a>(
     let scale = ctx.attn_scale;
     let t_n = pos + 1;
 
+    // Adaptive Depth Tier: cap layer count at inference time (Plan 284 T10).
+    let max_layer = ctx
+        .depth_tier
+        .map_or(config.n_layer, |t| t.max_layers(config.n_layer));
+
     // 2. Layer loop with CODA-fused kernels
-    for (layer_idx, layer_weights) in weights.layers.iter().enumerate() {
+    for (layer_idx, layer_weights) in weights.layers.iter().enumerate().take(max_layer) {
         let layer_cache = &mut cache.layers[layer_idx];
 
         // MLS: save pre-layer state for delta computation (Plan 104)
@@ -3348,7 +3363,12 @@ pub fn forward_prefill<'a>(
         ctx.wall_prefix.reset();
     }
 
-    for (layer_idx, layer_weights) in weights.layers.iter().enumerate() {
+    // Adaptive Depth Tier: cap layer count at inference time (Plan 284 T10).
+    let max_layer = ctx
+        .depth_tier
+        .map_or(config.n_layer, |t| t.max_layers(config.n_layer));
+
+    for (layer_idx, layer_weights) in weights.layers.iter().enumerate().take(max_layer) {
         let layer_cache = &mut cache.layers[layer_idx];
 
         // ── Phase A: Compute K/V for ALL positions → store in cache ──
@@ -4044,8 +4064,13 @@ pub fn forward_paged<'a>(
         ctx.wall_prefix.reset();
     }
 
+    // Adaptive Depth Tier: cap layer count at inference time (Plan 284 T10).
+    let max_layer = ctx
+        .depth_tier
+        .map_or(config.n_layer, |t| t.max_layers(config.n_layer));
+
     // 2. Layer loop
-    for (layer_idx, layer_weights) in weights.layers.iter().enumerate() {
+    for (layer_idx, layer_weights) in weights.layers.iter().enumerate().take(max_layer) {
         // Pre-attention: RMSNorm → save residual → RMSNorm
         rmsnorm(&mut ctx.x);
         ctx.xr[..n].copy_from_slice(&ctx.x[..n]);
@@ -4813,8 +4838,13 @@ pub fn forward_raven<'a>(
         &weights.wpe[pos_off_emb..pos_off_emb + n],
     );
 
+    // Adaptive Depth Tier: cap layer count at inference time (Plan 284 T10).
+    let max_layer = ctx
+        .depth_tier
+        .map_or(config.n_layer, |t| t.max_layers(config.n_layer));
+
     // 2. Layer loop
-    for (layer_idx, layer_weights) in weights.layers.iter().enumerate() {
+    for (layer_idx, layer_weights) in weights.layers.iter().enumerate().take(max_layer) {
         // layer_idx used by delta_routing cfg blocks below
         #[cfg(not(feature = "delta_routing"))]
         let _ = layer_idx;
@@ -5027,8 +5057,13 @@ pub fn forward_quantized<'a, C: types::QuantizedKVCache>(
         &weights.wpe[pos_off_emb..pos_off_emb + n],
     );
 
+    // Adaptive Depth Tier: cap layer count at inference time (Plan 284 T10).
+    let max_layer = ctx
+        .depth_tier
+        .map_or(config.n_layer, |t| t.max_layers(config.n_layer));
+
     // 2. Layer loop
-    for (layer_idx, layer_weights) in weights.layers.iter().enumerate() {
+    for (layer_idx, layer_weights) in weights.layers.iter().enumerate().take(max_layer) {
         // Pre-attention: RMSNorm → save residual
         rmsnorm(&mut ctx.x);
         ctx.xr[..n].copy_from_slice(&ctx.x[..n]);
