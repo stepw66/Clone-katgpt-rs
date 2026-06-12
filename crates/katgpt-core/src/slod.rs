@@ -132,9 +132,9 @@ fn mobius_add_into(result: &mut [f32], a: &[f32], b: &[f32], dim: usize) {
     let s1 = (1.0 + 2.0 * a_dot_b + norm_b_sq) * inv_denom;
     let s2 = (1.0 - norm_a_sq) * inv_denom;
 
-    for i in 0..dim {
-        result[i] = s1 * a[i] + s2 * b[i];
-    }
+    // Fused: result = s2 * b, then result += s1 * a (two SIMD passes instead of scalar loop)
+    crate::simd::simd_fused_decay_write(&mut result[..dim], 0.0, &b[..dim], s2);
+    crate::simd::simd_fused_scale_acc(&mut result[..dim], &a[..dim], s1, dim);
 }
 
 /// Riemannian log map: project `point` onto the tangent space at `base`.
@@ -276,14 +276,13 @@ impl SlodOperator {
                 let a_j = &embeddings[j * dim..(j + 1) * dim];
                 dists.push((j, poincare_distance(a_i, a_j, dim)));
             }
-            // Partial sort: O(n) to partition top-k nearest, then sort just those
+            // Partial sort: O(n) to partition top-k nearest
             // Clamp k to dists.len() since we skipped self (dists has n-1 elements)
             let k_eff = k.min(dists.len());
             if k_eff == 0 {
                 continue;
             }
             dists.select_nth_unstable_by(k_eff - 1, |a, b| a.1.total_cmp(&b.1));
-            dists[..k_eff].sort_unstable_by(|a, b| a.1.total_cmp(&b.1));
 
             // Take top-k nearest neighbors
             for &(j, d) in dists.iter().take(k_eff) {
@@ -310,11 +309,15 @@ impl SlodOperator {
         for i in 0..n {
             let isd_i = inv_sqrt_d[i];
             let row_off = i * n;
-            for (j, inv_sqrt_d_j) in inv_sqrt_d.iter().enumerate().take(n) {
-                let idx = row_off + j;
-                let scaled = w[idx] * isd_i * inv_sqrt_d_j;
-                lap[idx] = -scaled;
-            }
+            // SIMD: copy w row into lap, scale by isd_i
+            lap[row_off..row_off + n].copy_from_slice(&w[row_off..row_off + n]);
+            crate::simd::simd_scale_inplace(&mut lap[row_off..row_off + n], isd_i);
+            // SIMD: element-wise multiply by inv_sqrt_d, then negate
+            crate::simd::simd_scale_mul_inplace(
+                &mut lap[row_off..row_off + n],
+                &inv_sqrt_d[..n],
+                -1.0,
+            );
             lap[row_off + i] += 1.0;
         }
 
@@ -542,9 +545,7 @@ pub fn heat_kernel_weights_into(
         };
         let decay = (-eigenvalues[k] * sigma).exp();
         let amp = decay * coeff * coeff;
-        for i in 0..n {
-            weights[i] += amp * v[i];
-        }
+        crate::simd::simd_fused_scale_acc(&mut weights[..n], &v[..n], amp, n);
     }
 }
 
@@ -586,7 +587,7 @@ pub fn frechet_mean(
         crate::simd::simd_scale_inplace(&mut mu, (1.0 - 1e-5) / norm_sq.sqrt());
     }
 
-    let weight_sum: f32 = weights.iter().sum();
+    let weight_sum: f32 = crate::simd::simd_sum_f32(weights);
 
     // Pre-allocate scratch buffers once — reused across iterations
     let mut avg_tangent = vec![0.0f32; dim];
