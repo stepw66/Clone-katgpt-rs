@@ -201,6 +201,7 @@ impl<G, S> AndOrNode<G, S> {
                 solved_count: _,
                 ..
             } => {
+                children.reserve(1);
                 children.push(child);
                 // solved_bits bit for new child is 0 (unsolved) by default.
                 // solved_count unchanged — new child is unsolved.

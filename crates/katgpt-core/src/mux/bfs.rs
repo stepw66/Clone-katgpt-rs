@@ -4,6 +4,10 @@
 //! at each depth of the DD-tree.
 
 use crate::mux::dd_tree::MuxDdTree;
+#[cfg(feature = "comp_width")]
+use crate::mux::dd_tree::compositional_width;
+#[cfg(feature = "comp_width")]
+use crate::mux::top_k::{MAX_TOP_K, extract_top_k_into};
 #[cfg(not(feature = "comp_width"))]
 use crate::mux::top_k::{MAX_TOP_K, extract_top_k_into};
 
@@ -31,8 +35,16 @@ impl MuxBfs {
     pub fn detect_width(&self, logits: &[f32]) -> usize {
         #[cfg(feature = "comp_width")]
         {
-            let tree = MuxDdTree::new(self.k);
-            tree.detect_width(logits)
+            let mut buf = [0.0f32; MAX_TOP_K];
+            let peaks = extract_top_k_into(logits, self.k, &mut buf);
+            if peaks.len() < 2 {
+                return 1;
+            }
+            let total: f32 = peaks.iter().sum();
+            if total <= 0.0 {
+                return 1;
+            }
+            compositional_width(&peaks, self.k).max(1)
         }
 
         #[cfg(not(feature = "comp_width"))]

@@ -91,7 +91,7 @@ impl MuxNode {
 /// Shannon entropy of a probability distribution (in nats).
 /// Zero-alloc, branch-free inner loop.
 #[cfg(feature = "comp_width")]
-fn shannon_entropy(peaks: &[f32]) -> f32 {
+pub(crate) fn shannon_entropy(peaks: &[f32]) -> f32 {
     let total: f32 = peaks.iter().sum();
     if total <= 0.0 {
         return 0.0;
@@ -124,7 +124,7 @@ fn shannon_entropy(peaks: &[f32]) -> f32 {
 /// Uses CM isotropic scale internally for the norm estimate:
 /// `s = (normalized + damping).recip().sqrt()` — one division, one sqrt, zero-alloc.
 #[cfg(feature = "comp_width")]
-fn compositional_width(peaks: &[f32], base: usize) -> usize {
+pub(crate) fn compositional_width(peaks: &[f32], base: usize) -> usize {
     let entropy = shannon_entropy(peaks);
     // max entropy for uniform distribution over len items: ln(n)
     let max_entropy = (peaks.len() as f32).ln();
@@ -198,9 +198,8 @@ impl MuxDdTree {
         let peaks = extract_top_k_into(logits, self.k, &mut buf);
         let effective_width = width.min(peaks.len()).max(1);
 
-        // Hoist shared weights allocation outside the loop — identical for every child.
-        let child_weights: Arc<[f32]> = peaks.iter().take(self.k).copied().collect();
         let child_len = peaks.len().min(self.k);
+        let child_weights: Arc<[f32]> = Arc::from(&peaks[..child_len]);
         node.children.reserve(effective_width);
         for i in 0..effective_width {
             // Distribute peaks across children: each child gets a shifted view
@@ -302,7 +301,8 @@ impl MuxDdTree {
         // Pre-size stack: worst case is root with all children (branching factor ≤ K).
         // Start with 1 entry; the stack grows as needed but this avoids the initial
         // vec![...] heap allocation for small trees.
-        let mut stack: Vec<(*const MuxNode, usize, usize)> = Vec::with_capacity(self.k.max(1));
+        let mut stack: Vec<(*const MuxNode, usize, usize)> =
+            Vec::with_capacity((self.depth + 1) * self.k.max(1));
         stack.push((&self.root as *const _, 0, 0));
         paths.offsets.push(0);
 
