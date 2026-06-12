@@ -23,6 +23,9 @@ pub mod game_state; // Always compiled — GameState trait has no bevy_ecs depen
 #[cfg(feature = "subterranean")]
 pub mod subterranean;
 
+#[cfg(feature = "spec_pruner")]
+pub mod spec_compile;
+
 pub mod freeze;
 
 pub mod emotion_vector;
