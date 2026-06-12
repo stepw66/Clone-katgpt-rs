@@ -53,6 +53,8 @@ pub mod value_energy;
 #[cfg(feature = "vortex_flow")]
 pub mod vortex_flow;
 
+#[cfg(feature = "msa_per_group")]
+pub use block_topk::PerGroupTopKRouter;
 #[cfg(feature = "vortex_flow")]
 pub use block_topk::{BlockTopKCache, BlockTopKRouter};
 #[cfg(feature = "vortex_flow")]

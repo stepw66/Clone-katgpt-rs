@@ -1,0 +1,161 @@
+# Plan: Residual Context Diffusion — Modelless Inference (katgpt-rs)
+
+**Date:** 2026-06-12
+**Research:** [228_RCD_Residual_Context_Diffusion.md](../.research/228_RCD_Residual_Context_Diffusion.md)
+**Feature Flag:** `rcd_residual` (gated, not default)
+**GOAT Gate:** Compare against DMax baseline at equivalent TPS
+
+---
+
+## Overview
+
+Implement entropy-weighted residual context injection for the D2F denoise loop in katgpt-rs. This is the **modelless** (inference-time) component — no training required. Residuals are constructed from discarded token probability distributions and injected into the next denoising step's input embeddings.
+
+---
+
+## Architecture
+
+```
+denoise_loop step k:
+  1. Forward pass → logits → softmax → marginals p^k
+  2. Commit top-m confident tokens (existing)
+  3. [NEW] Compute residual for discarded positions:
+     - α_i = H(p^k_i) / log(V)           // normalized entropy weight
+     - Δ_i = Σ_j p^k_ij * E_j             // codebook weighted sum
+     - ẽ_i = (1-α_i)*E_mask + α_i*Δ_i     // interpolated input for next step
+  4. [NEW] ResidPruner filters implausible residuals
+  5. [NEW] Tier-adaptive: plasma skips, warm gets full RCD
+```
+
+---
+
+## Tasks
+
+### Phase 1: Core Residual Injection (~80 lines)
+
+- [ ] **Task 1.1**: Add `RcdConfig` struct to `dllm_solver.rs`
+  - `enabled: bool` (feature-gated)
+  - `temperature_residual: f32` (T_res for inference-time calibration, default 1.0)
+  - `log_vocab: f32` (log(V), pre-computed once)
+  - `residual_scratch: Vec<f32>` (pre-allocated, reuse across steps)
+
+- [ ] **Task 1.2**: Implement `normalized_entropy()` in `dllm_solver.rs`
+  - `α_i = H(p_i) / log(V)` — wraps existing `shannon_entropy()` with normalization
+  - SIMD-friendly: process 4/8 positions at once
+
+- [ ] **Task 1.3**: Implement `compute_residual()` in `dllm_solver.rs`
+  - `Δ_i = Σ_j p_ij * E_j` — weighted sum over embedding codebook
+  - Only for masked positions (unmasked get standard embedding)
+  - Zero-allocation: write into pre-allocated scratch buffer
+
+- [ ] **Task 1.4**: Implement `interpolate_residual()` in `dllm_solver.rs`
+  - `ẽ_i = (1-α_i)*E_mask + α_i*Δ_i` — linear interpolation
+  - SIMD-friendly: 4-wide f32 blend
+
+- [ ] **Task 1.5**: Wire residual injection into `denoise_loop()`
+  - After token commitment, compute residuals for discarded positions
+  - Store residual state in `D2fContext` for next step's input construction
+  - Gate behind `#[cfg(feature = "rcd_residual")]`
+
+### Phase 2: Tier-Adaptive Routing (~40 lines)
+
+- [ ] **Task 2.1**: Add `residual_mode` to `InferenceRouter` dispatch
+  - Map `InferenceTier` → `ResidualMode`:
+    - `Plasma` → `Skip` (no residual computation)
+    - `Hot` → `ConfidenceOnly` (α_i = max_prob, single register)
+    - `Warm` → `Full` (normalized entropy + codebook sum)
+    - `Cold` → `FullWithWarmStart` (full RCD + reference model warm start)
+
+- [ ] **Task 2.2**: Integrate residual mode selection into `forward_batch()`
+  - Query current tier from `InferenceRouter`
+  - Select residual mode accordingly
+  - Zero overhead when tier = Plasma (game AI path)
+
+### Phase 3: ResidPruner — Constraint-Filtered Residuals (~50 lines)
+
+- [ ] **Task 3.1**: Implement `ResidPruner` struct
+  - Wraps any `ConstraintPruner` impl
+  - `fn should_inject(&self, residual_top_k: &[u32], pruner: &dyn ConstraintPruner) -> bool`
+  - If none of top-5 tokens in residual distribution pass pruner → skip injection
+
+- [ ] **Task 3.2**: Wire ResidPruner into residual injection
+  - Before computing `Δ_i`, check if top-k residual tokens are pruner-valid
+  - Invalid residuals → skip, use standard mask embedding
+  - Reduces noise injection from nonsensical context
+
+### Phase 4: MUX-RCD Fusion (~60 lines)
+
+- [ ] **Task 4.1**: Implement `compute_mux_residual()` for DDTree paths
+  - Instead of single-step marginal, weight residuals across DDTree branches
+  - `Δ_i = Σ_path score_path * Δ_path_i` where `score_path` from DDTree selection
+  - Requires access to `TreeNode` scores during residual computation
+
+- [ ] **Task 4.2**: Wire MUX-RCD into `build_dd_tree_adaptive()`
+  - After DDTree construction, compute superposition residuals from top-K paths
+  - Inject into next denoising step
+  - Gate behind `#[cfg(all(feature = "rcd_residual", feature = "mux_latent"))]`
+
+### Phase 5: Tests & Benchmarks (~100 lines)
+
+- [ ] **Task 5.1**: Unit test `normalized_entropy()`
+  - Uniform distribution → α = 1.0
+  - One-hot distribution → α = 0.0
+  - Known distribution → expected α
+
+- [ ] **Task 5.2**: Unit test `compute_residual()`
+  - Verify Δ_i is in embedding space (correct dimensions)
+  - Verify Δ_i is zero when all probability on mask token
+
+- [ ] **Task 5.3**: Integration test: denoise_loop with RCD vs without
+  - Same input, same seeds
+  - Measure: steps to convergence, final accuracy
+  - Expected: RCD converges in fewer steps at same accuracy
+
+- [ ] **Task 5.4**: Benchmark: tier-adaptive overhead
+  - Plasma path: verify zero overhead (skip)
+  - Hot path: measure confidence-only residual cost
+  - Warm path: measure full RCD cost
+  - Cold path: measure full RCD + warm start cost
+
+- [ ] **Task 5.5**: GOAT gate comparison
+  - RCD vs DMax at equivalent TPS
+  - Measure: accuracy at throughput-matched decode speed
+  - Promote to default only if RCD > DMax by ≥2pp accuracy or ≥1.5× step reduction
+
+---
+
+## File Changes
+
+| File | Change | Lines |
+|------|--------|-------|
+| `src/dllm_solver.rs` | `RcdConfig`, entropy normalization, residual computation, interpolation | ~80 |
+| `src/dllm.rs` | Residual state in `D2fContext`, wire into `denoise_loop` | ~30 |
+| `src/inference_router.rs` | `ResidualMode` enum, tier mapping | ~20 |
+| `src/types.rs` | Residual scratch buffer in relevant types | ~10 |
+| `src/lib.rs` | Feature flag `rcd_residual` | ~5 |
+| `src/pruners/` | New `resid_pruner.rs` | ~50 |
+| `src/mux_demux.rs` | MUX-RCD fusion function | ~40 |
+| `Cargo.toml` | Feature flag | ~2 |
+| Tests | Unit + integration + benchmark | ~100 |
+
+**Total: ~340 lines**
+
+---
+
+## GOAT Gate
+
+| Metric | DMax Baseline | RCD Target | Pass Threshold |
+|--------|--------------|------------|----------------|
+| Accuracy (GSM8K equiv.) | Baseline | +2pp | ≥2pp gain |
+| Steps at equal accuracy | Baseline | -50% | ≥1.5× reduction |
+| Overhead per step | ~0% | <5% | <10% overhead |
+| Plasma path overhead | 0% | 0% | Must be zero |
+
+If RCD passes ≥3/4 metrics → promote to default (remove feature gate).
+If RCD fails → keep gated, document why.
+
+---
+
+## TL;DR
+
+Implement RCD residual context injection in 5 phases: core injection → tier routing → constraint filtering → MUX fusion → tests. ~340 lines total, gated behind `rcd_residual` feature. GOAT gate comparison against DMax before promoting to default. The novel fusions (ResidPruner, tier-adaptive, MUX-RCD) differentiate this from a direct paper implementation.

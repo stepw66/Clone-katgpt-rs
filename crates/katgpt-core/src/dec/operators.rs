@@ -178,8 +178,7 @@ pub fn hodge_laplacian(cx: &CellComplex, input: &CochainField) -> CochainField {
     // Rank-0 fast path: Δ₀ = δ₁d₀ = graph Laplacian.
     // Single-pass computation avoids 2 intermediate cochain allocations.
     if k == 0 && cx.n_edges() > 0 {
-        let mut scratch = vec![0.0f32; cx.n_edges() * dim];
-        return graph_laplacian(cx, input, &mut scratch);
+        return graph_laplacian(cx, input);
     }
 
     let mut output = CochainField::zeros(k, n, dim);
@@ -226,11 +225,7 @@ pub fn hodge_laplacian(cx: &CellComplex, input: &CochainField) -> CochainField {
 ///
 /// # Returns
 /// 0-cochain: the graph Laplacian applied to the input.
-pub fn graph_laplacian(
-    cx: &CellComplex,
-    potential: &CochainField,
-    _scratch: &mut [f32],
-) -> CochainField {
+pub fn graph_laplacian(cx: &CellComplex, potential: &CochainField) -> CochainField {
     debug_assert_eq!(potential.rank, 0, "graph_laplacian requires rank-0 cochain");
     let dim = potential.dim;
 
@@ -343,8 +338,7 @@ mod tests {
                 potential.set_scalar(idx, (x + y) as f32);
             }
         }
-        let mut scratch = vec![0.0f32; cx.n_edges()];
-        let lap = graph_laplacian(&cx, &potential, &mut scratch);
+        let lap = graph_laplacian(&cx, &potential);
 
         // Interior vertices should have zero Laplacian
         for y in 1..3usize {

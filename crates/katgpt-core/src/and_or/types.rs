@@ -192,7 +192,6 @@ impl<G, S> AndOrNode<G, S> {
     pub fn push_child(&mut self, child: AndOrNode<G, S>) {
         match self {
             Self::Or { children, .. } => {
-                children.reserve(1);
                 children.push(child);
             }
             Self::And {
@@ -201,7 +200,6 @@ impl<G, S> AndOrNode<G, S> {
                 solved_count: _,
                 ..
             } => {
-                children.reserve(1);
                 children.push(child);
                 // solved_bits bit for new child is 0 (unsolved) by default.
                 // solved_count unchanged — new child is unsolved.

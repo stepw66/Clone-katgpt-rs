@@ -179,6 +179,54 @@ pub fn should_skip_layer(skip_plan: &HydraSkipPlan, layer_idx: usize) -> bool {
     skip_plan.skip_layers.get(layer_idx)
 }
 
+// ── Depth Tier + Hydra Composition (Plan 284 T9) ───────────────
+
+/// Compute effective max layers when combining DepthTier cap with Hydra skip plan.
+///
+/// `effective_layers = min(tier.max_layers(), hydra_skip_plan.active_layers)`
+///
+/// Dual optimization: structural cap (tier) + learned importance (hydra).
+/// For n_layer=2: Plasma skips layer 2 entirely, Hot runs both, Warm runs both + verify.
+#[inline]
+pub fn effective_max_layers(
+    tier: Option<&katgpt_core::types::DepthTier>,
+    skip_plan: Option<&HydraSkipPlan>,
+    total_layers: usize,
+) -> usize {
+    let tier_cap = tier.map_or(total_layers, |t| t.max_layers(total_layers));
+    let hydra_active = skip_plan.map_or(total_layers, |sp| {
+        // Count non-skipped layers
+        (0..total_layers)
+            .filter(|&l| !sp.skip_layers.get(l))
+            .count()
+    });
+    tier_cap.min(hydra_active)
+}
+
+/// Check if a layer should be executed, considering both DepthTier cap and Hydra skip.
+///
+/// Returns true if the layer should be EXECUTED (not skipped).
+#[inline]
+pub fn should_execute_layer(
+    tier: Option<&katgpt_core::types::DepthTier>,
+    skip_plan: Option<&HydraSkipPlan>,
+    layer_idx: usize,
+    total_layers: usize,
+) -> bool {
+    // First check: is layer within tier cap?
+    let tier_cap = tier.map_or(total_layers, |t| t.max_layers(total_layers));
+    if layer_idx >= tier_cap {
+        return false;
+    }
+    // Second check: does Hydra skip this layer?
+    if let Some(sp) = skip_plan {
+        if sp.skip_layers.get(layer_idx) {
+            return false;
+        }
+    }
+    true
+}
+
 // ── Stage-Aware Skip (T14, Plan 165) ─────────────────────────
 
 /// Check if layer should be skipped based on decode stage.

@@ -120,32 +120,22 @@ fn cg_solve_scalar(
         }
     }
 
-    // Pre-allocate scratch for graph_laplacian (rank 0 only)
-    let mut scratch = match rank {
-        0 => vec![0.0f32; cx.n_edges()],
-        _ => Vec::new(),
-    };
-
     // Pre-allocate reusable cochain field for matvec — avoids v.to_vec() per iteration.
     let mut v_field = CochainField::zeros(rank, n, 1);
 
     // Matvec closure: compute A·v for given v (reuses v_field allocation)
-    let matvec = |cx: &CellComplex,
-                  v: &[f32],
-                  scratch: &mut [f32],
-                  v_field: &mut CochainField,
-                  out: &mut [f32]| {
+    let matvec = |cx: &CellComplex, v: &[f32], v_field: &mut CochainField, out: &mut [f32]| {
         v_field.data.copy_from_slice(v);
         let ax_field = match rank {
-            0 => graph_laplacian(cx, &v_field, scratch),
-            _ => hodge_laplacian(cx, &v_field),
+            0 => graph_laplacian(cx, v_field),
+            _ => hodge_laplacian(cx, v_field),
         };
         out.copy_from_slice(&ax_field.data);
     };
 
     // CG iterations: r = b, p = r, iterate
     x_out.fill(0.0f32);
-    let mut r = b.clone();
+    let mut r = b;
     let mut p = r.clone();
     let mut ap = vec![0.0f32; n];
 
@@ -159,7 +149,7 @@ fn cg_solve_scalar(
     }
 
     for _ in 0..max_iter {
-        matvec(cx, &p, &mut scratch, &mut v_field, &mut ap);
+        matvec(cx, &p, &mut v_field, &mut ap);
 
         let p_ap = dot(&p, &ap);
         if p_ap.abs() < 1e-20 {
@@ -865,8 +855,7 @@ mod tests {
         }
 
         let harm = harmonic_projector(&cx, &input);
-        let mut scratch = vec![0.0f32; cx.n_edges()];
-        let lap_harm = graph_laplacian(&cx, &harm, &mut scratch);
+        let lap_harm = graph_laplacian(&cx, &harm);
 
         let max_lap = cochain_max_abs(&lap_harm);
         assert!(max_lap < 1e-4, "Δ₀(harmonic) should be ≈ 0, got {max_lap}");

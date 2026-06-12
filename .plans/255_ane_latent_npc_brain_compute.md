@@ -115,9 +115,9 @@ else:
 - [x] INT8 quantization via `coremltools.optimize.coreml.LinearQuantizer` (implemented, needs Python 3.12 for serialization)
 - [x] ANE placement verification via `MLComputePlan` (implemented, needs native extensions)
 - [x] Graceful error handling for Python 3.13+ missing native extensions
-- [ ] **Blocked**: Generate `npc_brain.mlpackage` — requires Python 3.12 for BlobWriter serialization
-- [ ] **Blocked**: Validate ANE residency (timing check < 1ms for batch=1) — requires .mlpackage
-- [ ] **Blocked**: Test model output matches `CpuTernaryBackend` (cosine ≥ 0.99) — requires .mlpackage
+- [x] Generate `npc_brain.mlpackage` — Python 3.12 available via uv, BlobWriter serialization works
+- [ ] Validate ANE residency (timing check < 1ms for batch=1) — .mlpackage now available
+- [ ] Test model output matches `CpuTernaryBackend` (cosine ≥ 0.99) — .mlpackage now available
 
 **Stretch goals (from Research 224):**
 - [ ] Multifunction model: share weights between perception/emotion/zone (iOS 18+)

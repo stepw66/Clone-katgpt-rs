@@ -5,6 +5,40 @@
 // Enums
 // ---------------------------------------------------------------------------
 
+/// Adaptive depth tier mapping to layer count (Plan 284).
+/// Reuses ThermalPath naming convention from FlashAR Consensus (Plan 166).
+///
+/// | Tier     | Layers     | When                              |
+/// |----------|------------|-----------------------------------|
+/// | Plasma   | 1          | High entropy, easy positions      |
+/// | Hot      | 2          | Medium entropy, standard tactics  |
+/// | Warm     | all        | Low entropy, complex positions    |
+/// | Cold     | all+verify | Critical, full verification       |
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(u8)]
+pub enum DepthTier {
+    /// Easy positions: empty board, forced moves. 1 layer.
+    Plasma = 0,
+    /// Moderate: standard tactics. 2 layers.
+    Hot = 1,
+    /// Complex: all layers + spot-check verification.
+    Warm = 2,
+    /// Critical: all layers + full verification.
+    Cold = 3,
+}
+
+impl DepthTier {
+    /// Returns the maximum number of transformer layers to execute for this tier.
+    pub fn max_layers(&self, total_layers: usize) -> usize {
+        match self {
+            DepthTier::Plasma => 1.min(total_layers),
+            DepthTier::Hot => 2.min(total_layers),
+            DepthTier::Warm => total_layers,
+            DepthTier::Cold => total_layers,
+        }
+    }
+}
+
 /// Attention mode for HLA (Higher-order Linear Attention).
 ///
 /// - `Standard`: SDPA with KV cache (default, backward-compatible).
@@ -1957,6 +1991,12 @@ pub struct InferenceOverrides {
     /// Override Hydra erasure-skip-draft flag.
     #[cfg(feature = "hydra_budget")]
     pub hydra_skip_erasure_draft: Option<bool>,
+
+    // --- Adaptive Depth Tier (Plan 284) ---
+    /// Override depth tier for layer count capping at inference time.
+    /// When set, caps the layer loop to tier.max_layers().
+    /// None = use all layers (backward compatible).
+    pub depth_tier: Option<DepthTier>,
 }
 
 impl Default for Config {
@@ -2798,6 +2838,302 @@ impl LoraPair {
 }
 
 // ---------------------------------------------------------------------------
+// GPart Isometric Partition Adapter — replaces LoRA BA with Pθ_d (Research 227, Plan 257)
+// ---------------------------------------------------------------------------
+
+/// Binary format magic for GPart adapter files.
+#[cfg(feature = "gpart_adapter")]
+pub const GPART_MAGIC: &[u8; 5] = b"GPART";
+/// Current GPart binary format version.
+#[cfg(feature = "gpart_adapter")]
+pub const GPART_VERSION: u32 = 1;
+
+/// GPart isometric partition adapter — replaces LoRA's bilinear BA with single isometric Pθ_d.
+///
+/// `W = W₀ + Pθ_d` where `P^T P = I_d` (isometric, no bilinear distortion).
+/// Storage: d + 1 values (seed + theta). Single-pass O(N) broadcast apply.
+///
+/// Reference: Research 227 (arXiv 2605.14841)
+#[cfg(feature = "gpart_adapter")]
+#[derive(Clone, Debug)]
+pub struct GpartAdapter {
+    /// Partition dimension — the only hyperparameter.
+    pub d: usize,
+    /// Seed for deterministic pseudorandom partition generation.
+    pub seed: u64,
+    /// Trainable vector θ_d ∈ R^d (produced by training side, riir-ai).
+    pub theta: Vec<f32>,
+}
+
+#[cfg(feature = "gpart_adapter")]
+impl GpartAdapter {
+    /// Apply the isometric partition adapter to base weights in-place.
+    /// `W = W₀ + Pθ_d` where P is seed-generated.
+    /// Single-pass O(N) broadcast. SIMD-friendly (chunked 4/8).
+    pub fn apply(&self, base_weights: &mut [f32]) {
+        let n = base_weights.len();
+        if n == 0 || self.d == 0 {
+            return;
+        }
+
+        let assignments = self.generate_assignments(n);
+        let group_sizes = self.compute_group_sizes(n, &assignments);
+
+        // Single-pass broadcast: w[i] += theta[g(i)] / sqrt(n_g)
+        for i in 0..n {
+            let g = assignments[i];
+            let scale = 1.0 / (group_sizes[g] as f32).sqrt();
+            base_weights[i] += scale * self.theta[g];
+        }
+    }
+
+    /// Apply with pre-allocated scratch buffers — zero alloc in hot path.
+    pub fn apply_with_scratch(
+        &self,
+        base_weights: &mut [f32],
+        assignments: &mut [usize],
+        group_sizes: &mut [usize],
+    ) {
+        let n = base_weights.len();
+        if n == 0 || self.d == 0 {
+            return;
+        }
+
+        self.generate_assignments_into(n, assignments);
+        self.compute_group_sizes_into(n, assignments, group_sizes);
+
+        for i in 0..n {
+            let g = assignments[i];
+            let scale = 1.0 / (group_sizes[g] as f32).sqrt();
+            base_weights[i] += scale * self.theta[g];
+        }
+    }
+
+    /// Generate group assignments from seed.
+    /// Uses fastrand for deterministic cross-platform pseudorandom permutation.
+    fn generate_assignments(&self, n: usize) -> Vec<usize> {
+        let mut rng = fastrand::Rng::with_seed(self.seed);
+        let mut assignments = Vec::with_capacity(n);
+        for _ in 0..n {
+            assignments.push(rng.usize(..self.d));
+        }
+        assignments
+    }
+
+    /// Generate assignments into pre-allocated scratch buffer.
+    fn generate_assignments_into(&self, n: usize, out: &mut [usize]) {
+        let mut rng = fastrand::Rng::with_seed(self.seed);
+        for i in 0..n.min(out.len()) {
+            out[i] = rng.usize(..self.d);
+        }
+    }
+
+    /// Compute group sizes from assignments.
+    fn compute_group_sizes(&self, n: usize, assignments: &[usize]) -> Vec<usize> {
+        let mut sizes = vec![0usize; self.d];
+        for &g in &assignments[..n] {
+            sizes[g] += 1;
+        }
+        sizes
+    }
+
+    /// Compute group sizes into pre-allocated scratch buffer.
+    fn compute_group_sizes_into(&self, n: usize, assignments: &[usize], out: &mut [usize]) {
+        for g in out.iter_mut().take(self.d) {
+            *g = 0;
+        }
+        for &g in &assignments[..n] {
+            out[g] += 1;
+        }
+    }
+
+    /// BLAKE3 commitment over (seed || theta).
+    pub fn commitment(&self) -> [u8; 32] {
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(&self.seed.to_le_bytes());
+        let theta_bytes: &[u8] = unsafe {
+            std::slice::from_raw_parts(
+                self.theta.as_ptr() as *const u8,
+                self.theta.len() * std::mem::size_of::<f32>(),
+            )
+        };
+        hasher.update(theta_bytes);
+        *hasher.finalize().as_bytes()
+    }
+
+    /// Verify commitment matches.
+    pub fn verify(&self, expected: &[u8; 32]) -> bool {
+        self.commitment() == *expected
+    }
+
+    /// Save adapter to binary format:
+    /// `[GPART(5) | version(4) | d(4) | seed(8) | blake3(32) | theta(d×4)]`
+    pub fn save(&self, path: &std::path::Path) -> Result<(), String> {
+        let d_bytes = self.d as u32;
+        let theta_byte_len = self.theta.len() * std::mem::size_of::<f32>();
+        // magic(5) + version(4) + d(4) + seed(8) + commitment(32) + theta
+        let total = 5 + 4 + 4 + 8 + 32 + theta_byte_len;
+        let mut buf = Vec::with_capacity(total);
+
+        buf.extend_from_slice(GPART_MAGIC);
+        buf.extend_from_slice(&GPART_VERSION.to_le_bytes());
+        buf.extend_from_slice(&d_bytes.to_le_bytes());
+        buf.extend_from_slice(&self.seed.to_le_bytes());
+
+        // Commitment placeholder — will overwrite after computing
+        let commit_offset = buf.len();
+        buf.extend_from_slice(&[0u8; 32]);
+
+        // Theta data
+        let theta_bytes: &[u8] =
+            unsafe { std::slice::from_raw_parts(self.theta.as_ptr() as *const u8, theta_byte_len) };
+        buf.extend_from_slice(theta_bytes);
+
+        // Compute commitment over (seed || theta) and write into placeholder
+        let commitment = self.commitment();
+        buf[commit_offset..commit_offset + 32].copy_from_slice(&commitment);
+
+        std::fs::write(path).map_err(|e| format!("Failed to write gpart file: {e}"))
+    }
+
+    /// Load adapter from binary format.
+    pub fn load(path: &std::path::Path) -> Result<Self, String> {
+        let file_data =
+            std::fs::read(path).map_err(|e| format!("Failed to read gpart file: {e}"))?;
+
+        // Minimum: magic(5) + version(4) + d(4) + seed(8) + commitment(32) = 53
+        if file_data.len() < 53 {
+            return Err("File too small for gpart header".into());
+        }
+
+        if &file_data[0..5] != GPART_MAGIC {
+            return Err("Invalid gpart magic bytes".into());
+        }
+
+        let version = u32::from_le_bytes(
+            file_data[5..9]
+                .try_into()
+                .map_err(|e: std::array::TryFromSliceError| format!("Version parse: {e}"))?,
+        );
+        if version != GPART_VERSION {
+            return Err(format!("Unsupported gpart version: {version}"));
+        }
+
+        let d = u32::from_le_bytes(
+            file_data[9..13]
+                .try_into()
+                .map_err(|e: std::array::TryFromSliceError| format!("d parse: {e}"))?,
+        ) as usize;
+
+        let seed = u64::from_le_bytes(
+            file_data[13..21]
+                .try_into()
+                .map_err(|e: std::array::TryFromSliceError| format!("seed parse: {e}"))?,
+        );
+
+        let stored_commitment = &file_data[21..53];
+
+        let theta_bytes_start = 53;
+        let theta_bytes_len = d * std::mem::size_of::<f32>();
+        if theta_bytes_start + theta_bytes_len > file_data.len() {
+            return Err("Truncated theta data".into());
+        }
+
+        // Load theta
+        let theta: Vec<f32> = {
+            #[cfg(target_endian = "little")]
+            {
+                let src = &file_data[theta_bytes_start..theta_bytes_start + theta_bytes_len];
+                let count = d;
+                let mut v = Vec::with_capacity(count);
+                unsafe {
+                    std::ptr::copy_nonoverlapping(
+                        src.as_ptr(),
+                        v.as_mut_ptr() as *mut u8,
+                        theta_bytes_len,
+                    );
+                    v.set_len(count);
+                }
+                v
+            }
+            #[cfg(not(target_endian = "little"))]
+            {
+                file_data[theta_bytes_start..theta_bytes_start + theta_bytes_len]
+                    .chunks_exact(4)
+                    .map(|c| f32::from_le_bytes(c.try_into().expect("chunk is 4 bytes")))
+                    .collect()
+            }
+        };
+
+        // Verify commitment
+        let adapter = Self { d, seed, theta };
+        let computed = adapter.commitment();
+        if computed != stored_commitment {
+            return Err("GPart file commitment mismatch".into());
+        }
+
+        Ok(adapter)
+    }
+
+    /// Storage size in bytes (seed + theta).
+    pub fn storage_bytes(&self) -> usize {
+        8 + self.theta.len() * std::mem::size_of::<f32>()
+    }
+
+    /// Verify isometry: ||Pθ||² = ||θ||².
+    /// For the partition matrix, each group g contributes n_g × (θ_g/√n_g)² = θ_g².
+    /// Summing: Σ_g θ_g² = ||θ||². QED.
+    pub fn check_isometry(&self, n: usize) -> bool {
+        if n == 0 || self.d == 0 {
+            return true;
+        }
+
+        let assignments = self.generate_assignments(n);
+        let group_sizes = self.compute_group_sizes(n, &assignments);
+
+        // Compute ||Pθ||²
+        let mut projected_norm_sq = 0.0f32;
+        for i in 0..n {
+            let g = assignments[i];
+            let scale = 1.0 / (group_sizes[g] as f32).sqrt();
+            let delta = scale * self.theta[g];
+            projected_norm_sq += delta * delta;
+        }
+
+        // Compute ||θ||²
+        let theta_norm_sq: f32 = self.theta.iter().map(|&v| v * v).sum();
+
+        (projected_norm_sq - theta_norm_sq).abs() < 1e-3
+    }
+}
+
+/// A loaded GPart pair for modality-specific inference, mirroring LoraPair.
+/// Reader is active during bidirectional prefill, writer during causal decode.
+#[cfg(feature = "gpart_adapter")]
+#[derive(Clone, Debug)]
+pub struct GpartPair {
+    /// GPart active during bidirectional prefill.
+    pub reader: Option<GpartAdapter>,
+    /// GPart active during causal decode.
+    pub writer: Option<GpartAdapter>,
+}
+
+#[cfg(feature = "gpart_adapter")]
+impl GpartPair {
+    /// Empty pair — no GPart applied.
+    pub fn none() -> Self {
+        Self {
+            reader: None,
+            writer: None,
+        }
+    }
+}
+
+// NeuronShard Pod compatibility: seed(8) + d(max=90)×4(360) = 368 bytes max.
+#[cfg(feature = "gpart_adapter")]
+const _: () = assert!(8 + 90 * 4 <= 368);
+
+// ---------------------------------------------------------------------------
 // DomainLatent — feature-gated (Plan 038)
 // ---------------------------------------------------------------------------
 
@@ -3482,6 +3818,7 @@ mod tests_types {
             hydra_skip_threshold: None,
             #[cfg(feature = "hydra_budget")]
             hydra_skip_erasure_draft: None,
+            depth_tier: None,
         };
         let result = config.with_overrides(&overrides);
         assert_eq!(result.tree_budget, 1);
@@ -3592,6 +3929,108 @@ mod tests_types {
         assert_eq!(config.head_dim, 8);
         assert_eq!(config.mlp_hidden, 128);
         assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    #[cfg(feature = "gpart_adapter")]
+    fn test_gpart_isometry() {
+        let adapter = GpartAdapter {
+            d: 4,
+            seed: 42,
+            theta: vec![1.0, 2.0, 3.0, 4.0],
+        };
+        assert!(adapter.check_isometry(256));
+    }
+
+    #[test]
+    #[cfg(feature = "gpart_adapter")]
+    fn test_gpart_apply_correctness() {
+        let adapter = GpartAdapter {
+            d: 2,
+            seed: 123,
+            theta: vec![1.0, -1.0],
+        };
+        let mut weights = vec![0.0f32; 8];
+        adapter.apply(&mut weights);
+        // Every weight should have changed (each element assigned to group 0 or 1)
+        assert!(weights.iter().all(|&w| w != 0.0));
+        // Verify deterministic: apply again with same adapter should produce same result
+        let mut weights2 = vec![0.0f32; 8];
+        adapter.apply(&mut weights2);
+        assert_eq!(weights, weights2);
+    }
+
+    #[test]
+    #[cfg(feature = "gpart_adapter")]
+    fn test_gpart_commitment_roundtrip() {
+        let adapter = GpartAdapter {
+            d: 4,
+            seed: 99,
+            theta: vec![0.5, -0.5, 1.0, -1.0],
+        };
+        let commit = adapter.commitment();
+        assert!(adapter.verify(&commit));
+    }
+
+    #[test]
+    #[cfg(feature = "gpart_adapter")]
+    fn test_gpart_tamper_detection() {
+        let adapter = GpartAdapter {
+            d: 4,
+            seed: 99,
+            theta: vec![0.5, -0.5, 1.0, -1.0],
+        };
+        let commit = adapter.commitment();
+        // Tampered commitment
+        let mut tampered = commit;
+        tampered[0] ^= 0xFF;
+        assert!(!adapter.verify(&tampered));
+        // Different theta produces different commitment
+        let tampered_adapter = GpartAdapter {
+            d: 4,
+            seed: 99,
+            theta: vec![0.5, -0.5, 1.0, 0.0], // last element changed
+        };
+        assert_ne!(adapter.commitment(), tampered_adapter.commitment());
+        // Different seed produces different commitment
+        let seed_adapter = GpartAdapter {
+            d: 4,
+            seed: 100,
+            theta: vec![0.5, -0.5, 1.0, -1.0],
+        };
+        assert_ne!(adapter.commitment(), seed_adapter.commitment());
+    }
+
+    #[test]
+    #[cfg(feature = "gpart_adapter")]
+    fn test_gpart_save_load_roundtrip() {
+        let tmp = std::env::temp_dir().join("katgpt_core_test_gpart.bin");
+        let adapter = GpartAdapter {
+            d: 8,
+            seed: 42,
+            theta: vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
+        };
+        adapter.save(&tmp).unwrap();
+        let loaded = GpartAdapter::load(&tmp).unwrap();
+        assert_eq!(loaded.d, adapter.d);
+        assert_eq!(loaded.seed, adapter.seed);
+        assert_eq!(loaded.theta, adapter.theta);
+        drop(std::fs::remove_file(&tmp));
+    }
+
+    #[test]
+    #[cfg(feature = "gpart_adapter")]
+    fn test_gpart_determinism_same_seed() {
+        let adapter = GpartAdapter {
+            d: 4,
+            seed: 42,
+            theta: vec![1.0, 2.0, 3.0, 4.0],
+        };
+        let mut w1 = vec![0.0f32; 64];
+        let mut w2 = vec![0.0f32; 64];
+        adapter.apply(&mut w1);
+        adapter.apply(&mut w2);
+        assert_eq!(w1, w2);
     }
 }
 

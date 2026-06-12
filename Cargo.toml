@@ -53,6 +53,7 @@ parallax_attn = ["tiled_attention", "newton_schulz", "katgpt-core/parallax_attn"
 dash_attn = []  # DashAttention adaptive sparse hierarchical attention via α-entmax routing (Plan 106, Research 68)
 vortex_flow = ["dash_attn"]  # VortexFlow composable sparse routing (Plan 196 GOAT 72/72, default-ON)
 msa_sparse = ["vortex_flow"]  # MSA blockwise sparse distillation — max-pool/stddev scoring + SIMD argtopk (Plan 256 GOAT gate, opt-in until proven)
+msa_per_group = ["msa_sparse"]  # Per-GQA-group independent top-k (Plan 256 Phase 2 GOAT gate)
 rt_turbo = ["dash_attn"]  # RTPurbo retrieval head sparse decode via low-dim indexing (Plan 126, Research 86)
 mls_aggregate = []  # MLS Multi-Layer Sum aggregation of last K layer residuals (Plan 104, Research 68)
 dllm = []  # D2F Discrete Diffusion Forcing — mini dLLM research (Plan 066)

@@ -57,6 +57,13 @@ Distill MSA's key inference-time mechanisms into katgpt-rs's existing VortexFlow
   - New: independent top-k per GQA group (different blocks per group)
   - Gate behind `msa_per_group` sub-flag
   - Benchmark: accuracy vs shared selection on RULER
+  - [x] `PerGroupTopKRouter` struct + VortexFlow impl in `block_topk.rs`
+  - [x] `VortexFlowConfig::MsaPerGroup` variant in `vortex_flow.rs`
+  - [x] `VortexRouter::MsaPerGroup` + `VortexRouterCache::MsaPerGroup` variants
+  - [x] All match arms in `n_blocks()`, `from_config()`, `forward_cache()`, `forward_indexer()`, `cache_new()`
+  - [x] Export in `mod.rs`
+  - [x] 4 tests: different-blocks-per-group, total-leq-topk, each-group-gets-block, backward-compat-n_groups=1
+  - [ ] Benchmark vs shared selection on RULER
 - [ ] Implement KV-outer sparse prefill path for GPU
   - Build reverse index: for each KV block, gather queries that selected it
   - Pre-scheduled tile chunking for hot-block load balancing
