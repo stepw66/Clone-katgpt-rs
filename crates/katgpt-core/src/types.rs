@@ -3813,11 +3813,9 @@ impl SenseModule {
         for dir in &mut self.directions {
             dir.zero_padding();
         }
+        let size_before_commit = std::mem::offset_of!(SenseModule, commitment);
         let bytes: &[u8] = unsafe {
-            std::slice::from_raw_parts(
-                self as *const Self as *const u8,
-                std::mem::size_of::<Self>() - 32, // exclude commitment field
-            )
+            std::slice::from_raw_parts(self as *const Self as *const u8, size_before_commit)
         };
         self.commitment = *blake3::hash(bytes).as_bytes();
     }
@@ -3826,7 +3824,7 @@ impl SenseModule {
     /// Uses a stack buffer to avoid cloning the entire 232-byte struct.
     /// Zeros TernaryDir padding bytes before comparing to match commit() behavior.
     pub fn verify(&self) -> bool {
-        let size_before_commit = std::mem::size_of::<Self>() - 32;
+        let size_before_commit = std::mem::offset_of!(SenseModule, commitment);
         let mut buf = [0u8; std::mem::size_of::<SenseModule>()];
         // Copy raw bytes to stack buffer
         unsafe {
@@ -3836,7 +3834,7 @@ impl SenseModule {
                 size_before_commit,
             );
         }
-        // Zero commitment region in buffer
+        // Zero commitment region and trailing padding in buffer
         buf[size_before_commit..].fill(0);
         // Zero TernaryDir padding in buffer — each TernaryDir is 24 bytes, padding at bytes 20..24
         let dirs_offset = std::mem::offset_of!(SenseModule, directions);
