@@ -1,7 +1,7 @@
 # Plan 254: Spectral Budget Router — Layer-Adaptive NS Depth + Rank-p Truncation
 
 **Date:** 2026-06-12
-**Status:** 🚧 IN PROGRESS
+**Status:** ✅ COMPLETE
 **Source:** Research 222 (Spectral Scaling Laws of Muon — Adaptive Inference)
 **Related:** Plan 152 (Newton-Schulz — DONE), Research 114 (AMUSE), Research 235 (SLoD)
 **Feature Gates:** `spectral_budget` (opt-in initially, promote to default if GOAT)
@@ -12,9 +12,9 @@
 ## Task Index
 
 - [x] T1: Spectral Exponent Table + Predictive Config
-- [ ] T2: Layer-Adaptive NS Depth Selector
-- [ ] T3: Rank-p Spectral Truncation
-- [ ] T4: BanditPruner Integration
+- [x] T2: Layer-Adaptive NS Depth Selector
+- [x] T3: Rank-p Spectral Truncation
+- [x] T4: BanditPruner Integration
 - [x] T5: GOAT Proof Test (19/19 passed)
 
 ## Goal
@@ -42,7 +42,7 @@ Shipping this in the open engine:
 
 ## Task Breakdown
 
-- [ ] ### T1: Spectral Exponent Table + Predictive Config
+- [x] ### T1: Spectral Exponent Table + Predictive Config
 
 **File:** `src/spectral_budget.rs` (new)
 
@@ -100,7 +100,7 @@ pub fn predict_ns_config(
 | 0.75-0.875 (late) | -0.40 | -0.45 |
 | 0.875-1.0 (final) | -0.55 | -0.75 |
 
-- [ ] ### T2: Layer-Adaptive NS Depth Selector
+- [x] ### T2: Layer-Adaptive NS Depth Selector
 
 **File:** `src/spectral_budget.rs`
 
@@ -123,7 +123,7 @@ Wire into existing `newton_schulz.rs`:
 - `newton_schulz5` becomes `newton_schulz_n(..., 5)` — zero regression
 - `spectral_budget` feature gate enables depth selection
 
-- [ ] ### T3: Rank-p Spectral Truncation
+- [x] ### T3: Rank-p Spectral Truncation
 
 **File:** `src/spectral_budget.rs`
 
@@ -148,7 +148,7 @@ pub fn rank_p_retain(
 }
 ```
 
-- [ ] ### T4: BanditPruner Integration
+- [x] ### T4: BanditPruner Integration
 
 Wire `NsDepthConfig` into `BanditPruner` arm selection:
 
@@ -167,7 +167,7 @@ Three pre-defined arms:
 2. **Chain arm** (standard): 5-step NS, 75% retention
 3. **Diagnostic arm** (high accuracy): depth-adaptive NS, 90% retention
 
-- [ ] ### T5: GOAT Proof Test
+- [x] ### T5: GOAT Proof Test
 
 **File:** `tests/bench_254_spectral_budget_goat.rs`
 
