@@ -143,18 +143,21 @@ pub fn schema_init_entity(
     gamma: f32,
     rng: &mut fastrand::Rng,
 ) -> [f32; 8] {
-    // Collect (mean, std_dev) for classes found in cache — stack-allocated, max 8 classes
+    // Collect (mean, std_dev) for classes found in cache — stack-allocated, max 8 classes.
+    // Single pin() guard reused for all lookups — avoids 8× epoch pin/unpin.
+    let guard = cache.centroids.pin();
     let mut found: [Option<([f32; 8], [f32; 8])>; 8] = [None; 8];
     let mut found_count = 0usize;
     for &class_hash in classes {
         if found_count >= 8 {
             break;
         }
-        if let Some(stats) = cache.get(class_hash) {
+        if let Some(stats) = guard.get(&class_hash) {
             found[found_count] = Some((stats.mean, stats.std_dev));
             found_count += 1;
         }
     }
+    drop(guard);
 
     // Fallback: random init in [-0.5, 0.5]
     if found_count == 0 {
