@@ -36,6 +36,10 @@ Distill MSA's key inference-time mechanisms into katgpt-rs's existing VortexFlow
   - Test: `test_stddev_gate_amplifies_diverse_blocks`
 - [x] Add SIMD-optimized register TopK for k≤16
   - Register-based sorted top-k with SIMD threshold filter
+  - NEON path: 4-wide batch threshold comparison + SIMD-parallel insertion search
+  - AVX2 path: 8-wide threshold comparison + SIMD-parallel insertion search (x86_64)
+  - Scalar fallback for non-SIMD platforms
+  - Benchmark: `tests/bench_256_simd_topk.rs` — k=4,8,16 vs scalar, n=64..1024
   - NEON: 4-wide batch comparison via vcgtq_f32 + vmaxvq_u32 fast-path, NEON-parallel insertion search
   - AVX2: 8-wide batch comparison via _mm256_cmp_ps + movemask, AVX2-parallel insertion search
   - Scalar fallback for other targets (binary search + shift)

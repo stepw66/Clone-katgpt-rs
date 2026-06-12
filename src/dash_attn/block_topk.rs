@@ -316,10 +316,7 @@ fn argtopk_simd(scores: &[f32], k: usize, indices: &mut Vec<usize>) {
             let mask = vcgtq_f32(v, thresh);
 
             // Extract mask as u32 lanes — check which elements exceed threshold
-            let mask_bits: u32 = core::arch::aarch64::vmaxvq_u32(core::mem::transmute::<
-                _,
-                core::arch::aarch64::uint32x4_t,
-            >(mask));
+            let mask_bits: u32 = core::arch::aarch64::vmaxvq_u32(mask);
 
             if mask_bits != 0 {
                 // At least one lane exceeded threshold — process qualifying lanes
@@ -643,6 +640,149 @@ pub fn sigmoid(x: f32) -> f32 {
 }
 
 // ---------------------------------------------------------------------------
+// PerGroupTopKRouter — per-GQA-group independent top-k (Plan 256 Phase 2)
+// ---------------------------------------------------------------------------
+
+/// Per-GQA-group independent top-k router.
+///
+/// Instead of one shared top-k across all blocks for a KV head,
+/// each GQA group selects its own top blocks independently from the blocks
+/// assigned to that group. This allows different attention heads to focus
+/// on different regions of the KV cache.
+///
+/// Feature gate: `msa_per_group` (Plan 256 Phase 2 GOAT gate).
+#[cfg(feature = "msa_per_group")]
+#[derive(Debug)]
+pub struct PerGroupTopKRouter {
+    /// Inner router for cache management and fallback.
+    pub inner: BlockTopKRouter,
+    /// Number of GQA groups (query heads sharing one KV head is one group).
+    pub n_groups: usize,
+}
+
+#[cfg(feature = "msa_per_group")]
+impl PerGroupTopKRouter {
+    /// Create a new per-group router.
+    ///
+    /// * `scale` — apply `1/sqrt(head_dim)` scaling to dot products
+    /// * `n_groups` — number of GQA groups (must be > 0)
+    pub fn new(scale: bool, n_groups: usize) -> Self {
+        assert!(n_groups > 0, "n_groups must be > 0");
+        Self {
+            inner: BlockTopKRouter::new(scale),
+            n_groups,
+        }
+    }
+}
+
+#[cfg(feature = "msa_per_group")]
+impl VortexFlow for PerGroupTopKRouter {
+    type Cache = BlockTopKCache;
+
+    fn forward_cache(
+        &self,
+        cache: &mut Self::Cache,
+        keys: &[f32],
+        values: &[f32],
+        block_idx: usize,
+        head_dim: usize,
+    ) {
+        // Delegate to inner BlockTopKRouter — centroid computation is group-independent
+        self.inner
+            .forward_cache(cache, keys, values, block_idx, head_dim);
+    }
+
+    fn forward_indexer(
+        &self,
+        query: &[f32],
+        cache: &Self::Cache,
+        n_blocks: usize,
+        top_k: usize,
+        scratch: &mut VortexScratch,
+    ) -> RoutingDecision {
+        if n_blocks == 0 || top_k == 0 {
+            return RoutingDecision::new();
+        }
+
+        let hd = query.len();
+        let scale = match self.inner.scale {
+            true => 1.0 / (hd as f32).sqrt(),
+            false => 1.0,
+        };
+
+        // Budget: distribute top_k across groups, ensuring each gets at least 1
+        let per_group_k = (top_k / self.n_groups).max(1);
+        let total_budget = per_group_k * self.n_groups;
+
+        // Compute all dot-product scores once
+        scratch.ensure_capacity(n_blocks);
+        let scores = &mut scratch.scores[..n_blocks];
+        for (i, score) in scores.iter_mut().enumerate().take(n_blocks) {
+            let centroid = cache.centroid(i);
+            let mut dot0 = 0.0f32;
+            let mut dot1 = 0.0f32;
+            let mut dot2 = 0.0f32;
+            let mut dot3 = 0.0f32;
+            let chunks = hd / 4;
+            for c in 0..chunks {
+                let base = c * 4;
+                dot0 += query[base] * centroid[base];
+                dot1 += query[base + 1] * centroid[base + 1];
+                dot2 += query[base + 2] * centroid[base + 2];
+                dot3 += query[base + 3] * centroid[base + 3];
+            }
+            let mut dot = dot0 + dot1 + dot2 + dot3;
+            let rem = hd % 4;
+            for d in (hd - rem)..hd {
+                dot += query[d] * centroid[d];
+            }
+            *score = dot * scale;
+        }
+
+        // Partition blocks into groups (round-robin assignment)
+        // Group g owns blocks where block_idx % n_groups == g
+        let mut decision = RoutingDecision::with_capacity(total_budget);
+        let mut group_indices = Vec::new();
+        let mut group_pairs = Vec::new();
+
+        for g in 0..self.n_groups {
+            // Collect scores for blocks belonging to this group
+            group_indices.clear();
+            group_pairs.clear();
+
+            for i in (0..n_blocks).filter(|&i| i % self.n_groups == g) {
+                group_indices.push((i, scores[i]));
+            }
+
+            let group_n = group_indices.len();
+            if group_n == 0 {
+                continue;
+            }
+
+            // Extract scores for this group's blocks
+            let group_scores: Vec<f32> = group_indices.iter().map(|&(_, s)| s).collect();
+            let k = per_group_k.min(group_n);
+
+            let mut local_indices = Vec::new();
+            argtopk_with_scratch(&group_scores, k, &mut local_indices, &mut group_pairs);
+
+            // Map local indices back to global block indices
+            for &local_idx in &local_indices[..k] {
+                let global_block = group_indices[local_idx].0;
+                decision.blocks.push(global_block);
+                decision.weights.push(sigmoid(scores[global_block]));
+            }
+        }
+
+        decision
+    }
+
+    fn cache_new(&self, n_blocks_capacity: usize, head_dim: usize) -> Self::Cache {
+        self.inner.cache_new(n_blocks_capacity, head_dim)
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -930,5 +1070,168 @@ mod tests {
         argtopk(&scores, 3, &mut indices);
         assert_eq!(indices.len(), 3);
         assert_eq!(indices, vec![2, 0, 1]); // 4.0, 3.0, 1.0
+    }
+
+    // -----------------------------------------------------------------------
+    // PerGroupTopKRouter tests (Plan 256 Phase 2)
+    // -----------------------------------------------------------------------
+
+    #[cfg(feature = "msa_per_group")]
+    fn cache_centroids(
+        router: &super::PerGroupTopKRouter,
+        cache: &mut BlockTopKCache,
+        centroids: &[Vec<f32>],
+        head_dim: usize,
+    ) {
+        let values = vec![0.0f32; head_dim];
+        for (i, centroid) in centroids.iter().enumerate() {
+            // Build keys as [centroid] * block_size (block_size=1 for simplicity)
+            router.forward_cache(cache, centroid, &values, i, head_dim);
+        }
+    }
+
+    /// Per-group selection returns different blocks per group when centroids differ.
+    #[test]
+    #[cfg(feature = "msa_per_group")]
+    fn test_per_group_different_blocks_per_group() {
+        use super::PerGroupTopKRouter;
+        use super::VortexFlow;
+
+        let n_groups = 2;
+        let router = PerGroupTopKRouter::new(true, n_groups);
+        let mut cache = router.cache_new(6, HEAD_DIM);
+
+        // 6 blocks with distinct centroids
+        // Group 0: blocks 0, 2, 4
+        // Group 1: blocks 1, 3, 5
+        let centroids: Vec<Vec<f32>> = vec![
+            vec![1.0, 0.0, 0.0, 0.0], // block 0 (group 0)
+            vec![0.0, 1.0, 0.0, 0.0], // block 1 (group 1)
+            vec![0.5, 0.0, 0.0, 0.0], // block 2 (group 0)
+            vec![0.0, 0.5, 0.0, 0.0], // block 3 (group 1)
+            vec![0.1, 0.0, 0.0, 0.0], // block 4 (group 0)
+            vec![0.0, 0.1, 0.0, 0.0], // block 5 (group 1)
+        ];
+        cache_centroids(&router, &mut cache, &centroids, HEAD_DIM);
+
+        // Query aligned with group 0's best (block 0) and group 1's best (block 1)
+        let query = vec![1.0, 1.0, 0.0, 0.0];
+        let mut scratch = VortexScratch::new(6);
+        let decision = router.forward_indexer(&query, &cache, 6, 4, &mut scratch);
+
+        // Should select blocks from both groups
+        // Group 0's top: block 0 (highest), block 2
+        // Group 1's top: block 1 (highest), block 3
+        assert_eq!(decision.len(), 4, "expected 4 blocks (2 per group)");
+        assert!(
+            decision.blocks.contains(&0),
+            "block 0 should be selected (group 0 best)"
+        );
+        assert!(
+            decision.blocks.contains(&1),
+            "block 1 should be selected (group 1 best)"
+        );
+    }
+
+    /// Total selected blocks ≤ top_k.
+    #[test]
+    #[cfg(feature = "msa_per_group")]
+    fn test_per_group_total_leq_topk() {
+        use super::PerGroupTopKRouter;
+        use super::VortexFlow;
+
+        let n_groups = 3;
+        let router = PerGroupTopKRouter::new(true, n_groups);
+        let mut cache = router.cache_new(9, HEAD_DIM);
+
+        let centroids: Vec<Vec<f32>> = (0..9)
+            .map(|i| {
+                let mut v = vec![0.0; HEAD_DIM];
+                v[i % HEAD_DIM] = (i + 1) as f32;
+                v
+            })
+            .collect();
+        cache_centroids(&router, &mut cache, &centroids, HEAD_DIM);
+
+        let query = vec![1.0, 1.0, 1.0, 1.0];
+        let mut scratch = VortexScratch::new(9);
+        let decision = router.forward_indexer(&query, &cache, 9, 6, &mut scratch);
+
+        assert!(
+            decision.len() <= 6,
+            "selected {} blocks but top_k=6",
+            decision.len()
+        );
+    }
+
+    /// Each group gets at least 1 block when top_k >= n_groups.
+    #[test]
+    #[cfg(feature = "msa_per_group")]
+    fn test_per_group_each_group_gets_block() {
+        use super::PerGroupTopKRouter;
+        use super::VortexFlow;
+
+        let n_groups = 3;
+        let router = PerGroupTopKRouter::new(true, n_groups);
+        let mut cache = router.cache_new(9, HEAD_DIM);
+
+        // 9 blocks, 3 groups → 3 blocks each
+        let centroids: Vec<Vec<f32>> = (0..9)
+            .map(|i| {
+                let mut v = vec![0.0; HEAD_DIM];
+                v[i % HEAD_DIM] = (i + 1) as f32;
+                v
+            })
+            .collect();
+        cache_centroids(&router, &mut cache, &centroids, HEAD_DIM);
+
+        let query = vec![1.0, 1.0, 1.0, 1.0];
+        let mut scratch = VortexScratch::new(9);
+        let decision = router.forward_indexer(&query, &cache, 9, 6, &mut scratch);
+
+        // Each group should contribute at least 1 block
+        for g in 0..n_groups {
+            let group_has_block = decision.blocks.iter().any(|&b| b % n_groups == g);
+            assert!(group_has_block, "group {g} has no selected blocks");
+        }
+    }
+
+    /// Backward compatible when n_groups=1 (same as BlockTopKRouter).
+    #[test]
+    #[cfg(feature = "msa_per_group")]
+    fn test_per_group_backward_compat_single_group() {
+        use super::PerGroupTopKRouter;
+        use super::VortexFlow;
+
+        let router = PerGroupTopKRouter::new(true, 1);
+        let plain_router = BlockTopKRouter::new(true);
+        let mut cache = router.cache_new(4, HEAD_DIM);
+        let mut plain_cache = BlockTopKCache::new(4, HEAD_DIM);
+
+        let centroids: Vec<Vec<f32>> = vec![
+            vec![1.0, 0.0, 0.0, 0.0],
+            vec![0.0, 1.0, 0.0, 0.0],
+            vec![0.5, 0.5, 0.0, 0.0],
+            vec![0.0, 0.0, 1.0, 0.0],
+        ];
+        let values = vec![0.0f32; HEAD_DIM];
+        for (i, c) in centroids.iter().enumerate() {
+            router.forward_cache(&mut cache, c, &values, i, HEAD_DIM);
+            plain_router.forward_cache(&mut plain_cache, c, &values, i, HEAD_DIM);
+        }
+
+        let query = vec![1.0, 0.5, 0.0, 0.0];
+        let mut scratch = VortexScratch::new(4);
+        let mut plain_scratch = VortexScratch::new(4);
+
+        let decision = router.forward_indexer(&query, &cache, 4, 2, &mut scratch);
+        let plain_decision =
+            plain_router.forward_indexer(&query, &plain_cache, 4, 2, &mut plain_scratch);
+
+        // n_groups=1 should produce identical block selection
+        assert_eq!(
+            decision.blocks, plain_decision.blocks,
+            "n_groups=1 should match BlockTopKRouter selection"
+        );
     }
 }

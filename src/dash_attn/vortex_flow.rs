@@ -8,6 +8,8 @@
 
 use std::fmt::Debug;
 
+#[cfg(feature = "msa_per_group")]
+use super::block_topk::PerGroupTopKRouter;
 use super::block_topk::{BlockTopKCache, BlockTopKRouter};
 use super::channel_aware::{ChannelAwareCache, ChannelAwareRouter};
 use super::entmax_router::{EntmaxCache, EntmaxRouter};
@@ -100,6 +102,9 @@ pub enum VortexFlowConfig {
     /// Use MSA MaxStdDevBlockScorer (max Q·K × sigmoid(std_dev)).
     #[cfg(feature = "msa_sparse")]
     MsaMaxStdDev,
+    /// Use PerGroupTopKRouter — independent top-k per GQA group.
+    #[cfg(feature = "msa_per_group")]
+    MsaPerGroup { n_groups: usize },
 }
 
 // ---------------------------------------------------------------------------
@@ -157,6 +162,9 @@ pub enum VortexRouter {
     /// MSA MaxStdDev block scorer (max Q·K × sigmoid(std_dev)).
     #[cfg(feature = "msa_sparse")]
     MsaMaxStdDev(MaxStdDevBlockScorer),
+    /// Per-GQA-group independent top-k router.
+    #[cfg(feature = "msa_per_group")]
+    MsaPerGroup(PerGroupTopKRouter),
 }
 
 /// Cache storage for [`VortexRouter`] — mirrors the enum variants.
@@ -178,6 +186,9 @@ pub enum VortexRouterCache {
     /// MSA MaxStdDev cache.
     #[cfg(feature = "msa_sparse")]
     MsaMaxStdDev(MsaBlockCache),
+    /// Per-GQA-group cache (shares BlockTopKCache).
+    #[cfg(feature = "msa_per_group")]
+    MsaPerGroup(BlockTopKCache),
 }
 
 impl VortexRouterCache {
@@ -193,6 +204,8 @@ impl VortexRouterCache {
             Self::MsaMaxPool(c) => c.n_blocks,
             #[cfg(feature = "msa_sparse")]
             Self::MsaMaxStdDev(c) => c.n_blocks,
+            #[cfg(feature = "msa_per_group")]
+            Self::MsaPerGroup(c) => c.n_blocks,
         }
     }
 }
@@ -214,6 +227,10 @@ impl VortexRouter {
             VortexFlowConfig::MsaMaxPool => Self::MsaMaxPool(MaxPoolBlockScorer::new(128)),
             #[cfg(feature = "msa_sparse")]
             VortexFlowConfig::MsaMaxStdDev => Self::MsaMaxStdDev(MaxStdDevBlockScorer::new(128)),
+            #[cfg(feature = "msa_per_group")]
+            VortexFlowConfig::MsaPerGroup { n_groups } => {
+                Self::MsaPerGroup(PerGroupTopKRouter::new(true, n_groups))
+            }
             VortexFlowConfig::DashAttn => {
                 unreachable!("DashAttn does not produce a VortexRouter; check is_vortex() first")
             }
@@ -256,6 +273,10 @@ impl VortexFlow for VortexRouter {
             (Self::MsaMaxStdDev(r), VortexRouterCache::MsaMaxStdDev(c)) => {
                 r.forward_cache(c, keys, values, block_idx, head_dim)
             }
+            #[cfg(feature = "msa_per_group")]
+            (Self::MsaPerGroup(r), VortexRouterCache::MsaPerGroup(c)) => {
+                r.forward_cache(c, keys, values, block_idx, head_dim)
+            }
             _ => panic!("VortexRouter/Cache variant mismatch"),
         }
     }
@@ -292,6 +313,10 @@ impl VortexFlow for VortexRouter {
             (Self::MsaMaxStdDev(r), VortexRouterCache::MsaMaxStdDev(c)) => {
                 r.forward_indexer(query, c, n_blocks, top_k, scratch)
             }
+            #[cfg(feature = "msa_per_group")]
+            (Self::MsaPerGroup(r), VortexRouterCache::MsaPerGroup(c)) => {
+                r.forward_indexer(query, c, n_blocks, top_k, scratch)
+            }
             _ => panic!("VortexRouter/Cache variant mismatch"),
         }
     }
@@ -316,6 +341,10 @@ impl VortexFlow for VortexRouter {
             #[cfg(feature = "msa_sparse")]
             Self::MsaMaxStdDev(r) => {
                 VortexRouterCache::MsaMaxStdDev(r.cache_new(n_blocks_capacity, head_dim))
+            }
+            #[cfg(feature = "msa_per_group")]
+            Self::MsaPerGroup(r) => {
+                VortexRouterCache::MsaPerGroup(r.cache_new(n_blocks_capacity, head_dim))
             }
         }
     }
