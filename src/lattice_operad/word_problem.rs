@@ -126,16 +126,13 @@ fn dnf_to_expr(dnf: &Dnf) -> PrunerExpr {
                 clause
                     .iter()
                     .map(|&id| PrunerExpr::Atom(id))
-                    .reduce(|acc, e| PrunerExpr::and(acc, e))
+                    .reduce(PrunerExpr::and)
                     .unwrap()
             }
         })
         .collect();
 
-    clauses
-        .into_iter()
-        .reduce(|acc, e| PrunerExpr::or(acc, e))
-        .unwrap()
+    clauses.into_iter().reduce(PrunerExpr::or).unwrap()
 }
 
 #[cfg(test)]

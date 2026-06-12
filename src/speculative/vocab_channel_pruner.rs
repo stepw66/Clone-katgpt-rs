@@ -31,6 +31,9 @@ use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
 
 use katgpt_core::traits::ConstraintPruner;
 
+#[cfg(feature = "lattice_operad")]
+use crate::lattice_operad::PrunerExpr;
+
 // ── Phase 1: Core Math ──────────────────────────────────────────────
 
 /// Population skewness (γ₁) of a distribution in a single O(n) pass.

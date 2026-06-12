@@ -12,6 +12,7 @@ use super::block_topk::{BlockTopKCache, BlockTopKRouter};
 use super::channel_aware::{ChannelAwareCache, ChannelAwareRouter};
 use super::entmax_router::{EntmaxCache, EntmaxRouter};
 use super::meta_router::{DynPolicy, DynRoutingCache, MetaRouter};
+use super::msa_distill::{MaxPoolBlockScorer, MaxStdDevBlockScorer, MsaBlockCache};
 use super::value_energy::{ValueEnergyCache, ValueEnergyRouter};
 
 // ---------------------------------------------------------------------------
@@ -92,6 +93,10 @@ pub enum VortexFlowConfig {
     ChannelAware,
     /// Use MetaRouter (bandit-based policy selection).
     Meta,
+    /// Use MSA MaxPoolBlockScorer (max Q·K per block, exp-free top-k).
+    MsaMaxPool,
+    /// Use MSA MaxStdDevBlockScorer (max Q·K × sigmoid(std_dev)).
+    MsaMaxStdDev,
 }
 
 // ---------------------------------------------------------------------------
@@ -143,6 +148,10 @@ pub enum VortexRouter {
     ChannelAware(ChannelAwareRouter),
     /// Meta-router (bandit-based policy selection over multiple routers).
     Meta(Box<MetaRouter>),
+    /// MSA MaxPool block scorer (max Q·K per block).
+    MsaMaxPool(MaxPoolBlockScorer),
+    /// MSA MaxStdDev block scorer (max Q·K × sigmoid(std_dev)).
+    MsaMaxStdDev(MaxStdDevBlockScorer),
 }
 
 /// Cache storage for [`VortexRouter`] — mirrors the enum variants.
@@ -158,6 +167,10 @@ pub enum VortexRouterCache {
     ChannelAware(ChannelAwareCache),
     /// Meta-router cache (dynamic routing cache).
     Meta(DynRoutingCache),
+    /// MSA MaxPool cache.
+    MsaMaxPool(MsaBlockCache),
+    /// MSA MaxStdDev cache.
+    MsaMaxStdDev(MsaBlockCache),
 }
 
 impl VortexRouterCache {
@@ -169,6 +182,8 @@ impl VortexRouterCache {
             Self::ValueEnergy(c) => c.n_blocks,
             Self::ChannelAware(c) => c.n_blocks,
             Self::Meta(c) => c.n_blocks(),
+            Self::MsaMaxPool(c) => c.n_blocks,
+            Self::MsaMaxStdDev(c) => c.n_blocks,
         }
     }
 }
@@ -186,6 +201,8 @@ impl VortexRouter {
                 DynPolicy::Entmax(EntmaxRouter::default_router()),
                 DynPolicy::ValueEnergy(ValueEnergyRouter::new(true)),
             ]))),
+            VortexFlowConfig::MsaMaxPool => Self::MsaMaxPool(MaxPoolBlockScorer::new(128)),
+            VortexFlowConfig::MsaMaxStdDev => Self::MsaMaxStdDev(MaxStdDevBlockScorer::new(128)),
             VortexFlowConfig::DashAttn => {
                 unreachable!("DashAttn does not produce a VortexRouter; check is_vortex() first")
             }
@@ -220,6 +237,12 @@ impl VortexFlow for VortexRouter {
             (Self::Meta(r), VortexRouterCache::Meta(c)) => {
                 r.forward_cache(c, keys, values, block_idx, head_dim)
             }
+            (Self::MsaMaxPool(r), VortexRouterCache::MsaMaxPool(c)) => {
+                r.forward_cache(c, keys, values, block_idx, head_dim)
+            }
+            (Self::MsaMaxStdDev(r), VortexRouterCache::MsaMaxStdDev(c)) => {
+                r.forward_cache(c, keys, values, block_idx, head_dim)
+            }
             _ => panic!("VortexRouter/Cache variant mismatch"),
         }
     }
@@ -248,6 +271,12 @@ impl VortexFlow for VortexRouter {
             (Self::Meta(r), VortexRouterCache::Meta(c)) => {
                 r.forward_indexer(query, c, n_blocks, top_k, scratch)
             }
+            (Self::MsaMaxPool(r), VortexRouterCache::MsaMaxPool(c)) => {
+                r.forward_indexer(query, c, n_blocks, top_k, scratch)
+            }
+            (Self::MsaMaxStdDev(r), VortexRouterCache::MsaMaxStdDev(c)) => {
+                r.forward_indexer(query, c, n_blocks, top_k, scratch)
+            }
             _ => panic!("VortexRouter/Cache variant mismatch"),
         }
     }
@@ -265,6 +294,12 @@ impl VortexFlow for VortexRouter {
                 VortexRouterCache::ChannelAware(r.cache_new(n_blocks_capacity, head_dim))
             }
             Self::Meta(r) => VortexRouterCache::Meta(r.cache_new(n_blocks_capacity, head_dim)),
+            Self::MsaMaxPool(r) => {
+                VortexRouterCache::MsaMaxPool(r.cache_new(n_blocks_capacity, head_dim))
+            }
+            Self::MsaMaxStdDev(r) => {
+                VortexRouterCache::MsaMaxStdDev(r.cache_new(n_blocks_capacity, head_dim))
+            }
         }
     }
 }

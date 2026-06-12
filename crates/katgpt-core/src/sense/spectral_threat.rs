@@ -84,12 +84,12 @@ struct LabeledRhythm {
     z_buf: [f32; HIDDEN_DIM],
     /// Observed damage tick timestamps for auto-calibration.
     damage_timestamps: [u32; MAX_TIMESTAMPS],
-    /// Entity ID (source of damage / tracked participant).
-    entity_id: u8,
-    /// Number of damage events ingested for this participant.
-    event_count: u32,
     /// Number of valid entries in `damage_timestamps`.
     damage_timestamp_count: usize,
+    /// Number of damage events ingested for this participant.
+    event_count: u32,
+    /// Entity ID (source of damage / tracked participant).
+    entity_id: u8,
 }
 
 // ── Constants ──────────────────────────────────────────────────
@@ -110,16 +110,16 @@ pub struct CombatRhythmTracker {
     cells: [Option<LabeledRhythm>; HIDDEN_DIM],
     /// Direct-indexed LUT: entity_id → slot index. u8::MAX = not registered.
     entity_lut: [u8; 256],
+    /// Number of valid entries in `cells`.
+    cell_count: usize,
+    /// Hidden dimension — always HIDDEN_DIM. Kept for API compat.
+    hidden_dim: usize,
     /// Timestep for imex_step (derived from tick rate, e.g. 16ms → 0.016).
     dt: f32,
     /// Maximum expected damage for forcing normalization.
     max_damage: f32,
     /// Minimum events before rhythm_confidence ramps above 0.
     confidence_ramp: f32,
-    /// Number of valid entries in `cells`.
-    cell_count: usize,
-    /// Hidden dimension — always HIDDEN_DIM. Kept for API compat.
-    hidden_dim: usize,
 }
 
 impl CombatRhythmTracker {
@@ -345,15 +345,14 @@ impl CombatRhythmTracker {
         let mut best_count = 1u32;
         let mut run_start = 0;
         for i in 1..intervals.len() {
-            match intervals[i] - intervals[run_start] <= 10 {
-                true => {
-                    let count = (i - run_start + 1) as u32;
-                    if count > best_count {
-                        best_count = count;
-                        best_val = intervals[run_start + (i - run_start) / 2];
-                    }
+            if intervals[i] - intervals[run_start] <= 10 {
+                let count = (i - run_start + 1) as u32;
+                if count > best_count {
+                    best_count = count;
+                    best_val = intervals[run_start + (i - run_start) / 2];
                 }
-                false => run_start = i,
+            } else {
+                run_start = i;
             }
         }
         let dominant_interval = best_val;

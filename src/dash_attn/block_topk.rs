@@ -3,6 +3,8 @@
 //! Routes via mean key centroids + dot-product top-k selection.
 //! Feature gate: `vortex_flow` (Plan 196, Phase 1).
 
+use katgpt_core::simd::simd_argmax_f32;
+
 use super::vortex_flow::{RoutingDecision, VortexFlow, VortexScratch};
 
 // ---------------------------------------------------------------------------

@@ -1,4 +1,4 @@
-https://r.jina.ai/https://arxiv.org/pdf/2606.07878v1
+https://r.jina.ai/https://github.com/MiniMax-AI/MSA/blob/main/docs/MiniMaxSparseAttention.pdf?raw=true
 
 0. distill idea to our modelless [@katgpt-rs-core](file:///Users/katopz/git/katgpt-rs/crates/katgpt-rs-core/) [@README.md](file:///Users/katopz/git/katgpt-rs/README.md) [@src](file:///Users/katopz/git/katgpt-rs/src/)
 and/or model based:
@@ -23,6 +23,6 @@ constraints:
 4. **Self-learning adaptive CoT welcome** — but no LLM training
 5. **SOLID, DRY** — per [@optimization.md](file:///Users/katopz/git/katgpt-rs/.contexts/optimization.md)
 6. **Tests/examples** showing before/after thinking vs non-thinking with expected gains
-7. **CPU/GPU auto-route** when load changes
+7. **CPU/GPU/ANE auto-route** when load changes
 8. mind plasma/hot/warm/cold/freeze path, aim for both perf for game and more sec for chain
 9. use threhold to adpative between cpu/simd/gpu/ane if need
