@@ -105,8 +105,8 @@ pub struct SlodOperator {
 ///
 /// Points are clamped to remain inside the unit ball.
 pub fn poincare_distance(a: &[f32], b: &[f32], dim: usize) -> f32 {
-    let norm_a_sq = simd_dot_f32(a, a, dim);
-    let norm_b_sq = simd_dot_f32(b, b, dim);
+    let norm_a_sq = crate::simd::simd_sum_sq(a, dim);
+    let norm_b_sq = crate::simd::simd_sum_sq(b, dim);
 
     // Clamp norms to < 1 for numerical stability
     let norm_a_sq = norm_a_sq.min(1.0 - 1e-5);
@@ -132,8 +132,8 @@ fn mobius_add(a: &[f32], b: &[f32], dim: usize) -> Vec<f32> {
 /// In-place Möbius addition — zero-allocation hot path.
 #[inline]
 fn mobius_add_into(result: &mut [f32], a: &[f32], b: &[f32], dim: usize) {
-    let norm_a_sq = simd_dot_f32(a, a, dim).min(1.0 - 1e-5);
-    let norm_b_sq = simd_dot_f32(b, b, dim).min(1.0 - 1e-5);
+    let norm_a_sq = crate::simd::simd_sum_sq(a, dim).min(1.0 - 1e-5);
+    let norm_b_sq = crate::simd::simd_sum_sq(b, dim).min(1.0 - 1e-5);
     let a_dot_b = simd_dot_f32(a, b, dim);
 
     let denom = 1.0 + 2.0 * a_dot_b + norm_a_sq * norm_b_sq;
@@ -320,9 +320,9 @@ impl SlodOperator {
         for i in 0..n {
             let isd_i = inv_sqrt_d[i];
             let row_off = i * n;
-            for j in 0..n {
+            for (j, inv_sqrt_d_j) in inv_sqrt_d.iter().enumerate().take(n) {
                 let idx = row_off + j;
-                let scaled = w[idx] * isd_i * inv_sqrt_d[j];
+                let scaled = w[idx] * isd_i * inv_sqrt_d_j;
                 lap[idx] = -scaled;
             }
             lap[row_off + i] += 1.0;
@@ -345,7 +345,7 @@ impl SlodOperator {
             crate::simd::simd_matvec(&mut lv, &lap, v, n, n);
             // λ = (v^T Lv) / (v^T v)
             let numerator = simd_dot_f32(v, &lv, n);
-            let denominator = simd_dot_f32(v, v, n).max(1e-10);
+            let denominator = crate::simd::simd_sum_sq(v, n).max(1e-10);
             eigenvalues.push(numerator / denominator);
         }
 
@@ -441,8 +441,7 @@ impl SlodOperator {
 
             // D_w(σ): diffusion entropy
             let mut entropy = 0.0f32;
-            for i in 0..n {
-                let w = weights[i];
+            for &w in weights.iter().take(n) {
                 if w > 1e-10 {
                     let p = w / w_sum;
                     entropy -= p * p.ln();
@@ -699,10 +698,10 @@ impl SlodPruner {
         }
         let tier_idx = depth.min(n_tiers - 1);
         // Weak boundary → accept-all shortcut
-        if let Some(boundary) = self.operator.boundaries.get(tier_idx) {
-            if boundary.score < 0.1 {
-                return None;
-            }
+        if let Some(boundary) = self.operator.boundaries.get(tier_idx)
+            && boundary.score < 0.1
+        {
+            return None;
         }
         Some(tier_idx)
     }
@@ -736,9 +735,7 @@ impl crate::traits::ConstraintPruner for SlodPruner {
             }
         };
         match self.tier_pruners.get(tier) {
-            Some(pruner) => {
-                pruner.batch_is_valid(depth, candidates, parent_tokens, results)
-            }
+            Some(pruner) => pruner.batch_is_valid(depth, candidates, parent_tokens, results),
             None => {
                 let len = candidates.len().min(results.len());
                 results[..len].fill(true);

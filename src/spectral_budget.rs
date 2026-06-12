@@ -330,6 +330,189 @@ impl SpectralLod {
     }
 }
 
+// ── Rank-p Spectral Truncation (T3) ────────────────────────────────
+
+/// SVD-free rank-p truncation based on row norms after Newton-Schulz.
+///
+/// After NS iteration, well-orthonormalized rows have ||row|| ≈ 1.
+/// Poorly-orthonormalized rows have ||row|| << 1. This function sorts rows
+/// by norm descending and retains the top `retention` fraction, zeroing
+/// the rest.
+///
+/// Paper proves top 50% suffices to recover full Muon performance
+/// (Magakyan et al. 2026, rank-p analysis).
+///
+/// `ns_output` is a `rows × cols` row-major matrix (mutated in place).
+/// `retention` is in (0.0, 1.0] — 0.5 keeps top half.
+/// `row_norms_buf` is a caller-provided buffer of `rows` elements for
+/// scratch storage (avoids allocation).
+///
+/// Returns the number of rows retained.
+pub fn rank_p_retain(
+    ns_output: &mut [f32],
+    rows: usize,
+    cols: usize,
+    retention: f32,
+    row_norms_buf: &mut [f32],
+) -> usize {
+    debug_assert_eq!(ns_output.len(), rows * cols);
+    debug_assert_eq!(row_norms_buf.len(), rows);
+    debug_assert!(
+        (0.0..=1.0).contains(&retention),
+        "retention must be in [0, 1]"
+    );
+
+    if rows == 0 || cols == 0 {
+        return 0;
+    }
+
+    let r = retention.clamp(0.0, 1.0);
+    let keep = ((rows as f32 * r).ceil() as usize).min(rows);
+
+    if keep == rows {
+        return rows;
+    }
+
+    // Compute row norms
+    for i in 0..rows {
+        let row_start = i * cols;
+        let row_end = row_start + cols;
+        let sq_sum = crate::simd::simd_sum_sq(&ns_output[row_start..row_end], cols);
+        row_norms_buf[i] = sq_sum;
+    }
+
+    // Build index array sorted by norm descending.
+    // For small matrices (typical NS use), a simple insertion sort avoids allocation.
+    let mut indices: Vec<usize> = (0..rows).collect();
+    // Partial sort: only need top `keep` elements in correct position.
+    indices.select_nth_unstable_by(keep - 1, |&a, &b| {
+        row_norms_buf[b]
+            .partial_cmp(&row_norms_buf[a])
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    // Zero rows NOT in top `keep`
+    let top_set: Vec<bool> = {
+        let mut s = vec![false; rows];
+        for &idx in &indices[..keep] {
+            s[idx] = true;
+        }
+        s
+    };
+
+    for i in 0..rows {
+        if !top_set[i] {
+            let row_start = i * cols;
+            ns_output[row_start..row_start + cols].fill(0.0);
+        }
+    }
+
+    keep
+}
+
+// ── Spectral Budget Arms (T4) ────────────────────────────────────────
+
+/// Pre-defined compute arms for spectral budget routing.
+///
+/// Each arm represents a compute/accuracy tradeoff tier:
+/// - Gaming: minimum compute, 50% retention (hot path)
+/// - Chain: standard quality, 75% retention
+/// - Diagnostic: maximum accuracy, depth-adaptive NS, 90% retention
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SpectralBudgetArm {
+    /// NS iterations for this arm
+    pub ns_iterations: u8,
+    /// Singular direction retention fraction
+    pub retention: f32,
+    /// Relative compute cost estimate (1.0 = baseline 5-step NS)
+    pub compute_cost: f32,
+    /// Arm name for logging
+    pub name: &'static str,
+}
+
+impl SpectralBudgetArm {
+    /// Gaming arm: 5-step NS, 50% retention — minimum compute for hot path.
+    /// Best for real-time game NPC updates where latency dominates.
+    pub fn gaming() -> Self {
+        Self {
+            ns_iterations: 5,
+            retention: 0.50,
+            compute_cost: 1.0,
+            name: "gaming",
+        }
+    }
+
+    /// Chain arm: 5-step NS, 75% retention — standard quality.
+    /// Good balance of compute and quality for chain-of-thought.
+    pub fn chain() -> Self {
+        Self {
+            ns_iterations: 5,
+            retention: 0.75,
+            compute_cost: 1.0,
+            name: "chain",
+        }
+    }
+
+    /// Diagnostic arm: depth-adaptive NS, 90% retention — maximum accuracy.
+    /// Uses full spectral budget config for layer-adaptive iteration counts.
+    pub fn diagnostic() -> Self {
+        Self {
+            ns_iterations: 10, // overridden by config per-layer
+            retention: 0.90,
+            compute_cost: 2.0, // up to 2× more iterations
+            name: "diagnostic",
+        }
+    }
+
+    /// Resolve actual NS iterations for a specific layer using spectral config.
+    ///
+    /// Gaming/Chain arms use their fixed iteration count.
+    /// Diagnostic arm uses the config's predicted depth.
+    pub fn resolve_ns_iterations(&self, config: &SpectralBudgetConfig, layer_idx: usize) -> u8 {
+        match self.name {
+            "diagnostic" => config.ns_iterations(layer_idx),
+            _ => self.ns_iterations,
+        }
+    }
+
+    /// Resolve actual retention for a specific layer using spectral config.
+    ///
+    /// Gaming/Chain arms use their fixed retention.
+    /// Diagnostic arm uses the config's predicted retention.
+    pub fn resolve_retention(&self, config: &SpectralBudgetConfig, layer_idx: usize) -> f32 {
+        match self.name {
+            "diagnostic" => {
+                let config_ret = config.retention(layer_idx);
+                // Use the higher of arm default and config
+                self.retention.max(config_ret)
+            }
+            _ => self.retention,
+        }
+    }
+}
+
+/// All three pre-defined spectral budget arms, ordered by compute cost.
+pub const SPECTRAL_BUDGET_ARMS: [SpectralBudgetArm; 3] = [
+    SpectralBudgetArm {
+        ns_iterations: 5,
+        retention: 0.50,
+        compute_cost: 1.0,
+        name: "gaming",
+    },
+    SpectralBudgetArm {
+        ns_iterations: 5,
+        retention: 0.75,
+        compute_cost: 1.0,
+        name: "chain",
+    },
+    SpectralBudgetArm {
+        ns_iterations: 10,
+        retention: 0.90,
+        compute_cost: 2.0,
+        name: "diagnostic",
+    },
+];
+
 // ── Tests ────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -535,5 +718,230 @@ mod tests {
             final_mlp < mid,
             "final MLP sigma should be lower than mid: mid={mid:.6} vs final={final_mlp:.6}"
         );
+    }
+
+    // T2: newton_schulz_n matches newton_schulz5 for n=5
+    #[test]
+    fn t2_newton_schulz_n_matches_schulz5_for_n5() {
+        let g: Vec<f32> = (0..64).map(|i| (i as f32 * 0.1 - 3.2).sin()).collect();
+        let mut out5 = vec![0.0f32; 64];
+        let mut out_n = vec![0.0f32; 64];
+
+        crate::newton_schulz::newton_schulz5(&g, 8, 8, &mut out5);
+        crate::newton_schulz::newton_schulz_n(&g, 8, 8, &mut out_n, 5);
+
+        for i in 0..64 {
+            assert!(
+                (out5[i] - out_n[i]).abs() < 1e-6,
+                "newton_schulz_n(5) should match newton_schulz5 at index {i}: {} vs {}",
+                out5[i],
+                out_n[i]
+            );
+        }
+    }
+
+    #[test]
+    fn t2_more_iterations_improve_orthogonality() {
+        // Harder matrix: wide singular value spread.
+        // More iterations should produce better orthonormalization.
+        let mut g = vec![0.0f32; 64];
+        for i in 0..8 {
+            for j in 0..8 {
+                g[i * 8 + j] = ((i * 8 + j) as f32 * 0.37).sin() * (1.0 + i as f32 * 0.5);
+            }
+        }
+
+        let mut out5 = vec![0.0f32; 64];
+        let mut out10 = vec![0.0f32; 64];
+
+        crate::newton_schulz::newton_schulz_n(&g, 8, 8, &mut out5, 5);
+        crate::newton_schulz::newton_schulz_n(&g, 8, 8, &mut out10, 10);
+
+        // Measure orthogonality: off-diagonal of X*X^T should be small
+        let off_diag5 = max_off_diag(&out5, 8);
+        let off_diag10 = max_off_diag(&out10, 8);
+
+        assert!(
+            off_diag10 <= off_diag5 + 1e-6,
+            "10-step NS should be at least as orthogonal as 5-step: {off_diag10} vs {off_diag5}"
+        );
+    }
+
+    #[test]
+    fn t2_nonsquare_matches() {
+        let g: Vec<f32> = (0..72).map(|i| (i as f32 * 0.13).cos()).collect();
+        let mut out5 = vec![0.0f32; 72];
+        let mut out_n = vec![0.0f32; 72];
+
+        crate::newton_schulz::newton_schulz5(&g, 12, 6, &mut out5);
+        crate::newton_schulz::newton_schulz_n(&g, 12, 6, &mut out_n, 5);
+
+        for i in 0..72 {
+            assert!((out5[i] - out_n[i]).abs() < 1e-6, "mismatch at {i}");
+        }
+    }
+
+    // T3: Rank-p truncation tests
+    #[test]
+    fn t3_retention_50_keeps_half() {
+        // 8×4 matrix with known row norms
+        let mut mat = vec![
+            1.0, 0.0, 0.0, 0.0, // row 0: norm 1.0
+            0.0, 1.0, 0.0, 0.0, // row 1: norm 1.0
+            0.5, 0.0, 0.0, 0.0, // row 2: norm 0.5
+            0.0, 0.0, 0.0, 0.0, // row 3: norm 0.0
+            0.9, 0.0, 0.0, 0.0, // row 4: norm 0.9
+            0.0, 0.0, 0.0, 0.1, // row 5: norm 0.1
+            0.8, 0.0, 0.0, 0.0, // row 6: norm 0.8
+            0.0, 0.0, 0.3, 0.0, // row 7: norm 0.3
+        ];
+        let mut norms = vec![0.0f32; 8];
+        let kept = rank_p_retain(&mut mat, 8, 4, 0.5, &mut norms);
+        assert_eq!(kept, 4, "50%% retention of 8 rows should keep 4");
+
+        // Rows 0, 1, 4, 6 have the highest norms (1.0, 1.0, 0.9, 0.8)
+        // They should be non-zero; others should be zeroed
+        let row_nonzero = |r: usize| -> bool { mat[r * 4..r * 4 + 4].iter().any(|&v| v != 0.0) };
+        assert!(row_nonzero(0), "row 0 (norm 1.0) should be kept");
+        assert!(row_nonzero(1), "row 1 (norm 1.0) should be kept");
+        assert!(!row_nonzero(3), "row 3 (norm 0.0) should be zeroed");
+        assert!(!row_nonzero(5), "row 5 (norm 0.1) should be zeroed");
+    }
+
+    #[test]
+    fn t3_retention_100_keeps_all() {
+        let mut mat = vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0];
+        let original = mat.clone();
+        let mut norms = vec![0.0f32; 2];
+        let kept = rank_p_retain(&mut mat, 2, 3, 1.0, &mut norms);
+        assert_eq!(kept, 2);
+        assert_eq!(mat, original, "100% retention should not modify data");
+    }
+
+    #[test]
+    fn t3_retention_preserves_top_rows() {
+        // After NS + rank-p truncation, the kept rows should be the highest-norm rows.
+        // This doesn't require norm ≈ 1.0 (depends on matrix condition) — only that
+        // the selection is correct (kept >= discarded norms).
+        let g: Vec<f32> = (0..64).map(|i| (i as f32 * 0.17 + 1.0).sin()).collect();
+        let mut ns_out = vec![0.0f32; 64];
+        crate::newton_schulz::newton_schulz5(&g, 8, 8, &mut ns_out);
+
+        // Compute original row norms
+        let orig_norms: Vec<f32> = (0..8)
+            .map(|i| {
+                ns_out[i * 8..(i + 1) * 8]
+                    .iter()
+                    .map(|v| v * v)
+                    .sum::<f32>()
+            })
+            .collect();
+
+        let mut norms = vec![0.0f32; 8];
+        let kept = rank_p_retain(&mut ns_out, 8, 8, 0.5, &mut norms);
+        assert_eq!(kept, 4);
+
+        // Verify kept rows have higher norms than discarded rows
+        let kept_norms: Vec<f32> = (0..8)
+            .filter(|&i| ns_out[i * 8..(i + 1) * 8].iter().any(|&v| v != 0.0))
+            .map(|i| orig_norms[i])
+            .collect();
+        let discarded_norms: Vec<f32> = (0..8)
+            .filter(|&i| ns_out[i * 8..(i + 1) * 8].iter().all(|&v| v == 0.0))
+            .map(|i| orig_norms[i])
+            .collect();
+
+        for &kn in &kept_norms {
+            for &dn in &discarded_norms {
+                assert!(
+                    kn >= dn - 1e-6,
+                    "kept norm {kn} should be >= discarded norm {dn}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn t3_empty_matrix() {
+        let mut mat: Vec<f32> = vec![];
+        let mut norms: Vec<f32> = vec![];
+        let kept = rank_p_retain(&mut mat, 0, 0, 0.5, &mut norms);
+        assert_eq!(kept, 0);
+    }
+
+    // T4: SpectralBudgetArm tests
+    #[test]
+    fn t4_gaming_arm_uses_fewer_iterations() {
+        let gaming = SpectralBudgetArm::gaming();
+        let diagnostic = SpectralBudgetArm::diagnostic();
+        assert!(
+            gaming.ns_iterations <= diagnostic.ns_iterations,
+            "gaming ({}) should use <= iterations than diagnostic ({})",
+            gaming.ns_iterations,
+            diagnostic.ns_iterations
+        );
+        assert_eq!(gaming.ns_iterations, 5);
+    }
+
+    #[test]
+    fn t4_diagnostic_arm_uses_more_iterations() {
+        let diagnostic = SpectralBudgetArm::diagnostic();
+        assert_eq!(diagnostic.ns_iterations, 10);
+        assert!(diagnostic.retention > 0.8);
+    }
+
+    #[test]
+    fn t4_chain_arm_between_gaming_diagnostic() {
+        let gaming = SpectralBudgetArm::gaming();
+        let chain = SpectralBudgetArm::chain();
+        let diagnostic = SpectralBudgetArm::diagnostic();
+
+        assert!(chain.retention >= gaming.retention);
+        assert!(chain.retention <= diagnostic.retention);
+        assert_eq!(chain.ns_iterations, 5);
+    }
+
+    #[test]
+    fn t4_diagnostic_resolve_uses_config() {
+        let lt = [LayerType::MlpUp];
+        let config = SpectralBudgetConfig::from_model_dims(28, 2800, &lt);
+        let diagnostic = SpectralBudgetArm::diagnostic();
+
+        // Diagnostic arm should use config's per-layer prediction
+        let last_idx = config.layers.len() - 1;
+        let resolved_iters = diagnostic.resolve_ns_iterations(&config, last_idx);
+        let expected = config.ns_iterations(last_idx);
+        assert_eq!(resolved_iters, expected);
+    }
+
+    #[test]
+    fn t4_gaming_resolve_uses_fixed() {
+        let lt = [LayerType::MlpUp];
+        let config = SpectralBudgetConfig::from_model_dims(28, 2800, &lt);
+        let gaming = SpectralBudgetArm::gaming();
+
+        // Gaming arm should always use fixed 5 iterations
+        let resolved = gaming.resolve_ns_iterations(&config, config.layers.len() - 1);
+        assert_eq!(resolved, 5, "gaming arm should always use 5 iterations");
+    }
+
+    #[test]
+    fn t4_spectral_arms_const_matches_constructors() {
+        assert_eq!(SPECTRAL_BUDGET_ARMS[0], SpectralBudgetArm::gaming());
+        assert_eq!(SPECTRAL_BUDGET_ARMS[1], SpectralBudgetArm::chain());
+        assert_eq!(SPECTRAL_BUDGET_ARMS[2], SpectralBudgetArm::diagnostic());
+    }
+
+    // Helpers for tests
+    fn max_off_diag(mat: &[f32], m: usize) -> f32 {
+        let mut max_val = 0.0f32;
+        for i in 0..m {
+            for j in 0..m {
+                if i != j {
+                    max_val = max_val.max(mat[i * m + j].abs());
+                }
+            }
+        }
+        max_val
     }
 }

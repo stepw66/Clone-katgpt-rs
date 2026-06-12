@@ -109,6 +109,7 @@ impl FlowFieldCache {
     /// Returns `None` if:
     /// - `npc_count < min_npcs` (individual LEO should be used instead).
     /// - The goal index is out of range for the head.
+    #[allow(clippy::too_many_arguments)]
     pub fn get_or_compute<H: LeoHead>(
         &mut self,
         goal_id: u64,
@@ -161,7 +162,7 @@ impl FlowFieldCache {
         let mut grid = LeoPotentialGrid::from_q_values(grid_w, grid_h, goal_q, actions_per_cell);
 
         // Inflate obstacles before FFT to prevent flow into walls.
-        let words_per_row = ((grid_w as usize) + 63) / 64;
+        let words_per_row = (grid_w as usize).div_ceil(64);
         let blocked_words = words_per_row * (grid_h as usize);
 
         // Resize scratch buffers if grid dimensions changed.
@@ -173,7 +174,7 @@ impl FlowFieldCache {
         // multiple of 64, so per-cell copy is required.
         let wu = grid_w as usize;
         let hu = grid_h as usize;
-        if wu % 64 == 0 && wu > 0 {
+        if wu.is_multiple_of(64) && wu > 0 {
             // Fast path: identical layout, bulk copy
             let grid_blocked = grid.blocked();
             let copy_len = words_per_row * hu;
@@ -228,12 +229,16 @@ impl FlowFieldCache {
         );
 
         // Apply inflated obstacles back to the grid (same layout mismatch as above).
-        if wu % 64 == 0 && wu > 0 {
+        if wu.is_multiple_of(64) && wu > 0 {
             // Fast path: identical layout, bitwise OR bulk copy
             let grid_blocked = grid.blocked_mut();
             let copy_len = words_per_row * hu;
-            for i in 0..copy_len {
-                grid_blocked[i] |= self.blocked_buf[i];
+            for (grid_word, blocked_word) in grid_blocked
+                .iter_mut()
+                .zip(self.blocked_buf.iter())
+                .take(copy_len)
+            {
+                *grid_word |= blocked_word;
             }
         } else {
             // Unaligned: word-at-a-time copy from row-aligned source back to flat dest.

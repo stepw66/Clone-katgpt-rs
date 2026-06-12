@@ -511,7 +511,6 @@ mod tests {
         use crate::pruners::bandit::{BanditPruner, BanditStrategy};
         use crate::speculative::build_dd_tree_screened;
         use crate::types::{Config, Rng};
-        use katgpt_core::ScreeningPruner;
 
         let vocab = 8;
         let lookahead = 4;

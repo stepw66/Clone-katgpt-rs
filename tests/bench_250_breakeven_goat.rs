@@ -390,13 +390,12 @@ mod tests {
                 println!("│   {tok:>3}  │ {confidence:>10.6} │ {delta:>+10.6}           │");
             }
 
-            if tok > SKIP {
-                if let Some(prev) = prev_confidence {
-                    if confidence < prev - 1e-12 {
-                        monotonic = false;
-                        monotonic_violation_at = Some(tok);
-                    }
-                }
+            if tok > SKIP
+                && let Some(prev) = prev_confidence
+                && confidence < prev - 1e-12
+            {
+                monotonic = false;
+                monotonic_violation_at = Some(tok);
             }
             prev_confidence = Some(confidence);
         }

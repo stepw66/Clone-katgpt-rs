@@ -15,7 +15,6 @@
 const A: f32 = 3.4445;
 const B: f32 = -4.7750;
 const C: f32 = 2.0315;
-const ITERS: usize = 5;
 
 // ── Matrix helpers ──────────────────────────────────────────────
 
@@ -112,6 +111,39 @@ fn grow_no_zero(v: &mut Vec<f32>, new_len: usize) {
 
 // ── Public API ───────────────────────────────────────────────────
 
+/// Newton-Schulz N-iteration orthogonalization (generalized).
+///
+/// Converts matrix `G` (`rows × cols`, row-major) to its nearest orthogonal
+/// factor `X` via `n_iters` Newton-Schulz cubic iterations:
+/// ```text
+///   X = G / ||G||_F
+///   for n_iters: A = X @ X^T; X = a*X + (b*A + c*A@A) @ X
+/// ```
+/// where `a = 3.4445`, `b = -4.7750`, `c = 2.0315`.
+///
+/// Use `n_iters = 5` for NanoGPT-scale, 7 for intermediate, 10 for DeepSeek-V4.
+/// See `spectral_budget::ns_depth_for_sigma()` for modelless depth selection.
+///
+/// For non-square matrices where `rows > cols`, the input is transposed,
+/// orthogonalized, and transposed back.
+///
+/// `out` must have `rows * cols` elements.
+#[cfg(feature = "newton_schulz")]
+pub fn newton_schulz_n(g: &[f32], rows: usize, cols: usize, out: &mut [f32], n_iters: u8) {
+    assert_eq!(g.len(), rows * cols, "input matrix size mismatch");
+    assert_eq!(out.len(), rows * cols, "output buffer size mismatch");
+    assert!(n_iters >= 1, "n_iters must be >= 1, got {n_iters}");
+
+    use std::cell::RefCell;
+    thread_local! {
+        static SCRATCH: RefCell<NewtonSchulzScratch> = RefCell::new(NewtonSchulzScratch::new(0, 0));
+    }
+    SCRATCH.with(|s| {
+        let mut s = s.borrow_mut();
+        newton_schulz_n_into(g, rows, cols, out, &mut s, n_iters);
+    });
+}
+
 /// Newton-Schulz 5-iteration orthogonalization.
 ///
 /// Converts matrix `G` (`rows × cols`, row-major) to its nearest orthogonal
@@ -128,18 +160,7 @@ fn grow_no_zero(v: &mut Vec<f32>, new_len: usize) {
 /// `out` must have `rows * cols` elements.
 #[cfg(feature = "newton_schulz")]
 pub fn newton_schulz5(g: &[f32], rows: usize, cols: usize, out: &mut [f32]) {
-    assert_eq!(g.len(), rows * cols, "input matrix size mismatch");
-    assert_eq!(out.len(), rows * cols, "output buffer size mismatch");
-
-    // Delegate to scratch-reusing variant via thread-local scratch.
-    use std::cell::RefCell;
-    thread_local! {
-        static SCRATCH: RefCell<NewtonSchulzScratch> = RefCell::new(NewtonSchulzScratch::new(0, 0));
-    }
-    SCRATCH.with(|s| {
-        let mut s = s.borrow_mut();
-        newton_schulz5_into(g, rows, cols, out, &mut s);
-    });
+    newton_schulz_n(g, rows, cols, out, 5);
 }
 
 /// Muon optimizer update: momentum + Newton-Schulz orthogonalization + scaling.
@@ -253,24 +274,25 @@ impl NewtonSchulzScratch {
     }
 }
 
-/// Newton-Schulz with pre-allocated scratch buffers (zero-alloc after first call).
+/// Newton-Schulz N-iteration with pre-allocated scratch buffers (zero-alloc after first call).
 #[cfg(feature = "newton_schulz")]
-pub fn newton_schulz5_into(
+pub fn newton_schulz_n_into(
     g: &[f32],
     rows: usize,
     cols: usize,
     out: &mut [f32],
     scratch: &mut NewtonSchulzScratch,
+    n_iters: u8,
 ) {
     assert_eq!(g.len(), rows * cols, "input matrix size mismatch");
     assert_eq!(out.len(), rows * cols, "output buffer size mismatch");
+    assert!(n_iters >= 1, "n_iters must be >= 1, got {n_iters}");
 
     if rows > cols {
         let cr = cols * rows;
         scratch.ensure_capacity(cols, rows);
         transpose(g, rows, cols, &mut scratch.gt_buf[..cr]);
         {
-            // Borrow scratch fields separately to avoid double-mut borrow.
             let NewtonSchulzScratch {
                 x,
                 a_mat,
@@ -280,7 +302,7 @@ pub fn newton_schulz5_into(
                 gt_buf,
                 ort_buf,
             } = scratch;
-            newton_schulz5_square_into_raw(
+            newton_schulz_n_square_into_raw(
                 &gt_buf[..cr],
                 cols,
                 rows,
@@ -290,6 +312,7 @@ pub fn newton_schulz5_into(
                 b_mat,
                 bx,
                 xt_buf,
+                n_iters,
             );
         }
         transpose(&scratch.ort_buf[..cr], cols, rows, out);
@@ -297,17 +320,31 @@ pub fn newton_schulz5_into(
     }
 
     scratch.ensure_capacity(rows, cols);
-    newton_schulz5_square_into(g, rows, cols, out, scratch);
+    newton_schulz_n_square_into(g, rows, cols, out, scratch, n_iters);
 }
 
-/// Core Newton-Schulz with scratch reuse.
+/// Newton-Schulz 5-iteration with pre-allocated scratch buffers.
+/// Equivalent to `newton_schulz_n_into(g, rows, cols, out, scratch, 5)`.
+#[cfg(feature = "newton_schulz")]
+pub fn newton_schulz5_into(
+    g: &[f32],
+    rows: usize,
+    cols: usize,
+    out: &mut [f32],
+    scratch: &mut NewtonSchulzScratch,
+) {
+    newton_schulz_n_into(g, rows, cols, out, scratch, 5);
+}
+
+/// Core Newton-Schulz N-iteration with scratch reuse.
 #[inline]
-fn newton_schulz5_square_into(
+fn newton_schulz_n_square_into(
     g: &[f32],
     m: usize,
     n: usize,
     out: &mut [f32],
     scratch: &mut NewtonSchulzScratch,
+    n_iters: u8,
 ) {
     let mn = m * n;
     let mm = m * m;
@@ -319,7 +356,7 @@ fn newton_schulz5_square_into(
         xt_buf,
         ..
     } = scratch;
-    newton_schulz5_square_into_raw(
+    newton_schulz_n_square_into_raw(
         g,
         m,
         n,
@@ -329,12 +366,13 @@ fn newton_schulz5_square_into(
         &mut b_mat[..mm],
         &mut bx[..mn],
         &mut xt_buf[..mn],
+        n_iters,
     );
 }
 
 /// Raw implementation operating on individual scratch slices.
 #[allow(clippy::too_many_arguments)]
-fn newton_schulz5_square_into_raw(
+fn newton_schulz_n_square_into_raw(
     g: &[f32],
     m: usize,
     n: usize,
@@ -344,6 +382,7 @@ fn newton_schulz5_square_into_raw(
     b_mat: &mut [f32],
     bx: &mut [f32],
     xt_buf: &mut [f32],
+    n_iters: u8,
 ) {
     let mn = m * n;
     let mm = m * m;
@@ -362,7 +401,7 @@ fn newton_schulz5_square_into_raw(
     let bx = &mut bx[..mn];
     let xt_buf = &mut xt_buf[..mn];
 
-    for _ in 0..ITERS {
+    for _ in 0..n_iters {
         matmul_xtx(x, m, n, a_mat);
         // B = B·A + C·A², where A is symmetric (from X·Xᵀ), so A² is symmetric.
         // Exploit symmetry: compute upper triangle + mirror instead of full matmul.

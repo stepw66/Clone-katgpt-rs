@@ -81,7 +81,7 @@ pub fn spectral_flatness(
     let mut sum: f64 = 0.0;
     let mut count: usize = 0;
 
-    for bin in scratch.iter().take(spectrum_end + 1).skip(1) {
+    for bin in &scratch[1..=spectrum_end] {
         let mag_sq = bin.re as f64 * bin.re as f64 + bin.im as f64 * bin.im as f64;
         if mag_sq <= 0.0 {
             continue; // skip zero bins (they'd kill geometric mean)
@@ -284,20 +284,17 @@ impl IrrepPruner {
     fn rebuild_sorted_indices(&mut self) {
         let n = self.logits.len();
         self.sorted_indices.clear();
-        // SAFETY: indices are in-bounds by construction
         self.sorted_indices.extend(0..n);
 
         let k = self.valid_count.min(n);
         if k < n {
-            // Partial sort: partition into top-k and rest
+            // Partial sort: partition into top-k and rest. No need to sort
+            // the top-k portion — bitset membership is order-independent.
             self.sorted_indices
                 .select_nth_unstable_by(k, |&a, &b| self.logits[b].total_cmp(&self.logits[a]));
-            // Sort just the top-k portion for determinism
-            self.sorted_indices[..k]
-                .sort_unstable_by(|&a, &b| self.logits[b].total_cmp(&self.logits[a]));
         }
 
-        // Build bitset from sorted top-k.
+        // Build bitset from top-k (unsorted — bitset is order-independent).
         // Each u64 word holds 64 bits — 8× fewer cachelines than Vec<bool>.
         self.vocab_len = n;
         let n_words = n.div_ceil(64);

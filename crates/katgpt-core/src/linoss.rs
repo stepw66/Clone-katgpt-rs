@@ -184,14 +184,13 @@ impl LinOSSCell {
                 z: vec![0.0f32; h],
             })
             .collect();
-        for step in 0..n {
+        for (step, result) in results.iter_mut().enumerate() {
             let base = step * h;
-            let state = &mut results[step];
             for j in 0..h {
-                state.y[j] = scratch.pa[base + j] * initial.y[j]
+                result.y[j] = scratch.pa[base + j] * initial.y[j]
                     + scratch.pb[base + j] * initial.z[j]
                     + scratch.pby[base + j];
-                state.z[j] = scratch.pc[base + j] * initial.y[j]
+                result.z[j] = scratch.pc[base + j] * initial.y[j]
                     + scratch.pd[base + j] * initial.z[j]
                     + scratch.pbz[base + j];
             }
@@ -462,8 +461,8 @@ impl VocabFourierBasis {
         for ki in 0..self.k {
             let c = coefficients.get(ki).copied().unwrap_or(0.0);
             let mode_start = ki * self.vocab_dim;
-            for d in 0..vd {
-                result[d] += c * self.modes[mode_start + d];
+            for (d, result_d) in result.iter_mut().enumerate().take(vd) {
+                *result_d += c * self.modes[mode_start + d];
             }
         }
     }

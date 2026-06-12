@@ -77,15 +77,15 @@ pub fn fft_smooth_into(
     for x in 0..w {
         // Gather column via stride arithmetic
         let mut idx = x;
-        for y in 0..h {
-            col_buf[y] = buf[idx];
+        for (y, item) in col_buf.iter_mut().enumerate().take(h) {
+            *item = buf[idx];
             idx += w;
         }
         col_fwd.process(col_buf);
         // Scatter column back
         idx = x;
-        for y in 0..h {
-            buf[idx] = col_buf[y];
+        for (y, &item) in col_buf.iter().enumerate().take(h) {
+            buf[idx] = item;
             idx += w;
         }
     }
@@ -123,14 +123,14 @@ pub fn fft_smooth_into(
     // Inverse columns
     for x in 0..w {
         let mut idx = x;
-        for y in 0..h {
-            col_buf[y] = buf[idx];
+        for (y, item) in col_buf.iter_mut().enumerate().take(h) {
+            *item = buf[idx];
             idx += w;
         }
         col_inv.process(col_buf);
         idx = x;
-        for y in 0..h {
-            buf[idx] = col_buf[y];
+        for (y, &item) in col_buf.iter().enumerate().take(h) {
+            buf[idx] = item;
             idx += w;
         }
     }
@@ -162,7 +162,7 @@ pub fn inflate_obstacles_with_snapshot(
 ) {
     let wu = w as usize;
     let hu = h as usize;
-    let words_per_row = (wu + 63) / 64;
+    let words_per_row = wu.div_ceil(64);
     let total_words = words_per_row * hu;
     assert!(blocked.len() >= total_words, "blocked bitfield too small");
     assert!(snapshot.len() >= total_words, "snapshot bitfield too small");
@@ -200,7 +200,7 @@ pub fn inflate_obstacles_with_snapshot(
 pub fn inflate_obstacles(blocked: &mut [u64], w: u16, h: u16, radius: u8) {
     let wu = w as usize;
     let hu = h as usize;
-    let words_per_row = (wu + 63) / 64;
+    let words_per_row = wu.div_ceil(64);
     let total_words = words_per_row * hu;
     assert!(blocked.len() >= total_words, "blocked bitfield too small");
 

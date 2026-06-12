@@ -2345,16 +2345,19 @@ pub fn sparse_matmul(
     active_values: &mut [f32],
 ) -> usize {
     // Phase 1: Pack alive neurons (software TwELL formulation)
-    // Branch-free: mask = (val > 0.0) as usize avoids branch misprediction.
+    // Branch-predicted: with 95-99% sparsity, the branch is predicted correctly
+    // most of the time (~1 cycle), and we avoid the wasted store to active_values
+    // for dead neurons that the branch-free version always performed.
     let mut alive = 0;
     for c in 0..cols {
         let val = unsafe { *input.get_unchecked(c) };
-        let mask = (val > 0.0) as usize;
-        unsafe {
-            *active_indices.get_unchecked_mut(alive) = c;
-            *active_values.get_unchecked_mut(alive) = val;
+        if val > 0.0 {
+            unsafe {
+                *active_indices.get_unchecked_mut(alive) = c;
+                *active_values.get_unchecked_mut(alive) = val;
+            }
+            alive += 1;
         }
-        alive += mask;
     }
 
     // Phase 2: Sparse multiply — SIMD-accelerated (Plan 060 T5)
@@ -3641,9 +3644,7 @@ impl Default for ShardEmbedding {
 impl std::hash::Hash for ShardEmbedding {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         // Single write of all 32 bytes — fewer virtual calls than four write_u64.
-        state.write(unsafe {
-            std::slice::from_raw_parts(self.0.as_ptr() as *const u8, 32)
-        });
+        state.write(unsafe { std::slice::from_raw_parts(self.0.as_ptr() as *const u8, 32) });
     }
 }
 

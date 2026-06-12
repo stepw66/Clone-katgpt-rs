@@ -263,8 +263,8 @@ mod bake_store {
         /// Accumulate an observation (running sum, zero-alloc).
         pub fn observe(&mut self, observation: &[f32; 8]) {
             // Direct indexing for fixed-size array — LLVM unrolls fully.
-            for d in 0..8 {
-                self.accumulated_obs_sum[d] += observation[d];
+            for (d, obs_d) in observation.iter().enumerate() {
+                self.accumulated_obs_sum[d] += obs_d;
             }
             self.observation_count += 1;
         }
@@ -290,8 +290,8 @@ mod bake_store {
 
             let count = self.observation_count as f32;
             let mut mean_obs = [0.0f32; 8];
-            for d in 0..8 {
-                mean_obs[d] = self.accumulated_obs_sum[d] / count;
+            for (d, mean_d) in mean_obs.iter_mut().enumerate() {
+                *mean_d = self.accumulated_obs_sum[d] / count;
             }
 
             let effective_lambda = DEFAULT_OBS_PRECISION * count;

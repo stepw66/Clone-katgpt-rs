@@ -74,13 +74,10 @@ impl FlowField {
     /// O(1) flow-vector write. No-op for out-of-bounds.
     #[inline]
     pub fn set_flow(&mut self, x: u16, y: u16, dx: f32, dy: f32) {
-        match (x < self.w, y < self.h) {
-            (true, true) => {
-                let idx = (y as usize) * self.stride + (x as usize) * 2;
-                self.flow[idx] = dx;
-                self.flow[idx + 1] = dy;
-            }
-            _ => {}
+        if x < self.w && y < self.h {
+            let idx = (y as usize) * self.stride + (x as usize) * 2;
+            self.flow[idx] = dx;
+            self.flow[idx + 1] = dy;
         }
     }
 
@@ -130,7 +127,7 @@ impl LeoPotentialGrid {
     /// Create a zero-potential, all-unblocked grid.
     pub fn new(w: u16, h: u16) -> Self {
         let cells = (w as usize) * (h as usize);
-        let words = (cells + 63) / 64;
+        let words = cells.div_ceil(64);
         Self {
             w,
             h,
@@ -150,10 +147,10 @@ impl LeoPotentialGrid {
             cells * actions_per_cell,
             "q_values length mismatch"
         );
-        let words = (cells + 63) / 64;
+        let words = cells.div_ceil(64);
 
         let mut potential = vec![f32::NEG_INFINITY; cells];
-        for cell_idx in 0..cells {
+        for (cell_idx, potential_cell) in potential.iter_mut().enumerate() {
             let start = cell_idx * actions_per_cell;
             let mut max_q = f32::NEG_INFINITY;
             for a in 0..actions_per_cell {
@@ -163,7 +160,7 @@ impl LeoPotentialGrid {
                     max_q = val;
                 }
             }
-            potential[cell_idx] = max_q;
+            *potential_cell = max_q;
         }
 
         Self {
@@ -177,14 +174,11 @@ impl LeoPotentialGrid {
     /// Mark a cell as blocked (obstacle).
     #[inline]
     pub fn mark_blocked(&mut self, x: u16, y: u16) {
-        match (x < self.w, y < self.h) {
-            (true, true) => {
-                let cell = (y as usize) * (self.w as usize) + (x as usize);
-                let word = cell >> 6;
-                let bit = cell & 63;
-                self.blocked[word] |= 1u64 << bit;
-            }
-            _ => {}
+        if x < self.w && y < self.h {
+            let cell = (y as usize) * (self.w as usize) + (x as usize);
+            let word = cell >> 6;
+            let bit = cell & 63;
+            self.blocked[word] |= 1u64 << bit;
         }
     }
 
@@ -214,11 +208,8 @@ impl LeoPotentialGrid {
     /// Write a potential value at `(x, y)`. No-op for out-of-bounds.
     #[inline]
     pub fn set_potential(&mut self, x: u16, y: u16, val: f32) {
-        match (x < self.w, y < self.h) {
-            (true, true) => {
-                self.potential[(y as usize) * (self.w as usize) + (x as usize)] = val;
-            }
-            _ => {}
+        if x < self.w && y < self.h {
+            self.potential[(y as usize) * (self.w as usize) + (x as usize)] = val;
         }
     }
 

@@ -879,7 +879,7 @@ impl ConstraintPruner for ComposedPruner {
         parent_tokens: &[usize],
         results: &mut [bool],
     ) {
-        use crate::lattice_operad::{ComposedPruner as LatticeComposedPruner, PrunerExpr};
+        use crate::lattice_operad::ComposedPruner as LatticeComposedPruner;
 
         let len = candidates.len().min(results.len());
         if len == 0 {

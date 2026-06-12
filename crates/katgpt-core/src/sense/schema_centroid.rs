@@ -323,7 +323,7 @@ mod tests {
         };
         let hash = 42u64;
 
-        cache.insert(hash, stats.clone());
+        cache.insert(hash, stats);
         let retrieved = cache.get(hash).expect("should find inserted");
 
         assert_eq!(retrieved.count, 10);

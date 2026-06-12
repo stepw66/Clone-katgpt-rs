@@ -151,7 +151,7 @@ impl ContextStats {
 pub struct ConfiguratorBandit {
     /// Per-context Q-values and visit counts.
     /// Key: `(domain, entropy_bin, desperation_bin, epiplexity_bin)`, Value: stats for 4 arms.
-    stats: HashMap<(usize, usize, usize, u8), ContextStats>,
+    stats: HashMap<(usize, u8, u8, u8), ContextStats>,
 }
 
 impl ConfiguratorBandit {
@@ -339,9 +339,9 @@ impl EpiplexityArmHeuristic {
     ///
     /// Returns the heuristic suggestion. The caller should still use UCB1 for
     /// exploration — this is a warm-start hint, not a replacement.
-    pub fn suggest(epiplexity_bin: u8, entropy_bin: usize) -> PlanningDecision {
+    pub fn suggest(epiplexity_bin: u8, entropy_bin: u8) -> PlanningDecision {
         let high_s = epiplexity_bin >= Self::HIGH_THRESHOLD;
-        let high_h = entropy_bin >= Self::HIGH_THRESHOLD as usize;
+        let high_h = entropy_bin >= Self::HIGH_THRESHOLD;
 
         match (high_s, high_h) {
             // High S_T + Low H_T → structure-rich, predictable → extend existing plan
@@ -363,7 +363,7 @@ impl EpiplexityArmHeuristic {
     /// explore freely).
     pub fn consistency_bonus(
         epiplexity_bin: u8,
-        entropy_bin: usize,
+        entropy_bin: u8,
         decision: PlanningDecision,
     ) -> f32 {
         if Self::suggest(epiplexity_bin, entropy_bin) == decision {
