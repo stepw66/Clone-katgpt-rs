@@ -108,10 +108,7 @@ fn cg_solve_scalar(
 
     // For rank 0: project out constant null space
     let rhs_mean = match rank {
-        0 => {
-            let m = rhs.iter().sum::<f32>() / (n as f32);
-            m
-        }
+        0 => rhs.iter().sum::<f32>() / (n as f32),
         _ => 0.0,
     };
 
@@ -129,9 +126,16 @@ fn cg_solve_scalar(
         _ => Vec::new(),
     };
 
-    // Matvec closure: compute A·v for given v
-    let matvec = |cx: &CellComplex, v: &[f32], scratch: &mut [f32], out: &mut [f32]| {
-        let v_field = CochainField::from_vec(rank, 1, v.to_vec());
+    // Pre-allocate reusable cochain field for matvec — avoids v.to_vec() per iteration.
+    let mut v_field = CochainField::zeros(rank, n, 1);
+
+    // Matvec closure: compute A·v for given v (reuses v_field allocation)
+    let matvec = |cx: &CellComplex,
+                  v: &[f32],
+                  scratch: &mut [f32],
+                  v_field: &mut CochainField,
+                  out: &mut [f32]| {
+        v_field.data.copy_from_slice(v);
         let ax_field = match rank {
             0 => graph_laplacian(cx, &v_field, scratch),
             _ => hodge_laplacian(cx, &v_field),
@@ -141,10 +145,8 @@ fn cg_solve_scalar(
 
     // CG iterations: r = b, p = r, iterate
     x_out.fill(0.0f32);
-    let mut r = vec![0.0f32; n];
-    r.copy_from_slice(&b);
-    let mut p = vec![0.0f32; n];
-    p.copy_from_slice(&r);
+    let mut r = b.clone();
+    let mut p = r.clone();
     let mut ap = vec![0.0f32; n];
 
     let mut rs_old = dot(&r, &r);
@@ -157,7 +159,7 @@ fn cg_solve_scalar(
     }
 
     for _ in 0..max_iter {
-        matvec(cx, &p, &mut scratch, &mut ap);
+        matvec(cx, &p, &mut scratch, &mut v_field, &mut ap);
 
         let p_ap = dot(&p, &ap);
         if p_ap.abs() < 1e-20 {
@@ -521,22 +523,24 @@ pub fn hodge_spectrum(
     let mut eigenvalues = Vec::with_capacity(n_ev);
     let mut eigenvectors = Vec::with_capacity(n_ev);
 
+    // Pre-allocate reusable cochain field for hodge_laplacian calls.
+    let mut cochain = CochainField::zeros(rank, n, 1);
+
     for ev_idx in 0..n_ev {
         // Initialize with pseudo-random vector using simple LCG seeded by index
         let seed = (ev_idx + 7) as u32;
-        let mut x = vec![0.0f32; n];
+        let mut x = Vec::with_capacity(n);
         for i in 0..n {
             let val = simple_lcg(seed.wrapping_add(i as u32));
-            x[i] = (val as f32) / (u32::MAX as f32) - 0.5;
+            x.push((val as f32) / (u32::MAX as f32) - 0.5);
         }
 
         // Deflate: remove projection onto already-found eigenvectors
         deflate(&mut x, &eigenvectors);
         normalize_inplace(&mut x);
 
-        // Power iteration
+        // Power iteration — reuses cochain allocation across iterations
         for _ in 0..max_iter {
-            let mut cochain = CochainField::zeros(rank, n, 1);
             cochain.data.copy_from_slice(&x);
             let lap = hodge_laplacian(cx, &cochain);
             x.copy_from_slice(&lap.data);
@@ -554,7 +558,6 @@ pub fn hodge_spectrum(
         }
 
         // Rayleigh quotient: λ = xᵀΔx / (xᵀx)
-        let mut cochain = CochainField::zeros(rank, n, 1);
         cochain.data.copy_from_slice(&x);
         let lap = hodge_laplacian(cx, &cochain);
         let rayleigh: f32 = x.iter().zip(lap.data.iter()).map(|(&a, &b)| a * b).sum();

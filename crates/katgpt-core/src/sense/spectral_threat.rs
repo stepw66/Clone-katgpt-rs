@@ -206,9 +206,9 @@ impl CombatRhythmTracker {
             Some(s) => s,
             None => return,
         };
-        let rhythm = self.cells[slot]
-            .as_mut()
-            .expect("slot_for returned valid slot but cell is empty");
+        let Some(Some(rhythm)) = self.cells.get_mut(slot) else {
+            return;
+        };
 
         // Convert damage to forcing vector: normalized impulse across all dims
         let normalized = amount / self.max_damage;
@@ -254,9 +254,10 @@ impl CombatRhythmTracker {
     #[inline(always)]
     pub fn extract_features(&self, entity_id: u8) -> SpectralThreatFeatures {
         let rhythm = match self.slot_for(entity_id) {
-            Some(i) => self.cells[i]
-                .as_ref()
-                .expect("slot_for returned valid slot but cell is empty"),
+            Some(i) => match self.cells[i].as_ref() {
+                Some(r) => r,
+                None => return Self::DEFAULT_FEATURES,
+            },
             None => return Self::DEFAULT_FEATURES,
         };
 
@@ -314,9 +315,9 @@ impl CombatRhythmTracker {
             Some(i) => i,
             None => return,
         };
-        let rhythm = self.cells[rhythm]
-            .as_mut()
-            .expect("slot_for returned valid slot but cell is empty");
+        let Some(Some(rhythm)) = self.cells.get_mut(rhythm) else {
+            return;
+        };
         let ts_count = rhythm.damage_timestamp_count;
         if ts_count < 3 {
             return;
@@ -387,9 +388,9 @@ impl CombatRhythmTracker {
     /// Reset state for a participant (new encounter).
     pub fn reset(&mut self, entity_id: u8) {
         if let Some(i) = self.slot_for(entity_id) {
-            let rhythm = self.cells[i]
-                .as_mut()
-                .expect("slot_for returned valid slot but cell is empty");
+            let Some(Some(rhythm)) = self.cells.get_mut(i) else {
+                return;
+            };
             rhythm.state = LinOSSState::zeros(HIDDEN_DIM);
             rhythm.event_count = 0;
             rhythm.damage_timestamp_count = 0;
@@ -594,7 +595,9 @@ mod tests {
         tracker.auto_calibrate(1);
 
         // Verify at least one mode matches the observed frequency
-        let cell = tracker.cells[0].as_ref().expect("slot 0 should be occupied");
+        let cell = tracker.cells[0]
+            .as_ref()
+            .expect("slot 0 should be occupied");
         let snapped = cell
             .cell
             .omega_sq

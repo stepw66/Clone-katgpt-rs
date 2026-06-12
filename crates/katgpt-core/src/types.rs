@@ -192,6 +192,7 @@ pub struct DashAttnConfig {
     /// Prior strength σ for routing bias (default: 1e6, weak prior).
     pub sigma: f32,
     /// Whether to estimate diagonal attention contribution (default: true).
+    /// Tail-packed after f32 group to avoid bool-between-f32 padding.
     pub estimate_diagonal: bool,
 }
 
@@ -413,11 +414,12 @@ pub struct ConfiguratorContext {
     /// Domain index from bandit infrastructure.
     pub domain: usize,
     /// Coarse entropy bin: `floor(entropy * 10.0)`, clamped to 0..9.
-    pub entropy_bin: usize,
+    /// u8 — values are 0..9, packed after usize to avoid padding.
+    pub entropy_bin: u8,
     /// Coarse desperation bin: `floor(desperation * 10.0)`, clamped to 0..9.
     /// Plan 162 T11: emotion vector desperation score as additional context.
     /// 0 = not desperate, 9 = highly desperate.
-    pub desperation_bin: usize,
+    pub desperation_bin: u8,
     /// Coarse epiplexity bin: `floor(epiplexity * 10.0)`, clamped to 0..9.
     /// Plan 130 T4: structural information content (S_T) as additional context.
     /// 0 = no structure detectable, 9 = highly structured.
@@ -433,7 +435,7 @@ impl ConfiguratorContext {
     pub fn new(domain: usize, entropy_bin: usize) -> Self {
         Self {
             domain,
-            entropy_bin,
+            entropy_bin: (entropy_bin.min(9)) as u8,
             desperation_bin: 0,
             epiplexity_bin: 0,
         }
@@ -443,7 +445,7 @@ impl ConfiguratorContext {
     ///
     /// `floor(desperation * 10.0)`, clamped to 0..9.
     pub fn with_desperation(mut self, desperation: f32) -> Self {
-        self.desperation_bin = ((desperation * 10.0).floor() as usize).min(9);
+        self.desperation_bin = ((desperation * 10.0).floor() as u8).min(9);
         self
     }
 
@@ -463,7 +465,7 @@ impl ConfiguratorContext {
     /// epiplexity (S_T structural information) in one call.
     /// `desperation_bin` defaults to 0.
     pub fn from_entropy_epiplexity(domain: usize, entropy: f32, epiplexity: f32) -> Self {
-        let entropy_bin = ((entropy * 10.0).floor() as usize).min(9);
+        let entropy_bin = ((entropy * 10.0).floor() as u8).min(9);
         let epiplexity_bin = ((epiplexity * 10.0).floor() as u8).min(9);
         Self {
             domain,
@@ -3607,33 +3609,12 @@ impl ShardEmbedding {
     pub const DIM: usize = 8;
 
     /// Cosine similarity between two embeddings.
-    /// Unrolled for dim=8 — avoids loop overhead and helps register allocation.
+    /// Uses SIMD dot-product and SIMD sum-of-squares for the normalization.
     #[inline]
     pub fn cosine_similarity(&self, other: &Self) -> f32 {
-        let dot = self.0[0] * other.0[0]
-            + self.0[1] * other.0[1]
-            + self.0[2] * other.0[2]
-            + self.0[3] * other.0[3]
-            + self.0[4] * other.0[4]
-            + self.0[5] * other.0[5]
-            + self.0[6] * other.0[6]
-            + self.0[7] * other.0[7];
-        let sq_a = self.0[0] * self.0[0]
-            + self.0[1] * self.0[1]
-            + self.0[2] * self.0[2]
-            + self.0[3] * self.0[3]
-            + self.0[4] * self.0[4]
-            + self.0[5] * self.0[5]
-            + self.0[6] * self.0[6]
-            + self.0[7] * self.0[7];
-        let sq_b = other.0[0] * other.0[0]
-            + other.0[1] * other.0[1]
-            + other.0[2] * other.0[2]
-            + other.0[3] * other.0[3]
-            + other.0[4] * other.0[4]
-            + other.0[5] * other.0[5]
-            + other.0[6] * other.0[6]
-            + other.0[7] * other.0[7];
+        let dot = crate::simd::simd_dot_f32(&self.0, &other.0, Self::DIM);
+        let sq_a = crate::simd::simd_sum_sq(&self.0, Self::DIM);
+        let sq_b = crate::simd::simd_sum_sq(&other.0, Self::DIM);
         let denom = sq_a * sq_b;
         if denom < 1e-16 {
             return 0.0;

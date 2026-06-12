@@ -21,16 +21,15 @@ pub use steering::{blend_steering, flow_steering, should_use_flow_field};
 /// One per goal (or per goal-group for shared goals).
 /// Vectors are stored row-major as `[w * h * 2]` with `(dx, dy)` pairs.
 pub struct FlowField {
-    /// Flow vectors: `[w * h * 2]` — `(dx, dy)` per cell, row-major.
-    /// Normalised to unit length or zero for blocked cells.
-    flow: Vec<f32>,
     /// Pre-computed row stride in flow elements: `w as usize * 2`.
-    /// Avoids recomputing `w * 2` on every lookup/set/is_blocked call.
     stride: usize,
     /// Width in cells.
     pub w: u16,
     /// Height in cells.
     pub h: u16,
+    /// Flow vectors: `[w * h * 2]` — `(dx, dy)` per cell, row-major.
+    /// Normalised to unit length or zero for blocked cells.
+    flow: Vec<f32>,
 }
 
 impl FlowField {
@@ -117,14 +116,14 @@ impl FlowField {
 /// Intermediate structure — consumed by FFT smoothing then turned into a
 /// [`FlowField`] via [`Self::gradient`].
 pub struct LeoPotentialGrid {
-    /// Q-values: `[w * h]` — max-Q or expected value per cell for one goal.
-    potential: Vec<f32>,
-    /// Blocked cells (obstacles, walls). Bitfield, 1 = blocked.
-    blocked: Vec<u64>,
     /// Width in cells.
     pub w: u16,
     /// Height in cells.
     pub h: u16,
+    /// Q-values: `[w * h]` — max-Q or expected value per cell for one goal.
+    potential: Vec<f32>,
+    /// Blocked cells (obstacles, walls). Bitfield, 1 = blocked.
+    blocked: Vec<u64>,
 }
 
 impl LeoPotentialGrid {

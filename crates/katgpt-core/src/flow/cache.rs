@@ -14,9 +14,9 @@ use crate::traits::LeoHead;
 
 /// Per-goal cached flow field with dirty-tracking metadata.
 struct CachedField {
-    field: FlowField,
     /// Tick at which this field was last (re)computed.
     last_tick: u64,
+    field: FlowField,
     /// Number of cells changed since last compute.
     dirty_count: u16,
 }

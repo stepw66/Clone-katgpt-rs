@@ -30,6 +30,10 @@ use super::types::{CellComplex, CochainField};
 /// Edge flows are signed: positive = flow along edge orientation (tail→head).
 /// For a grid: horizontal edges index `y*(w-1)+x`, vertical edges index `(w-1)*h + y*w+x`.
 pub struct DecFlowField {
+    /// Grid width in vertices.
+    pub width: usize,
+    /// Grid height in vertices.
+    pub height: usize,
     /// Exact component — goal-seeking (gradient of potential). Per-edge flow values.
     pub exact: Vec<f32>,
     /// Coexact component — patrol/circulation (divergence-free). Per-edge flow values.
@@ -38,10 +42,6 @@ pub struct DecFlowField {
     pub harmonic: Vec<f32>,
     /// Combined weighted flow: `α·exact + β·coexact + γ·harmonic`. Per-edge.
     pub combined: Vec<f32>,
-    /// Grid width in vertices.
-    pub width: usize,
-    /// Grid height in vertices.
-    pub height: usize,
 }
 
 impl DecFlowField {
@@ -152,16 +152,17 @@ impl DecFlowField {
         // Average by dividing by degree (each interior vertex has degree 4, edges have 3, corners have 2)
         for y in 0..h {
             for x in 0..w {
-                let degree = match (x, y) {
-                    (0, 0) | (0, _) if y == h - 1 => 2,
-                    (_, 0) if x == w - 1 => 2,
-                    (_, _) if x == w - 1 && y == h - 1 => 2,
-                    (0, _) | (_, 0) | (_, _) if x == w - 1 || y == h - 1 => 3,
-                    _ => 4,
+                let is_interior_x = x > 0 && x < w - 1;
+                let is_interior_y = y > 0 && y < h - 1;
+                let degree = match (is_interior_x, is_interior_y) {
+                    (true, true) => 4,
+                    (false, false) => 2,
+                    _ => 3,
                 };
                 let idx = y * w + x;
-                vectors[idx][0] /= degree as f32;
-                vectors[idx][1] /= degree as f32;
+                let inv_degree = 1.0 / degree as f32;
+                vectors[idx][0] *= inv_degree;
+                vectors[idx][1] *= inv_degree;
             }
         }
 

@@ -65,13 +65,10 @@ impl MuxDemuxVerifier {
             }
         }
 
-        // Reuse sorted_tokens for output — write weight-sorted tokens directly into
-        // sorted_tokens buffer after uniqueness check is done with it.
-        for i in 0..len {
-            sorted_tokens[i] = pairs[i].0;
-        }
         let mut out_tokens = Vec::with_capacity(len);
-        out_tokens.extend_from_slice(&sorted_tokens[..len]);
+        for &(token, _) in &pairs[..len] {
+            out_tokens.push(token);
+        }
 
         DemuxResult {
             tokens: out_tokens,
@@ -114,12 +111,10 @@ impl MuxDemuxVerifier {
             }
         }
 
-        // Extract sorted-by-weight tokens into caller buffer — reuse sorted_tokens.
-        for i in 0..len {
-            sorted_tokens[i] = pairs[i].0;
-        }
         out_tokens.clear();
-        out_tokens.extend_from_slice(&sorted_tokens[..len]);
+        for &(token, _) in &pairs[..len] {
+            out_tokens.push(token);
+        }
 
         is_unique
     }
