@@ -53,7 +53,7 @@ pub fn spectral_flatness(
     planner: &mut FftPlanner<f64>,
 ) -> f32 {
     let n = logits.len();
-    assert!(n > 0, "spectral_flatness requires non-empty input");
+    debug_assert!(n > 0, "spectral_flatness requires non-empty input");
 
     // Prepare scratch buffer: resize if needed, then copy logits
     if scratch.len() < n {
@@ -351,8 +351,21 @@ impl ConstraintPruner for IrrepPruner {
         // Converged: all in-range valid
         if self.current_flatness >= self.convergence_threshold {
             let len = candidates.len().min(results.len());
-            for i in 0..len {
+            // Chunked bounds check — fewer branches than per-element comparison
+            let mut i = 0;
+            while i + 8 <= len {
                 results[i] = candidates[i] < self.logits.len();
+                results[i + 1] = candidates[i + 1] < self.logits.len();
+                results[i + 2] = candidates[i + 2] < self.logits.len();
+                results[i + 3] = candidates[i + 3] < self.logits.len();
+                results[i + 4] = candidates[i + 4] < self.logits.len();
+                results[i + 5] = candidates[i + 5] < self.logits.len();
+                results[i + 6] = candidates[i + 6] < self.logits.len();
+                results[i + 7] = candidates[i + 7] < self.logits.len();
+                i += 8;
+            }
+            for j in i..len {
+                results[j] = candidates[j] < self.logits.len();
             }
         } else {
             // Uncertain: check top-k membership via O(1) bitset

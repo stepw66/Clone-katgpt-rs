@@ -125,10 +125,14 @@ impl FlowFieldCache {
             return None;
         }
 
-        // Check for a valid cached entry.
-        let needs_recompute = match self.fields.get(&goal_id) {
-            Some(cached) => cached.dirty_count > 0 || cached.last_tick != tick,
-            None => true,
+        // Check for a valid cached entry via single lookup.
+        use std::collections::hash_map::Entry;
+        let needs_recompute = match self.fields.entry(goal_id) {
+            Entry::Occupied(e) => {
+                let cached = e.get();
+                cached.dirty_count > 0 || cached.last_tick != tick
+            }
+            Entry::Vacant(_) => true,
         };
         if !needs_recompute {
             return Some(&self.fields[&goal_id].field);

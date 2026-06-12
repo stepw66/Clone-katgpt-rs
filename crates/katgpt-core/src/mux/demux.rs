@@ -9,10 +9,10 @@ const MAX_DEMUX_K: usize = 32;
 /// Result of demultiplexing a superposition back to concrete token IDs.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DemuxResult {
-    /// Whether the recovery was unique (no duplicate tokens).
-    pub is_unique: bool,
     /// Ordered token IDs recovered from the superposition.
     pub tokens: Vec<u32>,
+    /// Whether the recovery was unique (no duplicate tokens).
+    pub is_unique: bool,
 }
 
 /// Verifies that a superposition span can be uniquely demultiplexed.
@@ -65,14 +65,13 @@ impl MuxDemuxVerifier {
             }
         }
 
-        // Single allocation: collect sorted-by-weight tokens into result Vec
-        // via stack buffer + extend_from_slice — avoids per-element push overhead.
-        let mut tmp: [u32; MAX_DEMUX_K] = [0; MAX_DEMUX_K];
+        // Reuse sorted_tokens for output — write weight-sorted tokens directly into
+        // sorted_tokens buffer after uniqueness check is done with it.
         for i in 0..len {
-            tmp[i] = pairs[i].0;
+            sorted_tokens[i] = pairs[i].0;
         }
         let mut out_tokens = Vec::with_capacity(len);
-        out_tokens.extend_from_slice(&tmp[..len]);
+        out_tokens.extend_from_slice(&sorted_tokens[..len]);
 
         DemuxResult {
             tokens: out_tokens,
@@ -115,13 +114,12 @@ impl MuxDemuxVerifier {
             }
         }
 
-        // Extract sorted-by-weight tokens into caller buffer.
-        let mut tmp: [u32; MAX_DEMUX_K] = [0; MAX_DEMUX_K];
+        // Extract sorted-by-weight tokens into caller buffer — reuse sorted_tokens.
         for i in 0..len {
-            tmp[i] = pairs[i].0;
+            sorted_tokens[i] = pairs[i].0;
         }
         out_tokens.clear();
-        out_tokens.extend_from_slice(&tmp[..len]);
+        out_tokens.extend_from_slice(&sorted_tokens[..len]);
 
         is_unique
     }

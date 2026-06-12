@@ -755,6 +755,8 @@ impl PeiraConfig {
 pub struct PeiraCovariance {
     /// Configuration.
     config: PeiraConfig,
+    /// Number of EMA updates applied.
+    step_count: usize,
     /// Cross-view covariance Σ (k×k), row-major.
     sigma: Vec<f64>,
     /// Within-view covariance N (k×k), row-major.
@@ -775,8 +777,6 @@ pub struct PeiraCovariance {
     /// Pre-allocated scratch for f32→f64 conversion in scalar outer product paths.
     s_scratch: Vec<f64>,
     t_scratch: Vec<f64>,
-    /// Number of EMA updates applied.
-    step_count: usize,
 }
 
 impl PeiraCovariance {
@@ -785,6 +785,7 @@ impl PeiraCovariance {
         let k = config.dim;
         Self {
             config,
+            step_count: 0,
             sigma: vec![0.0; k * k],
             n: vec![0.0; k * k],
             sigma_sample: vec![0.0; k * k],
@@ -798,7 +799,6 @@ impl PeiraCovariance {
             p_star: vec![0.0; k * k],
             s_scratch: vec![0.0; k],
             t_scratch: vec![0.0; k],
-            step_count: 0,
         }
     }
 
@@ -818,8 +818,8 @@ impl PeiraCovariance {
     #[inline]
     pub fn update(&mut self, student: &[f32], teacher: &[f32]) {
         let k = self.config.dim;
-        assert_eq!(student.len(), k, "student repr length mismatch");
-        assert_eq!(teacher.len(), k, "teacher repr length mismatch");
+        debug_assert_eq!(student.len(), k, "student repr length mismatch");
+        debug_assert_eq!(teacher.len(), k, "teacher repr length mismatch");
 
         let alpha = self.config.ema_rate;
 
@@ -1061,14 +1061,14 @@ pub fn peira_aux_loss(
     t_scratch: &mut [f64],
 ) -> f64 {
     let k = student.len();
-    assert_eq!(teacher.len(), k);
-    assert_eq!(p_star.len(), k * k);
-    assert_eq!(q_star.len(), k * k);
-    assert_eq!(sigma_sample.len(), k * k);
-    assert_eq!(n_sample.len(), k * k);
-    assert_eq!(pm.len(), k * k);
-    assert_eq!(s_scratch.len(), k);
-    assert_eq!(t_scratch.len(), k);
+    debug_assert_eq!(teacher.len(), k);
+    debug_assert_eq!(p_star.len(), k * k);
+    debug_assert_eq!(q_star.len(), k * k);
+    debug_assert_eq!(sigma_sample.len(), k * k);
+    debug_assert_eq!(n_sample.len(), k * k);
+    debug_assert_eq!(pm.len(), k * k);
+    debug_assert_eq!(s_scratch.len(), k);
+    debug_assert_eq!(t_scratch.len(), k);
 
     // Compute the auxiliary loss using the closed-form predictor:
     // L_aux = -½ Tr(Σ P*^T) + ¼ Tr(P* (N + λI) P*^T)

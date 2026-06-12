@@ -260,13 +260,12 @@ impl LinOSSCell {
     #[inline]
     pub fn energy(&self, state: &LinOSSState) -> f32 {
         let h = self.hidden_dim;
-        // Use f64 accumulator for precision over many dimensions.
-        let mut e = 0.0f64;
+        let mut e = 0.0f32;
         for i in 0..h {
-            e += state.y[i] as f64 * state.y[i] as f64
-                + self.omega_sq[i] as f64 * state.z[i] as f64 * state.z[i] as f64;
+            e += state.y[i] * state.y[i]
+                + self.omega_sq[i] * state.z[i] * state.z[i];
         }
-        e as f32
+        e
     }
 }
 

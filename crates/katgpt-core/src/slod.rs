@@ -319,11 +319,13 @@ impl SlodOperator {
         let mut lap = vec![0.0f32; n * n];
         for i in 0..n {
             let isd_i = inv_sqrt_d[i];
-            for (j, isd_j) in inv_sqrt_d.iter().enumerate().take(n) {
-                let idx = i * n + j;
-                let scaled = w[idx] * isd_i * isd_j;
-                lap[idx] = if i == j { 1.0 - scaled } else { -scaled };
+            let row_off = i * n;
+            for j in 0..n {
+                let idx = row_off + j;
+                let scaled = w[idx] * isd_i * inv_sqrt_d[j];
+                lap[idx] = -scaled;
             }
+            lap[row_off + i] += 1.0;
         }
 
         // Eigendecompose — reuse Jacobi from spectral_hierarchy
@@ -439,7 +441,8 @@ impl SlodOperator {
 
             // D_w(σ): diffusion entropy
             let mut entropy = 0.0f32;
-            for &w in &weights {
+            for i in 0..n {
+                let w = weights[i];
                 if w > 1e-10 {
                     let p = w / w_sum;
                     entropy -= p * p.ln();

@@ -30,14 +30,14 @@
 /// # Panics
 /// Panics if matrices are empty, non-square, or dimension-mismatched.
 pub fn eigenspace_alignment(gram: &[f32], reference: &[f32], n: usize, k: usize) -> f32 {
-    assert!(n > 0, "gram must be non-empty");
-    assert!(
+    debug_assert!(n > 0, "gram must be non-empty");
+    debug_assert!(
         reference.len() == n * n,
         "dimension mismatch: gram has {} elements, reference has {}",
         gram.len(),
         reference.len()
     );
-    assert_eq!(gram.len(), n * n, "gram must be n×n");
+    debug_assert_eq!(gram.len(), n * n, "gram must be n×n");
 
     let k = k.min(n);
     if k == 0 {
@@ -78,7 +78,7 @@ pub fn haar_wavelet_basis(depth: usize) -> (Vec<Vec<f32>>, Vec<Vec<Vec<f32>>>) {
     let n = 1 << depth; // 2^depth leaves
 
     // Scaling function: constant vector [1/sqrt(n), ..., 1/sqrt(n)]
-    let inv_sqrt_n = (1.0 / n as f64).sqrt() as f32;
+    let inv_sqrt_n = 1.0 / (n as f32).sqrt();
     let scaling = vec![inv_sqrt_n; n];
     let scaling_modes = vec![scaling];
 
@@ -89,7 +89,7 @@ pub fn haar_wavelet_basis(depth: usize) -> (Vec<Vec<f32>>, Vec<Vec<Vec<f32>>>) {
         let n_blocks = 1 << level; // number of parent blocks at this level
         let mut level_wavelets = Vec::with_capacity(n_blocks);
 
-        let inv_sqrt_bs = (1.0 / block_size as f64).sqrt() as f32;
+        let inv_sqrt_bs = 1.0 / (block_size as f32).sqrt();
         for block in 0..n_blocks {
             let mut wavelet = vec![0.0f32; n];
             let start = block * block_size;

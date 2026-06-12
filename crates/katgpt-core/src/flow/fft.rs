@@ -109,9 +109,10 @@ pub fn fft_smooth_into(
             let fx_raw = fx as f32;
             let fx_centered = fx_raw - w_f * ((fx_raw >= half_w) as u32 as f32);
             let r_sq = fx_centered * fx_centered + fyc_sq;
-            if r_sq > cutoff_r_sq {
-                buf[row_off + fx] = Complex::new(0.0, 0.0);
-            }
+            // Branch-free mask: multiply by 0.0 for out-of-band, 1.0 for in-band
+            let mask = (r_sq <= cutoff_r_sq) as u32 as f32;
+            buf[row_off + fx].re *= mask;
+            buf[row_off + fx].im *= mask;
         }
     }
 

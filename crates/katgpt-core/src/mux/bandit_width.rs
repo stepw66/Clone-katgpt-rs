@@ -6,9 +6,9 @@
 /// A single arm in the bandit, representing a candidate width.
 #[derive(Debug, Clone)]
 struct Arm {
-    total_reward: f32,
     width: usize,
     pulls: u32,
+    total_reward: f32,
 }
 
 impl Arm {
@@ -79,9 +79,11 @@ impl MuxBanditWidth {
     /// Update the arm for `width` with the observed `reward`.
     #[inline]
     pub fn update(&mut self, width: usize, reward: f32) {
-        if width >= 1 && width <= self.arms.len() {
-            // Arms are created as (1..=k), so arm index = width - 1.
-            self.arms[width - 1].update(reward);
+        match width.checked_sub(1) {
+            Some(idx) if idx < self.arms.len() => {
+                self.arms[idx].update(reward);
+            }
+            _ => {}
         }
     }
 }
