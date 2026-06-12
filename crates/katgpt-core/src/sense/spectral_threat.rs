@@ -88,7 +88,7 @@ struct LabeledRhythm {
     /// Observed damage tick timestamps for auto-calibration.
     damage_timestamps: [u32; MAX_TIMESTAMPS],
     /// Number of valid entries in `damage_timestamps`.
-    damage_timestamp_count: usize,
+    damage_timestamp_count: u32,
     /// Number of damage events ingested for this participant.
     event_count: u32,
     /// Entity ID (source of damage / tracked participant).
@@ -114,9 +114,9 @@ pub struct CombatRhythmTracker {
     /// Direct-indexed LUT: entity_id → slot index. u8::MAX = not registered.
     entity_lut: [u8; 256],
     /// Number of valid entries in `cells`.
-    cell_count: usize,
+    cell_count: u8,
     /// Hidden dimension — always HIDDEN_DIM. Kept for API compat.
-    hidden_dim: usize,
+    hidden_dim: u8,
     /// Timestep for imex_step (derived from tick rate, e.g. 16ms → 0.016).
     dt: f32,
     /// Maximum expected damage for forcing normalization.
@@ -136,7 +136,7 @@ impl CombatRhythmTracker {
             cells: [const { None }; HIDDEN_DIM],
             cell_count: 0,
             entity_lut: [u8::MAX; 256],
-            hidden_dim,
+            hidden_dim: hidden_dim as u8,
             dt,
             max_damage: 50.0,
             confidence_ramp: 5.0,
@@ -174,7 +174,7 @@ impl CombatRhythmTracker {
         if self.slot_for(entity_id).is_some() {
             return;
         }
-        if self.cell_count >= HIDDEN_DIM {
+        if self.cell_count as usize >= HIDDEN_DIM {
             return; // max tracked participants
         }
 
@@ -182,8 +182,8 @@ impl CombatRhythmTracker {
         cell.omega_sq.copy_from_slice(&Self::COMBAT_OMEGA_SQ);
         cell.beta.fill(Self::COMBAT_BETA);
 
-        self.entity_lut[entity_id as usize] = self.cell_count as u8;
-        self.cells[self.cell_count] = Some(LabeledRhythm {
+        self.entity_lut[entity_id as usize] = self.cell_count;
+        self.cells[self.cell_count as usize] = Some(LabeledRhythm {
             cell,
             state: LinOSSState::zeros(HIDDEN_DIM),
             forcing: [0.0; HIDDEN_DIM],
@@ -235,8 +235,8 @@ impl CombatRhythmTracker {
         // Only count real damage events for confidence ramp
         if amount > 0.0 {
             rhythm.event_count += 1;
-            if rhythm.damage_timestamp_count < MAX_TIMESTAMPS {
-                rhythm.damage_timestamps[rhythm.damage_timestamp_count] = _tick;
+            if (rhythm.damage_timestamp_count as usize) < MAX_TIMESTAMPS {
+                rhythm.damage_timestamps[rhythm.damage_timestamp_count as usize] = _tick;
                 rhythm.damage_timestamp_count += 1;
             }
         }
@@ -321,7 +321,7 @@ impl CombatRhythmTracker {
         let Some(Some(rhythm)) = self.cells.get_mut(rhythm) else {
             return;
         };
-        let ts_count = rhythm.damage_timestamp_count;
+        let ts_count = rhythm.damage_timestamp_count as usize;
         if ts_count < 3 {
             return;
         }

@@ -20,7 +20,7 @@ pub struct SenseOverride {
     /// Script ID if in scripted mode.
     pub script_id: Option<u64>,
     /// Number of valid entries in `pinned`.
-    pinned_count: usize,
+    pinned_count: u8,
     /// Pinned sense activations: (kind, value). If present, overrides autonomous.
     /// Fixed-size array avoids heap allocation — MAX_OVERRIDES slots.
     pub pinned: [(SenseKind, f32); MAX_OVERRIDES],
@@ -45,7 +45,7 @@ impl Default for SenseOverride {
 impl SenseOverride {
     fn rebuild_pin_lookup(&mut self) {
         self.pin_lookup = [None; SENSE_KIND_COUNT];
-        for i in 0..self.pinned_count {
+        for i in 0..self.pinned_count as usize {
             let (kind, value) = self.pinned[i];
             let idx = kind as usize;
             if idx < SENSE_KIND_COUNT {
@@ -67,7 +67,7 @@ impl SenseOverride {
         if idx < SENSE_KIND_COUNT {
             self.pin_lookup[idx]
         } else {
-            for i in 0..self.pinned_count {
+            for i in 0..self.pinned_count as usize {
                 if self.pinned[i].0 == kind {
                     return Some(self.pinned[i].1);
                 }
@@ -269,31 +269,31 @@ impl NpcBrain {
             // Fast path: O(1) check via pin_lookup
             if self.overrides.pin_lookup[idx].is_some() {
                 // Already pinned — update array entry and lookup in-place
-                for i in 0..self.overrides.pinned_count {
+                for i in 0..self.overrides.pinned_count as usize {
                     if self.overrides.pinned[i].0 == kind {
                         self.overrides.pinned[i].1 = value;
                         break;
                     }
                 }
                 self.overrides.pin_lookup[idx] = Some(value);
-            } else if self.overrides.pinned_count < MAX_OVERRIDES {
+            } else if (self.overrides.pinned_count as usize) < MAX_OVERRIDES {
                 // New pin — append to array and update single lookup slot
-                self.overrides.pinned[self.overrides.pinned_count] = (kind, value);
+                self.overrides.pinned[self.overrides.pinned_count as usize] = (kind, value);
                 self.overrides.pinned_count += 1;
                 self.overrides.pin_lookup[idx] = Some(value);
             }
         } else {
             // Unknown discriminant — fall back to linear scan
             let mut found = false;
-            for i in 0..self.overrides.pinned_count {
+            for i in 0..self.overrides.pinned_count as usize {
                 if self.overrides.pinned[i].0 == kind {
                     self.overrides.pinned[i].1 = value;
                     found = true;
                     break;
                 }
             }
-            if !found && self.overrides.pinned_count < MAX_OVERRIDES {
-                self.overrides.pinned[self.overrides.pinned_count] = (kind, value);
+            if !found && (self.overrides.pinned_count as usize) < MAX_OVERRIDES {
+                self.overrides.pinned[self.overrides.pinned_count as usize] = (kind, value);
                 self.overrides.pinned_count += 1;
             }
             self.overrides.rebuild_pin_lookup();
