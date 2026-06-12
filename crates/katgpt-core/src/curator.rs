@@ -11,7 +11,7 @@
 
 use std::collections::HashMap;
 
-use crate::merkle::{HASH_SIZE, MERKLE_OCTREE_LEAVES, MerkleOctree};
+use crate::merkle::{HASH_SIZE, MERKLE_OCTREE_INTERNAL, MERKLE_OCTREE_LEAVES, MerkleOctree};
 use crate::types::{SenseModule, TernaryDir};
 
 // ---------------------------------------------------------------------------
@@ -130,7 +130,7 @@ impl CuratorVerifier {
         let mut sum_sq = 0.0f64;
 
         for i in 0..MERKLE_OCTREE_LEAVES {
-            let leaf = tree.leaf_hash(i).expect("leaf index in bounds");
+            let leaf = &tree.hashes[MERKLE_OCTREE_INTERNAL + 1 + i];
             let val = u64::from_le_bytes([
                 leaf[0], leaf[1], leaf[2], leaf[3], leaf[4], leaf[5], leaf[6], leaf[7],
             ]);
