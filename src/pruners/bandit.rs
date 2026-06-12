@@ -450,7 +450,7 @@ impl<P: ScreeningPruner> BanditPruner<P> {
             #[cfg(feature = "bandit")]
             shared_stats: None,
             dual_cutoff: 0.0,
-            soft_route: true,
+            soft_route: false,
             soft_route_tau: 1.0,
             #[cfg(feature = "partial_scoring")]
             partial_scorer: None,
@@ -484,7 +484,7 @@ impl<P: ScreeningPruner> BanditPruner<P> {
             thompson_cache: vec![0.0; num_arms],
             shared_stats: Some(stats),
             dual_cutoff: 0.0,
-            soft_route: true,
+            soft_route: false,
             soft_route_tau: 1.0,
             #[cfg(feature = "partial_scoring")]
             partial_scorer: None,
@@ -519,7 +519,7 @@ impl<P: ScreeningPruner> BanditPruner<P> {
             #[cfg(feature = "bandit")]
             shared_stats: None,
             dual_cutoff: 0.0,
-            soft_route: true,
+            soft_route: false,
             soft_route_tau: 1.0,
             partial_scorer: Some(scorer),
             #[cfg(feature = "idea_divergence")]
@@ -554,7 +554,7 @@ impl<P: ScreeningPruner> BanditPruner<P> {
             #[cfg(feature = "bandit")]
             shared_stats: None,
             dual_cutoff: 0.0,
-            soft_route: true,
+            soft_route: false,
             soft_route_tau: 1.0,
             #[cfg(feature = "partial_scoring")]
             partial_scorer: None,
