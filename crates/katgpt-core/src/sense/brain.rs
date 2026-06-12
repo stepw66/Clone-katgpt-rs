@@ -54,6 +54,13 @@ impl SenseOverride {
         }
     }
 
+    /// Public accessor for pinned value by SenseKind.
+    /// Used by NpcBrainInput::from_brain() to extract override state.
+    #[inline]
+    pub fn pinned_value_brain(&self, kind: SenseKind) -> Option<f32> {
+        self.pinned_value(kind)
+    }
+
     #[inline]
     fn pinned_value(&self, kind: SenseKind) -> Option<f32> {
         let idx = kind as usize;

@@ -3,6 +3,7 @@
 //! Compresses game domain knowledge into fixed-type ternary bit-plane sense modules.
 //! NPCs compose modules at spawn time and query at ~45ns/tick via bitwise dot-product.
 
+pub mod backend;
 pub mod bake;
 pub mod bandit;
 pub mod batch;
@@ -19,6 +20,9 @@ pub mod serialize;
 #[cfg(feature = "spectral_threat")]
 pub mod spectral_threat;
 
+pub use backend::{
+    CpuTernaryBackend, MAX_MODULES, ModuleInput, NpcBrainBackend, NpcBrainInput, NpcBrainOutput,
+};
 #[cfg(feature = "bake_precision")]
 pub use bake::{BakePrecisionStore, BakeSession, PrecisionEntry};
 pub use bake::{
