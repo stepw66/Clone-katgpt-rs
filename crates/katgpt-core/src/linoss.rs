@@ -491,12 +491,12 @@ impl VocabFourierBasis {
 pub struct ModalSpecDrafter {
     cell: LinOSSCell,
     basis: VocabFourierBasis,
-    dt: f32,
-    hidden_dim: usize,
     /// Stored embeddings for nearest-token lookup.
     embeddings: Vec<Vec<f32>>,
     /// Pre-allocated zero-forcing buffer reused across `draft` calls.
     zero_forcing: Vec<f32>,
+    hidden_dim: usize,
+    dt: f32,
 }
 
 impl ModalSpecDrafter {
@@ -518,10 +518,10 @@ impl ModalSpecDrafter {
         Self {
             cell,
             basis,
-            dt: 0.1, // Default timestep — can be tuned per model.
-            hidden_dim,
             embeddings,
             zero_forcing,
+            hidden_dim,
+            dt: 0.1, // Default timestep — can be tuned per model.
         }
     }
 

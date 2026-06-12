@@ -118,12 +118,6 @@ pub struct IrrepPruner {
     /// Number of top-k tokens to keep when distribution is uncertain.
     /// When flatness < threshold, only tokens ranked in top-k by logit value are valid.
     pub top_k_when_uncertain: usize,
-    /// Threshold below which a step is considered "uncertain" (prune aggressively).
-    /// Default: 0.3. When spectral flatness < threshold → uncertain → top-k only.
-    /// Higher = more aggressive pruning.
-    pub convergence_threshold: f32,
-    /// Current spectral flatness (updated by set_logits).
-    current_flatness: f32,
     /// Cached FFT planner (avoids per-call allocation).
     planner: FftPlanner<f64>,
     /// Pre-allocated scratch buffer for FFT.
@@ -137,6 +131,12 @@ pub struct IrrepPruner {
     /// Each u64 word holds 64 bits. 8× denser than Vec<bool> — fills are
     /// 8× fewer cachelines touched, and 256K vocab fits in 4KB vs 256KB.
     top_k_bits: Vec<u64>,
+    /// Current spectral flatness (updated by set_logits).
+    current_flatness: f32,
+    /// Threshold below which a step is considered "uncertain" (prune aggressively).
+    /// Default: 0.3. When spectral flatness < threshold → uncertain → top-k only.
+    /// Higher = more aggressive pruning.
+    pub convergence_threshold: f32,
 }
 
 /// Configuration for [`IrrepPruner`].
@@ -144,17 +144,17 @@ pub struct IrrepPruner {
 /// Default: threshold=0.7, top_k=10, pre-alloc=0 (lazy).
 #[derive(Debug, Clone)]
 pub struct IrrepPrunerConfig {
+    pub max_vocab: usize,
     pub convergence_threshold: f32,
     pub top_k_when_uncertain: usize,
-    pub max_vocab: usize,
 }
 
 impl Default for IrrepPrunerConfig {
     fn default() -> Self {
         Self {
+            max_vocab: 0,
             convergence_threshold: 0.7,
             top_k_when_uncertain: 10,
-            max_vocab: 0,
         }
     }
 }
@@ -195,13 +195,13 @@ impl IrrepPruner {
             vocab_len: 0,
             valid_count: 0,
             top_k_when_uncertain,
-            convergence_threshold,
-            current_flatness: 0.0,
             planner: FftPlanner::new(),
             scratch: Vec::with_capacity(max_vocab),
             logits: Vec::with_capacity(max_vocab),
             sorted_indices: Vec::with_capacity(max_vocab),
             top_k_bits: Vec::with_capacity(bitset_words),
+            current_flatness: 0.0,
+            convergence_threshold,
         }
     }
 

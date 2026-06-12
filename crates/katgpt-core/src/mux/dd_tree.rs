@@ -58,12 +58,12 @@ impl LeafPaths {
 /// A node in the DD-tree that carries K tokens as a weighted span.
 #[derive(Debug, Clone)]
 pub struct MuxNode {
+    /// Child nodes (branching factor = width at this depth).
+    pub children: Vec<MuxNode>,
     /// Token IDs held in superposition at this node.
     pub tokens: Vec<u32>,
     /// Corresponding weights (logit values) for each token.
     pub weights: Arc<[f32]>,
-    /// Child nodes (branching factor = width at this depth).
-    pub children: Vec<MuxNode>,
 }
 
 impl MuxNode {
@@ -140,14 +140,14 @@ fn compositional_width(peaks: &[f32], base: usize) -> usize {
 /// DD-tree wrapper that manages superposition expansion.
 #[derive(Debug, Clone)]
 pub struct MuxDdTree {
+    /// Pruner for validating superposition spans.
+    pub pruner: MuxSpanPruner,
+    /// Root node.
+    pub root: MuxNode,
     /// Maximum superposition width per node.
     pub k: usize,
     /// Current depth of the tree.
     pub depth: usize,
-    /// Root node.
-    pub root: MuxNode,
-    /// Pruner for validating superposition spans.
-    pub pruner: MuxSpanPruner,
 }
 
 impl MuxDdTree {

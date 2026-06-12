@@ -21,10 +21,7 @@ use super::types::{CellComplex, CochainField, MAX_RANK};
 /// diagonal entry is the same, so we return that single scalar.
 ///
 /// TODO: Non-uniform grids need actual metric tensor — see Plan 251 T10.
-pub fn hodge_star(_cx: &CellComplex, rank: u8) -> f32 {
-    // Uniform grid: all cells have equal metric, so Mₖ = I (identity)
-    // Scale factor is 1.0 for all ranks on a uniform grid.
-    let _ = rank;
+pub fn hodge_star(_cx: &CellComplex, _rank: u8) -> f32 {
     1.0f32
 }
 
@@ -236,13 +233,30 @@ pub fn graph_laplacian(
         let (v_head, _e, _sign_h) = pair[1];
         let tail_start = v_tail * dim;
         let head_start = v_head * dim;
-        // Laplacian contribution for edge (tail, head):
-        //   output[tail] += potential[tail] - potential[head]
-        //   output[head] += potential[head] - potential[tail]
-        for d in 0..dim {
-            let diff = potential.data[tail_start + d] - potential.data[head_start + d];
-            output.data[tail_start + d] += diff;
-            output.data[head_start + d] -= diff;
+
+        // Chunked 4-wide to assist auto-vectorization
+        let chunks = dim / 4;
+        let remainder = dim % 4;
+        for c in 0..chunks {
+            let off = c * 4;
+            let diff0 = potential.data[tail_start + off] - potential.data[head_start + off];
+            let diff1 = potential.data[tail_start + off + 1] - potential.data[head_start + off + 1];
+            let diff2 = potential.data[tail_start + off + 2] - potential.data[head_start + off + 2];
+            let diff3 = potential.data[tail_start + off + 3] - potential.data[head_start + off + 3];
+            output.data[tail_start + off] += diff0;
+            output.data[head_start + off] -= diff0;
+            output.data[tail_start + off + 1] += diff1;
+            output.data[head_start + off + 1] -= diff1;
+            output.data[tail_start + off + 2] += diff2;
+            output.data[head_start + off + 2] -= diff2;
+            output.data[tail_start + off + 3] += diff3;
+            output.data[head_start + off + 3] -= diff3;
+        }
+        for d in 0..remainder {
+            let off = chunks * 4 + d;
+            let diff = potential.data[tail_start + off] - potential.data[head_start + off];
+            output.data[tail_start + off] += diff;
+            output.data[head_start + off] -= diff;
         }
     }
 

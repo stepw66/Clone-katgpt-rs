@@ -171,12 +171,12 @@ impl MoaActivation {
 /// - `up_gating`: `[MOA_DICT_SIZE × d_model]` — v_ℓ for each σ_ℓ (up branch)
 #[cfg(feature = "moa_inference")]
 pub struct MoaConfig {
-    /// Input dimension d_model
-    pub d_model: usize,
     /// Gate branch mixing params: [MOA_DICT_SIZE × d_model]
     pub gate_gating: Vec<f32>,
     /// Up branch mixing params: [MOA_DICT_SIZE × d_model]
     pub up_gating: Vec<f32>,
+    /// Input dimension d_model
+    pub d_model: usize,
 }
 
 #[cfg(feature = "moa_inference")]
@@ -187,9 +187,9 @@ impl MoaConfig {
     /// after sigmoid → each activation gets equal weight).
     pub fn new(d_model: usize) -> Self {
         Self {
-            d_model,
             gate_gating: vec![0.0; MOA_DICT_SIZE * d_model],
             up_gating: vec![0.0; MOA_DICT_SIZE * d_model],
+            d_model,
         }
     }
 }

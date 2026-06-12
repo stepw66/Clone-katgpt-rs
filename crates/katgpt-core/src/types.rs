@@ -3113,6 +3113,7 @@ pub trait DataGate {
 /// Sub-step integration strategy for the training-free loop.
 ///
 /// Controls how intermediate loop outputs are combined with the running state.
+#[repr(u8)]
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub enum SubStepStrategy {
     /// Damped Euler: x ← x + (1/K)·(y − x)

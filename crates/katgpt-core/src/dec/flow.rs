@@ -30,10 +30,6 @@ use super::types::{CellComplex, CochainField};
 /// Edge flows are signed: positive = flow along edge orientation (tail→head).
 /// For a grid: horizontal edges index `y*(w-1)+x`, vertical edges index `(w-1)*h + y*w+x`.
 pub struct DecFlowField {
-    /// Grid width in vertices.
-    pub width: usize,
-    /// Grid height in vertices.
-    pub height: usize,
     /// Exact component — goal-seeking (gradient of potential). Per-edge flow values.
     pub exact: Vec<f32>,
     /// Coexact component — patrol/circulation (divergence-free). Per-edge flow values.
@@ -42,6 +38,10 @@ pub struct DecFlowField {
     pub harmonic: Vec<f32>,
     /// Combined weighted flow: `α·exact + β·coexact + γ·harmonic`. Per-edge.
     pub combined: Vec<f32>,
+    /// Grid width in vertices.
+    pub width: usize,
+    /// Grid height in vertices.
+    pub height: usize,
 }
 
 impl DecFlowField {

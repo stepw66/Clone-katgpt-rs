@@ -168,13 +168,13 @@ impl CellComplex {
 /// - Rank 2 (faces): fluxes, vorticity, area-normalized quantities
 /// - Rank 3 (volumes): densities, mass, occupancy
 pub struct CochainField {
+    /// Flat feature data: `[n_k × dim]`, row-major.
+    /// `data[cell_idx * dim + d]` is the d-th feature of cell `cell_idx`.
+    pub data: Vec<f32>,
     /// Feature dimension per cell.
     pub dim: usize,
     /// Rank k of this cochain (0=vertex, 1=edge, 2=face, 3=volume).
     pub rank: u8,
-    /// Flat feature data: `[n_k × dim]`, row-major.
-    /// `data[cell_idx * dim + d]` is the d-th feature of cell `cell_idx`.
-    pub data: Vec<f32>,
 }
 
 impl CochainField {

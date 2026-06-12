@@ -1353,8 +1353,15 @@ pub fn maxsim_score_packed(
     let num_pairs = pair_q_ids.len();
     debug_assert_eq!(pair_d_ids.len(), num_pairs);
     debug_assert!(results.len() >= num_pairs, "results buffer too short");
-    debug_assert!(query_offsets.len() >= *pair_q_ids.iter().max().unwrap_or(&0) + 2);
-    debug_assert!(doc_offsets.len() >= *pair_d_ids.iter().max().unwrap_or(&0) + 2);
+    // Compute max indices in one pass instead of two .iter().max() scans
+    let mut max_q_id = 0usize;
+    let mut max_d_id = 0usize;
+    for p in 0..num_pairs {
+        max_q_id = max_q_id.max(pair_q_ids[p]);
+        max_d_id = max_d_id.max(pair_d_ids[p]);
+    }
+    debug_assert!(query_offsets.len() >= max_q_id.saturating_add(2));
+    debug_assert!(doc_offsets.len() >= max_d_id.saturating_add(2));
 
     for p in 0..num_pairs {
         let q_id = pair_q_ids[p];
@@ -2628,7 +2635,7 @@ pub fn sigmoid_margin_loss(
         // For positive pairs (adj=1): loss = softplus(-t·(score−b)), minimized when score → +∞
         // For negative pairs (adj=0): loss = softplus(+t·(score−b)), minimized when score → −∞
         // Branchless: 1.0 - 2.0 * (adj > 0.5) → -1.0 if positive, +1.0 if negative
-        let sign = 1.0 - 2.0 * (adj > 0.5) as u32 as f32;
+        let sign = 1.0 - 2.0 * f32::from(adj > 0.5);
         let x = temperature * (score - bias) * sign;
         total += softplus(x);
     }
@@ -2679,21 +2686,17 @@ pub fn compute_retrieval_margin(
     for i in 0..n_queries {
         let q_row = &queries[i * dim..(i + 1) * dim];
 
-        // Build positive set for this query via bitmap
+        // Build positive set and compute min positive score in one pass
         let pos_start = i * k;
         pos_bitmap.fill(false);
+        let mut pos_min = f32::INFINITY;
         for &idx in &neighborhoods[pos_start..pos_start + k] {
             if idx < n_docs {
                 pos_bitmap[idx] = true;
+                let d_row = &documents[idx * dim..(idx + 1) * dim];
+                let dot = simd_dot_f32(q_row, d_row, dim);
+                pos_min = pos_min.min(dot);
             }
-        }
-
-        // min positive score
-        let mut pos_min = f32::INFINITY;
-        for &j in &neighborhoods[pos_start..pos_start + k] {
-            let d_row = &documents[j * dim..(j + 1) * dim];
-            let dot = simd_dot_f32(q_row, d_row, dim);
-            pos_min = pos_min.min(dot);
         }
 
         // max negative score (all docs not in pos_set)

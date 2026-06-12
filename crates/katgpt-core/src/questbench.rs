@@ -653,16 +653,16 @@ pub fn tier_from_score(score: f32, config: &UnderspecConfig) -> MemoryTier {
 pub struct SyntheticCsp {
     /// The pruner that encodes the CSP constraints.
     pub pruner: Box<dyn crate::traits::ConstraintPruner>,
-    /// Depth at which the CSP is posed.
-    pub depth: usize,
-    /// Total vocabulary/domain size.
-    pub vocab_size: usize,
     /// Human-readable label for the CSP domain.
     pub label: String,
     /// Tokens already placed (known facts).
     pub placed_tokens: Vec<usize>,
     /// The ground-truth sufficient token(s).
     pub sufficient_answers: Vec<usize>,
+    /// Depth at which the CSP is posed.
+    pub depth: usize,
+    /// Total vocabulary/domain size.
+    pub vocab_size: usize,
 }
 
 /// Domain kind for synthetic CSP generation.
@@ -776,14 +776,17 @@ pub fn generate_synthetic_csps(count_per_domain: usize) -> Vec<SyntheticCsp> {
         };
         // OPT: reuse label_buf instead of format!() per iteration
         label_buf.clear();
-        let _ = core::fmt::write(&mut label_buf, format_args!("grid_{i}"));
+        // Writing to String is infallible, but handle the Result explicitly.
+        if core::fmt::write(&mut label_buf, format_args!("grid_{i}")).is_err() {
+            label_buf = format!("grid_{i}");
+        }
         csps.push(SyntheticCsp {
             pruner: Box::new(pruner),
-            depth: 0,
-            vocab_size,
             label: label_buf.clone(),
             placed_tokens: vec![],
             sufficient_answers: vec![key],
+            depth: 0,
+            vocab_size,
         });
     }
 
@@ -819,14 +822,16 @@ pub fn generate_synthetic_csps(count_per_domain: usize) -> Vec<SyntheticCsp> {
         };
         // OPT: reuse label_buf instead of format!() per iteration
         label_buf.clear();
-        let _ = core::fmt::write(&mut label_buf, format_args!("stone_{i}"));
+        if core::fmt::write(&mut label_buf, format_args!("stone_{i}")).is_err() {
+            label_buf = format!("stone_{i}");
+        }
         csps.push(SyntheticCsp {
             pruner: Box::new(pruner),
-            depth: 0,
-            vocab_size,
             label: label_buf.clone(),
             placed_tokens: vec![],
             sufficient_answers: vec![key],
+            depth: 0,
+            vocab_size,
         });
     }
 
@@ -853,14 +858,16 @@ pub fn generate_synthetic_csps(count_per_domain: usize) -> Vec<SyntheticCsp> {
         };
         // OPT: reuse label_buf instead of format!() per iteration
         label_buf.clear();
-        let _ = core::fmt::write(&mut label_buf, format_args!("logic_{i}"));
+        if core::fmt::write(&mut label_buf, format_args!("logic_{i}")).is_err() {
+            label_buf = format!("logic_{i}");
+        }
         csps.push(SyntheticCsp {
             pruner: Box::new(pruner),
-            depth: 0,
-            vocab_size,
             label: label_buf.clone(),
             placed_tokens: vec![],
             sufficient_answers: vec![key],
+            depth: 0,
+            vocab_size,
         });
     }
 

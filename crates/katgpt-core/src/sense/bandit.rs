@@ -17,9 +17,9 @@ struct KindAggregate {
 pub struct SenseTrial {
     pub npc_id: u32,
     pub action_taken: u32,
-    pub sense_kind: SenseKind,
     pub activation: f32,
     pub reward: f32,
+    pub sense_kind: SenseKind,
 }
 
 /// Trial log for sense module self-learning.

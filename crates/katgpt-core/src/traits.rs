@@ -1028,12 +1028,12 @@ pub trait PartialScorer: Send + Sync {
 #[cfg(feature = "problem_mutator")]
 #[derive(Clone, Debug)]
 pub struct GameConfig {
+    /// Maximum steps per episode.
+    pub max_steps: u32,
     /// Grid/board size (e.g., 9 for 9x9, 15 for 15x15).
     pub grid_size: u32,
     /// Number of opponents/NPCs.
     pub opponent_count: u32,
-    /// Maximum steps per episode.
-    pub max_steps: u32,
     /// Weight for survival objective in scoring.
     pub survival_weight: f32,
     /// Weight for kill/objective in scoring.
@@ -1044,9 +1044,9 @@ pub struct GameConfig {
 impl Default for GameConfig {
     fn default() -> Self {
         Self {
+            max_steps: 200,
             grid_size: 9,
             opponent_count: 1,
-            max_steps: 200,
             survival_weight: 0.5,
             kill_weight: 0.5,
         }
@@ -1070,12 +1070,12 @@ pub enum MutationKind {
 #[cfg(feature = "problem_mutator")]
 #[derive(Clone, Debug)]
 pub struct MutantConfig {
-    /// Estimated difficulty increase over seed config.
-    pub difficulty_delta: f32,
     /// Which mutation strategy was applied.
     pub mutation_kind: MutationKind,
     /// Human-readable description of the mutation.
     pub description: String,
+    /// Estimated difficulty increase over seed config.
+    pub difficulty_delta: f32,
 }
 
 /// Trait for mutating game configs into harder variants.

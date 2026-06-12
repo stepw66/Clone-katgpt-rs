@@ -144,7 +144,7 @@ pub struct TripleEvidence {
     /// Sum of confidence scores for recovered triples.
     pub confidence_sum: f32,
     /// Number of triples recovered.
-    pub count: u8,
+    pub count: u32,
 }
 
 impl TripleEvidence {
@@ -305,22 +305,22 @@ pub struct ReconstructionState {
     hla: [f32; 8],
     /// Accumulated evidence (H(t)).
     evidence: TripleEvidence,
-    /// Active octree nodes being explored (Z(t)).
-    /// Used in Phase 2 for full octree traversal.
-    #[allow(dead_code)]
-    active_nodes: [Option<OctreeNodeId>; 8],
     /// Configuration.
     config: ReconstructionConfig,
     /// Pre-computed projection weights (lazy init on first expand_matvec).
     /// None until `expand_matvec()` is called with a brain.
     #[cfg(feature = "sense_composition")]
     cached_weights: Option<ProjectionWeights>,
-    /// Current reconstruction step.
-    step: u8,
+    /// Active octree nodes being explored (Z(t)).
+    /// Used in Phase 2 for full octree traversal.
+    #[allow(dead_code)]
+    active_nodes: [Option<OctreeNodeId>; 8],
     /// Number of active nodes.
     /// Used in Phase 2 for full octree traversal.
     #[allow(dead_code)]
     n_active: u8,
+    /// Current reconstruction step.
+    step: u8,
 }
 
 impl ReconstructionState {
@@ -332,12 +332,12 @@ impl ReconstructionState {
         Self {
             hla,
             evidence: TripleEvidence::default(),
-            active_nodes,
             config: ReconstructionConfig::default(),
             #[cfg(feature = "sense_composition")]
             cached_weights: None,
-            step: 0,
+            active_nodes,
             n_active: 1,
+            step: 0,
         }
     }
 
@@ -349,12 +349,12 @@ impl ReconstructionState {
         Self {
             hla,
             evidence: TripleEvidence::default(),
-            active_nodes,
             config,
             #[cfg(feature = "sense_composition")]
             cached_weights: None,
-            step: 0,
+            active_nodes,
             n_active: 1,
+            step: 0,
         }
     }
 
@@ -862,7 +862,7 @@ pub struct ReconstructionResult {
     /// Final evidence state.
     pub evidence: TripleEvidence,
     /// Number of reconstruction steps taken.
-    pub steps: u8,
+    pub steps: u32,
 }
 
 /// Run side-by-side comparison: passive vs active reconstruction.
@@ -896,8 +896,8 @@ pub fn compare_reconstruction(
     ReconstructionResult {
         passive,
         active,
-        steps: state.step,
-        evidence: state.evidence.clone(),
+        steps: state.step() as u32,
+        evidence: state.evidence().clone(),
         hla_delta,
     }
 }

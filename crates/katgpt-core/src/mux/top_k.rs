@@ -16,7 +16,7 @@ pub fn extract_top_k_peaks(logits: &[f32], k: usize) -> Vec<f32> {
     }
     let mut values = logits.to_vec();
     // O(n) partial sort: partition so first k are the largest (unordered), then sort those k
-    let _ = values.select_nth_unstable_by(k - 1, |a, b| b.total_cmp(a));
+    let (_, _, _) = values.select_nth_unstable_by(k - 1, |a, b| b.total_cmp(a));
     values.truncate(k);
     values.sort_unstable_by(|a, b| b.total_cmp(a));
     values

@@ -9,10 +9,10 @@ const MAX_DEMUX_K: usize = 32;
 /// Result of demultiplexing a superposition back to concrete token IDs.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DemuxResult {
-    /// Ordered token IDs recovered from the superposition.
-    pub tokens: Vec<u32>,
     /// Whether the recovery was unique (no duplicate tokens).
     pub is_unique: bool,
+    /// Ordered token IDs recovered from the superposition.
+    pub tokens: Vec<u32>,
 }
 
 /// Verifies that a superposition span can be uniquely demultiplexed.

@@ -18,9 +18,8 @@ use crate::linoss::{LinOSSCell, LinOSSState};
 /// Spectral features extracted from LinOSS combat rhythm tracking.
 ///
 /// All fields are raw scalars — bridge from latent (LinOSS hidden) to raw (heuristic score).
-/// 16 bytes, `repr(C)` for deterministic layout.
+/// 16 bytes, all f32 — no padding regardless of repr.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
-#[repr(C)]
 pub struct SpectralThreatFeatures {
     /// Dominant combo frequency (ω²) — how fast the player cycles attacks.
     /// High value = fast combo, NPC should prioritize evasion.
@@ -73,6 +72,10 @@ fn sigmoid(x: f32) -> f32 {
 
 /// Per-participant LinOSS hidden state for combat rhythm tracking.
 struct LabeledRhythm {
+    /// LinOSS cell with pre-tuned ω² and β.
+    cell: LinOSSCell,
+    /// Hidden state (y, z) — oscillates with damage impulses.
+    state: LinOSSState,
     /// Pre-allocated forcing buffer — fixed-size to avoid heap alloc.
     forcing: [f32; HIDDEN_DIM],
     /// Pre-allocated scratch for in-place y output.
@@ -81,14 +84,10 @@ struct LabeledRhythm {
     z_buf: [f32; HIDDEN_DIM],
     /// Observed damage tick timestamps for auto-calibration.
     damage_timestamps: [u32; MAX_TIMESTAMPS],
-    /// LinOSS cell with pre-tuned ω² and β.
-    cell: LinOSSCell,
-    /// Hidden state (y, z) — oscillates with damage impulses.
-    state: LinOSSState,
-    /// Number of valid entries in `damage_timestamps`.
-    damage_timestamp_count: usize,
     /// Number of damage events ingested for this participant.
     event_count: u32,
+    /// Number of valid entries in `damage_timestamps`.
+    damage_timestamp_count: usize,
     /// Entity ID (source of damage / tracked participant).
     entity_id: u8,
 }
@@ -111,16 +110,16 @@ pub struct CombatRhythmTracker {
     cells: [Option<LabeledRhythm>; HIDDEN_DIM],
     /// Direct-indexed LUT: entity_id → slot index. u8::MAX = not registered.
     entity_lut: [u8; 256],
-    /// Number of valid entries in `cells`.
-    cell_count: usize,
-    /// Hidden dimension — always HIDDEN_DIM. Kept for API compat.
-    hidden_dim: usize,
     /// Timestep for imex_step (derived from tick rate, e.g. 16ms → 0.016).
     dt: f32,
     /// Maximum expected damage for forcing normalization.
     max_damage: f32,
     /// Minimum events before rhythm_confidence ramps above 0.
     confidence_ramp: f32,
+    /// Number of valid entries in `cells`.
+    cell_count: usize,
+    /// Hidden dimension — always HIDDEN_DIM. Kept for API compat.
+    hidden_dim: usize,
 }
 
 impl CombatRhythmTracker {

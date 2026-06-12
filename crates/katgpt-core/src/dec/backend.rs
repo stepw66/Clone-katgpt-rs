@@ -15,6 +15,7 @@
 
 /// DEC computation backend.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
 pub enum DecBackend {
     /// Scalar CPU — no SIMD, fallback for very small problems.
     Cpu,

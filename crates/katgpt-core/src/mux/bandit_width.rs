@@ -6,9 +6,9 @@
 /// A single arm in the bandit, representing a candidate width.
 #[derive(Debug, Clone)]
 struct Arm {
+    total_reward: f32,
     width: usize,
     pulls: u32,
-    total_reward: f32,
 }
 
 impl Arm {
@@ -30,9 +30,9 @@ impl Arm {
 /// Bandit-based width selector for MUX superposition expansion.
 #[derive(Debug, Clone)]
 pub struct MuxBanditWidth {
-    arms: Vec<Arm>,
     /// Exploration factor (higher = more exploration).
     pub exploration: f32,
+    arms: Vec<Arm>,
 }
 
 impl MuxBanditWidth {

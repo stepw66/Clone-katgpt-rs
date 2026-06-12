@@ -349,7 +349,7 @@ impl NpcBrain {
         ReconstructionResult {
             passive,
             active,
-            steps: state.step(),
+            steps: state.step() as u32,
             evidence: state.evidence().clone(),
             hla_delta,
         }
