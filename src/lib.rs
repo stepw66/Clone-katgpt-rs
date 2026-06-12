@@ -103,6 +103,8 @@ pub mod sp_kv;
 pub mod spec_reconciliation;
 #[cfg(feature = "spechop")]
 pub mod spechop;
+#[cfg(feature = "spectral_budget")]
+pub mod spectral_budget;
 #[cfg(feature = "spectral_quant")]
 pub mod spectralquant;
 pub mod speculative;
