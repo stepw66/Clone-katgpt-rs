@@ -125,24 +125,27 @@ impl CuratorVerifier {
     /// entropy should have non-trivial variance.
     #[inline]
     fn check_spectral(tree: &MerkleOctree, floor: f32) -> bool {
-        // Read all 64 leaf hashes as u64 values.
-        let mut sum = 0.0f64;
-        let mut sum_sq = 0.0f64;
-
+        // Process 64 leaf hashes as u64 via direct byte read.
+        // Single-pass Welford-style variance: numerically stable.
+        let n = MERKLE_OCTREE_LEAVES as f64;
+        let mut mean = 0.0f64;
+        let mut m2 = 0.0f64;
         for i in 0..MERKLE_OCTREE_LEAVES {
             let leaf = &tree.hashes[MERKLE_OCTREE_INTERNAL + 1 + i];
-            let val = u64::from_le_bytes([
-                leaf[0], leaf[1], leaf[2], leaf[3], leaf[4], leaf[5], leaf[6], leaf[7],
-            ]);
+            // SAFETY: leaf is [u8; 32], reading first 8 bytes as u64
+            let val = unsafe {
+                let ptr = leaf.as_ptr() as *const u64;
+                std::ptr::read_unaligned(ptr)
+            };
             let val = val as f64;
-            sum += val;
-            sum_sq += val * val;
+            // Welford online variance
+            let delta = val - mean;
+            mean += delta / (i as f64 + 1.0);
+            let delta2 = val - mean;
+            m2 += delta * delta2;
         }
 
-        let n = MERKLE_OCTREE_LEAVES as f64;
-        let mean = sum / n;
-        let variance = (sum_sq / n) - (mean * mean);
-
+        let variance = m2 / n;
         variance >= floor as f64
     }
 
@@ -396,13 +399,16 @@ impl CuratorBandit {
 /// - **Low accuracy (<50%)**: probation, weight → 0.
 #[inline]
 pub fn verification_weight(reputation: f32) -> f32 {
-    if reputation > 0.8 {
-        1.0 + (reputation - 0.8) * 5.0 // 1.0..2.0
-    } else if reputation < 0.5 {
-        0.0 // probation
-    } else {
-        reputation // linear 0.5..0.8 → 0.5..0.8
-    }
+    // Branchless: piecewise linear with sigmoid-like transition
+    // Below 0.5: 0.0 (probation)
+    // 0.5..0.8: linear ramp (reputation)
+    // Above 0.8: 1.0 + (reputation - 0.8) * 5.0 (1.0..2.0)
+    let prob_mask = (reputation >= 0.5) as u32 as f32;
+    let boosted_mask = (reputation > 0.8) as u32 as f32;
+    // For 0.5..0.8: linear_val = reputation, for > 0.8: base = 1.0
+    let linear_val = reputation * prob_mask * (1.0 - boosted_mask);
+    let boosted_val = (1.0 + (reputation - 0.8) * 5.0) * boosted_mask;
+    linear_val + boosted_val
 }
 
 // ---------------------------------------------------------------------------

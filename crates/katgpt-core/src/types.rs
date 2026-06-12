@@ -3051,8 +3051,8 @@ pub struct InferenceResult {
 
 /// Discriminator for different self-play task types.
 #[cfg(feature = "data_gate")]
-#[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
 pub enum TaskType {
     /// Python code output prediction
     CodeIO,
@@ -3139,8 +3139,8 @@ pub enum SubStepStrategy {
 ///
 /// Controls whether the window is applied as a single block or iterated
 /// layer-by-layer within each sub-step.
-#[repr(u8)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[repr(u8)]
 pub enum IterationMode {
     /// Apply the full window [a, b] as one block per sub-step.
     #[default]

@@ -56,9 +56,9 @@ impl MerkleOctree {
         // 1. Copy leaf hashes (index 9..=72)
         //    Leaf i → node index = MERKLE_OCTREE_INTERNAL + 1 + i
         //    Layout: root=0, internal=1..=8, leaves=9..=72.
-        for (i, leaf_hash) in leaf_hashes.iter().enumerate() {
-            tree.hashes[MERKLE_OCTREE_INTERNAL + 1 + i] = *leaf_hash;
-        }
+        // Bulk copy: all 64 leaf hashes are contiguous in both source and destination.
+        tree.hashes[MERKLE_OCTREE_INTERNAL + 1..=MERKLE_OCTREE_INTERNAL + MERKLE_OCTREE_LEAVES]
+            .copy_from_slice(leaf_hashes);
 
         // 2. Build internal nodes (index 1..=8) from their 8 children
         for i in (1..=MERKLE_OCTREE_INTERNAL).rev() {

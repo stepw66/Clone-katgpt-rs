@@ -260,8 +260,9 @@ impl SlodOperator {
 
         let k = config.effective_knn_k(n).min(n - 1).max(1);
 
-        // Build kNN adjacency + weight matrix
-        let mut w = vec![0.0f32; n * n];
+        // Build kNN adjacency + weight matrix directly into Laplacian storage.
+        // Single n×n allocation: reuse for both W and L.
+        let mut lap = vec![0.0f32; n * n];
         // Pre-allocate distance buffer — reused across iterations
         let mut dists: Vec<(usize, f32)> = Vec::with_capacity(n);
 
@@ -287,32 +288,25 @@ impl SlodOperator {
             // Take top-k nearest neighbors
             for &(j, d) in dists.iter().take(k_eff) {
                 let weight = (-d).exp();
-                w[i * n + j] = weight;
-                w[j * n + i] = weight; // symmetrize
+                lap[i * n + j] = weight;
+                lap[j * n + i] = weight; // symmetrize
             }
         }
 
-        // Degree vector (SIMD row-sums)
-        let mut degree = vec![0.0f32; n];
-        for i in 0..n {
-            degree[i] = crate::simd::simd_sum_f32(&w[i * n..(i + 1) * n]).max(1e-10);
-        }
-
-        // Precompute inv_sqrt(degree) once — avoids repeated sqrt in inner loop
+        // Degree vector + inv_sqrt(degree) in fused pass — avoids separate allocation
         let mut inv_sqrt_d = vec![0.0f32; n];
         for i in 0..n {
-            inv_sqrt_d[i] = 1.0 / degree[i].sqrt();
+            let row_off = i * n;
+            let degree = crate::simd::simd_sum_f32(&lap[row_off..row_off + n]).max(1e-10);
+            inv_sqrt_d[i] = 1.0 / degree.sqrt();
         }
 
         // Normalized Laplacian: L = I - D^{-1/2} W D^{-1/2}
-        let mut lap = vec![0.0f32; n * n];
+        // Transform W in-place into L
         for i in 0..n {
             let isd_i = inv_sqrt_d[i];
             let row_off = i * n;
-            // SIMD: copy w row into lap, scale by isd_i
-            lap[row_off..row_off + n].copy_from_slice(&w[row_off..row_off + n]);
             crate::simd::simd_scale_inplace(&mut lap[row_off..row_off + n], isd_i);
-            // SIMD: element-wise multiply by inv_sqrt_d, then negate
             crate::simd::simd_scale_mul_inplace(
                 &mut lap[row_off..row_off + n],
                 &inv_sqrt_d[..n],
@@ -791,16 +785,20 @@ fn mad_peak_picker(
         return Vec::new();
     }
 
-    // Compute median (O(n) via select_nth_unstable_by)
-    let mut sorted = composite.to_vec();
+    // Reuse a single scratch buffer for both median and MAD computation
+    let mut scratch: Vec<f32> = composite.to_vec();
     let mid = n / 2;
-    sorted.select_nth_unstable_by(mid, |a, b| a.total_cmp(b));
-    let median = sorted[mid];
 
-    // Compute MAD (O(n) via select_nth_unstable_by)
-    let mut deviations: Vec<f32> = composite.iter().map(|&x| (x - median).abs()).collect();
-    deviations.select_nth_unstable_by(mid, |a, b| a.total_cmp(b));
-    let mad = deviations[mid].max(1e-10);
+    // Compute median (O(n) via select_nth_unstable_by)
+    scratch.select_nth_unstable_by(mid, |a, b| a.total_cmp(b));
+    let median = scratch[mid];
+
+    // Compute MAD using same scratch buffer — fill with |x - median|
+    for (i, &x) in composite.iter().enumerate() {
+        scratch[i] = (x - median).abs();
+    }
+    scratch.select_nth_unstable_by(mid, |a, b| a.total_cmp(b));
+    let mad = scratch[mid].max(1e-10);
 
     // Find peaks where composite > median + β * MAD * 1.4826
     // (1.4826 is the consistency constant for normal distribution)
@@ -922,7 +920,8 @@ mod tests {
     #[test]
     fn zscore_zero_mean() {
         let signal = [1.0f32, 2.0, 3.0, 4.0, 5.0];
-        let z = zscore(&signal);
+        let mut z = [0.0f32; 5];
+        zscore_into(&signal, &mut z);
         let mean: f32 = z.iter().sum::<f32>() / z.len() as f32;
         assert!(near(mean, 0.0, 1e-5));
     }
