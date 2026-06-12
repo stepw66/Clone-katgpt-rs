@@ -46,7 +46,7 @@ pub mod channel_aware;
 pub mod entmax_router;
 #[cfg(feature = "vortex_flow")]
 pub mod meta_router;
-#[cfg(feature = "vortex_flow")]
+#[cfg(feature = "msa_sparse")]
 pub mod msa_distill;
 #[cfg(feature = "vortex_flow")]
 pub mod value_energy;
@@ -64,7 +64,7 @@ pub use channel_aware::{
 pub use entmax_router::{EntmaxCache, EntmaxRouter};
 #[cfg(feature = "vortex_flow")]
 pub use meta_router::{DynPolicy, DynRoutingCache, MetaRouter, compute_reward};
-#[cfg(feature = "vortex_flow")]
+#[cfg(feature = "msa_sparse")]
 pub use msa_distill::{MaxPoolBlockScorer, MaxStdDevBlockScorer, MsaBlockCache};
 #[cfg(feature = "vortex_flow")]
 pub use value_energy::{ValueEnergyCache, ValueEnergyRouter};

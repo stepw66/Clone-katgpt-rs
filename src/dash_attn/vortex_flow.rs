@@ -12,6 +12,7 @@ use super::block_topk::{BlockTopKCache, BlockTopKRouter};
 use super::channel_aware::{ChannelAwareCache, ChannelAwareRouter};
 use super::entmax_router::{EntmaxCache, EntmaxRouter};
 use super::meta_router::{DynPolicy, DynRoutingCache, MetaRouter};
+#[cfg(feature = "msa_sparse")]
 use super::msa_distill::{MaxPoolBlockScorer, MaxStdDevBlockScorer, MsaBlockCache};
 use super::value_energy::{ValueEnergyCache, ValueEnergyRouter};
 
@@ -94,8 +95,10 @@ pub enum VortexFlowConfig {
     /// Use MetaRouter (bandit-based policy selection).
     Meta,
     /// Use MSA MaxPoolBlockScorer (max Q·K per block, exp-free top-k).
+    #[cfg(feature = "msa_sparse")]
     MsaMaxPool,
     /// Use MSA MaxStdDevBlockScorer (max Q·K × sigmoid(std_dev)).
+    #[cfg(feature = "msa_sparse")]
     MsaMaxStdDev,
 }
 
@@ -149,8 +152,10 @@ pub enum VortexRouter {
     /// Meta-router (bandit-based policy selection over multiple routers).
     Meta(Box<MetaRouter>),
     /// MSA MaxPool block scorer (max Q·K per block).
+    #[cfg(feature = "msa_sparse")]
     MsaMaxPool(MaxPoolBlockScorer),
     /// MSA MaxStdDev block scorer (max Q·K × sigmoid(std_dev)).
+    #[cfg(feature = "msa_sparse")]
     MsaMaxStdDev(MaxStdDevBlockScorer),
 }
 
@@ -168,8 +173,10 @@ pub enum VortexRouterCache {
     /// Meta-router cache (dynamic routing cache).
     Meta(DynRoutingCache),
     /// MSA MaxPool cache.
+    #[cfg(feature = "msa_sparse")]
     MsaMaxPool(MsaBlockCache),
     /// MSA MaxStdDev cache.
+    #[cfg(feature = "msa_sparse")]
     MsaMaxStdDev(MsaBlockCache),
 }
 
@@ -182,7 +189,9 @@ impl VortexRouterCache {
             Self::ValueEnergy(c) => c.n_blocks,
             Self::ChannelAware(c) => c.n_blocks,
             Self::Meta(c) => c.n_blocks(),
+            #[cfg(feature = "msa_sparse")]
             Self::MsaMaxPool(c) => c.n_blocks,
+            #[cfg(feature = "msa_sparse")]
             Self::MsaMaxStdDev(c) => c.n_blocks,
         }
     }
@@ -201,7 +210,9 @@ impl VortexRouter {
                 DynPolicy::Entmax(EntmaxRouter::default_router()),
                 DynPolicy::ValueEnergy(ValueEnergyRouter::new(true)),
             ]))),
+            #[cfg(feature = "msa_sparse")]
             VortexFlowConfig::MsaMaxPool => Self::MsaMaxPool(MaxPoolBlockScorer::new(128)),
+            #[cfg(feature = "msa_sparse")]
             VortexFlowConfig::MsaMaxStdDev => Self::MsaMaxStdDev(MaxStdDevBlockScorer::new(128)),
             VortexFlowConfig::DashAttn => {
                 unreachable!("DashAttn does not produce a VortexRouter; check is_vortex() first")
@@ -237,9 +248,11 @@ impl VortexFlow for VortexRouter {
             (Self::Meta(r), VortexRouterCache::Meta(c)) => {
                 r.forward_cache(c, keys, values, block_idx, head_dim)
             }
+            #[cfg(feature = "msa_sparse")]
             (Self::MsaMaxPool(r), VortexRouterCache::MsaMaxPool(c)) => {
                 r.forward_cache(c, keys, values, block_idx, head_dim)
             }
+            #[cfg(feature = "msa_sparse")]
             (Self::MsaMaxStdDev(r), VortexRouterCache::MsaMaxStdDev(c)) => {
                 r.forward_cache(c, keys, values, block_idx, head_dim)
             }
@@ -271,9 +284,11 @@ impl VortexFlow for VortexRouter {
             (Self::Meta(r), VortexRouterCache::Meta(c)) => {
                 r.forward_indexer(query, c, n_blocks, top_k, scratch)
             }
+            #[cfg(feature = "msa_sparse")]
             (Self::MsaMaxPool(r), VortexRouterCache::MsaMaxPool(c)) => {
                 r.forward_indexer(query, c, n_blocks, top_k, scratch)
             }
+            #[cfg(feature = "msa_sparse")]
             (Self::MsaMaxStdDev(r), VortexRouterCache::MsaMaxStdDev(c)) => {
                 r.forward_indexer(query, c, n_blocks, top_k, scratch)
             }
@@ -294,9 +309,11 @@ impl VortexFlow for VortexRouter {
                 VortexRouterCache::ChannelAware(r.cache_new(n_blocks_capacity, head_dim))
             }
             Self::Meta(r) => VortexRouterCache::Meta(r.cache_new(n_blocks_capacity, head_dim)),
+            #[cfg(feature = "msa_sparse")]
             Self::MsaMaxPool(r) => {
                 VortexRouterCache::MsaMaxPool(r.cache_new(n_blocks_capacity, head_dim))
             }
+            #[cfg(feature = "msa_sparse")]
             Self::MsaMaxStdDev(r) => {
                 VortexRouterCache::MsaMaxStdDev(r.cache_new(n_blocks_capacity, head_dim))
             }
