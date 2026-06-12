@@ -111,7 +111,7 @@ Trains a 109M-parameter Llama2 transformer (Stories110M) **directly on Apple Neu
 | SOLID/DRY? | ✅ |
 | Tests? | Needs benchmarks |
 
-**VERDICT: GAIN — but behind `ane_direct` feature flag, NOT default. Reference implementation for experimental path. Keep as issue, not plan — blocked on testing private API stability across macOS versions.**
+**VERDICT: GAIN — **UNBLOCKED** by coremltools public API (Research 224). Use `mb.program` instead of private `_ANEInMemoryModelDescriptor`. Updated in Issue 004.
 
 ### Fusion 3: Concat-Tap for Existing ANE Inference
 

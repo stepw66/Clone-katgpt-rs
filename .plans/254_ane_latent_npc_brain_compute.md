@@ -1,7 +1,7 @@
 # Plan 254: ANE-Latent NPC Brain Compute — Batch NPC Ops on Neural Engine
 
-**Source:** [Research 223 — maderix/ANE Distillation](../.research/223_maderix_ANE_Distillation_Verdict.md)
-**Related:** Plan 176 (GPU/ANE Offload), Plan 148 (PlasmaPath SIMD), Plan 240 (Sense Compression)
+**Source:** [Research 223 — maderix/ANE Distillation](../.research/223_maderix_ANE_Distillation_Verdict.md) + [Research 224 — coremltools Public API](../.research/224_coremltools_Public_API_ANE_Distillation_Verdict.md)
+**Related:** Plan 176 (GPU/ANE Offload), Plan 148 (PlasmaPath SIMD), Plan 240 (Sense Compression), Issue 004 (ANE CoreML Model Generation)
 **Status:** Pending GOAT
 **Goal:** Move NPC "think brain" compute (sense reconstruction, emotion projection, zone attention) from CPU SIMD to ANE batch dispatch. CPU free for physics/combat/anti-cheat. 1000 NPCs × 20Hz → one ANE batch.
 
@@ -99,17 +99,25 @@ else:
 
 **Key finding**: SenseModule uses ternary bit-plane projection (not float matmul). ANE path will need ternary-to-float conversion or custom MIL kernel. CPU baseline preserves exact ternary semantics.
 
-### Part 2: CoreML Model for NPC Brain
+### Part 2: CoreML Model for NPC Brain (coremltools public API)
 
-- [ ] Create `scripts/generate_npc_brain_model.py` — builds CoreML model with 3 ops:
-  - Op 1: sense matmul `[6×8] × [8]` + sigmoid → `[6]` (emotions)
-  - Op 2: dot-product `[8]·[8]` + sigmoid → `[1]` (emotion scalar)
-  - Op 3: dot-product `[8]·[8]` + sigmoid → `[1]` (zone weight)
-- [ ] Use Conv2d(1×1) trick from maderix for matmul → ANE-optimized
-- [ ] Generate `npc_brain.mlmodelc` (macOS)
+**Updated per Research 224**: Use `coremltools` `mb.program` public API instead of maderix private MIL string building. This removes the private API blocker from Issue 004.
+
+- [ ] Create `scripts/generate_npc_brain_model.py` using `mb.program` with 3 fused ops:
+  - Op 1: sense matmul `[B, 6, 8] × [B, 8, 1]` + sigmoid → `[B, 6]` (emotions)
+  - Op 2: dot-product `[B, 8]·[B, 8]` + sigmoid → `[B, 1]` (emotion scalar)
+  - Op 3: dot-product `[B, 8]·[B, 8]` + sigmoid → `[B, 1]` (zone weight)
+- [ ] Ternary-to-float weight conversion: lossless -1/0/+1 → f32 in Python script
+- [ ] Use `mb.linear` + `mb.sigmoid` (public API) instead of Conv2d(1×1) MIL kernel
+- [ ] Generate `npc_brain.mlpackage` (public format, `ct.convert(..., convert_to="mlprogram")`)
+- [ ] Apply INT8 per-tensor quantization via `coremltools.optimize.coreml.LinearQuantizer`
+- [ ] Verify ANE placement via `MLComputePlan` (all ops land on NE)
 - [ ] Generate `npc_brain_weights.bin` for Rust-side verification
-- [ ] Apply INT8 per-tensor quantization (ANE-verified from ane-book)
 - [ ] Validate ANE residency (timing check < 1ms for batch=1)
+
+**Stretch goals (from Research 224):**
+- [ ] Multifunction model: share weights between perception/emotion/zone (iOS 18+)
+- [ ] Stateful model: persistent NPC emotion accumulators via `read_state`/`coreml_update_state`
 
 ### Part 3: ANE NpcBrainBackend Implementation
 
@@ -181,5 +189,5 @@ The win is NOT per-NPC latency (SIMD wins at 75ns vs ANE 95µs dispatch). The wi
 | ANE not resident (CPU fallback) | Auto-route fallback to SIMD, log warning |
 | CoreML compile overhead on first run | One-time ~100ms, cached for process lifetime |
 | INT8 quantization accuracy loss | Verify cosine ≥ 0.99 vs FP32 SIMD |
-| Private API dependency (rane path) | coreml-native uses public API only |
+| Private API dependency | **ELIMINATED** — coremltools `mb.program` is public API (Research 224) |
 | Feature flag complexity | Single flag, clear fallback path |
