@@ -29,7 +29,7 @@
 //! ```
 
 use crate::traits::ConstraintPruner;
-use rustfft::{FftPlanner, num_complex::Complex};
+use rustfft::{FftPlanner, num_complex::Complex32};
 
 // ── Spectral Flatness Utility ────────────────────────────────────
 
@@ -44,23 +44,26 @@ use rustfft::{FftPlanner, num_complex::Complex};
 ///
 /// Uses pre-allocated scratch buffer for zero-alloc hot path.
 ///
+/// Uses `f32` FFT instead of `f64` — halves memory bandwidth and doubles SIMD
+/// throughput for this per-decode-step pruning heuristic.
+///
 /// # Panics
 ///
 /// Panics if `logits` is empty.
 pub fn spectral_flatness(
     logits: &[f32],
-    scratch: &mut Vec<Complex<f64>>,
-    planner: &mut FftPlanner<f64>,
+    scratch: &mut Vec<Complex32>,
+    planner: &mut FftPlanner<f32>,
 ) -> f32 {
     let n = logits.len();
     debug_assert!(n > 0, "spectral_flatness requires non-empty input");
 
     // Prepare scratch buffer: resize if needed, then copy logits
     if scratch.len() < n {
-        scratch.resize(n, Complex::new(0.0, 0.0));
+        scratch.resize(n, Complex32::new(0.0, 0.0));
     }
     for (i, &v) in logits.iter().enumerate() {
-        scratch[i] = Complex::new(v as f64, 0.0);
+        scratch[i] = Complex32::new(v, 0.0);
     }
 
     // 1D FFT (reuses cached planner)
@@ -73,12 +76,13 @@ pub fn spectral_flatness(
         return 0.0; // single-bin spectrum is trivially peaked
     }
 
+    // Accumulate in f64 to avoid precision loss in log/sum over many bins
     let mut log_sum: f64 = 0.0;
     let mut sum: f64 = 0.0;
     let mut count: usize = 0;
 
     for bin in scratch.iter().take(spectrum_end + 1).skip(1) {
-        let mag_sq = bin.re * bin.re + bin.im * bin.im;
+        let mag_sq = bin.re as f64 * bin.re as f64 + bin.im as f64 * bin.im as f64;
         if mag_sq <= 0.0 {
             continue; // skip zero bins (they'd kill geometric mean)
         }
@@ -118,10 +122,10 @@ pub struct IrrepPruner {
     /// Number of top-k tokens to keep when distribution is uncertain.
     /// When flatness < threshold, only tokens ranked in top-k by logit value are valid.
     pub top_k_when_uncertain: usize,
-    /// Cached FFT planner (avoids per-call allocation).
-    planner: FftPlanner<f64>,
-    /// Pre-allocated scratch buffer for FFT.
-    scratch: Vec<Complex<f64>>,
+    /// Cached FFT planner (avoids per-call allocation). Uses f32 for 2× throughput.
+    planner: FftPlanner<f32>,
+    /// Pre-allocated scratch buffer for FFT (f32 — halves memory vs f64).
+    scratch: Vec<Complex32>,
     /// Cached logits for rank-based gating.
     logits: Vec<f32>,
     /// Cached sorted indices (descending by logit value), updated by set_logits.

@@ -124,10 +124,7 @@ impl LinOSSCell {
         // Per-step transfer matrix: [[1, dt], [-ω²dt, 1]] with bias [0, dt*f]
         // Fused zero-fill + init: only write each element once instead of zero + overwrite.
         // a=1.0 and d=1.0 are constants; b=dt is constant; only c and bias_z vary per-step.
-        for buf in [
-            &mut scratch.bias_y,
-            &mut scratch.pbz,
-        ] {
+        for buf in [&mut scratch.bias_y, &mut scratch.pbz] {
             buf[..total].fill(0.0);
         }
         scratch.a[..total].fill(1.0);
@@ -262,8 +259,7 @@ impl LinOSSCell {
         let h = self.hidden_dim;
         let mut e = 0.0f32;
         for i in 0..h {
-            e += state.y[i] * state.y[i]
-                + self.omega_sq[i] * state.z[i] * state.z[i];
+            e += state.y[i] * state.y[i] + self.omega_sq[i] * state.z[i] * state.z[i];
         }
         e
     }
@@ -352,8 +348,10 @@ impl Default for ParallelScanScratch {
 /// Top-K Fourier modes of vocabulary embedding space.
 /// Pre-computed once at model load time — zero alloc on hot path.
 pub struct VocabFourierBasis {
-    /// Top-K Fourier mode coefficients: [K][vocab_dim].
-    pub modes: Vec<Vec<f32>>,
+    /// Top-K Fourier mode coefficients: flat `[K * vocab_dim]` row-major.
+    /// Access mode k via `&modes[k * vocab_dim..(k+1) * vocab_dim]`.
+    /// Single allocation avoids K pointer dereferences per reconstruction.
+    pub modes: Vec<f32>,
     /// Mode frequencies (angular frequency for each mode).
     pub frequencies: Vec<f32>,
     /// Number of modes.
@@ -380,6 +378,7 @@ impl VocabFourierBasis {
 
         let n = embeddings.len();
         let vocab_dim = embeddings[0].len();
+        let vd = vocab_dim;
         let n_candidates = (n * 2).min(256);
 
         // Phase 1: compute magnitudes with single pre-allocated scratch buffer.
@@ -409,31 +408,31 @@ impl VocabFourierBasis {
         magnitudes.truncate(k);
 
         // Phase 2: compute modes only for top-K (reuse cos_mode buffer).
-        let mut modes = Vec::with_capacity(magnitudes.len());
-        let mut frequencies = Vec::with_capacity(magnitudes.len());
-        for &(_mag, ci) in &magnitudes {
+        let k_actual = magnitudes.len();
+        let mut modes = vec![0.0f32; k_actual * vd];
+        let mut frequencies = Vec::with_capacity(k_actual);
+        for (ki, &(_mag, ci)) in magnitudes.iter().enumerate() {
             let omega = std::f32::consts::PI * (ci as f32 + 1.0) / n as f32;
             cos_mode.fill(0.0);
             for (i, emb) in embeddings.iter().enumerate() {
                 let cos_w = (omega * i as f32).cos();
-                for (d, cos_slot) in cos_mode.iter_mut().enumerate().take(vocab_dim) {
+                for (d, cos_slot) in cos_mode.iter_mut().enumerate().take(vd) {
                     *cos_slot += emb[d] * cos_w;
                 }
             }
             let inv_n = 1.0 / n as f32;
-            for val in cos_mode.iter_mut().take(vocab_dim) {
+            for val in cos_mode.iter_mut().take(vd) {
                 *val *= inv_n;
             }
-            modes.push(cos_mode.clone());
+            modes[ki * vd..ki * vd + vd].copy_from_slice(&cos_mode[..vd]);
             frequencies.push(omega);
         }
-        let k = modes.len();
 
         Self {
             modes,
             frequencies,
-            k,
-            vocab_dim,
+            k: k_actual,
+            vocab_dim: vd,
         }
     }
 
@@ -451,6 +450,8 @@ impl VocabFourierBasis {
     }
 
     /// Zero-alloc reconstruct into pre-allocated buffer.
+    ///
+    /// Uses flat modes buffer — no pointer chasing per mode.
     #[inline]
     pub fn reconstruct_into(&self, coefficients: &[f32], result: &mut [f32]) {
         if self.k == 0 {
@@ -458,10 +459,11 @@ impl VocabFourierBasis {
         }
         let vd = self.vocab_dim.min(result.len());
         result[..vd].fill(0.0);
-        for (ki, mode) in self.modes.iter().enumerate() {
+        for ki in 0..self.k {
             let c = coefficients.get(ki).copied().unwrap_or(0.0);
+            let mode_start = ki * self.vocab_dim;
             for d in 0..vd {
-                result[d] += c * mode[d];
+                result[d] += c * self.modes[mode_start + d];
             }
         }
     }
@@ -484,8 +486,13 @@ impl VocabFourierBasis {
 pub struct ModalSpecDrafter {
     cell: LinOSSCell,
     basis: VocabFourierBasis,
-    /// Stored embeddings for nearest-token lookup.
-    embeddings: Vec<Vec<f32>>,
+    /// Stored embeddings for nearest-token lookup: flat `[vocab_size * vocab_dim]` row-major.
+    /// Single allocation avoids V pointer dereferences per `nearest_token` scan.
+    embeddings: Vec<f32>,
+    /// Embedding dimension per token.
+    emb_dim: usize,
+    /// Number of tokens in `embeddings`.
+    n_tokens: usize,
     /// Pre-allocated zero-forcing buffer reused across `draft` calls.
     zero_forcing: Vec<f32>,
     hidden_dim: usize,
@@ -503,8 +510,14 @@ impl ModalSpecDrafter {
         let cell = LinOSSCell::new(hidden_dim);
         let basis = VocabFourierBasis::from_embeddings(vocab_embeddings, n_modes);
 
-        // Store embeddings for nearest-token lookup.
-        let embeddings: Vec<Vec<f32>> = vocab_embeddings.iter().map(|e| e.to_vec()).collect();
+        // Flatten embeddings into single contiguous buffer
+        let emb_dim = vocab_embeddings.first().map_or(0, |e| e.len());
+        let n_tokens = vocab_embeddings.len();
+        let mut embeddings = vec![0.0f32; n_tokens * emb_dim];
+        for (i, emb) in vocab_embeddings.iter().enumerate() {
+            let copy_len = emb.len().min(emb_dim);
+            embeddings[i * emb_dim..i * emb_dim + copy_len].copy_from_slice(&emb[..copy_len]);
+        }
         // Pre-allocate zero-forcing buffer — reused across draft() calls.
         let zero_forcing = vec![0.0f32; hidden_dim];
 
@@ -512,6 +525,8 @@ impl ModalSpecDrafter {
             cell,
             basis,
             embeddings,
+            emb_dim,
+            n_tokens,
             zero_forcing,
             hidden_dim,
             dt: 0.1, // Default timestep — can be tuned per model.
@@ -523,7 +538,7 @@ impl ModalSpecDrafter {
     /// Zero-alloc per timestep using double-buffered scratch (y_a/z_a, y_b/z_b).
     /// Uses `imex_step_inplace` + `_into` variants to avoid Vec allocations in the hot loop.
     pub fn draft(&self, prompt_tokens: &[usize], n_draft: usize) -> Vec<usize> {
-        if n_draft == 0 || self.embeddings.is_empty() {
+        if n_draft == 0 || self.n_tokens == 0 {
             return vec![];
         }
         let h = self.hidden_dim;
@@ -541,8 +556,9 @@ impl ModalSpecDrafter {
 
         // Prompt encoding
         for &tok in prompt_tokens {
-            if tok < self.embeddings.len() {
-                self.project_to_hidden_into(&self.embeddings[tok], vocab_dim, &mut forcing);
+            if tok < self.n_tokens {
+                let emb = &self.embeddings[tok * self.emb_dim..(tok + 1) * self.emb_dim];
+                self.project_to_hidden_into(emb, vocab_dim, &mut forcing);
                 let (y_new, z_new) = self
                     .cell
                     .imex_step_inplace(&y_a, &z_a, &forcing, self.dt, &mut y_b, &mut z_b);
@@ -574,7 +590,7 @@ impl ModalSpecDrafter {
     /// Returns the number of drafted tokens written to `out`.
     pub fn draft_into(&self, prompt_tokens: &[usize], out: &mut [usize]) -> usize {
         let n_draft = out.len();
-        if n_draft == 0 || self.embeddings.is_empty() {
+        if n_draft == 0 || self.n_tokens == 0 {
             return 0;
         }
         let h = self.hidden_dim;
@@ -592,8 +608,9 @@ impl ModalSpecDrafter {
 
         // Prompt encoding
         for &tok in prompt_tokens {
-            if tok < self.embeddings.len() {
-                self.project_to_hidden_into(&self.embeddings[tok], vocab_dim, &mut forcing);
+            if tok < self.n_tokens {
+                let emb = &self.embeddings[tok * self.emb_dim..(tok + 1) * self.emb_dim];
+                self.project_to_hidden_into(emb, vocab_dim, &mut forcing);
                 let (y_new, z_new) = self
                     .cell
                     .imex_step_inplace(&y_a, &z_a, &forcing, self.dt, &mut y_b, &mut z_b);
@@ -660,15 +677,17 @@ impl ModalSpecDrafter {
         coeffs[n..].fill(0.0);
     }
 
-    /// Find nearest token via dot-product argmax.
+    /// Find nearest token via dot-product argmax over flat embedding buffer.
     /// Sigmoid is monotonic so argmax(dot) == argmax(sigmoid(dot)); skip it.
     #[inline]
     fn nearest_token(&self, query: &[f32]) -> usize {
-        let dim = query.len();
+        let dim = self.emb_dim.min(query.len());
         let mut best_idx = 0;
         let mut best_dot = f32::NEG_INFINITY;
-        for (i, emb) in self.embeddings.iter().enumerate() {
-            let dot = crate::simd::simd_dot_f32(emb, query, dim.min(emb.len()));
+        for i in 0..self.n_tokens {
+            let emb_start = i * self.emb_dim;
+            let dot =
+                crate::simd::simd_dot_f32(&self.embeddings[emb_start..emb_start + dim], query, dim);
             if dot > best_dot {
                 best_dot = dot;
                 best_idx = i;
