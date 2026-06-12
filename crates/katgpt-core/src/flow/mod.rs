@@ -88,11 +88,13 @@ impl FlowField {
     /// A cell is blocked when its flow vector is zero.
     #[inline]
     pub fn is_blocked(&self, x: u16, y: u16) -> bool {
-        if x >= self.w || y >= self.h {
-            return true;
+        match x < self.w && y < self.h {
+            true => {
+                let idx = (y as usize) * self.stride + (x as usize) * 2;
+                self.flow[idx] == 0.0 && self.flow[idx + 1] == 0.0
+            }
+            false => true,
         }
-        let idx = (y as usize) * self.stride + (x as usize) * 2;
-        self.flow[idx] == 0.0 && self.flow[idx + 1] == 0.0
     }
 
     #[inline]
