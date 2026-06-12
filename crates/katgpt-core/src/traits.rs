@@ -431,6 +431,8 @@ struct PlayerAgg {
 pub struct ActionSpaceLog {
     /// Running peak across all entries, tracked during record() for O(1) peak_action_space().
     peak: usize,
+    /// Running total sum of action counts for O(1) avg_action_space().
+    total_sum: f32,
     /// (tick, player_id, action_count) entries.
     /// Field order: usize (8B) → u32 (4B) → u8 (1B) = 16B vs 24B with (u32, u8, usize).
     entries: Vec<(usize, u32, u8)>,
@@ -453,6 +455,7 @@ impl ActionSpaceLog {
             entries: Vec::with_capacity(capacity),
             player_aggs: Vec::new(),
             peak: 0,
+            total_sum: 0.0,
         }
     }
 
@@ -468,6 +471,7 @@ impl ActionSpaceLog {
         }
         self.player_aggs[pid].sum += n as f32;
         self.player_aggs[pid].count += 1;
+        self.total_sum += n as f32;
         if n > self.peak {
             self.peak = n;
         }
@@ -485,13 +489,11 @@ impl ActionSpaceLog {
     }
 
     /// Average action space size across all entries.
+    /// O(1) via running total_sum tracked during record().
     pub fn avg_action_space(&self) -> f32 {
         match self.entries.is_empty() {
             true => 0.0,
-            false => {
-                self.entries.iter().map(|&(n, _, _)| n as f32).sum::<f32>()
-                    / self.entries.len() as f32
-            }
+            false => self.total_sum / self.entries.len() as f32,
         }
     }
 
@@ -520,6 +522,7 @@ impl ActionSpaceLog {
             agg.count = 0;
         }
         self.peak = 0;
+        self.total_sum = 0.0;
     }
 }
 
@@ -677,11 +680,9 @@ pub trait AllGoalsUpdate {
             .zip(next_q_max.iter())
             .zip(next_lambda_return.iter())
             .zip(done.iter())
-            .map(|(((&r, &q_max), &g_next), &d)| {
-                match d {
-                    true => r,
-                    false => r + gamma * (lambda * g_next + (1.0 - lambda) * q_max),
-                }
+            .map(|(((&r, &q_max), &g_next), &d)| match d {
+                true => r,
+                false => r + gamma * (lambda * g_next + (1.0 - lambda) * q_max),
             })
             .collect()
     }

@@ -72,12 +72,12 @@ impl SlodConfig {
 /// A detected scale boundary from the spectral analysis.
 #[derive(Debug, Clone)]
 pub struct ScaleBoundary {
-    /// Effective rank K* (number of significant eigenmodes) at this scale.
-    pub k_star: usize,
     /// Diffusion scale σ at which this boundary was detected.
     pub sigma: f32,
     /// Composite boundary score S(σ).
     pub score: f32,
+    /// Effective rank K* (number of significant eigenmodes) at this scale.
+    pub k_star: usize,
 }
 
 // ── SLoD Operator ─────────────────────────────────────────────────
@@ -117,16 +117,6 @@ pub fn poincare_distance(a: &[f32], b: &[f32], dim: usize) -> f32 {
 
     let inner = 1.0 + 2.0 * diff_sq / denom;
     inner.acosh()
-}
-
-/// Möbius addition in the Poincaré ball: a ⊕ b.
-///
-/// a ⊕ b = ((1 + 2<a,b> + ||b||²)a + (1 - ||a||²)b) / (1 + 2<a,b> + ||a||²||b||²)
-#[allow(dead_code)]
-fn mobius_add(a: &[f32], b: &[f32], dim: usize) -> Vec<f32> {
-    let mut result = vec![0.0f32; dim];
-    mobius_add_into(&mut result, a, b, dim);
-    result
 }
 
 /// In-place Möbius addition — zero-allocation hot path.
@@ -350,17 +340,13 @@ impl SlodOperator {
         }
 
         // Sort eigenvalues descending (and reorder eigenvectors to match)
-        let mut indexed: Vec<(usize, f32)> = eigenvalues
-            .iter()
-            .enumerate()
-            .map(|(i, &v)| (i, v))
-            .collect();
-        indexed.sort_unstable_by(|a, b| b.1.total_cmp(&a.1));
+        let mut indices: Vec<usize> = (0..eigenvalues.len()).collect();
+        indices.sort_unstable_by(|&a, &b| eigenvalues[b].total_cmp(&eigenvalues[a]));
 
-        let sorted_eigenvalues: Vec<f32> = indexed.iter().map(|&(_, v)| v).collect();
+        let sorted_eigenvalues: Vec<f32> = indices.iter().map(|&i| eigenvalues[i]).collect();
         let sorted_eigvecs = {
             let mut buf = vec![0.0f32; k_eigs * n];
-            for (out_row, &(src_row, _)) in indexed.iter().enumerate() {
+            for (out_row, &src_row) in indices.iter().enumerate() {
                 let src_off = src_row * n;
                 let dst_off = out_row * n;
                 buf[dst_off..dst_off + n].copy_from_slice(&eigvecs[src_off..src_off + n]);

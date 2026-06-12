@@ -17,15 +17,15 @@ const SENSE_KIND_COUNT: usize = 6;
 /// Per-NPC sense override configuration. GM always wins.
 #[derive(Clone, Debug)]
 pub struct SenseOverride {
+    /// Script ID if in scripted mode.
+    pub script_id: Option<u64>,
+    /// Number of valid entries in `pinned`.
+    pinned_count: usize,
     /// Pinned sense activations: (kind, value). If present, overrides autonomous.
     /// Fixed-size array avoids heap allocation — MAX_OVERRIDES slots.
     pub pinned: [(SenseKind, f32); MAX_OVERRIDES],
     /// O(1) pin lookup indexed by SenseKind discriminant. Rebuilt on pin/unpin.
     pin_lookup: [Option<f32>; SENSE_KIND_COUNT],
-    /// Script ID if in scripted mode.
-    pub script_id: Option<u64>,
-    /// Number of valid entries in `pinned`.
-    pinned_count: usize,
     /// If true, all autonomous computation is disabled; only pinned values returned.
     pub autonomous_disabled: bool,
 }
