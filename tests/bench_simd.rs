@@ -49,14 +49,18 @@ fn bench_simd_level() {
         SimdLevel::Scalar => "Scalar (no SIMD detected)",
         SimdLevel::Neon => "NEON (ARM)",
         SimdLevel::Avx2 => "AVX2 (x86_64)",
+        SimdLevel::WasmSimd128 => "WASM SIMD128 (wasm32)",
     };
-    println!("\n━━ SIMD Detection ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    println!("\n━━━ SIMD Detection ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     println!("  Level: {name}");
     println!("  arch:  {}", std::env::consts::ARCH);
     println!("  os:    {}", std::env::consts::OS);
     assert!(matches!(
         level,
-        SimdLevel::Neon | SimdLevel::Avx2 | SimdLevel::Scalar
+        SimdLevel::Neon
+            | SimdLevel::Avx2
+            | SimdLevel::WasmSimd128
+            | SimdLevel::Scalar
     ));
 }
 
@@ -511,6 +515,7 @@ fn bench_simd_feasibility_summary() {
         SimdLevel::Scalar => "Scalar",
         SimdLevel::Neon => "NEON",
         SimdLevel::Avx2 => "AVX2",
+        SimdLevel::WasmSimd128 => "WASM SIMD128",
     };
 
     let config = Config::micro();
