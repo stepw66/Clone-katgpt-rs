@@ -1050,3 +1050,11 @@ pub mod resid_pruner;
 
 #[cfg(feature = "rcd_residual")]
 pub use resid_pruner::ResidPruner;
+
+// ── Semiseparable Pruner (Plan 263) ────────────────────────────
+
+#[cfg(feature = "ss_pruner")]
+pub mod ss_pruner;
+
+#[cfg(feature = "ss_pruner")]
+pub use ss_pruner::SemiseparablePruner;

@@ -11,6 +11,8 @@ pub mod cache_prune;
 #[cfg(feature = "channel_simd_align")]
 pub mod channel_simd;
 pub mod cumprodsum;
+#[cfg(feature = "ssd_block")]
+pub mod ssd_block;
 #[cfg(feature = "dash_attn")]
 pub mod dash_attn;
 #[cfg(feature = "data_probe")]

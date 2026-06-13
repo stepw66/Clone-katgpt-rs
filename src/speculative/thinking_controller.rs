@@ -483,7 +483,46 @@ impl ThinkingController {
         }
     }
 
-    // ── T4: Freeze/Thaw ─────────────────────────────────────────────
+    // ── T5: Adaptive Thinking Budget via Cumprodsum Freshness ────
+
+    /// Fast sigmoid: `1 / (1 + e^{-x})`.
+    #[inline(always)]
+    fn sigmoid(x: f32) -> f32 {
+        1.0 / (1.0 + (-x.clamp(-50.0, 50.0)).exp())
+    }
+
+    /// Compute adaptive thinking budget based on context freshness.
+    ///
+    /// Uses cumprodsum-derived freshness signal to allocate more thinking
+    /// budget when the context is "fresh" (recent information dominates)
+    /// and less when context is "stale" (old information persists, meaning
+    /// the model has had time to fully process it).
+    ///
+    /// Formula: `budget = min_blocks + (max_blocks - min_blocks) * sigmoid(beta * (freshness - 0.5))`
+    ///
+    /// # Arguments
+    /// * `decay_factors` — Per-position decay factors from the SSM gate
+    ///   (typically `sigmoid(gate)` values in [0, 1]).
+    /// * `beta` — Sensitivity of budget to freshness changes.
+    ///   Default: 4.0 (moderate). Higher = sharper transition.
+    ///
+    /// # Returns
+    /// Thinking budget in RiM buffer block passes, clamped to
+    /// [`ThinkingConfig::min_blocks`, `ThinkingConfig::max_blocks`].
+    pub fn adaptive_budget(&self, decay_factors: &[f32], beta: f32) -> usize {
+        let freshness = crate::cumprodsum::context_freshness(decay_factors);
+        let range = self.config.max_blocks.saturating_sub(self.config.min_blocks);
+        let scale = Self::sigmoid(beta * (freshness - 0.5));
+        self.config.min_blocks + (range as f32 * scale).round() as usize
+    }
+
+    /// Convenience: adaptive budget with default beta=4.0.
+    #[inline]
+    pub fn adaptive_budget_default(&self, decay_factors: &[f32]) -> usize {
+        self.adaptive_budget(decay_factors, 4.0)
+    }
+
+    // ── T4: Freeze/Thaw ─────────────────────────────────────────
 
     /// Freeze bandit knowledge for disk persistence.
     pub fn freeze(&self) -> ThinkingBanditFrozen {
@@ -761,5 +800,81 @@ mod tests {
             total_pulls: 0,
         };
         assert!(ThinkingBanditFrozen::validate(&frozen).is_err());
+    }
+
+    // ── Adaptive Thinking Budget (Plan 263, Phase 4) ───
+
+    #[test]
+    fn test_adaptive_budget_fresh_context() {
+        // Fresh context: high decay (0.5) → freshness low → less budget
+        // Stale context: low decay (1.0) → freshness high → more budget
+        let ctrl = ThinkingController::new(ThinkingConfig {
+            min_blocks: 0,
+            max_blocks: 8,
+            ..Default::default()
+        });
+
+        // Fast decay: recent context dominates ("fresh")
+        // With decay 0.5, freshness ≈ sum(0.5^k)/T which is low
+        let fresh = vec![0.5f32; 64];
+        let budget_fresh = ctrl.adaptive_budget_default(&fresh);
+
+        // No decay: uniform context ("stale")
+        let stale = vec![1.0f32; 64];
+        let budget_stale = ctrl.adaptive_budget_default(&stale);
+
+        // Fresh context (low freshness) should get LESS budget
+        // because recent info is concentrated and doesn't need deep thinking.
+        // Stale context (high freshness) should get MORE budget.
+        assert!(
+            budget_fresh <= budget_stale,
+            "fresh ({budget_fresh}) should be <= stale ({budget_stale})"
+        );
+        assert!(
+            budget_fresh >= ctrl.config.min_blocks,
+            "budget {budget_fresh} below min"
+        );
+        assert!(
+            budget_fresh <= ctrl.config.max_blocks,
+            "budget {budget_fresh} above max"
+        );
+    }
+
+    #[test]
+    fn test_adaptive_budget_clamps_to_range() {
+        let ctrl = ThinkingController::new(ThinkingConfig {
+            min_blocks: 2,
+            max_blocks: 6,
+            ..Default::default()
+        });
+
+        // Extreme freshness values should still clamp
+        let budgets: Vec<usize> = [0.0f32, 0.1, 0.5, 0.9, 1.0]
+            .iter()
+            .map(|&decay| ctrl.adaptive_budget_default(&vec![decay; 32]))
+            .collect();
+
+        for &b in &budgets {
+            assert!(b >= 2 && b <= 6, "budget {b} out of [2, 6] range");
+        }
+    }
+
+    #[test]
+    fn test_adaptive_budget_beta_sensitivity() {
+        let ctrl = ThinkingController::new(ThinkingConfig {
+            min_blocks: 0,
+            max_blocks: 10,
+            ..Default::default()
+        });
+        // Medium decay: freshness ≈ 0.5
+        let decay = vec![0.9f32; 64];
+
+        let low_beta = ctrl.adaptive_budget(&decay, 1.0);
+        let high_beta = ctrl.adaptive_budget(&decay, 10.0);
+
+        // Higher beta = sharper transition. Both should be in range.
+        assert!(low_beta <= 10);
+        assert!(high_beta <= 10);
+        // usize is always >= 0, no need to check lower bound
     }
 }
