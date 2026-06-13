@@ -27,12 +27,15 @@ pub enum SimdLevel {
     Neon,
     /// x86 AVX2+FMA (8× f32 per operation).
     Avx2,
+    /// WASM SIMD128 (4× f32 per operation) — compile-time gated by `target_feature = "simd128"`.
+    WasmSimd128,
 }
 
 /// Detect the best available SIMD level for the current CPU.
 ///
 /// On `aarch64`: always returns [`SimdLevel::Neon`] (mandatory on ARMv8+).
 /// On `x86_64`: returns [`SimdLevel::Avx2`] if CPU supports AVX2+FMA, else [`SimdLevel::Scalar`].
+/// On `wasm32` with `+simd128`: returns [`SimdLevel::WasmSimd128`] (compile-time feature gate).
 /// On other architectures: returns [`SimdLevel::Scalar`].
 #[inline]
 pub fn simd_level() -> SimdLevel {
@@ -48,7 +51,15 @@ pub fn simd_level() -> SimdLevel {
             SimdLevel::Scalar
         }
     }
-    #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
+    #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+    {
+        SimdLevel::WasmSimd128
+    }
+    #[cfg(not(any(
+        target_arch = "aarch64",
+        target_arch = "x86_64",
+        all(target_arch = "wasm32", target_feature = "simd128")
+    )))]
     {
         SimdLevel::Scalar
     }
@@ -2531,9 +2542,104 @@ unsafe fn avx2_ternary_matvec(w: &TernaryWeights, x: &[f32], y: &mut [f32]) {
     } // unsafe
 }
 
+/// WASM SIMD128 ternary matvec — processes 4 f32 lanes per iteration using `v128`.
+///
+/// Mirrors the NEON kernel: extracts 4-bit nibbles from the u64 bit-planes, builds
+/// selection masks via `i32x4_make`, and uses `v128_bitselect` for masked add/sub.
+/// Bit-identical to `ternary_matvec_scalar()`.
+///
+/// Compile-time gated by `target_feature = "simd128"` — requires `-C target-feature=+simd128`.
+#[cfg(all(feature = "plasma_path", target_arch = "wasm32", target_feature = "simd128"))]
+#[allow(clippy::needless_range_loop)]
+unsafe fn wasm32_ternary_matvec(w: &TernaryWeights, x: &[f32], y: &mut [f32]) {
+    // Safety: caller guarantees x.len()==w.cols and y.len()==w.rows
+    unsafe {
+        use core::arch::wasm32::*;
+        assert_eq!(x.len(), w.cols);
+        assert_eq!(y.len(), w.rows);
+
+        for r in 0..w.rows {
+            let row_base = r * w.blocks64;
+            let mut acc = f32x4_splat(0.0);
+
+            for b in 0..w.blocks64 {
+                let idx = row_base + b;
+                let pos_word = w.pos_bits[idx];
+                let neg_word = w.neg_bits[idx];
+
+                let base_col = b * 64;
+                let remaining = if base_col + 64 <= w.cols {
+                    64
+                } else {
+                    w.cols - base_col
+                };
+                let chunks = remaining / 4;
+
+                for chunk in 0..chunks {
+                    let col_off = base_col + chunk * 4;
+                    let bits4 = (pos_word >> (chunk * 4)) & 0xF;
+                    let neg_bits4 = (neg_word >> (chunk * 4)) & 0xF;
+
+                    // Load 4 x values via transmute from [f32; 4] (both 16 bytes).
+                    // LLVM folds this into a single v128.load.
+                    let x_arr: [f32; 4] = [
+                        *x.get_unchecked(col_off),
+                        *x.get_unchecked(col_off + 1),
+                        *x.get_unchecked(col_off + 2),
+                        *x.get_unchecked(col_off + 3),
+                    ];
+                    let x_vals: v128 = core::mem::transmute(x_arr);
+
+                    // Build selection masks: -1i32 (all bits set) where bit is present, 0 elsewhere.
+                    // v128_bitselect(a, b, mask) returns a where mask bit=1, b where mask bit=0.
+                    let pos_arr: [i32; 4] = [
+                        if bits4 & 1 != 0 { -1i32 } else { 0 },
+                        if bits4 & 2 != 0 { -1i32 } else { 0 },
+                        if bits4 & 4 != 0 { -1i32 } else { 0 },
+                        if bits4 & 8 != 0 { -1i32 } else { 0 },
+                    ];
+                    let pos_mask: v128 = core::mem::transmute(pos_arr);
+                    let neg_arr: [i32; 4] = [
+                        if neg_bits4 & 1 != 0 { -1i32 } else { 0 },
+                        if neg_bits4 & 2 != 0 { -1i32 } else { 0 },
+                        if neg_bits4 & 4 != 0 { -1i32 } else { 0 },
+                        if neg_bits4 & 8 != 0 { -1i32 } else { 0 },
+                    ];
+                    let neg_mask: v128 = core::mem::transmute(neg_arr);
+
+                    let zeros = f32x4_splat(0.0);
+                    let pos_val = v128_bitselect(x_vals, zeros, pos_mask);
+                    let neg_val = v128_bitselect(x_vals, zeros, neg_mask);
+
+                    acc = f32x4_add(acc, f32x4_sub(pos_val, neg_val));
+                }
+
+                // Handle remaining elements (0-3) scalar
+                let mut scalar_acc = 0.0f32;
+                for i in (chunks * 4)..remaining {
+                    let c = base_col + i;
+                    let bit_mask = 1u64 << i;
+                    let pos = (pos_word & bit_mask) != 0;
+                    let neg = (neg_word & bit_mask) != 0;
+                    let sign = pos as i32 as f32 - neg as i32 as f32;
+                    scalar_acc += sign * *x.get_unchecked(c);
+                }
+                if scalar_acc != 0.0 {
+                    let scalar_arr: [f32; 4] = [scalar_acc, 0.0, 0.0, 0.0];
+                    acc = f32x4_add(acc, core::mem::transmute(scalar_arr));
+                }
+            }
+
+            // Horizontal sum of 4 lanes via transmute (both v128 and [f32; 4] are 16 bytes).
+            let lanes: [f32; 4] = core::mem::transmute(acc);
+            y[r] = (lanes[0] + lanes[1] + lanes[2] + lanes[3]) * w.row_scale[r];
+        }
+    } // unsafe
+}
+
 /// SIMD-accelerated ternary matvec: y = W_ternary × x
 ///
-/// Dispatches to NEON, AVX2, or scalar based on `simd_level()`.
+/// Dispatches to NEON, AVX2, WASM-SIMD128, or scalar based on `simd_level()`.
 /// All paths produce bit-identical results to `ternary_matvec_scalar()`.
 #[cfg(feature = "plasma_path")]
 #[inline]
@@ -2543,6 +2649,8 @@ pub fn simd_ternary_matvec(w: &TernaryWeights, x: &[f32], y: &mut [f32]) {
         SimdLevel::Neon => unsafe { neon_ternary_matvec(w, x, y) },
         #[cfg(target_arch = "x86_64")]
         SimdLevel::Avx2 => unsafe { avx2_ternary_matvec(w, x, y) },
+        #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+        SimdLevel::WasmSimd128 => unsafe { wasm32_ternary_matvec(w, x, y) },
         _ => ternary_matvec_scalar(w, x, y),
     }
 }
