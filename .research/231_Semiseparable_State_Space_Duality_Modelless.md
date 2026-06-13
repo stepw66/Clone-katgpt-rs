@@ -255,7 +255,7 @@ The cumprodsum and block decomposition are **plumbing** — they make the engine
 | **070 (GDN2)** | GDN2 IS a special case of SSD. `diagonal_gate.rs` implements the scalar-identity A structure. |
 | **169 (LinOSS)** | LinOSS's oscillation is a complex-eigenvalue variant of cumprodsum. |
 | **189 (FreqBandit)** | Frequency band selection can use cumprodsum freshness as a reward signal. |
-| **230 (Worms)** | The game state evolution model maps to SSD state space. |
+| 119 (Worms) | The game state evolution model maps to SSD state space. (Moved to `riir-ai/.research/119` — internal) |
 | **028 (Higher-Order Linear Attention)** | SSD generalizes linear attention — our HLA is a special case. |
 | **105 (Gated DeltaNet 2)** | Already implemented — confirms SSD's MVA head pattern is optimal. |
 
@@ -277,4 +277,4 @@ The cumprodsum and block decomposition are **plumbing** — they make the engine
 - [waai repo](https://github.com/Zemke/waai) — Worms Armageddon AI vision
 - [Research 070](070_Gated_DeltaNet_2_Decoupled_Erase_Write_Linear_Attention.md) — GDN2 (our SSD implementation)
 - [Research 169](169_Oscillatory_State_Space_Modelless_Distillation.md) — LinOSS (oscillatory SSD variant)
-- [Research 230](230_Worms_Armageddon_Latent_Space_Artillery_Game.md) — Worms game design
+- Research 119 — Worms game design (moved to `riir-ai/.research/119` — internal)

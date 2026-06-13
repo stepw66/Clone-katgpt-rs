@@ -2,7 +2,7 @@
 
 **Date:** 2026-06
 **Status:** 🔵 ACTIVE
-**Research:** [230 Arena × Latent Space](../.research/230_Worms_Armageddon_Latent_Space_Artillery_Game.md)
+**Research:** 119 — Arena × Latent Space (moved to `riir-ai/.research/119` — internal game product concept)
 **Depends On:** Plan 251 (DEC Operators), Plan 242 (Fourier Flow Fields)
 
 ---

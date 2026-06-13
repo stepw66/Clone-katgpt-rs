@@ -127,4 +127,4 @@ Default to `riir-ai` internal. It is always safe to keep something private. It i
 
 | Doc | Connection |
 |-----|-----------|
-| [230 — Worms Armageddon Latent Space Game](./230_Worms_Armageddon_Latent_Space_Artillery_Game.md) | Game product concept. Internal (`riir-ai`). |
+| 119 — Worms Armageddon Latent Space Game | Game product concept. Internal (`riir-ai/.research/119`). Moved out of public repo. |
