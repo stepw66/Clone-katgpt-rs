@@ -10,7 +10,7 @@
 
 #[cfg(feature = "gpart_adapter")]
 fn main() {
-    use katgpt_core::GpartAdapter;
+    use katgpt_core::{GpartAdapter, GpartPrepared};
     use std::env;
 
     // 1. Construct adapter from seed + θ
@@ -69,6 +69,18 @@ fn main() {
     adapter.apply(&mut w1);
     adapter.apply(&mut w2);
     println!("Determinism: {}", if w1 == w2 { "PASS" } else { "FAIL" });
+
+    // 7. Fast path: prepare() + GpartPrepared::apply()
+    let prepared: GpartPrepared = adapter.prepare(256);
+    let mut w_slow = vec![0.0f32; 256];
+    let mut w_fast = vec![0.0f32; 256];
+    adapter.apply(&mut w_slow);
+    prepared.apply(&mut w_fast);
+    println!(
+        "Fast path matches slow path: {}",
+        if w_slow == w_fast { "PASS" } else { "FAIL" }
+    );
+    println!("Pre-computed deltas: {} elements", 256);
 
     println!("\n=== Demo Complete ===");
 }

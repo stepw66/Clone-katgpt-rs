@@ -3142,6 +3142,56 @@ impl GpartAdapter {
     }
 }
 
+/// Pre-computed per-element deltas for zero-allocation apply.
+///
+/// Call [`GpartAdapter::prepare`] once for a given weight dimension `n`,
+/// then [`GpartPrepared::apply`] in the hot loop — no RNG, no allocation.
+#[cfg(feature = "gpart_adapter")]
+#[derive(Clone, Debug)]
+pub struct GpartPrepared {
+    /// Per-element delta: `theta[group(i)] / sqrt(n_group)` for each weight index.
+    deltas: Vec<f32>,
+}
+
+#[cfg(feature = "gpart_adapter")]
+impl GpartAdapter {
+    /// Pre-compute per-element deltas for a weight vector of length `n`.
+    ///
+    /// This is the **fast path** — call once after loading the adapter,
+    /// then use [`GpartPrepared::apply`] in the hot inference loop.
+    /// Cost: O(n) RNG + O(n) broadcast setup (amortised once per model load).
+    pub fn prepare(&self, n: usize) -> GpartPrepared {
+        if n == 0 || self.d == 0 {
+            return GpartPrepared { deltas: Vec::new() };
+        }
+        let assignments = self.generate_assignments(n);
+        let group_sizes = self.compute_group_sizes(n, &assignments);
+        // Match apply() arithmetic exactly: scale = 1/sqrt(n_g), delta = scale * theta[g]
+        let group_delta: Vec<f32> = (0..self.d)
+            .map(|g| {
+                let scale = 1.0 / (group_sizes[g] as f32).sqrt();
+                scale * self.theta[g]
+            })
+            .collect();
+        let deltas = assignments.iter().map(|&g| group_delta[g]).collect();
+        GpartPrepared { deltas }
+    }
+}
+
+#[cfg(feature = "gpart_adapter")]
+impl GpartPrepared {
+    /// Apply pre-computed deltas in-place: `w[i] += delta[i]`.
+    ///
+    /// Pure O(N) broadcast, zero allocation, branch-free inner loop.
+    /// LLVM auto-vectorises this to SIMD.
+    pub fn apply(&self, base_weights: &mut [f32]) {
+        let len = base_weights.len().min(self.deltas.len());
+        for i in 0..len {
+            base_weights[i] += self.deltas[i];
+        }
+    }
+}
+
 /// A loaded GPart pair for modality-specific inference, mirroring LoraPair.
 /// Reader is active during bidirectional prefill, writer during causal decode.
 #[cfg(feature = "gpart_adapter")]
