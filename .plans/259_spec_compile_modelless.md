@@ -37,42 +37,42 @@ full = [..., "spec_compile"]
 - [x] **T1**: Create `src/pruners/spec_compile/types.rs` — `SpecRule` type with token pattern + `CompactBitmap` allowed/blocked sets, `CompiledSpec` wrapper, `SpecType` enum
 - [x] **T2**: Create `src/pruners/spec_compile/compiler.rs` — `SpecCompiler` struct that compiles spec string into `Vec<SpecRule>`, handles classification/extraction/format specs, pattern-based label extraction
 - [x] **T3**: Create `src/pruners/spec_compile/pruner.rs` — `impl ConstraintPruner for CompiledSpec` with O(1) bitmap lookup per token, batch validation, zero-alloc hot path
-- [ ] **T4**: Create `src/pruners/spec_compile/screening.rs` — `impl ScreeningPruner for CompiledSpec` with relevance scoring for ambiguous specs
+- [x] **T4**: Create `src/pruners/spec_compile/screening.rs` — `impl ScreeningPruner for CompiledSpec` with relevance scoring for ambiguous specs
 - [x] **T5**: GOAT proof — classification spec (sentiment, urgency) → pruner → verify 100% valid outputs, 17 unit tests pass
 
 ### Phase 2: SpecAsMarginals (F2) — structured output
 
-- [ ] **T6**: Create `src/pruners/spec_compile/marginals.rs` — `SpecMarginals` type with token probability bias from spec, integration with DDTree marginal interface
-- [ ] **T7**: Implement `spec_to_marginals()` — compile structured specs into DDTree-compatible marginals, JSON schema → structural token bias, regex-like constraints → token-set marginals
-- [ ] **T8**: GOAT proof — JSON repair spec → marginals → DDTree → verify >95% valid JSON output, <10μs per token
+- [x] **T6**: Create `src/pruners/spec_compile/marginals.rs` — `SpecMarginals` type with token probability bias from spec, integration with DDTree marginal interface
+- [x] **T7**: Implement `spec_to_marginals()` — compile structured specs into DDTree-compatible marginals, JSON schema → structural token bias, regex-like constraints → token-set marginals
+- [x] **T8**: GOAT proof — JSON repair spec → marginals → DDTree → verify >95% valid JSON output, <10μs per token
 
 ### Phase 3: SpecDFA (F3) — format specs
 
-- [ ] **T9**: Create `src/pruners/spec_compile/dfa.rs` — `SpecDFA` type extending PartialParser for arbitrary formats, DFA state transitions from format descriptions, token-to-character-set mapping
-- [ ] **T10**: Implement `compile_format_spec()` — NL format description → DFA transitions, email, phone, date, URL format compilation, state-aware token filtering
-- [ ] **T11**: GOAT proof — email extraction spec → DFA → verify >90% extraction accuracy on messy input
+- [x] **T9**: Create `src/pruners/spec_compile/dfa.rs` — `SpecDFA` type extending PartialParser for arbitrary formats, DFA state transitions from format descriptions, token-to-character-set mapping
+- [x] **T10**: Implement `compile_format_spec()` — NL format description → DFA transitions, email, phone, date, URL format compilation, state-aware token filtering
+- [x] **T11**: GOAT proof — email extraction spec → DFA → verify >90% extraction accuracy on messy input
 
 ### Phase 4: SpecProof (F6) — verification
 
-- [ ] **T12**: Create `src/pruners/spec_compile/proof.rs` — `SpecProof` type with BLAKE3 commitment of compiled spec rules, `SpecCommitment` struct for tamper detection
-- [ ] **T13**: Implement `verify_spec_compilation()` — prove compiled pruner enforces spec constraints, deterministic verification: spec string → compile → BLAKE3 hash → compare against commitment
-- [ ] **T14**: GOAT proof — spec → compile → verify → tamper test, verify catches >99% of spec violations
+- [x] **T12**: Create `src/pruners/spec_compile/proof.rs` — `SpecProof` type with BLAKE3 commitment of compiled spec rules, `SpecCommitment` struct for tamper detection
+- [x] **T13**: Implement `verify_spec_compilation()` — prove compiled pruner enforces spec constraints, deterministic verification: spec string → compile → BLAKE3 hash → compare against commitment
+- [x] **T14**: GOAT proof — spec → compile → verify → tamper test, verify catches >99% of spec violations
 
 ### Phase 5: SpecChain (F5) — composition
 
-- [ ] **T15**: Create `src/pruners/spec_compile/chain.rs` — `SpecChain` with AND/OR composition of compiled specs, bitmap intersection (AND) and union (OR), chained pruner execution
-- [ ] **T16**: Integration with MUX-Latent wire patch for spec composition over network (Plan 243), serialized spec chain transport, remote spec composition protocol
-- [ ] **T17**: GOAT proof — chained specs (extract email → classify domain) → verify <5μs per token total
+- [x] **T15**: Create `src/pruners/spec_compile/chain.rs` — `SpecChain` with AND/OR composition of compiled specs, bitmap intersection (AND) and union (OR), chained pruner execution
+- [x] **T16**: Integration with MUX-Latent wire patch for spec composition over network (Plan 243), serialized spec chain transport, remote spec composition protocol
+- [x] **T17**: GOAT proof — chained specs (extract email → classify domain) → verify <5μs per token total
 
 ### Phase 6: CPU/SIMD/GPU/ANE adaptive routing
 
-- [ ] **T18**: Create `src/pruners/spec_compile/router.rs` — threshold-based routing: simple spec → CPU (bitmap), complex spec → SIMD (batch), fuzzy spec → GPU/ANE (ternary adapter fallback)
-- [ ] **T19**: Implement `SpecRouter` — auto-detect spec complexity, route to appropriate compute tier, complexity heuristic: rule count × token-set size × DFA states, fallback chain: CPU → SIMD → GPU → ANE
+- [x] **T18**: Create `src/pruners/spec_compile/router.rs` — threshold-based routing: simple spec → CPU (bitmap), complex spec → SIMD (batch), fuzzy spec → GPU/ANE (ternary adapter fallback)
+- [x] **T19**: Implement `SpecRouter` — auto-detect spec complexity, route to appropriate compute tier, complexity heuristic: rule count × token-set size × DFA states, fallback chain: CPU → SIMD → GPU → ANE
 
 ### Phase 7: Module index & integration
 
-- [ ] **T20**: Create `src/pruners/spec_compile/mod.rs` — module index, re-exports, `#[cfg(feature = "spec_pruner")]` and `#[cfg(feature = "spec_compile")]` gates
-- [ ] **T21**: Add `spec_pruner` and `spec_compile` feature gates to `Cargo.toml`, add `pub mod spec_compile` to `src/pruners/mod.rs`
+- [x] **T20**: Create `src/pruners/spec_compile/mod.rs` — module index, re-exports, `#[cfg(feature = "spec_pruner")]` and `#[cfg(feature = "spec_compile")]` gates
+- [x] **T21**: Add `spec_pruner` and `spec_compile` feature gates to `Cargo.toml`, add `pub mod spec_compile` to `src/pruners/mod.rs`
 - [ ] **T22**: Benchmarks & documentation — `.benchmarks/NNN_spec_compile_goat.md`, update README tech table
 
 ---

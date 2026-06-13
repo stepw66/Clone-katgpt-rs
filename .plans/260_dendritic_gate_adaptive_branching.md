@@ -1,7 +1,7 @@
 # Plan 260: DendriticGate — NMDA-Inspired Adaptive Tree Branching
 
 **Date**: 2026-06-12
-**Status**: 🔄 In Progress (Phase 1, 3, 4, 5, 6 done; Phase 2, 7 pending)
+**Status**: 🔄 In Progress (Phase 1-6 done; Phase 7 GOAT pending)
 **Feature**: `dendritic_gate`
 **Research**: `.research/228_TwinProp_Dendritic_Inference_Compute.md`
 
@@ -38,17 +38,18 @@ Implement physics-inspired NMDA-gated adaptive tree expansion in DDTree. Uses en
 
 ### Phase 2: ThinkingController Integration
 
-- [ ] Add `ThinkingMode::Dendritic` variant to `ThinkingMode` enum in `src/speculative/thinking_controller.rs`
+- [x] Add `ThinkingMode::Dendritic` variant to `ThinkingMode` enum in `src/speculative/thinking_controller.rs`
   - Uses `DendriticGate` for budget allocation instead of bandit
   - Deterministic: same input always produces same budget
 
-- [ ] Update `ThinkingSelector::Adaptive` to support 4th arm
+- [x] Update `ThinkingSelector::Adaptive` to support 4th arm
   - Add `dendritic_weight: f32` to exploration schedule
   - Default: 0.25 (equal weight with Direct, Latent, CpuResample)
 
-- [ ] Implement `ThinkingBandit::pull_dendritic()` — no randomness, pure gate computation
+- [x] Implement `ThinkingBandit::pull_dendritic()` — no randomness, pure gate computation
   - Uses current entropy from `MarginalStore` as input
   - Returns `ThinkingMode::Dendritic` with computed budget
+  - Arm 3 → `ThinkingMode::Dendritic` in `select_mode()`
 
 ### Phase 3: DDTree Build Variant
 
@@ -88,7 +89,7 @@ Implement physics-inspired NMDA-gated adaptive tree expansion in DDTree. Uses en
 - [x] Add unit test `test_dendritic_gate_coincidence_and` — low coincidence suppresses even high entropy
 - [x] Add unit test `test_dendritic_gate_early_exit` — gate < 0.1 triggers early exit
 - [x] Add SIMD tests: entropy_uniform, entropy_peaked, coincidence_full_match, coincidence_no_match
-- [ ] Add example: `examples/dendritic_thinking_demo.rs`
+- [x] Add example: `examples/dendritic_thinking_demo.rs`
   - Compare DDTree output: NoPruner (baseline) vs DendriticGate
   - Show before/after: thinking steps, total compute, output quality
   - Expected: same quality at ≤80% compute for simple queries
