@@ -2374,17 +2374,29 @@ pub fn ternary_matvec_scalar(w: &TernaryWeights, x: &[f32], y: &mut [f32]) {
 }
 
 #[cfg(all(feature = "plasma_path", target_arch = "aarch64"))]
-#[allow(clippy::needless_range_loop)]
 unsafe fn neon_ternary_matvec(w: &TernaryWeights, x: &[f32], y: &mut [f32]) {
     // Safety: caller guarantees x.len()==w.cols and y.len()==w.rows
     unsafe {
-        use core::arch::aarch64::*;
+        use core::arch::aarch64::{float32x4_t, uint32x4_t, *};
         assert_eq!(x.len(), w.cols);
         assert_eq!(y.len(), w.rows);
 
+        // SWAR bit-position masks: AND a splatted byte with these to isolate each of
+        // the 4 bits in a nibble into its own lane (Issue 298, ported from validated POC).
+        let mask_lo_arr: [u32; 4] = [1, 2, 4, 8];
+        let mask_hi_arr: [u32; 4] = [16, 32, 64, 128];
+        let mask_lo: uint32x4_t = vld1q_u32(mask_lo_arr.as_ptr());
+        let mask_hi: uint32x4_t = vld1q_u32(mask_hi_arr.as_ptr());
+        let one_u: uint32x4_t = vdupq_n_u32(1);
+
         for r in 0..w.rows {
             let row_base = r * w.blocks64;
-            let mut acc = vdupq_n_f32(0.0);
+            // 4 independent accumulators break the per-row serial dependency chain
+            // and let the out-of-order engine overlap chunks.
+            let mut acc0: float32x4_t = vdupq_n_f32(0.0);
+            let mut acc1: float32x4_t = vdupq_n_f32(0.0);
+            let mut acc2: float32x4_t = vdupq_n_f32(0.0);
+            let mut acc3: float32x4_t = vdupq_n_f32(0.0);
 
             for b in 0..w.blocks64 {
                 let idx = row_base + b;
@@ -2397,61 +2409,115 @@ unsafe fn neon_ternary_matvec(w: &TernaryWeights, x: &[f32], y: &mut [f32]) {
                 } else {
                     w.cols - base_col
                 };
-                let chunks = remaining / 4;
 
-                for chunk in 0..chunks {
-                    let col_off = base_col + chunk * 4;
-                    let bits4 = (pos_word >> (chunk * 4)) & 0xF;
-                    let neg_bits4 = (neg_word >> (chunk * 4)) & 0xF;
-
-                    // Load 4 x values
-                    let x_vals = vld1q_f32(x.as_ptr().add(col_off));
-
-                    // Build selection masks — LLVM optimizes the if/else into
-                    // NEON compare+negate, which is faster than wrapping_sub
-                    // (scalar dep chain prevents auto-vectorization of the mask array).
-                    let pos_mask: [u32; 4] = [
-                        if bits4 & 1 != 0 { !0u32 } else { 0 },
-                        if bits4 & 2 != 0 { !0u32 } else { 0 },
-                        if bits4 & 4 != 0 { !0u32 } else { 0 },
-                        if bits4 & 8 != 0 { !0u32 } else { 0 },
-                    ];
-                    let neg_mask: [u32; 4] = [
-                        if neg_bits4 & 1 != 0 { !0u32 } else { 0 },
-                        if neg_bits4 & 2 != 0 { !0u32 } else { 0 },
-                        if neg_bits4 & 4 != 0 { !0u32 } else { 0 },
-                        if neg_bits4 & 8 != 0 { !0u32 } else { 0 },
-                    ];
-
-                    // Select x lanes where pos/neg bits are set, zero elsewhere
-                    let pos_val = vbslq_f32(vld1q_u32(pos_mask.as_ptr()), x_vals, vdupq_n_f32(0.0));
-                    let neg_val = vbslq_f32(vld1q_u32(neg_mask.as_ptr()), x_vals, vdupq_n_f32(0.0));
-
-                    acc = vaddq_f32(acc, vsubq_f32(pos_val, neg_val));
+                // 32-element unroll: 4 × 8-element chunks, each into its own accumulator.
+                let chunks32 = remaining / 32 * 32;
+                let mut col = 0usize;
+                while col < chunks32 {
+                    fmla_nibble8(&mut acc0, pos_word, neg_word, col, base_col, x, mask_lo, mask_hi, one_u);
+                    col += 8;
+                    fmla_nibble8(&mut acc1, pos_word, neg_word, col, base_col, x, mask_lo, mask_hi, one_u);
+                    col += 8;
+                    fmla_nibble8(&mut acc2, pos_word, neg_word, col, base_col, x, mask_lo, mask_hi, one_u);
+                    col += 8;
+                    fmla_nibble8(&mut acc3, pos_word, neg_word, col, base_col, x, mask_lo, mask_hi, one_u);
+                    col += 8;
                 }
 
-                // Handle remaining elements (0-3) scalar
+                // Remaining 8-element chunks go into acc0
+                while col + 8 <= remaining {
+                    fmla_nibble8(&mut acc0, pos_word, neg_word, col, base_col, x, mask_lo, mask_hi, one_u);
+                    col += 8;
+                }
+
+                // Remaining 4-element chunk into acc0
+                if col + 4 <= remaining {
+                    let byte_off = col / 8;
+                    let pos_byte = ((pos_word >> (byte_off * 8)) & 0xFF) as u32;
+                    let neg_byte = ((neg_word >> (byte_off * 8)) & 0xFF) as u32;
+                    let pos_splat = vdupq_n_u32(pos_byte);
+                    let neg_splat = vdupq_n_u32(neg_byte);
+                    // vcgeq_u32(., 1) → all-ones (-1 as i32) where bit set, 0 elsewhere.
+                    let pos_nz = vreinterpretq_s32_u32(vcgeq_u32(vandq_u32(pos_splat, mask_lo), one_u));
+                    let neg_nz = vreinterpretq_s32_u32(vcgeq_u32(vandq_u32(neg_splat, mask_lo), one_u));
+                    // sign = neg - pos → +1 where pos, -1 where neg, 0 else.
+                    let sign_f = vcvtq_f32_s32(vsubq_s32(neg_nz, pos_nz));
+                    let x_v = vld1q_f32(x.as_ptr().add(base_col + col));
+                    acc0 = vfmaq_f32(acc0, sign_f, x_v);
+                    col += 4;
+                }
+
+                // Scalar tail (0-3 elements)
                 let mut scalar_acc = 0.0f32;
-                for i in (chunks * 4)..remaining {
-                    let c = base_col + i;
-                    let bit_mask = 1u64 << i;
-                    let pos = (pos_word & bit_mask) != 0;
-                    let neg = (neg_word & bit_mask) != 0;
-                    let sign = pos as u32 as f32 - neg as u32 as f32;
-                    scalar_acc += sign * x[c];
+                while col < remaining {
+                    let bit_mask = 1u64 << col;
+                    let pos = ((pos_word & bit_mask) != 0) as i32 as f32;
+                    let neg = ((neg_word & bit_mask) != 0) as i32 as f32;
+                    scalar_acc += (pos - neg) * *x.get_unchecked(base_col + col);
+                    col += 1;
                 }
                 if scalar_acc != 0.0 {
-                    acc = vaddq_f32(acc, vsetq_lane_f32(scalar_acc, vdupq_n_f32(0.0), 0));
+                    acc0 = vaddq_f32(acc0, vsetq_lane_f32(scalar_acc, vdupq_n_f32(0.0), 0));
                 }
             }
 
-            y[r] = vaddvq_f32(acc) * w.row_scale[r];
+            // Merge 4 accumulators → horizontal sum.
+            acc0 = vaddq_f32(vaddq_f32(acc0, acc1), vaddq_f32(acc2, acc3));
+            y[r] = vaddvq_f32(acc0) * w.row_scale[r];
         }
     } // unsafe
 }
 
+/// NEON inner-loop helper for Issue 298: process 8 elements (one byte each of
+/// pos/neg bit-planes, both nibbles) with SWAR mask construction + sign-FMLA.
+///
+/// `vcgeq_u32(and, 1)` returns all-ones (=-1 as i32) where the bit is set,
+/// zero otherwise. Therefore `sign_i32 = neg_nz - pos_nz` gives exactly the
+/// ternary sign `{-1, 0, +1}` per lane, and `vfmaq_f32(acc, sign_f, x)` fuses
+/// the multiply-add into a single instruction — replacing the previous
+/// `vbslq + vsub + vadd` (3 ops) chain.
+#[cfg(all(feature = "plasma_path", target_arch = "aarch64"))]
+#[inline(always)]
+unsafe fn fmla_nibble8(
+    acc: &mut core::arch::aarch64::float32x4_t,
+    pos_word: u64,
+    neg_word: u64,
+    col: usize,
+    base_col: usize,
+    x: &[f32],
+    mask_lo: core::arch::aarch64::uint32x4_t,
+    mask_hi: core::arch::aarch64::uint32x4_t,
+    one_u: core::arch::aarch64::uint32x4_t,
+) {
+    use core::arch::aarch64::*;
+    unsafe {
+        let byte_off = col / 8;
+        let pos_byte = ((pos_word >> (byte_off * 8)) & 0xFF) as u32;
+        let neg_byte = ((neg_word >> (byte_off * 8)) & 0xFF) as u32;
+
+        let pos_splat = vdupq_n_u32(pos_byte);
+        let neg_splat = vdupq_n_u32(neg_byte);
+
+        // Low nibble (cols [col..col+4]) and high nibble (cols [col+4..col+8]).
+        let pos_lo = vreinterpretq_s32_u32(vcgeq_u32(vandq_u32(pos_splat, mask_lo), one_u));
+        let neg_lo = vreinterpretq_s32_u32(vcgeq_u32(vandq_u32(neg_splat, mask_lo), one_u));
+        let pos_hi = vreinterpretq_s32_u32(vcgeq_u32(vandq_u32(pos_splat, mask_hi), one_u));
+        let neg_hi = vreinterpretq_s32_u32(vcgeq_u32(vandq_u32(neg_splat, mask_hi), one_u));
+
+        // sign = neg - pos → +1 where pos, -1 where neg, 0 else.
+        let sign_lo_f = vcvtq_f32_s32(vsubq_s32(neg_lo, pos_lo));
+        let sign_hi_f = vcvtq_f32_s32(vsubq_s32(neg_hi, pos_hi));
+
+        let x_lo = vld1q_f32(x.as_ptr().add(base_col + col));
+        let x_hi = vld1q_f32(x.as_ptr().add(base_col + col + 4));
+
+        // Single fused multiply-add per chunk (replaces vbslq + vsub + vadd).
+        *acc = vfmaq_f32(*acc, sign_lo_f, x_lo);
+        *acc = vfmaq_f32(*acc, sign_hi_f, x_hi);
+    }
+}
+
 #[cfg(all(feature = "plasma_path", target_arch = "x86_64"))]
-#[allow(clippy::needless_range_loop)]
 unsafe fn avx2_ternary_matvec(w: &TernaryWeights, x: &[f32], y: &mut [f32]) {
     // Safety: caller guarantees x.len()==w.cols and y.len()==w.rows
     unsafe {
@@ -2459,9 +2525,18 @@ unsafe fn avx2_ternary_matvec(w: &TernaryWeights, x: &[f32], y: &mut [f32]) {
         assert_eq!(x.len(), w.cols);
         assert_eq!(y.len(), w.rows);
 
+        // SWAR bit-position mask: AND a splatted byte with this isolates each of
+        // the 8 bits in one byte into its own i32 lane (Issue 298, AVX2 port).
+        let mask_byte: __m256i = _mm256_setr_epi32(1, 2, 4, 8, 16, 32, 64, 128);
+        let zero_i: __m256i = _mm256_setzero_si256();
+
         for r in 0..w.rows {
             let row_base = r * w.blocks64;
-            let mut acc = _mm256_setzero_ps();
+            // 4 independent accumulators (break serial dep chain for OoO ILP).
+            let mut acc0: __m256 = _mm256_setzero_ps();
+            let mut acc1: __m256 = _mm256_setzero_ps();
+            let mut acc2: __m256 = _mm256_setzero_ps();
+            let mut acc3: __m256 = _mm256_setzero_ps();
 
             for b in 0..w.blocks64 {
                 let idx = row_base + b;
@@ -2474,83 +2549,108 @@ unsafe fn avx2_ternary_matvec(w: &TernaryWeights, x: &[f32], y: &mut [f32]) {
                 } else {
                     w.cols - base_col
                 };
-                let chunks = remaining / 8;
 
-                for chunk in 0..chunks {
-                    let col_off = base_col + chunk * 8;
-
-                    let pos_byte = ((pos_word >> (chunk * 8)) & 0xFF) as u32;
-                    let neg_byte = ((neg_word >> (chunk * 8)) & 0xFF) as u32;
-
-                    // LLVM-optimizable mask construction — if/else compiles to
-                    // compare+negate which vectorizes; wrapping_sub creates scalar deps.
-                    let lane_masks_pos = [
-                        if pos_byte & 1 != 0 { !0u32 } else { 0 },
-                        if pos_byte & 2 != 0 { !0u32 } else { 0 },
-                        if pos_byte & 4 != 0 { !0u32 } else { 0 },
-                        if pos_byte & 8 != 0 { !0u32 } else { 0 },
-                        if pos_byte & 16 != 0 { !0u32 } else { 0 },
-                        if pos_byte & 32 != 0 { !0u32 } else { 0 },
-                        if pos_byte & 64 != 0 { !0u32 } else { 0 },
-                        if pos_byte & 128 != 0 { !0u32 } else { 0 },
-                    ];
-                    let lane_masks_neg = [
-                        if neg_byte & 1 != 0 { !0u32 } else { 0 },
-                        if neg_byte & 2 != 0 { !0u32 } else { 0 },
-                        if neg_byte & 4 != 0 { !0u32 } else { 0 },
-                        if neg_byte & 8 != 0 { !0u32 } else { 0 },
-                        if neg_byte & 16 != 0 { !0u32 } else { 0 },
-                        if neg_byte & 32 != 0 { !0u32 } else { 0 },
-                        if neg_byte & 64 != 0 { !0u32 } else { 0 },
-                        if neg_byte & 128 != 0 { !0u32 } else { 0 },
-                    ];
-
-                    let x_vals = _mm256_loadu_ps(x.as_ptr().add(col_off));
-                    let pos_mask = _mm256_castsi256_ps(_mm256_loadu_si256(
-                        lane_masks_pos.as_ptr() as *const __m256i
-                    ));
-                    let neg_mask = _mm256_castsi256_ps(_mm256_loadu_si256(
-                        lane_masks_neg.as_ptr() as *const __m256i
-                    ));
-
-                    let pos_val = _mm256_and_ps(x_vals, pos_mask);
-                    let neg_val = _mm256_and_ps(x_vals, neg_mask);
-
-                    acc = _mm256_add_ps(acc, _mm256_sub_ps(pos_val, neg_val));
+                // 32-element unroll: 4 × 8-element chunks (one byte each), each
+                // chunk into its own accumulator. Same pattern as the NEON port.
+                let chunks32 = remaining / 32 * 32;
+                let mut col = 0usize;
+                while col < chunks32 {
+                    fma_byte8_avx2(&mut acc0, pos_word, neg_word, col, base_col, x, mask_byte, zero_i);
+                    col += 8;
+                    fma_byte8_avx2(&mut acc1, pos_word, neg_word, col, base_col, x, mask_byte, zero_i);
+                    col += 8;
+                    fma_byte8_avx2(&mut acc2, pos_word, neg_word, col, base_col, x, mask_byte, zero_i);
+                    col += 8;
+                    fma_byte8_avx2(&mut acc3, pos_word, neg_word, col, base_col, x, mask_byte, zero_i);
+                    col += 8;
                 }
 
-                // Handle remaining elements (0-7) scalar
+                // Remaining 8-element chunks → acc0
+                while col + 8 <= remaining {
+                    fma_byte8_avx2(&mut acc0, pos_word, neg_word, col, base_col, x, mask_byte, zero_i);
+                    col += 8;
+                }
+
+                // Scalar tail (0-7 elements)
                 let mut scalar_acc = 0.0f32;
-                for i in (chunks * 8)..remaining {
-                    let c = base_col + i;
-                    let bit_mask = 1u64 << i;
-                    let pos = (pos_word & bit_mask) != 0;
-                    let neg = (neg_word & bit_mask) != 0;
-                    let sign = pos as u32 as f32 - neg as u32 as f32;
-                    scalar_acc += sign * x[c];
+                while col < remaining {
+                    let bit_mask = 1u64 << col;
+                    let pos = ((pos_word & bit_mask) != 0) as i32 as f32;
+                    let neg = ((neg_word & bit_mask) != 0) as i32 as f32;
+                    scalar_acc += (pos - neg) * *x.get_unchecked(base_col + col);
+                    col += 1;
                 }
                 if scalar_acc != 0.0 {
-                    acc = _mm256_add_ps(
-                        acc,
+                    acc0 = _mm256_add_ps(
+                        acc0,
                         _mm256_setr_ps(scalar_acc, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
                     );
                 }
             }
 
-            y[r] = horizontal_sum_256(acc) * w.row_scale[r];
+            // Merge 4 accumulators → horizontal sum.
+            acc0 = _mm256_add_ps(_mm256_add_ps(acc0, acc1), _mm256_add_ps(acc2, acc3));
+            y[r] = horizontal_sum_256(acc0) * w.row_scale[r];
         }
     } // unsafe
 }
 
+/// AVX2 inner-loop helper for Issue 298: process 8 elements (one byte each of
+/// pos/neg bit-planes) with SWAR mask construction + sign-FMA.
+///
+/// `_mm256_cmpgt_epi32(and, 0)` returns all-ones (=-1 as i32) where the bit is
+/// set, zero otherwise. Therefore `sign_i = neg_nz - pos_nz` gives exactly the
+/// ternary sign `{-1, 0, +1}` per lane, and `_mm256_fmadd_ps(sign_f, x, acc)`
+/// fuses the multiply-add — replacing the previous `and + sub + add` chain.
+#[cfg(all(feature = "plasma_path", target_arch = "x86_64"))]
+#[inline(always)]
+unsafe fn fma_byte8_avx2(
+    acc: &mut core::arch::x86_64::__m256,
+    pos_word: u64,
+    neg_word: u64,
+    col: usize,
+    base_col: usize,
+    x: &[f32],
+    mask_byte: core::arch::x86_64::__m256i,
+    zero_i: core::arch::x86_64::__m256i,
+) {
+    use core::arch::x86_64::*;
+    unsafe {
+        let byte_off = col / 8;
+        let pos_byte = ((pos_word >> (byte_off * 8)) & 0xFF) as i32;
+        let neg_byte = ((neg_word >> (byte_off * 8)) & 0xFF) as i32;
+
+        let pos_splat = _mm256_set1_epi32(pos_byte);
+        let neg_splat = _mm256_set1_epi32(neg_byte);
+
+        // cmpgt_epi32(and, 0) → all-ones (-1) where bit set, zero elsewhere.
+        let pos_nz = _mm256_cmpgt_epi32(_mm256_and_si256(pos_splat, mask_byte), zero_i);
+        let neg_nz = _mm256_cmpgt_epi32(_mm256_and_si256(neg_splat, mask_byte), zero_i);
+
+        // sign = neg - pos → +1 where pos, -1 where neg, 0 else.
+        let sign_i = _mm256_sub_epi32(neg_nz, pos_nz);
+        let sign_f = _mm256_cvtepi32_ps(sign_i);
+
+        let x_v = _mm256_loadu_ps(x.as_ptr().add(base_col + col));
+
+        // acc = sign_f * x_v + acc  (fused multiply-add).
+        *acc = _mm256_fmadd_ps(sign_f, x_v, *acc);
+    }
+}
+
 /// WASM SIMD128 ternary matvec — processes 4 f32 lanes per iteration using `v128`.
 ///
-/// Mirrors the NEON kernel: extracts 4-bit nibbles from the u64 bit-planes, builds
-/// selection masks via `i32x4_make`, and uses `v128_bitselect` for masked add/sub.
-/// Bit-identical to `ternary_matvec_scalar()`.
+/// SWAR-optimized for Issue 298: ports the proven riir-engine implementation
+/// (commit `23a2a8ff`, 4.34× speedup on wasmtime) plus 4 independent accumulators
+/// for ILP. Bit-identical to `ternary_matvec_scalar()`.
+///
+/// Algorithm: broadcast the bit-plane byte to all 4 lanes of an `i32x4`, AND with
+/// a bit-position mask `[1, 2, 4, 8]` (low nibble) or `[16, 32, 64, 128]` (high
+/// nibble) to isolate each bit into its own lane, then `i32x4_ne(_, 0)` produces
+/// a per-lane all-ones mask for `v128_bitselect`.
 ///
 /// Compile-time gated by `target_feature = "simd128"` — requires `-C target-feature=+simd128`.
 #[cfg(all(feature = "plasma_path", target_arch = "wasm32", target_feature = "simd128"))]
-#[allow(clippy::needless_range_loop)]
 unsafe fn wasm32_ternary_matvec(w: &TernaryWeights, x: &[f32], y: &mut [f32]) {
     // Safety: caller guarantees x.len()==w.cols and y.len()==w.rows
     unsafe {
@@ -2558,9 +2658,19 @@ unsafe fn wasm32_ternary_matvec(w: &TernaryWeights, x: &[f32], y: &mut [f32]) {
         assert_eq!(x.len(), w.cols);
         assert_eq!(y.len(), w.rows);
 
+        // SWAR bit-position masks (ported from riir-engine proven impl).
+        let mask_lo: v128 = i32x4(1, 2, 4, 8); // bits 0-3
+        let mask_hi: v128 = i32x4(16, 32, 64, 128); // bits 4-7
+        let zero_i: v128 = i32x4_splat(0);
+        let zeros_f: v128 = f32x4_splat(0.0);
+
         for r in 0..w.rows {
             let row_base = r * w.blocks64;
-            let mut acc = f32x4_splat(0.0);
+            // 4 independent accumulators (break serial dep chain for ILP).
+            let mut acc0: v128 = f32x4_splat(0.0);
+            let mut acc1: v128 = f32x4_splat(0.0);
+            let mut acc2: v128 = f32x4_splat(0.0);
+            let mut acc3: v128 = f32x4_splat(0.0);
 
             for b in 0..w.blocks64 {
                 let idx = row_base + b;
@@ -2573,68 +2683,109 @@ unsafe fn wasm32_ternary_matvec(w: &TernaryWeights, x: &[f32], y: &mut [f32]) {
                 } else {
                     w.cols - base_col
                 };
-                let chunks = remaining / 4;
 
-                for chunk in 0..chunks {
-                    let col_off = base_col + chunk * 4;
-                    let bits4 = (pos_word >> (chunk * 4)) & 0xF;
-                    let neg_bits4 = (neg_word >> (chunk * 4)) & 0xF;
-
-                    // Load 4 x values via transmute from [f32; 4] (both 16 bytes).
-                    // LLVM folds this into a single v128.load.
-                    let x_arr: [f32; 4] = [
-                        *x.get_unchecked(col_off),
-                        *x.get_unchecked(col_off + 1),
-                        *x.get_unchecked(col_off + 2),
-                        *x.get_unchecked(col_off + 3),
-                    ];
-                    let x_vals: v128 = core::mem::transmute(x_arr);
-
-                    // Build selection masks: -1i32 (all bits set) where bit is present, 0 elsewhere.
-                    // v128_bitselect(a, b, mask) returns a where mask bit=1, b where mask bit=0.
-                    let pos_arr: [i32; 4] = [
-                        if bits4 & 1 != 0 { -1i32 } else { 0 },
-                        if bits4 & 2 != 0 { -1i32 } else { 0 },
-                        if bits4 & 4 != 0 { -1i32 } else { 0 },
-                        if bits4 & 8 != 0 { -1i32 } else { 0 },
-                    ];
-                    let pos_mask: v128 = core::mem::transmute(pos_arr);
-                    let neg_arr: [i32; 4] = [
-                        if neg_bits4 & 1 != 0 { -1i32 } else { 0 },
-                        if neg_bits4 & 2 != 0 { -1i32 } else { 0 },
-                        if neg_bits4 & 4 != 0 { -1i32 } else { 0 },
-                        if neg_bits4 & 8 != 0 { -1i32 } else { 0 },
-                    ];
-                    let neg_mask: v128 = core::mem::transmute(neg_arr);
-
-                    let zeros = f32x4_splat(0.0);
-                    let pos_val = v128_bitselect(x_vals, zeros, pos_mask);
-                    let neg_val = v128_bitselect(x_vals, zeros, neg_mask);
-
-                    acc = f32x4_add(acc, f32x4_sub(pos_val, neg_val));
+                // 32-element unroll: 4 × 8-element chunks, each into its own accumulator.
+                let chunks32 = remaining / 32 * 32;
+                let mut col = 0usize;
+                while col < chunks32 {
+                    bitselect_nibble8_wasm(&mut acc0, pos_word, neg_word, col, base_col, x, mask_lo, mask_hi, zero_i, zeros_f);
+                    col += 8;
+                    bitselect_nibble8_wasm(&mut acc1, pos_word, neg_word, col, base_col, x, mask_lo, mask_hi, zero_i, zeros_f);
+                    col += 8;
+                    bitselect_nibble8_wasm(&mut acc2, pos_word, neg_word, col, base_col, x, mask_lo, mask_hi, zero_i, zeros_f);
+                    col += 8;
+                    bitselect_nibble8_wasm(&mut acc3, pos_word, neg_word, col, base_col, x, mask_lo, mask_hi, zero_i, zeros_f);
+                    col += 8;
                 }
 
-                // Handle remaining elements (0-3) scalar
+                // Remaining 8-element chunks → acc0
+                while col + 8 <= remaining {
+                    bitselect_nibble8_wasm(&mut acc0, pos_word, neg_word, col, base_col, x, mask_lo, mask_hi, zero_i, zeros_f);
+                    col += 8;
+                }
+
+                // Remaining 4-element chunk → acc0
+                if col + 4 <= remaining {
+                    let byte_off = col / 8;
+                    let pos_byte = ((pos_word >> (byte_off * 8)) & 0xFF) as i32;
+                    let neg_byte = ((neg_word >> (byte_off * 8)) & 0xFF) as i32;
+                    let pos_splat = i32x4_splat(pos_byte);
+                    let neg_splat = i32x4_splat(neg_byte);
+                    let pos_m = i32x4_ne(v128_and(pos_splat, mask_lo), zero_i);
+                    let neg_m = i32x4_ne(v128_and(neg_splat, mask_lo), zero_i);
+                    let x_v = v128_load(x.as_ptr().add(base_col + col) as *const v128);
+                    let pos_val = v128_bitselect(x_v, zeros_f, pos_m);
+                    let neg_val = v128_bitselect(x_v, zeros_f, neg_m);
+                    acc0 = f32x4_add(acc0, f32x4_sub(pos_val, neg_val));
+                    col += 4;
+                }
+
+                // Scalar tail (0-3 elements)
                 let mut scalar_acc = 0.0f32;
-                for i in (chunks * 4)..remaining {
-                    let c = base_col + i;
-                    let bit_mask = 1u64 << i;
-                    let pos = (pos_word & bit_mask) != 0;
-                    let neg = (neg_word & bit_mask) != 0;
-                    let sign = pos as i32 as f32 - neg as i32 as f32;
-                    scalar_acc += sign * *x.get_unchecked(c);
+                while col < remaining {
+                    let bit_mask = 1u64 << col;
+                    let pos = ((pos_word & bit_mask) != 0) as i32 as f32;
+                    let neg = ((neg_word & bit_mask) != 0) as i32 as f32;
+                    scalar_acc += (pos - neg) * *x.get_unchecked(base_col + col);
+                    col += 1;
                 }
                 if scalar_acc != 0.0 {
                     let scalar_arr: [f32; 4] = [scalar_acc, 0.0, 0.0, 0.0];
-                    acc = f32x4_add(acc, core::mem::transmute(scalar_arr));
+                    acc0 = f32x4_add(acc0, core::mem::transmute(scalar_arr));
                 }
             }
 
-            // Horizontal sum of 4 lanes via transmute (both v128 and [f32; 4] are 16 bytes).
-            let lanes: [f32; 4] = core::mem::transmute(acc);
+            // Merge 4 accumulators → horizontal sum.
+            acc0 = f32x4_add(f32x4_add(acc0, acc1), f32x4_add(acc2, acc3));
+            let lanes: [f32; 4] = core::mem::transmute(acc0);
             y[r] = (lanes[0] + lanes[1] + lanes[2] + lanes[3]) * w.row_scale[r];
         }
     } // unsafe
+}
+
+/// WASM inner-loop helper for Issue 298: process 8 elements (one byte each of
+/// pos/neg bit-planes, both nibbles) with SWAR mask construction + bitselect.
+/// Direct port of the proven riir-engine `project_ternary_simd` inner loop.
+#[cfg(all(feature = "plasma_path", target_arch = "wasm32", target_feature = "simd128"))]
+#[inline(always)]
+unsafe fn bitselect_nibble8_wasm(
+    acc: &mut core::arch::wasm32::v128,
+    pos_word: u64,
+    neg_word: u64,
+    col: usize,
+    base_col: usize,
+    x: &[f32],
+    mask_lo: core::arch::wasm32::v128,
+    mask_hi: core::arch::wasm32::v128,
+    zero_i: core::arch::wasm32::v128,
+    zeros_f: core::arch::wasm32::v128,
+) {
+    use core::arch::wasm32::*;
+    unsafe {
+        let byte_off = col / 8;
+        let pos_byte = ((pos_word >> (byte_off * 8)) & 0xFF) as i32;
+        let neg_byte = ((neg_word >> (byte_off * 8)) & 0xFF) as i32;
+
+        let pos_splat = i32x4_splat(pos_byte);
+        let neg_splat = i32x4_splat(neg_byte);
+
+        // Low nibble (cols [col..col+4]) and high nibble (cols [col+4..col+8]).
+        let pos_lo_m = i32x4_ne(v128_and(pos_splat, mask_lo), zero_i);
+        let neg_lo_m = i32x4_ne(v128_and(neg_splat, mask_lo), zero_i);
+        let pos_hi_m = i32x4_ne(v128_and(pos_splat, mask_hi), zero_i);
+        let neg_hi_m = i32x4_ne(v128_and(neg_splat, mask_hi), zero_i);
+
+        let x_lo = v128_load(x.as_ptr().add(base_col + col) as *const v128);
+        let x_hi = v128_load(x.as_ptr().add(base_col + col + 4) as *const v128);
+
+        let pos_lo_val = v128_bitselect(x_lo, zeros_f, pos_lo_m);
+        let neg_lo_val = v128_bitselect(x_lo, zeros_f, neg_lo_m);
+        let pos_hi_val = v128_bitselect(x_hi, zeros_f, pos_hi_m);
+        let neg_hi_val = v128_bitselect(x_hi, zeros_f, neg_hi_m);
+
+        *acc = f32x4_add(*acc, f32x4_sub(pos_lo_val, neg_lo_val));
+        *acc = f32x4_add(*acc, f32x4_sub(pos_hi_val, neg_hi_val));
+    }
 }
 
 /// SIMD-accelerated ternary matvec: y = W_ternary × x
