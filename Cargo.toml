@@ -141,6 +141,7 @@ roofline_cost = ["katgpt-core/roofline_cost"]  # Roofline cost model for GPU ope
 bandit_mcts = ["game_state"]  # Bandit-guided MCTS rollout policy — NFSP/MCTS duality (Plan 067)
 hla_attention = []  # Higher-order Linear Attention — O(1) inference cache (Plan 057)
 gdn2_attention = []  # Gated DeltaNet-2 recurrent attention — O(1) decode (Plan 105, Research 70)
+cumprodsum = []  # Cumprodsum primitive — atomic 1-SS matrix multiplication (Plan 263, Research 231) — always compiled, feature reserved for future SIMD gate
 lt2_looped = ["hla_attention"]  # LT2 looped inference pipeline — weight-shared T-pass loop (Plan 108, Research 73)
 sleep_consolidation = ["lt2_looped", "gdn2_attention"]  # Sleep-time offline recursive memory consolidation at eviction (Plan 154 GOAT 14/14, Research 116) — default-ON
 plasma_path = ["katgpt-core/plasma_path"]  # Bit-plane ternary SIMD matvec — multiplication-free CPU inference (Plan 148, Research 110)
