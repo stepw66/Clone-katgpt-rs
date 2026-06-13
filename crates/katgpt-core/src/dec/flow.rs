@@ -42,6 +42,9 @@ pub struct DecFlowField {
     pub harmonic: Vec<f32>,
     /// Combined weighted flow: `α·exact + β·coexact + γ·harmonic`. Per-edge.
     pub combined: Vec<f32>,
+    /// Topology version when this field was computed (Plan 261 Phase 4).
+    /// `None` = never computed. Used by `recompute_if_dirty` to skip redundant work.
+    topology_version: Option<u64>,
 }
 
 impl DecFlowField {
@@ -106,7 +109,33 @@ impl DecFlowField {
             coexact: decomp.coexact.data,
             harmonic: decomp.harmonic.data,
             combined,
+            topology_version: Some(cx.topology_version()),
         }
+    }
+
+    /// Recompute the flow field only if the cell complex topology changed since
+    /// the last computation (Plan 261 Phase 4).
+    ///
+    /// Returns `true` if recomputed, `false` if the cached field is still valid.
+    /// On the first call (never computed), always recomputes and returns `true`.
+    ///
+    /// Zero-overhead when topology is unchanged: a single `u64` comparison.
+    pub fn recompute_if_dirty(
+        &mut self,
+        cx: &CellComplex,
+        potential: &CochainField,
+        alpha: f32,
+        beta: f32,
+        gamma: f32,
+    ) -> bool {
+        let current_version = cx.topology_version();
+        match self.topology_version {
+            Some(v) if v == current_version => return false,
+            _ => {}
+        }
+        let recomputed = Self::compute(cx, potential, alpha, beta, gamma);
+        *self = recomputed;
+        true
     }
 
     /// Convert per-edge flows to per-vertex 2D velocity vectors (T24).
@@ -689,5 +718,62 @@ mod tests {
     #[test]
     fn solve_grid_width_single() {
         assert_eq!(solve_grid_width(1, 2), 1); // 1×1 → w+h=2
+    }
+
+    // -----------------------------------------------------------------------
+    // Plan 261 Phase 4: recompute_if_dirty
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn recompute_if_dirty_skips_when_unchanged() {
+        let cx = CellComplex::grid_2d(8, 8);
+        let mut pot = CochainField::zeros(0, cx.n_vertices(), 1);
+        for i in 0..cx.n_vertices() {
+            pot.set_scalar(i, (i as f32 * 0.3).sin());
+        }
+
+        let mut field = DecFlowField::compute(&cx, &pot, 1.0, 0.5, 0.3);
+
+        // Same topology → no recompute
+        let recomputed = field.recompute_if_dirty(&cx, &pot, 1.0, 0.5, 0.3);
+        assert!(!recomputed, "should skip recompute when topology unchanged");
+    }
+
+    #[test]
+    fn recompute_if_dirty_triggers_on_topology_change() {
+        let mut cx = CellComplex::grid_2d(8, 8);
+        let mut pot = CochainField::zeros(0, cx.n_vertices(), 1);
+        for i in 0..cx.n_vertices() {
+            pot.set_scalar(i, (i as f32 * 0.3).sin());
+        }
+
+        let mut field = DecFlowField::compute(&cx, &pot, 1.0, 0.5, 0.3);
+
+        // Destroy a face → topology changes
+        cx.remove_face(5);
+
+        let recomputed = field.recompute_if_dirty(&cx, &pot, 1.0, 0.5, 0.3);
+        assert!(recomputed, "should recompute after topology change");
+    }
+
+    #[test]
+    fn recompute_if_dirty_first_call_always_computes() {
+        let cx = CellComplex::grid_2d(4, 4);
+        let pot = CochainField::zeros(0, cx.n_vertices(), 1);
+
+        // Start with an uninitialized field (topology_version = None)
+        let mut field = DecFlowField {
+            width: 0,
+            height: 0,
+            exact: Vec::new(),
+            coexact: Vec::new(),
+            harmonic: Vec::new(),
+            combined: Vec::new(),
+            topology_version: None,
+        };
+
+        let recomputed = field.recompute_if_dirty(&cx, &pot, 1.0, 1.0, 1.0);
+        assert!(recomputed, "first call should always compute");
+        assert!(field.n_edges() > 0, "field should have data after compute");
     }
 }

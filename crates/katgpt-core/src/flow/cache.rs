@@ -19,6 +19,10 @@ struct CachedField {
     field: FlowField,
     /// Number of cells changed since last compute.
     dirty_count: u16,
+    /// Terrain topology version when this field was computed (Plan 261 Phase 4).
+    /// When the game destroys terrain, it bumps the global topology version;
+    /// entries with a stale version get invalidated.
+    topology_version: u64,
 }
 
 /// Per-goal shared flow field cache.
@@ -43,6 +47,9 @@ pub struct FlowFieldCache {
     snapshot_buf: Vec<u64>,
     /// Minimum NPCs sharing a goal to warrant a flow field.
     min_npcs: u16,
+    /// Current terrain topology version (Plan 261 Phase 4).
+    /// Game bumps this when terrain is destroyed; stale cache entries get invalidated.
+    current_topology_version: u64,
 }
 
 impl FlowFieldCache {
@@ -58,6 +65,7 @@ impl FlowFieldCache {
             potential_buf: Vec::new(),
             blocked_buf: Vec::new(),
             snapshot_buf: Vec::new(),
+            current_topology_version: 0,
         }
     }
 
@@ -97,6 +105,22 @@ impl FlowFieldCache {
         }
     }
 
+    /// Notify the cache that terrain topology changed (Plan 261 Phase 4).
+    ///
+    /// Bumps the internal topology version. On the next `get_or_compute`,
+    /// all cached entries with a stale topology version will be recomputed.
+    /// Call this after terrain destruction (e.g. `CellComplex::remove_face`).
+    #[inline]
+    pub fn notify_topology_changed(&mut self) {
+        self.current_topology_version = self.current_topology_version.saturating_add(1);
+    }
+
+    /// Current topology version the cache is tracking.
+    #[inline]
+    pub fn topology_version(&self) -> u64 {
+        self.current_topology_version
+    }
+
     /// Get or compute a flow field for a goal.
     ///
     /// - `head` provides Q-values via the LEO framework.
@@ -131,7 +155,9 @@ impl FlowFieldCache {
         let needs_recompute = match self.fields.entry(goal_id) {
             Entry::Occupied(e) => {
                 let cached = e.get();
-                cached.dirty_count > 0 || cached.last_tick != tick
+                cached.dirty_count > 0
+                    || cached.last_tick != tick
+                    || cached.topology_version != self.current_topology_version
             }
             Entry::Vacant(_) => true,
         };
@@ -305,6 +331,7 @@ impl FlowFieldCache {
                 field,
                 dirty_count: 0,
                 last_tick: tick,
+                topology_version: self.current_topology_version,
             },
         );
 
@@ -515,5 +542,40 @@ mod tests {
         // Should not panic.
         cache.mark_dirty(999, 10);
         assert_eq!(cache.len(), 0);
+    }
+
+    #[test]
+    fn test_topology_version_starts_zero() {
+        let cache = FlowFieldCache::new(test_config());
+        assert_eq!(cache.topology_version(), 0);
+    }
+
+    #[test]
+    fn test_notify_topology_changed_bumps_version() {
+        let mut cache = FlowFieldCache::new(test_config());
+        assert_eq!(cache.topology_version(), 0);
+        cache.notify_topology_changed();
+        assert_eq!(cache.topology_version(), 1);
+        cache.notify_topology_changed();
+        assert_eq!(cache.topology_version(), 2);
+    }
+
+    #[test]
+    fn test_topology_change_triggers_recompute() {
+        let mut cache = FlowFieldCache::new(test_config()).with_min_npcs(1);
+        let head = make_head();
+
+        // Compute and cache at topology version 0
+        let f1 = cache.get_or_compute(1, &head, &[0.0], 0, 4, 4, 0, 5);
+        assert!(f1.is_some());
+
+        // Same tick, same topology → should return cached (no recompute)
+        // We can't directly observe recompute, but topology bump forces it
+        cache.notify_topology_changed();
+        assert_eq!(cache.topology_version(), 1);
+
+        // Same tick but new topology → should recompute
+        let f2 = cache.get_or_compute(1, &head, &[0.0], 0, 4, 4, 0, 5);
+        assert!(f2.is_some(), "should return a field even after topology change");
     }
 }

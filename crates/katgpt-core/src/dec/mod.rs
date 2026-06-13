@@ -34,12 +34,15 @@
 //! ```
 
 pub mod backend;
+pub mod cache;
 pub mod flow;
 pub mod hodge;
 pub mod operators;
+pub mod terrain_cochains;
 pub mod types;
 
 pub use backend::{DecBackend, select_backend};
+pub use cache::{DecCache, DirtyRegion, affected_vertices, hodge_decompose_cached};
 pub use flow::{DecFlowField, coexact_flow, exact_flow, harmonic_flow};
 pub use hodge::{
     HodgeComponents, betti_numbers, dec_relevance_score, harmonic_projector, hodge_decompose,
@@ -48,4 +51,5 @@ pub use hodge::{
 pub use operators::{
     codifferential, exterior_derivative, graph_laplacian, hodge_laplacian, hodge_star,
 };
+pub use terrain_cochains::{DestructionCochain, OccupancyCochain, SafetyCochain, ThreatCochain};
 pub use types::{CellComplex, CochainField, MAX_RANK};

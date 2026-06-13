@@ -1,7 +1,7 @@
 # Plan 261: Dynamic DEC Topology for Destructible Terrain
 
 **Date:** 2026-06
-**Status:** 🔵 ACTIVE
+**Status:** 🟡 PHASE 3 GOAT — remove_face O(n) scan (Issue 013), A* quality comparison pending
 **Research:** 119 — Arena × Latent Space (moved to `riir-ai/.research/119` — internal game product concept)
 **Depends On:** Plan 251 (DEC Operators), Plan 242 (Fourier Flow Fields)
 
@@ -20,37 +20,37 @@ DEC dynamic topology is a **generic modelless primitive** — it's useful for an
 ## Tasks
 
 ### Phase 0: Dynamic CellComplex
-- [ ] Add `CellComplex::remove_cell()` — removes a cell from the complex and updates incidence matrices
-- [ ] Add `CellComplex::remove_face()` — removes a face (terrain chunk) and updates edge-vertex incidence
-- [ ] Add `CellComplex::topology_version()` — monotonically increasing version counter, incremented on any mutation
-- [ ] Add `CellComplex::is_dirty_since(version: u64) -> bool` — cheap dirty check for caching
-- [ ] Ensure `d₀`, `d₁`, `d₂`, `δₖ`, `Δₖ` operators correctly recompute after topology change
+- [x] Add `CellComplex::remove_cell()` — removes a cell from the complex and updates incidence matrices
+- [x] Add `CellComplex::remove_face()` — removes a face (terrain chunk) and updates edge-vertex incidence
+- [x] Add `CellComplex::topology_version()` — monotonically increasing version counter, incremented on any mutation
+- [x] Add `CellComplex::is_dirty_since(version: u64) -> bool` — cheap dirty check for caching
+- [x] Ensure `d₀`, `d₁`, `d₂`, `δₖ`, `Δₖ` operators correctly recompute after topology change
 
 ### Phase 1: Incremental DEC Updates
-- [ ] Add `DecCache` struct — caches Hodge decomposition results keyed by `topology_version()`
-- [ ] Implement incremental Hodge recomputation — only recompute affected rows/columns after local topology change
-- [ ] Add dirty-region tracking — mark which regions of the cell complex changed, only recompute those
-- [ ] Benchmark: full recomputation vs incremental for 1-cell, 10-cell, 100-cell destruction events
+- [x] Add `DecCache` struct — caches Hodge decomposition results keyed by `topology_version()`
+- [x] Implement incremental Hodge recomputation — only recompute affected rows/columns after local topology change
+- [x] Add dirty-region tracking — mark which regions of the cell complex changed, only recompute those
+- [x] Benchmark: full recomputation vs incremental for 1-cell, 10-cell, 100-cell destruction events
 
 ### Phase 2: Terrain-Specific Cochains
-- [ ] Add `terrain_cochains` module with arena-relevant cochain definitions:
+- [x] Add `terrain_cochains` module with arena-relevant cochain definitions:
   - `SafetyCochain` (C₀) — scalar per vertex: how safe is this position?
   - `ThreatCochain` (C₁) — vector per edge: threat direction/magnitude
   - `OccupancyCochain` (C₂) — scalar per face: how many entities in this area?
   - `DestructionCochain` (C₀) — scalar per vertex: how destroyed is this terrain?
-- [ ] Add bridge functions: `SafetyCochain::from_projectile_threat()` — raw trajectory → safety score via sigmoid
+- [x] Add bridge functions: `SafetyCochain::from_projectile_threat()` — raw trajectory → safety score via sigmoid
 
 ### Phase 3: GOAT Gate Validation
-- [ ] Create `examples/dec_terrain_bench.rs` — benchmark DEC terrain update vs naive grid scan
-- [ ] Measure: time to update navigation after N terrain destructions
+- [x] Create `examples/dec_terrain_bench.rs` — benchmark DEC terrain update vs naive grid scan
+- [x] Measure: time to update navigation after N terrain destructions
 - [ ] Measure: quality of Hodge-decomposed routes vs A* on modified terrain
 - [ ] If DEC wins → promote `dec_terrain_ai` to default feature
-- [ ] If DEC loses → demote, document why, create issue for optimization
+- [x] If DEC loses → demote, document why, create issue for optimization (Issue 013: remove_face O(n) scan)
 
 ### Phase 4: Integration with Existing Flow Fields
-- [ ] Add `DecFlowField::recompute_if_dirty(&mut self, complex: &CellComplex, cache: &DecCache)` — only recompute if topology changed
-- [ ] Wire `FlowFieldCache` to use `topology_version()` for dirty threshold
-- [ ] Ensure `flow_steering()` works correctly on post-destruction terrain
+- [x] Add `DecFlowField::recompute_if_dirty()` — only recompute if topology changed
+- [x] Wire `FlowFieldCache` to use `topology_version()` for dirty threshold
+- [x] Ensure `flow_steering()` works correctly on post-destruction terrain (inheritance — steering reads from FlowField which is rebuilt on topology change)
 
 ---
 

@@ -82,6 +82,7 @@ gpart_adapter = []  # GPart isometric partition adapter loading (Research 227, P
 dendritic_gate = []  # DendriticGate NMDA-inspired adaptive branching types (Plan 260)
 sector_projection = []  # Multi-sector spatial projection (Plan 262)
 action_bridge = []  # Generic latent→raw action bridge (Plan 262)
+dec_terrain_ai = ["dec_operators"]  # Dynamic DEC topology + terrain cochains for destructible terrain (Plan 261, GOAT-gated)
 
 [[bench]]
 name = "flow_field_bench"

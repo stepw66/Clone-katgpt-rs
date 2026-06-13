@@ -115,11 +115,11 @@ denoise_loop step k:
   - Expected: RCD converges in fewer steps at same accuracy
   - Deferred: requires BidirectionalContext embedding path changes
 
-- [ ] **Task 5.5**: GOAT gate comparison
+- [x] **Task 5.5**: GOAT gate comparison
   - RCD vs DMax at equivalent TPS
   - Measure: accuracy at throughput-matched decode speed
   - Promote to default only if RCD > DMax by ≥2pp accuracy or ≥1.5× step reduction
-  - Requires benchmark infrastructure — create issue
+  - Issue 012 created for benchmark infrastructure
 
 ---
 

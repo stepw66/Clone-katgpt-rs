@@ -30,6 +30,10 @@ pub struct CellComplex {
     /// `boundaries[2]` = B₃ (face→volume incidence).
     /// `boundaries[3]` is absent (no rank-4 cells).
     boundaries: [Vec<(usize, usize, i8)>; MAX_RANK as usize],
+    /// Monotonically increasing version counter. Bumped on any structural mutation
+    /// (cell addition/removal). Consumers compare against their cached version to
+    /// detect topology changes without polling individual cells.
+    topology_version: u64,
 }
 
 impl CellComplex {
@@ -41,6 +45,7 @@ impl CellComplex {
         Self {
             n_cells: [n_vertices, n_edges, n_faces, n_volumes],
             boundaries: [Vec::new(), Vec::new(), Vec::new()],
+            topology_version: 0,
         }
     }
 
@@ -157,6 +162,151 @@ impl CellComplex {
     pub fn n_volumes(&self) -> usize {
         self.n_cells[3]
     }
+
+    // -----------------------------------------------------------------------
+    // Dynamic Topology (Plan 261 Phase 0)
+    // -----------------------------------------------------------------------
+
+    /// Current topology version. Bumped on every structural mutation.
+    #[inline]
+    pub fn topology_version(&self) -> u64 {
+        self.topology_version
+    }
+
+    /// Returns `true` if the topology has changed since `version`.
+    /// Sub-nanosecent: single integer comparison.
+    #[inline]
+    pub fn is_dirty_since(&self, version: u64) -> bool {
+        self.topology_version > version
+    }
+
+    /// Number of active cells at a given rank.
+    ///
+    /// Since removal uses swap-remove (no tombstones), `n_cells` already reflects
+    /// the post-removal active count. This method exists for semantic clarity at
+    /// call sites that care about "alive" cells.
+    #[inline]
+    pub fn n_active_cells(&self, rank: u8) -> usize {
+        self.n_cells(rank)
+    }
+
+    /// Remove a face (rank-2 cell) from the complex using swap-remove.
+    ///
+    /// - Deletes all B₂ entries for this face (its boundary edges are detached).
+    /// - If the removed face is not the last, rebinds the last face's B₂ entries
+    ///   to the removed slot (swap-remove avoids O(n) reindexing).
+    /// - Vertices and edges are NOT removed — they may be shared with other faces.
+    ///   Dangling edges represent the boundary of the destroyed region.
+    pub fn remove_face(&mut self, face_idx: usize) {
+        assert!(
+            face_idx < self.n_cells[2],
+            "remove_face: face_idx {face_idx} >= n_faces {}",
+            self.n_cells[2]
+        );
+
+        let last_face = self.n_cells[2] - 1;
+
+        // Remove the face's column from B₂ (boundaries[1]).
+        self.swap_remove_from_boundary(1, face_idx, last_face, true);
+
+        self.n_cells[2] -= 1;
+        self.topology_version += 1;
+    }
+
+    /// Remove a cell of any rank using swap-remove.
+    ///
+    /// For each boundary matrix where the cell appears:
+    /// 1. Remove all entries referencing the cell.
+    /// 2. Rebind the last cell at that rank to fill the gap.
+    ///
+    /// Rank-specific handling:
+    /// - **Vertex (0)**: removed from B₁ as `row`
+    /// - **Edge (1)**: removed from B₁ as `col` AND from B₂ as `row`
+    /// - **Face (2)**: delegates to [`remove_face`](Self::remove_face)
+    /// - **Volume (3)**: removed from B₃ as `col`
+    pub fn remove_cell(&mut self, rank: u8, cell_idx: usize) {
+        match rank {
+            0 => {
+                assert!(
+                    cell_idx < self.n_cells[0],
+                    "remove_cell: vertex_idx {cell_idx} >= n_vertices {}",
+                    self.n_cells[0]
+                );
+                let last = self.n_cells[0] - 1;
+                self.swap_remove_from_boundary(0, cell_idx, last, false);
+                self.n_cells[0] -= 1;
+                self.topology_version += 1;
+            }
+            1 => {
+                assert!(
+                    cell_idx < self.n_cells[1],
+                    "remove_cell: edge_idx {cell_idx} >= n_edges {}",
+                    self.n_cells[1]
+                );
+                let last = self.n_cells[1] - 1;
+                // Edge appears as col in B₁ (boundaries[0]) and as row in B₂ (boundaries[1])
+                self.swap_remove_from_boundary(0, cell_idx, last, true);
+                self.swap_remove_from_boundary(1, cell_idx, last, false);
+                self.n_cells[1] -= 1;
+                self.topology_version += 1;
+            }
+            2 => {
+                self.remove_face(cell_idx);
+            }
+            3 => {
+                assert!(
+                    cell_idx < self.n_cells[3],
+                    "remove_cell: volume_idx {cell_idx} >= n_volumes {}",
+                    self.n_cells[3]
+                );
+                let last = self.n_cells[3] - 1;
+                self.swap_remove_from_boundary(2, cell_idx, last, true);
+                self.n_cells[3] -= 1;
+                self.topology_version += 1;
+            }
+            _ => panic!("remove_cell: rank {rank} exceeds MAX_RANK {MAX_RANK}"),
+        }
+    }
+
+    /// Swap-remove a cell from a single boundary matrix.
+    ///
+    /// - `boundary_idx`: index into `self.boundaries` (0=B₁, 1=B₂, 2=B₃)
+    /// - `target_idx`: cell index to remove
+    /// - `last_idx`: last cell index at this rank (for swap-rebind)
+    /// - `is_col`: `true` if the cell appears as `col` in entries, `false` if as `row`
+    fn swap_remove_from_boundary(
+        &mut self,
+        boundary_idx: usize,
+        target_idx: usize,
+        last_idx: usize,
+        is_col: bool,
+    ) {
+        let boundary = &mut self.boundaries[boundary_idx];
+
+        // Remove entries referencing the target cell
+        if is_col {
+            boundary.retain(|&(_, col, _)| col != target_idx);
+        } else {
+            boundary.retain(|&(row, _, _)| row != target_idx);
+        }
+
+        // Swap-rebind: move last cell's entries to the freed slot
+        if target_idx != last_idx {
+            if is_col {
+                for (_, col, _) in boundary.iter_mut() {
+                    if *col == last_idx {
+                        *col = target_idx;
+                    }
+                }
+            } else {
+                for (row, _, _) in boundary.iter_mut() {
+                    if *row == last_idx {
+                        *row = target_idx;
+                    }
+                }
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -240,6 +390,7 @@ impl CochainField {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::dec::operators::exterior_derivative;
 
     #[test]
     fn grid_2d_cell_counts() {
@@ -291,5 +442,146 @@ mod tests {
         cf.cell_features_mut(1)[1] = 2.0;
         let f = cf.cell_features(1);
         assert_eq!(f, &[1.0, 2.0]);
+    }
+
+    // -----------------------------------------------------------------------
+    // Plan 261 Phase 0: Dynamic Topology
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_topology_version_starts_zero() {
+        let cx = CellComplex::grid_2d(4, 4);
+        assert_eq!(cx.topology_version(), 0);
+        assert!(!cx.is_dirty_since(0));
+    }
+
+    #[test]
+    fn test_remove_face_bumps_version() {
+        let mut cx = CellComplex::grid_2d(4, 4);
+        assert_eq!(cx.topology_version(), 0);
+        cx.remove_face(0);
+        assert_eq!(cx.topology_version(), 1);
+        assert!(cx.is_dirty_since(0));
+        assert!(!cx.is_dirty_since(1));
+    }
+
+    #[test]
+    fn test_remove_face_decrements_count() {
+        let mut cx = CellComplex::grid_2d(4, 4);
+        let n_before = cx.n_faces();
+        cx.remove_face(0);
+        assert_eq!(cx.n_faces(), n_before - 1);
+        assert_eq!(cx.n_active_cells(2), n_before - 1);
+    }
+
+    #[test]
+    fn test_remove_face_swap_remove_rebinds() {
+        // grid_2d(3, 2) has exactly 2 faces — perfect for testing swap-rebind
+        let mut cx = CellComplex::grid_2d(3, 2);
+        assert_eq!(cx.n_faces(), 2);
+
+        // Capture face 1's boundary edges before removal
+        let b2_before = cx.boundary_entries(1);
+        let face1_edges_before: Vec<usize> = b2_before
+            .iter()
+            .filter(|&&(_, col, _)| col == 1)
+            .map(|&(row, _, _)| row)
+            .collect();
+        assert!(!face1_edges_before.is_empty());
+
+        // Remove face 0 — face 1 (the last) should be rebound to index 0
+        cx.remove_face(0);
+        assert_eq!(cx.n_faces(), 1);
+
+        let b2_after = cx.boundary_entries(1);
+
+        // All remaining B₂ entries must reference face 0 (the swapped slot)
+        for &(_, col, _) in b2_after {
+            assert_eq!(
+                col, 0,
+                "all B₂ entries should reference face 0 after swap-remove"
+            );
+        }
+
+        // The rebound edges must match face 1's original boundary edges
+        let edges_after: Vec<usize> = b2_after.iter().map(|&(row, _, _)| row).collect();
+        let mut sorted_before = face1_edges_before.clone();
+        sorted_before.sort_unstable();
+        let mut sorted_after = edges_after.clone();
+        sorted_after.sort_unstable();
+        assert_eq!(
+            sorted_before, sorted_after,
+            "rebound edges should match face 1's original edges"
+        );
+    }
+
+    #[test]
+    fn test_is_dirty_since() {
+        let mut cx = CellComplex::grid_2d(4, 4);
+
+        // Version 0: not dirty since 0
+        assert!(!cx.is_dirty_since(0));
+
+        cx.remove_face(2);
+        // Version 1: dirty since 0, not dirty since 1
+        assert!(cx.is_dirty_since(0));
+        assert!(!cx.is_dirty_since(1));
+
+        cx.remove_face(0);
+        // Version 2: dirty since 0 and 1, not dirty since 2
+        assert!(cx.is_dirty_since(0));
+        assert!(cx.is_dirty_since(1));
+        assert!(!cx.is_dirty_since(2));
+    }
+
+    #[test]
+    fn test_remove_cell_face_delegates() {
+        // remove_cell(rank=2, idx) must produce same result as remove_face(idx)
+        let mut cx_a = CellComplex::grid_2d(4, 4);
+        let mut cx_b = CellComplex::grid_2d(4, 4);
+
+        cx_a.remove_face(3);
+        cx_b.remove_cell(2, 3);
+
+        assert_eq!(cx_a.n_faces(), cx_b.n_faces());
+        assert_eq!(cx_a.topology_version(), cx_b.topology_version());
+
+        // Compare B₂ entries
+        let b2_a = cx_a.boundary_entries(1);
+        let b2_b = cx_b.boundary_entries(1);
+        assert_eq!(b2_a.len(), b2_b.len());
+        for i in 0..b2_a.len() {
+            assert_eq!(
+                b2_a[i], b2_b[i],
+                "B₂ entry {i} differs after remove_cell vs remove_face"
+            );
+        }
+    }
+
+    #[test]
+    fn test_operators_correct_after_removal() {
+        // The fundamental identity d₁∘d₀ = 0 must hold after face removal.
+        // Removing a face deletes a column of B₂ but cannot violate B₁·B₂ = 0
+        // because remaining columns were already zero in the product.
+        let mut cx = CellComplex::grid_2d(4, 4);
+        cx.remove_face(0);
+        cx.remove_face(2);
+
+        let mut potential = CochainField::zeros(0, cx.n_vertices(), 1);
+        for i in 0..cx.n_vertices() {
+            potential.set_scalar(i, (i as f32 * 0.5).sin());
+        }
+
+        let grad = exterior_derivative(&cx, &potential);
+        let curl = exterior_derivative(&cx, &grad);
+
+        assert_eq!(curl.rank, 2);
+        for i in 0..cx.n_faces() {
+            assert!(
+                curl.scalar(i).abs() < 1e-6,
+                "curl(grad) should be 0 after removal at face {i}, got {}",
+                curl.scalar(i)
+            );
+        }
     }
 }
