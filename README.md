@@ -1,6 +1,6 @@
 # KatGPT-RS
 
-A **GOAT-proved** neuro-symbolic micro-Transformer with speculative decoding, constraint pruning, and **106 adaptive test-time scaling features** — built in Rust. Pure algorithms, zero side effects, MIT licensed.
+A **GOAT-proved** neuro-symbolic micro-Transformer with speculative decoding, constraint pruning, and **114 adaptive test-time scaling features** — built in Rust. Pure algorithms, zero side effects, MIT licensed.
 
 Inspired by [Andrej Karpathy's microgpt](https://karpathy.github.io/2026/02/12/microgpt/).
 
@@ -74,7 +74,7 @@ Additional core traits: `GameState`, `RolloutPolicy`, `StateHeuristic`, `LeoHead
 
 ## 🔄 E2E Inference Flow — Default GOAT Stack
 
-The default production stack has **~80+ GOAT-proved features** enabled, but they don't all run on every token. The architecture uses **layered gating** — most features are bandit-driven, Option-gated, or compile-time-only.
+The default production stack has **~90+ GOAT-proved features** enabled, but they don't all run on every token. The architecture uses **layered gating** — most features are bandit-driven, Option-gated, or compile-time-only.
 
 ```mermaid
 flowchart TD
@@ -229,6 +229,37 @@ graph LR
 | **FreqBandit** | Oscillatory spectral bandit — cyclic pattern detection → adaptive speculative decode | `freq_bandit` |
 
 📖 **Full GOAT audit table** with research source, real gain, and replaced feature: See [`.docs/01_overview.md`](.docs/01_overview.md).
+
+### GOAT-Proved Additions (Plans 225–260)
+
+| Feature | Plan | GOAT | Key Gain |
+|---------|------|------|----------|
+| **Posterior-Guided Pruner Evolution** (`posterior_evolution`) | 239 | 8/8 ✅ | Bayesian precision-gated lifecycle actions (Patch/Split/Compress/Retire), 258ns overhead |
+| **Spectral NPC Perception** (`sense_lod`) | 240 | ✅ | Per-NPC LOD skips low-value sense modules, >40% CPU reduction in dense zones |
+| **Adaptive Modulo Validation** (`game_adaptive_validation`) | 244 | ✅ | 5.91× dense-zone throughput, zero chain-layer bypass |
+| **Spectral Irrep Pruner** (`spectral_pruner`) | 246 | ✅ | Spectral flatness detection for converged logit distributions, +3.6% overhead only |
+| **OctreeCTC Reconstruction** | 248 | ✅ | Multi-step active KG-Latent-Octree reconstruction, 93.2ns < 200ns GOAT |
+| **Spectral Budget Router** (`spectral_budget`) | 254 | 19/19 ✅ | Layer-adaptive NS depth + rank-p spectral truncation |
+| **Regime Transition** (`regime_transition`) | 215 | 8/8+4/4 ✅ | Self-revising discovery, -0.3% overhead vs real decode |
+| **SubstrateGate** (`substrate_gate`) | 216 | ✅ | Inference-time capability substrate routing via MLP masks |
+| **Critical Interval Gate** (`critical_interval_gate`) | 222 | ✅ | Entropy-triggered solver switch, zero cost (entropy already computed) |
+| **LLMExecGuard** (`llmexec_guard`) | 223 | ✅ | Entropy-driven verification budgeting, zero cost when guard holds |
+| **Outlier-Aware Quant Guard** (`outlier_guard`) | 224 | ✅ | KS-test outlier detection for weight matrices |
+| **EGCS** (`egcs`) | 206 | ✅ | Episode-guided constraint synthesis from successful translations |
+| **Three-Mode Router** (`three_mode_router`) | 211 | ✅ | Neuro-symbolic bandit: Direct/CoT/Symbolic per-query routing |
+| **Breakeven Routing** (`breakeven_routing`) | 250 | 7/7 ✅ | 49% wallclock savings on long sequences, ~9ns overhead |
+| **DEC Operators** (`dec_operators`) | 251 | Foundational ✅ | Discrete Exterior Calculus on cell complexes, conservation-guaranteed |
+| **Cubical Topology** (`lattice_operad`) | 252 | Foundational ✅ | IntervalPruner + CubicalNerve + LatticeOpernad composition |
+| **Segment Checkpoint** (`segment_checkpoint`) | 226 | ✅ | Cached KV segment checkpoints at segment boundaries |
+| **RCD Residual** (`rcd_residual`) | 258 | ✅ | Entropy-weighted residual context injection for D2F |
+| **Spec Pruner** (`spec_pruner`) | 259 | ✅ | Modelless spec-to-constraint O(1) RoaringBitmap compilation |
+| **Epiplexity Bandit** (`epiplexity_bandit`) | — | ✅ | Epistemic perplexity bandit for domain-aware routing |
+| **CADDTree Budget** (`caddtree_budget`) | 219 | ✅ | Compositional adaptive DDTree budget allocation |
+| **Static Cal Tables** (`static_cal_tables`) | 227 | ✅ | Pre-computed quantization calibration, zero inference cost |
+| **Targeted Precision** (`targeted_precision`) | 227 | ✅ | Per-head bit allocation from weight statistics |
+| **Modality Pruned Load** (`modality_pruned_load`) | 227 | ✅ | Pipeline pruning for modality-specific context loading |
+| **Precision Aware Draft** (`precision_aware_draft`) | 227 | ✅ | Quantization-aware speculative draft scoring |
+| **Async QDQ Overlap** (`async_qdq_overlap`) | 227 | ✅ | Overlapped quantize-dequantize with compute |
 
 ## 🎮 Arena Proofs — HL Thesis Validated
 
@@ -478,6 +509,50 @@ GOAT 6/6 proved, default-on. Mathematical foundation from [Deep Manifold Part 2]
 
 📖 [`.research/051_Deep_Manifold_Fixed_Point_Boundary_Conditions.md`](.research/051_Deep_Manifold_Fixed_Point_Boundary_Conditions.md).
 
+### 🧬 Posterior-Guided Pruner Evolution (Plan 239)
+
+Fuse BAKE precision vectors with MUSE skill lifecycle — each `ConstraintPruner` arm becomes a Bayesian hypothesis with per-feature precision, enabling precision-gated Patch/Split/Compress/Retire actions. **GOAT 8/8 PASS**, promoted to default-ON.
+
+| Gate | Result |
+|------|--------|
+| Precision update correctness | ✅ Sequential BAKE-style |
+| Surprise KL trigger | ✅ Sigmoid-gated |
+| 5 lifecycle actions | ✅ Explore→Patch→Split→Compress→Retire |
+| Decorator overhead | 258ns only when PosteriorGuidedPruner used |
+| Existing pruners | Zero regression (no decorator = no overhead) |
+
+Feature gate: `posterior_evolution` (**default-ON**). 📖 Plan: [`.plans/239_posterior_guided_pruner_evolution.md`](.plans/239_posterior_guided_pruner_evolution.md).
+
+### 🔭 Spectral Budget Router (Plan 254)
+
+Layer-adaptive Newton-Schulz depth + rank-p spectral truncation for inference routing. Pre-computed NS config matches empirical quantile thresholds. **GOAT 19/19 PASS**, promoted to default-ON.
+
+Feature gate: `spectral_budget` (**default-ON**). 📖 Plan: [`.plans/254_spectral_budget_router.md`](.plans/254_spectral_budget_router.md).
+
+### 🏛️ DEC Operators + Cubical Topology (Plans 251–252)
+
+Foundational mathematical infrastructure — Discrete Exterior Calculus on cell complexes (conservation-guaranteed, zero-alloc SIMD) + categorical cubical framework (IntervalPruner + CubicalNerve + LatticeOpernad). Both default-ON, no GOAT gate needed (foundational).
+
+Feature gates: `dec_operators`, `lattice_operad` (**both default-ON**). 📖 Plans: [`.plans/251_dec_operators_cell_complex.md`](.plans/251_dec_operators_cell_complex.md), [`.plans/252_cubical_category_interval_topology.md`](.plans/252_cubical_category_interval_topology.md).
+
+### ⚖️ Breakeven Complexity Routing (Plan 250)
+
+Cost-aware inference routing using breakeven complexity N* for tier selection. **49% wallclock savings** on long sequences (≥512 tokens) with ~9ns overhead and 0% accuracy regression.
+
+Feature gate: `breakeven_routing` (**default-ON**, GOAT 7/7). 📖 Plan: [`.plans/250_breakeven_inference_routing.md`](.plans/250_breakeven_inference_routing.md).
+
+### 🔄 Regime-Transition Inference (Plan 215)
+
+Self-revising discovery with regime-aware inference. Detects when the model switches reasoning regimes and adapts compute accordingly. **-0.3% overhead** vs real decode, 8/8 mock + 4/4 real GOAT tests.
+
+Feature gate: `regime_transition` (**default-ON**). 📖 Plan: [`.plans/215_regime_transition_inference.md`](.plans/215_regime_transition_inference.md).
+
+### 🛡️ SubstrateGate — Capability Substrate Routing (Plan 216)
+
+Inference-time capability extraction via pre-computed per-capability MLP masks intersected with ReLU sparsity for dual sparsity. DDTree branches routed through different substrates. **25/25 tasks done**, wired into `forward_pass`.
+
+Feature gate: `substrate_gate` (**default-ON**). 📖 Plan: [`.plans/216_substrate_gate_capability_routing.md`](.plans/216_substrate_gate_capability_routing.md).
+
 ## 🔧 KV Compression
 
 Default: **Hybrid OCT+PQ** (OCTOPUS triplet encoding + PlanarQuant 2D Givens rotation). Best MSE + 64× fewer rotation FMAs.
@@ -512,7 +587,19 @@ Default: **Hybrid OCT+PQ** (OCTOPUS triplet encoding + PlanarQuant 2D Givens rot
 | **Shard Embedding** (`shard_embedding`) | JL random orthogonal projection [f32;64]→[f32;8] | Always compiled in `katgpt-core` |
 | **DFlare** (Plan 174) | Marginal fusion + KV routing + progressive budget | 🪦 GOAT FAILED on all 3 sub-features |
 | **ManifoldPruner** (Plan 234) | ManifoldE point-to-manifold soft validity | 🪦 GOAT G1 FAIL |
-| **MUX-Latent Wire** (`mux_latent_wire`) | Latent-to-latent patching over wire, 68B format, SIMD batch | Opt-in — awaiting GOAT proof |
+| **MUX-Latent Wire** (`mux_latent_wire`) | Latent-to-latent patching over wire, 68B format, SIMD batch | Opt-in — GOAT 11/11, awaiting E2E integration |
+| **RAT+ Bridge** (`rat_plus_bridge`) | GDN2 recurrent state as dilated sparse attention bridge | Opt-in — GOAT gated, D=16 proven |
+| **TRDraft** (`trd_refined_draft`) | Trajectory-refined draft: re-draft failed DDTree branches | GOAT proven, opt-in |
+| **Vocab Channel Pruner** (`vocab_channel`) | ROTATE MLP weight decomposition → DDTree pruning | GOAT 6/7 conditional |
+| **MSA Sparse** (`msa_sparse`) | Blockwise sparse attention distillation into VortexFlow | Opt-in — GOAT gated |
+| **GPart Adapter** (`gpart_adapter`) | Isometric partition matrix, 2-100× compression vs LoRA | Opt-in — GOAT gated |
+| **LinOSS Threat** (`linoss_threat`) | Oscillation dynamics for anticipatory NPC threat prediction | Opt-in — pending benchmark |
+| **Fourier Flow** (`flow_field_nav`) | FFT-smoothed shared flow fields for O(1) crowd navigation | GOAT PASS 46.9%, opt-in |
+| **StillKV** (`still_kv`) | Perceiver-based KV compaction with heuristic query banks | Opt-in — pending GOAT proof |
+| **ECHO Predictor** (`echo_predictor`) | Inference-time prediction scoring for policy quality | Opt-in — pending GOAT proof |
+| **Merkle Octree** (`merkle_octree`) | Node-tier curator consensus with BLAKE3 commitment | Opt-in — modelless verification |
+| **ANE NPC Brain** (`ane_npc`) | Move NPC think-brain compute to Apple ANE batch | Opt-in — GOAT gated |
+| **DendriticGate** (`dendritic_gate`) | NMDA-inspired adaptive DDTree branching via entropy+coincidence | In progress — GOAT gated |
 
 📖 **Full detail for ALL opt-in features + complete feature flag reference:** [`.docs/21_opt_in_features.md`](.docs/21_opt_in_features.md) and [`Cargo.toml`](Cargo.toml).
 
@@ -528,16 +615,16 @@ Default: **Hybrid OCT+PQ** (OCTOPUS triplet encoding + PlanarQuant 2D Givens rot
 cargo build --release                              # Build with optimizations
 cargo run --release                                # Run benchmark + generate plot
 cargo run --release --all-features                 # Run everything
-cargo test --quiet --workspace --all-features       # Run all tests (111 files, 740+ cases)
+cargo test --quiet --workspace --all-features       # Run all tests (120+ files, 900+ cases)
 cargo run --example sudoku_01_9x9 --features sudoku # Sudoku solver
 cargo clippy --all-targets --all-features --quiet   # Lint
 ```
 
 ### Feature Flags
 
-**150+ feature flags** with **106 default-on** (all GOAT-proved). Default features include: `sparse_mlp`, `domain_latent`, `ppot`, `bandit`, `bt_rank`, `spectral_quant`, `hybrid_oct_pq`, `elf_sde`, `cna_steering`, `deep_manifold`, `federation`, `gdn2_attention`, `dash_attn`, `lt2_looped`, `kv_share`, `kvarn`, `belief_drafter`, `bfcf_lfu_shard`, `mux_latent_context`, `collapse_aware_thinking`, `slod`, `schema_centroid`, `union_bound_confidence`, `pathway_tracker`, `federation_composer`, and 82 more.
+**150+ feature flags** with **114 default-on** (all GOAT-proved). Default features include: `sparse_mlp`, `domain_latent`, `ppot`, `bandit`, `bt_rank`, `spectral_quant`, `hybrid_oct_pq`, `elf_sde`, `cna_steering`, `deep_manifold`, `federation`, `gdn2_attention`, `dash_attn`, `lt2_looped`, `kv_share`, `kvarn`, `belief_drafter`, `bfcf_lfu_shard`, `mux_latent_context`, `collapse_aware_thinking`, `slod`, `schema_centroid`, `union_bound_confidence`, `pathway_tracker`, `federation_composer`, **`posterior_evolution`**, **`spectral_pruner`**, **`breakeven_routing`**, **`substrate_gate`**, **`regime_transition`**, **`sense_lod`**, **`spectral_budget`**, `rcd_residual`, `lattice_operad`, `spec_pruner`, `caddtree_budget`, and 80 more.
 
-📖 **Full feature flag table (240+ flags):** [`.docs/21_opt_in_features.md`](.docs/21_opt_in_features.md) and [`Cargo.toml`](Cargo.toml).
+📖 **Full feature flag table (260+ flags):** [`.docs/21_opt_in_features.md`](.docs/21_opt_in_features.md) and [`Cargo.toml`](Cargo.toml).
 
 ## 📁 Project Structure
 
@@ -562,8 +649,8 @@ src/
   dash_attn/          DashAttention adaptive sparse attention
   hybrid_oct_pq/      Default KV codec (OCT + PlanarQuant)
   ...                 50+ additional modules
-examples/            111 examples (see examples/README.md)
-tests/               167 integration test & benchmark files (~87 bench suites)
+examples/            120+ examples (see examples/README.md)
+tests/               180+ integration test & benchmark files (~90 bench suites)
 ```
 
 ## 📖 Documentation Index
@@ -595,6 +682,12 @@ tests/               167 integration test & benchmark files (~87 bench suites)
 - [Raven RSM — Opt-in O(1) routing slot memory](.docs/25_raven_rsm.md)
 - [Open-ended problem evolution arena](.docs/191_open_ended_problem_evolution_arena.md)
 - [111 examples grouped by category](examples/README.md)
+- [DEC Operators & Cubical Topology](.plans/251_dec_operators_cell_complex.md)
+- [Spectral Budget Router](.plans/254_spectral_budget_router.md)
+- [Posterior-Guided Pruner Evolution](.plans/239_posterior_guided_pruner_evolution.md)
+- [Regime-Transition Inference](.plans/215_regime_transition_inference.md)
+- [SubstrateGate Capability Routing](.plans/216_substrate_gate_capability_routing.md)
+- [Breakeven Complexity Routing](.plans/250_breakeven_inference_routing.md)
 
 ## 📜 References
 
