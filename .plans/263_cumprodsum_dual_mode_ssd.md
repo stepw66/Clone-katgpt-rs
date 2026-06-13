@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-13
 **Status:** 🔵 ACTIVE
-**Research:** [231 Semiseparable State Space Duality](../.research/231_Semiseparable_State_Space_Duality_Modelless.md)
+**Research:** [230 Semiseparable State Space Duality](../.research/230_Semiseparable_State_Space_Duality_Modelless.md)
 **Depends On:** GDN2 (Plan 105), Diagonal Gate (existing), ConstraintPruner trait
 
 ---
@@ -120,6 +120,6 @@ The block decomposition gives adaptive CPU/SIMD/GPU routing: small chunks → SI
 ## References
 
 - [SSD Paper](https://arxiv.org/abs/2405.21060) — Section 3.2.2 (cumprodsum), Section 6 (block decomposition)
-- [Research 231](../.research/231_Semiseparable_State_Space_Duality_Modelless.md)
+- [Research 230](../.research/230_Semiseparable_State_Space_Duality_Modelless.md)
 - [Research 070](../.research/070_Gated_DeltaNet_2_Decoupled_Erase_Write_Linear_Attention.md) — GDN2 (existing SSD implementation)
 - [Plan 105](105_gated_deltanet_2_recurrent_attention.md) — GDN2 implementation plan

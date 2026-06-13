@@ -1,4 +1,4 @@
-# Research 231: Semiseparable State Space Duality — The Unifying Matrix Primitive
+# Research 230: Semiseparable State Space Duality — The Unifying Matrix Primitive
 
 **Date:** 2026-06-13
 **Source:** arXiv 2405.21060 — "Transformers are SSMs: Generalized Models and Efficient Algorithms Through Structured State Space Duality" (Tri Dao, Albert Gu)
