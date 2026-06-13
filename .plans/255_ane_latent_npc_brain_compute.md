@@ -124,9 +124,9 @@ else:
   - Fixed: output name discovery via `model.outputs()` (CoreML auto-names `mul_0` not `sense_proj`)
   - Measured: cosine mean=0.999995 across 988/1000 non-zero NPCs
 
-**Stretch goals (from Research 224):**
-- [ ] Multifunction model: share weights between perception/emotion/zone (iOS 18+)
-- [ ] Stateful model: persistent NPC emotion accumulators via `read_state`/`coreml_update_state`
+**Stretch goals (from Research 224) — DEFERRED:**
+- [x] ~~Multifunction model: share weights between perception/emotion/zone (iOS 18+)~~ — **DEFERRED**: requires iOS 18+ CoreML `multifunction` API. Current single-function model already meets cosine ≥ 0.99. Revisit when deployment targets iOS 18+ and CPU headroom is bottlenecked by multiple model loads.
+- [x] ~~Stateful model: persistent NPC emotion accumulators via `read_state`/`coreml_update_state`~~ — **DEFERRED**: requires CoreML stateful model API. Current stateless design matches CPU SIMD semantics (NPC emotion accumulators live in game state, not model). Revisit if NPC brain compute migrates to ANE-resident inference loop.
 
 ### Part 3: ANE NpcBrainBackend Implementation
 
@@ -177,7 +177,7 @@ TriggerGate routes general inference by QPS; NPC brain routes by NPC count.
   - Target: CPU utilization reduced by ≥30% at 1000 NPC load
   - Implemented as `examples/ane_npc_power.rs` (getrusage FFI, zero new deps)
   - Result: PASS on ratio (94.5% → 53.3% = 43.6% reduction), FAIL on absolute CPU time (13.85ms → 584ms)
-- [ ] If GOAT passes: promote `ane_npc` to default-on for macOS
+- [x] ~~If GOAT passes: promote `ane_npc` to default-on for macOS~~ — **N/A: GOAT FAILED** (see verdict below). Promotion precondition not met. Cannot execute.
 - [x] If GOAT fails: keep as opt-in, document why
 
 ### GOAT Verdict: ❌ FAIL — keep `ane_npc` as opt-in

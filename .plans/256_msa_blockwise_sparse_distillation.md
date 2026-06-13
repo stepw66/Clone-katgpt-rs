@@ -86,14 +86,14 @@ Distill MSA's key inference-time mechanisms into katgpt-rs's existing VortexFlow
 
 ### Phase 3: GOAT Proof & Promotion
 
-- [ ] Run arena benchmark: `msa_sparse` vs `vortex_flow` vs `dash_attn` vs dense attention
-  - RULER-8K, RULER-32K, RULER-128K accuracy
-  - Prefill latency at 32K, 128K, 512K
-  - Decode latency at 32K, 128K
-  - Block selection latency (micro-bench)
-  - **Deferred → Issue 014**: requires trained model weights + RULER dataset; not feasible in modelless inference mode. The 3 Phase 2 micro-benchmarks below serve as modelless GOAT proxies and their failures predict the arena would also fail.
-- [ ] If ≥5% RULER gain + ≥10% selection speedup → promote `msa_sparse` to default-ON
-  - **SKIP**: all 3 Phase 2 micro-benchmarks FAILED their GOAT gates (see verdict below)
+- [x] ~~Run arena benchmark: `msa_sparse` vs `vortex_flow` vs `dash_attn` vs dense attention~~
+  - ~~RULER-8K, RULER-32K, RULER-128K accuracy~~
+  - ~~Prefill latency at 32K, 128K, 512K context~~
+  - ~~Decode latency at 32K, 128K~~
+  - ~~Block selection latency (micro-bench)~~
+  - **DEFERRED → [Issue 014](../.issues/014_msa_arena_ruler_benchmark_infrastructure.md)**: requires trained model weights + RULER dataset; not feasible in modelless inference mode. The 3 Phase 2 micro-benchmarks serve as modelless GOAT proxies — their failures predict the arena would also fail. Tracked as blocking issue with clear acceptance criteria.
+- [x] ~~If ≥5% RULER gain + ≥10% selection speedup → promote `msa_sparse` to default-ON~~
+  - **SKIP — all 3 Phase 2 GOAT gates FAILED** (see verdict below): per-group coverage 1.003× (need ≥1.5×), KV-outer 1.14× at 128K (need ≥1.5×), adaptive-k recall 0.629 (need ≥0.90). Promotion precondition not met.
 - [x] If <5% gain → document results, keep opt-in, create issue for optimization
   - **DONE**: results documented below; Issue 014 created for arena benchmark infrastructure
 - [x] Update README.md feature showcase with MSA results

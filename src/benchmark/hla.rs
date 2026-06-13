@@ -324,6 +324,7 @@ pub fn bench_simd(_config: &Config) -> BenchResult {
         SimdLevel::Scalar => "Scalar",
         SimdLevel::Neon => "NEON",
         SimdLevel::Avx2 => "AVX2",
+        SimdLevel::WasmSimd128 => "WasmSimd128",
     };
 
     let iters = 10_000;
