@@ -1058,3 +1058,17 @@ pub mod ss_pruner;
 
 #[cfg(feature = "ss_pruner")]
 pub use ss_pruner::SemiseparablePruner;
+
+// ── Thicket Variance Probe (Plan 267) ──────────────────────────
+// Decoding-space density routing signal — composes with RV (Plan 202)
+// for the G4 ablation gate: TVP+RV ≥ max(TVP, RV).
+
+#[cfg(feature = "thicket_variance_probe")]
+pub mod thicket_variance_probe;
+
+#[cfg(feature = "thicket_variance_probe")]
+pub use thicket_variance_probe::{
+    ProbeOutput, SyntheticProbeSource, TvpAggregator, TvpConfig, TvpProbeCountBandit,
+    TvpProbeSource, TvpSignal, TvpSignalFrozen, TvpTierDecision, TvpThresholdAdapter,
+    canonical_format_hash, tvp_tier_decision,
+};
