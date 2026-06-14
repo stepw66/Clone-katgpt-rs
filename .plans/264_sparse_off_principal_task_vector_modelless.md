@@ -3,7 +3,7 @@
 **Research:** [231_Sparse_Off_Principal_Task_Vector_OPD.md](../.research/231_Sparse_Off_Principal_Task_Vector_OPD.md)
 **Paper:** arXiv 2606.13657 — Dense Supervision, Sparse Updates (OPD parameter geometry)
 **Date:** 2026-06-14
-**Status:** 🟢 Phases 1–5 complete (all G1–G10 GOAT tests pass). Phase 6 (promotion) and Phase 7 (docs) pending.
+**Status:** 🟢 Phases 1–6 complete (all G1–G10 GOAT tests pass; features promoted to default-ON). Phase 7 (docs) pending.
 **Feature Gates:** `sparse_task_vector` (Fusion A), `off_principal_retrieval` (Fusion B), `spectral_rank` (Fusion C), `module_energy_route` (Fusion D). All opt-in until GOAT-proven.
 **Constraints:**
 - Modelless only — no LLM training.
@@ -73,11 +73,11 @@
 
 ### Phase 6 — GOAT Gate & Promotion
 
-- [ ] T6.1 Run full benchmark suite with all four features on.
-- [ ] T6.2 Confirm G1–G10 all pass.
-- [ ] T6.3 If all pass → promote features to `default` (paper-grounded GOAT).
-- [ ] T6.4 Update README with showcase entry under "GOAT-Proved Additions".
-- [ ] T6.5 Demote any prior dense-only LoRA storage path if SparseTaskVector strictly wins (per user rules).
+- [x] T6.1 Run full benchmark suite with all four features on. (`cargo test --lib --features sparse_task_vector,off_principal_retrieval,spectral_rank,module_energy_route` → 3430 passed, 4 pre-existing failures unrelated.)
+- [x] T6.2 Confirm G1–G10 all pass. (G1–G2 sparse_task_vector 12/12, G3–G4 off_principal 8/8, G5–G6 spectral_concentration 18/18, G7–G8 module_energy_route 11/11, G9–G10 sparse_compose 17/17 = 66 tests, 0 fail.)
+- [x] T6.3 If all pass → promote features to `default` (paper-grounded GOAT). (All 4 features added to `default` in Cargo.toml; `cargo build` clean; `cargo test --lib` → 3430 passed, 4 pre-existing failures, zero regression.)
+- [x] T6.4 Update README with showcase entry under "GOAT-Proved Additions". (Added 4 rows to the GOAT-Proved Additions table in README.md, updated section header to Plans 225–264.)
+- [x] T6.5 Demote any prior dense-only LoRA storage path if SparseTaskVector strictly wins (per user rules). **N/A** — SparseTaskVector complements dense storage (better for density <50%); dense is still superior for high-density deltas. No strict winner across all cases, so no demotion.
 
 ### Phase 7 — Documentation
 
