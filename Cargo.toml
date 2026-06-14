@@ -1113,6 +1113,15 @@ name = "prof_dense_mesh"
 path = "tests/prof_dense_mesh.rs"
 required-features = ["dense_mesh"]
 
+# Plan 266 — DenseMesh GOAT gate proofs against real `transformer::forward`
+# (Phase 5 + Phase 7 completion). Proves Gate 3 (easy overhead vs vanilla),
+# measures Gate 4 (hard bound at width 4 — single-threaded ratio),
+# proves Gate 2 (composition mechanism), re-checks Gate 5 (bandit).
+[[test]]
+name = "dense_mesh_goat_gates"
+path = "tests/dense_mesh_goat_gates.rs"
+required-features = ["dense_mesh"]
+
 # Plan 270 — before/after demo showing naive vs gauge-invariant compose.
 [[example]]
 name = "gauge_invariant_demo"
@@ -1152,6 +1161,13 @@ required-features = ["attn_match"]
 name = "attn_match_router_bench"
 required-features = ["attn_match"]
 harness = false
+
+# Plan 272 Phase 3 — Progressive MCGS GOAT gate benchmark.
+# Validates entropy decay, backprop isolation, stagnation improvement,
+# latency, and allocation audit on synthetic reward streams.
+[[test]]
+name = "bench_272_progressive_mcgs_goat"
+required-features = ["progressive_mcgs"]
 
 # ── Plan 265: Task-Relevant Identifiability (BCKVSS + SPLAT + CCCP) ────────
 

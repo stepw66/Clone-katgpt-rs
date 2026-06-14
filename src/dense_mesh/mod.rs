@@ -39,6 +39,7 @@ pub mod edge_identity;
 pub mod edge_lora;
 pub mod edge_projection;
 pub mod handoff;
+pub mod node_transformer;
 pub mod topology;
 pub mod traits;
 pub mod types;
@@ -49,6 +50,7 @@ pub use edge_identity::IdentityEdge;
 pub use edge_lora::LoraEdge;
 pub use edge_projection::ProjectionEdge;
 pub use handoff::HiddenHandoff;
+pub use node_transformer::TransformerNode;
 pub use topology::{LayerwiseTopology, TopologyError};
 pub use traits::{DenseEdge, DenseNode};
 pub use types::{
