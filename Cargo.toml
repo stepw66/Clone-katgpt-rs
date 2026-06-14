@@ -306,6 +306,7 @@ interval_pruner = []  # IntervalPruner interval-closure for valid token sets (Pl
 cubical_nerve = []  # CubicalNerve CAT(0) cubical complexes from zone posets (Plan 252 Phase 3, Research 220)
 cubical_topology = ["interval_pruner", "lattice_operad", "cubical_nerve"]  # Cubical Category Interval Topology — canonical pruner composition (Plan 252, Research 220)
 gpart_adapter = ["katgpt-core/gpart_adapter"]  # GPart isometric partition adapter loading (Research 227, Plan 257)
+gpart_pruning = ["katgpt-core/gpart_pruning"]  # GPart top-k group pruning — magnitude-based group masking at apply time (Issue 008)
 dendritic_gate = ["katgpt-core/dendritic_gate"]  # DendriticGate NMDA-inspired adaptive tree branching (Plan 260, GOAT-gated)
 dec_operators = ["katgpt-core/dec_operators"]  # DEC operators — cell complexes, cochain fields, d/δ/Δ operators (Plan 251)
 dec_terrain_ai = ["katgpt-core/dec_terrain_ai"]  # Dynamic DEC topology + terrain cochains for destructible terrain (Plan 261, GOAT-gated)
@@ -1021,6 +1022,10 @@ required-features = ["msa_per_group"]
 [[test]]
 name = "bench_257_gpart_adapter_goat"
 required-features = ["gpart_adapter"]
+
+[[test]]
+name = "bench_008_gpart_pruning_goat"
+required-features = ["gpart_pruning"]
 
 [[example]]
 name = "ane_npc_goat"

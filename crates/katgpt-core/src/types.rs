@@ -3032,6 +3032,55 @@ impl GpartAdapter {
         }
     }
 
+    /// Apply with pre-allocated scratch buffers AND a per-group boolean mask.
+    ///
+    /// Groups where `group_mask[g] == false` contribute zero to `base_weights`.
+    /// This is the inference-time pruning path: low-magnitude groups are skipped,
+    /// trading output fidelity for reduced effective FLOPs on the downstream matmul.
+    ///
+    /// `group_mask.len()` must be `>= self.d`. When `group_mask` is all-true this
+    /// is identical to [`apply_with_scratch`].
+    ///
+    /// Gates: `gpart_pruning` feature (Issue 008). Static top-k magnitude mask;
+    /// BanditPruner-driven dynamic mask is deferred to a separate plan.
+    #[cfg(feature = "gpart_pruning")]
+    pub fn apply_with_scratch_masked(
+        &self,
+        base_weights: &mut [f32],
+        assignments: &mut [usize],
+        group_sizes: &mut [usize],
+        group_mask: &[bool],
+    ) {
+        let n = base_weights.len();
+        if n == 0 || self.d == 0 {
+            return;
+        }
+        debug_assert!(
+            group_mask.len() >= self.d,
+            "group_mask len {} < d {}",
+            group_mask.len(),
+            self.d,
+        );
+
+        self.generate_assignments_into(n, assignments);
+        self.compute_group_sizes_into(n, assignments, group_sizes);
+
+        // Branch-free inner loop: precompute per-group scale×θ, zeroed when masked.
+        // LLVM vectorises the all-true path to match `apply_with_scratch`.
+        let mut group_delta: Vec<f32> = Vec::with_capacity(self.d);
+        for g in 0..self.d {
+            let active = group_mask[g];
+            let scale = 1.0 / (group_sizes[g] as f32).sqrt();
+            // `active as f32` is 0.0 or 1.0 — multiply zeros out masked groups
+            // without a per-element branch.
+            group_delta.push(scale * self.theta[g] * (active as u8 as f32));
+        }
+
+        for i in 0..n {
+            base_weights[i] += group_delta[assignments[i]];
+        }
+    }
+
     /// SIMD-optimised apply: pre-computes per-group delta once (O(d) divisions
     /// instead of O(N)), then applies in 8-wide chunks.
     ///
@@ -3065,6 +3114,40 @@ impl GpartAdapter {
         for i in (chunks * 8)..n {
             base_weights[i] += group_delta[assignments[i]];
         }
+    }
+
+    /// Build a top-k magnitude mask: keep the `k` groups with largest `|θ[g]|`.
+    ///
+    /// Returns a `Vec<bool>` of length `d` where `true` = active. When `k >= d`, all
+    /// groups are active (no pruning). This is the static selection policy for
+    /// [`apply_with_scratch_masked`] — cheap to compute, deterministic, requires no
+    /// reward signal. Dynamic bandit-based masking is deferred to a separate plan.
+    ///
+    /// Gates: `gpart_pruning` feature (Issue 008).
+    #[cfg(feature = "gpart_pruning")]
+    pub fn topk_mask(&self, k: usize) -> Vec<bool> {
+        if k >= self.d {
+            return vec![true; self.d];
+        }
+        if k == 0 {
+            return vec![false; self.d];
+        }
+
+        // (|θ[g]|, g) pairs — partial sort by magnitude to find the top-k threshold.
+        let mut magnitudes: Vec<(f32, usize)> =
+            (0..self.d).map(|g| (self.theta[g].abs(), g)).collect();
+        // `select_nth_unstable_by` partitions around the k-th largest in O(d) avg.
+        // Descending comparator: after it returns, indices [0..k] hold the k
+        // largest magnitudes (unordered).
+        magnitudes.select_nth_unstable_by(k - 1, |a, b| {
+            b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        let mut mask = vec![false; self.d];
+        for &(_, g) in &magnitudes[..k] {
+            mask[g] = true;
+        }
+        mask
     }
 
     /// Generate group assignments from seed.
@@ -4266,6 +4349,142 @@ mod tests_types {
         adapter.apply(&mut w1);
         adapter.apply(&mut w2);
         assert_eq!(w1, w2);
+    }
+
+    #[test]
+    #[cfg(feature = "gpart_pruning")]
+    fn test_gpart_masked_all_true_matches_unmasked() {
+        // When group_mask is all-true, masked apply must equal unmasked apply.
+        let adapter = GpartAdapter {
+            d: 4,
+            seed: 42,
+            theta: vec![1.0, 2.0, 3.0, 4.0],
+        };
+        let n = 256;
+        let mut w_ref = vec![0.0f32; n];
+        let mut assignments = vec![0usize; n];
+        let mut group_sizes = vec![0usize; adapter.d];
+        adapter.apply_with_scratch(&mut w_ref, &mut assignments, &mut group_sizes);
+
+        let mut w_masked = vec![0.0f32; n];
+        let mask = vec![true; adapter.d];
+        adapter.apply_with_scratch_masked(
+            &mut w_masked,
+            &mut assignments,
+            &mut group_sizes,
+            &mask,
+        );
+
+        for (i, (a, b)) in w_ref.iter().zip(w_masked.iter()).enumerate() {
+            assert_eq!(a, b, "mismatch at index {i}");
+        }
+    }
+
+    #[test]
+    #[cfg(feature = "gpart_pruning")]
+    fn test_gpart_masked_zeroes_masked_groups() {
+        // If group g is masked off, NO base_weights element assigned to g
+        // should receive any delta from theta[g]. Concretely: the masked
+        // delta for elements of masked groups must be exactly zero.
+        let adapter = GpartAdapter {
+            d: 4,
+            seed: 7,
+            theta: vec![1.0, 2.0, 3.0, 4.0],
+        };
+        let n = 512;
+        let mut w_zero = vec![0.0f32; n]; // baseline: all groups masked off
+        let mut assignments = vec![0usize; n];
+        let mut group_sizes = vec![0usize; adapter.d];
+        let all_false = vec![false; adapter.d];
+        adapter.apply_with_scratch_masked(
+            &mut w_zero,
+            &mut assignments,
+            &mut group_sizes,
+            &all_false,
+        );
+        // With every group masked, weights should remain exactly zero.
+        assert!(w_zero.iter().all(|&w| w == 0.0));
+    }
+
+    #[test]
+    #[cfg(feature = "gpart_pruning")]
+    fn test_gpart_masked_single_group_preserves_others() {
+        // Masking group 0 only: every element in groups 1..d should still receive
+        // its full delta, while elements in group 0 should stay at baseline.
+        let adapter = GpartAdapter {
+            d: 4,
+            seed: 7,
+            theta: vec![1.0, 2.0, 3.0, 4.0],
+        };
+        let n = 512;
+
+        // Full (unmasked) reference.
+        let mut w_full = vec![0.0f32; n];
+        let mut assignments_full = vec![0usize; n];
+        let mut group_sizes = vec![0usize; adapter.d];
+        adapter.apply_with_scratch(&mut w_full, &mut assignments_full, &mut group_sizes);
+
+        // Masked: drop group 0.
+        let mut w_masked = vec![0.0f32; n];
+        let mut assignments = vec![0usize; n];
+        let mut mask = vec![true; adapter.d];
+        mask[0] = false;
+        adapter.apply_with_scratch_masked(
+            &mut w_masked,
+            &mut assignments,
+            &mut group_sizes,
+            &mask,
+        );
+
+        // assignments[] is regenerated deterministically from seed, so it matches
+        // between the two calls — compare per-element using the masked call's
+        // assignment vector.
+        for i in 0..n {
+            let g = assignments[i];
+            if g == 0 {
+                // Group 0 masked off → masked output should equal baseline (0.0).
+                assert_eq!(w_masked[i], 0.0, "group-0 element {i} should be zero");
+            } else {
+                // Other groups untouched → should equal full reference.
+                assert_eq!(
+                    w_masked[i], w_full[i],
+                    "group-{g} element {i} should match unmasked"
+                );
+            }
+        }
+    }
+
+    #[test]
+    #[cfg(feature = "gpart_pruning")]
+    fn test_gpart_topk_mask_edge_cases() {
+        let adapter = GpartAdapter {
+            d: 4,
+            seed: 0,
+            theta: vec![0.1, 0.5, 0.3, 0.9],
+        };
+        // k >= d → all active
+        assert!(adapter.topk_mask(adapter.d).iter().all(|&b| b));
+        assert!(adapter.topk_mask(adapter.d + 10).iter().all(|&b| b));
+        // k == 0 → all inactive
+        assert!(adapter.topk_mask(0).iter().all(|&b| !b));
+    }
+
+    #[test]
+    #[cfg(feature = "gpart_pruning")]
+    fn test_gpart_topk_mask_selects_largest_magnitudes() {
+        // θ = [0.1, 0.5, -0.3, 0.9] → |θ| = [0.1, 0.5, 0.3, 0.9]
+        // top-2 by magnitude should keep groups {3 (0.9), 1 (0.5)}.
+        let adapter = GpartAdapter {
+            d: 4,
+            seed: 0,
+            theta: vec![0.1, 0.5, -0.3, 0.9],
+        };
+        let mask = adapter.topk_mask(2);
+        assert_eq!(mask.len(), 4);
+        assert!(mask[1] && mask[3], "groups 1 and 3 must be in top-2");
+        assert!(!mask[0] && !mask[2], "groups 0 and 2 must be pruned");
+        // Exactly 2 active.
+        assert_eq!(mask.iter().filter(|&&b| b).count(), 2);
     }
 }
 
