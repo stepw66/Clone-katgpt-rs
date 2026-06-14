@@ -40,20 +40,25 @@ All three **FAILED** their GOAT gates. The micro-benchmark failures predict the 
 ## Scope of This Issue
 
 ### Prerequisites (must exist before arena can run)
-- [ ] Trained model weights with KV-cache attention (Gemma2-2B scale or equivalent)
-- [ ] RULER task dataset downloaded + parsing (needle-in-haystack, multi-key-value, variable-tracking)
-- [ ] End-to-end attention inference harness that integrates `VortexRouter` selection into actual softmax-weighted value accumulation
+- [-] Trained model weights with KV-cache attention (Gemma2-2B scale or equivalent) — blocked: katgpt-rs is modelless; this belongs in riir-ai/riir-gpu
+- [-] RULER task dataset downloaded + parsing (needle-in-haystack, multi-key-value, variable-tracking) — blocked: no download/parse code exists; worthless without trained model
+- [-] End-to-end attention inference harness that integrates `VortexRouter` selection into actual softmax-weighted value accumulation — blocked: only `KvOuterPrefill::prefill_sparse` has a real attention path; generalizing needs trained model first
 
 ### Arena benchmark implementation (once prereqs exist)
-- [ ] `tests/bench_256_arena_ruler.goat.rs` — compares router configs on real model attention
-- [ ] Measure RULER accuracy (exact-match / F1) per task per context length
-- [ ] Measure prefill/decode latency
-- [ ] GOAT gate: `msa_sparse` ≥5% RULER gain + ≥10% selection speedup → promote to default
+- [-] `tests/bench_256_arena_ruler.goat.rs` — compares router configs on real model attention — blocked on prereqs
+- [-] Measure RULER accuracy (exact-match / F1) per task per context length — blocked on prereqs
+- [-] Measure prefill/decode latency — blocked on prereqs (decode needs real transformer forward)
+- [-] GOAT gate: `msa_sparse` ≥5% RULER gain + ≥10% selection speedup → promote to default — blocked on prereqs
 
 ### Optimization candidates (if arena confirms failure)
-- [ ] Per-group: redesign coverage metric to measure per-call partition spread, not cross-query union
-- [ ] KV-outer: add query batching / increase effective n_queries per block to restore sharing at long context
-- [ ] Adaptive-k: replace recall@fixed_k with precision@adaptive_k or weighted recall
+- [-] Per-group: redesign coverage metric to measure per-call partition spread, not cross-query union — **spun out to Issue 015** (tractable now, no prereqs)
+- [-] KV-outer: add query batching / increase effective n_queries per block to restore sharing at long context — **spun out to Issue 015** (tractable now, no prereqs)
+- [-] Adaptive-k: replace recall@fixed_k with precision@adaptive_k or weighted recall — **spun out to Issue 015** (tractable now, no prereqs)
+
+The three optimization candidates were spun out to [Issue 015](./015_msa_microbench_metric_refinement.md)
+because they're metric redesigns on existing synthetic micro-benchmarks and don't
+need the arena infrastructure. Everything else here is blocked on trained model
+weights + RULER dataset, which are outside katgpt-rs scope.
 
 ## Priority
 
