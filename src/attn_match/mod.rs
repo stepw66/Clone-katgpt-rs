@@ -55,6 +55,9 @@ pub mod score_matrix_simd;
 pub mod types;
 pub mod value_fitter;
 
+#[cfg(feature = "adaptive_cot_compaction")]
+pub mod adaptive_cot;
+
 pub use beta_fitter::{fit_beta_nnls, BetaFitConfig, BetaFitResult};
 pub use chunked::{ChunkedCompactor, ChunkedCompactOutput, ChunkMeta, TextChunk};
 pub use compact::{compact, CompactError, CompactOutput};
@@ -70,6 +73,9 @@ pub use types::{
     AmConfig, AmResult, KeySelector, ReconstructionReport, ScoreMethod, SolverChoice,
 };
 pub use value_fitter::{fit_cv_least_squares, ValueFitConfig, ValueFitResult};
+
+#[cfg(feature = "adaptive_cot_compaction")]
+pub use adaptive_cot::{AdaptiveCompactResult, AdaptiveTraceCompactor};
 
 #[cfg(test)]
 mod tests;

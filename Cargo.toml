@@ -176,6 +176,7 @@ safe_bandit = ["bandit"]  # PrudentBanker Safe-Phased Bandit — delay-calibrate
 stiff_anomaly = []  # Stiff/Soft Subspace Anomaly Gate — generic eigenvalue decomposition anomaly detection (Plan 138)
 still_kv = []  # StillKV perceiver-based KV cache compaction — modelless (Plan 245)
 attn_match = []  # Attention Matching KV compaction — modelless (Plan 271, arxiv 2602.16284)
+adaptive_cot_compaction = ["attn_match", "freq_bandit"]  # Phase 6: entropy-thresholded bandit-tuned online compaction (Plan 271) — opt-in until GOAT
 cache_prune = []  # CachePrune SAT + rolling hash + sensitivity masking (Plan 140, Research 101)
 state_source = ["bandit"]  # State-Source Modelless Distillation — state-visitation tracking + P-UCB + retention (Plan 142, Research 103)
 nexus_elo = ["state_source", "proof_sketch_evolution"]  # Nexus Elo — Plackett-Luce + P-UCB + goal cache for DDTree/SR²AM (Plan 143, Research 104)
@@ -1133,6 +1134,16 @@ required-features = ["attn_match"]
 # Plan 271 Phase 5 — Online compaction example (mid-trajectory).
 [[example]]
 name = "attn_match_online"
+required-features = ["attn_match"]
+
+# Plan 271 Phase 6 — Adaptive CoT compaction example.
+[[example]]
+name = "attn_match_adaptive"
+required-features = ["adaptive_cot_compaction"]
+
+# Plan 271 GOAT gate integration test (G1–G8).
+[[test]]
+name = "bench_271_attn_match_goat"
 required-features = ["attn_match"]
 
 # Plan 271 Phase 2 — Adaptive solver router benchmark.
