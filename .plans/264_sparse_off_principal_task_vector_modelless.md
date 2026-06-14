@@ -3,7 +3,7 @@
 **Research:** [231_Sparse_Off_Principal_Task_Vector_OPD.md](../.research/231_Sparse_Off_Principal_Task_Vector_OPD.md)
 **Paper:** arXiv 2606.13657 — Dense Supervision, Sparse Updates (OPD parameter geometry)
 **Date:** 2026-06-14
-**Status:** 🟢 Phases 1–6 complete (all G1–G10 GOAT tests pass; features promoted to default-ON). Phase 7 (docs) pending.
+**Status:** ✅ COMPLETE (Phases 1–7 done, all G1–G10 GOAT tests pass, 4 features promoted to default-ON).
 **Feature Gates:** `sparse_task_vector` (Fusion A), `off_principal_retrieval` (Fusion B), `spectral_rank` (Fusion C), `module_energy_route` (Fusion D). All opt-in until GOAT-proven.
 **Constraints:**
 - Modelless only — no LLM training.
@@ -81,9 +81,9 @@
 
 ### Phase 7 — Documentation
 
-- [ ] T7.1 Add doc comments linking each function to the specific paper section it implements.
-- [ ] T7.2 Cross-link Research 231 from README research index.
-- [ ] T7.3 Cross-link Plan 264 from README plans index.
+- [x] T7.1 Add doc comments linking each function to the specific paper section it implements. (Module-level docs already reference arXiv 2606.13657 §4.1, §4.2 Table 3, §4.3 Table 4, §5.1 Table 9, §5.2 — verified in sparse_task_vector.rs, off_principal.rs, spectral_concentration.rs, inference_router.rs.)
+- [x] T7.2 Cross-link Research 231 from README research index. (Added Feature Showcase entry with Research 231 link.)
+- [x] T7.3 Cross-link Plan 264 from README plans index. (Added Feature Showcase entry with Plan 264 link.)
 
 ---
 
