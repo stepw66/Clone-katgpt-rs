@@ -170,6 +170,18 @@ fn sigmoid(x: f32) -> f32 {
     1.0 / (1.0 + (-x).exp())
 }
 
+/// Compute the bridge gate α = sigmoid(⟨query, gdn2_readout⟩).
+///
+/// Extracted as a standalone helper so callers like
+/// [`super::dilated_kv::dilated_decode_step_into`] can compute the gate
+/// once and reuse it for both dilated-attention and bridge-readout stages.
+/// Uses [`crate::simd::simd_dot_f32`] for the dot product.
+#[inline]
+pub fn bridge_attention_gate(query: &[f32], gdn2_readout: &[f32]) -> f32 {
+    let dim = query.len();
+    sigmoid(crate::simd::simd_dot_f32(query, gdn2_readout, dim))
+}
+
 /// Full decode step with RAT+ bridge.
 ///
 /// Combines `RatBridgeState` gate computation with dilated KV attention.
