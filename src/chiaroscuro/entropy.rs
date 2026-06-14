@@ -1,4 +1,4 @@
-//! Per-token spectral entropy via Type-II DCT (Plan 269, Research 269).
+//! Per-token spectral entropy via Type-II DCT (Plan 269, Research 237).
 //!
 //! Implements CHIAR-Former's per-token complexity signal:
 //!

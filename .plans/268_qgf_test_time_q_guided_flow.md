@@ -1,6 +1,6 @@
 # Plan 268: QGF Test-Time Q-Guided Flow — Modelless Primitive
 
-**Research:** `.research/268_QGF_Test_Time_Q_Guided_Flow.md`
+**Research:** `.research/236_QGF_Test_Time_Q_Guided_Flow.md`
 **Paper:** [arXiv:2606.11087](https://arxiv.org/pdf/2606.11087) — Q-Guided Flow (Zhou et al., 2026)
 **Status:** 🚧 In Progress — Phase 1 (T1-T3) + F4 adaptive (T7) implemented, tests green
 **Branch:** `develop` (no new feature branch per project rules)
@@ -79,7 +79,7 @@ At generation step t with prefix p_t and drafter velocity v_t:
       type Action;
       /// ∇_a Q(s, a) evaluated at the projected action.
       ///
-      /// # QGF Design Decision (Research 268)
+      /// # QGF Design Decision (Research 236)
       /// Jacobian is intentionally dropped (J ≈ I) per QGF paper §5.
       /// Do NOT add chain-rule backprop — it increases variance (paper Fig 3).
       /// FFT smoothing (FlowFieldCache) is the equivalent variance reduction.
@@ -100,7 +100,7 @@ At generation step t with prefix p_t and drafter velocity v_t:
   ```
 - [x] Unit test: mock oracle returns known gradient (via `NoGuidanceOracle` zero-test)
 - [x] Unit test: `q_gradient_into` matches `q_gradient_at` for same input
-- [x] Doc cross-ref to `.research/268_QGF_Test_Time_Q_Guided_Flow.md` §F3
+- [x] Doc cross-ref to `.research/236_QGF_Test_Time_Q_Guided_Flow.md` §F3
 
 #### T2: FirstOrderProjector (F2)
 - [x] Create `katgpt-core/src/qgf/projector.rs`
@@ -256,7 +256,7 @@ At generation step t with prefix p_t and drafter velocity v_t:
 - [ ] Add `examples/qgf_01_guided_drafter.rs` — minimal usage
 - [ ] Add `examples/qgf_02_adaptive_weight.rs` — F4 adaptive guidance
 - [ ] Add `examples/qgf_03_tier_routing.rs` — plasma/hot/warm/cold/freeze demo
-- [ ] Cross-link Research 268 ↔ Plan 268 ↔ Plan 229 (NFCoT)
+- [ ] Cross-link Research 236 ↔ Plan 268 ↔ Plan 229 (NFCoT)
 
 #### T14: GOAT gate decision
 - [ ] If G1-G5 all pass: promote `qgf_drafter` + `qgf_projector` + `qgf_oracle` to default-ON
@@ -322,7 +322,7 @@ At generation step t with prefix p_t and drafter velocity v_t:
 ## References
 
 - Paper: arXiv:2606.11087 (QGF, Zhou et al. 2026)
-- Research: `.research/268_QGF_Test_Time_Q_Guided_Flow.md`
+- Research: `.research/236_QGF_Test_Time_Q_Guided_Flow.md`
 - Related plans: 229 (NFCoT FlowScore), 217 (NextLat), 247 (ECHO), 267 (Thicket), 195 (ThoughtFold)
 - Related research: 150 (RecFM), 204 (NFCoT), 215 (ECHO), 229 (PAW), 267 (Thicket)
 - riir-ai companion: `riir-ai/.research/125_QGF_Critic_Training_Verdict.md`

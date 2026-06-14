@@ -1017,7 +1017,7 @@ pub trait GenerativeConstraintPruner<Output>: Send + Sync {
 /// - `ActionBridge` (latent → raw action via ternary direction dot-product)
 /// - A BFN-rejection-sampling proxy (Freeze-tier fallback, no trained critic)
 ///
-/// See `.research/268_QGF_Test_Time_Q_Guided_Flow.md` and
+/// See `.research/236_QGF_Test_Time_Q_Guided_Flow.md` and
 /// `.plans/268_qgf_test_time_q_guided_flow.md`.
 #[cfg(feature = "qgf_oracle")]
 pub trait QGradientOracle {

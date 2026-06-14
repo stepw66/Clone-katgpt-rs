@@ -1,4 +1,4 @@
-# Research 268: QGF — Test-Time Q-Guided Flow for Modelless Inference
+# Research 236: QGF — Test-Time Q-Guided Flow for Modelless Inference
 
 **Paper:** [arXiv:2606.11087](https://arxiv.org/pdf/2606.11087) — Test-Time Gradient Guidance of Flow Policies in Reinforcement Learning (Zhou, Peng, Xu, Li, Springenberg, Frans, Levine; UC Berkeley + Physical Intelligence, Jun 2026)
 **Date:** 2026-06-14, distilled 2026-06-14

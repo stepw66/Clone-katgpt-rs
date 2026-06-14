@@ -1,4 +1,4 @@
-# Plan 265: Attention Matching KV Compaction (Modelless)
+# Plan 271: Attention Matching KV Compaction (Modelless)
 
 **Date:** 2026-06-14
 **Research:** [katgpt-rs/.research/233_Attention_Matching_KV_Compaction.md](../.research/233_Attention_Matching_KV_Compaction.md)
@@ -253,7 +253,7 @@ Goal: prove the module is ready for default promotion.
 
 ### Tasks
 
-- [ ] **T7.1** Write `tests/bench_265_attn_match_goat.rs`:
+- [ ] **T7.1** Write `tests/bench_271_attn_match_goat.rs`:
   - [ ] G1: β recovery < 0.1 infinity norm on synthetic
   - [ ] G2: Cv reconstruction < 5% relative Frobenius
   - [ ] G3: OMP residual < 5% of initial mass
@@ -262,7 +262,7 @@ Goal: prove the module is ready for default promotion.
   - [ ] G6: Router determinism (no flapping)
   - [ ] G7: No allocation in hot loops (assert via custom allocator in test)
   - [ ] G8: SIMD ≥ 4× scalar
-- [ ] **T7.2** Add `[[test]]` entry in Cargo.toml: `bench_265_attn_match_goat` with required-features
+- [ ] **T7.2** Add `[[test]]` entry in Cargo.toml: `bench_271_attn_match_goat` with required-features
 - [ ] **T7.3** Run GOAT gate, document results in this plan
 - [ ] **T7.4** If G1–G7 pass: add `attention_matching` to default features
 - [ ] **T7.5** If G8 passes: add `am_simd` (or merged into attention_matching) to default
@@ -325,7 +325,7 @@ benches/
 └── attn_match_router_bench.rs   # Phase 2 router benchmark
 
 tests/
-└── bench_265_attn_match_goat.rs # Phase 7 GOAT gate
+└── bench_271_attn_match_goat.rs # Phase 7 GOAT gate
 ```
 
 ---

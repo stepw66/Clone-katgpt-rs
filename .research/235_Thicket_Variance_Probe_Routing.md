@@ -1,4 +1,4 @@
-# Research 267: Thicket Variance Probe (TVP) — Decoding-Space Density as Substrate Routing Signal
+# Research 235: Thicket Variance Probe (TVP) — Decoding-Space Density as Substrate Routing Signal
 
 **Date:** 2026-06-14
 **Status:** Active — GOAT/gain verdict below

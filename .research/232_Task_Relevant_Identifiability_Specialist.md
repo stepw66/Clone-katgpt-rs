@@ -265,7 +265,7 @@ Tier mapping (constraint 8):
 ## What We Are NOT Doing (Per Constraints)
 
 - ❌ No LLM training (constraint 1: modelless first).
-- ❌ No full fine-tuning (constraint 3: LoRA only — that's the model-based path in riir-ai Plan 297).
+- ❌ No full fine-tuning (constraint 3: LoRA only — that's the model-based path in riir-ai Plan 300).
 - ❌ No softmax anywhere (sigmoid-bounded scores only — constraint 5).
 - ❌ No leak of game configs, hyperparams, or fusion recipes (strategy 003).
 

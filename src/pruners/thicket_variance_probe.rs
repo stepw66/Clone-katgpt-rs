@@ -1,6 +1,6 @@
 //! Thicket Variance Probe (TVP) — decoding-space density as substrate routing signal.
 //!
-//! Plan 267, Research 267. Lifts RandOpt's (Neural Thickets, arXiv:2603.12228)
+//! Plan 267, Research 235. Lifts RandOpt's (Neural Thickets, arXiv:2603.12228)
 //! fundamental insight — *variance structure of perturbation probes reveals
 //! loss-landscape geometry* — from weight-space (Plan 121) to decoding-config-space.
 //!

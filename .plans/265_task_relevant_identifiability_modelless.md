@@ -3,7 +3,7 @@
 **Research:** [232_Task_Relevant_Identifiability_Specialist.md](../.research/232_Task_Relevant_Identifiability_Specialist.md)
 **Paper:** arXiv 2605.12733 — From Generalist to Specialist Representation (Zheng et al., ICML 2026)
 **Date:** 2026-06-14
-**Status:** 🟢 Phase 0 complete (14 unit tests + 1 doc-test pass). Phases 1-5 pending. Unblocks Plan 264 Phase 2 and riir-ai Plan 297 Phase 0.
+**Status:** 🟢 Phase 0 complete (14 unit tests + 1 doc-test pass). Phases 1-5 pending. Unblocks Plan 264 Phase 2 and riir-ai Plan 300 Phase 0.
 **Feature Gates:** `band_conditioner` (Fusion A), `specialist_projection` (Fusion B), `collider_consistency` (Fusion C). All opt-in until GOAT-proven.
 **Constraints:**
 - Modelless only — no LLM training (constraint 1).
@@ -32,7 +32,7 @@ The three fusions share one primitive: the **band conditioning set** and the con
 - [x] T0.8 GOAT test G0b: Fisher z-test recovers dependence on linear Gaussian SCM (paper setup) at p<0.05 with ≥ 90% power at n=1000 samples.
 - [x] T0.9 Example: doc-test in module showing paper Figure 2 walk-through.
 
-**Phase 0 unblocks:** Plan 264 Phase 2 (SPLAT consumer), Plan 297 Phase 0 (riir-ai TJS-LoRA + CCAR + CIACoT).
+**Phase 0 unblocks:** Plan 264 Phase 2 (SPLAT consumer), Plan 300 Phase 0 (riir-ai TJS-LoRA + CCAR + CIACoT).
 
 ### Phase 1 — Fusion A: Band-Conditioned KV Segment Selector (BCKVSS)
 
@@ -109,7 +109,7 @@ Paper's Algorithm 1 + Theorem 1 give a *theory-backed* stopping criterion for ad
 - [ ] T5.4 If SPLAT-masked attention (G6) beats prior MSA implementation → demote `msa_blockwise_sparse` (Plan 256) to non-default per user rules ("demote loser").
 - [ ] T5.5 Update README with showcase entry under "GOAT-Proved Additions" — three new items.
 - [ ] T5.6 Mark Plan 264 Phase 2 unblocked (SPLAT is the consumer).
-- [ ] T5.7 Cross-link Plan 297 (riir-ai model-based) — riir-ai consumes the engine primitives for TJS-LoRA training.
+- [ ] T5.7 Cross-link Plan 300 (riir-ai model-based) — riir-ai consumes the engine primitives for TJS-LoRA training.
 
 ### Phase 6 — Documentation
 

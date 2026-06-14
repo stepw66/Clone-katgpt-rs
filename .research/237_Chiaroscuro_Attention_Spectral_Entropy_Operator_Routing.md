@@ -1,4 +1,4 @@
-# Research 269: Chiaroscuro Attention — Spectral-Entropy Operator Routing
+# Research 237: Chiaroscuro Attention — Spectral-Entropy Operator Routing
 
 **Date:** 2026-06-14
 **Paper:** [Chiaroscuro Attention: Spending Compute in the Dark](https://arxiv.org/pdf/2606.08327) — Sikdar (Accenture), Jun 2026

@@ -1,6 +1,6 @@
 //! Thicket Variance Probe (TVP) — before/after thinking vs non-thinking demo.
 //!
-//! Plan 267, Research 267. Demonstrates the creative fusion of RandOpt
+//! Plan 267, Research 235. Demonstrates the creative fusion of RandOpt
 //! (Neural Thickets, arXiv:2603.12228) into a modelless routing signal.
 //!
 //! # What this shows

@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-14
 **Status:** ✅ Phase 1-7 COMPLETE (GOAT 9/9)
-**Research:** 269_Chiaroscuro_Attention_Spectral_Entropy_Operator_Routing.md
+**Research:** 237_Chiaroscuro_Attention_Spectral_Entropy_Operator_Routing.md
 **Feature Flag:** `chiaroscuro` (opt-in, GOAT-proven)
 **Source:** [CHIAR-Former (arXiv:2606.08327)](https://arxiv.org/pdf/2606.08327)
 
@@ -12,7 +12,7 @@
 
 Implement CHIAR-Former's three reusable inference-time primitives in katgpt-rs, plus the novel **CHIAR-KV cache fusion** (per-token spectral-entropy-gated KV storage strategy). Pure inference-time — no gradients, no training, no learned filter.
 
-Four fusions from Research 269:
+Four fusions from Research 237:
 - **A. CHIAR-KV** (primary) — per-token DCT entropy decides storage strategy
 - **B. ChiaroscuroOp trait** — operator-level routing framework
 - **C. CollapseDiscoveryHarness** — automated operator promotion
@@ -120,7 +120,7 @@ Composed with existing infra (no duplication):
 
 - [ ] **T26:** Update `README.md` with CHIAR section (TODO after default promotion)
 - [ ] **T27:** Update `.docs/02_architecture.md` if routing changes (N/A — no routing changes)
-- [x] **T28:** Cross-link Research 269 and Plan 269 (this doc + research doc)
+- [x] **T28:** Cross-link Research 237 and Plan 269 (this doc + research doc)
 
 ---
 

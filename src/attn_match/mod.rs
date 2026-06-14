@@ -1,4 +1,4 @@
-//! Attention Matching (AM) KV cache compaction — modelless (Plan 265, Research 233).
+//! Attention Matching (AM) KV cache compaction — modelless (Plan 271, Research 233).
 //!
 //! Implements "Fast KV Compaction via Attention Matching"
 //! (Zweiger, Fu, Guo, Kim — MIT, ICML 2026, arxiv 2602.16284).

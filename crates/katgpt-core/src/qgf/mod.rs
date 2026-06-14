@@ -28,7 +28,7 @@
 //! | Cold | Turso Q-table snapshot | ~10ms | Consolidation |
 //! | Freeze | `NoGuidanceOracle` (zero gradient) | 0ns | Engine always boots |
 //!
-//! See `.research/268_QGF_Test_Time_Q_Guided_Flow.md` and
+//! See `.research/236_QGF_Test_Time_Q_Guided_Flow.md` and
 //! `.plans/268_qgf_test_time_q_guided_flow.md`.
 
 #![cfg(feature = "qgf")]

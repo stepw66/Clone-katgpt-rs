@@ -119,7 +119,7 @@ fn run_compaction(
 
 fn main() {
     println!("╔══════════════════════════════════════════════════════════════════════════╗");
-    println!("║  Attention Matching KV Cache Compaction — modelless demo (Plan 265)    ║");
+    println!("║  Attention Matching KV Cache Compaction — modelless demo (Plan 271)    ║");
     println!("║  Paper: arxiv 2602.16284 — Zweiger, Fu, Guo, Kim (MIT, ICML 2026)      ║");
     println!("╚══════════════════════════════════════════════════════════════════════════╝");
 
@@ -183,5 +183,5 @@ fn main() {
     );
 
     println!("\n✓ Demo complete. See .research/233_Attention_Matching_KV_Compaction.md");
-    println!("  and .plans/265_attention_matching_compaction.md for full plan.");
+    println!("  and .plans/271_attention_matching_compaction.md for full plan.");
 }

@@ -4,7 +4,7 @@
 **Source:** [Fast KV Compaction via Attention Matching](https://arxiv.org/abs/2602.16284) (Zweiger, Fu, Guo, Kim — MIT, ICML 2026)
 **Repo:** [adamzweiger/compaction](https://github.com/adamzweiger/compaction) ( vendored under `katgpt-rs/.raw/compaction/`)
 **Target:** `katgpt-rs` modelless inference engine — new `src/attn_match/` module
-**Status:** Verdict = **GAIN** — direct port + novel CPU/SIMD/GPU/ANE adaptive solver routing. Plan 265.
+**Status:** Verdict = **GAIN** — direct port + novel CPU/SIMD/GPU/ANE adaptive solver routing. Plan 271.
 
 ---
 
@@ -117,7 +117,7 @@ Compact mid-trajectory to support arbitrarily long generation under fixed physic
 | 3. LoRA only for training | ✅ No training in core AM (LoRA β predictor is an optional fusion — Research 121) |
 | 4. Self-learning adaptive CoT welcome | ✅ Online compaction enables adaptive CoT trace compaction (no LLM training) |
 | 5. SOLID, DRY | ✅ Reuses StillKV's `BetaBias` + `CompactKVCache`; trait-based selectors and fitters |
-| 6. Tests/examples before/after | ✅ Required by Plan 265 — perplexity proxy + reconstruction tests |
+| 6. Tests/examples before/after | ✅ Required by Plan 271 — perplexity proxy + reconstruction tests |
 | 7. CPU/GPU/ANE auto-route | ✅ Novel fusion: adaptive solver routing by tensor size (see below) |
 | 8. Plasma/hot/warm/cold/freeze path | ✅ Tier-mapped in Research 121 (riir-ai fusion) |
 | 9. Threshold-based CPU/SIMD/GPU/ANE | ✅ Size-thresholded router in this research |
@@ -235,7 +235,7 @@ Region importance comes from BFCF (Plan 218/220). Spatial heads in frequently-vi
 | Hot path impact | ✅ Positive — routing PREVENTS bad choices (e.g., rayon overhead on tiny matrices) |
 | Repo proof | ✅ Strong — paper demonstrates seconds-scale compaction; we mirror algorithms exactly |
 
-**Verdict: GAIN** — Implement as part of Plan 265. Promote CPU/SIMD paths to default; gate GPU/ANE behind features.
+**Verdict: GAIN** — Implement as part of Plan 271. Promote CPU/SIMD paths to default; gate GPU/ANE behind features.
 
 ### Fusion B: Adaptive CoT Compaction
 | Criterion | Assessment |
@@ -464,4 +464,4 @@ return {p_h}
 - **D (DEFER)**: SpectralQuant pre-selection for T > 100k.
 - **E (riir-ai)**: Per-region head budgets via BFCF.
 
-**Verdict**: GAIN — promote core AM + CPU/SIMD router to default after GOAT gate. Plan 265.
+**Verdict**: GAIN — promote core AM + CPU/SIMD router to default after GOAT gate. Plan 271.

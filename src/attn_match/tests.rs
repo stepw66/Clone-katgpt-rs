@@ -1,4 +1,4 @@
-//! Integration tests for the Attention Matching module (Plan 265).
+//! Integration tests for the Attention Matching module (Plan 271).
 //!
 //! These tests validate the GOAT gate criteria:
 //! - G1: β recovery

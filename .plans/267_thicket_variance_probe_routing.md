@@ -2,7 +2,7 @@
 
 > **Status:** 🚧 PARTIAL — Core module + tests + example done (T1-T3, T6-T8, T13-T18, T21-T23). Router integration (T9-T12, T19-T20, T24 GOAT G4 ablation) deferred for user review — surgical hot-path edit. See completed tasks below.
 > **Branch:** `develop` (per project rule — no feature branches)
-> **Research:** `.research/267_Thicket_Variance_Probe_Routing.md`
+> **Research:** `.research/235_Thicket_Variance_Probe_Routing.md`
 > **Source:** arXiv:2603.12228 — Neural Thickets (Gan & Isola, MIT CSAIL)
 > **Feature gate:** `thicket_variance_probe` (opt-in, depends on `rv_gated_routing`)
 > **Predecessor:** Plan 121 (weight-space RandOpt, ✅ complete) — TVP is the decoding-space analog
