@@ -4,6 +4,8 @@ pub mod ane_backend;
 #[cfg(feature = "async_qdq_overlap")]
 pub mod async_qdq;
 pub mod benchmark;
+#[cfg(feature = "band_conditioner")]
+pub mod band_conditioner;
 #[cfg(feature = "breakeven_routing")]
 pub mod breakeven;
 #[cfg(feature = "cache_prune")]
@@ -101,6 +103,8 @@ pub mod segment_checkpoint;
 #[cfg(feature = "shard_kv")]
 pub mod shard_kv;
 pub mod simd;
+#[cfg(feature = "sparse_task_vector")]
+pub mod sparse_task_vector;
 #[cfg(feature = "skill_opt")]
 pub mod skill_opt;
 #[cfg(feature = "sleep_consolidation")]
