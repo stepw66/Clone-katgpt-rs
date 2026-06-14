@@ -57,20 +57,7 @@ impl IntervalMask {
         }
 
         let mut result = self.mask.clone();
-
-        // Walk adjacent interval pairs, fill gaps ≤ threshold.
-        for w in intervals.windows(2) {
-            let (_a_start, a_end) = w[0];
-            let (b_start, _b_end) = w[1];
-            let gap = b_start - a_end; // exclusive end → exclusive start distance
-            if gap <= gap_threshold {
-                // fill everything from a_end to b_start (exclusive)
-                for j in a_end..b_start {
-                    result[j] = true;
-                }
-            }
-        }
-
+        close_intervals_inplace(&mut result, &intervals, gap_threshold);
         Self { mask: result }
     }
 
@@ -104,31 +91,7 @@ impl IntervalMask {
     ///
     /// `end` is exclusive (one past the last valid index).
     pub fn valid_intervals(&self) -> Vec<(usize, usize)> {
-        let n = self.mask.len();
-        if n == 0 {
-            return Vec::new();
-        }
-
-        let mut intervals = Vec::with_capacity(4);
-        let mut i = 0;
-
-        while i < n {
-            // skip invalid
-            while i < n && !self.mask[i] {
-                i += 1;
-            }
-            if i >= n {
-                break;
-            }
-            let start = i;
-            // scan valid run
-            while i < n && self.mask[i] {
-                i += 1;
-            }
-            intervals.push((start, i));
-        }
-
-        intervals
+        valid_intervals_from_slice(&self.mask)
     }
 
     #[inline]
@@ -165,9 +128,64 @@ impl IntervalMask {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Free helpers (zero-allocation interval ops on borrowed slices)
+// ---------------------------------------------------------------------------
+
+/// Return list of `(start, end)` for contiguous valid ranges in `mask`.
+///
+/// `end` is exclusive. Shared by [`IntervalMask::valid_intervals`] and the
+/// in-place batch path so callers don't need to wrap a slice in an owned
+/// `IntervalMask` just to compute intervals.
+fn valid_intervals_from_slice(mask: &[bool]) -> Vec<(usize, usize)> {
+    let n = mask.len();
+    if n == 0 {
+        return Vec::new();
+    }
+
+    let mut intervals = Vec::with_capacity(4);
+    let mut i = 0;
+
+    while i < n {
+        // skip invalid
+        while i < n && !mask[i] {
+            i += 1;
+        }
+        if i >= n {
+            break;
+        }
+        let start = i;
+        // scan valid run
+        while i < n && mask[i] {
+            i += 1;
+        }
+        intervals.push((start, i));
+    }
+
+    intervals
+}
+
+/// Fill gaps ≤ `gap_threshold` between adjacent intervals directly into
+/// `mask`, in place. Walks adjacent interval pairs.
+#[inline]
+fn close_intervals_inplace(mask: &mut [bool], intervals: &[(usize, usize)], gap_threshold: usize) {
+    for w in intervals.windows(2) {
+        let (_a_start, a_end) = w[0];
+        let (b_start, _b_end) = w[1];
+        let gap = b_start - a_end; // exclusive end → exclusive start distance
+        if gap <= gap_threshold {
+            // fill everything from a_end to b_start (exclusive)
+            for j in a_end..b_start {
+                mask[j] = true;
+            }
+        }
+    }
+}
+
 /// State machine for gap counting.
 #[cfg(feature = "interval_pruner")]
 #[derive(Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
 enum State {
     LeadingInvalid,
     InValid,
@@ -237,15 +255,15 @@ impl<P: ConstraintPruner> ConstraintPruner for IntervalPruner<P> {
         }
 
         // Build mask only over the batch slice.
-        let mask = IntervalMask::from_vec(results[..len].to_vec());
-
+        // Compute intervals directly from `results` (no Vec<bool> allocation,
+        // no IntervalMask wrapper), then fill gaps in place.
         match self.gap_threshold {
             0 => { /* no merging */ }
             _ => {
-                let closed = mask.close_intervals(self.gap_threshold);
-                let src = closed.as_slice();
-                for i in 0..len {
-                    results[i] = src[i];
+                let intervals = valid_intervals_from_slice(&results[..len]);
+                match intervals.len() {
+                    0 | 1 => {}
+                    _ => close_intervals_inplace(&mut results[..len], &intervals, self.gap_threshold),
                 }
             }
         }

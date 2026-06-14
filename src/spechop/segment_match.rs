@@ -27,6 +27,11 @@ pub struct IndexedSegment {
     pub rolling_hash: u64,
     /// blake3 hash for verification.
     pub full_hash: [u8; 32],
+    /// Cached prefix-hash table for the segment's tokens.
+    /// Avoids O(seg_len) recomputation on every prefix/substring query.
+    /// Built once at [`HopSegmentIndex::index_observation`] time.
+    #[serde(default)]
+    pub prefix_hashes: Vec<u64>,
 }
 
 // ---------------------------------------------------------------------------
@@ -101,6 +106,7 @@ impl HopSegmentIndex {
             token_hashes: tokens.to_vec(),
             rolling_hash,
             full_hash,
+            prefix_hashes: prefixes,
         });
 
         // Evict oldest if over capacity — O(1) with VecDeque pop_front.
@@ -130,7 +136,8 @@ impl HopSegmentIndex {
                 continue;
             }
 
-            let seg_prefixes = self.roller.prefix_hashes(&seg.token_hashes);
+            // Use cached prefix hashes from indexing time — avoids O(seg_len) recomputation.
+            let seg_prefixes = &seg.prefix_hashes;
 
             // Binary search for the longest matching prefix using rolling hash.
             let mut lo = best_len + 1;
@@ -140,7 +147,7 @@ impl HopSegmentIndex {
             while lo <= hi {
                 let mid = lo + (hi - lo) / 2;
                 let q_hash = self.roller.substring_hash(&query_prefixes, 0, mid);
-                let s_hash = self.roller.substring_hash(&seg_prefixes, 0, mid);
+                let s_hash = self.roller.substring_hash(seg_prefixes, 0, mid);
 
                 if q_hash == s_hash {
                     found_len = mid;
@@ -201,7 +208,8 @@ impl HopSegmentIndex {
         let mut best_len = min_length - 1; // Must beat this.
 
         for seg in &self.pool {
-            let seg_prefixes = self.roller.prefix_hashes(&seg.token_hashes);
+            // Use cached prefix hashes — avoids O(seg_len) recomputation per query.
+            let seg_prefixes = &seg.prefix_hashes;
             let seg_len = seg.token_hashes.len();
 
             // Try every starting position in the query, looking for a match
@@ -239,7 +247,7 @@ impl HopSegmentIndex {
                                 .substring_hash(&query_prefixes, q_start, q_start + mid);
                         let s_hash =
                             self.roller
-                                .substring_hash(&seg_prefixes, s_start, s_start + mid);
+                                .substring_hash(seg_prefixes, s_start, s_start + mid);
 
                         if q_hash == s_hash {
                             found_len = mid;
@@ -416,6 +424,7 @@ mod tests {
             token_hashes: vec![1, 2, 3, 4],
             rolling_hash: 0xDEADBEEF,
             full_hash: [0xAA; 32],
+            prefix_hashes: vec![10, 20, 30, 40],
         };
 
         let json = serde_json::to_string(&seg).unwrap();
@@ -425,5 +434,6 @@ mod tests {
         assert_eq!(back.token_hashes, vec![1, 2, 3, 4]);
         assert_eq!(back.rolling_hash, 0xDEADBEEF);
         assert_eq!(back.full_hash, [0xAA; 32]);
+        assert_eq!(back.prefix_hashes, vec![10, 20, 30, 40]);
     }
 }

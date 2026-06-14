@@ -90,21 +90,27 @@ pub fn fit_beta_nnls(
     }
 
     // Solve via Cholesky; if rank-deficient, add diagonal jitter.
+    // We mutate `ata` in place (adding/removing jitter each attempt) to avoid
+    // a per-iteration `clone()` of the (t*t) buffer in the hot retry loop.
     let mut jitter = 0.0f32;
     let l_mat;
     loop {
-        // Add jitter to diagonal.
-        let mut a_jittered = ata.clone();
-        for j in 0..t {
-            a_jittered[j * t + j] += jitter;
-        }
-        match cholesky_decompose(&a_jittered, t) {
+        match cholesky_decompose(&ata, t) {
             Some(l) => {
                 l_mat = l;
                 break;
             }
             None => {
+                // Remove previous jitter before adding the new one.
+                if jitter > 0.0 {
+                    for j in 0..t {
+                        ata[j * t + j] -= jitter;
+                    }
+                }
                 jitter = if jitter == 0.0 { 1e-6 } else { jitter * 10.0 };
+                for j in 0..t {
+                    ata[j * t + j] += jitter;
+                }
                 if jitter > 1e3 {
                     // Fall back to a diagonal-only "solution": w = atm[j] / ata[j,j]
                     for j in 0..t {
@@ -283,7 +289,11 @@ fn estimate_spectral_norm_squared(a: &[f32], n: usize, t: usize, steps: usize) -
     }
     let mut v: Vec<f32> = vec![1.0f32 / v_norm; t];
 
+    // Pre-allocate both scratch buffers outside the power-iteration loop to
+    // avoid a per-step `Vec` allocation (`new_v` was previously reallocated
+    // every iteration).
     let mut aw = vec![0.0f32; n];
+    let mut new_v = vec![0.0f32; t];
     for _ in 0..steps.max(1) {
         // aw = A v
         for i in 0..n {
@@ -294,8 +304,8 @@ fn estimate_spectral_norm_squared(a: &[f32], n: usize, t: usize, steps: usize) -
             }
             aw[i] = s;
         }
-        // v = A^T aw
-        let mut new_v = vec![0.0f32; t];
+        // v = A^T aw  (reuse new_v instead of reallocating)
+        new_v.iter_mut().for_each(|x| *x = 0.0);
         for i in 0..n {
             let row = &a[i * t..(i + 1) * t];
             let aw_i = aw[i];

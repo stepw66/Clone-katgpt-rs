@@ -72,7 +72,9 @@ impl LatentPrefillAdapter {
     /// The effective prefill length is the count of entries, which should be
     /// much smaller than `original_token_count` when compression is active.
     pub fn to_prefill_sequence(&self, ctx: &CompressedContext) -> MixedPrefillSequence {
-        let mut entries = Vec::new();
+        // Lower bound on entries: one per segment. Avoids realloc churn when
+        // raw segments expand into many entries.
+        let mut entries = Vec::with_capacity(ctx.segments.len());
         let mut original_pos = 0usize;
         let mut compressed_pos = 0usize;
 

@@ -68,26 +68,31 @@ impl DefaultManifoldGenerator {
     ///
     /// Each Q-value corresponds to a direction bin (uniformly spaced over [0, 2π)).
     /// Returns the sampled direction angle in radians.
+    ///
+    /// Two-pass over `q_goals` with on-the-fly weight recomputation: avoids the
+    /// per-trajectory `Vec<f32>` allocation the previous softmax-collect did.
     fn sample_goal_from_q(&self, q_goals: &[f32], rng: &mut Rng) -> f32 {
         if q_goals.is_empty() {
             return rng.uniform() * TAU;
         }
 
-        // Convert Q-values to weights via softmax-like normalization on non-negative values.
-        let max_q = q_goals.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
-        let weights: Vec<f32> = q_goals.iter().map(|q| (q - max_q).exp()).collect();
-        let total: f32 = weights.iter().sum();
+        // Shift by max_q for numerical stability (same as before — this is
+        // categorical sampling, not an activation; the project sigmoid rule
+        // applies to bounded mappings, not probability normalization).
+        let max_q = q_goals.iter().copied().fold(f32::NEG_INFINITY, f32::max);
 
+        // Pass 1: total weight, no allocation.
+        let total: f32 = q_goals.iter().map(|q| (q - max_q).exp()).sum();
         if total <= 0.0 {
             return rng.uniform() * TAU;
         }
 
-        // Weighted sample: pick a bin.
-        let mut r = rng.uniform() * total;
+        // Pass 2: weighted sample, recomputing weights inline.
         let bin_count = q_goals.len();
-        let mut chosen = 0;
-        for (i, &w) in weights.iter().enumerate() {
-            r -= w;
+        let mut r = rng.uniform() * total;
+        let mut chosen = 0usize;
+        for (i, &q) in q_goals.iter().enumerate() {
+            r -= (q - max_q).exp();
             if r <= 0.0 {
                 chosen = i;
                 break;

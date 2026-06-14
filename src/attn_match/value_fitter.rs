@@ -12,7 +12,7 @@
 //! Default solver: Cholesky on `X^T X` (with diagonal jitter fallback for
 //! rank-deficient systems). No external LAPACK dependency.
 
-use crate::attn_match::{score_matrix::row_max, STABILITY_EPS};
+use crate::attn_match::{score_matrix::row_max, score_matrix_simd::dot_8wide, STABILITY_EPS};
 
 /// Configuration for Cv fitting.
 #[derive(Debug, Clone, Copy)]
@@ -106,10 +106,12 @@ pub fn fit_cv_least_squares(
             Some(l) => {
                 // Solve L Z = X^T Y (forward substitution), then L^T Cv = Z (back substitution).
                 let mut cv = vec![0.0f32; t * d];
+                // Hoist `z` outside the per-column loop — reuse across d columns
+                // instead of reallocating t f32 per column.
+                let mut z = vec![0.0f32; t];
                 // For each column of X^T Y (= each dim of d), solve the triangular system.
                 for col in 0..d {
                     // Forward: L z = xty[:, col]
-                    let mut z = vec![0.0f32; t];
                     for j in 0..t {
                         let mut s = xty[j * d + col];
                         for k in 0..j {
@@ -151,8 +153,9 @@ pub fn fit_cv_least_squares(
                     // Try one more time with the heavy loading.
                     if let Some(l) = cholesky_decompose(&xtx, t) {
                         let mut cv = vec![0.0f32; t * d];
+                        // Reuse z across columns (avoids per-column alloc).
+                        let mut z = vec![0.0f32; t];
                         for col in 0..d {
-                            let mut z = vec![0.0f32; t];
                             for j in 0..t {
                                 let mut s = xty[j * d + col];
                                 for k in 0..j {
@@ -278,10 +281,8 @@ pub fn compute_compact_attention(
         let out_row = &mut x_out[i * t..(i + 1) * t];
         for j in 0..t {
             let k_row = &compact_keys[j * d..(j + 1) * d];
-            let mut dot = 0.0f32;
-            for k in 0..d {
-                dot += q_row[k] * k_row[k];
-            }
+            // 8-wide chunked dot product auto-vectorizes on AVX2/NEON.
+            let dot = dot_8wide(q_row, k_row, d);
             out_row[j] = dot * inv_sqrt_d + beta[j];
         }
     }

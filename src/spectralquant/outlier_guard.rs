@@ -52,9 +52,20 @@ impl OutlierGuardReport {
     }
 
     fn finalize(&mut self) {
+        // Single pass: count flagged and track max ks_d together.
+        let mut total_flagged = 0usize;
+        let mut max_ks_d = 0.0f32;
+        for l in &self.layers {
+            if l.flagged {
+                total_flagged += 1;
+            }
+            if l.ks_d > max_ks_d {
+                max_ks_d = l.ks_d;
+            }
+        }
         self.total_scanned = self.layers.len();
-        self.total_flagged = self.layers.iter().filter(|l| l.flagged).count();
-        self.max_ks_d = self.layers.iter().map(|l| l.ks_d).fold(0.0f32, f32::max);
+        self.total_flagged = total_flagged;
+        self.max_ks_d = max_ks_d;
     }
 }
 

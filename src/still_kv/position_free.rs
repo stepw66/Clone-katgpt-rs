@@ -21,26 +21,32 @@ pub struct PositionFreeCompactor {
     pub rope_theta: f32,
     /// Head dimension.
     pub head_dim: usize,
+    /// Pre-computed RoPE frequency table: `freq[i] = 1.0 / (theta^(2i / head_dim))`.
+    /// Cached at construction so per-call un-rotate/re-rotate avoid recomputing it.
+    freqs: Vec<f32>,
 }
 
 impl PositionFreeCompactor {
     /// Create a new position-free compactor with the given RoPE parameters.
     pub fn new(rope_theta: f32, head_dim: usize) -> Self {
+        let freqs = Self::compute_freq_table(rope_theta, head_dim);
         Self {
             rope_theta,
             head_dim,
+            freqs,
         }
     }
 
-    /// Pre-compute RoPE frequency table.
+    /// Build the RoPE frequency table.
     ///
     /// `freq[i] = 1.0 / (theta^(2i / head_dim))` for `i` in `0..half`.
-    fn compute_freq_table(&self) -> Vec<f32> {
-        let half = self.head_dim / 2;
+    /// Pure function of `(rope_theta, head_dim)` — safe to cache once.
+    fn compute_freq_table(rope_theta: f32, head_dim: usize) -> Vec<f32> {
+        let half = head_dim / 2;
         let mut freqs = Vec::with_capacity(half);
         for i in 0..half {
-            let exponent = 2.0 * i as f32 / self.head_dim as f32;
-            freqs.push(1.0 / self.rope_theta.powf(exponent));
+            let exponent = 2.0 * i as f32 / head_dim as f32;
+            freqs.push(1.0 / rope_theta.powf(exponent));
         }
         freqs
     }
@@ -72,8 +78,8 @@ impl PositionFreeCompactor {
             out.push(v.to_f32());
         }
 
-        // Pre-compute frequency table
-        let freqs = self.compute_freq_table();
+        // Use cached frequency table (built once at construction).
+        let freqs = &self.freqs;
 
         // For each token at position p, un-rotate pairs (i, i+half)
         for t in 0..seq_len {
@@ -146,8 +152,8 @@ impl PositionFreeCompactor {
         // Work in f32, convert to f16 at the end
         let mut buf = keys.to_vec();
 
-        // Pre-compute frequency table
-        let freqs = self.compute_freq_table();
+        // Use cached frequency table (built once at construction).
+        let freqs = &self.freqs;
 
         // For each token at position p, apply forward rotation
         for t in 0..seq_len {
@@ -340,7 +346,7 @@ mod tests {
     #[test]
     fn test_freq_table_correctness() {
         let compactor = PositionFreeCompactor::new(10000.0, 8);
-        let freqs = compactor.compute_freq_table();
+        let freqs = &compactor.freqs;
         let half = 4; // head_dim / 2
 
         assert_eq!(freqs.len(), half);

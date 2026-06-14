@@ -148,24 +148,43 @@ impl HeadBudgetSolver {
         // preserves the sum (and hence the average) by construction.
         let step = self.step_size;
 
+        // Cached gain[i] = marginal_gain(ratios[i], step)
+        // and loss[i] = marginal_gain(ratios[i] - step, step) = quality cost of donating η.
+        // After each swap only 2 entries change, so we keep these in sync
+        // incrementally and scan the cache (O(n) reads, no curve interpolation)
+        // instead of recomputing all 2n interpolations per iteration.
+        let mut gains = vec![0.0f32; n];
+        let mut losses = vec![0.0f32; n];
+        let mut can_recv = vec![false; n];
+        let mut can_donate = vec![false; n];
+        for i in 0..n {
+            let r = ratios[i];
+            can_recv[i] = r + step <= 1.0 + STABILITY_EPS;
+            can_donate[i] = r >= step;
+            gains[i] = self.curves[i].marginal_gain(r, step);
+            // loss[i] is meaningful only when head i can donate.
+            losses[i] = if can_donate[i] {
+                self.curves[i].marginal_gain(r - step, step)
+            } else {
+                f32::INFINITY
+            };
+        }
+
         // Safety: bound iterations to prevent pathological loops.
         let mut iter = 0usize;
         while iter < MAX_ITERATIONS {
             iter += 1;
 
-            // Pass 1: find the head `g` with the largest marginal gain from +η.
-            // gain = delta(r) - delta(r + η)  (quality recovered).
+            // Pass 1: find head `g` with the largest cached gain among those
+            // that can still receive budget.
             let mut best_gain_idx: Option<usize> = None;
             let mut best_gain = f32::NEG_INFINITY;
             for i in 0..n {
-                let r_i = ratios[i];
-                let can_receive = r_i + step <= 1.0 + STABILITY_EPS;
-                if !can_receive {
+                if !can_recv[i] {
                     continue;
                 }
-                let g = self.curves[i].marginal_gain(r_i, step);
-                if g > best_gain {
-                    best_gain = g;
+                if gains[i] > best_gain {
+                    best_gain = gains[i];
                     best_gain_idx = Some(i);
                 }
             }
@@ -173,26 +192,16 @@ impl HeadBudgetSolver {
                 break; // No head can receive → done.
             };
 
-            // Pass 2: find the head `l` (≠ g) with the smallest marginal loss
-            // from giving up η. loss = delta(r - η) - delta(r) (quality lost).
-            // We must exclude `gain_idx` — moving η from a head to itself is a no-op.
+            // Pass 2: find head `l` (≠ g) with the smallest cached loss among
+            // those that can still donate.
             let mut best_loss_idx: Option<usize> = None;
             let mut best_loss = f32::INFINITY;
             for i in 0..n {
-                if i == gain_idx {
+                if i == gain_idx || !can_donate[i] {
                     continue;
                 }
-                let r_i = ratios[i];
-                let can_donate = r_i >= step;
-                if !can_donate {
-                    continue;
-                }
-                let l = self.curves[i].marginal_gain(r_i - step, step);
-                // `l` is the quality that head `i` would recover if it had
-                // η more (i.e., the cost of giving up η). We want the head
-                // for which this cost is smallest.
-                if l < best_loss {
-                    best_loss = l;
+                if losses[i] < best_loss {
+                    best_loss = losses[i];
                     best_loss_idx = Some(i);
                 }
             }
@@ -209,9 +218,21 @@ impl HeadBudgetSolver {
                 break;
             }
 
-            // Apply the swap.
+            // Apply the swap and incrementally update only the 2 touched heads.
             ratios[gain_idx] += step;
             ratios[loss_idx] -= step;
+            // Refresh receive/donate flags and cached curves for both heads.
+            for idx in [gain_idx, loss_idx] {
+                let r = ratios[idx];
+                can_recv[idx] = r + step <= 1.0 + STABILITY_EPS;
+                can_donate[idx] = r >= step;
+                gains[idx] = self.curves[idx].marginal_gain(r, step);
+                losses[idx] = if can_donate[idx] {
+                    self.curves[idx].marginal_gain(r - step, step)
+                } else {
+                    f32::INFINITY
+                };
+            }
         }
 
         ratios

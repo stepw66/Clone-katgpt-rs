@@ -211,13 +211,11 @@ impl<R: VortexFlow> VortexFlow for AdaptiveKRouter<R> {
             return decision_full;
         }
 
-        // Step 4: Truncate to adaptive_k blocks.
-        let mut truncated = RoutingDecision::with_capacity(adaptive_k);
-        for i in 0..adaptive_k {
-            truncated.blocks.push(decision_full.blocks[i]);
-            truncated.weights.push(decision_full.weights[i]);
-        }
-        truncated
+        // Step 4: Truncate to adaptive_k blocks in place — avoids a fresh
+        // `RoutingDecision` allocation when the inner call already produced one.
+        decision_full.blocks.truncate(adaptive_k);
+        decision_full.weights.truncate(adaptive_k);
+        decision_full
     }
 
     fn cache_new(&self, n_blocks_capacity: usize, head_dim: usize) -> Self::Cache {

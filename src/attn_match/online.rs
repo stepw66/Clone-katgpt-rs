@@ -123,21 +123,22 @@ impl OnlineCompactor {
 
         let prefix_len = current_pos - self.recent_window;
 
-        // Defensive dimension checks.
-        if kv_keys.len() < current_pos * d {
+        // Defensive dimension checks. Compute products once.
+        let cur_bytes = current_pos * d;
+        if kv_keys.len() < cur_bytes {
             return Err(CompactError::DimensionMismatch(format!(
                 "kv_keys.len()={} but current_pos*d={}*{}={}",
                 kv_keys.len(),
                 current_pos,
                 d,
-                current_pos * d
+                cur_bytes
             )));
         }
-        if kv_values.len() < current_pos * d {
+        if kv_values.len() < cur_bytes {
             return Err(CompactError::DimensionMismatch(format!(
                 "kv_values.len()={} but current_pos*d={}",
                 kv_values.len(),
-                current_pos * d
+                cur_bytes
             )));
         }
         if queries.len() != n * d {
@@ -155,10 +156,11 @@ impl OnlineCompactor {
             return Ok(None);
         }
 
-        let prefix_keys = &kv_keys[..prefix_len * d];
-        let prefix_values = &kv_values[..prefix_len * d];
-        let recent_keys = kv_keys[prefix_len * d..current_pos * d].to_vec();
-        let recent_values = kv_values[prefix_len * d..current_pos * d].to_vec();
+        let prefix_bytes = prefix_len * d;
+        let prefix_keys = &kv_keys[..prefix_bytes];
+        let prefix_values = &kv_values[..prefix_bytes];
+        let recent_keys = kv_keys[prefix_bytes..cur_bytes].to_vec();
+        let recent_values = kv_values[prefix_bytes..cur_bytes].to_vec();
 
         let cfg = clamp_compact_size(config, prefix_len);
         let compact_prefix = compact(prefix_keys, prefix_values, queries, prefix_len, d, n, &cfg)?;
@@ -206,10 +208,13 @@ impl OnlineCompactResult {
 /// unchanged (cheap clone). If it's ≥ prefix_len, we shrink to
 /// `prefix_len - 1` so [`compact`] accepts it.
 fn clamp_compact_size(config: &AmConfig, prefix_len: usize) -> AmConfig {
-    let mut cfg = config.clone();
-    if cfg.compact_size >= prefix_len {
-        cfg.compact_size = prefix_len.saturating_sub(1).max(1);
+    // Fast path: no clamping needed. We still must clone to return an owned
+    // AmConfig, but the caller is one-shot per compaction so this is fine.
+    if config.compact_size < prefix_len {
+        return config.clone();
     }
+    let mut cfg = config.clone();
+    cfg.compact_size = prefix_len.saturating_sub(1).max(1);
     cfg
 }
 

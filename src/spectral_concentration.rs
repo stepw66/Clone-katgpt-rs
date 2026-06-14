@@ -67,17 +67,13 @@ pub fn spectral_concentration(eigenvalues: &[f32], k: usize) -> f32 {
         return 0.0;
     }
     let k_clamped = k.min(eigenvalues.len());
-    let mut top_k_sum = 0.0_f32;
-    for i in 0..k_clamped {
-        top_k_sum += eigenvalues[i];
-    }
-    let mut total = 0.0_f32;
-    for &v in eigenvalues {
-        total += v;
-    }
+    // SIMD-accelerated sums: total over the full slice, top-k over the prefix.
+    // Two vectorized passes beat one branchy scalar pass for typical sizes.
+    let total = crate::simd::simd_sum_f32(eigenvalues);
     if total <= 0.0 {
         return 0.0;
     }
+    let top_k_sum = crate::simd::simd_sum_f32(&eigenvalues[..k_clamped]);
     let ratio = top_k_sum / total;
     ratio.clamp(0.0, 1.0)
 }
