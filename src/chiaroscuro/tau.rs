@@ -106,7 +106,9 @@ impl StreamingTauCalibrator {
     fn rebuild_sorted(&mut self) {
         self.sorted.clear();
         self.sorted.extend_from_slice(&self.ring[..self.len]);
-        self.sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        // Unstable sort is faster for primitives and doesn't allocate.
+        // total_cmp gives a consistent total ordering (handles NaN safely).
+        self.sorted.sort_unstable_by(f32::total_cmp);
         self.dirty = false;
     }
 
