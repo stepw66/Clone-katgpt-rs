@@ -1021,11 +1021,10 @@ fn generate_random_rotation(dim: usize, seed: u64) -> Vec<f32> {
 /// Uses binary search on the assumption that centroids are sorted ascending.
 /// This gives O(log n) instead of O(n) for the hot-path quantize loop.
 fn quantize_to_idx(value: f32, centroids: &[f32]) -> u8 {
-    if centroids.is_empty() {
-        return 0;
-    }
-    if centroids.len() == 1 {
-        return 0;
+    // Empty or single-centroid codebook: only one valid index.
+    match centroids.len() {
+        0 | 1 => return 0,
+        _ => {}
     }
 
     // Binary search for insertion point
@@ -1065,17 +1064,20 @@ fn dequantize_idx(idx: u8, centroids: &[f32]) -> f32 {
 /// Each index uses `bits_per_dim[i]` bits. Output is written LSB-first.
 fn pack_variable_bits(indices: &[u8], bits_per_dim: &[u8], out: &mut Vec<u8>) {
     out.clear();
-    let total_bits: usize = indices
+    // Callers always pass a full-length bits_per_dim (see store/dequantize sites),
+    // so we can sum the leading `indices.len()` entries directly instead of
+    // the prior enumerate+get+unwrap_or pattern (which redundantly bounds-checked).
+    let total_bits: usize = bits_per_dim
         .iter()
-        .enumerate()
-        .map(|(i, _)| bits_per_dim.get(i).copied().unwrap_or(1) as usize)
+        .take(indices.len())
+        .map(|&b| b as usize)
         .sum();
     out.reserve(total_bits.div_ceil(8));
     let mut bit_buffer = 0u64;
     let mut bits_in_buffer = 0u32;
 
     for (i, &idx) in indices.iter().enumerate() {
-        let bits = bits_per_dim.get(i).copied().unwrap_or(1) as u32;
+        let bits = bits_per_dim[i] as u32;
         bit_buffer |= (idx as u64) << bits_in_buffer;
         bits_in_buffer += bits;
 
@@ -1099,7 +1101,9 @@ fn unpack_variable_bits(packed: &[u8], bits_per_dim: &[u8], n_dims: usize, out: 
     let mut byte_idx = 0;
 
     for (i, o) in out.iter_mut().enumerate().take(n_dims) {
-        let bits = bits_per_dim.get(i).copied().unwrap_or(1) as u32;
+        // Callers always pass a full-length bits_per_dim (see docstring); direct
+        // indexing avoids the per-element get+unwrap_or bounds check.
+        let bits = bits_per_dim[i] as u32;
         while bits_in_buffer < bits && byte_idx < packed.len() {
             bit_buffer |= (packed[byte_idx] as u64) << bits_in_buffer;
             bits_in_buffer += 8;

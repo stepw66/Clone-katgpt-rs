@@ -214,10 +214,14 @@ impl InferenceBackend for AneBackend {
 
         // If we have a compiled CoreML model, run the lm_head on ANE and
         // override the CPU-computed logits. This proves the pipeline works.
-        if let Some(ref model) = self.model
-            && let Ok(ane_logits) = run_lm_head(model, &ctx.x[..config.n_embd], config)
-        {
-            ctx.logits[..config.vocab_size].copy_from_slice(&ane_logits);
+        // Write ANE logits directly into ctx.logits — no intermediate Vec.
+        if let Some(ref model) = self.model {
+            let _ = run_lm_head_into(
+                model,
+                &ctx.x[..config.n_embd],
+                &mut ctx.logits[..config.vocab_size],
+                config.vocab_size,
+            );
         }
 
         &mut ctx.logits
@@ -693,13 +697,17 @@ fn multi_array_type(shape: &[i64]) -> FeatureType {
 
 /// Run the lm_head linear projection on the compiled CoreML model.
 ///
-/// Takes the hidden state vector `h` of length `n_embd` and returns
-/// the logits vector of length `vocab_size`.
-fn run_lm_head(
+/// Takes the hidden state vector `h` of length `n_embd` and writes
+/// logits of length `vocab_size` into `out`. Returns the number of elements written.
+///
+/// Writes directly into the caller's buffer to avoid a per-call `Vec` allocation
+/// (previously `to_vec()` was followed by an immediate `copy_from_slice`).
+fn run_lm_head_into(
     model: &coreml::Model,
     hidden: &[f32],
-    config: &Config,
-) -> Result<Vec<f32>, AneError> {
+    out: &mut [f32],
+    vocab: usize,
+) -> Result<usize, AneError> {
     let n = hidden.len();
     // Shape must match the model's declared input shape: [n_embd, 1, 1].
     let tensor = coreml::BorrowedTensor::from_f32(hidden, &[n, 1, 1])
@@ -713,9 +721,10 @@ fn run_lm_head(
         .get_f32("output")
         .map_err(|e| AneError::PredictionError(format!("get output: {e}")))?;
 
-    // Trim to vocab_size in case the output has extra elements.
-    let vocab = config.vocab_size;
-    Ok(output[..vocab].to_vec())
+    // Trim to vocab_size in case the output has extra elements, copy into caller's buffer.
+    let len = output.len().min(vocab);
+    out[..len].copy_from_slice(&output[..len]);
+    Ok(len)
 }
 
 /// Validate ANE residency by timing a single micro-prediction.
@@ -727,9 +736,10 @@ fn run_lm_head(
 pub fn validate_residency(model: &coreml::Model, config: &Config) -> Result<u64, AneError> {
     let mut rng = crate::types::Rng::new(0);
     let hidden: Vec<f32> = (0..config.n_embd).map(|_| rng.uniform()).collect();
+    let mut logits = vec![0.0f32; config.vocab_size];
 
     let start = std::time::Instant::now();
-    run_lm_head(model, &hidden, config)?;
+    run_lm_head_into(model, &hidden, &mut logits, config.vocab_size)?;
     let elapsed_us = start.elapsed().as_micros() as u64;
 
     const THRESHOLD_US: u64 = 1000;
@@ -924,7 +934,14 @@ mod tests {
 
         // Run the lm_head on ANE using the same hidden state.
         let model = backend.model.as_ref().unwrap();
-        let ane_logits = run_lm_head(model, &ctx.x[..config.n_embd], &config).unwrap();
+        let mut ane_logits = vec![0.0f32; config.vocab_size];
+        run_lm_head_into(
+            model,
+            &ctx.x[..config.n_embd],
+            &mut ane_logits,
+            config.vocab_size,
+        )
+        .unwrap();
 
         // Verify dimensions match.
         assert_eq!(
@@ -1182,8 +1199,9 @@ mod tests {
             *v = (i as f32) * 0.1;
         }
 
+        let mut logits = vec![0.0f32; config.vocab_size];
         let start = std::time::Instant::now();
-        let result = run_lm_head(model, &hidden, &config);
+        let result = run_lm_head_into(model, &hidden, &mut logits, config.vocab_size);
         let elapsed = start.elapsed();
 
         assert!(result.is_ok(), "lm_head prediction should succeed");

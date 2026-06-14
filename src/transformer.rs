@@ -1019,15 +1019,17 @@ impl WallPrefixState {
         let inv_current = 1.0 / current as f32;
         let mut min_ret: f32 = f32::MAX;
 
+        // Branch-free min reduction: f32::min is a single instruction on most ISAs
+        // (e.g. vminps on x86-64 with SSE4.1, fmin on AArch64 NEON). Replaces the
+        // branchy `if x < m { m = x; }` pattern, removing a predicted-branch stall
+        // when the retention values are similar (the common case for stable blocks).
         let mut d = 0;
         while d + 4 <= hd {
             for dd in 0..4 {
                 let gate_accumulated = ps[offset + d + dd];
                 let gate_in_block = gate_accumulated * block_span * inv_current;
                 let retention = gate_in_block.exp();
-                if retention < min_ret {
-                    min_ret = retention;
-                }
+                min_ret = min_ret.min(retention);
             }
             d += 4;
         }
@@ -1035,9 +1037,7 @@ impl WallPrefixState {
             let gate_accumulated = ps[offset + d];
             let gate_in_block = gate_accumulated * block_span * inv_current;
             let retention = gate_in_block.exp();
-            if retention < min_ret {
-                min_ret = retention;
-            }
+            min_ret = min_ret.min(retention);
             d += 1;
         }
 
@@ -2077,9 +2077,10 @@ fn depth_route(
         let logit = crate::simd::simd_dot_f32(&scaled_buf[..n_embd], query_weight, n_embd);
 
         logits_buf[i] = logit;
-        if logit > max_logit {
-            max_logit = logit;
-        }
+        // Branch-free max reduction: f32::max compiles to a single instruction
+        // (vmaxss on x86-64 SSE, fmax on AArch64 NEON). Avoids predicted-branch
+        // mispredicts when logits are similar (typical for well-normalized sources).
+        max_logit = max_logit.max(logit);
     }
 
     // 2. Softmax (numerically stable, SIMD batch)
@@ -2150,9 +2151,10 @@ fn depth_route_with_indices(args: DepthRouteIndicesArgs<'_>) {
         let logit = crate::simd::simd_dot_f32(&scaled_buf[..n_embd], query_weight, n_embd);
 
         logits_buf[i] = logit;
-        if logit > max_logit {
-            max_logit = logit;
-        }
+        // Branch-free max reduction: f32::max compiles to a single instruction
+        // (vmaxss on x86-64 SSE, fmax on AArch64 NEON). Avoids predicted-branch
+        // mispredicts when logits are similar (typical for well-normalized sources).
+        max_logit = max_logit.max(logit);
     }
 
     // 2. Softmax (numerically stable, SIMD batch)
@@ -2206,9 +2208,8 @@ pub fn depth_route_weights(
         let logit = crate::simd::simd_dot_f32(&scaled[..n_embd], query_weight, n_embd);
 
         logits[i] = logit;
-        if logit > max_logit {
-            max_logit = logit;
-        }
+        // Branch-free max reduction (single SIMD instruction, no predicted branch).
+        max_logit = max_logit.max(logit);
     }
 
     // 2. Softmax (SIMD batch)
@@ -4329,7 +4330,10 @@ pub fn tokens_to_string(tokens: &[usize]) -> String {
     const CHARS: &[u8] = b"abcdefghijklmnopqrstuvwxyz";
     tokens
         .iter()
-        .map(|&t| if t < 26 { CHARS[t] as char } else { '_' })
+        .map(|&t| match t {
+            0..=25 => CHARS[t] as char,
+            _ => '_',
+        })
         .collect()
 }
 
@@ -4643,11 +4647,13 @@ pub fn raven_compute_router_into(
     let num_slots = raw_logits.len();
     let top_k = top_k.min(num_slots);
 
-    // Negate logits in-place into r_t scratch buffer
+    // Negate logits in-place into r_t scratch buffer.
+    // Replace scalar `r_t[i] = -x` loop with copy + SIMD scale: two passes but
+    // vectorized, wins for num_slots >= 16 (Raven typically uses 16-64 slots).
+    // simd_scale_inplace(x, -1.0) compiles to a single SIMD negate per chunk.
     r_t.resize(num_slots, 0.0);
-    for (i, &x) in raw_logits.iter().enumerate() {
-        r_t[i] = -x;
-    }
+    r_t[..num_slots].copy_from_slice(&raw_logits[..num_slots]);
+    crate::simd::simd_scale_inplace(&mut r_t[..num_slots], -1.0);
     crate::simd::simd_exp_inplace(&mut r_t[..num_slots]);
     // Write directly into pre-sized scored buffer (avoids push reallocation)
     scored.resize(num_slots, (0, 0.0));
@@ -4672,12 +4678,11 @@ pub fn raven_compute_router_into(
         sum += *score;
     }
 
-    // Normalize so selected slots sum to 1.0
+    // Normalize so selected slots sum to 1.0.
+    // SIMD scale is branch-free and vectorized; replaces scalar `*v *= inv_sum` loop.
     if sum > 0.0 {
         let inv_sum = 1.0 / sum;
-        for v in r_t[..num_slots].iter_mut() {
-            *v *= inv_sum;
-        }
+        crate::simd::simd_scale_inplace(&mut r_t[..num_slots], inv_sum);
     }
 }
 
@@ -4760,9 +4765,8 @@ pub fn raven_readout_into<'a>(
         unsafe {
             *scores.get_unchecked_mut(s) = dot;
         }
-        if dot > max_score {
-            max_score = dot;
-        }
+        // Branch-free max reduction (single SIMD instruction).
+        max_score = max_score.max(dot);
     }
 
     // Pass 2: fused exp + accumulate + normalize (SIMD batch)

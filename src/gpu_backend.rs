@@ -283,6 +283,28 @@ fn scalar_buffer<T: Copy>(device: &metal::DeviceRef, value: &T) -> Buffer {
     buffer
 }
 
+/// Overwrite the contents of an existing Metal buffer with a scalar value.
+/// Reuses the allocation — avoids a `device.new_buffer()` IPC per forward call.
+#[inline]
+fn write_scalar<T: Copy>(buf: &Buffer, value: &T) {
+    let byte_len = mem::size_of::<T>();
+    let contents = buf.contents();
+    unsafe {
+        std::ptr::copy_nonoverlapping(value as *const T as *const c_void, contents, byte_len);
+    }
+}
+
+/// Overwrite the contents of an existing Metal buffer with an f32 slice.
+/// Reuses the allocation — avoids a `device.new_buffer()` IPC per forward call.
+#[inline]
+fn write_f32_slice(buf: &Buffer, data: &[f32]) {
+    let byte_len = std::mem::size_of_val(data);
+    let contents = buf.contents();
+    unsafe {
+        std::ptr::copy_nonoverlapping(data.as_ptr() as *const c_void, contents, byte_len);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // GpuBackend
 // ---------------------------------------------------------------------------
@@ -333,6 +355,13 @@ pub struct GpuBackend {
     q_off_bufs: Option<Vec<Buffer>>,
     kv_off_bufs: Option<Vec<Buffer>>,
     out_off_bufs: Option<Vec<Buffer>>,
+    // Per-call buffers (values change every forward, but the Metal buffer allocation
+    // is reused via `contents()` write). Previously each of these triggered a
+    // `device.new_buffer()` IPC call per forward pass.
+    seq_len_scalar: Option<Buffer>,  // u32 seq_len (pos + 1)
+    pos_scalar: Option<Buffer>,      // u32 pos
+    emb_wte_slice: Option<Buffer>,   // [n_embd] wte[token] slice
+    emb_wpe_slice: Option<Buffer>,   // [n_embd] wpe[pos] slice
 }
 
 impl GpuBackend {
@@ -372,6 +401,10 @@ impl GpuBackend {
             q_off_bufs: None,
             kv_off_bufs: None,
             out_off_bufs: None,
+            seq_len_scalar: None,
+            pos_scalar: None,
+            emb_wte_slice: None,
+            emb_wpe_slice: None,
         })
     }
 }
@@ -439,13 +472,16 @@ impl InferenceBackend for GpuBackend {
         // n_embd_buf doubles as n_embd_in_dim_buf, mlp_in_dim_buf, and kv_in_dim_buf
         // (all carry the same n_embd value for these matmul in_dim arguments).
 
-        let device = &*self.device;
         let command_queue = &self.command_queue;
 
         // Per-call scalar buffers (these change every forward, so cannot be cached):
         // seq_len grows as context extends; pos advances by 1 each token.
-        let seq_len_buf = scalar_buffer(device, &(seq_len as u32));
-        let pos_buf = scalar_buffer(device, &(pos as u32));
+        // Reuse pre-allocated buffers from compile() — write via contents() instead
+        // of allocating new Metal buffers each call.
+        let seq_len_buf = self.seq_len_scalar.as_ref().expect("seq_len_scalar missing");
+        let pos_buf = self.pos_scalar.as_ref().expect("pos_scalar missing");
+        write_scalar(seq_len_buf, &(seq_len as u32));
+        write_scalar(pos_buf, &(pos as u32));
 
         // Helper: dispatch a 1D compute kernel with `n` total threads
         let dispatch_1d =
@@ -471,19 +507,21 @@ impl InferenceBackend for GpuBackend {
 
         // ── Step 1: Embedding lookup x = wte[token] + wpe[pos] ──
         {
-            // Copy wte[token*n_embd..(token+1)*n_embd] into x_buf
+            // Copy wte[token*n_embd..(token+1)*n_embd] into emb_wte_slice (reused buffer)
             let wte_offset = token * n_embd;
             let wte_slice = &weights.wte[wte_offset..wte_offset + n_embd];
-            let x_upload = upload_buffer(device, wte_slice);
-            // Copy wpe[pos*n_embd..(pos+1)*n_embd] into xr_buf (reuse as temp)
+            let x_upload = self.emb_wte_slice.as_ref().expect("emb_wte_slice missing");
+            write_f32_slice(x_upload, wte_slice);
+            // Copy wpe[pos*n_embd..(pos+1)*n_embd] into emb_wpe_slice (reused buffer)
             let wpe_offset = pos * n_embd;
             let wpe_slice = &weights.wpe[wpe_offset..wpe_offset + n_embd];
-            let wpe_upload = upload_buffer(device, wpe_slice);
+            let wpe_upload = self.emb_wpe_slice.as_ref().expect("emb_wpe_slice missing");
+            write_f32_slice(wpe_upload, wpe_slice);
             // x_buf = wte + wpe
             let cmd_buffer = command_queue.new_command_buffer();
             let encoder = cmd_buffer.new_compute_command_encoder();
-            encoder.set_buffer(0, Some(&x_upload), 0);
-            encoder.set_buffer(1, Some(&wpe_upload), 0);
+            encoder.set_buffer(0, Some(x_upload), 0);
+            encoder.set_buffer(1, Some(wpe_upload), 0);
             encoder.set_buffer(2, Some(x_buf), 0);
             dispatch_1d(encoder, &pipelines.elem_add, n_embd as u64);
             encoder.end_encoding();
@@ -533,7 +571,7 @@ impl InferenceBackend for GpuBackend {
             encoder.set_buffer(1, Some(v_buf), 0);
             encoder.set_buffer(2, Some(key_cache_buf), 0);
             encoder.set_buffer(3, Some(value_cache_buf), 0);
-            encoder.set_buffer(4, Some(&pos_buf), 0); // cached at forward entry
+            encoder.set_buffer(4, Some(pos_buf), 0); // cached at forward entry
             encoder.set_buffer(5, Some(kv_dim_buf), 0);
             dispatch_1d(encoder, &pipelines.kv_store, kv_dim as u64);
 
@@ -551,8 +589,6 @@ impl InferenceBackend for GpuBackend {
                 let kv_off_buf = &kv_off_bufs[h];
                 let out_off_buf = &out_off_bufs[h];
 
-                let (key_cache_buf, value_cache_buf) = &kv_cache[layer_idx];
-
                 let cmd_buf = command_queue.new_command_buffer();
                 let enc = cmd_buf.new_compute_command_encoder();
 
@@ -569,7 +605,7 @@ impl InferenceBackend for GpuBackend {
 
                 // Softmax over scores[0..seq_len]
                 enc.set_buffer(0, Some(scores_buf), 0);
-                enc.set_buffer(1, Some(&seq_len_buf), 0);
+                enc.set_buffer(1, Some(seq_len_buf), 0);
                 dispatch_single(enc, &pipelines.softmax);
 
                 // Weighted value sum: attn_out[h*head_dim..] = sum_t scores[t] * value_cache[t*kv_dim + kv_offset..]
@@ -580,7 +616,7 @@ impl InferenceBackend for GpuBackend {
                 enc.set_buffer(4, Some(kv_off_buf), 0);
                 enc.set_buffer(5, Some(kv_dim_buf), 0);
                 enc.set_buffer(6, Some(head_dim_buf), 0);
-                enc.set_buffer(7, Some(&seq_len_buf), 0);
+                enc.set_buffer(7, Some(seq_len_buf), 0);
                 dispatch_single(enc, &pipelines.attention_value);
 
                 enc.end_encoding();
@@ -825,6 +861,13 @@ impl InferenceBackend for GpuBackend {
             out_off_bufs.push(scalar_buffer(device, &((h * head_dim) as u32)));
         }
 
+        // Per-call reusable buffers — allocated once, overwritten each forward via
+        // `contents()` write. Eliminates 4 `device.new_buffer()` IPC calls per token.
+        let seq_len_scalar = scalar_buffer(device, &0u32);
+        let pos_scalar = scalar_buffer(device, &0u32);
+        let emb_wte_slice = zero_buffer(device, n_embd);
+        let emb_wpe_slice = zero_buffer(device, n_embd);
+
         // Store everything
         self.pipelines = Some(pipelines);
         self.weight_buffers = Some(wb);
@@ -848,6 +891,10 @@ impl InferenceBackend for GpuBackend {
         self.q_off_bufs = Some(q_off_bufs);
         self.kv_off_bufs = Some(kv_off_bufs);
         self.out_off_bufs = Some(out_off_bufs);
+        self.seq_len_scalar = Some(seq_len_scalar);
+        self.pos_scalar = Some(pos_scalar);
+        self.emb_wte_slice = Some(emb_wte_slice);
+        self.emb_wpe_slice = Some(emb_wpe_slice);
         self.config_snapshot = Some(config.clone());
         self.compiled = true;
         self.needs_recompile = false;

@@ -682,9 +682,9 @@ impl ShardKVCache {
             for g in 0..n_groups {
                 let idx = indices[g] as usize;
                 let base = g * gs;
-                for d in 0..gs {
-                    self.scratch_rotated[base + d] = cb.centroids[idx * gs + d];
-                }
+                // memcpy of `gs` consecutive centroids beats scalar loop.
+                self.scratch_rotated[base..base + gs]
+                    .copy_from_slice(&cb.centroids[idx * gs..idx * gs + gs]);
             }
         }
 
@@ -951,6 +951,14 @@ fn kmeans_fit(
 /// `bits_per_dim.len()` must be `>= indices.len()` (callers always pass a full-length array).
 fn pack_variable_bits(indices: &[u8], bits_per_dim: &[u8], out: &mut Vec<u8>) {
     out.clear();
+    // Pre-reserve to avoid reallocation in the push loop. Inner Vecs were pre-sized
+    // with `kv_dim` capacity at construction; reserve keeps us within that capacity.
+    let total_bits: usize = bits_per_dim
+        .iter()
+        .take(indices.len())
+        .map(|&b| b as usize)
+        .sum();
+    out.reserve(total_bits.div_ceil(8));
     let mut bit_buffer = 0u64;
     let mut bits_in_buffer = 0u32;
 

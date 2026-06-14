@@ -166,9 +166,9 @@ impl AdaptiveNoiseSchedule {
         for (i, tracker) in self.step_trackers.iter_mut().enumerate() {
             self.current_ratios[i] = tracker.adapt();
         }
-        // Sort to maintain monotonicity (min to max)
-        self.current_ratios
-            .sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        // Sort to maintain monotonicity (min to max).
+        // total_cmp avoids the partial_cmp + unwrap_or overhead and handles NaN.
+        self.current_ratios.sort_by(f32::total_cmp);
         self.adaptations += 1;
         &self.current_ratios
     }
@@ -1144,7 +1144,7 @@ fn backward(
             let kv_off = kv_group * hd;
 
             // d_raw_weights[t] = dot(d_attn_out[h], v[t,h])
-            bctx.d_raw[..seq_len].fill(0.0);
+            // No fill needed: d_raw[t] is assigned (not accumulated) below.
             for t in 0..seq_len {
                 bctx.d_raw[t] = crate::simd::simd_dot_f32(
                     &d_ao[q_off..q_off + hd],
@@ -1195,12 +1195,15 @@ fn backward(
     }
 
     // ── Phase 3: QKV projections → RMSNorm → Embeddings ──
+    // When any position was masked, bidirectional attention propagated non-zero
+    // d_k/d_v to ALL positions in Phase 2 (every masked query attends to every
+    // key). When none were masked, Phase 2 was a no-op and Phase 3 should be too.
+    // The per-position d_k/d_v scans were O(seq_len*kvd) and always returned true
+    // when any_masked — replaced with a single O(seq_len) check.
+    let any_masked = is_masked.iter().any(|&m| m);
     for p in 0..seq_len {
-        let has_grad = is_masked[p]
-            || bctx.d_k[p * kvd..(p + 1) * kvd].iter().any(|&g| g != 0.0)
-            || bctx.d_v[p * kvd..(p + 1) * kvd].iter().any(|&g| g != 0.0);
-        if !has_grad {
-            continue;
+        if !any_masked {
+            break;
         }
 
         // d_wq, d_wk, d_wv
@@ -1261,14 +1264,15 @@ fn backward(
     for p in 0..seq_len {
         bctx.d_an1[..n].fill(0.0);
 
-        // From norm2 backward
+        // From norm2 backward.
+        // rmsnorm_backward on all-zero dy produces all-zero output (mean_dy_y=0,
+        // out[i]=dy[i]*inv_rms=0), so the zero-check is unnecessary overhead
+        // in the hot path where an2_grad is non-zero.
         let an2_grad = &bctx.d_after_norm2[p * n..(p + 1) * n];
-        if an2_grad.iter().any(|&g| g != 0.0) {
-            let an1 = &act.after_norm1[p * n..(p + 1) * n];
-            let an2 = &act.after_norm2[p * n..(p + 1) * n];
-            rmsnorm_backward_into(an1, an2, an2_grad, &mut bctx.d_rmsnorm_buf);
-            crate::simd::simd_add_inplace(&mut bctx.d_an1[..n], &bctx.d_rmsnorm_buf[..n]);
-        }
+        let an1 = &act.after_norm1[p * n..(p + 1) * n];
+        let an2 = &act.after_norm2[p * n..(p + 1) * n];
+        rmsnorm_backward_into(an1, an2, an2_grad, &mut bctx.d_rmsnorm_buf);
+        crate::simd::simd_add_inplace(&mut bctx.d_an1[..n], &bctx.d_rmsnorm_buf[..n]);
 
         // From residual: after_attn_res = wo @ attn_out + after_norm1
         // d_after_norm1 += d_after_attn_res (saved from Phase 1)

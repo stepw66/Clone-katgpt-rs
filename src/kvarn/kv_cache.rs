@@ -458,16 +458,24 @@ impl KVarNKVCache {
         // Specialized hot path per bit-width — inline unpack directly into dequant
         match bits {
             4 => {
-                // 2 values per byte, dequant inline
+                // 2 values per byte, dequant inline.
+                // Split into full-pair loop (branch-free) + odd tail to eliminate the
+                // per-iteration `if 2*i+1 < kv_dim` check on the common even-kv_dim path.
                 let rtn_scale = rtn_scales[pos_in_tile];
                 let rtn_zp_val = rtn_zp[pos_in_tile];
-                for (i, &b) in packed_row.iter().take(kv_dim.div_ceil(2)).enumerate() {
+                let full_pairs = kv_dim / 2;
+                for i in 0..full_pairs {
+                    let b = packed_row[i];
                     let q0 = (b & 0x0F) as f32;
                     out[2 * i] = (q0 * rtn_scale + rtn_zp_val) * s_col[2 * i] * var_row;
-                    if 2 * i + 1 < kv_dim {
-                        let q1 = (b >> 4) as f32;
-                        out[2 * i + 1] = (q1 * rtn_scale + rtn_zp_val) * s_col[2 * i + 1] * var_row;
-                    }
+                    let q1 = (b >> 4) as f32;
+                    out[2 * i + 1] = (q1 * rtn_scale + rtn_zp_val) * s_col[2 * i + 1] * var_row;
+                }
+                if kv_dim & 1 == 1 {
+                    let b = packed_row[full_pairs];
+                    let q0 = (b & 0x0F) as f32;
+                    out[2 * full_pairs] =
+                        (q0 * rtn_scale + rtn_zp_val) * s_col[2 * full_pairs] * var_row;
                 }
             }
             2 => {
@@ -505,43 +513,61 @@ impl KVarNKVCache {
                         // Non-grouped: per-token scale
                         let rtn_scale = rtn_scales[pos_in_tile];
                         let rtn_zp_val = rtn_zp[pos_in_tile];
-                        for (i, &b) in packed_row.iter().take(kv_dim.div_ceil(4)).enumerate() {
-                            let q0 = (b & 0x03) as f32;
-                            out[4 * i] = q0 * rtn_scale + rtn_zp_val;
-                            if 4 * i + 1 < kv_dim {
-                                let q1 = ((b >> 2) & 0x03) as f32;
-                                out[4 * i + 1] = q1 * rtn_scale + rtn_zp_val;
-                            }
-                            if 4 * i + 2 < kv_dim {
-                                let q2 = ((b >> 4) & 0x03) as f32;
-                                out[4 * i + 2] = q2 * rtn_scale + rtn_zp_val;
-                            }
-                            if 4 * i + 3 < kv_dim {
-                                let q3 = ((b >> 6) & 0x03) as f32;
-                                out[4 * i + 3] = q3 * rtn_scale + rtn_zp_val;
+                        // Branch-free over complete quads; tail handled separately.
+                        let full_quads = kv_dim / 4;
+                        for i in 0..full_quads {
+                            let b = packed_row[i];
+                            out[4 * i] = ((b & 0x03) as f32) * rtn_scale + rtn_zp_val;
+                            out[4 * i + 1] = (((b >> 2) & 0x03) as f32) * rtn_scale + rtn_zp_val;
+                            out[4 * i + 2] = (((b >> 4) & 0x03) as f32) * rtn_scale + rtn_zp_val;
+                            out[4 * i + 3] = (((b >> 6) & 0x03) as f32) * rtn_scale + rtn_zp_val;
+                        }
+                        let tail_start = 4 * full_quads;
+                        if tail_start < kv_dim {
+                            let tail_byte = packed_row[full_quads];
+                            let shifts = [0u32, 2, 4, 6];
+                            for (j, &sh) in shifts.iter().enumerate() {
+                                let idx = tail_start + j;
+                                if idx >= kv_dim {
+                                    break;
+                                }
+                                out[idx] = (((tail_byte >> sh) & 0x03) as f32) * rtn_scale + rtn_zp_val;
                             }
                         }
                     }
                 } else {
                     let rtn_scale = rtn_scales[pos_in_tile];
                     let rtn_zp_val = rtn_zp[pos_in_tile];
-                    for (i, &b) in packed_row.iter().take(kv_dim.div_ceil(4)).enumerate() {
+                    // Process complete quads branch-free, then handle the 0–3 elem tail.
+                    // Common case (kv_dim divisible by 4) skips all per-iter bounds checks.
+                    let full_quads = kv_dim / 4;
+                    for i in 0..full_quads {
+                        let b = packed_row[i];
                         let q0 = (b & 0x03) as f32;
                         out[4 * i] = (q0 * rtn_scale + rtn_zp_val) * s_col[4 * i] * var_row;
-                        if 4 * i + 1 < kv_dim {
-                            let q1 = ((b >> 2) & 0x03) as f32;
-                            out[4 * i + 1] =
-                                (q1 * rtn_scale + rtn_zp_val) * s_col[4 * i + 1] * var_row;
-                        }
-                        if 4 * i + 2 < kv_dim {
-                            let q2 = ((b >> 4) & 0x03) as f32;
-                            out[4 * i + 2] =
-                                (q2 * rtn_scale + rtn_zp_val) * s_col[4 * i + 2] * var_row;
-                        }
-                        if 4 * i + 3 < kv_dim {
-                            let q3 = ((b >> 6) & 0x03) as f32;
-                            out[4 * i + 3] =
-                                (q3 * rtn_scale + rtn_zp_val) * s_col[4 * i + 3] * var_row;
+                        let q1 = ((b >> 2) & 0x03) as f32;
+                        out[4 * i + 1] =
+                            (q1 * rtn_scale + rtn_zp_val) * s_col[4 * i + 1] * var_row;
+                        let q2 = ((b >> 4) & 0x03) as f32;
+                        out[4 * i + 2] =
+                            (q2 * rtn_scale + rtn_zp_val) * s_col[4 * i + 2] * var_row;
+                        let q3 = ((b >> 6) & 0x03) as f32;
+                        out[4 * i + 3] =
+                            (q3 * rtn_scale + rtn_zp_val) * s_col[4 * i + 3] * var_row;
+                    }
+                    // Tail: 0..=3 remaining elements packed in the next byte.
+                    // Only access packed_row[full_quads] if a tail actually exists.
+                    let tail_start = 4 * full_quads;
+                    if tail_start < kv_dim {
+                        let tail_byte = packed_row[full_quads];
+                        let shifts = [0u32, 2, 4, 6];
+                        for (j, &sh) in shifts.iter().enumerate() {
+                            let idx = tail_start + j;
+                            if idx >= kv_dim {
+                                break;
+                            }
+                            let q = ((tail_byte >> sh) & 0x03) as f32;
+                            out[idx] = (q * rtn_scale + rtn_zp_val) * s_col[idx] * var_row;
                         }
                     }
                 }
@@ -966,7 +992,6 @@ fn rtn_quantize_rows_grouped(
         for g in 0..groups_per_row {
             let g_start = g * group_size;
             let g_end = (g_start + group_size).min(cols);
-            let _g_len = g_end - g_start;
 
             // Find min/max within this group
             let mut lo = f32::MAX;

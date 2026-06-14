@@ -552,6 +552,7 @@ pub fn d2f_decode_block_with_prompt_with(
     let block_size = decode_config.block_size;
     let seq_len = (prompt.len() + block_size).min(config.block_size);
     let block_start = prompt.len();
+    let denoising_positions = seq_len - block_start;
     let max_steps = decode_config.denoise_steps;
     let tau_conf = decode_config.confidence_threshold;
     let temperature = decode_config.temperature;
@@ -692,8 +693,10 @@ pub fn d2f_decode_block_with_prompt_with(
         let confidence = n_confident as f32 / block_size as f32;
         confidence_history.push(confidence);
 
-        // Early exit: all block positions unmasked
-        if tokens[block_start..seq_len].iter().all(|&t| t != mask) {
+        // Early exit: all block positions unmasked.
+        // O(1) check via the counter we already maintain, avoiding a per-step
+        // O(denoising_positions) linear scan of the token slice.
+        if n_confident == denoising_positions {
             converged_step = step;
             break;
         }
@@ -761,6 +764,7 @@ pub fn d2f_decode_block_with_prompt_with_sampler(
     let block_size = decode_config.block_size;
     let seq_len = (prompt.len() + block_size).min(config.block_size);
     let block_start = prompt.len();
+    let denoising_positions = seq_len - block_start;
     let max_steps = decode_config.denoise_steps;
     let tau_conf = decode_config.confidence_threshold;
     let temperature = decode_config.temperature;
@@ -895,7 +899,10 @@ pub fn d2f_decode_block_with_prompt_with_sampler(
         let confidence = n_confident as f32 / block_size as f32;
         confidence_history.push(confidence);
 
-        if tokens[block_start..seq_len].iter().all(|&t| t != mask) {
+        // Early exit: all block positions unmasked.
+        // O(1) check via the counter we already maintain, avoiding a per-step
+        // O(denoising_positions) linear scan of the token slice.
+        if n_confident == denoising_positions {
             converged_step = step;
             break;
         }
@@ -1319,7 +1326,10 @@ impl<'a> D2fPipeline<'a> {
                 let confidence = n_confident as f32 / current_block_size as f32;
                 confidence_history.push(confidence);
 
-                if seq_tokens[block_start..seq_len].iter().all(|&t| t != mask) {
+                // Early exit: all block positions unmasked.
+                // O(1) check via the counter we already maintain, avoiding a per-step
+                // O(current_block_size) linear scan of the token slice.
+                if n_confident == current_block_size {
                     converged_step = step;
                     break;
                 }
@@ -1602,29 +1612,24 @@ pub fn d2f_decode_block_soft(
             let logit_end = logit_off + vocab_size;
             let logits = &ctx.logits_flat[logit_off..logit_end];
 
-            // Get logits for this position (copy for local processing)
-            let local_logits = logits.to_vec();
-
-            // Top-1 token and its logit value
-            let (best_idx, best_val) = local_logits
+            // Single pass: argmax gives both best_idx and max_val (they coincide).
+            // Working directly on the logits slice avoids a per-position Vec alloc.
+            let (best_idx, max_val) = logits
                 .iter()
                 .copied()
                 .enumerate()
                 .max_by(|a: &(usize, f32), b: &(usize, f32)| {
                     a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal)
                 })
-                .unwrap_or((0, 0.0f32));
+                .unwrap_or((0, f32::NEG_INFINITY));
 
             current_top1[pos] = best_idx;
 
-            // Confidence via softmax max probability
-            let max_val = local_logits
-                .iter()
-                .copied()
-                .fold(f32::NEG_INFINITY, f32::max);
-            let sum_exp: f32 = local_logits.iter().map(|&v| (v - max_val).exp()).sum();
+            // Confidence via softmax max probability.
+            // best_val == max_val → exp(0) == 1, so conf = 1 / sum_exp.
+            let sum_exp: f32 = logits.iter().map(|&v| (v - max_val).exp()).sum();
             let conf = if sum_exp > 0.0 {
-                (best_val - max_val).exp() / sum_exp
+                1.0 / sum_exp
             } else {
                 1.0 / vocab_size as f32
             };

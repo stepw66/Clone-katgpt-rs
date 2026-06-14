@@ -275,28 +275,31 @@ impl InferenceRouter {
         // Trust-triggered tier adjustment (Plan 182)
         let tier_after_trust = if self.trust_signal < 0.4 && tier == ComputeTier::CpuOnly {
             // Low trust on CPU → tier up to GPU if available
-            if self.gpu.is_some() {
-                log::info!(
-                    "Router trust-triggered tier-up: trust={:.2}, CPU→CPU+GPU",
-                    self.trust_signal
-                );
-                ComputeTier::CpuGpu
-            } else {
-                tier
+            match self.gpu.is_some() {
+                true => {
+                    log::info!(
+                        "Router trust-triggered tier-up: trust={:.2}, CPU→CPU+GPU",
+                        self.trust_signal
+                    );
+                    ComputeTier::CpuGpu
+                }
+                false => tier,
             }
         } else if self.trust_signal > 0.8 && tier == ComputeTier::CpuGpu {
-            // High trust on GPU → allow tier down to CPU
-            // Only if GPU is not under load (check estimated QPS)
-            if self.gate.estimated_qps()
-                < self.gate.config().gpu_activate_qps * self.gate.config().hysteresis_factor
-            {
-                log::info!(
-                    "Router trust-triggered tier-down: trust={:.2}, CPU+GPU→CPU",
-                    self.trust_signal
-                );
-                ComputeTier::CpuOnly
-            } else {
-                tier
+            // High trust on GPU → allow tier down to CPU.
+            // Snapshot gate config once to avoid repeated method calls.
+            let cfg = self.gate.config();
+            let low_load =
+                self.gate.estimated_qps() < cfg.gpu_activate_qps * cfg.hysteresis_factor;
+            match low_load {
+                true => {
+                    log::info!(
+                        "Router trust-triggered tier-down: trust={:.2}, CPU+GPU→CPU",
+                        self.trust_signal
+                    );
+                    ComputeTier::CpuOnly
+                }
+                false => tier,
             }
         } else {
             tier
@@ -597,13 +600,25 @@ impl InferenceRouter {
         pos: usize,
     ) -> &'static str {
         if let Some(ref mut gpu) = self.gpu {
-            if !gpu.is_compiled() {
+            // Single is_compiled() probe: if not yet compiled, attempt compile
+            // once and capture readiness, avoiding a redundant probe afterwards.
+            let ready = if gpu.is_compiled() {
+                true
+            } else {
                 match gpu.compile(weights, &self.config) {
-                    Ok(()) => log::info!("TriggerGate: CPU → CPU+GPU (compiled)"),
-                    Err(e) => log::info!("Router: GPU compile failed ({e}), falling back to CPU"),
+                    Ok(()) => {
+                        log::info!("TriggerGate: CPU → CPU+GPU (compiled)");
+                        true
+                    }
+                    Err(e) => {
+                        log::info!(
+                            "Router: GPU compile failed ({e}), falling back to CPU"
+                        );
+                        false
+                    }
                 }
-            }
-            if gpu.is_compiled() {
+            };
+            if ready {
                 gpu.forward(ctx, weights, cache, token, pos, &self.config);
                 return "GPU";
             }
@@ -803,8 +818,10 @@ impl InferenceRouter {
     pub fn observe_tvp_decision(&self, current_tier: ComputeTier) -> TvpTierDecision {
         let gpu_available = self.gpu.is_some();
         // Demotion only fires under low load (matches trust_signal semantics).
-        let low_load = self.gate.estimated_qps()
-            < self.gate.config().gpu_activate_qps * self.gate.config().hysteresis_factor;
+        // Snapshot gate config once to avoid repeated method calls.
+        let cfg = self.gate.config();
+        let low_load =
+            self.gate.estimated_qps() < cfg.gpu_activate_qps * cfg.hysteresis_factor;
         let decision = tvp_tier_decision(
             self.tvp_signal,
             self.tvp_config.promote_at,
@@ -1928,6 +1945,7 @@ mod tests {
 /// tier table in the module-level docs above).
 #[cfg(feature = "module_energy_route")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[repr(u8)]
 pub enum ComputeTarget {
     /// Ternary hot path — FFN-dominated workloads at low QPS. Uses the
     /// `plasma_path` ternary kernels for ~3–5× throughput on Apple Silicon.
@@ -2003,7 +2021,8 @@ impl ModuleEnergyProfile {
 
 /// Pick the most efficient [`ComputeTarget`] for the given module profile and QPS.
 ///
-/// Routing rules (paper §4.2 Table 3):
+/// Routing rules (paper §4.2 Table 3), equivalently structured as a `match`
+/// on QPS band with an inner ffn/attn branch per band:
 ///
 /// 1. **FFN-dominated + low QPS** (`ffn_frac > 0.70 && qps < 1000`) →
 ///    [`ComputeTarget::Plasma`]. The ternary hot path is ~3–5× faster than
@@ -2027,20 +2046,27 @@ impl ModuleEnergyProfile {
 /// no flapping back and forth as QPS increases.
 #[cfg(feature = "module_energy_route")]
 pub fn route_by_module_energy(ffn_frac: f32, attn_frac: f32, qps: u32) -> ComputeTarget {
-    // Rule 1: FFN-dominated + low QPS → Plasma (ternary hot path).
-    if ffn_frac > 0.70 && qps < 1000 {
-        return ComputeTarget::Plasma;
+    // Branch on QPS band first: groups all qps-dependent rules so each path
+    // evaluates at most one ffn/attn comparison instead of up to three.
+    match qps {
+        0..=99 => match ffn_frac > 0.70 {
+            // Rule 1 (low QPS half): FFN-heavy → Plasma.
+            true => ComputeTarget::Plasma,
+            // Rule 3: cold-start QPS → ANE.
+            false => ComputeTarget::Ane,
+        },
+        100..=999 => match ffn_frac > 0.70 {
+            // Rule 1 (mid QPS half): FFN-heavy → Plasma.
+            true => ComputeTarget::Plasma,
+            // Rule 4: neither rule applies → Simd.
+            false => ComputeTarget::Simd,
+        },
+        // qps >= 1000: rule 2 applies, else Simd.
+        _ => match attn_frac > 0.40 {
+            true => ComputeTarget::Gpu,
+            false => ComputeTarget::Simd,
+        },
     }
-    // Rule 2: Attention-dominated + high QPS → GPU (batched matmul).
-    if attn_frac > 0.40 && qps >= 1000 {
-        return ComputeTarget::Gpu;
-    }
-    // Rule 3: Very low QPS → ANE (cold-start power efficiency).
-    if qps < 100 {
-        return ComputeTarget::Ane;
-    }
-    // Rule 4: Default → CPU SIMD f32.
-    ComputeTarget::Simd
 }
 
 #[cfg(all(test, feature = "module_energy_route"))]
