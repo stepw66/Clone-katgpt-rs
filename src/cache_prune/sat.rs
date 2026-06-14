@@ -82,22 +82,38 @@ impl<'a> SummedAreaTable<'a> {
 
     /// Build SAT from nested `&mut [Vec<f32>]` (legacy, backward-compatible).
     ///
-    /// Uses the standard SAT recurrence.
+    /// Uses the standard SAT recurrence with a branch-free inner loop
+    /// (row 0 / column 0 special-cased), matching the `build_flat` pattern.
     /// Time: O(n²)
     pub fn build(attention: &'a mut [Vec<f32>]) -> Self {
         let n = attention.len();
 
-        for i in 0..n {
-            for j in 0..n {
-                let val = attention[i][j];
-                let up = if i > 0 { attention[i - 1][j] } else { 0.0 };
-                let left = if j > 0 { attention[i][j - 1] } else { 0.0 };
-                let up_left = if i > 0 && j > 0 {
-                    attention[i - 1][j - 1]
-                } else {
-                    0.0
-                };
-                attention[i][j] = val + up + left - up_left;
+        if n == 0 {
+            return Self::Nested(NestedSat { data: attention, n });
+        }
+
+        // Row 0: running prefix sum (no upper row).
+        let mut row_sum = 0.0f32;
+        for j in 0..n {
+            row_sum += attention[0][j];
+            attention[0][j] = row_sum;
+        }
+
+        // Rows 1..n: column 0 special-cased (no left neighbor),
+        // then the inner loop is branch-free for auto-vectorization.
+        for i in 1..n {
+            let (prev_row, cur_row) = attention.split_at_mut(i);
+            let prev = &prev_row[i - 1];
+            let cur = &mut cur_row[0];
+            // j = 0: SAT = val + up (no left, no up_left).
+            cur[0] += prev[0];
+            // j = 1..n: val + up + left - up_left (branch-free).
+            for j in 1..n {
+                let val = cur[j];
+                let up = prev[j];
+                let left = cur[j - 1];
+                let up_left = prev[j - 1];
+                cur[j] = val + up + left - up_left;
             }
         }
 
