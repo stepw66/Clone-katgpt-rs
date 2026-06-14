@@ -10,7 +10,7 @@
 //! Dequantization: one extra multiply vs standard RTN for the dual-scale reconstruction.
 
 use super::hadamard;
-use super::var_norm::{VarNormConfig, VarianceNormScales, variance_normalize};
+use super::var_norm::{VarNormConfig, VarianceNormScales, variance_normalize_into};
 
 #[cfg(feature = "targeted_precision")]
 use crate::targeted_precision::PrecisionBudget;
@@ -137,6 +137,19 @@ pub struct KVarNKVCache {
     scratch_tile: Vec<f32>,
     /// Scratch for batch-unpacked u32 values (reused across dequant calls).
     scratch_unpack: Vec<u32>,
+    /// VarN scratch: copy of the tile being normalized (`rows * cols`).
+    /// Sized to `max(kv_dim, tile_size)² ` to cover both K and V tile shapes.
+    varn_cur: Vec<f32>,
+    /// VarN scratch: per-column std devs (length = max(kv_dim, tile_size)).
+    varn_col_s: Vec<f32>,
+    /// VarN scratch: per-row std devs (length = max(kv_dim, tile_size)).
+    varn_row_s: Vec<f32>,
+    /// VarN scratch: per-column mean (length = max(kv_dim, tile_size)).
+    varn_mean: Vec<f32>,
+    /// VarN scratch: 1 / exp(log_s_row[i]) (length = max(kv_dim, tile_size)).
+    varn_inv_row: Vec<f32>,
+    /// VarN scratch: 1 / exp(log_s_col[j]) (length = max(kv_dim, tile_size)).
+    varn_inv_col: Vec<f32>,
     // ── Scalar config (usize: 8 bytes each) ──
     /// Current write position.
     pos: usize,
@@ -215,6 +228,12 @@ impl KVarNKVCache {
         let key_buffer_size = cfg.kv_dim * tile_size;
         let val_buffer_size = tile_size * cfg.kv_dim;
 
+        // VarN scratch sizes: key tile is [kv_dim, count], val tile is [count, kv_dim].
+        // Both dimensions are bounded by max(kv_dim, tile_size), so a single square
+        // scratch layout covers both call sites without resizing.
+        let varn_max_dim = cfg.kv_dim.max(tile_size);
+        let varn_tile_size = varn_max_dim * varn_max_dim;
+
         Self {
             key_quantized,
             key_tiles,
@@ -224,6 +243,12 @@ impl KVarNKVCache {
             val_buffer: vec![0.0; val_buffer_size],
             scratch_tile: vec![0.0f32; key_buffer_size.max(val_buffer_size)],
             scratch_unpack: vec![0u32; cfg.kv_dim],
+            varn_cur: vec![0.0f32; varn_tile_size],
+            varn_col_s: vec![0.0f32; varn_max_dim],
+            varn_row_s: vec![0.0f32; varn_max_dim],
+            varn_mean: vec![0.0f32; varn_max_dim],
+            varn_inv_row: vec![0.0f32; varn_max_dim],
+            varn_inv_col: vec![0.0f32; varn_max_dim],
             pos: 0,
             n_layers: cfg.n_layers,
             kv_dim: cfg.kv_dim,
@@ -627,7 +652,18 @@ impl KVarNKVCache {
                     tile_size: self.tile_size,
                     ..Default::default()
                 };
-                variance_normalize(tile_data, rows, cols, &config)
+                variance_normalize_into(
+                    tile_data,
+                    rows,
+                    cols,
+                    &config,
+                    &mut self.varn_cur[..rows * cols],
+                    &mut self.varn_col_s[..cols],
+                    &mut self.varn_row_s[..rows],
+                    &mut self.varn_mean[..cols],
+                    &mut self.varn_inv_row[..rows],
+                    &mut self.varn_inv_col[..cols],
+                )
             };
 
             #[cfg(not(feature = "static_cal_tables"))]
@@ -641,7 +677,18 @@ impl KVarNKVCache {
                     tile_size: self.tile_size,
                     ..Default::default()
                 };
-                variance_normalize(tile_data, rows, cols, &config)
+                variance_normalize_into(
+                    tile_data,
+                    rows,
+                    cols,
+                    &config,
+                    &mut self.varn_cur[..rows * cols],
+                    &mut self.varn_col_s[..cols],
+                    &mut self.varn_row_s[..rows],
+                    &mut self.varn_mean[..cols],
+                    &mut self.varn_inv_row[..rows],
+                    &mut self.varn_inv_col[..cols],
+                )
             };
 
             // Step 2: RTN quantization
@@ -726,7 +773,18 @@ impl KVarNKVCache {
                     tile_size: self.tile_size,
                     ..Default::default()
                 };
-                variance_normalize(tile_data, rows, cols, &config)
+                variance_normalize_into(
+                    tile_data,
+                    rows,
+                    cols,
+                    &config,
+                    &mut self.varn_cur[..rows * cols],
+                    &mut self.varn_col_s[..cols],
+                    &mut self.varn_row_s[..rows],
+                    &mut self.varn_mean[..cols],
+                    &mut self.varn_inv_row[..rows],
+                    &mut self.varn_inv_col[..cols],
+                )
             };
 
             #[cfg(not(feature = "static_cal_tables"))]
@@ -740,7 +798,18 @@ impl KVarNKVCache {
                     tile_size: self.tile_size,
                     ..Default::default()
                 };
-                variance_normalize(tile_data, rows, cols, &config)
+                variance_normalize_into(
+                    tile_data,
+                    rows,
+                    cols,
+                    &config,
+                    &mut self.varn_cur[..rows * cols],
+                    &mut self.varn_col_s[..cols],
+                    &mut self.varn_row_s[..rows],
+                    &mut self.varn_mean[..cols],
+                    &mut self.varn_inv_row[..rows],
+                    &mut self.varn_inv_col[..cols],
+                )
             };
 
             // Step 2: RTN quantization
