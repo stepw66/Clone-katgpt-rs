@@ -325,4 +325,4 @@ At generation step t with prefix p_t and drafter velocity v_t:
 - Research: `.research/268_QGF_Test_Time_Q_Guided_Flow.md`
 - Related plans: 229 (NFCoT FlowScore), 217 (NextLat), 247 (ECHO), 267 (Thicket), 195 (ThoughtFold)
 - Related research: 150 (RecFM), 204 (NFCoT), 215 (ECHO), 229 (PAW), 267 (Thicket)
-- riir-ai companion: `riir-ai/.research/123_QGF_Critic_Training_Verdict.md`
+- riir-ai companion: `riir-ai/.research/125_QGF_Critic_Training_Verdict.md`

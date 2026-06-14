@@ -278,7 +278,7 @@ This is consistent with the existing `ActionBridge` which already bridges latent
 
 **QGF's continuous flow-matching training** (the `v_θ` velocity field trained with the flow matching loss in Eq. 2) is model-based. We do NOT implement continuous diffusion/flow policies in katgpt-rs — same verdict as Research 079 (ELF), 041 (RePlaid), 010 (ColaDLM): incompatible with our discrete DDTree inference path. The modelless extractions above capture the *principle* without the continuous machinery.
 
-**QGF's IQL critic training** (TD loss with expectile regression) is model-based. That belongs in riir-ai (see companion doc `riir-ai/.research/123_QGF_Critic_Training_Verdict.md`). We only consume the trained critic via the `LeoHead` trait, which already exists.
+**QGF's IQL critic training** (TD loss with expectile regression) is model-based. That belongs in riir-ai (see companion doc `riir-ai/.research/125_QGF_Critic_Training_Verdict.md`). We only consume the trained critic via the `LeoHead` trait, which already exists.
 
 **QGF's OGBench manipulation experiments** are robotics-specific. We validate on our own arenas (Bomber, Go, FFT, Sudoku, Rust syntax validation).
 
