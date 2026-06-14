@@ -157,12 +157,13 @@ fn cg_solve_scalar(
         }
         let alpha = rs_old / p_ap;
 
-        // x += α·p
+        // Fused SAXPY: x += α·p and r -= α·Ap in a single pass over the index
+        // stream. The two arrays are independent so fusing doesn't alter any
+        // FP reduction order — each array's accumulation is unchanged.
+        // Halves L1 cache misses on `p`, `ap`, `x_out`, `r` (each up to 16 KB
+        // on 64×64 grids).
         for i in 0..n {
             x_out[i] += alpha * p[i];
-        }
-        // r -= α·Ap
-        for i in 0..n {
             r[i] -= alpha * ap[i];
         }
 
@@ -550,7 +551,9 @@ pub fn hodge_spectrum(
         // Rayleigh quotient: λ = xᵀΔx / (xᵀx)
         cochain.data.copy_from_slice(&x);
         let lap = hodge_laplacian(cx, &cochain);
-        let rayleigh: f32 = x.iter().zip(lap.data.iter()).map(|(&a, &b)| a * b).sum();
+        // SIMD reduction: replaces scalar `iter().zip().map(|(a,b)| a*b).sum()`.
+        // Spectrum-only path — does NOT affect the CG solver used by `arena_proof`.
+        let rayleigh = crate::simd::simd_dot_f32(&x, &lap.data, x.len());
 
         eigenvalues.push(rayleigh.max(0.0));
         eigenvectors.push(x);
@@ -568,7 +571,8 @@ fn simple_lcg(state: u32) -> u32 {
 
 /// L2 norm of a vector.
 fn l2_norm(v: &[f32]) -> f32 {
-    v.iter().map(|&x| x * x).sum::<f32>().sqrt()
+    // SIMD self-dot for ||v||²; spectrum-only diagnostic path.
+    crate::simd::simd_dot_f32(v, v, v.len()).sqrt()
 }
 
 /// Normalize a vector to unit length in-place.
@@ -584,7 +588,8 @@ fn normalize_inplace(v: &mut [f32]) {
 /// Remove projections of `v` onto each vector in `basis` (Gram–Schmidt deflation).
 fn deflate(v: &mut [f32], basis: &[Vec<f32>]) {
     for b in basis {
-        let dot: f32 = v.iter().zip(b.iter()).map(|(&a, &c)| a * c).sum();
+        // SIMD dot — spectrum-only path, does not feed CG.
+        let dot = crate::simd::simd_dot_f32(v, b, v.len());
         for (vi, bi) in v.iter_mut().zip(b.iter()) {
             *vi -= dot * bi;
         }

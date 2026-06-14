@@ -180,18 +180,23 @@ impl DecFlowField {
             }
         }
 
-        // Average by dividing by degree (each interior vertex has degree 4, edges have 3, corners have 2)
+        // Average by dividing by degree. Pre-compute the three possible reciprocals
+        // (corners=2, edges=3, interior=4) as consts. Each `vectors[idx][k] *= c`
+        // is independent per vertex — fusing the loops or precomputing the recip
+        // does not change FP reduction order (verified safe for arena_proof test).
+        const INV_DEG_2: f32 = 0.5;
+        const INV_DEG_3: f32 = 1.0 / 3.0;
+        const INV_DEG_4: f32 = 0.25;
         for y in 0..h {
+            let is_interior_y = y > 0 && y < h - 1;
             for x in 0..w {
                 let is_interior_x = x > 0 && x < w - 1;
-                let is_interior_y = y > 0 && y < h - 1;
-                let degree = match (is_interior_x, is_interior_y) {
-                    (true, true) => 4,
-                    (false, false) => 2,
-                    _ => 3,
+                let inv_degree = match (is_interior_x, is_interior_y) {
+                    (true, true) => INV_DEG_4,
+                    (false, false) => INV_DEG_2,
+                    _ => INV_DEG_3,
                 };
                 let idx = y * w + x;
-                let inv_degree = 1.0 / degree as f32;
                 vectors[idx][0] *= inv_degree;
                 vectors[idx][1] *= inv_degree;
             }
