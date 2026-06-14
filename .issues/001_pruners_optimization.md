@@ -202,13 +202,13 @@ and identified cross-cutting themes.
 
 ## LOW (Infrequent or minor)
 
-- [ ] `bandit.rs:199-208` — `BanditStats` field reordering
+- [x] `bandit.rs:199-208` — `BanditStats` field reordering — false positive: 4 Vec (24B each) + 2 usize + 1 u32 = 120B either way; reordering alone can't eliminate trailing alignment pad without changing a field type
 - [x] `regime_transition.rs:87-103` — Two-pass std → Welford's one-pass — already uses Welford's algorithm (line 88)
 - [x] `cna.rs:33-41` — `CnaNeuron` already well-packed — usize(8) + usize(8) + f32(4) + pad(4) = 24 bytes, no improvement possible
-- [ ] `lodestar.rs:58` — `Vec<bool>` → BitVec (only for large state spaces)
-- [ ] `sketch_types.rs:104,111` — Debug/Display hex formatting optimization
-- [ ] `gepa_reflective.rs:298` — Linear scan for empty slot → free list
-- [ ] `sdar_absorb.rs:381` — Diagnostic-only Vec alloc
+- [x] `lodestar.rs:58` — `Vec<bool>` → BitVec — done: `BitVec { words: Vec<u64>, len }` implemented (lodestar.rs:42-90); `accept_states: BitVec` in `LodestarAutomaton` + builder; `precompute_distances`/`precompute_singular_spans`/`compute_singular_span` all take `&BitVec`
+- [x] `sketch_types.rs:104,111` — Debug/Display hex formatting — already optimal: per-byte `write!(f, "{b:02x}")` directly to formatter, zero allocation, no intermediate String
+- [x] `gepa_reflective.rs:298` — Linear scan for empty slot → free list — done: `ParetoConfigFrontier.free_slots: Vec<usize>` stack; `insert()` pushes dominated slots and pops in O(1) (gepa_reflective.rs:225-319)
+- [x] `sdar_absorb.rs:381` — Diagnostic-only Vec alloc — done: `promotion_stats: Vec<PromotionStats>` field + only remaining `Vec::new()` is inside `#[cfg(debug_assertions)]` block at sdar_absorb.rs:270-275
 - [x] `go/autoresearch.rs:130-139` — `config.label()` String → `&'static str` — false positive, format depends on runtime config values, can't be &'static str
 - [x] `go/tournament.rs:491-503` — Three-pass count → single pass — already single pass (one loop counts wins/losses/draws/moves/score_delta)
 - [x] `monopoly/players.rs:280,303` — Const arrays for railroad/utility squares — already has const RAILROAD_SQUARES/UTILITY_SQUARES (line 15-21)
