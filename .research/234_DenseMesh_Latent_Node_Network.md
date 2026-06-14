@@ -1,7 +1,7 @@
 # Research: DenseMesh — Latent Node Network for Modelless Inference
 
 **Date:** 2026-06-14
-**Status:** Verdict → GAIN (GOAT-gated, not default)
+**Status:** Implemented (Phases 1–4, 6, 7-partial, 8-partial). GOAT Gate 1 (correctness) + Gate 5 (EdgeBandit convergence) pass. Gates 2/3/4 deferred pending LLM forward integration (Phase 5) and game LoRAs (riir-ai R122). Verdict: GAIN (GOAT-gated, not default).
 **Context:** katgpt-rs inference engine — modelless (inference-time only, no LLM training)
 **Source Paper:** "Language Model Networks: Supervision-Efficient Learning through Dense Communication" (arXiv:2505.12741, ICML 2026) — Wu, Wang, Yao (Tsinghua / BIMSA)
 **Commercial Bound:** Public (katgpt-rs/MIT). Generic trait + topology framework. The trained-edge LoRA recipes stay in riir-ai (R122).

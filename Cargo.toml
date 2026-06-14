@@ -147,6 +147,9 @@ cumprodsum = []  # Cumprodsum primitive — atomic 1-SS matrix multiplication (P
 ssd_block = []  # Dual-mode SSD block decomposition — chunked semiseparable computation (Plan 263, Phase 2, GOAT PASS 33-661x speedup, default-ON)
 ss_pruner = []  # SemiseparablePruner — cumprodsum temporal influence pruning for DDTree (Plan 263, Phase 3, GOAT PASS 25-56% branching reduction, default-ON)
 band_conditioner = []  # Band conditioning set + CI test primitives for task-relevant identifiability (Plan 265, Research 232, arXiv 2605.12733) — opt-in until GOAT
+bckvss = ["band_conditioner"]  # Fusion A: Band-Conditioned KV Segment Selector (Plan 265 Phase 1) — opt-in until GOAT G1–G3 pass
+collider_consistency = ["band_conditioner"]  # Fusion C: Collider-Consistency ConstraintPruner for DDTree (Plan 265 Phase 3) — opt-in until GOAT G7–G9 pass
+adaptive_cot_identifiability = ["bckvss"]  # Phase 4: Theory-backed adaptive CoT stopping criterion (Plan 265 Phase 4) — opt-in until GOAT G10 passes
 lt2_looped = ["hla_attention"]  # LT2 looped inference pipeline — weight-shared T-pass loop (Plan 108, Research 73)
 sleep_consolidation = ["lt2_looped", "gdn2_attention"]  # Sleep-time offline recursive memory consolidation at eviction (Plan 154 GOAT 14/14, Research 116) — default-ON
 plasma_path = ["katgpt-core/plasma_path"]  # Bit-plane ternary SIMD matvec — multiplication-free CPU inference (Plan 148, Research 110)
@@ -268,6 +271,10 @@ lodestar = []  # Lodestar Completion-Distance Pruning — shortest-accepting-dis
 reward_calibrator = []  # Reward-Gated Pruner Calibration — sigmoid-bounded Q-values + Welford variance + blake3 audit (Plan 210 F4, GOAT 6/6, default-ON)
 reward_mem = ["egcs", "bandit"]  # Reward-Weighted Branch Memorization — blake3 pattern hashing + EMA reward tracking (Plan 209 T3, GOAT 6/6, default-ON)
 sparse_task_vector = []  # Sparse Off-Principal Task Vector storage — OPD-grounded sparse delta format (Plan 264 Phase 1, Research 231) — opt-in until GOAT proofs G1–G10 pass
+off_principal_retrieval = ["newton_schulz"]  # Off-Principal Task Vector Retrieval — projection + index + score (Plan 264 Phase 2, Research 231) — opt-in until GOAT proofs G3–G4 pass
+spectral_rank = []  # Spectral-Concentration Adaptive Rank — concentration + adaptive_rank + cot_budget (Plan 264 Phase 3, Research 231) — opt-in until GOAT proofs G5–G6 pass
+module_energy_route = []  # Module-Energy Compute Routing — ComputeTarget + route_by_module_energy + ModuleEnergyProfile (Plan 264 Phase 4, Research 231) — opt-in until GOAT proofs G7–G8 pass
+specialist_projection = ["sparse_task_vector", "band_conditioner"]  # Fusion B: SPLAT specialist latent projection (Plan 265 Phase 2) — opt-in until GOAT G4–G6 pass
 fol_constraints = []  # FOL constraint extraction from prompts — keyword table + FolPruner (Plan 209 T1)
 rule_extraction = []  # Logical rule extraction from DDTree paths — ExtractedRule + RuleExtractor (Plan 209 T2)
 decision_trace = ["rule_extraction"]  # Interpretable decision traces — opt-in debug/audit (Plan 209 T4)
@@ -1088,6 +1095,70 @@ name = "bench_256_kv_outer_goat"
 path = "tests/bench_256_kv_outer.goat.rs"
 required-features = ["msa_kv_outer"]
 
+# Plan 270 — Gauge-Invariant Adapter Composition GOAT proof (17 tests).
+# Requires both `gauge_invariant` (for the core primitives) and
+# `sparse_task_vector` (for the SparseTaskVector integration test t07).
+[[test]]
+name = "bench_270_gauge_invariant_goat"
+path = "tests/bench_270_gauge_invariant_goat.rs"
+required-features = ["gauge_invariant", "sparse_task_vector"]
+
+# Plan 266 — DenseMesh profiling test (Phase 7, T7.4). Measures forward
+# scaling, aggregation overhead, EdgeBandit decision, compute_router dispatch,
+# and hot-path allocation count (debug-only via TrackingAllocator).
+[[test]]
+name = "prof_dense_mesh"
+path = "tests/prof_dense_mesh.rs"
+required-features = ["dense_mesh"]
+
+# Plan 270 — before/after demo showing naive vs gauge-invariant compose.
+[[example]]
+name = "gauge_invariant_demo"
+required-features = ["gauge_invariant"]
+
 [[example]]
 name = "attn_match_basic"
 required-features = ["attn_match"]
+
+# Plan 271 Phase 3 — Head budget solver example.
+[[example]]
+name = "attn_match_head_budget"
+required-features = ["attn_match"]
+
+# Plan 271 Phase 2 — Adaptive solver router benchmark.
+[[bench]]
+name = "attn_match_router_bench"
+required-features = ["attn_match"]
+harness = false
+
+# ── Plan 265: Task-Relevant Identifiability (BCKVSS + SPLAT + CCCP) ────────
+
+[[example]]
+name = "bckvss_vs_dense"
+required-features = ["bckvss"]
+
+[[example]]
+name = "splat_vs_dense_attention"
+required-features = ["specialist_projection"]
+
+[[example]]
+name = "cccp_vs_nopruner"
+required-features = ["collider_consistency"]
+
+[[example]]
+name = "adaptive_cot_stopping"
+required-features = ["adaptive_cot_identifiability"]
+
+# ── Plan 264: Sparse Off-Principal Task Vector (Phases 2–5) ────────────────
+
+[[example]]
+name = "off_principal_retrieval"
+required-features = ["off_principal_retrieval"]
+
+[[example]]
+name = "adaptive_rank_vs_fixed"
+required-features = ["spectral_rank"]
+
+[[example]]
+name = "module_aware_routing"
+required-features = ["module_energy_route"]

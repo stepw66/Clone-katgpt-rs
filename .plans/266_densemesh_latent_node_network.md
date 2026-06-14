@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-14
 **Research:** katgpt-rs/.research/234_DenseMesh_Latent_Node_Network.md
-**Status:** Phase 1–4, 6 complete (core traits, types, topology engine, all edges, EdgeBandit, bridge functions). Gate 1 + Gate 5 pass. Gates 2–4 require LLM forward integration (Phase 5) and game LoRAs (riir-ai R122). 26/26 unit tests pass.
+**Status:** Phase 1–4, 6, 7-partial, 8-partial complete (core traits, types, topology engine, all edges, EdgeBandit, bridge functions, compute router, profiling test, README/research docs). Gate 1 + Gate 5 pass. Profiling test `prof_dense_mesh.rs` measures topology scaling, aggregation overhead, bandit/router latency, hot-path allocations. Gates 2–4 require LLM forward integration (Phase 5) and game LoRAs (riir-ai R122). 26 unit tests + 5 profiling tests pass.
 **Commercial Bound:** Public (katgpt-rs/MIT) — generic framework. Edge LoRA composition recipes stay in riir-ai (R122).
 
 ---
@@ -96,14 +96,14 @@ katgpt-rs/src/dense_mesh/
 - [ ] **Gate 3 (easy overhead):** requires real LLM forward pass integration (Phase 5)
 - [ ] **Gate 4 (hard bound):** requires real LLM forward pass integration (Phase 5)
 - [x] **Gate 5 (bandit convergence):** `test_bandit_converges_to_best_arm` — regret bound over 500 pulls passes
-- [ ] Add profiling test `prof_dense_mesh.rs` per optimisation.md template
+- [x] Add profiling test `prof_dense_mesh.rs` per optimisation.md template
 
 ### Phase 8 — Documentation & Feature Gate
 
-- [ ] Add `dense_mesh` to feature flags section in `README.md`
-- [ ] Add DenseMesh section to `README.md` feature showcase (after VortexFlow or SubstrateGate)
-- [ ] Update `.research/234_...` status to "Implemented" after gates pass
-- [ ] Create benchmark output format showing topology/latency/quality tradeoff
+- [x] Add `dense_mesh` to feature flags section in `README.md`
+- [x] Add DenseMesh section to `README.md` feature showcase (after SubstrateGate)
+- [x] Update `.research/234_...` status to "Implemented" after gates pass
+- [x] Create benchmark output format showing topology/latency/quality tradeoff (served by `prof_dense_mesh.rs` T1 scaling table)
 - [ ] If gates 1–3 pass AND gate 2 ≥ 5 pp gain → promote to default, demote SubstrateGate if dominated
 
 ---

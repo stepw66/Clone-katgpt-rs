@@ -1,0 +1,801 @@
+//! Concrete `QGradientOracle` implementations for existing critic-like
+//! types (Plan 268 Phase 2 T5).
+//!
+//! Each oracle maps an existing value-function-like type onto the
+//! [`QGradientOracle`] trait, providing `∇_a Q(s, a)` for the
+//! [`QGuidedDrafter`](crate::qgf::drafter::QGuidedDrafter).
+//!
+//! # Tier Mapping
+//!
+//! | Tier | Oracle | Latency | Confidence |
+//! |------|--------|---------|------------|
+//! | Plasma | [`ActionBridgeOracle`] | < 100ns | 1.0 |
+//! | Hot | [`LeoHeadOracle`] | < 1μs | 1.0 |
+//! | Warm | (GPU batched critic — not in katgpt-core) | ~1ms | 1.0 |
+//! | Cold | (Turso loader — not in katgpt-core) | ~10ms | 0.5-1.0 |
+//! | Freeze | [`NoGuidanceOracle`] / [`BfnProxyOracle`] | 0ns / ~1ms | 0.0 / 0.3 |
+//!
+//! # Sigmoid Not Softmax
+//!
+//! Gradient values are per-action-dimension scalars intended for **additive
+//! logit shift** (`logits += w · g`), never softmax normalisation. See the
+//! drafter module for how the tilt is applied.
+
+use crate::traits::QGradientOracle;
+
+// Re-export the no-op Freeze-tier oracle so consumers can reach it from the
+// `qgf::oracles` module without crossing feature boundaries.
+#[cfg(feature = "qgf_oracle")]
+pub use crate::traits::NoGuidanceOracle;
+
+// ──────────────────────────────────────────────────────────────────────────
+// LeoHeadOracle — Hot tier (feature: leo_all_goals)
+// ──────────────────────────────────────────────────────────────────────────
+
+#[cfg(feature = "leo_all_goals")]
+mod leo_head_oracle {
+    use super::*;
+    use crate::traits::LeoHead;
+
+    /// Hot-tier oracle wrapping a [`LeoHead`].
+    ///
+    /// The "gradient" of an all-goals Q-head w.r.t. the discrete action is
+    /// simply the per-action Q-value vector itself (for the selected goal).
+    /// Moving probability mass toward action `a` increases expected return by
+    /// `Q(s, a)`, so `∇_a Q(s, a)[i] = Q(s, a_i)` — this is the natural
+    /// discrete-action gradient.
+    ///
+    /// # Finite-Difference Interpretation
+    ///
+    /// For a discrete action space, the QGF paper's `∇_a Q` is interpreted as
+    /// the finite-difference `[Q(s, a_i + ε) − Q(s, a_i − ε)] / (2ε)`, which
+    /// for a one-hot action encoding reduces to `Q(s, a_i)` up to a constant
+    /// baseline. We drop the baseline (it cancels under softmax-free sampling
+    /// anyway — the tilt is rank-preserving).
+    ///
+    /// # Confidence
+    ///
+    /// `LeoHead` is a deterministic cached Q-table lookup → confidence `1.0`.
+    /// This makes the adaptive guidance weight saturate to `~1.0` for
+    /// high-quality LEO heads.
+    pub struct LeoHeadOracle<H: LeoHead> {
+        head: H,
+        /// Which goal's Q-slice to use as the gradient source.
+        goal_idx: usize,
+    }
+
+    impl<H: LeoHead> LeoHeadOracle<H> {
+        /// Wrap a [`LeoHead`] and select which goal's Q-slice provides gradients.
+        #[inline]
+        pub fn new(head: H, goal_idx: usize) -> Self {
+            Self { head, goal_idx }
+        }
+
+        /// Borrow the wrapped head.
+        #[inline]
+        pub fn head(&self) -> &H {
+            &self.head
+        }
+
+        /// Current goal index used for gradient extraction.
+        #[inline]
+        pub const fn goal_idx(&self) -> usize {
+            self.goal_idx
+        }
+
+        /// Switch to a different goal's Q-slice.
+        #[inline]
+        pub fn set_goal_idx(&mut self, goal_idx: usize) {
+            self.goal_idx = goal_idx;
+        }
+    }
+
+    impl<H: LeoHead> QGradientOracle for LeoHeadOracle<H> {
+        type State = Vec<f32>;
+        type Action = ();
+
+        fn q_gradient_at(
+            &self,
+            state: &Self::State,
+            _projected_action: &Self::Action,
+        ) -> Vec<f32> {
+            let all_q = self.head.all_goals_q(state);
+            if self.goal_idx < self.head.goal_count() {
+                self.head.q_for_goal(&all_q, self.goal_idx).to_vec()
+            } else {
+                Vec::new()
+            }
+        }
+
+        fn q_gradient_into(
+            &self,
+            state: &Self::State,
+            _projected_action: &Self::Action,
+            out: &mut [f32],
+        ) {
+            let all_q = self.head.all_goals_q(state);
+            if self.goal_idx >= self.head.goal_count() {
+                for slot in out.iter_mut() {
+                    *slot = 0.0;
+                }
+                return;
+            }
+            let q_slice = self.head.q_for_goal(&all_q, self.goal_idx);
+            for (i, slot) in out.iter_mut().enumerate() {
+                *slot = q_slice.get(i).copied().unwrap_or(0.0);
+            }
+        }
+
+        // Deterministic cached lookup → confidence 1.0 (default).
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use crate::traits::LeoHead;
+
+        /// Mock LeoHead returning a known Q-matrix: goal 0 = [1, 2, 3, 4],
+        /// goal 1 = [10, 20, 30, 40]. Used to verify the oracle extracts the
+        /// correct goal slice and reports it as the gradient.
+        struct MockLeo {
+            goals: usize,
+            actions: usize,
+        }
+
+        impl LeoHead for MockLeo {
+            fn all_goals_q(&self, _state: &[f32]) -> Vec<f32> {
+                if self.goals == 2 && self.actions == 4 {
+                    // Goal-major layout: [g0*a0..g0*a3, g1*a0..g1*a3]
+                    vec![1.0, 2.0, 3.0, 4.0, 10.0, 20.0, 30.0, 40.0]
+                } else {
+                    (0..(self.goals * self.actions)).map(|i| i as f32).collect()
+                }
+            }
+
+            fn goal_count(&self) -> usize {
+                self.goals
+            }
+
+            fn action_count(&self) -> usize {
+                self.actions
+            }
+        }
+
+        #[test]
+        fn test_leo_head_oracle_gradient() {
+            let oracle = LeoHeadOracle::new(MockLeo { goals: 2, actions: 4 }, 1);
+
+            let state = vec![0.0; 8];
+            let grad = oracle.q_gradient_at(&state, &());
+
+            // Goal 1 slice = [10, 20, 30, 40]
+            assert_eq!(grad, vec![10.0, 20.0, 30.0, 40.0]);
+        }
+
+        #[test]
+        fn test_leo_head_oracle_into_matches_at() {
+            let oracle = LeoHeadOracle::new(MockLeo { goals: 2, actions: 4 }, 0);
+
+            let state = vec![0.0; 8];
+            let via_at = oracle.q_gradient_at(&state, &());
+
+            let mut via_into = [0.0f32; 4];
+            oracle.q_gradient_into(&state, &(), &mut via_into);
+
+            assert_eq!(via_at, vec![1.0, 2.0, 3.0, 4.0]);
+            assert_eq!(&via_into, &[1.0, 2.0, 3.0, 4.0]);
+            assert_eq!(via_at, via_into.to_vec());
+        }
+
+        #[test]
+        fn test_leo_head_oracle_out_of_range_goal_zeros() {
+            let oracle = LeoHeadOracle::new(MockLeo { goals: 2, actions: 4 }, 99);
+
+            let state = vec![0.0; 8];
+            let grad = oracle.q_gradient_at(&state, &());
+
+            assert!(grad.is_empty(), "out-of-range goal should return empty");
+
+            let mut buf = [99.0f32; 4];
+            oracle.q_gradient_into(&state, &(), &mut buf);
+            assert_eq!(buf, [0.0; 4], "out-of-range goal should zero the buffer");
+        }
+
+        #[test]
+        fn test_leo_head_oracle_confidence_is_one() {
+            let oracle = LeoHeadOracle::new(MockLeo { goals: 1, actions: 2 }, 0);
+            // Deterministic cached lookup → confidence 1.0.
+            assert_eq!(oracle.confidence(&vec![0.0; 2]), 1.0);
+        }
+
+        #[test]
+        fn test_leo_head_oracle_set_goal() {
+            let mut oracle = LeoHeadOracle::new(MockLeo { goals: 2, actions: 4 }, 0);
+            assert_eq!(oracle.goal_idx(), 0);
+
+            let state = vec![0.0; 8];
+            assert_eq!(oracle.q_gradient_at(&state, &()), vec![1.0, 2.0, 3.0, 4.0]);
+
+            oracle.set_goal_idx(1);
+            assert_eq!(oracle.goal_idx(), 1);
+            assert_eq!(oracle.q_gradient_at(&state, &()), vec![10.0, 20.0, 30.0, 40.0]);
+        }
+    }
+}
+
+#[cfg(feature = "leo_all_goals")]
+pub use leo_head_oracle::LeoHeadOracle;
+
+// ──────────────────────────────────────────────────────────────────────────
+// FlowFieldOracle — Plasma/Hot tier (feature: flow_field_nav)
+// ──────────────────────────────────────────────────────────────────────────
+
+#[cfg(feature = "flow_field_nav")]
+mod flow_field_oracle {
+    use super::*;
+    use crate::flow::FlowField;
+
+    /// Plasma/Hot-tier oracle wrapping an owned [`FlowField`].
+    ///
+    /// The "gradient" of a flow field at a position is simply the `(dx, dy)`
+    /// flow vector at that cell — it already *is* the negative gradient of the
+    /// FFT-smoothed potential field. This is the variance-reduced gradient that
+    /// QGF's FFT smoothing provides.
+    ///
+    /// # Action / State Mapping
+    ///
+    /// - `State` = `()` (the flow field is pre-computed and stateless)
+    /// - `Action` = `(u16, u16)` — the projected position `(x, y)` at which to
+    ///   look up the flow vector.
+    ///
+    /// The gradient buffer receives `[dx, dy]` — a 2-element tilt suitable for
+    /// steering-style action spaces.
+    ///
+    /// # Confidence
+    ///
+    /// `1.0` — the flow field is the deterministic output of an FFT-smoothed
+    /// potential, so the gradient is exact (no sampling noise).
+    pub struct FlowFieldOracle {
+        field: FlowField,
+    }
+
+    impl FlowFieldOracle {
+        /// Wrap an owned [`FlowField`].
+        #[inline]
+        pub fn new(field: FlowField) -> Self {
+            Self { field }
+        }
+
+        /// Borrow the underlying flow field.
+        #[inline]
+        pub fn field(&self) -> &FlowField {
+            &self.field
+        }
+    }
+
+    impl QGradientOracle for FlowFieldOracle {
+        type State = ();
+        type Action = (u16, u16);
+
+        fn q_gradient_at(
+            &self,
+            _state: &Self::State,
+            projected_action: &Self::Action,
+        ) -> Vec<f32> {
+            let (x, y) = *projected_action;
+            let (dx, dy) = self.field.lookup(x, y);
+            vec![dx, dy]
+        }
+
+        fn q_gradient_into(
+            &self,
+            _state: &Self::State,
+            projected_action: &Self::Action,
+            out: &mut [f32],
+        ) {
+            let (x, y) = *projected_action;
+            let (dx, dy) = self.field.lookup(x, y);
+            if let Some(slot) = out.get_mut(0) {
+                *slot = dx;
+            }
+            if let Some(slot) = out.get_mut(1) {
+                *slot = dy;
+            }
+            for slot in out.iter_mut().skip(2) {
+                *slot = 0.0;
+            }
+        }
+
+        // Deterministic FFT-smoothed lookup → confidence 1.0 (default).
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use crate::flow::FlowField;
+
+        fn make_field() -> FlowField {
+            let mut f = FlowField::new(3, 3);
+            // Set a known flow at (1, 1) → (0.5, -0.5).
+            f.set_flow(1, 1, 0.5, -0.5);
+            // And a unit flow at (2, 0) → (1.0, 0.0).
+            f.set_flow(2, 0, 1.0, 0.0);
+            f
+        }
+
+        #[test]
+        fn test_flow_field_oracle_gradient() {
+            let oracle = FlowFieldOracle::new(make_field());
+
+            let g = oracle.q_gradient_at(&(), &(1, 1));
+            assert_eq!(g, vec![0.5, -0.5]);
+
+            let g2 = oracle.q_gradient_at(&(), &(2, 0));
+            assert_eq!(g2, vec![1.0, 0.0]);
+        }
+
+        #[test]
+        fn test_flow_field_oracle_into_matches_at() {
+            let oracle = FlowFieldOracle::new(make_field());
+
+            let via_at = oracle.q_gradient_at(&(), &(1, 1));
+
+            let mut via_into = [0.0f32; 2];
+            oracle.q_gradient_into(&(), &(1, 1), &mut via_into);
+
+            assert_eq!(via_at, via_into.to_vec());
+        }
+
+        #[test]
+        fn test_flow_field_oracle_blocked_cell_zero() {
+            let oracle = FlowFieldOracle::new(make_field());
+
+            // (0, 0) was never set → zero flow (blocked).
+            let g = oracle.q_gradient_at(&(), &(0, 0));
+            assert_eq!(g, vec![0.0, 0.0]);
+        }
+
+        #[test]
+        fn test_flow_field_oracle_out_of_bounds_zero() {
+            let oracle = FlowFieldOracle::new(make_field());
+
+            // (99, 99) is out of bounds → lookup returns (0, 0).
+            let g = oracle.q_gradient_at(&(), &(99, 99));
+            assert_eq!(g, vec![0.0, 0.0]);
+        }
+
+        #[test]
+        fn test_flow_field_oracle_confidence_is_one() {
+            let oracle = FlowFieldOracle::new(make_field());
+            assert_eq!(oracle.confidence(&()), 1.0);
+        }
+
+        #[test]
+        fn test_flow_field_oracle_long_buffer_pads_zero() {
+            let oracle = FlowFieldOracle::new(make_field());
+            let mut buf = [99.0f32; 5];
+            oracle.q_gradient_into(&(), &(2, 0), &mut buf);
+            // [dx, dy, 0, 0, 0]
+            assert_eq!(buf, [1.0, 0.0, 0.0, 0.0, 0.0]);
+        }
+    }
+}
+
+#[cfg(feature = "flow_field_nav")]
+pub use flow_field_oracle::FlowFieldOracle;
+
+// ──────────────────────────────────────────────────────────────────────────
+// ActionBridgeOracle — Plasma tier (feature: action_bridge)
+// ──────────────────────────────────────────────────────────────────────────
+
+#[cfg(feature = "action_bridge")]
+mod action_bridge_oracle {
+    use super::*;
+    use crate::bridge::ActionBridge;
+
+    /// Plasma-tier oracle wrapping an [`ActionBridge<A, D>`].
+    ///
+    /// The "gradient" per action is the dot product of the latent Q-vector
+    /// with that action's ternary direction vector:
+    ///
+    /// ```text
+    /// gradient[a] = dot(q_values, action_directions[a])
+    ///            = Σ_i q_values[i] · directions[a][i]
+    /// ```
+    ///
+    /// This gives a per-action logit tilt that favours actions whose ternary
+    /// direction aligns with the latent Q-values. The tilt is rank-compatible
+    /// with `ActionBridge::select_action` (which applies `sigmoid(dot)`), but
+    /// expressed here as a raw pre-sigmoid scalar — the drafter's
+    /// `logits += w · g` shift is the additive-logit-space form.
+    ///
+    /// # Action / State Mapping
+    ///
+    /// - `State` = `[f32; D]` — the latent Q-value vector.
+    /// - `Action` = `()` — the gradient is state-derived (no projection needed;
+    ///   the bridge already encodes the full per-action scoring).
+    ///
+    /// # Confidence
+    ///
+    /// `1.0` — ternary direction dot products are deterministic.
+    pub struct ActionBridgeOracle<const A: usize, const D: usize> {
+        bridge: ActionBridge<A, D>,
+    }
+
+    /// Maximum number of per-action scores we can recover in a single
+    /// `select_top_k` call without heap allocation. Game NPC action spaces
+    /// are typically ≤ 16; 32 provides generous headroom. For `A > 32`, only
+    /// the top 32 actions receive a non-zero gradient (lossy but safe).
+    const TOPK_BUF_CAP: usize = 32;
+
+    impl<const A: usize, const D: usize> ActionBridgeOracle<A, D> {
+        /// Wrap an [`ActionBridge`].
+        #[inline]
+        pub fn new(bridge: ActionBridge<A, D>) -> Self {
+            Self { bridge }
+        }
+
+        /// Borrow the underlying bridge.
+        #[inline]
+        pub fn bridge(&self) -> &ActionBridge<A, D> {
+            &self.bridge
+        }
+
+        /// Fill `out` with per-action gradient (raw dot product) values.
+        ///
+        /// `ActionBridge` keeps its direction vectors private and exposes only
+        /// `select_top_k` (which returns sigmoid(dot) scores). We recover the
+        /// raw dot product via `logit` (inverse sigmoid). Sigmoid is monotonic,
+        /// so the resulting gradient preserves `select_action`'s ranking —
+        /// which is what QGF's tilt needs.
+        ///
+        /// For large `|dot|` (where sigmoid saturates), `logit` clips to ≈ ±13.8.
+        /// This is acceptable because the guidance weight `1/β` scales it down,
+        /// and the ranking (not magnitude) drives the tilt's effect.
+        fn gradient_into_inner(&self, state: &[f32; D], out: &mut [f32]) {
+            for slot in out.iter_mut() {
+                *slot = 0.0;
+            }
+            let mut entries: [(usize, f32); TOPK_BUF_CAP] = [(0, 0.0); TOPK_BUF_CAP];
+            let k = A.min(TOPK_BUF_CAP);
+            let count = self.bridge.select_top_k(state, A, &mut entries[..k]);
+            for &(action, sigmoid_score) in &entries[..count] {
+                if action < out.len() {
+                    out[action] = logit(sigmoid_score);
+                }
+            }
+        }
+    }
+
+    impl<const A: usize, const D: usize> QGradientOracle for ActionBridgeOracle<A, D> {
+        type State = [f32; D];
+        type Action = ();
+
+        fn q_gradient_at(
+            &self,
+            state: &Self::State,
+            _projected_action: &Self::Action,
+        ) -> Vec<f32> {
+            let mut out = vec![0.0f32; A];
+            self.gradient_into_inner(state, &mut out);
+            out
+        }
+
+        fn q_gradient_into(
+            &self,
+            state: &Self::State,
+            _projected_action: &Self::Action,
+            out: &mut [f32],
+        ) {
+            self.gradient_into_inner(state, out);
+        }
+
+        // Deterministic ternary dot → confidence 1.0.
+    }
+
+    /// Inverse sigmoid (logit): `logit(p) = ln(p / (1 − p))`.
+    ///
+    /// Recovers the raw dot product from `sigmoid(dot)`. Clamped to avoid
+    /// `ln(0)` blow-ups when sigmoid saturates.
+    #[inline]
+    fn logit(p: f32) -> f32 {
+        let clamped = p.clamp(1e-6, 1.0 - 1e-6);
+        let odds = clamped / (1.0 - clamped);
+        odds.ln()
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use crate::bridge::ActionBridge;
+
+        fn make_bridge() -> ActionBridge<3, 2> {
+            // Action 0: prefers +q0  → direction [1, 0]
+            // Action 1: prefers -q0  → direction [-1, 0]
+            // Action 2: prefers +q1  → direction [0, 1]
+            let directions: [[i8; 2]; 3] = [[1, 0], [-1, 0], [0, 1]];
+            ActionBridge::new(directions, 0.5)
+        }
+
+        #[test]
+        fn test_action_bridge_oracle_gradient() {
+            let oracle = ActionBridgeOracle::new(make_bridge());
+            let q: [f32; 2] = [5.0, 1.0];
+
+            let grad = oracle.q_gradient_at(&q, &());
+
+            // Expected raw dots (before sigmoid):
+            //   action 0:  5*1 + 1*0  =  5
+            //   action 1:  5*-1 + 1*0 = -5
+            //   action 2:  5*0 + 1*1  =  1
+            assert_eq!(grad.len(), 3);
+            assert!(
+                (grad[0] - 5.0).abs() < 1e-3,
+                "action 0 gradient should be ≈ 5 (got {})",
+                grad[0]
+            );
+            assert!(
+                (grad[1] - (-5.0)).abs() < 1e-3,
+                "action 1 gradient should be ≈ -5 (got {})",
+                grad[1]
+            );
+            assert!(
+                (grad[2] - 1.0).abs() < 1e-3,
+                "action 2 gradient should be ≈ 1 (got {})",
+                grad[2]
+            );
+        }
+
+        #[test]
+        fn test_action_bridge_oracle_into_matches_at() {
+            let oracle = ActionBridgeOracle::new(make_bridge());
+            let q: [f32; 2] = [3.0, 2.0];
+
+            let via_at = oracle.q_gradient_at(&q, &());
+
+            let mut via_into = [0.0f32; 3];
+            oracle.q_gradient_into(&q, &(), &mut via_into);
+
+            for i in 0..3 {
+                assert!(
+                    (via_at[i] - via_into[i]).abs() < 1e-3,
+                    "index {i}: at={} vs into={}",
+                    via_at[i],
+                    via_into[i]
+                );
+            }
+        }
+
+        #[test]
+        fn test_action_bridge_oracle_ranking_preserved() {
+            // The gradient (raw dot) must rank actions identically to
+            // ActionBridge::select_action (sigmoid dot) — sigmoid is monotonic.
+            let oracle = ActionBridgeOracle::new(make_bridge());
+            let q: [f32; 2] = [5.0, 1.0];
+
+            let grad = oracle.q_gradient_at(&q, &());
+            let (best_action, _) = oracle.bridge().select_action(&q);
+
+            // Argmax of gradient should match select_action's best.
+            let grad_argmax = grad
+                .iter()
+                .enumerate()
+                .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+                .map(|(i, _)| i)
+                .unwrap();
+
+            assert_eq!(grad_argmax, best_action);
+            assert_eq!(best_action, 0, "action 0 should win for q=[5,1]");
+        }
+
+        #[test]
+        fn test_action_bridge_oracle_confidence_is_one() {
+            let oracle = ActionBridgeOracle::new(make_bridge());
+            let q: [f32; 2] = [0.0, 0.0];
+            assert_eq!(oracle.confidence(&q), 1.0);
+        }
+
+        #[test]
+        fn test_logit_inverse_of_sigmoid() {
+            // Round-trip: logit(sigmoid(x)) ≈ x for moderate x.
+            for &x in &[0.0, 0.5, 1.0, 2.0, -1.0, -2.0] {
+                let s = crate::simd::fast_sigmoid(x);
+                let recovered = logit(s);
+                assert!(
+                    (recovered - x).abs() < 1e-3,
+                    "logit(sigmoid({x})) = {recovered}, expected {x}"
+                );
+            }
+        }
+    }
+}
+
+#[cfg(feature = "action_bridge")]
+pub use action_bridge_oracle::ActionBridgeOracle;
+
+// ──────────────────────────────────────────────────────────────────────────
+// BfnProxyOracle — Freeze tier fallback (no trained critic required)
+// ──────────────────────────────────────────────────────────────────────────
+
+/// Freeze-tier oracle using pre-computed rejection-sampled returns as a
+/// gradient proxy.
+///
+/// When no trained critic is available (cold start, OOD state, freeze tier),
+/// this oracle uses rejection-sampled episode returns as a stand-in for the
+/// Q-gradient. The caller populates `returns` with per-action return estimates
+/// (e.g. from a BFN rejection sampler or a roll-out buffer), and the oracle
+/// reports them as the gradient signal.
+///
+/// # Confidence
+///
+/// Returns `0.3` — a deliberately low confidence that causes the adaptive
+/// guidance weight to collapse toward zero (safe fallback). The value `0.3`
+/// is chosen to be below the default adaptive threshold of `0.5`, so
+/// `sigmoid(steepness · (0.3 − 0.5)) ≈ sigmoid(−0.8 · steepness) → small`.
+///
+/// # Action / State Mapping
+///
+/// - `State` = `()` (the returns are pre-computed and stored in the oracle).
+/// - `Action` = `()` (the gradient is state-derived).
+pub struct BfnProxyOracle {
+    /// Per-action rejection-sampled return estimates — the gradient proxy.
+    returns: Vec<f32>,
+}
+
+impl BfnProxyOracle {
+    /// Construct with a pre-computed return vector.
+    #[inline]
+    pub fn new(returns: Vec<f32>) -> Self {
+        Self { returns }
+    }
+
+    /// Construct an empty proxy (all-zero gradient). Used for pure fallback.
+    #[inline]
+    pub fn empty(action_count: usize) -> Self {
+        Self {
+            returns: vec![0.0; action_count],
+        }
+    }
+
+    /// Replace the return estimates (e.g. after a new rejection-sampling batch).
+    #[inline]
+    pub fn set_returns(&mut self, returns: Vec<f32>) {
+        self.returns = returns;
+    }
+
+    /// Borrow the current return estimates.
+    #[inline]
+    pub fn returns(&self) -> &[f32] {
+        &self.returns
+    }
+
+    /// The fixed low confidence reported by this proxy.
+    pub const CONFIDENCE: f32 = 0.3;
+}
+
+impl QGradientOracle for BfnProxyOracle {
+    type State = ();
+    type Action = ();
+
+    fn q_gradient_at(
+        &self,
+        _state: &Self::State,
+        _projected_action: &Self::Action,
+    ) -> Vec<f32> {
+        self.returns.clone()
+    }
+
+    fn q_gradient_into(
+        &self,
+        _state: &Self::State,
+        _projected_action: &Self::Action,
+        out: &mut [f32],
+    ) {
+        for (i, slot) in out.iter_mut().enumerate() {
+            *slot = self.returns.get(i).copied().unwrap_or(0.0);
+        }
+    }
+
+    /// Freeze-tier proxy → low confidence (0.3).
+    #[inline]
+    fn confidence(&self, _state: &Self::State) -> f32 {
+        Self::CONFIDENCE
+    }
+}
+
+#[cfg(test)]
+mod bfn_proxy_tests {
+    use super::*;
+
+    #[test]
+    fn test_bfn_proxy_oracle_returns_gradient() {
+        let oracle = BfnProxyOracle::new(vec![0.5, -0.2, 0.8]);
+        let g = oracle.q_gradient_at(&(), &());
+        assert_eq!(g, vec![0.5, -0.2, 0.8]);
+    }
+
+    #[test]
+    fn test_bfn_proxy_oracle_into_matches_at() {
+        let oracle = BfnProxyOracle::new(vec![1.0, 2.0, 3.0]);
+        let via_at = oracle.q_gradient_at(&(), &());
+
+        let mut via_into = [0.0f32; 3];
+        oracle.q_gradient_into(&(), &(), &mut via_into);
+
+        assert_eq!(via_at, via_into.to_vec());
+    }
+
+    #[test]
+    fn test_bfn_proxy_oracle_low_confidence() {
+        let oracle = BfnProxyOracle::new(vec![1.0, 2.0]);
+        let conf = oracle.confidence(&());
+        assert!(
+            conf < 0.5,
+            "BFN proxy confidence must be < 0.5 for safe fallback, got {conf}"
+        );
+        assert!(
+            (conf - 0.3).abs() < 1e-6,
+            "BFN proxy confidence should be exactly 0.3"
+        );
+    }
+
+    #[test]
+    fn test_bfn_proxy_oracle_empty_zeros() {
+        let oracle = BfnProxyOracle::empty(4);
+        let g = oracle.q_gradient_at(&(), &());
+        assert_eq!(g, vec![0.0, 0.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn test_bfn_proxy_oracle_short_buffer() {
+        let oracle = BfnProxyOracle::new(vec![1.0, 2.0, 3.0]);
+        let mut buf = [0.0f32; 2];
+        oracle.q_gradient_into(&(), &(), &mut buf);
+        assert_eq!(buf, [1.0, 2.0]);
+    }
+
+    #[test]
+    fn test_bfn_proxy_oracle_long_buffer_pads_zero() {
+        let oracle = BfnProxyOracle::new(vec![1.0]);
+        let mut buf = [99.0f32; 3];
+        oracle.q_gradient_into(&(), &(), &mut buf);
+        assert_eq!(buf, [1.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn test_bfn_proxy_oracle_set_returns() {
+        let mut oracle = BfnProxyOracle::empty(2);
+        assert_eq!(oracle.returns(), &[0.0, 0.0]);
+
+        oracle.set_returns(vec![5.0, 6.0]);
+        assert_eq!(oracle.returns(), &[5.0, 6.0]);
+        assert_eq!(oracle.q_gradient_at(&(), &()), vec![5.0, 6.0]);
+    }
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// NoGuidanceOracle — already defined in traits.rs; verify it here too.
+// ──────────────────────────────────────────────────────────────────────────
+
+#[cfg(all(test, feature = "qgf_oracle"))]
+mod no_guidance_tests {
+    use super::*;
+    use crate::traits::NoGuidanceOracle;
+
+    #[test]
+    fn test_no_guidance_oracle_zero_gradient() {
+        let oracle = NoGuidanceOracle;
+        let g = oracle.q_gradient_at(&(), &());
+        assert!(g.is_empty(), "NoGuidanceOracle should return empty gradient");
+
+        let mut buf = [99.0f32; 4];
+        oracle.q_gradient_into(&(), &(), &mut buf);
+        assert_eq!(buf, [0.0; 4], "NoGuidanceOracle should zero the buffer");
+    }
+
+    #[test]
+    fn test_no_guidance_oracle_zero_confidence() {
+        let oracle = NoGuidanceOracle;
+        assert_eq!(oracle.confidence(&()), 0.0);
+    }
+}

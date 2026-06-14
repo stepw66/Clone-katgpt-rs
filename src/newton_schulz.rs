@@ -274,6 +274,227 @@ impl NewtonSchulzScratch {
     }
 }
 
+// ── Newton-Schulz Inverse Square Root for PSD matrices ─────────────
+//
+// Plan 270 (LoRA-Muon distillation). Paper Algorithm 4 from arXiv:2606.12921.
+// Computes P^{-1/2} for a positive-semidefinite r×r matrix P via polynomial
+// Newton-Schulz iteration with damping γ=1.001 and ε=1e-5 regularization.
+//
+// Used by:
+//   - LoRA-Muon optimizer (riir-ai Plan 299) for Gram matrices A^T A, B^T B
+//   - Gauge-invariant adapter composition (Plan 270) — projector-form updates
+//   - Future Muon-family LoRA training (HTMuon, CM-LoRA evolution)
+//
+// Coefficients from paper Table 2 (7 iterations converge stably for σ ∈ [0,1]).
+
+/// Inverse square root coefficients (paper Table 2, r=2 specialization).
+const INV_SQRT_COEFFS: [(f32, f32, f32); 7] = [
+    (7.424_865_680_309_214, -18.395_816_356_189_96, 12.896_720_413_604_342),
+    (3.487_725_605_154_601_7, -2.330_043_656_398_699_3, 0.440_469_216_843_109_5),
+    (2.776_608_512_488_252_7, -2.070_643_152_532_662, 0.463_022_610_500_049_67),
+    (1.991_314_210_434_150_6, -1.373_936_700_683_126_9, 0.387_593_497_956_853_8),
+    (1.875_463_774_947_924_6, -1.250_515_209_001_053_4, 0.375_051_524_636_172_64),
+    (1.874_999_066_623_701, -1.249_998_133_214_167_6, 0.374_999_066_590_466_33),
+    (1.875, -1.25, 0.375),
+];
+
+const INV_SQRT_GAMMA: f32 = 1.001;
+const INV_SQRT_EPS: f32 = 1e-5;
+
+/// Pre-allocated scratch for PSD inverse square root.
+///
+/// Sized for matrices up to `max_r × max_r`. Reused across calls to avoid
+/// per-step heap allocations in training hot loops.
+pub struct InvSqrtScratch {
+    p_a: Vec<f32>,
+    p_b: Vec<f32>,
+    p_k_sq: Vec<f32>,
+    w_mat: Vec<f32>,
+    x_mat: Vec<f32>,
+    xw: Vec<f32>,
+    pw2: Vec<f32>,
+    w_sq: Vec<f32>,
+}
+
+impl InvSqrtScratch {
+    pub fn new(max_r: usize) -> Self {
+        let rr = max_r * max_r;
+        Self {
+            p_a: vec![0.0; rr],
+            p_b: vec![0.0; rr],
+            p_k_sq: vec![0.0; rr],
+            w_mat: vec![0.0; rr],
+            x_mat: vec![0.0; rr],
+            xw: vec![0.0; rr],
+            pw2: vec![0.0; rr],
+            w_sq: vec![0.0; rr],
+        }
+    }
+
+    pub fn ensure_capacity(&mut self, r: usize) {
+        let rr = r * r;
+        grow_no_zero(&mut self.p_a, rr);
+        grow_no_zero(&mut self.p_b, rr);
+        grow_no_zero(&mut self.p_k_sq, rr);
+        grow_no_zero(&mut self.w_mat, rr);
+        grow_no_zero(&mut self.x_mat, rr);
+        grow_no_zero(&mut self.xw, rr);
+        grow_no_zero(&mut self.pw2, rr);
+        grow_no_zero(&mut self.w_sq, rr);
+    }
+}
+
+/// Newton-Schulz inverse square root for a symmetric PSD `r × r` matrix.
+///
+/// Computes `P^{-1/2}` via paper Algorithm 4. The input `p` is symmetrized
+/// defensively; output is symmetric `r × r`.
+#[cfg(feature = "newton_schulz")]
+pub fn ns_inv_sqrt_psd(p: &[f32], r: usize, out: &mut [f32], n_iters: u8) {
+    assert_eq!(p.len(), r * r, "input PSD matrix size mismatch");
+    assert_eq!(out.len(), r * r, "output buffer size mismatch");
+    assert!(n_iters >= 1, "n_iters must be >= 1, got {n_iters}");
+
+    use std::cell::RefCell;
+    thread_local! {
+        static INV_SQRT_SCRATCH: RefCell<InvSqrtScratch> =
+            RefCell::new(InvSqrtScratch::new(0));
+    }
+    INV_SQRT_SCRATCH.with(|s| {
+        let mut s = s.borrow_mut();
+        ns_inv_sqrt_psd_into(p, r, out, &mut s, n_iters);
+    });
+}
+
+/// Zero-alloc variant of [`ns_inv_sqrt_psd`].
+#[cfg(feature = "newton_schulz")]
+pub fn ns_inv_sqrt_psd_into(
+    p: &[f32],
+    r: usize,
+    out: &mut [f32],
+    scratch: &mut InvSqrtScratch,
+    n_iters: u8,
+) {
+    assert_eq!(p.len(), r * r, "input PSD matrix size mismatch");
+    assert_eq!(out.len(), r * r, "output buffer size mismatch");
+    assert!(n_iters >= 1, "n_iters must be >= 1, got {n_iters}");
+    let rr = r * r;
+    scratch.ensure_capacity(r);
+
+    let t = frobenius_norm(&p[..rr]);
+    if t < 1e-20 {
+        out[..rr].fill(0.0);
+        return;
+    }
+    let inv_t = 1.0 / t;
+    let inv_sqrt_t = 1.0 / t.sqrt();
+
+    // p_a = P/t + ε·I  (symmetrize defensively). This is P_0.
+    {
+        let p_norm = &mut scratch.p_a[..rr];
+        for i in 0..r {
+            for j in 0..r {
+                let val = 0.5 * (p[i * r + j] + p[j * r + i]);
+                p_norm[i * r + j] = val * inv_t;
+            }
+            p_norm[i * r + i] += INV_SQRT_EPS;
+        }
+    }
+
+    // X_0 = I.
+    let x_mat = &mut scratch.x_mat[..rr];
+    x_mat.fill(0.0);
+    for i in 0..r {
+        x_mat[i * r + i] = 1.0;
+    }
+
+    let gamma = INV_SQRT_GAMMA;
+    let inv_gamma = 1.0 / gamma;
+    let inv_gamma3 = 1.0 / (gamma * gamma * gamma);
+    let inv_gamma5 = inv_gamma3 / (gamma * gamma);
+
+    let mut p_in_a = true;
+    let n_iters_clamped = (n_iters as usize).min(INV_SQRT_COEFFS.len());
+
+    for k in 0..n_iters_clamped {
+        let (a_k, b_k, c_k) = INV_SQRT_COEFFS[k];
+
+        let (p_cur, p_next) = if p_in_a {
+            (&scratch.p_a[..rr], &mut scratch.p_b[..rr])
+        } else {
+            (&scratch.p_b[..rr], &mut scratch.p_a[..rr])
+        };
+
+        // P_k² → p_k_sq.
+        matmul_symmetric(p_cur, r, &mut scratch.p_k_sq[..rr]);
+        let p_sq_buf = &scratch.p_k_sq[..rr];
+
+        // W_k = (a_k/γ)·I + (b_k/γ³)·P_k + (c_k/γ⁵)·P_k².
+        {
+            let w_mat = &mut scratch.w_mat[..rr];
+            let a_term = a_k * inv_gamma;
+            let b_term = b_k * inv_gamma3;
+            let c_term = c_k * inv_gamma5;
+            for i in 0..r {
+                for j in 0..r {
+                    let p_ij = p_cur[i * r + j];
+                    let psq_ij = p_sq_buf[i * r + j];
+                    let identity = if i == j { 1.0 } else { 0.0 };
+                    w_mat[i * r + j] = a_term * identity + b_term * p_ij + c_term * psq_ij;
+                }
+            }
+        }
+
+        // X_{k+1} = X_k · W_k.
+        matmul_nn(x_mat, &scratch.w_mat[..rr], r, &mut scratch.xw[..rr]);
+        x_mat.copy_from_slice(&scratch.xw[..rr]);
+
+        if k + 1 < n_iters_clamped {
+            matmul_symmetric(&scratch.w_mat[..rr], r, &mut scratch.w_sq[..rr]);
+            matmul_nn(p_cur, &scratch.w_sq[..rr], r, &mut scratch.pw2[..rr]);
+            for i in 0..r {
+                for j in 0..r {
+                    let v = 0.5 * (scratch.pw2[i * r + j] + scratch.pw2[j * r + i]);
+                    p_next[i * r + j] = v;
+                }
+            }
+            p_in_a = !p_in_a;
+        }
+    }
+
+    crate::simd::simd_scale_inplace(x_mat, inv_sqrt_t);
+    out[..rr].copy_from_slice(x_mat);
+}
+
+#[inline]
+fn matmul_symmetric(a: &[f32], r: usize, c: &mut [f32]) {
+    for i in 0..r {
+        let a_row_i = &a[i * r..(i + 1) * r];
+        c[i * r + i] = crate::simd::simd_dot_f32(a_row_i, a_row_i, r);
+        for j in (i + 1)..r {
+            let a_row_j = &a[j * r..(j + 1) * r];
+            let v = crate::simd::simd_dot_f32(a_row_i, a_row_j, r);
+            c[i * r + j] = v;
+            c[j * r + i] = v;
+        }
+    }
+}
+
+#[inline]
+fn matmul_nn(a: &[f32], b: &[f32], r: usize, c: &mut [f32]) {
+    for i in 0..r {
+        let a_row_i = &a[i * r..(i + 1) * r];
+        let c_row_i = &mut c[i * r..(i + 1) * r];
+        for j in 0..r {
+            let mut sum = 0.0f32;
+            let b_col_j = &b[j..];
+            for k in 0..r {
+                sum += a_row_i[k] * b_col_j[k * r];
+            }
+            c_row_i[j] = sum;
+        }
+    }
+}
+
 /// Newton-Schulz N-iteration with pre-allocated scratch buffers (zero-alloc after first call).
 #[cfg(feature = "newton_schulz")]
 pub fn newton_schulz_n_into(
@@ -634,5 +855,130 @@ mod tests {
             norms[1] > norms[0] && norms[2] > norms[1],
             "Momentum should accumulate: norms = {norms:?}"
         );
+    }
+
+    // ── Newton-Schulz inverse square root tests (Plan 270) ────────────
+
+    fn seeded_random_psd(seed: u64, r: usize) -> Vec<f32> {
+        let m = seeded_random_matrix(seed, r, r);
+        let mut p = vec![0.0f32; r * r];
+        for i in 0..r {
+            for j in 0..r {
+                let mut s = 0.0f32;
+                for k in 0..r {
+                    s += m[i * r + k] * m[j * r + k];
+                }
+                p[i * r + j] = s;
+            }
+        }
+        for i in 0..r {
+            p[i * r + i] += 0.1;
+        }
+        p
+    }
+
+    fn inv_sqrt_roundtrip_error(inv_sqrt: &[f32], p: &[f32], r: usize) -> f32 {
+        let mut tmp = vec![0.0f32; r * r];
+        for i in 0..r {
+            for j in 0..r {
+                let mut s = 0.0f32;
+                for k in 0..r {
+                    s += inv_sqrt[i * r + k] * p[k * r + j];
+                }
+                tmp[i * r + j] = s;
+            }
+        }
+        let mut max_err = 0.0f32;
+        for i in 0..r {
+            for j in 0..r {
+                let mut s = 0.0f32;
+                for k in 0..r {
+                    s += tmp[i * r + k] * inv_sqrt[k * r + j];
+                }
+                let expected = if i == j { 1.0 } else { 0.0 };
+                max_err = max_err.max((s - expected).abs());
+            }
+        }
+        max_err
+    }
+
+    #[test]
+    fn test_ns_inv_sqrt_identity_matrix() {
+        let r = 4;
+        let p: Vec<f32> = (0..r * r)
+            .map(|idx| if idx % (r + 1) == 0 { 1.0 } else { 0.0 })
+            .collect();
+        let mut out = vec![0.0f32; r * r];
+        ns_inv_sqrt_psd(&p, r, &mut out, 7);
+        let err = inv_sqrt_roundtrip_error(&out, &p, r);
+        assert!(err < 0.1, "P=I roundtrip max err = {err}");
+    }
+
+    #[test]
+    fn test_ns_inv_sqrt_scaled_identity() {
+        let r = 3;
+        let mut p = vec![0.0f32; r * r];
+        for i in 0..r {
+            p[i * r + i] = 4.0;
+        }
+        let mut out = vec![0.0f32; r * r];
+        ns_inv_sqrt_psd(&p, r, &mut out, 7);
+        for i in 0..r {
+            assert!((out[i * r + i] - 0.5).abs() < 0.05, "P=4I diag {} = {}", i, out[i * r + i]);
+        }
+    }
+
+    #[test]
+    fn test_ns_inv_sqrt_random_psd() {
+        for seed in [42u64, 99, 777, 1234] {
+            for r in [2usize, 4, 8, 16] {
+                let p = seeded_random_psd(seed + r as u64, r);
+                let mut out = vec![0.0f32; r * r];
+                ns_inv_sqrt_psd(&p, r, &mut out, 7);
+                let err = inv_sqrt_roundtrip_error(&out, &p, r);
+                assert!(err < 0.05, "seed={seed} r={r}: roundtrip err = {err}");
+            }
+        }
+    }
+
+    #[test]
+    fn test_ns_inv_sqrt_matches_alloc_vs_scratch() {
+        let r = 8;
+        let p = seeded_random_psd(42, r);
+        let mut out_alloc = vec![0.0f32; r * r];
+        let mut out_scratch = vec![0.0f32; r * r];
+        ns_inv_sqrt_psd(&p, r, &mut out_alloc, 7);
+        let mut scratch = InvSqrtScratch::new(r);
+        ns_inv_sqrt_psd_into(&p, r, &mut out_scratch, &mut scratch, 7);
+        for i in 0..r * r {
+            assert!((out_alloc[i] - out_scratch[i]).abs() < 1e-6, "Mismatch at {}", i);
+        }
+    }
+
+    #[test]
+    fn test_ns_inv_sqrt_output_symmetric() {
+        let r = 6;
+        let p = seeded_random_psd(2024, r);
+        let mut out = vec![0.0f32; r * r];
+        ns_inv_sqrt_psd(&p, r, &mut out, 7);
+        for i in 0..r {
+            for j in (i + 1)..r {
+                let diff = (out[i * r + j] - out[j * r + i]).abs();
+                assert!(diff < 1e-4, "Asymmetric at ({i},{j}): diff = {diff}");
+            }
+        }
+    }
+
+    #[test]
+    fn test_ns_inv_sqrt_no_nan_inf() {
+        let r = 4;
+        let mut p = seeded_random_psd(13, r);
+        p[0] = 1e6;
+        p[r + 1] = 1e-3;
+        let mut out = vec![0.0f32; r * r];
+        ns_inv_sqrt_psd(&p, r, &mut out, 7);
+        for v in &out {
+            assert!(v.is_finite(), "Got non-finite value: {v}");
+        }
     }
 }

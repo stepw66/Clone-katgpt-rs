@@ -45,17 +45,23 @@
 
 pub mod beta_fitter;
 pub mod compact;
+pub mod head_budget;
 pub mod key_selection;
+pub mod router;
 pub mod score_matrix;
+pub mod score_matrix_simd;
 pub mod types;
 pub mod value_fitter;
 
 pub use beta_fitter::{fit_beta_nnls, BetaFitConfig, BetaFitResult};
 pub use compact::{compact, CompactError, CompactOutput};
+pub use head_budget::{HeadBudgetSchedule, HeadBudgetSolver, HeadSensitivityCurve};
 pub use key_selection::{
     highest_attn::select_highest_attn_keys, omp::select_omp_keys, KeySelection, KeySelectorKind,
 };
+pub use router::{pick_backend, SolverBackend, SolverRouter, SolverRouterConfig};
 pub use score_matrix::{compute_score_matrix, compute_softmax_attention};
+pub use score_matrix_simd::compute_score_matrix_simd;
 pub use types::{
     AmConfig, AmResult, KeySelector, ReconstructionReport, ScoreMethod, SolverChoice,
 };

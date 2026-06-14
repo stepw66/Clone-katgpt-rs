@@ -8,6 +8,8 @@ pub mod async_qdq;
 pub mod benchmark;
 #[cfg(feature = "band_conditioner")]
 pub mod band_conditioner;
+#[cfg(feature = "bckvss")]
+pub mod bckvss;
 #[cfg(feature = "breakeven_routing")]
 pub mod breakeven;
 #[cfg(feature = "cache_prune")]
@@ -29,6 +31,8 @@ pub mod npc_brain_router;
 // Available when either gdn2_attention or wall_attention is enabled.
 #[cfg(feature = "cubical_nerve")]
 pub mod cubical_nerve;
+#[cfg(feature = "collider_consistency")]
+pub mod collider_pruner;
 #[cfg(any(feature = "gdn2_attention", feature = "wall_attention"))]
 pub mod diagonal_gate;
 #[cfg(any(
@@ -77,6 +81,8 @@ pub mod gauge_invariant;
 pub mod mbu;
 #[cfg(feature = "newton_schulz")]
 pub mod newton_schulz;
+#[cfg(feature = "off_principal_retrieval")]
+pub mod off_principal;
 #[cfg(feature = "octopus")]
 pub mod octopus;
 #[cfg(feature = "osc_kv")]
@@ -92,6 +98,9 @@ pub mod precision_aware_draft;
 #[cfg(feature = "proof_cert")]
 pub mod proof_cert;
 pub mod pruners;
+// DenseMesh — latent node network for modelless inference (Plan 266, Research 234).
+#[cfg(feature = "dense_mesh")]
+pub mod dense_mesh;
 #[cfg(feature = "rat_plus_bridge")]
 pub mod rat_bridge;
 #[cfg(feature = "maxsim")]
@@ -109,8 +118,12 @@ pub mod shard_kv;
 pub mod simd;
 #[cfg(feature = "chiaroscuro")]
 pub mod chiaroscuro;
+#[cfg(feature = "specialist_projection")]
+pub mod specialist_projection;
 #[cfg(feature = "sparse_task_vector")]
 pub mod sparse_task_vector;
+#[cfg(feature = "sparse_task_vector")]
+pub mod sparse_compose;
 #[cfg(feature = "skill_opt")]
 pub mod skill_opt;
 #[cfg(feature = "sleep_consolidation")]
@@ -122,6 +135,8 @@ pub mod spec_reconciliation;
 pub mod spechop;
 #[cfg(feature = "spectral_budget")]
 pub mod spectral_budget;
+#[cfg(feature = "spectral_rank")]
+pub mod spectral_concentration;
 #[cfg(feature = "spectral_quant")]
 pub mod spectralquant;
 pub mod speculative;
@@ -142,6 +157,10 @@ pub mod types;
 #[cfg(feature = "unit_distance")]
 pub mod unit_distance;
 pub mod weights;
+
+// Plan 265 Phase 4: Adaptive CoT stopping criterion (depends on band_conditioner).
+#[cfg(feature = "adaptive_cot_identifiability")]
+pub mod adaptive_cot_stopper;
 
 #[cfg(debug_assertions)]
 pub mod alloc;

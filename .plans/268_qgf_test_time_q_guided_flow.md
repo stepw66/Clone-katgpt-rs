@@ -2,7 +2,7 @@
 
 **Research:** `.research/236_QGF_Test_Time_Q_Guided_Flow.md`
 **Paper:** [arXiv:2606.11087](https://arxiv.org/pdf/2606.11087) — Q-Guided Flow (Zhou et al., 2026)
-**Status:** 🚧 In Progress — Phase 1 (T1-T3) + F4 adaptive (T7) implemented, tests green
+**Status:** 🚧 In Progress — Phase 1 (T1-T3) + Phase 2 (T4-T5) + Phase 3 (T7 partial) + Phase 4 (T8-T9) implemented, tests green
 **Branch:** `develop` (no new feature branch per project rules)
 **Feature Gates:** `qgf` (parent, default OFF until GOAT proof)
   - `qgf_projector` (F2 — FirstOrderProjector)
@@ -122,8 +122,8 @@ At generation step t with prefix p_t and drafter velocity v_t:
 ### Phase 2: QGuidedDrafter (F1) — the core fusion
 
 #### T4: QGuidedDrafter struct
-- [ ] Create `katgpt-core/src/qgf/drafter.rs`
-- [ ] Implement `QGuidedDrafter<G, O>` wrapping any `SpeculativeGenerator` + `QGradientOracle`
+- [x] Create `katgpt-core/src/qgf/drafter.rs`
+- [x] Implement `QGuidedDrafter<G, O>` wrapping any `SpeculativeGenerator` + `QGradientOracle`
   ```rust
   pub struct QGuidedDrafter<G, O> {
       generator: G,
@@ -132,25 +132,35 @@ At generation step t with prefix p_t and drafter velocity v_t:
       guidance_period: usize, // apply guidance every N steps
   }
   ```
-- [ ] Implement guided generation loop (discrete analogue of QGF Algorithm 1):
-  ```rust
-  // For each generation step t:
-  //   1. Compute marginal p_t from generator
-  //   2. Project prefix to final: â_1 = project_one_step(...)
-  //   3. Query gradient: g = oracle.q_gradient_at(state, &â_1)
-  //   4. Tilt marginal: p' = softmax(logits + (1/β) · g)  // sigmoid-gated
-  //   5. Sample from p'
-  ```
-- [ ] Implement zero-alloc variant using pre-allocated marginal + gradient buffers
-- [ ] Unit test: with `guidance_weight = 0.0`, QGuidedDrafter == base generator
-- [ ] Unit test: with `guidance_weight > 0`, marginal is tilted toward higher-Q actions
+  **Adaptation:** the plan pseudocode assumed a logits-aware generator
+  (`logits_into`/`sample`). The real `SpeculativeGenerator` only has
+  `generate(condition, rng) -> Result<Vec<Output>>`. The drafter now
+  exposes `tilt_logits` (the pure QGF tilt math on caller-owned buffers)
+  plus `generate_guided`/`generate_guided_into` for the high-level path.
+- [x] Implement guided generation loop (discrete analogue of QGF Algorithm 1):
+  - `tilt_logits` performs step 4 (additive logit shift, NOT softmax).
+  - `generate_project_tilt_sample` chains all 5 steps.
+  - `tilt_logits_adaptive` (F4) integrates `adaptive_guidance_weight`.
+- [x] Implement zero-alloc variant using pre-allocated marginal + gradient buffers
+  (`generate_guided_into` + `tilt_logits` operate on caller buffers).
+- [x] Unit test: with `guidance_weight = 0.0`, QGuidedDrafter == base generator
+- [x] Unit test: with `guidance_weight > 0`, marginal is tilted toward higher-Q actions
+- [x] Additional tests: period skip, builder setters, short-buffer safety, full pipeline.
 
 #### T5: Implement QGradientOracle for existing types
-- [ ] Impl `QGradientOracle` for `LeoHead` (delegate to `all_goals_q` + finite-difference)
-- [ ] Impl `QGradientOracle` for `FlowFieldCache` (use `FlowField::gradient()` directly)
-- [ ] Impl `QGradientOracle` for `ActionBridge<A, D>` (use i8 ternary directions as gradient proxy)
-- [ ] Impl `QGradientOracle` for a new `BfnProxyOracle` (rejection-sampled return gradient — Freeze tier fallback)
-- [ ] Unit test: each oracle returns sensible gradient for a known state
+- [x] Impl `QGradientOracle` for `LeoHead` via `LeoHeadOracle<H>` wrapper
+  (delegates to `all_goals_q` + goal-slice extraction; Q-values ARE the
+  discrete-action gradient).
+- [x] Impl `QGradientOracle` for `FlowField` via `FlowFieldOracle` wrapper
+  (uses `FlowField::lookup(x,y)` → `(dx,dy)` as the 2-element gradient).
+- [x] Impl `QGradientOracle` for `ActionBridge<A,D>` via `ActionBridgeOracle`
+  wrapper (recovers raw dot products from `select_top_k` sigmoid scores via
+  `logit` inversion — directions are private in `ActionBridge`).
+- [x] Impl `QGradientOracle` for a new `BfnProxyOracle` (rejection-sampled
+  return gradient — Freeze tier fallback, confidence 0.3).
+- [x] Re-export `NoGuidanceOracle` from `traits.rs` (Freeze tier, zero gradient).
+- [x] Unit test: each oracle returns sensible gradient for a known state
+  (25 tests across all oracle types).
 
 #### T6: NFCoT FlowScore fusion (unblock Plan 229)
 - [ ] Extend `NfFlowScore` (Plan 229) to optionally consume Q-gradient guidance
@@ -177,8 +187,10 @@ At generation step t with prefix p_t and drafter velocity v_t:
   ) -> f32;
   ```
 - [x] Use **sigmoid, not softmax** (per project rules)
-- [ ] Integrate with `QGuidedDrafter` — replaces fixed `guidance_weight` (needs T4)
+- [x] Integrate with `QGuidedDrafter` — `tilt_logits_adaptive` method
+  computes `1/β` per call from `oracle.confidence(state)` (needs T4 — done).
 - [ ] Reuse Thicket (Plan 267) variance probe as the confidence signal
+  (deferred — Thicket integration is Phase 5)
 - [x] Unit test: low confidence → weight ≈ 0; high confidence → weight ≈ 1
 - [x] Unit test: threshold crossing is smooth (no discontinuity)
 - [x] Unit test: monotonic in confidence, output range `[0,1]`
@@ -188,28 +200,37 @@ At generation step t with prefix p_t and drafter velocity v_t:
 ### Phase 4: Routing & Tier Integration
 
 #### T8: CPU / SIMD / GPU / ANE auto-route
-- [ ] Add `QgfComputeRoute` enum: `CpuSimd`, `GpuBatch`, `AneCritic`
-- [ ] Implement `route_for(action_space_size, batch_size) -> QgfComputeRoute`:
+- [x] Add `QgfComputeRoute` enum: `CpuSimd`, `GpuBatch`, `AneCritic`
+- [x] Implement `route_for(action_space_size, batch_size) -> QgfComputeRoute`:
   ```rust
   if action_space_size < 1024 { CpuSimd }
-  else if batch_size >= 8 && action_space_size >= 1024 { GpuBatch }
+  else if batch_size >= 8 { GpuBatch }  // action_space >= 1024 implied
   else { CpuSimd }
   ```
 - [ ] Dispatch `q_gradient_at` to appropriate backend based on route
+  (deferred — backend dispatch is Phase 5 integration work)
 - [ ] CPU path: reuse existing `simd::dot_f32_i8` and `simd::fast_sigmoid`
+  (ActionBridgeOracle already uses these via `select_top_k`)
 - [ ] GPU path: batch dispatch via `riir-gpu` (optional, feature-gated)
+  (deferred — needs riir-gpu integration, not in katgpt-core scope)
 - [ ] ANE path: route critic forward to `npc_ane_backend` (existing)
-- [ ] Benchmark: routing decision is O(1) and does not dominate
+  (deferred — needs ANE backend wiring, not in katgpt-core scope)
+- [x] Benchmark: routing decision is O(1) and does not dominate
+  (`test_route_o1` verifies < 100ns/call over 100k iterations).
 
 #### T9: Plasma / Hot / Warm / Cold / Freeze tier wiring
-- [ ] Document tier mapping in `qgf/mod.rs` (table from research doc §6)
-- [ ] Plasma impl: `ActionBridge`-based ternary gradient (default for game NPCs)
-- [ ] Hot impl: `LeoHead` cached Q-values (default for active inference)
-- [ ] Warm impl: GPU batched critic (training-time / large batch)
-- [ ] Cold impl: Turso Q-table loader (episode-end consolidation)
-- [ ] Freeze impl: `NoGuidanceOracle` (returns zero gradient → pure BC reference)
-- [ ] Test: Freeze tier produces identical output to unguided generator (graceful degradation)
+- [x] Document tier mapping in `qgf/mod.rs` (table from research doc §6)
+- [x] Plasma impl: `ActionBridgeOracle` wrapping `ActionBridge` (default for game NPCs)
+- [x] Hot impl: `LeoHeadOracle` wrapping `LeoHead` (default for active inference)
+- [x] Hot/Plasma impl: `FlowFieldOracle` wrapping `FlowField` (FFT-smoothed)
+- [ ] Warm impl: GPU batched critic (training-time / large batch) — deferred to riir-gpu
+- [ ] Cold impl: Turso Q-table loader (episode-end consolidation) — deferred (needs turso)
+- [x] Freeze impl: `NoGuidanceOracle` (returns zero gradient → pure BC reference)
+  + `BfnProxyOracle` (rejection-sampled returns, confidence 0.3)
+- [x] Test: Freeze tier produces identical output to unguided generator
+  (`test_zero_weight_matches_base` + `test_no_guidance_oracle_zero_gradient`)
 - [ ] Test: tier promotion/demotion does not corrupt in-flight generation
+  (deferred — needs runtime tier-switching harness, Phase 5)
 
 ---
 
