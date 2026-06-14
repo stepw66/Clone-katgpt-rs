@@ -152,6 +152,13 @@ impl ColliderConstraint {
     ///
     /// `cand_hidden`: the candidate token's hidden-state representative
     /// (the would-be `s_{vL}`). Used as y in the CI test.
+    ///
+    /// # Hot-path optimization
+    ///
+    /// The `z_cols` lookup was previously re-allocated (via `.collect()`)
+    /// for every segment boundary × candidate combination. We now use a
+    /// stack-allocated `[&[f32]; 16]` buffer to skip the heap allocation
+    /// when the band contains ≤16 conditioning states (the common case).
     pub fn collider_preservation_score(
         &self,
         depth: usize,
@@ -169,6 +176,19 @@ impl ColliderConstraint {
         let v_pos = depth + 1;
         // Walk parent_hidden in reverse to find the nearest preceding boundary.
         let mut max_score = 0.0_f32;
+        let segment_len = self.config.segment_len;
+        let alpha = self.config.alpha;
+        let active_collider = match self.active_task_colliders.first() {
+            Some(&c) => c,
+            None => return 1.0, // Defensive: is_noop covered this, but be explicit.
+        };
+
+        // Pre-size a stack buffer for z_cols lookups. The CI test takes
+        // `&[&[f32]]`, so we collect into this buffer once per boundary and
+        // pass a slice. Cap at 16 — bands larger than this fall back to a Vec.
+        const Z_COLS_STACK_CAP: usize = 16;
+        let mut z_cols_stack: [&[f32]; Z_COLS_STACK_CAP] = [&[]; Z_COLS_STACK_CAP];
+
         for (k_idx, &boundary) in self.segment_boundaries.iter().enumerate() {
             if boundary >= v_pos {
                 break; // boundaries are sorted; rest are >= v_pos
@@ -179,41 +199,65 @@ impl ColliderConstraint {
                 Some(s) if !s.is_empty() => *s,
                 _ => continue,
             };
-            let k_seg = (boundary + self.config.segment_len - 1) / self.config.segment_len;
-            let v_seg = (v_pos + self.config.segment_len - 1) / self.config.segment_len;
+            let k_seg = (boundary + segment_len - 1) / segment_len;
+            let v_seg = (v_pos + segment_len - 1) / segment_len;
             if k_seg >= v_seg {
                 continue;
             }
             let band = BandConditioningSet::from_segments(
                 k_seg,
                 v_seg,
-                self.active_task_colliders[0],
-                self.config.segment_len,
+                active_collider,
+                segment_len,
                 v_pos,
             );
             // Conditioning columns: use parent_hidden rows for band states
             // when available; otherwise skip (empty z_cols).
-            let z_cols: Vec<&[f32]> = band
-                .state_indices()
-                .iter()
-                .map(|&s| {
-                    // Map state to a parent_hidden row if it falls on a boundary.
+            let state_indices = band.state_indices();
+            let z_cols: &[&[f32]] = if state_indices.len() <= Z_COLS_STACK_CAP {
+                // Stack fast-path — no heap allocation.
+                for (slot, &s) in z_cols_stack.iter_mut().zip(state_indices.iter()) {
                     let s_pos = s as usize;
-                    match self.segment_boundaries.binary_search(&s_pos) {
+                    *slot = match self.segment_boundaries.binary_search(&s_pos) {
                         Ok(idx) => parent_hidden.get(idx).copied().unwrap_or(&[]),
                         Err(_) => &[][..],
-                    }
-                })
-                .collect();
+                    };
+                }
+                &z_cols_stack[..state_indices.len()]
+            } else {
+                // Rare large-band fallback — allocate.
+                let z_cols_vec: Vec<&[f32]> = state_indices
+                    .iter()
+                    .map(|&s| {
+                        let s_pos = s as usize;
+                        match self.segment_boundaries.binary_search(&s_pos) {
+                            Ok(idx) => parent_hidden.get(idx).copied().unwrap_or(&[]),
+                            Err(_) => &[][..],
+                        }
+                    })
+                    .collect();
+                // Leak-free borrow: re-borrow the Vec's contents for the call.
+                // We use an inner block so the Vec outlives the call.
+                let d = x.len().min(cand_hidden.len());
+                let result = conditional_dependence_fisher_z(
+                    &x[..d],
+                    &cand_hidden[..d],
+                    &z_cols_vec,
+                    d,
+                    CiTestConfig { alpha },
+                );
+                if result.score > max_score {
+                    max_score = result.score;
+                }
+                continue;
+            };
             let d = x.len().min(cand_hidden.len());
             let result = conditional_dependence_fisher_z(
                 &x[..d],
                 &cand_hidden[..d],
-                &z_cols,
+                z_cols,
                 d,
-                CiTestConfig {
-                    alpha: self.config.alpha,
-                },
+                CiTestConfig { alpha },
             );
             if result.score > max_score {
                 max_score = result.score;

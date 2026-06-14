@@ -248,14 +248,32 @@ impl Runner {
         let mut output_names: Vec<String> = output_tokens.keys().cloned().collect();
         output_names.sort();
 
-        // Build unified vocabulary (union of input + output token names)
-        let mut all_names: Vec<String> = input_names;
-        for name in &output_names {
-            if !all_names.contains(name) {
-                all_names.push(name.clone());
+        // Build unified vocabulary (union of input + output token names).
+        // Both `input_names` and `output_names` are already sorted, so we can
+        // merge them in O(n + m) instead of the O(n × m) `Vec::contains` scan.
+        let mut all_names: Vec<String> = Vec::with_capacity(input_names.len() + output_names.len());
+        let mut i = 0;
+        let mut j = 0;
+        while i < input_names.len() && j < output_names.len() {
+            let cmp = input_names[i].cmp(&output_names[j]);
+            match cmp {
+                std::cmp::Ordering::Less => {
+                    all_names.push(input_names[i].clone());
+                    i += 1;
+                }
+                std::cmp::Ordering::Greater => {
+                    all_names.push(output_names[j].clone());
+                    j += 1;
+                }
+                std::cmp::Ordering::Equal => {
+                    all_names.push(input_names[i].clone());
+                    i += 1;
+                    j += 1;
+                }
             }
         }
-        all_names.sort();
+        all_names.extend_from_slice(&input_names[i..]);
+        all_names.extend_from_slice(&output_names[j..]);
 
         // Build the ProgramGraph (vec-based, index = token ID in vocab)
         let graph = builder.build(
@@ -461,18 +479,33 @@ impl Runner {
         let mut builder = GraphBuilder::new();
         let (input_tokens, output_tokens) = interpreter::build(Some(program), &mut builder);
 
-        // Collect unified vocabulary names
+        // Collect unified vocabulary names (sorted merge — see `build`)
         let mut input_names: Vec<String> = input_tokens.keys().cloned().collect();
         input_names.sort();
         let mut output_names: Vec<String> = output_tokens.keys().cloned().collect();
         output_names.sort();
-        let mut all_names: Vec<String> = input_names;
-        for name in &output_names {
-            if !all_names.contains(name) {
-                all_names.push(name.clone());
+        let mut all_names: Vec<String> = Vec::with_capacity(input_names.len() + output_names.len());
+        let mut i = 0;
+        let mut j = 0;
+        while i < input_names.len() && j < output_names.len() {
+            match input_names[i].cmp(&output_names[j]) {
+                std::cmp::Ordering::Less => {
+                    all_names.push(input_names[i].clone());
+                    i += 1;
+                }
+                std::cmp::Ordering::Greater => {
+                    all_names.push(output_names[j].clone());
+                    j += 1;
+                }
+                std::cmp::Ordering::Equal => {
+                    all_names.push(input_names[i].clone());
+                    i += 1;
+                    j += 1;
+                }
             }
         }
-        all_names.sort();
+        all_names.extend_from_slice(&input_names[i..]);
+        all_names.extend_from_slice(&output_names[j..]);
 
         // Build the ProgramGraph
         let graph = builder.build(

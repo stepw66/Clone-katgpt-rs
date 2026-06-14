@@ -353,25 +353,33 @@ impl Default for AdaptiveTraceCompactor {
 /// max-shift for numerical stability.
 ///
 /// Returns 0 for empty input.
+///
+/// Hot-path: max-shift and per-element `exp` are computed once, then reused
+/// for both the normalizer sum and the per-token `p * ln(p)` term.
 pub fn entropy_from_logits(logits: &[f32]) -> f32 {
     if logits.is_empty() {
         return 0.0;
     }
-    // Max-shift for numerical stability.
-    let max_logit = logits.iter().copied().fold(f32::NEG_INFINITY, f32::max);
-    let mut sum_exp = 0.0f32;
-    for &l in logits {
-        sum_exp += (l - max_logit).exp();
-    }
+    // Max-shift for numerical stability (SIMD-reduced).
+    let max_logit = crate::simd::simd_max_f32(logits);
+    // Single pass: shifted_exp[i] = exp(logits[i] - max_logit).
+    let mut shifted_exp: Vec<f32> = Vec::with_capacity(logits.len());
+    shifted_exp.extend(logits.iter().map(|&l| (l - max_logit).exp()));
+    let sum_exp: f32 = shifted_exp.iter().copied().sum();
     if sum_exp <= 0.0 {
         return 0.0;
     }
     let inv_sum = 1.0 / sum_exp;
+    // H = -Σ p_i * ln(p_i), with p_i = shifted_exp[i] * inv_sum.
+    // Use ln(p) = ln(shifted_exp[i]) + ln(inv_sum) = ln(shifted_exp[i]) - ln(sum_exp)
+    // → avoid one mul per iteration by folding the constant.
+    let ln_inv_sum = inv_sum.ln(); // = -ln(sum_exp)
     let mut h = 0.0f32;
-    for &l in logits {
-        let p = (l - max_logit).exp() * inv_sum;
-        if p > 0.0 {
-            h -= p * p.ln();
+    for &e in &shifted_exp {
+        if e > 0.0 {
+            let p = e * inv_sum;
+            // p * ln(p) = p * (ln(e) + ln(inv_sum)).
+            h -= p * (e.ln() + ln_inv_sum);
         }
     }
     h

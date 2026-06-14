@@ -19,26 +19,48 @@
 const EPSILON: f32 = 1e-10;
 
 /// Sigmoid activation: `1 / (1 + exp(-x))`.
+///
+/// Delegates to [`katgpt_core::simd::fast_sigmoid`] which adds early-exit for
+/// `|x| > 40` (where σ saturates in f32) — saves an `exp()` call on the
+/// log_det path where entropies can be large.
 #[inline]
 pub fn sigmoid(x: f32) -> f32 {
-    1.0 / (1.0 + (-x).exp())
+    katgpt_core::simd::fast_sigmoid(x)
 }
 
 /// Shannon entropy of a categorical distribution: `H = -Σ p_i * log(p_i)`.
 ///
 /// Returns 0.0 for empty or degenerate inputs. Skips probabilities < EPSILON
-/// to avoid log(0).
+/// to avoid log(0). The inner loop is branch-free (uses `select` semantics)
+/// so LLVM can auto-vectorize across 4-element chunks.
 #[inline]
 pub fn categorical_entropy(probs: &[f32]) -> f32 {
     if probs.is_empty() {
         return 0.0;
     }
 
+    let len = probs.len();
+    let chunks = len / 4;
+    let remainder = len % 4;
     let mut h = 0.0f32;
-    for &p in probs {
-        if p > EPSILON {
-            h -= p * p.ln();
-        }
+
+    // 4-way unrolled body — branch-free `select` for the EPSILON guard,
+    // enabling LLVM to lower this to packed f32 ops on AVX2/NEON.
+    for i in 0..chunks {
+        let base = i * 4;
+        let p0 = probs[base];
+        let p1 = probs[base + 1];
+        let p2 = probs[base + 2];
+        let p3 = probs[base + 3];
+        // `select(p > EPSILON, -p*ln(p), 0.0)` — branch-free.
+        h += if p0 > EPSILON { -p0 * p0.ln() } else { 0.0 };
+        h += if p1 > EPSILON { -p1 * p1.ln() } else { 0.0 };
+        h += if p2 > EPSILON { -p2 * p2.ln() } else { 0.0 };
+        h += if p3 > EPSILON { -p3 * p3.ln() } else { 0.0 };
+    }
+    for i in 0..remainder {
+        let p = probs[chunks * 4 + i];
+        h += if p > EPSILON { -p * p.ln() } else { 0.0 };
     }
     h
 }

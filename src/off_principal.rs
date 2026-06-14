@@ -96,6 +96,21 @@ pub fn off_principal_project<'a>(
     // Split scratch into [coeffs: k][out: d].
     let (coeffs_buf, out) = scratch.split_at_mut(k);
 
+    // Fast path: rank-1 principal subspace (the common case for flattened
+    // weight vectors — see OffPrincipalIndex::new). Column 0 of U_k is the
+    // only non-zero column, so we skip the j-loop and use a single contiguous
+    // dot product. This also lets the autovectorizer see a unit-stride access.
+    if k == 1 {
+        // coeffs[0] = <q, U_k[:, 0]>  — U_k[:, 0] is contiguous when k == 1.
+        coeffs_buf[0] = simd_dot_f32(q, &u_k[..d], d);
+        // out[i] = q[i] - coeffs[0] * u_k[i]
+        let c0 = coeffs_buf[0];
+        for i in 0..d {
+            out[i] = q[i] - c0 * u_k[i];
+        }
+        return out;
+    }
+
     // coeffs[j] = <q, U_k[:, j]>  — column j is strided by k: u_k[j, k+j, 2k+j, ...]
     for j in 0..k {
         let mut acc = 0.0_f32;
@@ -227,7 +242,9 @@ impl OffPrincipalIndex {
                 5,
             );
         }
-        // Re-normalize: principal = principal / ||principal||
+        // Re-normalize: principal = principal / ||principal||.
+        // Single-pass accumulation — the rescale is a second pass because we
+        // need the full norm before we can scale any element.
         let mut p_norm_sq = 0.0_f32;
         for &v in &principal {
             p_norm_sq += v * v;

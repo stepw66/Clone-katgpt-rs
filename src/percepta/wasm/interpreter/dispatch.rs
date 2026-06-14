@@ -16,8 +16,6 @@
 //! × 4 sign combinations = 64 circle points, of which the first 36 are assigned
 //! to the 36 interpreter opcodes.
 
-use std::collections::HashMap;
-
 use crate::percepta::graph::types::{Expression, GraphBuilder};
 
 // ── Constants ──────────────────────────────────────────────────
@@ -548,9 +546,12 @@ pub struct OpcodeDispatch {
     /// Whether this is a specialized (Futamura) build.
     specialized: bool,
     /// Cache: opcode → dot product expression.
-    op_dot_cache: HashMap<Opcode, Expression>,
-    /// Cache: opcode → is_op gate expression.
-    is_op_cache: HashMap<Opcode, Expression>,
+    ///
+    /// Index is `Opcode` discriminant (0..OPCODE_COUNT). Array-backed for O(1)
+    /// lookup instead of `HashMap` hashing on a `#[repr(u8)]` enum.
+    op_dot_cache: [Option<Expression>; OPCODE_COUNT],
+    /// Cache: opcode → is_op gate expression. Same indexing as `op_dot_cache`.
+    is_op_cache: [Option<Expression>; OPCODE_COUNT],
 }
 
 impl OpcodeDispatch {
@@ -571,8 +572,8 @@ impl OpcodeDispatch {
             fetched_y,
             one_expr,
             specialized,
-            op_dot_cache: HashMap::new(),
-            is_op_cache: HashMap::new(),
+            op_dot_cache: std::array::from_fn(|_| None),
+            is_op_cache: std::array::from_fn(|_| None),
         }
     }
 
@@ -584,7 +585,8 @@ impl OpcodeDispatch {
     ///
     /// Results are cached per opcode.
     pub fn op_dot(&mut self, op: Opcode) -> Expression {
-        if let Some(cached) = self.op_dot_cache.get(&op) {
+        let idx = op as usize;
+        if let Some(cached) = &self.op_dot_cache[idx] {
             return cached.clone();
         }
 
@@ -593,7 +595,7 @@ impl OpcodeDispatch {
             - self.one_expr.clone() * (POINTS_R2 as f64)
             + self.one_expr.clone();
 
-        self.op_dot_cache.insert(op, result.clone());
+        self.op_dot_cache[idx] = Some(result.clone());
         result
     }
 
@@ -604,7 +606,8 @@ impl OpcodeDispatch {
     ///
     /// Results are cached per opcode.
     pub fn is_op(&mut self, builder: &mut GraphBuilder, op: Opcode) -> Expression {
-        if let Some(cached) = self.is_op_cache.get(&op) {
+        let idx = op as usize;
+        if let Some(cached) = &self.is_op_cache[idx] {
             return cached.clone();
         }
 
@@ -615,7 +618,7 @@ impl OpcodeDispatch {
             builder.reglu(self.one_expr.clone(), dot)
         };
 
-        self.is_op_cache.insert(op, result.clone());
+        self.is_op_cache[idx] = Some(result.clone());
         result
     }
 

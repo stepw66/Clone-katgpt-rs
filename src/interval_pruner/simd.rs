@@ -356,6 +356,7 @@ unsafe fn avx2_is_interval_closed(mask: &[bool]) -> bool {
 /// Useful for testing that the threshold boundary is correct.
 #[cfg(feature = "interval_pruner")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
 pub enum RouteDecision {
     /// Scalar (CPU) path — input below SIMD threshold.
     Scalar,

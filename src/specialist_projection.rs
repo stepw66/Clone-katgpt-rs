@@ -279,18 +279,29 @@ impl SpecialistMask {
             return;
         }
         // Walk row by row, using scratch[0..d_hidden] as a keep-flag buffer.
+        // mask is row-major flat sorted, so per-row coords are a contiguous run.
+        let mut idx = 0usize;
+        let mask = &self.inner.mask;
         for row in 0..self.n_rows() {
             let base = row * d_hidden;
+            let row_end = base + d_hidden;
             // Clear keep flags for this row.
             for s in &mut scratch[..d_hidden] {
                 *s = 0.0;
             }
-            // Set keep flags for coords in this row's support.
-            for &flat in &self.inner.mask {
-                let f = flat as usize;
-                if f >= base && f < base + d_hidden {
-                    scratch[f - base] = 1.0;
+            // Advance idx past any coords belonging to earlier rows (already
+            // consumed in prior iterations — mask is sorted ascending).
+            while idx < mask.len() && (mask[idx] as usize) < base {
+                idx += 1;
+            }
+            // Set keep flags for coords in this row's support (contiguous run).
+            while idx < mask.len() {
+                let f = mask[idx] as usize;
+                if f >= row_end {
+                    break;
                 }
+                scratch[f - base] = 1.0;
+                idx += 1;
             }
             // Zero non-kept coordinates.
             for j in 0..d_hidden {
@@ -302,32 +313,39 @@ impl SpecialistMask {
     }
 
     /// Fallback projection when scratch is too small: zero coordinates not in
-    /// the support by walking the complement. O(d_hidden * n_rows) worst case.
+    /// the support by walking the complement. O(d_hidden + nnz) per row total.
     fn project_fallback(&self, hidden: &mut [f32]) {
         let d_hidden = self.d_hidden();
-        // Build per-row keep-sets on the fly.
+        // mask is row-major flat sorted, so per-row coords form a contiguous run
+        // — single forward sweep with a cursor (no per-row filter realloc).
+        let mut cursor = 0usize;
+        let mask = &self.inner.mask;
         for row in 0..self.n_rows() {
             let base = row * d_hidden;
-            // Collect kept coords for this row (sorted since mask is sorted).
-            let mut kept_iter = self
-                .inner
-                .mask
-                .iter()
-                .copied()
-                .filter(|&f| (f as usize) >= base && (f as usize) < base + d_hidden)
-                .map(|f| (f as usize) - base)
-                .peekable();
+            let row_end = base + d_hidden;
+            // Advance cursor to the first coord >= base.
+            while cursor < mask.len() && (mask[cursor] as usize) < base {
+                cursor += 1;
+            }
+            // Walk coords and dims together: both advance monotonically.
+            let mut local_cursor = cursor;
             for j in 0..d_hidden {
-                // If j is not the next kept coord, zero it.
-                match kept_iter.peek() {
-                    Some(&k) if k == j => {
-                        kept_iter.next();
-                    }
-                    _ => {
-                        hidden[base + j] = 0.0;
-                    }
+                let global = base + j;
+                // Advance local_cursor past any coords < global.
+                while local_cursor < mask.len()
+                    && (mask[local_cursor] as usize) < global
+                    && (mask[local_cursor] as usize) < row_end
+                {
+                    local_cursor += 1;
+                }
+                let kept = local_cursor < mask.len()
+                    && (mask[local_cursor] as usize) == global;
+                if !kept {
+                    hidden[global] = 0.0;
                 }
             }
+            // Commit the cursor advance for this row.
+            cursor = local_cursor;
         }
     }
 
@@ -398,16 +416,21 @@ pub fn specialist_score(mask: &SpecialistMask, hidden: &[f32]) -> f32 {
     if d_hidden == 0 {
         return 0.0;
     }
-    // Compute energy in kept vs. total using the underlying SparseTaskVector.
-    // The mask's `deltas` are all 1.0, so `mask[i]` flags a kept coordinate.
+    // Single forward sweep: hidden is iterated in flat order, mask is sorted
+    // ascending flat indices → no per-element binary search.
     let mut kept_energy = 0.0_f32;
     let mut total_energy = 1e-12_f32; // avoid divide-by-zero.
+    let mut cursor = 0usize;
+    let mask_flat = &mask.inner.mask;
+    let n_mask = mask_flat.len();
     for (i, &h) in hidden.iter().enumerate() {
         let e = h * h;
         total_energy += e;
-        // Binary-search the mask for flat index i (mask is sorted).
-        // For small masks a linear scan is fine; for large ones we binary-search.
-        if mask.inner.mask.binary_search(&(i as u32)).is_ok() {
+        // Advance cursor to first coord >= i (mask is sorted).
+        while cursor < n_mask && (mask_flat[cursor] as usize) < i {
+            cursor += 1;
+        }
+        if cursor < n_mask && (mask_flat[cursor] as usize) == i {
             kept_energy += e;
         }
     }
@@ -430,12 +453,10 @@ pub fn specialist_score(mask: &SpecialistMask, hidden: &[f32]) -> f32 {
 #[inline]
 #[must_use]
 pub fn route_specialist_projection(density: f32) -> ComputeTarget {
-    if density < 0.2 {
-        ComputeTarget::Plasma
-    } else if density < 0.5 {
-        ComputeTarget::Simd
-    } else {
-        ComputeTarget::Cpu
+    match density {
+        d if d < 0.2 => ComputeTarget::Plasma,
+        d if d < 0.5 => ComputeTarget::Simd,
+        _ => ComputeTarget::Cpu,
     }
 }
 

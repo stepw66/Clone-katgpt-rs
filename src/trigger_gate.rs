@@ -282,8 +282,13 @@ impl TriggerGate {
             .last_tier_change
             .lock()
             .expect("last_tier_change lock poisoned");
+        // Enforce minimum interval between tier changes FIRST — cheap gate that
+        // avoids the QPS-estimation Mutex round-trip when we can't act yet.
         let min_interval =
             std::time::Duration::from_millis(self.config.min_tier_change_interval_ms);
+        if last.elapsed() < min_interval {
+            return None;
+        }
 
         // Compute QPS once to avoid double Mutex acquisition.
         let qps = self.estimated_qps();
@@ -327,11 +332,6 @@ impl TriggerGate {
             }
             _ => None,
         })?;
-
-        // Enforce minimum interval between tier changes.
-        if last.elapsed() < min_interval {
-            return None;
-        }
 
         // Commit the tier change.
         self.current_tier.store(candidate as u8, Ordering::Relaxed);

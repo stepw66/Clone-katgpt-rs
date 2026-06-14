@@ -42,6 +42,21 @@ fn token_to_latent(
     out
 }
 
+/// Borrow one token row from flat kv_cache as a slice.
+///
+/// Fast path for the common case `kv_dim == latent_dim` (true for every built-in
+/// `QueryBank` impl in this file, which sets `kv_dim = self.latent_dim`).
+/// Avoids the per-call `Vec` allocation that `token_to_latent` does — this matters
+/// because the k-means loops call this O(seq_len × iters × centroids) times.
+///
+/// Caller must guarantee `token_idx * kv_dim + kv_dim <= kv_cache.len()`, which
+/// holds when `seq_len = kv_cache.len() / kv_dim` is used to bound `token_idx`.
+#[inline]
+fn token_slice(kv_cache: &[f32], token_idx: usize, kv_dim: usize) -> &[f32] {
+    let start = token_idx * kv_dim;
+    &kv_cache[start..start + kv_dim]
+}
+
 /// Squared Euclidean distance between two slices.
 fn sq_dist(a: &[f32], b: &[f32]) -> f32 {
     a.iter().zip(b.iter()).map(|(x, y)| (x - y) * (x - y)).sum()
@@ -88,13 +103,15 @@ impl QueryBank for ClusterQueryBank {
         // generator seeded from the data.
         let mut seed: u64 = 42;
         for _ in 1..n {
-            // Compute squared distance from each point to its nearest centroid
+            // Compute squared distance from each point to its nearest centroid.
+            // Use borrowed slices (no per-token Vec allocation) — this is the hot
+            // k-means++ init loop.
             let min_dists: Vec<f32> = (0..seq_len)
                 .map(|t| {
-                    let point = token_to_latent(kv_cache, t, kv_dim, self.latent_dim);
+                    let point = token_slice(kv_cache, t, kv_dim);
                     centroids
                         .iter()
-                        .map(|c| sq_dist(&point, c))
+                        .map(|c| sq_dist(point, c))
                         .fold(f32::INFINITY, f32::min)
                 })
                 .collect();
@@ -131,16 +148,20 @@ impl QueryBank for ClusterQueryBank {
         // --- k-means iterations (max 10) ---
         let max_iters = 10;
         let mut assignments = vec![0usize; seq_len];
+        // Reusable scratch buffers — allocated once, zeroed each iteration.
+        // Avoids `vec![vec![0.0; latent_dim]; n]` allocation every iteration.
+        let mut sums = vec![0.0f32; n * self.latent_dim];
+        let mut counts = vec![0usize; n];
 
         for _ in 0..max_iters {
-            // Assign each point to nearest centroid
+            // Assign each point to nearest centroid (borrowed slices, no alloc)
             let mut changed = false;
             for t in 0..seq_len {
-                let point = token_to_latent(kv_cache, t, kv_dim, self.latent_dim);
+                let point = token_slice(kv_cache, t, kv_dim);
                 let (best_idx, _) = centroids
                     .iter()
                     .enumerate()
-                    .map(|(i, c)| (i, sq_dist(&point, c)))
+                    .map(|(i, c)| (i, sq_dist(point, c)))
                     .fold(
                         (0, f32::INFINITY),
                         |acc, (i, d)| if d < acc.1 { (i, d) } else { acc },
@@ -156,12 +177,17 @@ impl QueryBank for ClusterQueryBank {
             }
 
             // Update centroids as mean of assigned points
-            let mut sums = vec![vec![0.0f32; self.latent_dim]; n];
-            let mut counts = vec![0usize; n];
+            for s in &mut sums {
+                *s = 0.0;
+            }
+            for c in &mut counts {
+                *c = 0;
+            }
             for t in 0..seq_len {
                 let c = assignments[t];
-                let point = token_to_latent(kv_cache, t, kv_dim, self.latent_dim);
-                for (s, p) in sums[c].iter_mut().zip(point.iter()) {
+                let point = token_slice(kv_cache, t, kv_dim);
+                let sum_row = &mut sums[c * self.latent_dim..(c + 1) * self.latent_dim];
+                for (s, p) in sum_row.iter_mut().zip(point.iter()) {
                     *s += p;
                 }
                 counts[c] += 1;
@@ -169,10 +195,8 @@ impl QueryBank for ClusterQueryBank {
             for (c, cnt) in counts.iter().enumerate() {
                 if *cnt > 0 {
                     let inv = 1.0f32 / *cnt as f32;
-                    for s in &mut centroids[c] {
-                        *s *= 0.0; // reset
-                    }
-                    for (cent, sum_val) in centroids[c].iter_mut().zip(sums[c].iter()) {
+                    let sum_row = &sums[c * self.latent_dim..(c + 1) * self.latent_dim];
+                    for (cent, sum_val) in centroids[c].iter_mut().zip(sum_row.iter()) {
                         *cent = sum_val * inv;
                     }
                 }
@@ -237,23 +261,26 @@ impl QueryBank for AttentionQueryBank {
             *w *= inv_total;
         }
 
-        // Sample `budget` tokens proportional to importance using deterministic LCG
+        // Sample `budget` tokens proportional to importance using deterministic LCG.
+        // `remaining_importance` is never mutated (importance stays — see comment below),
+        // so `rem_total` is constant across iterations and can be hoisted out of the loop.
+        // This also lets us drop the `importance.clone()` allocation.
+        let rem_total: f32 = importance.iter().sum();
+        if rem_total < 1e-12 {
+            // Uniform sampling fallback
+            return sample_uniform(kv_cache, budget, seq_len, kv_dim, self.latent_dim);
+        }
+
         let mut seed: u64 = 12345;
         let mut chosen = Vec::with_capacity(budget);
-        let remaining_importance = importance.clone();
 
         for _ in 0..budget {
-            let rem_total: f32 = remaining_importance.iter().sum();
-            if rem_total < 1e-12 {
-                // All importance depleted — cycle through already-chosen
-                break;
-            }
             seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
             let r = (seed as f32 / u64::MAX as f32) * rem_total;
 
             let mut cumsum = 0.0f32;
             let mut idx = seq_len - 1;
-            for (i, &w) in remaining_importance.iter().enumerate() {
+            for (i, &w) in importance.iter().enumerate() {
                 cumsum += w;
                 if cumsum >= r {
                     idx = i;
@@ -398,7 +425,7 @@ impl QueryBank for BfcfQueryBank {
             let count = (end_tok - start_tok) as f32;
             let mut centroid = vec![0.0f32; self.latent_dim];
             for t in start_tok..end_tok {
-                let token = token_to_latent(kv_cache, t, kv_dim, self.latent_dim);
+                let token = token_slice(kv_cache, t, kv_dim);
                 for (c, v) in centroid.iter_mut().zip(token.iter()) {
                     *c += v;
                 }

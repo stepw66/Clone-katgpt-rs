@@ -20,6 +20,7 @@
 //!
 //! Feature-gated behind `echo_env_predictor` — off by default until GOAT proof.
 
+use katgpt_core::simd::fast_sigmoid;
 use katgpt_core::traits::ScreeningPruner;
 
 // ── Data types ──────────────────────────────────────────────────
@@ -77,18 +78,31 @@ impl Default for EnvPredictorConfig {
     }
 }
 
-// ── Helpers ─────────────────────────────────────────────────────
-
+// ── Helpers ─────────────────────────────────────────────────
+/// Sigmoid activation. Delegates to `katgpt_core::simd::fast_sigmoid`
+/// which adds early-exit for `|x| > 40` (where σ saturates in f32).
 #[inline]
 fn sigmoid(x: f32) -> f32 {
-    1.0 / (1.0 + (-x).exp())
+    fast_sigmoid(x)
 }
 
+/// Cosine similarity in a single fused pass over both slices.
+///
+/// Accumulates `dot`, `norm_a²`, `norm_b²` together so the data only
+/// traverses L1 once (3 passes → 1). Uses `mul_add` so the inner ops
+/// compile to FMA on platforms that have it.
+#[inline]
 fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
-    let dot: f32 = a.iter().zip(b.iter()).map(|(&x, &y)| x * y).sum();
-    let norm_a: f32 = a.iter().map(|&x| x * x).sum::<f32>().sqrt().max(1e-8);
-    let norm_b: f32 = b.iter().map(|&x| x * x).sum::<f32>().sqrt().max(1e-8);
-    (dot / (norm_a * norm_b)).clamp(0.0, 1.0)
+    let mut dot = 0.0f32;
+    let mut na = 0.0f32;
+    let mut nb = 0.0f32;
+    for (&x, &y) in a.iter().zip(b.iter()) {
+        dot += x * y;
+        na += x * x;
+        nb += y * y;
+    }
+    let denom = (na.max(0.0).sqrt()).max(1e-8) * (nb.max(0.0).sqrt()).max(1e-8);
+    (dot / denom).clamp(0.0, 1.0)
 }
 
 // ── A) EnvPredictorPruner ───────────────────────────────────────
@@ -126,11 +140,16 @@ where
     }
 
     /// Update historical average with new observation features.
+    ///
+    /// Uses the running-mean identity `μ_new = μ_old + α·(x − μ_old)`
+    /// via `mul_add` so the hot path compiles to a single FMA per element.
     pub fn update_avg(&mut self, features: &[f32]) {
         let n = self.n_observations as f32;
         let alpha = 1.0 / (n + 1.0);
+        let one_m_alpha = 1.0 - alpha;
         for (avg, &f) in self.feature_avg.iter_mut().zip(features.iter()) {
-            *avg = *avg * (1.0 - alpha) + f * alpha;
+            // μ_new = one_m_alpha * μ_old + alpha * f
+            *avg = one_m_alpha.mul_add(*avg, alpha * f);
         }
         self.n_observations += 1;
     }
@@ -148,28 +167,17 @@ where
         // Run forward model to predict outcome features
         let predicted = (self.forward_model)(token_idx, parent_tokens);
 
-        // Score = sigmoid(cosine_similarity(predicted, historical_avg) / temperature)
-        let dot: f32 = predicted
-            .iter()
-            .zip(self.feature_avg.iter())
-            .map(|(&p, &a)| p * a)
-            .sum();
-
-        let norm_p: f32 = predicted
-            .iter()
-            .map(|&x| x * x)
-            .sum::<f32>()
-            .sqrt()
-            .max(1e-8);
-        let norm_a: f32 = self
-            .feature_avg
-            .iter()
-            .map(|&x| x * x)
-            .sum::<f32>()
-            .sqrt()
-            .max(1e-8);
-
-        let cosine = dot / (norm_p * norm_a);
+        // Single fused pass: dot, ‖predicted‖², ‖avg‖² in one traversal.
+        let mut dot = 0.0f32;
+        let mut np = 0.0f32;
+        let mut na = 0.0f32;
+        for (&p, &a) in predicted.iter().zip(self.feature_avg.iter()) {
+            dot += p * a;
+            np += p * p;
+            na += a * a;
+        }
+        let denom = (np.max(0.0).sqrt()).max(1e-8) * (na.max(0.0).sqrt()).max(1e-8);
+        let cosine = dot / denom;
         sigmoid(cosine / self.config.temperature)
     }
 }
@@ -261,6 +269,9 @@ impl PredictionConsistencyGate {
     /// Compute Shannon entropy from a set of prediction feature vectors.
     /// Each row is a branch's predicted features. We compute per-feature
     /// variance across branches, then sum log-variances as entropy proxy.
+    ///
+    /// Uses the `E[x²] − E[x]²` identity so each feature is processed in a
+    /// single fused pass over the branches (2 passes → 1).
     pub fn compute_branch_entropy(branch_features: &[Vec<f32>]) -> f32 {
         if branch_features.len() <= 1 {
             return 0.0; // Single branch = zero entropy
@@ -268,18 +279,23 @@ impl PredictionConsistencyGate {
 
         let n_features = branch_features[0].len();
         let n_branches = branch_features.len() as f32;
+        let inv_n = 1.0 / n_branches;
 
         let mut total_entropy = 0.0f32;
         for j in 0..n_features {
-            // Compute mean
-            let mean: f32 = branch_features.iter().map(|b| b[j]).sum::<f32>() / n_branches;
-            // Compute variance
-            let var: f32 = branch_features
-                .iter()
-                .map(|b| (b[j] - mean) * (b[j] - mean))
-                .sum::<f32>()
-                / n_branches;
-            // Entropy proxy: log(1 + variance) — higher variance = higher entropy
+            // E[x] and E[x²] in a single pass per feature.
+            let mut sum = 0.0f32;
+            let mut sum_sq = 0.0f32;
+            for b in branch_features {
+                let x = b[j];
+                sum += x;
+                sum_sq += x * x;
+            }
+            let mean = sum * inv_n;
+            let mean_sq = sum_sq * inv_n;
+            // var = E[x²] − E[x]² — algebraically identical to the prior
+            // two-pass form, but touches each branch only once per feature.
+            let var = (mean_sq - mean * mean).max(0.0);
             total_entropy += (1.0 + var).ln();
         }
 

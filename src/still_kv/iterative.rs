@@ -209,25 +209,31 @@ impl IterativeChunkCompactor {
             return KVChunk::new(chunk.start_pos);
         }
 
-        // T16: If lookahead is present, concatenate chunk keys/values with lookahead
-        let (combined_keys_f16, combined_values_f16, combined_start_pos, combined_len) =
-            match lookahead {
-                Some(la) if !la.is_empty() => {
-                    let mut k = Vec::with_capacity(chunk.keys.len() + la.keys.len());
-                    let mut v = Vec::with_capacity(chunk.values.len() + la.values.len());
-                    k.extend_from_slice(&chunk.keys);
-                    k.extend_from_slice(&la.keys);
-                    v.extend_from_slice(&chunk.values);
-                    v.extend_from_slice(&la.values);
-                    (k, v, chunk.start_pos, chunk.len + la.len)
-                }
-                _ => (
-                    chunk.keys.clone(),
-                    chunk.values.clone(),
-                    chunk.start_pos,
-                    chunk.len,
-                ),
-            };
+        // T16: If lookahead is present, concatenate chunk keys/values with lookahead.
+        // Use slices to avoid cloning the (often large) chunk buffers when there is
+        // no lookahead — the no-lookahead path only needs to borrow `chunk`.
+        // `concat_buf` keeps the owned Vecs alive for the duration of the slice borrows.
+        let concat_buf: Option<(Vec<f16>, Vec<f16>)> = match lookahead {
+            Some(la) if !la.is_empty() => {
+                let mut k = Vec::with_capacity(chunk.keys.len() + la.keys.len());
+                let mut v = Vec::with_capacity(chunk.values.len() + la.values.len());
+                k.extend_from_slice(&chunk.keys);
+                k.extend_from_slice(&la.keys);
+                v.extend_from_slice(&chunk.values);
+                v.extend_from_slice(&la.values);
+                Some((k, v))
+            }
+            _ => None,
+        };
+        let combined_len = match concat_buf.as_ref() {
+            Some((k, _)) => k.len() / kv_dim,
+            None => chunk.len,
+        };
+        let (combined_keys_f16, combined_values_f16) = match concat_buf.as_ref() {
+            Some((k, v)) => (k.as_slice(), v.as_slice()),
+            None => (chunk.keys.as_slice(), chunk.values.as_slice()),
+        };
+        let combined_start_pos = chunk.start_pos;
 
         // Step 1: Un-rotate RoPE from keys (position-free space)
         let pos_free_compactor = PositionFreeCompactor::new(self.rope_theta, kv_dim);

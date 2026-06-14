@@ -432,25 +432,24 @@ fn chunk_local_config(config: &AmConfig, chunk_len: usize) -> AmConfig {
 /// Infer `d` from the chunks, ensuring consistency.
 fn infer_d(chunks: &[TextChunk]) -> Result<usize, CompactError> {
     for c in chunks {
-        if c.chunk_len > 0 {
-            if c.chunk_len == 0 {
-                continue;
-            }
-            if c.keys.len() % c.chunk_len != 0 {
-                return Err(CompactError::DimensionMismatch(format!(
-                    "chunk: keys.len()={} not divisible by chunk_len={}",
-                    c.keys.len(),
-                    c.chunk_len
-                )));
-            }
-            let d = c.keys.len() / c.chunk_len;
-            if d == 0 {
-                return Err(CompactError::DimensionMismatch(
-                    "inferred d=0 from chunk".into(),
-                ));
-            }
-            return Ok(d);
+        // First non-empty chunk determines d.
+        if c.chunk_len == 0 {
+            continue;
         }
+        if c.keys.len() % c.chunk_len != 0 {
+            return Err(CompactError::DimensionMismatch(format!(
+                "chunk: keys.len()={} not divisible by chunk_len={}",
+                c.keys.len(),
+                c.chunk_len
+            )));
+        }
+        let d = c.keys.len() / c.chunk_len;
+        if d == 0 {
+            return Err(CompactError::DimensionMismatch(
+                "inferred d=0 from chunk".into(),
+            ));
+        }
+        return Ok(d);
     }
     Err(CompactError::DimensionMismatch(
         "all chunks empty — cannot infer d".into(),
