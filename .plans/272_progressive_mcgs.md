@@ -151,11 +151,11 @@ Goal: prove the three GOAT criteria. Hard pass/fail, no tuning excuses.
 
 ### Tasks
 
-- [ ] **T4.1** Write `katgpt-rs/.docs/progressive_mcgs.md` with: API reference, config knob table, 3 usage examples (pure search, integrated with `BanditPruner`, integrated with `ConstraintPruner`).
-- [ ] **T4.2** Add module-level example to `src/progressive_mcgs/mod.rs` doc comment.
-- [ ] **T4.3** Update `katgpt-rs/.research/239_*.md` "Related Plans" from "TBD" to "272 (this plan)".
-- [ ] **T4.4** Update `riir-ai/.plans/298_*.md` Phase 0 status: dependency on Plan 272 → resolved. Mark Plan 298 ready to proceed to Phase 1.
-- [ ] **T4.5** Tag release (per AGENTS.md commit convention — `feat:` prefix): `feat(progressive_mcgs): graph search with reference edges + entropy-gated schedule`.
+- [x] **T4.1** Write `katgpt-rs/.docs/progressive_mcgs.md` with: API reference, config knob table, 3 usage examples (pure search, integrated with `BanditPruner`, integrated with `ConstraintPruner`).
+- [x] **T4.2** Add module-level example to `src/progressive_mcgs/mod.rs` doc comment.
+- [x] **T4.3** Update `katgpt-rs/.research/239_*.md` "Related Plans" from "TBD" to "272 (this plan)".
+- [x] **T4.4** Update `riir-ai/.plans/298_*.md` Phase 0 status: dependency on Plan 272 → resolved. Mark Plan 298 ready to proceed to Phase 1.
+- [x] **T4.5** Tag release (per AGENTS.md commit convention — `feat:` prefix): `feat(progressive_mcgs): graph search with reference edges + entropy-gated schedule`.
 
 ### Phase 4 Exit Criteria
 - Docs published

@@ -73,6 +73,57 @@
 //!   validates token streams, not graph nodes.
 //!
 //! Consumers compose them at a higher layer via the `SearchDomain` trait.
+//!
+//! # Quick-start Example
+//!
+//! Minimal end-to-end search: a synthetic domain where branch 0 is "good"
+//! (emits `Reward::Progress`) and all other branches emit `Reward::Failure`.
+//! The scheduler should concentrate compute on branch 0 over the budget.
+//!
+//! ```rust
+//! # #![cfg(feature = "progressive_mcgs")]
+//! use katgpt_rs::progressive_mcgs::{
+//!     BranchId, NodeId, ProgressiveMcgs, ProgressiveMcgsConfig,
+//!     ProgressiveMcgsSearch, Reward, SearchDomain,
+//! };
+//!
+//! struct GoodBranchDomain;
+//!
+//! impl SearchDomain<u32> for GoodBranchDomain {
+//!     fn propose(
+//!         &mut self, _g: &ProgressiveMcgs<u32>, _parent: NodeId,
+//!         _branch: BranchId, _refs: &[NodeId], step_index: u32,
+//!     ) -> u32 {
+//!         step_index // payload is just the counter
+//!     }
+//!
+//!     fn evaluate(&mut self, g: &ProgressiveMcgs<u32>, node: NodeId) -> Reward {
+//!         if g.branch_of(node) == BranchId(0) { Reward::Progress }
+//!         else { Reward::Failure }
+//!     }
+//! }
+//!
+//! let mut search = ProgressiveMcgsSearch::new(
+//!     ProgressiveMcgsConfig::default(), /* n_branches */ 5,
+//! ).with_max_expansions(50);
+//! search.add_root(0);
+//! for b in 0..5 {
+//!     search.seed_branch(BranchId(b), 100 + b);
+//! }
+//!
+//! let mut domain = GoodBranchDomain;
+//! let mut rng = fastrand::Rng::with_seed(0xC0FFEE);
+//! let mut breakthroughs = 0;
+//! while let Some(step) = search.step(&mut domain, &mut rng) {
+//!     if step.reward == Reward::Breakthrough { breakthroughs += 1; }
+//! }
+//! // Branch 0 should produce at least one breakthrough under the schedule.
+//! assert!(breakthroughs >= 1, "expected ≥1 breakthrough on good branch");
+//! ```
+//!
+//! See [`.docs/progressive_mcgs.md`](../../../.docs/progressive_mcgs.md) for the
+//! full API reference, config knob table, and composition examples with
+//! `BanditPruner` / `ConstraintPruner`.
 
 pub mod graph;
 pub mod operators;
