@@ -364,17 +364,26 @@ pub struct SelfCondDraft {
     seq_len: usize,
     /// Vocab size per position.
     vocab_size: usize,
+    /// Scratch buffer for pass-1 output. Avoids per-call `vec![0.0f32; total]`
+    /// allocation inside [`SelfCondDraft::draft`].
+    pass1_buf: Vec<f32>,
+    /// Scratch buffer for pass-2 output. Avoids per-call `vec![0.0f32; total]`
+    /// allocation inside [`SelfCondDraft::draft`].
+    pass2_buf: Vec<f32>,
 }
 
 #[cfg(feature = "self_cond_draft")]
 impl SelfCondDraft {
     /// Create a new SelfCondDraft for the given dimensions.
     pub fn new(seq_len: usize, vocab_size: usize) -> Self {
+        let total = seq_len * vocab_size;
         Self {
-            sc_buffer: vec![0.0f32; seq_len * vocab_size],
+            sc_buffer: vec![0.0f32; total],
             sc_ready: false,
             seq_len,
             vocab_size,
+            pass1_buf: Vec::with_capacity(total),
+            pass2_buf: Vec::with_capacity(total),
         }
     }
 
@@ -387,6 +396,9 @@ impl SelfCondDraft {
         self.sc_buffer[..needed].fill(0.0);
         self.sc_ready = false;
         self.seq_len = seq_len;
+        // Pre-size pass scratch buffers so `draft` doesn't allocate per call.
+        grow_no_zero(&mut self.pass1_buf, needed);
+        grow_no_zero(&mut self.pass2_buf, needed);
     }
 
     /// Whether the SC buffer is ready for pass 2.
@@ -475,21 +487,47 @@ impl SelfCondDraft {
         if self.sc_buffer.len() < total {
             self.sc_buffer.resize(total, 0.0);
         }
+        // Ensure pass scratch buffers are sized (no per-call allocation).
+        grow_no_zero(&mut self.pass1_buf, total);
+        grow_no_zero(&mut self.pass2_buf, total);
 
-        // Pass 1: standard prediction
-        let mut pass1_out = vec![0.0f32; total];
-        predict_fn(0, &mut pass1_out);
+        // Pass 1: standard prediction (writes into pre-allocated scratch).
+        predict_fn(0, &mut self.pass1_buf[..total]);
 
-        // Store pass-1 result as self-conditioning
-        self.store_pass1(&pass1_out);
+        // Store pass-1 result as self-conditioning.
+        //
+        // `store_pass1` borrows `self` mutably (writes to `sc_buffer`) while we
+        // need to read `pass1_buf` from the same `self`. Split the borrow by
+        // temporarily moving `pass1_buf` out of `self` via `mem::take`, then
+        // putting it back after the call.
+        let pass1_buf = std::mem::take(&mut self.pass1_buf);
+        self.store_pass1(&pass1_buf[..total]);
+        self.pass1_buf = pass1_buf;
 
         // Pass 2: prediction with self-conditioning awareness
-        let mut pass2_out = vec![0.0f32; total];
-        predict_fn(1, &mut pass2_out);
+        predict_fn(1, &mut self.pass2_buf[..total]);
 
         // Blend pass-2 with SC buffer
-        self.blend_pass2(&pass2_out, blend, output);
+        self.blend_pass2(&self.pass2_buf[..total], blend, output);
     }
+}
+
+/// Grow a Vec to `new_len` without zeroing the new tail.
+///
+/// Caller guarantees the new elements will be fully written before any read.
+/// Avoids the O(n) memset that `Vec::resize` performs on the new tail.
+#[cfg(feature = "self_cond_draft")]
+#[inline]
+fn grow_no_zero(v: &mut Vec<f32>, new_len: usize) {
+    if v.len() >= new_len {
+        return;
+    }
+    if v.capacity() < new_len {
+        v.reserve(new_len - v.capacity());
+    }
+    // SAFETY: capacity is sufficient (via reserve above or pre-existing).
+    // Caller guarantees all `new_len` elements are written before any read.
+    unsafe { v.set_len(new_len) };
 }
 
 // ---------------------------------------------------------------------------

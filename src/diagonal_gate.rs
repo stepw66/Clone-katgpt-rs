@@ -200,27 +200,28 @@ impl DiagonalGate for WallDiagonalGate {
     }
 
     /// Apply query rescale: target[i] *= exp(gate_values[i]).
+    ///
+    /// In-place fused exp+mul — zero allocation. Skips the temporary buffer
+    /// by computing `target[i] *= gate_values[i].exp()` directly per element
+    /// (auto-vectorizable via LLVM). For very large `d`, callers that already
+    /// hold an exp buffer can hand it off via `simd_exp_inplace` themselves.
     #[inline]
     fn apply(&self, gate_values: &[f32], target: &mut [f32]) {
         let d = gate_values.len().min(target.len());
-        // target *= exp(gate_values)
-        // Copy to temp, exp, multiply — avoids mutating gate_values in place.
-        let mut exp_buf = vec![0.0f32; d];
-        exp_buf[..d].copy_from_slice(&gate_values[..d]);
-        simd_exp_inplace(&mut exp_buf[..d]);
-        simd_scale_mul_inplace(&mut target[..d], &exp_buf, 1.0);
+        for i in 0..d {
+            // Branch-free, auto-vectorizable. f32::exp is a single intrinsic
+            // on most targets (NEON/AVX2 have vector approximations).
+            target[i] *= unsafe { gate_values.get_unchecked(i) }.exp();
+        }
     }
 
     /// Apply key rescale: target[i] *= exp(-gate_values[i]).
     #[inline]
     fn apply_inverse(&self, gate_values: &[f32], target: &mut [f32]) {
         let d = gate_values.len().min(target.len());
-        // target *= exp(-gate_values)
-        let mut neg_buf = vec![0.0f32; d];
-        neg_buf[..d].copy_from_slice(&gate_values[..d]);
-        simd_scale_inplace(&mut neg_buf[..d], -1.0);
-        simd_exp_inplace(&mut neg_buf[..d]);
-        simd_scale_mul_inplace(&mut target[..d], &neg_buf, 1.0);
+        for i in 0..d {
+            target[i] *= unsafe { -(*gate_values.get_unchecked(i)) }.exp();
+        }
     }
 
     /// Reset prefix sums to zero.

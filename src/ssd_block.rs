@@ -90,6 +90,9 @@ pub struct SsdScratch {
     inter_state: Vec<f32>,
     /// Per-chunk decay product: `[n_chunks]`
     chunk_decay: Vec<f32>,
+    /// Per-position prefix decay Π_{k=cs}^{cs+i} a[k] within the current chunk: `[block_len]`.
+    /// Used by Step 4 to avoid O(block_len²) recomputation of chunk-local decay.
+    chunk_decay_prefix: Vec<f32>,
     /// `segsum` matrix for intra-chunk attention: `[block_len * block_len]`
     segsum_buf: Vec<f32>,
     /// Log-decay for current chunk (input to `segsum`): `[block_len]`
@@ -110,6 +113,7 @@ impl SsdScratch {
             chunk_states: vec![0.0; np * n_chunks],
             inter_state: vec![0.0; np * n_chunks],
             chunk_decay: vec![0.0; n_chunks],
+            chunk_decay_prefix: vec![0.0; block_len],
             segsum_buf: vec![0.0; block_len * block_len],
             log_a_buf: vec![0.0; block_len],
         }
@@ -127,6 +131,7 @@ impl SsdScratch {
         self.chunk_states.resize(np * n_chunks, 0.0);
         self.inter_state.resize(np * n_chunks, 0.0);
         self.chunk_decay.resize(n_chunks, 0.0);
+        self.chunk_decay_prefix.resize(block_len, 0.0);
         self.segsum_buf.resize(block_len * block_len, 0.0);
         self.log_a_buf.resize(block_len, 0.0);
     }
@@ -354,15 +359,28 @@ pub fn ssd_block_forward(
     for chunk in 1..n_chunks {
         let cs = chunk * block_len;
         let ce = (cs + block_len).min(seq_len);
+        let cl = ce - cs;
 
-        for t_local in 0..(ce - cs) {
+        // Pre-compute cumulative decay Π_{k=cs}^{cs+i} a[k] for i = 0..cl-1.
+        //
+        // Previously this was recomputed per t with an inner `for k in cs..=t` loop —
+        // O(block_len²) per chunk. The prefix product is O(block_len).
+        //
+        // SAFETY: `chunk_decay_prefix` is sized for the largest chunk length
+        // (block_len) by SsdScratch. We use only `cl` slots here.
+        let prefix = &mut scratch.chunk_decay_prefix[..cl];
+        let mut acc = 1.0f32;
+        for i in 0..cl {
+            acc *= a[cs + i];
+            prefix[i] = acc;
+        }
+
+        for t_local in 0..cl {
             let t = cs + t_local;
 
             // Decay from chunk start to position t: Π_{k=cs}^{t} a[k]
-            let mut decay = 1.0f32;
-            for k in cs..=t {
-                decay *= a[k];
-            }
+            // (precomputed above as prefix[t_local]).
+            let decay = prefix[t_local];
 
             if decay == 0.0 {
                 continue;

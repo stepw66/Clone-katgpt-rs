@@ -117,6 +117,9 @@ impl AlignedWeightMatrix {
 
     /// Convert from ternary weight representation to aligned float matrix.
     /// Each ternary value {-1, 0, +1} is converted to f32, then aligned.
+    ///
+    /// Writes directly into a pre-sized slice (no per-element `push`/growth),
+    /// and pads each row's tail with a single `fill(0.0)` call.
     pub fn from_ternary(
         pos_bits: &[u64],
         neg_bits: &[u64],
@@ -128,31 +131,43 @@ impl AlignedWeightMatrix {
         let row_dim = cols;
         let padded_dim = Self::pad_dim(row_dim);
 
-        let mut data = Vec::with_capacity(padded_dim * rows);
+        let total_len = padded_dim
+            .checked_mul(rows)
+            .expect("padded_dim * rows overflows");
+        let mut data = Vec::with_capacity(total_len);
+        // SAFETY: we will fully initialize `total_len` f32s below before any read.
+        // Each row writes exactly `cols` ternary values then `padding` zeros.
+        unsafe { data.set_len(total_len) };
         let mut offsets = Vec::with_capacity(rows);
 
+        let mut write_pos = 0usize;
         for r in 0..rows {
-            offsets.push(data.len());
-            let scale = row_scale[r];
+            offsets.push(write_pos);
+            let scale = unsafe { *row_scale.get_unchecked(r) };
+            let row_base = r * blocks64;
+
+            // Decode ternary bits into the destination row slice directly.
+            // Branch-free inner: compute `val = sign * scale` where sign ∈ {-1, 0, +1}.
+            let row_dst = &mut data[write_pos..write_pos + cols];
             for c in 0..cols {
                 let block = c >> 6;
-                let bit = c & 63;
-                let mask = 1u64 << bit;
-                let idx = r * blocks64 + block;
-
-                let val = if pos_bits[idx] & mask != 0 {
-                    scale
-                } else if neg_bits[idx] & mask != 0 {
-                    -scale
-                } else {
-                    0.0
+                let bit = 1u64 << (c & 63);
+                let idx = row_base + block;
+                let pos = unsafe { *pos_bits.get_unchecked(idx) } & bit != 0;
+                let neg = unsafe { *neg_bits.get_unchecked(idx) } & bit != 0;
+                let sign = (pos as i32) - (neg as i32);
+                // sign ∈ {-1, 0, +1}; multiply by scale once.
+                unsafe {
+                    *row_dst.get_unchecked_mut(c) = (sign as f32) * scale;
                 };
-                data.push(val);
             }
-            // Pad to cache line
-            for _ in cols..padded_dim {
-                data.push(0.0);
+
+            // Zero-pad the tail of this row in one shot.
+            let pad = padded_dim - cols;
+            if pad > 0 {
+                data[write_pos + cols..write_pos + padded_dim].fill(0.0);
             }
+            write_pos += padded_dim;
         }
 
         Self {

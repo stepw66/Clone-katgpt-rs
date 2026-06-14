@@ -116,27 +116,59 @@ pub fn segsum(a: &[f32], out: &mut [f32]) {
         return;
     }
 
-    // Cumulative sum of a
-    let mut cumsum = vec![0.0f32; t]; // Small, stack-like allocation for the cumsum
-    cumsum[0] = a[0];
-    for i in 1..t {
-        cumsum[i] = cumsum[i - 1] + a[i];
-    }
+    // Pre-fill with -inf in one shot. This makes the lower-triangular fill
+    // loop below branch-free (no per-element `if j <= i` check); only the
+    // entries with `j <= i` are overwritten.
+    out.fill(f32::NEG_INFINITY);
 
-    // segsum[i, j] = cumsum[i] - cumsum[j] for j <= i, else -inf
-    for i in 0..t {
-        for j in 0..t {
-            let idx = i * t + j;
-            if j <= i {
+    // Compute segsum using an inline stack buffer when t is small (common case
+    // for SSM chunked kernels where T ≤ 256), avoiding any heap allocation
+    // per call. The body is in a closure so both stack-buffer and heap-buffer
+    // paths share the same borrow type.
+    //
+    // SAFETY of the inline path: we initialize `t` elements of `buf` below
+    // before reading any of them.
+    const INLINE_MAX: usize = 256;
+    let mut inline_buf: [std::mem::MaybeUninit<f32>; INLINE_MAX] =
+        [const { std::mem::MaybeUninit::uninit() }; INLINE_MAX];
+
+    // Closure writes cumsum into `cumsum`, then writes lower-triangular segsum
+    // into `out` using `ci - cumsum[j]` for j in 0..=i. The inner loop is
+    // branch-free (upper triangle already -inf) and auto-vectorizes.
+    let mut compute = |cumsum: &mut [f32]| {
+        cumsum[0] = a[0];
+        for i in 1..t {
+            cumsum[i] = cumsum[i - 1] + a[i];
+        }
+        for i in 0..t {
+            let row_offset = i * t;
+            let ci = unsafe { *cumsum.get_unchecked(i) };
+            for j in 0..=i {
                 unsafe {
-                    *out.get_unchecked_mut(idx) = cumsum.get_unchecked(i) - cumsum.get_unchecked(j);
-                }
-            } else {
-                unsafe {
-                    *out.get_unchecked_mut(idx) = f32::NEG_INFINITY;
+                    *out.get_unchecked_mut(row_offset + j) =
+                        ci - *cumsum.get_unchecked(j);
                 }
             }
         }
+    };
+
+    if t <= INLINE_MAX {
+        // Reinterpret the first `t` MaybeUninit<f32> slots as `&mut [f32]`.
+        // SAFETY: MaybeUninit<f32> has the same layout as f32. We write all
+        // `t` elements in `compute` before any read.
+        let cumsum: &mut [f32] = unsafe {
+            std::slice::from_raw_parts_mut(inline_buf.as_mut_ptr().cast::<f32>(), t)
+        };
+        compute(cumsum);
+        // inline_buf lives on the stack and is dropped at scope end; nothing
+        // to free.
+    } else {
+        // Rare: very long sequence. Heap-allocate once.
+        let mut cumsum_storage: Vec<f32> = Vec::with_capacity(t);
+        // SAFETY: `compute` initializes all `t` elements before reading any.
+        unsafe { cumsum_storage.set_len(t) };
+        compute(cumsum_storage.as_mut_slice());
+        // `cumsum_storage` drops here.
     }
 }
 

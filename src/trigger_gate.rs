@@ -150,6 +150,9 @@ impl Default for RvThresholds {
 // ---------------------------------------------------------------------------
 
 /// Adaptive compute-tier gate that promotes/demotes based on live load metrics.
+///
+/// Field order is already packed: 8-byte-aligned atomics/mutexes first,
+/// then `AtomicU8 + bool + bool` trailing (3 bytes contiguous, 1-byte aligned).
 pub struct TriggerGate {
     config: TriggerGateConfig,
     /// Monotonically increasing inference counter.

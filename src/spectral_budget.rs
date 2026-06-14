@@ -391,20 +391,15 @@ pub fn rank_p_retain(
             .unwrap_or(std::cmp::Ordering::Equal)
     });
 
-    // Zero rows NOT in top `keep`
-    let top_set: Vec<bool> = {
-        let mut s = vec![false; rows];
-        for &idx in &indices[..keep] {
-            s[idx] = true;
-        }
-        s
-    };
-
-    for i in 0..rows {
-        if !top_set[i] {
-            let row_start = i * cols;
-            ns_output[row_start..row_start + cols].fill(0.0);
-        }
+    // Zero rows NOT in top `keep`.
+    //
+    // Avoid the auxiliary `Vec<bool>` mask: walk `indices[keep..]` directly.
+    // After `select_nth_unstable_by`, indices[keep..] contains exactly the rows
+    // to discard (in unspecified order). Clearing those rows in place is O(cols)
+    // per row, matching the previous mask-based approach but with no allocation.
+    for &discard_idx in &indices[keep..] {
+        let row_start = discard_idx * cols;
+        ns_output[row_start..row_start + cols].fill(0.0);
     }
 
     keep
