@@ -427,6 +427,11 @@ fn max_format_share(probes: &[ProbeOutput]) -> f32 {
 fn mean_pairwise_kl(probes: &[ProbeOutput]) -> f32 {
     let mut sum: f32 = 0.0;
     let mut pairs: u32 = 0;
+    // Stack scratch buffers reused across all pairwise KL ops — zero heap
+    // allocations in the O(K²) loop. K ≤ TVP_MAX_PROBES so worst case is
+    // C(8,2)=28 pairs × 2 softmax_normalizes = 56 saved allocs per aggregate.
+    let mut pa = [0.0f32; TVP_TOP_LOGIT_CAP];
+    let mut pb = [0.0f32; TVP_TOP_LOGIT_CAP];
     for i in 0..probes.len() {
         let li = probes[i].logits();
         if li.is_empty() {
@@ -442,7 +447,7 @@ fn mean_pairwise_kl(probes: &[ProbeOutput]) -> f32 {
             if n == 0 {
                 continue;
             }
-            let kl_ij = symmetric_kl(&li[..n], &lj[..n]);
+            let kl_ij = symmetric_kl_into(&li[..n], &lj[..n], &mut pa, &mut pb);
             sum += kl_ij;
             pairs += 1;
         }
@@ -460,45 +465,59 @@ fn mean_pairwise_kl(probes: &[ProbeOutput]) -> f32 {
 /// probability — sigmoid (not softmax) is used at the routing layer.
 fn symmetric_kl(a: &[f32], b: &[f32]) -> f32 {
     debug_assert_eq!(a.len(), b.len());
+    let mut pa = [0.0f32; TVP_TOP_LOGIT_CAP];
+    let mut pb = [0.0f32; TVP_TOP_LOGIT_CAP];
+    symmetric_kl_into(a, b, &mut pa, &mut pb)
+}
+
+/// Zero-allocation symmetric KL using caller-provided stack buffers.
+/// `pa_buf` and `pb_buf` must be at least `a.len()` (== `b.len()`) elements
+/// long. Their contents are overwritten.
+#[inline]
+fn symmetric_kl_into(a: &[f32], b: &[f32], pa_buf: &mut [f32], pb_buf: &mut [f32]) -> f32 {
+    debug_assert_eq!(a.len(), b.len());
     let n = a.len();
     if n == 0 {
         return 0.0;
     }
+    debug_assert!(pa_buf.len() >= n && pb_buf.len() >= n);
     // Normalize each to a distribution via softmax. This is internal to the
     // KL computation — the router itself uses sigmoid thresholds.
-    let (pa, pb) = (softmax_inplace(a), softmax_inplace(b));
+    fill_softmax(a, &mut pa_buf[..n]);
+    fill_softmax(b, &mut pb_buf[..n]);
     let mut kl_ab = 0.0;
     let mut kl_ba = 0.0;
     for i in 0..n {
-        let pai = pa[i].max(1e-12);
-        let pbi = pb[i].max(1e-12);
+        let pai = pa_buf[i].max(1e-12);
+        let pbi = pb_buf[i].max(1e-12);
         kl_ab += pai * (pai / pbi).ln();
         kl_ba += pbi * (pbi / pai).ln();
     }
     0.5 * (kl_ab + kl_ba)
 }
 
-/// Numerically stable softmax into a stack buffer. Returns normalized probs.
+/// Numerically stable softmax into a caller-provided buffer. Writes
+/// normalized probs in place. Caller must size `out` to at least `logits.len()`.
 /// Note: this is the *only* place softmax appears — internal to KL computation.
 /// Routing decisions use sigmoid thresholds (per project conventions).
-fn softmax_inplace(logits: &[f32]) -> Vec<f32> {
+#[inline]
+fn fill_softmax(logits: &[f32], out: &mut [f32]) {
     let n = logits.len();
     if n == 0 {
-        return Vec::new();
+        return;
     }
+    debug_assert!(out.len() >= n);
     let max = logits.iter().copied().fold(f32::NEG_INFINITY, f32::max);
-    let mut out = Vec::with_capacity(n);
     let mut sum = 0.0;
-    for &l in logits {
-        let e = (l - max).exp();
-        out.push(e);
+    for i in 0..n {
+        let e = (logits[i] - max).exp();
+        out[i] = e;
         sum += e;
     }
     let inv = if sum > 0.0 { 1.0 / sum } else { 0.0 };
-    for v in &mut out {
+    for v in &mut out[..n] {
         *v *= inv;
     }
-    out
 }
 
 // ── Self-learning: threshold adapter ────────────────────────────

@@ -208,15 +208,6 @@ impl SpecCompiler {
         let mut rules = Vec::new();
 
         if spec_lower.contains("json") {
-            // JSON structural tokens: { } [ ] : , " and whitespace
-            let json_structural = CompactBitmap::from_token_indices(
-                [
-                    b'{', b'}', b'[', b']', b':', b',', b'"', b' ', b'\n', b'\t', b'\r',
-                ]
-                .iter()
-                .map(|&b| b as usize),
-            );
-
             // Depth 0: first token must be { or [ (for objects/arrays)
             rules.push(SpecRule {
                 depth: Some(0),

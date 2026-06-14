@@ -317,6 +317,22 @@ pub struct GpuBackend {
     logits_buf: Option<Buffer>,   // [vocab_size]
     // GPU-side KV cache: Vec of (key_buffer, value_buffer) per layer
     kv_cache: Option<Vec<(Buffer, Buffer)>>,
+
+    // Cached scalar buffers (allocated once in compile(), reused every forward).
+    // These represent config-derived constants that never change between calls —
+    // previously the forward path allocated ~9 + n_layer + 3*n_head*n_layer
+    // Metal buffers per call (kernel IPC allocations). See Plan: GPU scalar cache.
+    n_embd_scalar: Option<Buffer>,      // u32 n_embd — doubles as n_embd_in_dim/mlp_in_dim/kv_in_dim
+    kv_dim_scalar: Option<Buffer>,      // u32 kv_dim
+    head_dim_scalar: Option<Buffer>,    // u32 head_dim
+    mlp_hidden_scalar: Option<Buffer>,  // u32 mlp_hidden (mlp_w2 in_dim)
+    eps_scalar: Option<Buffer>,         // f32 rmsnorm eps
+    scale_scalar: Option<Buffer>,       // f32 attention scale (1/sqrt(head_dim))
+    // Per-head offset buffers (q_off, kv_off, out_off) — pre-computed once
+    // since head layout is fixed at compile time.
+    q_off_bufs: Option<Vec<Buffer>>,
+    kv_off_bufs: Option<Vec<Buffer>>,
+    out_off_bufs: Option<Vec<Buffer>>,
 }
 
 impl GpuBackend {
@@ -347,6 +363,15 @@ impl GpuBackend {
             scores_buf: None,
             logits_buf: None,
             kv_cache: None,
+            n_embd_scalar: None,
+            kv_dim_scalar: None,
+            head_dim_scalar: None,
+            mlp_hidden_scalar: None,
+            eps_scalar: None,
+            scale_scalar: None,
+            q_off_bufs: None,
+            kv_off_bufs: None,
+            out_off_bufs: None,
         })
     }
 }
@@ -381,14 +406,12 @@ impl InferenceBackend for GpuBackend {
 
         let n_embd = config.n_embd;
         let kv_dim = kv_dim(config);
-        let head_dim = config.head_dim;
         let n_head = config.n_head;
-        let n_kv_head = config.n_kv_head;
         let mlp_hidden = config.mlp_hidden;
         let vocab_size = config.vocab_size;
-        let eps = config.rms_norm_eps as f32;
-        let scale = 1.0f32 / (head_dim as f32).sqrt();
         let seq_len = pos + 1; // number of cached positions
+        // head_dim, n_kv_head, eps, scale are consumed by compile() into cached
+        // scalar buffers — no longer needed in forward() per-call.
 
         // Shortcut references to scratch buffers
         let x_buf = self.x_buf.as_ref().unwrap();
@@ -402,8 +425,27 @@ impl InferenceBackend for GpuBackend {
         let scores_buf = self.scores_buf.as_ref().unwrap();
         let logits_buf = self.logits_buf.as_ref().unwrap();
 
+        // Cached scalar buffers (allocated once in compile()). These replace
+        // per-forward scalar_buffer() calls that triggered Metal IPC allocations.
+        let n_embd_buf = self.n_embd_scalar.as_ref().unwrap();
+        let kv_dim_buf = self.kv_dim_scalar.as_ref().unwrap();
+        let head_dim_buf = self.head_dim_scalar.as_ref().unwrap();
+        let eps_buf = self.eps_scalar.as_ref().unwrap();
+        let scale_buf = self.scale_scalar.as_ref().unwrap();
+        let mlp_hidden_in_dim_buf = self.mlp_hidden_scalar.as_ref().unwrap();
+        let q_off_bufs = self.q_off_bufs.as_ref().unwrap();
+        let kv_off_bufs = self.kv_off_bufs.as_ref().unwrap();
+        let out_off_bufs = self.out_off_bufs.as_ref().unwrap();
+        // n_embd_buf doubles as n_embd_in_dim_buf, mlp_in_dim_buf, and kv_in_dim_buf
+        // (all carry the same n_embd value for these matmul in_dim arguments).
+
         let device = &*self.device;
         let command_queue = &self.command_queue;
+
+        // Per-call scalar buffers (these change every forward, so cannot be cached):
+        // seq_len grows as context extends; pos advances by 1 each token.
+        let seq_len_buf = scalar_buffer(device, &(seq_len as u32));
+        let pos_buf = scalar_buffer(device, &(pos as u32));
 
         // Helper: dispatch a 1D compute kernel with `n` total threads
         let dispatch_1d =
@@ -422,16 +464,10 @@ impl InferenceBackend for GpuBackend {
             encoder.dispatch_thread_groups(MTLSize::new(1, 1, 1), MTLSize::new(1, 1, 1));
         };
 
-        // Helper constants as buffers (created once per forward pass, reused across encoder calls)
-        let n_embd_buf = scalar_buffer(device, &(n_embd as u32));
-        let kv_dim_buf = scalar_buffer(device, &(kv_dim as u32));
-        let head_dim_buf = scalar_buffer(device, &(head_dim as u32));
-        let eps_buf = scalar_buffer(device, &eps);
-        let scale_buf = scalar_buffer(device, &scale);
-        let seq_len_buf = scalar_buffer(device, &(seq_len as u32));
-        let n_embd_in_dim_buf = scalar_buffer(device, &(n_embd as u32)); // in_dim for matmul
-        let mlp_in_dim_buf = scalar_buffer(device, &(n_embd as u32)); // in_dim for mlp_w1 matmul
-        let mlp_hidden_in_dim_buf = scalar_buffer(device, &(mlp_hidden as u32)); // in_dim for mlp_w2 matmul
+        // Helper constants as buffers — cached scalar buffers allocated once
+        // in compile() (n_embd_buf, kv_dim_buf, head_dim_buf, eps_buf, scale_buf,
+        // mlp_hidden_in_dim_buf). Only seq_len_buf is per-call (context grows).
+        // n_embd_buf doubles as n_embd_in_dim_buf, mlp_in_dim_buf, kv_in_dim_buf.
 
         // ── Step 1: Embedding lookup x = wte[token] + wpe[pos] ──
         {
@@ -465,8 +501,8 @@ impl InferenceBackend for GpuBackend {
             encoder.set_buffer(0, Some(x_buf), 0);
             encoder.set_buffer(1, Some(xr_buf), 0);
             encoder.set_buffer(2, Some(&wb.attn_norm_gamma[layer_idx]), 0);
-            encoder.set_buffer(3, Some(&n_embd_buf), 0);
-            encoder.set_buffer(4, Some(&eps_buf), 0);
+            encoder.set_buffer(3, Some(n_embd_buf), 0);
+            encoder.set_buffer(4, Some(eps_buf), 0);
             dispatch_single(encoder, &pipelines.rmsnorm);
 
             // 2b. QKV projection: q = wq @ xr, k = wk @ xr, v = wv @ xr
@@ -474,33 +510,31 @@ impl InferenceBackend for GpuBackend {
             encoder.set_buffer(0, Some(&wb.attn_wq[layer_idx]), 0);
             encoder.set_buffer(1, Some(xr_buf), 0);
             encoder.set_buffer(2, Some(q_buf), 0);
-            encoder.set_buffer(3, Some(&n_embd_in_dim_buf), 0);
+            encoder.set_buffer(3, Some(n_embd_buf), 0); // in_dim = n_embd
             dispatch_1d(encoder, &pipelines.matmul, n_embd as u64);
 
             // Key: k = attn_wk @ xr  [kv_dim output, n_embd input]
-            let kv_in_dim_buf = scalar_buffer(device, &(n_embd as u32));
             encoder.set_buffer(0, Some(&wb.attn_wk[layer_idx]), 0);
             encoder.set_buffer(1, Some(xr_buf), 0);
             encoder.set_buffer(2, Some(k_buf), 0);
-            encoder.set_buffer(3, Some(&kv_in_dim_buf), 0);
+            encoder.set_buffer(3, Some(n_embd_buf), 0); // in_dim = n_embd (cached)
             dispatch_1d(encoder, &pipelines.matmul, kv_dim as u64);
 
             // Value: v = attn_wv @ xr  [kv_dim output, n_embd input]
             encoder.set_buffer(0, Some(&wb.attn_wv[layer_idx]), 0);
             encoder.set_buffer(1, Some(xr_buf), 0);
             encoder.set_buffer(2, Some(v_buf), 0);
-            encoder.set_buffer(3, Some(&kv_in_dim_buf), 0);
+            encoder.set_buffer(3, Some(n_embd_buf), 0); // in_dim = n_embd (cached)
             dispatch_1d(encoder, &pipelines.matmul, kv_dim as u64);
 
             // 2c. KV cache store: write k, v into cache at position pos
             let (key_cache_buf, value_cache_buf) = &kv_cache[layer_idx];
-            let pos_buf = scalar_buffer(device, &(pos as u32));
             encoder.set_buffer(0, Some(k_buf), 0);
             encoder.set_buffer(1, Some(v_buf), 0);
             encoder.set_buffer(2, Some(key_cache_buf), 0);
             encoder.set_buffer(3, Some(value_cache_buf), 0);
-            encoder.set_buffer(4, Some(&pos_buf), 0);
-            encoder.set_buffer(5, Some(&kv_dim_buf), 0);
+            encoder.set_buffer(4, Some(&pos_buf), 0); // cached at forward entry
+            encoder.set_buffer(5, Some(kv_dim_buf), 0);
             dispatch_1d(encoder, &pipelines.kv_store, kv_dim as u64);
 
             // 2d. Multi-head attention
@@ -512,14 +546,10 @@ impl InferenceBackend for GpuBackend {
             cmd_buffer.wait_until_completed();
 
             for h in 0..n_head {
-                let kv_group = h * n_kv_head / n_head;
-                let q_offset = (h * head_dim) as u32;
-                let kv_offset = (kv_group * head_dim) as u32;
-                let out_offset = (h * head_dim) as u32;
-
-                let q_off_buf = scalar_buffer(device, &q_offset);
-                let kv_off_buf = scalar_buffer(device, &kv_offset);
-                let out_off_buf = scalar_buffer(device, &out_offset);
+                // Per-head offsets — pre-computed buffers cached at compile().
+                let q_off_buf = &q_off_bufs[h];
+                let kv_off_buf = &kv_off_bufs[h];
+                let out_off_buf = &out_off_bufs[h];
 
                 let (key_cache_buf, value_cache_buf) = &kv_cache[layer_idx];
 
@@ -529,11 +559,11 @@ impl InferenceBackend for GpuBackend {
                 // Attention scores: scores[t] = q[h*head_dim..] . key_cache[t*kv_dim + kv_group*head_dim..] * scale
                 enc.set_buffer(0, Some(q_buf), 0);
                 enc.set_buffer(1, Some(key_cache_buf), 0);
-                enc.set_buffer(2, Some(&q_off_buf), 0);
-                enc.set_buffer(3, Some(&kv_off_buf), 0);
-                enc.set_buffer(4, Some(&kv_dim_buf), 0);
-                enc.set_buffer(5, Some(&head_dim_buf), 0);
-                enc.set_buffer(6, Some(&scale_buf), 0);
+                enc.set_buffer(2, Some(q_off_buf), 0);
+                enc.set_buffer(3, Some(kv_off_buf), 0);
+                enc.set_buffer(4, Some(kv_dim_buf), 0);
+                enc.set_buffer(5, Some(head_dim_buf), 0);
+                enc.set_buffer(6, Some(scale_buf), 0);
                 enc.set_buffer(7, Some(scores_buf), 0);
                 dispatch_1d(enc, &pipelines.attention_score, seq_len as u64);
 
@@ -546,10 +576,10 @@ impl InferenceBackend for GpuBackend {
                 enc.set_buffer(0, Some(scores_buf), 0);
                 enc.set_buffer(1, Some(value_cache_buf), 0);
                 enc.set_buffer(2, Some(attn_out_buf), 0);
-                enc.set_buffer(3, Some(&out_off_buf), 0);
-                enc.set_buffer(4, Some(&kv_off_buf), 0);
-                enc.set_buffer(5, Some(&kv_dim_buf), 0);
-                enc.set_buffer(6, Some(&head_dim_buf), 0);
+                enc.set_buffer(3, Some(out_off_buf), 0);
+                enc.set_buffer(4, Some(kv_off_buf), 0);
+                enc.set_buffer(5, Some(kv_dim_buf), 0);
+                enc.set_buffer(6, Some(head_dim_buf), 0);
                 enc.set_buffer(7, Some(&seq_len_buf), 0);
                 dispatch_single(enc, &pipelines.attention_value);
 
@@ -565,7 +595,7 @@ impl InferenceBackend for GpuBackend {
                 enc.set_buffer(0, Some(&wb.attn_wo[layer_idx]), 0);
                 enc.set_buffer(1, Some(attn_out_buf), 0);
                 enc.set_buffer(2, Some(x_buf), 0);
-                enc.set_buffer(3, Some(&n_embd_in_dim_buf), 0);
+                enc.set_buffer(3, Some(n_embd_buf), 0); // in_dim = n_embd (cached)
                 dispatch_1d(enc, &pipelines.matmul, n_embd as u64);
                 enc.end_encoding();
                 cmd_buf.commit();
@@ -603,8 +633,8 @@ impl InferenceBackend for GpuBackend {
                 enc.set_buffer(0, Some(x_buf), 0);
                 enc.set_buffer(1, Some(x_buf), 0); // in-place: output = input
                 enc.set_buffer(2, Some(&wb.mlp_norm_gamma[layer_idx]), 0);
-                enc.set_buffer(3, Some(&n_embd_buf), 0);
-                enc.set_buffer(4, Some(&eps_buf), 0);
+                enc.set_buffer(3, Some(n_embd_buf), 0);
+                enc.set_buffer(4, Some(eps_buf), 0);
                 dispatch_single(enc, &pipelines.rmsnorm);
                 enc.end_encoding();
                 cmd_buf.commit();
@@ -619,7 +649,7 @@ impl InferenceBackend for GpuBackend {
                 enc.set_buffer(0, Some(&wb.mlp_w1[layer_idx]), 0);
                 enc.set_buffer(1, Some(x_buf), 0);
                 enc.set_buffer(2, Some(hidden_buf), 0);
-                enc.set_buffer(3, Some(&mlp_in_dim_buf), 0);
+                enc.set_buffer(3, Some(n_embd_buf), 0); // in_dim = n_embd (cached)
                 dispatch_1d(enc, &pipelines.matmul, mlp_hidden as u64);
 
                 // ReLU on hidden
@@ -631,7 +661,7 @@ impl InferenceBackend for GpuBackend {
                 enc.set_buffer(0, Some(&wb.mlp_w2[layer_idx]), 0);
                 enc.set_buffer(1, Some(hidden_buf), 0);
                 enc.set_buffer(2, Some(x_buf), 0);
-                enc.set_buffer(3, Some(&mlp_hidden_in_dim_buf), 0);
+                enc.set_buffer(3, Some(mlp_hidden_in_dim_buf), 0);
                 dispatch_1d(enc, &pipelines.matmul, n_embd as u64);
 
                 enc.end_encoding();
@@ -660,7 +690,7 @@ impl InferenceBackend for GpuBackend {
             enc.set_buffer(0, Some(&wb.lm_head), 0);
             enc.set_buffer(1, Some(x_buf), 0);
             enc.set_buffer(2, Some(logits_buf), 0);
-            enc.set_buffer(3, Some(&n_embd_in_dim_buf), 0);
+            enc.set_buffer(3, Some(n_embd_buf), 0); // in_dim = n_embd (cached)
             dispatch_1d(enc, &pipelines.matmul, vocab_size as u64);
             enc.end_encoding();
             cmd_buf.commit();
@@ -767,6 +797,34 @@ impl InferenceBackend for GpuBackend {
             })
             .collect();
 
+        // Pre-allocate cached scalar buffers that never change between forward() calls.
+        // Previously these were allocated per-forward via scalar_buffer(), causing
+        // ~9 + n_layer + 3*n_head*n_layer Metal `device.new_buffer()` IPC calls
+        // every token. Now allocated once at compile().
+        let n_head = config.n_head;
+        let n_kv_head = config.n_kv_head;
+        let head_dim = config.head_dim;
+        let eps_val = config.rms_norm_eps as f32;
+        let scale_val = 1.0f32 / (head_dim as f32).sqrt();
+
+        let n_embd_scalar = scalar_buffer(device, &(n_embd as u32));
+        let kv_dim_scalar = scalar_buffer(device, &(kvd as u32));
+        let head_dim_scalar = scalar_buffer(device, &(head_dim as u32));
+        let mlp_hidden_scalar = scalar_buffer(device, &(config.mlp_hidden as u32));
+        let eps_scalar = scalar_buffer(device, &eps_val);
+        let scale_scalar = scalar_buffer(device, &scale_val);
+
+        // Per-head offset buffers — head layout is fixed at compile time.
+        let mut q_off_bufs = Vec::with_capacity(n_head);
+        let mut kv_off_bufs = Vec::with_capacity(n_head);
+        let mut out_off_bufs = Vec::with_capacity(n_head);
+        for h in 0..n_head {
+            let kv_group = h * n_kv_head / n_head;
+            q_off_bufs.push(scalar_buffer(device, &((h * head_dim) as u32)));
+            kv_off_bufs.push(scalar_buffer(device, &((kv_group * head_dim) as u32)));
+            out_off_bufs.push(scalar_buffer(device, &((h * head_dim) as u32)));
+        }
+
         // Store everything
         self.pipelines = Some(pipelines);
         self.weight_buffers = Some(wb);
@@ -781,6 +839,15 @@ impl InferenceBackend for GpuBackend {
         self.scores_buf = Some(scores_buf);
         self.logits_buf = Some(logits_buf);
         self.kv_cache = Some(kv_cache);
+        self.n_embd_scalar = Some(n_embd_scalar);
+        self.kv_dim_scalar = Some(kv_dim_scalar);
+        self.head_dim_scalar = Some(head_dim_scalar);
+        self.mlp_hidden_scalar = Some(mlp_hidden_scalar);
+        self.eps_scalar = Some(eps_scalar);
+        self.scale_scalar = Some(scale_scalar);
+        self.q_off_bufs = Some(q_off_bufs);
+        self.kv_off_bufs = Some(kv_off_bufs);
+        self.out_off_bufs = Some(out_off_bufs);
         self.config_snapshot = Some(config.clone());
         self.compiled = true;
         self.needs_recompile = false;
