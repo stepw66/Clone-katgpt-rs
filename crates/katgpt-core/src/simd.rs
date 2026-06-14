@@ -5796,6 +5796,28 @@ mod tests {
     }
 
     #[test]
+    fn test_entropy_with_neg_inf_logprobs() {
+        // logp = -∞ (zero-prob tokens) must not poison the sum via 0·(-∞) = NaN.
+        // Two valid tokens with equal mass + two impossible tokens → H = ln(2) ≈ 0.693.
+        let logprobs: Vec<f32> = vec![
+            (0.5f32).ln(),
+            (0.5f32).ln(),
+            f32::NEG_INFINITY,
+            f32::NEG_INFINITY,
+        ];
+        let h = entropy_f32(&logprobs);
+        let expected = 2.0f32.ln();
+        assert!(
+            h.is_finite(),
+            "entropy must be finite when some logp = -∞, got {h}"
+        );
+        assert!(
+            (h - expected).abs() < 0.01,
+            "two-token uniform entropy should be ln(2)≈0.693, got {h}"
+        );
+    }
+
+    #[test]
     fn test_coincidence_full_match() {
         let top_k = vec![0, 1, 2, 3];
         let parent = vec![0, 1, 2, 3];
