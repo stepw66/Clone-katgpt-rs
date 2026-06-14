@@ -35,6 +35,12 @@ use crate::pruners::thicket_variance_probe::{
     TvpConfig, TvpSignal, TvpTierDecision, tvp_tier_decision,
 };
 
+// Plan 269 — CHIAR (Chiaroscuro Attention) router observation hook.
+// Observation-only: exposes CHIAR KV strategy utilization and regime gate
+// via RouterStats. Does NOT influence tier routing (CHIAR is per-token).
+#[cfg(feature = "chiaroscuro")]
+use crate::chiaroscuro::{ChiarRouterHook, ChiarRouterStats};
+
 #[cfg(feature = "modality_pruned_load")]
 use crate::pipeline_pruner::QueryClassifier;
 
@@ -72,6 +78,10 @@ pub struct RouterStats {
     /// Current TVP signal (Plan 267). `None` if `thicket_variance_probe` disabled.
     #[cfg(feature = "thicket_variance_probe")]
     pub tvp_signal: Option<TvpSignal>,
+    /// CHIAR (Plan 269) router observation stats. `None` if `chiaroscuro` disabled
+    /// or no keys observed yet.
+    #[cfg(feature = "chiaroscuro")]
+    pub chiar_stats: Option<ChiarRouterStats>,
 }
 
 // ---------------------------------------------------------------------------
@@ -130,6 +140,10 @@ pub struct InferenceRouter {
     /// TVP config (Plan 267) — promote/demote thresholds + probe knobs.
     #[cfg(feature = "thicket_variance_probe")]
     tvp_config: TvpConfig,
+    /// CHIAR observation hook (Plan 269 T15) — KV strategy utilization + regime gate.
+    /// Observation-only; does NOT influence tier routing.
+    #[cfg(feature = "chiaroscuro")]
+    chiar_hook: ChiarRouterHook,
 }
 
 impl InferenceRouter {
@@ -184,6 +198,8 @@ impl InferenceRouter {
             tvp_signal: None,
             #[cfg(feature = "thicket_variance_probe")]
             tvp_config: TvpConfig::default(),
+            #[cfg(feature = "chiaroscuro")]
+            chiar_hook: ChiarRouterHook::new(),
         }
     }
 
@@ -615,6 +631,11 @@ impl InferenceRouter {
             breakeven: self.breakeven.stats(),
             #[cfg(feature = "thicket_variance_probe")]
             tvp_signal: self.tvp_signal,
+            #[cfg(feature = "chiaroscuro")]
+            chiar_stats: {
+                let s = self.chiar_hook.stats();
+                if s.tokens_observed > 0 { Some(s) } else { None }
+            },
         }
     }
 
@@ -725,6 +746,37 @@ impl InferenceRouter {
     #[cfg(feature = "thicket_variance_probe")]
     pub fn tvp_signal(&self) -> Option<TvpSignal> {
         self.tvp_signal
+    }
+
+    // ── CHIAR Observation API (Plan 269 T15) ────────────────────
+
+    /// Observe a key embedding for CHIAR KV strategy classification (Plan 269).
+    ///
+    /// Updates the τ calibrator and dispatches the key to a storage strategy
+    /// (DctTruncated / Quantized / FullPrecision). Call this for each key
+    /// entering the KV cache when the `chiaroscuro` feature is enabled.
+    ///
+    /// Observation-only — does NOT influence tier routing.
+    #[cfg(feature = "chiaroscuro")]
+    pub fn observe_chiar_key(&mut self, key: &[f32]) {
+        self.chiar_hook.observe_key(key);
+    }
+
+    /// Observe a prompt token's spectral entropy for CHIAR regime classification (Plan 269).
+    ///
+    /// Updates the Welford variance tracker inside the regime gate.
+    /// Observation-only — does NOT influence tier routing.
+    #[cfg(feature = "chiaroscuro")]
+    pub fn observe_chiar_prompt_token(&mut self, h: f32) {
+        self.chiar_hook.observe_prompt_token(h);
+    }
+
+    /// Get the current CHIAR router stats snapshot (Plan 269).
+    /// Returns `None` if no keys have been observed yet.
+    #[cfg(feature = "chiaroscuro")]
+    pub fn chiar_stats(&self) -> Option<ChiarRouterStats> {
+        let s = self.chiar_hook.stats();
+        if s.tokens_observed > 0 { Some(s) } else { None }
     }
 
     /// Update TVP config at runtime (Plan 267).
@@ -1803,6 +1855,44 @@ mod tests {
             correct_tvp_only < n,
             "TVP-only should miss the RV-high-TVP-low class"
         );
+    }
+
+    // ── CHIAR integration tests (Plan 269 T15) ──────────────────
+
+    #[cfg(feature = "chiaroscuro")]
+    #[test]
+    fn chiar_hook_reports_none_when_no_keys_observed() {
+        let router = fast_router(false, false);
+        // No keys observed → stats should be None.
+        assert!(router.chiar_stats().is_none());
+    }
+
+    #[cfg(feature = "chiaroscuro")]
+    #[test]
+    fn chiar_hook_reports_stats_after_observing_keys() {
+        let mut router = fast_router(false, false);
+        // Observe a mix of smooth and high-entropy keys.
+        let smooth_key = vec![0.5f32; 256];
+        let entropy_key: Vec<f32> = (0..256).map(|i| ((i as f32) * 0.3).sin().cos()).collect();
+        for _ in 0..50 {
+            router.observe_chiar_key(&smooth_key);
+            router.observe_chiar_key(&entropy_key);
+        }
+        let stats = router.chiar_stats().expect("stats after 100 keys");
+        assert!(stats.tokens_observed >= 100, "tokens_observed = {}", stats.tokens_observed);
+        let entropy = stats.utilization_entropy.expect("utilization_entropy");
+        assert!(entropy >= 0.0 && entropy <= 1.0, "entropy out of range: {entropy}");
+    }
+
+    #[cfg(feature = "chiaroscuro")]
+    #[test]
+    fn chiar_hook_stats_visible_in_router_stats() {
+        let mut router = fast_router(false, false);
+        router.observe_chiar_key(&[0.5f32; 256]);
+        let stats = router.stats();
+        assert!(stats.chiar_stats.is_some(), "chiar_stats should be Some in RouterStats");
+        let cs = stats.chiar_stats.unwrap();
+        assert!(cs.tokens_observed >= 1);
     }
 }
 
