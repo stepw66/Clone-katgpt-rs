@@ -27,6 +27,12 @@
 //!
 //! Reference: katgpt-rs/.research/234_DenseMesh_Latent_Node_Network.md
 
+// Adaptive width controller — Plan 266 Phase 5 CollapseAware + BreakevenRouter
+// integration. Picks between narrow/wide topology per query, driven by
+// external CollapseDetector and BreakevenBandit signals. Sub-modules are
+// feature-gated internally so callers without `collapse_aware_thinking` or
+// `breakeven_routing` still get the base `AdaptiveWidthConfig` API.
+pub mod adaptive_width;
 pub mod compute_router;
 pub mod edge_bandit;
 pub mod edge_identity;
@@ -37,6 +43,7 @@ pub mod topology;
 pub mod traits;
 pub mod types;
 
+pub use adaptive_width::{AdaptiveWidthConfig, WidthDecision};
 pub use edge_bandit::{EdgeBandit, EdgeBanditArm};
 pub use edge_identity::IdentityEdge;
 pub use edge_lora::LoraEdge;

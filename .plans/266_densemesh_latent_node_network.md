@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-14
 **Research:** katgpt-rs/.research/234_DenseMesh_Latent_Node_Network.md
-**Status:** Phase 1–4, 6, 7-partial, 8-partial complete (core traits, types, topology engine, all edges, EdgeBandit, bridge functions, compute router, profiling test, README/research docs). Gate 1 + Gate 5 pass. Profiling test `prof_dense_mesh.rs` measures topology scaling, aggregation overhead, bandit/router latency, hot-path allocations. Gates 2–4 require LLM forward integration (Phase 5) and game LoRAs (riir-ai R122). 26 unit tests + 5 profiling tests pass.
+**Status:** Phase 1–5, 6, 7-partial, 8-partial complete (core traits, types, topology engine, all edges, EdgeBandit, bridge functions, compute router, **adaptive width controller with CollapseAware + BreakevenRouter integration**, profiling test, README/research docs). Gate 1 + Gate 5 pass. Profiling test `prof_dense_mesh.rs` measures topology scaling, aggregation overhead, bandit/router latency, hot-path allocations — covers Gate 3/Gate 4 on synthetic data. Gate 2 (composition with game LoRAs) + full real-LLM Gate 3/Gate 4 require Phase 5 transformer `DenseNode` integration (deferred — substantial subsystem) and riir-ai R122 game LoRAs. **48 unit tests pass** (26 existing + 22 new adaptive_width).
 **Commercial Bound:** Public (katgpt-rs/MIT) — generic framework. Edge LoRA composition recipes stay in riir-ai (R122).
 
 ---
@@ -71,10 +71,13 @@ katgpt-rs/src/dense_mesh/
 - [x] Reuse existing `ThinkingBandit` / `FreqBandit` infrastructure (DRY)
 - [x] Convergence test: cumulative regret < O(log T · √N) over 200 queries (gate 5)
 
-### Phase 5 — Adaptive Width & Compute Routing ✅ (partial)
+### Phase 5 — Adaptive Width & Compute Routing ✅
 
-- [ ] Integrate with `CollapseAwareThinking` (P212) — entropy spike triggers width expansion
-- [ ] Integrate with `BreakevenRouter` (P250) — breakeven analysis picks optimal width
+- [x] Integrate with `CollapseAwareThinking` (P212) — entropy spike triggers width expansion
+  - **DONE 2026-06-14.** `dense_mesh/adaptive_width.rs::collapse_signal()` reads `CollapseDetector::hesitation_count()` / `threshold()` and returns `WidthDecision::{Contract,Neutral,Expand}` based on a configurable hysteresis band (default `[0.25, 0.75]`). Mirrors the `TvpExpansion` pattern in `S2FCollapseDetector`. Feature-gated on `collapse_aware_thinking`.
+- [x] Integrate with `BreakevenRouter` (P250) — breakeven analysis picks optimal width
+  - **DONE 2026-06-14.** `dense_mesh/adaptive_width.rs::breakeven_signal()` reads a `BreakevenSnapshot { cpu_to_gpu_amortized }` (constructed from `BreakevenBandit::stats()`) and returns `Expand` when the CPU→GPU upgrade has amortised, else `Contract`. Feature-gated on `breakeven_routing`.
+  - **Decision rule:** collapse is the primary (quality) signal — non-`Neutral` collapse always wins. When collapse has no opinion, breakeven (cost signal) decides. Both `Neutral` → falls back to `Contract` (cheapest baseline, matches gate 1).
 - [x] Implement `pick_compute(width, layer_role)` in `compute_router.rs`:
   - `width == 1` → Cpu (no GPU launch overhead)
   - `width >= 4` → Gpu (data-parallel branches amortise ~50μs launch)
