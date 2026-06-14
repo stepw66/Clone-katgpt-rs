@@ -103,12 +103,12 @@ pub fn spectral_entropy_dct_into(
 
     // Take real part of first d outputs, then |·|².
     // (Imaginary parts should be ≈ 0 by symmetry, but we use Re for stability.)
+    // Reuse s[..d].re to store energies — avoids per-call Vec allocation.
     let mut total_energy: f32 = 0.0;
-    let mut energy: Vec<f32> = vec![0.0; d];
     for k in 0..d {
         let coef = s[k].re;
         let e = coef * coef;
-        energy[k] = e;
+        s[k].re = e;
         total_energy += e;
     }
     if total_energy <= 0.0 {
@@ -117,10 +117,11 @@ pub fn spectral_entropy_dct_into(
     }
 
     // H = -Σ p_k log p_k, normalized by log d.
+    // Multiply by inv_total instead of dividing per bin.
     let mut h = 0.0f32;
-    let total = total_energy;
-    for &e in &energy {
-        let p = e / total;
+    let inv_total = 1.0 / total_energy;
+    for k in 0..d {
+        let p = s[k].re * inv_total;
         if p > P_LOG_P_FLOOR {
             h -= p * p.ln();
         }
@@ -133,9 +134,16 @@ pub fn spectral_entropy_dct_into(
 }
 
 /// Standard sigmoid. Used for any gating decision (NOT softmax — per project constraint).
+///
+/// Branches on sign to avoid `exp()` overflow for large negative inputs.
 #[inline]
 pub fn sigmoid(x: f32) -> f32 {
-    1.0 / (1.0 + (-x).exp())
+    if x >= 0.0 {
+        1.0 / (1.0 + (-x).exp())
+    } else {
+        let ex = x.exp();
+        ex / (1.0 + ex)
+    }
 }
 
 #[cfg(test)]

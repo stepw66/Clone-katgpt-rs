@@ -101,30 +101,32 @@ impl ChiaroscuroRouter {
     }
 
     /// Route from a pre-computed H(x) value. O(num_ops).
+    ///
+    /// Single pass: tracks both the last eligible op and (as fallback) the
+    /// last highest-cost op, avoiding a second scan when no op is eligible.
     pub fn route_from_h(&mut self, h_x: f32) -> usize {
         if self.ops.is_empty() {
             return 0;
         }
 
-        // Pick the highest-cost op whose range contains h_x.
-        // Tie-break by entropy_hi descending (prefer the op that goes higher).
         let mut chosen = 0usize;
         let mut found = false;
+        // Fallback tracker: last op with the highest relative_cost.
+        let mut max_cost = self.ops[0].relative_cost();
+
         for (i, op) in self.ops.iter().enumerate() {
+            // Update fallback candidate (highest cost, last wins on tie).
+            let cost = op.relative_cost();
+            if cost >= max_cost {
+                max_cost = cost;
+                if !found {
+                    chosen = i;
+                }
+            }
+            // Eligible check overrides fallback.
             if op.eligible(h_x) {
                 chosen = i;
                 found = true;
-            }
-        }
-
-        // Fallback: if no op eligible, pick highest-cost op seen.
-        if !found {
-            let mut max_cost = f32::NEG_INFINITY;
-            for (i, op) in self.ops.iter().enumerate() {
-                if op.relative_cost() >= max_cost {
-                    max_cost = op.relative_cost();
-                    chosen = i;
-                }
             }
         }
 

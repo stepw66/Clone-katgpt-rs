@@ -61,22 +61,11 @@ impl BreakevenTierPair {
     /// Target (higher) tier.
     pub const fn target_tier(&self) -> ComputeTier {
         match self {
-            Self::CpuToGpu | Self::GpuToAne => {
-                // GPU and ANE map to CpuGpu / CpuGpuAne respectively
-                match self {
-                    Self::CpuToGpu => ComputeTier::CpuGpu,
-                    Self::GpuToAne => ComputeTier::CpuGpuAne,
-                    _ => unreachable!(),
-                }
-            }
-            Self::CpuToSpeculative | Self::GpuToSpeculative => {
-                // Speculative stays on the same hardware but adds draft model
-                match self {
-                    Self::CpuToSpeculative => ComputeTier::CpuOnly,
-                    Self::GpuToSpeculative => ComputeTier::CpuGpu,
-                    _ => unreachable!(),
-                }
-            }
+            Self::CpuToGpu => ComputeTier::CpuGpu,
+            Self::GpuToAne => ComputeTier::CpuGpuAne,
+            // Speculative stays on the same hardware but adds draft model.
+            Self::CpuToSpeculative => ComputeTier::CpuOnly,
+            Self::GpuToSpeculative => ComputeTier::CpuGpu,
         }
     }
 
@@ -433,31 +422,24 @@ pub struct BreakevenStats {
 
 impl fmt::Display for BreakevenStats {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let fmt_n = |n: f64| {
+        // Write N* directly to the formatter — avoids per-field String allocation.
+        fn write_n(f: &mut fmt::Formatter<'_>, n: f64) -> fmt::Result {
             if n.is_infinite() {
-                "∞".to_string()
+                f.write_str("∞")
             } else {
-                format!("{n:.0}")
+                write!(f, "{n:.0}")
             }
-        };
-        write!(
-            f,
-            "Breakeven {{ CPU→GPU: N*={} {} | GPU→ANE: N*={} {} | CPU→SPEC: N*={} | GPU→SPEC: N*={} }}",
-            fmt_n(self.cpu_to_gpu_n),
-            if self.cpu_to_gpu_amortized {
-                "✓"
-            } else {
-                "…"
-            },
-            fmt_n(self.gpu_to_ane_n),
-            if self.gpu_to_ane_amortized {
-                "✓"
-            } else {
-                "…"
-            },
-            fmt_n(self.cpu_to_spec_n),
-            fmt_n(self.gpu_to_spec_n),
-        )
+        }
+
+        f.write_str("Breakeven { CPU→GPU: N*=")?;
+        write_n(f, self.cpu_to_gpu_n)?;
+        f.write_str(if self.cpu_to_gpu_amortized { " ✓ | GPU→ANE: N*=" } else { " … | GPU→ANE: N*=" })?;
+        write_n(f, self.gpu_to_ane_n)?;
+        f.write_str(if self.gpu_to_ane_amortized { " ✓ | CPU→SPEC: N*=" } else { " … | CPU→SPEC: N*=" })?;
+        write_n(f, self.cpu_to_spec_n)?;
+        f.write_str(" | GPU→SPEC: N*=")?;
+        write_n(f, self.gpu_to_spec_n)?;
+        f.write_str(" }")
     }
 }
 

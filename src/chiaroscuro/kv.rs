@@ -32,7 +32,8 @@
 //!
 //! Pure inference-time computation. τ calibrated via [`StreamingTauCalibrator`].
 
-use crate::chiaroscuro::entropy::spectral_entropy_dct;
+use crate::chiaroscuro::entropy::{spectral_entropy_dct, spectral_entropy_dct_into};
+use rustfft::{FftPlanner, num_complex::Complex32};
 
 /// Default number of DCT coefficients retained for `DctTruncated` strategy.
 ///
@@ -205,10 +206,17 @@ impl StrategyUtilization {
 /// Owns a [`StrategyUtilization`] counter for collapse detection. Delegates τ
 /// calibration to an external [`crate::chiaroscuro::tau::StreamingTauCalibrator`]
 /// (passed by reference to avoid coupling lifetimes).
+///
+/// Caches an [`FftPlanner`] and scratch buffer internally so that [`dispatch`](Self::dispatch)
+/// does zero heap allocation per token after the first call.
 pub struct ChiaroscuroKvDispatcher {
     pub utilization: StrategyUtilization,
     /// Number of DCT coefficients for `DctTruncated` strategy.
     pub dct_n_coeffs: usize,
+    /// Reused FFT planner — caches plans across tokens.
+    planner: FftPlanner<f32>,
+    /// Reused complex scratch buffer for the DCT mirror-and-FFT trick.
+    scratch: Vec<Complex32>,
 }
 
 impl Default for ChiaroscuroKvDispatcher {
@@ -223,15 +231,17 @@ impl ChiaroscuroKvDispatcher {
         Self {
             utilization: StrategyUtilization::default(),
             dct_n_coeffs,
+            planner: FftPlanner::new(),
+            scratch: Vec::new(),
         }
     }
 
     /// Route a key embedding to its storage strategy, given calibrated τ.
     ///
     /// O(d log d) for the DCT + O(1) for the threshold gate.
-    /// Updates the utilization counter.
+    /// Updates the utilization counter. Zero-alloc after the first call.
     pub fn dispatch(&mut self, key: &[f32], tau_lo: f32, tau_hi: f32) -> ChiaroscuroKvStrategy {
-        let h = spectral_entropy_dct(key);
+        let h = spectral_entropy_dct_into(key, &mut self.scratch, &mut self.planner);
         let strategy = ChiaroscuroKvStrategy::decide(h, tau_lo, tau_hi);
         self.utilization.observe(strategy);
         strategy

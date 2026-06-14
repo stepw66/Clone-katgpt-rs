@@ -51,15 +51,16 @@ impl RollingHash {
         let n = tokens.len();
         let mut h = Vec::with_capacity(n + 1);
         h.push(0);
+        // Track previous hash in a local to avoid per-iteration `.last().unwrap()`.
+        let mut prev: u64 = 0;
         for &t in tokens {
-            let prev = *h.last().unwrap();
             // prev * base + t  (mod Mersenne prime)
-            let val = mersenne_add(
+            prev = mersenne_add(
                 mersenne_mul(prev, self.base, self.modulus),
                 t as u64,
                 self.modulus,
             );
-            h.push(val);
+            h.push(prev);
         }
         h
     }
@@ -230,9 +231,12 @@ impl KvSegmentPool {
         let n = request_tokens.len();
         let mut results = Vec::with_capacity(self.segments.len());
 
-        // Pre-allocate scratch buffer for blake3 hashing (reused across iterations).
-        let max_seg_bytes = self.segments.iter().map(|s| s.token_hashes.len() * 4).max().unwrap_or(0);
-        let mut hash_buf = Vec::with_capacity(max_seg_bytes);
+        // Pre-encode request tokens to little-endian bytes ONCE.
+        // Each window's bytes are then a contiguous slice — no per-position re-encoding.
+        let mut req_bytes = Vec::with_capacity(n * 4);
+        for &t in request_tokens {
+            req_bytes.extend_from_slice(&t.to_le_bytes());
+        }
 
         // Use pre-computed length index instead of rebuilding per query.
         for (&seg_len, _indices) in &self.by_len {
@@ -242,6 +246,7 @@ impl KvSegmentPool {
 
             // How many tokens to use for the prefix filter.
             let prefix_len = PREFIX_WINDOW.min(seg_len);
+            let seg_bytes = seg_len * 4;
 
             // Slide across the request tokens.
             for pos in 0..=(n - seg_len) {
@@ -249,14 +254,10 @@ impl KvSegmentPool {
                     roller.substring_hash(&request_prefixes, pos, pos + prefix_len);
 
                 if let Some(candidates) = self.prefix_index.get(&req_prefix_hash) {
-                    // Phase 2: blake3 verification — batch into contiguous bytes.
-                    let window = &request_tokens[pos..pos + seg_len];
-                    hash_buf.clear();
-                    hash_buf.reserve(seg_len * 4);
-                    for &t in window {
-                        hash_buf.extend_from_slice(&t.to_le_bytes());
-                    }
-                    let window_hash: [u8; 32] = blake3::hash(&hash_buf).into();
+                    // Phase 2: blake3 verification — slice into pre-encoded bytes.
+                    let byte_start = pos * 4;
+                    let byte_end = byte_start + seg_bytes;
+                    let window_hash: [u8; 32] = blake3::hash(&req_bytes[byte_start..byte_end]).into();
 
                     for &seg_idx in candidates {
                         // Only compare against segments of the right length.

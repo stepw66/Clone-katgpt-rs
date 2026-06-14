@@ -42,21 +42,38 @@ impl<'a> SummedAreaTable<'a> {
     ///
     /// The buffer must be `n * n` elements. Modifies in-place.
     /// Time: O(n²)
+    ///
+    /// Implementation: row 0 and column 0 are handled separately so the
+    /// inner loop (rows 1..n, cols 1..n) is branch-free for auto-vectorization.
     pub fn build_flat(data: &'a mut [f32]) -> Self {
         let n = (data.len() as f64).sqrt() as usize;
         debug_assert_eq!(n * n, data.len(), "flat buffer must be a perfect square");
 
-        for i in 0..n {
-            for j in 0..n {
-                let val = data[i * n + j];
-                let up = if i > 0 { data[(i - 1) * n + j] } else { 0.0 };
-                let left = if j > 0 { data[i * n + j - 1] } else { 0.0 };
-                let up_left = if i > 0 && j > 0 {
-                    data[(i - 1) * n + j - 1]
-                } else {
-                    0.0
-                };
-                data[i * n + j] = val + up + left - up_left;
+        if n == 0 {
+            return Self::Flat(FlatSat { data, n });
+        }
+
+        // Row 0: running prefix sum (no upper row).
+        let mut row_sum = 0.0f32;
+        for j in 0..n {
+            row_sum += data[j];
+            data[j] = row_sum;
+        }
+
+        // Rows 1..n: column 0 special-cased (no left neighbor),
+        // then the inner loop is branch-free.
+        for i in 1..n {
+            let prev_row = (i - 1) * n;
+            let cur_row = i * n;
+            // j = 0: SAT = val + up (no left, no up_left).
+            data[cur_row] += data[prev_row];
+            // j = 1..n: val + up + left - up_left (branch-free).
+            for j in 1..n {
+                let val = data[cur_row + j];
+                let up = data[prev_row + j];
+                let left = data[cur_row + j - 1];
+                let up_left = data[prev_row + j - 1];
+                data[cur_row + j] = val + up + left - up_left;
             }
         }
 
