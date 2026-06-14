@@ -314,6 +314,10 @@ pub struct InvSqrtScratch {
     xw: Vec<f32>,
     pw2: Vec<f32>,
     w_sq: Vec<f32>,
+    /// Transpose of the right operand for `matmul_nn`. Lets the inner dot
+    /// product read Bᵀ row-major (contiguous) instead of striding through B
+    /// column-by-column.
+    bt_buf: Vec<f32>,
 }
 
 impl InvSqrtScratch {
@@ -328,6 +332,7 @@ impl InvSqrtScratch {
             xw: vec![0.0; rr],
             pw2: vec![0.0; rr],
             w_sq: vec![0.0; rr],
+            bt_buf: vec![0.0; rr],
         }
     }
 
@@ -341,6 +346,7 @@ impl InvSqrtScratch {
         grow_no_zero(&mut self.xw, rr);
         grow_no_zero(&mut self.pw2, rr);
         grow_no_zero(&mut self.w_sq, rr);
+        grow_no_zero(&mut self.bt_buf, rr);
     }
 }
 
@@ -445,12 +451,12 @@ pub fn ns_inv_sqrt_psd_into(
         }
 
         // X_{k+1} = X_k · W_k.
-        matmul_nn(x_mat, &scratch.w_mat[..rr], r, &mut scratch.xw[..rr]);
+        matmul_nn(x_mat, &scratch.w_mat[..rr], r, &mut scratch.xw[..rr], &mut scratch.bt_buf[..rr]);
         x_mat.copy_from_slice(&scratch.xw[..rr]);
 
         if k + 1 < n_iters_clamped {
             matmul_symmetric(&scratch.w_mat[..rr], r, &mut scratch.w_sq[..rr]);
-            matmul_nn(p_cur, &scratch.w_sq[..rr], r, &mut scratch.pw2[..rr]);
+            matmul_nn(p_cur, &scratch.w_sq[..rr], r, &mut scratch.pw2[..rr], &mut scratch.bt_buf[..rr]);
             for i in 0..r {
                 for j in 0..r {
                     let v = 0.5 * (scratch.pw2[i * r + j] + scratch.pw2[j * r + i]);
@@ -479,18 +485,19 @@ fn matmul_symmetric(a: &[f32], r: usize, c: &mut [f32]) {
     }
 }
 
+/// Compute C = A · B for `r × r` matrices. Transposes B into `bt_buf` first
+/// so the inner dot product reads both operands row-major (contiguous) and can
+/// hit the SIMD dot kernel; the naive column-walk through B thrashes the cache
+/// on anything that doesn't fit in L1.
 #[inline]
-fn matmul_nn(a: &[f32], b: &[f32], r: usize, c: &mut [f32]) {
+fn matmul_nn(a: &[f32], b: &[f32], r: usize, c: &mut [f32], bt_buf: &mut [f32]) {
+    transpose(b, r, r, bt_buf);
     for i in 0..r {
         let a_row_i = &a[i * r..(i + 1) * r];
         let c_row_i = &mut c[i * r..(i + 1) * r];
         for j in 0..r {
-            let mut sum = 0.0f32;
-            let b_col_j = &b[j..];
-            for k in 0..r {
-                sum += a_row_i[k] * b_col_j[k * r];
-            }
-            c_row_i[j] = sum;
+            // bt_buf row j == B column j, stored contiguously.
+            c_row_i[j] = crate::simd::simd_dot_f32(a_row_i, &bt_buf[j * r..(j + 1) * r], r);
         }
     }
 }

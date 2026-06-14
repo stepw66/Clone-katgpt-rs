@@ -329,6 +329,13 @@ pub struct FlashARConsensusVerifier<'a> {
     target_cache: MultiLayerKVCache,
     d2f_ctx: D2fContext,
     probs_buf: Vec<f32>,
+    /// Pre-allocated flat storage for per-position target distributions.
+    /// Layout: `p_flat[(i+1) * vocab_size .. (i+2) * vocab_size]` holds the
+    /// softmaxed target distribution used to score position `i`.
+    /// Length = `(MAX_DRAFT_WIDTH + 1) * vocab_size`, allocated once.
+    p_flat: Vec<f32>,
+    /// Reusable scratch for a single forward's softmax output (alias-safe).
+    forward_scratch: Vec<f32>,
 }
 
 impl<'a> FlashARConsensusVerifier<'a> {
@@ -357,6 +364,11 @@ impl<'a> FlashARConsensusVerifier<'a> {
             target_cache: MultiLayerKVCache::new(target_config),
             d2f_ctx: D2fContext::new(target_config),
             probs_buf: vec![0.0f32; target_config.vocab_size],
+            p_flat: vec![
+                0.0f32;
+                (MAX_DRAFT_WIDTH + 1) * target_config.vocab_size
+            ],
+            forward_scratch: vec![0.0f32; target_config.vocab_size],
         }
     }
 }
@@ -373,6 +385,7 @@ impl SpeculativeVerifier for FlashARConsensusVerifier<'_> {
     ) -> Vec<usize> {
         let target_temp = self.target_config.temperature;
         let draft_width = self.draft_width;
+        let vocab_size = self.target_config.vocab_size;
 
         // ── Phase 0: Score initial token with target model ──────────
         self.target_cache.reset();
@@ -387,6 +400,8 @@ impl SpeculativeVerifier for FlashARConsensusVerifier<'_> {
             );
             self.probs_buf.copy_from_slice(logits);
             softmax_scaled(&mut self.probs_buf, 1.0 / target_temp);
+            // Store p_dist[0] into the flat buffer (slot 0).
+            self.p_flat[..vocab_size].copy_from_slice(&self.probs_buf);
         }
 
         // ── Phase 1: Path V — D2F block decode ──────────────────────
@@ -415,23 +430,26 @@ impl SpeculativeVerifier for FlashARConsensusVerifier<'_> {
         let k_bounded = k.min(MAX_DRAFT_WIDTH);
         v_tokens[..k_bounded].copy_from_slice(&v_tokens_raw[..k_bounded]);
 
-        // Extract D2F confidence per position from the logits
-        // For simplicity, we run a quick forward through the D2F result to get confidences
-        // Since we don't have per-position logits from D2F, we estimate from the D2F context
-        // by reading the logits_flat. For the test (modelless), all confidences will be similar.
+        // Extract D2F confidence per position from the logits.
+        // Single-pass softmax+argmax: compute max_logit, then sum_exp + top1 in
+        // one fold to halve iterations over the vocab.
         for i in 0..k_bounded {
             let logits_offset = i * draft_config.vocab_size;
             if logits_offset + draft_config.vocab_size <= self.d2f_ctx.logits_flat.len() {
                 let logits_p = &self.d2f_ctx.logits_flat
                     [logits_offset..logits_offset + draft_config.vocab_size];
-                // Quick softmax to get top-1 prob
                 let max_logit = logits_p.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
-                let sum_exp: f32 = logits_p.iter().map(|&l| (l - max_logit).exp()).sum();
-                let top1 = logits_p
-                    .iter()
-                    .map(|&l| (l - max_logit).exp() / sum_exp.max(1e-10))
-                    .fold(0.0f32, f32::max);
-                v_conf[i] = top1;
+                // Fused pass: accumulate sum_exp and track top1 prob.
+                let mut sum_exp = 0.0f32;
+                let mut top1 = 0.0f32;
+                for &l in logits_p {
+                    let p = (l - max_logit).exp();
+                    sum_exp += p;
+                    if p > top1 {
+                        top1 = p;
+                    }
+                }
+                v_conf[i] = top1 / sum_exp.max(1e-10);
             } else {
                 v_conf[i] = 0.5; // fallback confidence
             }
@@ -442,17 +460,13 @@ impl SpeculativeVerifier for FlashARConsensusVerifier<'_> {
         // Run AR draft using the same draft_weights.
         let mut h_tokens = [0usize; MAX_DRAFT_WIDTH];
         let mut h_conf = [0.0f32; MAX_DRAFT_WIDTH];
-
-        // Score each D2F draft position through the AR model to get h_tokens
-        // Use argmax of target distribution as H path prediction.
-        // For a true MTP draft we'd use dflash_predict_ar_with, but here we
-        // use the target model's sequential scoring — this is the "self-speculation" approach.
-        let mut p_distributions: Vec<Vec<f32>> = Vec::with_capacity(k_bounded + 1);
-        // p_dist[0] from Phase 0
-        p_distributions.push(self.probs_buf.clone());
+        // Cache the target argmax per position (avoids recomputing it in
+        // Phase 5 for Warm/Cold segments — each p_dist is scanned once here).
+        let mut target_argmax = [0usize; MAX_DRAFT_WIDTH];
 
         // Sequential AR scoring: for each position, get target distribution,
         // extract argmax as H's prediction, and top1 as H's confidence.
+        // Write softmaxed distribution into p_flat slot (i+1).
         for i in 0..k_bounded {
             // Use D2F token as input for sequential scoring (like D2fDrafterVerifier)
             let input_tok = if i == 0 { v_tokens[0] } else { h_tokens[i - 1] };
@@ -464,22 +478,27 @@ impl SpeculativeVerifier for FlashARConsensusVerifier<'_> {
                 pos + 1 + i,
                 self.target_config,
             );
-            self.probs_buf.copy_from_slice(logits);
-            softmax_scaled(&mut self.probs_buf, 1.0 / target_temp);
+            self.forward_scratch.copy_from_slice(logits);
+            softmax_scaled(&mut self.forward_scratch, 1.0 / target_temp);
 
-            // H path: argmax of target distribution (this is what the target model prefers)
-            let (best_idx, best_prob) = self
-                .probs_buf
-                .iter()
-                .enumerate()
-                .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
-                .map(|(idx, &p)| (idx, p))
-                .unwrap_or((0, 0.0f32));
+            // H path: argmax of target distribution (this is what the target model prefers).
+            // Single pass — extract both best_idx and best_prob.
+            let mut best_idx = 0usize;
+            let mut best_prob = f32::NEG_INFINITY;
+            for (idx, &p) in self.forward_scratch.iter().enumerate() {
+                if p > best_prob {
+                    best_prob = p;
+                    best_idx = idx;
+                }
+            }
 
             h_tokens[i] = best_idx;
-            h_conf[i] = best_prob;
+            h_conf[i] = if best_prob == f32::NEG_INFINITY { 0.0 } else { best_prob };
+            target_argmax[i] = best_idx;
 
-            p_distributions.push(self.probs_buf.clone());
+            // Persist this distribution into p_flat slot (i+1).
+            let start = (i + 1) * vocab_size;
+            self.p_flat[start..start + vocab_size].copy_from_slice(&self.forward_scratch);
         }
 
         // ── Phase 3: Ternary consensus ──────────────────────────────
@@ -499,7 +518,7 @@ impl SpeculativeVerifier for FlashARConsensusVerifier<'_> {
 
         // ── Phase 5: Selective verification ─────────────────────────
         // Plasma/Hot: accept immediately
-        // Warm: verify single position (we already have p_distributions from Phase 2)
+        // Warm: verify single position (we already have target_argmax from Phase 2)
         // Cold: fall back to prefix-match for that segment
         let mut accepted = Vec::with_capacity(k_bounded + 1);
         let mut all_accepted = true;
@@ -507,78 +526,47 @@ impl SpeculativeVerifier for FlashARConsensusVerifier<'_> {
         // Track contiguous cold segments for prefix-match fallback
         let mut cold_start: Option<usize> = None;
 
+        // Helper: flush a cold segment [start..end) using cached target_argmax.
+        // Returns false on first mismatch (caller breaks out).
+        let flush_cold = |start: usize, end: usize,
+                          consensus_tokens: &[usize; MAX_DRAFT_WIDTH],
+                          target_argmax: &[usize; MAX_DRAFT_WIDTH],
+                          accepted: &mut Vec<usize>| -> bool {
+            for j in start..end {
+                let draft_tok = consensus_tokens[j];
+                let target_tok = target_argmax[j];
+                if draft_tok == target_tok {
+                    accepted.push(draft_tok);
+                } else {
+                    accepted.push(target_tok);
+                    return false;
+                }
+            }
+            true
+        };
+
         for i in 0..k_bounded {
             match result.thermal_paths[i] {
                 ThermalPath::Plasma | ThermalPath::Hot => {
                     // Flush any pending cold segment
-                    if let Some(start) = cold_start.take() {
-                        // Prefix-match verification for cold segment [start..i]
-                        for j in start..i {
-                            let draft_tok = consensus_tokens[j];
-                            let p_dist = &p_distributions[j + 1];
-                            let target_tok = p_dist
-                                .iter()
-                                .enumerate()
-                                .max_by(|(_, a), (_, b)| {
-                                    a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
-                                })
-                                .map(|(idx, _)| idx)
-                                .unwrap_or(0);
-
-                            if draft_tok == target_tok {
-                                accepted.push(draft_tok);
-                            } else {
-                                accepted.push(target_tok);
-                                all_accepted = false;
-                                break;
-                            }
-                        }
-                        if !all_accepted {
-                            break;
-                        }
+                    if let Some(start) = cold_start.take()
+                        && !flush_cold(start, i, &consensus_tokens, &target_argmax, &mut accepted) {
+                        all_accepted = false;
+                        break;
                     }
                     // Accept Plasma/Hot position
                     accepted.push(result.accepted_tokens[i]);
                 }
                 ThermalPath::Warm => {
                     // Flush any pending cold segment
-                    if let Some(start) = cold_start.take() {
-                        for j in start..i {
-                            let draft_tok = consensus_tokens[j];
-                            let p_dist = &p_distributions[j + 1];
-                            let target_tok = p_dist
-                                .iter()
-                                .enumerate()
-                                .max_by(|(_, a), (_, b)| {
-                                    a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
-                                })
-                                .map(|(idx, _)| idx)
-                                .unwrap_or(0);
-
-                            if draft_tok == target_tok {
-                                accepted.push(draft_tok);
-                            } else {
-                                accepted.push(target_tok);
-                                all_accepted = false;
-                                break;
-                            }
-                        }
-                        if !all_accepted {
-                            break;
-                        }
+                    if let Some(start) = cold_start.take()
+                        && !flush_cold(start, i, &consensus_tokens, &target_argmax, &mut accepted) {
+                        all_accepted = false;
+                        break;
                     }
-                    // Spot-check: verify this single position against target
+                    // Spot-check: verify this single position against cached target argmax
                     let draft_tok = result.accepted_tokens[i];
-                    let p_dist = &p_distributions[i + 1];
-                    let target_tok = p_dist
-                        .iter()
-                        .enumerate()
-                        .max_by(|(_, a), (_, b)| {
-                            a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
-                        })
-                        .map(|(idx, _)| idx)
-                        .unwrap_or(0);
-
+                    let target_tok = target_argmax[i];
                     if draft_tok == target_tok {
                         accepted.push(draft_tok);
                     } else {
@@ -602,32 +590,16 @@ impl SpeculativeVerifier for FlashARConsensusVerifier<'_> {
 
         // Flush trailing cold segment
         if all_accepted {
-            if let Some(start) = cold_start.take() {
-                for j in start..k_bounded {
-                    let draft_tok = consensus_tokens[j];
-                    let p_dist = &p_distributions[j + 1];
-                    let target_tok = p_dist
-                        .iter()
-                        .enumerate()
-                        .max_by(|(_, a), (_, b)| {
-                            a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
-                        })
-                        .map(|(idx, _)| idx)
-                        .unwrap_or(0);
-
-                    if draft_tok == target_tok {
-                        accepted.push(draft_tok);
-                    } else {
-                        accepted.push(target_tok);
-                        all_accepted = false;
-                        break;
-                    }
-                }
+            if let Some(start) = cold_start.take()
+                && !flush_cold(start, k_bounded, &consensus_tokens, &target_argmax, &mut accepted) {
+                all_accepted = false;
             }
 
             // Bonus token if all accepted
             if all_accepted {
-                let bonus_dist = &p_distributions[k_bounded];
+                let bonus_start = k_bounded * vocab_size;
+                let bonus_end = bonus_start + vocab_size;
+                let bonus_dist = &self.p_flat[bonus_start..bonus_end];
                 let bonus = sample_from_distribution(bonus_dist, rng);
                 accepted.push(bonus);
             }
@@ -635,7 +607,8 @@ impl SpeculativeVerifier for FlashARConsensusVerifier<'_> {
 
         // Safety: always return at least one token
         if accepted.is_empty() {
-            accepted.push(sample_from_distribution(&p_distributions[0], rng));
+            let p0 = &self.p_flat[..vocab_size];
+            accepted.push(sample_from_distribution(p0, rng));
         }
 
         accepted

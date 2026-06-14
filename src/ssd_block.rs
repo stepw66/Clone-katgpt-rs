@@ -252,11 +252,8 @@ pub fn ssd_block_forward(
                 let j_global = cs + j_local;
                 let b_j = &b[j_global * state_dim..j_global * state_dim + state_dim];
 
-                // dot(b[j], c[t])
-                let mut dot_bc = 0.0f32;
-                for n in 0..state_dim {
-                    dot_bc += b_j[n] * c_t[n];
-                }
+                // dot(b[j], c[t]) — contiguous slices, ideal for the SIMD dot kernel.
+                let dot_bc = crate::simd::simd_dot_f32(b_j, c_t, state_dim);
 
                 let weight = mask * dot_bc;
                 let x_j = &x[j_global * head_dim..j_global * head_dim + head_dim];
@@ -453,12 +450,9 @@ pub fn ssd_naive(
                 continue;
             }
 
-            // dot(b[j], c[t])
+            // dot(b[j], c[t]) — contiguous slices, ideal for the SIMD dot kernel.
             let b_j = &b[j * state_dim..j * state_dim + state_dim];
-            let mut dot_bc = 0.0f32;
-            for n in 0..state_dim {
-                dot_bc += b_j[n] * c_t[n];
-            }
+            let dot_bc = crate::simd::simd_dot_f32(b_j, c_t, state_dim);
 
             let weight = decay * dot_bc;
             let x_j = &x[j * head_dim..j * head_dim + head_dim];

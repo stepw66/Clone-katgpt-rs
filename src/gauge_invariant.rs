@@ -117,14 +117,10 @@ fn power_iterate_sigma_max(
     // Initialize v if zero (defensive).
     let v_norm: f32 = simd_dot_f32(v, v, rank).sqrt();
     if v_norm < 1e-20 {
-        let init = 1.0 / (rank as f32).sqrt();
-        for x in v.iter_mut() {
-            *x = init;
-        }
+        v.fill(1.0 / (rank as f32).sqrt());
     } else {
         // Normalize (in case caller passed something weird).
-        let inv = 1.0 / v_norm;
-        simd_scale_inplace(v, inv);
+        simd_scale_inplace(v, 1.0 / v_norm);
     }
 
     for _ in 0..n_steps {
@@ -143,9 +139,7 @@ fn power_iterate_sigma_max(
         // for the full iteration but avoids heap allocation entirely.
 
         // Zero v_new.
-        for x in v_new.iter_mut() {
-            *x = 0.0;
-        }
+        v_new.fill(0.0);
 
         for i in 0..outer {
             let row = &mat[i * rank..(i + 1) * rank];

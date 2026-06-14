@@ -397,8 +397,9 @@ impl FrequencyBandit {
         let i = band.as_index();
         self.arm_counts[i] += 1;
         self.total_pulls += 1;
-        let n = self.arm_counts[i] as f64;
-        self.arm_q_values[i] += (reward - self.arm_q_values[i]) / n;
+        // Pre-compute the reciprocal so we multiply instead of divide below.
+        let inv_n = 1.0 / self.arm_counts[i] as f64;
+        self.arm_q_values[i] += (reward - self.arm_q_values[i]) * inv_n;
     }
 
     /// Map a frequency band to speculative decode configuration.
@@ -461,13 +462,14 @@ impl FrequencyBandit {
         // Welford online variance from Q-value updates.
         // Since we only track incremental mean (Q(a)), not raw samples,
         // we use Q-value spread as a proxy: variance ≈ (Q(a) - Q_mean)².
-        let q_mean: f64 = self
-            .arm_q_values
-            .iter()
-            .copied()
-            .filter(|&q| q != 0.0)
-            .sum::<f64>()
-            / 3.0_f64;
+        // Preserve original semantics: exclude zero Q-values from the mean.
+        let mut q_sum = 0.0_f64;
+        for &q in &self.arm_q_values {
+            if q != 0.0 {
+                q_sum += q;
+            }
+        }
+        let q_mean = q_sum / 3.0_f64;
         let mut variances = [0.0; 3];
         for (i, &q) in self.arm_q_values.iter().enumerate() {
             match self.arm_counts[i] {

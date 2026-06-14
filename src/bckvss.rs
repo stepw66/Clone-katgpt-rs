@@ -594,8 +594,8 @@ impl SyntheticScm {
     /// Returns a `Vec<f32>` parallel to `chunk_into_segments(seg_len)`.
     #[must_use]
     pub fn ground_truth_relevance(&self, seg_len: usize, query_task: usize) -> Vec<f32> {
-        let mut out = Vec::new();
         let n = self.task_at_token.len();
+        let mut out = Vec::with_capacity(n.div_ceil(seg_len));
         let mut start = 0;
         while start < n {
             let end = (start + seg_len).min(n);
@@ -628,22 +628,23 @@ impl SyntheticScm {
 #[must_use]
 pub fn matthews_corr(y_true: &[f32], y_pred: &[f32]) -> f32 {
     debug_assert_eq!(y_true.len(), y_pred.len());
-    let mut tp = 0.0_f32;
-    let mut tn = 0.0_f32;
-    let mut fp = 0.0_f32;
-    let mut fn_ = 0.0_f32;
+    // Use integer counters — cheaper than f32 accumulation and exact.
+    let mut tp = 0_u32;
+    let mut tn = 0_u32;
+    let mut fp = 0_u32;
+    let mut fn_ = 0_u32;
     for (&t, &p) in y_true.iter().zip(y_pred.iter()) {
         let t_b = t >= 0.5;
         let p_b = p >= 0.5;
         match (t_b, p_b) {
-            (true, true) => tp += 1.0,
-            (false, false) => tn += 1.0,
-            (false, true) => fp += 1.0,
-            (true, false) => fn_ += 1.0,
+            (true, true) => tp += 1,
+            (false, false) => tn += 1,
+            (false, true) => fp += 1,
+            (true, false) => fn_ += 1,
         }
     }
-    let num = tp * tn - fp * fn_;
-    let denom = ((tp + fp) * (tp + fn_) * (tn + fp) * (tn + fn_)).sqrt();
+    let num = (tp as f32) * (tn as f32) - (fp as f32) * (fn_ as f32);
+    let denom = ((tp + fp) as f32 * (tp + fn_) as f32 * (tn + fp) as f32 * (tn + fn_) as f32).sqrt();
     if denom <= f32::MIN_POSITIVE {
         return 0.0;
     }

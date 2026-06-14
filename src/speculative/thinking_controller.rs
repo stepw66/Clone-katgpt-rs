@@ -94,10 +94,9 @@ impl ThinkingConfig {
     /// Low entropy (high top-1 prob) → bias toward Direct mode.
     #[cfg(feature = "directional_credit")]
     pub fn entropy_bias(&self, top1_prob: f32) -> ThinkingMode {
-        if top1_prob < self.confidence_threshold {
-            ThinkingMode::Latent
-        } else {
-            ThinkingMode::Direct
+        match top1_prob < self.confidence_threshold {
+            true => ThinkingMode::Latent,
+            false => ThinkingMode::Direct,
         }
     }
 }
@@ -166,9 +165,10 @@ impl ThinkingBandit {
 
     /// Decay old observations for recency weighting.
     fn decay_observations(&mut self) {
+        let d = self.decay;
         for arm in 0..4 {
-            self.successes[arm] *= self.decay;
-            self.failures[arm] *= self.decay;
+            self.successes[arm] *= d;
+            self.failures[arm] *= d;
         }
     }
 
@@ -471,15 +471,14 @@ impl ThinkingController {
         self.bandit.decay_observations();
     }
 
-    // ── T3: CPU/GPU Auto-Route ──────────────────────────────────────
+    // ── T3: CPU/GPU Auto-Route ──────────────────────────────
 
     /// Route thinking to CPU or GPU based on load.
     pub fn route_thinking(&self) -> ThinkingMode {
         let gpu_load = self.gpu_load.load_value();
-        if gpu_load > self.config.gpu_load_threshold {
-            ThinkingMode::CpuResample
-        } else {
-            ThinkingMode::Latent
+        match gpu_load > self.config.gpu_load_threshold {
+            true => ThinkingMode::CpuResample,
+            false => ThinkingMode::Latent,
         }
     }
 

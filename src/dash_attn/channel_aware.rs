@@ -357,17 +357,15 @@ impl VortexFlow for ChannelAwareRouter {
                 }
             }
             _ => {
-                // Mean pooling → full centroid
+                // Mean pooling → full centroid. Use the crate SIMD kernels so the
+                // accumulation and final 1/N scaling are vectorized on NEON/AVX2
+                // instead of relying on the autovectorizer.
                 for t in 0..block_size {
                     let k_start = t * head_dim;
-                    for d in 0..head_dim {
-                        full_centroid[d] += keys[k_start + d];
-                    }
+                    crate::simd::simd_add_inplace(full_centroid, &keys[k_start..k_start + head_dim]);
                 }
                 let inv = 1.0 / block_size as f32;
-                for d in full_centroid.iter_mut() {
-                    *d *= inv;
-                }
+                crate::simd::simd_scale_inplace(full_centroid, inv);
 
                 // Extract routing channels from full centroid
                 if !cache.routing_channels.is_empty() {

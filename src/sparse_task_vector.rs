@@ -173,14 +173,15 @@ impl SparseTaskVector {
     /// after `from_dense` to verify the task vector is small in the paper's sense.
     pub fn relative_norm_vs(&self, base: &[f32]) -> f32 {
         debug_assert_eq!(base.len(), self.dense_len());
+        let eta = self.eta;
+        // Delta sum of squares — sparse, scalar is fine (nnz is small).
         let mut delta_sq_sum = 0.0_f32;
         for &d in &self.deltas {
-            delta_sq_sum += (d * self.eta) * (d * self.eta);
+            let s = d * eta;
+            delta_sq_sum += s * s;
         }
-        let mut base_sq_sum = 0.0_f32;
-        for &b in base {
-            base_sq_sum += b * b;
-        }
+        // Base sum of squares — dense, use SIMD.
+        let base_sq_sum = crate::simd::simd_sum_sq(base, base.len());
         if base_sq_sum <= f32::MIN_POSITIVE {
             return 0.0;
         }

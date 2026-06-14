@@ -162,7 +162,11 @@ impl HybridOctPqKVCache {
         // 1. Normalize into scratch buffer (copy + scale, zero-pad to even)
         let inv_norm = 1.0 / norm;
         self.scratch_normalized[..key.len()].copy_from_slice(key);
-        self.scratch_normalized[key.len()..].fill(0.0);
+        // Only the padding tail (at most 1 element when kv_dim is odd) needs
+        // zeroing — the [..kv_dim] range is fully overwritten above and below.
+        if key.len() < self.kv_dim_padded {
+            self.scratch_normalized[key.len()..self.kv_dim_padded].fill(0.0);
+        }
         simd_scale_inplace(&mut self.scratch_normalized, inv_norm);
 
         // 2. PQ 2D Givens rotation → scratch_rotated
@@ -210,7 +214,9 @@ impl HybridOctPqKVCache {
 
         let inv_norm = 1.0 / norm;
         self.scratch_normalized[..value.len()].copy_from_slice(value);
-        self.scratch_normalized[value.len()..].fill(0.0);
+        if value.len() < self.kv_dim_padded {
+            self.scratch_normalized[value.len()..self.kv_dim_padded].fill(0.0);
+        }
         simd_scale_inplace(&mut self.scratch_normalized, inv_norm);
 
         apply_rotation(
@@ -318,9 +324,15 @@ impl HybridOctPqKVCache {
         // OCT decode triplets into workspace
         decode_vector_into(&self.scratch_indices, cb, &mut self.scratch_workspace);
 
-        // Copy + zero-pad to even for PQ inverse rotation
-        self.scratch_rotated.fill(0.0);
-        self.scratch_rotated[..self.kv_dim].copy_from_slice(&self.scratch_workspace[..self.kv_dim]);
+        // Copy + zero-pad to even for PQ inverse rotation. Only the padding
+        // tail (at most 1 element when kv_dim is odd) needs zeroing — the
+        // [..kv_dim] range is fully overwritten by the copy below.
+        self.scratch_rotated[..self.kv_dim]
+            .copy_from_slice(&self.scratch_workspace[..self.kv_dim]);
+        if self.kv_dim < self.kv_dim_padded {
+            // Only zero the single padding slot (avoids a full-buffer fill).
+            self.scratch_rotated[self.kv_dim..self.kv_dim_padded].fill(0.0);
+        }
 
         // PQ inverse 2D rotation
         apply_inverse_rotation(
@@ -355,8 +367,12 @@ impl HybridOctPqKVCache {
 
         decode_vector_into(&self.scratch_indices, cb, &mut self.scratch_workspace);
 
-        self.scratch_rotated.fill(0.0);
-        self.scratch_rotated[..self.kv_dim].copy_from_slice(&self.scratch_workspace[..self.kv_dim]);
+        // Copy + zero-pad to even for PQ inverse rotation (tail-only zeroing).
+        self.scratch_rotated[..self.kv_dim]
+            .copy_from_slice(&self.scratch_workspace[..self.kv_dim]);
+        if self.kv_dim < self.kv_dim_padded {
+            self.scratch_rotated[self.kv_dim..self.kv_dim_padded].fill(0.0);
+        }
 
         apply_inverse_rotation(
             &self.layers[layer].val_rotations,

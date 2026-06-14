@@ -561,21 +561,51 @@ fn pack_indices_into(indices: &[u8], bits: u8, out: &mut [u8]) {
     match bits {
         2 => {
             out.fill(0);
-            for (i, &idx) in indices.iter().enumerate() {
-                let byte = i / 4;
-                let shift = (i % 4) * 2;
+            // Process 4 indices per byte (full-quad split + tail) to eliminate
+            // per-element div/mod and enable 4 independent OR chains per iter.
+            let n = indices.len();
+            let full_quads = n / 4;
+            for q in 0..full_quads {
+                let base = q * 4;
                 unsafe {
-                    *out.get_unchecked_mut(byte) |= (idx & 0x3) << shift;
+                    let i0 = *indices.get_unchecked(base) & 0x3;
+                    let i1 = *indices.get_unchecked(base + 1) & 0x3;
+                    let i2 = *indices.get_unchecked(base + 2) & 0x3;
+                    let i3 = *indices.get_unchecked(base + 3) & 0x3;
+                    *out.get_unchecked_mut(q) = i0 | (i1 << 2) | (i2 << 4) | (i3 << 6);
+                }
+            }
+            let remainder = n % 4;
+            if remainder > 0 {
+                let base = full_quads * 4;
+                let mut byte = 0u8;
+                for i in 0..remainder {
+                    unsafe {
+                        byte |= (*indices.get_unchecked(base + i) & 0x3) << (i * 2);
+                    }
+                }
+                unsafe {
+                    *out.get_unchecked_mut(full_quads) = byte;
                 }
             }
         }
         3 | 4 => {
             out.fill(0);
-            for (i, &idx) in indices.iter().enumerate() {
-                let byte = i / 2;
-                let shift = (i % 2) * 4;
+            // Process 2 indices per byte (full-pair split + tail).
+            let n = indices.len();
+            let full_pairs = n / 2;
+            for p in 0..full_pairs {
+                let base = p * 2;
                 unsafe {
-                    *out.get_unchecked_mut(byte) |= (idx & 0xF) << shift;
+                    let lo = *indices.get_unchecked(base) & 0xF;
+                    let hi = *indices.get_unchecked(base + 1) & 0xF;
+                    *out.get_unchecked_mut(p) = lo | (hi << 4);
+                }
+            }
+            if !n.is_multiple_of(2) {
+                unsafe {
+                    *out.get_unchecked_mut(full_pairs) =
+                        *indices.get_unchecked(n - 1) & 0xF;
                 }
             }
         }
@@ -659,20 +689,45 @@ fn unpack_indices_into(packed: &[u8], bits: u8, n: usize, out: &mut [u8]) {
     debug_assert!(out.len() >= n);
     match bits {
         2 => {
-            for i in 0..n {
-                let byte = i / 4;
-                let shift = (i % 4) * 2;
+            // Full-quad split + tail: read one packed byte and emit 4 indices
+            // per iter — eliminates per-element div/mod and bounds checks.
+            let full_quads = n / 4;
+            for q in 0..full_quads {
+                let base = q * 4;
                 unsafe {
-                    *out.get_unchecked_mut(i) = (*packed.get_unchecked(byte) >> shift) & 0x3;
+                    let b = *packed.get_unchecked(q);
+                    *out.get_unchecked_mut(base) = b & 0x3;
+                    *out.get_unchecked_mut(base + 1) = (b >> 2) & 0x3;
+                    *out.get_unchecked_mut(base + 2) = (b >> 4) & 0x3;
+                    *out.get_unchecked_mut(base + 3) = (b >> 6) & 0x3;
+                }
+            }
+            let remainder = n % 4;
+            if remainder > 0 {
+                let base = full_quads * 4;
+                unsafe {
+                    let b = *packed.get_unchecked(full_quads);
+                    for i in 0..remainder {
+                        *out.get_unchecked_mut(base + i) = (b >> (i * 2)) & 0x3;
+                    }
                 }
             }
         }
         3 | 4 => {
-            for i in 0..n {
-                let byte = i / 2;
-                let shift = (i % 2) * 4;
+            // Full-pair split + tail: read one packed byte and emit 2 indices
+            // per iter — eliminates per-element div/mod and bounds checks.
+            let full_pairs = n / 2;
+            for p in 0..full_pairs {
+                let base = p * 2;
                 unsafe {
-                    *out.get_unchecked_mut(i) = (*packed.get_unchecked(byte) >> shift) & 0xF;
+                    let b = *packed.get_unchecked(p);
+                    *out.get_unchecked_mut(base) = b & 0xF;
+                    *out.get_unchecked_mut(base + 1) = (b >> 4) & 0xF;
+                }
+            }
+            if !n.is_multiple_of(2) {
+                unsafe {
+                    *out.get_unchecked_mut(n - 1) = *packed.get_unchecked(full_pairs) & 0xF;
                 }
             }
         }

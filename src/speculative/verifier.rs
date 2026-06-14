@@ -96,26 +96,26 @@ impl SpeculativeVerifier for SimulatedVerifier {
 
         // 4. Simulated acceptance: cap at rate
         let max_accept = ((self.sctx.path_buf.len() as f32) * self.acceptance_rate).ceil() as usize;
+        let take = max_accept.max(1);
         self.sctx.accepted_buf.clear();
         self.sctx
             .accepted_buf
-            .extend(self.sctx.path_buf.iter().take(max_accept.max(1)).copied());
+            .extend(self.sctx.path_buf.iter().take(take).copied());
 
         // 5. Bonus token: if all accepted, sample +1 from last marginal
         if self.sctx.accepted_buf.len() == max_accept && self.sctx.steps_populated > 0 {
             let last_step = self.sctx.steps_populated - 1;
             let start = last_step * vocab_size;
             let end = start + vocab_size;
-            let last_marginal: &[f32] = if end <= self.sctx.marginals_flat.len() {
-                &self.sctx.marginals_flat[start..end]
-            } else {
-                &[]
+            let marginals_flat = &self.sctx.marginals_flat;
+            let last_marginal: &[f32] = match end <= marginals_flat.len() {
+                true => &marginals_flat[start..end],
+                false => &[],
             };
             let bonus = sample_from_distribution(
-                if last_marginal.is_empty() {
-                    &[1.0]
-                } else {
-                    last_marginal
+                match last_marginal.is_empty() {
+                    true => &[1.0],
+                    false => last_marginal,
                 },
                 rng,
             );
