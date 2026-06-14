@@ -517,6 +517,19 @@ impl std::error::Error for DecodeError {}
 //  Opcodes with no immediates                                            //
 // ===================================================================== //
 
+/// Build a 256-entry lookup table from a slice of opcodes at compile time.
+///
+/// Converts O(n) `.contains(&opcode)` scans into O(1) `TABLE[opcode as usize]` lookups.
+const fn build_opcode_table(const_slice: &[u8]) -> [bool; 256] {
+    let mut table = [false; 256];
+    let mut i = 0;
+    while i < const_slice.len() {
+        table[const_slice[i] as usize] = true;
+        i += 1;
+    }
+    table
+}
+
 /// Opcodes that have no immediate operands.
 const NO_IMM_OPS: &[u8] = &[
     OP_UNREACHABLE,
@@ -597,6 +610,18 @@ const MEM_INSTR_OPS: &[u8] = &[
     OP_I64_STORE16,
     OP_I64_STORE32,
 ];
+
+/// Compile-time lookup table for `NO_IMM_OPS` (O(1) membership check).
+const NO_IMM_TABLE: [bool; 256] = build_opcode_table(NO_IMM_OPS);
+
+/// Compile-time lookup table for `BLOCK_TYPE_OPS` (O(1) membership check).
+const BLOCK_TYPE_TABLE: [bool; 256] = build_opcode_table(BLOCK_TYPE_OPS);
+
+/// Compile-time lookup table for `VAR_INDEX_OPS` (O(1) membership check).
+const VAR_INDEX_TABLE: [bool; 256] = build_opcode_table(VAR_INDEX_OPS);
+
+/// Compile-time lookup table for `MEM_INSTR_OPS` (O(1) membership check).
+const MEM_INSTR_TABLE: [bool; 256] = build_opcode_table(MEM_INSTR_OPS);
 
 // ===================================================================== //
 //  Decoder                                                               //
@@ -954,12 +979,12 @@ pub fn decode_instruction(data: &[u8], pos: usize) -> Result<(WasmInstr, usize),
     let mut p = pos + 1;
 
     // No immediates
-    if NO_IMM_OPS.contains(&opcode) {
+    if NO_IMM_TABLE[opcode as usize] {
         return Ok((WasmInstr::new(opcode), p));
     }
 
     // Block type (1 byte)
-    if BLOCK_TYPE_OPS.contains(&opcode) {
+    if BLOCK_TYPE_TABLE[opcode as usize] {
         let block_type = data[p] as i64;
         p += 1;
         return Ok((WasmInstr::with_imms(opcode, [block_type]), p));
@@ -1009,14 +1034,14 @@ pub fn decode_instruction(data: &[u8], pos: usize) -> Result<(WasmInstr, usize),
     }
 
     // Local/global variable access (unsigned LEB128 index)
-    if VAR_INDEX_OPS.contains(&opcode) {
+    if VAR_INDEX_TABLE[opcode as usize] {
         let (idx, new_pos) = read_unsigned_leb128(data, p)?;
         p = new_pos;
         return Ok((WasmInstr::with_imms(opcode, [idx as i64]), p));
     }
 
     // Memory instructions: alignment + offset (two unsigned LEB128)
-    if MEM_INSTR_OPS.contains(&opcode) {
+    if MEM_INSTR_TABLE[opcode as usize] {
         let (align, new_pos) = read_unsigned_leb128(data, p)?;
         p = new_pos;
         let (offset, new_pos) = read_unsigned_leb128(data, p)?;

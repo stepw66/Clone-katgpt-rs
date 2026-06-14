@@ -343,14 +343,18 @@ fn entropy_from_log_probs(log_probs: &[f32]) -> f32 {
 #[inline]
 fn log_softmax_inplace(logits: &mut [f32]) {
     let max = logits.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+    // Shift by −max in place AND accumulate sum_exp in the same pass, then
+    // subtract ln(sum_exp). Result: x_i − max − ln(sum_exp) = log_softmax(x_i).
+    // This avoids the old exp→store→sum→per-element ln() undo path that
+    // issued N ln() calls; now there is exactly one ln() call total.
     let mut sum_exp = 0.0f32;
     for v in logits.iter_mut() {
-        *v = (*v - max).exp();
-        sum_exp += *v;
+        *v -= max;
+        sum_exp += v.exp();
     }
     let log_sum = sum_exp.ln();
     for v in logits.iter_mut() {
-        *v = (*v).ln() - log_sum; // undo exp, apply log-softmax
+        *v -= log_sum;
     }
 }
 
@@ -729,22 +733,16 @@ fn write_u32(wtr: &mut impl Write, val: u32) -> Result<(), String> {
 }
 
 fn read_f32_vec(rdr: &mut impl Read, expected_len: usize, label: &str) -> Result<Vec<f32>, String> {
-    let byte_len = expected_len * 4;
-    let mut buf = vec![0u8; byte_len];
-    rdr.read_exact(&mut buf)
+    // Allocate the f32 buffer directly and read bytes in place via bytemuck,
+    // avoiding the old intermediate Vec<u8> + N `f32::from_le_bytes` calls.
+    // Assumes a little-endian target (matches `write_f32_slice`'s `to_le_bytes`);
+    // katgpt-rs targets LE (x86_64/aarch64 macOS).
+    let mut vec: Vec<f32> = vec![0.0f32; expected_len];
+    let bytes: &mut [u8] = bytemuck::cast_slice_mut(vec.as_mut_slice());
+    rdr.read_exact(bytes)
         .map_err(|e| format!("read {label}: {e}"))?;
-    let vec: Vec<f32> = buf
-        .chunks_exact(4)
-        .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
-        .collect();
-    if vec.len() == expected_len {
-        Ok(vec)
-    } else {
-        Err(format!(
-            "{label}: expected {expected_len} elements, got {}",
-            vec.len()
-        ))
-    }
+    debug_assert_eq!(vec.len(), expected_len);
+    Ok(vec)
 }
 
 fn write_f32_slice(wtr: &mut impl Write, data: &[f32]) -> Result<(), String> {

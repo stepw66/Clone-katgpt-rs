@@ -9,8 +9,14 @@
 /// Measures effective dimensionality of eigenvalue spectrum.
 /// Returns 1.0 for rank-1, returns n for uniform spectrum.
 pub fn participation_ratio(eigenvalues: &[f32]) -> f32 {
-    let sum: f64 = eigenvalues.iter().map(|&x| x as f64).sum();
-    let sum_sq: f64 = eigenvalues.iter().map(|&x| (x as f64) * (x as f64)).sum();
+    // Single-pass accumulation: halves bandwidth over the eigenvalue slice.
+    let mut sum = 0.0f64;
+    let mut sum_sq = 0.0f64;
+    for &x in eigenvalues {
+        let v = x as f64;
+        sum += v;
+        sum_sq += v * v;
+    }
     if sum_sq < 1e-12 {
         return 0.0;
     }
@@ -64,9 +70,9 @@ pub fn cumulative_variance_thresholds(eigenvalues: &[f32]) -> (usize, usize) {
 /// is the eigenvector for eigenvalue j.
 ///
 /// Self-contained — no external deps. Uses `f64` internally for precision.
-fn jacobi_eigendecompose(matrix: &[f32], dim: usize) -> (Vec<f32>, Vec<f32>) {
+fn jacobi_eigendecompose(matrix: &[f64], dim: usize) -> (Vec<f32>, Vec<f32>) {
     // Copy matrix to mutable working copy (f64 for precision)
-    let mut a: Vec<f64> = matrix.iter().map(|&x| x as f64).collect();
+    let mut a: Vec<f64> = matrix.to_vec();
     // V starts as identity
     let mut v: Vec<f64> = vec![0.0; dim * dim];
     for i in 0..dim {
@@ -244,8 +250,7 @@ pub fn calibrate_eigenbasis(samples: &[Vec<f32>], head_dim: usize) -> Calibratio
         *val *= scale;
     }
 
-    let cov_f32: Vec<f32> = cov.iter().map(|&x| x as f32).collect();
-    let (eigenvalues, eigenvectors) = jacobi_eigendecompose(&cov_f32, head_dim);
+    let (eigenvalues, eigenvectors) = jacobi_eigendecompose(&cov, head_dim);
 
     let d_eff = participation_ratio(&eigenvalues);
     let gap = spectral_gap(&eigenvalues, d_eff);
@@ -309,11 +314,8 @@ pub fn calibrate_eigenbasis_dual_gram(samples: &[Vec<f32>], head_dim: usize) -> 
         *val *= scale;
     }
 
-    // Convert to f32 for Jacobi (which internally converts back to f64)
-    let gram_f32: Vec<f32> = gram.iter().map(|&x| x as f32).collect();
-
     // Eigendecompose G (n_samples × n_samples) — much smaller than d_h × d_h
-    let (gram_eigenvalues, gram_eigenvectors) = jacobi_eigendecompose(&gram_f32, n_samples);
+    let (gram_eigenvalues, gram_eigenvectors) = jacobi_eigendecompose(&gram, n_samples);
 
     // Recover eigenvectors of C = Xᵀ·X from G's eigendecomposition:
     //   V_k = Xᵀ · U_k · (1/σ_k)
@@ -836,7 +838,7 @@ mod tests {
     #[test]
     fn test_jacobi_identity() {
         let dim = 4;
-        let mut matrix = vec![0.0f32; dim * dim];
+        let mut matrix = vec![0.0f64; dim * dim];
         for i in 0..dim {
             matrix[i * dim + i] = 1.0;
         }
@@ -863,7 +865,7 @@ mod tests {
     #[test]
     fn test_jacobi_diagonal() {
         let dim = 3;
-        let mut matrix = vec![0.0f32; dim * dim];
+        let mut matrix = vec![0.0f64; dim * dim];
         matrix[0] = 3.0;
         matrix[4] = 1.0;
         matrix[8] = 2.0;
@@ -889,7 +891,7 @@ mod tests {
     #[test]
     fn test_jacobi_2x2() {
         // [2 1; 1 3] → eigenvalues 3.618, 1.382
-        let matrix = vec![2.0f32, 1.0f32, 1.0f32, 3.0f32];
+        let matrix = vec![2.0f64, 1.0f64, 1.0f64, 3.0f64];
         let (eigenvalues, eigenvectors) = jacobi_eigendecompose(&matrix, 2);
         let trace = eigenvalues[0] + eigenvalues[1];
         assert!((trace - 5.0).abs() < 0.01, "trace should be 5, got {trace}");
@@ -906,7 +908,7 @@ mod tests {
     fn test_jacobi_known_symmetric() {
         // 3×3 symmetric matrix with known eigenvalues
         // [4 1 2; 1 3 1; 2 1 5] → eigenvalues ~7.04, 2.88, 2.08
-        let matrix = vec![4.0f32, 1.0, 2.0, 1.0, 3.0, 1.0, 2.0, 1.0, 5.0];
+        let matrix = vec![4.0f64, 1.0, 2.0, 1.0, 3.0, 1.0, 2.0, 1.0, 5.0];
         let dim = 3;
         let (eigenvalues, eigenvectors) = jacobi_eigendecompose(&matrix, dim);
 
@@ -947,7 +949,7 @@ mod tests {
                 for k in 0..dim {
                     for l in 0..dim {
                         val += eigenvectors[k * dim + i]
-                            * matrix[k * dim + l]
+                            * (matrix[k * dim + l] as f32)
                             * eigenvectors[l * dim + j];
                     }
                 }

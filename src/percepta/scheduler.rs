@@ -839,17 +839,27 @@ fn compute_alive_sets(
     dim_death: &HashMap<DimId, i32>,
     num_layers: usize,
 ) -> HashMap<i32, HashSet<DimId>> {
+    // Pre-extract birth/death into aligned Vec<i32> so the hot nested loop
+    // does pure array indexing instead of 2 HashMap lookups per dim per boundary.
+    // Total lookups: 2 × dims_vec.len() upfront, vs. previously
+    // 2 × dims_vec.len() × num_layers × 2 inside the loop.
+    let mut births: Vec<i32> = Vec::with_capacity(dims_vec.len());
+    let mut deaths: Vec<i32> = Vec::with_capacity(dims_vec.len());
+    for &d in dims_vec {
+        births.push(dim_birth.get(&d).copied().unwrap_or(i32::MAX));
+        deaths.push(dim_death.get(&d).copied().unwrap_or(i32::MIN));
+    }
+
     let mut alive_after = HashMap::with_capacity(num_layers * 2);
     for l in 0..num_layers {
         for sp in [1, 3] {
             let c = 4 * l as i32 + sp;
             // Pre-size to dim count upper bound.
             let mut alive: HashSet<DimId> = HashSet::with_capacity(dims_vec.len());
-            for &d in dims_vec {
-                let birth = dim_birth.get(&d).copied().unwrap_or(i32::MAX);
-                let death = dim_death.get(&d).copied().unwrap_or(i32::MIN);
-                if birth <= c && death > c {
-                    alive.insert(d);
+            for i in 0..dims_vec.len() {
+                // Bounds checks hoisted: births/deaths have length dims_vec.len().
+                if births[i] <= c && deaths[i] > c {
+                    alive.insert(dims_vec[i]);
                 }
             }
             alive_after.insert(c, alive);

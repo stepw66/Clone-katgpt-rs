@@ -457,21 +457,23 @@ pub fn decompose_layer_channels(
     for neuron_idx in 0..mlp_hidden {
         // Extract column neuron_idx from mlp_w2 (row-major [n_embd, mlp_hidden])
         // neuron weight: w[i] = mlp_w2[i * mlp_hidden + neuron_idx] for i in 0..n_embd
-        let neuron_weight: Vec<f32> = (0..n_embd)
-            .map(|i| mlp_w2[i * mlp_hidden + neuron_idx])
-            .collect();
+        let mut neuron_weight = Vec::with_capacity(n_embd);
+        for i in 0..n_embd {
+            neuron_weight.push(mlp_w2[i * mlp_hidden + neuron_idx]);
+        }
 
         let channels = decomposer.decompose_neuron(&neuron_weight, lm_head, vocab_size, n_embd);
 
-        // Union top-K tokens from each channel into a sorted set
-        let mut token_set: Vec<usize> = Vec::new();
+        // Union top-K tokens from each channel into a sorted set.
+        // collect-all → sort_unstable → dedup is O(N log N) vs the old
+        // per-element binary_search + Vec::insert which was O(N²) due to shifts.
+        let total_tokens: usize = channels.iter().map(|ch| ch.top_tokens.len()).sum();
+        let mut token_set: Vec<usize> = Vec::with_capacity(total_tokens);
         for ch in &channels {
-            for &tok in &ch.top_tokens {
-                if let Err(pos) = token_set.binary_search(&tok) {
-                    token_set.insert(pos, tok);
-                }
-            }
+            token_set.extend_from_slice(&ch.top_tokens);
         }
+        token_set.sort_unstable();
+        token_set.dedup();
 
         result.push(token_set);
     }
@@ -545,14 +547,15 @@ impl VocabChannelMap {
     pub fn layer_union(&self, layer: usize) -> Vec<usize> {
         match self.layers.get(layer) {
             Some(neurons) => {
-                let mut union_set: Vec<usize> = Vec::new();
+                // O(N log N): collect-all with exact capacity → sort_unstable → dedup.
+                // Was O(N²): per-token binary_search + Vec::insert (shifts elements).
+                let total: usize = neurons.iter().map(|t| t.len()).sum();
+                let mut union_set: Vec<usize> = Vec::with_capacity(total);
                 for tokens in neurons {
-                    for &tok in tokens {
-                        if let Err(pos) = union_set.binary_search(&tok) {
-                            union_set.insert(pos, tok);
-                        }
-                    }
+                    union_set.extend_from_slice(tokens);
                 }
+                union_set.sort_unstable();
+                union_set.dedup();
                 union_set
             }
             None => Vec::new(),
@@ -563,16 +566,22 @@ impl VocabChannelMap {
     ///
     /// Returns a sorted Vec.
     pub fn global_union(&self) -> Vec<usize> {
-        let mut union_set: Vec<usize> = Vec::new();
+        // O(N log N): collect-all with exact capacity → sort_unstable → dedup.
+        // Was O(N²): per-token binary_search + Vec::insert across all layers.
+        let total: usize = self
+            .layers
+            .iter()
+            .flat_map(|neurons| neurons.iter())
+            .map(|t| t.len())
+            .sum();
+        let mut union_set: Vec<usize> = Vec::with_capacity(total);
         for neurons in &self.layers {
             for tokens in neurons {
-                for &tok in tokens {
-                    if let Err(pos) = union_set.binary_search(&tok) {
-                        union_set.insert(pos, tok);
-                    }
-                }
+                union_set.extend_from_slice(tokens);
             }
         }
+        union_set.sort_unstable();
+        union_set.dedup();
         union_set
     }
 
@@ -586,7 +595,21 @@ impl VocabChannelMap {
     ///     - u32 LE: num_tokens
     ///     - u32 LE × num_tokens: token indices
     pub fn serialize(&self) -> Vec<u8> {
-        let mut buf = Vec::new();
+        // Pre-compute exact byte size to avoid repeated Vec growth reallocs.
+        // Layout: header (4) + per layer (4) + per neuron (4 + 4 * token_count).
+        let total_bytes: usize = 4
+            + self
+                .layers
+                .iter()
+                .map(|neurons| {
+                    4 + neurons
+                        .iter()
+                        .map(|tokens| 4 + tokens.len() * 4)
+                        .sum::<usize>()
+                })
+                .sum::<usize>();
+
+        let mut buf = Vec::with_capacity(total_bytes);
 
         let num_layers = self.layers.len() as u32;
         buf.extend_from_slice(&num_layers.to_le_bytes());
