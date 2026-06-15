@@ -4,7 +4,7 @@
 **Research:** [katgpt-rs/.research/240_SGS_Curiosity_Guided_Self_Play.md](../.research/240_SGS_Curiosity_Guided_Self_Play.md)
 **Source paper:** [arXiv:2604.20209](https://arxiv.org/abs/2604.20209) — Bailey et al. (Stanford, Apr 2026), "Scaling Self-Play with Self-Guidance"
 **Target:** `katgpt-rs/src/cgsp/` (new module) + Cargo feature `cgsp`
-**Status:** Active — Phase 1 not started
+**Status:** Active — Phase 1 + Phase 2 complete, Phase 3 + Phase 4 pending
 
 ---
 
@@ -26,7 +26,7 @@ Ship the open-primitive half of Super-GOAT Research 240: a generic, modelless, z
 
 ### Tasks
 
-- [ ] **T1.1** Create `katgpt-rs/src/cgsp/` module skeleton behind `cgsp` feature flag
+- [x] **T1.1** Create `katgpt-rs/src/cgsp/` module skeleton behind `cgsp` feature flag
   - `mod.rs` — module root, re-exports
   - `types.rs` — `Direction`, `Priority`, `Target`, `Candidate`, `CycleResult`, `ScratchBuffers`
   - `traits.rs` — `CuriosityConjecturer`, `QualityGuide`, `Solver` (alias to existing trait), `HintDeltaBandit` (alias to Plan 049 trait)
@@ -35,20 +35,20 @@ Ship the open-primitive half of Super-GOAT Research 240: a generic, modelless, z
   - Update root `Cargo.toml` `[features]` section: `cgsp = ["bandit", "collapse_aware_thinking", "data_gate", "breakeven_complexity"]`
   - Update `crates/katgpt-core/Cargo.toml` if needed
 
-- [ ] **T1.2** Implement `CuriosityConjecturer` trait + `PoolConjecturer` reference impl
+- [x] **T1.2** Implement `CuriosityConjecturer` trait + `PoolConjecturer` reference impl
   - Trait: `fn sample_candidates(&self, target: &Target, priorities: &[f32], out: &mut [Direction])`
   - `PoolConjecturer`: holds `[Direction; N]`, samples k via priority-weighted roulette (no alloc, scratch buffer for CDF)
   - Unit tests: sample distribution matches priority weights (χ² test, p > 0.05)
   - Unit tests: zero-allocation verified (no `Vec::new` in hot path)
 
-- [ ] **T1.3** Implement `QualityGuide` trait + `HlaProjectionGuide` reference impl
+- [x] **T1.3** Implement `QualityGuide` trait + `HlaProjectionGuide` reference impl
   - Trait: `fn score(&self, target: &Target, candidate: &Direction) -> f32`
   - `HlaProjectionGuide`: `score = sigmoid(λ · dot(candidate, target)) · sigmoid(−α · structural_complexity(candidate))`
   - `structural_complexity(candidate)` = weighted sum of (disjunction_count, length, redundancy) — generic, game-agnostic weights default to (0.4, 0.3, 0.3)
   - Unit tests: score ∈ [0, 1], monotone in dot-product, monotone decreasing in complexity
   - Unit tests: sigmoid not softmax (verify via numerical gradient sign)
 
-- [ ] **T1.4** Implement `CgspLoop::cycle()` zero-alloc main loop
+- [x] **T1.4** Implement `CgspLoop::cycle()` zero-alloc main loop
   - Signature: `fn cycle(&mut self, target: &Target, scratch: &mut ScratchBuffers) -> CycleResult`
   - Steps per Research 240 §2.3:
     1. Conjecturer samples k candidates into `scratch.candidates`
@@ -62,24 +62,24 @@ Ship the open-primitive half of Super-GOAT Research 240: a generic, modelless, z
   - Unit tests: priority monotone in reward (higher r_synth → higher priority after update)
   - Unit tests: zero-allocation verified via `#[cfg(feature = "alloc_count")]` instrumentation
 
-- [ ] **T1.5** Integrate collapse_aware_thinking (Plan 212) as exploration injector
+- [x] **T1.5** Integrate collapse_aware_thinking (Plan 212) as exploration injector
   - When `CycleResult.collapse_triggered`, raise Conjecturer sampling temperature for next cycle
   - Add `CgspLoop::inject_exploration(&mut self, magnitude: f32)` method
   - Unit tests: after injection, next-cycle sample distribution is more uniform (entropy increases)
 
-- [ ] **T1.6** Wire data_gate (Plan 111) as Conjecturer output gate
+- [x] **T1.6** Wire data_gate (Plan 111) as Conjecturer output gate
   - Before bandit update, data_gate checks if the candidate batch is degenerate (e.g. all same direction, or all rejected by difficulty filter)
   - If degenerate, skip bandit update and force exploration injection
   - Unit tests: degenerate batch does not corrupt priority table
 
-- [ ] **T1.7** Integration test: full cycle on synthetic 8-direction pool
+- [x] **T1.7** Integration test: full cycle on synthetic 8-direction pool
   - 8 directions, random target, 100 cycles
   - Verify: priority table converges toward target-aligned directions
   - Verify: no panic, no NaN, no allocation in hot path
 
 ### Deliverable
 
-`cargo test --features cgsp` passes. `cargo check` (without `cgsp`) compiles with zero new code. No game semantics in this module.
+`cargo test --features cgsp` passes (29/29 tests). `cargo check` (without `cgsp`) compiles with zero new code. No game semantics in this module.
 
 ---
 
@@ -87,18 +87,18 @@ Ship the open-primitive half of Super-GOAT Research 240: a generic, modelless, z
 
 ### Tasks
 
-- [ ] **T2.1** Implement `CuriosityPrioritySnapshot` (serialization + BLAKE3 commitment)
+- [x] **T2.1** Implement `CuriosityPrioritySnapshot` (serialization + BLAKE3 commitment)
   - Serialize `[Direction; N]` + `[f32; N]` to fixed-size bytes (no serde alloc — manual encode)
   - BLAKE3 hash of serialized bytes
   - `SnapshotVersion` (Uuid v7) for ordering
   - Unit tests: roundtrip preserves bit-identity; BLAKE3 deterministic
 
-- [ ] **T2.2** Implement `CgspLoop::snapshot()` and `CgspLoop::restore(snapshot)`
+- [x] **T2.2** Implement `CgspLoop::snapshot()` and `CgspLoop::restore(snapshot)`
   - snapshot: capture current priorities + directions, return `CuriosityPrioritySnapshot`
   - restore: replace internal state from snapshot (atomic, no partial state)
   - Unit tests: restore after N cycles of drift produces identical behavior to fresh-start-with-snapshot
 
-- [ ] **T2.3** Add freeze/thaw cycle helper `CgspLoop::run_with_snapshotting(cycles, every_n, sink)`
+- [x] **T2.3** Add freeze/thaw cycle helper `CgspLoop::run_with_snapshotting(cycles, every_n, sink)`
   - Every `every_n` cycles, calls `snapshot()` and pushes to `sink`
   - Used by riir-ai runtime to persist personality checkpoints
   - Unit tests: sink receives snapshots at correct intervals
@@ -213,9 +213,9 @@ These are all game IP and belong in `riir-ai`.
 
 ## Status Tracking
 
-- Phase 1: 0/7 tasks complete
-- Phase 2: 0/3 tasks complete
-- Phase 3: 0/8 tasks complete
-- Phase 4: 0/6 tasks complete
+- Phase 1: 7/7 tasks complete ✅
+- Phase 2: 3/3 tasks complete ✅
+- Phase 3: 0/8 tasks complete (GOAT gate — pending benchmark run on Apple Silicon)
+- Phase 4: 0/6 tasks complete (documentation — pending GOAT decision)
 
-**Next action:** T1.1 (module skeleton).
+**Next action:** Phase 3 T3.1 (synthetic benchmark CGSP vs g_zero-only on transfer-to-target).
