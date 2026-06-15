@@ -87,15 +87,16 @@ impl DrafterLoraWeights {
         }
     }
 
-    /// Collect all LoRA params into a flat vector for gradient computation.
+    /// Write all LoRA params into a reusable buffer (zero-alloc after first call).
     /// Order: [Q_A, Q_B, K_A, K_B, V_A, V_B, O_A, O_B, MLP1_A, MLP1_B, MLP2_A, MLP2_B]
-    fn params_flat(&self) -> Vec<f32> {
-        let mut params = Vec::with_capacity(self.total_params());
+    /// The buffer is cleared and extended in-place, preserving its capacity across calls.
+    fn params_flat_into(&self, out: &mut Vec<f32>) {
+        out.clear();
+        out.reserve(self.total_params());
         for adapter in &self.adapters() {
-            params.extend_from_slice(&adapter.a);
-            params.extend_from_slice(&adapter.b);
+            out.extend_from_slice(&adapter.a);
+            out.extend_from_slice(&adapter.b);
         }
-        params
     }
 
     /// Set all LoRA params from a flat vector (same order as params_flat).
@@ -569,6 +570,15 @@ pub fn train_drafter_lora(
     let mut ctx = DrafterForwardContext::new(drafter_config, lora.q_lora.rank);
     let mut best_loss = f32::MAX;
 
+    // Hoist scratch buffers outside the pair loop: total_params is constant for
+    // a given config/rank, so these allocate exactly once and are reused via
+    // clear()+extend / fill across every pair and epoch.
+    // Before: 2 × pairs.len() × epochs heap allocations of n_params f32 each.
+    // After: 2 allocations total for the entire training run.
+    let n_params = lora.total_params();
+    let mut params: Vec<f32> = Vec::with_capacity(n_params);
+    let mut gradients = vec![0.0f32; n_params];
+
     for _epoch in 0..epochs {
         let mut epoch_loss = 0.0f32;
 
@@ -577,11 +587,10 @@ pub fn train_drafter_lora(
             let base_loss =
                 compute_lora_loss(&mut ctx, drafter_config, drafter_weights, lora, pair);
 
-            // Snapshot current params once; perturb in-place via set_param_flat
-            // to avoid O(P^2) vector copies in the finite-difference loop.
-            let n_params = lora.total_params();
-            let mut params = lora.params_flat();
-            let mut gradients = vec![0.0f32; n_params];
+            // Refresh the param snapshot from the (just-updated) weights,
+            // reusing the pre-allocated buffer — zero alloc.
+            lora.params_flat_into(&mut params);
+            gradients.fill(0.0);
 
             for i in 0..n_params {
                 let prev = params[i];

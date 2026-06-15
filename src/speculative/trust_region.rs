@@ -265,19 +265,15 @@ fn compute_blend_kl_from_logs(log_p: &[f32], log_q: &[f32], beta: f32) -> f32 {
     let inv_beta = 1.0 - beta;
     let mut kl = 0.0f32;
 
-    for i in 0..log_p.len() {
-        // Blended log probability
-        let log_mu = inv_beta * log_q[i] + beta * log_p[i];
+    // Branch-free inner loop: always compute the contribution and mask to 0
+    // when degenerate (μ too small or log_p too negative). Lets LLVM
+    // auto-vectorize the zip — no branch to block vectorization. The extra
+    // FLOPs when masked out are far cheaper than a branch mispredict.
+    for (&lp, &lq) in log_p.iter().zip(log_q.iter()) {
+        let log_mu = inv_beta * lq + beta * lp;
         let mu = log_mu.exp();
-
-        // KL(μ || p) = Σ μ * (log μ - log p)
-        // Branch-free select: contributes 0 when μ or p is too small.
-        let contrib = if mu > 1e-30 && log_p[i] > -29.999 {
-            mu * (log_mu - log_p[i])
-        } else {
-            0.0
-        };
-        kl += contrib;
+        let active = ((mu > 1e-30) & (lp > -29.999)) as u8 as f32;
+        kl += active * mu * (log_mu - lp);
     }
 
     kl
@@ -373,18 +369,21 @@ impl TrustRegionState {
 ///
 /// Tracks average trust, recommended window size, and compute tier for one
 /// category of queries. The bandit learns which configuration works best.
+///
+/// Field order groups wide-aligning types first to eliminate padding (48B vs 56B):
+/// `domain`(24B String) → `window`(8B) → `observations`(8B) → `avg_trust`(4B) → `tier`(1B + 3B pad).
 #[derive(Clone, Debug)]
 pub struct TrustArm {
     /// Domain/query type identifier (e.g., "code", "math", "chat").
     pub domain: String,
-    /// Running average trust for this domain.
-    pub avg_trust: f32,
     /// Recommended speculation window size.
     pub window: usize,
-    /// Recommended compute tier (0=CPU, 1=GPU, 2=GPU+ANE).
-    pub tier: u8,
     /// Number of observations.
     pub observations: usize,
+    /// Running average trust for this domain.
+    pub avg_trust: f32,
+    /// Recommended compute tier (0=CPU, 1=GPU, 2=GPU+ANE).
+    pub tier: u8,
 }
 
 impl TrustArm {
@@ -392,10 +391,10 @@ impl TrustArm {
     pub fn new(domain: &str, window: usize) -> Self {
         Self {
             domain: domain.to_string(),
-            avg_trust: 1.0, // Optimistic cold start
             window,
-            tier: 0,
             observations: 0,
+            avg_trust: 1.0, // Optimistic cold start
+            tier: 0,
         }
     }
 
