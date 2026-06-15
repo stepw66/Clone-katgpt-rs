@@ -115,14 +115,32 @@ impl SpecReconciler {
             .generate(h_last, q_goals, self.config.k, dt, steps, rng);
 
         // ── Stage 3: Soft scoring ────────────────────────────────────
-        // Score the client trajectory against the manifold.
+        // Score the client trajectory against the manifold. `score_trajectory`
+        // invokes `score_against_manifold` once per client point; instead of
+        // re-running that pass for `max_similarity`, fuse the two reductions so
+        // we do a single O(C×M) sweep.
         self.scorer.set_manifold(&manifold);
 
-        let avg_similarity = self.scorer.score_trajectory(client_trajectory);
-        let max_similarity = client_trajectory
-            .iter()
-            .map(|cp| self.scorer.score_against_manifold(cp))
-            .fold(0.0f32, f32::max);
+        let (avg_similarity, max_similarity) = if client_trajectory.is_empty() {
+            (0.0, 0.0)
+        } else {
+            let mut sum = 0.0f32;
+            let mut max = f32::NEG_INFINITY;
+            for cp in client_trajectory {
+                let s = self.scorer.score_against_manifold(cp);
+                sum += s;
+                if s > max {
+                    max = s;
+                }
+            }
+            (sum / client_trajectory.len() as f32, max)
+        };
+        // Defensive: if the manifold was empty max stayed at -inf.
+        let max_similarity = if max_similarity.is_finite() {
+            max_similarity
+        } else {
+            0.0
+        };
 
         // ── Stage 4: Verdict ─────────────────────────────────────────
         let verdict = if max_similarity >= self.config.accept_threshold {

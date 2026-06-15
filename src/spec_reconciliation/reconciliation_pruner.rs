@@ -46,6 +46,10 @@ impl ReconciliationPruner {
     /// Check that displacement between two points respects the max speed bound.
     ///
     /// Returns `true` if `distance(prev, current) / dt <= max_speed`.
+    ///
+    /// Hot-path optimization: compare squared distance against the squared
+    /// speed bound — avoids a `sqrt` per call. Mathematically equivalent for
+    /// non-negative inputs.
     #[inline]
     pub fn check_velocity(
         &self,
@@ -56,8 +60,14 @@ impl ReconciliationPruner {
         if dt <= 0.0 {
             return true; // degenerate timestep — cannot violate velocity
         }
-        let distance = current.distance_to(prev);
-        distance / dt <= self.config.max_speed
+        // distance² = dx² + dy²
+        let dx = current.pos_x() - prev.pos_x();
+        let dy = current.pos_y() - prev.pos_y();
+        let dist_sq = dx * dx + dy * dy;
+        // max_step = max_speed * dt → max_step² = max_speed² * dt²
+        let max_step = self.config.max_speed * dt;
+        let max_step_sq = max_step * max_step;
+        dist_sq <= max_step_sq
     }
 
     /// Check that a point's position is within the configured map bounds.

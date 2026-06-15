@@ -21,19 +21,17 @@ impl BpeTokenizerImpl {
         }
 
         // Map each char to its token ID up front. Unknown chars map to `unk`.
-        // This is the only String allocation in the entire encode path — one
-        // transient String per char, reused via a stack-local buffer.
+        // Uses a fixed-size stack buffer (`encode_utf8` writes ≤4 bytes) —
+        // zero heap allocation for the entire char→ID map step.
         let unk = tokenizer.unk_id();
         let char_count = text.chars().count();
         let mut tokens: Vec<usize> = Vec::with_capacity(char_count);
-        let mut buf = String::with_capacity(4);
+        let mut buf = [0u8; 4];
         for c in text.chars() {
-            buf.clear();
-            buf.push(c);
-            let id = tokenizer.vocab_to_id.get(&buf).copied().unwrap_or(unk);
+            let s = c.encode_utf8(&mut buf);
+            let id = tokenizer.vocab_to_id.get(s).copied().unwrap_or(unk);
             tokens.push(id);
         }
-        drop(buf);
 
         // Fast path: no merges configured (or tables not rebuilt).
         if tokenizer.merge_ranks_id.is_empty() {
@@ -45,10 +43,11 @@ impl BpeTokenizerImpl {
         // Iteratively merge the highest-priority (lowest-rank) pair.
         loop {
             // Find the lowest-rank applicable merge across all adjacent pairs.
+            // `windows(2)` lets LLVM drop the per-iteration bounds check on
+            // `tokens[i + 1]` that the manual index loop forces.
             let mut best: Option<(usize, usize)> = None; // (rank, left_idx)
-            for i in 0..tokens.len().saturating_sub(1) {
-                let pair = (tokens[i], tokens[i + 1]);
-                if let Some(&rank) = tokenizer.merge_ranks_id.get(&pair) {
+            for (i, w) in tokens.windows(2).enumerate() {
+                if let Some(&rank) = tokenizer.merge_ranks_id.get(&(w[0], w[1])) {
                     match best {
                         Some((best_rank, _)) if best_rank <= rank => {}
                         _ => best = Some((rank, i)),
