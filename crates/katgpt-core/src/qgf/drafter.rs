@@ -236,7 +236,8 @@ where
             .q_gradient_into(condition, projected, gradient_buffer);
         let n = logits_buffer.len().min(gradient_buffer.len());
         for i in 0..n {
-            logits_buffer[i] += weight * gradient_buffer[i];
+            // FMA: logits[i] = w * gradient[i] + logits[i] (single rounding, matches tilt_logits).
+            logits_buffer[i] = weight.mul_add(gradient_buffer[i], logits_buffer[i]);
         }
         true
     }

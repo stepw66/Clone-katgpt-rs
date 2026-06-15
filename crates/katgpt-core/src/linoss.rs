@@ -113,6 +113,10 @@ impl LinOSSCell {
 
     /// Zero-alloc parallel scan using pre-allocated scratch buffers.
     /// Reuse `ParallelScanScratch` across calls to avoid repeated allocation.
+    ///
+    /// This is a back-compat wrapper: it calls [`parallel_scan_into_flat`] (which writes flat
+    /// `n*h` result buffers into scratch, zero per-call allocation), then materializes them
+    /// into `Vec<LinOSSState>`. Prefer [`parallel_scan_into_flat`] on hot paths.
     pub fn parallel_scan_with_scratch(
         &self,
         initial: &LinOSSState,
@@ -120,13 +124,38 @@ impl LinOSSCell {
         dt: f32,
         scratch: &mut ParallelScanScratch,
     ) -> Vec<LinOSSState> {
+        let n = self.parallel_scan_into_flat(initial, forcings, dt, scratch);
+        let h = self.hidden_dim;
+        // Materialize flat buffers into Vec<LinOSSState>. This is the only allocation path —
+        // hot callers should use `parallel_scan_into_flat` + `scratch.result_y()/result_z()` directly.
+        let (ry, rz) = scratch.split_results(n * h);
+        ry.chunks_exact(h)
+            .zip(rz.chunks_exact(h))
+            .map(|(y, z)| LinOSSState { y: y.to_vec(), z: z.to_vec() })
+            .collect()
+    }
+
+    /// Zero-alloc parallel scan writing flat result buffers into `scratch.ry` / `scratch.rz`.
+    ///
+    /// Returns the number of steps written (`n`). Read results via
+    /// `scratch.result_y()` / `scratch.result_z()`, each length `n * hidden_dim`,
+    /// row-major: step `s`, dim `j` at index `s * hidden_dim + j`.
+    ///
+    /// For `n <= 64`, falls back to sequential scan (still writes flat buffers).
+    pub fn parallel_scan_into_flat(
+        &self,
+        initial: &LinOSSState,
+        forcings: &[&[f32]],
+        dt: f32,
+        scratch: &mut ParallelScanScratch,
+    ) -> usize {
         let n = forcings.len();
         if n == 0 {
-            return vec![];
+            return 0;
         }
         // For small sequences, sequential avoids overhead.
         if n <= 64 {
-            return self.sequential_scan(initial, forcings, dt);
+            return self.sequential_scan_into_flat(initial, forcings, dt, scratch);
         }
 
         let h = self.hidden_dim;
@@ -189,31 +218,29 @@ impl LinOSSCell {
             }
         }
 
-        // Pre-allocate all result states upfront — batch allocation, write in-place.
-        let mut results: Vec<LinOSSState> = (0..n)
-            .map(|_| LinOSSState {
-                y: vec![0.0f32; h],
-                z: vec![0.0f32; h],
-            })
-            .collect();
-        for (step, result) in results.iter_mut().enumerate() {
+        // Write flat result buffers. FMA via mul_add for single-rounded accumulation.
+        // ry[base+j] = pa·y0 + pb·z0 + pby; rz[base+j] = pc·y0 + pd·z0 + pbz.
+        for step in 0..n {
             let base = step * h;
             for j in 0..h {
-                result.y[j] = scratch.pa[base + j] * initial.y[j]
-                    + scratch.pb[base + j] * initial.z[j]
-                    + scratch.pby[base + j];
-                result.z[j] = scratch.pc[base + j] * initial.y[j]
-                    + scratch.pd[base + j] * initial.z[j]
-                    + scratch.pbz[base + j];
+                let y0 = initial.y[j];
+                let z0 = initial.z[j];
+                scratch.ry[base + j] = scratch.pa[base + j]
+                    .mul_add(y0, scratch.pb[base + j].mul_add(z0, scratch.pby[base + j]));
+                scratch.rz[base + j] = scratch.pc[base + j]
+                    .mul_add(y0, scratch.pd[base + j].mul_add(z0, scratch.pbz[base + j]));
             }
         }
-        results
+        n
     }
 
     /// Sequential scan — simple loop for correctness reference and small sequences.
     ///
-    /// Pre-allocates all result states upfront, writes directly via `split_at_mut`
-    /// to avoid double-buffer overhead and initial state clone.
+    /// Back-compat allocating wrapper around [`sequential_scan_into_flat`].
+    /// Materializes flat result buffers into `Vec<LinOSSState>`.
+    ///
+    /// Only used by tests as the reference for parity checks against `parallel_scan`.
+    #[cfg(test)]
     #[inline]
     fn sequential_scan(
         &self,
@@ -221,48 +248,60 @@ impl LinOSSCell {
         forcings: &[&[f32]],
         dt: f32,
     ) -> Vec<LinOSSState> {
+        let mut scratch = ParallelScanScratch::new();
+        let n = self.sequential_scan_into_flat(initial, forcings, dt, &mut scratch);
+        let h = self.hidden_dim;
+        let (ry, rz) = scratch.split_results(n * h);
+        ry.chunks_exact(h)
+            .zip(rz.chunks_exact(h))
+            .map(|(y, z)| LinOSSState { y: y.to_vec(), z: z.to_vec() })
+            .collect()
+    }
+
+    /// Zero-alloc sequential scan writing flat result buffers into `scratch.ry` / `scratch.rz`.
+    ///
+    /// Because `ry` and `rz` are separate `Vec<f32>` allocations, we can pass disjoint
+    /// `&mut [f32]` slices per step directly — no `split_at_mut` borrow-dance needed.
+    /// Returns the number of steps written (`n`).
+    #[inline]
+    fn sequential_scan_into_flat(
+        &self,
+        initial: &LinOSSState,
+        forcings: &[&[f32]],
+        dt: f32,
+        scratch: &mut ParallelScanScratch,
+    ) -> usize {
         let h = self.hidden_dim;
         let n = forcings.len();
         if n == 0 {
-            return vec![];
+            return 0;
         }
-        // Pre-allocate all result states upfront — batch allocation, write in-place.
-        let mut results: Vec<LinOSSState> = (0..n)
-            .map(|_| LinOSSState {
-                y: vec![0.0f32; h],
-                z: vec![0.0f32; h],
-            })
-            .collect();
-        // Step 0: from initial state directly into results[0].
-        //
-        // imex_step_inplace needs &mut y and &mut z of the same LinOSSState.
-        // We can't borrow fields of results[0] mutably at the same time, so
-        // we destructure the struct to get disjoint mutable references.
+        let total = n * h;
+        scratch.ensure_capacity(total);
+        // ry and rz are distinct Vec allocations → disjoint &mut borrows are sound.
+        let (ry, rz) = scratch.split_results(total);
+
+        // Step 0: from initial state directly into flat result row 0.
+        // ry and rz are distinct allocations → disjoint &mut borrows are sound.
         {
-            let LinOSSState {
-                y: ref mut y_out,
-                z: ref mut z_out,
-            } = results[0];
-            self.imex_step_inplace(&initial.y, &initial.z, forcings[0], dt, y_out, z_out);
+            let (y0, z0) = (&mut ry[..h], &mut rz[..h]);
+            self.imex_step_inplace(&initial.y, &initial.z, forcings[0], dt, y0, z0);
         }
-        // Steps 1..n: read results[i-1], write results[i].
-        // split_at_mut provides disjoint borrows to satisfy borrow checker.
+        // Steps 1..n: read row i-1, write row i. ry and rz are separate allocations
+        // so (prev_y, cur_y) and (prev_z, cur_z) borrows don't alias each other.
         for step in 1..n {
-            let (prev, cur) = results.split_at_mut(step);
-            let LinOSSState {
-                y: ref mut y_out,
-                z: ref mut z_out,
-            } = cur[0];
-            self.imex_step_inplace(
-                &prev[step - 1].y,
-                &prev[step - 1].z,
-                forcings[step],
-                dt,
-                y_out,
-                z_out,
-            );
+            let prev = (step - 1) * h;
+            let base = step * h;
+            // split_at_mut within ry to separate prev row (read) from cur row (write).
+            let (prev_part, cur_part) = ry.split_at_mut(base);
+            let prev_y = &prev_part[prev..prev + h];
+            let cur_y = &mut cur_part[..h];
+            let (prev_part, cur_part) = rz.split_at_mut(base);
+            let prev_z = &prev_part[prev..prev + h];
+            let cur_z = &mut cur_part[..h];
+            self.imex_step_inplace(prev_y, prev_z, forcings[step], dt, cur_y, cur_z);
         }
-        results
+        n
     }
 
     #[inline]
@@ -303,6 +342,10 @@ pub struct ParallelScanScratch {
     pd: Vec<f32>,
     pby: Vec<f32>,
     pbz: Vec<f32>,
+    /// Flat result buffer: y-state for all steps, length n*h. Written by `parallel_scan_into_flat`.
+    ry: Vec<f32>,
+    /// Flat result buffer: z-state for all steps, length n*h. Written by `parallel_scan_into_flat`.
+    rz: Vec<f32>,
 }
 
 impl ParallelScanScratch {
@@ -321,6 +364,8 @@ impl ParallelScanScratch {
             pd: Vec::new(),
             pby: Vec::new(),
             pbz: Vec::new(),
+            ry: Vec::new(),
+            rz: Vec::new(),
         }
     }
 
@@ -345,6 +390,24 @@ impl ParallelScanScratch {
         ensure!(pd);
         ensure!(pby);
         ensure!(pbz);
+        ensure!(ry);
+        ensure!(rz);
+    }
+
+    /// Borrow the flat y-result buffer `[n*h]` after `parallel_scan_into_flat`.
+    pub fn result_y(&self) -> &[f32] {
+        &self.ry
+    }
+
+    /// Borrow the flat z-result buffer `[n*h]` after `parallel_scan_into_flat`.
+    pub fn result_z(&self) -> &[f32] {
+        &self.rz
+    }
+
+    /// Split out the first `len` elements of `ry`/`rz` as separate mutable slices.
+    /// Used by `parallel_scan_with_scratch` to materialize `Vec<LinOSSState>` after a flat scan.
+    fn split_results(&mut self, len: usize) -> (&mut [f32], &mut [f32]) {
+        (&mut self.ry[..len], &mut self.rz[..len])
     }
 }
 
@@ -670,7 +733,7 @@ impl ModalSpecDrafter {
             let start = ((i as f32 * ratio) as usize).min(vocab_dim);
             let end = (((i + 1) as f32 * ratio) as usize).min(vocab_dim);
             if start < end {
-                *result_slot = vec[start..end].iter().sum::<f32>() / (end - start) as f32;
+                *result_slot = crate::simd::simd_sum_f32(&vec[start..end]) / (end - start) as f32;
             } else {
                 *result_slot = 0.0;
             }

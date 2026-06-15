@@ -246,11 +246,13 @@ unsafe fn neon_outer_product_ema_f64(
     first_step: bool,
 ) {
     use core::arch::aarch64::{
-        vdupq_n_f64, vld1q_dup_f64, vld1q_f64, vmlaq_f64, vmulq_f64, vst1q_f64,
+        vcvt_f64_f32, vdupq_n_f64, vld1_f32, vld1q_dup_f64, vld1q_f64, vmlaq_f64, vmulq_f64,
+        vst1q_f64,
     };
 
     unsafe {
         let n_chunks = k / 2;
+        let half = vdupq_n_f64(0.5);
 
         if first_step {
             // First step: direct assignment (no EMA blending, no load from dst)
@@ -265,18 +267,13 @@ unsafe fn neon_outer_product_ema_f64(
 
                 let mut j = 0;
                 for _ in 0..n_chunks {
-                    let sj0 = *student.get_unchecked(j) as f64;
-                    let sj1 = *student.get_unchecked(j + 1) as f64;
-                    let v_sj = vld1q_f64([sj0, sj1].as_ptr());
-
-                    let tj0 = *teacher.get_unchecked(j) as f64;
-                    let tj1 = *teacher.get_unchecked(j + 1) as f64;
-                    let v_tj = vld1q_f64([tj0, tj1].as_ptr());
+                    // Hardware f32→f64 widening via vcvt_f64_f32 — avoids 2 scalar casts + stack roundtrip.
+                    let v_sj = vcvt_f64_f32(vld1_f32(student.as_ptr().add(j)));
+                    let v_tj = vcvt_f64_f32(vld1_f32(teacher.as_ptr().add(j)));
 
                     let v_sigma = vmulq_f64(v_si, v_tj);
                     let v_n = vmulq_f64(v_si, v_sj);
                     let v_n = vmlaq_f64(v_n, v_ti, v_tj);
-                    let half = vdupq_n_f64(0.5);
                     let v_n = vmulq_f64(v_n, half);
 
                     vst1q_f64(row_sigma.add(j), v_sigma);
@@ -309,18 +306,13 @@ unsafe fn neon_outer_product_ema_f64(
 
                 let mut j = 0;
                 for _ in 0..n_chunks {
-                    let sj0 = *student.get_unchecked(j) as f64;
-                    let sj1 = *student.get_unchecked(j + 1) as f64;
-                    let v_sj = vld1q_f64([sj0, sj1].as_ptr());
-
-                    let tj0 = *teacher.get_unchecked(j) as f64;
-                    let tj1 = *teacher.get_unchecked(j + 1) as f64;
-                    let v_tj = vld1q_f64([tj0, tj1].as_ptr());
+                    // Hardware f32→f64 widening via vcvt_f64_f32 — avoids 2 scalar casts + stack roundtrip.
+                    let v_sj = vcvt_f64_f32(vld1_f32(student.as_ptr().add(j)));
+                    let v_tj = vcvt_f64_f32(vld1_f32(teacher.as_ptr().add(j)));
 
                     let v_sigma = vmulq_f64(v_si, v_tj);
                     let v_n = vmulq_f64(v_si, v_sj);
                     let v_n = vmlaq_f64(v_n, v_ti, v_tj);
-                    let half = vdupq_n_f64(0.5);
                     let v_n = vmulq_f64(v_n, half);
 
                     let v_old_sigma = vld1q_f64(row_sigma.add(j));
@@ -363,7 +355,7 @@ unsafe fn neon_outer_product_f64(
     k: usize,
 ) {
     use core::arch::aarch64::{
-        vaddq_f64, vdupq_n_f64, vld1q_dup_f64, vld1q_f64, vmulq_f64, vst1q_f64,
+        vaddq_f64, vcvt_f64_f32, vdupq_n_f64, vld1_f32, vld1q_dup_f64, vmulq_f64, vst1q_f64,
     };
 
     unsafe {
@@ -381,13 +373,9 @@ unsafe fn neon_outer_product_f64(
 
             let mut j = 0;
             for _ in 0..n_chunks {
-                let sj0 = *student.get_unchecked(j) as f64;
-                let sj1 = *student.get_unchecked(j + 1) as f64;
-                let v_sj = vld1q_f64([sj0, sj1].as_ptr());
-
-                let tj0 = *teacher.get_unchecked(j) as f64;
-                let tj1 = *teacher.get_unchecked(j + 1) as f64;
-                let v_tj = vld1q_f64([tj0, tj1].as_ptr());
+                // Hardware f32→f64 widening via vcvt_f64_f32 — avoids 2 scalar casts + stack roundtrip.
+                let v_sj = vcvt_f64_f32(vld1_f32(student.as_ptr().add(j)));
+                let v_tj = vcvt_f64_f32(vld1_f32(teacher.as_ptr().add(j)));
 
                 let v_sigma = vmulq_f64(v_si, v_tj);
                 // n = (si*sj + ti*tj) / 2
@@ -458,12 +446,13 @@ unsafe fn avx2_outer_product_ema_f64(
     first_step: bool,
 ) {
     use core::arch::x86_64::{
-        _mm256_add_pd, _mm256_broadcast_sd, _mm256_loadu_pd, _mm256_mul_pd, _mm256_set1_pd,
-        _mm256_storeu_pd,
+        _mm256_add_pd, _mm256_broadcast_sd, _mm256_cvtps_pd, _mm256_loadu_pd, _mm256_mul_pd,
+        _mm256_set1_pd, _mm256_storeu_pd, _mm_loadu_ps,
     };
 
     unsafe {
         let n_chunks = k / 4;
+        let half = _mm256_set1_pd(0.5);
 
         if first_step {
             // First step: direct assignment (no EMA blending, no load from dst)
@@ -478,19 +467,13 @@ unsafe fn avx2_outer_product_ema_f64(
 
                 let mut j = 0;
                 for _ in 0..n_chunks {
-                    let mut sj_buf = [0.0f64; 4];
-                    let mut tj_buf = [0.0f64; 4];
-                    for b in 0..4 {
-                        sj_buf[b] = *student.get_unchecked(j + b) as f64;
-                        tj_buf[b] = *teacher.get_unchecked(j + b) as f64;
-                    }
-                    let v_sj = _mm256_loadu_pd(sj_buf.as_ptr());
-                    let v_tj = _mm256_loadu_pd(tj_buf.as_ptr());
+                    // Hardware f32→f64 widening via _mm256_cvtps_pd — avoids 4 scalar casts + stack roundtrip.
+                    let v_sj = _mm256_cvtps_pd(_mm_loadu_ps(student.as_ptr().add(j)));
+                    let v_tj = _mm256_cvtps_pd(_mm_loadu_ps(teacher.as_ptr().add(j)));
 
                     let v_sigma = _mm256_mul_pd(v_si, v_tj);
                     let v_n = _mm256_mul_pd(v_si, v_sj);
                     let v_n = _mm256_add_pd(v_n, _mm256_mul_pd(v_ti, v_tj));
-                    let half = _mm256_set1_pd(0.5);
                     let v_n = _mm256_mul_pd(v_n, half);
 
                     _mm256_storeu_pd(row_sigma.add(j), v_sigma);
@@ -523,19 +506,13 @@ unsafe fn avx2_outer_product_ema_f64(
 
                 let mut j = 0;
                 for _ in 0..n_chunks {
-                    let mut sj_buf = [0.0f64; 4];
-                    let mut tj_buf = [0.0f64; 4];
-                    for b in 0..4 {
-                        sj_buf[b] = *student.get_unchecked(j + b) as f64;
-                        tj_buf[b] = *teacher.get_unchecked(j + b) as f64;
-                    }
-                    let v_sj = _mm256_loadu_pd(sj_buf.as_ptr());
-                    let v_tj = _mm256_loadu_pd(tj_buf.as_ptr());
+                    // Hardware f32→f64 widening via _mm256_cvtps_pd — avoids 4 scalar casts + stack roundtrip.
+                    let v_sj = _mm256_cvtps_pd(_mm_loadu_ps(student.as_ptr().add(j)));
+                    let v_tj = _mm256_cvtps_pd(_mm_loadu_ps(teacher.as_ptr().add(j)));
 
                     let v_sigma = _mm256_mul_pd(v_si, v_tj);
                     let v_n = _mm256_mul_pd(v_si, v_sj);
                     let v_n = _mm256_add_pd(v_n, _mm256_mul_pd(v_ti, v_tj));
-                    let half = _mm256_set1_pd(0.5);
                     let v_n = _mm256_mul_pd(v_n, half);
 
                     let v_old_sigma = _mm256_loadu_pd(row_sigma.add(j));
@@ -581,8 +558,8 @@ unsafe fn avx2_outer_product_f64(
     k: usize,
 ) {
     use core::arch::x86_64::{
-        _mm256_add_pd, _mm256_broadcast_sd, _mm256_loadu_pd, _mm256_mul_pd, _mm256_set1_pd,
-        _mm256_storeu_pd,
+        _mm256_add_pd, _mm256_broadcast_sd, _mm256_cvtps_pd, _mm256_mul_pd, _mm256_set1_pd,
+        _mm256_storeu_pd, _mm_loadu_ps,
     };
 
     unsafe {
@@ -600,14 +577,9 @@ unsafe fn avx2_outer_product_f64(
 
             let mut j = 0;
             for _ in 0..n_chunks {
-                let mut sj_buf = [0.0f64; 4];
-                let mut tj_buf = [0.0f64; 4];
-                for b in 0..4 {
-                    sj_buf[b] = *student.get_unchecked(j + b) as f64;
-                    tj_buf[b] = *teacher.get_unchecked(j + b) as f64;
-                }
-                let v_sj = _mm256_loadu_pd(sj_buf.as_ptr());
-                let v_tj = _mm256_loadu_pd(tj_buf.as_ptr());
+                // Hardware f32→f64 widening via _mm256_cvtps_pd — avoids 4 scalar casts + stack roundtrip.
+                let v_sj = _mm256_cvtps_pd(_mm_loadu_ps(student.as_ptr().add(j)));
+                let v_tj = _mm256_cvtps_pd(_mm_loadu_ps(teacher.as_ptr().add(j)));
 
                 let v_sigma = _mm256_mul_pd(v_si, v_tj);
                 let v_n = _mm256_mul_pd(v_si, v_sj);

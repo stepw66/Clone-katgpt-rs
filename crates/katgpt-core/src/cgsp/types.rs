@@ -69,7 +69,8 @@ impl Direction {
         }
         let mut sum = 0.0f32;
         for (a, b) in self.coords.iter().zip(other.coords.iter()) {
-            sum += a * b;
+            // FMA: sum = a * b + sum (single rounding, matches bridge::dot_f32_i8).
+            sum = a.mul_add(*b, sum);
         }
         sum
     }
@@ -79,7 +80,8 @@ impl Direction {
     pub fn norm_sq(&self) -> f32 {
         let mut s = 0.0f32;
         for c in &self.coords {
-            s += c * c;
+            // FMA: s = c * c + s (single rounding).
+            s = c.mul_add(*c, s);
         }
         s
     }

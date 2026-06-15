@@ -487,14 +487,12 @@ fn renormalize_priorities(p: &mut [Priority]) {
         return;
     }
     let mut max = 0.0f32;
-    let mut total = 0.0f32;
     for &v in p.iter() {
         // Sanitize: NaN / negative -> 0.
         let v = if v.is_finite() && v >= 0.0 { v } else { 0.0 };
         if v > max {
             max = v;
         }
-        total += v;
     }
     if max == 0.0 || !max.is_finite() {
         // All-zero table — restore uniform.
@@ -509,9 +507,6 @@ fn renormalize_priorities(p: &mut [Priority]) {
         let sanitized = if v.is_finite() && *v >= 0.0 { *v } else { 0.0 };
         *v = sanitized / max;
     }
-    // Avoid the degenerate all-zero case after normalization (impossible here
-    // since max > 0, but be defensive).
-    let _ = total;
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────
