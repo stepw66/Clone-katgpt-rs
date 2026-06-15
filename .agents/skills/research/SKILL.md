@@ -5,7 +5,7 @@ description: Research workflow for distilling ML/AI papers into modelless infere
 
 # Research Workflow — Modelless Inference, Freeze/Thaw, Latent-to-Latent
 
-> **Pivot (issue 004, 2026-06-14):** Training-method research lives in `riir-train`. This repo (`katgpt-rs`) and `riir-ai` ship **freeze/thaw runtime + self-learn/adaptive NPCs + latent-space operations**. No LoRA training, no adapter fine-tuning, no optimizer research here. If a paper's value is its training loop → `riir-train/.research`. If its value is a latent-space insight, a routing trick, a freeze/thaw pattern, or a modelless inference primitive → distill here.
+Training-method research lives in `riir-train`. This repo (`katgpt-rs`) and `riir-ai` ship **freeze/thaw runtime + self-learn/adaptive NPCs + latent-space operations**. No LoRA training, no adapter fine-tuning, no optimizer research here. If a paper's value is its training loop → `riir-train/.research`. If its value is a latent-space insight, a routing trick, a freeze/thaw pattern, or a modelless inference primitive → distill here.
 
 ## When to use this skill
 
@@ -29,9 +29,18 @@ Do NOT activate for: pure refactor tasks, bug fixes with no research angle, or o
 
 Always reference files with project-relative paths (e.g. `katgpt-rs/.research/238_*.md`, `riir-ai/.plans/NNN_*.md`). The agent can `read_file` these directly.
 
+## Read first (grounding)
+
+Before distilling, read these for context:
+
+- `katgpt-rs/README.md` — public engine purpose, architecture, current state.
+- `katgpt-rs/src/` + `katgpt-rs/crates/katgpt-core/src/` — existing modelless primitives (ConstraintPruners, bandits, DDTree, speculative decode).
+- `riir-ai/README.md` — game product context (freeze/thaw runtime, self-learn, chain).
+- `riir-ai/crates/` — runtime IP: `riir-engine`, `riir-games`, `riir-chain`, `riir-chaind`, `riir-ffi`, `riir-data`, `riir-examples`.
+
 ## Primary focus (distill HERE in katgpt-rs / riir-ai)
 
-> **Fusion-first mindset (restored 2026-06-15):** The highest-value Super-GOATs in this codebase come from **fusing 2–3 papers/primitives into a novel combination**, not from direct-mapping a single paper. Always grep `.research/` + `.plans/` for the 2–3 closest cousins before verdict, and ask: "what does paper × note A × note B produce that none of them alone can?" Examples that shipped: Gemini Fourier × LatCal (research 212 → plan 242); EGA × SpectralQuant (research 100 × 039); collapse-aware × bandit × sigmoid-margin (plans 212 × 157 × 061). See §Workflow step 1 for the full fusion protocol.
+**Fusion-first mindset:** The highest-value Super-GOATs in this codebase come from **fusing 2–3 papers/primitives into a novel combination**, not from direct-mapping a single paper. Always grep `.research/` + `.plans/` for the 2–3 closest cousins before verdict, and ask: "what does paper × note A × note B produce that none of them alone can?" Examples that shipped: Gemini Fourier × LatCal (research 212 → plan 242); EGA × SpectralQuant (research 100 × 039); collapse-aware × bandit × sigmoid-margin (plans 212 × 157 × 061). See §Workflow step 1 for the full fusion protocol.
 
 - **Latent-to-latent operations** — anything that stays in embedding/latent space: dot-product projections, cosine similarity retrieval, sigmoid-gated routing, manifold geometry, spectral methods on activations. Prefer operating on latents over decoding to tokens then re-encoding. **Fusion hook:** combine with freeze/thaw to version latent-direction vectors; combine with self-learn to update direction vectors from runtime curiosity signal.
 - **Freeze/thaw patterns** — versioned weight snapshots, atomic hot-swap, lock-free read paths, BLAKE3/commitment-checked adapter reload, per-entity personality divergence via snapshot versioning. **Fusion hook:** combine with runtime adapter routing to dispatch by latent-state similarity; combine with self-learn to snapshot emergent NPC personalities.
@@ -42,6 +51,9 @@ Always reference files with project-relative paths (e.g. `katgpt-rs/.research/23
 
 ## Redirect to riir-train (do NOT distill here)
 
+If a paper is training-only → note "→ riir-train" in one line and stop. Do not create files in this session for it.
+
+**By topic:**
 - LoRA / OFT / SPEFT / IA3 / QLoRA / ManifoldE / BAKE / GPart / MSA / Dendritic and all adapter-**training** methods.
 - Training optimizers (Muon, Adam variants, symmetry-compatible optimizers).
 - Training loss functions, curricula, distillation recipes.
@@ -49,7 +61,13 @@ Always reference files with project-relative paths (e.g. `katgpt-rs/.research/23
 - DPO / GRPO / SFT / RL **training** pipelines (runtime GRPO self-play stays in `riir-ai` — it updates latent state, not weights).
 - Anything that requires backpropagation through base weights.
 
-If a paper is training-only → note "→ riir-train" in one line and stop. Do not create files in this session for it.
+**By user-request phrasing (these mean "→ riir-train"):**
+- "Train a LoRA adapter to do X"
+- "Fine-tune with method Y"
+- "Optimizer Z improves convergence"
+- "Distillation recipe from teacher to student"
+- "Quantization-aware training" (but "quantization-aware inference" stays here)
+- "DPO/GRPO/SFT/RL training pipeline" (but runtime GRPO self-play stays in riir-ai)
 
 ## Distillation targets (3-repo strategy)
 
@@ -62,8 +80,8 @@ Per `katgpt-rs/.research/003_Commercial_Open_Source_Strategy_Verdict.md`:
 | `riir-train` (private) | Training research vault | **Only if the paper's value is its training method.** Out of scope for this workflow — just note "→ riir-train" and move on. |
 
 Distill into:
-- **Modelless** → `katgpt-rs/.research/` + `katgpt-rs/src/` (or `katgpt-rs/crates/katgpt-rs-core/`)
-- **Runtime/game/chain** → `riir-ai/.research/` + `riir-ai/crates/`
+- **Modelless** → `katgpt-rs/.research/` + `katgpt-rs/.plans/` + `katgpt-rs/src/` (or `katgpt-rs/crates/katgpt-core/`)
+- **Runtime/game/chain** → `riir-ai/.research/` + `riir-ai/.plans/` + `riir-ai/crates/`
 - **Training-only** → note the redirect, do not create files in this session
 
 ## Workflow
@@ -200,7 +218,7 @@ If a plan is blocked by a missing primitive, implement the minimal version. Afte
 Keyword search arxiv:
 
 ```
-https://r.jina.ai/https://arxiv.org/search/advanced?advanced=&terms-0-operator=AND&terms-0-term={KEYWORD}&terms-0-field=abstract&classification-computer_science=y&classification-mathematics=y&classification-physics_archives=all&classification-statistics=y&classification-include_cross_list=include&date-filter_by=all_dates&size=50&order=-announced_date_first
+https://r.jina.ai/https://arxiv.org/search/advanced?advanced=&terms-0-operator=AND&terms-0-term={KEYWORD}&terms-0-field=abstract&classification-computer_science=y&classification-mathematics=y&classification-physics_archives=all&classification-statistics=y&classification-include_cross_list=include&date-filter_by=all_dates&date-year=&date-from_date=&date-to_date=&date-date_type=submitted_date&abstracts=show&size=50&order=-announced_date_first
 ```
 
 Good keywords: `latent space routing`, `adapter hot-swap`, `inference-time composition`, `spectral pruning`, `sigmoid gating`, `snapshot consistency`, `lock-free weight swap`.
@@ -230,15 +248,6 @@ Reinforce these when designing game systems or chain state:
 **KG triple emission:** semantic encounters → KG triple from latent similarity. Physical events → TxDelta with raw values, NOT KG triple. Never substitute latent embedding for raw position in anti-cheat validation.
 
 **Spatial cognition (two-brain model):** info brain = real `MapPos` (synced, ground truth). Think brain = per-NPC `SpatialBelief` (zone-level KG triple + stale last_known_pos, fog-of-war gated, NOT synced). Bridge is one-way: real position → belief update only when within `visible_radius`. Confidence decay: `sigmoid(-λ * (current_tick - last_observed_tick))`. Two brains MUST exist independently — divergence is emergent behavior, not a bug.
-
-## Anti-patterns (redirect to riir-train, do not implement here)
-
-- "Train a LoRA adapter to do X" → riir-train
-- "Fine-tune with method Y" → riir-train
-- "Optimizer Z improves convergence" → riir-train
-- "Distillation recipe from teacher to student" → riir-train
-- "Quantization-aware training" → riir-train (quantization-aware **inference** stays here)
-- "DPO/GRPO/SFT/RL training pipeline" → riir-train (runtime GRPO self-play stays in riir-ai — it updates latent state, not weights)
 
 ## Cross-references (read on demand)
 
