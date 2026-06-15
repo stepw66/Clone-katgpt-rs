@@ -24,7 +24,10 @@
 //! For rank 0 on connected complexes, we project out the constant null space
 //! before solving.
 
-use super::operators::{codifferential, exterior_derivative, graph_laplacian, hodge_laplacian};
+use super::operators::{
+    codifferential, exterior_derivative, graph_laplacian_into, hodge_laplacian,
+    hodge_laplacian_into,
+};
 use super::types::{CellComplex, CochainField, MAX_RANK};
 
 // ---------------------------------------------------------------------------
@@ -120,15 +123,34 @@ fn cg_solve_scalar(
         }
     }
 
-    // Pre-allocate reusable cochain field for matvec — avoids v.to_vec() per iteration.
+    // Pre-allocate reusable cochain fields for matvec — allocated ONCE, reused across
+    // all CG iterations (up to max_iter). Previously, graph_laplacian / hodge_laplacian
+    // allocated a fresh CochainField (and hodge_laplacian allocated 4 intermediates)
+    // per iteration → up to 5*max_iter heap allocs per solve.
     let mut v_field = CochainField::zeros(rank, n, 1);
+    let mut ax_field = CochainField::zeros(rank, n, 1);
+    // Scratch for hodge_laplacian_into (rank ≥ 1). Sized for the intermediate ranks;
+    // unused for rank 0 (graph_laplacian_into needs no scratch beyond ax_field).
+    let n_upper = if rank + 1 < MAX_RANK as u8 { cx.n_cells(rank + 1) } else { 0 };
+    let n_lower = if rank > 0 { cx.n_cells(rank - 1) } else { 0 };
+    let mut scratch_upper = CochainField::zeros(rank + 1, n_upper, 1);
+    let mut scratch_lower = CochainField::zeros(rank.saturating_sub(1), n_lower, 1);
+    let mut scratch_result = CochainField::zeros(rank, n, 1);
 
-    // Matvec closure: compute A·v for given v (reuses v_field allocation)
-    let matvec = |cx: &CellComplex, v: &[f32], v_field: &mut CochainField, out: &mut [f32]| {
+    // Matvec closure: compute A·v for given v, writing directly into `out` (zero alloc per iter).
+    // Declared `mut` because it captures `&mut` cochain fields.
+    let mut matvec = |cx: &CellComplex, v: &[f32], v_field: &mut CochainField, out: &mut [f32]| {
         v_field.data.copy_from_slice(v);
-        let ax_field = match rank {
-            0 => graph_laplacian(cx, v_field),
-            _ => hodge_laplacian(cx, v_field),
+        match rank {
+            0 => graph_laplacian_into(cx, v_field, &mut ax_field),
+            _ => hodge_laplacian_into(
+                cx,
+                v_field,
+                &mut ax_field,
+                &mut scratch_upper,
+                &mut scratch_lower,
+                &mut scratch_result,
+            ),
         };
         out.copy_from_slice(&ax_field.data);
     };
@@ -603,6 +625,7 @@ fn deflate(v: &mut [f32], basis: &[Vec<f32>]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::super::operators::graph_laplacian;
 
     /// Tolerance for floating-point comparisons.
     const TOL: f32 = 1e-3;

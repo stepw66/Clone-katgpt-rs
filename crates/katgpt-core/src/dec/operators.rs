@@ -56,6 +56,23 @@ pub fn exterior_derivative(cx: &CellComplex, input: &CochainField) -> CochainFie
     let n_output = cx.n_cells(target_rank);
     let dim = input.dim;
     let mut output = CochainField::zeros(target_rank, n_output, dim);
+    exterior_derivative_into(cx, input, &mut output);
+    output
+}
+
+/// Zero-alloc `exterior_derivative` writing into pre-allocated `output`.
+///
+/// `output` must have `rank == input.rank + 1`, `dim == input.dim`, and
+/// `data.len() >= cx.n_cells(input.rank + 1) * dim`. Its data is zero-filled then accumulated.
+#[inline]
+pub fn exterior_derivative_into(
+    cx: &CellComplex,
+    input: &CochainField,
+    output: &mut CochainField,
+) {
+    let k = input.rank;
+    let dim = input.dim;
+    output.data.fill(0.0);
 
     // dₖ = Bₖ₊₁ᵀ means we iterate boundary entries and accumulate:
     // For each entry (row, col, sign) in Bₖ₊₁:
@@ -85,8 +102,6 @@ pub fn exterior_derivative(cx: &CellComplex, input: &CochainField) -> CochainFie
             output.data[dst_start + off] += sign_f * input.data[src_start + off];
         }
     }
-
-    output
 }
 
 // ---------------------------------------------------------------------------
@@ -119,12 +134,29 @@ pub fn codifferential(cx: &CellComplex, input: &CochainField) -> CochainField {
     let n_output = cx.n_cells(target_rank);
     let dim = input.dim;
     let mut output = CochainField::zeros(target_rank, n_output, dim);
+    codifferential_into(cx, input, &mut output);
+    output
+}
+
+/// Zero-alloc `codifferential` writing into pre-allocated `output`.
+///
+/// `output` must have `rank == input.rank - 1`, `dim == input.dim`, and
+/// `data.len() >= cx.n_cells(input.rank - 1) * dim`. Its data is zero-filled then accumulated.
+#[inline]
+pub fn codifferential_into(
+    cx: &CellComplex,
+    input: &CochainField,
+    output: &mut CochainField,
+) {
+    let k = input.rank;
+    let dim = input.dim;
+    output.data.fill(0.0);
 
     // With identity Hodge stars (uniform grid), δₖ = Bₖ (boundary matrix applied directly).
     // For each entry (row, col, sign) in Bₖ:
     //   output[row] += sign * input[col]
     // (Note: Bₖ maps (k)-cells to (k-1)-cells, so we iterate its entries directly)
-    let entries = cx.boundary_entries(target_rank);
+    let entries = cx.boundary_entries(k - 1);
 
     // Hoist invariant chunk geometry; branch-free sign via f32 multiply (matches exterior_derivative).
     let chunks = dim / 4;
@@ -147,8 +179,6 @@ pub fn codifferential(cx: &CellComplex, input: &CochainField) -> CochainField {
             output.data[dst_start + off] += sign_f * input.data[src_start + off];
         }
     }
-
-    output
 }
 
 // ---------------------------------------------------------------------------
@@ -182,13 +212,48 @@ pub fn hodge_laplacian(cx: &CellComplex, input: &CochainField) -> CochainField {
     }
 
     let mut output = CochainField::zeros(k, n, dim);
+    // Allocate scratch for the two intermediate ranks (k+1, k-1) and one result accumulator (k).
+    let mut scratch_upper = CochainField::zeros(k + 1, cx.n_cells(k + 1), dim);
+    let mut scratch_lower = CochainField::zeros(k.saturating_sub(1), cx.n_cells(k.saturating_sub(1)), dim);
+    let mut scratch_result = CochainField::zeros(k, n, dim);
+    hodge_laplacian_into(cx, input, &mut output, &mut scratch_upper, &mut scratch_lower, &mut scratch_result);
+    output
+}
+
+/// Zero-alloc `hodge_laplacian` writing into pre-allocated `output`.
+///
+/// Scratch buffers are reused across CG iterations:
+/// - `scratch_upper`: rank k+1, capacity `cx.n_cells(k+1) * dim`
+/// - `scratch_lower`: rank k-1, capacity `cx.n_cells(k-1) * dim` (unused for rank 0)
+/// - `scratch_result`: rank k, capacity `n * dim` (second-stage result accumulator)
+///
+/// `output.data` is zero-filled then accumulated. Rank-0 delegates to `graph_laplacian_into`.
+#[inline]
+pub fn hodge_laplacian_into(
+    cx: &CellComplex,
+    input: &CochainField,
+    output: &mut CochainField,
+    scratch_upper: &mut CochainField,
+    scratch_lower: &mut CochainField,
+    scratch_result: &mut CochainField,
+) {
+    let k = input.rank;
+
+    // Rank-0 fast path: Δ₀ = δ₁d₀ = graph Laplacian.
+    if k == 0 && cx.n_edges() > 0 {
+        graph_laplacian_into(cx, input, output);
+        return;
+    }
+
+    output.data.fill(0.0);
 
     // Upper channel: Δ↑ₖ = δₖ₊₁ ∘ dₖ
     if k < MAX_RANK && cx.n_cells(k + 1) > 0 {
-        let dk_input = exterior_derivative(cx, input);
-        if dk_input.n_cells() > 0 {
-            let delta_up = codifferential(cx, &dk_input);
-            for (o, u) in output.data.iter_mut().zip(delta_up.data.iter()) {
+        exterior_derivative_into(cx, input, scratch_upper);
+        if scratch_upper.n_cells() > 0 {
+            // δₖ₊₁ maps rank k+1 → rank k. Write into scratch_result, accumulate into output.
+            codifferential_into(cx, scratch_upper, scratch_result);
+            for (o, u) in output.data.iter_mut().zip(scratch_result.data.iter()) {
                 *o += u;
             }
         }
@@ -196,16 +261,15 @@ pub fn hodge_laplacian(cx: &CellComplex, input: &CochainField) -> CochainField {
 
     // Lower channel: Δ↓ₖ = dₖ₋₁ ∘ δₖ
     if k > 0 {
-        let delta_k = codifferential(cx, input);
-        if delta_k.n_cells() > 0 {
-            let d_lower = exterior_derivative(cx, &delta_k);
-            for (o, l) in output.data.iter_mut().zip(d_lower.data.iter()) {
+        codifferential_into(cx, input, scratch_lower);
+        if scratch_lower.n_cells() > 0 {
+            // dₖ₋₁ maps rank k-1 → rank k. Write into scratch_result, accumulate into output.
+            exterior_derivative_into(cx, scratch_lower, scratch_result);
+            for (o, l) in output.data.iter_mut().zip(scratch_result.data.iter()) {
                 *o += l;
             }
         }
     }
-
-    output
 }
 
 // ---------------------------------------------------------------------------
@@ -227,14 +291,30 @@ pub fn hodge_laplacian(cx: &CellComplex, input: &CochainField) -> CochainField {
 /// 0-cochain: the graph Laplacian applied to the input.
 pub fn graph_laplacian(cx: &CellComplex, potential: &CochainField) -> CochainField {
     debug_assert_eq!(potential.rank, 0, "graph_laplacian requires rank-0 cochain");
+    let n_vertices = cx.n_vertices();
+    let mut output = CochainField::zeros(0, n_vertices, potential.dim);
+    graph_laplacian_into(cx, potential, &mut output);
+    output
+}
+
+/// Zero-alloc `graph_laplacian` writing into pre-allocated `output`.
+///
+/// `output` must have `rank == 0`, `dim == potential.dim`, and
+/// `data.len() >= cx.n_vertices() * dim`. Its data is zero-filled then accumulated.
+#[inline]
+pub fn graph_laplacian_into(
+    cx: &CellComplex,
+    potential: &CochainField,
+    output: &mut CochainField,
+) {
+    debug_assert_eq!(potential.rank, 0, "graph_laplacian requires rank-0 cochain");
     let dim = potential.dim;
+    output.data.fill(0.0);
 
     // Single-pass graph Laplacian: boundary entries are stored as adjacent pairs
     // (v_tail, e, -1), (v_head, e, +1) for each edge. Process each pair to compute
     // Δ₀[v] = degree(v)*potential[v] - Σ potential[neighbor] directly.
     let entries = cx.boundary_entries(0);
-    let n_vertices = cx.n_vertices();
-    let mut output = CochainField::zeros(0, n_vertices, dim);
 
     // Entries come in pairs for each edge: (v_tail, e, -1), (v_head, e, +1).
     // Hoist invariant chunk geometry out of the loop.
@@ -269,8 +349,6 @@ pub fn graph_laplacian(cx: &CellComplex, potential: &CochainField) -> CochainFie
             output.data[head_start + off] -= diff;
         }
     }
-
-    output
 }
 
 // ---------------------------------------------------------------------------
