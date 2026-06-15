@@ -135,6 +135,7 @@ impl Default for CpuBackend {
 
 /// Backend selection for CLI flag.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[repr(u8)]
 pub enum BackendKind {
     /// Automatically select best available backend.
     #[default]
