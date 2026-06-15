@@ -31,10 +31,12 @@ Always reference files with project-relative paths (e.g. `katgpt-rs/.research/23
 
 ## Primary focus (distill HERE in katgpt-rs / riir-ai)
 
-- **Latent-to-latent operations** — anything that stays in embedding/latent space: dot-product projections, cosine similarity retrieval, sigmoid-gated routing, manifold geometry, spectral methods on activations. Prefer operating on latents over decoding to tokens then re-encoding.
-- **Freeze/thaw patterns** — versioned weight snapshots, atomic hot-swap, lock-free read paths, BLAKE3/commitment-checked adapter reload, per-entity personality divergence via snapshot versioning.
-- **Runtime adapter routing** — selecting between frozen adapters by state/objective/context (Dynamic Pair, Polytope, dMoE — all inference-time, zero training).
-- **Self-learn / adaptive CoT** — runtime curiosity, entropy-driven exploration, collapse detection/recovery, latent prediction SSL, trajectory folding. No LLM training, no backprop through weights — runtime self-improvement via latent-space updates is welcome.
+> **Fusion-first mindset (restored 2026-06-15):** The highest-value Super-GOATs in this codebase come from **fusing 2–3 papers/primitives into a novel combination**, not from direct-mapping a single paper. Always grep `.research/` + `.plans/` for the 2–3 closest cousins before verdict, and ask: "what does paper × note A × note B produce that none of them alone can?" Examples that shipped: Gemini Fourier × LatCal (research 212 → plan 242); EGA × SpectralQuant (research 100 × 039); collapse-aware × bandit × sigmoid-margin (plans 212 × 157 × 061). See §Workflow step 1 for the full fusion protocol.
+
+- **Latent-to-latent operations** — anything that stays in embedding/latent space: dot-product projections, cosine similarity retrieval, sigmoid-gated routing, manifold geometry, spectral methods on activations. Prefer operating on latents over decoding to tokens then re-encoding. **Fusion hook:** combine with freeze/thaw to version latent-direction vectors; combine with self-learn to update direction vectors from runtime curiosity signal.
+- **Freeze/thaw patterns** — versioned weight snapshots, atomic hot-swap, lock-free read paths, BLAKE3/commitment-checked adapter reload, per-entity personality divergence via snapshot versioning. **Fusion hook:** combine with runtime adapter routing to dispatch by latent-state similarity; combine with self-learn to snapshot emergent NPC personalities.
+- **Runtime adapter routing** — selecting between frozen adapters by state/objective/context (Dynamic Pair, Polytope, dMoE — all inference-time, zero training). **Fusion hook:** combine with freeze/thaw to make the adapter pool itself versioned and BLAKE3-committed; combine with bandits to learn routing policy online.
+- **Self-learn / adaptive CoT** — runtime curiosity, entropy-driven exploration, collapse detection/recovery, latent prediction SSL, trajectory folding. No LLM training, no backprop through weights — runtime self-improvement via latent-space updates is welcome. **Fusion hook:** combine with MMORPG-scale game AI to give thousands of NPCs independent curiosity/entropy signals; combine with freeze/thaw to checkpoint learned latent directions.
 - **Modelless inference primitives** — ConstraintPruners, bandits, DDTree, speculative decode, sparse attention, quantization-aware inference.
 - **MMORPG-scale game AI** — thousands of concurrent NPCs each with independent latent state, real-time latency budgets (20Hz tick, plasma/hot tier), spatial partitioning + fog-of-war, emergent social/economic behavior (factions, trade routes, reputation), zone-level attention routing, crowd-scale curiosity/exploration signals. Latent ops must batch across many entities; raw sync must stay bit-identical for deterministic replay/anti-cheat.
 
@@ -70,14 +72,22 @@ Distill into:
 
 Fetch via `https://r.jina.ai/https://arxiv.org/pdf/{ID}` (per AGENTS.md). Ask: *is the value in the training loop, or in a latent-space / inference / routing insight?* If training-only → note "→ riir-train", stop.
 
-### 1. Distill fundamentally
+### 1. Distill fundamentally — fuse, don't just direct-map
 
-Don't direct-map the paper. Find the transferable primitive: the geometric, spectral, or information-theoretic insight that works without the paper's training setup.
+Don't direct-map the paper to our code. Find the transferable primitive: the geometric, spectral, or information-theoretic insight that works without the paper's training setup. **Then look for fusion opportunities**: cross-pollinate this paper's insight with existing `.research/` notes, `.plans/`, and shipped primitives to synthesize a *novel* combination. The highest-value Super-GOATs in freeze/thaw runtime and self-learn/adaptive CoT almost always come from **fusing** 2–3 papers, not from a single-paper direct mapping.
 
-- `grep` `katgpt-rs/.research/` and `katgpt-rs/.plans/` for related prior work (keyword, paper title, author).
-- `grep` `riir-ai/.research/` and `riir-ai/.plans/` likewise.
-- Verdict by the commercial strategy doc (`003_*.md`): **Super-GOAT** > GOAT > Gain > Pass (see §Verdict tiers below).
-- Create research `.md` at the right repo (see table above).
+**Fusion examples that shipped:**
+- Gemini Fourier × LatCal → `katgpt-rs/.research/212_Gemini_Fourier_LatCal_Fusion_Verdict.md` → `katgpt-rs/.plans/242_Fourier_Smoothed_Potential_Fields_LEO.md`
+- EGA spectral salience × SpectralQuant eigenbasis KV compression → `katgpt-rs/.research/100_*.md` + `039_*.md`
+- Collapse-aware × bandit coverage × sigmoid margin → `katgpt-rs/.plans/212_*`, `157_*`, `061_*`
+- G-Zero self-play × Hint-δ bandit × absorb-compress → `katgpt-rs/.plans/049_*` (modelless self-play distillation, 1.16M cycles/sec)
+
+**Fusion protocol:**
+1. `grep` `katgpt-rs/.research/` and `katgpt-rs/.plans/` for related prior work (keyword, paper title, author).
+2. `grep` `riir-ai/.research/` and `riir-ai/.plans/` likewise.
+3. After finding the transferable primitive of *this* paper, list the 2–3 closest existing notes/plans and ask: "what novel combination of this paper + note A + note B produces a capability none of them has alone?" Write that combination into the research note's §Distillation as a **Fusion** subsection, even if you don't plan it yet.
+4. Verdict by the commercial strategy doc (`003_*.md`): **Super-GOAT** > GOAT > Gain > Pass (see §Verdict tiers below). **A fusion that produces a new capability class is a strong Super-GOAT candidate — check the novelty gate (§1.5).**
+5. Create research `.md` at the right repo (see table above).
 
 **File naming:** `{NNN}_{Short_Title_with_Underscores}.md` where NNN is the next free number (zero-padded to 3 digits, e.g. `239_`, `240_`). Check the folder first — numbers may be non-contiguous; pick the next free slot.
 
@@ -242,4 +252,4 @@ Reinforce these when designing game systems or chain state:
 
 ## TL;DR
 
-This skill packages the katgpt-rs research workflow: read paper → classify (training? → riir-train, stop) → distill the latent/inference/routing primitive → **novelty gate** (Super-GOAT? → open primitive + private riir-ai guide; else GOAT/Gain → plan only) → implement behind feature flag → benchmark → promote GOAT or demote loser. Hard constraints: modelless-first, latent-to-latent with sigmoid (never softmax), freeze/thaw over fine-tuning, 3-repo commercial discipline, raw scalars at the sync boundary. **Super-GOAT = private moat; never skip the riir-ai guide.**
+This skill packages the katgpt-rs research workflow: read paper → classify (training? → riir-train, stop) → **distill + fuse** (find the transferable primitive, then cross-pollinate with 2–3 closest `.research/` notes to synthesize a novel combination) → **novelty gate** (Super-GOAT? → open primitive + private riir-ai guide; else GOAT/Gain → plan only) → implement behind feature flag → benchmark → promote GOAT or demote loser. Hard constraints: modelless-first, latent-to-latent with sigmoid (never softmax), freeze/thaw over fine-tuning, 3-repo commercial discipline, raw scalars at the sync boundary, **fusion-first mindset** (the best Super-GOATs come from fusing papers, not direct-mapping one). **Super-GOAT = private moat; never skip the riir-ai guide.**
