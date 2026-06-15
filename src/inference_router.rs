@@ -253,6 +253,7 @@ impl InferenceRouter {
     ///
     /// Checks the [`TriggerGate`] for tier changes, selects the backend, and
     /// records inference timing for future load estimation.
+    #[inline]
     pub fn forward<'a>(
         &mut self,
         ctx: &'a mut ForwardContext,
@@ -427,11 +428,13 @@ impl InferenceRouter {
     }
 
     /// Update trust signal from verifier (called after each speculative decode).
+    #[inline]
     pub fn update_trust(&mut self, trust: f32) {
         self.trust_signal = trust;
     }
 
     /// Get current trust signal.
+    #[inline]
     pub fn trust_signal(&self) -> f32 {
         self.trust_signal
     }
@@ -443,6 +446,7 @@ impl InferenceRouter {
     /// Call after each speculative decode verification.
     /// No-op when `rv_gated_routing` is disabled.
     #[cfg(feature = "rv_gated_routing")]
+    #[inline]
     pub fn observe_acceptance(&mut self, accepted: bool) {
         if let Some(ref mut tracker) = self.rv_tracker {
             tracker.observe(accepted);
@@ -454,6 +458,7 @@ impl InferenceRouter {
     /// RV ∈ [0.0, 0.25] for Bernoulli acceptance data.
     /// 0.0 = all accept/reject (confident). 0.25 = 50/50 (uncertain).
     #[cfg(feature = "rv_gated_routing")]
+    #[inline]
     pub fn rv_signal(&self) -> f64 {
         self.rv_tracker.as_ref().map(|t| t.rv()).unwrap_or(-1.0)
     }
@@ -461,6 +466,7 @@ impl InferenceRouter {
     /// Reset the RV tracker (call at query boundaries).
     /// No-op when `rv_gated_routing` is disabled.
     #[cfg(feature = "rv_gated_routing")]
+    #[inline]
     pub fn reset_rv(&mut self) {
         if let Some(ref mut tracker) = self.rv_tracker {
             tracker.reset();
@@ -489,6 +495,7 @@ impl InferenceRouter {
     /// - `PromoteGpu` — critical interval + low load, promote to GPU
     /// - `StayCpu` — critical interval + high load, stay on CPU with fast solver
     #[cfg(all(feature = "critical_interval_gate", feature = "rv_gated_routing"))]
+    #[inline]
     pub fn observe_critical_entropy(&mut self, entropy: f32) -> CriticalTierDecision {
         self.last_critical_entropy = entropy;
         let current_tier = self.gate.current_tier();
@@ -593,6 +600,7 @@ impl InferenceRouter {
     /// Central routing point for GPU dispatch:
     /// 1. Auto-compiles weights on first use (lazy compile)
     /// 2. Dispatches to GPU if compiled, else falls back to CPU
+    #[inline]
     fn dispatch_gpu_or_cpu(
         &mut self,
         ctx: &mut ForwardContext,
@@ -667,6 +675,7 @@ impl InferenceRouter {
     /// doesn't allow holding multiple mutable borrows of `ctx` across loop iterations.
     ///
     /// Layout: `[token0_logits, token1_logits, ...]` where each segment is `config.vocab_size` elements.
+    #[inline]
     pub fn forward_batch(
         &mut self,
         ctx: &mut ForwardContext,
@@ -720,6 +729,7 @@ impl InferenceRouter {
     }
 
     /// Delegate queue-depth recording to the gate.
+    #[inline]
     pub fn record_queue_depth(&self, depth: usize) {
         self.gate.record_queue_depth(depth);
     }
@@ -740,6 +750,7 @@ impl InferenceRouter {
     /// Passing `None` clears the signal — useful at query boundaries where the
     /// next query has no probe budget.
     #[cfg(feature = "thicket_variance_probe")]
+    #[inline]
     pub fn update_tvp(&mut self, signal: Option<TvpSignal>) {
         if let Some(s) = signal {
             let changed = self.tvp_signal != Some(s);
@@ -761,6 +772,7 @@ impl InferenceRouter {
     /// Get the last observed TVP signal (Plan 267).
     /// Returns `None` if no probes have run yet or the feature is disabled.
     #[cfg(feature = "thicket_variance_probe")]
+    #[inline]
     pub fn tvp_signal(&self) -> Option<TvpSignal> {
         self.tvp_signal
     }
@@ -775,6 +787,7 @@ impl InferenceRouter {
     ///
     /// Observation-only — does NOT influence tier routing.
     #[cfg(feature = "chiaroscuro")]
+    #[inline]
     pub fn observe_chiar_key(&mut self, key: &[f32]) {
         self.chiar_hook.observe_key(key);
     }
@@ -784,6 +797,7 @@ impl InferenceRouter {
     /// Updates the Welford variance tracker inside the regime gate.
     /// Observation-only — does NOT influence tier routing.
     #[cfg(feature = "chiaroscuro")]
+    #[inline]
     pub fn observe_chiar_prompt_token(&mut self, h: f32) {
         self.chiar_hook.observe_prompt_token(h);
     }
@@ -817,6 +831,7 @@ impl InferenceRouter {
     /// Returns `TvpTierDecision::Defer` when no signal has been observed yet
     /// (G3 zero-impact guarantee).
     #[cfg(feature = "thicket_variance_probe")]
+    #[inline]
     pub fn observe_tvp_decision(&self, current_tier: ComputeTier) -> TvpTierDecision {
         let gpu_available = self.gpu.is_some();
         // Demotion only fires under low load (matches trust_signal semantics).
@@ -933,11 +948,16 @@ impl InferenceRouter {
     {
         let candidates = generator.generate(condition, rng).unwrap_or_default();
         let validity = pruner.batch_is_valid(&candidates);
-        candidates
-            .into_iter()
-            .zip(validity)
-            .filter_map(|(c, v)| if v { Some(c) } else { None })
-            .collect()
+        // Pre-allocate with exact valid count to avoid incremental Vec growth
+        // during collect (filter_map yields unknown lower-bound size hint).
+        let valid_count = validity.iter().filter(|&&v| v).count();
+        let mut result = Vec::with_capacity(valid_count);
+        for (c, v) in candidates.into_iter().zip(validity) {
+            if v {
+                result.push(c);
+            }
+        }
+        result
     }
 }
 
@@ -2047,6 +2067,7 @@ impl ModuleEnergyProfile {
 /// (0.78) and QPS 500. GOAT G8 verifies the routing is monotone in QPS —
 /// no flapping back and forth as QPS increases.
 #[cfg(feature = "module_energy_route")]
+#[inline]
 pub fn route_by_module_energy(ffn_frac: f32, attn_frac: f32, qps: u32) -> ComputeTarget {
     // Branch on QPS band first: groups all qps-dependent rules so each path
     // evaluates at most one ffn/attn comparison instead of up to three.
