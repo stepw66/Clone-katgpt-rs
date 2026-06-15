@@ -1,6 +1,6 @@
 # katgpt-rs: Model Adaptation Techniques
 
-Fifteen production techniques that adapt the transformer to different tasks and domains **without modifying base weights**. All are feature-gated, zero-copy, and backward-compatible.
+Sixteen production techniques that adapt the transformer to different tasks and domains **without modifying base weights**. All are feature-gated, zero-copy, and backward-compatible.
 
 | # | Technique | Plan | Feature Flag | What It Does |
 |---|-----------|------|-------------|--------------|
@@ -19,6 +19,7 @@ Fifteen production techniques that adapt the transformer to different tasks and 
 | 13 | Hydra-Aware Adaptive Layer Budget | 165 | `hydra_budget` | Emergent self-repair layer skipping via logit lens |
 | 14 | FlashAR Consensus Tri-Mode | 166 | `flashar_consensus` | Dual-path ternary thermal routing for consensus decode |
 | 15 | Budget Adaptation | 167 | `budget_adaptation` | Compression-adaptive decode budget scaling |
+| 16 | CGSP — Curiosity-Guided Self-Play | 274 | `cgsp` | Modelless Solver/Conjecturer/Guide triad — updates direction-vector priorities (NOT weights) via Hint-δ bandit on `(1 − solve_rate) · guide_score`; entropy-collapse detector re-injects exploration when priority mass degenerates. Opt-in (see `.benchmarks/274_cgsp_goat.md`); value is collapse recovery + degenerate-batch gating, not target-seeking. |
 
 ## Adaptation Pipeline
 

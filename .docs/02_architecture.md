@@ -774,6 +774,67 @@ Learning vs Random also verified: Q-values differentiate properly (spread > 0.1)
 
 Run: `cargo run --example go_08_self_play_freeze --features go`
 
+## CGSP — Curiosity-Guided Self-Play (`crates/katgpt-core/src/cgsp/`, Plan 274)
+
+Modelless, inference-time distillation of the SGS triad (Bailey et al., arXiv:2604.20209). Three frozen role-fillers + one bandit; **no gradient updates**, only priority-table updates on direction vectors. The public-facing entry point is `CgspLoop`, generic over five pluggable trait-fillers wired in at compile time (zero-cost, no dynamic dispatch on the hot path).
+
+```rust
+pub struct CgspLoop<C, G, S, B, Col = EntropyCollapse, Df = NoOpDifficultyFilter, Qg = NoOpBatchGate>
+where
+    C: CuriosityConjecturer,  // samples k candidate directions per cycle
+    G: QualityGuide,          // scores each candidate [0, 1]
+    S: Solver,                // attempts a candidate, returns solve-rate
+    B: HintDeltaBandit,        // absorbs r_synth, exposes priorities
+    Col: CollapseSignal,       // entropy-collapse detector + recovery injector
+    Df: DifficultyFilter,      // breakeven-complexity admission gate
+    Qg: BatchQualityGate;      // degenerate-batch gate (Plan 111 data_gate)
+```
+
+**Per-cycle pipeline** (Plan 274 §2.3, see `crates/katgpt-core/src/cgsp/loop_.rs::cycle()`):
+
+1. Conjecturer samples k candidates → `scratch.candidates`.
+2. Guide scores each → `scratch.guide_scores`.
+3. Difficulty filter admits/rejects → `scratch.admitted`.
+4. Solver attempts admitted candidates → `scratch.solve_rates`.
+5. Compute `r_synth[i] = (1 − solve_rates[i]) · guide_scores[i]`.
+6. BatchQualityGate checks for degeneracy (skip update if degenerate).
+7. Bandit absorbs `r_synth` per admitted candidate (Hint-δ absorb-compress).
+8. CollapseSignal checks entropy; if < τ_low, inject exploration mass.
+
+**Latent/raw boundary:** Only `f32`, `bool`, and `u32` cross the trait boundary (`CycleResult`). `Direction` and `Target` never escape — they are pure latent state. The freeze/thaw bridge is `CuriosityPrioritySnapshot` (BLAKE3-committed, fixed-size binary encoding; snapshot_id is Uuid v7 for monotonic ordering).
+
+**GOAT gate status** (`.benchmarks/274_cgsp_goat.md`, 9 tests at `tests/bench_274_cgsp_goat.rs`):
+
+| Gate | Measurement | Status |
+|------|-------------|--------|
+| G1 transfer-to-target | CGSP 0/64, baseline 0/64 | ⚠ INFORMATIONAL — CGSP is curiosity-driven, not target-seeking (root-cause: `(1 − solve_rate)` factor rewards intermediate-difficulty arms) |
+| G2 collapse recovery | 1 cycle with aware; 200+ without | ✅ PASS |
+| G3 feature isolation | `cargo check` clean both ways | ✅ PASS |
+| G4 per-cycle overhead | 844.5 ns/cycle (release, Apple Silicon arm64) | ✅ PASS |
+| P2 1000 NPCs/tick | 1363 µs/tick (1.36 µs/NPC, Rayon 8 chunks) | ✅ PASS |
+| P3 allocations | 55.91 allocs/cycle (bounded, not zero) | ✅ PASS (bounded) — optimization tracked in `.issues/021_cgsp_cycle_allocation_reduction.md` |
+| G6 latent/raw boundary | only f32+bool+u32 in CycleResult | ✅ PASS |
+
+**Promotion decision:** KEEP OPT-IN. CGSP is architecturally sound and plasma-tier fast, but its value proposition is collapse recovery + degenerate-batch gating — *not* target-seeking. Promote to default only after riir-ai Plan 299 validates on real game domains.
+
+**Consumer pattern:**
+
+```rust
+use katgpt_rs::cgsp::{
+    CgspConfig, CgspLoop, ColinearityBatchGate, EntropyCollapse,
+    BreakevenDifficultyFilter, HlaProjectionGuide, PoolConjecturer, ScratchBuffers, Target,
+};
+
+let mut lp = CgspLoop::new(conjecturer, guide, solver, bandit, CgspConfig::default())
+    .with_collapse(EntropyCollapse::new(0.30))
+    .with_difficulty_filter(BreakevenDifficultyFilter::default())
+    .with_batch_gate(ColinearityBatchGate::default());
+let mut scratch = ScratchBuffers::new(k, pool_size);
+let result = lp.cycle(&target, &mut scratch);
+```
+
+See `examples/cgsp_minimal.rs` and `examples/cgsp_collapse_recovery.rs` for full runnable demos. Implementation lives in `crates/katgpt-core/src/cgsp/` so `riir-engine` (Plan 299) can consume it without depending on the root application crate; `src/cgsp.rs` is a thin re-export shim preserving the `katgpt_rs::cgsp::*` import path.
+
 ## SpeculativeVerifier (Strategy Pattern)
 
 Based on [Algorithm 1 from Leviathan et al. 2022](https://arxiv.org/pdf/2211.17192) — the verification strategy is swappable via trait:

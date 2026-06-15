@@ -656,6 +656,7 @@ src/
 | `pathway_tracker` | — | PathwayTracker — intrinsic pathway stability detection (Plan 231, default-on, GOAT 7/7) |
 | `federation_composer` | — | FederationComposer — explicit pruning with residual early termination (Plan 231, default-on, GOAT 7/7) |
 | `collapse_aware_thinking` | `selectivity_router`, `thinking_cot`, `bandit` | Collapse-aware adaptive thinking — runtime reasoning collapse detection + early exit (Plan 212, default-on) |
+| `cgsp` | `bandit`, `collapse_aware_thinking`, `data_gate`, `breakeven_routing` | Curiosity-Guided Self-Play — modelless Solver/Conjecturer/Guide triad with collapse recovery + BLAKE3-committed personality snapshots (Plan 274, Research 240 — **opt-in**: GOAT gate run, G2/G3/G4/P2/P3/G6 pass; G1 is informational because CGSP is curiosity-driven not target-seeking — see `.benchmarks/274_cgsp_goat.md`) |
 | `substrate_gate` | `katgpt-core/substrate_gate` | SubstrateGate — inference-time routing via substrate conditions (Plan 216, opt-in) |
 | `llmexec_guard` | — | Entropy-driven verification budgeting (default-on) |
 | `outlier_guard` | — | Model-load-time outlier injection detection via KS D-statistic (default-on) |

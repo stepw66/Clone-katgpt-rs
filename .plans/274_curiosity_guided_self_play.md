@@ -4,7 +4,7 @@
 **Research:** [katgpt-rs/.research/240_SGS_Curiosity_Guided_Self_Play.md](../.research/240_SGS_Curiosity_Guided_Self_Play.md)
 **Source paper:** [arXiv:2604.20209](https://arxiv.org/abs/2604.20209) — Bailey et al. (Stanford, Apr 2026), "Scaling Self-Play with Self-Guidance"
 **Target:** `katgpt-rs/src/cgsp/` (new module) + Cargo feature `cgsp`
-**Status:** Complete — Phase 1 + 2 + 3 done. CGSP ships as opt-in feature;
+**Status:** Complete — Phase 1 + 2 + 3 + 4 done. CGSP ships as opt-in feature;
 GOAT decision: keep opt-in (see `.benchmarks/274_cgsp_goat.md`).
 
 ---
@@ -185,12 +185,33 @@ GOAT proof benchmark file at `.benchmarks/274_cgsp_goat.md`. Decision recorded.
 
 ### Tasks
 
-- [ ] **T4.1** Add `cgsp` to `katgpt-rs/.docs/01_overview.md` Feature Flags table
-- [ ] **T4.2** Add `cgsp` module to `katgpt-rs/.docs/02_architecture.md`
-- [ ] **T4.3** Add example: `examples/cgsp_minimal.rs` showing 8-direction pool + 1 target + 100 cycles
-- [ ] **T4.4** Add example: `examples/cgsp_collapse_recovery.rs` showing injected collapse + recovery
-- [ ] **T4.5** Update `.docs/07_adaptation.md` with CGSP as a new adaptation technique
-- [ ] **T4.6** Cross-link from `.research/240_*.md` to this plan and to riir-ai Plan 299
+- [x] **T4.1** Add `cgsp` to `katgpt-rs/.docs/01_overview.md` Feature Flags table
+- [x] **T4.2** Add `cgsp` module to `katgpt-rs/.docs/02_architecture.md`
+- [x] **T4.3** Add example: `examples/cgsp_minimal.rs` showing 8-direction pool + 1 target + 100 cycles
+- [x] **T4.4** Add example: `examples/cgsp_collapse_recovery.rs` showing injected collapse + recovery
+- [x] **T4.5** Update `.docs/07_adaptation.md` with CGSP as a new adaptation technique
+- [x] **T4.6** Cross-link from `.research/240_*.md` to this plan and to riir-ai Plan 299
+
+### Phase 4 notes
+
+- **Bug found and fixed while writing examples:** `src/cgsp.rs` (the re-export
+  shim that bridges `katgpt_rs::cgsp::*` to `katgpt_core::cgsp::*`) was missing
+  the submodule re-exports (`traits`, `conjecturer`, `filters`, `guide`,
+  `loop_`, `types`). Both the GOAT benchmark (`tests/bench_274_cgsp_goat.rs`)
+  and the new examples use the `katgpt_rs::cgsp::traits::{HintDeltaBandit,
+  Solver, ...}` import path; without the submodule re-exports the entire
+  `cgsp` feature failed to compile. Fixed by adding
+  `pub use katgpt_core::cgsp::{conjecturer, filters, guide, loop_, traits, types};`
+  to the shim. This was a pre-existing breakage — the plan marked Phase 3
+  complete but the test hadn't been re-run after the move from `src/cgsp/`
+  to `crates/katgpt-core/src/cgsp/`. Now `cargo check --features cgsp --tests`
+  is clean.
+- **Examples also added to `examples/README.md` catalog** (housekeeping —
+  every other example is listed there).
+- **Honest framing in examples:** `cgsp_minimal.rs` ends with an explicit note
+  that CGSP is curiosity-driven not target-seeking, with a link to
+  `.benchmarks/274_cgsp_goat.md` §G1. This prevents the example from becoming
+  a misleading "look, CGSP converges on the target" claim.
 
 ---
 
@@ -237,8 +258,10 @@ These are all game IP and belong in `riir-ai`.
 - Phase 1: 7/7 tasks complete ✅
 - Phase 2: 3/3 tasks complete ✅
 - Phase 3: 8/8 tasks complete ✅ (GOAT gate run — keep opt-in)
-- Phase 4: 0/6 tasks complete (documentation — pending, low priority)
+- Phase 4: 6/6 tasks complete ✅ (docs + examples shipped; pre-existing shim
+  bug in `src/cgsp.rs` found and fixed during example compilation)
 
-**Next action:** Phase 4 T4.1 (docs updates) if/when CGSP gains downstream
-consumers. The GOAT decision is to keep CGSP opt-in until riir-ai Plan 299
-validates on real game domains.
+**Next action:** None — Plan 274 is fully shipped. CGSP remains opt-in until
+riir-ai Plan 299 validates on real game domains. The remaining optimisation
+debt (P3: 55.91 allocs/cycle, not zero) is tracked separately in
+`./issues/021_cgsp_cycle_allocation_reduction.md` and is not blocking.

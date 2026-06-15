@@ -20,6 +20,23 @@ pub mod simd;
 pub mod traits;
 pub mod types;
 
+// CGSP — Curiosity-Guided Self-Play modelless triad (Plan 274, Research 240).
+// Self-contained: Direction/Target/Candidate, CgspLoop, PoolConjecturer,
+// HlaProjectionGuide, BreakevenDifficultyFilter, ColinearityBatchGate,
+// EntropyCollapse, CuriosityPrioritySnapshot (BLAKE3-committed).
+// Consumed by riir-engine Plan 299 (NPC curiosity runtime).
+#[cfg(feature = "cgsp")]
+pub mod cgsp;
+#[cfg(feature = "cgsp")]
+pub use cgsp::{
+    BatchQualityGate, BreakevenDifficultyFilter, Candidate, CgspConfig, CgspLoop,
+    ColinearityBatchGate, CollapseSignal, ComplexityWeights, CuriosityConjecturer,
+    CuriosityPrioritySnapshot, CycleResult, CycleStats, Direction, DifficultyFilter,
+    EntropyCollapse, HlaProjectionGuide, HintDeltaBandit, NoOpBatchGate, NoOpDifficultyFilter,
+    PoolConjecturer, Priority, QualityGuide, ScratchBuffers, Solver, SolveRate, Target,
+    DEFAULT_HLA_DIM, DEFAULT_K, DEFAULT_POOL_SIZE, entropy_nats, sigmoid, structural_complexity,
+};
+
 // ActionBridge — generic latent→raw action bridge (Plan 262).
 #[cfg(feature = "action_bridge")]
 pub mod bridge;

@@ -122,6 +122,8 @@ flag is missing.
 | `mux_latent_expand` | MUX-Latent | `mux_latent_context` | Compress then selectively expand segments, query-based retrieval (Plan 238) |
 | `dec_terrain_bench` | DEC Terrain | `dec_terrain_ai` | Dynamic topology update perf — `remove_face` + `recompute_if_dirty` (Plan 261) |
 | `dec_terrain_quality_bench` | DEC Terrain | `dec_terrain_ai` | Hodge-decomposed route quality vs A* on modified terrain (Plan 261 T46–47) |
+| `cgsp_minimal` | CGSP | `cgsp` | Minimal end-to-end CGSP loop: 8-direction pool + 1 target + 100 cycles + snapshot/BLAKE3 (Plan 274 Phase 4 T4.3) |
+| `cgsp_collapse_recovery` | CGSP | `cgsp` | Force one-hot priority table → measure cycles to recover (1 cycle vs 200+ baseline) — the G2 proof (Plan 274 Phase 4 T4.4) |
 
 ---
 
