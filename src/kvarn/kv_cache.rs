@@ -486,31 +486,50 @@ impl KVarNKVCache {
                 // 4 values per byte
                 if self.skip_varn {
                     if self.group_size > 0 {
-                        // Grouped quantization: per-token, per-channel-group scales
+                        // Grouped quantization: per-token, per-channel-group scales.
+                        //
+                        // Fast path: group_size == 4 means each byte covers exactly
+                        // one group (4 values / 4 = 1 byte per group). This is the
+                        // only configuration that sets group_size > 0 (see with_config:
+                        // `group_size: if cfg.bits <= 2 { 4 } else { 0 }`), so we can
+                        // specialize the branch-free inner loop. The original code
+                        // had 3 `if 4*i+k < kv_dim` checks per byte.
+                        debug_assert_eq!(
+                            self.group_size, 4,
+                            "group_size>0 implies group_size==4 at 2-bit"
+                        );
                         let groups_per_row = kv_dim.div_ceil(self.group_size);
                         let row_base = pos_in_tile * groups_per_row;
-                        for (i, &b) in packed_row.iter().take(kv_dim.div_ceil(4)).enumerate() {
-                            let q0 = (b & 0x03) as f32;
-                            let g0 = (4 * i) / self.group_size;
-                            let idx0 = row_base + g0.min(groups_per_row - 1);
-                            out[4 * i] = q0 * rtn_scales[idx0] + rtn_zp[idx0];
-                            if 4 * i + 1 < kv_dim {
-                                let q1 = ((b >> 2) & 0x03) as f32;
-                                let g1 = (4 * i + 1) / self.group_size;
-                                let idx1 = row_base + g1.min(groups_per_row - 1);
-                                out[4 * i + 1] = q1 * rtn_scales[idx1] + rtn_zp[idx1];
-                            }
-                            if 4 * i + 2 < kv_dim {
-                                let q2 = ((b >> 4) & 0x03) as f32;
-                                let g2 = (4 * i + 2) / self.group_size;
-                                let idx2 = row_base + g2.min(groups_per_row - 1);
-                                out[4 * i + 2] = q2 * rtn_scales[idx2] + rtn_zp[idx2];
-                            }
-                            if 4 * i + 3 < kv_dim {
-                                let q3 = ((b >> 6) & 0x03) as f32;
-                                let g3 = (4 * i + 3) / self.group_size;
-                                let idx3 = row_base + g3.min(groups_per_row - 1);
-                                out[4 * i + 3] = q3 * rtn_scales[idx3] + rtn_zp[idx3];
+                        let full_quads = kv_dim / 4;
+                        for i in 0..full_quads {
+                            let b = packed_row[i];
+                            let g = i.min(groups_per_row - 1);
+                            let idx = row_base + g;
+                            let scale = rtn_scales[idx];
+                            let zp = rtn_zp[idx];
+                            out[4 * i] = ((b & 0x03) as f32).mul_add(scale, zp);
+                            out[4 * i + 1] =
+                                (((b >> 2) & 0x03) as f32).mul_add(scale, zp);
+                            out[4 * i + 2] =
+                                (((b >> 4) & 0x03) as f32).mul_add(scale, zp);
+                            out[4 * i + 3] =
+                                (((b >> 6) & 0x03) as f32).mul_add(scale, zp);
+                        }
+                        // Tail: 0..=3 remaining values packed in the next byte,
+                        // all in the last group.
+                        let tail_start = 4 * full_quads;
+                        if tail_start < kv_dim {
+                            let b = packed_row[full_quads];
+                            let idx = row_base + (groups_per_row - 1);
+                            let scale = rtn_scales[idx];
+                            let zp = rtn_zp[idx];
+                            let shifts = [0u32, 2, 4, 6];
+                            for (j, &sh) in shifts.iter().enumerate() {
+                                let k = tail_start + j;
+                                if k >= kv_dim {
+                                    break;
+                                }
+                                out[k] = (((b >> sh) & 0x03) as f32).mul_add(scale, zp);
                             }
                         }
                     } else {
