@@ -29,10 +29,19 @@ Do NOT activate for: pure refactor tasks, bug fixes with no research angle, or o
 
 Always reference files with project-relative paths (e.g. `katgpt-rs/.research/238_*.md`, `riir-ai/.plans/NNN_*.md`). The agent can `read_file` these directly.
 
-## Read first (grounding)
+## Read first (grounding) — MANDATORY pre-flight
 
-Before distilling, read these for context:
+**Hard rule:** before any distillation, verdict, or file creation, you MUST `list_directory` **all four** research/plan folders in this session. This skill is invoked from `katgpt-rs/`, which biases toward the public repo — but `riir-ai/` holds 60+ research notes and 90+ plans that are invisible to you until you list them. Skipping this is the #1 cause of duplicate notes and missed cross-repo fusion.
 
+**Mandatory enumeration (all four, before any verdict):**
+- `katgpt-rs/.research/` — public modelless research notes
+- `katgpt-rs/.plans/` — public modelless plans
+- `riir-ai/.research/` — private runtime/game/chain research notes
+- `riir-ai/.plans/` — private runtime/game/chain plans
+
+If you have not yet listed `riir-ai/.research/` AND `riir-ai/.plans/` in this session, STOP and do so now. Do not create any file until all four are enumerated.
+
+Then read for context:
 - `katgpt-rs/README.md` — public engine purpose, architecture, current state.
 - `katgpt-rs/src/` + `katgpt-rs/crates/katgpt-core/src/` — existing modelless primitives (ConstraintPruners, bandits, DDTree, speculative decode).
 - `riir-ai/README.md` — game product context (freeze/thaw runtime, self-learn, chain).
@@ -101,11 +110,14 @@ Don't direct-map the paper to our code. Find the transferable primitive: the geo
 - G-Zero self-play × Hint-δ bandit × absorb-compress → `katgpt-rs/.plans/049_*` (modelless self-play distillation, 1.16M cycles/sec)
 
 **Fusion protocol:**
-1. `grep` `katgpt-rs/.research/` and `katgpt-rs/.plans/` for related prior work (keyword, paper title, author).
-2. `grep` `riir-ai/.research/` and `riir-ai/.plans/` likewise.
-3. After finding the transferable primitive of *this* paper, list the 2–3 closest existing notes/plans and ask: "what novel combination of this paper + note A + note B produces a capability none of them has alone?" Write that combination into the research note's §Distillation as a **Fusion** subsection, even if you don't plan it yet.
-4. Verdict by the commercial strategy doc (`003_*.md`): **Super-GOAT** > GOAT > Gain > Pass (see §Verdict tiers below). **A fusion that produces a new capability class is a strong Super-GOAT candidate — check the novelty gate (§1.5).**
-5. Create research `.md` at the right repo (see table above).
+1. **MANDATORY — grep BOTH repos in this session. Do NOT stop after the first repo.** Run keyword / paper-title / author grep across all four folders:
+   - `katgpt-rs/.research/` + `katgpt-rs/.plans/`
+   - `riir-ai/.research/` + `riir-ai/.plans/`
+
+   The closest cousin is frequently in the OTHER repo (e.g., a `katgpt-rs` modelless primitive fused with a `riir-ai` game runtime guide — see Gemini Fourier × LatCal). If you only grep `katgpt-rs`, you will miss it and produce a duplicate or weaker note.
+2. After finding the transferable primitive of *this* paper, list the 2–3 closest existing notes/plans **across both repos** and ask: "what novel combination of this paper + note A + note B produces a capability none of them has alone?" Write that combination into the research note's §Distillation as a **Fusion** subsection, even if you don't plan it yet.
+3. Verdict by the commercial strategy doc (`003_*.md`): **Super-GOAT** > GOAT > Gain > Pass (see §Verdict tiers below). **A fusion that produces a new capability class is a strong Super-GOAT candidate — check the novelty gate (§1.5).**
+4. Create research `.md` at the right repo (see table above).
 
 **File naming:** `{NNN}_{Short_Title_with_Underscores}.md` where NNN is the next free number (zero-padded to 3 digits, e.g. `239_`, `240_`). Check the folder first — numbers may be non-contiguous; pick the next free slot.
 
@@ -261,4 +273,4 @@ Reinforce these when designing game systems or chain state:
 
 ## TL;DR
 
-This skill packages the katgpt-rs research workflow: read paper → classify (training? → riir-train, stop) → **distill + fuse** (find the transferable primitive, then cross-pollinate with 2–3 closest `.research/` notes to synthesize a novel combination) → **novelty gate** (Super-GOAT? → open primitive + private riir-ai guide; else GOAT/Gain → plan only) → implement behind feature flag → benchmark → promote GOAT or demote loser. Hard constraints: modelless-first, latent-to-latent with sigmoid (never softmax), freeze/thaw over fine-tuning, 3-repo commercial discipline, raw scalars at the sync boundary, **fusion-first mindset** (the best Super-GOATs come from fusing papers, not direct-mapping one). **Super-GOAT = private moat; never skip the riir-ai guide.**
+This skill packages the katgpt-rs research workflow: **MANDATORY pre-flight: `list_directory` all four folders (`katgpt-rs/{.research,.plans}`, `riir-ai/{.research,.plans}`) before any verdict** → read paper → classify (training? → riir-train, stop) → **distill + fuse** (find the transferable primitive, then grep BOTH repos for the 2–3 closest cousins to synthesize a novel combination) → **novelty gate** (Super-GOAT? → open primitive + private riir-ai guide; else GOAT/Gain → plan only) → implement behind feature flag → benchmark → promote GOAT or demote loser. Hard constraints: modelless-first, latent-to-latent with sigmoid (never softmax), freeze/thaw over fine-tuning, 3-repo commercial discipline, raw scalars at the sync boundary, **fusion-first mindset** (the best Super-GOATs come from fusing papers across BOTH repos, not direct-mapping one). **Super-GOAT = private moat; never skip the riir-ai guide. Never grep only katgpt-rs — riir-ai is half the corpus.**
