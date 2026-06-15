@@ -426,7 +426,8 @@ pub fn run_all(config: &Config) -> Vec<BenchResult> {
     cooldown(30);
 
     #[allow(unused_mut)]
-    let mut results = Vec::new();
+    // Upper-bound on result count: ~14 phases × ~5 results each.
+    let mut results = Vec::with_capacity(64);
 
     // ── Phase 1: Infrastructure / KV Optimization (cool CPU) ──
     let (flat_br, paged_br) = infrastructure::bench_paged_vs_flat_cache(config);

@@ -19,7 +19,8 @@ use std::time::Instant;
 ///
 /// Returns BenchResult entries tagged with `feature_dim = "Route"`.
 pub fn bench_routing(_config: &Config) -> Vec<BenchResult> {
-    let mut results = Vec::new();
+    // T1 router + T2 update + T3 readout + optional T4 delta = up to 4.
+    let mut results = Vec::with_capacity(4);
     let warmup = 100;
     let iters = 5_000;
 

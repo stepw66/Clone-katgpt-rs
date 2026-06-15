@@ -701,8 +701,6 @@ pub fn bench_maxsim_score() -> Vec<BenchResult> {
     use crate::simd::maxsim_score;
 
     let iters = 10_000u64;
-    let mut results = Vec::new();
-
     let configs: &[(usize, usize, usize)] = &[
         (64, 8, 32),
         (64, 32, 128),
@@ -711,6 +709,7 @@ pub fn bench_maxsim_score() -> Vec<BenchResult> {
         (128, 64, 256),
         (128, 32, 1024),
     ];
+    let mut results = Vec::with_capacity(configs.len());
 
     for &(dim, lq, ld) in configs {
         let queries: Vec<f32> = (0..lq * dim).map(|i| (i as f32 * 0.01).sin()).collect();
@@ -793,13 +792,15 @@ pub fn bench_pflash_maxsim_block_scoring() -> BenchResult {
         }
     }
 
+    // Hoist scores allocation out of the timed loop — per-iter alloc would
+    // pollute the measurement with allocator overhead.
+    let mut scores = vec![0.0f32; num_blocks];
     let start = Instant::now();
     for _ in 0..iters {
-        let mut scores = vec![0.0f32; num_blocks];
         for (b, k_block) in block_keys.iter().enumerate() {
             scores[b] = maxsim_score(&block_queries, k_block, block_size, block_size, dim);
         }
-        std::hint::black_box(scores);
+        std::hint::black_box(&scores);
     }
     let elapsed = start.elapsed();
 

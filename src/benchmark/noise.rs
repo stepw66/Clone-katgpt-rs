@@ -17,7 +17,8 @@ use std::time::Instant;
 ///
 /// Returns BenchResult entries tagged with feature_dim = "Noise".
 pub fn bench_elf_sde(_config: &Config) -> Vec<BenchResult> {
-    let mut results = Vec::new();
+    // dims(4) + schedule_configs(3) + path_diversity(1) = 8 max entries.
+    let mut results = Vec::with_capacity(8);
     let warmup = 1_000;
     let iters = 50_000;
 

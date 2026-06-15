@@ -10,7 +10,8 @@ use std::time::Instant;
 ///
 /// All results use `feature_dim: "Distill"` and `category: BenchCategory::Distillation`.
 pub fn bench_distillation() -> Vec<BenchResult> {
-    let mut results = Vec::new();
+    // Up to 6 results: bt_rank(2) + bandit(2) + absorb_compress(2).
+    let mut results = Vec::with_capacity(6);
 
     #[cfg(feature = "bt_rank")]
     results.extend(bench_bt_rank());
