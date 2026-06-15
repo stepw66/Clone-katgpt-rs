@@ -3,7 +3,7 @@
 **Paper:** [arXiv:2503.13877](https://arxiv.org/abs/2503.13877) — Shock with Confidence: Formal Proofs of Correctness for Hyperbolic Partial Differential Equation Solvers
 **Authors:** Jonathan Gorard (Princeton), Ammar Hakim (Princeton Plasma Physics Laboratory), 2025
 **Date:** 2026-05-25
-**Verdict:** 🟡 **Conditional Adopt — methodology paper on formal verification of numerical algorithms. Key extractable primitives: (1) IEEE 754-aware symbolic normalization for constraint validation, (2) property-proving pipeline structure (hierarchical decomposition → canonical form → proof), (3) constrained mutation zones for Percepta compiler stack. Cross-references Research 088/104 (AlphaProof Nexus) for evolutionary proof patterns.**
+**Verdict:** 🟡 **Conditional Adopt — methodology paper on formal verification of numerical algorithms. Key extractable primitives: (1) IEEE 754-aware symbolic normalization for constraint validation, (2) property-proving pipeline structure (hierarchical decomposition → canonical form → proof), (3) constrained mutation zones for our compiler stack. Cross-references Research 088/104 (AlphaProof Nexus) for evolutionary proof patterns.**
 
 ---
 
@@ -85,12 +85,12 @@ This is essentially our existing DDTree branch decomposition, but formalized as 
 
 The paper's flux limiters (minmod, MC, superbee, van Leer) are functions that **constrain how solutions evolve** — preventing spurious oscillations while maintaining accuracy. The TVD (Total Variation Diminishing) property is proved via the Sweby criteria.
 
-**Distillation for us:** This maps directly to our Percepta compiler stack's constrained mutation:
+**Distillation for us:** This maps directly to our compiler stack's constrained mutation:
 - `EVOLVE-BLOCK` markers → flux limiter boundaries
 - Constrained mutation → only allow modifications within bounds
 - TVD verification → our `ConstraintPruner` validation of mutated sketches
 
-The paper proves that **different limiters have different proof success rates** — minmod and MC proved both symmetry and TVD, superbee failed symmetry, van Leer failed TVD. This suggests **mutation strategy choice matters** for our Percepta proof sketch evolution (Plan 128).
+The paper proves that **different limiters have different proof success rates** — minmod and MC proved both symmetry and TVD, superbee failed symmetry, van Leer failed TVD. This suggests **mutation strategy choice matters** for our proof sketch evolution (Plan 128).
 
 ### 6. Partial/Conditional Proofs — Honest Failure
 
@@ -138,7 +138,7 @@ The prover's most valuable property: **it knows when it can't prove something** 
 | Correctness properties | Binary (proved/disproved) | Graduated (full/conditional/partial) | Shock's graduated approach improves Nexus's binary verdict |
 | Constrained mutation | EVOLVE-BLOCK markers | Flux limiter boundaries | Same pattern, different domains |
 
-**Key synthesis:** AlphaProof Nexus gives us the **search strategy** (evolutionary population + Elo). Shock with Confidence gives us the **verification methodology** (hierarchical properties + canonical forms + honest failure). Together, they form a complete "generate + verify" pipeline for our Percepta compiler stack.
+**Key synthesis:** AlphaProof Nexus gives us the **search strategy** (evolutionary population + Elo). Shock with Confidence gives us the **verification methodology** (hierarchical properties + canonical forms + honest failure). Together, they form a complete "generate + verify" pipeline for our compiler stack.
 
 ---
 
@@ -150,7 +150,7 @@ The prover's most valuable property: **it knows when it can't prove something** 
 
 2. **Conditional/graduated proof results**: Not just pass/fail — "passes given X constraint" or "partially proves (missing Y)". This makes our GOAT proof documents more diagnostic.
 
-3. **Mutation strategy comparison**: The paper shows different flux limiters have different proof success rates. For our Percepta proof sketch evolution (Plan 128), we should **benchmark multiple mutation strategies** rather than committing to one.
+3. **Mutation strategy comparison**: The paper shows different flux limiters have different proof success rates. For our proof sketch evolution (Plan 128), we should **benchmark multiple mutation strategies** rather than committing to one.
 
 **Not a GOAT pillar** per the [decision matrix](../../riir-ai/.docs/27_mmo_goat_pillars_decision_matrix.md) — this is proof methodology infrastructure, not directly MMO-productive. No game-specific code needed. Lives entirely in `katgpt-rs`.
 

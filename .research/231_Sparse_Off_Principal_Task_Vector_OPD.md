@@ -130,7 +130,7 @@ pub struct SparseTaskVector {
 
 **Gain:** For a rank-8 LoRA on `[4096, 4096]` at 17.5% density (DS-Qwen OPD mask): dense = 262K floats, sparse = 45K indices + 45K floats = 90K — **2.9× storage reduction**. For Qwen3 OPSD at 10.5% density: **5.7×**.
 
-**SOLID/DRY:** One struct replaces `LoraAdapter` (when used as delta-from-base), `BomberFrozenBandit`, `MuxTarget` payloads. The `eta` field unifies task arithmetic (add), negation (subtract), and clipping.
+**SOLID/DRY:** One struct replaces `LoraAdapter` (when used as delta-from-base), per-game frozen bandit configs (private), `MuxTarget` payloads. The `eta` field unifies task arithmetic (add), negation (subtract), and clipping.
 
 **Modelless:** No training. The mask is computed offline from `(trained, source)` checkpoint pairs and shipped. At inference we apply the masked delta to the base weight buffer once at load.
 

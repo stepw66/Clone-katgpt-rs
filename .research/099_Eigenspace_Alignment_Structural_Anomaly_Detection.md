@@ -18,11 +18,11 @@ The paper treats behavioral populations as **geometric energy landscapes** and d
 
 2. **Dual-observer anomaly cascade** maps to our model-based/modelless duality — modelless (geometric: Jacobian trace, no forward pass) and model-based (thermodynamic: energy landscape, requires learned parameters). Our `ScreeningPruner`/`ConstraintPruner` trait stack already separates these modes.
 
-3. **δmg mass-gravity divergence** (weighted vs. unweighted population centers) maps to our `BanditPruner` Q-value weighted vs. uniform routing — a principled way to detect "lightweight influx" in game populations (e.g., low-quality moves flooding MCTS) vs. genuine strategy shifts.
+3. **δmg mass-gravity divergence** (weighted vs. unweighted population centers) is a generic primitive — weighted vs. unweighted mean divergence as a population-shift signal.
 
-4. **Event taxonomy (PRECURSOR → REGIME_S → REGIME_D → REGIME_E → REGIME_K → NORMAL)** provides a principled classification framework for game state health monitoring — directly applicable to MMO server-side anomaly detection (Pillar 2/4).
+4. **Event taxonomy (PRECURSOR → REGIME_S → REGIME_D → REGIME_E → REGIME_K → NORMAL)** is a generic classification framework; game-specific tuning and applications → riir-ai/.research/125.
 
-**Verdict: 🟡 CONDITIONAL ADOPT — The stiff/soft subspace decomposition is high-value for katgpt-rs as a generic anomaly detection primitive (feature-gate `stiff_anomaly`). The dual-observer event taxonomy is game-specific and belongs in riir-ai as a structural health monitor for MMO game loops. The δmg discriminator is the super-GOAT piece — it distinguishes population floods from structural fractures in game populations, and this is a selling point that should stay private in riir-ai.**
+**Verdict: 🟡 CONDITIONAL ADOPT — The stiff/soft subspace decomposition is high-value for katgpt-rs as a generic anomaly detection primitive (feature-gate `stiff_anomaly`). Game-specific application (MCTS population discrimination, structural health monitoring) → moved to riir-ai (private). See riir-ai/.research/125.**
 
 ---
 
@@ -120,31 +120,13 @@ We already compute eigendecomposition of per-(layer, head) key covariance in Spe
 
 The paper's "structure precedes geometry" maps to our "modelless before model-based" philosophy — cheap structural checks before expensive forward passes.
 
-### 2.3 Event Taxonomy → Game State Health
+### 2.3 Event Taxonomy → Generic Health Signal
 
-Mapping the six event types to our game domains:
+The six event types (PRECURSOR → REGIME_S → REGIME_D → REGIME_E → REGIME_K → NORMAL) form a generic classification framework. Game-specific analogs (NPC dialog drift, zone flooding, fleet restart forensics) and tuning thresholds → riir-ai/.research/125 (private).
 
-| Paper Event | Game Analog | Detection |
-|---|---|---|
-| PRECURSOR | NPC dialog quality degrading before visible failure | CV of move quality scores rising |
-| REGIME_S | New players flooding a zone (elastic) | α high, δmg high (weighted positions stable) |
-| REGIME_D | Single-player exploit detected (localized) | α high, δmg low, isolated to one role |
-| REGIME_E | Server-wide game state corruption | Global EJT z < -2.0 across all players |
-| REGIME_K | Scheduled maintenance / admin action | Bimodal restart age, forensic checklist |
-| NORMAL | Stable game loop | No anomaly gates fire |
+### 2.4 Game Application
 
-### 2.4 δmg → BanditPruner Population Discrimination
-
-The mass-gravity divergence directly applies to MCTS/Bandit populations:
-
-```
-δmg_bandit = ‖Q_weighted_mean - Q_unweighted_mean‖
-```
-
-- **Lightweight moves** (low visit count, high variance): mass shifts, gravity stays → exploration surge, not convergence failure
-- **Structural shift** (genuine strategy change): both move → real convergence event
-
-This is the **super-GOAT insight**: distinguishing "lots of noise moves" from "the game has changed" in MCTS populations. Private to riir-ai as game-specific knowledge.
+**Game application (δmg discriminator):** The mass-gravity divergence discriminator for distinguishing MCTS exploration from strategy collapse is a Super-GOAT selling point → moved to riir-ai/.research/125. The generic eigenspace decomposition stays here.
 
 ---
 
@@ -161,17 +143,9 @@ This is the **super-GOAT insight**: distinguishing "lots of noise moves" from "t
 
 These are generic linear algebra utilities that extend SpectralQuant's existing eigenbasis code. They don't encode any game-specific knowledge.
 
-### 3.2 riir-ai (Private, Game-Specific)
+### 3.2 Game-Specific Components
 
-| Component | What | Why Private |
-|---|---|---|
-| `GameStructuralHealth` struct | Event taxonomy (PRECURSOR→REGIME_K) applied to game populations | Game-specific tuning thresholds |
-| `game_mass_gravity_divergence()` | δmg for MCTS/Bandit populations — distinguishes exploration surge from convergence failure | **Super GOAT**: tells you whether noise or strategy changed |
-| `npc_dialog_drift_detector()` | PRECURSOR detection on NPC dialog quality scores | Private quest FSM knowledge |
-| `mmo_zone_health_monitor()` | Per-zone stiff/soft tracking for MMO server | Pillar 4 integration (Frame-Sampling Bridge) |
-| `fleet_restart_forensic()` | REGIME_K checklist for MMO maintenance events | Operational MMO domain knowledge |
-
-The δmg discriminator is the key selling point: nobody else can tell you whether your MCTS is exploring or collapsing. This is private game IP.
+**Game-specific components** (event taxonomy, population discriminators, zone health monitors) → moved to riir-ai/.research/125 (private).
 
 ---
 
@@ -179,14 +153,14 @@ The δmg discriminator is the key selling point: nobody else can tell you whethe
 
 Reference: `27_mmo_goat_pillars_decision_matrix.md`
 
-| Pillar | How This Research Strengthens It |
+| Pillar | How This Research Strengthens It (generic primitives only) |
 |---|---|
 | **P1: Fourier Spatial AI** | Stiff/soft decomposition adds anomaly detection to Fourier-hashed positions — detect when spatial structure changes (rigid) vs. normal variation (elastic) |
-| **P2: WASM Validators** | `GameStructuralHealth` runs inside WASM sandbox — structural anomaly detection as a validator-level gate. "Is the game population healthy?" as a validation primitive |
-| **P3: NPC Dialog Engine** | `npc_dialog_drift_detector` provides PRECURSOR detection — flag when NPC responses drift before visible quality failure |
-| **P4: Frame-Sampling Bridge** | `mmo_zone_health_monitor` per-zone stiff/soft tracking — decide frame sampling ratio based on structural health (healthy = decimate more, stressed = sample more) |
+| **P2: WASM Validators** | Stiff/soft anomaly gate runs inside WASM sandbox as a validator-level primitive. Game-specific validator wiring → riir-ai/.research/125 |
+| **P3: NPC Dialog Engine** | PRECURSOR-style CV gating is generic; game-specific drift detector → riir-ai/.research/125 |
+| **P4: Frame-Sampling Bridge** | Generic per-region stiff/soft tracking can inform sampling ratio; game-specific zone monitor → riir-ai/.research/125 |
 
-**LoRA independence:** All four applications work modelless. The stiff/soft decomposition is pure linear algebra. The δmg discriminator uses existing BanditPruner Q-values. No neural network required.
+**LoRA independence:** The generic stiff/soft decomposition is pure linear algebra. Game-specific applications → riir-ai/.research/125.
 
 ---
 
@@ -194,11 +168,11 @@ Reference: `27_mmo_goat_pillars_decision_matrix.md`
 
 ### What's Genuinely New (We Don't Have)
 
-1. **Temporal eigenvalue tracking** — We compute eigenvalues once (SpectralQuant calibration), then freeze. The paper tracks stability across 67 windows. We should track across training steps / game rounds.
+1. **Temporal eigenvalue tracking** — We compute eigenvalues once (SpectralQuant calibration), then freeze. The paper tracks stability across 67 windows. We should track across training steps.
 
 2. **Soft alignment ratio α** — We don't compute the projection of population change onto soft vs. stiff axes. This is a one-liner given existing eigenbasis, but we never compute it.
 
-3. **δmg as discriminator** — We use weighted/unweighted means in BanditPruner but never compute their divergence as a diagnostic signal.
+3. **δmg as discriminator** — The weighted/unweighted mean divergence as a diagnostic signal is a generic primitive; specific application as a game/MCTS discriminator → riir-ai/.research/125 (private).
 
 ### What We Already Have (No Action)
 
@@ -225,11 +199,10 @@ Reference: `27_mmo_goat_pillars_decision_matrix.md`
 | **Novelty** | Medium — stiff/soft decomposition is standard sensitivity analysis; the event taxonomy and δmg discriminator are the novel contributions |
 | **Implementability** | High — all components are linear algebra primitives that compose with existing SpectralQuant code |
 | **GOAT provability** | High — z-score FPR, Jaccard stability, and k-invariance are all measurable with synthetic data |
-| **Moat value** | High for δmg game discriminator (private riir-ai), Medium for generic stiff/soft (open katgpt-rs) |
+| **Moat value** | High (private application → riir-ai/.research/125), Medium for generic stiff/soft (open katgpt-rs) |
 | **LoRA independence** | Full — pure modelless linear algebra |
 | **Risk** | Low — additive feature gates, no existing code changes |
 
 **Action:**
 1. Add `stiff_anomaly` feature gate to katgpt-rs with generic stiff/soft utilities
-2. Add game-specific `GameStructuralHealth` to riir-ai (private, super GOAT)
-3. Wire into GOAT pillar framework for MMO server integration
+2. Game-specific Super-GOAT components (δmg discriminator, zone/dialog/fleet monitors) → riir-ai/.research/125 (private)

@@ -141,11 +141,11 @@ Per [27_mmo_goat_pillars_decision_matrix.md](../../riir-ai/.docs/27_mmo_goat_pil
 | SAT attention analysis primitive | ✅ Generic algorithm | — |
 | Rolling-hash KV segment retrieval | ✅ Generic retrieval | — |
 | SensitivityDetector trait | ✅ Generic interface | — |
-| Game-specific sensitivity patterns | — | ✅ Private — which game tokens are "strategic" (e.g., Go move sequences, Bomber bomb placements) |
-| Per-domain ρ recompute thresholds | — | ✅ Private — bomber ρ, go ρ, FFT ρ |
+| Game-specific sensitivity patterns | — | ✅ Private — per-game token classification |
+| Per-domain ρ recompute thresholds | — | ✅ Private |
 | MMO cross-player KV reuse policy | — | ✅ Private — per-game cache sharing rules |
 
-**The "super GOAT" angle:** In an MMO context, multiple players interact with the same game world. Cross-player KV reuse (sharing system prompts + game state descriptions) is a genuine efficiency win. The **game-specific sensitivity patterns** (which tokens reveal strategic information) become private IP. A naive implementation shares too much (leaks strategy via cache timing) or too little (no efficiency gain). The tuned patterns are the moat.
+**The "super GOAT" angle:** In an MMO context, multiple players interact with the same game world. Cross-player KV reuse is a genuine efficiency win. The **game-specific sensitivity patterns** are private IP. A naive implementation shares too much or too little.
 
 **Keep secret:** Game-specific sensitivity patterns, per-domain recompute thresholds. Ship the generic SAT + rolling hash infrastructure.
 

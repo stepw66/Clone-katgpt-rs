@@ -166,6 +166,40 @@ Default to `riir-ai` internal. It is always safe to keep something private. It i
 
 ---
 
+## Super-GOAT Capture Protocol
+
+A **Super-GOAT** is a novel mechanism that creates a capability competitors don't have — a private IP moat, not just a benchmark win. Most papers are GOAT/Gain (incremental). Detecting Super-GOAT early and routing it correctly is the difference between building a moat and giving away the store.
+
+### Detection — 4 gates, ALL must pass
+
+| Gate | Question | Fail → |
+|------|----------|--------|
+| **Novelty** | Grep `.research/` across all 3 repos. Does any existing note cover this mechanism? | → Gain |
+| **Capability class** | Is this a new *class* of behavior (not just better numbers on an existing capability)? | → GOAT |
+| **Selling point** | Can you finish: "Our NPCs/systems do ___ that no competitor can"? | → GOAT |
+| **Force multiplier** | Connects to ≥2 existing pillars/systems (freeze/thaw, latent ops, self-learn, chain, KG/HLA)? | → GOAT |
+
+4/4 → Super-GOAT. Any miss → highest matching tier.
+
+### Routing — the two-output rule
+
+Super-GOAT MUST produce **both** outputs. Skipping either is a process failure.
+
+| Output | Location | Purpose |
+|--------|----------|--------|
+| **Open primitive** | `katgpt-rs/.research/` + `crates/katgpt-core/src/` | Adoption hook — generic math, no game semantics. The Ferrari part. |
+| **Private guide** | `riir-ai/.research/NNN_*.md` | The selling-point doc — how the game uses it, commercial value, connection map, validation protocol. The gas. |
+
+The private guide MUST answer: what's the selling point, what connects to existing systems, what crosses the sync boundary (raw scalars only), what stays private, and how to validate the Super-GOAT claim.
+
+### Why the guide matters
+
+The open primitive is reproducible from the paper — anyone reading arXiv can build it. The **guide** is where the private IP lives: the game-specific semantics, the integration with HLA/emotions/KG/freeze-thaw, the cross-game transfer protocol. Without the guide, the knowledge is lost — a future agent won't know why the open primitive matters or how to use it commercially.
+
+**Common failure:** agent reads paper → writes open primitive + plan → marks done → moves on. The private selling-point knowledge was never captured. Next agent sees generic math with no context. Fix: the novelty gate (SKILL.md §1.5) blocks this — Super-GOAT requires the riir-ai guide before the task is complete.
+
+---
+
 ## Related
 
 | Doc | Connection |

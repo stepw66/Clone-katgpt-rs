@@ -84,7 +84,7 @@ In Gemma-2 and LLaMA:
 | `spectralquant` KV cache | Dirichlet Energy over embeddings | Add `dirichlet_energy()` diagnostic to measure cross-position structural alignment |
 | `ScreeningPruner` | Graded relevance | Analogy suggests relevance should encode **relational role similarity**, not just token probability |
 | `ConfiguratorContext` (SR²AM) | Data/optimizer sensitivity | Add analogy-readiness signal: "is the current training regime likely to produce structural alignment?" |
-| `GameState` trait | Category structure | Games ARE categories — entities = positions, relations = valid moves. Analogical transfer = "same tactic works in Bomber and FFT" |
+| `GameState` trait | Category structure | Games ARE categories — entities = positions, relations = valid moves. Analogical transfer = "same tactic works across game domains" |
 | `data_probe` | Markov chain diagnostics | Already have Dirichlet sampling in `markov.rs` — extend to Dirichlet Energy computation over embedding adjacency |
 | Early exit (Plan 026) | Layer-axis alignment | Dirichlet Energy at layer L could be an early-exit signal for "this query is analogical" |
 
@@ -107,7 +107,7 @@ In Gemma-2 and LLaMA:
 | `dirichlet_energy` diagnostic | katgpt-rs (open) | KV cache analysis | Generic embedding diagnostic — not game-specific |
 | Functor direction probe | katgpt-rs (open) | Inference-time | General mechanistic interpretability |
 | LoRA analogy training config | riir-ai (private) | LoRA training | Game-specific weight decay and relation diversity tuning |
-| Cross-game analogy detection | riir-ai (private) | Game AI | Super-GOAT: detect when Bomber tactics transfer to FFT/Go |
+| Cross-game analogy detection | riir-ai (private) | Game AI | Super-GOAT: detect cross-domain tactical transfer via functor directions. Details → riir-ai/.research/123 |
 | Structural alignment early exit | katgpt-rs (open) | Inference | General early-exit signal |
 
 ---
@@ -150,6 +150,13 @@ From `27_mmo_goat_pillars_decision_matrix.md`:
 
 ---
 
+## Implementation Status (2026-06-15)
+
+Both open-engine primitives identified above are now built in `crates/katgpt-core/src/dirichlet.rs` (feature `dirichlet_energy`):
+
+1. **Dirichlet Energy diagnostic** — Plan 149 ✅ (`dirichlet_energy`, `kv_cache_dirichlet_energy`, adjacency helpers).
+2. **Functor direction probe** (`e_target ≈ e_source + f`) — Plan 273 ✅. Modelless latent-to-latent analogy: `extract_functor` (mean displacement + coherence), `apply_functor`, `functor_parallelism[_into]` (the §3 metric), `functor_gate` (sigmoid-gated trust). GOAT G1–G5 PASS, incl. ranking-preservation (constraint 7). Game-specific cross-domain functor transfer remains Super-GOAT in riir-ai — see **riir-ai Research 123** (Latent Functor Runtime Guide) for the private architectural guide covering NPC relational learning, coherence-driven re-estimation, and cross-game transfer.
+
 ## Related Internal Research
 
 | Research | Connection |
@@ -161,6 +168,7 @@ From `27_mmo_goat_pillars_decision_matrix.md`:
 | Research 070 (GDN2) | Linear attention recurrence could implement functor application |
 | Research 039 (SpectralQuant) | Eigenbasis alignment ≈ structural alignment in spectral domain |
 | riir-ai Research 010 (KG × HLA × Role Transport) | **Direct hit** — role transport operators ARE functors, HLA higher-order moments capture "relations between relations". Dirichlet Energy is the quality diagnostic for KG training. Plan 151 (riir-ai) implements the full pipeline. |
+| riir-ai Research 123 (Latent Functor Runtime Guide) | **Super-GOAT guide** — runtime NPC relational learning via functor directions, coherence as collapse detection, freeze/thaw re-estimation, cross-game transfer path. The private counterpart to this open research note. |
 
 ## External References
 

@@ -76,7 +76,7 @@ Don't direct-map the paper. Find the transferable primitive: the geometric, spec
 
 - `grep` `katgpt-rs/.research/` and `katgpt-rs/.plans/` for related prior work (keyword, paper title, author).
 - `grep` `riir-ai/.research/` and `riir-ai/.plans/` likewise.
-- Verdict GOAT / gain by the commercial strategy doc (`003_*.md`).
+- Verdict by the commercial strategy doc (`003_*.md`): **Super-GOAT** > GOAT > Gain > Pass (see §Verdict tiers below).
 - Create research `.md` at the right repo (see table above).
 
 **File naming:** `{NNN}_{Short_Title_with_Underscores}.md` where NNN is the next free number (zero-padded to 3 digits, e.g. `239_`, `240_`). Check the folder first — numbers may be non-contiguous; pick the next free slot.
@@ -110,12 +110,49 @@ Don't direct-map the paper. Find the transferable primitive: the geometric, spec
 ## 2. Distillation
 ...
 ## 3. Verdict
-GOAT | Gain | Pass   ← with one-line reasoning
+
+**Tiers (high → low):**
+
+| Tier | Criteria | Routing |
+|------|----------|--------|
+| **Super-GOAT** | Novel mechanism (no prior art) + new capability class + product selling point + force multiplier (≥2 pillars). Creates a moat. | Open primitive → katgpt-rs. **Architectural guide → riir-ai/.research/**. Plans → both repos as needed. |
+| **GOAT** | Provable gain (latency/quality/security) over existing approach, but not a new class of capability. Promotes to default if it wins. | Plan + implement → appropriate repo. Feature flag + benchmark. |
+| **Gain** | Incremental improvement, useful but not headline-worthy. | Plan only, behind feature flag. |
+| **Pass** | Not relevant to modelless/latent/freeze-thaw/runtime, OR training-only (→ riir-train note, stop). | One-line note. No files created in this session. |
+
+**One-line reasoning required for each verdict.** For Super-GOAT: state the selling point explicitly.
 ```
 
-### 2. If gain, plan it
+### 1.5. Novelty gate — is this Super-GOAT?
+
+Before planning, score novelty. Ask all four:
+
+1. **No prior art?** Grep `.research/` across all repos — does any existing note already cover this mechanism? If yes → not novel, it's a Gain at best.
+2. **New class of behavior?** Not better numbers, but something no incumbent can do (a new capability, not an optimization).
+3. **Product selling point?** Can you finish the sentence: "Our NPCs/systems do X that no competitor can"? If you can't → Gain.
+4. **Force multiplier?** Connects to ≥2 existing pillars/systems (check connection map in `.research/`). Solo novelty without integration = GOAT, not Super-GOAT.
+
+**If YES to all 4 → verdict = Super-GOAT.** Mandatory outputs:
+1. **Open primitive** → `katgpt-rs` (generic math, no game semantics).
+2. **Architectural GUIDE** → `riir-ai/.research/NNN_*.md` (the private selling-point doc). The guide MUST include:
+   - TL;DR with commercial value (the selling point in one sentence)
+   - Distilled primitive (how the mechanism works modellessly)
+   - Connection map (which existing systems it multiplies)
+   - Latent vs raw boundary (what crosses sync, what stays local)
+   - What stays private vs open
+   - Validation protocol (how to prove it's Super-GOAT, not just hype)
+   - Implementation priority table (P0–P3)
+3. **Plan(s)** → `katgpt-rs/.plans/` (open) and/or `riir-ai/.plans/` (private runtime).
+
+**If NO to any → proceed to GOAT/Gain verdict.** Plan only, no guide.
+
+> **Rule:** Super-GOAT ideas are the private IP moat. The open primitive is the adoption hook; the riir-ai guide is the selling point. Never ship the guide publicly. Never skip the guide for a Super-GOAT — that's losing the knowledge.
+
+### 2. If gain (or GOAT), plan it
 
 Add plan `.md` to `katgpt-rs/.plans/` (modelless) and/or `riir-ai/.plans/` (runtime/game/chain). Use `## Phase N` sections with `- [ ]` per task (mark `- [x]` when done). **Never** plan into `riir-train` from this workflow.
+
+> Super-GOAT plans should be created AFTER the riir-ai guide. The guide is the strategy; the plan is the execution.
 
 **Plan format** (see `katgpt-rs/.plans/271_attention_matching_compaction.md` for a canonical example):
 
@@ -205,4 +242,4 @@ Reinforce these when designing game systems or chain state:
 
 ## TL;DR
 
-This skill packages the katgpt-rs research workflow: read paper → classify (training? → riir-train, stop) → distill the latent/inference/routing primitive → write `.research/NNN_*.md` → if gain, write `.plans/NNN_*.md` with `- [ ]` tasks → implement behind a feature flag → benchmark → promote GOAT or demote loser. Hard constraints: modelless-first, latent-to-latent with sigmoid (never softmax), freeze/thaw over fine-tuning, 3-repo commercial discipline, raw scalars at the sync boundary.
+This skill packages the katgpt-rs research workflow: read paper → classify (training? → riir-train, stop) → distill the latent/inference/routing primitive → **novelty gate** (Super-GOAT? → open primitive + private riir-ai guide; else GOAT/Gain → plan only) → implement behind feature flag → benchmark → promote GOAT or demote loser. Hard constraints: modelless-first, latent-to-latent with sigmoid (never softmax), freeze/thaw over fine-tuning, 3-repo commercial discipline, raw scalars at the sync boundary. **Super-GOAT = private moat; never skip the riir-ai guide.**

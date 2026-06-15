@@ -37,9 +37,11 @@ Distill into:
 
 0. **Read the paper** (or PDF via `https://r.jina.ai/https://arxiv.org/pdf/{ID}`). Ask: *is the value in the training loop, or in a latent-space / inference / routing insight?* If training-only → note "→ riir-train", stop.
 
-1. **Distill fundamentally** — don't direct-map the paper. Find the transferable primitive: the geometric, spectral, or information-theoretic insight that works without the paper's training setup. Grep `.research/` and `.plans/` for related prior work. Verdict GOAT/gain by the commercial strategy doc. Create research `.md` at the right repo (see table above).
+1. **Distill fundamentally** — don't direct-map the paper. Find the transferable primitive: the geometric, spectral, or information-theoretic insight that works without the paper's training setup. Grep `.research/` and `.plans/` for related prior work. Verdict by `003_*.md`: **Super-GOAT** > GOAT > Gain > Pass. Create research `.md` at the right repo (see table above).
 
-2. **If gain, plan it** — add plan `.md` to `katgpt-rs/.plans/` (modelless) and/or `riir-ai/.plans/` (runtime/game/chain). Use `## Task` sections with `- [ ]` per task. **Never** plan into riir-train from this workflow.
+1.5. **Novelty gate** — before planning, score 4 gates (ALL must pass for Super-GOAT): (a) no prior art in any `.research/`, (b) new capability class not just better numbers, (c) product selling point ("our NPCs do X no competitor can"), (d) force multiplier (connects ≥2 pillars). If 4/4 → **Super-GOAT**: MUST create open primitive in katgpt-rs AND **architectural guide in `riir-ai/.research/`** (selling-point doc: commercial value, connection map, latent/raw boundary, validation protocol). Skipping the riir-ai guide = losing the private IP.
+
+2. **If gain (or GOAT), plan it** — add plan `.md` to `katgpt-rs/.plans/` (modelless) and/or `riir-ai/.plans/` (runtime/game/chain). Use `## Task` sections with `- [ ]` per task. **Never** plan into riir-train from this workflow. Super-GOAT: create the riir-ai guide FIRST, then the plan.
 
 3. **Implement to unblock** — if a plan is blocked by a missing primitive, implement the minimal version. After GOAT check + proof of gain: promote to default if it wins, demote the loser.
 

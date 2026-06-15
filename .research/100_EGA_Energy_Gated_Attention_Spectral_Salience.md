@@ -9,7 +9,7 @@
 
 ## TL;DR
 
-EGA gates value aggregation by spectral energy of key token embeddings via a single learned linear projection. +0.103 val loss improvement with <0.26% parameter overhead. The threshold τ ≈ 0.35 converges independently of initialization, corresponding to ~36% content-word fraction in English. Simple, elegant, drop-in.
+EGA gates value aggregation by spectral energy of key token embeddings via a single learned linear projection. +0.103 val loss improvement with <0.26% parameter overhead. The paper reports a stable energy threshold τ that converges independently of initialization. Simple, elegant, drop-in.
 
 ---
 
@@ -68,7 +68,7 @@ Cross-dataset: TinyShakespeare +0.103, Penn Treebank +0.101 — effectively iden
 |--------|-----------------|
 | **Scale** | Paper tested at ≤6.2M params, character-level. No evidence at LLM scale. |
 | **Model-based** | Requires training w_proj, τ, α. Not modelless. Cannot retrofit on frozen weights without fine-tuning. |
-| **Tokenization dependency** | τ ≈ 0.35 is character-level English. BPE/subword will change the content-word fraction. |
+| **Tokenization dependency** | The paper's τ value is character-level English. BPE/subword will change the content-word fraction. |
 | **Incremental over SdpaOutputGate** | We already have a sigmoid gate on attention output. EGA adds per-key-position gating upstream. Diminishing returns likely when combined. |
 
 ---
@@ -110,11 +110,11 @@ Per [27_mmo_goat_pillars_decision_matrix.md](../../riir-ai/.docs/27_mmo_goat_pil
 |--------|-----------------|-------------------|
 | Core EGA algorithm | ✅ Public — generic energy-gated attention | — |
 | Feature gate `ega_attn` | ✅ Generic implementation | — |
-| Game-domain τ values | — | ✅ Private — bomber τ, go τ, FFT τ |
-| Per-domain w_proj LoRA | — | ✅ Private — `game_ega_lora.bin` |
+| Game-domain τ values | — | ✅ Private — per-game energy thresholds |
+| Per-domain w_proj LoRA | — | ✅ Private |
 | KV eviction policy using energy | ✅ Generic threshold | ✅ Domain-specific thresholds |
 
-**The "super GOAT" angle:** If EGA's KV eviction criterion (tokens below τ ≈ 0.35 energy are suppressible) proves useful for our cache compression pipeline, the specific energy thresholds per game domain become private IP. The generic mechanism ships open; the tuned values stay closed.
+**The "super GOAT" angle:** If EGA's KV eviction criterion proves useful for our cache compression pipeline, the specific energy thresholds per game domain become private IP. The generic mechanism ships open; the tuned values stay closed.
 
 ---
 
@@ -142,9 +142,9 @@ Per [27_mmo_goat_pillars_decision_matrix.md](../../riir-ai/.docs/27_mmo_goat_pil
 ## Open Questions
 
 1. Does EGA improve when combined with our SpectralQuant KV compression? (Spectral analysis twice — sharing energy computation?)
-2. Can τ ≈ 0.35 be used as a KV cache eviction threshold in our TurboQuant/OCTOPUS pipeline?
+2. Can the paper's τ value be used as a KV cache eviction threshold in our TurboQuant/OCTOPUS pipeline?
 3. Does the sequence-length scaling hypothesis hold? (ΔL grows with context T?)
-4. What is τ for game states? (Bomber, Go, FFT — likely different from English text 0.35)
+4. What is τ for game states? (Likely different from the paper's character-level English value — per-domain tuning is private.)
 5. Can w_proj be LoRA-adapted per game domain? (riir-ai question)
 
 ---
