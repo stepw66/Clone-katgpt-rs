@@ -86,9 +86,8 @@ pub fn select_highest_attn_keys(
                 let mut m = f32::NEG_INFINITY;
                 for i in 0..n {
                     let a = scratch_attn[i * t_len + j];
-                    if a > m {
-                        m = a;
-                    }
+                    // Branch-free max — emits CMOV/conditional-select.
+                    m = m.max(a);
                 }
                 per_key_score[j] = m;
             }
