@@ -5,8 +5,9 @@
 //! for offline trajectory verification (Plan 177, Task T4).
 
 use super::types::{ReconciliationConfig, TrajectoryPoint};
-use crate::benchmark::cosine_similarity;
 use crate::speculative::types::ScreeningPruner;
+#[cfg(test)]
+use crate::benchmark::cosine_similarity;
 
 /// Cosine-similarity scorer over a flattened speculative manifold.
 ///
