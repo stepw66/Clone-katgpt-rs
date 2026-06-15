@@ -16,6 +16,8 @@ pub mod breakeven;
 pub mod cache_prune;
 #[cfg(feature = "channel_simd_align")]
 pub mod channel_simd;
+#[cfg(feature = "cgsp")]
+pub mod cgsp;
 pub mod cumprodsum;
 #[cfg(feature = "ssd_block")]
 pub mod ssd_block;
@@ -146,6 +148,9 @@ pub mod spectral_concentration;
 #[cfg(feature = "spectral_quant")]
 pub mod spectralquant;
 pub mod speculative;
+// SwiR Switch-Thinking — Explicit↔Latent mode controller (Plan 275, Research 241).
+#[cfg(feature = "swir_switch_thinking")]
+pub mod swir;
 #[cfg(feature = "static_cal_tables")]
 pub mod static_cal;
 #[cfg(feature = "stiff_anomaly")]

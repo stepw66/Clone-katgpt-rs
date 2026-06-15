@@ -4,7 +4,7 @@
 **Research:** [katgpt-rs/.research/241_SwiReasoning_Explicit_Latent_Switch.md](../.research/241_SwiReasoning_Explicit_Latent_Switch.md)
 **Source paper:** [arxiv 2510.05069](https://arxiv.org/abs/2510.05069) — SwiReasoning (ICLR 2026, Shi et al., Georgia Tech / Microsoft)
 **Target:** `katgpt-rs/src/swir/` (new module) + Cargo feature `swir_switch_thinking`
-**Status:** Active — Phase 1 pending
+**Status:** Active — Phase 1 ✅ complete, Phase 2 pending
 **Depends On:** `thinking_cot` (Plan 194, for `ThinkingStrategy` integration point), `rim_slots` (Plan 172, for latent workspace reuse — optional, can use standalone buffer), `selectivity_router` (Plan 204, for explicit-only fallback on rigid-constraint tasks)
 **GOAT Criteria:** G1 (+1.5pp accuracy vs `thinking_cot`), G2 (1.3× token efficiency at fixed accuracy), G3 (<200ns per `step()` call, zero alloc), G4 (soft-embedding in vocab convex hull), G5 (no regression when disabled), G6 (auto-fallback on rigid-constraint tasks)
 
@@ -24,20 +24,20 @@ Goal: compiling, tested, feature-gated module implementing the core SwiR state m
 
 ### Tasks
 
-- [ ] **T1.1** Create `src/swir/` directory with empty `mod.rs`
-- [ ] **T1.2** Add feature flag `swir_switch_thinking = []` to `katgpt-rs/Cargo.toml` features section (after `thinking_cot`)
-- [ ] **T1.3** Add `#[cfg(feature = "swir_switch_thinking")] pub mod swir;` to `src/lib.rs` (alphabetical, after `spectralquant` or similar)
-- [ ] **T1.4** Implement `src/swir/types.rs`:
-  - [ ] `ThinkMode` enum (`Explicit`, `Latent`) with `#[repr(u8)]`
-  - [ ] `SwiRConfig` struct (w_e_to_l: u32 default 512, w_l_to_e: u32 default 0, c_max: u32 default 20, c_convergence_fraction: f32 default 0.5, answer_budget_b: u32 default 256, alpha_0: f32 default 0.6, beta_0: f32 default 0.7, max_steps: u32)
-  - [ ] `SwiRConfig::default()` returning paper's best-practice values
-  - [ ] `StepAction` enum: `EmitToken(u32)`, `EmitSoftEmbedding`, `InjectControlToken(ControlToken)`, `Terminate`
-  - [ ] `ControlToken` enum: `CloseThink` (`</think>`), `ForceAnswerPrefix` (`</think>\n\nThe final answer is`)
-  - [ ] `SwiRStats` struct (switches_total, latent_steps, explicit_steps, mode_at_termination) for debugging/benchmarks
-- [ ] **T1.5** Implement `src/swir/controller.rs` — `SwiRController` state machine:
-  - [ ] Struct fields: mode, reference_entropy, dwell_steps, switch_count, injection_queue (small VecDeque or fixed `[u32; 8]` ring), answer_budget_remaining, config, stats
-  - [ ] `SwiRController::new(config)` initializes mode=Latent, reference_entropy=NaN (set on first step), switch_count=0, queue empty
-  - [ ] `fn step(&mut self, entropy: f32, step_index: u32) -> StepAction` — Algorithm 1 of the paper:
+- [x] **T1.1** Create `src/swir/` directory with empty `mod.rs`
+- [x] **T1.2** Add feature flag `swir_switch_thinking = []` to `katgpt-rs/Cargo.toml` features section (after `thinking_cot`)
+- [x] **T1.3** Add `#[cfg(feature = "swir_switch_thinking")] pub mod swir;` to `src/lib.rs` (alphabetical, after `spectralquant` or similar)
+- [x] **T1.4** Implement `src/swir/types.rs`:
+  - [x] `ThinkMode` enum (`Explicit`, `Latent`) with `#[repr(u8)]`
+  - [x] `SwiRConfig` struct (w_e_to_l: u32 default 512, w_l_to_e: u32 default 0, c_max: u32 default 20, c_convergence_fraction: f32 default 0.5, answer_budget_b: u32 default 256, alpha_0: f32 default 0.6, beta_0: f32 default 0.7, max_steps: u32)
+  - [x] `SwiRConfig::default()` returning paper's best-practice values
+  - [x] `StepAction` enum: `EmitToken(u32)`, `EmitSoftEmbedding`, `InjectControlToken(ControlToken)`, `Terminate`
+  - [x] `ControlToken` enum: `CloseThink` (`</think>`), `ForceAnswerPrefix` (`</think>\n\nThe final answer is`)
+  - [x] `SwiRStats` struct (switches_total, latent_steps, explicit_steps, mode_at_termination) for debugging/benchmarks
+- [x] **T1.5** Implement `src/swir/controller.rs` — `SwiRController` state machine:
+  - [x] Struct fields: mode, reference_entropy, dwell_steps, switch_count, injection_queue (small VecDeque or fixed `[u32; 8]` ring), answer_budget_remaining, config, stats
+  - [x] `SwiRController::new(config)` initializes mode=Latent, reference_entropy=NaN (set on first step), switch_count=0, queue empty
+  - [x] `fn step(&mut self, entropy: f32, step_index: u32) -> StepAction` — Algorithm 1 of the paper:
     1. If queue non-empty: pop and return `InjectControlToken`. If termination budget hits 0, return `Terminate`.
     2. First-step init: if reference_entropy is NaN, set `reference_entropy = entropy`, `dwell_steps = 0`.
     3. Mode-switch logic (paper §3.3):
@@ -48,39 +48,39 @@ Goal: compiling, tested, feature-gated module implementing the core SwiR state m
        - If `mode == Explicit ∧ ½c_max ≤ switch_count ≤ c_max`: enqueue `CloseThink` (convergence)
        - Else if `mode == Explicit ∧ switch_count > c_max`: enqueue `ForceAnswerPrefix`, set answer_budget_remaining = answer_budget_b (termination)
     5. Return `EmitToken(0)` (caller fills token id) if mode==Explicit, `EmitSoftEmbedding` if mode==Latent
-  - [ ] `fn should_mix_signal(&self) -> Option<(SignalMixKind, f32)>` — returns `Some((LatentEntry, α_t))` or `Some((ExplicitExit, β_t))` only on the first step after a switch, None otherwise. Schedule: `α_t = α_0 + (1 - α_0) * step_index / max_steps`, same for β.
-  - [ ] `fn stats(&self) -> SwiRStats`
-- [ ] **T1.6** Implement `src/swir/soft_embedding.rs` — latent-mode soft embedding:
-  - [ ] `fn soft_embedding(probs: &[f32], embedding_matrix: &[f32], embedding_dim: usize, out: &mut [f32])` — `ẽ_t = Σ_v p_t[v] * e(v)`, writes to `out` (length=embedding_dim, caller-allocated)
-  - [ ] Zero-overhead: no allocation. Caller responsible for `out.zero_fill()` before call (or document that this is "accumulate" semantics — TBD which is cleaner; lean toward zero-internal-alloc by requiring caller to pre-zero).
-  - [ ] SIMD chunked loop (8-wide) over `embedding_dim` for the inner reduction.
-  - [ ] Numerical guard: if `probs` does not sum to ≈1, normalize on the fly with a single pre-pass (documented cost).
-- [ ] **T1.7** Implement `src/swir/signal_mix.rs`:
-  - [ ] `fn mix_thinking_signal(soft_embed: &mut [f32], control_token_embed: &[f32], ratio: f32)` — `out ← ratio * out + (1 - ratio) * control_token_embed`. In-place, no alloc.
-  - [ ] Assert `ratio ∈ [0, 1]` in debug builds.
-- [ ] **T1.8** Implement `src/swir/convex_hull_check.rs` (G4 invariant):
-  - [ ] `fn in_vocab_convex_hull(soft_embed: &[f32], embedding_matrix: &[f32], embedding_dim: usize) -> bool` — for each dim d, check `min_v e(v)[d] ≤ soft_embed[d] ≤ max_v e(v)[d]`. O(vocab * embedding_dim) but only runs in test/debug, not hot path.
-  - [ ] Used in unit tests to verify Lyapunov-style invariant.
-- [ ] **T1.9** Unit tests in `src/swir/controller.rs` (#[cfg(test)]):
-  - [ ] `test_first_step_initializes_reference_entropy` — NaN → real value
-  - [ ] `test_latent_to_explicit_on_confidence_rise` — H_t < H̄ triggers switch
-  - [ ] `test_explicit_to_latent_requires_dwell_window` — H_t > H̄ but dwell < W_E→L stays explicit
-  - [ ] `test_explicit_to_latent_fires_after_dwell` — dwell ≥ W_E→L + H_t > H̄ triggers switch
-  - [ ] `test_switch_count_incremented_only_on_latent_to_explicit`
-  - [ ] `test_convergence_trigger_at_half_cmax` — switch_count=½c_max enqueues CloseThink
-  - [ ] `test_termination_trigger_above_cmax` — switch_count>c_max enqueues ForceAnswerPrefix + sets budget
-  - [ ] `test_terminate_after_answer_budget_exhausted`
-  - [ ] `test_signal_mix_schedule_at_switch_instants` — ratio increases with step_index per α_t/β_t schedule
-  - [ ] `test_no_signal_mix_on_non_switch_steps`
-- [ ] **T1.10** Unit tests in `src/swir/soft_embedding.rs`:
-  - [ ] `test_uniform_probs_returns_centroid` — uniform p over k one-hot vectors returns mean embedding
-  - [ ] `test_one_hot_prob_returns_token_embedding` — p concentrated on token v returns e(v)
-  - [ ] `test_result_lies_in_vocab_convex_hull` — random probs, G4 invariant holds
-  - [ ] `test_simd_matches_naive` — chunked SIMD matches naive O(vocab·dim) loop
-- [ ] **T1.11** Doc tests in `src/swir/mod.rs` showing a minimal end-to-end trace on a synthetic entropy stream (no real model) — exercises the controller through Explicit→Latent→Explicit cycle and verifies stats.
-- [ ] **T1.12** Feature gate audit: `cargo build --no-default-features --features "swir_switch_thinking"` compiles; `cargo build` (with defaults) does NOT include swir code.
+  - [x] `fn should_mix_signal(&self) -> Option<(SignalMixKind, f32)>` — returns `Some((LatentEntry, α_t))` or `Some((ExplicitExit, β_t))` only on the first step after a switch, None otherwise. Schedule: `α_t = α_0 + (1 - α_0) * step_index / max_steps`, same for β.
+  - [x] `fn stats(&self) -> SwiRStats`
+- [x] **T1.6** Implement `src/swir/soft_embedding.rs` — latent-mode soft embedding:
+  - [x] `fn soft_embedding(probs: &[f32], embedding_matrix: &[f32], embedding_dim: usize, out: &mut [f32])` — `ẽ_t = Σ_v p_t[v] * e(v)`, writes to `out` (length=embedding_dim, caller-allocated)
+  - [x] Zero-overhead: no allocation. Caller responsible for `out.zero_fill()` before call (or document that this is "accumulate" semantics — TBD which is cleaner; lean toward zero-internal-alloc by requiring caller to pre-zero).
+  - [x] SIMD chunked loop (8-wide) over `embedding_dim` for the inner reduction.
+  - [x] Numerical guard: if `probs` does not sum to ≈1, normalize on the fly with a single pre-pass (documented cost).
+- [x] **T1.7** Implement `src/swir/signal_mix.rs`:
+  - [x] `fn mix_thinking_signal(soft_embed: &mut [f32], control_token_embed: &[f32], ratio: f32)` — `out ← ratio * out + (1 - ratio) * control_token_embed`. In-place, no alloc.
+  - [x] Assert `ratio ∈ [0, 1]` in debug builds.
+- [x] **T1.8** Implement `src/swir/convex_hull_check.rs` (G4 invariant):
+  - [x] `fn in_vocab_convex_hull(soft_embed: &[f32], embedding_matrix: &[f32], embedding_dim: usize) -> bool` — for each dim d, check `min_v e(v)[d] ≤ soft_embed[d] ≤ max_v e(v)[d]`. O(vocab * embedding_dim) but only runs in test/debug, not hot path.
+  - [x] Used in unit tests to verify Lyapunov-style invariant.
+- [x] **T1.9** Unit tests in `src/swir/controller.rs` (#[cfg(test)]):
+  - [x] `test_first_step_initializes_reference_entropy` — NaN → real value
+  - [x] `test_latent_to_explicit_on_confidence_rise` — H_t < H̄ triggers switch
+  - [x] `test_explicit_to_latent_requires_dwell_window` — H_t > H̄ but dwell < W_E→L stays explicit
+  - [x] `test_explicit_to_latent_fires_after_dwell` — dwell ≥ W_E→L + H_t > H̄ triggers switch
+  - [x] `test_switch_count_incremented_only_on_latent_to_explicit`
+  - [x] `test_convergence_trigger_at_half_cmax` — switch_count=½c_max enqueues CloseThink
+  - [x] `test_termination_trigger_above_cmax` — switch_count>c_max enqueues ForceAnswerPrefix + sets budget
+  - [x] `test_terminate_after_answer_budget_exhausted`
+  - [x] `test_signal_mix_schedule_at_switch_instants` — ratio increases with step_index per α_t/β_t schedule
+  - [x] `test_no_signal_mix_on_non_switch_steps`
+- [x] **T1.10** Unit tests in `src/swir/soft_embedding.rs`:
+  - [x] `test_uniform_probs_returns_centroid` — uniform p over k one-hot vectors returns mean embedding
+  - [x] `test_one_hot_prob_returns_token_embedding` — p concentrated on token v returns e(v)
+  - [x] `test_result_lies_in_vocab_convex_hull` — random probs, G4 invariant holds (covered by convex_hull_check::tests::random_soft_embeddings_all_in_hull)
+  - [x] `test_simd_matches_naive` — chunked SIMD matches naive O(vocab·dim) loop
+- [x] **T1.11** Doc tests in `src/swir/mod.rs` showing a minimal end-to-end trace on a synthetic entropy stream (no real model) — exercises the controller through Explicit→Latent→Explicit cycle and verifies stats.
+- [x] **T1.12** Feature gate audit: `cargo build --no-default-features --features "swir_switch_thinking"` compiles; `cargo build` (with defaults) does NOT include swir code.
 
-**Exit criteria for Phase 1:** All 12 task groups complete. `cargo test --features swir_switch_thinking swir::` passes 100%. Public API (`SwiRController`, `SwiRConfig`, `StepAction`, `soft_embedding`, `mix_thinking_signal`) frozen.
+**Exit criteria for Phase 1:** ✅ MET. All 12 task groups complete. `cargo test --features swir_switch_thinking swir::` passes 26/26 (10 controller + 4 entropy + 4 soft_embedding + 4 signal_mix + 4 convex_hull_check). Public API (`SwiRController`, `SwiRConfig`, `StepAction`, `soft_embedding`, `mix_thinking_signal`) frozen. Bonus: `SwiRConfig::default_for_model(embedding_dim)` constructor and `ControlTokenIds` wiring type added per T2.4 anticipation.
 
 ---
 
