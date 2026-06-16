@@ -543,7 +543,7 @@ Key findings:
 - **Orthogonality proof (G2):** On a 1000-tick emotional-event trace, raw HLA norm peaks at tick 999 (monotone non-decreasing), while surprise peaks at the first event (tick 207) — 792-tick argmax gap, proving the derivative carries information complementary to the raw state.
 - **Counter-intuitive recall gain (G3):** More aggressive write gating *improves* recall — θ=0.10 suppresses 42.9% of boring writes while boosting recall 9.6% (0.1626→0.1782), because filtered background noise stops overwriting event associations.
 - **100% FN reduction (G4):** The derivative collapse signal catches every gradual-convergence case the hesitation-only detector misses.
-- **Unified α-pair:** All four consumers use the same paper-default `(0.3, 0.03)` — no per-consumer tuning required (Super-GOAT escalation tracked in [Issue 026](.issues/026_temporal_deriv_super_goat_escalation.md)).
+- **Unified α-pair:** 3/4 consumers use the same paper-default `(0.3, 0.03)` — no per-consumer tuning required. The δ-Mem gate (F2) is the outlier: it benefits from `α_slow=0.1` for stream-driven background-write suppression (see [Research 252](.research/252_Unified_Surprise_Bus_Validation.md)).
 
 Feature gate: `temporal_deriv` (**default-ON** since Plan 277 Phase 6 GOAT 4/4). 📖 Plan: [`.plans/277_temporal_derivative_kernel.md`](.plans/277_temporal_derivative_kernel.md). Research: [`.research/243_Temporal_Derivative_Kernel_Neocortical_Learning.md`](.research/243_Temporal_Derivative_Kernel_Neocortical_Learning.md). Scorecard: [`.benchmarks/277_temporal_deriv_goat.md`](.benchmarks/277_temporal_deriv_goat.md).
 

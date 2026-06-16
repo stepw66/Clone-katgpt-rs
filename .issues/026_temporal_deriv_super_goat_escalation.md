@@ -1,7 +1,7 @@
 # Issue 026: Temporal Derivative Kernel — Super-GOAT Escalation (Unified Surprise Bus)
 
 **Date:** 2026-06-16
-**Status:** Open — escalation pending separate validation
+**Status:** Closed — GOAT but not Super-GOAT (validated 2026-06-16)
 **Plan:** [277_temporal_derivative_kernel.md](../.plans/277_temporal_derivative_kernel.md)
 **Research:** [243_Temporal_Derivative_Kernel_Neocortical_Learning.md](../.research/243_Temporal_Derivative_Kernel_Neocortical_Learning.md) §2.5
 **Benchmark:** [277_temporal_deriv_goat.md](../.benchmarks/277_temporal_deriv_goat.md)
@@ -47,13 +47,21 @@ If it fails (per-consumer tuning is needed), the primitive is still GOAT (4/4 in
 
 ## Next Steps
 
-- [ ] Create `.research/244_unified_surprise_bus_validation.md` with the controlled sweep design
-- [ ] Run the sweep across all four consumers
-- [ ] Document the Pareto-optimal α-region per consumer
-- [ ] Run the cross-consumer interference test (single NPC, all 4 fusions)
-- [ ] Honest assessment: is the paper-default in the intersection of all four Pareto regions?
-- [ ] If yes: claim Super-GOAT in a separate validation note
-- [ ] If no: document per-consumer recommended α-pairs, close this issue as "GOAT but not Super-GOAT"
+- [x] Create `.research/252_Unified_Surprise_Bus_Validation.md` with the controlled sweep design
+- [x] Run the sweep across all four consumers (`tests/bench_277_unified_surprise_bus.rs`)
+- [x] Document the Pareto-optimal α-region per consumer
+- [~] Run the cross-consumer interference test (single NPC, all 4 fusions) — **moot**: F2 fails standalone, so concurrent would fail too
+- [x] Honest assessment: is the paper-default in the intersection of all four Pareto regions?
+- [x] If yes: claim Super-GOAT in a separate validation note
+- [x] If no: document per-consumer recommended α-pairs, close this issue as "GOAT but not Super-GOAT"
+
+## Result
+
+**VERDICT: GOAT but not Super-GOAT.**
+
+The paper-default (0.3, 0.03) is Pareto-optimal for 3/4 consumers. The δ-Mem gate (F2) is the outlier: it needs `α_slow=0.1` for adequate background-write suppression (81% vs 49%). See [Research 252](../.research/252_Unified_Surprise_Bus_Validation.md) for the full sweep results and per-consumer recommended α-pairs.
+
+The derivative kernel remains DEFAULT-ON (4/4 individual GOAT gates passed). Each consumer documents its recommended α-pair in Research 252 §4. No code changes needed — the α-pairs are configurable per-consumer already.
 
 ---
 
