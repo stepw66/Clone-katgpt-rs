@@ -85,6 +85,29 @@ total) and `LeakyIntegrator::step` (sum-over-dim total) both delegate to it. The
 parameter is caller-controlled because the two callers aggregate differently (evolve_hla
 sums 6 source activations; the generic kernel sums all `dim`).
 
+### Reconstruction early-stop criteria (4)
+
+The HLA reconstruction loop (`ReconstructionState::reconstruct*`) halts via four
+complementary signals, checked in order each step:
+
+| # | Criterion | Signal | Semantics | Source |
+|---|-----------|--------|-----------|--------|
+| 1 | `max_steps` (default 3) | step count | "MRAgent shows diminishing returns after 3-4" | `ReconstructionConfig.max_steps` |
+| 2 | `entropy_threshold` (default 0.05) | activation entropy | "evidence is sharp enough — distribution converged" | `TripleEvidence::activation_entropy()` via `sufficient()` |
+| 3 | `adaptive_budget` (Phase 6) | measured cycle latency | "spending too much time — reduce `max_steps`" | `LATENCY_BUDGET_NS = 500` |
+| 4 | **advantage-margin gate** (Plan 283 T5.1) | `A(candidate) − E[A(a)]` | **"did this step help?" — improvement signal** | `ReconstructionConfig.advantage_margin_threshold` (default `NaN` = disabled; feature `self_advantage_gate`) |
+
+Criterion 4 is the **only** one that asks "did this step help?" (improvement) rather than
+"is this step done?" (sufficiency) or "is this step slow?" (budget). It catches dead compute
+that the other three miss — e.g., argmax-drift-with-sharp-entropy where the activation
+distribution stays sharp but the top module changes between steps.
+
+The math is an inline minimal of the canonical `AdvantageMarginGate` (root crate,
+`src/pruners/self_advantage.rs`, Plan 283). Kept inline because katgpt-core cannot depend on
+the root crate. Module activations are sigmoid-bounded `[0, 1]` (treated as logits over 6
+module candidates); the advantage math is scale-invariant but the threshold needs separate
+tuning from the LLM-logit benchmark.
+
 ---
 
 ## Latent vs raw boundary (AGENTS.md)

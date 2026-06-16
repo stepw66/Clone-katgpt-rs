@@ -97,6 +97,7 @@ simd_sigmoid = []  # SIMD-vectorized sigmoid→tanh→clamp fused pass for Attra
 temporal_deriv = []  # Temporal Derivative Kernel — dual fast/slow EMA surprise signal (Plan 277, Research 243, arXiv:2606.08720). DEFAULT-ON after GOAT 4/4 fusions passed (G2 HLA companion, G3 δ-Mem gate, G4 collapse detector, G5 derivative curiosity).
 faithfulness_probe = []  # FaithfulnessProbe — causal intervention diagnostic for injected memory (Plan 278, Research 244). Audit-cadence diagnostic — opt-in (diagnostic, audit cadence not every tick). Moved from katgpt root to katgpt-core so riir-engine (Plan 308) can consume via katgpt-core/faithfulness_probe.
 triggered_injection = []  # TriggeredInjectionGate — sigmoid-thresholded inject/skip hot-path gate (Plan 278, Research 244). DEFAULT-ON after GOAT G3 passed (50% skips w/ 0.63% quality parity in saturated regime). Moved from katgpt root to katgpt-core so riir-engine (Plan 308) can consume via katgpt-core/triggered_injection.
+self_advantage_gate = []  # Self-advantage recursion gate for HLA reconstruction (Plan 283 T5.1, Research 250, arxiv:2511.16886). Adds advantage-margin as the 4th early-stop criterion. The canonical AdvantageMarginGate primitive lives in the katgpt root crate (src/pruners/self_advantage.rs); this feature adds a minimal inline gate for the 6-element HLA activation vector (sigmoid-bounded, not logits — tuned separately).
 
 [[bench]]
 name = "flow_field_bench"

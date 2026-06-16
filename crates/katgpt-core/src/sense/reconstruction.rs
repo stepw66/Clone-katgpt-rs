@@ -99,6 +99,29 @@ pub struct ReconstructionConfig {
     /// canonical separation of time constants.
     #[cfg(feature = "temporal_deriv")]
     pub temporal_deriv_alpha_slow: f32,
+    /// Self-advantage recursion gate threshold (Plan 283 T5.1).
+    ///
+    /// Default: `f32::NAN` (disabled). When finite (e.g., `0.01`), the
+    /// reconstruction loop halts early if the advantage margin for the
+    /// top-routed module drops below this threshold — i.e., the current
+    /// step did not improve the prediction for the candidate module above
+    /// the population average (dead compute detected).
+    ///
+    /// This is the 4th early-stop criterion, complementary to `max_steps`,
+    /// `entropy_threshold`, and `with_adaptive_budget`. Unlike those (which
+    /// ask "is this step done?" or "is this step slow?"), this asks
+    /// "did this step help?" — an improvement signal.
+    ///
+    /// # Input semantics
+    ///
+    /// The canonical `AdvantageMarginGate` (root crate, `src/pruners/self_advantage.rs`)
+    /// consumes raw policy logits. Here, module activations are sigmoid-bounded
+    /// `[0, 1]` and treated as logits over 6 module candidates. The advantage
+    /// math (`log π+ − log π̂`) is invariant to the input scale — it only
+    /// measures relative shifts between steps. The threshold needs separate
+    /// tuning from the LLM-logit benchmark because the dynamic range differs.
+    #[cfg(feature = "self_advantage_gate")]
+    pub advantage_margin_threshold: f32,
 }
 
 impl Default for ReconstructionConfig {
@@ -113,6 +136,11 @@ impl Default for ReconstructionConfig {
             temporal_deriv_alpha_fast: 0.3,
             #[cfg(feature = "temporal_deriv")]
             temporal_deriv_alpha_slow: 0.03,
+            // Plan 283 T5.1: disabled by default (NaN). Enable by setting a
+            // finite threshold (e.g., 0.01). GOAT gate T5.1.4 will decide
+            // whether to promote this to default-on after benchmark T5.1.3.
+            #[cfg(feature = "self_advantage_gate")]
+            advantage_margin_threshold: f32::NAN,
         }
     }
 }
@@ -531,6 +559,38 @@ impl ReconstructionState {
             || (self.step > 0 && self.evidence.activation_entropy() < self.config.entropy_threshold)
     }
 
+    /// 4th early-stop criterion (Plan 283 T5.1): self-advantage recursion gate.
+    ///
+    /// Returns `true` if reconstruction should halt because the current step
+    /// is dead compute — the top-routed module's activation did not improve
+    /// above the population average relative to the previous step.
+    ///
+    /// Returns `false` to continue. No-op when:
+    /// - `config.advantage_margin_threshold` is NaN (disabled), OR
+    /// - `prev` is `None` (first step — no prior to compare against).
+    ///
+    /// Uses a stack-local `[f32; 18]` scratch (3 × 6 elements) — zero allocation.
+    /// The math is a minimal inline of the canonical `self_advantage_margin`
+    /// (root crate, `src/pruners/self_advantage.rs`), kept here because
+    /// katgpt-core cannot depend on the root crate. The two implementations
+    /// are mathematically equivalent; the canonical one is the tested,
+    /// benchmarked reference.
+    #[cfg(feature = "self_advantage_gate")]
+    #[inline]
+    fn advantage_gate_halt(&self, prev: Option<&[f32; 6]>, curr: &[f32; 6]) -> bool {
+        let threshold = self.config.advantage_margin_threshold;
+        if threshold.is_nan() {
+            return false; // disabled
+        }
+        let Some(prev) = prev else {
+            return false; // first step — no prior
+        };
+        // Stack-local scratch: [pre_lsm | post_lsm | advantage] each [f32; 6].
+        let mut scratch = [0.0f32; 18];
+        let margin = advantage_margin_hla(prev, curr, argmax6(curr), &mut scratch);
+        margin < threshold
+    }
+
     /// Advance step counter (for manual reconstruction loops).
     #[inline]
     pub fn advance_step(&mut self) {
@@ -878,6 +938,11 @@ impl ReconstructionState {
     /// with a pre-computed `ProjectionWeights` for production multi-entity path.
     #[cfg(feature = "sense_composition")]
     pub fn reconstruct_matvec(&mut self, brain: &crate::sense::brain::NpcBrain) -> [f32; 6] {
+        // Plan 283 T5.1: previous-step activations for the advantage gate.
+        // `None` on the first iteration (no prior to compare).
+        #[cfg(feature = "self_advantage_gate")]
+        let mut prev_activations: Option<[f32; 6]> = None;
+
         loop {
             let activations = self.expand_matvec(brain);
             let selected = self.route(&activations);
@@ -886,6 +951,14 @@ impl ReconstructionState {
             self.step += 1;
             if self.sufficient() {
                 return activations;
+            }
+            // 4th early-stop: advantage-margin gate (dead compute).
+            #[cfg(feature = "self_advantage_gate")]
+            {
+                if self.advantage_gate_halt(prev_activations.as_ref(), &activations) {
+                    return activations;
+                }
+                prev_activations = Some(activations);
             }
         }
     }
@@ -903,6 +976,10 @@ impl ReconstructionState {
     /// ```
     #[cfg(feature = "sense_composition")]
     pub fn reconstruct_with_weights(&mut self, weights: &ProjectionWeights) -> [f32; 6] {
+        // Plan 283 T5.1: previous-step activations for the advantage gate.
+        #[cfg(feature = "self_advantage_gate")]
+        let mut prev_activations: Option<[f32; 6]> = None;
+
         loop {
             let activations = self.expand_with_weights(weights);
             let selected = self.route(&activations);
@@ -911,6 +988,14 @@ impl ReconstructionState {
             self.step += 1;
             if self.sufficient() {
                 return activations;
+            }
+            // 4th early-stop: advantage-margin gate (dead compute).
+            #[cfg(feature = "self_advantage_gate")]
+            {
+                if self.advantage_gate_halt(prev_activations.as_ref(), &activations) {
+                    return activations;
+                }
+                prev_activations = Some(activations);
             }
         }
     }
@@ -951,6 +1036,10 @@ impl ReconstructionState {
         #[cfg(not(feature = "sense_composition"))]
         let simd_available = false;
 
+        // Plan 283 T5.1: previous-step activations for the advantage gate.
+        #[cfg(feature = "self_advantage_gate")]
+        let mut prev_activations: Option<[f32; 6]> = None;
+
         loop {
             // Expand + route: scalar path is faster for 6 modules × 8-dim HLA
             // (SIMD setup overhead exceeds compute savings at this array size).
@@ -974,8 +1063,148 @@ impl ReconstructionState {
             if self.sufficient() {
                 return activations;
             }
+
+            // 4th early-stop: advantage-margin gate (dead compute).
+            // Halts if the current step did not improve the prediction for
+            // the top-routed module above the population average.
+            #[cfg(feature = "self_advantage_gate")]
+            {
+                if self.advantage_gate_halt(prev_activations.as_ref(), &activations) {
+                    return activations;
+                }
+                prev_activations = Some(activations);
+            }
         }
     }
+}
+
+// ── Plan 283 T5.1: Self-advantage gate helpers ─────────────────
+// Minimal inline of the canonical advantage-margin math (root crate
+// `src/pruners/self_advantage.rs`). Kept here because katgpt-core cannot
+// depend on the root crate. Mathematically equivalent; the canonical
+// version is the tested, benchmarked reference.
+
+/// Argmax of a 6-element array — used to select the gate's candidate
+/// (the top-routed module). Unrolled for speed.
+#[cfg(feature = "self_advantage_gate")]
+#[inline]
+fn argmax6(v: &[f32; 6]) -> usize {
+    let mut idx = 0usize;
+    let mut max = v[0];
+    if v[1] > max {
+        max = v[1];
+        idx = 1;
+    }
+    if v[2] > max {
+        max = v[2];
+        idx = 2;
+    }
+    if v[3] > max {
+        max = v[3];
+        idx = 3;
+    }
+    if v[4] > max {
+        max = v[4];
+        idx = 4;
+    }
+    if v[5] > max {
+        idx = 5;
+    }
+    idx
+}
+
+/// Advantage margin for the HLA reconstruction gate (Eq. 18, arxiv:2511.16886).
+///
+/// `margin(candidate) = A(candidate) − E_{a∼π+}[A(a)]`
+///
+/// where `A(a) = log π+(a) − log π̂(a)` is the self-advantage of action `a`,
+/// `π̂` is the pre-step distribution (`prev`), and `π+` is the post-step
+/// distribution (`curr`). The expectation is under `π+` and equals
+/// `KL(π+ ‖ π̂)` by the standard identity.
+///
+/// Inputs are treated as logits (module activations are sigmoid-bounded
+/// `[0, 1]`; the advantage math is invariant to absolute scale — it
+/// measures relative shifts between steps).
+///
+/// # Scratch layout
+///
+/// `[pre_lsm(6) | post_lsm(6) | advantage(6)]` = 18 f32s. Written and read
+/// within this function — no allocation.
+#[cfg(feature = "self_advantage_gate")]
+#[inline]
+fn advantage_margin_hla(prev: &[f32; 6], curr: &[f32; 6], candidate: usize, scratch: &mut [f32; 18]) -> f32 {
+    debug_assert!(candidate < 6);
+
+    // Scratch layout: [pre_lsm(6) | post_lsm(6) | advantage(6)] = 18 f32s.
+    // Use split_at_mut to get non-overlapping mutable borrows.
+    let (pre_lsm, rest) = scratch.split_at_mut(6);
+    let (post_lsm, adv) = rest.split_at_mut(6);
+
+    // log-softmax for pre and post (max-subtracted for numerical stability).
+    log_softmax_into6(prev, pre_lsm);
+    log_softmax_into6(curr, post_lsm);
+
+    // Advantage: A(a) = post_lsm(a) − pre_lsm(a).
+    adv[0] = post_lsm[0] - pre_lsm[0];
+    adv[1] = post_lsm[1] - pre_lsm[1];
+    adv[2] = post_lsm[2] - pre_lsm[2];
+    adv[3] = post_lsm[3] - pre_lsm[3];
+    adv[4] = post_lsm[4] - pre_lsm[4];
+    adv[5] = post_lsm[5] - pre_lsm[5];
+
+    // E_{a∼π+}[A(a)] = Σ_a π+(a) · A(a) = Σ_a exp(post_lsm[a]) · adv[a] = KL(π+‖π̂).
+    let expectation = post_lsm[0].exp() * adv[0]
+        + post_lsm[1].exp() * adv[1]
+        + post_lsm[2].exp() * adv[2]
+        + post_lsm[3].exp() * adv[3]
+        + post_lsm[4].exp() * adv[4]
+        + post_lsm[5].exp() * adv[5];
+
+    adv[candidate] - expectation
+}
+
+/// In-place log-softmax for a 6-element vector.
+///
+/// Writes `log_softmax(x)[i] = x[i] − logsumexp(x)` into `out`.
+/// Max-subtracted for numerical stability. Both slices must have length 6.
+#[cfg(feature = "self_advantage_gate")]
+#[inline]
+fn log_softmax_into6(x: &[f32], out: &mut [f32]) {
+    debug_assert_eq!(x.len(), 6);
+    debug_assert_eq!(out.len(), 6);
+
+    let mut max_val = x[0];
+    if x[1] > max_val {
+        max_val = x[1];
+    }
+    if x[2] > max_val {
+        max_val = x[2];
+    }
+    if x[3] > max_val {
+        max_val = x[3];
+    }
+    if x[4] > max_val {
+        max_val = x[4];
+    }
+    if x[5] > max_val {
+        max_val = x[5];
+    }
+
+    // Σ exp(x[i] − max)
+    let lse = (x[0] - max_val).exp()
+        + (x[1] - max_val).exp()
+        + (x[2] - max_val).exp()
+        + (x[3] - max_val).exp()
+        + (x[4] - max_val).exp()
+        + (x[5] - max_val).exp();
+    let log_lse = lse.ln();
+
+    out[0] = x[0] - max_val - log_lse;
+    out[1] = x[1] - max_val - log_lse;
+    out[2] = x[2] - max_val - log_lse;
+    out[3] = x[3] - max_val - log_lse;
+    out[4] = x[4] - max_val - log_lse;
+    out[5] = x[5] - max_val - log_lse;
 }
 
 impl SenseModule {
@@ -1790,5 +2019,196 @@ mod tests {
         // On most test machines, SIMD is available and max_steps=3, so should be true
         // But we can't assert true/false because it depends on the machine
         let _ = beneficial;
+    }
+
+    // ── Plan 283 T5.1: self-advantage gate tests ──────────────────
+
+    #[cfg(feature = "self_advantage_gate")]
+    #[test]
+    fn argmax6_finds_correct_index() {
+        assert_eq!(argmax6(&[0.1, 0.2, 0.3, 0.4, 0.5, 0.6]), 5);
+        assert_eq!(argmax6(&[0.6, 0.5, 0.4, 0.3, 0.2, 0.1]), 0);
+        assert_eq!(argmax6(&[0.1, 0.1, 0.9, 0.1, 0.1, 0.1]), 2);
+        // Ties → first occurrence wins (consistent with `>` comparison).
+        assert_eq!(argmax6(&[0.5, 0.5, 0.1, 0.1, 0.1, 0.1]), 0);
+    }
+
+    #[cfg(feature = "self_advantage_gate")]
+    #[test]
+    fn log_softmax_into6_sums_to_one_after_exp() {
+        let x = [0.3, 0.7, 0.1, 0.5, 0.4, 0.2];
+        let mut out = [0.0f32; 6];
+        log_softmax_into6(&x, &mut out);
+        let sum: f32 = out.iter().map(|&v| v.exp()).sum();
+        assert!((sum - 1.0).abs() < 1e-5, "exp(log_softmax) must sum to 1, got {sum}");
+        for &v in &out {
+            assert!(v <= 0.0, "log-prob must be ≤ 0, got {v}");
+        }
+    }
+
+    #[cfg(feature = "self_advantage_gate")]
+    #[test]
+    fn advantage_margin_zero_when_identical() {
+        let prev = [0.5, 0.2, 0.8, 0.1, 0.3, 0.4];
+        let curr = prev;
+        let mut scratch = [0.0f32; 18];
+        for candidate in 0..6 {
+            let m = advantage_margin_hla(&prev, &curr, candidate, &mut scratch);
+            assert!(m.abs() < 1e-6, "identical steps → zero margin, got {m} for candidate {candidate}");
+        }
+    }
+
+    #[cfg(feature = "self_advantage_gate")]
+    #[test]
+    fn advantage_margin_positive_when_post_sharpens_candidate() {
+        let prev = [0.3, 0.3, 0.3, 0.3, 0.3, 0.3];
+        let curr = [0.1, 0.1, 0.9, 0.1, 0.1, 0.1];
+        let mut scratch = [0.0f32; 18];
+        let m = advantage_margin_hla(&prev, &curr, 2, &mut scratch);
+        assert!(m > 0.0, "sharpening the candidate must give positive margin, got {m}");
+    }
+
+    #[cfg(feature = "self_advantage_gate")]
+    #[test]
+    fn advantage_margin_negative_when_post_shifts_away_from_candidate() {
+        let prev = [0.9, 0.1, 0.1, 0.1, 0.1, 0.1];
+        let curr = [0.1, 0.1, 0.9, 0.1, 0.1, 0.1];
+        let mut scratch = [0.0f32; 18];
+        let m = advantage_margin_hla(&prev, &curr, 0, &mut scratch);
+        assert!(m < 0.0, "shifting away from candidate must give negative margin, got {m}");
+    }
+
+    #[cfg(feature = "self_advantage_gate")]
+    #[test]
+    fn gate_halt_disabled_when_threshold_nan() {
+        let config = ReconstructionConfig::default();
+        assert!(config.advantage_margin_threshold.is_nan(), "default threshold is NaN");
+        let state = ReconstructionState::with_config([0.0; 8], config);
+        let prev = [0.3, 0.3, 0.3, 0.3, 0.3, 0.3];
+        let curr = [0.1, 0.1, 0.9, 0.1, 0.1, 0.1];
+        assert!(!state.advantage_gate_halt(Some(&prev), &curr), "disabled gate never halts");
+    }
+
+    #[cfg(feature = "self_advantage_gate")]
+    #[test]
+    fn gate_halt_never_on_first_step() {
+        let config = ReconstructionConfig {
+            advantage_margin_threshold: 0.01,
+            ..Default::default()
+        };
+        let state = ReconstructionState::with_config([0.0; 8], config);
+        let curr = [0.1, 0.1, 0.9, 0.1, 0.1, 0.1];
+        assert!(!state.advantage_gate_halt(None, &curr), "first step (prev=None) never halts");
+    }
+
+    #[cfg(feature = "self_advantage_gate")]
+    #[test]
+    fn gate_halt_when_dead_compute_detected() {
+        let config = ReconstructionConfig {
+            advantage_margin_threshold: 0.01,
+            ..Default::default()
+        };
+        let state = ReconstructionState::with_config([0.0; 8], config);
+        let prev = [0.5, 0.2, 0.8, 0.1, 0.3, 0.4];
+        let curr = prev;
+        assert!(state.advantage_gate_halt(Some(&prev), &curr), "identical steps must trigger halt");
+    }
+
+    #[cfg(feature = "self_advantage_gate")]
+    #[test]
+    fn gate_no_halt_when_candidate_improves() {
+        let config = ReconstructionConfig {
+            advantage_margin_threshold: 0.01,
+            ..Default::default()
+        };
+        let state = ReconstructionState::with_config([0.0; 8], config);
+        let prev = [0.3, 0.3, 0.3, 0.3, 0.3, 0.3];
+        let curr = [0.1, 0.1, 0.9, 0.1, 0.1, 0.1];
+        assert!(!state.advantage_gate_halt(Some(&prev), &curr), "improving step must not halt");
+    }
+
+    #[cfg(feature = "self_advantage_gate")]
+    #[test]
+    fn reconstruct_with_gate_enabled_runs_to_completion() {
+        use crate::sense::brain::NpcBrain;
+        use crate::types::{SenseKind, SenseModule, TernaryDir};
+
+        let mut m1 = SenseModule {
+            kind: SenseKind::FighterSense,
+            confidence: 0.8,
+            n_directions: 8,
+            directions: {
+                let mut dirs = [TernaryDir::zero(); 8];
+                dirs[0] = TernaryDir {
+                    pos_bits: 0xFF,
+                    neg_bits: 0,
+                    row_scale: 1.0,
+                };
+                dirs
+            },
+            ..Default::default()
+        };
+        m1.commit();
+
+        let brain = NpcBrain::compose(vec![m1]);
+        let config = ReconstructionConfig {
+            max_steps: 5,
+            advantage_margin_threshold: 0.01,
+            ..Default::default()
+        };
+        let mut state = ReconstructionState::with_config(brain.hla_state, config);
+        let result = state.reconstruct(&brain);
+
+        for &a in &result {
+            assert!(a.is_finite(), "gate-enabled reconstruction must produce finite activations, got {a}");
+        }
+        assert!(state.step() > 0, "should have taken at least 1 step");
+        assert!(state.step() <= 5, "should not exceed max_steps");
+    }
+
+    #[cfg(feature = "self_advantage_gate")]
+    #[test]
+    fn gate_disabled_is_byte_identical_to_baseline() {
+        use crate::sense::brain::NpcBrain;
+        use crate::types::{SenseKind, SenseModule, TernaryDir};
+
+        let mut m1 = SenseModule {
+            kind: SenseKind::CommonSense,
+            confidence: 0.7,
+            n_directions: 8,
+            directions: {
+                let mut dirs = [TernaryDir::zero(); 8];
+                dirs[0] = TernaryDir {
+                    pos_bits: 0x01,
+                    neg_bits: 0x04,
+                    row_scale: 0.5,
+                };
+                dirs[1] = TernaryDir {
+                    pos_bits: 0x02,
+                    neg_bits: 0x08,
+                    row_scale: 0.5,
+                };
+                dirs
+            },
+            ..Default::default()
+        };
+        m1.commit();
+
+        let brain = NpcBrain::compose(vec![m1]);
+
+        let mut state_a = ReconstructionState::with_config(brain.hla_state, ReconstructionConfig::default());
+        let result_a = state_a.reconstruct(&brain);
+
+        let config_b = ReconstructionConfig {
+            advantage_margin_threshold: f32::NAN,
+            ..Default::default()
+        };
+        let mut state_b = ReconstructionState::with_config(brain.hla_state, config_b);
+        let result_b = state_b.reconstruct(&brain);
+
+        assert_eq!(state_a.step(), state_b.step(), "disabled gate must not alter step count");
+        for i in 0..6 {
+            assert_eq!(result_a[i].to_bits(), result_b[i].to_bits(), "byte-identical result at index {i}");
+        }
     }
 }

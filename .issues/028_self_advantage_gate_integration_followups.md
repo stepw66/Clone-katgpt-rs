@@ -98,11 +98,16 @@ The signals are genuinely complementary, not redundant. The advantage-margin gat
 
 ### Tasks (GOAT-gated, behind `self_advantage_gate` feature — already default-on)
 
-- [ ] **T5.1.1** Add `ReconstructionConfig::advantage_margin_threshold: f32` (default: `f32::NAN` = disabled; Bench 056 default 0.01 when enabled). Feature-gate behind `self_advantage_gate`.
-- [ ] **T5.1.2** In `reconstruct_inner`, capture previous-step `activations` (stack buffer `[f32; 6]`), call `gate.should_recurse(&prev_activations, &activations, candidate_idx)`, halt if false.
+- [x] **T5.1.1** Add `ReconstructionConfig::advantage_margin_threshold: f32` (default: `f32::NAN` = disabled; Bench 056 default 0.01 when enabled). Feature-gate behind `self_advantage_gate`.
+  - **Implemented 2026-06-17:** field added to `crates/katgpt-core/src/sense/reconstruction.rs:124`. Root crate `self_advantage_gate` feature now forwards to `katgpt-core/self_advantage_gate`. Default is `NaN` (disabled) — byte-identical to feature-off path (locked by `gate_disabled_is_byte_identical_to_baseline` test).
+  - **Design decision:** the canonical `AdvantageMarginGate` primitive (root crate `src/pruners/self_advantage.rs`) cannot be imported into katgpt-core (would create circular dependency: root → katgpt-core → root). Per the `triggered_injection`/`faithfulness_probe` precedent, the RIGHT fix is to move the primitive to katgpt-core — but that's a separate refactor with blast radius on Bench 056 + examples. For T5.1, an inline minimal gate (~50 LOC of math) is used, justified by the sigmoid-bounded input needing separate threshold tuning anyway.
+- [x] **T5.1.2** In `reconstruct_inner`, capture previous-step `activations` (stack buffer `[f32; 6]`), call gate check, halt if dead compute.
+  - **Implemented 2026-06-17:** wired into all three reconstruction loops (`reconstruct_inner`, `reconstruct_matvec`, `reconstruct_with_weights`). Uses `advantage_gate_halt()` helper + stack-local `[f32; 18]` scratch (zero allocation). 11 new unit tests cover: math correctness, disabled-no-op, first-step-skip, dead-compute-halt, improving-step-no-halt, end-to-end smoke.
 - [ ] **T5.1.3** Benchmark: replay 1000 reconstruction traces with vs without gate. Metrics: (a) mean steps saved, (b) final-activations argmax match, (c) per-step latency overhead (<100ns target since vocab=6 is sub-µs already).
+  - **Status:** Not started. Will use synthetic brain configurations to generate diverse reconstruction traces (no saved real traces exist yet).
 - [ ] **T5.1.4** GOAT gate: ≥1.5× steps saved at ≥99% argmax match → promote `advantage_margin_threshold` default from NaN to 0.01. Demote (or keep) entropy_threshold based on relative win.
-- [ ] **T5.1.5** Document in `.docs/26_micro_belief.md` — add the gate as the 4th early-stop criterion.
+- [x] **T5.1.5** Document in `.docs/26_micro_belief.md` — add the gate as the 4th early-stop criterion.
+  - **Done 2026-06-17:** added "Reconstruction early-stop criteria (4)" section with comparison table.
 
 **Tier:** GOAT-tier optimization (measurable improvement to existing capability, no new capability class). No plan — this issue is the tracking artifact per AGENTS.md.
 
