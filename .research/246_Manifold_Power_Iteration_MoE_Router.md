@@ -2,7 +2,7 @@
 
 > **Source:** [Redesign Mixture-of-Experts Routers with Manifold Power Iteration](https://arxiv.org/abs/2606.12397) — Songhao Wu, Ang Lv, Ruobing Xie, Yankai Lin (RUC / Tencent), arXiv:2606.12397, 10 Jun 2026
 > **Date:** 2026-06-16
-> **Status:** Active
+> **Status:** Done — Plan 279 GOAT gate 9/9 green, promoted to DEFAULT-ON 2026-06-16.
 > **Related Research:** 161 (dMoE block routing), 222 (Spectral Scaling Laws / NS depth), 231 (Sparse Off-Principal Task Vector), 238 (LoRA-Muon spectral low-rank manifold — canonical cousin), 099 (Eigenspace alignment / power iteration tool), 207 (ManifoldE point-to-manifold)
 > **Related Plans:** 181 (dMoE adaptive top-p bandit — shipped), 203 (riir-ai frame coreset — shipped), 254 (Spectral Budget Router — shipped), 270 (Gauge-Invariant Adapter Composition — shipped), 268 (Rank-One LoRA Spectral Regularization → riir-train)
 > **Cross-ref (riir-ai):** 051 (dMoE block-level LoRA routing), `riir-gpu::RimBlockRouter` (SHINE expert routing)
