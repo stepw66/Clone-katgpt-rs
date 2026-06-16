@@ -37,6 +37,9 @@ use std::path::Path;
 use katgpt_core::traits::CollapseDetector;
 use katgpt_core::types::ThinkingBudget;
 
+#[cfg(all(feature = "collapse_aware_thinking", feature = "temporal_deriv"))]
+use katgpt_core::temporal_deriv::TemporalDerivativeKernel;
+
 use crate::pruners::freeze::{load_frozen, save_frozen};
 use crate::speculative::thinking_controller::ThinkingMode;
 
@@ -146,11 +149,54 @@ pub struct S2FCollapseDetector {
     /// TVP reasoning EMA above this triggers budget expansion. Range [0, 1].
     #[cfg(feature = "thicket_variance_probe")]
     tvp_expand_threshold: f32,
+    // ── Plan 277 Phase 4 (F3): Temporal-Derivative Collapse Fusion ────
+    //
+    // Orthogonal early-warning signal. The hesitation detector fires *after*
+    // degenerate tokens appear; the derivative signal fires *before* when the
+    // entropy stream has stopped changing ("coasting"). The two are deliberately
+    // independent: a trace can coast without hesitation, or hesitate without
+    // the entropy derivative going to zero.
+    //
+    // `Option<...>` allows runtime ablation (set to `None` to disable the
+    // derivative channel while keeping the feature compiled). When the
+    // `temporal_deriv` feature is off the entire field is `cfg`-gated out and
+    // the struct is byte-identical to its pre-fusion form (per AGENTS.md).
+    /// Dual fast/slow EMA kernel over the scalar entropy stream. `None` =
+    /// disabled (ablation).
+    #[cfg(all(feature = "collapse_aware_thinking", feature = "temporal_deriv"))]
+    pub derivative_collapse: Option<TemporalDerivativeKernel<1>>,
+    /// Absolute value of the most recent `(fast − slow)` derivative sample.
+    /// Updated by [`observe_entropy`](Self::observe_entropy). Zero before any
+    /// observation.
+    #[cfg(all(feature = "collapse_aware_thinking", feature = "temporal_deriv"))]
+    last_entropy_derivative: f32,
+    /// τ_deriv — below this magnitude the entropy derivative is considered
+    /// "collapsed" (the stream is coasting). Default 0.01.
+    #[cfg(all(feature = "collapse_aware_thinking", feature = "temporal_deriv"))]
+    tau_deriv: f32,
+    /// Fast EMA coefficient for the derivative kernel. Default 0.3.
+    #[cfg(all(feature = "collapse_aware_thinking", feature = "temporal_deriv"))]
+    temporal_deriv_alpha_fast: f32,
+    /// Slow EMA coefficient for the derivative kernel. Default 0.03 (~10× ratio).
+    #[cfg(all(feature = "collapse_aware_thinking", feature = "temporal_deriv"))]
+    temporal_deriv_alpha_slow: f32,
 }
 
 impl S2FCollapseDetector {
     /// Ring buffer capacity. 64 tokens covers ~2 sentences of reasoning context.
     const RING_SIZE: usize = 64;
+
+    // ── Plan 277 Phase 4 (F3): derivative-fusion defaults ──────────────
+    // Centralized so the constructor and docs agree. τ_deriv = 0.01 catches
+    // "coasting" entropy streams while still rejecting normal per-token
+    // jitter; alphas follow the paper's canonical ~10× fast/slow ratio
+    // (paper §Implementational, O'Reilly 2026).
+    #[cfg(all(feature = "collapse_aware_thinking", feature = "temporal_deriv"))]
+    const DEFAULT_TAU_DERIV: f32 = 0.01;
+    #[cfg(all(feature = "collapse_aware_thinking", feature = "temporal_deriv"))]
+    const DEFAULT_TEMPORAL_DERIV_ALPHA_FAST: f32 = 0.3;
+    #[cfg(all(feature = "collapse_aware_thinking", feature = "temporal_deriv"))]
+    const DEFAULT_TEMPORAL_DERIV_ALPHA_SLOW: f32 = 0.03;
 
     /// Create a new detector with the given hesitation tokens and budget.
     pub fn new(hesitation_tokens: Vec<u32>, budget: &ThinkingBudget) -> Self {
@@ -174,6 +220,23 @@ impl S2FCollapseDetector {
             tvp_expand_budget_delta: 0,
             #[cfg(feature = "thicket_variance_probe")]
             tvp_expand_threshold: 0.5,
+            // Plan 277 Phase 4 (F3): the kernel is always constructed when the
+            // `temporal_deriv` feature is on (it is 8 bytes on the stack and
+            // zero-allocation). Callers can disable the channel for ablation
+            // via [`disable_derivative_collapse`](Self::disable_derivative_collapse).
+            #[cfg(all(feature = "collapse_aware_thinking", feature = "temporal_deriv"))]
+            derivative_collapse: Some(TemporalDerivativeKernel::new(
+                Self::DEFAULT_TEMPORAL_DERIV_ALPHA_FAST,
+                Self::DEFAULT_TEMPORAL_DERIV_ALPHA_SLOW,
+            )),
+            #[cfg(all(feature = "collapse_aware_thinking", feature = "temporal_deriv"))]
+            last_entropy_derivative: 0.0,
+            #[cfg(all(feature = "collapse_aware_thinking", feature = "temporal_deriv"))]
+            tau_deriv: Self::DEFAULT_TAU_DERIV,
+            #[cfg(all(feature = "collapse_aware_thinking", feature = "temporal_deriv"))]
+            temporal_deriv_alpha_fast: Self::DEFAULT_TEMPORAL_DERIV_ALPHA_FAST,
+            #[cfg(all(feature = "collapse_aware_thinking", feature = "temporal_deriv"))]
+            temporal_deriv_alpha_slow: Self::DEFAULT_TEMPORAL_DERIV_ALPHA_SLOW,
         }
     }
 
@@ -249,6 +312,156 @@ impl S2FCollapseDetector {
         } else {
             self.threshold
         }
+    }
+
+    // ── Plan 277 Phase 4 (F3): Temporal-Derivative Collapse Fusion ──────
+    //
+    // The hesitation ring-buffer detects collapse *after* degenerate tokens
+    // appear. The dual EMA kernel over the entropy stream detects it *before*:
+    // when `|fast − slow|` is small the entropy stream has stopped changing
+    // and the trace is "coasting" toward a fixed point. We expose this as an
+    // orthogonal early-warning predicate that host code can OR with the
+    // existing `check_collapse` signal.
+    //
+    // The `CollapseDetector` trait signature is unchanged (constraint 4);
+    // host code feeds entropy in via `observe_entropy` on the side.
+
+    /// Override the default τ_deriv (the "coasting" threshold).
+    ///
+    /// Smaller values fire only on very flat entropy; larger values fire
+    /// earlier but admit more false alarms. Must be finite and non-negative.
+    #[cfg(all(feature = "collapse_aware_thinking", feature = "temporal_deriv"))]
+    pub fn with_tau_deriv(mut self, tau_deriv: f32) -> Self {
+        debug_assert!(
+            tau_deriv.is_finite() && tau_deriv >= 0.0,
+            "tau_deriv must be finite and non-negative, got {tau_deriv}"
+        );
+        self.tau_deriv = tau_deriv;
+        self
+    }
+
+    /// Override the default fast/slow EMA coefficients for the derivative
+    /// kernel and (re)construct the kernel with the new alphas.
+    ///
+    /// Validation is delegated to [`TemporalDerivativeKernel::new`]:
+    /// `0 < alpha_slow < alpha_fast <= 1` (debug panic / release clamp).
+    /// The canonical ~10× ratio (`alpha_fast=0.3, alpha_slow=0.03`) is the
+    /// paper's recommended default.
+    #[cfg(all(feature = "collapse_aware_thinking", feature = "temporal_deriv"))]
+    pub fn with_temporal_deriv_alphas(mut self, alpha_fast: f32, alpha_slow: f32) -> Self {
+        self.temporal_deriv_alpha_fast = alpha_fast;
+        self.temporal_deriv_alpha_slow = alpha_slow;
+        self.derivative_collapse = Some(TemporalDerivativeKernel::new(alpha_fast, alpha_slow));
+        self
+    }
+
+    /// Disable the derivative-collapse channel at runtime (ablation).
+    ///
+    /// Sets `derivative_collapse = None`; [`observe_entropy`] becomes a no-op
+    /// and [`derivative_collapse_detected`] always returns `false`. Used by
+    /// the G4 benchmark to measure the false-negative rate *without* the
+    /// derivative signal on identical traces.
+    ///
+    /// [`observe_entropy`]: Self::observe_entropy
+    /// [`derivative_collapse_detected`]: Self::derivative_collapse_detected
+    #[cfg(all(feature = "collapse_aware_thinking", feature = "temporal_deriv"))]
+    pub fn disable_derivative_collapse(mut self) -> Self {
+        self.derivative_collapse = None;
+        self.last_entropy_derivative = 0.0;
+        self
+    }
+
+    /// Feed a per-token scalar entropy sample into the derivative kernel and
+    /// return the signed `(fast − slow)` derivative sample.
+    ///
+    /// Side-channel into the collapse detector — deliberately *outside* the
+    /// `CollapseDetector` trait (which only receives a token id). Host code
+    /// that already computes entropy per token should call this once per
+    /// token **in addition to** [`check_collapse`](CollapseDetector::check_collapse):
+    ///
+    /// ```text
+    /// let d = detector.observe_entropy(entropy);   // signed scalar derivative
+    /// let hard = detector.check_collapse(token_id, position);
+    /// let soft = detector.derivative_collapse_detected();
+    /// if hard || soft { /* exit thinking */ }
+    /// ```
+    ///
+    /// Returns the signed scalar derivative `result[0]` (positive when entropy
+    /// is rising, negative when falling, ~0 when stationary). Returns `0.0`
+    /// when the channel is disabled at runtime (`disable_derivative_collapse`).
+    /// The stored [`last_entropy_derivative`] is this same signed value;
+    /// [`derivative_collapse_detected`] takes the absolute value at check time.
+    ///
+    /// Zero-allocation: the `N=1` kernel is 16 bytes on the stack and the
+    /// update is two in-place SIMD EMA writes. When the kernel is `None`
+    /// (ablation) this is a single branch and returns `0.0` immediately.
+    ///
+    /// [`last_entropy_derivative`]: Self::last_entropy_derivative
+    /// [`derivative_collapse_detected`]: Self::derivative_collapse_detected
+    #[cfg(all(feature = "collapse_aware_thinking", feature = "temporal_deriv"))]
+    #[inline]
+    pub fn observe_entropy(&mut self, entropy: f32) -> f32 {
+        match self.derivative_collapse.as_mut() {
+            Some(kernel) => {
+                let derivative = kernel.observe(&[entropy]);
+                self.last_entropy_derivative = derivative[0];
+                derivative[0]
+            }
+            None => {
+                self.last_entropy_derivative = 0.0;
+                0.0
+            }
+        }
+    }
+
+    /// Latest signed `(fast − slow)` derivative sample from
+    /// [`observe_entropy`](Self::observe_entropy). Zero before the first
+    /// observation or when the channel is disabled. The sign indicates
+    /// direction (positive = entropy rising, negative = entropy falling).
+    #[cfg(all(feature = "collapse_aware_thinking", feature = "temporal_deriv"))]
+    #[inline]
+    pub fn last_entropy_derivative(&self) -> f32 {
+        self.last_entropy_derivative
+    }
+
+    /// Configured τ_deriv (the "coasting" threshold).
+    #[cfg(all(feature = "collapse_aware_thinking", feature = "temporal_deriv"))]
+    #[inline]
+    pub fn tau_deriv(&self) -> f32 {
+        self.tau_deriv
+    }
+
+    /// **Soft** early-warning predicate: the entropy derivative has gone to
+    /// zero while the hesitation-based hard collapse has not yet fired.
+    ///
+    /// Returns `true` when *all* of the following hold:
+    ///
+    /// 1. `|last_entropy_derivative| < tau_deriv` — the entropy stream has
+    ///    stopped changing ("coasting" toward a fixed point). Sign is
+    ///    irrelevant: rising or falling, magnitude below τ_deriv means flat.
+    /// 2. `hesitation_count() < threshold` — the hard hesitation detector has
+    ///    *not* yet collapsed. This is what makes the signal **orthogonal**:
+    ///    it fires only in the window where the trace is degenerate-by-flatness
+    ///    but not yet degenerate-by-repetition.
+    ///
+    /// This is intentionally a softer signal than
+    /// [`check_collapse`](CollapseDetector::check_collapse) — host code may
+    /// choose to interpret it as a probabilistic early-exit hint rather than
+    /// a hard force-exit. When the channel is disabled (kernel `None`) this
+    /// always returns `false`.
+    ///
+    /// **Sigmoid, not softmax:** the eventual gate from this signal is
+    /// `sigmoid(β · surprise_norm)`-shaped (see [`katgpt_core::temporal_deriv`]).
+    /// This predicate is the boolean projection at `β → ∞`.
+    #[cfg(all(feature = "collapse_aware_thinking", feature = "temporal_deriv"))]
+    #[inline]
+    pub fn derivative_collapse_detected(&self) -> bool {
+        // If the kernel was disabled at runtime (ablation), never fire.
+        if self.derivative_collapse.is_none() {
+            return false;
+        }
+        self.last_entropy_derivative.abs() < self.tau_deriv
+            && self.count_hesitation() < self.threshold
     }
 
     /// Freeze detector state to disk via `repr(C)` binary dump.
@@ -366,6 +579,18 @@ impl CollapseDetector for S2FCollapseDetector {
         #[cfg(feature = "thicket_variance_probe")]
         {
             self.tvp_reasoning_ema = 0.0;
+        }
+
+        // Plan 277 Phase 4 (F3): reset the derivative kernel and the cached
+        // derivative sample. τ_deriv and alpha config are preserved (they are
+        // per-detector config, not per-trace state). If the kernel was
+        // disabled at runtime (ablation), keep it disabled.
+        #[cfg(all(feature = "collapse_aware_thinking", feature = "temporal_deriv"))]
+        {
+            if let Some(kernel) = self.derivative_collapse.as_mut() {
+                kernel.reset();
+            }
+            self.last_entropy_derivative = 0.0;
         }
     }
 
@@ -927,6 +1152,374 @@ mod tests {
             assert!(!detector.check_collapse(42, 0));
             assert!(!detector.check_collapse(42, 1));
             assert!(detector.check_collapse(42, 2));
+        }
+    }
+
+    // ── Plan 277 Phase 4 (F3): Temporal-Derivative Collapse Fusion Tests ──
+    //
+    // G4 gate: prove the derivative channel reduces false-negative rate on
+    // gradual-convergence traces by ≥ 20% vs hesitation-only. Two suites:
+    //
+    //   1. Entropy-collapse (one-hot forced, sharp drop) — hesitation path catches.
+    //   2. Derivative-only-collapse (gradual convergence, no hesitation tokens)
+    //      — only the derivative channel catches.
+    //
+    // Gated on both features (the same dual-gate as the production code).
+    #[cfg(all(feature = "collapse_aware_thinking", feature = "temporal_deriv"))]
+    mod derivative_collapse_fusion {
+        use super::*;
+
+        /// Hesitation set = {1, 2, 3}. Tests emit tokens with id ≥ 100, so the
+        /// hesitation ring never sees a match on gradual-convergence traces.
+        const HESITATION_TOKENS: [u32; 3] = [1, 2, 3];
+
+        /// Non-hesitation token id for step `t` — guaranteed outside the set.
+        #[inline]
+        fn non_hesitation_token(t: usize) -> u32 {
+            100 + (t as u32)
+        }
+
+        /// Detector with derivative channel ENABLED (default state).
+        fn make_detector_with_derivative(threshold: u32) -> S2FCollapseDetector {
+            let budget = ThinkingBudget {
+                max_tokens: 4096,
+                collapse_threshold: threshold,
+                efficiency_gamma: 0.5,
+            };
+            S2FCollapseDetector::new(HESITATION_TOKENS.to_vec(), &budget)
+        }
+
+        /// Detector with derivative channel DISABLED (ablation arm).
+        fn make_detector_without_derivative(threshold: u32) -> S2FCollapseDetector {
+            make_detector_with_derivative(threshold).disable_derivative_collapse()
+        }
+
+        /// Generate a gradual-convergence entropy trace.
+        ///
+        /// `e(t) = e_star + (e0 - e_star) * exp(-t / tau)`.
+        ///
+        /// Entropy converges exponentially to a moderate fixed point `e_star`
+        /// (well above 0), so the trace never becomes one-hot but its rate of
+        /// change goes to zero. This is the regime the hesitation ring misses
+        /// (no repetitive tokens) but `|d(entropy)/dt| → 0` should catch.
+        fn gradual_convergence_trace(e0: f32, e_star: f32, tau: f32, len: usize) -> Vec<f32> {
+            let mut out = Vec::with_capacity(len);
+            for t in 0..len {
+                let decay = (-(t as f32) / tau).exp();
+                out.push(e_star + (e0 - e_star) * decay);
+            }
+            out
+        }
+
+        /// Run one detector arm over a trace and report whether collapse was
+        /// detected at any step.
+        ///
+        /// - `with_derivative_channel`: if true, call `observe_entropy` and OR
+        ///   the soft predicate with the hard `check_collapse` signal. If false,
+        ///   only the hard hesitation path is consulted (the kernel state is
+        ///   untouched, but the detector was constructed via
+        ///   `disable_derivative_collapse` so the soft predicate is hard-wired
+        ///   to false anyway).
+        fn trace_collapses(
+            detector: &mut S2FCollapseDetector,
+            trace: &[f32],
+            with_derivative_channel: bool,
+        ) -> bool {
+            for (t, &entropy) in trace.iter().enumerate() {
+                let token_id = non_hesitation_token(t);
+                if with_derivative_channel {
+                    detector.observe_entropy(entropy);
+                }
+                let hard = detector.check_collapse(token_id, t);
+                let soft = if with_derivative_channel {
+                    detector.derivative_collapse_detected()
+                } else {
+                    false
+                };
+                if hard || soft {
+                    return true;
+                }
+            }
+            false
+        }
+
+        /// Sanity: the derivative channel fires on a long constant-entropy
+        /// stream with no hesitation tokens. This is the kernel-level proof
+        /// that the bridge is wired correctly.
+        #[test]
+        fn derivative_fires_on_constant_entropy_no_hesitation() {
+            let mut detector = make_detector_with_derivative(8);
+            // Constant entropy 0.5 — derivative → 0 after EMA warm-up.
+            let trace = vec![0.5_f32; 200];
+            let mut fired = false;
+            for (t, &entropy) in trace.iter().enumerate() {
+                detector.observe_entropy(entropy);
+                let _ = detector.check_collapse(non_hesitation_token(t), t);
+                if detector.derivative_collapse_detected() {
+                    fired = true;
+                    break;
+                }
+            }
+            assert!(
+                fired,
+                "derivative_collapse_detected should fire on a long constant entropy stream"
+            );
+            // Hesitation path must NOT have fired — no hesitation tokens emitted.
+            assert_eq!(
+                detector.hesitation_count(),
+                0,
+                "hesitation ring must be empty when only non-hesitation tokens are emitted"
+            );
+        }
+
+        /// Entropy-collapse suite: sharp drop to ~0 PLUS repetitive hesitation
+        /// tokens. The existing hesitation detector catches this — both arms
+        /// must report collapse.
+        #[test]
+        fn entropy_collapse_caught_by_hesitation_path() {
+            // Trace: 5 warm-up non-hesitation tokens at high entropy, then a
+            // sharp drop to ~0 with repetitive hesitation token id=1.
+            let threshold = 4;
+            let mut det_with = make_detector_with_derivative(threshold);
+            let mut det_without = make_detector_without_derivative(threshold);
+
+            // Warm-up: non-hesitation tokens, high entropy.
+            for t in 0..5 {
+                let _ = det_with.observe_entropy(2.0);
+                let _ = det_without.observe_entropy(2.0);
+                det_with.check_collapse(non_hesitation_token(t), t);
+                det_without.check_collapse(non_hesitation_token(t), t);
+            }
+
+            // Collapse phase: entropy → 0, repetitive hesitation token.
+            let mut caught_with = false;
+            let mut caught_without = false;
+            for t in 5..30 {
+                let _ = det_with.observe_entropy(0.0);
+                let _ = det_without.observe_entropy(0.0);
+                // Emit the hesitation token id=1 on every step.
+                if det_with.check_collapse(1, t) {
+                    caught_with = true;
+                }
+                if det_without.check_collapse(1, t) {
+                    caught_without = true;
+                }
+            }
+            assert!(
+                caught_without,
+                "hesitation-only arm must catch the repetitive-token entropy collapse"
+            );
+            assert!(
+                caught_with,
+                "fused arm must also catch the repetitive-token entropy collapse"
+            );
+        }
+
+        /// **G4 gate.** Gradual-convergence suite: false-negative rate must drop
+        /// by ≥ 20% when the derivative channel is enabled.
+        ///
+        /// Each trace converges exponentially to a moderate fixed point
+        /// (`e_star ∈ [0.3, 0.7]`) with no hesitation tokens. The hesitation
+        /// ring never fires. Without the derivative channel, every such trace
+        /// is a false negative. With the derivative channel, the
+        /// `|fast − slow| < τ_deriv` predicate fires once the slow EMA catches
+        /// up to the stabilized signal.
+        #[test]
+        fn g4_gate_derivative_reduces_false_negatives_by_at_least_20pct() {
+            // Trace ensemble: 24 traces varying fixed point, time constant,
+            // and starting entropy. All are genuine collapse cases (entropy has
+            // stopped changing mid-budget while no answer has been produced).
+            const N_TRACES: usize = 24;
+            const TRACE_LEN: usize = 200;
+            const THRESHOLD: u32 = 8;
+
+            let mut false_neg_without = 0u32;
+            let mut false_neg_with = 0u32;
+            let mut detected_step_with = Vec::new();
+
+            for i in 0..N_TRACES {
+                // Spread e_star across [0.30, 0.70].
+                let e_star = 0.30 + 0.40 * (i as f32) / (N_TRACES as f32 - 1.0);
+                // Vary tau across {4, 8, 12} — different convergence speeds.
+                let tau = 4.0_f32 * (1.0 + ((i % 3) as f32));
+                // Vary e0 across {1.2, 1.5, 1.8, 2.1}.
+                let e0 = 1.2 + 0.3 * ((i % 4) as f32);
+                let trace =
+                    gradual_convergence_trace(e0, e_star, tau, TRACE_LEN);
+
+                // Arm A: hesitation-only (derivative channel disabled).
+                let mut det_without = make_detector_without_derivative(THRESHOLD);
+                let caught_without = trace_collapses(&mut det_without, &trace, false);
+                if !caught_without {
+                    false_neg_without += 1;
+                }
+
+                // Arm B: fused (hesitation OR derivative).
+                let mut det_with = make_detector_with_derivative(THRESHOLD);
+                let mut caught_with_at = None;
+                for (t, &entropy) in trace.iter().enumerate() {
+                    det_with.observe_entropy(entropy);
+                    let hard = det_with.check_collapse(non_hesitation_token(t), t);
+                    let soft = det_with.derivative_collapse_detected();
+                    if hard || soft {
+                        caught_with_at = Some(t);
+                        break;
+                    }
+                }
+                match caught_with_at {
+                    Some(step) => detected_step_with.push((i, e_star, tau, step)),
+                    None => false_neg_with += 1,
+                }
+            }
+
+            // Improvement in false-negative rate.
+            let denom = false_neg_without.max(1) as f32;
+            let improvement = (false_neg_without - false_neg_with) as f32 / denom;
+
+            // Diagnostic dump on failure.
+            if improvement < 0.20 {
+                let mut dbg = String::new();
+                dbg.push_str(&format!(
+                    "\nG4 FAIL: improvement={:.3} (< 0.20) without={}, with={}\n",
+                    improvement, false_neg_without, false_neg_with
+                ));
+                dbg.push_str("detected traces (i, e_star, tau, step):\n");
+                for (i, e_star, tau, step) in &detected_step_with {
+                    dbg.push_str(&format!(
+                        "  i={i:2} e_star={e_star:.3} tau={tau:.1} detected_at_step={step}\n"
+                    ));
+                }
+                panic!("{dbg}");
+            }
+
+            // Additional invariant: the hesitation-only arm must miss every
+            // gradual-convergence trace (no hesitation tokens emitted).
+            assert_eq!(
+                false_neg_without, N_TRACES as u32,
+                "hesitation-only arm must miss all gradual-convergence traces (no hesitation tokens), got {} / {}",
+                false_neg_without, N_TRACES
+            );
+            // The derivative channel must catch at least one (sanity).
+            assert!(
+                false_neg_with < false_neg_without,
+                "derivative channel must strictly reduce false negatives: without={}, with={}",
+                false_neg_without,
+                false_neg_with
+            );
+        }
+
+        /// `observe_entropy` returns the signed derivative (positive when
+        /// entropy rises, negative when it falls, ~0 when stationary).
+        #[test]
+        fn observe_entropy_returns_signed_derivative() {
+            let mut detector = make_detector_with_derivative(8);
+            // Warm up at a constant 0.5 so the derivative settles near 0.
+            for _ in 0..150 {
+                let _ = detector.observe_entropy(0.5);
+            }
+            let baseline = detector.last_entropy_derivative().abs();
+            assert!(
+                baseline < 0.05,
+                "derivative must be near zero after long constant stream, got {}",
+                baseline
+            );
+            // Step up: derivative must be positive on the first rising sample.
+            let d_up = detector.observe_entropy(2.0);
+            assert!(
+                d_up > 0.0,
+                "rising entropy must produce a positive derivative, got {}",
+                d_up
+            );
+            // Warm back down to constant 0.5.
+            for _ in 0..150 {
+                let _ = detector.observe_entropy(0.5);
+            }
+            // Step down: derivative must be negative.
+            let d_down = detector.observe_entropy(0.0);
+            assert!(
+                d_down < 0.0,
+                "falling entropy must produce a negative derivative, got {}",
+                d_down
+            );
+        }
+
+        /// `disable_derivative_collapse` makes `observe_entropy` return 0.0
+        /// and `derivative_collapse_detected` always return false.
+        #[test]
+        fn disable_derivative_collapse_neutralizes_channel() {
+            let mut detector = make_detector_without_derivative(8);
+            for _ in 0..50 {
+                let d = detector.observe_entropy(0.5);
+                assert_eq!(d, 0.0, "disabled channel must return 0.0");
+                assert!(
+                    !detector.derivative_collapse_detected(),
+                    "disabled channel must never fire"
+                );
+            }
+        }
+
+        /// Builder: `with_tau_deriv` tightens / loosens the firing threshold.
+        #[test]
+        fn with_tau_deriv_controls_firing_threshold() {
+            // Tight tau: should fire earlier on a near-constant stream.
+            let budget = ThinkingBudget {
+                max_tokens: 4096,
+                collapse_threshold: 8,
+                efficiency_gamma: 0.5,
+            };
+            let mut tight = S2FCollapseDetector::new(HESITATION_TOKENS.to_vec(), &budget)
+                .with_tau_deriv(0.001);
+            let mut loose = S2FCollapseDetector::new(HESITATION_TOKENS.to_vec(), &budget)
+                .with_tau_deriv(0.5);
+            let trace = vec![0.5_f32; 200];
+            let mut tight_step = None;
+            let mut loose_step = None;
+            for (t, &e) in trace.iter().enumerate() {
+                tight.observe_entropy(e);
+                if tight_step.is_none() && tight.derivative_collapse_detected() {
+                    tight_step = Some(t);
+                }
+                loose.observe_entropy(e);
+                if loose_step.is_none() && loose.derivative_collapse_detected() {
+                    loose_step = Some(t);
+                }
+            }
+            assert!(
+                loose_step.unwrap_or(usize::MAX) <= tight_step.unwrap_or(usize::MAX),
+                "looser tau must fire no later than tight tau: loose={:?} tight={:?}",
+                loose_step,
+                tight_step
+            );
+        }
+
+        /// `reset()` clears derivative state but preserves config (tau, alphas).
+        #[test]
+        fn reset_clears_derivative_state_but_preserves_config() {
+            let mut detector =
+                make_detector_with_derivative(8).with_tau_deriv(0.005);
+            let tau_before = detector.tau_deriv();
+            // Drive some entropy through.
+            for e in [0.1_f32, 0.9, 0.2, 0.8] {
+                detector.observe_entropy(e);
+            }
+            let deriv_before = detector.last_entropy_derivative();
+            assert!(deriv_before.abs() > 0.0, "derivative must be nonzero after mixed samples");
+
+            detector.reset();
+            assert_eq!(
+                detector.last_entropy_derivative(),
+                0.0,
+                "reset must clear the cached derivative sample"
+            );
+            assert_eq!(
+                detector.tau_deriv(),
+                tau_before,
+                "reset must preserve tau_deriv config"
+            );
+            assert!(
+                detector.derivative_collapse.is_some(),
+                "reset must keep the kernel Some(...) (preserves ablation state)"
+            );
         }
     }
 }
