@@ -116,13 +116,16 @@ The signals are genuinely complementary, not redundant. The advantage-margin gat
 
 ## T5.3 — Freeze/thaw snapshot of improvement direction vector `A(·)`
 
-**Status:** Speculative, blocked on T5.1 producing useful per-NPC `A(·)` traces.
+**Status:** Speculative. T5.1 is now shipped (2026-06-17) so the blocker is removed, but the aggregation design question remains open.
 
 The idea: per-NPC, the advantage-margin direction `A(·) = log π+ − log π̂` over many ticks characterizes which kinds of observations improve that NPC's predictions. Snapshotting this as a versioned latent direction vector (BLAKE3-committed `MicroRecurrentKernelSnapshot` variant — Plan 276) gives NPCs a per-personality "what improves me" fingerprint.
 
-**Why deferred:** T5.1 isn't shipped. Without per-NPC `A(·)` traces, there's nothing to snapshot. Also: `A(·)` is per-step per-candidate, not a single direction vector — needs aggregation design (running EMA? top-K directions?).
+**Why still deferred (post-T5.1):**
+1. **Aggregation design open:** `A(·)` is per-step per-candidate (6 values per step), and reconstruction now halts after ~2 steps (T5.1.4 GOAT result). So per cycle we get at most ~12 values. Aggregating into a single "direction vector" requires a design decision: running EMA over cycles? Top-K directions? Mean direction? The right choice depends on the consumer.
+2. **No real consumer yet:** the T5.1.3 benchmark traces are synthetic (deterministic HLA seeds + confidence scalings), not from real game NPC behavior. Designing the snapshot format without a real game-side consumer risks premature optimization.
+3. **Personality fingerprint is speculative:** the hypothesis that `A(·)` aggregates into a meaningful "personality" needs validation against real NPC behavior distributions first.
 
-**Re-evaluate after T5.1.3 benchmark produces real traces.**
+**Re-evaluate when:** a game-side consumer (riir-engine/riir-armageddon) identifies a concrete need for per-NPC "what improves me" fingerprinting, OR when real reconstruction traces from game sessions are available for analysis.
 
 ---
 
@@ -192,14 +195,14 @@ Generators that have a recursion loop implement `RecursionLogits`; `AdvantageMar
 
 | Item | Tier | Action | Status |
 |------|------|--------|--------|
-| T5.2 (riir-ai Super-GOAT guide) | **NOT Super-GOAT** (Q1 NO, Q2 Partial) | Verdict rendered, no guide created | ✅ Closed (this issue) |
-| T5.1 (HLA evolve_hla integration) | GOAT optimization | Tracked here as T5.1.1–T5.1.5 | Open — needs benchmark |
-| T5.3 (Freeze/thaw A(·) snapshot) | Speculative | Blocked on T5.1 | Open — deferred |
+| T5.2 (riir-ai Super-GOAT guide) | **NOT Super-GOAT** (Q1 NO, Q2 Partial) | Verdict rendered, no guide created | ✅ Closed |
+| T5.1 (HLA evolve_hla integration) | GOAT optimization | T5.1.1–T5.1.5 all done. GOAT 3/3 PASS (Bench 057). Default promoted NaN→0.01. | ✅ **COMPLETE** |
+| T5.3 (Freeze/thaw A(·) snapshot) | Speculative | T5.1 blocker removed, but aggregation design open + no real consumer | Open — deferred |
 | T2.2 (LoopMode::WeightShared wire) | Deep integration, hot path | Tracked here as T2.2.1–T2.2.4 | Open — deferred |
 | T2.3 (SpeculativeGenerator trait hook) | API ergonomics | New `RecursionLogits` trait recommended over modifying `SpeculativeGenerator` | Open — deferred |
 
-**No Super-GOAT guide created.** No new plans created (per AGENTS.md, optimization tasks → issues). The shipped primitive (Phase 1–4) is complete and GOAT-validated; all follow-ups are integration opportunities tracked here.
+**No Super-GOAT guide created.** No new plans created (per AGENTS.md, optimization tasks → issues). The shipped primitive (Phase 1–4) is complete and GOAT-validated; T5.1 (HLA integration) is now also complete and GOAT-validated (Bench 057, 3/3 PASS, default-on).
 
 ---
 
-**TL;DR:** Plan 283 Phase 1–4 is shipped and GOAT-validated (4/4 PASS, default-on). The T5.2 Super-GOAT re-evaluation is complete: **NOT Super-GOAT** (Q1 prior art in `evolve_hla` + 3 existing HLA early-stop criteria; Q2 is optimization not new capability). T5.1 (HLA integration) is a real GOAT-tier optimization, complementary to existing `max_steps` + `entropy_threshold` + `adaptive_budget` criteria — but needs a targeted benchmark on real reconstruction traces because module activations aren't true logits. T5.3 blocked on T5.1. T2.2/T2.3 are deferred deep integrations with recommended non-breaking approaches documented above. No guide, no new plans — this issue is the tracking artifact.
+**TL;DR:** Plan 283 Phase 1–4 shipped and GOAT-validated (4/4 PASS, default-on). T5.2 Super-GOAT re-evaluation: **NOT Super-GOAT**. **T5.1 (HLA integration) COMPLETE: GOAT 3/3 PASS (2.50× steps saved, 100% argmax match, 0ns overhead — Bench 057), `advantage_margin_threshold` promoted default NaN→0.01.** The gate is the 4th early-stop criterion, complementary to max_steps + entropy_threshold + adaptive_budget — it caught dead compute on all 1000 benchmark traces that the other 3 missed. T5.3 speculative (aggregation design open). T2.2/T2.3 deferred deep integrations. No guide, no new plans — this issue is the tracking artifact.
