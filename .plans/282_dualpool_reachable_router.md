@@ -4,7 +4,7 @@
 **Research:** [katgpt-rs/.research/249_DecentMem_DualPool_Reachable_Router.md](../.research/249_DecentMem_DualPool_Reachable_Router.md)
 **Source paper:** [arXiv:2605.22721](https://arxiv.org/pdf/2605.22721) — Hao, Long, Zhao 2026, "Self-Evolving MAS via Decentralized Memory"
 **Target:** `crates/katgpt-core/src/cgsp/dual_pool.rs` (new module) + Cargo feature `cgsp_dual_pool`
-**Status:** Active — Phase 4 (G3 E-pool growth) complete; Phase 4 (G4 faithfulness gate) blocked on Plan 278
+**Status:** Active — Phase 4 complete (G3 E-pool growth + G4 faithfulness gate); Phase 5 (G5 CGSP integration) deferred to riir-ai
 
 ---
 
@@ -126,20 +126,20 @@ Ship a generic **dual-pool memory router** that splits a bandit's candidate pool
   - Run 500 cycles. Assert: the optimal direction gets consolidated into E-pool (the NPC discovers a strategy beyond its initial template — the capability gap identified in Research 249 §2.1).
   - Compare: single-pool CGSP (static 4-direction pool) can never select the optimal direction (it's not in the pool). This is the GOAT gain.
   - **DONE (2026-06-16):** Test passes (50 cycles). E-pool grows from 4 → 5+ arms. X-pool arm 7 ("optimal direction") promoted into E-pool via `push_arm`. Verified: max E-pool priority > initial uniform(4) = 0.25, confirming the promoted direction carries elevated priority.
-- [ ] **T4.3** Wire `FaithfulnessProbe` (Plan 278) as consolidation gate:
+- [x] **T4.3** Wire `FaithfulnessProbe` (Plan 278) as consolidation gate:
   - Before consolidating an X-pool item into E-pool, run a causal intervention probe.
   - Only items with behavioral delta > `τ_faith` (configurable) enter E-pool.
   - This prevents Research 244's "dead condensed memory" failure — items the consumer structurally ignores don't clog the E-pool.
-  - **BLOCKED:** `FaithfulnessProbe` (Plan 278, `faithfulness_probe` feature) is declared in Cargo.toml but the primitive is not yet implemented/shipped. Feature flag exists but no `FaithfulnessProbe` struct/trait found in `crates/katgpt-core/src/`. Requires Plan 278 Phase 1 to ship first.
-- [ ] **T4.4** `g4_faithfulness_gate_rejects_dead_items` test:
+  - **DONE (2026-06-16):** Added `consolidate_growing_gated<F: Fn(usize) -> bool>(gate)` method. The gate closure wraps a `FaithfulnessProbe::is_faithfully_used(threshold)` check — arms that fail the probe (dead items) are rejected from promotion. Zero-cost when inlined, no heap alloc. The `consolidate_growing()` method delegates to `consolidate_growing_gated(|_| true)` (no gate).
+- [x] **T4.4** `g4_faithfulness_gate_rejects_dead_items` test:
   - Construct an X-pool item that the consumer (Solver) structurally ignores (perturbation produces no behavioral delta).
   - Run consolidation with faithfulness gate ON.
   - Assert: dead item is rejected (not in E-pool after consolidate).
   - Run consolidation with gate OFF.
   - Assert: dead item enters E-pool (baseline failure mode — E-pool fills with dead weight).
-  - **BLOCKED:** Depends on T4.3 (FaithfulnessProbe not yet shipped).
+  - **DONE (2026-06-16):** Test passes. Gate ON: E-pool grows 1→5 (4 live arms, 4 dead filtered). Gate OFF: E-pool grows 1→9 (all 8 arms promoted, dead weight clogs). Also verified `FaithfulnessProbe` correctly identifies faithful arms via `DotProductConsumer` + `faithfulness_profile().is_faithfully_used(threshold)`.
 
-**Phase 4 exit:** G3 PASS (T4.1 + T4.2 done — E-pool grows and discovers strategies beyond initial pool). G4 BLOCKED on Plan 278 FaithfulnessProbe (T4.3/T4.4 deferred). The `HintDeltaBandit` trait gained backward-compatible `push_arm()` + `is_growing()` default methods to support arm growth generically.
+**Phase 4 exit:** G3 + G4 PASS — E-pool grows, discovers strategies beyond initial pool (G3), and faithfulness gate rejects dead items (G4). The `HintDeltaBandit` trait gained backward-compatible `push_arm()` + `is_growing()` default methods to support arm growth generically. `consolidate_growing_gated(gate)` is the FaithfulnessProbe integration point.
 
 ---
 
