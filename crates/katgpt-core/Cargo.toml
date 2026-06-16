@@ -115,6 +115,11 @@ harness = false
 required-features = ["sense_composition"]
 
 [[bench]]
+name = "self_advantage_hla_bench"
+harness = false
+required-features = ["self_advantage_gate", "sense_composition"]
+
+[[bench]]
 name = "merkle_octree_bench"
 harness = false
 required-features = ["merkle_octree"]
@@ -138,6 +143,11 @@ required-features = ["qgf"]
 name = "temporal_deriv_bench"
 harness = false
 required-features = ["temporal_deriv"]
+
+[[bench]]
+name = "derivative_curiosity_bench"
+harness = false
+required-features = ["cgsp", "temporal_deriv"]
 
 [[bench]]
 name = "micro_belief_bench"

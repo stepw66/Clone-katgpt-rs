@@ -136,11 +136,12 @@ impl Default for ReconstructionConfig {
             temporal_deriv_alpha_fast: 0.3,
             #[cfg(feature = "temporal_deriv")]
             temporal_deriv_alpha_slow: 0.03,
-            // Plan 283 T5.1: disabled by default (NaN). Enable by setting a
-            // finite threshold (e.g., 0.01). GOAT gate T5.1.4 will decide
-            // whether to promote this to default-on after benchmark T5.1.3.
+            // Plan 283 T5.1: DEFAULT-ON (0.01) after GOAT gate T5.1.4 passed
+            // (2.50× steps saved, 100% argmax match, 0ns overhead — see
+            // `.benchmarks/057_self_advantage_hla_gate.md`). Set to NaN to
+            // disable the 4th early-stop criterion (byte-identical to baseline).
             #[cfg(feature = "self_advantage_gate")]
-            advantage_margin_threshold: f32::NAN,
+            advantage_margin_threshold: 0.01,
         }
     }
 }
@@ -2081,12 +2082,25 @@ mod tests {
     #[cfg(feature = "self_advantage_gate")]
     #[test]
     fn gate_halt_disabled_when_threshold_nan() {
-        let config = ReconstructionConfig::default();
-        assert!(config.advantage_margin_threshold.is_nan(), "default threshold is NaN");
+        // Explicit NaN threshold disables the gate (default is now 0.01 after T5.1.4).
+        let config = ReconstructionConfig {
+            advantage_margin_threshold: f32::NAN,
+            ..Default::default()
+        };
         let state = ReconstructionState::with_config([0.0; 8], config);
         let prev = [0.3, 0.3, 0.3, 0.3, 0.3, 0.3];
         let curr = [0.1, 0.1, 0.9, 0.1, 0.1, 0.1];
         assert!(!state.advantage_gate_halt(Some(&prev), &curr), "disabled gate never halts");
+    }
+
+    #[cfg(feature = "self_advantage_gate")]
+    #[test]
+    fn gate_default_threshold_is_0_01() {
+        // Plan 283 T5.1.4: promoted to default-on after GOAT gate passed
+        // (2.50× steps saved, 100% argmax match, 0ns overhead).
+        let config = ReconstructionConfig::default();
+        assert!((config.advantage_margin_threshold - 0.01).abs() < 1e-6,
+            "default threshold should be 0.01 after T5.1.4 promotion, got {}", config.advantage_margin_threshold);
     }
 
     #[cfg(feature = "self_advantage_gate")]
@@ -2168,7 +2182,10 @@ mod tests {
 
     #[cfg(feature = "self_advantage_gate")]
     #[test]
-    fn gate_disabled_is_byte_identical_to_baseline() {
+    fn gate_on_preserves_argmax_vs_disabled() {
+        // Plan 283 T5.1.4 GOAT gate G2: gate ON (default 0.01) must produce
+        // the same argmax as gate OFF (NaN), even though it may halt earlier.
+        // This is the quality guarantee that makes the gate safe to default-on.
         use crate::sense::brain::NpcBrain;
         use crate::types::{SenseKind, SenseModule, TernaryDir};
 
@@ -2196,19 +2213,26 @@ mod tests {
 
         let brain = NpcBrain::compose(vec![m1]);
 
-        let mut state_a = ReconstructionState::with_config(brain.hla_state, ReconstructionConfig::default());
-        let result_a = state_a.reconstruct(&brain);
-
-        let config_b = ReconstructionConfig {
+        // Gate OFF (NaN).
+        let config_off = ReconstructionConfig {
             advantage_margin_threshold: f32::NAN,
             ..Default::default()
         };
-        let mut state_b = ReconstructionState::with_config(brain.hla_state, config_b);
-        let result_b = state_b.reconstruct(&brain);
+        let mut state_off = ReconstructionState::with_config(brain.hla_state, config_off);
+        let result_off = state_off.reconstruct(&brain);
 
-        assert_eq!(state_a.step(), state_b.step(), "disabled gate must not alter step count");
-        for i in 0..6 {
-            assert_eq!(result_a[i].to_bits(), result_b[i].to_bits(), "byte-identical result at index {i}");
-        }
+        // Gate ON (default 0.01).
+        let mut state_on = ReconstructionState::with_config(brain.hla_state, ReconstructionConfig::default());
+        let result_on = state_on.reconstruct(&brain);
+
+        // Argmax must match (quality guarantee).
+        let argmax_off = result_off.iter().enumerate()
+            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+            .map(|(i, _)| i).unwrap_or(0);
+        let argmax_on = result_on.iter().enumerate()
+            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+            .map(|(i, _)| i).unwrap_or(0);
+        assert_eq!(argmax_off, argmax_on,
+            "gate ON must preserve argmax vs OFF (quality guarantee)");
     }
 }
