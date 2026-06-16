@@ -1,54 +1,40 @@
 //! Family C — leaky integrator / delta-rule SSM kernel.
 //!
-//! This is a **standalone mirror** of the math in
-//! `ReconstructionState::evolve_hla()`
-//! (`katgpt-rs/crates/katgpt-core/src/sense/reconstruction.rs` L625–648). It
-//! exists so that Plan 276's `MicroRecurrentBeliefState` trait has a Family C
-//! implementation that can be benchmarked against the Family A attractor kernel
-//! on the same footing (G2.1 coherence benchmark).
+//! This module exposes the Family C implementation of
+//! [`MicroRecurrentBeliefState`] for Plan 276. It reuses the **shared**
+//! leaky-integrator update math that lives in [`crate::leaky_core`] — the
+//! same primitive that [`ReconstructionState::evolve_hla`] delegates to.
 //!
-//! # IMPORTANT — scope note
+//! # History / scope
 //!
-//! Plan 276 Phase 2 task T2.1 calls for refactoring `evolve_hla` itself into a
-//! thin delegate over `LeakyIntegrator::step()`. **That refactor is OUT OF
-//! SCOPE for this delegation** — it requires editing
-//! `sense/reconstruction.rs`, which is locked. What's here is the standalone
-//! kernel with the *same math*, so:
+//! Previously this file carried a standalone **mirror** of the `evolve_hla`
+//! math, with a note that refactoring `evolve_hla` itself to delegate here was
+//! "OUT OF SCOPE / locked". Plan 276 Phase 2 T2.1 has now landed: the math
+//! was lifted into [`crate::leaky_core`] (ungated, so `sense` can depend on it
+//! without pulling in the `micro_belief` feature). Both callers now share one
+//! update body:
 //!
-//! 1. The trait has a Family C impl (the G1.1–G1.5 tests can run on it too).
-//! 2. Future T2.1 refactor will replace `evolve_hla`'s body with a delegate
-//!    call to this kernel — zero behavior change, because the math is identical.
+//! - [`LeakyIntegrator::step`] computes `total = Σ input[0..dim]` and calls
+//!   [`crate::leaky_core::leaky_step`].
+//! - [`ReconstructionState::evolve_hla`] computes `total = Σ kind_activations[0..6]`
+//!   and calls [`crate::leaky_core::leaky_step`] with the `KIND_MAP`-gathered
+//!   8-element input.
 //!
-//! When T2.1 lands, the existing `ReconstructionState::evolve_hla()` will
-//! become:
+//! # Why the two callers pass different `total`s
 //!
-//! ```text
-//! pub fn evolve_hla(&mut self) {
-//!     let kernel = LeakyIntegrator::new(self.config.hla_learning_rate, self.config.max_hla_delta, 8);
-//!     kernel.step(&mut self.hla, &self.evidence.kind_activations_padded());
-//! }
-//! ```
+//! `evolve_hla`'s normalization mass is the 6 distinct SenseKind activations,
+//! but its per-element update loop runs over 8 gathered inputs (dims 6,7 reuse
+//! kinds 0,1). The generic kernel here has no such wrap, so it sums all `dim`
+//! inputs. Both are correct for their respective call sites; the shared core
+//! takes `total` as a parameter precisely so neither quirk leaks into the
+//! primitive. See [`crate::leaky_core`] for the exact formula and rationale.
 //!
-//! (The `KIND_MAP` wrap — `kind_activations[0,1,2,3,4,5,0,1]` — would move
-//! into a small helper on `TripleEvidence`. That's a T2.1 concern.)
+//! # Stable public API (G2.1 benchmark depends on it)
 //!
-//! # Math (verbatim from evolve_hla)
+//! [`LeakyIntegrator`] exposes `new`, `hla_default`, `step`,
+//! `project_to_scalars`, `family`. These are NOT changed by T2.1.
 //!
-//! Given `input` = activation vector of length `dim`:
-//!
-//! ```text
-//! total        = sum(input)
-//! if total < 1e-8: return (no update — avoids div-by-zero)
-//! t_min        = total.min(1.0)
-//! scale        = lr * t_min / total
-//! half_total   = 0.5 * total
-//! for i in 0..dim:
-//!     delta         = scale * (input[i] - half_total)
-//!     clamped_delta = delta.clamp(-max_delta, max_delta)
-//!     state[i]      = (state[i] + clamped_delta).clamp(-1.0, 1.0)
-//! ```
-//!
-//! Properties (inherited from `evolve_hla`):
+//! Properties inherited from the shared core:
 //! - Always stable: output clamped to `[-1, 1]`.
 //! - Zero allocation: operates on the `&mut [f32]` slice.
 //! - No softmax: pure additive update with sigmoid-style bounds.
@@ -93,31 +79,20 @@ impl MicroRecurrentBeliefState for LeakyIntegrator {
         self.dim
     }
 
-    /// Advance one tick using the `evolve_hla` leaky-integrator update.
+    /// Advance one tick using the leaky-integrator update.
     ///
-    /// See the module-level docs for the exact formula. This is byte-for-byte
-    /// equivalent to `ReconstructionState::evolve_hla()` modulo the `KIND_MAP`
-    /// gather (which is a concern of `TripleEvidence`, not the kernel).
+    /// Delegates to the shared [`crate::leaky_core::leaky_step`] primitive —
+    /// the same body used by `ReconstructionState::evolve_hla`. Here `total` is
+    /// `Σ input[0..dim]` (no KIND_MAP wrap); see the module docs for why
+    /// `evolve_hla` passes a different `total`.
     #[inline]
     fn step(&self, state: &mut [f32], input: &[f32]) {
         debug_assert_eq!(state.len(), self.dim, "state/dim mismatch");
         debug_assert_eq!(input.len(), self.dim, "input/dim mismatch");
 
-        // Verbatim from reconstruction.rs L628–647.
-        let total_activation: f32 = input.iter().copied().sum();
-        if total_activation < 1e-8 {
-            return;
-        }
-        let t_min = total_activation.min(1.0);
-        let scale = self.lr * t_min / total_activation;
-        let half_total = 0.5 * total_activation;
-
-        for i in 0..self.dim {
-            let normalized = input[i];
-            let delta = scale * (normalized - half_total);
-            let clamped_delta = delta.clamp(-self.max_delta, self.max_delta);
-            state[i] = (state[i] + clamped_delta).clamp(-1.0, 1.0);
-        }
+        // Generic Family C kernel: normalize over the full dim-length input.
+        let total: f32 = input.iter().copied().sum();
+        crate::leaky_core::leaky_step(state, input, total, self.lr, self.max_delta);
     }
 
     #[inline(always)]

@@ -15,6 +15,7 @@ pub mod coda;
 pub mod dec;
 #[cfg(feature = "parallax_attn")]
 pub mod parallax_attn;
+pub mod leaky_core;
 pub mod shard_embedding;
 pub mod simd;
 pub mod traits;

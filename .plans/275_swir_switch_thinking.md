@@ -181,6 +181,8 @@ Goal: prove the GOAT gate on a real model (Gemma 2 or Qwen3 family already suppo
 
 ## Phase 4 — Default Promotion & Demotion (conditional)
 
+**STATUS: SKIPPED (2026-06-16).** Only execute if Phase 3 T3.10 verdict is "promote to default". The Phase 3 verdict was **"keep opt-in"** (G1/G2 real-model gates deferred to riir-ai Plan 299, not failed). Therefore Phase 4 does NOT execute — T4.1–T4.5 remain `- [ ]` because their precondition was not met (not because they're TODO). Re-open this phase only after riir-ai Plan 299 proves G1 (≥+1.5pp accuracy) and G2 (≥1.3× token efficiency) on a real model.
+
 Only execute if Phase 3 T3.10 verdict is "promote to default".
 
 ### Tasks
@@ -194,6 +196,8 @@ Only execute if Phase 3 T3.10 verdict is "promote to default".
 ---
 
 ## Phase 5 — Fusion Explorations (Stretch, post-GOAT)
+
+**STATUS: STRETCH (not started).** These are research-note creation tasks (not code) and require the full research workflow (pre-flight README audit + cross-repo fusion grep + novelty gate per the `research` skill). They're Super-GOAT candidates worth pursuing separately, but are out of scope for the "code with subagent" execution pass. Each would warrant its own session.
 
 Only execute after Phase 3 ships. Each fusion from Research 241 §2.3 warrants its own plan.
 

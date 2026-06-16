@@ -15,8 +15,9 @@
 //! - ✅ [`MicroRecurrentKernelSnapshot`] — BLAKE3-committed freeze/thaw artifact.
 //! - ✅ Bridge: [`project_to_scalars`](bridge::project_to_scalars).
 //! - ✅ G1.1–G1.5 GOAT-gate tests in [`tests`].
-//! - ⏳ G2.1 coherence benchmark — Phase 5 T5.0 (see TODO in `tests.rs`).
-//! - ⏳ Family B (`LatentThoughtKernel`) — Phase 3 T3.1.
+//! - ✅ G1.6 (K=1 reduces to Family A) test in [`latent_thought`].
+//! - ✅ [`LatentThoughtKernel`] — Family B (Phase 3 T3.1).
+//! - ✅ G2.1 coherence benchmark — Phase 5 T5.0, see [`coherence_bench`].
 //!
 //! # Latent vs raw boundary (AGENTS.md)
 //!
@@ -43,6 +44,8 @@
 
 pub mod attractor;
 pub mod bridge;
+pub mod coherence_bench;
+pub mod latent_thought;
 pub mod leaky;
 pub mod snapshot;
 pub mod types;
@@ -60,6 +63,7 @@ mod tests;
 
 pub use attractor::AttractorKernel;
 pub use bridge::project_to_scalars;
+pub use latent_thought::LatentThoughtKernel;
 pub use leaky::LeakyIntegrator;
 pub use snapshot::{MicroRecurrentKernelSnapshot, SNAPSHOT_VERSION};
 pub use types::{KernelConfig, MicroRecurrentBeliefState, RecurrenceFamily};

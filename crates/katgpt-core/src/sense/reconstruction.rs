@@ -179,9 +179,39 @@ impl TripleEvidence {
     pub fn merge(&mut self, other: &Self) {
         self.count = self.count.saturating_add(other.count);
         self.confidence_sum += other.confidence_sum;
+        // Direct indexing for fixed-size array — LLVM unrolls fully.
         for i in 0..6 {
             self.kind_activations[i] += other.kind_activations[i];
         }
+    }
+
+    /// Map HLA dimension index (0..8) → source SenseKind index (0..6).
+    ///
+    /// The HLA is 8-dimensional but only 6 SenseKinds feed it, so dims 6 and 7
+    /// reuse kinds 0 and 1. This is the **single source of truth** for that
+    /// gather — used by both [`ReconstructionState::evolve_hla`] and
+    /// [`ReconstructionState::evolve_hla_simd`] via [`kind_activations_padded`].
+    ///
+    /// (Plan 276 T2.1 — do NOT duplicate this constant elsewhere.)
+    pub const KIND_MAP: [usize; 8] = [0, 1, 2, 3, 4, 5, 0, 1];
+
+    /// Gather the 6 per-kind activations into the 8-element HLA input vector.
+    ///
+    /// Returns `[k0,k1,k2,k3,k4,k5,k0,k1]` — the activations laid out per
+    /// [`KIND_MAP`](Self::KIND_MAP). This is the `input` passed to the shared
+    /// leaky-integrator core ([`crate::leaky_core::leaky_step`]).
+    ///
+    /// NOTE: the normalization `total` is NOT `Σ padded` — it is `Σ padded[..6]`
+    /// (the 6 distinct source activations). See [`evolve_hla`] and the
+    /// `leaky_core` module docs for why `total` is supplied separately.
+    #[inline]
+    pub fn kind_activations_padded(&self) -> [f32; 8] {
+        let k = &self.kind_activations;
+        // Direct indexing over a const LUT — fully unrolled, zero allocation.
+        let m = Self::KIND_MAP;
+        [
+            k[m[0]], k[m[1]], k[m[2]], k[m[3]], k[m[4]], k[m[5]], k[m[6]], k[m[7]],
+        ]
     }
 }
 
@@ -223,8 +253,9 @@ impl ProjectionWeights {
             let row_off = kind_idx * 8;
             for i in 0..n {
                 let dir = &module.directions[i];
-                let pos = ((dir.pos_bits >> i) & 1) as u32 as f32;
-                let neg = ((dir.neg_bits >> i) & 1) as u32 as f32;
+                // Bit masked to 0/1 — `as u32` is redundant.
+                let pos = ((dir.pos_bits >> i) & 1) as f32;
+                let neg = ((dir.neg_bits >> i) & 1) as f32;
                 matrix[row_off + i] = (pos - neg) * dir.row_scale;
             }
         }
@@ -442,8 +473,8 @@ impl ReconstructionState {
             let mut sign_scaled = [0.0f32; 8];
             for (i, item) in sign_scaled.iter_mut().enumerate().take(n) {
                 let dir = &module.directions[i];
-                let pos = ((dir.pos_bits >> i) & 1) as u32 as f32;
-                let neg = ((dir.neg_bits >> i) & 1) as u32 as f32;
+                let pos = ((dir.pos_bits >> i) & 1) as f32;
+                let neg = ((dir.neg_bits >> i) & 1) as f32;
                 *item = (pos - neg) * dir.row_scale;
             }
 
@@ -620,28 +651,26 @@ impl ReconstructionState {
     /// Bridge function per AGENTS.md: raw KG triples → latent HLA update.
     /// Uses dot-product projection + sigmoid. No softmax.
     /// Zero-allocation. Clamp to valid range [-1, 1].
+    ///
+    /// Plan 276 T2.1: now a thin delegate over the shared leaky-integrator core
+    /// ([`crate::leaky_core::leaky_step`]). The `KIND_MAP` gather lives in
+    /// [`TripleEvidence::kind_activations_padded`], and the normalization total
+    /// is `Σ kind_activations[0..6]` (the 6 source activations — NOT the
+    /// gathered 8; see `leaky_core` module docs). Behavior is byte-identical to
+    /// the previous inline implementation.
     pub fn evolve_hla(&mut self) {
-        let lr = self.config.hla_learning_rate;
-        let max_delta = self.config.max_hla_delta;
-        let total_activation: f32 = self.evidence.kind_activations.iter().copied().sum();
-
-        if total_activation < 1e-8 {
-            return;
-        }
-
-        // Const LUT avoids modulo per iteration
-        const KIND_MAP: [usize; 8] = [0, 1, 2, 3, 4, 5, 0, 1];
-        let t_min = total_activation.min(1.0);
-        let scale = lr * t_min / total_activation;
-        let half_total = 0.5 * total_activation;
-
-        for (i, &kind_idx) in KIND_MAP.iter().enumerate() {
-            let normalized = self.evidence.kind_activations[kind_idx];
-            let delta = scale * (normalized - half_total);
-
-            let clamped_delta = delta.clamp(-max_delta, max_delta);
-            self.hla[i] = (self.hla[i] + clamped_delta).clamp(-1.0, 1.0);
-        }
+        // total is over the 6 distinct SenseKind activations — preserved exactly
+        // from the original inline math. Do not change to Σ padded (would alter
+        // scale and break the shipped HLA benchmarks).
+        let total: f32 = self.evidence.kind_activations.iter().copied().sum();
+        let input = self.evidence.kind_activations_padded();
+        crate::leaky_core::leaky_step(
+            &mut self.hla,
+            &input,
+            total,
+            self.config.hla_learning_rate,
+            self.config.max_hla_delta,
+        );
     }
 
     /// SIMD-optimized HLA evolution.
@@ -657,7 +686,8 @@ impl ReconstructionState {
         let lr = self.config.hla_learning_rate;
         let max_delta = self.config.max_hla_delta;
 
-        // SIMD sum of kind activations (extends to [f32; 8] with padding)
+        // SIMD sum of kind activations (zero-padded to [f32; 8] — sum is over the
+        // 6 distinct activations, matching the scalar path's Σ[0..6]).
         let mut padded_activations = [0.0f32; 8];
         padded_activations[..6].copy_from_slice(&self.evidence.kind_activations);
         let total_activation = crate::simd::simd_sum_f32(&padded_activations);
@@ -669,11 +699,9 @@ impl ReconstructionState {
         let t_min = total_activation.min(1.0);
         let scale = lr * t_min / total_activation;
 
-        // Gather: KIND_MAP = [0,1,2,3,4,5,0,1] → first 6 copied, last 2 wrap
-        let mut delta = [0.0f32; 8];
-        delta[..6].copy_from_slice(&self.evidence.kind_activations);
-        delta[6] = self.evidence.kind_activations[0];
-        delta[7] = self.evidence.kind_activations[1];
+        // Gather: KIND_MAP = [0,1,2,3,4,5,0,1] → lives once in
+        // TripleEvidence::kind_activations_padded() (Plan 276 T2.2 dedup).
+        let mut delta = self.evidence.kind_activations_padded();
 
         // SIMD: delta = (delta - 0.5 * total) * scale  →  fused sub-scale
         let sub_val = 0.5 * total_activation;
@@ -1021,6 +1049,77 @@ mod tests {
             max_diff < 1e-4,
             "SIMD and scalar evolve_hla should produce similar results, diff={max_diff}"
         );
+    }
+
+    /// Plan 276 T2.3 — zero-behavior-change regression gate.
+    ///
+    /// Runs a known evidence pattern through the refactored `evolve_hla`
+    /// (now a delegate over `crate::leaky_core::leaky_step`) and asserts the
+    /// resulting HLA is **bit-for-bit identical** to the original inline math
+    /// (sum-over-6 total, `KIND_MAP = [0,1,2,3,4,5,0,1]` gather, config-sourced
+    /// lr / max_delta). Runs whenever `sense` compiles — `micro_belief` is NOT
+    /// required, which proves the ungated core keeps `sense` decoupled.
+    #[test]
+    fn evolve_hla_is_byte_identical_to_inline_reference() {
+        let config = ReconstructionConfig::default();
+        let lr = config.hla_learning_rate;
+        let max_delta = config.max_hla_delta;
+        let init_hla = [0.3, 0.7, 0.1, 0.5, 0.4, 0.2, 0.6, 0.8];
+
+        // Accumulate a non-trivial evidence pattern with non-zero k0/k1 so the
+        // KIND_MAP wrap (dims 6,7) is exercised and the sum-over-6 vs
+        // sum-over-8 distinction actually matters.
+        let selected = [true, true, true, true, true, true];
+        let activations = [0.5, 0.2, 0.8, 0.1, 0.3, 0.4];
+
+        // --- Actual: refactored delegate path ---
+        let mut state_actual = ReconstructionState::with_config(init_hla, config);
+        state_actual.accumulate(&selected, &activations);
+        state_actual.evolve_hla();
+
+        // --- Reference: verbatim copy of the PRE-refactor evolve_hla body ---
+        // total is Σ kind_activations[0..6]; gather uses KIND_MAP wrap.
+        const KIND_MAP: [usize; 8] = [0, 1, 2, 3, 4, 5, 0, 1];
+        let mut kind_activations = [0.0f32; 6];
+        for (i, &sel) in selected.iter().enumerate() {
+            if sel && activations[i] > 0.0 {
+                kind_activations[i] += activations[i];
+            }
+        }
+        let mut hla_ref = init_hla;
+        let total_activation: f32 = kind_activations.iter().copied().sum();
+        assert!(
+            total_activation >= 1e-8,
+            "test fixture must accumulate non-trivial evidence"
+        );
+        let t_min = total_activation.min(1.0);
+        let scale = lr * t_min / total_activation;
+        let half_total = 0.5 * total_activation;
+        for i in 0..8 {
+            let normalized = kind_activations[KIND_MAP[i]];
+            let delta = scale * (normalized - half_total);
+            let clamped_delta = delta.clamp(-max_delta, max_delta);
+            hla_ref[i] = (hla_ref[i] + clamped_delta).clamp(-1.0, 1.0);
+        }
+
+        // Bit-for-bit equality — not approximate. Any drift is a regression.
+        assert_eq!(
+            *state_actual.hla(),
+            hla_ref,
+            "T2.3: refactored evolve_hla must be byte-identical to the inline reference"
+        );
+    }
+
+    /// Plan 276 T2.1 — the `KIND_MAP` gather helper must produce the wrapped
+    /// 8-element layout from the 6 per-kind activations. Single-source-of-truth
+    /// guard: if someone edits `TripleEvidence::KIND_MAP`, this catches it.
+    #[test]
+    fn kind_activations_padded_matches_kind_map() {
+        let mut ev = TripleEvidence::default();
+        ev.kind_activations = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6];
+        let padded = ev.kind_activations_padded();
+        assert_eq!(padded, [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.1, 0.2]);
+        assert_eq!(TripleEvidence::KIND_MAP, [0, 1, 2, 3, 4, 5, 0, 1]);
     }
 
     /// Verify expand_simd produces same activations as scalar expand.

@@ -1861,3 +1861,38 @@ Feature gate: `bake_precision` (opt-in, requires `dep:papaya`, `sense_compositio
 RAT+ recurrence bridge via GDN2 state for modelless dilated inference.
 
 Feature gate: `rat_plus_bridge` (opt-in).
+
+---
+
+## MicroRecurrentBeliefState (`crates/katgpt-core/src/micro_belief/`, Plan 276)
+
+Per-entity implicit state-tracking kernel — small frozen recurrent kernels implementing
+`s_t = f(s_{t-1}, x_t)` over a fixed-size latent belief vector, applied once per
+(entity, tick). The belief vector is latent/local (never synced); a bridge projects it to
+bounded raw scalars that cross the sync boundary. Full reference: `.docs/26_micro_belief.md`.
+
+```rust
+pub trait MicroRecurrentBeliefState: Send + Sync {
+    fn dim(&self) -> usize;
+    fn step(&self, state: &mut [f32], input: &[f32]);                 // zero-alloc
+    fn project_to_scalars(&self, state: &[f32], directions: &[f32],   // latent→raw bridge
+                          dim: usize, out: &mut [f32]);
+    fn family(&self) -> RecurrenceFamily;                              // routing
+}
+```
+
+| Module | Family | Status |
+|---|---|---|
+| `micro_belief/attractor.rs` | A — `s_t = 2·σ(W_s·s + W_x·x + b) − 1` | Opt-in experiment (G1.4 + G2.1 FAIL) |
+| `micro_belief/latent_thought.rs` | B — K iters of Family A per tick | Opt-in experiment (G1.6: K=1 bit-identical to A) |
+| `micro_belief/leaky.rs` | C — monotone additive, `±max_delta` clamp | **Promotable** — byte-identical to `evolve_hla` |
+| `micro_belief/snapshot.rs` | freeze/thaw — BLAKE3-committed weights | Opt-in (per-NPC personality divergence) |
+| `micro_belief/bridge.rs` | `project_to_scalars` — sigmoid(dot) | Shared bridge (all families delegate) |
+| `leaky_core.rs` (ungated) | shared `leaky_step` primitive | Single source of truth for Family C math |
+
+**GOAT verdict:** trait unification + `LeakyIntegrator` are the promotable outputs.
+Attractor demoted to Gain (G1.4 latency ~273ns; G2.1 coherence 569× more flip-flops than
+leaky). The `evolve_hla` refactor (Phase 2) made `evolve_hla` delegate to the ungated
+`leaky_core::leaky_step` — zero behavior change, no `micro_belief` feature coupling.
+
+Feature gate: `micro_belief` (opt-in).
