@@ -1,4 +1,4 @@
-# Research 245: Manifold Power Iteration — MoE Router Row ↔ Expert Principal Singular Direction
+# Research 246: Manifold Power Iteration — MoE Router Row ↔ Expert Principal Singular Direction
 
 > **Source:** [Redesign Mixture-of-Experts Routers with Manifold Power Iteration](https://arxiv.org/abs/2606.12397) — Songhao Wu, Ang Lv, Ruobing Xie, Yankai Lin (RUC / Tencent), arXiv:2606.12397, 10 Jun 2026
 > **Date:** 2026-06-16
