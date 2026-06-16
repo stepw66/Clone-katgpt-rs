@@ -322,11 +322,10 @@ mod tests {
         #[cfg(debug_assertions)]
         {
             let (count, _bytes) = crate::alloc::get_alloc_stats();
-            // The global counter is shared across all parallel tests, so we
-            // can't assert exact zero. But if `pick_backend` allocated even
-            // once per call, we'd see ≥1000. Allow a generous slack for
-            // concurrent test allocations (empirically < 500 across the
-            // full suite running in parallel).
+            // Thread-local counters isolate this measurement from concurrent
+            // tests, so `count` reflects only `pick_backend` calls on this
+            // thread. If `pick_backend` allocated even once per call, we'd
+            // see ≥1000. The threshold catches any per-call leak.
             assert!(
                 count < 1000,
                 "pick_backend should not allocate per-call; observed {} \

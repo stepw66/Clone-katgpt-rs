@@ -75,12 +75,13 @@ fn synth_queries(n: usize, d: usize, seed: u64) -> Vec<f32> {
     q
 }
 
-// ─── Allocation tracking (G7) ─────────────────────────────────────────────
+// ─── Allocation tracking (G7) ─────────────────────────────────────────
 //
 // The library crate installs a `TrackingAllocator` (in `src/alloc.rs`) when
-// built in debug mode. We reuse its `reset_alloc_stats` / `get_alloc_stats`
-// API rather than installing our own `#[global_allocator]` (which would
-// conflict).
+// built in debug mode. Its counters are thread-local, so parallel tests do
+// not bleed allocations into each other. We reuse its
+// `reset_alloc_stats` / `get_alloc_stats` API rather than installing our own
+// `#[global_allocator]` (which would conflict).
 //
 // In release builds this gate degrades gracefully — it falls back to a
 // timing-based sanity check.
@@ -392,10 +393,9 @@ fn g7_no_allocation_in_hot_loops() {
     #[cfg(debug_assertions)]
     {
         // Reset allocation counters, run many calls, verify near-zero.
-        // NOTE: the TrackingAllocator is process-global, so if other tests
-        // run in parallel they will inflate the counter. We tolerate up to
-        // 1 KB/call of background noise — the real per-call allocation is
-        // 0 (verified by `--test-threads=1`).
+        // Thread-local counters isolate this measurement from concurrent
+        // tests on other threads; `per_call` reflects only `pick_backend`
+        // allocations on this thread. The real per-call allocation is 0.
         reset_alloc_stats();
         let n_calls = 1000usize;
         for i in 0..n_calls {
@@ -408,11 +408,11 @@ fn g7_no_allocation_in_hot_loops() {
             "  {} calls allocated {} bytes total ({:.3} bytes/call, threshold: < 1024.0)",
             n_calls, bytes, per_call
         );
-        // Tolerate up to 1KB/call of background parallel-test noise.
-        // For the true zero-alloc verification, run with `--test-threads=1`.
+        // Tolerate up to 1KB/call to absorb runtime bookkeeping on this
+        // thread. The real per-call allocation is 0.
         assert!(
             per_call < 1024.0,
-            "G7 FAIL: pick_backend allocates {per_call:.3} bytes/call on average (target: ~0; run with --test-threads=1 for accurate measurement)"
+            "G7 FAIL: pick_backend allocates {per_call:.3} bytes/call on average (target: ~0)"
         );
     }
 

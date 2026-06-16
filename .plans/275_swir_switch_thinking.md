@@ -134,6 +134,8 @@ Goal: wire SwiR into the existing `thinking_cot` framework so it can actually dr
 
 **VERIFICATION NOTE (2026-06-16):** the `bench_275_swir_goat` integration suite passes **10/10 serially** (`-- --test-threads=1`) but **9/10 under default parallel execution** — `g7_step_zero_allocation_debug` flakes because the global `katgpt_rs::alloc` tracking allocator is process-global, so allocations from concurrently-running tests bleed into the `count <= 0` assertion. The controller itself is zero-allocation (proven by the serial run and by `g7_adapter_on_step_allocations_debug`). This is a **test-harness isolation gap, not a production-code bug**. The reproduce command in `src/swir/BENCHMARKS.md` already pins `--test-threads=1`; a future cleanup could thread a per-test allocator counter. Documented honestly here rather than claiming a clean parallel pass.
 
+**RESOLVED (2026-06-16):** `src/alloc.rs` switched from process-global `AtomicUsize` counters to thread-local `Cell<AllocStats>` counters. This fixes the root cause — each test thread's allocation measurements are now isolated from sibling tests. `g7_step_zero_allocation_debug` now passes **10/10 under default parallel execution** (verified with 5 consecutive runs). The `--test-threads=1` pin is removed from the test doc and `src/swir/BENCHMARKS.md`. Stale comments in `src/attn_match/router.rs` and `tests/bench_271_attn_match_goat.rs` (both referenced the now-inaccurate "global counter" model) updated. All 6 alloc-audit call sites (`alloc.rs` internal, `attn_match/router.rs`, `bench_271/272/274/275`) benefit from the isolation fix.
+
 ---
 
 ## Phase 3 — Real Model Integration & GOAT Gate

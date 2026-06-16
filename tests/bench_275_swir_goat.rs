@@ -50,15 +50,16 @@
 //! ```bash
 //! # Release for perf gates (G3).
 //! cargo test --release --test bench_275_swir_goat \
-//!     --features swir_switch_thinking -- --nocapture --test-threads=1
+//!     --features swir_switch_thinking -- --nocapture
 //!
 //! # Debug for the allocation audit (G7).
 //! cargo test --test bench_275_swir_goat \
-//!     --features swir_switch_thinking -- --nocapture --test-threads=1
+//!     --features swir_switch_thinking -- --nocapture
 //! ```
 //!
-//! `--test-threads=1` is required for G7: the library's `TrackingAllocator`
-//! is process-global, so parallel tests bleed allocations into the counter.
+//! No `--test-threads=1` flag is needed: the library's `TrackingAllocator`
+//! (in `src/alloc.rs`) uses thread-local counters, so each test thread's
+//! allocation measurements are isolated from sibling tests.
 
 #![cfg(feature = "swir_switch_thinking")]
 #![cfg(test)]

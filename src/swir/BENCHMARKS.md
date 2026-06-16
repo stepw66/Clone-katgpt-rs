@@ -11,7 +11,7 @@
 
 ```bash
 # All synthetic gates (debug — fast, includes allocation audit)
-cargo test --features swir_switch_thinking --test bench_275_swir_goat -- --nocapture --test-threads=1
+cargo test --features swir_switch_thinking --test bench_275_swir_goat -- --nocapture
 
 # G3 perf gate (release — the actual 200ns budget is release-mode)
 cargo test --release --features swir_switch_thinking --test bench_275_swir_goat g3_step_perf -- --nocapture
@@ -30,9 +30,9 @@ cargo check --no-default-features --features thinking_cot
 | **G4** convex hull | 1000 random probs all in vocab hull | 1000/1000 in hull (100.00%) | ✅ PASS |
 | **G5** feature isolation | swir code absent without feature | `cargo check --no-default-features --features thinking_cot` clean | ✅ PASS |
 | **G6** kurtosis auto-fallback | High kurtosis forces Explicit mode | kurtosis=5.0 > threshold=3.0 → forced Explicit | ✅ PASS |
-| **G7** zero-alloc step() | 0 allocations in `step()` (debug) | 0 allocs, 0 bytes over 1023 steps | ✅ PASS (serial) |
+| **G7** zero-alloc step() | 0 allocations in `step()` (debug) | 0 allocs, 0 bytes over 1023 steps | ✅ PASS |
 
-> **G7 reproducibility caveat:** the gate table reflects the serial run (`--test-threads=1`). Under default **parallel** test execution `g7_step_zero_allocation_debug` flakes — the global `katgpt_rs::alloc` tracking allocator is process-global, so allocations from concurrently-running tests bleed into the `count <= 0` assertion. The controller is genuinely zero-allocation (proven by the serial run and by `g7_adapter_on_step_allocations_debug`); this is a test-harness isolation gap, not a production bug. Always run the suite with `--test-threads=1` (as the reproduce command above does).
+> **G7 parallel-safe (resolved 2026-06-16):** `src/alloc.rs` now uses thread-local `Cell<AllocStats>` counters instead of process-global atomics, so each test thread's allocation measurements are isolated from sibling tests. `g7_step_zero_allocation_debug` passes reliably under default parallel execution (verified 5 consecutive runs). The previous `--test-threads=1` pin is no longer required.
 | **G8** signal-mix schedule | α_t/β_t monotonic non-decreasing in step_index | [0.70, 0.72, 0.74, 0.78, 0.85, 0.93, 1.0] — monotonic ✓ | ✅ PASS |
 
 **All 8 synthetic-data gates PASS.**
