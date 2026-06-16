@@ -52,8 +52,11 @@ If M1–M4 don't reach <100ns, keep `micro_belief` opt-in (do NOT promote to def
 
 | Variant | ns/step | Target | Verdict |
 |---|---|---|---|
-| `AttractorKernel::step()` dim=32 (current) | ~270 | <100 | FAIL |
-| `LeakyIntegrator::step()` dim=32 (Family C, baseline) | TBD | <100 | TBD |
+| `AttractorKernel::step()` dim=32 (current) | **270.47** (criterion median, T1.14) | <100 | FAIL |
+| `LeakyIntegrator::step()` dim=32 (Family C, baseline) | **35.73** (criterion median, T1.14) | <100 | PASS |
+| `LatentThoughtKernel::step()` dim=32 K=1 | **270.86** (criterion median, T1.14) | attractor ±5% | PASS (matches attractor) |
+| `LatentThoughtKernel::step()` dim=32 K=3 | **811.46** (criterion median, T1.14) | ~3× attractor | PASS (exactly 3.00×) |
+| `project_to_scalars` K=5 dim=32 | **22.34** (criterion median, T1.14) | <50 | PASS |
 | `ReconstructionState::evolve_hla_simd()` dim=8 (HLA baseline) | ~30 | — | reference |
 
 ## Cross-References

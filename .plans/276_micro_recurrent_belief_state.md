@@ -167,7 +167,7 @@ katgpt-rs/crates/katgpt-core/src/
 - [x] **T1.13** Run `cargo test --features micro_belief` — all G1 tests green.
   **DONE (2026-06-16):** `cargo test -p katgpt-core --no-default-features --features sparse_mlp,micro_belief,temporal_deriv --lib` → 165 passed, 0 failed (G1.4 informational in release, ~270ns/step — see Issue 024).
 - [x] **T1.14** Run `cargo bench --features micro_belief,bench` — capture G1.4 numbers, paste into `katgpt-rs/.benchmarks/276_micro_belief_goat.md`.
-  **PARTIAL:** No criterion bench wired yet (only the wall-clock test). The canonical bench needs a `[[bench]]` entry + `bench` feature. See Issue 024 for the ~270ns/step number from the wall-clock test. The G2.1 re-bench in release confirmed 273.2 ns/step.
+  **DONE (2026-06-16):** `[[bench]] micro_belief_bench` wired in `crates/katgpt-core/Cargo.toml` with `required-features = ["micro_belief"]` (matches the temporal_deriv_bench convention; no separate `bench` feature needed). Harness at `crates/katgpt-core/benches/micro_belief_bench.rs` covers attractor/leaky/latent_thought (K=1,K=3)/project_to_scalars/1000-NPC batch (serial+rayon). Numbers pasted into `.benchmarks/276_micro_belief_goat.md` §G1.4 Criterion Bench and `.issues/024_*`. Attractor 270.47 ns (FAIL), leaky 35.73 ns (PASS), latent_thought K=1 270.86 ns / K=3 811.46 ns (both scale as predicted). Side finding: rayon LOSES to serial at the 1000-NPC batch granularity (~10ns/step is 500× below rayon breakeven) — documented honestly in the bench.
 - [x] **T1.15** Write `katgpt-rs/.benchmarks/276_micro_belief_goat.md` with the GOAT proof (G1.1–G1.5 pass/fail table + latency numbers).
   **DONE (2026-06-16):** `.benchmarks/276_micro_belief_goat.md` written with G1.1–G1.5 summary + G2.1 results table.
 

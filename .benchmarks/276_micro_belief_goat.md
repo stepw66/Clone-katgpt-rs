@@ -126,9 +126,37 @@ Even if G2.1 had passed, the attractor family could NOT be promoted to default-o
 
 ### Outstanding Plan 276 items (not blocked by G2.1)
 
-- **T2.1–T2.3** — refactor `ReconstructionState::evolve_hla` to delegate to `LeakyIntegrator::step` (zero-behavior-change). Owned by the reconstruction.rs-lock holder; not blocked by G2.1 (the leaky integrator is the part that ships regardless).
-- **T1.14** — canonical criterion bench for G1.4 (needs `[[bench]]` + `bench` feature). Informational only; G1.4 already known to fail at ~273 ns.
-- **Phase 4** — docs + examples. Unaffected by G2.1.
+- **T2.1–T2.3** — refactor `ReconstructionState::evolve_hla` to delegate to `LeakyIntegrator::step` (zero-behavior-change). ✅ **DONE** in commit `3eae61d3` (2026-06-16).
+- **T1.14** — canonical criterion bench for G1.4. ✅ **DONE** in commit (this one) — see §G1.4 Criterion Bench below. Informational only; G1.4 still FAILs at ~270 ns.
+- **Phase 4** — docs + examples. ✅ **DONE** in commit `3eae61d3`.
+
+---
+
+## G1.4 Criterion Bench (T1.14 — canonical numbers)
+
+**Harness:** `crates/katgpt-core/benches/micro_belief_bench.rs`, criterion 0.5, sample_size=500 (100 for batch).
+**Run:**
+```bash
+cargo bench -p katgpt-core --bench micro_belief_bench --features micro_belief
+```
+
+| Bench | Median | 95% CI | Target | Verdict |
+|---|---|---|---|---|
+| `g1_4_step/attractor_dim32` | **270.47 ns** | [270.26, 270.67] | <100 ns | ❌ FAIL (confirms Issue 024) |
+| `g1_4_step/leaky_dim32` | **35.73 ns** | [35.68, 35.78] | <30 ns (HLA ref) | ⚠️ ~5 ns over HLA ref; well under 100 ns target. promotable. |
+| `g1_4_step/latent_thought_k1_dim32` | **270.86 ns** | [270.52, 271.21] | attractor ±5% | ✅ PASS — within 0.15% of attractor (G1.6 latency analogue). |
+| `g1_4_step/latent_thought_k3_dim32` | **811.46 ns** | [810.20, 812.72] | ~3× attractor | ✅ PASS — exactly 3.00× (270.47×3=811.4). |
+| `project_to_scalars/k5_dim32` | **22.34 ns** | [22.32, 22.36] | <50 ns | ✅ PASS. |
+| `batch_1000_npcs/leaky_serial_iter_dim8` | **11.34 µs** | [11.16, 11.57] | <15 µs | ✅ PASS — near the 10 µs aspirational target. |
+| `batch_1000_npcs/leaky_rayon_par_iter_dim8` | **139.27 µs** | [96.25, 215.31] | — | ❌ rayon LOSES — see note below. |
+
+### Why rayon loses to serial at this work size
+
+At ~10 ns per leaky step (extrapolated from the 35.73 ns dim=32 measurement, dim=8 is ~3.6× less work), 1000 NPCs is ~10 µs of useful work — **500× below rayon's ~5 µs thread-pool spin-up breakeven** (AGENTS.md: "only parallelize when per-task work exceeds thread-pool overhead"). The Mutex lock acquisition per criterion sample adds further constant overhead. The rayon variant is kept in the bench **intentionally** to document this finding: at the per-NPC work size the leaky kernel operates at, serial iteration is the correct tool. Parallelism would only win at much larger per-NPC work (e.g. attractor family at dim=32, or batch sizes >100k NPCs).
+
+### Leaky vs HLA baseline
+
+The leaky integrator at dim=32 measures **35.73 ns/step**, vs the HLA baseline (`evolve_hla_simd` at dim=8) reference of **~30 ns/step** (Issue 024). The ~5 ns gap is the trait-dispatch + precomputed-`total` indirection added by the Phase 2 refactor (`leaky_core::leaky_step`). This is acceptable — the leaky path is still well under the 100 ns G1.4 target and the indirection is the price of DRY (one math body, two callers).
 
 ---
 
@@ -148,7 +176,8 @@ cargo test -p katgpt-core --no-default-features \
 ```
 
 **Machine:** Apple Silicon arm64, macOS.
-**G1.4 release:** 273.2 ns/step.
+**G1.4 release (criterion, T1.14):** attractor 270.47 ns/step; leaky 35.73 ns/step.
+**G1.4 release (wall-clock test, superseded by criterion):** 273.2 ns/step.
 **G2.1 flip-flops (debug == release):** leaky=1, attractor=569, latent_thought=560.
 
 ---
