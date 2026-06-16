@@ -181,39 +181,19 @@ pub fn compute_expert_gram_into(w_g: &[f32], d_model: usize, out: &mut [f32]) {
 
 /// One-shot Manifold Power Iteration on a router matrix (paper Eq. 4–5).
 ///
-/// For each expert row `i`:
-/// ```text
-/// R̂[i]  = R[i] · M[i]                      (Eq. 4)
-/// R'[i] = C · R̂[i] / ‖R̂[i]‖₂  with C = c_prime/√N   (Eq. 5, Eq. 7)
-/// ```
+/// For each expert row `i`: `R̂[i] = R[i]·M[i]` (Eq. 4), then
+/// `R'[i] = C·R̂[i]/‖R̂[i]‖₂` with `C = c_prime/√N` (Eq. 5, Eq. 7).
 ///
-/// Diagnostics (paper Eq. 11, §1.4):
-/// - `lambda_alignment`: mean `(R'[i]·M[i]·R'[i]^T) / (‖R'[i]·M[i]‖·‖R'[i]‖)`.
-/// - `maxvio`: max `|‖R'[i]‖₂ − C|` (should be ≈ 0 post-retraction).
+/// Diagnostics: `lambda_alignment` (paper Eq. 11, mean cosine of
+/// `(R'[i]·M[i]·R'[i]^T) / (‖R'[i]·M[i]‖·‖R'[i]‖)`), `maxvio` (max
+/// `|‖R'[i]‖₂ − C|`, should be ≈0 post-retraction).
 ///
-/// # Determinism (G5)
+/// Deterministic (G5): pure function of `(r, grams, c_prime, iters)` →
+/// byte-identical `R'` across runs — sync/quorum-safe. Zero-alloc in the
+/// retraction loop (caller-owned `scratch`); `r_prime` field clones once for
+/// convenience (ignore it for true zero-alloc).
 ///
-/// Pure function of `(r, gram_per_expert, c_prime, iters)`. Same inputs →
-/// byte-identical `R'` across runs / nodes — safe under quorum commit.
-///
-/// # Zero-alloc
-///
-/// Reuses caller-owned `scratch` across rows. The returned `MpiRouterResult`
-/// allocates one `r_prime` clone for convenience; if the caller wants zero
-/// allocation they read `r` directly and ignore the field.
-///
-/// # Arguments
-///
-/// - `r`: `[N×D]` router, mutated in place → `R'`.
-/// - `gram_per_expert`: N views, each `[D×D]` expert Gram `M[i] = W_g·W_g^T`.
-/// - `n_experts`, `d_model`: matrix shape (N, D).
-/// - `c_prime`: norm scale `C'` (target row norm = `C'/√N`).
-/// - `iters`: power-iteration steps (paper default `1`).
-/// - `scratch`: reusable [`PowerRetractScratch`].
-///
-/// # Panics
-///
-/// Debug assert only: shape mismatches.
+/// # Panics: debug assert only (shape mismatches).
 pub fn manifold_power_iter_router(
     r: &mut [f32],
     gram_per_expert: &[&[f32]],
@@ -303,26 +283,12 @@ pub fn compute_diagnostics(
 // ── Sigmoid gate (NEVER softmax — AGENTS.md constraint) ──────────────────
 
 /// Independent per-expert sigmoid top-k gating (research note §2.3).
+/// `score_i = σ(β · x · R'[i]^T)`, then `TopK_k(scores)`. **Never softmax**
+/// — each expert is independent (G7). Correct semantics for NPC routing
+/// where multiple experts can fire on the same frame.
 ///
-/// ```text
-/// score_i = σ(β · x · R'[i]^T)         independent per-expert sigmoid
-/// top_k   = TopK_k(score_1, …, score_N)
-/// ```
-///
-/// **Never softmax.** Each expert's score is computed independently —
-/// changing one row's score does NOT affect another's (G7 runtime check).
-/// This is the *correct* semantics for NPC routing where multiple experts
-/// can fire on the same frame.
-///
-/// # Arguments
-///
-/// - `x`: length-`d_model` token vector.
-/// - `r_prime`: `[N×D]` MPI-conditioned router `R'`.
-/// - `n_experts`, `d_model`: shape.
-/// - `beta`: sigmoid temperature.
-/// - `k`: top-k selection.
-/// - `out_scores`: length-`n_experts` output buffer (caller-owned). Filled
-///   with the sigmoid scores (same order as experts). Zero-alloc.
+/// `out_scores` is caller-owned (zero-alloc); returns top-k indices (one Vec
+/// alloc). `σ(z) = 1/(1+e^{-z})` via libm `exp`.
 ///
 /// # Returns
 ///
@@ -377,30 +343,14 @@ pub fn gate_sigmoid_topk(
 // ── Snapshot-swap hook (Phase 2) ─────────────────────────────────────────
 
 /// Hook called once per freeze/thaw snapshot swap to recondition a router.
-///
-/// Called from the **swap path** (when the frozen expert pool changes), NOT
-/// from the per-token forward path (freeze/thaw constraint, research note
-/// §2.2). Implementations cache the per-expert grams keyed by snapshot
-/// version so a no-op swap (same version) costs ~zero.
-///
-/// riir-ai's `LoRAHotSwap` consumes this trait (out of scope here).
+/// Called from the **swap path** only (NOT per-token — freeze/thaw constraint).
+/// riir-ai's `LoRAHotSwap` consumes this trait.
 pub trait MpiRouterSnapshotHook {
-    /// Recondition `router` against the current expert grams.
-    ///
-    /// Returns the MPI-conditioned router + diagnostics. Must be
-    /// deterministic in `(router, expert_grams, snapshot_version)` (G5).
-    ///
-    /// # Freeze/Thaw Invariant
-    ///
-    /// This method MUST NOT be called from a per-token forward path. It
-    /// mutates router weights in place — only the snapshot-swap boundary
-    /// is allowed to do that. Doc-test:
-    /// ```
-    /// // Conceptual call site (NOT per-token):
-    /// //   on_snapshot_swap { hook.recondition_at_swap(router, grams, …); }
-    /// // NEVER:
-    /// //   forward(token) { hook.recondition_at_swap(…) }  // ← violates freeze/thaw
-    /// ```
+    /// Recondition `router` against the current expert grams. Returns the
+    /// MPI-conditioned router + diagnostics. Must be deterministic in
+    /// `(router, expert_grams, snapshot_version)` (G5). MUST NOT be called
+    /// from a per-token forward path — only the swap boundary may mutate
+    /// router weights.
     fn recondition_at_swap(
         &mut self,
         router: &mut [f32],
@@ -412,24 +362,13 @@ pub trait MpiRouterSnapshotHook {
 }
 
 /// Default snapshot hook — wraps [`manifold_power_iter_router`] with a
-/// BLAKE3-tagged Gram cache keyed by snapshot version.
-///
-/// On cache hit (same snapshot version): skips gram recomputation, reuses
-/// the cached `gram_per_expert` slices. Zero-allocation hot path.
-/// On cache miss (version bump): caller passes the new grams directly.
-///
-/// The cache is *opaque* to the caller — it stores `(version, blake3_tag)`
-/// and only validates that the snapshot_version matches. Expert weight
-/// bytes are BLAKE3-hashed once on cache fill (research note §2.2).
+/// BLAKE3-tagged Gram cache keyed by snapshot version. Cache hit (same
+/// version): skips gram recomputation. Cache miss (version bump): re-fills.
 pub struct DefaultMpiRouterSnapshotHook {
     config: MpiRouterConfig,
     scratch: PowerRetractScratch,
-    /// Cached (version, blake3) tuple. Empty cache → first call always misses.
     cache_version: u64,
     cache_blake3: [u8; 32],
-    /// Cached grams (owned). Borrowed out via `&[&[f32]]` lifetime juggling
-    /// is non-trivial, so we store owned buffers and hand out references
-    /// from within `recondition_at_swap` (which holds `&mut self`).
     cached_grams: Vec<Vec<f32>>,
 }
 

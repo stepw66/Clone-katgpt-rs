@@ -363,4 +363,33 @@ mod tests {
         s.ensure_dim(16);
         assert_eq!(s.norm, 0.0);
     }
+
+    #[test]
+    fn test_power_iter_step_normalizes_to_unit() {
+        // Matvec scales v by 3 → pre-norm = 3·‖v_in‖; v should be unit after.
+        let mut v = vec![1.0_f32, 2.0, 2.0]; // ‖v‖ = 3
+        let mut mv_out = vec![0.0_f32; 3];
+        let norm = power_iter_step(&mut v, &mut mv_out, |vin, vout| {
+            for i in 0..vin.len() {
+                vout[i] = vin[i] * 3.0;
+            }
+        });
+        // pre-norm = 3 * ‖v_in‖ = 3 * 3 = 9.
+        assert!((norm - 9.0).abs() < 1e-5, "norm={norm}, expected 9");
+        let n = l2_norm(&v, 3);
+        assert!((n - 1.0).abs() < 1e-5, "v should be unit, got {n}");
+    }
+
+    #[test]
+    fn test_power_iter_step_degenerate_returns_zero() {
+        // Matvec produces zero → step returns 0, v left unchanged.
+        let mut v = vec![0.5_f32, 0.5, 0.5];
+        let v_orig = v.clone();
+        let mut mv_out = vec![0.0_f32; 3];
+        let norm = power_iter_step(&mut v, &mut mv_out, |_vin, vout| {
+            vout.fill(0.0);
+        });
+        assert_eq!(norm, 0.0);
+        assert_eq!(v, v_orig, "v should be unchanged on degeneracy");
+    }
 }

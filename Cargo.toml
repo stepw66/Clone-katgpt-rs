@@ -209,6 +209,7 @@ language_domain = []  # Language domain: BPE vocab, LLM models (Plan 040, future
 newton_schulz = []  # Newton-Schulz orthogonalization + Muon momentum (Plan 152, Research 114, GOAT 25/25 Bench 050) — default-ON
 spectral_budget = ["newton_schulz"]  # Spectral Budget Router — layer-adaptive NS depth + rank-p truncation (Plan 253, Research 222) — opt-in, GOAT gate
 gauge_invariant = ["newton_schulz"]  # Gauge-invariant adapter composition — LoRA-Muon distillation (Plan 270, Research 238, GOAT 17/17 PASS, default-ON). Provides ns_inv_sqrt_psd + gauge_rebalance + gauge_invariant_compose primitives.
+manifold_power_iter_router = []  # Manifold Power Iteration MoE Router — one-shot router-row conditioning at snapshot swap via shared spectral_retract helper (Plan 279, Research 246, arxiv 2606.12397) — opt-in until GOAT gate passes on real MoE pool
 river_valley = []  # River-valley diagnostic metrics — subspace ratios, effective rank, cosine similarity (Plan 152, Research 114, GOAT 25/25 Bench 050) — default-ON
 spectral_hierarchy = ["katgpt-core/spectral_hierarchy"]  # Spectral hierarchy diagnostic — eigenspace alignment, Haar wavelets, Cauchy interlacing (Plan 156 GOAT) — default-ON
 sigmoid_margin = ["katgpt-core/sigmoid_margin"]  # Sigmoid margin loss + retrieval margin diagnostic (Research 123, Plan 157)
@@ -546,6 +547,15 @@ required-features = ["self_advantage_gate"]
 [[example]]
 name = "pruner_04_product_policy"
 required-features = ["product_policy_sharpen"]
+
+# Plan 283 Phase 4 — Self-Advantage Recursion Gate GOAT benchmark.
+# G1: ≥2× forward-pass reduction. G2: ≥95% argmax match. G3: <1µs latency.
+# G4: robust across vocab sizes 8..1024.
+[[bench]]
+name = "self_advantage_gate_bench"
+path = "benches/self_advantage_gate_bench.rs"
+required-features = ["self_advantage_gate"]
+harness = false
 
 [[example]]
 name = "bomber_21_sonlt_arena"
@@ -1143,6 +1153,20 @@ name = "bench_270_gauge_invariant_goat"
 path = "tests/bench_270_gauge_invariant_goat.rs"
 required-features = ["gauge_invariant", "sparse_task_vector"]
 
+# Plan 279 — Manifold Power Iteration MoE Router GOAT gate (G1–G8).
+# Requires `gauge_invariant` for G6 (DRY non-regression: imports gauge_rebalance).
+[[test]]
+name = "bench_279_manifold_power_iter_goat"
+path = "tests/bench_279_manifold_power_iter_goat.rs"
+required-features = ["manifold_power_iter_router", "gauge_invariant"]
+
+# Plan 279 — N/D sweep benchmark (std::time::Instant, not criterion).
+[[bench]]
+name = "manifold_power_iter_router_bench"
+path = "benches/manifold_power_iter_router_bench.rs"
+required-features = ["manifold_power_iter_router"]
+harness = false
+
 # Plan 266 — DenseMesh profiling test (Phase 7, T7.4). Measures forward
 # scaling, aggregation overhead, EdgeBandit decision, compute_router dispatch,
 # and hot-path allocation count (debug-only via TrackingAllocator).
@@ -1164,6 +1188,11 @@ required-features = ["dense_mesh"]
 [[example]]
 name = "gauge_invariant_demo"
 required-features = ["gauge_invariant"]
+
+# Plan 279 — Manifold Power Iteration MoE Router before/after demo (λ/MaxVio).
+[[example]]
+name = "manifold_power_iter_router_basic"
+required-features = ["manifold_power_iter_router"]
 
 [[example]]
 name = "attn_match_basic"
@@ -1244,6 +1273,15 @@ required-features = ["cgsp"]
 [[example]]
 name = "cgsp_dual_pool_demo"
 required-features = ["cgsp_dual_pool"]
+
+# Plan 277 Issue 026 — Unified Surprise Bus Super-GOAT sweep.
+# Sweeps α_fast × α_slow across all 4 TemporalDerivativeKernel consumers
+# (HLA companion, δ-Mem gate, collapse detector, derivative curiosity) and
+# checks whether the paper-default (0.3, 0.03) is within ±10% of the best
+# metric for each. Verdict: Super-GOAT (4/4 in Pareto) vs GOAT-only.
+[[test]]
+name = "bench_277_unified_surprise_bus"
+required-features = ["temporal_deriv", "sense_composition", "delta_mem", "collapse_aware_thinking", "cgsp"]
 
 # Plan 274 Phase 3 — CGSP GOAT gate benchmark.
 # Validates transfer-to-target, collapse recovery, feature-gate isolation,
