@@ -18,6 +18,12 @@ pub use katgpt_core::cgsp::{
     DEFAULT_HLA_DIM, DEFAULT_K, DEFAULT_POOL_SIZE, entropy_nats, sigmoid, structural_complexity,
 };
 
+// Dual-pool reachable memory router (Plan 282, Research 249 — DecentMem).
+// Re-exported under the `cgsp_dual_pool` feature so `katgpt::cgsp::DualPoolBandit`
+// resolves from the root crate.
+#[cfg(feature = "cgsp_dual_pool")]
+pub use katgpt_core::cgsp::{DualPoolBandit, DualPoolConfig, PoolId, ReachableDualPoolRouter};
+
 /// Re-export the `traits` submodule so `katgpt::cgsp::traits::*` paths from
 /// Plan 274's GOAT benchmark keep resolving.
 pub mod traits {

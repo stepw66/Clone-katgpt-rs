@@ -31,13 +31,18 @@
 //! loop's `cycle()` method. The caller wraps `begin_cycle()` /
 //! [`end_cycle`](DualPoolBandit::end_cycle) around the existing cycle call.
 //!
-//! ## Phase 1 scope
+//! ## Phase coverage
 //!
-//! This module implements the **unblocking skeleton**: same-size E/X pools
-//! (both N arms, same directions), priority-blend consolidation. True E-pool
-//! **growth** (adding arms discovered by X-pool) and the
-//! [`FaithfulnessProbe`](crate::faithfulness_probe) consolidation gate are
-//! deferred to Plan 282 Phase 4.
+//! - **Phase 1 (skeleton, shipped):** same-size E/X pools (both N arms, same
+//!   directions), priority-blend consolidation, sigmoid routing, reachability
+//!   clamp, `HintDeltaBandit` delegation to the active pool.
+//! - **Phase 4 (shipped):** E-pool arm growth via backward-compatible
+//!   [`HintDeltaBandit::push_arm`] / [`HintDeltaBandit::is_growing`] default
+//!   methods, per-arm X-pool reward tracking, `consolidate_growing()` and the
+//!   gated variant `consolidate_growing_gated(gate)` (the
+//!   [`FaithfulnessProbe`](crate::faithfulness_probe) integration point).
+//! - **Phase 5 (deferred to riir-ai):** `NpcCgspRuntime` integration benchmark
+//!   (personality divergence, latency budget, E-pool persistence).
 //!
 //! ## Sigmoid vs ratio
 //!
@@ -52,6 +57,8 @@
 //! sigmoid router. The X-pool's nonzero probability guarantees proactive
 //! non-trapping (Theorem 1). Per-pool weight updates from binary feedback
 //! give O(log T) regret (Theorem 2). Single-pool CGSP = degenerate `α = 1`.
+//! Phase 4 adds backward-compatible E-pool growth (`push_arm` / `is_growing`)
+//! and a `consolidate_growing_gated(gate)` FaithfulnessProbe integration point.
 
 use crate::cgsp::traits::HintDeltaBandit;
 use crate::cgsp::types::{sigmoid, Priority};
@@ -325,6 +332,20 @@ impl<B: HintDeltaBandit> DualPoolBandit<B> {
     #[inline]
     pub fn active_pool(&self) -> PoolId {
         self.active_pool
+    }
+
+    /// Override which pool is active (testing / deterministic replay).
+    ///
+    /// `begin_cycle()` normally selects the active pool via sigmoid routing.
+    /// This method lets a caller force a specific pool active so that
+    /// [`absorb`](HintDeltaBandit::absorb) (via the `DualPoolBandit` impl)
+    /// routes reward into the desired pool's per-arm accumulator
+    /// (`x_arm_rewards` when `Exploration`). Useful for tests, demos, and
+    /// deterministic replay where the reward source is external to
+    /// `CgspLoop::cycle`. Production callers should use `begin_cycle()`.
+    #[inline]
+    pub fn set_active_pool(&mut self, pool: PoolId) {
+        self.active_pool = pool;
     }
 
     /// Borrow the router configuration.

@@ -4,7 +4,7 @@
 **Research:** [katgpt-rs/.research/249_DecentMem_DualPool_Reachable_Router.md](../.research/249_DecentMem_DualPool_Reachable_Router.md)
 **Source paper:** [arXiv:2605.22721](https://arxiv.org/pdf/2605.22721) — Hao, Long, Zhao 2026, "Self-Evolving MAS via Decentralized Memory"
 **Target:** `crates/katgpt-core/src/cgsp/dual_pool.rs` (new module) + Cargo feature `cgsp_dual_pool`
-**Status:** Active — Phase 4 complete (G3 E-pool growth + G4 faithfulness gate); Phase 5 (G5 CGSP integration) deferred to riir-ai
+**Status:** Active — Phase 4 complete (G3 E-pool growth + G4 faithfulness gate); Phase 5 (G5 CGSP integration) deferred to riir-ai; Phase 6 (docs + GOAT decision) complete — feature stays opt-in (G1–G4 PASS, G5 deferred)
 
 ---
 
@@ -173,14 +173,19 @@ Ship a generic **dual-pool memory router** that splits a bandit's candidate pool
 
 ### Tasks
 
-- [ ] **T6.1** Add `dual_pool.rs` module docs citing DecentMem Theorems 1 + 2, sigmoid routing rationale, and the CGSP single-pool-as-degenerate-case relationship.
-- [ ] **T6.2** Update `katgpt-rs/.docs/07_adaptation.md` with dual-pool as CGSP extension.
-- [ ] **T6.3** Update `katgpt-rs/README.md` Feature Showcase with dual-pool entry (after GOAT gate passes).
-- [ ] **T6.4** Add example: `examples/cgsp_dual_pool_demo.rs` showing growing E-pool + X-pool exploration on a synthetic 8-direction pool.
-- [ ] **T6.5** GOAT gate decision:
+- [x] **T6.1** Add `dual_pool.rs` module docs citing DecentMem Theorems 1 + 2, sigmoid routing rationale, and the CGSP single-pool-as-degenerate-case relationship.
+  - **DONE (2026-06-16):** Module header docs updated. "Phase 1 scope" section rewritten as "Phase coverage" reflecting Phase 1 (shipped) + Phase 4 (shipped) + Phase 5 (deferred to riir-ai). TL;DR extended with Phase 4 growth + FaithfulnessProbe gate note.
+- [x] **T6.2** Update `katgpt-rs/.docs/07_adaptation.md` with dual-pool as CGSP extension.
+  - **DONE (2026-06-16):** Added Technique 17 (Dual-Pool Reachable Memory Router) with full Problem/Solution/Implementation/Phase 4 growth/sigmoid-vs-ratio/proactive-vs-reactive/GOAT gate status/Performance sections. Technique count updated 16→17. Interaction Matrix updated with dual-pool row.
+- [x] **T6.3** Update `katgpt-rs/README.md` Feature Showcase with dual-pool entry (after GOAT gate passes).
+  - **DONE (2026-06-16):** Added "🔀 Dual-Pool Reachable Memory Router" showcase entry after temporal_deriv. Includes mermaid flow diagram (begin_cycle → sigmoid routing → E/X pool → cycle → consolidate → blend/grow/gate), GOAT G1–G4 PASS table (G5 deferred), key findings (proactive vs reactive, backward-compatible trait extension, sigmoid convention, FaithfulnessProbe fusion, CGSP = degenerate case).
+- [x] **T6.4** Add example: `examples/cgsp_dual_pool_demo.rs` showing growing E-pool + X-pool exploration on a synthetic 8-direction pool.
+  - **DONE (2026-06-16):** Example created with 3 demos: (1) G1 proactive reachability — drives w_E to 25000+, verifies X-pool still selected; (2) G3 E-pool growth — rewards X-pool arm 7, consolidates once, E-pool grows 4→5; (3) G4 faithfulness gate — gate ON promotes 4 live arms (E-pool 1→5), gate OFF promotes all 8 (E-pool 1→9). All assertions pass. Registered in Cargo.toml under `cgsp_dual_pool` feature. Also added `set_active_pool(PoolId)` public method to `DualPoolBandit` for deterministic replay/testing, and dual_pool re-exports to root `src/cgsp.rs` shim.
+- [x] **T6.5** GOAT gate decision:
   - If G1–G5 all pass AND dual-pool shows measurably wider personality divergence (G5.2) → recommend `cgsp_dual_pool` for promotion to CGSP default in riir-ai (separate riir-ai plan).
   - If G1–G4 pass but G5.2 shows no divergence improvement → keep opt-in, document as "reachability guarantee without personality benefit at this scale."
   - If any gate fails → demote to experimental, create issue.
+  - **DECISION (2026-06-16):** G1–G4 PASS, G5 deferred to riir-ai (requires `NpcCgspRuntime`). Per the second branch above, **`cgsp_dual_pool` stays opt-in**. The reachability guarantee alone (G1: 30× cheaper per-cycle than reactive entropy detector, formal non-trapping) justifies the feature for trap-prone domains. Promotion to CGSP default deferred until riir-ai validates G5.2 personality divergence widening. No issue created — no gate failed.
 
 ---
 

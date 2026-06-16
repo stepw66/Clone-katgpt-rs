@@ -1227,6 +1227,12 @@ required-features = ["cgsp"]
 name = "cgsp_collapse_recovery"
 required-features = ["cgsp"]
 
+# Plan 282 Phase 6 — Dual-Pool Reachable Memory Router demo.
+# Shows G1 reachability, G3 E-pool growth, G4 FaithfulnessProbe gate.
+[[example]]
+name = "cgsp_dual_pool_demo"
+required-features = ["cgsp_dual_pool"]
+
 # Plan 274 Phase 3 — CGSP GOAT gate benchmark.
 # Validates transfer-to-target, collapse recovery, feature-gate isolation,
 # per-cycle overhead, batched NPC throughput, allocation audit, and
