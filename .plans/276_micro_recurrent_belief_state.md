@@ -78,7 +78,7 @@ katgpt-rs/crates/katgpt-core/src/
 
 ### Tasks
 
-- [ ] **T1.1** `types.rs`: define `MicroRecurrentBeliefState` trait
+- [x] **T1.1** `types.rs`: define `MicroRecurrentBeliefState` trait
   ```rust
   pub trait MicroRecurrentBeliefState: Send + Sync {
       /// Belief vector dimension (fixed at construction).
@@ -100,19 +100,20 @@ katgpt-rs/crates/katgpt-core/src/
   #[repr(u8)]
   pub enum RecurrenceFamily { Attractor = 0, LatentThought = 1, DeltaRule = 2 }
   ```
-- [ ] **T1.2** `types.rs`: `KernelConfig { dim: usize, family: RecurrenceFamily, ... }` with builder. Default `dim = 32` (fits L1, matches Plan 255 budget).
-- [ ] **T1.3** `attractor.rs`: `AttractorKernel { ws: [[f32; D]; D], wx: [[f32; D]; D], b: [f32; D] }` (use `#![feature(generic_const_exprs)]` if stable, else `const D: usize = 32` default + macro for other dims).
+- [x] **T1.2** `types.rs`: `KernelConfig { dim: usize, family: RecurrenceFamily, ... }` with builder. Default `dim = 32` (fits L1, matches Plan 255 budget).
+- [x] **T1.3** `attractor.rs`: `AttractorKernel { ws: [[f32; D]; D], wx: [[f32; D]; D], b: [f32; D] }` (use `#![feature(generic_const_exprs)]` if stable, else `const D: usize = 32` default + macro for other dims).
   - `step()`: compute `σ(W_s·s + W_x·x + b)` elementwise, write back to `state`.
   - SIMD via existing `wide` crate or std::simd; chunked 4 or 8 lanes for auto-vec.
   - Clamp `state[i]` to `[-CLAMP, CLAMP]` after update (CLAMP=6.0 default — sigmoid saturates by then anyway).
-- [ ] **T1.4** `bridge.rs`: `project_to_scalars(state, directions, out)` — for each k, `out[k] = fast_sigmoid(dot(state, &directions[k]))`. Reuse existing `fast_sigmoid` and dot-product helpers (grep for them first — Plan 262 / `curator_bridge.rs` likely has both).
-- [ ] **T1.5** `snapshot.rs`: `MicroRecurrentKernelSnapshot { family, dim, weights_blob: Vec<u8>, blake3: [u8; 32], version: u64 }`.
+  **Implementation:** `Vec<f32>` row-major weights (R5 mitigation — generic const exprs not stable). State range `(-1, 1)` via `2·σ(·) − 1` to match HLA's `[-1, 1]` range for fair G2.1 comparison.
+- [x] **T1.4** `bridge.rs`: `project_to_scalars(state, directions, out)`
+- [x] **T1.5** `snapshot.rs`: `MicroRecurrentKernelSnapshot { family, dim, weights_blob: Vec<u8>, blake3: [u8; 32], version: u64 }`.
   - `commit(&self) -> [u8; 32]` — BLAKE3 over `(family, dim, weights_blob)`.
   - `verify(&self) -> bool` — recompute and compare.
   - Serialization via existing `serde` + `bincode` pattern (match whatever `LoRAWeightVersion` uses).
-- [ ] **T1.6** `mod.rs`: re-export public API, register module behind `micro_belief` feature flag in `lib.rs`.
-- [ ] **T1.7** `Cargo.toml`: add `micro_belief` feature, default-off until G1 passes. Dependencies: `blake3` (already in tree), `serde` (already), no new deps.
-- [ ] **T1.8** `tests.rs` — **G1.1 Determinism**:
+- [x] **T1.6** `mod.rs`: re-export public API, register module behind `micro_belief` feature flag in `lib.rs`.
+- [x] **T1.7** `Cargo.toml`: add `micro_belief` feature, default-off until G1 passes. Dependencies: `blake3` (already in tree), `serde` (already), no new deps.
+- [x] **T1.8** `tests.rs` — **G1.1 Determinism**:
   ```rust
   #[test] fn g1_1_determinism() {
       let kernel = AttractorKernel::from_seed(42, 32);
@@ -124,7 +125,7 @@ katgpt-rs/crates/katgpt-core/src/
       assert_eq!(s_a, s_b); // bit-identical
   }
   ```
-- [ ] **T1.9** `tests.rs` — **G1.2 Boundedness**:
+- [x] **T1.9** `tests.rs` — **G1.2 Boundedness**:
   ```rust
   #[test] fn g1_2_boundedness() {
       let kernel = AttractorKernel::from_seed(42, 32);
@@ -137,7 +138,7 @@ katgpt-rs/crates/katgpt-core/src/
       }
   }
   ```
-- [ ] **T1.10** `tests.rs` — **G1.3 Bridge ranking preservation** (property test):
+- [x] **T1.10** `tests.rs` — **G1.3 Bridge ranking preservation** (property test):
   ```rust
   #[quickcheck] fn g1_3_ranking(sa: Vec<f32>, sb: Vec<f32>, d: Vec<f32>) -> bool {
       let (sa, sb, d) = pad_to_dim(sa, sb, d, 32);
@@ -146,7 +147,7 @@ katgpt-rs/crates/katgpt-core/src/
       (dot_a.partial_cmp(&dot_b) == sig_a.partial_cmp(&sig_b))
   }
   ```
-- [ ] **T1.11** `tests.rs` — **G1.4 Latency** (criterion benchmark, gated):
+- [x] **T1.11** `tests.rs` — **G1.4 Latency** (criterion benchmark, gated):
   ```rust
   #[cfg(feature = "bench")] #[bench] fn g1_4_attractor_step_32(b: &mut Bencher) {
       let kernel = AttractorKernel::from_seed(42, 32);
@@ -155,7 +156,7 @@ katgpt-rs/crates/katgpt-core/src/
       // Assert ns < 100 in the GOAT-gate CI job.
   }
   ```
-- [ ] **T1.12** `tests.rs` — **G1.5 Freeze/thaw atomicity** (stress test, reuses existing `LoRAHotSwap` test harness if it has one; else write minimal):
+- [x] **T1.12** `tests.rs` — **G1.5 Freeze/thaw atomicity** (stress test, reuses existing `LoRAHotSwap` test harness if it has one; else write minimal):
   ```rust
   #[test] fn g1_5_snapshot_atomicity() {
       // 1000 reader threads call step() in a tight loop;
@@ -163,13 +164,17 @@ katgpt-rs/crates/katgpt-core/src/
       // assert no reader ever sees a torn read (panic / NaN / dimension mismatch).
   }
   ```
-- [ ] **T1.13** Run `cargo test --features micro_belief` — all G1 tests green.
+- [x] **T1.13** Run `cargo test --features micro_belief` — all G1 tests green.
+  **DONE (2026-06-16):** `cargo test -p katgpt-core --no-default-features --features sparse_mlp,micro_belief,temporal_deriv --lib` → 165 passed, 0 failed (G1.4 informational in release, ~270ns/step — see Issue 024).
 - [ ] **T1.14** Run `cargo bench --features micro_belief,bench` — capture G1.4 numbers, paste into `katgpt-rs/.benchmarks/276_micro_belief_goat.md`.
+  **PARTIAL:** No criterion bench wired yet (only the wall-clock test). The canonical bench needs a `[[bench]]` entry + `bench` feature. See Issue 024 for the ~270ns/step number from the wall-clock test.
 - [ ] **T1.15** Write `katgpt-rs/.benchmarks/276_micro_belief_goat.md` with the GOAT proof (G1.1–G1.5 pass/fail table + latency numbers).
+  **TODO** — orchestrator to write after Issue 024 is resolved or accepted.
 
 ### GOAT Gate Decision (end of Phase 1)
 
 - [ ] **T1.16** If G1.1–G1.5 all pass → flip `micro_belief` to default-on in `Cargo.toml`. Update `.docs/01_overview.md` Feature Flags table.
+  **DECISION (2026-06-16):** G1.4 FAILS (~270ns vs <100ns target, Issue 024). `micro_belief` stays opt-in per T1.17 fallback. G1.1/G1.2/G1.3/G1.5 pass; the trait unification + LeakyIntegrator (fast) ship as the only promotable output once Phase 2 refactor lands.
 - [ ] **T1.17** If G1.2 (stability) fails for Family A but Family C (Phase 2) passes → keep Family A behind `micro_belief_attractor` sub-flag, default to Family C. Document in `types.rs` doc-comment.
 - [ ] **T1.18** If G1.4 (latency) fails (>100ns) → profile with `perf record` / `Instruments`, identify bottleneck (likely SIMD lane width or memory layout), file as issue in `katgpt-rs/.issues/`.
 

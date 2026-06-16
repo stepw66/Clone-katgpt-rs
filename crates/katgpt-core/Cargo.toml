@@ -90,6 +90,8 @@ qgf_oracle = []  # QGradientOracle trait — drop-Jacobian critic gradient (Plan
 qgf_projector = ["speculative_generator"]  # FirstOrderProjector — one-step Euler projection (Plan 268 F2)
 qgf_drafter = ["qgf"]  # QGuidedDrafter — Q-gradient velocity bias during generation (Plan 268 F1). Enables `qgf` parent so `pub mod qgf` compiles.
 qgf_adaptive = ["qgf_drafter"]  # VarianceAdaptiveGuidance — sigmoid-gated per-query 1/β (Plan 268 F4)
+micro_belief = []  # MicroRecurrentBeliefState — per-entity recurrent state trait + attractor/leaky kernels + BLAKE3 snapshot (Plan 276, Research 242). Opt-in until G1.1–G1.5 GOAT gate passes.
+temporal_deriv = []  # Temporal Derivative Kernel — dual fast/slow EMA surprise signal (Plan 277, Research 243, arXiv:2606.08720). Opt-in until ≥2 fusion gates pass.
 
 [[bench]]
 name = "flow_field_bench"
@@ -125,3 +127,8 @@ required-features = ["sector_projection", "action_bridge"]
 name = "qgf_projector_bench"
 harness = false
 required-features = ["qgf"]
+
+[[bench]]
+name = "temporal_deriv_bench"
+harness = false
+required-features = ["temporal_deriv"]

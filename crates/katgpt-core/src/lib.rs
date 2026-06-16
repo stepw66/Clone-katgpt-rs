@@ -57,6 +57,26 @@ pub use traits::{NoGuidanceOracle, QGradientOracle};
 #[cfg(feature = "qgf")]
 pub mod qgf;
 
+// MicroRecurrentBeliefState — per-entity recurrent state kernel (Plan 276, Research 242).
+// Trait + Family A (attractor) + Family C (leaky) + BLAKE3 snapshot + sigmoid bridge.
+// Opt-in until G1.1–G1.5 GOAT gate passes.
+#[cfg(feature = "micro_belief")]
+pub mod micro_belief;
+#[cfg(feature = "micro_belief")]
+pub use micro_belief::{
+    AttractorKernel, KernelConfig, LeakyIntegrator, MicroRecurrentBeliefState,
+    MicroRecurrentKernelSnapshot, RecurrenceFamily, SNAPSHOT_VERSION, project_to_scalars,
+};
+
+// Temporal Derivative Kernel — dual fast/slow EMA surprise signal (Plan 277, Research 243).
+// Turns any streaming latent vector into a signed "surprise" signal — the implicit
+// prediction-error channel for credit assignment, computed locally with no backprop.
+// Opt-in until ≥2 fusion gates (G2–G5) pass.
+#[cfg(feature = "temporal_deriv")]
+pub mod temporal_deriv;
+#[cfg(feature = "temporal_deriv")]
+pub use temporal_deriv::{TemporalDerivativeKernel, sigmoid_surprise_gate};
+
 #[cfg(feature = "dual_leo")]
 pub use traits::{
     ActingMode, AlphaSchedule, AutocurriculumSampler, BcConfig, BcTarget, DualLeoMixer,
