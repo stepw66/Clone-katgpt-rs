@@ -4,7 +4,7 @@
 **Research:** [katgpt-rs/.research/250_Latent_Recursion_Policy_Improvement_Advantage_Margin.md](../.research/250_Latent_Recursion_Policy_Improvement_Advantage_Margin.md)
 **Source paper:** [arxiv:2511.16886](https://arxiv.org/abs/2511.16886) — "Latent Reasoning in TRMs is Secretly a Policy Improvement Operator" (Asadulaev et al., ICML 2026)
 **Target:** `katgpt-rs/src/pruners/self_advantage.rs` (new module) + Cargo features `self_advantage_gate`, `product_policy_sharpen`
-**Status:** Active — Phase 1 + 2 + 3 COMPLETE (math + wrappers + examples). Phase 4 (GOAT gate benchmark) pending.
+**Status:** Phase 1–3 COMPLETE + Phase 4 GOAT gate run (3/4 pass, G3 latency fails at vocab=1024). **Decision: stays opt-in** — see [`.benchmarks/283_self_advantage_gate_goat.md`](../.benchmarks/283_self_advantage_gate_goat.md).
 
 ---
 
@@ -100,16 +100,16 @@ Ship three modelless primitives derived from the policy-improvement theoretical 
 
 ### Tasks
 
-- [ ] **T4.1** A/B benchmark: recursion loop with `EarlyStopGate` (baseline) vs `AdvantageMarginGate` (new).
+- [x] **T4.1** A/B benchmark: recursion loop with `EarlyStopGate` (baseline) vs `AdvantageMarginGate` (new).
   - Metric: forward passes saved at matched output quality.
-  - Domain: HLA belief evolution OR DDTree speculative decode (whichever T0.1 picked).
-  - **Gate:** ≥2× forward pass reduction with no quality loss → promote to default.
+  - Domain: synthetic geometric-blend recursion loop (EarlyStopGate is structurally incompatible — different gate point, see benchmark note).
+  - **Result:** G1 PASS (2.68×–6.76× reduction), G2 PASS (100% argmax match). See [`.benchmarks/283_self_advantage_gate_goat.md`](../.benchmarks/283_self_advantage_gate_goat.md).
 
-- [ ] **T4.2** If `AdvantageMarginGate` wins: demote `EarlyStopGate` to opt-in, promote `self_advantage_gate` to default-on. Update README GOAT table.
+- [ ] **T4.2** If `AdvantageMarginGate` wins: demote `EarlyStopGate` to opt-in, promote `self_advantage_gate` to default-on. Update README GOAT table. — **N/A: G3 failed, feature did not win GOAT.**
 
-- [ ] **T4.3** If `AdvantageMarginGate` loses: keep opt-in, document why in benchmark note (`.benchmarks/NNN_self_advantage_gate.md`). The product-policy sharpening primitive may still ship as opt-in.
+- [x] **T4.3** If `AdvantageMarginGate` loses: keep opt-in, document why in benchmark note (`.benchmarks/283_self_advantage_gate_goat.md`). The product-policy sharpening primitive may still ship as opt-in. — **DONE: stays opt-in, G3 latency (3.96µs at vocab=1024) exceeds 1µs target.**
 
-- [ ] **T4.4** Latency check: `self_advantage()` must be <1µs per call (O(vocab) SIMD loop). Verify with criterion bench.
+- [x] **T4.4** Latency check: `self_advantage()` must be <1µs per call (O(vocab) SIMD loop). Verify with criterion bench. — **DONE: FAILS at vocab=1024 (3.958µs), passes at vocab ≤128. Root cause: O(vocab) scalar loop; SIMD mitigation documented in benchmark note.**
 
 ---
 
