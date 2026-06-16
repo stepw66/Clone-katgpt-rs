@@ -48,6 +48,8 @@ pub mod chunked;
 pub mod compact;
 pub mod head_budget;
 pub mod key_selection;
+#[cfg(feature = "lora_beta_predictor")]
+pub mod lora_beta_predictor;
 pub mod online;
 pub mod router;
 pub mod score_matrix;
@@ -79,6 +81,13 @@ pub use value_fitter::{fit_cv_least_squares, ValueFitConfig, ValueFitResult};
 
 #[cfg(feature = "adaptive_cot_compaction")]
 pub use adaptive_cot::{AdaptiveCompactResult, AdaptiveTraceCompactor};
+
+#[cfg(feature = "lora_beta_predictor")]
+pub use lora_beta_predictor::{
+    LoraBetaError, LoraBetaPredictor, PREDICTOR_MAGIC, PREDICTOR_VERSION,
+    BETA_MAX, BETA_MID, BETA_MIN, DEFAULT_ALPHA, DEFAULT_RANK,
+    LORA_INPUT_DIM as LORA_BETA_INPUT_DIM, LORA_OUTPUT_DIM as LORA_BETA_OUTPUT_DIM,
+};
 
 #[cfg(test)]
 mod tests;
