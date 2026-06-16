@@ -69,6 +69,15 @@ pub use micro_belief::{
     MicroRecurrentKernelSnapshot, RecurrenceFamily, SNAPSHOT_VERSION, project_to_scalars,
 };
 
+// FaithfulnessProbe — causal intervention diagnostic for injected memory (Plan 278, Research 244).
+// Moved from katgpt root to katgpt-core so riir-engine (Plan 308) can consume via katgpt-core.
+// Two features:
+// - `triggered_injection` (default-ON after GOAT G3): sigmoid-thresholded inject/skip hot-path gate.
+// - `faithfulness_probe` (opt-in, audit cadence): full intervention suite + perturbation + attribution.
+// The module is compiled when EITHER feature is on; submodules are individually gated in `mod.rs`.
+#[cfg(any(feature = "faithfulness_probe", feature = "triggered_injection"))]
+pub mod faithfulness;
+
 // Temporal Derivative Kernel — dual fast/slow EMA surprise signal (Plan 277, Research 243).
 // Turns any streaming latent vector into a signed "surprise" signal — the implicit
 // prediction-error channel for credit assignment, computed locally with no backprop.

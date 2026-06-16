@@ -3,7 +3,7 @@
 **Date:** 2026-06-16
 **Research:** [katgpt-rs/.research/244_Self_Evolver_Faithfulness_Cognitive_Integrity.md](../.research/244_Self_Evolver_Faithfulness_Cognitive_Integrity.md)
 **Source paper:** [arxiv 2601.22436](https://arxiv.org/pdf/2601.22436) — Zhao et al. 2026 (ICML), "Large Language Model Agents Are Not Always Faithful Self-Evolvers"
-**Target:** `katgpt-rs/src/faithfulness/` (new module) + Cargo features `faithfulness_probe`, `triggered_injection`
+**Target:** `crates/katgpt-core/src/faithfulness/` (new module in katgpt-core, moved from `katgpt-rs/src/faithfulness/` so riir-engine Plan 308 can consume via katgpt-core) + Cargo features `faithfulness_probe`, `triggered_injection` (defined in katgpt-core, forwarded as passthroughs from the katgpt root crate)
 **Status:** Active — Phase 1 (unblocking skeleton)
 
 ---

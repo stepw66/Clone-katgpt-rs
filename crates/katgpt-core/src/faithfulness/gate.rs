@@ -23,13 +23,13 @@
 
 /// Numerically stable logistic sigmoid.
 ///
-/// Re-exports `katgpt_core::simd::fast_sigmoid` — same implementation used
+/// Re-exports `crate::simd::fast_sigmoid` — same implementation used
 /// across the engine (clamps at ±40 to avoid overflow, then `1/(1+e^{-x})`).
 /// Used only by the soft-gating accessor [`EntropyThresholdGate::sigmoid_value`],
 /// NOT by the hot-path boolean decision (which collapses to a compare).
 #[inline]
 fn sigmoid(x: f32) -> f32 {
-    katgpt_core::simd::fast_sigmoid(x)
+    crate::simd::fast_sigmoid(x)
 }
 
 /// Decision gate for triggered memory injection.

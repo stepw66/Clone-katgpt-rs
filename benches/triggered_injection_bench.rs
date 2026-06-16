@@ -15,7 +15,7 @@
 //! cargo run --release --bench triggered_injection_bench --features faithfulness_probe,triggered_injection
 //! ```
 
-use katgpt_rs::faithfulness::gate::{EntropyThresholdGate, TriggeredInjectionGate};
+use katgpt_core::faithfulness::gate::{EntropyThresholdGate, TriggeredInjectionGate};
 
 fn main() {
     println!("=== TriggeredInjectionGate Benchmark (Plan 278 T2.8) ===\n");

@@ -42,7 +42,7 @@ katgpt-rs = { version = "...", features = ["faithfulness_probe", "triggered_inje
 ### `ConsumerContext` trait (implement this for your consumer)
 
 ```rust
-use katgpt_rs::faithfulness::types::ConsumerContext;
+use katgpt_core::faithfulness::types::ConsumerContext;
 
 impl ConsumerContext for MyConsumer {
     type Behavior = f32;           // or Vec<f32>, action enum, etc.
@@ -59,7 +59,7 @@ impl ConsumerContext for MyConsumer {
 
 ```rust
 use fastrand::Rng;
-use katgpt_rs::faithfulness::probe::{DefaultFaithfulnessProbe, FaithfulnessProbe};
+use katgpt_core::faithfulness::probe::{DefaultFaithfulnessProbe, FaithfulnessProbe};
 
 let consumer = MyConsumer { /* ... */ };
 let irrelevant_pool = vec![/* tokens from a different context */];
@@ -88,7 +88,7 @@ The `FaithfulnessProfile` has four delta fields:
 ### `AttributionProbe` — rank segments by causal influence
 
 ```rust
-use katgpt_rs::faithfulness::attribution::{AttributionProbe, FiniteDifferenceAttributionProbe};
+use katgpt_core::faithfulness::attribution::{AttributionProbe, FiniteDifferenceAttributionProbe};
 
 let mut probe = FiniteDifferenceAttributionProbe::new(consumer);
 let norm = probe.attribution_norm(&memory, 1e-3); // epsilon = 1e-3
@@ -101,7 +101,7 @@ Validated against exact Integrated Gradients on a non-linear consumer: **Spearma
 ### `TriggeredInjectionGate` — skip injection when saturated
 
 ```rust
-use katgpt_rs::faithfulness::gate::{EntropyThresholdGate, TriggeredInjectionGate};
+use katgpt_core::faithfulness::gate::{EntropyThresholdGate, TriggeredInjectionGate};
 
 let gate = EntropyThresholdGate::default(); // tau=0.5, lambda=8.0
 
@@ -118,7 +118,7 @@ The gate uses **sigmoid** (never softmax — AGENTS.md constraint): `should_inje
 ### `UncertaintySignal` — unify entropy / collapse / curiosity
 
 ```rust
-use katgpt_rs::faithfulness::gate::UncertaintySignal;
+use katgpt_core::faithfulness::gate::UncertaintySignal;
 
 impl UncertaintySignal for MyConsumer {
     fn uncertainty(&self) -> f32 {
@@ -136,7 +136,7 @@ The katgpt-rs primitive ships **generic math only**. The canonical game wiring (
 
 ```rust
 use fastrand::Rng;
-use katgpt_rs::faithfulness::{
+use katgpt_core::faithfulness::{
     ConsumerContext, DefaultFaithfulnessProbe, FaithfulnessProbe,
     EntropyThresholdGate, TriggeredInjectionGate,
 };

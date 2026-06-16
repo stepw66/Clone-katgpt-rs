@@ -133,8 +133,8 @@ Module compiled when EITHER feature is on; submodules individually gated in `mod
 - **Research:** [244_Self_Evolver_Faithfulness_Cognitive_Integrity.md](../.research/244_Self_Evolver_Faithfulness_Cognitive_Integrity.md)
 - **Private guide (riir-ai):** [129_Cognitive_Integrity_Layer_Guide.md](../../riir-ai/.research/129_Cognitive_Integrity_Layer_Guide.md)
 - **Source paper:** [arxiv 2601.22436](https://arxiv.org/pdf/2601.22436) — Zhao et al. 2026 (ICML)
-- **Implementation:** `katgpt-rs/src/faithfulness/{mod,types,probe,attribution,gate,perturb,goat_gate}.rs`
-- **Benches:** `katgpt-rs/benches/{triggered_injection_bench,faithfulness_probe_bench}.rs`
+- **Implementation:** `crates/katgpt-core/src/faithfulness/{mod,types,probe,attribution,gate,perturb,goat_gate}.rs` (moved from `katgpt-rs/src/faithfulness/` so riir-engine Plan 308 can consume via katgpt-core)
+- **Benches:** `katgpt-rs/benches/{triggered_injection_bench,faithfulness_probe_bench}.rs` (import via `katgpt_core::faithfulness::*`)
 - **API docs:** [`.docs/faithfulness_probe.md`](../.docs/faithfulness_probe.md)
 
 ## TL;DR

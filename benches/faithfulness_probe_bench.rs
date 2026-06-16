@@ -13,8 +13,8 @@
 //! ```
 
 use fastrand::Rng;
-use katgpt_rs::faithfulness::probe::{DefaultFaithfulnessProbe, FaithfulnessProbe};
-use katgpt_rs::faithfulness::types::ConsumerContext;
+use katgpt_core::faithfulness::probe::{DefaultFaithfulnessProbe, FaithfulnessProbe};
+use katgpt_core::faithfulness::types::ConsumerContext;
 
 /// Synthetic faithful consumer: behavior = weighted dot product.
 /// Mirrors the faithful consumer from probe.rs unit tests.
