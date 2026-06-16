@@ -521,6 +521,10 @@ required-features = ["sia_feedback", "g_zero", "bomber"]
 name = "bomber_18_sdpg_tournament"
 required-features = ["sdpg_bandit", "sdar_gate", "ropd_rubric", "g_zero", "bomber"]
 
+[[example]]
+name = "bomber_21_sonlt_arena"
+required-features = ["bomber"]
+
 # ── Monopoly FSM Arena ────────────────────────────────────────
 
 [[example]]
