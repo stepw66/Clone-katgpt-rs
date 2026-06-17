@@ -291,3 +291,13 @@ pub mod dendritic_gate;
 pub use dendritic_gate::{DendriticGate, dendritic_sigmoid};
 #[cfg(feature = "dendritic_gate")]
 pub use simd::{coincidence_score, entropy_f32};
+
+// CompressionDrafter — Hot-tier modelless LZ4 corpus-as-model drafter (Plan 285,
+// Research 256, nathan.rs/gzip-lm). The compressor IS the model: score candidate
+// continuations by compressed length against a frozen corpus. Corpus is appendable
+// for online learning and is itself the wired format (bytes + BLAKE3).
+// Opt-in until G1–G3 GOAT gate passes.
+#[cfg(feature = "compression_drafter")]
+pub mod compression_drafter;
+#[cfg(feature = "compression_drafter")]
+pub use compression_drafter::{CompressionDrafter, Lz4FlexDrafter};

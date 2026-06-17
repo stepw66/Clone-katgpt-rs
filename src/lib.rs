@@ -47,6 +47,11 @@ pub mod npc_brain_router;
 pub mod cubical_nerve;
 #[cfg(feature = "collider_consistency")]
 pub mod collider_pruner;
+// CompressionDrafter — corpus-as-model quest grammar drafter (Plan 285, Research 256).
+// Re-exports katgpt-core's compression_drafter module for downstream consumers (riir-games).
+// Opt-in behind the `compression_drafter` feature until GOAT gate passes.
+#[cfg(feature = "compression_drafter")]
+pub use katgpt_core::compression_drafter;
 #[cfg(feature = "cs_kv_probe")]
 pub mod cs_kv_probe;
 #[cfg(any(feature = "gdn2_attention", feature = "wall_attention"))]

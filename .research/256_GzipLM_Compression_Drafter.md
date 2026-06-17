@@ -3,7 +3,7 @@
 > **Source:** [gzip as a language model: beam-search text generation by compression](https://nathan.rs/posts/gzip-lm/) — Nathan (nathan.rs), 2026
 > **Reference impl:** 110-line Python script in the blog post (reproduced in §Source Code below)
 > **Date:** 2026-06-17
-> **Status:** Active — Super-GOAT (committed, pending G1–Gn validation in `riir-ai/.research/137_*.md`)
+> **Status:** REVISED 2026-06-17 (2nd revision) — **GOAT FAILED** on quest grammar gate (Plan 285). G1 diversity 0.12× (need 3×), G2 latency 407× (need ≤2×). G3 composition + G4 zero-alloc passed. The open primitive (`compression_drafter` in katgpt-core) stays as opt-in; `CompressionQuestDrafter` stays opt-in but does NOT promote to default. See `katgpt-rs/.benchmarks/285_compression_drafter_goat.md` for the honest negative result. **Root cause**: candidate-set-scoring is the wrong algorithm (needs nathan.rs's actual beam search); lz4 is Warm-tier not Hot-tier. The corpus-as-format insight (CorpusSnapshot, BLAKE3) is correct and stays. The per-NPC plasma angle in `riir-ai/.research/137` is still unvalidated.
 > **Related Research:** 024 (δ-Mem — delta rule, didn't help DDTree, different mechanism), 060 (MeMo memory-as-model — different mechanism), 125 (Weight Norm = Kolmogorov — theoretical basis), 137 (Pplx Datrie — trie acceleration primitive), 147 (PhraseBoost — single-step trie boost, composable), 168/188 (Ruliology + IrreducibilityGate — compression-as-diagnostic, NOT generative), 229 (ProgramAsWeights — program-as-model variant), 255 (VibeThinker)
 > **Related Plans:** TBD after guide validation (target `katgpt-rs/.plans/281_*.md`)
 > **Cross-ref (riir-ai):** Research 137 (Compression-Drafter Plasma Personality Guide)
@@ -29,7 +29,9 @@ The compressor's match window IS a **frozen corpus** — no learned weights, but
 - **Per-NPC personality at plasma tier (the Super-GOAT selling point — see riir-ai/.research/137):** when the alphabet is small (game actions, 6–32 symbols) and the window is tiny (last 256 actions), LZ-style match scoring fits the plasma µs budget via SIMD. This unblocks per-NPC personality without per-NPC LoRA — a feat no incumbent can match.
 - **Fifth pillar of modelless:** ConstraintPruners, Bandits, DDTree, SpeculativeDecode, **CompressionDrafter**.
 
-**Verdict: Super-GOAT (committed).** Novel mechanism (zero compression crates in any of the 3 repos), new capability class (corpus-as-model is a 5th modelless primitive class), product selling point (per-NPC personality at plasma tier), force multiplier (Plasma Path × Freeze/Thaw × HLA × PhraseBoost × R188 IrreducibilityGate). Selling-point guide: `riir-ai/.research/137_Compression_Drafter_Plasma_Personality_Guide.md`. Validation G1–Gn gate lives in that guide.
+**Verdict (revised 2026-06-17): GOAT — quest grammar compression drafter.** Concrete win: replace `TernaryDraftModel::generate()`'s 8-hardcoded-template selection with compression-as-scorer over the registered quest corpus. **The corpus IS the wired format** — no parser, no struct deserialization, BLAKE3-committable via existing freeze/thaw (Plan 092). Ships as Hot-tier modelless drafter (sub-ms `lz4_flex` or custom tiny LZ77).
+
+**Why not Super-GOAT (downgrade rationale):** The original Super-GOAT claim hinged on the per-NPC plasma-LZ angle (G1 latency fit), but the validation gate has not run and may not pass (LZ77 on tiny alphabets may be too coarse to discriminate actions). Committing Super-GOAT before G1 was premature. The quest grammar angle alone is GOAT — it ships as a new modelless drafter class (5th class after ConstraintPruners/Bandits/DDTree/SpeculativeDecode), but it does not enable a new product-class capability (template selection already works; this is a quality/scalability improvement, not a new feature). The per-NPC personality angle (if G1 passes) would promote this to Super-GOAT in a follow-up note.
 
 ---
 
@@ -148,7 +150,18 @@ For our Rust ports:
 
 ## 3. Verdict
 
-### Tier: **Super-GOAT (committed)**
+### Tier: **GOAT (revised 2026-06-17 — was Super-GOAT, downgraded)**
+
+The 4-question novelty gate was originally scored all-YES, but on reflection Q3 (product selling point) is conditional on the per-NPC plasma angle that has not been validated. The honest Q3 answer for the GOAT verdict is: "better quest generation via corpus-as-format" — a quality improvement, not a new product feature.
+
+| Q | Original answer | Revised honest answer |
+|---|-----------------|----------------------|
+| Q1: No prior art? | YES | **YES** (still holds — zero compression crates in any of the 3 repos) |
+| Q2: New capability class? | YES | **PARTIAL** — 5th modelless drafter class (yes), but doesn't unlock a behavior the existing 4 classes can't approximate at lower quality |
+| Q3: Product selling point? | YES | **NO for GOAT, MAYBE for Super-GOAT-via-plasma** — the per-NPC-personality claim is unvalidated, so we cannot honestly commit it |
+| Q4: Force multiplier? | YES | **YES** (Plasma, Freeze/Thaw, HLA, PhraseBoost, IrreducibilityGate — all connect) |
+
+2.5/4 YES → **GOAT**, not Super-GOAT. Per skill rule: GOAT ships plan + impl + bench + promote/demote. The riir-ai guide (`riir-ai/.research/137`) remains as an exploration doc for the per-NPC plasma angle but does NOT trigger the Super-GOAT mandatory-output protocol. Plans proceed.
 
 **Novelty gate (§1.5 of research workflow):**
 

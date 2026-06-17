@@ -235,6 +235,7 @@ swir_switch_thinking = ["thinking_cot"]  # SwiR Switch-Thinking — Explicit↔L
 faithfulness_probe = ["katgpt-core/faithfulness_probe"]  # FaithfulnessProbe — causal intervention diagnostic for injected memory (Plan 278, Research 244). Audit-cadence diagnostic — opt-in (diagnostic, audit cadence not every tick). Passthrough to katgpt-core (moved from root; riir-engine Plan 308 consumes via katgpt-core).
 triggered_injection = ["katgpt-core/triggered_injection"]  # TriggeredInjectionGate — sigmoid-thresholded inject/skip hot-path gate (Plan 278, Research 244). DEFAULT-ON after GOAT G3 passed (50% skips w/ 0.63% quality parity in saturated regime). Passthrough to katgpt-core (moved from root; riir-engine Plan 308 consumes via katgpt-core).
 micro_belief = ["katgpt-core/micro_belief"]  # MicroRecurrentBeliefState — per-entity recurrent state trait + attractor/leaky kernels + BLAKE3 snapshot (Plan 276, Research 242). Opt-in until G1.1–G1.5 GOAT gate passes.
+compression_drafter = ["katgpt-core/compression_drafter"]  # CompressionDrafter — corpus-as-model quest grammar drafter (Plan 285, Research 256, nathan.rs/gzip-lm). Hot-tier lz4_flex scorer. Opt-in until GOAT gate passes.
 temporal_deriv = ["katgpt-core/temporal_deriv"]  # Temporal Derivative Kernel — dual fast/slow EMA surprise signal (Plan 277, Research 243, arXiv:2606.08720). Opt-in until ≥2 fusion gates pass.
 chain_fold = ["thinking_cot"]  # ThoughtFold chain folding — inference-time CoT step pruning (Plan 195 GOAT 16/16, validated by Plan 228 78% reduction)
 clr = []  # CLR Claim-Level Reliability runtime — sigmoid projection vote over claim embeddings (Plan 284, Research 255)
@@ -996,6 +997,10 @@ name = "micro_belief_demo"
 required-features = ["micro_belief"]
 
 [[example]]
+name = "compression_drafter_01_basic"
+required-features = ["compression_drafter"]
+
+[[example]]
 name = "spectral_threat_arena"
 required-features = ["spectral_threat"]
 
@@ -1364,7 +1369,26 @@ required-features = ["module_energy_route"]
 name = "sigmoid_graded_reject"
 required-features = ["sigmoid_graded_reject"]
 
-# Plan 284 Phase 4 — CLR GOAT gate (G1–G5) stubs. Opt-in until the gate runs.
+# Plan 284 Phase 4 — CLR GOAT gate (G1, G2, G5). Opt-in until the gate runs.
 [[test]]
 name = "bench_284_clr_goat"
+path = "tests/bench_284_clr_goat.rs"
 required-features = ["clr"]
+
+# Plan 284 Phase 4 — CLR GOAT gate G4 (zero-allocation audit).
+# Separate binary because it installs its own #[global_allocator] (counting
+# wrapper around System). Must not share a binary with any other test that
+# declares a global allocator.
+[[test]]
+name = "bench_284_clr_goat_g4"
+path = "tests/bench_284_clr_goat_g4.rs"
+required-features = ["clr"]
+
+# Plan 284 Phase 4 — CLR clr_vote_minimal performance benchmark (G3).
+# Uses std::time::Instant + harness = false (criterion is not a root-crate
+# dev-dep; see benches/bench_284_clr_perf.rs doc-comment for the deviation note).
+[[bench]]
+name = "bench_284_clr_perf"
+path = "benches/bench_284_clr_perf.rs"
+required-features = ["clr"]
+harness = false
