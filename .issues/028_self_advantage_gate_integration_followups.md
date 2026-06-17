@@ -116,7 +116,11 @@ The signals are genuinely complementary, not redundant. The advantage-margin gat
 
 ## T5.3 — Freeze/thaw snapshot of improvement direction vector `A(·)`
 
-**Status:** Speculative. T5.1 is now shipped (2026-06-17) so the blocker is removed, but the aggregation design question remains open.
+> **✅ STATUS UPDATE (2026-06-17): COMPLETE — shipped as opt-in feature `advantage_freeze_thaw`.**
+>
+> Commit `3d60c34e` on `develop`. 9/9 tests pass. Resolves all three "Why deferred" items below: aggregation design = **EMA over cycles** (decay configurable), consumer-ready = the snapshot is the consumer-ready surface, and the personality-fingerprint hypothesis is now testable from the shipped artifact. Default-off pending real game-side consumer validation of the EMA decay choice.
+
+**Status (historical, pre-2026-06-17):** Speculative. T5.1 is now shipped (2026-06-17) so the blocker is removed, but the aggregation design question was open.
 
 The idea: per-NPC, the advantage-margin direction `A(·) = log π+ − log π̂` over many ticks characterizes which kinds of observations improve that NPC's predictions. Snapshotting this as a versioned latent direction vector (BLAKE3-committed `MicroRecurrentKernelSnapshot` variant — Plan 276) gives NPCs a per-personality "what improves me" fingerprint.
 
@@ -131,7 +135,11 @@ The idea: per-NPC, the advantage-margin direction `A(·) = log π+ − log π̂`
 
 ## T2.2 — Wire into `LoopMode::WeightShared`
 
-**Integration site:** `katgpt-rs/crates/katgpt-core/src/types.rs:314-324` (`LoopMode::WeightShared { loop_count }`)
+> **✅ STATUS UPDATE (2026-06-17): COMPLETE — shipped as opt-in feature `weight_shared_advantage_gate`.**
+>
+> Commit `6af47cf1` on `develop`. 4/4 new tests pass, including `no_gate_path_is_byte_identical_to_baseline` GOAT gate (verifies zero hot-path regression when feature is off). Existing LT2 suite re-verified under the feature flag: `goat_108_lt2_looped` 11/11 pass (2026-06-17 regression re-check). Gate threaded as `Option<&mut AdvantageMarginGate>` in `forward_looped` (`src/transformer.rs`), call sites updated in `tests/bench_108_lt2_looped.rs` (6) and `tests/goat_108_lt2_looped.rs` (1). T2.2.4 (real-workload bench) remains open as a consumer-validation task, not a primitive-availability task.
+
+**Integration site:** `katgpt-rs/crates/katgpt-core/src/types.rs:314-324` (`LoopMode::WeightShared { loop_count }`) — feature wiring landed in `src/transformer.rs::forward_looped`.
 
 ### Why deferred
 
@@ -156,7 +164,11 @@ Step 3 is cheap (~100ns for LLM-scale vocab, see Bench 056 G3 informational note
 
 ## T2.3 — `pre_recursion_logits` capture hook on `SpeculativeGenerator` trait
 
-**Integration site:** `katgpt-rs/crates/katgpt-core/src/traits.rs:997-1007`
+> **✅ STATUS UPDATE (2026-06-17): COMPLETE — shipped as opt-in feature `recursion_logits`.**
+>
+> Commit `65656fea` on `develop`. 3/3 tests pass. Implemented exactly as the "Recommended approach (when revisited)" section below prescribes: new opt-in trait `RecursionLogits` (added in `crates/katgpt-core/src/traits.rs`), no modification to `SpeculativeGenerator`. `AdvantageMarginGate` can be parametric over `P: RecursionLogits` without trait breakage. Default-off pending adoption by ≥2 recursion-capable generators before promotion.
+
+**Integration site:** `katgpt-rs/crates/katgpt-core/src/traits.rs` (new trait block). Historical reference: the old `SpeculativeGenerator` surface at `traits.rs:997-1007`.
 
 ```rust
 pub trait SpeculativeGenerator {
@@ -197,12 +209,12 @@ Generators that have a recursion loop implement `RecursionLogits`; `AdvantageMar
 |------|------|--------|--------|
 | T5.2 (riir-ai Super-GOAT guide) | **NOT Super-GOAT** (Q1 NO, Q2 Partial) | Verdict rendered, no guide created | ✅ Closed |
 | T5.1 (HLA evolve_hla integration) | GOAT optimization | T5.1.1–T5.1.5 all done. GOAT 3/3 PASS (Bench 057). Default promoted NaN→0.01. | ✅ **COMPLETE** |
-| T5.3 (Freeze/thaw A(·) snapshot) | Speculative | T5.1 blocker removed, but aggregation design open + no real consumer | Open — deferred |
-| T2.2 (LoopMode::WeightShared wire) | Deep integration, hot path | Tracked here as T2.2.1–T2.2.4 | Open — deferred |
-| T2.3 (SpeculativeGenerator trait hook) | API ergonomics | New `RecursionLogits` trait recommended over modifying `SpeculativeGenerator` | Open — deferred |
+| T5.3 (Freeze/thaw A(·) snapshot) | Speculative → shipped opt-in | Commit `3d60c34e`. Feature `advantage_freeze_thaw`. 9/9 tests pass. EMA aggregator chosen; BLAKE3-committed snapshot. Default-off pending real consumer validation of decay choice. | ✅ **COMPLETE** (opt-in, 2026-06-17) |
+| T2.2 (LoopMode::WeightShared wire) | Deep integration, hot path | Commit `6af47cf1`. Feature `weight_shared_advantage_gate`. 4/4 new tests pass (incl. GOAT byte-identity gate). LT2 regression 11/11 pass under feature. T2.2.4 real-workload bench remains as consumer-validation task. | ✅ **COMPLETE** (opt-in, 2026-06-17) |
+| T2.3 (SpeculativeGenerator trait hook) | API ergonomics | Commit `65656fea`. Feature `recursion_logits`. New `RecursionLogits` opt-in trait, 3/3 tests pass, no `SpeculativeGenerator` breakage. Default-off pending ≥2 generator adopters. | ✅ **COMPLETE** (opt-in, 2026-06-17) |
 
-**No Super-GOAT guide created.** No new plans created (per AGENTS.md, optimization tasks → issues). The shipped primitive (Phase 1–4) is complete and GOAT-validated; T5.1 (HLA integration) is now also complete and GOAT-validated (Bench 057, 3/3 PASS, default-on).
+**No Super-GOAT guide created.** No new plans created (per AGENTS.md, optimization tasks → issues). The shipped primitive (Phase 1–4) is complete and GOAT-validated; T5.1 (HLA integration) is complete and GOAT-validated (Bench 057, 3/3 PASS, default-on). T2.2/T2.3/T5.3 are now also complete as opt-in features (2026-06-17) — default-off pending real-workload/consumer validation before promotion.
 
 ---
 
-**TL;DR:** Plan 283 Phase 1–4 shipped and GOAT-validated (4/4 PASS, default-on). T5.2 Super-GOAT re-evaluation: **NOT Super-GOAT**. **T5.1 (HLA integration) COMPLETE: GOAT 3/3 PASS (2.50× steps saved, 100% argmax match, 0ns overhead — Bench 057), `advantage_margin_threshold` promoted default NaN→0.01.** The gate is the 4th early-stop criterion, complementary to max_steps + entropy_threshold + adaptive_budget — it caught dead compute on all 1000 benchmark traces that the other 3 missed. T5.3 speculative (aggregation design open). T2.2/T2.3 deferred deep integrations. No guide, no new plans — this issue is the tracking artifact.
+**TL;DR:** Plan 283 Phase 1–4 shipped and GOAT-validated (4/4 PASS, default-on). T5.2 Super-GOAT re-evaluation: **NOT Super-GOAT**. **T5.1 (HLA integration) COMPLETE: GOAT 3/3 PASS (2.50× steps saved, 100% argmax match, 0ns overhead — Bench 057), `advantage_margin_threshold` promoted default NaN→0.01.** **T2.2/T2.3/T5.3 COMPLETE (2026-06-17) as opt-in features** — `weight_shared_advantage_gate` (commit `6af47cf1`, 4/4 + LT2 regression 11/11), `recursion_logits` (commit `65656fea`, 3/3), `advantage_freeze_thaw` (commit `3d60c34e`, 9/9). All three default-off pending real-workload consumer validation before promotion. The gate is the 4th early-stop criterion, complementary to max_steps + entropy_threshold + adaptive_budget — it caught dead compute on all 1000 benchmark traces that the other 3 missed. No guide, no new plans — this issue is the tracking artifact.
