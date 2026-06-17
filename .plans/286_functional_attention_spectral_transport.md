@@ -40,37 +40,54 @@ Minimal module, behind feature flag, not in default features.
 ### Tasks
 
 - [ ] **T1.1** Add `funcattn` feature to `katgpt-rs/Cargo.toml` and `katgpt-rs/crates/katgpt-core/Cargo.toml`. **Not in default features.** Add to `full` feature aggregation.
-- [ ] **T1.2** Create `crates/katgpt-core/src/funcattn.rs` with the core types:
+- [ ] **T1.2** Create `crates/katgpt-core/src/funcattn.rs` with the core types. **Verified against reference code at `.raw/FUNCATTN/PDE-StandardBenchmark/model/Functional_attention.py` (Research 257 §6 Code Verification Addendum):**
   ```rust
   pub enum FuncAttnBasis {
-      /// Paper Eq. 9: Φ = Softmax(Linear(X)) along k-dim.
+      /// Paper Eq. 9 / code L60: Φ = Softmax(Linear(X) / τ) along k-dim.
+      /// τ is learnable per-head, clamped [0.1, 5.0] (code L13, L61).
       Softmax,
-      /// AGENTS.md compliance: Φ = Sigmoid(Linear(X)) then row-normalize.
+      /// AGENTS.md compliance: Φ = Sigmoid(Linear(X) · β) then row-normalize.
       /// Partition-of-unity still holds (any row-normalized non-negative kernel).
+      /// β plays the role of 1/τ.
       Sigmoid,
   }
 
   pub struct FuncAttnConfig {
       pub k: usize,                  // basis dimension, paper default 64
-      pub lambda: f32,               // Tikhonov regularization, default 1e-4
       pub basis: FuncAttnBasis,      // default Sigmoid
+      /// Convex-combo regularization coefficient α = sigmoid(alpha_param).
+      /// Code uses (1-α)·K̃ᵀK̃ + α·I — NOT paper Eq. 7's additive K̃K̃ᵀ+λI.
+      /// See Research 257 §6 Discrepancy 1. Bounded spectrum for α∈(0,1).
+      pub alpha: f32,                // default 0.5 (sigmoid(0)); range (0.01, 0.99)
+      /// Per-head learnable temperature τ ∈ [0.1, 5.0] (code L13, L61).
+      /// For Sigmoid basis, reinterpreted as inverse slope β = 1/τ.
+      pub temperature: f32,          // default 0.5 (matches code init)
       pub transpose_proj: bool,      // paper Rem 4.1: use Φᵀ not Φᵀ⁺. Default true.
   }
 
   pub struct FuncAttnScratch {
       // Pre-allocated scratch buffers for zero-alloc hot path:
       // phi (n×k), psi (n×k), q_tilde (k×d), k_tilde (k×d), v_tilde (k×d),
-      // kktt (k×k), kktt_reg (k×k), c_op (k×k), pv (n×d), scores (n×k)
+      // ktk (d×d DUAL FORM — not ktkt k×k primal!), reg (d×d), z_op (d×k),
+      // c_op (k×k), pv (n×d), scores (n×k)
+      // Note: code uses d×d dual form because d ≤ k typically; see Research 257 §6.
   }
   ```
 - [ ] **T1.3** Implement `compute_basis_into(x, w, bias, n, d, k, kind, out)` — writes row-normalized basis to `out: &mut [f32]` of length `n*k`. Zero-alloc.
-- [ ] **T1.4** Implement `funcattn_forward(q, k, v, w_phi, w_psi, cfg, scratch, out)`:
-  - Compute Φ, Ψ via `compute_basis_into`
-  - Project: `Q̃ = Φᵀ·Q`, `K̃ = Ψᵀ·K`, `Ṽ = Ψᵀ·V` (all via existing `simd_matmul_rows`)
-  - Form `KKᵀ + λI_k` (k×k), Cholesky-decompose, solve for `C = Q̃·K̃ᵀ·(KKᵀ+λI)⁻¹`
-  - `out = Φ · C · Ṽ` (two matmuls)
+- [ ] **T1.4** Implement `funcattn_forward(q, k, v, w_phi, w_psi, w_value_proj, cfg, scratch, out)`. **Follows reference code (Functional_attention.py L50-89), NOT paper Eq. 7–8:**
+  - **Basis computation**: `Φ = softmax_or_sigmoid(w_basis(x_proj) / τ)` where `x_proj = w_phi(x)` (NOT the same as the value projection — see code L17-18, two separate Conv2d layers `in_project_x` and `in_project_fx`).
+  - **Slice tokens** (code L62-64): `slice_token[g] = Σ_n Φ[n,g] · fx_mid[n] / (Σ_n Φ[n,g] + ε)` — this is a weighted average, not just a projection. The code normalizes by column sum.
+  - **Project**: `Q̃ = slice_token_q`, `K̃ = slice_token_k`, `Ṽ = slice_token_v` after applying `to_q`, `to_k`, `to_v` linear layers (these are separate from the basis projection).
+  - **Operator solve (DUAL FORM — code L71-76)**:
+    - `kH = K̃ᵀ` (d×k)
+    - `K̃ᵀK̃ = kH · K̃` (d×d — DUAL, not k×k primal)
+    - `reg = (1-α)·K̃ᵀK̃ + α·I_d`  ← **convex combo, not additive**
+    - `Z = solve(reg, kH)` solving `reg · Z = K̃ᵀ` (d×k)
+    - `C = Q̃ · Z` (k×k)
+  - **Apply**: `out_slice = C · Ṽ` (k×d), then `out = Φ · out_slice` (n×d) — inverse projection via the SAME basis weights Φ used in forward slice.
   - All in `scratch`, output to caller-owned `out: &mut [f32]`
-- [ ] **T1.5** Reuse `crates/katgpt-core/src/simd.rs` for matmuls. Reuse Cholesky from `riir-gpu/schur.rs` if license-compatible (Apache-2.0 attribution required per file header); otherwise vendor a minimal k×k Cholesky (≤30 lines).
+  - **Orthogonal init** for `w_basis` (code L20-21: `torch.nn.init.orthogonal_`) — document in module doc, applied by caller (we don't init weights in inference paths).
+- [ ] **T1.5** Reuse `crates/katgpt-core/src/simd.rs` for matmuls. For the linear solve, **add a `solve_convex_combo_dual(k_tilde, alpha, out_z)` helper** to `funcattn.rs` — forms `(1-α)·K̃ᵀK̃ + α·I_d` and solves via Cholesky. **Do NOT reuse SchurSolver directly** — SchurSolver does additive `Q + eps·I`; we need convex combo. Vendor a ~40-line d×d Cholesky (clean, MIT-compatible) since d is small (≤256). The reference code uses `torch.linalg.solve` (LU); Cholesky is faster and exploits PSD structure of `(1-α)·K̃ᵀK̃ + α·I`.
 
 ---
 
@@ -106,6 +123,7 @@ Minimal module, behind feature flag, not in default features.
   - Compare FUNCATTN vs Parallax (sigmoid) vs SDPA at matched parameter count.
   - Assert FUNCATTN MSE ≤ Parallax MSE × 0.5 AND FUNCATTN MSE ≤ SDPA MSE × 0.1.
   - This is the **paper's headline result** — we should reproduce it.
+  - **Reference implementation**: `.raw/FUNCATTN/Few-Shot-Regression/models.py::FuncAttn` (L123-176). Port this exact architecture including the convex-combo regularization (`reg = (1-self.ridge)*kkH + self.ridge*I`, L173) — NOT the paper Eq. 7 additive form. The few-shot code uses fixed `ridge=1e-4` (not learnable α); match that for direct reproduction.
 
 ---
 

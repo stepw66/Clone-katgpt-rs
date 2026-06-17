@@ -212,4 +212,78 @@ The paper uses softmax for its basis (Eq. 9). AGENTS.md mandates sigmoid. **The 
 
 ## TL;DR
 
-FUNCATTN is the **functional-maps framework applied to attention**: replace softmax pairwise affinities with a closed-form Tikhonov k×k operator between learned adaptive bases. Linear-in-n, resolution-invariant, Lipschitz-bounded by λ. The math (ridge solve, eigenbasis, sigmoid partition-of-unity) is already distributed across our stack (Schur/SpectralQuant/Parallax/latent_functor). **GOAT verdict**: primary value is the riir-ai rank-1 → rank-k latent_functor upgrade (concrete game-domain gain, extends existing Super-GOAT 123/303); katgpt-rs open primitive is Gain-tier behind feature flag (paper itself hasn't shown NLP gain). Not Super-GOAT because (a) no novel math, (b) extends an existing pillar rather than creating one. **Fusion F1 is the headline** — rank-k functor with closed-form ridge re-estimation unblocks multi-axis NPC relations, the difference between linear-affine and manifold-aware NPC minds.
+FUNCATTN is the **functional-maps framework applied to attention**: replace softmax pairwise affinities with a closed-form ridge-regularized k×k operator between learned adaptive bases. Linear-in-n, resolution-invariant, Lipschitz-bounded by λ. The math (ridge solve, eigenbasis, sigmoid partition-of-unity) is already distributed across our stack (Schur/SpectralQuant/Parallax/latent_functor). **GOAT verdict**: primary value is the riir-ai rank-1 → rank-k latent_functor upgrade (concrete game-domain gain, extends existing Super-GOAT 123/303); katgpt-rs open primitive is Gain-tier behind feature flag (paper itself hasn't shown NLP gain). Not Super-GOAT because (a) no novel math, (b) extends an existing pillar rather than creating one. **Fusion F1 is the headline** — rank-k functor with closed-form ridge re-estimation unblocks multi-axis NPC relations, the difference between linear-affine and manifold-aware NPC minds.
+
+---
+
+## 6. Code Verification Addendum (2026-06-17, post-distillation)
+
+Reference implementation reviewed at `.raw/FUNCATTN/` (official code from xjffff/FUNCATTN). **Three material discrepancies between paper text and actual shipped code** — Plans 286 and 318 must follow the CODE, not the paper formulas, where they differ.
+
+### Discrepancy 1: Regularization form — convex combo, NOT additive Tikhonov
+
+- **Paper Eq. 7**: `C* = Q̃K̃ᵀ(K̃K̃ᵀ + λI_k)⁻¹` (additive λ on k×k primal)
+- **Code** (`PDE-StandardBenchmark/model/Functional_attention.py` L73-76, `Few-Shot-Regression/models.py` L172-175):
+  ```python
+  alpha = self.sigmoid(self.alpha)                    # α ∈ (0,1), learnable
+  reg_dual = (1 - alpha) * kTk + alpha * self.I_d      # (1-α)·K̃ᵀK̃ + α·I_d (d×d DUAL)
+  Z = torch.linalg.solve(reg_dual, kH)                # solves reg_dual · Z = K̃ᵀ
+  C = torch.matmul(q_slice_token, Z)                  # C = Q̃ · Z
+  ```
+
+**The actual regularization is a convex combination** `(1-α)·K̃ᵀK̃ + α·I_d` where `α = sigmoid(parameter)` ∈ (0,1), in the **dual form** (d×d, not k×k). This is strictly better-conditioned than additive λ:
+- Eigenvalues of `(1-α)·K̃ᵀK̃ + α·I` lie in `[α, α + (1-α)·λ_max(K̃ᵀK̃)]` — bounded spectrum.
+- Additive `K̃ᵀK̃ + λI` has unbounded λ_max — needs careful λ tuning.
+- The convex combo guarantees well-posedness for any α ∈ (0,1) — this is why the paper reports λ insensitivity (Tab 13: <0.02 test error variation across 10× α_init change).
+
+**Implementation implication for Plans 286/318**: use `reg = (1-α)·M + α·I` with `α = sigmoid(learnable_param)` or `α = fixed_const ∈ (0.01, 0.5)`. SchurSolver's `eps_reg` parameter already does additive — we need a sibling `solve_convex_combo(M, alpha)` or wrap it.
+
+### Discrepancy 2: Learnable temperature on basis softmax
+
+- **Paper Eq. 9**: `Φ = Softmax(Linear(X))` (no temperature mentioned in main text)
+- **Code** (`Functional_attention.py` L13, L60-61):
+  ```python
+  self.temperature = nn.Parameter(torch.ones([1, num_heads, 1, 1]) * 0.5)  # learnable τ
+  slice_weights = self.softmax(self.in_project_basis(x_mid) / torch.clamp(self.temperature, min=0.1, max=5.0))
+  ```
+
+The temperature IS the τ from Prop 4.3 (P0 limit as τ→0). It's **learnable per-head**, clamped to [0.1, 5.0]. My note §2.2 mentioned this in passing but Plans missed it.
+
+**Implementation implication**: `FuncAttnConfig` must carry `temperature: f32` (or per-head vector) clamped to [0.1, 5.0]. For our sigmoid-basis variant, this becomes a sigmoid-slope β.
+
+### Discrepancy 3: Two input projections (Φ ≠ Ψ)
+
+- **Paper §4**: treats Φ and Ψ as if potentially the same matrix (Remark 4.1 discusses using transpose for both)
+- **Code** (`Functional_attention.py` L17-24, L55-58):
+  ```python
+  self.in_project_x = nn.Conv2d(embed_dim, embed_dim, ...)   # for basis weights
+  self.in_project_fx = nn.Conv2d(embed_dim, embed_dim, ...)  # for slice tokens (values being projected)
+  # basis weights from x_mid, slice tokens from fx_mid — DIFFERENT projections
+  slice_weights = softmax(in_project_basis(x_mid) / temp)
+  slice_token = einsum('bhnc,bhng->bhgc', fx_mid, slice_weights)  # fx_mid, not x_mid
+  ```
+
+So Φ uses one projection (`in_project_x` → `in_project_basis`), Ψ uses a different one. They are NOT the same matrix in general. Plus the basis projection itself uses **orthogonal weight initialization** (`torch.nn.init.orthogonal_`).
+
+**Implementation implication**: Plan 286 T1.2's `FuncAttnConfig` needs separate `w_phi` and `w_psi` weight matrices (already planned) PLUS a separate `w_value_proj` for the value-side input projection. Orthogonal init for the basis projection is important for training stability — document.
+
+### Bonus: Intention uses a DIFFERENT regularization form
+
+**Intention** (`models.py` L66-71) uses the **N×N primal additive** form:
+```python
+KKT = torch.bmm(K, Kt)              # N×N
+reg = KKT + (self.ridge + 1e-5) * I_N  # ADDITIVE ridge
+```
+
+While FUNCATTN uses **d×d dual convex combo**. The paper's Prop A.4 ("FUNCATTN reduces to Intention when Φ=Ψ=I_n") is about the *operator form* — it does NOT mean the regularization forms match. A faithful Intention baseline must use additive ridge on N×N; a faithful FUNCATTN must use convex combo on d×d.
+
+### Summary of code-vs-paper deltas
+
+| Aspect | Paper text | Actual code | Plan impact |
+|---|---|---|---|
+| Regularization | `K̃K̃ᵀ + λI` (additive, k×k primal) | `(1-α)·K̃ᵀK̃ + α·I` (convex combo, d×d dual) | Plans 286 T1.4, 318 T2.2 must use convex combo |
+| Basis temperature | not in main text | learnable τ∈[0.1,5.0] per head | Plan 286 T1.2 must add temperature field |
+| Φ vs Ψ | "possibly same" | different projections, orthogonal init | Plan 286 T1.4 already has w_phi/w_psi split — add value-side w_fx |
+| Intention regularization | "reduces to" | actually additive N×N primal | Note for Plan 286 G2 baseline reproduction |
+
+**Net effect on verdict:** unchanged. GOAT, primary value still Plan 318. But implementation correctness now depends on matching the code's convex-combo regularization — getting this wrong would silently produce an unstable solve and a false negative on the GOAT gate.
