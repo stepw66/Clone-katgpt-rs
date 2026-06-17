@@ -1,9 +1,9 @@
 # Issue 029: Compression-Drafter Beam Search Follow-ups
 
 **Date:** 2026-06-17
-**Status:** Open — tracking two paths that might still make compression-based generation useful
+**Status:** Closed — both paths ruled out by Plan 287 Seal re-bench (153ms latency on real 1.3MB corpus).
 **Plan:** [285_compression_drafter_quest_grammar.md](../.plans/285_compression_drafter_quest_grammar.md)
-**Benchmark:** [285_compression_drafter_goat.md](../.benchmarks/285_compression_drafter_goat.md) (GOAT FAILED, 2 runs)
+**Benchmark:** [285_compression_drafter_goat.md](../.benchmarks/285_compression_drafter_goat.md) (synthetic, GOAT FAILED) → [287_compression_drafter_seal_goat.md](../.benchmarks/287_compression_drafter_seal_goat.md) (real Seal 17k corpus, GOAT FAILED)
 **Research:** [256_GzipLM_Compression_Drafter.md](../.research/256_GzipLM_Compression_Drafter.md)
 
 ---
@@ -61,11 +61,40 @@ Target: G1 ≥ 3× (24 unique), G2 ≤ 2× (≈ 600ns).
 
 ## Recommendation
 
-**Don't pursue either immediately.** The honest result from Plan 285 is:
-- `TernaryDraftModel` is the right tool for Hot-tier quest grammar.
-- Compression-based generation is interesting but doesn't fit this use case.
+**~~Don't pursue either immediately.~~ CLOSED 2026-06-17 — both paths definitively ruled out by Plan 287 Seal re-bench.**
 
-If a future use case emerges (GM tool, NPC sleep cycle, per-NPC personality at plasma tier), the open primitive (`compression_drafter` with beam search + MatchLengthScorer) is ready and waiting — 15/15 tests pass, the code is clean. Until then, it stays opt-in and unused.
+The user pushed back on Plan 285: "do bench from 17k seal, it's our prod target." Re-ran CompressionDrafter on the real Seal English quest corpus (13,780 lines, 1.3MB — 615× larger than synthetic). Results in [`.benchmarks/287_compression_drafter_seal_goat.md`](../.benchmarks/287_compression_drafter_seal_goat.md):
+
+- **G1 Diversity: PASS** — 77 unique outputs (9.62× over 8-template baseline). Real corpus richness helped massively (12 → 77).
+- **G2 Latency: CATASTROPHIC FAIL** — 153ms per generation (target: 1ms). The `MatchLengthScorer` inverted-index algorithm is O(matching_positions) per call. On a 1.3MB corpus, common bytes have ~100k positions → beam search × 4752 calls × 100k scans = 153ms.
+- **G3 Adaptivity: PASS (caveat)** — corpus append changed output (-12 unique), but adding random noise decreased quality.
+
+### Why Path A (per-NPC corpus) is now ruled out
+
+Path A predicted: "G2 still fails (per-NPC doesn't change the per-call latency math)." This was **too optimistic**. The real corpus showed latency scales linearly with corpus size via the position-scan. Per-NPC corpora would each still be 100KB+ → still ~10ms+ per generation × 1000 NPCs = 10s+ per tick. Path A is **strictly worse** than the synthetic bench suggested.
+
+### Why Path B (Warm-tier positioning) is now ruled out
+
+Path B predicted: "313µs fits 100ms Warm-tier budget 300× over." This was **based on the synthetic 2KB corpus**. The real 1.3MB corpus shows **153ms per generation** — already **1.5× over** the 100ms Warm-tier budget, before any quality fixes (longer horizon for real sentences, per-NPC filtering, etc.). Path B is **not viable** without a different algorithm (suffix array / FM-index), which is a different primitive entirely.
+
+### The actual right answer: adaptive template selector
+
+The user's insight ("it wont be 8 forever for real prod bro, we may need adaptive") is **correct** — but the right implementation is not compression. It's:
+
+```rust
+struct AdaptiveQuestDrafter {
+    templates: Vec<String>,  // N templates from corpus at startup
+}
+impl AdaptiveQuestDrafter {
+    fn generate(&self, ctx: &str) -> &str {
+        &self.templates[fnv1a_hash(ctx) % self.templates.len()]
+    }
+}
+```
+
+Measured on real Seal corpus: N=1024 templates → 95 unique outputs in **42ns**. Beats beam search on BOTH diversity (95 vs 77) AND latency (42ns vs 153ms) — by **3.6 million times** on latency. Adding templates is free (latency stays at ~40ns regardless of N).
+
+This is a separate small plan if/when quest variety becomes a real product requirement. Compression-based generation is closed as a quest grammar technique.
 
 ---
 
