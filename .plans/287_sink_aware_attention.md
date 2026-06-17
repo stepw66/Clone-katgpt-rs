@@ -154,3 +154,13 @@ Wire the new classifier into the broader `data_probe` family so it composes with
 2. **Direct wiring into `parallax_attn.rs` / `funcattn.rs` forward paths DEFERRED** per validation fallback. The policy enum + standalone `apply_dual_policy_gate` ship now; callers invoke after a forward pass. Keeps `ParallaxConfig` / `FuncAttnConfig` backwards-compatible. Rationale: adding `policy: SinkAwarePolicy` to `ParallaxConfig` would require feature-gating the field or breaking `Default::default()`; the standalone path is cleaner.
 3. **Real-ViT effective_rank G2 DEFERRED.** Needs a frozen model. Synthetic G2 substitute verifies the dual-policy decision logic.
 4. **Stable-rank formula clarification.** Plan task wrote `(Σσ_k)²/Σσ_k²`; we implemented the standard stable rank `‖O‖_F²/‖O‖_op²` (matches the prescribed approximation, only needs top singular value, consistent with Roy-Vetterli `effective_rank` in `geometry.rs`). Documented in module doc.
+
+---
+
+## Follow-up: Plan 288 (flat-layout variants) — DONE 2026-06-18
+
+[Plan 288](./288_sink_aware_flat_layout.md) shipped flat `&[f32]` row-major variants of every sink-aware function (`stable_rank_update_into_flat`, `classify_sink_at_flat`, `classify_all_sinks_flat`, `apply_dual_policy_gate_flat`, `apply_dual_policy_gate_cached_flat`). These match the layout used by `parallax_attn::tiled_attention_parallax_forward` and `funcattn::funcattn_forward`, unblocking direct forward-path composition without `Vec<Vec<f32>>` materialization.
+
+**Result:** flat variants are 1.8×–5.1× faster than Vec<Vec<f32>> due to cache locality. The cached-flat steady-state path is also faster than the Vec<Vec> Uniform baseline (single contiguous memcpy beats n per-row copies). G1 parity verified by 8 new unit tests.
+
+This removes the technical blocker for the forward-path wiring (scope reduction #2 above). The wiring itself is now a pure API-design task — Plan 289 scope.

@@ -840,3 +840,439 @@ fn scale_rows(src: &[Vec<f32>], scale: f32, dst: &mut [Vec<f32>]) {
         }
     }
 }
+
+// ════════════════════════════════════════════════════════════════════
+// ── Plan 288: Flat `&[f32]` row-major variants ──────────────────────
+// ════════════════════════════════════════════════════════════════════
+//
+// These mirror the `&[Vec<f32>]` API above but take flat row-major
+// slices (`o[i*d..(i+1)*d]` = row `i`). They exist so that callers with
+// contiguous tensors — notably `parallax_attn::tiled_attention_parallax_forward`
+// and `funcattn::funcattn_forward`, which produce `output: &mut [f32]` and
+// `v: &[f32]` — can invoke the sink-aware gate without materializing a
+// `Vec<Vec<f32>>` wrapper (which would be an O(n·d) per-call allocation,
+// breaking the zero-alloc property verified by Plan 287 G5).
+//
+// ## Correctness parity
+//
+// The arithmetic is identical to the `&[Vec<f32>]` variants — only the
+// slicing changes (`row = &o[i*d..(i+1)*d]` vs `row = &o[i]`). T7 parity
+// tests in `src/data_probe/sink_classify.rs` assert bit-identical
+// `SinkKind` decisions on identical inputs.
+//
+// ## Why keep both layouts
+//
+// `&[Vec<f32>]` is diagnostic-friendly: callers building attention maps
+// row-by-row (e.g. `examples/sink_phase_plot.rs`) already have that
+// layout. `&[f32]` is forward-path-friendly: matches parallax/funcattn.
+// We do NOT deprecate either. Pick whichever matches your data.
+
+/// Compute the stable rank of `O = A · V` from a **flat** row-major `O`.
+///
+/// Flat-layout variant of [`stable_rank_update_into`]. Identical
+/// arithmetic; rows are sliced as `o[i*d..(i+1)*d]` instead of `o[i]`.
+///
+/// # Arguments
+/// * `o` — `(n, d)` flat row-major, length `n * d`.
+/// * `n` — number of rows.
+/// * `d` — row stride / head dim.
+/// * `scratch` — power-iteration scratch (reused across calls).
+/// * `n_iters` — power iteration count (5 is the plan default).
+///
+/// # Returns
+/// Stable rank in `[1.0, rank(O)]`. Same semantics as
+/// [`stable_rank_update_into`] — see that function's docs for the
+/// algorithm, early-exits, and edge cases.
+pub fn stable_rank_update_into_flat(
+    o: &[f32],
+    n: usize,
+    d: usize,
+    scratch: &mut StableRankScratch,
+    n_iters: u8,
+) -> f32 {
+    if n == 0 || d == 0 {
+        return 0.0;
+    }
+    debug_assert_eq!(o.len(), n * d, "flat stable_rank: o must be (n={}, d={}) flat", n, d);
+    scratch.ensure_capacity_dn(d, n);
+    let v = &mut scratch.v[..d];
+    let w = &mut scratch.w[..d];
+    let ov_buf = &mut scratch.ov_buf[..n];
+
+    // trace(F) = Σ_i ‖row_i(O)‖². Single pass, contiguous reads.
+    let mut trace_f = 0.0f32;
+    for i in 0..n {
+        let row = &o[i * d..(i + 1) * d];
+        trace_f += simd::simd_dot_f32(row, row, d);
+    }
+    if trace_f <= 0.0 {
+        return 0.0;
+    }
+
+    // Issue 001 T5: rank-1 cosine probe on first/last row. Same as the
+    // Vec<Vec<f32>> variant — O(d) work that often skips the full power
+    // iteration when Broadcast heads dominate.
+    if n >= 2 {
+        let first = &o[0..d];
+        let last = &o[(n - 1) * d..n * d];
+        let dot_fl = simd::simd_dot_f32(first, last, d);
+        let nf_sq = simd::simd_dot_f32(first, first, d);
+        let nl_sq = simd::simd_dot_f32(last, last, d);
+        if nf_sq > 0.0 && nl_sq > 0.0 {
+            let cos_fl = dot_fl / (nf_sq.sqrt() * nl_sq.sqrt());
+            if cos_fl > 0.95 {
+                return 1.0;
+            }
+        }
+    }
+
+    let inv_sqrt_d = 1.0 / (d as f32).sqrt();
+    for x in v.iter_mut() {
+        *x = inv_sqrt_d;
+    }
+
+    ov_buf.fill(0.0);
+    let mut sigma1_sq = trace_f;
+    let iters = n_iters.max(1) as usize;
+    for _ in 0..iters {
+        // (a) ov_buf[i] = O[i] · v
+        for i in 0..n {
+            let row = &o[i * d..(i + 1) * d];
+            ov_buf[i] = simd::simd_dot_f32(row, v, d);
+        }
+        // (b) w = O^T · ov_buf = Σ_i ov_buf[i] · O[i]
+        w.fill(0.0);
+        for i in 0..n {
+            let row = &o[i * d..(i + 1) * d];
+            let c = ov_buf[i];
+            simd::simd_fused_scale_acc(w, row, c, d);
+        }
+
+        let vtv = simd::simd_dot_f32(v, v, d);
+        let vtw = simd::simd_dot_f32(v, w, d);
+        if vtv <= 0.0 {
+            break;
+        }
+        sigma1_sq = vtw / vtv;
+        if sigma1_sq > 0.95 * trace_f {
+            return 1.0;
+        }
+
+        let norm_w = (simd::simd_dot_f32(w, w, d)).max(1e-30).sqrt();
+        let inv_norm = 1.0 / norm_w;
+        for j in 0..d {
+            v[j] = w[j] * inv_norm;
+        }
+    }
+
+    if sigma1_sq <= 0.0 {
+        return 0.0;
+    }
+    trace_f / sigma1_sq
+}
+
+/// Flat-layout variant of [`classify_sink_at`]. Identical decision rule;
+/// `values` is `(n, d)` flat row-major and `update_O` carries its own
+/// `(flat_o, n, d)` triple.
+///
+/// See [`classify_sink_at`] for argument semantics. The flat layout adds
+/// `n` and `d` parameters; `update_O` becomes `Option<(&[f32], usize, usize)>`
+/// = `(flat_O, n_O, d_O)`.
+#[allow(non_snake_case)]
+pub fn classify_sink_at_flat(
+    position: usize,
+    attn_column: &[f32],
+    values: &[f32],
+    n: usize,
+    d: usize,
+    update_O: Option<(&[f32], usize, usize)>,
+    cfg: &SinkClassifierConfig,
+    scratch: &mut StableRankScratch,
+) -> SinkDiagnostic {
+    debug_assert_eq!(
+        values.len(),
+        n * d,
+        "flat classify_sink_at: values must be (n={}, d={}) flat",
+        n,
+        d
+    );
+
+    // ── Strength ───────────────────────────────────────────────
+    let n_col = attn_column.len();
+    let strength = if n_col == 0 {
+        0.0
+    } else {
+        simd::simd_sum_f32(attn_column) / (n_col as f32)
+    };
+
+    // ── value_norm_ratio ───────────────────────────────────────
+    let (value_norm_ratio, degenerate) = if n == 0 || d == 0 {
+        (1.0, true)
+    } else {
+        // ‖v_s‖
+        let v_s_norm = if position < n {
+            let row = &values[position * d..(position + 1) * d];
+            simd::simd_dot_f32(row, row, d).sqrt()
+        } else {
+            0.0
+        };
+        // mean_i ‖v_i‖ = sqrt(Σ_i ‖v_i‖² / n). Single pass, contiguous.
+        let mut sum_sq = 0.0f32;
+        for i in 0..n {
+            let row = &values[i * d..(i + 1) * d];
+            sum_sq += simd::simd_dot_f32(row, row, d);
+        }
+        if sum_sq == 0.0 {
+            (1.0, true)
+        } else {
+            let mean_norm = (sum_sq / (n as f32)).sqrt();
+            if mean_norm <= 0.0 {
+                (1.0, true)
+            } else {
+                (v_s_norm / mean_norm, false)
+            }
+        }
+    };
+
+    // ── update_stable_rank ────────────────────────────────
+    // Issue 001 T2: skip stable rank when value_norm_ratio is already decisive.
+    let stable_rank_reachable = !degenerate
+        && strength > cfg.sink_strength_threshold
+        && value_norm_ratio > cfg.nop_value_ratio_max
+        && value_norm_ratio >= cfg.broadcast_value_ratio_min
+        && value_norm_ratio <= cfg.broadcast_value_ratio_max;
+    let update_stable_rank = if stable_rank_reachable {
+        match update_O {
+            Some((o_flat, n_o, d_o)) if n_o > 0 && d_o > 0 => {
+                stable_rank_update_into_flat(o_flat, n_o, d_o, scratch, 5)
+            }
+            _ => f32::NAN,
+        }
+    } else {
+        f32::NAN
+    };
+
+    // ── Decision rule (Research 258 §2.1) ──────────────────────
+    let kind = if degenerate {
+        SinkKind::None
+    } else if strength <= cfg.sink_strength_threshold {
+        SinkKind::None
+    } else if value_norm_ratio <= cfg.nop_value_ratio_max {
+        SinkKind::Nop
+    } else if value_norm_ratio >= cfg.broadcast_value_ratio_min
+        && value_norm_ratio <= cfg.broadcast_value_ratio_max
+        && update_O.is_some()
+        && update_stable_rank <= cfg.broadcast_stable_rank_max
+    {
+        SinkKind::Broadcast
+    } else {
+        SinkKind::None
+    };
+
+    SinkDiagnostic {
+        position,
+        strength,
+        value_norm_ratio,
+        update_stable_rank,
+        kind,
+    }
+}
+
+/// Flat-layout variant of [`classify_all_sinks`].
+///
+/// `attn` is `(n, n)` flat row-major; `values` is `(n, d)` flat row-major.
+/// Same semantics as the `&[Vec<f32>]` variant — caller-owned `out`, single
+/// `col_sums` scratch reused across calls.
+pub fn classify_all_sinks_flat(
+    attn: &[f32],
+    n: usize,
+    values: &[f32],
+    d: usize,
+    cfg: &SinkClassifierConfig,
+    scratch: &mut StableRankScratch,
+    out: &mut Vec<SinkDiagnostic>,
+) {
+    if n == 0 {
+        return;
+    }
+    debug_assert_eq!(attn.len(), n * n, "flat classify_all_sinks: attn must be (n, n)");
+    debug_assert_eq!(values.len(), n * d, "flat classify_all_sinks: values must be (n, d)");
+
+    scratch.ensure_capacity_dn(d, n);
+    let col_sums = &mut scratch.col_sums;
+    col_sums[..n].fill(0.0);
+    // Column sums: c[j] = Σ_i attn[i*n + j]. Stride-d-1 access on the
+    // inner read — cache-unfriendly but unavoidable for column sums; the
+    // row-major layout of `attn` means each row is contiguous, so we walk
+    // row-by-row and accumulate into col_sums[j].
+    for i in 0..n {
+        let row = &attn[i * n..(i + 1) * n];
+        for j in 0..n {
+            col_sums[j] += row[j];
+        }
+    }
+    let inv_n = 1.0 / (n as f32);
+
+    // Materialize strengths so we can release the `col_sums` borrow before
+    // calling `classify_sink_at_flat(&mut scratch)` (borrow checker).
+    let strengths: Vec<f32> = col_sums[..n].iter().map(|s| s * inv_n).collect();
+
+    for j in 0..n {
+        let strength_j = strengths[j];
+        if strength_j <= cfg.sink_strength_threshold {
+            continue;
+        }
+        let col = [strength_j];
+        let diag = classify_sink_at_flat(j, &col, values, n, d, None, cfg, scratch);
+        out.push(diag);
+    }
+}
+
+/// Flat-layout variant of [`apply_dual_policy_gate`].
+///
+/// `attn` is `(n, n)` flat, `values`/`o`/`out` are `(n, d)` flat. Same
+/// decision rule as the `&[Vec<f32>]` variant — see that function's docs.
+///
+/// This is the variant intended for direct integration with
+/// `parallax_attn::tiled_attention_parallax_forward` and
+/// `funcattn::funcattn_forward`, which produce flat `output: &mut [f32]`.
+pub fn apply_dual_policy_gate_flat(
+    attn: &[f32],
+    values: &[f32],
+    o: &[f32],
+    n: usize,
+    d: usize,
+    policy: &SinkAwarePolicy,
+    gate_scale: f32,
+    scratch: &mut StableRankScratch,
+    out: &mut [f32],
+) -> SinkKind {
+    let cfg = match policy {
+        SinkAwarePolicy::Uniform => {
+            copy_rows_flat(o, out, n * d);
+            return SinkKind::None;
+        }
+        SinkAwarePolicy::DualPolicy(c) => *c,
+    };
+
+    if n == 0 || d == 0 {
+        return SinkKind::None;
+    }
+
+    debug_assert_eq!(attn.len(), n * n, "flat gate: attn must be (n, n)");
+    debug_assert_eq!(values.len(), n * d, "flat gate: values must be (n, d)");
+    debug_assert_eq!(o.len(), n * d, "flat gate: o must be (n, d)");
+    debug_assert_eq!(out.len(), n * d, "flat gate: out must be (n, d)");
+
+    scratch.ensure_capacity_dn(d, n);
+
+    // Dominant sink column = argmax_j Σ_i attn[i*n + j].
+    let col_sums = &mut scratch.col_sums;
+    col_sums[..n].fill(0.0);
+    for i in 0..n {
+        let row = &attn[i * n..(i + 1) * n];
+        for j in 0..n {
+            col_sums[j] += row[j];
+        }
+    }
+    let (dominant_pos, _dominant_strength) = {
+        let mut best_i = 0usize;
+        let mut best_v = col_sums[0];
+        for (i, &v) in col_sums[..n].iter().enumerate() {
+            if v > best_v {
+                best_v = v;
+                best_i = i;
+            }
+        }
+        (best_i, best_v / (n as f32))
+    };
+
+    let col = [_dominant_strength];
+    let diag = classify_sink_at_flat(
+        dominant_pos,
+        &col,
+        values,
+        n,
+        d,
+        Some((o, n, d)),
+        &cfg,
+        scratch,
+    );
+
+    match diag.kind {
+        SinkKind::Nop => {
+            let g = sigmoid(gate_scale);
+            scale_rows_flat(o, g, out, n * d);
+        }
+        SinkKind::Broadcast | SinkKind::None => {
+            copy_rows_flat(o, out, n * d);
+        }
+    }
+    diag.kind
+}
+
+/// Flat-layout cached variant of [`apply_dual_policy_gate_cached`].
+///
+/// Same audit-cadence logic as the `&[Vec<f32>]` variant — see that
+/// function's docs for the caching contract. Flat layout enables direct
+/// composition with parallax/funcattn forward paths without `Vec<Vec<f32>>`
+/// materialization.
+pub fn apply_dual_policy_gate_cached_flat(
+    attn: &[f32],
+    values: &[f32],
+    o: &[f32],
+    n: usize,
+    d: usize,
+    gate_scale: f32,
+    scratch: &mut StableRankScratch,
+    cached: &mut CachedSinkClassification,
+    out: &mut [f32],
+) -> SinkKind {
+    let cadence = cached.audit_every_n.max(1);
+    let needs_audit = cached.cached_kind.is_none() || cached.calls_since_audit >= cadence;
+
+    if needs_audit {
+        let policy = SinkAwarePolicy::DualPolicy(cached.cfg);
+        let kind = apply_dual_policy_gate_flat(
+            attn, values, o, n, d, &policy, gate_scale, scratch, out,
+        );
+        cached.cached_kind = Some(kind);
+        cached.calls_since_audit = 1;
+        return kind;
+    }
+
+    cached.calls_since_audit += 1;
+    let total = n * d;
+    match cached.cached_kind {
+        Some(SinkKind::Nop) => {
+            let g = sigmoid(gate_scale);
+            scale_rows_flat(o, g, out, total);
+            SinkKind::Nop
+        }
+        Some(SinkKind::Broadcast) => {
+            copy_rows_flat(o, out, total);
+            SinkKind::Broadcast
+        }
+        Some(SinkKind::None) | None => {
+            copy_rows_flat(o, out, total);
+            SinkKind::None
+        }
+    }
+}
+
+// ── Flat helpers ───────────────────────────────────────────────
+
+#[inline]
+fn copy_rows_flat(src: &[f32], dst: &mut [f32], total: usize) {
+    let m = src.len().min(dst.len()).min(total);
+    dst[..m].copy_from_slice(&src[..m]);
+}
+
+#[inline]
+fn scale_rows_flat(src: &[f32], scale: f32, dst: &mut [f32], total: usize) {
+    let m = src.len().min(dst.len()).min(total);
+    // simd_fused_decay_write(dst, 0.0, src, scale) = dst = 0·dst + scale·src
+    // = scale·src. Single SIMD pass, no scalar fallback needed (simd
+    // module already handles scalar platforms).
+    simd::simd_fused_decay_write(&mut dst[..m], 0.0, &src[..m], scale);
+}

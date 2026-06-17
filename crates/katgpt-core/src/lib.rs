@@ -331,6 +331,9 @@ pub use funcattn::{
 pub mod data_probe;
 #[cfg(feature = "sink_aware_attn")]
 pub use data_probe::{
-    SinkAwarePolicy, SinkClassifierConfig, SinkDiagnostic, SinkKind, StableRankScratch,
-    apply_dual_policy_gate, classify_all_sinks, classify_sink_at, stable_rank_update_into,
+    CachedSinkClassification, SinkAwarePolicy, SinkClassifierConfig, SinkDiagnostic, SinkKind,
+    StableRankScratch, apply_dual_policy_gate, apply_dual_policy_gate_cached,
+    apply_dual_policy_gate_cached_flat, apply_dual_policy_gate_flat, classify_all_sinks,
+    classify_all_sinks_flat, classify_sink_at, classify_sink_at_flat, stable_rank_update_into,
+    stable_rank_update_into_flat,
 };

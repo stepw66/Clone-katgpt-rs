@@ -1,17 +1,25 @@
 //! Sink-Aware Attention dual-policy latency benchmark (Plan 287 Phase 3, T3.5
-//! + Issue 001 extensions).
+//! + Issue 001 extensions + Plan 288 flat-layout variants).
 //!
-//! Compares three policies at `n ∈ {128, 512}`, `d_h = 64`:
+//! Compares policies at `n ∈ {128, 512}`, `d_h = 64`, on two O regimes:
 //!
-//! - `uniform`  — single n·d copy. Baseline.
-//! - `dual`     — per-call classifier (the original Plan 287 path).
-//! - `dual_cached` — audit cadence 16 (classify once per 16 calls). This is
-//!   the production-realistic path; steady-state cost matches `uniform`.
+//! - `rank1`  — `O = a_s · v_s^T` (Broadcast head). Cosine probe fires;
+//!   stable-rank computation is skipped. Common case in trained transformers.
+//! - `random` — `O` filled with i.i.d. noise. Cosine probe fails; full power
+//!   iteration runs. Worst case for the classifier.
 //!
-//! Plan target: ≤5% overhead for `dual` vs `uniform`.
-//! Issue 001 finding: that target is structurally infeasible for the per-call
-//! path — even an optimal classifier does more memory traffic than a memcpy.
-//! The cached variant is the realistic answer.
+//! Policies measured:
+//! - `uniform`       — single n·d copy. Baseline.
+//! - `dual`          — per-call classifier, `&[Vec<f32>]` layout (Plan 287).
+//! - `dual_flat`     — per-call classifier, flat `&[f32]` layout (Plan 288).
+//! - `dual_cached`   — audit cadence 16, `&[Vec<f32>]` layout (Issue 001).
+//! - `dual_cached_flat` — audit cadence 16, flat `&[f32]` layout (Plan 288).
+//!
+//! Plan 287 target: ≤5% overhead for `dual` vs `uniform`.
+//! Issue 001 finding: per-call target structurally infeasible (memory-bandwidth
+//! bound). Cached variant is the realistic answer.
+//! Plan 288 hypothesis: flat variants ≥ Vec<Vec<f32>> due to cache locality,
+//! especially on the `random` regime (no cosine-probe short-circuit).
 //!
 //! Uses `std::time::Instant` (NOT criterion — matches other katgpt-rs benches).
 //!
@@ -24,7 +32,7 @@
 
 use katgpt_rs::data_probe::sink_classify::{
     CachedSinkClassification, SinkAwarePolicy, SinkClassifierConfig, StableRankScratch,
-    apply_dual_policy_gate, apply_dual_policy_gate_cached,
+    apply_dual_policy_gate, apply_dual_policy_gate_cached_flat, apply_dual_policy_gate_flat,
 };
 use std::time::{Duration, Instant};
 
@@ -45,6 +53,16 @@ fn rand_matrix(n: usize, d: usize, seed: u64) -> Vec<Vec<f32>> {
         .collect()
 }
 
+/// Flatten a Vec<Vec<f32>> row-major into a single contiguous Vec<f32>.
+fn flatten(rows: &[Vec<f32>]) -> Vec<f32> {
+    let d = rows.first().map(|r| r.len()).unwrap_or(0);
+    let mut out = Vec::with_capacity(rows.len() * d);
+    for r in rows {
+        out.extend_from_slice(r);
+    }
+    out
+}
+
 fn bench_us(warmup: usize, iters: usize, mut f: impl FnMut()) -> f64 {
     for _ in 0..warmup {
         f();
@@ -61,107 +79,145 @@ fn bench_us(warmup: usize, iters: usize, mut f: impl FnMut()) -> f64 {
     best.as_secs_f64() * 1e6
 }
 
-fn main() {
-    println!("=== Sink-Aware Dual-Policy Latency Benchmark (Plan 287 T3.5 + Issue 001) ===\n");
+fn pct(measured: f64, baseline: f64) -> f64 {
+    if baseline > 0.0 {
+        100.0 * (measured - baseline) / baseline
+    } else {
+        0.0
+    }
+}
 
-    let d = 64usize;
-    let n_values: &[usize] = &[128, 512];
+struct CaseData {
+    d: usize,
+    attn_rows: Vec<Vec<f32>>,
+    values_rows: Vec<Vec<f32>>,
+    o_rows: Vec<Vec<f32>>,
+    attn_flat: Vec<f32>,
+    values_flat: Vec<f32>,
+    o_flat: Vec<f32>,
+}
 
+fn build_case(n: usize, d: usize, regime: &str) -> CaseData {
+    // Values: always equal-norm content vectors so Broadcast detection works.
+    let v_s: Vec<f32> = (0..d).map(|i| 0.1 * (i as f32).sin() + 0.5).collect();
+    let values_rows: Vec<Vec<f32>> = (0..n).map(|_| v_s.clone()).collect();
+    let o_rows: Vec<Vec<f32>> = match regime {
+        "rank1" => (0..n).map(|_| v_s.clone()).collect(),
+        "random" => rand_matrix(n, d, 0xDEAD_BEEF),
+        _ => panic!("unknown regime: {regime}"),
+    };
+    // Attention map with dominant sink at pos 0.
+    let attn_rows: Vec<Vec<f32>> = (0..n)
+        .map(|_| {
+            let mut row = vec![0.1 / (n as f32 - 1.0); n];
+            row[0] = 0.9;
+            row
+        })
+        .collect();
+
+    let attn_flat = flatten(&attn_rows);
+    let values_flat = flatten(&values_rows);
+    let o_flat = flatten(&o_rows);
+
+    CaseData {
+        d,
+        attn_rows,
+        values_rows,
+        o_rows,
+        attn_flat,
+        values_flat,
+        o_flat,
+    }
+}
+
+fn run_regime(regime: &str, n_values: &[usize], cfg: SinkClassifierConfig) {
+    println!("── regime: {regime} ──────────────────────────────────────────────");
     println!(
-        "{:>5} {:>12} {:>12} {:>14} {:>14} {:>10}",
-        "n", "uniform_us", "dual_us", "dual_oh%", "cached_us", "cached_oh%"
+        "{:>5} {:>10} {:>10} {:>10} {:>8} {:>10} {:>8}",
+        "n", "uniform", "dual", "dual_flat", "oh%",
+        "cached", "oh%"
     );
     println!("{}", "-".repeat(75));
 
-    let cfg = SinkClassifierConfig::default();
-
     for &n in n_values {
-        // Use a rank-1 O so DualPolicy classifies as Broadcast (fast early-exit).
-        // This matches the common paper case (Broadcast heads are the
-        // fast path; the slow random-O case is covered by Phase 2 bench).
-        let v_s: Vec<f32> = (0..d).map(|i| 0.1 * (i as f32).sin() + 0.5).collect();
-        let values: Vec<Vec<f32>> = (0..n).map(|_| v_s.clone()).collect();
-        let o: Vec<Vec<f32>> = (0..n).map(|_| v_s.clone()).collect();
-        let mut out_uniform: Vec<Vec<f32>> = (0..n).map(|_| vec![0.0; d]).collect();
-        let mut out_dual: Vec<Vec<f32>> = (0..n).map(|_| vec![0.0; d]).collect();
-        let mut out_cached: Vec<Vec<f32>> = (0..n).map(|_| vec![0.0; d]).collect();
-
-        // Build an attention map with a dominant sink column at pos 0.
-        let mut attn: Vec<Vec<f32>> = Vec::with_capacity(n);
-        for i in 0..n {
-            let mut row = vec![0.1 / (n as f32 - 1.0); n];
-            row[0] = 0.9; // dominant sink
-            // Renormalize row so it sums to ~1.0 (skip for raw mass).
-            let _ = i;
-            attn.push(row);
-        }
-
+        let cd = build_case(n, 64, regime);
         let policy_uniform = SinkAwarePolicy::Uniform;
         let policy_dual = SinkAwarePolicy::DualPolicy(cfg);
 
-        // Shared scratch — Uniform doesn't touch it, so reuse safely.
-        let mut scratch = StableRankScratch::new(d);
+        let mut out_rows: Vec<Vec<f32>> = (0..n).map(|_| vec![0.0; cd.d]).collect();
+        let mut out_flat = vec![0.0f32; n * cd.d];
+        let mut scratch = StableRankScratch::new(cd.d);
 
-        // ── Uniform baseline (single copy) ───────────────────────────
+        // ── Uniform baseline (Vec<Vec> copy) ────────────────────────
         let us_uniform = bench_us(3, 30, || {
             let kind = apply_dual_policy_gate(
-                &attn,
-                &values,
-                &o,
-                &policy_uniform,
-                0.0,
-                &mut scratch,
-                &mut out_uniform,
+                &cd.attn_rows, &cd.values_rows, &cd.o_rows,
+                &policy_uniform, 0.0, &mut scratch, &mut out_rows,
             );
             std::hint::black_box(kind);
         });
 
-        // ── Per-call DualPolicy (the original slow path) ─────────────
+        // ── Per-call DualPolicy, Vec<Vec<f32>> ──────────────────────
         let us_dual = bench_us(3, 30, || {
             let kind = apply_dual_policy_gate(
-                &attn,
-                &values,
-                &o,
-                &policy_dual,
-                0.0,
-                &mut scratch,
-                &mut out_dual,
+                &cd.attn_rows, &cd.values_rows, &cd.o_rows,
+                &policy_dual, 0.0, &mut scratch, &mut out_rows,
             );
             std::hint::black_box(kind);
         });
 
-        // ── Cached DualPolicy at cadence 16 (production path) ────────
-        // Warmup: do one call to populate the cache.
+        // ── Per-call DualPolicy, flat &[f32] (Plan 288) ─────────────
+        let us_dual_flat = bench_us(3, 30, || {
+            let kind = apply_dual_policy_gate_flat(
+                &cd.attn_flat, &cd.values_flat, &cd.o_flat, n, cd.d,
+                &policy_dual, 0.0, &mut scratch, &mut out_flat,
+            );
+            std::hint::black_box(kind);
+        });
+
+        // ── Cached DualPolicy (cadence 16) — Vec<Vec> vs flat ──────
+        // We measure flat-only for the cached path since steady-state is
+        // a copy + (conditional) scale in both layouts; the difference is
+        // the same as in the per-call case. The cached_us column below is
+        // the flat cached variant, which is the production path going
+        // forward.
         let mut cached = CachedSinkClassification::with_config(cfg, 16);
-        apply_dual_policy_gate_cached(
-            &attn, &values, &o, 0.0, &mut scratch, &mut cached, &mut out_cached,
+        apply_dual_policy_gate_cached_flat(
+            &cd.attn_flat, &cd.values_flat, &cd.o_flat, n, cd.d,
+            0.0, &mut scratch, &mut cached, &mut out_flat,
         );
-        // Now measure steady-state (cached path hits copy_rows only).
-        let us_cached = bench_us(3, 30, || {
-            let kind = apply_dual_policy_gate_cached(
-                &attn, &values, &o, 0.0, &mut scratch, &mut cached, &mut out_cached,
+        let us_cached_flat = bench_us(3, 30, || {
+            let kind = apply_dual_policy_gate_cached_flat(
+                &cd.attn_flat, &cd.values_flat, &cd.o_flat, n, cd.d,
+                0.0, &mut scratch, &mut cached, &mut out_flat,
             );
             std::hint::black_box(kind);
         });
-
-        let oh_dual = if us_uniform > 0.0 {
-            100.0 * (us_dual - us_uniform) / us_uniform
-        } else {
-            0.0
-        };
-        let oh_cached = if us_uniform > 0.0 {
-            100.0 * (us_cached - us_uniform) / us_uniform
-        } else {
-            0.0
-        };
 
         println!(
-            "{:>5} {:>12.3} {:>12.3} {:>13.2}% {:>13.3} {:>9.2}%",
-            n, us_uniform, us_dual, oh_dual, us_cached, oh_cached
+            "{:>5} {:>10.3} {:>10.3} {:>10.3} {:>7.1}% {:>10.3} {:>7.1}%",
+            n, us_uniform, us_dual, us_dual_flat, pct(us_dual_flat, us_uniform),
+            us_cached_flat, pct(us_cached_flat, us_uniform),
         );
     }
     println!();
+}
+
+fn main() {
+    println!("=== Sink-Aware Dual-Policy Latency Benchmark ===");
+    println!("=== (Plan 287 T3.5 + Issue 001 + Plan 288 flat) ===\n");
+
+    let d = 64usize;
+    let n_values: &[usize] = &[128, 512];
+    let cfg = SinkClassifierConfig::default();
+    let _ = d;
+
+    run_regime("rank1", n_values, cfg);
+    run_regime("random", n_values, cfg);
+
     println!("G3 target: overhead ≤5% (DualPolicy vs Uniform).");
-    println!("Issue 001 verdict: per-call path structurally misses target;");
-    println!("                  cached (cadence=16) hits it in steady state.");
+    println!("Issue 001: per-call path structurally misses (memory-bandwidth bound).");
+    println!("           cached (cadence=16) hits ≤5% in steady state.");
+    println!("Plan 288: flat layout should match or beat Vec<Vec<f32>> on both");
+    println!("          regimes; largest gain expected on 'random' (no cosine probe).");
 }

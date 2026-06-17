@@ -1,6 +1,6 @@
 # Bench 059: Sink-Aware Attention GOAT Gate — Status
 
-**Date:** 2026-06-17 (initial); 2026-06-18 (Issue 001 latency work)
+**Date:** 2026-06-17 (initial); 2026-06-18 (Issue 001 latency work + Plan 288 flat-layout)
 **Plan:** [287_sink_aware_attention](../.plans/287_sink_aware_attention.md)
 **Research:** [258_Attention_Sink_Dual_Mechanism_NOP_Broadcast](../.research/258_Attention_Sink_Dual_Mechanism_NOP_Broadcast.md)
 **Paper:** [arxiv 2606.08105](https://arxiv.org/abs/2606.08105) — Fesser et al., *A Unifying View of Attention Sinks: Two Algorithms, Two Solutions*
@@ -39,6 +39,7 @@ G2 still DEFERRED.
 | **G2** (real ViT) | `effective_rank` preserved/improved on frozen ViT | ⏳ DEFERRED | Requires a real model + per-layer hook. Out of scope for this coding task. Synthetic G2 is the substitute. |
 | **G3** (per-call) | Latency overhead ≤5% (`DualPolicy` vs `Uniform`) | ❌ **STRUCTURAL FAIL** | 1000–3000% overhead at n=128/512, d_h=64. Memory-bandwidth bound: classifier reads attn (n²) + values (n·d); Uniform is just an n·d copy. Issue 001 T1–T5 optimizations (zero-alloc scratch, NOP fast-path, rank-1 cosine probe) brought the standalone `classify_sink_at` rank-1 path from 3.125µs → 0.625µs at n=128, but `apply_dual_policy_gate` still has to do the col_sums scan + value_norm scan, which fundamentally cannot beat a memcpy. |
 | **G3** (cached cadence=16) | Latency overhead ≤5% (`apply_dual_policy_gate_cached` vs `Uniform`) | ✅ **PASS** | Steady-state ≤5% (often negative — cached variant is faster than Uniform due to simpler code path on the non-audit calls). The classifier runs every 16 calls; sinks are stable across forward passes in trained transformers, so the cached decision is correct. |
+| **G3-flat** (Plan 288) | Flat `&[f32]` variants ≥ Vec<Vec<f32>> variants | ✅ **PASS (big margin)** | Flat variants are **1.8×–5.1× faster** than Vec<Vec<f32>> across all regimes. Cache locality from contiguous layout delivers far more than the hypothesized 5%. Cached-flat path is also faster than Uniform-Vec<Vec> baseline (flat memcpy beats per-row `copy_from_slice`). Enables Plan 289 forward-path integration. |
 | **Promote to default** | G2 (real-ViT) + G3 both pass | ❌ DEFERRED | Per-call G3 structurally infeasible; cached G3 PASS but real-ViT G2 still DEFERRED. Default stays `Uniform`. Promote when both gates pass on a real model. |
 
 ---
@@ -129,6 +130,48 @@ Full `apply_dual_policy_gate` vs `apply_dual_policy_gate_cached`:
 
 (Bench is noisy at 30 iterations; numbers fluctuate but the cached variant
 consistently lands at or below the Uniform baseline.)
+
+### Numbers after Plan 288 (flat `&[f32]` layout variants)
+
+Two regimes tested: `rank1` (Broadcast head, cosine probe fires) and `random`
+(i.i.d. noise, no probe short-circuit). The `cached` column uses the flat cached
+variant (production path).
+
+**Regime: rank1**
+
+| n    | uniform_us | dual_us (Vec) | dual_flat_us | flat vs Vec | cached_flat_us | cached_oh% |
+|------|-----------:|--------------:|-------------:|------------:|---------------:|-----------:|
+| 128  | 0.42–0.50  | 8.8–9.0       | 2.5–2.6      | **3.5–3.6×** | 0.29          | -30% to -42% |
+| 512  | 1.96–2.08  | 118–120       | 23.1–23.7    | **5.1×**    | 1.25–1.50      | -28% to -36% |
+
+**Regime: random**
+
+| n    | uniform_us | dual_us (Vec) | dual_flat_us | flat vs Vec | cached_flat_us | cached_oh% |
+|------|-----------:|--------------:|-------------:|------------:|---------------:|-----------:|
+| 128  | 0.46       | 14.5–15.0     | 8.2–8.5      | **1.8×**    | 0.29–0.42      | -9% to -36% |
+| 512  | 2.00       | 144–148       | 46.5–49.8    | **3.1×**    | 1.17–1.21      | -40% |
+
+### Why flat is so much faster
+
+The Vec<Vec<f32>> layout has hidden costs beyond the obvious pointer-chase:
+
+1. **Per-row allocation footprint.** Each `Vec<f32>` row carries its own
+   heap header (capacity, len, ptr) — 24 bytes on 64-bit. For n=128 rows,
+   that's 3KB of metadata polluting the L1 cache lines alongside actual data.
+2. **Non-contiguous rows.** The allocator may place rows anywhere on the
+   heap. The prefetcher cannot predict the next row's address, so every row
+   transition is a potential L1/L2 miss.
+3. **Per-row `copy_from_slice` call overhead.** `copy_rows` loops over rows
+   calling `copy_from_slice` per row — n function calls (even if inlined,
+   the boundary checks + bounds logic repeat per row).
+
+Flat layout eliminates all three: one contiguous allocation, sequential
+memory access pattern, single `copy_from_slice` for the whole tensor.
+
+The cached-flat variant is **faster than the Uniform-Vec<Vec> baseline**
+because the steady-state path is a single flat memcpy, while Uniform's
+`copy_rows` does n per-row copies. This is a free win for any caller that
+adopts the flat layout.
 
 ### Why the per-call path cannot hit 5%
 
@@ -222,7 +265,7 @@ per-forward is too expensive with the current implementation.
 Promote-to-default criteria for a future iteration:
 1. ✅ Make `stable_rank_update_into` truly zero-alloc (Issue 001 T4 — done).
 2. ✅ Skip stable rank in `apply_dual_policy_gate` when `value_norm_ratio` alone is decisive (Issue 001 T2 — done).
-3. ⚠️ Switch to flat `&[f32]` layout for `O` / `values` / `attn` to enable cross-row SIMD — **deferred**; the cosine rank-1 probe (T5) makes this less urgent. Could still help the random-O case.
+3. ✅ Switch to flat `&[f32]` layout for `O` / `values` / `attn` to enable cross-row SIMD — **done (Plan 288)**; flat variants ship alongside Vec<Vec<f32>> and are 1.8×–5.1× faster. Unblocks Plan 289 (forward-path wiring into parallax/funcattn).
 4. ✅ Re-run G3 with audit-cadence variant (Issue 001 T5b — done; cached cadence=16 meets target).
 5. ⏳ Real-ViT G2: run `effective_rank` on a frozen ViT before/after applying DualPolicyCached. **This is now the only remaining blocker for promotion.**
 
