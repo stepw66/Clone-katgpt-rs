@@ -11,11 +11,13 @@
 
 pub mod battle;
 pub mod players;
+pub mod replay_encode;
 pub mod status;
 pub mod types;
 
 pub use battle::*;
 pub use players::*;
+pub use replay_encode::encode_battle_state;
 pub use status::*;
 pub use types::*;
 
@@ -50,5 +52,7 @@ pub mod sr2am_player;
 pub use sr2am_player::FftSr2amPlayer;
 
 pub mod arena_runner;
+pub mod lora_player;
 
 pub use arena_runner::{FftArenaConfig, FftBattleResult, run_fft_battle, run_fft_matchup};
+pub use lora_player::FftLoRAPlayer;

@@ -639,6 +639,15 @@ required-features = ["sdar_gate", "ropd_rubric", "g_zero", "fft"]
 name = "fft_04_feedback_goat"
 required-features = ["g_zero", "fft"]
 
+# Plan 296 T7.3 — FFT SON-LT (Sparse OPD-Native LoRA Training) examples.
+[[example]]
+name = "fft_05_replay_gen"
+required-features = ["fft"]
+
+[[example]]
+name = "fft_06_lora_arena"
+required-features = ["fft"]
+
 # ── Blue Bear ──────────────────────────────────────────────────
 
 [[example]]

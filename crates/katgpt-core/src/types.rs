@@ -1112,6 +1112,118 @@ impl Config {
         }
     }
 
+    /// Game config for FFT Tactics Arena LoRA training (Plan 296 T7.3).
+    /// Tiny Transformer for battle state → action prediction.
+    ///
+    /// # Token Layout
+    ///
+    /// - State vocab (values 0..9): team(0-1), class(0-5), hp_bucket(0-7),
+    ///   mp_bucket(0-3), pos_x(0-7), pos_y(0-7), alive(0-1).
+    /// - Action tokens: 10..19 (9 FFT ActionTypes).
+    ///
+    /// Sequence (58 tokens):
+    ///   `[tick, u0_team, u0_class, u0_hp, u0_mp, u0_x, u0_y, u0_alive,
+    ///     u1_..., ..., u7_..., action_token]`
+    ///
+    /// Per-unit = 7 tokens × 8 units = 56, +1 tick +1 action = 58 tokens.
+    /// ~18K params total, ~1.5K LoRA params (rank=4). Comparable to Bomber/Go.
+    pub fn game_fft() -> Self {
+        Self {
+            vocab_size: 19,
+            block_size: 58,
+            n_embd: 32,
+            n_head: 4,
+            head_dim: 8,
+            mlp_hidden: 128,
+            n_layer: 1,
+            n_kv_head: 4,
+            bos_token: 0,
+            temperature: 1.0,
+            draft_lookahead: 0,
+            tree_budget: 0,
+            parallel_threshold: 128,
+            lora_rank: 4,
+            lora_alpha: 8.0,
+            lora_dropout: 0.0,
+            lora_targets: vec![
+                "q".into(),
+                "k".into(),
+                "v".into(),
+                "o".into(),
+                "mlp1".into(),
+                "mlp2".into(),
+            ],
+            screening_threshold: 0.0,
+            sparse_threshold: 0.8,
+            early_exit_patience: 0,
+            early_exit_gap: 0.0,
+            mtp_activation_threshold: usize::MAX,
+            mtp_cluster_vocab_threshold: usize::MAX,
+            mtp_shared_kv_prompt_threshold: usize::MAX,
+            mtp_cluster_size: 512,
+            mtp_min_output_tokens: usize::MAX,
+            mtp_cluster_topk: 1,
+            hla_mode: HlaMode::Standard,
+            hla_normalize: false,
+            hla_decay: 1.0,
+            model_arch: ModelArchitecture::Generic,
+            rms_norm_eps: 1e-5,
+            rms_norm_offset: false,
+            tied_embeddings: false,
+            use_rope: false,
+            rope_theta: 10000.0,
+            post_norm: false,
+            attn_logit_softcapping: 0.0,
+            final_logit_softcapping: 0.0,
+            weight_dtype: WeightDtype::F32,
+            mask_token: 0,
+            attention_mode: AttentionMode::Causal,
+            sp_kv_window: 128,
+            sp_kv_threshold: 0.5,
+            sp_kv_predictor_hidden: 0,
+            sp_kv_predictor_lr_mult: 5.0,
+            width_rollouts: 1,
+            early_stop_threshold: 0.0,
+            convergence_selector: ConvergenceSelector::default(),
+            d2f_block_size: 8,
+            mls_layers: 0,
+            loop_mode: LoopMode::None,
+            hybrid_pattern: HybridPattern::Uniform,
+            gated_attn: false,
+            parallax_gate_scale: 0.0,
+            emotion_desperation_threshold: 0.5,
+            parallax_zero_init: true,
+            #[cfg(feature = "hydra_budget")]
+            hydra_profiles: Vec::new(),
+            #[cfg(feature = "deltanet_inference")]
+            layer_types: Vec::new(),
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_conv_kernel_size: 0,
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_state_dim: 0,
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_linear_head_dim: 0,
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_linear_n_heads: 0,
+            #[cfg(feature = "deltanet_inference")]
+            deltanet_linear_n_value_heads: 0,
+            #[cfg(feature = "rim_slots")]
+            rim_block_count: 0,
+            #[cfg(feature = "rim_slots")]
+            rim_tokens_per_block: 2,
+            #[cfg(feature = "rim_slots")]
+            rim_buffer_token: 0,
+            #[cfg(feature = "wall_attention")]
+            wall_config: None,
+            #[cfg(feature = "collapse_aware_thinking")]
+            collapse_budget: ThinkingBudget::default(),
+            #[cfg(feature = "belief_drafter")]
+            belief_drafter_path: None,
+            #[cfg(feature = "belief_drafter")]
+            belief_drafter_entropy_threshold: 2.0,
+        }
+    }
+
     /// Lightweight draft model for speculative decoding (~4× smaller than target).
     /// Same vocab/block to share embeddings, but embd=4, heads=2, mlp=16.
     pub fn draft() -> Self {
