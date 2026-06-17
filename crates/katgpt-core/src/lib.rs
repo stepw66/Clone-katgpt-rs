@@ -56,6 +56,12 @@ pub use traits::{
 };
 pub use traits::{GenerativeConstraintPruner, SpeculativeGenerator};
 
+// RecursionLogits — opt-in trait for generators that expose pre/post recursion
+// logits so AdvantageMarginGate can wrap them (Plan 283 T2.3, arxiv:2511.16886).
+// Opt-in: not in default feature list. Non-recursing generators do not implement it.
+#[cfg(feature = "recursion_logits")]
+pub use traits::RecursionLogits;
+
 // Q-Guided Flow (Plan 268) — test-time Q-gradient guidance primitive.
 #[cfg(feature = "qgf_oracle")]
 pub use traits::{NoGuidanceOracle, QGradientOracle};
