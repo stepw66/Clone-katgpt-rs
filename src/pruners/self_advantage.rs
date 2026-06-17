@@ -938,3 +938,405 @@ mod tests {
         );
     }
 }
+
+// ── Phase 5 T5.3: AdvantageDirectionSnapshot (freeze/thaw) ──────
+// Feature-gated: requires `advantage_freeze_thaw` Cargo feature.
+//
+// Per-NPC personality fingerprint: the running EMA of the self-advantage
+// direction A(·) = log π+ - log π̂ over many ticks. Captures "what kinds
+// of observations improve this NPC's predictions" as a versioned,
+// BLAKE3-committed latent direction vector.
+//
+// Design decision: EMA aggregation. The advantage A(·) is per-step
+// per-candidate (n values per step, where n = vocab size). EMA smooths
+// transient noise into a single direction. Decay λ defaults to 0.1
+// (i.e., new observations weigh 10x the cumulative history). Conservative
+// default — revisit if a consumer needs a different aggregation (Top-K,
+// mean direction, etc.).
+
+/// Snapshot version format for `AdvantageDirectionSnapshot`.
+/// Bump if the weights_blob layout changes.
+pub const ADVANTAGE_SNAPSHOT_VERSION: u64 = 1;
+
+/// Running EMA aggregator for the self-advantage direction.
+///
+/// Maintains a single `direction: Vec<f32>` of length `n` (vocab size).
+/// Each call to `update(advantage_slice)` blends the new observation into
+/// the running direction via `direction ← (1-λ)·direction + λ·advantage`.
+///
+/// First call initializes `direction` to a copy of `advantage` (no history
+/// to decay from). Subsequent calls apply the EMA.
+///
+/// # Decay λ
+///
+/// * `λ = 0.1` (default) — new observations weigh 10× cumulative history.
+///   Smooths transient noise, captures slow drift.
+/// * `λ = 1.0` — no memory, direction = last observation only.
+/// * `λ → 0` — perfect memory, direction = average over all history.
+///
+/// # Zero allocation in steady state
+///
+/// The `direction` buffer is sized once on the first `update()` and reused.
+/// `update()` performs zero heap allocations after the first call.
+#[cfg(feature = "advantage_freeze_thaw")]
+#[derive(Debug, Clone)]
+pub struct AdvantageDirectionAccumulator {
+    /// Running EMA of the advantage direction. Length = vocab size.
+    pub direction: Vec<f32>,
+    /// EMA decay factor (0, 1]. New observations weigh `λ`, history weighs `1-λ`.
+    pub lambda: f32,
+    /// Number of updates observed. Used for snapshot metadata.
+    pub updates: u64,
+}
+
+#[cfg(feature = "advantage_freeze_thaw")]
+impl Default for AdvantageDirectionAccumulator {
+    #[inline]
+    fn default() -> Self {
+        Self::new(0.1)
+    }
+}
+
+#[cfg(feature = "advantage_freeze_thaw")]
+impl AdvantageDirectionAccumulator {
+    /// Create an accumulator with EMA decay `lambda`.
+    ///
+    /// `lambda` must be in `(0.0, 1.0]`. Values outside this range panic in
+    /// debug mode.
+    #[inline]
+    pub fn new(lambda: f32) -> Self {
+        debug_assert!(
+            (0.0..=1.0).contains(&lambda),
+            "lambda must be in (0, 1], got {}",
+            lambda
+        );
+        Self {
+            direction: Vec::new(),
+            lambda,
+            updates: 0,
+        }
+    }
+
+    /// Blend a new advantage observation into the running direction.
+    ///
+    /// First call initializes `direction` to a copy of `advantage`.
+    /// Subsequent calls apply `direction ← (1-λ)·direction + λ·advantage`.
+    ///
+    /// Panics if `advantage.len()` differs from the direction length set
+    /// by the first call.
+    pub fn update(&mut self, advantage: &[f32]) {
+        let n = advantage.len();
+        assert!(n > 0, "AdvantageDirectionAccumulator::update: empty slice");
+        if self.direction.is_empty() {
+            // First observation: initialize.
+            self.direction.clear();
+            self.direction.extend_from_slice(advantage);
+        } else {
+            assert_eq!(
+                self.direction.len(),
+                n,
+                "advantage length {} differs from direction length {}",
+                n,
+                self.direction.len()
+            );
+            let one_minus_lambda = 1.0 - self.lambda;
+            // Chunked loop for auto-vectorization (4-wide).
+            let chunks = n / 4;
+            let mut i = 0;
+            while i < chunks * 4 {
+                self.direction[i] = one_minus_lambda * self.direction[i] + self.lambda * advantage[i];
+                self.direction[i + 1] =
+                    one_minus_lambda * self.direction[i + 1] + self.lambda * advantage[i + 1];
+                self.direction[i + 2] =
+                    one_minus_lambda * self.direction[i + 2] + self.lambda * advantage[i + 2];
+                self.direction[i + 3] =
+                    one_minus_lambda * self.direction[i + 3] + self.lambda * advantage[i + 3];
+                i += 4;
+            }
+            while i < n {
+                self.direction[i] = one_minus_lambda * self.direction[i] + self.lambda * advantage[i];
+                i += 1;
+            }
+        }
+        self.updates += 1;
+    }
+
+    /// Current EMA direction. Empty if `update()` has never been called.
+    pub fn direction(&self) -> &[f32] {
+        &self.direction
+    }
+
+    /// Snapshot the current direction as a BLAKE3-committed freeze/thaw artifact.
+    ///
+    /// The snapshot owns a copy of the direction bytes (LE f32 per element).
+    /// Use `commit()` after construction (or after any modification) to
+    /// compute the BLAKE3 hash.
+    pub fn snapshot(&self, version: u64) -> AdvantageDirectionSnapshot {
+        let mut weights_blob = Vec::with_capacity(self.direction.len() * 4);
+        for &v in &self.direction {
+            weights_blob.extend_from_slice(&v.to_le_bytes());
+        }
+        AdvantageDirectionSnapshot::from_parts(
+            self.direction.len(),
+            self.lambda,
+            self.updates,
+            weights_blob,
+            [0u8; 32],
+            version,
+        )
+    }
+}
+
+/// A versioned, BLAKE3-committed snapshot of an advantage direction vector.
+///
+/// The freeze/thaw artifact for an NPC's "what improves me" fingerprint.
+/// Two NPCs of the same type can diverge by holding different snapshot
+/// versions — one may have learned that combat observations improve its
+/// predictions, another that exploration observations do.
+///
+/// # Sync boundary
+///
+/// - The **direction blob** is latent, local, never synced.
+/// - The **BLAKE3 commitment + version** IS synced as an audit event when
+///   a personality update occurs — clients can verify that the NPC they
+///   observe matches a committed personality, without learning the direction.
+///
+/// # Commitment scheme
+///
+/// BLAKE3 over `dim_le_bytes || lambda_le_bytes || updates_le_bytes || weights_blob`:
+///
+/// ```text
+/// hasher.update(&(self.dim as u64).to_le_bytes());
+/// hasher.update(&self.lambda.to_le_bytes());
+/// hasher.update(&self.updates.to_le_bytes());
+/// hasher.update(&self.weights_blob);
+/// ```
+///
+/// Matches the streaming-`Hasher` pattern used by `MicroRecurrentKernelSnapshot`
+/// (`katgpt-rs/crates/katgpt-core/src/micro_belief/snapshot.rs`).
+#[cfg(feature = "advantage_freeze_thaw")]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct AdvantageDirectionSnapshot {
+    /// Vocab size the direction was accumulated against.
+    pub dim: usize,
+    /// EMA decay λ used during accumulation. Part of the commitment so a
+    /// snapshot cannot be silently replayed with a different λ.
+    pub lambda: f32,
+    /// Number of `update()` calls observed before the snapshot. Provenance
+    /// metadata (helps detect under-trained personalities).
+    pub updates: u64,
+    /// Serialised direction: `dim` LE f32 values, 4 bytes each.
+    pub weights_blob: Vec<u8>,
+    /// BLAKE3 commitment over `(dim, lambda, updates, weights_blob)`.
+    /// Filled by `commit()`; zeroed during hashing.
+    pub blake3: [u8; 32],
+    /// Monotonic version counter (caller-managed). NOT part of the BLAKE3
+    /// input — two snapshots with identical direction but different versions
+    /// are the *same* personality at different points in time.
+    pub version: u64,
+}
+
+#[cfg(feature = "advantage_freeze_thaw")]
+impl AdvantageDirectionSnapshot {
+    /// Build a snapshot from raw parts WITHOUT computing the commitment.
+    ///
+    /// Useful for deserialisation paths where the commitment is already known
+    /// (e.g. loading from disk). Call `commit()` afterwards if you need to
+    /// recompute, or `verify()` to check integrity.
+    pub fn from_parts(
+        dim: usize,
+        lambda: f32,
+        updates: u64,
+        weights_blob: Vec<u8>,
+        blake3: [u8; 32],
+        version: u64,
+    ) -> Self {
+        Self { dim, lambda, updates, weights_blob, blake3, version }
+    }
+
+    /// Compute (or recompute) the BLAKE3 commitment over
+    /// `(dim, lambda, updates, weights_blob)`.
+    ///
+    /// Idempotent: calling twice produces the same hash. The existing
+    /// `self.blake3` is zeroed internally before hashing so the commitment
+    /// never feeds back into itself.
+    pub fn commit(&mut self) -> [u8; 32] {
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(&(self.dim as u64).to_le_bytes());
+        hasher.update(&self.lambda.to_le_bytes());
+        hasher.update(&self.updates.to_le_bytes());
+        hasher.update(&self.weights_blob);
+        let hash = *hasher.finalize().as_bytes();
+        self.blake3 = hash;
+        hash
+    }
+
+    /// Recompute the commitment and compare with the stored `self.blake3`.
+    ///
+    /// Returns `true` iff the stored direction produces the stored hash.
+    /// A `false` result indicates tampering or corruption.
+    pub fn verify(&self) -> bool {
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(&(self.dim as u64).to_le_bytes());
+        hasher.update(&self.lambda.to_le_bytes());
+        hasher.update(&self.updates.to_le_bytes());
+        hasher.update(&self.weights_blob);
+        let recomputed = *hasher.finalize().as_bytes();
+        recomputed == self.blake3
+    }
+
+    /// Decode the `weights_blob` back into an `Vec<f32>` direction vector.
+    ///
+    /// Returns `Err` if the blob length is not `dim * 4`.
+    pub fn decode_direction(&self) -> Result<Vec<f32>, &'static str> {
+        if self.weights_blob.len() != self.dim * 4 {
+            return Err("weights_blob length mismatch");
+        }
+        let mut out = Vec::with_capacity(self.dim);
+        for i in 0..self.dim {
+            let start = i * 4;
+            let bytes: [u8; 4] = self.weights_blob[start..start + 4].try_into().map_err(|_| "slice conversion")?;
+            out.push(f32::from_le_bytes(bytes));
+        }
+        Ok(out)
+    }
+
+    /// Restore an accumulator from this snapshot.
+    ///
+    /// The restored accumulator has the same `lambda`, `direction`, and
+    /// `updates` count. Future `update()` calls will continue the EMA from
+    /// the snapshotted state.
+    pub fn restore_accumulator(&self) -> Result<AdvantageDirectionAccumulator, &'static str> {
+        let direction = self.decode_direction()?;
+        Ok(AdvantageDirectionAccumulator {
+            direction,
+            lambda: self.lambda,
+            updates: self.updates,
+        })
+    }
+}
+
+#[cfg(all(test, feature = "advantage_freeze_thaw"))]
+mod advantage_freeze_thaw_tests {
+    use super::*;
+
+    #[test]
+    fn accumulator_first_update_initializes() {
+        let mut acc = AdvantageDirectionAccumulator::default();
+        acc.update(&[1.0, -0.5, 0.25, -0.125]);
+        assert_eq!(acc.direction(), &[1.0, -0.5, 0.25, -0.125]);
+        assert_eq!(acc.updates, 1);
+    }
+
+    #[test]
+    fn accumulator_ema_converges_to_steady_input() {
+        // With lambda=0.1 and a constant input, the EMA should converge
+        // toward that constant.
+        let mut acc = AdvantageDirectionAccumulator::new(0.1);
+        let target = [3.0, -1.0, 2.0, 0.5];
+        for _ in 0..200 {
+            acc.update(&target);
+        }
+        // After 200 updates with λ=0.1, EMA is essentially at the target.
+        for (i, &t) in target.iter().enumerate() {
+            let diff = (acc.direction()[i] - t).abs();
+            assert!(diff < 0.01, "idx {}: EMA {} not converged to {}", i, acc.direction()[i], t);
+        }
+    }
+
+    #[test]
+    fn accumulator_ema_smooths_noise() {
+        // Alternating +1/-1 input should smooth toward the mean (0).
+        // With λ=0.5 the EMA steady-state oscillation amplitude is λ/(2-λ)=1/3,
+        // which does NOT demonstrate smoothing. Use the default λ=0.1: amplitude
+        // is 0.1/1.9 ≈ ±0.053, well within the < 0.2 threshold.
+        let mut acc = AdvantageDirectionAccumulator::new(0.1);
+        for step in 0..100 {
+            let v = if step % 2 == 0 { 1.0 } else { -1.0 };
+            acc.update(&[v]);
+        }
+        let d = acc.direction()[0];
+        assert!(d.abs() < 0.2, "alternating input should smooth toward 0, got {}", d);
+    }
+
+    #[test]
+    fn snapshot_roundtrips_commit_verify() {
+        let mut acc = AdvantageDirectionAccumulator::default();
+        acc.update(&[0.5, -0.25, 0.125]);
+        acc.update(&[0.6, -0.30, 0.150]);
+
+        let mut snap = acc.snapshot(1);
+        snap.commit();
+        assert!(snap.verify(), "freshly-committed snapshot must verify");
+        assert_eq!(snap.dim, 3);
+        assert_eq!(snap.updates, 2);
+        assert_ne!(snap.blake3, [0u8; 32], "blake3 must be non-zero after commit");
+    }
+
+    #[test]
+    fn commit_is_idempotent() {
+        let mut acc = AdvantageDirectionAccumulator::default();
+        acc.update(&[0.5, -0.25]);
+        let mut snap = acc.snapshot(1);
+        let h1 = snap.commit();
+        let h2 = snap.commit();
+        assert_eq!(h1, h2, "commit must be idempotent");
+    }
+
+    #[test]
+    fn tampered_blob_fails_verify() {
+        let mut acc = AdvantageDirectionAccumulator::default();
+        acc.update(&[1.0, 2.0, 3.0]);
+        let mut snap = acc.snapshot(1);
+        snap.commit();
+        // Tamper: flip a byte.
+        snap.weights_blob[0] ^= 0xFF;
+        assert!(!snap.verify(), "tampered snapshot must fail verify");
+    }
+
+    #[test]
+    fn decode_direction_roundtrips() {
+        let mut acc = AdvantageDirectionAccumulator::default();
+        let original = [0.5, -0.25, 0.125, -0.0625, 1.0];
+        acc.update(&original);
+        let mut snap = acc.snapshot(1);
+        snap.commit();
+        let decoded = snap.decode_direction().expect("decode");
+        assert_eq!(decoded, original);
+    }
+
+    #[test]
+    fn restore_accumulator_continues_ema() {
+        // Snapshot, restore, continue updating — the restored accumulator
+        // should pick up where it left off.
+        let mut acc = AdvantageDirectionAccumulator::default();
+        acc.update(&[1.0, 0.0]);
+        acc.update(&[1.0, 0.0]);
+        let mut snap = acc.snapshot(1);
+        snap.commit();
+
+        let mut restored = snap.restore_accumulator().expect("restore");
+        assert_eq!(restored.updates, 2);
+        assert_eq!(restored.direction(), acc.direction());
+
+        // Continue updating.
+        restored.update(&[1.0, 0.0]);
+        assert_eq!(restored.updates, 3);
+    }
+
+    #[test]
+    fn lambda_is_part_of_commitment() {
+        // Two snapshots with identical direction but different λ must have
+        // different BLAKE3 hashes.
+        let mut acc1 = AdvantageDirectionAccumulator::new(0.1);
+        let mut acc2 = AdvantageDirectionAccumulator::new(0.5);
+        acc1.update(&[1.0, 2.0]);
+        acc2.update(&[1.0, 2.0]);  // same initial direction, different λ
+
+        let mut snap1 = acc1.snapshot(1);
+        let mut snap2 = acc2.snapshot(1);
+        snap1.commit();
+        snap2.commit();
+        assert_ne!(snap1.blake3, snap2.blake3, "different λ must yield different commitments");
+    }
+}
