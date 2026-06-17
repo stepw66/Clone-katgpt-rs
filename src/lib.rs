@@ -18,6 +18,18 @@ pub mod cache_prune;
 pub mod channel_simd;
 #[cfg(feature = "cgsp")]
 pub mod cgsp;
+#[cfg(feature = "clr")]
+pub mod clr;
+// CLR — Claim-Level Reliability runtime (Plan 284, Research 255).
+// Opt-in behind the `clr` feature until G1-G5 GOAT gate passes. Re-exports the
+// public surface so consumers can `use katgpt::clr_vote` etc. without nesting.
+#[cfg(feature = "clr")]
+pub use clr::{
+    allocate_budget, brevity_tiebreak, Claim, ClaimExtractor, ClaimVerifier, ClrConfig, ClrScratch,
+    Cluster, DirectionVectorSource, FnClaimExtractor, learning_potential, mgpo_sampling_weight,
+    ReliabilityScore, should_write_memory, SigmoidProjectionVerifier, Trajectory, Verdict,
+    VoteResult, clr_vote, clr_vote_minimal,
+};
 pub mod cumprodsum;
 #[cfg(feature = "ssd_block")]
 pub mod ssd_block;

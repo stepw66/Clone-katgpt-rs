@@ -237,6 +237,7 @@ triggered_injection = ["katgpt-core/triggered_injection"]  # TriggeredInjectionG
 micro_belief = ["katgpt-core/micro_belief"]  # MicroRecurrentBeliefState — per-entity recurrent state trait + attractor/leaky kernels + BLAKE3 snapshot (Plan 276, Research 242). Opt-in until G1.1–G1.5 GOAT gate passes.
 temporal_deriv = ["katgpt-core/temporal_deriv"]  # Temporal Derivative Kernel — dual fast/slow EMA surprise signal (Plan 277, Research 243, arXiv:2606.08720). Opt-in until ≥2 fusion gates pass.
 chain_fold = ["thinking_cot"]  # ThoughtFold chain folding — inference-time CoT step pruning (Plan 195 GOAT 16/16, validated by Plan 228 78% reduction)
+clr = []  # CLR Claim-Level Reliability runtime — sigmoid projection vote over claim embeddings (Plan 284, Research 255)
 bandit_top_p = ["bandit"]  # Adaptive top-p bandit arm selection (Plan 181, default ON candidate)
 curvature_alloc = ["bandit"]  # Curvature-influence allocation — EoS proxy budget control (Plan 183)
 nds_proxy = ["bandit"]  # NDS curvature proxy — modelless inference budget control (Plan 186)
@@ -1362,3 +1363,8 @@ required-features = ["module_energy_route"]
 [[example]]
 name = "sigmoid_graded_reject"
 required-features = ["sigmoid_graded_reject"]
+
+# Plan 284 Phase 4 — CLR GOAT gate (G1–G5) stubs. Opt-in until the gate runs.
+[[test]]
+name = "bench_284_clr_goat"
+required-features = ["clr"]
