@@ -107,7 +107,10 @@ in `neon_exp_inplace` that should be filed as a separate issue.**
 - **Promote `simd_sigmoid` to default-on for `bom_sampling`**: G3 passes, and the
   sigmoid vectorization is strictly beneficial (1.13–1.69× across step/K=8).
   No correctness regression (G1.3 holds, 348 lib tests pass).
+  → **APPLIED 2026-06-17 (Issue 025 closed).** `bom_sampling` now auto-enables
+  `simd_sigmoid`.
 - **Keep `micro_belief` opt-in**: G1.4 still fails. The attractor family needs M2
   (inline simd_dot_f32 at small dim) or M4 (dim=16 default) before promotion.
 - **File follow-up issue**: the `neon_exp_inplace` polynomial bug should be fixed
   separately — it affects all exp/softmax callers, not just sigmoid.
+  → **DONE as Issue 027 (FIXED 2026-06-16).**

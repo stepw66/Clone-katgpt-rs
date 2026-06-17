@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-16
 **Plan:** [katgpt-rs/.plans/281_bom_single_pass_diverse_sampling.md](../.plans/281_bom_single_pass_diverse_sampling.md) — Phase 2, T2.1 (G3 gate)
-**Status:** Open — does NOT block Plan 281 Phase 1 exit (G1.1, G1.2, G1.3 all pass). `bom_sampling` stays opt-in anyway (G2 arena is deferred to riir-ai). Documents the G3 borderline-fail for future optimization.
+**Status:** ✅ **CLOSED** (2026-06-17). G3 PASSES for K≤8 (1.87× step via `simd_sigmoid`, was 2.54× scalar). Per the issue's own recommendation, `bom_sampling` now auto-enables `simd_sigmoid` in `crates/katgpt-core/Cargo.toml` — the feature combination is automatic, callers cannot accidentally ship the slow scalar path. The scalar fallback remains switchable via `--no-default-features` for debugging. Does not block Plan 281 Phase 1 (G1.1/G1.2/G1.3 all pass) or the G2 arena (deferred to riir-ai).
 
 ---
 
@@ -97,3 +97,13 @@ for K≤8, no correctness regression (G1.3 σ=0 degeneracy holds, 17 bom tests
 pass). Combined with Issue 024's recommendation: `simd_sigmoid` should be
 enabled whenever `bom_sampling` is enabled, either by making `bom_sampling`
 depend on `simd_sigmoid` or by documenting the recommended feature combination.
+
+### Resolution (2026-06-17)
+
+**Applied:** `bom_sampling = ["micro_belief", "simd_sigmoid"]` in
+`crates/katgpt-core/Cargo.toml`. The feature combination is now automatic —
+any caller enabling `bom_sampling` gets the SIMD sigmoid path with no extra
+configuration. 373 katgpt-core tests pass with just `--features bom_sampling`
+(auto-includes simd_sigmoid). Plan 281 T2.4 (partial) marked complete; full
+promotion of `bom_sampling` to default-on remains blocked on G2 arena
+(deferred to riir-ai). Issue 025 closed.
