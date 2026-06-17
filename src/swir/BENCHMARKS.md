@@ -1,11 +1,11 @@
 # SwiR Switch-Thinking — Phase 3 GOAT Gate Results
 
 **Plan:** 275 (Phase 3, tasks T3.2–T3.11)
-**Test file:** `tests/bench_275_swir_goat.rs` (10 tests)
+**Test file:** `tests/bench_275_swir_goat.rs` (16 tests)
 **Benchmark report:** `.benchmarks/275_swir_switch_thinking_goat.md`
 **Profile:** release (G3 enforced) + debug (G7 allocation audit)
 **Hardware:** Apple Silicon arm64 (NEON SIMD), Rust 1.93.0
-**Model dependency:** None — all gates run on synthetic entropy streams + synthetic embedding matrices. Real-model gates (G1 accuracy, G2 efficiency, T3.9 ablations) are deferred to riir-ai Plan 299 (NPC Curiosity Self-Play Runtime), which has the model loader + MATH500 harness.
+**Model dependency:** None — all gates run on synthetic entropy streams + synthetic embedding matrices. Real-model gates (G1 accuracy, G2 efficiency, T3.9 accuracy ablations) are deferred to riir-ai Plan 299 (NPC Curiosity Self-Play Runtime), which has the model loader + MATH500 harness. The **benchmark harness** (`src/swir/bench.rs`) ships in katgpt-rs with `ProblemSource` + `DecodeBackend` traits — riir-ai implements them over Qwen3-1.7B + MATH500.
 
 ## Reproduce
 
@@ -34,8 +34,11 @@ cargo check --no-default-features --features thinking_cot
 
 > **G7 parallel-safe (resolved 2026-06-16):** `src/alloc.rs` now uses thread-local `Cell<AllocStats>` counters instead of process-global atomics, so each test thread's allocation measurements are isolated from sibling tests. `g7_step_zero_allocation_debug` passes reliably under default parallel execution (verified 5 consecutive runs). The previous `--test-threads=1` pin is no longer required.
 | **G8** signal-mix schedule | α_t/β_t monotonic non-decreasing in step_index | [0.70, 0.72, 0.74, 0.78, 0.85, 0.93, 1.0] — monotonic ✓ | ✅ PASS |
+| **G9** hyperparameter ablation | W_E→L/C_max/α_0/mixing behavioral response matches paper expectations | W_E→L: 256→1 switches; C_max: term 27→117; α_0: identical 13 switches across 0.3–1.0; mix: fires only on switch steps | ✅ PASS |
+| **G1h** accuracy gate harness | `run_benchmark` produces correct metrics; `ComparisonResult::accuracy_delta_pp` computes | harness structure validated, 10 problems × 2 modes | ✅ PASS |
+| **G2h** efficiency gate harness | SwiR terminates < baseline; efficiency ratio > 1.0 | SwiR terminates at step 48 vs baseline 64 = 1.33× | ✅ PASS |
 
-**All 8 synthetic-data gates PASS.**
+**All 11 synthetic-data gates PASS.**
 
 ### Deferred to riir-ai Plan 299 (needs real model)
 
@@ -45,9 +48,9 @@ cargo check --no-default-features --features thinking_cot
 | **G2** efficiency | 1.3× token efficiency at fixed accuracy | Same — needs real decoding to measure actual token counts at matched accuracy. |
 | **T3.9** ablations | W_E→L, α_0, C_max, signal mix sweeps | Same — accuracy ablations need a real task. |
 
-## Algorithmic bug fixed during Phase 3
+## Algorithmic bugs fixed during Phase 3
 
-**Switch-count guard livelock** (fixed in `src/swir/controller.rs`):
+### Bug 1: Switch-count guard livelock (fixed earlier)
 
 The original code enqueued `CloseThink`/`ForceAnswerPrefix` on *every step* while in Explicit mode with switch_count in the convergence window. This caused a livelock: the enqueued token was drained at the start of the next step (skipping mode-switch logic), which prevented switch_count from advancing, which re-enqueued the same token forever.
 
@@ -55,6 +58,15 @@ The original code enqueued `CloseThink`/`ForceAnswerPrefix` on *every step* whil
 
 Before fix: G2p ran 1024 steps without terminating (0% reduction).
 After fix: G2p terminates at step 33 (97% reduction, 31.03× speedup) with the REAL `c_convergence_fraction=0.5` (no workaround).
+
+### Bug 2: Answer-budget countdown allows mode switches (fixed 2026-06-17)
+
+After `ForceAnswerPrefix` fires (switch_count > c_max), the answer-budget countdown began but the mode-switch logic still ran. On alternating entropy schedules, this caused spurious Latent→Explicit switches during the answer window, inflating switch_count far past c_max. `g9b_c_max_sweep_termination_step_scales_monotonically` caught this (C_max=2 produced 7 switches, expected ≤ 4).
+
+**Fix:** when `answer_budget_remaining` is `Some` (post-ForceAnswerPrefix), skip mode-switch logic entirely and emit `EmitToken(0)` directly. The paper's ForceAnswerPrefix means "stop reasoning, start answering" — allowing further mode switches would defeat the overthinking guard (paper §3.4).
+
+Before fix: `g9b` FAILED (7 switches for C_max=2).
+After fix: `g9b` PASSES (switch count correctly bounded by c_max + small slop for injection steps).
 
 ## G7 adapter allocation note
 

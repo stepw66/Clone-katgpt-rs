@@ -487,6 +487,30 @@ Detects reasoning collapse **at runtime** during CoT generation and triggers ear
 
 Feature gate: `collapse_aware_thinking` (**default-ON**). 📖 Research: [`.research/187_S2F_Slow_to_Fast_Adaptive_Reasoning.md`](.research/187_S2F_Slow_to_Fast_Adaptive_Reasoning.md).
 
+### 🔄 SwiR Switch-Thinking: Explicit↔Latent Mode Controller (Plan 275)
+
+Distills SwiReasoning (ICLR 2026, [arXiv:2510.05069](https://arxiv.org/abs/2510.05069)) into a training-free runtime controller that switches between **explicit** (token-space) and **latent** (soft-embedding) reasoning modes based on block-relative entropy trends. Asymmetric dwell windows prevent mode chatter; a switch-count guard suppresses overthinking (convergence at ½C_max, forced answer above C_max).
+
+Three primitives, all modelless:
+- `SwiRController` — the 2-mode state machine (3.1 ns/step, zero-alloc).
+- `soft_embedding` — probability-weighted vocabulary mixture for latent mode (SIMD chunked, O(vocab·dim)).
+- `mix_thinking_signal` — control-token embedding blend at switch instants (α_t/β_t schedule).
+
+Integrates into `thinking_cot` (Plan 194) as a `ThinkingStrategy`. Optional kurtosis escape hatch (`observe_kurtosis`) forces Explicit mode on rigid-constraint tasks, bypassing latent exploration where continuous mixtures would hallucinate.
+
+| Gate | Target | Result |
+|------|--------|--------|
+| G3 step() perf | < 200 ns/call | **3.1 ns** (64× margin) |
+| G4 convex hull | 1000 random probs in hull | **1000/1000** |
+| G7 zero-alloc step() | 0 allocs | **0 allocs / 0 bytes** |
+| G1c controller correctness | switches + convergence + termination | 6 switches, 3 CloseThink, 1 ForceAnswerPrefix, terminated step 21 |
+| G2p efficiency proxy | SwiR < fixed-budget baseline | 33 steps vs 1024 = 31× fewer |
+| G9 hyperparameter ablation | W_E→L/C_max/α_0 respond correctly | monotonic ✓, α-independent ✓ |
+
+**G1/G2 (accuracy/efficiency on real model) deferred to riir-ai Plan 299** — katgpt-rs is modelless (no model loader). The algorithmic invariants above are necessary preconditions.
+
+Feature gate: `swir_switch_thinking` (depends on `thinking_cot`, **opt-in** until G1/G2 pass on a real model). 📖 Plan: [`.plans/275_swir_switch_thinking.md`](.plans/275_swir_switch_thinking.md). Research: [`.research/241_SwiReasoning_Explicit_Latent_Switch.md`](.research/241_SwiReasoning_Explicit_Latent_Switch.md). Benchmark: [`.benchmarks/275_swir_switch_thinking_goat.md`](.benchmarks/275_swir_switch_thinking_goat.md).
+
 ### 🧠 NextLat Belief-State Speculative Drafter (Plan 217)
 
 Replaces the separate draft model with a lightweight 3-layer residual MLP that predicts next hidden states from `(h_t, x_{t+1})`, enabling variable-length self-speculative decoding at near-zero overhead.

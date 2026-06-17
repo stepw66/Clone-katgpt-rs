@@ -9,7 +9,7 @@
 
 ## TL;DR
 
-8/8 synthetic-data GOAT gates **PASS**. The SwiR controller is algorithmically
+8/8→**9/9** synthetic-data GOAT gates **PASS**. The SwiR controller is algorithmically
 correct, plasma-tier fast (3.1 ns/step vs 200 ns budget = 64× margin),
 zero-allocation in `step()`, and the convex-hull invariant holds on 1000 random
 samples. The paper's headline gates (G1 accuracy on MATH500, G2 token
@@ -46,9 +46,10 @@ fast enough to sit on the decode loop.
 | **G1c** | controller correctness (switches, convergence, termination) | 6 switches, 3 CloseThink, 1 ForceAnswerPrefix, terminated at step 21 | ✅ PASS |
 | **G2p** | SwiR terminates < fixed-budget baseline | **33 steps vs 1024** = 31.03× fewer | ✅ PASS |
 | **G8** | α_t / β_t monotonic in step_index | **[0.703, 0.719, 0.738, 0.775, 0.85, 0.925, 1.0]** | ✅ PASS |
+| **G9** | hyperparameter ablation (W_E→L/C_max/α_0 behavioral response) | W_E→L: 256→1 switches (monotone ✓); C_max: term 27→117 (monotone ✓); α_0: identical 13 switches across 0.3–1.0 (α-independent ✓) | ✅ PASS |
 | **G1** | accuracy on MATH500 (+1.5 pp target) | — | ⏸ DEFERRED (riir-ai Plan 299) |
 | **G2** | token efficiency at fixed accuracy (1.3× target) | — | ⏸ DEFERRED (riir-ai Plan 299) |
-| **T3.9** | accuracy ablations (W_E→L, α_0, C_max, signal mix) | — | ⏸ DEFERRED (riir-ai Plan 299) |
+| **T3.9** | accuracy ablations (W_E→L, α_0, C_max, signal mix) | G9 above is the modelless behavioral proxy | ⏸ DEFERRED (riir-ai Plan 299) — G9 modelless proxy ✅ PASS |
 
 ## G6 Auto-Fallback (Plan 275 T3.8) — New Primitive
 
@@ -141,7 +142,7 @@ caveat as Plan 271 G7).
 
 ## Validation Summary
 
-- ✅ `cargo test --release --features swir_switch_thinking --test bench_275_swir_goat` → **10/10 pass**
+- ✅ `cargo test --release --features swir_switch_thinking --test bench_275_swir_goat` → **13/13 pass** (was 10/10 — G9a/G9b/G9c added for the hyperparameter ablation proxy)
 - ✅ `cargo test --features swir_switch_thinking --lib swir::` → **38/38 unit tests pass** (33 original + 5 new G6 escape hatch tests)
 - ✅ `cargo test --features swir_switch_thinking --test swir_strategy_integration` → **6/6 integration tests pass**
 - ✅ `cargo check` (default, no swir) → clean
