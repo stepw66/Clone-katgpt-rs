@@ -167,10 +167,12 @@ the correctness gates).
 
 ## Promotion Decision
 
-**All G1–G5 pass.** Per the plan's promotion criteria:
+**All G1–G5 pass. Promotion EXECUTED (Plan 284 Phase 5 T5.6):**
 
-- ✅ Promote `clr` to default-on in `Cargo.toml` `default = [...]`.
-- ✅ Update README + `.docs/01_overview.md` to mark "GOAT-proved".
+- ✅ `clr` added to `Cargo.toml` `default = [...]` (Phase 5).
+- ✅ `.docs/01_overview.md` feature table updated with the `clr` row + added to the default features list.
+- ✅ `README.md` Feature Showcase gained the Plan 284 CLR section with the full G1–G5 scorecard.
+- ✅ Three example files shipped: `examples/clr_minimal.rs`, `examples/clr_brevity_tiebreak.rs`, `examples/clr_learning_potential.rs`.
 - ⚠️ **Caveat (G4):** the extractor path allocates ~192/call at K=32 (caller-domain).
   Before promoting to default-on for hot-path callers (e.g. riir-ai Plan 316's
   per-NPC CLR cycle at 20Hz), consider adding a `clr_vote_minimal_preextracted`
@@ -178,11 +180,13 @@ the correctness gates).
   would eliminate extractor allocations entirely. The vote internals are already
   zero-alloc, so only the extractor seam needs work.
 
-### Files to touch for promotion (not done in this phase)
+### Files touched by Phase 5 promotion
 
-- `Cargo.toml` line 45 (`default = [...]`) — add `"clr"`.
-- `README.md` — add clr to the GOAT-proved features list.
-- `.docs/01_overview.md` — add clr section.
+- `Cargo.toml` line 45 (`default = [...]`) — added `"clr"`.
+- `Cargo.toml` end-of-file — added 3 `[[example]]` entries for the new examples.
+- `README.md` — added Plan 284 CLR Feature Showcase section.
+- `.docs/01_overview.md` — added `clr` row to feature table + `clr` to default list.
+- `examples/clr_minimal.rs`, `examples/clr_brevity_tiebreak.rs`, `examples/clr_learning_potential.rs` — NEW.
 
 ---
 

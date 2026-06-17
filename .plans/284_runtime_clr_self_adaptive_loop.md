@@ -5,7 +5,7 @@
 **Private guide:** [riir-ai/.research/136_Per_NPC_Runtime_Test_Time_Scaling_Guide.md](../../riir-ai/.research/136_Per_NPC_Runtime_Test_Time_Scaling_Guide.md)
 **Source paper:** [arxiv 2606.16140](https://arxiv.org/pdf/2606.16140) — Xu et al., "VibeThinker-3B" (Sina Weibo Inc.), 15 Jun 2026
 **Target:** `katgpt-rs/src/clr/` (new module) + Cargo feature `clr` (opt-in until GOAT G1–G5 pass)
-**Status:** Active — Phase 1-3 complete, Phase 4 (GOAT gate) stubbed, Phase 5 deferred
+**Status:** Active — Phase 1-5 complete. All GOAT gates G1–G5 pass; `clr` promoted to default-on (Phase 5 T5.6).
 **Depends On:** existing SIMD helpers (`simd_dot_f32`, `simd_sum_f32`, `simd_exp_inplace` from `crates/katgpt-core/src/simd.rs`), `ConstraintPruner` trait (existing, for the fallback binary verifier path)
 **GOAT Criteria:** G1 (CLR-vote ≥ +3pp over best-of-N majority on synthetic suite), G2 (verifier sigmoid ECE ≤ 0.10), G3 (≤200µs/call at K=32, M=5, 8-dim direction vectors — target ≤50µs), G4 (zero heap allocation on the vote path), G5 (feature isolation — compiles with/without `clr`, zero overhead when disabled)
 
@@ -100,7 +100,7 @@ Ship the four modelless primitives distilled from Research 255 as a generic, MIT
 - [x] **T3.1** Verify the inner loop vectorizes. The `verifier.verify()` call for fixed `direction_dim=8` should auto-vectorize via the existing `simd_dot_f32` helper. Add `#[inline(always)]` to `SigmoidProjectionVerifier::verify` and `FnClaimExtractor::extract` to encourage inlining across the `clr_vote` boundary.
 - [x] **T3.2** Add a fixed-M unrolled path for `M=5` (paper default). `powf(5.0)` is general but slow; an unrolled `v*v*v*v*v` for integer `M=5` is faster. Gate behind `if config.m == 5 { ... } else { ... }`.
 - [x] **T3.3** Add `#[cfg(test)]` allocation counter. Use `std::alloc::System` with a global allocator hook in `tests/bench_284_clr_goat.rs` to assert 0 allocations after `ClrScratch::new()` warmup.
-- [~] **T3.4** Profile with `cargo bench` (criterion). Establish baseline numbers at K=8, K=16, K=32, each at M=5, direction_dim=8. Record in `.benchmarks/284_clr_goat.md`.
+- [x] **T3.4** Profile with `cargo bench` (criterion). Establish baseline numbers at K=8, K=16, K=32, each at M=5, direction_dim=8. Record in `.benchmarks/284_clr_goat.md`.
 
 ---
 
@@ -108,22 +108,22 @@ Ship the four modelless primitives distilled from Research 255 as a generic, MIT
 
 ### Tasks
 
-- [~] **T4.1** G1 test `g1_clr_beats_best_of_n_majority` in `tests/bench_284_clr_goat.rs`:
+- [x] **T4.1** G1 test `g1_clr_beats_best_of_n_majority` in `tests/bench_284_clr_goat.rs`:
   - Synthetic suite: 50 trajectory-groups, each with 5 clusters of 10 trajectories. In each cluster, exactly 1 trajectory has a ground-truth-flawed claim (its `embedding[m_flaw]` is set to a vector orthogonal to `direction_vec[m_flaw]`, forcing `v < 0.5` for that claim).
   - Run `clr_vote` (K=50, M=5) vs best-of-N majority (pick cluster with most members).
   - Assert CLR picks the flawless cluster ≥3pp more often than majority. Run over 100 random seeds, report mean + stddev.
-- [~] **T4.2** G2 test `g2_calibration_ece`:
+- [x] **T4.2** G2 test `g2_calibration_ece`:
   - Ground-truth binary verdicts (constructed so `v_k,m` is calibrated: random `embedding` projections, true verdict is `Bernoulli(sigmoid(dot))`).
   - Compute Expected Calibration Error of `SigmoidProjectionVerifier::verify` outputs.
   - Assert ECE ≤ 0.10 over 10K samples.
-- [~] **T4.3** G3 test `g3_hot_path_under_200us`:
+- [x] **T4.3** G3 test `g3_hot_path_under_200us`:
   - `cargo bench` criterion group. K=32, M=5, direction_dim=8. Time per `clr_vote_minimal()` call.
   - Assert mean ≤ 200µs. Stretch target ≤ 50µs.
-- [~] **T4.4** G4 test `g4_zero_allocation`:
+- [x] **T4.4** G4 test `g4_zero_allocation`:
   - Custom global allocator that counts `alloc`/`dealloc` calls.
   - Warm up `ClrScratch::new(32, 5)` once.
   - Call `clr_vote_minimal()` 1000 times. Assert 0 net allocations after the first warmup.
-- [~] **T4.5** G5 test `g5_feature_isolation`:
+- [x] **T4.5** G5 test `g5_feature_isolation`:
   - `cargo build --no-default-features --features clr` compiles cleanly.
   - `cargo build --no-default-features` (no `clr`) compiles cleanly and `clr` symbols are absent from the binary (`nm` check or trait-resolution failure when attempting to use `clr_vote`).
   - Zero overhead when disabled — assert no `clr` code paths reachable from the default-features build.
@@ -133,16 +133,14 @@ Ship the four modelless primitives distilled from Research 255 as a generic, MIT
 
 ## Phase 5 — Documentation + Examples + Promotion
 
-- [ ] **T5.1** Add `examples/clr_minimal.rs` — synthetic reliability suite, run `clr_vote`, print winner + reliability scores for each trajectory. <150 lines.
-- [ ] **T5.2** Add `examples/clr_brevity_tiebreak.rs` — two clusters tied on `Σ r_k`, show `brevity_tiebreak` picking the shorter representative.
-- [ ] **T5.3** Add `examples/clr_learning_potential.rs` — given a trajectory + a fake log-prob accessor, compute `S_LP` and demo `should_write_memory`.
-- [ ] **T5.4** Add `clr` row to the feature table in `katgpt-rs/.docs/01_overview.md` (opt-in until G1–G5 pass, then promote).
-- [ ] **T5.5** Add CLR section to `katgpt-rs/README.md` Feature Showcase (after the most recent Super-GOAT — find the right insertion point by grepping for the latest entry). Cross-ref to Research 255 and the riir-ai guide.
-- [ ] **T5.6** Promotion decision:
-  - If G1–G5 all pass → move `clr` from opt-in to default-on in root `Cargo.toml`. Update README to note "GOAT-proved".
-  - If G1 fails (CLR doesn't beat majority on synthetic) → keep opt-in, note in `.benchmarks/284_clr_goat.md` that the mechanism is correct but the synthetic suite may be too easy (revisit with harder suite).
-  - If G3 fails (>200µs) → keep opt-in, profile to find the bottleneck (likely the `powf` or the outcome_eq callback). Demote hot-path callers to `clr_vote_minimal` only.
-  - If G4 fails (allocates) → critical bug in scratch discipline; fix before any promotion.
+- [x] **T5.1** Add `examples/clr_minimal.rs` — synthetic reliability suite, run `clr_vote`, print winner + reliability scores for each trajectory. <150 lines.
+- [x] **T5.2** Add `examples/clr_brevity_tiebreak.rs` — two clusters tied on `Σ r_k`, show `brevity_tiebreak` picking the shorter representative.
+- [x] **T5.3** Add `examples/clr_learning_potential.rs` — given a trajectory + a fake log-prob accessor, compute `S_LP` and demo `should_write_memory`.
+- [x] **T5.4** Add `clr` row to the feature table in `katgpt-rs/.docs/01_overview.md` (opt-in until G1–G5 pass, then promote).
+- [x] **T5.5** Add CLR section to `katgpt-rs/README.md` Feature Showcase (after the most recent Super-GOAT — find the right insertion point by grepping for the latest entry). Cross-ref to Research 255 and the riir-ai guide.
+- [x] **T5.6** Promotion decision:
+  - G1–G5 all pass → `clr` moved from opt-in to default-on in root `Cargo.toml`. Updated README + `.docs/01_overview.md` to note "GOAT-proved".
+  - (G1 fail / G3 fail / G4 fail branches not taken — all gates passed.)
 
 ---
 
