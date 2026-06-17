@@ -249,7 +249,7 @@ katgpt-rs/crates/katgpt-core/src/
   **DECISION (2026-06-16): DEMOTE attractor family to Gain.** Attractor loses decisively (569× more flip-flops than leaky's 1). Combined with the G1.4 latency failure (~273 ns/step), the attractor family is doubly non-default-on. Only the trait unification + `LeakyIntegrator` (which delegates to the shared `leaky_core` and is byte-identical to the shipped `evolve_hla`) are promotable outputs. Attractor + `LatentThoughtKernel` remain behind the `micro_belief` flag as opt-in experiments for future trained-weight exploration.
 - [x] **T5.3** Commit with `feat:` (if attractor promoted) or `refactor:` (if only trait unification shipped) prefix on `develop`.
   **DECISION:** `refactor:` prefix — only trait unification + LeakyIntegrator shipped as promotable output; attractor demoted.
-- [x] **T5.4** Mark all `- [ ]` tasks in this plan as `- [x]` when complete.
+- [x] **T5.4** Mark all tasks in this plan as `- [x]` when complete.
   **DONE** (this update).
 
 ---
