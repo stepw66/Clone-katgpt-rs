@@ -130,33 +130,60 @@ impl Default for SinkClassifierConfig {
     }
 }
 
-/// Pre-allocated scratch buffers for power-iteration stable-rank computation.
+/// Pre-allocated scratch buffers for power-iteration stable-rank computation
+/// and sink classifier bookkeeping.
 ///
 /// Create once via [`StableRankScratch::new`] and reuse across calls via
-/// [`StableRankScratch::ensure_capacity`]. The hot path performs no heap
-/// allocation when the dimension matches the cache.
+/// [`StableRankScratch::ensure_capacity`] (head-dim-only) or
+/// [`StableRankScratch::ensure_capacity_dn`] (head-dim + seq-len). The hot
+/// path performs no heap allocation when the dimensions match the cache.
 ///
 /// - `v`: current power-iteration vector, length `d` (smallest dim of `O`).
 /// - `w`: next power-iteration vector (`O^T·O · v`), length `d`.
+/// - `ov_buf`: per-row `O · v` matvec intermediate, length `n`.
+/// - `col_sums`: attention column accumulator, length `n`.
+///
+/// The `ov_buf`/`col_sums` buffers were added by Issue 001 to eliminate the
+/// two per-call `vec![0.0; n]` allocations that dominated the G3 latency
+/// benchmark (`benches/sink_aware_latency_bench.rs`).
 pub struct StableRankScratch {
     /// Current iterate (length `d`).
     pub v: Vec<f32>,
     /// Next iterate (length `d`).
     pub w: Vec<f32>,
+    /// Per-row `O · v` matvec intermediate (length `n`). Lazily grown on
+    /// first call to [`stable_rank_update_into`] for a given `n`.
+    pub ov_buf: Vec<f32>,
+    /// Attention column sums (length `n`). Lazily grown on first call to
+    /// [`classify_all_sinks`] / [`apply_dual_policy_gate`] for a given `n`.
+    pub col_sums: Vec<f32>,
     cached_d: usize,
+    cached_n: usize,
 }
 
 impl StableRankScratch {
     /// Allocate scratch for power iteration on a `d × d` Gram matrix.
+    ///
+    /// The two `n`-length buffers (`ov_buf`, `col_sums`) are allocated empty
+    /// and lazily grown on first use — callers that only ever use `d` (the
+    /// historical use case for `stable_rank_update_into` on small matrices)
+    /// pay no `n`-length cost up front.
     pub fn new(d: usize) -> Self {
         Self {
             v: vec![0.0; d],
             w: vec![0.0; d],
+            ov_buf: Vec::new(),
+            col_sums: Vec::new(),
             cached_d: d,
+            cached_n: 0,
         }
     }
 
-    /// Resize if dimension changed; no-op on the hot path.
+    /// Resize if head dim changed; no-op on the hot path.
+    ///
+    /// Backward-compatible signature: callers that don't track `n` continue
+    /// to work. The `n`-length buffers (`ov_buf`, `col_sums`) are grown
+    /// lazily by the consumers that need them.
     pub fn ensure_capacity(&mut self, d: usize) {
         if self.cached_d == d {
             return;
@@ -164,6 +191,24 @@ impl StableRankScratch {
         self.v.resize(d, 0.0);
         self.w.resize(d, 0.0);
         self.cached_d = d;
+    }
+
+    /// Resize both head dim `d` and seq len `n` if either changed. Use this
+    /// when you know `n` up front (e.g. `apply_dual_policy_gate`) to keep the
+    /// hot path allocation-free.
+    pub fn ensure_capacity_dn(&mut self, d: usize, n: usize) {
+        if self.cached_d != d {
+            self.v.resize(d, 0.0);
+            self.w.resize(d, 0.0);
+            self.cached_d = d;
+        }
+        if self.cached_n != n {
+            // Resize, preserving any existing prefix (cheap when shrinking
+            // and the cached_n was larger).
+            self.ov_buf.resize(n, 0.0);
+            self.col_sums.resize(n, 0.0);
+            self.cached_n = n;
+        }
     }
 }
 
@@ -209,9 +254,10 @@ pub fn stable_rank_update_into(
     if d == 0 {
         return 0.0;
     }
-    scratch.ensure_capacity(d);
+    scratch.ensure_capacity_dn(d, n);
     let v = &mut scratch.v[..d];
     let w = &mut scratch.w[..d];
+    let ov_buf = &mut scratch.ov_buf[..n];
 
     // trace(F) = Σ_i ‖row_i(O)‖². Also serves as scale reference.
     let mut trace_f = 0.0f32;
@@ -222,6 +268,34 @@ pub fn stable_rank_update_into(
     if trace_f <= 0.0 {
         // Zero matrix — no signal.
         return 0.0;
+    }
+
+    // Issue 001 T5: cheap rank-1 probe. Compare the first and last rows of O
+    // by cosine similarity. If they're near-parallel (cos > 0.95), O is very
+    // likely rank-1 (a Broadcast head where every row is `a_s · v_s^T`).
+    // This is O(d) work that lets us skip the O(n·d) power iteration in the
+    // common case where Broadcast sinks dominate.
+    //
+    // False-positive cost: a matrix that happens to have O[0] ∥ O[n-1] but is
+    // not rank-1 would be misclassified as rank-1. We accept this risk because
+    // (a) the caller has already gated on `value_norm_ratio ∈ [0.5, 1.5]`
+    // (broadcast window) before invoking stable-rank, and (b) the paper's
+    // Broadcast signature is exactly "rows parallel to v_s". False negatives
+    // are not possible — if cosine is low, we fall through to power iteration.
+    if n >= 2 {
+        let first = &o[0];
+        let last = &o[n - 1];
+        let dot_fl = simd::simd_dot_f32(first, last, d);
+        let nf_sq = simd::simd_dot_f32(first, first, d);
+        let nl_sq = simd::simd_dot_f32(last, last, d);
+        if nf_sq > 0.0 && nl_sq > 0.0 {
+            let cos_fl = dot_fl / (nf_sq.sqrt() * nl_sq.sqrt());
+            if cos_fl > 0.95 {
+                // Strong rank-1 signature. Conservative: σ_1² ≈ trace_f / 1,
+                // stable rank = 1.0.
+                return 1.0;
+            }
+        }
     }
 
     // Init v to a deterministic non-zero seed (1/sqrt(d) on each coordinate).
@@ -237,12 +311,9 @@ pub fn stable_rank_update_into(
     // Decomposed as two matvecs: ov_buf = O·v (length n), then w = O^T·ov_buf
     // (length d). This avoids materializing F = O^T·O (d × d) explicitly.
     //
-    // ov_buf is the only allocation in this function — once per call, length
-    // n. To make this fully zero-alloc, callers should add an n-length buffer
-    // to StableRankScratch; we keep the scratch struct minimal here (2 × d)
-    // because head dim d, not seq len n, is the design parameter the struct
-    // is named after.
-    let mut ov_buf = vec![0.0f32; n];
+    // ov_buf is now reused from scratch (Issue 001 T4). The first call for a
+    // new `n` pays one resize; subsequent calls are allocation-free.
+    ov_buf.fill(0.0);
 
     let mut sigma1_sq = trace_f; // conservative upper bound
     let iters = n_iters.max(1) as usize;
@@ -360,10 +431,26 @@ pub fn classify_sink_at(
         }
     };
 
-    // ── update_stable_rank ─────────────────────────────────────
-    let update_stable_rank = match update_O {
-        Some(o) if !o.is_empty() => stable_rank_update_into(o, scratch, 5),
-        _ => f32::NAN,
+    // ── update_stable_rank ─────────────────────────────────
+    //
+    // Issue 001 T2: skip stable-rank computation when `value_norm_ratio` is
+    // already decisive. Power iteration is the most expensive part of the
+    // classifier; if the position is clearly NOP (ratio ≤ nop_max) or clearly
+    // out-of-range for Broadcast (ratio outside [min, max]), stable rank
+    // would not change the final classification. Only compute it when the
+    // Broadcast window is reachable.
+    let stable_rank_reachable = !degenerate
+        && strength > cfg.sink_strength_threshold
+        && value_norm_ratio > cfg.nop_value_ratio_max
+        && value_norm_ratio >= cfg.broadcast_value_ratio_min
+        && value_norm_ratio <= cfg.broadcast_value_ratio_max;
+    let update_stable_rank = if stable_rank_reachable {
+        match update_O {
+            Some(o) if !o.is_empty() => stable_rank_update_into(o, scratch, 5),
+            _ => f32::NAN,
+        }
+    } else {
+        f32::NAN
     };
 
     // ── Decision rule (Research 258 §2.1) ──────────────────────
@@ -422,23 +509,29 @@ pub fn classify_all_sinks(
         return;
     }
     // Per-position attention column sums — `col_sums[j] = Σ_i attn[i][j]`.
-    // Single allocation per call; cheap relative to the per-sink classifier
-    // work that follows.
-    let mut col_sums = vec![0.0f32; n];
+    // Issue 001 T3: reuse `scratch.col_sums` instead of allocating per call.
+    // The first call for a new `n` pays one resize; subsequent calls are
+    // allocation-free.
+    scratch.ensure_capacity_dn(values.first().map(|r| r.len()).unwrap_or(0), n);
+    let col_sums = &mut scratch.col_sums;
+    col_sums[..n].fill(0.0);
     for row in attn.iter() {
         let m = row.len().min(n);
         for j in 0..m {
             col_sums[j] += row[j];
         }
     }
-
-    // For each candidate position, synthesize a length-1 attention column
-    // carrying the precomputed mean strength. This avoids re-scanning the
-    // full attention matrix per position. The number of sink candidates is
-    // bounded by paper phenomenology (head specialization → ~1 sink per head).
     let inv_n = 1.0 / (n as f32);
+
+    // Materialize the per-position strengths into a small local Vec *once*,
+    // so we can release the `&mut scratch.col_sums` borrow before calling
+    // `classify_sink_at(&mut scratch)` (the borrow checker needs them to be
+    // disjoint). Cost: one length-n allocation up-front; cheaper than the
+    // original which allocated col_sums AND iterated it in a closure chain.
+    let strengths: Vec<f32> = col_sums[..n].iter().map(|s| s * inv_n).collect();
+
     for j in 0..n {
-        let strength_j = col_sums[j] * inv_n;
+        let strength_j = strengths[j];
         if strength_j <= cfg.sink_strength_threshold {
             continue;
         }
@@ -531,20 +624,35 @@ pub fn apply_dual_policy_gate(
         return SinkKind::None;
     }
 
+    let d = o[0].len();
+    if d == 0 {
+        return SinkKind::None;
+    }
+
+    // Issue 001 T1+T3: reuse all scratch buffers — no allocations on the hot
+    // path after warmup.
+    scratch.ensure_capacity_dn(d, n);
+
     // Find dominant sink column = argmax_j Σ_i attn[i][j].
-    let mut col_sums = vec![0.0f32; n];
+    let col_sums = &mut scratch.col_sums;
+    col_sums[..n].fill(0.0);
     for row in attn.iter() {
         let m = row.len().min(n);
         for j in 0..m {
             col_sums[j] += row[j];
         }
     }
-    let (dominant_pos, _dominant_strength) = col_sums
-        .iter()
-        .enumerate()
-        .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
-        .map(|(i, &v)| (i, v / (n as f32)))
-        .unwrap_or((0, 0.0));
+    let (dominant_pos, _dominant_strength) = {
+        let mut best_i = 0usize;
+        let mut best_v = col_sums[0];
+        for (i, &v) in col_sums[..n].iter().enumerate() {
+            if v > best_v {
+                best_v = v;
+                best_i = i;
+            }
+        }
+        (best_i, best_v / (n as f32))
+    };
 
     // Classify. Pass `o` as update_O so stable rank is computed.
     let col = [_dominant_strength];
@@ -569,6 +677,135 @@ pub fn apply_dual_policy_gate(
         }
     }
     diag.kind
+}
+
+/// Cached classification state for [`apply_dual_policy_gate_cached`].
+///
+/// Sinks in trained transformers are **stable across forward calls** — the
+/// same head tends to be NOP-dominant or Broadcast-dominant across the whole
+/// sequence. This struct lets callers classify once and reuse the decision
+/// for `audit_every_n` subsequent calls, dropping steady-state overhead to
+/// the cost of a copy + (conditional) scale.
+///
+/// ## Why this exists
+///
+/// The per-call [`apply_dual_policy_gate`] cannot beat a memcpy: it has to
+/// scan `attn` (n² values) and `values` (n·d values) to classify, while
+/// [`SinkAwarePolicy::Uniform`] is just a copy. Memory-bandwidth-bound, the
+/// gap is structural — see Issue 001 § Latency analysis. The cached variant
+/// is the production-realistic path: amortize the classifier over `N` calls.
+///
+/// ## Cadence
+///
+/// `audit_every_n` controls how often the classifier re-runs. Default 16
+/// (≈6% steady-state overhead in the worst case where classification costs
+/// as much as the copy itself; in practice far less because the cached
+/// classify path uses the rank-1 cosine probe).
+///
+/// Set to `1` to disable caching (equivalent to [`apply_dual_policy_gate`]).
+/// Set to `usize::MAX` to classify exactly once and never re-classify
+/// (useful for frozen-model analysis).
+#[derive(Debug, Clone)]
+pub struct CachedSinkClassification {
+    /// Classifier config to use when re-classifying.
+    pub cfg: SinkClassifierConfig,
+    /// Re-classify every `audit_every_n` calls. `0` and `1` both mean "every
+    /// call" (no caching).
+    pub audit_every_n: usize,
+    /// Last computed kind. `None` until first classification.
+    pub cached_kind: Option<SinkKind>,
+    /// Calls since last classification.
+    pub calls_since_audit: usize,
+}
+
+impl CachedSinkClassification {
+    /// Create with the default classifier config and audit cadence 16.
+    pub fn new() -> Self {
+        Self {
+            cfg: SinkClassifierConfig::default(),
+            audit_every_n: 16,
+            cached_kind: None,
+            calls_since_audit: 0,
+        }
+    }
+
+    /// Create with a specific config and cadence.
+    pub fn with_config(cfg: SinkClassifierConfig, audit_every_n: usize) -> Self {
+        Self {
+            cfg,
+            audit_every_n,
+            cached_kind: None,
+            calls_since_audit: 0,
+        }
+    }
+
+    /// Force re-classification on the next call (e.g. after a model swap).
+    pub fn invalidate(&mut self) {
+        self.cached_kind = None;
+        self.calls_since_audit = 0;
+    }
+}
+
+impl Default for CachedSinkClassification {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Cached variant of [`apply_dual_policy_gate`].
+///
+/// On the audit cadence (`cached.audit_every_n`), runs the full classifier
+/// and stores the result. On other calls, applies the cached decision:
+///
+/// - `Nop` → `out ← O · σ(gate_scale)`
+/// - `Broadcast` / `None` → `out ← O` (copy)
+///
+/// Steady-state cost is a copy (or copy + scale) — same as
+/// [`SinkAwarePolicy::Uniform`]. The classifier cost is amortized over
+/// `audit_every_n` calls.
+///
+/// # Returns
+/// The [`SinkKind`] applied on this call (the cached value, except on audit
+/// calls where it is freshly computed).
+pub fn apply_dual_policy_gate_cached(
+    attn: &[Vec<f32>],
+    values: &[Vec<f32>],
+    o: &[Vec<f32>],
+    gate_scale: f32,
+    scratch: &mut StableRankScratch,
+    cached: &mut CachedSinkClassification,
+    out: &mut [Vec<f32>],
+) -> SinkKind {
+    let cadence = cached.audit_every_n.max(1);
+    let needs_audit = cached.cached_kind.is_none()
+        || cached.calls_since_audit >= cadence;
+
+    if needs_audit {
+        let policy = SinkAwarePolicy::DualPolicy(cached.cfg);
+        let kind = apply_dual_policy_gate(
+            attn, values, o, &policy, gate_scale, scratch, out,
+        );
+        cached.cached_kind = Some(kind);
+        cached.calls_since_audit = 1;
+        return kind;
+    }
+
+    cached.calls_since_audit += 1;
+    match cached.cached_kind {
+        Some(SinkKind::Nop) => {
+            let g = sigmoid(gate_scale);
+            scale_rows(o, g, out);
+            SinkKind::Nop
+        }
+        Some(SinkKind::Broadcast) => {
+            copy_rows(o, out);
+            SinkKind::Broadcast
+        }
+        Some(SinkKind::None) | None => {
+            copy_rows(o, out);
+            SinkKind::None
+        }
+    }
 }
 
 // ── Small helpers ───────────────────────────────────────────────

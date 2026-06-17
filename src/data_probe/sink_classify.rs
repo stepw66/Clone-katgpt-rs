@@ -22,8 +22,9 @@
 //! Plan 287, Research 258, arXiv:2606.08105.
 
 pub use katgpt_core::data_probe::{
-    SinkAwarePolicy, SinkClassifierConfig, SinkDiagnostic, SinkKind, StableRankScratch,
-    apply_dual_policy_gate, classify_all_sinks, classify_sink_at, stable_rank_update_into,
+    CachedSinkClassification, SinkAwarePolicy, SinkClassifierConfig, SinkDiagnostic, SinkKind,
+    StableRankScratch, apply_dual_policy_gate, apply_dual_policy_gate_cached, classify_all_sinks,
+    classify_sink_at, stable_rank_update_into,
 };
 
 // ── Tests (Plan 287 Phase 1 T1.5 — G1 classifier correctness) ────
@@ -259,5 +260,106 @@ mod tests {
             sr
         );
         assert!(!sr.is_nan());
+    }
+
+    // ── Issue 001: cached variant parity ────────────────────────────
+
+    /// The cached variant must produce the same output as the per-call
+    /// variant on its audit call, and the same output on subsequent cached
+    /// calls (assuming the classification is stable).
+    #[test]
+    fn issue001_cached_matches_per_call_for_broadcast() {
+        use super::*;
+        let n = 8;
+        let d = 16;
+        let v_s: Vec<f32> = (0..d).map(|i| 0.5 + 0.1 * i as f32).collect();
+        let values: Vec<Vec<f32>> = (0..n).map(|_| v_s.clone()).collect();
+        let o: Vec<Vec<f32>> = (0..n).map(|_| v_s.clone()).collect();
+        let attn: Vec<Vec<f32>> = (0..n)
+            .map(|_| {
+                let mut row = vec![0.1 / (n as f32 - 1.0); n];
+                row[0] = 0.9;
+                row
+            })
+            .collect();
+
+        let cfg = SinkClassifierConfig::default();
+        let policy_dual = SinkAwarePolicy::DualPolicy(cfg);
+        let mut out_dual: Vec<Vec<f32>> = (0..n).map(|_| vec![0.0; d]).collect();
+        let mut out_cached: Vec<Vec<f32>> = (0..n).map(|_| vec![0.0; d]).collect();
+        let mut scratch_a = StableRankScratch::new(d);
+        let mut scratch_b = StableRankScratch::new(d);
+        let mut cached = CachedSinkClassification::with_config(cfg, 16);
+
+        // Audit call (first call) — must match per-call DualPolicy.
+        let kind_dual = apply_dual_policy_gate(
+            &attn, &values, &o, &policy_dual, 2.0, &mut scratch_a, &mut out_dual,
+        );
+        let kind_cached = apply_dual_policy_gate_cached(
+            &attn, &values, &o, 2.0, &mut scratch_b, &mut cached, &mut out_cached,
+        );
+        assert_eq!(kind_dual, kind_cached, "audit call should classify same");
+        assert_eq!(kind_dual, SinkKind::Broadcast);
+
+        // Verify outputs match bit-for-bit (Broadcast → copy unchanged).
+        for i in 0..n {
+            for j in 0..d {
+                assert!((out_dual[i][j] - out_cached[i][j]).abs() < 1e-6);
+            }
+        }
+
+        // Subsequent cached calls should reuse the cached Broadcast decision.
+        let kind_cached_2 = apply_dual_policy_gate_cached(
+            &attn, &values, &o, 2.0, &mut scratch_b, &mut cached, &mut out_cached,
+        );
+        assert_eq!(kind_cached_2, SinkKind::Broadcast);
+        assert_eq!(cached.calls_since_audit, 2);
+        // Output unchanged for Broadcast.
+        for i in 0..n {
+            for j in 0..d {
+                assert!((out_cached[i][j] - o[i][j]).abs() < 1e-6);
+            }
+        }
+    }
+
+    /// Cache invalidate forces re-classification on next call.
+    #[test]
+    fn issue001_cached_invalidate_forces_reaudit() {
+        let n = 4;
+        let d = 8;
+        let v_s: Vec<f32> = vec![1.5; d];
+        let values: Vec<Vec<f32>> = (0..n).map(|_| v_s.clone()).collect();
+        let o: Vec<Vec<f32>> = (0..n).map(|_| v_s.clone()).collect();
+        let attn: Vec<Vec<f32>> = (0..n)
+            .map(|_| {
+                let mut row = vec![0.0; n];
+                row[0] = 1.0;
+                row
+            })
+            .collect();
+
+        let cfg = SinkClassifierConfig::default();
+        let mut scratch = StableRankScratch::new(d);
+        let mut out: Vec<Vec<f32>> = (0..n).map(|_| vec![0.0; d]).collect();
+        let mut cached = CachedSinkClassification::with_config(cfg, 16);
+
+        // First call: audit.
+        let _ = apply_dual_policy_gate_cached(
+            &attn, &values, &o, 2.0, &mut scratch, &mut cached, &mut out,
+        );
+        assert_eq!(cached.cached_kind, Some(SinkKind::Broadcast));
+        assert_eq!(cached.calls_since_audit, 1);
+
+        // Invalidate.
+        cached.invalidate();
+        assert!(cached.cached_kind.is_none());
+        assert_eq!(cached.calls_since_audit, 0);
+
+        // Next call should re-audit.
+        let kind = apply_dual_policy_gate_cached(
+            &attn, &values, &o, 2.0, &mut scratch, &mut cached, &mut out,
+        );
+        assert_eq!(kind, SinkKind::Broadcast);
+        assert_eq!(cached.calls_since_audit, 1);
     }
 }
