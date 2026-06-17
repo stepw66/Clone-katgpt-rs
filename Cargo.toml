@@ -326,6 +326,10 @@ regime_transition = ["and_or_dtree", "bandit", "decision_trace", "fol_constraint
 segment_checkpoint = []  # ON BY DEFAULT — core GRM segment caching (Plan 223b)
 ssc_spec_draft = ["segment_checkpoint", "regime_transition"]  # Opt-in — SSC sparse speculative drafting
 memory_soup_dtree = ["segment_checkpoint", "regime_transition"]  # Opt-in — experimental DDTree branch merging
+# Memory Soup LoRA Artifact Importer (Plan 253 T19 G5).
+# Standalone MSP0 binary format parser for riir-gpu's exported Memory Soup
+# artifacts. Uses only std + blake3 (no riir-gpu dependency). Default-OFF.
+memory_soup_lora = []
 llmexec_guard = []  # Default-on: entropy-driven verification budgeting (Plan 223)
 hoare_pruner = ["llmexec_guard"]  # Opt-in: predicate propagation (Plan 223)
 trajectory_doctor = ["hoare_pruner"]  # Opt-in: failure localization (Plan 223)
@@ -357,7 +361,7 @@ cs_kv_probe = []  # CS-KV-Importance Probe + Density-Budget Interpolator (Plan 2
 federation_composer = ["bandit"]  # Explicit Model→Agent→Tool pipeline with residual checking (Research 205, Plan 231, GOAT 7/7, default-ON)
 # dynamic_rank: defined above with papaya dep (Plan 232)
 # LeviathanVerifier is always compiled (no gate needed) — verifier.rs, benchmark.rs
-full = ["sudoku", "validator", "ppot", "domain_latent", "bandit", "delta_mem", "g_zero", "fft", "bomber", "bomber-agent", "bomber-wasm", "game_state", "bandit_mcts", "hla_attention", "gdn2_attention", "lt2_looped", "dash_attn", "mls_aggregate", "dmax_spd", "dreamer", "monopoly", "go", "randopt_weight", "feedback", "rest", "embedding_router", "gpu", "game_domain", "language_domain", "percepta_compile", "dllm", "tri_mode", "bt_rank", "spectral_quant", "octopus", "turboquant", "planar_quant", "iso_quant", "hybrid_oct_pq", "replaid_schedules", "elf_sde", "maxsim", "cna_steering", "deep_manifold", "federation", "delta_routing", "decode_specialize", "lattice_deduction", "unit_distance", "memo_reflections", "eqr_convergence", "subterranean", "sr2am_configurator", "data_gate", "coda_fusion", "tiled_attention", "vpd_em_distill", "proof_sketch_evolution", "convex_tok", "opus_selection", "epiplexity_scoring", "epiplexity_bandit", "committee_boost", "questbench", "cache_prune", "sleep_consolidation", "spectral_hierarchy", "newton_schulz", "river_valley", "peira_distill", "kog_cpu_fusion", "datrie_vocab", "gepa_reflective", "phrase_boost", "hydra_budget", "budget_adaptation", "recfm", "ilc_distill", "trd_refined_draft", "thinking_prune", "rim_slots", "wall_attention", "ane", "inference_router", "thinking_cot", "kvarn", "freq_bandit", "directional_credit", "kv_share", "nds_proxy", "wealth_pruner", "and_or_dtree", "speculative_generator", "selectivity_router", "lodestar", "collapse_aware_thinking", "three_mode_router", "auto_constraint_synthesis", "safe_exploration_budget", "substrate_gate", "bfcf_tree", "bfcf_lfu_shard", "bfcf_lsh_cms", "ted_lite", "coexplain_pruner", "coexplain_riir", "caddtree_budget", "belief_drafter", "llmexec_guard", "hoare_pruner", "trajectory_doctor", "workflow_lattice", "segment_checkpoint", "regime_transition", "ssc_spec_draft", "memory_soup_dtree", "static_cal_tables", "targeted_precision", "modality_pruned_load", "precision_aware_draft", "async_qdq_overlap", "union_bound_confidence", "pathway_tracker", "federation_composer", "manifold_pruner", "schema_centroid", "slod", "echo_env_predictor", "breakeven_routing", "lattice_operad", "cubical_topology", "spec_pruner", "spec_compile", "dendritic_gate", "funcattn"]
+full = ["sudoku", "validator", "ppot", "domain_latent", "bandit", "delta_mem", "g_zero", "fft", "bomber", "bomber-agent", "bomber-wasm", "game_state", "bandit_mcts", "hla_attention", "gdn2_attention", "lt2_looped", "dash_attn", "mls_aggregate", "dmax_spd", "dreamer", "monopoly", "go", "randopt_weight", "feedback", "rest", "embedding_router", "gpu", "game_domain", "language_domain", "percepta_compile", "dllm", "tri_mode", "bt_rank", "spectral_quant", "octopus", "turboquant", "planar_quant", "iso_quant", "hybrid_oct_pq", "replaid_schedules", "elf_sde", "maxsim", "cna_steering", "deep_manifold", "federation", "delta_routing", "decode_specialize", "lattice_deduction", "unit_distance", "memo_reflections", "eqr_convergence", "subterranean", "sr2am_configurator", "data_gate", "coda_fusion", "tiled_attention", "vpd_em_distill", "proof_sketch_evolution", "convex_tok", "opus_selection", "epiplexity_scoring", "epiplexity_bandit", "committee_boost", "questbench", "cache_prune", "sleep_consolidation", "spectral_hierarchy", "newton_schulz", "river_valley", "peira_distill", "kog_cpu_fusion", "datrie_vocab", "gepa_reflective", "phrase_boost", "hydra_budget", "budget_adaptation", "recfm", "ilc_distill", "trd_refined_draft", "thinking_prune", "rim_slots", "wall_attention", "ane", "inference_router", "thinking_cot", "kvarn", "freq_bandit", "directional_credit", "kv_share", "nds_proxy", "wealth_pruner", "and_or_dtree", "speculative_generator", "selectivity_router", "lodestar", "collapse_aware_thinking", "three_mode_router", "auto_constraint_synthesis", "safe_exploration_budget", "substrate_gate", "bfcf_tree", "bfcf_lfu_shard", "bfcf_lsh_cms", "ted_lite", "coexplain_pruner", "coexplain_riir", "caddtree_budget", "belief_drafter", "llmexec_guard", "hoare_pruner", "trajectory_doctor", "workflow_lattice", "segment_checkpoint", "regime_transition", "ssc_spec_draft", "memory_soup_dtree", "memory_soup_lora", "static_cal_tables", "targeted_precision", "modality_pruned_load", "precision_aware_draft", "async_qdq_overlap", "union_bound_confidence", "pathway_tracker", "federation_composer", "manifold_pruner", "schema_centroid", "slod", "echo_env_predictor", "breakeven_routing", "lattice_operad", "cubical_topology", "spec_pruner", "spec_compile", "dendritic_gate", "funcattn"]
 
 [[example]]
 name = "cs_kv_probe_demo"
@@ -1200,6 +1204,22 @@ name = "manifold_power_iter_router_bench"
 path = "benches/manifold_power_iter_router_bench.rs"
 required-features = ["manifold_power_iter_router"]
 harness = false
+
+# Plan 286 T2.2 (G4) — FUNCATTN linear-in-n scaling sweep + tiled_attention
+# baseline comparison. std::time::Instant, harness=false, no criterion dep.
+[[bench]]
+name = "funcattn_scaling_bench"
+path = "benches/funcattn_scaling_bench.rs"
+required-features = ["funcattn"]
+harness = false
+
+# Plan 286 T2.3 (G5) — FUNCATTN zero-allocation steady-state gate.
+# Debug-only alloc audit via `katgpt_rs::alloc::TrackingAllocator`; in release
+# it just exercises the hot path with a timing sanity check.
+[[test]]
+name = "funcattn_g5_zero_alloc"
+path = "tests/funcattn_g5_zero_alloc.rs"
+required-features = ["funcattn"]
 
 # Plan 266 — DenseMesh profiling test (Phase 7, T7.4). Measures forward
 # scaling, aggregation overhead, EdgeBandit decision, compute_router dispatch,

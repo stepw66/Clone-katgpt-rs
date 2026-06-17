@@ -4,7 +4,7 @@
 **Research:** [257_Functional_Attention_Spectral_Transport_Operator](../.research/257_Functional_Attention_Spectral_Transport_Operator.md)
 **Source paper:** [arxiv 2605.31559](https://arxiv.org/pdf/2605.31559) — Functional Attention: From Pairwise Affinities to Functional Correspondences (Xiao et al., ICML 2026)
 **Target:** `crates/katgpt-core/src/funcattn.rs` (new module) + Cargo feature `funcattn`
-**Status:** Active — Phase 1 done (T1.1–T1.5 ✅), Phase 2 in progress
+**Status:** Active — Phase 1 done (T1.1–T1.5 ✅), Phase 2 done (T2.1–T2.3 ✅ G1+G4+G5 PASS), Phase 3 deferred (G2/G3 need training)
 **Tier:** Gain (open primitive; await GOAT proof before opt-in promotion; **do not promote to default** until LLM-domain evidence exists)
 
 ---
@@ -96,11 +96,11 @@ Minimal module, behind feature flag, not in default features.
 ### Tasks
 
 - [x] **T2.1 (G1)** `g1_lipschitz_bounded`: implemented as `g1_finite_output_random_inputs`, `g1_sweep_input_norm_and_alpha`, and `g1_lipschitz_bounded`. Finite output for B ∈ {1, 10, 100} and α ∈ {0.01, 0.5, 0.99}. **Caveat:** Prop 4.5 is stated for the additive-λ primal form; the convex-combo dual form's Lipschitz bound is a function of α/(1-α). We check finiteness, not the exact C₁/λ + C₂/λ² scaling.
-- [ ] **T2.2 (G4)** `g4_linear_in_n_scaling`:
+- [x] **T2.2 (G4)** `g4_linear_in_n_scaling`: **DONE 2026-06-17.** Bench `benches/funcattn_scaling_bench.rs` (std::time::Instant, harness=false). Slope of `log(time) vs log(n)` over n ∈ {2048, 8192, 32768} = **0.9407** (target [0.85, 1.15]) → **PASS**. At n=8192 FUNCATTN is **66.56×** faster than `tiled_attention` (17.9ms vs 1191ms). Full table in `.benchmarks/058_funcattn_goat.md` “G4 Results”.
   - n ∈ {512, 2048, 8192, 32768}, d=128, k=64.
   - Measure forward time. Assert linear scaling (R² > 0.95 on log-log fit, slope ≈ 1.0).
   - Compare against `tiled_attention` baseline — at n=32768, FUNCATTN should be >10× faster.
-- [ ] **T2.3 (G5)** `g5_zero_alloc`:
+- [x] **T2.3 (G5)** `g5_zero_alloc`: **DONE 2026-06-17.** Test `tests/funcattn_g5_zero_alloc.rs` mirrors the `bench_275_swir_goat.rs::g7_step_zero_allocation_debug` pattern (debug-only `TrackingAllocator`). After 50 warmup calls, **0 allocations / 0 bytes** over 100 measured `funcattn_forward` calls (d=128, k=64, n=512). Release path exercises the same hot path with a timing sanity check.
   - Run `cargo test --features funcattn` with allocator counting (or `cargo bench` with `--bench allocator_count` if available).
   - Assert 0 allocations per forward call after warmup.
 
