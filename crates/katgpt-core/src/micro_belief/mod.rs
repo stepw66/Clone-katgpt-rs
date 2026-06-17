@@ -19,6 +19,7 @@
 //! - ✅ [`LatentThoughtKernel`] — Family B (Phase 3 T3.1).
 //! - ✅ G2.1 coherence benchmark — Phase 5 T5.0, see [`coherence_bench`].
 //! - ⏳ [`BoMSampler`] — K-hypothesis sampling (Plan 281, behind `bom_sampling`).
+//! - ⏳ [`bom_arena`] — G2 arena harness (Plan 281 T2.3, behind `bom_sampling`).
 //!
 //! # Latent vs raw boundary (AGENTS.md)
 //!
@@ -46,6 +47,8 @@
 pub mod attractor;
 #[cfg(feature = "bom_sampling")]
 pub mod bom;
+#[cfg(feature = "bom_sampling")]
+pub mod bom_arena;
 pub mod bridge;
 pub mod coherence_bench;
 pub mod latent_thought;
@@ -67,6 +70,12 @@ mod tests;
 pub use attractor::AttractorKernel;
 #[cfg(feature = "bom_sampling")]
 pub use bom::{BoMSampler, NoiseQueryConfig, SeedStrategy, dot_product_scorer};
+#[cfg(feature = "bom_sampling")]
+pub use bom_arena::{
+    ArenaAction, ArenaEnvironment, BeliefPlanner, BoMMeanPlanner, BoMMinimaxPlanner,
+    ComparisonResult, DeterministicPlanner, EnvHint, PlannerOutcome, SyntheticThreatArena,
+    bom_mean_attractor, bom_minimax_attractor, bom_minimax_leaky, run_arena_comparison,
+};
 pub use bridge::project_to_scalars;
 pub use latent_thought::LatentThoughtKernel;
 pub use leaky::LeakyIntegrator;

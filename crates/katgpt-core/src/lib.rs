@@ -84,6 +84,16 @@ pub use micro_belief::{
 #[cfg(feature = "bom_sampling")]
 pub use micro_belief::{BoMSampler, NoiseQueryConfig, SeedStrategy, dot_product_scorer};
 
+// BoM G2 arena harness — Plan 281 T2.3.
+// Engine-side traits + synthetic reference env. riir-ai implements the traits
+// over a real bomber/go sim to produce the empirical G2 gate.
+#[cfg(feature = "bom_sampling")]
+pub use micro_belief::{
+    ArenaAction, ArenaEnvironment, BeliefPlanner, BoMMeanPlanner, BoMMinimaxPlanner,
+    ComparisonResult, DeterministicPlanner, EnvHint, PlannerOutcome, SyntheticThreatArena,
+    bom_mean_attractor, bom_minimax_attractor, bom_minimax_leaky, run_arena_comparison,
+};
+
 // FaithfulnessProbe — causal intervention diagnostic for injected memory (Plan 278, Research 244).
 // Moved from katgpt root to katgpt-core so riir-engine (Plan 308) can consume via katgpt-core.
 // Two features:
