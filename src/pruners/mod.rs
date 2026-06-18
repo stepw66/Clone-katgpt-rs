@@ -56,7 +56,7 @@ pub mod hot_swap;
 pub mod regression;
 
 #[cfg(feature = "bandit")]
-pub mod review_metrics;
+pub use katgpt_core::pruners::review_metrics;
 
 #[cfg(feature = "bandit")]
 pub mod trial_log;

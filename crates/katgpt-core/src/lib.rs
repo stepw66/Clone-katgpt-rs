@@ -103,6 +103,13 @@ pub use micro_belief::{
 #[cfg(any(feature = "faithfulness_probe", feature = "triggered_injection"))]
 pub mod faithfulness;
 
+// ReviewMetrics — inference-time path-consistency / reward-hacking counter (Plan 054, Research 244).
+// Moved from katgpt root to katgpt-core so riir-engine (Plan 308 Phase 3) can consume via
+// katgpt-core/review_metrics. Whole `pruners` module is feature-gated, matching the
+// faithfulness/cgsp precedent.
+#[cfg(feature = "review_metrics")]
+pub mod pruners;
+
 // Temporal Derivative Kernel — dual fast/slow EMA surprise signal (Plan 277, Research 243).
 // Turns any streaming latent vector into a signed "surprise" signal — the implicit
 // prediction-error channel for credit assignment, computed locally with no backprop.

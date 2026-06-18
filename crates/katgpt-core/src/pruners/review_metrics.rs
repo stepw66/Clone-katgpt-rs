@@ -1,3 +1,5 @@
+//! Moved from katgpt root to katgpt-core so riir-engine (Plan 308) can consume via katgpt-core/review_metrics.
+//!
 //! Inference-time review metrics for Reinforced Agent Distillation.
 //!
 //! Tracks helpful/harmful classifications of reviewer intervention,
