@@ -341,6 +341,26 @@ pub use content_store::{
     build_binary_merkle_proof, build_binary_merkle_root, verify_binary_merkle_proof,
 };
 
+// Closure-Expansion Instrument (CEI) — PTG recorder + motif miner + PRI/CDG/TaR metrics
+// (Plan 290, Research 264, arxiv 2606.15386, Momennejad & Raileanu). Open measurement
+// layer: turns open-ended inference into observable metrics. Opt-in until G1–G4 GOAT
+// gate passes; G5 demotes to opt-in diagnostic if metrics don't correlate with quality.
+#[cfg(feature = "closure_instrument")]
+pub mod closure;
+#[cfg(feature = "closure_instrument")]
+pub use closure::{
+    PrimitiveKind, PrimitiveTransitionGraph, PtgEdge, PtgNode, OperatorKind,
+    commitment, deserialize_postcard, serialize_postcard,
+    admit::{GateResult, MotifAdmitter, RejectionReason},
+    bridge::{DEFAULT_MOTIF_DIRS, MotifDirections, motif_embedding_to_tar_score, ptg_to_motif_embedding},
+    metrics::{CdgScore, PriScores, compute_pri, compute_cdg, compute_tar_score, motif_multiset},
+    motif::{
+        FixedU32Set, MAX_MOTIF_EDGES, MAX_MOTIF_NODES, Motif, MotifMiner, RING_BUFFER_K,
+        enumerate_subgraph_hashes,
+    },
+    trace::{DEFAULT_TRACE_CAPACITY, NodeId, PtgRecorder},
+};
+
 // Sink-Aware Attention — NOP/Broadcast classifier + dual-policy sigmoid gate
 // (Plan 287, Research 258, arxiv 2606.08105, Fesser et al.). Per-head
 // classifier (value-norm-ratio + stable-rank-of-update) decides whether a
