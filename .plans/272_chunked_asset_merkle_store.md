@@ -4,7 +4,7 @@
 **Research:** [katgpt-rs/.research/262_Lore_Chunked_Asset_Merkle_Store_Modelless.md](../.research/262_Lore_Chunked_Asset_Merkle_Store_Modelless.md)
 **Source:** [Epic Games Lore](https://github.com/EpicGames/lore) — distilled chunked content-addressed VCS primitive.
 **Target:** `katgpt-rs/crates/katgpt-core/src/content_store/` (new module) + Cargo feature `chunked_content_store`
-**Status:** Active — Phase 1 <not started>
+**Status:** Active — Phase 1 ✅ COMPLETE (2026-06-18). Trait + Types + Reference Impl shipped; 36 unit tests pass; example runs. Phase 2 (FastCDC) + Phase 3 (Fetchers) + Phase 4 (GOAT Gate) pending.
 
 **Cross-ref (riir-ai):** This is the open primitive consumed by [riir-ai Plan 319](../../riir-ai/.plans/319_executable_asset_vessel_quorum_gitflow.md) (Executable Asset Vessel + Quorum Gitflow). The fusion Super-GOAT lives there; this plan is the GOAT-tier foundation only.
 
@@ -31,35 +31,35 @@ Goal: a compiling, tested, feature-gated module that exposes the public API surf
 
 ### Tasks
 
-- [ ] **T1.1** Add Cargo feature `chunked_content_store = ["dep:papaya", "dep:blake3"]` to `katgpt-rs/crates/katgpt-core/Cargo.toml`. Ensure `papaya` and `blake3` are already present (they should be — verify via `cargo tree -p katgpt-core`).
-- [ ] **T1.2** Create module `katgpt-rs/crates/katgpt-core/src/content_store/mod.rs` with module doc referencing Research 262 + this plan + the "no game IP / no chain IP" boundary.
-- [ ] **T1.3** Add `#[cfg(feature = "chunked_content_store")] pub mod content_store;` to `katgpt-rs/crates/katgpt-core/src/lib.rs` (alphabetical).
-- [ ] **T1.4** Define types in `content_store/types.rs`:
+- [x] **T1.1** Add Cargo feature `chunked_content_store = ["dep:papaya", "dep:blake3"]` to `katgpt-rs/crates/katgpt-core/Cargo.toml`. Ensure `papaya` and `blake3` are already present (they should be — verify via `cargo tree -p katgpt-core`).
+- [x] **T1.2** Create module `katgpt-rs/crates/katgpt-core/src/content_store/mod.rs` with module doc referencing Research 262 + this plan + the "no game IP / no chain IP" boundary.
+- [x] **T1.3** Add `#[cfg(feature = "chunked_content_store")] pub mod content_store;` to `katgpt-rs/crates/katgpt-core/src/lib.rs` (alphabetical).
+- [x] **T1.4** Define types in `content_store/types.rs`:
   - `BlobId(pub [u8; 32])` — `#[repr(transparent)]`, `#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, bytemuck::Pod, bytemuck::Zeroable)]`.
   - `StoreStats { n_chunks_stored: u64, n_blobs_indexed: u64, total_bytes_stored: u64, total_bytes_logical: u64, dedup_ratio: f32 }` — `#[repr(C)]`.
   - `ChunkRange { offset: u64, length: u32 }` — for partial reads.
-- [ ] **T1.5** Define traits in `content_store/trait.rs`:
+- [x] **T1.5** Define traits in `content_store/trait.rs`:
   - `pub trait ChunkedContentStore` — `put`, `get`, `get_chunk`, `prove_chunk`, `verify_proof` (assoc fn), `stats`. Match Research 262 §2.1 signature.
   - `pub trait ChunkFetcher` — `fn fetch(&self, chunk_hash: &[u8; 32]) -> Option<Vec<u8>>` plus `fn fetch_range(&self, blob_id: &BlobId, range: ChunkRange) -> Option<Vec<u8>>` for partial hydrate (caller may know only the range they need, e.g. LOD-0 only).
   - `pub trait ChunkingStrategy` — `fn chunk<'a>(&self, bytes: &'a [u8]) -> Vec<&'a [u8]>` (borrowed slices; zero-copy on read path).
-- [ ] **T1.6** Implement `FixedSizeChunker { chunk_size: usize }` in `content_store/chunker.rs`:
+- [x] **T1.6** Implement `FixedSizeChunker { chunk_size: usize }` in `content_store/chunker.rs`:
   - `chunk_size` defaults to 64 KiB; configurable.
   - `chunk()` returns non-overlapping slices; final slice may be shorter.
   - Unit tests: empty input, exact multiple, partial last chunk, single-byte input.
-- [ ] **T1.7** Implement `InMemoryChunkedStore` in `content_store/in_memory.rs`:
+- [x] **T1.7** Implement `InMemoryChunkedStore` in `content_store/in_memory.rs`:
   - Backed by `papaya::HashMap<[u8; 32], Vec<u8>>` for chunks (per AGENTS.md lock-free rule).
   - Backed by `papaya::HashMap<[u8; 32], BlobMetadata>` for blob index.
   - `BlobMetadata { n_chunks: u32, chunk_hashes: Box<[[u8; 32]]>, total_bytes: u64 }` — fixed-size fields where possible.
   - Implement all five `ChunkedContentStore` methods + `stats()`.
   - `get_chunk` returns `&[u8]` borrowed from the hashmap value (zero-copy).
-- [ ] **T1.8** Add a binary Merkle root helper in `content_store/merkle.rs`:
+- [x] **T1.8** Add a binary Merkle root helper in `content_store/merkle.rs`:
   - `pub fn build_binary_merkle_root(hashes: &[[u8; 32]]) -> [u8; 32]` — pads to next power of 2 with zero hashes, builds bottom-up via `blake3::hash(left ‖ right)`.
   - `pub fn build_binary_merkle_proof(hashes: &[[u8; 32]], leaf_index: usize) -> Vec<[u8; 32]>` — O(log n) siblings.
   - `pub fn verify_binary_merkle_proof(leaf_hash: &[u8; 32], leaf_index: usize, siblings: &[[u8; 32]], root: &[u8; 32]) -> bool` — pure BLAKE3, no store access.
   - If Plan 253 `MerkleOctree`/`MerkleProof` already supports binary mode (depth = ⌈log₂ n⌉), reuse it; otherwise this module is the reference impl.
-- [ ] **T1.9** Add a `MerkleProof` wrapper struct in `content_store/types.rs`:
+- [x] **T1.9** Add a `MerkleProof` wrapper struct in `content_store/types.rs`:
   - `pub struct MerkleProof { pub leaf_index: usize, pub siblings: Vec<[u8; 32]>, pub expected_root: [u8; 32] }` — matches the binary-tree shape.
-- [ ] **T1.10** Write unit tests in `content_store/in_memory.rs` (`#[cfg(test)] mod tests`):
+- [x] **T1.10** Write unit tests in `content_store/in_memory.rs` (`#[cfg(test)] mod tests`):
   - `test_put_get_roundtrip` — put bytes, get them back, byte-identical.
   - `test_idempotent_put` — same bytes → same `BlobId`.
   - `test_dedup_chunks_shared` — two blobs with 50% shared chunks → chunk store has only 1.5× unique chunks (not 2×).
@@ -68,7 +68,7 @@ Goal: a compiling, tested, feature-gated module that exposes the public API surf
   - `test_inclusion_proof_wrong_index` — proof for leaf 0 doesn't verify against leaf 1's hash.
   - `test_zero_alloc_get_chunk` — manual inspection + `#[track_caller]`; assert no `Vec`/`String`/`Box` in the `get_chunk` body.
   - `test_empty_blob` — zero-length input → 0 chunks → root = `BLAKE3(empty)`.
-- [ ] **T1.11** Add example `katgpt-rs/crates/katgpt-core/examples/chunked_store_basic.rs`:
+- [x] **T1.11** Add example `katgpt-rs/crates/katgpt-core/examples/chunked_store_basic.rs`:
   - Construct two synthetic blobs sharing 50% of chunks (sword_base + sword_variant with mutated handle).
   - Put both into `InMemoryChunkedStore`.
   - Print `BlobId`s, `StoreStats.dedup_ratio`, and an inclusion proof for chunk 0 of sword_variant.

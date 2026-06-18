@@ -329,6 +329,18 @@ pub use funcattn::{
     funcattn_forward, solve_convex_combo_dual,
 };
 
+// ChunkedContentStore — Lore-distilled chunked content-addressed Merkle store (Plan 272, Research 262).
+// Open primitive: chunks → BLAKE3 → dedup via papaya → binary Merkle root. No game/chain IP.
+// Consumed by riir-ai Plan 319 (Executable Asset Vessel + Quorum Gitflow).
+#[cfg(feature = "chunked_content_store")]
+pub mod content_store;
+#[cfg(feature = "chunked_content_store")]
+pub use content_store::{
+    BlobId, ChunkFetcher, ChunkRange, ChunkedContentStore, ChunkingStrategy, FixedSizeChunker,
+    InMemoryChunkedStore, MerkleProof, StoreStats, build_binary_merkle_proof,
+    build_binary_merkle_root, verify_binary_merkle_proof,
+};
+
 // Sink-Aware Attention — NOP/Broadcast classifier + dual-policy sigmoid gate
 // (Plan 287, Research 258, arxiv 2606.08105, Fesser et al.). Per-head
 // classifier (value-norm-ratio + stable-rank-of-update) decides whether a
