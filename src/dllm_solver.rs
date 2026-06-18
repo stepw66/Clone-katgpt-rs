@@ -645,6 +645,182 @@ impl RcdConfig {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Three-State Reuse (3SR) Warm-Start (Plan 291, Research 265, feature: d2f_3sr_warm_start)
+// ---------------------------------------------------------------------------
+//
+// Composes the CoFRe paper's three-state warm-start rule with the shipped RCD
+// loop (Plan 258). Tokens are classified per position between consecutive
+// denoising steps into {UnchangedVisible, StillMasked, NewlyRevealed}, each
+// mapping to a different warm-start coefficient γ used to lerp the next step's
+// initial state between the prior step's solved state and the current
+// preprocessing-stack output:
+//
+//     h⁰_t[i] = γ[i] · h⋆_{t+1}[i] + (1 − γ[i]) · h_pre,t[i]
+//
+// Zero-cost when `enabled=false` — the runtime check in `denoise_loop_rcd_3sr`
+// falls through to `denoise_loop_rcd` with no further work.
+
+/// Configuration for Three-State Reuse (3SR) warm-start (Plan 291, Research 265).
+///
+/// When composed with RCD (Plan 258) inside a D2F denoising loop with LT2 looping
+/// enabled, this controls per-position warm-start of the FP solver state across
+/// denoising steps. Per CoFRe paper §1.2, tokens transition between three states
+/// between denoising steps:
+/// - **UnchangedVisible**: committed in both steps → γ=1.0 (full reuse of prior state)
+/// - **StillMasked**: masked in both steps → γ∈[γ_masked_min, γ_masked_max] (partial reuse)
+/// - **NewlyRevealed**: was masked, now visible (or vice versa) → γ=0.2 (weak reuse)
+///
+/// The warm-start lerp is `h⁰_t = γ_t ⊙ h⋆_{t+1} + (1−γ_t) ⊙ h_pre,t`.
+///
+/// Zero-cost when `enabled=false` — the runtime check in `denoise_loop_rcd_3sr` falls
+/// through to `denoise_loop_rcd` with no further work.
+#[cfg(feature = "d2f_3sr_warm_start")]
+#[derive(Clone, Debug)]
+pub struct ThreeStateReuseConfig {
+    /// γ for UnchangedVisible positions — default 1.0 (full reuse).
+    pub gamma_visible: f32,
+    /// γ floor for StillMasked positions — default 0.75 (paper Tables 4-5).
+    pub gamma_masked_min: f32,
+    /// γ ceiling for StillMasked positions — default 0.90 (paper Tables 4-5).
+    pub gamma_masked_max: f32,
+    /// γ for NewlyRevealed positions — default 0.2 (paper §1.2).
+    pub gamma_newly_revealed: f32,
+    /// Runtime on/off toggle. When false, `denoise_loop_rcd_3sr` falls back to `denoise_loop_rcd`.
+    pub enabled: bool,
+}
+
+#[cfg(feature = "d2f_3sr_warm_start")]
+impl Default for ThreeStateReuseConfig {
+    fn default() -> Self {
+        Self {
+            gamma_visible: 1.0,
+            gamma_masked_min: 0.75,
+            gamma_masked_max: 0.90,
+            gamma_newly_revealed: 0.2,
+            enabled: true,
+        }
+    }
+}
+
+#[cfg(feature = "d2f_3sr_warm_start")]
+impl ThreeStateReuseConfig {
+    /// Disabled config (zero overhead — falls back to standard RCD loop).
+    pub fn disabled() -> Self {
+        Self { enabled: false, ..Default::default() }
+    }
+}
+
+/// Per-position transition type between two consecutive D2F denoising steps.
+/// Used by 3SR warm-start (Plan 291) to choose the warm-start coefficient γ.
+#[cfg(feature = "d2f_3sr_warm_start")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub enum TransitionType {
+    /// Visible (committed) in both `z_prev` and `z_t`. γ = `gamma_visible`.
+    UnchangedVisible = 0,
+    /// Still masked in both. γ = lerp([gamma_masked_min, gamma_masked_max], visible_fraction).
+    StillMasked = 1,
+    /// Was masked in `z_prev`, now visible in `z_t` (or vice versa). γ = `gamma_newly_revealed`.
+    NewlyRevealed = 2,
+}
+
+/// Classify each position's transition type between two denoising steps.
+///
+/// `z_prev_tokens`, `z_t_tokens`: token slices for the previous and current step.
+/// `mask_token`: the mask token id.
+/// `out`: output slice of length `z_prev_tokens.len()` (must equal `z_t_tokens.len()`).
+///
+/// Zero allocation — caller-provided output buffer.
+#[cfg(feature = "d2f_3sr_warm_start")]
+#[inline]
+pub fn classify_transitions(
+    z_prev_tokens: &[usize],
+    z_t_tokens: &[usize],
+    mask_token: usize,
+    out: &mut [TransitionType],
+) {
+    debug_assert_eq!(z_prev_tokens.len(), z_t_tokens.len());
+    debug_assert!(out.len() >= z_prev_tokens.len());
+    let n = z_prev_tokens.len().min(out.len());
+    for i in 0..n {
+        let prev_masked = z_prev_tokens[i] == mask_token;
+        let curr_masked = z_t_tokens[i] == mask_token;
+        out[i] = match (prev_masked, curr_masked) {
+            (false, false) => TransitionType::UnchangedVisible,
+            (true, true) => TransitionType::StillMasked,
+            _ => TransitionType::NewlyRevealed,
+        };
+    }
+}
+
+/// Compute per-position γ coefficients from transition types + visible fraction.
+///
+/// - UnchangedVisible → `cfg.gamma_visible`
+/// - StillMasked       → `cfg.gamma_masked_min + (cfg.gamma_masked_max − cfg.gamma_masked_min) * v_t`
+///                       where `v_t = visible_fraction_t` ∈ [0, 1]
+/// - NewlyRevealed     → `cfg.gamma_newly_revealed`
+///
+/// `visible_fraction_t` = fraction of positions visible (committed) in `z_t_tokens`.
+/// This is one scalar per step, not per-position — it modulates all still-masked γs together.
+///
+/// Zero allocation — caller-provided output buffer.
+#[cfg(feature = "d2f_3sr_warm_start")]
+#[inline]
+pub fn compute_gammas(
+    transitions: &[TransitionType],
+    visible_fraction_t: f32,
+    cfg: &ThreeStateReuseConfig,
+    out: &mut [f32],
+) {
+    debug_assert!(out.len() >= transitions.len());
+    let n = transitions.len().min(out.len());
+    let masked_span = cfg.gamma_masked_max - cfg.gamma_masked_min;
+    let v = visible_fraction_t.clamp(0.0, 1.0);
+    for i in 0..n {
+        out[i] = match transitions[i] {
+            TransitionType::UnchangedVisible => cfg.gamma_visible,
+            TransitionType::StillMasked => cfg.gamma_masked_min + masked_span * v,
+            TransitionType::NewlyRevealed => cfg.gamma_newly_revealed,
+        };
+    }
+}
+
+/// Apply per-position γ-weighted warm-start lerp:
+///   `h⁰_t[i] = γ[i] * h_star_next[i] + (1−γ[i]) * h_pre_t[i]`
+///
+/// `h_star_next`: previous step's solved FP solver state, flat [seq_len * n_embd].
+/// `h_pre_t`: current step's preprocessing-stack output, flat [seq_len * n_embd].
+/// `gammas`: per-position γ ∈ [0, 1], length `seq_len`.
+/// `out`: warm-start initial state, length `seq_len * n_embd`.
+///
+/// This is the composition primitive from CoFRe §1.2 — operates per-position on
+/// the embedding/state buffer. Zero allocation; caller-provided buffers.
+#[cfg(feature = "d2f_3sr_warm_start")]
+#[inline]
+pub fn warm_start_lerp(
+    h_star_next: &[f32],
+    h_pre_t: &[f32],
+    gammas: &[f32],
+    n_embd: usize,
+    out: &mut [f32],
+) {
+    let seq = gammas.len();
+    debug_assert!(h_star_next.len() >= seq * n_embd);
+    debug_assert!(h_pre_t.len() >= seq * n_embd);
+    debug_assert!(out.len() >= seq * n_embd);
+    for i in 0..seq {
+        let g = gammas[i].clamp(0.0, 1.0);
+        let inv_g = 1.0 - g;
+        let dst = &mut out[i * n_embd..(i + 1) * n_embd];
+        let star = &h_star_next[i * n_embd..(i + 1) * n_embd];
+        let pre = &h_pre_t[i * n_embd..(i + 1) * n_embd];
+        for k in 0..n_embd {
+            dst[k] = g * star[k] + inv_g * pre[k];
+        }
+    }
+}
+
 /// Compute normalized entropy weight α_i for a single position.
 ///
 /// α_i = H(p_i) / log(V)
@@ -1602,5 +1778,108 @@ mod tests {
             super::tier_to_residual_mode(ComputeTier::CpuGpuAne),
             super::ResidualMode::FullWithWarmStart
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // Three-State Reuse (3SR) tests (Plan 291, feature: d2f_3sr_warm_start)
+    // -----------------------------------------------------------------------
+
+    #[cfg(feature = "d2f_3sr_warm_start")]
+    #[test]
+    fn test_3sr_config_default() {
+        let cfg = super::ThreeStateReuseConfig::default();
+        assert!((cfg.gamma_visible - 1.0).abs() < 1e-6);
+        assert!((cfg.gamma_masked_min - 0.75).abs() < 1e-6);
+        assert!((cfg.gamma_masked_max - 0.90).abs() < 1e-6);
+        assert!((cfg.gamma_newly_revealed - 0.2).abs() < 1e-6);
+        assert!(cfg.enabled, "default must be enabled (zero-cost gate is runtime)");
+    }
+
+    #[cfg(feature = "d2f_3sr_warm_start")]
+    #[test]
+    fn test_3sr_config_disabled() {
+        let cfg = super::ThreeStateReuseConfig::disabled();
+        assert!(!cfg.enabled, "disabled() must have enabled=false");
+        // γ values still hold their paper defaults so they're ready if re-enabled.
+        assert!((cfg.gamma_visible - 1.0).abs() < 1e-6);
+        assert!((cfg.gamma_masked_min - 0.75).abs() < 1e-6);
+    }
+
+    #[cfg(feature = "d2f_3sr_warm_start")]
+    #[test]
+    fn test_3sr_classify_transitions() {
+        let mask = 99;
+        // pos 0: visible in both → UnchangedVisible
+        // pos 1: masked in both → StillMasked
+        // pos 2: was mask, now visible → NewlyRevealed
+        // pos 3: was visible, now mask → NewlyRevealed
+        let z_prev = vec![5, mask, mask, 7];
+        let z_t = vec![5, mask, 3, mask];
+        let mut out = vec![super::TransitionType::UnchangedVisible; 4];
+        super::classify_transitions(&z_prev, &z_t, mask, &mut out);
+        assert_eq!(out[0], super::TransitionType::UnchangedVisible);
+        assert_eq!(out[1], super::TransitionType::StillMasked);
+        assert_eq!(out[2], super::TransitionType::NewlyRevealed);
+        assert_eq!(out[3], super::TransitionType::NewlyRevealed);
+    }
+
+    #[cfg(feature = "d2f_3sr_warm_start")]
+    #[test]
+    fn test_3sr_compute_gammas() {
+        let cfg = super::ThreeStateReuseConfig::default();
+        let transitions = vec![
+            super::TransitionType::UnchangedVisible,
+            super::TransitionType::StillMasked,
+            super::TransitionType::NewlyRevealed,
+        ];
+        let mut gammas = vec![0.0f32; 3];
+
+        // v_t = 0.5 → StillMasked γ should be midpoint of [0.75, 0.90] = 0.825.
+        super::compute_gammas(&transitions, 0.5, &cfg, &mut gammas);
+        assert!((gammas[0] - 1.0).abs() < 1e-6, "visible → gamma_visible");
+        assert!((gammas[1] - 0.825).abs() < 1e-6, "masked(v=0.5) → 0.825, got {}", gammas[1]);
+        assert!((gammas[2] - 0.2).abs() < 1e-6, "newly-revealed → gamma_newly_revealed");
+
+        // v_t = 0 → StillMasked γ should clamp to gamma_masked_min (0.75).
+        super::compute_gammas(&transitions, 0.0, &cfg, &mut gammas);
+        assert!((gammas[1] - 0.75).abs() < 1e-6, "masked(v=0) → 0.75, got {}", gammas[1]);
+
+        // v_t = 1 → StillMasked γ should clamp to gamma_masked_max (0.90).
+        super::compute_gammas(&transitions, 1.0, &cfg, &mut gammas);
+        assert!((gammas[1] - 0.90).abs() < 1e-6, "masked(v=1) → 0.90, got {}", gammas[1]);
+    }
+
+    #[cfg(feature = "d2f_3sr_warm_start")]
+    #[test]
+    fn test_3sr_warm_start_lerp() {
+        // 2 positions, n_embd = 2.
+        let h_star_next = vec![10.0, 20.0, 30.0, 40.0]; // pos 0 = [10,20], pos 1 = [30,40]
+        let h_pre_t = vec![0.0, 0.0, 0.0, 0.0];
+        let mut out = vec![0.0f32; 4];
+
+        // γ = 1.0 → pure h_star_next.
+        super::warm_start_lerp(&h_star_next, &h_pre_t, &[1.0, 1.0], 2, &mut out);
+        assert!((out[0] - 10.0).abs() < 1e-6);
+        assert!((out[1] - 20.0).abs() < 1e-6);
+        assert!((out[2] - 30.0).abs() < 1e-6);
+        assert!((out[3] - 40.0).abs() < 1e-6);
+
+        // γ = 0.0 → pure h_pre_t.
+        super::warm_start_lerp(&h_star_next, &h_pre_t, &[0.0, 0.0], 2, &mut out);
+        assert!(out.iter().all(|&v| v.abs() < 1e-6));
+
+        // γ = 0.5 → midpoint.
+        super::warm_start_lerp(&h_star_next, &h_pre_t, &[0.5, 0.5], 2, &mut out);
+        assert!((out[0] - 5.0).abs() < 1e-6);
+        assert!((out[1] - 10.0).abs() < 1e-6);
+        assert!((out[2] - 15.0).abs() < 1e-6);
+        assert!((out[3] - 20.0).abs() < 1e-6);
+
+        // Per-position γ mixing: pos 0 γ=1.0, pos 1 γ=0.0.
+        super::warm_start_lerp(&h_star_next, &h_pre_t, &[1.0, 0.0], 2, &mut out);
+        assert!((out[0] - 10.0).abs() < 1e-6, "pos 0 star");
+        assert!((out[1] - 20.0).abs() < 1e-6, "pos 0 star");
+        assert!((out[2] - 0.0).abs() < 1e-6, "pos 1 pre");
+        assert!((out[3] - 0.0).abs() < 1e-6, "pos 1 pre");
     }
 }

@@ -307,6 +307,19 @@ struct BidirectionalContext {
     /// Step 0 has no residuals yet (all-mask), so this is false on the first forward pass.
     #[cfg(feature = "rcd_residual")]
     rcd_active: bool,
+    /// 3SR warm-start embedding override for masked positions: `[block_size * n_embd]`.
+    /// When `tsr_active` is true and a position's token is the mask token, this
+    /// buffer's slice `[p*n..(p+1)*n]` is used *instead of* `rcd_residual_embeddings`
+    /// (it pre-composes the RCD residual with the prior step's solved state via
+    /// `warm_start_lerp`). Written by `denoise_loop_rcd_3sr` after each commitment
+    /// phase, read in the next forward pass. Plan 291, Research 265.
+    #[cfg(feature = "d2f_3sr_warm_start")]
+    tsr_warm_start_embeddings: Vec<f32>,
+    /// Whether the 3SR warm-start override is active for the current step.
+    /// Step 0 has no z_prev (no transitions to classify), so this is false on
+    /// the first forward pass — same rule as `rcd_active`.
+    #[cfg(feature = "d2f_3sr_warm_start")]
+    tsr_active: bool,
 }
 
 impl BidirectionalContext {
@@ -337,6 +350,10 @@ impl BidirectionalContext {
             rcd_residual_embeddings: vec![0.0f32; bs * n],
             #[cfg(feature = "rcd_residual")]
             rcd_active: false,
+            #[cfg(feature = "d2f_3sr_warm_start")]
+            tsr_warm_start_embeddings: vec![0.0f32; bs * n],
+            #[cfg(feature = "d2f_3sr_warm_start")]
+            tsr_active: false,
         }
     }
 }
@@ -382,10 +399,22 @@ fn forward_bidirectional_positions_into(
     // (k_cache, v_cache, x_norm2_all, xr_all are fully overwritten for [0..seq_len)
     // inside the loop, so no pre-zero is needed.)
     for (p, &token) in tokens.iter().enumerate().take(seq_len) {
-        // RCD: when residual override is active and this position is still masked,
-        // use the interpolated residual embedding ẽ_i instead of wte[mask_token].
+        // RCD / 3SR: when an embedding override is active and this position is
+        // still masked, use the override buffer instead of `wte[mask_token]`.
+        // 3SR warm-start takes precedence — it pre-composes the RCD residual
+        // (which serves as `h_pre_t`) with the prior step's solved state via
+        // `warm_start_lerp`. When 3SR is inactive, the RCD residual is used.
+        //
         // This is a single branch per position — does not touch the inner matmul loops.
-        #[cfg(feature = "rcd_residual")]
+        #[cfg(feature = "d2f_3sr_warm_start")]
+        let emb = if bctx.tsr_active && token == config.mask_token {
+            &bctx.tsr_warm_start_embeddings[p * n..(p + 1) * n]
+        } else if bctx.rcd_active && token == config.mask_token {
+            &bctx.rcd_residual_embeddings[p * n..(p + 1) * n]
+        } else {
+            &weights.wte[token * n..(token + 1) * n]
+        };
+        #[cfg(all(feature = "rcd_residual", not(feature = "d2f_3sr_warm_start")))]
         let emb = if bctx.rcd_active && token == config.mask_token {
             &bctx.rcd_residual_embeddings[p * n..(p + 1) * n]
         } else {
@@ -2334,6 +2363,261 @@ pub fn denoise_loop_rcd(
     (tokens, converged_step)
 }
 
+/// Run denoising loop with Residual Context Diffusion (Plan 258) **composed**
+/// with Three-State Reuse warm-start (Plan 291, Research 265).
+///
+/// This is the entry point for `d2f_3sr_warm_start`. It runs the same commitment
+/// loop as [`denoise_loop_rcd`], but after each step's RCD residual computation
+/// it additionally classifies per-position transitions between the previous and
+/// current token state and applies the CoFRe §1.2 warm-start lerp:
+///
+///     h⁰_t[i] = γ[i] · h⋆_{t+1}[i] + (1 − γ[i]) · h_pre,t[i]
+///
+/// where `h_pre,t[i]` is the RCD residual embedding (RCD's output serves as the
+/// preprocessing-stack result for 3SR) and `h⋆_{t+1}[i]` is the prior step's
+/// embedding (modelless proxy for the FP solver hidden state — full FP-state
+/// 3SR requires Plan 108 LT2's loop carry, out of scope for this plan).
+///
+/// γ is chosen per-position by transition type (UnchangedVisible / StillMasked /
+/// NewlyRevealed) and modulated by the step's visible fraction for StillMasked
+/// positions (paper Tables 4-5).
+///
+/// **Operational hook**: 3SR writes its lerped warm-start into
+/// `bctx.tsr_warm_start_embeddings`, which the embedding-lookup path prefers
+/// over `rcd_residual_embeddings` when `tsr_active` is set. RCD's residual
+/// computation is unchanged — 3SR composes on top of it.
+///
+/// **Honest scope note**: this captures the *structure* of 3SR (token-type-aware
+/// warm-start with three discrete γ coefficients) but operates on the input
+/// embedding layer (same layer as RCD), not the FP solver hidden state. The
+/// full paper version would stash the FP solver's hidden state; we don't have
+/// an FP solver exposed here, so we use the prior step's residual as a proxy.
+///
+/// When `tsr_config` is `None` or `enabled = false`, behaves identically to
+/// [`denoise_loop_rcd`] (zero overhead — falls through directly).
+#[cfg(feature = "d2f_3sr_warm_start")]
+pub fn denoise_loop_rcd_3sr(
+    weights: &TransformerWeights,
+    target_tokens: &[usize],
+    config: &Config,
+    n_steps: usize,
+    confidence_threshold: f32,
+    constraint: &mut dyn DenoiseConstraint,
+    rng: &mut Rng,
+    rcd_config: Option<&mut crate::dllm_solver::RcdConfig>,
+    tsr_config: Option<&crate::dllm_solver::ThreeStateReuseConfig>,
+) -> (Vec<usize>, usize) {
+    // Zero-overhead runtime gate: if 3SR is disabled at runtime, delegate to RCD.
+    let tsr_enabled = tsr_config.map_or(false, |c| c.enabled);
+    if !tsr_enabled {
+        return denoise_loop_rcd(
+            weights,
+            target_tokens,
+            config,
+            n_steps,
+            confidence_threshold,
+            constraint,
+            rng,
+            rcd_config,
+        );
+    }
+
+    // 3SR implies rcd_residual (via Cargo feature deps), so we can rely on
+    // rcd_config being meaningful. If RCD itself is disabled at runtime,
+    // h_pre,t degenerates to the standard mask embedding — still well-defined.
+    let rcd_enabled = rcd_config.as_ref().map_or(false, |c| c.enabled);
+    if !rcd_enabled {
+        // RCD disabled: 3SR still runs, but h_pre,t falls back to the mask
+        // embedding for every still-masked position. This is the
+        // modelless-3SR-on-bare-D2F mode (no RCD composition).
+    }
+
+    use crate::dllm_solver::{
+        classify_transitions, compute_gammas, compute_residual, interpolate_residual,
+        normalized_entropy, warm_start_lerp, ThreeStateReuseConfig,
+    };
+    let tsr_cfg: &ThreeStateReuseConfig = tsr_config.expect("checked tsr_enabled above");
+
+    let seq_len = target_tokens.len().min(config.block_size);
+    let mask = config.mask_token;
+    let n = config.n_embd;
+    let vocab = config.vocab_size;
+    let log_vocab = rcd_config.as_ref().map_or(1.0, |c| c.log_vocab);
+
+    let mut bctx = BidirectionalContext::new(config);
+    let mut tokens = vec![mask; seq_len];
+    let mut converged_step = n_steps;
+    let mut remaining = seq_len;
+
+    // Reusable scratch buffers — allocated once, never reallocated in the loop.
+    let mut softmax_scratch = vec![0.0f32; vocab];
+    let mut residual_scratch = vec![0.0f32; n];
+    let mask_emb: &[f32] = &weights.wte[mask * n..(mask + 1) * n];
+
+    // 3SR-specific scratch (Plan 291). All allocated once outside the loop.
+    let mut transition_scratch = vec![crate::dllm_solver::TransitionType::UnchangedVisible; seq_len];
+    let mut gamma_scratch = vec![0.0f32; seq_len];
+    // h_star_next: previous step's residual buffer (modelless proxy for FP state).
+    // Length `seq_len * n_embd`, zero-init (first step has no z_prev).
+    let mut prev_residual = vec![0.0f32; seq_len * n];
+    // z_prev_tokens: snapshot of tokens from the previous step. Initialized to
+    // all-mask so step 0's transition classification is trivially StillMasked
+    // everywhere (then explicitly skipped — see step-0 guard below).
+    let mut z_prev_tokens = vec![mask; seq_len];
+
+    for step in 0..n_steps {
+        // Forward uses standard embedding on step 0 (tsr_active = false),
+        // RCD residual on step k>0 if 3SR didn't write anything this step,
+        // 3SR warm-start on step k>0 when 3SR composed over RCD's output.
+        forward_bidirectional_positions_into(weights, &tokens, config, &mut bctx);
+
+        // Standard commitment phase — mirror of `denoise_loop_rcd`.
+        constraint.rebuild(&tokens, mask);
+        let mut any_changed = false;
+
+        for p in 0..seq_len {
+            if tokens[p] != mask {
+                continue;
+            }
+
+            let logits_p = &bctx.all_logits[p * vocab..(p + 1) * vocab];
+            let max_l = crate::simd::simd_max_f32(logits_p);
+            let exp_buf = &mut bctx.all_attn_weights[..vocab];
+            exp_buf[..vocab].copy_from_slice(logits_p);
+            crate::simd::simd_add_scalar_inplace(&mut exp_buf[..vocab], -max_l);
+            crate::simd::simd_exp_inplace(&mut exp_buf[..vocab]);
+            let sum_exp = crate::simd::simd_sum_f32(&exp_buf[..vocab]);
+            let inv_sum = 1.0 / sum_exp;
+
+            let mut best_token = mask;
+            let mut best_exp = 0.0f32;
+            for t in 0..vocab {
+                if t == mask {
+                    continue;
+                }
+                if !constraint.is_valid(p, t, &tokens) {
+                    continue;
+                }
+                let e = exp_buf[t];
+                if e > best_exp {
+                    best_exp = e;
+                    best_token = t;
+                }
+            }
+            let best_prob = best_exp * inv_sum;
+
+            if best_prob >= confidence_threshold && best_token != mask {
+                tokens[p] = best_token;
+                any_changed = true;
+                remaining -= 1;
+            }
+        }
+
+        // RCD pass: compute entropy-weighted residual for every still-masked
+        // position and write to `rcd_residual_embeddings` (h_pre,t for 3SR).
+        let mut wrote_residual = false;
+        for p in 0..seq_len {
+            if tokens[p] != mask {
+                continue;
+            }
+
+            let logits_p = &bctx.all_logits[p * vocab..(p + 1) * vocab];
+            let max_l = crate::simd::simd_max_f32(logits_p);
+            softmax_scratch[..vocab].copy_from_slice(logits_p);
+            crate::simd::simd_add_scalar_inplace(&mut softmax_scratch[..vocab], -max_l);
+            crate::simd::simd_exp_inplace(&mut softmax_scratch[..vocab]);
+            let sum_exp = crate::simd::simd_sum_f32(&softmax_scratch[..vocab]);
+            if sum_exp > 0.0 {
+                let inv = 1.0 / sum_exp;
+                crate::simd::simd_scale_inplace(&mut softmax_scratch[..vocab], inv);
+            }
+
+            let alpha = normalized_entropy(&softmax_scratch[..vocab], log_vocab);
+            compute_residual(
+                &softmax_scratch[..vocab],
+                &weights.wte,
+                n,
+                &mut residual_scratch,
+            );
+            interpolate_residual(
+                &mask_emb,
+                &residual_scratch,
+                alpha,
+                &mut bctx.rcd_residual_embeddings[p * n..(p + 1) * n],
+            );
+            wrote_residual = true;
+        }
+        bctx.rcd_active = wrote_residual;
+
+        // 3SR pass (Plan 291). Step 0 has no z_prev → skip warm-start this step;
+        // forward on step 1 will use the RCD residual directly. From step ≥ 1,
+        // classify transitions between z_prev and the current `tokens`, compute
+        // γ per position, and lerp between prev_residual (h⋆) and rcd_residual
+        // (h_pre) into tsr_warm_start_embeddings. tsr_active gates the next
+        // forward's embedding lookup to prefer the 3SR buffer.
+        if step > 0 && wrote_residual {
+            classify_transitions(
+                &z_prev_tokens,
+                &tokens,
+                mask,
+                &mut transition_scratch,
+            );
+            // visible_fraction_t = (seq_len - remaining) / seq_len.
+            let visible_fraction = if seq_len > 0 {
+                (seq_len - remaining) as f32 / seq_len as f32
+            } else {
+                0.0
+            };
+            compute_gammas(
+                &transition_scratch,
+                visible_fraction,
+                tsr_cfg,
+                &mut gamma_scratch,
+            );
+            // h_pre_t = rcd_residual_embeddings (just written above).
+            // h_star_next = prev_residual (stashed from prior step).
+            // out = tsr_warm_start_embeddings.
+            warm_start_lerp(
+                &prev_residual,
+                &bctx.rcd_residual_embeddings,
+                &gamma_scratch,
+                n,
+                &mut bctx.tsr_warm_start_embeddings,
+            );
+            bctx.tsr_active = true;
+        } else {
+            bctx.tsr_active = false;
+        }
+
+        // Stash the current step's residual buffer as next step's h_star_next.
+        // Only the still-masked positions have meaningful residuals — the rest
+        // are stale but unused (their transition type will be UnchangedVisible
+        // or NewlyRevealed, not StillMasked, so γ will not select them).
+        if wrote_residual {
+            prev_residual[..seq_len * n]
+                .copy_from_slice(&bctx.rcd_residual_embeddings[..seq_len * n]);
+        }
+
+        // Snapshot current tokens as next iteration's z_prev.
+        z_prev_tokens[..seq_len].copy_from_slice(&tokens[..seq_len]);
+
+        if !any_changed && remaining == 0 {
+            converged_step = step;
+            break;
+        }
+    }
+
+    // Leave the context in a clean state for callers that reuse it.
+    bctx.rcd_active = false;
+    bctx.tsr_active = false;
+
+    if remaining == 0 && converged_step == n_steps {
+        converged_step = n_steps - 1;
+    }
+
+    (tokens, converged_step)
+}
+
 /// Measure denoising accuracy: fraction of correctly recovered tokens.
 pub fn denoising_accuracy(predicted: &[usize], target: &[usize]) -> f32 {
     let len = predicted.len().min(target.len());
@@ -3029,6 +3313,178 @@ mod tests {
         assert!(
             rcd_steps_total <= base_steps_total * 2,
             "RCD step count regression too large: base={base_steps_total} rcd={rcd_steps_total}"
+        );
+    }
+
+    // ── Plan 291: 3SR × RCD fusion integration tests ──
+
+    /// 3SR disabled must byte-match baseline `denoise_loop`. This is the
+    /// runtime fallback guarantee: when `tsr_config.enabled = false`, the 3SR
+    /// entry point delegates to `denoise_loop_rcd`, which (when its RCD is also
+    /// disabled) delegates to `denoise_loop`. The composition must be invisible.
+    #[cfg(feature = "d2f_3sr_warm_start")]
+    #[test]
+    fn test_denoise_loop_rcd_3sr_disabled_falls_through() {
+        let config = Config::micro_dllm();
+        let mut rng = Rng::new(42);
+        let train_data = generate_pattern_dataset(&mut rng, 50, 4, 8);
+        let (weights, _) =
+            train_mini_dllm(&config, &train_data, &train_data, 200, 0.01, 0.25, 42);
+
+        let target = vec![3, 7, 3, 7];
+
+        let (base_tokens, base_steps) = denoise_loop(
+            &weights,
+            &target,
+            &config,
+            10,
+            0.3,
+            &mut NoConstraint,
+            &mut Rng::new(42),
+        );
+
+        // Both RCD and 3SR disabled → must produce baseline behavior.
+        let mut rcd_cfg = crate::dllm_solver::RcdConfig::disabled();
+        let tsr_cfg = crate::dllm_solver::ThreeStateReuseConfig::disabled();
+        let (tsr_tokens, tsr_steps) = denoise_loop_rcd_3sr(
+            &weights,
+            &target,
+            &config,
+            10,
+            0.3,
+            &mut NoConstraint,
+            &mut Rng::new(42),
+            Some(&mut rcd_cfg),
+            Some(&tsr_cfg),
+        );
+
+        assert_eq!(
+            base_tokens, tsr_tokens,
+            "disabled 3SR must match baseline tokens"
+        );
+        assert_eq!(
+            base_steps, tsr_steps,
+            "disabled 3SR must match baseline steps"
+        );
+    }
+
+    /// 3SR enabled with RCD enabled must converge and produce a mask-free
+    /// sequence on the micro config. This validates the warm-start lerp path
+    /// end-to-end: forward reads `tsr_warm_start_embeddings`, classify /
+    /// gammas / lerp fire, and the loop terminates cleanly.
+    #[cfg(feature = "d2f_3sr_warm_start")]
+    #[test]
+    fn test_denoise_loop_rcd_3sr_enabled_runs() {
+        let config = Config::micro_dllm();
+        let mut rng = Rng::new(42);
+        let train_data = generate_pattern_dataset(&mut rng, 50, 4, 8);
+        let (weights, _) =
+            train_mini_dllm(&config, &train_data, &train_data, 200, 0.01, 0.25, 42);
+
+        let target = vec![3, 7, 3, 7];
+
+        let mut rcd_cfg = crate::dllm_solver::RcdConfig::new(config.vocab_size, config.n_embd);
+        let tsr_cfg = crate::dllm_solver::ThreeStateReuseConfig::default();
+        let (tokens, steps) = denoise_loop_rcd_3sr(
+            &weights,
+            &target,
+            &config,
+            10,
+            0.3,
+            &mut NoConstraint,
+            &mut Rng::new(42),
+            Some(&mut rcd_cfg),
+            Some(&tsr_cfg),
+        );
+
+        assert!(
+            steps < 10,
+            "3SR should converge in < 10 steps, got {steps}"
+        );
+        assert!(
+            tokens.iter().all(|&t| t != config.mask_token),
+            "3SR result still has mask tokens"
+        );
+    }
+
+    /// 3SR-enabled must not catastrophically regress vs RCD-only on the micro
+    /// config. Token-agreement within 50% of RCD baseline — loose bound, since
+    /// this is a synthetic test on a model not trained for either refinement.
+    /// The GOAT gate (T1.7–T1.9) measures real gain on production weights.
+    #[cfg(feature = "d2f_3sr_warm_start")]
+    #[test]
+    fn test_3sr_no_regression_vs_rcd() {
+        let config = Config::micro_dllm();
+        let mut rng = Rng::new(42);
+        let train_data = generate_pattern_dataset(&mut rng, 50, 4, 8);
+        let (weights, _) =
+            train_mini_dllm(&config, &train_data, &train_data, 200, 0.01, 0.25, 42);
+
+        // Aggregate over several targets — single-seed measurements are noisy
+        // on a micro model with no RCD/3SR-aware training.
+        let targets: Vec<Vec<usize>> = (0..8)
+            .map(|_| {
+                let a = (rng.next() as usize) % 8;
+                let b = ((rng.next() as usize) % 7 + a + 1) % 8;
+                vec![a, b, a, b]
+            })
+            .collect();
+
+        let mut rcd_acc = 0.0f32;
+        let mut tsr_acc = 0.0f32;
+        let mut rcd_steps_total = 0usize;
+        let mut tsr_steps_total = 0usize;
+
+        for target in &targets {
+            let mut rcd_cfg =
+                crate::dllm_solver::RcdConfig::new(config.vocab_size, config.n_embd);
+            let (rcd_tokens, rcd_steps) = denoise_loop_rcd(
+                &weights,
+                target,
+                &config,
+                10,
+                0.3,
+                &mut NoConstraint,
+                &mut Rng::new(42),
+                Some(&mut rcd_cfg),
+            );
+
+            let mut rcd_cfg_t =
+                crate::dllm_solver::RcdConfig::new(config.vocab_size, config.n_embd);
+            let tsr_cfg = crate::dllm_solver::ThreeStateReuseConfig::default();
+            let (tsr_tokens, tsr_steps) = denoise_loop_rcd_3sr(
+                &weights,
+                target,
+                &config,
+                10,
+                0.3,
+                &mut NoConstraint,
+                &mut Rng::new(42),
+                Some(&mut rcd_cfg_t),
+                Some(&tsr_cfg),
+            );
+
+            rcd_acc += denoising_accuracy(&rcd_tokens, target);
+            tsr_acc += denoising_accuracy(&tsr_tokens, target);
+            rcd_steps_total += rcd_steps;
+            tsr_steps_total += tsr_steps;
+        }
+
+        let n = targets.len() as f32;
+        rcd_acc /= n;
+        tsr_acc /= n;
+
+        // Loose 50% bound: 3SR is a refinement on top of RCD. We do NOT assert
+        // strict improvement — that's the GOAT gate's job. We assert the
+        // warm-start lerp path is sound and doesn't catastrophically corrupt
+        // the denoise dynamics.
+        assert!(
+            tsr_acc >= rcd_acc - 0.50,
+            "3SR accuracy regression too large: rcd={rcd_acc:.3} tsr={tsr_acc:.3}"
+        );
+        assert!(
+            tsr_steps_total <= rcd_steps_total * 4,
+            "3SR step count regression too large: rcd={rcd_steps_total} tsr={tsr_steps_total}"
         );
     }
 }
