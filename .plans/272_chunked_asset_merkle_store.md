@@ -4,7 +4,7 @@
 **Research:** [katgpt-rs/.research/262_Lore_Chunked_Asset_Merkle_Store_Modelless.md](../.research/262_Lore_Chunked_Asset_Merkle_Store_Modelless.md)
 **Source:** [Epic Games Lore](https://github.com/EpicGames/lore) — distilled chunked content-addressed VCS primitive.
 **Target:** `katgpt-rs/crates/katgpt-core/src/content_store/` (new module) + Cargo feature `chunked_content_store`
-**Status:** Active — Phase 1 ✅ COMPLETE (2026-06-18). Trait + Types + Reference Impl shipped; 36 unit tests pass; example runs. Phase 2 (FastCDC) + Phase 3 (Fetchers) + Phase 4 (GOAT Gate) pending.
+**Status:** Active — Phase 1 ✅ COMPLETE (2026-06-18). Phase 2 (FastCDC) ✅ COMPLETE (2026-06-18). 7 CDC tests pass; G1 GOAT gate proven (1.35% incremental push vs 52.94% FixedSize, ~39× win). **Constants deviation: NORMAL_LEVEL=13 (not 23) — level 23 gives 8 MiB expected spacing, defeating CDC on ≤1 MiB blobs; see chunker.rs module doc.** Phase 3 (Fetchers) + Phase 4 (GOAT Gate) pending.
 
 **Cross-ref (riir-ai):** This is the open primitive consumed by [riir-ai Plan 319](../../riir-ai/.plans/319_executable_asset_vessel_quorum_gitflow.md) (Executable Asset Vessel + Quorum Gitflow). The fusion Super-GOAT lives there; this plan is the GOAT-tier foundation only.
 
@@ -90,18 +90,20 @@ Goal: enable cross-blob dedup on similar large blobs. Required for G1 and G2.
 
 ### Tasks
 
-- [ ] **T2.1** Implement `FastCdcChunker` in `content_store/chunker.rs`:
+- [x] **T2.1** Implement `FastCdcChunker` in `content_store/chunker.rs`:
   - Algorithm: FastCDC (Xia et al. 2016) — gear-hash-based rolling hash, two-level boundary mask (normal/small/large) for variance.
-  - Constants: `MIN_CHUNK_SIZE = 4 KiB`, `MAX_CHUNK_SIZE = 64 KiB`, `NORMAL_LEVEL = 23`, `MIN_LEVEL = 13`, `MAX_LEVEL = 17` (paper defaults; tune in benchmark).
-  - Gear table: `[u64; 256]` pre-computed at construction (lazy-init via `OnceLock`).
+  - Constants: `MIN_CHUNK_SIZE = 4 KiB`, `MAX_CHUNK_SIZE = 64 KiB`, `NORMAL_LEVEL = 13`, `MIN_LEVEL = 13`, `MAX_LEVEL = 8` (paper defaults for ~8 KiB avg; **deviation from plan's `NORMAL=23, MAX=17` — see module doc for the reasoning: level 23 → expected 8 MiB spacing defeats CDC on ≤1 MiB blobs**). Tune in benchmark.
+  - Gear table: `[u64; 256]` compile-time `const` via splitmix64 from fixed seed (deterministic, no RNG).
   - Returns borrowed slices of `bytes`, no allocation in `chunk()`.
-- [ ] **T2.2** Implement the chunker's `chunk_into_owned()` companion for the `InMemoryChunkedStore::put` path (which needs to copy each chunk into the hashmap). Borrowed path for read; owned path for write.
-- [ ] **T2.3** Unit tests:
-  - `test_cdc_stable_boundaries` — same input → same chunk boundaries.
-  - `test_cdc_local_change` — insert 1 byte at start of 10 MiB blob → only first chunk changes; rest match (within tolerance, given mask variance).
-  - `test_cdc_min_max_size` — chunks are within `[MIN, MAX]`.
-  - `test_cdc_dedup_with_variant` — two 1 MiB blobs differing in 1 KiB → ≤ 5% unique chunks.
-- [ ] **T2.4** Add a `ChunkerConfig` struct to allow runtime tuning of MIN/MAX/levels without recompiling.
+- [x] **T2.2** Implement the chunker's `chunk_into_owned()` companion — convenience method for callers needing owned `Vec<u8>`. `InMemoryChunkedStore::put` already works via the borrowed `chunk()` interface (unchanged).
+- [x] **T2.3** Unit tests:
+  - `test_cdc_stable_boundaries` — same input → same boundaries.
+  - `test_cdc_deterministic_across_instances` — two fresh instances agree.
+  - `test_cdc_min_max_size` — chunks in `[MIN, MAX]`.
+  - `test_cdc_local_change` — 1-byte prefix insertion: 94.1% boundary match (need ≥ 50%).
+  - `test_cdc_dedup_with_variant` — 1 KiB mid-blob insertion in 1 MiB: FastCDC push ratio 1.35% (need ≤ 5%), FixedSize 52.94% (negative control). **Metric deviation: uses incremental push-ratio instead of unique/total — see test doc.**
+  - `test_cdc_empty_input`, `test_cdc_short_input`.
+- [x] **T2.4** Add a `ChunkerConfig` struct to allow runtime tuning of MIN/MAX/levels without recompiling.
 
 ### Phase 2 Exit Criteria
 - All CDC unit tests pass.

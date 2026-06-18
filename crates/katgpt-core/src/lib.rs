@@ -336,9 +336,9 @@ pub use funcattn::{
 pub mod content_store;
 #[cfg(feature = "chunked_content_store")]
 pub use content_store::{
-    BlobId, ChunkFetcher, ChunkRange, ChunkedContentStore, ChunkingStrategy, FixedSizeChunker,
-    InMemoryChunkedStore, MerkleProof, StoreStats, build_binary_merkle_proof,
-    build_binary_merkle_root, verify_binary_merkle_proof,
+    BlobId, ChunkFetcher, ChunkRange, ChunkedContentStore, ChunkingStrategy, ChunkerConfig,
+    FastCdcChunker, FixedSizeChunker, InMemoryChunkedStore, MerkleProof, StoreStats,
+    build_binary_merkle_proof, build_binary_merkle_root, verify_binary_merkle_proof,
 };
 
 // Sink-Aware Attention — NOP/Broadcast classifier + dual-policy sigmoid gate

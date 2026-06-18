@@ -44,7 +44,11 @@ pub mod merkle;
 pub mod r#trait;
 pub mod types;
 
-pub use chunker::{DEFAULT_CHUNK_SIZE, FixedSizeChunker};
+pub use chunker::{
+    ChunkerConfig, DEFAULT_CHUNK_SIZE, FASTCDC_MAX_CHUNK_SIZE, FASTCDC_MAX_LEVEL,
+    FASTCDC_MIN_CHUNK_SIZE, FASTCDC_MIN_LEVEL, FASTCDC_NORMAL_LEVEL, FastCdcChunker,
+    FixedSizeChunker,
+};
 pub use in_memory::InMemoryChunkedStore;
 pub use merkle::{build_binary_merkle_proof, build_binary_merkle_root, verify_binary_merkle_proof};
 pub use r#trait::{ChunkFetcher, ChunkedContentStore, ChunkingStrategy};
