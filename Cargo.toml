@@ -568,6 +568,16 @@ path = "benches/self_advantage_gate_bench.rs"
 required-features = ["self_advantage_gate"]
 harness = false
 
+# Issue 030 — Cost-Aware Reward-Proportional Latent Trajectory Scorer GOAT gate.
+# Research 263 fusion bench (arxiv 2606.16222 — Latent Thought Flow, modelless slice).
+# G1: composite ≥3pp over best single. G1b: ≥30% discard. G2: interior entropy
+# band peak. G3: <1µs per-trajectory scoring.
+[[bench]]
+name = "latent_thought_flow_scorer_bench"
+path = "benches/latent_thought_flow_scorer_bench.rs"
+required-features = ["self_advantage_gate", "micro_belief"]
+harness = false
+
 # Plan 283 T2.2 — AdvantageMarginGate integration with forward_looped.
 # Byte-identical no-gate path GOAT gate + early-halt observability test.
 [[test]]

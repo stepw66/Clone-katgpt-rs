@@ -5,8 +5,69 @@
 **Paper:** [arxiv:2606.16222](https://arxiv.org/abs/2606.16222) — Latent Thought Flow (Zou et al., 2026)
 **Type:** Optimization / fusion candidate — **not a plan** (per AGENTS.md, optimization tasks go to `.issues/`)
 **Verdict at filing:** GAIN — every component has shipped prior art; the fusion is incremental synthesis, not a new capability class.
+**Status:** ❌ **CLOSED 2026-06-18** — GOAT gate G1a/G1b FAIL. See [Benchmark results](#benchmark-results-run-2026-06-18) below. Confirms Research 263 GAIN verdict; do not promote.
 
 ---
+
+## Benchmark Results (RUN 2026-06-18)
+
+Bench: `katgpt-rs/benches/latent_thought_flow_scorer_bench.rs`
+Run: `cargo bench --bench latent_thought_flow_scorer_bench --features self_advantage_gate,micro_belief`
+Config: DIM=32, VOCAB=8, N_TRAJECTORIES=8, N_QUERIES=2000, λ_c=0.03, K_CANDIDATES=[0,1,2,3,5,8]
+
+### Synthetic task signal (sanity check — kernel DOES solve the task)
+
+| K (iters) | Accuracy |
+|---|---|
+| 0 (no thought) | 12.45% (chance) |
+| 1 | 28.55% |
+| 2 | 33.95% |
+| 3 | 39.00% |
+| 5 | 39.00% (plateaus) |
+| 8 | 39.00% |
+
+### G1: Composite vs baselines
+
+| Scorer | Accuracy | Discard % |
+|---|---|---|
+| first-K1 (no score) | 28.55% | 0.00% |
+| **majority vote (no score)** | **39.00%** | 0.00% |
+| cost-only (argmax) | 12.45% | 0.00% |
+| advantage-only (argmax) | 38.40% | 0.00% |
+| entropy-only (argmax) | 33.95% | 0.00% |
+| **composite (argmax, paper shape)** | **28.55%** | 45.09% |
+| weighted-vote (composite) | 33.95% | 0.00% |
+| weighted-vote (advantage) | 39.00% | 0.00% |
+
+### GOAT gate verdict
+
+| Gate | Criterion | Result | Verdict |
+|---|---|---|---|
+| G1a | Composite ≥3pp over best single | -9.85pp (28.55% vs 38.40%) | ❌ FAIL |
+| G1b | Best fusion ≥1pp over majority | +0.00pp (39.00% ties 39.00%) | ❌ FAIL |
+| G1c | ≥30% dead-thought discard | 45.09% | ✅ PASS |
+| G2 | Interior entropy band peak | flat 28.55% across all bands | ⚠️ WEAK |
+| G3 | <1µs per-trajectory scoring | 802.7 ns | ✅ PASS |
+
+### Interpretation
+
+The modelless fusion of LTF's inference-time insights **does not beat simple majority vote** in the synthetic-task setting:
+
+1. **Majority vote (39%) dominates.** With a fixed (untrained) sampler, N=8 trajectories produce diverse votes; plurality aggregates them robustly. The paper's "argmax of reward-proportional score" assumes a *trained* sampler that concentrates on good trajectories — that concentration comes from the GFlowNet training (→ riir-train), not from the scoring formula itself.
+2. **Composite scorer (28.55%) actively hurts** — the cost penalty `exp(-λ_c·K)` biases it toward K=0/K=1 trajectories which are below the convergence point (K=3). The paper's λ_c=0.03 is tuned for their trained trajectories (mean length 1-4); in our untrained setup, the convergent K is higher and the cost penalty wrongly penalizes it.
+3. **Weighted-vote (advantage) only ties majority vote** — self-advantage weighting is a wash when the underlying voted actions are already majority-correct.
+4. **Entropy band has no effect** — once the composite score is dominated by the advantage term, the multiplicative entropy gate cannot change the argmax. G2's flat 28.55% confirms this.
+5. **G3 latency is fine** — 802ns per trajectory, 6.4µs per query (N=8). Fits plasma tier.
+
+### Conclusion
+
+This is an **honest negative result** that confirms Research 263's GAIN verdict. The fusion as specified in this issue (paper's argmax-of-composite-score) does not produce a measurable gain over the existing majority-vote aggregation that ships with Plan 260 (MaxProof Population TTS). The paper's accuracy gains (9.5pp) come from the GFlowNet *training* (EW-SubTB + reference-prior + LoRA-on-latent-head), which is correctly redirected to riir-train.
+
+**Do not promote.** Close this issue. If a future paper provides a modelless concentration mechanism (a way to make the fixed sampler concentrate on good trajectories without training), revisit.
+
+---
+
+## Original filing (preserved for context)
 
 ## Summary
 
