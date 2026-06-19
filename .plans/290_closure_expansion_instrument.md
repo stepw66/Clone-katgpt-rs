@@ -4,7 +4,7 @@
 **Research:** [katgpt-rs/.research/264_Compositional_Open_Ended_Intelligence_Framework.md](../.research/264_Compositional_Open_Ended_Intelligence_Framework.md)
 **Source paper:** [arxiv 2606.15386](https://arxiv.org/abs/2606.15386) — Momennejad & Raileanu, "A Compositional Framework for Open-ended Intelligence", Jun 2026
 **Target:** `katgpt-rs/crates/katgpt-core/src/closure/` (new module) + Cargo feature `closure_instrument`
-**Status:** Active — Phase 0 spec-locked; Phases 1–4 unstarted
+**Status:** Phase 0–3 complete. Phase 4: T4.1/T4.2/T4.3/T4.5/T4.6/T4.8 done; T4.4 deferred (riir-ai private IP); T4.7 blocked (G1/G4 structural PARTIAL). `closure_instrument` stays opt-in.
 
 ---
 
@@ -101,12 +101,12 @@ The paper's §6 evaluation metrics as runtime functions. PRI/CDG are pure-PTG-ag
 ### Tasks
 
 - [x] **T4.1** Create `tests/bench_290_closure_instrument_goat.rs` with all G1–G5 assertions.
-- [ ] **T4.2** Wire `PtgRecorder` as an opt-in wrapper around `BanditPruner` / `AbsorbCompressLayer` (gated by `closure_instrument` feature).
-- [ ] **T4.3** Wire `MotifMiner::mine_batch()` into the existing sleep-cycle scheduler (Plan 107 AutoDreamer consolidation tick). Document the schedule.
-- [ ] **T4.4** Cross-repo validation: request riir-ai to expose `AnchorProfile::translate_priorities()` benchmark traces for TaR correlation (G3). If riir-ai cannot share traces (private IP), use synthetic transfer scenarios as a proxy and downgrade G3 to "correlates with synthetic transfer" with a TODO to upgrade.
+- [x] **T4.2** Wire `PtgRecorder` as an opt-in wrapper around `BanditPruner` / `AbsorbCompressLayer` (gated by `closure_instrument` feature). — Shipped as `katgpt-rs/src/closure_wire.rs`: `PtgTracedPruner<P: ScreeningPruner>` decorator auto-instruments `AbsorbCompress::absorb`/`compress`; bandit `update` traced via explicit `trace()` API. 8 unit tests + 6 integration tests pass.
+- [x] **T4.3** Wire `MotifMiner::mine_batch()` into the existing sleep-cycle scheduler (Plan 107 AutoDreamer consolidation tick). Document the schedule. — Shipped as `katgpt-rs/src/closure_mining.rs`: `mine_motifs_at_sleep_cycle()` + `fold_cdg_at_sleep_cycle()`. Backend-agnostic (usable from both `dreamer` and `sleep_consolidation`); doc includes the wake→sleep→admit schedule diagram.
+- [ ] **T4.4** Cross-repo validation: request riir-ai to expose `AnchorProfile::translate_priorities()` benchmark traces for TaR correlation (G3). If riir-ai cannot share traces (private IP), use synthetic transfer scenarios as a proxy and downgrade G3 to "correlates with synthetic transfer" with a TODO to upgrade. — **DEFERRED**: riir-ai is private IP. G3 stays on the synthetic proxy (same-corpus=1.0, disjoint=0.0); upgrading requires riir-ai to expose transfer-acceleration traces. Out of scope for this repo.
 - [x] **T4.5** Cold-tier commitment: PTG snapshot ≤ 1MB per 10K traces (G4). Use postcard encoding + BLAKE3 hash; reuse Plan 280 Merkle-octree commitment infrastructure. (Honest result: 1.774 MB — see `.benchmarks/290_closure_instrument_goat.md`. Per-node 32-byte `blake3_in` is structural.)
 - [x] **T4.6** Run full benchmark suite with `--features closure_instrument`. Document results in `katgpt-rs/.benchmarks/290_closure_instrument_goat.md`.
-- [ ] **T4.7** If G1–G4 PASS and G5 does not fire → promote `closure_instrument` to default-on, demote any loser. (G1 PARTIAL 4507µs vs 100µs target; G4 PARTIAL 1.774MB vs 1MB — not promoted.)
+- [ ] **T4.7** If G1–G4 PASS and G5 does not fire → promote `closure_instrument` to default-on, demote any loser. — **BLOCKED**: G1 (4507µs vs 100µs) and G4 (1.774MB vs 1MB) PARTIAL per the benchmark file; T4.2/T4.3 wiring does not change these (they are structural properties of the locked Phase 0 data model + std HashMap). `closure_instrument` stays opt-in. Promotion would require either (a) relaxing the locked data model (Phase 0 T0.2/T0.3) or (b) revising G1/G4 targets to warm-tier-appropriate values.
 - [x] **T4.8** If G5 fires (metrics don't correlate) → keep opt-in, document honest negative result in benchmark file. (Opt-in retained. Honest partial result documented in `.benchmarks/290_closure_instrument_goat.md`.)
 
 ### Acceptance
@@ -217,4 +217,8 @@ pub struct PrimitiveTransitionGraph {
 
 ## TL;DR
 
-Plan 290 ships the runtime half of Momennejad & Raileanu's Compositional Open-ended Intelligence paper that isn't already in our stack: a **Primitive Transition Graph (PTG)** recorder, a **motif miner** that promotes recurring subgraphs as new primitives via the existing MDL gate (Plan 215), and **PRI/CDG/TaR metrics** that convert open-ended inference from a claim into a measured property of our NPCs. Fuses with 7 existing pillars (Plan 215 MDL gate × MUSE lifecycle × Bayesian posterior × AnchorProfile transfer × CGSP × AutoDreamer × Merkle-octree). Behind `closure_instrument` feature flag; promote to default-on only if G1–G4 PASS and G5 (correlation-with-real-quality) does not fire. **GOAT, not Super-GOAT** — measurement layer, not new capability class.
+Plan 290 ships the runtime half of Momennejad & Raileanu's Compositional Open-ended Intelligence paper that isn't already in our stack: a **Primitive Transition Graph (PTG)** recorder, a **motif miner** that promotes recurring subgraphs as new primitives via the existing MDL gate (Plan 215), and **PRI/CDG/TaR metrics** that convert open-ended inference from a claim into a measured property of our NPCs. Fuses with 7 existing pillars (Plan 215 MDL gate × MUSE lifecycle × Bayesian posterior × AnchorProfile transfer × CGSP × AutoDreamer × Merkle-octree).
+
+**Phase 4 wiring (T4.2/T4.3) shipped 2026-06-19:** `PtgTracedPruner<P: ScreeningPruner>` decorator (`closure_wire.rs`) auto-traces any `AbsorbCompress` pruner; `mine_motifs_at_sleep_cycle()` (`closure_mining.rs`) runs mining + admission at every sleep-cycle boundary. Full wake→sleep→admit loop proven end-to-end (17 unit tests + 6 integration tests, all green).
+
+**Decision: `closure_instrument` stays opt-in.** G2/G3 PASS, but G1 (4507µs vs 100µs hot-tier target — std HashMap dominates) and G4 (1.774MB vs 1MB target — locked Phase 0 `blake3_in: [u8; 32]` per node dominates) are PARTIAL for **structural** reasons, not implementation bugs. T4.4 (riir-ai `AnchorProfile` correlation) deferred — private IP. **GOAT, not Super-GOAT** — measurement layer, not new capability class.

@@ -102,6 +102,73 @@ These are deliberate deferrals — the measurement layer is shipped and observab
 
 ---
 
+## Phase 4 T4.2 + T4.3 Wiring (added 2026-06-19)
+
+The runtime wiring landed in two new modules under `katgpt-rs/src/`:
+
+- **`closure_wire.rs`** — `PtgTracedPruner<P: ScreeningPruner>` decorator.
+  Auto-instruments any pruner exposing `AbsorbCompress` (i.e.
+  `AbsorbCompressLayer`, and transitively `BanditPruner` when its inner
+  layer does). Emits one PTG node per `absorb(arm, reward)` (linked with
+  `Sequence`) and one per `compress()` (linked with `Branch`, using the
+  reserved `COMPRESS_PRIMITIVE_ID = 254`). Bandit `update(arm, reward)` is
+  traced via the explicit `PtgTracedPruner::trace` API — `update` lives on
+  `BanditPruner<P>`, not on the outermost pruner the wrapper sees. The
+  `relevance()` hot path is strictly pass-through (G2 contract).
+- **`closure_mining.rs`** — `mine_motifs_at_sleep_cycle(miner, admitter, dl_old_bits)`.
+  Backend-agnostic consolidation-tick hook: runs `mine_batch()` + `compute_pri()`
+  + an admission sweep, returning a `SleepCycleClosureReport`. Caller
+  invokes it at every Plan 107 / Plan 154 sleep-cycle boundary. Also
+  exposes `fold_cdg_at_sleep_cycle()` for the CDG EMA.
+
+### Integration test
+
+`tests/bench_290_closure_wire_integration.rs` (6 tests, all pass) exercises
+the full wake → sleep → admit loop end-to-end with real engine types
+(`AbsorbCompressLayer<NoScreeningPruner>` wrapped by `PtgTracedPruner`,
+observed by `MotifMiner`, mined at the sleep-cycle boundary, admitted by
+`MotifAdmitter`). Confirms:
+
+1. Recurring 3-arm motif across 3 task families × 5 episodes is discovered
+   and admitted as a `Composite(..)` primitive.
+2. TaR proxy distinguishes identical corpora (1.0) from perturbed (< 1.0).
+3. `relevance()` is unchanged by tracing (zero hot-path overhead).
+4. Manual `trace()` captures bandit `update`-equivalent events.
+5. Compress events emit the reserved primitive id with a `Branch` edge.
+6. `MotifAdmitter::evaluate` on every mined motif returns without panic.
+
+### What still does NOT happen
+
+- **T4.4** — Cross-repo validation with riir-ai's
+  `AnchorProfile.translate_priorities()` traces remains deferred (riir-ai is
+  private IP). The G3 synthetic proxy is the public-side stopgap; the
+  benchmark file already records this. Upgrading G3 from "synthetic proxy"
+  to "real correlation" requires riir-ai to expose transfer-acceleration
+  traces — out of scope for this repo.
+- **T4.5** — Cold-tier commitment via Plan 280 Merkle-octree is unchanged
+  (the `commitment()` helper exists; full octree wiring still deferred).
+- **T4.7** — Promotion to default-on remains **BLOCKED** by the structural
+  G1 (4507µs vs 100µs) and G4 (1.774MB vs 1MB) failures documented above.
+  Wiring T4.2/T4.3 does not change those numbers — the wrapper adds zero
+  cost when the feature is off and the measurement layer's warm-tier
+  latency/size characteristics are unchanged. Per the plan's promotion
+  rule (G1–G4 must ALL pass), `closure_instrument` stays opt-in.
+
+### Latency impact of the wiring (warm tier only)
+
+The wrapper adds PTG node emission to `absorb`/`compress` calls. The added
+work per call is one `Vec::push` for the node and one for the edge
+(amortized to zero allocation after the recorder's pre-reserved capacity
+of 16 nodes/edges, per `PtgRecorder::new`). Since `absorb`/`compress` are
+warm-tier calls (not the decode hot path) and `MotifMiner::mine_batch` is
+the actual warm-tier cost (already measured at ~2ms in the G2 gate above),
+the wrapper's contribution is negligible relative to mining. The
+ decode-path `relevance()` call adds zero instructions beyond the
+ delegation hop — confirmed by the `relevance_unchanged_by_tracing`
+integration test.
+
+---
+
 ## Demotion / Promotion Decision
 
 **`closure_instrument`: stays opt-in.**

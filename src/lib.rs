@@ -232,3 +232,14 @@ pub use breakeven::{BreakevenBandit, BreakevenStats, BreakevenTierPair, Breakeve
 
 #[cfg(feature = "tf_loop")]
 pub mod tf_loop;
+
+// Closure-Expansion Instrument — runtime wiring (Plan 290 Phase 4 T4.2/T4.3).
+// `closure_wire` decorates any ScreeningPruner (BanditPruner / AbsorbCompressLayer)
+// with PTG recording; `closure_mining` runs motif mining + admission at
+// sleep-cycle boundaries. Both are gated on `closure_instrument`; the
+// AbsorbCompress auto-tracing impl in `closure_wire` additionally needs `bandit`.
+#[cfg(feature = "closure_instrument")]
+pub mod closure_wire;
+
+#[cfg(feature = "closure_instrument")]
+pub mod closure_mining;
