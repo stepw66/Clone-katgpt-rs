@@ -283,7 +283,7 @@ graph LR
 | **Sink-Aware Attention** (`sink_aware_attn`) | 287 | G1/G2 cached ✅ | NOP/Broadcast classifier + dual-policy sigmoid gate — cache cadence=16 ≤5% steady-state |
 | **ICT Branching Detector** (`ict_branching`) | 294 | G1/G3/G4/G5/G6/G10 ✅ | `collision_purity β(π) = Σ π²`, JS-divergence novelty, BranchingDetector — ρ(H₁,JS)=0.065 (Super-GOAT proceeds) |
 | **MicroRecurrentBeliefState** (`micro_belief`) | 276 | G1.1–G1.4 ✅ | BeliefKernel trait unifying attractor + leaky-integrator families — G2 (attractor coherence) deferred |
-| **Forensic Watermark** (`forensic_watermark`) | 293 | 31/31 unit ✅ | BLAKE3-seeded per-recipient asset fingerprint — recipe + deployment private in riir-ai — G1–G4 GOAT gate deferred |
+| **Forensic Watermark** | Moved to riir-ai | Recipe impl relocated to Plan 322 (honeypot OPSEC) |
 
 ## 🎮 Arena Proofs — HL Thesis Validated
 
@@ -1097,11 +1097,9 @@ Distills Asadulaev et al. *Latent Reasoning in TRMs is Secretly a Policy Improve
 
 Feature gate: `self_advantage_gate` (**DEFAULT-ON** since GOAT 4/4 PASS). Deep integrations T2.2/T2.3 + freeze/thaw T5.3 remain **deferred** in [Issue 028](.issues/028_self_advantage_gate_integration_followups.md). 📖 Plan: [`.plans/283_self_advantage_recursion_gate.md`](.plans/283_self_advantage_recursion_gate.md), Research: [`.research/250_Latent_Recursion_Policy_Improvement_Advantage_Margin.md`](.research/250_Latent_Recursion_Policy_Improvement_Advantage_Margin.md), Paper: [arxiv 2511.16886](https://arxiv.org/abs/2511.16886).
 
-### 🔏 Forensic Watermark — Per-Recipient Asset Fingerprint (Plan 293, arxiv 2606.18208)
+### 🔏 Forensic Watermark — Moved to riir-ai (Plan 322)
 
-A generic, domain-agnostic forensic watermarking primitive — BLAKE3-seeded per-recipient asset fingerprint for leakage attribution. Open math distilled from public prior art (Tardos 2008, Boneh–Shaw 1998, arxiv 2606.18208); the recipe combination, deployment pattern, and chain integration live in `riir-ai` Plan 322. The forensic value depends on deployment secrecy, so algorithm details (recipe pipeline, mark channels, recovery procedure) are intentionally not enumerated in this public README.
-
-Feature gate: `forensic_watermark` (**opt-in** — 31/31 unit tests green; G1–G4 GOAT gate deferred). 📖 Plan: [`.plans/293_forensic_watermark_recipe_primitive.md`](.plans/293_forensic_watermark_recipe_primitive.md), Research: [`.research/268_Forensic_Asset_Fingerprinting_LatCal_Recipe.md`](.research/268_Forensic_Asset_Fingerprinting_LatCal_Recipe.md), Paper: [arxiv 2606.18208](https://arxiv.org/abs/2606.18208).
+The forensic watermark recipe primitive (Plan 293, arxiv 2606.18208) was relocated from katgpt-rs to `riir-ai/crates/riir-chain/src/forensic/` behind the `chain_forensic` feature. Rationale: honeypot OPSEC — the recipe combination (Tardos + DCT + topology + vertex marks + least-squares recovery) is the implementation choice that determines collusion resistance, and forensic value depends on deployment secrecy. Per strategy verdict 003: "How = private." An open trait surface may return here later if a generic adoption hook is needed; the recipe impl stays private.
 
 ## 🔧 KV Compression
 
@@ -1155,7 +1153,7 @@ Default: **Hybrid OCT+PQ** (OCTOPUS triplet encoding + PlanarQuant 2D Givens rot
 | **BoMSampler** (`bom_sampling`) | K-hypothesis single-pass belief sampling (Plan 281, arxiv 2604.04913). `BoMSampler` extends `MicroRecurrentBeliefState`. | **DEFAULT-ON** in `katgpt-core` (G2 PASS +31.49pp). Opt-in at katgpt-rs root. Auto-enables `simd_sigmoid`. |
 | **CompressionDrafter** (`compression_drafter`) | LZ4 corpus-as-model drafter (Plan 285, nathan.rs/gzip-lm) | 🪦 GOAT FAILED (2 runs) — stays opt-in, unused. `TernaryDraftModel` remains Hot-tier default. |
 | **FuncAttn** (`funcattn`) | Functional Attention — closed-form Tikhonov k×k spectral transport (Plan 286, arxiv 2605.31559) | 🪦 G6 FAIL on LM prediction (0.969 < SDPA 1.000). Stays opt-in, NOT default. Gain-tier. |
-| **Forensic Watermark** (`forensic_watermark`) | BLAKE3-seeded per-recipient asset fingerprint (Plan 293, arxiv 2606.18208) — recipe + deployment private in `riir-ai` | Opt-in — 31/31 unit tests; G1–G4 GOAT gate deferred. |
+| **Forensic Watermark** | Moved to `riir-ai` (Plan 322) — recipe implementation relocated to preserve honeypot value per strategy verdict 003 | — |
 | **ICT Branching Detector** (`ict_branching`) | `collision_purity β(π)` + JS-divergence novelty + `BranchingDetector` (Plan 294, arxiv 2606.19771) | Opt-in — G1/G3/G4/G5/G6/G10 PASS (Super-GOAT proceeds); G8 (runtime fusion) deferred to riir-ai Plan 324. |
 
 📖 **Full detail for ALL opt-in features + complete feature flag reference:** [`.docs/21_opt_in_features.md`](.docs/21_opt_in_features.md) and [`Cargo.toml`](Cargo.toml).

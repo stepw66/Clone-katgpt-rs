@@ -387,25 +387,6 @@ pub use data_probe::{
     stable_rank_update_into_flat,
 };
 
-// Forensic Watermark Recipe Primitive — open generic math (Plan 293, Research 268).
-// Per-recipient BLAKE3-derived perturbation recipes (LoopWM-stable P_vertex +
-// Tardos anti-collusion codebook + mid-frequency DCT marks + degenerate
-// triangle topology marks). Recipient = &[u8;32]; no game semantics, no
-// chain, no NFT, no WASM vessel — those are riir-ai Plan 322.
-// Opt-in until G1–G4 GOAT gate passes (T7.2–T7.5, separate session).
-#[cfg(feature = "forensic_watermark")]
-pub mod forensic;
-#[cfg(feature = "forensic_watermark")]
-pub use forensic::{
-    Dct8x8Block, InMemoryRegistry, LeakedContent, Recipe, RecipeConfig, RecoveryEvidence,
-    RecoveryResult, RecipientRegistry, TardosCodebook, TextureMarkable, TriangleMesh,
-    VertexMarkable, apply_dct_marks, apply_topology_marks, apply_vertex_marks,
-    apply_vertex_marks_simd, attribute, construct_perturbation_matrix, count_surviving_marks,
-    dct8x8_forward, dct8x8_inverse, derive_recipe, derive_seed, extract_codeword_from_seed,
-    recipient_index, recover_codeword, recover_dct_marks, recover_p_vertex,
-    recover_topology_marks, sigmoid,
-};
-
 // ICT Distributional Branching-Point Detector — open generic math (Plan 294,
 // Research 270, arxiv 2606.19771). Collision purity β(π) = Σ π² (proven
 // unconditionally monotone, ICT §A.2.5 — H₁ is wrong below π > e⁻¹ ≈ 0.37),
