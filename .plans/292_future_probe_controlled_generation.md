@@ -5,7 +5,7 @@
 **Source paper:** [openreview 48NnVTsirb](https://openreview.net/forum?id=48NnVTsirb) — Kortukov et al., NeurIPS 2026 / Mech Interp Workshop at ICML 2026
 **Reference impl:** <https://github.com/kortukov/future_probes>
 **Target:** `katgpt-rs/src/pruners/future_probe.rs` (new module) + `katgpt-rs/src/pruners/feature_class.rs` (vocabulary tag) + Cargo features `future_probe`, `fpcg_selector`
-**Status:** Active — Phase 1 <not started>
+**Status:** Active — Phase 1 ✓ / Phase 2 ✓ / Phase 3 ✓ / Phase 4 <next>
 
 ---
 
@@ -36,7 +36,7 @@ The smallest, highest-value output of this plan. The detection-vs-prediction dis
 
 ### Tasks
 
-- [ ] **T1.1** Create `src/pruners/feature_class.rs` with `FeatureClass` enum:
+- [x] **T1.1** Create `src/pruners/feature_class.rs` with `FeatureClass` enum:
 
   ```rust
   /// Tags how a primitive reads model activations.
@@ -61,11 +61,11 @@ The smallest, highest-value output of this plan. The detection-vs-prediction dis
   }
   ```
 
-- [ ] **T1.2** Add `fn feature_class(&self) -> FeatureClass` to `ScreeningPruner` trait with default `FeatureClass::Detection` (non-breaking). All existing pruners inherit Detection by default — no migration.
-- [ ] **T1.3** Add `FeatureClass::Detection` annotation to `EmotionDirections`, CNA's pruner, `FaithfulnessProbe`, `RegimeTransition`. (Document-only — they already default to Detection; this makes it explicit.)
-- [ ] **T1.4** Add a doc cross-reference in `crates/katgpt-core/src/traits.rs` pointing to Research 267 for the rationale.
-- [ ] **T1.5** Unit test: assert `EmotionDirections::feature_class() == Detection`. Assert that a new `FutureBehaviorProbe` (Phase 2) returns `Prediction`. Assert the default impl returns `Detection`.
-- [ ] **T1.6** Add `feature_class` field to `ReviewMetrics` for telemetry (count of detection-side vs prediction-side reads per session).
+- [x] **T1.2** Add `fn feature_class(&self) -> FeatureClass` to `ScreeningPruner` trait with default `FeatureClass::Detection` (non-breaking). All existing pruners inherit Detection by default — no migration.
+- [x] **T1.3** Add `FeatureClass::Detection` annotation to `EmotionDirections`, CNA's pruner, `FaithfulnessProbe`, `RegimeTransition`. (Document-only — they already default to Detection; this makes it explicit.)
+- [x] **T1.4** Add a doc cross-reference in `crates/katgpt-core/src/traits.rs` pointing to Research 267 for the rationale.
+- [x] **T1.5** Unit test: assert `EmotionDirections::feature_class() == Detection`. Assert that a new `FutureBehaviorProbe` (Phase 2) returns `Prediction`. Assert the default impl returns `Detection`.
+- [x] **T1.6** Add `feature_class` field to `ReviewMetrics` for telemetry (count of detection-side vs prediction-side reads per session).
 
 **Phase 1 ships independently.** Even if Phase 2–5 fail GOAT, the vocabulary tag is the durable architectural output. Mark Phase 1 complete when the trait compiles, all existing pruners still work, and the docstring is in place.
 
@@ -77,7 +77,7 @@ The forecast-side primitive. Single new file: `src/pruners/future_probe.rs`. Mir
 
 ### Tasks
 
-- [ ] **T2.1** Define types in `src/pruners/future_probe.rs`:
+- [x] **T2.1** Define types in `src/pruners/future_probe.rs`:
 
   ```rust
   /// Frozen direction vector for forecasting future behavior probability.
@@ -109,7 +109,7 @@ The forecast-side primitive. Single new file: `src/pruners/future_probe.rs`. Mir
   }
   ```
 
-- [ ] **T2.2** Implement `FutureBehaviorProbe`:
+- [x] **T2.2** Implement `FutureBehaviorProbe`:
 
   ```rust
   impl FutureBehaviorProbe {
@@ -129,17 +129,17 @@ The forecast-side primitive. Single new file: `src/pruners/future_probe.rs`. Mir
   }
   ```
 
-- [ ] **T2.3** Implement `ScreeningPruner` for `FutureBehaviorProbe`. `feature_class()` returns `Prediction`. `relevance()` returns the forecast probability (so it composes with the rest of the screening stack).
-- [ ] **T2.4** Add loader: `FutureBehaviorProbe::load_from_safetensors(path)` and `load_from_bytes(&[u8])`. Both compute BLAKE3 on load and refuse to serve if hash mismatches a manifest entry.
-- [ ] **T2.5** Add feature flag `future_probe` in root `Cargo.toml`. No default-on — opt-in until Phase 4 GOAT gate passes.
-- [ ] **T2.6** Unit tests:
+- [x] **T2.3** Implement `ScreeningPruner` for `FutureBehaviorProbe`. `feature_class()` returns `Prediction`. `relevance()` returns the forecast probability (so it composes with the rest of the screening stack).
+- [x] **T2.4** Add loader: `FutureBehaviorProbe::load_from_safetensors(path)` and `load_from_bytes(&[u8])`. Both compute BLAKE3 on load and refuse to serve if hash mismatches a manifest entry.
+- [x] **T2.5** Add feature flag `future_probe` in root `Cargo.toml`. No default-on — opt-in until Phase 4 GOAT gate passes.
+- [x] **T2.6** Unit tests:
   - zero direction → forecast = σ(bias) (deterministic)
   - orthogonal direction → forecast = σ(bias) (no signal)
   - aligned direction → forecast → 1.0
   - anti-aligned direction → forecast → 0.0
   - BLAKE3 hash stable across runs
   - swap is atomic (concurrent readers never see torn state)
-- [ ] **T2.7** Example `examples/future_probe_01_basic.rs`: load a synthetic probe (random direction), forecast on a synthetic activation, print the probability. Mirrors `examples/emotion_vector_demo.rs`.
+- [x] **T2.7** Example `examples/future_probe_01_basic.rs`: load a synthetic probe (random direction), forecast on a synthetic activation, print the probability. Mirrors `examples/emotion_vector_demo.rs`.
 
 ---
 
@@ -149,7 +149,7 @@ The candidate-sampler + score + select loop. Mirrors the CGSP Conjecturer→Guid
 
 ### Tasks
 
-- [ ] **T3.1** Define `SentenceCandidateSelector` trait (in `src/pruners/future_probe.rs` or a new `src/pruners/fpcg_selector.rs`):
+- [x] **T3.1** Define `SentenceCandidateSelector` trait (in `src/pruners/future_probe.rs` or a new `src/pruners/fpcg_selector.rs`):
 
   ```rust
   /// Generates M candidate next-utterance-spans for FPCG.
@@ -182,21 +182,21 @@ The candidate-sampler + score + select loop. Mirrors the CGSP Conjecturer→Guid
   pub enum SteeringDirection { Positive = 0, Negative = 1 }
   ```
 
-- [ ] **T3.2** Implement `FpcgSelector::step(prefix) -> String`:
+- [x] **T3.2** Implement `FpcgSelector::step(prefix) -> String`:
   1. Generate `num_candidates` next-sentence spans.
   2. For each: run forward pass up to `probe.layer`, extract activation at sentence-end position, call `probe.forecast()`.
   3. Return argmax (Positive) or argmin (Negative) candidate.
   - **Zero-alloc hot path**: pre-allocate `Vec::with_capacity(num_candidates)` once, `clear()` + reuse across steps.
-- [ ] **T3.3** Implement `FpcgSelector::run(prompt, max_sentences) -> String`: top-level loop calling `step` until EOS or `max_sentences` reached.
-- [ ] **T3.4** Add feature flag `fpcg_selector` depending on `future_probe`. Opt-in.
-- [ ] **T3.5** Provide a default `TemperatureCandidateGenerator` impl that wraps the existing model forward pass at temperature T=1.0 (matches paper setup). Other generators (nucleus, beam) can be added later.
-- [ ] **T3.6** Unit tests on a stub model:
+- [x] **T3.3** Implement `FpcgSelector::run(prompt, max_sentences) -> String`: top-level loop calling `step` until EOS or `max_sentences` reached.
+- [x] **T3.4** Add feature flag `fpcg_selector` depending on `future_probe`. Opt-in.
+- [x] **T3.5** Provide a default `TemperatureCandidateGenerator` impl that wraps the existing model forward pass at temperature T=1.0 (matches paper setup). Other generators (nucleus, beam) can be added later.
+- [x] **T3.6** Unit tests on a stub model:
   - selector with `num_candidates=1` is equivalent to unsteered generation
   - selector with `direction=Positive` picks the highest-probability candidate
   - selector with `direction=Negative` picks the lowest-probability candidate
   - selector terminates at EOS
   - hot-path is zero-alloc across 1000 steps (assert via `Vec::capacity` stable)
-- [ ] **T3.7** Example `examples/fpcg_01_basic.rs`: stub model producing synthetic candidates, selector picks based on a synthetic probe, prints the resulting trajectory.
+- [x] **T3.7** Example `examples/fpcg_01_basic.rs`: stub model producing synthetic candidates, selector picks based on a synthetic probe, prints the resulting trajectory.
 
 ---
 
