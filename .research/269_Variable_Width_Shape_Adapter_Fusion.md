@@ -1,26 +1,28 @@
-# Research 269: Variable-Width `> <former` × On-the-Fly LoRA × Hydra Layer-Skip — Shape-Adaptive Adapter Fusion
+# Research 269: Variable-Width `> <former` → Stage-Gated HLA Subspace Activation (Latent-Functor-LatCal Fusion)
 
 > **Source:** Wu, Sieberling, Tan, Panda, Polyanskiy, Kim. *Variable-Width Transformers* (`> <former`). [arXiv:2606.18246](https://arxiv.org/abs/2606.18246). MIT / MIT-IBM Watson AI Lab. 16 Jun 2026.
-> **Date:** 2026-06-19
+> **Date:** 2026-06-19 (rev 2 — latent-functor-LatCal reframing after skill refinement)
 > **Status:** Active — **fusion idea, novelty TBD (needs Q1–Q4 check before verdict)**. See [`.issues/034_shape_adapter_novelty_gate.md`](../.issues/034_shape_adapter_novelty_gate.md).
-> **Related Research:** 148 (Hydra Effect → Hydra Budget), 231 (OPD per-module energy profile), 247 (Dense Latent cross-model adapters, training→riir-train pattern), 258 (Sink-Aware / compression valleys), 266 (DenseMesh adaptive width).
-> **Related Plans:** 165 (Hydra Budget — layer skip via pre-computed profiles), 260 (Dynamic Pair LoRA routing), 279 (Manifold Power Iter MoE Router — snapshot-swap hook).
-> **Cross-ref (riir-ai):** snapshot.rs `SnapshotMeta`, episode_buffer.rs `LoRAHotSwap`/`LoRAWeightVersion`, riir-gpu `AdapterShape`.
+> **Related Research:** 123 (Latent Functor Runtime Guide — Super-GOAT), 010 (KG × HLA × Role Transport), 148 (Hydra Effect → Hydra Budget), 231 (OPD per-module energy profile), 247 (Dense Latent cross-model adapters, training→riir-train pattern), 258 (Sink-Aware / compression valleys), 266 (DenseMesh adaptive width), 212 (Gemini Fourier × LatCal fusion — the canonical LatCal Super-GOAT precedent).
+> **Related Plans:** 165 (Hydra Budget — layer skip via pre-computed profiles), 258 (LatCal Fixed-Point Shell Bridge), 265 (LatCal Fixed-Point Fourier Coefficients), 276 (MicroRecurrentBeliefState — HLA kernel snapshot).
+> **Cross-ref (riir-ai):** `latent_functor/zone_gating.rs::NpcFunctorRuntime`, `hla/types.rs::MultiLayerHlaCache` (gamma decay = carry-forward), `hla/kernel.rs::evolve_hla`, `riir-chain/src/encoding/latcal*.rs`.
 > **Classification:** Public (katgpt-rs engine note). The training recipe itself → `riir-train`.
 
 ---
 
 ## TL;DR
 
-The paper proposes a `×`-shaped transformer (wide early/late, narrow middle) with a parameter-free **carry-forward residual** that lets inactive dimensions bypass narrowed layers. At parameter parity this gives ~3% perplexity win, ~22% FLOP reduction, ~15% KV reduction, and (in analysis) it **mitigates mid-layer representation collapse** — the same "compression valley" phenomenon our Sink-Aware work (R258) and Hydra Budget (R148) already target.
+The paper proposes a `×`-shaped transformer (wide early/late, narrow middle) with a parameter-free **carry-forward residual** that lets inactive dimensions bypass narrowed layers. At parameter parity: ~3% perplexity win, ~22% FLOP reduction, ~15% KV reduction. In analysis it **mitigates mid-layer representation collapse**.
 
-**Two honest calls in this note:**
+**Two framings, ranked by tier:**
 
-1. **Architecture recipe → `riir-train`.** Pre-training a `> <former` from scratch is pure training research. The recipe (geometric width schedule, `ℓ*=0.75L`, `d_ℓ*=0.3d`, carry-forward expansion) belongs in the training vault, not here. One-line redirect; no files created in katgpt-rs for the architecture itself.
+1. **PRIMARY (Super-GOAT-tier) — Stage-Gated HLA Subspace Activation.** The ×-shape insight reframes as a latent-to-latent operation: at each decision stage (combat / dialog / economic / social), only a *subspace* of the NPC's HLA latent state needs to be active. `latent_functor/zone_gating.rs::NpcFunctorRuntime` already gates by **zone density** (spatial axis). The ×-shape adds a SECOND gating axis: **decision-stage subspace selection within HLA's 8-dim state** (valence/arousal/desperation/calm/fear + 3). Dormant subspaces **carry forward** via HLA's `gamma` decay leaky integrator — exactly the paper's carry-forward mechanism. This is modelless, latent-to-latent, batchable across thousands of NPCs at 20Hz, and the per-stage subspace profile is **LatCal-committable** for deterministic replay/anti-cheat.
 
-2. **Fusion idea, novelty TBD.** With **on-the-fly LoRA** (`LoRAHotSwap`, `dispatch_lora_merge`, `SenseHotSwap`) and a **live `riir-train`**, the paper's *insight* (variable width is a structural regularizer that prevents collapse and concentrates useful compute in early/late layers) becomes a **shape-adaptive adapter** primitive rather than a new base model. This is the distillation worth tracking. It is **not** a committed Super-GOAT — Q1 (no prior art) has not been verified against the adapter-composition literature, so per the research skill this is filed as "novelty TBD" with an issue for the gate.
+2. **SECONDARY (GOAT-tier fallback) — Shape-Adaptive Adapter Routing.** With on-the-fly LoRA + riir-train, train adapters with per-layer shape objectives and hot-swap by shape. Documented in rev 1 of this note; demoted to fallback after skill refinement mandated the latent reframing first.
 
-**Distilled for katgpt-rs (modelless, inference-time):** the per-layer "effective width profile" of an adapter — which layers it concentrates capacity in vs suppresses — is a new routing/skip dimension that combines three shipped primitives (Hydra layer-skip, OPD per-module profile, on-the-fly hot-swap) into a runtime-selectable architecture shape.
+**Architecture recipe → `riir-train`.** Pre-training a `> <former` from scratch is pure training research. One-line redirect; no katgpt-rs files for the architecture itself.
+
+**Distilled for katgpt-rs (modelless, inference-time):** the per-stage HLA subspace activation profile is a new latent-functor gating axis (orthogonal to zone density) that makes NPC cognition **variable-width per decision context** — combat NPCs run a narrow survival subspace, dialog NPCs run a narrow social subspace, dormant subspaces persist via gamma decay rather than recomputing. LatCal commits the per-stage profile for replay determinism.
 
 ---
 
@@ -53,69 +55,72 @@ The paper proposes a `×`-shaped transformer (wide early/late, narrow middle) wi
 
 **The gap:** every shipped cousin is either (a) per-module-type (OPD: FFN vs Attn), (b) per-adapter-static (`AdapterShape`: fixed rank per adapter), or (c) per-layer-intrinsic (Hydra: skip based on the *base model's* profile). **Nothing characterizes an adapter by its per-LAYER shape profile** — which layers it concentrates capacity in vs suppresses. That is the dimension `> <former` operates on, and it's orthogonal to all three shipped axes.
 
-### 2.2 The fusion (novelty TBD)
+### 2.2 The PRIMARY fusion (Super-GOAT-tier) — Stage-Gated HLA Subspace Activation
 
-**Shape-Adaptive Adapter Routing**: `> <former × Hydra Budget × On-the-Fly LoRA × OPD`
+**`> <former × latent_functor/zone_gating × hla/types.rs (gamma decay) × LatCal commitment`**
+
+The paper's variable-width insight reframes as a **latent-to-latent subspace gating** operation on HLA state. Reading the actual shipped code:
+
+- `NpcFunctorRuntime` (`latent_functor/zone_gating.rs:220`) already has stage-gated activation — but gated by **zone density** (`ZoneGatingTier { min_density, tau, beta, reest_budget }`). `on_zone_transition()` resolves the active tier and pushes to the scheduler. This is the **spatial gating axis**.
+- `MultiLayerHlaCache` (`hla/types.rs:136`) carries `gamma: f32` — the **leaky integrator decay**. Dormant HLA subspaces decay via `gamma` but do NOT zero out. This is exactly the paper's **carry-forward** mechanism: inactive dimensions bypass the layer and are restored from their last active value.
+- `ThirdOrderMoment` (`hla/types.rs:211`) captures "relations between relations" in compressed form — this is the **wide early/late, narrow middle** analog: high-order moments are the "wide" subspace where dense relational computation happens; first-order scalars are the "narrow" projection.
+
+**The fusion:** add a **decision-stage gating axis** to `NpcFunctorRuntime`, orthogonal to the existing zone-density axis. The ×-shape profile becomes a **per-stage HLA subspace activation schedule**:
 
 ```
-riir-train:  Train adapter pool with explicit shape objectives
-             (e.g. "combat" adapter: ×-shape, narrow middle, fast;
-              "dialog" adapter: inverted-× or uniform, wide middle, deep)
-             → each adapter ships a per-layer-width profile alongside its weights
-             → profile committed in SnapshotMeta (BLAKE3-hashed extension)
-
-katgpt-rs:   ShapeAdaptiveRouter (new modelless primitive)
-             input complexity signal (Collapse-Aware entropy, EGA spectral salience)
-               ↓
-             pick adapter by shape×complexity match
-               ↓
-             Hydra Budget reads the adapter's per-layer profile
-               ↓
-             skip suppressed layers; carry-forward residual preserves info
-               ↓
-             Sparse MLP skips dead dims within active layers
-             → one frozen base + N shape-profiled adapters = N runtime architectures
-
-riir-ai:     LoRAHotSwap atomic swap between shape profiles per NPC / context
-             NPC in 20Hz combat tick: narrow-middle adapter (Hydra skips layers 8–24)
-             NPC in dialog: wide-middle adapter (full depth)
-             Freeze/thaw persists shape profile in NeuronShard Cold tier
+Combat stage:   active = {desperation, fear, arousal}            (survival subspace, narrow)
+Dialog stage:   active = {valence, calm, +social dims}            (social subspace, narrow)
+Economic stage: active = {greed-axis, +economic dims}             (economic subspace, narrow)
+Idle/explore:   active = all 8 dims                               (wide — full curiosity)
 ```
 
-**Why this isn't just "Hydra Budget with a new signal":** Hydra's `modelless: bool` loads a profile *of the base model*. The fusion loads a profile *of the adapter* — meaning the skip plan **changes on hot-swap**, not just on model load. That's a runtime capability Hydra doesn't have today.
+Dormant subspaces **carry forward** via `gamma` decay (no recomputation — the paper's parameter-free bypass). On stage transition, the newly-active subspace reads its last-decayed value as a warm start (the paper's expansion = copy-from-prior-layer).
 
-**Why this isn't just "OPD per-module profile":** OPD characterizes FFN-vs-Attn energy *within* a layer. The fusion characterizes layer-5-vs-layer-20 energy *across* layers. Orthogonal axes; both can compose.
+**Why this is Super-GOAT-tier, not GOAT-tier:**
+- It's **latent-to-latent** (operates on HLA state, never decodes to tokens or raw scalars except at the sync boundary).
+- It's **modelless** (no training — the subspace profile is a runtime schedule, learned via curiosity signal or authored).
+- It's **batchable at MMORPG scale** (1000s of NPCs × 20Hz — each NPC has its own stage + subspace profile).
+- It connects to **LatCal** (the per-stage profile is a deterministic schedule that MUST be committed for replay/anti-cheat determinism — LatCal fixed-point bridge commits it as raw scalars).
+- It connects to **freeze/thaw** (the subspace profile per NPC personality is snapshot-versioned — different NPC personalities have different ×-shapes).
+- It connects to **cgsp_runtime** (curiosity signal drives WHICH subspace to activate — high curiosity on economic axis → economic subspace widens).
 
-### 2.3 Honest uncertainty on the mechanism
+**The LatCal bridge (sync boundary):** the per-stage subspace activation is a latent-space operation (which HLA dims are active), but the **decision** of which stage the NPC is in crosses the sync boundary as a raw scalar (stage_id, confidence). LatCal commits this as a fixed-point value so deterministic replay reconstructs the exact subspace schedule. The HLA scalar projections (valence/arousal/desperation/calm/fear) cross the wire as raw scalars per AGENTS.md; the full 8-dim vector stays local. This respects the raw-vs-latent boundary exactly.
 
-The paper achieves variable width **structurally** — narrowed layers literally lack weights for the bypassed dimensions. The fusion cannot do this on a frozen uniform base. Instead it would achieve **emergent narrowing** via three composed mechanisms:
+### 2.3 The SECONDARY fusion (GOAT-tier fallback) — Shape-Adaptive Adapter Routing
 
-1. Adapter learns to **suppress** its own contribution to certain middle-layer output dims (low-rank update that cancels the base).
-2. Hydra Budget detects the suppressed layers (effective_rank / participation_ratio drop on a calibration set) and **skips them entirely**.
-3. Residual stream **carries the information forward** (the paper's carry-forward insight — already structurally true in any residual transformer).
+Documented in rev 1. With on-the-fly LoRA + riir-train, train adapters with per-layer shape objectives and hot-swap by shape. This is a legitimate GOAT-tier framing but **not the primary** — it operates on adapter weights (modelless but weight-aware), not on HLA latent state (modelless and fully latent). Per the refined skill, adapter routing is a fallback framing when the latent reframing is unavailable. The latent reframing IS available here, so the adapter framing is secondary.
 
-The open question is whether (1) is achievable with low-rank LoRA without hurting quality. This is a **riir-train** research question, not a modelless one. The modelless primitive (ShapeAdaptiveRouter + adapter-profile-driven Hydra) is well-defined regardless of how the profile is produced.
+### 2.4 Honest uncertainty on the mechanism (primary fusion)
+
+The primary fusion is well-defined modellessly: the subspace gating is a runtime schedule on HLA state, no training needed. The open questions are:
+
+1. **Profile authoring vs learning.** Where does the per-stage subspace profile come from? Three options: (a) authored by game designer (deterministic, simple), (b) learned via cgsp_runtime curiosity signal (emergent, the Super-GOAT angle), (c) calibrated from HLA participation_ratio per stage (the paper's analysis methodology applied to HLA). Option (b) is the strongest selling point but needs validation.
+2. **Stage detection.** How does the runtime know which stage the NPC is in? Via the existing `on_zone_transition()` hook (spatial) + a new `on_decision_context()` hook (behavioral — combat action initiated, dialog opened, trade started). The behavioral hook is new plumbing in riir-games.
+3. **LatCal commitment granularity.** Per-stage profile per NPC per tick is a lot of state. Likely commit only on stage transitions (not per-tick), matching the existing `on_zone_transition` cadence.
+
+These are engineering questions, not research-blockers. The modelless primitive (stage-gated HLA subspace selection with gamma-decay carry-forward) is well-defined regardless of how the profile is produced.
 
 ## 3. Verdict
 
-**Fusion idea — novelty TBD, needs Q1–Q4 check before verdict.** Not a committed Super-GOAT.
+**Fusion idea — novelty TBD, needs Q1–Q4 check before verdict.** Not a committed Super-GOAT. The PRIMARY fusion (stage-gated HLA subspace activation) is Super-GOAT-tier in framing; the SECONDARY (adapter routing) is GOAT-tier.
 
-| Gate | Status | Evidence |
+| Gate | Status (PRIMARY fusion) | Evidence |
 |---|---|---|
-| Q1 No prior art | ❓ **UNCERTAIN — must check literature** | Per-layer adapter shape profile is a new dimension in *our* codebase (confirmed via vocabulary-translated grep across both repos, both layers). But "shape-adapted adapters" / "layer-skipping adapters" exist in the broader adapter-composition literature — needs a proper arxiv survey before claiming novelty. See [Issue 034](../.issues/034_shape_adapter_novelty_gate.md). |
-| Q2 New class of behavior | ✅ Likely yes | Runtime-selectable architecture *shape* (not just content) via adapter swap. No shipped primitive does this. |
-| Q3 Product selling point | ✅ Likely yes | "One frozen base + N shape-profiled adapters = N runtime architectures. Combat NPCs run narrow-fast; dialog NPCs run wide-deep; all from one model." |
-| Q4 Force multiplier | ✅ Yes | Connects OPD (R231), Hydra Budget (R148/P165), on-the-fly LoRA (riir-ai hot-swap), Sink-Aware (R258), Sparse MLP (P022), DenseMesh adaptive_width (R234/P266), Manifold Power Iter Router (R246/P279). ≥6 pillars. |
+| Q1 No prior art | ❓ **UNCERTAIN — must check literature** | Stage-gated subspace activation on per-NPC latent state is a new combination in *our* codebase (zone_gating is spatial-only; HLA gamma is per-layer decay, not per-stage subspace selection). But "stage-gated affective subspaces" / "context-gated latent subspace routing" exist in the affective computing + agent architecture literature — needs arxiv survey. See [Issue 034](../.issues/034_shape_adapter_novelty_gate.md) (revised to cover BOTH framings). |
+| Q2 New class of behavior | ✅ Likely yes | Per-decision-stage latent subspace routing for thousands of NPCs. No shipped primitive gates HLA by decision context (only by zone density). |
+| Q3 Product selling point | ✅ Likely yes | "NPCs don't waste compute updating emotional subspaces during combat, or spatial subspaces during dialog — stage-gated latent width, 1000s of NPCs at 20Hz, LatCal-committed for replay determinism." |
+| Q4 Force multiplier | ✅ Yes | Connects HLA (`hla/types.rs`), latent_functor (`zone_gating.rs`), cgsp_runtime (curiosity-driven profile), LatCal (commitment bridge), freeze/thaw (per-personality profile snapshot). 5 pillars. |
 
-**Per the research skill:** because Q1 is not committed YES, this is filed as "novelty TBD" with an issue — NOT as "Super-GOAT candidate." If Issue 034 closes with Q1=YES (no prior art in literature), this note upgrades to Super-GOAT and the mandatory outputs (open primitive in katgpt-rs + private riir-ai guide + plans) become due in that follow-up session.
+**Per the research skill:** because Q1 is not committed YES, this is filed as "novelty TBD" with an issue — NOT as "Super-GOAT candidate." If Issue 034 closes with Q1=YES on the PRIMARY fusion, this note upgrades to Super-GOAT and the mandatory outputs (open primitive in katgpt-rs + private riir-ai guide + plans) become due in that follow-up session.
 
 **The pure architecture recipe → `riir-train`.** One-line redirect; no katgpt-rs files created for the `×`-shape training method itself.
 
 ### Tier reasoning
 
-- **Not Pass:** the fusion idea is legitimate and the prior-art surface leaves a real gap (per-layer adapter shape profile). Dismissing it as "already covered by Hydra Budget" was wrong — Hydra profiles the *base model*, not the *adapter*.
-- **Not Super-GOAT (yet):** Q1 literature check is genuinely open. Adapter shape adaptation is an active research area; claiming novelty without the survey would repeat the `evolve_hla` overclaim failure mode.
-- **Not GOAT/Gain:** those tiers require a committed primitive + benchmark. The primitive is well-defined but its value depends on the training side (riir-train) actually producing shape-profiled adapters that don't hurt quality — which is itself TBD.
+- **Not Pass:** the PRIMARY fusion (stage-gated HLA subspace activation) is a legitimate latent-to-latent Super-GOAT-tier framing. The gap in shipped prior art is real: `zone_gating` is spatial-only, HLA `gamma` is per-layer not per-stage-subspace.
+- **Not Super-GOAT (yet):** Q1 literature check on "stage-gated affective subspaces" / "context-gated latent routing" is genuinely open. Affective computing has prior art on context-gated emotion models; claiming novelty without the survey would repeat the `evolve_hla` overclaim.
+- **Not GOAT/Gain:** those tiers require a committed primitive + benchmark. The primitive is well-defined but its value depends on validating that stage-gated subspace narrowing actually saves compute at iso-quality on HLA state — which is the G2 gate.
+- **Secondary fusion (adapter routing) is GOAT-tier at best** — it's a weight-aware modelless framing, weaker than the latent-to-latent primary.
 
 ## 4. What would change the verdict
 
@@ -138,4 +143,4 @@ The open question is whether (1) is achievable with low-rank LoRA without hurtin
 
 ## TL;DR
 
-The architecture is training research (→ `riir-train`). The analysis methodology is `effective_rank`-equivalent math we already ship. BUT the user's pushback was correct: with on-the-fly LoRA and a live riir-train, the paper's *insight* (per-layer width profile is a structural regularizer; carry-forward preserves bypassed info) becomes a **shape-adaptive adapter** fusion that combines Hydra layer-skip + OPD per-module profile + hot-swap into runtime-selectable architecture shape. The gap in our shipped prior art is real: nothing characterizes an adapter by its **per-layer** shape profile (OPD is per-module-type, `AdapterShape` is static per-adapter, Hydra profiles the base model not the adapter). Verdict is **fusion — novelty TBD** because Q1 (no prior art) needs a literature check before committing Super-GOAT. Filed Issue 034 for the gate; no guide or plans created until Q1 resolves YES.
+The architecture is training research (→ `riir-train`). The analysis methodology is `effective_rank`-equivalent math we already ship. The PRIMARY fusion (Super-GOAT-tier, after skill refinement forced the latent reframing): **stage-gated HLA subspace activation** — `> <former`'s variable width = which HLA subspace is active at which decision stage; carry-forward = dormant subspace persistence via HLA `gamma` leaky integrator; ×-shape profile = LatCal-committed per-stage schedule for replay determinism. The SECONDARY fusion (GOAT-tier, rev 1's primary): shape-adaptive adapter routing via on-the-fly LoRA. Verdict is **fusion — novelty TBD** because Q1 needs a literature check on "stage-gated affective subspaces" / "context-gated latent routing" before committing Super-GOAT. Filed Issue 034 for the gate; no guide or plans created until Q1 resolves YES. The skill refinement (added five Super-GOAT factory modules including LatCal, mandatory latent-space reframing step, R269 as documented failure case) is what surfaced the primary framing — without it, this note would have stayed at the weaker adapter-routing verdict.

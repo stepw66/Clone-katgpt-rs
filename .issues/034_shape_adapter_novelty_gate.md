@@ -17,7 +17,19 @@ The honest call in R269 was "fusion — novelty TBD" rather than "Super-GOAT can
 
 ## The four sub-questions to resolve
 
-### Q1.a — Is "per-layer adapter shape profile" novel in the adapter-composition literature?
+### Q1.a — Is "stage-gated HLA subspace activation" novel? (PRIMARY fusion, latent-to-latent)
+
+Survey arxiv for (use the keyword search URL from AGENTS.md):
+- `stage-gated affective subspace`
+- `context-gated latent subspace routing`
+- `decision-context emotion model gating`
+- `variable-width latent state agent`
+- `subspace selection recurrent belief`
+- `carry-forward dormant latent dimension`
+
+**Pass criterion:** no paper proposes (per-decision-stage latent subspace selection on a recurrent belief state) × (carry-forward persistence via leaky integrator) × (deterministic commitment for replay). This is the PRIMARY fusion — if it's novel, R269 promotes to Super-GOAT.
+
+### Q1.a' — Is "per-layer adapter shape profile" novel? (SECONDARY fusion, adapter-routing)
 
 Survey arxiv for (use the keyword search URL from AGENTS.md):
 - `layer-wise adapter capacity allocation`
@@ -50,9 +62,9 @@ R269 proposes extending `riir-ai/crates/riir-engine/src/snapshot.rs::SnapshotMet
 
 | Outcome | Action on R269 |
 |---|---|
-| Q1.a = no prior art AND Q1.b = mechanism feasible AND Q1.c = novel AND Q1.d = compatible | **Promote R269 to Super-GOAT.** Mandatory outputs due in the follow-up session: (1) open `ShapeAdaptiveRouter` primitive in `katgpt-rs/src/inference_router/`; (2) private `riir-ai/.research/NNN_shape_adaptive_adapter_guide.md` with validation protocol G1–Gn; (3) plans in katgpt-rs (modelless router) + riir-ai (hot-swap wiring) + riir-train (shape-objective training recipe). |
-| Q1.a has partial prior art (2-of-3 exist) | **Downgrade R269 to GOAT.** Plan + implement behind `shape_adaptive_router` feature flag. Benchmark vs vanilla adapter routing (Dynamic Pair, Polytope). Promote if ≥5% latency win at iso-quality. |
-| Q1.a has full prior art (all 3 exist together) OR Q1.b infeasible | **Downgrade R269 to Gain.** Plan-only, feature-flagged, low priority. Close this issue. |
+| Q1.a (PRIMARY) = no prior art AND mechanism feasible | **Promote R269 to Super-GOAT on the PRIMARY fusion.** Mandatory outputs due in the follow-up session: (1) open `StageGatedHlaSubspace` primitive in `katgpt-rs/crates/katgpt-core/src/sense/` (extends `NpcFunctorRuntime` with decision-stage axis); (2) private `riir-ai/.research/NNN_stage_gated_hla_subspace_guide.md` with validation protocol G1–Gn; (3) plans: katgpt-rs (modelless subspace selector), riir-ai (wire `on_decision_context()` hook + LatCal commitment of per-stage profile), optional riir-train (if profile is learned not authored). |
+| Q1.a (PRIMARY) has prior art BUT Q1.a' (SECONDARY) is novel | **Downgrade PRIMARY to Gain, promote SECONDARY to GOAT.** Plan the adapter-routing fusion behind `shape_adaptive_router` feature flag. Benchmark vs vanilla adapter routing. |
+| Both have prior art | **Downgrade R269 to Gain.** Plan-only, feature-flagged, low priority. Close this issue. |
 
 ## Tasks
 
