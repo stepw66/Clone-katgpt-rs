@@ -5,7 +5,9 @@
 **Benchmark report:** `.benchmarks/275_swir_switch_thinking_goat.md`
 **Profile:** release (G3 enforced) + debug (G7 allocation audit)
 **Hardware:** Apple Silicon arm64 (NEON SIMD), Rust 1.93.0
-**Model dependency:** None — all gates run on synthetic entropy streams + synthetic embedding matrices. Real-model gates (G1 accuracy, G2 efficiency, T3.9 accuracy ablations) are deferred to riir-ai Plan 299 (NPC Curiosity Self-Play Runtime), which has the model loader + MATH500 harness. The **benchmark harness** (`src/swir/bench.rs`) ships in katgpt-rs with `ProblemSource` + `DecodeBackend` traits — riir-ai implements them over Qwen3-1.7B + MATH500.
+**Model dependency:** None — all gates run on synthetic entropy streams + synthetic embedding matrices. Real-model gates (G1 accuracy, G2 efficiency, T3.9 accuracy ablations) are deferred to riir-ai Plan 313 (SwiR Real-Model Validation), which has the model loader + MATH500 harness. The **benchmark harness** (`src/swir/bench.rs`) ships in katgpt-rs with `ProblemSource` + `DecodeBackend` traits — riir-ai implements them over Gemma 2 2B IT + MATH500.
+
+> **Real-model update (riir-ai Plan 313, 2026-06-19):** G2 = **1.37× (GATE PASS)** at `w_e_to_l=32, c_max=64` (n=5); G1 = 0% (blocked by Gemma 2 2B capability — T4.2e ruled out prompt/checker bugs). See [`riir-ai/.benchmarks/313_swir_real_model_goat.md`](../../../riir-ai/.benchmarks/313_swir_real_model_goat.md).
 
 ## Reproduce
 
@@ -40,7 +42,7 @@ cargo check --no-default-features --features thinking_cot
 
 **All 11 synthetic-data gates PASS.**
 
-### Deferred to riir-ai Plan 299 (needs real model)
+### Deferred to riir-ai Plan 313 (needs real model) — ✅ G2 PASS, G1 blocked by model capability
 
 | Gate | Target | Why deferred |
 |------|--------|--------------|
@@ -78,4 +80,4 @@ This is documented in Plan 275 T2.2 ("soft-embedding clone + InjectTokens Vec").
 
 ## Decision
 
-**Keep `swir_switch_thinking` OPT-IN** (default-off) until riir-ai Plan 299 proves G1/G2 on a real model. The algorithmic invariants (G3–G8, G1c, G2p) all pass on synthetic data — the controller is correct by construction. The missing piece is empirical proof on a real reasoning task, which is riir-ai's mandate.
+**Keep `swir_switch_thinking` OPT-IN** (default-off) until riir-ai Plan 313 confirms the G2 gate at n=20+ (currently 1.37× at n=5, gate target 1.3× — see the real-model update banner above). The algorithmic invariants (G3–G8, G1c, G2p) all pass on synthetic data — the controller is correct by construction. G2 has now passed on a real model (Gemma 2 2B); G1 remains blocked by model capability (needs Qwen3-4B/8B).

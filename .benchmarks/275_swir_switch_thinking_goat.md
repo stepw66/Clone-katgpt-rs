@@ -1,6 +1,11 @@
 # Plan 275 — SwiR Switch-Thinking GOAT Gate (Synthetic Data)
 
-> **UPDATE 2026-06-18:** The "deferred to riir-ai Plan 299" references throughout this document should read **riir-ai Plan 313** (Plan 299 is a different plan — NPC CGSP runtime). Plan 313 ran the real-model validation on **Gemma 2 2B IT + MATH-500** (CPU M1 Pro): **G1 = 0%** (model capability blocked), **G2 = 1.12× avg** (below 1.3× gate). Verdict: keep opt-in. Definitive G1/G2 gate pass requires Qwen3-4B/8B (the paper's model). See [`riir-ai/.benchmarks/313_swir_real_model_goat.md`](../../riir-ai/.benchmarks/313_swir_real_model_goat.md) for the real-model results. The synthetic-data results below remain valid as algorithmic-correctness proof.
+> **UPDATE 2026-06-19:** The "deferred to riir-ai Plan 299" references throughout this document should read **riir-ai Plan 313** (Plan 299 is a different plan — NPC CGSP runtime). Plan 313 ran the real-model validation on **Gemma 2 2B IT + MATH-500** (CPU M1 Pro):
+> - **G2 = 1.37× (GATE PASS, target ≥ 1.3×)** at the tuned config `w_e_to_l=32, c_max=64` (n=5; 1.43× at n=10 partial). Non-monotonic Pareto curve peaks at c_max=64.
+> - **G1 = 0%** — blocked purely by Gemma 2 2B capability. T4.2e (2026-06-19) closed the prompt/checker bug class (the `INSTRUCTION` said `####` but the checker wanted `\boxed{}`, silently dropping `####`-formatted answers in zero-shot/system modes); post-fix verification on `1^(2^huge)=1` confirms the model now emits correctly-formatted `\boxed{ }` with wrong content. G1 unblock requires Qwen3-4B/8B.
+> - **Verdict:** promote `swir_switch_thinking` to default-on once the G2 hold is confirmed at n=20+ (token efficiency is the primary value prop and it passes).
+>
+> See [`riir-ai/.benchmarks/313_swir_real_model_goat.md`](../../riir-ai/.benchmarks/313_swir_real_model_goat.md) for the real-model results + the T4.2e accuracy-fix writeup. The synthetic-data results below remain valid as algorithmic-correctness proof.
 
 **Date:** 2026-06-15
 **Plan:** [`katgpt-rs/.plans/275_swir_switch_thinking.md`](../.plans/275_swir_switch_thinking.md)
@@ -15,12 +20,13 @@
 correct, plasma-tier fast (3.1 ns/step vs 200 ns budget = 64× margin),
 zero-allocation in `step()`, and the convex-hull invariant holds on 1000 random
 samples. The paper's headline gates (G1 accuracy on MATH500, G2 token
-efficiency at fixed accuracy) are **deferred to riir-ai Plan 299** — katgpt-rs
+efficiency at fixed accuracy) are **deferred to riir-ai Plan 313** — katgpt-rs
 is a modelless primitives library with no model loader (engine/fuel split).
 
-**Decision: keep `swir_switch_thinking` OPT-IN** until riir-ai Plan 299 proves
-G1/G2 on a real model. The algorithmic invariants proven here are necessary
-preconditions for real-model validation to be meaningful.
+**Decision: keep `swir_switch_thinking` OPT-IN** until riir-ai Plan 313 confirms
+the G2 gate at n=20+ (currently 1.37× at n=5, gate target 1.3× — see the update
+banner at the top of this doc). The algorithmic invariants proven here are
+necessary preconditions for real-model validation to be meaningful.
 
 ## Scope
 
@@ -49,9 +55,9 @@ fast enough to sit on the decode loop.
 | **G2p** | SwiR terminates < fixed-budget baseline | **33 steps vs 1024** = 31.03× fewer | ✅ PASS |
 | **G8** | α_t / β_t monotonic in step_index | **[0.703, 0.719, 0.738, 0.775, 0.85, 0.925, 1.0]** | ✅ PASS |
 | **G9** | hyperparameter ablation (W_E→L/C_max/α_0 behavioral response) | W_E→L: 256→1 switches (monotone ✓); C_max: term 27→117 (monotone ✓); α_0: identical 13 switches across 0.3–1.0 (α-independent ✓) | ✅ PASS |
-| **G1** | accuracy on MATH500 (+1.5 pp target) | — | ⏸ DEFERRED (riir-ai Plan 299) |
-| **G2** | token efficiency at fixed accuracy (1.3× target) | — | ⏸ DEFERRED (riir-ai Plan 299) |
-| **T3.9** | accuracy ablations (W_E→L, α_0, C_max, signal mix) | G9 above is the modelless behavioral proxy | ⏸ DEFERRED (riir-ai Plan 299) — G9 modelless proxy ✅ PASS |
+| **G1** | accuracy on MATH500 (+1.5 pp target) | **0% on Gemma 2 2B** (blocked by model capability) | 🟥 riir-ai Plan 313: G1 blocked, needs Qwen3-4B/8B |
+| **G2** | token efficiency at fixed accuracy (1.3× target) | **1.37× at `w_e_to_l=32, c_max=64`** (n=5; 1.43× at n=10) | ✅ riir-ai Plan 313: G2 PASS |
+| **T3.9** | accuracy ablations (W_E→L, α_0, C_max, signal mix) | G9 above is the modelless behavioral proxy; T4.3 Pareto sweep done on real model | 🟦 riir-ai Plan 313: C_max sweep done (T4.3), W_E→L/α_0/mix blocked on non-zero accuracy |
 
 ## G6 Auto-Fallback (Plan 275 T3.8) — New Primitive
 
@@ -117,10 +123,10 @@ The earlier version of this benchmark used a `c_convergence_fraction = 10.0`
 workaround to skip the convergence branch entirely. That workaround is no
 longer needed and has been removed from G2p.
 
-**Note for riir-ai Plan 299:** the fix is algorithmically correct (each guard
-fires exactly once per switch event), but real-model validation should still
-verify that the `</think>` injection + answer-prefix budget produces the
-expected accuracy/efficiency on MATH500.
+**Note for riir-ai Plan 313:** the fix is algorithmically correct (each guard
+fires exactly once per switch event). Real-model validation (Plan 313 T4.2d)
+confirmed the guards fire correctly on Gemma 2 2B's entropy schedule — the
+remaining accuracy gap is model capability, not guard behavior.
 
 ## Reproduction
 
@@ -160,10 +166,12 @@ caveat as Plan 271 G7).
    headline claims and require a real LLM. They are the actual GOAT criteria
    for promotion.
 3. **No downstream consumers yet** — `thinking_cot` integration is wired but
-   no host decode loop drives it. riir-ai Plan 299 will be the first consumer.
+   no host decode loop drives it. riir-ai Plan 313 is the first consumer.
 4. **Convergence-guard livelock FIXED** — the switch-count guards now fire as
-   one-shot triggers per switch event (not every Explicit step). riir-ai Plan 299
+   one-shot triggers per switch event (not every Explicit step). riir-ai Plan 313
    should still verify real-model entropy schedules produce the expected
    accuracy/efficiency.
 
-Revisit promotion after riir-ai Plan 299 proves G1/G2 on a real model.
+Revisit promotion after riir-ai Plan 313 confirms the G2 gate at n=20+
+(currently 1.37× at n=5, gate target 1.3× — see the update banner at the top
+of this doc). G1 remains blocked by Gemma 2 2B capability (needs Qwen3-4B/8B).

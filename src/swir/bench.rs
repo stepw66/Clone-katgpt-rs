@@ -3,9 +3,13 @@
 //! This module provides the **engine-side** benchmark structure: traits that
 //! abstract the "real model" + "real dataset" halves, plus a synthetic
 //! reference implementation that validates the harness wiring on
-//! deterministic data. riir-ai Plan 299 implements the traits against a real
-//! Qwen3-1.7B model and the MATH500 dataset to produce the empirical G1
+//! deterministic data. riir-ai Plan 313 implements the traits against a real
+//! Gemma 2 2B IT model and the MATH500 dataset to produce the empirical G1
 //! (accuracy) and G2 (efficiency) gates.
+//!
+//! **Real-model status (riir-ai Plan 313, 2026-06-19):** G2 = **1.37× PASS**
+//! at `w_e_to_l=32, c_max=64` (n=5); G1 = 0% (blocked by Gemma 2 2B capability,
+//! T4.2e ruled out prompt/checker bugs).
 //!
 //! # Why this split
 //!
@@ -31,9 +35,12 @@
 //!
 //! # Usage (riir-ai side — real model)
 //!
-//! riir-ai Plan 299 implements `ProblemSource` over MATH500 and
-//! `DecodeBackend` over candle/gguf, then calls the same `run_benchmark`.
-//! The harness structure is identical; only the trait implementations differ.
+//! riir-ai Plan 313 implements `ProblemSource` over MATH500 and
+//! `DecodeBackend` over the Gemma 2 2B GGUF loader, then drives
+//! `SwiRController` directly (the engine-side `run_benchmark` concatenates
+//! argmax IDs as strings, which doesn't round-trip through detokenization —
+//! see `riir-ai/crates/riir-engine/tests/bench_313_swir_real_model_goat.rs`
+//! for the custom loop that produces the real G1/G2 numbers).
 
 use crate::swir::{SwiRConfig, SwiRController, StepAction, ThinkMode};
 

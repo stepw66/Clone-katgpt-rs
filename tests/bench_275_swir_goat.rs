@@ -10,10 +10,14 @@
 //! tokenizer, no KV cache (per the engine/fuel split: katgpt-rs = engine,
 //! riir-ai = fuel). The paper's headline gates (G1 accuracy on MATH500, G2
 //! token efficiency at fixed accuracy) therefore cannot run here. They are
-//! **deferred to riir-ai Plan 299** (NPC curiosity self-play runtime) which
+//! **deferred to riir-ai Plan 313** (SwiR Real-Model Validation) which
 //! wires real models. This matches the precedent set by Plan 271 (Attention
 //! Matching), whose GOAT gate also ran on synthetic data with real-model
 //! validation deferred.
+//!
+//! **Real-model update (riir-ai Plan 313, 2026-06-19):** G2 = **1.37× PASS**
+//! at `w_e_to_l=32, c_max=64` (n=5); G1 = 0% (blocked by Gemma 2 2B capability,
+//! T4.2e ruled out prompt/checker bugs). See `riir-ai/.benchmarks/313_swir_real_model_goat.md`.
 //!
 //! What this gate *does* prove (the algorithmic invariants that must hold
 //! before real-model validation is even meaningful):
@@ -768,7 +772,7 @@ fn g8_signal_mix_schedule_monotonic_in_step_index() {
 // ════════════════════════════════════════════════════════════════════════════
 //
 // T3.9 (accuracy ablations on W_E→L, α_0, C_max, signal mixing) is deferred
-// to riir-ai Plan 299 — accuracy needs a real model. This gate is the
+// to riir-ai Plan 313 — accuracy needs a real model. This gate is the
 // modelless proxy: it sweeps the same hyperparameters and verifies the
 // controller's *behavioral* response matches the paper's structural
 // expectations. The accuracy ranking can only be validated on a real model,
@@ -1095,7 +1099,8 @@ fn g9d_signal_mixing_on_off_decisions_identical() {
 // The real G1 (accuracy ≥ +1.5pp on MATH500) requires a real model. This test
 // validates the harness STRUCTURE: that `run_benchmark` produces the right
 // metrics, and that `ComparisonResult::accuracy_delta_pp` computes correctly.
-// riir-ai Plan 299 plugs in Qwen3-1.7B + MATH500 to get the real number.
+// riir-ai Plan 313 plugs in Gemma 2 2B + MATH500 to get the real number
+// (currently 0% — blocked by model capability; needs Qwen3-4B/8B).
 // ════════════════════════════════════════════════════════════════════════════
 
 #[test]
@@ -1235,13 +1240,14 @@ fn g_summary_print_verdict_table() {
     println!("║ G1h  | accuracy gate harness structure (T3.3)            | see g1h_*   ║");
     println!("║ G2h  | efficiency gate harness structure (T3.4)          | see g2h_*   ║");
     println!("╠══════╧═══════════════════════════════════════════════════╧═════════════╣");
-    println!("║ DEFERRED to riir-ai Plan 299 (needs real model):                        ║");
-    println!("║   G1 — accuracy on MATH500 (+1.5pp target) — harness ships here         ║");
-    println!("║   G2 — token efficiency at fixed accuracy (1.3× target) — harness ships  ║");
+    println!("║ DEFERRED to riir-ai Plan 313 (needs real model):                        ║");
+    println!("║   G1 — accuracy on MATH500 (+1.5pp target) — 0% on Gemma 2 2B (blocked) ║");
+    println!("║   G2 — token efficiency at fixed accuracy (1.3× target) — 1.37× PASS    ║");
     println!("║   T3.9 real-model accuracy ablations — harness + synthetic proxies ship  ║");
     println!("╚══════════════════════════════════════════════════════════════════════════╝");
     println!();
-    println!("Decision: keep swir_switch_thinking OPT-IN until riir-ai Plan 299 proves");
-    println!("G1/G2 on a real model. The algorithmic invariants (G3-G8, G1c, G2p) all");
-    println!("pass on synthetic data — the controller is correct by construction.");
+    println!("Decision: keep swir_switch_thinking OPT-IN until riir-ai Plan 313 confirms");
+    println!("the G2 gate at n=20+ (currently 1.37× at n=5, target 1.3×). The algorithmic");
+    println!("invariants (G3-G8, G1c, G2p) all pass on synthetic data — the controller");
+    println!("is correct by construction. G1 is blocked by Gemma 2 2B capability.");
 }

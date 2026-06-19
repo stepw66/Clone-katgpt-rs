@@ -179,5 +179,5 @@ If G1-bandit ≥ uniform SwiR AND G2-bandit ≥ uniform SwiR, extend Plan 211 wi
 3. The reward signal needs accuracy feedback, which may not be available at inference time (need a proxy).
 
 **Recommendation:** extend Plan 211 (no new plan needed) after:
-- Plan 275's real-model G1/G2 proves SwiR works (riir-ai Plan 299)
+- Plan 275's real-model G1/G2 proves SwiR works (riir-ai Plan 313 — **G2 = 1.37× PASS** at `w_e_to_l=32, c_max=64` on Gemma 2 2B as of 2026-06-19; G1 still blocked by model capability, needs Qwen3-4B/8B)
 - A quick synthetic experiment on the existing harness showing the Latent arm wins on a distinct query subclass

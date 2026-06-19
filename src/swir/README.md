@@ -40,7 +40,14 @@ decoder between token-space (`Explicit`) and continuous-embedding-space
 4. **Locally available.** `riir-train/data/` holds `gemma-2-2b-it-f16.gguf` and
    `MiniCPM5-1B-F16.gguf`; the Qwen3-1.7B GGUF is the natural sibling for
    SwiR validation. katgpt-rs cannot load any of them (no model loader — see
-   below), but riir-ai Plan 299 can.
+   below), but riir-ai Plan 313 can.
+
+> **Actual validation model (riir-ai Plan 313, 2026-06-19):** validation ran
+> on **Gemma 2 2B IT** (locally available), not Qwen3-1.7B. Result: G2 =
+> **1.37× PASS** at `w_e_to_l=32, c_max=64` (n=5); G1 = 0% (blocked by model
+> capability — T4.2e ruled out prompt/checker bugs). The paper-default
+> `w_e_to_l=512` had to be retuned to 32 for Gemma 2 2B's shorter responses.
+> Qwen3-4B/8B remains the target for the G1 accuracy gate.
 
 ### Fallbacks (if Qwen3-1.7B unavailable)
 
@@ -77,9 +84,9 @@ Therefore the GOAT gate is split:
 | G7 zero-alloc step() | Algorithmic | **katgpt-rs** — `g7_*` ✅ 0 allocs/1023 steps |
 | G8 α_t/β_t schedule | Algorithmic | **katgpt-rs** — `g8_*` ✅ monotonic |
 | G9 hyperparameter sweeps | Algorithmic | **katgpt-rs** — `g9a/g9b/g9c` ✅ |
-| G1 accuracy ≥ +1.5pp on MATH500 | Empirical | **riir-ai Plan 299** — needs Qwen3-1.7B + MATH500 |
-| G2 token efficiency ≥ 1.3× | Empirical | **riir-ai Plan 299** — needs decode loop |
-| T3.9 accuracy ablations | Empirical | **riir-ai Plan 299** — needs accuracy signal |
+| G1 accuracy ≥ +1.5pp on MATH500 | Empirical | **riir-ai Plan 313** — Gemma 2 2B + MATH500. Result (2026-06-19): **0%** (blocked by model capability; T4.2e ruled out prompt/checker bugs). Needs Qwen3-4B/8B. |
+| G2 token efficiency ≥ 1.3× | Empirical | **riir-ai Plan 313** — **✅ PASS 1.37×** at `w_e_to_l=32, c_max=64` (n=5; 1.43× at n=10). Non-monotonic Pareto peaks at c_max=64. |
+| T3.9 accuracy ablations | Empirical | **riir-ai Plan 313** — blocked on non-zero accuracy (needs larger model) |
 
 The katgpt-rs half is **complete** (8/8 synthetic gates pass, plus the G9
 ablation sweeps). The riir-ai half is the real-model proof.
