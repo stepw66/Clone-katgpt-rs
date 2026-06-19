@@ -27,6 +27,8 @@
 use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use crate::traits::FeatureClass;
+
 // ── Review Summary ──────────────────────────────────────────────
 
 /// Computed review metrics snapshot for display/logging.
@@ -116,6 +118,15 @@ pub struct ReviewMetrics {
     calm_score_sum: AtomicU64,
     /// Number of emotion observations recorded (Plan 162).
     emotion_count: AtomicU64,
+    // ── Feature Class Telemetry (Plan 292 Phase 1, Research 267) ──
+    /// Count of activation reads tagged [`FeatureClass::Detection`] this session.
+    /// Detection primitives describe behavior already realized in the text —
+    /// e.g. `EmotionDirections`, CNA, `FaithfulnessProbe`, `RegimeTransition`.
+    detection_reads: AtomicU64,
+    /// Count of activation reads tagged [`FeatureClass::Prediction`] this session.
+    /// Prediction primitives forecast future behavior probability from
+    /// intermediate state — e.g. `FutureBehaviorProbe` (Plan 292 Phase 2).
+    prediction_reads: AtomicU64,
 }
 
 impl ReviewMetrics {
@@ -138,6 +149,8 @@ impl ReviewMetrics {
             desperation_score_sum: AtomicU64::new(0),
             calm_score_sum: AtomicU64::new(0),
             emotion_count: AtomicU64::new(0),
+            detection_reads: AtomicU64::new(0),
+            prediction_reads: AtomicU64::new(0),
         }
     }
 
@@ -438,6 +451,47 @@ impl ReviewMetrics {
         let profile = self.emotion_profile_summary();
         profile.count > 0 && profile.desperation > threshold as f64
     }
+
+    // ── Feature Class Telemetry (Plan 292 Phase 1, Research 267) ─────
+
+    /// Record one activation read by its [`FeatureClass`] tag.
+    ///
+    /// Thread-safe: single atomic increment, no lock. Use this whenever a
+    /// primitive that implements `ScreeningPruner::feature_class()` is invoked
+    /// so the session telemetry can answer: "how much of this session's
+    /// activation traffic was detection-side vs prediction-side?"
+    ///
+    /// The ratio matters for FPCG promotion decisions (Plan 292 Phase 5):
+    /// if a session is 100% detection reads, the prediction-side stack is
+    /// unproven in production; if a healthy mix emerges after enabling
+    /// `future_probe`, the GOAT gate has real-world corroboration.
+    pub fn record_feature_read(&self, class: FeatureClass) {
+        match class {
+            FeatureClass::Detection => &self.detection_reads,
+            FeatureClass::Prediction => &self.prediction_reads,
+        }
+        .fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Snapshot of detection-side vs prediction-side activation reads (Plan 292).
+    pub fn feature_read_summary(&self) -> FeatureReadSummary {
+        let detection = self.detection_reads.load(Ordering::Relaxed);
+        let prediction = self.prediction_reads.load(Ordering::Relaxed);
+        let total = detection + prediction;
+        let (detection_fraction, prediction_fraction) = if total > 0 {
+            let d = detection as f64 / total as f64;
+            (d, 1.0 - d)
+        } else {
+            (0.0, 0.0)
+        };
+        FeatureReadSummary {
+            detection_reads: detection,
+            prediction_reads: prediction,
+            total_reads: total,
+            detection_fraction,
+            prediction_fraction,
+        }
+    }
 }
 
 impl Default for ReviewMetrics {
@@ -544,6 +598,42 @@ impl fmt::Display for EmotionProfileSummary {
             f,
             "valence={:.3} arousal={:.3} desperation={:.3} calm={:.3} n={}",
             self.valence, self.arousal, self.desperation, self.calm, self.count
+        )
+    }
+}
+
+/// Snapshot of detection-side vs prediction-side activation reads for a session
+/// (Plan 292 Phase 1, Research 267).
+///
+/// Counts how many activation reads this session tagged as
+/// [`FeatureClass::Detection`] vs [`FeatureClass::Prediction`]. Lets the
+/// screening-stack composer and the FPCG promotion gate answer: "is the
+/// prediction-side stack actually being exercised in production, or is the
+/// session 100% detection reads?"
+#[derive(Clone, Debug, Default)]
+pub struct FeatureReadSummary {
+    /// Raw count of reads tagged [`FeatureClass::Detection`] this session.
+    pub detection_reads: u64,
+    /// Raw count of reads tagged [`FeatureClass::Prediction`] this session.
+    pub prediction_reads: u64,
+    /// `detection_reads + prediction_reads`.
+    pub total_reads: u64,
+    /// `detection_reads / total_reads` (0.0 when `total_reads == 0`).
+    pub detection_fraction: f64,
+    /// `prediction_reads / total_reads` (= `1.0 - detection_fraction`).
+    pub prediction_fraction: f64,
+}
+
+impl fmt::Display for FeatureReadSummary {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "detection={} prediction={} total={} ({:.1}% / {:.1}%)",
+            self.detection_reads,
+            self.prediction_reads,
+            self.total_reads,
+            self.detection_fraction * 100.0,
+            self.prediction_fraction * 100.0,
         )
     }
 }
@@ -979,5 +1069,47 @@ mod tests {
             "precision should be within 0.001, got diff of {}",
             (summary.mean - entropy as f64).abs()
         );
+    }
+
+    // ── Feature Class Telemetry (Plan 292 Phase 1, Research 267) ─────
+
+    #[test]
+    fn test_feature_read_summary_empty() {
+        let metrics = ReviewMetrics::new();
+        let summary = metrics.feature_read_summary();
+        assert_eq!(summary.detection_reads, 0);
+        assert_eq!(summary.prediction_reads, 0);
+        assert_eq!(summary.total_reads, 0);
+        assert_eq!(summary.detection_fraction, 0.0);
+        assert_eq!(summary.prediction_fraction, 0.0);
+    }
+
+    #[test]
+    fn test_feature_read_summary_records_by_class() {
+        let metrics = ReviewMetrics::new();
+        // 3 detection reads + 1 prediction read → 75% / 25% mix.
+        metrics.record_feature_read(FeatureClass::Detection);
+        metrics.record_feature_read(FeatureClass::Detection);
+        metrics.record_feature_read(FeatureClass::Detection);
+        metrics.record_feature_read(FeatureClass::Prediction);
+
+        let summary = metrics.feature_read_summary();
+        assert_eq!(summary.detection_reads, 3);
+        assert_eq!(summary.prediction_reads, 1);
+        assert_eq!(summary.total_reads, 4);
+        assert!((summary.detection_fraction - 0.75).abs() < 1e-9);
+        assert!((summary.prediction_fraction - 0.25).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_feature_read_summary_display() {
+        let metrics = ReviewMetrics::new();
+        metrics.record_feature_read(FeatureClass::Detection);
+        metrics.record_feature_read(FeatureClass::Prediction);
+        let summary = metrics.feature_read_summary();
+        let s = format!("{summary}");
+        assert!(s.contains("detection=1"), "display missing detection: {s}");
+        assert!(s.contains("prediction=1"), "display missing prediction: {s}");
+        assert!(s.contains("50.0%"), "display missing pct: {s}");
     }
 }

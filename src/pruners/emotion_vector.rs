@@ -108,6 +108,19 @@ impl EmotionDirections {
         self.valence.len()
     }
 
+    /// Feature class tag (Plan 292 Phase 1, Research 267).
+    ///
+    /// `EmotionDirections` extracts valence / arousal / desperation / calm from
+    /// contrastive *final-answer* activations (Research 144). Those directions
+    /// describe behavior already realized in the text — the canonical detection-
+    /// side setup — so the explicit tag is [`FeatureClass::Detection`]. This
+    /// overrides nothing (the trait default is also Detection); the override is
+    /// here for documentation and to surface up in `grep feature_class`.
+    #[inline]
+    pub fn feature_class(&self) -> katgpt_core::FeatureClass {
+        katgpt_core::FeatureClass::Detection
+    }
+
     /// Project activation vector onto a direction — O(d) dot product, zero alloc.
     ///
     /// This is the core primitive: a single dot product between the mid-layer

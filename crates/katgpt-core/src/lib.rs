@@ -51,8 +51,8 @@ pub use bridge::ActionBridge;
 // Re-export consolidated traits (Plan 107 Phase 0)
 pub use traits::{
     ActionSpaceLog, BestBuddyAligner, BinaryScreeningPruner, ConstraintPruner, DominoPruner,
-    GameState, NoPruner, NoScreeningPruner, RandomRolloutPolicy, RolloutPolicy, ScreeningPruner,
-    StateHeuristic, best_buddies, pearson_correlation,
+    FeatureClass, GameState, NoPruner, NoScreeningPruner, RandomRolloutPolicy, RolloutPolicy,
+    ScreeningPruner, StateHeuristic, best_buddies, pearson_correlation,
 };
 pub use traits::{GenerativeConstraintPruner, SpeculativeGenerator};
 

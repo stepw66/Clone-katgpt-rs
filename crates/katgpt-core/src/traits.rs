@@ -258,6 +258,46 @@ pub trait CompletionHorizon: ConstraintPruner {
 /// `NoPruner` has no horizon — budget masking is a no-op (returns 0).
 impl CompletionHorizon for NoPruner {}
 
+// ── FeatureClass (Plan 292 Phase 1, Research 267) ───────────────
+
+/// Tags how a primitive reads model activations.
+///
+/// Distilled from Kortukov et al. 2026 (openreview 48NnVTsirb, Research 267 §1.1).
+/// The empirical finding: features that *describe behavior already in the text*
+/// (Detection) are a different linear subspace from features that *forecast the
+/// probability of future behavior* (Prediction). Treating them as interchangeable
+/// is the root cause of activation steering breaking outputs.
+///
+/// - **Detection** (`= 0`): reads features that *already* describe behavior in the
+///   generated text (e.g. emotion vectors extracted from contrastive final-answer
+///   pairs, CNA circuits). Safe for *monitoring* and for *intervention that
+///   mutates behavior downstream of the read*. Risky to use as a *direct steering
+///   target* — pushing activations along detection directions pushes the model
+///   off-manifold.
+///
+/// - **Prediction** (`= 1`): reads features that *forecast* future behavior
+///   probability from intermediate reasoning state (e.g. FPCG's future probe).
+///   Safe as a *non-invasive steering target* via candidate selection (no
+///   residual-stream modification).
+///
+/// All existing pruners inherit `Detection` by default (T1.2); the only
+/// `Prediction`-side primitive currently in the tree is `FutureBehaviorProbe`
+/// (Plan 292 Phase 2). The tag is a non-breaking addition — callers that don't
+/// override the default are unchanged.
+///
+/// See `katgpt-rs/.research/267_Future_Probe_Controlled_Generation_Detection_vs_Prediction_Features.md`
+/// for the full empirical distinction and the FPCG algorithm that motivates it.
+#[repr(u8)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub enum FeatureClass {
+    /// Reads behavior already realized in the generated text (e.g. CAA / CNA
+    /// / `EmotionDirections`). Default for all existing detection-side pruners.
+    Detection = 0,
+    /// Reads a linear forecast of future behavior probability from intermediate
+    /// reasoning state (e.g. `FutureBehaviorProbe`, Plan 292 Phase 2).
+    Prediction = 1,
+}
+
 // ── ScreeningPruner ─────────────────────────────────────────────
 
 /// Graded relevance pruner replacing binary valid/invalid with continuous score.
@@ -294,6 +334,22 @@ pub trait ScreeningPruner: Send + Sync {
     /// `parent_tokens[i]` = token placed at depth `i` in the current path.
     /// At depth 0, `parent_tokens` is empty.
     fn relevance(&self, depth: usize, token_idx: usize, parent_tokens: &[usize]) -> f32;
+
+    /// How this primitive reads model activations (Plan 292 Phase 1, Research 267).
+    ///
+    /// Defaults to [`FeatureClass::Detection`] — every existing pruner in the
+    /// tree inherits Detection, which matches the historical assumption that
+    /// activation-reading primitives describe already-realized behavior.
+    /// Primitives that instead forecast future behavior (e.g. `FutureBehaviorProbe`)
+    /// override this to return [`FeatureClass::Prediction`]. The tag is purely
+    /// advisory metadata for the screening-stack composer and `ReviewMetrics`
+    /// telemetry — it does not change runtime semantics.
+    ///
+    /// Non-breaking: implementations that do not override are unchanged.
+    #[inline]
+    fn feature_class(&self) -> FeatureClass {
+        FeatureClass::Detection
+    }
 }
 
 /// Adapter: wraps any [`ConstraintPruner`] as a [`ScreeningPruner`] with binary relevance.

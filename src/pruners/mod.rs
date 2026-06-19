@@ -30,6 +30,24 @@ pub mod freeze;
 
 pub mod emotion_vector;
 
+/// Feature class vocabulary tag — detection vs prediction features (Plan 292 Phase 1, Research 267).
+/// Re-export shim for `katgpt_core::FeatureClass` plus unit tests asserting the
+/// default impl returns Detection and `EmotionDirections` is Detection.
+pub mod feature_class;
+
+/// Future Behavior Probe — frozen direction vector for forecasting future
+/// behavior probability (Plan 292 Phase 2, Research 267).
+/// Opt-in until Phase 4 GOAT gate passes.
+#[cfg(feature = "future_probe")]
+pub mod future_probe;
+
+/// FpcgSelector — Future Probe Controlled Generation sample-score-select loop
+/// (Plan 292 Phase 3). Sentence-atomic candidate sampling + probe scoring +
+/// argmax/argmin selection. Never modifies the residual stream.
+/// Opt-in (depends on `future_probe`) until Phase 4 GOAT gate passes.
+#[cfg(feature = "fpcg_selector")]
+pub mod fpcg_selector;
+
 /// Self-advantage from latent recursion pre/post logits (Plan 283, Research 250).
 /// Modelless dead-compute detector distilled from arxiv:2511.16886.
 pub mod self_advantage;
