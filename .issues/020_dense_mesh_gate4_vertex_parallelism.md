@@ -52,10 +52,24 @@ Start with **Path A** (rayon) — small, isolated, measurable. If ratio still > 
 
 ## Acceptance criteria
 
-- [ ] Gate 4 test un-ignored (remove `#[ignore]`)
-- [ ] Measured ratio at `[1, 4, 1]` topology ≤ 2.5× vanilla forward
-- [ ] No regression in `prof_dense_mesh` aggregation/forward scaling tests
-- [ ] No data race in `MultiLayerKVCache` (currently single-threaded — needs per-thread instances under rayon)
+- [x] Gate 4 test un-ignored (removed `#[ignore]`; now runs at both `draft` and `small_target` scale)
+- [ ] Measured ratio at `[1, 4, 1]` topology ≤ 2.5× vanilla forward — **Path A landed 2.76–3.04× at `small_target` (n_embd=64)**; sequential was ~5×. Gap to 2.5× requires Path B (batched transformer forward)
+- [x] No regression in `prof_dense_mesh` aggregation/forward scaling tests — 5/5 pass; width=16/width=1 = 7.40× (threshold <16×)
+- [x] No data race in `MultiLayerKVCache` — per-thread `Mutex` pools indexed by `rayon::current_thread_index()`; verified by `test_transformer_node_parallel_forward_is_safe` (8 parallel workers, bit-identical outputs)
+
+## Status update (Path A applied 2026-06-19)
+
+**Path A (rayon vertex parallelism) is complete** behind opt-in `MeshConfig::enable_vertex_parallelism` (default `false`). Dispatch triggers when `width_next >= gpu_width_threshold`. `TransformerNode` now holds per-thread `Mutex` pools for `ForwardContext` + `MultiLayerKVCache` (pool size = `available_parallelism()`), so each rayon worker locks only its own slot — uncontended, no data race.
+
+**Result:** at `Config::small_target()` (n_embd=64, ~60μs/fwd), width-4 ratio dropped from ~5× (sequential) to **2.76–3.04×** — Path A beat sequential by ~1.8×. Still above the 2.5× paper bound.
+
+At `Config::draft()` (sub-μs forwards), rayon spawn overhead dominates and Path A regresses — expected at micro-bench scale; the win only materializes once the per-forward work exceeds thread-pool overhead (~5μs), which matches the issue's own caveat.
+
+## Path B follow-up (deferred)
+
+The remaining ~0.5× gap to the 2.5× bound needs **Path B — batched transformer forward** in `src/transformer.rs` (~200 LoC): a `forward_batched(ctx, weights, cache, tokens: &[usize], pos, config) -> Vec<&mut [f32]>` entry point that processes N tokens at once, amortizing KV cache writes + matmul setup. Expected additional ~1.2× on top of Path A → ~2.5× combined.
+
+This is a separate, larger change touching `transformer.rs` internals. File as a new issue when the `dense_mesh` feature sees real workload that justifies the risk.
 
 ## References
 

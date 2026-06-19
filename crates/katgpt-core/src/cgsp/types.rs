@@ -242,6 +242,11 @@ pub struct ScratchBuffers {
 
 impl ScratchBuffers {
     /// Allocate scratch buffers for `k` candidates and `pool_size` priority slots.
+    ///
+    /// Capacity is reserved but no slots are materialised — call
+    /// [`ensure_len`](Self::ensure_len) before the first `cycle()` (or let
+    /// `CgspLoop::cycle` call it for you) to pre-fill the `candidates` Vec
+    /// with reusable `Candidate` slots.
     pub fn new(k: usize, pool_size: usize) -> Self {
         Self {
             candidates: Vec::with_capacity(k),
@@ -253,12 +258,57 @@ impl ScratchBuffers {
         }
     }
 
-    /// Reset all per-cycle buffers to empty (capacity preserved).
+    /// Ensure the `candidates` Vec contains exactly `k` reusable slots, each
+    /// carrying a `Direction` of dimension `dim`.
     ///
-    /// Cheap: `clear()` does not free backing storage.
+    /// This is the Option-B fix for issue 021 Site 1: instead of clearing
+    /// and re-growing the Vec every cycle (which clones a `Vec<f32>` per
+    /// slot), we materialise the slots **once** and let the conjecturer
+    /// overwrite their `coords` in place via `clone_from` (zero allocation
+    /// in steady state). On subsequent calls with the same `(k, dim)` this
+    /// method is a no-op apart from a length check.
+    ///
+    /// If `k` grows between calls, only the newly-appended slots allocate.
+    /// If `dim` changes, existing slots are resized in place (which may
+    /// reallocate, but only on the dimension-change cycle, never in steady
+    /// state).
+    pub fn ensure_len(&mut self, k: usize, dim: usize) {
+        // Shrink is unusual but keep the contract exact.
+        if self.candidates.len() > k {
+            self.candidates.truncate(k);
+        }
+        while self.candidates.len() < k {
+            self.candidates.push(Candidate::new(Direction::zeros(dim), usize::MAX));
+        }
+        // Resize any existing slot whose dim doesn't match (e.g. caller
+        // changed target dimensionality). `Vec::resize` on `f32` is
+        // allocation-free when the existing capacity already covers `dim`,
+        // which holds for every cycle after the first.
+        for slot in self.candidates.iter_mut() {
+            if slot.direction.coords.len() != dim {
+                slot.direction.coords.resize(dim, 0.0);
+            }
+        }
+        // Keep the scalar buffers at length k so direct index assignment in
+        // `cycle()` is in bounds. `resize` on `f32` / `bool` is alloc-free
+        // once capacity covers k (which it does after the first call).
+        self.guide_scores.resize(k, 0.0);
+        self.admitted.resize(k, false);
+        self.solve_rates.resize(k, 0.0);
+        self.r_synth.resize(k, 0.0);
+    }
+
+    /// Reset the per-cycle scalar buffers.
+    ///
+    /// As of issue 021 (Option B) this is a **no-op on `candidates`** — the
+    /// reusable slots are owned by `ScratchBuffers` and overwritten in place
+    /// by the conjecturer each cycle. Only the scalar working buffers are
+    /// cleared (their capacity is preserved; `clear` is alloc-free).
+    ///
+    /// `cdf_scratch` is also cleared here; `PoolConjecturer::build_cdf` does
+    /// its own `clear` + `push` pattern that is alloc-free in steady state.
     #[inline]
     pub fn reset(&mut self) {
-        self.candidates.clear();
         self.guide_scores.clear();
         self.admitted.clear();
         self.solve_rates.clear();

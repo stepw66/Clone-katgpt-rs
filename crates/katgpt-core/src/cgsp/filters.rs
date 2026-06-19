@@ -89,32 +89,36 @@ impl BatchQualityGate for ColinearityBatchGate {
         admitted: &[bool],
         _guide_scores: &[f32],
     ) -> bool {
-        // Case 1: nobody admitted → degenerate.
-        let any_admitted = admitted.iter().any(|&a| a);
-        if !any_admitted {
-            return true;
-        }
-        // Case 2: all admitted candidates colinear with each other.
-        let admitted_idx: Vec<usize> = admitted
-            .iter()
-            .enumerate()
-            .filter_map(|(i, &a)| if a { Some(i) } else { None })
-            .collect();
-        // Need at least 2 to check colinearity.
-        if admitted_idx.len() < 2 {
-            return false;
-        }
-        let mut all_colinear = true;
-        for w in admitted_idx.windows(2) {
-            let a = &candidates[w[0]].direction;
-            let b = &candidates[w[1]].direction;
-            let cos = cosine(a, b);
-            if cos < self.colinearity_threshold {
-                all_colinear = false;
-                break;
+        // Allocation-free degeneracy check (issue 021 — the historical
+        // `Vec<usize>::collect()` here was the third per-cycle allocation
+        // site, discovered after fixing Sites 1 and 2). We walk `admitted`
+        // once, tracking the previous admitted index to pairwise-compare
+        // adjacent admitted candidates' directions.
+        //
+        // Semantics:
+        //   0 admitted  → degenerate (nothing to update on)
+        //   1 admitted  → not degenerate (no pair to compare)
+        //   ≥2 admitted → degenerate iff every adjacent admitted pair is
+        //                 colinear (cos ≥ threshold).
+        let mut prev_admitted: Option<usize> = None;
+        let mut admitted_count: usize = 0;
+        for (i, &a) in admitted.iter().enumerate() {
+            if !a {
+                continue;
             }
+            admitted_count += 1;
+            if let Some(prev) = prev_admitted {
+                let cos = cosine(&candidates[prev].direction, &candidates[i].direction);
+                if cos < self.colinearity_threshold {
+                    // Found a non-colinear pair → batch is diverse.
+                    return false;
+                }
+            }
+            prev_admitted = Some(i);
         }
-        all_colinear
+        // 0 admitted → degenerate. 1 admitted → not degenerate. ≥2 admitted
+        // with no non-colinear pair found → all colinear → degenerate.
+        admitted_count != 1
     }
 }
 

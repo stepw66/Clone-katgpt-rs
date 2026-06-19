@@ -18,7 +18,7 @@
 
 use katgpt_rs::cgsp::{
     traits::{CollapseSignal, HintDeltaBandit, Solver},
-    BreakevenDifficultyFilter, Candidate, CgspConfig, CgspLoop, ColinearityBatchGate,
+    BreakevenDifficultyFilter, CgspConfig, CgspLoop, ColinearityBatchGate,
     ComplexityWeights, CycleResult, Direction, EntropyCollapse, HlaProjectionGuide,
     NoOpBatchGate, NoOpDifficultyFilter, PoolConjecturer, Priority, ScratchBuffers, Target,
     entropy_nats, sigmoid,
@@ -50,8 +50,13 @@ impl HintDeltaBandit for VecBandit {
 struct DotSolver { sharpness: f32 }
 
 impl Solver for DotSolver {
-    fn attempt(&mut self, target: &Target, candidate: &Candidate) -> f32 {
-        let d = candidate.direction.dot(&target.direction);
+    fn attempt(
+        &mut self,
+        target: &Target,
+        candidate_direction: &Direction,
+        _pool_index: usize,
+    ) -> f32 {
+        let d = candidate_direction.dot(&target.direction);
         sigmoid(self.sharpness * d)
     }
 }

@@ -86,14 +86,19 @@ impl LayerwiseTopology {
     /// `input` is the first layer's input (e.g., token embeddings).
     /// Returns the last layer's output hidden state.
     ///
-    /// `_config` is reserved for future compute-routing integration; currently
-    /// the topology runs all layers on CPU (the actual CPU/GPU/ANE dispatch is
-    /// performed by the caller based on [`MeshConfig::pick_compute`]).
+    /// `config` controls compute routing. When
+    /// [`MeshConfig::enable_vertex_parallelism`] is set and a hidden layer's
+    /// width ≥ [`MeshConfig::gpu_width_threshold`], the per-successor-node
+    /// work (edge aggregation + node forward) is dispatched to a rayon
+    /// parallel iterator so the width-many shared-LLM forwards execute in
+    /// parallel — paper §3.3 vertex parameter sharing + Issue 020 Path A.
+    /// Below the threshold (or with parallelism disabled) the path stays
+    /// sequential to avoid rayon spawn overhead on trivial nodes.
     pub fn forward(
         &self,
         input: &DenseHidden,
         scratch: &mut MeshScratch,
-        _config: &MeshConfig,
+        config: &MeshConfig,
     ) -> DenseHidden {
         // Current layer's hidden states: width-many DenseHidden buffers.
         // Layer 0 has width 1 in all our topologies (input node).
@@ -108,43 +113,18 @@ impl LayerwiseTopology {
             let width_l = self.topology.width(l);
             let width_next = self.topology.width(l + 1);
 
-            // For each successor node in layer l+1, aggregate incoming edges.
-            let mut next: Vec<DenseHidden> = Vec::with_capacity(width_next);
-            for j in 0..width_next {
-                scratch.aggregate.clear();
-                let mut any = false;
-                for i in 0..width_l {
-                    let edge_idx = i * width_next + j;
-                    // Route predecessor i's hidden state through the edge.
-                    // Writes into scratch.edge_output; returns ().
-                    self.edges[l][edge_idx].route_into(&current[i], scratch);
-                    let edge_len = scratch.edge_output.len();
-                    let seq_len = current[i].seq_len;
-                    // Now safe to read scratch.edge_output (mutable borrow released).
-                    if !any {
-                        // First contributor: copy.
-                        scratch.aggregate.data[..edge_len]
-                            .copy_from_slice(&scratch.edge_output.data[..edge_len]);
-                        scratch.aggregate.seq_len = seq_len;
-                        scratch.aggregate.hidden_dim = edge_len / seq_len.max(1);
-                        any = true;
-                    } else {
-                        for (dst, src) in scratch.aggregate.data[..edge_len]
-                            .iter_mut()
-                            .zip(scratch.edge_output.data[..edge_len].iter())
-                        {
-                            *dst += *src;
-                        }
-                    }
-                }
-                // Forward the aggregated input through the shared node.
-                // Clone aggregate out so node can borrow scratch mutably.
-                let agg = scratch.aggregate.clone();
-                let out = self.node.forward_dense(&agg, l + 1, scratch);
-                next.push(out);
+            // Parallel vertex path (Issue 020, Path A). Only worth it when the
+            // successor layer is wide enough to amortise rayon spawn overhead
+            // (~5us per task per AGENTS.md optimisation guidelines) AND the
+            // caller has opted in via `enable_vertex_parallelism`. Sequential
+            // is the default — it preserves the existing scaling tests and is
+            // faster for cheap nodes (IdentityNode) where spawn overhead
+            // would dominate the actual forward work.
+            if config.enable_vertex_parallelism && width_next >= config.gpu_width_threshold {
+                current = self.forward_layer_parallel(l, width_l, width_next, &current, input);
+            } else {
+                current = self.forward_layer_sequential(l, width_l, width_next, &current, scratch);
             }
-
-            current = next;
         }
 
         // After the last layer, `current` has width-many buffers. For an output
@@ -160,6 +140,144 @@ impl LayerwiseTopology {
             }
             acc
         }
+    }
+
+    /// Sequential per-layer forward (paper §3.1.3 eq. (1)).
+    ///
+    /// Reuses the caller-provided `scratch` for aggregation/edge output —
+    /// plasma-tier zero-alloc in the steady state.
+    fn forward_layer_sequential(
+        &self,
+        l: usize,
+        width_l: usize,
+        width_next: usize,
+        current: &[DenseHidden],
+        scratch: &mut MeshScratch,
+    ) -> Vec<DenseHidden> {
+        let mut next: Vec<DenseHidden> = Vec::with_capacity(width_next);
+        for j in 0..width_next {
+            scratch.aggregate.clear();
+            let mut any = false;
+            for i in 0..width_l {
+                let edge_idx = i * width_next + j;
+                // Route predecessor i's hidden state through the edge.
+                // Writes into scratch.edge_output; returns ().
+                self.edges[l][edge_idx].route_into(&current[i], scratch);
+                let edge_len = scratch.edge_output.len();
+                let seq_len = current[i].seq_len;
+                // Now safe to read scratch.edge_output (mutable borrow released).
+                if !any {
+                    // First contributor: copy.
+                    scratch.aggregate.data[..edge_len]
+                        .copy_from_slice(&scratch.edge_output.data[..edge_len]);
+                    scratch.aggregate.seq_len = seq_len;
+                    scratch.aggregate.hidden_dim = edge_len / seq_len.max(1);
+                    any = true;
+                } else {
+                    for (dst, src) in scratch.aggregate.data[..edge_len]
+                        .iter_mut()
+                        .zip(scratch.edge_output.data[..edge_len].iter())
+                    {
+                        *dst += *src;
+                    }
+                }
+            }
+            // Forward the aggregated input through the shared node.
+            // Clone aggregate out so node can borrow scratch mutably.
+            let agg = scratch.aggregate.clone();
+            let out = self.node.forward_dense(&agg, l + 1, scratch);
+            next.push(out);
+        }
+        next
+    }
+
+    /// Parallel per-layer forward (Issue 020, Path A).
+    ///
+    /// Each successor node j's work (edge aggregation + node forward) runs in
+    /// its own rayon task. Because the shared `&self.node` is `Send + Sync`
+    /// (see `DenseNode` trait bounds), rayon can share the reference across
+    /// workers. Each worker gets its own `MeshScratch` for edge aggregation —
+    /// obtained as a disjoint `&mut` via `zip` of two `par_iter_mut` slices, so
+    /// there is no shared mutable scratch and no `unsafe`. The node itself is
+    /// responsible for per-thread isolation of its internal
+    /// `(ForwardContext, MultiLayerKVCache)` state (see `TransformerNode`'s
+    /// pool keyed by `rayon::current_thread_index()`).
+    ///
+    /// `_input` is unused; edges route from `current`. Kept in the signature
+    /// for symmetry with [`Self::forward_layer_sequential`] and future routing.
+    fn forward_layer_parallel(
+        &self,
+        l: usize,
+        width_l: usize,
+        width_next: usize,
+        current: &[DenseHidden],
+        _input: &DenseHidden,
+    ) -> Vec<DenseHidden> {
+        use rayon::prelude::*;
+
+        // Size per-worker scratch from the predecessor hidden shape.
+        let seq_len = current.first().map(|h| h.seq_len).unwrap_or(1);
+        let hidden_dim = current.first().map(|h| h.hidden_dim).unwrap_or(1);
+
+        // Pre-allocate output slots and per-worker scratch. Both are moved into
+        // parallel iterators below; rayon splits them into disjoint `&mut`
+        // chunks per task, so no two tasks ever alias.
+        let mut next: Vec<DenseHidden> =
+            (0..width_next).map(|_| DenseHidden::zeros(seq_len, hidden_dim)).collect();
+        // One scratch per successor node. Allocated per mesh-forward call; for
+        // width-4 that is 4 scratch allocations, dwarfed by the transformer
+        // forward cost. (Pooling these in the topology is a future Path B
+        // optimisation; out of scope for the ~50 LoC Path A target.)
+        let mut local_scratches: Vec<MeshScratch> =
+            (0..width_next).map(|_| MeshScratch::new(seq_len, hidden_dim)).collect();
+
+        // Shared (Sync) captures — edges + node + predecessor hidden states.
+        let edges_l = &self.edges[l];
+        let node = &self.node;
+
+        // Zip the output slots with their per-worker scratch and enumerate so
+        // each task knows its successor index `j` (needed for edge lookup).
+        // `par_iter_mut().zip(par_iter_mut()).enumerate()` is the idiomatic
+        // rayon pattern for fan-out writes into two parallel pre-allocated
+        // buffers: the iterator implementation proves disjointness, so no
+        // `unsafe` is needed.
+        next.par_iter_mut()
+            .zip(local_scratches.par_iter_mut())
+            .enumerate()
+            .for_each(|(j, (out_slot, scratch_j))| {
+                // Aggregate edges from all predecessors i into successor j.
+                scratch_j.aggregate.clear();
+                let mut any = false;
+                for i in 0..width_l {
+                    let edge_idx = i * width_next + j;
+                    edges_l[edge_idx].route_into(&current[i], scratch_j);
+                    let edge_len = scratch_j.edge_output.len();
+                    let seq_len_i = current[i].seq_len;
+                    if !any {
+                        scratch_j.aggregate.data[..edge_len]
+                            .copy_from_slice(&scratch_j.edge_output.data[..edge_len]);
+                        scratch_j.aggregate.seq_len = seq_len_i;
+                        scratch_j.aggregate.hidden_dim = edge_len / seq_len_i.max(1);
+                        any = true;
+                    } else {
+                        for (dst, src) in scratch_j.aggregate.data[..edge_len]
+                            .iter_mut()
+                            .zip(scratch_j.edge_output.data[..edge_len].iter())
+                        {
+                            *dst += *src;
+                        }
+                    }
+                }
+
+                // Forward the aggregated input through the shared node. Each
+                // rayon worker picks up its own (ctx, cache) slot from the
+                // node's internal pool — see TransformerNode::forward_dense.
+                let agg = scratch_j.aggregate.clone();
+                let out = node.forward_dense(&agg, l + 1, scratch_j);
+                *out_slot = out;
+            });
+
+        next
     }
 
     /// The topology shape.

@@ -193,6 +193,15 @@ pub struct MeshConfig {
     pub gpu_width_threshold: usize,
     /// Whether to route the output layer to ANE (Apple Silicon only).
     pub prefer_ane_output: bool,
+    /// Enable rayon vertex parallelism across hidden nodes when a hidden
+    /// layer's width ≥ [`MeshConfig::gpu_width_threshold`] (Issue 020, Path A).
+    ///
+    /// Defaults to `false` to preserve single-threaded scaling measurements
+    /// (e.g. `prof_dense_mesh`). Callers that want the paper's vertex-parameter-
+    /// sharing parallel speedup (Gate 4) must opt in. Each rayon worker borrows
+    /// the shared `&dyn DenseNode` and must pick up its own per-thread state
+    /// via `rayon::current_thread_index()` (see `TransformerNode::ctx_pool`).
+    pub enable_vertex_parallelism: bool,
 }
 
 impl Default for MeshConfig {
@@ -201,6 +210,7 @@ impl Default for MeshConfig {
             topology: Topology::chain(),
             gpu_width_threshold: 4,
             prefer_ane_output: true,
+            enable_vertex_parallelism: false,
         }
     }
 }

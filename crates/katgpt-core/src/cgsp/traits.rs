@@ -17,6 +17,10 @@
 //! scalars or write into caller-provided scratch buffers.
 
 use crate::cgsp::types::{Candidate, CycleResult, Direction, Priority, Target};
+// Note: `Candidate` import retained for `BatchQualityGate::is_degenerate`
+// (still receives `&[Candidate]`). The `Solver::attempt` signature now takes
+// `&Direction` + `pool_index` directly to avoid per-cycle `Candidate` clones
+// inside `CgspLoop::cycle()` (issue 021, Site 2).
 
 // ── CuriosityConjecturer ──────────────────────────────────────────────────
 
@@ -86,13 +90,24 @@ pub trait QualityGuide {
 /// Modelless counterpart of the SGS paper's `π_θ` (which is trained).
 /// No weight mutation — only reads.
 pub trait Solver {
-    /// Attempt `candidate` against `target`.
+    /// Attempt the candidate `direction` (from pool slot `pool_index`, or
+    /// `usize::MAX` for off-pool samples) against `target`.
     ///
     /// Returns the empirical solve-rate in `[0, 1]`. A return of `1.0`
     /// means the solver trivially succeeded (filtered out by the
     /// difficulty router), `0.0` means it failed outright (also filtered
     /// out — intermediate-difficulty band only).
-    fn attempt(&mut self, target: &Target, candidate: &Candidate) -> f32;
+    ///
+    /// The signature takes `&Direction` + `pool_index` rather than
+    /// `&Candidate` so the loop can pass a borrowed slot from
+    /// `ScratchBuffers::candidates` without cloning the inner `Vec<f32>`.
+    /// See issue 021 (Site 2) for the allocation root-cause this avoids.
+    fn attempt(
+        &mut self,
+        target: &Target,
+        candidate_direction: &Direction,
+        pool_index: usize,
+    ) -> f32;
 }
 
 // ── HintDeltaBandit ───────────────────────────────────────────────────────

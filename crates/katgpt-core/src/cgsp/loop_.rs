@@ -23,8 +23,8 @@ use crate::cgsp::traits::{
     NoOpBatchGate, NoOpDifficultyFilter, QualityGuide, Solver,
 };
 use crate::cgsp::types::{
-    entropy_nats, Candidate, CuriosityPrioritySnapshot, CycleResult, CycleStats, Direction,
-    Priority, ScratchBuffers, Target,
+    entropy_nats, CuriosityPrioritySnapshot, CycleResult, CycleStats, Direction, Priority,
+    ScratchBuffers, Target,
 };
 
 // ── CgspConfig ────────────────────────────────────────────────────────────
@@ -203,20 +203,19 @@ where
     /// Run one CGSP cycle. Writes into `scratch`, returns raw observables.
     ///
     /// Zero-allocation in steady state — every write goes into `scratch`.
+    ///
+    /// See issue 021 for the two allocation sites that historically broke
+    /// this invariant (now fixed by Option A + Option B):
+    /// - Site 1 (clear+resize on `scratch.candidates`) → replaced by
+    ///   [`ScratchBuffers::ensure_len`], which materialises slots once.
+    /// - Site 2 (`candidates[i].clone()` to dodge a borrow conflict) →
+    ///   removed by changing [`Solver::attempt`] to take `&Direction`.
     pub fn cycle(&mut self, target: &Target, scratch: &mut ScratchBuffers) -> CycleResult {
         scratch.reset();
         let k = self.config.k;
-        // Defensive resize in case the caller reused scratch with a different k.
-        if scratch.candidates.capacity() < k {
-            scratch.candidates.reserve(k - scratch.candidates.capacity());
-        }
-        // Grow to exactly k via truncate-after-fill pattern; we already cleared.
-        // Pre-size all parallel slices to k so indexing is safe below.
-        scratch.candidates.resize(k, Candidate::new(Direction::zeros(target.dim()), usize::MAX));
-        scratch.guide_scores.resize(k, 0.0);
-        scratch.admitted.resize(k, false);
-        scratch.solve_rates.resize(k, 0.0);
-        scratch.r_synth.resize(k, 0.0);
+        // Materialise exactly k reusable slots once, then overwrite in place
+        // every cycle. Alloc-free in steady state (issue 021 Site 1).
+        scratch.ensure_len(k, target.dim());
 
         // Split the mutable borrow so we can hand disjoint fields to the
         // conjecturer (`candidates` + `cdf_scratch`) while keeping the rest
@@ -268,10 +267,14 @@ where
                 continue;
             }
             admitted_count += 1;
-            // Borrow dance: clone the candidate so we don't alias `solver`
-            // and the `candidates` slice.
-            let cand = candidates[i].clone();
-            let rate = self.solver.attempt(target, &cand);
+            // Borrow the direction + pool_index directly from the scratch
+            // slot — no `Candidate` clone (issue 021, Site 2). The solver
+            // trait takes `&Direction` + `pool_index` precisely so this call
+            // site can pass disjoint fields without aliasing `solver`.
+            let pool_index = candidates[i].pool_index;
+            let rate = self
+                .solver
+                .attempt(target, &candidates[i].direction, pool_index);
             let rate_clamped = rate.clamp(0.0, 1.0);
             solve_rates[i] = rate_clamped;
             if rate_clamped > 0.5 {
@@ -553,8 +556,13 @@ mod tests {
         pub sharpness: f32,
     }
     impl Solver for DotSolver {
-        fn attempt(&mut self, target: &Target, candidate: &Candidate) -> f32 {
-            let d = candidate.direction.dot(&target.direction);
+        fn attempt(
+            &mut self,
+            target: &Target,
+            candidate_direction: &Direction,
+            _pool_index: usize,
+        ) -> f32 {
+            let d = candidate_direction.dot(&target.direction);
             // Map dot in [-1, 1] to solve-rate in [0, 1] via sigmoid.
             crate::cgsp::types::sigmoid(self.sharpness * d)
         }

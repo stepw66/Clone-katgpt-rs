@@ -21,7 +21,12 @@ use super::types::{DenseHidden, MeshScratch};
 /// Per paper §3.3, all nodes share the same pre-trained LLM weights `θ_v`.
 /// Implementations should reuse a single transformer forward function — only
 /// the active LoRA edge differs per branch.
-pub trait DenseNode {
+///
+/// `Send + Sync` is required so that [`super::topology::LayerwiseTopology`] can
+/// share `&self.node` across rayon worker threads when vertex parallelism is
+/// enabled (Issue 020, Path A). Implementations must use thread-safe interior
+/// mutability (e.g. `Mutex`, not `RefCell`) for any per-call mutable state.
+pub trait DenseNode: Send + Sync {
     /// Forward pass: consume `input` hidden state, produce output hidden state.
     ///
     /// `scratch` is a pre-allocated reusable buffer (plasma tier) — use it for

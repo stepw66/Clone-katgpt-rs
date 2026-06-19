@@ -658,8 +658,13 @@ mod tests {
         sharpness: f32,
     }
     impl crate::cgsp::traits::Solver for DotSolver {
-        fn attempt(&mut self, target: &Target, candidate: &Candidate) -> f32 {
-            let d = candidate.direction.dot(&target.direction);
+        fn attempt(
+            &mut self,
+            target: &Target,
+            candidate_direction: &Direction,
+            _pool_index: usize,
+        ) -> f32 {
+            let d = candidate_direction.dot(&target.direction);
             crate::cgsp::types::sigmoid(self.sharpness * d)
         }
     }

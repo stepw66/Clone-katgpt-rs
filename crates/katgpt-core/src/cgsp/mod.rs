@@ -109,8 +109,13 @@ mod integration_tests {
         pub sharpness: f32,
     }
     impl Solver for DotSolver {
-        fn attempt(&mut self, target: &Target, candidate: &Candidate) -> f32 {
-            let d = candidate.direction.dot(&target.direction);
+        fn attempt(
+            &mut self,
+            target: &Target,
+            candidate_direction: &Direction,
+            _pool_index: usize,
+        ) -> f32 {
+            let d = candidate_direction.dot(&target.direction);
             sigmoid(self.sharpness * d)
         }
     }
