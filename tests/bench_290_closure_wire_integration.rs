@@ -125,8 +125,8 @@ fn tar_proxy_distinguishes_baseline_and_perturbed() {
         }
     }
 
-    let base: Vec<_> = miner_base.recent_ptgs.clone();
-    let pert: Vec<_> = miner_pert.recent_ptgs.clone();
+    let base: Vec<_> = miner_base.recent_ptgs.iter().cloned().collect();
+    let pert: Vec<_> = miner_pert.recent_ptgs.iter().cloned().collect();
     let tar = compute_tar_score(&base, &pert);
     // Same corpus → 1.0.
     let tar_same = compute_tar_score(&base, &base);

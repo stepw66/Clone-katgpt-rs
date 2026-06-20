@@ -22,7 +22,7 @@
 //! thread-local `std::collections::HashMap` and the results are merged
 //! serially afterwards.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
 use papaya::HashMap as PapayaMap;
 use rayon::prelude::*;
@@ -290,8 +290,10 @@ fn write_varint_u32(out: &mut [u8], mut v: u32) -> usize {
 /// lock contention (per AGENTS.md "Parallelism / Rayon": no locks in
 /// parallel sections).
 pub struct MotifMiner {
-    /// Ring buffer of recent PTGs (FIFO eviction).
-    pub recent_ptgs: Vec<PrimitiveTransitionGraph>,
+    /// Ring buffer of recent PTGs (FIFO eviction). `VecDeque` so
+    /// [`MotifMiner::observe`] eviction is O(1) instead of the O(RING_BUFFER_K)
+    /// memmove that `Vec::remove(0)` would cost.
+    pub recent_ptgs: VecDeque<PrimitiveTransitionGraph>,
     /// Shared motif index. Written by `mine_batch()` only.
     pub motif_index: PapayaMap<[u8; 32], Motif>,
 }
@@ -302,19 +304,22 @@ impl MotifMiner {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            recent_ptgs: Vec::with_capacity(RING_BUFFER_K),
+            recent_ptgs: VecDeque::with_capacity(RING_BUFFER_K),
             motif_index: PapayaMap::new(),
         }
     }
 
     /// Push a PTG; evict the oldest if we've exceeded `RING_BUFFER_K` (FIFO).
+    ///
+    /// O(1) amortized — `VecDeque::pop_front` is constant-time vs the O(n)
+    /// `Vec::remove(0)` shift the previous `Vec` backing incurred.
     #[inline]
     pub fn observe(&mut self, ptg: PrimitiveTransitionGraph) {
         if self.recent_ptgs.len() >= RING_BUFFER_K {
             // FIFO eviction — drop the front.
-            self.recent_ptgs.remove(0);
+            self.recent_ptgs.pop_front();
         }
-        self.recent_ptgs.push(ptg);
+        self.recent_ptgs.push_back(ptg);
     }
 
     /// Enumerate all connected subgraphs of bounded size across all recent
@@ -693,7 +698,10 @@ mod tests {
         assert_eq!(miner.recent_ptgs[0].task_family_id, 5);
         // Latest is the last one pushed.
         let last_id = (RING_BUFFER_K + 4) as u32;
-        assert_eq!(miner.recent_ptgs.last().unwrap().task_family_id, last_id);
+        assert_eq!(
+            miner.recent_ptgs.back().unwrap().task_family_id,
+            last_id
+        );
     }
 
     /// The hand-rolled varint encoder in `canonical_hash` must produce

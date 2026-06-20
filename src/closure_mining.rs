@@ -109,7 +109,13 @@ pub fn mine_motifs_at_sleep_cycle(
     //    the denominator for the motif-level PRI the admitter computes.
     //    PRI's denominator is "distinct task families observed", not
     //    "distinct primitives" — count from the snapshot.
-    let corpus_snapshot: Vec<PrimitiveTransitionGraph> = miner.recent_ptgs.clone();
+    //
+    //    Iter-clone into a `Vec` (rather than `.clone()` on the field) because
+    //    `recent_ptgs` is a `VecDeque` for O(1) FIFO eviction; collect-as-Vec
+    //    gives `compute_pri` / `count_distinct_task_families` the `&[T]` they
+    //    expect and skips a redundant intermediate `VecDeque` allocation.
+    let corpus_snapshot: Vec<PrimitiveTransitionGraph> =
+        miner.recent_ptgs.iter().cloned().collect();
     let pri = compute_pri(&corpus_snapshot);
     let total_task_families = count_distinct_task_families(&corpus_snapshot);
 
