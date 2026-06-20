@@ -97,7 +97,10 @@ fn normalize(x: f32, y: f32) -> (f32, f32) {
     if mag < EPSILON {
         return (0.0, 0.0);
     }
-    (x / mag, y / mag)
+    // Reciprocal multiply: 1 div + 2 mul beats 2 div on x86/arm64
+    // (divss latency ≈ 4–11 cycles vs mulss ≈ 3–4 cycles).
+    let inv = 1.0 / mag;
+    (x * inv, y * inv)
 }
 
 #[cfg(test)]

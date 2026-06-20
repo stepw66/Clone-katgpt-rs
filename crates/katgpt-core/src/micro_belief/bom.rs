@@ -431,13 +431,23 @@ impl BoMSampler for LeakyIntegrator {
         let scale = lr * t_min / total;
         let half_total = 0.5 * total;
 
+        // Hoist the k-invariant base delta into a stack buffer (≤ 1024 f32, matches
+        // AttractorKernel::step's cap). The K elementwise perturbations then become
+        // a single `add + clamp + clamp` per (k, j) — no per-k mul/sub.
+        // Precomputing saves K×dim multiplications (256 at the G3 K=8/dim=32 budget).
+        let mut base_delta = [0.0f32; 1024];
+        debug_assert!(dim <= base_delta.len(), "dim {dim} exceeds stack buffer");
+        for j in 0..dim {
+            base_delta[j] = scale * (x[j] - half_total);
+        }
+
         // K elementwise perturbations of the pre-clamp delta.
         for k_idx in 0..k {
             let q_base = k_idx * dim;
             let out_base = k_idx * dim;
             for j in 0..dim {
-                // Deterministic delta from leaky_step + noise perturbation.
-                let delta = scale * (x[j] - half_total) + queries[q_base + j];
+                // Base delta (precomputed) + noise perturbation.
+                let delta = base_delta[j] + queries[q_base + j];
                 let clamped_delta = delta.clamp(-max_delta, max_delta);
                 out[out_base + j] = (s_prev[j] + clamped_delta).clamp(-1.0, 1.0);
             }

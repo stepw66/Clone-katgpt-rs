@@ -8,19 +8,6 @@
 
 // Sigmoid delegates to shared crate::simd::fast_sigmoid (bounded (0,1), libm-exp).
 
-/// Dot product of an `f32` Q-value vector with an `i8` ternary direction vector.
-///
-/// `sum(q_values[i] * direction[i] as f32)`
-#[inline(always)]
-fn dot_f32_i8<const D: usize>(q_values: &[f32; D], direction: &[i8; D]) -> f32 {
-    let mut acc = 0.0f32;
-    for i in 0..D {
-        // FMA: acc = q[i] * dir[i] + acc (single rounding when target has FMA).
-        acc = (q_values[i]).mul_add(direction[i] as f32, acc);
-    }
-    acc
-}
-
 /// Bridges latent Q-values to raw game actions via sigmoid-gated projection.
 ///
 /// Generic over action space size (`A`) and latent dimension (`D`).
@@ -30,13 +17,23 @@ fn dot_f32_i8<const D: usize>(q_values: &[f32; D], direction: &[i8; D]) -> f32 {
 ///
 /// Zero allocation, fixed-size. Uses `sigmoid(dot())` — never softmax.
 ///
+/// # Direction storage: `f32`, not `i8`
+///
+/// Direction vectors are stored as `f32` even though the public constructor
+/// takes `i8` ternary values. The `i8 as f32` cast inside the dot-product loop
+/// previously blocked LLVM's auto-vectorizer (forced scalar FMA chain). With
+/// pre-converted `f32` directions, the inner loop is a plain FMA chain that
+/// maps to SIMD lanes. Direction memory is `A·D·4` bytes — negligible vs the
+/// Q-value vector it multiplies against.
+///
 /// ## Type Parameters
 ///
 /// - `A` — Number of actions in the action space (e.g., 6 for abilities).
 /// - `D` — Dimension of the Q-value/latent vector (e.g., 8 for HLA state).
 pub struct ActionBridge<const A: usize, const D: usize> {
-    /// Direction vectors per action (ternary `{-1, 0, +1}`).
-    action_directions: [[i8; D]; A],
+    /// Direction vectors per action as `f32` (cast once at construction from
+    /// ternary `i8` inputs). See struct docs for the SIMD rationale.
+    action_directions: [[f32; D]; A],
     /// Confidence threshold — actions below this are suppressed.
     threshold: f32,
 }
@@ -44,12 +41,22 @@ pub struct ActionBridge<const A: usize, const D: usize> {
 impl<const A: usize, const D: usize> ActionBridge<A, D> {
     /// Creates a new `ActionBridge` from direction vectors and a confidence threshold.
     ///
-    /// The threshold gates which actions are considered valid. Actions whose
-    /// projected sigmoid score falls below the threshold are suppressed.
+    /// `i8` ternary directions are converted to `f32` once at construction
+    /// (see struct docs). The threshold gates which actions are considered
+    /// valid: actions whose projected sigmoid score falls below the threshold
+    /// are suppressed.
     #[inline]
     pub fn new(directions: [[i8; D]; A], threshold: f32) -> Self {
+        // One-time i8→f32 cast: pays 4× direction memory for SIMD-vectorizable
+        // dot products on every select_action/select_top_k call thereafter.
+        let mut f32_directions = [[0.0f32; D]; A];
+        for a in 0..A {
+            for d in 0..D {
+                f32_directions[a][d] = directions[a][d] as f32;
+            }
+        }
         Self {
-            action_directions: directions,
+            action_directions: f32_directions,
             threshold,
         }
     }
@@ -72,7 +79,13 @@ impl<const A: usize, const D: usize> ActionBridge<A, D> {
         let mut best_score = f32::MIN;
 
         for a in 0..A {
-            let dot = dot_f32_i8(q_values, &self.action_directions[a]);
+            let dir = &self.action_directions[a];
+            let mut dot = 0.0f32;
+            // Plain f32 FMA chain — LLVM maps to SIMD lanes (vfmla on NEON,
+            // vfmadd on AVX2). The earlier `i8 as f32` cast here blocked this.
+            for d in 0..D {
+                dot = q_values[d].mul_add(dir[d], dot);
+            }
             let score = crate::simd::fast_sigmoid(dot);
             if score > best_score {
                 best_score = score;
@@ -101,11 +114,16 @@ impl<const A: usize, const D: usize> ActionBridge<A, D> {
             return 0;
         }
 
-        // Compute all scores into a stack buffer.
+        // Compute all scores into a stack buffer. Inner dot-product is now a
+        // plain f32 FMA chain (auto-vectorized).
         let mut scores = [0.0f32; A];
-        for (a, score) in scores.iter_mut().enumerate() {
-            let dot = dot_f32_i8(q_values, &self.action_directions[a]);
-            *score = crate::simd::fast_sigmoid(dot);
+        for a in 0..A {
+            let dir = &self.action_directions[a];
+            let mut dot = 0.0f32;
+            for d in 0..D {
+                dot = q_values[d].mul_add(dir[d], dot);
+            }
+            scores[a] = crate::simd::fast_sigmoid(dot);
         }
 
         // Track which action indices have already been selected.

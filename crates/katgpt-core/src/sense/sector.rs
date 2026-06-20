@@ -8,33 +8,32 @@
 
 // Sigmoid delegates to shared crate::simd::fast_sigmoid (bounded (0,1), libm-exp).
 
-/// Dot product of an `f32` observation vector with an `i8` ternary direction vector.
-///
-/// `sum(observation[i] * direction[i] as f32)`
-#[inline(always)]
-fn dot_f32_i8<const D: usize>(observation: &[f32; D], direction: &[i8; D]) -> f32 {
-    let mut acc = 0.0f32;
-    for i in 0..D {
-        // FMA: acc = obs[i] * dir[i] + acc (single rounding when target has FMA).
-        acc = (observation[i]).mul_add(direction[i] as f32, acc);
-    }
-    acc
-}
-
 /// Multi-sector spatial projection for NPC perception.
 ///
 /// Divides space around an NPC into `N` sectors, projects each into a latent
-/// score using pre-computed ternary direction vectors.
+/// score using pre-computed ternary direction vectors (`{-1, 0, +1}`) and a
+/// sigmoid non-linearity.
 ///
 /// Zero allocation, fixed-size. Uses `sigmoid(dot())` — never softmax.
 ///
-/// ## Type Parameters
+/// # Direction storage: `f32`, not `i8`
 ///
-/// - `N` — Number of sectors (e.g., 4 for quadrant, 8 for octant).
-/// - `D` — Dimension of the observation/latent vector (e.g., 8 for HLA state).
+/// Direction vectors are stored as `f32` even though the public constructor
+/// takes `i8` ternary values. This trades 4× direction memory for SIMD
+/// auto-vectorization: an `i8 as f32` cast inside the dot-product loop
+/// previously defeated LLVM's vectorizer, forcing a scalar reduction. With
+/// pre-converted `f32` directions, the inner loop is a plain FMA chain that
+/// the compiler maps to `vfmla`/`vfmadd` lanes. Direction memory is `N·D·4`
+/// bytes (e.g. 256 B at N=8, D=8) — negligible vs the L1-resident observation
+/// vector it multiplies against.
 pub struct SectorProjection<const N: usize, const D: usize> {
-    /// Pre-computed direction vectors per sector (ternary `{-1, 0, +1}`).
-    sector_directions: [[i8; D]; N],
+    /// Pre-computed direction vectors per sector as `f32` (cast once at
+    /// construction from ternary `i8` inputs). Storing `f32` instead of the
+    /// original `i8` lets the dot-product inner loop auto-vectorize — the
+    /// `i8 as f32` cast was the one instruction LLVM refused to hoist out of
+    /// the reduction. Direction vectors are immutable after `new()` /
+    /// `update_directions()`, so the f32 representation is the canonical form.
+    sector_directions: [[f32; D]; N],
     /// Last projection scores per sector (updated on `project` call).
     scores: [f32; N],
 }
@@ -42,11 +41,21 @@ pub struct SectorProjection<const N: usize, const D: usize> {
 impl<const N: usize, const D: usize> SectorProjection<N, D> {
     /// Creates a new `SectorProjection` from pre-computed direction vectors.
     ///
-    /// Scores are initialized to zero. Call `project` to compute them.
+    /// The `i8` ternary directions are converted to `f32` once at construction
+    /// (see struct docs for the SIMD rationale). Scores are initialized to
+    /// zero; call `project` to compute them.
     #[inline]
     pub fn new(directions: [[i8; D]; N]) -> Self {
+        // One-time i8→f32 cast: pays 4× direction memory for SIMD-vectorizable
+        // dot products on every `project()` call thereafter.
+        let mut f32_directions = [[0.0f32; D]; N];
+        for i in 0..N {
+            for j in 0..D {
+                f32_directions[i][j] = directions[i][j] as f32;
+            }
+        }
         Self {
-            sector_directions: directions,
+            sector_directions: f32_directions,
             scores: [0.0; N],
         }
     }
@@ -55,13 +64,20 @@ impl<const N: usize, const D: usize> SectorProjection<N, D> {
     ///
     /// For each sector `i`: `scores[i] = sigmoid(dot(observation, sector_directions[i]))`.
     ///
-    /// Zero allocation — writes into the internal fixed-size buffer.
+    /// Zero allocation — writes into the internal fixed-size buffer. Inner
+    /// dot-product is auto-vectorizable (plain `f32 × f32` FMA chain).
     ///
     /// Returns a reference to the updated scores array.
     #[inline]
     pub fn project(&mut self, observation: &[f32; D]) -> &[f32; N] {
         for i in 0..N {
-            let dot = dot_f32_i8(observation, &self.sector_directions[i]);
+            let dir = &self.sector_directions[i];
+            let mut dot = 0.0f32;
+            // Plain f32 FMA chain — LLVM maps to SIMD lanes (vfmla on NEON,
+            // vfmadd on AVX2). The earlier `i8 as f32` cast here blocked this.
+            for j in 0..D {
+                dot = observation[j].mul_add(dir[j], dot);
+            }
             self.scores[i] = crate::simd::fast_sigmoid(dot);
         }
         &self.scores
@@ -73,7 +89,11 @@ impl<const N: usize, const D: usize> SectorProjection<N, D> {
     /// game phase or threat level.
     #[inline]
     pub fn update_directions(&mut self, new_directions: [[i8; D]; N]) {
-        self.sector_directions = new_directions;
+        for i in 0..N {
+            for j in 0..D {
+                self.sector_directions[i][j] = new_directions[i][j] as f32;
+            }
+        }
     }
 
     /// Read-only access to the last computed scores.

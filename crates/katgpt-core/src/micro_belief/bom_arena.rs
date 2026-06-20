@@ -54,10 +54,15 @@
 //! - Source paper: [arXiv:2604.04913](https://arxiv.org/abs/2604.04913)
 
 use crate::micro_belief::{
-    AttractorKernel, BoMSampler, LeakyIntegrator, MicroRecurrentBeliefState, NoiseQueryConfig,
+    AttractorKernel, BoMSampler, LeakyIntegrator, NoiseQueryConfig,
 };
+// `MicroRecurrentBeliefState` is needed by the `#[cfg(test)]` module via
+// `use super::*` (the `.step()` / `.dim()` methods are trait methods). Listed
+// separately with `#[cfg(test)]` so the non-test build stays warning-clean.
+#[cfg(test)]
+use crate::micro_belief::MicroRecurrentBeliefState;
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────────────────
 // Traits — the abstraction boundary between engine and fuel
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -315,7 +320,6 @@ impl<K: BoMSampler> BeliefPlanner for BoMMinimaxPlanner<K> {
         env_hint: &dyn EnvHint,
     ) -> ArenaAction {
         let dim = self.kernel.dim();
-        let k = self.cfg.k;
 
         // Deterministic per-tick seed: mix a fixed salt with the dot-product
         // of (state, observation). This keeps queries deterministic for the
@@ -354,35 +358,14 @@ impl<K: BoMSampler> BeliefPlanner for BoMMinimaxPlanner<K> {
         // threat) is near-optimal and BoM cannot beat it by hedging. On
         // richer envs (riir-ai's bomber/go), the observation is partial and
         // the kernel's belief integrates multiple ticks; there, high
-        // hypothesis dispersion genuinely warrants hedging. Here we compute
-        // the dispersion as a *diagnostic* (future richer envs may use it)
-        // but commit to the deterministic action — this keeps the smoke test
-        // honest (BoM doesn't catastrophically underperform just because the
-        // harness is wired up).
+        // hypothesis dispersion genuinely warrants hedging. Here we commit
+        // to the deterministic action — this keeps the smoke test honest
+        // (BoM doesn't catastrophically underperform just because the harness
+        // is wired up).
         //
-        // Diagnostic: K-hypothesis dispersion on the threat subspace.
-        #[allow(unused_assignments)]
-        {
-            let mut mean_x = 0.0f32;
-            let mut mean_y = 0.0f32;
-            for k_idx in 0..k {
-                let hyp = &self.hypotheses[k_idx * dim..(k_idx + 1) * dim];
-                mean_x += hyp.first().copied().unwrap_or(0.0);
-                mean_y += hyp.get(1).copied().unwrap_or(0.0);
-            }
-            let inv_k = 1.0 / k as f32;
-            mean_x *= inv_k;
-            mean_y *= inv_k;
-            let mut var = 0.0f32;
-            for k_idx in 0..k {
-                let hyp = &self.hypotheses[k_idx * dim..(k_idx + 1) * dim];
-                let dx = hyp.first().copied().unwrap_or(0.0) - mean_x;
-                let dy = hyp.get(1).copied().unwrap_or(0.0) - mean_y;
-                var += dx * dx + dy * dy;
-            }
-            // Future richer envs: `if var > threshold { hedge }`.
-            let _dispersion = var * inv_k;
-        }
+        // Note: a K-hypothesis dispersion diagnostic used to live here but
+        // was removed (dead code, computed every tick but never consumed).
+        // If a richer env ever needs it, restore from git history.
 
         let threat = env_hint.threat_vec();
         evade_action_for_direction(threat)
@@ -464,12 +447,14 @@ impl<K: BoMSampler> BeliefPlanner for BoMMeanPlanner<K> {
             &mut self.hypotheses,
             &self.cfg,
         );
-        // Mean across K hypotheses.
+        // Mean across K hypotheses. Use `simd_add_inplace` per K-row (length
+        // `dim`) instead of the scalar inner loop — the SIMD kernel auto-vectorizes
+        // the `dim`-wide accumulation. For dim=32, K=8 this is 8 SIMD dispatches
+        // vs 256 scalar adds.
         self.mean.iter_mut().for_each(|v| *v = 0.0);
         for k_idx in 0..k {
-            for j in 0..dim {
-                self.mean[j] += self.hypotheses[k_idx * dim + j];
-            }
+            let row = &self.hypotheses[k_idx * dim..(k_idx + 1) * dim];
+            crate::simd::simd_add_inplace(&mut self.mean[..dim], row);
         }
         let inv_k = 1.0 / k as f32;
         for v in self.mean.iter_mut() {
@@ -479,15 +464,22 @@ impl<K: BoMSampler> BeliefPlanner for BoMMeanPlanner<K> {
         // evolves consistently with what it planned against).
         state[..dim].copy_from_slice(&self.mean[..dim]);
 
-        // Evade the mean's implied threat direction.
-        let hx = self.mean.first().copied().unwrap_or(0.0);
-        let hy = self.mean.get(1).copied().unwrap_or(0.0);
+        // Evade the mean's implied threat direction. Direct index when
+        // `dim >= 2` (the invariant guaranteed by `SyntheticThreatArena::new`
+        // and `BoMMeanPlanner::new`'s `mean: vec![0.0; dim]`). Fall back to the
+        // env hint's threat for degenerate `dim < 2` kernels.
+        if dim < 2 {
+            return evade_action_for_direction(env_hint.threat_vec());
+        }
+        let hx = self.mean[0];
+        let hy = self.mean[1];
         let hmag = (hx * hx + hy * hy).sqrt();
         if hmag < 1e-6 {
             // No implied threat — pick the env hint's threat.
             evade_action_for_direction(env_hint.threat_vec())
         } else {
-            evade_action_for_direction([hx / hmag, hy / hmag])
+            let inv = 1.0 / hmag;
+            evade_action_for_direction([hx * inv, hy * inv])
         }
     }
 }
@@ -545,6 +537,10 @@ pub struct SyntheticThreatArena {
     tick_idx: usize,
     /// Maximum ticks per episode.
     max_ticks: usize,
+    /// Cached `1.0 / max_ticks as f32` — avoids a divss on every successful
+    /// evasion in the hot `tick()` path. Set once in `new`; `max_ticks` never
+    /// mutates after construction.
+    inv_max_ticks: f32,
     /// Hits taken so far.
     hits_taken: u32,
     /// Maximum hits before episode ends.
@@ -564,10 +560,13 @@ impl SyntheticThreatArena {
     /// `max_ticks / 2` (so the NPC can survive if it evades ~half the threats).
     pub fn new(dim: usize, max_ticks: usize) -> Self {
         assert!(dim >= 2, "SyntheticThreatArena requires dim >= 2");
+        // Guard against max_ticks == 0 to avoid div-by-zero in the cached reciprocal.
+        let inv_max_ticks = if max_ticks == 0 { 0.0 } else { 1.0 / max_ticks as f32 };
         Self {
             obs: vec![0.0; dim],
             tick_idx: 0,
             max_ticks,
+            inv_max_ticks,
             hits_taken: 0,
             max_hits: (max_ticks / 2).max(1) as u32,
             current_threat: [0.0, 0.0],
@@ -590,13 +589,20 @@ impl EnvHint for SyntheticThreatArena {
     #[inline]
     fn threat_vec(&self) -> [f32; 2] {
         // Observation's first two dims = noisy threat estimate. Normalise.
-        let hx = self.obs.first().copied().unwrap_or(0.0);
-        let hy = self.obs.get(1).copied().unwrap_or(0.0);
+        // `SyntheticThreatArena::new` asserts `dim >= 2`, so direct index is safe
+        // and skips the `Option` machinery of `.first().copied().unwrap_or(0.0)`.
+        // (We still guard `obs.len() < 2` for paranoia — should never trigger.)
+        if self.obs.len() < 2 {
+            return [0.0, 0.0];
+        }
+        let hx = self.obs[0];
+        let hy = self.obs[1];
         let mag = (hx * hx + hy * hy).sqrt();
         if mag < 1e-6 {
             [0.0, 0.0]
         } else {
-            [hx / mag, hy / mag]
+            let inv = 1.0 / mag;
+            [hx * inv, hy * inv]
         }
     }
 }
@@ -620,8 +626,9 @@ impl ArenaEnvironment for SyntheticThreatArena {
         {
             self.hits_taken += 1;
         } else if evasion_dot > 0.0 {
-            // Successfully evaded a real threat.
-            self.reward += 1.0 / self.max_ticks as f32;
+            // Successfully evaded a real threat. Use cached reciprocal to
+            // replace `divss` with `mulss` on the hot tick path.
+            self.reward += self.inv_max_ticks;
         }
 
         self.tick_idx += 1;
@@ -859,6 +866,9 @@ where
     let start = std::time::Instant::now();
     let mut scores: Vec<f32> = Vec::with_capacity(n_episodes);
     let mut wins = 0u32;
+    // Belief vector reused across episodes (resized if needed, zeroed each reset).
+    // Allocated once here to amortize heap traffic across `n_episodes`.
+    let mut state: Vec<f32> = Vec::new();
 
     for ep in 0..n_episodes {
         let mut env = env_factory();
@@ -867,14 +877,30 @@ where
 
         // The planner holds its own belief state — we allocate it here so it
         // resets per episode (otherwise belief leaks across episodes, which
-        // would invalidate the comparison).
+        // would invalidate the comparison). Hoist the allocation outside the
+        // episode loop and zero in place to avoid per-episode heap traffic.
+        // Lazily size on the first episode (dim is constant across episodes for
+        // a given environment factory).
         let dim = env.observe().len();
-        let mut state = vec![0.0f32; dim];
+        if state.len() != dim {
+            state.resize(dim, 0.0);
+        } else {
+            // Per-episode reset: planner sees a clean belief vector.
+            for v in state.iter_mut() {
+                *v = 0.0;
+            }
+        }
 
         let mut ticks = 0usize;
         while !env.is_terminal() && ticks < max_ticks_per_episode {
-            let obs = env.observe().to_vec(); // copy so we can borrow env mutably
-            let action = planner.plan_action(&mut state, &obs, &env);
+            // Borrow `obs` only for the duration of `plan_action`; it drops before
+            // `apply_action`/`tick` mutably borrow `env`. No `.to_vec()` needed:
+            // the planner trait takes `&dyn EnvHint` (shared borrow), not a unique
+            // borrow, so two simultaneous shared borrows of `env` are fine.
+            let action = {
+                let obs = env.observe();
+                planner.plan_action(&mut state, obs, &env)
+            };
             env.apply_action(action);
             env.tick();
             ticks += 1;
