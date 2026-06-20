@@ -3,7 +3,7 @@
 > **Research:** [katgpt-rs/.research/243_Bebop_Entropy_Bounded_MTP_Acceptance_Adaptive_Gamma.md](../.research/243_Bebop_Entropy_Bounded_MTP_Acceptance_Adaptive_Gamma.md)
 > **Source paper:** [arXiv:2606.12370](https://arxiv.org/abs/2606.12370) — Bebop (Qwen Team), §3 (entropy–acceptance bound), §7.6 (adaptive-γ future work)
 > **Date:** 2026-06-16
-> **Status:** Open — optimization task (Gain tier, GOAT gate required)
+> **Status:** CLOSED (keep-opt-in — GOAT gate failed: -9.25% throughput)
 > **Type:** Optimization (per AGENTS.md: optimization tasks → issues, not plans)
 
 ---
@@ -52,12 +52,12 @@ Benchmark `accepted_tokens/sec` and `μs/step` with feature ON vs OFF, on a work
 
 ## Tasks
 
-- [ ] **T1** Implement `AcceptanceForecast` primitive in `crates/katgpt-core/src/` (or `src/speculative/`), with `observe_and_forecast` + `adaptive_gamma` methods.
-- [ ] **T2** Add feature flag `adaptive_gamma_forecast` (default-OFF).
-- [ ] **T3** Fit `a, b` from warmup: run N steps of standard spec-decode, record `(H(p_t), actual_accept_rate_t)` pairs, linear-fit. Expose fit via a `fit_from_warmup` constructor.
-- [ ] **T4** Wire `γ_t = adaptive_gamma(...)` into the speculative decode loop, replacing static `draft_lookahead` when feature is ON.
-- [ ] **T5** Benchmark on entropy-varying workload (long CoT, agentic multi-turn). Record `accepted_tokens/sec`, `μs/step`, output-distribution KL vs feature-OFF baseline.
-- [ ] **T6** GOAT decision: promote / demote / close.
+- [x] **T1** Implement `AcceptanceForecast` primitive in `src/speculative/acceptance_forecast.rs`, with `observe_and_forecast` + `adaptive_gamma` + `fit_from_warmup` + `forecast_alpha_current`. 20/20 unit tests pass.
+- [x] **T2** Add feature flag `adaptive_gamma_forecast` (default-OFF, also in `full`).
+- [x] **T3** `fit_from_warmup` OLS constructor implemented + tested (recovers known line, handles degenerate, clamps).
+- [x] **T4** Wired `γ_t = adaptive_gamma(...)` into `LeviathanVerifier::speculate()`, replacing static `draft_lookahead` when feature ON. Uses a shadow `Config` clone with overridden `draft_lookahead`.
+- [x] **T5** Benchmark on entropy-varying workload (`bench_023_adaptive_gamma.goat.rs`). **Result: -9.25% throughput (release).** KL = 0.000000 (quality preserved). Forecast overhead 0.529 μs/step (3.2%).
+- [x] **T6** GOAT decision: **keep-opt-in** (do NOT promote to default). See closure rationale below.
 
 ## References
 
@@ -66,3 +66,27 @@ Benchmark `accepted_tokens/sec` and `μs/step` with feature ON vs OFF, on a work
 - `src/llmexec_guard.rs` (existing ad-hoc entropy gate — candidate for demotion)
 - `src/attn_match/adaptive_cot.rs:159` (EMA entropy helper to reuse)
 - `src/freq_bandit.rs:315` (acceptance-rate bandit reward — forecast becomes prior)
+
+---
+
+## Closure rationale (2026-06-20)
+
+**GOAT verdict: keep-opt-in (do NOT promote to default).** The benchmark measured **-9.25% throughput** (release, batched-verify cost model) with adaptive γ ON vs static γ=8 OFF, far below the +5% promotion bar. The output-distribution KL was 0.000000 nats (rejection sampling preserves the target distribution regardless of γ — the quality invariant holds). Forecast computation overhead was 0.529 μs/step (3.2% of the 16.53 μs step cost).
+
+**Root cause of the negative result:** the paper's formula `γ = ceil(L_target / α)` *increases* γ when the forecast acceptance rate α drops (high entropy). This is correct for tree-based spec decode where the target forward cost is amortised over all drafted positions (constant C_verify regardless of γ), but counterproductive when draft cost scales linearly with γ (our model: `C_total = γ·C_draft + C_verify + C_fixed`). At low α, increasing γ adds draft cost without proportionally increasing accepted tokens — the marginal token is more likely to be rejected.
+
+**What landed behind the flag (default-OFF, GOAT-gated):**
+- `src/speculative/acceptance_forecast.rs` — `AcceptanceForecast` primitive with zero-alloc `entropy_nats_zero_alloc` (2-pass, no Vec/Box), `fit_from_warmup` OLS constructor, `observe_and_forecast`, `adaptive_gamma`, `forecast_alpha_current`. 20/20 unit tests.
+- `LeviathanVerifier::with_forecast()` + shadow-config γ override in `speculate()`.
+- `tests/bench_023_adaptive_gamma.goat.rs` — GOAT gate benchmark with real-measured forecast overhead.
+
+**Why keep-opt-in instead of close-as-won't-fix:** the primitive and the proven linear entropy–acceptance bound (`α ≈ a − b·H`) are both correct and reusable. The negative result is specific to the `γ = ceil(L/α)` *formula* under the current non-batched verification cost model. Two conditions would flip the verdict:
+1. **Batched target verification** (one forward scores all γ positions) — then increasing γ at low α becomes net-positive because C_verify is constant.
+2. **A throughput-optimal γ formula** (e.g. `γ_opt = argmax_γ E[accepted(γ,α)] / (γ·C_draft + C_verify)`) instead of the paper's target-acceptance-length formula. This would *decrease* γ at low α, saving wasted draft compute.
+
+**Not demoting `llmexec_guard`:** the ad-hoc sigmoid gate in `src/llmexec_guard.rs` gates *which verifier runs* (a different decision), not *how many tokens to draft*. The two are orthogonal; this benchmark does not compare them. A separate benchmark would be needed to demote `llmexec_guard`.
+
+**Commits:**
+- `feat(spec-decode): add AcceptanceForecast primitive + adaptive_gamma_forecast flag (Issue 023)`
+- `test(spec-decode): add bench_023_adaptive_gamma.goat.rs GOAT gate`
+- `docs(023): close — keep-opt-in (GOAT gate failed: -9.25% throughput)`
