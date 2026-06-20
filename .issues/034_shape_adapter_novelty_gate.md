@@ -1,9 +1,14 @@
 # Issue 034: Shape-Adaptive Adapter Novelty Gate — close Q1 before verdict on Research 269
 
+**Status:** CLOSED (**R269 downgraded to Gain** — both PRIMARY and SECONDARY fusions have prior art; plan-only, feature-flagged, low priority; no primitive opened.)
+
 **Opened:** 2026-06-19
+**Closed:** 2026-06-20
 **Blocks:** Final verdict on [Research 269](../.research/269_Variable_Width_Shape_Adapter_Fusion.md) (`> <former` × on-the-fly LoRA × Hydra layer-skip fusion).
 **Owner:** unassigned
 **Type:** novelty gate (literature survey + mechanism feasibility check)
+
+**Closure rationale (2026-06-20):** Literature survey of 12 arxiv keyword searches (3 returned 0 hits on exact-phrase — itself a weak novelty signal; the rest timed out at the arxiv search UI and were re-run via broader web search) plus full reads of the 3 closest papers produced prior art on BOTH framings. **Q1.a (PRIMARY — stage-gated HLA subspace activation):** PARTIAL PRIOR ART. VSG / SVSG (Jain et al., NeurIPS 2022, [arXiv:2210.11698](https://arxiv.org/abs/2210.11698)) directly anticipates the load-bearing mechanism — sparse subspace update on a recurrent latent state with dormant-dimension carry-forward via `h_t = u_t·h̃_t + (1-u_t)·h_{t-1}`, `u_t ~ Bernoulli(p)`. VSG covers PRIMARY legs (a) [subspace selection on recurrent belief] and (b) [carry-forward] but not leg (c) [deterministic commitment for replay]; it also lacks the affective / per-decision-stage axis. The remaining PRIMARY novelty is composition (affective stage axis + leaky-integrator persistence + LatCal commitment + 1000s-of-NPCs batching), which is novel-in-combination, not novel-in-mechanism — fails the Super-GOAT bar. **Q1.a' (SECONDARY — shape-adaptive adapter routing):** PRIOR ART on 2 of 3 legs. FIM-LoRA ([arXiv:2605.16800](https://arxiv.org/abs/2605.16800)) produces "a standard LoRA with a per-layer rank pattern" (leg a); vLLM / HuggingFace PEFT hotswap / Unsloth ship runtime LoRA hot-swap in production (leg b); LayerRoute ([arXiv:2606.01838](https://arxiv.org/abs/2606.01838)) trains LoRA + per-layer skip router jointly (leg c, partial — skip from learned router, not from adapter shape profile). Per the issue's Q1.a' criterion, "any two of the three exist together" → at best GOAT, and the specific composition (skip plan *derived from* adapter shape profile, atomically hot-swapped with the adapter) is a thin novelty over LayerRoute + FIM-LoRA + vLLM-hotswap. **Q1.c (adapter-driven Hydra skip):** grep of `HydraBudgetConfig` call sites in `katgpt-rs/src/` and `katgpt-rs/crates/katgpt-core/src/` confirms no adapter-aware variant exists today (struct at `types.rs:4203`, callers in `pruners/hydra_budget.rs` + `tests/bench_165_hydra_budget_goat.rs`); mechanism is feasible to add but LayerRoute already demonstrates LoRA-driven layer skip in the literature, so this is novel-as-shipped-code, not novel-as-concept. **Q1.d (SnapshotMeta forward-compat):** `riir-ai/crates/riir-engine/src/snapshot.rs:300-310` has NO `#[serde(default)]` on any field — R269 §5's forward-compat assumption was wrong; any per-layer-width-profile extension requires a migration (add `#[serde(default)]` + bump `SNAPSHOT_VERSION` from 1) as a prerequisite. **Action on R269:** per the resolution table row 3 ("Both have prior art → Downgrade R269 to Gain. Plan-only, feature-flagged, low priority. Close this issue."), R269 is downgraded to **Gain**. No primitive opened, no Super-GOAT promotion, no mandatory follow-up outputs triggered. If implemented later, it goes behind the `shape_adaptive_router` feature flag and must benchmark vs vanilla adapter routing before any promotion. See R269 §3 for the full citation table.
 
 ---
 
@@ -68,11 +73,11 @@ R269 proposes extending `riir-ai/crates/riir-engine/src/snapshot.rs::SnapshotMet
 
 ## Tasks
 
-- [ ] **T1** Run the six arxiv keyword searches above; tabulate hits with one-line relevance assessment each.
-- [ ] **T2** Read top 3 closest papers from T1 in full (via `https://r.jina.ai/https://arxiv.org/pdf/{ID}`).
-- [ ] **T3** Grep `HydraBudgetConfig` call sites; confirm no adapter-aware variant exists.
-- [ ] **T4** Read `SnapshotMeta` serialization; confirm forward-compat.
-- [ ] **T5** Write Q1.a–Q1.d verdict into R269 §3 and close this issue with the resolution action.
+- [x] **T1** Run the six arxiv keyword searches above; tabulate hits with one-line relevance assessment each. *(3 of 12 returned 0 exact-phrase hits — itself a weak novelty signal; the remaining 9 timed out or 429'd at the arxiv search UI and were re-run via broader web search. Tabulation + relevance in R269 §3 citation table. Closest hits: VSG [2210.11698] for PRIMARY; FIM-LoRA [2605.16800], ALoRA [2403.16187], MoLA, LayerRoute [2606.01838], LoRA-Switch [2405.17741], LoRA-Drop [2601.02569] for SECONDARY.)*
+- [x] **T2** Read top 3 closest papers from T1 in full (via `https://r.jina.ai/https://arxiv.org/pdf/{ID}`). *(Full reads: VSG [2210.11698], LayerRoute [2606.01838], FIM-LoRA [2605.16800]. Assessments in R269 §3.)*
+- [x] **T3** Grep `HydraBudgetConfig` call sites; confirm no adapter-aware variant exists. *(Confirmed: struct at `crates/katgpt-core/src/types.rs:4203` has only `{ skip_threshold, cumulative_threshold, modelless: bool, skip_erasure_draft: bool }`; `modelless` means "lookup vs logit-lens," NOT "base vs adapter." Call sites: `src/pruners/hydra_budget.rs:11,95`, `tests/bench_165_hydra_budget_goat.rs`. No adapter-aware variant anywhere.)*
+- [x] **T4** Read `SnapshotMeta` serialization; confirm forward-compat. *(Cross-repo file IS accessible from this workspace: `riir-ai/crates/riir-engine/src/snapshot.rs:300-310`. Finding: `SnapshotMeta` has NO `#[serde(default)]` on any field — NOT forward-compatible as-is. R269 §5 assumption was wrong. Any extension requires a migration prerequisite.)*
+- [x] **T5** Write Q1.a–Q1.d verdict into R269 §3 and close this issue with the resolution action. *(Done — R269 §3 rewritten with PRIMARY/SECONDARY/Q1.c/Q1.d verdicts + citation table; resolution action = downgrade to Gain per table row 3.)*
 
 ## Estimated effort
 
