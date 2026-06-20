@@ -2,8 +2,10 @@
 
 **Source**: Plan 257 (GPart Isometric Partition Adapter) — Deferred Idea 4
 **Priority**: Low
-**Blocked**: Yes — blocked on multi-node consensus layer
+**Status**: CLOSED (blocked on multi-node consensus layer — not yet built)
 **Depends**: Plan 257, multi-node consensus layer
+
+**Closure rationale (2026-06-20):** All four acceptance criteria are blocked on a multi-node consensus layer that does not yet exist in katgpt-rs. GPart's `commitment()` (BLAKE3 of partition matrix) is the only piece present today; the protocol, exchange, and quorum verification all need the missing layer. Reopen when the consensus layer lands.
 
 ## Summary
 Use GPart's seed-derived partition assignments as a deterministic routing key for consensus. Two nodes with the same seed must produce identical partition matrices — this property enables seed-route consensus for distributed inference validation.
