@@ -372,11 +372,12 @@ impl BatchProjectionWeights {
                 8,
             );
 
-            // Sigmoid + confidence
+            // Sigmoid + confidence. Uses crate::simd::fast_sigmoid for numerical
+            // equivalence with scalar `SenseModule::project` (the rational
+            // approximation overshoots (0,1) for |x| > 2.67 — see simd.rs docs).
             for m in 0..6 {
-                let x = dots[m].clamp(-12.0, 12.0);
-                let sigmoid = 0.5 + x / (2.0 + (4.0 + x * x).sqrt());
-                activations_out[act_off + m] = self.weights.confidence[m] * sigmoid;
+                activations_out[act_off + m] =
+                    self.weights.confidence[m] * crate::simd::fast_sigmoid(dots[m]);
             }
         }
     }
@@ -654,10 +655,11 @@ impl ReconstructionState {
             // SIMD dot: sign_scaled · hla
             let dot = crate::simd::simd_dot_f32(&sign_scaled, &self.hla, 8);
 
-            // Fast sigmoid * confidence
-            let x = dot.clamp(-12.0, 12.0);
-            let sigmoid = 0.5 + x / (2.0 + (4.0 + x * x).sqrt());
-            activations[kind_idx] = module.confidence * sigmoid;
+            // Fast sigmoid * confidence. Uses crate::simd::fast_sigmoid for
+            // numerical equivalence with the scalar `SenseModule::project` path
+            // (the previous rational approximation `0.5 + x/(2+sqrt(4+x^2))`
+            // overshoots (0,1) for |x| > 2.67 — see simd.rs docs).
+            activations[kind_idx] = module.confidence * crate::simd::fast_sigmoid(dot);
         }
 
         activations
@@ -714,12 +716,12 @@ impl ReconstructionState {
         let mut dots = [0.0f32; 6];
         crate::simd::simd_matmul_rows(&mut dots, &weights.matrix, &self.hla, 6, 8);
 
-        // Elementwise sigmoid + confidence
+        // Elementwise sigmoid + confidence. Uses crate::simd::fast_sigmoid for
+        // numerical equivalence with scalar `SenseModule::project` (the rational
+        // approximation `0.5 + x/(2+sqrt(4+x^2))` overshoots (0,1) for |x| > 2.67).
         let mut activations = [0.0f32; 6];
         for i in 0..6 {
-            let x = dots[i].clamp(-12.0, 12.0);
-            let sigmoid = 0.5 + x / (2.0 + (4.0 + x * x).sqrt());
-            activations[i] = weights.confidence[i] * sigmoid;
+            activations[i] = weights.confidence[i] * crate::simd::fast_sigmoid(dots[i]);
         }
 
         activations
@@ -918,8 +920,9 @@ impl ReconstructionState {
     /// Run reconstruction using SIMD-optimized HLA evolution.
     ///
     /// Equivalent to `reconstruct()` but uses `evolve_hla_simd()` for the
-    /// HLA update step (proven win). Expand/route stay scalar because SIMD
-    /// overhead exceeds benefit for 6-8 element arrays.
+    /// HLA update step (proven win). Both paths now use `expand_matvec` for
+    /// the expand step (sense_composition feature); `use_simd` only toggles
+    /// the HLA evolution kernel.
     ///
     /// Use when the reconstruction cycle is on the hot path and every
     /// nanosecond counts.
@@ -933,6 +936,12 @@ impl ReconstructionState {
     /// Materializes `[6×8]` weight matrix on first step, then reuses it for
     /// all subsequent steps. The expand becomes one `simd_matmul_rows` call
     /// instead of 6 individual `module.project()` calls.
+    ///
+    /// **Note**: Since the matvec path is now numerically equivalent to the
+    /// scalar path (both use `crate::simd::fast_sigmoid`), `reconstruct_inner`
+    /// dispatches to `expand_matvec` directly when `sense_composition` is on.
+    /// This function is kept for explicit callers that want the matvec path
+    /// without depending on feature-flag dispatch.
     ///
     /// **GOAT result**: Per-step expand is 1.27× faster than scalar (20.4ns vs 25.9ns).
     /// Full-cycle parity depends on loop overhead — use `expand_with_weights()`
@@ -1042,8 +1051,19 @@ impl ReconstructionState {
         let mut prev_activations: Option<[f32; 6]> = None;
 
         loop {
-            // Expand + route: scalar path is faster for 6 modules × 8-dim HLA
-            // (SIMD setup overhead exceeds compute savings at this array size).
+            // Expand + route. When `sense_composition` is enabled, use the
+            // matvec path: weights are cached on first call (one-shot
+            // `simd_matmul_rows` for all 6 modules) and reused for every
+            // subsequent step. Benchmarks show ~1.27× per-step expand speedup
+            // (20.4ns vs 25.9ns). Numerically equivalent to scalar `expand`
+            // since both paths now use `crate::simd::fast_sigmoid`.
+            //
+            // Constraint: a `ReconstructionState` is bound to one brain
+            // configuration once `expand_matvec` is called (it caches the
+            // weight matrix). Different brains require different states.
+            #[cfg(feature = "sense_composition")]
+            let activations = self.expand_matvec(brain);
+            #[cfg(not(feature = "sense_composition"))]
             let activations = self.expand(brain);
             let selected = self.route(&activations);
 

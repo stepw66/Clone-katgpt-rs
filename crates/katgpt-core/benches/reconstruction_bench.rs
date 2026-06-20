@@ -4,14 +4,22 @@
 //! GOAT Gate: <200ns per 3-step reconstruction cycle.
 //!
 //! Measures:
-//!   - Scalar `reconstruct()` — baseline
-//!   - SIMD `reconstruct_simd()` — SIMD evolve (historically slower at 6×8)
-//!   - Matvec `reconstruct_matvec()` — pre-computed weight matrix, single matvec expand
+//!   - `reconstruct()` — default path; uses `expand_matvec` (lazy-init weights)
+//!     with scalar HLA evolve. The label "Scalar" is kept for historical
+//!     continuity but the expand step is now matvec on the default path.
+//!   - SIMD `reconstruct_simd()` — `expand_matvec` + SIMD evolve (the only
+//!     difference vs `reconstruct()` is the HLA evolution kernel).
+//!   - Matvec `reconstruct_with_weights()` — caller pre-computes `ProjectionWeights`
+//!     once per brain config (production multi-entity path; skips lazy init).
 //!   - Multi-entity batch — N NPCs × same brain config, amortized SIMD
 //!   - Per-step breakdown: expand → route → accumulate → evolve_hla
 //!
-//! Key finding: At 6 modules × 8-dim HLA, scalar wins for single entity.
-//! SIMD only wins when batched across N ≥ 4 entities (48N f32 ops amortize NEON setup).
+//! Key finding: As of the `expand_matvec` default flip, the per-step expand
+//! is ~6× faster than the legacy scalar `module.project()` loop (2.3ns vs 14.3ns).
+//! Full-cycle parity is more modest (~1.1×) because expand is only ~40% of
+//! the cycle. SIMD evolve remains slower than scalar evolve at 6×8 (NEON
+//! setup exceeds compute savings); SIMD only wins when batched across
+//! N ≥ 4 entities (48N f32 ops amortize NEON setup).
 
 use katgpt_core::sense::brain::NpcBrain;
 use katgpt_core::sense::octree::{KgEmbedding, SenseOctreeBuilder};
@@ -582,13 +590,18 @@ fn main() {
     let simd_ns = bench_reconstruct_simd(&brain, config);
     let matvec_ns = bench_reconstruct_matvec(&brain, config);
 
-    println!("Scalar:            {scalar_ns:>8.1} ns/cycle");
+    // Note: as of the expand_matvec default flip, `reconstruct()` and
+    // `reconstruct_simd()` both use `expand_matvec` for the expand step.
+    // The only difference is the HLA evolution kernel (scalar vs SIMD).
+    // `bench_reconstruct_matvec` pre-computes `ProjectionWeights` outside
+    // the loop, skipping the lazy-init cost paid by the other two.
+    println!("Default (matvec+scalar-evolve):  {scalar_ns:>8.1} ns/cycle");
     println!(
-        "SIMD (evolve):     {simd_ns:>8.1} ns/cycle  ({:.2}×)",
+        "SIMD (matvec+simd-evolve):      {simd_ns:>8.1} ns/cycle  ({:.2}×)",
         scalar_ns / simd_ns
     );
     println!(
-        "Matvec (batched):  {matvec_ns:>8.1} ns/cycle  ({:.2}×)",
+        "Pre-computed weights:           {matvec_ns:>8.1} ns/cycle  ({:.2}×)",
         scalar_ns / matvec_ns
     );
 
