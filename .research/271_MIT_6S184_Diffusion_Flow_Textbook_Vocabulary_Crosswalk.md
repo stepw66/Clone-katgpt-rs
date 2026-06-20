@@ -62,9 +62,9 @@ Future diffusion/score/flow-matching research notes should grep this crosswalk f
 | VAE rate-distortion Pareto frontier | "5 scalars across sync boundary" heuristic (not yet framed as R-D optimization) | gap → future issue |
 | Fokker-Planck / continuity equation `∂_t p = -div(pu) + (σ²/2)Δp` | (not yet a runtime invariant validator) | gap |
 | Generator Matching (Remark 40, unified discrete+continuous) | (not framed; CTMC and flow both ship but not unified) | gap |
-| GLASS Flows (Remark 21, stochastic via ODE) | (not framed; adjacent to mcts_collapse_bridge) | gap → Issue 038 |
-| Langevin dynamics `dX = (σ²/2)∇log p dt + σ dW` | (not directly shipped; bandits + decayed absorb used for exploration instead) | gap → Issue 037 |
-| Diffusion coefficient `σ_t` (runtime knob) | `bench_sde_noise_injection_overhead` measures cost; not yet exposed as determinism/exploration knob | gap → Issue 037 |
+| GLASS Flows (Remark 21, stochastic via ODE) | (not applicable — GLASS is narrowly reward-alignment for diffusion models, see Issue 038 closure; `mcts_collapse_bridge.rs` uses MCTS visit statistics, not flow sampling) | closed → Issue 038 |
+| Langevin dynamics `dX = (σ²/2)∇log p dt + σ dW` | (tested by PTRM, zero gain over plain Gaussian — see Issue 037 closure) | closed → Issue 037 |
+| Diffusion coefficient `σ_t` (runtime knob) | `TrdConfig::elf_noise_scale` (default 0.1) + `inject_sde_noise` (ELF Plan 079) | shipped — Issue 037 closed |
 
 **Rows marked "gap" are not yet shipped or framed.** They are candidate fusion angles (§3), **not** novel mechanisms until Q1–Q4 novelty gate passes.
 
@@ -112,15 +112,15 @@ Classifier-free guidance `(1-w)u(∅) + w·u(y)` is mathematically identical to 
 
 ---
 
-## 5. Future fusion candidates (tracked as issues, NOT plans)
+## 5. Future fusion candidates (issues status)
 
-Per AGENTS.md ("Create issue at ./issues for optimization task, do not create plan") and the workflow's anti-escape-hatch rule ("do not write 'Super-GOAT candidate' — write 'fusion idea, novelty TBD, needs Q1-Q4' and create an issue"), the four "gap" rows from §2 that look most promising are tracked as:
+Both fusion candidates from the initial version of this note have been **closed** after running the Q1–Q4 novelty gate:
 
-- **Issue 037 — SDE Extension σ as runtime determinism/exploration knob.** Theorem 17 says given a trained flow `u_θ_t`, any `σ_t ≥ 0` produces a valid SDE at inference time. Currently `cgsp_runtime` uses decayed-absorb bandits for curiosity, NOT SDE noise injection. Fusion idea: σ=0 for sync-critical NPCs (bit-identical replay), σ>0 for exploring NPCs. **Novelty TBD — needs Q1–Q4.**
+- **Issue 037 — SDE Extension σ as runtime determinism/exploration knob.** ❌ **CLOSED NOT NOVEL.** Vocabulary translation revealed `TrdConfig::elf_noise_scale` (default 0.1) + `inject_sde_noise` (ELF Plan 079) **already ship the exact mechanism**. The stronger version (gradient-guided Langevin) was tested by PTRM (Research 049 §6.1, §7.4) and gave **zero improvement** over plain Gaussian — explicit negative result. Lesson: original Issue 037 was created from a paper-vocabulary-only grep that missed `noise_scale`/`inject_sde_noise`/`elf_noise_scale`. This is exactly the workflow §1.5 step 1 #2 failure mode the crosswalk was meant to prevent.
 
-- **Issue 038 — GLASS Flows (Remark 21) for MCTS collapse bridge.** Stochastic-looking dynamics via ODEs using sampling tricks, allowing search algorithms while keeping ODE efficiency. Adjacent to `cgsp_runtime/mcts_collapse_bridge.rs` and 215 ECHO. **Novelty TBD — needs Q1–Q4.**
+- **Issue 038 — GLASS Flows (Remark 21) for MCTS collapse bridge.** ❌ **CLOSED NOT APPLICABLE.** Reading the actual GLASS Flows paper (arxiv 2509.25170) revealed the lecture-note Remark over-generalized. GLASS is narrowly scoped to **reward alignment in diffusion models** (SMC/search/guidance that already sample from `pt′|t` of a flow model). `mcts_collapse_bridge.rs` operates on MCTS visit statistics (δmg discriminator), not flow sampling — GLASS doesn't apply. GLASS would only become relevant if we ship a continuous-flow NPC behavior policy that needs SMC reward steering; we don't have one today.
 
-Two smaller reframings are mentioned in §3 but **not** worth issues (too small to track):
+Two smaller reframings remain mentioned in §3 but **not** worth issues (too small to track):
 - "MoE router = Bayesian posterior over expert identity" (theoretical clarification of 161/246, not new mechanism)
 - "Fokker-Planck as runtime invariant validator" (small implementation detail, ~20 LOC sanity check on HLA updates — pick up next time HLA integrity is touched)
 
@@ -128,4 +128,4 @@ Two smaller reframings are mentioned in §3 but **not** worth issues (too small 
 
 ## TL;DR
 
-MIT 6.S184 is the canonical diffusion/flow-matching textbook. Every chapter ships or is covered in our corpus. **Verdict: Pass on novelty.** The artifact here is a vocabulary crosswalk (§2) to prevent future false-Super-GOAT claims caused by paper-vs-codebase vocabulary mismatch. Two promising "gap" angles (σ-as-runtime-knob, GLASS-flows-for-MCTS) are tracked as Issues 037/038 with explicit "novelty TBD, needs Q1–Q4" status — not promoted to plans or Super-GOAT candidates until the gate passes.
+MIT 6.S184 is the canonical diffusion/flow-matching textbook. Every chapter ships or is covered in our corpus. **Verdict: Pass on novelty.** The artifact here is a vocabulary crosswalk (§2) to prevent future false-Super-GOAT claims caused by paper-vs-codebase vocabulary mismatch. The two initial "gap" angles (σ-as-runtime-knob, GLASS-flows-for-MCTS) were tracked as Issues 037/038, ran through the Q1–Q4 novelty gate, and **both closed**: 037 because `elf_noise_scale`/`inject_sde_noise` already ship (plus PTRM proved gradient-guided Langevin adds nothing), 038 because GLASS Flows is narrowly reward-alignment for diffusion models and doesn't apply to `mcts_collapse_bridge.rs`. The vocabulary crosswalk itself was the durable output — and the closures proved its worth (Issue 037's failure mode is exactly what the crosswalk was meant to catch, once it was extended with the missing rows).
