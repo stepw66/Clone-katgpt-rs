@@ -33,10 +33,19 @@ impl MuxBfs {
     /// which uses continuous partner-entropy scaling.
     /// Without: binary threshold on top-1 dominance ratio. Zero-alloc.
     pub fn detect_width(&self, logits: &[f32]) -> usize {
+        let mut buf = [0.0f32; MAX_TOP_K];
+        let peaks = extract_top_k_into(logits, self.k, &mut buf);
+        self.detect_width_with_peaks(peaks)
+    }
+
+    /// Same contract as [`Self::detect_width`] but accepts pre-extracted
+    /// top-K peaks. Avoids the redundant `extract_top_k_into` when the
+    /// caller already has the peaks (e.g. for `is_valid_with_peaks` or
+    /// `MuxDdTree::expand_node_with_peaks` in the same BFS step).
+    #[inline]
+    pub fn detect_width_with_peaks(&self, peaks: &[f32]) -> usize {
         #[cfg(feature = "comp_width")]
         {
-            let mut buf = [0.0f32; MAX_TOP_K];
-            let peaks = extract_top_k_into(logits, self.k, &mut buf);
             if peaks.len() < 2 {
                 return 1;
             }
@@ -44,13 +53,11 @@ impl MuxBfs {
             if total <= 0.0 {
                 return 1;
             }
-            compositional_width(&peaks, self.k).max(1)
+            compositional_width(peaks, self.k).max(1)
         }
 
         #[cfg(not(feature = "comp_width"))]
         {
-            let mut buf = [0.0f32; MAX_TOP_K];
-            let peaks = extract_top_k_into(logits, self.k, &mut buf);
             if peaks.len() < 2 {
                 return 1;
             }
@@ -69,6 +76,10 @@ impl MuxBfs {
 
     /// Run one BFS expansion step on the tree: expand all leaves with
     /// the provided per-leaf logit distributions.
+    ///
+    /// Top-K peaks are extracted once per leaf and reused across width
+    /// detection, pruning, and node expansion — 3× fewer `extract_top_k_into`
+    /// passes compared to the naïve per-call extraction.
     pub fn step(&self, tree: &mut MuxDdTree, depth: usize, logits_by_leaf: &[Vec<f32>]) {
         let leaves = tree.collect_leaf_paths_flat();
         assert_eq!(
@@ -78,11 +89,15 @@ impl MuxBfs {
         );
 
         for i in 0..leaves.len() {
-            let width = self.detect_width(&logits_by_leaf[i]);
-            if tree.pruner.is_valid(&logits_by_leaf[i], depth) {
-                tree.expand_node(leaves.path(i), &logits_by_leaf[i], width);
+            // Extract once — reused for width, validity, and expansion.
+            let mut buf = [0.0f32; MAX_TOP_K];
+            let peaks = extract_top_k_into(&logits_by_leaf[i], tree.k, &mut buf);
+            let width = self.detect_width_with_peaks(peaks);
+            if tree.pruner.is_valid_with_peaks(peaks) {
+                tree.expand_node_with_peaks(leaves.path(i), peaks, width);
             }
         }
+        let _ = depth; // preserved for API compat; pruner ignores depth
     }
 
     /// BFS step with dendritic-gated dynamic width.
@@ -110,16 +125,21 @@ impl MuxBfs {
         );
 
         for i in 0..leaves.len() {
-            if tree.pruner.is_valid(&logits_by_leaf[i], depth) {
-                let base_width = self.detect_width(&logits_by_leaf[i]);
+            // Extract once — reused for width and expansion (pruner check skipped here
+            // since the original used is_valid inside the guard; preserved below).
+            let mut buf = [0.0f32; MAX_TOP_K];
+            let peaks = extract_top_k_into(&logits_by_leaf[i], tree.k, &mut buf);
+            if tree.pruner.is_valid_with_peaks(peaks) {
+                let base_width = self.detect_width_with_peaks(peaks);
                 let nmda_gate = gate.compute_gate(
                     *entropy_by_leaf.get(i).unwrap_or(&1.0),
                     *coincidence_by_leaf.get(i).unwrap_or(&0.5),
                 );
                 let gated_width = ((base_width as f32) * nmda_gate).max(1.0) as usize;
-                tree.expand_node(leaves.path(i), &logits_by_leaf[i], gated_width);
+                tree.expand_node_with_peaks(leaves.path(i), peaks, gated_width);
             }
         }
+        let _ = depth; // preserved for API compat; pruner ignores depth
     }
 
     /// Zero-alloc variant of `step` that reuses a caller-provided `LeafPaths` buffer.
@@ -141,11 +161,15 @@ impl MuxBfs {
         );
 
         for i in 0..leaves.len() {
-            let width = self.detect_width(&logits_by_leaf[i]);
-            if tree.pruner.is_valid(&logits_by_leaf[i], depth) {
-                tree.expand_node(leaves.path(i), &logits_by_leaf[i], width);
+            // Extract once — reused for width, validity, and expansion.
+            let mut buf = [0.0f32; MAX_TOP_K];
+            let peaks = extract_top_k_into(&logits_by_leaf[i], tree.k, &mut buf);
+            let width = self.detect_width_with_peaks(peaks);
+            if tree.pruner.is_valid_with_peaks(peaks) {
+                tree.expand_node_with_peaks(leaves.path(i), peaks, width);
             }
         }
+        let _ = depth; // preserved for API compat; pruner ignores depth
     }
 }
 

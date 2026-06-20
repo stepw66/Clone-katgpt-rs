@@ -193,10 +193,21 @@ impl MuxDdTree {
 
     /// Expand a leaf node at the given path using logit distribution.
     /// Creates `width` children, each with top-K tokens from `logits`.
+    ///
+    /// If the caller has already extracted the top-K peaks (e.g. for width
+    /// detection or pruning in the same BFS step), use
+    /// [`Self::expand_node_with_peaks`] to skip the redundant extraction.
     pub fn expand_node(&mut self, path: &[usize], logits: &[f32], width: usize) {
-        let node = Self::get_node_mut(&mut self.root, path);
         let mut buf = [0.0f32; MAX_TOP_K];
         let peaks = extract_top_k_into(logits, self.k, &mut buf);
+        self.expand_node_with_peaks(path, peaks, width);
+    }
+
+    /// Same contract as [`Self::expand_node`] but accepts pre-extracted
+    /// top-K peaks. Avoids the O(N·K) `extract_top_k_into` pass when the
+    /// caller has already computed the peaks for another purpose.
+    pub fn expand_node_with_peaks(&mut self, path: &[usize], peaks: &[f32], width: usize) {
+        let node = Self::get_node_mut(&mut self.root, path);
         let effective_width = width.min(peaks.len()).max(1);
 
         let child_len = peaks.len().min(self.k);
@@ -240,11 +251,15 @@ impl MuxDdTree {
 
         for i in 0..leaves.len() {
             let logits = logits_by_leaf[i].as_ref();
-            let width = self.detect_width(logits);
-            if width > 0 && self.pruner.is_valid(logits, depth) {
-                self.expand_node(leaves.path(i), logits, width);
+            // Extract once — reused for width, validity, and expansion.
+            let mut buf = [0.0f32; MAX_TOP_K];
+            let peaks = extract_top_k_into(logits, self.k, &mut buf);
+            let width = self.detect_width_with_peaks(peaks);
+            if width > 0 && self.pruner.is_valid_with_peaks(peaks) {
+                self.expand_node_with_peaks(leaves.path(i), peaks, width);
             }
         }
+        let _ = depth; // preserved for API compat; pruner ignores depth
     }
 
     /// Detect the effective branching width from a logit distribution.
@@ -252,9 +267,19 @@ impl MuxDdTree {
     /// With `comp_width` feature: uses continuous partner-entropy scaling
     /// derived from Compositional Muon's isotropic approximation.
     /// Without: falls back to binary PEAK_DOMINANCE_RATIO threshold.
+    ///
+    /// If the caller has already extracted the top-K peaks, use
+    /// [`Self::detect_width_with_peaks`] to skip the redundant extraction.
     pub fn detect_width(&self, logits: &[f32]) -> usize {
         let mut buf = [0.0f32; MAX_TOP_K];
         let peaks = extract_top_k_into(logits, self.k, &mut buf);
+        self.detect_width_with_peaks(peaks)
+    }
+
+    /// Same contract as [`Self::detect_width`] but accepts pre-extracted
+    /// top-K peaks.
+    #[inline]
+    pub fn detect_width_with_peaks(&self, peaks: &[f32]) -> usize {
         if peaks.len() < 2 {
             return 1;
         }
@@ -265,7 +290,7 @@ impl MuxDdTree {
 
         #[cfg(feature = "comp_width")]
         {
-            let width = compositional_width(&peaks, self.k);
+            let width = compositional_width(peaks, self.k);
             width.max(1)
         }
 
