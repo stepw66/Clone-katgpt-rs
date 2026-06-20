@@ -269,9 +269,11 @@ impl BranchingDetector {
         let k_select = ((self.k_percent * k as f32).ceil() as usize).max(1).min(k);
         // Sort into scratch_sorted (we keep one as a field for zero-alloc).
         self.scratch_sorted[..k].copy_from_slice(&self.scratch_u[..k]);
-        // Could use sort_unstable_by for speed; sort_by is stable and fine
-        // for K ≤ 32.
-        self.scratch_sorted[..k].sort_by(|a, b| {
+        // Unstable sort is correct here: we only need the k-th largest value
+        // (the threshold), not which equal-scored element wins the order tie.
+        // unstable is faster than stable for K ≤ 32 and skips the O(K) aux
+        // buffer that stable_sort allocates on the heap.
+        self.scratch_sorted[..k].sort_unstable_by(|a, b| {
             b.partial_cmp(a).unwrap_or(core::cmp::Ordering::Equal)
         });
         let threshold = self.scratch_sorted[k_select - 1];

@@ -201,15 +201,38 @@ serde_for_motif!(Motif);
 /// Returns a 32-byte BLAKE3 hash. Two subgraphs hash identically iff they have
 /// the same multiset of node kinds and edge operator kinds (ticks/blake3_in
 /// ignored).
+///
+/// Inputs are bounded by [`MAX_MOTIF_NODES`] / [`MAX_MOTIF_EDGES`] (= 4 each),
+/// so the sort scratch lives on the stack — zero heap allocation for the sort
+/// buffers (the previous version cloned into two heap `Vec`s per call).
 #[inline]
 fn canonical_hash(node_kinds: &[u32], edge_kinds: &[u8]) -> [u8; 32] {
-    let mut n_sorted: Vec<u32> = node_kinds.to_vec();
-    let mut e_sorted: Vec<u8> = edge_kinds.to_vec();
-    n_sorted.sort_unstable();
-    e_sorted.sort_unstable();
+    debug_assert!(
+        node_kinds.len() <= MAX_MOTIF_NODES as usize,
+        "canonical_hash node_kinds overflow: {} > {}",
+        node_kinds.len(),
+        MAX_MOTIF_NODES
+    );
+    debug_assert!(
+        edge_kinds.len() <= MAX_MOTIF_EDGES as usize,
+        "canonical_hash edge_kinds overflow: {} > {}",
+        edge_kinds.len(),
+        MAX_MOTIF_EDGES
+    );
+
+    // Stack-backed sort scratch — sized to the motif bounds.
+    let mut n_buf = [0u32; MAX_MOTIF_NODES as usize];
+    let mut e_buf = [0u8; MAX_MOTIF_EDGES as usize];
+    let n_len = node_kinds.len();
+    let e_len = edge_kinds.len();
+    n_buf[..n_len].copy_from_slice(node_kinds);
+    e_buf[..e_len].copy_from_slice(edge_kinds);
+    n_buf[..n_len].sort_unstable();
+    e_buf[..e_len].sort_unstable();
+
     let mut hasher = blake3::Hasher::new();
-    hasher.update(&postcard::to_allocvec(&n_sorted).unwrap_or_default());
-    hasher.update(&postcard::to_allocvec(&e_sorted).unwrap_or_default());
+    hasher.update(&postcard::to_allocvec(&n_buf[..n_len]).unwrap_or_default());
+    hasher.update(&postcard::to_allocvec(&e_buf[..e_len]).unwrap_or_default());
     hasher.finalize().into()
 }
 
