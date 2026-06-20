@@ -4,7 +4,9 @@
 > **Research:** [katgpt-rs/.research/265_b_posit_tapered_precision_format.md](../.research/265_b_posit_tapered_precision_format.md)
 > **Source paper:** [arXiv:2603.01615v1](https://arxiv.org/abs/2603.01615) — Jonnalagadda, Thotli, Gustafson (2026)
 > **Verdict at open time:** Gain (deferred) — no software-level win today, no hardware target.
-> **Status:** ⏸ Parked — awaiting trigger
+> **Status:** CLOSED (parked — awaiting hardware/fusion/standard trigger; none of the four re-evaluation triggers has fired)
+
+**Closure rationale (2026-06-20):** The issue itself specifies four re-evaluation triggers (hardware support, fusion benchmark win, standard ratification, or a real FTZ/DAZ drift bug). None has fired as of 2026-06-20. Software b-posit decode is 50–200ns/op vs sub-ns native f32; no current backend (ANE/NVIDIA/AMD/RISC-V/WebGPU) ships posit instructions; SpectralQuant strictly dominates on the KV-cache compression hot path (Research 039, Benchmark 013). Closing to clear the issue queue; reopen immediately when any trigger fires. The four triggers are documented in the body for future reference.
 
 ---
 
