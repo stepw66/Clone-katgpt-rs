@@ -3,6 +3,9 @@
 **Created:** 2026-06-13
 **Source:** Plan 256 Phase 3 (deferred task: "Run arena benchmark: msa_sparse vs vortex_flow vs dash_attn vs dense attention")
 **Blocking:** Plan 256 full GOAT gate (arena accuracy portion)
+**Status:** CLOSED (blocked on trained model weights + RULER dataset + inference harness — none exist in katgpt-rs)
+
+**Closure rationale (2026-06-20):** All three prerequisites (trained model weights, RULER dataset, end-to-end attention inference harness) are explicitly out of scope for the public modelless `katgpt-rs` engine and belong in `riir-ai`/`riir-gpu`. The three Phase 2 micro-benchmarks all FAILED their GOAT gates (per-group 1.003×, KV-outer 1.14×, adaptive-k 0.629), strongly predicting the full arena would also fail. The optimization candidates were already spun out to Issue 015. Reopen when a trained transformer with KV-cache attention lands in riir-ai.
 
 ---
 
