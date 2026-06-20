@@ -1,9 +1,11 @@
 # Issue 004: ANE CoreML Model Generation Pipeline
 
 **Source:** Research 223 (maderix/ANE Distillation) + Research 224 (coremltools Public API)
-**Status:** Unblocked
+**Status:** CLOSED (blocked on Python 3.12 BlobWriter — external toolchain constraint)
 **Priority:** Medium (Plan 254 Part 2 dependency)
 **Previously Blocked On:** ~~Private API stability testing~~ → **RESOLVED** by coremltools public API
+
+**Closure rationale (2026-06-20):** All in-scope katgpt-rs work is complete: `scripts/generate_npc_brain_model.py` shipped, ternary→float conversion, 3 fused ops, weight binary export, INT8 quantization, ANE placement verification API, Python 3.13+ graceful error handling. The four remaining `[-]` items are all transitively blocked on `BlobWriter` requiring Python 3.12 — an external toolchain constraint outside katgpt-rs. Reopen when the local Python toolchain is upgraded to 3.12 or coremltools adds BlobWriter support for 3.13+.
 
 ## What
 
