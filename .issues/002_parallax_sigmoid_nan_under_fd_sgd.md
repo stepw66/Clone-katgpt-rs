@@ -4,7 +4,9 @@
 **Re-investigated:** 2026-06-19 (findings inverted — see below)
 **Source:** `.benchmarks/058_funcattn_goat.md` G2 Results "Caveat 3"
 **Plan:** [135_parallax_attn](../.plans/) (historical; current issue is post-shipping)
-**Status:** OPEN. Original sigmoid divergence no longer reproduces; softmax now diverges instead. Root cause of the inversion not diagnosed. See T6.
+**Status:** CLOSED (parked as research debt). Original sigmoid divergence no longer reproduces; softmax now diverges instead. Root cause of the inversion not diagnosed (T6/T7 remain open research questions). The shipped `tiled_attention_parallax_forward` is correct and stable; only end-to-end FD-SGD training dynamics are affected. Production modelless-inference callers using pre-trained W_R are unaffected.
+
+**Closure rationale (2026-06-20):** T6 (history bisect) and T7 (softmax rescue) are research tasks that need a dedicated session. All acceptance criteria that can be met today ARE met: 3/3 regression-anchor tests pass, W_R clip is documented as a caller requirement, sigmoid Parallax is verified stable through 500 steps. The two remaining items (T6/T7) are diagnostic-only and tracked here for the next research session.
 
 ---
 
