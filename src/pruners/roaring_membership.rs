@@ -25,6 +25,51 @@ enum BitmapContainer {
 /// Threshold for switching between array and bit container (Roaring spec).
 const ARRAY_MAX_CARDINALITY: usize = 4096;
 
+/// Enum-based iterator over a `BitmapContainer` — avoids the `Box<dyn Iterator>`
+/// heap allocation that the previous `iter()` implementation paid per container
+/// (Issue 001 H-13). One enum variant per container kind; the `Iterator` impl
+/// dispatches on the variant.
+pub enum BitmapContainerIter<'a> {
+    /// Sorted-array iteration.
+    Array(std::slice::Iter<'a, u16>),
+    /// Bit-container iteration: `(word_index, remaining_words)`.
+    Bits {
+        words: std::slice::Iter<'a, u64>,
+        word_index: usize,
+        current_word: u64,
+    },
+}
+
+impl Iterator for BitmapContainerIter<'_> {
+    type Item = u16;
+
+    #[inline]
+    fn next(&mut self) -> Option<u16> {
+        match self {
+            BitmapContainerIter::Array(it) => it.next().copied(),
+            BitmapContainerIter::Bits {
+                words,
+                word_index,
+                current_word,
+            } => loop {
+                if *current_word != 0 {
+                    // trailing_zeros gives the bit position of the lowest set bit.
+                    let bit = current_word.trailing_zeros() as u16;
+                    *current_word &= *current_word - 1; // clear lowest set bit
+                    return Some((*word_index as u16) * 64 + bit);
+                }
+                match words.next() {
+                    Some(&w) => {
+                        *current_word = w;
+                        *word_index += 1;
+                    }
+                    None => return None,
+                }
+            },
+        }
+    }
+}
+
 impl BitmapContainer {
     fn new() -> Self {
         BitmapContainer::Array(Vec::new())
@@ -71,18 +116,17 @@ impl BitmapContainer {
         }
     }
 
-    fn iter(&self) -> Box<dyn Iterator<Item = u16> + '_> {
+    fn iter(&self) -> BitmapContainerIter<'_> {
         match self {
-            BitmapContainer::Array(a) => Box::new(a.iter().copied()),
-            BitmapContainer::Bits(b, _) => Box::new(b.iter().enumerate().flat_map(|(i, &word)| {
-                (0..64u32).filter_map(move |bit| {
-                    if (word >> bit) & 1 == 1 {
-                        Some(((i * 64) + bit as usize) as u16)
-                    } else {
-                        None
-                    }
-                })
-            })),
+            BitmapContainer::Array(a) => BitmapContainerIter::Array(a.iter()),
+            // Start with current_word=0 and let the first `next()` call pull the
+            // first word from `words`. word_index starts at 0 and increments on
+            // each pull, so the emitted bit index is word_index * 64 + bit.
+            BitmapContainer::Bits(b, _) => BitmapContainerIter::Bits {
+                words: b.iter(),
+                word_index: 0,
+                current_word: 0,
+            },
         }
     }
 

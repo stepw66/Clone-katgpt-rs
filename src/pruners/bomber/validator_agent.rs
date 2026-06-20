@@ -577,6 +577,13 @@ pub fn evaluate_validator(candidate: &ValidatorCandidate, rounds: u32) -> ArenaE
             // Each player selects an action
             let mut actions = [None; 4];
 
+            // Borrow the ArenaGrid resource once for the whole tick — avoids a
+            // per-player `.clone()` of the grid (Issue 001 H-27). The grid is
+            // only read by `select_action`; no system mutates it inside this loop.
+            // Holding the shared `&ArenaGrid` across the loop is safe because no
+            // mutable world access happens while it's live.
+            let grid: &ArenaGrid = world.resource::<ArenaGrid>();
+
             // Rule player (index 0) — separate variable for failure trace access
             let pos0 = world
                 .get::<GridPos>(entities[0])
@@ -584,14 +591,13 @@ pub fn evaluate_validator(candidate: &ValidatorCandidate, rounds: u32) -> ArenaE
                 .unwrap_or_default();
             let alive0 = world.get::<Alive>(entities[0]).is_some();
             if alive0 {
-                let grid = world.resource::<ArenaGrid>().clone();
-                let action = rule_player.select_action(&grid, pos0, &tick_events, &mut rng);
+                let action = rule_player.select_action(grid, pos0, &tick_events, &mut rng);
 
                 // C4: Capture state for failure trace extraction
                 last_approved = Some(action);
                 last_safe_actions = BomberAction::all()
                     .iter()
-                    .filter(|a| is_safe_action(a, &grid, pos0, rule_player.known_bombs()))
+                    .filter(|a| is_safe_action(a, grid, pos0, rule_player.known_bombs()))
                     .copied()
                     .collect();
 
@@ -606,12 +612,7 @@ pub fn evaluate_validator(candidate: &ValidatorCandidate, rounds: u32) -> ArenaE
                     .unwrap_or_default();
                 let alive = world.get::<Alive>(entities[i + 1]).is_some();
                 if alive {
-                    actions[i + 1] = Some(player.select_action(
-                        &world.resource::<ArenaGrid>().clone(),
-                        pos,
-                        &tick_events,
-                        &mut rng,
-                    ));
+                    actions[i + 1] = Some(player.select_action(grid, pos, &tick_events, &mut rng));
                 }
             }
 

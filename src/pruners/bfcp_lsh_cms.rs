@@ -155,7 +155,11 @@ impl BfcpLshCms {
         // Build bitmaps for each region based on token ranges.
         // This is a simplified version — real implementation would use
         // actual token indices from ScreeningPruner results.
-        let mut bitmaps = Vec::new();
+        //
+        // Pre-allocate with capacity (Issue 001 H-23): the number of bitmaps is
+        // exactly `partition.regions.len()`, so we can avoid the repeated
+        // `Vec::push` reallocations that a fresh `Vec::new()` would incur.
+        let mut bitmaps = Vec::with_capacity(partition.regions.len());
         let mut offset = 0u32;
         for region in &partition.regions {
             let mut bm = CompactBitmap::new();
