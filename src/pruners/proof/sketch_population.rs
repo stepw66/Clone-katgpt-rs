@@ -282,15 +282,60 @@ impl SketchPopulation {
     /// Returns `None` if population is empty.
     /// Used for P-UCB normalization.
     pub fn elo_range(&self) -> Option<(f64, f64)> {
-        let elos: Vec<f64> = self.sketches.values().map(|e| e.elo_rating).collect();
-        match elos.is_empty() {
-            true => None,
-            false => {
-                let min = elos.iter().cloned().fold(f64::INFINITY, f64::min);
-                let max = elos.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-                Some((min, max))
+        // Single-pass min/max with no allocation (replaces the previous
+        // `Vec<f64>::collect()` + 2-pass scan). Called per P-UCB sample.
+        let mut min = f64::INFINITY;
+        let mut max = f64::NEG_INFINITY;
+        for e in self.sketches.values() {
+            if e.elo_rating < min {
+                min = e.elo_rating;
+            }
+            if e.elo_rating > max {
+                max = e.elo_rating;
             }
         }
+        if min.is_finite() {
+            Some((min, max))
+        } else {
+            None
+        }
+    }
+
+    /// Entry with the highest Elo rating.
+    ///
+    /// O(N) single pass, no allocation. Replaces the previous
+    /// `sorted_by_elo().first()` which performed an O(N log N) sort + Vec
+    /// allocation per call.
+    pub fn best_elo(&self) -> Option<&SketchEntry> {
+        self.sketches
+            .values()
+            .max_by(|a, b| a.elo_rating.total_cmp(&b.elo_rating))
+    }
+
+    /// Pick the entry at the `idx`-th position in HashMap iteration order.
+    ///
+    /// Used by `sample_random` to draw a uniform random entry without the
+    /// O(N log N) sort + allocation that `sorted_by_elo()` imposed. HashMap
+    /// iteration order is unspecified but well-defined for a given
+    /// mutation history, so `idx ∈ [0, len)` is a uniform draw over the
+    /// current entries. Returns `None` if `idx >= len`.
+    pub fn nth_in_arbitrary_order(&self, idx: usize) -> Option<&SketchEntry> {
+        if idx >= self.sketches.len() {
+            return None;
+        }
+        // Iterator advance is O(idx); for small populations (≤64 per config)
+        // this is faster than allocating + sorting.
+        self.sketches.values().nth(idx)
+    }
+
+    /// Iterator over all entries in arbitrary (HashMap) order.
+    ///
+    /// Use this instead of `sorted_by_elo()` whenever the call site does not
+    /// actually need entries sorted by Elo — e.g. when it will immediately
+    /// `max_by` / `sum` / `filter` over them. Avoids the O(N log N) sort and
+    /// the `Vec<&SketchEntry>` allocation.
+    pub fn values_arbitrary(&self) -> impl Iterator<Item = &SketchEntry> {
+        self.sketches.values()
     }
 
     /// Average Elo across all entries.
