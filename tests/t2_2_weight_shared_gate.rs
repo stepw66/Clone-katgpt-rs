@@ -66,6 +66,7 @@ fn run_once(
         None,
         None,
         gate,
+        None,
     );
     logits.to_vec()
 }

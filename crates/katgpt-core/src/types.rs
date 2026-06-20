@@ -713,6 +713,15 @@ pub struct Config {
     // LT2 Looped Inference Pipeline (Plan 108, Research 73)
     pub loop_mode: LoopMode,
     pub hybrid_pattern: HybridPattern,
+    // Any-Time LT2 Dispatch (Issue 035, Research 273 — ELT arXiv:2604.09168).
+    // `loop_min` = floor for elastic override (refuse exit below this).
+    // `loop_max` = trained max loop count; 0 = sentinel meaning "derive from
+    //   loop_mode" (i.e. use WeightShared.loop_count).
+    // Hard ceiling for elastic over-iteration is `2 × loop_max` (ELT §1.5:
+    // modest over-looping beyond L_max is regularized by training; cap at 2×
+    // to prevent runaway). Both default to 0 = "derive from loop_mode".
+    pub loop_min: usize,
+    pub loop_max: usize,
     pub weight_dtype: WeightDtype,
     pub hla_normalize: bool,
     pub rms_norm_offset: bool,
@@ -787,6 +796,50 @@ pub struct Config {
 }
 
 impl Config {
+    /// Compute the effective loop count for `forward_looped`, applying an
+    /// optional elastic override clamped to `[loop_min, 2×loop_max]`.
+    ///
+    /// (Issue 035, Research 273 — ELT arXiv:2604.09168 Any-Time inference.)
+    ///
+    /// - `elastic_override = None` → use `loop_mode`'s natural loop count
+    ///   (byte-identical to pre-Issue-035 behavior).
+    /// - `elastic_override = Some(L)` with `LoopMode::WeightShared` → clamp L
+    ///   to `[max(loop_min, 1), 2 × max(loop_max, base)]`.
+    ///   - Below `loop_min` (default 1): clamped up. ELT §1.4 establishes a
+    ///     minimum depth for representational capacity (`1N × 32L` collapsed
+    ///     to FID 10.30 vs 2.83 for `16N × 2L`).
+    ///   - Above `2 × loop_max`: clamped down. ELT §1.5 shows modest
+    ///     over-looping beyond L_max is regularized (UCF-101 peak FVD at L=6
+    ///     with L_max=4), but quality eventually deteriorates — 2× is the cap.
+    /// - `elastic_override = Some(_)` with `LoopMode::None` or `TrainingFree` →
+    ///   refused (returns base); there is no weight-shared loop to elastically
+    ///   exit from.
+    ///
+    /// `loop_max == 0` is a sentinel meaning "derive from `loop_mode`" (use
+    /// `WeightShared.loop_count`). This keeps the 12 existing Config
+    /// constructors unchanged in semantics — they default to `loop_max: 0`
+    /// which resolves to the natural loop count.
+    #[inline]
+    pub fn effective_loop_count(&self, elastic_override: Option<usize>) -> usize {
+        let base = match self.loop_mode {
+            LoopMode::WeightShared { loop_count } => loop_count,
+            LoopMode::None | LoopMode::TrainingFree => 1,
+        };
+        let requested = match elastic_override {
+            None => return base,
+            Some(o) => o,
+        };
+        // Refuse elastic override when there's no weight-shared loop to exit.
+        if !matches!(self.loop_mode, LoopMode::WeightShared { .. }) {
+            return base;
+        }
+        let lo = self.loop_min.max(1);
+        let max_base = if self.loop_max == 0 { base } else { self.loop_max };
+        let hi = max_base.max(base).max(lo);
+        let hard_cap = 2 * hi;
+        requested.clamp(lo, hard_cap)
+    }
+
     /// Micro GPT config matching [talos-vs-macbook](https://github.com/AlexCheema/talos-vs-macbook) reference:
     /// vocab=27, block=16, n_layer=1, n_head=4, n_embd=16, head_dim=4,
     /// RMSNorm (no learnable gain), ReLU MLP (4x), no biases, untied lm_head.
@@ -845,6 +898,8 @@ impl Config {
             mls_layers: 0,
             loop_mode: LoopMode::None,
             hybrid_pattern: HybridPattern::Uniform,
+            loop_min: 0,
+            loop_max: 0,
             gated_attn: false,
             parallax_gate_scale: 0.0,
             emotion_desperation_threshold: 0.5,
@@ -975,6 +1030,8 @@ impl Config {
             mls_layers: 0,
             loop_mode: LoopMode::None,
             hybrid_pattern: HybridPattern::Uniform,
+            loop_min: 0,
+            loop_max: 0,
             gated_attn: false,
             parallax_gate_scale: 0.0,
             emotion_desperation_threshold: 0.5,
@@ -1077,6 +1134,8 @@ impl Config {
             mls_layers: 0,
             loop_mode: LoopMode::None,
             hybrid_pattern: HybridPattern::Uniform,
+            loop_min: 0,
+            loop_max: 0,
             gated_attn: false,
             parallax_gate_scale: 0.0,
             emotion_desperation_threshold: 0.5,
@@ -1189,6 +1248,8 @@ impl Config {
             mls_layers: 0,
             loop_mode: LoopMode::None,
             hybrid_pattern: HybridPattern::Uniform,
+            loop_min: 0,
+            loop_max: 0,
             gated_attn: false,
             parallax_gate_scale: 0.0,
             emotion_desperation_threshold: 0.5,
@@ -1281,6 +1342,8 @@ impl Config {
             mls_layers: 0,
             loop_mode: LoopMode::None,
             hybrid_pattern: HybridPattern::Uniform,
+            loop_min: 0,
+            loop_max: 0,
             gated_attn: false,
             parallax_gate_scale: 0.0,
             emotion_desperation_threshold: 0.5,
@@ -1374,6 +1437,8 @@ impl Config {
             mls_layers: 0,
             loop_mode: LoopMode::None,
             hybrid_pattern: HybridPattern::Uniform,
+            loop_min: 0,
+            loop_max: 0,
             gated_attn: false,
             parallax_gate_scale: 0.0,
             emotion_desperation_threshold: 0.5,
@@ -1465,6 +1530,8 @@ impl Config {
             mls_layers: 0,
             loop_mode: LoopMode::None,
             hybrid_pattern: HybridPattern::Uniform,
+            loop_min: 0,
+            loop_max: 0,
             gated_attn: false,
             parallax_gate_scale: 0.0,
             emotion_desperation_threshold: 0.5,
@@ -1558,6 +1625,8 @@ impl Config {
             mls_layers: 0,
             loop_mode: LoopMode::None,
             hybrid_pattern: HybridPattern::Uniform,
+            loop_min: 0,
+            loop_max: 0,
             gated_attn: false,
             parallax_gate_scale: 0.0,
             emotion_desperation_threshold: 0.5,
@@ -1650,6 +1719,8 @@ impl Config {
             mls_layers: 0,
             loop_mode: LoopMode::None,
             hybrid_pattern: HybridPattern::Uniform,
+            loop_min: 0,
+            loop_max: 0,
             gated_attn: false,
             parallax_gate_scale: 0.0,
             emotion_desperation_threshold: 0.5,
@@ -1744,6 +1815,8 @@ impl Config {
             mls_layers: 0,
             loop_mode: LoopMode::None,
             hybrid_pattern: HybridPattern::Uniform,
+            loop_min: 0,
+            loop_max: 0,
             gated_attn: false,
             parallax_gate_scale: 0.0,
             emotion_desperation_threshold: 0.5,
@@ -1846,6 +1919,8 @@ impl Config {
             mls_layers: 0,
             loop_mode: LoopMode::None,
             hybrid_pattern: HybridPattern::Uniform,
+            loop_min: 0,
+            loop_max: 0,
             gated_attn: false,
             parallax_gate_scale: 0.0,
             emotion_desperation_threshold: 0.5,

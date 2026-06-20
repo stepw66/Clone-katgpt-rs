@@ -69,6 +69,8 @@ pub struct Config {
     // LT2 Looped Inference Pipeline (Plan 108, Research 73)
     pub loop_mode: LoopMode,                // None or WeightShared { loop_count }
     pub hybrid_pattern: HybridPattern,      // Uniform, Interleave, Bookend
+    pub loop_min: usize,                    // elastic override floor (Issue 035, Research 273 — ELT Any-Time)
+    pub loop_max: usize,                    // elastic override ceiling (0 = derive from loop_mode)
     pub gated_attn: bool,                   // whether to use SDPA output gate
     // Parallax Attention (Plan 135)
     pub parallax_gate_scale: f32,            // covariance correction gate scale (0.0=disabled)
@@ -664,6 +666,16 @@ Output: lm_head(h)
 | `SdpaOutputGate` | Sigmoid gate after SDPA before Wo — zero-init → sigmoid(0) = 0.5 neutral |
 
 **Memory scaling**: AHLA layers use O(d·dv) constant state (no growth with L or T). SDPA layers use O(L·d) KV cache (no growth with T). Hybrid 1:4 achieves ~95% throughput of pure SDPA T=4 with 80% constant-memory layers.
+
+**Any-Time LT2 Dispatch (Issue 035, Research 273 — ELT arXiv:2604.09168)**: the same artifact serves requests at any compute budget by exiting the loop early or over-iterating, without retraining. `forward_looped()` takes a final `elastic_loop_override: Option<usize>` parameter:
+
+- `None` → byte-identical to pre-Issue-035 behavior (uses `loop_mode.loop_count`).
+- `Some(L)` → runs L loops, clamped to `[max(loop_min,1), 2×max(loop_max, base)]` per `Config::effective_loop_count()`.
+  - `Config::loop_min` (default 0 → treated as 1) = floor; refusal to exit below this preserves representational capacity (ELT §1.4: `1N × 32L` collapsed to FID 10.30).
+  - `Config::loop_max` (default 0 → derive from `loop_mode`) = trained max; `2×` is the over-iteration cap (ELT §1.5: modest over-looping regularized).
+- Override refused when `loop_mode` is `None` or `TrainingFree` (no weight-shared loop to exit from).
+
+The parameter is unconditional (no feature gate) — it is a caller input, not a feature. Zero-overhead when `None`. Use cases: crowd NPCs run L_min, hero NPCs run L_max, crisis moments over-iterate to 2×L_max — all from one BLAKE3-committed snapshot.
 
 **Feature gate**: `lt2_looped = ["hla_attention"]` (default-on). GOAT: 11/11 proofs pass.
 

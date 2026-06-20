@@ -1343,9 +1343,15 @@ pub fn forward_looped<'a>(
     #[cfg(feature = "weight_shared_advantage_gate")] recursion_gate: Option<
         &mut crate::pruners::self_advantage::AdvantageMarginGate,
     >,
+    // Issue 035 (Research 273 — ELT Any-Time inference): per-call elastic
+    // loop override. `None` = use `config.loop_mode`'s natural loop count
+    // (byte-identical to pre-Issue-035 behavior). `Some(L)` runs L loops
+    // clamped to `[loop_min, 2×loop_max]` per `Config::effective_loop_count`.
+    // No feature gate required (it's a parameter); zero cost when `None`.
+    elastic_loop_override: Option<usize>,
 ) -> &'a mut [f32] {
     cache.advance_pos(pos);
-    use crate::types::{HybridPattern, LoopMode};
+    use crate::types::HybridPattern;
 
     let n = config.n_embd;
     let hd = config.head_dim;
@@ -1355,11 +1361,10 @@ pub fn forward_looped<'a>(
     let scale = ctx.attn_scale;
     let t_n = pos + 1;
 
-    let loop_count = match config.loop_mode {
-        LoopMode::WeightShared { loop_count } => loop_count,
-        LoopMode::None => 1,
-        LoopMode::TrainingFree => 1,
-    };
+    // Issue 035: derive effective loop count, applying elastic override if
+    // present. `None` is byte-identical to the prior `match config.loop_mode`
+    // block (verified by `Config::effective_loop_count` returning `base`).
+    let loop_count = config.effective_loop_count(elastic_loop_override);
 
     // 1. Embedding: x = wte[token] + wpe[pos]
     let tok_off = token * n;

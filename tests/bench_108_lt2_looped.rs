@@ -324,6 +324,7 @@ fn bench_lt2_ahla_loop() {
                 None,
                 #[cfg(feature = "weight_shared_advantage_gate")]
                 None,
+                None,
             );
         }
     }
@@ -348,6 +349,7 @@ fn bench_lt2_ahla_loop() {
                 None,
                 None,
                 #[cfg(feature = "weight_shared_advantage_gate")]
+                None,
                 None,
             ));
         }
@@ -417,6 +419,7 @@ fn bench_lt2_hybrid() {
                 None,
                 #[cfg(feature = "weight_shared_advantage_gate")]
                 None,
+                None,
             );
         }
     }
@@ -441,6 +444,7 @@ fn bench_lt2_hybrid() {
                 None,
                 None,
                 #[cfg(feature = "weight_shared_advantage_gate")]
+                None,
                 None,
             ));
         }
@@ -553,6 +557,7 @@ fn proof_lt2_hybrid_throughput() {
                 None,
                 #[cfg(feature = "weight_shared_advantage_gate")]
                 None,
+                None,
             );
         }
     }
@@ -577,6 +582,7 @@ fn proof_lt2_hybrid_throughput() {
                 None,
                 None,
                 #[cfg(feature = "weight_shared_advantage_gate")]
+                None,
                 None,
             ));
         }
