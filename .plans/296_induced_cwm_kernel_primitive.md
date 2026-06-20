@@ -5,7 +5,7 @@
 **Source paper:** [arxiv 2510.04542](https://arxiv.org/pdf/2510.04542) — Lehrach et al., Code World Models for General Game Playing (DeepMind, Oct 2025)
 **Target:** `katgpt-rs/crates/katgpt-core/src/induced_cwm/` (new module, open) + re-export through `katgpt-rs/src/lib.rs`
 **Cargo features:** `induced_cwm` (katgpt-core, **opt-in**); `induced_cwm_ismcts` (depends on `induced_cwm` + `game_state`)
-**Status:** Active — Phase 1 ✅ SHIPPED + Phase 2 ✅ SHIPPED + Phase 3 ✅ SHIPPED (2026-06-21); Phase 4 (hot-swap hook) + Phase 5 (docs + GOAT proof) pending.
+**Status:** Active — Phase 1 ✅ + Phase 2 ✅ + Phase 3 ✅ + Phase 4 ✅ + Phase 5 ✅ ALL SHIPPED (2026-06-21). Plan 296 COMPLETE — ready for downstream consumption (riir-ai Plan 326).
 
 ---
 
@@ -152,11 +152,23 @@ katgpt-rs/examples/
 
 ### Tasks
 
-- [ ] **T5.1** Update `katgpt-rs/.docs/01_overview.md` Module Structure table to list `induced_cwm/` under `katgpt-core` with the `⎗` symbol (new) and reference Plan 296.
-- [ ] **T5.2** Update `katgpt-rs/.docs/21_opt_in_features.md` with a new section "Induced CWM (Plan 296)" listing the two features and pointing at the example.
-- [ ] **T5.3** Update `katgpt-rs/README.md` Feature Showcase with a short "🧩 Induced CWM — LLM-Induced Forward Models (Plan 296, arxiv 2510.04542)" subsection linking to the research note.
-- [ ] **T5.4** Create `katgpt-rs/.benchmarks/296_induced_cwm_primitive_goat.md` with the G1–G4 proof structure (per Research 275 §7). Run all four gates on the mock Leduc-style test fixture; record results. Promote/demote per outcome.
-- [ ] **T5.5** Commit with prefix `feat(induced_cwm):` per AGENTS.md. Rebase non-interactively onto `develop` (AGENTS.md — `GIT_EDITOR=true git rebase --no-edit` if needed; default to fast-forward when safe).
+- [x] **T5.1** Updated `katgpt-rs/.docs/01_overview.md`:
+  - Module Structure table: added `induced_cwm/` entry after `traits.rs` with the `⎗` opt-in marker and the full primitive surface (kernel trait + commitment + belief + unit_test + ISMCTS + tournament + slot).
+  - Feature Flags table: added three rows for `induced_cwm`, `induced_cwm_ismcts`, `induced_cwm_tournament` with descriptions and dependency strings.
+  - `full` feature row: appended the three new features to the exclusion list (consistent with the pattern that opt-in primitives are excluded from `full`).
+- [x] **T5.2** Updated `katgpt-rs/.docs/21_opt_in_features.md` with a new section "10. Induced CWM (Plan 296)" covering: open-half framing, three feature bullets, Phase 4 `InducedCwmSlot` note, G1–G4 GOAT 4/4 PASS table, both smoke example commands, plan/research/benchmark links.
+- [x] **T5.3** Updated `katgpt-rs/README.md` Feature Showcase with a new "🧩 Induced CWM — LLM-Induced Forward Models (Plan 296, arxiv 2510.04542)" subsection linking to the research note + GOAT proof + both examples.
+- [x] **T5.4** Created `katgpt-rs/.benchmarks/296_induced_cwm_primitive_goat.md` with the full G1–G4 proof structure. All 4 gates PASS (47/47 tests). Per the promotion rule, the features stay opt-in by design (primitive, not default-on capability) and are marked ready for downstream consumption (riir-ai Plan 326). No `.issues/` follow-ups needed.
+- [x] **T5.5** Committed with prefix `docs(induced_cwm):` per AGENTS.md. Rebased non-interactively onto `develop` (fast-forward, no conflicts).
+
+### Files
+
+```
+katgpt-rs/.docs/01_overview.md                              # Module Structure + Feature Flags + full exclusion
+katgpt-rs/.docs/21_opt_in_features.md                       # Section 10: Induced CWM
+katgpt-rs/README.md                                         # Feature Showcase subsection
+katgpt-rs/.benchmarks/296_induced_cwm_primitive_goat.md     # G1-G4 GOAT proof
+```
 
 ---
 

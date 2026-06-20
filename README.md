@@ -1102,6 +1102,14 @@ Feature gate: `self_advantage_gate` (**DEFAULT-ON** since GOAT 4/4 PASS). Deep i
 
 The forensic watermark recipe primitive (Plan 293, arxiv 2606.18208) was relocated from katgpt-rs to `riir-ai/crates/riir-chain/src/forensic/` behind the `chain_forensic` feature. Rationale: honeypot OPSEC — the recipe combination (Tardos + DCT + topology + vertex marks + least-squares recovery) is the implementation choice that determines collusion resistance, and forensic value depends on deployment secrecy. Per strategy verdict 003: "How = private." An open trait surface may return here later if a generic adoption hook is needed; the recipe impl stays private.
 
+### 🧩 Induced CWM — LLM-Induced Forward Models (Plan 296, arxiv 2510.04542)
+
+Open half of the Code World Models Super-GOAT: a generic, IP-free trait surface for forward-model impls that are verifiable, committable, and hot-swappable. The LLM-induction pipeline is private (riir-ai Plan 326).
+
+- Features: `induced_cwm`, `induced_cwm_ismcts`, `induced_cwm_tournament` (all opt-in)
+- [Research note](.research/275_Code_World_Model_Induced_Forward_Model.md) • [GOAT proof](.benchmarks/296_induced_cwm_primitive_goat.md) (G1–G4 all PASS)
+- Examples: `induced_cwm_01_mock_iig`, `induced_cwm_02_value_tournament`
+
 ## 🔧 KV Compression
 
 Default: **Hybrid OCT+PQ** (OCTOPUS triplet encoding + PlanarQuant 2D Givens rotation). Best MSE + 64× fewer rotation FMAs.
