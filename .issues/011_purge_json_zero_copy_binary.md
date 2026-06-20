@@ -1,5 +1,20 @@
 # Issue 011: Purge JSON — Zero-Copy Binary Serialization Everywhere
 
+**Status:** CLOSED (katgpt-rs portion — binary paths added to go replay; riir-ai training pipeline migration remains cross-repo)
+
+**Closure rationale (2026-06-20):** Added postcard-based binary serialization paths
+(`to_bytes` / `from_bytes`) and length-prefixed binary writers to `go/replay.rs`
+(`GoReplay`) and `go/replay_writer.rs` (`JsonlGoSample`, `GoReplayWriter`,
+`GameSampleCollector`), matching the pattern established in
+`bomber/replay.rs`. The legacy JSON / JSONL API is preserved but deprecated
+because the riir-ai training pipeline still consumes JSONL; that migration is a
+cross-repo task and is correctly deferred (kept as `[-]` below). Note:
+removing `serde_json` from `Cargo.toml` runtime deps remains blocked —
+`src/speculative/vocab_channel_pruner.rs` (`load_cached_pruner` /
+`save_pruner_cache`) still uses `serde_json::from_slice` / `to_vec` at runtime;
+that file was out of scope for this task and is tracked by the new `[-]` note
+on the serde_json line.
+
 ## Status: IN PROGRESS — katgpt-rs core done, riir-ai training pipeline deferred
 
 - [x] `proof_cert/certificate.rs` — `ProofEvidence::Custom` now `Vec<u8>` binary blob
@@ -20,10 +35,10 @@
 - [x] `skill_opt/buffer.rs` — `to_bytes`/`from_bytes` (length-prefixed postcard)
 - [x] `examples/rt_turbo_01_calibration.rs` — updated for binary serialization
 - [x] `Cargo.toml` — added `postcard` dep to both katgpt-rs and katgpt-core
-- [-] `pruners/go/replay.rs` — Go replay still uses JSON (deferred — training data format)
-- [-] `pruners/go/replay_writer.rs` — Go JSONL writer (deferred — training data format)
+- [x] `pruners/go/replay.rs` — `to_bytes`/`from_bytes` added (postcard via `GoReplayBin` shadow; JSON methods deprecated, kept for riir-ai)
+- [x] `pruners/go/replay_writer.rs` — `to_bytes`/`from_bytes` + `write_sample_binary` + `finalize_and_write_binary` added (postcard via `JsonlGoSampleBin` shadow; JSONL writer deprecated, kept for riir-ai)
 - [-] riir-ai training pipeline — JSONL is the training data format, deferred
-- [-] Remove `serde_json` from `Cargo.toml` when all callers migrated (blocked on above)
+- [-] Remove `serde_json` from `Cargo.toml` when all callers migrated — still blocked: `src/speculative/vocab_channel_pruner.rs` uses `serde_json::from_slice`/`to_vec` at runtime (`load_cached_pruner`/`save_pruner_cache`); migrate that file (out of Issue 011 scope) before downgrading the dep
 
 ## Problem
 Runtime JSON serialization (`serde_json::to_string`, `serde_json::json!`, `from_str`) has crept into hot paths and latent structures. JSON is:
