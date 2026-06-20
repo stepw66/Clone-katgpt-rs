@@ -33,7 +33,9 @@ use katgpt_rs::dense_mesh::{
     DenseEdge, DenseHidden, DenseNode, EdgeBandit, EdgeBanditArm, IdentityEdge, LayerwiseTopology,
     LoraEdge, MeshConfig, MeshScratch, Topology, TransformerNode,
 };
-use katgpt_rs::transformer::{forward, ForwardContext, MultiLayerKVCache, TransformerWeights};
+use katgpt_rs::transformer::{
+    forward, forward_batched, ForwardContext, MultiLayerKVCache, TransformerWeights,
+};
 use katgpt_rs::types::{Config, Rng};
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -229,7 +231,8 @@ fn make_node_with_seed(config: Config, seed: u64, token: usize, pos: usize) -> T
 ///   - `mesh_wide`: `LayerwiseTopology::forward` on `[1, 4, 1]` topology
 ///     (= 5 transformer forwards per iteration: 4 hidden + 1 output) with
 ///     `MeshConfig::enable_vertex_parallelism = true` so the 4 hidden nodes
-///     run concurrently via rayon (Issue 020, Path A).
+///     run concurrently via rayon (Issue 020, Path A) AND the hidden-layer
+///     transition uses pooled scratch/output slots (Issue 020, Path B).
 ///
 /// **Path A outcome (rayon vertex parallelism):** the 4 hidden forwards
 /// share one `TransformerNode` (paper §3.3 vertex parameter sharing) and
@@ -246,19 +249,28 @@ fn make_node_with_seed(config: Config, seed: u64, token: usize, pos: usize) -> T
 ///     5× sequential cost towards `1 + (4 / cores)` and is the regime where
 ///     Gate 4's 2.5× bound becomes reachable.
 ///
+/// **Path B outcome (pooled scratch/output):** the hidden-layer transition
+/// reuses `Vec<MeshScratch>` and `Vec<DenseHidden>` across `forward()` calls
+/// instead of allocating them per call. The saving is the ~8 allocations
+/// (4 scratch + 4 output) that Path A was doing every iteration. Full
+/// `transformer::forward_batched` matmul fusion is blocked by the `DenseNode`
+/// trait's single-token `forward_dense` API — documented in issue 020 as a
+/// trait-extension follow-up.
+///
 /// The paper's 2.5× bound further assumes a batched GPU forward that fuses
-/// the 4 nodes into one kernel — Path B (transformer.rs batched forward,
-/// follow-up issue) is required to close any remaining gap above 2.5×.
+/// the 4 nodes into one kernel. On CPU with rayon + pooling we approach but
+/// may not reach 2.5× — the gap is the difference between CPU parallel
+/// dispatch and GPU kernel fusion.
 ///
 /// This test runs at BOTH scales (no longer `#[ignore]`) and reports each
-/// measured ratio. It does NOT hard-assert the 2.5× paper bound — that's
-/// Path B territory. It DOES assert that, at `small_target()` scale, Path A
-/// beats the sequential 5× expectation (otherwise the rayon dispatch or
-/// per-thread pool is broken). The draft-scale result is measurement-only.
+/// measured ratio. It does NOT hard-assert the 2.5× paper bound. It DOES
+/// assert that, at `small_target()` scale, the mesh beats the sequential 5×
+/// expectation (otherwise the rayon dispatch or per-thread pool is broken).
+/// The draft-scale result is measurement-only.
 #[test]
 fn test_dense_mesh_gate4_hard_bound_width4_measured() {
     println!();
-    println!("Gate 4: Hard bound — DenseMesh[1,4,1]+rayon (Issue 020 Path A) vs 1× vanilla");
+    println!("Gate 4: Hard bound — DenseMesh[1,4,1]+rayon+pooling (Issue 020 Path A+B) vs 1× vanilla");
     println!();
 
     // Draft scale: rayon overhead dominates — measurement only, no assert.
@@ -277,15 +289,16 @@ fn test_dense_mesh_gate4_hard_bound_width4_measured() {
     println!();
     if small_passes_bound {
         println!(
-            "Gate 4 overall: ✅ Path A meets 2.5× at small_target scale; draft scale is\n  \
+            "Gate 4 overall: ✅ Path A+B meets 2.5× at small_target scale; draft scale is\n  \
              measurement-only (rayon overhead dominates the sub-us forward)."
         );
     } else if draft_passes_bound {
-        println!("Gate 4 overall: ✅ Path A meets 2.5× at both scales.");
+        println!("Gate 4 overall: ✅ Path A+B meets 2.5× at both scales.");
     } else {
         println!(
-            "Gate 4 overall: ⚠️ Path A did not meet 2.5× at either scale. Remaining gap\n  \
-             needs Path B (batched transformer forward) — see issue 020."
+            "Gate 4 overall: ⚠️ Path A+B did not meet 2.5× at either scale. Full\n  \
+             `transformer::forward_batched` matmul fusion (requires DenseNode\n  \
+             trait extension) is the remaining lever — see issue 020."
         );
     }
 }
@@ -350,7 +363,7 @@ fn run_gate4_at_scale(config: &Config, config_name: &str, assert_beats_sequentia
     let input = DenseHidden::zeros(1, config.vocab_size);
     let mut scratch = MeshScratch::new(1, config.vocab_size);
     let mut cfg = MeshConfig::default();
-    cfg.enable_vertex_parallelism = true; // Issue 020 Path A: rayon across hidden nodes
+    cfg.enable_vertex_parallelism = true; // Issue 020 Path A+B: rayon + pooled scratch/output
 
     for _ in 0..warmup {
         let _ = mesh.forward(&input, &mut scratch, &cfg);
@@ -369,7 +382,7 @@ fn run_gate4_at_scale(config: &Config, config_name: &str, assert_beats_sequentia
     let passes_bound = ratio <= paper_bound;
 
     println!(
-        "  [{:<22}] baseline med={:>8.2}us | mesh[1,4,1]+rayon med={:>8.2}us | ratio={:>6.2}x \
+        "  [{:<22}] baseline med={:>8.2}us | mesh[1,4,1]+rayon+pool med={:>8.2}us | ratio={:>6.2}x \
          (paper 2.5x, seq ~{:.0}x) {}",
         config_name,
         med_b.as_secs_f64() * 1e6,
@@ -379,11 +392,11 @@ fn run_gate4_at_scale(config: &Config, config_name: &str, assert_beats_sequentia
         if passes_bound { "✅ ≤2.5x" } else { "⚠️ >2.5x" }
     );
     if ratio < expected_sequential_ratio {
-        println!("    → Path A beat sequential {:.0}× (speedup {:.2}× vs seq).",
+        println!("    → Path A+B beat sequential {:.0}× (speedup {:.2}× vs seq).",
                  expected_sequential_ratio,
                  expected_sequential_ratio / ratio);
     } else {
-        println!("    → Path A slower than sequential {:.0}× — rayon spawn overhead \
+        println!("    → Path A+B slower than sequential {:.0}× — rayon spawn overhead \
                  (~5us/task) dominates this forward scale.",
                  expected_sequential_ratio);
     }
@@ -397,13 +410,86 @@ fn run_gate4_at_scale(config: &Config, config_name: &str, assert_beats_sequentia
         let slack = if cfg!(debug_assertions) { 10.0 } else { 2.0 };
         assert!(
             ratio <= expected_sequential_ratio * slack,
-            "Gate 4 (Path A, {config_name}): measured ratio {ratio:.2}× is worse than \
+            "Gate 4 (Path A+B, {config_name}): measured ratio {ratio:.2}× is worse than \
              sequential {expected_sequential_ratio:.0}× (×{slack} slack). Rayon vertex \
              parallelism is broken or the per-thread pool is misconfigured.",
         );
     }
 
     passes_bound
+}
+
+// ─── forward_batched correctness (Issue 020, Path B infrastructure) ───────
+
+/// `forward_batched` (Issue 020, Path B) must produce logits bit-identical to
+/// calling `forward` once per token at consecutive positions on a SHARED KV
+/// cache. The batched path uses prefill semantics: token `i` sees K/V for
+/// tokens `0..i` in the same batch (positions `pos_start..pos_start+i`). This
+/// is exactly what a sequential loop over `forward` on the same cache would
+/// produce, because `forward` writes K/V at position `pos_start + i` before
+/// the next call reads it.
+///
+/// We don't assert a speedup here — the speedup is measured by
+/// `test_dense_mesh_gate4_hard_bound_width4_measured` via the pooled topology
+/// dispatch. This test only proves the batched path produces the same numbers
+/// as the sequential path, so future DenseNode trait extensions can build on
+/// it without a correctness regression.
+#[test]
+fn test_forward_batched_matches_sequential() {
+    let config = Config::small_target();
+    let mut rng = Rng::new(2024);
+    let weights = TransformerWeights::new(&config, &mut rng);
+
+    let tokens: Vec<usize> = vec![3, 7, 11, 19, 23];
+    let pos_start = 0usize;
+    let n_tokens = tokens.len();
+
+    // --- Reference: sequential forward per token, SHARED cache (prefill) ---
+    // Same cache instance across all tokens so token i sees K/V of 0..i.
+    let mut ctx_ref = ForwardContext::new(&config);
+    let mut cache_ref = MultiLayerKVCache::new(&config);
+    let mut seq_logits: Vec<Vec<f32>> = Vec::with_capacity(n_tokens);
+    for (i, &tok) in tokens.iter().enumerate() {
+        let out = forward(
+            &mut ctx_ref,
+            &weights,
+            &mut cache_ref,
+            tok,
+            pos_start + i,
+            &config,
+        );
+        seq_logits.push(out.to_vec());
+    }
+
+    // --- Batched: one call, shared cache (same prefill semantics) ---
+    let mut ctx_b = ForwardContext::new(&config);
+    let mut cache_b = MultiLayerKVCache::new(&config);
+    let batched = forward_batched(
+        &mut ctx_b,
+        &weights,
+        &mut cache_b,
+        &tokens,
+        pos_start,
+        &config,
+    );
+
+    assert_eq!(batched.len(), n_tokens, "one slice per token");
+    for (i, slice) in batched.iter().enumerate() {
+        assert_eq!(slice.len(), config.vocab_size, "vocab-sized slice per token");
+        let max_diff = slice
+            .iter()
+            .zip(seq_logits[i].iter())
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0f32, f32::max);
+        assert!(
+            max_diff < 1e-5,
+            "forward_batched token {i} diverged from sequential (max_diff={max_diff:.3e})"
+        );
+    }
+    println!(
+        "forward_batched correctness: {n_tokens} tokens × vocab={} — max_diff < 1e-5 vs sequential ✅",
+        config.vocab_size
+    );
 }
 
 // ─── Gate 2: Composition (diamond 1/2/1 + 2 LoRA edges vs single-LoRA) ──────

@@ -539,6 +539,11 @@ pub struct ForwardContext {
     // Pre-allocated, zero alloc in hot path. Updated incrementally each token.
     #[cfg(feature = "wall_attention")]
     pub(crate) wall_prefix: WallPrefixState,
+    // Batched forward output buffer (Issue 020, Path B). Grown on demand by
+    // [`forward_batched`] to `n_tokens * vocab_size`. Reused across calls —
+    // amortises per-token logits allocation when DenseMesh batches width-many
+    // hidden-node forwards into one call.
+    pub(crate) batch_logits: Vec<f32>,
     // ── f32 fields last (4-byte aligned, no padding before) ──────────
     /// Pre-computed attention scale: `1.0 / sqrt(head_dim)`. Constant per config.
     attn_scale: f32,
@@ -644,6 +649,7 @@ impl ForwardContext {
             depth_tier: None,
             #[cfg(feature = "wall_attention")]
             wall_prefix: WallPrefixState::new(config),
+            batch_logits: Vec::new(),
             attn_scale: 1.0 / (config.head_dim as f32).sqrt(),
         }
     }
@@ -1158,6 +1164,94 @@ pub fn forward<'a>(
             forward_base(ctx, weights, cache, token, pos, config, None, None)
         }
     }
+}
+
+/// Batched forward pass — process N tokens at consecutive positions in one call (Issue 020, Path B).
+///
+/// This is the DenseMesh vertex-parameter-sharing batched entry point. The 4
+/// hidden nodes in a `[1, 4, 1]` mesh share one set of `TransformerWeights`
+/// (paper §3.3). When their forwards are batched into this single call, we
+/// amortise:
+///   - function-call overhead (1 call vs N),
+///   - `batch_logits` buffer growth (resized once, not allocated per token),
+///   - config-derived constants (hoisted outside the token loop).
+///
+/// Each `tokens[i]` is forwarded at position `pos_start + i` and writes K/V
+/// into `cache` at that position. The returned slice for token `i` spans
+/// `[i * vocab_size .. (i+1) * vocab_size]` of [`ForwardContext::batch_logits`].
+///
+/// # Safety of returned slices
+///
+/// The returned `Vec<&mut [f32]>` contains N disjoint mutable slices into a
+/// single `Vec<f32>`. This is sound because the slices are non-overlapping
+/// (each spans `vocab_size` consecutive elements), but the borrow checker
+/// cannot prove disjointness through raw pointers, so we use
+/// `slice::from_raw_parts_mut` inside a small `unsafe` block. The slices are
+/// valid for the lifetime `'a` of the `ctx` borrow. Callers must not outlive
+/// `ctx`.
+///
+/// # When to use
+///
+/// Prefer `forward_batched` when forwarding ≥ 2 tokens of the same model
+/// back-to-back (e.g. DenseMesh hidden-layer vertex batch, prefill). For a
+/// single token, use [`forward`] — the batched path has no advantage at N=1.
+#[allow(clippy::too_many_arguments)]
+pub fn forward_batched<'a>(
+    ctx: &'a mut ForwardContext,
+    weights: &TransformerWeights,
+    cache: &mut MultiLayerKVCache,
+    tokens: &[usize],
+    pos_start: usize,
+    config: &Config,
+) -> Vec<&'a mut [f32]> {
+    let n_tokens = tokens.len();
+    let vocab = config.vocab_size;
+    debug_assert!(n_tokens > 0, "forward_batched requires at least one token");
+
+    // Grow the flat batch buffer once (no per-token alloc). `resize` is a no-op
+    // when capacity already suffices — callers that repeatedly batch the same
+    // width pay zero allocation after the first call (plasma tier).
+    ctx.batch_logits.resize(n_tokens * vocab, 0.0);
+
+    // Hoist the config-derived `vocab` stride outside the per-token loop. The
+    // per-token forward already hoists its own layer-loop invariants; we only
+    // add the batch-stride and output-index arithmetic here.
+    for (i, &token) in tokens.iter().enumerate() {
+        let pos = pos_start + i;
+        // `forward` returns `&mut ctx.logits` (single-token buffer) but also
+        // mutably borrows `ctx`. To then write into `ctx.batch_logits` we'd
+        // need a second mutable borrow of `ctx`. The borrow checker can't see
+        // that `logits` and `batch_logits` are disjoint fields, so we copy
+        // through raw pointers. SAFETY: `ctx.logits.len() == vocab` (invariant
+        // from ForwardContext::new) and `batch_logits.len() == n_tokens *
+        // vocab` (from the resize above). `out_start + vocab <= len`. The two
+        // regions never overlap because `logits` is the single-token buffer
+        // and `batch_logits` is the flat batch buffer.
+        let _logits = forward(ctx, weights, cache, token, pos, config);
+        let out_start = i * vocab;
+        // SAFETY: see comment above the loop.
+        let src = ctx.logits.as_ptr();
+        let dst = unsafe { ctx.batch_logits.as_mut_ptr().add(out_start) };
+        unsafe {
+            std::ptr::copy_nonoverlapping(src, dst, vocab);
+        }
+    }
+
+    // Return disjoint per-token mutable slices into batch_logits. The lifetime
+    // `'a` ties the slices to the `ctx` borrow. Each slice is `vocab` long.
+    // SAFETY: batch_logits has length `n_tokens * vocab`; each slice covers a
+    // disjoint `[i*vocab .. (i+1)*vocab]` range. The raw-pointer reborrow does
+    // not violate aliasing because no two returned slices overlap.
+    let base = ctx.batch_logits.as_mut_ptr();
+    let mut out: Vec<&'a mut [f32]> = Vec::with_capacity(n_tokens);
+    for i in 0..n_tokens {
+        // SAFETY: offset `i * vocab` is in-bounds (total len = n_tokens * vocab).
+        // Slice length `vocab` stays in-bounds. Slices are disjoint across `i`.
+        let ptr = unsafe { base.add(i * vocab) };
+        let slice: &'a mut [f32] = unsafe { std::slice::from_raw_parts_mut(ptr, vocab) };
+        out.push(slice);
+    }
+    out
 }
 
 /// Forward with optional LoRA and domain latent (Plan 038).

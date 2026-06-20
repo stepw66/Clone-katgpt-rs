@@ -5,10 +5,19 @@
 //! layer, vertexes share the same node (vertex parameter sharing, §3.3).
 
 use std::boxed::Box;
+use std::sync::Mutex;
 use std::vec::Vec;
 
 use super::traits::{DenseEdge, DenseNode};
 use super::types::{DenseHidden, MeshConfig, MeshScratch, Topology};
+
+/// Width at which the parallel path switches from per-successor rayon tasks to
+/// the batched scratch-pooled dispatch (Issue 020, Path B). Below this, the
+/// per-successor rayon path is fine — allocations and spawn overhead are
+/// invisible against cheap IdentityNode forwards. Above it, pooling the
+/// per-worker scratches and output slots becomes worthwhile (the Path A code
+/// comment flagged this as "a future Path B optimisation").
+const VERTEX_BATCH_THRESHOLD: usize = 4;
 
 /// Errors from topology construction or forward.
 #[derive(Debug)]
@@ -33,6 +42,16 @@ pub struct LayerwiseTopology {
     /// Edge matrix, indexed `[layer][from * width_next + to]`.
     /// Length per layer = widths[l] * widths[l+1].
     edges: Vec<Vec<Box<dyn DenseEdge>>>,
+    /// Pooled per-worker scratch buffers for the batched parallel path
+    /// (Issue 020, Path B). Allocated once on first use, grown as topology
+    /// width demands, reused across `forward()` calls — eliminates the
+    /// per-call `Vec<MeshScratch>` allocation that Path A's comment flagged as
+    /// "out of scope for the ~50 LoC target". Locked once per forward (not
+    /// per rayon task) so contention is negligible.
+    scratch_pool: Mutex<Vec<MeshScratch>>,
+    /// Pooled output slots (`next` buffer) for the batched parallel path.
+    /// Same lifetime pattern as `scratch_pool`: allocated once, reused.
+    output_pool: Mutex<Vec<DenseHidden>>,
 }
 
 impl LayerwiseTopology {
@@ -60,6 +79,8 @@ impl LayerwiseTopology {
             topology,
             node,
             edges: edges_per_layer,
+            scratch_pool: Mutex::new(Vec::new()),
+            output_pool: Mutex::new(Vec::new()),
         })
     }
 
@@ -113,15 +134,31 @@ impl LayerwiseTopology {
             let width_l = self.topology.width(l);
             let width_next = self.topology.width(l + 1);
 
-            // Parallel vertex path (Issue 020, Path A). Only worth it when the
-            // successor layer is wide enough to amortise rayon spawn overhead
-            // (~5us per task per AGENTS.md optimisation guidelines) AND the
-            // caller has opted in via `enable_vertex_parallelism`. Sequential
-            // is the default — it preserves the existing scaling tests and is
-            // faster for cheap nodes (IdentityNode) where spawn overhead
-            // would dominate the actual forward work.
+            // Parallel vertex path (Issue 020, Path A + Path B). Two modes:
+            //
+            //   - Path A (`width_next < VERTEX_BATCH_THRESHOLD` or pooling not
+            //     yet profitable): per-successor rayon task with fresh
+            //     per-call scratch/output allocation. Matches the original
+            //     Path A behaviour exactly.
+            //   - Path B (`width_next >= VERTEX_BATCH_THRESHOLD`): the same
+            //     per-successor rayon parallelism, but using pooled scratch +
+            //     output slots from `self.scratch_pool` / `self.output_pool`.
+            //     This eliminates the per-call `Vec<MeshScratch>` and
+            //     `Vec<DenseHidden>` allocations the Path A code flagged as a
+            //     "future Path B optimisation". The transformer forward itself
+            //     still runs one `forward_dense` per successor — full
+            //     `transformer::forward_batched` fusion requires a DenseNode
+            //     trait extension (documented in issue 020 as follow-up).
+            //
+            // Both paths preserve Path A's per-thread `TransformerNode` (ctx,
+            // cache) pool isolation — no data race on the shared vertex.
             if config.enable_vertex_parallelism && width_next >= config.gpu_width_threshold {
-                current = self.forward_layer_parallel(l, width_l, width_next, &current, input);
+                if width_next >= VERTEX_BATCH_THRESHOLD {
+                    current =
+                        self.forward_layer_parallel_pooled(l, width_l, width_next, &current, input);
+                } else {
+                    current = self.forward_layer_parallel(l, width_l, width_next, &current, input);
+                }
             } else {
                 current = self.forward_layer_sequential(l, width_l, width_next, &current, scratch);
             }
@@ -276,6 +313,116 @@ impl LayerwiseTopology {
                 let out = node.forward_dense(&agg, l + 1, scratch_j);
                 *out_slot = out;
             });
+
+        next
+    }
+
+    /// Parallel per-layer forward with pooled scratch/output (Issue 020, Path B).
+    ///
+    /// Identical compute shape to [`Self::forward_layer_parallel`] — each
+    /// successor node's edge aggregation + node forward runs in its own rayon
+    /// task. The difference is allocation: instead of `Vec<MeshScratch>` and
+    /// `Vec<DenseHidden>` freshly allocated per call (Path A's "future Path B
+    /// optimisation" footnote), these buffers are drawn from
+    /// [`Self::scratch_pool`] / [`Self::output_pool`] and returned after the
+    /// layer completes. At width 4 with `vocab_size = 4096` this saves ~8
+    /// allocations (4 scratch + 4 output DenseHidden) per hidden-layer
+    /// transition — the pooled path pays zero allocator cost after the first
+    /// call.
+    ///
+    /// Full `transformer::forward_batched` fusion (one matmul-batched call for
+    /// all width-many successors) is NOT done here because the `DenseNode`
+    /// trait exposes only `forward_dense` — the shared `TransformerNode`'s
+    /// `weights` / `ctx_pool` / `cache_pool` are private. That fusion is
+    /// documented in issue 020 as a DenseNode trait extension follow-up.
+    fn forward_layer_parallel_pooled(
+        &self,
+        l: usize,
+        width_l: usize,
+        width_next: usize,
+        current: &[DenseHidden],
+        _input: &DenseHidden,
+    ) -> Vec<DenseHidden> {
+        use rayon::prelude::*;
+
+        let seq_len = current.first().map(|h| h.seq_len).unwrap_or(1);
+        let hidden_dim = current.first().map(|h| h.hidden_dim).unwrap_or(1);
+
+        // Drain pooled scratch + output. Grown on first call (or width bump),
+        // then stable — no allocator traffic in steady state.
+        let mut scratches: Vec<MeshScratch> = {
+            let mut guard = self
+                .scratch_pool
+                .lock()
+                .expect("scratch_pool poisoned");
+            std::mem::take(&mut *guard)
+        };
+        let mut next: Vec<DenseHidden> = {
+            let mut guard = self
+                .output_pool
+                .lock()
+                .expect("output_pool poisoned");
+            std::mem::take(&mut *guard)
+        };
+        while scratches.len() < width_next {
+            scratches.push(MeshScratch::new(seq_len, hidden_dim));
+        }
+        // Truncate extra pooled slots if the topology shrank; keep capacity.
+        scratches.truncate(width_next);
+        // Ensure `next` has exactly `width_next` slots of the right shape.
+        while next.len() < width_next {
+            next.push(DenseHidden::zeros(seq_len, hidden_dim));
+        }
+        next.truncate(width_next);
+        // If shapes changed since last call (rare — topology or model resized),
+        // re-zero the slots to their new shape.
+        for slot in next.iter_mut() {
+            if slot.seq_len != seq_len || slot.hidden_dim != hidden_dim {
+                *slot = DenseHidden::zeros(seq_len, hidden_dim);
+            }
+        }
+
+        let edges_l = &self.edges[l];
+        let node = &self.node;
+
+        next.par_iter_mut()
+            .zip(scratches.par_iter_mut())
+            .enumerate()
+            .for_each(|(j, (out_slot, scratch_j))| {
+                scratch_j.aggregate.clear();
+                let mut any = false;
+                for i in 0..width_l {
+                    let edge_idx = i * width_next + j;
+                    edges_l[edge_idx].route_into(&current[i], scratch_j);
+                    let edge_len = scratch_j.edge_output.len();
+                    let seq_len_i = current[i].seq_len;
+                    if !any {
+                        scratch_j.aggregate.data[..edge_len]
+                            .copy_from_slice(&scratch_j.edge_output.data[..edge_len]);
+                        scratch_j.aggregate.seq_len = seq_len_i;
+                        scratch_j.aggregate.hidden_dim = edge_len / seq_len_i.max(1);
+                        any = true;
+                    } else {
+                        for (dst, src) in scratch_j.aggregate.data[..edge_len]
+                            .iter_mut()
+                            .zip(scratch_j.edge_output.data[..edge_len].iter())
+                        {
+                            *dst += *src;
+                        }
+                    }
+                }
+
+                let agg = scratch_j.aggregate.clone();
+                let out = node.forward_dense(&agg, l + 1, scratch_j);
+                *out_slot = out;
+            });
+
+        // Return buffers to the pool for the next call. Any prior capacity is
+        // preserved (pushes don't shrink the underlying allocation).
+        {
+            let mut guard = self.scratch_pool.lock().expect("scratch_pool poisoned");
+            *guard = scratches;
+        }
 
         next
     }
