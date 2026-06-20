@@ -2,7 +2,9 @@
 
 **Date:** 2026-06-19
 **Plan:** [286_functional_attention_spectral_transport.md](../.plans/286_functional_attention_spectral_transport.md) Phase 5 T5.1
-**Status:** Documented null result. Primitive + composition ship as opt-in; no promotion.
+**Status:** CLOSED (documented null result — primitive + composition ship as opt-in; no promotion)
+
+**Closure rationale (2026-06-20):** No remaining work. The hypothesis (eigenbasis pre-rotation would make FUNCATTN more expressive per parameter on anisotropic input) is empirically FALSE — eigen-aligned FUNCATTN is 17–25% worse than vanilla at matched parameter budget. Root cause documented in body: FUNCATTN's row-normalization strips the magnitude information that would let high-eigenvalue directions dominate the partition. The primitive (`katgpt-core::funcattn::pre_rotate_basis_weights_into`) and composition (`src/funcattn_compose/spectral_pre_rotate.rs`) ship behind opt-in feature `funcattn_spectral_pre_rotate` (NOT in `default` or `full`). The `effective_basis_rank` diagnostic is the residual value. G6 test exists and passes mechanics. Documented null result — closure is the resolution.
 
 ---
 
