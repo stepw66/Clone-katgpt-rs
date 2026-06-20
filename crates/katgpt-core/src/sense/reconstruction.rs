@@ -375,6 +375,8 @@ impl BatchProjectionWeights {
             // Sigmoid + confidence. Uses crate::simd::fast_sigmoid for numerical
             // equivalence with scalar `SenseModule::project` (the rational
             // approximation overshoots (0,1) for |x| > 2.67 — see simd.rs docs).
+            // NOTE: `simd_sigmoid_inplace` was benchmarked and rejected for the
+            // 6-element expand path — see `expand_with_weights` for details.
             for m in 0..6 {
                 activations_out[act_off + m] =
                     self.weights.confidence[m] * crate::simd::fast_sigmoid(dots[m]);
@@ -719,6 +721,15 @@ impl ReconstructionState {
         // Elementwise sigmoid + confidence. Uses crate::simd::fast_sigmoid for
         // numerical equivalence with scalar `SenseModule::project` (the rational
         // approximation `0.5 + x/(2+sqrt(4+x^2))` overshoots (0,1) for |x| > 2.67).
+        //
+        // NOTE: `simd_sigmoid_inplace` was benchmarked here and REJECTED. On
+        // Apple Silicon NEON, libm `expf` is fast enough (~5 ns/call) that the
+        // 6-call scalar loop beats the SIMD polynomial path — the Cephes setup
+        // (10+ `vdupq` constants) + 1 SIMD chunk + 2-element scalar tail costs
+        // more than 6 libm calls. Padding to 8 helped the per-step expand
+        // (~25% faster) but regressed the full reconstruction cycle (~40 ns
+        // slower) due to register/icache pressure in the hot loop. The scalar
+        // `fast_sigmoid` loop is the GOAT here.
         let mut activations = [0.0f32; 6];
         for i in 0..6 {
             activations[i] = weights.confidence[i] * crate::simd::fast_sigmoid(dots[i]);

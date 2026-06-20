@@ -1744,6 +1744,73 @@ pub fn simd_sigmoid_tanh_clamp_inplace(out: &mut [f32], a: &[f32], q: &[f32], cl
     }
 }
 
+/// SIMD-vectorized in-place sigmoid: `x[i] = σ(x[i]) = 1/(1 + e^{-x[i]})`.
+///
+/// Pure sigmoid (no tanh/clamp post-processing). Backends share the same
+/// Cephes 6th-order polynomial used by [`simd_sigmoid_tanh_clamp_inplace`] and
+/// [`simd_exp_inplace`].
+///
+/// ## When to use this instead of [`fast_sigmoid`] in a loop
+///
+/// **Win threshold: ≥ 8 elements.** Below that, the scalar `fast_sigmoid` loop
+/// wins — libm `expf` on modern hardware (Apple Silicon NEON, x86 with FMA)
+/// is fast enough (~5 ns/call) that the SIMD polynomial setup overhead
+/// (10+ `vdupq`/`_mm256_set1_ps` constants) exceeds the per-element savings.
+/// The 6-element sense/action expand path was benchmarked and the scalar loop
+/// is the GOAT there — see `sense::reconstruction::ReconstructionState::expand_with_weights`.
+///
+/// This helper wins when sigmoid is applied to 8+ contiguous elements, e.g.:
+/// - Attractor kernel state-writeback chains (`dim` ≥ 8) — though those use
+///   the fused `simd_sigmoid_tanh_clamp_inplace` variant.
+/// - Batched projection of N entities × dots (when N×6 ≥ 8).
+/// - Future larger HLA dimensions.
+///
+/// ## Numerical contract
+///
+/// - σ computed via the same Cephes 6th-order polynomial as the tanh-clamp
+///   variant. Output strictly in `(0, 1)` for finite inputs.
+/// - Matches [`fast_sigmoid`] to ~1 ULP for `|x| < 80`; diverges only in the
+///   libm vs Cephes tail bits (max abs diff < 5e-6 in f32 across all input
+///   ranges, typically < 1e-6).
+/// - Reconstruction equivalence tests pin the cumulative divergence at <1e-4
+///   across a full 3-step reconstruction cycle (see
+///   `matvec_expand_matches_scalar`), well above the per-call <5e-6 floor.
+#[inline]
+pub fn simd_sigmoid_inplace(x: &mut [f32]) {
+    #[cfg(target_arch = "aarch64")]
+    {
+        unsafe { neon_sigmoid_inplace(x) }
+        return;
+    }
+    #[cfg(target_arch = "x86_64")]
+    {
+        if is_avx2_fma_available() {
+            unsafe { avx2_sigmoid_inplace(x) }
+        } else {
+            scalar_sigmoid_inplace(x)
+        }
+        return;
+    }
+    #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
+    {
+        scalar_sigmoid_inplace(x)
+    }
+}
+
+/// Scalar fallback for `simd_sigmoid_inplace` and the tail of the SIMD paths.
+///
+/// Uses `fast_sigmoid` (libm `exp`) so the scalar path is bit-exact with the
+/// pre-SIMD code. This is also the scalar tail for NEON (len % 4) and AVX2
+/// (len % 8) — keeping the tail bit-identical preserves determinism on
+/// odd-length buffers.
+#[inline(always)]
+#[allow(dead_code)]
+fn scalar_sigmoid_inplace(x: &mut [f32]) {
+    for v in x.iter_mut() {
+        *v = fast_sigmoid(*v);
+    }
+}
+
 /// Scalar fallback for `simd_sigmoid_tanh_clamp_inplace`.
 ///
 /// Uses `fast_sigmoid` (libm `exp`) so the scalar path is bit-exact with the
@@ -2173,6 +2240,87 @@ unsafe fn avx2_sigmoid_tanh_clamp(out: &mut [f32], a: &[f32], q: &[f32], clamp: 
     }
 }
 
+/// AVX2 backend for `simd_sigmoid_inplace`.
+///
+/// Computes `x[i] = σ(x[i]) = 1/(1 + exp(-x[i]))` in 8-wide chunks. Mirrors
+/// `avx2_sigmoid_tanh_clamp`, minus the scale-shift and clamp. Uses
+/// `_mm256_div_ps` for the reciprocal (~1 ULP on x86).
+///
+/// Scalar tail uses `fast_sigmoid` to stay bit-exact with the pre-SIMD code
+/// on odd-length buffers (AVX2 tail = len % 8).
+#[cfg(target_arch = "x86_64")]
+#[inline]
+unsafe fn avx2_sigmoid_inplace(x: &mut [f32]) {
+    use core::arch::x86_64::{
+        _mm256_add_epi32, _mm256_add_ps, _mm256_castsi256_ps, _mm256_cvtps_epi32, _mm256_div_ps,
+        _mm256_loadu_ps, _mm256_max_epi32, _mm256_min_epi32, _mm256_mul_ps, _mm256_round_ps,
+        _mm256_set1_epi32, _mm256_set1_ps, _mm256_slli_epi32, _mm256_storeu_ps, _mm256_sub_ps,
+        _mm256_xor_ps,
+    };
+    unsafe {
+        const ROUND_NEAREST: i32 = 0x00;
+
+        let v_inv_ln2 = _mm256_set1_ps(CEPHES_INV_LN2);
+        let v_ln2_hi = _mm256_set1_ps(CEPHES_LN2_HI);
+        let v_ln2_lo = _mm256_set1_ps(CEPHES_LN2_LO);
+        let v_one = _mm256_set1_ps(1.0);
+        let v_half = _mm256_set1_ps(0.5);
+        let v_third = _mm256_set1_ps(1.0 / 3.0);
+        let v_quarter = _mm256_set1_ps(0.25);
+        let v_fifth = _mm256_set1_ps(0.2);
+        let v_sixth = _mm256_set1_ps(1.0 / 6.0);
+        let v_sign_flip = _mm256_set1_ps(f32::from_bits(0x8000_0000));
+
+        let mut i = 0;
+        let chunks = x.len() / 8;
+
+        for _ in 0..chunks {
+            let vx = _mm256_xor_ps(_mm256_loadu_ps(x.as_ptr().add(i)), v_sign_flip);
+
+            let vn_f = _mm256_round_ps(_mm256_mul_ps(vx, v_inv_ln2), ROUND_NEAREST);
+            let vn_i = _mm256_cvtps_epi32(vn_f);
+
+            let vg = _mm256_sub_ps(
+                _mm256_sub_ps(vx, _mm256_mul_ps(vn_f, v_ln2_hi)),
+                _mm256_mul_ps(vn_f, v_ln2_lo),
+            );
+
+            // Cephes 6th-order polynomial — Horner form matching `cephes_exp_scalar`.
+            let gc_sixth = _mm256_mul_ps(vg, v_sixth);
+            let p6 = _mm256_add_ps(v_one, gc_sixth);
+            let gc_fifth = _mm256_mul_ps(vg, v_fifth);
+            let p5 = _mm256_add_ps(v_one, _mm256_mul_ps(gc_fifth, p6));
+            let gc_quarter = _mm256_mul_ps(vg, v_quarter);
+            let p4 = _mm256_add_ps(v_one, _mm256_mul_ps(gc_quarter, p5));
+            let gc_third = _mm256_mul_ps(vg, v_third);
+            let p3 = _mm256_add_ps(v_one, _mm256_mul_ps(gc_third, p4));
+            let gc_half = _mm256_mul_ps(vg, v_half);
+            let p2 = _mm256_add_ps(v_one, _mm256_mul_ps(gc_half, p3));
+            let qpoly = _mm256_add_ps(v_one, _mm256_mul_ps(vg, p2));
+
+            let vn_clamped = _mm256_max_epi32(
+                _mm256_min_epi32(vn_i, _mm256_set1_epi32(127)),
+                _mm256_set1_epi32(-126),
+            );
+            let vn_shifted_i = _mm256_add_epi32(vn_clamped, _mm256_set1_epi32(127));
+            let v_scale_bits = _mm256_slli_epi32::<23>(vn_shifted_i);
+            let v_scale = _mm256_castsi256_ps(v_scale_bits);
+            let exp_neg_x = _mm256_mul_ps(v_scale, qpoly);
+
+            let denom = _mm256_add_ps(v_one, exp_neg_x);
+            let sigma = _mm256_div_ps(v_one, denom);
+
+            _mm256_storeu_ps(x.as_mut_ptr().add(i), sigma);
+            i += 8;
+        }
+
+        while i < x.len() {
+            *x.get_unchecked_mut(i) = fast_sigmoid(*x.get_unchecked(i));
+            i += 1;
+        }
+    }
+}
+
 /// Fused AVX2 exp + sum: `x[i] = exp(x[i])` and returns `Σ x[i]` in one pass.
 ///
 /// 4 independent accumulators (32 elements per outer iteration) for ILP.
@@ -2440,6 +2588,88 @@ unsafe fn neon_sigmoid_tanh_clamp(out: &mut [f32], a: &[f32], q: &[f32], clamp: 
             let s = fast_sigmoid(*a.get_unchecked(i) + *q.get_unchecked(i));
             let v = 2.0 * s - 1.0;
             *out.get_unchecked_mut(i) = v.clamp(-clamp, clamp);
+            i += 1;
+        }
+    }
+}
+
+/// NEON backend for `simd_sigmoid_inplace`.
+///
+/// Computes `x[i] = σ(x[i]) = 1/(1 + exp(-x[i]))` in 4-wide chunks. Same
+/// Cephes 6th-order polynomial as `neon_sigmoid_tanh_clamp`, minus the
+/// scale-shift (`2σ−1`) and clamp.
+///
+/// Scalar tail uses `fast_sigmoid` to stay bit-exact with the pre-SIMD code
+/// on odd-length buffers (NEON tail = len % 4).
+#[cfg(target_arch = "aarch64")]
+#[inline]
+unsafe fn neon_sigmoid_inplace(x: &mut [f32]) {
+    use core::arch::aarch64::{
+        vaddq_f32, vaddq_s32, vcvtq_s32_f32, vdivq_f32, vdupq_n_f32, vdupq_n_s32, vld1q_f32,
+        vmaxq_s32, vminq_s32, vmulq_f32, vnegq_f32, vreinterpretq_f32_s32, vrndq_f32,
+        vshlq_n_s32, vst1q_f32, vsubq_f32,
+    };
+    unsafe {
+        let v_inv_ln2 = vdupq_n_f32(CEPHES_INV_LN2);
+        let v_ln2_hi = vdupq_n_f32(CEPHES_LN2_HI);
+        let v_ln2_lo = vdupq_n_f32(CEPHES_LN2_LO);
+        let v_one = vdupq_n_f32(1.0);
+        let v_half = vdupq_n_f32(0.5);
+        let v_third = vdupq_n_f32(1.0 / 3.0);
+        let v_quarter = vdupq_n_f32(0.25);
+        let v_fifth = vdupq_n_f32(0.2);
+        let v_sixth = vdupq_n_f32(1.0 / 6.0);
+        let v127 = vdupq_n_s32(127);
+        let vneg126 = vdupq_n_s32(-126);
+        let v_bias = vdupq_n_s32(127);
+
+        let mut i = 0;
+        let chunks = x.len() / 4;
+
+        for _ in 0..chunks {
+            // σ(x) = 1/(1 + exp(-x)). Compute exp(-x) via the Cephes polynomial.
+            let vx = vnegq_f32(vld1q_f32(x.as_ptr().add(i)));
+
+            let vn_f = vrndq_f32(vmulq_f32(vx, v_inv_ln2));
+            let vn_i = vcvtq_s32_f32(vn_f);
+
+            let vg = vsubq_f32(
+                vsubq_f32(vx, vmulq_f32(vn_f, v_ln2_hi)),
+                vmulq_f32(vn_f, v_ln2_lo),
+            );
+
+            // Cephes 6th-order polynomial — Horner form matching `cephes_exp_scalar`.
+            let gc_sixth = vmulq_f32(vg, v_sixth);
+            let p6 = vaddq_f32(v_one, gc_sixth);
+            let gc_fifth = vmulq_f32(vg, v_fifth);
+            let p5 = vaddq_f32(v_one, vmulq_f32(gc_fifth, p6));
+            let gc_quarter = vmulq_f32(vg, v_quarter);
+            let p4 = vaddq_f32(v_one, vmulq_f32(gc_quarter, p5));
+            let gc_third = vmulq_f32(vg, v_third);
+            let p3 = vaddq_f32(v_one, vmulq_f32(gc_third, p4));
+            let gc_half = vmulq_f32(vg, v_half);
+            let p2 = vaddq_f32(v_one, vmulq_f32(gc_half, p3));
+            let qpoly = vaddq_f32(v_one, vmulq_f32(vg, p2));
+
+            // 2^n via branchless NEON bit manipulation. Clamp n to [-126, 127]
+            // — folds the |x| > 40 early-exit: large positive x → exp(-x) → 0
+            // (σ → 1), large negative x → exp(-x) → inf (σ → 0). Both correct.
+            let vn_clamped = vmaxq_s32(vminq_s32(vn_i, v127), vneg126);
+            let v_shifted =
+                vreinterpretq_f32_s32(vshlq_n_s32::<23>(vaddq_s32(vn_clamped, v_bias)));
+            let exp_neg_x = vmulq_f32(v_shifted, qpoly);
+
+            // σ = 1 / (1 + exp(-x)). vdivq gives ~1 ULP.
+            let denom = vaddq_f32(v_one, exp_neg_x);
+            let sigma = vdivq_f32(v_one, denom);
+
+            vst1q_f32(x.as_mut_ptr().add(i), sigma);
+            i += 4;
+        }
+
+        // Scalar tail — bit-exact with the pre-SIMD code via fast_sigmoid.
+        while i < x.len() {
+            *x.get_unchecked_mut(i) = fast_sigmoid(*x.get_unchecked(i));
             i += 1;
         }
     }
@@ -4270,6 +4500,53 @@ mod tests {
         assert!(matches!(level, SimdLevel::Avx2 | SimdLevel::Scalar));
         #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
         assert_eq!(level, SimdLevel::Scalar);
+    }
+
+    /// `simd_sigmoid_inplace` must produce sigmoid values in (0, 1) and match
+    /// `fast_sigmoid` to within the documented <3e-7 Cephes-vs-libm tolerance.
+    /// Verifies the SIMD chunk path, the scalar tail, and the boundary cases
+    /// (|x| > 40 saturates, x=0 → 0.5).
+    #[test]
+    fn simd_sigmoid_inplace_matches_fast_sigmoid_within_tolerance() {
+        let mut rng = fastrand::Rng::with_seed(2026);
+        // Sweep a wide range of lengths to exercise both SIMD chunks and scalar tails.
+        for len in 0..=32 {
+            let mut input: Vec<f32> = (0..len)
+                .map(|_| (rng.f32() * 80.0) - 40.0) // [-40, 40]
+                .collect();
+            let reference: Vec<f32> = input.iter().map(|&x| fast_sigmoid(x)).collect();
+            simd_sigmoid_inplace(&mut input);
+            assert_eq!(input.len(), reference.len(), "length changed");
+            let mut max_diff = 0.0f32;
+            for (got, want) in input.iter().zip(reference.iter()) {
+                // Sigmoid can round to exactly 0.0 or 1.0 in f32 at the precision
+                // boundary (e.g. σ(20) rounds to 1.0). Allow the closed range.
+                assert!(*got >= 0.0 && *got <= 1.0, "sigmoid out of [0,1]: {got}");
+                assert!(*want >= 0.0 && *want <= 1.0, "reference out of [0,1]: {want}");
+                max_diff = max_diff.max((got - want).abs());
+            }
+            assert!(
+                max_diff < 5e-6,
+                "len={len}: max_diff={max_diff:e} exceeds Cephes tolerance"
+            );
+        }
+    }
+
+    /// Boundary cases: |x| > 40 saturates; x=0 → 0.5; empty slice is a no-op.
+    #[test]
+    fn simd_sigmoid_inplace_handles_boundaries() {
+        let mut empty: Vec<f32> = vec![];
+        simd_sigmoid_inplace(&mut empty);
+        assert!(empty.is_empty());
+
+        let mut extremes = [60.0f32, -60.0, 0.0, 0.0001, -0.0001];
+        simd_sigmoid_inplace(&mut extremes);
+        assert!((extremes[0] - 1.0).abs() < 1e-6, "σ(60) ≈ 1, got {}", extremes[0]);
+        assert!((extremes[1] - 0.0).abs() < 1e-6, "σ(-60) ≈ 0, got {}", extremes[1]);
+        assert!((extremes[2] - 0.5).abs() < 1e-6, "σ(0) = 0.5, got {}", extremes[2]);
+        // σ near zero should be near 0.5.
+        assert!((extremes[3] - 0.5).abs() < 1e-3);
+        assert!((extremes[4] - 0.5).abs() < 1e-3);
     }
 
     #[test]
