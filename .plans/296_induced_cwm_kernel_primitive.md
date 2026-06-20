@@ -5,7 +5,7 @@
 **Source paper:** [arxiv 2510.04542](https://arxiv.org/pdf/2510.04542) — Lehrach et al., Code World Models for General Game Playing (DeepMind, Oct 2025)
 **Target:** `katgpt-rs/crates/katgpt-core/src/induced_cwm/` (new module, open) + re-export through `katgpt-rs/src/lib.rs`
 **Cargo features:** `induced_cwm` (katgpt-core, **opt-in**); `induced_cwm_ismcts` (depends on `induced_cwm` + `game_state`)
-**Status:** Active — Phase 1 (unblocking skeleton)
+**Status:** Active — Phase 1 ✅ SHIPPED (2026-06-21); Phase 2 (ISMCTS) pending.
 
 ---
 
@@ -36,61 +36,21 @@ Ship the **generic, IP-free half** of the CWM Super-GOAT (Research 275):
 
 ### Tasks
 
-- [ ] **T1.1** Create `katgpt-rs/crates/katgpt-core/src/induced_cwm/mod.rs` with module-level docs that mirror Research 275 §2.1: this is the open half of the CWM primitive; the LLM-induction pipeline lives in riir-ai. Re-export from `katgpt-core/src/lib.rs` gated by `induced_cwm` feature.
-- [ ] **T1.2** Add `induced_cwm = []` and `induced_cwm_ismcts = ["induced_cwm", "game_state"]` to `katgpt-core/Cargo.toml` `[features]`. Add `blake3` (already a dep) — no new external crates.
-- [ ] **T1.3** Define `pub trait InducedCwmKernel: GameState` in `induced_cwm/kernel.rs`:
-  ```rust
-  /// Marker trait for forward-model impls that are:
-  /// (a) verifiable — pass auto-generated transition unit tests,
-  /// (b) committable — BLAKE3 over canonicalized representation,
-  /// (c) snapshot-able — atomic Arc swap via the existing freeze/thaw machinery.
-  ///
-  /// The trait surface is empty (marker) — implementors only need to provide
-  /// `fn canonical_bytes(&self) -> Vec<u8>` for commitment, plus the existing
-  /// `GameState` impl. The LLM that induced the impl is the integrator's concern.
-  pub trait InducedCwmKernel: GameState {
-      /// Canonical byte representation for BLAKE3 commitment.
-      /// MUST be deterministic: same logical kernel → same bytes across runs.
-      /// Recommended: serialize state schema + action enum + canonicalized rule
-      /// source/bytecode. Integrators decide the canonical form.
-      fn canonical_bytes(&self) -> Vec<u8>;
+- [x] **T1.1** Create `katgpt-rs/crates/katgpt-core/src/induced_cwm/mod.rs` with module-level docs that mirror Research 275 §2.1: this is the open half of the CWM primitive; the LLM-induction pipeline lives in riir-ai. Re-export from `katgpt-core/src/lib.rs` gated by `induced_cwm` feature.
+- [x] **T1.2** Add `induced_cwm = []` and `induced_cwm_ismcts = ["induced_cwm"]` to `katgpt-core/Cargo.toml` `[features]`. (`induced_cwm_ismcts` dropped the `game_state` dep — that feature lives in the ROOT crate, not katgpt-core; the only thing Phase 2 needs is `induced_cwm` itself, since `GameState` is already in `katgpt-core/src/traits.rs`.) Also added forwarding features to root `katgpt-rs/Cargo.toml`.
+- [x] **T1.3** Define `pub trait InducedCwmKernel: GameState` in `induced_cwm/kernel.rs` — exact design as planned (marker trait + `canonical_bytes` + default `commitment`).
+- [x] **T1.4** Define `CwmCommitment` in `induced_cwm/commitment.rs`. **DEViates from plan**: dropped `snapshot_id: Uuid` in favour of `version: u64`, following the established `micro_belief::MicroRecurrentKernelSnapshot` precedent (UUID is deferred to the swap-event layer in riir-ai Plan 326). The `uuid` crate is not currently a katgpt-core/katgpt-rs dependency; adding it for one unread field is scope-creep. Documented in the file-level rustdoc with the AGENTS.md rule citation. Kept `blake3` + `created_at_tick` as planned.
+- [x] **T1.5** Define `pub trait BeliefInferenceFn<S: GameState>` in `induced_cwm/belief.rs` — exact design as planned, with `type Sample` associated type and the posterior-support contract documented.
+- [x] **T1.6** Define `TransitionUnitTest<S>` + `verify_transition` in `induced_cwm/unit_test.rs`. **DEViates from plan**: dropped the `kernel: &K` parameter — it's redundant with `test.pre: S` since `GameState::advance(&self, action, pid)` is called on the state itself, not via a separate kernel object. The `InducedCwmKernel` bound on `S` enforces kernel-ness. Matches how existing `mcts_search(state: &S, ...)` works. Documented in `verify_transition` rustdoc.
+- [x] **T1.7** Add `pub fn make_transition_tests_from_trajectory<S, I>` helper in `unit_test.rs`.
+- [x] **T1.8** Added `#[cfg(test)] mod tests` in `induced_cwm/tests.rs` covering all 4 planned categories (canonical_bytes determinism, transition test pass/fail, belief sampler count, serde roundtrip, plus commitment hash/eq and version-doesn't-affect-blake3). 17 tests, all pass.
+- [x] **T1.9** Re-exported everything from `induced_cwm/mod.rs` and from `katgpt-core/src/lib.rs` under `#[cfg(feature = "induced_cwm")]`.
 
-      /// BLAKE3 hash over `canonical_bytes`. Convenience wrapper.
-      fn commitment(&self) -> [u8; 32] {
-          blake3::hash(&self.canonical_bytes()).into()
-      }
-  }
-  ```
-- [ ] **T1.4** Define `pub struct CwmCommitment { pub blake3: [u8; 32], pub snapshot_id: Uuid, pub created_at_tick: u64 }` in `induced_cwm/commitment.rs`. Use `Uuid::now_v7()` (AGENTS.md). Add `Eq`/`Hash`/`Debug`/`Clone`. Document the rule: two kernels with identical `canonical_bytes` MUST produce identical `blake3`; `snapshot_id` distinguishes induction events.
-- [ ] **T1.5** Define `pub trait BeliefInferenceFn<S: GameState>` in `induced_cwm/belief.rs`:
-  ```rust
-  /// Stochastic belief-state sampler for imperfect-information games.
-  ///
-  /// Paper §4.2: `sample(obs_history, action_history) -> Vec<HiddenStateSample>`
-  /// where each sample is a plausible hidden state from the agent's posterior
-  /// `p_M(s_t | o_{1:t}, a_{1:t})`.
-  ///
-  /// Posterior-support guarantee (paper §4.2, hidden-history variant): if the
-  /// offline unit tests all pass, then each emitted sample is a valid CWM
-  /// state AND reproduces the observed observation sequence. The guarantee is
-  /// about SUPPORT, not DISTRIBUTION — that is sufficient for ISMCTS.
-  pub trait BeliefInferenceFn<S: GameState> {
-      /// Hidden-state sample — opaque to this trait; integrators define the type.
-      type Sample;
+### Phase 1 deviations summary
 
-      /// Draw `n` samples from the belief at the current observation horizon.
-      /// Implementations SHOULD be deterministic given a seed (for unit tests).
-      fn sample(&self, obs_history: &[S::Action], action_history: &[S::Action],
-                player_id: u8, n: usize, seed: u64) -> Vec<Self::Sample>;
-  }
-  ```
-- [ ] **T1.6** Define `pub struct TransitionUnitTest<S: GameState> { pub pre: S, pub action: S::Action, pub player_id: u8, pub expected_post: S, pub expected_legal_actions: Option<Vec<S::Action>> }` and `pub fn verify_transition<K: InducedCwmKernel>(kernel: &K, test: &TransitionUnitTest<K::Action>) -> Result<(), TransitionTestFailure<K::Action>>` in `induced_cwm/unit_test.rs`. Failure enum carries the diff (expected vs actual post-state and legal-action set). Mirrors paper §4.1's auto-generated transition unit tests.
-- [ ] **T1.7** Add a `pub fn make_transition_tests_from_trajectory<S, I>(trajectory: I) -> Vec<TransitionUnitTest<S>>` helper that walks an observed `(state, action, next_state)` sequence and emits one `TransitionUnitTest` per step.
-- [ ] **T1.8** Add `#[cfg(test)]` unit tests:
-  - canonical_bytes determinism (same kernel → same blake3)
-  - transition test passes for a correct kernel, fails for a wrong one (use a tiny in-test mock `GameState` impl)
-  - belief fn sampler returns the requested count
-- [ ] **T1.9** Re-export everything from `induced_cwm/mod.rs` and from `katgpt-core/src/lib.rs` under `#[cfg(feature = "induced_cwm")]`.
+1. **T1.2**: `induced_cwm_ismcts` no longer depends on `game_state` — that feature is in the ROOT crate, not katgpt-core. The `GameState` trait lives in `katgpt-core/src/traits.rs` already (unconditional), so no extra feature dep is needed.
+2. **T1.4**: `CwmCommitment` uses `u64 version` instead of `Uuid snapshot_id` (micro_belief precedent; UUID deferred to swap-event layer in riir-ai Plan 326).
+3. **T1.6**: `verify_transition` takes `&TransitionUnitTest<S>` only, no `kernel: &K` (the state IS the kernel under the codebase's `GameState` convention).
 
 ### Files
 

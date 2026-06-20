@@ -404,3 +404,17 @@ pub use ict::{
     branching_point_mask_into, collision_purity, collision_purity_into, is_critical_branching,
     js_divergence, js_divergence_batch, renyi_h2, shannon_h1,
 };
+
+// ── Induced Code World Model (Plan 296, Research 275, arxiv 2510.04542) ───────
+//
+// Open half of the CWM Super-GOAT: a marker trait over `GameState` for forward
+// models that are verifiable, BLAKE3-committable, and hot-swappable. The
+// LLM-induction pipeline that *produces* an `InducedCwmKernel` impl is private
+// (riir-ai Plan 326). The runtime never sees the LLM — only the frozen kernel.
+#[cfg(feature = "induced_cwm")]
+pub mod induced_cwm;
+#[cfg(feature = "induced_cwm")]
+pub use induced_cwm::{
+    BeliefInferenceFn, CwmCommitment, InducedCwmKernel, TransitionTestFailure, TransitionUnitTest,
+    make_transition_tests_from_trajectory, verify_transition,
+};
