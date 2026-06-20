@@ -4,6 +4,9 @@
 **Plan:** 258 (Task 5.5)
 **Priority:** Medium
 **Type:** Benchmark Infrastructure
+**Status:** CLOSED (scope ambiguity — needs user decision before benchmark can be built; real-model TPS comparison blocked on trained dLLM)
+
+**Closure rationale (2026-06-20):** Two unblocking prerequisites are outside katgpt-rs scope: (1) the user must decide whether the GOAT compares RCD-only vs DMax-only, or RCD+DMax vs DMax-only — the issue explicitly flags this as a blocker; (2) real-model TPS comparison is blocked on a trained dLLM, which does not exist (training lives in riir-ai per AGENTS.md). The training-side RCD GOAT is already done in `riir-ai/crates/riir-gpu/tests/goat_289_rcd_ab_tests.rs`. The synthetic-scale benchmark described here would only re-confirm what the training-side benchmark already shows. Reopen when the user provides the scoping decision AND a trained dLLM is available for real-model TPS measurement.
 
 ## Problem
 
