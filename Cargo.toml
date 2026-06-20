@@ -1499,6 +1499,17 @@ name = "cce_convergence"
 path = "tests/cce_convergence.rs"
 required-features = ["cce_moderator"]
 
+# Plan 295 Phase 3 — CCE vs Nash Pareto-dominance benchmark (G1).
+[[test]]
+name = "cce_vs_nash"
+path = "tests/cce_vs_nash.rs"
+required-features = ["cce_moderator"]
+
+# Plan 295 Phase 3 — CCE designer steering demo (G3).
+[[example]]
+name = "cce_demo"
+required-features = ["cce_moderator"]
+
 [[example]]
 name = "clr_brevity_tiebreak"
 required-features = ["clr"]
