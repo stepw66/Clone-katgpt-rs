@@ -126,13 +126,34 @@ pub fn simd_fma_row(weight_row: &[f32], input: &[f32], len: usize) -> f32 {
 #[inline(always)]
 #[allow(dead_code)]
 fn scalar_dot_f32(a: &[f32], b: &[f32], len: usize) -> f32 {
-    let mut sum = 0.0f32;
-    for i in 0..len {
+    // 4 independent accumulators (4 elements per outer iter) — same pattern as
+    // `scalar_dot_f64` in peira.rs. Single-accumulator dot is FMA-latency-bound
+    // (~4 cycles/iter on most FPUs); 4 parallel accumulators keep the FMA
+    // pipeline full and let LLVM emit 4-wide unrolled FMA on targets without
+    // hardware f32 SIMD (WASM, RISC-V, debug builds, or x86_64 without AVX2).
+    //
+    // `mul_add` (not `+= a * b`) preserves single-rounding FMA semantics on
+    // hardware that has it, matching the SIMD path's `_mm256_fmadd_ps` /
+    // `vfmaq_f32` numerically. On non-FMA targets `mul_add` falls back to
+    // separate mul+add, which is bit-identical to the previous single-acc form.
+    let mut acc = [0.0f32; 4];
+    let chunks = len / 4;
+    let mut i = 0;
+    for _ in 0..chunks {
         unsafe {
-            // mul_add emits FMA when target has it; matches the SIMD path's
-            // `_mm256_fmadd_ps` / `vfmaq_f32` numerically (single rounding).
+            acc[0] = (*a.get_unchecked(i)).mul_add(*b.get_unchecked(i), acc[0]);
+            acc[1] = (*a.get_unchecked(i + 1)).mul_add(*b.get_unchecked(i + 1), acc[1]);
+            acc[2] = (*a.get_unchecked(i + 2)).mul_add(*b.get_unchecked(i + 2), acc[2]);
+            acc[3] = (*a.get_unchecked(i + 3)).mul_add(*b.get_unchecked(i + 3), acc[3]);
+        }
+        i += 4;
+    }
+    let mut sum = acc.iter().sum::<f32>();
+    while i < len {
+        unsafe {
             sum = (*a.get_unchecked(i)).mul_add(*b.get_unchecked(i), sum);
         }
+        i += 1;
     }
     sum
 }
