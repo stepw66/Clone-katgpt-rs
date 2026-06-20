@@ -178,20 +178,34 @@ pub fn inflate_obstacles_with_snapshot(
     // Snapshot original state to avoid order-dependent dilation.
     snapshot[..total_words].copy_from_slice(&blocked[..total_words]);
 
+    // Iterate set bits only (skip empty words). For sparse obstacle maps this
+    // turns the O(w·h) outer scan into O(words + blocked_count); for dense
+    // maps it's still bounded by O(words + 64·words) = O(w·h).
+    //
+    // `y_min`/`y_max` depend only on the source row `y`, so hoist them out
+    // of the inner bit loop.
     for y in 0..hu {
-        for x in 0..wu {
-            let word_idx = y * words_per_row + (x >> 6);
-            let bit = x & 63;
-            if snapshot[word_idx] & (1u64 << bit) != 0 {
-                // Already blocked — expand neighbors
-                let y_min = (y as i32 - r).max(0) as usize;
-                let y_max = (y as i32 + r).min(hu as i32 - 1) as usize;
+        let y_min = (y as i32 - r).max(0) as usize;
+        let y_max = (y as i32 + r).min(hu as i32 - 1) as usize;
+        for word_x in 0..words_per_row {
+            let word_idx = y * words_per_row + word_x;
+            let mut word = snapshot[word_idx];
+            while word != 0 {
+                let bit = word.trailing_zeros() as usize;
+                word &= word - 1; // clear lowest set bit (BLSR)
+                let x = (word_x << 6) + bit;
+                if x >= wu {
+                    // Bit is padding past the grid width — skip (and any higher
+                    // bits in this word are also padding since trailing_zeros
+                    // returns them in ascending order).
+                    break;
+                }
                 let x_min = (x as i32 - r).max(0) as usize;
                 let x_max = (x as i32 + r).min(wu as i32 - 1) as usize;
                 for ny in y_min..=y_max {
+                    let row_off = ny * words_per_row;
                     for nx in x_min..=x_max {
-                        let nw_idx = ny * words_per_row + (nx >> 6);
-                        blocked[nw_idx] |= 1u64 << (nx & 63);
+                        blocked[row_off + (nx >> 6)] |= 1u64 << (nx & 63);
                     }
                 }
             }
@@ -420,6 +434,86 @@ mod tests {
                     "cell ({x},{y}): blocked={is_blocked}, expected={expected}"
                 );
             }
+        }
+    }
+
+    /// Reference (cell-by-cell) implementation — used to cross-check the
+    /// word-skipping fast path against the obvious baseline for grids that
+    /// span multiple words per row and have non-trivial padding bits.
+    fn inflate_reference(
+        blocked: &mut [u64],
+        snapshot: &mut [u64],
+        w: u16,
+        h: u16,
+        radius: u8,
+    ) {
+        let wu = w as usize;
+        let hu = h as usize;
+        let words_per_row = wu.div_ceil(64);
+        let total_words = words_per_row * hu;
+        snapshot[..total_words].copy_from_slice(&blocked[..total_words]);
+        let r = radius as i32;
+        if r == 0 {
+            return;
+        }
+        for y in 0..hu {
+            for x in 0..wu {
+                let word_idx = y * words_per_row + (x >> 6);
+                let bit = x & 63;
+                if snapshot[word_idx] & (1u64 << bit) != 0 {
+                    let y_min = (y as i32 - r).max(0) as usize;
+                    let y_max = (y as i32 + r).min(hu as i32 - 1) as usize;
+                    let x_min = (x as i32 - r).max(0) as usize;
+                    let x_max = (x as i32 + r).min(wu as i32 - 1) as usize;
+                    for ny in y_min..=y_max {
+                        for nx in x_min..=x_max {
+                            blocked[ny * words_per_row + (nx >> 6)] |= 1u64 << (nx & 63);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Differential test: random grids + radii, fast path must equal reference.
+    /// Covers the multi-word-row case (w > 64) and padding bits (w not a
+    /// multiple of 64) which the basic 8×8 tests don't exercise.
+    #[test]
+    fn inflate_obstacles_matches_reference_randomized() {
+        let mut rng = fastrand::Rng::with_seed(2026);
+        for trial in 0..200 {
+            // Widths that span 1-3 words with padding (65, 100, 130, 200).
+            let configs: [(u16, u16); 4] = [(65, 8), (100, 16), (130, 50), (200, 100)];
+            let (w, h) = configs[trial % 4];
+            let words_per_row = (w as usize).div_ceil(64);
+            let total_words = words_per_row * h as usize;
+            let densities = [0.05f32, 0.2, 0.5, 0.9];
+            let density = densities[trial % 4];
+
+            // Build a random blocked bitfield.
+            let mut orig = vec![0u64; total_words];
+            for y in 0..h as usize {
+                for x in 0..w as usize {
+                    if rng.f32() < density {
+                        orig[y * words_per_row + (x >> 6)] |= 1u64 << (x & 63);
+                    }
+                }
+            }
+
+            let radius = (trial % 5) as u8; // 0..=4
+
+            let mut fast = orig.clone();
+            let mut fast_snap = vec![0u64; total_words];
+            inflate_obstacles_with_snapshot(&mut fast, &mut fast_snap, w, h, radius);
+
+            let mut refr = orig.clone();
+            let mut refr_snap = vec![0u64; total_words];
+            inflate_reference(&mut refr, &mut refr_snap, w, h, radius);
+
+            assert_eq!(
+                fast, refr,
+                "trial {trial}: w={w} h={h} r={radius} density={density} diverged"
+            );
         }
     }
 }
