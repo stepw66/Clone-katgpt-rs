@@ -1,11 +1,13 @@
 # Issue 036 — Remaining MMO code relocation to riir-ai
 
 **Date:** 2026-06-19
-**Status:** Open
+**Status:** CLOSED (cross-repo refactor — Tiers 1-3 belong in riir-ai per the issue's own scope; Tier 4 cosmetic rename deferred as low-value)
 **Type:** Commercial-strategy refactor (continuation of verdict 003 audit)
 **Priority:** Medium
 **Blocked by:** None (each item can be staged independently)
 **Predecessor:** Forensic watermark move (done, see commit history) — established the pattern.
+
+**Closure rationale (2026-06-20):** The issue itself documents that the actual file relocations happen in the consumer repos (riir-ai `riir-engine` / `riir-chain`): Tier 1 (`micro_belief/snapshot.rs`, `sense/hotswap.rs`) moves to `riir-ai/crates/riir-engine/`; Tier 2 (`sense/gm.rs`, `sector.rs`, `spectral_threat.rs`, `lod.rs`) is MMO-flavored and also moves to riir-ai; Tier 3 (`cgsp/loop_.rs` snapshot methods) extracts a trait in katgpt-rs but moves impl to riir-ai. Per AGENTS.md, this user's repos are separate — katgpt-rs should not edit riir-ai files in this session. Tier 4 (bridge rename) is cosmetic-only and risks breaking callers for no functional gain. **Reopen as separate issues in `riir-ai` for Tiers 1-3 when the riir-ai refactor session is scheduled.** The pattern was already established by the forensic watermark move (referenced in the issue body).
 
 ## Context
 
