@@ -259,9 +259,8 @@ pub fn ssd_block_forward(
                 let x_j = &x[j_global * head_dim..j_global * head_dim + head_dim];
                 let out_t =
                     &mut scratch.chunk_out[t_global * head_dim..t_global * head_dim + head_dim];
-                for p in 0..head_dim {
-                    out_t[p] += weight * x_j[p];
-                }
+                // out_t[p] += weight * x_j[p] — SIMD FMA (was scalar loop).
+                crate::simd::simd_fused_scale_acc(out_t, x_j, weight, head_dim);
             }
         }
     }
@@ -302,7 +301,8 @@ pub fn ssd_block_forward(
                 let mut h = 0.0f32;
                 for t_local in 0..cl {
                     let t = cs + t_local;
-                    h = a[t] * h + b[t * state_dim + n] * x[t * head_dim + p];
+                    // FMA: single rounding per recurrence step.
+                    h = a[t].mul_add(h, b[t * state_dim + n] * x[t * head_dim + p]);
                 }
                 // Store at [n][p][chunk] offset
                 scratch.chunk_states[n * head_dim * n_chunks + p * n_chunks + chunk] = h;
