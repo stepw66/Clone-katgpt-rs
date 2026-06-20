@@ -1,4 +1,5 @@
 pub mod budget_compat;
+pub mod acceptance_forecast;
 
 #[cfg(feature = "belief_drafter")]
 pub mod belief_cache;
