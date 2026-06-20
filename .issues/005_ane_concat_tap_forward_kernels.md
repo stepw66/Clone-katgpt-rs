@@ -1,9 +1,10 @@
 # Issue 002: ANE Concat-Tap Forward Kernels for Larger Models
 
 **Source:** Research 223 — maderix/ANE Distillation
-**Status:** Deferred
-**Blocked On:** Multi-layer model integration (currently 1-layer microGPT)
+**Status:** CLOSED (deferred — blocked on multi-layer model integration)
 **Priority:** Low
+
+**Closure rationale (2026-06-20):** Issue explicitly self-defers. All four task items are blocked on multi-layer model integration (n_layer > 4), which is out of scope for the current 1-layer microGPT. The micro-benchmark showed only 2-3 dispatch savings at 1-layer scale — not worth the kernel complexity. Reopen when katgpt-rs supports multi-layer models.
 
 ## What
 
