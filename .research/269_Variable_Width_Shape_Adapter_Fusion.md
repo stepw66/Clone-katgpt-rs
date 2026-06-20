@@ -1,8 +1,8 @@
 # Research 269: Variable-Width `> <former` → Stage-Gated HLA Subspace Activation (Latent-Functor-LatCal Fusion)
 
 > **Source:** Wu, Sieberling, Tan, Panda, Polyanskiy, Kim. *Variable-Width Transformers* (`> <former`). [arXiv:2606.18246](https://arxiv.org/abs/2606.18246). MIT / MIT-IBM Watson AI Lab. 16 Jun 2026.
-> **Date:** 2026-06-19 (rev 2 — latent-functor-LatCal reframing after skill refinement)
-> **Status:** Active — **fusion idea, novelty TBD (needs Q1–Q4 check before verdict)**. See [`.issues/034_shape_adapter_novelty_gate.md`](../.issues/034_shape_adapter_novelty_gate.md).
+> **Date:** 2026-06-19 (rev 2 — latent-functor-LatCal reframing after skill refinement; rev 3 — 2026-06-20, Issue 034 closed, downgraded to Gain after literature survey)
+> **Status:** **Gain (downgraded 2026-06-20).** Both PRIMARY (stage-gated HLA subspace) and SECONDARY (shape-adaptive adapter routing) fusions have material prior art. Plan-only, feature-flagged, low priority — no primitive opened, no Super-GOAT promotion. See [`.issues/034_shape_adapter_novelty_gate.md`](../.issues/034_shape_adapter_novelty_gate.md) (CLOSED) and §3 below for the verdict + citation table.
 > **Related Research:** 123 (Latent Functor Runtime Guide — Super-GOAT), 010 (KG × HLA × Role Transport), 148 (Hydra Effect → Hydra Budget), 231 (OPD per-module energy profile), 247 (Dense Latent cross-model adapters, training→riir-train pattern), 258 (Sink-Aware / compression valleys), 266 (DenseMesh adaptive width), 212 (Gemini Fourier × LatCal fusion — the canonical LatCal Super-GOAT precedent).
 > **Related Plans:** 165 (Hydra Budget — layer skip via pre-computed profiles), 258 (LatCal Fixed-Point Shell Bridge), 265 (LatCal Fixed-Point Fourier Coefficients), 276 (MicroRecurrentBeliefState — HLA kernel snapshot).
 > **Cross-ref (riir-ai):** `latent_functor/zone_gating.rs::NpcFunctorRuntime`, `hla/types.rs::MultiLayerHlaCache` (gamma decay = carry-forward), `hla/kernel.rs::evolve_hla`, `riir-chain/src/encoding/latcal*.rs`.
@@ -102,33 +102,94 @@ These are engineering questions, not research-blockers. The modelless primitive 
 
 ## 3. Verdict
 
-**Fusion idea — novelty TBD, needs Q1–Q4 check before verdict.** Not a committed Super-GOAT. The PRIMARY fusion (stage-gated HLA subspace activation) is Super-GOAT-tier in framing; the SECONDARY (adapter routing) is GOAT-tier.
+**Downgraded to Gain (2026-06-20, Issue 034 closure).** Both the PRIMARY (stage-gated HLA subspace activation) and SECONDARY (shape-adaptive adapter routing) fusions have material prior art in the literature. Neither clears the Super-GOAT bar (novel-in-mechanism); the SECONDARY doesn't even clear the GOAT bar (novel-in-combination) cleanly. R269 stays as a plan-only, feature-flagged, low-priority Gain — no primitive opened, no Super-GOAT promotion, no mandatory follow-up outputs triggered.
 
-| Gate | Status (PRIMARY fusion) | Evidence |
-|---|---|---|
-| Q1 No prior art | ❓ **UNCERTAIN — must check literature** | Stage-gated subspace activation on per-NPC latent state is a new combination in *our* codebase (zone_gating is spatial-only; HLA gamma is per-layer decay, not per-stage subspace selection). But "stage-gated affective subspaces" / "context-gated latent subspace routing" exist in the affective computing + agent architecture literature — needs arxiv survey. See [Issue 034](../.issues/034_shape_adapter_novelty_gate.md) (revised to cover BOTH framings). |
-| Q2 New class of behavior | ✅ Likely yes | Per-decision-stage latent subspace routing for thousands of NPCs. No shipped primitive gates HLA by decision context (only by zone density). |
-| Q3 Product selling point | ✅ Likely yes | "NPCs don't waste compute updating emotional subspaces during combat, or spatial subspaces during dialog — stage-gated latent width, 1000s of NPCs at 20Hz, LatCal-committed for replay determinism." |
-| Q4 Force multiplier | ✅ Yes | Connects HLA (`hla/types.rs`), latent_functor (`zone_gating.rs`), cgsp_runtime (curiosity-driven profile), LatCal (commitment bridge), freeze/thaw (per-personality profile snapshot). 5 pillars. |
+### Q1.a — PRIMARY fusion (stage-gated HLA subspace activation): **PARTIAL PRIOR ART**
 
-**Per the research skill:** because Q1 is not committed YES, this is filed as "novelty TBD" with an issue — NOT as "Super-GOAT candidate." If Issue 034 closes with Q1=YES on the PRIMARY fusion, this note upgrades to Super-GOAT and the mandatory outputs (open primitive in katgpt-rs + private riir-ai guide + plans) become due in that follow-up session.
+Three legs: (a) per-decision-stage latent subspace selection on recurrent belief, (b) carry-forward persistence via leaky integrator, (c) deterministic commitment for replay.
 
-**The pure architecture recipe → `riir-train`.** One-line redirect; no katgpt-rs files created for the `×`-shape training method itself.
+Closest prior art:
+- **VSG / SVSG (Jain et al., NeurIPS 2022, [arXiv:2210.11698](https://arxiv.org/abs/2210.11698))** — "Variational Sparse Gating." Update equation `h_t = u_t·h̃_t + (1-u_t)·h_{t-1}` with `u_t ~ Bernoulli(p)` is *exactly* sparse subspace selection on a recurrent latent state with carry-forward of dormant dimensions. Anticipates legs (a) generically (per-step, not per-decision-stage) and (b) via a binary gate (not a leaky integrator — `gamma` decay in our `MultiLayerHlaCache` is closer to the paper's intent than VSG's hard Bernoulli). Does NOT anticipate leg (c) — VSG's gates are stochastic for exploration, the antithesis of deterministic commitment.
+- **Sparsely Changing Latent States (NeurIPS 2021)** — L0-regularized rectified gating on latent state updates. Same leg (a)/(b) family.
+- **Latent Structure of Affective Representations in LLMs ([arXiv:2604.07382](https://arxiv.org/abs/2604.07382))** — geometric analysis of affective subspaces in LLMs. Establishes that "affective subspace" is a populated concept; not a gating mechanism.
+- **Appraisal-based chain-of-emotion ([arXiv:2309.05076](https://arxiv.org/abs/2309.05076))** — decision-context emotion simulation in games. Establishes the affective + decision-context framing; no latent subspace selection mechanism.
 
-### Tier reasoning
+**Verdict:** no paper composes all three legs for affective NPC cognition with replay commitment, but two of three legs (sparse subspace update on recurrent belief + dormant-dim carry-forward) are direct prior art in VSG. The remaining novelty is the **composition** (affective stage axis + leaky-integrator persistence + LatCal commitment + 1000s-of-NPCs batching) — novel-in-combination, not novel-in-mechanism. Per the resolution table, this fails the Q1=YES criterion for Super-GOAT.
 
-- **Not Pass:** the PRIMARY fusion (stage-gated HLA subspace activation) is a legitimate latent-to-latent Super-GOAT-tier framing. The gap in shipped prior art is real: `zone_gating` is spatial-only, HLA `gamma` is per-layer not per-stage-subspace.
-- **Not Super-GOAT (yet):** Q1 literature check on "stage-gated affective subspaces" / "context-gated latent routing" is genuinely open. Affective computing has prior art on context-gated emotion models; claiming novelty without the survey would repeat the `evolve_hla` overclaim.
-- **Not GOAT/Gain:** those tiers require a committed primitive + benchmark. The primitive is well-defined but its value depends on validating that stage-gated subspace narrowing actually saves compute at iso-quality on HLA state — which is the G2 gate.
-- **Secondary fusion (adapter routing) is GOAT-tier at best** — it's a weight-aware modelless framing, weaker than the latent-to-latent primary.
+### Q1.a' — SECONDARY fusion (shape-adaptive adapter routing): **PRIOR ART**
+
+Three legs: (a) per-layer adapter capacity profile, (b) runtime hot-swap between profiles, (c) inference-time layer skip driven by the profile.
+
+Closest prior art:
+- **FIM-LoRA ([arXiv:2605.16800](https://arxiv.org/abs/2605.16800))** — produces "a standard LoRA with a per-layer rank pattern — no new parameters, no training overhead, no changes to serving." Directly anticipates leg (a). Per-layer maps are interpretable ("value projections and early-to-middle layers consistently receive higher rank").
+- **ALoRA ([arXiv:2403.16187](https://arxiv.org/abs/2403.16187))** — re-allocates LoRA ranks per layer during fine-tuning. Leg (a).
+- **MoLA (NAACL 2025)** — LoRA-MoE with layer-wise expert allocation. Leg (a), different mechanism.
+- **La-LoRA, AdaLoRA, IGU-LoRA** — layer-wise adaptive rank via various signals. Leg (a) family.
+- **vLLM / HuggingFace PEFT hotswap / Unsloth** — runtime LoRA hot-swap is production shipping. Leg (b).
+- **LoRA-Switch ([arXiv:2405.17741](https://arxiv.org/abs/2405.17741))** — token-wise LoRA routing. Leg (b), per-token not per-profile.
+- **LayerRoute ([arXiv:2606.01838](https://arxiv.org/abs/2606.01838))** — "Input-Conditioned Adaptive Layer Skipping via LoRA Fine-Tuning." Trains a per-layer router + LoRA jointly; tool-call inputs skip 15.25% of FLOPs, planning inputs skip 2.34%. Anticipates leg (c) — LoRA-driven layer skip — but the skip plan is a *separately learned router*, not *derived from the adapter's per-layer shape profile*.
+- **LoRA-Drop ([arXiv:2601.02569](https://arxiv.org/abs/2601.02569))** — temporal compute schedule on a fixed LoRA subset. Leg (c) family.
+
+**Verdict:** legs (a) and (b) are fully anticipated by separate papers; leg (c) is partially anticipated by LayerRoute (skip driven by LoRA, but not by shape profile). Per the issue's Q1.a' criterion — "If any two of the three exist together, the fusion is GOAT (novel-in-combination) not Super-GOAT" — the SECONDARY is at best GOAT, and the specific composition (skip plan *derived from* adapter shape profile, *atomically hot-swapped with* the adapter) is a thin novelty over LayerRoute + FIM-LoRA + vLLM-hotswap. Downgraded to Gain.
+
+### Q1.c — adapter-driven Hydra skip plan: **feasible, novel as code, not as concept**
+
+Grep of `HydraBudgetConfig` call sites in `katgpt-rs/src/` and `katgpt-rs/crates/katgpt-core/src/` (2026-06-20):
+- `crates/katgpt-core/src/types.rs:4203` — struct definition `{ skip_threshold, cumulative_threshold, modelless: bool, skip_erasure_draft: bool }`. **No adapter-aware field.** `modelless` means "lookup vs logit-lens," not "base vs adapter."
+- `crates/katgpt-core/src/lib.rs:184` — re-export.
+- `src/pruners/hydra_budget.rs:11,95` — `hydra_layer_skip(profiles: &[HydraLayerProfile], config: &HydraBudgetConfig)`. Profile source is the caller's responsibility; nothing prevents passing an adapter-derived profile.
+- `tests/bench_165_hydra_budget_goat.rs` — benchmarks pass synthetic profiles.
+
+**Verdict:** no adapter-aware variant exists in katgpt-rs today. The mechanism is feasible — extend `HydraBudgetConfig` with `adapter_profile: Option<HydraLayerProfile>` (or pass adapter-derived profiles into `hydra_layer_skip`). But LayerRoute already demonstrates LoRA-driven layer skip in the literature, so this is novel-as-shipped-code, not novel-as-concept.
+
+### Q1.d — `SnapshotMeta` forward-compat: **NOT forward-compatible as-is — migration prerequisite**
+
+`riir-ai/crates/riir-engine/src/snapshot.rs:300-310` (read 2026-06-20, cross-repo accessible from this workspace):
+
+```rust
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct SnapshotMeta {
+    pub blake3_hash: [u8; 32],
+    pub n_layers: usize,
+    pub size_bytes: usize,
+    pub timestamp: u64,
+}
+```
+
+**No `#[serde(default)]` on any field.** Adding `width_profile: Vec<u8>` (or any new field) would cause `serde::Deserialize` to reject old snapshots with a missing-field error. R269 §5's assumption ("forward-compatible serde-with-default fields") is **wrong**. Any snapshot extension requires a forward-compat migration first: add `#[serde(default)]` on the new field AND bump `SNAPSHOT_VERSION` (currently 1). This is an additional cost against the Gain tier.
+
+### Tier reasoning (final)
+
+- **Not Super-GOAT:** Q1=YES on PRIMARY fails. VSG (2210.11698) directly anticipates the load-bearing mechanism (sparse subspace update on recurrent latent + dormant-dim carry-forward). The remaining PRIMARY novelty is composition (affective stage axis + LatCal commitment + multi-NPC batching) — novel-in-combination, not novel-in-mechanism. Per the research skill, Super-GOAT requires novel-in-mechanism.
+- **Not GOAT:** GOAT requires a committed primitive + benchmarked gain. R269 has neither. The SECONDARY fusion's three legs are each separately prior art; the composition is thin over LayerRoute + FIM-LoRA + vLLM-hotswap.
+- **Gain (final):** the fusion is a useful composition of our shipped primitives (Hydra Budget + HLA + LatCal + hot-swap) that *might* yield a small win in NPC compute-per-tick at iso-quality, but the moat is weak and the snapshot forward-compat migration adds cost. Plan-only, feature-flagged (`shape_adaptive_router`), low priority. No primitive opened. No mandatory follow-up outputs.
+
+### Citation table
+
+| Paper | arXiv | Anticipates | Gap vs R269 |
+|---|---|---|---|
+| VSG / SVSG (Jain et al., NeurIPS 2022) | [2210.11698](https://arxiv.org/abs/2210.11698) | PRIMARY legs (a) generically + (b) via binary gate | No affective axis, no per-stage gating, no deterministic commitment |
+| Sparsely Changing Latent States (NeurIPS 2021) | — | PRIMARY leg (a) via L0 gating | Same as VSG |
+| FIM-LoRA (Sathyavageeswaran, 2026) | [2605.16800](https://arxiv.org/abs/2605.16800) | SECONDARY leg (a) — per-layer rank pattern as adapter property | No skip coupling, no hot-swap |
+| ALoRA | [2403.16187](https://arxiv.org/abs/2403.16187) | SECONDARY leg (a) — rank re-allocation | No skip, no swap |
+| MoLA (NAACL 2025) | — | SECONDARY leg (a) — layer-wise expert allocation | MoE not rank-profile |
+| LayerRoute (Sikdar, 2026) | [2606.01838](https://arxiv.org/abs/2606.01838) | SECONDARY leg (c) — LoRA-driven per-input layer skip | Skip from learned router, not from adapter shape profile; no hot-swap |
+| LoRA-Switch | [2405.17741](https://arxiv.org/abs/2405.17741) | SECONDARY leg (b) — token-wise LoRA routing | Per-token not per-profile |
+| LoRA-Drop | [2601.02569](https://arxiv.org/abs/2601.02569) | SECONDARY leg (c) — temporal compute schedule on LoRA subset | Not shape-profile-derived |
+| Latent Structure of Affective Reps in LLMs | [2604.07382](https://arxiv.org/abs/2604.07382) | "Affective subspace" as populated concept | Analysis only, no gating |
+| Appraisal-based chain-of-emotion | [2309.05076](https://arxiv.org/abs/2309.05076) | Decision-context emotion in games | No latent subspace mechanism |
 
 ## 4. What would change the verdict
 
+Issue 034 closed (2026-06-20) with **both Q1.a (PRIMARY) and Q1.a' (SECONDARY) showing prior art** → R269 downgraded to **Gain** per the resolution table row 3. The original hypothetical table below is retained for audit:
+
 | If Issue 034 finds... | Then... |
 |---|---|
-| Prior art on "per-layer adapter shape profile" in literature | Downgrade to **Gain** — the fusion is still useful as a composition of our shipped primitives, but no moat. Plan-only, feature-flagged. |
-| No prior art; mechanism (adapter-driven layer suppression + Hydra skip + carry-forward) is novel | Upgrade to **Super-GOAT**. Mandatory outputs in follow-up session: (1) open `ShapeAdaptiveRouter` primitive in katgpt-rs; (2) private `riir-ai/.research/NNN_*.md` guide with validation protocol; (3) plans in katgpt-rs + riir-ai + riir-train. |
+| Prior art on "per-layer adapter shape profile" in literature | Downgrade to **Gain** ← *this row fired* |
+| No prior art; mechanism (adapter-driven layer suppression + Hydra skip + carry-forward) is novel | Upgrade to **Super-GOAT**. |
 | Prior art exists but our specific composition (× OPD × Hydra × hot-swap) is novel-in-combination | **GOAT** — plan + implement behind feature flag, benchmark vs vanilla adapter routing, promote if it wins. |
+
+**Actual outcome:** PRIMARY has partial prior art (VSG anticipates the load-bearing subspace-gating mechanism); SECONDARY has prior art on 2 of 3 legs (FIM-LoRA + vLLM-hotswap). Neither composition clears Super-GOAT or GOAT. Gain it is.
 
 ## 5. Cross-references for the follow-up session
 
@@ -143,4 +204,4 @@ These are engineering questions, not research-blockers. The modelless primitive 
 
 ## TL;DR
 
-The architecture is training research (→ `riir-train`). The analysis methodology is `effective_rank`-equivalent math we already ship. The PRIMARY fusion (Super-GOAT-tier, after skill refinement forced the latent reframing): **stage-gated HLA subspace activation** — `> <former`'s variable width = which HLA subspace is active at which decision stage; carry-forward = dormant subspace persistence via HLA `gamma` leaky integrator; ×-shape profile = LatCal-committed per-stage schedule for replay determinism. The SECONDARY fusion (GOAT-tier, rev 1's primary): shape-adaptive adapter routing via on-the-fly LoRA. Verdict is **fusion — novelty TBD** because Q1 needs a literature check on "stage-gated affective subspaces" / "context-gated latent routing" before committing Super-GOAT. Filed Issue 034 for the gate; no guide or plans created until Q1 resolves YES. The skill refinement (added five Super-GOAT factory modules including LatCal, mandatory latent-space reframing step, R269 as documented failure case) is what surfaced the primary framing — without it, this note would have stayed at the weaker adapter-routing verdict.
+**Verdict (rev 3, 2026-06-20): Gain — downgraded from fusion-novelty-TBD after Issue 034 literature survey.** The architecture is training research (→ `riir-train`). The PRIMARY fusion (stage-gated HLA subspace activation) has its load-bearing mechanism — sparse subspace update on a recurrent latent with dormant-dim carry-forward — directly anticipated by **VSG / SVSG (Jain et al., NeurIPS 2022, [arXiv:2210.11698](https://arxiv.org/abs/2210.11698))**; the remaining PRIMARY novelty is composition (affective stage axis + LatCal commitment + multi-NPC batching), novel-in-combination not novel-in-mechanism. The SECONDARY fusion (shape-adaptive adapter routing) has prior art on 2 of 3 legs: **FIM-LoRA ([2605.16800](https://arxiv.org/abs/2605.16800))** for per-layer rank pattern, **vLLM/HF/Unsloth hotswap** for runtime swap; LayerRoute ([2606.01838](https://arxiv.org/abs/2606.01838)) partially anticipates the LoRA-driven-skip leg. Neither fusion clears Super-GOAT or GOAT. Plan-only behind `shape_adaptive_router` feature flag, low priority. **Caveat uncovered:** `riir-ai/crates/riir-engine/src/snapshot.rs::SnapshotMeta` has no `#[serde(default)]` — any per-layer-width-profile extension requires a forward-compat migration (add `#[serde(default)]` + bump `SNAPSHOT_VERSION`) as a prerequisite. No primitive opened; no Super-GOAT promotion; no mandatory follow-up outputs triggered.
