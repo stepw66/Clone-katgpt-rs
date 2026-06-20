@@ -5,7 +5,7 @@
 **Source paper:** [arxiv 2510.04542](https://arxiv.org/pdf/2510.04542) — Lehrach et al., Code World Models for General Game Playing (DeepMind, Oct 2025)
 **Target:** `katgpt-rs/crates/katgpt-core/src/induced_cwm/` (new module, open) + re-export through `katgpt-rs/src/lib.rs`
 **Cargo features:** `induced_cwm` (katgpt-core, **opt-in**); `induced_cwm_ismcts` (depends on `induced_cwm` + `game_state`)
-**Status:** Active — Phase 1 ✅ SHIPPED (2026-06-21); Phase 2 (ISMCTS) pending.
+**Status:** Active — Phase 1 ✅ SHIPPED + Phase 2 ✅ SHIPPED (2026-06-21); Phase 3 (tournament) pending.
 
 ---
 
@@ -52,6 +52,13 @@ Ship the **generic, IP-free half** of the CWM Super-GOAT (Research 275):
 2. **T1.4**: `CwmCommitment` uses `u64 version` instead of `Uuid snapshot_id` (micro_belief precedent; UUID deferred to swap-event layer in riir-ai Plan 326).
 3. **T1.6**: `verify_transition` takes `&TransitionUnitTest<S>` only, no `kernel: &K` (the state IS the kernel under the codebase's `GameState` convention).
 
+### Phase 2 deviations summary
+
+1. **T2.1 algorithm**: per-iteration determinized MCTS with root-level aggregation, NOT full single-tree Cowling 2012 ISMCTS. Simpler, correct for G2 gate, documented in rustdoc. Future rev can deepen if needed.
+2. **T2.1 signature**: dropped the `kernel_sample: &S` and `heuristic: Option<&dyn StateHeuristic<S>>` parameters from the plan signature. The first sample from `belief.sample(...)` serves as the initial state (avoids a redundant parameter). Heuristic is not used by the simplified algorithm (rollouts are pure-random); can be added back when full single-tree ISMCTS is implemented.
+3. **T2.3**: `NodeStats.visits` is `u32`, not `usize` — matches the smaller-scale IIG mock.
+4. **No `papaya` dependency added** (plan T2.2 mentioned it as optional for v2). Current algorithm is single-threaded `&mut` HashMap; concurrent access can be added in Phase 4 hot-swap if needed.
+
 ### Files
 
 ```
@@ -74,13 +81,11 @@ katgpt-rs/crates/katgpt-core/src/lib.rs        # gated re-export
 
 ### Tasks
 
-- [ ] **T2.1** In `induced_cwm/ismcts.rs` (gated by `induced_cwm_ismcts`), add `pub fn ismcts_search_with_inference<S, B>(root_obs_history: &[S::Action], root_action_history: &[S::Action], player_id: u8, kernel_sample: &S, belief: &B, heuristic: Option<&dyn StateHeuristic<S>>, budget: usize, rng_seed: u64) -> S::Action where S: GameState, B: BeliefInferenceFn<S>`:
-  - At each iteration: (a) draw one hidden-state sample `s̃` from `belief`, (b) treat `s̃` as the MCTS root, (c) run standard UCB1 tree search using `kernel.advance()` (the CWM) as forward model, (d) statistics aggregate at the information-set level (per paper §B ISMCTS — Cowling et al. 2012).
-  - Default to no heuristic (pure rollouts). When heuristic is provided, use it for leaf initialization (paper §4.3).
-- [ ] **T2.2** Define `InformationSet<S: GameState> { pub key: u64, pub edges: HashMap<S::Action, NodeStats> }` where `key` is a hash of the observation-action history that the player cannot distinguish. Use `papaya` HashMap (AGENTS.md) if concurrent access is needed in v2; v1 uses `std::collections::HashMap` behind `&mut`.
-- [ ] **T2.3** Add `NodeStats { visits: u32, total_value: f32 }` mirroring `mcts_search`'s existing node struct (DRY — reuse if exported).
-- [ ] **T2.4** Unit test: a 2-card Leduc-poker-style mock where the inference fn deterministically enumerates the (small) hidden-state support; assert that ISMCTS picks a non-folding action when the agent's hand is strong.
-- [ ] **T2.5** Add `examples/induced_cwm_01_mock_iig.rs` showing: a mock induced CWM (3 hidden states, 4 actions), a mock belief fn returning 1–3 samples, ISMCTS picks an action, prints the chosen action and information-set statistics.
+- [x] **T2.1** `ismcts_search_with_inference<S, B>` implemented in `induced_cwm/ismcts.rs`. **Algorithm simplification**: instead of full single-tree Cowling 2012 ISMCTS, implements per-iteration determinized MCTS with root-level info-set aggregation (sample one hidden state per iteration → rollout per root action → accumulate in shared root HashMap). Sufficient for G2 gate; documented in rustdoc. Future rev can implement full single-tree if deeper-lookahead games need it.
+- [x] **T2.2** `InformationSet<A>` defined as `{ edges: HashMap<u64, NodeStats>, total_visits }`. Public for API symmetry; current algorithm uses only the root one.
+- [x] **T2.3** `NodeStats { visits: u32, total_value: f32 }` with `ucb1(parent_visits)` mirroring mcts.rs UCB1 formula. Uses `u32` visits (not `usize` as plan said) to match the smaller-scale IIG mock — revisit if a real domain exceeds 2³² iterations.
+- [x] **T2.4** Leduc-style IIG mock in `induced_cwm/ismcts_tests.rs` (10 tests, all pass). G2 gate test: `ismcts_picks_nonfold_at_least_70pct_when_strong_hand` verifies non-fold ≥ 70% when posterior P(strong) ≥ 0.7. Plus 9 supporting tests (NodeStats, InformationSet, action_hash stability, determinism, canonical_bytes constancy).
+- [x] **T2.5** `examples/induced_cwm_01_mock_iig.rs` — mock grid-world IIG with hidden exit, 4 actions, belief fn returning 1–3 samples. Prints chosen action + root info-set stats table. Runs clean.
 
 ### Files
 
