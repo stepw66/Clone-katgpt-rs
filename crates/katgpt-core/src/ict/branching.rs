@@ -86,8 +86,12 @@ pub fn branching_point_mask(uniqueness_scores: &[f32], k_percent: f32, mask: &mu
     // quickselect and deterministic. Clone into a local Vec is acceptable —
     // this is NOT the zero-alloc path; the zero-alloc path is in
     // BranchingDetector which keeps its own scratch.
+    //
+    // sort_unstable_by is correct: we only consume `threshold = sorted[k-1]`,
+    // the order of equal-scored elements doesn't affect the output (the
+    // cap-at-k loop below enforces deterministic lower-index tie-breaking).
     let mut sorted: Vec<f32> = uniqueness_scores.to_vec();
-    sorted.sort_by(|a, b| b.partial_cmp(a).unwrap_or(core::cmp::Ordering::Equal));
+    sorted.sort_unstable_by(|a, b| b.partial_cmp(a).unwrap_or(core::cmp::Ordering::Equal));
     let threshold = sorted[k - 1];
 
     branching_point_mask_into(uniqueness_scores, threshold, mask);
