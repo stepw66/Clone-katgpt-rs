@@ -185,10 +185,11 @@ where
         // Tilt: additive shift over the shorter of the two buffers.
         let n = logits_buffer.len().min(gradient_buffer.len());
         let w = self.guidance_weight;
-        for i in 0..n {
-            // FMA: logits[i] = w * gradient[i] + logits[i] (single rounding).
-            logits_buffer[i] = w.mul_add(gradient_buffer[i], logits_buffer[i]);
-        }
+        // SIMD AXPY via `simd_fused_scale_acc` — same single-rounding FMA
+        // semantics as the scalar `w.mul_add(gradient[i], logits[i])` form
+        // (verified bit-identical by `scalar_fused_scale_acc` in simd/research.rs),
+        // but vectorized via NEON/AVX2. Hot path on every guided generation step.
+        crate::simd::simd_fused_scale_acc(logits_buffer, gradient_buffer, w, n);
         true
     }
 
@@ -235,10 +236,8 @@ where
         self.oracle
             .q_gradient_into(condition, projected, gradient_buffer);
         let n = logits_buffer.len().min(gradient_buffer.len());
-        for i in 0..n {
-            // FMA: logits[i] = w * gradient[i] + logits[i] (single rounding, matches tilt_logits).
-            logits_buffer[i] = weight.mul_add(gradient_buffer[i], logits_buffer[i]);
-        }
+        // SIMD AXPY — matches `tilt_logits` numerically (single-rounding FMA).
+        crate::simd::simd_fused_scale_acc(logits_buffer, gradient_buffer, weight, n);
         true
     }
 
