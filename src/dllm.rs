@@ -422,11 +422,7 @@ fn forward_bidirectional_positions_into(
         };
         #[cfg(not(feature = "rcd_residual"))]
         let emb = &weights.wte[token * n..(token + 1) * n];
-        crate::simd::simd_add_into(
-            &mut bctx.x,
-            emb,
-            &weights.wpe[p * n..(p + 1) * n],
-        );
+        crate::simd::simd_add_into(&mut bctx.x, emb, &weights.wpe[p * n..(p + 1) * n]);
         rmsnorm(&mut bctx.x);
         bctx.xr_all[p * n..(p + 1) * n].copy_from_slice(&bctx.x);
         rmsnorm(&mut bctx.x);
@@ -1229,59 +1225,58 @@ fn backward(
     let any_masked = is_masked.iter().any(|&m| m);
     if any_masked {
         for p in 0..seq_len {
+            // d_wq, d_wk, d_wv
+            let an2 = &act.after_norm2[p * n..(p + 1) * n];
+            crate::simd::simd_outer_product_acc(
+                &mut grads.attn_wq,
+                &bctx.d_q[p * n..p * n + n],
+                an2,
+                n,
+                n,
+            );
+            crate::simd::simd_outer_product_acc(
+                &mut grads.attn_wk,
+                &bctx.d_k[p * kvd..p * kvd + kvd],
+                an2,
+                kvd,
+                n,
+            );
+            crate::simd::simd_outer_product_acc(
+                &mut grads.attn_wv,
+                &bctx.d_v[p * kvd..p * kvd + kvd],
+                an2,
+                kvd,
+                n,
+            );
 
-        // d_wq, d_wk, d_wv
-        let an2 = &act.after_norm2[p * n..(p + 1) * n];
-        crate::simd::simd_outer_product_acc(
-            &mut grads.attn_wq,
-            &bctx.d_q[p * n..p * n + n],
-            an2,
-            n,
-            n,
-        );
-        crate::simd::simd_outer_product_acc(
-            &mut grads.attn_wk,
-            &bctx.d_k[p * kvd..p * kvd + kvd],
-            an2,
-            kvd,
-            n,
-        );
-        crate::simd::simd_outer_product_acc(
-            &mut grads.attn_wv,
-            &bctx.d_v[p * kvd..p * kvd + kvd],
-            an2,
-            kvd,
-            n,
-        );
-
-        // d_after_norm2 = wq^T @ d_q + wk^T @ d_k + wv^T @ d_v
-        bctx.d_an2[..n].fill(0.0);
-        for i in 0..n {
-            let grad = bctx.d_q[p * n + i];
-            crate::simd::simd_fused_scale_acc(
-                &mut bctx.d_an2[..n],
-                &layer.attn_wq[i * n..(i + 1) * n],
-                grad,
-                n,
-            );
-        }
-        for i in 0..kvd {
-            let gk = bctx.d_k[p * kvd + i];
-            let gv = bctx.d_v[p * kvd + i];
-            crate::simd::simd_fused_scale_acc(
-                &mut bctx.d_an2[..n],
-                &layer.attn_wk[i * n..(i + 1) * n],
-                gk,
-                n,
-            );
-            crate::simd::simd_fused_scale_acc(
-                &mut bctx.d_an2[..n],
-                &layer.attn_wv[i * n..(i + 1) * n],
-                gv,
-                n,
-            );
-        }
-        bctx.d_after_norm2[p * n..(p + 1) * n].copy_from_slice(&bctx.d_an2[..n]);
+            // d_after_norm2 = wq^T @ d_q + wk^T @ d_k + wv^T @ d_v
+            bctx.d_an2[..n].fill(0.0);
+            for i in 0..n {
+                let grad = bctx.d_q[p * n + i];
+                crate::simd::simd_fused_scale_acc(
+                    &mut bctx.d_an2[..n],
+                    &layer.attn_wq[i * n..(i + 1) * n],
+                    grad,
+                    n,
+                );
+            }
+            for i in 0..kvd {
+                let gk = bctx.d_k[p * kvd + i];
+                let gv = bctx.d_v[p * kvd + i];
+                crate::simd::simd_fused_scale_acc(
+                    &mut bctx.d_an2[..n],
+                    &layer.attn_wk[i * n..(i + 1) * n],
+                    gk,
+                    n,
+                );
+                crate::simd::simd_fused_scale_acc(
+                    &mut bctx.d_an2[..n],
+                    &layer.attn_wv[i * n..(i + 1) * n],
+                    gv,
+                    n,
+                );
+            }
+            bctx.d_after_norm2[p * n..(p + 1) * n].copy_from_slice(&bctx.d_an2[..n]);
         }
     }
 
@@ -2222,9 +2217,8 @@ pub fn denoise_loop_rcd(
     rcd_config: Option<&mut crate::dllm_solver::RcdConfig>,
 ) -> (Vec<usize>, usize) {
     // If RCD is disabled at runtime, fall back to the standard loop with zero overhead.
-    let rcd_enabled = rcd_config.as_ref().map_or(false, |c| c.enabled);
+    let rcd_enabled = rcd_config.as_ref().is_some_and(|c| c.enabled);
     if !rcd_enabled {
-        drop(rcd_config);
         return denoise_loop(
             weights,
             target_tokens,
@@ -2335,7 +2329,7 @@ pub fn denoise_loop_rcd(
                 &mut residual_scratch,
             );
             interpolate_residual(
-                &mask_emb,
+                mask_emb,
                 &residual_scratch,
                 alpha,
                 &mut bctx.rcd_residual_embeddings[p * n..(p + 1) * n],
@@ -2433,8 +2427,8 @@ pub fn denoise_loop_rcd_3sr(
     }
 
     use crate::dllm_solver::{
-        classify_transitions, compute_gammas, compute_residual, interpolate_residual,
-        normalized_entropy, warm_start_lerp, ThreeStateReuseConfig,
+        ThreeStateReuseConfig, classify_transitions, compute_gammas, compute_residual,
+        interpolate_residual, normalized_entropy, warm_start_lerp,
     };
     let tsr_cfg: &ThreeStateReuseConfig = tsr_config.expect("checked tsr_enabled above");
 
@@ -2455,7 +2449,8 @@ pub fn denoise_loop_rcd_3sr(
     let mask_emb: &[f32] = &weights.wte[mask * n..(mask + 1) * n];
 
     // 3SR-specific scratch (Plan 291). All allocated once outside the loop.
-    let mut transition_scratch = vec![crate::dllm_solver::TransitionType::UnchangedVisible; seq_len];
+    let mut transition_scratch =
+        vec![crate::dllm_solver::TransitionType::UnchangedVisible; seq_len];
     let mut gamma_scratch = vec![0.0f32; seq_len];
     // h_star_next: previous step's residual buffer (modelless proxy for FP state).
     // Length `seq_len * n_embd`, zero-init (first step has no z_prev).
@@ -2556,12 +2551,7 @@ pub fn denoise_loop_rcd_3sr(
         // (h_pre) into tsr_warm_start_embeddings. tsr_active gates the next
         // forward's embedding lookup to prefer the 3SR buffer.
         if step > 0 && wrote_residual {
-            classify_transitions(
-                &z_prev_tokens,
-                &tokens,
-                mask,
-                &mut transition_scratch,
-            );
+            classify_transitions(&z_prev_tokens, &tokens, mask, &mut transition_scratch);
             // visible_fraction_t = (seq_len - remaining) / seq_len.
             let visible_fraction = if seq_len > 0 {
                 (seq_len - remaining) as f32 / seq_len as f32
@@ -3171,8 +3161,7 @@ mod tests {
         let config = Config::micro_dllm();
         let mut rng = Rng::new(42);
         let train_data = generate_pattern_dataset(&mut rng, 50, 4, 8);
-        let (weights, _) =
-            train_mini_dllm(&config, &train_data, &train_data, 200, 0.01, 0.25, 42);
+        let (weights, _) = train_mini_dllm(&config, &train_data, &train_data, 200, 0.01, 0.25, 42);
 
         let target = vec![3, 7, 3, 7];
 
@@ -3198,8 +3187,14 @@ mod tests {
             Some(&mut rcd_cfg),
         );
 
-        assert_eq!(base_tokens, rcd_tokens, "disabled RCD must match baseline tokens");
-        assert_eq!(base_steps, rcd_steps, "disabled RCD must match baseline steps");
+        assert_eq!(
+            base_tokens, rcd_tokens,
+            "disabled RCD must match baseline tokens"
+        );
+        assert_eq!(
+            base_steps, rcd_steps,
+            "disabled RCD must match baseline steps"
+        );
     }
 
     /// RCD enabled must still converge and produce a mask-free sequence.
@@ -3212,13 +3207,11 @@ mod tests {
         let config = Config::micro_dllm();
         let mut rng = Rng::new(42);
         let train_data = generate_pattern_dataset(&mut rng, 50, 4, 8);
-        let (weights, _) =
-            train_mini_dllm(&config, &train_data, &train_data, 200, 0.01, 0.25, 42);
+        let (weights, _) = train_mini_dllm(&config, &train_data, &train_data, 200, 0.01, 0.25, 42);
 
         let target = vec![3, 7, 3, 7];
 
-        let mut rcd_cfg =
-            crate::dllm_solver::RcdConfig::new(config.vocab_size, config.n_embd);
+        let mut rcd_cfg = crate::dllm_solver::RcdConfig::new(config.vocab_size, config.n_embd);
         let (tokens, steps) = denoise_loop_rcd(
             &weights,
             &target,
@@ -3230,10 +3223,7 @@ mod tests {
             Some(&mut rcd_cfg),
         );
 
-        assert!(
-            steps < 10,
-            "RCD should converge in ≤ 10 steps, got {steps}"
-        );
+        assert!(steps < 10, "RCD should converge in ≤ 10 steps, got {steps}");
         assert!(
             tokens.iter().all(|&t| t != config.mask_token),
             "RCD result still has mask tokens"
@@ -3251,8 +3241,7 @@ mod tests {
         let config = Config::micro_dllm();
         let mut rng = Rng::new(42);
         let train_data = generate_pattern_dataset(&mut rng, 50, 4, 8);
-        let (weights, _) =
-            train_mini_dllm(&config, &train_data, &train_data, 200, 0.01, 0.25, 42);
+        let (weights, _) = train_mini_dllm(&config, &train_data, &train_data, 200, 0.01, 0.25, 42);
 
         // Multiple targets — aggregate to avoid single-seed noise.
         let targets: Vec<Vec<usize>> = (0..8)
@@ -3278,8 +3267,7 @@ mod tests {
                 &mut NoConstraint,
                 &mut Rng::new(42),
             );
-            let mut rcd_cfg =
-                crate::dllm_solver::RcdConfig::new(config.vocab_size, config.n_embd);
+            let mut rcd_cfg = crate::dllm_solver::RcdConfig::new(config.vocab_size, config.n_embd);
             let (rcd_tokens, rcd_steps) = denoise_loop_rcd(
                 &weights,
                 target,
@@ -3328,8 +3316,7 @@ mod tests {
         let config = Config::micro_dllm();
         let mut rng = Rng::new(42);
         let train_data = generate_pattern_dataset(&mut rng, 50, 4, 8);
-        let (weights, _) =
-            train_mini_dllm(&config, &train_data, &train_data, 200, 0.01, 0.25, 42);
+        let (weights, _) = train_mini_dllm(&config, &train_data, &train_data, 200, 0.01, 0.25, 42);
 
         let target = vec![3, 7, 3, 7];
 
@@ -3378,8 +3365,7 @@ mod tests {
         let config = Config::micro_dllm();
         let mut rng = Rng::new(42);
         let train_data = generate_pattern_dataset(&mut rng, 50, 4, 8);
-        let (weights, _) =
-            train_mini_dllm(&config, &train_data, &train_data, 200, 0.01, 0.25, 42);
+        let (weights, _) = train_mini_dllm(&config, &train_data, &train_data, 200, 0.01, 0.25, 42);
 
         let target = vec![3, 7, 3, 7];
 
@@ -3397,10 +3383,7 @@ mod tests {
             Some(&tsr_cfg),
         );
 
-        assert!(
-            steps < 10,
-            "3SR should converge in < 10 steps, got {steps}"
-        );
+        assert!(steps < 10, "3SR should converge in < 10 steps, got {steps}");
         assert!(
             tokens.iter().all(|&t| t != config.mask_token),
             "3SR result still has mask tokens"
@@ -3417,8 +3400,7 @@ mod tests {
         let config = Config::micro_dllm();
         let mut rng = Rng::new(42);
         let train_data = generate_pattern_dataset(&mut rng, 50, 4, 8);
-        let (weights, _) =
-            train_mini_dllm(&config, &train_data, &train_data, 200, 0.01, 0.25, 42);
+        let (weights, _) = train_mini_dllm(&config, &train_data, &train_data, 200, 0.01, 0.25, 42);
 
         // Aggregate over several targets — single-seed measurements are noisy
         // on a micro model with no RCD/3SR-aware training.
@@ -3436,8 +3418,7 @@ mod tests {
         let mut tsr_steps_total = 0usize;
 
         for target in &targets {
-            let mut rcd_cfg =
-                crate::dllm_solver::RcdConfig::new(config.vocab_size, config.n_embd);
+            let mut rcd_cfg = crate::dllm_solver::RcdConfig::new(config.vocab_size, config.n_embd);
             let (rcd_tokens, rcd_steps) = denoise_loop_rcd(
                 &weights,
                 target,

@@ -54,7 +54,7 @@ pub fn measure_sensitivity_stub(num_heads: usize) -> Vec<HeadSensitivityCurve> {
 #[inline]
 fn synthetic_delta(head_id: usize, r: f32) -> f32 {
     let one_minus_r = (1.0f32 - r).max(0.0);
-    if head_id % 2 == 0 {
+    if head_id.is_multiple_of(2) {
         // Sensitive head.
         (one_minus_r.powf(1.5) * 0.8).min(1.0)
     } else {

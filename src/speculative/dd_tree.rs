@@ -8,6 +8,8 @@
 //! EqR convergence selection is only reliable after landscape shaping (RI + NI training).
 //! See Research 079 (EqR, arXiv:2605.21488) for theoretical justification.
 
+#![allow(clippy::needless_range_loop)]
+
 use std::collections::{BinaryHeap, HashMap};
 
 #[cfg(test)]

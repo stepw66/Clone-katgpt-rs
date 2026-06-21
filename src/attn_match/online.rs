@@ -36,7 +36,9 @@
 //! `phys_budget + recent_window` tokens; the result has a compacted prefix
 //! and a bit-identical recent suffix.
 
-use crate::attn_match::compact::{compact, CompactError};
+#![allow(clippy::too_many_arguments)]
+
+use crate::attn_match::compact::{CompactError, compact};
 use crate::attn_match::types::{AmConfig, AmResult};
 
 /// Result of a single online compaction pass.
@@ -183,7 +185,8 @@ impl OnlineCompactResult {
     /// Compact prefix: `compact_len * (2*d + 1)` f32 (Ck, β, Cv).
     /// Recent suffix: `recent_window * 2 * d` f32 (raw K, V).
     pub fn total_bytes(&self, d: usize) -> usize {
-        let prefix_bytes = self.compact_prefix.compact_len * (2 * d + 1) * std::mem::size_of::<f32>();
+        let prefix_bytes =
+            self.compact_prefix.compact_len * (2 * d + 1) * std::mem::size_of::<f32>();
         let recent_bytes = self.recent_keys.len() * std::mem::size_of::<f32>()
             + self.recent_values.len() * std::mem::size_of::<f32>();
         prefix_bytes + recent_bytes
@@ -195,8 +198,11 @@ impl OnlineCompactResult {
     pub fn bytes_saved(&self, d: usize) -> usize {
         let original_prefix_bytes =
             self.compact_prefix.original_len * 2 * d * std::mem::size_of::<f32>();
-        original_prefix_bytes.saturating_sub(self.total_bytes(d) - self.recent_keys.len() * std::mem::size_of::<f32>()
-            - self.recent_values.len() * std::mem::size_of::<f32>())
+        original_prefix_bytes.saturating_sub(
+            self.total_bytes(d)
+                - self.recent_keys.len() * std::mem::size_of::<f32>()
+                - self.recent_values.len() * std::mem::size_of::<f32>(),
+        )
     }
 }
 
@@ -357,7 +363,11 @@ mod tests {
             }
         }
 
-        assert_eq!(logical_len_history.len(), 3, "should have compacted 3 times");
+        assert_eq!(
+            logical_len_history.len(),
+            3,
+            "should have compacted 3 times"
+        );
         // Every observed logical length must respect the bound.
         for &ll in &logical_len_history {
             assert!(ll <= phys + window + 1, "logical len out of bound: {ll}");
@@ -368,7 +378,12 @@ mod tests {
         }
     }
 
-    fn synth_kv_with_offset(offset: usize, len: usize, d: usize, seed: usize) -> (Vec<f32>, Vec<f32>) {
+    fn synth_kv_with_offset(
+        offset: usize,
+        len: usize,
+        d: usize,
+        seed: usize,
+    ) -> (Vec<f32>, Vec<f32>) {
         let mut keys = vec![0.0f32; len * d];
         let mut values = vec![0.0f32; len * d];
         for i in 0..len {

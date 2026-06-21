@@ -3,6 +3,8 @@
 //! Implements the core `ConstraintPruner` trait for spec-compiled rules.
 //! O(1) per-token validation via bitmap lookup. Zero neural forward pass.
 
+#![allow(clippy::needless_range_loop)]
+
 use katgpt_core::traits::ConstraintPruner;
 
 use super::types::*;
@@ -21,10 +23,10 @@ impl ConstraintPruner for CompiledSpec {
         // Phase 1: Check depth-specific rules with prefix matching
         for rule in &self.rules {
             // Skip if depth doesn't match
-            if let Some(rule_depth) = rule.depth {
-                if rule_depth != depth {
-                    continue;
-                }
+            if let Some(rule_depth) = rule.depth
+                && rule_depth != depth
+            {
+                continue;
             }
 
             // Check prefix constraint
@@ -129,10 +131,10 @@ impl CompiledSpec {
     #[inline]
     fn find_rule(&self, depth: usize, parent_tokens: &[usize]) -> Option<(&CompactBitmap, bool)> {
         for rule in &self.rules {
-            if let Some(rule_depth) = rule.depth {
-                if rule_depth != depth {
-                    continue;
-                }
+            if let Some(rule_depth) = rule.depth
+                && rule_depth != depth
+            {
+                continue;
             }
             if !prefix_matches(&rule.prefix, parent_tokens) {
                 continue;

@@ -8,6 +8,8 @@
 //! - 8-wide chunked inner loop enables SIMD auto-vectorization on AVX2/NEON.
 //! - No allocation inside the hot loop.
 
+#![allow(clippy::needless_range_loop)]
+
 use crate::attn_match::STABILITY_EPS;
 
 /// Compute the score matrix `S = Q·K^T · inv_sqrt_d` for `(n, d)` queries and
@@ -97,7 +99,7 @@ pub fn row_max(matrix: &[f32], n: usize, t_len: usize, out: &mut [f32]) {
 /// Panics on dimension mismatch.
 #[inline]
 pub fn compute_softmax_attention(
-    scores: &[f32],   // (n, T) row-major, already scaled by inv_sqrt_d
+    scores: &[f32], // (n, T) row-major, already scaled by inv_sqrt_d
     n: usize,
     t_len: usize,
     attn_out: &mut [f32], // (n, T) row-major

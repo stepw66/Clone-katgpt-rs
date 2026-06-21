@@ -19,6 +19,8 @@
 //! GOAT G8: at `t=512, d=64`, this kernel must run ≥4× faster than the scalar
 //! reference. The benchmark test below verifies this on release builds.
 
+#![allow(clippy::too_many_arguments)]
+
 /// Default stabilization flag. When `true`, the kernel subtracts the per-row
 /// max before writing, ensuring `exp()` of the output is numerically safe.
 pub const DEFAULT_STABILIZE: bool = true;
@@ -171,7 +173,11 @@ mod tests {
                 .iter()
                 .cloned()
                 .fold(f32::NEG_INFINITY, f32::max);
-            assert!((row_max - 0.0).abs() < 1e-6, "stabilized row max should be 0, got {}", row_max);
+            assert!(
+                (row_max - 0.0).abs() < 1e-6,
+                "stabilized row max should be 0, got {}",
+                row_max
+            );
         }
     }
 
@@ -208,7 +214,11 @@ mod tests {
         compute_score_matrix_simd(&queries, &keys, n, t, d, inv_sqrt_d, &mut simd, false);
 
         for i in 0..n * t {
-            assert!((scalar[i] - simd[i]).abs() < 1e-6, "odd-d mismatch at {}", i);
+            assert!(
+                (scalar[i] - simd[i]).abs() < 1e-6,
+                "odd-d mismatch at {}",
+                i
+            );
         }
     }
 
@@ -241,21 +251,55 @@ mod tests {
 
         // Warmup.
         for _ in 0..3 {
-            scalar_dot_matmul(black_box(&queries), black_box(&keys), n, t, d, inv_sqrt_d, &mut scalar_buf);
-            compute_score_matrix_simd(black_box(&queries), black_box(&keys), n, t, d, inv_sqrt_d, &mut simd_buf, false);
+            scalar_dot_matmul(
+                black_box(&queries),
+                black_box(&keys),
+                n,
+                t,
+                d,
+                inv_sqrt_d,
+                &mut scalar_buf,
+            );
+            compute_score_matrix_simd(
+                black_box(&queries),
+                black_box(&keys),
+                n,
+                t,
+                d,
+                inv_sqrt_d,
+                &mut simd_buf,
+                false,
+            );
         }
 
         let iters = 200;
         let start = Instant::now();
         for _ in 0..iters {
-            scalar_dot_matmul(black_box(&queries), black_box(&keys), n, t, d, inv_sqrt_d, &mut scalar_buf);
+            scalar_dot_matmul(
+                black_box(&queries),
+                black_box(&keys),
+                n,
+                t,
+                d,
+                inv_sqrt_d,
+                &mut scalar_buf,
+            );
         }
         let _: f32 = black_box(scalar_buf[0]);
         let scalar_ns = start.elapsed().as_nanos();
 
         let start = Instant::now();
         for _ in 0..iters {
-            compute_score_matrix_simd(black_box(&queries), black_box(&keys), n, t, d, inv_sqrt_d, &mut simd_buf, false);
+            compute_score_matrix_simd(
+                black_box(&queries),
+                black_box(&keys),
+                n,
+                t,
+                d,
+                inv_sqrt_d,
+                &mut simd_buf,
+                false,
+            );
         }
         let _: f32 = black_box(simd_buf[0]);
         let simd_ns = start.elapsed().as_nanos();

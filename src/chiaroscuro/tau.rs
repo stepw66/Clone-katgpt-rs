@@ -120,14 +120,18 @@ impl StreamingTauCalibrator {
         if self.sorted.is_empty() {
             return DEFAULT_TAU_LO;
         }
-        let idx = ((q * (self.sorted.len() as f32 - 1.0)).round() as usize)
-            .min(self.sorted.len() - 1);
+        let idx =
+            ((q * (self.sorted.len() as f32 - 1.0)).round() as usize).min(self.sorted.len() - 1);
         self.sorted[idx]
     }
 
     /// Current τ_lo estimate (33rd percentile), or default if cold start.
     pub fn tau_lo(&self) -> f32 {
-        if (self.total_count as usize) < self.min_samples || self.len < 8 {
+        if (self.total_count as usize) < self.min_samples
+            || self.len < 8
+            || self.dirty
+            || self.sorted.is_empty()
+        {
             DEFAULT_TAU_LO
         } else {
             // Mutate-free read: we know sorted is up-to-date if not dirty,
@@ -136,25 +140,19 @@ impl StreamingTauCalibrator {
             // The non-mut version assumes sorted is current (rebuild on observe
             // is deferred, but a previous tau_lo_mut/tau_hi_mut call would have
             // rebuilt). For safety, return default if dirty.
-            if self.dirty {
-                DEFAULT_TAU_LO
-            } else if self.sorted.is_empty() {
-                DEFAULT_TAU_LO
-            } else {
-                let idx = ((0.33 * (self.sorted.len() as f32 - 1.0)).round() as usize)
-                    .min(self.sorted.len() - 1);
-                self.sorted[idx]
-            }
+            let idx = ((0.33 * (self.sorted.len() as f32 - 1.0)).round() as usize)
+                .min(self.sorted.len() - 1);
+            self.sorted[idx]
         }
     }
 
     /// Current τ_hi estimate (67th percentile), or default if cold start.
     pub fn tau_hi(&self) -> f32 {
-        if (self.total_count as usize) < self.min_samples || self.len < 8 {
-            DEFAULT_TAU_HI
-        } else if self.dirty {
-            DEFAULT_TAU_HI
-        } else if self.sorted.is_empty() {
+        if (self.total_count as usize) < self.min_samples
+            || self.len < 8
+            || self.dirty
+            || self.sorted.is_empty()
+        {
             DEFAULT_TAU_HI
         } else {
             let idx = ((0.67 * (self.sorted.len() as f32 - 1.0)).round() as usize)
@@ -236,8 +234,14 @@ mod tests {
         }
         let lo = c.tau_lo_mut();
         let hi = c.tau_hi_mut();
-        assert!(lo > 0.81 && lo < 0.85, "tau_lo should converge near 0.833, got {lo}");
-        assert!(hi > 0.85 && hi < 0.89, "tau_hi should converge near 0.867, got {hi}");
+        assert!(
+            lo > 0.81 && lo < 0.85,
+            "tau_lo should converge near 0.833, got {lo}"
+        );
+        assert!(
+            hi > 0.85 && hi < 0.89,
+            "tau_hi should converge near 0.867, got {hi}"
+        );
         assert!(lo < hi, "tau_lo ({lo}) must be < tau_hi ({hi})");
     }
 
@@ -251,7 +255,10 @@ mod tests {
         }
         // Window full of low-H. tau_lo should be ~0.50.
         let lo_low = c.tau_lo_mut();
-        assert!((lo_low - 0.50).abs() < 0.05, "tau_lo after low samples: {lo_low}");
+        assert!(
+            (lo_low - 0.50).abs() < 0.05,
+            "tau_lo after low samples: {lo_low}"
+        );
 
         // Now feed high-H samples, evicting the low ones.
         for _ in 0..100 {
@@ -310,9 +317,15 @@ mod tests {
         }
         // 33rd percentile ≈ index 33 → value 0.033.
         let lo = c.tau_lo_mut();
-        assert!((lo - 0.033).abs() < 0.005, "tau_lo should be ~0.033, got {lo}");
+        assert!(
+            (lo - 0.033).abs() < 0.005,
+            "tau_lo should be ~0.033, got {lo}"
+        );
         // 67th percentile ≈ index 67 → value 0.067.
         let hi = c.tau_hi_mut();
-        assert!((hi - 0.067).abs() < 0.005, "tau_hi should be ~0.067, got {hi}");
+        assert!(
+            (hi - 0.067).abs() < 0.005,
+            "tau_hi should be ~0.067, got {hi}"
+        );
     }
 }

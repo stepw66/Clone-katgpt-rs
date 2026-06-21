@@ -124,7 +124,7 @@ impl SamplerFeatures {
             }
         }
 
-        if !(sum_exp > 0.0) {
+        if sum_exp <= 0.0 {
             return Self::default();
         }
 

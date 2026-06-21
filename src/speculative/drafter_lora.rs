@@ -544,7 +544,7 @@ fn compute_lora_loss(
     pair: &TrainingPair,
 ) -> f32 {
     let logits = run_drafter_sequence(ctx, config, weights, lora, &pair.input_tokens);
-    cross_entropy(&logits, pair.target_token)
+    cross_entropy(logits, pair.target_token)
 }
 
 // ── Training loop (T2) ──────────────────────────────────────

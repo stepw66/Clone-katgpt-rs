@@ -27,11 +27,10 @@ impl ScreeningPruner for CompiledSpec {
         let mut first_applicable: Option<&SpecRule> = None;
 
         for rule in &self.rules {
-            if let Some(rule_depth) = rule.depth {
-                if rule_depth != depth {
+            if let Some(rule_depth) = rule.depth
+                && rule_depth != depth {
                     continue;
                 }
-            }
 
             if !prefix_matches(&rule.prefix, parent_tokens) {
                 continue;

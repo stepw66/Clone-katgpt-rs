@@ -12,7 +12,9 @@
 //! Default solver: Cholesky on `X^T X` (with diagonal jitter fallback for
 //! rank-deficient systems). No external LAPACK dependency.
 
-use crate::attn_match::{score_matrix::row_max, score_matrix_simd::dot_8wide, STABILITY_EPS};
+#![allow(clippy::needless_range_loop)]
+
+use crate::attn_match::{STABILITY_EPS, score_matrix::row_max, score_matrix_simd::dot_8wide};
 
 /// Configuration for Cv fitting.
 #[derive(Debug, Clone, Copy)]
@@ -194,14 +196,7 @@ pub fn fit_cv_least_squares(
 }
 
 #[inline]
-fn compute_relative_error(
-    cv: &[f32],
-    x: &[f32],
-    y: &[f32],
-    n: usize,
-    t: usize,
-    d: usize,
-) -> f32 {
+fn compute_relative_error(cv: &[f32], x: &[f32], y: &[f32], n: usize, t: usize, d: usize) -> f32 {
     let mut residual_sq = 0.0f32;
     let mut y_norm_sq = 0.0f32;
     let mut xcv = vec![0.0f32; d];
@@ -358,9 +353,9 @@ fn cholesky_decompose_blocked(a: &[f32], t: usize) -> Option<Vec<f32>> {
 /// attention matrix `X = softmax((q Ck^T + β) / √d)`. The caller typically uses
 /// this directly as input to [`fit_cv_least_squares`].
 pub fn compute_compact_attention(
-    queries: &[f32], // (n, d)
+    queries: &[f32],      // (n, d)
     compact_keys: &[f32], // (t, d)
-    beta: &[f32], // (t,)
+    beta: &[f32],         // (t,)
     n: usize,
     t: usize,
     d: usize,
@@ -480,7 +475,10 @@ mod tests {
         // Solver should still return something (with jitter).
         assert_eq!(result.compact_values.len(), t * d);
         // Reconstruction error should be small (we have many degrees of freedom).
-        assert!(result.relative_error < 0.1, "rank-deficient system should still reconstruct Y well");
+        assert!(
+            result.relative_error < 0.1,
+            "rank-deficient system should still reconstruct Y well"
+        );
     }
 
     #[test]
@@ -509,7 +507,11 @@ mod tests {
         compute_compact_attention(&queries, &compact_keys, &beta, n, t, d, &mut x);
         // All keys identical → uniform attention 0.25.
         let sum: f32 = x.iter().sum();
-        assert!((sum - 1.0).abs() < 1e-6, "softmax should sum to 1, got {}", sum);
+        assert!(
+            (sum - 1.0).abs() < 1e-6,
+            "softmax should sum to 1, got {}",
+            sum
+        );
         for &v in &x {
             assert!((v - 0.25).abs() < 1e-6);
         }
@@ -553,8 +555,14 @@ mod tests {
                     s += li * lj;
                 }
                 let a_ij = a[i * t + j];
-                assert!((s - a_ij).abs() < 1e-3 * a_ij.abs().max(1.0),
-                    "L·L^T mismatch at ({},{}): got {} want {}", i, j, s, a_ij);
+                assert!(
+                    (s - a_ij).abs() < 1e-3 * a_ij.abs().max(1.0),
+                    "L·L^T mismatch at ({},{}): got {} want {}",
+                    i,
+                    j,
+                    s,
+                    a_ij
+                );
             }
         }
     }
@@ -587,6 +595,10 @@ mod tests {
         for i in 0..t * t {
             max_diff = max_diff.max((l_blocked[i] - l_unblocked[i]).abs());
         }
-        assert!(max_diff < 1e-4, "blocked/unblocked L max diff: {}", max_diff);
+        assert!(
+            max_diff < 1e-4,
+            "blocked/unblocked L max diff: {}",
+            max_diff
+        );
     }
 }

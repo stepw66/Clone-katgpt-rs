@@ -22,6 +22,8 @@
 //! is bounded below by 0, so the algorithm terminates. Worst-case iteration
 //! count is `O(num_heads / η)` but in practice far fewer.
 
+#![allow(clippy::needless_range_loop)]
+
 /// Convergence threshold for the greedy swap: if the net quality gain from
 /// the best swap is below this, stop. We use a larger threshold than
 /// `STABILITY_EPS` (1e-12) because f32 interpolation rounding can produce

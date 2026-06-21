@@ -22,6 +22,8 @@
 //! let pruner = TacticalPruner::new(&map_str);
 //! ```
 
+#![allow(clippy::needless_range_loop)]
+
 use crate::pruners::pathfinder::{is_passable, reachable_flat};
 use std::collections::HashSet;
 

@@ -99,7 +99,7 @@ pub const DEFAULT_CHOLESKY_JITTER: f32 = 1e-6;
 /// Default bound on `w = exp(β)` for HighestAttnKeys (paper Appendix C.2):
 /// β ∈ [-3, 3] ⇒ w ∈ [e^-3, e^3].
 pub const DEFAULT_W_LOWER: f32 = 1e-3; // ~ e^-6.9, safe lower bound
-pub const DEFAULT_W_UPPER: f32 = 1096.6331; // e^7 ≈ 1096.63 (paper cap)
+pub const DEFAULT_W_UPPER: f32 = 1_096.633; // e^7 ≈ 1096.63 (paper cap)
 
 /// β lower bound for OMP key pruning (paper Appendix C.2).
 pub const OMP_BETA_PRUNE_THRESHOLD: f32 = -7.0;

@@ -33,13 +33,17 @@
 //!
 //! All data is latent (KV cache, β values). No sync boundary.
 
+#![allow(clippy::too_many_arguments)]
+
+use crate::attn_match::key_selection::{
+    KeySelection, highest_attn::select_highest_attn_keys, omp::select_omp_keys,
+};
 use crate::attn_match::{
+    CompactError, CompactOutput,
     score_matrix::{compute_score_matrix, compute_softmax_attention},
     types::{AmConfig, KeySelector, ReconstructionReport},
-    value_fitter::{compute_compact_attention, fit_cv_least_squares, ValueFitConfig},
-    CompactError, CompactOutput,
+    value_fitter::{ValueFitConfig, compute_compact_attention, fit_cv_least_squares},
 };
-use crate::attn_match::key_selection::{highest_attn::select_highest_attn_keys, omp::select_omp_keys, KeySelection};
 
 // ── β bounds ───────────────────────────────────────────────────────
 
@@ -106,7 +110,9 @@ pub fn compact_with_fixed_beta(
     fixed_beta: f32,
 ) -> Result<CompactOutput, CompactError> {
     // Validate.
-    config.validate(t_len).map_err(CompactError::InvalidConfig)?;
+    config
+        .validate(t_len)
+        .map_err(CompactError::InvalidConfig)?;
     if keys.len() != t_len * d {
         return Err(CompactError::DimensionMismatch(format!(
             "keys.len()={} but T*d={}*{}={}",
@@ -317,7 +323,10 @@ mod tests {
         assert_eq!(result.compact_values.len(), 8 * 8);
         // All β should be the fixed value.
         for &b in &result.beta {
-            assert!((b - BETA_MID).abs() < 1e-6, "beta should be BETA_MID, got {b}");
+            assert!(
+                (b - BETA_MID).abs() < 1e-6,
+                "beta should be BETA_MID, got {b}"
+            );
         }
     }
 
@@ -335,7 +344,10 @@ mod tests {
                 compact_with_fixed_beta(&keys, &values, &queries, t_len, d, n, &cfg, beta_val)
                     .unwrap();
             for &b in &result.beta {
-                assert!((b - beta_val).abs() < 1e-6, "beta mismatch: expected {beta_val}, got {b}");
+                assert!(
+                    (b - beta_val).abs() < 1e-6,
+                    "beta mismatch: expected {beta_val}, got {b}"
+                );
             }
         }
     }
@@ -369,11 +381,15 @@ mod tests {
         let cfg = AmConfig::highest_attn(8);
 
         // Wrong keys length.
-        assert!(compact_with_fixed_beta(&[0.0; 10], &values, &queries, t_len, d, n, &cfg, BETA_MID)
-            .is_err());
+        assert!(
+            compact_with_fixed_beta(&[0.0; 10], &values, &queries, t_len, d, n, &cfg, BETA_MID)
+                .is_err()
+        );
         // Wrong queries length.
-        assert!(compact_with_fixed_beta(&keys, &values, &[0.0; 3], t_len, d, n, &cfg, BETA_MID)
-            .is_err());
+        assert!(
+            compact_with_fixed_beta(&keys, &values, &[0.0; 3], t_len, d, n, &cfg, BETA_MID)
+                .is_err()
+        );
     }
 
     #[test]
@@ -412,21 +428,24 @@ mod tests {
         let mut cfg = AmConfig::highest_attn(8);
         cfg.report_reconstruction = true;
 
-        let err_min = compact_with_fixed_beta(&keys, &values, &queries, t_len, d, n, &cfg, BETA_MIN)
-            .unwrap()
-            .report
-            .unwrap()
-            .relative_attn_output_error;
-        let err_mid = compact_with_fixed_beta(&keys, &values, &queries, t_len, d, n, &cfg, BETA_MID)
-            .unwrap()
-            .report
-            .unwrap()
-            .relative_attn_output_error;
-        let err_max = compact_with_fixed_beta(&keys, &values, &queries, t_len, d, n, &cfg, BETA_MAX)
-            .unwrap()
-            .report
-            .unwrap()
-            .relative_attn_output_error;
+        let err_min =
+            compact_with_fixed_beta(&keys, &values, &queries, t_len, d, n, &cfg, BETA_MIN)
+                .unwrap()
+                .report
+                .unwrap()
+                .relative_attn_output_error;
+        let err_mid =
+            compact_with_fixed_beta(&keys, &values, &queries, t_len, d, n, &cfg, BETA_MID)
+                .unwrap()
+                .report
+                .unwrap()
+                .relative_attn_output_error;
+        let err_max =
+            compact_with_fixed_beta(&keys, &values, &queries, t_len, d, n, &cfg, BETA_MAX)
+                .unwrap()
+                .report
+                .unwrap()
+                .relative_attn_output_error;
 
         // All three should be within 1 ULP of each other.
         let ulp_tol = 1e-5;
@@ -441,11 +460,13 @@ mod tests {
 
         // Also verify the Cv fit is finite and the compact path runs at all.
         let nnls_out = compact(&keys, &values, &queries, t_len, d, n, &cfg).unwrap();
-        assert!(nnls_out
-            .report
-            .as_ref()
-            .unwrap()
-            .relative_attn_output_error
-            .is_finite());
+        assert!(
+            nnls_out
+                .report
+                .as_ref()
+                .unwrap()
+                .relative_attn_output_error
+                .is_finite()
+        );
     }
 }

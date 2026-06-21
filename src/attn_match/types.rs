@@ -120,7 +120,7 @@ impl AmConfig {
             score_method: ScoreMethod::Rms,
             omp_keys_per_iter: 1,
             omp_refit_interval: 1,
-            nnls_iters: 2, // paper: 2 projected-GD iters for HighestAttnKeys
+            nnls_iters: 2,    // paper: 2 projected-GD iters for HighestAttnKeys
             w_lower: 1e-3, // e^-3 ≈ 0.0498 — but paper uses e^-3 for β; we use w = e^β so e^-3 maps to β=-3
             w_upper: 20.0855, // e^3
             power_iter_steps: 3,
@@ -176,7 +176,7 @@ impl AmConfig {
         if self.omp_refit_interval == 0 {
             return Err("omp_refit_interval must be > 0".into());
         }
-        if !(self.w_lower > 0.0) {
+        if self.w_lower <= 0.0 {
             return Err("w_lower must be > 0".into());
         }
         if self.w_upper <= self.w_lower {

@@ -343,10 +343,10 @@ pub fn compute_diagnostics_with_scratch(
             let grow = &gram[k * d_model..(k + 1) * d_model];
             simd_fused_scale_acc(rm_scratch, grow, rk, d_model);
         }
-        let rm_norm = simd_dot_f32(&rm_scratch, &rm_scratch, d_model).sqrt();
+        let rm_norm = simd_dot_f32(rm_scratch, rm_scratch, d_model).sqrt();
 
         // Numerator: R'[i] · M[i] · R'[i]^T = rm · R'[i]^T = dot(rm, row).
-        let num = simd_dot_f32(&rm_scratch, row, d_model);
+        let num = simd_dot_f32(rm_scratch, row, d_model);
         let denom = rm_norm * r_norm;
         let cos = if denom < 1e-20 { 0.0 } else { num / denom };
         lambda_sum += cos;

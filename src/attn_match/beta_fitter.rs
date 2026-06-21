@@ -15,6 +15,9 @@
 //! Box constraints (`w_lower ≤ w_j ≤ w_upper`) match the paper's stability
 //! bounds to prevent degenerate solutions where one key absorbs all mass.
 
+// Index-based loops are intentional for numerical clarity in this NNLS kernel.
+#![allow(clippy::needless_range_loop)]
+
 use crate::attn_match::STABILITY_EPS;
 
 /// Configuration for β fitting.
@@ -348,9 +351,7 @@ mod tests {
         let n = 3;
         let a = vec![1.0f32, 1.0, 0.5, 1.5, 2.0, 0.5]; // (3, 2)
         // m_i = A[i,0]*2 + A[i,1]*2
-        let m: Vec<f32> = (0..n)
-            .map(|i| (a[i * t] + a[i * t + 1]) * 2.0)
-            .collect();
+        let m: Vec<f32> = (0..n).map(|i| (a[i * t] + a[i * t + 1]) * 2.0).collect();
         let cfg = BetaFitConfig {
             iters: 5,
             w_lower: 1e-3,

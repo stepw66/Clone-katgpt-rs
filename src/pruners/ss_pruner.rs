@@ -9,6 +9,8 @@
 //! Key design: pre-compute the cumulative product into `influence_cache` at construction
 //! time so that `is_valid` is a zero-allocation O(1) slice lookup.
 
+#![allow(clippy::needless_range_loop)]
+
 use katgpt_core::ConstraintPruner;
 
 /// Prunes DDTree branches based on cumulative temporal influence.

@@ -103,11 +103,10 @@ impl SegmentStore {
     ///
     /// Single hash lookup per map (was three: `contains_key` + `entry` + `get`).
     pub fn get(&mut self, segment_id: u32) -> Option<&SegmentCheckpoint> {
-        if self.segments.get(&segment_id).is_some() {
-            if let Some(count) = self.access_counts.get_mut(&segment_id) {
+        if self.segments.contains_key(&segment_id)
+            && let Some(count) = self.access_counts.get_mut(&segment_id) {
                 *count += 1;
             }
-        }
         self.segments.get(&segment_id)
     }
 

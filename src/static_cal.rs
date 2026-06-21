@@ -112,7 +112,7 @@ fn hash_scales(scales: &[f32]) -> [u8; 32] {
     let bytes: &[u8] = unsafe {
         std::slice::from_raw_parts(
             scales.as_ptr() as *const u8,
-            scales.len() * std::mem::size_of::<f32>(),
+            std::mem::size_of_val(scales),
         )
     };
     hasher.update(bytes);

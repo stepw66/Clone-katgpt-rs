@@ -35,6 +35,8 @@
 //! `v * v * v * v * v` form, which LLVM turns into 4 multiplies with no
 //! libm call. All other `M` fall back to the general `mean.powf(M)` path.
 
+#![allow(clippy::needless_range_loop)]
+
 use crate::clr::brevity::brevity_tiebreak;
 use crate::clr::scratch::ClrScratch;
 use crate::clr::traits::{ClaimExtractor, ClaimVerifier};

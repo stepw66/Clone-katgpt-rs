@@ -11,11 +11,14 @@
 //!
 //! The returned `weights` are `w = exp(β)` directly — no separate β fit needed.
 
+// Index-based loops and wide signatures are intentional for the OMP numerical kernel.
+#![allow(clippy::needless_range_loop, clippy::too_many_arguments)]
+
 use crate::attn_match::{
-    beta_fitter::{fit_beta_nnls, BetaFitConfig},
+    STABILITY_EPS,
+    beta_fitter::{BetaFitConfig, fit_beta_nnls},
     key_selection::KeySelection,
     score_matrix::compute_score_matrix,
-    STABILITY_EPS,
 };
 
 /// Select t keys via Orthogonal Matching Pursuit on the mass feature matrix.
@@ -118,12 +121,14 @@ pub fn select_omp_keys(
                 top_k_buf.push((j, corr));
                 if top_k_buf.len() == k {
                     // Heapify or sort to find min for replacement.
-                    top_k_buf.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+                    top_k_buf
+                        .sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
                 }
             } else if corr > top_k_buf[0].1 {
                 top_k_buf[0] = (j, corr);
                 // Re-sift min to front.
-                top_k_buf.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+                top_k_buf
+                    .sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
             }
         }
 
@@ -149,7 +154,7 @@ pub fn select_omp_keys(
         iter_count += 1;
 
         // Periodic NNLS refit.
-        if iter_count % tau == 0 || selected.len() >= t {
+        if iter_count.is_multiple_of(tau) || selected.len() >= t {
             // Build A = phi[:, selected] ∈ R^{n × |selected|}.
             let cur_t = selected.len();
             a_sub.clear();

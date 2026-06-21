@@ -53,13 +53,13 @@ pub const DEFAULT_SCORE_TEMPERATURE: f32 = 1.0;
 ///
 /// - `q`:    length-`d` query vector.
 /// - `u_k`:  `d × k` matrix stored row-major, i.e. `u_k[row*k + col]` is
-///           element `(row, col)`. Column `j` of `U_k` is the strided slice
-///           `[j, k+j, 2k+j, …]` (stride `k`).
+///   element `(row, col)`. Column `j` of `U_k` is the strided slice
+///   `[j, k+j, 2k+j, …]` (stride `k`).
 /// - `k`:    number of principal directions.
 /// - `scratch`: length `k + d`. The first `k` elements are used as a
-///           temporary accumulator for `U_k^T q`; the remaining `d` elements
-///           receive the projected output. Returns a `&mut [f32]` view over
-///           the `d`-element output.
+///   temporary accumulator for `U_k^T q`; the remaining `d` elements
+///   receive the projected output. Returns a `&mut [f32]` view over
+///   the `d`-element output.
 ///
 /// # Zero-alloc contract
 ///
@@ -270,7 +270,7 @@ impl OffPrincipalIndex {
         // meaningful; the remaining columns are structurally zero.
         let mut u_k = vec![0.0_f32; d * k];
         for row in 0..d {
-            u_k[row * k + 0] = principal[row];
+            u_k[row * k] = principal[row];
         }
 
         Self {
@@ -388,10 +388,7 @@ fn blake3_hash(bytes: &[f32]) -> [u8; 32] {
     // Reinterpret f32 slice as bytes. Safe because we read the bytes out and
     // immediately hash them — no aliasing.
     let byte_slice = unsafe {
-        std::slice::from_raw_parts(
-            bytes.as_ptr() as *const u8,
-            bytes.len() * std::mem::size_of::<f32>(),
-        )
+        std::slice::from_raw_parts(bytes.as_ptr() as *const u8, std::mem::size_of_val(bytes))
     };
     *blake3::hash(byte_slice).as_bytes()
 }

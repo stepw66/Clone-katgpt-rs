@@ -61,6 +61,8 @@
 //! // After rebalance, σ_max(A) ≈ σ_max(B), and A·B^T is unchanged.
 //! ```
 
+#![allow(clippy::too_many_arguments)]
+
 use crate::simd::{simd_dot_f32, simd_scale_inplace};
 use crate::spectral_retract::power_iter_step;
 
@@ -211,8 +213,16 @@ pub fn gauge_rebalance(
 ) {
     assert_eq!(a.len(), a_rows * a_cols, "A size mismatch");
     assert_eq!(b.len(), b_rows * b_cols, "B size mismatch");
-    assert_eq!(a_cols, b_cols, "rank mismatch: a_cols={} b_cols={}", a_cols, b_cols);
-    assert!(alpha > 0.0 && alpha <= 1.0, "alpha must be in (0, 1], got {}", alpha);
+    assert_eq!(
+        a_cols, b_cols,
+        "rank mismatch: a_cols={} b_cols={}",
+        a_cols, b_cols
+    );
+    assert!(
+        alpha > 0.0 && alpha <= 1.0,
+        "alpha must be in (0, 1], got {}",
+        alpha
+    );
 
     let r = a_cols;
 
@@ -304,11 +314,7 @@ pub struct GaugePair<'a> {
 /// - If any pair has mismatched shape.
 /// - If `out_a` or `out_b` is the wrong size (`a_rows × (n_pairs · rank)` and
 ///   `b_rows × (n_pairs · rank)` respectively).
-pub fn gauge_invariant_compose(
-    pairs: &[GaugePair<'_>],
-    out_a: &mut [f32],
-    out_b: &mut [f32],
-) {
+pub fn gauge_invariant_compose(pairs: &[GaugePair<'_>], out_a: &mut [f32], out_b: &mut [f32]) {
     assert!(!pairs.is_empty(), "pairs must not be empty");
 
     let p0 = &pairs[0];
@@ -505,14 +511,32 @@ mod tests {
         let n = 12;
         let r = 4;
         // Construct deliberately imbalanced: A scaled by 10, B scaled by 0.1
-        let mut a: Vec<f32> = seeded_random_matrix(7, m, r).iter().map(|v| v * 10.0).collect();
-        let mut b: Vec<f32> = seeded_random_matrix(8, n, r).iter().map(|v| v * 0.1).collect();
+        let mut a: Vec<f32> = seeded_random_matrix(7, m, r)
+            .iter()
+            .map(|v| v * 10.0)
+            .collect();
+        let mut b: Vec<f32> = seeded_random_matrix(8, n, r)
+            .iter()
+            .map(|v| v * 0.1)
+            .collect();
         let mut scratch = GaugeRebalanceScratch::new(m.max(n), r);
 
-        let sigma_a_before =
-            power_iterate_sigma_max(&a, m, r, &mut scratch.v_a.clone(), &mut scratch.v_a_new.clone(), 20);
-        let sigma_b_before =
-            power_iterate_sigma_max(&b, n, r, &mut scratch.v_b.clone(), &mut scratch.v_b_new.clone(), 20);
+        let sigma_a_before = power_iterate_sigma_max(
+            &a,
+            m,
+            r,
+            &mut scratch.v_a.clone(),
+            &mut scratch.v_a_new.clone(),
+            20,
+        );
+        let sigma_b_before = power_iterate_sigma_max(
+            &b,
+            n,
+            r,
+            &mut scratch.v_b.clone(),
+            &mut scratch.v_b_new.clone(),
+            20,
+        );
         let ratio_before = (sigma_a_before / sigma_b_before).abs();
         assert!(
             ratio_before > 5.0,
@@ -522,10 +546,22 @@ mod tests {
 
         gauge_rebalance(&mut a, &mut b, m, r, n, r, 1.0, &mut scratch);
 
-        let sigma_a_after =
-            power_iterate_sigma_max(&a, m, r, &mut scratch.v_a.clone(), &mut scratch.v_a_new.clone(), 20);
-        let sigma_b_after =
-            power_iterate_sigma_max(&b, n, r, &mut scratch.v_b.clone(), &mut scratch.v_b_new.clone(), 20);
+        let sigma_a_after = power_iterate_sigma_max(
+            &a,
+            m,
+            r,
+            &mut scratch.v_a.clone(),
+            &mut scratch.v_a_new.clone(),
+            20,
+        );
+        let sigma_b_after = power_iterate_sigma_max(
+            &b,
+            n,
+            r,
+            &mut scratch.v_b.clone(),
+            &mut scratch.v_b_new.clone(),
+            20,
+        );
         let ratio_after = (sigma_a_after / sigma_b_after).abs();
         assert!(
             ratio_after < 1.5,
@@ -639,8 +675,22 @@ mod tests {
         let b2 = seeded_random_matrix(4, n, r);
 
         let pairs = [
-            GaugePair { eta: 1.0, a: &a1, b: &b1, a_rows: m, b_rows: n, rank: r },
-            GaugePair { eta: 1.0, a: &a2, b: &b2, a_rows: m, b_rows: n, rank: r },
+            GaugePair {
+                eta: 1.0,
+                a: &a1,
+                b: &b1,
+                a_rows: m,
+                b_rows: n,
+                rank: r,
+            },
+            GaugePair {
+                eta: 1.0,
+                a: &a2,
+                b: &b2,
+                a_rows: m,
+                b_rows: n,
+                rank: r,
+            },
         ];
 
         let merged_rank = 2 * r;
@@ -730,8 +780,22 @@ mod tests {
         let mut out_a_orig = vec![0.0f32; m * merged_r];
         let mut out_b_orig = vec![0.0f32; n * merged_r];
         let pairs_orig = [
-            GaugePair { eta: 0.5, a: &a, b: &b, a_rows: m, b_rows: n, rank: r },
-            GaugePair { eta: 0.5, a: &a, b: &b, a_rows: m, b_rows: n, rank: r },
+            GaugePair {
+                eta: 0.5,
+                a: &a,
+                b: &b,
+                a_rows: m,
+                b_rows: n,
+                rank: r,
+            },
+            GaugePair {
+                eta: 0.5,
+                a: &a,
+                b: &b,
+                a_rows: m,
+                b_rows: n,
+                rank: r,
+            },
         ];
         gauge_invariant_compose(&pairs_orig, &mut out_a_orig, &mut out_b_orig);
         let w_orig = abt(&out_a_orig, &out_b_orig, m, merged_r, n);
@@ -740,8 +804,22 @@ mod tests {
         let mut out_a_g = vec![0.0f32; m * merged_r];
         let mut out_b_g = vec![0.0f32; n * merged_r];
         let pairs_g = [
-            GaugePair { eta: 0.5, a: &a_g, b: &b_g, a_rows: m, b_rows: n, rank: r },
-            GaugePair { eta: 0.5, a: &a_g, b: &b_g, a_rows: m, b_rows: n, rank: r },
+            GaugePair {
+                eta: 0.5,
+                a: &a_g,
+                b: &b_g,
+                a_rows: m,
+                b_rows: n,
+                rank: r,
+            },
+            GaugePair {
+                eta: 0.5,
+                a: &a_g,
+                b: &b_g,
+                a_rows: m,
+                b_rows: n,
+                rank: r,
+            },
         ];
         gauge_invariant_compose(&pairs_g, &mut out_a_g, &mut out_b_g);
         let w_g = abt(&out_a_g, &out_b_g, m, merged_r, n);
@@ -791,8 +869,22 @@ mod tests {
         let mut out_a = vec![0.0f32; m * merged_r];
         let mut out_b = vec![0.0f32; n * merged_r];
         let pairs = [
-            GaugePair { eta: 1.0, a: &a, b: &b, a_rows: m, b_rows: n, rank: r },
-            GaugePair { eta: 1.0, a: &a_g, b: &b_g, a_rows: m, b_rows: n, rank: r },
+            GaugePair {
+                eta: 1.0,
+                a: &a,
+                b: &b,
+                a_rows: m,
+                b_rows: n,
+                rank: r,
+            },
+            GaugePair {
+                eta: 1.0,
+                a: &a_g,
+                b: &b_g,
+                a_rows: m,
+                b_rows: n,
+                rank: r,
+            },
         ];
         gauge_invariant_compose(&pairs, &mut out_a, &mut out_b);
         let w_gauge = abt(&out_a, &out_b, m, merged_r, n);

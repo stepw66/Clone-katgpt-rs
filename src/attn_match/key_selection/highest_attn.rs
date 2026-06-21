@@ -12,6 +12,8 @@
 //! Per the paper (Section 3.3, "Highest attention keys"), this is the fastest
 //! selector and a strong baseline.
 
+#![allow(clippy::too_many_arguments)]
+
 use crate::attn_match::{
     key_selection::KeySelection,
     score_matrix::{compute_score_matrix, compute_softmax_attention},

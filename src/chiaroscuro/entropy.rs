@@ -25,6 +25,8 @@
 //! - Entropy sum: O(d)
 //! - Total per token: O(d log d) — negligible vs O(n²d) attention.
 
+#![allow(clippy::needless_range_loop)]
+
 use rustfft::{FftPlanner, num_complex::Complex32};
 
 /// Numerical floor for `p log p` summands. Below this, treat p as 0.

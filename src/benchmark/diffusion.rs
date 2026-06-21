@@ -97,13 +97,13 @@ fn bench_d2f_pipeline() -> BenchResult {
     let iters = 100;
 
     for _ in 0..warmup {
-        let pipeline = D2fPipeline::new(&config, decode_config.clone(), total_len);
+        let pipeline = D2fPipeline::new(&config, decode_config, total_len);
         pipeline.decode_all(&weights, &pruner, &NoScreeningPruner, &mut rng);
     }
 
     let start = Instant::now();
     for _ in 0..iters {
-        let pipeline = D2fPipeline::new(&config, decode_config.clone(), total_len);
+        let pipeline = D2fPipeline::new(&config, decode_config, total_len);
         pipeline.decode_all(&weights, &pruner, &NoScreeningPruner, &mut rng);
     }
     let elapsed = start.elapsed();

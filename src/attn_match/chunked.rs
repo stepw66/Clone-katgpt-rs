@@ -36,7 +36,9 @@
 //! (position-aware with RoPE). Both reuse the Phase 1 [`compact`] orchestrator
 //! per chunk.
 
-use crate::attn_match::compact::{compact, CompactError};
+#![allow(clippy::too_many_arguments)]
+
+use crate::attn_match::compact::{CompactError, compact};
 use crate::attn_match::types::AmConfig;
 
 /// Pre-split text chunk with its own KV slice and global position offset.
@@ -180,7 +182,15 @@ impl ChunkedCompactor {
             // Per-chunk config must respect `compact_size < chunk_len`.
             let chunk_cfg = chunk_local_config(config, chunk_len);
 
-            let result = compact(chunk_keys, chunk_values, queries, chunk_len, d, n, &chunk_cfg)?;
+            let result = compact(
+                chunk_keys,
+                chunk_values,
+                queries,
+                chunk_len,
+                d,
+                n,
+                &chunk_cfg,
+            )?;
 
             let recon = result
                 .report
@@ -190,8 +200,7 @@ impl ChunkedCompactor {
 
             out.compact_keys.extend_from_slice(&result.compact_keys);
             out.beta.extend_from_slice(&result.beta);
-            out.compact_values
-                .extend_from_slice(&result.compact_values);
+            out.compact_values.extend_from_slice(&result.compact_values);
             out.total_compact_len += result.compact_len;
             out.per_chunk.push(ChunkMeta {
                 chunk_start: start,
@@ -274,7 +283,15 @@ impl ChunkedCompactor {
             {
                 let pf = PositionFreeBridge::new(ROPE_THETA, d);
                 let pos_free_keys = pf.un_rotate_f32(chunk_keys, chunk.start_pos);
-                let result = compact(&pos_free_keys, chunk_values, queries, chunk_len, d, n, &chunk_cfg)?;
+                let result = compact(
+                    &pos_free_keys,
+                    chunk_values,
+                    queries,
+                    chunk_len,
+                    d,
+                    n,
+                    &chunk_cfg,
+                )?;
                 let new_pos = chunk.start_pos; // keep original global position
                 let rerotated = pf.re_rotate_f32(&result.compact_keys, new_pos);
                 let recon = result
@@ -298,7 +315,15 @@ impl ChunkedCompactor {
             // See `apply_rope_phase_shift` doc for the no-op contract.
             #[cfg(not(feature = "still_kv"))]
             {
-                let result = compact(chunk_keys, chunk_values, queries, chunk_len, d, n, &chunk_cfg)?;
+                let result = compact(
+                    chunk_keys,
+                    chunk_values,
+                    queries,
+                    chunk_len,
+                    d,
+                    n,
+                    &chunk_cfg,
+                )?;
                 let recon = result
                     .report
                     .as_ref()
@@ -327,11 +352,7 @@ impl ChunkedCompactOutput {
         if self.per_chunk.is_empty() {
             return 0.0;
         }
-        let sum: f32 = self
-            .per_chunk
-            .iter()
-            .map(|c| c.reconstruction_error)
-            .sum();
+        let sum: f32 = self.per_chunk.iter().map(|c| c.reconstruction_error).sum();
         sum / self.per_chunk.len() as f32
     }
 
@@ -468,10 +489,7 @@ struct PositionFreeBridge {
 impl PositionFreeBridge {
     fn new(rope_theta: f32, head_dim: usize) -> Self {
         Self {
-            inner: crate::still_kv::position_free::PositionFreeCompactor::new(
-                rope_theta,
-                head_dim,
-            ),
+            inner: crate::still_kv::position_free::PositionFreeCompactor::new(rope_theta, head_dim),
         }
     }
 

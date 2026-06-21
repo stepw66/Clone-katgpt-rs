@@ -140,11 +140,7 @@ impl SolverRouter {
         // topology changes to force a fresh decision.
         let kept = match (self.last_backend, self.last_t) {
             (Some(_), Some(last_t)) if last_t > 0 => {
-                let diff = if t >= last_t {
-                    t - last_t
-                } else {
-                    last_t - t
-                };
+                let diff = t.abs_diff(last_t);
                 let rel = (diff as f32) / (last_t as f32);
                 rel < self.config.hysteresis_pct
             }

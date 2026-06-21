@@ -28,6 +28,11 @@ const MAX_INVENTORY: u8 = 2;
 /// A single floor's grid.
 pub type FloorGrid = Vec<Vec<char>>;
 
+/// Output of [`DungeonMap::build_lookups`]: precomputed hot-path tables.
+///
+/// Fields: `(floor_cols, all_treasures_mask, monster_at, treasure_at)`.
+type DungeonLookups = (Vec<usize>, u32, Vec<Vec<i32>>, Vec<Vec<i32>>);
+
 /// Connection between two floors via stairs.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct StairConnection {
@@ -85,7 +90,7 @@ impl DungeonMap {
         floors: &[FloorGrid],
         monsters: &[(usize, usize, usize)],
         treasures: &[(usize, usize, usize)],
-    ) -> (Vec<usize>, u32, Vec<Vec<i32>>, Vec<Vec<i32>>) {
+    ) -> DungeonLookups {
         let floor_cols: Vec<usize> = floors
             .iter()
             .map(|grid| grid.first().map_or(0, |r| r.len()))
@@ -314,7 +319,8 @@ impl DungeonPruner {
     #[inline]
     fn monster_at(&self, floor: usize, r: usize, c: usize) -> i32 {
         let cols = *self.map.floor_cols.get(floor).unwrap_or(&0);
-        self.map.monster_at
+        self.map
+            .monster_at
             .get(floor)
             .and_then(|lut| lut.get(r * cols + c))
             .copied()
@@ -325,7 +331,8 @@ impl DungeonPruner {
     #[inline]
     fn treasure_at(&self, floor: usize, r: usize, c: usize) -> i32 {
         let cols = *self.map.floor_cols.get(floor).unwrap_or(&0);
-        self.map.treasure_at
+        self.map
+            .treasure_at
             .get(floor)
             .and_then(|lut| lut.get(r * cols + c))
             .copied()
@@ -394,8 +401,7 @@ impl DungeonPruner {
 
         // Check for a LIVE monster at the target tile — O(1) flat lookup
         let m_idx = self.monster_at(next.floor, nr, nc);
-        let live_monster_here = m_idx != NO_ENTITY
-            && (next.killed_monsters & (1 << m_idx)) == 0;
+        let live_monster_here = m_idx != NO_ENTITY && (next.killed_monsters & (1 << m_idx)) == 0;
 
         // Treasure collection (locked without item) — O(1) flat lookup
         if !live_monster_here {

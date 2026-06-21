@@ -11,6 +11,8 @@
 //! Constants a=3.4445, b=-4.7750, c=2.0315 from the AMUSE paper —
 //! converges for singular values in [0, 1].
 
+#![allow(clippy::needless_range_loop)]
+
 /// Newton-Schulz coefficients (converges for σ ∈ [0, 1]).
 const A: f32 = 3.4445;
 const B: f32 = -4.7750;
@@ -289,12 +291,12 @@ impl NewtonSchulzScratch {
 
 /// Inverse square root coefficients (paper Table 2, r=2 specialization).
 const INV_SQRT_COEFFS: [(f32, f32, f32); 7] = [
-    (7.424_865_680_309_214, -18.395_816_356_189_96, 12.896_720_413_604_342),
-    (3.487_725_605_154_601_7, -2.330_043_656_398_699_3, 0.440_469_216_843_109_5),
-    (2.776_608_512_488_252_7, -2.070_643_152_532_662, 0.463_022_610_500_049_67),
-    (1.991_314_210_434_150_6, -1.373_936_700_683_126_9, 0.387_593_497_956_853_8),
-    (1.875_463_774_947_924_6, -1.250_515_209_001_053_4, 0.375_051_524_636_172_64),
-    (1.874_999_066_623_701, -1.249_998_133_214_167_6, 0.374_999_066_590_466_33),
+    (7.424_865_7, -18.395_817, 12.896_721),
+    (3.487_725_5, -2.330_043_6, 0.440_469_2),
+    (2.776_608_5, -2.070_643_2, 0.463_022_62),
+    (1.991_314_2, -1.373_936_7, 0.387_593_5),
+    (1.875_463_7, -1.250_515_2, 0.375_051_53),
+    (1.874_999, -1.249_998_1, 0.374_999_08),
     (1.875, -1.25, 0.375),
 ];
 
@@ -451,12 +453,24 @@ pub fn ns_inv_sqrt_psd_into(
         }
 
         // X_{k+1} = X_k · W_k.
-        matmul_nn(x_mat, &scratch.w_mat[..rr], r, &mut scratch.xw[..rr], &mut scratch.bt_buf[..rr]);
+        matmul_nn(
+            x_mat,
+            &scratch.w_mat[..rr],
+            r,
+            &mut scratch.xw[..rr],
+            &mut scratch.bt_buf[..rr],
+        );
         x_mat.copy_from_slice(&scratch.xw[..rr]);
 
         if k + 1 < n_iters_clamped {
             matmul_symmetric(&scratch.w_mat[..rr], r, &mut scratch.w_sq[..rr]);
-            matmul_nn(p_cur, &scratch.w_sq[..rr], r, &mut scratch.pw2[..rr], &mut scratch.bt_buf[..rr]);
+            matmul_nn(
+                p_cur,
+                &scratch.w_sq[..rr],
+                r,
+                &mut scratch.pw2[..rr],
+                &mut scratch.bt_buf[..rr],
+            );
             for i in 0..r {
                 for j in 0..r {
                     let v = 0.5 * (scratch.pw2[i * r + j] + scratch.pw2[j * r + i]);
@@ -932,7 +946,12 @@ mod tests {
         let mut out = vec![0.0f32; r * r];
         ns_inv_sqrt_psd(&p, r, &mut out, 7);
         for i in 0..r {
-            assert!((out[i * r + i] - 0.5).abs() < 0.05, "P=4I diag {} = {}", i, out[i * r + i]);
+            assert!(
+                (out[i * r + i] - 0.5).abs() < 0.05,
+                "P=4I diag {} = {}",
+                i,
+                out[i * r + i]
+            );
         }
     }
 
@@ -959,7 +978,11 @@ mod tests {
         let mut scratch = InvSqrtScratch::new(r);
         ns_inv_sqrt_psd_into(&p, r, &mut out_scratch, &mut scratch, 7);
         for i in 0..r * r {
-            assert!((out_alloc[i] - out_scratch[i]).abs() < 1e-6, "Mismatch at {}", i);
+            assert!(
+                (out_alloc[i] - out_scratch[i]).abs() < 1e-6,
+                "Mismatch at {}",
+                i
+            );
         }
     }
 

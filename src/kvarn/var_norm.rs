@@ -5,6 +5,9 @@
 //! iteratively adjusts log-space column and row scales until the imbalance
 //! (max/min ratio of row and column standard deviations) converges.
 
+// Index-based loops are intentional for the dual-scale Sinkhorn numerical kernel.
+#![allow(clippy::needless_range_loop, clippy::too_many_arguments)]
+
 /// Scales produced by variance normalization.
 ///
 /// The normalized tile is: `tile[i,j] = original[i,j] / s_row[i] / s_col[j]`.

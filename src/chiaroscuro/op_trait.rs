@@ -18,6 +18,8 @@
 //! }
 //! ```
 
+#![allow(clippy::needless_range_loop)]
+
 use crate::chiaroscuro::entropy::spectral_entropy_dct;
 
 /// A structurally distinct operator eligible for chiaroscuro routing.
@@ -184,11 +186,7 @@ impl ChiaroscuroRouter {
             }
         }
         let log_n = (self.ops.len() as f32).ln();
-        if log_n <= 0.0 {
-            0.0
-        } else {
-            u / log_n
-        }
+        if log_n <= 0.0 { 0.0 } else { u / log_n }
     }
 
     /// Operators with zero utilization (collapse candidates for demotion).
@@ -238,7 +236,10 @@ impl DctMixOp {
     ///
     /// Default: `entropy_hi = 0.855` (paper's τ_lo for WikiText-103), `n_coeffs = 32`.
     pub fn new(entropy_hi: f32, n_coeffs: usize) -> Self {
-        Self { entropy_hi, n_coeffs }
+        Self {
+            entropy_hi,
+            n_coeffs,
+        }
     }
 }
 
@@ -400,8 +401,10 @@ mod tests {
 
     #[test]
     fn test_router_routes_low_entropy_to_dct() {
-        let ops: Vec<Box<dyn ChiaroscuroOp>> =
-            vec![Box::new(DctMixOp::default()), Box::new(FullAttnOp::default())];
+        let ops: Vec<Box<dyn ChiaroscuroOp>> = vec![
+            Box::new(DctMixOp::default()),
+            Box::new(FullAttnOp::default()),
+        ];
         let mut router = ChiaroscuroRouter::new(ops);
 
         // Constant embedding → H ≈ 0 → DctMix.
@@ -436,13 +439,18 @@ mod tests {
         let mut out = vec![0.0f32; 256];
         let idx = router.route_and_forward(&x, &mut out);
         // Should route to FullAttn (idx 1) since x has high entropy.
-        assert_eq!(idx, 1, "high-entropy token (H={h}) should route to FullAttn");
+        assert_eq!(
+            idx, 1,
+            "high-entropy token (H={h}) should route to FullAttn"
+        );
     }
 
     #[test]
     fn test_router_utilization_entropy_collapse() {
-        let ops: Vec<Box<dyn ChiaroscuroOp>> =
-            vec![Box::new(DctMixOp::default()), Box::new(FullAttnOp::default())];
+        let ops: Vec<Box<dyn ChiaroscuroOp>> = vec![
+            Box::new(DctMixOp::default()),
+            Box::new(FullAttnOp::default()),
+        ];
         let mut router = ChiaroscuroRouter::new(ops);
 
         // All tokens constant → all route to DctMix → collapse.
@@ -460,8 +468,10 @@ mod tests {
 
     #[test]
     fn test_router_utilization_entropy_uniform() {
-        let ops: Vec<Box<dyn ChiaroscuroOp>> =
-            vec![Box::new(DctMixOp::default()), Box::new(FullAttnOp::default())];
+        let ops: Vec<Box<dyn ChiaroscuroOp>> = vec![
+            Box::new(DctMixOp::default()),
+            Box::new(FullAttnOp::default()),
+        ];
         let mut router = ChiaroscuroRouter::new(ops);
 
         // Manually drive uniform utilization via route_from_h.

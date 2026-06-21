@@ -1,3 +1,6 @@
+// Speculative step pipeline. Index-based loops are intentional for marginal buffer access.
+#![allow(clippy::needless_range_loop)]
+
 use std::collections::HashMap;
 
 #[cfg(feature = "stability_metrics")]
@@ -296,7 +299,7 @@ pub fn speculative_step_conditioned(
 
     // 4. Simulated acceptance (75% cap)
     // Integer arithmetic equivalent of `((path.len() as f32) * 0.75).ceil() as usize`.
-    let max_accept = (path.len() * 3 + 3) / 4;
+    let max_accept = (path.len() * 3).div_ceil(4);
     let accepted: Vec<usize> = path.into_iter().take(max_accept.max(1)).collect();
 
     // 5. Bonus token if all accepted
@@ -806,7 +809,7 @@ pub fn speculative_step_conditioned_with(
     // 4. Simulated acceptance (75% cap)
     // Integer arithmetic equivalent of `((path.len() as f32) * 0.75).ceil() as usize` —
     // avoids f32 conversion and rounding entirely.
-    let max_accept = (path.len() * 3 + 3) / 4;
+    let max_accept = (path.len() * 3).div_ceil(4);
     let accepted: Vec<usize> = path.into_iter().take(max_accept.max(1)).collect();
 
     // 5. Bonus token if all accepted
@@ -897,7 +900,7 @@ pub fn speculative_step_conditioned_with_router(
 
     // 6. Simulated acceptance (75% cap)
     // Integer arithmetic equivalent of `((path.len() as f32) * 0.75).ceil() as usize`.
-    let max_accept = (path.len() * 3 + 3) / 4;
+    let max_accept = (path.len() * 3).div_ceil(4);
     let accepted: Vec<usize> = path.into_iter().take(max_accept.max(1)).collect();
 
     // 7. Bonus token if all accepted

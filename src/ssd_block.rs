@@ -17,6 +17,8 @@
 //!
 //! Reference: Research 230 — Semiseparable State Space Duality, Plan 263.
 
+#![allow(clippy::needless_range_loop)]
+
 use crate::cumprodsum::{cumprodsum_scalar, segsum};
 
 // ────────────────────────────────────────────────────────────────────────────

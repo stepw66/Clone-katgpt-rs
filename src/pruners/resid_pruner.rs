@@ -5,6 +5,8 @@
 //! If none pass the constraint pruner → skip injection, use standard mask embedding.
 //! This prevents noise injection from nonsensical context.
 
+#![allow(clippy::needless_range_loop)]
+
 use katgpt_core::ConstraintPruner;
 
 /// Residual pruner that wraps a `ConstraintPruner` to filter implausible residuals.

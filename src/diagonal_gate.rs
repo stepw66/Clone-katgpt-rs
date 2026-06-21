@@ -9,6 +9,8 @@
 //! - Applying diagonal scaling to vectors
 //! - Accumulating gate state (prefix sum or decay)
 
+#![allow(clippy::needless_range_loop)]
+
 use crate::simd::{
     simd_add_scalar_inplace, simd_exp_inplace, simd_scale_inplace, simd_scale_mul_inplace,
 };

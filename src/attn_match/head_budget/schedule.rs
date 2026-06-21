@@ -9,6 +9,8 @@
 //! binary representation. BLAKE3 is used per AGENTS.md ("Use blake3 as
 //! possible instead of SHA1, SHA256").
 
+#![allow(clippy::needless_range_loop)]
+
 use serde::{Deserialize, Serialize};
 
 /// A solved per-head budget schedule, ready for serialization and deployment.

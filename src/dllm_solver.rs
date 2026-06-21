@@ -4,6 +4,8 @@
 //! When marginal entropy exceeds H_critical, switch from DPM-Solver++(2M)
 //! to q-sampling or other strategies.
 
+#![allow(clippy::needless_range_loop)]
+
 /// Solver kind for D2F decode steps.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[repr(u8)]
@@ -571,13 +573,8 @@ pub fn mbr_select(
     // descending and use a suffix sum so each candidate's risk is O(1):
     //   risk_p = (k-p-1) * s_p - suffix_sum[p+1]
     // This converts the O(k²) pairwise scan into O(k log k).
-    let mut sorted: Vec<(usize, f32)> = top_k_indices
-        .iter()
-        .map(|&i| (i, scores[i]))
-        .collect();
-    sorted.sort_unstable_by(|a, b| {
-        b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)
-    });
+    let mut sorted: Vec<(usize, f32)> = top_k_indices.iter().map(|&i| (i, scores[i])).collect();
+    sorted.sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
     // suffix_sum[p] = Σ_{j>=p} sorted[j].1; suffix_sum[k] = 0.
     let mut suffix_sum = vec![0.0f32; k + 1];
@@ -707,7 +704,10 @@ impl Default for ThreeStateReuseConfig {
 impl ThreeStateReuseConfig {
     /// Disabled config (zero overhead — falls back to standard RCD loop).
     pub fn disabled() -> Self {
-        Self { enabled: false, ..Default::default() }
+        Self {
+            enabled: false,
+            ..Default::default()
+        }
     }
 }
 
@@ -928,7 +928,10 @@ pub fn compute_entropy_weights(
         katgpt_core::simd::simd_add_scalar_inplace(&mut softmax_scratch[..vocab_size], -max_l);
         let sum_exp = katgpt_core::simd::simd_exp_sum_inplace(&mut softmax_scratch[..vocab_size]);
         if sum_exp > 0.0 {
-            katgpt_core::simd::simd_scale_inplace(&mut softmax_scratch[..vocab_size], 1.0 / sum_exp);
+            katgpt_core::simd::simd_scale_inplace(
+                &mut softmax_scratch[..vocab_size],
+                1.0 / sum_exp,
+            );
         }
 
         alphas[p] = normalized_entropy(softmax_scratch, log_vocab);
@@ -1792,7 +1795,10 @@ mod tests {
         assert!((cfg.gamma_masked_min - 0.75).abs() < 1e-6);
         assert!((cfg.gamma_masked_max - 0.90).abs() < 1e-6);
         assert!((cfg.gamma_newly_revealed - 0.2).abs() < 1e-6);
-        assert!(cfg.enabled, "default must be enabled (zero-cost gate is runtime)");
+        assert!(
+            cfg.enabled,
+            "default must be enabled (zero-cost gate is runtime)"
+        );
     }
 
     #[cfg(feature = "d2f_3sr_warm_start")]
@@ -1837,16 +1843,31 @@ mod tests {
         // v_t = 0.5 → StillMasked γ should be midpoint of [0.75, 0.90] = 0.825.
         super::compute_gammas(&transitions, 0.5, &cfg, &mut gammas);
         assert!((gammas[0] - 1.0).abs() < 1e-6, "visible → gamma_visible");
-        assert!((gammas[1] - 0.825).abs() < 1e-6, "masked(v=0.5) → 0.825, got {}", gammas[1]);
-        assert!((gammas[2] - 0.2).abs() < 1e-6, "newly-revealed → gamma_newly_revealed");
+        assert!(
+            (gammas[1] - 0.825).abs() < 1e-6,
+            "masked(v=0.5) → 0.825, got {}",
+            gammas[1]
+        );
+        assert!(
+            (gammas[2] - 0.2).abs() < 1e-6,
+            "newly-revealed → gamma_newly_revealed"
+        );
 
         // v_t = 0 → StillMasked γ should clamp to gamma_masked_min (0.75).
         super::compute_gammas(&transitions, 0.0, &cfg, &mut gammas);
-        assert!((gammas[1] - 0.75).abs() < 1e-6, "masked(v=0) → 0.75, got {}", gammas[1]);
+        assert!(
+            (gammas[1] - 0.75).abs() < 1e-6,
+            "masked(v=0) → 0.75, got {}",
+            gammas[1]
+        );
 
         // v_t = 1 → StillMasked γ should clamp to gamma_masked_max (0.90).
         super::compute_gammas(&transitions, 1.0, &cfg, &mut gammas);
-        assert!((gammas[1] - 0.90).abs() < 1e-6, "masked(v=1) → 0.90, got {}", gammas[1]);
+        assert!(
+            (gammas[1] - 0.90).abs() < 1e-6,
+            "masked(v=1) → 0.90, got {}",
+            gammas[1]
+        );
     }
 
     #[cfg(feature = "d2f_3sr_warm_start")]

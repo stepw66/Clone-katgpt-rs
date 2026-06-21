@@ -9,6 +9,8 @@
 //!
 //! Dequantization: one extra multiply vs standard RTN for the dual-scale reconstruction.
 
+#![allow(clippy::needless_range_loop)]
+
 use super::hadamard;
 use super::var_norm::{VarNormConfig, VarianceNormScales, variance_normalize_into};
 

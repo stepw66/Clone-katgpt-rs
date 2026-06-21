@@ -8,14 +8,16 @@
 //! Returns an [`AmResult`] containing the compact `(Ck, β, Cv)` along with
 //! a [`ReconstructionReport`] if requested.
 
+#![allow(clippy::too_many_arguments)]
+
 use crate::attn_match::{
-    beta_fitter::{fit_beta_nnls, BetaFitConfig},
-    key_selection::{highest_attn::select_highest_attn_keys, omp::select_omp_keys, KeySelection},
+    beta_fitter::{BetaFitConfig, fit_beta_nnls},
+    key_selection::{KeySelection, highest_attn::select_highest_attn_keys, omp::select_omp_keys},
     router::{SolverBackend, SolverRouter},
     score_matrix::{compute_score_matrix, compute_softmax_attention},
     score_matrix_rayon::compute_score_matrix_rayon,
     types::{AmConfig, AmResult, KeySelector, ReconstructionReport},
-    value_fitter::{compute_compact_attention, fit_cv_least_squares, ValueFitConfig},
+    value_fitter::{ValueFitConfig, compute_compact_attention, fit_cv_least_squares},
 };
 
 /// Error returned by [`compact`].
@@ -71,8 +73,18 @@ pub fn compact(
     n: usize,
     config: &AmConfig,
 ) -> Result<CompactOutput, CompactError> {
-    compact_with_router(keys, values, queries, t_len, d, n, config, &mut SolverRouter::default(), false)
-        .map(|(output, _trace)| output)
+    compact_with_router(
+        keys,
+        values,
+        queries,
+        t_len,
+        d,
+        n,
+        config,
+        &mut SolverRouter::default(),
+        false,
+    )
+    .map(|(output, _trace)| output)
 }
 
 /// Run Attention Matching compaction with an explicit router (Plan 271 T2.5).
@@ -106,7 +118,9 @@ pub fn compact_with_router(
     gpu_available: bool,
 ) -> Result<(CompactOutput, RouterTrace), CompactError> {
     // Validate.
-    config.validate(t_len).map_err(CompactError::InvalidConfig)?;
+    config
+        .validate(t_len)
+        .map_err(CompactError::InvalidConfig)?;
     if keys.len() != t_len * d {
         return Err(CompactError::DimensionMismatch(format!(
             "keys.len()={} but T*d={}*{}={}",
@@ -179,8 +193,7 @@ pub fn compact_with_router(
     // The compact-key matrix is always `n × t` with `t << T`, so the
     // mass-features stage always uses the scalar/SIMD path regardless of
     // router decision. We still log the router's pick for traceability.
-    trace.mass_features_backend =
-        Some(router.pick_backend(t.max(1), t_len, gpu_available));
+    trace.mass_features_backend = Some(router.pick_backend(t.max(1), t_len, gpu_available));
     let mut a_mass = vec![0.0f32; n * t];
     let inv_sqrt_d = 1.0f32 / (d as f32).sqrt();
     for i in 0..n {
@@ -204,13 +217,7 @@ pub fn compact_with_router(
     dispatch_score_matrix(score_backend, queries, keys, n, t_len, d, &mut full_scores);
     let mut full_attn = vec![0.0f32; n * t_len];
     let mut m_target = vec![0.0f32; n];
-    compute_softmax_attention(
-        &full_scores,
-        n,
-        t_len,
-        &mut full_attn,
-        &mut m_target,
-    );
+    compute_softmax_attention(&full_scores, n, t_len, &mut full_attn, &mut m_target);
 
     // Fit β. For OMP we already have weights from selection; we re-fit here to
     // also produce a relative error estimate.
@@ -527,9 +534,18 @@ mod tests {
         let cfg = AmConfig::omp_fast(t);
 
         let mut router = SolverRouter::default();
-        let (result, trace) =
-            compact_with_router(&keys, &values, &queries, t_len, d, n, &cfg, &mut router, false)
-                .expect("compact ok");
+        let (result, trace) = compact_with_router(
+            &keys,
+            &values,
+            &queries,
+            t_len,
+            d,
+            n,
+            &cfg,
+            &mut router,
+            false,
+        )
+        .expect("compact ok");
 
         // The score-matrix backend should be CpuRayon for T=2048 (no GPU).
         // Note: the actual pick also depends on hysteresis, but with a fresh
@@ -556,9 +572,18 @@ mod tests {
         let cfg = AmConfig::omp_fast(t);
 
         let mut router = SolverRouter::default();
-        let (result, trace) =
-            compact_with_router(&keys, &values, &queries, t_len, d, n, &cfg, &mut router, true)
-                .expect("compact ok");
+        let (result, trace) = compact_with_router(
+            &keys,
+            &values,
+            &queries,
+            t_len,
+            d,
+            n,
+            &cfg,
+            &mut router,
+            true,
+        )
+        .expect("compact ok");
 
         assert_eq!(trace.score_matrix_backend, Some(SolverBackend::Gpu));
         // Output must still be correct even though GPU dispatch was a stub
@@ -583,15 +608,23 @@ mod tests {
         let cfg = AmConfig::omp_fast(t);
 
         let mut router = SolverRouter::default();
-        let (_result, trace) =
-            compact_with_router(&keys, &values, &queries, t_len, d, n, &cfg, &mut router, false)
-                .expect("compact ok");
+        let (_result, trace) = compact_with_router(
+            &keys,
+            &values,
+            &queries,
+            t_len,
+            d,
+            n,
+            &cfg,
+            &mut router,
+            false,
+        )
+        .expect("compact ok");
 
         assert!(
             trace.blocked_cholesky_eligible,
             "blocked Cholesky should be eligible for t={} (block size {})",
-            t,
-            CHOLESKY_BLOCK_SIZE
+            t, CHOLESKY_BLOCK_SIZE
         );
     }
 }

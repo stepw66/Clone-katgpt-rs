@@ -15,6 +15,8 @@
 //!
 //! Reference: Research 231 — Semiseparable State Space Duality.
 
+#![allow(clippy::needless_range_loop)]
+
 /// Scalar cumprodsum: `out[t] = a[t] * out[t-1] + x[t]` with `out[0] = a[0] * h_init + x[0]`.
 ///
 /// This is the atomic 1-SS matrix multiplication (SSD paper eq. 7).
@@ -147,8 +149,7 @@ pub fn segsum(a: &[f32], out: &mut [f32]) {
             let ci = unsafe { *cumsum.get_unchecked(i) };
             for j in 0..=i {
                 unsafe {
-                    *out.get_unchecked_mut(row_offset + j) =
-                        ci - *cumsum.get_unchecked(j);
+                    *out.get_unchecked_mut(row_offset + j) = ci - *cumsum.get_unchecked(j);
                 }
             }
         }
@@ -158,9 +159,8 @@ pub fn segsum(a: &[f32], out: &mut [f32]) {
         // Reinterpret the first `t` MaybeUninit<f32> slots as `&mut [f32]`.
         // SAFETY: MaybeUninit<f32> has the same layout as f32. We write all
         // `t` elements in `compute` before any read.
-        let cumsum: &mut [f32] = unsafe {
-            std::slice::from_raw_parts_mut(inline_buf.as_mut_ptr().cast::<f32>(), t)
-        };
+        let cumsum: &mut [f32] =
+            unsafe { std::slice::from_raw_parts_mut(inline_buf.as_mut_ptr().cast::<f32>(), t) };
         compute(cumsum);
         // inline_buf lives on the stack and is dropped at scope end; nothing
         // to free.
@@ -174,9 +174,8 @@ pub fn segsum(a: &[f32], out: &mut [f32]) {
         // MaybeUninit<f32> has no Drop impl, so drop is a no-op.
         let mut cumsum_storage: Vec<std::mem::MaybeUninit<f32>> = Vec::with_capacity(t);
         unsafe { cumsum_storage.set_len(t) };
-        let cumsum: &mut [f32] = unsafe {
-            std::slice::from_raw_parts_mut(cumsum_storage.as_mut_ptr().cast::<f32>(), t)
-        };
+        let cumsum: &mut [f32] =
+            unsafe { std::slice::from_raw_parts_mut(cumsum_storage.as_mut_ptr().cast::<f32>(), t) };
         compute(cumsum);
         // `cumsum_storage` drops here.
     }
