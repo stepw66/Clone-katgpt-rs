@@ -266,9 +266,23 @@ pub use slod::{
 // GOAT PASS: +3.6% overhead, default-ON.
 #[cfg(feature = "spectral_pruner")]
 pub mod irrep_pruner;
+
+// Subspace phase-gate primitives — participation ratio, numerical rank, N≥d
+// phase-transition gate (Wang et al. Thm 4, arXiv:2409.02426), and runtime
+// Jacobian SVD via forward differences (Plan 301, Research 279). Pure numeric,
+// no game/shard/chain semantics. Consumers (riir-neuron-db Plan 002, future
+// riir-ai HLA self-discovery plan) apply these to their own maps.
+// Opt-in until G1 GOAT gate passes.
+#[cfg(feature = "subspace_phase_gate")]
+pub mod subspace_phase_gate;
 #[cfg(feature = "spectral_pruner")]
 pub use irrep_pruner::{
     IrrepPruner, IrrepPrunerConfig, irrep_pruner_from_config, spectral_flatness,
+};
+#[cfg(feature = "subspace_phase_gate")]
+pub use subspace_phase_gate::{
+    IntrinsicDimMethod, JacobianSvdScratch, SvdResult, estimate_intrinsic_dim, jacobian_svd_at,
+    numerical_rank, participation_ratio, phase_transition_gate,
 };
 
 #[cfg(feature = "flow_field_nav")]
