@@ -35,7 +35,7 @@
 //! Per `AGENTS.md`: the bridge projection [`sigmoid_surprise_gate`] uses
 //! sigmoid. Softmax over a single scalar is meaningless.
 
-use crate::simd::{fast_sigmoid, simd_dot_f32, simd_fused_decay_write};
+use crate::simd::{fast_sigmoid, simd_dot_f32, simd_dist_sq, simd_fused_decay_write};
 
 /// Dual fast/slow EMA temporal-derivative kernel.
 ///
@@ -156,13 +156,12 @@ impl<const N: usize> TemporalDerivativeKernel<N> {
     /// normalization.
     #[inline]
     pub fn surprise_norm(&self) -> f32 {
-        // Compute the difference into a stack buffer, then dot it with
-        // itself. The diff buffer fits in L1 for N <= 64.
-        let mut diff = [0.0f32; N];
-        for i in 0..N {
-            diff[i] = self.fast[i] - self.slow[i];
-        }
-        let sq = simd_dot_f32(&diff, &diff, N);
+        // Direct squared-distance between fast and slow — avoids materializing
+        // an intermediate `diff` buffer (saves N stack writes + N reads) and
+        // fuses the subtract+FMA into a single SIMD pass. Numerically
+        // bit-identical to the previous two-step form because both lower to
+        // `d = a - b; acc = d.mul_add(d, acc)` (single rounding on the square).
+        let sq = simd_dist_sq(&self.fast, &self.slow, N);
         // Guard against negative zero from FMA contraction.
         sq.max(0.0).sqrt()
     }

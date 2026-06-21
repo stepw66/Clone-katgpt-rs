@@ -92,8 +92,12 @@ pub fn should_use_flow_field(
 }
 
 /// Normalize to unit length. Returns (0, 0) if magnitude < epsilon.
+///
+/// Uses `(x² + y²).sqrt()` instead of `f32::hypot` — `hypot` pays
+/// ~10-20 cycles for overflow protection that's wasted here because the
+/// inputs are bilinear blends of unit vectors (always in `[-1, 1]²`).
 fn normalize(x: f32, y: f32) -> (f32, f32) {
-    let mag = x.hypot(y);
+    let mag = (x * x + y * y).sqrt();
     if mag < EPSILON {
         return (0.0, 0.0);
     }
