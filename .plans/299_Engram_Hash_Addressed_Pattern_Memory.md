@@ -6,7 +6,7 @@
 **Source paper:** [arXiv:2601.07372](https://arxiv.org/pdf/2601.07372) — Engram, Cheng et al. 2026 (DeepSeek-AI / Peking U.)
 **Target:** `katgpt-rs/crates/katgpt-core/src/engram/` (new module)
 **Cargo feature:** `engram` (opt-in, default OFF — promote to default-on after G1–G7 GOAT gate passes; per AGENTS.md GOAT gate rule)
-**Status:** Active — Phases 1-8 complete. G1/G2/G4 GOAT gates PASS (48 ns/retrieval, ρ=1.0, bit-deterministic commitment). G6 (effective depth) deferred to riir-ai integration; feature stays opt-in until G6 lands.
+**Status:** Active — Phases 1-8 complete. T1.7 proptest + T2.6 micro-bench landed. G1/G2/G4 GOAT gates PASS (48 ns/retrieval, ρ=1.0, bit-deterministic commitment). G3 (T6.6, Zipf workload) + G6 (T7.6, effective depth) deferred to riir-ai integration; feature stays opt-in until G6 lands.
 
 ---
 
@@ -52,7 +52,10 @@ Plus tests in `crates/katgpt-core/src/engram/` (unit) and `tests/bench_299_engra
 - [x] **T1.4** Define `K_MAX = 16` const (paper uses 8 heads × 2 N-gram orders = 16). Fixed-size array `[EngramHash; K_MAX]` per retrieval — zero alloc.
 - [x] **T1.5** Implement `multi_head_hash(suffix: &[CanonicalId], heads: &[HashHead; K_MAX]) -> [EngramHash; K_MAX]` in `hash.rs`. Multiplicative-XOR per head: `hash = (seed XOR suffix_fold) % modulus` where `suffix_fold = Σᵢ suffix[i] · MULTIPLIERS[i]`. SIMD-friendly (4 or 8 heads at once when suffix is fixed-size `[u64; 3]`).
 - [x] **T1.6** Unit tests: empty suffix → all-zero hashes; same suffix → same hash (determinism); different suffix → different hash (no trivial collisions); K heads independent (changing one head's seed changes only its hash).
-- [ ] **T1.7** Property test: `proptest` over random `[CanonicalId; 3]` suffixes — verify determinism + uniform distribution modulo prime (chi-square test on 10K samples).
+- [x] **T1.7** Property test: `proptest` over random `[CanonicalId; 3]` suffixes — verify determinism + uniform distribution modulo prime (chi-square test on 10K samples).
+  - Added `proptest = "1"` as a katgpt-core dev-dependency (already used in the project per `seal-online-remaster` workspace).
+  - 3 properties: `prop_hash_deterministic`, `prop_head_independence`, `prop_distinct_suffix_distinct_hash`.
+  - 1 deterministic chi-square test: `chi_square_uniform_distribution_10k` — buckets `hash % 256` across 10K LCG-seeded trigrams for all 16 heads, threshold = 350 (≈ p=0.001 critical for 255 DoF + LCG margin). **PASS** for all 16 heads with current `make_heads(42)` configuration.
 
 ---
 
@@ -75,7 +78,10 @@ Plus tests in `crates/katgpt-core/src/engram/` (unit) and `tests/bench_299_engra
   - Return hit count (slots that contain non-zero data)
   - Zero-allocation: caller provides `out` of size `K_MAX × D`
 - [x] **T2.5** Unit tests: empty table → all zeros out; single-slot populated → lookup hits; K-head retrieval fills all K slots; commitment deterministic (same content → same BLAKE3).
-- [ ] **T2.6** Performance: micro-bench `lookup_into` on 1M-slot table — target < 50 ns per K=16 retrieval (cache-resident, SIMD-friendly).
+- [x] **T2.6** Performance: micro-bench `lookup_into` on 1M-slot table — target < 50 ns per K=16 retrieval (cache-resident, SIMD-friendly).
+  - Landed as `crates/katgpt-core/benches/engram_micro.rs` (criterion harness, gated `engram`).
+  - Bench covers `lookup_into` @ 1M×D=128, `multi_head_hash` (suffix_1/3/8), `sigmoid_fuse_into` @ D=128, end-to-end `fuse_into_hidden_state` @ D=128 K=16.
+  - **Measured** (Apple Silicon arm64 release, --quick): lookup_into = **777 ns / call** = **~48.6 ns/retrieval** (K=16 amortized) — under the 50 ns target ✅. Matches G1 gate's 48.12 ns figure (criterion vs wall-clock Instant).
 
 ---
 

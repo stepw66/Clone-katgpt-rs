@@ -241,4 +241,171 @@ mod tests {
             assert!(m != 0);
         }
     }
+
+    // ─── T1.7: proptest property tests ───────────────────────────────────
+    //
+    // Plan 299 T1.7: `proptest` over random `[CanonicalId; 3]` suffixes —
+    // verify determinism + uniform distribution modulo prime (chi-square test
+    // on 10K samples).
+    //
+    // Two properties:
+    //   1. Determinism: same (suffix, heads) → same `[EngramHash; K_MAX]`.
+    //   2. Uniform distribution: per-head hashes are approximately uniform
+    //      modulo their prime modulus (chi-square test on 10K samples, all
+    //      16 heads must pass p > 0.001). The check uses a deterministic LCG
+    //      so it is reproducible — not flaky.
+
+    use proptest::prelude::*;
+
+    /// Any `u64` is a valid `CanonicalId` payload.
+    fn any_canonical_id() -> impl Strategy<Value = CanonicalId> {
+        any::<u64>().prop_map(CanonicalId)
+    }
+
+    /// A 3-element suffix (trigram) of arbitrary canonical ids.
+    fn any_trigram() -> impl Strategy<Value = [CanonicalId; 3]> {
+        (any_canonical_id(), any_canonical_id(), any_canonical_id())
+            .prop_map(|(a, b, c)| [a, b, c])
+    }
+
+    proptest! {
+        /// T1.7 determinism: same suffix + same heads → same hashes, always.
+        /// No shrinking needed (output is a fixed-size array). Runs 256 cases
+        /// by default — proptest will explore the input space.
+        #[test]
+        fn prop_hash_deterministic(suffix in any_trigram()) {
+            let heads = make_heads(42);
+            let a = multi_head_hash(&suffix, &heads);
+            let b = multi_head_hash(&suffix, &heads);
+            prop_assert_eq!(a, b, "same suffix + same heads → same hashes");
+        }
+
+        /// T1.7 head independence: change one head's seed → only that head's
+        /// hash changes (the rest are bit-identical).
+        #[test]
+        fn prop_head_independence(suffix in any_trigram(), head_idx in 0usize..K_MAX) {
+            let heads_a = make_heads(42);
+            let keys_a = multi_head_hash(&suffix, &heads_a);
+
+            let mut heads_b = heads_a;
+            heads_b[head_idx].seed = heads_a[head_idx].seed.wrapping_add(1);
+            let keys_b = multi_head_hash(&suffix, &heads_b);
+
+            for k in 0..K_MAX {
+                if k == head_idx {
+                    // Note: edge case — if changing the seed by 1 happens to
+                    // produce the same `(seed ^ suffix_fold) % modulus`, the
+                    // hash could be unchanged. This is astronomically rare for
+                    // primes near 2^20 and never observed in practice, but we
+                    // don't hard-assert to keep the property test sound.
+                    // Just assert the *other* heads are unchanged.
+                    continue;
+                }
+                prop_assert_eq!(
+                    keys_a[k], keys_b[k],
+                    "head {} unchanged after head_idx={} seed change",
+                    k, head_idx
+                );
+            }
+        }
+
+        /// T1.7 distinct-suffix decorrelation: two distinct trigrams produce
+        /// at least one different head hash. (With prime moduli ≥ 2^20+7 and
+        //  K_MAX=16, a total collision across all heads is astronomically
+        //  improbable for distinct suffixes.)
+        #[test]
+        fn prop_distinct_suffix_distinct_hash(
+            a in any_trigram(),
+            b in any_trigram()
+        ) {
+            prop_assume!(a != b);
+            let heads = make_heads(42);
+            let ka = multi_head_hash(&a, &heads);
+            let kb = multi_head_hash(&b, &heads);
+            prop_assert!(
+                ka != kb,
+                "distinct trigrams should not collide on all K_MAX heads"
+            );
+        }
+    }
+
+    /// T1.7 uniform distribution: chi-square test on 10K samples per head.
+    ///
+    /// For each head k, hash 10K random `[CanonicalId; 3]` suffixes, bucket
+    /// `(hash) % 256` into 256 buckets, compute chi-square = Σ (O−E)²/E,
+    /// and verify it's below the critical value for p=0.001 with 255 degrees
+    /// of freedom. A chi-square this large should appear < 0.1% of the time
+    /// under the uniform null hypothesis — generous enough that a good hash
+    /// always passes, strict enough to catch gross degeneracies (e.g., all
+    /// hashes landing in one bucket).
+    ///
+    /// Uses a deterministic LCG — this test is NOT flaky.
+    #[test]
+    fn chi_square_uniform_distribution_10k() {
+        let heads = make_heads(42);
+        let n_samples = 10_000u64;
+        let n_buckets = 256usize;
+
+        // LCG matching the G1 bench for determinism.
+        let mut rng_state = 0xC0FFEE_1234u64;
+        let mut rng = || {
+            rng_state = rng_state
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            rng_state
+        };
+
+        // Per-head per-bucket counts. K_MAX × 256 = 4096 u64s — trivial.
+        let mut counts = [[0u64; 256]; K_MAX];
+        for _ in 0..n_samples {
+            let suffix = [
+                CanonicalId(rng()),
+                CanonicalId(rng()),
+                CanonicalId(rng()),
+            ];
+            let keys = multi_head_hash(&suffix, &heads);
+            for k in 0..K_MAX {
+                // Bucket = hash % 256. Taking `% modulus` first and then `%
+                // n_buckets` would also work but modulus ≥ 2^20+7 is much
+                // larger than 256, so `(hash) % 256` directly is unbiased
+                // enough for a chi-square uniformity check.
+                let bucket = (keys[k].0 % (n_buckets as u64)) as usize;
+                counts[k][bucket] += 1;
+            }
+        }
+
+        // The chi-square distribution with `n_buckets - 1 = 255` degrees of
+        // freedom has critical value ≈ 336.6 at p=0.001 (i.e., under the
+        // uniform null, P(chi-square > 336.6) ≈ 0.001). We use 350 as the
+        // threshold to give margin for LCG-induced sample autocorrelation.
+        let chi_sq_critical = 350.0f64;
+        let expected = n_samples as f64 / n_buckets as f64;
+
+        let mut chi_sq_per_head = [0.0f64; K_MAX];
+        let mut failures = Vec::new();
+        for k in 0..K_MAX {
+            let mut chi = 0.0f64;
+            for b in 0..n_buckets {
+                let o = counts[k][b] as f64;
+                let diff = o - expected;
+                chi += diff * diff / expected;
+            }
+            chi_sq_per_head[k] = chi;
+            if chi > chi_sq_critical {
+                failures.push((k, chi));
+            }
+        }
+
+        // Report every head's chi-square value — useful diagnostic if any
+        // head is borderline.
+        let report: Vec<String> = (0..K_MAX)
+            .map(|k| format!("h{k}={:.1}", chi_sq_per_head[k]))
+            .collect();
+        let joined = report.join(", ");
+        assert!(
+            failures.is_empty(),
+            "T1.7 chi-square uniformity failed for heads {failures:?} (critical={chi_sq_critical}). \
+             Per-head chi-square: {joined}",
+        );
+    }
 }

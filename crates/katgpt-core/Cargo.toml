@@ -28,6 +28,7 @@ unicode-normalization = { version = "0.1", optional = true }
 [dev-dependencies]
 serde_json = "1"
 criterion = { version = "0.5", features = ["html_reports"] }
+proptest = "1"  # Plan 299 T1.7 — multi_head_hash property tests (determinism + uniform distribution)
 
 [features]
 default = ["sparse_mlp", "plasma_path", "leo_all_goals", "dual_leo", "sigmoid_margin", "spectral_hierarchy", "dual_gram_pca", "roofline_cost", "octree_ctc", "sector_projection", "action_bridge", "triggered_injection", "temporal_deriv", "bom_sampling", "personality_composition"]  # triggered_injection DEFAULT-ON (Plan 278 GOAT G3) — sigmoid-thresholded inject/skip gate; temporal_deriv DEFAULT-ON (Plan 277 GOAT 4/4 fusions passed) — dual fast/slow EMA surprise signal; bom_sampling DEFAULT-ON (Plan 281 T2.4 full, 2026-06-17) — G2 PASS +31.49pp on 100 episodes proven in riir-ai Plan 314 (MultiThreatArena + MultiHypothesisBoMMinimaxPlanner vs deterministic). Auto-enables micro_belief + simd_sigmoid.
@@ -181,6 +182,14 @@ required-features = ["micro_belief", "bom_sampling"]
 name = "personality_composition_bench"
 harness = false
 required-features = ["personality_composition"]
+
+# Plan 299 T2.6 — Engram lookup_into / multi_head_hash / sigmoid_fuse_into
+# / fuse_into_hidden_state micro-benchmarks. The G1 latency gate lives in
+# tests/bench_299_engram_goat.rs; this bench is the criterion regression watch.
+[[bench]]
+name = "engram_micro"
+harness = false
+required-features = ["engram"]
 
 # Plan 272 — ChunkedContentStore basic example. Lives in katgpt-core (not the
 # root crate) because it imports katgpt_core::BlobId / ChunkedContentStore /
