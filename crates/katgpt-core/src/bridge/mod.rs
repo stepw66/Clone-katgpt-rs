@@ -8,6 +8,8 @@
 
 // Sigmoid delegates to shared crate::simd::fast_sigmoid (bounded (0,1), libm-exp).
 
+#![allow(clippy::needless_range_loop)]
+
 /// Bridges latent Q-values to raw game actions via sigmoid-gated projection.
 ///
 /// Generic over action space size (`A`) and latent dimension (`D`).

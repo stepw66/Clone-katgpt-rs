@@ -241,7 +241,6 @@ pub fn simd_sigmoid_tanh_clamp_inplace(out: &mut [f32], a: &[f32], q: &[f32], cl
     #[cfg(target_arch = "aarch64")]
     {
         unsafe { neon_sigmoid_tanh_clamp(&mut out[..len], &a[..len], &q[..len], clamp) }
-        return;
     }
     #[cfg(target_arch = "x86_64")]
     {
@@ -294,7 +293,6 @@ pub fn simd_sigmoid_inplace(x: &mut [f32]) {
     #[cfg(target_arch = "aarch64")]
     {
         unsafe { neon_sigmoid_inplace(x) }
-        return;
     }
     #[cfg(target_arch = "x86_64")]
     {

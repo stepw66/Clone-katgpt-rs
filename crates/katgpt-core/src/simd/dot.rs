@@ -15,7 +15,6 @@
 ///
 /// Dispatches to NEON, AVX2, or scalar based on compile-time target and
 /// runtime CPU feature detection.
-
 #[inline(always)]
 pub fn simd_dot_f32(a: &[f32], b: &[f32], len: usize) -> f32 {
     #[cfg(target_arch = "aarch64")]
@@ -584,7 +583,9 @@ pub(super) fn scalar_dot_f16_f32(w: &[half::f16], x: &[f32], len: usize) -> f32 
     let mut i = 0;
     for _ in 0..chunks {
         unsafe {
-            acc[0] = (*w.get_unchecked(i)).to_f32().mul_add(*x.get_unchecked(i), acc[0]);
+            acc[0] = (*w.get_unchecked(i))
+                .to_f32()
+                .mul_add(*x.get_unchecked(i), acc[0]);
             acc[1] = (*w.get_unchecked(i + 1))
                 .to_f32()
                 .mul_add(*x.get_unchecked(i + 1), acc[1]);
@@ -600,7 +601,9 @@ pub(super) fn scalar_dot_f16_f32(w: &[half::f16], x: &[f32], len: usize) -> f32 
     let mut sum = acc.iter().sum::<f32>();
     while i < len {
         unsafe {
-            sum = (*w.get_unchecked(i)).to_f32().mul_add(*x.get_unchecked(i), sum);
+            sum = (*w.get_unchecked(i))
+                .to_f32()
+                .mul_add(*x.get_unchecked(i), sum);
         }
         i += 1;
     }

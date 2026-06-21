@@ -15,7 +15,6 @@
 /// TurboQuant normalize, and any bulk `*= scale` pattern.
 ///
 /// NEON: 4× f32 per op. AVX2: 8× f32 per op. Scalar fallback for remainder.
-
 #[inline(always)]
 pub fn simd_scale_inplace(x: &mut [f32], scale: f32) {
     #[cfg(target_arch = "aarch64")]
@@ -318,7 +317,6 @@ pub fn simd_scale_mul_inplace(x: &mut [f32], gamma: &[f32], scale: f32) {
         scalar_scale_mul_inplace(x, gamma, scale)
     }
 }
-
 
 // ── Scalar Fallbacks (new primitives) ─────────────────────────
 

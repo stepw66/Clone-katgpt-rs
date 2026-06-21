@@ -35,7 +35,9 @@
 //! Per `AGENTS.md`: the bridge projection [`sigmoid_surprise_gate`] uses
 //! sigmoid. Softmax over a single scalar is meaningless.
 
-use crate::simd::{fast_sigmoid, simd_dot_f32, simd_dist_sq, simd_fused_decay_write};
+#![allow(clippy::needless_range_loop)]
+
+use crate::simd::{fast_sigmoid, simd_dist_sq, simd_dot_f32, simd_fused_decay_write};
 
 /// Dual fast/slow EMA temporal-derivative kernel.
 ///
@@ -87,12 +89,7 @@ impl<const N: usize> TemporalDerivativeKernel<N> {
     /// Construct with initial EMA state — for warm starts or snapshot
     /// restore.
     #[inline]
-    pub fn with_initial(
-        fast: [f32; N],
-        slow: [f32; N],
-        alpha_fast: f32,
-        alpha_slow: f32,
-    ) -> Self {
+    pub fn with_initial(fast: [f32; N], slow: [f32; N], alpha_fast: f32, alpha_slow: f32) -> Self {
         validate_alphas(alpha_fast, alpha_slow);
         Self {
             fast,
@@ -203,7 +200,10 @@ impl<const N: usize> Default for TemporalDerivativeKernel<N> {
 /// small `beta` → soft gate. Typical operating value `beta ∈ [1, 10]`.
 #[inline]
 pub fn sigmoid_surprise_gate(derivative: &[f32], beta: f32) -> f32 {
-    debug_assert!(beta.is_finite(), "sigmoid_surprise_gate: beta must be finite");
+    debug_assert!(
+        beta.is_finite(),
+        "sigmoid_surprise_gate: beta must be finite"
+    );
     let sq = simd_dot_f32(derivative, derivative, derivative.len()).max(0.0);
     let norm = sq.sqrt();
     fast_sigmoid(beta * norm)

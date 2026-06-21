@@ -8,6 +8,8 @@
 
 // Sigmoid delegates to shared crate::simd::fast_sigmoid (bounded (0,1), libm-exp).
 
+#![allow(clippy::needless_range_loop)]
+
 /// Multi-sector spatial projection for NPC perception.
 ///
 /// Divides space around an NPC into `N` sectors, projects each into a latent

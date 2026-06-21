@@ -10,7 +10,6 @@
 ///
 /// For x > 20: returns x (avoids exp overflow).
 /// For x < -20: returns exp(x) ≈ 0 (avoids log(1+0) precision loss).
-
 use super::*;
 
 #[cfg(feature = "sigmoid_margin")]
@@ -431,7 +430,10 @@ unsafe fn avx2_sum_abs_f32(x: &[f32]) -> f32 {
         let len = x.len();
         let chunks4 = len / 32;
         for _ in 0..chunks4 {
-            acc0 = _mm256_add_ps(acc0, _mm256_and_ps(_mm256_loadu_ps(x.as_ptr().add(i)), abs_mask));
+            acc0 = _mm256_add_ps(
+                acc0,
+                _mm256_and_ps(_mm256_loadu_ps(x.as_ptr().add(i)), abs_mask),
+            );
             acc1 = _mm256_add_ps(
                 acc1,
                 _mm256_and_ps(_mm256_loadu_ps(x.as_ptr().add(i + 8)), abs_mask),

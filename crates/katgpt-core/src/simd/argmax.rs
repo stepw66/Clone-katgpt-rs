@@ -13,7 +13,6 @@
 /// the maximum is returned (strict `>` never replaces an earlier equal value).
 ///
 /// Returns `(0, f32::NEG_INFINITY)` for an empty slice.
-
 #[inline]
 pub fn simd_argmax_f32(x: &[f32]) -> (usize, f32) {
     if x.is_empty() {

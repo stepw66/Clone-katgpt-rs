@@ -11,7 +11,6 @@
 ///
 /// Scalar fallback for alive ≤ 4 (gather overhead not worth it).
 /// NEON/AVX2 processes 4/8 elements per iteration for larger counts.
-
 #[inline(always)]
 pub fn simd_sparse_dot_f32(
     weight: &[f32],
@@ -64,7 +63,8 @@ pub(super) fn scalar_sparse_dot_f32(
         unsafe {
             let c = *active_indices.get_unchecked(i);
             // FMA: sum = weight[c] * val + sum (single rounding, matches SIMD path).
-            sum = (*weight.get_unchecked(row_off + c)).mul_add(*active_values.get_unchecked(i), sum);
+            sum =
+                (*weight.get_unchecked(row_off + c)).mul_add(*active_values.get_unchecked(i), sum);
         }
     }
     sum

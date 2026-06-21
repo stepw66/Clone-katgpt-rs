@@ -60,8 +60,8 @@ impl GateActivation {
                 x * sigmoid
             }
             Self::GegeluTanh => {
-                // sqrt(2/π) full f32 precision (was truncated to 7 digits).
-                const SQRT_2_OVER_PI: f32 = 0.797_884_560_802_865_4;
+                // sqrt(2/π) — f32 cannot represent more than ~7 significant digits.
+                const SQRT_2_OVER_PI: f32 = 0.797_884_6;
                 // Cubic via mul_add for FMA fusion: 0.044715 * x³ + x.
                 let x_sq = x * x;
                 let inner = SQRT_2_OVER_PI * 0.044_715_f32.mul_add(x * x_sq, x);

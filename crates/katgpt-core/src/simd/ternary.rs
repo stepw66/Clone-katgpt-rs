@@ -1,7 +1,9 @@
 //! Ternary bit-plane matvec — multiplication-free CPU inference
 //! (`plasma_path` feature, Plan 148). Includes scalar/NEON/AVX2 paths.
 
-// ── Ternary SIMD Matvec (Plasma Path — Plan 148) ─────────────
+// ── Ternary SIMD Matvec (Plasma Path — Plan 148) ─────────
+
+#![allow(clippy::needless_range_loop, clippy::too_many_arguments)]
 
 use super::*;
 
@@ -76,19 +78,29 @@ unsafe fn neon_ternary_matvec(w: &TernaryWeights, x: &[f32], y: &mut [f32]) {
                 let chunks32 = remaining / 32 * 32;
                 let mut col = 0usize;
                 while col < chunks32 {
-                    fmla_nibble8(&mut acc0, pos_word, neg_word, col, base_col, x, mask_lo, mask_hi, one_u);
+                    fmla_nibble8(
+                        &mut acc0, pos_word, neg_word, col, base_col, x, mask_lo, mask_hi, one_u,
+                    );
                     col += 8;
-                    fmla_nibble8(&mut acc1, pos_word, neg_word, col, base_col, x, mask_lo, mask_hi, one_u);
+                    fmla_nibble8(
+                        &mut acc1, pos_word, neg_word, col, base_col, x, mask_lo, mask_hi, one_u,
+                    );
                     col += 8;
-                    fmla_nibble8(&mut acc2, pos_word, neg_word, col, base_col, x, mask_lo, mask_hi, one_u);
+                    fmla_nibble8(
+                        &mut acc2, pos_word, neg_word, col, base_col, x, mask_lo, mask_hi, one_u,
+                    );
                     col += 8;
-                    fmla_nibble8(&mut acc3, pos_word, neg_word, col, base_col, x, mask_lo, mask_hi, one_u);
+                    fmla_nibble8(
+                        &mut acc3, pos_word, neg_word, col, base_col, x, mask_lo, mask_hi, one_u,
+                    );
                     col += 8;
                 }
 
                 // Remaining 8-element chunks go into acc0
                 while col + 8 <= remaining {
-                    fmla_nibble8(&mut acc0, pos_word, neg_word, col, base_col, x, mask_lo, mask_hi, one_u);
+                    fmla_nibble8(
+                        &mut acc0, pos_word, neg_word, col, base_col, x, mask_lo, mask_hi, one_u,
+                    );
                     col += 8;
                 }
 
@@ -100,8 +112,10 @@ unsafe fn neon_ternary_matvec(w: &TernaryWeights, x: &[f32], y: &mut [f32]) {
                     let pos_splat = vdupq_n_u32(pos_byte);
                     let neg_splat = vdupq_n_u32(neg_byte);
                     // vcgeq_u32(., 1) → all-ones (-1 as i32) where bit set, 0 elsewhere.
-                    let pos_nz = vreinterpretq_s32_u32(vcgeq_u32(vandq_u32(pos_splat, mask_lo), one_u));
-                    let neg_nz = vreinterpretq_s32_u32(vcgeq_u32(vandq_u32(neg_splat, mask_lo), one_u));
+                    let pos_nz =
+                        vreinterpretq_s32_u32(vcgeq_u32(vandq_u32(pos_splat, mask_lo), one_u));
+                    let neg_nz =
+                        vreinterpretq_s32_u32(vcgeq_u32(vandq_u32(neg_splat, mask_lo), one_u));
                     // sign = neg - pos → +1 where pos, -1 where neg, 0 else.
                     let sign_f = vcvtq_f32_s32(vsubq_s32(neg_nz, pos_nz));
                     let x_v = vld1q_f32(x.as_ptr().add(base_col + col));
@@ -217,19 +231,29 @@ unsafe fn avx2_ternary_matvec(w: &TernaryWeights, x: &[f32], y: &mut [f32]) {
                 let chunks32 = remaining / 32 * 32;
                 let mut col = 0usize;
                 while col < chunks32 {
-                    fma_byte8_avx2(&mut acc0, pos_word, neg_word, col, base_col, x, mask_byte, zero_i);
+                    fma_byte8_avx2(
+                        &mut acc0, pos_word, neg_word, col, base_col, x, mask_byte, zero_i,
+                    );
                     col += 8;
-                    fma_byte8_avx2(&mut acc1, pos_word, neg_word, col, base_col, x, mask_byte, zero_i);
+                    fma_byte8_avx2(
+                        &mut acc1, pos_word, neg_word, col, base_col, x, mask_byte, zero_i,
+                    );
                     col += 8;
-                    fma_byte8_avx2(&mut acc2, pos_word, neg_word, col, base_col, x, mask_byte, zero_i);
+                    fma_byte8_avx2(
+                        &mut acc2, pos_word, neg_word, col, base_col, x, mask_byte, zero_i,
+                    );
                     col += 8;
-                    fma_byte8_avx2(&mut acc3, pos_word, neg_word, col, base_col, x, mask_byte, zero_i);
+                    fma_byte8_avx2(
+                        &mut acc3, pos_word, neg_word, col, base_col, x, mask_byte, zero_i,
+                    );
                     col += 8;
                 }
 
                 // Remaining 8-element chunks → acc0
                 while col + 8 <= remaining {
-                    fma_byte8_avx2(&mut acc0, pos_word, neg_word, col, base_col, x, mask_byte, zero_i);
+                    fma_byte8_avx2(
+                        &mut acc0, pos_word, neg_word, col, base_col, x, mask_byte, zero_i,
+                    );
                     col += 8;
                 }
 
@@ -312,7 +336,11 @@ unsafe fn fma_byte8_avx2(
 /// a per-lane all-ones mask for `v128_bitselect`.
 ///
 /// Compile-time gated by `target_feature = "simd128"` — requires `-C target-feature=+simd128`.
-#[cfg(all(feature = "plasma_path", target_arch = "wasm32", target_feature = "simd128"))]
+#[cfg(all(
+    feature = "plasma_path",
+    target_arch = "wasm32",
+    target_feature = "simd128"
+))]
 unsafe fn wasm32_ternary_matvec(w: &TernaryWeights, x: &[f32], y: &mut [f32]) {
     // Safety: caller guarantees x.len()==w.cols and y.len()==w.rows
     unsafe {
@@ -350,19 +378,34 @@ unsafe fn wasm32_ternary_matvec(w: &TernaryWeights, x: &[f32], y: &mut [f32]) {
                 let chunks32 = remaining / 32 * 32;
                 let mut col = 0usize;
                 while col < chunks32 {
-                    bitselect_nibble8_wasm(&mut acc0, pos_word, neg_word, col, base_col, x, mask_lo, mask_hi, zero_i, zeros_f);
+                    bitselect_nibble8_wasm(
+                        &mut acc0, pos_word, neg_word, col, base_col, x, mask_lo, mask_hi, zero_i,
+                        zeros_f,
+                    );
                     col += 8;
-                    bitselect_nibble8_wasm(&mut acc1, pos_word, neg_word, col, base_col, x, mask_lo, mask_hi, zero_i, zeros_f);
+                    bitselect_nibble8_wasm(
+                        &mut acc1, pos_word, neg_word, col, base_col, x, mask_lo, mask_hi, zero_i,
+                        zeros_f,
+                    );
                     col += 8;
-                    bitselect_nibble8_wasm(&mut acc2, pos_word, neg_word, col, base_col, x, mask_lo, mask_hi, zero_i, zeros_f);
+                    bitselect_nibble8_wasm(
+                        &mut acc2, pos_word, neg_word, col, base_col, x, mask_lo, mask_hi, zero_i,
+                        zeros_f,
+                    );
                     col += 8;
-                    bitselect_nibble8_wasm(&mut acc3, pos_word, neg_word, col, base_col, x, mask_lo, mask_hi, zero_i, zeros_f);
+                    bitselect_nibble8_wasm(
+                        &mut acc3, pos_word, neg_word, col, base_col, x, mask_lo, mask_hi, zero_i,
+                        zeros_f,
+                    );
                     col += 8;
                 }
 
                 // Remaining 8-element chunks → acc0
                 while col + 8 <= remaining {
-                    bitselect_nibble8_wasm(&mut acc0, pos_word, neg_word, col, base_col, x, mask_lo, mask_hi, zero_i, zeros_f);
+                    bitselect_nibble8_wasm(
+                        &mut acc0, pos_word, neg_word, col, base_col, x, mask_lo, mask_hi, zero_i,
+                        zeros_f,
+                    );
                     col += 8;
                 }
 
@@ -408,7 +451,11 @@ unsafe fn wasm32_ternary_matvec(w: &TernaryWeights, x: &[f32], y: &mut [f32]) {
 /// WASM inner-loop helper for Issue 298: process 8 elements (one byte each of
 /// pos/neg bit-planes, both nibbles) with SWAR mask construction + bitselect.
 /// Direct port of the proven riir-engine `project_ternary_simd` inner loop.
-#[cfg(all(feature = "plasma_path", target_arch = "wasm32", target_feature = "simd128"))]
+#[cfg(all(
+    feature = "plasma_path",
+    target_arch = "wasm32",
+    target_feature = "simd128"
+))]
 #[inline(always)]
 unsafe fn bitselect_nibble8_wasm(
     acc: &mut core::arch::wasm32::v128,

@@ -44,6 +44,8 @@
 //! [`AttractorKernel`]: crate::micro_belief::attractor::AttractorKernel
 //! [`LatentThoughtKernel`]: crate::micro_belief::latent_thought::LatentThoughtKernel
 
+#![allow(clippy::needless_range_loop)]
+
 use crate::micro_belief::attractor::AttractorKernel;
 use crate::micro_belief::latent_thought::LatentThoughtKernel;
 use crate::micro_belief::leaky::LeakyIntegrator;
@@ -198,14 +200,13 @@ fn run_kernel(
             })
             .unwrap_or((0, &0.0f32));
 
-        if let Some(prev) = prev_argmax {
-            if prev != argmax_idx {
+        if let Some(prev) = prev_argmax
+            && prev != argmax_idx {
                 flip_flops += 1;
             }
-        }
         prev_argmax = Some(argmax_idx);
 
-        if step >= PHASE_DIM0_END && step < PHASE_AMBIGUOUS_END {
+        if (PHASE_DIM0_END..PHASE_AMBIGUOUS_END).contains(&step) {
             ambiguous_argmax.push(argmax_idx as f64);
         }
     }

@@ -11,6 +11,8 @@
 //! The ANE path is feature-gated behind `ane_npc` and only compiled on macOS.
 //! The CPU ternary baseline is always available as fallback.
 
+#![allow(clippy::needless_range_loop)]
+
 use crate::sense::brain::NpcBrain;
 
 /// Maximum sense modules per NPC brain (matches SenseKind count).

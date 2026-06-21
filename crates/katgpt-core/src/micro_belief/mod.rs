@@ -91,10 +91,10 @@ pub(crate) const fn uninit_stack<const N: usize>() -> [core::mem::MaybeUninit<f3
 ///
 /// Caller MUST ensure elements `0..len` are written before any read.
 #[inline]
-pub(crate) unsafe fn assume_init_slice<'a, const N: usize>(
-    buf: &'a mut [core::mem::MaybeUninit<f32>; N],
+pub(crate) unsafe fn assume_init_slice<const N: usize>(
+    buf: &mut [core::mem::MaybeUninit<f32>; N],
     len: usize,
-) -> &'a mut [f32] {
+) -> &mut [f32] {
     // SAFETY: caller upholds that buf[0..len] is fully initialized before
     // any read. MaybeUninit<f32> has the same layout as f32.
     unsafe { core::slice::from_raw_parts_mut(buf.as_mut_ptr() as *mut f32, len) }

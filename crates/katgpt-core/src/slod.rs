@@ -13,6 +13,8 @@
 //! 4. **Fréchet mean** — SIMD-accelerated Riemannian centroid in Poincaré ball
 //! 5. **SlodPruner** — ConstraintPruner that routes between spectral tiers at O(1)
 
+#![allow(clippy::needless_range_loop)]
+
 use crate::simd::simd_dot_f32;
 
 // ── Configuration ─────────────────────────────────────────────────
@@ -291,8 +293,7 @@ impl SlodOperator {
         // Bit-identical to the prior scalar recomputation (same value, fewer times).
         let norm_sq: Vec<f32> = (0..n)
             .map(|i| {
-                crate::simd::simd_sum_sq(&embeddings[i * dim..(i + 1) * dim], dim)
-                    .min(1.0 - 1e-5)
+                crate::simd::simd_sum_sq(&embeddings[i * dim..(i + 1) * dim], dim).min(1.0 - 1e-5)
             })
             .collect();
 
@@ -305,7 +306,10 @@ impl SlodOperator {
                     continue;
                 }
                 let a_j = &embeddings[j * dim..(j + 1) * dim];
-                dists.push((j, poincare_distance_precomputed(a_i, a_j, norm_sq[i], norm_sq[j], dim)));
+                dists.push((
+                    j,
+                    poincare_distance_precomputed(a_i, a_j, norm_sq[i], norm_sq[j], dim),
+                ));
             }
             // Partial sort: O(n) to partition top-k nearest
             // Clamp k to dists.len() since we skipped self (dists has n-1 elements)

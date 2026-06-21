@@ -19,6 +19,8 @@
 //!
 //! The kernel weights are a freeze/thaw artifact — see `snapshot.rs`.
 
+#![allow(clippy::needless_range_loop)]
+
 use crate::simd::fast_sigmoid;
 
 /// Recurrence family identifier.

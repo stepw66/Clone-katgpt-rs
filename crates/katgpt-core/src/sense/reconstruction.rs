@@ -9,6 +9,8 @@
 //! accumulated evidence, producing strictly more expressive retrieval
 //! (Theorem 4.1, arXiv:2606.06036).
 
+#![allow(clippy::needless_range_loop)]
+
 use crate::types::SenseModule;
 
 #[cfg(feature = "temporal_deriv")]
