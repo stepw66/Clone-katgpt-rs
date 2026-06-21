@@ -388,7 +388,10 @@ fn blake3_hash(bytes: &[f32]) -> [u8; 32] {
     // Reinterpret f32 slice as bytes. Safe because we read the bytes out and
     // immediately hash them — no aliasing.
     let byte_slice = unsafe {
-        std::slice::from_raw_parts(bytes.as_ptr() as *const u8, bytes.len() * std::mem::size_of::<f32>())
+        std::slice::from_raw_parts(
+            bytes.as_ptr() as *const u8,
+            bytes.len() * std::mem::size_of::<f32>(),
+        )
     };
     *blake3::hash(byte_slice).as_bytes()
 }
@@ -596,10 +599,10 @@ mod tests {
         // by the projection (up to f32 noise).
         let d = 8;
         let k = 2;
-        // U_k with all weight on axes {0, 1}.
+        // U_k is d×k row-major: u_k[row*k + col]. Col 0 = e_0, col 1 = e_1.
         let mut u_k = vec![0.0_f32; d * k];
-        u_k[0 * k + 0] = 1.0; // col 0 = e_0
-        u_k[1 * k + 1] = 1.0; // col 1 = e_1
+        u_k[0] = 1.0; // (row=0, col=0): e_0 has component 1 at axis 0
+        u_k[k + 1] = 1.0; // (row=1, col=1): e_1 has component 1 at axis 1
         // Query lives entirely in the orthogonal complement {2..d}.
         let mut q = vec![0.0_f32; d];
         q[3] = 0.7;

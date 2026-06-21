@@ -170,3 +170,11 @@ required-features = ["cgsp", "temporal_deriv"]
 name = "micro_belief_bench"
 harness = false
 required-features = ["micro_belief", "bom_sampling"]
+
+# Plan 272 — ChunkedContentStore basic example. Lives in katgpt-core (not the
+# root crate) because it imports katgpt_core::BlobId / ChunkedContentStore /
+# FixedSizeChunker / InMemoryChunkedStore, all of which are gated behind the
+# `chunked_content_store` feature of this crate.
+[[example]]
+name = "chunked_store_basic"
+required-features = ["chunked_content_store"]

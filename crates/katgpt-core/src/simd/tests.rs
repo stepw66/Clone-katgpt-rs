@@ -1939,7 +1939,7 @@
             // reduced argument). The old buggy poly produced ~5e-2 relative error
             // at x=2 — this assertion would have caught it.
             let denom = expected.abs().max(1e-30);
-            let rel_err = ((got - expected).abs() / denom) as f32;
+            let rel_err = (got - expected).abs() / denom;
             if rel_err > worst_rel {
                 worst_rel = rel_err;
                 worst_at = xi;
@@ -1975,7 +1975,7 @@
                 let expected = xi.exp();
                 expected_sum += expected;
                 let denom = expected.abs().max(1e-30);
-                let rel_err = ((x[i] - expected).abs() / denom) as f32;
+                let rel_err = (x[i] - expected).abs() / denom;
                 assert!(
                     rel_err < 5e-4,
                     "len={len} exp({xi}) = {} vs true {expected}, rel_err={rel_err:.3e}",
@@ -1983,7 +1983,7 @@
                 );
             }
             // Sum tolerance: fused 4-accumulator reassociation adds ~1e-6 relative.
-            let sum_rel = ((got_sum - expected_sum).abs() / expected_sum.abs().max(1e-30)) as f32;
+            let sum_rel = (got_sum - expected_sum).abs() / expected_sum.abs().max(1e-30);
             assert!(sum_rel < 5e-4, "len={len} sum mismatch: got {got_sum}, exp {expected_sum}, rel={sum_rel:.3e}");
         }
     }
@@ -2026,7 +2026,7 @@
         // (-clamp, clamp), and the sigmoid saturation must drive outliers to
         // ±1 (well within clamp=6).
         let a = [
-            100.0f32, -100.0, 50.0, -50.0, 0.0, 1.5, -2.3, 10.0, -10.0, 3.14, -3.14, 0.001, 25.0,
+            100.0f32, -100.0, 50.0, -50.0, 0.0, 1.5, -2.3, 10.0, -10.0, 2.5, -2.5, 0.001, 25.0,
             -25.0, 80.0, -80.0,
         ];
         let q = [0.0f32; 16];

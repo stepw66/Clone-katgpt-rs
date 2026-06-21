@@ -166,10 +166,18 @@ pub fn segsum(a: &[f32], out: &mut [f32]) {
         // to free.
     } else {
         // Rare: very long sequence. Heap-allocate once.
-        let mut cumsum_storage: Vec<f32> = Vec::with_capacity(t);
-        // SAFETY: `compute` initializes all `t` elements before reading any.
+        // Use Vec<MaybeUninit<f32>> so clippy::uninit_vec is satisfied while
+        // still avoiding the O(t) zero-init that `vec![0.0; t]` would impose.
+        // SAFETY: MaybeUninit<f32> has no invariant; the Vec just holds `t`
+        // uninitialized slots, and `compute` writes all `t` slots before any
+        // read. The borrow via from_raw_parts_mut ends before the Vec drops;
+        // MaybeUninit<f32> has no Drop impl, so drop is a no-op.
+        let mut cumsum_storage: Vec<std::mem::MaybeUninit<f32>> = Vec::with_capacity(t);
         unsafe { cumsum_storage.set_len(t) };
-        compute(cumsum_storage.as_mut_slice());
+        let cumsum: &mut [f32] = unsafe {
+            std::slice::from_raw_parts_mut(cumsum_storage.as_mut_ptr().cast::<f32>(), t)
+        };
+        compute(cumsum);
         // `cumsum_storage` drops here.
     }
 }
