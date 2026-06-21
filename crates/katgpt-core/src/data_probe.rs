@@ -517,9 +517,10 @@ pub fn classify_all_sinks(
     col_sums[..n].fill(0.0);
     for row in attn.iter() {
         let m = row.len().min(n);
-        for j in 0..m {
-            col_sums[j] += row[j];
-        }
+        // SIMD-accelerated column-sum reduction (NEON/AVX2) — replaces a
+        // scalar `for j in 0..m { col_sums[j] += row[j]; }` that the auto-
+        // vectorizer may or may not pick up depending on inlining.
+        crate::simd::simd_add_inplace(&mut col_sums[..m], &row[..m]);
     }
     let inv_n = 1.0 / (n as f32);
 
@@ -1127,15 +1128,11 @@ pub fn classify_all_sinks_flat(
     scratch.ensure_capacity_dn(d, n);
     let col_sums = &mut scratch.col_sums;
     col_sums[..n].fill(0.0);
-    // Column sums: c[j] = Σ_i attn[i*n + j]. Stride-d-1 access on the
-    // inner read — cache-unfriendly but unavoidable for column sums; the
-    // row-major layout of `attn` means each row is contiguous, so we walk
-    // row-by-row and accumulate into col_sums[j].
+    // Column sums: c[j] = Σ_i attn[i*n + j]. Each row of `attn` is contiguous,
+    // so we walk row-by-row and SIMD-reduce into col_sums[j].
     for i in 0..n {
         let row = &attn[i * n..(i + 1) * n];
-        for j in 0..n {
-            col_sums[j] += row[j];
-        }
+        crate::simd::simd_add_inplace(&mut col_sums[..n], row);
     }
     let inv_n = 1.0 / (n as f32);
 
@@ -1229,9 +1226,10 @@ pub fn apply_dual_policy_gate_flat(
     col_sums[..n].fill(0.0);
     for i in 0..n {
         let row = &attn[i * n..(i + 1) * n];
-        for j in 0..n {
-            col_sums[j] += row[j];
-        }
+        // SIMD-accelerated column-sum reduction — the previous scalar inner
+        // loop ran `n` times per row over stride-1 f32 reads; this routes
+        // through NEON/AVX2 add instructions.
+        crate::simd::simd_add_inplace(&mut col_sums[..n], row);
     }
     let (dominant_pos, _dominant_strength) = {
         let mut best_i = 0usize;

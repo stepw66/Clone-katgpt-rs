@@ -219,8 +219,9 @@ fn project_ternary(
     for i in 0..n_directions {
         let dir = &directions[i];
         let hla_val = hla_state[i];
-        let pos = ((dir.pos_bits >> i) & 1) as u32 as f32;
-        let neg = ((dir.neg_bits >> i) & 1) as u32 as f32;
+        // Drop the redundant `as u32` intermediate — `as f32` works directly on `u64`.
+        let pos = ((dir.pos_bits >> i) & 1) as f32;
+        let neg = ((dir.neg_bits >> i) & 1) as f32;
         dot += (pos - neg) * hla_val * dir.row_scale;
     }
     confidence * crate::simd::fast_sigmoid(dot)
