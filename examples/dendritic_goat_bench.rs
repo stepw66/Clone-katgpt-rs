@@ -6,6 +6,7 @@
 //!   - Timing: build_dd_tree_dendritic vs build_dd_tree overhead
 
 #![cfg(feature = "dendritic_gate")]
+#![allow(dead_code)] // BenchResult fields are part of the recorded output but not all are read back.
 
 use std::hint::black_box;
 

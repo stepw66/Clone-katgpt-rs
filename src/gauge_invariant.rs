@@ -770,7 +770,7 @@ mod tests {
         // Naive sum: just add A_1 + A_2 and B_1 + B_2 (where pair 2 = pair 1).
         let w_naive_1 = abt(&a, &b, m, r, n);
         // Naive 2·A·B^T = sum of pair with itself.
-        let w_naive_sum: Vec<f32> = w_naive_1.iter().map(|v| 2.0 * v).collect();
+        let _w_naive_sum: Vec<f32> = w_naive_1.iter().map(|v| 2.0 * v).collect();
 
         // Now do the same with gauge-transformed inputs (A' = 5A, B' = B/5).
         // Naive sum gives 2·A'·B'^T = 2·A·B^T (gauge cancels in this trivial case

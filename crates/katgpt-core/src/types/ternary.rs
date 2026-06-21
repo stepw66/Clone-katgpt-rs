@@ -1,7 +1,5 @@
 //! Bit-plane packed ternary weights.
 
-use super::*;
-
 /// Bit-plane packed ternary weights: each element is {-1, 0, +1}.
 ///
 /// 64 weights per block stored as two u64 bitmasks:

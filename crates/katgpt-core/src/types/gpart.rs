@@ -1,7 +1,5 @@
 //! GPart Isometric Partition Adapter.
 
-use super::*;
-
 // ---------------------------------------------------------------------------
 // GPart Isometric Partition Adapter — replaces LoRA BA with Pθ_d (Research 227, Plan 257)
 // ---------------------------------------------------------------------------

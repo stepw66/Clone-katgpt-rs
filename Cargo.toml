@@ -600,6 +600,16 @@ path = "tests/t2_2_weight_shared_gate.rs"
 required-features = ["weight_shared_advantage_gate"]
 
 [[example]]
+name = "bomber_19_sdpg_replay_gen"
+required-features = ["sdpg_bandit", "bomber"]
+
+# bomber_20 has an unconditional main() but imports katgpt_rs::pruners::bomber
+# which is feature-gated. Gate the example so it only compiles with --features bomber.
+[[example]]
+name = "bomber_20_postcard_to_jsonl"
+required-features = ["bomber"]
+
+[[example]]
 name = "bomber_21_sonlt_arena"
 required-features = ["bomber"]
 
@@ -1665,3 +1675,28 @@ required-features = ["ict_branching"]
 [[example]]
 name = "ict_curiosity_pulse_upgrade"
 required-features = ["ict_branching"]
+
+# ── Issue 004 follow-up: examples/benches with feature-gated imports that
+# were missing required-features declarations (auto-discovery was building them
+# without the feature, breaking cargo check --all-targets). Added in batch.
+
+# Plan 296 Phase 2 T2.5 — Induced CWM + ISMCTS smoke example.
+[[example]]
+name = "induced_cwm_01_mock_iig"
+required-features = ["induced_cwm_ismcts"]
+
+# Plan 296 Phase 3 T3.5 — Induced CWM value-function tournament.
+[[example]]
+name = "induced_cwm_02_value_tournament"
+required-features = ["induced_cwm_tournament"]
+
+# δ-Mem Surprise Gate benchmark — uses feature-gated katgpt_rs::pruners::delta_mem.
+[[bench]]
+name = "delta_mem_surprise_gate_bench"
+harness = false
+required-features = ["delta_mem"]
+
+# Plan 272 — Progressive MCGS basic example (feature-gated module).
+[[example]]
+name = "progressive_mcgs_basic"
+required-features = ["progressive_mcgs"]

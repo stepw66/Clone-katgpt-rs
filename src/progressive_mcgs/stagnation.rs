@@ -223,7 +223,7 @@ impl StagnationTriggers {
 
     /// Iterate over queued triggers.
     #[inline]
-    pub const fn iter(&self) -> StagnationTriggersIter {
+    pub const fn iter(&self) -> StagnationTriggersIter<'_> {
         StagnationTriggersIter {
             triggers: self,
             pos: 0,

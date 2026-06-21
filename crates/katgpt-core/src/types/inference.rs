@@ -1,6 +1,7 @@
 //! Inference result + proposer/gate types.
 
-use super::*;
+#[cfg(feature = "sr2am_configurator")]
+use super::PlanningDecision;
 
 // ---------------------------------------------------------------------------
 // InferenceResult

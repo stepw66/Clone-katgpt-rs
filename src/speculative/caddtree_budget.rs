@@ -917,6 +917,7 @@ mod tests {
     // (3) guards handle empty marginals and out-of-range positions.
 
     /// Build a tiny Config with explicit vocab/n_embd for deterministic residuals.
+    #[allow(dead_code)]
     fn mux_rcd_config(vocab: usize, n_embd: usize) -> Config {
         Config {
             vocab_size: vocab,
@@ -934,6 +935,7 @@ mod tests {
     }
 
     /// Reference residual: `Σ_j p_j · E_j` over the codebook.
+    #[allow(dead_code)]
     fn reference_residual(marginal: &[f32], wte: &[f32], n_embd: usize) -> Vec<f32> {
         let vocab = marginal.len();
         let mut out = vec![0.0f32; n_embd];

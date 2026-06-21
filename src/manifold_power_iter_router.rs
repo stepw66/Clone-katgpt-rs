@@ -639,7 +639,7 @@ mod tests {
         let gram = gram_of(&w_g, d);
 
         let mut r = seeded_matrix(7, n, d);
-        let mut r_before = r.clone();
+        let r_before = r.clone();
         let grams: Vec<&[f32]> = vec![&gram];
         let mut scratch = PowerRetractScratch::new(d);
         let _res = manifold_power_iter_router(&mut r, &grams, n, d, 1.0, 1, &mut scratch);

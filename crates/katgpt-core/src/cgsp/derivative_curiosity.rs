@@ -83,7 +83,7 @@
 //! | Need per-arm differentiation within a cycle | CGSP (`CgspLoop` + `Solver`) |
 
 use crate::cgsp::conjecturer::PoolConjecturer;
-use crate::cgsp::loop_::{renormalize_priorities, CgspConfig, EntropyCollapse};
+use crate::cgsp::loop_::{renormalize_priorities, CgspConfig};
 use crate::cgsp::traits::{CollapseSignal, CuriosityConjecturer, HintDeltaBandit};
 use crate::cgsp::types::{
     entropy_nats, Candidate, CycleResult, CycleStats, Direction, Priority, ScratchBuffers, Target,

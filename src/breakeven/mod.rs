@@ -565,7 +565,7 @@ mod tests {
 
     #[test]
     fn test_bandit_select_tier() {
-        let mut bandit = BreakevenBandit::new(100, 200, 50);
+        let bandit = BreakevenBandit::new(100, 200, 50);
 
         // Feed baseline CPU timings
         for _ in 0..20 {

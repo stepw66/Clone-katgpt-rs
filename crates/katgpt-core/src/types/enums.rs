@@ -1,7 +1,5 @@
 //! Small configuration enums and feature-config structs.
 
-use super::*;
-
 // Shared configuration, RNG, and math utilities.
 // Superset of types from both katgpt-rs and riir-engine projects.
 
@@ -144,6 +142,11 @@ pub enum WeightDtype {
 
 /// Delta routing mode — cross-layer information flow via delta vectors.
 /// Research 061: Delta Attention Residuals (Plan 097).
+///
+/// Kept compiled even when `delta_routing` is off so config round-trips
+/// serialize identically across feature sets. Reachable via `Config` defaults
+/// once the routing backend lands.
+#[allow(dead_code)]
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum DeltaRoutingMode {
@@ -162,6 +165,7 @@ pub enum DeltaRoutingMode {
 ///
 /// Fields ordered by descending alignment to minimize padding:
 /// usize (8B) → repr(u8) enum (1B) — 16 bytes total, no wasted padding.
+#[allow(dead_code)]
 #[derive(Clone, Copy, Debug)]
 pub struct DeltaRoutingConfig {
     /// Block size for DeltaBlock mode (number of layers per block).
@@ -197,6 +201,10 @@ pub enum DeltaNetLayerType {
     DeltaNet,
 }
 
+// DeltaRoutingConfig::delta_block / is_enabled are intended for the
+// delta_routing backend (Plan 097) which is still being wired up. Silence
+// dead-code until callers land.
+#[allow(dead_code)]
 impl DeltaRoutingConfig {
     pub fn delta_block(block_size: usize) -> Self {
         Self {
@@ -603,6 +611,7 @@ impl WallConfig {
 ///
 /// Controls when mid-reasoning early exit triggers and how efficiency rewards
 /// are shaped. Feature-gated behind `collapse_aware_thinking`.
+#[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub struct ThinkingBudget {
     /// Maximum thinking tokens before forced termination.

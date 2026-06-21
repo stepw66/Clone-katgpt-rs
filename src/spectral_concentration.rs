@@ -228,7 +228,7 @@ mod tests {
             state ^= state << 13;
             state ^= state >> 7;
             state ^= state << 17;
-            ((state >> 11) as f32 / (1u64 << 52) as f32)
+            (state >> 11) as f32 / (1u64 << 52) as f32
         }
     }
 

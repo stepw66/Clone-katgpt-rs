@@ -396,6 +396,7 @@ mod tests {
     /// Toy direction source: M unit vectors, one per axis (so direction `m`
     /// picks out the `m`-th component of the claim embedding).
     struct AxisDirections {
+        #[allow(dead_code)]
         m: usize,
         k: usize,
         vectors: Vec<f32>,

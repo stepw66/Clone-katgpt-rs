@@ -22,6 +22,7 @@ const WARMUP_ITERS: usize = 10;
 const ITERATIONS: usize = 1000;
 
 // GOAT gate: ANE must reduce CPU utilization by ≥ 30% at 1000 NPC load.
+#[allow(dead_code)]
 const CPU_UTIL_REDUCTION_TARGET_PCT: f64 = 30.0;
 
 // ── CPU time FFI (Unix only, no external crate) ───────────────────
@@ -318,6 +319,7 @@ fn main() {
     }
 }
 
+#[allow(dead_code)]
 fn print_verdict(cpu: &PhaseResult, ane: &PhaseResult) {
     println!("── GOAT Power Verdict ──");
 
