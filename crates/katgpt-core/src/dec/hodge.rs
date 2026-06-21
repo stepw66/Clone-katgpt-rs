@@ -80,7 +80,15 @@ fn cg_solve(
     match dim {
         1 => {
             let mut scratch = CgScratch::new(n);
-            cg_solve_scalar(cx, &rhs.data, rank, tol, max_iter, &mut x.data, &mut scratch);
+            cg_solve_scalar(
+                cx,
+                &rhs.data,
+                rank,
+                tol,
+                max_iter,
+                &mut x.data,
+                &mut scratch,
+            );
         }
         _ => {
             // Per-channel solve
@@ -91,15 +99,7 @@ fn cg_solve(
                 for i in 0..n {
                     rhs_ch[i] = rhs.data[i * dim + d];
                 }
-                cg_solve_scalar(
-                    cx,
-                    &rhs_ch,
-                    rank,
-                    tol,
-                    max_iter,
-                    &mut x_ch,
-                    &mut scratch,
-                );
+                cg_solve_scalar(cx, &rhs_ch, rank, tol, max_iter, &mut x_ch, &mut scratch);
                 for i in 0..n {
                     x.data[i * dim + d] = x_ch[i];
                 }
@@ -174,9 +174,18 @@ fn cg_solve_scalar(
         _ => 0.0,
     };
 
+    // Split scratch into the four working buffers ONCE. We hold all four
+    // disjoint field slices for the rest of the function; `scratch` itself
+    // is not touched again. This avoids the double-`&mut` borrow that would
+    // arise if we re-borrowed `scratch` later (e.g. via a helper).
+    let CgScratch { b, r, p, ap } = scratch;
+    let b = &mut b[..n];
+    let r = &mut r[..n];
+    let p = &mut p[..n];
+    let ap = &mut ap[..n];
+
     // Build corrected RHS into the reused `b` buffer (avoids `rhs.to_vec()` per call).
     // `b[..n]` is fully overwritten below before any read.
-    let b = &mut scratch.b[..n];
     b.copy_from_slice(rhs);
     if rank == 0 {
         for v in b.iter_mut() {
@@ -192,7 +201,11 @@ fn cg_solve_scalar(
     let mut ax_field = CochainField::zeros(rank, n, 1);
     // Scratch for hodge_laplacian_into (rank ≥ 1). Sized for the intermediate ranks;
     // unused for rank 0 (graph_laplacian_into needs no scratch beyond ax_field).
-    let n_upper = if rank + 1 < MAX_RANK as u8 { cx.n_cells(rank + 1) } else { 0 };
+    let n_upper = if rank + 1 < MAX_RANK as u8 {
+        cx.n_cells(rank + 1)
+    } else {
+        0
+    };
     let n_lower = if rank > 0 { cx.n_cells(rank - 1) } else { 0 };
     let mut scratch_upper = CochainField::zeros(rank + 1, n_upper, 1);
     let mut scratch_lower = CochainField::zeros(rank.saturating_sub(1), n_lower, 1);
@@ -219,7 +232,9 @@ fn cg_solve_scalar(
     // CG iterations: r = b, p = r, iterate. All four working buffers come from
     // the caller-supplied scratch — no per-call Vec allocations.
     x_out.fill(0.0f32);
-    let (r, p, ap) = scratch_rpa(b, scratch);
+    // CG initialization: r = b; p = r.clone().
+    r.copy_from_slice(b);
+    p.copy_from_slice(r);
 
     let mut rs_old = dot(r, r);
 
@@ -262,27 +277,6 @@ fn cg_solve_scalar(
 
         rs_old = rs_new;
     }
-}
-
-/// Split the `b`/`r`/`p`/`ap` scratch slots into the four (now-aliased) working
-/// buffers CG needs. Returns `(&mut r, &mut p, &mut ap)` after copying `b → r`
-/// and `r → p` (the CG initialization `r = b; p = r.clone()`).
-///
-/// This is a small helper that keeps the borrow-splitting local — the four
-/// `scratch.*` fields are disjoint, so we can hand out three `&mut` views at
-/// once without `RefCell`.
-#[inline]
-fn scratch_rpa<'a>(b: &'a [f32], scratch: &'a mut CgScratch) -> (&'a mut [f32], &'a mut [f32], &'a mut [f32]) {
-    let n = b.len();
-    let CgScratch { r, p, ap, b: _ } = scratch;
-    let r = &mut r[..n];
-    let p = &mut p[..n];
-    let ap = &mut ap[..n];
-    // r = b (CG initialization)
-    r.copy_from_slice(b);
-    // p = r
-    p.copy_from_slice(r);
-    (r, p, ap)
 }
 
 /// Dot product of two slices — SIMD-accelerated.
@@ -621,7 +615,11 @@ pub fn hodge_spectrum(
     // all power-iteration steps (max_iter * n_ev calls previously allocated fresh).
     let mut cochain = CochainField::zeros(rank, n, 1);
     let mut lap = CochainField::zeros(rank, n, 1);
-    let n_upper = if rank + 1 < MAX_RANK as u8 { cx.n_cells(rank + 1) } else { 0 };
+    let n_upper = if rank + 1 < MAX_RANK as u8 {
+        cx.n_cells(rank + 1)
+    } else {
+        0
+    };
     let n_lower = if rank > 0 { cx.n_cells(rank - 1) } else { 0 };
     let mut scratch_upper = CochainField::zeros(rank + 1, n_upper, 1);
     let mut scratch_lower = CochainField::zeros(rank.saturating_sub(1), n_lower, 1);
@@ -726,8 +724,8 @@ fn deflate(v: &mut [f32], basis: &[Vec<f32>]) {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::operators::graph_laplacian;
+    use super::*;
 
     /// Tolerance for floating-point comparisons.
     const TOL: f32 = 1e-3;

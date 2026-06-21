@@ -488,10 +488,10 @@ impl GpartPair {
 /// **Note:** θ_d = P⁺ΔW must be computed by the riir-ai training pipeline.
 /// This conversion is a placeholder until that pipeline provides θ_d.
 #[cfg(feature = "gpart_adapter")]
-impl TryFrom<&LoraAdapter> for GpartAdapter {
+impl TryFrom<&crate::LoraAdapter> for GpartAdapter {
     type Error = &'static str;
 
-    fn try_from(_lora: &LoraAdapter) -> Result<Self, Self::Error> {
+    fn try_from(_lora: &crate::LoraAdapter) -> Result<Self, Self::Error> {
         Err("GpartAdapter requires pre-computed θ_d from riir-ai training pipeline (P⁺ΔW)")
     }
 }

@@ -352,13 +352,19 @@ pub use funcattn::{
 // ChunkedContentStore — Lore-distilled chunked content-addressed Merkle store (Plan 272, Research 262).
 // Open primitive: chunks → BLAKE3 → dedup via papaya → binary Merkle root. No game/chain IP.
 // Consumed by riir-ai Plan 319 (Executable Asset Vessel + Quorum Gitflow).
+//
+// NOTE: the binary-Merkle `MerkleProof` here is renamed on re-export to
+// `BinaryMerkleProof` to avoid colliding with `merkle_octree::MerkleProof`
+// when both features are active simultaneously (caught by `cargo check
+// --all-features`). Internal callers still reach the type via
+// `crate::content_store::MerkleProof`.
 #[cfg(feature = "chunked_content_store")]
 pub mod content_store;
 #[cfg(feature = "chunked_content_store")]
 pub use content_store::{
     BlobId, ChunkFetcher, ChunkRange, ChunkedContentStore, ChunkerConfig, ChunkingStrategy,
-    FastCdcChunker, FixedSizeChunker, InMemoryChunkedStore, MerkleProof, StoreStats,
-    build_binary_merkle_proof, build_binary_merkle_root, verify_binary_merkle_proof,
+    FastCdcChunker, FixedSizeChunker, InMemoryChunkedStore, MerkleProof as BinaryMerkleProof,
+    StoreStats, build_binary_merkle_proof, build_binary_merkle_root, verify_binary_merkle_proof,
 };
 
 // Closure-Expansion Instrument (CEI) — PTG recorder + motif miner + PRI/CDG/TaR metrics
