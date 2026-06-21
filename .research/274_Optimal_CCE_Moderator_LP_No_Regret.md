@@ -318,7 +318,7 @@ GOAT gate rule: `cce_moderator` feature flag default-off. Promote to considerati
 
 ---
 
-## 9. Subjective-CCE heterogeneous extension (Plan 300, 2026-06-21 → T4.3b 2026-06-22)
+## 9. Subjective-CCE heterogeneous extension (Plan 300, 2026-06-21 → Plan 328, 2026-06-22)
 
 The homogeneous `CceLp<N,A>::solve(d, p)` takes a **single** `PayoffTensor<N,A>`
 shared across all deviation constraints. The subjective-CCE generalization —
@@ -369,13 +369,73 @@ now in the `default` features list in `katgpt-rs/Cargo.toml`. Zero non-optional
 deps (`cce_moderator = []`); the module is `#[cfg(feature="cce_moderator")]`
 gated, so promotion is zero-cost for non-consumers.
 
+### 9.1 Runtime adapter — crowd-scale wiring (Plan 328, 2026-06-22)
+
+Plan 300 closed the **primitive** surface (`HeterogeneousPayoff<N,A>` trait,
+`CcePrimalDual::run_heterogeneous`, `PerPlayerGame` reference impl). Plan 328
+closes the **runtime** surface in riir-ai — the path from per-NPC
+`NpcCwmRuntime<K>` payoff tables to the primitive, at crowd scale.
+
+**New module** `riir-ai/crates/riir-engine/src/cce_runtime/heterogeneous.rs`:
+
+- **`NpcHeterogeneousPayoff<N, A>`** — owned per-player cost tables
+  (`Vec<Vec<f32>>`, flat row-major `[s,a]` per player) + per-player
+  `Vec<Vec<Deviation<N, A>>>`. Implements `HeterogeneousPayoff<N, A>` via
+  direct `player_costs[p][s * A + a]` indexing. Chosen **owned** (not
+  borrowed like `PerPlayerGame<'a>`) because the integrator has just walked
+  the NPC population, built fresh tables, and wants to hand them to the
+  moderator without tracking borrow lifetimes across zone-batch boundaries.
+- **`CwmPayoffExtractor<K, N, A>`** trait — game-side hook with a single
+  required method `cost(kernel, info_state, player_id, state_idx, action_idx)
+  -> f32`. The integrator supplies state_idx → info_state and action_idx →
+  move mappings in their impl. No default impl in the module (would need
+  game-specific mappings); a mock test demonstrates the pattern.
+- **`extract_npc_payoff_matrices(runtimes, info_state, extractor,
+  deviations_per_player)`** — cold-tier batch extractor. Walks
+  `&[NpcCwmRuntime<K>]`, clones each non-empty slot's kernel, calls
+  extractor at every `(s, a)`. Falls back to `default_deviations`
+  (constant-action per action index) when no per-player deviations supplied.
+- **`CceCrowdBatchHeterogeneous<'p, N, A>`** — hot-tier rayon-parallel
+  heterogeneous primal-dual runner. Holds `&'p NpcHeterogeneousPayoff<N, A>`
+  + `eta` / `n_iters` / `rayon_threshold`. `run_zone_batch(&[u8])` calls
+  `CcePrimalDual::run_heterogeneous` per zone in rayon-parallel above
+  threshold. Returns `Vec<ZoneBatchResult<N, A>>` with `final_er =
+  ER_heterogeneous(ρ̄ᴺ)`.
+
+**Cold/hot tier split:** extraction (`O(P · N · A · extractor_call)`, typical
+extractor ≈ one `advance` + one `reward` ≈ µs; at `P=32, N=8, A=4` ≈ 1ms
+ total) runs once per moderator refresh — never on the hot path. The hot path
+is the heterogeneous primal-dual iterator reading the frozen tables.
+
+**GOAT gates (Plan 328):**
+- **G1 PASS** — `NpcHeterogeneousPayoff` with 4 identical players reproduces
+  the homogeneous `CceCrowdBatch` output (ρ̄ L1 < 1e-3, ER diff < 1e-3).
+- **G2 PASS (inherited)** — primitive-level gate from Plan 300 T4.3b.
+- **G3 PASS (inherited)** — primitive-level gate from Plan 300 T4.3b.
+- **G4 PASS** — 32-player crowd-scale × 10⁴ iters = **6ms** in release
+  (target < 50ms; 8.3× margin). **1.48× faster** than Plan 300's
+  `PerPlayerGame` primitive baseline (8.9ms) due to simpler indexing — one
+  `Vec<f32>` direct lookup vs tuple dereference + trait dispatch.
+
+**No new Cargo feature.** The module lives under the existing
+`latent_cce_moderator` feature (default-on after Plan 325 Phase 9 GOAT) and
+references `cwm_runtime::npc_slot::NpcCwmRuntime` (default-on after Plan 326
+Phase 6 GOAT). Both features are in `riir-engine`'s `default` list; the
+module compiles on a default `cargo build`.
+
+**Issue 327 T-A+.5 closed.** The subjective-CCE wiring path (Path A+) is
+complete end-to-end at both primitive (katgpt-rs Plan 300) and runtime
+(riir-ai Plan 328) levels.
+
 **Scope boundary:** this is the subjective-CCE wiring path (Issue 327 Path
 A+). Strict Bayes-CCE (no-common-prior per-NPC CWMs modeled as draws from a
 non-degenerate joint) is deferred Super-GOAT research, tracked separately in
 `riir-ai/.issues/328_no_common_prior_bayes_cce.md`.
 
 **References:**
-- Plan 300: [`katgpt-rs/.plans/300_subjective_cce_heterogeneous_payoff_wrapper.md`](../.plans/300_subjective_cce_heterogeneous_payoff_wrapper.md)
+- Plan 300 (primitive): [`katgpt-rs/.plans/300_subjective_cce_heterogeneous_payoff_wrapper.md`](../.plans/300_subjective_cce_heterogeneous_payoff_wrapper.md)
+- Plan 328 (runtime adapter): [`riir-ai/.plans/328_subjective_cce_crowd_batch_wiring.md`](../../riir-ai/.plans/328_subjective_cce_crowd_batch_wiring.md)
+- Plan 328 GOAT evidence: [`riir-ai/.benchmarks/328_subjective_cce_crowd_goat.md`](../../riir-ai/.benchmarks/328_subjective_cce_crowd_goat.md)
 - Parent issue (closed): [`riir-ai/.issues/327_cwm_cce_bayes_fusion.md`](../../riir-ai/.issues/327_cwm_cce_bayes_fusion.md)
 - Sibling issue (deferred): [`riir-ai/.issues/328_no_common_prior_bayes_cce.md`](../../riir-ai/.issues/328_no_common_prior_bayes_cce.md)
 - Regret sketch: [`riir-ai/.docs/62_bayes_cce_regret_sketch.md`](../../riir-ai/.docs/62_bayes_cce_regret_sketch.md) §2
