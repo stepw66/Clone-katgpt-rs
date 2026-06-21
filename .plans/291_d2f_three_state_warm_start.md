@@ -78,7 +78,7 @@ Add the CoFRe **three-state reuse (3SR)** rule as an opt-in refinement to the LT
 - Pretrained MDLM → FP-MDLM distillation (CKA-guided layer mapping, 40k-step KL adaptation).
 - Over-sharpening early-stop rule for L_CONS post-training.
 
-These are real training contributions; route to `riir-train/.research/` if iterated-solver distillation becomes a priority. Not filed from this workflow per the 3-repo discipline.
+These are real training contributions; route to `riir-train/.research/` if iterated-solver distillation becomes a priority. Not filed from this workflow per the 4-repo discipline.
 
 ## References
 

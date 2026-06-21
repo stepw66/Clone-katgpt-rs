@@ -26,7 +26,7 @@ Ship the **detection-vs-prediction vocabulary** in the trait stack and a **`Futu
 3. **Freeze/thaw compatible.** Direction vector is a versioned, BLAKE3-hashed artifact reloadable at runtime via atomic swap. Pattern matches `LoRAWeightVersion` / snapshot conventions.
 4. **Zero-alloc hot path.** The probe `forecast()` is a single `simd_dot_f32` over `d_model` + one sigmoid. Reuse the `EmotionDirections::project` template — it's the canonical pattern.
 5. **Read-only at the LLM level.** FPCG **never modifies the residual stream**. The intervention is at the sample selector, not the activation. This is the *whole point* of FPCG (perplexity preservation) — breaking this rule voids the GOAT gate.
-6. **3-repo discipline.** Generic math (probe, selector, vocabulary tag) → `katgpt-rs`. Game-side NPC dialogue steering → `riir-ai` (deferred, post-GOAT). No game semantics leak to the engine.
+6. **4-repo discipline.** Generic math (probe, selector, vocabulary tag) → `katgpt-rs`. Game-side NPC dialogue steering → `riir-ai` (deferred, post-GOAT). No game semantics leak to the engine; no chain IP involved.
 
 ---
 

@@ -190,7 +190,7 @@ The paper uses softmax for its basis (Eq. 9). AGENTS.md mandates sigmoid. **The 
 | Latent-to-latent preferred | ✅ Operates entirely in spectral/latent space; Φ,Ψ project raw → latent; out is raw reconstruction. |
 | Use sigmoid not softmax | ⚠️ Paper uses softmax (Eq. 9). **Fusion F2 mandates sigmoid-normalized basis** to comply with AGENTS.md. Partition-of-unity property (Prop 4.3) holds for any row-normalized non-negative kernel. |
 | Freeze/thaw over fine-tuning | ✅ W_Φ,W_Ψ (and the rank-k C in F1) are perfect freeze/thaw candidates — small matrices, atomic Arc-swap, BLAKE3-committed. |
-| 3-repo discipline | ✅ Open primitive → katgpt-rs; rank-k game runtime → riir-ai; no training know-how leaks. |
+| 4-repo discipline | ✅ Open primitive → katgpt-rs; rank-k game runtime → riir-ai; no chain IP; no training know-how leaks. |
 | Raw scalars at sync boundary | ✅ In F1, the *operator* stays local; only its scalar outputs (valence/arousal/desperation/calm/fear projections of `out`) cross sync. Same boundary discipline as rank-1 latent_functor. |
 | Zero-alloc hot path | ✅ All matmuls + one small k×k solve. `Vec::with_capacity` once, `clear()`+reuse across calls per optimization.md. |
 

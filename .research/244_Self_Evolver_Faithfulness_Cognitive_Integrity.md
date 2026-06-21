@@ -221,7 +221,7 @@ pub trait AttributionProbe {
 - **Sigmoid not softmax**: behavioral delta metrics use sigmoid-gated comparisons, never softmax.
 - **Raw/latent boundary**: probes never substitute latent for raw in anti-cheat paths. The "raw signature co-emission" rule emits raw *alongside* latent at the bridge — never replaces.
 - **Zero-allocation**: probe suite reuses scratch buffers; `FaithfulnessProfile` is a fixed-size POD.
-- **3-repo discipline**: open primitive (`FaithfulnessProbe`, `AttributionProbe`, `Intervention` enum) → katgpt-rs. Game/chain semantics, HLA direction interpretations, NPC integration → riir-ai (Research 129). No training know-how here.
+- **4-repo discipline**: open primitive (`FaithfulnessProbe`, `AttributionProbe`, `Intervention` enum) → katgpt-rs. Game runtime semantics, HLA direction interpretations, NPC integration → riir-ai (Research 129). Chain-side commitment (if any) → riir-chain. No training know-how here.
 
 ---
 

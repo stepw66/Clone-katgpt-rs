@@ -253,7 +253,7 @@ impl<C, G, S, B> CgspLoop<C, G, S, B> {
 - **No backprop**: ✅ Bandit updates are closed-form (Hint-δ absorb-compress).
 - **Sigmoid not softmax**: ✅ All projections use sigmoid. Priorities normalized via softmax-free scheme (Hint-δ absorb-compress is additive, not softmax-normalized).
 - **Zero-allocation**: ✅ Scratch buffers passed in; priorities updated in-place.
-- **3-repo discipline**: ✅ Open traits in katgpt-rs; game semantics in riir-ai.
+- **4-repo discipline**: ✅ Open traits in katgpt-rs; game semantics in riir-ai.
 
 ---
 

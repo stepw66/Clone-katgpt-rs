@@ -174,6 +174,6 @@ If Phase 4 promotes, wire composability. Each opt-in.
 | Latent-to-latent preferred | ✅ All in spectral space; only final `Φ·C·Ṽ` returns to raw |
 | Sigmoid not softmax | ✅ `FuncAttnBasis::Sigmoid` is the default |
 | Freeze/thaw over fine-tuning | ✅ W_Φ,W_Ψ are swappable snapshots (Phase 5.3) |
-| 3-repo discipline | ✅ Open primitive in katgpt-rs; no game IP; no training know-how |
+| 4-repo discipline | ✅ Open primitive in katgpt-rs; no game IP; no chain IP; no training know-how |
 | Zero-alloc hot path | ✅ `FuncAttnScratch` pre-allocated; all `_into` APIs |
 | CPU/SIMD first | ✅ All matmuls via `simd_matmul_rows`; Cholesky is k×k (L1-resident for k=64) |

@@ -171,7 +171,7 @@ Wall Attention's diagonal forget gates produce per-channel retention scores. Use
 
 ---
 
-## 5. What Stays Where (3-Repo Discipline)
+## 5. What Stays Where (4-Repo Discipline)
 
 | Component | Repo | Why |
 |-----------|------|-----|

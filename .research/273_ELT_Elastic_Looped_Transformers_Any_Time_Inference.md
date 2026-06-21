@@ -14,7 +14,7 @@
 
 ELT trains a weight-shared transformer loop so that **any prefix of loops L_int ∈ [L_min, L_max] yields a useful output** — "Any-Time inference" from a single artifact. The mechanism is Intra-Loop Self Distillation (ILSD): a stochastic student path (exits at random L_int) is supervised by the teacher path (full L_max), both sharing parameters Θ, with `λ` curriculum decaying from GT-anchored to distillation-anchored over training. Result: 4× parameter reduction at iso-inference-compute, FID 2.0 on ImageNet 256², FVD 72.8 on UCF-101; one artifact serves every compute tier without retraining.
 
-**Distilled for katgpt-rs (modelless, inference-time):** The architecture is already shipped as **LT2 (Plan 108, `LoopMode::WeightShared`)**. The ILSD training algorithm → **riir-train** (backprop through shared Θ, training-time only — out of scope per 3-repo strategy). The transferable inference primitive — *elastic loop count L per dispatch, with intermediate states being valid belief states* — is partially shipped via `latent_functor::ReestimationScheduler::set_active_budget` + `set_zone_gating` (per-zone elastic budget) and Per-NPC Runtime Test-Time Scaling (riir-ai Research 136). The only genuinely missing piece is **per-dispatch elastic `loop_count` on the LT2 forward path** driven by compute tier / NPC importance. That's a small coordination layer on top of LT2, not a new capability class.
+**Distilled for katgpt-rs (modelless, inference-time):** The architecture is already shipped as **LT2 (Plan 108, `LoopMode::WeightShared`)**. The ILSD training algorithm → **riir-train** (backprop through shared Θ, training-time only — out of scope per 4-repo strategy). The transferable inference primitive — *elastic loop count L per dispatch, with intermediate states being valid belief states* — is partially shipped via `latent_functor::ReestimationScheduler::set_active_budget` + `set_zone_gating` (per-zone elastic budget) and Per-NPC Runtime Test-Time Scaling (riir-ai Research 136). The only genuinely missing piece is **per-dispatch elastic `loop_count` on the LT2 forward path** driven by compute tier / NPC importance. That's a small coordination layer on top of LT2, not a new capability class.
 
 ---
 
@@ -42,7 +42,7 @@ L_ILSD = L_GT(F_(N,L_max)(x), y)                        // teacher ground-truth
 
 with `λ` linearly decayed 1→0 over training (anchor to GT early, switch to teacher distillation late), and `sg` = stop-grad on teacher. The student trajectory `L_int` is a **strict prefix** of the teacher trajectory `L_max`, so distillation adds ~zero training overhead.
 
-**This is a training algorithm with backprop through shared Θ.** Per the 3-repo strategy (`003_Commercial_Open_Source_Strategy_Verdict.md`) and the modelless-first constraint, this is **→ riir-train**. Not distilled here.
+**This is a training algorithm with backprop through shared Θ.** Per the 4-repo strategy (`003_Commercial_Open_Source_Strategy_Verdict.md`) and the modelless-first constraint, this is **→ riir-train**. Not distilled here.
 
 ### 1.3 Any-Time inference — the transferable inference primitive
 

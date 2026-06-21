@@ -271,7 +271,7 @@ GOAT gate rule: `cce_moderator` feature flag default-off. Promote to considerati
 | **Sigmoid not softmax** | ✅ Projection gates onto HLA direction vectors use sigmoid (per AGENTS.md); the policy table itself is a categorical distribution (representation, not a projection gate). |
 | **Freeze/thaw over fine-tuning** | ✅ The policy table `(Ξ_φ, θ)` is snapshotted via existing freeze/thaw; no weight mutation during inference. The primal-dual iterator updates the *table*, not weights. |
 | **Self-learn / adaptive CoT welcome** | ✅ The primal-dual iterator IS self-learning — `ρ` adapts from runtime regret signal. Latent-state direction-vector update, not weight update. |
-| **3-repo discipline** | ✅ Public math (katgpt-rs), private runtime (riir-ai), training-only parts (riir-train). |
+| **4-repo discipline** | ✅ Public math (katgpt-rs), private runtime (riir-ai), chain commitment via LatCal (riir-chain), training-only parts (riir-train). |
 | **Raw↔latent bridge** | ✅ Zone-mood signal `ζ` is the bridge: committed raw via LatCal, consumed latent via HLA dot-product. |
 | **SOLID, DRY** | ✅ `CceLp<N,A>`, `ExternalRegret<D>`, `CcePrimalDual` are generic over `N`, `A`, `D`. No duplication of `PayoffTable<N>` (different solution concept). |
 | **Tests/examples** | ✅ G1–G5 above + before/after on a bomber/RPS/emission-abatement arena showing CCE Pareto-dominates Nash. |

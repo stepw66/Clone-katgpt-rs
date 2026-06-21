@@ -160,7 +160,7 @@ Root cause analysis:
 2. **New wired format (user's insight).** The corpus IS the storage format. No QuestPack struct deserialization — the bytes go straight into the compressor window. BLAKE3 over the corpus bytes is the commitment. This is structurally identical to how we already commit weight snapshots, just on a different representation.
 3. **Swap-in point exists.** `TernaryDraftModel::generate()` is the current template selector. `CompressionQuestDrafter::generate()` is the drop-in replacement. No invasive changes to `QuestGrammarPipeline`.
 4. **Perf budget honest.** Hot tier (sub-ms), not plasma (µs). `lz4_flex` on 30KB corpus is ~tens of µs per call — fits the existing `hot_budget_ms` in `QuestGrammarConfig`. No speculative SIMD LZ77 kernel.
-5. **3-repo discipline.** Open generic primitive in katgpt-core, private quest wiring in riir-games, no training anywhere.
+5. **4-repo discipline.** Open generic primitive in katgpt-core, private quest wiring in riir-ai, no chain IP, no training anywhere.
 
 ---
 

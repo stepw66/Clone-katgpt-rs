@@ -212,7 +212,7 @@ MLEvolve has Base/Stepwise/Diff modes (≈ PATCH/REWRITE/Base). MaxProof's PATCH
 
 ---
 
-## 5. What Stays Where (3-Repo Discipline)
+## 5. What Stays Where (4-Repo Discipline)
 
 | Component | Repo | Why |
 |-----------|------|-----|

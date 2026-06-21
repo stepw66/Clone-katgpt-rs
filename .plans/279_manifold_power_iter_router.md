@@ -239,7 +239,7 @@ katgpt-rs/
 - [x] **SOLID / zero-alloc hot paths** — caller-owned `PowerRetractScratch`, no allocation in the reconditioning loop.
 - [x] **CPU/SIMD/GPU auto-route** — plasma (sub-μs, D ≤ 256) / hot (sub-ms, D ≤ 1024) / GPU delegation (D > 1024, out of scope, caller falls back to dense).
 - [x] **Determinism / sync-safety** — same `(R, M, c_prime, iters, snapshot_version)` → byte-identical `R'`. Safe under `SyncBlock → ChainConsensus` quorum (G5).
-- [x] **3-repo discipline** — engine primitive in katgpt-rs (MIT, no game IP); runtime wiring in riir-ai; training in riir-train.
+- [x] **4-repo discipline** — engine primitive in katgpt-rs (MIT, no game IP); runtime wiring in riir-ai; chain transport in riir-chain; training in riir-train.
 - [x] **GOAT gate** — G1–G8 pass criteria defined; promote to default if 8/8 green, demote loser; feature flag `manifold_power_iter_router` opt-in until proof.
 - [x] **`Uuid::now_v7()` / blake3 / argon2 / papaya** — N/A for this primitive (no UUIDs, no passwords, no concurrent hashmap needed at the kernel level). BLAKE3 used for Gram cache versioning (T2.3).
 

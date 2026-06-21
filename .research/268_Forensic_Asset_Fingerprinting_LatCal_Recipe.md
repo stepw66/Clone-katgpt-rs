@@ -209,7 +209,7 @@ Per AGENTS.md raw-vs-latent rules and Research 262 §5:
 | Latent-to-latent preferred | ⚠️ Partial. Recipe is latent-to-raw (perturbs raw vertices). Acceptable because the *output* is a physical-domain asset, by design. Recovery (raw→latent codeword) is offline forensic, not hot-path. |
 | Use sigmoid not softmax | ✅ Codebook selection is BLAKE3-seeded deterministic; no softmax anywhere. Attribution confidence is a sigmoid-gated threshold (`σ(log P(attribution / null))`) to match AGENTS.md rule. |
 | Freeze/thaw over fine-tuning | ✅ Recipes are derived, not trained. Per-session. Revoked on chain slashing (frozen NFT). |
-| 3-repo discipline | ✅ Open math (this note) → katgpt-rs. Private runtime (WASM vessel + NFT + slashing) → riir-ai 140. No training know-how here. |
+| 4-repo discipline | ✅ Open math (this note) → katgpt-rs. Private runtime (WASM vessel + NFT) → riir-ai 140. On-chain slashing/commitment → riir-chain. No training know-how here. |
 | Raw scalars at sync boundary | ✅ Slashing events cross sync as raw `TxDelta`. Recipe never crosses sync — only its byte-level effects do. |
 | Zero-alloc hot path | ✅ Recipe application runs inside WASM vessel with pre-allocated vertex scratch buffer; one matmul per marked vertex; SIMD-batched where possible. |
 | BLAKE3 not SHA | ✅ Recipe seed uses BLAKE3-XOF (matches Doc 57 Layer 1). |

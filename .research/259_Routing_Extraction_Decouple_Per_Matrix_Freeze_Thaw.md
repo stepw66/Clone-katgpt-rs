@@ -250,7 +250,7 @@ Manifold Power Iteration (R246) finds the dominant routing direction in MoE rout
 
 ---
 
-## 5. What Stays Where (3-Repo Discipline)
+## 5. What Stays Where (4-Repo Discipline)
 
 | Component | Repo | Why |
 |-----------|------|-----|
