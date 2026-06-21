@@ -273,9 +273,7 @@ impl BranchingDetector {
         // (the threshold), not which equal-scored element wins the order tie.
         // unstable is faster than stable for K ≤ 32 and skips the O(K) aux
         // buffer that stable_sort allocates on the heap.
-        self.scratch_sorted[..k].sort_unstable_by(|a, b| {
-            b.partial_cmp(a).unwrap_or(core::cmp::Ordering::Equal)
-        });
+        self.scratch_sorted[..k].sort_unstable_by(|a, b| b.total_cmp(a));
         let threshold = self.scratch_sorted[k_select - 1];
 
         branching_point_mask_into(&self.scratch_u, threshold, &mut self.scratch_mask);

@@ -185,7 +185,12 @@ const GEAR_TABLE: [u64; 256] = compute_gear_table();
 /// Gear-hash rolling hash + two-level boundary mask. Deterministic across
 /// nodes (gear table is a compile-time constant). See the [module docs](self)
 /// for algorithm details and the determinism guarantee.
-#[repr(C)]
+///
+/// The 2 KB `GEAR_TABLE` const lives in `.rodata` and is referenced directly
+/// from `find_cut_point`; we do **not** embed a per-instance copy. This keeps
+/// the chunker struct at ~40 bytes (vs ~2080 bytes), improving cache density
+/// when chunkers are stored in collections, and is bit-identical at the
+/// table-access site (both lower to a fixed-address `.rodata` load).
 #[derive(Clone, Debug)]
 pub struct FastCdcChunker {
     /// Minimum chunk size — no cut points before this offset.
@@ -199,8 +204,6 @@ pub struct FastCdcChunker {
     pub min_mask: u64,
     /// Mask bits for large-phase (looser) boundary detection.
     pub max_mask: u64,
-    /// Gear table — 256 entries of `u64`, deterministically initialized.
-    gear_table: [u64; 256],
 }
 
 impl FastCdcChunker {
@@ -237,7 +240,6 @@ impl FastCdcChunker {
             normal_mask: (1u64 << config.normal_level).wrapping_sub(1),
             min_mask: (1u64 << config.min_level).wrapping_sub(1),
             max_mask: (1u64 << config.max_level).wrapping_sub(1),
-            gear_table: GEAR_TABLE,
         }
     }
 
@@ -267,12 +269,12 @@ impl FastCdcChunker {
 
         // Phase 0: prime fp, no cuts allowed.
         while i < skip_end {
-            fp = (fp << 1) ^ self.gear_table[bytes[i] as usize];
+            fp = (fp << 1) ^ GEAR_TABLE[bytes[i] as usize];
             i += 1;
         }
         // Phase 1: normal mask (stricter → expected chunk ≈ 2^normal_level).
         while i < mid_end {
-            fp = (fp << 1) ^ self.gear_table[bytes[i] as usize];
+            fp = (fp << 1) ^ GEAR_TABLE[bytes[i] as usize];
             if (fp & self.normal_mask) == 0 {
                 return i + 1;
             }
@@ -280,7 +282,7 @@ impl FastCdcChunker {
         }
         // Phase 2: looser mask (force a cut before MAX).
         while i < max_end {
-            fp = (fp << 1) ^ self.gear_table[bytes[i] as usize];
+            fp = (fp << 1) ^ GEAR_TABLE[bytes[i] as usize];
             if (fp & self.max_mask) == 0 {
                 return i + 1;
             }

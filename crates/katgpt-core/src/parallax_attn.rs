@@ -488,6 +488,11 @@ pub fn tiled_attention_parallax_forward_retaining(
 
     // Phase 2: Compute Σ_KV = Σ_j c_j · v_j ⊗ k_j^T
     // Only N outer products instead of N² — the key optimization.
+    //
+    // Folds the per-column attention weight `c_j` directly into the outer
+    // product's broadcast multiplier (`simd_outer_product_acc_scaled`),
+    // eliminating the `pv_buf` materialization that the unscaled variant
+    // required (saves 2·n·d memory ops: n·d writes + n·d reads of `pv_buf`).
     for j in 0..n {
         let c_j = scratch.col_sums[j];
         if c_j == 0.0 {
@@ -495,12 +500,10 @@ pub fn tiled_attention_parallax_forward_retaining(
         }
         let v_off = j * d;
         let k_off = j * d;
-        // Perf: fused scale-copy (pv_buf = c_j * v[j]) in single SIMD pass,
-        // instead of separate copy + scale (two passes over d elements).
-        simd::simd_fused_decay_write(&mut scratch.pv_buf, 0.0, &v[v_off..v_off + d], c_j);
-        simd::simd_outer_product_acc(
+        simd::simd_outer_product_acc_scaled(
             scratch.sigma_kv.as_mut(),
-            &scratch.pv_buf,
+            c_j,
+            &v[v_off..v_off + d],
             &k[k_off..k_off + d],
             d,
             d,

@@ -278,7 +278,7 @@ fn ranks(values: &[f32]) -> Vec<f32> {
     // Unstable is safe: the tie-averaging loop below keys on equal *values*
     // (which are still adjacent post-sort regardless of stability), not on
     // preservation of original input order.
-    indexed.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(core::cmp::Ordering::Equal));
+    indexed.sort_unstable_by(|a, b| a.1.total_cmp(&b.1));
     let mut out = vec![0.0_f32; n];
     let mut i = 0;
     while i < n {

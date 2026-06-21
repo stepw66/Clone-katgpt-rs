@@ -625,4 +625,3 @@ impl Default for ThinkingBudget {
         }
     }
 }
-

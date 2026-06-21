@@ -398,7 +398,7 @@ where
                     // Tie-break: mean value (descending).
                     let ma = va.mean_value();
                     let mb = vb.mean_value();
-                    match ma.partial_cmp(&mb).unwrap_or(std::cmp::Ordering::Equal) {
+                    match ma.total_cmp(&mb) {
                         std::cmp::Ordering::Equal => {
                             // Tertiary: hash value (descending) — guarantees
                             // determinism regardless of HashMap iter order.

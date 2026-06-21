@@ -192,9 +192,7 @@ impl GpartAdapter {
         // `select_nth_unstable_by` partitions around the k-th largest in O(d) avg.
         // Descending comparator: after it returns, indices [0..k] hold the k
         // largest magnitudes (unordered).
-        magnitudes.select_nth_unstable_by(k - 1, |a, b| {
-            b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal)
-        });
+        magnitudes.select_nth_unstable_by(k - 1, |a, b| b.0.total_cmp(&a.0));
 
         let mut mask = vec![false; self.d];
         for &(_, g) in &magnitudes[..k] {

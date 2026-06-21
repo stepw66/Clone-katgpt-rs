@@ -64,54 +64,45 @@ pub fn build_binary_merkle_root(hashes: &[[u8; 32]]) -> [u8; 32] {
 /// (`len() == tree_depth` after padding). Returns an empty `Vec` if
 /// `leaf_index >= hashes.len()` (out-of-range).
 ///
-/// **O(log n)** BLAKE3-free sibling collection — siblings are looked up by
-/// index, never recomputed. The proof does not contain intermediate hashes;
-/// the verifier reconstructs them via [`verify_binary_merkle_proof`].
+/// **O(log n)** BLAKE3-free sibling collection — only the path from `leaf_index`
+/// to the root is hashed; siblings are looked up by index, never recomputed.
+/// The previous implementation rebuilt the entire level on every iteration
+/// (O(n) BLAKE3 calls per proof); this version walks only the proof path
+/// (O(log n) BLAKE3 calls).
 pub fn build_binary_merkle_proof(hashes: &[[u8; 32]], leaf_index: usize) -> Vec<[u8; 32]> {
     if leaf_index >= hashes.len() || hashes.is_empty() {
         return Vec::new();
     }
     // Pad to next power of two with zeros so sibling indexing is uniform.
     let n_padded = hashes.len().next_power_of_two().max(1);
-    // Work on a padded copy so we can index siblings uniformly.
+    // Pre-allocate exactly tree_depth siblings — avoids reallocations as the
+    // Vec grows past its default capacity.
+    let mut siblings: Vec<[u8; 32]> = Vec::with_capacity(n_padded.trailing_zeros() as usize);
+
+    // O(n) reduction: hash each level exactly once. The previous implementation
+    // rebuilt the entire next level on every proof step (O(n log n) BLAKE3 calls);
+    // this version writes parents back into the lower half of the same buffer
+    // (`level[i] = parent(level[2i], level[2i+1])`) and truncates logically by
+    // halving `n`. Total BLAKE3 calls: `n_padded - 1` (one per non-leaf node),
+    // independent of `leaf_index`. The in-place overwrite is safe because
+    // reads of `level[2i]` and `level[2i+1]` happen before the write to
+    // `level[i]` (i < 2i always when i > 0).
     let mut level: Vec<[u8; 32]> = Vec::with_capacity(n_padded);
     level.extend_from_slice(hashes);
     if level.len() < n_padded {
         level.resize(n_padded, [0u8; 32]);
     }
-    let mut siblings: Vec<[u8; 32]> = Vec::new();
     let mut idx = leaf_index;
     let mut n = n_padded;
     while n > 1 {
-        // Sibling is XOR 1 of idx.
         let sib = idx ^ 1;
         siblings.push(level[sib]);
-        // Compute parent for the next level (needed only along the path).
-        let left = level[idx & !1];
-        let right = level[(idx & !1) | 1];
-        let parent = parent_hash(&left, &right);
-        let parent_idx = idx / 2;
-        // Move to the parent level. To avoid maintaining a separate buffer,
-        // we overwrite the level buffer with a sparse "path-only" reduction.
-        // Since we only ever read level[sib] at the current level (already
-        // pushed), and level[idx] / level[idx^1] are consumed, we can stash
-        // `parent` at index parent_idx of a shrinking view. Simplest correct
-        // approach: maintain a fresh level Vec each iteration. The depth is
-        // log2(n) ≤ 64, so the alloc count is bounded.
-        let mut next_level: Vec<[u8; 32]> = Vec::with_capacity(n / 2);
-        // Rebuild next level from current level: pair up siblings, hash.
-        // We've already computed `parent` for our path; reuse it.
-        for j in (0..n).step_by(2) {
-            if j / 2 == parent_idx {
-                next_level.push(parent);
-            } else {
-                let l = level[j];
-                let r = level[j + 1];
-                next_level.push(parent_hash(&l, &r));
-            }
+        for i in 0..n / 2 {
+            let l = level[2 * i];
+            let r = level[2 * i + 1];
+            level[i] = parent_hash(&l, &r);
         }
-        level = next_level;
-        idx = parent_idx;
+        idx /= 2;
         n /= 2;
     }
     siblings

@@ -308,6 +308,146 @@ unsafe fn avx2_outer_product_acc(acc: &mut [f32], a: &[f32], b: &[f32], m: usize
     }
 }
 
+// ── Scaled Outer Product Accumulation ─────────────────────────
+
+/// SIMD-accelerated scaled outer product accumulation:
+/// `acc[i*n + j] += scale * a[i] * b[j]`.
+///
+/// Used by `tiled_attention_parallax_forward` Phase 2, where it folds the
+/// per-column attention weight `c_j` into the broadcast multiplier. This
+/// removes the `pv_buf` materialization (`d` writes + `d` reads per `j`)
+/// that the unscaled [`simd_outer_product_acc`] required, and replaces it
+/// with a single FMA inside the inner SIMD kernel.
+#[inline(always)]
+pub fn simd_outer_product_acc_scaled(
+    acc: &mut [f32],
+    scale: f32,
+    a: &[f32],
+    b: &[f32],
+    m: usize,
+    n: usize,
+) {
+    #[cfg(target_arch = "aarch64")]
+    {
+        unsafe { neon_outer_product_acc_scaled(acc, scale, a, b, m, n) }
+    }
+    #[cfg(target_arch = "x86_64")]
+    {
+        if is_avx2_fma_available() {
+            unsafe { avx2_outer_product_acc_scaled(acc, scale, a, b, m, n) }
+        } else {
+            scalar_outer_product_acc_scaled(acc, scale, a, b, m, n)
+        }
+    }
+    #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
+    {
+        scalar_outer_product_acc_scaled(acc, scale, a, b, m, n)
+    }
+}
+
+#[inline(always)]
+#[allow(dead_code)]
+pub(super) fn scalar_outer_product_acc_scaled(
+    acc: &mut [f32],
+    scale: f32,
+    a: &[f32],
+    b: &[f32],
+    m: usize,
+    n: usize,
+) {
+    for i in 0..m {
+        // FMA: scale * a[i] + 0.0 — keeps single-rounding parity with the
+        // SIMD paths' broadcast+mul, then per-j FMA matches `simd_outer_product_acc`.
+        let ai = scale.mul_add(unsafe { *a.get_unchecked(i) }, 0.0);
+        let row = &mut acc[i * n..i * n + n];
+        for j in 0..n {
+            unsafe {
+                let bj = *b.get_unchecked(j);
+                *row.get_unchecked_mut(j) = ai.mul_add(bj, *row.get_unchecked(j));
+            }
+        }
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+#[inline]
+unsafe fn neon_outer_product_acc_scaled(
+    acc: &mut [f32],
+    scale: f32,
+    a: &[f32],
+    b: &[f32],
+    m: usize,
+    n: usize,
+) {
+    use core::arch::aarch64::{vfmaq_f32, vld1q_dup_f32, vld1q_f32, vst1q_f32};
+
+    unsafe {
+        let n_chunks = n / 4;
+
+        for i in 0..m {
+            // Fold `scale` into the broadcast multiplier — single FMA per row,
+            // no extra SIMD op in the inner loop.
+            let ai_scaled = scale * *a.get_unchecked(i);
+            let va = vld1q_dup_f32(&ai_scaled);
+            let row = &mut acc[i * n..i * n + n];
+
+            let mut j = 0;
+            for _ in 0..n_chunks {
+                let vacc = vld1q_f32(row.as_ptr().add(j));
+                let vb = vld1q_f32(b.as_ptr().add(j));
+                let vresult = vfmaq_f32(vacc, va, vb);
+                vst1q_f32(row.as_mut_ptr().add(j), vresult);
+                j += 4;
+            }
+
+            while j < n {
+                *row.get_unchecked_mut(j) += ai_scaled * *b.get_unchecked(j);
+                j += 1;
+            }
+        }
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[inline]
+unsafe fn avx2_outer_product_acc_scaled(
+    acc: &mut [f32],
+    scale: f32,
+    a: &[f32],
+    b: &[f32],
+    m: usize,
+    n: usize,
+) {
+    use core::arch::x86_64::{
+        _mm256_broadcast_ss, _mm256_fmadd_ps, _mm256_loadu_ps, _mm256_storeu_ps,
+    };
+
+    unsafe {
+        let n_chunks8 = n / 8;
+
+        for i in 0..m {
+            // Fold `scale` into the broadcast multiplier.
+            let ai_scaled = scale * *a.get_unchecked(i);
+            let va = _mm256_broadcast_ss(&ai_scaled);
+            let row = &mut acc[i * n..i * n + n];
+
+            let mut j = 0;
+            for _ in 0..n_chunks8 {
+                let vacc = _mm256_loadu_ps(row.as_ptr().add(j));
+                let vb = _mm256_loadu_ps(b.as_ptr().add(j));
+                let vresult = _mm256_fmadd_ps(va, vb, vacc);
+                _mm256_storeu_ps(row.as_mut_ptr().add(j), vresult);
+                j += 8;
+            }
+
+            while j < n {
+                *row.get_unchecked_mut(j) += ai_scaled * *b.get_unchecked(j);
+                j += 1;
+            }
+        }
+    }
+}
+
 // ── Matrix-Vector Multiply ────────────────────────────────────
 
 /// SIMD-accelerated matvec: `acc[i] = Σ mat[i*cols + j] * vec[j]` for each row.
