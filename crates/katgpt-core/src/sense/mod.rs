@@ -14,6 +14,12 @@ pub mod hotswap;
 pub mod lod;
 pub mod octree;
 pub mod reconstruction;
+// Plan 331 Phase 1 — depth-invariance audit + RmsNorm wrap for HLA. Sibling
+// methods on `ReconstructionState`, gated behind the existing `depth_invariance`
+// feature (Plan 306 Phase 1+5). Split into its own file to keep
+// `reconstruction.rs` focused on the raw kernel (zero changes to `evolve_hla`).
+#[cfg(feature = "depth_invariance")]
+pub mod reconstruction_depth_invariance;
 #[cfg(feature = "schema_centroid")]
 pub mod schema_centroid;
 #[cfg(feature = "sector_projection")]

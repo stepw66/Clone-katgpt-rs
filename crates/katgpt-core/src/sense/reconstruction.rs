@@ -531,6 +531,35 @@ impl ReconstructionState {
         }
     }
 
+    /// Directly overwrite the per-SenseKind activation drive signal.
+    ///
+    /// Plan 331 Phase 1 audit helper: lets [`crate::sense::reconstruction_depth_invariance`]
+    /// inject a controlled per-tick stimulus into the leaky integrator without
+    /// going through `accumulate()` (which *adds* rather than *sets*). Only the
+    /// `kind_activations` field is touched — `confidence_sum` / `count` are
+    /// unchanged (they do not feed `evolve_hla`'s math).
+    ///
+    /// `pub(crate)` so the audit module can use it without leaking a generic
+    /// setter into the public API.
+    #[cfg(feature = "depth_invariance")]
+    #[inline]
+    pub(crate) fn set_kind_activations(&mut self, activations: [f32; 6]) {
+        self.evidence.kind_activations = activations;
+    }
+
+    /// Mutable reference to the 8-dim HLA latent state.
+    ///
+    /// Plan 331 Phase 1 wrap helper: lets [`crate::sense::reconstruction_depth_invariance`]
+    /// apply in-place magnitude regularization to the latent vector after the
+    /// raw `evolve_hla` update. `pub(crate)` to avoid exposing a generic
+    /// mutable accessor publicly (the public surface stays `hla() -> &[f32; 8]`
+    /// + `inject_hla_delta`).
+    #[cfg(feature = "depth_invariance")]
+    #[inline]
+    pub(crate) fn hla_mut(&mut self) -> &mut [f32; 8] {
+        &mut self.hla
+    }
+
     /// Feed the current HLA into the surprise kernel and cache the derivative
     /// in `last_surprise`. Private — `evolve_hla` and `evolve_hla_simd` are
     /// the only callers, which keeps a single observation point per tick.

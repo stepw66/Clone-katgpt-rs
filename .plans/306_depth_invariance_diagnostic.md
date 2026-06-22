@@ -6,7 +6,7 @@
 **Private runtime plan:** [riir-ai/.plans/331_recursive_latent_state_magnitude_hygiene_runtime.md](../../riir-ai/.plans/331_recursive_latent_state_magnitude_hygiene_runtime.md)
 **Source paper:** [arXiv:2605.09992](https://arxiv.org/abs/2605.09992) — Eldenk et al., *Attention Drift: What Autoregressive Speculative Decoding Models Learn*
 **Target:** `katgpt-rs/crates/katgpt-core/src/depth_invariance.rs` (new) + `crates/katgpt-core/src/types/config.rs` (extension) + audit hook in `katgpt-rs/src/speculative/belief_drafter.rs`
-**Status:** Active — Phase 1 ✅ complete (12 tests pass), Phase 5 ✅ complete, Phases 2/3/4/6/7/8 deferred (Phase 2 G1 tests rolled into Phase 1 per delegation)
+**Status:** Active — Phase 1 ✅ complete (12 tests pass), Phase 5 ✅ complete, Phases 2/3/4/6/7/8 deferred (Phase 2 G1 tests rolled into Phase 1 per delegation). **Phase 3 (BeliefDrafter audit) + Phase 4 (micro_belief audit) still deferred**, but the **HLA `evolve_hla` audit shipped via riir-ai Plan 331 Phase 1** (`katgpt-core/src/sense/reconstruction_depth_invariance.rs` — `audit_depth_invariance` + `evolve_hla_regularized`). Key finding from that audit: HLA classifies as `DepthInvariant` by construction (per-element `[-1,1]` clamp bounds magnitude), refuting the drift hypothesis for this kernel; the RmsNorm wrap is retained as a defense-in-depth backstop.
 
 ---
 
