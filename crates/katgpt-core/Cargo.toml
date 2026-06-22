@@ -90,6 +90,7 @@ spectral_pruner = ["dep:rustfft"]  # Spectral Irrep Pruner — spectral flatness
 octree_ctc = ["sense_composition"]  # OctreeCTC Reconstructive Memory Navigation (Plan 248, GOAT PASS, arXiv:2606.06036)
 subspace_phase_gate = []  # Subspace phase-gate primitives — participation ratio, N≥d phase-transition gate (Wang et al. Thm 4, arXiv:2409.02426), runtime Jacobian SVD via forward differences (Plan 301, Research 279). Pure numeric, no extra deps. Opt-in until G1 GOAT gate passes.
 merkle_octree = ["sense_composition"]  # Merkle octree hierarchical commitment for SenseModule (Plan 221-M)
+rtdc = ["slod", "merkle_octree", "sense_composition"]  # Resolution-Tiered Deterministic Commitment — multi-resolution Merkle roots per SLoD σ-boundary (Plan 302, Research 280). Phase 1: open primitive only; LatCal-backed encoding + chain quorum live in riir-chain (Plan 003).
 dec_operators = []  # Discrete Exterior Calculus — cell complexes, cochain fields, d/δ/Δ operators (Plan 251, Research 219, arXiv:2606.09806)
 gpart_adapter = []  # GPart isometric partition adapter loading (Research 227, Plan 257)
 gpart_pruning = ["gpart_adapter"]  # GPart top-k group pruning — zero out low-magnitude groups at apply time (Issue 008)

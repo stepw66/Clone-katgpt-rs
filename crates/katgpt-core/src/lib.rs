@@ -307,8 +307,26 @@ pub use merkle::{
 pub mod curator;
 #[cfg(feature = "merkle_octree")]
 pub use curator::{
-    CuratorArm, CuratorBandit, CuratorVerdict, CuratorVerifier, FrozenTarget, MerkleEnvelope,
-    MerkleFrozenStore, verification_weight,
+    CuratorArm, CuratorBandit, CuratorVerdict, FrozenTarget, MerkleEnvelope, MerkleFrozenStore,
+    verification_weight,
+};
+
+// RTDC — Resolution-Tiered Deterministic Commitment (Plan 302, Research 280).
+// Wraps `MerkleOctree` with 3 per-depth roots aligned to SLoD σ-boundaries,
+// enabling trust-minimized semantic zoom: a light client verifies its
+// fog-of-war view is a faithful sub-summation of the chain-committed full KG,
+// with O(log n) proof at the abstraction level it operates at.
+//
+// Phase 1 ships the open primitive (types + trait + depth-2 sound proofs).
+// Cross-depth soundness (`subtree_inclusion`) is Phase 2 — see
+// `riir-chain/issues/002_rtdc_subtree_inclusion_research.md`.
+// LatCal-backed `DeterministicLeafEncode` impl lives in riir-chain (Plan 003).
+#[cfg(feature = "rtdc")]
+pub mod rtdc;
+#[cfg(feature = "rtdc")]
+pub use rtdc::{
+    DepthSelector, DepthTieredMerkleOctree, DepthTieredRoots, DeterministicLeafEncode, RtdcError,
+    RtdcProof, SubtreeProof,
 };
 
 // GPart isometric partition adapter — replaces LoRA's bilinear BA with single isometric Pθ_d (Plan 257).

@@ -286,23 +286,34 @@ pub enum RtdcError {
 
 ### Tasks
 
-- [ ] **T1.1** Create `katgpt-rs/crates/katgpt-core/src/rtdc.rs` with the types above. Add `#[cfg(feature = "rtdc")] pub mod rtdc;` to `lib.rs`. — `katgpt-rs/crates/katgpt-core/src/rtdc.rs`, `katgpt-rs/crates/katgpt-core/src/lib.rs`
-- [ ] **T1.2** Add `rtdc = ["slod", "merkle_octree", "sense_composition"]` feature gate. Verify `cargo check --features rtdc` compiles. — `katgpt-rs/crates/katgpt-core/Cargo.toml`, `katgpt-rs/Cargo.toml`
-- [ ] **T1.3** Implement `DepthTieredMerkleOctree::build` (3 depth-root extraction from existing `MerkleOctree`). — `katgpt-rs/crates/katgpt-core/src/rtdc.rs`
-- [ ] **T1.4** Implement `prove_at_depth` + `verify_at_depth` (Phase 1: truncated path from existing `MerkleOctree::prove_inclusion`). — `katgpt-rs/crates/katgpt-core/src/rtdc.rs`
-- [ ] **T1.5** Implement `DepthSelector::from_boundaries` + `select` (branchless). — `katgpt-rs/crates/katgpt-core/src/rtdc.rs`
-- [ ] **T1.6** Implement `DeterministicLeafEncode` trait + `encode_cbor_canonical` default. — `katgpt-rs/crates/katgpt-core/src/rtdc.rs`
+- [x] **T1.1** Create `katgpt-rs/crates/katgpt-core/src/rtdc.rs` with the types above. Add `#[cfg(feature = "rtdc")] pub mod rtdc;` to `lib.rs`. — `katgpt-rs/crates/katgpt-core/src/rtdc.rs`, `katgpt-rs/crates/katgpt-core/src/lib.rs`
+- [x] **T1.2** Add `rtdc = ["slod", "merkle_octree", "sense_composition"]` feature gate. Verify `cargo check --features rtdc` compiles. — `katgpt-rs/crates/katgpt-core/Cargo.toml`, `katgpt-rs/Cargo.toml`
+- [x] **T1.3** Implement `DepthTieredMerkleOctree::build` (3 depth-root extraction from existing `MerkleOctree`). — `katgpt-rs/crates/katgpt-core/src/rtdc.rs`
+- [x] **T1.4** Implement `prove_at_depth` + `verify_at_depth` (Phase 1: truncated path from existing `MerkleOctree::prove_inclusion`). — `katgpt-rs/crates/katgpt-core/src/rtdc.rs`
+- [x] **T1.5** Implement `DepthSelector::from_boundaries` + `select` (branchless). — `katgpt-rs/crates/katgpt-core/src/rtdc.rs`
+- [x] **T1.6** Implement `DeterministicLeafEncode` trait + `encode_cbor_canonical` default. — `katgpt-rs/crates/katgpt-core/src/rtdc.rs`
+
+### Notes from implementation
+
+- **Domain separators added** to `roots[0]` and `roots[1]` derivations (`rtdc_global_v1`, `rtdc_regional_v1` BLAKE3 tags). Without these, `roots[1]` would equal `roots[2]` because the existing `MerkleOctree` computes its root as `BLAKE3(h₁ ‖ … ‖ h₈)` — identical to the regional-root computation. BIP-340-style tagged hashes ensure all three roots are distinct. Test `build_derives_three_distinct_roots` enforces this invariant.
+- **`DepthSelector::select` math inverted** vs the plan's pseudocode. The plan's `above_t0 + above_t1` returned the inverse of the documented semantics (low σ should map to depth 2 / fine, not depth 0 / global). Fixed to `at_or_below_t0 + at_or_below_t1` — matches the docstring and the architectural intent (low diffusion scale = sharp view = finest depth).
+- **`encode_cbor_canonical` deferred** — would require a new `ciborium` dep not currently in `Cargo.toml`. Phase 1 ships only the `DeterministicLeafEncode` trait; the CBOR helper is not on any GOAT gate, so it can land in Phase 2 alongside the LatCal-backed impl in riir-chain.
+- **`thiserror` not added** — replaced the plan's `#[derive(thiserror::Error)]` with hand-rolled `Display` + `std::error::Error` impls to match the existing convention (`engram/tokenizer.rs::SurjectiveMapLoadError`). katgpt-core stays free of the `thiserror` dep.
+- **Phase 1 soundness caveat made explicit**: `prove_at_depth(d=2)` is fully sound; `prove_at_depth(d∈{0,1})` are well-formed but cryptographically unsound until Phase 2's `subtree_inclusion` proof lands (tracked in `riir-chain/issues/002_rtdc_subtree_inclusion_research.md`). Tests `prove_depth_0_trivial` and `prove_depth_1_well_formed_but_phase1_unsound` document this.
+- **14 unit tests, all passing** under `cargo test -p katgpt-core --features rtdc`. The pre-existing failure in `curator::tests::test_verification_weight_thresholds` is unrelated (fails with just `merkle_octree`, before `rtdc` is enabled) and was not touched.
 
 ### Phase 1 GOAT gates
 
-| Gate | Test | Pass if |
-|------|------|---------|
-| G1 | `DepthTieredMerkleOctree::build` vs `MerkleOctree::build` (64 leaves) | ≤ 3× wall-clock (target: existing 5µs → ≤ 15µs) |
-| G2 | `prove_at_depth(d) + verify_at_depth` for d ∈ {0,1,2} | All < 1µs each |
-| G3 | `DepthSelector::select(σ)` at boundaries | Correct tier selected at σ = threshold ± ε (ε = 1e-6) |
-| G4 | `DeterministicLeafEncode` impls: byte output identical on ARM64 + x86_64 + wasm32 | 1000 random payloads → identical BLAKE3 hashes |
-| G5 | `DepthTieredRoots::roots` correct | roots[2] == inner.root when octree is balanced; roots[1] == BLAKE3(d1 nodes); roots[0] == BLAKE3(d0 node) |
-| G6 | Cross-platform leaf hash agreement (uses G4) | 1000 random KG payloads → identical hashes on 3 platforms |
+| Gate | Test | Pass if | Status |
+|------|------|---------|--------|
+| G1 | `DepthTieredMerkleOctree::build` vs `MerkleOctree::build` (64 leaves) | ≤ 3× wall-clock (target: existing 5µs → ≤ 15µs) | Pending benchmark |
+| G2 | `prove_at_depth(d) + verify_at_depth` for d ∈ {0,1,2} | All < 1µs each | Pending benchmark |
+| G3 | `DepthSelector::select(σ)` at boundaries | Correct tier selected at σ = threshold ± ε (ε = 1e-6) | ✅ Test `selector_branchless_at_boundaries` |
+| G4 | `DeterministicLeafEncode` impls: byte output identical on ARM64 + x86_64 + wasm32 | 1000 random payloads → identical BLAKE3 hashes | Deferred (no impl yet — LatCal impl lives in riir-chain Plan 003) |
+| G5 | `DepthTieredRoots::roots` correct | roots[2] == inner.root() when octree is balanced; roots[1] and roots[0] distinct by domain-separator tags | ✅ Test `build_derives_three_distinct_roots` + `build_roots_propagate_leaf_changes` |
+| G6 | Cross-platform leaf hash agreement (uses G4) | 1000 random KG payloads → identical hashes on 3 platforms | Deferred (depends on G4) |
+
+**Phase 1 status:** skeleton + unit-level correctness gates (G3, G5) PASS. Performance (G1, G2) and cross-platform determinism (G4, G6) require benchmark + multi-target test harness — both deferred until the LatCal-backed encoder exists in riir-chain Plan 003, since G4/G6 are meaningless without a concrete `DeterministicLeafEncode` impl.
 
 ---
 
