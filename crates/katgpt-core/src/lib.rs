@@ -535,3 +535,22 @@ pub mod gain_cost_halt;
 pub use gain_cost_halt::{
     GainCostLoopHalter, HaltDecision, HaltReason, angular_change, hidden_erank, step_size,
 };
+
+// Depth-Invariance Diagnostic + Magnitude-Regularized Residual — the
+// root-cause counterpart to four symptom-only detectors (BeliefRankPruner,
+// GainCostLoopHalter, latent_functor/reestimation.rs,
+// micro_belief/coherence_bench.rs). Modelless math, no game semantics.
+// Classifies recursive latent-state chains as DepthInvariant /
+// DepthSpecificRefinement / Collapsed / Insufficient. The MagnitudeReg
+// wrapper is the modelless fix for kernels we own (HLA, functor,
+// micro_belief, engram, Raven); for frozen MLPs (BeliefDrafter) the fix
+// requires retraining → riir-train.
+// Plan 306 Phase 1+5; Research 286; arXiv:2605.09992 Eldenk et al.
+// Opt-in until G1 (8 correctness tests) passes.
+#[cfg(feature = "depth_invariance")]
+pub mod depth_invariance;
+#[cfg(feature = "depth_invariance")]
+pub use depth_invariance::{
+    DepthInvarianceConfig, DepthInvarianceDiagnostic, DepthInvarianceKind, MagnitudeRegularization,
+    Scratch, apply_magnitude_regularization, classify_chain, classify_chain_batched,
+};

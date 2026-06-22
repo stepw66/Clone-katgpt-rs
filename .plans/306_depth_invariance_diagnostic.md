@@ -6,7 +6,7 @@
 **Private runtime plan:** [riir-ai/.plans/331_recursive_latent_state_magnitude_hygiene_runtime.md](../../riir-ai/.plans/331_recursive_latent_state_magnitude_hygiene_runtime.md)
 **Source paper:** [arXiv:2605.09992](https://arxiv.org/abs/2605.09992) — Eldenk et al., *Attention Drift: What Autoregressive Speculative Decoding Models Learn*
 **Target:** `katgpt-rs/crates/katgpt-core/src/depth_invariance.rs` (new) + `crates/katgpt-core/src/types/config.rs` (extension) + audit hook in `katgpt-rs/src/speculative/belief_drafter.rs`
-**Status:** Active — Phase 1 <state: not started>
+**Status:** Active — Phase 1 ✅ complete (12 tests pass), Phase 5 ✅ complete, Phases 2/3/4/6/7/8 deferred (Phase 2 G1 tests rolled into Phase 1 per delegation)
 
 ---
 
@@ -26,8 +26,8 @@ Minimal, dependency-free classifier. Pure math over `&[f32]` flattened state cha
 
 ### Tasks
 
-- [ ] **T1.1** Create `crates/katgpt-core/src/depth_invariance.rs` with module doc. Re-export from `crates/katgpt-core/src/lib.rs` behind new `depth_invariance` feature (umbrella: just this module for now; may pull in `data_probe` for shared `simd_*` helpers).
-- [ ] **T1.2** Define types (all per AGENTS.md; `#[repr(u8)]` on the enum):
+- [x] **T1.1** Create `crates/katgpt-core/src/depth_invariance.rs` with module doc. Re-export from `crates/katgpt-core/src/lib.rs` behind new `depth_invariance` feature (umbrella: just this module for now; may pull in `data_probe` for shared `simd_*` helpers).
+- [x] **T1.2** Define types (all per AGENTS.md; `#[repr(u8)]` on the enum):
   ```rust
   #[derive(Clone, Copy, Debug, PartialEq, Eq)]
   #[repr(u8)]
@@ -53,14 +53,14 @@ Minimal, dependency-free classifier. Pure math over `&[f32]` flattened state cha
       pub cos_step_drift_lock: f32,       // default 0.95  — cos > this AND magnitude grows → locked drift
   }
   ```
-- [ ] **T1.3** `classify_chain(states: &[f32], d: usize, cfg: &DepthInvarianceConfig, scratch: &mut Scratch) -> DepthInvarianceDiagnostic`.
+- [x] **T1.3** `classify_chain(states: &[f32], d: usize, cfg: &DepthInvarianceConfig, scratch: &mut Scratch) -> DepthInvarianceDiagnostic`.
   - `states` is flattened `[k+1][d]`, row-major. `k+1 >= cfg.min_samples` else `Insufficient`.
   - Magnitude slope: least-squares fit of `‖h_t‖_2` vs `t ∈ [0, k]`. Caller-owned `&mut [f32]` of length `k+1` for the magnitude series. O(k·d) via `simd_dot_f32`.
   - Cosine step: mean of `cos(h_t, h_{t-1})` for `t ∈ [1, k]`. O(k·d).
   - Effective-rank slope: per-timestep `flatness(h_t) = (Σh²)² / (d · Σh⁴)` (existing `BeliefRankPruner` formula), then least-squares slope. O(k·d).
   - Decision rule per research note §2.1.
-- [ ] **T1.4** `classify_chain_batched(states_per_kernel: &[&[f32]], d: usize, cfg, scratch, out: &mut Vec<DepthInvarianceDiagnostic>)` — for crowd-scale audits (one classification per NPC's latent state chain in a single sweep). Single pass over the slice; reuses scratch.
-- [ ] **T1.5** Define `Scratch` struct with `Vec::with_capacity` once, `clear()` + reuse per call (per AGENTS.md hot-loop rules):
+- [x] **T1.4** `classify_chain_batched(states_per_kernel: &[&[f32]], d: usize, cfg, scratch, out: &mut Vec<DepthInvarianceDiagnostic>)` — for crowd-scale audits (one classification per NPC's latent state chain in a single sweep). Single pass over the slice; reuses scratch.
+- [x] **T1.5** Define `Scratch` struct with `Vec::with_capacity` once, `clear()` + reuse per call (per AGENTS.md hot-loop rules):
   ```rust
   pub struct Scratch {
       magnitude_series: Vec<f32>,    // length k+1
@@ -73,14 +73,14 @@ Minimal, dependency-free classifier. Pure math over `&[f32]` flattened state cha
 
 ## Phase 2 — G1 correctness tests (8 tests, all must pass)
 
-- [ ] **T2.1** `g1_flat_magnitude_is_depth_invariant` — synthetic chain with `‖h_t‖ = const` → `DepthInvariant`.
-- [ ] **T2.2** `g1_linear_growth_is_depth_specific` — `h_t = t * v` for fixed `v` → `DepthSpecificRefinement`, positive slope.
-- [ ] **T2.3** `g1_rank_collapse_is_collapsed` — chain that converges to a fixed direction with growing magnitude → `Collapsed` (rank slope negative).
-- [ ] **T2.4** `g1_insufficient_samples` — k+1 < min_samples → `Insufficient`, no slope computed.
-- [ ] **T2.5** `g1_oscillating_chain_is_depth_invariant` — alternating-sign `h_t` with flat magnitude → `DepthInvariant` (low mean_cos_step but flat magnitude).
-- [ ] **T2.6** `g1_locked_drift_high_cos_growing_mag` — `h_t = h_{t-1} + ε * v` for fixed `v` → `DepthSpecificRefinement` with `mean_cos_step > cos_step_drift_lock` (the "locked drift" subcase — extra diagnostic flag).
-- [ ] **T2.7** `g1_zero_chain_degenerate` — all-zero `h_t` → `DepthInvariant` (degenerate but stable; flatness returns 0, slope 0).
-- [ ] **T2.8** `g1_batched_matches_single` — `classify_chain_batched` returns identical diagnostics to per-chain `classify_chain` calls.
+- [x] **T2.1** `g1_flat_magnitude_is_depth_invariant` — synthetic chain with `‖h_t‖ = const` → `DepthInvariant`.
+- [x] **T2.2** `g1_linear_growth_is_depth_specific` — `h_t = t * v` for fixed `v` → `DepthSpecificRefinement`, positive slope.
+- [x] **T2.3** `g1_rank_collapse_is_collapsed` — chain that converges to a fixed direction with growing magnitude → `Collapsed` (rank slope negative).
+- [x] **T2.4** `g1_insufficient_samples` — k+1 < min_samples → `Insufficient`, no slope computed.
+- [x] **T2.5** `g1_oscillating_chain_is_depth_invariant` — alternating-sign `h_t` with flat magnitude → `DepthInvariant` (low mean_cos_step but flat magnitude).
+- [x] **T2.6** `g1_locked_drift_high_cos_growing_mag` — `h_t = h_{t-1} + ε * v` for fixed `v` → `DepthSpecificRefinement` with `mean_cos_step > cos_step_drift_lock` (the "locked drift" subcase — extra diagnostic flag).
+- [x] **T2.7** `g1_zero_chain_degenerate` — all-zero `h_t` → `DepthInvariant` (degenerate but stable; flatness returns 0, slope 0).
+- [x] **T2.8** `g1_batched_matches_single` — `classify_chain_batched` returns identical diagnostics to per-chain `classify_chain` calls.
 
 ---
 
@@ -111,7 +111,7 @@ The paper's central empirical finding: pre-norm EAGLE-3 drafters classify as `De
 
 For kernels we own (HLA, latent_functor, micro_belief, engram, Raven) — NOT for BeliefDrafter (frozen MLP).
 
-- [ ] **T5.1** Define the wrapper:
+- [x] **T5.1** Define the wrapper:
   ```rust
   #[derive(Clone, Copy, Debug)]
   #[repr(u8)]
@@ -127,8 +127,8 @@ For kernels we own (HLA, latent_functor, micro_belief, engram, Raven) — NOT fo
       scratch: &mut [f32],   // length d, for rms computation
   )
   ```
-- [ ] **T5.2** Unit tests for each mode: `none_is_identity`, `rmsnorm_produces_unit_rms`, `scalar_pinch_caps_at_max_rms`, `scalar_pinch_no_op_below_max_rms`.
-- [ ] **T5.3** Document in the module doc: "For frozen pretrained kernels (BeliefDrafter MLP), apply this only as a diagnostic — paper §4.4 Table 4 shows inference-time pin drops acceptance 56% on pre-norm models. The fix requires retraining. → riir-train. For kernels we own (HLA, functor, micro_belief, engram, Raven), this is the modelless upstream fix."
+- [x] **T5.2** Unit tests for each mode: `none_is_identity`, `rmsnorm_produces_unit_rms`, `scalar_pinch_caps_at_max_rms`, `scalar_pinch_no_op_below_max_rms`.
+- [x] **T5.3** Document in the module doc: "For frozen pretrained kernels (BeliefDrafter MLP), apply this only as a diagnostic — paper §4.4 Table 4 shows inference-time pin drops acceptance 56% on pre-norm models. The fix requires retraining. → riir-train. For kernels we own (HLA, functor, micro_belief, engram, Raven), this is the modelless upstream fix."
 
 ---
 
@@ -142,8 +142,8 @@ For kernels we own (HLA, latent_functor, micro_belief, engram, Raven) — NOT fo
 
 ## Phase 7 — Wiring + feature flag + Cargo
 
-- [ ] **T7.1** Add `depth_invariance` feature to `crates/katgpt-core/Cargo.toml`. Default: OFF (opt-in until G1–G4 pass).
-- [ ] **T7.2** Re-export `DepthInvarianceDiagnostic`, `DepthInvarianceKind`, `DepthInvarianceConfig`, `MagnitudeRegularization`, `apply_magnitude_regularization`, `Scratch` from `crates/katgpt-core/src/lib.rs`.
+- [x] **T7.1** Add `depth_invariance` feature to `crates/katgpt-core/Cargo.toml`. Default: OFF (opt-in until G1–G4 pass).
+- [x] **T7.2** Re-export `DepthInvarianceDiagnostic`, `DepthInvarianceKind`, `DepthInvarianceConfig`, `MagnitudeRegularization`, `apply_magnitude_regularization`, `Scratch` from `crates/katgpt-core/src/lib.rs`.
 - [ ] **T7.3** Update `.docs/01_overview.md` Feature Flags table with `depth_invariance` row. Update `.docs/02_architecture.md` with a new "Depth-Invariance Diagnostic" section near the existing Sink-Aware section (cross-link to avoid confusion — different papers).
 - [ ] **T7.4** If G1–G4 all pass → promote `depth_invariance` to default-on in `crates/katgpt-core/Cargo.toml` and in the root `katgpt-rs/Cargo.toml` default feature list. If any fail → keep opt-in, document in `.benchmarks/`.
 
