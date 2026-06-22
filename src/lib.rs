@@ -30,6 +30,20 @@ pub use clr::{
     ReliabilityScore, should_write_memory, SigmoidProjectionVerifier, Trajectory, Verdict,
     VoteResult, clr_vote, clr_vote_minimal,
 };
+
+// Claim Rubric Runtime — L1/L2/L3 evidence ladder validator (Plan 307,
+// Research 287, arxiv 2606.07612). Generic meta-discipline that grades
+// probe/steering claims by evidence level: L1 (Behavioral) / L2
+// (Functional) / L3 (Causal-mechanistic). Vocabulary must match evidence
+// — "causally controls" requires L3 evidence; "reads" is L1-safe. Opt-in
+// until Phase 2 round-trip tests pass on R287 §4 scores.
+#[cfg(feature = "claim_rubric")]
+pub mod claim_rubric;
+#[cfg(feature = "claim_rubric")]
+pub use claim_rubric::{
+    ChecklistSection, ClaimValidator, EvidenceItem, EvidenceItemId, EvidenceLevel, Grade,
+    VocabularyViolation,
+};
 pub mod cumprodsum;
 #[cfg(feature = "ssd_block")]
 pub mod ssd_block;
@@ -127,6 +141,12 @@ pub mod pipeline_pruner;
 #[cfg(feature = "planar_quant")]
 pub mod planar_quant;
 pub mod plot;
+// Orthogonal Procrustes — cross-frame embedding alignment via polar
+// decomposition (Newton-Schulz on B^T A). Issue 001 (katgpt-rs). GOAT
+// candidate — gated behind `orthogonal_procrustes` until benchmark gates
+// G1–G6 (Issue 001) pass. Promotes to default-on if GOAT, demoted if not.
+#[cfg(feature = "orthogonal_procrustes")]
+pub mod procrustes;
 #[cfg(feature = "precision_aware_draft")]
 pub mod precision_aware_draft;
 #[cfg(feature = "progressive_mcgs")]

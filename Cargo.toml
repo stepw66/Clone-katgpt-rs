@@ -216,6 +216,7 @@ embedding_router = []  # Semantic embedding routing (Plan 024, not yet started)
 game_domain = ["domain_latent"]  # Alias for domain_latent — game-specific Config presets (Plan 040)
 language_domain = []  # Language domain: BPE vocab, LLM models (Plan 040, future)
 newton_schulz = []  # Newton-Schulz orthogonalization + Muon momentum (Plan 152, Research 114, GOAT 25/25 Bench 050) — default-ON
+orthogonal_procrustes = []  # Orthogonal Procrustes — cross-frame embedding alignment via polar decomposition (Issue 001, GOAT candidate). Opt-in until G1–G6 benchmark gates pass.
 spectral_budget = ["newton_schulz"]  # Spectral Budget Router — layer-adaptive NS depth + rank-p truncation (Plan 253, Research 222) — opt-in, GOAT gate
 gauge_invariant = ["newton_schulz"]  # Gauge-invariant adapter composition — LoRA-Muon distillation (Plan 270, Research 238, GOAT 17/17 PASS, default-ON). Provides ns_inv_sqrt_psd + gauge_rebalance + gauge_invariant_compose primitives.
 manifold_power_iter_router = []  # Manifold Power Iteration MoE Router — one-shot router-row conditioning at snapshot swap via shared spectral_retract helper (Plan 279, Research 246, arxiv 2606.12397) — DEFAULT-ON since Plan 279 Phase 4 GOAT 9/9 green
@@ -255,6 +256,7 @@ funcattn_compose = ["funcattn_spectral_pre_rotate", "funcattn_chiar_blend", "fun
 temporal_deriv = ["katgpt-core/temporal_deriv"]  # Temporal Derivative Kernel — dual fast/slow EMA surprise signal (Plan 277, Research 243, arXiv:2606.08720). Opt-in until ≥2 fusion gates pass.
 chain_fold = ["thinking_cot"]  # ThoughtFold chain folding — inference-time CoT step pruning (Plan 195 GOAT 16/16, validated by Plan 228 78% reduction)
 clr = []  # CLR Claim-Level Reliability runtime — sigmoid projection vote over claim embeddings (Plan 284, Research 255)
+claim_rubric = []  # Claim Rubric Runtime — L1/L2/L3 evidence ladder validator (Plan 307, Research 287)
 bandit_top_p = ["bandit"]  # Adaptive top-p bandit arm selection (Plan 181, default ON candidate)
 curvature_alloc = ["bandit"]  # Curvature-influence allocation — EoS proxy budget control (Plan 183)
 nds_proxy = ["bandit"]  # NDS curvature proxy — modelless inference budget control (Plan 186)
@@ -599,6 +601,22 @@ name = "latent_thought_flow_scorer_bench"
 path = "benches/latent_thought_flow_scorer_bench.rs"
 required-features = ["self_advantage_gate", "micro_belief"]
 harness = false
+
+
+# Issue 001 — Orthogonal Procrustes GOAT benchmark.
+# G1: <=800 us at n=512, d=32. G2: <=5 ms at n=2048, d=64.
+# G4: <=1% residual at n>=128. G6: <=64 KB scratch at d=64.
+[[bench]]
+name = "procrustes_bench"
+path = "benches/procrustes_bench.rs"
+required-features = ["orthogonal_procrustes"]
+harness = false
+
+# Issue 001 G3 — Procrustes determinism test (bit-identical same-input).
+[[test]]
+name = "procrustes_determinism"
+path = "tests/procrustes_determinism.rs"
+required-features = ["orthogonal_procrustes"]
 
 # Plan 283 T2.2 — AdvantageMarginGate integration with forward_looped.
 # Byte-identical no-gate path GOAT gate + early-halt observability test.
@@ -1497,6 +1515,12 @@ required-features = ["module_energy_route"]
 name = "sigmoid_graded_reject"
 required-features = ["sigmoid_graded_reject"]
 
+# Plan 307 Phase 4 — Claim Rubric GOAT gate (correctness round-trip on R287 §4).
+[[test]]
+name = "bench_307_claim_rubric_goat"
+path = "tests/bench_307_claim_rubric_goat.rs"
+required-features = ["claim_rubric"]
+
 # Plan 284 Phase 4 — CLR GOAT gate (G1, G2, G5). Opt-in until the gate runs.
 [[test]]
 name = "bench_284_clr_goat"
@@ -1525,6 +1549,11 @@ harness = false
 [[example]]
 name = "clr_minimal"
 required-features = ["clr"]
+
+# Plan 307 Phase 3 — Claim Rubric minimal example (construct a claim, grade it).
+[[example]]
+name = "claim_rubric_minimal"
+required-features = ["claim_rubric"]
 
 # Plan 295 Phase 2 — CCE primal-dual convergence test (G2).
 # Verifies O(N⁻¹ᐟ²) convergence on the emission-abatement discrete example.
