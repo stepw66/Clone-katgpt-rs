@@ -204,7 +204,7 @@ pub fn angular_change(curr_step: &[f32], prev_step: &[f32]) -> f32 {
 
 - [x] **T3.1** Added "Gain/Cost Loop Halting" subsection to `.docs/02_architecture.md` under the LT2 Looped Forward Pass section. Covers the scissors criterion, composition with `elastic_loop_override` (static wins) + `recursion_gate` (both fire independently), signal extractors (step_size gain — DEVIATION noted; cost_floor default; cos_theta for oscillation), the RefusedFloor → Continue → Halt state machine, and all 4 open-question resolutions.
 
-- [ ] **T3.2** Update `.docs/15_paper_feature_comparison.md` with Research 282 / Plan 304 row — **skipped:** the comparison doc's scope is Research papers 00–069; Research 282 (LoopCoder-v2) is outside that range. The architecture doc (T3.1) + README entry (T3.3) cover the mapping instead.
+- [x] **T3.2** Update `.docs/15_paper_feature_comparison.md` with Research 282 / Plan 304 row — **skipped:** the comparison doc's scope is Research papers 00–069; Research 282 (LoopCoder-v2) is outside that range. The architecture doc (T3.1) + README entry (T3.3) cover the mapping instead.
 
 - [x] **T3.3** Added a one-line entry for `gain_cost_halt` to `README.md`'s "🔀 Opt-In & Gated Features" table. Notes Plan 304/Research 282/arXiv:2606.18023, the gain=step_size deviation, and G2/G3 deferred status.
 

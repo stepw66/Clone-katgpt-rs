@@ -21,7 +21,7 @@ From epiplexity paper (arXiv:2601.03220): Structural information extractable by 
 ## Scope
 
 - [x] **In scope**: EpiplexityEstimator, prequential coding, loss-curve tracking, ScreeningPruner integration, SR²AM context extension, GOAT proofs on game arenas
-- [ ] **Out of scope**: Requential coding (requires teacher-student KL at every step), scaling law estimation, cryptographic proofs, full MDL program search
+- [x] **Out of scope**: Requential coding (requires teacher-student KL at every step), scaling law estimation, cryptographic proofs, full MDL program search **[CLOSED: out of scope by design]**
 
 ## Tasks
 
@@ -95,7 +95,7 @@ From epiplexity paper (arXiv:2601.03220): Structural information extractable by 
 - [x] Report: `.benchmarks/041_epiplexity_structural_information_goat.md`
 - [x] Bomber Arena: measure epiplexity of training data (synthetic traces, 4 tests)
 - [x] Go Arena: measure epiplexity of game traces (synthetic traces, 2 tests)
-- [ ] Chess: reproduce paper's forward vs reverse result (deferred — requires chess domain)
+- [x] Chess: reproduce paper's forward vs reverse result (**CLOSED: no chess domain exists; not actionable in this repo**)
 
 ### T7: Benchmarks — Epiplexity vs Baseline Screening
 - [x] Feature gate + module glue: `epiplexity_scoring = []` in Cargo.toml, added to `full`
@@ -110,7 +110,7 @@ From epiplexity paper (arXiv:2601.03220): Structural information extractable by 
 - [x] Clippy pass: `cargo clippy --fix --allow-dirty` — zero warnings
 - [x] All tests pass: `cargo test --features epiplexity_scoring --test test_130_epiplexity_goat` — 48/48
 - [x] Update `README.md` — add Epiplexity section (feature flags table entry)
-- [ ] Update `.docs/` if applicable (N/A)
+- [x] Update `.docs/` if applicable (N/A) **[CLOSED: N/A]**
 
 ## Architecture
 

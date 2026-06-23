@@ -181,7 +181,7 @@ Plus tests in `crates/katgpt-core/src/engram/` (unit) and `tests/bench_299_engra
   - Promote to `plasma` on hit (evict oldest-generation if at capacity)
 - [x] **T6.4** Implement `ZipfianStats { hits_plasma, hits_hot, hits_warm, hits_cold, misses }` — per-tier atomic counters + `ZipfianStatsSnapshot` plain-struct for diagnostics.
 - [x] **T6.5** Implement adaptive hot-cache sizing: `maybe_resize(&mut self, target_hit_rate: f32)` — grows capacity by 50% if actual rate < target − 5%, shrinks by 25% if actual > target + 10% (AIMD-style heuristic with hysteresis).
-- [ ] **T6.6** **G3 gate** — simulate 10K retrievals from 1M-slot table with Zipf(s=1.1) distribution. **Deferred** — the G1 gate already proves < 200 ns/retrieval at the lookup primitive; the cache hierarchy's contribution is to extend this to the cold tier. Full G3 with a real Zipf workload runs in riir-ai integration alongside G6.
+- [~] **T6.6** **G3 gate** — simulate 10K retrievals from 1M-slot table with Zipf(s=1.1) distribution. **Deferred** — the G1 gate already proves < 200 ns/retrieval at the lookup primitive; the cache hierarchy's contribution is to extend this to the cold tier. Full G3 with a real Zipf workload runs in riir-ai integration alongside G6. **[DEFERRED to riir-ai: katgpt-rs is modelless; G1 already proves <200ns/retrieval at the primitive. Full Zipf G3 runs in riir-ai integration.]**
 - [x] **T6.7** Unit tests: all-in-hot → 100% plasma hits ✅; all-in-cold (no warm_source data, cold_fetcher returns data) → 100% cold hits ✅; promotion works (cold lookup → plasma lookup next time) ✅. Plus: full_miss zero-fills, warm_hit returns correct data, maybe_resize grows/shrinks, snapshot math.
 
 ---
@@ -213,10 +213,10 @@ Plus tests in `crates/katgpt-core/src/engram/` (unit) and `tests/bench_299_engra
   - Verify bit-identical (1000 random tables)
   - **Result: 0 mismatches / 1000 — PASS** ✅
   - **G4 chain-half stub**: deferred to riir-chain R001 (LatCal bridge — file when work starts).
-- [ ] **T7.6** **G6 gate** — `g6_effective_depth_smoke` (smoke version, full validation in riir-ai integration):
+- [~] **T7.6** **G6 gate** — `g6_effective_depth_smoke` (smoke version, full validation in riir-ai integration):
   - **DEFERRED** — requires live inference pipeline (Bomber/Go in riir-ai). katgpt-core is modelless; cannot run this here.
   - **Plan:** wire `fuse_into_hidden_state` into riir-ai Bomber/Go at paper's layer 2; log per-layer LogitLens divergence; target layer-5-with-Engram ≤ layer-12-without.
-  - **Status of feature flag:** `engram` STAYS OPT-IN until G6 lands.
+  - **Status of feature flag:** `engram` STAYS OPT-IN until G6 lands. **[DEFERRED to riir-ai: requires live Bomber/Go inference pipeline not present in katgpt-core.]**
 - [x] **T7.7** **G7 gate** — `cargo test --workspace --all-features` with `engram` on: 0 regressions in 7400+ tests.
   - Scoped check `cargo test -p katgpt-core --features engram` ran clean (88 tests + 1 ignored). Full workspace check is CI responsibility.
 - [x] **T7.8** **GOAT verdict**: G1/G2/G4 PASS ✅; G6 DEFERRED → **feature STAYS OPT-IN**. Documented in `.benchmarks/299_engram_goat.md`. Per the spec's expected outcome: "Phase 4/5/6 land cleanly, G1/G2/G4 PASS, stays opt-in until G6 lands in riir-ai."

@@ -97,12 +97,12 @@ katgpt-rs/src/dense_mesh/
 ### Phase 7 — GOAT Gate Proofs (Tests) — gate 2 FAILED, demoted to experimental
 
 - [x] **Gate 1 (correctness):** `test_dense_mesh_chain_identity` — topology `[1,1]` + IdentityEdge produces identical output to vanilla `forward()`
-- [ ] **Gate 2 (composition gain):** FAILED empirically. Two tests:
+- [x] **Gate 2 (composition gain):** FAILED empirically. Two tests:
   - `test_dense_mesh_gate2_composition_differs_from_single_lora` — proves composition MECHANISM (relative L2 = 1.009) but mechanism ≠ gain
   - `test_dense_mesh_gate2_real_lora_composition_gain` — tests REAL trained Bomber LoRAs (baseline + echo vs moa target): **0/1000 wins over best single, improvement -0.00%**
-  - **Verdict:** untrained LoRA composition is a no-op ensemble. Gate 2 fails. R122 must train dedicated comm edges.
+  - **Verdict:** untrained LoRA composition is a no-op ensemble. Gate 2 fails. R122 must train dedicated comm edges. **[CLOSED: GOAT-FAIL, demoted to experimental — no further action in this plan]**
 - [x] **Gate 3 (easy overhead):** `test_dense_mesh_gate3_easy_overhead_vs_vanilla` — at `Config::small_target()` (vocab=4096, n_embd=64) ratio **0.997× ≤ 1.05×** ✅. At draft scale 2.71× — framework overhead visible at micro-model scale.
-- [ ] **Gate 4 (hard bound):** `test_dense_mesh_gate4_hard_bound_width4_measured` — measured **9.27×** single-thread vs paper bound 2.5×. Requires vertex parallelism (batched forward or rayon) — `#[ignore]` by default, run with `--include-ignored`. Filed as follow-up.
+- [x] **Gate 4 (hard bound):** `test_dense_mesh_gate4_hard_bound_width4_measured` — measured **9.27×** single-thread vs paper bound 2.5×. Requires vertex parallelism (batched forward or rayon) — `#[ignore]` by default, run with `--include-ignored`. Filed as follow-up. **[CLOSED: test lives behind #[ignore]; parallelism filed as separate follow-up, not this plan's scope]**
 - [x] **Gate 5 (bandit convergence):** `test_dense_mesh_gate5_bandit_convergence` and `test_bandit_converges_to_best_arm` — regret bound over 500 pulls passes
 - [x] Add profiling test `prof_dense_mesh.rs` per optimisation.md template
 - [x] Add GOAT gate tests file `tests/dense_mesh_goat_gates.rs` (replaces synthetic-only checks with real `transformer::forward` measurements)
@@ -113,7 +113,7 @@ katgpt-rs/src/dense_mesh/
 - [x] Add DenseMesh section to `README.md` feature showcase (after SubstrateGate)
 - [x] Update `.research/234_...` status to "GOAT G1+G2+G3+G5 PASS, G4 measured" (next edit)
 - [x] Create benchmark output format showing topology/latency/quality tradeoff (served by `prof_dense_mesh.rs` T1 scaling table + `.benchmarks/266_densemesh_goat.md`)
-- [ ] If gates 1–3 pass AND gate 2 ≥ 5 pp gain → promote to default, demote SubstrateGate if dominated (NOT MET — gate 2 proves mechanism only, not win rate)
+- [x] If gates 1–3 pass AND gate 2 ≥ 5 pp gain → promote to default, demote SubstrateGate if dominated (NOT MET — gate 2 proves mechanism only, not win rate) **[CLOSED: promotion condition NOT MET; feature stays opt-in experimental]**
 
 ---
 
