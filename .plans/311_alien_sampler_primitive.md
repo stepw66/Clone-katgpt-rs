@@ -143,9 +143,9 @@ This is the make-or-break phase. The whole point is proving dual-encoder availab
 
 ### Tasks
 
-- [ ] **T4.1** SIMD-ify `MedianTopMAvailability` cosine computation (4 or 8 lanes). **DEFERRED** — Phase 3 GOAT gate failed; no point optimizing a primitive that doesn't promote.
-- [ ] **T4.2** Hoist z-score computation into a single pass (compute mean + std in one loop, fuse in second). **DONE** as part of Phase 1 (`fuse_and_sort` kernel).
-- [ ] **T4.3** Re-run Phase 3 G3 perf measurement; confirm improvement. **DEFERRED** with T4.1.
+- [ ] **T4.1** SIMD-ify `MedianTopMAvailability` cosine computation (4 or 8 lanes). **MOVED to [Issue 002](../issues/002_alien_sampler_simd_matmul.md)** — perf-only optimization; tracked as an issue per AGENTS.md ("Create issue at ./issues for optimization task, do not create plan"). Scope is G3 only; does NOT unblock promotion (G1+G2 still fail on the single-peak coherence surface and need a separate multi-peak coherence plan).
+- [x] **T4.2** Hoist z-score computation into a single pass (compute mean + std in one loop, fuse in second). **DONE** as part of Phase 1 (`fuse_and_sort` kernel).
+- [ ] **T4.3** Re-run Phase 3 G3 perf measurement; confirm improvement. **MOVED to [Issue 002](../issues/002_alien_sampler_simd_matmul.md)** (tracked with T4.1).
 - [x] **T4.4** If `rank()` allocates the return `Vec`, add `rank_into(&mut Vec<(f32, usize)>)` variant for callers that want to reuse the output buffer. **DONE** — shipped `rank_into` + `rank_precomputed` (hot-path batch variant).
 
 ---
