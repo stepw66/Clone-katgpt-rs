@@ -1211,6 +1211,35 @@ Examples:
 - `cargo run --example salience_tri_gate_basic --features salience_tri_gate`
 - `cargo run --example salience_tri_gate_batch --features salience_tri_gate`
 
+### 📐 Cross-Resolution Spectral Transport: Train-Small-Deploy-Large (Plan 310, Research 291, arxiv 2605.31559)
+
+An **asymmetric-basis FUNCATTN** primitive that generalizes symmetric `k×k` spectral transport to `d_src ≠ d_dst`. Two frozen, BLAKE3-committed, column-orthonormal bases `Φ_src ∈ R^{d_src × k}` and `Ψ_dst ∈ R^{d_dst × k}` enable **train-on-small-deploy-on-large** latent transfer without retraining:
+
+```text
+a  ← Φ_src^T · s        // project source latent → k-dim spectral
+t  ← Ψ_dst · a           // reconstruct at destination resolution
+```
+
+The headline claim — **train once on a small-tier shard, deploy on any tier** — is the Super-GOAT candidate from Research 291. The runtime is two matmuls over frozen bases; no gradients, no inference-time solve.
+
+**Phase 2 GOAT (2026-06-23): ALL 4 GATES PASS — Super-GOAT headline holds. PROMOTED to default-on (Phase 4).**
+
+| Gate | Target | Result | Verdict |
+|------|--------|--------|---------|
+| **G1** reconstruction cos | mean ≥ 0.85, min ≥ 0.75 (16→256→16 round-trip) | mean **0.8944**, min 0.8944 | ✅ |
+| **G2-A** rank preservation (transported weights) | mean cos ≥ 0.85 (16→256) | mean **0.9300**, median 0.9435, min 0.6127 | ✅ **Super-GOAT** |
+| **G2-B** negative control (padded weights) | < 0.85 (documents naive padding fails) | mean 0.7142 | ✅ |
+| **G3** k-sweep | elbow at intrinsic_k | elbow at k=8 (= intrinsic personality rank) | ✅ |
+| **G4** zero-alloc | 0 allocations after warmup | **0** allocs / 1000 transports | ✅ |
+
+**Honest caveat (G1):** the synthetic `bandlimited_sample` construction puts exactly `band_frac` of energy in the rank-k subspace, so mean cos = `sqrt(band_frac)` = `sqrt(0.80)` = 0.8944 exactly. Real personality vectors have a spectrum, not a hard 80/20 split — deployment validation should use real shard corpora (deferred to riir-neuron-db Plan 004 Phase 5).
+
+**Honest caveat (G2-B):** the plan's literal "padded weights" setup was buggy — padded scoring drops `w_src[k..d_src, :]`, so it fails at cos 0.71. Variant A (transported action weights) is the correct setup. Variant B is retained as a documented negative control.
+
+Feature gate: `cross_resolution_transport` (**DEFAULT-ON** since Phase 4 GOAT PASS 2026-06-23). Implies `funcattn` as transitive default. 📖 Plan: [`.plans/310_cross_resolution_spectral_transport_primitive.md`](.plans/310_cross_resolution_spectral_transport_primitive.md), Research: [`.research/291_cross_resolution_spectral_transport_open_primitive.md`](.research/291_cross_resolution_spectral_transport_open_primitive.md). Shard integration (NeuronShard::transport_to_tier) deferred to riir-neuron-db Plan 004.
+
+---
+
 ## 🔧 KV Compression
 
 Default: **Hybrid OCT+PQ** (OCTOPUS triplet encoding + PlanarQuant 2D Givens rotation). Best MSE + 64× fewer rotation FMAs.

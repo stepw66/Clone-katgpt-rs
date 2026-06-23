@@ -4,12 +4,7 @@
 **Research:** [katgpt-rs/.research/291_cross_resolution_spectral_transport_open_primitive.md](../.research/291_cross_resolution_spectral_transport_open_primitive.md)
 **Source:** Synthesized from FUNCATTN (arxiv 2605.31559, Research 257) + Topological Neural Operators (arxiv 2606.09806, Research 219) + Gemini "continuous field" reframing
 **Target:** `katgpt-rs/crates/katgpt-core/src/cross_resolution.rs` (new module) + Cargo feature `cross_resolution_transport`
-**Status:** Phase 0–2 COMPLETE. Phase 4 promotion recommended (deferred to
-follow-up). Phase 3 (SIMD) likely a no-op — auto-vec via `simd::simd_dot_f32`
-is already in place; manual SIMD would be evaluated only if a real deployment
-shows the hot path is bottlenecked on the contiguous-row dots (unlikely at
-k ≤ 64, L1-resident). Phase 5 (shard integration) blocked on user decision to
-proceed with riir-neuron-db Plan 004.
+**Status:** Phase 0–4 COMPLETE (Phase 4 promotion done 2026-06-23: `cross_resolution_transport` now DEFAULT-ON in katgpt-core + root Cargo.toml, README showcase added, per AGENTS.md rule 'GOAT pass → promote to default'). Phase 3 (SIMD) likely a no-op — auto-vec via `simd::simd_dot_f32` is already in place; manual SIMD would be evaluated only if a real deployment shows the hot path is bottlenecked on the contiguous-row dots (unlikely at k ≤ 64, L1-resident). Phase 5 (shard integration) blocked on user decision to proceed with riir-neuron-db Plan 004.
 
 ---
 
@@ -171,18 +166,14 @@ Each gate is a standalone file. All must pass to promote from opt-in.
 
 ## Phase 4 — Promotion Decision
 
-**STATUS: G1–G4 all PASS → recommend promote to opt-in default.**
+**STATUS: COMPLETE (2026-06-23) — promoted to DEFAULT-ON per AGENTS.md rule 'GOAT pass → promote to default'.**
 
-Decision deferred to a follow-up turn — promotion touches the README "Feature
-Showcase" section and the `default = [...]` line in `katgpt-core/Cargo.toml`,
-which is a separate user-visible change from the G1–G4 validation itself. The
-open primitive is now proven; promotion is the deployment step.
+Changes:
+- `katgpt-rs/crates/katgpt-core/Cargo.toml`: added `cross_resolution_transport` to `default = [...]`; updated feature comment to note G1-G4 PASS + DEFAULT-ON; updated `funcattn` comment to note transitive default-on.
+- `katgpt-rs/Cargo.toml`: added `cross_resolution_transport` to `default = [...]`; updated feature alias comment.
+- `katgpt-rs/README.md`: added showcase section under "Feature Showcase" with GOAT table + honest caveats.
 
-- [x] T4.1 (recommendation) G1–G4 all pass → promote to opt-in default in
-      katgpt-rs feature showcase; document in README "Feature Showcase" section.
-      **Action required:** add `cross_resolution_transport` to `default = [...]`
-      in `katgpt-core/Cargo.toml` and update README. (Not done in this commit —
-      promotion is a user-visible decision.)
+- [x] T4.1 G1–G4 all pass → promoted to opt-in default in katgpt-rs feature showcase; documented in README "Feature Showcase" section.
 - [x] T4.2 G1 mean ≥ 0.75 — confirmed (0.8944). No demotion.
 - [x] T4.3 G2 mean ≥ 0.75 — confirmed (0.9300 Variant A). No demotion.
 - [x] T4.4 No borderline cases — both G1 and G2 are well above the 0.85 gate.
