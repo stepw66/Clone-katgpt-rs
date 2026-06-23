@@ -267,25 +267,32 @@ pub const CHOLESKY_BLOCK_SIZE: usize = 32;
 /// This is the textbook column-by-column algorithm used for small matrices.
 /// It is called automatically by [`cholesky_decompose`] when `t <
 /// CHOLESKY_BLOCK_SIZE`, and is also used internally by the blocked variant
-/// to factorize the diagonal blocks.
+/// to factorize the diagonal blocks. Inner dot products use the shared
+/// `dot_8wide` SIMD kernel — for t=64 this turns ~t³/6 scalar FMAs into
+/// auto-vectorized 8-wide FMA chains.
 #[inline]
 fn cholesky_decompose_unblocked(a: &[f32], t: usize) -> Option<Vec<f32>> {
     let mut l = vec![0.0f32; t * t];
     for j in 0..t {
-        let mut sum = a[j * t + j];
-        for k in 0..j {
-            sum -= l[j * t + k] * l[j * t + k];
-        }
+        // Diagonal: sum = a[j,j] − ‖l[j,0..j]‖². Single SIMD dot product
+        // instead of a scalar accumulation loop. dot_8wide's pairwise-sum
+        // order is also more numerically stable than sequential subtraction.
+        let l_norm_sq = dot_8wide(&l[j * t..j * t + j], &l[j * t..j * t + j], j);
+        let sum = a[j * t + j] - l_norm_sq;
         if sum <= 0.0 {
             return None;
         }
         let diag = sum.sqrt();
         l[j * t + j] = diag;
+        // Off-diagonal strip: l[i,j] = (a[i,j] − l[i,0..j]·l[j,0..j]) / diag.
+        // Each row's dot with the j-th prefix reuses the shared SIMD kernel.
+        // The borrows are scoped so the subsequent write to l[i,j] is allowed.
         for i in (j + 1)..t {
-            let mut s = a[i * t + j];
-            for k in 0..j {
-                s -= l[i * t + k] * l[j * t + k];
-            }
+            let s = {
+                let l_row_i = &l[i * t..i * t + j];
+                let l_prefix_j = &l[j * t..j * t + j];
+                a[i * t + j] - dot_8wide(l_row_i, l_prefix_j, j)
+            };
             l[i * t + j] = s / diag;
         }
     }
@@ -334,30 +341,32 @@ fn cholesky_decompose_blocked(a: &[f32], t: usize) -> Option<Vec<f32>> {
 
         // 2. Off-diagonal strip L[k+bk:, k:k+bk] via forward substitution.
         //    For each row i in the strip, solve L_diag · x = A[i, k:k+bk]^T.
+        //    The triangular dependency (col depends on col-1) prevents batching
+        //    across columns, but each per-col dot product uses `dot_8wide`.
         let n_strip = t - (k + bk);
         if n_strip > 0 {
             for i in 0..n_strip {
                 let row = k + bk + i;
                 for col in 0..bk {
-                    let mut s = a_red[row * t + (k + col)];
-                    for p in 0..col {
-                        s -= l[row * t + (k + p)] * diag_l[col * bk + p];
-                    }
+                    let l_strip = &l[row * t + k..row * t + k + col];
+                    let diag_row = &diag_l[col * bk..col * bk + col];
+                    let s = a_red[row * t + (k + col)] - dot_8wide(l_strip, diag_row, col);
                     l[row * t + (k + col)] = s / diag_l[col * bk + col];
                 }
             }
 
             // 3. Symmetric rank-k update: a_red[k+bk:, k+bk:] -= L_strip · L_strip^T.
             //    Maintains symmetry explicitly so subsequent iterations read
-            //    a consistent reduced matrix.
+            //    a consistent reduced matrix. Inner dot uses `dot_8wide` —
+            //    bk (= CHOLESKY_BLOCK_SIZE = 32) is the sweet spot for 4
+            //    SIMD lanes worth of FMA per strip row.
             for i in 0..n_strip {
                 let row_i = k + bk + i;
                 for j in 0..=i {
                     let row_j = k + bk + j;
-                    let mut dot = 0.0f32;
-                    for p in 0..bk {
-                        dot += l[row_i * t + (k + p)] * l[row_j * t + (k + p)];
-                    }
+                    let l_i_strip = &l[row_i * t + k..row_i * t + k + bk];
+                    let l_j_strip = &l[row_j * t + k..row_j * t + k + bk];
+                    let dot = dot_8wide(l_i_strip, l_j_strip, bk);
                     a_red[row_i * t + row_j] -= dot;
                     a_red[row_j * t + row_i] = a_red[row_i * t + row_j];
                 }

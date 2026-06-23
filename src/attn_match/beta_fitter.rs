@@ -254,26 +254,30 @@ fn vector_norm(v: &[f32]) -> f32 {
 /// Cholesky decomposition of a symmetric positive-definite matrix.
 /// Returns lower-triangular `L` such that `A = L L^T`, row-major `(t, t)`.
 /// Returns `None` if the matrix is not PD (negative pivot encountered).
+///
+/// Inner dot products use the shared `dot_8wide` SIMD kernel for 8-wide
+/// auto-vectorized FMA chains (DRY with value_fitter and score_matrix).
 #[inline]
 fn cholesky_decompose(a: &[f32], t: usize) -> Option<Vec<f32>> {
     let mut l = vec![0.0f32; t * t];
     for j in 0..t {
-        // Diagonal.
-        let mut sum = a[j * t + j];
-        for k in 0..j {
-            sum -= l[j * t + k] * l[j * t + k];
-        }
+        // Diagonal: a[j,j] − ‖l[j,0..j]‖².
+        let l_norm_sq = dot_8wide(&l[j * t..j * t + j], &l[j * t..j * t + j], j);
+        let sum = a[j * t + j] - l_norm_sq;
         if sum <= 0.0 {
             return None;
         }
         let diag = sum.sqrt();
         l[j * t + j] = diag;
-        // Off-diagonal below.
+        // Off-diagonal: (a[i,j] − l[i,0..j]·l[j,0..j]) / diag.
+        // Re-borrow the j-prefix per row — the borrow ends when dot_8wide
+        // returns, so the subsequent write to l[i,j] is allowed.
         for i in (j + 1)..t {
-            let mut s = a[i * t + j];
-            for k in 0..j {
-                s -= l[i * t + k] * l[j * t + k];
-            }
+            let s = {
+                let l_row_i = &l[i * t..i * t + j];
+                let l_prefix_j = &l[j * t..j * t + j];
+                a[i * t + j] - dot_8wide(l_row_i, l_prefix_j, j)
+            };
             l[i * t + j] = s / diag;
         }
     }
