@@ -170,9 +170,10 @@ pub fn compact_with_fixed_beta(
         ),
     };
 
-    let selected_indices = selection.indices.clone();
-    // Pre-allocate exactly and memcpy each row — avoids the log(t) Vec growth
-    // reallocations of `flat_map().collect()`.
+    // Move indices out of `selection` (no clone — we own it and don't use
+    // `weights` here). Pre-allocate exactly and memcpy each row — avoids the
+    // log(t) Vec growth reallocations of `flat_map().collect()`.
+    let selected_indices = selection.indices;
     let mut compact_keys = Vec::with_capacity(selected_indices.len() * d);
     for &idx in &selected_indices {
         compact_keys.extend_from_slice(&keys[idx * d..(idx + 1) * d]);
@@ -180,8 +181,6 @@ pub fn compact_with_fixed_beta(
 
     // Stage 2: Use fixed β (skip NNLS).
     let beta = vec![fixed_beta; t];
-    // Weights = exp(β) — matches how NNLS-derived β maps to weights.
-    let weights: Vec<f32> = beta.iter().map(|&b| b.exp()).collect();
     let relative_mass_error = f32::NAN; // not computed without NNLS
 
     // Stage 3: Fit Cv via least squares.
@@ -229,22 +228,26 @@ pub fn compact_with_fixed_beta(
         for &idx in &selected_indices {
             selected_bitmap[idx] = true;
         }
-        let mut sel_mass_sq = 0.0f32;
-        let mut tot_mass_sq = 0.0f32;
+        // Accumulate raw sum-of-squares per key directly. The prior code
+        // computed `rms = sqrt(sum_sq / n)` then immediately squared it back
+        // (`rms * rms == sum_sq / n`), wasting t_len sqrt + t_len divisions.
+        // Since the final coverage is `sqrt(Σ_sel / Σ_all)`, the `/n` factor
+        // cancels — we skip it entirely. Mathematically identical result.
+        let mut sel_sum_sq = 0.0f32;
+        let mut tot_sum_sq = 0.0f32;
         for j in 0..t_len {
             let mut sum_sq = 0.0f32;
             for i in 0..n {
                 let a = full_attn[i * t_len + j];
                 sum_sq += a * a;
             }
-            let rms = (sum_sq / (n as f32)).sqrt();
-            tot_mass_sq += rms * rms;
+            tot_sum_sq += sum_sq;
             if selected_bitmap[j] {
-                sel_mass_sq += rms * rms;
+                sel_sum_sq += sum_sq;
             }
         }
-        let selected_mass_coverage = if tot_mass_sq > 0.0 {
-            (sel_mass_sq / tot_mass_sq).sqrt()
+        let selected_mass_coverage = if tot_sum_sq > 0.0 {
+            (sel_sum_sq / tot_sum_sq).sqrt()
         } else {
             0.0
         };
@@ -256,8 +259,6 @@ pub fn compact_with_fixed_beta(
     } else {
         None
     };
-
-    let _ = weights;
 
     Ok(CompactOutput {
         selected_indices,

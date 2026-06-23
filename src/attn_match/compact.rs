@@ -179,10 +179,11 @@ pub fn compact_with_router(
         ),
     };
 
-    // Extract Ck = K[selection.indices]. Pre-allocate exactly and memcpy each
-    // row via `extend_from_slice` — the prior `flat_map().collect()` did not
-    // pre-size the Vec, causing log(t) reallocations as it grew.
-    let selected_indices = selection.indices.clone();
+    // Extract Ck = K[selection.indices]. Move indices out of `selection` — we
+    // don't use `weights` here (β is re-fit below). Pre-allocate exactly and
+    // memcpy each row via `extend_from_slice` — the prior `flat_map().collect()`
+    // did not pre-size the Vec, causing log(t) reallocations as it grew.
+    let selected_indices = selection.indices;
     let mut compact_keys = Vec::with_capacity(selected_indices.len() * d);
     for &idx in &selected_indices {
         compact_keys.extend_from_slice(&keys[idx * d..(idx + 1) * d]);
@@ -231,9 +232,10 @@ pub fn compact_with_router(
         power_iter_steps: config.power_iter_steps,
     };
     let beta_result = fit_beta_nnls(&a_mass, &m_target, n, t, &beta_cfg);
-    let beta = beta_result.beta.clone();
-    let weights = beta_result.weights.clone();
+    // Move `beta` out of the result (avoids cloning `t` f32). `relative_error`
+    // is `f32` (Copy). `weights` is dropped — unused downstream.
     let relative_mass_error = beta_result.relative_error;
+    let beta = beta_result.beta;
 
     // Stage 3: Fit Cv via least squares.
     // Blocked Cholesky is eligible when t >= CHOLESKY_BLOCK_SIZE (T2.4).
@@ -279,22 +281,26 @@ pub fn compact_with_router(
         }
         // Compute selected_mass_coverage: fraction of total RMS attention mass
         // captured by selected keys.
-        let mut sel_mass_sq = 0.0f32;
-        let mut tot_mass_sq = 0.0f32;
+        // Accumulate raw sum-of-squares per key directly. The prior code
+        // computed `rms = sqrt(sum_sq / n)` then immediately squared it back
+        // (`rms * rms == sum_sq / n`), wasting t_len sqrt + t_len divisions.
+        // Since the final coverage is `sqrt(Σ_sel / Σ_all)`, the `/n` factor
+        // cancels — we skip it entirely. Mathematically identical result.
+        let mut sel_sum_sq = 0.0f32;
+        let mut tot_sum_sq = 0.0f32;
         for j in 0..t_len {
             let mut sum_sq = 0.0f32;
             for i in 0..n {
                 let a = full_attn[i * t_len + j];
                 sum_sq += a * a;
             }
-            let rms = (sum_sq / (n as f32)).sqrt();
-            tot_mass_sq += rms * rms;
+            tot_sum_sq += sum_sq;
             if selected_bitmap[j] {
-                sel_mass_sq += rms * rms;
+                sel_sum_sq += sum_sq;
             }
         }
-        let selected_mass_coverage = if tot_mass_sq > 0.0 {
-            (sel_mass_sq / tot_mass_sq).sqrt()
+        let selected_mass_coverage = if tot_sum_sq > 0.0 {
+            (sel_sum_sq / tot_sum_sq).sqrt()
         } else {
             0.0
         };
@@ -306,9 +312,6 @@ pub fn compact_with_router(
     } else {
         None
     };
-
-    // Use weights from β fit (matches paper).
-    let _ = weights; // already used via beta
 
     Ok((
         AmResult {
