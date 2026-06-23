@@ -4,7 +4,7 @@
 **Research:** [katgpt-rs/.research/288_KARC_Delay_Basis_Ridge_Forecaster.md](../.research/288_KARC_Delay_Basis_Ridge_Forecaster.md)
 **Source paper:** [arxiv 2606.19984](https://arxiv.org/abs/2606.19984) — Huang, Kurths, Tang, *Kolmogorov-Arnold Reservoir Computing*, 2026-06-18
 **Target:** `katgpt-rs/crates/katgpt-core/src/karc.rs` (new module) + Cargo feature `karc_forecaster`
-**Status:** Active — Phase 1 unblocking skeleton
+**Status:** Active — Phase 1 ✅ complete (G2/G3/G4 PASS, G1 threshold 8.16 LT PASS, G1 NRMSE 5× miss documented). **Phase 2 ✅ complete** (higher-order R=2 features Eq. 32, chunked Gram Eq. 44, ALS low-rank fit Eq. 47 — NRMSE 1.67e-4 on small config, 6× better than target; low-rank within 1.105× of full-rank). Phase 3 optional (deferred). **Phase 4 ⏸ deferred** — G1 needs full re-run with threshold time on a declared config before promotion; headline NRMSE is on different config than Phase 1 miss.
 
 ---
 
@@ -126,7 +126,15 @@ Goal: address the paper's stated limitation ("fixed basis dictionary may limit a
 
 ## Phase 4 — GOAT Gate & Default Promotion
 
+**Status (parent, 2026-06-23):** **NOT YET — Phase 4 incomplete.** Phase 2 exit criteria met (low-rank within 1.5× of full-rank: measured 1.105×). Higher-order R=2 features deliver NRMSE **1.67e-4** on the small config (D=3,M=8,K=4,d_h=4752), which is 6× better than the 1e-3 target and 3× better than the paper headline (5.3e-4). However, promotion is deferred because:
+1. **G1 not fully re-run:** The headline 1.67e-4 is on a DIFFERENT config (K=4,M=8) than Phase 1's 4.79e-3 miss (K=8,M=24). Not apples-to-apples. The Phase 1 config with R=2 (d_h=166752) requires a 220GB Cholesky — infeasible without the large-d_h ALS B-step (future work, tracked in `karc.rs` rustdoc).
+2. **Threshold time (ε=0.1 autonomous rollout) not measured** on the Phase 2 config. G1 requires BOTH NRMSE ≤ 1e-3 AND threshold ≥ 8 LT. Only the NRMSE was measured.
+3. T4.1–T4.4 require a full GOAT gate recording on a DECLARED config before T4.5 promotion can fire.
+
+**Next steps for Phase 4:** (a) Declare the canonical G1 config (small K=4,M=8,R=2 or build large-d_h ALS for K=8,M=24,R=2); (b) measure both NRMSE AND threshold time on that config; (c) record in `.benchmarks/308_karc_goat.md`; (d) if both pass, promote per T4.5.
+
 - [ ] **T4.1** Run G1 (double-scroll Table I reproduction within 2×) — record result in `katgpt-rs/.benchmarks/308_karc_goat.md`.
+  *Phase 1 partial:* NRMSE 4.79e-3 (5× miss), threshold 8.16 LT (PASS). *Phase 2 partial:* NRMSE 1.67e-4 on small config (PASS, 6× better than target), threshold NOT measured.
 - [ ] **T4.2** Run G2 (train-time wall clock ≤ 2× paper on CPU SIMD) — same bench file.
 - [ ] **T4.3** Run G3 (zero-alloc forecast_into) — same bench file, with `cargo-allocations` output.
 - [ ] **T4.4** Run G4 (bit-reproducibility across two instances) — same bench file.
