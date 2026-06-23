@@ -106,19 +106,21 @@ This is the "what does it look like?" demo. It validates the mechanism shape end
 
 ### Tasks
 
-- [ ] **T4.1** **G1** — `test_pullback_volume_identity_is_zero`: `pullback_volume(|x| *x, z, ...)` ≈ 0 for `z = [0.0; 4]` and `z = [1.0; 4]`. Tolerance 1e-6.
-- [ ] **T4.2** **G2** — `test_pullback_volume_scaling_is_2n_log_c`: `pullback_volume(|x| x * 2.0, z, ...)` ≈ `2 * n * log(2)` for `n = 4`. Tolerance 1e-4.
-- [ ] **T4.3** **G3** — `test_safe_graph_build_connected_when_predicate_true`: 100 samples on a 4D grid, predicate = always true, threshold = +∞ → all 100 nodes kept, graph is connected via k-nearest with k=4.
-- [ ] **T4.4** **G3b** — `test_safe_graph_build_disconnected_when_predicate_splits`: same 100 samples, predicate = "z[0] > 0" → two disconnected components.
-- [ ] **T4.5** **G4** — `test_manifold_geodesic_validity`: build a graph, pick two nodes, run `manifold_geodesic`, verify every node on the path satisfies the predicate. Verify path length ≤ free-space grid A* length on the same nodes.
-- [ ] **T4.6** **G5** — `test_manifold_random_walk_validity`: build a graph, run `manifold_random_walk(src, m=25)`, verify every node on the walk satisfies the predicate. **Playability = 1.0 by construction.**
-- [ ] **T4.7** **G6** — `test_manifold_random_walk_zero_alloc_across_1000_steps`: walk for 1000 steps, verify no `Vec` capacity growth in the scratch path. Per AGENTS.md hot-loop rule.
-- [ ] **T4.8** **G7** — `test_primitive_never_touches_sync`: a static check (or a doc-test) that the primitive signature accepts only `&[f32]` + closures. The lint: the module must not import anything from `riir-chain`, `riir-neuron-db`, or any sync module. (Compile-pass test.)
-- [ ] **T4.9** Add `benches/viable_manifold_graph_bench.rs`:
-  - `pullback_volume` latency on `R^4 → R^4` (target: < 5µs, since it's one SVD call).
-  - `manifold_random_walk` per-step latency (target: < 100ns/step for k=4 neighbors).
-  - `build_safe_manifold_graph` on 1000 samples (target: < 10ms, dominated by 1000 SVD calls).
-- [ ] **T4.10** Create `examples/viable_manifold_graph_01_basic.rs` — a small synthetic demo: build a safe graph on a 2D toy manifold (matching the paper's setup), run a geodesic and a random walk, print the playability comparison (manifold-constrained vs free Gaussian).
+- [x] **T4.1** **G1** — `test_pullback_volume_identity_is_zero`: `pullback_volume(|x| *x, z, ...)` ≈ 0 for `z = [0.0; 4]` and `z = [1.0; 4]`. Tolerance 1e-6. **Verified 2026-06-23** — PASS.
+- [x] **T4.2** **G2** — `test_pullback_volume_scaling_is_2n_log_c`: `pullback_volume(|x| x * 2.0, z, ...)` ≈ `2 * n * log(2)` for `n = 4`. Tolerance 1e-4. **Verified 2026-06-23** — PASS.
+- [x] **T4.3** **G3** — `test_safe_graph_build_connected_when_predicate_true`: 100 samples on a 4D grid, predicate = always true, threshold = +∞ → all 100 nodes kept, graph is connected via k-nearest with k=4. **Verified 2026-06-23** — PASS (BFS reached all 100 nodes).
+- [x] **T4.4** **G3b** — `test_safe_graph_build_disconnected_when_predicate_splits`: same 100 samples, predicate = "z[0] > 0" → two disconnected components. **Verified 2026-06-23** — PASS (no edge crosses the predicate boundary).
+- [x] **T4.5** **G4** — `test_manifold_geodesic_validity`: build a graph, pick two nodes, run `manifold_geodesic`, verify every node on the path satisfies the predicate. Verify path length ≤ free-space grid A* length on the same nodes. **Verified 2026-06-23** — PASS (two-disk corridor, path stays viable, no repeated nodes).
+- [x] **T4.6** **G5** — `test_manifold_random_walk_validity`: build a graph, run `manifold_random_walk(src, m=25)`, verify every node on the walk satisfies the predicate. **Playability = 1.0 by construction.** **Verified 2026-06-23** — PASS.
+- [x] **T4.7** **G6** — `test_manifold_random_walk_zero_alloc_across_1000_steps`: walk for 1000 steps, verify no `Vec` capacity growth in the scratch path. Per AGENTS.md hot-loop rule. **Verified 2026-06-23** — PASS (Vec capacity == m+1, no growth).
+- [x] **T4.8** **G7** — `test_primitive_never_touches_sync`: a static check (or a doc-test) that the primitive signature accepts only `&[f32]` + closures. The lint: the module must not import anything from `riir-chain`, `riir-neuron-db`, or any sync module. (Compile-pass test.) **Verified 2026-06-23** — PASS by inspection (module imports only `crate::subspace_phase_gate::{JacobianSvdScratch, jacobian_svd_at}` + `std::collections::BinaryHeap`).
+- [x] **T4.9** Add `benches/viable_manifold_graph_bench.rs`:
+  - `pullback_volume` latency on `R^4 → R^4` (target: < 5µs, since it's one SVD call). **Measured 2026-06-23: 304.74 ns — PASS (16.4× under target).**
+  - `manifold_random_walk` per-step latency (target: < 100ns/step for k=4 neighbors). **Measured 2026-06-23: 485.58 ns/step — FAIL (4.86× over target). Root cause: `for_each_neighbor` is O(E) linear scan, not O(degree). See `.benchmarks/312_viable_manifold_graph_goat.md` for full analysis + CSR fix recommendation.**
+  - `build_safe_manifold_graph` on 1000 samples (target: < 10ms, dominated by 1000 SVD calls). **Measured 2026-06-23: 367.93 µs — PASS (27.2× under target).**
+- [x] **T4.10** Create `examples/viable_manifold_graph_01_basic.rs` — a small synthetic demo: build a safe graph on a 2D toy manifold (matching the paper's setup), run a geodesic and a random walk, print the playability comparison (manifold-constrained vs free Gaussian). **Already complete from Phase 0 (T0.1). Re-verified 2026-06-23: still runs, reproduces paper's 74.2% vs 100% playability gap.**
+
+**Exit gate status (2026-06-23):** G1–G7 unit tests all PASS. Bench G-bench 2 (random_walk per-step) FAILS its 100ns/step target due to O(E) `for_each_neighbor`. **Recommendation: DEMOTE — hold at opt-in until CSR adjacency lands.** Full numbers + root cause + promotion path in [`katgpt-rs/.benchmarks/312_viable_manifold_graph_goat.md`](../.benchmarks/312_viable_manifold_graph_goat.md). Phase 5 promotion tasks T5.1–T5.4 NOT executed (deferred to human decision).
 
 **Exit:** all G1–G7 green; bench numbers documented in `katgpt-rs/.benchmarks/312_viable_manifold_graph_goat.md` (new file).
 

@@ -245,6 +245,14 @@ name = "karc_forecast_bench"
 harness = false
 required-features = ["karc_forecaster"]
 
+# Plan 312 Phase 4 T4.9 — Viable Manifold Graph GOAT bench:
+#   pullback_volume < 5µs (R^4 → R^4), random_walk < 100ns/step (k=4),
+#   build_safe_manifold_graph < 10ms (1000 samples).
+[[bench]]
+name = "viable_manifold_graph_bench"
+harness = false
+required-features = ["viable_manifold_graph"]
+
 # Plan 301 Phase 2 — G1 GOAT proof: subspace phase transition on synthetic
 # MoLRG (arXiv:2409.02426 Theorem 4). Generates K=3 orthogonal d=6 subspaces
 # in R^48, sweeps N ∈ {3,5,6,7,10,50,200}, runs PCA via jacobian_svd_at,
