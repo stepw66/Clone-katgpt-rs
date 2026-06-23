@@ -554,3 +554,23 @@ pub use depth_invariance::{
     DepthInvarianceConfig, DepthInvarianceDiagnostic, DepthInvarianceKind, MagnitudeRegularization,
     Scratch, apply_magnitude_regularization, classify_chain, classify_chain_batched,
 };
+
+// Shared linear-algebra kernels for ridge-style solvers. Currently consumed
+// by `karc` (Plan 308); the f32 Cholesky/ridge path lives here as a standalone
+// extraction of the PEIRA `(N + λI)⁻¹` pattern — see the module note for why
+// PEIRA's f64 path is left untouched.
+#[cfg(feature = "karc_forecaster")]
+pub mod linalg;
+
+// KARC — Kolmogorov-Arnold Reservoir Computing delay-basis-ridge forecaster
+// (Plan 308, Research 288, arXiv:2606.19984). Modelless, inference-time
+// trajectory forecaster: delay-embedding × sealed KarcBasis (Fourier/Chebyshev/
+// BSpline) × closed-form ridge readout, with a zero-alloc forecast matvec.
+// Opt-in until G1–G4 GOAT gate passes (no root-feature alias in Phase 1).
+#[cfg(feature = "karc_forecaster")]
+pub mod karc;
+#[cfg(feature = "karc_forecaster")]
+pub use karc::{
+    BSplineBasis, ChebyshevBasis, DelayRing, FitError, FourierBasis, KarcBasis, KarcForecaster,
+    KarcScratch, feature_expand,
+};

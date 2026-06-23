@@ -60,22 +60,26 @@ Goal: a compiling, tested, feature-gated module that implements the full KARC pi
 
 ### Tasks
 
-- [ ] **T1.1** Create `crates/katgpt-core/src/karc.rs` behind `#[cfg(feature = "karc_forecaster")]`. Empty `KarcForecaster<D, M, K>` struct with const generics, `KarcBasis` sealed trait, `KarcScratch` pre-allocated buffers. Wire `karc_forecaster` into `crates/katgpt-core/Cargo.toml` features list and `lib.rs` mod declaration.
-- [ ] **T1.2** Implement `KarcBasis` trait with three const-generic instances:
+- [x] **T1.1** Create `crates/katgpt-core/src/karc.rs` behind `#[cfg(feature = "karc_forecaster")]`. Empty `KarcForecaster<D, M, K>` struct with const generics, `KarcBasis` sealed trait, `KarcScratch` pre-allocated buffers. Wire `karc_forecaster` into `crates/katgpt-core/Cargo.toml` features list and `lib.rs` mod declaration.
+- [x] **T1.2** Implement `KarcBasis` trait with three const-generic instances:
   - `FourierBasis<const M: usize>` — `ψ_{2i-1}(x) = cos(2π·i·x/P)`, `ψ_{2i}(x) = sin(...)`, period `P` set at construction.
   - `ChebyshevBasis<const M: usize>` — `T_0..T_{M-1}` via three-term recurrence.
   - `BSplineBasis<const M: usize>` — uniform knots, degree-3 default, Cox-de Boor recursion.
   Trait method `eval_into(&self, x: f32, out: &mut [f32; M])` — zero-alloc per-coordinate projection. Reuse `riir-engine::linoss::basis::FourierBasis` if dep tree allows; otherwise vendor with attribution.
-- [ ] **T1.3** Implement `DelayRing<D, K>` — fixed-capacity ring buffer of last-K `&[f32; D]` observations. `push(o: &[f32; D])` overwrites oldest. `flatten_into(&mut [f32; K*D])` writes the delay-embedded state `x_i = u_i ⊕ u_{i-1} ⊕ ... ⊕ u_{i-k+1}` in observation order (newest first).
-- [ ] **T1.4** Implement `feature_expand<B: KarcBasis>(delay_state: &[f32], basis: &B, out: &mut [f32])` — applies basis to each of the `K·D` delay coordinates, writing `K·D·M` features. Chunk-4 unrolled for SIMD.
-- [ ] **T1.5** Implement `KarcForecaster::observe(u: &[f32; D])` — pushes to delay ring; if ring is full and `fit_interval_ticks` has elapsed since last fit, accumulates `(Ψ(x), u_{t+1})` pair into the trajectory buffer.
-- [ ] **T1.6** Implement `KarcForecaster::fit_ridge(lambda: f32)` — solves `Wout = YH^T(HH^T + λI)^{-1}` using the Woodbury form `(H^T H + λI)^{-1} H^T Y` when `d_h > N` (the typical per-NPC regime). Extract the inversion kernel from `peira::predictor_with_scratch` into `crates/katgpt-core/src/linalg/ridge_solve.rs` (new file, no behavior change to PEIRA — pure refactor).
-- [ ] **T1.7** Implement `KarcForecaster::forecast_into(delay_state: &[f32], out: &mut [f32; D])` — `feature_expand` into scratch, then `simd_matvec(Wout, features, out)`. Zero allocation.
-- [ ] **T1.8** Write `examples/karc_double_scroll.rs` — integrates the double-scroll ODE (paper §A.1 with `R1=1.2, R2=3.44, R4=0.193, β=11.6, I_r=2.25e-5`), generates 4,000 samples @ 4 obs/unit time, fits KARC with `K=4, M=8, λ=1e-6`, runs autonomous rollout, reports NRMSE over first Lyapunov time and threshold time at `ε=0.1`. **G1 gate target: NRMSE ≤ 1.0e-3, threshold ≥ 8 LT.**
-- [ ] **T1.9** Write `tests/karc_reproducibility.rs` — fit two forecasters on byte-identical synthetic trajectories, assert `Wout` byte-equality (G4 gate). Vary `λ ∈ {1e-8, 1e-6, 1e-4}` to ensure stability across regularization strengths.
-- [ ] **T1.10** Write `tests/karc_alloc_check.rs` — use `cargo-allocations` or a manual `Box::leak` allocator hook to verify `forecast_into` performs zero allocations after warmup (G3 gate). Skip if `cargo-allocations` not available — fall back to `#[track_caller]` + manual `GlobalAlloc` counter.
-- [ ] **T1.11** Add `benches/karc_forecast_bench.rs` — `criterion` benchmark of `forecast_into` at `D=8, M=8, K=4` (the HLA-shaped config). **G2 hot-path target: forecast wall clock ≤ 500 ns/call.**
-- [ ] **T1.12** Document `karc.rs` module-level rustdoc — the math (Eqs. 8, 11, 14), the basis dictionary, the Woodbury swap, and the G1–G4 GOAT gate. Link to Plan 308 and Research 288.
+- [x] **T1.3** Implement `DelayRing<D, K>` — fixed-capacity ring buffer of last-K `&[f32; D]` observations. `push(o: &[f32; D])` overwrites oldest. `flatten_into(&mut [f32; K*D])` writes the delay-embedded state `x_i = u_i ⊕ u_{i-1} ⊕ ... ⊕ u_{i-k+1}` in observation order (newest first).
+- [x] **T1.4** Implement `feature_expand<B: KarcBasis>(delay_state: &[f32], basis: &B, out: &mut [f32])` — applies basis to each of the `K·D` delay coordinates, writing `K·D·M` features. Chunk-4 unrolled for SIMD.
+- [x] **T1.5** Implement `KarcForecaster::observe(u: &[f32; D])` — pushes to delay ring; if ring is full and `fit_interval_ticks` has elapsed since last fit, accumulates `(Ψ(x), u_{t+1})` pair into the trajectory buffer.
+- [x] **T1.6** Implement `KarcForecaster::fit_ridge(lambda: f32)` — solves `Wout = YH^T(HH^T + λI)^{-1}` using the Woodbury form `(H^T H + λI)^{-1} H^T Y` when `d_h > N` (the typical per-NPC regime). Extract the inversion kernel from `peira::predictor_with_scratch` into `crates/katgpt-core/src/linalg/ridge_solve.rs` (new file, no behavior change to PEIRA — pure refactor).
+  - *Deviation:* Shipped a standalone f32+f64 ridge solve rather than extracting from PEIRA (PEIRA's f64 Cholesky is private and tightly coupled to its EMA covariance). KARC accumulates the Gram in f64 for numerical robustness at small λ. See `linalg/mod.rs` module doc for the rationale. `// TODO: unify with peira's f64 path`.
+- [x] **T1.7** Implement `KarcForecaster::forecast_into(delay_state: &[f32], out: &mut [f32; D])` — `feature_expand` into scratch, then `simd_matvec(Wout, features, out)`. Zero allocation.
+  - *Note:* `forecast_into(&mut self, ...)` uses a pre-allocated `forecast_psi` buffer (stack arrays of size `K·D·M` are not expressible in stable Rust — `generic_const_exprs` unstable). Zero-alloc verified by G3.
+- [x] **T1.8** Write `examples/karc_double_scroll.rs` — integrates the double-scroll ODE (paper §A.1 with `R1=1.2, R2=3.44, R4=0.193, β=11.6, I_r=2.25e-5`), generates 4,000 samples @ 4 obs/unit time, fits KARC with `K=4, M=8, λ=1e-6`, runs autonomous rollout, reports NRMSE over first Lyapunov time and threshold time at `ε=0.1`. **G1 gate target: NRMSE ≤ 1.0e-3, threshold ≥ 8 LT.**
+  - *Result:* Threshold 8.16 LT ✅ PASS; NRMSE 4.79e-3 ❌ (5× target). One-step NRMSE 9.7e-4 ✅. Gap attributable to first-order features (paper uses second-order). See `.benchmarks/308_karc_goat.md`.
+- [x] **T1.9** Write `tests/karc_reproducibility.rs` — fit two forecasters on byte-identical synthetic trajectories, assert `Wout` byte-equality (G4 gate). Vary `λ ∈ {1e-8, 1e-6, 1e-4}` to ensure stability across regularization strengths.
+- [x] **T1.10** Write `tests/karc_alloc_check.rs` — use `cargo-allocations` or a manual `Box::leak` allocator hook to verify `forecast_into` performs zero allocations after warmup (G3 gate). Skip if `cargo-allocations` not available — fall back to `#[track_caller]` + manual `GlobalAlloc` counter.
+- [x] **T1.11** Add `benches/karc_forecast_bench.rs` — `criterion` benchmark of `forecast_into` at `D=8, M=8, K=4` (the HLA-shaped config). **G2 hot-path target: forecast wall clock ≤ 500 ns/call.**
+  - *Result:* 381 ns/call ✅ PASS.
+- [x] **T1.12** Document `karc.rs` module-level rustdoc — the math (Eqs. 8, 11, 14), the basis dictionary, the Woodbury swap, and the G1–G4 GOAT gate. Link to Plan 308 and Research 288.
 
 **Phase 1 exit criteria:** All T1.x tasks done. `cargo check --features karc_forecaster` passes. G1, G3, G4 pass. G2 documented (may defer to Phase 2 if Phase 1 bench is noisy). Feature is **opt-in** (`karc_forecaster` not in default features).
 

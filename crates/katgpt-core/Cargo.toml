@@ -127,6 +127,7 @@ smear_classifier = ["faithfulness_probe"]  # SmearClassifier — ternary (Cohere
 engram = ["dep:unicode-normalization", "dep:papaya"]  # Engram — hash-addressed, sigmoid-fused static pattern memory open primitive (Plan 299, Research 278, arXiv:2601.07372). N-gram-suffix → multi-head hash → O(1) table lookup → sigmoid gate → residual fuse. Open half of the Engram Super-GOAT (private half: riir-ai Guide 147; chain half: riir-chain R001 TODO). Default-off until G1–G7 GOAT gate passes. T4.3 rolls in `unicode-normalization` for NFKC tokenizer compression; T6.2 rolls in `papaya` for the plasma-tier lock-free LRU.
 gain_cost_halt = []  # Gain/Cost Loop Halting Primitive — per-loop halting kernel (Plan 304, Research 282, arXiv:2606.18023, LoopCoder-v2). halt when marginal refinement gain < marginal drift cost × τ; oscillation early-halt via cos θ < 0; L_min floor protects representational capacity. Phase 1 ships the substrate-agnostic kernel only — Phase 2 wires into `forward_looped()` via the existing elastic-loop-override path (Issue 035). Opt-in until G1–G5 GOAT gate passes.
 depth_invariance = []  # Depth-Invariance Diagnostic + MagnitudeRegularizedResidual — root-cause counterpart to BeliefRankPruner / GainCostLoopHalter / latent_functor/reestimation / micro_belief/coherence_bench (Plan 306, Research 286, arXiv:2605.09992 Eldenk et al., Attention Drift). Detects DepthSpecificRefinement / Collapsed / DepthInvariant on flattened `&[f32]` state chains. The MagnitudeRegularizedResidual wrapper is the modelless fix for kernels we own (HLA/functor/micro_belief/engram/Raven); for frozen MLPs the fix requires retraining (→ riir-train). Opt-in until G1 (8 correctness tests) passes.
+karc_forecaster = []  # KARC — Kolmogorov-Arnold Reservoir Computing delay-basis-ridge forecaster (Plan 308, Research 288, arXiv:2606.19984 Huang/Kurths/Tang). Modelless, inference-time trajectory forecaster: delay-embedding × sealed KarcBasis (Fourier/Chebyshev/BSpline) × closed-form ridge readout. Reuses the PEIRA ridge pattern via the new `linalg::ridge_solve` (f32) without touching PEIRA's f64 path. GOAT-gated G1 (double-scroll NRMSE ≤ 1e-3, ≥ 8 LT), G2 (≤ 500 ns/call forecast), G3 (zero-alloc forecast), G4 (bit-reproducible Wout). Opt-in — Phase 1 only; no root-feature alias yet.
 
 [[bench]]
 name = "flow_field_bench"
@@ -218,3 +219,17 @@ required-features = ["personality_composition"]
 [[example]]
 name = "personality_composition_02_taming"
 required-features = ["personality_composition"]
+
+# Plan 308 — KARC double-scroll GOAT gate (G1: NRMSE ≤ 1e-3, threshold ≥ 8 LT).
+# Integrates the paper §A.1 double-scroll ODE (R1=1.2, R2=3.44, R4=0.193,
+# β=11.6, I_r=2.25e-5), fits KARC with K=4/M=8/λ=1e-6, runs autonomous
+# rollout, prints NRMSE over the first Lyapunov time and the ε=0.1 threshold.
+[[example]]
+name = "karc_double_scroll"
+required-features = ["karc_forecaster"]
+
+# Plan 308 — KARC forecast hot-path benchmark (G2: ≤ 500 ns/call at D=8,M=8,K=4).
+[[bench]]
+name = "karc_forecast_bench"
+harness = false
+required-features = ["karc_forecaster"]
