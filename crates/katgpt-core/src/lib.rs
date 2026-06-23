@@ -286,6 +286,16 @@ pub mod subspace_phase_gate;
 // chain wiring lives in riir-ai (R154). Opt-in until G1–G6 GOAT gates pass.
 #[cfg(feature = "viable_manifold_graph")]
 pub mod viable_manifold_graph;
+
+// AC-GPT Arbitrary-Conditional Prefix — modelless mask builder + sequence
+// augmenter that turns any causal Transformer forward into a single-pass
+// arbitrary-conditional forward p(xe | xc) via position-aware copies of xc at
+// the front and a [xc-bidirectional | causal-everywhere-else] attention mask
+// (Lu et al., Mila, arXiv:2606.14943, Plan 313, Research 295). Phase 1 ships
+// types + bit math only — no attention kernel dep, no SVD. Opt-in until G1–G4
+// GOAT gates pass.
+#[cfg(feature = "ac_prefix")]
+pub mod ac_prefix;
 #[cfg(feature = "spectral_pruner")]
 pub use irrep_pruner::{
     IrrepPruner, IrrepPrunerConfig, irrep_pruner_from_config, spectral_flatness,
@@ -302,6 +312,9 @@ pub use viable_manifold_graph::{
     build_safe_manifold_graph, manifold_curiosity_walk, manifold_geodesic, manifold_random_walk,
     pullback_volume,
 };
+
+#[cfg(feature = "ac_prefix")]
+pub use ac_prefix::{AcPrefix, AcPrefixMask};
 
 #[cfg(feature = "flow_field_nav")]
 pub mod flow;

@@ -41,9 +41,9 @@ Ship a modelless, zero-allocation **AC-GPT-style arbitrary-conditional prefix pr
 
 ### Tasks
 
-- [ ] **T1.1** Add `ac_prefix` feature to `crates/katgpt-core/Cargo.toml` (opt-in, default-off).
-- [ ] **T1.2** Create `crates/katgpt-core/src/ac_prefix/mod.rs` with module doc linking to Research 295 and Plan 313.
-- [ ] **T1.3** Define the core types in `crates/katgpt-core/src/ac_prefix/types.rs`:
+- [x] **T1.1** Add `ac_prefix` feature to `crates/katgpt-core/Cargo.toml` (opt-in, default-off).
+- [x] **T1.2** Create `crates/katgpt-core/src/ac_prefix/mod.rs` with module doc linking to Research 295 and Plan 313.
+- [x] **T1.3** Define the core types in `crates/katgpt-core/src/ac_prefix/types.rs`:
   ```rust
   /// AC-GPT-style arbitrary-conditional prefix. Borrowed; zero-owning allocations.
   pub struct AcPrefix<'a> {
@@ -63,9 +63,9 @@ Ship a modelless, zero-allocation **AC-GPT-style arbitrary-conditional prefix pr
   #[repr(transparent)]
   pub struct AcPrefixMask { bits: Box<[u64]> } // owned only when materialized; borrowing variant for hot path
   ```
-- [ ] **T1.4** Implement `AcPrefix::augmented_len` (`base_tokens.len() + conditioning_positions.len()`).
-- [ ] **T1.5** Implement `AcPrefix::original_positions_into(&self, out: &mut [usize])` — writes original position for each augmented slot (the copy carries its source position; the original positions are identity).
-- [ ] **T1.6** Implement `AcPrefix::attends(&self, i: usize, j: usize) -> bool` with the three-region rule:
+- [x] **T1.4** Implement `AcPrefix::augmented_len` (`base_tokens.len() + conditioning_positions.len()`).
+- [x] **T1.5** Implement `AcPrefix::original_positions_into(&self, out: &mut [usize])` — writes original position for each augmented slot (the copy carries its source position; the original positions are identity).
+- [x] **T1.6** Implement `AcPrefix::attends(&self, i: usize, j: usize) -> bool` with the three-region rule:
   - region 0 = `[0, |xc|)` — bidirectional self-attn among the copies.
   - region 1 = `[|xc|, |x|+|xc|)` — the original sequence positions.
   - `(i ∈ r0, j ∈ r0) → true`
@@ -73,8 +73,8 @@ Ship a modelless, zero-allocation **AC-GPT-style arbitrary-conditional prefix pr
   - `(i ∈ r0, j ∈ r1) → false` (copies don't attend back to the original sequence — they ARE the original tokens)
   - `(i ∈ r1, j ∈ r1) → original_pos(i) >= original_pos(j)` (standard causal)
   - **Branch-free inner expression.** No heap allocation.
-- [ ] **T1.7** Implement `AcPrefix::loss_mask_into(&self, out: &mut [f32])` — 1.0 for eval positions in region 1, 0.0 for conditioning positions (region 1) and all region 0 copies.
-- [ ] **T1.8** Implement `AcPrefixMask::materialize_from(&prefix)` — bit-packs the `attends` rule into a `Box<[u64]>` for batched attention kernels that want a materialized mask.
+- [x] **T1.7** Implement `AcPrefix::loss_mask_into(&self, out: &mut [f32])` — 1.0 for eval positions in region 1, 0.0 for conditioning positions (region 1) and all region 0 copies.
+- [x] **T1.8** Implement `AcPrefixMask::materialize_from(&prefix)` — bit-packs the `attends` rule into a `Box<[u64]>` for batched attention kernels that want a materialized mask.
 
 **Phase 1 exit:** types compile, unit tests for `attends` three-region rule + `loss_mask_into` + `original_positions_into` all pass.
 
