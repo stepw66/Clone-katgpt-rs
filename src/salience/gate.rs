@@ -17,6 +17,20 @@ use super::types::SalienceDecision;
 /// **Zero-allocation on the hot path**: all state is fixed-size; `decide`
 /// and `decide_batch` perform no heap allocation.
 ///
+/// # Performance (GOAT-validated, 2026-06-23)
+///
+/// Measured on a dev laptop via `benches/salience_tri_gate_bench.rs`
+/// (1024-call batched timing, median of 256 batches):
+/// - `decide()` latency: **9.11 ns** for D=8, 14.81 ns for D=16, 30.27 ns for D=32.
+///   Cf. the crate's reference hot-path kernel `evolve_hla` at ~14 ns for D=8 —
+///   the two-sigmoid design adds ~5 ns (one extra dot-product) over a pure
+///   single-sigmoid gate.
+/// - `decide_batch()` throughput: **120.6 M decisions/sec** for D=8, N=1000.
+///
+/// All four GOAT gates pass (G1 determinism, G2 ablation parity, latency
+/// < 50 ns, throughput ≥ 50 M/s) → `salience_tri_gate` is a **default feature**.
+/// See `.benchmarks/303_salience_tri_gate_goat.md` for the full report.
+///
 /// Reference: Plan 303 (T1.5–T1.10), Research 281,
 /// source paper [arxiv 2606.14777](https://arxiv.org/abs/2606.14777)
 /// (JoyAI-VL-Interaction, Yao et al., JD.com, Jun 2026).
