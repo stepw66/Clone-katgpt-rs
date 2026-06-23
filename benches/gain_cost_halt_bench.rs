@@ -34,6 +34,8 @@
 use katgpt_core::gain_cost_halt::{
     GainCostLoopHalter, HaltDecision, HaltReason, angular_change, step_size,
 };
+#[cfg(feature = "pathway_tracker")]
+use katgpt_rs::speculative::pathway_tracker::PathwayTracker;
 use std::hint::black_box;
 use std::time::{Duration, Instant};
 
@@ -430,6 +432,192 @@ fn verify_non_oscillation_contract() -> bool {
 }
 
 // ──────────────────────────────────────────────────────────────────────────
+// G4 — Oscillation detection catches what stability-only misses
+// (Research 149 §5 G4)
+// ──────────────────────────────────────────────────────────────────────────
+
+/// G4 result: does gain/cost halter catch oscillation that PathwayTracker
+/// (stability-only) misses?
+struct G4Result {
+    /// Loop at which GainCostLoopHalter fired `Halt::Oscillation`. Expect 2.
+    halter_halt_loop: Option<usize>,
+    /// Final PathwayTracker stability (0.0–1.0). Expect ≥ 0.8 ("converged").
+    pathway_stability: Option<f32>,
+    /// Did PathwayTracker's `is_converged(0.8)` return true at the end?
+    /// Expect true — it sees constant branch selections and declares
+    /// "converged" despite the underlying activation oscillating.
+    pathway_converged: Option<bool>,
+    /// Pass criterion: halter halts at loop 2 via Oscillation AND
+    /// PathwayTracker reports stability ≥ 0.8 (converged). The contrast
+    /// proves gain/cost catches what stability-only misses.
+    pass: bool,
+}
+
+/// Simulate an oscillatory hidden-state trace where the activation hops
+/// between two fixed points A and B every loop. Both A and B project to the
+/// SAME top-k branch selection (so PathwayTracker sees constant input), but
+/// the update direction reverses sign each loop (so cos θ = −1.0 and the
+/// gain/cost halter detects oscillation).
+///
+/// Concrete construction (DIM=4):
+/// - h^(0) = origin
+/// - h^(1) = A = [+1, 0, 0, 0]
+/// - h^(2) = B = [−1, 0, 0, 0]   ← step^(2) = B − A = [−2, 0, 0, 0]
+/// - h^(3) = A = [+1, 0, 0, 0]   ← step^(3) = A − B = [+2, 0, 0, 0] = −step^(2)
+/// - ...
+///
+/// cos θ between step^(2) and step^(3) = dot(−v, v) / (|v|·|v|) = −1.0.
+///
+/// Both A and B map to branch selection [1, 3, 5] (constant), so
+/// PathwayTracker sees identical input every step and reports high stability.
+fn run_g4() -> G4Result {
+    println!("┌─ G4 — Oscillation detection catches what stability misses ───────┐");
+    println!("│ Regime: hidden state hops A↔B each loop (cos θ = −1.0 from loop 2)│");
+    println!("│ Branch selection constant [1,3,5] every loop (PathwayTracker input)│");
+    println!("│ Expect: halter Halts@L=2 (Oscillation); PathwayTracker 'converged'   │");
+    println!();
+
+    let dim: usize = 4;
+    let pos_a: Vec<f32> = vec![1.0, 0.0, 0.0, 0.0];
+    let pos_b: Vec<f32> = vec![-1.0, 0.0, 0.0, 0.0];
+    // Constant branch selection — both positions route to the same top-k.
+    let branches: [usize; 3] = [1, 3, 5];
+
+    // ── GainCostLoopHalter side ──────────────────────────────────────────
+    let mut halter = GainCostLoopHalter::new(TAU, OSCILLATION_PATIENCE, L_MIN);
+    let mut prev_hidden: Vec<f32> = vec![0.0; dim];
+    let mut prev_step_buf: Vec<f32> = Vec::with_capacity(dim);
+    let mut curr_step_buf: Vec<f32> = Vec::with_capacity(dim);
+    let mut first = true;
+    let mut halter_halt_loop: Option<usize> = None;
+
+    for tau in 1..=L_MAX {
+        // Hop: odd loops → A, even loops → B.
+        let curr_hidden = if tau % 2 == 1 { pos_a.clone() } else { pos_b.clone() };
+
+        let gain = step_size(&curr_hidden, &prev_hidden);
+
+        curr_step_buf.clear();
+        for (c, p) in curr_hidden.iter().zip(prev_hidden.iter()) {
+            curr_step_buf.push(c - p);
+        }
+
+        let cos_theta = if first {
+            first = false;
+            0.0
+        } else {
+            angular_change(&curr_step_buf, &prev_step_buf)
+        };
+
+        let decision = halter.halt_decision(tau, gain, IMPORTANT_COST_FLOOR, cos_theta);
+
+        std::mem::swap(&mut prev_step_buf, &mut curr_step_buf);
+        prev_hidden = curr_hidden;
+        halter.update_prev_step(gain);
+
+        if let HaltDecision::Halt { reason } = decision {
+            halter_halt_loop = Some(tau);
+            let reason_str = match reason {
+                HaltReason::Oscillation => "Oscillation",
+                HaltReason::GainBelowCost => "GainBelowCost",
+            };
+            println!(
+                "  GainCostLoopHalter: HALTED at loop {} ({}) — cos_theta was {:.3}",
+                tau, reason_str, cos_theta
+            );
+            break;
+        }
+    }
+    if halter_halt_loop.is_none() {
+        println!("  GainCostLoopHalter: ran all {} loops without halting", L_MAX);
+    }
+
+    // ── PathwayTracker side ──────────────────────────────────────────────
+    // Run PathwayTracker on the SAME number of loops the halter observed
+    // (or L_MAX if the halter didn't halt — it should have, but be defensive).
+    //
+    // Note: we also run a "full 10-loop" PathwayTracker to show that its
+    // stability signal stays high (≥0.8) even after many oscillatory loops —
+    // this is the real "stability-only misses it" evidence. The 2-loop
+    // reading is what the halter would have seen if consulted in parallel.
+    let loops_for_pathway = halter_halt_loop.unwrap_or(L_MAX);
+    let (pathway_stability_2loop, pathway_converged_2loop) =
+        run_g4_pathway(&branches, loops_for_pathway);
+    let (pathway_stability_full, pathway_converged_full) =
+        run_g4_pathway(&branches, L_MAX);
+    println!(
+        "  PathwayTracker ({} loops, parallel to halter): stability = {:.3}, is_converged(0.8) = {}",
+        loops_for_pathway, pathway_stability_2loop, pathway_converged_2loop
+    );
+    println!(
+        "  PathwayTracker (full {} loops, if halter hadn't fired): stability = {:.3}, is_converged(0.8) = {}",
+        L_MAX, pathway_stability_full, pathway_converged_full
+    );
+    println!(
+        "    (constant branch input → PathwayTracker's stability signal stays high (≥0.8)"
+    );
+    println!(
+        "     even after many oscillatory loops — it cannot detect the activation reversal)"
+    );
+
+    println!();
+    let halter_caught = halter_halt_loop == Some(2);
+    // G4 pass criterion: halter catches oscillation at L=2 AND PathwayTracker's
+    // stability signal remains high (≥0.8) after the full oscillatory trace —
+    // proving the stability-only primitive is structurally blind to this
+    // failure mode. We use the FULL-run stability (not the 2-loop reading)
+    // because that's the honest "stability-only misses it" evidence: even
+    // after L_MAX oscillatory loops, PathwayTracker's stability stays high.
+    // The 2-loop `is_converged=false` is an artifact of the `steps >= 3`
+    // minimum, not oscillation detection.
+    let pathway_missed = pathway_stability_full >= 0.8;
+    let pass = halter_caught && pathway_missed;
+
+    if pass {
+        println!("│ G4 PASS: gain/cost halter caught oscillation at L=2 (cos θ = −1.0);");
+        println!("│          PathwayTracker (stability-only) reported stability={:.3}", pathway_stability_full);
+        println!("│          after {} oscillatory loops — structurally blind to activation reversal ✓", L_MAX);
+    } else {
+        println!("│ G4 FAIL:");
+        if !halter_caught {
+            println!("│   → GainCostLoopHalter did not halt at L=2 (got {:?})", halter_halt_loop);
+        }
+        if !pathway_missed {
+            println!("│   → PathwayTracker full-run stability={:.3} (< 0.8) — controls mismatch", pathway_stability_full);
+        }
+    }
+    println!("└──────────────────────────────────────────────────────────────────┘");
+    println!();
+
+    G4Result {
+        halter_halt_loop,
+        pathway_stability: Some(pathway_stability_full),
+        pathway_converged: Some(pathway_converged_full),
+        pass,
+    }
+}
+
+/// Drive PathwayTracker with constant branch input for `loops` steps and
+/// return (final stability, is_converged(0.8)).
+#[cfg(feature = "pathway_tracker")]
+fn run_g4_pathway(branches: &[usize], loops: usize) -> (f32, bool) {
+    let mut tracker = PathwayTracker::new(L_MAX);
+    for _ in 0..loops {
+        tracker.update(branches);
+    }
+    (tracker.stability(), tracker.is_converged(0.8))
+}
+
+/// Fallback when `pathway_tracker` feature is off: G4 cannot run the
+/// comparison. Report NaN stability and force-fail with a clear message.
+/// This branch should never trigger because the bench's `required-features`
+/// includes `pathway_tracker`.
+#[cfg(not(feature = "pathway_tracker"))]
+fn run_g4_pathway(_branches: &[usize], _loops: usize) -> (f32, bool) {
+    (f32::NAN, false)
+}
+
+// ──────────────────────────────────────────────────────────────────────────
 // Secondary: latency sanity (informational, not gated)
 // ──────────────────────────────────────────────────────────────────────────
 
@@ -460,7 +648,8 @@ fn run_latency_sanity() {
 
 fn main() {
     println!("═══════════════════════════════════════════════════════════════════");
-    println!("  Plan 304 T2.4 + T2.5 — Gain/Cost Loop Halting GOAT Gates (G2/G3)");
+    println!("  Plan 304 T2.4 + T2.5 + G4 — Gain/Cost Loop Halting GOAT Gates");
+    println!("  (G2 crowd-NPC savings / G3 no-regression / G4 oscillation-vs-stability)");
     println!("═══════════════════════════════════════════════════════════════════");
     println!();
     println!("Synthetic kernel-only harness. No `forward_looped`, no weights.");
@@ -470,6 +659,7 @@ fn main() {
 
     let (g2_rows, g2_pass) = run_g2();
     let g3 = run_g3();
+    let g4 = run_g4();
     run_latency_sanity();
 
     // ── Final verdict ────────────────────────────────────────────────────
@@ -509,14 +699,21 @@ fn main() {
     if g3.spurious_oscillation {
         println!("    ⚠ spurious Oscillation fired on aligned cos_theta");
     }
+    println!(
+        "  G4 (osc vs stability):    {} — halter halted at L={:?}, PathwayTracker stability={:?}",
+        if g4.pass { "PASS" } else { "FAIL" },
+        g4.halter_halt_loop,
+        g4.pathway_stability
+    );
     println!();
 
-    if g2_pass && g3.pass {
-        println!("  ── BOTH GATES PASS ──");
-        println!("  GOAT gate met. Recommendation: keep `gain_cost_halt` opt-in");
-        println!("  (default-off) until riir-ai Plan 330 wires real game loops;");
-        println!("  the synthetic harness confirms the kernel's savings/regression");
-        println!("  contract on the two reference regimes.");
+    if g2_pass && g3.pass && g4.pass {
+        println!("  ── ALL THREE GATES PASS (G2/G3/G4) ──");
+        println!("  GOAT gate matrix complete (G1 mechanics + G5 isolation already");
+        println!("  shipped in Plan 304 T1.5/T3.5). Recommendation: keep `gain_cost_halt`");
+        println!("  opt-in (default-off) until riir-ai Plan 330 wires real game loops;");
+        println!("  the synthetic harness confirms the kernel's savings/regression/");
+        println!("  oscillation-detection contract on all reference regimes.");
         std::process::exit(0);
     } else {
         println!("  ── ONE OR MORE GATES FAILED ──");
@@ -527,6 +724,11 @@ fn main() {
         if !g3.pass {
             println!("  → G3 fix: tune cost_floor down for important tier, or");
             println!("    verify cos_theta extraction in the forward-path wiring.");
+        }
+        if !g4.pass {
+            println!("  → G4 fix: verify cos_theta < 0 detection in halt_decision;");
+            println!("    if PathwayTracker reports low stability, the test scenario");
+            println!("    may need a different constant-branch mapping.");
         }
         std::process::exit(1);
     }

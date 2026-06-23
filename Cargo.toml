@@ -627,14 +627,16 @@ path = "benches/salience_tri_gate_bench.rs"
 required-features = ["salience_tri_gate"]
 harness = false
 
-# Plan 304 Phase 2 T2.4/T2.5 — Gain/Cost Loop Halting G2 (crowd-NPC savings
-# >= 75%) + G3 (important-NPC no-regression, waste <= 1) synthetic bench.
+# Plan 304 Phase 2 T2.4/T2.5 + G4 — Gain/Cost Loop Halting G2 (crowd-NPC savings
+# >= 75%) + G3 (important-NPC no-regression, waste <= 1) + G4 (oscillation
+# detection catches what PathwayTracker stability-only misses) synthetic bench.
 # Kernel-only (forward_looped-free) — the harness simulates per-loop
-# step_size decay patterns directly against GainCostLoopHalter.
+# step_size decay patterns directly against GainCostLoopHalter. G4 requires
+# `pathway_tracker` for the stability-only baseline comparison.
 [[bench]]
 name = "gain_cost_halt_bench"
 path = "benches/gain_cost_halt_bench.rs"
-required-features = ["gain_cost_halt"]
+required-features = ["gain_cost_halt", "pathway_tracker"]
 harness = false
 
 # Plan 305 Phase 2 T2.1/T2.2 — Algorithmic-Probability Sampler GOAT bench.
