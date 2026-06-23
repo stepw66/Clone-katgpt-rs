@@ -348,8 +348,11 @@ mod tests {
             self.0 >> 33
         }
         fn next_f32(&mut self) -> f32 {
-            // Uniform in [0, 1). High bits only — well-mixed.
-            (self.next() as f32) / (u32::MAX as f32)
+            // Uniform in [0, 1). `next()` returns the top 31 bits (range [0, 2^31));
+            // dividing by 2^31 (NOT u32::MAX ≈ 2^32) yields the correct [0, 1) range.
+            // The prior `u32::MAX` divisor halved the range to [0, 0.5), biasing every
+            // downstream decision (always-Silent / never-Delegate). See Plan 303 follow-up.
+            (self.next() as f32) / ((1u64 << 31) as f32)
         }
     }
 

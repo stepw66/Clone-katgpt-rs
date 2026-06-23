@@ -277,6 +277,7 @@ graph LR
 | **Triggered Injection Gate** (`triggered_injection`) | 278 | G1/G2/G3/G8 ✅ | Sigmoid-thresholded inject/skip gate — 50% skips w/ 0.63% quality parity in saturated regime |
 | **FaithfulnessProbe** (`faithfulness_probe`) | 278 | G1/G2/G8 ✅ | Causal intervention diagnostic — 100%/100% detection, IG surrogate Spearman ρ=1.0, audit cadence |
 | **SmearClassifier** (`smear_classifier`) | 298 | G1/G2/G3 ✅ | Ternary (CoherentSingle/TokenSmear/SequenceSmear) latent-mass vocabulary extending Plan 278 — SequenceSmear/TokenSmear unfaithfulness ratio 2.11×, k=8 d=32 at 107.6 ns |
+| **Salience Tri-Gate** (`salience_tri_gate`) | 303 | 4/4 ✅ | 3-way per-tick emit gate (Speak / Silent / Delegate) with silence as a first-class variant, two stacked sigmoids (never softmax), zero-allocation hot path. `decide()` **9.11 ns** for D=8 (target <50ns, ~5 ns over single-sigmoid), `decide_batch()` **120.6 M/s** for D=8 N=1000 (target ≥50M). Default-on (Plan 303 Phase 5, 2026-06-23). |
 | **Engram** (`engram`) | 299 | G1/G2/G4 ✅ (G6 deferred) | Hash-addressed sigmoid-fused static pattern memory — N-gram → multi-head hash → O(1) lookup → sigmoid gate → residual fuse. **48 ns/retrieval**, Spearman ρ=1.0. Opt-in pending G6 (effective-depth) in riir-ai |
 | **CS-KV-Importance Probe** (`cs_kv_probe`) | 280 | G1/G2/G3 ✅ | Compressed-sensing KV-group importance probe + density-budget interpolator, sigmoid-compatible |
 | **BoMSampler** (`bom_sampling`) | 281 | G1/G2/G3 ✅ | K-hypothesis single-pass belief sampling — K=8 at 1.87× step, **+31.49pp** arena win in riir-ai Plan 314 |
@@ -286,6 +287,7 @@ graph LR
 | **ICT Branching Detector** (`ict_branching`) | 294 | G1/G3/G4/G5/G6/G10 ✅ | `collision_purity β(π) = Σ π²`, JS-divergence novelty, BranchingDetector — ρ(H₁,JS)=0.065 (Super-GOAT proceeds) |
 | **CCE Moderator** (`cce_moderator`) | 295 | G1/G2/G3 ✅ | LP-CCE solver + Bregman primal-dual iterator (arxiv 2606.20062). Chicken CCE welfare +37.5% over Nash; designer steering demo shows two Γ₀ → two different CCEs. Default-off pending riir-ai Plan 325 runtime integration (G4 latency + G5 LatCal). |
 | **MicroRecurrentBeliefState** (`micro_belief`) | 276 | G1.1–G1.4 ✅ | BeliefKernel trait unifying attractor + leaky-integrator families — G2 (attractor coherence) deferred |
+| **Algorithmic-Probability Sampler** (`complexity_prior_sampler`) | 305 | G1+G2 ✅ | Levin-Search variant for modelless inference — `sigmoid(-α·K̃(x) - β)`-weighted candidate sampling with pluggable K̃ proxies (RLE / Shannon entropy / L1). G1 safety 5/5 landscapes PASS; G2 exponential speedup: RLE **92275×** + Entropy **18455×** stretch on low-K optimum (L1 honest-negative on sparse byte encoding, documented domain mismatch). Per-candidate sigmoid **never softmax**. Default-on (Plan 305 Phase 2, 2026-06-23). |
 | **Forensic Watermark** | Moved to riir-ai | Recipe impl relocated to Plan 322 (honeypot OPSEC) |
 
 ## 🎮 Arena Proofs — HL Thesis Validated
@@ -1156,11 +1158,58 @@ Open half of the Code World Models Super-GOAT: a generic, IP-free trait surface 
 
 A Levin-Search variant applied to modelless inference: replace uniform candidate sampling in MCTS / bandits / speculative drafters with `sigmoid(-α·K̃(x) - β)`-weighted sampling, where `K̃` is a pluggable Kolmogorov-complexity proxy (RLE ratio, Shannon entropy, L1 norm — LZ4 + BLAKE3 stubs land behind sub-features). Per Dingle & Hutter 2026 (*Entropy* 28(2):226), this prior is **never worse than uniform** (α ≥ 0 ⇒ low-K candidates are always at least as likely) and **exponentially better on simple optima** (Levin-search lift). Theorem-backed cross-task transfer is exposed via `CoincidenceGate`: a found optimum `x*` for one simple objective `f1` hits `Θ(r / |X_O(1)|)` per probe against other simple objectives, vs `Θ(r / |X|)` from random candidates.
 
-Phase 1 (shipping): `CompressionPriorSampler<K>` + `LatentCompressionPriorSampler<K>` (operates on `&[f32]` via byte-quantization) + `CoincidenceGate` — 22/22 tests PASS, demo shipped. Per-candidate sigmoid **never softmax** (project rule). Zero-allocation hot path: caller-provided scratch buffers, `#[inline]` proxies.
+Phase 1 (shipped): `CompressionPriorSampler<K>` + `LatentCompressionPriorSampler<K>` (operates on `&[f32]` via byte-quantization) + `CoincidenceGate` — 22/22 tests PASS, demo shipped. Per-candidate sigmoid **never softmax** (project rule). Zero-allocation hot path: caller-provided scratch buffers, `#[inline]` proxies.
+
+**Phase 2 GOAT (2026-06-23): PROMOTED to default-on.** G1 (sampler safety) PASS — 5/5 random landscapes, worst Δ −0.5% vs uniform (target ≤ +1% degradation). G2 (exponential speedup) PASS — RLE proxy **92275×** + Entropy proxy **18455×** stretch on low-K optimum (Levin-search lift); L1 proxy 72× honest-negative on sparse byte encoding (documented domain mismatch: K̃ range collapses to [0, 0.125] under L1 normalization, too narrow to concentrate even at α=128). See [`.benchmarks/305_complexity_prior_sampler_goat.md`](.benchmarks/305_complexity_prior_sampler_goat.md).
 
 Phase 3 (this plan): adapter-only integration hooks behind three sub-features — `mcts_k_prior` (`MctsExpansionPrior` trait with `UniformExpansion` / `KPriorExpansion<K>` impls), `bandit_k_prior` (`KPriorBandit<K>` wrapper that adds a per-arm log-prior to any bandit policy), `spec_k_prior` (`KPriorDrafter<K>` post-drafting re-ranker that composes with `CompressionDrafter` R256 and `DendriticGate` R260). All three are **adapter-only seams** — the existing MCTS / bandit / speculative code stays byte-identical when the sub-feature is off; the caller wires the prior into their expansion / arm-scoring / draft-ranking loop.
 
-Feature gates: `complexity_prior_sampler` (Phase 1 primitives, opt-in until G1 + G2 GOAT), `mcts_k_prior` / `bandit_k_prior` / `spec_k_prior` (Phase 3 hooks, each implies `complexity_prior_sampler`). 📖 Plan: [`.plans/305_algorithmic_probability_sampler.md`](.plans/305_algorithmic_probability_sampler.md), Research: [`.research/284_Simplicity_Bias_Sampler_Coincidence_Extrema.md`](.research/284_Simplicity_Bias_Sampler_Coincidence_Extrema.md), Paper: [Dingle & Hutter, *Entropy* 28(2):226](https://www.mdpi.com/1099-4300/28/2/226).
+Feature gates: `complexity_prior_sampler` (**DEFAULT-ON** since Phase 2 GOAT PASS 2026-06-23), `mcts_k_prior` / `bandit_k_prior` / `spec_k_prior` (Phase 3 hooks, each implies `complexity_prior_sampler`). 📖 Plan: [`.plans/305_algorithmic_probability_sampler.md`](.plans/305_algorithmic_probability_sampler.md), Research: [`.research/284_Simplicity_Bias_Sampler_Coincidence_Extrema.md`](.research/284_Simplicity_Bias_Sampler_Coincidence_Extrema.md), Paper: [Dingle & Hutter, *Entropy* 28(2):226](https://www.mdpi.com/1099-4300/28/2/226), GOAT proof: [`.benchmarks/305_complexity_prior_sampler_goat.md`](.benchmarks/305_complexity_prior_sampler_goat.md).
+
+### 🧠 Salience Tri-Gate: Three-Way Per-Tick Emit Gate (Plan 303, Research 281)
+
+A modelless, zero-allocation primitive that decides — per tick, per agent — whether to **Speak** (emit), **Stay Silent** (first-class variant, not just "no emission"), or **Delegate** (defer to another agent). Built on two stacked sigmoids (project rule: **never softmax**), one for the speak direction and one for the delegate direction, with silence emerging naturally when both sigmoids are below threshold.
+
+**Kernel surface:**
+
+```rust
+pub struct SalienceTriGate<A, const D: usize> {
+    d_speak:    [f32; D],  // "what makes this agent want to speak"
+    d_delegate: [f32; D],  // "what makes this agent want to delegate vs answer"
+    w_z: f32,              // zone-attention scalar weight
+    w_c: f32,              // curiosity scalar weight
+    // + thresholds (floor_speak, ceil_delegate)
+}
+
+pub enum SalienceDecision<A> { Speak, Silent, Delegate(A) }
+
+impl<A, const D: usize> SalienceTriGate<A, D> {
+    pub fn decide(&self, a: &[f32; D], z: f32, c: f32,
+                  delegate_payload: A, tick: u64) -> SalienceDecision<A>;
+    pub fn decide_batch(&self, activations: &[[f32; D]], z: &[f32], c: &[f32],
+                        payloads: &[A], tick: u64,
+                        out: &mut [SalienceDecision<A>]);
+}
+```
+
+**Why two sigmoids, not softmax:** Softmax couples the three outcomes — `P(Delegate)` would rise merely because `P(Speak)` rose. The two-sigmoid design keeps each decision axis independent: an agent can simultaneously have low speak-salience AND low delegate-salience, yielding **Silent** as a genuine first-class outcome rather than a tie-break. This matches the JoyAI-VL-Interaction paper's observation that silence carries information distinct from either emission.
+
+**Phase 2 GOAT (2026-06-23): PROMOTED to default-on.**
+
+| Gate | Target | D=8 | D=16 | D=32 | Verdict |
+|------|--------|-----|------|------|---------|
+| **G1** determinism | bit-identical across runs | PASS (1000-call re-confirm) | — | — | ✅ |
+| **G2** ablation parity | `ceil_delegate=+∞` bit-identical to speak/silent reference | PASS (10k-input re-confirm) | — | — | ✅ |
+| **Latency** `decide()` | < 50 ns for D=8 | **9.11 ns** | 14.81 ns | 30.27 ns | ✅ |
+| **Throughput** `decide_batch()` | ≥ 50 M decisions/sec for D=8, N=1000 | **120.6 M/s** | 77.7 M/s | 36.3 M/s | ✅ |
+
+The D=8 latency (9.11 ns) is comparable to the crate's reference hot-path kernel `evolve_hla` (~14 ns for D=8) — the two-stacked-sigmoid design (one extra dot-product over a pure-sigmoid gate) costs ~5 ns of additional latency, well within the 50 ns budget. See [`.benchmarks/303_salience_tri_gate_goat.md`](.benchmarks/303_salience_tri_gate_goat.md).
+
+Feature gate: `salience_tri_gate` (**DEFAULT-ON** since Phase 5 GOAT PASS 2026-06-23). 📖 Plan: [`.plans/303_salience_tri_gate_primitive.md`](.plans/303_salience_tri_gate_primitive.md), Research: [`.research/281_BoM_Salience_Gate.md`](.research/281_BoM_Salience_Gate.md), Paper: [JoyAI-VL-Interaction, arxiv 2606.14777](https://arxiv.org/abs/2606.14777). NPC wiring (per-NPC salience gate runtime) lives in riir-ai Plan 330.
+
+Examples:
+- `cargo run --example salience_tri_gate_basic --features salience_tri_gate`
+- `cargo run --example salience_tri_gate_batch --features salience_tri_gate`
 
 ## 🔧 KV Compression
 
@@ -1217,7 +1266,7 @@ Default: **Hybrid OCT+PQ** (OCTOPUS triplet encoding + PlanarQuant 2D Givens rot
 | **Forensic Watermark** | Moved to `riir-ai` (Plan 322) — recipe implementation relocated to preserve honeypot value per strategy verdict 003 | — |
 | **ICT Branching Detector** (`ict_branching`) | `collision_purity β(π)` + JS-divergence novelty + `BranchingDetector` (Plan 294, arxiv 2606.19771) | Opt-in — G1/G3/G4/G5/G6/G10 PASS (Super-GOAT proceeds); G8 (runtime fusion) deferred to riir-ai Plan 324. |
 | **PersonalityWeightedComposition** (`personality_composition`) | Sigmoid-gated N-layer latent direction composition + reward-surprise drift + BLAKE3 snapshot (Plan 297, Research 276). Open primitive for the Entity Cognition Stack Super-GOAT. | **DEFAULT-ON** — GOAT G4 (79.585ns < 1µs target, 12.6× margin) + G5 (zero alloc) PASS. |
-| **Gain/Cost Loop Halting** (`gain_cost_halt`) | Per-loop halting kernel for `forward_looped` (Plan 304, Research 282, arXiv:2606.18023 LoopCoder-v2). halt when marginal refinement gain < marginal drift cost × τ; oscillation early-halt via cos θ < 0; L_min floor. Composes with `elastic_loop_override` (static wins). Phase 2 wired; gain signal = `step_size` (erank degenerate for single-vector hidden state). | Opt-in — G1 mechanics PASS (27/27); G2/G3 **deferred** (synthetic loop suite harness). |
+| **Gain/Cost Loop Halting** (`gain_cost_halt`) | Per-loop halting kernel for `forward_looped` (Plan 304, Research 282, arXiv:2606.18023 LoopCoder-v2). halt when marginal refinement gain < marginal drift cost × τ; oscillation early-halt via cos θ < 0; L_min floor. Composes with `elastic_loop_override` (static wins). Phase 2 wired; gain signal = `step_size` (erank degenerate for single-vector hidden state). | Opt-in — G1 mechanics PASS (27/27); G2 crowd-NPC savings **76.7% mean** PASS (target ≥75%); G3 important-NPC no-regression **0-loop waste** PASS (target ≤1). G4 oscillation-vs-stability + Phase 2.5 (TF-Loop wiring) deferred. |
 
 📖 **Full detail for ALL opt-in features + complete feature flag reference:** [`.docs/21_opt_in_features.md`](.docs/21_opt_in_features.md) and [`Cargo.toml`](Cargo.toml).
 
