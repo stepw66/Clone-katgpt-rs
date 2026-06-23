@@ -315,3 +315,21 @@ pub use screening::{
     CoincidenceGate, CompressionPriorSampler, ComplexityProxy, EntropyComplexity, L1Complexity,
     LatentCompressionPriorSampler, RleComplexity, quantize_latent,
 };
+
+// Alien Sampler Primitive — Coherence × Availability Frontier Ranking
+// (Plan 311, Research 293, arxiv 2603.01092, Artiles et al. "The Alien Space
+// of Science" May 2026). Generic, modelless within-pool ranking: z-scored
+// linear fusion `(1−β)·zC + β·zU` of a coherence score and an unavailability
+// score. `MedianTopMAvailability` implements the paper's load-bearing
+// median-of-top-m cosine rule. Open math only — NPC population banks, CGSP
+// binding, and zone emission feeds live in riir-ai Plan 312+.
+// Opt-in until Phase 3 GOAT gate (G1 motif collapse ≤50% of OPUS baseline,
+// G2 quality ≥90% of coherence-only, G3 perf ≤5× baseline, G4 no Vec<f32>
+// escapes rank()) passes.
+#[cfg(feature = "alien_sampler")]
+pub mod alien_sampler;
+#[cfg(feature = "alien_sampler")]
+pub use alien_sampler::{
+    AlienConfig, AlienSampler, AlienSamplerError, AvailabilityScorer, CoherenceScorer,
+    MedianTopMAvailability, ScoredCandidate,
+};

@@ -4,7 +4,7 @@
 **Research:** [katgpt-rs/.research/293_Alien_Science_Coherence_Availability_Frontier.md](../.research/293_Alien_Science_Coherence_Availability_Frontier.md)
 **Source paper:** [arXiv:2603.01092](https://arxiv.org/abs/2603.01092) — Artiles et al., "The Alien Space of Science" (May 2026)
 **Target:** `katgpt-rs/src/alien_sampler/` (new module) + Cargo feature `alien_sampler`
-**Status:** Active — Phase 1 not started
+**Status:** Complete — Phase 1+2+3 done. GOAT gate FAILED (1/4). Module ships opt-in, NOT promoted to default. See `.benchmarks/311_alien_sampler_goat.md`.
 
 ---
 
@@ -22,7 +22,7 @@ Ship the generic, modelless `AlienSampler<V, C, A>` primitive distilled from arX
 
 ### Tasks
 
-- [ ] **T1.1** Create `src/alien_sampler/` module tree:
+- [x] **T1.1** Create `src/alien_sampler/` module tree:
   - `mod.rs` — module root, re-exports
   - `traits.rs` — `CoherenceScorer<V>` + `AvailabilityScorer<V>` traits
   - `sampler.rs` — `AlienSampler<V, C, A>` struct + `rank()` method
@@ -30,7 +30,7 @@ Ship the generic, modelless `AlienSampler<V, C, A>` primitive distilled from arX
   - `types.rs` — `AlienConfig`, `ScoredCandidate`, error types
   - `tests.rs` — unit tests (inline module)
 
-- [ ] **T1.2** Implement traits in `traits.rs`:
+- [x] **T1.2** Implement traits in `traits.rs`:
   ```rust
   pub trait CoherenceScorer<V> {
       fn coherence(&self, atoms: &[V]) -> f32;
@@ -41,7 +41,7 @@ Ship the generic, modelless `AlienSampler<V, C, A>` primitive distilled from arX
   }
   ```
 
-- [ ] **T1.3** Implement `AlienSampler::rank()` in `sampler.rs`:
+- [x] **T1.3** Implement `AlienSampler::rank()` in `sampler.rs`:
   - Take `&[Vec<V>]` candidates + caller-provided scratch buffers `&mut [f32]` (zero-alloc hot path per AGENTS.md).
   - Compute coherence + availability into scratch.
   - Within-pool z-score both (mean + std, population formula for determinism).
@@ -49,21 +49,21 @@ Ship the generic, modelless `AlienSampler<V, C, A>` primitive distilled from arX
   - Return `Vec<(score, candidate_idx)>` sorted desc.
   - Handle edge cases: pool size ≤ 1 (std=0), empty candidates, NaN guard.
 
-- [ ] **T1.4** Implement `MedianTopMAvailability` in `median_top_m.rs`:
+- [x] **T1.4** Implement `MedianTopMAvailability` in `median_top_m.rs`:
   - Precomputed `community_bank: Vec<Vec<f32>>` (embeddings of repertoire items).
   - `embedding_fn: Fn(&[V]) -> Vec<f32>` or pre-embedded candidates (caller choice).
   - For each candidate: compute cosine against all bank items, take top-m via `select_nth_unstable` (O(n) partial sort, zero-alloc), return median of top-m.
   - `m` configurable (paper uses top-10). Top-1 fallback if bank smaller than m.
 
-- [ ] **T1.5** Add feature flag `alien_sampler` to `Cargo.toml` (default-OFF):
+- [x] **T1.5** Add feature flag `alien_sampler` to `Cargo.toml` (default-OFF):
   ```toml
   alien_sampler = ["dep:katgpt-core"]  # if any katgpt-core types needed; else just []
   ```
   Wire module in `src/lib.rs` under `#[cfg(feature = "alien_sampler")]`.
 
-- [ ] **T1.6** Run `cargo check --features alien_sampler` + `cargo check --no-default-features`. Both must compile.
+- [x] **T1.6** Run `cargo check --features alien_sampler` + `cargo check --no-default-features`. Both must compile.
 
-- [ ] **T1.7** Write Phase-1 unit tests in `tests.rs`:
+- [x] **T1.7** Write Phase-1 unit tests in `tests.rs`:
   - `rank_empty_returns_empty`
   - `rank_single_returns_one`
   - `beta_zero_is_coherence_only` (Fβ=0 ranking equals coherence-only ranking)
@@ -79,12 +79,12 @@ Ship the generic, modelless `AlienSampler<V, C, A>` primitive distilled from arX
 
 ### Tasks
 
-- [ ] **T2.1** Property tests via `proptest` (if already a dev-dep; else skip and use random fuzz):
+- [x] **T2.1** Property tests via `proptest` (if already a dev-dep; else skip and use random fuzz):
   - `rank_is_permutation_of_indices` (output indices are a permutation of `0..candidates.len()`)
   - `beta_monotone_in_coherence_when_avail_const` (when availability is constant, increasing β toward 0 → more coherence-driven)
   - `median_top_m_invariant_to_bank_permutation` (shuffle bank → same result)
 
-- [ ] **T2.2** Microbench `benches/alien_sampler_bench.rs`:
+- [x] **T2.2** Microbench `benches/alien_sampler_bench.rs`:
   - `bench_rank_1k_candidates` (1000 candidates × 4 atoms × 16-dim bank of 100)
   - `bench_rank_10k_candidates` (10k candidates — warm-tier batch case)
   - `bench_median_top_m_m10_bank100` (single MedianTopMAvailability call)
@@ -92,7 +92,7 @@ Ship the generic, modelless `AlienSampler<V, C, A>` primitive distilled from arX
   - Target: `rank` 1k ≤ 500µs SIMD, 10k ≤ 5ms; `median_top_m` bank100 ≤ 5µs, bank10k ≤ 500µs.
   - Use `std::time::Instant` + batched timing per crate convention (matches salience_tri_gate bench pattern). No Criterion dep.
 
-- [ ] **T2.3** Module-level doc in `src/alien_sampler/mod.rs`:
+- [x] **T2.3** Module-level doc in `src/alien_sampler/mod.rs`:
   - Cite paper (arXiv:2603.01092)
   - Explain the two-axis decomposition (coherence vs availability)
   - Note the load-bearing `MedianTopMAvailability` rule (median over top-m, not top-1)
@@ -106,33 +106,33 @@ This is the make-or-break phase. The whole point is proving dual-encoder availab
 
 ### Tasks
 
-- [ ] **T3.1** Build synthetic motif-collapse scenario in `benches/alien_sampler_goat.rs`:
+- [x] **T3.1** Build synthetic motif-collapse scenario in `benches/alien_sampler_goat.rs`:
   - 100 "NPCs", each with a 16-dim Conjecturer-equivalent pool (just `Vec<f32>` directions).
   - A shared "zone bank" initialized empty; populated as NPCs emit selections.
   - Coherence scorer: dot-product against a fixed per-NPC "personality direction" (so coherence rewards staying on-personality).
   - Without availability pressure, all NPCs converge to the top-3 highest-coherence directions (the "motif").
 
-- [ ] **T3.2** Implement three arms:
+- [x] **T3.2** Implement three arms:
   - **Arm A (no availability):** β=0, coherence-only ranking. Expected: severe motif collapse.
   - **Arm B (OPUS-style scalar local redundancy):** per-NPC CountSketch-equivalent penalty against own previous selections. Reuse `OpusBanditPruner` if composable; else a minimal local-redundancy stub.
   - **Arm C (AlienSampler):** `MedianTopMAvailability` against the zone bank, β=0.7.
 
-- [ ] **T3.3** Run 10k cycles per arm, 5 seeds each. Record per-cycle:
+- [x] **T3.3** Run 10k cycles per arm, 5 seeds each. Record per-cycle:
   - Selected direction index per NPC
   - Coherence score of selected direction
   - Bank state (for arm C)
 
-- [ ] **T3.4** Compute metrics:
+- [x] **T3.4** Compute metrics:
   - **G1 (motif collapse):** top-10 direction concentration across the zone (fraction of all selections in last 1000 cycles that hit the top-10 most-selected directions). Arm C must be ≤ 50% of Arm B's concentration. (Paper analog: 95.7%→34.3% is ~36% of baseline.)
   - **G2 (quality preservation):** mean coherence of selected directions in last 1000 cycles. Arm C must be ≥ 90% of Arm A's mean coherence. (Diversity must not destroy quality.)
   - **G3 (perf):** per-cycle wall time for Arm C must be ≤ 5× Arm B's per-cycle wall time. (Dual-encoder is allowed to be slower, but not catastrophically.)
   - **G4 (latent boundary):** no `Vec<f32>` from the bank or per-NPC Fβ score appears in a hypothetical `SyncBlock`-equivalent audit. (This is a static check on the bench — the open primitive has no sync concept, so this gate is "no `Vec<f32>` escapes the `rank()` call boundary in the public API".)
 
-- [ ] **T3.5** Write results to `.benchmarks/311_alien_sampler_goat.md` with all four gate verdicts.
+- [x] **T3.5** Write results to `.benchmarks/311_alien_sampler_goat.md` with all four gate verdicts.
 
 ### Gate decision tree
 
-- **G1 PASS + G2 PASS + G3 PASS + G4 PASS** → promote `alien_sampler` to default feature (Phase 5).
+- **G1 BORDERLINE-FAIL + G2 FAIL + G3 FAIL + G4 PASS** → DEMOTE. Module stays opt-in for paper reproduction. β sweep (β=0.2, 0.3, 0.5, 0.7) found a sharp phase transition at β≈0.4 with no β satisfying both G1 and G2 on the synthetic single-peak-coherence scenario. The dual-encoder mechanism IS validated (2× concentration reduction at β=0.7), but the scenario's quality/diversity tradeoff is unfavorable. See `.benchmarks/311_alien_sampler_goat.md`.
 - **G1 FAIL** → demote. The dual-encoder is not worth the complexity over scalar redundancy. Note honestly in `.benchmarks/311_*.md`, keep module as opt-in for research reproduction, do NOT promote.
 - **G1 PASS but G2 FAIL** → diversity at the cost of quality. Investigate β sweep (try β=0.5, 0.6); if no β satisfies both, demote.
 - **G1+G2 PASS but G3 FAIL** → perf regression. Profile; if fixable in Phase 4 SIMD pass, proceed; else demote to opt-in.
@@ -143,10 +143,10 @@ This is the make-or-break phase. The whole point is proving dual-encoder availab
 
 ### Tasks
 
-- [ ] **T4.1** SIMD-ify `MedianTopMAvailability` cosine computation (4 or 8 lanes).
-- [ ] **T4.2** Hoist z-score computation into a single pass (compute mean + std in one loop, fuse in second).
-- [ ] **T4.3** Re-run Phase 3 G3 perf measurement; confirm improvement.
-- [ ] **T4.4** If `rank()` allocates the return `Vec`, add `rank_into(&mut Vec<(f32, usize)>)` variant for callers that want to reuse the output buffer.
+- [ ] **T4.1** SIMD-ify `MedianTopMAvailability` cosine computation (4 or 8 lanes). **DEFERRED** — Phase 3 GOAT gate failed; no point optimizing a primitive that doesn't promote.
+- [ ] **T4.2** Hoist z-score computation into a single pass (compute mean + std in one loop, fuse in second). **DONE** as part of Phase 1 (`fuse_and_sort` kernel).
+- [ ] **T4.3** Re-run Phase 3 G3 perf measurement; confirm improvement. **DEFERRED** with T4.1.
+- [x] **T4.4** If `rank()` allocates the return `Vec`, add `rank_into(&mut Vec<(f32, usize)>)` variant for callers that want to reuse the output buffer. **DONE** — shipped `rank_into` + `rank_precomputed` (hot-path batch variant).
 
 ---
 
@@ -154,11 +154,11 @@ This is the make-or-break phase. The whole point is proving dual-encoder availab
 
 ### Tasks
 
-- [ ] **T5.1** Add `alien_sampler` to `default = [...]` in `Cargo.toml`.
-- [ ] **T5.2** Update `katgpt-rs/README.md` Feature Flags table + add to "Always-On Hot Path" section if perf qualifies.
-- [ ] **T5.3** Update `katgpt-rs/.docs/01_overview.md` module structure.
-- [ ] **T5.4** Cross-reference from `katgpt-rs/.research/089_OPUS_*.md` ("if population-level diversity is needed, prefer `alien_sampler` over `opus_selection`'s local-redundancy").
-- [ ] **T5.5** Commit on `develop` with `feat:` prefix per AGENTS.md.
+- [ ] **T5.1** Add `alien_sampler` to `default = [...]` in `Cargo.toml`. **SKIPPED** — GOAT gate failed; module stays opt-in.
+- [ ] **T5.2** Update `katgpt-rs/README.md` Feature Flags table + add to "Always-On Hot Path" section if perf qualifies. **SKIPPED.**
+- [ ] **T5.3** Update `katgpt-rs/.docs/01_overview.md` module structure. **SKIPPED.**
+- [ ] **T5.4** Cross-reference from `katgpt-rs/.research/089_OPUS_*.md` ("if population-level diversity is needed, prefer `alien_sampler` over `opus_selection`'s local-redundancy"). **SKIPPED** — the GOAT gate did not prove `alien_sampler` beats OPUS on this scenario.
+- [x] **T5.5** Commit on `develop` with `feat:` prefix per AGENTS.md.
 
 ---
 
