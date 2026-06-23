@@ -572,5 +572,7 @@ pub mod karc;
 #[cfg(feature = "karc_forecaster")]
 pub use karc::{
     BSplineBasis, ChebyshevBasis, DelayRing, FitError, FourierBasis, KarcBasis, KarcForecaster,
-    KarcScratch, feature_expand,
+    KarcScratch, LowRankFitScratch, chunked_gram_into, feature_expand,
+    feature_expand_higher_order, forecast_low_rank_apply, higher_order_feature_count,
+    low_rank_fit,
 };

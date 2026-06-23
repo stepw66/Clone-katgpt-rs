@@ -18,6 +18,7 @@
 pub mod ridge_solve;
 
 pub use ridge_solve::{
-    cholesky_f32, cholesky_f64, chol_solve_f32, ridge_solve_direct_f32,
-    ridge_solve_direct_f64, ridge_solve_woodbury_f32, spd_inverse_f32,
+    chol_solve_f32, chol_solve_f64, cholesky_f32, cholesky_f64,
+    ridge_solve_direct_f32, ridge_solve_direct_f64, ridge_solve_woodbury_f32,
+    spd_inverse_f32,
 };

@@ -228,6 +228,14 @@ required-features = ["personality_composition"]
 name = "karc_double_scroll"
 required-features = ["karc_forecaster"]
 
+# Plan 308 Phase 2 (T2.5) — higher-order R=2 features + low-rank ALS on
+# double-scroll. Compares first-order full-rank vs higher-order full-rank
+# (chunked Gram, d_h=4752) vs first-order low-rank r=8 (ALS). Reports the
+# low-rank/full-rank NRMSE ratio (target ≤ 1.5×).
+[[example]]
+name = "karc_double_scroll_higher_order"
+required-features = ["karc_forecaster"]
+
 # Plan 308 — KARC forecast hot-path benchmark (G2: ≤ 500 ns/call at D=8,M=8,K=4).
 [[bench]]
 name = "karc_forecast_bench"

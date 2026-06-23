@@ -153,6 +153,26 @@ pub fn ridge_solve_direct_f64(
     solve_upper_f64(w_t, l_scratch, z_scratch, d_h, n_out);
 }
 
+/// Solve `L·Lᵀ·X = B` given a **pre-computed** f64 Cholesky factor `L`
+/// (lower-triangular, `k×k`), writing the `k×n_rhs` solution into `x` (f64,
+/// row-major). `z_scratch` must hold `k*n_rhs` f64 and is overwritten.
+///
+/// Used by Plan 308 Phase 2 ALS (`low_rank_fit`): factor `G+λI` once via
+/// [`cholesky_f64`], then call this each ALS iteration for the B-step
+/// back-substitution with `r` right-hand sides.
+#[inline]
+pub fn chol_solve_f64(
+    x: &mut [f64],
+    z_scratch: &mut [f64],
+    l: &[f64],
+    b: &[f64],
+    k: usize,
+    n_rhs: usize,
+) {
+    solve_lower_f64(z_scratch, l, b, k, n_rhs);
+    solve_upper_f64(x, l, z_scratch, k, n_rhs);
+}
+
 /// Cholesky factorisation `A = L·Lᵀ` of an SPD matrix `A` (row-major, `k×k`).
 ///
 /// Writes the lower-triangular factor (including the diagonal) into `l`;

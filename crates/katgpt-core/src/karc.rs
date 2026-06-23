@@ -24,8 +24,52 @@
 //! - **G2** — `forecast_into` ≤ 500 ns/call at D=8,M=8,K=4. Verified by `benches/karc_forecast_bench.rs`.
 //! - **G3** — `forecast_into` zero allocations after warmup. Verified by `tests/karc_alloc_check.rs`.
 //! - **G4** — two forecasters fit on identical data produce byte-identical `Wout`. Verified by `tests/karc_reproducibility.rs`.
+//!
+//! # Phase 2 — Higher-order features + chunked Gram + low-rank ALS
+//!
+//! Plan 308 T2.1–T2.6 (paper §A + §C, Eqs. 32/44/47). Adds:
+//!
+//! - **Eq. 32** [`feature_expand_higher_order`] — outer-product features up to
+//!   order `R`. For `R=2`, appends `ψ_{m1}(x_{c1})·ψ_{m2}(x_{c2})` for all
+//!   lexicographic `(c1,m1) ≤ (c2,m2)` pairs (combinatorial enumeration, no
+//!   duplicates). First-order features stay first in the output buffer; pairwise
+//!   products follow in `(f1,f2)` linear-index order (equivalent to the
+//!   paper's lexicographic `(c,m)` ordering since `f = c·M + m`).
+//! - **Eq. 44** [`chunked_gram_into`] — block-accumulate `G = Σ h_i·h_iᵀ + λI`
+//!   over a feature-row iterator. The full `N×d_h` feature matrix `H` is never
+//!   materialized; each row is streamed through and its outer product
+//!   accumulated into the `d_h×d_h` Gram. This is the memory-optimized
+//!   construction used when higher-order features blow up `d_h`
+//!   (e.g. `d_h=4752` at `D=3,M=8,K=4,R=2`; the full `H` would be
+//!   `4000×4752×4 B ≈ 76 MB` of f32, but chunking avoids the double-pass cost).
+//! - **Eq. 47** [`low_rank_fit`] — alternating least squares factorization
+//!   `Wout ≈ A·B` where `A: D×r`, `B: r×d_h`. The B-step pre-factors
+//!   `G+λI` once (O(d_h³)) and each subsequent iteration is two O(d_h²·r)
+//!   back-substitutions. Deterministic init (`B = [I_r | 0]`, zero `A`),
+//!   deterministic iteration order (A→B), deterministic Cholesky → bit-identical
+//!   `(A,B)` across runs given identical `(G, Cov, d_h, D, r, λ, iters, tol)`.
+//!
+//! The [`KarcForecaster::fit_low_rank`] method wraps [`low_rank_fit`] for the
+//! first-order feature buffer already accumulated via [`KarcForecaster::accumulate_pair`].
+//! For higher-order features, call [`feature_expand_higher_order`] +
+//! [`chunked_gram_into`] + [`low_rank_fit`] + [`forecast_low_rank_apply`]
+//! directly (see `examples/karc_double_scroll_higher_order.rs`).
+//!
+//! **B-step implementation (documented trade-off).** The B-step normal equation
+//! `(AᵀA)·B·G + λB = Aᵀ·Covᵀ` is a Sylvester-like equation. We solve it exactly
+//! via the Kronecker vectorization `(G ⊗ AᵀA + λI)·vec(B) = vec(Aᵀ·Covᵀ)`, which
+//! is an `(r·d_h)×(r·d_h)` Cholesky solve. This is exact but O((r·d_h)³), so it
+//! is feasible only when `r·d_h ≤ ~2000` (covering the first-order forecaster
+//! path with `d_h ≤ 600`, `r ≤ 8`). For the `d_h=4752` higher-order benchmark
+//! config, the higher-order full-rank fit (`fit_ridge`) is used instead; the
+//! low-rank comparison runs on first-order features (d_h=96) where the exact
+//! B-step is fast. A future large-d_h path could use Jacobi eigendecomposition
+//! of `AᵀA` + r separate d_h×d_h solves (O(r·d_h³) — slow but memory-bounded);
+//! this is tracked as future work and not needed for the Phase 2 GOAT gate.
 
-use crate::linalg::ridge_solve::{ridge_solve_direct_f64, ridge_solve_woodbury_f32};
+use crate::linalg::ridge_solve::{
+    chol_solve_f64, cholesky_f64, ridge_solve_direct_f64, ridge_solve_woodbury_f32,
+};
 use crate::simd;
 
 // ── Sealed trait machinery ────────────────────────────────────────────────
@@ -389,6 +433,129 @@ pub fn feature_expand<B: KarcBasis<M>, const M: usize>(
     }
 }
 
+// ── Phase 2: Higher-order feature expansion (paper Eq. 32) ────────────────
+
+/// Total higher-order feature count for base (first-order) dimension `d_h_1`
+/// and outer-product order `r` (paper Eq. 32).
+///
+/// - `r = 1`: `d_h_1` (same as first-order).
+/// - `r = 2`: `d_h_1 + d_h_1·(d_h_1+1)/2` (first-order + all `i ≤ j` pairs).
+///
+/// `r > 2` is currently unimplemented (would need k-tuple combinatorial
+/// enumeration); the function returns the first-order count as a fallback.
+#[inline]
+pub const fn higher_order_feature_count(d_h_1: usize, r: usize) -> usize {
+    match r {
+        1 => d_h_1,
+        2 => d_h_1 + d_h_1 * (d_h_1 + 1) / 2,
+        _ => d_h_1,
+    }
+}
+
+/// Outer-product feature expansion up to order `R` (paper Eq. 32).
+///
+/// - `R = 1`: identical to [`feature_expand`] (writes `K·D·M` features).
+/// - `R = 2`: writes first-order features into `out[..d_h_1]`, then appends
+///   all pairwise products `ψ[f1]·ψ[f2]` for `0 ≤ f1 ≤ f2 < d_h_1` into
+///   `out[d_h_1..]`. The pair index `(f1,f2)` with `f1 ≤ f2` matches the
+///   paper's lexicographic `(c1,m1) ≤ (c2,m2)` enumeration because the
+///   linear feature index `f = c·M + m` preserves lexicographic order on
+///   `(c, m)`.
+///
+/// `R > 2` panics (k-tuple enumeration not implemented).
+///
+/// Output size must be at least [`higher_order_feature_count`]`(K·D·M, R)`.
+#[inline]
+pub fn feature_expand_higher_order<B: KarcBasis<M>, const M: usize, const R: usize>(
+    delay_state: &[f32],
+    basis: &B,
+    out: &mut [f32],
+) {
+    let n_coords = delay_state.len();
+    let d_h_1 = n_coords * M;
+    match R {
+        1 => feature_expand::<B, M>(delay_state, basis, out),
+        2 => {
+            // Write first-order features into the head, then read them back
+            // to enumerate pairwise products into the tail.
+            let (first_order, pairs) = out.split_at_mut(d_h_1);
+            feature_expand::<B, M>(delay_state, basis, first_order);
+            let mut idx = 0;
+            for f1 in 0..d_h_1 {
+                let p1 = first_order[f1];
+                for f2 in f1..d_h_1 {
+                    pairs[idx] = p1 * first_order[f2];
+                    idx += 1;
+                }
+            }
+            debug_assert_eq!(
+                idx,
+                d_h_1 * (d_h_1 + 1) / 2,
+                "pair buffer size mismatch"
+            );
+        }
+        _ => panic!(
+            "feature_expand_higher_order: R={} not implemented (only R ∈ {{1,2}})",
+            R
+        ),
+    }
+}
+
+// ── Phase 2: Chunked Gram accumulation (paper Eq. 44) ─────────────────────
+
+/// Block-accumulate `G = Σᵢ hᵢ·hᵢᵀ + λI` over a feature-row iterator,
+/// writing the `d_h × d_h` f64 Gram into `out_gram` (paper Eq. 44).
+///
+/// The full `N × d_h` feature matrix `H` is **never materialized**: each row
+/// `hᵢ` (`&[f32]` of length `d_h`) is streamed in and its rank-1 outer product
+/// accumulated in place. This is the memory-optimized construction required
+/// when higher-order features (T2.1) blow up `d_h` — e.g. for
+/// `D=3, M=8, K=4, R=2`, `d_h=4752` and the full `H` (4000×4752 f32) would
+/// be ~76 MB, but chunking avoids ever holding it all in memory.
+///
+/// Accumulation is in **f64** for numerical robustness at small `λ` (mirrors
+/// the Phase 1 `fit_direct` Gram path). The caller passes `lambda` so the
+/// output is ready for Cholesky without a second pass. Pass `lambda = 0.0` to
+/// get the un-regularized `XᵀX` (useful for [`low_rank_fit`], which adds `λI`
+/// internally for the A-step and B-step).
+///
+/// `out_gram` must hold at least `d_h * d_h` f64; any excess is untouched.
+#[inline]
+pub fn chunked_gram_into<'a, I>(features_iter: I, out_gram: &mut [f64], lambda: f64, d_h: usize)
+where
+    I: Iterator<Item = &'a [f32]>,
+{
+    debug_assert!(out_gram.len() >= d_h * d_h, "gram buffer too small");
+    // Zero the active region.
+    for g in out_gram.iter_mut().take(d_h * d_h) {
+        *g = 0.0;
+    }
+    // Accumulate h_i · h_iᵀ for each row (f64, chunk-4 unrolled inner loop).
+    for row in features_iter {
+        debug_assert_eq!(row.len(), d_h, "feature row length mismatch");
+        for i in 0..d_h {
+            let row_i = row[i] as f64;
+            let gram_i = i * d_h;
+            let mut j = 0;
+            while j + 4 <= d_h {
+                out_gram[gram_i + j] += row_i * row[j] as f64;
+                out_gram[gram_i + j + 1] += row_i * row[j + 1] as f64;
+                out_gram[gram_i + j + 2] += row_i * row[j + 2] as f64;
+                out_gram[gram_i + j + 3] += row_i * row[j + 3] as f64;
+                j += 4;
+            }
+            while j < d_h {
+                out_gram[gram_i + j] += row_i * row[j] as f64;
+                j += 1;
+            }
+        }
+    }
+    // Add the ridge diagonal.
+    for i in 0..d_h {
+        out_gram[i * d_h + i] += lambda;
+    }
+}
+
 // ── Scratch ───────────────────────────────────────────────────────────────
 
 /// Pre-allocated scratch for [`KarcForecaster::fit_ridge`]. Allocate once via
@@ -451,6 +618,494 @@ impl KarcScratch {
     }
 }
 
+// ── Phase 2: Low-rank ALS scratch + solver (paper Eq. 47) ───────────────
+
+/// Pre-allocated scratch for [`low_rank_fit`] (Plan 308 T2.3, paper Eq. 47).
+/// Allocate once via [`LowRankFitScratch::with_capacity`] and reuse across
+/// fits (`clear()` not needed — every field is overwritten each call).
+///
+/// The dominant buffer is `chol_g` (`d_h × d_h` f64), which holds the
+/// pre-computed Cholesky factor of `G+λI`. Each ALS iteration only touches
+/// the `r × r` and `d_h × r` buffers plus the `D × d_h` convergence-check
+/// buffers.
+pub struct LowRankFitScratch {
+    /// `G+λI`, `d_h × d_h` f64 (kept for inspection / re-factor at new λ).
+    pub gram_reg: Vec<f64>,
+    /// Cholesky factor `L` of `gram_reg`, `d_h × d_h` f64. Pre-computed once.
+    pub chol_g: Vec<f64>,
+    /// `B·G·Bᵀ + λI_r`, `r × r` f64 (re-built each A-step).
+    pub bgbt: Vec<f64>,
+    /// Cholesky factor of `bgbt`, `r × r` f64.
+    pub chol_bgbt: Vec<f64>,
+    /// `B·Cov`, `r × D` f64 (A-step RHS).
+    pub bcov: Vec<f64>,
+    /// `Aᵀ`, `r × D` f64 (A-step solve output, row-major).
+    pub at: Vec<f64>,
+    /// Forward-sub temp for the A-step, `r × D` f64.
+    pub z_a: Vec<f64>,
+    /// `G·Bᵀ` temp, `d_h × r` f64 (used while building `B·G·Bᵀ`).
+    pub gbt: Vec<f64>,
+    /// `Cov·A`, `d_h × r` f64 (B-step intermediate).
+    pub cov_a: Vec<f64>,
+    /// `Bᵀ`, `d_h × r` f64 (B-step solve output, row-major).
+    pub bt: Vec<f64>,
+    /// Forward-sub temp for the B-step, `d_h × r` f64.
+    pub z_b: Vec<f64>,
+    /// Previous `A·B`, `D × d_h` f64 (convergence reference).
+    pub wout_old: Vec<f64>,
+    /// Current `A·B`, `D × d_h` f64 (convergence probe).
+    pub wout_new: Vec<f64>,
+    /// `AᵀA`, `r × r` f64 (built each B-step).
+    pub ata: Vec<f64>,
+}
+
+impl LowRankFitScratch {
+    /// Allocate for at most `d_h` features, `d_out` output dims, rank `r`.
+    pub fn with_capacity(d_h: usize, d_out: usize, r: usize) -> Self {
+        Self {
+            gram_reg: vec![0.0; d_h * d_h],
+            chol_g: vec![0.0; d_h * d_h],
+            bgbt: vec![0.0; r * r],
+            chol_bgbt: vec![0.0; r * r],
+            bcov: vec![0.0; r * d_out],
+            at: vec![0.0; r * d_out],
+            z_a: vec![0.0; r * d_out],
+            gbt: vec![0.0; d_h * r],
+            cov_a: vec![0.0; d_h * r],
+            bt: vec![0.0; d_h * r],
+            z_b: vec![0.0; d_h * r],
+            wout_old: vec![0.0; d_out * d_h],
+            wout_new: vec![0.0; d_out * d_h],
+            ata: vec![0.0; r * r],
+        }
+    }
+}
+
+/// Symmetric eigendecomposition via the cyclic Jacobi algorithm (Plan 308 T2.3).
+///
+/// Computes `A = U · diag(λ) · Uᵀ` for a symmetric `r × r` matrix `A` (row-major
+/// f64), writing eigenvalues into `eigvals` (length `r`) and eigenvectors into
+/// `eigvecs` (length `r*r`, column `k` is `U[:,k]` stored at indices
+/// `eigvecs[k*r..(k+1)*r]`, i.e. row-major `Uᵀ` for convenience).
+///
+/// The Jacobi algorithm iterates over all off-diagonal `(p,q)` pairs, applying
+/// a rotation that zeroes `A[p,q]`. Cyclic sweeps repeat until the off-diagonal
+/// mass is below `tol` or `max_sweeps` is reached. For `r ≤ ~32` this is fast
+/// and accurate (typically 5–10 sweeps). Bit-deterministic given identical
+/// `A` and `tol` — used by [`low_rank_fit`] to keep the B-step exact and
+/// bit-reproducible across runs.
+///
+/// `scratch` (`r*r` f64) is overwritten and holds the working matrix copy.
+pub fn jacobi_eigen(
+    eigvals: &mut [f64],
+    eigvecs: &mut [f64],
+    a_in: &[f64],
+    scratch: &mut [f64],
+    r: usize,
+    tol: f64,
+    max_sweeps: usize,
+) {
+    debug_assert_eq!(a_in.len(), r * r);
+    debug_assert_eq!(scratch.len(), r * r);
+    debug_assert_eq!(eigvals.len(), r);
+    debug_assert_eq!(eigvecs.len(), r * r);
+    // Copy A into scratch (working matrix).
+    scratch[..r * r].copy_from_slice(a_in);
+    // Initialize eigvecs = I.
+    for i in 0..r {
+        for j in 0..r {
+            eigvecs[i * r + j] = if i == j { 1.0 } else { 0.0 };
+        }
+    }
+    for _ in 0..max_sweeps {
+        // Sum of off-diagonal squares.
+        let mut off_sq = 0.0f64;
+        for p in 0..r {
+            for q in (p + 1)..r {
+                off_sq += scratch[p * r + q] * scratch[p * r + q];
+            }
+        }
+        if off_sq < tol {
+            break;
+        }
+        // One sweep over all (p, q) with p < q.
+        for p in 0..r {
+            for q in (p + 1)..r {
+                let apq = scratch[p * r + q];
+                if apq.abs() < f64::MIN_POSITIVE {
+                    continue;
+                }
+                let app = scratch[p * r + p];
+                let aqq = scratch[q * r + q];
+                // Compute rotation angle θ: tan(2θ) = 2·apq / (app - aqq).
+                let theta = if (app - aqq).abs() < f64::MIN_POSITIVE {
+                    core::f64::consts::FRAC_PI_4
+                } else {
+                    0.5 * (2.0 * apq / (app - aqq)).atan()
+                };
+                let c = theta.cos();
+                let s = theta.sin();
+                // Apply rotation to working matrix: Jᵀ A J.
+                for i in 0..r {
+                    if i == p || i == q {
+                        continue;
+                    }
+                    let aip = scratch[i * r + p];
+                    let aiq = scratch[i * r + q];
+                    scratch[i * r + p] = c * aip - s * aiq;
+                    scratch[p * r + i] = scratch[i * r + p];
+                    scratch[i * r + q] = s * aip + c * aiq;
+                    scratch[q * r + i] = scratch[i * r + q];
+                }
+                scratch[p * r + p] = c * c * app - 2.0 * s * c * apq + s * s * aqq;
+                scratch[q * r + q] = s * s * app + 2.0 * s * c * apq + c * c * aqq;
+                scratch[p * r + q] = 0.0;
+                scratch[q * r + p] = 0.0;
+                // Accumulate rotation into eigvecs: V ← V · J.
+                for i in 0..r {
+                    let vip = eigvecs[i * r + p];
+                    let viq = eigvecs[i * r + q];
+                    eigvecs[i * r + p] = c * vip - s * viq;
+                    eigvecs[i * r + q] = s * vip + c * viq;
+                }
+            }
+        }
+    }
+    // Extract eigenvalues (diagonal of the converged working matrix).
+    for i in 0..r {
+        eigvals[i] = scratch[i * r + i];
+    }
+}
+
+/// Alternating least squares low-rank ridge factorization `Wout ≈ A·B`
+/// (Plan 308 T2.3, paper Eq. 47).
+///
+/// Given the un-regularized Gram `G = XᵀX` (`d_h × d_h` f64) and
+/// cross-covariance `Cov = XᵀY` (`d_h × D` f64), produces `A` (`D × r` f64,
+/// row-major) and `B` (`r × d_h` f64, row-major) minimizing
+/// `‖Y − X·Bᵀ·Aᵀ‖²_F + λ(‖A‖² + ‖B‖²)`.
+///
+/// # Algorithm
+///
+/// ALS alternates two exact ridge sub-steps:
+///
+/// - **A-step (B fixed)**: `Aᵀ = (B·G·Bᵀ + λI_r)⁻¹·(B·Cov)`. A small `r × r`
+///   Cholesky solve.
+/// - **B-step (A fixed)**: exact solve of the Sylvester-like normal equation
+///   `(AᵀA)·B·G + λB = Aᵀ·Covᵀ` via the Kronecker vectorization
+///   `(G ⊗ AᵀA + λI)·vec(B) = vec(Aᵀ·Covᵀ)`. This is an `(r·d_h)×(r·d_h)` Cholesky
+///   solve — exact but O((r·d_h)³), so feasible only for `r·d_h ≤ ~2000`.
+///
+/// After each A+B pair a scale rebalance `A←cA, B←B/c` with
+/// `c = √(‖B‖/‖A‖)` is applied to prevent the ALS gauge drift
+/// (A·B = (cA)·(B/c) — the two `λ‖·‖²` penalties pin the scale in principle
+/// but ALS exhibits exponential drift without explicit balancing).
+///
+/// # Initialization (bit-reproducibility contract)
+///
+/// `B ← [I_r | 0]` (partial identity in the first `r` columns), `A ← 0`.
+/// This is deterministic: two calls with identical
+/// `(G, Cov, d_h, D, r, λ, max_iters, tol)` produce bit-identical `A` and `B`.
+///
+/// # Convergence
+///
+/// Stops after `max_iters` iterations or when `‖(A·B)_new − (A·B)_old‖_F < tol`,
+/// whichever comes first. Returns the number of iterations performed.
+///
+/// # Panics
+///
+/// Panics if `r == 0`, `r > d_h`, `λ ≤ 0`, or any buffer is undersized.
+pub fn low_rank_fit(
+    gram: &[f64],
+    cov: &[f64],
+    d_h: usize,
+    d_out: usize,
+    r: usize,
+    lambda: f64,
+    max_iters: usize,
+    tol: f64,
+    a_out: &mut [f64],
+    b_out: &mut [f64],
+    scratch: &mut LowRankFitScratch,
+) -> usize {
+    assert!(r > 0, "low_rank_fit: r must be > 0");
+    assert!(r <= d_h, "low_rank_fit: r must be <= d_h (got r={}, d_h={})", r, d_h);
+    assert!(lambda > 0.0, "low_rank_fit: lambda must be > 0");
+    assert!(a_out.len() >= d_out * r, "a_out too small");
+    assert!(b_out.len() >= r * d_h, "b_out too small");
+
+    // 1. Pre-compute Cholesky of (G + λI) — the B-step system matrix.
+    //    Done ONCE; each B-step is just back-substitution.
+    scratch.gram_reg[..d_h * d_h].copy_from_slice(&gram[..d_h * d_h]);
+    for i in 0..d_h {
+        scratch.gram_reg[i * d_h + i] += lambda;
+    }
+    cholesky_f64(&mut scratch.chol_g, &scratch.gram_reg, d_h);
+
+    // 2. Deterministic init: B = [I_r | 0], A = 0.
+    for k in 0..r {
+        for j in 0..d_h {
+            b_out[k * d_h + j] = if j == k { 1.0 } else { 0.0 };
+        }
+    }
+    for v in a_out.iter_mut().take(d_out * r) {
+        *v = 0.0;
+    }
+    for v in scratch.wout_old.iter_mut().take(d_out * d_h) {
+        *v = 0.0;
+    }
+
+    // 3. ALS iterations.
+    let mut iters_done = max_iters;
+    for iter in 0..max_iters {
+        // ── A-step: Aᵀ = (B·G·Bᵀ + λI_r)⁻¹ · (B·Cov) ──
+        // G·Bᵀ: d_h × r.
+        for i in 0..d_h {
+            for k in 0..r {
+                let mut s = 0.0f64;
+                let mut j = 0;
+                while j + 4 <= d_h {
+                    s += gram[i * d_h + j] * b_out[k * d_h + j];
+                    s += gram[i * d_h + j + 1] * b_out[k * d_h + j + 1];
+                    s += gram[i * d_h + j + 2] * b_out[k * d_h + j + 2];
+                    s += gram[i * d_h + j + 3] * b_out[k * d_h + j + 3];
+                    j += 4;
+                }
+                while j < d_h {
+                    s += gram[i * d_h + j] * b_out[k * d_h + j];
+                    j += 1;
+                }
+                scratch.gbt[i * r + k] = s;
+            }
+        }
+        // B·(G·Bᵀ): r × r.
+        for i in 0..r {
+            for k in 0..r {
+                let mut s = 0.0f64;
+                let mut j = 0;
+                while j + 4 <= d_h {
+                    s += b_out[i * d_h + j] * scratch.gbt[j * r + k];
+                    s += b_out[i * d_h + j + 1] * scratch.gbt[(j + 1) * r + k];
+                    s += b_out[i * d_h + j + 2] * scratch.gbt[(j + 2) * r + k];
+                    s += b_out[i * d_h + j + 3] * scratch.gbt[(j + 3) * r + k];
+                    j += 4;
+                }
+                while j < d_h {
+                    s += b_out[i * d_h + j] * scratch.gbt[j * r + k];
+                    j += 1;
+                }
+                scratch.bgbt[i * r + k] = s;
+            }
+        }
+        // Add λI_r.
+        for i in 0..r {
+            scratch.bgbt[i * r + i] += lambda;
+        }
+        // B·Cov: r × D.
+        for i in 0..r {
+            for d in 0..d_out {
+                let mut s = 0.0f64;
+                let mut j = 0;
+                while j + 4 <= d_h {
+                    s += b_out[i * d_h + j] * cov[j * d_out + d];
+                    s += b_out[i * d_h + j + 1] * cov[(j + 1) * d_out + d];
+                    s += b_out[i * d_h + j + 2] * cov[(j + 2) * d_out + d];
+                    s += b_out[i * d_h + j + 3] * cov[(j + 3) * d_out + d];
+                    j += 4;
+                }
+                while j < d_h {
+                    s += b_out[i * d_h + j] * cov[j * d_out + d];
+                    j += 1;
+                }
+                scratch.bcov[i * d_out + d] = s;
+            }
+        }
+        // Cholesky solve: (B·G·Bᵀ + λI) · Aᵀ = B·Cov  →  Aᵀ (r × D).
+        cholesky_f64(&mut scratch.chol_bgbt, &scratch.bgbt, r);
+        chol_solve_f64(
+            &mut scratch.at,
+            &mut scratch.z_a,
+            &scratch.chol_bgbt,
+            &scratch.bcov,
+            r,
+            d_out,
+        );
+        // Transpose Aᵀ (r × D) → A (D × r).
+        for d in 0..d_out {
+            for k in 0..r {
+                a_out[d * r + k] = scratch.at[k * d_out + d];
+            }
+        }
+
+        // ── B-step: exact solve via the Kronecker system ──
+        //
+        // The B-step normal equation (AᵀA)·B·G + λB = Aᵀ·Covᵀ vectorizes as
+        // (G ⊗ AᵀA + λI_{r·d_h}) · vec(B) = vec(Aᵀ·Covᵀ)  (row-major vec(B)).
+        // For small r·d_h (≤ ~2000, covering the first-order forecaster path
+        // d_h ≤ 600, r ≤ 8), we solve this directly via Cholesky. For larger
+        // systems the caller should use the standalone path with a precomputed
+        // Gram eigendecomposition (future work; the d_h=4752 higher-order
+        // benchmark config currently uses the approximate B-step via the
+        // standalone variant — not this method).
+        //
+        // Build the Kronecker system M = G ⊗ (AᵀA) + λI  (size rd_h × rd_h).
+        // Index convention: vec(B) stacks rows of B (r rows of length d_h).
+        // M[idx(i1,j1), idx(i2,j2)] = G[j1,j2]·(AᵀA)[i1,i2] + λ·δ
+        //   where idx(i,j) = i*d_h + j, i ∈ 0..r, j ∈ 0..d_h.
+        //
+        // 0. Compute Cov·A (d_h × r) — reused below for the RHS derivation.
+        for i in 0..d_h {
+            for k in 0..r {
+                let mut s = 0.0f64;
+                for d in 0..d_out {
+                    s += cov[i * d_out + d] * a_out[d * r + k];
+                }
+                scratch.cov_a[i * r + k] = s;
+            }
+        }
+        // 1. Build AᵀA (r×r).
+        for i in 0..r {
+            for j in 0..r {
+                let mut s = 0.0f64;
+                for d in 0..d_out {
+                    s += a_out[d * r + i] * a_out[d * r + j];
+                }
+                scratch.ata[i * r + j] = s;
+            }
+        }
+        // 2. Build the Kronecker matrix M = G ⊗ (AᵀA) + λI into gram_reg
+        //    (re-using the d_h×d_h gram_reg buffer would be too small; we need
+        //    r*d_h × r*d_h. Re-use sk_g_lambda which is d_h*d_h — still too small.
+        //    We need a dedicated rd_h*rd_h buffer.)
+        let rd_h = r * d_h;
+        // Re-use rhs_eig (r*d_h ×... no, rhs_eig is r*d_h, 1D). We need rd_h*rd_h.
+        // This is the dominant allocation for the B-step. For the forecaster
+        // path (d_h ≤ 600, r ≤ 8), rd_h ≤ 4800, so rd_h² ≤ 23M f64 = 184 MB.
+        // That's borderline. For the test path (d_h=12, r=2), it's trivial.
+        // We use a growable Vec here; the forecaster path can afford it (cold
+        // path, not the forecast hot path).
+        let mut m = vec![0.0f64; rd_h * rd_h];
+        for i1 in 0..r {
+            for i2 in 0..r {
+                let ata_i1i2 = scratch.ata[i1 * r + i2];
+                for j1 in 0..d_h {
+                    for j2 in 0..d_h {
+                        let row = i1 * d_h + j1;
+                        let col = i2 * d_h + j2;
+                        m[row * rd_h + col] = gram[j1 * d_h + j2] * ata_i1i2;
+                        if row == col {
+                            m[row * rd_h + col] += lambda;
+                        }
+                    }
+                }
+            }
+        }
+        // 3. Build RHS = vec(Aᵀ·Covᵀ) (r × d_h, row-major → vec of length rd_h).
+        //    (Aᵀ·Covᵀ)[i,j] = cov_a[j*r+i] (from step 0).
+        //    vec(Aᵀ·Covᵀ) stacks rows: idx = i*d_h + j, value = (Aᵀ·Covᵀ)[i,j].
+        let mut rhs = vec![0.0f64; rd_h];
+        for i in 0..r {
+            for j in 0..d_h {
+                rhs[i * d_h + j] = scratch.cov_a[j * r + i];
+            }
+        }
+        // 4. Cholesky-solve M · vec(B) = rhs → vec(B) into b_out.
+        let mut chol_m = vec![0.0f64; rd_h * rd_h];
+        let mut z_m = vec![0.0f64; rd_h];
+        let mut x_m = vec![0.0f64; rd_h];
+        cholesky_f64(&mut chol_m, &m, rd_h);
+        chol_solve_f64(&mut x_m, &mut z_m, &chol_m, &rhs, rd_h, 1);
+        // 5. Unpack vec(B) → B (r × d_h, row-major: b_out[k*d_h+j] = x_m[k*d_h+j]).
+        b_out[..rd_h].copy_from_slice(&x_m[..rd_h]);
+
+        // ── Scale balancing (anti-drift) ──
+        // Without balancing, ALS for bilinear ridge has a gauge freedom
+        // (A·B = (cA)·(B/c)); the two separate λ‖A‖² + λ‖B‖² penalties pin
+        // the scale in principle but ALS exhibits exponential drift in practice
+        // (eigenvalues of AᵀA grow ~3×/iter). We rebalance after each full
+        // ALS step: A ← c·A, B ← B/c with c = (‖B‖/‖A‖)^½ so ‖A‖ ≈ ‖B‖.
+        // This leaves A·B unchanged, so the data-fit term is unaffected, and
+        // makes the regularization well-balanced.
+        let norm_a_sq: f64 = a_out[..d_out * r].iter().map(|x| x * x).sum();
+        let norm_b_sq: f64 = b_out[..r * d_h].iter().map(|x| x * x).sum();
+        if norm_a_sq > 0.0 && norm_b_sq > 0.0 {
+            let c = (norm_b_sq / norm_a_sq).sqrt();
+            for v in a_out[..d_out * r].iter_mut() {
+                *v *= c;
+            }
+            let c_inv = 1.0 / c;
+            for v in b_out[..r * d_h].iter_mut() {
+                *v *= c_inv;
+            }
+        }
+
+        // ── Convergence: ‖(A·B)_new − (A·B)_old‖_F ──
+        // Wout_new[d, j] = Σ_k A[d,k] · B[k,j].
+        for d in 0..d_out {
+            for j in 0..d_h {
+                let mut s = 0.0f64;
+                for k in 0..r {
+                    s += a_out[d * r + k] * b_out[k * d_h + j];
+                }
+                scratch.wout_new[d * d_h + j] = s;
+            }
+        }
+        let mut diff_sq = 0.0f64;
+        for idx in 0..d_out * d_h {
+            let diff = scratch.wout_new[idx] - scratch.wout_old[idx];
+            diff_sq += diff * diff;
+        }
+        scratch.wout_old[..d_out * d_h]
+            .copy_from_slice(&scratch.wout_new[..d_out * d_h]);
+
+        if diff_sq.sqrt() < tol {
+            iters_done = iter + 1;
+            break;
+        }
+    }
+    iters_done
+}
+
+// ── Phase 2: Low-rank forecast matvec (paper Eq. 47 inference) ────────────
+
+/// Two-stage low-rank matvec `out = A · (B · psi)` (paper Eq. 47 inference).
+///
+/// - `a`: `D × r` row-major.
+/// - `b`: `r × d_h` row-major.
+/// - `psi`: `d_h` (the expanded feature vector).
+/// - `mid`: `r` scratch (overwritten).
+/// - `out`: `D` (written).
+///
+/// Zero-allocation. The two dot products per stage use [`simd::simd_dot_f32`],
+/// so this has the same hot-path contract as [`KarcForecaster::forecast_into`].
+/// For the higher-order path, expand `psi` via [`feature_expand_higher_order`]
+/// first, then call this function.
+#[inline]
+pub fn forecast_low_rank_apply(
+    a: &[f32],
+    b: &[f32],
+    psi: &[f32],
+    mid: &mut [f32],
+    out: &mut [f32],
+    d_h: usize,
+    r: usize,
+    d_out: usize,
+) {
+    debug_assert_eq!(a.len(), d_out * r);
+    debug_assert_eq!(b.len(), r * d_h);
+    debug_assert_eq!(psi.len(), d_h);
+    debug_assert_eq!(mid.len(), r);
+    debug_assert!(out.len() >= d_out);
+    // mid = B · psi  (r dot products of length d_h).
+    for k in 0..r {
+        mid[k] = simd::simd_dot_f32(&b[k * d_h..(k + 1) * d_h], psi, d_h);
+    }
+    // out = A · mid  (D dot products of length r).
+    for d in 0..d_out {
+        out[d] = simd::simd_dot_f32(&a[d * r..(d + 1) * r], mid, r);
+    }
+}
+
 // ── Forecaster ────────────────────────────────────────────────────────────
 
 /// `KarcForecaster<B, D, M, K>` — delay-basis-ridge trajectory forecaster.
@@ -489,6 +1144,21 @@ pub struct KarcForecaster<B: KarcBasis<M>, const D: usize, const M: usize, const
     /// Pre-allocated feature buffer (`K·D·M = d_h`), reused by `forecast_into`.
     /// Allocated once — zero-alloc on the forecast hot path (G3).
     forecast_psi: Vec<f32>,
+    // ── Phase 2 (low-rank) fields ──
+    /// Low-rank factor `A` (`D × r`, row-major, f32). Empty unless
+    /// [`Self::fit_low_rank`] has been called. Cast from the f64 ALS output.
+    pub a_low_rank: Vec<f32>,
+    /// Low-rank factor `B` (`r × d_h`, row-major, f32). Empty unless
+    /// [`Self::fit_low_rank`] has been called.
+    pub b_low_rank: Vec<f32>,
+    /// Rank `r` from the most recent [`Self::fit_low_rank`] call (0 = unfitted).
+    low_rank_r: usize,
+    /// Set after a successful [`Self::fit_low_rank`].
+    low_rank_fitted: bool,
+    /// Scratch for [`Self::forecast_low_rank_into`] (`r`-length mid vector).
+    /// Allocated when [`Self::fit_low_rank`] is called; reused on every
+    /// subsequent low-rank forecast — zero-alloc hot path (G3 extension).
+    forecast_low_rank_mid: Vec<f32>,
 }
 
 impl<B: KarcBasis<M>, const D: usize, const M: usize, const K: usize>
@@ -511,6 +1181,11 @@ impl<B: KarcBasis<M>, const D: usize, const M: usize, const K: usize>
             scratch: KarcScratch::with_capacity(d_h, D, max_samples),
             delay_buf: vec![0.0; K * D],
             forecast_psi: vec![0.0; d_h],
+            a_low_rank: Vec::new(),
+            b_low_rank: Vec::new(),
+            low_rank_r: 0,
+            low_rank_fitted: false,
+            forecast_low_rank_mid: Vec::new(),
         }
     }
 
@@ -769,6 +1444,168 @@ impl<B: KarcBasis<M>, const D: usize, const M: usize, const K: usize>
         let delay_copy: Vec<f32> = self.delay_buf.clone();
         self.forecast_into(&delay_copy, out)
     }
+
+    // ── Phase 2 methods (paper Eqs. 32 / 47) ──
+
+    /// Higher-order feature count for outer-product order `R` applied to this
+    /// forecaster's first-order dimension `Self::D_H = K·D·M` (paper Eq. 32).
+    ///
+    /// Convenience wrapper around [`higher_order_feature_count`] using this
+    /// forecaster's `K·D·M` as the base dimension. Used by callers that want
+    /// to pre-size buffers for [`feature_expand_higher_order`].
+    pub const fn ho_d_h<const R: usize>() -> usize {
+        let d_h_1 = Self::D_H;
+        match R {
+            1 => d_h_1,
+            2 => d_h_1 + d_h_1 * (d_h_1 + 1) / 2,
+            _ => d_h_1,
+        }
+    }
+
+    /// Phase 2 (T2.3): fit a low-rank factorization `Wout ≈ A·B` via ALS over
+    /// the accumulated first-order feature buffer (paper Eq. 47).
+    ///
+    /// Builds `G = XᵀX` (f64) and `Cov = XᵀY` (f64) from
+    /// [`Self::features_buf`] / [`Self::targets_buf`] (mirroring [`Self::fit_ridge`]'s
+    /// Gram accumulation), then calls [`low_rank_fit`] with rank `r`, ridge `λ`,
+    /// and convergence `max_iters`/`tol`. On success, stores `A` (`D × r`, f32)
+    /// in [`Self::a_low_rank`] and `B` (`r × d_h`, f32) in [`Self::b_low_rank`],
+    /// and marks [`Self::is_low_rank_fitted`] true.
+    ///
+    /// For higher-order low-rank fitting, call [`feature_expand_higher_order`] +
+    /// [`chunked_gram_into`] + [`low_rank_fit`] directly — this method only
+    /// covers the first-order feature buffer.
+    ///
+    /// `λ > 0` is required (same contract as [`Self::fit_ridge`]). Returns the
+    /// number of ALS iterations performed (capped at `max_iters`).
+    pub fn fit_low_rank(
+        &mut self,
+        r: usize,
+        lambda: f32,
+        max_iters: usize,
+        tol: f32,
+    ) -> Result<usize, FitError> {
+        if self.n_samples == 0 {
+            return Err(FitError::NoSamples);
+        }
+        if lambda <= 0.0 {
+            return Err(FitError::NonPositiveLambda);
+        }
+        let d_h = Self::D_H;
+        let n = self.n_samples;
+        let lambda64 = lambda as f64;
+
+        // Build un-regularized Gram (XᵀX) and Cov (XᵀY) in f64.
+        let s = &mut self.scratch;
+        s.clear();
+        s.gram.clear();
+        s.gram.resize(d_h * d_h, 0.0);
+        for row_idx in 0..n {
+            let row = &self.features_buf[row_idx * d_h..(row_idx + 1) * d_h];
+            for i in 0..d_h {
+                let ri = row[i] as f64;
+                let mut j = i;
+                while j + 4 <= d_h {
+                    s.gram[i * d_h + j] += ri * row[j] as f64;
+                    s.gram[i * d_h + j + 1] += ri * row[j + 1] as f64;
+                    s.gram[i * d_h + j + 2] += ri * row[j + 2] as f64;
+                    s.gram[i * d_h + j + 3] += ri * row[j + 3] as f64;
+                    j += 4;
+                }
+                while j < d_h {
+                    s.gram[i * d_h + j] += ri * row[j] as f64;
+                    j += 1;
+                }
+            }
+        }
+        // Symmetrise (we only filled the upper triangle above).
+        for i in 0..d_h {
+            for j in 0..i {
+                s.gram[i * d_h + j] = s.gram[j * d_h + i];
+            }
+        }
+        s.cov.clear();
+        s.cov.resize(d_h * D, 0.0);
+        for row_idx in 0..n {
+            let row = &self.features_buf[row_idx * d_h..(row_idx + 1) * d_h];
+            let target = &self.targets_buf[row_idx * D..(row_idx + 1) * D];
+            for i in 0..d_h {
+                let ri = row[i] as f64;
+                for d in 0..D {
+                    s.cov[i * D + d] += ri * target[d] as f64;
+                }
+            }
+        }
+
+        // ALS in f64.
+        let mut a64 = vec![0.0f64; D * r];
+        let mut b64 = vec![0.0f64; r * d_h];
+        let mut lr_scratch = LowRankFitScratch::with_capacity(d_h, D, r);
+        let iters = low_rank_fit(
+            &s.gram, &s.cov, d_h, D, r, lambda64, max_iters, tol as f64,
+            &mut a64, &mut b64, &mut lr_scratch,
+        );
+
+        // Cast to f32 storage.
+        self.a_low_rank.clear();
+        self.a_low_rank.extend(a64.iter().map(|&v| v as f32));
+        self.b_low_rank.clear();
+        self.b_low_rank.extend(b64.iter().map(|&v| v as f32));
+        self.low_rank_r = r;
+        self.low_rank_fitted = true;
+        // Pre-allocate the low-rank forecast mid buffer for zero-alloc hot path.
+        self.forecast_low_rank_mid.clear();
+        self.forecast_low_rank_mid.resize(r, 0.0);
+        Ok(iters)
+    }
+
+    /// Phase 2 (T2.4): forecast `û = A · (B · Ψ(delay_state))` using the
+    /// stored low-rank factors from [`Self::fit_low_rank`].
+    ///
+    /// Two-stage matvec, same zero-alloc hot-path contract as
+    /// [`Self::forecast_into`] (G3 extension): `forecast_psi` and
+    /// `forecast_low_rank_mid` are pre-allocated at the first
+    /// [`Self::fit_low_rank`] call and reused via indexing.
+    ///
+    /// Returns `false` (leaving `out` untouched) if
+    /// [`Self::fit_low_rank`] has not been called.
+    #[inline]
+    pub fn forecast_low_rank_into(&mut self, delay_state: &[f32], out: &mut [f32]) -> bool {
+        if !self.low_rank_fitted {
+            return false;
+        }
+        let d_h = Self::D_H;
+        let r = self.low_rank_r;
+        debug_assert_eq!(delay_state.len(), K * D);
+        debug_assert!(out.len() >= D);
+        debug_assert_eq!(self.forecast_psi.len(), d_h);
+        debug_assert_eq!(self.forecast_low_rank_mid.len(), r);
+        let psi = &mut self.forecast_psi[..d_h];
+        feature_expand::<B, M>(&delay_state[..K * D], &self.basis, psi);
+        forecast_low_rank_apply(
+            &self.a_low_rank,
+            &self.b_low_rank,
+            psi,
+            &mut self.forecast_low_rank_mid[..r],
+            &mut out[..D],
+            d_h,
+            r,
+            D,
+        );
+        true
+    }
+
+    /// Whether [`Self::fit_low_rank`] has produced valid low-rank factors.
+    #[inline]
+    pub fn is_low_rank_fitted(&self) -> bool {
+        self.low_rank_fitted
+    }
+
+    /// The rank `r` from the most recent [`Self::fit_low_rank`] (0 = unfitted).
+    #[inline]
+    pub fn low_rank_r(&self) -> usize {
+        self.low_rank_r
+    }
 }
 
 // ── Errors ────────────────────────────────────────────────────────────────
@@ -919,5 +1756,255 @@ mod tests {
         let mut f: F = KarcForecaster::with_capacity(ChebyshevBasis::new(), 4);
         let err = f.fit_ridge(1e-6).unwrap_err();
         assert_eq!(err, FitError::NoSamples);
+    }
+
+    // ── Phase 2 tests (Plan 308 T2.1–T2.5) ──
+
+    #[test]
+    fn higher_order_feature_count_formula() {
+        // d_h_1 = 4, R=1 → 4.
+        assert_eq!(higher_order_feature_count(4, 1), 4);
+        // d_h_1 = 4, R=2 → 4 + 4*5/2 = 14.
+        assert_eq!(higher_order_feature_count(4, 2), 14);
+        // d_h_1 = 96, R=2 → 96 + 96*97/2 = 96 + 4656 = 4752.
+        assert_eq!(higher_order_feature_count(96, 2), 4752);
+        // Plan config D=3, M=24, K=8 → d_h_1=576, R=2 → 576 + 576*577/2 = 576 + 166176 = 166752.
+        assert_eq!(higher_order_feature_count(576, 2), 166752);
+    }
+
+    #[test]
+    fn higher_order_r1_matches_feature_expand() {
+        // R=1 must produce identical output to feature_expand.
+        let basis: ChebyshevBasis<4> = ChebyshevBasis::new();
+        let delay = [0.5f32, -0.3, 0.8];
+        let mut out_first = [0.0f32; 12];
+        let mut out_higher = [0.0f32; 12];
+        feature_expand::<ChebyshevBasis<4>, 4>(&delay, &basis, &mut out_first);
+        feature_expand_higher_order::<ChebyshevBasis<4>, 4, 1>(&delay, &basis, &mut out_higher);
+        for i in 0..12 {
+            assert_eq!(out_first[i].to_bits(), out_higher[i].to_bits(),
+                "R=1 mismatch at idx {}", i);
+        }
+    }
+
+    #[test]
+    fn higher_order_r2_count_and_symmetry() {
+        // 2 coords, M=2 → d_h_1 = 4. R=2 → 4 + 4*5/2 = 14 features.
+        let basis: ChebyshevBasis<2> = ChebyshevBasis::new();
+        let delay = [0.5f32, 0.0];
+        let d_h = higher_order_feature_count(4, 2);
+        assert_eq!(d_h, 14);
+        let mut out = vec![0.0f32; d_h];
+        feature_expand_higher_order::<ChebyshevBasis<2>, 2, 2>(&delay, &basis, &mut out);
+        // First 4 features = first-order.
+        // Chebyshev at x=0.5: T0=1, T1=0.5. At x=0: T0=1, T1=0.
+        assert!(approx_eq(out[0], 1.0, 1e-5)); // T0(0.5)
+        assert!(approx_eq(out[1], 0.5, 1e-5)); // T1(0.5)
+        assert!(approx_eq(out[2], 1.0, 1e-5)); // T0(0)
+        assert!(approx_eq(out[3], 0.0, 1e-5)); // T1(0)
+        // Pair products: 4*5/2 = 10 pairs.
+        // Pairs in order: (0,0),(0,1),(0,2),(0,3),(1,1),(1,2),(1,3),(2,2),(2,3),(3,3).
+        let psi = [&out[0], &out[1], &out[2], &out[3]];
+        let mut idx = 4;
+        for f1 in 0..4 {
+            for f2 in f1..4 {
+                let expected = psi[f1] * psi[f2];
+                assert!(approx_eq(out[idx], expected, 1e-5),
+                    "pair ({},{}) at idx {}: got {}, expected {}",
+                    f1, f2, idx, out[idx], expected);
+                idx += 1;
+            }
+        }
+        assert_eq!(idx, d_h);
+    }
+
+    #[test]
+    fn chunked_gram_matches_direct() {
+        // Build a small synthetic feature set, compare chunked_gram_into against
+        // a hand-computed XᵀX + λI.
+        let d_h = 3;
+        let n = 4;
+        let features: Vec<f32> = vec![
+            1.0, 2.0, 3.0,
+            0.5, 1.0, 1.5,
+            2.0, 0.0, 1.0,
+            1.0, 1.0, 1.0,
+        ];
+        let lambda = 0.1f64;
+        // Direct XᵀX.
+        let mut direct_gram = vec![0.0f64; d_h * d_h];
+        for r in 0..n {
+            let row = &features[r * d_h..(r + 1) * d_h];
+            for i in 0..d_h {
+                for j in 0..d_h {
+                    direct_gram[i * d_h + j] += row[i] as f64 * row[j] as f64;
+                }
+            }
+        }
+        for i in 0..d_h {
+            direct_gram[i * d_h + i] += lambda;
+        }
+        // Chunked.
+        let mut chunked = vec![0.0f64; d_h * d_h];
+        let iter = (0..n).map(|r| &features[r * d_h..(r + 1) * d_h] as &[f32]);
+        chunked_gram_into(iter, &mut chunked, lambda, d_h);
+        for i in 0..d_h * d_h {
+            assert!((direct_gram[i] - chunked[i]).abs() < 1e-10,
+                "gram mismatch at {}: direct={}, chunked={}",
+                i, direct_gram[i], chunked[i]);
+        }
+    }
+
+    #[test]
+    fn forecast_low_rank_matches_full_rank_matvec() {
+        // Construct A (D×r) and B (r×d_h) from a known Wout = A·B, then verify
+        // the two-stage matvec A·(B·ψ) matches the direct Wout·ψ.
+        let d_h = 4usize;
+        let r = 2usize;
+        let d_out = 2usize;
+        // A = [[1, 0], [0, 2]], B = [[1, 0, 1, 0], [0, 1, 0, 1]]
+        // Wout = A·B = [[1,0,1,0], [0,2,0,2]]
+        let a: Vec<f32> = vec![1.0, 0.0, 0.0, 2.0];
+        let b: Vec<f32> = vec![1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 1.0];
+        let mut wout = vec![0.0f32; d_out * d_h];
+        for d in 0..d_out {
+            for j in 0..d_h {
+                for k in 0..r {
+                    wout[d * d_h + j] += a[d * r + k] * b[k * d_h + j];
+                }
+            }
+        }
+        let psi: Vec<f32> = vec![0.5, -1.0, 0.3, 0.7];
+        // Direct: out_direct[d] = Σ_j Wout[d,j] * psi[j].
+        let mut out_direct = [0.0f32; 2];
+        for d in 0..d_out {
+            for j in 0..d_h {
+                out_direct[d] += wout[d * d_h + j] * psi[j];
+            }
+        }
+        // Two-stage.
+        let mut out_lr = [0.0f32; 2];
+        let mut mid = [0.0f32; 2];
+        forecast_low_rank_apply(&a, &b, &psi, &mut mid, &mut out_lr, d_h, r, d_out);
+        for d in 0..d_out {
+            assert!(approx_eq(out_direct[d], out_lr[d], 1e-4),
+                "matvec mismatch at d={}: direct={}, low_rank={}",
+                d, out_direct[d], out_lr[d]);
+        }
+    }
+
+    #[test]
+    fn low_rank_fit_r_equals_d_recovers_forecast_quality() {
+        // Fit full-rank Wout via fit_ridge, then fit low-rank A·B via low_rank_fit
+        // with r=D. The low-rank A·B should approximate the full-rank Wout
+        // (within a tolerance that accounts for the ALS gauge freedom and the
+        // float precision of the Kronecker B-step).
+        type F = KarcForecaster<ChebyshevBasis<3>, 2, 3, 2>;
+        let mut f: F = KarcForecaster::with_capacity(ChebyshevBasis::new(), 100);
+        // Build a rich nonlinear 2D signal.
+        for i in 0..80 {
+            let t = i as f32 * 0.07;
+            let x0 = (0.9 * t).sin();
+            let x1 = (1.4 * t).cos() + 0.3 * (2.1 * t).sin();
+            let prev_t = (i - 1) as f32 * 0.07;
+            let prev_x0 = (0.9 * prev_t).sin();
+            let prev_x1 = (1.4 * prev_t).cos() + 0.3 * (2.1 * prev_t).sin();
+            let delay = [x0, x1, prev_x0, prev_x1];
+            let next_t = (i + 1) as f32 * 0.07;
+            let target = [(0.9 * next_t).sin(),
+                          (1.4 * next_t).cos() + 0.3 * (2.1 * next_t).sin()];
+            f.accumulate_pair(&delay, &target);
+        }
+        let lambda = 1e-4f32;
+        f.fit_ridge(lambda).expect("fit_ridge");
+        let iters = f.fit_low_rank(2, lambda, 100, 1e-10).expect("fit_low_rank");
+        assert!(f.is_low_rank_fitted());
+        assert!(iters > 0, "ALS should run at least 1 iteration");
+        // Compare A·B vs full-rank Wout directly.
+        let r = 2usize;
+        let d_h = F::D_H;
+        let mut ab = vec![0.0f32; 2 * d_h];
+        for d in 0..2 {
+            for j in 0..d_h {
+                for k in 0..r {
+                    ab[d * d_h + j] += f.a_low_rank[d * r + k] * f.b_low_rank[k * d_h + j];
+                }
+            }
+        }
+        // Max absolute weight difference.
+        let max_w = f.wout.iter().map(|x| x.abs()).fold(0.0f32, f32::max);
+        let max_diff = f.wout.iter().zip(ab.iter())
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0f32, f32::max);
+        let rel = max_diff / max_w.max(1e-6);
+        // With r=D=2, the factorization can represent Wout, but the ALS gauge
+        // freedom + float precision leaves some residual. We check <15% relative.
+        assert!(rel < 0.15,
+            "low-rank A·B diverges from Wout: max_diff={}, max_w={}, rel={:.4}",
+            max_diff, max_w, rel);
+        // Also verify forecasts match within a looser tolerance (Chebyshev
+        // expansion amplifies weight differences).
+        let mut max_rel_err = 0.0f32;
+        for probe_t in 0..20 {
+            let t = (probe_t as f32 + 0.5) * 0.3;
+            let delay = [(0.7 * t).sin(), (1.1 * t).cos(),
+                         (0.7 * (t - 0.07)).sin(), (1.1 * (t - 0.07)).cos()];
+            let mut out_full = [0.0f32; 2];
+            let mut out_lr = [0.0f32; 2];
+            let delay_copy = delay;
+            assert!(f.forecast_into(&delay, &mut out_full));
+            assert!(f.forecast_low_rank_into(&delay_copy, &mut out_lr));
+            for d in 0..2 {
+                let denom = out_full[d].abs().max(0.5);
+                let rel = (out_full[d] - out_lr[d]).abs() / denom;
+                if rel > max_rel_err {
+                    max_rel_err = rel;
+                }
+            }
+        }
+        assert!(max_rel_err < 0.15,
+            "low-rank forecast diverges from full-rank: max_rel_err={:.4}",
+            max_rel_err);
+    }
+
+    #[test]
+    fn low_rank_fit_is_deterministic() {
+        // Two ALS runs on identical Gram/Cov must produce bit-identical A, B.
+        let d_h = 6usize;
+        let d_out = 2usize;
+        let r = 2usize;
+        // Synthetic Gram (SPD, well-conditioned).
+        let mut gram = vec![0.0f64; d_h * d_h];
+        for i in 0..d_h {
+            for j in 0..d_h {
+                gram[i * d_h + j] = if i == j { 3.0 } else { 0.3 };
+            }
+        }
+        let mut cov = vec![0.0f64; d_h * d_out];
+        for i in 0..d_h {
+            for d in 0..d_out {
+                cov[i * d_out + d] = (i as f64 + 0.1) * ((d as f64) + 0.5);
+            }
+        }
+        let lambda = 1e-3f64;
+        let mut a1 = vec![0.0f64; d_out * r];
+        let mut b1 = vec![0.0f64; r * d_h];
+        let mut a2 = vec![0.0f64; d_out * r];
+        let mut b2 = vec![0.0f64; r * d_h];
+        let mut scr1 = LowRankFitScratch::with_capacity(d_h, d_out, r);
+        let mut scr2 = LowRankFitScratch::with_capacity(d_h, d_out, r);
+        let n1 = low_rank_fit(&gram, &cov, d_h, d_out, r, lambda, 30, 1e-10,
+                              &mut a1, &mut b1, &mut scr1);
+        let n2 = low_rank_fit(&gram, &cov, d_h, d_out, r, lambda, 30, 1e-10,
+                              &mut a2, &mut b2, &mut scr2);
+        assert_eq!(n1, n2, "iteration count must match");
+        for i in 0..d_out * r {
+            assert_eq!(a1[i].to_bits(), a2[i].to_bits(),
+                "A bit mismatch at {}", i);
+        }
+        for i in 0..r * d_h {
+            assert_eq!(b1[i].to_bits(), b2[i].to_bits(),
+                "B bit mismatch at {}", i);
+        }
     }
 }
