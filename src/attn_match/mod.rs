@@ -70,7 +70,7 @@ pub use key_selection::{
 };
 pub use online::{OnlineCompactResult, OnlineCompactor};
 pub use router::{pick_backend, SolverBackend, SolverRouter, SolverRouterConfig};
-pub use score_matrix::{compute_score_matrix, compute_softmax_attention};
+pub use score_matrix::{compute_attention_output, compute_score_matrix, compute_softmax_attention};
 pub use score_matrix_rayon::{compute_rms_attention_rayon, compute_score_matrix_rayon};
 pub use score_matrix_simd::compute_score_matrix_simd;
 pub use types::{

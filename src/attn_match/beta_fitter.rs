@@ -158,13 +158,9 @@ pub fn fit_beta_nnls(
         w[j] = s / l_mat[j * t + j];
     }
 
-    // Clamp to box constraints (initial closed-form solution).
+    // Clamp to box constraints (initial closed-form solution). Branchless.
     for j in 0..t {
-        if w[j] < config.w_lower {
-            w[j] = config.w_lower;
-        } else if w[j] > config.w_upper {
-            w[j] = config.w_upper;
-        }
+        w[j] = w[j].clamp(config.w_lower, config.w_upper);
     }
 
     // Step 2: Projected gradient descent (only if iters > 0).
@@ -195,15 +191,12 @@ pub fn fit_beta_nnls(
                         grad[j] += row[j] * r_i;
                     }
                 }
-                // Step: w ← w - η * grad; clamp to box.
+                // Step: w ← w - η * grad; clamp to box. Branchless clamp
+                // (emits minss/maxss) — keeps the inner loop branch-free
+                // for SIMD friendliness.
                 for j in 0..t {
-                    let mut new_w = w[j] - eta * grad[j];
-                    if new_w < config.w_lower {
-                        new_w = config.w_lower;
-                    } else if new_w > config.w_upper {
-                        new_w = config.w_upper;
-                    }
-                    w[j] = new_w;
+                    let new_w = w[j] - eta * grad[j];
+                    w[j] = new_w.clamp(config.w_lower, config.w_upper);
                 }
             }
         }
@@ -221,13 +214,9 @@ fn finalize(
     t: usize,
     config: &BetaFitConfig,
 ) -> BetaFitResult {
-    // Final clamp (defensive).
+    // Final clamp (defensive). Branchless — emits minss/maxss.
     for j in 0..t {
-        if w[j] < config.w_lower {
-            w[j] = config.w_lower;
-        } else if w[j] > config.w_upper {
-            w[j] = config.w_upper;
-        }
+        w[j] = w[j].clamp(config.w_lower, config.w_upper);
     }
     // β = log(w)
     let beta: Vec<f32> = w.iter().map(|&wi| wi.ln()).collect();

@@ -113,16 +113,55 @@ pub fn compute_softmax_attention(
         }
 
         // Pass 3: normalize via reciprocal-multiply (1 division + N multiplies).
-        let denom = if sum_exp < STABILITY_EPS {
-            STABILITY_EPS
-        } else {
-            sum_exp
-        };
+        let denom = sum_exp.max(STABILITY_EPS);
         let inv_denom = 1.0 / denom;
         for out in out_row.iter_mut() {
             *out *= inv_denom;
         }
         mass_out[i] = sum_exp;
+    }
+}
+
+/// Compute the attention output `Y = A · V` where `A` is `(n, t_len)` attention
+/// weights and `V` is `(t_len, d)` values. Output is `(n, d)` row-major.
+///
+/// This is the standard attention output computation `Y_i = Σ_j A_ij V_j`,
+/// shared between [`crate::attn_match::compact::compact`] and
+/// [`crate::attn_match::compact_with_fixed_beta`] for building the Cv-fit
+/// target. Extracted as a single source of truth so both fast paths benefit
+/// from any future kernel improvement.
+///
+/// # Loop order
+///
+/// `i` (query) × `j` (source token) × `k` (head dim), with `k` innermost.
+/// Both `values[j*d..]` and `out[i*d..]` are read/written sequentially within
+/// a fixed `i,j` — the cache-friendly ijk GEMM variant. The prior duplicated
+/// code had a k-outer / j-inner form that did strided `values[j*d + k]` reads.
+///
+/// # Panics
+/// Panics on dimension mismatch.
+#[inline]
+pub fn compute_attention_output(
+    attn: &[f32],  // (n, t_len) row-major — normalized attention weights
+    values: &[f32], // (t_len, d) row-major
+    n: usize,
+    t_len: usize,
+    d: usize,
+    out: &mut [f32], // (n, d) row-major — must be pre-zeroed
+) {
+    assert_eq!(attn.len(), n * t_len, "attn buffer size mismatch");
+    assert_eq!(values.len(), t_len * d, "values buffer size mismatch");
+    assert_eq!(out.len(), n * d, "output buffer size mismatch");
+    for i in 0..n {
+        let attn_row = &attn[i * t_len..(i + 1) * t_len];
+        let y_row = &mut out[i * d..(i + 1) * d];
+        for j in 0..t_len {
+            let a = attn_row[j];
+            let v_row = &values[j * d..(j + 1) * d];
+            for k in 0..d {
+                y_row[k] += a * v_row[k];
+            }
+        }
     }
 }
 

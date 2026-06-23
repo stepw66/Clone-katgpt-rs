@@ -418,11 +418,7 @@ pub fn compute_compact_attention(
             sum_exp += e;
         }
         // Pass 3: normalize via reciprocal-multiply.
-        let denom = if sum_exp < STABILITY_EPS {
-            STABILITY_EPS
-        } else {
-            sum_exp
-        };
+        let denom = sum_exp.max(STABILITY_EPS);
         let inv_denom = 1.0 / denom;
         for v in row.iter_mut() {
             *v *= inv_denom;

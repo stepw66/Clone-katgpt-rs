@@ -40,7 +40,7 @@ use crate::attn_match::key_selection::{
 };
 use crate::attn_match::{
     CompactError, CompactOutput,
-    score_matrix::{compute_score_matrix, compute_softmax_attention},
+    score_matrix::{compute_attention_output, compute_score_matrix, compute_softmax_attention},
     types::{AmConfig, KeySelector, ReconstructionReport},
     value_fitter::{ValueFitConfig, compute_compact_attention, fit_cv_least_squares},
 };
@@ -196,21 +196,10 @@ pub fn compact_with_fixed_beta(
     compute_softmax_attention(&full_scores, n, t_len, &mut full_attn, &mut m_target);
 
     // Build Y ∈ R^{n×d}: Y_i = softmax(q_i K^T / √d) V.
-    // Loop order j-outer / k-inner so both `values` and `y_target` are read
-    // and written sequentially (row-major). The prior k-outer / j-inner form
-    // did strided `values[j*d + k]` reads — one cache miss per j for large d.
+    // Extracted to the shared `compute_attention_output` kernel — see
+    // `compact::compact_with_router` for the cache-friendly loop-order notes.
     let mut y_target = vec![0.0f32; n * d];
-    for i in 0..n {
-        let attn_row = &full_attn[i * t_len..(i + 1) * t_len];
-        let y_row = &mut y_target[i * d..(i + 1) * d];
-        for j in 0..t_len {
-            let a = attn_row[j];
-            let v_row = &values[j * d..(j + 1) * d];
-            for k in 0..d {
-                y_row[k] += a * v_row[k];
-            }
-        }
-    }
+    compute_attention_output(&full_attn, values, n, t_len, d, &mut y_target);
 
     let cv_cfg = ValueFitConfig {
         ridge_lambda: config.cv_ridge_lambda,
