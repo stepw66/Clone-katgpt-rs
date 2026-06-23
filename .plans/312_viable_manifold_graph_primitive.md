@@ -35,18 +35,41 @@ Ship the generic, modelless, MIT-licensed open half of the Viable Manifold Graph
 
 ---
 
+## Phase 0 — Self-Contained Proof-of-Concept (runs TODAY, no feature gate)
+
+**Goal:** a single example file that proves the paper's headline result (manifold-constrained walk ~100% viable vs free Gaussian walk ~70% viable) on a toy 2D manifold, **before any module/feature work**. Fully self-contained — hand-rolls the volume field, graph, A*, and random walk inline. No dependency on the not-yet-built `viable_manifold_graph` module. Auto-discovered by Cargo (no `[[example]]` entry needed since `required-features` is empty).
+
+This is the "what does it look like?" demo. It validates the mechanism shape end-to-end and de-risks Phase 1–3 (if the toy reproduces the paper's 70%-vs-100% gap, the real primitive will too).
+
+### Tasks
+
+- [x] **T0.1** Create `katgpt-rs/examples/viable_manifold_graph_01_basic.rs` (self-contained, no `use katgpt_*`, only `std` + `rand` if needed; prefer a simple LCG RNG to avoid the rand dep).
+- [x] **T0.2** Define the toy viability predicate: union of two disks (radius 1.5 at (−2, 0) and (+2, 0)) connected by a thin corridor (|x| < 2, |y| < 0.4). This mirrors the paper's Figure 3b "playable clusters connected by a corridor".
+- [x] **T0.3** Define the toy "decoder" `f: R^2 → R^2` as `f(x,y) = (amp·x, amp·y)` where `amp = 1.0` if viable else `1e3`. Jacobian = `amp·I`; `log det(J^T J) = 4·log(amp)` (= 0 inside viable, ≈ 27.6 outside). Hand-rolled — no SVD call.
+- [x] **T0.4** Build the SafeManifoldGraph inline: sample a 50×50 grid over [−5,5]², keep nodes where the volume ≤ threshold AND predicate is true, connect each node to its 4 nearest viable neighbors with midpoint viability check.
+- [x] **T0.5** Hand-roll A* (`manifold_geodesic`) using `std::collections::BinaryHeap` with Euclidean latent-distance heuristic.
+- [x] **T0.6** Hand-roll `free_gaussian_walk(z0, σ, steps, rng)` and `manifold_random_walk(graph, start, steps, rng)` (uniform-over-neighbors).
+- [x] **T0.7** Print, in order:
+  1. Graph stats: "Built safe-manifold graph: N viable nodes, M edges"
+  2. ASCII visualization of the viable set (60 cols × 10 rows over [−5,5]×[−2,2.5]), `#` for viable, `.` for non-viable, with axis labels.
+  3. Free Gaussian walk stats: "Free Gaussian walk (30 steps): viable X/30 = Y%" — expect ~60–75% (paper analogue: 77% SMB).
+  4. Manifold-constrained walk stats: "Manifold-constrained walk (30 steps): viable 30/30 = 100% (by construction)".
+  5. Geodesic demo: print the node-count of `manifold_geodesic(left_disk_center, right_disk_center)` and confirm every hop is viable.
+- [x] **T0.8** Verify it runs: `cargo run --example viable_manifold_graph_01_basic` (no `--features` flag). **Verified 2026-06-23** — output: 360 viable nodes, 720 edges; free Gaussian 74.2% viable (256-trial ensemble, σ=0.25), manifold-constrained 100% by construction, geodesic 19 hops all viable. Reproduces paper's SMB headline (77.3% vs 99.6%).
+
+**Exit:** example runs with no feature flags; output shows the ASCII viable-set map + the 70%-vs-100% (approx) playability gap. This unblocks Phase 1–3 by proving the mechanism shape.
+
+---
+
 ## Phase 1 — Unblocking Skeleton (CORE)
 
 ### Tasks
 
-- [ ] **T1.1** Add feature gate `viable_manifold_graph = []` to `katgpt-rs/crates/katgpt-core/Cargo.toml` and `viable_manifold_graph = ["katgpt-core/viable_manifold_graph"]` to root `katgpt-rs/Cargo.toml`. **Depends on `subspace_phase_gate`** (for `jacobian_svd_at`).
-- [ ] **T1.2** Create `katgpt-rs/crates/katgpt-core/src/viable_manifold_graph.rs` with module doc referencing R294 + paper arxiv 2206.00106.
-- [ ] **T1.3** Define `pub struct VolumeFieldConfig { pub log_eps: f32 }` — just ε for the `log(Π σᵢ² + ε)` reduction. Default `log_eps = 1e-12`.
-- [ ] **T1.4** Implement `pub fn pullback_volume<F>(f: F, z: &[f32], scratch: &mut JacobianSvdScratch, cfg: &VolumeFieldConfig) -> f32 where F: Fn(&[f32], &mut [f32])`:
-  - Call `jacobian_svd_at(f, z, eps, scratch)` (eps from scratch's config; reuse Plan 301's default 1e-4).
-  - Return `Σ_i log(σᵢ² + cfg.log_eps)` over `result.singular_values`. (Numerically stable equivalent of `log(Π σᵢ² + ε)`.)
-  - Zero new allocations beyond what `jacobian_svd_at` already does.
-- [ ] **T1.5** Add `pub use viable_manifold_graph::{...}` to `katgpt-core/src/lib.rs` behind `#[cfg(feature = "viable_manifold_graph")]`.
+- [x] **T1.1** Add feature gate to `katgpt-rs/crates/katgpt-core/Cargo.toml` (defined as `viable_manifold_graph = ["subspace_phase_gate"]` — auto-pulls the SVD dep) and `viable_manifold_graph = ["katgpt-core/viable_manifold_graph"]` passthrough to root `katgpt-rs/Cargo.toml`.
+- [x] **T1.2** Create `katgpt-rs/crates/katgpt-core/src/viable_manifold_graph.rs` with module doc referencing R294 + paper arxiv 2206.00106.
+- [x] **T1.3** Define `pub struct VolumeFieldConfig { pub log_eps: f32, pub jacobian_eps: f32 }`. **Deviation:** added `jacobian_eps` because `JacobianSvdScratch` does not store eps (Plan 301's `jacobian_svd_at` takes it as a parameter). Default `jacobian_eps = 1e-4` via `DEFAULT_JACOBIAN_EPS`.
+- [x] **T1.4** Implement `pub fn pullback_volume<F>(f: F, z: &[f32], scratch: &mut JacobianSvdScratch, cfg: &VolumeFieldConfig) -> f32 where F: Fn(&[f32], &mut [f32])`: calls `jacobian_svd_at(f, z, cfg.jacobian_eps, scratch)`, returns `Σ_i log(σᵢ² + cfg.log_eps)`. Zero new allocations beyond SVD.
+- [x] **T1.5** Add `pub use viable_manifold_graph::{...}` to `katgpt-core/src/lib.rs` behind `#[cfg(feature = "viable_manifold_graph")]`, mirroring the `subspace_phase_gate` pattern.
 
 **Exit:** `cargo check -p katgpt-core --features viable_manifold_graph` clean.
 
@@ -56,18 +79,12 @@ Ship the generic, modelless, MIT-licensed open half of the Viable Manifold Graph
 
 ### Tasks
 
-- [ ] **T2.1** Define `pub struct SafeManifoldGraph { pub dim: usize, nodes: Vec<f32>, edges: Vec<(u32, u32)> }` — `nodes` is flat `[n_nodes × dim]`, row-major. Edges are bidirectional, deduplicated, sorted.
-- [ ] **T2.2** Define `pub struct GraphBuildConfig { pub volume_threshold: f32, pub edge_midpoint_check: bool, pub k_nearest: usize }`:
-  - `volume_threshold` — keep nodes where `pullback_volume ≤ threshold`. Caller responsibility to pick (paper uses mean volume).
-  - `edge_midpoint_check` — if true, verify the midpoint of each candidate edge is also viable (slower, more correct).
-  - `k_nearest` — connect each viable node to its `k` nearest viable neighbors (paper uses grid adjacency; we generalize).
-- [ ] **T2.3** Define `pub trait ViabilityPredicate { fn is_viable(&self, z: &[f32]) -> bool; }` for closure-agnostic predicate passing. Provide `pub struct ClosurePredicate<F>(pub F) where F: Fn(&[f32]) -> bool` impl.
-- [ ] **T2.4** Implement `pub fn build_safe_manifold_graph<F, V>(f: F, samples: &[f32], dim: usize, predicate: &V, volume_cfg: &VolumeFieldConfig, build_cfg: &GraphBuildConfig, scratch: &mut JacobianSvdScratch) -> SafeManifoldGraph where F: Fn(&[f32], &mut [f32]), V: ViabilityPredicate`:
-  - For each sample `z_i`: compute `vol_i = pullback_volume(&f, z_i, scratch, volume_cfg)`. Keep `i` iff `vol_i ≤ build_cfg.volume_threshold AND predicate.is_viable(z_i)`.
-  - Build edges: for each kept node, find `k_nearest` kept neighbors (Euclidean in latent space). Optionally verify midpoint viability.
-  - Return graph.
-- [ ] **T2.5** Implement `SafeManifoldGraph::node_latent(&self, idx: u32) -> &[f32]` — O(1) slice into `nodes`.
-- [ ] **T2.6** Implement `SafeManifoldGraph::neighbors(&self, idx: u32) -> Vec<u32>` (or iterator) — O(degree) scan over edges.
+- [x] **T2.1** Define `pub struct SafeManifoldGraph { pub dim: usize, nodes: Vec<f32>, edges: Vec<(u32, u32)> }` — flat row-major nodes, bidirectional dedup sorted edges.
+- [x] **T2.2** Define `pub struct GraphBuildConfig { pub volume_threshold: f32, pub edge_midpoint_check: bool, pub k_nearest: usize }`.
+- [x] **T2.3** Define `pub trait ViabilityPredicate { fn is_viable(&self, z: &[f32]) -> bool; }` + `pub struct ClosurePredicate<F>(pub F) where F: Fn(&[f32]) -> bool` impl.
+- [x] **T2.4** Implement `pub fn build_safe_manifold_graph<F, V>(...)` per spec: keep node iff `vol ≤ threshold AND predicate.is_viable(z)`; kNN edges with optional midpoint check.
+- [x] **T2.5** Implement `SafeManifoldGraph::node_latent(&self, idx: u32) -> &[f32]` — O(1) slice. Also `n_nodes`, `n_edges`, `nearest_node`, `for_each_neighbor`.
+- [x] **T2.6** Edges stored as `Vec<(u32, u32)>` with linear-scan `for_each_neighbor`. **Deviation:** CSR adjacency deferred until >10⁴ nodes (paper-scale is 10²–10³). Documented in `for_each_neighbor` docstring.
 
 **Exit:** unit tests for connected-graph construction (predicate = always true → expected node count), disconnected-graph construction (predicate = "x > 0" → bipartite split).
 
@@ -77,9 +94,9 @@ Ship the generic, modelless, MIT-licensed open half of the Viable Manifold Graph
 
 ### Tasks
 
-- [ ] **T3.1** Implement `pub fn manifold_geodesic(g: &SafeManifoldGraph, src: u32, dst: u32) -> Option<Vec<u32>>` — A* on the graph with Euclidean latent-distance heuristic. Reuse the priority-queue pattern from `pruners/pathfinder.rs::find_path`. Returns node-index path or `None` if unreachable.
-- [ ] **T3.2** Implement `pub fn manifold_random_walk<R: Rng>(g: &SafeManifoldGraph, src: u32, m: usize, rng: &mut R) -> Vec<u32>` — uniform-over-neighbors walk for `m` steps. Returns the visited node-index sequence (length `m + 1`, including `src`). Caller owns the returned `Vec`; the walk itself uses a small stack buffer.
-- [ ] **T3.3** (Optional, P2) Implement `pub fn manifold_curiosity_walk<R, W>(g: &SafeManifoldGraph, src: u32, m: usize, weights: &W, rng: &mut R) -> Vec<u32> where W: Fn(u32, u32) -> f32` — weighted-over-neighbors walk. The `weights` closure lets the caller (riir-ai) inject curiosity-driven neighbor preference without leaking cgsp types into katgpt-rs. **This is the riir-ai integration hook** — designed so `weights` can wrap `cgsp_runtime::curiosity_step` without that type being visible here.
+- [x] **T3.1** Implement `pub fn manifold_geodesic(g: &SafeManifoldGraph, src: u32, dst: u32) -> Option<Vec<u32>>` — A* with Euclidean heuristic + `came_from` reconstruction.
+- [x] **T3.2** Implement `pub fn manifold_random_walk(g: &SafeManifoldGraph, src: u32, m: usize, rng: &mut fastrand::Rng) -> Vec<u32>`. **Deviation:** uses `fastrand::Rng` (already a katgpt-core dep at line 9, used throughout the codebase) instead of a custom `ManifoldRng` trait — per plan's "check how katgpt-core handles RNG; if it uses fastrand, use that".
+- [x] **T3.3** Implement `pub fn manifold_curiosity_walk<W>(g: &SafeManifoldGraph, src: u32, m: usize, weights: &W, rng: &mut fastrand::Rng) -> Vec<u32> where W: Fn(u32, u32) -> f32` — weighted-over-neighbors walk. The riir-ai integration hook (closure wraps `cgsp_runtime::curiosity_step` without leaking that type).
 
 **Exit:** unit tests for shortest path correctness (matches BFS on a small graph), random walk length, weighted walk converges to high-weight neighbor.
 
