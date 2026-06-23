@@ -149,9 +149,9 @@ Each gate is a standalone file. All must pass to promote from opt-in.
       `len % 8` remainder. Unit test `saxpy_simd_matches_scalar` asserts
       bit-equality at d=8 and d=16 across multiple seeds/alphas — PASSES.
       Clean `cargo clippy` and `cargo check` on katgpt-core with the feature.
-- [ ] T3.2 Benchmark SIMD vs scalar on d=8 and d=16. **Gate:** ≥2× speedup at
+- [-] T3.2 Benchmark SIMD vs scalar on d=8 and d=16. **Gate:** ≥2× speedup at
       d=8, ≥1.5× at d=16. Re-run G4 with SIMD path; gate still <1ms.
-      **INCONCLUSIVE — GATE CANNOT BE EVALUATED ON DEV HOST (2026-06-23).**
+      **DEFERRED (2026-06-23) — GATE CANNOT BE EVALUATED ON DEV HOST.**
       The dev machine is **aarch64 (Apple Silicon)**, so the `#[cfg(target_arch = "x86_64")]`
       AVX2 backend is compiled out and `apply_latent_steering` routes to the
       scalar fallback. The bench harness `tests/latent_steering_t3_simd_vs_scalar.rs`
@@ -199,20 +199,14 @@ Changes:
 
 ## Phase 5 — Game Integration (DEFERRED to riir-ai)
 
-Blocked on Phase 2 G1–G2 pass. See
+**Status (2026-06-23):** Phase 2 G1–G2 PASS — primitive proven and promoted to default in katgpt-rs. Game-side wiring deferred to riir-ai Plan 330. See
 [riir-ai/.research/153](../../../riir-ai/.research/153_latent_field_steering_game_runtime_guide.md)
 for the integration guide.
 
-- [ ] T5.1 HLA post-evolve wiring in `riir-engine/src/hla/`: after
-      `evolve_hla(...)`, call `apply_latent_steering(state, field)` for each
-      active field on the entity. Field registry per zone.
-- [ ] T5.2 CWM soft-rule → field mapping: induced rules with `soft: true`
-      emit a `LatentField` instead of a hard constraint.
-- [ ] T5.3 Faction "battle stance" frozen field: stored as
-      `MerkleFrozenEnvelope<LatentSteeringVector>`, atomic Arc swap on stance
-      change.
-- [ ] T5.4 `GrudgeMemory` (Plan 317) integration: grudge emits a long-lived
-      `LatentField` applied when the target is within visible radius.
+- [-] T5.1 HLA post-evolve wiring in `riir-engine/src/hla/`. **DEFERRED to riir-ai Plan 330.**
+- [-] T5.2 CWM soft-rule → field mapping. **DEFERRED to riir-ai Plan 330.**
+- [-] T5.3 Faction "battle stance" frozen field. **DEFERRED to riir-ai Plan 330.**
+- [-] T5.4 `GrudgeMemory` (Plan 317) integration. **DEFERRED to riir-ai Plan 330.**
 
 ---
 

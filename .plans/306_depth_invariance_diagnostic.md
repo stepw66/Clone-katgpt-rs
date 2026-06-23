@@ -154,7 +154,7 @@ For kernels we own (HLA, latent_functor, micro_belief, engram, Raven) — NOT fo
 ## Phase 8 — Cross-references and issue filing
 
 - [x] **T8.1** Note in `katgpt-rs/src/speculative/belief_drafter.rs` module doc that the drafter is a known-subject of attention drift per Research 286 / Plan 306, and that the post-norm fix requires MLP retraining (riir-train territory). No code change to the drafter itself in this plan.
-- [ ] **T8.2** File follow-up issue in `riir-neuron-db/.issues/` for Raven/δ-Mem consolidation chain audit (each consolidation cycle = a speculation step on `style_weights[64]`; check for magnitude drift across consolidation cycles). Out of scope for this plan — private to riir-neuron-db.
+- [-] **T8.2** File follow-up issue in `riir-neuron-db/.issues/` for Raven/δ-Mem consolidation chain audit (each consolidation cycle = a speculation step on `style_weights[64]`; check for magnitude drift across consolidation cycles). **DEFERRED (2026-06-23)** — out of scope for this repo (katgpt-rs owns the open diagnostic only; Raven/δ-Mem lives in riir-neuron-db). To be filed when riir-neuron-db next touches the consolidation pipeline.
 - [x] **T8.3** Cross-link from `katgpt-rs/.research/258_Attention_Sink_Dual_Mechanism_NOP_Broadcast.md` and `katgpt-rs/.plans/287_sink_aware_attention.md` to this research note, with a one-line "different paper, different mechanism" disambiguation. The two are frequently confused; the cross-link prevents future misclassification.
 
 ---

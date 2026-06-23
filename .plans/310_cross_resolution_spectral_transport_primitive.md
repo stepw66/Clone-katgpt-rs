@@ -150,17 +150,13 @@ Each gate is a standalone file. All must pass to promote from opt-in.
 
 ---
 
-## Phase 3 — SIMD Acceleration (if G1–G4 pass)
+## Phase 3 — SIMD Acceleration (DEFERRED — no-op per gate)
 
-- [ ] T3.1 Identify hot loop: the `project_to_spectral_into` and
-      `reconstruct_from_spectral_into` inner products. Both are
-      matrix-vector products with small matrices.
-- [ ] T3.2 For d_src, d_dst ≤ 64 and k ≤ 16: evaluate manual SIMD
-      (`std::arch::x86_64::_mm256_fmadd_ps`) vs `wide` crate vs leaving scalar
-      (LLVM auto-vectorizes well at these sizes). Bench at G4's crowd scale.
-- [ ] T3.3 If cross-domain variant (4-matrix product) becomes a hot path,
-      consider fusing the C multiplication with the reconstruction (loop
-      re-ordering to keep k×k in registers).
+**Status (2026-06-23):** Phase 1 already ships the inner products via `simd::simd_dot_f32` (auto-fallback to scalar on non-AVX/non-NEON). G4 confirmed 0 allocs and the d=64→256,k=16 hot path is L1-resident; manual SIMD is a no-op at these sizes against LLVM auto-vectorization. Re-open this phase ONLY if a real deployment profile shows the contiguous-row dot as a hot spot (unlikely at k ≤ 64).
+
+- [-] T3.1 Identify hot loop — covered by Phase 1's `simd::simd_dot_f32` reuse; no manual inner-loop work needed at k ≤ 64.
+- [-] T3.2 Manual SIMD evaluation (`_mm256_fmadd_ps` / `wide`) — DEFERRED. G4 crowd-scale (5000×8) finished at 19.2µs in Plan 309's cousin primitive; same auto-vec regime here. Reopen only on profiled hot path.
+- [-] T3.3 Cross-domain variant (4-matrix product) fusion — DEFERRED. Not yet on a hot path; fusion adds complexity without a measured bottleneck.
 
 ---
 
@@ -183,22 +179,16 @@ Changes:
 
 ## Phase 5 — Shard Integration (DEFERRED to riir-neuron-db)
 
-Blocked on Phase 2 G1–G2 pass. See
+**Status (2026-06-23):** Phase 2 G1–G2 PASS — primitive proven and promoted to default in katgpt-rs. Shard-side wiring blocked on user decision to proceed with riir-neuron-db Plan 004. See
 [riir-neuron-db/.research/004](../../../riir-neuron-db/.research/004_cross_resolution_shard_transport_guide.md)
 for the integration guide.
 
-- [ ] T5.1 `NeuronShard::transport_to_tier(d_dst, bases) -> NeuronShard` in
-      `riir-neuron-db/src/shard.rs`. New constructor that produces a shard at
-      a different `STYLE_DIM` via cross-resolution transport. Both source and
-      destination are valid committed artifacts.
-- [ ] T5.2 `ShardIndex::get_at_tier(zone_hash, d_dst, bases) -> NeuronShard` in
-      `riir-neuron-db/src/index.rs`. Lazy projection on retrieval — store one
-      reference (highest-fidelity) shard per zone, project on demand.
-- [ ] T5.3 Consolidation integration: `Raven/δ-Mem` runs at low resolution
-      (fast, plasma-tier), the consolidated result projects up to reference
-      resolution for cold-tier commit.
-- [ ] T5.4 AnyRAG escalation: external retrieval returns whatever resolution
-      the source provides; gateway transports to the caller's native tier.
+- [-] T5.1 `NeuronShard::transport_to_tier(d_dst, bases) -> NeuronShard` in
+      `riir-neuron-db/src/shard.rs`. **DEFERRED to riir-neuron-db Plan 004.**
+- [-] T5.2 `ShardIndex::get_at_tier(zone_hash, d_dst, bases) -> NeuronShard` in
+      `riir-neuron-db/src/index.rs`. **DEFERRED to riir-neuron-db Plan 004.**
+- [-] T5.3 Consolidation integration (`Raven/δ-Mem` low-res → high-res commit). **DEFERRED to riir-neuron-db Plan 004.**
+- [-] T5.4 AnyRAG escalation gateway transport. **DEFERRED to riir-neuron-db Plan 004.**
 
 ---
 

@@ -154,24 +154,26 @@ No new `[[example]]` entries needed (Phase 3 ships no new examples).
 
 ---
 
-## Phase 4 — riir-ai Hand-off (reference, executed in riir-ai Plan 331)
+## Phase 4 — riir-ai Hand-off (DEFERRED to riir-ai Plan 331)
 
-This phase is *referenced* here for traceability but executed in `riir-ai/.plans/331_*.md` (TBD).
+**Status (2026-06-23):** katgpt-rs side COMPLETE — open primitive promoted to default after G1+G2 GOAT pass. Runtime-side wiring deferred to riir-ai Plan 331 (out of scope for this repo per 4-repo discipline).
 
-- [ ] **T4.1 (riir-ai)** Wire `LatentCompressionPriorSampler` into `riir-engine/src/hla/` for per-NPC `(α_i, β_i)` K-prior on candidate affect vectors. (Private, gated by riir-ai feature `hla_k_prior`.)
-- [ ] **T4.2 (riir-ai)** Wire `dirichlet_energy` K-prior into `riir-engine/src/latent_functor/` for functor `C` matrix sampling. (Private.)
-- [ ] **T4.3 (riir-ai)** Unify curiosity pulse with K-prior deviation: `curiosity = KL(p_sampled || p_K_prior)` in `riir-engine/src/cgsp_runtime/`. (Private.)
-- [ ] **T4.4 (riir-ai)** Online `(α, β)` calibration via curiosity signal. (Private — the moat.)
-- [ ] **T4.5 (riir-ai)** `CoincidenceGate` wiring to KG triple emission in `riir-engine/src/kg_*.rs` + `riir-games/src/social/`. Free zone-transfer of KG patterns. (Private.)
-- [ ] **T4.6 (riir-ai)** G3 + G4 + G5 GOAT gate on the runtime side. Promote riir-ai features if pass.
+- [-] **T4.1 (riir-ai)** Wire `LatentCompressionPriorSampler` into `riir-engine/src/hla/` for per-NPC `(α_i, β_i)` K-prior on candidate affect vectors. **DEFERRED to riir-ai Plan 331.**
+- [-] **T4.2 (riir-ai)** Wire `dirichlet_energy` K-prior into `riir-engine/src/latent_functor/`. **DEFERRED to riir-ai Plan 331.**
+- [-] **T4.3 (riir-ai)** Unify curiosity pulse with K-prior deviation. **DEFERRED to riir-ai Plan 331.**
+- [-] **T4.4 (riir-ai)** Online `(α, β)` calibration via curiosity signal. **DEFERRED to riir-ai Plan 331.**
+- [-] **T4.5 (riir-ai)** `CoincidenceGate` wiring to KG triple emission. **DEFERRED to riir-ai Plan 331.**
+- [-] **T4.6 (riir-ai)** G3 + G4 + G5 GOAT gate on the runtime side. **DEFERRED to riir-ai Plan 331.**
 
 ---
 
-## Phase 5 — Chain + Shard Bridges (reference, executed in respective repos)
+## Phase 5 — Chain + Shard Bridges (DEFERRED to respective repos)
 
-- [ ] **T5.1 (riir-chain)** Add `latcal_fixed::to_fixed(α)` and `to_fixed(β)` commitment of per-NPC K-prior scalars in `riir-chain/src/encoding/latcal_fixed.rs`. Update `MerkleFrozenEnvelope` schema. (Private, gated by `k_prior_commitment`.)
-- [ ] **T5.2 (riir-neuron-db)** Extend `NeuronShard` with K-prior signature field `(α, β)` alongside `style_weights[64]`. Audit ALL constructors (`new`, `new_unchecked`, `new_spectral`, `from_bytes`) — per the `merkle_root` lesson. (Private, gated by `k_prior_signature`.)
-- [ ] **T5.3 (riir-chain + riir-neuron-db)** CI guard: `cargo check --all-features` across both repos to catch combo-only regressions on the new shard field.
+**Status (2026-06-23):** katgpt-rs side COMPLETE. Cross-repo wiring deferred per 4-repo discipline.
+
+- [-] **T5.1 (riir-chain)** `latcal_fixed::to_fixed(α)` / `to_fixed(β)` commitment. **DEFERRED to riir-chain.**
+- [-] **T5.2 (riir-neuron-db)** `NeuronShard` K-prior signature field. **DEFERRED to riir-neuron-db.**
+- [-] **T5.3 (riir-chain + riir-neuron-db)** CI guard: `cargo check --all-features` across both repos. **DEFERRED — re-run after T5.1 + T5.2 land.**
 
 ---
 

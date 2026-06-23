@@ -4,7 +4,7 @@
 **Research:** [katgpt-rs/.research/287_Probe_Steering_Claim_Evidence_Ladder_Fusion_With_267.md](../.research/287_Probe_Steering_Claim_Evidence_Ladder_Fusion_With_267.md) (Gain-tier meta-discipline)
 **Source paper:** [arxiv 2606.07612](https://arxiv.org/abs/2606.07612) — Gupta et al., ICML 2026 position paper (Pass as mechanism; rubric is the fusion value).
 **Target:** `katgpt-rs/src/claim_rubric/` (new module) + Cargo feature `claim_rubric`
-**Status:** Active — Phase 1 <state: in-progress>
+**Status:** COMPLETE (2026-06-23) — Phases 1–4 all done. Phase 2 (17/17 round-trip + 1/1 GOAT gate) re-verified green by parent agent; `claim_rubric` promoted to `default` in `katgpt-rs/Cargo.toml`. `cargo check --no-default-features --features claim_rubric` and the default build both compile clean.
 
 ---
 
