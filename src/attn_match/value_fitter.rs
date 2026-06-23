@@ -210,20 +210,19 @@ pub fn fit_cv_least_squares(
 fn compute_relative_error(cv: &[f32], x: &[f32], y: &[f32], n: usize, t: usize, d: usize) -> f32 {
     let mut residual_sq = 0.0f32;
     let mut y_norm_sq = 0.0f32;
-    let mut xcv = vec![0.0f32; d];
+    // Fused single-pass: compute X·Cv row entry inline and fold directly into
+    // the residual / y-norm accumulators. Eliminates the per-call `xcv` Vec
+    // allocation (d f32) and the second k-loop pass over it.
     for i in 0..n {
         let x_row = &x[i * t..(i + 1) * t];
         let y_row = &y[i * d..(i + 1) * d];
-        // X Cv row = sum_j x_row[j] * cv[j, :]
         for k in 0..d {
+            // X·Cv entry k = sum_j x_row[j] * cv[j*d + k]
             let mut s = 0.0f32;
             for j in 0..t {
                 s += x_row[j] * cv[j * d + k];
             }
-            xcv[k] = s;
-        }
-        for k in 0..d {
-            let r = xcv[k] - y_row[k];
+            let r = s - y_row[k];
             residual_sq += r * r;
             y_norm_sq += y_row[k] * y_row[k];
         }
