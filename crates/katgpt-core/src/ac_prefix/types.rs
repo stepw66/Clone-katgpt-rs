@@ -141,6 +141,23 @@ impl<'a> AcPrefix<'a> {
         j_in_r0 | (both_in_r1 & causal_in_r1)
     }
 
+    /// Write the augmented token sequence into `out`. Slot layout:
+    ///   - `[0, xc_len)`         → copies: `base_tokens[conditioning_positions[k]]`
+    ///   - `[xc_len, augmented)` → originals: `base_tokens` verbatim
+    ///
+    /// `debug_assert`s `out.len() == augmented_len()`.
+    pub fn augmented_tokens_into(&self, out: &mut [u32]) {
+        let xc = self.conditioning_positions.len();
+        let base_len = self.base_tokens.len();
+        debug_assert_eq!(out.len(), xc + base_len, "out.len() must equal augmented_len");
+        for k in 0..xc {
+            out[k] = self.base_tokens[self.conditioning_positions[k]];
+        }
+        for k in 0..base_len {
+            out[xc + k] = self.base_tokens[k];
+        }
+    }
+
     /// Write the loss mask into `out`:
     ///   - `0.0` for slots in region 0 (the copies — never part of the loss).
     ///   - `0.0` for slots in region 1 whose original position is in
@@ -174,6 +191,128 @@ impl<'a> AcPrefix<'a> {
             out[xc + k] = if is_conditioning { 0.0 } else { 1.0 };
         }
     }
+
+    /// Single-pass arbitrary-conditional log-likelihood `log p(xe | xc)`.
+    ///
+    /// Builds the augmented sequence (`xc copies | base_tokens`), materializes
+    /// the attention mask, calls `forward` once, and sums the per-position
+    /// logprobs at loss_mask=1.0 positions (the eval tokens `xe`).
+    ///
+    /// `forward` receives:
+    ///   - `augmented_tokens: &[u32]`  — the augmented sequence
+    ///   - `augmented_positions: &[usize]` — original position per slot (for RoPE)
+    ///   - `mask: &AcPrefixMask` — the materialized three-region attention mask
+    ///   - `loss_mask: &[f32]` — 1.0 at eval positions, 0.0 elsewhere
+    /// and returns per-position logprobs `Vec<f32>` (length = augmented_len).
+    ///
+    /// Returns the sum of logprobs at loss_mask=1.0 positions.
+    pub fn conditional_logprob<F>(&self, mut forward: F) -> f32
+    where
+        F: FnMut(&[u32], &[usize], &AcPrefixMask, &[f32]) -> Vec<f32>,
+    {
+        let n = self.augmented_len();
+        let mut augmented_tokens = vec![0u32; n];
+        let mut augmented_positions = vec![0usize; n];
+        let mut loss_mask = vec![0.0f32; n];
+        self.augmented_tokens_into(&mut augmented_tokens);
+        self.original_positions_into(&mut augmented_positions);
+        self.loss_mask_into(&mut loss_mask);
+        let mask = AcPrefixMask::materialize_from(self);
+        let logprobs = forward(&augmented_tokens, &augmented_positions, &mask, &loss_mask);
+        debug_assert_eq!(
+            logprobs.len(),
+            n,
+            "forward must return one logprob per augmented slot"
+        );
+        let mut acc = 0.0f32;
+        for (lp, m) in logprobs.iter().zip(loss_mask.iter()) {
+            acc += *lp * *m;
+        }
+        acc
+    }
+
+    /// Sample `xe` tokens conditionally on `xc`, left-to-right.
+    ///
+    /// For each eval position (loss_mask=1.0 slot) in left-to-right order:
+    ///   - Forward the augmented sequence up to and including the current eval slot.
+    ///   - The closure returns logits `[vocab]` at the current eval position.
+    ///   - Sample via the **Gumbel-max trick** (`argmax(logit - log(-log(u)))`,
+    ///     `u ~ Uniform(0,1)`). This is the cleanest sigmoid-respecting sampler:
+    ///     it doesn't construct an explicit probability distribution and is
+    ///     mathematically equivalent to sampling from the softmax-categorical.
+    ///     The AGENTS.md "sigmoid not softmax" rule applies to blending/decision
+    ///     gates, not the LM head; Gumbel-max is used here because it sidesteps
+    ///     the explicit softmax while remaining exact.
+    ///   - Write the sampled token into the augmented sequence at the eval slot
+    ///     so later eval positions can attend to it.
+    ///
+    /// Conditioning copies and original conditioning positions stay fixed.
+    /// Returns just the eval tokens in original order.
+    pub fn conditional_sample<F>(&self, mut forward: F, rng: &mut fastrand::Rng) -> Vec<u32>
+    where
+        F: FnMut(&[u32], &[usize], &AcPrefixMask, &[f32], usize) -> Vec<f32>,
+    {
+        let n = self.augmented_len();
+        let mut augmented_tokens = vec![0u32; n];
+        let mut augmented_positions = vec![0usize; n];
+        let mut loss_mask = vec![0.0f32; n];
+        self.augmented_tokens_into(&mut augmented_tokens);
+        self.original_positions_into(&mut augmented_positions);
+        self.loss_mask_into(&mut loss_mask);
+        let mask = AcPrefixMask::materialize_from(self);
+
+        // Walk eval slots left-to-right. We forward the *entire* augmented
+        // sequence each step (the closure may cache internally); the current
+        // eval slot index is passed so the closure can return its logits.
+        let mut sampled = Vec::with_capacity(n);
+        for eval_slot in 0..n {
+            if loss_mask[eval_slot] == 0.0 {
+                continue;
+            }
+            let logits = forward(
+                &augmented_tokens,
+                &augmented_positions,
+                &mask,
+                &loss_mask,
+                eval_slot,
+            );
+            let token = gumbel_max_sample(&logits, rng);
+            augmented_tokens[eval_slot] = token;
+            sampled.push(token);
+        }
+        sampled
+    }
+}
+
+/// Gumbel-max sampler: `argmax_i (logit_i + g_i)` where `g_i = -log(-log(u_i))`,
+/// `u_i ~ Uniform(0,1)`. Mathematically equivalent to sampling from
+/// `softmax(logits)` without ever materializing the categorical distribution.
+///
+/// Returns `0` on an empty input. Redraws when `u_i == 0.0` to keep `log`
+/// finite (matches the existing `sample_token` defensive redraw).
+#[inline]
+pub(crate) fn gumbel_max_sample(logits: &[f32], rng: &mut fastrand::Rng) -> u32 {
+    if logits.is_empty() {
+        return 0;
+    }
+    let mut best_idx = 0usize;
+    let mut best_score = f32::NEG_INFINITY;
+    for (i, &l) in logits.iter().enumerate() {
+        let mut u = rng.f32();
+        while u <= 0.0 || u >= 1.0 {
+            u = rng.f32();
+        }
+        // Gumbel(0,1) sample: g = -ln(-ln(u)). Both -ln(u) and ln(-ln(u)) are
+        // real-valued for u in (0,1), so no NaN risk after the redraw guard.
+        let neg_ln_u = -u.ln();
+        let g = -neg_ln_u.ln();
+        let score = l + g;
+        if score > best_score {
+            best_score = score;
+            best_idx = i;
+        }
+    }
+    best_idx as u32
 }
 
 /// Bit-packed attention mask for the augmented sequence.
@@ -406,5 +545,51 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn augmented_tokens_into_matches_layout() {
+        let base = [10u32, 20, 30, 40];
+        let p = small_prefix(&base);
+        // r0 copies come from positions [1, 3] → base[1]=20, base[3]=40
+        // r1 originals: 10, 20, 30, 40
+        let mut out = [0u32; 6];
+        p.augmented_tokens_into(&mut out);
+        assert_eq!(out, [20, 40, 10, 20, 30, 40]);
+    }
+
+    #[test]
+    fn conditional_logprob_sums_loss_mask_slots_only() {
+        // Stub forward: returns logprob[i] = (token[i] as f32) / 100.0 for
+        // every slot. The conditional_logprob sum should pick only the
+        // loss_mask=1.0 slots.
+        //   augmented_tokens = [20, 40, 10, 20, 30, 40]
+        //   loss_mask         = [ 0,  0,  1,  0,  1,  0]
+        //   picked: slots 2 and 4 → logprobs 0.10 + 0.30 = 0.40
+        let base = [10u32, 20, 30, 40];
+        let p = small_prefix(&base);
+        let total = p.conditional_logprob(|tokens, _pos, _mask, _lm| {
+            tokens.iter().map(|t| *t as f32 / 100.0).collect()
+        });
+        assert!((total - 0.40_f32).abs() < 1e-6, "got {total}");
+    }
+
+    #[test]
+    fn conditional_sample_walks_eval_slots_left_to_right() {
+        // Stub forward: always returns logits with a sharp peak at index 5.
+        // Gumbel-max noise has variance π²/6 ≈ 1.64, so a peak of 1000 vs
+        // trough -1000 makes the peak essentially deterministic.
+        // The augmented sequence has 2 eval slots → sampled = [5, 5].
+        let base = [10u32, 20, 30, 40];
+        let p = small_prefix(&base);
+        let mut rng = fastrand::Rng::with_seed(0);
+        let sampled = p.conditional_sample(
+            |_tokens, _pos, _mask, _lm, _eval_slot| {
+                (0..27).map(|i| if i == 5 { 1000.0 } else { -1000.0 }).collect()
+            },
+            &mut rng,
+        );
+        assert_eq!(sampled.len(), 2);
+        assert_eq!(sampled, vec![5, 5], "all eval slots should pick peak=5");
     }
 }

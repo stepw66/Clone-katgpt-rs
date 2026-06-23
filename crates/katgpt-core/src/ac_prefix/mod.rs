@@ -68,6 +68,10 @@
 //! (`ac_prefix` feature flag, default-off). Stays opt-in until the G1–G4 GOAT
 //! gate passes in Phase 3.
 
+mod forward;
 mod types;
 
+pub use forward::ForwardForAcPrefix;
 pub use types::{AcPrefix, AcPrefixMask};
+
+pub(crate) use types::gumbel_max_sample;
