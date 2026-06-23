@@ -93,13 +93,29 @@ pub fn select_omp_keys(
     // Hoisted scratch buffers — reused across greedy iterations to avoid
     // per-iteration allocation. top_k_buf holds the (idx, corr) candidates
     // for the current iteration; a_sub holds the phi[:, selected] sub-matrix
-    // rebuilt on each periodic NNLS refit.
+    // rebuilt on each periodic NNLS refit. corr_all holds the per-key
+    // correlation scores computed in a single cache-friendly sweep.
     let mut top_k_buf: Vec<(usize, f32)> = Vec::with_capacity(k);
     let mut a_sub: Vec<f32> = Vec::with_capacity(n * t);
+    let mut corr_all: Vec<f32> = vec![0.0f32; t_len];
 
     let mut iter_count = 0usize;
     while selected.len() < t {
-        // Correlation scores: c_j = residual^T Φ_:,j  (for j not in selected).
+        // Correlation scores: c = Φ^T residual, computed in one cache-friendly
+        // pass. The previous form iterated j-outer / i-inner and did strided
+        // `phi[i*t_len + j]` reads — one cache miss per i per j. With n=8 and
+        // t_len=4096, that was 32K misses to read 128 KB. This i-outer form
+        // reads phi row-by-row (sequential) and writes corr_all sequentially.
+        corr_all.fill(0.0);
+        for i in 0..n {
+            let r = residual[i];
+            let phi_row = &phi[i * t_len..(i + 1) * t_len];
+            for j in 0..t_len {
+                corr_all[j] += phi_row[j] * r;
+            }
+        }
+
+        // Pick top-k from corr_all, skipping selected keys.
         let mut best_j = 0usize;
         let mut best_score = f32::NEG_INFINITY;
         top_k_buf.clear();
@@ -107,11 +123,7 @@ pub fn select_omp_keys(
             if in_selected[j] {
                 continue;
             }
-            let col_j = &phi[j..]; // stride-T access
-            let mut corr = 0.0f32;
-            for i in 0..n {
-                corr += residual[i] * col_j[i * t_len];
-            }
+            let corr = corr_all[j];
             if corr > best_score {
                 best_score = corr;
                 best_j = j;
@@ -163,12 +175,17 @@ pub fn select_omp_keys(
         // Periodic NNLS refit.
         if iter_count.is_multiple_of(tau) || selected.len() >= t {
             // Build A = phi[:, selected] ∈ R^{n × |selected|}.
+            // Row-major (i-outer) construction reads each phi row sequentially.
+            // The prior col-major form did strided `phi[i*t_len + sel_idx]`
+            // reads — one cache miss per i per selected key.
             let cur_t = selected.len();
             a_sub.clear();
             a_sub.resize(n * cur_t, 0.0);
-            for (col, &sel_idx) in selected.iter().enumerate() {
-                for i in 0..n {
-                    a_sub[i * cur_t + col] = phi[i * t_len + sel_idx];
+            for i in 0..n {
+                let phi_row = &phi[i * t_len..(i + 1) * t_len];
+                let a_row = &mut a_sub[i * cur_t..(i + 1) * cur_t];
+                for (col, &sel_idx) in selected.iter().enumerate() {
+                    a_row[col] = phi_row[sel_idx];
                 }
             }
             // Solve NNLS on the subset.
@@ -196,9 +213,12 @@ pub fn select_omp_keys(
     // Final NNLS fit on the full selected set.
     let final_t = selected.len();
     let mut a_final = vec![0.0f32; n * final_t];
-    for (col, &sel_idx) in selected.iter().enumerate() {
-        for i in 0..n {
-            a_final[i * final_t + col] = phi[i * t_len + sel_idx];
+    // Row-major construction — see periodic refit above for rationale.
+    for i in 0..n {
+        let phi_row = &phi[i * t_len..(i + 1) * t_len];
+        let a_row = &mut a_final[i * final_t..(i + 1) * final_t];
+        for (col, &sel_idx) in selected.iter().enumerate() {
+            a_row[col] = phi_row[sel_idx];
         }
     }
     let cfg = BetaFitConfig {

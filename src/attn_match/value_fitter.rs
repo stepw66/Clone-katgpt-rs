@@ -210,18 +210,29 @@ pub fn fit_cv_least_squares(
 fn compute_relative_error(cv: &[f32], x: &[f32], y: &[f32], n: usize, t: usize, d: usize) -> f32 {
     let mut residual_sq = 0.0f32;
     let mut y_norm_sq = 0.0f32;
+
+    // Transpose cv from (t, d) row-major to (d, t) row-major so each output
+    // dimension's coefficients are contiguous. The prior form did strided
+    // `cv[j*d + k]` reads — one cache miss per j per k. For typical
+    // (t=64, d=64, n=8) this is 32K strided reads; the transpose costs
+    // 4K elements once and makes every subsequent `dot_8wide` sequential.
+    let mut cv_t = vec![0.0f32; d * t];
+    for j in 0..t {
+        let cv_row = &cv[j * d..(j + 1) * d];
+        for k in 0..d {
+            cv_t[k * t + j] = cv_row[k];
+        }
+    }
+
     // Fused single-pass: compute X·Cv row entry inline and fold directly into
-    // the residual / y-norm accumulators. Eliminates the per-call `xcv` Vec
-    // allocation (d f32) and the second k-loop pass over it.
+    // the residual / y-norm accumulators. Uses the shared 8-wide SIMD dot
+    // kernel — DRY with the other score-matrix paths.
     for i in 0..n {
         let x_row = &x[i * t..(i + 1) * t];
         let y_row = &y[i * d..(i + 1) * d];
         for k in 0..d {
-            // X·Cv entry k = sum_j x_row[j] * cv[j*d + k]
-            let mut s = 0.0f32;
-            for j in 0..t {
-                s += x_row[j] * cv[j * d + k];
-            }
+            let cv_row = &cv_t[k * t..(k + 1) * t];
+            let s = dot_8wide(x_row, cv_row, t);
             let r = s - y_row[k];
             residual_sq += r * r;
             y_norm_sq += y_row[k] * y_row[k];

@@ -18,7 +18,7 @@
 // Index-based loops are intentional for numerical clarity in this NNLS kernel.
 #![allow(clippy::needless_range_loop)]
 
-use crate::attn_match::STABILITY_EPS;
+use crate::attn_match::{STABILITY_EPS, score_matrix_simd::dot_8wide};
 
 /// Configuration for β fitting.
 #[derive(Debug, Clone, Copy)]
@@ -178,14 +178,11 @@ pub fn fit_beta_nnls(
             let mut grad = vec![0.0f32; t];
             let mut aw = vec![0.0f32; n];
             for _ in 0..config.iters {
-                // aw = A w
+                // aw = A w  (matvec; reuse the shared SIMD dot kernel)
+                let w_slice = &w[..t];
                 for i in 0..n {
                     let row = &a[i * t..(i + 1) * t];
-                    let mut s = 0.0f32;
-                    for j in 0..t {
-                        s += row[j] * w[j];
-                    }
-                    aw[i] = s;
+                    aw[i] = dot_8wide(row, w_slice, t);
                 }
                 // grad = A^T (A w - m). Iterate i in the outer loop so reads
                 // from `a` are sequential (row-major). The prior j-outer form
@@ -236,13 +233,11 @@ fn finalize(
     let beta: Vec<f32> = w.iter().map(|&wi| wi.ln()).collect();
     // Relative mass error ||A w - m|| / ||m||
     let m_norm = vector_norm(m);
+    let w_slice = &w[..t];
     let mut residual_norm_sq = 0.0f32;
     for i in 0..n {
         let row = &a[i * t..(i + 1) * t];
-        let mut aw_i = 0.0f32;
-        for j in 0..t {
-            aw_i += row[j] * w[j];
-        }
+        let aw_i = dot_8wide(row, w_slice, t);
         let r = aw_i - m[i];
         residual_norm_sq += r * r;
     }
@@ -312,14 +307,11 @@ fn estimate_spectral_norm_squared(a: &[f32], n: usize, t: usize, steps: usize) -
     let mut aw = vec![0.0f32; n];
     let mut new_v = vec![0.0f32; t];
     for _ in 0..steps.max(1) {
-        // aw = A v
+        // aw = A v  (matvec)
+        let v_slice = &v[..t];
         for i in 0..n {
             let row = &a[i * t..(i + 1) * t];
-            let mut s = 0.0f32;
-            for j in 0..t {
-                s += row[j] * v[j];
-            }
-            aw[i] = s;
+            aw[i] = dot_8wide(row, v_slice, t);
         }
         // v = A^T aw  (reuse new_v instead of reallocating)
         new_v.iter_mut().for_each(|x| *x = 0.0);
@@ -338,15 +330,13 @@ fn estimate_spectral_norm_squared(a: &[f32], n: usize, t: usize, steps: usize) -
             v[j] = new_v[j] / v_norm;
         }
     }
-    // Rayleigh quotient: ||A v|| ≈ sqrt(lambda) where lambda ≈ ||A||².
+    // Rayleigh quotient: ||A v||^2 ≈ lambda where lambda ≈ ||A||^2.
     // Recompute Av with the final v.
+    let v_slice = &v[..t];
     let mut av_norm_sq = 0.0f32;
     for i in 0..n {
         let row = &a[i * t..(i + 1) * t];
-        let mut s = 0.0f32;
-        for j in 0..t {
-            s += row[j] * v[j];
-        }
+        let s = dot_8wide(row, v_slice, t);
         av_norm_sq += s * s;
     }
     // av_norm_sq ≈ v^T A^T A v ≈ ||A||² (since ||v||=1).
