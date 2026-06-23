@@ -38,6 +38,13 @@
 //! - [`SilenceToken`] — emitted with `Silent` from Phase 3 onward.
 //! - [`DelegateToken`] / [`FoldbackTarget`] — typed delegate handoff (caller
 //!   spawns the async task in Phase 3+).
+//! - [`PendingDelegateQueue`] — fixed-capacity ring buffer of pending
+//!   `DelegateToken`s. Zero-allocation handoff between the per-tick decision
+//!   and the caller-owned async spawn (Phase 3, Plan 303 T3.2). This crate
+//!   does **not** spawn async tasks — see the contract note on
+//!   [`PendingDelegateQueue`] (Plan 303 T3.3).
+//! - [`SalienceTriGate::build_delegate_token`] — convenience constructor for
+//!   `DelegateToken<A2>` (Phase 3, Plan 303 T3.1).
 //!
 //! ## Private boundary
 //! - NPC wiring → `riir-ai` Plan 330.
@@ -54,7 +61,9 @@
 #![cfg(feature = "salience_tri_gate")]
 
 pub mod gate;
+pub mod pending;
 pub mod types;
 
 pub use gate::SalienceTriGate;
+pub use pending::PendingDelegateQueue;
 pub use types::{DelegateToken, FoldbackTarget, SalienceDecision, SilenceToken};

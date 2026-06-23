@@ -229,6 +229,42 @@ impl<A: Clone, const D: usize> SalienceTriGate<A, D> {
             out[i] = self.decide(&activations[i], z[i], c[i], payloads[i].clone(), tick);
         }
     }
+
+    /// Convenience constructor for a [`DelegateToken`](super::types::DelegateToken)
+    /// (Plan 303 T3.1).
+    ///
+    /// The gate itself is agnostic to delegate payloads — `decide()` takes the
+    /// payload directly and wraps it in [`SalienceDecision::Delegate`]`(A)`.
+    /// This helper is for callers that want the typed handoff form
+    /// (`DelegateToken<A>`) so they can push it onto a
+    /// [`PendingDelegateQueue`](super::pending::PendingDelegateQueue) and let
+    /// the runtime spawn the async task.
+    ///
+    /// The payload type `A2` is generic *independent* of the gate's `A`: the
+    /// caller may want a richer handoff payload (e.g. an `Arc<Request>`) than
+    /// the lightweight payload passed into `decide()`.
+    ///
+    /// **Validation:** we store `holding_reply_idx` as-is. The caller's
+    /// template-table size is the caller's concern — we do not validate range
+    /// here. (Range checks at gate-construction time would couple this crate
+    /// to the caller's table layout, which is out of scope.)
+    ///
+    /// Reference: Plan 303 T3.1.
+    #[inline]
+    pub fn build_delegate_token<A2: Clone>(
+        &self,
+        payload: A2,
+        tick: u64,
+        holding_reply_idx: u8,
+        foldback_target: super::types::FoldbackTarget,
+    ) -> super::types::DelegateToken<A2> {
+        super::types::DelegateToken {
+            payload,
+            issued_tick: tick,
+            holding_reply_idx,
+            foldback_target,
+        }
+    }
 }
 
 // ── Private hot-path helpers ──────────────────────────────────────────────

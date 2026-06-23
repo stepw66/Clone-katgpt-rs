@@ -6,7 +6,7 @@
 **Runtime plan:** [riir-ai/.plans/330_proactive_npc_salience_gate_runtime.md](../../riir-ai/.plans/330_proactive_npc_salience_gate_runtime.md)
 **Source paper:** [arxiv 2606.14777](https://arxiv.org/abs/2606.14777) — JoyAI-VL-Interaction (Yao et al., JD.com, Jun 2026)
 **Target:** `katgpt-rs/src/salience/` (new module) + Cargo feature `salience_tri_gate`
-**Status:** Active — Phase 1 complete (skeleton + G1/G2 property tests shipped, 11/11 tests pass), Phase 2 benchmarks + Phase 3-5 deferred.
+**Status:** Active — Phase 1 + Phase 3 + Phase 4 complete (skeleton + G1/G2 property tests + async-delegate helpers + docs/examples shipped; 20/20 tests pass). Phase 2 latency bench (T2.2) + Phase 5 GOAT promotion still deferred.
 
 ---
 
@@ -155,8 +155,8 @@ GOAT gate: G1 (determinism + monotonicity) and G2 (two-sigmoid ablation parity) 
 
 ### Tasks
 
-- [ ] **T3.1** Add `SalienceTriGate::build_delegate_token(&self, payload: A, tick: u64, holding_reply_idx: u8, foldback_target: FoldbackTarget) -> DelegateToken<A>` — convenience constructor. Validates `holding_reply_idx` is in range (caller's table size is caller's concern; we just store the index).
-- [ ] **T3.2** Add a `PendingDelegateQueue<A: Clone, const CAP: usize = 2>` ring buffer in `katgpt-rs/src/salience/pending.rs`:
+- [x] **T3.1** Add `SalienceTriGate::build_delegate_token(&self, payload: A, tick: u64, holding_reply_idx: u8, foldback_target: FoldbackTarget) -> DelegateToken<A>` — convenience constructor. Validates `holding_reply_idx` is in range (caller's table size is caller's concern; we just store the index). **DEVIATION:** method is generic over a *separate* `A2: Clone` (independent of the gate's `A`) so callers can pass a richer handoff payload than the lightweight `decide()` payload. No range validation done — documented as caller's concern.
+- [x] **T3.2** Add a `PendingDelegateQueue<A: Clone, const CAP: usize = 2>` ring buffer in `katgpt-rs/src/salience/pending.rs`. **DEVIATION:** initialized via `[const { None }; CAP]` inline const blocks (stable since Rust 1.79; crate edition is 2024 so MSRV ≥ 1.85 — available). This is required because `DelegateToken<A>` is `Clone` but not `Copy`. Also added `Default` impl, `pop()` (FIFO) / `is_empty()` / `len()` / `capacity()` / `clear()`. `head`/`len` are `u8` ⇒ `CAP <= 255` asserted in `new()`. Ring convention: `head` = next write slot, oldest = `(head + CAP - len) % CAP`.
   ```rust
   pub struct PendingDelegateQueue<A: Clone, const CAP: usize = 2> {
       slots: [Option<DelegateToken<A>>; CAP],
@@ -164,14 +164,14 @@ GOAT gate: G1 (determinism + monotonicity) and G2 (two-sigmoid ablation parity) 
       len: u8,
   }
   ```
-  Methods: `push(token) -> Result<(), DelegateToken<A>>` (Err if full — caller decides policy), `pop_completed()`, `is_empty()`, `len()`. Fixed-size, zero-alloc.
-- [ ] **T3.3** Document the contract: this crate does **not** spawn async tasks. The caller (riir-ai runtime) owns the spawn. This crate only provides the typed handoff + queue.
-- [ ] **T3.4** Add doc example showing the typical caller pattern (build token → push to queue → caller spawns async → on completion, caller removes from queue and applies foldback).
+  Methods: `push(token) -> Result<(), DelegateToken<A>>` (Err if full — caller decides policy), `pop() -> Option<DelegateToken<A>>` (FIFO), `is_empty()`, `len()`, `capacity()`, `clear()`. Fixed-size, zero-alloc. (Plan said `pop_completed`; implemented as `pop` for FIFO semantics — name is clearer.)
+- [x] **T3.3** Document the contract: this crate does **not** spawn async tasks. The caller (riir-ai runtime) owns the spawn. This crate only provides the typed handoff + queue. — Documented in `PendingDelegateQueue` struct doc + module doc + `.docs/30_salience_tri_gate.md`.
+- [x] **T3.4** Add doc example showing the typical caller pattern (build token → push to queue → caller spawns async → on completion, caller removes from queue and applies foldback). — Added as a `no_run` rustdoc example at the top of `pending.rs`; verified to compile against the real API.
 
 ### Phase 3 acceptance
 
-- Queue property tests: push/pop FIFO order; push when full returns Err with the token; CAP=2 holds exactly 2.
-- No async runtime dependency in this crate.
+- [x] Queue property tests: push/pop FIFO order; push when full returns Err with the token; CAP=2 holds exactly 2. (9 queue tests shipped: FIFO, full-Err, CAP=2, pop-empty, clear, reuse-after-clear, wraparound, default, larger-CAP.)
+- [x] No async runtime dependency in this crate.
 
 ---
 
@@ -179,15 +179,15 @@ GOAT gate: G1 (determinism + monotonicity) and G2 (two-sigmoid ablation parity) 
 
 ### Tasks
 
-- [ ] **T4.1** Add `katgpt-rs/examples/salience_tri_gate_basic.rs` — minimal example: construct gate with hand-tuned direction vectors, run 100 random activations, print decision distribution. No game semantics.
-- [ ] **T4.2** Add `katgpt-rs/examples/salience_tri_gate_batch.rs` — batched usage with N=10000, print throughput.
-- [ ] **T4.3** Add module-level doc with the paper citation, the open/private split, and a pointer to `riir-ai/.research/148` (just the path, not the contents — private).
-- [ ] **T4.4** Add `katgpt-rs/.docs/30_salience_tri_gate.md` (or next free number) documenting the API surface, design rationale (two sigmoids vs softmax, silence-as-variant), and the GOAT gate results once Phase 2 completes.
+- [x] **T4.1** Add `katgpt-rs/examples/salience_tri_gate_basic.rs` — minimal example: construct gate with hand-tuned direction vectors, run 100 random activations, print decision distribution. No game semantics. **DEVIATION:** the cribbed `Lcg::next_f32` from `gate::tests` has a range bug — `(next() as f32) / (u32::MAX as f32)` divides 31 bits by ~2^32, giving `[0, 0.5)` instead of `[0, 1)`. This makes `* 2.0 - 1.0` span `[-1, 0)`, never positive ⇒ `Delegate` never fires. Fixed in the *examples* (divide by `1u64 << 31`). Did **not** fix the same bug in `gate::tests` — that's Phase 1 code out of scope, and the G2 test still passes (it only checks parity, not distribution). Noted here as a follow-up. Gate params also tuned (`floor_speak=0.15`, `ceil_delegate=0.4`) so all three variants fire in the demo (27/48/25 split).
+- [x] **T4.2** Add `katgpt-rs/examples/salience_tri_gate_batch.rs` — batched usage with N=10000, print throughput. Same LCG fix as T4.1. Release build on dev machine: **~50M decisions/sec** via single-shot `Instant`. Caveat documented in-example + in `.docs/30`: this is a smoke test, **not** the authoritative Criterion bench (T2.2 deferred).
+- [x] **T4.3** Add module-level doc with the paper citation, the open/private split, and a pointer to `riir-ai/.research/148` (just the path, not the contents — private). — Module doc updated to re-export `PendingDelegateQueue`, `build_delegate_token`, and note Phase 3 contract.
+- [x] **T4.4** Add `katgpt-rs/.docs/30_salience_tri_gate.md` (or next free number) documenting the API surface, design rationale (two sigmoids vs softmax, silence-as-variant), and the GOAT gate results once Phase 2 completes. — Created at `30_salience_tri_gate.md` (30 was free; `.docs/` had 01–27 contiguous + 191). GOAT gate status section is honest: G1+G2 PASS as tests, latency NOT measured to GOAT-gate standard (T2.2 deferred).
 
 ### Phase 4 acceptance
 
-- Both examples compile and run with `--features salience_tri_gate`.
-- Module doc renders cleanly via `cargo doc`.
+- [x] Both examples compile and run with `--features salience_tri_gate`. (`cargo run --example salience_tri_gate_basic` → 27/48/25 split; `--release --example salience_tri_gate_batch` → ~50M decisions/sec.)
+- [x] Module doc renders cleanly via `cargo doc`. (`cargo check --features salience_tri_gate` passes; rustdoc `no_run` example in `pending.rs` compiles.)
 
 ---
 
@@ -226,4 +226,39 @@ GOAT gate: G1 (determinism + monotonicity) and G2 (two-sigmoid ablation parity) 
 
 ## TL;DR
 
-Open primitive plan for the Super-GOAT declared in `katgpt-rs/.research/281`. Ships `SalienceTriGate<A, D>` in `katgpt-rs/src/salience/` behind feature `salience_tri_gate` — a 3-way per-tick emit gate (Speak / Silent / Delegate) with silence as a first-class variant, two stacked sigmoids (never softmax), BLAKE3-committed direction vectors (caller's responsibility), and a typed `DelegateToken` handoff with a fixed-size `PendingDelegateQueue`. **Phase 1 = skeleton + types + decide/decide_batch**; **Phase 2 = G1 (determinism + monotonicity) + G2 (two-sigmoid ablation parity) + latency bench (< 50ns for D=8)**; **Phase 3 = delegate token + pending queue helpers**; **Phase 4 = examples + docs**; **Phase 5 = GOAT gate run + promotion decision**. Game-side wiring is riir-ai Plan 330; training is riir-train. This crate stays math-only, MIT, no game IP.
+Open primitive plan for the Super-GOAT declared in `katgpt-rs/.research/281`. Ships `SalienceTriGate<A, D>` in `katgpt-rs/src/salience/` behind feature `salience_tri_gate` — a 3-way per-tick emit gate (Speak / Silent / Delegate) with silence as a first-class variant, two stacked sigmoids (never softmax), BLAKE3-committed direction vectors (caller's responsibility), and a typed `DelegateToken` handoff with a fixed-size `PendingDelegateQueue`.
+
+**Phase 1 ✅** = skeleton + types + decide/decide_batch (11/11 tests, G1+G2 PASS).
+**Phase 2 ⏳** = latency bench (< 50ns for D=8) — T2.2 **deferred**.
+**Phase 3 ✅** = delegate token + pending queue helpers (T3.1–T3.4 done; 9 queue tests; 20/20 total).
+**Phase 4 ✅** = examples + docs (T4.1–T4.4 done; basic + batched examples run; `.docs/30` written).
+**Phase 5 ⏳** = GOAT gate run + promotion decision — blocked on T2.2.
+
+Game-side wiring is riir-ai Plan 330; training is riir-train. This crate stays math-only, MIT, no game IP.
+
+### DEVIATIONS (Phase 3 + Phase 4)
+
+- **T3.1**: `build_delegate_token<A2: Clone>` is generic over a payload type *independent* of the gate's `A` (so callers can use a richer handoff payload). No `holding_reply_idx` range validation — documented as caller's concern.
+- **T3.2**: `PendingDelegateQueue` initialized via `[const { None }; CAP]` inline const blocks (stable Rust 1.79; crate edition 2024 ⇒ MSRV ≥ 1.85 ⇒ available). Required because `DelegateToken<A>` is `Clone`-only. `head`/`len` are `u8` ⇒ `CAP <= 255` asserted in `new()`. Plan's `pop_completed` renamed to `pop` (FIFO semantics, clearer name). Added `Default` impl.
+- **T4.1 / T4.2**: the cribbed `Lcg::next_f32` has a range bug (`/u32::MAX` should be `/ (1<<31)`) that makes activations span `[-1, 0)` instead of `[-1, 1)`, so `Delegate` never fires. Fixed in the *examples* only. The same bug exists in `gate::tests::Lcg` (Phase 1 code) but the G2 ablation test still passes (parity check, not distribution) — left as a **follow-up**, not fixed in this phase per the "don't fix unrelated bugs" rule. Gate params also tuned (`floor_speak=0.15`, `ceil_delegate=0.4`) so all three variants fire in the demos.
+- **T4.2**: the example reports ~50M decisions/sec via single-shot `Instant` — this is a **smoke test, not a GOAT-gate-quality number**. Authoritative bench is T2.2 (deferred). Caveat is documented in-example and in `.docs/30`.
+- **Cargo.toml**: NOT edited (another agent has it locked). Two `[[example]]` entries needed — see below.
+
+### Cargo.toml additions needed (DO NOT apply here — hand off to Cargo.toml owner)
+
+```toml
+[[example]]
+name = "salience_tri_gate_basic"
+required-features = ["salience_tri_gate"]
+
+[[example]]
+name = "salience_tri_gate_batch"
+required-features = ["salience_tri_gate"]
+```
+
+Both examples compile + run fine today via cargo auto-discovery (`cargo run --example salience_tri_gate_basic --features salience_tri_gate`); the explicit entries just enforce `required-features` so `cargo build --examples` without the flag doesn't try to compile them.
+
+### Follow-ups (not blocking Phase 3/4 merge)
+
+- **`gate::tests::Lcg::next_f32` range bug** — divides 31 bits by `u32::MAX` (~2^32), giving `[0, 0.5)`. Affects G2 test coverage (the "Span [-1, 1]" comment is wrong; actually spans `[-1, 0)`). Fix: `(self.next() as f32) / ((1u64 << 31) as f32)`. Low priority — G2 still passes as a parity check.
+- **Workspace blocker**: `crates/katgpt-core/Cargo.toml` declares `[[bench]] karc_forecast_bench` but `crates/katgpt-core/benches/karc_forecast_bench.rs` does not exist (Plan 308 / `karc_forecaster` agent WIP). This blocks `cargo test` workspace-wide — had to create a temporary stub bench file to validate. The stub was deleted after validation; the Plan 308 agent owns the real file.
