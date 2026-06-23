@@ -275,6 +275,17 @@ pub mod irrep_pruner;
 // Opt-in until G1 GOAT gate passes.
 #[cfg(feature = "subspace_phase_gate")]
 pub mod subspace_phase_gate;
+
+// Viable Manifold Graph — discrete safe-manifold navigation primitive.
+// Distillation of arXiv:2206.00106 (González-Duque et al., *Mario Plays on a
+// Manifold*, 2022). Generic over any smooth map `f: R^n → R^m` (closure) and
+// a viability predicate `V(z)`. Computes the pullback volume field
+// `log det(J_f^T J_f)` (via Plan 301's `jacobian_svd_at`), filters a latent
+// sample to a discrete safe-manifold subgraph, and runs A* / random-walk
+// navigation that stays inside the viable set by construction. Game / shard /
+// chain wiring lives in riir-ai (R154). Opt-in until G1–G6 GOAT gates pass.
+#[cfg(feature = "viable_manifold_graph")]
+pub mod viable_manifold_graph;
 #[cfg(feature = "spectral_pruner")]
 pub use irrep_pruner::{
     IrrepPruner, IrrepPrunerConfig, irrep_pruner_from_config, spectral_flatness,
@@ -283,6 +294,13 @@ pub use irrep_pruner::{
 pub use subspace_phase_gate::{
     IntrinsicDimMethod, JacobianSvdScratch, SvdResult, estimate_intrinsic_dim, jacobian_svd_at,
     numerical_rank, participation_ratio, phase_transition_gate,
+};
+
+#[cfg(feature = "viable_manifold_graph")]
+pub use viable_manifold_graph::{
+    ClosurePredicate, GraphBuildConfig, SafeManifoldGraph, ViabilityPredicate, VolumeFieldConfig,
+    build_safe_manifold_graph, manifold_curiosity_walk, manifold_geodesic, manifold_random_walk,
+    pullback_volume,
 };
 
 #[cfg(feature = "flow_field_nav")]
