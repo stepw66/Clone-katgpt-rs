@@ -148,8 +148,8 @@ Ship a modelless, zero-allocation **AC-GPT-style arbitrary-conditional prefix pr
 ### Tasks
 
 - [x] **T4.1 (if G1–G4 pass)** Add `ac_prefix` to the `default` feature list in `crates/katgpt-core/Cargo.toml`. Update `katgpt-rs/README.md` Feature Showcase with a new section "🔀 AC-Prefix: Arbitrary-Conditional Single-Pass Evaluation (Plan 313, arxiv 2606.14943)".
-- [ ] **T4.2 (if G2 fails)** Add a `.benchmarks/313_ac_prefix_goat.md` with the negative result, the measured speedup ratio, and the reason (likely: micro-GPT is too small for the single-pass win to beat iterative-MLM at this scale; the win appears only at larger contexts). Leave `ac_prefix` opt-in. Document the open question: does the speedup appear at game-AI context lengths (1024+ tokens)?
-  - **N/A:** G2 passed (27.258× speedup). T4.2 not executed.
+- [x] **T4.2 (if G2 fails)** Add a `.benchmarks/313_ac_prefix_goat.md` with the negative result, the measured speedup ratio, and the reason (likely: micro-GPT is too small for the single-pass win to beat iterative-MLM at this scale; the win appears only at larger contexts). Leave `ac_prefix` opt-in. Document the open question: does the speedup appear at game-AI context lengths (1024+ tokens)? **N/A — G2 PASSED (27.46× speedup, threshold ≥3×); demotion branch not taken. T4.1 (promote) executed instead.**
+
 - [x] **T4.3** Either way, commit on `develop` with `feat:` prefix (per AGENTS.md).
 - [x] **T4.4** If G1–G4 pass, file `katgpt-rs/.issues/NNN_ac_prefix_super_goat_gate.md` to track the open Super-GOAT question: does the AC-Prefix × Engram × Latent Field Steering fusion deliver a measurable quality win over Engram × Latent Field Steering at iso-compute on a real game-AI workload? This is the follow-up that could re-open the Super-GOAT gate (see Research 295 §2.4).
   - **FILED:** `katgpt-rs/.issues/002_ac_prefix_super_goat_gate.md`.

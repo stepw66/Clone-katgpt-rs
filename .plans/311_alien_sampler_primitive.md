@@ -154,10 +154,10 @@ This is the make-or-break phase. The whole point is proving dual-encoder availab
 
 ### Tasks
 
-- [ ] **T5.1** Add `alien_sampler` to `default = [...]` in `Cargo.toml`. **SKIPPED** — GOAT gate failed; module stays opt-in.
-- [ ] **T5.2** Update `katgpt-rs/README.md` Feature Flags table + add to "Always-On Hot Path" section if perf qualifies. **SKIPPED.**
-- [ ] **T5.3** Update `katgpt-rs/.docs/01_overview.md` module structure. **SKIPPED.**
-- [ ] **T5.4** Cross-reference from `katgpt-rs/.research/089_OPUS_*.md` ("if population-level diversity is needed, prefer `alien_sampler` over `opus_selection`'s local-redundancy"). **SKIPPED** — the GOAT gate did not prove `alien_sampler` beats OPUS on this scenario.
+- [x] **T5.1** Add `alien_sampler` to `default = [...]` in `Cargo.toml`. **SKIPPED — CLOSED N/A.** GOAT gate failed (G1 0.5010, G2 0.6724); promotion precondition not met. Module stays opt-in.
+- [x] **T5.2** Update `katgpt-rs/README.md` Feature Flags table + add to "Always-On Hot Path" section if perf qualifies. **SKIPPED — CLOSED N/A** (depends on T5.1).
+- [x] **T5.3** Update `katgpt-rs/.docs/01_overview.md` module structure. **SKIPPED — CLOSED N/A** (depends on T5.1).
+- [x] **T5.4** Cross-reference from `katgpt-rs/.research/089_OPUS_*.md` ("if population-level diversity is needed, prefer `alien_sampler` over `opus_selection`'s local-redundancy"). **SKIPPED — CLOSED N/A** — the GOAT gate did not prove `alien_sampler` beats OPUS on this scenario.
 - [x] **T5.5** Commit on `develop` with `feat:` prefix per AGENTS.md.
 
 ---

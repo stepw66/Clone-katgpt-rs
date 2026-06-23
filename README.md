@@ -344,7 +344,7 @@ Path-Aware:  100 nodes, 100 accumulated-valid (100.0%)
 | ManifoldPruner (Plan 234) | **NO GOAT** | G1 FAIL: sigmoid(x)>0.5 ⟺ x>0, identical to binary at 0.5 cutoff |
 | FuncAttn (Plan 286) | **G6 FAIL** | 0.969 < SDPA 1.000 on masked-token LM prediction at 600 FD-SGD steps — stays opt-in |
 | CompressionDrafter (Plan 285) | **GOAT FAILED (2 runs)** | G1 1.50× (<3× target), G2 1077× (>2× target). Beam search structurally loses to template selection at Hot-tier |
-| Alien Sampler (Plan 311) | **GOAT FAILED (1/4)** | G2/G3 FAIL — dual-encoder β phase-transition at β≈0.4 has no β satisfying both motif-collapse and quality-preservation on synthetic NPC scenario. Mechanism validated (2× concentration reduction); domain transfer unvalidated |
+| Alien Sampler (Plan 311) | **GOAT FAILED (2/4)** | G1+G2 FAIL (β phase-transition at β≈0.4 — no β satisfies both motif-collapse and quality-preservation on synthetic NPC scenario). G3 PASS post-rayon (38.42×→4.56×). G4 PASS. Mechanism validated (2× concentration reduction); domain transfer unvalidated |
 
 📖 **Full negative result detail + replaced feature audit:** [`.docs/20_negative_results.md`](.docs/20_negative_results.md).
 
