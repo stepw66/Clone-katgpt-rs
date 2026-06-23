@@ -385,6 +385,22 @@ pub use cross_resolution::{
     transport_cross_resolution_into,
 };
 
+// Latent Field Steering — top-down direction-vector injection into mutable
+// latent state (Plan 309, Research 290, CAA + functional emotions). The missing
+// fourth quadrant: CNA mutates neurons, EmotionDirections is read-only, FPCG
+// refuses mutation — this injects directly into the latent state on the hot
+// path. Zero-alloc SIMD SAXPY + sigmoid-falloff localized support.
+// Opt-in until G1–G5 GOAT gate passes (G2 make-or-break: rank preservation ≥0.95).
+#[cfg(feature = "latent_field_steering")]
+pub mod latent_steering;
+#[cfg(feature = "latent_field_steering")]
+pub use latent_steering::{
+    FieldSupport, LatentField, LatentSteeringError, LatentSteeringVector,
+    HLA_AROUSAL, HLA_CALM, HLA_DESPERATION, HLA_DIM, HLA_FEAR, HLA_VALENCE,
+    apply_field_to_crowd, apply_latent_steering, apply_latent_steering_weighted,
+    kernel_weight,
+};
+
 // ChunkedContentStore — Lore-distilled chunked content-addressed Merkle store (Plan 272, Research 262).
 // Open primitive: chunks → BLAKE3 → dedup via papaya → binary Merkle root. No game/chain IP.
 // Consumed by riir-ai Plan 319 (Executable Asset Vessel + Quorum Gitflow).

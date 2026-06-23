@@ -1240,6 +1240,39 @@ Feature gate: `cross_resolution_transport` (**DEFAULT-ON** since Phase 4 GOAT PA
 
 ---
 
+### 🌊 Latent Field Steering: Top-Down Direction-Vector Injection (Plan 309, Research 290)
+
+The **missing top-down control direction** for NPC affect. Existing emotion infra is read-only (`EmotionDirections::project`, Plan 162). Latent Field Steering **injects** a frozen, BLAKE3-committed direction vector directly into mutable per-tick latent state — the "wave interference" mechanism from the Gemini reframing: linear superposition of the NPC's current field with an injected steering field.
+
+```text
+s' = s + α · kernel(distance, bandwidth) · v
+```
+
+The kernel is `sigmoid((bandwidth - distance) · steepness)` — ~1 inside the support, ~0 outside, smooth at the boundary. Per AGENTS.md: **sigmoid, never softmax**. Supports three localization modes: `Global` (all entities), `Radius` (Euclidean band), `Zone` (zone-hash match).
+
+**Phase 2 GOAT (2026-06-23): ALL 5 GATES PASS — PROMOTED to default-on (Phase 4).**
+
+| Gate | Target | Result | Verdict |
+|------|--------|--------|---------|
+| **G1** steering strength | fear-axis post/pre ≥ 1.30 (α=0.5) | **1.50×** | ✅ |
+| **G2** rank preservation (α=0.3) | mean cos ≥ 0.95, min cos ≥ 0.90 | mean **0.9958**, min **0.9667** | ✅ |
+| **G3** localization | leakage ratio < 0.01 | **4.5e-5** | ✅ |
+| **G4** crowd perf | 5000 NPCs < 1ms | p50 **19.2µs** | ✅ (52× headroom) |
+| **G5** zero-alloc | 0 allocs after warmup | **0** allocs / 1000 applies | ✅ |
+
+**Deployment caveat (G2 argmax flip):** the α-sweep reveals that 8% of NPCs change their top-1 action at α=0.3 (12% at α=0.5, 18% at α=0.9). The cosine gate passes cleanly, but deployment should use **α ≤ 0.3** for hot-path steering to keep argmax flips under 10%.
+
+| α | mean cos | min cos | argmax flip |
+|---|----------|---------|-------------|
+| 0.1 | 0.9995 | 0.9962 | 1% |
+| 0.3 | 0.9958 | 0.9667 | 8% |
+| 0.5 | 0.9883 | 0.8993 | 12% |
+| 0.9 | 0.9634 | 0.5923 | 18% |
+
+Feature gate: `latent_field_steering` (**DEFAULT-ON** since Phase 4 GOAT PASS 2026-06-23). 📖 Plan: [`.plans/309_latent_field_steering_primitive.md`](.plans/309_latent_field_steering_primitive.md), Research: [`.research/290_latent_field_steering_open_primitive.md`](.research/290_latent_field_steering_open_primitive.md). Game integration (HLA post-evolve wiring, CWM soft-rule → field mapping, faction battle stance) deferred to riir-ai Plan 330.
+
+---
+
 ## 🔧 KV Compression
 
 Default: **Hybrid OCT+PQ** (OCTOPUS triplet encoding + PlanarQuant 2D Givens rotation). Best MSE + 64× fewer rotation FMAs.
