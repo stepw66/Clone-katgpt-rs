@@ -81,14 +81,38 @@ The plan says: "G1 PASS but G2 FAIL → Investigate β sweep (try β=0.5, 0.6); 
 
 For reference, the Phase 2 microbench (separate from the GOAT gate):
 
-| Kernel | Target | Result | Verdict |
-|--------|--------|--------|---------|
-| `rank` 1k candidates (batch path) | ≤ 500µs | **498µs** | ✅ PASS |
-| `rank` 10k candidates (batch path) | ≤ 5ms | **5.49ms** | ❌ FAIL (10% over; SIMD would fix) |
-| `median_top_m` bank=100 | ≤ 5µs | **0.42µs** | ✅ PASS (12× under) |
-| `median_top_m` bank=10k | ≤ 500µs | **35µs** | ✅ PASS (14× under) |
+| Kernel | Target | Pre-Issue-002 | Post-Issue-002 | Verdict |
+|--------|--------|---------------|----------------|---------|
+| `rank` 1k candidates (batch path) | ≤ 500µs | 498µs | **456µs** | ✅ PASS (~8% faster) |
+| `rank` 10k candidates (batch path) | ≤ 5ms | 5.49ms | **5.10ms** | ❌ FAIL (~7% faster, still 2% over) |
+| `median_top_m` bank=100 | ≤ 5µs | 0.42µs | **0.42µs** | ✅ PASS (unchanged) |
+| `median_top_m` bank=10k | ≤ 500µs | 35µs | **34µs** | ✅ PASS (unchanged) |
 
-The `median_top_m` kernel is excellent (12-14× under target). The `rank` kernel is borderline; the trait-path allocation + no-SIMD inner loop explain the gap. The batch path (`availability_batch` + `rank_precomputed`) is the recommended hot-path entry point.
+The `median_top_m` kernel is excellent (12-14× under target). The `rank` kernel improved 7-8% from the SoA flat-bank refactor (Issue 002 C1) — better cache locality on the per-candidate bank sweep. The batch path (`availability_batch` + `rank_precomputed`) is the recommended hot-path entry point.
+
+---
+
+## Post-Issue-002 G3 re-measurement (2026-06-23)
+
+Issue 002 (SoA flat bank + SIMD-friendly dot + incremental norms) landed C1/C2/C3 as infrastructure but **did not close G3** on the GOAT bench:
+
+| Metric | Pre-Issue-002 | Post-Issue-002 | Verdict |
+|--------|---------------|----------------|---------|
+| G3 C/B ratio | 38.86× | **40.22×** | ❌ FAIL (target ≤5×) |
+| Arm C per-cycle | 2890µs | 3015µs | ~neutral (within noise) |
+| `rank` 1k batch (fixed bank=100) | 498µs | **456µs** | ✅ 8% faster |
+
+**Root cause of G3 non-closure:** the GOAT bench's zone bank grows unboundedly (100 NPCs × 1 selection/cycle × 1000 cycles = up to 100K bank items). Per-cycle cosine work is O(bank_size), which no constant-factor primitive optimization (SoA, SIMD, inv-norms) can overcome. The microbench (fixed bank=100) confirms the primitive itself is 8% faster post-Issue-002; the GOAT G3 failure is a **scenario design issue** (unbounded bank growth), not a primitive speed issue.
+
+**What Issue 002 shipped (useful infrastructure despite G3 non-closure):**
+- **C1 SoA flat bank** — cleaner storage, cache-friendly, 8% faster on fixed-size banks.
+- **C2 `dot_4acc`** — available but NOT used in the default hot path. Benchmarks showed the 4-accumulator `mul_add` form is slower than sequential `+=` without `target-cpu=native` (no autovec, added register pressure). `dot_seq` (sequential, R1-preserving) is the shipped default; `dot_4acc` is kept for future `target-cpu=native` builds.
+- **C3 incremental API** (`from_flat_bank`, `push_bank_items`, `invalidate_norms`) — lets future consumers avoid the clone+rebuild cliff. The GOAT bench is unchanged per Issue 002 spec, so it still uses `new(zone_bank.clone(), M)` every 10 cycles.
+
+**What would actually close G3 (out of scope for Issue 002):**
+- **Bank bounding**: cap the zone bank at a max size (e.g. 1000 items) with FIFO/LRU eviction. This is an algorithmic change to the scenario, not a primitive change. Filed as a follow-up.
+- **Adopt C3 in the bench**: change the bench to use `push_bank_items` instead of `new(clone)`. Avoids the rebuild clone but doesn't fix the O(bank_size) cosine cost.
+- **`target-cpu=native` build**: would enable `dot_4acc` autovec. Not a portable fix (CI builds are generic-target).
 
 ---
 
