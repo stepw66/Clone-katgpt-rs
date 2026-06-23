@@ -56,31 +56,31 @@ pub fn select_omp_keys(
     let mut phi = vec![0.0f32; n * t_len];
     compute_score_matrix(queries, keys, n, t_len, d, &mut phi);
 
-    // Apply max-shift per row for numerical stability, then exp.
-    let mut max_per_row = vec![f32::NEG_INFINITY; n];
-    for i in 0..n {
-        let row = &phi[i * t_len..(i + 1) * t_len];
-        let mut m = row[0];
-        for &v in &row[1..] {
-            m = m.max(v);
-        }
-        max_per_row[i] = m;
-    }
-    for i in 0..n {
-        let m = max_per_row[i];
-        let row = &mut phi[i * t_len..(i + 1) * t_len];
-        for v in row.iter_mut() {
-            *v = (*v - m).exp();
-        }
-    }
-
-    // Step 2: Compute target mass m_i = Σ_j Φ_ij (post-shift).
+    // Apply max-shift per row for numerical stability, then exp, and compute
+    // the per-query target mass `m_i = Σ_j Φ_ij` (post-shift) — all in one
+    // fused row-by-row walk. The prior form ran three separate loops over the
+    // full `n × t_len` matrix (max scan, exp, sum) and kept a `max_per_row`
+    // `Vec<f32>` scratch. Fusing to two passes per row keeps each row hot in L1
+    // between the max scan and the exp+sum pass, and eliminates the
+    // `max_per_row` allocation entirely.
     let mut m_target = vec![0.0f32; n];
     for i in 0..n {
-        let row = &phi[i * t_len..(i + 1) * t_len];
+        // Pass 1: per-row max (immutable borrow of `phi`).
+        let m = {
+            let row = &phi[i * t_len..(i + 1) * t_len];
+            let mut m = row[0];
+            for &v in &row[1..] {
+                m = m.max(v);
+            }
+            m
+        };
+        // Pass 2: shifted exp (in place) + fused mass accumulation.
+        let row = &mut phi[i * t_len..(i + 1) * t_len];
         let mut s = 0.0f32;
-        for &v in row {
-            s += v;
+        for v in row.iter_mut() {
+            let e = (*v - m).exp();
+            *v = e;
+            s += e;
         }
         m_target[i] = s;
     }

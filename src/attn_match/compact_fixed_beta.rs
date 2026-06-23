@@ -38,10 +38,11 @@
 use crate::attn_match::key_selection::{
     KeySelection, highest_attn::select_highest_attn_keys, omp::select_omp_keys,
 };
+use crate::attn_match::compact::build_reconstruction_report;
 use crate::attn_match::{
     CompactError, CompactOutput,
     score_matrix::{compute_attention_output, compute_score_matrix, compute_softmax_attention},
-    types::{AmConfig, KeySelector, ReconstructionReport},
+    types::{AmConfig, KeySelector},
     value_fitter::{ValueFitConfig, compute_compact_attention, fit_cv_least_squares},
 };
 
@@ -209,42 +210,18 @@ pub fn compact_with_fixed_beta(
     let compact_values = cv_result.compact_values;
     let relative_attn_output_error = cv_result.relative_error;
 
-    // Optional reconstruction report.
+    // Optional reconstruction report. Shared helper (also used by
+    // `compact_with_router`) keeps the cache-friendly `i`-outer loop order in
+    // one place — DRY across both compact paths.
     let report = if config.report_reconstruction {
-        // O(t_len) bitmap for O(1) membership test. The prior
-        // `selected_indices.contains(&j)` was O(t) per key → O(T·t) total.
-        let mut selected_bitmap = vec![false; t_len];
-        for &idx in &selected_indices {
-            selected_bitmap[idx] = true;
-        }
-        // Accumulate raw sum-of-squares per key directly. The prior code
-        // computed `rms = sqrt(sum_sq / n)` then immediately squared it back
-        // (`rms * rms == sum_sq / n`), wasting t_len sqrt + t_len divisions.
-        // Since the final coverage is `sqrt(Σ_sel / Σ_all)`, the `/n` factor
-        // cancels — we skip it entirely. Mathematically identical result.
-        let mut sel_sum_sq = 0.0f32;
-        let mut tot_sum_sq = 0.0f32;
-        for j in 0..t_len {
-            let mut sum_sq = 0.0f32;
-            for i in 0..n {
-                let a = full_attn[i * t_len + j];
-                sum_sq += a * a;
-            }
-            tot_sum_sq += sum_sq;
-            if selected_bitmap[j] {
-                sel_sum_sq += sum_sq;
-            }
-        }
-        let selected_mass_coverage = if tot_sum_sq > 0.0 {
-            (sel_sum_sq / tot_sum_sq).sqrt()
-        } else {
-            0.0
-        };
-        Some(ReconstructionReport {
+        Some(build_reconstruction_report(
+            &selected_indices,
+            &full_attn,
+            n,
+            t_len,
             relative_attn_output_error,
             relative_mass_error,
-            selected_mass_coverage,
-        })
+        ))
     } else {
         None
     };

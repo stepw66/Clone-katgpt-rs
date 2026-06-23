@@ -43,6 +43,69 @@ impl std::error::Error for CompactError {}
 /// Output of a successful compaction (alias for [`AmResult`] for API symmetry).
 pub type CompactOutput = AmResult;
 
+/// Build the reconstruction report, shared between [`compact_with_router`] and
+/// [`compact_with_fixed_beta`](super::compact_fixed_beta::compact_with_fixed_beta).
+///
+/// Computes `selected_mass_coverage = sqrt(Σ_sel sum_i a_ij^2 / Σ_all sum_i a_ij^2)`
+/// over the full attention matrix `full_attn`.
+///
+/// # Cache-friendly loop order
+///
+/// Iterates `i`-outer / `j`-inner so reads of `full_attn` are row-major
+/// sequential (prefetcher-friendly). The prior duplicated inline form iterated
+/// `j`-outer / `i`-inner with strided `full_attn[i*t_len + j]` reads — one
+/// cache miss per `i` per `j`. For `(n=8, t_len=4096)` that is 32K strided
+/// reads; this form does 32K sequential reads into a `(t_len,)` per-key buffer,
+/// then one sequential pass over the buffer. The `/n` factor cancels in the
+/// final ratio, so we skip the per-key division entirely (mathematically
+/// identical result, eliminates `t_len` divisions).
+pub(crate) fn build_reconstruction_report(
+    selected_indices: &[usize],
+    full_attn: &[f32],
+    n: usize,
+    t_len: usize,
+    relative_attn_output_error: f32,
+    relative_mass_error: f32,
+) -> ReconstructionReport {
+    debug_assert_eq!(full_attn.len(), n * t_len);
+
+    // O(t_len) bitmap for O(1) membership test. The prior
+    // `selected_indices.contains(&j)` was O(t) per key → O(T·t) total.
+    let mut selected_bitmap = vec![false; t_len];
+    for &idx in selected_indices {
+        selected_bitmap[idx] = true;
+    }
+
+    // Per-key sum-of-squares accumulated via row-major sequential reads.
+    let mut per_key_sum_sq = vec![0.0f32; t_len];
+    for i in 0..n {
+        let row = &full_attn[i * t_len..(i + 1) * t_len];
+        for j in 0..t_len {
+            per_key_sum_sq[j] += row[j] * row[j];
+        }
+    }
+
+    let mut sel_sum_sq = 0.0f32;
+    let mut tot_sum_sq = 0.0f32;
+    for j in 0..t_len {
+        let ssq = per_key_sum_sq[j];
+        tot_sum_sq += ssq;
+        if selected_bitmap[j] {
+            sel_sum_sq += ssq;
+        }
+    }
+    let selected_mass_coverage = if tot_sum_sq > 0.0 {
+        (sel_sum_sq / tot_sum_sq).sqrt()
+    } else {
+        0.0
+    };
+    ReconstructionReport {
+        relative_attn_output_error,
+        relative_mass_error,
+        selected_mass_coverage,
+    }
+}
+
 /// Per-stage backend decisions made by [`compact_with_router`].
 ///
 /// This is populated by `log::debug!` when the `am_compaction_trace` feature
@@ -259,44 +322,18 @@ pub fn compact_with_router(
     let compact_values = cv_result.compact_values;
     let relative_attn_output_error = cv_result.relative_error;
 
-    // Optional reconstruction report.
+    // Optional reconstruction report. Shared helper (also used by
+    // `compact_with_fixed_beta`) keeps the cache-friendly `i`-outer loop order
+    // in one place — DRY across both compact paths.
     let report = if config.report_reconstruction {
-        // O(t_len) bitmap for O(1) membership test. The prior
-        // `selected_indices.contains(&j)` was O(t) per key → O(T·t) total.
-        let mut selected_bitmap = vec![false; t_len];
-        for &idx in &selected_indices {
-            selected_bitmap[idx] = true;
-        }
-        // Compute selected_mass_coverage: fraction of total RMS attention mass
-        // captured by selected keys.
-        // Accumulate raw sum-of-squares per key directly. The prior code
-        // computed `rms = sqrt(sum_sq / n)` then immediately squared it back
-        // (`rms * rms == sum_sq / n`), wasting t_len sqrt + t_len divisions.
-        // Since the final coverage is `sqrt(Σ_sel / Σ_all)`, the `/n` factor
-        // cancels — we skip it entirely. Mathematically identical result.
-        let mut sel_sum_sq = 0.0f32;
-        let mut tot_sum_sq = 0.0f32;
-        for j in 0..t_len {
-            let mut sum_sq = 0.0f32;
-            for i in 0..n {
-                let a = full_attn[i * t_len + j];
-                sum_sq += a * a;
-            }
-            tot_sum_sq += sum_sq;
-            if selected_bitmap[j] {
-                sel_sum_sq += sum_sq;
-            }
-        }
-        let selected_mass_coverage = if tot_sum_sq > 0.0 {
-            (sel_sum_sq / tot_sum_sq).sqrt()
-        } else {
-            0.0
-        };
-        Some(ReconstructionReport {
+        Some(build_reconstruction_report(
+            &selected_indices,
+            &full_attn,
+            n,
+            t_len,
             relative_attn_output_error,
             relative_mass_error,
-            selected_mass_coverage,
-        })
+        ))
     } else {
         None
     };

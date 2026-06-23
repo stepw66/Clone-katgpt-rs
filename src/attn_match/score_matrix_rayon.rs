@@ -127,36 +127,45 @@ pub fn compute_rms_attention_rayon(
     let inv_sqrt_d = 1.0f32 / (d as f32).sqrt();
     let rows_per_block = compute_block_rows(d);
 
-    // Parallelize across query-row blocks. Each block produces a local
-    // (t_len,) accumulator and we sum at the end. This avoids the per-cell
-    // atomic that the plan's wording ("atomic accumulate") hints at, and is
-    // strictly faster for the score matrix because the reduction is over
-    // rows, not cells.
-    let partial: Vec<Vec<f64>> = queries
+    // Parallelize across query-row blocks using `fold` + `reduce` so each rayon
+    // worker owns a single reusable `(t_len,)` accumulator (allocated once per
+    // worker, reused across all chunks the worker processes) instead of
+    // allocating a fresh `Vec` per chunk and collecting into a `Vec<Vec<f64>>`
+    // for a sequential merge. This eliminates the outer `Vec` allocation and
+    // the post-parallel merge loop. Per AGENTS.md hot-loop rules: no allocation
+    // inside the parallel closure body.
+    //
+    // Reduction is over rows (not cells), so no per-cell atomic is needed —
+    // the only merge is the disjoint thread-local accumulator sum in `reduce`.
+    let n_f64 = n as f64;
+    let total_sum_sq: Vec<f64> = queries
         .par_chunks(rows_per_block * d)
-        .map(|q_block| {
-            let rows_in_block = q_block.len() / d;
-            let mut local_sum_sq = vec![0.0f64; t_len];
-            for i in 0..rows_in_block {
-                let q_row = &q_block[i * d..(i + 1) * d];
-                for j in 0..t_len {
-                    let k_row = &keys[j * d..(j + 1) * d];
-                    let s = (dot_8wide(q_row, k_row, d) * inv_sqrt_d) as f64;
-                    local_sum_sq[j] += s * s;
+        .fold(
+            || vec![0.0f64; t_len],
+            |mut acc, q_block| {
+                let rows_in_block = q_block.len() / d;
+                for i in 0..rows_in_block {
+                    let q_row = &q_block[i * d..(i + 1) * d];
+                    for j in 0..t_len {
+                        let k_row = &keys[j * d..(j + 1) * d];
+                        let s = (dot_8wide(q_row, k_row, d) * inv_sqrt_d) as f64;
+                        acc[j] += s * s;
+                    }
                 }
-            }
-            local_sum_sq
-        })
-        .collect::<Vec<_>>();
-    // Sequential merge — t_len is small relative to the parallelized work.
-    let mut total_sum_sq = vec![0.0f64; t_len];
-    for local in &partial {
-        for j in 0..t_len {
-            total_sum_sq[j] += local[j];
-        }
-    }
+                acc
+            },
+        )
+        .reduce(
+            || vec![0.0f64; t_len],
+            |mut a, b| {
+                for j in 0..t_len {
+                    a[j] += b[j];
+                }
+                a
+            },
+        );
     for j in 0..t_len {
-        out_rms[j] = (total_sum_sq[j] / (n as f64)).sqrt() as f32;
+        out_rms[j] = (total_sum_sq[j] / n_f64).sqrt() as f32;
     }
 }
 
