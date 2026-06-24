@@ -162,7 +162,7 @@ The GOAT gate must prove the ternary classification is *useful*, not just correc
 
 - [x] **T4.1** Update `katgpt-rs/README.md` with a `SmearClassifier` entry under the Faithfulness section (new row in the GOAT-Proved Additions table + new subsection under the FaithfulnessProbe showcase). Coordinated with Plan 299 agent: only edited Faithfulness-related content, no Engram sections touched.
 - [x] **T4.2** Updated `.docs/faithfulness_probe.md` with the ternary classification vocabulary + wiring guide + paper citations (covered alongside T2.3).
-- [ ] **T4.3** **SKIPPED** — the riir-ai `.research/129` cross-repo update is out of scope for this single-repo coding task. Remains TODO for the orchestrator. The katgpt-rs docs already cross-link to `.research/129` and cite arXiv:2606.20560; the riir-ai guide itself needs the vocabulary adoption ("opaque serial depth" + "smearing") + paper citation as external validation of the top-k scalar bridge design.
+- [-] **T4.3** **SKIPPED** — the riir-ai `.research/129` cross-repo update is out of scope for this single-repo coding task. Remains TODO for the orchestrator. The katgpt-rs docs already cross-link to `.research/129` and cite arXiv:2606.20560; the riir-ai guide itself needs the vocabulary adoption ("opaque serial depth" + "smearing") + paper citation as external validation of the top-k scalar bridge design.
 - [x] **T4.4** Cross-links added in `.docs/faithfulness_probe.md`: Research 277 ↔ Plan 298 ↔ Plan 278 ↔ Plan 178 (MUX) ↔ Plan 281 (BoM). Also cross-linked in `.benchmarks/298_smear_classifier_goat.md`.
 
 ## Optimization constraints (per AGENTS.md)
