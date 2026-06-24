@@ -317,6 +317,24 @@ name = "bench_319_g8e_aoi_latency"
 harness = false
 required-features = ["geometric_product"]
 
+# Plan 319 Phase 5 follow-up — G8c Super-GOAT formation-robustness sim:
+# minimal encounter sim (4-NPC party, varied threats, wedge vs dot formation).
+# Validates the core hypothesis: complementarity-weighted parties survive
+# ≥15% longer than similarity-weighted parties under varied threats.
+[[bench]]
+name = "bench_319_g8c_formation_robustness"
+harness = false
+required-features = ["geometric_product"]
+
+# Plan 319 Phase 5 follow-up — G8d Super-GOAT faction-diversity sim:
+# 100-NPC sandbox, 4 factions, complementarity vs similarity assignment.
+# Validates: complementarity-driven factions have ≥2× higher intra-faction
+# role variance than similarity-driven factions.
+[[bench]]
+name = "bench_319_g8d_faction_diversity"
+harness = false
+required-features = ["geometric_product"]
+
 # Plan 301 Phase 2 — G1 GOAT proof: subspace phase transition on synthetic
 # MoLRG (arXiv:2409.02426 Theorem 4). Generates K=3 orthogonal d=6 subspaces
 # in R^48, sweeps N ∈ {3,5,6,7,10,50,200}, runs PCA via jacobian_svd_at,
