@@ -401,7 +401,7 @@ pub fn corpus_alphabet(data: &[u8]) -> Vec<u8> {
             alphabet.push(b);
         }
     }
-    alphabet.sort();
+    alphabet.sort_unstable();
     alphabet
 }
 
