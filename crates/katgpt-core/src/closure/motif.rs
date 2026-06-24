@@ -431,6 +431,15 @@ fn enumerate_motifs_into(
         .iter()
         .map(|e| (e.op as u8, e.from as usize, e.to as usize))
         .collect();
+    // Adjacency list keyed by `from` node — built once so the DFS in
+    // `enumerate_chains` iterates only the out-edges of the current node
+    // (O(out-degree)) instead of scanning all E edges per pop (O(E)).
+    // At K=1024 PTGs × N=10 × ~4 edges this is the difference between
+    // O(V·depth·E) and O(V·depth·avg_degree) total edge iterations.
+    let mut adjacency: Vec<Vec<(u8, usize)>> = vec![Vec::new(); n];
+    for &(op, from, to) in &edges {
+        adjacency[from].push((op, to));
+    }
 
     // Single-node "motifs" — every primitive observed becomes a 1-node motif.
     // (Useful for PRI: which primitives get reused.)
@@ -468,7 +477,7 @@ fn enumerate_motifs_into(
     // canonical hash absorbs ordering, so different walks over the same shape
     // collapse to one entry.)
     for start in 0..n {
-        enumerate_chains(start, &node_kinds, &edges, 3, ptg.task_family_id, out);
+        enumerate_chains(start, &node_kinds, &adjacency, 3, ptg.task_family_id, out);
     }
 }
 
@@ -478,7 +487,7 @@ fn enumerate_motifs_into(
 fn enumerate_chains(
     start: usize,
     node_kinds: &[u32],
-    edges: &[(u8, usize, usize)],
+    adjacency: &[Vec<(u8, usize)>],
     max_depth: u8,
     task_family_id: u32,
     out: &mut HashMap<[u8; 32], Motif>,
@@ -542,11 +551,9 @@ fn enumerate_chains(
         if path.ops_len >= MAX_MOTIF_EDGES {
             continue;
         }
-        // Expand: try every outgoing edge from `node` whose target is not on path.
-        for &(op, from, to) in edges {
-            if from != node {
-                continue;
-            }
+        // Expand: iterate only the out-edges of `node` (O(out-degree)
+        // via the pre-built adjacency list) instead of scanning all E edges.
+        for &(op, to) in &adjacency[node] {
             // Branch-free `path.contains(&to)` over the fixed-size prefix.
             let mut on_path = false;
             for i in 0..path_len {

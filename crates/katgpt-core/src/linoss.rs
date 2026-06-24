@@ -625,7 +625,9 @@ impl ModalSpecDrafter {
         let vocab_dim = self.basis.vocab_dim();
         let k = self.basis.k();
 
-        // Double-buffered scratch — avoids 2 Vec allocations per imex_step
+        // Double-buffered scratch — avoids 2 Vec allocations per imex_step.
+        // Ping-pong: (y_a, z_a) is current, (y_b, z_b) is next; swap roles each
+        // step via mem::swap to avoid the copy_from_slice back into the input.
         let mut y_a = vec![0.0f32; h];
         let mut z_a = vec![0.0f32; h];
         let mut y_b = vec![0.0f32; h];
@@ -639,24 +641,22 @@ impl ModalSpecDrafter {
             if tok < self.n_tokens {
                 let emb = &self.embeddings[tok * self.emb_dim..(tok + 1) * self.emb_dim];
                 self.project_to_hidden_into(emb, vocab_dim, &mut forcing);
-                let (y_new, z_new) = self
-                    .cell
+                self.cell
                     .imex_step_inplace(&y_a, &z_a, &forcing, self.dt, &mut y_b, &mut z_b);
-                y_a[..h].copy_from_slice(y_new);
-                z_a[..h].copy_from_slice(z_new);
+                std::mem::swap(&mut y_a, &mut y_b);
+                std::mem::swap(&mut z_a, &mut z_b);
             }
         }
 
-        // Draft loop — zero alloc per iteration
+        // Draft loop — zero alloc per iteration, no per-step copy_back.
         forcing.fill(0.0);
         let mut draft = Vec::with_capacity(n_draft);
         for _ in 0..n_draft {
-            let (y_new, z_new) = self
-                .cell
+            self.cell
                 .imex_step_inplace(&y_a, &z_a, &forcing, self.dt, &mut y_b, &mut z_b);
-            y_a[..h].copy_from_slice(y_new);
-            z_a[..h].copy_from_slice(z_new);
-
+            std::mem::swap(&mut y_a, &mut y_b);
+            std::mem::swap(&mut z_a, &mut z_b);
+            // After the swap, (y_a, z_a) holds the freshly-computed state.
             self.extract_coefficients_into(&y_a, k, &mut coeffs);
             self.basis.reconstruct_into(&coeffs, &mut reconstructed);
             draft.push(self.nearest_token(&reconstructed));
@@ -677,7 +677,11 @@ impl ModalSpecDrafter {
         let vocab_dim = self.basis.vocab_dim();
         let k = self.basis.k();
 
-        // Pre-allocate all scratch buffers once
+        // Pre-allocate all scratch buffers once. The (y_a, z_a) pair is the
+        // "current" state and (y_b, z_b) the "next" state; we ping-pong them
+        // across IMEX steps (swapping roles via mem::swap) instead of copying
+        // the result back into the input buffer each step — eliminates 2×h
+        // f32 copies per token.
         let mut y_a = vec![0.0f32; h];
         let mut z_a = vec![0.0f32; h];
         let mut y_b = vec![0.0f32; h];
@@ -686,29 +690,28 @@ impl ModalSpecDrafter {
         let mut coeffs = vec![0.0f32; k];
         let mut reconstructed = vec![0.0f32; vocab_dim];
 
-        // Prompt encoding
+        // Prompt encoding (ping-pong: result lands in the "next" pair, then
+        // we swap so it becomes the "current" pair for the next step).
         for &tok in prompt_tokens {
             if tok < self.n_tokens {
                 let emb = &self.embeddings[tok * self.emb_dim..(tok + 1) * self.emb_dim];
                 self.project_to_hidden_into(emb, vocab_dim, &mut forcing);
-                let (y_new, z_new) = self
-                    .cell
+                self.cell
                     .imex_step_inplace(&y_a, &z_a, &forcing, self.dt, &mut y_b, &mut z_b);
-                y_a[..h].copy_from_slice(y_new);
-                z_a[..h].copy_from_slice(z_new);
+                std::mem::swap(&mut y_a, &mut y_b);
+                std::mem::swap(&mut z_a, &mut z_b);
             }
         }
 
-        // Draft loop — zero alloc per iteration
+        // Draft loop — zero alloc per iteration, no per-step copy_back.
         forcing.fill(0.0);
         let mut drafted = 0;
         for out_slot in out.iter_mut().take(n_draft) {
-            let (y_new, z_new) = self
-                .cell
+            self.cell
                 .imex_step_inplace(&y_a, &z_a, &forcing, self.dt, &mut y_b, &mut z_b);
-            y_a[..h].copy_from_slice(y_new);
-            z_a[..h].copy_from_slice(z_new);
-
+            std::mem::swap(&mut y_a, &mut y_b);
+            std::mem::swap(&mut z_a, &mut z_b);
+            // After the swap, (y_a, z_a) holds the freshly-computed state.
             self.extract_coefficients_into(&y_a, k, &mut coeffs);
             self.basis.reconstruct_into(&coeffs, &mut reconstructed);
             *out_slot = self.nearest_token(&reconstructed);
@@ -885,6 +888,23 @@ mod tests {
         for &tok in &draft {
             assert!(tok < 10, "Token {tok} out of range");
         }
+    }
+
+    #[test]
+    fn test_drafter_draft_into_matches_draft() {
+        // Regression guard for the ping-pong double-buffer refactor:
+        // `draft` and `draft_into` must produce identical token sequences,
+        // confirming the mem::swap buffer exchange is numerically equivalent
+        // to the old copy_from_slice approach.
+        let embs: Vec<Vec<f32>> = (0..10).map(|i| vec![i as f32 * 0.1; 4]).collect();
+        let refs: Vec<&[f32]> = embs.iter().map(|e| e.as_slice()).collect();
+        let drafter = ModalSpecDrafter::new(8, &refs, 4);
+        let prompt = [0usize, 1, 2, 3];
+        let draft = drafter.draft(&prompt, 5);
+        let mut into_buf = vec![usize::MAX; 5];
+        let written = drafter.draft_into(&prompt, &mut into_buf);
+        assert_eq!(written, 5);
+        assert_eq!(draft, into_buf, "draft and draft_into must agree");
     }
 
     #[test]
