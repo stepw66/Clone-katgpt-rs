@@ -269,6 +269,14 @@ name = "bench_313_ac_prefix_goat"
 harness = false
 required-features = ["ac_prefix"]
 
+# Plan 314 Phase 3 — Stokes calculus GOAT gate bench: G-B boundary_flux_mass
+# vs naive volume sum on 256×256 map, G-C line_integral path cost on 32×32 grid,
+# belief_mass_divergence + codifferential_into latency baselines.
+[[bench]]
+name = "stokes_calculus_bench"
+harness = false
+required-features = ["dec_operators"]
+
 # Plan 301 Phase 2 — G1 GOAT proof: subspace phase transition on synthetic
 # MoLRG (arXiv:2409.02426 Theorem 4). Generates K=3 orthogonal d=6 subspaces
 # in R^48, sweeps N ∈ {3,5,6,7,10,50,200}, runs PCA via jacobian_svd_at,
