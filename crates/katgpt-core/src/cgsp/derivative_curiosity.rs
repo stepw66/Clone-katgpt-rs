@@ -410,6 +410,7 @@ impl<const D: usize> CuriosityConjecturer for DerivativeCuriosity<D> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cgsp::loop_::EntropyCollapse;
     use crate::cgsp::traits::HintDeltaBandit;
     use crate::cgsp::types::{Direction, Priority, ScratchBuffers, Target};
 
