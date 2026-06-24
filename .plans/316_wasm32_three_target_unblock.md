@@ -105,10 +105,21 @@ the Vessel *projection* path (Model B) needed the getrandom + bytemuck fixes.
 
 ### Known latent issues NOT fixed by this plan
 
-- `riir-chaind chain_node_browser` fails with 8 `web-sys` errors: the `web-sys`
-  dep in `crates/riir-chaind/Cargo.toml` is missing the `WebTransport`,
-  `WebTransportBidirectionalStream`, `WebTransportDatagramDuplexStream` feature
-  flags. Separate fix, tracked as a follow-up.
+- ~~`riir-chaind chain_node_browser` fails with 8 `web-sys` errors~~ **RESOLVED
+  2026-06-24 (Plan 316 follow-up).** The original note claimed the `web-sys` dep
+  was missing the `WebTransport` / `WebTransportBidirectionalStream` /
+  `WebTransportDatagramDuplexStream` feature flags. **That diagnosis was wrong** —
+  the flags were already present in `crates/riir-chaind/Cargo.toml:114-123`.
+  `cargo tree -e features -i web-sys` confirmed all three features were active.
+  The real root cause: web-sys 0.3.102 gates these types behind
+  `#[cfg(web_sys_unstable_apis)]` (see `gen_WebTransport.rs` line 5), so the types
+  don't exist unless that rustc cfg is passed. `crates/riir-chaind/build_wasm.sh:24`
+  already set this for production builds via `RUSTFLAGS`, but bare `cargo check`
+  hit the 8 errors. Fix: added `riir-chain/.cargo/config.toml` scoping
+  `--cfg web_sys_unstable_apis` to `[target.wasm32-unknown-unknown]`, so
+  `cargo check --target wasm32-unknown-unknown --features chain_node_browser`
+  works out of the box. Verified: builds clean (1 pre-existing dead-code warning,
+  0 errors). All three targets now compile: native ✅ browser ✅ CF Worker ✅.
 - `seal-edge-worker/src/runtime/wasm_compat.rs:213` has a `0xCA` filler standing
   in for `web_sys::crypto().getRandomValues()` (`TODO(F-140)`). Any crypto path
   routing through this on CF uses non-random randomness. Audit before production.
@@ -116,6 +127,7 @@ the Vessel *projection* path (Model B) needed the getrandom + bytemuck fixes.
   kernel. All other SIMD ops (`simd_dot_f32`, `simd_matmul_rows`, `simd_sigmoid_*`,
   `simd_exp_*`, etc.) fall to scalar on wasm32 even with `+simd128`. Research 226's
   "AVX2 → NEON → WASM simd128 → scalar" tier is only realized for the ternary path.
+  Tracked as optimization issue `.issues/004_wasm_simd128_coverage_gap.md`.
 
 ## Files Changed
 
@@ -130,6 +142,10 @@ modelless freeze/thaw stack: (1) `argmax.rs` missing import, (2) getrandom `wasm
 `extern_crate_alloc` for `pod_collect_to_vec`. Verified: `katgpt-core`,
 `secure_vessel`, `bomber-wasm`, and `plasma_path +simd128` all compile to
 `wasm32-unknown-unknown`; native + 509 lib tests pass; downstream riir-chain /
-riir-neuron-db / seal-edge-worker unaffected. Native ✅, browser ⚠️ (blocked by
-separate `web-sys` feature gap in riir-chaind), CF Worker ✅ (seal-edge-worker
-builds; katgpt-core wiring is the next step).
+riir-neuron-db / seal-edge-worker unaffected.
+
+**Follow-up (2026-06-24):** the "browser target web-sys gap" listed above as a
+known issue was a misdiagnosis — the cargo features were already correct. The
+real blocker was web-sys's `#[cfg(web_sys_unstable_apis)]` gate on WebTransport
+types. Fixed via `riir-chain/.cargo/config.toml`. All three deploy targets
+(native / browser / CF Worker) now compile clean.
