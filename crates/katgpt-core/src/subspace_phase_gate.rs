@@ -611,7 +611,14 @@ fn one_sided_jacobi_svd_into(
     let max_sweeps = 60;
 
     for _sweep in 0..max_sweeps {
-        let mut off_diag_max: f32 = 0.0;
+        // Convergence criterion: break when a full sweep applies no rotation.
+        // This is the standard cyclic-Jacobi criterion and is scale-invariant
+        // (unlike an absolute off-diagonal threshold, which never triggers for
+        // matrices whose entries are O(1) — see issue 003). Once every column
+        // pair satisfies the per-pair relative test below, the matrix A^T A is
+        // diagonal to within `tol` relative accuracy, so the singular values
+        // are accurate to ~7 digits and the singular vectors are stable.
+        let mut rotated: bool = false;
         for p in 0..n {
             for q in (p + 1)..n {
                 // Compute (p, q) entry of A^T A: dot of column p and column q.
@@ -625,10 +632,10 @@ fn one_sided_jacobi_svd_into(
                     aqq += arq * arq;
                     apq += arp * arq;
                 }
-                off_diag_max = off_diag_max.max(apq.abs());
                 if apq.abs() <= tol * (app * aqq).sqrt() {
                     continue; // Already diagonal in this plane.
                 }
+                rotated = true;
                 // Compute Jacobi rotation (c, s) that zeroes apq.
                 let tau = (aqq - app) / (2.0 * apq);
                 let t = tau.signum() / (tau.abs() + (1.0 + tau * tau).sqrt());
@@ -649,7 +656,7 @@ fn one_sided_jacobi_svd_into(
                 }
             }
         }
-        if off_diag_max <= tol * 1e-3 {
+        if !rotated {
             break;
         }
     }

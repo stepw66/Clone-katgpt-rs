@@ -490,14 +490,13 @@ impl VocabFourierBasis {
             cos_mode.fill(0.0);
             for (i, emb) in embeddings.iter().enumerate() {
                 let cos_w = (omega * i as f32).cos();
-                for (d, cos_slot) in cos_mode.iter_mut().enumerate().take(vd) {
-                    *cos_slot += emb[d] * cos_w;
-                }
+                // SIMD AXPY — matches Phase 1's hot path. Phase 2 runs only
+                // k_actual (typically ≤8) times, but each still touches
+                // n × vocab_dim elements, so SIMD still wins over scalar.
+                crate::simd::simd_fused_scale_acc(&mut cos_mode[..vocab_dim], &emb[..vocab_dim], cos_w, vocab_dim);
             }
             let inv_n = 1.0 / n as f32;
-            for val in cos_mode.iter_mut().take(vd) {
-                *val *= inv_n;
-            }
+            crate::simd::simd_scale_inplace(&mut cos_mode[..vocab_dim], inv_n);
             modes[ki * vd..ki * vd + vd].copy_from_slice(&cos_mode[..vd]);
             frequencies.push(omega);
         }
