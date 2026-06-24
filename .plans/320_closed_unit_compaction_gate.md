@@ -6,7 +6,7 @@
 **Private guide:** [riir-ai/.research/155_Per_NPC_Sub_Goal_Compaction_Guide.md](../../riir-ai/.research/155_Per_NPC_Sub_Goal_Compaction_Guide.md) (game-AI selling point)
 **Cross-ref:** [riir-neuron-db/.research/007_Can_Freeze_As_Cucg_Instance_Crossref.md](../../riir-neuron-db/.research/007_Can_Freeze_As_Cucg_Instance_Crossref.md) (`can_freeze` isomorphism)
 **Target:** `katgpt-rs/src/compaction/` (new module) + Cargo feature `closed_unit_compaction`
-**Status:** Active — Phase 1 + Phase 2 + Phase 3 COMPLETE (2026-06-25). 64 unit tests PASS, G1/G3/G5/G6 gates green. Phase 4 (MathRubric, CacheReuseProbe, G3) next.
+**Status:** Active — Phase 1 + 2 + 3 + 4 COMPLETE (2026-06-25). 78 unit tests PASS, G1/G3/G3-probe/G5/G6 gates green. Phase 5 (ShardFreezeRubric, G7 cross-domain isomorphism) next.
 
 ---
 
@@ -109,17 +109,17 @@ G1 PASSES (recall=1.000, FDR=0.000 on synthetic Figure-1 reproduction). `cargo t
 
 ### Tasks
 
-- [ ] **T4.1** Implement `MathRubric` in `src/compaction/rubrics/math.rs` with `ARITY = 3` (Q1, Q2, Q3). Configure `fire_rule = Or(Q1_mask, And(Q2_mask | Q3_mask))` — paper's math rule.
-- [ ] **T4.2** Implement `CacheReuseProbe` in `src/compaction/probe.rs`:
+- [x] **T4.1** Implement `MathRubric` in `src/compaction/rubrics/math.rs` with `ARITY = 3` (Q1, Q2, Q3). Configure `fire_rule = Or(Q1_mask, And(Q2_mask | Q3_mask))` — paper's math rule.
+- [x] **T4.2** Implement `CacheReuseProbe` in `src/compaction/probe.rs`:
   - `pub fn probe_append(&self, trajectory: &mut Vec<u8>, rubric_prompt: &[u8]) -> ProbeToken` — appends rubric prompt to trajectory (preserving KV cache), returns token for revert.
   - `pub fn revert(&self, trajectory: &mut Vec<u8>, token: ProbeToken)` — removes the appended prompt on CONTINUE (no cache pollution).
   - `pub fn summarize(&self, trajectory: &[u8], summarizer_prompt: &[u8]) -> Summary` — caller-supplied summarizer (LLM or chain_fold); CUCG itself does not summarize.
-- [ ] **T4.3** G3 test: measure probe latency at L = 1k, 10k, 100k tokens. Assert latency within ±10% across L (only the appended instruction pays prefill). Document the cache-reuse invariant in rustdoc.
-- [ ] **T4.4** Probe-revert correctness test: generate k CONTINUE probes, then verify subsequent generation matches a no-probe baseline byte-for-byte (modulo KV-cache indexing). The rolling cache MUST be uncontaminated.
+- [x] **T4.3** G3 test: measure probe latency at L = 1k, 10k, 100k tokens. Assert latency within ±10% across L (only the appended instruction pays prefill). Document the cache-reuse invariant in rustdoc.
+- [x] **T4.4** Probe-revert correctness test: generate k CONTINUE probes, then verify subsequent generation matches a no-probe baseline byte-for-byte (modulo KV-cache indexing). The rolling cache MUST be uncontaminated.
 
 ### Acceptance
 
-G3 PASSES. Math rubric reproduces paper's `Q1 ∨ (Q2 ∧ Q3)` rule. Probe-revert is byte-clean.
+G3 PASSES (release-mode probe latency ratio=1.00 across L=1k/10k/100k). Math rubric reproduces paper's `Q1 ∨ (Q2 ∧ Q3)` rule (Branch A: Q1 answer; Branch B: Q2 stuck ∧ Q3 has-next). Probe-revert is byte-clean.
 
 ---
 

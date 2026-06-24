@@ -23,3 +23,4 @@
 //! | P1 output conv. | spectral flatness < τ | riir-neuron-db `ConsolidationPipeline::can_freeze` |
 
 pub mod search;
+pub mod math;
