@@ -6,7 +6,7 @@
 - [arxiv 2202.11322](https://arxiv.org/abs/2202.11322) — *Efficient CDF Approximations for Normalizing Flows* (TMLR 2022) — "leverage the divergence theorem to estimate the CDF over a closed region in target space"
 - [NeurIPS 2020](https://papers.nips.cc/paper/2020/hash/cbf8710b43df3f2c1553e649403426df-Abstract.html) — *Neural Manifold Ordinary Differential Equations* (Lou et al.) — `d/dt log p = -div(f)` instantaneous change-of-variables
 **Target:** `katgpt-rs/crates/katgpt-core/src/dec/stokes_calculus.rs` (new file) + Cargo feature `stokes_calculus` (under `dec_operators`)
-**Status:** Active — Phase 1 + 2 + 3 COMPLETE (2026-06-24); `stokes_calculus` stays opt-in (G-B PASS, G-C structural fail, G-A deferred to riir-ai). Phase 4 filed as riir-ai Plan 334 (2026-06-24); stale Phase-4/validation/constraint checkboxes reconciled.
+**Status:** Active — Phase 1 + 2 + 3 COMPLETE (2026-06-24); `stokes_calculus` stays opt-in (G-B PASS, G-C structural fail, **G-A FAIL in riir-ai Plan 334**). Phase 4 filed as riir-ai Plan 334 (2026-06-24); **G-A gate ran 2026-06-24 and FAILED** (candidate 9.5× slower + 36% lower F1 than JS-divergence baseline at `action_dim=8`). See `riir-ai/.benchmarks/334_stokes_validator_g_a.md`.
 
 ---
 
@@ -89,13 +89,13 @@ Each primitive gets an A/B benchmark vs the naive alternative. **Promote the win
 
 ### Tasks
 
-- [x] **T3.1** **G-A (Fokker-Planck validator GOAT):** A/B in riir-ai — does flagging `belief_mass_divergence > τ` catch ICT `BranchingDetector` (Plan 324) branching events earlier/cheaper than the existing JS-divergence-to-mean detector? **This gate runs in riir-ai (needs live HLA), not katgpt-core.** Target: ≥1.5× earlier detection OR ≥2× cheaper per-tick on the same events. **Deferred to riir-ai follow-up plan** (file when HLA wiring starts). Until then, `stokes_calculus` stays opt-in. **Baseline measured in katgpt-core:** `belief_mass_divergence` on 32×32 grid = 5.00 µs (2.5 ns/edge), on par with raw `codifferential_into` — wrapper overhead negligible.
+- [x] **T3.1** **G-A (Fokker-Planck validator GOAT):** A/B in riir-ai — does flagging `belief_mass_divergence > τ` catch ICT `BranchingDetector` (Plan 324) branching events earlier/cheaper than the existing JS-divergence-to-mean detector? **This gate runs in riir-ai (needs live HLA), not katgpt-core.** Target: ≥1.5× earlier detection OR ≥2× cheaper per-tick on the same events. **❌ FAIL (ran 2026-06-24 in riir-ai Plan 334 T3.2):** 327 branching events across 3 archetypes; candidate is 9.5× slower (5352 ns vs 562 ns/tick) AND 36% lower F1 (0.640 vs 1.000). Root cause: fixed-grid cost cannot compete at `action_dim=8`, and the G8 corpus is perfectly separable for JS-divergence by construction. See `riir-ai/.benchmarks/334_stokes_validator_g_a.md`. **Baseline measured in katgpt-core:** `belief_mass_divergence` on 32×32 grid = 5.00 µs (2.5 ns/edge), on par with raw `codifferential_into` — wrapper overhead negligible.
 - [x] **T3.2** **G-B (Boundary-flux mass GOAT):** A/B in katgpt-core — on a 256×256 game map, `boundary_flux_mass_only` (115.53 µs) vs naive full-volume `exterior_derivative_into` + region sum (619.31 µs). **Result: 5.36× faster, error_bound/mass = 3.78% < 5% → PASS.** Win comes from memory access patterns (no output materialization), NOT from theoretical O(boundary) — see Issue 006 for the coboundary-index optimization that would unlock true O(boundary). See `.benchmarks/314_stokes_calculus_goat.md`.
 - [x] **T3.3** **G-C (Line integral GOAT):** A/B in katgpt-core — `line_integral` discriminates smooth vs zigzag paths (Δ=1.872 on non-exact field). **Result: STRUCTURAL FAIL.** `line_integral` of a rank-1 edge cochain cannot encode turn penalties (turns are a pairwise edge property requiring rank-2 face cochains). The primitive is correct and useful as a path-cost function, but the "≥20% fewer reversals" target is mathematically unreachable for rank-1. See Issue 005 for the proposed rank-2 `circulation_integral` wrapper. See `.benchmarks/314_stokes_calculus_goat.md`.
-- [x] **T3.4** Benchmark summary written in `katgpt-rs/.benchmarks/314_stokes_calculus_goat.md`. Honest results documented — G-B passes (5.36×, 3.78% error), G-C fails structurally (rank-1 can't encode turns), G-A deferred.
+- [x] **T3.4** Benchmark summary written in `katgpt-rs/.benchmarks/314_stokes_calculus_goat.md`. Honest results documented — G-B passes (5.36×, 3.78% error), G-C fails structurally (rank-1 can't encode turns), **G-A fails in riir-ai (9.5× slower, 36% lower F1)**.
 - [x] **T3.5** Promotion decision:
-  - G-B PASSES (5.36×, 3.78% error), G-C FAILS (structural). Per the split rule: **`stokes_calculus` stays opt-in** — the winning `boundary_flux_mass` is available to callers; `line_integral` documented honestly as a path-cost function (not smoothness regularizer).
-  - G-A (riir-ai, deferred) feeds back when available. If G-A passes → re-evaluate promotion.
+  - G-B PASSES (5.36×, 3.78% error), G-C FAILS (structural), G-A FAILS (riir-ai Plan 334: 9.5× slower, 36% lower F1). Per the split rule: **`stokes_calculus` stays opt-in** — the winning `boundary_flux_mass` is available to callers; `line_integral` documented honestly as a path-cost function (not smoothness regularizer); `belief_mass_divergence` is a clean mass-conservation checker but NOT a branching detector.
+  - G-A (riir-ai) ran and FAILED (2026-06-24). No re-evaluation of promotion — all three gates now have verdicts (1 PASS, 2 FAIL).
   - Issues filed: `005_stokes_calculus_g_c_turn_penalty.md` (rank-2 `circulation_integral` fix), `006_coboundary_index_for_boundary_flux.md` (true O(boundary) optimization).
 
 **Exit:** GOAT gate run, results documented, promotion decided.
@@ -110,9 +110,9 @@ Each primitive gets an A/B benchmark vs the naive alternative. **Promote the win
 
 - [-] **T4.1** Construct a `CellComplex` on the HLA belief manifold (8-dim). → riir-ai Plan 334 T1.1–T1.3 (recommendation: 2D projection of 5 synced scalars, lattice discretization).
 - [-] **T4.2** Per HLA tick, compute the belief-flow cochain from the HLA state delta (`evolve_hla`'s update vector). Feed to `belief_mass_divergence()`. → riir-ai Plan 334 T2.1–T2.3.
-- [-] **T4.3** Run G-A gate (T3.1): does `belief_mass_divergence > τ` catch ICT branching events earlier/cheaper than JS-divergence? → riir-ai Plan 334 T3.1–T3.4 (G-A PASS = ≥1.5× earlier OR ≥2× cheaper on ≥100 events).
-- [-] **T4.4** Wire into `cgsp_runtime/pulse_bridge.rs` as a curiosity signal (divergence > 0 = expanding belief = curiosity). Cross-reference Plan 277 (Temporal Derivative Kernel). → riir-ai Plan 334 T4.1 (gated on G-A passing).
-- [-] **T4.5** Feed to LatCal commitment: the 5 synced scalars should be the boundary flux of a near-zero-divergence field. If `belief_mass_divergence > τ` on the committed slice → flag for `mape_k.rs` self-healing (riir-neuron-db). → riir-ai Plan 334 T4.2 (gated on G-A passing; boolean flag crosses sync, never the `CochainField`).
+- [-] **T4.3** Run G-A gate (T3.1): does `belief_mass_divergence > τ` catch ICT branching events earlier/cheaper than JS-divergence? → riir-ai Plan 334 T3.1–T3.4. **❌ G-A FAIL (2026-06-24):** candidate 9.5× slower + 36% lower F1 than baseline at `action_dim=8`. See `riir-ai/.benchmarks/334_stokes_validator_g_a.md`.
+- [-] **T4.4** Wire into `cgsp_runtime/pulse_bridge.rs` as a curiosity signal (divergence > 0 = expanding belief = curiosity). Cross-reference Plan 277 (Temporal Derivative Kernel). → riir-ai Plan 334 T4.1 (**not gated on G-A** — curiosity is an independent use case; may proceed behind opt-in feature without promotion).
+- [-] **T4.5** Feed to LatCal commitment: the 5 synced scalars should be the boundary flux of a near-zero-divergence field. If `belief_mass_divergence > τ` on the committed slice → flag for `mape_k.rs` self-healing (riir-neuron-db). → riir-ai Plan 334 T4.2 (**not gated on G-A** — mass-consistency flag is independent of branching detection; may proceed behind opt-in feature without promotion).
 
 ---
 
@@ -139,18 +139,18 @@ katgpt-rs/crates/katgpt-core/src/dec/
 stokes_calculus = ["katgpt-core/dec_operators"]  # opt-in, NOT default until G-B + G-C pass
 ```
 
-Promotion to default requires G-B AND G-C passing (T3.5). G-A (riir-ai) feeds back later.
+Promotion to default requires G-B AND G-C passing (T3.5). **G-A ran in riir-ai and FAILED (2026-06-24)** — does not change the promotion verdict (already blocked on G-C). All three gates now have verdicts: G-B PASS, G-C FAIL (structural), G-A FAIL (domain mismatch).
 
 ## Validation
 
-Reconciled 2026-06-24 against Phase 1–3 completion. The four
-already-discharged gates marked `[x]`; G-C's structural fail and G-A's
-riir-ai deferral carry forward to Phase 4 / Issue 005.
+Reconciled 2026-06-24 against Phase 1–3 completion + Phase 4 G-A verdict. The four
+discharged gates marked `[x]`; G-C's structural fail and G-A's riir-ai FAIL are
+closed (not deferred). Issue 005 remains open for the rank-2 fix.
 
 - [x] All 12 Phase-2 unit tests pass (Stokes identities hold by construction) — confirmed T2.4 (96/96 DEC tests, 0 warnings).
 - [x] G-B benchmark: boundary-flux mass ≥3× faster than full-volume on 256×256 map, error < 5% — confirmed 5.36×, 3.78% error (T3.2).
 - [-] G-C benchmark: line-integral-weighted geodesic ≥20% fewer reversals — **STRUCTURAL FAIL** (rank-1 cochain cannot encode turn penalties; see Issue 005 for rank-2 `circulation_integral` fix). Primitive retained as a path-cost function.
-- [-] G-A (riir-ai, deferred): Fokker-Planck validator catches ICT branching ≥1.5× earlier or ≥2× cheaper — deferred to riir-ai Plan 334 (Phase 4).
+- [-] G-A (riir-ai): Fokker-Planck validator catches ICT branching ≥1.5× earlier or ≥2× cheaper — **❌ FAIL (2026-06-24)**: candidate 9.5× slower + 36% lower F1 at `action_dim=8`. See `riir-ai/.benchmarks/334_stokes_validator_g_a.md`. Primitive retained as opt-in mass-conservation checker (not a branching detector).
 - [x] Zero allocations in the wrapper layer (delegate to DEC scratch buffers) — confirmed T1.3 (single `Vec<bool>` region marker, proportional to complex size).
 - [x] Files < 2048 lines — confirmed (~300 LOC + tests, T1.5).
 
