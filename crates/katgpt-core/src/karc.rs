@@ -1223,11 +1223,21 @@ impl<B: KarcBasis<M>, const D: usize, const M: usize, const K: usize>
         if !have_state {
             return false;
         }
-        // Copy the delay snapshot out of the shared buffer before accumulate_pair
-        // re-enters feature_expand (which does not touch delay_buf, but the
-        // explicit copy documents the lifetime).
-        let delay_copy: Vec<f32> = self.delay_buf.clone();
-        self.accumulate_pair(&delay_copy, obs);
+        // Inline of `accumulate_pair` body. `accumulate_pair(&mut self, ...)`
+        // borrows all of `self`, so passing `&self.delay_buf` would alias.
+        // It only touches `features_buf` / `basis` / `targets_buf` /
+        // `n_samples` — all disjoint from `delay_buf` — so split-borrowing
+        // those fields lets us read `delay_buf` in place and drop the
+        // per-observation `delay_buf.clone()` alloc.
+        let d_h = Self::D_H;
+        let old_len = self.features_buf.len();
+        self.features_buf.resize(old_len + d_h, 0.0);
+        let row = &mut self.features_buf[old_len..old_len + d_h];
+        feature_expand::<B, M>(&self.delay_buf, &self.basis, row);
+        let t_old = self.targets_buf.len();
+        self.targets_buf.resize(t_old + D, 0.0);
+        self.targets_buf[t_old..t_old + D].copy_from_slice(obs);
+        self.n_samples += 1;
         true
     }
 
@@ -1441,8 +1451,17 @@ impl<B: KarcBasis<M>, const D: usize, const M: usize, const K: usize>
         if !self.ring.flatten_into(&mut self.delay_buf) {
             return false;
         }
-        let delay_copy: Vec<f32> = self.delay_buf.clone();
-        self.forecast_into(&delay_copy, out)
+        // Inline of `forecast_into` body. We can't call `self.forecast_into(
+        // &self.delay_buf, out)` because it takes `&mut self`, which would alias
+        // the shared `&self.delay_buf` borrow. Split-borrowing the disjoint
+        // fields (forecast_psi / basis / wout — none of which is delay_buf)
+        // lets us read `delay_buf` in place, eliminating the per-tick
+        // `delay_buf.clone()` (K·D f32 alloc+copy+drop) this used to do.
+        let d_h = Self::D_H;
+        let psi = &mut self.forecast_psi[..d_h];
+        feature_expand::<B, M>(&self.delay_buf[..K * D], &self.basis, psi);
+        simd::simd_matvec(&mut out[..D], &self.wout, psi, D, d_h);
+        true
     }
 
     // ── Phase 2 methods (paper Eqs. 32 / 47) ──

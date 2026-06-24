@@ -663,9 +663,10 @@ pub fn apply_dual_policy_gate(
     col_sums[..n].fill(0.0);
     for row in attn.iter() {
         let m = row.len().min(n);
-        for j in 0..m {
-            col_sums[j] += row[j];
-        }
+        // SIMD-accelerated column-sum reduction (NEON/AVX2) — matches
+        // `classify_all_sinks` and `apply_dual_policy_gate_flat`. The scalar
+        // loop that was here previously was the lone non-SIMD variant.
+        crate::simd::simd_add_inplace(&mut col_sums[..m], &row[..m]);
     }
     let (dominant_pos, _dominant_strength) = {
         let mut best_i = 0usize;

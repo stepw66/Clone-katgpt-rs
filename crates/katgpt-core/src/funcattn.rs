@@ -306,7 +306,11 @@ pub fn compute_basis_into(
 
     let inv_temp = 1.0 / temperature;
 
-    // Stage 1: raw linear projection scaled by 1/τ. out[n, k] = (Σ_d w[k, d]·x[n, d] + bias[k]) / τ.
+    // Stage 1 + Stage 2 fused: per row, do the linear projection + bias + scale
+    // AND the per-row activation/normalization in the same pass. Each row is
+    // independent, so fusing keeps the `out[i*k..]` row hot in L1 between the
+    // projection write and the normalize read instead of streaming all of `out`
+    // through cache twice. Bit-identical to the previous two-loop form.
     for i in 0..n {
         let x_row = &x[i * d..(i + 1) * d];
         let out_row = &mut out[i * k..(i + 1) * k];
@@ -315,12 +319,7 @@ pub fn compute_basis_into(
             simd::simd_add_inplace(out_row, bias);
         }
         simd::simd_scale_inplace(out_row, inv_temp);
-    }
-
-    // Stage 2: per-row activation + normalization.
-    for i in 0..n {
-        let row = &mut out[i * k..(i + 1) * k];
-        normalize_basis_row(row, kind);
+        normalize_basis_row(out_row, kind);
     }
 }
 
@@ -653,19 +652,18 @@ pub fn funcattn_forward(
         &mut scratch.phi,
     );
 
-    // Stage 2: column sums of Φ. col_sum[g] = Σ_n Φ[n, g].
+    // Stage 2 + Stage 3 fused: accumulate col_sum[g] = Σ_n Φ[n,g] and
+    // slice_token[g,:] = Σ_n Φ[n,g]·x_value[n,:] in the SAME pass over Φ.
+    // Both stages previously streamed `scratch.phi` (n·k f32) through cache
+    // twice; fusing reads each Φ row once. The column normalization that
+    // divides slice_token by col_sum still runs after this loop (it needs the
+    // fully-accumulated col_sum). Bit-identical to the previous two-loop form.
     scratch.col_sum[..k].fill(0.0);
-    for i in 0..n {
-        let phi_row = &scratch.phi[i * k..(i + 1) * k];
-        simd::simd_add_inplace(&mut scratch.col_sum[..k], phi_row);
-    }
-
-    // Stage 3: slice_token = (Φᵀ · x_value) / (col_sum + ε), column-normalized.
-    // slice_token[g, :] = Σ_n Φ[n, g] · x_value[n, :] / (col_sum[g] + ε).
     scratch.slice_token[..k * d].fill(0.0);
     for i in 0..n {
         let phi_row = &scratch.phi[i * k..(i + 1) * k];
         let x_row = &x_value[i * d..(i + 1) * d];
+        simd::simd_add_inplace(&mut scratch.col_sum[..k], phi_row);
         simd::simd_outer_product_acc(&mut scratch.slice_token, phi_row, x_row, k, d);
     }
     let eps = 1e-5;

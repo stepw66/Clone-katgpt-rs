@@ -513,11 +513,15 @@ impl<B: HintDeltaBandit> HintDeltaBandit for DualPoolBandit<B> {
             }
             PoolId::Exploration => {
                 self.x_pool.absorb(arm, reward);
-                self.x_reward_accum += reward.max(0.0);
+                // Hoisted once: the Exploration arm previously evaluated
+                // `reward.max(0.0)` twice (accum + per-arm). f32::max is cheap
+                // but branchy; computing it once is free and clearer.
+                let r = reward.max(0.0);
+                self.x_reward_accum += r;
                 self.x_count += 1;
                 // Phase 4: track per-arm X-pool reward for growth consolidation.
                 if arm < self.x_arm_rewards.len() {
-                    self.x_arm_rewards[arm] += reward.max(0.0);
+                    self.x_arm_rewards[arm] += r;
                 }
             }
         }
