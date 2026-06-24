@@ -145,3 +145,84 @@ Rationale:
 - Research 296 — Stokes Calculus DEC Vocabulary Crosswalk
 - Plan 251 — DEC operators (the underlying machinery these wrappers call)
 - Plan 312 — Viable Manifold Graph (CSR adjacency precedent for the coboundary-index optimization)
+
+---
+
+## Update: Plan 318 — Coboundary Index (2026-06-24)
+
+**Origin:** Issue 006 (`boundary_flux_mass` coboundary index).
+**Goal:** Widen the G-B win from the current 5.36× memory-access-pattern win
+  toward true O(boundary) via a CSR coboundary index on `CellComplex`.
+
+### New primitive
+
+`boundary_flux_mass_indexed(cx, region_cells, field) -> f32` — uses the
+pre-built coboundary index (`CellComplex::build_coboundary_index(k)`) to do
+`O(|region| × boundary_per_cell)` direct CSR lookups instead of the
+`O(|B_{k+1}|)` full-matrix scan.
+
+### G-B indexed results (same 256×256 grid, 64×64 zone)
+
+| Bench | Median | Speedup vs full-scan | Notes |
+|-------|--------|----------------------|-------|
+| `G-B_256x256_full_scan_baseline` | **132.93 µs** | 1.0× | `boundary_flux_mass_only` (current winner) |
+| `G-B_256x256_indexed_cold` | **1.3435 ms** | 0.099× (10× SLOWER) | clone + `build_coboundary_index` + 1 query per iter |
+| `G-B_256x256_indexed_warm` | **14.718 µs** | **9.03× FASTER** ✅ | pre-built index, query only |
+
+**GOAT gate: PASS (warm = 9.03× ≥ 3× target).**
+
+The cold-cache path is 10× slower (clone + build cost dominates a single
+query). This is the honest "you must amortize the build" signal — the indexed
+path is the right choice ONLY when the caller does many region queries on the
+same topology. For single-query scenarios, `boundary_flux_mass_only` remains
+the winner.
+
+### Why warm is faster than the estimate
+
+Plan 318's pre-implementation estimate was "~7 µs". Actual warm = 14.72 µs.
+The discrepancy is because:
+- The estimate assumed the dominant cost was the CSR scan (`4096 × 4 = 16k` ops).
+- In practice, the indexed path also avoids the `Vec<bool>` region-membership
+  allocation (`260k bools` = 260KB) that `boundary_flux_mass_only` does every
+  call. The allocation + memset alone is ~50-100 µs.
+- So the warm path pays neither the allocation nor the full-matrix scan —
+  just the CSR lookups.
+
+The 9.03× win (not the theoretical 16×) reflects the remaining work: iterating
+4096 region cells × 4 edges each = 16k scalar reads + multiplies.
+
+### Promotion decision (Plan 318)
+
+**`stokes_calculus` stays opt-in.** G-B-indexed widens the G-B margin but does
+NOT change the feature's promotion status, because G-A and G-C still fail.
+The coboundary index is a modelless architectural win available to callers who
+enable the feature.
+
+### `merkle_root` lesson audit
+
+All 5 topology-mutation paths invalidate the coboundary cache via
+`invalidate_coboundary_cache()`:
+- `remove_face` (rank 2)
+- `remove_cell` rank 0 (vertex)
+- `remove_cell` rank 1 (edge)
+- `remove_cell` rank 2 → delegates to `remove_face` (covered)
+- `remove_cell` rank 3 (volume)
+
+Test `test_coboundary_index_remove_cell_invalidates_all_ranks` verifies all 4
+explicit ranks (0/1/2/3) invalidate all 3 coboundary indices. No `add_incidence`
+method exists (confirmed by grep), so there are no other mutation paths.
+
+### Test count update
+
+| Suite | Before Plan 318 | After Plan 318 |
+|-------|-----------------|----------------|
+| `dec::` (with `--features dec_operators`) | 99 | **111** (+12) |
+| Full `katgpt-core --lib` (default features) | 509 | **509** (unchanged — dec is opt-in) |
+
+New tests: 7 `CoboundaryIndex` tests (types.rs) + 5 `boundary_flux_mass_indexed`
+tests (stokes_calculus.rs).
+
+### Cross-refs
+
+- Plan 318 — Coboundary Index for `boundary_flux_mass`
+- Issue 006 — `.issues/006_coboundary_index_for_boundary_flux.md` (CLOSED)

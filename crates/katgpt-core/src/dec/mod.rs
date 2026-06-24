@@ -53,8 +53,8 @@ pub use operators::{
     codifferential, exterior_derivative, graph_laplacian, hodge_laplacian, hodge_star,
 };
 pub use stokes_calculus::{
-    belief_mass_divergence, boundary_flux_mass, boundary_flux_mass_only, circulation_integral,
-    line_integral,
+    belief_mass_divergence, boundary_flux_mass, boundary_flux_mass_indexed,
+    boundary_flux_mass_only, circulation_integral, line_integral,
 };
 pub use terrain_cochains::{DestructionCochain, OccupancyCochain, SafetyCochain, ThreatCochain};
-pub use types::{CellComplex, CochainField, MAX_RANK};
+pub use types::{CellComplex, CoboundaryIndex, CochainField, MAX_RANK};

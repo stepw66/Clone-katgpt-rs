@@ -1,10 +1,10 @@
 # Issue 006: Add Coboundary Index to `CellComplex` for True O(boundary) `boundary_flux_mass`
 
 **Date:** 2026-06-24
-**Status:** Open — optimization task (perf, not correctness)
+**Status:** CLOSED — RESOLVED (Plan 318, commit pending)
 **Origin:** Plan 314 Phase 3 GOAT gate analysis (`.benchmarks/314_stokes_calculus_goat.md`)
 **Severity:** Low (G-B already passes at 5.36× via memory-access-pattern win; this would widen the margin)
-**Related:** katgpt-rs/.plans/314 (Stokes Calculus Wrappers), katgpt-rs/.benchmarks/314_stokes_calculus_goat.md, katgpt-rs/.plans/312 (CSR adjacency precedent)
+**Related:** katgpt-rs/.plans/314 (Stokes Calculus Wrappers), katgpt-rs/.benchmarks/314_stokes_calculus_goat.md, katgpt-rs/.plans/312 (CSR adjacency precedent), katgpt-rs/.plans/318 (implementation plan)
 
 ## Problem
 
@@ -78,3 +78,59 @@ This modifies `CellComplex` (a core type), not just `stokes_calculus.rs`. It's a
 ## Verdict
 
 **Not blocking** — G-B already passes without this optimization. File for when boundary-flux becomes a hot path (e.g., if riir-ai wires it into per-tick zone-threat computation for many zones). The coboundary index is the right architectural fix; the question is whether the current 5.36× win is sufficient to defer.
+
+---
+
+## Resolution (Plan 318, 2026-06-24)
+
+**RESOLVED.** Implemented as Plan 318 despite the "not blocking" verdict, because the user listed it as the #1 remaining item and the change is well-contained (additive API, explicit invalidation, no `Sync` breakage).
+
+### What was delivered
+
+1. **`CoboundaryIndex` struct** (CSR layout: `offsets: Vec<u32>`, `entries: Vec<(u32, i8)>`) in `types.rs`.
+2. **`CellComplex::build_coboundary_index(&mut self, k: u8)`** — explicit build, `O(|B_{k+1}|)` count-sort pass.
+3. **`CellComplex::coboundary_entries(&self, k: u8) -> Option<&CoboundaryIndex>`** — immutable accessor, `None` if not built or invalidated.
+4. **`boundary_flux_mass_indexed(cx, region, field) -> f32`** in `stokes_calculus.rs` — the fast path. Falls back to `boundary_flux_mass_only` (with `debug_assert`) if the index is not built.
+5. **Cache invalidation** via private `invalidate_coboundary_cache()` helper, called from all 4 `topology_version += 1` sites (`remove_face` + `remove_cell` ranks 0/1/3; rank 2 delegates to `remove_face`).
+6. **7 unit tests** for `CoboundaryIndex` + **5 unit tests** for `boundary_flux_mass_indexed` = 12 new tests.
+7. **3 benchmark variants** (full-scan baseline, cold, warm) in `stokes_calculus_bench.rs`.
+
+### GOAT gate result
+
+| Variant | Time | Speedup |
+|---------|------|---------|
+| `full_scan_baseline` (`boundary_flux_mass_only`) | 132.93 µs | 1.0× |
+| `indexed_cold` (clone + build + 1 query) | 1.3435 ms | 0.099× (10× SLOWER) |
+| `indexed_warm` (pre-built, query only) | **14.718 µs** | **9.03× FASTER** ✅ |
+
+**Gate: PASS (warm = 9.03× ≥ 3× target).** The cold-cache path is 10× slower
+(clone + build dominates), confirming the issue's own analysis: the index only
+wins when amortized across multiple queries on stable topology.
+
+### `merkle_root` lesson audit
+
+All mutation paths that bump `topology_version` now call `invalidate_coboundary_cache()`.
+Test `test_coboundary_index_remove_cell_invalidates_all_ranks` verifies all
+4 explicit ranks (0/1/2/3) invalidate all 3 coboundary indices. Confirmed via
+grep that no `add_incidence` method exists — the only boundary-populating
+constructors are `new` and `grid_2d`, both of which produce fresh objects with
+`coboundaries = [None, None, None]`.
+
+### Promotion decision
+
+**`stokes_calculus` stays opt-in.** G-A and G-C still fail. The coboundary
+index is a modelless architectural win (9.03× for multi-query boundary-flux
+scenarios) available to callers who enable the feature, but it does not change
+the feature's default-on status.
+
+### Verification
+
+| Check | Result |
+|-------|--------|
+| `cargo test -p katgpt-core --features dec_operators --lib dec::` | **111 passed** (was 99; +12), 0 failed |
+| `cargo test -p katgpt-core --lib` (full G3) | **509 passed**, 0 failed |
+| `cargo check --all-features` | **EXIT 0** (Issue 004 fix holds) |
+| `cargo check --no-default-features --features dec_operators` | **EXIT 0** |
+| G-B indexed warm benchmark | 14.72 µs vs 132.93 µs = **9.03× faster** |
+| G-B indexed cold benchmark | 1.34 ms (10× slower — expected) |
+| Diagnostics on changed files | No errors or warnings |

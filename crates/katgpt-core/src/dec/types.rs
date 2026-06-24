@@ -12,6 +12,45 @@
 /// Maximum supported rank (3 = vertices, edges, faces, volumes).
 pub const MAX_RANK: u8 = 3;
 
+/// CSR-style coboundary index for rank k→(k+1) (Plan 318).
+///
+/// For each (k+1)-cell `c`, its boundary (k)-cells with orientation signs are:
+/// ```text
+/// entries[offsets[c]..offsets[c+1]]
+/// ```
+/// This is the transpose of `B_{k+1}`, stored in CSR layout for O(1) per-cell
+/// boundary lookup. Built lazily by [`CellComplex::build_coboundary_index`] and
+/// invalidated on any topology mutation.
+///
+/// The index is the key data structure for `boundary_flux_mass_indexed`: it
+/// turns an `O(|B_{k+1}|)` full-matrix scan into an `O(|region| ×
+/// boundary_per_cell)` direct lookup. Build cost is `O(|B_{k+1}|)` once per
+/// topology version.
+#[derive(Clone, Debug)]
+pub struct CoboundaryIndex {
+    /// Row pointers: length `n_cells(k+1) + 1`. `offsets[c]..offsets[c+1]` is
+    /// the slice of `entries` for (k+1)-cell `c`.
+    offsets: Vec<u32>,
+    /// Flat entry list: `(k_cell_idx, orientation_sign)` pairs.
+    entries: Vec<(u32, i8)>,
+}
+
+impl CoboundaryIndex {
+    /// Returns the boundary entries for (k+1)-cell `c` as `&[(k_cell_idx, sign)]`.
+    #[inline]
+    pub fn cell_boundary(&self, c: usize) -> &[(u32, i8)] {
+        let lo = self.offsets[c] as usize;
+        let hi = self.offsets[c + 1] as usize;
+        &self.entries[lo..hi]
+    }
+
+    /// Number of (k+1)-cells covered by this index (= `offsets.len() - 1`).
+    #[inline]
+    pub fn n_cells(&self) -> usize {
+        self.offsets.len().saturating_sub(1)
+    }
+}
+
 /// A regular cell complex: vertices, edges, faces, and volumes with oriented incidence.
 ///
 /// Cells are indexed per-rank: cell (rank=0, idx=5) is the 6th vertex.
@@ -20,6 +59,7 @@ pub const MAX_RANK: u8 = 3;
 ///
 /// The fundamental identity `B[k] * B[k+1] = 0` holds by construction
 /// (boundary of boundary is zero → curl(grad)=0, div(curl)=0).
+#[derive(Clone)]
 pub struct CellComplex {
     /// Number of cells per rank: `n_cells[0]` = vertices, `n_cells[1]` = edges, etc.
     n_cells: [usize; (MAX_RANK as usize) + 1],
@@ -34,6 +74,12 @@ pub struct CellComplex {
     /// (cell addition/removal). Consumers compare against their cached version to
     /// detect topology changes without polling individual cells.
     topology_version: u64,
+    /// Coboundary index cache (Plan 318). `coboundaries[k]` is the transpose of
+    /// `boundaries[k]` in CSR layout. `None` = not built or invalidated. Built
+    /// lazily by `build_coboundary_index`; cleared on every topology mutation
+    /// (all 5 paths in `remove_face` / `remove_cell` × 4 ranks) per the
+    /// `merkle_root` lesson.
+    coboundaries: [Option<CoboundaryIndex>; MAX_RANK as usize],
 }
 
 impl CellComplex {
@@ -46,6 +92,7 @@ impl CellComplex {
             n_cells: [n_vertices, n_edges, n_faces, n_volumes],
             boundaries: [Vec::new(), Vec::new(), Vec::new()],
             topology_version: 0,
+            coboundaries: [const { None }; MAX_RANK as usize],
         }
     }
 
@@ -139,6 +186,70 @@ impl CellComplex {
         &self.boundaries[k as usize]
     }
 
+    /// Build (or rebuild) the coboundary index for rank k→(k+1) (Plan 318).
+    ///
+    /// The coboundary index is the CSR-layout transpose of `boundaries[k]`:
+    /// for each (k+1)-cell, a contiguous slice of its boundary (k)-cells with
+    /// orientation signs. Enables `O(|region| × boundary_per_cell)` queries via
+    /// [`coboundary_entries`](Self::coboundary_entries) instead of the
+    /// `O(|B_{k+1}|)` full-matrix scan done by `boundary_entries`.
+    ///
+    /// # Complexity
+    /// `O(|B_{k+1}|)` — a single count-then-scatter pass over the existing
+    /// boundary triplets. Called once per topology version; the result is
+    /// cached and invalidated automatically on any structural mutation.
+    ///
+    /// # Panics
+    /// If `k >= MAX_RANK` (there is no `B_{k+1}` at rank `MAX_RANK`).
+    pub fn build_coboundary_index(&mut self, k: u8) {
+        assert!(
+            k < MAX_RANK,
+            "build_coboundary_index: k={k} exceeds MAX_RANK={MAX_RANK}"
+        );
+        let ki = k as usize;
+        let n_kp1 = self.n_cells[ki + 1];
+
+        // Pass 1: count entries per (k+1)-cell (column histogram of B_{k+1}).
+        let mut offsets = vec![0u32; n_kp1 + 1];
+        for &(_row, col, _sign) in &self.boundaries[ki] {
+            offsets[col + 1] += 1;
+        }
+        // Prefix-sum → CSR row pointers (here: column pointers).
+        for i in 1..=n_kp1 {
+            offsets[i] += offsets[i - 1];
+        }
+
+        // Pass 2: scatter entries into their CSR slots.
+        let n_entries = self.boundaries[ki].len();
+        let mut entries = Vec::with_capacity(n_entries);
+        entries.resize(n_entries, (0, 0));
+        let mut cursor = offsets.clone(); // mutable write cursors per (k+1)-cell
+        for &(row, col, sign) in &self.boundaries[ki] {
+            let slot = cursor[col] as usize;
+            entries[slot] = (row as u32, sign);
+            cursor[col] += 1;
+        }
+        // cursor is now discarded; `offsets` holds the final CSR layout.
+
+        self.coboundaries[ki] = Some(CoboundaryIndex { offsets, entries });
+    }
+
+    /// Access the pre-built coboundary index for rank k→(k+1) (Plan 318).
+    ///
+    /// Returns `None` if [`build_coboundary_index`](Self::build_coboundary_index)
+    /// has not been called for rank `k` since the most recent topology mutation,
+    /// or `k >= MAX_RANK`.
+    ///
+    /// Callers that need the fast path should call `build_coboundary_index`
+    /// once after the topology stabilizes, then query via this accessor.
+    #[inline]
+    pub fn coboundary_entries(&self, k: u8) -> Option<&CoboundaryIndex> {
+        if k >= MAX_RANK {
+            return None;
+        }
+        self.coboundaries[k as usize].as_ref()
+    }
+
     /// Number of vertices.
     #[inline]
     pub fn n_vertices(&self) -> usize {
@@ -210,6 +321,7 @@ impl CellComplex {
         self.swap_remove_from_boundary(1, face_idx, last_face, true);
 
         self.n_cells[2] -= 1;
+        self.invalidate_coboundary_cache();
         self.topology_version += 1;
     }
 
@@ -235,6 +347,7 @@ impl CellComplex {
                 let last = self.n_cells[0] - 1;
                 self.swap_remove_from_boundary(0, cell_idx, last, false);
                 self.n_cells[0] -= 1;
+                self.invalidate_coboundary_cache();
                 self.topology_version += 1;
             }
             1 => {
@@ -248,6 +361,7 @@ impl CellComplex {
                 self.swap_remove_from_boundary(0, cell_idx, last, true);
                 self.swap_remove_from_boundary(1, cell_idx, last, false);
                 self.n_cells[1] -= 1;
+                self.invalidate_coboundary_cache();
                 self.topology_version += 1;
             }
             2 => {
@@ -262,6 +376,7 @@ impl CellComplex {
                 let last = self.n_cells[3] - 1;
                 self.swap_remove_from_boundary(2, cell_idx, last, true);
                 self.n_cells[3] -= 1;
+                self.invalidate_coboundary_cache();
                 self.topology_version += 1;
             }
             _ => panic!("remove_cell: rank {rank} exceeds MAX_RANK {MAX_RANK}"),
@@ -302,8 +417,16 @@ impl CellComplex {
 
             // Rebind last cell's entries to the freed slot (swap-remove semantics).
             let (new_row, new_col) = if needs_rebind {
-                let nr = if !is_col && row == last_idx { target_idx } else { row };
-                let nc = if is_col && col == last_idx { target_idx } else { col };
+                let nr = if !is_col && row == last_idx {
+                    target_idx
+                } else {
+                    row
+                };
+                let nc = if is_col && col == last_idx {
+                    target_idx
+                } else {
+                    col
+                };
                 (nr, nc)
             } else {
                 (row, col)
@@ -314,6 +437,19 @@ impl CellComplex {
         }
 
         boundary.truncate(write);
+    }
+
+    /// Invalidate all cached coboundary indices (Plan 318).
+    ///
+    /// Called from every topology-mutation path (`remove_face`, `remove_cell`
+    /// ranks 0/1/3; rank 2 delegates to `remove_face`). A mutation at any rank
+    /// can perturb multiple boundary matrices (e.g. removing an edge touches both
+    /// B₁ and B₂), so we invalidate all three CSR caches conservatively. This
+    /// follows the `merkle_root` lesson: audit ALL mutation paths, not just the
+    /// obvious one.
+    #[inline]
+    fn invalidate_coboundary_cache(&mut self) {
+        self.coboundaries = [const { None }; MAX_RANK as usize];
     }
 }
 
@@ -591,5 +727,160 @@ mod tests {
                 curl.scalar(i)
             );
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // Plan 318: Coboundary Index
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_coboundary_index_not_built_returns_none() {
+        let cx = CellComplex::grid_2d(4, 4);
+        assert!(cx.coboundary_entries(0).is_none());
+        assert!(cx.coboundary_entries(1).is_none());
+        assert!(cx.coboundary_entries(2).is_none());
+        assert!(cx.coboundary_entries(3).is_none(), "k >= MAX_RANK -> None");
+    }
+
+    #[test]
+    fn test_coboundary_index_b2_correct_csr() {
+        // grid_2d(3, 2): 2 faces, each bounded by 4 edges.
+        // B₂ has 8 entries (4 per face). Coboundary index for k=1 should have:
+        //   offsets = [0, 4, 8]   (each face has 4 boundary edges)
+        //   entries per face match the B₂ column for that face.
+        let mut cx = CellComplex::grid_2d(3, 2);
+        cx.build_coboundary_index(1);
+        let idx = cx.coboundary_entries(1).expect("index built for k=1");
+
+        assert_eq!(idx.n_cells(), cx.n_faces(), "n_cells should = n_faces");
+
+        // Cross-check: for each face, the coboundary entry set must equal the
+        // B₂ column for that face (same edges, same signs).
+        let b2 = cx.boundary_entries(1);
+        for face in 0..cx.n_faces() {
+            let cob = idx.cell_boundary(face);
+            let expected: Vec<(u32, i8)> = b2
+                .iter()
+                .filter(|&&(_, col, _)| col == face)
+                .map(|&(row, _, sign)| (row as u32, sign))
+                .collect();
+            let got: Vec<(u32, i8)> = cob.to_vec();
+            // CSR doesn't guarantee ordering; sort both for comparison.
+            let mut got_sorted = got.clone();
+            got_sorted.sort_unstable_by_key(|&(e, _)| e);
+            let mut exp_sorted = expected.clone();
+            exp_sorted.sort_unstable_by_key(|&(e, _)| e);
+            assert_eq!(
+                got_sorted, exp_sorted,
+                "face {face} coboundary mismatch: got {got:?}, expected {expected:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_coboundary_index_b1_correct_csr() {
+        // grid_2d(3, 2): 7 edges, each bounded by 2 vertices (tail, head).
+        let mut cx = CellComplex::grid_2d(3, 2);
+        cx.build_coboundary_index(0);
+        let idx = cx.coboundary_entries(0).expect("index built for k=0");
+
+        assert_eq!(idx.n_cells(), cx.n_edges());
+
+        // Every edge should have exactly 2 coboundary vertices.
+        for edge in 0..cx.n_edges() {
+            let cob = idx.cell_boundary(edge);
+            assert_eq!(cob.len(), 2, "edge {edge} should have 2 boundary vertices");
+            // Signs should be {-1, +1} (one tail, one head).
+            let signs: Vec<i8> = cob.iter().map(|&(_, s)| s).collect();
+            assert!(
+                signs.contains(&-1) && signs.contains(&1),
+                "edge {edge} signs should be {{-1, +1}}, got {signs:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_coboundary_index_remove_face_invalidates() {
+        // The `merkle_root` lesson: every mutation path must invalidate the cache.
+        let mut cx = CellComplex::grid_2d(4, 4);
+        cx.build_coboundary_index(1);
+        assert!(
+            cx.coboundary_entries(1).is_some(),
+            "index built before mutation"
+        );
+
+        cx.remove_face(0);
+        assert!(
+            cx.coboundary_entries(1).is_none(),
+            "remove_face must invalidate the coboundary cache"
+        );
+    }
+
+    #[test]
+    fn test_coboundary_index_remove_cell_invalidates_all_ranks() {
+        // Audit ALL mutation paths (ranks 0/1/2/3) — per the `merkle_root` lesson.
+        for rank in 0..=3u8 {
+            let mut cx = CellComplex::grid_2d(4, 4);
+            // Build all valid coboundary indices (k=0,1,2).
+            for k in 0..3u8 {
+                cx.build_coboundary_index(k);
+            }
+            for k in 0..3u8 {
+                assert!(cx.coboundary_entries(k).is_some(), "pre-mutation k={k}");
+            }
+
+            // remove_cell at the given rank bumps topology_version and should
+            // invalidate ALL coboundary caches (conservative invalidation).
+            // For rank 2, we remove a face (valid). For others, remove cell 0.
+            // Volumes (rank 3) don't exist in grid_2d, so guard that case.
+            match rank {
+                0 => cx.remove_cell(0, 0),
+                1 => cx.remove_cell(1, 0),
+                2 => cx.remove_cell(2, 0),
+                3 => continue, // grid_2d has no volumes; skip.
+                _ => unreachable!(),
+            }
+            for k in 0..3u8 {
+                assert!(
+                    cx.coboundary_entries(k).is_none(),
+                    "remove_cell rank {rank} must invalidate coboundary k={k}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_coboundary_index_rebuild_after_mutation() {
+        // After invalidation, build_coboundary_index must produce a correct
+        // index reflecting the post-mutation topology.
+        let mut cx = CellComplex::grid_2d(4, 4);
+        cx.remove_face(0); // 15 faces remain
+        cx.build_coboundary_index(1);
+        let idx = cx.coboundary_entries(1).expect("rebuilt after mutation");
+
+        assert_eq!(
+            idx.n_cells(),
+            cx.n_faces(),
+            "rebuilt index reflects new n_faces"
+        );
+
+        // Cross-check against the (also-mutated) B₂.
+        let b2 = cx.boundary_entries(1);
+        for face in 0..cx.n_faces() {
+            let cob = idx.cell_boundary(face);
+            let expected_count = b2.iter().filter(|&&(_, col, _)| col == face).count();
+            assert_eq!(
+                cob.len(),
+                expected_count,
+                "face {face} coboundary count mismatch after rebuild"
+            );
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "exceeds MAX_RANK")]
+    fn test_coboundary_index_build_panics_at_max_rank() {
+        let mut cx = CellComplex::grid_2d(4, 4);
+        cx.build_coboundary_index(MAX_RANK); // k=3 has no B₄
     }
 }

@@ -30,8 +30,8 @@
 use criterion::{Criterion, Throughput, black_box, criterion_group, criterion_main};
 use katgpt_core::dec::operators::{codifferential_into, exterior_derivative_into};
 use katgpt_core::dec::{
-    CellComplex, CochainField, belief_mass_divergence, boundary_flux_mass_only, circulation_integral,
-    line_integral,
+    CellComplex, CochainField, belief_mass_divergence, boundary_flux_mass_indexed,
+    boundary_flux_mass_only, circulation_integral, line_integral,
 };
 
 // ─── G-A baseline: belief_mass_divergence per-edge ──────────────────────────
@@ -172,6 +172,73 @@ fn bench_boundary_flux_vs_naive(c: &mut Criterion) {
                 vol += d_field_scratch.scalar(f as usize);
             }
             black_box(vol);
+        });
+    });
+
+    group.finish();
+}
+
+// ─── G-B indexed: cold vs warm coboundary index (Plan 318) ──────────────────
+//
+// Compares three variants on the same 256×256 grid + 64×64 region as the
+// baseline `bench_boundary_flux_vs_naive`:
+//
+//   1. `boundary_flux_mass_only`       — the current 5.36× winner (full-scan).
+//   2. `boundary_flux_mass_indexed_cold` — build_coboundary_index + 1 query
+//      per iteration. Expected to be SLOWER than #1 because the build cost
+//      dominates a single query. This is the honest "you must amortize" signal.
+//   3. `boundary_flux_mass_indexed_warm` — pre-built index, query only.
+//      Target: ≥3× faster than #1 (the Plan 318 GOAT gate).
+
+fn bench_boundary_flux_indexed(c: &mut Criterion) {
+    let mut group = c.benchmark_group("stokes_calculus/boundary_flux_indexed");
+    group.sample_size(50);
+
+    let (cx, field, region) = build_256x256_grid_and_field();
+
+    // Baseline (full-scan) for direct A/B in the same group.
+    group.bench_function("G-B_256x256_full_scan_baseline", |b| {
+        b.iter(|| {
+            let mass = boundary_flux_mass_only(
+                black_box(&cx),
+                black_box(&region),
+                black_box(&field),
+            );
+            black_box(mass);
+        });
+    });
+
+    // Cold: build_coboundary_index + 1 query per iteration.
+    // This is the worst case for the indexed path — build cost is not amortized.
+    group.bench_function("G-B_256x256_indexed_cold", |b| {
+        b.iter_batched(
+            || (),
+            |_| {
+                let mut cx = cx.clone();
+                cx.build_coboundary_index(1);
+                let mass = boundary_flux_mass_indexed(
+                    black_box(&cx),
+                    black_box(&region),
+                    black_box(&field),
+                );
+                black_box(mass);
+            },
+            criterion::BatchSize::SmallInput,
+        );
+    });
+
+    // Warm: index pre-built once, query only per iteration.
+    // This is the intended use case (multi-query on stable topology).
+    let mut cx_warm = cx.clone();
+    cx_warm.build_coboundary_index(1);
+    group.bench_function("G-B_256x256_indexed_warm", |b| {
+        b.iter(|| {
+            let mass = boundary_flux_mass_indexed(
+                black_box(&cx_warm),
+                black_box(&region),
+                black_box(&field),
+            );
+            black_box(mass);
         });
     });
 
@@ -490,6 +557,7 @@ criterion_group!(
     benches,
     bench_belief_mass_divergence,
     bench_boundary_flux_vs_naive,
+    bench_boundary_flux_indexed,
     bench_line_integral,
     bench_circulation_integral,
     bench_codifferential_baseline,

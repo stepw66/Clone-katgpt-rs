@@ -1,27 +1,32 @@
 //! Stokes Calculus Wrappers — thin modelless primitives over DEC operators.
 //!
-//! Implements Plan 314 (Research 296) + Plan 317 (Issue 005). Four named
-//! wrappers exposing the Generalized Stokes' Theorem as modelless inference
-//! tools:
+//! Implements Plan 314 (Research 296) + Plan 317 (Issue 005) + Plan 318
+//! (Issue 006). Five named wrappers exposing the Generalized Stokes' Theorem
+//! as modelless inference tools:
 //!
 //! - [`belief_mass_divergence`] — Fokker-Planck belief-mass validator
 //!   (L1 norm of discrete divergence).
 //! - [`boundary_flux_mass`] — divergence-theorem boundary integral for
 //!   low-dim manifolds (O(boundary) vs O(volume)).
+//! - [`boundary_flux_mass_indexed`] — CSR-indexed fast path for multi-query
+//!   scenarios (Plan 318; `O(|region| × boundary_per_cell)` after a one-time
+//!   `O(|B_{k+1}|)` build).
 //! - [`line_integral`] — discrete line integral of a rank-1 cochain along a
 //!   vertex path (open path; per-edge cost).
 //! - [`circulation_integral`] — discrete circulation of a rank-1 cochain
 //!   around a closed vertex loop (Stokes: ∮F = ∬curl F; Plan 317).
 //!
-//! All four are pure wrappers over the shipped DEC operators ([`codifferential`],
-//! [`exterior_derivative`], [`hodge_decompose`]). No new DEC machinery.
+//! All five are pure wrappers over the shipped DEC operators ([`codifferential`],
+//! [`exterior_derivative`], [`hodge_decompose`], and the coboundary index on
+//! [`CellComplex`]). No new DEC machinery.
 //!
 //! # Constraint checklist (AGENTS.md)
 //!
 //! - Modelless (linear algebra only, no backprop): YES by construction.
 //! - Latent-to-latent preferred (sigmoid not softmax): N/A (pure summation).
 //! - Freeze/thaw over fine-tuning: YES (no weight mutation).
-//! - Zero allocations in wrapper code: YES (all Vecs come from delegated ops).
+//! - Zero allocations in wrapper code: YES (all Vecs come from delegated ops
+//!   or the pre-built coboundary index).
 
 use super::hodge::hodge_decompose;
 use super::operators::codifferential;
@@ -189,6 +194,78 @@ pub fn boundary_flux_mass_only(
     mass
 }
 
+/// Boundary-flux mass via pre-built coboundary index (Plan 318).
+///
+/// Same mathematical result as [`boundary_flux_mass_only`] (the discrete
+/// divergence theorem: `∫_∂M ω = ∫_M dω`), but uses the CSR coboundary index
+/// for an `O(|region| × boundary_per_cell)` direct lookup instead of the
+/// `O(|B_{k+1}|)` full-matrix scan. For a 64×64 region in a 256×256 grid this
+/// is ~16× fewer ops.
+///
+/// # Preconditions
+/// - The caller MUST have called [`CellComplex::build_coboundary_index`] for
+///   rank `field.rank` since the last topology mutation. **Panics** (debug) or
+///   silently falls back to [`boundary_flux_mass_only`] (release) if not.
+///
+/// # When to use this vs `boundary_flux_mass_only`
+/// - **Single query:** prefer `boundary_flux_mass_only`. The index build cost
+///   (`O(|B_{k+1}|)`) dominates and makes the indexed path slower.
+/// - **Many queries on stable topology:** call `build_coboundary_index` once,
+///   then call this function per region. The build amortizes and each query is
+///   `O(|region| × boundary_per_cell)`.
+///
+/// Returns `0.0` for an empty region.
+///
+/// # Complexity
+/// `O(|region| × boundary_per_cell)` — direct CSR lookups, no full-matrix
+/// scan, no `Vec<bool>` allocation. Interior k-cells (bounding two region
+/// (k+1)-cells) appear with opposite signs and cancel.
+pub fn boundary_flux_mass_indexed(
+    cx: &CellComplex,
+    region_cells: &[u32],
+    field: &CochainField,
+) -> f32 {
+    if region_cells.is_empty() {
+        return 0.0;
+    }
+
+    let k = field.rank;
+    debug_assert_eq!(
+        field.dim, 1,
+        "boundary_flux_mass_indexed: field must be dim=1 (scalar per cell), got dim {}",
+        field.dim
+    );
+
+    let index = match cx.coboundary_entries(k) {
+        Some(idx) => idx,
+        None => {
+            debug_assert!(
+                false,
+                "boundary_flux_mass_indexed: coboundary index for rank {k} not built. \
+                 Call cx.build_coboundary_index({k}) first. Falling back to full-scan \
+                 boundary_flux_mass_only in release builds."
+            );
+            return boundary_flux_mass_only(cx, region_cells, field);
+        }
+    };
+
+    // Boundary flux = Σ_{c ∈ region} Σ_{(k_cell, sign) ∈ ∂c} sign · field[k_cell]
+    //
+    // Interior k-cells (bounding two region (k+1)-cells) appear with opposite
+    // signs across the two cells and cancel. Only boundary k-cells survive.
+    // This is the discrete divergence theorem: ∫_∂M ω = ∫_M dω.
+    //
+    // No allocation: iterate region cells, look up each cell's CSR slice directly.
+    let mut mass = 0.0f32;
+    for &cell in region_cells {
+        for &(k_cell, sign) in index.cell_boundary(cell as usize) {
+            mass += sign as f32 * field.scalar(k_cell as usize);
+        }
+    }
+
+    mass
+}
+
 // ===========================================================================
 // line_integral — discrete line integral along a vertex path
 // ===========================================================================
@@ -329,7 +406,11 @@ pub fn line_integral(cx: &CellComplex, edge_field: &CochainField, path: &[u32]) 
 /// let circ = circulation_integral(&cx, &field, &square_loop);
 /// assert_eq!(circ, 0.0);
 /// ```
-pub fn circulation_integral(cx: &CellComplex, edge_field: &CochainField, closed_loop: &[u32]) -> f32 {
+pub fn circulation_integral(
+    cx: &CellComplex,
+    edge_field: &CochainField,
+    closed_loop: &[u32],
+) -> f32 {
     // A closed loop needs at least 3 vertices (2 edges) to enclose anything.
     // Shorter inputs trivially have zero circulation.
     if closed_loop.len() < 3 {
@@ -402,7 +483,10 @@ mod tests {
         // The L1 norm is dominated by boundary contributions.
         // Just verify it's non-zero (boundary effects) and finite.
         assert!(div.is_finite(), "divergence must be finite");
-        assert!(div > 0.0, "boundary vertices contribute non-zero divergence");
+        assert!(
+            div > 0.0,
+            "boundary vertices contribute non-zero divergence"
+        );
     }
 
     /// T2.1.2 Scaling: divergence scales linearly with flow magnitude.
@@ -547,6 +631,152 @@ mod tests {
         let (mass, err) = boundary_flux_mass(&cx, &[], &field);
         assert_eq!(mass, 0.0);
         assert_eq!(err, 0.0);
+    }
+
+    // ── boundary_flux_mass_indexed (Plan 318) ────────────────────────────────
+
+    /// T318.1 Indexed path matches `boundary_flux_mass_only` on a full-grid region.
+    /// Stokes identity: both paths compute the same discrete divergence theorem.
+    #[test]
+    fn test_boundary_flux_mass_indexed_matches_only_full_region() {
+        let mut cx = CellComplex::grid_2d(5, 5);
+        let n_edges = cx.n_edges();
+        let n_faces = cx.n_faces();
+
+        let mut field = CochainField::zeros(1, n_edges, 1);
+        for e in 0..n_edges {
+            field.set_scalar(e, ((e as f32) * 0.7).sin());
+        }
+
+        let all_faces: Vec<u32> = (0..n_faces as u32).collect();
+
+        // Full-scan baseline.
+        let mass_only = boundary_flux_mass_only(&cx, &all_faces, &field);
+
+        // Indexed path.
+        cx.build_coboundary_index(1);
+        let mass_indexed = boundary_flux_mass_indexed(&cx, &all_faces, &field);
+
+        assert_eq!(
+            mass_only, mass_indexed,
+            "indexed must match full-scan on full region"
+        );
+    }
+
+    /// T318.2 Indexed path matches naive volume integral on a subset region.
+    /// This is the more meaningful test: subset regions exercise the interior-
+    /// edge cancellation that makes the divergence theorem work.
+    #[test]
+    fn test_boundary_flux_mass_indexed_stokes_identity_subset() {
+        let mut cx = CellComplex::grid_2d(6, 6);
+        let n_edges = cx.n_edges();
+
+        let mut field = CochainField::zeros(1, n_edges, 1);
+        for e in 0..n_edges {
+            field.set_scalar(e, ((e as f32) * 0.31).cos());
+        }
+
+        // A non-trivial region: 3 faces forming an L-shape (shared edges cancel).
+        let region: Vec<u32> = vec![0, 1, 5];
+
+        // Build the index AFTER topology is stable.
+        cx.build_coboundary_index(1);
+        let mass = boundary_flux_mass_indexed(&cx, &region, &field);
+
+        // Naive volume integral: Σ_{f ∈ region} d₁(field)[f].
+        let d1_field = exterior_derivative(&cx, &field);
+        let volume_mass: f32 = region.iter().map(|&f| d1_field.scalar(f as usize)).sum();
+
+        assert!(
+            (mass - volume_mass).abs() < 1e-4,
+            "indexed Stokes identity (subset): {mass} must equal volume integral {volume_mass}"
+        );
+
+        // Also cross-check against the full-scan path (tolerance accounts for
+        // float accumulation-order differences between the two paths).
+        let mass_only = boundary_flux_mass_only(&cx, &region, &field);
+        assert!(
+            (mass - mass_only).abs() < 1e-4,
+            "indexed ({mass}) must match full-scan ({mass_only}) on subset"
+        );
+    }
+
+    /// T318.3 Indexed path: empty region → 0.0 without panicking.
+    #[test]
+    fn test_boundary_flux_mass_indexed_empty_region() {
+        let mut cx = CellComplex::grid_2d(4, 4);
+        cx.build_coboundary_index(1);
+        let field = CochainField::zeros(1, cx.n_edges(), 1);
+        let mass = boundary_flux_mass_indexed(&cx, &[], &field);
+        assert_eq!(mass, 0.0);
+    }
+
+    /// T318.4 Indexed path: zero-curl (exact/gradient) field → zero flux
+    /// regardless of region. Validates the FTC via the indexed code path.
+    #[test]
+    fn test_boundary_flux_mass_indexed_exact_field_zero() {
+        let mut cx = CellComplex::grid_2d(5, 5);
+
+        // φ(v) = v_index → d₀(φ) is a pure gradient (exact) field.
+        let mut potential = CochainField::zeros(0, cx.n_vertices(), 1);
+        for v in 0..cx.n_vertices() {
+            potential.set_scalar(v, v as f32);
+        }
+        let gradient = exterior_derivative(&cx, &potential); // rank-1, exact
+
+        let all_faces: Vec<u32> = (0..cx.n_faces() as u32).collect();
+        cx.build_coboundary_index(1);
+        let mass = boundary_flux_mass_indexed(&cx, &all_faces, &gradient);
+
+        // Curl of gradient = 0 → boundary circulation = 0.
+        assert!(
+            mass.abs() < 1e-4,
+            "exact field → indexed boundary flux ≈ 0, got {mass}"
+        );
+    }
+
+    /// T318.5 Indexed path: rebuilding after a topology mutation produces
+    /// correct results. Exercises the cache invalidation + rebuild cycle.
+    #[test]
+    fn test_boundary_flux_mass_indexed_after_rebuild() {
+        let mut cx = CellComplex::grid_2d(5, 5);
+        let n_edges = cx.n_edges();
+
+        let mut field = CochainField::zeros(1, n_edges, 1);
+        for e in 0..n_edges {
+            field.set_scalar(e, ((e as f32) * 0.5).sin());
+        }
+
+        // Build, query, then mutate + rebuild + query again.
+        cx.build_coboundary_index(1);
+        let region: Vec<u32> = (0..cx.n_faces() as u32).collect();
+        let mass_before = boundary_flux_mass_indexed(&cx, &region, &field);
+
+        cx.remove_face(0);
+        assert!(cx.coboundary_entries(1).is_none(), "cache invalidated");
+
+        cx.build_coboundary_index(1);
+        let region_after: Vec<u32> = (0..cx.n_faces() as u32).collect();
+        let mass_after = boundary_flux_mass_indexed(&cx, &region_after, &field);
+
+        // Cross-check both against full-scan on the respective topologies.
+        // (mass_before was computed on the pre-mutation topology; recompute
+        // the full-scan baseline on a fresh pre-mutation complex for fairness.)
+        let mut cx_ref = CellComplex::grid_2d(5, 5);
+        let region_ref: Vec<u32> = (0..cx_ref.n_faces() as u32).collect();
+        let mass_before_ref = boundary_flux_mass_only(&cx_ref, &region_ref, &field);
+        cx_ref.remove_face(0);
+        let region_ref_after: Vec<u32> = (0..cx_ref.n_faces() as u32).collect();
+        let mass_after_ref = boundary_flux_mass_only(&cx_ref, &region_ref_after, &field);
+
+        assert!(
+            (mass_before - mass_before_ref).abs() < 1e-4,
+            "pre-mutation match: indexed={mass_before}, ref={mass_before_ref}"
+        );
+        assert!(
+            (mass_after - mass_after_ref).abs() < 1e-4,
+            "post-mutation match: indexed={mass_after}, ref={mass_after_ref}"
+        );
     }
 
     // ── line_integral ───────────────────────────────────────────────────────
