@@ -17,8 +17,16 @@
 
 pub mod ridge_solve;
 
+#[cfg(feature = "geometric_product")]
+pub mod geometric_product;
+
 pub use ridge_solve::{
     chol_solve_f32, chol_solve_f64, cholesky_f32, cholesky_f64,
     ridge_solve_direct_f32, ridge_solve_direct_f64, ridge_solve_woodbury_f32,
     spd_inverse_f32,
 };
+
+// Plan 319 — Channel-wise Clifford Geometric Product (coherence + wedge).
+// Re-exported alongside the ridge kernels as a peer linear-algebra primitive.
+#[cfg(feature = "geometric_product")]
+pub use geometric_product::{cyclic_shift_into, geometric_product_into};

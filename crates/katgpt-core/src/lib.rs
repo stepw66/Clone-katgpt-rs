@@ -618,11 +618,13 @@ pub use depth_invariance::{
     Scratch, apply_magnitude_regularization, classify_chain, classify_chain_batched,
 };
 
-// Shared linear-algebra kernels for ridge-style solvers. Currently consumed
-// by `karc` (Plan 308); the f32 Cholesky/ridge path lives here as a standalone
+// Shared linear-algebra kernels. Originally extracted for `karc`'s ridge-style
+// solvers (Plan 308); the f32 Cholesky/ridge path lives here as a standalone
 // extraction of the PEIRA `(N + λI)⁻¹` pattern — see the module note for why
-// PEIRA's f64 path is left untouched.
-#[cfg(feature = "karc_forecaster")]
+// PEIRA's f64 path is left untouched. Plan 319 (Clifford geometric product)
+// ships `linalg::geometric_product` as a peer — `geometric_product` must also
+// gate this `pub mod` so the crate compiles when only that feature is on.
+#[cfg(any(feature = "karc_forecaster", feature = "geometric_product"))]
 pub mod linalg;
 
 // KARC — Kolmogorov-Arnold Reservoir Computing delay-basis-ridge forecaster

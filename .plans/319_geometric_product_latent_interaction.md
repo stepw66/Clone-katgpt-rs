@@ -4,7 +4,7 @@
 **Research:** [katgpt-rs/.research/299_Clifford_Geometric_Product_Latent_Interaction.md](../.research/299_Clifford_Geometric_Product_Latent_Interaction.md)
 **Source paper:** [arXiv:2601.06793](https://arxiv.org/abs/2601.06793) — CliffordNet: All You Need is Geometric Algebra (Ji, Feb 2026)
 **Target:** `katgpt-rs/crates/katgpt-core/src/linalg/geometric_product.rs` (new module) + Cargo feature `geometric_product`
-**Status:** Active — Phase 1 (skeleton)
+**Status:** Active — Phase 1 ✅ complete, Phase 2 (GOAT gate) next
 
 ---
 
@@ -22,19 +22,27 @@ Ship the **channel-wise geometric product** `uv = u·v + u∧v` as a modelless, 
 
 ### Tasks
 
-- [ ] **T1.1** Add `geometric_product` feature to `katgpt-rs/crates/katgpt-core/Cargo.toml` (empty deps, opt-in).
-- [ ] **T1.2** Create `katgpt-rs/crates/katgpt-core/src/linalg/geometric_product.rs` with:
+- [x] **T1.1** Add `geometric_product` feature to `katgpt-rs/crates/katgpt-core/Cargo.toml` (empty deps, opt-in).
+- [x] **T1.2** Create `katgpt-rs/crates/katgpt-core/src/linalg/geometric_product.rs` with:
   - `pub fn cyclic_shift_into(src: &[f32], dim: usize, shift: usize, out: &mut [f32])` — zero-alloc cyclic channel shift `T_s`. Handles wrap-around. Documented with the anti-symmetric sign caveat (Research 299 §5 Q4).
   - `pub fn geometric_product_into(u, v, dim, shifts, dot_out, wedge_out, scratch_u, scratch_v)` — accumulates `Σ_s SiLU(u ⊙ T_s(v))` into `dot_out` and `Σ_s (u ⊙ T_s(v) − T_s(u) ⊙ v)` into `wedge_out`. Zero alloc after scratch init.
   - SIMD chunking hint (4-wide) on inner channel loop, mirroring `dec/operators.rs::exterior_derivative_into` pattern.
-- [ ] **T1.3** Gate the module behind `#[cfg(feature = "geometric_product")]` and re-export from `linalg/mod.rs`.
-- [ ] **T1.4** Unit tests (same file, `#[cfg(test)]`):
-  - `wedge_is_antisymmetric`: `geometric_product_into(u, v, ...) == -geometric_product_into(v, u, ...)` on the wedge output.
-  - `wedge_self_is_zero`: `u ∧ u = 0` (anti-symmetry implies `x∧x=0`).
-  - `dot_is_symmetric`: `u·v == v·u` on the dot output.
-  - `shift_zero_is_hadamard`: with `shifts = &[0]`, `dot_out[c] = SiLU(u[c]·v[c])` and `wedge_out[c] = 0` (since `u_c v_c − u_c v_c = 0`).
-  - `shift_s_extracts_diagonal`: with `shifts = &[s]`, `wedge_out[c] = u[c]·v[(c+s)%dim] − u[(c+s)%dim]·v[c]` — matches paper Eq. 11.
-- [ ] **T1.5** `cargo test -p katgpt-core --features geometric_product --lib` passes.
+- [x] **T1.3** Gate the module behind `#[cfg(feature = "geometric_product")]` and re-export from `linalg/mod.rs`. Also broadened the top-level `pub mod linalg` gate in `lib.rs` from `#[cfg(feature = "karc_forecaster")]` to `#[cfg(any(feature = "karc_forecaster", feature = "geometric_product"))]` so the linalg module compiles when only `geometric_product` is on.
+- [x] **T1.4** Unit tests (same file, `#[cfg(test)]`) — **15 tests, all pass**:
+  - `wedge_is_antisymmetric`: `geometric_product_into(u, v, ...) == -geometric_product_into(v, u, ...)` on the wedge output. ✅
+  - `wedge_self_is_zero`: `u ∧ u = 0` (anti-symmetry implies `x∧x=0`). ✅
+  - `dot_is_symmetric`: `u·v == v·u` on the dot output (verified at `s=0` — the only shift where the dot term is symmetric; multi-shift dot sums are NOT symmetric because index pairs differ, documented in the test). ✅
+  - `shift_zero_is_hadamard`: with `shifts = &[0]`, `dot_out[c] = SiLU(u[c]·v[c])` and `wedge_out[c] = 0` (since `u_c v_c − u_c v_c = 0`). ✅
+  - `shift_s_extracts_diagonal`: with `shifts = &[s]`, `wedge_out[c] = u[c]·v[(c+s)%dim] − u[(c+s)%dim]·v[c]` — matches paper Eq. 11. ✅
+  - Plus: `silu_signs`, `cyclic_shift_identity`, `cyclic_shift_by_one`, `cyclic_shift_mod_reduces`, `cyclic_shift_wraps`, `empty_shifts_zeros_outputs`, `dim_zero_noop`, `hla_sized_smoke` (D=8), `shard_sized_smoke` (D=64), `non_multiple_of_four_dim` (remainder path + antisymmetry).
+- [x] **T1.5** `cargo test -p katgpt-core --features geometric_product --lib` passes — **15 passed; 0 failed**.
+
+**Design decisions resolved (Research 299 §5 open questions):**
+- **Q4 (anti-symmetric wrap-around sign):** Chose **cyclic shift** (paper-faithful). Documented the sign caveat in the module-level numerical contract. `shift_s_extracts_diagonal` test pins the exact formula including wrap. Zero-pad (non-wrapping) variant deferred as TODO in Plan 319 §Risks — only needed if a downstream caller requires sign-pure wedges.
+- **Q3 (wedge magnitude scale):** SiLU gate on the dot term naturally absorbs scale. Raw `Σ` scores used in tests. Caller fuses `(dot, wedge)` with their own sigmoid gate (not baked in — primitive stays substrate-agnostic).
+- **Q2 (shift set S):** Tests use `&[1,2,4]` (D=8) and `&[1,2,4,8,16,32]` (D=64). Phase 2 G1 gate will verify these are expressive enough.
+
+**G3 early check (no regression):** `cargo check -p katgpt-core --all-features` ✅ clean (warnings only); `cargo check -p katgpt-core --no-default-features` ✅ clean.
 
 ---
 
