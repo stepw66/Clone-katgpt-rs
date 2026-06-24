@@ -25,6 +25,8 @@ Inspired by [Andrej Karpathy's microgpt](https://karpathy.github.io/2026/02/12/m
 | **KARC Trajectory Forecast** | **NRMSE 1.67e-4** (6× better than paper target 5.3e-4) | Delay-basis ridge forecaster (Plan 308 Phase 2 R=2 higher-order) |
 | **Latent Field Steering** | **1.50× fear-axis shift**, ≤4.5e-5 leakage | Top-down direction-vector injection (Plan 309) |
 | **Cross-Resolution Transport** | **0.9300 mean cos rank preservation** (16→256 tier transfer) | Train-small-deploy-large asymmetric-basis FUNCATTN (Plan 310) |
+| **Manifold Walk Viability** | **100% playability** vs free 74.2% (paper's SMB headline reproduced); **7.10 ns/step** post-CSR (68.4× speedup, 14× under target) | Viable Manifold Graph safe-navigation (Plan 312, DEFAULT-ON) |
+| **AC-Prefix Modelless G1** | **0.0 diff** (bit-identical to iterative-MLM) via `attends_dedup`; **27.258× speedup** vs 64 iterative forwards | §3.5 modelless unblock of AC-GPT arbitrary-conditional eval (Plan 313, DEFAULT-ON) |
 
 ## 🏗️ Architecture
 
