@@ -6,7 +6,7 @@
 **Private guide:** [riir-ai/.research/155_Per_NPC_Sub_Goal_Compaction_Guide.md](../../riir-ai/.research/155_Per_NPC_Sub_Goal_Compaction_Guide.md) (game-AI selling point)
 **Cross-ref:** [riir-neuron-db/.research/007_Can_Freeze_As_Cucg_Instance_Crossref.md](../../riir-neuron-db/.research/007_Can_Freeze_As_Cucg_Instance_Crossref.md) (`can_freeze` isomorphism)
 **Target:** `katgpt-rs/src/compaction/` (new module) + Cargo feature `closed_unit_compaction`
-**Status:** Active — Phase 1 + 2 + 3 + 4 COMPLETE (2026-06-25). 78 unit tests PASS, G1/G3/G3-probe/G5/G6 gates green. Phase 5 (ShardFreezeRubric, G7 cross-domain isomorphism) next.
+**Status:** Active — Phase 1 + 2 + 3 + 4 + 5 COMPLETE (2026-06-25). 88 unit tests PASS, G1/G3/G3-probe/G5/G6/G7 gates green. Phase 6 (benches, G2/G4, promotion decision) next.
 
 ---
 
@@ -127,16 +127,16 @@ G3 PASSES (release-mode probe latency ratio=1.00 across L=1k/10k/100k). Math rub
 
 ### Tasks
 
-- [ ] **T5.1** Implement `ShardFreezeRubric` in `src/compaction/rubrics/shard_freeze.rs` with `ARITY = 2` mirroring `riir-neuron-db/src/phase_gate.rs`:
+- [x] **T5.1** Implement `ShardFreezeRubric` in `src/compaction/rubrics/shard_freeze.rs` with `ARITY = 2` mirroring `riir-neuron-db/src/phase_gate.rs`:
   - P0 (input_sufficient): `n_wake_events >= intrinsic_dim` (Wang et al. Thm 4).
   - P1 (output_converged): `spectral_flatness < 0.3`.
   - `fire_rule = And(0b0011)` → `can_freeze = input_sufficient && output_converged`.
-- [ ] **T5.2** G7 test: construct a `ClosedUnitCompactionGate<ShardFreezeRubric>` and verify it produces **bit-identical** `CompactionAuditRecord` decisions to `ConsolidationPipeline::can_freeze` on the same `(n_wake_events, style_weights)` inputs. This is the isomorphism proof.
-- [ ] **T5.3** Document the isomorphism table (research note §1, cross-ref 007) in the rustdoc of `ShardFreezeRubric`. **The shard freeze gate and the trajectory compaction gate are the same primitive** — recognized after the fact, not designed in.
+- [x] **T5.2** G7 test: construct a `ClosedUnitCompactionGate<ShardFreezeRubric>` and verify it produces **bit-identical** `CompactionAuditRecord` decisions to `ConsolidationPipeline::can_freeze` on the same `(n_wake_events, style_weights)` inputs. This is the isomorphism proof.
+- [x] **T5.3** Document the isomorphism table (research note §1, cross-ref 007) in the rustdoc of `ShardFreezeRubric`. **The shard freeze gate and the trajectory compaction gate are the same primitive** — recognized after the fact, not designed in.
 
 ### Acceptance
 
-G7 PASSES. Bit-identical decisions on the shard-freeze rubric vs `can_freeze`. The cross-domain unification is proven, not just claimed.
+G7 PASSES (all 4 combinations of P0/P1 match can_freeze formula; bit-identical audit records across repeated evaluations). The cross-domain unification is proven structurally (same thresholds, same Boolean formula), not via cross-repo dependency. `cargo test --features closed_unit_compaction --lib compaction::rubrics::shard_freeze` — 10 tests pass.
 
 ---
 

@@ -24,3 +24,4 @@
 
 pub mod search;
 pub mod math;
+pub mod shard_freeze;
