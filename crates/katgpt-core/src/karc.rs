@@ -1201,6 +1201,57 @@ impl<B: KarcBasis<M>, const D: usize, const M: usize, const K: usize>
         self.fitted
     }
 
+    /// Restore a previously-fit `Wout` without re-running `fit_ridge`.
+    ///
+    /// This is the **thaw** half of the freeze/thaw bridge: a caller that
+    /// serialized a fitted `Wout` (e.g. via `riir-neuron-db::KarcShard`) can
+    /// restore the forecaster to a "freshly fitted" state. The semantics are
+    /// identical to having just called `fit_ridge` and then forgotten the
+    /// trajectory: `is_fitted() == true`, `forecast_into` works immediately,
+    /// `forecast_now` works once the delay ring re-fills.
+    ///
+    /// Clears the trajectory buffer (`n_samples == 0`) and drops any stale
+    /// low-rank factors — the restored `Wout` is full-rank, and carrying stale
+    /// `(A, B)` would make [`Self::is_low_rank_fitted`] lie about the
+    /// forecaster's actual state. The delay ring is NOT touched (it is runtime
+    /// observation state, not fit state).
+    ///
+    /// # Panics
+    ///
+    /// Panics if `wout.len() != D * Self::D_H` (shape mismatch — caller bug).
+    ///
+    /// # Use case
+    ///
+    /// This is the ONLY sanctioned way to set `Wout` outside of `fit_ridge`.
+    /// It exists so the freeze/thaw envelope (riir-ai Plan 332 Phase 4) can
+    /// avoid re-running the fitter on every shard thaw, which would defeat
+    /// the G4 bit-exact restoration gate (the fit path depends on
+    /// `n_samples`, which is not carried in the frozen shard).
+    pub fn restore_wout(&mut self, wout: Vec<f32>) {
+        let d_h = Self::D_H;
+        let expected = D * d_h;
+        assert_eq!(
+            wout.len(), expected,
+            "KarcForecaster::restore_wout: wout.len() = {} but expected D*d_h = {}*{} = {}",
+            wout.len(), D, d_h, expected,
+        );
+        self.wout = wout;
+        self.fitted = true;
+        // Drop low-rank state — the restored Wout is full-rank. Carrying
+        // stale (A, B) would make is_low_rank_fitted() lie.
+        self.a_low_rank = Vec::new();
+        self.b_low_rank = Vec::new();
+        self.low_rank_r = 0;
+        self.low_rank_fitted = false;
+        self.forecast_low_rank_mid = Vec::new();
+        // Clear the trajectory buffer — the restored forecaster has no
+        // training history. A subsequent `fit_ridge` starts from scratch
+        // (matches "freshly fitted but no history" semantics).
+        self.features_buf.clear();
+        self.targets_buf.clear();
+        self.n_samples = 0;
+    }
+
     /// Push an observation into the delay ring.
     #[inline]
     pub fn observe(&mut self, obs: &[f32; D]) {
