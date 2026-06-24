@@ -1,5 +1,7 @@
 //! SIMD argmax — single-pass `(usize, f32)` reducer used by token sampling.
 
+use crate::simd::simd_max_f32;
+
 /// Single-pass argmax: returns `(index, value)` of the maximum element.
 ///
 /// Fuses max-finding and index-recovery into one traversal. The naive idiom —

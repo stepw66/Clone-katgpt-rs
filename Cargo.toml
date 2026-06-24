@@ -26,9 +26,20 @@ ordered-float = { version = "4", optional = true } # Ord wrapper for f64 — CHT
 good_lp = { version = "1", optional = true, default-features = false, features = ["highs", "microlp"] } # MILP solver — scheduling (Plan 064 TG-D), highs primary + microlp fallback
 reqwest = { version = "0.12", features = ["blocking", "json"], optional = true } # AutoGo REST API client (Plan 065)
 toml = "0.8"
-bytemuck = "1"
+bytemuck = { version = "1", features = ["extern_crate_alloc"] }  # extern_crate_alloc: enables pod_collect_to_vec (used by transformer.rs weight loading). On native this is unified transitively via plotters→image, but wasm32 builds skip plotters so the feature must be explicit. See Plan 316.
 half = "2"  # f16 compact KV cache storage (Plan 245 StillKV)
 rustfft = { version = "6", optional = true }  # CHIAR per-token DCT entropy (Plan 269)
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+# getrandom wasm32 backends — required so that transitive consumers (bevy_ecs
+# → bevy_utils → ahash pulls BOTH getrandom 0.2 and 0.3) compile for the
+# browser / CF Worker / wasmtime wasm32-unknown-unknown targets. Without
+# these, `secure_vessel` / `bomber-wasm` / `bomber` fail with getrandom's
+# "wasm32-unknown-unknown targets are not supported by default" error.
+# getrandom 0.3 renamed the feature: `js` (0.2) → `wasm_js` (0.3).
+# See https://docs.rs/getrandom/#webassembly-support
+getrandom = { version = "0.3", features = ["wasm_js"] }
+getrandom_02 = { package = "getrandom", version = "0.2", features = ["js"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 coreml-native = { version = "0.2", optional = true }  # Apple Neural Engine inference backend (Plan 176)
