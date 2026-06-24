@@ -340,7 +340,7 @@ The hard problem: prove that roots[d] is a faithful aggregation of roots[d+1].
 2. FFT-style batch verification via Plan 242 Fourier Smoothed Potential Fields
 3. Probabilistic proof via sampling (curator verifies K random leaves under each internal node)
 
-**Tracked in:** [`riir-chain/issues/002_rtdc_subtree_inclusion_research.md`](../../riir-chain/issues/002_rtdc_subtree_inclusion_research.md).
+**Tracked in:** [`riir-chain/.issues/002_rtdc_subtree_inclusion_research.md`](../../riir-chain/.issues/002_rtdc_subtree_inclusion_research.md) (Candidate A — Pedersen on tangent log-maps; dormant until deterministic-soundness trigger fires).
 
 ### Phase 3 status (updated 2026-06-22)
 
@@ -373,7 +373,7 @@ The hard problem: prove that roots[d] is a faithful aggregation of roots[d+1].
       the production answer. If deterministic-per-frequency-cutoff
       soundness ever becomes a hard requirement, the path is Candidate A
       (Pedersen on tangent log-maps), not FFT.
-- [ ] **Candidate A (Pedersen)** — deferred (3-4 weeks, needs curve dep).
+- [-] **Candidate A (Pedersen)** — **DEFERRED, tracked at** [`riir-chain/.issues/002_rtdc_subtree_inclusion_research.md`](../../riir-chain/.issues/002_rtdc_subtree_inclusion_research.md). Dormant until the trigger condition fires (deterministic per-frequency-cutoff soundness becomes a hard requirement, or a curve dep becomes acceptable). Blocked on curve-dependency decision (`curve25519-dalek` likely), NOT on training. CG6 (latency) expected to fail — group ops are ~1000× BLAKE3 — so Candidate A would ship as an opt-in deterministic-soundness mode alongside (not replacing) Candidate C.
 - [x] **Chain wiring** — **LANDED** in `riir-chain` commit `fac46d5`
       (2026-06-22). `chain_rtdc_subtree` feature in `riir-chain/Cargo.toml`,
       bridge glue in `riir-chain/src/encoding/rtdc_bridge.rs` exposes

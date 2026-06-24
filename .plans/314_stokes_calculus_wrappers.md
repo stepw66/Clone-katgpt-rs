@@ -6,7 +6,7 @@
 - [arxiv 2202.11322](https://arxiv.org/abs/2202.11322) — *Efficient CDF Approximations for Normalizing Flows* (TMLR 2022) — "leverage the divergence theorem to estimate the CDF over a closed region in target space"
 - [NeurIPS 2020](https://papers.nips.cc/paper/2020/hash/cbf8710b43df3f2c1553e649403426df-Abstract.html) — *Neural Manifold Ordinary Differential Equations* (Lou et al.) — `d/dt log p = -div(f)` instantaneous change-of-variables
 **Target:** `katgpt-rs/crates/katgpt-core/src/dec/stokes_calculus.rs` (new file) + Cargo feature `stokes_calculus` (under `dec_operators`)
-**Status:** Active — Phase 1 + 2 + 3 COMPLETE (2026-06-24); `stokes_calculus` stays opt-in (G-B PASS, G-C structural fail, G-A deferred to riir-ai). Phase 4 riir-ai wiring pending.
+**Status:** Active — Phase 1 + 2 + 3 COMPLETE (2026-06-24); `stokes_calculus` stays opt-in (G-B PASS, G-C structural fail, G-A deferred to riir-ai). Phase 4 filed as riir-ai Plan 334 (2026-06-24); stale Phase-4/validation/constraint checkboxes reconciled.
 
 ---
 
@@ -29,13 +29,17 @@ Three thin wrapper primitives (<50 LOC each) over the shipped DEC operators (Pla
 
 ## Constraint Checklist (per AGENTS.md + skill)
 
-- [ ] Modelless (inference-time only, no backprop) — ✓ by construction (DEC ops are linear algebra)
-- [ ] Latent-to-latent preferred (sigmoid not softmax) — ✓ (no softmax in this primitive)
-- [ ] Freeze/thaw over fine-tuning — ✓ (no weight mutation)
-- [ ] 5-repo discipline (open primitive in katgpt-rs) — ✓
-- [ ] SOLID, DRY, zero-alloc hot paths — ✓ (wrappers reuse DEC scratch buffers)
-- [ ] CPU/SIMD/GPU auto-route inherited from DEC `backend.rs` — ✓
-- [ ] File < 2048 lines — ✓ (single file, ~300 LOC + tests)
+All constraints satisfied by construction during Phase 1–3 implementation.
+Reconciled 2026-06-24 (previously left as unchecked bookkeeping despite
+inline `✓` confirmations).
+
+- [x] Modelless (inference-time only, no backprop) — ✓ by construction (DEC ops are linear algebra)
+- [x] Latent-to-latent preferred (sigmoid not softmax) — ✓ (no softmax in this primitive)
+- [x] Freeze/thaw over fine-tuning — ✓ (no weight mutation)
+- [x] 5-repo discipline (open primitive in katgpt-rs) — ✓
+- [x] SOLID, DRY, zero-alloc hot paths — ✓ (wrappers reuse DEC scratch buffers)
+- [x] CPU/SIMD/GPU auto-route inherited from DEC `backend.rs` — ✓
+- [x] File < 2048 lines — ✓ (single file, ~300 LOC + tests)
 
 ---
 
@@ -98,17 +102,17 @@ Each primitive gets an A/B benchmark vs the naive alternative. **Promote the win
 
 ---
 
-## Phase 4 — riir-ai Wiring (Deferred, runs in riir-ai)
+## Phase 4 — riir-ai Wiring (Filed as riir-ai Plan 334)
 
-This phase lands in `riir-ai/crates/riir-engine/`, NOT katgpt-rs. It is the G-A gate (T3.1) plus the actual HLA integration. **File as a riir-ai plan when this Phase 1–3 work is done.** Cross-reference this plan.
+**Filed 2026-06-24** as [`riir-ai/.plans/334_stokes_calculus_hla_wiring.md`](../../riir-ai/.plans/334_stokes_calculus_hla_wiring.md) per this plan's directive ("File as a riir-ai plan when Phase 1–3 work is done"). Phase 1–3 is COMPLETE; the tasks below are now tracked there, not here. They are riir-engine work, not katgpt-rs work.
 
-### Tasks (sketch — to be elaborated in riir-ai plan)
+### Tasks (now owned by riir-ai Plan 334)
 
-- [ ] **T4.1** Construct a `CellComplex` on the HLA belief manifold (8-dim). Options: (a) lattice discretization of the 5 synced scalars' range, (b) reuse `SafeManifoldGraph` from Plan 312 to build a discrete approximation. Decide and document.
-- [ ] **T4.2** Per HLA tick, compute the belief-flow cochain from the HLA state delta (`evolve_hla`'s update vector). Feed to `belief_mass_divergence()`.
-- [ ] **T4.3** Run G-A gate (T3.1): does `belief_mass_divergence > τ` catch ICT branching events earlier/cheaper than JS-divergence?
-- [ ] **T4.4** Wire into `cgsp_runtime/pulse_bridge.rs` as a curiosity signal (divergence > 0 = expanding belief = curiosity). Cross-reference Plan 277 (Temporal Derivative Kernel).
-- [ ] **T4.5** Feed to LatCal commitment: the 5 synced scalars should be the boundary flux of a near-zero-divergence field. If `belief_mass_divergence > τ` on the committed slice → flag for `mape_k.rs` self-healing (riir-neuron-db).
+- [-] **T4.1** Construct a `CellComplex` on the HLA belief manifold (8-dim). → riir-ai Plan 334 T1.1–T1.3 (recommendation: 2D projection of 5 synced scalars, lattice discretization).
+- [-] **T4.2** Per HLA tick, compute the belief-flow cochain from the HLA state delta (`evolve_hla`'s update vector). Feed to `belief_mass_divergence()`. → riir-ai Plan 334 T2.1–T2.3.
+- [-] **T4.3** Run G-A gate (T3.1): does `belief_mass_divergence > τ` catch ICT branching events earlier/cheaper than JS-divergence? → riir-ai Plan 334 T3.1–T3.4 (G-A PASS = ≥1.5× earlier OR ≥2× cheaper on ≥100 events).
+- [-] **T4.4** Wire into `cgsp_runtime/pulse_bridge.rs` as a curiosity signal (divergence > 0 = expanding belief = curiosity). Cross-reference Plan 277 (Temporal Derivative Kernel). → riir-ai Plan 334 T4.1 (gated on G-A passing).
+- [-] **T4.5** Feed to LatCal commitment: the 5 synced scalars should be the boundary flux of a near-zero-divergence field. If `belief_mass_divergence > τ` on the committed slice → flag for `mape_k.rs` self-healing (riir-neuron-db). → riir-ai Plan 334 T4.2 (gated on G-A passing; boolean flag crosses sync, never the `CochainField`).
 
 ---
 
@@ -139,12 +143,16 @@ Promotion to default requires G-B AND G-C passing (T3.5). G-A (riir-ai) feeds ba
 
 ## Validation
 
-- [ ] All 12 Phase-2 unit tests pass (Stokes identities hold by construction).
-- [ ] G-B benchmark: boundary-flux mass ≥3× faster than full-volume on 256×256 map, error < 5%.
-- [ ] G-C benchmark: line-integral-weighted geodesic ≥20% fewer reversals.
-- [ ] G-A (riir-ai, deferred): Fokker-Planck validator catches ICT branching ≥1.5× earlier or ≥2× cheaper.
-- [ ] Zero allocations in the wrapper layer (delegate to DEC scratch buffers).
-- [ ] Files < 2048 lines.
+Reconciled 2026-06-24 against Phase 1–3 completion. The four
+already-discharged gates marked `[x]`; G-C's structural fail and G-A's
+riir-ai deferral carry forward to Phase 4 / Issue 005.
+
+- [x] All 12 Phase-2 unit tests pass (Stokes identities hold by construction) — confirmed T2.4 (96/96 DEC tests, 0 warnings).
+- [x] G-B benchmark: boundary-flux mass ≥3× faster than full-volume on 256×256 map, error < 5% — confirmed 5.36×, 3.78% error (T3.2).
+- [-] G-C benchmark: line-integral-weighted geodesic ≥20% fewer reversals — **STRUCTURAL FAIL** (rank-1 cochain cannot encode turn penalties; see Issue 005 for rank-2 `circulation_integral` fix). Primitive retained as a path-cost function.
+- [-] G-A (riir-ai, deferred): Fokker-Planck validator catches ICT branching ≥1.5× earlier or ≥2× cheaper — deferred to riir-ai Plan 334 (Phase 4).
+- [x] Zero allocations in the wrapper layer (delegate to DEC scratch buffers) — confirmed T1.3 (single `Vec<bool>` region marker, proportional to complex size).
+- [x] Files < 2048 lines — confirmed (~300 LOC + tests, T1.5).
 
 ## Honest Risk Notes
 
