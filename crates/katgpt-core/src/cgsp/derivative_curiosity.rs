@@ -227,12 +227,12 @@ impl<const D: usize> DerivativeCuriosity<D> {
             priorities.len(),
             D
         );
-        // Zero-pad into the fixed-size observation buffer. Positions beyond
-        // priorities.len() stay at zero — they contribute nothing to the
-        // surprise norm because the EMAs never move off zero there.
-        self.pref_buf = [0.0; D];
+        // Zero-pad into the fixed-size observation buffer. Only positions
+        // beyond `n` need zeroing — the prefix is overwritten by the copy,
+        // so we copy first then zero the tail to avoid touching it twice.
         let n = priorities.len().min(D);
         self.pref_buf[..n].copy_from_slice(&priorities[..n]);
+        self.pref_buf[n..D].fill(0.0);
 
         // Observe + score. observe() returns the per-dim derivative; the gate
         // recomputes its L2 norm internally via simd_dot_f32. (We do not use

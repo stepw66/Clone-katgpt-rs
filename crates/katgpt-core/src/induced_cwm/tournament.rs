@@ -546,12 +546,17 @@ where
         // `root_visits.iter().copied().sum::<u32>()` inside the MCTS loop.
         let mut total_root_visits: u32 = 0;
 
-        // Scratch buffers reused across iterations (AGENTS.md hot-loop rules).
+        // Scratch buffers reused across iterations (AGENTS.md hot-loop rules):
+        // hoisted outside the MCTS budget loop to avoid per-iteration
+        // allocation. `depth_actions` is cleared at the top of each iteration
+        // and after every state transition; `path`/`rollout_actions` likewise.
         let mut path: Vec<usize> = Vec::with_capacity(MCTS_ROLLOUT_DEPTH_CAP + 1);
         let mut rollout_actions: Vec<S::Action> = Vec::with_capacity(8);
+        let mut depth_actions: Vec<S::Action> = Vec::with_capacity(8);
 
         for _iter in 0..self.mcts_budget {
             path.clear();
+            depth_actions.clear();
             let mut current = root.clone();
             let mut current_player = player_id;
 
@@ -559,7 +564,6 @@ where
             // an unexplored action or a terminal. We re-collect legal
             // actions at every depth because different states have
             // different action sets.
-            let mut depth_actions: Vec<S::Action> = Vec::with_capacity(8);
             current.available_actions_into(current_player, &mut depth_actions);
             let mut depth = 0usize;
 
@@ -675,31 +679,49 @@ where
     }
 }
 
-/// Pick an action index by UCB1. Unvisited actions get priority (return the
-/// first unvisited one found, breaking ties by random pick among them).
+/// Pick an action index by UCB1. Unvisited actions get priority (return a
+/// uniformly-random unvisited one). Alloc-free: uses a two-pass
+/// count-then-pick over the slice instead of materializing an `unvisited`
+/// `Vec` — this is called once per MCTS iteration in the hot loop.
 #[inline]
 fn pick_ucb1(visits: &[u32], total: &[f32], parent_visits: u32, rng: &mut Rng) -> usize {
-    // Collect unvisited action indices — these get +∞ UCB1.
-    let mut unvisited: Vec<usize> = Vec::with_capacity(visits.len());
-    for (i, &v) in visits.iter().enumerate() {
+    // Count unvisited actions — these get +∞ UCB1.
+    let mut unvisited_count: usize = 0;
+    for &v in visits {
         if v == 0 {
-            unvisited.push(i);
+            unvisited_count += 1;
         }
     }
-    if !unvisited.is_empty() {
+    if unvisited_count > 0 {
         // Pick uniformly at random among unvisited — matches the standard
-        // "first-play" tie-break in UCB1 implementations.
-        return unvisited[rng.usize(0..unvisited.len())];
+        // "first-play" tie-break in UCB1 implementations. Single pass picking
+        // the k-th unvisited index avoids materializing the list.
+        let target = rng.usize(0..unvisited_count);
+        let mut seen = 0;
+        for (i, &v) in visits.iter().enumerate() {
+            if v == 0 {
+                if seen == target {
+                    return i;
+                }
+                seen += 1;
+            }
+        }
+        // Unreachable: unvisited_count > 0 guarantees we return above.
+        return visits.len() - 1;
     }
 
     // All actions visited at least once: pick max UCB1.
+    // Hoist the parent-visit-dependent exploration scale out of the loop —
+    // `ln(parent_visits).sqrt()` is invariant across actions.
+    let explore_scale = UCB1_C * (parent_visits.max(1) as f32).ln().sqrt();
     let mut best_idx = 0usize;
     let mut best_score = f32::NEG_INFINITY;
     for i in 0..visits.len() {
         let v = visits[i];
         debug_assert!(v > 0, "v > 0 in UCB1 branch");
-        let exploit = total[i] / v as f32;
-        let explore = UCB1_C * (parent_visits.max(1) as f32).ln().sqrt() / (v as f32).sqrt();
+        let vf = v as f32;
+        let exploit = total[i] / vf;
+        let explore = explore_scale / vf.sqrt();
         let score = exploit + explore;
         if score > best_score {
             best_score = score;

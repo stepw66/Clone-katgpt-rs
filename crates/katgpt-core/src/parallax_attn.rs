@@ -742,14 +742,13 @@ pub fn tiled_attention_parallax_forward_sink_aware(
             )
         }
         None => {
-            let resolved = crate::data_probe::SinkAwarePolicy::DualPolicy(policy_cfg);
             crate::data_probe::apply_dual_policy_gate_flat(
                 attn_matrix,
                 v,
                 o_temp,
                 n,
                 d,
-                &resolved,
+                policy,
                 gate_scale,
                 classifier,
                 output,

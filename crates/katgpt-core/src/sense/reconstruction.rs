@@ -839,17 +839,22 @@ impl ReconstructionState {
             return [false; 6];
         }
 
-        let max_val = crate::simd::simd_max_f32(&padded);
-
         let mean = total * (1.0 / 6.0);
         let mut selected = [false; 6];
         let mut any_selected = false;
+        // Track the first max index with strict `>` so SIMD and scalar paths
+        // agree on tie-breaking (e.g. all-equal activations: both pick index 0).
+        // Seed from activations[0] (not the SIMD-reduced padded max, which would
+        // incorrectly consider the 2 zero-padding lanes when all activations
+        // are negative).
         let mut max_idx = 0usize;
+        let mut max_val = activations[0];
         for i in 0..6 {
             let above = activations[i] > mean;
             selected[i] = above;
             any_selected |= above;
-            if activations[i] == max_val {
+            if activations[i] > max_val {
+                max_val = activations[i];
                 max_idx = i;
             }
         }

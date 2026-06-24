@@ -28,6 +28,15 @@ pub struct LeafPaths {
 }
 
 impl LeafPaths {
+    /// Create an empty `LeafPaths` with no allocation. Intended for reuse
+    /// via [`Self::clear`] across calls to `expand_bfs_frontier_into`.
+    pub fn new() -> Self {
+        Self {
+            buf: Vec::new(),
+            offsets: Vec::new(),
+        }
+    }
+
     /// Number of leaf paths stored.
     pub fn len(&self) -> usize {
         self.offsets.len().saturating_sub(1)
@@ -238,25 +247,44 @@ impl MuxDdTree {
     ///
     /// For each leaf, reads the logit distribution, determines the effective
     /// width via `detect_width`, validates with the pruner, and expands.
+    ///
+    /// Allocates a fresh [`LeafPaths`] each call. For per-step BFS hot loops
+    /// (e.g. speculative decoding), prefer [`Self::expand_bfs_frontier_into`]
+    /// to reuse the leaf-path buffer across calls.
     pub fn expand_bfs_frontier<F>(&mut self, depth: usize, logits_by_leaf: &[F])
     where
         F: AsRef<[f32]>,
     {
-        let leaves = self.collect_leaf_paths_flat();
+        let mut paths = LeafPaths::new();
+        self.expand_bfs_frontier_into(depth, logits_by_leaf, &mut paths);
+    }
+
+    /// Zero-alloc variant of [`Self::expand_bfs_frontier`]: reuses a
+    /// caller-provided `paths` buffer for leaf collection, eliminating the
+    /// per-call `LeafPaths` allocation in the BFS hot loop.
+    pub fn expand_bfs_frontier_into<F>(
+        &mut self,
+        depth: usize,
+        logits_by_leaf: &[F],
+        paths: &mut LeafPaths,
+    ) where
+        F: AsRef<[f32]>,
+    {
+        self.collect_leaf_paths_flat_into(paths);
         assert_eq!(
-            leaves.len(),
+            paths.len(),
             logits_by_leaf.len(),
             "must provide logits for every leaf"
         );
 
-        for i in 0..leaves.len() {
+        for i in 0..paths.len() {
             let logits = logits_by_leaf[i].as_ref();
             // Extract once — reused for width, validity, and expansion.
             let mut buf = [0.0f32; MAX_TOP_K];
             let peaks = extract_top_k_into(logits, self.k, &mut buf);
             let width = self.detect_width_with_peaks(peaks);
             if width > 0 && self.pruner.is_valid_with_peaks(peaks) {
-                self.expand_node_with_peaks(leaves.path(i), peaks, width);
+                self.expand_node_with_peaks(paths.path(i), peaks, width);
             }
         }
         let _ = depth; // preserved for API compat; pruner ignores depth

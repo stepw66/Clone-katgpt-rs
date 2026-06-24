@@ -34,6 +34,7 @@
 /// The enum is small (≤ 2 bytes) and `Copy`, so it is cheap to pass around
 /// on the stack and does not allocate.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
 pub enum HaltDecision {
     /// Continue looping — gain >= cost × tau and no oscillation detected.
     Continue,
@@ -261,12 +262,8 @@ pub fn step_size(h_curr: &[f32], h_prev: &[f32]) -> f32 {
         h_prev.len(),
         "step_size: hidden-state slices must have equal length"
     );
-    let mut sum_sq = 0.0f32;
-    for (a, b) in h_curr.iter().zip(h_prev.iter()) {
-        let diff = a - b;
-        sum_sq += diff * diff;
-    }
-    sum_sq.sqrt()
+    // SIMD fused distance: Σ(a-b)² in one NEON/AVX2 sweep, then sqrt once.
+    crate::simd::simd_dist_sq(h_curr, h_prev, h_curr.len()).sqrt()
 }
 
 /// Compute angular change `cos θ` between two successive update directions.
@@ -281,6 +278,8 @@ pub fn step_size(h_curr: &[f32], h_prev: &[f32]) -> f32 {
 ///
 /// Zero-allocation. Returns `0.0` (never NaN) when either input has zero
 /// norm, so the oscillation detector never trips on a degenerate step.
+/// The zero-norm guard (`denom > 0.0`) also short-circuits NaN inputs since
+/// NaN comparisons are false — see the `no_nan_in_any_path` test.
 #[inline]
 pub fn angular_change(curr_step: &[f32], prev_step: &[f32]) -> f32 {
     debug_assert_eq!(
@@ -288,14 +287,12 @@ pub fn angular_change(curr_step: &[f32], prev_step: &[f32]) -> f32 {
         prev_step.len(),
         "angular_change: step slices must have equal length"
     );
-    let mut dot = 0.0f32;
-    let mut norm_curr = 0.0f32;
-    let mut norm_prev = 0.0f32;
-    for (a, b) in curr_step.iter().zip(prev_step.iter()) {
-        dot += a * b;
-        norm_curr += a * a;
-        norm_prev += b * b;
-    }
+    // Three SIMD reductions over the (typically d=1024..4096) step vectors.
+    // For hidden-state scale these beat the single scalar pass that LLVM
+    // cannot auto-vectorize (strict-FP `+=` reduction).
+    let dot = crate::simd::simd_dot_f32(curr_step, prev_step, curr_step.len());
+    let norm_curr = crate::simd::simd_sum_sq(curr_step, curr_step.len());
+    let norm_prev = crate::simd::simd_sum_sq(prev_step, prev_step.len());
     let denom = (norm_curr * norm_prev).sqrt();
     if denom > 0.0 { dot / denom } else { 0.0 }
 }
