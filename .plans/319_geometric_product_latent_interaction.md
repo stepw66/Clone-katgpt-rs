@@ -241,7 +241,7 @@ compositions than similarity-driven factions?
 **Promotion actions taken:**
 - `geometric_product` (katgpt-core) — **default-on** (Phase 3).
 - `diverse_retrieval` (riir-neuron-db) — **default-on** (Phase 5 Super-GOAT, functional promotion — gates real `retrieve_diverse` code).
-- `clifford_complementarity` (riir-engine) — **opt-in, symbolic promotion deferred**. This feature is an empty capability marker (zero `#[cfg]` gates; the `clifford_bridge` module compiles unconditionally because katgpt-core is always-on). The symbolic default flip is deferred because `crates/riir-engine/Cargo.toml` has pre-existing uncommitted `karc_runtime` work in the same file — committing both in one commit would conflate two pieces of work. Flip on the next riir-engine Cargo.toml commit.
+- `clifford_complementarity` (riir-engine) — **default-on** (Phase 5 Super-GOAT, symbolic promotion). This feature is an empty capability marker (zero `#[cfg]` gates; the `clifford_bridge` module compiles unconditionally because katgpt-core is always-on). Symbolic flip completed after the `karc_runtime` pre-existing work landed (commit `d87f0caf`); the two changes no longer need to be conflated. All G8 gates the wedge owns now PASS (G8e 3.34ms, G8c 2.934×, G8d 4/4) and G5 post-compaction is RESOLVED at 1.5011× via Issue 001.
 
 **Open follow-up (Issue, not Plan — per AGENTS.md):** ~~`riir-neuron-db/issues/001`~~ — **✅ RESOLVED** (2026-06-25). ShardCompactor multi-query spread-query AM mode implemented; G5 post-compaction gate now PASSES at 1.5011×. Default remains `n_am_queries=1` (no behavior change); diversity-preserving mode is opt-in via `with_n_am_queries(k)`.
 
