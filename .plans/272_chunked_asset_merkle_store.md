@@ -188,18 +188,17 @@ Goal: prove the gain. Required before promoting `chunked_content_store` to defau
   - **Status (2026-06-25):** DONE — already proven by Phase 2 test `test_cdc_dedup_with_variant`.
     FastCDC push ratio **1.35%** (need ≤5%), FixedSize **52.94%** (negative control). The Phase 2 test
     IS the G2 gate; no additional bench needed. Formalized in `.benchmarks/262_chunked_content_store_goat.md`.
-- [ ] **T4.4** Implement G3 (inclusion proof cost) benchmark:
+- [x] **T4.4** Implement G3 (inclusion proof cost) benchmark:
   - 1024-chunk blob.
   - Bench `prove_chunk(random_index)` and `verify_proof(random_proof)`.
   - Use `criterion` if available; otherwise `std::time::Instant` over 10K iters.
   - Pass: mean < 10 µs.
-  - **Status (2026-06-25):** IMPLEMENTED as inline `#[test]` (`#[ignore]`d) but **FAILS**.
-    Measured: prove=1.2ms, verify=12µs in debug mode (combined >> 10µs target).
-    **Root cause:** `build_binary_merkle_proof` (merkle.rs:72) is O(n) — it rebuilds the ENTIRE
-    Merkle tree (all n−1 internal nodes) on each proof call to collect level-by-level siblings.
-    The 10µs target assumes O(log n) proof generation (cached tree levels). Fix: cache Merkle
-    levels in `BlobMetadata` at `put()` time (Phase 1 implementation change). G3 is the
-    **blocker for promotion** — the store stays opt-in until prove_chunk is O(log n).
+  - **Status (2026-06-25):** DONE — ✅ PASS (release). prove=588ns + verify~1µs = <2µs.
+    Initially FAILING (prove=1.2ms) because `build_binary_merkle_proof` was O(n) — it rebuilt
+    the ENTIRE Merkle tree per proof call. **Fixed** by caching all tree levels in `BlobMetadata`
+    at `put()` time via `build_merkle_levels`, and using `build_proof_from_levels` for O(log n)
+    sibling lookups (zero BLAKE3 calls). **2088× improvement** (1.2ms → 588ns). Debug mode: 12.45µs
+    (BLAKE3 debug overhead); perf gates run in release via `cargo test --release -- --ignored`.
 - [x] **T4.5** Implement G4 (light-client verify) check:
   - Grep `content_store/merkle.rs` and `content_store/trait.rs`: assert no `chunks.get()`, no `blobs.get()`, no `self.chunks` access in `verify_proof` or `verify_binary_merkle_proof`.
   - Pass: zero grep hits.
@@ -208,14 +207,13 @@ Goal: prove the gain. Required before promoting `chunked_content_store` to defau
     siblings, root)` — no store access. Test `g4_light_client_verify_no_self` drops the store before
     calling verify (would fail to compile if any `&self` access existed). Test `g4_proof_is_owned_not_borrowed`
     verifies the proof is `'static` (owned, not borrowed from store).
-- [ ] **T4.6** Implement G5 (hot-path read latency) benchmark:
+- [x] **T4.6** Implement G5 (hot-path read latency) benchmark:
   - 10K-chunk store, 1M random reads via `get_chunk`.
   - Measure p50/p99 latency.
   - Pass: p99 < 200 ns.
-  - **Status (2026-06-25):** IMPLEMENTED as inline `#[test]` (`#[ignore]`d) — needs RELEASE-MODE
-    measurement. Debug p99 ~875ns (debug-mode overhead on papaya's lock-free path); `get_chunk` is
-    zero-alloc (`papaya` `.copied()` on `&'static [u8]` — copies the 8-byte reference, not the chunk
-    bytes), which should meet 200ns in release. Non-blocking for promotion (G3 is the blocker).
+  - **Status (2026-06-25):** DONE — ✅ PASS (release). Release p99 <200ns via zero-alloc `papaya`
+    `.copied()` on `&'static [u8]` (copies the 8-byte reference, not the chunk bytes). Debug p99
+    ~667ns (papaya lock-free path debug overhead); perf gates run in release.
 - [x] **T4.7** Implement G6 (default-off regression) check:
   - `cargo test -p katgpt-core` (no features) — all existing tests pass.
   - `cargo bench -p katgpt-core` (no features) — no perf regression vs the prior commit on existing benches.

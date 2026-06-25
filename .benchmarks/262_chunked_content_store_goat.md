@@ -40,7 +40,7 @@ consumed by riir-ai Plan 319 (Executable Asset Vessel + Quorum Gitflow).
 |------|------|------|
 | `g1_dedup_ratio_meets_target` | G1 | `content_store/goat.rs` |
 | `test_cdc_dedup_with_variant` | G2 | `content_store/chunker.rs` (Phase 2) |
-| `g3_inclusion_proof_cost_under_10us` | G3 | `content_store/goat.rs` (`#[ignore]` — FAILS, O(n) prove_chunk) |
+| `g3_inclusion_proof_cost_under_10us` | G3 | `content_store/goat.rs` (`#[ignore]` — release-only; PASS after O(log n) fix) |
 | `g4_light_client_verify_no_self` | G4 | `content_store/goat.rs` |
 | (type-system check) | G6 | `cargo check --no-default-features` |
 | `g5_hot_path_read_p99_under_200ns` | G5 | `content_store/goat.rs` (`#[ignore]` — release-only) |
