@@ -15,6 +15,10 @@ use super::types::{CellComplex, CochainField};
 /// Gaussian falloff sigma for projectile threat propagation.
 const THREAT_SIGMA: f32 = 4.0;
 
+/// Gaussian falloff sigma for POI anchor notability propagation (Plan 335 T1).
+/// Distinct from `THREAT_SIGMA` so the two domains can be tuned independently.
+const INTEREST_SIGMA: f32 = 4.0;
+
 /// Sigmoid: `σ(x) = 1 / (1 + e^x)`.
 ///
 /// Uses `e^x` (not `e^{-x}`), so `sigmoid(danger) = 1/(1 + e^{danger})`
@@ -365,6 +369,104 @@ impl DestructionCochain {
 }
 
 // ---------------------------------------------------------------------------
+// InterestCohain (rank 0, dim 1 — scalar per vertex) — the user's "f" field
+// ---------------------------------------------------------------------------
+
+/// Per-vertex interest/notability field (Plan 335 T1).
+///
+/// Rank-0 cochain: one scalar per vertex. Bridges raw POI anchors
+/// into semantic interest scores via sigmoid projection.
+/// Higher value = more interesting/notable (fame, reward, attention).
+#[repr(transparent)]
+pub struct InterestCohain(CochainField);
+
+impl InterestCohain {
+    /// Create a zero-initialized interest field over the given cell complex.
+    #[inline]
+    pub fn zeros(cx: &CellComplex) -> Self {
+        Self(CochainField::zeros(0, cx.n_vertices(), 1))
+    }
+
+    /// Wrap an existing rank-0 cochain as an interest field.
+    #[inline]
+    pub fn from_cochain(field: CochainField) -> Self {
+        debug_assert_eq!(field.rank, 0, "InterestCohain requires rank 0");
+        debug_assert_eq!(field.dim, 1, "InterestCohain requires dim 1");
+        Self(field)
+    }
+
+    /// Read interest at vertex `vertex_idx`.
+    #[inline]
+    pub fn interest(&self, vertex_idx: usize) -> f32 {
+        self.0.scalar(vertex_idx)
+    }
+
+    /// Write interest at vertex `vertex_idx`.
+    #[inline]
+    pub fn set_interest(&mut self, vertex_idx: usize, val: f32) {
+        self.0.set_scalar(vertex_idx, val);
+    }
+
+    /// Borrow the underlying cochain.
+    #[inline]
+    pub fn as_cochain(&self) -> &CochainField {
+        &self.0
+    }
+
+    /// Consume and return the underlying cochain.
+    #[inline]
+    pub fn into_cochain(self) -> CochainField {
+        self.0
+    }
+
+    /// Number of vertices in this field.
+    #[inline]
+    pub fn n_vertices(&self) -> usize {
+        self.0.n_cells()
+    }
+
+    // --- Bridge functions ---
+
+    /// Raw→semantic bridge: convert POI anchors into vertex interest scores.
+    ///
+    /// For each vertex, accumulate Gaussian-weighted notability from all
+    /// anchors, then project to interest via `sigmoid(-notability)`.
+    ///
+    /// The existing `sigmoid(x) = 1/(1 + e^x)` maps high input → low output,
+    /// so we pass `-notability` to get the correct interest polarity: high
+    /// notability → high interest. With no anchors, notability = 0 everywhere
+    /// and interest = `sigmoid(0) = 0.5` — the same baseline convention as
+    /// `SafetyCochain::from_projectile_threat`.
+    pub fn from_anchors(
+        cx: &CellComplex,
+        grid_w: usize,
+        grid_h: usize,
+        anchors: &[(f32, f32, f32)],
+    ) -> Self {
+        let mut field = CochainField::zeros(0, cx.n_vertices(), 1);
+
+        for vy in 0..grid_h {
+            let vyf = vy as f32;
+            for vx in 0..grid_w {
+                let vxf = vx as f32;
+
+                let mut notability = 0.0f32;
+                for &(ax, ay, notability_level) in anchors {
+                    let dist_sq = (vxf - ax).powi(2) + (vyf - ay).powi(2);
+                    notability += notability_level * (-dist_sq / INTEREST_SIGMA).exp();
+                }
+
+                let vertex_idx = vy * grid_w + vx;
+                // High notability → high interest: invert sigmoid polarity.
+                field.set_scalar(vertex_idx, sigmoid(-notability));
+            }
+        }
+
+        Self(field)
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -541,5 +643,145 @@ mod tests {
         let field = d.into_cochain();
         assert_eq!(field.rank, 0);
         assert!((field.scalar(7) - 0.33).abs() < 1e-6);
+    }
+
+    // -----------------------------------------------------------------------
+    // InterestCohain (Plan 335 T1)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_interest_cochain_zeros() {
+        let cx = CellComplex::grid_2d(4, 4);
+        let f = InterestCohain::zeros(&cx);
+        assert_eq!(f.n_vertices(), 16);
+        for i in 0..16 {
+            assert_eq!(f.interest(i), 0.0);
+        }
+    }
+
+    #[test]
+    fn test_interest_set_get() {
+        let cx = CellComplex::grid_2d(4, 4);
+        let mut f = InterestCohain::zeros(&cx);
+        f.set_interest(5, 0.91);
+        assert!((f.interest(5) - 0.91).abs() < 1e-6);
+        assert_eq!(f.interest(0), 0.0);
+        assert_eq!(f.interest(6), 0.0);
+    }
+
+    #[test]
+    fn test_interest_cochain_rank_zero() {
+        let cx = CellComplex::grid_2d(4, 4);
+        let f = InterestCohain::zeros(&cx);
+        assert_eq!(f.as_cochain().rank, 0);
+    }
+
+    #[test]
+    fn test_interest_cochain_dim_one() {
+        let cx = CellComplex::grid_2d(4, 4);
+        let f = InterestCohain::zeros(&cx);
+        assert_eq!(f.as_cochain().dim, 1);
+    }
+
+    #[test]
+    fn test_from_anchors_no_anchors_returns_baseline() {
+        // No anchors → notability = 0 everywhere → interest = sigmoid(0) = 0.5.
+        // Mirrors `test_safety_from_projectile_threat_no_threats`.
+        let cx = CellComplex::grid_2d(4, 4);
+        let f = InterestCohain::from_anchors(&cx, 4, 4, &[]);
+        for i in 0..16 {
+            assert!(
+                (f.interest(i) - 0.5).abs() < 1e-6,
+                "interest at vertex {i} should be 0.5 (baseline), got {}",
+                f.interest(i)
+            );
+        }
+    }
+
+    #[test]
+    fn test_from_anchors_peaks_at_anchor_positions() {
+        // Single anchor at (5, 5) → interest peaks at vertex (5, 5).
+        //
+        // Note: since notability ≥ 0 everywhere (Gaussian tail is always
+        // non-negative), `-notability ≤ 0`, so `sigmoid(-notability) ≥ 0.5`
+        // at EVERY vertex. The peak is the global max; far vertices sit at the
+        // 0.5 baseline (their notability contribution is ~0).
+        let cx = CellComplex::grid_2d(8, 8);
+        let anchors = [(5.0_f32, 5.0, 3.0)];
+        let f = InterestCohain::from_anchors(&cx, 8, 8, &anchors);
+
+        let peak = f.interest(5 * 8 + 5);
+        let corner = f.interest(0);
+
+        assert!(peak > corner, "peak ({peak}) should be > corner ({corner})");
+        assert!(
+            peak > 0.5,
+            "anchor vertex should be notable (>0.5), got {peak}"
+        );
+        // Far corner sits at the 0.5 baseline (notability contribution ~0).
+        assert!(
+            (corner - 0.5).abs() < 1e-4,
+            "far corner should be ~0.5 baseline, got {corner}"
+        );
+
+        for vy in 0..8 {
+            for vx in 0..8 {
+                let idx = vy * 8 + vx;
+                if idx == 5 * 8 + 5 {
+                    continue;
+                }
+                assert!(
+                    f.interest(idx) <= peak,
+                    "vertex ({vx},{vy}) interest {} exceeded peak {peak}",
+                    f.interest(idx)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_from_anchors_adds_multiple_sources() {
+        // Two anchors: verify contributions sum before sigmoid (closed-form check).
+        let cx = CellComplex::grid_2d(8, 8);
+        let a1 = (0.0_f32, 0.0, 2.0);
+        let a2 = (8.0, 8.0, 2.0);
+        let f = InterestCohain::from_anchors(&cx, 8, 8, &[a1, a2]);
+
+        let vx = 4.0_f32;
+        let vy = 4.0_f32;
+        let d1_sq = (vx - a1.0).powi(2) + (vy - a1.1).powi(2);
+        let d2_sq = (vx - a2.0).powi(2) + (vy - a2.1).powi(2);
+        let expected_notability =
+            a1.2 * (-d1_sq / INTEREST_SIGMA).exp() + a2.2 * (-d2_sq / INTEREST_SIGMA).exp();
+        let expected = sigmoid(-expected_notability);
+
+        let idx = 4 * 8 + 4;
+        assert!((f.interest(idx) - expected).abs() < 1e-6);
+
+        // Adding a second anchor raises interest — but only at a vertex where
+        // the second anchor actually contributes. Vertex (4,4) is equidistant
+        // from both a1=(0,0) and a2=(8,8), so both contribute meaningfully;
+        // compare the dual-anchor interest there against the single-anchor
+        // (a1-only) interest at the same vertex.
+        let f_one = InterestCohain::from_anchors(&cx, 8, 8, &[a1]);
+        let single = f_one.interest(idx);
+        let dual = f.interest(idx);
+        assert!(
+            dual > single,
+            "dual ({dual}) should be > single ({single}) at vertex (4,4)"
+        );
+    }
+
+    #[test]
+    fn test_interest_into_cochain_roundtrip() {
+        let cx = CellComplex::grid_2d(4, 4);
+        let mut f = InterestCohain::zeros(&cx);
+        f.set_interest(3, 0.42);
+        let field = f.into_cochain();
+        assert_eq!(field.rank, 0);
+        assert_eq!(field.dim, 1);
+        assert!((field.scalar(3) - 0.42).abs() < 1e-6);
+        let f2 = InterestCohain::from_cochain(field);
+        assert!((f2.interest(3) - 0.42).abs() < 1e-6);
     }
 }

@@ -140,6 +140,11 @@ depth_invariance = []  # Depth-Invariance Diagnostic + MagnitudeRegularizedResid
 karc_forecaster = []  # KARC — Kolmogorov-Arnold Reservoir Computing delay-basis-ridge forecaster (Plan 308, Research 288, arXiv:2606.19984 Huang/Kurths/Tang). Modelless, inference-time trajectory forecaster: delay-embedding × sealed KarcBasis (Fourier/Chebyshev/BSpline) × closed-form ridge readout. Reuses the PEIRA ridge pattern via the new `linalg::ridge_solve` (f32) without touching PEIRA's f64 path. GOAT-gated G1 (double-scroll NRMSE ≤ 1e-3, ≥ 8 LT), G2 (≤ 500 ns/call forecast), G3 (zero-alloc forecast), G4 (bit-reproducible Wout). Opt-in — Phase 1 only; no root-feature alias yet.
 cross_resolution_transport = ["funcattn"]  # Cross-Resolution Spectral Transport — asymmetric-basis FUNCATTN (Plan 310, Research 291, arXiv:2605.31559). Generalizes FUNCATTN to `d_src ≠ d_dst`, enabling train-on-small-deploy-on-large latent transfer. Implies `funcattn` for solver/C-operator reuse. DEFAULT-ON (Plan 310 Phase 4, 2026-06-23): G1 mean cos 0.8944≥0.85, G2-A rank preservation mean cos 0.9300≥0.85 (Super-GOAT headline claim holds), G3 elbow at k=intrinsic_k=8, G4 0 allocs/1000 transports. Promoted per AGENTS.md rule 'GOAT pass → promote to default'.
 latent_field_steering = []  # Latent Field Steering — top-down direction-vector injection into mutable latent state (Plan 309, Research 290, CAA + functional emotions). Zero-alloc SIMD SAXPY + sigmoid-falloff localized support (radius/zone). DEFAULT-ON (Plan 309 Phase 4, 2026-06-23): G1-G5 all PASS — G1 fear-axis 1.50×≥1.30, G2 mean cos 0.9958≥0.95 min cos 0.9667≥0.90, G3 leakage 4.5e-5<0.01, G4 19.2µs<1ms, G5 0 allocs. Caveat: 8% argmax flip at α=0.3 — keep α≤0.3 for hot-path.
+# Plan 335 Phase 1 — InterestCohain (fame/notability cochain). Default-off
+# until Phase 6 GOAT gate passes; will be promoted to default in Phase 7.
+# The type ships unconditionally (no cfg gate) so downstream (riir-neuron-db
+# Phase 0) can reference it; the flag exists for promotion tracking only.
+interest_cochain = []
 
 [[bench]]
 name = "flow_field_bench"
@@ -342,3 +347,15 @@ required-features = ["geometric_product"]
 [[example]]
 name = "subspace_phase_gate_goat"
 required-features = ["subspace_phase_gate"]
+
+# Plan 308 — KARC zero-alloc (G3) and reproducibility (G4) GOAT gates. These
+# integration tests import KarcForecaster / FourierBasis / ChebyshevBasis /
+# KarcBasis, which only exist under `karc_forecaster`. Gate them so default
+# features compile cleanly (the symbols are not re-exported without the feature).
+[[test]]
+name = "karc_alloc_check"
+required-features = ["karc_forecaster"]
+
+[[test]]
+name = "karc_reproducibility"
+required-features = ["karc_forecaster"]
