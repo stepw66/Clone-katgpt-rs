@@ -145,6 +145,13 @@ latent_field_steering = []  # Latent Field Steering — top-down direction-vecto
 # The type ships unconditionally (no cfg gate) so downstream (riir-neuron-db
 # Phase 0) can reference it; the flag exists for promotion tracking only.
 interest_cochain = []
+# Plan 335 Phase 5 — SIMD lattice-edge utility op (leaf-clean raw-slice API).
+# The module ships inside the `dec` module and is thus compiled whenever
+# `dec_operators` is on. This alias implies `dec_operators` and exists purely
+# for GOAT-gate promotion tracking (Phase 6/7). Default-off until the GOAT
+# gate passes; the raw-slice signature keeps katgpt-core leaf-clean (no
+# dependency on riir-ai types like `ValidatedZoneView` / `HlaState`).
+lattice_utility = ["dec_operators"]
 
 [[bench]]
 name = "flow_field_bench"

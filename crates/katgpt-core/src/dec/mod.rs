@@ -37,6 +37,7 @@ pub mod backend;
 pub mod cache;
 pub mod flow;
 pub mod hodge;
+pub mod lattice_utility;
 pub mod operators;
 pub mod stokes_calculus;
 pub mod terrain_cochains;
@@ -49,6 +50,7 @@ pub use hodge::{
     HodgeComponents, betti_numbers, dec_relevance_score, harmonic_projector, hodge_decompose,
     hodge_energy, hodge_residual, hodge_spectrum,
 };
+pub use lattice_utility::{HlaToCohainWeights, lattice_edge_utility_into};
 pub use operators::{
     codifferential, exterior_derivative, graph_laplacian, hodge_laplacian, hodge_star,
 };
