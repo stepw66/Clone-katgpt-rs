@@ -45,6 +45,9 @@ pub mod merkle;
 pub mod r#trait;
 pub mod types;
 
+#[cfg(test)]
+mod goat;
+
 pub use chunker::{
     ChunkerConfig, DEFAULT_CHUNK_SIZE, FASTCDC_MAX_CHUNK_SIZE, FASTCDC_MAX_LEVEL,
     FASTCDC_MIN_CHUNK_SIZE, FASTCDC_MIN_LEVEL, FASTCDC_NORMAL_LEVEL, FastCdcChunker,
