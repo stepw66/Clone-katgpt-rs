@@ -79,7 +79,7 @@ Wire the open primitive into `ShardCompactor` as an alternative cold-tier archiv
   - Bind provenance via `compute_cycle_root` (shared `pub(crate)` helper from `shard_compactor.rs`)
 - [x] **T2.5** Add `TuckerCompaction::reconstruct_into(&self, out: &mut Vec<NeuronShard>)` + `reconstruct_into_with_scratch` (zero-alloc hot-path variant). Requires supporting `TuckerResultScratch::from_owned` constructor added to katgpt-core (the Cold-tier reload path: owned → scratch → `tucker_reconstruct_into`).
 - [x] **T2.6** Tests: round-trip preserves HLA exactly, provenance root deterministic, distinct inputs → distinct roots, full-rank near-lossless, zone_hashes derived from cycle_root, scratch vs no-scratch path equivalence, semantic-axis cosine gate (T2.G1), zero-alloc path equivalence + cross-envelope validation (T2.G4) (24 tests written, all PASS).
-- [ ] **T2.7** Comparison bench: AM compaction vs Tucker compaction on N ∈ {16} — Tucker wins at shallow AM ratios (≥0.5), AM wins at deep ratios (0.1). Cross-over documented in test `tucker_envelope_is_smaller_than_am_at_n_16`. Bench deferred (system-level dyld/trustd binary-launch blocker prevents Criterion bench from running).
+- [x] **T2.7** Comparison bench: AM compaction vs Tucker compaction on N ∈ {4, 8, 16} — **DONE**: `benches/bench_326_tucker_vs_am_crossover.rs` (`harness = false`, no Criterion dep). Results in `.benchmarks/326_tucker_vs_am_crossover.md`. **Key finding:** Tucker only beats AM on raw storage at ONE cell (N=16 vs shallow-AM 0.5: 448f vs 512f); AM-deep (0.1) always wins on floats (128f). AM is ~10× faster on compaction (4–18µs vs 39–208µs). Tucker's actual value is **near-lossless full-batch factorization** (rel-Frob ~1e-6) vs AM's lossy M-representative reduction (~1.0) — i.e. fidelity + one-envelope format, NOT raw compression. This is why the feature stays opt-in (see T2.P).
 
 ### Phase 2 GOAT gate
 
@@ -90,7 +90,7 @@ Wire the open primitive into `ShardCompactor` as an alternative cold-tier archiv
 
 ### Phase 2 promotion
 
-- [x] **T2.P** Keep `tucker_factorization` opt-in in riir-neuron-db. All four GOAT gates now pass (G1 semantic-axis cosine, G2 storage compression, G3 full-rank lossless, G4 zero-alloc reconstruct). The integration stays opt-in because it is a new cold-tier code path that needs soak time, and T2.7 (Criterion comparison bench) remains deferred (the AM-vs-Tucker crossover is already pinned by the `tucker_envelope_is_smaller_than_am_at_n_16` unit test; a Criterion bench would add perf-vs-quality curves but no new correctness signal).
+- [x] **T2.P** Keep `tucker_factorization` opt-in in riir-neuron-db. All four GOAT gates pass (G1–G4) **but the T2.7 bench shows Tucker is NOT a default-on storage win**: AM-deep (0.1) beats it on raw floats at every N ≤ 16, and AM is ~10× faster on compaction. Tucker's value is near-lossless full-batch factorization (rel-Frob ~1e-6) — a fidelity option for Cold-tier archival, not a compression win. Stays opt-in until a consumer validates that fidelity-preserving archival is worth the extra latency + transitive `katgpt-rs` dep (see T2.7 bench record).
 
 ---
 
