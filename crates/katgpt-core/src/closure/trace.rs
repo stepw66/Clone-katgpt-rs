@@ -46,8 +46,8 @@ pub const DEFAULT_TRACE_CAPACITY: usize = 16;
 /// use katgpt_core::closure::{OperatorKind, PrimitiveKind, PtgRecorder};
 ///
 /// let mut rec = PtgRecorder::new(0);
-/// let a = rec.enter(PrimitiveKind::UserDefined(0), 0, [0u8; 32]);
-/// let b = rec.enter(PrimitiveKind::UserDefined(1), 1, [1u8; 32]);
+/// let a = rec.enter(PrimitiveKind::UserDefined(0), 0, None);
+/// let b = rec.enter(PrimitiveKind::UserDefined(1), 1, Some([1u8; 32]));
 /// rec.exit(a, b, OperatorKind::Sequence);
 /// let ptg = rec.finish();
 /// assert_eq!(ptg.nodes.len(), 2);
@@ -74,16 +74,22 @@ impl PtgRecorder {
         }
     }
 
-    /// Push a node for `primitive` invoked at `tick` with input commitment
-    /// `blake3_in`. Returns its node id (== its index in the final `nodes`).
+    /// Push a node for `primitive` invoked at `tick` with optional input
+    /// commitment `blake3_in`. Returns its node id (== its index in the final `nodes`).
     ///
     /// The first node entered becomes the root of the resulting PTG.
+    ///
+    /// Pass `None` for `blake3_in` when no per-node audit commitment is
+    /// available (the common production case — e.g. `PtgTracedPruner::trace`
+    /// cannot inspect the inner pruner's input state). Pass `Some(hash)`
+    /// when tamper-evidence at this node is required; the hash crosses the
+    /// sync boundary as a raw 32-byte commitment.
     #[inline]
     pub fn enter(
         &mut self,
         primitive: PrimitiveKind,
         tick: u32,
-        blake3_in: [u8; 32],
+        blake3_in: Option<[u8; 32]>,
     ) -> NodeId {
         let id = self.nodes.len() as NodeId;
         self.nodes.push(PtgNode {
@@ -136,8 +142,8 @@ mod tests {
     fn recorder_is_deterministic() {
         fn build() -> PrimitiveTransitionGraph {
             let mut rec = PtgRecorder::new(7);
-            let a = rec.enter(PrimitiveKind::UserDefined(0), 10, [1u8; 32]);
-            let b = rec.enter(PrimitiveKind::UserDefined(1), 11, [2u8; 32]);
+            let a = rec.enter(PrimitiveKind::UserDefined(0), 10, Some([1u8; 32]));
+            let b = rec.enter(PrimitiveKind::UserDefined(1), 11, None);
             rec.exit(a, b, OperatorKind::Sequence);
             rec.finish()
         }
@@ -163,7 +169,7 @@ mod tests {
     #[test]
     fn single_node_ptg() {
         let mut rec = PtgRecorder::new(1);
-        let id = rec.enter(PrimitiveKind::UserDefined(42), 100, [9u8; 32]);
+        let id = rec.enter(PrimitiveKind::UserDefined(42), 100, Some([9u8; 32]));
         let ptg = rec.finish();
         assert_eq!(ptg.nodes.len(), 1);
         assert_eq!(ptg.edges.len(), 0);
@@ -171,13 +177,16 @@ mod tests {
         assert_eq!(id, 0);
         assert_eq!(ptg.nodes[0].primitive, PrimitiveKind::UserDefined(42));
         assert_eq!(ptg.nodes[0].tick, 100);
+        assert_eq!(ptg.nodes[0].blake3_in, Some([9u8; 32]));
     }
 
     #[test]
     fn id_equals_index_invariant() {
         let mut rec = PtgRecorder::new(0);
         for i in 0..10u32 {
-            let id = rec.enter(PrimitiveKind::UserDefined(i), i, [i as u8; 32]);
+            // Alternate Some/None to exercise both paths.
+            let blake = if i % 2 == 0 { Some([i as u8; 32]) } else { None };
+            let id = rec.enter(PrimitiveKind::UserDefined(i), i, blake);
             assert_eq!(id, i, "id must equal index");
         }
         let ptg = rec.finish();
@@ -194,10 +203,10 @@ mod tests {
         let mut rec = PtgRecorder::new(5);
         // Build: A --Seq--> B --Branch--> C --ParJoin--> D
         // plus  D --Recurse--> A  (back-edge to root).
-        let a = rec.enter(PrimitiveKind::UserDefined(0), 0, [0u8; 32]);
-        let b = rec.enter(PrimitiveKind::UserDefined(1), 1, [1u8; 32]);
-        let c = rec.enter(PrimitiveKind::UserDefined(2), 2, [2u8; 32]);
-        let d = rec.enter(PrimitiveKind::UserDefined(3), 3, [3u8; 32]);
+        let a = rec.enter(PrimitiveKind::UserDefined(0), 0, None);
+        let b = rec.enter(PrimitiveKind::UserDefined(1), 1, Some([1u8; 32]));
+        let c = rec.enter(PrimitiveKind::UserDefined(2), 2, None);
+        let d = rec.enter(PrimitiveKind::UserDefined(3), 3, Some([3u8; 32]));
         rec.exit(a, b, OperatorKind::Sequence);
         rec.exit(b, c, OperatorKind::Branch);
         rec.exit(c, d, OperatorKind::ParallelJoin);
@@ -213,6 +222,9 @@ mod tests {
         assert_eq!(ptg.edges[1].op, OperatorKind::Branch);
         assert_eq!(ptg.edges[2].op, OperatorKind::ParallelJoin);
         assert_eq!(ptg.edges[3].op, OperatorKind::Recurse);
+        // Option<blake3> round-trips for both variants.
+        assert_eq!(ptg.nodes[0].blake3_in, None);
+        assert_eq!(ptg.nodes[1].blake3_in, Some([1u8; 32]));
     }
 
     /// Capacity hint avoids per-call allocation in the common case.

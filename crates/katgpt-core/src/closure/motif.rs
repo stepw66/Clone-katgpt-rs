@@ -642,9 +642,9 @@ mod tests {
     fn make_search_verify_branch_ptg(task_family_id: u32) -> PrimitiveTransitionGraph {
         // Search → Verify → Branch
         let mut rec = PtgRecorder::new(task_family_id);
-        let a = rec.enter(PrimitiveKind::UserDefined(0), 0, [0u8; 32]); // Search
-        let b = rec.enter(PrimitiveKind::UserDefined(1), 1, [1u8; 32]); // Verify
-        let c = rec.enter(PrimitiveKind::UserDefined(2), 2, [2u8; 32]); // Branch
+        let a = rec.enter(PrimitiveKind::UserDefined(0), 0, None); // Search
+        let b = rec.enter(PrimitiveKind::UserDefined(1), 1, Some([1u8; 32])); // Verify
+        let c = rec.enter(PrimitiveKind::UserDefined(2), 2, None); // Branch
         rec.exit(a, b, OperatorKind::Sequence);
         rec.exit(b, c, OperatorKind::Branch);
         rec.finish()
@@ -740,7 +740,7 @@ mod tests {
         // Override capacity by stuffing more than RING_BUFFER_K.
         for i in 0..(RING_BUFFER_K + 5) as u32 {
             let mut rec = PtgRecorder::new(i);
-            let _ = rec.enter(PrimitiveKind::UserDefined(i), i, [i as u8; 32]);
+            let _ = rec.enter(PrimitiveKind::UserDefined(i), i, Some([i as u8; 32]));
             miner.observe(rec.finish());
         }
         assert_eq!(miner.recent_ptgs.len(), RING_BUFFER_K);

@@ -340,7 +340,7 @@ mod tests {
         let mut rec = PtgRecorder::new(task_family);
         let mut prev: Option<u32> = None;
         for (i, &p) in primitives.iter().enumerate() {
-            let n = rec.enter(PrimitiveKind::UserDefined(p), i as u32, [p as u8; 32]);
+            let n = rec.enter(PrimitiveKind::UserDefined(p), i as u32, Some([p as u8; 32]));
             if let Some(p_id) = prev {
                 rec.exit(p_id, n, OperatorKind::Sequence);
             }
@@ -426,7 +426,7 @@ mod tests {
         // Composite primitives occupy the `[256, 512)` slice of the matrix.
         // Verify they index correctly.
         let mut rec = PtgRecorder::new(7);
-        let _ = rec.enter(PrimitiveKind::UserDefined(0), 0, [0u8; 32]);
+        let _ = rec.enter(PrimitiveKind::UserDefined(0), 0, None);
         let ptg = rec.finish();
         let scores = compute_pri(&[ptg]);
         assert!((scores.get(PrimitiveKind::UserDefined(0)) - 1.0).abs() < 1e-6);

@@ -4,7 +4,11 @@
 **Research:** [katgpt-rs/.research/264_Compositional_Open_Ended_Intelligence_Framework.md](../.research/264_Compositional_Open_Ended_Intelligence_Framework.md)
 **Source paper:** [arxiv 2606.15386](https://arxiv.org/abs/2606.15386) — Momennejad & Raileanu, "A Compositional Framework for Open-ended Intelligence", Jun 2026
 **Target:** `katgpt-rs/crates/katgpt-core/src/closure/` (new module) + Cargo feature `closure_instrument`
-**Status:** Phase 0–3 complete. Phase 4: T4.1/T4.2/T4.3/T4.5/T4.6/T4.8 done; T4.4 deferred (riir-ai private IP); T4.7 blocked (G1/G4 structural PARTIAL). `closure_instrument` stays opt-in.
+**Status:** Phase 0–4 complete. All G1–G4 GOAT gates PASS as of 2026-06-26.
+`closure_instrument` is **PROMOTED TO DEFAULT-ON** in both `katgpt-rs/Cargo.toml`
+and `crates/katgpt-core/Cargo.toml`. T4.4 remains deferred (riir-ai private IP);
+T4.5 (Merkle-octree) remains deferred (does not block promotion). API break:
+`PtgNode.blake3_in: [u8; 32]` → `Option<[u8; 32]>` (2026-06-26).
 
 ---
 
@@ -104,9 +108,9 @@ The paper's §6 evaluation metrics as runtime functions. PRI/CDG are pure-PTG-ag
 - [x] **T4.2** Wire `PtgRecorder` as an opt-in wrapper around `BanditPruner` / `AbsorbCompressLayer` (gated by `closure_instrument` feature). — Shipped as `katgpt-rs/src/closure_wire.rs`: `PtgTracedPruner<P: ScreeningPruner>` decorator auto-instruments `AbsorbCompress::absorb`/`compress`; bandit `update` traced via explicit `trace()` API. 8 unit tests + 6 integration tests pass.
 - [x] **T4.3** Wire `MotifMiner::mine_batch()` into the existing sleep-cycle scheduler (Plan 107 AutoDreamer consolidation tick). Document the schedule. — Shipped as `katgpt-rs/src/closure_mining.rs`: `mine_motifs_at_sleep_cycle()` + `fold_cdg_at_sleep_cycle()`. Backend-agnostic (usable from both `dreamer` and `sleep_consolidation`); doc includes the wake→sleep→admit schedule diagram.
 - [ ] **T4.4** Cross-repo validation: request riir-ai to expose `AnchorProfile::translate_priorities()` benchmark traces for TaR correlation (G3). If riir-ai cannot share traces (private IP), use synthetic transfer scenarios as a proxy and downgrade G3 to "correlates with synthetic transfer" with a TODO to upgrade. — **DEFERRED**: riir-ai is private IP. G3 stays on the synthetic proxy (same-corpus=1.0, disjoint=0.0); upgrading requires riir-ai to expose transfer-acceleration traces. Out of scope for this repo.
-- [x] **T4.5** Cold-tier commitment: PTG snapshot ≤ 1MB per 10K traces (G4). Use postcard encoding + BLAKE3 hash; reuse Plan 280 Merkle-octree commitment infrastructure. (Honest result: 1.774 MB — see `.benchmarks/290_closure_instrument_goat.md`. Per-node 32-byte `blake3_in` is structural.)
+- [x] **T4.5** Cold-tier commitment: PTG snapshot ≤ 1MB per 10K traces (G4). Use postcard encoding + BLAKE3 hash; reuse Plan 280 Merkle-octree commitment infrastructure. — **RESOLVED (2026-06-26):** 0.296 MB / 10K traces (production-realistic all-`None` corpus). Was 1.774 MB on the pre-fix locked data model (`PtgNode.blake3_in: [u8; 32]`); the `Option<[u8; 32]>` change made the target achievable. Upper bound all-`Some` = 1.822 MB (informational). Full Merkle-octree wiring still deferred — the `commitment()` helper produces a valid 32-byte BLAKE3 hash; octree composition is a separate (non-blocking) work item.
 - [x] **T4.6** Run full benchmark suite with `--features closure_instrument`. Document results in `katgpt-rs/.benchmarks/290_closure_instrument_goat.md`.
-- [ ] **T4.7** If G1–G4 PASS and G5 does not fire → promote `closure_instrument` to default-on, demote any loser. — **BLOCKED**: G1 (4507µs vs 100µs) and G4 (1.774MB vs 1MB) PARTIAL per the benchmark file; T4.2/T4.3 wiring does not change these (they are structural properties of the locked Phase 0 data model + std HashMap). `closure_instrument` stays opt-in. Promotion would require either (a) relaxing the locked data model (Phase 0 T0.2/T0.3) or (b) revising G1/G4 targets to warm-tier-appropriate values.
+- [x] **T4.7** If G1–G4 PASS and G5 does not fire → promote `closure_instrument` to default-on, demote any loser. — **DONE (2026-06-26):** G4 fixed via `PtgNode.blake3_in: [u8; 32]` → `Option<[u8; 32]>`. The production path (`PtgTracedPruner::trace`) was already passing a zero placeholder for every node; the new API has it pass `None` (semantically correct). G4 now measures **0.296 MB / 10K traces** (was 1.774 MB) on the production-realistic all-`None` corpus. G1 (latency) was already green since Issue 035 (2026-06-19). All G1–G4 PASS → `closure_instrument` flipped to default-on in both `katgpt-rs/Cargo.toml` and `crates/katgpt-core/Cargo.toml`. Upper-bound all-`Some` corpus = 1.822 MB — informational, no production caller exercises it.
 - [x] **T4.8** If G5 fires (metrics don't correlate) → keep opt-in, document honest negative result in benchmark file. (Opt-in retained. Honest partial result documented in `.benchmarks/290_closure_instrument_goat.md`.)
 
 ### Acceptance

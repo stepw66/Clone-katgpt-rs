@@ -192,9 +192,9 @@ mod tests {
     fn seed_search_verify_branch(miner: &mut MotifMiner, family: u32, count: usize) {
         for _ in 0..count {
             let mut rec = PtgRecorder::new(family);
-            let a = rec.enter(PrimitiveKind::UserDefined(0), 0, [0u8; 32]);
-            let b = rec.enter(PrimitiveKind::UserDefined(1), 1, [1u8; 32]);
-            let c = rec.enter(PrimitiveKind::UserDefined(2), 2, [2u8; 32]);
+            let a = rec.enter(PrimitiveKind::UserDefined(0), 0, None);
+            let b = rec.enter(PrimitiveKind::UserDefined(1), 1, Some([1u8; 32]));
+            let c = rec.enter(PrimitiveKind::UserDefined(2), 2, None);
             rec.exit(a, b, OperatorKind::Sequence);
             rec.exit(b, c, OperatorKind::Branch);
             miner.observe(rec.finish());
@@ -234,7 +234,7 @@ mod tests {
         // denominator grows but the seed motif stays in 1 family.
         for family in 1..10u32 {
             let mut rec = PtgRecorder::new(family);
-            let _ = rec.enter(PrimitiveKind::UserDefined(100), 0, [0u8; 32]);
+            let _ = rec.enter(PrimitiveKind::UserDefined(100), 0, None);
             miner.observe(rec.finish());
         }
         let report = mine_motifs_at_sleep_cycle(&miner, &MotifAdmitter::new(), 10_000.0);
@@ -270,7 +270,7 @@ mod tests {
         for depth in [3u32, 5, 7] {
             let mut rec = PtgRecorder::new(0);
             for i in 0..depth {
-                let _ = rec.enter(PrimitiveKind::UserDefined(0), i, [i as u8; 32]);
+                let _ = rec.enter(PrimitiveKind::UserDefined(0), i, None);
             }
             miner.observe(rec.finish());
         }

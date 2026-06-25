@@ -50,6 +50,13 @@ fn xorshift32(state: &mut u32) -> u32 {
 
 /// Build a synthetic PTG with `n_nodes` nodes, ~`n_nodes - 1` sequence edges,
 /// the given `task_family_id`, and a small mix of primitive kinds.
+///
+/// All nodes are entered with `blake3_in = None` — this mirrors the
+/// production reality via `PtgTracedPruner::trace`, which has no insight
+/// into the inner pruner's input state and therefore attaches no per-node
+/// commitment. (Plan 290 G4 fix, 2026-06-26.) The G4 size gate measures the
+/// production-realistic corpus; a separate upper-bound measurement for the
+/// all-`Some` case lives in `g4_snapshot_upper_bound_all_committed`.
 fn synth_ptg(n_nodes: usize, task_family_id: u32, seed: u32) -> PrimitiveTransitionGraph {
     let mut rec = PtgRecorder::new(task_family_id);
     let mut state = seed.wrapping_mul(0x9e3779b9).wrapping_add(1);
@@ -70,17 +77,57 @@ fn synth_ptg(n_nodes: usize, task_family_id: u32, seed: u32) -> PrimitiveTransit
     let mut prev_id = rec.enter(
         primitives[(xorshift32(&mut state) as usize) % primitives.len()],
         0,
-        [0u8; 32],
+        None,
     );
 
     for i in 1..n_nodes {
         let prim = primitives[(xorshift32(&mut state) as usize) % primitives.len()];
-        let mut blake = [0u8; 32];
-        // Cheap pseudo-fill — just needs to be deterministic and varied.
+        let new_id = rec.enter(prim, i as u32, None);
+        let op = ops[(xorshift32(&mut state) as usize) % ops.len()];
+        rec.exit(prev_id, new_id, op);
+        prev_id = new_id;
+    }
+
+    rec.finish()
+}
+
+/// Like [`synth_ptg`] but every node carries a `Some(hash)` audit commitment.
+/// Used by `g4_snapshot_upper_bound_all_committed` to measure the worst-case
+/// (full-tamper-evidence) snapshot size — the upper bound that holds even if
+/// a future caller attaches real commitments to every node.
+fn synth_ptg_all_committed(
+    n_nodes: usize,
+    task_family_id: u32,
+    seed: u32,
+) -> PrimitiveTransitionGraph {
+    let mut rec = PtgRecorder::new(task_family_id);
+    let mut state = seed.wrapping_mul(0x9e3779b9).wrapping_add(1);
+    let primitives = [
+        PrimitiveKind::UserDefined(0),
+        PrimitiveKind::UserDefined(1),
+        PrimitiveKind::UserDefined(2),
+        PrimitiveKind::UserDefined(3),
+    ];
+    let ops = [
+        OperatorKind::Sequence,
+        OperatorKind::Branch,
+        OperatorKind::Recurse,
+        OperatorKind::ParallelJoin,
+    ];
+
+    let mut blake = [0u8; 32];
+    let mut prev_id = rec.enter(
+        primitives[(xorshift32(&mut state) as usize) % primitives.len()],
+        0,
+        Some(blake),
+    );
+
+    for i in 1..n_nodes {
+        let prim = primitives[(xorshift32(&mut state) as usize) % primitives.len()];
         for b in &mut blake {
             *b = (xorshift32(&mut state) & 0xff) as u8;
         }
-        let new_id = rec.enter(prim, i as u32, blake);
+        let new_id = rec.enter(prim, i as u32, Some(blake));
         let op = ops[(xorshift32(&mut state) as usize) % ops.len()];
         rec.exit(prev_id, new_id, op);
         prev_id = new_id;
@@ -93,9 +140,9 @@ fn synth_ptg(n_nodes: usize, task_family_id: u32, seed: u32) -> PrimitiveTransit
 /// (canonical form), used to seed miners and to find the motif hash.
 fn search_verify_branch_motif(task_family_id: u32) -> PrimitiveTransitionGraph {
     let mut rec = PtgRecorder::new(task_family_id);
-    let root = rec.enter(PrimitiveKind::UserDefined(10), 0, [0u8; 32]);
-    let verify = rec.enter(PrimitiveKind::UserDefined(11), 1, [1u8; 32]);
-    let branch = rec.enter(PrimitiveKind::UserDefined(12), 2, [2u8; 32]);
+    let root = rec.enter(PrimitiveKind::UserDefined(10), 0, None);
+    let verify = rec.enter(PrimitiveKind::UserDefined(11), 1, Some([1u8; 32]));
+    let branch = rec.enter(PrimitiveKind::UserDefined(12), 2, None);
     rec.exit(root, verify, OperatorKind::Sequence);
     rec.exit(verify, branch, OperatorKind::Branch);
     rec.finish()
@@ -228,8 +275,8 @@ fn g3_tar_synthetic_proxy_monotone_with_overlap() {
     // (which uses ids 10/11/12).
     let perturbed_none: Vec<PrimitiveTransitionGraph> = (0..50).map(|i| {
         let mut rec = PtgRecorder::new(i + 200);
-        let a = rec.enter(PrimitiveKind::UserDefined(100), 0, [0u8; 32]);
-        let b = rec.enter(PrimitiveKind::UserDefined(101), 1, [1u8; 32]);
+        let a = rec.enter(PrimitiveKind::UserDefined(100), 0, None);
+        let b = rec.enter(PrimitiveKind::UserDefined(101), 1, None);
         rec.exit(a, b, OperatorKind::ParallelJoin);
         rec.finish()
     }).collect();
@@ -267,11 +314,12 @@ fn g3_tar_synthetic_proxy_monotone_with_overlap() {
 fn g4_snapshot_10k_traces_reported_against_1mb_target() {
     // 10K traces, ~5 nodes each. The Plan 290 G4 target is "< 1MB per 10K traces".
     //
-    // NOTE: the locked Phase 0 data model includes a 32-byte `blake3_in` per
-    // `PtgNode`. For 10K traces × 5 nodes that's 1.6MB just for the blake3
-    // fields — the < 1MB target is structurally incompatible with the locked
-    // data model unless `blake3_in` is made optional or per-trace rather than
-    // per-node. The benchmark doc records this honestly.
+    // As of the Plan 290 G4 fix (2026-06-26), `PtgNode.blake3_in` is
+    // `Option<[u8; 32]>`. This corpus mirrors the production reality via
+    // `PtgTracedPruner::trace` — all nodes carry `None` (no per-node audit
+    // commitment, because the wrapper has no insight into the inner pruner's
+    // input state). The all-`Some` upper bound is measured separately in
+    // `g4_snapshot_upper_bound_all_committed`.
     let corpus: Vec<PrimitiveTransitionGraph> = (0..10_000)
         .map(|i| synth_ptg(5, (i % 10) as u32, i as u32 + 1))
         .collect();
@@ -280,16 +328,18 @@ fn g4_snapshot_10k_traces_reported_against_1mb_target() {
     let bytes = postcard::to_allocvec(&corpus).expect("postcard serialize 10K traces");
     let size_mb = bytes.len() as f64 / (1024.0 * 1024.0);
 
-    println!("G4: 10K-trace snapshot = {:.3} MB ({} bytes)", size_mb, bytes.len());
+    println!("G4: 10K-trace snapshot (production-realistic, all None) = {:.3} MB ({} bytes)",
+             size_mb, bytes.len());
 
-    // Hard regression guard: snapshot must stay under 5MB (catches accidental
-    // bloat from new fields). The canonical 1MB target is documented as
-    // structurally blocked by the locked data model — see benchmark doc.
+    // Canonical G4 target: < 1MB. With `blake3_in: Option<[u8; 32]>` and the
+    // production-realistic all-`None` corpus, postcard encoding packs each
+    // node to ~3 bytes (1B None tag + 1B prim varint + 1B tick varint).
     assert!(
-        size_mb < 5.0,
-        "G4 CATASTROPHIC REGRESSION: 10K-trace snapshot = {:.3} MB (> 5MB guard)",
+        size_mb < 1.0,
+        "G4 FAIL: 10K-trace snapshot = {:.3} MB (>= 1MB canonical target)",
         size_mb,
     );
+    println!("✅ G4 PASSED: 10K-trace snapshot < 1 MB canonical target");
 
     // Round-trip spot check (subset — full round trip would be slow).
     let first_bytes = serialize_postcard(&corpus[0]).expect("serialize first ptg");
@@ -299,16 +349,28 @@ fn g4_snapshot_10k_traces_reported_against_1mb_target() {
     // BLAKE3 commitment smoke test.
     let hash = commitment(&corpus[0]);
     assert!(hash.iter().any(|&b| b != 0), "commitment produced all-zero hash");
+    println!("   Round-trip + commitment OK.");
+}
 
-    if size_mb < 1.0 {
-        println!("✅ G4 PASSED: 10K-trace snapshot < 1 MB canonical target");
-    } else {
-        println!(
-            "⚠️  G4 PARTIAL: 10K-trace snapshot {:.3} MB exceeds 1MB canonical target — locked data model has 32B blake3 per node (see benchmark doc)",
-            size_mb,
-        );
-    }
-    println!("   Round-trip + commitment OK regardless of size gate.");
+/// Upper-bound snapshot size when every node carries a real `Some(hash)`
+/// audit commitment. This is the worst case — no production caller currently
+/// does this (the wrapper passes `None`), but the measurement documents what
+/// a full-tamper-evidence deployment would cost. NOT asserted against the 1MB
+/// target; reported for transparency.
+#[test]
+fn g4_snapshot_upper_bound_all_committed() {
+    let corpus: Vec<PrimitiveTransitionGraph> = (0..10_000)
+        .map(|i| synth_ptg_all_committed(5, (i % 10) as u32, i as u32 + 1))
+        .collect();
+    let bytes = postcard::to_allocvec(&corpus).expect("postcard serialize 10K traces");
+    let size_mb = bytes.len() as f64 / (1024.0 * 1024.0);
+    println!("G4 upper bound: 10K-trace snapshot (all Some) = {:.3} MB — informational, NOT asserted", size_mb);
+    // Guard against accidental bloat beyond the pre-fix baseline (~1.77MB).
+    assert!(
+        size_mb < 2.5,
+        "G4 upper bound regressed past pre-fix baseline: {:.3} MB",
+        size_mb,
+    );
 }
 
 // ─── G1 supplementary: per-PTG commitment determinism ─────────────────────

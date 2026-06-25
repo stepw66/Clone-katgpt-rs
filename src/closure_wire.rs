@@ -158,7 +158,7 @@ impl<P: ScreeningPruner> PtgTracedPruner<P> {
     }
 
     /// Emit a node for `primitive` with a deterministic per-episode tick
-    /// and a zeroed input commitment hash.
+    /// and no input commitment hash.
     ///
     /// The first call in an episode becomes the PTG root. Subsequent calls
     /// are linked to the previous node with `op`. Returns the new node id
@@ -166,16 +166,19 @@ impl<P: ScreeningPruner> PtgTracedPruner<P> {
     /// [`trace_edge`](Self::trace_edge)).
     ///
     /// No-op when no episode is active.
+    ///
+    /// The emitted node carries `blake3_in = None` — the wrapper has no
+    /// insight into the inner pruner's input state, so attaching a placeholder
+    /// zero hash would be misleading. Callers that need real tamper-evidence
+    /// can post-process the PTG (via [`ptg_recorder`](Self::ptg_recorder))
+    /// and overwrite `blake3_in` from their own audit log, or call
+    /// [`PtgRecorder::enter`] directly with `Some(hash)`.
     #[inline]
     pub fn trace(&mut self, primitive: PrimitiveKind, op: OperatorKind) -> Option<NodeId> {
         let rec = self.recorder.as_mut()?;
         let tick = self.tick;
         self.tick = tick.wrapping_add(1);
-        // Zeroed commitment — the wrapper has no insight into the inner
-        // pruner's input state. Callers that need real tamper-evidence can
-        // post-process the PTG and overwrite `blake3_in` from their own
-        // audit log.
-        let new_id = rec.enter(primitive, tick, [0u8; 32]);
+        let new_id = rec.enter(primitive, tick, None);
         if let Some(prev) = self.last_node {
             rec.exit(prev, new_id, op);
         }
@@ -210,7 +213,7 @@ impl<P: ScreeningPruner> PtgTracedPruner<P> {
     }
 
     /// Borrow the active recorder, if any. Exposed for advanced callers that
-    /// want to enter nodes with a real `blake3_in` commitment.
+    /// want to enter nodes with a real `Some(hash)` audit commitment.
     #[inline]
     #[must_use]
     pub fn ptg_recorder(&mut self) -> Option<&mut PtgRecorder> {

@@ -1008,15 +1008,15 @@ flowchart LR
 
 | Gate | Target | Measured | Verdict |
 |------|--------|----------|---------|
-| G1 | PRI < 100µs / 1K traces (hot-tier) | 22–26µs | ✅ PASS (bit matrix + ahash, Issue 035; was 4507µs) |
-| G2 | Motif mining < 5% of admission path | 2.07ms mine / 250ns admit | ✅ PASS |
+| G1 | PRI < 100µs / 1K traces (hot-tier) | 20–67µs | ✅ PASS (bit matrix + ahash, Issue 035; was 4507µs) |
+| G2 | Motif mining < 5% of admission path | 407µs mine / 42ns admit | ✅ PASS |
 | G3 | TaR correlates with real transfer ≥0.5 | synthetic proxy 1.0/0.0 | ✅ PASS (proxy — real correlation needs riir-ai) |
-| G4 | 10K-trace snapshot < 1MB | 1.774MB | ⚠️ PARTIAL (32B per-node blake3 is structural, locked in Phase 0; sole remaining blocker) |
+| G4 | 10K-trace snapshot < 1MB | **0.296 MB** (production-realistic all-None corpus) | ✅ PASS (Option<[u8;32]> data-model fix, 2026-06-26; was 1.774MB. Upper bound all-Some = 1.822MB informational.) |
 | G5 | Demotion if no quality correlation | N/A | DEFERRED (needs riir-ai transfer traces) |
 
-**Decision: `closure_instrument` stays opt-in.** Per the plan's T4.7 promotion rule, G1–G4 must ALL pass. **G1 is now green** (Issue 035, 2026-06-19: replaced the nested `HashMap<PrimitiveKind, HashSet<u32>>` with a primitive×family bit matrix + ahash + rolling-tag dedup — 22–26µs / 1K traces, was 4507µs, ~180× speedup). **G4 is the sole remaining blocker** and is structural — it stems from the locked Phase 0 data model (`blake3_in: [u8; 32]` per node), not from an implementation bug. All 9 GOAT tests + 9 metrics unit tests + 6 integration tests pass; the wake→sleep→admit loop is proven end-to-end on real `AbsorbCompressLayer<NoScreeningPruner>`.
+**Decision: `closure_instrument` is DEFAULT-ON as of 2026-06-26.** All G1–G4 PASS. G1 was fixed by Issue 035 (bit matrix + ahash, 20–67µs / 1K traces, was 4507µs). G4 was fixed by changing `PtgNode.blake3_in` from `[u8; 32]` to `Option<[u8; 32]>` — the production path (`PtgTracedPruner::trace`) was already attaching a zero placeholder for every node; the new API has it pass `None` (semantically correct). G4 now measures 0.296 MB / 10K traces (was 1.774 MB). All 10 GOAT tests + 9 metrics unit tests + 6 integration tests + 38 closure module tests pass; the wake→sleep→admit loop is proven end-to-end on real `AbsorbCompressLayer<NoScreeningPruner>`. **API break:** `PtgNode.blake3_in: [u8; 32]` → `Option<[u8; 32]>`; `PtgRecorder::enter` takes `Option`.
 
-Feature gate: `closure_instrument` (**opt-in**, requires `katgpt-core/closure_instrument`; auto-tracing of `AbsorbCompress` additionally needs `bandit`). 📖 Plan: [`.plans/290_closure_expansion_instrument.md`](.plans/290_closure_expansion_instrument.md), Research: [`.research/264_Compositional_Open_Ended_Intelligence_Framework.md`](.research/264_Compositional_Open_Ended_Intelligence_Framework.md), Benchmark: [`.benchmarks/290_closure_instrument_goat.md`](.benchmarks/290_closure_instrument_goat.md), Paper: [arxiv 2606.15386](https://arxiv.org/abs/2606.15386).
+Feature gate: `closure_instrument` (**DEFAULT-ON** in both `katgpt-rs/Cargo.toml` and `crates/katgpt-core/Cargo.toml`; auto-tracing of `AbsorbCompress` additionally needs `bandit`). 📖 Plan: [`.plans/290_closure_expansion_instrument.md`](.plans/290_closure_expansion_instrument.md), Research: [`.research/264_Compositional_Open_Ended_Intelligence_Framework.md`](.research/264_Compositional_Open_Ended_Intelligence_Framework.md), Benchmark: [`.benchmarks/290_closure_instrument_goat.md`](.benchmarks/290_closure_instrument_goat.md), Paper: [arxiv 2606.15386](https://arxiv.org/abs/2606.15386).
 
 ### 🌿 ICT Distributional Branching-Point Detector (Plan 294, arxiv 2606.19771)
 
@@ -1570,7 +1570,7 @@ Default: **Hybrid OCT+PQ** (OCTOPUS triplet encoding + PlanarQuant 2D Givens rot
 | **Merkle Octree** (`merkle_octree`) | Node-tier curator consensus with BLAKE3 commitment | Opt-in — modelless verification |
 | **ANE NPC Brain** (`ane_npc`) | Move NPC think-brain compute to Apple ANE batch | Opt-in — GOAT gated |
 | **DendriticGate** (`dendritic_gate`) | NMDA-inspired adaptive DDTree branching via entropy+coincidence | In progress — GOAT gated |
-| **Closure-Expansion Instrument** (`closure_instrument`) | PTG recorder + motif miner + PRI/CDG/TaR metrics (Momennejad & Raileanu 2026, arxiv 2606.15386). `PtgTracedPruner` wraps any `ScreeningPruner`; `mine_motifs_at_sleep_cycle()` runs at sleep-cycle boundaries. Fuses with Plan 215 MDL gate, MUSE lifecycle, AnchorProfile transfer. | Opt-in — G2/G3 PASS, G1/G4 PARTIAL (structural: std HashMap + per-node blake3); not promoted |
+| **Closure-Expansion Instrument** (`closure_instrument`) | PTG recorder + motif miner + PRI/CDG/TaR metrics (Momennejad & Raileanu 2026, arxiv 2606.15386). `PtgTracedPruner` wraps any `ScreeningPruner`; `mine_motifs_at_sleep_cycle()` runs at sleep-cycle boundaries. Fuses with Plan 215 MDL gate, MUSE lifecycle, AnchorProfile transfer. | **DEFAULT-ON** (Plan 290 T4.7, 2026-06-26): all G1–G4 PASS — G1 20–67µs<100µs (bit matrix), G4 0.296MB<1MB (`Option<[u8;32]>` fix; was 1.774MB). API break: `PtgNode.blake3_in` `[u8;32]`→`Option<[u8;32]>`. |
 | **MicroRecurrentBeliefState** (`micro_belief`) | Generic `BeliefKernel` trait unifying attractor + leaky-integrator families. | Opt-in — G1.1–G1.4 PASS; G2 (attractor coherence) deferred. Auto-enabled by `bom_sampling`. |
 | **BoMSampler** (`bom_sampling`) | K-hypothesis single-pass belief sampling (Plan 281, arxiv 2604.04913). `BoMSampler` extends `MicroRecurrentBeliefState`. | **DEFAULT-ON** in `katgpt-core` (G2 PASS +31.49pp). Opt-in at katgpt-rs root. Auto-enables `simd_sigmoid`. |
 | **CompressionDrafter** (`compression_drafter`) | LZ4 corpus-as-model drafter (Plan 285, nathan.rs/gzip-lm) | 🪦 GOAT FAILED (2 runs) — stays opt-in, unused. `TernaryDraftModel` remains Hot-tier default. |

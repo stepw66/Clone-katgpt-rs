@@ -170,9 +170,9 @@ mod tests {
 
     fn make_search_verify_branch_ptg(task_family_id: u32) -> crate::closure::PrimitiveTransitionGraph {
         let mut rec = PtgRecorder::new(task_family_id);
-        let a = rec.enter(PrimitiveKind::UserDefined(0), 0, [0u8; 32]);
-        let b = rec.enter(PrimitiveKind::UserDefined(1), 1, [1u8; 32]);
-        let c = rec.enter(PrimitiveKind::UserDefined(2), 2, [2u8; 32]);
+        let a = rec.enter(PrimitiveKind::UserDefined(0), 0, None);
+        let b = rec.enter(PrimitiveKind::UserDefined(1), 1, Some([1u8; 32]));
+        let c = rec.enter(PrimitiveKind::UserDefined(2), 2, None);
         rec.exit(a, b, OperatorKind::Sequence);
         rec.exit(b, c, OperatorKind::Branch);
         rec.finish()

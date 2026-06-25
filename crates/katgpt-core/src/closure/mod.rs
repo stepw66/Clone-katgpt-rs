@@ -190,14 +190,22 @@ serde_via_u8!(OperatorKind);
 ///
 /// `blake3_in` is the commitment of the input state observed at entry — used
 /// for tamper-evident replay (raw/syncable). It is **not** a latent embedding.
+///
+/// Stored as `Option<[u8; 32]>` (Plan 290 G4 fix, 2026-06-26) so the common
+/// production case — a node with no per-node audit commitment, e.g. every
+/// node emitted by [`PtgTracedPruner::trace`] — costs 1 byte (postcard `None`
+/// tag) instead of 32 bytes of zeros. Callers that need tamper-evidence pass
+/// `Some(hash)`; the G4 size target (< 1MB / 10K traces) is met when the
+/// corpus is dominated by `None` nodes, which matches the production reality.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct PtgNode {
     /// Which primitive was invoked.
     pub primitive: PrimitiveKind,
     /// Tick at entry (raw — deterministic ordering).
     pub tick: u32,
-    /// BLAKE3 commitment of input state at this node (audit).
-    pub blake3_in: [u8; 32],
+    /// Optional BLAKE3 commitment of input state at this node (audit).
+    /// `None` in the common production case (no per-node commitment).
+    pub blake3_in: Option<[u8; 32]>,
 }
 
 /// An edge in a [`PrimitiveTransitionGraph`]: a primitive-to-primitive op.
@@ -308,7 +316,7 @@ mod tests {
         PtgNode {
             primitive: PrimitiveKind::UserDefined(id),
             tick,
-            blake3_in: [id as u8; 32],
+            blake3_in: Some([id as u8; 32]),
         }
     }
 
@@ -384,10 +392,10 @@ mod tests {
     fn deeply_nested_chain_serializes() {
         // 5-level chain: root → n1 → n2 → n3 → n4
         let mut recorder = PtgRecorder::new(99);
-        let root = recorder.enter(PrimitiveKind::UserDefined(0), 0, [0u8; 32]);
+        let root = recorder.enter(PrimitiveKind::UserDefined(0), 0, None);
         let mut prev = root;
         for i in 1..=4u32 {
-            let cur = recorder.enter(PrimitiveKind::UserDefined(i), i, [i as u8; 32]);
+            let cur = recorder.enter(PrimitiveKind::UserDefined(i), i, Some([i as u8; 32]));
             recorder.exit(prev, cur, OperatorKind::Recurse);
             prev = cur;
         }
@@ -398,5 +406,9 @@ mod tests {
         let back = deserialize_postcard(&bytes).expect("deserialize");
         assert_eq!(back.nodes.len(), 5);
         assert_eq!(back.edges.len(), 4);
+        // Round-trip preserves the Option<blake3> field exactly — exercises
+        // both the `None` (root) and `Some` (children) paths.
+        assert_eq!(back.nodes[0].blake3_in, None);
+        assert_eq!(back.nodes[1].blake3_in, Some([1u8; 32]));
     }
 }
