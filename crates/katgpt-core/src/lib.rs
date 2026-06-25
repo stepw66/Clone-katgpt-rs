@@ -746,3 +746,23 @@ pub use arg::{
     ResponseMode, ScoredCandidate, ShouldProceed, TaxonomyKind, TaxonomyNode, TaxonomyValidator,
     TypedOfflineCandidate, ValidationError, ValidationResult, ValidationScratch,
 };
+
+// Non-Interference Memory Branches — Super-GOAT fusion (Plan 329, Research 310,
+// arXiv:2606.20638 Goel et al. Oxford Jun 2026). Five generic open primitives:
+// BranchBank (bounded persistent CognitiveBranch bank with spawn/merge/prune
+// lifecycle), BranchRouter (dot-product snap + Jaccard fallback), VerifierGate
+// (reward + curiosity + centroid-quarantine write gate, composes with CLR),
+// NonInterferenceProjection (Phase 2), BudgetCompiler (Phase 2). Fuses
+// BAKE × CLR × MCGS × Engram × ARG × closure-instrument × Salience into a new
+// capability class: per-NPC continual adaptation without catastrophic
+// forgetting. Composes with arg_protocol LifecycleState when both features on.
+// Opt-in until G1–G5 GOAT gate passes (Phase 3).
+#[cfg(feature = "non_interference_branches")]
+pub mod branching;
+#[cfg(feature = "non_interference_branches")]
+pub use branching::{
+    BranchBank, BranchId, BranchLifecycle, BranchRouter, BranchStats, CognitiveBranch,
+    DEFAULT_MAX_BRANCHES, DEFAULT_QUARANTINE_CENTROID_THRESH, DEFAULT_TAU_CURIOSITY,
+    DEFAULT_TAU_JACCARD, DEFAULT_TAU_SNAP, DEFAULT_TAU_SPAWN, DEFAULT_TAU_WRITE, EpisodicEntry,
+    FailureEntry, ProceduralRule, RouteMode, RouteResult, VerifierGate, WriteDecision,
+};
