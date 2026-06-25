@@ -253,6 +253,21 @@ required-features = ["personality_composition"]
 name = "personality_composition_02_taming"
 required-features = ["personality_composition"]
 
+# Plan 321 T4.1 — CommittedFieldBlend three-archetype demo (K=3, D=32, 100
+# entities). Demonstrates sampling invariance under fog-of-war observation
+# gaps (dense vs sparse summaries of the same trajectory → identical pi).
+[[example]]
+name = "committed_blend_01_three_archetypes"
+required-features = ["committed_field_blend"]
+
+# Plan 321 T4.2 — CommittedFieldBlend re-commit-on-event demo. Shows the
+# version-bumped personality swap lifecycle (v=1 → v=2 produces a distinct
+# BLAKE3 commitment; old hash fails to verify; cached-hash observer detects
+# the swap; tamper detection still works after re-commit).
+[[example]]
+name = "committed_blend_02_recommit_on_event"
+required-features = ["committed_field_blend"]
+
 # Issue 007 — WASM SIMD128 GOAT harness (G1 bit-exactness + G2 perf smoke).
 # Runs on native (validates NEON/AVX2) AND wasm32-wasip2 +simd128 (validates
 # the Issue 007 port). No required-features — only uses always-on simd::* APIs.

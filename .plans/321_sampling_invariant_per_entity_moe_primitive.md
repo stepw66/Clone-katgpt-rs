@@ -179,14 +179,14 @@ G2 gate tests this directly: simulate an entity with dense observations vs spars
 
 ---
 
-## Phase 4 — Examples + Documentation
+## Phase 4 — Examples + Documentation ✅ DONE
 
 ### Tasks
 
-- [ ] **T4.1** `examples/committed_blend_01_three_archetypes.rs` — K=3 synthetic archetype fields (aggressive/cautious/social analogues), 100 entities, each commits a blend from its trajectory summary, verify sampling invariance under fog-of-war gaps.
-- [ ] **T4.2** `examples/committed_blend_02_recommit_on_event.rs` — demonstrate the re-commit trigger (major personality event → `commit()` called again → new BLAKE3, new version).
-- [ ] **T4.3** Update `katgpt-rs/README.md` Feature Showcase with `committed_field_blend` entry.
-- [ ] **T4.4** Update `katgpt-rs/.docs/01_overview.md` Feature Flags table.
+- [x] **T4.1** `examples/committed_blend_01_three_archetypes.rs` — K=3 synthetic archetype fields (aggressive/cautious/social analogues), 100 entities, each commits a blend from its trajectory summary, verify sampling invariance under fog-of-war gaps. **PASS** — 100/100 entities pass both pi and trajectory invariance (worst-case Δpi = 1.19e-6, worst-case Δtraj = 5.96e-6, both well under 1e-3 tolerance); 100/100 distinct committed pi vectors (test is non-vacuous).
+- [x] **T4.2** `examples/committed_blend_02_recommit_on_event.rs` — demonstrate the re-commit trigger (major personality event → `commit()` called again → new BLAKE3, new version). **PASS** — v=1 → v=2 produces distinct BLAKE3 commitments; cached-hash observer detects the swap; personality changes in the expected direction (aggressive gate 0.6341→0.0208 after fleeing, social gate 0.6225→0.9890); tamper detection still works after re-commit.
+- [x] **T4.3** Update `katgpt-rs/README.md` Feature Showcase with `committed_field_blend` entry. Added: (a) row in the Opt-In & Gated Features table; (b) full `### 🧠 CommittedFieldBlend` subsection after `PersonalityWeightedComposition` (math, trait surface, defining property, re-commit lifecycle, GOAT status, examples); (c) module listing in the Project Structure tree; (d) Plan 321 link in the Documentation Index.
+- [x] **T4.4** Update `katgpt-rs/.docs/01_overview.md` Feature Flags table. Added row for `committed_field_blend` (implied dep on `personality_composition`, sampling-invariance defining property, G1–G5 ALL PASS with worst-case Δpi evidence, promotion deferred).
 
 ---
 

@@ -1540,6 +1540,7 @@ Default: **Hybrid OCT+PQ** (OCTOPUS triplet encoding + PlanarQuant 2D Givens rot
 | **Forensic Watermark** | Moved to `riir-ai` (Plan 322) — recipe implementation relocated to preserve honeypot value per strategy verdict 003 | — |
 | **ICT Branching Detector** (`ict_branching`) | `collision_purity β(π)` + JS-divergence novelty + `BranchingDetector` (Plan 294, arxiv 2606.19771) | Opt-in — G1/G3/G4/G5/G6/G10 PASS (Super-GOAT proceeds); G8 (runtime fusion) deferred to riir-ai Plan 324. |
 | **PersonalityWeightedComposition** (`personality_composition`) | Sigmoid-gated N-layer latent direction composition + reward-surprise drift + BLAKE3 snapshot (Plan 297, Research 276). Open primitive for the Entity Cognition Stack Super-GOAT. | **DEFAULT-ON** — GOAT G4 (79.585ns < 1µs target, 12.6× margin) + G5 (zero alloc) PASS. |
+| **CommittedFieldBlend** (`committed_field_blend`) | Sampling-invariant per-entity MoE: frozen sigmoid blend of N archetype operator fields, weights computed ONCE from a trajectory summary + BLAKE3-committed (Plan 321, Research 302, arXiv:2510.00621 FAME). Defining property: **sampling invariance** (FAME Prop. 3) — dense vs sparse observation of the same trajectory → identical committed `pi` and identical dynamics. Reuses `personality_composition`'s sigmoid + `simd::simd_fused_scale_acc` (DRY). Includes closed-form Lipschitz safety bound (`max_k sigmoid(pi_k/tau)·L_k`, FAME Lemma 1). | Opt-in — G1–G5 GOAT gate **ALL PASS** (G2 sampling invariance holds across 100 entities, worst-case Δpi=1.19e-6). Promotion to default deferred pending riir-ai Plan 336 runtime-integration validation. |
 | **Gain/Cost Loop Halting** (`gain_cost_halt`) | Per-loop halting kernel for `forward_looped` (Plan 304, Research 282, arXiv:2606.18023 LoopCoder-v2). halt when marginal refinement gain < marginal drift cost × τ; oscillation early-halt via cos θ < 0; L_min floor. Composes with `elastic_loop_override` (static wins). Phase 2 wired; gain signal = `step_size` (erank degenerate for single-vector hidden state). | Opt-in — G1 mechanics PASS (27/27); G2 crowd-NPC savings **76.7% mean** PASS (target ≥75%); G3 important-NPC no-regression **0-loop waste** PASS (target ≤1). G4 oscillation-vs-stability + Phase 2.5 (TF-Loop wiring) deferred. |
 | **Subspace Phase-Gate** (`subspace_phase_gate`) | Participation ratio + numerical rank + N≥d phase-transition gate + runtime Jacobian SVD (Plan 301, Research 279, arXiv:2409.02426 Wang et al.). Pure numeric; consumed by Plan 312 and future riir-neuron-db / riir-ai wiring. | Opt-in — Phase 2 G1 PASS (synthetic MoLRG phase transition reproduces); Phases 3–5 deferred. |
 | **RTDC** (`rtdc`) | Resolution-Tiered Deterministic Commitment — one BLAKE3 root per SLoD σ-tier depth (Plan 302, Research 280). `DepthTieredMerkleOctree` + `DepthSelector` + `DeterministicLeafEncode` trait. | Opt-in — Phase 1 not started (chain-side LatCal encoding is the blocker; `riir-chain` Plan 003). |
@@ -1624,6 +1625,75 @@ impl<const N: usize, const D: usize> PersonalityWeightedComposition<N, D> {
 - `cargo run --example personality_composition_01_basic --features personality_composition`
 - `cargo run --example personality_composition_02_taming --features personality_composition`
 
+### 🧠 CommittedFieldBlend — Sampling-Invariant Per-Entity MoE (Plan 321, Research 302, arXiv:2510.00621 FAME)
+
+A generic, modelless, MIT-licensed primitive for computing a per-entity **frozen** convex blend of `N` archetype operator fields over `D`-dim state, with sigmoid-computed weights derived **once** from a trajectory summary and committed via BLAKE3. The blend governs the entity's dynamics for its entire lifetime (until a major personality event triggers re-commitment). The defining property is **sampling invariance** (FAME Proposition 3): because both the weights `pi` and the fields `f_k` are frozen, the entity's trajectory is a pure function of state — observation density, network desync, and snapshot thaw all preserve the committed personality.
+
+**The math:**
+
+```text
+pi_k    = clamp( dot(summary, dir_k), -pi_max, +pi_max )   // computed ONCE at commit
+f_pi(z) = Σ_k sigmoid(pi_k / tau) · f_k(z)                  // applied every tick
+L_pi    = max_k { sigmoid(pi_k / tau) · L_k }               // Lipschitz safety bound
+```
+
+**Defining property (FAME Proposition 3 — sampling invariance):**
+
+If two observation grids encode the same underlying trajectory, the committed blend produces identical dynamics. This holds because (1) `pi` is computed once from the trajectory summary, then frozen; (2) the fields `f_k` are frozen snapshots; (3) therefore `f_pi(z)` is a pure function of `z` — observation density does not enter the dynamics. **Verified across 100 entities with periodic trajectories under fog-of-war gaps (dense vs every-10th-step sampling): worst-case Δpi = 1.19e-6, worst-case trajectory divergence = 5.96e-6** — both well under the 1e-3 tolerance.
+
+**Why this is the modelless counterpart of FAME:** the paper's functional-on-function regression requires training expert weights. The open primitive here ships the *inference-time* half: the K archetype fields are pre-trained offline once (upstream freeze/thaw substrate), and the per-entity blend weights are computed modellessly via sigmoid projection — no per-entity gradient descent.
+
+**Trait surface:**
+
+```rust
+pub trait ArchetypeFieldSource<const D: usize>: Send + Sync {
+    fn evolve<'a>(&self, z: &[f32], dz_scratch: &'a mut [f32]) -> &'a mut [f32];
+    fn commitment(&self) -> [u8; 32];                              // BLAKE3 of field defn
+    fn lipschitz_bound(&self) -> f32 { f32::INFINITY }            // override for safety bound
+}
+
+pub struct CommittedFieldBlend<const N: usize, const D: usize> {
+    pub pi: [f32; N],        // committed blend weights (frozen after commit)
+    pub tau: f32,            // personality-sharpness temperature
+    pub pi_max: f32,         // clamp bound on pi
+    pub blake3: [u8; 32],    // commitment over (version, pi, field_commitments)
+    pub version: u64,        // incremented on re-commit (IS part of BLAKE3)
+}
+
+impl<const N: usize, const D: usize> CommittedFieldBlend<N, D> {
+    pub fn commit(&mut self, summary: &[f32],
+                  direction_vectors: &[[f32; D]; N],
+                  fields: &[&dyn ArchetypeFieldSource<D>; N],
+                  version: u64) -> [u8; 32];
+    pub fn apply_blended<'a>(&self, fields: &[&dyn ArchetypeFieldSource<D>; N],
+                            z: &[f32], dz_scratch: &mut [f32],
+                            dz_out: &'a mut [f32]) -> &'a mut [f32];
+    pub fn verify_commitment(&self, fields: &[&dyn ArchetypeFieldSource<D>; N]) -> bool;
+    pub fn lipschitz_bound(&self, fields: &[&dyn ArchetypeFieldSource<D>; N]) -> f32;
+}
+
+// Pinned alias for the production Entity Cognition Stack case (K=3, D=32).
+pub type TriArchetypeBlend = CommittedFieldBlend<3, 32>;
+```
+
+**Why sigmoid, not softmax:** same reason as `PersonalityWeightedComposition` — sigmoid allows a field to contribute ~0 (entity ignores it) or ~1 (entity embodies it), with signed resistance (negative `pi_k`). Softmax would couple fields and destroy the "near-zero weight = field ignored" semantics.
+
+**Re-commit lifecycle (vs `PersonalityWeightedComposition` drift):**
+
+Unlike `PersonalityWeightedComposition`, which *drifts* continuously under a reward signal, `CommittedFieldBlend` is **frozen** between major personality events. Re-commit is an explicit `commit()` call with a bumped `version`:
+
+- `version` **IS** part of the BLAKE3 input (unlike `PersonalitySnapshot`) — a re-commit is a distinct audit event.
+- An observer (sync layer, audit log) that cached the v=1 hash detects the swap via hash mismatch.
+- The K raw `pi` scalars + new version cross the sync boundary as a commitment event; the archetype field definitions stay library-side (referenced by their BLAKE3 commitment hash, never sent over the wire).
+
+**GOAT status:** G1–G5 **ALL PASS** (2026-06-25). The make-or-break gate is G2 (sampling invariance under fog-of-war) — 100/100 entities pass with worst-case Δpi = 1.19e-6. G4 zero-alloc (apply_blended 1000 iters = 0 allocs, commit 100 re-commits = 0 allocs). G5 BLAKE3 reproducible + tamper-detecting (4/4). See [`.benchmarks/321_committed_field_blend_goat.md`](.benchmarks/321_committed_field_blend_goat.md). Promotion to default deferred pending riir-ai Plan 336 runtime-integration validation.
+
+**Entity-agnostic:** Same kernel applies to NPC, predator, robot, recommender user. The archetype names (aggressive/cautious/social), the K=3 field library, and the direction-vector library are host-supplied frozen artifacts (riir-train trains the K=3 field library once offline; katgpt-rs only consumes the frozen result).
+
+**Examples:**
+- `cargo run --example committed_blend_01_three_archetypes --features committed_field_blend` — K=3 archetypes × 100 entities, fog-of-war sampling invariance.
+- `cargo run --example committed_blend_02_recommit_on_event --features committed_field_blend` — re-commit lifecycle (v=1 → v=2 personality swap + tamper detection).
+
 ## 📁 Project Structure
 
 ```
@@ -1643,6 +1713,7 @@ crates/katgpt-core/   Shared types + SIMD kernels + traits (consumed by katgpt-r
   viable_manifold_graph.rs Safe-manifold navigation: pullback volume + graph + A*/random walk (Plan 312)
   karc.rs             KARC delay-basis ridge forecaster + KarcBasis trait (Plan 308)
   rtdc.rs             Resolution-Tiered Deterministic Commitment — multi-depth Merkle roots (Plan 302)
+  committed_field_blend.rs Sampling-invariant per-entity MoE: frozen sigmoid blend of N archetype fields (Plan 321, FAME arXiv:2510.00621)
   peira.rs            PEIRA inter-view regressor alignment
   dirichlet.rs        Dirichlet Energy structural alignment diagnostic
   spectral_hierarchy.rs  Eigenspace alignment, Haar wavelets, Cauchy interlacing
@@ -1739,6 +1810,7 @@ benches/             Criterion benchmarks
 - [Latent Field Steering](.plans/309_latent_field_steering_primitive.md)
 - [Cross-Resolution Spectral Transport](.plans/310_cross_resolution_spectral_transport_primitive.md)
 - [Viable Manifold Graph](.plans/312_viable_manifold_graph_primitive.md)
+- [CommittedFieldBlend — sampling-invariant per-entity MoE](.plans/321_sampling_invariant_per_entity_moe_primitive.md)
 
 ## 📜 References
 
