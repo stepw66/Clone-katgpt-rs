@@ -105,7 +105,11 @@ Three contributions from the paper have **no shipped equivalent** under any voca
 
 1. **Primitive Transition Graph (PTG) as explicit runtime data structure.** We have *pruners* and *skill catalogs* and *operadic composition of pruners*, but no place where an *executed trace* is materialized as a directed graph of `(primitive, operator)` nodes for downstream mining. The closest thing is `EventLog` (Plan 124) and `TrialLog` (BanditPruner), both flat append-only logs without graph structure or motif mining.
 
+   **✅ CONCRETELY INSTANTIABLE (2026-06-25):** Plan 324 (`bisimulation_operator_inference`, Research 308) ships `TransitionGraph` — a sorted, deduped, indexed observed-transition set that IS the PTG data structure. Combined with `partition_refine` (bisimulation quotient), it closes the motif-mining loop: recurring sub-paths collapse into single quotient classes, and `infer_operators` lifts them to abstract operator schemas. The CEI (Plan 290) wraps this for full motif-mining + metrics; Plan 324 supplies the deterministic core.
+
 2. **Motif mining → motif wrapping → higher-order primitive promotion.** Plan 215 admits *new primitives* through the MDL gate but does not *consolidate recurring subgraphs of past executions* into new composite primitives. The paper's "turn recurring block into reusable function" loop is missing.
+
+   **✅ CONCRETELY INSTANTIABLE (2026-06-25):** Plan 324's `BisimulationQuotient` + `OperatorSchema` provide the deterministic half — bisimulation collapses recurring motifs into equivalence classes, and operator inference produces the abstract "wrapped" primitive (one `OperatorDef` per recurring label). The MDL-gated admission (Plan 215) wraps around this: when a quotient class's BLAKE3 commitment stabilizes across N observations, admit the corresponding `OperatorDef` as a first-class primitive. The non-deterministic half (LLM-grade symbolic abstraction, ASP solver) remains the CWM path (Plan 296).
 
 3. **Closure-expansion metrics (PRI, CDG, PDY, OCR, TaR) as runtime evaluation surface.** We measure win-rate, latency, win-rate-improvement, GOAT gate pass-rate. We do not measure:
    - *How often each primitive recurs across task families* (PRI)

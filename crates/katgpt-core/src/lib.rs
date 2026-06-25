@@ -533,6 +533,25 @@ pub use induced_cwm::{
 #[cfg(feature = "induced_cwm_ismcts")]
 pub use induced_cwm::{InformationSet, NodeStats, ismcts_search_with_inference};
 
+// ── Bisimulation Operator Inference (Plan 324, Research 308, arxiv 2602.19260) ─
+//
+// Open primitive: quotient an observed transition graph into bisimulation-
+// equivalent state classes (signature-based partition refinement, O((S+E)
+// log² S log d)) and infer an abstract PDDL-like operator schema. The
+// lighter-weight PDDL-side counterpart to Induced CWM (Plan 296): where CWM
+// induces executable *code* via an LLM, this induces an *operator schema* via
+// a deterministic graph algorithm. Closes Research 264 §2.2 gaps #1 (PTG) +
+// #2 (motif mining). Opt-in by design — downstream pipelines (riir-ai NPC
+// runtime, riir-chain LatCal consumer) opt in by enabling the feature.
+#[cfg(feature = "bisimulation_operator_inference")]
+pub mod bisimulation;
+#[cfg(feature = "bisimulation_operator_inference")]
+pub use bisimulation::{
+    BisimulationQuotient, OperatorDef, OperatorLabel, OperatorSchema, Plan, QuotientEdge,
+    StateClassId, StateId, Transition, TransitionGraph, TransitionGraphBuilder, partition_refine,
+    plan as bisimulation_plan,
+};
+
 // ── Personality-Weighted Layer Composition (Plan 297, Research 276) ───────
 //
 // Open MIT-licensed primitive for the Entity Cognition Stack Super-GOAT.
