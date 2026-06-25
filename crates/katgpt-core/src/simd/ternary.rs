@@ -5,7 +5,8 @@
 
 #![allow(clippy::needless_range_loop, clippy::too_many_arguments)]
 
-use super::*;
+#[cfg(feature = "plasma_path")]
+use super::{SimdLevel, simd_level};
 
 #[cfg(feature = "plasma_path")]
 use crate::types::TernaryWeights;

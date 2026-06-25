@@ -43,7 +43,8 @@
 /// # GOAT proof (Plan 080 T2)
 /// Must match naive materialized result within 1e-6.
 /// Must be ≥2× faster than naive for Lq≥32, Ld≥128, dim=128.
-use super::*;
+#[cfg(feature = "maxsim")]
+use super::simd_dot_f32;
 
 #[cfg(feature = "maxsim")]
 #[inline]
