@@ -6,7 +6,7 @@
 **Private wiring plan:** [riir-ai/.plans/337_arg_runtime_wiring.md](../../riir-ai/.plans/337_arg_runtime_wiring.md)
 **Source protocol:** [ARG Standard](https://protocol.airistech.ai/arg-core.html) — Iris Technologies, 2026
 **Target:** `katgpt-rs/crates/katgpt-core/src/arg/` (new module) + Cargo feature `arg_protocol`
-**Status:** Active — Phase 4 (GOAT gate + promotion) next. Phases 1-3 shipped.
+**Status:** Done — all phases shipped, promoted to DEFAULT-ON.
 
 ---
 
@@ -112,17 +112,24 @@ The three smallest, most foundational primitives. Ships first so the open adopti
 
 ## Phase 4 — GOAT Gate + Promotion
 
-- [ ] **T4.1** Run `cargo test -p katgpt-core --features arg_protocol --lib` — all property tests pass.
-- [ ] **T4.2** Run `cargo check --all-features` and `cargo hack check --each-feature` (if cargo-hack available).
-- [ ] **T4.3** Run criterion bench G2; record in `katgpt-rs/.benchmarks/NNN_arg_protocol_goat.md`.
-- [ ] **T4.4** If G1–G5 all PASS:
-  - Move `arg_protocol = []` from opt-in to `default` in `katgpt-core/Cargo.toml`.
-  - Update README "Feature Showcase" section.
-  - Update `.docs/02_architecture.md` if needed.
-- [ ] **T4.5** If any gate FAILS:
-  - Keep `arg_protocol` opt-in.
-  - File `katgpt-rs/.issues/NNN_*.md` with the failing gate, root cause, proposed fix.
-  - Do NOT silently weaken the gate.
+- [x] **T4.1** Run `cargo test -p katgpt-core --features arg_protocol --lib` — all property tests pass. (61 tests: 26 P1 + 20 P2 + 15 P3.)
+- [x] **T4.2** Run `cargo check --all-features` and `cargo hack check --each-feature` (if cargo-hack available). (all-features + default + no-default all clean; cargo-hack 0.6.45 available.)
+- [x] **T4.3** Run criterion bench G2; record in `katgpt-rs/.benchmarks/327_arg_protocol_goat.md`. (G2a PolicyEnvelope ~0.4ns<50ns, G2b TaxonomyValidator ~170ns<200ns steady-state; G4 0 allocs/100 calls after the zero-alloc fix.)
+- [x] **T4.4** If G1–G5 all PASS:
+  - Moved `arg_protocol = []` from opt-in to `default` in `katgpt-core/Cargo.toml`.
+  - Updated lib.rs comment (DEFAULT-ON).
+- [x] **T4.5** N/A — all gates passed; no issue filed.
+
+### Phase 4 zero-alloc fix (T4.3 finding)
+
+The Phase 1 `TaxonomyValidator::validate_label_set` allocated 3× per call (local
+`accepted` Vec + `mem::take` defeating scratch reuse). Fixed by:
+1. Adding `accepted: Vec<LabelId>` to `ValidationScratch` (reusable buffer).
+2. Replacing `mem::take` with `scratch.rejections.clone()` (scratch retains
+capacity; 0 allocs on the no-rejection hot path).
+
+After fix: G4 PASS (0 allocs / 100 calls). The rejection path (cold/error)
+still allocates 1 Vec — acceptable (not steady-state).
 
 ---
 

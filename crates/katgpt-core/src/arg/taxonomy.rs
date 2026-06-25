@@ -160,20 +160,27 @@ pub struct ValidationScratch {
     pub rejections: Vec<ValidationError>,
     /// Visited-set for ascending expansion (cleared per call).
     pub visited: Vec<LabelId>,
+    /// Accepted-candidates buffer for `validate_label_set` (cleared per call).
+    /// Holds the candidate ids that passed existence check, for the cross-
+    /// validation passes (incompatibility, parent/child coherence).
+    pub accepted: Vec<LabelId>,
 }
 
 impl ValidationScratch {
-    /// Pre-allocate capacity for `n` rejections and `n` visited ids.
+    /// Pre-allocate capacity for `n` rejections, `n` visited ids, and `n`
+    /// accepted candidates.
     pub fn with_capacity(n: usize) -> Self {
         ValidationScratch {
             rejections: Vec::with_capacity(n),
             visited: Vec::with_capacity(n),
+            accepted: Vec::with_capacity(n),
         }
     }
 
     fn clear(&mut self) {
         self.rejections.clear();
         self.visited.clear();
+        self.accepted.clear();
     }
 }
 
@@ -225,10 +232,9 @@ impl<'a> TaxonomyValidator<'a> {
         let mut valid = LabelSet::new();
         let cands = candidates.as_slice();
 
-        // Pass 1: existence check + collect accepted nodes.
-        // We collect accepted labels into a small Vec for cross-checking;
-        // bounded by LABEL_SET_CAPACITY so no unbounded allocation.
-        let mut accepted: Vec<LabelId> = Vec::with_capacity(cands.len());
+        // Pass 1: existence check + collect accepted nodes into scratch.accepted
+        // (reusable buffer — no per-call allocation). Bounded by LABEL_SET_CAPACITY.
+        let accepted = &mut scratch.accepted;
         for &c in cands {
             match self.find(c) {
                 None => scratch.rejections.push(ValidationError::NotFound),
@@ -285,9 +291,13 @@ impl<'a> TaxonomyValidator<'a> {
             }
         }
 
+        // The result owns its rejections Vec; the scratch keeps its capacity for
+        // the next call (we clone the slice, not mem::take — so scratch.rejections
+        // retains its allocation). For the common (no-rejection) case, cloning an
+        // empty slice returns Vec::new() (no allocation).
         ValidationResult {
             valid,
-            rejections: core::mem::take(&mut scratch.rejections),
+            rejections: scratch.rejections.clone(),
         }
     }
 

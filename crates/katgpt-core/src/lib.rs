@@ -717,7 +717,7 @@ pub use karc::{
 // G5 silence-bias penalty), `InfoRegistry` (Step 9 + Step C two-phase dedup
 // with grey-zone review). Private runtime composition with HLA / Entity
 // Cognition Stack / VMG / Sub-Goal Compaction lives in riir-ai Plan 337.
-// No game/chain/shard semantics. Opt-in until G1–G5 GOAT gate passes.
+// No game/chain/shard semantics. DEFAULT-ON (Plan 327 Phase 4, 2026-06-25):
 #[cfg(feature = "arg_protocol")]
 pub mod arg;
 #[cfg(feature = "arg_protocol")]
