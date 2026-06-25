@@ -25,8 +25,9 @@
 //!   The specialized 1D-periodic case where DEC `exterior_derivative` is
 //!   overkill.
 //!
-//! Future narrow gaps (Tucker factorization for `NeuronShard` compaction)
-//! would land under this same umbrella as a separate feature.
+//! The third FNO gap (Tucker/HOSVD tensor factorization, Plan 326) landed
+//! under `linalg/tucker.rs` instead — it is an SVD generalization, not a
+//! Fourier operation, so `spectral/` would be a misnomer.
 
 #[cfg(feature = "fourier_continuation")]
 pub mod continuation;

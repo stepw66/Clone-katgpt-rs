@@ -682,9 +682,14 @@ pub use depth_invariance::{
 // solvers (Plan 308); the f32 Cholesky/ridge path lives here as a standalone
 // extraction of the PEIRA `(N + λI)⁻¹` pattern — see the module note for why
 // PEIRA's f64 path is left untouched. Plan 319 (Clifford geometric product)
-// ships `linalg::geometric_product` as a peer — `geometric_product` must also
-// gate this `pub mod` so the crate compiles when only that feature is on.
-#[cfg(any(feature = "karc_forecaster", feature = "geometric_product"))]
+// and Plan 326 (Tucker/HOSVD tensor factorization) ship peers under `linalg::`
+// — each must also gate this `pub mod` so the crate compiles when only that
+// feature is on.
+#[cfg(any(
+    feature = "karc_forecaster",
+    feature = "geometric_product",
+    feature = "tucker_factorization"
+))]
 pub mod linalg;
 
 // KARC — Kolmogorov-Arnold Reservoir Computing delay-basis-ridge forecaster

@@ -20,10 +20,15 @@ pub mod ridge_solve;
 #[cfg(feature = "geometric_product")]
 pub mod geometric_product;
 
+// Plan 326 — Tucker / HOSVD N-mode tensor factorization (the N-mode
+// generalization of `thin_svd_into`). Distilled from TFNO §6.1 as the third
+// and final FNO gap (Research 307 §3 candidate plan #3).
+#[cfg(feature = "tucker_factorization")]
+pub mod tucker;
+
 pub use ridge_solve::{
-    chol_solve_f32, chol_solve_f64, cholesky_f32, cholesky_f64,
-    ridge_solve_direct_f32, ridge_solve_direct_f64, ridge_solve_woodbury_f32,
-    spd_inverse_f32,
+    chol_solve_f32, chol_solve_f64, cholesky_f32, cholesky_f64, ridge_solve_direct_f32,
+    ridge_solve_direct_f64, ridge_solve_woodbury_f32, spd_inverse_f32,
 };
 
 // Plan 319 — Channel-wise Clifford Geometric Product (coherence + wedge).
@@ -31,4 +36,12 @@ pub use ridge_solve::{
 #[cfg(feature = "geometric_product")]
 pub use geometric_product::{
     cyclic_shift_into, geometric_product_into, geometric_product_wedge_into,
+};
+
+// Plan 326 — Tucker / HOSVD factorization re-exports. Peer to the SVD
+// primitives in `subspace_phase_gate`; this is their N-mode generalization.
+#[cfg(feature = "tucker_factorization")]
+pub use tucker::{
+    MAX_MODES, TuckerConfig, TuckerError, TuckerResult, TuckerResultScratch, TuckerScratch,
+    tucker_decompose, tucker_decompose_into, tucker_reconstruct_into,
 };
