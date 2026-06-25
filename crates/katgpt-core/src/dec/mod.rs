@@ -56,5 +56,7 @@ pub use stokes_calculus::{
     belief_mass_divergence, boundary_flux_mass, boundary_flux_mass_indexed,
     boundary_flux_mass_only, circulation_integral, line_integral,
 };
-pub use terrain_cochains::{DestructionCochain, OccupancyCochain, SafetyCochain, ThreatCochain};
+pub use terrain_cochains::{
+    DestructionCochain, InterestCohain, OccupancyCochain, SafetyCochain, ThreatCochain,
+};
 pub use types::{CellComplex, CoboundaryIndex, CochainField, MAX_RANK};
