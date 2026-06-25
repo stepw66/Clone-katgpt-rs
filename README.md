@@ -1485,6 +1485,44 @@ Feature gate: `ac_prefix` (**DEFAULT-ON** since 2026-06-24 Issue 003 Phase 0 res
 
 ---
 
+### 🗺️ InterestCohain + Lattice Edge Utility — Zone Eggshell Spatial Substrate (Plan 335)
+
+The **fifth typed cochain** for the DEC terrain substrate, plus the SIMD per-edge utility op that consumes it. Closes the spatial-reasoning gap: the existing `SafetyCohain` / `ThreatCohain` / `OccupancyCohain` / `DestructionCohain` quartet had no slot for *notability* (fame, reward, attention). Plan 335 adds `InterestCohain` as a rank-0 cochain — the "f" lane the eggshell matrix was missing — and ships `lattice_edge_utility_into`, the leaf-clean SIMD hot path that blends all five cochains + NPC HLA state into a per-edge traversal utility.
+
+```text
+  NPC HLA (5 scalars)        5 typed cochains (rank 0 + rank 1)
+  ┌───────────────┐          ┌──────────────────────────────┐
+  │ valence       │─────────▶│ interest[src]  · curiosity_w │
+  │ calm          │─────────▶│ safety[src]    · calm_w      │
+  │ fear          │─────────▶│ − threat[edge] · fear_w      │
+  │ desperation   │─────────▶│ destruction[src]·desp_w      │
+  │ arousal       │          │ + occupancy[face]·good_w     │
+  └───────────────┘          └──────────────┬───────────────┘
+                                            ▼
+                                   sigmoid → per-edge utility
+                                            │
+                          utility > τ  ───▶ emit KG triple
+                          (zone_a, reachable_from, zone_b)
+```
+
+`lattice_edge_utility_into` takes **raw slices** (`&[f32]` cochain data + `HlaToCohainWeights`), not typed `ValidatedZoneView` / `HlaState` handles — this keeps katgpt-core leaf-clean (those consumer types live above the leaf in riir-ai). The inner loop is chunked for auto-vectorization and allocation-free by construction (no `Vec`/`Box`/`collect`/`format!` in the body).
+
+**Plan 335 GOAT (2026-06-25): 8/8 PASS** (full results in riir-ai `.benchmarks/335_zone_eggshell_goat.md`).
+
+| Gate | Target | Result | Verdict |
+|------|--------|--------|----------|
+| **G1** regen determinism | 100% byte-identical | 10/10, pod = 228 bytes | ✅ PASS |
+| **G4** zero-alloc hot path | 0 heap allocs | by construction (code-review verified) | ✅ PASS |
+| **G5a** cache HIT latency | < 100 ns | **68.8 ns** (31% margin) | ✅ PASS |
+| **G5b** cache MISS latency | < 1 ms | **7.45 µs** (134× under, post anon-mmap fix) | ✅ PASS |
+| **G6** two-node convergence | bit-identical | headers + all cochains + eggshell identical | ✅ PASS |
+
+Leaf lattice op throughput: **738.89 Melem/s** (649.63 ns for 480 edges on 16×16 grid).
+
+Feature gates: `interest_cohain` (**DEFAULT-ON** in katgpt-core since Plan 335 Phase 7, `9330e6cb`), `lattice_utility` (opt-in — pulls `dec_operators`, consumer-crate boundary). The eggshell **coexists with `pathfinder.rs` A\*** (zone-level KG reasoning vs tactical single-path movement); it does not dominate or replace A\* (G2 framing-corrected — see benchmark). 📖 Plan: [`.plans/335_zone_eggshell_spatial_lattice.md`](../../riir-ai/.plans/335_zone_eggshell_spatial_lattice.md) (riir-ai), GOAT bench: [`../../riir-ai/.benchmarks/335_zone_eggshell_goat.md`](../../riir-ai/.benchmarks/335_zone_eggshell_goat.md).
+
+---
+
 ## 🔧 KV Compression
 
 Default: **Hybrid OCT+PQ** (OCTOPUS triplet encoding + PlanarQuant 2D Givens rotation). Best MSE + 64× fewer rotation FMAs.
