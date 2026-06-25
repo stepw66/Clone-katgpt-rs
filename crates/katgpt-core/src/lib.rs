@@ -554,6 +554,23 @@ pub use personality_composition::{
     sigmoid_into as personality_sigmoid_into,
 };
 
+// ── Committed Field Blend (Plan 321, Research 302) ───────────────────────
+//
+// Open MIT-licensed primitive: the sampling-invariant half of the FAME
+// Super-GOAT. A `CommittedFieldBlend<N, D>` computes blend weights pi ONCE
+// from a trajectory summary via sigmoid projection, then FREEZES them for
+// the entity's lifetime. The blended field f_pi(z) = Σ_k sigmoid(pi_k/tau) ·
+// f_k(z) governs dynamics; because both pi and the fields are frozen, the
+// trajectory is sampling-invariant (FAME Proposition 3 / Young-integral).
+// Zero-alloc apply + BLAKE3-committed. Reuses personality_composition's
+// sigmoid + simd::simd_fused_scale_acc (DRY).
+// Opt-in until G1–G5 GOAT gate passes; G2 (sampling invariance) is the
+// make-or-break gate. Private selling-point guide at riir-ai/.research/158.
+#[cfg(feature = "committed_field_blend")]
+pub mod committed_field_blend;
+#[cfg(feature = "committed_field_blend")]
+pub use committed_field_blend::{ArchetypeFieldSource, CommittedFieldBlend, TriArchetypeBlend};
+
 // ── Engram — Hash-Addressed Pattern Memory (Plan 299, Research 278) ───────
 //
 // Open MIT-licensed primitive: the first conditional-MEMORY axis in the
