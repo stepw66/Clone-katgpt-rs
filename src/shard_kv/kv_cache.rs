@@ -44,6 +44,7 @@ pub struct ShardKVCache {
     pos: usize,
     n_layers: usize,
     kv_dim: usize,
+    #[allow(dead_code)]
     head_dim: usize,
     max_seq_len: usize,
     sink_tokens: usize,

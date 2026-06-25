@@ -153,6 +153,14 @@ interest_cochain = []
 # dependency on riir-ai types like `ValidatedZoneView` / `HlaState`).
 lattice_utility = ["dec_operators"]
 
+# Plan 335 Phase 6 — GOAT gate leaf bench. G2 lattice-side latency on a 16×16
+# grid (480 edges) + G4 zero-alloc code-review note. Leaf-clean: raw slices
+# only, no riir-ai / riir-neuron-db types (those live in the integrated bench).
+[[bench]]
+name = "zone_lattice_goat"
+harness = false
+required-features = ["lattice_utility"]
+
 [[bench]]
 name = "flow_field_bench"
 harness = false

@@ -35,13 +35,13 @@
 
 #![allow(clippy::too_many_arguments)]
 
+use crate::attn_match::compact::build_reconstruction_report;
 use crate::attn_match::key_selection::{
     KeySelection, highest_attn::select_highest_attn_keys, omp::select_omp_keys,
 };
-use crate::attn_match::compact::build_reconstruction_report;
 use crate::attn_match::{
     CompactError, CompactOutput,
-    score_matrix::{compute_attention_output, compute_score_matrix, compute_softmax_attention},
+    score_matrix::{compute_score_matrix, compute_softmax_attention_and_output},
     types::{AmConfig, KeySelector},
     value_fitter::{ValueFitConfig, compute_compact_attention, fit_cv_least_squares},
 };
@@ -189,18 +189,44 @@ pub fn compact_with_fixed_beta(
     let mut x_attn = vec![0.0f32; n * t];
     compute_compact_attention(queries, &compact_keys, &beta, n, t, d, &mut x_attn);
 
-    // Build full attention for Y target and optional report.
+    // Build full attention for Y target and optional report. Fused softmax +
+    // attention-output so the `(n, t_len)` normalized-attention matrix is only
+    // materialized when the reconstruction report needs it. See
+    // `compute_softmax_attention_and_output` for the disclosed float-op
+    // reordering.
     let mut full_scores = vec![0.0f32; n * t_len];
     compute_score_matrix(queries, keys, n, t_len, d, &mut full_scores);
-    let mut full_attn = vec![0.0f32; n * t_len];
     let mut m_target = vec![0.0f32; n];
-    compute_softmax_attention(&full_scores, n, t_len, &mut full_attn, &mut m_target);
-
-    // Build Y ∈ R^{n×d}: Y_i = softmax(q_i K^T / √d) V.
-    // Extracted to the shared `compute_attention_output` kernel — see
-    // `compact::compact_with_router` for the cache-friendly loop-order notes.
     let mut y_target = vec![0.0f32; n * d];
-    compute_attention_output(&full_attn, values, n, t_len, d, &mut y_target);
+    let full_attn = if config.report_reconstruction {
+        let mut a = vec![0.0f32; n * t_len];
+        compute_softmax_attention_and_output(
+            &full_scores,
+            values,
+            n,
+            t_len,
+            d,
+            &mut m_target,
+            &mut y_target,
+            Some(&mut a),
+        );
+        a
+    } else {
+        compute_softmax_attention_and_output(
+            &full_scores,
+            values,
+            n,
+            t_len,
+            d,
+            &mut m_target,
+            &mut y_target,
+            None,
+        );
+        Vec::new()
+    };
+    // `m_target` is not consumed by the fixed-β path (no NNLS), but the fused
+    // kernel produces it as a byproduct; silence the unused binding.
+    let _ = m_target;
 
     let cv_cfg = ValueFitConfig {
         ridge_lambda: config.cv_ridge_lambda,

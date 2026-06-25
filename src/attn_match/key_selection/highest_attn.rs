@@ -62,19 +62,17 @@ pub fn select_highest_attn_keys(
     compute_softmax_attention(scratch_scores, n, t_len, scratch_attn, &mut mass);
 
     // Aggregate per-key attention scores.
-    // Iterate queries in the outer loop so reads from `scratch_attn` are
-    // sequential (row-major) and writes to `per_key_score` are sequential.
-    // The previous j-outer/i-inner form did strided `scratch_attn[i*t_len + j]`
-    // reads — cache-hostile for large `t_len`. FLOPs are identical; only the
-    // memory access order changes.
+    // Queries are the outer loop so reads from `scratch_attn` are sequential
+    // (row-major) and writes to `per_key_score` are sequential — cache-friendly
+    // for large `t_len`. The iterator form (`chunks_exact` + `zip`) lets LLVM
+    // elide bounds checks and auto-vectorize the FMA inner loop.
     let mut per_key_score = vec![0.0f32; t_len];
     let inv_n = 1.0f32 / (n as f32);
     match score_method {
         ScoreMethod::Mean => {
-            for i in 0..n {
-                let row = &scratch_attn[i * t_len..(i + 1) * t_len];
-                for j in 0..t_len {
-                    per_key_score[j] += row[j];
+            for row in scratch_attn.chunks_exact(t_len) {
+                for (acc, &val) in per_key_score.iter_mut().zip(row) {
+                    *acc += val;
                 }
             }
             for v in &mut per_key_score {
@@ -82,10 +80,10 @@ pub fn select_highest_attn_keys(
             }
         }
         ScoreMethod::Rms => {
-            for i in 0..n {
-                let row = &scratch_attn[i * t_len..(i + 1) * t_len];
-                for j in 0..t_len {
-                    per_key_score[j] += row[j] * row[j];
+            for row in scratch_attn.chunks_exact(t_len) {
+                for (acc, &val) in per_key_score.iter_mut().zip(row) {
+                    // FMA pattern: acc += val * val — auto-vectorizes to SIMD.
+                    *acc += val * val;
                 }
             }
             for v in &mut per_key_score {
@@ -94,10 +92,9 @@ pub fn select_highest_attn_keys(
         }
         ScoreMethod::Max => {
             per_key_score.fill(f32::NEG_INFINITY);
-            for i in 0..n {
-                let row = &scratch_attn[i * t_len..(i + 1) * t_len];
-                for j in 0..t_len {
-                    per_key_score[j] = per_key_score[j].max(row[j]);
+            for row in scratch_attn.chunks_exact(t_len) {
+                for (acc, &val) in per_key_score.iter_mut().zip(row) {
+                    *acc = acc.max(val);
                 }
             }
         }
@@ -107,13 +104,19 @@ pub fn select_highest_attn_keys(
     // O(t log t) sort of just the survivors. For t << T this beats the prior
     // full O(T log T) argsort. total_cmp replaces partial_cmp().unwrap_or()
     // (no NaN branch — scores are finite dot products).
-    let mut indexed: Vec<(usize, f32)> = per_key_score.iter().copied().enumerate().collect();
-    if t > 0 && t < indexed.len() {
-        indexed.select_nth_unstable_by(t - 1, |a, b| b.1.total_cmp(&a.1));
+    //
+    // Indirect sort via an index array avoids materializing a `Vec<(usize, f32)>`
+    // — the index buffer is 8 bytes/entry vs 16 bytes/entry for the pair form,
+    // and `per_key_score` stays the single score source-of-truth. The final
+    // `indices` buffer doubles as the return value (truncate after partition).
+    let mut indices: Vec<usize> = (0..t_len).collect();
+    if t > 0 && t < t_len {
+        indices.select_nth_unstable_by(t - 1, |&a, &b| {
+            per_key_score[b].total_cmp(&per_key_score[a])
+        });
     }
-    indexed[..t].sort_by(|a, b| b.1.total_cmp(&a.1));
-
-    let indices: Vec<usize> = indexed[..t].iter().map(|(i, _)| *i).collect();
+    indices[..t].sort_by(|&a, &b| per_key_score[b].total_cmp(&per_key_score[a]));
+    indices.truncate(t);
     // No NNLS weights here — caller will fit β separately.
     let weights = vec![1.0f32; t];
 
@@ -192,24 +195,11 @@ mod tests {
         let n = 4;
         let keys: Vec<f32> = (0..t_len * d).map(|i| (i as f32).sin() * 0.5).collect();
         let queries: Vec<f32> = (0..n * d).map(|i| (i as f32).cos() * 0.3).collect();
-        for &method in &[
-            ScoreMethod::Mean,
-            ScoreMethod::Rms,
-            ScoreMethod::Max,
-        ] {
+        for &method in &[ScoreMethod::Mean, ScoreMethod::Rms, ScoreMethod::Max] {
             let mut s1 = Vec::new();
             let mut s2 = Vec::new();
-            let sel = select_highest_attn_keys(
-                &keys,
-                &queries,
-                4,
-                method,
-                t_len,
-                d,
-                n,
-                &mut s1,
-                &mut s2,
-            );
+            let sel =
+                select_highest_attn_keys(&keys, &queries, 4, method, t_len, d, n, &mut s1, &mut s2);
             assert_eq!(sel.indices.len(), 4);
             // No panic, returns valid result.
         }

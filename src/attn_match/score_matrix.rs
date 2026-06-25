@@ -122,6 +122,89 @@ pub fn compute_softmax_attention(
     }
 }
 
+/// Fused softmax + attention-output kernel.
+///
+/// Computes the unnormalized mass `m_i = Σ_j exp(s_ij − max_i)`, the
+/// normalized attention-output `Y_i = (Σ_j exp(s_ij − max_i) · V_j) / m_i`,
+/// and optionally the normalized attention weights `A_ij = exp(...)/m_i`.
+///
+/// # Why fuse
+///
+/// Separately, `compute_softmax_attention` writes the full `(n, t_len)`
+/// attention matrix into `attn_out`, and `compute_attention_output` then
+/// reads it back to compute `Y = A · V`. The fused kernel folds the `exp`
+/// directly into the `V` reduction, eliminating the `(n, t_len)` materialized
+/// attention matrix when the caller does not need it (i.e. when
+/// `attn_out_opt` is `None`).
+///
+/// # Float-op reordering (disclosed)
+///
+/// The unfused path computes `A_ij = exp(...)/m_i` first, then
+/// `Y_ik = Σ_j A_ij · V_jk`. The fused path accumulates
+/// `num_ik = Σ_j exp(...) · V_jk` and divides by `m_i` once at the end:
+/// `Y_ik = num_ik / m_i`. Distributing the division changes last-bit rounding
+/// (fewer divisions → arguably more accurate). This is a deliberate fusion
+/// tradeoff, not a bit-identical rewrite.
+///
+/// # Panics
+/// Panics if `scores.len() != n*t_len`, `values.len() != t_len*d`,
+/// `mass_out.len() != n`, `y_out.len() != n*d`, or if `attn_out_opt` is
+/// `Some` with a slice whose length `!= n*t_len`.
+#[inline]
+pub fn compute_softmax_attention_and_output(
+    scores: &[f32], // (n, t_len) row-major, already scaled by inv_sqrt_d
+    values: &[f32], // (t_len, d) row-major
+    n: usize,
+    t_len: usize,
+    d: usize,
+    mass_out: &mut [f32], // (n,) — Σ_j exp(s_ij) BEFORE normalization
+    y_out: &mut [f32],    // (n, d) — must be pre-zeroed
+    mut attn_out_opt: Option<&mut [f32]>, // (n, t_len) if the normalized weights are needed downstream
+) {
+    assert_eq!(scores.len(), n * t_len);
+    assert_eq!(values.len(), t_len * d);
+    assert_eq!(mass_out.len(), n);
+    assert_eq!(y_out.len(), n * d);
+    for i in 0..n {
+        let row = &scores[i * t_len..(i + 1) * t_len];
+        let y_row = &mut y_out[i * d..(i + 1) * d];
+
+        // Pass 1: per-row max (max-shift stabilization).
+        let mut max_s = row[0];
+        for &v in &row[1..] {
+            max_s = max_s.max(v);
+        }
+
+        // Pass 2: shifted exp → accumulate mass + Y numerator (+ optional attn).
+        let mut sum_exp = 0.0f32;
+        for j in 0..t_len {
+            let e = (row[j] - max_s).exp();
+            sum_exp += e;
+            // Y numerator: num_ik += e * V_jk. Sequential reads of V_j.
+            let v_row = &values[j * d..(j + 1) * d];
+            for k in 0..d {
+                y_row[k] += e * v_row[k];
+            }
+        }
+
+        // Pass 3: divide numerators by the mass → normalized Y and attn.
+        let denom = sum_exp.max(STABILITY_EPS);
+        let inv_denom = 1.0 / denom;
+        for k in 0..d {
+            y_row[k] *= inv_denom;
+        }
+        mass_out[i] = sum_exp;
+        if let Some(attn_out) = &mut attn_out_opt {
+            // Reconstruct normalized A_ij = exp(...)/denom. One extra exp pass,
+            // only when the caller actually needs the attention matrix (report).
+            let attn_row = &mut attn_out[i * t_len..(i + 1) * t_len];
+            for j in 0..t_len {
+                attn_row[j] = (row[j] - max_s).exp() * inv_denom;
+            }
+        }
+    }
+}
+
 /// Compute the attention output `Y = A · V` where `A` is `(n, t_len)` attention
 /// weights and `V` is `(t_len, d)` values. Output is `(n, d)` row-major.
 ///
@@ -142,7 +225,7 @@ pub fn compute_softmax_attention(
 /// Panics on dimension mismatch.
 #[inline]
 pub fn compute_attention_output(
-    attn: &[f32],  // (n, t_len) row-major — normalized attention weights
+    attn: &[f32],   // (n, t_len) row-major — normalized attention weights
     values: &[f32], // (t_len, d) row-major
     n: usize,
     t_len: usize,

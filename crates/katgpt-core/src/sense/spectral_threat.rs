@@ -86,6 +86,7 @@ struct LabeledRhythm {
     /// Number of damage events ingested for this participant.
     event_count: u32,
     /// Entity ID (source of damage / tracked participant).
+    #[allow(dead_code)]
     entity_id: u8,
 }
 
@@ -110,6 +111,7 @@ pub struct CombatRhythmTracker {
     /// Number of valid entries in `cells`.
     cell_count: u8,
     /// Hidden dimension — always HIDDEN_DIM. Kept for API compat.
+    #[allow(dead_code)]
     hidden_dim: u8,
     /// Timestep for imex_step (derived from tick rate, e.g. 16ms → 0.016).
     dt: f32,

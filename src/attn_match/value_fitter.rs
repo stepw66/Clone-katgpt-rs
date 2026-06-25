@@ -117,31 +117,8 @@ pub fn fit_cv_least_squares(
         }
         match cholesky_decompose(&xtx, t) {
             Some(l) => {
-                // Solve L Z = X^T Y (forward substitution), then L^T Cv = Z (back substitution).
-                let mut cv = vec![0.0f32; t * d];
-                // Hoist `z` outside the per-column loop — reuse across d columns
-                // instead of reallocating t f32 per column.
-                let mut z = vec![0.0f32; t];
-                // For each column of X^T Y (= each dim of d), solve the triangular system.
-                for col in 0..d {
-                    // Forward: L z = xty[:, col]
-                    for j in 0..t {
-                        let mut s = xty[j * d + col];
-                        for k in 0..j {
-                            s -= l[j * t + k] * z[k];
-                        }
-                        z[j] = s / l[j * t + j];
-                    }
-                    // Back: L^T cv[:, col] = z
-                    for j in (0..t).rev() {
-                        let mut s = z[j];
-                        for k in (j + 1)..t {
-                            s -= l[k * t + j] * cv[k * d + col];
-                        }
-                        cv[j * d + col] = s / l[j * t + j];
-                    }
-                }
-                // Compute reconstruction error.
+                // Solve L Z = X^T Y (forward), then L^T Cv = Z (back), per RHS column.
+                let cv = solve_cholesky_multi_rhs(&l, &xty, t, d);
                 let rel_err = compute_relative_error(&cv, x, y, n, t, d);
                 return ValueFitResult {
                     compact_values: cv,
@@ -165,25 +142,7 @@ pub fn fit_cv_least_squares(
                     }
                     // Try one more time with the heavy loading.
                     if let Some(l) = cholesky_decompose(&xtx, t) {
-                        let mut cv = vec![0.0f32; t * d];
-                        // Reuse z across columns (avoids per-column alloc).
-                        let mut z = vec![0.0f32; t];
-                        for col in 0..d {
-                            for j in 0..t {
-                                let mut s = xty[j * d + col];
-                                for k in 0..j {
-                                    s -= l[j * t + k] * z[k];
-                                }
-                                z[j] = s / l[j * t + j];
-                            }
-                            for j in (0..t).rev() {
-                                let mut s = z[j];
-                                for k in (j + 1)..t {
-                                    s -= l[k * t + j] * cv[k * d + col];
-                                }
-                                cv[j * d + col] = s / l[j * t + j];
-                            }
-                        }
+                        let cv = solve_cholesky_multi_rhs(&l, &xty, t, d);
                         let rel_err = compute_relative_error(&cv, x, y, n, t, d);
                         return ValueFitResult {
                             compact_values: cv,
@@ -204,6 +163,38 @@ pub fn fit_cv_least_squares(
             }
         }
     }
+}
+
+/// Solve `L L^T Cv = X^T Y` for the `(t, d)` RHS via forward+back substitution.
+///
+/// `l` is the lower-triangular Cholesky factor `(t, t)`, `rhs` is `X^T Y`
+/// laid out `(t, d)` row-major (`rhs[j*d + col]`). Returns `Cv` laid out `(t, d)`.
+///
+/// Hoists the `z` scratch outside the per-column loop — allocated once (t f32)
+/// and reused across all d columns, instead of reallocating per column.
+#[inline]
+fn solve_cholesky_multi_rhs(l: &[f32], rhs: &[f32], t: usize, d: usize) -> Vec<f32> {
+    let mut cv = vec![0.0f32; t * d];
+    let mut z = vec![0.0f32; t];
+    for col in 0..d {
+        // Forward: L z = rhs[:, col]
+        for j in 0..t {
+            let mut s = rhs[j * d + col];
+            for k in 0..j {
+                s -= l[j * t + k] * z[k];
+            }
+            z[j] = s / l[j * t + j];
+        }
+        // Back: L^T cv[:, col] = z
+        for j in (0..t).rev() {
+            let mut s = z[j];
+            for k in (j + 1)..t {
+                s -= l[k * t + j] * cv[k * d + col];
+            }
+            cv[j * d + col] = s / l[j * t + j];
+        }
+    }
+    cv
 }
 
 #[inline]

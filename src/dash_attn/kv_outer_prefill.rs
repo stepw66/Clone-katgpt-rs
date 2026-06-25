@@ -307,6 +307,7 @@ fn compute_scores(
 
 /// Find maximum value in a slice.
 #[inline]
+#[allow(dead_code)]
 fn find_max(slice: &[f32]) -> f32 {
     let mut max = f32::NEG_INFINITY;
     for &v in slice {
@@ -317,6 +318,7 @@ fn find_max(slice: &[f32]) -> f32 {
 
 /// Accumulate `w * values` into `out`.
 #[inline]
+#[allow(dead_code)]
 fn accumulate_scaled(out: &mut [f32], values: &[f32], w: f32) {
     let n = out.len().min(values.len());
     // 4-way unrolled for auto-vectorization

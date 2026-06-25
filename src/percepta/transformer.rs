@@ -517,6 +517,7 @@ impl VanillaTransformer {
     ///
     /// Returns [`TieBreak::Latest`] if the head's tiebreak flag is set,
     /// [`TieBreak::Average`] otherwise (including when metadata is missing).
+    #[allow(dead_code)]
     fn get_tie_break(&self, layer_idx: usize, head: usize) -> TieBreak {
         match self.weights.head_tiebreak.get(layer_idx) {
             Some(row) => match row.get(head) {

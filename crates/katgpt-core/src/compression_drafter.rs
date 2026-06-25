@@ -153,6 +153,7 @@ pub trait MatchScorer {
 /// LZ4-backed `MatchScorer`. Wraps the existing `Lz4FlexDrafter` for correctness
 /// validation of beam search (slow but accurate compressed-length scoring).
 pub struct Lz4MatchScorer {
+    #[allow(dead_code)]
     inner: Lz4FlexDrafter,
 }
 

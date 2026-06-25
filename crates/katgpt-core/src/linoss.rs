@@ -92,7 +92,8 @@ impl LinOSSCell {
             for i in 0..h {
                 y_out[i] = dt.mul_add(z_in[i], y_in[i]);
                 // z_out = z + dt·(−ω²·y_out − β·z + f)
-                let wz = (-self.omega_sq[i]).mul_add(y_out[i], -self.beta[i] * z_in[i]) + forcing[i];
+                let wz =
+                    (-self.omega_sq[i]).mul_add(y_out[i], -self.beta[i] * z_in[i]) + forcing[i];
                 z_out[i] = dt.mul_add(wz, z_in[i]);
             }
         }
@@ -131,7 +132,10 @@ impl LinOSSCell {
         let (ry, rz) = scratch.split_results(n * h);
         ry.chunks_exact(h)
             .zip(rz.chunks_exact(h))
-            .map(|(y, z)| LinOSSState { y: y.to_vec(), z: z.to_vec() })
+            .map(|(y, z)| LinOSSState {
+                y: y.to_vec(),
+                z: z.to_vec(),
+            })
             .collect()
     }
 
@@ -254,7 +258,10 @@ impl LinOSSCell {
         let (ry, rz) = scratch.split_results(n * h);
         ry.chunks_exact(h)
             .zip(rz.chunks_exact(h))
-            .map(|(y, z)| LinOSSState { y: y.to_vec(), z: z.to_vec() })
+            .map(|(y, z)| LinOSSState {
+                y: y.to_vec(),
+                z: z.to_vec(),
+            })
             .collect()
     }
 
@@ -467,7 +474,12 @@ impl VocabFourierBasis {
                 // SIMD AXPY — single-rounding FMA parity with the previous
                 // scalar 'cos_mode[d] += emb[d] * cos_w' loop. Hot path:
                 // n_candidates × n × vocab_dim scalar ops → SIMD.
-                crate::simd::simd_fused_scale_acc(&mut cos_mode[..vocab_dim], &emb[..vocab_dim], cos_w, vocab_dim);
+                crate::simd::simd_fused_scale_acc(
+                    &mut cos_mode[..vocab_dim],
+                    &emb[..vocab_dim],
+                    cos_w,
+                    vocab_dim,
+                );
             }
             let inv_n = 1.0 / n as f32;
             // SIMD scale in place, then SIMD sum-of-squares.
@@ -493,7 +505,12 @@ impl VocabFourierBasis {
                 // SIMD AXPY — matches Phase 1's hot path. Phase 2 runs only
                 // k_actual (typically ≤8) times, but each still touches
                 // n × vocab_dim elements, so SIMD still wins over scalar.
-                crate::simd::simd_fused_scale_acc(&mut cos_mode[..vocab_dim], &emb[..vocab_dim], cos_w, vocab_dim);
+                crate::simd::simd_fused_scale_acc(
+                    &mut cos_mode[..vocab_dim],
+                    &emb[..vocab_dim],
+                    cos_w,
+                    vocab_dim,
+                );
             }
             let inv_n = 1.0 / n as f32;
             crate::simd::simd_scale_inplace(&mut cos_mode[..vocab_dim], inv_n);
@@ -573,6 +590,7 @@ pub struct ModalSpecDrafter {
     /// Number of tokens in `embeddings`.
     n_tokens: usize,
     /// Pre-allocated zero-forcing buffer reused across `draft` calls.
+    #[allow(dead_code)]
     zero_forcing: Vec<f32>,
     hidden_dim: usize,
     dt: f32,
@@ -720,6 +738,7 @@ impl ModalSpecDrafter {
     }
 
     #[inline]
+    #[allow(dead_code)]
     fn project_to_hidden(&self, vec: &[f32], vocab_dim: usize) -> Vec<f32> {
         let h = self.hidden_dim;
         let mut result = vec![0.0f32; h];
@@ -744,6 +763,7 @@ impl ModalSpecDrafter {
 
     /// Extract first k elements of y (position) as modal coefficients.
     #[inline]
+    #[allow(dead_code)]
     fn extract_coefficients(&self, state: &LinOSSState, k: usize) -> Vec<f32> {
         let n = k.min(state.y.len());
         let mut coeffs = vec![0.0f32; k];

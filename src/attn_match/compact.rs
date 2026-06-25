@@ -14,7 +14,7 @@ use crate::attn_match::{
     beta_fitter::{BetaFitConfig, fit_beta_nnls},
     key_selection::{KeySelection, highest_attn::select_highest_attn_keys, omp::select_omp_keys},
     router::{SolverBackend, SolverRouter},
-    score_matrix::{compute_attention_output, compute_score_matrix, compute_softmax_attention},
+    score_matrix::{compute_score_matrix, compute_softmax_attention_and_output},
     score_matrix_rayon::compute_score_matrix_rayon,
     types::{AmConfig, AmResult, KeySelector, ReconstructionReport},
     value_fitter::{ValueFitConfig, compute_compact_attention, fit_cv_least_squares},
@@ -276,15 +276,45 @@ pub fn compact_with_router(
         }
     }
 
-    // Target mass m: compute from full K. This is the stage where the router
-    // actually dispatches across backends (the matrix is `n × T`, large).
+    // Target mass m and Y target: compute from full K. This is the stage where
+    // the router actually dispatches across backends (the matrix is `n × T`,
+    // large). We fuse the softmax + attention-output (Y) into one kernel so the
+    // `(n, t_len)` normalized-attention matrix is materialized only when the
+    // reconstruction report needs it — otherwise it is folded directly into the
+    // `Y = A · V` reduction. See `compute_softmax_attention_and_output` for
+    // the disclosed float-op reordering (divide-once vs per-element division).
     let score_backend = router.pick_backend(t_len.max(1), t_len, gpu_available);
     trace.score_matrix_backend = Some(score_backend);
     let mut full_scores = vec![0.0f32; n * t_len];
     dispatch_score_matrix(score_backend, queries, keys, n, t_len, d, &mut full_scores);
-    let mut full_attn = vec![0.0f32; n * t_len];
     let mut m_target = vec![0.0f32; n];
-    compute_softmax_attention(&full_scores, n, t_len, &mut full_attn, &mut m_target);
+    let mut y_target = vec![0.0f32; n * d];
+    let full_attn = if config.report_reconstruction {
+        let mut a = vec![0.0f32; n * t_len];
+        compute_softmax_attention_and_output(
+            &full_scores,
+            values,
+            n,
+            t_len,
+            d,
+            &mut m_target,
+            &mut y_target,
+            Some(&mut a),
+        );
+        a
+    } else {
+        compute_softmax_attention_and_output(
+            &full_scores,
+            values,
+            n,
+            t_len,
+            d,
+            &mut m_target,
+            &mut y_target,
+            None,
+        );
+        Vec::new()
+    };
 
     // Fit β. For OMP we already have weights from selection; we re-fit here to
     // also produce a relative error estimate.
@@ -307,12 +337,6 @@ pub fn compact_with_router(
     // Build X ∈ R^{n×t}: X_i = softmax((q_i Ck^T + β) / √d).
     let mut x_attn = vec![0.0f32; n * t];
     compute_compact_attention(queries, &compact_keys, &beta, n, t, d, &mut x_attn);
-
-    // Build Y ∈ R^{n×d}: Y_i = softmax(q_i K^T / √d) V = full_attn[i] · V.
-    // Extracted to the shared `compute_attention_output` kernel so both
-    // compact paths use the same cache-friendly ijk loop order.
-    let mut y_target = vec![0.0f32; n * d];
-    compute_attention_output(&full_attn, values, n, t_len, d, &mut y_target);
 
     let cv_cfg = ValueFitConfig {
         ridge_lambda: config.cv_ridge_lambda,

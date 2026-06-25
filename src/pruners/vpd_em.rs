@@ -63,6 +63,7 @@ fn log_sigmoid(x: f32) -> f32 {
 ///
 /// Numerically stable: subtract max before exp to avoid overflow.
 /// Returns `Vec<f32>` of same length where values sum to ~1.0 in probability space.
+#[allow(dead_code)]
 fn softmax(q: &[f32]) -> Vec<f32> {
     if q.is_empty() {
         return Vec::new();

@@ -107,9 +107,9 @@ pub struct BreakevenTracker {
     tier_cost_ema_us: AtomicU64,
     /// Total tokens processed at this tier.
     total_tokens: AtomicU64,
-    /// EMA smoothing factor (stored as fixed-point: α × 65536).
-    /// Default: α = 0.1 → 6553.
-    alpha_fixed: u16,
+    // alpha_fixed removed: always ALPHA_FIXED (6553), no setter. Using the
+    // const directly saves 8 bytes/tracker (u16 + 6 padding) and drops the
+    // 4-tracker bandit array from 160→128 bytes.
 }
 
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -131,7 +131,6 @@ impl BreakevenTracker {
             baseline_cost_ema_us: AtomicU64::new(0),
             tier_cost_ema_us: AtomicU64::new(0),
             total_tokens: AtomicU64::new(0),
-            alpha_fixed: Self::ALPHA_FIXED,
         }
     }
 
@@ -145,12 +144,12 @@ impl BreakevenTracker {
     /// Uses exponential moving average to track per-token cost
     /// at the baseline tier without storing all observations.
     pub fn observe_baseline(&self, timing_us: u64) {
-        Self::update_ema(&self.baseline_cost_ema_us, timing_us, self.alpha_fixed);
+        Self::update_ema(&self.baseline_cost_ema_us, timing_us);
     }
 
     /// Observe a tier timing and update EMA + token counter.
     pub fn observe_tier(&self, timing_us: u64) {
-        Self::update_ema(&self.tier_cost_ema_us, timing_us, self.alpha_fixed);
+        Self::update_ema(&self.tier_cost_ema_us, timing_us);
         self.total_tokens.fetch_add(1, Ordering::Relaxed);
     }
 
@@ -240,9 +239,9 @@ impl BreakevenTracker {
     ///
     /// EMA_new = α × value + (1 - α) × EMA_old
     /// Fixed-point: result_fp = α_fp × value + (65536 - α_fp) × EMA_old_fp / 65536
-    fn update_ema(ema: &AtomicU64, value: u64, alpha_fixed: u16) {
+    fn update_ema(ema: &AtomicU64, value: u64) {
         let old = ema.load(Ordering::Relaxed);
-        let alpha = alpha_fixed as u64;
+        let alpha = Self::ALPHA_FIXED as u64;
         let new = (alpha * value + (Self::FP_SCALE - alpha) * old) / Self::FP_SCALE;
         ema.store(new, Ordering::Relaxed);
     }
@@ -433,9 +432,17 @@ impl fmt::Display for BreakevenStats {
 
         f.write_str("Breakeven { CPU→GPU: N*=")?;
         write_n(f, self.cpu_to_gpu_n)?;
-        f.write_str(if self.cpu_to_gpu_amortized { " ✓ | GPU→ANE: N*=" } else { " … | GPU→ANE: N*=" })?;
+        f.write_str(if self.cpu_to_gpu_amortized {
+            " ✓ | GPU→ANE: N*="
+        } else {
+            " … | GPU→ANE: N*="
+        })?;
         write_n(f, self.gpu_to_ane_n)?;
-        f.write_str(if self.gpu_to_ane_amortized { " ✓ | CPU→SPEC: N*=" } else { " … | CPU→SPEC: N*=" })?;
+        f.write_str(if self.gpu_to_ane_amortized {
+            " ✓ | CPU→SPEC: N*="
+        } else {
+            " … | CPU→SPEC: N*="
+        })?;
         write_n(f, self.cpu_to_spec_n)?;
         f.write_str(" | GPU→SPEC: N*=")?;
         write_n(f, self.gpu_to_spec_n)?;

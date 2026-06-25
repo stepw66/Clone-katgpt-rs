@@ -282,10 +282,13 @@ fn fuse_and_sort(c: &mut [f32], a: &mut [f32], beta: f32, out: &mut Vec<ScoredCa
 
     // Fuse + emit. Fβ = (1−β)·zC + β·zU,  zU = −zA.
     // FMA-friendly: (1−β)·zC + β·(−zA) = (1−β)·zC − β·zA.
+    // The `zip` lets LLVM elide per-iteration bounds checks on `c` / `a`
+    // (both have length `n`); enumerate provides the input index for the
+    // stable tie-break.
     let one_minus_beta = 1.0 - beta;
-    for i in 0..n {
-        let z_c = (c[i] - mean_c) * inv_std_c;
-        let z_a = (a[i] - mean_a) * inv_std_a;
+    for (i, (c_i, a_i)) in c.iter().zip(a.iter()).enumerate() {
+        let z_c = (*c_i - mean_c) * inv_std_c;
+        let z_a = (*a_i - mean_a) * inv_std_a;
         let score = one_minus_beta.mul_add(z_c, -beta * z_a);
         out.push(ScoredCandidate::new(score, i));
     }
@@ -376,10 +379,11 @@ mod tests {
     }
 
     fn make_sampler(beta: f32) -> AlienSampler<f32, SumCoherence, FirstAtomAvailability> {
-        AlienSampler::new(SumCoherence, FirstAtomAvailability, AlienConfig {
-            beta,
-            top_m: 10,
-        })
+        AlienSampler::new(
+            SumCoherence,
+            FirstAtomAvailability,
+            AlienConfig { beta, top_m: 10 },
+        )
     }
 
     // ── Edge cases ─────────────────────────────────────────────────────────
@@ -403,7 +407,10 @@ mod tests {
         let out = s.rank(&candidates, &mut sc, &mut sa).unwrap();
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].idx, 0);
-        assert!(out[0].score.abs() < 1e-6, "single-candidate score should be 0");
+        assert!(
+            out[0].score.abs() < 1e-6,
+            "single-candidate score should be 0"
+        );
     }
 
     #[test]
@@ -414,7 +421,11 @@ mod tests {
         let mut sa = [0.0, 0.0, 0.0];
         let err = s.rank(&candidates, &mut sc, &mut sa).unwrap_err();
         match err {
-            AlienSamplerError::ScratchLengthMismatch { expected, got, which } => {
+            AlienSamplerError::ScratchLengthMismatch {
+                expected,
+                got,
+                which,
+            } => {
                 assert_eq!(expected, 3);
                 assert_eq!(got, 2);
                 assert_eq!(which, "coherence");
@@ -433,15 +444,18 @@ mod tests {
         // independently — so coherence-only and availability-only orderings
         // differ.
         let candidates = vec![
-            vec![10.0, 0.0],   // coh=10, avail=10
-            vec![1.0, 100.0],  // coh=101, avail=1
-            vec![5.0, 5.0],    // coh=10, avail=5
+            vec![10.0, 0.0],  // coh=10, avail=10
+            vec![1.0, 100.0], // coh=101, avail=1
+            vec![5.0, 5.0],   // coh=10, avail=5
         ];
         let mut sc = [0.0; 3];
         let mut sa = [0.0; 3];
         let out = s.rank(&candidates, &mut sc, &mut sa).unwrap();
         // Coherence values: [10, 101, 10]. Highest is idx 1, then idx 0/2 tie.
-        assert_eq!(out[0].idx, 1, "highest-coherence candidate should rank first");
+        assert_eq!(
+            out[0].idx, 1,
+            "highest-coherence candidate should rank first"
+        );
         // idx 0 and 2 both have coherence 10 → z=0 → tie → stable sort keeps
         // input order (0 before 2).
         assert_eq!(out[1].idx, 0);
@@ -453,16 +467,19 @@ mod tests {
         // β=1 → score = zU = −zA. Lower availability (more alien) ranks first.
         let s = make_sampler(1.0);
         let candidates = vec![
-            vec![10.0, 0.0],   // avail=10
-            vec![1.0, 100.0],  // avail=1   ← most alien
-            vec![5.0, 5.0],    // avail=5
+            vec![10.0, 0.0],  // avail=10
+            vec![1.0, 100.0], // avail=1   ← most alien
+            vec![5.0, 5.0],   // avail=5
         ];
         let mut sc = [0.0; 3];
         let mut sa = [0.0; 3];
         let out = s.rank(&candidates, &mut sc, &mut sa).unwrap();
         // Availability values: [10, 1, 5]. zA: [z, -z, 0]-ish.
         // zU = -zA, so highest zU = lowest zA = lowest availability = idx 1.
-        assert_eq!(out[0].idx, 1, "lowest-availability (most alien) should rank first");
+        assert_eq!(
+            out[0].idx, 1,
+            "lowest-availability (most alien) should rank first"
+        );
         // idx 2 (avail=5) is middle, idx 0 (avail=10) is highest availability.
         assert_eq!(out[1].idx, 2);
         assert_eq!(out[2].idx, 0);
@@ -473,20 +490,27 @@ mod tests {
         // All-equal coherence + all-equal availability → both std=0 → both
         // z=0 → score=0 for all. Output is in input order (stable sort on
         // ties).
-        let s = AlienSampler::new(SumCoherence, ConstAvailability(0.5), AlienConfig {
-            beta: 0.7,
-            top_m: 10,
-        });
+        let s = AlienSampler::new(
+            SumCoherence,
+            ConstAvailability(0.5),
+            AlienConfig {
+                beta: 0.7,
+                top_m: 10,
+            },
+        );
         let candidates = vec![
-            vec![1.0, 1.0],  // coh=2
-            vec![1.0, 1.0],  // coh=2 (same)
-            vec![1.0, 1.0],  // coh=2 (same)
+            vec![1.0, 1.0], // coh=2
+            vec![1.0, 1.0], // coh=2 (same)
+            vec![1.0, 1.0], // coh=2 (same)
         ];
         let mut sc = [0.0; 3];
         let mut sa = [0.0; 3];
         let out = s.rank(&candidates, &mut sc, &mut sa).unwrap();
         for sc_item in &out {
-            assert!(sc_item.score.abs() < 1e-6, "zero-variance pool should give score 0");
+            assert!(
+                sc_item.score.abs() < 1e-6,
+                "zero-variance pool should give score 0"
+            );
         }
         // Stable sort preserves input order on ties.
         assert_eq!(out[0].idx, 0);
@@ -537,7 +561,8 @@ mod tests {
         let mut out = Vec::with_capacity(3);
         // Put garbage in the buffer to verify it's cleared.
         out.push(ScoredCandidate::new(99.9, 99));
-        s.rank_into(&candidates, &mut sc, &mut sa, &mut out).unwrap();
+        s.rank_into(&candidates, &mut sc, &mut sa, &mut out)
+            .unwrap();
         assert_eq!(out.len(), 3);
         // No 99.99 garbage.
         assert!(out.iter().all(|s| s.idx < 3));
@@ -559,7 +584,8 @@ mod tests {
         let mut sc_a = [0.0; 5];
         let mut sa_a = [0.0; 5];
         let mut out_a = Vec::new();
-        s.rank_into(&candidates, &mut sc_a, &mut sa_a, &mut out_a).unwrap();
+        s.rank_into(&candidates, &mut sc_a, &mut sa_a, &mut out_a)
+            .unwrap();
 
         // Path B: pre-fill scratch manually, then rank_precomputed.
         // We reuse the same scorers by calling them directly.
@@ -570,7 +596,8 @@ mod tests {
             sa_b[i] = FirstAtomAvailability.availability(cand);
         }
         let mut out_b = Vec::new();
-        s.rank_precomputed(&mut sc_b, &mut sa_b, &mut out_b).unwrap();
+        s.rank_precomputed(&mut sc_b, &mut sa_b, &mut out_b)
+            .unwrap();
 
         assert_eq!(out_a, out_b, "rank_precomputed must match rank_into");
     }

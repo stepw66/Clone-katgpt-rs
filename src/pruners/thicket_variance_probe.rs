@@ -244,11 +244,7 @@ impl ProbeOutput {
     }
 
     /// Construct a probe output from a token and its top logits.
-    pub fn from_token_and_logits(
-        token_id: u32,
-        format_hash: u64,
-        logits: &[f32],
-    ) -> Self {
+    pub fn from_token_and_logits(token_id: u32, format_hash: u64, logits: &[f32]) -> Self {
         let mut top_logits = [0.0; TVP_TOP_LOGIT_CAP];
         let n = logits.len().min(TVP_TOP_LOGIT_CAP);
         top_logits[..n].copy_from_slice(&logits[..n]);
@@ -452,17 +448,14 @@ fn mean_pairwise_kl(probes: &[ProbeOutput]) -> f32 {
             pairs += 1;
         }
     }
-    if pairs == 0 {
-        0.0
-    } else {
-        sum / pairs as f32
-    }
+    if pairs == 0 { 0.0 } else { sum / pairs as f32 }
 }
 
 /// Symmetric KL divergence between two logit vectors (assumed same length).
 /// First applies softmax-style normalization via log-sum-exp for numerical
 /// stability. Note: this is internal normalization for a *signal*, not a
 /// probability — sigmoid (not softmax) is used at the routing layer.
+#[allow(dead_code)]
 fn symmetric_kl(a: &[f32], b: &[f32]) -> f32 {
     debug_assert_eq!(a.len(), b.len());
     let mut pa = [0.0f32; TVP_TOP_LOGIT_CAP];
@@ -1272,18 +1265,16 @@ mod tests {
 
     #[test]
     fn test_frozen_rejects_bad_magic() {
-        let mut frozen = TvpSignalFrozen::from_adapter(&TvpThresholdAdapter::new(
-            &TvpConfig::default(),
-        ));
+        let mut frozen =
+            TvpSignalFrozen::from_adapter(&TvpThresholdAdapter::new(&TvpConfig::default()));
         frozen.magic = *b"BAD!";
         assert!(frozen.validate().is_err());
     }
 
     #[test]
     fn test_frozen_rejects_bad_version() {
-        let mut frozen = TvpSignalFrozen::from_adapter(&TvpThresholdAdapter::new(
-            &TvpConfig::default(),
-        ));
+        let mut frozen =
+            TvpSignalFrozen::from_adapter(&TvpThresholdAdapter::new(&TvpConfig::default()));
         frozen.version = 999;
         assert!(frozen.validate().is_err());
     }

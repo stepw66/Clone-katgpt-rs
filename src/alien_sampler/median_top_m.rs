@@ -148,7 +148,10 @@ impl MedianTopMAvailability {
         let bank_flat: Vec<f32> = if dim == 0 {
             Vec::new()
         } else {
-            let cap = community_bank.len().checked_mul(dim).expect("bank size overflow");
+            let cap = community_bank
+                .len()
+                .checked_mul(dim)
+                .expect("bank size overflow");
             let mut flat = Vec::with_capacity(cap);
             for item in &community_bank {
                 flat.extend_from_slice(item);
@@ -271,7 +274,10 @@ impl MedianTopMAvailability {
             }
         }
         // Append rows flat.
-        let extra = items.len().checked_mul(self.bank_dim).expect("bank size overflow");
+        let extra = items
+            .len()
+            .checked_mul(self.bank_dim)
+            .expect("bank size overflow");
         self.bank_flat.reserve(extra);
         for item in items {
             self.bank_flat.extend_from_slice(item);
@@ -285,10 +291,12 @@ impl MedianTopMAvailability {
             let norm = s.sqrt();
             self.bank_norms.push(norm);
             // 0.0 sentinel for zero-norm (hot path skips).
-            self.bank_inv_norms.push(if norm > 0.0 { norm.recip() } else { 0.0 });
+            self.bank_inv_norms
+                .push(if norm > 0.0 { norm.recip() } else { 0.0 });
         }
         // Grow the convenience scratch to match.
-        self.scratch.resize(self.bank_flat.len() / self.bank_dim.max(1), 0.0);
+        self.scratch
+            .resize(self.bank_flat.len() / self.bank_dim.max(1), 0.0);
     }
 
     /// Force a full recompute of the cached norms.
@@ -482,11 +490,18 @@ impl MedianTopMAvailability {
         // - Zero-norm rows have inv_bank_norm = 0.0, and their dot product is
         //   0.0 (zero vector · anything = 0), so `dot * inv_cand_norm * 0.0 = 0.0`
         //   — no explicit zero-norm branch needed; the multiply handles it.
+        // - The three-way `zip` lets LLVM elide per-iteration bounds checks
+        //   on `cosine_scratch` / `bank_inv_norms` (lengths all == n_bank).
         // - `chunks_exact(dim)` avoids per-iteration index arithmetic; `zip`
         //   inside `dot_seq` handles short candidates.
-        for (i, row) in self.bank_flat.chunks_exact(dim).enumerate() {
+        for ((row, inv_norm), out) in self
+            .bank_flat
+            .chunks_exact(dim)
+            .zip(self.bank_inv_norms.iter())
+            .zip(cosine_scratch.iter_mut())
+        {
             let dot = dot_seq(cand_slice, row);
-            cosine_scratch[i] = dot * inv_cand_norm * self.bank_inv_norms[i];
+            *out = dot * inv_cand_norm * inv_norm;
         }
 
         // Pass 2: median of top-m.
@@ -676,7 +691,10 @@ mod tests {
         let mut sb = vec![0.0; s_b.bank_len()];
         let va = s_a.availability_embedded_with_scratch(&cand, &mut sa);
         let vb = s_b.availability_embedded_with_scratch(&cand, &mut sb);
-        assert!((va - vb).abs() < 1e-6, "from_flat_bank mismatch: {va} vs {vb}");
+        assert!(
+            (va - vb).abs() < 1e-6,
+            "from_flat_bank mismatch: {va} vs {vb}"
+        );
     }
 
     #[test]
@@ -696,10 +714,8 @@ mod tests {
         assert!((s.bank_inv_norms[2] - 0.2).abs() < 1e-6);
 
         // Matches a fresh `new` with the same full bank.
-        let fresh = MedianTopMAvailability::new(
-            vec![vec![3.0, 4.0], vec![1.0, 0.0], vec![0.0, 5.0]],
-            2,
-        );
+        let fresh =
+            MedianTopMAvailability::new(vec![vec![3.0, 4.0], vec![1.0, 0.0], vec![0.0, 5.0]], 2);
         assert_eq!(s.bank_flat(), fresh.bank_flat());
         assert_eq!(s.bank_norms, fresh.bank_norms);
         assert_eq!(s.bank_inv_norms, fresh.bank_inv_norms);
@@ -871,7 +887,10 @@ mod tests {
         let mut sb = MedianTopMAvailability::new(bank_b, 2);
         let va = sa.availability_embedded(&candidate);
         let vb = sb.availability_embedded(&candidate);
-        assert!((va - vb).abs() < 1e-6, "bank permutation changed result: {va} vs {vb}");
+        assert!(
+            (va - vb).abs() < 1e-6,
+            "bank permutation changed result: {va} vs {vb}"
+        );
     }
 
     #[test]

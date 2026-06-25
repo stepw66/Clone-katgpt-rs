@@ -102,62 +102,68 @@ pub fn select_omp_keys(
     let mut iter_count = 0usize;
     while selected.len() < t {
         // Correlation scores: c = Φ^T residual, computed in one cache-friendly
-        // pass. The previous form iterated j-outer / i-inner and did strided
-        // `phi[i*t_len + j]` reads — one cache miss per i per j. With n=8 and
-        // t_len=4096, that was 32K misses to read 128 KB. This i-outer form
-        // reads phi row-by-row (sequential) and writes corr_all sequentially.
+        // pass. The i-outer form reads phi row-by-row (sequential) and writes
+        // corr_all sequentially. The iterator form (`zip`) lets LLVM elide
+        // bounds checks and auto-vectorize the FMA inner loop with the broadcast
+        // scalar `r`.
         corr_all.fill(0.0);
-        for i in 0..n {
-            let r = residual[i];
-            let phi_row = &phi[i * t_len..(i + 1) * t_len];
-            for j in 0..t_len {
-                corr_all[j] += phi_row[j] * r;
+        for (r, phi_row) in residual.iter().zip(phi.chunks_exact(t_len)) {
+            for (corr, &pv) in corr_all.iter_mut().zip(phi_row) {
+                *corr += pv * r;
             }
         }
 
         // Pick top-k from corr_all, skipping selected keys.
-        let mut best_j = 0usize;
-        let mut best_score = f32::NEG_INFINITY;
         top_k_buf.clear();
-        for j in 0..t_len {
-            if in_selected[j] {
-                continue;
-            }
-            let corr = corr_all[j];
-            if corr > best_score {
-                best_score = corr;
-                best_j = j;
-            }
-            // Track top-k via unsorted buffer with linear-min replacement.
-            // The prior code called `sort_by` on every replacement once the
-            // buffer was full — O(k log k) per candidate, O(T·k log k) total.
-            // For k=4 default that's ~T·8 comparisons; the linear scan below
-            // is O(k) per candidate with no branch-heavy sort. Correctness is
-            // preserved because `top_k_buf` is consumed without order
-            // dependency (dedup via `in_selected`).
-            if top_k_buf.len() < k {
-                top_k_buf.push((j, corr));
-            } else {
-                // Find the slot with the minimum corr and replace if larger.
-                let mut min_idx = 0;
-                for m in 1..top_k_buf.len() {
-                    if top_k_buf[m].1 < top_k_buf[min_idx].1 {
-                        min_idx = m;
-                    }
-                }
-                if corr > top_k_buf[min_idx].1 {
-                    top_k_buf[min_idx] = (j, corr);
-                }
-            }
-        }
 
         if k == 1 {
-            // Single-key path — fastest.
+            // Fast path: argmax only — no top-k buffer maintenance. This is the
+            // default selector and the hottest OMP path, so skipping the
+            // linear-min-replacement bookkeeping (which is O(k) per candidate
+            // even for k=1) saves a branch + a tiny inner scan per candidate.
+            let mut best_j = 0usize;
+            let mut best_score = f32::NEG_INFINITY;
+            for j in 0..t_len {
+                if in_selected[j] {
+                    continue;
+                }
+                let corr = corr_all[j];
+                if corr > best_score {
+                    best_score = corr;
+                    best_j = j;
+                }
+            }
             if !in_selected[best_j] && selected.len() < t {
                 selected.push(best_j);
                 in_selected[best_j] = true;
             }
         } else {
+            // Multi-key path: track top-k via unsorted buffer with linear-min
+            // replacement. The prior code called `sort_by` on every replacement
+            // once the buffer was full — O(k log k) per candidate. This linear
+            // scan is O(k) per candidate. Correctness is preserved because
+            // `top_k_buf` is consumed without order dependency (dedup via
+            // `in_selected`).
+            for j in 0..t_len {
+                if in_selected[j] {
+                    continue;
+                }
+                let corr = corr_all[j];
+                if top_k_buf.len() < k {
+                    top_k_buf.push((j, corr));
+                } else {
+                    // Find the slot with the minimum corr and replace if larger.
+                    let mut min_idx = 0;
+                    for m in 1..top_k_buf.len() {
+                        if top_k_buf[m].1 < top_k_buf[min_idx].1 {
+                            min_idx = m;
+                        }
+                    }
+                    if corr > top_k_buf[min_idx].1 {
+                        top_k_buf[min_idx] = (j, corr);
+                    }
+                }
+            }
             // Add top-k new keys (deduplicated).
             for &(j, _) in &top_k_buf {
                 if !in_selected[j] && selected.len() < t {
@@ -181,8 +187,7 @@ pub fn select_omp_keys(
             let cur_t = selected.len();
             a_sub.clear();
             a_sub.resize(n * cur_t, 0.0);
-            for i in 0..n {
-                let phi_row = &phi[i * t_len..(i + 1) * t_len];
+            for (i, phi_row) in phi.chunks_exact(t_len).enumerate() {
                 let a_row = &mut a_sub[i * cur_t..(i + 1) * cur_t];
                 for (col, &sel_idx) in selected.iter().enumerate() {
                     a_row[col] = phi_row[sel_idx];
@@ -197,12 +202,12 @@ pub fn select_omp_keys(
             };
             let beta_result = fit_beta_nnls(&a_sub, &m_target, n, cur_t, &cfg);
             // Update residual: r = m − A w.
-            for i in 0..n {
-                let row = &a_sub[i * cur_t..(i + 1) * cur_t];
-                let mut aw_i = 0.0f32;
-                for j in 0..cur_t {
-                    aw_i += row[j] * beta_result.weights[j];
-                }
+            for (i, row) in a_sub.chunks_exact(cur_t).enumerate() {
+                let aw_i = row
+                    .iter()
+                    .zip(&beta_result.weights)
+                    .map(|(&a, &w)| a * w)
+                    .sum::<f32>();
                 residual[i] = m_target[i] - aw_i;
             }
             // Note: weights are recomputed in the final fit below; we don't keep
@@ -214,8 +219,7 @@ pub fn select_omp_keys(
     let final_t = selected.len();
     let mut a_final = vec![0.0f32; n * final_t];
     // Row-major construction — see periodic refit above for rationale.
-    for i in 0..n {
-        let phi_row = &phi[i * t_len..(i + 1) * t_len];
+    for (i, phi_row) in phi.chunks_exact(t_len).enumerate() {
         let a_row = &mut a_final[i * final_t..(i + 1) * final_t];
         for (col, &sel_idx) in selected.iter().enumerate() {
             a_row[col] = phi_row[sel_idx];

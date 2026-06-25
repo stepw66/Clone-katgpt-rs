@@ -63,11 +63,7 @@ impl HeadBudgetSolver {
     ///
     /// # Panics
     /// Panics if `curves.len() != num_layers * num_heads`.
-    pub fn new(
-        curves: Vec<HeadSensitivityCurve>,
-        num_layers: usize,
-        num_heads: usize,
-    ) -> Self {
+    pub fn new(curves: Vec<HeadSensitivityCurve>, num_layers: usize, num_heads: usize) -> Self {
         let expected = num_layers * num_heads;
         assert_eq!(
             curves.len(),
@@ -155,17 +151,25 @@ impl HeadBudgetSolver {
         // After each swap only 2 entries change, so we keep these in sync
         // incrementally and scan the cache (O(n) reads, no curve interpolation)
         // instead of recomputing all 2n interpolations per iteration.
+        //
+        // Sentinel encoding eliminates the `can_recv` / `can_donate` bool arrays:
+        // gains[i] = NEG_INFINITY  ⟺ head i cannot receive (+η would exceed 1.0)
+        // losses[i] = INFINITY     ⟺ head i cannot donate (r < η)
+        // Both sentinels are never selected by the argmax/argmin scans, so the
+        // per-iteration inner loops are branch-free (no flag lookup).
         let mut gains = vec![0.0f32; n];
         let mut losses = vec![0.0f32; n];
-        let mut can_recv = vec![false; n];
-        let mut can_donate = vec![false; n];
-        for i in 0..n {
+        for (i, g) in gains.iter_mut().enumerate() {
             let r = ratios[i];
-            can_recv[i] = r + step <= 1.0 + STABILITY_EPS;
-            can_donate[i] = r >= step;
-            gains[i] = self.curves[i].marginal_gain(r, step);
-            // loss[i] is meaningful only when head i can donate.
-            losses[i] = if can_donate[i] {
+            *g = if r + step <= 1.0 + STABILITY_EPS {
+                self.curves[i].marginal_gain(r, step)
+            } else {
+                f32::NEG_INFINITY
+            };
+        }
+        for (i, l) in losses.iter_mut().enumerate() {
+            let r = ratios[i];
+            *l = if r >= step {
                 self.curves[i].marginal_gain(r - step, step)
             } else {
                 f32::INFINITY
@@ -177,14 +181,12 @@ impl HeadBudgetSolver {
         while iter < MAX_ITERATIONS {
             iter += 1;
 
-            // Pass 1: find head `g` with the largest cached gain among those
-            // that can still receive budget.
+            // Pass 1: find head `g` with the largest cached gain. Heads that
+            // cannot receive carry NEG_INFINITY, so they never win the argmax —
+            // no separate flag scan needed.
             let mut best_gain_idx: Option<usize> = None;
             let mut best_gain = f32::NEG_INFINITY;
             for i in 0..n {
-                if !can_recv[i] {
-                    continue;
-                }
                 if gains[i] > best_gain {
                     best_gain = gains[i];
                     best_gain_idx = Some(i);
@@ -194,12 +196,13 @@ impl HeadBudgetSolver {
                 break; // No head can receive → done.
             };
 
-            // Pass 2: find head `l` (≠ g) with the smallest cached loss among
-            // those that can still donate.
+            // Pass 2: find head `l` (≠ g) with the smallest cached loss. Heads
+            // that cannot donate carry INFINITY, so they never win the argmin —
+            // no separate flag scan needed.
             let mut best_loss_idx: Option<usize> = None;
             let mut best_loss = f32::INFINITY;
             for i in 0..n {
-                if i == gain_idx || !can_donate[i] {
+                if i == gain_idx {
                     continue;
                 }
                 if losses[i] < best_loss {
@@ -223,13 +226,15 @@ impl HeadBudgetSolver {
             // Apply the swap and incrementally update only the 2 touched heads.
             ratios[gain_idx] += step;
             ratios[loss_idx] -= step;
-            // Refresh receive/donate flags and cached curves for both heads.
-            for idx in [gain_idx, loss_idx] {
+            // Refresh sentinel-encoded cached curves for both heads.
+            for &idx in &[gain_idx, loss_idx] {
                 let r = ratios[idx];
-                can_recv[idx] = r + step <= 1.0 + STABILITY_EPS;
-                can_donate[idx] = r >= step;
-                gains[idx] = self.curves[idx].marginal_gain(r, step);
-                losses[idx] = if can_donate[idx] {
+                gains[idx] = if r + step <= 1.0 + STABILITY_EPS {
+                    self.curves[idx].marginal_gain(r, step)
+                } else {
+                    f32::NEG_INFINITY
+                };
+                losses[idx] = if r >= step {
                     self.curves[idx].marginal_gain(r - step, step)
                 } else {
                     f32::INFINITY
@@ -298,7 +303,12 @@ mod tests {
     #[test]
     fn test_uniform_allocation_equal_shares() {
         // All heads have identical curves → uniform solution.
-        let curves = vec![flat_curve(0, 0.5), flat_curve(1, 0.5), flat_curve(2, 0.5), flat_curve(3, 0.5)];
+        let curves = vec![
+            flat_curve(0, 0.5),
+            flat_curve(1, 0.5),
+            flat_curve(2, 0.5),
+            flat_curve(3, 0.5),
+        ];
         let solver = HeadBudgetSolver::new(curves, 1, 4);
         let shares = solver.solve(0.5);
         assert_eq!(shares.len(), 4);
@@ -334,8 +344,8 @@ mod tests {
     fn test_solver_handles_sensitive_heads() {
         // 4 heads, one is much steeper than the others.
         let curves = vec![
-            steep_curve(0),                 // very sensitive
-            flat_curve(1, 0.05),            // barely matters
+            steep_curve(0),      // very sensitive
+            flat_curve(1, 0.05), // barely matters
             flat_curve(2, 0.05),
             flat_curve(3, 0.05),
         ];
