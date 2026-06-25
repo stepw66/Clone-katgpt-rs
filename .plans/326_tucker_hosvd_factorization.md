@@ -49,13 +49,13 @@ Generic HOSVD on flat `&[f32]` + shape descriptor. Pure numeric, no shard/chain/
 ### Phase 1 GOAT gate
 
 - [x] **T1.G1** Reconstruction quality: synthetic rank-`(2,2,2)` tensor, HOSVD with ranks=r → reconstruction rel error `< 1e-4` — **PASS via unit test `hosvd_low_rank_recovers_exact_low_rank_tensor`**
-- [ ] **T1.G2** Perf: `(8, 8, 8)` decompose + reconstruct mean latency ≤ 500µs — **PENDING**: bench could not run (system-level Rust binary execution failure under heavy parallel cargo load; analytical estimate ~75µs, well under budget). See `.benchmarks/326_tucker_hosvd_goat.md`.
-- [x] **T1.G3** No-regression: full-rank decomposition (`r_n = I_n` ∀n) → reconstruction max abs error `< 1e-4` — **PASS via unit test `hosvd_full_rank_is_near_lossless_3mode`**
-- [ ] **T1.G4** Alloc-free hot path: `tucker_decompose_into` with pre-warmed `TuckerScratch` → 0 allocations / 100 calls — **PENDING**: bench could not run (same system issue as G2; static design verification confirms no grow-path on hot path, but empirical CountingAllocator verification needed).
+- [x] **T1.G2** Perf: `(8, 8, 8)` decompose + reconstruct mean latency ≤ 500µs — **PASS**: empirically verified **73.89µs** (1000 iters, release, direct binary launch). See `.benchmarks/326_tucker_hosvd_goat.md`.
+- [x] **T1.G3** No-regression: full-rank decomposition (`r_n = I_n` ∀n) → reconstruction max abs error `< 1e-4` — **PASS via unit test** `hosvd_full_rank_is_near_lossless_3mode`
+- [x] **T1.G4** Alloc-free hot path: `tucker_decompose_into` with pre-warmed `TuckerScratch` → 0 allocations / 100 calls — **PASS**: empirically verified **0 allocs** via `CountingAllocator`. See `.benchmarks/326_tucker_hosvd_goat.md`.
 
 ### Phase 1 promotion
 
-- [ ] **T1.P** **NOT PROMOTED** — feature stays opt-in. G2/G4 pending empirical bench verification in a clean environment. Re-run `cargo bench -p katgpt-core --features tucker_factorization --bench bench_326_tucker_hosvd_goat -- --nocapture` once the environment recovers; if all 4 gates pass, promote to `default`.
+- [x] **T1.P** **PROMOTED to DEFAULT-ON** in `katgpt-rs/crates/katgpt-core/Cargo.toml` (Phase 3, 2026-06-25). All 4 GOAT gates PASS empirically (G1 4.096e-8, G2 73.89µs, G3 1.013e-6, G4 0 allocs). Pure modelless gain (closed-form HOSVD, no training). Re-verified by direct binary launch (`bench_326_tucker_hosvd_goat` bench) — bypasses the `cargo bench` dyld/trustd stall.
 
 ---
 
@@ -83,7 +83,7 @@ Wire the open primitive into `ShardCompactor` as an alternative cold-tier archiv
 
 ### Phase 2 GOAT gate
 
-- [ ] **T2.G1** Reconstruction quality: Tucker reconstructs shards whose leading semantic axis (top `semantic_axes` direction) has cosine similarity `≥ 0.95` with the source — **PENDING**: requires `phase_transition_subspace_phase_gate` co-feature + semantic_axes API; tracked as follow-up. The full-rank near-lossless test (rel err < 1e-3) is a weaker substitute that PASSES.
+- [x] **T2.G1** Reconstruction quality: Tucker reconstructs shards whose leading semantic axis (top `semantic_axes` direction) has cosine similarity `≥ 0.95` with the source — **PASS** via test `tucker_preserves_leading_semantic_axis` (gated on `phase_transition_subspace_phase_gate` co-feature). Constructs rank-1-dominant shards (10x dominant term + small noise), compacts with default ranks `(8,4,4)`, reconstructs, and asserts the min leading-axis cosine across the batch is ≥ 0.95. Sign-ambiguity handled via `|cos|`.
 - [ ] **T2.G2** Storage compression: Tucker envelope `compressed_floats` beats shallow-AM (ratio ≥ 0.5) at N=16 — **PASS via test** `tucker_envelope_is_smaller_than_am_at_n_16` (Tucker 320 < shallow-AM 512 floats at N=16, ratio 0.5). Note: at deep AM ratio (0.1, M=2 → 128 floats), AM wins — Tucker is for archival, not deep reduction. Original plan target "N=64" was re-spec'd to N=16 due to the SVD_MAX_RANK=16 constraint discovered in Phase 1.
 - [x] **T2.G3** No-regression: full-rank Tucker (`r_N=N, r_R=8, r_C=8`) → reconstruction rel-Frob err `< 1e-3` — **PASS via test** `full_rank_tucker_is_near_lossless`.
 - [ ] **T2.G4** Alloc-free reconstruction hot path — **PENDING**: the `reconstruct_into_with_scratch` API is in place (caller-supplied `TuckerScratch`), but the `TuckerResultScratch::from_owned` call inside still allocates one `Vec`. A truly zero-alloc path would persist the scratch across calls. Deferred — the cold-tier reload path is not yet a proven hot-path bottleneck.
@@ -100,7 +100,7 @@ Wire the open primitive into `ShardCompactor` as an alternative cold-tier archiv
 - [x] **T3.2** Verify `cargo check -p riir-neuron-db` (default features) clean — **PASS** (no default-feature regression).
 - [x] **T3.3** Verify `cargo clippy -p riir-neuron-db --features tucker_factorization -- -D warnings` clean — **PASS** (0 warnings on the new module).
 - [x] **T3.4** Verify katgpt-core Tucker tests (28 total, including 3 new `from_owned` tests) — **PASS** (28 passed; 0 failed).
-- [ ] **T3.5** Run riir-neuron-db Tucker compactor tests (19 tests written) — **BLOCKED**: test binary launch hits the system-level dyld/trustd stall intermittently. `cargo check` + `cargo clippy` pass; the logic mirrors the AM compactor patterns and the katgpt-core API verified by T3.4.
+- [x] **T3.5** Run riir-neuron-db Tucker compactor tests — **PASS**: 21/21 tests pass (direct binary launch bypassing the `cargo test` dyld/trustd stall). Includes the new `tucker_preserves_leading_semantic_axis` T2.G1 test (gated on `phase_transition_subspace_phase_gate`, on by default).
 - [x] **T3.6** Commit on `develop` with `feat:` prefix.
 
 ---
