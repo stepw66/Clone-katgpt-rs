@@ -426,6 +426,74 @@ impl TuckerResultScratch {
         let compressed = self.core.len() + self.factors.len();
         compressed as f32 / original as f32
     }
+
+    /// Rebuild a scratch result from an owned [`TuckerResult`] (inverse of
+    /// [`TuckerResult::from_scratch`]).
+    ///
+    /// This is the Cold-tier reload path: a persisted `TuckerResult` (core +
+    /// factor matrices + shapes) is loaded back into the hot-path SOA layout so
+    /// [`tucker_reconstruct_into`] can run without re-decomposing. The shapes
+    /// must be consistent (core length = product of `core_shape`, each factor
+    /// length = `I_n * r_n`); otherwise a [`TuckerError::InputSizeMismatch`] is
+    /// returned naming the offending region.
+    ///
+    /// Allocates once (the SOA buffers); reuse the resulting scratch across
+    /// many reconstruction calls.
+    pub fn from_owned(result: &TuckerResult) -> Result<Self, TuckerError> {
+        let nmodes = result.factor_shapes.len();
+        if nmodes == 0 || nmodes > MAX_MODES {
+            return Err(TuckerError::InvalidModeCount {
+                got: nmodes,
+                max: MAX_MODES,
+            });
+        }
+        if result.core.len() != result.core_shape.iter().product::<usize>() {
+            return Err(TuckerError::InputSizeMismatch {
+                got: result.core.len(),
+                expected: result.core_shape.iter().product(),
+            });
+        }
+        if result.factors.len() != nmodes || result.core_shape.len() != nmodes {
+            return Err(TuckerError::InvalidModeCount {
+                got: result.factors.len(),
+                max: MAX_MODES,
+            });
+        }
+        // Validate each factor length and build the flat layout + offsets.
+        let mut shape = [0usize; MAX_MODES];
+        let mut ranks = [0usize; MAX_MODES];
+        let mut factor_offsets = [0usize; MAX_MODES];
+        let mut factors_flat = Vec::new();
+        let mut acc = 0usize;
+        for n in 0..nmodes {
+            let (i_n, r_n) = result.factor_shapes[n];
+            let expected_len = i_n * r_n;
+            if result.factors[n].len() != expected_len {
+                return Err(TuckerError::InputSizeMismatch {
+                    got: result.factors[n].len(),
+                    expected: expected_len,
+                });
+            }
+            shape[n] = i_n;
+            ranks[n] = r_n;
+            factor_offsets[n] = acc;
+            acc += expected_len;
+            factors_flat.extend_from_slice(&result.factors[n]);
+        }
+        Ok(Self {
+            core: result.core.clone(),
+            factors: factors_flat,
+            factor_offsets,
+            factor_rows: shape,
+            factor_cols: ranks,
+            core_shape: {
+                let mut cs = [0usize; MAX_MODES];
+                cs[..nmodes].copy_from_slice(&result.core_shape);
+                cs
+            },
+            n_modes: nmodes as u8,
+        })
+    }
 }
 
 /// Owned HOSVD result for one-shot consumers. Hot paths use [`TuckerResultScratch`].
@@ -1467,6 +1535,89 @@ mod tests {
                 assert_eq!(max, SVD_MAX_RANK);
             }
             _ => panic!("expected ShapeExceedsSvdLimit, got {err:?}"),
+        }
+    }
+
+    // ── from_owned round-trip (Cold-tier reload path) ──────────────────────
+
+    #[test]
+    fn from_owned_reconstructs_identically_to_original_scratch() {
+        // decompose → from_scratch (owned) → from_owned (scratch) → reconstruct
+        // must give the same tensor as reconstructing directly from the original
+        // scratch result. This is the Cold-tier reload contract.
+        let shape = [8, 8, 8];
+        let total = 512;
+        let x: Vec<f32> = (0..total).map(|i| ((i as f32) * 0.07).sin()).collect();
+        let cfg = TuckerConfig::new(&shape, &[4, 4, 4]).unwrap();
+        let mut scratch = TuckerScratch::with_capacity(&cfg);
+        let mut result = TuckerResultScratch::with_capacity(&cfg);
+        tucker_decompose_into(&x, &cfg, &mut scratch, &mut result).unwrap();
+
+        // Direct reconstruction from the original scratch.
+        let mut recon_direct = vec![0.0f32; total];
+        tucker_reconstruct_into(&result, &shape, &mut recon_direct, &mut scratch).unwrap();
+
+        // Cold-tier reload path: scratch → owned → scratch → reconstruct.
+        let owned = TuckerResult::from_scratch(&result);
+        let reloaded = TuckerResultScratch::from_owned(&owned).expect("from_owned must succeed");
+        let mut recon_reload = vec![0.0f32; total];
+        tucker_reconstruct_into(&reloaded, &shape, &mut recon_reload, &mut scratch).unwrap();
+
+        // Bit-identical: the reload path must not perturb the reconstruction.
+        for i in 0..total {
+            assert_eq!(
+                recon_direct[i], recon_reload[i],
+                "recon[{i}] differs between direct and reload path"
+            );
+        }
+    }
+
+    #[test]
+    fn from_owned_rejects_inconsistent_core_length() {
+        let owned = TuckerResult {
+            core: vec![0.0; 8],   // claims 8 elements
+            factors: vec![vec![0.0; 4]],
+            core_shape: vec![2, 2, 2], // product = 8 ✓ — make it inconsistent
+            factor_shapes: vec![(2, 2)],
+        };
+        // core.len()==8 == product(core_shape)==8 → core is fine, but this has
+        // 1 factor for a 3-mode core_shape → InvalidModeCount. Build a truly
+        // core-inconsistent one:
+        let owned_bad = TuckerResult {
+            core: vec![0.0; 7],       // 7 ≠ 2*2*2 = 8
+            factors: vec![vec![0.0; 4], vec![0.0; 4], vec![0.0; 4]],
+            core_shape: vec![2, 2, 2],
+            factor_shapes: vec![(2, 2), (2, 2), (2, 2)],
+        };
+        let err = TuckerResultScratch::from_owned(&owned_bad).unwrap_err();
+        match err {
+            TuckerError::InputSizeMismatch { got, expected } => {
+                assert_eq!(got, 7);
+                assert_eq!(expected, 8);
+            }
+            _ => panic!("expected InputSizeMismatch, got {err:?}"),
+        }
+        // Also confirm the well-formed one works (the first `owned` is rejected
+        // for mode-count mismatch, not core mismatch — sanity check both paths):
+        let err_modes = TuckerResultScratch::from_owned(&owned).unwrap_err();
+        assert!(matches!(err_modes, TuckerError::InvalidModeCount { .. }));
+    }
+
+    #[test]
+    fn from_owned_rejects_inconsistent_factor_length() {
+        let owned = TuckerResult {
+            core: vec![0.0; 8],
+            factors: vec![vec![0.0; 3], vec![0.0; 4], vec![0.0; 4]], // mode 0: 3 ≠ 2*2=4
+            core_shape: vec![2, 2, 2],
+            factor_shapes: vec![(2, 2), (2, 2), (2, 2)],
+        };
+        let err = TuckerResultScratch::from_owned(&owned).unwrap_err();
+        match err {
+            TuckerError::InputSizeMismatch { got, expected } => {
+                assert_eq!(got, 3);
+                assert_eq!(expected, 4);
+            }
+            _ => panic!("expected InputSizeMismatch, got {err:?}"),
         }
     }
 }
