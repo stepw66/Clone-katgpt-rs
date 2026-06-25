@@ -318,17 +318,34 @@ mod tests {
 
     #[test]
     fn compaction_audit_record_is_pod_and_zeroable() {
-        let zero: CompactionAuditRecord<3> = bytemuck::Zeroable::zeroed();
+        // `<const N>` pinning via turbofish throughout: rust-analyzer mis-infers
+        // the const-generic `N` for `[PredicateAudit; N]` fields otherwise,
+        // producing a spurious `[PredicateAudit; 3]` vs `[PredicateAudit; 1]`
+        // mismatch on field access. The code is correct under `cargo`; the
+        // explicit annotations just help the IDE's inference.
+        type Rec = CompactionAuditRecord<3>;
+        let zero: Rec = bytemuck::Zeroable::zeroed();
         assert_eq!(zero.trajectory_len, 0);
         assert_eq!(zero.decision, DecisionKind::Continue.to_byte());
 
-        // Round-trip through bytes.
-        let mut r: CompactionAuditRecord<3> = CompactionAuditRecord::default();
-        r.trajectory_len = 1234;
-        r.decision = DecisionKind::Compress.to_byte();
-        r.predicates[0] = PredicateAudit::yes(10, 2);
-        let bytes: &[u8] = bytemuck::bytes_of(&r);
-        let back: &CompactionAuditRecord<3> = bytemuck::from_bytes(bytes);
+        // Round-trip through bytes. Build directly with a struct expression
+        // rather than `Default::default()` + field reassign (clippy).
+        let predicates = [
+            PredicateAudit::yes(10, 2),
+            PredicateAudit::default(),
+            PredicateAudit::default(),
+        ];
+        let r: Rec = CompactionAuditRecord {
+            trajectory_len: 1234,
+            predicates,
+            fire_rule_eval: FireRuleEval::default(),
+            backstop_triggered: 0,
+            skip_if_reliable_triggered: 0,
+            decision: DecisionKind::Compress.to_byte(),
+            _pad: 0,
+        };
+        let bytes: &[u8] = bytemuck::bytes_of::<Rec>(&r);
+        let back: &Rec = bytemuck::from_bytes::<Rec>(bytes);
         assert_eq!(back, &r);
         assert_eq!(back.trajectory_len, 1234);
         assert!(back.is_compress());
