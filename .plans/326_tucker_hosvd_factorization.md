@@ -21,9 +21,48 @@ This is the third and last Gain-tier candidate plan from Research 307 (FNO pract
 | `compact` (AM) | `M` shards × 64 floats | N/M ratio | Live Hot/Warm tier — produce fewer, representative shards |
 | `compact_tucker` (new) | core `(r_N·r_R·r_C)` + 3 factors | depends on ranks | Cold-tier archival — store a whole zone's shard set as one factored tensor |
 
-For a zone with N=64 shards reshaped `(64, 8, 8)` and ranks `(8, 4, 4)`: original = 4096 floats, Tucker = 128 (core) + 3·(64·8 + 8·4 + 8·4) = 128 + 1664 = 1792 floats → **2.3× compression**, lossy within the truncation budget. The AM path cannot achieve this because it always produces `Vec<NeuronShard>` — one Pod per output — paying the 64-float overhead per shard.
+For a zone with N=64 shards reshaped `(64, 8, 8)` and ranks `(8, 4, 4)`: original = 4096 floats, Tucker = 128 (core) + 3·(64·8 + 8·4 + 8·4) = 128 + 1664 = 1792 floats → **2.3× compression** (lossy within the truncation budget). **⚠ NOTE: this N=64 example is currently impossible** — the implementation caps at `MAX_SHARDS_PER_TUCKER = SVD_MAX_RANK = 16` (see the SVD limit note below). It would require chunking into ≥5 envelopes, whose per-envelope factor overhead is NOT included in this 2.3× figure. The example is retained as the asymptotic rationale; the T2.7 bench is the only empirically validated range (N ≤ 16, where AM-deep wins on raw floats). The AM path cannot achieve factorized compression because it always produces `Vec<NeuronShard>` — one Pod per output — paying the 64-float overhead per shard.
 
 **Modelless:** pure closed-form linear algebra — mode-n unfoldings + thin SVD + tensor-times-matrix contractions. No gradient descent, no learned weights, no training. Promotable to default-on if the GOAT gate passes.
+
+## Consumer / adoption status (honest)
+
+> **As of 2026-06-25: ZERO production consumers.** `compact_tucker` is called
+> only by its own test suite and the T2.7 crossover bench. No code in
+> riir-neuron-db, riir-ai, riir-chain, or any other repo calls it.
+
+This plan's primary motivation is **research-driven** (close the last FNO-derived
+modelless gap per Research 307), NOT consumer-driven. The "Cold-tier archival"
+framing above is **speculative** — it describes a plausible use case, not a
+validated one. No downstream tier-management, replay, or audit code path
+actually invokes Tucker compaction.
+
+**Adoption criteria (what would make this real):** a downstream consumer must
+validate that fidelity-preserving batch archival (rel-Frob ~1e-6, vs AM's lossy
+~1.0 reduction) is worth the integration cost. Candidate consumers that *would*
+justify Tucker, if/when they exist:
+
+- **Cold-tier replay/audit** — a path that archives a zone's shard batch and must
+  later reconstruct it bit-faithfully (for deterministic replay, regulatory
+  audit, or warm-reload to exact state). AM cannot do this at any ratio; Tucker
+  can. No such path exists yet.
+- **Cross-zone batch transfer** — shipping one factored envelope instead of N
+  Pods over the wire. Speculative; no transfer code uses this.
+
+**Known limitation the original Goal example ignored:** the Goal cites N=64
+shards → 2.3× compression, but the implementation caps at `MAX_SHARDS_PER_TUCKER
+= SVD_MAX_RANK = 16`. N=64 requires chunking into ≥5 envelopes, and the
+per-envelope factor overhead invalidates the 2.3× math. The T2.7 bench
+(N ∈ {4,8,16}) is the only empirically validated range; at those sizes AM-deep
+(0.1) beats Tucker on raw floats at every cell. Tucker's storage advantage, if
+any, is unproven for N > 16.
+
+**Why it shipped anyway:** the katgpt-core *primitive* (generic N-mode HOSVD)
+has independent value as a linear-algebra building block and is correctly
+DEFAULT-ON there (G1–G4 pass, pure math). The riir-neuron-db *integration*
+(`compact_tucker`) is the speculative part — it stays OPT-IN until a consumer
+materializes. If none does within a reasonable soak window, the integration
+should be considered for removal (the primitive in katgpt-core stays).
 
 ---
 
