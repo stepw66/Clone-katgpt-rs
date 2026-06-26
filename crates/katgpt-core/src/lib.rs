@@ -430,6 +430,22 @@ pub use babel_codec::{
     BabelCodec, BabelCommitment, BabelPair, CompressedLatent, FixedRuleTextCodec, SigmoidLatentCodec,
 };
 
+// Analytic Lattice — k×k transport operator chain composer + ASOC trait shapes
+// + direction-vector SIMD decoder + spectral audit (Plan 330, Research 311).
+// katgpt-core half: pure math primitives + generic trait shapes (NO GpuFuture
+// import — leaf-clean). The ComposerTick: GpuFuture impl + Join3 combinator
+// ship in riir-engine under the `analytic_lattice_runtime` feature (Phase 1b).
+// Opt-in until G1–G6 GOAT gate passes.
+#[cfg(feature = "analytic_lattice")]
+pub mod analytic_lattice;
+#[cfg(feature = "analytic_lattice")]
+pub use analytic_lattice::{
+    ChainError, ComposerCtx, LatticeVector, PlasmaDraft, RederiveOp, TransportOperator,
+    apply_operator_into, audit::AuditReport, audit::spectral_audit, batch_compose_chain,
+    batch_compose_chain_into, compose_chain, compose_chain_into, decoder::direction_vector_decode,
+    decoder::direction_vector_decode_into,
+};
+
 // Functional Attention — closed-form Tikhonov spectral transport operator
 // (Plan 286, Research 257, arxiv 2605.31559, Xiao et al. ICML 2026). DUAL FORM
 // matching the reference implementation (`.raw/FUNCATTN/PDE-StandardBenchmark/model/

@@ -1,0 +1,200 @@
+# Plan 332 — Structured Basis Selection for FUNCATTN: GOAT Gate Results
+
+**Date:** 2026-06-26
+**Plan:** [332_structured_basis_selection_for_funcattn.md](../.plans/332_structured_basis_selection_for_funcattn.md)
+**Feature:** `funcattn_structured_basis` (opt-in, NOT promoted to default)
+**Verdict:** **MIXED — partial PASS (Haar-packet at k≤8, τ=0.5), full KILL (DCT-log everywhere). Strict G1+G2 gate FAILS; not promoted.**
+
+---
+
+## TL;DR
+
+The Phase 0 probe (Issue 001) showed a HAND-CRAFTED signal-aligned basis beats random-orthogonal by +0.11 cos on multi-scale transport. Plan 332 asked: can a PRINCIPLED fixed basis (no a-priori signal knowledge) capture ≥50% of that gain?
+
+**Answer: yes for Haar-packet at small k and moderate temperature; no for DCT-log; no for either at sharp sigmoid (τ=0.1).**
+
+- **Haar-packet** captures **77.4%** of the achievable gain at k=8, τ=0.5 (the default). Wins at k∈{4,8}, loses at k≥16.
+- **DCT-log** actively HURTS at every k and τ tested (worst case −0.5370 cos vs random at k=32).
+- The k-sweep confirms the hypothesis (T3.3): principled bases help most at small k where random is rank-starved. The elbow is at k=16 — exactly the boundary of the NPC regime (k=4..16).
+- Because the strict gate (G1 requires BOTH bases to pass) fails, **the feature stays opt-in**. The Haar constructor is documented as the recommended choice for small-k transport tasks; DCT-log is kept for completeness but not recommended.
+
+---
+
+## Test artifacts
+
+| File | Purpose |
+|------|---------|
+| `crates/katgpt-core/src/funcattn.rs` | `make_dct_log_basis`, `make_haar_packet_basis`, `gram_schmidt_rows` (private helper) — all gated by `#[cfg(feature = "funcattn_structured_basis")]` |
+| `crates/katgpt-core/src/funcattn.rs` (tests module) | 5 unit tests: orthonormality, frequency coverage, forward-pass sanity |
+| `crates/katgpt-core/tests/funcattn_structured_basis_g1.rs` | Phase 2 GOAT gate (G1 + G2 verdict) |
+| `crates/katgpt-core/tests/funcattn_structured_basis_k_sweep.rs` | Phase 3 k-sweep (k ∈ {4,8,16,32}) |
+
+---
+
+## Phase 2 — GOAT gate (d=64, n=20, k=8)
+
+### τ = 0.5 (the default temperature)
+
+| Basis | cos(out, target) | Δ vs random | G1 (≥+0.05) | G2 (≥50% of achievable) |
+|-------|------------------|-------------|-------------|--------------------------|
+| random-orthogonal | +0.4806 | — (baseline) | — | — |
+| hand-crafted (upper bound) | +0.5900 | +0.1093 | — | 100% (definition) |
+| **DCT-log** | +0.3379 | **−0.1427** | ❌ KILL | −130.5% |
+| **Haar-packet** | +0.5652 | **+0.0846** | ✅ PASS | **77.4% ✅ PASS** |
+
+### τ = 0.1 (sharp sigmoid)
+
+| Basis | cos(out, target) | Δ vs random | G1 | G2 |
+|-------|------------------|-------------|----|----|
+| random-orthogonal | +0.5526 | — | — | — |
+| hand-crafted | +0.5772 | +0.0245 | — | 100% |
+| DCT-log | +0.4180 | −0.1346 | ❌ KILL | −548.7% |
+| Haar-packet | +0.4678 | −0.0848 | ❌ KILL | −345.8% |
+
+**Observation:** at τ=0.1 the sigmoid is so sharp that Φ saturates and basis choice matters less — consistent with the Phase 0 probe finding. The gate is only meaningful at τ=0.5 (the default).
+
+### Verdict
+
+- **G1 (strict AND of both bases)**: **FAIL** — DCT-log fails at both τ; Haar fails at τ=0.1.
+- **G2 (strict AND)**: **FAIL** — same reason.
+- **Per-basis**: Haar-packet PASSES G1+G2 at τ=0.5 (the meaningful regime); DCT-log KILLS everywhere.
+
+Per Plan 332 T4.3, the strict-gate failure means **document the negative result and do NOT promote to default**. The partial success (Haar at τ=0.5, k≤8) is recorded below as a documented option for callers.
+
+---
+
+## Phase 3 — k-sweep (d=64, n=20, τ=0.5)
+
+```
+   k      random     DCT-log   Haar-packet  hand-craft  Δ(DCT-rand)   Δ(Haar-r)
+   4     +0.4192     +0.1228       +0.5065     +0.4837     -0.2965     +0.0873
+   8     +0.4806     +0.3379       +0.5652     +0.5900     -0.1427     +0.0846
+  16     +0.6370     +0.2066       +0.4548     +0.6066     -0.4305     -0.1822
+  32     +0.6698     +0.1328       +0.3091     +0.4968     -0.5370     -0.3607
+```
+
+### Elbow analysis (T3.3)
+
+- **k=4**: best principled (Haar) +0.5065, random +0.4192, **gap +0.0873** ✅
+- **k=8**: best principled (Haar) +0.5652, random +0.4806, **gap +0.0846** ✅
+- **k=16**: best principled (Haar) +0.4548, random +0.6370, **gap −0.1822** ❌ (elbow)
+- **k=32**: best principled (Haar) +0.3091, random +0.6698, **gap −0.3607** ❌
+
+**Hypothesis CONFIRMED**: principled bases help more at small k. k=4 gap = +0.0873, k=32 gap = −0.3607.
+
+**Elbow at k=16**: above this, random-orthogonal catches up and overtakes principled. This matches the NPC regime boundary (k=4..16) flagged in Research 257 §5 item 5.
+
+### Why DCT-log loses everywhere
+
+DCT-log picks smooth log-spaced sinusoids. For the smoothing-transport target (a *local* operation — blend neighbors), smooth basis vectors cannot sparsely differentiate adjacent tokens: the Φ rows for neighbors are nearly identical, so the transport operator `Φ · C · Ṽ` cannot implement "weight neighbor tokens differently from self". Haar wavelets, with their localized support, *can* differentiate neighbors — that's why Haar wins where DCT loses.
+
+This is consistent with classical wavelet theory: **Haar is the canonical basis for local/piecewise operators; DCT is the canonical basis for smooth/global operators.** The transport-smoothing task is local, so Haar wins.
+
+### Why Haar loses at k ≥ 16
+
+At large k the random-orthogonal basis has enough rank to approximate any direction in the d=64 space, including the localized directions Haar uses. The "rank-starvation" advantage of structured bases evaporates. This is the curse-of-dimensionality working in our favor for once: at k≪d, structure helps; at k≈d/2, structure is redundant.
+
+---
+
+## Phase 2 G3 + G4 (no-regression, zero-alloc)
+
+- **G3** (existing FUNCATTN tests still pass): ✅ all 22 `funcattn::tests::*` pass with `funcattn_structured_basis` enabled (17 original + 5 new).
+- **G4** (`funcattn_g5_zero_alloc` still passes): ✅ the constructors are init-time only; the forward hot path is unchanged. Zero-alloc steady state preserved by construction.
+
+---
+
+## Decision (Plan 332 Phase 4)
+
+- **T4.1 (promote to default)**: ❌ NOT done. Strict G1+G2 fails (DCT-log kills the AND).
+- **T4.2 (auto-select structured for small k)**: ❌ NOT done. Same reason — the gate didn't pass cleanly, and auto-selection would require a runtime branch we can't justify without a clean gate.
+- **T4.3 (document negative result)**: ✅ DONE — this file.
+- **T4.4 (update Issue 001)**: ✅ DONE — see updated verdict in Issue 001.
+
+### Recommended usage (documented, not enforced)
+
+Callers who know they are doing **transport-like tasks at small k (k ≤ 8) with moderate temperature (τ ≥ 0.5)** should prefer `make_haar_packet_basis` over random-orthogonal initialization. Concretely:
+
+```rust
+#[cfg(feature = "funcattn_structured_basis")]
+let w_basis = if k <= 8 {
+    katgpt_core::make_haar_packet_basis(k, d)
+} else {
+    random_orthonormal_init(k, d)  // caller's existing init
+};
+```
+
+Do NOT use `make_dct_log_basis` for transport tasks — it actively hurts. It is kept in the codebase for completeness (smoother signals than this synthetic smoothing target might benefit), but the GOAT gate showed no regime where it wins.
+
+---
+
+## Implications for Phase 5 (Apollonian harmonics)
+
+The plan gated Apollonian harmonics on a simpler multi-scale basis (Haar-packet) passing first. **Haar-packet passed at k≤8, τ=0.5** — the Apollonian-surrogate door is ajar, not closed.
+
+However:
+- Haar's win is narrow (+0.0846 at k=8, vs the +0.1093 achievable). Apollonian's richer geometry would need to beat Haar by a meaningful margin to justify the implementation cost.
+- The loss at k≥16 and τ=0.1 means Apollonian would face the same rank-saturation and sharp-sigmoid problems.
+- The k-sweep elbow at k=16 suggests the maximum addressable regime for any fixed structured basis is k∈[4, 16] — a small window.
+
+**Recommendation for Phase 5**: do NOT implement true d-dimensional Apollonian harmonics yet. The Phase 2 result shows the achievable gain is bounded (+0.08 to +0.11 cos), localized to small k, and already mostly captured by Haar. Apollonian's extra geometric richness is unlikely to clear the implementation-cost bar. Revisit only if a concrete use case emerges where the +0.02 cos gap between Haar and the achievable bound is the blocking factor.
+
+---
+
+## Raw test output (for reproducibility)
+
+```
+=== Plan 332 Phase 2 — GOAT gate (d=64, n=20, k=8) ===
+
+--- τ = 0.5 ---
+random-orth        (τ=0.5): cos(out, y) = +0.4806
+hand-crafted       (τ=0.5): cos(out, y) = +0.5900
+DCT-log            (τ=0.5): cos(out, y) = +0.3379
+Haar-packet        (τ=0.5): cos(out, y) = +0.5652
+  achievable gain (hand - rand) = +0.1093
+  DCT-log   gain (dct  - rand)   = -0.1427
+  Haar-pack gain (haar - rand)   = +0.0846
+  G1 DCT-log   PASS=false  KILL=true   (Δ=-0.1427, threshold +0.05)
+  G1 Haar-pack PASS=true   KILL=false  (Δ=+0.0846, threshold +0.05)
+  G2 DCT-log   captures -130.5% of achievable (FAIL, threshold 50%)
+  G2 Haar-pack captures 77.4% of achievable (PASS, threshold 50%)
+
+--- τ = 0.1 ---
+random-orth        (τ=0.1): cos(out, y) = +0.5526
+hand-crafted       (τ=0.1): cos(out, y) = +0.5772
+DCT-log            (τ=0.1): cos(out, y) = +0.4180
+Haar-packet        (τ=0.1): cos(out, y) = +0.4678
+  achievable gain (hand - rand) = +0.0245
+  DCT-log   gain (dct  - rand)   = -0.1346
+  Haar-pack gain (haar - rand)   = -0.0848
+  G1 DCT-log   PASS=false  KILL=true   (Δ=-0.1346, threshold +0.05)
+  G1 Haar-pack PASS=false  KILL=true   (Δ=-0.0848, threshold +0.05)
+  G2 DCT-log   captures -548.7% of achievable (FAIL, threshold 50%)
+  G2 Haar-pack captures -345.8% of achievable (FAIL, threshold 50%)
+
+=== Verdict ===
+G1 (principled ≥ random + 0.05): FAIL/KILL
+G2 (captures ≥ 50% of achievable): FAIL/KILL
+→ G1 KILL: principled basis loses to no-information baseline.
+
+=== Plan 332 Phase 3 — k-sweep (d=64, n=20, τ=0.5) ===
+   k      random     DCT-log   Haar-packet  hand-craft  Δ(DCT-rand)   Δ(Haar-r)
+   4     +0.4192     +0.1228       +0.5065     +0.4837     -0.2965     +0.0873
+   8     +0.4806     +0.3379       +0.5652     +0.5900     -0.1427     +0.0846
+  16     +0.6370     +0.2066       +0.4548     +0.6066     -0.4305     -0.1822
+  32     +0.6698     +0.1328       +0.3091     +0.4968     -0.5370     -0.3607
+
+--- Elbow analysis (Plan 332 T3.3) ---
+  k= 4: best principled = +0.5065, random = +0.4192, gap = +0.0873
+  k= 8: best principled = +0.5652, random = +0.4806, gap = +0.0846
+  k=16: best principled = +0.4548, random = +0.6370, gap = -0.1822
+  ↑ elbow: at k=16, random catches up to within 0.02 of principled.
+  k=32: best principled = +0.3091, random = +0.6698, gap = -0.3607
+
+Hypothesis (T3.3): principled helps more at small k. k=4 gap = +0.0873, k=32 gap = -0.3607. CONFIRMED
+```
+
+---
+
+## TL;DR (one-line)
+
+Haar-packet PASSES G1+G2 at τ=0.5/k≤8 (captures 77% of achievable gain, confirming the Apollonian-surrogate hypothesis); DCT-log KILLS everywhere (smooth basis can't do local transport); strict gate FAILS so feature stays opt-in, but Haar is documented as the recommended basis for small-k transport callers — and Phase 5 (true Apollonian harmonics) is deferred as not worth the implementation cost given the narrow gain window.

@@ -570,6 +570,226 @@ pub fn pre_rotate_basis_weights_into(
     }
 }
 
+// ── Principled multi-scale basis constructors (Plan 332) ──────────
+//
+// Phase 0 of Plan 332 (Issue 001 probe, 2026-06-26) proved that a HAND-CRAFTED
+// signal-aligned basis beats random-orthogonal by +0.11 cos on multi-scale
+// transport. These constructors answer: can a PRINCIPLED fixed basis (no
+// a-priori signal knowledge) capture most of that gain? DCT-log is the poor
+// man's wavelet packet; Haar-packet is the Apollonian surrogate (same
+// multi-scale hierarchical property, well-understood construction).
+//
+// All three return a row-orthonormal `(k, d)` matrix suitable for direct use
+// as `w_basis` in `funcattn_forward`. Construction is O(d·k) ONCE at init;
+// the forward hot path is unchanged (consumes `w_basis: &[f32]` regardless).
+// G4 (zero-alloc steady state) is preserved by construction.
+
+/// Gram-Schmidt orthogonalize the rows of `w` (k rows, d cols, row-major).
+/// Produces a row-orthonormal matrix in place. O(k²·d).
+///
+/// Private helper shared by the structured-basis constructors. Not on the
+/// forward hot path (init-time only).
+#[cfg(feature = "funcattn_structured_basis")]
+fn gram_schmidt_rows(w: &mut [f32], k: usize, d: usize) {
+    for i in 0..k {
+        // Subtract projections onto all previous (already-orthonormal) rows.
+        for j in 0..i {
+            let mut dot = 0.0f32;
+            for l in 0..d {
+                dot += w[i * d + l] * w[j * d + l];
+            }
+            for l in 0..d {
+                w[i * d + l] -= dot * w[j * d + l];
+            }
+        }
+        // L2-normalize row i in place.
+        let mut s = 0.0f32;
+        for l in 0..d {
+            s += w[i * d + l] * w[i * d + l];
+        }
+        let n = s.sqrt().max(1e-12);
+        for l in 0..d {
+            w[i * d + l] /= n;
+        }
+    }
+}
+
+/// Build a DCT-II basis at logarithmically-spaced frequencies.
+///
+/// The simplest principled multi-scale basis (Plan 332 T1.1): the "poor man's
+/// wavelet packet". Frequencies are log-spaced from 1 to `d/2`, so each basis
+/// row captures a different scale of variation without requiring any a-priori
+/// signal knowledge.
+///
+/// Frequencies: `f_i = round(2^((i/(k-1)) · log2(d/2)))` for `i` in `0..k`, so
+/// `f_0 = 1` (one cycle over the whole domain) and `f_{k-1} = d/2` (Nyquist).
+/// Basis row `i`: `w[i, j] = cos(π · f_i · (j + 0.5) / d)`, L2-normalized, then
+/// Gram-Schmidt to guarantee exact row-orthonormality.
+///
+/// Returns a flat `(k, d)` row-major `Vec<f32>` suitable as `w_basis`.
+///
+/// # Cost
+///
+/// `O(k · d)` to fill + `O(k² · d)` Gram-Schmidt. Init-time only.
+///
+/// # Panics
+///
+/// Debug-build panics on `k == 0` or `d == 0`. For `k > d` the resulting rows
+/// cannot all be orthonormal (rank-deficient); Gram-Schmidt still produces a
+/// valid row-orthogonal matrix but later rows are numerically tiny.
+#[cfg(feature = "funcattn_structured_basis")]
+pub fn make_dct_log_basis(k: usize, d: usize) -> Vec<f32> {
+    debug_assert!(k > 0, "k must be > 0");
+    debug_assert!(d > 0, "d must be > 0");
+
+    let mut w = vec![0.0f32; k * d];
+    let log_d_half = ((d as f32) / 2.0).log2(); // log2(d/2); for d=64, = 5.
+
+    // Pick k distinct integer frequencies in [1, d/2], log-spaced.
+    //
+    // Naive round(2^(frac · log2(d/2))) can collide (e.g. for k=16, d=64 the
+    // log-spacing clusters at low frequencies and rounds to many duplicates).
+    // Two rows at the same frequency are identical up to sign, which after
+    // Gram-Schmidt yields a near-zero row (and then any FP noise on it gets
+    // amplified by the 1/norm normalization, breaking row-orthonormality).
+    //
+    // Fix: enforce strictly-increasing integer frequencies after rounding by
+    // bumping each collision to the next free integer. This may compress the
+    // high end of the spectrum when k is close to d/2 (acceptable — that's the
+    // rank-saturated regime where DCT-log offers little over random).
+    let max_f = (d / 2).max(1);
+    let mut freqs: Vec<i64> = Vec::with_capacity(k);
+    for i in 0..k {
+        let frac = if k > 1 {
+            i as f32 / (k - 1) as f32
+        } else {
+            0.0
+        };
+        let f_raw = (2.0f32).powf(frac * log_d_half).round() as i64;
+        let mut f = f_raw.clamp(1, max_f as i64);
+        // Ensure strictly-greater than the previous frequency.
+        if let Some(&prev) = freqs.last() {
+            if f <= prev {
+                f = prev + 1;
+            }
+        }
+        // If we ran past max_f, clamp (last few frequencies may saturate at
+        // max_f — for k > d/2 this is unavoidable).
+        if f > max_f as i64 {
+            f = max_f as i64;
+        }
+        freqs.push(f);
+    }
+
+    for (i, &f) in freqs.iter().enumerate() {
+        // DCT-II basis vector: cos(π · f · (j + 0.5) / d), j = 0..d.
+        let phase_step = core::f32::consts::PI * (f as f32) / (d as f32);
+        for j in 0..d {
+            w[i * d + j] = (phase_step * (j as f32 + 0.5)).cos();
+        }
+    }
+
+    // L2-normalize + orthogonalize. Pure DCT-II rows at distinct frequencies
+    // are already ~orthogonal (the off-diagonal entries of W·Wᵀ are O(1/d)),
+    // but Gram-Schmidt gives exact row-orthonormality required by the FUNCATTN
+    // forward path (the Cholesky on the d×d reg matrix is well-conditioned
+    // only when w_basis has bounded condition number).
+    gram_schmidt_rows(&mut w, k, d);
+    w
+}
+
+/// Build a Haar wavelet packet basis at multiple scales (Plan 332 T1.2).
+///
+/// This is the **Apollonian surrogate**: a genuine multi-resolution basis
+/// (Haar wavelet packet) that shares the multi-scale hierarchical property
+/// of Apollonian packings, but with a well-understood construction. If Haar
+/// wavelet packets fail, Apollonian would also fail; if they succeed, we
+/// justify the harder Apollonian implementation (Plan 332 Phase 5).
+///
+/// Row 0 is the scaling function (constant DC = `[1/sqrt(d); d]`); the
+/// remaining rows are Haar wavelets at log-spaced scales, picked coarsest
+/// first then by position. At scale `s` (`1 ≤ s ≤ log2(d)`), support is
+/// `2^s` samples and there are `2^(log2(d) - s)` positions.
+///
+/// Requires `d` to be a power of two.
+///
+/// Returns a flat `(k, d)` row-major `Vec<f32>` suitable as `w_basis`.
+///
+/// # Cost
+///
+/// `O(k · d)` to fill + `O(k² · d)` Gram-Schmidt (only to handle the padding
+/// rows when `k > log2(d) + 1`). Init-time only.
+///
+/// # Panics
+///
+/// Debug-build panics on `k == 0`, `d == 0`, or `d` not a power of two.
+#[cfg(feature = "funcattn_structured_basis")]
+pub fn make_haar_packet_basis(k: usize, d: usize) -> Vec<f32> {
+    debug_assert!(k > 0, "k must be > 0");
+    debug_assert!(d > 0, "d must be > 0");
+    debug_assert!(
+        d.is_power_of_two(),
+        "d must be a power of two for Haar (got {d})"
+    );
+
+    let mut w = vec![0.0f32; k * d];
+    let log_d = d.trailing_zeros() as usize; // log2(d); for d=64, = 6.
+
+    // Row 0: scaling function (DC component) = [1/sqrt(d); d]. This is the
+    // "1 coarse" node from the plan — the lowest-frequency component.
+    let dc_scale = (d as f32).sqrt();
+    for j in 0..d {
+        w[j] = 1.0 / dc_scale;
+    }
+
+    // Rows 1..k: Haar wavelets at multiple scales, coarse-to-fine then by
+    // position. At scale s (1=finest support-2, log_d=coarsest support-d),
+    // the wavelet is +1 on the first half of its support, -1 on the second,
+    // normalized so each wavelet has unit L2 norm (norm = sqrt(support)).
+    //
+    // Two wavelets at different scales are orthogonal iff one's support lies
+    // entirely inside a single sign-region of the other. Picking scales in
+    // decreasing order with positions starting from 0 satisfies this by
+    // construction (the next finer wavelet's support fits inside the previous
+    // coarser wavelet's +1 half).
+    let mut row = 1usize;
+    'outer: for s in (1..=log_d).rev() {
+        // s = log_d (coarsest, 1 position) → s = 1 (finest, d/2 positions).
+        let support = 1usize << s; // 2^s
+        let half = support >> 1; // 2^(s-1)
+        let n_positions = d >> s; // d / 2^s = 2^(log_d - s)
+        let inv_norm = 1.0 / (support as f32).sqrt();
+        for p in 0..n_positions {
+            if row >= k {
+                break 'outer;
+            }
+            let start = p * support;
+            let row_off = row * d;
+            for j in 0..half {
+                w[row_off + start + j] = inv_norm;
+                w[row_off + start + half + j] = -inv_norm;
+            }
+            row += 1;
+        }
+    }
+
+    // Pad remaining rows (when k > 1 + total available wavelets) with standard
+    // basis vectors; Gram-Schmidt orthogonalizes them against the existing
+    // Haar rows. For the plan's NPC regime (d=64, k ≤ 16) this branch is
+    // typically not hit (1 + 6 + 12 + 24 + ... ample supply at fine scales).
+    while row < k {
+        let idx = (row - 1) % d;
+        w[row * d + idx] = 1.0;
+        row += 1;
+    }
+
+    // Exact row-orthonormality. The Haar vectors above are already orthogonal
+    // by construction; this pass cleans up the filler rows and removes any
+    // floating-point drift in the constructed wavelets.
+    gram_schmidt_rows(&mut w, k, d);
+    w
+}
+
 // ── Forward pass ──────────────────────────────────────────────────
 
 /// Functional Attention forward pass — **dual form** (matches reference code).
@@ -1647,6 +1867,195 @@ mod tests {
         .expect("forward after rotation");
         for v in &out {
             assert!(v.is_finite(), "non-finite output after eigen-rotation");
+        }
+    }
+
+    // ── Plan 332 — Principled structured basis constructors ─────────
+
+    /// Verify `W·W^T ≈ I_k` (rows are orthonormal) for a constructed basis.
+    fn check_row_orthonormal(w: &[f32], k: usize, d: usize, tol: f32, label: &str) {
+        assert_eq!(w.len(), k * d, "{label}: wrong length");
+        for i in 0..k {
+            // Diagonal: row norm should be 1.
+            let mut norm_sq = 0.0f32;
+            for j in 0..d {
+                norm_sq += w[i * d + j] * w[i * d + j];
+            }
+            assert!(
+                (norm_sq - 1.0).abs() < tol,
+                "{label}: row {i} norm^2 = {norm_sq}, expected 1.0 (tol {tol})"
+            );
+            // Off-diagonal: orthogonal to all earlier rows.
+            for j in 0..i {
+                let mut dot = 0.0f32;
+                for l in 0..d {
+                    dot += w[i * d + l] * w[j * d + l];
+                }
+                assert!(
+                    dot.abs() < tol,
+                    "{label}: rows ({i},{j}) dot = {dot}, expected 0 (tol {tol})"
+                );
+            }
+        }
+    }
+
+    /// T1.1 unit test: DCT-log basis is row-orthonormal.
+    #[cfg(feature = "funcattn_structured_basis")]
+    #[test]
+    fn dct_log_basis_is_row_orthonormal() {
+        for &(k, d) in &[(1usize, 8usize), (4, 16), (8, 64), (16, 64), (8, 128)] {
+            let w = make_dct_log_basis(k, d);
+            check_row_orthonormal(&w, k, d, 1e-5, &format!("DCT-log k={k} d={d}"));
+        }
+    }
+
+    /// T1.1 unit test: DCT-log basis covers log-spaced frequencies.
+    ///
+    /// We verify by reconstructing the per-row dominant frequency from the
+    /// zero-crossing count of the post-Gram-Schmidt rows. The i-th row's
+    /// dominant frequency should be monotonically non-decreasing in i.
+    #[cfg(feature = "funcattn_structured_basis")]
+    #[test]
+    fn dct_log_basis_covers_log_spaced_frequencies() {
+        let (k, d) = (8, 64);
+        let w = make_dct_log_basis(k, d);
+        // Count sign changes in each row interior as a proxy for frequency.
+        let mut sign_changes = Vec::with_capacity(k);
+        for i in 0..k {
+            let row = &w[i * d..(i + 1) * d];
+            let mut count = 0usize;
+            for j in 1..d {
+                if row[j - 1].signum() != row[j].signum() && row[j] != 0.0 {
+                    count += 1;
+                }
+            }
+            sign_changes.push(count);
+        }
+        // Coarsest row (i=0, f=1) should have ~2 sign changes (one full cycle);
+        // finest row (i=k-1, f=d/2) should have many. Monotone non-decreasing.
+        println!("DCT-log sign-change profile (k={k}, d={d}): {sign_changes:?}");
+        assert!(
+            sign_changes[0] <= sign_changes[k - 1],
+            "DCT-log should span coarse→fine: first={}, last={}",
+            sign_changes[0],
+            sign_changes[k - 1]
+        );
+        // The coarsest row must have meaningfully fewer sign changes than the
+        // finest (otherwise we didn't actually span log-spaced frequencies).
+        assert!(
+            sign_changes[k - 1] >= 2 * sign_changes[0],
+            "DCT-log frequency spread too narrow: first={}, last={}",
+            sign_changes[0],
+            sign_changes[k - 1]
+        );
+    }
+
+    /// T1.2 unit test: Haar-packet basis is row-orthonormal.
+    #[cfg(feature = "funcattn_structured_basis")]
+    #[test]
+    fn haar_packet_basis_is_row_orthonormal() {
+        for &(k, d) in &[(1usize, 8usize), (4, 16), (8, 64), (16, 64), (7, 128)] {
+            let w = make_haar_packet_basis(k, d);
+            check_row_orthonormal(&w, k, d, 1e-5, &format!("Haar-packet k={k} d={d}"));
+        }
+    }
+
+    /// T1.2 unit test: Haar-packet basis spans multiple scales.
+    ///
+    /// Row 0 must be the DC component (constant sign — zero sign changes).
+    /// Later rows must have progressively more localized support: sign changes
+    /// increase as we move to finer-scale wavelets.
+    #[cfg(feature = "funcattn_structured_basis")]
+    #[test]
+    fn haar_packet_basis_spans_multiple_scales() {
+        let (k, d) = (8, 64);
+        let w = make_haar_packet_basis(k, d);
+
+        // Row 0: DC = constant sign (no interior sign changes).
+        let dc_row = &w[0..d];
+        let dc_sign = dc_row[0].signum();
+        for &v in dc_row {
+            assert_eq!(v.signum(), dc_sign, "Haar DC row should be constant-sign");
+        }
+
+        // Each subsequent row should have at least one sign change (it's a
+        // wavelet, not a scaling function). Count sign changes per row.
+        let mut sign_counts = Vec::with_capacity(k - 1);
+        for i in 1..k {
+            let row = &w[i * d..(i + 1) * d];
+            let mut count = 0usize;
+            for j in 1..d {
+                if row[j - 1].signum() != row[j].signum() && row[j] != 0.0 {
+                    count += 1;
+                }
+            }
+            assert!(count >= 1, "Haar row {i} should have ≥1 sign change (got {count})");
+            sign_counts.push(count);
+        }
+        println!("Haar-packet sign-change profile (k={k}, d={d}): {sign_counts:?}");
+        // The coarsest wavelet (row 1, support=d) has exactly 1 sign change.
+        assert_eq!(
+            sign_counts[0], 1,
+            "Haar row 1 (coarsest wavelet) should have exactly 1 sign change"
+        );
+    }
+
+    /// T1.1+T1.2 cross-check: both bases plug into `funcattn_forward` cleanly
+    /// (G3 — drop-in replacement sanity). Output must be finite + partition of
+    /// unity on Φ (the existing forward-pass invariant).
+    #[cfg(feature = "funcattn_structured_basis")]
+    #[test]
+    fn structured_bases_forward_pass_clean() {
+        let (n, d, k) = (12, 64, 8);
+        let cfg = FuncAttnConfig {
+            d,
+            k,
+            basis: FuncAttnBasis::Sigmoid,
+            alpha: 0.5,
+            temperature: 0.5,
+            cholesky_jitter: 1e-6,
+        };
+        // Random input (deterministic).
+        let mut x = vec![0.0f32; n * d];
+        let mut rng = make_rng(12345);
+        for v in x.iter_mut() {
+            *v = rng.next().unwrap_or(0.0);
+        }
+        let w_q = identity_matrix(d);
+        let w_k = identity_matrix(d);
+        let w_v = identity_matrix(d);
+
+        for (label, w_basis) in [
+            ("DCT-log", make_dct_log_basis(k, d)),
+            ("Haar-packet", make_haar_packet_basis(k, d)),
+        ] {
+            let mut scratch = FuncAttnScratch::new(n, d, k);
+            let mut out = vec![0.0f32; n * d];
+            funcattn_forward(&x, &x, &w_basis, &w_q, &w_k, &w_v, &cfg, &mut scratch, &mut out)
+                .unwrap_or_else(|e| panic!("{label}: forward failed: {e:?}"));
+            for v in &out {
+                assert!(v.is_finite(), "{label}: non-finite forward output");
+            }
+            // Φ partition-of-unity (compute_basis_into separately for clarity).
+            let mut phi = vec![0.0f32; n * k];
+            compute_basis_into(
+                &x,
+                &w_basis,
+                &[],
+                n,
+                d,
+                k,
+                FuncAttnBasis::Sigmoid,
+                0.5,
+                &mut phi,
+            );
+            for i in 0..n {
+                let row_sum: f32 = phi[i * k..(i + 1) * k].iter().sum();
+                assert!(
+                    (row_sum - 1.0).abs() < 1e-5,
+                    "{label}: Φ row {i} sum = {row_sum}, expected 1.0"
+                );
+            }
         }
     }
 }

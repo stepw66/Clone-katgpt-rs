@@ -1,7 +1,7 @@
 # Issue 001: Apollonian Sphere Manifold Geometry — Exploration
 
 **Date:** 2026-06-23
-**Status:** Active — FUNCATTN basis selection (#4) VALIDATED by probe (2026-06-26): structured basis beats random by +0.11 cos. T5.1 "invariance" claim falsified. Promoting to plan. MMORPG use cases (#1-#3) still rejected on domain-shape mismatch.
+**Status:** Active — FUNCATTN basis selection (#4) VALIDATED by probe (2026-06-26): structured basis beats random by +0.11 cos. T5.1 "invariance" claim falsified. Promoting to plan. MMORPG use cases (#1-#3) still rejected on domain-shape mismatch. **UPDATE 2026-06-26: Plan 332 executed. Principled bases (DCT-log, Haar-packet) tested head-to-head against the hand-crafted bound. MIXED verdict: Haar-packet captures 77% of the achievable gain at τ=0.5/k≤8 (Apollonian-surrogate hypothesis CONFIRMED for localized bases); DCT-log fails everywhere (smooth basis can't do local transport). Feature ships opt-in; Phase 5 (true Apollonian harmonics) DEFERRED — narrow gain window doesn't justify the implementation cost. See [Plan 332 benchmark](../.benchmarks/332_structured_basis_goat_and_k_sweep.md).**
 **Origin:** Gemini "Functional Attention + Relational Functor" reframing (2026-06-23)
 **Related Research:** katgpt-rs/.research/257 (FUNCATTN), katgpt-rs/.research/219 (TNO/DEC), katgpt-rs/.research/291 (cross-resolution transport), katgpt-rs/.research/100 (EGA — fixed<learned precedent)
 
