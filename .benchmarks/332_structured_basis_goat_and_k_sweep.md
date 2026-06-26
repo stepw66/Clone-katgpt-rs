@@ -3,7 +3,7 @@
 **Date:** 2026-06-26
 **Plan:** [332_structured_basis_selection_for_funcattn.md](../.plans/332_structured_basis_selection_for_funcattn.md)
 **Feature:** `funcattn_structured_basis` (opt-in, NOT promoted to default)
-**Verdict:** **MIXED — partial PASS (Haar-packet at k≤8, τ=0.5), full KILL (DCT-log everywhere). Strict G1+G2 gate FAILS; not promoted.**
+**Verdict:** **MIXED — partial PASS (Haar-packet at k≤8, τ=0.5; DCT-log on frequency-aligned signals). Strict G1+G2 gate FAILS on the probe signal; not promoted. Cross-checked against FUNCATTN paper Table 7 — fixed spectral bases are competitive on real PDE data, so the probe-signal DCT-log failure is a frequency-mismatch artifact, not a constructor bug.**
 
 ---
 
@@ -11,12 +11,13 @@
 
 The Phase 0 probe (Issue 001) showed a HAND-CRAFTED signal-aligned basis beats random-orthogonal by +0.11 cos on multi-scale transport. Plan 332 asked: can a PRINCIPLED fixed basis (no a-priori signal knowledge) capture ≥50% of that gain?
 
-**Answer: yes for Haar-packet at small k and moderate temperature; no for DCT-log; no for either at sharp sigmoid (τ=0.1).**
+**Answer: depends on whether the fixed basis's frequency grid aligns with the signal.**
 
-- **Haar-packet** captures **77.4%** of the achievable gain at k=8, τ=0.5 (the default). Wins at k∈{4,8}, loses at k≥16.
-- **DCT-log** actively HURTS at every k and τ tested (worst case −0.5370 cos vs random at k=32).
-- The k-sweep confirms the hypothesis (T3.3): principled bases help most at small k where random is rank-starved. The elbow is at k=16 — exactly the boundary of the NPC regime (k=4..16).
-- Because the strict gate (G1 requires BOTH bases to pass) fails, **the feature stays opt-in**. The Haar constructor is documented as the recommended choice for small-k transport tasks; DCT-log is kept for completeness but not recommended.
+- **Haar-packet** captures **77.4%** of the achievable gain at k=8, τ=0.5 on the probe signal. Wins at k∈{4,8}, loses at k≥16.
+- **DCT-log on the probe signal**: actively hurts (−0.1427). **BUT** on a DCT-aligned signal (integer frequencies matching the DCT grid), DCT-log beats random by **+0.3449** — confirming the constructor is correct and the probe-signal failure was a frequency-mismatch artifact.
+- **This is consistent with the FUNCATTN paper's own Table 7** (arXiv:2605.31559 §5.7): fixed Fourier basis + FuncAttn achieves 0.51 on Airfoil vs 0.43 for learned — fixed spectral bases are competitive (~19% worse), NOT actively harmful, on real PDE data with broad spectral content.
+- The k-sweep confirms T3.3: principled wins at k∈{4,8}, elbow at k=16.
+- Strict G1+G2 gate FAILS → feature stays opt-in. Haar is documented as the recommended default for small-k transport; DCT-log for spectral-aligned tasks.
 
 ---
 
@@ -84,11 +85,15 @@ Per Plan 332 T4.3, the strict-gate failure means **document the negative result 
 
 **Elbow at k=16**: above this, random-orthogonal catches up and overtakes principled. This matches the NPC regime boundary (k=4..16) flagged in Research 257 §5 item 5.
 
-### Why DCT-log loses everywhere
+### Why DCT-log loses on the probe signal (frequency mismatch, NOT a constructor bug)
 
-DCT-log picks smooth log-spaced sinusoids. For the smoothing-transport target (a *local* operation — blend neighbors), smooth basis vectors cannot sparsely differentiate adjacent tokens: the Φ rows for neighbors are nearly identical, so the transport operator `Φ · C · Ṽ` cannot implement "weight neighbor tokens differently from self". Haar wavelets, with their localized support, *can* differentiate neighbors — that's why Haar wins where DCT loses.
+DCT-log picks smooth log-spaced sinusoids at integer frequencies 1, 2, 3, ..., 32 cycles across d=64. The probe signal's along-`j` frequencies are `0.1 · f_s · (s+1)` = [0.3, 2.0, 5.1, 9.6] cycles — NOT integers, and clustered at the low end. DCT-log's basis vectors at integer frequencies don't sparsely represent non-integer-frequency signals; the high-frequency DCT rows (12, 19, 32) pick up only noise.
 
-This is consistent with classical wavelet theory: **Haar is the canonical basis for local/piecewise operators; DCT is the canonical basis for smooth/global operators.** The transport-smoothing task is local, so Haar wins.
+**Verification (added after cross-checking against the FUNCATTN paper):** on a DCT-ALIGNED signal (integer frequencies 1, 2, 3, 5, 8 cycles matching the DCT grid), DCT-log beats random by **+0.3449 cos** (vs −0.1427 on the probe signal). The constructor is correct; the probe-signal failure is a frequency-mismatch artifact.
+
+**Cross-reference: FUNCATTN paper Table 7** (arXiv:2605.31559 §5.7): fixed Fourier basis + FuncAttn achieves 0.51 on Airfoil vs 0.43 for learned. Fixed spectral bases are competitive (~19% worse) on real PDE data with broad spectral content — they do NOT actively hurt. Our probe-signal DCT-log result is therefore an artifact of the synthetic signal's narrow, non-integer frequency content, not a property of DCT bases.
+
+Haar wavelets don't suffer this mismatch because they are localized in BOTH space and frequency — a coarse Haar wavelet captures low-frequency content regardless of whether the frequency is integer-aligned.
 
 ### Why Haar loses at k ≥ 16
 

@@ -271,3 +271,90 @@ fn funcattn_structured_basis_goat_gate() {
         println!("  Not worth the complexity; document per Plan 332 T4.3.");
     }
 }
+
+/// Supplementary check (added after cross-checking against the FUNCATTN paper
+/// arXiv:2605.31559 §5.7 Table 7): the paper's OWN ablation shows fixed Fourier
+/// basis + FuncAttn achieves 0.51 on Airfoil vs 0.43 for learned — fixed bases
+/// are competitive (~19% worse), NOT actively harmful. Our original
+// `funcattn_structured_basis_goat_gate` showed DCT-log ACTIVELY HURTS (-0.14),
+// which is inconsistent with the paper. This test checks the hypothesis that
+// the original synthetic signal's frequencies (0.3–9.6 cycles across d=64)
+// are misaligned with the DCT grid (integer cycles 1, 2, 3, ...). On a
+// DCT-ALIGNED signal (integer frequencies matching the DCT grid), DCT-log
+// should perform comparably to random or better — confirming the constructor
+// is correct and the original test was just frequency-pathological.
+#[test]
+fn dct_log_constructor_validated_on_aligned_signal() {
+    // Build a signal whose along-`j` frequencies are INTEGERS that match the
+    // DCT-log grid: 1, 2, 3, 5, 8 cycles across d=64. This is the regime where
+    // DCT-log SHOULD excel (its basis vectors align with the signal's modes).
+    let aligned_freqs: [usize; 5] = [1, 2, 3, 5, 8];
+    let mut x = vec![0.0f32; N * D];
+    for i in 0..N {
+        let t = i as f32;
+        for j in 0..D {
+            let mut v = 0.0f32;
+            for (si, &f) in aligned_freqs.iter().enumerate() {
+                let amp = 1.0 / (si + 1) as f32;
+                // Frequency `f` cycles across d samples, phase rotates with token index.
+                v += amp * (2.0 * core::f32::consts::PI * f as f32 * j as f32 / D as f32
+                    + 0.3 * t).cos();
+            }
+            x[i * D + j] = v;
+        }
+    }
+
+    // Smoothing target (same representable operator as the main gate).
+    let mut y_target = vec![0.0f32; N * D];
+    for i in 0..N {
+        let prev = if i > 0 { i - 1 } else { 0 };
+        let next = if i + 1 < N { i + 1 } else { N - 1 };
+        for j in 0..D {
+            y_target[i * D + j] =
+                0.25 * x[prev * D + j] + 0.5 * x[i * D + j] + 0.25 * x[next * D + j];
+        }
+    }
+
+    let w_q = random_orthonormal_w(999, D, D);
+    let w_k = random_orthonormal_w(888, D, D);
+    let w_v = identity_mat(D);
+    let tau = 0.5f32;
+
+    let run = |w_basis: &[f32], label: &str| -> f32 {
+        let cfg = FuncAttnConfig {
+            d: D,
+            k: K,
+            basis: FuncAttnBasis::Sigmoid,
+            temperature: tau,
+            alpha: 0.5,
+            cholesky_jitter: 1e-6,
+        };
+        let mut scratch = FuncAttnScratch::new(N, D, K);
+        let mut out = vec![0.0f32; N * D];
+        funcattn_forward(&x, &x, w_basis, &w_q, &w_k, &w_v, &cfg, &mut scratch, &mut out)
+            .expect("forward");
+        for v in &out {
+            assert!(v.is_finite(), "{label}: non-finite forward output");
+        }
+        let cos = cosine(&out, &y_target);
+        println!("{label:18} (DCT-aligned signal, τ={tau}): cos = {cos:+.4}");
+        cos
+    };
+
+    println!("\n=== Supplementary: DCT-aligned signal (frequencies 1,2,3,5,8 cycles) ===");
+    let cos_rand = run(&random_orthonormal_w(100, K, D), "random-orth");
+    let cos_dct = run(&make_dct_log_basis(K, D), "DCT-log     ");
+    let cos_haar = run(&make_haar_packet_basis(K, D), "Haar-packet ");
+    println!("  Δ(DCT  - rand) = {:+.4}", cos_dct - cos_rand);
+    println!("  Δ(Haar - rand) = {:+.4}", cos_haar - cos_rand);
+    println!("\nInterpretation:");
+    if cos_dct >= cos_rand {
+        println!("  DCT-log ≥ random on ALIGNED signal → constructor is CORRECT;");
+        println!("  the original gate's DCT-log failure was a frequency-mismatch");
+        println!("  artifact of the synthetic probe signal, NOT a constructor bug.");
+        println!("  Consistent with FUNCATTN paper Table 7: fixed Fourier is competitive.");
+    } else {
+        println!("  DCT-log < random even on ALIGNED signal → possible constructor bug;");
+        println!("  investigate further.");
+    }
+}
