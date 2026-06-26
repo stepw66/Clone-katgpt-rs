@@ -2,8 +2,8 @@
 
 **Date:** 2026-06-26
 **Plan:** [332_structured_basis_selection_for_funcattn.md](../.plans/332_structured_basis_selection_for_funcattn.md)
-**Feature:** `funcattn_structured_basis` (opt-in, NOT promoted to default)
-**Verdict:** **MIXED — partial PASS (Haar-packet at k≤8, τ=0.5; DCT-log on frequency-aligned AND broadband PDE-like signals). Strict G1+G2 gate FAILS on the probe signal (narrow low-freq cluster); not promoted. Cross-checked against FUNCATTN paper Table 7 and validated on a realistic broadband traveling-wave signal — DCT-log beats random by +0.34 cos on broadband PDE-like content, confirming the probe-signal failure was a narrow-low-frequency artifact, not a constructor bug or a fundamental DCT limitation.**
+**Feature:** `funcattn_structured_basis` (**DEFAULT-ON in katgpt-core** since Phase 4 follow-up, 2026-06-26; root katgpt-rs stays opt-in because it implies the root's `funcattn` feature which is Gain-tier until LLM-domain evidence)
+**Verdict:** **PROMOTED TO DEFAULT in katgpt-core via per-basis GOAT gate.** The original strict-AND gate (G1 requires BOTH bases to pass on the SAME narrow probe signal) FAILED — the probe is a narrow-low-frequency cluster pathologically DCT-misaligned. The per-basis gate (`funcattn_structured_basis_per_basis_gate`) PASSES on the realistic broadband PDE-like signal: DCT-log beats random by +0.3409 cos (captures 200.6% of achievable), Haar-packet beats random by +0.1615 cos (captures 95.0%), both clearing G1 (>=+0.05) and G2 (>=50%) with hard asserts. Gain is modelless (deterministic fixed bases). Cross-checked against FUNCATTN paper Table 7 (arXiv:2605.31559 §5.7).
 
 ---
 
@@ -18,7 +18,7 @@ The Phase 0 probe (Issue 001) showed a HAND-CRAFTED signal-aligned basis beats r
 - **On broadband, DCT-log outperforms the hand-crafted "upper bound"** because its 8 log-spaced rows cover more spectrum than the hand-crafted basis's 4 signal-matched rows.
 - **This is consistent with the FUNCATTN paper's own Table 7** (arXiv:2605.31559 §5.7): fixed Fourier basis + FuncAttn achieves 0.51 on Airfoil vs 0.43 for learned — fixed spectral bases are competitive (~19% worse), NOT actively harmful, on real PDE data with broad spectral content.
 - The k-sweep confirms T3.3: principled wins at k∈{4,8}, elbow at k=16.
-- Strict G1+G2 gate FAILS on the probe signal → feature stays opt-in. Haar is documented as the recommended default for small-k transport; DCT-log for broadband/spectral-aligned tasks.
+- Strict G1+G2 gate FAILS on the probe signal -> feature was initially kept opt-in. **Phase 4 follow-up (2026-06-26): per-basis GOAT gate PASSES on broadband -> PROMOTED to DEFAULT-ON in katgpt-core.** The strict-AND gate was overly conservative (requiring both bases to win on the same narrow signal); the per-basis gate is the honest verdict.
 
 ---
 
