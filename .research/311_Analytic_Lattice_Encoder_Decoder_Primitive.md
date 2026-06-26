@@ -189,9 +189,11 @@ amortizes across N players in one zone via prefix factoring."
 |---|---|---|
 | `compose_chain` operator product | katgpt-rs (open) | Generic k×k matmul, no game IP |
 | `batch_compose_chain` zone-prefix factoring | katgpt-rs (open) | Generic prefix-amortization, no game IP |
-| ASOC `ComposerTick: GpuFuture` cascade | katgpt-rs (open) | Generic orchestration over `GpuFuture`; plasma-draft trait is generic |
+| `PlasmaDraft` + `RederiveOp` trait shapes | katgpt-rs (open) | Generic traits; `RederiveOp` uses an unconstrained `type Fut` so the leaf crate avoids the `riir-gpu-async` dep |
+| `ComposerCtx` (generic per-tick context) | katgpt-rs (open) | Generic struct; game-specific construction lives in riir-ai |
 | `direction_vector_decode` SIMD (generic) | katgpt-rs (open) | Generic dot-product + sigmoid |
 | Spectral audit verifier | katgpt-rs (open) | Generic Fourier-mode tangent check |
+| ASOC `ComposerTick<P,Rb,Rq,Rp,D>: GpuFuture` impl + `Join3` | **riir-ai** (private) | Needs `GpuFuture` + `Join` imports from `riir-gpu-async`, which is private to riir-ai. Same layering rule as Plan 335's `ZoneGeometryCache`. |
 | ~~`AnalyticLatticeEncoder` trait~~ | ~~katgpt-rs~~ | **DROPPED — redundant with `fourier/encoder.rs`.** Reuse, do not re-ship. |
 | Plasma-tier draft model (concrete game) | riir-ai (private) | Game design IP — ships as `riir-games::quest_draft::QuestDraftModel` |
 | Quest/Zone/Boss/Player encoding schemas | riir-ai (private) | Game design IP |

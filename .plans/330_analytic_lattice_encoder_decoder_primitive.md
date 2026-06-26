@@ -14,10 +14,25 @@
 > (`ComposerTick: GpuFuture`) as the new headline primitive, built on the
 > already-shipped `riir-gpu-async` `GpuFuture` / `Join` / `block_on`
 > substrate. A new Phase 2.5 (`batch_compose_chain`) is added for zone-batched
-> prefix factoring. Phases 2/3/4/5 are otherwise preserved (Phase 3 stays
-> `compose_chain`; Phase 2 stays `direction_vector_decode`; Phase 4 stays
+> prefix factoring. Phases 2/3/4/5 are otherwise preserved (Phase 2 stays
+> `compose_chain`; Phase 3 stays `direction_vector_decode`; Phase 4 stays
 > spectral audit; Phase 5 stays GOAT gate). See R311 revision note for the
 > matching research-layer narrowing.
+>
+> **Layering correction (2026-06-26, post-review):** `ComposerTick: GpuFuture`
+> and the `Join3` combinator CANNOT live in `katgpt-rs/crates/katgpt-core/`
+> — they need to import `GpuFuture` / `Join` from `riir-gpu-async`, which is
+> private to `riir-ai`. Adding the dep would invert the 5-repo commercial
+> boundary (R311 §6: "Generic math, no game IP" stays in katgpt-rs).
+> Same class of bug as Plan 335 Phase 2's `ZoneGeometryCache`.
+>
+> **Fix:** the generic **trait shapes** (`PlasmaDraft`, `RederiveOp`) and
+> the math primitives (`compose_chain`, `batch_compose_chain`,
+> `direction_vector_decode`, spectral audit) stay in `katgpt-core`. The
+> **`GpuFuture` impl** (`ComposerTick` + `Join3`) moves to
+> `riir-ai/crates/riir-engine/src/analytic_lattice/asoc.rs`. Feature flags
+> split: `analytic_lattice` (katgpt-core, traits + math) and
+> `analytic_lattice_runtime` (riir-engine, the `GpuFuture` wiring).
 
 ---
 
@@ -30,17 +45,23 @@ Ship the primitives identified as genuinely novel in R311 (revised):
    rederive futures (`C_boss`, `C_quest`, `C_player`) via `GpuFuture::Join`;
    returns the stale plasma draft on `Poll::Pending` so the bot loop never
    blocks.
+   - **Layer split:** the generic **trait shapes** (`PlasmaDraft`, `RederiveOp`)
+     ship in `katgpt-core` (no `GpuFuture` import — they use an associated
+     `type Fut`). The `GpuFuture` **impl** (`ComposerTick` + `Join3`) ships in
+     `riir-engine/src/analytic_lattice/asoc.rs` (the only place with both
+     `katgpt-core` + `riir-gpu-async` in scope). See revision note above.
 2. **`compose_chain`** — cross-entity operator product
    `C[n-1] × ... × C[1] × C[0]` for an arbitrary-length chain of `f32`
    transport operators (k×k). The cross-entity analog of `funcattn_compose`
-   (which is token-level).
+   (which is token-level). Ships in `katgpt-core`.
 3. **`batch_compose_chain`** — zone-batched prefix factoring: factor the
    shared prefix `C_qb = C_boss × C_quest` once per tick, then apply
    `C_player_i × C_qb` for N players in the same zone (O(N+k³) vs O(N·k³)).
+   Ships in `katgpt-core`.
 4. **`direction_vector_decode`** — SIMD projection of a latent state onto a
    direction vector, producing an action-score scalar (generalization of
    riir-games `scalar_projection.rs`, lifted out of HLA-specific 5-scalar
-   semantics into a generic single-direction primitive).
+   semantics into a generic single-direction primitive). Ships in `katgpt-core`.
 
 **Redundant (NOT shipped here):** `AnalyticLatticeEncoder` trait. The
 encoder half is already shipped as `FourierEncoder::encode_*_into` in
@@ -58,7 +79,7 @@ promotion to `default`.
 
 ### Tasks
 
-- [ ] **T0.1** Add Cargo feature `analytic_lattice_encoder = []` to `katgpt-rs/crates/katgpt-core/Cargo.toml`. NOT default-on.
+- [ ] **T0.1** Add Cargo feature `analytic_lattice = []` to `katgpt-rs/crates/katgpt-core/Cargo.toml`. NOT default-on. (Name changed from `analytic_lattice_encoder` — the encoder is dropped per revision note; this flag now covers only the math primitives + traits that stay in katgpt-core.)
 - [ ] **T0.2** Create `analytic_lattice/mod.rs` with module doc + sub-module declarations. **Note:** the originally-planned `encoder.rs` submodule is DROPPED (redundant with `fourier/encoder.rs`). New submodule set: `asoc.rs`, `chain.rs`, `batch_chain.rs`, `decoder.rs`, `audit.rs`.
 - [ ] **T0.3** Define the typed-slot lattice vector and transport operator:
 
@@ -83,17 +104,28 @@ pub struct TransportOperator {
 
 ## Phase 1 — ASOC cascade core: `ComposerTick: GpuFuture` (HEADLINE)
 
-**Target:** `katgpt-rs/crates/katgpt-core/src/analytic_lattice/asoc.rs` (new)
-
 > This Phase is the **headline novel contribution** (per R311 §3, revised).
 > It is the autoplay bot's per-tick action selector. It always emits a
 > synchronous plasma-tier draft, then speculatively joins 3 hot-tier rederive
 > futures, and returns the stale plasma draft on `Poll::Pending` so the bot
 > loop never blocks on GPU.
+>
+> **Layering (corrected):** this phase is split across two repos:
+> - **Phase 1a** (katgpt-core): generic trait shapes `PlasmaDraft`, `RederiveOp`.
+>   These do NOT import `GpuFuture` — `RederiveOp` uses an associated
+>   `type Fut` so the trait is object-safe in the leaf crate.
+> - **Phase 1b** (riir-engine): the `ComposerTick<P,Rb,Rq,Rp,D>: GpuFuture`
+>   impl + the `Join3` combinator. This is the only layer with both
+>   `katgpt-core` AND `riir-gpu-async` in scope.
+
+### Phase 1a — Trait shapes (katgpt-core)
+
+**Target:** `katgpt-rs/crates/katgpt-core/src/analytic_lattice/asoc.rs` (new)
 
 ### Tasks
 
-- [ ] **T1.1** Define the plasma-tier draft trait (generic, no game IP):
+- [ ] **T1a.1** Define the plasma-tier draft trait (generic, no game IP, no
+      `GpuFuture` import):
 
 ```rust
 /// Plasma-tier synchronous draft producer. Always completes in nanoseconds;
@@ -109,23 +141,52 @@ pub trait PlasmaDraft {
 }
 ```
 
-- [ ] **T1.2** Define the hot-tier rederive trait (generic `GpuFuture` producer):
+- [ ] **T1a.2** Define the hot-tier rederive trait (generic — note the
+      associated `type Fut`, no `GpuFuture` bound at the trait level):
 
 ```rust
-/// Hot-tier transport-operator rederive. Produces a `GpuFuture` that resolves
-/// to a `TransportOperator` when the GPU work completes. The ASOC cascade
+/// Hot-tier transport-operator rederive. Produces a future that resolves
+/// to a `TransportOperator` when the work completes. The ASOC cascade
 /// joins 3 of these per tick (`C_boss`, `C_quest`, `C_player`).
+///
+/// The `Fut` associated type is only constrained to `GpuFuture<Output = TransportOperator>`
+/// at the **impl site** (Phase 1b in riir-engine), NOT here in katgpt-core —
+/// this keeps the leaf crate free of the `riir-gpu-async` dependency.
 pub trait RederiveOp {
-    type Fut: GpuFuture<Output = TransportOperator>;
+    type Fut;
     fn rederive(&self, ctx: &ComposerCtx) -> Self::Fut;
 }
 ```
 
-- [ ] **T1.3** Implement `ComposerTick: GpuFuture` — the cascade core:
+- [ ] **T1a.3** Define `ComposerCtx` (the shared per-tick context, generic):
 
 ```rust
+/// Per-tick composer context — shared read-only state used by both the
+/// plasma draft and the hot-tier rederives. Generic struct; concrete
+/// construction lives in riir-ai.
+pub struct ComposerCtx {
+    pub tick: u64,
+    pub zone_hash: u64,
+    // ... generic fields only — no game IP
+}
+```
+
+### Phase 1b — `ComposerTick: GpuFuture` impl + `Join3` (riir-engine)
+
+**Target:** `riir-ai/crates/riir-engine/src/analytic_lattice/asoc.rs` (new)
+
+### Tasks
+
+- [ ] **T1b.1** Implement `ComposerTick<P, Rb, Rq, Rp, D>: GpuFuture` — the
+      cascade core, in riir-engine (where `riir-gpu-async::GpuFuture` is
+      importable):
+
+```rust
+use katgpt_core::analytic_lattice::{ComposerCtx, PlasmaDraft, RederiveOp, TransportOperator};
+use riir_gpu_async::{GpuFuture, Join};
+
 /// The ASOC cascade tick. On `poll`:
-///   1. If hot-tier join (`C_boss` ⊗ `C_quest` ⊗ `C_player` via `GpuFuture::Join`)
+///   1. If hot-tier join (`C_boss` ⊗ `C_quest` ⊗ `C_player` via `Join3`)
 ///      returns `Ready`, compose the chain via `compose_chain` and return the
 ///      decoded action.
 ///   2. If hot-tier join returns `Pending`, return `Ready(stale_plasma_draft)`
@@ -133,7 +194,7 @@ pub trait RederiveOp {
 ///      guarantee** — the bot loop never stalls on GPU congestion.
 pub struct ComposerTick<P, Rb, Rq, Rp, D> {
     plasma: P,             // PlasmaDraft
-    rederive_boss: Rb,     // RederiveOp
+    rederive_boss: Rb,     // RederiveOp (Fut bound to GpuFuture<Output=TransportOperator> here)
     rederive_quest: Rq,    // RederiveOp
     rederive_player: Rp,   // RederiveOp
     decoder: D,            // direction_vector_decode closure / trait obj
@@ -144,9 +205,9 @@ pub struct ComposerTick<P, Rb, Rq, Rp, D> {
 impl<P, Rb, Rq, Rp, D> GpuFuture for ComposerTick<P, Rb, Rq, Rp, D>
 where
     P: PlasmaDraft + Unpin,
-    Rb: RederiveOp + Unpin, Rb::Fut: Unpin,
-    Rq: RederiveOp + Unpin, Rq::Fut: Unpin,
-    Rp: RederiveOp + Unpin, Rp::Fut: Unpin,
+    Rb: RederiveOp + Unpin, Rb::Fut: GpuFuture<Output = TransportOperator> + Unpin,
+    Rq: RederiveOp + Unpin, Rq::Fut: GpuFuture<Output = TransportOperator> + Unpin,
+    Rp: RederiveOp + Unpin, Rp::Fut: GpuFuture<Output = TransportOperator> + Unpin,
     D: FnMut(&TransportOperator) -> P::Action,
 {
     type Output = P::Action;
@@ -162,19 +223,26 @@ where
 }
 ```
 
-- [ ] **T1.4** `Join3` helper — a 3-way `GpuFuture::Join` (the shipped `Join`
-      is 2-way; nest `Join<Join<A, B>, C>` or add a small `Join3` combinator
-      in this module — prefer nesting to avoid growing `riir-gpu-async`).
+- [ ] **T1b.2** `Join3` helper — a 3-way `riir-gpu-async::GpuFuture::Join`.
+      The shipped `Join` is 2-way; nest `Join<Join<A, B>, C>` or add a small
+      `Join3` combinator in this riir-engine module — prefer nesting to avoid
+      growing `riir-gpu-async`. (Lives in riir-engine, not katgpt-core, since
+      it needs the `Join` import.)
 
-- [ ] **T1.5** G1 test (determinism): same `(ctx, plasma, rederive)` inputs →
+- [ ] **T1b.3** Add `analytic_lattice_runtime` feature flag to
+      `riir-ai/crates/riir-engine/Cargo.toml` (gates the `asoc` submodule +
+      the `riir-gpu-async` + `katgpt-core/analytic_lattice` deps). NOT
+      default-on.
+
+- [ ] **T1b.4** G1 test (determinism): same `(ctx, plasma, rederive)` inputs →
       byte-identical action when the join is `Ready`. Stale-draft fallback
-      path tested separately (see T1.6).
+      path tested separately (see T1b.5).
 
-- [ ] **T1.6** G1b test (non-blocking contract): inject a `MockRederiveOp`
+- [ ] **T1b.5** G1b test (non-blocking contract): inject a `MockRederiveOp`
       that returns `Poll::Pending` indefinitely. Assert `ComposerTick::poll`
       returns `Ready(stale_draft)` (NOT `Pending`) — the bot loop contract.
 
-- [ ] **T1.7** G4 test (latency): plasma-draft path (`Poll::Pending` injected)
+- [ ] **T1b.6** G4 test (latency): plasma-draft path (`Poll::Pending` injected)
       must complete in < 100ns. Hot-tier-join path must complete in < 1µs when
       the join resolves immediately.
 
@@ -331,16 +399,11 @@ pub fn direction_vector_decode<const N: usize>(
 
 ### Tasks
 
-- [ ] **T5.1** Run all 6 gates in `katgpt-rs/crates/katgpt-core/tests/analytic_lattice_goat.rs`. Gates (per R311 §5):
-  - G1 determinism (compose_chain + ASOC `ComposerTick` Ready path)
-  - G1b non-blocking contract (ASOC `ComposerTick` returns stale draft on `Poll::Pending`)
-  - G2 ranking preservation (decoder + batch_compose_chain vs naive)
-  - G3 associativity (compose_chain)
-  - G4 latency (plasma-draft path < 100ns, hot-join path < 1µs, batched N=64 ≥ 4× vs naive)
-  - G5 zero-alloc steady state (`TrackingAllocator`)
-  - G6 spectral audit (max spurious coupling ≤ 5%)
-- [ ] **T5.2** Write benchmark to `katgpt-rs/.benchmarks/330_analytic_lattice_goat.md`.
-- [ ] **T5.3** If all gates pass: promote `analytic_lattice_encoder` to `default` in katgpt-core Cargo.toml.
+- [ ] **T5.1** Split test locations per the Phase 1a/1b layering:
+  - **katgpt-core** (`katgpt-rs/crates/katgpt-core/tests/analytic_lattice_goat.rs`): G1 determinism (compose_chain), G2 ranking (decoder + batch_compose_chain vs naive), G3 associativity, G5 zero-alloc, G6 spectral audit. Pure math, no `GpuFuture`.
+  - **riir-engine** (`riir-ai/crates/riir-engine/tests/analytic_lattice_runtime_goat.rs`): G1 ASOC `ComposerTick` Ready path, G1b non-blocking contract (returns stale draft on `Poll::Pending`), G4 latency (plasma-draft path < 100ns, hot-join path < 1µs, batched N=64 ≥ 4× vs naive).
+- [ ] **T5.2** Write benchmark to `katgpt-rs/.benchmarks/330_analytic_lattice_goat.md` (math primitives) + `riir-ai/.benchmarks/330_analytic_lattice_runtime_goat.md` (ASOC cascade).
+- [ ] **T5.3** If all gates pass: promote `analytic_lattice` to `default` in katgpt-core Cargo.toml. Separately promote `analytic_lattice_runtime` to default in riir-engine ONLY if `riir-gpu-async` is itself default-on (it is not today — keep opt-in).
 - [ ] **T5.4** If any gate fails: keep opt-in, document the failure in `.issues/`, decide modelless unblock path per workflow §3.5 (check freeze/thaw, raw/lora, latent correction before any riir-train deferral).
 
 ---
