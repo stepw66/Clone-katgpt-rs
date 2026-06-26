@@ -2,6 +2,38 @@
 
 Hot-path Rust optimization patterns. Apply to any microsecond-sensitive code.
 
+## Checklist (Quick Reference)
+
+This is a LOOP. Keep optimizing until nothing left to improve.
+
+1. **Complexity**: O(n) scan → O(1) lookup, merge HashMap lookups, merge loops, **boundary-vs-volume** (Stokes/divergence theorem: integrate boundary `O(n^{(d-1)/d})` instead of interior `O(n)` for low-dim d≤3 region mass queries — curse-of-dim caps it at d≤3)
+2. **Allocations**: `String` → `&'static str`, pre-allocate, eliminate `.to_string()`
+3. **Layout**: field reorder (u64→u32→u8), `#[repr(u8)]` enums, remove `#[repr(C)]`
+4. **Arithmetic**: `f32` counters → `u32`/`u64`
+5. **Iterators**: fix double `chunks_exact()`, use index arithmetic
+6. **Concurrency**: `Arc<RwLock<HashMap>>` → `papaya`, `Mutex<u32>` → `AtomicU32`
+7. **SIMD**: chunked loops, branch-free inner loops
+8. **Caching**: pre-compute lookup tables, compute once not N×M
+9. **Errors**: `unwrap()` → `?`, `let _ =` → `.log_err()`
+
+## Termination
+
+This is a LOOP. You keep optimizing until you cannot find anything to optimize.
+
+After each turn, end your response with exactly one of:
+
+- `Continue optimizing remaining files.` — you made code changes this turn
+- `No optimizations this pass.` — you read files but changed nothing
+
+If you only summarized what you read without changing code, say "no optimizations this pass".
+
+## Rules
+
+- Do NOT create plans or issues.
+- Do NOT create new files unless necessary.
+- Commit when done (`perf:` or `refactor:` prefix).
+- Use sigmoid, not softmax.
+
 ## When to Optimize
 
 1. Profile first — never optimize without numbers
@@ -28,13 +60,44 @@ Hot-path Rust optimization patterns. Apply to any microsecond-sensitive code.
 - Cache allocations: `Vec::with_capacity()` once, `clear()` + reuse across calls
 - Pass pre-allocated scratch buffers as `&mut [T]` parameters instead of allocating inside hot loops
 
+### Manifold / Cell-Complex Geometry
+
+For code operating on cell complexes / meshes / grid manifolds (DEC, FEM, game maps):
+
+- **Boundary-vs-volume (Stokes / divergence theorem)**: to compute a region's total mass / energy / activation magnitude, integrate over the boundary `∂M` (surface area, `O(n^{(d-1)/d})` cells) instead of the interior `M` (volume, `O(n)` cells). Valid when the field is curl-free / exact; reconstruction error is bounded by the harmonic component (compute via Hodge decomposition). **Win shrinks fast as dimension d grows — practical only for d ≤ 3 (2D game maps, 3D belief regions, KG embeddings). For d ≥ 8 (HLA state) or d ≥ 64 (style weights) the boundary is larger than the interior, so boundary-only is a loss.**
+- **Conservation-by-construction**: identity `curl(grad)=0` / `div(curl)=0` enforced by DEC operator construction (not a soft penalty) gives mass-conservation invariants for free. Use as a modelless validator: if `div(flow) > τ`, mass leaked/created = anomaly.
+- **Pre-compute incidence / Hodge on topology change only**: DEC operators (`exterior_derivative`, `codifferential`, `hodge_decompose`) depend only on the cell complex topology, not on the field values. Compute once on map/complex load, cache, invalidate only when topology changes — zero per-tick DEC op cost on a stable map.
+- **Cache the Hodge spectrum / Betti numbers** alongside the operators — they are topology invariants reused across every field query.
+
 ### SIMD / Auto-vectorization
+
+**Auto-vectorization (let LLVM do the work):**
 
 - Write chunked loops (4 or 8 elements at a time) to help LLVM auto-vectorize
 - Cast `usize` → `u64` slices (same layout on 64-bit) for wider SIMD lanes
 - Use `u64` equality comparison — compiler maps to `_mm256_cmpeq_epi64` on AVX2
 - Keep inner loops branch-free (use `bool as usize` instead of `if`)
 - Verify with release build — SIMD benefits only appear with optimizations enabled
+
+**Portable `std::simd` recipes (when auto-vec isn't enough):**
+
+Reach for `std::simd` only after profiling shows auto-vectorization failing. Patterns below are distilled from mcyoung's `vb64` writeup (https://mcyoung.xyz/2023/11/27/simd-base64/). Full skeleton in `recipes/swizzle_lookup.rs`.
+
+- **Branchless range dispatch**: replace `match` on byte ranges with `simd_ge`/`simd_le` masks + `mask.select(splat_a, splat_b)`. 1 select beats N branches.
+- **Perfect-hash lookup via `swizzle_dyn`**: if `(byte >> 4) - (byte == c)` distinguishes all ranges, build an 8-entry offset table and do 1 shuffle instead of N compares. Index vector must be same width as lookup table.
+- **Widening cast for sub-byte packing**: `sextets.cast::<u16>() << Simd::from([2,4,6,8])`, then split into `lo = v.cast::<u8>()` and `hi = (v >> 8).cast::<u8>()`, OR them after rotating hi by 1 lane. Lets bits cross byte boundaries without per-bit ops.
+- **Lane-deletion swizzle**: when every k-th lane is garbage, use a const swizzle `|i| i + i/(k-1)` to skip those lanes. Compile-time indices = single `vpshufb`.
+- **Slop-buffer commit**: `out.reserve(final_len + N/4)`, write full SIMD vectors via `ptr.cast::<Simd<u8,N>>().write_unaligned()`, only call `set_len()` after success. On error, never commit — garbage writes vanish.
+- **Delayed failure**: accumulate `error |= !ok` from each iteration, return `Err` once after the loop. Errors are rare; don't pay branch cost per chunk.
+- **Unroll-and-jam with overlapping loads**: use `chunks_exact(N)` for the hot path + `Simd::from_slice()`. For the remainder, load `u64` from `p` and `p+len-8` (overlap by 1 byte), OR them — 2 loads cover any 8–15 byte tail.
+
+**Decision rules:**
+
+- SIMD wins: lane count ≥ 8, branch-heavy parse/codec, no allocator in loop, input ≥ 16 bytes
+- Scalar wins: input < 16 bytes, branch predicts well (profile says so), cold path, or auto-vec already covers it
+- `swizzle_dyn` requires index vector length == lookup table length — pad the table if needed
+- Bound all generic SIMD fns with `LaneCount<N>: SupportedLaneCount`
+- Tune `N` by benchmark; on x86-64 with AVX2, `N = 32` (one YMM) is usually optimal
 
 ### Parallelism / Rayon
 
