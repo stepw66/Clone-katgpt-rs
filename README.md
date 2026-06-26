@@ -1849,6 +1849,7 @@ benches/             Criterion benchmarks
 - [Cross-Resolution Spectral Transport](.plans/310_cross_resolution_spectral_transport_primitive.md)
 - [Viable Manifold Graph](.plans/312_viable_manifold_graph_primitive.md)
 - [CommittedFieldBlend — sampling-invariant per-entity MoE](.plans/321_sampling_invariant_per_entity_moe_primitive.md)
+- [Sigmoid-not-Softmax: The Universality-Class Escape (Research 315, Liu & Gore 2606.25008)](.docs/31_universality_class_escape.md)
 
 ## 📜 References
 

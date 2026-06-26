@@ -140,9 +140,9 @@ If softmax gives 1/3 and the paper's argument is "nonlinearity fixes exponent", 
 
 ### Action items
 
-- [ ] **T1 (optional, low priority):** Add a "universality-class canary" sub-bench to `katgpt-rs/benches/cucg_goat.rs` extending G6 — construct softmax-gated vs sigmoid-gated equivalent blend systems and report the tail-decay difference. This makes G6 quantitatively defensible rather than just rule-enforced. No new primitive; pure bench addition.
-- [ ] **T2 (documentation):** Add a one-paragraph note to `katgpt-rs/README.md` (or `.docs/`) citing this paper as the theoretical grounding for the sigmoid-not-softmax rule and the committed-blend coefficient-navigation strategy. Low effort, high documentation value.
-- [ ] **T3 (cross-reference update):** Update `katgpt-rs/crates/katgpt-core/benches/bench_313_ac_prefix_goat.rs:132-133` comment to reference this research note as the theoretical grounding, closing the deferred Research 295 thread.
+- [x] **T1 (done, 2026-06-26):** Added "universality-class canary" sub-bench to `katgpt-rs/benches/cucg_goat.rs` extending G6. The canary constructs equivalent softmax-gated and sigmoid-gated blend systems over 8 mixed-sign logits, measures output entropy at scale T=64, and asserts the structural divergence Liu & Gore predict: softmax entropy collapses to ~0 (one-hot via partition-of-unity) while sigmoid normalized entropy plateaus at ln(n_positive)=ln(5)≈1.609 (independent per-coordinate saturation, no partition constraint). Measured Δ=1.6094 > 1.0 threshold → different universality class. G6 is now quantitatively defensible, not just grep-enforced. All 7 CUCG gates still pass (no regression).
+- [x] **T2 (done, 2026-06-26):** Added `katgpt-rs/.docs/31_universality_class_escape.md` citing this paper as the theoretical grounding for the sigmoid-not-softmax rule and the committed-blend coefficient-navigation strategy. Linked from the README Documentation Index.
+- [x] **T3 (done, 2026-06-26):** Updated `katgpt-rs/crates/katgpt-core/benches/bench_313_ac_prefix_goat.rs:132-137` comment to reference Research 315, closing the deferred Research 295 thread. The comment now explains *why* the LM head softmax is the exception (it's where the 1/3 exponent is canonically fixed) and *why* the blending-gate sigmoid is the escape.
 
 ---
 

@@ -130,7 +130,11 @@ fn rand_vec(n: usize, rng: &mut SimpleRng, scale: f32) -> Vec<f32> {
 /// Used by both the AC-GPT path (passes `prefix.attends`) and the iterative-MLM
 /// path (passes a per-eval-position unmasking predicate). The LM head uses
 /// log-softmax over vocab — AGENTS.md "sigmoid not softmax" rule applies to
-/// blending gates, not the LM head.
+/// blending gates, not the LM head. Per Research 315 (Liu & Gore 2606.25008),
+/// the LM head softmax is exactly where the universal 1/3 training-time
+/// exponent is fixed; the blending-gate sigmoid is exactly where this codebase
+/// deliberately escapes it (different universality class, not better — just
+/// structurally distinct). This closes the deferred thread from Research 295.
 fn forward_masked(
     model: &MicroGpt,
     tokens: &[u32],
