@@ -164,12 +164,29 @@ pub trait RederiveOp {
 /// Per-tick composer context — shared read-only state used by both the
 /// plasma draft and the hot-tier rederives. Generic struct; concrete
 /// construction lives in riir-ai.
+///
+/// **Shape contract (T1a.4):** ctx carries ONLY cache-keying + routing
+/// fields (tick, zone_hash). It does NOT carry entity state — each
+/// `RederiveOp` impl owns its own data source (e.g. `Arc<EntitySnapshots>`,
+/// `ArcSwap<TransportOperator>` cache). This keeps ctx cheap to clone
+/// (needed for the warm-tier reflection queue) and avoids putting game IP
+/// in the katgpt-core generic struct.
 pub struct ComposerCtx {
     pub tick: u64,
     pub zone_hash: u64,
     // ... generic fields only — no game IP
 }
 ```
+
+- [ ] **T1a.4** Document the `ComposerCtx` shape contract (see T1a.3 doc
+      comment): ctx carries ONLY `(tick, zone_hash, ...)` for cache keying
+      and routing. Each `RederiveOp` impl owns its entity-state source
+      (e.g. `BossRederiveOp` holds `Arc<BossSnapshots>` internally and only
+      uses `ctx.tick` / `ctx.zone_hash` to key its internal cache). This
+      avoids bloating the generic ctx struct with game-specific fields,
+      keeps `ctx.clone()` cheap (needed for the warm-tier reflection queue,
+      see § Cascade param threading), and respects the katgpt-core leaf
+      discipline (no game IP in the generic struct).
 
 ### Phase 1b — `ComposerTick: GpuFuture` impl + `Join3` (riir-engine)
 
@@ -245,6 +262,168 @@ where
 - [ ] **T1b.6** G4 test (latency): plasma-draft path (`Poll::Pending` injected)
       must complete in < 100ns. Hot-tier-join path must complete in < 1µs when
       the join resolves immediately.
+
+- [ ] **T1b.7** **Stash lifecycle — refresh every poll.** `ComposerTick::poll`
+      MUST refresh `stale_draft` from `plasma.draft(ctx)` on EVERY poll call,
+      BEFORE polling the in-flight join — not just on first construction.
+      Without this, a long congestion period leaves the bot acting on an
+      infinitely stale draft. The refresh is sync + cheap (plasma contract).
+      Concretely the poll body becomes:
+      ```text
+      1. self.stale_draft = Some(self.plasma.draft(ctx))   // refresh ALWAYS
+      2. if self.join.is_none() { self.join = Some(Join3::new(...)) }  // lazy init
+      3. match self.join.poll(cx) {
+           Ready((Cb,Cq,Cp)) => { compose_chain + decode => Ready(fresh) }
+           Pending            => Ready(self.stale_draft.take().unwrap())
+         }
+      ```
+      Add a G1c test: inject a `MockPlasmaDraft` that returns incrementing
+      values per call; inject `MockRederiveOp` that returns `Pending` for N
+      polls then `Ready`; assert the Nth `poll()` returns the LATEST plasma
+      draft (not the original) — i.e. the stash was refreshed each tick.
+
+- [ ] **T1b.8** **Previous-tick join policy — let it complete.** If tick N's
+      `Join3` is still `Pending` when tick N+1 starts, do NOT drop the old
+      join. Let it complete in the background; when it eventually returns
+      `Ready((Cb,Cq,Cp))`, treat the result as a **free warm-tier observation**:
+      compose + audit + push `(ctx_N, draft_N+1, fresh_N)` to the reflection
+      queue (note: divergence is checked against tick N+1's CURRENT plasma
+      draft, not tick N's). This recovers GPU work that would otherwise be
+      wasted and gives the warm tier a real freshness signal.
+
+      Implementation: `ComposerTick` owns its `Join3`; on tick rollover the
+      bot loop moves the still-Pending join into a `pending_prev_join` field
+      (or a small side queue of ≤1 entry) and polls it alongside the new
+      tick's join. Add a G1d test verifying the previous-tick path emits a
+      reflection event on completion, even after the bot has already acted
+      on multiple stale drafts.
+
+---
+
+## Cascade param threading (diagram)
+
+This section documents how `ComposerCtx` and the stashed `stale_draft`
+thread through the three ASOC tiers per tick. It is the visual contract
+for Phase 1a/1b — implementation MUST match this flow.
+
+### Per-tick sequence
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Bot as Bot loop<br/>(Bevy FixedUpdate 20Hz)
+    participant Ctx as ComposerCtx<br/>builder
+    participant Plasma as Plasma tier<br/>(sync, us)
+    participant Hot as Hot tier<br/>(Join3 GpuFuture)
+    participant GPU as wgpu device
+    participant Queue as Reflection<br/>queue
+    participant Warm as Warm tier<br/>(ReestimationScheduler)
+
+    Note over Bot,Warm: One tick = one ASOC cascade cycle
+
+    Bot->>Ctx: gather tick state<br/>(tick, zone_hash, routing)
+    Ctx-->>Bot: ComposerCtx
+
+    Bot->>Plasma: plasma.draft(ctx)
+    Note right of Plasma: sync read of ArcSwap caches<br/>compose_chain(stale Cb,Cq,Cp)<br/>spectral_audit(draft_C_total)<br/>direction_vector_decode
+    Plasma-->>Bot: stale_draft: P::Action<br/>STASHED as fallback param
+    Note over Bot: bot can already act on stale_draft<br/>(non-blocking contract)
+
+    Bot->>Hot: ComposerTick.poll()<br/>(carries ctx + stashed draft)
+    Note over Hot: T1b.7: refresh stale_draft first<br/>lazy-init Join3 on first poll:<br/>redrive_boss.rederive(ctx)<br/>redrive_quest.rederive(ctx)<br/>redrive_player.rederive(ctx)
+
+    par 3 concurrent GpuFutures
+        Hot->>GPU: dispatch C_boss shader
+        Hot->>GPU: dispatch C_quest shader
+        Hot->>GPU: dispatch C_player shader
+    end
+
+    alt Join3 returns Ready (Cb, Cq, Cp)
+        GPU-->>Hot: 3 TransportOperators
+        Note over Hot: compose_chain Cb,Cq,Cp to C_total_fresh<br/>spectral_audit(C_total_fresh)<br/>decoder(C_total_fresh) to fresh_action
+        Hot->>Hot: divergence check:<br/>draft - fresh greater than eps ?
+        alt diverges
+            Hot->>Queue: push (ctx.clone(),<br/>draft.clone(),<br/>fresh.clone())
+            Note right of Queue: warm tier will<br/>re-audit + re-estimate
+        end
+        Hot-->>Bot: Ready(fresh_action)
+        Note over Bot: bot acts on fresh_action
+    else Join3 returns Pending (congestion)
+        Note over Hot: KEY: do NOT propagate Pending<br/>return Ready(stale_draft.take())
+        Hot-->>Bot: Ready(stale_draft)<br/>(the threaded fallback param)
+        Note over Bot: bot acts on stale_draft<br/>loop never stalls
+    end
+
+    Note over Warm: Background (separate tick or idle)
+
+    Queue-->>Warm: pop (ctx, draft, fresh)
+    Note over Warm: ReestimationScheduler::tick<br/>coherence_decay(C_player entry)<br/>if coherence less than tau_reest:<br/>  prior = cross_game_transfer(best_historical)<br/>  if prior.test_coherence greater than 0.7:<br/>    rederive_from_prior(prior)<br/>  else:<br/>    rederive_from_scratch()<br/>  FunctorTable.atomic_swap(new_entry)<br/>  (BLAKE3 + Uuid::now_v7)
+    Warm-->>Plasma: next tick's plasma reads<br/>the updated ArcSwap cache
+```
+
+### Param threading, condensed
+
+```mermaid
+graph LR
+    Ctx[ComposerCtx<br/>tick, zone_hash,<br/>routing only — T1a.4]
+
+    Ctx -->|&pass by ref| Plasma[Plasma draft<br/>sync]
+    Ctx -->|&pass by ref| Rb[redrive_boss.rederive]
+    Ctx -->|&pass by ref| Rq[redrive_quest.rederive]
+    Ctx -->|&pass by ref| Rp[redrive_player.rederive]
+    Ctx -.->|clone if divergent| Queue[(Reflection queue<br/>ctx, draft, fresh)]
+
+    Plasma -->|refresh every poll<br/>T1b.7| Stale[(stale_draft:<br/>fallback param)]
+    Rb --> Join[Join3]
+    Rq --> Join
+    Rp --> Join
+    Join -->|Ready| Compose[compose_chain<br/>to C_total_fresh]
+    Join -->|Pending| Stale
+
+    Compose --> Decode[decoder to fresh_action]
+    Decode --> Div{diverges<br/>from draft?}
+    Div -->|yes| Queue
+    Div -->|no| Done[bot acts on fresh]
+
+    Stale --> Done2[bot acts on stale<br/>NON-BLOCKING]
+    Queue -.-> Warm[Warm tier<br/>re-estimate + swap]
+
+    PrevJoin[prev-tick join<br/>T1b.8] -.->|let it complete| Queue
+```
+
+### The non-obvious bit (why this works)
+
+The `stale_draft` is **not just an output** — it is **the param that makes
+the whole thing non-blocking**. Without stashing it from the plasma pass,
+the hot tier's `Poll::Pending` would have to propagate up and stall the bot.
+The stash turns `Pending` into `Ready(stale)`.
+
+This is why the trait split matters:
+
+- `PlasmaDraft::draft(ctx)` is **synchronous and total** (always returns,
+  never fails) — its output is always available to be stashed.
+- `RederiveOp::rederive(ctx)` returns a `GpuFuture` that may never complete
+  (congestion) — its output is conditional; fall back to the stash.
+
+If `PlasmaDraft` were also async, the non-blocking contract would collapse
+— there would be no sync fallback to stash. The tier asymmetry
+(plasma = sync, hot = async) is what makes ASOC work.
+
+### Param threading, explicit table
+
+| Tier | Input params | Output | Carries forward? |
+|---|---|---|---|
+| ComposerCtx builder | tick state (Bevy resources) | `ComposerCtx` | yes — handed to plasma AND each rederive |
+| Plasma | `&ComposerCtx` + `ArcSwap` operator caches | `stale_draft: P::Action` | **yes** — stashed in `ComposerTick.stale_draft` as the Pending fallback (refreshed every poll per T1b.7) |
+| Hot `redrive_boss` | `&ComposerCtx` | `GpuFuture<Output=TransportOperator>` | GPU shader reads ctx-derived uniforms |
+| Hot `redrive_quest` | `&ComposerCtx` | same | concurrent with boss |
+| Hot `redrive_player` | `&ComposerCtx` | same | concurrent with boss + quest |
+| `Join3` | 3 `GpuFuture`s | `Poll<(TransportOperator × 3)>` | drives the Ready/Pending branch |
+| compose_chain (on Ready) | the 3 fresh operators | `C_total_fresh` | feeds decoder + divergence check |
+| decoder (on Ready) | `C_total_fresh` + action directions | `fresh_action: P::Action` | the real answer |
+| divergence check | `draft` + `fresh` | `bool` | if true → push `(ctx, draft, fresh)` to queue |
+| prev-tick join (T1b.8) | `ctx_N` (stashed) + own futures | `(Cb_N, Cq_N, Cp_N)` when it finally completes | becomes a free warm-tier observation; divergence checked against tick N+1's CURRENT plasma draft |
+| Warm `ReestimationScheduler` | `(ctx, draft, fresh)` from queue | updated `FunctorTable` entry | next tick's plasma reads the swap |
 
 ---
 
