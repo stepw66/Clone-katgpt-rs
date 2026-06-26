@@ -136,6 +136,7 @@ self_advantage_gate = []  # Self-advantage recursion gate for HLA reconstruction
 recursion_logits = []  # RecursionLogits opt-in trait — pre/post recursion logits exposure for AdvantageMarginGate wrapping (Plan 283 T2.3, arxiv:2511.16886). Opt-in; non-recursing generators do not implement it.
 compression_drafter = ["dep:lz4_flex"]  # CompressionDrafter — Hot-tier modelless LZ4 corpus-as-model drafter (Plan 285, Research 256, nathan.rs/gzip-lm). Opt-in until G1–G3 GOAT gate passes.
 funcattn = []  # Functional Attention — closed-form Tikhonov k×k spectral transport operator (Plan 286, Research 257, arxiv 2605.31559). Linear-in-n attention variant; sigmoid-basis default per AGENTS.md. TRANSITIVELY DEFAULT-ON via `cross_resolution_transport = ["funcattn"]` (Plan 310 Phase 4 promotion, 2026-06-23). On its own merits funcattn is Gain-tier (Plan 286 GOAT gate pending); promoted only because its asymmetric generalization (Plan 310) passed G1-G4.
+funcattn_structured_basis = ["funcattn"]  # Plan 332 — Principled multi-scale basis constructors for FUNCATTN (DCT-log, Haar-packet). The probe (Issue 001, 2026-06-26) proved structured beats random by +0.11 cos on transport; this feature ships FIXED principled bases that don't need a-priori signal knowledge. Opt-in until G1+G2 GOAT gate passes (captures ≥50% of hand-crafted gain).
 chunked_content_store = ["dep:papaya"]  # ChunkedContentStore — Lore-distilled chunked content-addressed Merkle store (Plan 272, Research 262). Open primitive; consumed by riir-ai Plan 319. Default-off until GOAT gate G1–G7 pass.
 chunked_net_fetch = []  # NetChunkFetcher — network chunk fetcher stub for ChunkedContentStore (Plan 272 T3.3). Gates the `NetChunkFetcher` trait surface + URL construction; the stub returns `None` (no `reqwest` dep). When `reqwest` is added, this becomes `chunked_net_fetch = ["dep:reqwest"]` and the stub gains a real HTTP client. Opt-in; `TieredChunkFetcher` is generic over any `ChunkFetcher` so consumers compose it only when needed.
 sink_aware_attn = []  # Sink-Aware Attention — NOP/Broadcast classifier + dual-policy sigmoid gate (Plan 287, Research 258, arxiv 2606.08105, Fesser et al.). Per-head classifier (value-norm-ratio + stable-rank-of-update) decides whether a sink is Adaptive NOP (gate it) or Broadcast (preserve it). Opt-in until synthetic G2 + latency G3 pass; default stays Uniform.
@@ -168,6 +169,7 @@ interest_cochain = []
 lattice_utility = ["dec_operators"]
 bisimulation_operator_inference = []  # Bisimulation Operator Inference — generic modelless primitive that quotients an observed transition graph into bisimulation-equivalent state classes and infers an abstract PDDL-like operator schema (Plan 324, Research 308, arXiv:2602.19260 "The Price Is Not Right" Duggan et al. Feb 2026; underlying NSM method arXiv:2508.21501 Lorang et al.). Closes Research 264 §2.2 gap #1 (PTG data structure) + #2 (motif-mining loop). Lighter-weight PDDL-side counterpart to Induced CWM (Plan 296). Opt-in by design — downstream pipelines opt in; the primitive is not a default-on capability. Paige-Tarjan O((S+E) log S) partition refinement, canonical BLAKE3 commitment, BFS planner.
 arg_protocol = ["dep:papaya"]  # ARG Protocol Primitives — PolicyEnvelope + TaxonomyValidator + LifecycleState+RedirectTable + TypedOfflineCandidate+OfflineCandidateScorer + InfoRegistry (Plan 327 Phases 1-4, Research 309 — open half of the ARG × Latent Substrate Super-GOAT fusion). Five generic protocol primitives distilled from the ARG Standard (protocol.airistech.ai/arg-core.html). No game/chain/shard semantics. DEFAULT-ON (Plan 327 Phase 4, 2026-06-25): G1-G5 all PASS, pure modelless gain. Private runtime composition lives in riir-ai Plan 337 / Guide 160.
+babel_codec = []  # BabelCodec — Readability-relaxed semantic codec (Plan 331, Research 312, arXiv:2606.19857 BabelTele). Open primitive: generic `BabelCodec` trait + `FixedRuleTextCodec` (deterministic BT-P8 fixed symbolic mapping rules for KG-triple / entity-attribute / config / quest-grammar surfaces) + `SigmoidLatentCodec<D>` (generic-trait facade over existing `DensityBudget` infrastructure, latent-level analog) + BLAKE3 commitment. The modelless subset of BabelTele (the paper's headline 3.6× is LLM-prompted, NOT deterministic; we ship the fixed-rule subset). Opt-in until G1–G5 GOAT gate passes — the same G2 (≥ 2× on real corpus) gate that killed CompressionDrafter twice (Plan 285/287). Sigmoid, not softmax (per AGENTS.md).
 
 # Plan 335 Phase 6 — GOAT gate leaf bench. G2 lattice-side latency on a 16×16
 # grid (480 edges) + G4 zero-alloc code-review note. Leaf-clean: raw slices
@@ -405,6 +407,16 @@ required-features = ["karc_forecaster"]
 [[test]]
 name = "karc_reproducibility"
 required-features = ["karc_forecaster"]
+
+# Plan 331 — BabelCodec GOAT gate. G1 round-trip fidelity + G2 compression
+# ratio (the make-or-break — same gate that killed CompressionDrafter twice) +
+# G3 latency + G4 alloc-free hot path + G5 determinism. The corpus is a
+# 1500-entry synthetic Seal-style substitute (the real Seal 17k corpus is not
+# a committed fixture — documented honestly in the bench header).
+[[test]]
+name = "bench_331_babel_codec_goat"
+required-features = ["babel_codec"]
+harness = false
 
 # Plan 321 Phase 2 — CommittedFieldBlend G4 zero-alloc GOAT gate. CountingAllocator
 # audit of apply_blended (1000 iters) + commit (100 re-commits). Gated on

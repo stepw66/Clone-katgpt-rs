@@ -410,6 +410,26 @@ pub mod compression_drafter;
 #[cfg(feature = "compression_drafter")]
 pub use compression_drafter::{CompressionDrafter, Lz4FlexDrafter};
 
+// BabelCodec — Readability-relaxed semantic codec (Plan 331, Research 312,
+// arXiv:2606.19857 BabelTele). Successor text codec to CompressionDrafter:
+// where CompressionDrafter failed G2 twice on the Seal corpus (byte-level LZ4
+// matching on short quest-grammar strings), BabelCodec operates on semantic
+// STRUCTURE (BT-P8 fixed symbolic mapping rules) — purpose-built for KG-triple
+// / entity-attribute / config / quest-grammar surfaces. Ships three pieces:
+// (1) generic `BabelCodec` trait, (2) `FixedRuleTextCodec` (deterministic BT-P8
+// text codec, the modelless subset of BabelTele), (3) `SigmoidLatentCodec<D>`
+// (generic-trait facade over existing DensityBudget infrastructure, latent-level
+// analog — value is API uniformity, NOT new capability), plus BLAKE3 commitment
+// for the future LatCal chain bridge (.issues/002). Sigmoid, not softmax.
+// Opt-in until the G1–G5 GOAT gate passes — the same G2 (≥ 2× on real corpus)
+// gate that killed CompressionDrafter twice.
+#[cfg(feature = "babel_codec")]
+pub mod babel_codec;
+#[cfg(feature = "babel_codec")]
+pub use babel_codec::{
+    BabelCodec, BabelCommitment, BabelPair, CompressedLatent, FixedRuleTextCodec, SigmoidLatentCodec,
+};
+
 // Functional Attention — closed-form Tikhonov spectral transport operator
 // (Plan 286, Research 257, arxiv 2605.31559, Xiao et al. ICML 2026). DUAL FORM
 // matching the reference implementation (`.raw/FUNCATTN/PDE-StandardBenchmark/model/
@@ -426,6 +446,10 @@ pub use funcattn::{
     FuncAttnBasis, FuncAttnConfig, FuncAttnError, FuncAttnScratch, compute_basis_into,
     funcattn_forward, pre_rotate_basis_weights_into, solve_convex_combo_dual,
 };
+// Plan 332 — principled multi-scale basis constructors (DCT-log, Haar-packet).
+// gated by the dedicated `funcattn_structured_basis` feature (implies funcattn).
+#[cfg(feature = "funcattn_structured_basis")]
+pub use funcattn::{make_dct_log_basis, make_haar_packet_basis};
 
 // Cross-Resolution Spectral Transport — asymmetric-basis FUNCATTN (Plan 310,
 // Research 291, arxiv 2605.31559). Generalizes FUNCATTN to d_src ≠ d_dst,

@@ -4,7 +4,7 @@
 **Research:** [katgpt-rs/.research/312_BabelTele_Readability_Relaxed_Semantic_Codec.md](../.research/312_BabelTele_Readability_Relaxed_Semantic_Codec.md)
 **Source paper:** [arxiv 2606.19857](https://arxiv.org/abs/2606.19857) — BabelTele (Zhu et al., SJTU, Jun 2026)
 **Target:** `katgpt-rs/crates/katgpt-core/src/babel_codec/` (new module) + Cargo feature `babel_codec`
-**Status:** Active — Phase 1 unblocking skeleton
+**Status:** Complete — Phases 1–5 implemented. **GOAT FAILED (G2)**: FixedRuleTextCodec achieves 1.14× on structured data, missing the ≥ 2× bar. Stays opt-in (honest negative result, matches CompressionDrafter precedent). G1/G3/G4/G5 all PASS. See [`.benchmarks/331_babel_codec_goat.md`](../.benchmarks/331_babel_codec_goat.md).
 
 ---
 
@@ -30,9 +30,9 @@ Ship a generic `BabelCodec` trait + two deterministic implementations:
 
 ### Tasks
 
-- [ ] **T1.1** Create `crates/katgpt-core/src/babel_codec/mod.rs` with the `BabelCodec` trait, `BabelPair` struct, and module docs citing Research 312.
-- [ ] **T1.2** Add `babel_codec` feature to `crates/katgpt-core/Cargo.toml` (opt-in, empty dep list).
-- [ ] **T1.3** Add `babel_codec` to the root `lib.rs` feature-gated module list.
+- [x] **T1.1** Create `crates/katgpt-core/src/babel_codec/mod.rs` with the `BabelCodec` trait, `BabelPair` struct, and module docs citing Research 312.
+- [x] **T1.2** Add `babel_codec` feature to `crates/katgpt-core/Cargo.toml` (opt-in, empty dep list).
+- [x] **T1.3** Add `babel_codec` to the root `lib.rs` feature-gated module list.
 
 **Exit:** `cargo check -p katgpt-core --features babel_codec` compiles an empty module.
 
@@ -42,7 +42,7 @@ Ship a generic `BabelCodec` trait + two deterministic implementations:
 
 ### Tasks
 
-- [ ] **T2.1** `fixed_rule.rs`: implement BT-P8 schema parser + emitter. Schema (from paper Appendix C.2.8):
+- [x] **T2.1** `fixed_rule.rs`: implement BT-P8 schema parser + emitter. Schema (from paper Appendix C.2.8):
   - `S[topic/abbrev]` — section anchor
   - `@entity(K=V)` — entity attribute binding
   - `Config[target]:K=V(unit)` — exact-value config
@@ -52,11 +52,11 @@ Ship a generic `BabelCodec` trait + two deterministic implementations:
   - `A<>B:conclusion` — comparison
   - Preserve original placeholders (`BIBREF`, `TABREF`) verbatim
   - `NULL` / `?` for missing data
-- [ ] **T2.2** Implement `compress(&str) -> Vec<u8>`: tokenize input as `(subject, predicate, object)` triples + entity-attribute pairs + config lines, emit BT-P8 form. Returns compressed bytes (UTF-8 of the BT-P8 string).
-- [ ] **T2.3** Implement `decompress(&[u8]) -> String`: parse BT-P8 form back to verbose natural-language-ish triple form. **Deterministic inverse** — round-trip must be bit-identical for the schema-covered subset.
-- [ ] **T2.4** Implement `last_ratio()` — compression ratio of the most recent call.
-- [ ] **T2.5** Unit tests (≥ 12): round-trip on KG triples, entity-attribute pairs, config strings, conditional branches, comparison matrices, placeholder preservation, NULL handling, nested structures, empty input, max-length input, mixed schema, unicode entity names.
-- [ ] **T2.6** Doc example showing before/after on a sample quest dialog.
+- [x] **T2.2** Implement `compress(&str) -> Vec<u8>`: tokenize input as `(subject, predicate, object)` triples + entity-attribute pairs + config lines, emit BT-P8 form. Returns compressed bytes (UTF-8 of the BT-P8 string).
+- [x] **T2.3** Implement `decompress(&[u8]) -> String`: parse BT-P8 form back to verbose natural-language-ish triple form. **Deterministic inverse** — round-trip must be bit-identical for the schema-covered subset.
+- [x] **T2.4** Implement `last_ratio()` — compression ratio of the most recent call.
+- [x] **T2.5** Unit tests (≥ 12): round-trip on KG triples, entity-attribute pairs, config strings, conditional branches, comparison matrices, placeholder preservation, NULL handling, nested structures, empty input, max-length input, mixed schema, unicode entity names.
+- [x] **T2.6** Doc example showing before/after on a sample quest dialog.
 
 **Exit:** `cargo test -p katgpt-core --features babel_codec babel_codec::fixed_rule` green.
 
@@ -66,11 +66,11 @@ Ship a generic `BabelCodec` trait + two deterministic implementations:
 
 ### Tasks
 
-- [ ] **T3.1** `sigmoid_latent.rs`: implement `SigmoidLatentCodec<D>` generic over latent dimension. Fields: `directions: [[f32; D]; K]`, `bias: [f32; K]`, `tau: f32`.
-- [ ] **T3.2** `compress(&[f32; D]) -> CompressedLatent<K>`: project onto K direction vectors, apply `sigmoid(dot + bias)`, return top-k by magnitude (k ≤ K). **Zero-allocation** — write into a pre-sized `CompressedLatent<K>` scratch buffer.
-- [ ] **T3.3** `decompress(reader: &Reader, c: &CompressedLatent<K>) -> [f32; D]`: deterministic pseudo-inverse via the reader's projection matrix. Document that this is a lossy inverse (latent projection is not bijective) — the contract is "recover the top-k subspace", not bit-identical recovery.
-- [ ] **T3.4** Cross-reference: doc comment explicitly states this is structurally identical to `DensityBudget` + `extract_hla_slice` (Plan 311) — the value is API uniformity, not new capability.
-- [ ] **T3.5** Unit tests (≥ 8): round-trip preserves top-k subspace, zero vector, max-magnitude vector, deterministic across calls, direction orthogonality, bias shift, tau sharpness, K < D case.
+- [x] **T3.1** `sigmoid_latent.rs`: implement `SigmoidLatentCodec<D>` generic over latent dimension. Fields: `directions: [[f32; D]; K]`, `bias: [f32; K]`, `tau: f32`.
+- [x] **T3.2** `compress(&[f32; D]) -> CompressedLatent<K>`: project onto K direction vectors, apply `sigmoid(dot + bias)`, return top-k by magnitude (k ≤ K). **Zero-allocation** — write into a pre-sized `CompressedLatent<K>` scratch buffer.
+- [x] **T3.3** `decompress(reader: &Reader, c: &CompressedLatent<K>) -> [f32; D]`: deterministic pseudo-inverse via the reader's projection matrix. Document that this is a lossy inverse (latent projection is not bijective) — the contract is "recover the top-k subspace", not bit-identical recovery.
+- [x] **T3.4** Cross-reference: doc comment explicitly states this is structurally identical to `DensityBudget` + `extract_hla_slice` (Plan 311) — the value is API uniformity, not new capability.
+- [x] **T3.5** Unit tests (≥ 8): round-trip preserves top-k subspace, zero vector, max-magnitude vector, deterministic across calls, direction orthogonality, bias shift, tau sharpness, K < D case.
 
 **Exit:** `cargo test -p katgpt-core --features babel_codec babel_codec::sigmoid_latent` green.
 
@@ -80,10 +80,10 @@ Ship a generic `BabelCodec` trait + two deterministic implementations:
 
 ### Tasks
 
-- [ ] **T4.1** `commitment.rs`: `BabelCommitment` newtype wrapping `[u8; 32]` BLAKE3 digest of the compressed bytes.
-- [ ] **T4.2** `commit(&self) -> BabelCommitment` on both codec impls.
-- [ ] **T4.3** `verify(&self, commitment: &BabelCommitment) -> bool` — recompute and compare.
-- [ ] **T4.4** Unit tests: deterministic across architectures (test on host arch; document that cross-arch is validated in G5 bench, not here), tamper detection, empty input.
+- [x] **T4.1** `commitment.rs`: `BabelCommitment` newtype wrapping `[u8; 32]` BLAKE3 digest of the compressed bytes.
+- [x] **T4.2** `commit(&self) -> BabelCommitment` on both codec impls.
+- [x] **T4.3** `verify(&self, commitment: &BabelCommitment) -> bool` — recompute and compare.
+- [x] **T4.4** Unit tests: deterministic across architectures (test on host arch; document that cross-arch is validated in G5 bench, not here), tamper detection, empty input.
 
 **Exit:** `cargo test -p katgpt-core --features babel_codec babel_codec::commitment` green. This unblocks issue #002 (deterministic → LatCal chain commitment).
 
@@ -93,16 +93,18 @@ Ship a generic `BabelCodec` trait + two deterministic implementations:
 
 ### Tasks
 
-- [ ] **T5.1** `tests/bench_331_babel_codec_goat.rs`: G1 round-trip fidelity on 1000 synthetic KG triples + entity-attribute pairs.
-- [ ] **T5.2** G2 compression on the **real Seal 17k corpus** (same corpus as Plan 285/287). Measure byte reduction. **Target: ≥ 2×.** Honest expectation: 2–3×.
-- [ ] **T5.3** G3 latency: `std::time::Instant` batched median (matching crate convention). Target: < 200 ns / latent msg, < 2 µs / 256-byte text chunk.
-- [ ] **T5.4** G4 no-regression: `cargo test -p katgpt-core --all-features` clean.
-- [ ] **T5.5** G5 cross-arch determinism: run G1 on ARM64 + x86_64 (wasm32 if feasible), assert bit-identical BLAKE3 commitments.
-- [ ] **T5.6** Document results in `katgpt-rs/.benchmarks/331_babel_codec_goat.md`. **Honest negative result if G2 fails** — keep primitive opt-in, document why, do NOT promote.
+- [x] **T5.1** `tests/bench_331_babel_codec_goat.rs`: G1 round-trip fidelity on 1000 synthetic KG triples + entity-attribute pairs.
+- [x] **T5.2** G2 compression on the **real Seal 17k corpus** (same corpus as Plan 285/287). Measure byte reduction. **Target: ≥ 2×.** Honest expectation: 2–3×.
+- [x] **T5.3** G3 latency: `std::time::Instant` batched median (matching crate convention). Target: < 200 ns / latent msg, < 2 µs / 256-byte text chunk.
+- [x] **T5.4** G4 no-regression: `cargo test -p katgpt-core --all-features` clean.
+- [x] **T5.5** G5 cross-arch determinism: run G1 on ARM64 + x86_64 (wasm32 if feasible), assert bit-identical BLAKE3 commitments.
+- [x] **T5.6** Document results in `katgpt-rs/.benchmarks/331_babel_codec_goat.md`. **Honest negative result if G2 fails** — keep primitive opt-in, document why, do NOT promote.
 
 **Exit decision:**
 - All G1–G5 pass → promote `babel_codec` to default feature, update README, file follow-up issue #002 for the LatCal chain-commitment Super-GOAT investigation.
 - G2 fails → keep opt-in, document honest negative result, do NOT promote. Match the CompressionDrafter precedent.
+
+**Actual outcome (2026-06-26):** G2 FAILED at 1.14× (target ≥ 2×). Kept opt-in — no promotion. G1/G3/G4/G5 all passed. Issue #002 blocked on the value side (1.14× byte savings will not survive LatCal commitment-gas overhead). See [`.benchmarks/331_babel_codec_goat.md`](../.benchmarks/331_babel_codec_goat.md) for the full honest report.
 
 ---
 
