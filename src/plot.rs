@@ -78,21 +78,16 @@ pub fn plot_results(
             color.filled(),
         )))?;
 
-        // Format throughput with unit suffix
+        // Format throughput with unit suffix into a single String (avoids
+        // intermediate `tp_str` allocation before composing the label).
         let tp = result.throughput;
-        let tp_str = if tp >= 1_000_000.0 {
-            let m = tp / 1_000_000.0;
-            format!("{m:.2}M")
+        let label = if tp >= 1_000_000.0 {
+            format!("{:.2}M  ({:.2} μs)", tp / 1_000_000.0, result.time_per_step_us)
         } else if tp >= 1_000.0 {
-            let k = tp / 1_000.0;
-            format!("{k:.0}K")
+            format!("{:.0}K  ({:.2} μs)", tp / 1_000.0, result.time_per_step_us)
         } else {
-            format!("{tp:.0}")
+            format!("{:.0}  ({:.2} μs)", tp, result.time_per_step_us)
         };
-
-        // Annotation: throughput + latency
-        let us = result.time_per_step_us;
-        let label = format!("{tp_str}  ({us:.2} μs)");
 
         // Place text just past the bar end
         let text_x = result.throughput + max_val * 0.012;

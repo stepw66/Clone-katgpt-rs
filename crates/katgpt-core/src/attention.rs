@@ -165,17 +165,14 @@ fn tiled_attention_inner(
         let mut max_tile = [f32::NEG_INFINITY; BR];
         let mut norm_tile = [0.0f32; BR];
 
+        // s_tile initialized to -inf so padding columns (j >= actual_bc) are masked.
+        // The used region [0..actual_br, 0..actual_bc] is fully overwritten each k_tile
+        // by the score computation below — no need to re-clear.
         let mut s_tile = [f32::NEG_INFINITY; BR * BC];
         for k_tile_idx in 0..k_tiles {
             let k_start = k_tile_idx * BC;
             let k_end = (k_start + BC).min(seq_len);
             let actual_bc = k_end - k_start;
-
-            for i in 0..actual_br {
-                for j in 0..actual_bc {
-                    s_tile[i * BC + j] = f32::NEG_INFINITY;
-                }
-            }
 
             // 1. Score tile: S = q_tile @ k_tile.T (BR × BC)
             for i in 0..actual_br {
@@ -199,15 +196,20 @@ fn tiled_attention_inner(
                 let m_new = m_old.max(rm);
                 max_tile[i] = m_new;
 
-                // Correction factor: exp2((m_old - m_new) * log2e_scale)
-                let correction = ((m_old - m_new) * log2e_scale).exp2();
+                // Fast path: when m_new == m_old (typical after the first K-tile,
+                // since softmax max saturates quickly), correction is 1.0 and the
+                // `simd_scale_inplace` + `norm_tile *=` work is a no-op. Skip it.
+                if m_new > m_old {
+                    // Correction factor: exp2((m_old - m_new) * log2e_scale)
+                    let correction = ((m_old - m_new) * log2e_scale).exp2();
 
-                // Apply correction to existing accumulators FIRST (SIMD-accelerated)
-                crate::simd::simd_scale_inplace(
-                    &mut o_tile[i * head_dim..i * head_dim + head_dim],
-                    correction,
-                );
-                norm_tile[i] *= correction;
+                    // Apply correction to existing accumulators FIRST (SIMD-accelerated)
+                    crate::simd::simd_scale_inplace(
+                        &mut o_tile[i * head_dim..i * head_dim + head_dim],
+                        correction,
+                    );
+                    norm_tile[i] *= correction;
+                }
 
                 // Compute P̃ in-place on s_tile row: exp((s - m_new) * scale)
                 // Mathematically equivalent to exp2((s - m_new) * log2e_scale)
@@ -397,9 +399,11 @@ pub fn tiled_attention_batched(
                         let scores = unsafe { &mut *scores.get() };
                         let o_tile = unsafe { &mut *o_tile.get() };
                         if scores.len() < scores_buf_size {
+                            // `resize` zero-fills the new tail; the existing
+                            // prefix is preserved but `tiled_attention_forward_impl`
+                            // will zero the working range itself (L279), so no
+                            // extra fill is needed here on the grow path either.
                             scores.resize(scores_buf_size, 0.0);
-                        } else {
-                            scores[..scores_buf_size].fill(0.0);
                         }
                         if o_tile.len() < o_tile_size {
                             o_tile.resize(o_tile_size, 0.0);

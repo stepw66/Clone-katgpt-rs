@@ -202,7 +202,7 @@ fn bench_165_hydra_budget_goat_proof() {
 
     println!(
         "   Skipped layers: {}/{}",
-        plan_p1.skip_layers.iter().filter(|&&s| s).count(),
+        plan_p1.skip_layers.count(),
         N_LAYERS
     );
     println!("   Non-skipped layers: identical output ✓");
@@ -254,7 +254,7 @@ fn bench_165_hydra_budget_goat_proof() {
     };
     let plan_p2 = hydra_layer_skip(&profiles_p2, &config_p2);
 
-    let base_skip_count = plan_p2.skip_layers.iter().filter(|&&s| s).count();
+    let base_skip_count = plan_p2.skip_layers.count();
 
     // With decode_specialize, verify stage-aware skipping.
     #[cfg(feature = "decode_specialize")]

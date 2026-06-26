@@ -5,11 +5,13 @@
 **Date:** 2026-05-25
 **Verdict:** 🟡 **Conditional Adopt — model-based attention modification, useful for attention quality + KV eviction**
 
+**Cross-reference (2026-06-17, Plan 287):** EGA gates uniformly — every key position gets the same sigmoid-gate treatment based on its spectral energy. Research 258 (Fesser et al., arxiv 2606.08105) provides the per-head NOP/Broadcast categorization that could make EGA's gate **categorical** instead of uniform: NOP sinks could be gated (suppressed) while Broadcast sinks are preserved. This is the dual-policy attention shipped as `sink_aware_attn` — see `katgpt-rs/.plans/287_sink_aware_attention.md`. EGA + sink-aware = "gate only the no-op sinks, keep the broadcasters" — strictly more selective than EGA alone.
+
 ---
 
 ## TL;DR
 
-EGA gates value aggregation by spectral energy of key token embeddings via a single learned linear projection. +0.103 val loss improvement with <0.26% parameter overhead. The threshold τ ≈ 0.35 converges independently of initialization, corresponding to ~36% content-word fraction in English. Simple, elegant, drop-in.
+EGA gates value aggregation by spectral energy of key token embeddings via a single learned linear projection. +0.103 val loss improvement with <0.26% parameter overhead. The paper reports a stable energy threshold τ that converges independently of initialization. Simple, elegant, drop-in.
 
 ---
 
@@ -68,7 +70,7 @@ Cross-dataset: TinyShakespeare +0.103, Penn Treebank +0.101 — effectively iden
 |--------|-----------------|
 | **Scale** | Paper tested at ≤6.2M params, character-level. No evidence at LLM scale. |
 | **Model-based** | Requires training w_proj, τ, α. Not modelless. Cannot retrofit on frozen weights without fine-tuning. |
-| **Tokenization dependency** | τ ≈ 0.35 is character-level English. BPE/subword will change the content-word fraction. |
+| **Tokenization dependency** | The paper's τ value is character-level English. BPE/subword will change the content-word fraction. |
 | **Incremental over SdpaOutputGate** | We already have a sigmoid gate on attention output. EGA adds per-key-position gating upstream. Diminishing returns likely when combined. |
 
 ---
@@ -110,11 +112,11 @@ Per [27_mmo_goat_pillars_decision_matrix.md](../../riir-ai/.docs/27_mmo_goat_pil
 |--------|-----------------|-------------------|
 | Core EGA algorithm | ✅ Public — generic energy-gated attention | — |
 | Feature gate `ega_attn` | ✅ Generic implementation | — |
-| Game-domain τ values | — | ✅ Private — bomber τ, go τ, FFT τ |
-| Per-domain w_proj LoRA | — | ✅ Private — `game_ega_lora.bin` |
+| Game-domain τ values | — | ✅ Private — per-game energy thresholds |
+| Per-domain w_proj LoRA | — | ✅ Private |
 | KV eviction policy using energy | ✅ Generic threshold | ✅ Domain-specific thresholds |
 
-**The "super GOAT" angle:** If EGA's KV eviction criterion (tokens below τ ≈ 0.35 energy are suppressible) proves useful for our cache compression pipeline, the specific energy thresholds per game domain become private IP. The generic mechanism ships open; the tuned values stay closed.
+**The "super GOAT" angle:** If EGA's KV eviction criterion proves useful for our cache compression pipeline, the specific energy thresholds per game domain become private IP. The generic mechanism ships open; the tuned values stay closed.
 
 ---
 
@@ -125,6 +127,18 @@ Per [27_mmo_goat_pillars_decision_matrix.md](../../riir-ai/.docs/27_mmo_goat_pil
 - **Research 086 (RTPurbo):** Both identify important tokens. RTPurbo uses retrieval-head-specific scoring. EGA is retrieval-head-agnostic.
 - **Research 066 (TileRT):** Execution pipeline. EGA fits as a pre-attention gate in the tile pipeline.
 - **Research 070 (GDN2):** GDN2 already has gating (erase/write gates). EGA is complementary — spectral energy gate vs recurrence gate.
+
+---
+
+## Plan 332 Followup (2026-06-26) — fixed<learned now has nuance
+
+The EGA finding ("fixed wavelets near-baseline, only learned data-adaptive works") was a strong claim against fixed spectral bases. **Plan 332 added nuance** by testing fixed bases on FUNCATTN's transport task:
+
+- **Fixed localized basis (Haar-packet)** captures **77% of the achievable gain** at k≤8, τ=0.5 on multi-scale transport (`.benchmarks/332_structured_basis_goat_and_k_sweep.md`). Not near-baseline — it's a real, narrow win.
+- **Fixed smooth basis (DCT-log)** fails on the probe signal (frequency mismatch) but wins big (+0.34 cos) on frequency-aligned signals. Constructor verified correct against Wikipedia DCT-II + FUNCATTN reference code.
+- **Cross-reference: FUNCATTN paper Table 7** — fixed Fourier basis achieves 0.51 on Airfoil vs 0.43 for learned. Fixed spectral bases are competitive (~19% worse) on real PDE data with broad spectral content, NOT near-baseline.
+
+**Revised reading of EGA's fixed<learned finding:** the original claim holds for EGA's specific task (LLM attention gating, where learned data-adaptive projection is strongly preferred). It does NOT generalize to all fixed-basis uses — for FUNCATTN-style transport tasks on multi-scale signals, fixed localized bases (Haar) capture most of the achievable gain at small k. The key difference is the task: EGA gates attention pointwise (needs data-adaptive), FUNCATTN transports across a basis (fixed multi-scale structure helps when k≪d). Both findings stand in their respective domains.
 
 ---
 
@@ -142,9 +156,9 @@ Per [27_mmo_goat_pillars_decision_matrix.md](../../riir-ai/.docs/27_mmo_goat_pil
 ## Open Questions
 
 1. Does EGA improve when combined with our SpectralQuant KV compression? (Spectral analysis twice — sharing energy computation?)
-2. Can τ ≈ 0.35 be used as a KV cache eviction threshold in our TurboQuant/OCTOPUS pipeline?
+2. Can the paper's τ value be used as a KV cache eviction threshold in our TurboQuant/OCTOPUS pipeline?
 3. Does the sequence-length scaling hypothesis hold? (ΔL grows with context T?)
-4. What is τ for game states? (Bomber, Go, FFT — likely different from English text 0.35)
+4. What is τ for game states? (Likely different from the paper's character-level English value — per-domain tuning is private.)
 5. Can w_proj be LoRA-adapted per game domain? (riir-ai question)
 
 ---

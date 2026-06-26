@@ -190,20 +190,21 @@ pub fn compress_prompt(
         .map(|i| (i, importance_scores[i]))
         .collect();
 
-    // Sort by score descending, take top middle_budget
-    middle_indices.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    // Sort by score descending, take top middle_budget.
+    // `total_cmp` is branch-free and NaN-deterministic vs `partial_cmp().unwrap_or(Equal)`.
+    middle_indices.sort_by(|a, b| b.1.total_cmp(&a.1));
     middle_indices.truncate(middle_budget);
 
-    // Collect all selected indices
+    // Re-sort surviving indices by original position (in-place — avoids a second Vec alloc).
+    middle_indices.sort_by_key(|(i, _)| *i);
+
     let mut selected: Vec<usize> = Vec::with_capacity(budget);
 
     // Prefix
     selected.extend(0..prefix_len);
 
-    // Middle (sorted by original position)
-    let mut middle_selected: Vec<usize> = middle_indices.into_iter().map(|(i, _)| i).collect();
-    middle_selected.sort();
-    selected.extend(middle_selected);
+    // Middle (already position-sorted above)
+    selected.extend(middle_indices.into_iter().map(|(i, _)| i));
 
     // Suffix
     selected.extend(total.saturating_sub(suffix_len)..total);
@@ -273,8 +274,8 @@ pub fn block_select(block_scores: &[f32], cfg: &FlashPrefillConfig) -> Vec<usize
         }
     }
 
-    selected.sort();
-    selected.dedup();
+    // Iteration is monotonically increasing in k_block, so `selected` is
+    // already sorted and unique — no sort/dedup needed.
     selected
 }
 
@@ -339,8 +340,6 @@ pub fn block_select_entmax(block_scores: &[f32], cfg: &FlashPrefillConfig) -> Ve
         return block_select(block_scores, cfg);
     }
 
-    let entmax_set: std::collections::HashSet<usize> = entmax_selected.into_iter().collect();
-
     let mut selected: Vec<usize> = Vec::with_capacity(num_blocks);
 
     for (k_block, _) in block_scores.iter().enumerate() {
@@ -348,18 +347,19 @@ pub fn block_select_entmax(block_scores: &[f32], cfg: &FlashPrefillConfig) -> Ve
             continue;
         }
 
-        // Sink + window rules are unconditional; entmax replaces the alpha threshold
+        // Sink + window rules are unconditional; entmax replaces the alpha threshold.
+        // Linear `Vec::contains` beats `HashSet` for typical block counts (< 64) —
+        // avoids hashing overhead and a heap allocation per call.
         let keep = k_block < cfg.attention_sink
             || q_block.abs_diff(k_block) < cfg.window
-            || entmax_set.contains(&k_block);
+            || entmax_selected.contains(&k_block);
 
         if keep {
             selected.push(k_block);
         }
     }
 
-    selected.sort();
-    selected.dedup();
+    // Monotonic k_block iteration keeps `selected` sorted & unique.
     selected
 }
 
@@ -381,6 +381,10 @@ pub fn block_select_grid(
     let mut idx_out = vec![-1i32; m * n * h];
     let mut cnt_out = vec![0i32; m * h];
 
+    // Pre-allocate scratch buffer once; `clear()` reuses capacity across (q, head)
+    // iterations instead of allocating a new Vec per inner loop.
+    let mut selected_buf: Vec<i32> = Vec::with_capacity(n);
+
     for q in 0..m {
         let last_full = q >= m.saturating_sub(cfg.last_n_full);
 
@@ -388,13 +392,11 @@ pub fn block_select_grid(
             let mut max_score: f32 = -f32::INFINITY;
             for k in 0..=q.min(n - 1) {
                 let v = score[q * n * h + k * h + head];
-                if v > max_score {
-                    max_score = v;
-                }
+                max_score = max_score.max(v);
             }
             let thresh = max_score * cfg.alpha;
 
-            let mut selected = Vec::with_capacity(n);
+            selected_buf.clear();
             for k in 0..=q.min(n - 1) {
                 let keep = k < cfg.attention_sink
                     || q.abs_diff(k) < cfg.window
@@ -402,17 +404,16 @@ pub fn block_select_grid(
                     || score[q * n * h + k * h + head] >= thresh;
 
                 if keep {
-                    selected.push(k as i32);
+                    selected_buf.push(k as i32);
                 }
             }
 
-            selected.sort();
-
+            // selected_buf is already sorted (monotonic k).
             let idx_row = &mut idx_out[q * n * h + head..];
-            for (i, &sel) in selected.iter().enumerate() {
+            for (i, &sel) in selected_buf.iter().enumerate() {
                 idx_row[i * h] = sel;
             }
-            cnt_out[q * h + head] = selected.len() as i32;
+            cnt_out[q * h + head] = selected_buf.len() as i32;
         }
     }
 
@@ -566,7 +567,8 @@ pub fn compress_prompt_blocks(
 
     let selected_blocks = block_select(&block_scores, cfg);
 
-    let mut selected_tokens: Vec<usize> = Vec::new();
+    // Upper bound on selected tokens: never more than the original prompt length.
+    let mut selected_tokens: Vec<usize> = Vec::with_capacity(total);
     let prefix_end = prefix_len.min(total);
     selected_tokens.extend(0..prefix_end);
 

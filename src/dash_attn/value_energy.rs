@@ -101,22 +101,21 @@ impl VortexFlow for ValueEnergyRouter {
                 cache.v_energy[block_idx] = 0.0;
             }
             _ => {
+                // Fused single pass over tokens: accumulate centroid (from keys)
+                // and value energy (from values) together. Halves loop overhead
+                // and improves locality versus two separate passes over the
+                // same token count.
+                let mut energy = 0.0f32;
+                let inv = 1.0 / block_size as f32;
                 for t in 0..block_size {
                     let k_start = t * head_dim;
+                    let v_start = t * head_dim;
+                    // Centroid accumulation (scalar — centroid is consumed
+                    // downstream by another SIMD dot, so the cost is symmetric).
                     for d in 0..head_dim {
                         centroid[d] += keys[k_start + d];
                     }
-                }
-                let inv = 1.0 / block_size as f32;
-                for d in centroid.iter_mut() {
-                    *d *= inv;
-                }
-
-                // Compute value energy: mean ‖v‖ across tokens in this block
-                let mut energy = 0.0f32;
-                for t in 0..block_size {
-                    let v_start = t * head_dim;
-                    // Fused norm computation (chunked for auto-vectorization)
+                    // Value ‖v‖ via 4-way unrolled sum-of-squares (auto-vectorizes).
                     let mut n0 = 0.0f32;
                     let mut n1 = 0.0f32;
                     let mut n2 = 0.0f32;
@@ -136,7 +135,10 @@ impl VortexFlow for ValueEnergyRouter {
                     }
                     energy += norm_sq.sqrt();
                 }
-                cache.v_energy[block_idx] = energy / block_size as f32;
+                for d in centroid.iter_mut() {
+                    *d *= inv;
+                }
+                cache.v_energy[block_idx] = energy * inv;
             }
         }
 

@@ -1123,9 +1123,27 @@ impl Explorer for AiExplorer {
 
 // ── HybridExplorer ─────────────────────────────────────────────
 
-struct HybridExplorer;
+/// Steps without new tiles seen before switching to BF fallback.
+const STUCK_THRESHOLD: usize = 15;
+
+struct HybridExplorer {
+    /// Steps since last new tile was seen.
+    steps_without_progress: usize,
+    /// Number of seen tiles at last check.
+    last_seen_count: usize,
+    /// Whether currently in BF fallback mode.
+    bf_fallback: bool,
+}
 
 impl HybridExplorer {
+    fn new() -> Self {
+        Self {
+            steps_without_progress: 0,
+            last_seen_count: 0,
+            bf_fallback: false,
+        }
+    }
+
     fn cluster_frontiers(&self, frontiers: &[(usize, usize)]) -> Vec<Vec<(usize, usize)>> {
         let mut clusters: Vec<Vec<(usize, usize)>> = Vec::new();
         let mut assigned: HashSet<usize> = HashSet::new();
@@ -1165,9 +1183,39 @@ impl Explorer for HybridExplorer {
         state: &StrategicState,
         fog: &FogState,
     ) -> Option<usize> {
+        // Stuck detector: if no new tiles seen for STUCK_THRESHOLD steps,
+        // switch to BF nearest-frontier mode.
+        let current_seen = fog.seen.len();
+        if current_seen > self.last_seen_count {
+            self.steps_without_progress = 0;
+            self.last_seen_count = current_seen;
+            self.bf_fallback = false;
+        } else {
+            self.steps_without_progress += 1;
+            if self.steps_without_progress >= STUCK_THRESHOLD {
+                self.bf_fallback = true;
+            }
+        }
+
         let frontiers = fog.frontier_tiles(&game.grid);
 
         if !frontiers.is_empty() {
+            // BF fallback: go to nearest frontier (same as BfExplorer)
+            if self.bf_fallback {
+                let target_set: HashSet<_> = frontiers.into_iter().collect();
+                if let Some(action) = bfs_first_action(
+                    game,
+                    (state.r, state.c),
+                    &target_set,
+                    &fog.seen,
+                    state,
+                    &fog.discovered_traps,
+                ) {
+                    return Some(dodge_boss_if_adjacent(game, state, fog, action));
+                }
+                return navigate_to_known_target(game, state, fog);
+            }
+
             let clusters = self.cluster_frontiers(&frontiers);
 
             let ai = AiExplorer;
@@ -1316,7 +1364,7 @@ fn bench_seed(seed: u64) -> BenchResult {
     let mut ai_explorer = AiExplorer;
     let ai = solve_exploring(&game, &mut ai_explorer);
 
-    let mut hy_explorer = HybridExplorer;
+    let mut hy_explorer = HybridExplorer::new();
     let hy = solve_exploring(&game, &mut hy_explorer);
 
     BenchResult {

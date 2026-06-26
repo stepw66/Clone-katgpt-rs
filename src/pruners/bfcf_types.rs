@@ -4,6 +4,7 @@
 //! where all tokens are symbolically equivalent (same accept/reject/maybe label).
 
 use std::fmt;
+use std::sync::Arc;
 
 // ── RegionLabel ─────────────────────────────────────────────────
 
@@ -56,26 +57,36 @@ impl HalfSpace {
 /// Contiguous region of logit space — convex polytope from ReLU thresholds.
 #[derive(Clone, Debug)]
 pub struct BorelRegion {
-    /// Half-space constraints defining the polytope.
-    pub constraints: Vec<HalfSpace>,
-    /// Symbolic label from screening.
-    pub label: RegionLabel,
+    /// Half-space constraints defining the polytope (Arc for cheap cloning).
+    pub constraints: Arc<[HalfSpace]>,
     /// Number of tokens within this region.
     pub token_count: usize,
     /// Boundary precision anchoring strength — [0.0, 1.0].
     /// 0.0 = no anchoring (default), 1.0 = highly anchored (resists boundary changes).
     /// Zero cost when 0.0 — not feature-gated.
     pub boundary_precision: f32,
+    /// Symbolic label from screening.
+    pub label: RegionLabel,
 }
 
 impl BorelRegion {
     /// Create a new BorelRegion with the given label, constraints, and token count.
     pub fn new(label: RegionLabel, constraints: Vec<HalfSpace>, token_count: usize) -> Self {
         Self {
-            constraints,
-            label,
+            constraints: constraints.into(),
             token_count,
             boundary_precision: 0.0,
+            label,
+        }
+    }
+
+    /// Create a BorelRegion from shared constraints (cheap Arc clone).
+    pub fn from_arc(label: RegionLabel, constraints: Arc<[HalfSpace]>, token_count: usize) -> Self {
+        Self {
+            constraints,
+            token_count,
+            boundary_precision: 0.0,
+            label,
         }
     }
 
@@ -94,12 +105,12 @@ impl BorelRegion {
     /// Intersect this region with another, combining constraints.
     /// Returns `None` if the intersection is empty (contradictory constraints).
     pub fn intersect(&self, other: &Self) -> Option<Self> {
-        let mut combined = self.constraints.clone();
+        let mut combined: Vec<HalfSpace> = self.constraints.to_vec();
         combined.extend_from_slice(&other.constraints);
 
         // Check for contradictions: same dim, same above flag, incompatible thresholds
-        for a in &self.constraints {
-            for b in &other.constraints {
+        for a in self.constraints.iter() {
+            for b in other.constraints.iter() {
                 if a.dim == b.dim && a.above != b.above {
                     // One says >= t1, other says < t2. Empty if t1 >= t2.
                     if a.above && a.threshold >= b.threshold {

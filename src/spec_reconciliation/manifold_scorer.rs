@@ -5,8 +5,9 @@
 //! for offline trajectory verification (Plan 177, Task T4).
 
 use super::types::{ReconciliationConfig, TrajectoryPoint};
-use crate::benchmark::cosine_similarity;
 use crate::speculative::types::ScreeningPruner;
+#[cfg(test)]
+use crate::benchmark::cosine_similarity;
 
 /// Cosine-similarity scorer over a flattened speculative manifold.
 ///
@@ -18,6 +19,10 @@ use crate::speculative::types::ScreeningPruner;
 pub struct ManifoldScorer {
     /// Pre-computed manifold trajectories flattened for comparison.
     manifold: Vec<TrajectoryPoint>,
+    /// Cached L2 norms of `manifold` points, indexed in lock-step. Avoids
+    /// recomputing the norm M times per `score_trajectory` pass — pre-built
+    /// once in `set_manifold`.
+    manifold_norms: Vec<f32>,
     /// Best similarity score computed in the last scoring pass.
     best_score: f32,
     /// Accept threshold (from [`ReconciliationConfig`]).
@@ -29,6 +34,7 @@ impl ManifoldScorer {
     pub fn new(config: &ReconciliationConfig) -> Self {
         Self {
             manifold: Vec::new(),
+            manifold_norms: Vec::new(),
             best_score: 0.0,
             accept_threshold: config.accept_threshold,
         }
@@ -38,11 +44,29 @@ impl ManifoldScorer {
     ///
     /// Each inner `Vec<TrajectoryPoint>` represents one speculative trajectory.
     /// All points are appended into a single flat vector so that scoring is a
-    /// simple max over a contiguous slice.
+    /// simple max over a contiguous slice. Manifold point norms are pre-computed
+    /// here so the per-client-point scoring pass is a tight dot-product + divide.
     pub fn set_manifold(&mut self, trajectories: &[Vec<TrajectoryPoint>]) {
         self.manifold.clear();
+        let total: usize = trajectories.iter().map(|t| t.len()).sum();
+        self.manifold.reserve(total);
+        self.manifold_norms.clear();
+        self.manifold_norms.reserve(total);
         for traj in trajectories {
-            self.manifold.extend_from_slice(traj);
+            for mp in traj {
+                self.manifold.push(*mp);
+                // Fixed 8-wide dot — LLVM vectorizes this cleanly.
+                let d = &mp.data;
+                let norm_sq = d[0] * d[0]
+                    + d[1] * d[1]
+                    + d[2] * d[2]
+                    + d[3] * d[3]
+                    + d[4] * d[4]
+                    + d[5] * d[5]
+                    + d[6] * d[6]
+                    + d[7] * d[7];
+                self.manifold_norms.push(norm_sq.sqrt());
+            }
         }
     }
 
@@ -50,14 +74,51 @@ impl ManifoldScorer {
     ///
     /// Returns `max_j(cosine_similarity(client_point.data, manifold[j].data))`.
     /// Returns `0.0` when the manifold is empty.
+    #[inline]
     pub fn score_against_manifold(&self, client_point: &TrajectoryPoint) -> f32 {
-        if self.manifold.is_empty() {
+        let n = self.manifold.len();
+        if n == 0 {
             return 0.0;
         }
-        self.manifold
-            .iter()
-            .map(|mp| cosine_similarity(&client_point.data, &mp.data))
-            .fold(f32::NEG_INFINITY, f32::max)
+        let cd = &client_point.data;
+        let client_norm_sq = cd[0] * cd[0]
+            + cd[1] * cd[1]
+            + cd[2] * cd[2]
+            + cd[3] * cd[3]
+            + cd[4] * cd[4]
+            + cd[5] * cd[5]
+            + cd[6] * cd[6]
+            + cd[7] * cd[7];
+        let client_norm = client_norm_sq.sqrt();
+        if client_norm < f32::EPSILON {
+            return 0.0;
+        }
+        // Single fused pass: dot + divide by pre-cached manifold norms.
+        // No per-iteration norm computation and no inner iterator allocations.
+        let mut best = f32::NEG_INFINITY;
+        for (mp, &mn) in self.manifold.iter().zip(self.manifold_norms.iter()) {
+            if mn < f32::EPSILON {
+                continue;
+            }
+            let md = &mp.data;
+            let dot = cd[0] * md[0]
+                + cd[1] * md[1]
+                + cd[2] * md[2]
+                + cd[3] * md[3]
+                + cd[4] * md[4]
+                + cd[5] * md[5]
+                + cd[6] * md[6]
+                + cd[7] * md[7];
+            let s = dot / (client_norm * mn);
+            if s > best {
+                best = s;
+            }
+        }
+        if best.is_finite() {
+            best
+        } else {
+            0.0
+        }
     }
 
     /// Score an entire client trajectory against the manifold.

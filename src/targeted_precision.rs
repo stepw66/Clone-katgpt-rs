@@ -91,9 +91,10 @@ impl PrecisionBudget {
 
     /// Compute total KV cache size in bits.
     pub fn total_kv_bits(&self, seq_len: usize, head_dim: usize) -> u64 {
+        let per_bit = seq_len as u64 * head_dim as u64;
         self.head_bits
             .iter()
-            .map(|&bits| bits as u64 * seq_len as u64 * head_dim as u64)
+            .map(|&bits| bits as u64 * per_bit)
             .sum()
     }
 

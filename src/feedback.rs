@@ -9,14 +9,14 @@ use std::sync::mpsc::Sender;
 
 /// Background worker sender — initialized once, reused for all feedback calls.
 /// Avoids ~10-50μs `thread::spawn` overhead per call.
-static FEEDBACK_SENDER: OnceLock<Sender<String>> = OnceLock::new();
+static FEEDBACK_SENDER: OnceLock<Sender<Vec<u8>>> = OnceLock::new();
 
-fn get_feedback_sender() -> &'static Sender<String> {
+fn get_feedback_sender() -> &'static Sender<Vec<u8>> {
     FEEDBACK_SENDER.get_or_init(|| {
-        let (tx, rx) = std::sync::mpsc::channel();
+        let (tx, rx) = std::sync::mpsc::channel::<Vec<u8>>();
         std::thread::spawn(move || {
             while let Ok(msg) = rx.recv() {
-                log::debug!("Feedback: {:.100}...", msg);
+                log::debug!("Feedback: {:.100}...", String::from_utf8_lossy(&msg));
             }
         });
         tx
@@ -53,13 +53,13 @@ pub fn send_feedback(config: &FeedbackConfig, result: &InferenceResult) {
         return; // Skip low-quality results
     }
 
-    // Serialize to JSON
-    let Ok(json) = serde_json::to_string(result) else {
+    // Serialize to binary (postcard)
+    let Ok(bytes) = postcard::to_allocvec(result) else {
         return;
     };
 
     // Send to background worker thread via channel — avoids thread::spawn per call.
-    let _ = get_feedback_sender().send(json);
+    let _ = get_feedback_sender().send(bytes);
 }
 
 #[cfg(test)]

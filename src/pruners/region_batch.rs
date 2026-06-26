@@ -10,6 +10,7 @@
 
 use super::bfcf_types::{BorelRegion, RegionLabel};
 use crate::speculative::types::ScreeningPruner;
+use std::sync::Arc;
 
 // ── RegionBatching Trait ──────────────────────────────────────────
 
@@ -138,18 +139,18 @@ impl RegionBatching for RegionBatcher {
 
             // Emit accept sub-region.
             if accept_count > 0 {
-                sub_regions.push(BorelRegion::new(
+                sub_regions.push(BorelRegion::from_arc(
                     RegionLabel::Accept,
-                    region.constraints.clone(),
+                    Arc::clone(&region.constraints),
                     accept_count,
                 ));
             }
 
             // Emit reject sub-region.
             if reject_count > 0 {
-                sub_regions.push(BorelRegion::new(
+                sub_regions.push(BorelRegion::from_arc(
                     RegionLabel::Reject,
-                    region.constraints.clone(),
+                    Arc::clone(&region.constraints),
                     reject_count,
                 ));
             }

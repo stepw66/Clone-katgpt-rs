@@ -305,53 +305,58 @@ impl SketchSampler {
     }
 
     /// Random entry from the population.
+    ///
+    /// Draws uniformly by HashMap iteration index — no sort, no allocation.
+    /// Previously called `sorted_by_elo()` (O(N log N) sort + Vec alloc)
+    /// purely to index by a random integer.
     fn sample_random(&self, rng: &mut Rng) -> Option<&SketchEntry> {
-        let sorted = self.population.sorted_by_elo();
-        match sorted.is_empty() {
-            true => None,
-            false => {
-                let idx = rng.usize(0..sorted.len());
-                Some(sorted[idx])
-            }
+        let len = self.population.len();
+        if len == 0 {
+            return None;
         }
+        let idx = rng.usize(0..len);
+        self.population.nth_in_arbitrary_order(idx)
     }
 
     /// Best Elo entry from the population.
+    ///
+    /// O(N) single pass via `max_by` — replaces the previous
+    /// `sorted_by_elo().first()` which sorted all entries (O(N log N))
+    /// and allocated a Vec just to read the first element.
     fn sample_best_elo(&self) -> Option<&SketchEntry> {
-        self.population.sorted_by_elo().first().copied()
+        self.population.best_elo()
     }
 
     // ── Fallback UCB (single-threaded) ────────────────────────
 
     /// Fallback basic UCB for single-threaded execution.
     ///
-    /// Uses sorted Elo order with a lightweight exploration bonus.
-    /// Simpler than full P-UCB since parallelism isn't helping.
+    /// Single O(N) pass with a lightweight exploration bonus — no sort, no
+    /// allocation. Previously called `sorted_by_elo()` (O(N log N) sort + Vec
+    /// alloc) and then immediately `max_by`-ed over the sorted vec, which
+    /// discarded the sort ordering anyway.
     fn sample_fallback_ucb(&self, rng: &mut Rng) -> Option<&SketchEntry> {
-        let sorted = self.population.sorted_by_elo();
-        match sorted.is_empty() {
-            true => None,
-            false => {
-                // Simple fallback: prefer best Elo with small random perturbation
-                let total = self.population.total_visits();
-                let c = self.config.c * 0.5; // reduced exploration for single-thread
-
-                let best = sorted.iter().max_by(|a, b| {
-                    // Basic UCB without Elo normalization
-                    let score_a = a.elo_rating + c * (total as f64 / (a.visits + 1) as f64).sqrt();
-                    let score_b = b.elo_rating + c * (total as f64 / (b.visits + 1) as f64).sqrt();
-                    score_a.total_cmp(&score_b)
-                });
-
-                match best {
-                    Some(entry) => Some(*entry),
-                    None => {
-                        let idx = rng.usize(0..sorted.len());
-                        Some(sorted[idx])
-                    }
-                }
-            }
+        let len = self.population.len();
+        if len == 0 {
+            return None;
         }
+        // Simple fallback: prefer best Elo with small random perturbation
+        let total = self.population.total_visits();
+        let c = self.config.c * 0.5; // reduced exploration for single-thread
+
+        let best = self.population.values_arbitrary().max_by(|a, b| {
+            // Basic UCB without Elo normalization
+            let score_a = a.elo_rating + c * (total as f64 / (a.visits + 1) as f64).sqrt();
+            let score_b = b.elo_rating + c * (total as f64 / (b.visits + 1) as f64).sqrt();
+            score_a.total_cmp(&score_b)
+        });
+
+        // `values_arbitrary` on a non-empty HashMap always yields at least
+        // one element, so `best` is `Some` here. Keep the fallback for safety.
+        best.or_else(|| {
+            let idx = rng.usize(0..len);
+            self.population.nth_in_arbitrary_order(idx)
+        })
     }
 
     /// Pick the ID of the best fallback entry (for mutable access).

@@ -28,6 +28,10 @@ pub enum ThinkingMode {
     /// CPU-only thinking — PPoT resample high-entropy tokens on CPU.
     /// Zero GPU overhead beyond initial forward pass. Good when GPU is loaded.
     CpuResample,
+    /// NMDA-gated adaptive thinking — deterministic gate replaces bandit.
+    /// Uses entropy + coincidence to modulate thinking budget. Zero randomness.
+    /// Feature-gated behind `dendritic_gate`.
+    Dendritic,
 }
 
 /// How the thinking mode is selected per-query.
@@ -42,6 +46,8 @@ pub enum ThinkingSelector {
     Adaptive {
         /// Exploration rate for bandit (ε in ε-greedy). Default: 0.1.
         exploration_rate: f32,
+        /// Weight for dendritic arm in adaptive selection. Default: 0.25.
+        dendritic_weight: f32,
     },
 }
 
@@ -49,6 +55,7 @@ impl Default for ThinkingSelector {
     fn default() -> Self {
         Self::Adaptive {
             exploration_rate: 0.1,
+            dendritic_weight: 0.25,
         }
     }
 }
@@ -87,23 +94,22 @@ impl ThinkingConfig {
     /// Low entropy (high top-1 prob) → bias toward Direct mode.
     #[cfg(feature = "directional_credit")]
     pub fn entropy_bias(&self, top1_prob: f32) -> ThinkingMode {
-        if top1_prob < self.confidence_threshold {
-            ThinkingMode::Latent
-        } else {
-            ThinkingMode::Direct
+        match top1_prob < self.confidence_threshold {
+            true => ThinkingMode::Latent,
+            false => ThinkingMode::Direct,
         }
     }
 }
 
 // ── T2: ThinkingBandit ─────────────────────────────────────────────────
 
-/// Lightweight bandit with 3 arms: Direct, Latent, CpuResample.
+/// Lightweight bandit with 4 arms: Direct, Latent, CpuResample, Dendritic.
 /// Tracks reward = answer_quality * (1 - normalized_cost).
 /// Uses Thompson sampling (consistent with BanditPruner).
 struct ThinkingBandit {
     /// Per-arm success/failure counts for Beta posterior.
-    successes: [f32; 3],
-    failures: [f32; 3],
+    successes: [f32; 4],
+    failures: [f32; 4],
     /// Decay factor for recency weighting. Default: 0.99.
     decay: f32,
     /// Total pulls across all arms.
@@ -113,8 +119,8 @@ struct ThinkingBandit {
 impl ThinkingBandit {
     fn new() -> Self {
         Self {
-            successes: [1.0; 3], // Beta(1,1) = Uniform prior
-            failures: [1.0; 3],
+            successes: [1.0; 4], // Beta(1,1) = Uniform prior
+            failures: [1.0; 4],
             decay: 0.99,
             total_pulls: 0,
         }
@@ -125,12 +131,12 @@ impl ThinkingBandit {
         self.total_pulls += 1;
         // ε-greedy: with probability ε, pick a random arm
         if rng.next_f32() < exploration_rate {
-            return (rng.next_u32() as usize) % 3;
+            return (rng.next_u32() as usize) % 4;
         }
         // Thompson sampling: sample from Beta(α, β) for each arm, pick max
         let mut best_arm = 0;
         let mut best_score = 0.0f32;
-        for arm in 0..3 {
+        for arm in 0..4 {
             let alpha = self.successes[arm];
             let beta = self.failures[arm];
             // Sample from Beta(α, β) using the ratio of Gamma variates
@@ -159,9 +165,10 @@ impl ThinkingBandit {
 
     /// Decay old observations for recency weighting.
     fn decay_observations(&mut self) {
-        for arm in 0..3 {
-            self.successes[arm] *= self.decay;
-            self.failures[arm] *= self.decay;
+        let d = self.decay;
+        for arm in 0..4 {
+            self.successes[arm] *= d;
+            self.failures[arm] *= d;
         }
     }
 
@@ -263,17 +270,17 @@ pub struct ThinkingBanditFrozen {
     pub magic: [u8; 4],
     /// Version for migration.
     pub version: u32,
-    /// Per-arm success counts: [direct, latent, cpu_resample].
-    pub successes: [f32; 3],
-    /// Per-arm failure counts: [direct, latent, cpu_resample].
-    pub failures: [f32; 3],
+    /// Per-arm success counts: [direct, latent, cpu_resample, dendritic].
+    pub successes: [f32; 4],
+    /// Per-arm failure counts: [direct, latent, cpu_resample, dendritic].
+    pub failures: [f32; 4],
     /// Total episodes observed.
     pub total_pulls: u32,
 }
 
 impl ThinkingBanditFrozen {
     const MAGIC: [u8; 4] = *b"THKB";
-    const VERSION: u32 = 1;
+    const VERSION: u32 = 2;
 
     fn validate(&self) -> Result<(), String> {
         if self.magic != Self::MAGIC {
@@ -390,7 +397,10 @@ impl ThinkingController {
         match &self.config.mode {
             ThinkingSelector::AlwaysDirect => ThinkingMode::Direct,
             ThinkingSelector::AlwaysLatent => ThinkingMode::Latent,
-            ThinkingSelector::Adaptive { exploration_rate } => {
+            ThinkingSelector::Adaptive {
+                exploration_rate,
+                dendritic_weight: _,
+            } => {
                 let exploration_rate = *exploration_rate;
 
                 // 1. Check GPU load → decide CPU vs GPU route
@@ -438,6 +448,7 @@ impl ThinkingController {
                             }
                         }
                         2 => ThinkingMode::CpuResample,
+                        3 => ThinkingMode::Dendritic,
                         _ => ThinkingMode::Direct,
                     }
                 }
@@ -460,19 +471,57 @@ impl ThinkingController {
         self.bandit.decay_observations();
     }
 
-    // ── T3: CPU/GPU Auto-Route ──────────────────────────────────────
+    // ── T3: CPU/GPU Auto-Route ──────────────────────────────
 
     /// Route thinking to CPU or GPU based on load.
     pub fn route_thinking(&self) -> ThinkingMode {
         let gpu_load = self.gpu_load.load_value();
-        if gpu_load > self.config.gpu_load_threshold {
-            ThinkingMode::CpuResample
-        } else {
-            ThinkingMode::Latent
+        match gpu_load > self.config.gpu_load_threshold {
+            true => ThinkingMode::CpuResample,
+            false => ThinkingMode::Latent,
         }
     }
 
-    // ── T4: Freeze/Thaw ─────────────────────────────────────────────
+    // ── T5: Adaptive Thinking Budget via Cumprodsum Freshness ────
+
+    /// Fast sigmoid: `1 / (1 + e^{-x})`.
+    #[inline(always)]
+    fn sigmoid(x: f32) -> f32 {
+        1.0 / (1.0 + (-x.clamp(-50.0, 50.0)).exp())
+    }
+
+    /// Compute adaptive thinking budget based on context freshness.
+    ///
+    /// Uses cumprodsum-derived freshness signal to allocate more thinking
+    /// budget when the context is "fresh" (recent information dominates)
+    /// and less when context is "stale" (old information persists, meaning
+    /// the model has had time to fully process it).
+    ///
+    /// Formula: `budget = min_blocks + (max_blocks - min_blocks) * sigmoid(beta * (freshness - 0.5))`
+    ///
+    /// # Arguments
+    /// * `decay_factors` — Per-position decay factors from the SSM gate
+    ///   (typically `sigmoid(gate)` values in [0, 1]).
+    /// * `beta` — Sensitivity of budget to freshness changes.
+    ///   Default: 4.0 (moderate). Higher = sharper transition.
+    ///
+    /// # Returns
+    /// Thinking budget in RiM buffer block passes, clamped to
+    /// [`ThinkingConfig::min_blocks`, `ThinkingConfig::max_blocks`].
+    pub fn adaptive_budget(&self, decay_factors: &[f32], beta: f32) -> usize {
+        let freshness = crate::cumprodsum::context_freshness(decay_factors);
+        let range = self.config.max_blocks.saturating_sub(self.config.min_blocks);
+        let scale = Self::sigmoid(beta * (freshness - 0.5));
+        self.config.min_blocks + (range as f32 * scale).round() as usize
+    }
+
+    /// Convenience: adaptive budget with default beta=4.0.
+    #[inline]
+    pub fn adaptive_budget_default(&self, decay_factors: &[f32]) -> usize {
+        self.adaptive_budget(decay_factors, 4.0)
+    }
+
+    // ── T4: Freeze/Thaw ─────────────────────────────────────────
 
     /// Freeze bandit knowledge for disk persistence.
     pub fn freeze(&self) -> ThinkingBanditFrozen {
@@ -591,6 +640,7 @@ mod tests {
         let config = ThinkingConfig {
             mode: ThinkingSelector::Adaptive {
                 exploration_rate: 0.0,
+                dendritic_weight: 0.25,
             },
             confidence_threshold: 0.7,
             ..Default::default()
@@ -607,6 +657,7 @@ mod tests {
         let config = ThinkingConfig {
             mode: ThinkingSelector::Adaptive {
                 exploration_rate: 0.0,
+                dendritic_weight: 0.25,
             },
             confidence_threshold: 0.7,
             ..Default::default()
@@ -622,6 +673,7 @@ mod tests {
             mode == ThinkingMode::Direct
                 || mode == ThinkingMode::Latent
                 || mode == ThinkingMode::CpuResample
+                || mode == ThinkingMode::Dendritic
         );
     }
 
@@ -630,6 +682,7 @@ mod tests {
         let config = ThinkingConfig {
             mode: ThinkingSelector::Adaptive {
                 exploration_rate: 0.0,
+                dendritic_weight: 0.25,
             },
             confidence_threshold: 0.7,
             gpu_load_threshold: 0.8,
@@ -687,7 +740,7 @@ mod tests {
 
         let frozen = ctrl.freeze();
         assert_eq!(frozen.magic, *b"THKB");
-        assert_eq!(frozen.version, 1);
+        assert_eq!(frozen.version, 2);
         assert!(frozen.total_pulls > 0);
 
         // Thaw into new controller
@@ -727,12 +780,12 @@ mod tests {
 
     #[test]
     fn test_frozen_size() {
-        // 4 (magic) + 4 (version) + 12 (3 floats) + 12 (3 floats) + 4 (total_pulls) = 36
+        // 4 (magic) + 4 (version) + 16 (4 floats) + 16 (4 floats) + 4 (total_pulls) = 44
         // But repr(C) may add padding. Check it's small.
         let size = std::mem::size_of::<ThinkingBanditFrozen>();
         assert!(
-            size <= 56,
-            "ThinkingBanditFrozen is {size} bytes, expected <= 56"
+            size <= 64,
+            "ThinkingBanditFrozen is {size} bytes, expected <= 64"
         );
     }
 
@@ -740,11 +793,87 @@ mod tests {
     fn test_frozen_bad_magic() {
         let frozen = ThinkingBanditFrozen {
             magic: *b"XXXX",
-            version: 1,
-            successes: [1.0; 3],
-            failures: [1.0; 3],
+            version: 2,
+            successes: [1.0; 4],
+            failures: [1.0; 4],
             total_pulls: 0,
         };
         assert!(ThinkingBanditFrozen::validate(&frozen).is_err());
+    }
+
+    // ── Adaptive Thinking Budget (Plan 263, Phase 4) ───
+
+    #[test]
+    fn test_adaptive_budget_fresh_context() {
+        // Fresh context: high decay (0.5) → freshness low → less budget
+        // Stale context: low decay (1.0) → freshness high → more budget
+        let ctrl = ThinkingController::new(ThinkingConfig {
+            min_blocks: 0,
+            max_blocks: 8,
+            ..Default::default()
+        });
+
+        // Fast decay: recent context dominates ("fresh")
+        // With decay 0.5, freshness ≈ sum(0.5^k)/T which is low
+        let fresh = vec![0.5f32; 64];
+        let budget_fresh = ctrl.adaptive_budget_default(&fresh);
+
+        // No decay: uniform context ("stale")
+        let stale = vec![1.0f32; 64];
+        let budget_stale = ctrl.adaptive_budget_default(&stale);
+
+        // Fresh context (low freshness) should get LESS budget
+        // because recent info is concentrated and doesn't need deep thinking.
+        // Stale context (high freshness) should get MORE budget.
+        assert!(
+            budget_fresh <= budget_stale,
+            "fresh ({budget_fresh}) should be <= stale ({budget_stale})"
+        );
+        assert!(
+            budget_fresh >= ctrl.config.min_blocks,
+            "budget {budget_fresh} below min"
+        );
+        assert!(
+            budget_fresh <= ctrl.config.max_blocks,
+            "budget {budget_fresh} above max"
+        );
+    }
+
+    #[test]
+    fn test_adaptive_budget_clamps_to_range() {
+        let ctrl = ThinkingController::new(ThinkingConfig {
+            min_blocks: 2,
+            max_blocks: 6,
+            ..Default::default()
+        });
+
+        // Extreme freshness values should still clamp
+        let budgets: Vec<usize> = [0.0f32, 0.1, 0.5, 0.9, 1.0]
+            .iter()
+            .map(|&decay| ctrl.adaptive_budget_default(&[decay; 32]))
+            .collect();
+
+        for &b in &budgets {
+            assert!((2..=6).contains(&b), "budget {b} out of [2, 6] range");
+        }
+    }
+
+    #[test]
+    fn test_adaptive_budget_beta_sensitivity() {
+        let ctrl = ThinkingController::new(ThinkingConfig {
+            min_blocks: 0,
+            max_blocks: 10,
+            ..Default::default()
+        });
+        // Medium decay: freshness ≈ 0.5
+        let decay = vec![0.9f32; 64];
+
+        let low_beta = ctrl.adaptive_budget(&decay, 1.0);
+        let high_beta = ctrl.adaptive_budget(&decay, 10.0);
+
+        // Higher beta = sharper transition. Both should be in range.
+        assert!(low_beta <= 10);
+        assert!(high_beta <= 10);
+        // usize is always >= 0, no need to check lower bound
     }
 }

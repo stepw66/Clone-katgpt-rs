@@ -424,10 +424,10 @@ fn test_bandit_decay_changes_projection() {
     // Simulate low reward bandit feedback
     let trial = SenseTrial {
         npc_id: 1,
-        sense_kind: SenseKind::FighterSense,
-        activation: 0.5,
         action_taken: 0,
+        activation: 0.5,
         reward: 0.1,
+        sense_kind: SenseKind::FighterSense,
     };
     decay_direction(&mut module, &trial, 0.5);
 

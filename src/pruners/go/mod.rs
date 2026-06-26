@@ -19,9 +19,11 @@ pub mod autoresearch;
 pub mod g_zero_player;
 pub mod players;
 pub mod replay;
+pub mod replay_writer;
 pub mod state;
 pub mod tournament;
 pub mod types;
+pub mod utils;
 
 #[cfg(feature = "event_log")]
 pub mod event_log_player;
@@ -55,10 +57,14 @@ pub use analytics::{
     split_samples_into_games,
 };
 
+// Replay Writer (Plan 271 T2.1)
+pub use replay_writer::{GameSampleCollector, GoActionType, GoReplayWriter, JsonlGoSample};
+
 // G-Zero Self-Play
 pub use g_zero_player::{
     GoDeltaGatedAbsorbCompress, GoDeltaGatedConfig, GoGZeroSelfPlayConfig, GoGZeroSelfPlayResults,
-    GoSelfPlayResult, GoTemplateProposer, MoveDelta, compute_go_delta, run_gzero_selfplay,
+    GoSelfPlayResult, GoTemplateProposer, MoveDelta, compute_go_delta, compute_go_delta_into,
+    run_gzero_selfplay,
 };
 
 // Tournament

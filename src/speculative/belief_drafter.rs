@@ -12,6 +12,25 @@
 //! keeping weight dimensions unchanged. Feature-gated behind `self_cond_draft`.
 //!
 //! Feature-gated behind `belief_drafter` — off by default until GOAT proof.
+//!
+//! # Attention-drift subject (Plan 306, Research 286, arXiv:2605.09992)
+//!
+//! This drafter is a **known subject** of the attention-drift failure mode diagnosed
+//! by Eldenk et al. — the architecture (input LayerNorm + unnormalized residual) is
+//! structurally identical to the pre-norm EAGLE-3 drafter that paper §3 shows classifies
+//! as `DepthSpecificRefinement` beyond the TTT horizon. Run [`BeliefDrafter::audit_depth_invariance`]
+//! (gated on `depth_invariance`) to classify a chain.
+//!
+//! **The fix (post-norm residual) is NOT applied here.** It requires MLP retraining —
+//! training-side work lives in `riir-train`. Inference-time [`katgpt_core::MagnitudeRegularization`]
+//! is **diagnostic-only** for this kernel: paper §4.4 Table 4 reports -56% acceptance
+//! when applied to a frozen pre-norm model. For kernels we own (HLA, functor,
+//! micro_belief, engram, Raven) `MagnitudeRegularization` is the modelless upstream fix;
+//! for this frozen-pretrained MLP it is not.
+//!
+//! Disambiguation: this is the **drafter-side magnitude-accumulation** mechanism, distinct
+//! from the **target-side sink classification** mechanism of Plan 287 / Research 258
+//! (arXiv:2606.08105). Different paper, different mechanism.
 
 use std::io::{BufReader, BufWriter, Read, Write};
 use std::path::Path;
@@ -93,13 +112,72 @@ pub struct LatentDynamicsMLP {
     pub fc3_bias: Vec<f32>,    // [n_embd]
 }
 
+/// Reusable scratch buffers for [`LatentDynamicsMLP::forward_into`].
+///
+/// Sized once at construction and reused across every draft step — eliminates
+/// the 5 intermediate `vec!` allocations that the allocating `forward` would
+/// otherwise do per token. None of these buffers are read between calls; they
+/// are fully overwritten on each `forward_into`.
+pub struct MlpForwardScratch {
+    /// `[2 * n_embd]` — concat(h_t, next_emb).
+    concat: Vec<f32>,
+    /// `[2 * n_embd]` — LayerNorm output.
+    normed: Vec<f32>,
+    /// `[n_embd]` — FC1 output (post-GELU).
+    fc1_out: Vec<f32>,
+    /// `[n_embd]` — FC2 output (post-GELU).
+    fc2_out: Vec<f32>,
+    /// `[n_embd]` — FC3 output (pre-residual).
+    fc3_out: Vec<f32>,
+}
+
+impl MlpForwardScratch {
+    /// Allocate scratch sized for a model with embedding dim `n_embd`.
+    #[inline]
+    pub fn new(n_embd: usize) -> Self {
+        let concat_dim = 2 * n_embd;
+        Self {
+            concat: vec![0.0; concat_dim],
+            normed: vec![0.0; concat_dim],
+            fc1_out: vec![0.0; n_embd],
+            fc2_out: vec![0.0; n_embd],
+            fc3_out: vec![0.0; n_embd],
+        }
+    }
+}
+
 impl LatentDynamicsMLP {
     /// Run the MLP forward pass: `h_{t+1} = h_t + FC3(GELU(FC2(GELU(FC1(LN(concat))))))`.
     ///
     /// - `h_t`: current hidden state `[n_embd]`
     /// - `next_emb`: embedding of next token `[n_embd]`
     /// - Returns: predicted next hidden state `[n_embd]`
+    ///
+    /// Allocating convenience wrapper around [`Self::forward_into`]; hot-path
+    /// callers (e.g. [`BeliefDrafter::draft`]) should reuse an
+    /// [`MlpForwardScratch`] via `forward_into` to avoid the 6 per-step
+    /// allocations.
     pub fn forward(&self, h_t: &[f32], next_emb: &[f32]) -> Vec<f32> {
+        let n = self.n_embd;
+        let mut scratch = MlpForwardScratch::new(n);
+        let mut out = vec![0.0f32; n];
+        self.forward_into(h_t, next_emb, &mut scratch, &mut out);
+        out
+    }
+
+    /// Zero-allocation forward pass writing into caller-provided scratch + output.
+    ///
+    /// All intermediate buffers (`concat`, `normed`, `fc1_out`, `fc2_out`,
+    /// `fc3_out`) live in `scratch` and are reused across calls; the residual
+    /// result is written into `out` (`h_{t+1} = h_t + FC3(...)`).
+    #[allow(clippy::too_many_arguments)]
+    pub fn forward_into(
+        &self,
+        h_t: &[f32],
+        next_emb: &[f32],
+        scratch: &mut MlpForwardScratch,
+        out: &mut [f32],
+    ) {
         let n = self.n_embd;
         assert_eq!(h_t.len(), n, "h_t must have length n_embd");
         assert_eq!(next_emb.len(), n, "next_emb must have length n_embd");
@@ -107,39 +185,37 @@ impl LatentDynamicsMLP {
         let concat_dim = 2 * n;
 
         // 1. Concatenate h_t and next_emb
-        let mut concat = vec![0.0f32; concat_dim];
+        let concat = &mut scratch.concat[..concat_dim];
         concat[..n].copy_from_slice(h_t);
         concat[n..].copy_from_slice(next_emb);
 
         // 2. LayerNorm
-        let mut normed = vec![0.0f32; concat_dim];
-        layer_norm(&concat, &self.norm_weight, &self.norm_bias, &mut normed);
+        let normed = &mut scratch.normed[..concat_dim];
+        layer_norm(concat, &self.norm_weight, &self.norm_bias, normed);
 
         // 3. FC1: [2*n_embd] → [n_embd] + GELU
-        let mut fc1_out = vec![0.0f32; n];
-        linear(&normed, &self.fc1_weight, &self.fc1_bias, n, &mut fc1_out);
-        for v in &mut fc1_out {
+        let fc1_out = &mut scratch.fc1_out[..n];
+        linear(normed, &self.fc1_weight, &self.fc1_bias, n, fc1_out);
+        for v in fc1_out.iter_mut() {
             *v = gelu(*v);
         }
 
         // 4. FC2: [n_embd] → [n_embd] + GELU
-        let mut fc2_out = vec![0.0f32; n];
-        linear(&fc1_out, &self.fc2_weight, &self.fc2_bias, n, &mut fc2_out);
-        for v in &mut fc2_out {
+        let fc2_out = &mut scratch.fc2_out[..n];
+        linear(fc1_out, &self.fc2_weight, &self.fc2_bias, n, fc2_out);
+        for v in fc2_out.iter_mut() {
             *v = gelu(*v);
         }
 
         // 5. FC3: [n_embd] → [n_embd] (no activation)
-        let mut fc3_out = vec![0.0f32; n];
-        linear(&fc2_out, &self.fc3_weight, &self.fc3_bias, n, &mut fc3_out);
+        let fc3_out = &mut scratch.fc3_out[..n];
+        linear(fc2_out, &self.fc3_weight, &self.fc3_bias, n, fc3_out);
 
         // 6. Residual: h_{t+1} = h_t + FC3(...)
-        let mut result = vec![0.0f32; n];
+        let out = &mut out[..n];
         for i in 0..n {
-            result[i] = h_t[i] + fc3_out[i];
+            out[i] = h_t[i] + fc3_out[i];
         }
-
-        result
     }
 
     /// Forward pass with self-conditioning: additive SC injection into embedding channel.
@@ -175,8 +251,12 @@ impl LatentDynamicsMLP {
             blended_emb[i] = next_emb[i] + sc_scale * sc[i];
         }
 
-        // Standard forward with blended embedding
-        self.forward(h_t, &blended_emb)
+        // Standard forward with blended embedding (reuses forward_into to
+        // avoid a second allocation for the residual output buffer).
+        let mut scratch = MlpForwardScratch::new(n);
+        let mut out = vec![0.0f32; n];
+        self.forward_into(h_t, &blended_emb, &mut scratch, &mut out);
+        out
     }
 
     /// Load MLP weights from a binary file.
@@ -343,14 +423,18 @@ fn entropy_from_log_probs(log_probs: &[f32]) -> f32 {
 #[inline]
 fn log_softmax_inplace(logits: &mut [f32]) {
     let max = logits.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+    // Shift by −max in place AND accumulate sum_exp in the same pass, then
+    // subtract ln(sum_exp). Result: x_i − max − ln(sum_exp) = log_softmax(x_i).
+    // This avoids the old exp→store→sum→per-element ln() undo path that
+    // issued N ln() calls; now there is exactly one ln() call total.
     let mut sum_exp = 0.0f32;
     for v in logits.iter_mut() {
-        *v = (*v - max).exp();
-        sum_exp += *v;
+        *v -= max;
+        sum_exp += v.exp();
     }
     let log_sum = sum_exp.ln();
     for v in logits.iter_mut() {
-        *v = (*v).ln() - log_sum; // undo exp, apply log-softmax
+        *v -= log_sum;
     }
 }
 
@@ -518,14 +602,21 @@ impl BeliefDrafter {
         assert_eq!(h_t.len(), n, "h_t must have length n_embd");
 
         let mut drafts = Vec::with_capacity(max_steps);
-        let mut h_current = h_t.to_vec();
+        // Double-buffered hidden state: forward_into writes h_{t+1} into the
+        // inactive buffer while reading h_t from the active one, then we swap.
+        // This removes the per-step `h_current = mlp.forward(...)` allocation
+        // (the prior `h_t.to_vec()` + a fresh result Vec every step).
+        let mut h_a = h_t.to_vec();
+        let mut h_b = vec![0.0f32; n];
 
-        // Pre-allocate scratch for log-softmax
+        // Pre-allocate scratch for log-softmax and for the MLP forward pass
+        // (reused across all steps — see MlpForwardScratch).
         let mut logits_buf = vec![0.0f32; self.vocab_size];
+        let mut mlp_scratch = MlpForwardScratch::new(n);
 
         for _ in 0..max_steps {
             // 1. Project hidden → logits
-            self.logits_from_hidden_into(&h_current, &mut logits_buf);
+            self.logits_from_hidden_into(&h_a, &mut logits_buf);
 
             // 2. Convert to log-probs + compute entropy
             log_softmax_inplace(&mut logits_buf);
@@ -546,9 +637,11 @@ impl BeliefDrafter {
                 break;
             }
 
-            // 6. Get embedding for drafted token, advance hidden state
+            // 6. Get embedding for drafted token, advance hidden state.
+            //    forward_into reads h_a, writes h_b; swap for next iteration.
             let emb = self.token_embedding(token_idx);
-            h_current = self.mlp.forward(&h_current, emb);
+            self.mlp.forward_into(&h_a, emb, &mut mlp_scratch, &mut h_b);
+            std::mem::swap(&mut h_a, &mut h_b);
         }
 
         drafts
@@ -580,9 +673,11 @@ impl BeliefDrafter {
         assert_eq!(h_t.len(), n, "h_t must have length n_embd");
 
         let mut drafts = Vec::with_capacity(max_steps);
-        let mut h_current = h_t.to_vec();
+        // Double-buffered hidden state (h_a = current input, h_b = next output).
+        let mut h_a = h_t.to_vec();
+        let mut h_b = vec![0.0f32; n];
 
-        // SC buffer starts with initial signal or zeros
+        // SC buffer starts with initial signal or zeros.
         let mut sc_current: Vec<f32> = match initial_sc {
             Some(sc) => {
                 assert_eq!(sc.len(), n, "initial_sc must have length n_embd");
@@ -590,13 +685,19 @@ impl BeliefDrafter {
             }
             None => vec![0.0f32; n],
         };
+        // Previous hidden state used as the SC signal next iteration; reused
+        // across steps to avoid the prior per-step `h_current.clone()`.
+        let mut prev_h = vec![0.0f32; n];
+        // Blended embedding scratch (next_emb + scale * sc).
+        let mut blended_emb = vec![0.0f32; n];
 
-        // Pre-allocate scratch for log-softmax
+        // Pre-allocate scratch for log-softmax and the MLP forward pass.
         let mut logits_buf = vec![0.0f32; self.vocab_size];
+        let mut mlp_scratch = MlpForwardScratch::new(n);
 
         for _ in 0..max_steps {
             // 1. Project hidden → logits
-            self.logits_from_hidden_into(&h_current, &mut logits_buf);
+            self.logits_from_hidden_into(&h_a, &mut logits_buf);
 
             // 2. Convert to log-probs + compute entropy
             log_softmax_inplace(&mut logits_buf);
@@ -620,16 +721,23 @@ impl BeliefDrafter {
             // 6. Get embedding for drafted token
             let emb = self.token_embedding(token_idx);
 
-            // 7. Store current hidden state as SC for next step
-            let prev_h = h_current.clone();
+            // 7. Snapshot current hidden state into prev_h (reused buffer) —
+            //    becomes the SC signal next iteration.
+            prev_h.copy_from_slice(&h_a);
 
-            // 8. Advance with SC: h_{t+1} = mlp.forward_with_sc(h_t, emb, sc, scale)
-            h_current = self
-                .mlp
-                .forward_with_sc(&prev_h, emb, &sc_current, sc_scale);
+            // 8. Blend SC into embedding: next_emb' = next_emb + scale * sc.
+            for i in 0..n {
+                blended_emb[i] = emb[i] + sc_scale * sc_current[i];
+            }
 
-            // 9. Update SC signal for next iteration (previous hidden state)
-            sc_current = prev_h;
+            // 9. Advance: h_{t+1} = mlp.forward(h_t, blended_emb) via the
+            //    zero-alloc forward_into (reads h_a, writes h_b); then swap.
+            self.mlp
+                .forward_into(&h_a, &blended_emb, &mut mlp_scratch, &mut h_b);
+            std::mem::swap(&mut h_a, &mut h_b);
+
+            // 10. Update SC signal for next iteration (previous hidden state).
+            std::mem::swap(&mut sc_current, &mut prev_h);
         }
 
         drafts
@@ -688,9 +796,108 @@ impl BeliefDrafter {
             wte,
         })
     }
+
+    /// Recursively advance the MLP for `max_depth` steps and classify the hidden
+    /// state chain with [`katgpt_core::classify_chain`].
+    ///
+    /// Drives the drafter with an external token sequence: at each step the
+    /// next token's embedding is fed as `next_emb` to
+    /// [`LatentDynamicsMLP::forward_into`], producing `h_{t+1} = h_t +
+    /// FC3(GELU(FC2(GELU(FC1(LN(concat(h_t, next_emb)))))))`. The chain
+    /// `h_0, h_1, …, h_k` (with `k = min(max_depth, token_seq.len())`) is
+    /// captured into a flattened buffer and classified.
+    ///
+    /// Reuses the drafter's own `MlpForwardScratch` + double-buffered `h_a` /
+    /// `h_b` pattern from [`Self::draft`] (zero per-step allocation; only one
+    /// `Vec::with_capacity` for the chain buffer up-front). The depth-invariance
+    /// `Scratch` is allocated inside this call — callers running many audits in
+    /// a tight loop should re-use one themselves via the raw
+    /// [`katgpt_core::classify_chain`] primitive.
+    ///
+    /// # Plan 306 Phase 3 (G2 — paper finding reproduction)
+    ///
+    /// Paper arXiv:2605.09992 §3 shows pre-norm EAGLE-3 drafters classify as
+    /// [`DepthSpecificRefinement`] beyond TTT. Our `LatentDynamicsMLP` has the
+    /// same structural shape; random-init results may differ from trained
+    /// (Xavier init bounds FC3 output) — informative either way. See Plan 306
+    /// §T3.2 doc for the random-init caveat.
+    ///
+    /// Returns [`DepthInvarianceDiagnostic::kind`] == [`Insufficient`] if
+    /// `max_depth + 1 < cfg.min_samples`.
+    ///
+    /// [`DepthSpecificRefinement`]: katgpt_core::DepthInvarianceKind::DepthSpecificRefinement
+    /// [`Insufficient`]: katgpt_core::DepthInvarianceKind::Insufficient
+    #[cfg(feature = "depth_invariance")]
+    pub fn audit_depth_invariance(
+        &self,
+        h_0: &[f32],
+        token_seq: &[usize],
+        max_depth: usize,
+        cfg: &katgpt_core::DepthInvarianceConfig,
+    ) -> katgpt_core::DepthInvarianceDiagnostic {
+        // No regularization on the plain audit — the audit is a measurement
+        // of the drafter as-shipped, not as-regularized.
+        let chain = self.capture_chain(h_0, token_seq, max_depth, katgpt_core::MagnitudeRegularization::None);
+        let k_plus_1 = chain.len() / self.mlp.n_embd;
+        let mut scratch = katgpt_core::Scratch::with_capacity(k_plus_1, self.mlp.n_embd);
+        katgpt_core::classify_chain(&chain, self.mlp.n_embd, cfg, &mut scratch)
+    }
+
+    /// Plan 306 Phase 3 G2c — capture the hidden-state chain with optional
+    /// inference-time [`katgpt_core::MagnitudeRegularization`] applied to
+    /// `h_{t+1}` after each forward step.
+    ///
+    /// Returns the flattened chain `[k+1][n_embd]` row-major. The caller is
+    /// responsible for `classify_chain` on the result. Exposed publicly so
+    /// tests can interleave custom regularization schedules without re-implementing
+    /// the double-buffered forward loop.
+    ///
+    /// # Diagnostic intent (Plan 306 §T3.4)
+    ///
+    /// For our frozen-pretrained drafter, applying `MagnitudeRegularization`
+    /// here is **diagnostic-only** — paper §4.4 Table 4 reports -56%
+    /// acceptance on pre-norm models when applied at inference time. The
+    /// shipped fix requires MLP retraining (→ riir-train). For kernels we own
+    /// (HLA, functor, micro_belief, engram, Raven) this same primitive is the
+    /// modelless upstream fix.
+    #[cfg(feature = "depth_invariance")]
+    pub fn capture_chain(
+        &self,
+        h_0: &[f32],
+        token_seq: &[usize],
+        max_depth: usize,
+        regularization: katgpt_core::MagnitudeRegularization,
+    ) -> Vec<f32> {
+        let n = self.mlp.n_embd;
+        assert_eq!(h_0.len(), n, "h_0 must have length n_embd");
+
+        let k = max_depth.min(token_seq.len());
+        let k_plus_1 = k + 1;
+
+        let mut chain: Vec<f32> = Vec::with_capacity(k_plus_1 * n);
+        chain.extend_from_slice(h_0);
+
+        let mut h_a: Vec<f32> = h_0.to_vec();
+        let mut h_b: Vec<f32> = vec![0.0f32; n];
+        let mut mlp_scratch = MlpForwardScratch::new(n);
+        // Scratch for the optional RmsNorm/ScalarPinch path. Length-d as per
+        // the apply_magnitude_regularization contract (currently unused by
+        // RmsNorm but required for API stability — see module doc).
+        let mut reg_scratch: Vec<f32> = vec![0.0f32; n];
+
+        for &tok in &token_seq[..k] {
+            let emb = self.token_embedding(tok);
+            self.mlp.forward_into(&h_a, emb, &mut mlp_scratch, &mut h_b);
+            katgpt_core::apply_magnitude_regularization(&mut h_b, regularization, &mut reg_scratch);
+            chain.extend_from_slice(&h_b[..n]);
+            std::mem::swap(&mut h_a, &mut h_b);
+        }
+
+        chain
+    }
 }
 
-// ── SpeculativeGenerator Integration ───────────────────────────
+// ── SpeculativeGenerator Integration ─────────────────────────────
 
 impl SpeculativeGenerator for BeliefDrafter {
     type Condition = BeliefDraftCondition;
@@ -729,22 +936,16 @@ fn write_u32(wtr: &mut impl Write, val: u32) -> Result<(), String> {
 }
 
 fn read_f32_vec(rdr: &mut impl Read, expected_len: usize, label: &str) -> Result<Vec<f32>, String> {
-    let byte_len = expected_len * 4;
-    let mut buf = vec![0u8; byte_len];
-    rdr.read_exact(&mut buf)
+    // Allocate the f32 buffer directly and read bytes in place via bytemuck,
+    // avoiding the old intermediate Vec<u8> + N `f32::from_le_bytes` calls.
+    // Assumes a little-endian target (matches `write_f32_slice`'s `to_le_bytes`);
+    // katgpt-rs targets LE (x86_64/aarch64 macOS).
+    let mut vec: Vec<f32> = vec![0.0f32; expected_len];
+    let bytes: &mut [u8] = bytemuck::cast_slice_mut(vec.as_mut_slice());
+    rdr.read_exact(bytes)
         .map_err(|e| format!("read {label}: {e}"))?;
-    let vec: Vec<f32> = buf
-        .chunks_exact(4)
-        .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
-        .collect();
-    if vec.len() == expected_len {
-        Ok(vec)
-    } else {
-        Err(format!(
-            "{label}: expected {expected_len} elements, got {}",
-            vec.len()
-        ))
-    }
+    debug_assert_eq!(vec.len(), expected_len);
+    Ok(vec)
 }
 
 fn write_f32_slice(wtr: &mut impl Write, data: &[f32]) -> Result<(), String> {

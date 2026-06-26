@@ -68,24 +68,31 @@ impl DefaultManifoldGenerator {
     ///
     /// Each Q-value corresponds to a direction bin (uniformly spaced over [0, 2π)).
     /// Returns the sampled direction angle in radians.
+    ///
+    /// Hot-path optimization: pre-compute shifted weights once in a small
+    /// `Vec<f32>` instead of recomputing `exp(q - max_q)` twice per element
+    /// (which dominates cost once `q_goals.len()` exceeds ~4).
     fn sample_goal_from_q(&self, q_goals: &[f32], rng: &mut Rng) -> f32 {
         if q_goals.is_empty() {
             return rng.uniform() * TAU;
         }
 
-        // Convert Q-values to weights via softmax-like normalization on non-negative values.
-        let max_q = q_goals.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
-        let weights: Vec<f32> = q_goals.iter().map(|q| (q - max_q).exp()).collect();
-        let total: f32 = weights.iter().sum();
+        // Shift by max_q for numerical stability (same as before — this is
+        // categorical sampling, not an activation; the project sigmoid rule
+        // applies to bounded mappings, not probability normalization).
+        let max_q = q_goals.iter().copied().fold(f32::NEG_INFINITY, f32::max);
 
+        // Compute weights once, reuse for total + sampling. Capacity hint
+        // avoids the realloc-on-first-push.
+        let weights: Vec<f32> = q_goals.iter().map(|q| (q - max_q).exp()).collect();
+        let total: f32 = weights.iter().copied().sum();
         if total <= 0.0 {
             return rng.uniform() * TAU;
         }
 
-        // Weighted sample: pick a bin.
+        // Weighted sample using cached weights — no recomputation.
         let mut r = rng.uniform() * total;
-        let bin_count = q_goals.len();
-        let mut chosen = 0;
+        let mut chosen = weights.len() - 1;
         for (i, &w) in weights.iter().enumerate() {
             r -= w;
             if r <= 0.0 {
@@ -95,17 +102,24 @@ impl DefaultManifoldGenerator {
         }
 
         // Map bin to direction angle with jitter.
+        let bin_count = weights.len();
         let bin_width = TAU / bin_count as f32;
         chosen as f32 * bin_width + rng.uniform() * bin_width
     }
 
     /// Clamp velocity to `max_speed`.
+    ///
+    /// Hot-path optimization: compare squared speed against the squared limit
+    /// to avoid the `sqrt` on the fast (already-bounded) path. Only when we
+    /// need to scale do we compute the actual magnitude.
     #[inline]
     fn clamp_velocity(vx: f32, vy: f32, max_speed: f32) -> (f32, f32) {
-        let speed = (vx * vx + vy * vy).sqrt();
-        if speed > max_speed && speed > 0.0 {
-            let scale = max_speed / speed;
-            (vx * scale, vy * scale)
+        let speed_sq = vx * vx + vy * vy;
+        let max_sq = max_speed * max_speed;
+        if speed_sq > max_sq && speed_sq > 0.0 {
+            // scale = max_speed / sqrt(speed_sq)
+            let inv_speed = max_speed / speed_sq.sqrt();
+            (vx * inv_speed, vy * inv_speed)
         } else {
             (vx, vy)
         }
@@ -194,22 +208,17 @@ impl ManifoldGenerator for DefaultManifoldGenerator {
 
                 // Direction updates smoothly toward velocity direction.
                 let vel_dir = vel_y.atan2(vel_x);
-                let mut delta = vel_dir - direction;
-                // Normalize delta to [-π, π].
-                while delta > PI {
+                // Normalize delta to [-π, π] via one add + one remainder
+                // rather than a `while` loop (cheap and bounded).
+                let mut delta = (vel_dir - direction) % TAU;
+                if delta > PI {
                     delta -= TAU;
-                }
-                while delta < -PI {
+                } else if delta < -PI {
                     delta += TAU;
                 }
                 direction += delta * 0.3;
                 // Normalize to [0, 2π).
-                while direction < 0.0 {
-                    direction += TAU;
-                }
-                while direction >= TAU {
-                    direction -= TAU;
-                }
+                direction = ((direction % TAU) + TAU) % TAU;
 
                 traj.push(TrajectoryPoint::from_fields(
                     pos_x, pos_y, vel_x, vel_y, kills, deaths, assists, direction,

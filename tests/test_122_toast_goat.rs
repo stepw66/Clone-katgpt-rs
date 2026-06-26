@@ -6,7 +6,9 @@
 mod tests {
     use std::collections::HashMap;
 
-    use katgpt_rs::tokenizer::{SplitTreeBuilder, ToastTokenizer, ToastTokenizerImpl};
+    use katgpt_rs::tokenizer::{
+        BpeTokenizerImpl, BpeTrainer, SplitTreeBuilder, ToastTokenizer, ToastTokenizerImpl,
+    };
 
     fn make_simple_tokenizer() -> ToastTokenizer {
         let mut vocab_to_id = HashMap::new();
@@ -68,6 +70,94 @@ mod tests {
             }
         }
         counts
+    }
+
+    /// Build a ToaST tokenizer from a corpus (shared with test_120 pattern).
+    fn build_toast_from_corpus(corpus: &str) -> ToastTokenizer {
+        let bytes = corpus.as_bytes();
+
+        let mut ngram_counts: HashMap<Vec<u8>, u64> = HashMap::new();
+        for n in 2..=3 {
+            for i in 0..bytes.len().saturating_sub(n - 1) {
+                *ngram_counts.entry(bytes[i..i + n].to_vec()).or_default() += 1;
+            }
+        }
+
+        let mut vocab_to_id = HashMap::new();
+        let mut id_to_vocab = Vec::new();
+
+        for (id, tok) in [
+            (0usize, b"<pad>".to_vec()),
+            (1, b"<bos>".to_vec()),
+            (2, b"<eos>".to_vec()),
+            (3, b"<unk>".to_vec()),
+        ] {
+            vocab_to_id.insert(tok.clone(), id);
+            id_to_vocab.push(tok);
+        }
+
+        for b in 0u8..=127 {
+            let bv = vec![b];
+            if !vocab_to_id.contains_key(&bv) {
+                let id = id_to_vocab.len();
+                vocab_to_id.insert(bv.clone(), id);
+                id_to_vocab.push(bv);
+            }
+        }
+
+        let mut word_counts: HashMap<&str, usize> = HashMap::new();
+        for word in corpus.split_whitespace() {
+            *word_counts.entry(word).or_default() += 1;
+        }
+
+        let mut trees = HashMap::new();
+        let builder = SplitTreeBuilder::new(&ngram_counts, 1);
+
+        for (word, &count) in &word_counts {
+            if count >= 2 && word.len() >= 2 {
+                let wb = word.as_bytes();
+                if !vocab_to_id.contains_key(wb) {
+                    let id = id_to_vocab.len();
+                    vocab_to_id.insert(wb.to_vec(), id);
+                    id_to_vocab.push(wb.to_vec());
+                }
+                let tree = builder.build(wb);
+                trees.insert(wb.to_vec(), tree);
+            }
+        }
+
+        ToastTokenizer {
+            vocab_to_id,
+            id_to_vocab,
+            trees,
+            bos_id: 1,
+            eos_id: 2,
+            pad_id: 0,
+            unk_id: 3,
+            datrie_vocab: None,
+        }
+    }
+
+    /// Count single-byte tokens in a token ID list (tokens whose byte length == 1).
+    fn count_single_byte_tokens_toast(tokenizer: &ToastTokenizer, ids: &[usize]) -> usize {
+        ids.iter()
+            .filter(|&&id| tokenizer.id_to_vocab.get(id).is_some_and(|v| v.len() == 1))
+            .count()
+    }
+
+    /// Count single-byte tokens in a BPE token ID list.
+    fn count_single_byte_tokens_bpe(
+        tokenizer: &katgpt_rs::tokenizer::BpeTokenizer,
+        ids: &[usize],
+    ) -> usize {
+        ids.iter()
+            .filter(|&&id| {
+                tokenizer
+                    .id_to_vocab
+                    .get(id)
+                    .is_some_and(|v| v.as_bytes().len() == 1)
+            })
+            .count()
     }
 
     fn make_tokenizer_with_trees() -> ToastTokenizer {
@@ -274,5 +364,110 @@ mod tests {
             ids_orig, ids_restored,
             "Serde roundtrip must preserve encoding"
         );
+    }
+
+    // ── G2: Single-byte fallback comparison (T5 G2) ───────────
+
+    #[test]
+    fn proof_t5_g2_toast_single_byte_fallback_leq_bpe() {
+        // Corpus has every test word repeated >= 2× so ToaST builds trees for all of them.
+        // This mirrors real usage where the tokenizer is trained on the target domain.
+        let corpus = "the cat sat on the mat the cat the mat the test hello world the test split \
+                      cat cat sat sat mat mat on on \
+                      hello world test split hello world test split \
+                      the cat the mat the test hello world the cat the mat the test split \
+                      the cat the mat the test hello world the cat the mat the test split \
+                      cat cat sat mat on hello world test split";
+        let bpe = BpeTrainer::train(corpus, 300);
+        let toast = build_toast_from_corpus(corpus);
+
+        let test_strings = [
+            "the cat sat on the mat",
+            "hello world test split",
+            "the test hello world",
+            "cat mat on sat",
+        ];
+
+        println!("┌──────────────────────────────────────┬────────────────┬─────────────────┐");
+        println!("│ text                                 │ bpe_single_byte│ toast_single_by │");
+        println!("├──────────────────────────────────────┼────────────────┼─────────────────┤");
+
+        for text in &test_strings {
+            let bpe_ids = BpeTokenizerImpl::encode(&bpe, text);
+            let toast_ids = ToastTokenizerImpl::encode(&toast, text);
+
+            let bpe_single = count_single_byte_tokens_bpe(&bpe, &bpe_ids);
+            let toast_single = count_single_byte_tokens_toast(&toast, &toast_ids);
+
+            println!("│ {text:<36} │ {bpe_single:>14} │ {toast_single:>15} │");
+
+            assert!(
+                toast_single <= bpe_single,
+                "ToaST single-byte fallback ({toast_single}) must be <= BPE ({bpe_single}) for \"{text}\""
+            );
+        }
+
+        println!("└──────────────────────────────────────┴────────────────┴─────────────────┘");
+    }
+
+    // ── G3: Inference latency benchmark (T5 G3) ──────────────
+
+    #[test]
+    fn proof_t5_g3_toast_latency_leq_2x_bpe() {
+        let corpus = "the cat sat on the mat the cat the mat the test hello world the test split \
+                      the cat the mat the test hello world the cat the mat the test split \
+                      hello world test split hello world test split \
+                      the cat the mat the test hello world the cat the mat the test split \
+                      the cat sat on the mat the cat the mat the test";
+        let bpe = BpeTrainer::train(corpus, 300);
+        let toast = build_toast_from_corpus(corpus);
+
+        let test_strings = [
+            "the cat sat on the mat",
+            "hello world test split",
+            "the cat the mat the test hello world the cat the mat the test",
+        ];
+
+        // Warmup
+        for text in &test_strings {
+            let _ = BpeTokenizerImpl::encode(&bpe, text);
+            let _ = ToastTokenizerImpl::encode(&toast, text);
+        }
+
+        println!("┌──────────────────────────────────────┬────────────┬──────────────┬──────────┐");
+        println!("│ text                                 │ bpe_us     │ toast_us     │ ratio    │");
+        println!("├──────────────────────────────────────┼────────────┼──────────────┼──────────┤");
+
+        for text in &test_strings {
+            // BPE timing — multiple iterations for stable measurement
+            let iters = 1000u32;
+            let bpe_start = std::time::Instant::now();
+            for _ in 0..iters {
+                let ids = BpeTokenizerImpl::encode(&bpe, text);
+                std::hint::black_box(&ids);
+            }
+            let bpe_elapsed = bpe_start.elapsed();
+
+            // ToaST timing
+            let toast_start = std::time::Instant::now();
+            for _ in 0..iters {
+                let ids = ToastTokenizerImpl::encode(&toast, text);
+                std::hint::black_box(&ids);
+            }
+            let toast_elapsed = toast_start.elapsed();
+
+            let bpe_us = bpe_elapsed.as_secs_f64() * 1e6;
+            let toast_us = toast_elapsed.as_secs_f64() * 1e6;
+            let ratio = toast_us / bpe_us;
+
+            println!("│ {text:<36} │ {bpe_us:>10.1} │ {toast_us:>12.1} │ {ratio:>8.3} │");
+
+            assert!(
+                ratio <= 2.0,
+                "ToaST latency ({toast_us:.1}us) must be <= 2× BPE ({bpe_us:.1}us), ratio={ratio:.3}"
+            );
+        }
+
+        println!("└──────────────────────────────────────┴────────────┴──────────────┴──────────┘");
     }
 }

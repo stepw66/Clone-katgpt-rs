@@ -28,7 +28,12 @@ impl SynPruner {
     /// Validate a complete code string through both tiers.
     pub fn validate(&self, code: &str) -> PruneResult {
         // Tier 0: Bracket balance
-        if !self.parser.lock().unwrap().is_valid(code) {
+        if !self
+            .parser
+            .lock()
+            .expect("parser mutex poisoned")
+            .is_valid(code)
+        {
             return PruneResult {
                 is_valid: false,
                 error_kind: super::types::ErrorKind::UnbalancedBrackets,
@@ -50,36 +55,45 @@ impl SynPruner {
 
     /// Quick Tier 0 check only (for DDTree hot path).
     pub fn is_valid_quick(&self, code: &str) -> bool {
-        self.parser.lock().unwrap().is_valid(code)
+        self.parser
+            .lock()
+            .expect("parser mutex poisoned")
+            .is_valid(code)
     }
 }
 
 impl ConstraintPruner for SynPruner {
     fn is_valid(&self, _depth: usize, token_idx: usize, parent_tokens: &[usize]) -> bool {
-        let mut all_tokens = self.scratch_tokens.lock().unwrap();
+        let mut all_tokens = self
+            .scratch_tokens
+            .lock()
+            .expect("scratch_tokens mutex poisoned");
         all_tokens.clear();
         all_tokens.extend_from_slice(parent_tokens);
         all_tokens.push(token_idx);
 
-        let code = BpeTokenizerImpl::decode(&self.tokenizer, &*all_tokens);
+        let code = BpeTokenizerImpl::decode(&self.tokenizer, &all_tokens);
 
         // Only do Tier 0 (bracket balance) in the hot path.
         // Tier 1 (syn) is too expensive for every DDTree node.
         // Reuse the existing parser via Mutex to avoid per-call allocation.
-        let mut parser = self.parser.lock().unwrap();
+        let mut parser = self.parser.lock().expect("parser mutex poisoned");
         parser.is_valid(&code)
     }
 
     #[cfg(feature = "hoare_pruner")]
     fn propagate(&mut self, _depth: usize, token_idx: usize, parent_tokens: &[usize]) -> bool {
-        let mut all_tokens = self.scratch_tokens.lock().unwrap();
+        let mut all_tokens = self
+            .scratch_tokens
+            .lock()
+            .expect("scratch_tokens mutex poisoned");
         all_tokens.clear();
         all_tokens.extend_from_slice(parent_tokens);
         all_tokens.push(token_idx);
 
-        let code = BpeTokenizerImpl::decode(&self.tokenizer, &*all_tokens);
+        let code = BpeTokenizerImpl::decode(&self.tokenizer, &all_tokens);
 
-        let mut parser = self.parser.lock().unwrap();
+        let mut parser = self.parser.lock().expect("parser mutex poisoned");
         parser.reset();
         let valid = parser.is_valid(&code);
 
@@ -95,7 +109,7 @@ mod tests {
     #[test]
     fn test_syn_pruner_accepts_valid_rust() {
         let tokenizer = Arc::new(crate::tokenizer::BpeTrainer::train("fn let mut x", 64));
-        let mut pruner = SynPruner::new(tokenizer);
+        let pruner = SynPruner::new(tokenizer);
 
         let result = pruner.validate("let x = 42;");
         assert!(result.is_valid, "expected valid for 'let x = 42;'");
@@ -111,7 +125,7 @@ mod tests {
     #[test]
     fn test_syn_pruner_rejects_invalid_rust() {
         let tokenizer = Arc::new(crate::tokenizer::BpeTrainer::train("fn let mut x", 64));
-        let mut pruner = SynPruner::new(tokenizer);
+        let pruner = SynPruner::new(tokenizer);
 
         let result = pruner.validate("let = ;");
         assert!(!result.is_valid, "expected invalid for 'let = ;'");
@@ -127,7 +141,7 @@ mod tests {
     #[test]
     fn test_syn_pruner_bracket_tier_rejects() {
         let tokenizer = Arc::new(crate::tokenizer::BpeTrainer::train("fn let { }", 64));
-        let mut pruner = SynPruner::new(tokenizer);
+        let pruner = SynPruner::new(tokenizer);
 
         // Unmatched closing brace — Tier 0 should reject before syn sees it
         let result = pruner.validate("fn main() { } }");

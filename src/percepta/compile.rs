@@ -51,8 +51,12 @@ const GLOBAL_BASE: i64 = 8;
 const PLACEHOLDER: i32 = 0xDEAD;
 
 /// Embedded runtime.h for WASM compilation.
-pub const RUNTIME_H: &str =
-    include_str!("../../.raw/transformer-vm/transformer_vm/compilation/runtime.h");
+///
+/// Vendored from Percepta transformer-vm (Apache-2.0 © Percepta) and tracked at
+/// `src/percepta/runtime.h`. Provides `putchar` (→ `env.output_byte` import),
+/// `print_str`, `print_int`, `parse_int`, and minimal `printf`/`sscanf` (`%d`,
+/// `%s`, `%c`, `%%`) so user C compiled with `-nostdlib` can emit output.
+pub const RUNTIME_H: &str = include_str!("runtime.h");
 
 // ── Error Type ─────────────────────────────────────────────────
 
@@ -104,7 +108,11 @@ impl From<DecodeError> for CompileError {
 // ── Types ──────────────────────────────────────────────────────
 
 /// A dispatch table entry: (opcode_name, immediate_value).
-pub type DispatchEntry = (String, i32);
+///
+/// Uses `&'static str` for the opcode name — all names are compile-time
+/// literals or from `wasm_opcode_to_name` (which returns `&'static str`),
+/// so this eliminates a heap allocation per dispatch entry.
+pub type DispatchEntry = (&'static str, i32);
 
 /// Result of compilation.
 #[derive(Clone, Debug)]
@@ -527,7 +535,8 @@ fn compile_function(
     }
     let num_imports = func_import_idx;
 
-    let mut entries: Vec<DispatchEntry> = Vec::new();
+    // Pre-allocate: worst case each instruction emits a few dispatch entries.
+    let mut entries: Vec<DispatchEntry> = Vec::with_capacity(func.instructions.len() * 2);
     let mut label_stack: Vec<LabelFrame> = Vec::new();
 
     for instr in &func.instructions {
@@ -560,9 +569,9 @@ fn compile_function(
         }
 
         if op == OP_IF {
-            entries.push(("i32.eqz".to_string(), 0));
+            entries.push(("i32.eqz", 0));
             let br_idx = entries.len();
-            entries.push(("br_if".to_string(), PLACEHOLDER));
+            entries.push(("br_if", PLACEHOLDER));
             label_stack.push(LabelFrame {
                 kind: LabelKind::If,
                 start_pc: entries.len() - 2,
@@ -580,7 +589,7 @@ fn compile_function(
                 return Err(CompileError::Other("ELSE without matching IF".to_string()));
             }
             let else_br_idx = entries.len();
-            entries.push(("br".to_string(), PLACEHOLDER));
+            entries.push(("br", PLACEHOLDER));
             let else_pc = entries.len();
             frame.patches = vec![else_br_idx];
             if let Some(if_entry) = frame.if_entry {
@@ -591,7 +600,7 @@ fn compile_function(
 
         if op == OP_END {
             if label_stack.is_empty() {
-                entries.push((if is_main { "halt" } else { "return" }.to_string(), 0));
+                entries.push((if is_main { "halt" } else { "return" }, 0));
                 continue;
             }
             let frame = label_stack.pop().unwrap();
@@ -615,10 +624,10 @@ fn compile_function(
                     })?;
             let target_frame = &label_stack[target_frame_idx];
             if target_frame.kind == LabelKind::Loop {
-                entries.push(("br".to_string(), target_frame.start_pc as i32));
+                entries.push(("br", target_frame.start_pc as i32));
             } else {
                 let idx = entries.len();
-                entries.push(("br".to_string(), PLACEHOLDER));
+                entries.push(("br", PLACEHOLDER));
                 label_stack[target_frame_idx].patches.push(idx);
             }
             continue;
@@ -635,10 +644,10 @@ fn compile_function(
                     })?;
             let target_frame = &label_stack[target_frame_idx];
             if target_frame.kind == LabelKind::Loop {
-                entries.push(("br_if".to_string(), target_frame.start_pc as i32));
+                entries.push(("br_if", target_frame.start_pc as i32));
             } else {
                 let idx = entries.len();
-                entries.push(("br_if".to_string(), PLACEHOLDER));
+                entries.push(("br_if", PLACEHOLDER));
                 label_stack[target_frame_idx].patches.push(idx);
             }
             continue;
@@ -661,7 +670,7 @@ fn compile_function(
             };
 
             // Save switch index to temp local
-            entries.push(("local.set".to_string(), temp));
+            entries.push(("local.set", temp));
 
             // Emit compare-and-branch for each target
             for (i, &label_idx_raw) in instr.immediates[..n_targets].iter().enumerate() {
@@ -676,18 +685,18 @@ fn compile_function(
                             ))
                         })?;
 
-                entries.push(("local.get".to_string(), temp));
-                entries.push(("i32.const".to_string(), i as i32));
-                entries.push(("i32.eq".to_string(), 0));
+                entries.push(("local.get", temp));
+                entries.push(("i32.const", i as i32));
+                entries.push(("i32.eq", 0));
 
                 if label_stack[target_frame_idx].kind == LabelKind::Loop {
                     entries.push((
-                        "br_if".to_string(),
+                        "br_if",
                         label_stack[target_frame_idx].start_pc as i32,
                     ));
                 } else {
                     let idx = entries.len();
-                    entries.push(("br_if".to_string(), PLACEHOLDER));
+                    entries.push(("br_if", PLACEHOLDER));
                     label_stack[target_frame_idx].patches.push(idx);
                 }
             }
@@ -704,24 +713,24 @@ fn compile_function(
 
             if label_stack[default_frame_idx].kind == LabelKind::Loop {
                 entries.push((
-                    "br".to_string(),
+                    "br",
                     label_stack[default_frame_idx].start_pc as i32,
                 ));
             } else {
                 let idx = entries.len();
-                entries.push(("br".to_string(), PLACEHOLDER));
+                entries.push(("br", PLACEHOLDER));
                 label_stack[default_frame_idx].patches.push(idx);
             }
             continue;
         }
 
         if op == OP_RETURN {
-            entries.push((if is_main { "halt" } else { "return" }.to_string(), 0));
+            entries.push((if is_main { "halt" } else { "return" }, 0));
             continue;
         }
 
         if op == OP_UNREACHABLE {
-            entries.push(("halt".to_string(), 0));
+            entries.push(("halt", 0));
             continue;
         }
 
@@ -732,7 +741,7 @@ fn compile_function(
             if fi < num_imports {
                 match import_map.get(&fi) {
                     Some(&"output_byte") => {
-                        entries.push(("output".to_string(), 0));
+                        entries.push(("output", 0));
                     }
                     _ => {
                         return Err(CompileError::UnsupportedOpcode(format!(
@@ -741,7 +750,7 @@ fn compile_function(
                     }
                 }
             } else {
-                entries.push(("call".to_string(), fi as i32));
+                entries.push(("call", fi as i32));
             }
             continue;
         }
@@ -750,8 +759,8 @@ fn compile_function(
 
         if op == OP_GLOBAL_GET {
             let gidx = instr.immediates[0];
-            entries.push(("i32.const".to_string(), (GLOBAL_BASE + 4 * gidx) as i32));
-            entries.push(("i32.load".to_string(), 0));
+            entries.push(("i32.const", (GLOBAL_BASE + 4 * gidx) as i32));
+            entries.push(("i32.load", 0));
             continue;
         }
 
@@ -760,10 +769,10 @@ fn compile_function(
             let temp = global_temp_local.ok_or_else(|| {
                 CompileError::Other("global.set requires a temp local".to_string())
             })?;
-            entries.push(("local.set".to_string(), temp));
-            entries.push(("i32.const".to_string(), (GLOBAL_BASE + 4 * gidx) as i32));
-            entries.push(("local.get".to_string(), temp));
-            entries.push(("i32.store".to_string(), 0));
+            entries.push(("local.set", temp));
+            entries.push(("i32.const", (GLOBAL_BASE + 4 * gidx) as i32));
+            entries.push(("local.get", temp));
+            entries.push(("i32.store", 0));
             continue;
         }
 
@@ -771,7 +780,7 @@ fn compile_function(
 
         if op == OP_LOCAL_GET || op == OP_LOCAL_SET || op == OP_LOCAL_TEE {
             let name = wasm_opcode_to_name(op).unwrap_or("???");
-            entries.push((name.to_string(), instr.immediates[0] as i32));
+            entries.push((name, instr.immediates[0] as i32));
             continue;
         }
 
@@ -779,7 +788,7 @@ fn compile_function(
 
         if op == OP_I32_CONST {
             entries.push((
-                "i32.const".to_string(),
+                "i32.const",
                 (instr.immediates[0] & MASK32) as i32,
             ));
             continue;
@@ -800,14 +809,14 @@ fn compile_function(
         ) {
             let name = wasm_opcode_to_name(op).unwrap_or("???");
             let offset = instr.immediates[1] as i32;
-            entries.push((name.to_string(), offset));
+            entries.push((name, offset));
             continue;
         }
 
         // ── Simple ops (no immediates) ──────────────────────
 
         if let Some(name) = wasm_opcode_to_name(op) {
-            entries.push((name.to_string(), 0));
+            entries.push((name, 0));
             continue;
         }
 
@@ -852,13 +861,17 @@ fn compute_input_base(module: &WasmModule) -> Result<i32, CompileError> {
 
 /// Adjust branch targets in a compiled function body by adding an offset.
 fn adjust_branches(body: &[DispatchEntry], offset: usize) -> Vec<DispatchEntry> {
+    let off = offset as i32;
     body.iter()
-        .map(|(op, imm)| {
-            if op == "br" || op == "br_if" {
-                (op.clone(), imm + offset as i32)
+        .map(|&(op, imm)| {
+            // Branch-only opcodes get the offset added; everything else is unchanged.
+            let new_imm = if op == "br" || op == "br_if" {
+                imm + off
             } else {
-                (op.clone(), *imm)
-            }
+                imm
+            };
+            // `op` is `&'static str` (Copy) — no heap allocation needed.
+            (op, new_imm)
         })
         .collect()
 }
@@ -900,7 +913,7 @@ fn build_program(module: &WasmModule) -> Result<(Vec<DispatchEntry>, i32), Compi
 
     // Part 0: input_base instruction
     if param_count > 0 {
-        prologue.push(("input_base".to_string(), input_base));
+        prologue.push(("input_base", input_base));
     }
 
     // Part 1: local variable initialization (reverse order)
@@ -910,15 +923,15 @@ fn build_program(module: &WasmModule) -> Result<(Vec<DispatchEntry>, i32), Compi
         } else {
             0
         };
-        prologue.push(("i32.const".to_string(), init_val));
-        prologue.push(("local.set".to_string(), k as i32));
+        prologue.push(("i32.const", init_val));
+        prologue.push(("local.set", k as i32));
     }
 
-    // Part 2: memory initialization (globals + data segments, skip zeros)
+    // Part 2: memory-initialization (globals + data segments, skip zeros)
     let mut initial_memory: BTreeMap<i32, u8> = BTreeMap::new();
 
-    // Find which globals are actually used
-    let mut used_globals: HashSet<usize> = HashSet::new();
+    // Find which globals are actually used (pre-size to global count)
+    let mut used_globals: HashSet<usize> = HashSet::with_capacity(module.globals.len());
     for fn_body in &module.functions {
         for ins in &fn_body.instructions {
             if ins.opcode == OP_GLOBAL_GET || ins.opcode == OP_GLOBAL_SET {
@@ -951,9 +964,9 @@ fn build_program(module: &WasmModule) -> Result<(Vec<DispatchEntry>, i32), Compi
         if byte_val == 0 {
             continue;
         }
-        prologue.push(("i32.const".to_string(), addr));
-        prologue.push(("i32.const".to_string(), byte_val as i32));
-        prologue.push(("i32.store8".to_string(), 0));
+        prologue.push(("i32.const", addr));
+        prologue.push(("i32.const", byte_val as i32));
+        prologue.push(("i32.store8", 0));
     }
 
     // Part 3: compile main function body
@@ -978,7 +991,7 @@ fn build_program(module: &WasmModule) -> Result<(Vec<DispatchEntry>, i32), Compi
 
         // Parameter prologue: set locals from stack (reverse order)
         for k in (0..n_params).rev() {
-            program.push(("local.set".to_string(), k as i32));
+            program.push(("local.set", k as i32));
         }
 
         let gt_fi = func_global_temp(func_fi, module, fi);
@@ -995,8 +1008,9 @@ fn build_program(module: &WasmModule) -> Result<(Vec<DispatchEntry>, i32), Compi
         }
     }
 
-    // Part 5: resolve CALL targets (func_idx → absolute cursor position)
-    for entry in program.iter_mut() {
+    // Part 5+6 merged: resolve CALL targets and convert all branch/call targets
+    // to relative offsets in a single pass (avoids iterating the program twice).
+    for (i, entry) in program.iter_mut().enumerate() {
         if entry.0 == "call" {
             let fi = entry.1 as usize;
             let target = *func_addresses.get(&fi).ok_or_else(|| {
@@ -1004,11 +1018,8 @@ fn build_program(module: &WasmModule) -> Result<(Vec<DispatchEntry>, i32), Compi
             })?;
             entry.1 = target as i32;
         }
-    }
-
-    // Part 6: convert absolute branch/call targets to relative offsets
-    for (i, entry) in program.iter_mut().enumerate() {
-        if matches!(entry.0.as_str(), "br" | "br_if" | "call") {
+        // Convert absolute target to relative offset for br, br_if, and call.
+        if entry.0 == "br" || entry.0 == "br_if" || entry.0 == "call" {
             let target = entry.1;
             entry.1 = target - i as i32 - 1;
         }
@@ -1021,50 +1032,60 @@ fn build_program(module: &WasmModule) -> Result<(Vec<DispatchEntry>, i32), Compi
 
 /// Convert dispatch table to token prefix string with `{` `}` delimiters.
 pub fn format_prefix(program: &[DispatchEntry]) -> String {
-    let mut lines = vec!["{".to_string()];
+    // Worst case: each entry is op_name + space + 8-char hex + 3 separators ≈ 32 bytes.
+    let mut out = String::with_capacity(program.len() * 32 + 4);
+    out.push('{');
+    out.push('\n');
     for (op, imm) in program {
         let bytes = int_to_bytes(*imm as i64);
-        let hex_bytes: Vec<String> = bytes.iter().map(|b| format!("{b:02x}")).collect();
-        lines.push(format!("{op} {}", hex_bytes.join(" ")));
+        // Inline write avoids allocating an intermediate Vec<String>.
+        use std::fmt::Write as _;
+        let _ = write!(out, "{op} {:02x} {:02x} {:02x} {:02x}\n", bytes[0], bytes[1], bytes[2], bytes[3]);
     }
-    lines.push("}".to_string());
-    lines.join("\n") + "\n"
+    out.push('}');
+    out.push('\n');
+    out
 }
 
 /// Format input bytes + commit token for appending after the program.
 pub fn format_input_section(input_str: &str) -> String {
     let data = input_str.as_bytes();
-    let mut tokens: Vec<String> = Vec::with_capacity(data.len() + 2);
+    // Worst case: 2 chars per byte + separators + commit token.
+    let mut out = String::with_capacity(data.len() * 3 + 24);
 
     for &b in data {
         if (0x20..0x7F).contains(&b) && b != b'{' && b != b'}' {
-            tokens.push(String::from(b as char));
+            out.push(b as char);
         } else {
-            tokens.push(format!("{b:02x}"));
+            use std::fmt::Write as _;
+            let _ = write!(out, "{b:02x}");
         }
+        out.push(' ');
     }
-    // Null terminator
-    tokens.push("00".to_string());
-    tokens.push("commit(+0,sts=0,bt=0)".to_string());
-    tokens.join(" ") + "\n"
+    // Null terminator + commit token.
+    out.push_str("00 commit(+0,sts=0,bt=0)\n");
+    out
 }
 
 /// Format the specialized model input (start + optional input tokens).
 pub fn format_spec_input(input_str: &str) -> String {
-    let mut tokens = vec!["start".to_string()];
+    let mut out = String::with_capacity(input_str.len() * 3 + 16);
+    out.push_str("start");
     if !input_str.is_empty() {
         let data = input_str.as_bytes();
         for &b in data {
+            out.push(' ');
             if (0x20..0x7F).contains(&b) && b != b'{' && b != b'}' {
-                tokens.push(String::from(b as char));
+                out.push(b as char);
             } else {
-                tokens.push(format!("{b:02x}"));
+                use std::fmt::Write as _;
+                let _ = write!(out, "{b:02x}");
             }
         }
-        tokens.push("00".to_string());
-        tokens.push("commit(+0,sts=0,bt=0)".to_string());
+        out.push_str(" 00 commit(+0,sts=0,bt=0)");
     }
-    tokens.join(" ") + "\n"
+    out.push('\n');
+    out
 }
 
 // ── Pipeline ──────────────────────────────────────────────────
@@ -1198,9 +1219,9 @@ mod tests {
 
         // Should produce: i32.const 72, output 0, halt 0
         assert_eq!(result.len(), 3);
-        assert_eq!(result[0], ("i32.const".to_string(), 72));
-        assert_eq!(result[1], ("output".to_string(), 0));
-        assert_eq!(result[2], ("halt".to_string(), 0));
+        assert_eq!(result[0], ("i32.const", 72));
+        assert_eq!(result[1], ("output", 0));
+        assert_eq!(result[2], ("halt", 0));
     }
 
     #[test]
@@ -1319,9 +1340,9 @@ mod tests {
     #[test]
     fn test_format_prefix() {
         let program: Vec<DispatchEntry> = vec![
-            ("i32.const".to_string(), 72),
-            ("output".to_string(), 0),
-            ("halt".to_string(), 0),
+            ("i32.const", 72),
+            ("output", 0),
+            ("halt", 0),
         ];
 
         let prefix = format_prefix(&program);
@@ -1458,10 +1479,10 @@ mod tests {
         assert_eq!(result.input_base, 65536);
 
         // Should contain output instruction
-        assert!(result.program.iter().any(|(op, _)| op == "output"));
+        assert!(result.program.iter().any(|(op, _)| *op == "output"));
 
         // Should contain halt instruction
-        assert!(result.program.iter().any(|(op, _)| op == "halt"));
+        assert!(result.program.iter().any(|(op, _)| *op == "halt"));
 
         // Count non-empty lines in prefix
         let lines: Vec<&str> = result
@@ -1559,30 +1580,30 @@ mod tests {
         .unwrap();
 
         // GLOBAL_GET expands to: i32.const (addr) + i32.load 0
-        assert!(result.iter().any(|(op, _)| op == "i32.load"));
+        assert!(result.iter().any(|(op, _)| *op == "i32.load"));
         // Should contain the global address: GLOBAL_BASE + 4*0 = 8
         assert!(
             result
                 .iter()
-                .any(|(op, imm)| op == "i32.const" && *imm == GLOBAL_BASE as i32)
+                .any(|(op, imm)| *op == "i32.const" && *imm == GLOBAL_BASE as i32)
         );
     }
 
     #[test]
     fn test_adjust_branches() {
         let body: Vec<DispatchEntry> = vec![
-            ("i32.const".to_string(), 1),
-            ("br".to_string(), 5),
-            ("br_if".to_string(), 3),
-            ("halt".to_string(), 0),
+            ("i32.const", 1),
+            ("br", 5),
+            ("br_if", 3),
+            ("halt", 0),
         ];
 
         let adjusted = adjust_branches(&body, 10);
 
-        assert_eq!(adjusted[0], ("i32.const".to_string(), 1)); // unchanged
-        assert_eq!(adjusted[1], ("br".to_string(), 15)); // 5 + 10
-        assert_eq!(adjusted[2], ("br_if".to_string(), 13)); // 3 + 10
-        assert_eq!(adjusted[3], ("halt".to_string(), 0)); // unchanged
+        assert_eq!(adjusted[0], ("i32.const", 1)); // unchanged
+        assert_eq!(adjusted[1], ("br", 15)); // 5 + 10
+        assert_eq!(adjusted[2], ("br_if", 13)); // 3 + 10
+        assert_eq!(adjusted[3], ("halt", 0)); // unchanged
     }
 
     #[test]
@@ -1651,7 +1672,7 @@ mod tests {
             .program
             .iter()
             .enumerate()
-            .filter(|(_, (op, _))| op == "br")
+            .filter(|(_, (op, _))| *op == "br")
             .collect();
 
         assert!(!br_entries.is_empty(), "should have br instructions");
@@ -1741,8 +1762,7 @@ void compute(const char *input) {
 
         // Must contain output instruction (print_str → putchar → output_byte)
         assert!(
-            compiled.program.iter().any(|(op, _)| op == "output"),
-            "program should contain output instruction"
+            compiled.program.iter().any(|(op, _)| *op == "output")
         );
 
         // Must end with halt
@@ -1750,7 +1770,7 @@ void compute(const char *input) {
             compiled
                 .program
                 .last()
-                .map_or(false, |(op, _)| op == "halt"),
+                .map_or(false, |(op, _)| *op == "halt"),
             "program should end with halt"
         );
 
@@ -1810,13 +1830,13 @@ void compute(const char *input) {
             compiled
                 .program
                 .iter()
-                .any(|(op, _)| op == "br" || op == "br_if"),
+                .any(|(op, _)| *op == "br" || *op == "br_if"),
             "collatz should have branch instructions (loop)"
         );
 
         // Should have output instructions
         assert!(
-            compiled.program.iter().any(|(op, _)| op == "output"),
+            compiled.program.iter().any(|(op, _)| *op == "output"),
             "collatz should have output instructions (printf → putchar)"
         );
 
@@ -1873,8 +1893,8 @@ void compute(const char *input) {
         );
 
         let compiled = result.unwrap();
-        assert!(compiled.program.iter().any(|(op, _)| op == "output"));
-        assert!(compiled.program.iter().any(|(op, _)| op == "halt"));
+        assert!(compiled.program.iter().any(|(op, _)| *op == "output"));
+        assert!(compiled.program.iter().any(|(op, _)| *op == "halt"));
 
         // Cleanup
         let _ = fs::remove_dir_all(&temp_dir);

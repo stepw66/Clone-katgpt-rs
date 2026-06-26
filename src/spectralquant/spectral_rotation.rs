@@ -7,8 +7,16 @@
 ///
 /// Forward: x_hat = V^T @ x  (project into spectral basis)
 /// Inverse: x = V @ x_hat   (reconstruct original basis)
+///
+/// Stores both `eigenvectors` (V, row-major) and `eigenvectors_t` (V^T,
+/// row-major) so both forward and inverse paths use contiguous-access
+/// SIMD row dot-products via `simd_matmul_rows`. The transpose is computed
+/// once at construction time.
 pub struct SpectralRotation {
-    eigenvectors: Vec<f32>, // (head_dim × head_dim), row-major
+    eigenvectors: Vec<f32>, // (head_dim × head_dim), row-major (V)
+    /// Transpose of `eigenvectors` (V^T), row-major. Precomputed once so that
+    /// the forward rotation `out = V^T @ x` uses `simd_matmul_rows`.
+    eigenvectors_t: Vec<f32>,
     head_dim: usize,
 }
 
@@ -19,38 +27,39 @@ impl SpectralRotation {
             head_dim * head_dim,
             "eigenvectors must be head_dim × head_dim"
         );
+        // Precompute V^T so both rotate() and unrotate() use contiguous-row
+        // SIMD dot products instead of strided column gathers.
+        let mut eigenvectors_t = vec![0.0f32; head_dim * head_dim];
+        for i in 0..head_dim {
+            for j in 0..head_dim {
+                eigenvectors_t[j * head_dim + i] = eigenvectors[i * head_dim + j];
+            }
+        }
         Self {
             eigenvectors,
+            eigenvectors_t,
             head_dim,
         }
     }
 
     /// Forward rotation: out = V^T @ x.
-    /// V is stored row-major, V^T[j][i] = V[i][j].
-    /// out[j] = Σ_i V[i][j] * x[i]
     ///
-    /// Implemented as transpose-and-accumulate: iterate over rows of V,
-    /// scaling each row by x[i] and accumulating into `out`. This gives
-    /// contiguous reads from V and contiguous writes to out, which is
-    /// SIMD-friendly and cache-friendly.
+    /// Uses the precomputed `eigenvectors_t` (V^T stored row-major) so the
+    /// computation reduces to `out[j] = dot(V^T_row_j, x)` — a contiguous-access
+    /// SIMD row dot-product via `simd_matmul_rows`.
     pub fn rotate(&self, x: &[f32], out: &mut [f32]) {
         assert_eq!(x.len(), self.head_dim);
         assert_eq!(out.len(), self.head_dim);
-        out.fill(0.0);
-        let hd = self.head_dim;
-        for (i, xi) in x.iter().copied().take(hd).enumerate() {
-            let row = &self.eigenvectors[i * hd..i * hd + hd];
-            // out[j] += row[j] * xi — contiguous for both read and write
-            for j in 0..hd {
-                unsafe {
-                    *out.get_unchecked_mut(j) += *row.get_unchecked(j) * xi;
-                }
-            }
-        }
+        crate::simd::simd_matmul_rows(
+            out,
+            &self.eigenvectors_t,
+            x,
+            self.head_dim,
+            self.head_dim,
+        );
     }
 
     /// Inverse rotation: out = V @ x.
-    /// out[i] = Σ_j V[i][j] * x[j]
     ///
     /// Uses SIMD-accelerated row dot-products via `simd_matmul_rows` for
     /// ~4-8× speedup over scalar on NEON/AVX2 targets.

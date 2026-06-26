@@ -101,11 +101,14 @@ pub fn attention_octopus(
     let t_n = pos + 1;
 
     // Pass 1: Q·K scores + find max
+    // Hoist the invariant q_slice out of the loop — it does not depend on t.
+    let q_slice = unsafe {
+        std::slice::from_raw_parts(q.as_ptr().add(q_head_offset), head_dim)
+    };
     let mut max_score = f32::NEG_INFINITY;
     for t in 0..t_n {
         let k_off = t * kv_dim + kv_group_offset;
         let dot = unsafe {
-            let q_slice = std::slice::from_raw_parts(q.as_ptr().add(q_head_offset), head_dim);
             let k_slice = std::slice::from_raw_parts(flat_keys.as_ptr().add(k_off), head_dim);
             crate::simd::simd_dot_f32(q_slice, k_slice, head_dim)
         };
@@ -129,7 +132,8 @@ pub fn attention_octopus(
     // Pass 3: normalize + weighted value accumulation
     // Loop order: t outer, d inner — contiguous value_cache row access, better cache locality.
     let inv_sum = 1.0 / sum;
-    attn_out[q_head_offset..q_head_offset + head_dim].fill(0.0);
+    let out_slice = &mut attn_out[q_head_offset..q_head_offset + head_dim];
+    out_slice.fill(0.0);
     for t in 0..t_n {
         let weight = unsafe { *scores_buf.get_unchecked(t) * inv_sum };
         let v_row = unsafe {
@@ -138,12 +142,7 @@ pub fn attention_octopus(
                 head_dim,
             )
         };
-        crate::simd::simd_fused_scale_acc(
-            &mut attn_out[q_head_offset..q_head_offset + head_dim],
-            v_row,
-            weight,
-            head_dim,
-        );
+        crate::simd::simd_fused_scale_acc(out_slice, v_row, weight, head_dim);
     }
 }
 

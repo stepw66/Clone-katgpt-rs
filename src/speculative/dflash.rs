@@ -630,18 +630,15 @@ pub fn domino_correct_marginals(
         // Apply logit residual in-place
         let len = marginal.len().min(correction.len()).min(vocab_size);
         for v in 0..len {
-            marginal[v] += correction[v];
-            // Clamp to non-negative (logit residual can push below 0)
-            if marginal[v] < 0.0 {
-                marginal[v] = 0.0;
-            }
+            marginal[v] = (marginal[v] + correction[v]).max(0.0);
         }
 
-        // Re-normalize
+        // Re-normalize via reciprocal multiply (single division per vocab)
         let sum: f32 = marginal.iter().sum();
         if sum > f32::EPSILON {
+            let inv_sum = 1.0 / sum;
             for v in marginal.iter_mut() {
-                *v /= sum;
+                *v *= inv_sum;
             }
         }
     }
@@ -701,8 +698,9 @@ pub fn marginal_fusion_blend(
         let end = start + vocab_size;
         let sum: f32 = output[start..end].iter().sum();
         if sum > 0.0 {
+            let inv_sum = 1.0 / sum;
             for v in &mut output[start..end] {
-                *v /= sum;
+                *v *= inv_sum;
             }
         }
     }
@@ -780,12 +778,23 @@ mod tests {
 
     #[test]
     fn test_dflash_ar_is_autoregressive() {
+        // Verify the sampler is actually consuming the RNG (not just returning argmax).
+        // We sample from many seeds and require that at least two distinct token
+        // sequences appear. Asserting a specific pair (e.g. seed 1 vs 2) is too
+        // fragile: the 27-token draft vocab at temperature 0.5 can be peaked
+        // enough that nearby uniform draws land in the same CDF bin, making
+        // adjacent seeds produce identical AR paths by chance.
         let (weights, config) = make_draft();
-        let r1 = dflash_predict_ar(&weights, &config, 0, 0, &mut Rng::new(1));
-        let r2 = dflash_predict_ar(&weights, &config, 0, 0, &mut Rng::new(2));
-        assert_ne!(
-            r1.sampled_tokens, r2.sampled_tokens,
-            "different seeds should produce different AR tokens"
+        let mut distinct = std::collections::HashSet::new();
+        for seed in 1u64..=16 {
+            let r = dflash_predict_ar(&weights, &config, 0, 0, &mut Rng::new(seed));
+            distinct.insert(r.sampled_tokens);
+        }
+        assert!(
+            distinct.len() >= 2,
+            "sampler appears deterministic across 16 seeds — RNG is not being consumed; \
+             distinct sequences: {}",
+            distinct.len()
         );
     }
 

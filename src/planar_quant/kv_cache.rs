@@ -118,8 +118,12 @@ impl PlanarQuantKVCache {
         // Normalize into scratch buffer (copy + SIMD scale)
         let inv_norm = 1.0 / norm;
         self.scratch_normalized[..key.len()].copy_from_slice(key);
-        // Zero-pad if kv_dim is odd (shouldn't happen in practice, but safe)
-        self.scratch_normalized[key.len()..].fill(0.0);
+        // Zero-pad if kv_dim is odd (shouldn't happen in practice, but safe).
+        // Only the tail slot needs zeroing — the [..kv_dim] range is fully
+        // overwritten by the copy above.
+        if key.len() < self.scratch_normalized.len() {
+            self.scratch_normalized[key.len()..].fill(0.0);
+        }
         simd_scale_inplace(&mut self.scratch_normalized, inv_norm);
 
         // 2D Givens rotation → scratch_rotated
@@ -165,7 +169,9 @@ impl PlanarQuantKVCache {
         // Normalize into scratch buffer
         let inv_norm = 1.0 / norm;
         self.scratch_normalized[..value.len()].copy_from_slice(value);
-        self.scratch_normalized[value.len()..].fill(0.0);
+        if value.len() < self.scratch_normalized.len() {
+            self.scratch_normalized[value.len()..].fill(0.0);
+        }
         simd_scale_inplace(&mut self.scratch_normalized, inv_norm);
 
         // 2D Givens rotation → scratch_rotated
@@ -263,7 +269,9 @@ impl PlanarQuantKVCache {
 
         // Dequantize → scratch_rotated (only clear padding, the kv_dim range
         // will be fully overwritten by the dequantize loop)
-        self.scratch_rotated[self.kv_dim..].fill(0.0);
+        if self.kv_dim < self.scratch_rotated.len() {
+            self.scratch_rotated[self.kv_dim..].fill(0.0);
+        }
         for i in 0..self.kv_dim {
             unsafe {
                 *self.scratch_rotated.get_unchecked_mut(i) = dequantize_index(
@@ -306,7 +314,9 @@ impl PlanarQuantKVCache {
         );
 
         // Dequantize → scratch_rotated (only clear padding)
-        self.scratch_rotated[self.kv_dim..].fill(0.0);
+        if self.kv_dim < self.scratch_rotated.len() {
+            self.scratch_rotated[self.kv_dim..].fill(0.0);
+        }
         for i in 0..self.kv_dim {
             unsafe {
                 *self.scratch_rotated.get_unchecked_mut(i) = dequantize_index(
@@ -591,72 +601,56 @@ fn unpack_indices_into(packed: &[u8], bits: u8, n: usize, out: &mut [u8]) {
     debug_assert!(out.len() >= n);
     match bits {
         2 => {
-            let full_quads = n / 4;
-            for q in 0..full_quads {
+            // Hoist `q < packed.len()` out of the inner loop: process the
+            // available full bytes in a branch-free body, then a single fill(0)
+            // covers any indices whose source byte is missing.
+            let n_full_bytes = packed.len().min(n / 4);
+            for q in 0..n_full_bytes {
                 let base = q * 4;
-                if q < packed.len() {
-                    unsafe {
-                        let b = *packed.get_unchecked(q);
-                        *out.get_unchecked_mut(base) = b & 0x3;
-                        *out.get_unchecked_mut(base + 1) = (b >> 2) & 0x3;
-                        *out.get_unchecked_mut(base + 2) = (b >> 4) & 0x3;
-                        *out.get_unchecked_mut(base + 3) = (b >> 6) & 0x3;
-                    }
-                } else {
-                    unsafe {
-                        *out.get_unchecked_mut(base) = 0;
-                        *out.get_unchecked_mut(base + 1) = 0;
-                        *out.get_unchecked_mut(base + 2) = 0;
-                        *out.get_unchecked_mut(base + 3) = 0;
-                    }
+                unsafe {
+                    let b = *packed.get_unchecked(q);
+                    *out.get_unchecked_mut(base) = b & 0x3;
+                    *out.get_unchecked_mut(base + 1) = (b >> 2) & 0x3;
+                    *out.get_unchecked_mut(base + 2) = (b >> 4) & 0x3;
+                    *out.get_unchecked_mut(base + 3) = (b >> 6) & 0x3;
                 }
             }
-            let remainder = n % 4;
-            if remainder > 0 {
-                let base = full_quads * 4;
-                if full_quads < packed.len() {
+            let consumed = n_full_bytes * 4;
+            if consumed < n {
+                if n_full_bytes < packed.len() {
+                    let base = consumed;
+                    let remainder = n - consumed;
                     unsafe {
-                        let b = *packed.get_unchecked(full_quads);
+                        let b = *packed.get_unchecked(n_full_bytes);
                         for i in 0..remainder {
                             *out.get_unchecked_mut(base + i) = (b >> (i * 2)) & 0x3;
                         }
                     }
                 } else {
-                    unsafe {
-                        for i in 0..remainder {
-                            *out.get_unchecked_mut(base + i) = 0;
-                        }
-                    }
+                    out[consumed..n].fill(0);
                 }
             }
         }
         3 | 4 => {
-            let full_pairs = n / 2;
-            for p in 0..full_pairs {
+            // Same hoisting pattern as the 2-bit case.
+            let n_full_bytes = packed.len().min(n / 2);
+            for p in 0..n_full_bytes {
                 let base = p * 2;
-                if p < packed.len() {
-                    unsafe {
-                        let b = *packed.get_unchecked(p);
-                        *out.get_unchecked_mut(base) = b & 0xF;
-                        *out.get_unchecked_mut(base + 1) = (b >> 4) & 0xF;
-                    }
-                } else {
-                    unsafe {
-                        *out.get_unchecked_mut(base) = 0;
-                        *out.get_unchecked_mut(base + 1) = 0;
-                    }
+                unsafe {
+                    let b = *packed.get_unchecked(p);
+                    *out.get_unchecked_mut(base) = b & 0xF;
+                    *out.get_unchecked_mut(base + 1) = (b >> 4) & 0xF;
                 }
             }
-            if !n.is_multiple_of(2) {
-                let last = n - 1;
-                if full_pairs < packed.len() {
+            let consumed = n_full_bytes * 2;
+            if consumed < n {
+                if n_full_bytes < packed.len() {
                     unsafe {
-                        *out.get_unchecked_mut(last) = *packed.get_unchecked(full_pairs) & 0xF;
+                        *out.get_unchecked_mut(consumed) =
+                            *packed.get_unchecked(n_full_bytes) & 0xF;
                     }
                 } else {
-                    unsafe {
-                        *out.get_unchecked_mut(last) = 0;
-                    }
+                    out[consumed..n].fill(0);
                 }
             }
         }

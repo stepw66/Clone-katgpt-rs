@@ -671,3 +671,290 @@ mod tests {
         assert_eq!(format!("{}", FactorizationOrder::Adaptive), "Adaptive");
     }
 }
+
+// ── T4: SR²AM Context Extension (Plan 130 T4) ──────────────────
+//
+// GOAT proofs for epiplexity-aware bandit arm selection.
+// Feature-gated on `epiplexity_bandit` = epiplexity_scoring + sr2am_configurator.
+
+#[cfg(feature = "epiplexity_bandit")]
+mod t4_bandit {
+    use katgpt_core::{ConfiguratorContext, PlanningDecision};
+    use katgpt_rs::pruners::configurator_bandit::{ConfiguratorBandit, EpiplexityArmHeuristic};
+
+    // ── ConfiguratorContext epiplexity_bin ───────────────────────
+
+    #[test]
+    fn test_context_from_entropy_epiplexity() {
+        let ctx = ConfiguratorContext::from_entropy_epiplexity(0, 0.35, 0.72);
+        assert_eq!(ctx.domain, 0);
+        assert_eq!(ctx.entropy_bin, 3); // floor(0.35 * 10) = 3
+        assert_eq!(ctx.epiplexity_bin, 7); // floor(0.72 * 10) = 7
+        assert_eq!(ctx.desperation_bin, 0); // default
+    }
+
+    #[test]
+    fn test_context_with_epiplexity_builder() {
+        let ctx = ConfiguratorContext::new(1, 5).with_epiplexity(0.83);
+        assert_eq!(ctx.domain, 1);
+        assert_eq!(ctx.entropy_bin, 5);
+        assert_eq!(ctx.epiplexity_bin, 8);
+        assert_eq!(ctx.desperation_bin, 0);
+    }
+
+    #[test]
+    fn test_context_with_epiplexity_clamp_high() {
+        let ctx = ConfiguratorContext::new(0, 0).with_epiplexity(5.0);
+        assert_eq!(ctx.epiplexity_bin, 9, "should clamp to 9");
+    }
+
+    #[test]
+    fn test_context_with_epiplexity_clamp_zero() {
+        let ctx = ConfiguratorContext::new(0, 0).with_epiplexity(0.0);
+        assert_eq!(ctx.epiplexity_bin, 0);
+    }
+
+    #[test]
+    fn test_context_with_epiplexity_negative() {
+        // Negative epiplexity = no structure, should clamp to 0
+        let ctx = ConfiguratorContext::new(0, 0).with_epiplexity(-1.0);
+        assert_eq!(ctx.epiplexity_bin, 0);
+    }
+
+    #[test]
+    fn test_epiplexity_bin_static_helper() {
+        assert_eq!(ConfiguratorContext::epiplexity_bin(0.0), 0);
+        assert_eq!(ConfiguratorContext::epiplexity_bin(0.55), 5);
+        assert_eq!(ConfiguratorContext::epiplexity_bin(0.99), 9);
+        assert_eq!(ConfiguratorContext::epiplexity_bin(10.0), 9);
+    }
+
+    #[test]
+    fn test_context_backward_compat_new_defaults_epiplexity_zero() {
+        let ctx = ConfiguratorContext::new(2, 7);
+        assert_eq!(
+            ctx.epiplexity_bin, 0,
+            "new() should default epiplexity_bin to 0"
+        );
+    }
+
+    #[test]
+    fn test_context_equality_includes_epiplexity() {
+        let ctx_a = ConfiguratorContext::new(0, 5).with_epiplexity(0.5);
+        let ctx_b = ConfiguratorContext::new(0, 5).with_epiplexity(0.5);
+        let ctx_c = ConfiguratorContext::new(0, 5).with_epiplexity(0.6);
+
+        assert_eq!(ctx_a, ctx_b, "same epiplexity_bin should be equal");
+        assert_ne!(ctx_a, ctx_c, "different epiplexity_bin should not be equal");
+    }
+
+    // ── EpiplexityArmHeuristic ─────────────────────────────────
+
+    #[test]
+    fn test_heuristic_high_structure_low_entropy_plan_extend() {
+        let decision = EpiplexityArmHeuristic::suggest(7, 2); // high S_T, low H_T
+        assert_eq!(
+            decision,
+            PlanningDecision::PlanExtend,
+            "high S_T + low H_T should suggest PlanExtend"
+        );
+    }
+
+    #[test]
+    fn test_heuristic_low_structure_high_entropy_plan_skip() {
+        let decision = EpiplexityArmHeuristic::suggest(2, 8); // low S_T, high H_T
+        assert_eq!(
+            decision,
+            PlanningDecision::PlanSkip,
+            "low S_T + high H_T should suggest PlanSkip"
+        );
+    }
+
+    #[test]
+    fn test_heuristic_high_structure_high_entropy_plan_new() {
+        let decision = EpiplexityArmHeuristic::suggest(8, 8); // high S_T, high H_T
+        assert_eq!(
+            decision,
+            PlanningDecision::PlanNew,
+            "high S_T + high H_T should suggest PlanNew"
+        );
+    }
+
+    #[test]
+    fn test_heuristic_low_structure_low_entropy_plan_skip() {
+        let decision = EpiplexityArmHeuristic::suggest(2, 2); // low S_T, low H_T
+        assert_eq!(
+            decision,
+            PlanningDecision::PlanSkip,
+            "low S_T + low H_T should suggest PlanSkip"
+        );
+    }
+
+    #[test]
+    fn test_consistency_bonus_match() {
+        let bonus = EpiplexityArmHeuristic::consistency_bonus(
+            7,                            // high S_T
+            2,                            // low H_T
+            PlanningDecision::PlanExtend, // matches heuristic
+        );
+        assert!(
+            (bonus - 0.1).abs() < 1e-6,
+            "matching arm should get 0.1 bonus, got {bonus}"
+        );
+    }
+
+    #[test]
+    fn test_consistency_bonus_mismatch() {
+        let bonus = EpiplexityArmHeuristic::consistency_bonus(
+            7,                          // high S_T
+            2,                          // low H_T
+            PlanningDecision::PlanSkip, // does NOT match heuristic (expects PlanExtend)
+        );
+        assert!(
+            (bonus - 0.0).abs() < 1e-6,
+            "mismatching arm should get 0.0 bonus, got {bonus}"
+        );
+    }
+
+    // ── select_with_epiplexity ──────────────────────────────────
+
+    #[test]
+    fn test_select_with_epiplexity_uses_heuristic_for_unvisited() {
+        let mut bandit = ConfiguratorBandit::new();
+        let ctx = ConfiguratorContext::from_entropy_epiplexity(0, 0.2, 0.8);
+        // high S_T (bin 8) + low H_T (bin 2) → PlanExtend
+
+        let decision = bandit.select_with_epiplexity(ctx);
+        assert_eq!(
+            decision,
+            PlanningDecision::PlanExtend,
+            "unvisited context should use heuristic"
+        );
+    }
+
+    #[test]
+    fn test_select_with_epiplexity_uses_ucb1_after_visit() {
+        let mut bandit = ConfiguratorBandit::new();
+        let ctx = ConfiguratorContext::from_entropy_epiplexity(0, 0.2, 0.8);
+
+        // First select uses heuristic → PlanExtend
+        let d1 = bandit.select_with_epiplexity(ctx);
+        assert_eq!(d1, PlanningDecision::PlanExtend);
+
+        // Give PlanSkip a high reward → should eventually converge to PlanSkip via UCB1
+        for _ in 0..200 {
+            let d = bandit.select_with_epiplexity(ctx);
+            let reward = match d {
+                PlanningDecision::PlanSkip => 1.0,
+                _ => 0.0,
+            };
+            bandit.update_with_epiplexity(ctx, d, reward);
+        }
+
+        let d_final = bandit.select_with_epiplexity(ctx);
+        assert_eq!(
+            d_final,
+            PlanningDecision::PlanSkip,
+            "after training, UCB1 should override heuristic"
+        );
+    }
+
+    #[test]
+    fn test_select_with_epiplexity_context_isolation() {
+        let mut bandit = ConfiguratorBandit::new();
+
+        // Two different epiplexity bins → different contexts
+        let ctx_high_s = ConfiguratorContext::from_entropy_epiplexity(0, 0.2, 0.8);
+        let ctx_low_s = ConfiguratorContext::from_entropy_epiplexity(0, 0.2, 0.1);
+
+        // Train high S_T to prefer PlanExtend
+        for _ in 0..200 {
+            let d = bandit.select_with_epiplexity(ctx_high_s);
+            let reward = match d {
+                PlanningDecision::PlanExtend => 1.0,
+                _ => 0.0,
+            };
+            bandit.update_with_epiplexity(ctx_high_s, d, reward);
+        }
+
+        // Train low S_T to prefer PlanSkip
+        for _ in 0..200 {
+            let d = bandit.select_with_epiplexity(ctx_low_s);
+            let reward = match d {
+                PlanningDecision::PlanSkip => 1.0,
+                _ => 0.0,
+            };
+            bandit.update_with_epiplexity(ctx_low_s, d, reward);
+        }
+
+        let d_high = bandit.select_with_epiplexity(ctx_high_s);
+        let d_low = bandit.select_with_epiplexity(ctx_low_s);
+
+        assert_eq!(
+            d_high,
+            PlanningDecision::PlanExtend,
+            "high S_T should prefer PlanExtend"
+        );
+        assert_eq!(
+            d_low,
+            PlanningDecision::PlanSkip,
+            "low S_T should prefer PlanSkip"
+        );
+    }
+
+    #[test]
+    fn test_update_with_epiplexity_adds_bonus() {
+        let mut bandit = ConfiguratorBandit::new();
+        let ctx = ConfiguratorContext::from_entropy_epiplexity(0, 0.2, 0.8);
+
+        // PlanExtend matches heuristic → should get bonus on top of base reward
+        bandit.update_with_epiplexity(ctx, PlanningDecision::PlanExtend, 0.5);
+        let q_extend = bandit.q_value(ctx, PlanningDecision::PlanExtend).unwrap();
+        assert_eq!(q_extend, 0.6, "0.5 reward + 0.1 consistency bonus = 0.6");
+
+        // PlanSkip does NOT match → no bonus
+        bandit.update_with_epiplexity(ctx, PlanningDecision::PlanSkip, 0.5);
+        let q_skip = bandit.q_value(ctx, PlanningDecision::PlanSkip).unwrap();
+        assert_eq!(q_skip, 0.5, "0.5 reward + 0.0 no bonus = 0.5");
+    }
+
+    #[test]
+    fn test_epiplexity_context_separate_from_entropy_only() {
+        // Same entropy bin but different epiplexity bins → separate Q-values
+        let mut bandit = ConfiguratorBandit::new();
+
+        let ctx_no_ep = ConfiguratorContext::new(0, 5); // epiplexity_bin = 0
+        let ctx_high_ep = ConfiguratorContext::new(0, 5).with_epiplexity(0.8); // epiplexity_bin = 8
+
+        // Train no-epiplexity to prefer PlanSkip
+        for _ in 0..100 {
+            let d = bandit.select(ctx_no_ep);
+            let reward = match d {
+                PlanningDecision::PlanSkip => 1.0,
+                _ => 0.0,
+            };
+            bandit.update(ctx_no_ep, d, reward);
+        }
+
+        // Train high-epiplexity to prefer PlanNew
+        for _ in 0..100 {
+            let d = bandit.select(ctx_high_ep);
+            let reward = match d {
+                PlanningDecision::PlanNew => 1.0,
+                _ => 0.0,
+            };
+            bandit.update(ctx_high_ep, d, reward);
+        }
+
+        assert_eq!(
+            bandit.select(ctx_no_ep),
+            PlanningDecision::PlanSkip,
+            "no epiplexity context should prefer PlanSkip"
+        );
+        assert_eq!(
+            bandit.select(ctx_high_ep),
+            PlanningDecision::PlanNew,
+            "high epiplexity context should prefer PlanNew"
+        );
+    }
+}

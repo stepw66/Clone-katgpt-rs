@@ -40,12 +40,15 @@ pub struct IsoQuantKVCache {
     n_layers: usize,
     /// KV dimension.
     kv_dim: usize,
+    /// Maximum sequence length.
+    #[allow(dead_code)] // capacity metadata; reset uses max_used_pos for efficiency
+    max_seq_len: usize,
+    /// Highest position ever written (for efficient reset).
+    max_used_pos: usize,
     /// Key bits per coordinate.
     key_bits: u8,
     /// Value bits per coordinate.
     val_bits: u8,
-    /// Maximum sequence length.
-    max_seq_len: usize,
     /// Rotation mode: Full (6 DOF) or Fast (3 DOF).
     mode: IsoQuantMode,
     /// Scratch: normalized input [kv_dim]. Reused across store/dequantize calls.
@@ -108,9 +111,10 @@ impl IsoQuantKVCache {
             pos: 0,
             n_layers: config.n_layers,
             kv_dim: config.kv_dim,
+            max_seq_len: config.max_seq_len,
+            max_used_pos: 0,
             key_bits: config.key_bits,
             val_bits: config.val_bits,
-            max_seq_len: config.max_seq_len,
             mode: config.mode,
             scratch_normalized: vec![0.0f32; config.kv_dim],
             scratch_rotated: vec![0.0f32; config.kv_dim],
@@ -121,6 +125,9 @@ impl IsoQuantKVCache {
     /// Quantize and store a key vector at given layer and position.
     pub fn store_key(&mut self, layer: usize, pos: usize, key: &[f32]) {
         debug_assert_eq!(key.len(), self.kv_dim);
+        if pos > self.max_used_pos {
+            self.max_used_pos = pos;
+        }
         let layer_state = &self.layers[layer];
 
         // Compute norm via SIMD (avoids scalar iteration)
@@ -163,6 +170,9 @@ impl IsoQuantKVCache {
     /// Quantize and store a value vector at given layer and position.
     pub fn store_value(&mut self, layer: usize, pos: usize, value: &[f32]) {
         debug_assert_eq!(value.len(), self.kv_dim);
+        if pos > self.max_used_pos {
+            self.max_used_pos = pos;
+        }
         let layer_state = &self.layers[layer];
 
         let norm = crate::simd::simd_sum_sq(value, value.len()).sqrt();
@@ -343,8 +353,10 @@ impl IsoQuantKVCache {
 
     /// Reset cache for new sequence.
     pub fn reset(&mut self) {
+        // Only clear positions that were actually used.
+        let limit = self.max_used_pos + 1;
         for layer in 0..self.n_layers {
-            for pos in 0..self.max_seq_len {
+            for pos in 0..limit {
                 self.key_indices[layer][pos].fill(0);
                 self.key_norms[layer][pos] = 0.0;
                 self.val_indices[layer][pos].fill(0);
@@ -352,6 +364,7 @@ impl IsoQuantKVCache {
             }
         }
         self.pos = 0;
+        self.max_used_pos = 0;
     }
 
     /// Bytes stored per token (K + V, all layers).
@@ -436,21 +449,51 @@ fn pack_indices_into(indices: &[u8], bits: u8, out: &mut [u8]) {
     match bits {
         2 => {
             out.fill(0);
-            for (i, &idx) in indices.iter().enumerate() {
-                let byte = i / 4;
-                let shift = (i % 4) * 2;
+            // Full-quad split + tail: pack 4 indices per byte per iter,
+            // eliminating per-element div/mod.
+            let n = indices.len();
+            let full_quads = n / 4;
+            for q in 0..full_quads {
+                let base = q * 4;
                 unsafe {
-                    *out.get_unchecked_mut(byte) |= (idx & 0x3) << shift;
+                    let i0 = *indices.get_unchecked(base) & 0x3;
+                    let i1 = *indices.get_unchecked(base + 1) & 0x3;
+                    let i2 = *indices.get_unchecked(base + 2) & 0x3;
+                    let i3 = *indices.get_unchecked(base + 3) & 0x3;
+                    *out.get_unchecked_mut(q) = i0 | (i1 << 2) | (i2 << 4) | (i3 << 6);
+                }
+            }
+            let remainder = n % 4;
+            if remainder > 0 {
+                let base = full_quads * 4;
+                let mut byte = 0u8;
+                for i in 0..remainder {
+                    unsafe {
+                        byte |= (*indices.get_unchecked(base + i) & 0x3) << (i * 2);
+                    }
+                }
+                unsafe {
+                    *out.get_unchecked_mut(full_quads) = byte;
                 }
             }
         }
         3 | 4 => {
             out.fill(0);
-            for (i, &idx) in indices.iter().enumerate() {
-                let byte = i / 2;
-                let shift = (i % 2) * 4;
+            // Full-pair split + tail: pack 2 indices per byte per iter.
+            let n = indices.len();
+            let full_pairs = n / 2;
+            for p in 0..full_pairs {
+                let base = p * 2;
                 unsafe {
-                    *out.get_unchecked_mut(byte) |= (idx & 0xF) << shift;
+                    let lo = *indices.get_unchecked(base) & 0xF;
+                    let hi = *indices.get_unchecked(base + 1) & 0xF;
+                    *out.get_unchecked_mut(p) = lo | (hi << 4);
+                }
+            }
+            if !n.is_multiple_of(2) {
+                unsafe {
+                    *out.get_unchecked_mut(full_pairs) =
+                        *indices.get_unchecked(n - 1) & 0xF;
                 }
             }
         }
@@ -533,32 +576,58 @@ fn unpack_indices_into(packed: &[u8], bits: u8, n: usize, out: &mut [u8]) {
     debug_assert!(out.len() >= n);
     match bits {
         2 => {
-            for i in 0..n {
-                let byte = i / 4;
-                let shift = (i % 4) * 2;
-                if byte < packed.len() {
+            // Fast path: process 4 indices per byte, only covering the bytes
+            // that actually exist in `packed`. The tail (any remainder indices
+            // whose source byte is missing) is zeroed afterward. This hoists
+            // the `byte < packed.len()` branch out of the inner loop.
+            let n_full_bytes = packed.len().min(n / 4);
+            for q in 0..n_full_bytes {
+                let base = q * 4;
+                unsafe {
+                    let b = *packed.get_unchecked(q);
+                    *out.get_unchecked_mut(base) = b & 0x3;
+                    *out.get_unchecked_mut(base + 1) = (b >> 2) & 0x3;
+                    *out.get_unchecked_mut(base + 2) = (b >> 4) & 0x3;
+                    *out.get_unchecked_mut(base + 3) = (b >> 6) & 0x3;
+                }
+            }
+            // Tail: indices beyond the last available full byte.
+            let consumed = n_full_bytes * 4;
+            if consumed < n {
+                if n_full_bytes < packed.len() {
+                    let base = consumed;
+                    let remainder = n - consumed;
                     unsafe {
-                        *out.get_unchecked_mut(i) = (*packed.get_unchecked(byte) >> shift) & 0x3;
+                        let b = *packed.get_unchecked(n_full_bytes);
+                        for i in 0..remainder {
+                            *out.get_unchecked_mut(base + i) = (b >> (i * 2)) & 0x3;
+                        }
                     }
                 } else {
-                    unsafe {
-                        *out.get_unchecked_mut(i) = 0;
-                    }
+                    out[consumed..n].fill(0);
                 }
             }
         }
         3 | 4 => {
-            for i in 0..n {
-                let byte = i / 2;
-                let shift = (i % 2) * 4;
-                if byte < packed.len() {
+            // Fast path: 2 indices per byte; tail handles the remainder.
+            let n_full_bytes = packed.len().min(n / 2);
+            for p in 0..n_full_bytes {
+                let base = p * 2;
+                unsafe {
+                    let b = *packed.get_unchecked(p);
+                    *out.get_unchecked_mut(base) = b & 0xF;
+                    *out.get_unchecked_mut(base + 1) = (b >> 4) & 0xF;
+                }
+            }
+            let consumed = n_full_bytes * 2;
+            if consumed < n {
+                if n_full_bytes < packed.len() {
                     unsafe {
-                        *out.get_unchecked_mut(i) = (*packed.get_unchecked(byte) >> shift) & 0xF;
+                        *out.get_unchecked_mut(consumed) =
+                            *packed.get_unchecked(n_full_bytes) & 0xF;
                     }
                 } else {
-                    unsafe {
-                        *out.get_unchecked_mut(i) = 0;
-                    }
+                    out[consumed..n].fill(0);
                 }
             }
         }

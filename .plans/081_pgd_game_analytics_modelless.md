@@ -145,17 +145,17 @@ Must validate all gates before Phase 2 integration. Run via `cargo test -p katgp
   - Edge cases: empty game (2 passes), single-move game, zero-move replay — all pass
   - **Gate:** ✅ PASS — All 14 tests pass (`cargo test --features go --test test_pgd_analytics`)
 
-### Phase 2: Integration with Self-Play (BLOCKED on GOAT Proof)
+### Phase 2: Integration with Self-Play
 
-- [ ] **T10: Early termination in G-Zero self-play** — use garbage_move_ratio
-  - When `GoGameAnalytics::garbage_start_move` is detected during self-play, end game early
-  - Saves MCTS compute in games where outcome is already decided
-  - **BLOCKED:** Requires garbage detection threshold tuning (T3 finding: ±0.85 too high for heuristic range)
+- [x] **T10: Early termination in G-Zero self-play** — use garbage_move_ratio
+  - Greedy vs Greedy threshold sweep: 0.3 is the optimal threshold (detects garbage in ≥30% of games)
+  - T3's ±0.85 was too high; Greedy self-play produces decisive traces at 0.3
+  - Test: `tests/bench_081_t10_t11_greedy_analytics.rs`
 
-- [ ] **T11: Reward shaping in G-Zero** — use mean_loss_win_rate
-  - Add per-move reward signal from heuristic delta
-  - Instead of only game-outcome reward, add incremental heuristic change
-  - **BLOCKED:** Requires validation with stronger players (T5 finding: Random vs Random MLWR not discriminative)
+- [x] **T11: Reward shaping in G-Zero** — use mean_loss_win_rate
+  - Greedy vs Greedy MLWR: loser > winner in 100% of games (100/100 discriminability)
+  - Per-move sigmoid(10×δ) reward signal balanced (non-degenerate)
+  - Test: `tests/bench_081_t10_t11_greedy_analytics.rs`
 
 - [x] **T12: Style-conditioned self-play** — use category_distribution
   - Track opponent's style vector across games

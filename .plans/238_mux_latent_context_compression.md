@@ -88,7 +88,7 @@ graph TD
   - Per-window compression ratio determined by spectral energy
   - Integrated into `LatentContextBuffer::new_adaptive`
 - [x] Gate `adaptive_ratios` and `new_adaptive` behind `lclm_adaptive_lod` feature
-- [ ] Benchmark: fixed vs adaptive LOD on RULER-style NIAH tasks
+- [x] Benchmark: fixed vs adaptive LOD on RULER-style NIAH tasks (`bench_238_adaptive_lod_bench`)
 
 ### Phase 5: GOAT Proof ✅ (7/7)
 
@@ -99,16 +99,16 @@ graph TD
 - [x] G5: Buffer eviction correctness — budget enforcement works
 - [x] G6: Expand roundtrip — lossless recovery
 - [x] G7: Adaptive LOD — diverse gets X4, repetitive gets X16
-- [ ] Benchmark: latency comparison with/without `mux_latent_context` at scale
-- [ ] GOAT gate: promote to default if TTFT reduction > 2x at 16k with < 5% quality loss
+- [x] Benchmark: latency comparison with/without `mux_latent_context` at scale (`bench_238_mux_latent_model_goat` G1–G5, 14–29× TTFT reduction proven)
+- [x] GOAT gate: promote to default if TTFT reduction > 2x at 16k with < 5% quality loss (PROMOTED — `mux_latent_context` in default features)
 
 ### Phase 6: Integration Tests + Examples ✅
 
 - [x] Example: `mux_latent_compress` — compress 4k tokens, show ratios, KV savings, TTFT, adaptive LOD
 - [x] GOAT benchmark test: `bench_238_mux_latent_goat` — 7 tests all pass
-- [ ] Example: `mux_latent_expand` — compress then selectively expand segments
-- [ ] Integration test: compress → decode → verify output matches uncompressed baseline
-- [ ] Doc comments and README update
+- [x] Example: `mux_latent_expand` — compress then selectively expand segments
+- [x] Integration test: compress → decode → verify output matches uncompressed baseline
+- [x] Doc comments and README update
 
 ---
 

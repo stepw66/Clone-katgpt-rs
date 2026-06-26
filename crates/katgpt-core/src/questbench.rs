@@ -463,10 +463,13 @@ pub fn find_sufficient_set(
         &mut valid_buf[..check_limit],
     );
 
-    // Pre-allocate counts with capacity up to vocab_size (bounded by limit).
-    // Single pass: filter valid tokens AND compute extension counts, avoiding
-    // an intermediate Vec<usize> allocation.
-    let mut counts: Vec<(usize, usize)> = Vec::with_capacity(limit);
+    // Pre-allocate counts on the stack — limit ≤ 256 so 256 * 16B = 4 KB,
+    // well within typical stack budgets. Avoids the per-call Vec allocation
+    // that was previously here, and matches the pattern used by `valid_buf`,
+    // `batch_buf`, and `relevance_buf` elsewhere in this function.
+    const COUNTS_CAP: usize = 256;
+    let mut counts_stack: [(usize, usize); COUNTS_CAP] = [(0, 0); COUNTS_CAP];
+    let mut n_counts: usize = 0;
     for (tok, &valid) in valid_buf.iter().enumerate().take(check_limit) {
         if !valid {
             continue;
@@ -480,15 +483,16 @@ pub fn find_sufficient_set(
             &CANDIDATE_INDICES[..limit],
             &mut batch_buf[..limit],
         );
-        counts.push((tok, count));
+        counts_stack[n_counts] = (tok, count);
+        n_counts += 1;
     }
 
     // Sort by pre-computed counts (ascending = tighter constraints first)
-    counts.sort_by_key(|&(_, count)| count);
+    counts_stack[..n_counts].sort_by_key(|&(_, count)| count);
 
     let mut relevance_buf = [0.0f32; 256];
 
-    for &(tok, _) in counts.iter().take(max_search_depth) {
+    for &(tok, _) in counts_stack[..n_counts].iter().take(max_search_depth) {
         ext_buf[base_len] = tok; // Overwrite only the candidate slot (avoids clear + extend)
         score_relevance_into(pruner, depth + 1, &ext_buf, vocab_size, &mut relevance_buf);
         let score = underspecification_score(&relevance_buf[..limit]);
@@ -603,8 +607,8 @@ fn score_relevance(
 
 /// Decision from underspecification score for planning.
 /// Maps to `PlanningDecision` in types.rs but lives here to avoid circular deps.
-#[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
 pub enum QuestBenchDecision {
     PlanNew,
     PlanExtend,
@@ -625,8 +629,8 @@ impl QuestBenchDecision {
 // ── T5: Four-Tier trigger ───────────────────────────────────────
 
 /// Which memory tier to consult based on underspecification score.
-#[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
 pub enum MemoryTier {
     Hot,    // CPU SIMD — standard decode
     Warm,   // HLA KG — O(1) relation lookup
@@ -653,21 +657,21 @@ pub fn tier_from_score(score: f32, config: &UnderspecConfig) -> MemoryTier {
 pub struct SyntheticCsp {
     /// The pruner that encodes the CSP constraints.
     pub pruner: Box<dyn crate::traits::ConstraintPruner>,
-    /// Depth at which the CSP is posed.
-    pub depth: usize,
-    /// Total vocabulary/domain size.
-    pub vocab_size: usize,
     /// Human-readable label for the CSP domain.
     pub label: String,
     /// Tokens already placed (known facts).
     pub placed_tokens: Vec<usize>,
     /// The ground-truth sufficient token(s).
     pub sufficient_answers: Vec<usize>,
+    /// Depth at which the CSP is posed.
+    pub depth: usize,
+    /// Total vocabulary/domain size.
+    pub vocab_size: usize,
 }
 
 /// Domain kind for synthetic CSP generation.
-#[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
 pub enum CspDomain {
     /// Grid-based (Bomber-like): adjacency constraints on a 2D grid.
     Grid,
@@ -748,11 +752,8 @@ pub fn generate_synthetic_csps(count_per_domain: usize) -> Vec<SyntheticCsp> {
     let mut label_buf = String::with_capacity(16);
 
     // Grid CSPs (Bomber-like): placing the "bomb" cell narrows explosion zone
-    // Pre-allocate constant structures once — all grid CSPs share the same
-    // valid_at_depth (all-true) and base narrowing structure (empty vecs).
     let grid_vocab = 16;
-    let grid_valid: Vec<bool> = vec![true; grid_vocab];
-    let mut adjacent_buf = vec![false; grid_vocab];
+    let mut adjacent_buf = [false; 16];
     for i in 0..count_per_domain {
         let vocab_size = grid_vocab;
         let key = i % vocab_size;
@@ -771,32 +772,33 @@ pub fn generate_synthetic_csps(count_per_domain: usize) -> Vec<SyntheticCsp> {
         // Build narrowing directly — only the key slot is non-empty, avoiding
         // cloning 16 empty Vecs from grid_base_narrowing.
         let mut narrowing: Vec<Vec<bool>> = (0..vocab_size).map(|_| Vec::new()).collect();
-        narrowing[key] = adjacent_buf.clone();
+        narrowing[key] = adjacent_buf.to_vec();
         let pruner = NarrowingPruner {
             _vocab_size: vocab_size,
-            valid_at_depth: grid_valid.clone(),
+            valid_at_depth: vec![true; grid_vocab],
             narrowing,
         };
         // OPT: reuse label_buf instead of format!() per iteration
         label_buf.clear();
-        core::fmt::write(&mut label_buf, format_args!("grid_{i}")).unwrap();
+        // Writing to String is infallible, but handle the Result explicitly.
+        if core::fmt::write(&mut label_buf, format_args!("grid_{i}")).is_err() {
+            label_buf = format!("grid_{i}");
+        }
         csps.push(SyntheticCsp {
             pruner: Box::new(pruner),
-            depth: 0,
-            vocab_size,
             label: label_buf.clone(),
             placed_tokens: vec![],
             sufficient_answers: vec![key],
+            depth: 0,
+            vocab_size,
         });
     }
 
     // Stone CSPs (Go-like): placing a "capture" stone eliminates liberties
-    // Pre-compute the wide bitmap once (identical for all stone CSPs)
     let stone_vocab = 12;
-    let stone_valid: Vec<bool> = vec![true; stone_vocab];
     let wide_next_bm: Vec<bool> = (0..stone_vocab).map(|c| c % 3 == 0).collect();
     // Pre-allocate reusable scratch for narrow bitmap
-    let mut narrow_bm_scratch = vec![false; stone_vocab];
+    let mut narrow_bm_scratch = [false; 12];
 
     for i in 0..count_per_domain {
         let vocab_size = stone_vocab; // smaller board for tighter constraints
@@ -810,7 +812,7 @@ pub fn generate_synthetic_csps(count_per_domain: usize) -> Vec<SyntheticCsp> {
         let mut narrowing: Vec<Vec<bool>> = Vec::with_capacity(vocab_size);
         for j in 0..vocab_size {
             if j == key {
-                narrowing.push(narrow_bm_scratch.clone());
+                narrowing.push(narrow_bm_scratch.to_vec());
             } else {
                 // Clone the shared wide bitmap instead of the base narrowing's empty vec
                 // (wide_next_bm is identical for all non-key slots)
@@ -819,27 +821,28 @@ pub fn generate_synthetic_csps(count_per_domain: usize) -> Vec<SyntheticCsp> {
         }
         let pruner = NarrowingPruner {
             _vocab_size: vocab_size,
-            valid_at_depth: stone_valid.clone(),
+            valid_at_depth: vec![true; stone_vocab],
             narrowing,
         };
         // OPT: reuse label_buf instead of format!() per iteration
         label_buf.clear();
-        core::fmt::write(&mut label_buf, format_args!("stone_{i}")).unwrap();
+        if core::fmt::write(&mut label_buf, format_args!("stone_{i}")).is_err() {
+            label_buf = format!("stone_{i}");
+        }
         csps.push(SyntheticCsp {
             pruner: Box::new(pruner),
-            depth: 0,
-            vocab_size,
             label: label_buf.clone(),
             placed_tokens: vec![],
             sufficient_answers: vec![key],
+            depth: 0,
+            vocab_size,
         });
     }
 
     // Logic CSPs (propositional): XOR constraints where revealing one variable
     // determines the other
     let logic_vocab = 8;
-    let logic_valid: Vec<bool> = vec![true; logic_vocab];
-    let mut logic_bm_scratch = vec![false; logic_vocab];
+    let mut logic_bm_scratch = [false; 8];
 
     for i in 0..count_per_domain {
         let vocab_size = logic_vocab;
@@ -851,22 +854,24 @@ pub fn generate_synthetic_csps(count_per_domain: usize) -> Vec<SyntheticCsp> {
         logic_bm_scratch[partner] = true;
         // Build narrowing directly — only the key slot is non-empty.
         let mut narrowing: Vec<Vec<bool>> = (0..vocab_size).map(|_| Vec::new()).collect();
-        narrowing[key] = logic_bm_scratch.clone();
+        narrowing[key] = logic_bm_scratch.to_vec();
         let pruner = NarrowingPruner {
             _vocab_size: vocab_size,
-            valid_at_depth: logic_valid.clone(),
+            valid_at_depth: vec![true; logic_vocab],
             narrowing,
         };
         // OPT: reuse label_buf instead of format!() per iteration
         label_buf.clear();
-        core::fmt::write(&mut label_buf, format_args!("logic_{i}")).unwrap();
+        if core::fmt::write(&mut label_buf, format_args!("logic_{i}")).is_err() {
+            label_buf = format!("logic_{i}");
+        }
         csps.push(SyntheticCsp {
             pruner: Box::new(pruner),
-            depth: 0,
-            vocab_size,
             label: label_buf.clone(),
             placed_tokens: vec![],
             sufficient_answers: vec![key],
+            depth: 0,
+            vocab_size,
         });
     }
 

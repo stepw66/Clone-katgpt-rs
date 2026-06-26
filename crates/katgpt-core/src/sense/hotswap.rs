@@ -20,7 +20,7 @@ pub struct SenseHotSwap {
 impl SenseHotSwap {
     pub fn new(kinds: &[SenseKind]) -> Self {
         let mut slots: [Option<(AtomicPtr<SenseModule>, AtomicBool)>; SENSE_KIND_COUNT] =
-            [None, None, None, None, None, None, None, None];
+            [const { None }; SENSE_KIND_COUNT];
         for &kind in kinds {
             let idx = kind as usize;
             if idx < SENSE_KIND_COUNT {

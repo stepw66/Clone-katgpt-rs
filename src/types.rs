@@ -30,6 +30,20 @@ pub trait QuantizedKVCache {
     fn pos(&self) -> usize;
     /// Set the current write position.
     fn set_pos(&mut self, pos: usize);
+
+    /// Compact the KV cache into a smaller representation.
+    ///
+    /// Default implementation returns an error — only meaningful when the
+    /// `still_kv` feature is enabled and the concrete cache type supports
+    /// compaction.
+    #[cfg(feature = "still_kv")]
+    fn compact_into(
+        &mut self,
+        _budget: usize,
+        _strategy: crate::still_kv::CompactionStrategy,
+    ) -> Result<crate::still_kv::CompactKVCache, String> {
+        Err("compact_into not supported by this cache type".to_string())
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -132,6 +146,10 @@ pub fn top_p_coreset(
     debug_assert_eq!(scratch_sorted.len(), n);
     debug_assert_eq!(mask.len(), n);
 
+    // Pre-initialize mask to all false up front. This makes the selection loop
+    // branch-free for the unselected tail — no second pass needed after break.
+    mask.fill(false);
+
     // Initialize indices
     for (i, idx) in scratch_indices.iter_mut().enumerate() {
         *idx = i;
@@ -149,24 +167,20 @@ pub fn top_p_coreset(
 
     if total <= 0.0 {
         // Degenerate: select all
-        for m in mask.iter_mut() {
-            *m = true;
-        }
+        mask.fill(true);
         return n;
     }
 
+    // Normalize once outside the loop (avoid repeated division).
+    let inv_total = 1.0 / total;
     let mut cumsum = 0.0f32;
     let mut selected = 0usize;
-    for (rank, &idx) in scratch_indices.iter().enumerate() {
-        let prob = scores[idx].max(0.0) / total;
+    for &idx in scratch_indices.iter() {
+        let prob = scores[idx].max(0.0) * inv_total;
         cumsum += prob;
         mask[idx] = true;
         selected += 1;
         if cumsum >= p {
-            // Fill remaining with false
-            for &remaining_idx in &scratch_indices[rank + 1..] {
-                mask[remaining_idx] = false;
-            }
             break;
         }
     }

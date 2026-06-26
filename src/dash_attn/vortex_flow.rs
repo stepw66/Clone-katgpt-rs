@@ -4,14 +4,40 @@
 //! 1. `forward_cache` — query-independent cache update when KV blocks are appended
 //! 2. `forward_indexer` — query-dependent block selection during decode
 //!
+//! # Available Routers
+//!
+//! | Router | Feature Gate | Scoring Strategy |
+//! |--------|-------------|------------------|
+//! | `BlockTopKRouter` | `vortex_flow` | mean-key centroid · query dot-product |
+//! | `EntmaxRouter` | `vortex_flow` | α-entmax sparsified scoring |
+//! | `ValueEnergyRouter` | `vortex_flow` | centroid · query gated by ‖value‖ |
+//! | `ChannelAwareRouter` | `vortex_flow` | SIMD-optimized critical-channel routing |
+//! | `MetaRouter` | `vortex_flow` | bandit-selected policy over multiple routers |
+//! | `MaxPoolBlockScorer` | `msa_sparse` | max(Q·K) per block instead of centroid (MSA Plan 256) |
+//! | `MaxStdDevBlockScorer` | `msa_sparse` | max(Q·K) × sigmoid(σ_k) — diversity-gated (MSA Plan 256) |
+//! | `PerGroupTopKRouter` | `msa_per_group` | independent top-k per GQA group (MSA Plan 256) |
+//! | `AdaptiveKRouter<R>` | `msa_adaptive_k` | variance-driven k budget via sigmoid gate (MSA Plan 256) |
+//! | `KvOuterPrefill` | `msa_kv_outer` | reverse-index sparse prefill (MSA Plan 256) |
+//!
+//! # MSA Plan 256 GOAT Status
+//!
+//! The `msa_sparse` family is **opt-in** (not default). All Phase 2 micro-benchmarks
+//! failed their GOAT gates — see `.plans/256_msa_blockwise_sparse_distillation.md`.
+//! Each technique has a narrow winning regime but does not beat the baseline
+//! broadly enough to promote to default.
+//!
 //! Feature gate: `vortex_flow` (Plan 196, Phase 1, default-OFF).
 
 use std::fmt::Debug;
 
+#[cfg(feature = "msa_per_group")]
+use super::block_topk::PerGroupTopKRouter;
 use super::block_topk::{BlockTopKCache, BlockTopKRouter};
 use super::channel_aware::{ChannelAwareCache, ChannelAwareRouter};
 use super::entmax_router::{EntmaxCache, EntmaxRouter};
 use super::meta_router::{DynPolicy, DynRoutingCache, MetaRouter};
+#[cfg(feature = "msa_sparse")]
+use super::msa_distill::{MaxPoolBlockScorer, MaxStdDevBlockScorer, MsaBlockCache};
 use super::value_energy::{ValueEnergyCache, ValueEnergyRouter};
 
 // ---------------------------------------------------------------------------
@@ -92,6 +118,15 @@ pub enum VortexFlowConfig {
     ChannelAware,
     /// Use MetaRouter (bandit-based policy selection).
     Meta,
+    /// Use MSA MaxPoolBlockScorer (max Q·K per block, exp-free top-k).
+    #[cfg(feature = "msa_sparse")]
+    MsaMaxPool,
+    /// Use MSA MaxStdDevBlockScorer (max Q·K × sigmoid(std_dev)).
+    #[cfg(feature = "msa_sparse")]
+    MsaMaxStdDev,
+    /// Use PerGroupTopKRouter — independent top-k per GQA group.
+    #[cfg(feature = "msa_per_group")]
+    MsaPerGroup { n_groups: usize },
 }
 
 // ---------------------------------------------------------------------------
@@ -143,6 +178,15 @@ pub enum VortexRouter {
     ChannelAware(ChannelAwareRouter),
     /// Meta-router (bandit-based policy selection over multiple routers).
     Meta(Box<MetaRouter>),
+    /// MSA MaxPool block scorer (max Q·K per block).
+    #[cfg(feature = "msa_sparse")]
+    MsaMaxPool(MaxPoolBlockScorer),
+    /// MSA MaxStdDev block scorer (max Q·K × sigmoid(std_dev)).
+    #[cfg(feature = "msa_sparse")]
+    MsaMaxStdDev(MaxStdDevBlockScorer),
+    /// Per-GQA-group independent top-k router.
+    #[cfg(feature = "msa_per_group")]
+    MsaPerGroup(PerGroupTopKRouter),
 }
 
 /// Cache storage for [`VortexRouter`] — mirrors the enum variants.
@@ -158,6 +202,15 @@ pub enum VortexRouterCache {
     ChannelAware(ChannelAwareCache),
     /// Meta-router cache (dynamic routing cache).
     Meta(DynRoutingCache),
+    /// MSA MaxPool cache.
+    #[cfg(feature = "msa_sparse")]
+    MsaMaxPool(MsaBlockCache),
+    /// MSA MaxStdDev cache.
+    #[cfg(feature = "msa_sparse")]
+    MsaMaxStdDev(MsaBlockCache),
+    /// Per-GQA-group cache (shares BlockTopKCache).
+    #[cfg(feature = "msa_per_group")]
+    MsaPerGroup(BlockTopKCache),
 }
 
 impl VortexRouterCache {
@@ -169,6 +222,12 @@ impl VortexRouterCache {
             Self::ValueEnergy(c) => c.n_blocks,
             Self::ChannelAware(c) => c.n_blocks,
             Self::Meta(c) => c.n_blocks(),
+            #[cfg(feature = "msa_sparse")]
+            Self::MsaMaxPool(c) => c.n_blocks,
+            #[cfg(feature = "msa_sparse")]
+            Self::MsaMaxStdDev(c) => c.n_blocks,
+            #[cfg(feature = "msa_per_group")]
+            Self::MsaPerGroup(c) => c.n_blocks,
         }
     }
 }
@@ -186,6 +245,14 @@ impl VortexRouter {
                 DynPolicy::Entmax(EntmaxRouter::default_router()),
                 DynPolicy::ValueEnergy(ValueEnergyRouter::new(true)),
             ]))),
+            #[cfg(feature = "msa_sparse")]
+            VortexFlowConfig::MsaMaxPool => Self::MsaMaxPool(MaxPoolBlockScorer::new(128)),
+            #[cfg(feature = "msa_sparse")]
+            VortexFlowConfig::MsaMaxStdDev => Self::MsaMaxStdDev(MaxStdDevBlockScorer::new(128)),
+            #[cfg(feature = "msa_per_group")]
+            VortexFlowConfig::MsaPerGroup { n_groups } => {
+                Self::MsaPerGroup(PerGroupTopKRouter::new(true, n_groups))
+            }
             VortexFlowConfig::DashAttn => {
                 unreachable!("DashAttn does not produce a VortexRouter; check is_vortex() first")
             }
@@ -220,6 +287,18 @@ impl VortexFlow for VortexRouter {
             (Self::Meta(r), VortexRouterCache::Meta(c)) => {
                 r.forward_cache(c, keys, values, block_idx, head_dim)
             }
+            #[cfg(feature = "msa_sparse")]
+            (Self::MsaMaxPool(r), VortexRouterCache::MsaMaxPool(c)) => {
+                r.forward_cache(c, keys, values, block_idx, head_dim)
+            }
+            #[cfg(feature = "msa_sparse")]
+            (Self::MsaMaxStdDev(r), VortexRouterCache::MsaMaxStdDev(c)) => {
+                r.forward_cache(c, keys, values, block_idx, head_dim)
+            }
+            #[cfg(feature = "msa_per_group")]
+            (Self::MsaPerGroup(r), VortexRouterCache::MsaPerGroup(c)) => {
+                r.forward_cache(c, keys, values, block_idx, head_dim)
+            }
             _ => panic!("VortexRouter/Cache variant mismatch"),
         }
     }
@@ -248,6 +327,18 @@ impl VortexFlow for VortexRouter {
             (Self::Meta(r), VortexRouterCache::Meta(c)) => {
                 r.forward_indexer(query, c, n_blocks, top_k, scratch)
             }
+            #[cfg(feature = "msa_sparse")]
+            (Self::MsaMaxPool(r), VortexRouterCache::MsaMaxPool(c)) => {
+                r.forward_indexer(query, c, n_blocks, top_k, scratch)
+            }
+            #[cfg(feature = "msa_sparse")]
+            (Self::MsaMaxStdDev(r), VortexRouterCache::MsaMaxStdDev(c)) => {
+                r.forward_indexer(query, c, n_blocks, top_k, scratch)
+            }
+            #[cfg(feature = "msa_per_group")]
+            (Self::MsaPerGroup(r), VortexRouterCache::MsaPerGroup(c)) => {
+                r.forward_indexer(query, c, n_blocks, top_k, scratch)
+            }
             _ => panic!("VortexRouter/Cache variant mismatch"),
         }
     }
@@ -265,6 +356,18 @@ impl VortexFlow for VortexRouter {
                 VortexRouterCache::ChannelAware(r.cache_new(n_blocks_capacity, head_dim))
             }
             Self::Meta(r) => VortexRouterCache::Meta(r.cache_new(n_blocks_capacity, head_dim)),
+            #[cfg(feature = "msa_sparse")]
+            Self::MsaMaxPool(r) => {
+                VortexRouterCache::MsaMaxPool(r.cache_new(n_blocks_capacity, head_dim))
+            }
+            #[cfg(feature = "msa_sparse")]
+            Self::MsaMaxStdDev(r) => {
+                VortexRouterCache::MsaMaxStdDev(r.cache_new(n_blocks_capacity, head_dim))
+            }
+            #[cfg(feature = "msa_per_group")]
+            Self::MsaPerGroup(r) => {
+                VortexRouterCache::MsaPerGroup(r.cache_new(n_blocks_capacity, head_dim))
+            }
         }
     }
 }

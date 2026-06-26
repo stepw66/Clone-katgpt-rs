@@ -1,0 +1,154 @@
+# Plan 326: Tucker / HOSVD Tensor Factorization
+
+**Date:** 2026-06-25
+**Research:** [katgpt-rs/.research/307_FNO_Practical_Perspective_Spectral_Primitives_Survey.md](../.research/307_FNO_Practical_Perspective_Spectral_Primitives_Survey.md) (§3 candidate plan #3)
+**Source paper:** [arXiv:2511.05963](https://arxiv.org/abs/2511.05963) — Duruisseaux, Kossaffi, Anandkumar, *Fourier Neural Operators: A Practical Perspective* (Caltech + NVIDIA, Nov 2025)
+**Target:** `katgpt-rs/crates/katgpt-core/src/linalg/tucker.rs` (open primitive) + `riir-neuron-db/src/shard_compactor.rs` (integration), Cargo feature `tucker_factorization`
+**Status:** Active — Phase 1 implementation
+
+---
+
+## Goal
+
+Ship the **N-mode generalization of `thin_svd_into`** — HOSVD (Higher-Order SVD) / Tucker decomposition — as a generic open primitive in `katgpt-rs`, then wire it into the `riir-neuron-db` `ShardCompactor` as an alternative cold-tier compaction path that compactly stores a *batch* of `NeuronShard`s via a low-rank core tensor + factor matrices.
+
+This is the third and last Gain-tier candidate plan from Research 307 (FNO practical-perspective survey). The headline FNO inference primitive (resolution-invariant spectral transport) already ships as our Super-GOAT `cross_resolution_transport` (Research 291 / Plan 310, DEFAULT-ON); this plan closes the only remaining FNO-derived modelless gap.
+
+**Why Tucker for shards:** the existing `ShardCompactor::compact` uses Attention-Matching (AM, Plan 233), which produces `M < N` *output shards* (row-subsampled + fit). Tucker produces a *factorized representation* of the whole batch `(N, 8, 8)` — a small core `(r_N, r_R, r_C)` plus three factor matrices. Compression wins when `N` is large:
+
+| Path | Output | Compression | Use case |
+|------|--------|-------------|----------|
+| `compact` (AM) | `M` shards × 64 floats | N/M ratio | Live Hot/Warm tier — produce fewer, representative shards |
+| `compact_tucker` (new) | core `(r_N·r_R·r_C)` + 3 factors | depends on ranks | Cold-tier archival — store a whole zone's shard set as one factored tensor |
+
+For a zone with N=64 shards reshaped `(64, 8, 8)` and ranks `(8, 4, 4)`: original = 4096 floats, Tucker = 128 (core) + 3·(64·8 + 8·4 + 8·4) = 128 + 1664 = 1792 floats → **2.3× compression** (lossy within the truncation budget). **⚠ NOTE: this N=64 example is currently impossible** — the implementation caps at `MAX_SHARDS_PER_TUCKER = SVD_MAX_RANK = 16` (see the SVD limit note below). It would require chunking into ≥5 envelopes, whose per-envelope factor overhead is NOT included in this 2.3× figure. The example is retained as the asymptotic rationale; the T2.7 bench is the only empirically validated range (N ≤ 16, where AM-deep wins on raw floats). The AM path cannot achieve factorized compression because it always produces `Vec<NeuronShard>` — one Pod per output — paying the 64-float overhead per shard.
+
+**Modelless:** pure closed-form linear algebra — mode-n unfoldings + thin SVD + tensor-times-matrix contractions. No gradient descent, no learned weights, no training. Promotable to default-on if the GOAT gate passes.
+
+## Consumer / adoption status (honest)
+
+> **As of 2026-06-25: ZERO production consumers.** `compact_tucker` is called
+> only by its own test suite and the T2.7 crossover bench. No code in
+> riir-neuron-db, riir-ai, riir-chain, or any other repo calls it.
+
+This plan's primary motivation is **research-driven** (close the last FNO-derived
+modelless gap per Research 307), NOT consumer-driven. The "Cold-tier archival"
+framing above is **speculative** — it describes a plausible use case, not a
+validated one. No downstream tier-management, replay, or audit code path
+actually invokes Tucker compaction.
+
+**Adoption criteria (what would make this real):** a downstream consumer must
+validate that fidelity-preserving batch archival (rel-Frob ~1e-6, vs AM's lossy
+~1.0 reduction) is worth the integration cost. Candidate consumers that *would*
+justify Tucker, if/when they exist:
+
+- **Cold-tier replay/audit** — a path that archives a zone's shard batch and must
+  later reconstruct it bit-faithfully (for deterministic replay, regulatory
+  audit, or warm-reload to exact state). AM cannot do this at any ratio; Tucker
+  can. No such path exists yet.
+- **Cross-zone batch transfer** — shipping one factored envelope instead of N
+  Pods over the wire. Speculative; no transfer code uses this.
+
+**Known limitation the original Goal example ignored:** the Goal cites N=64
+shards → 2.3× compression, but the implementation caps at `MAX_SHARDS_PER_TUCKER
+= SVD_MAX_RANK = 16`. N=64 requires chunking into ≥5 envelopes, and the
+per-envelope factor overhead invalidates the 2.3× math. The T2.7 bench
+(N ∈ {4,8,16}) is the only empirically validated range; at those sizes AM-deep
+(0.1) beats Tucker on raw floats at every cell. Tucker's storage advantage, if
+any, is unproven for N > 16.
+
+**Why it shipped anyway:** the katgpt-core *primitive* (generic N-mode HOSVD)
+has independent value as a linear-algebra building block and is correctly
+DEFAULT-ON there (G1–G4 pass, pure math). The riir-neuron-db *integration*
+(`compact_tucker`) is the speculative part — it stays OPT-IN until a consumer
+materializes. If none does within a reasonable soak window, the integration
+should be considered for removal (the primitive in katgpt-core stays).
+
+**Tracked in:** [`riir-neuron-db/issues/002_compact_tucker_consumer_adoption_or_removal.md`](../../riir-neuron-db/issues/002_compact_tucker_consumer_adoption_or_removal.md) — 30-day soak window (re-evaluate 2026-07-25). The decision is binary: either a production consumer PR lands (integration stays opt-in), or the integration is removed (the `katgpt-core` primitive stays default-on regardless).
+
+---
+
+## Phase 1 — Open Primitive (katgpt-rs)
+
+### Goal
+
+Generic HOSVD on flat `&[f32]` + shape descriptor. Pure numeric, no shard/chain/game semantics. Reuses `thin_svd_into` from `subspace_phase_gate` — does NOT reimplement SVD.
+
+### Tasks
+
+- [x] **T1.1** Create `crates/katgpt-core/src/linalg/tucker.rs` with module doc + feature gating
+- [x] **T1.2** Implement `TuckerConfig` — inline-array shape/ranks (`[usize; MAX_MODES]` + len, no `smallvec` dep) + validation (ranks ≤ shape per mode, ≥1 mode, ≤4 modes)
+- [x] **T1.3** Implement `TuckerScratch` — pre-allocated buffers for: per-mode unfolding matrix (sized for max `(I_n, prod(I_others))`), `SvdScratch` + `SvdResultScratch` (reuse from subspace_phase_gate), core assembly workspace
+- [x] **T1.4** Implement mode-n unfolding: `unfold_into(tensor, shape, mode, out: &mut [f32])` — row-major `I_n × prod(other)` matrix
+- [x] **T1.5** Implement `tucker_decompose_into(tensor, cfg, scratch) -> &TuckerResultScratch`: per-mode unfold → `thin_svd_into` → top-`r_n` cols of U^(n) → store factor; core = `X ×_1 U^(1)^T ×_2 U^(2)^T × … ×_N U^(N)^T`
+- [x] **T1.6** Implement `tucker_reconstruct_into(core, factors, shape, out: &mut [f32])` — inverse `X̃ = S ×_1 U^(1) ×_2 U^(2) × … ×_N U^(N)`
+- [x] **T1.7** Implement `TuckerResultScratch` (SOA, hot-path) + `TuckerResult::from_scratch` convenience (owned)
+- [x] **T1.8** Add `tucker_factorization = ["subspace_phase_gate"]` to `Cargo.toml` features (initially OFF)
+- [x] **T1.9** Register `pub mod tucker;` in `linalg/mod.rs` + re-exports in `lib.rs`
+- [x] **T1.10** Unit tests: known-rank tensor recovery, orthogonality of factors, core energy bound, reconstruction error monotonic in ranks (25 tests, all PASS)
+
+### Phase 1 GOAT gate
+
+- [x] **T1.G1** Reconstruction quality: synthetic rank-`(2,2,2)` tensor, HOSVD with ranks=r → reconstruction rel error `< 1e-4` — **PASS via unit test `hosvd_low_rank_recovers_exact_low_rank_tensor`**
+- [x] **T1.G2** Perf: `(8, 8, 8)` decompose + reconstruct mean latency ≤ 500µs — **PASS**: empirically verified **73.89µs** (1000 iters, release, direct binary launch). See `.benchmarks/326_tucker_hosvd_goat.md`.
+- [x] **T1.G3** No-regression: full-rank decomposition (`r_n = I_n` ∀n) → reconstruction max abs error `< 1e-4` — **PASS via unit test** `hosvd_full_rank_is_near_lossless_3mode`
+- [x] **T1.G4** Alloc-free hot path: `tucker_decompose_into` with pre-warmed `TuckerScratch` → 0 allocations / 100 calls — **PASS**: empirically verified **0 allocs** via `CountingAllocator`. See `.benchmarks/326_tucker_hosvd_goat.md`.
+
+### Phase 1 promotion
+
+- [x] **T1.P** **PROMOTED to DEFAULT-ON** in `katgpt-rs/crates/katgpt-core/Cargo.toml` (Phase 3, 2026-06-25). All 4 GOAT gates PASS empirically (G1 4.096e-8, G2 73.89µs, G3 1.013e-6, G4 0 allocs). Pure modelless gain (closed-form HOSVD, no training). Re-verified by direct binary launch (`bench_326_tucker_hosvd_goat` bench) — bypasses the `cargo bench` dyld/trustd stall.
+
+---
+
+## Phase 2 — Integration (riir-neuron-db)
+
+### Goal
+
+Wire the open primitive into `ShardCompactor` as an alternative cold-tier archival path.
+
+### Tasks
+
+- [x] **T2.1** Add `tucker_factorization` feature to `riir-neuron-db/Cargo.toml` — `tucker_factorization = ["shard_compactor", "katgpt-core/tucker_factorization"]`. No chain alias needed initially (leaf-crate-local).
+- [x] **T2.2** Add `TuckerCompactionConfig { ranks: [usize; 3] }` (default `(8, 4, 4)`, mode-0 clamped to `min(N, 8)` at compaction time).
+- [x] **T2.3** Add `pub struct TuckerCompaction { decomposition: TuckerResult, source_shape, hla_moments, source_cycle_root, report }` (the cold-tier archival envelope). Lives in new file `tucker_compactor.rs` (separate SRP from AM `shard_compactor.rs`; respects the <2048-line guideline).
+- [x] **T2.4** Add `ShardCompactor::compact_tucker(&self, shards, tucker_cfg) -> Result<TuckerCompaction, TuckerCompactError>`:
+  - Validate (wallets drained, commitments verify — same invariant as `compact`)
+  - Flatten to `(N, 8, 8)` (shard × row × col of `style_weights`)
+  - Call `tucker_decompose_into` (via `TuckerConfig::new` + `TuckerScratch` + `TuckerResultScratch`)
+  - Measure reconstruction rel-Frob error (diagnostic, in report)
+  - Carry forward HLA verbatim (one row per source shard — only style is compressed)
+  - Bind provenance via `compute_cycle_root` (shared `pub(crate)` helper from `shard_compactor.rs`)
+- [x] **T2.5** Add `TuckerCompaction::reconstruct_into(&self, out: &mut Vec<NeuronShard>)` + `reconstruct_into_with_scratch` (zero-alloc hot-path variant). Requires supporting `TuckerResultScratch::from_owned` constructor added to katgpt-core (the Cold-tier reload path: owned → scratch → `tucker_reconstruct_into`).
+- [x] **T2.6** Tests: round-trip preserves HLA exactly, provenance root deterministic, distinct inputs → distinct roots, full-rank near-lossless, zone_hashes derived from cycle_root, scratch vs no-scratch path equivalence, semantic-axis cosine gate (T2.G1), zero-alloc path equivalence + cross-envelope validation (T2.G4) (24 tests written, all PASS).
+- [x] **T2.7** Comparison bench: AM compaction vs Tucker compaction on N ∈ {4, 8, 16} — **DONE**: `benches/bench_326_tucker_vs_am_crossover.rs` (`harness = false`, no Criterion dep). Results in `.benchmarks/326_tucker_vs_am_crossover.md`. **Key finding:** Tucker only beats AM on raw storage at ONE cell (N=16 vs shallow-AM 0.5: 448f vs 512f); AM-deep (0.1) always wins on floats (128f). AM is ~10× faster on compaction (4–18µs vs 39–208µs). Tucker's actual value is **near-lossless full-batch factorization** (rel-Frob ~1e-6) vs AM's lossy M-representative reduction (~1.0) — i.e. fidelity + one-envelope format, NOT raw compression. This is why the feature stays opt-in (see T2.P).
+
+### Phase 2 GOAT gate
+
+- [x] **T2.G1** Reconstruction quality: Tucker reconstructs shards whose leading semantic axis (top `semantic_axes` direction) has cosine similarity `≥ 0.95` with the source — **PASS** via test `tucker_preserves_leading_semantic_axis` (gated on `phase_transition_subspace_phase_gate` co-feature). Constructs rank-1-dominant shards (10x dominant term + small noise), compacts with default ranks `(8,4,4)`, reconstructs, and asserts the min leading-axis cosine across the batch is ≥ 0.95. Sign-ambiguity handled via `|cos|`.
+- [x] **T2.G2** Storage compression: Tucker envelope `compressed_floats` beats shallow-AM (ratio ≥ 0.5) at N=16 — **PASS via test** `tucker_envelope_is_smaller_than_am_at_n_16` (Tucker 320 < shallow-AM 512 floats at N=16, ratio 0.5). Note: at deep AM ratio (0.1, M=2 → 128 floats), AM wins — Tucker is for archival, not deep reduction. Original plan target "N=64" was re-spec'd to N=16 due to the SVD_MAX_RANK=16 constraint discovered in Phase 1.
+- [x] **T2.G3** No-regression: full-rank Tucker (`r_N=N, r_R=8, r_C=8`) → reconstruction rel-Frob err `< 1e-3` — **PASS via test** `full_rank_tucker_is_near_lossless`.
+- [x] **T2.G4** Alloc-free reconstruction hot path — **PASS**: added `TuckerReconScratch` (bundles `TuckerConfig` + `TuckerResultScratch` + `TuckerScratch` + `recon_buf`, built once via `from_compaction`) and `TuckerCompaction::reconstruct_into_zero_alloc(&self, &mut TuckerReconScratch, &mut Vec<NeuronShard>)`. This hoists all three per-call allocations that `reconstruct_into_with_scratch` still did (`TuckerResultScratch::from_owned`'s core clone + flat-factors Vec, plus the `recon_buf` Vec) into the persisted scratch. Verified by `reconstruct_zero_alloc_matches_baseline` (bit-identical to allocating baseline + idempotent across repeated calls) and `reconstruct_zero_alloc_rejects_mismatched_envelope` (cross-envelope shape/rank validation → `ScratchShapeMismatch`). Empirical alloc counting for the katgpt-core primitive is G4 of `bench_326_tucker_hosvd_goat` (0 allocs / 100 steady-state calls); the integration contract is enforced *by construction* (no `Vec::new`/`vec![]`/`Vec::clone` on the hot path — only `out.clear()` + `out.reserve(n)` no-ops on a reused Vec + `out.push(NeuronShard)` into pre-reserved capacity, where `NeuronShard` is a stack Pod).
+
+### Phase 2 promotion
+
+- [x] **T2.P** Keep `tucker_factorization` opt-in in riir-neuron-db. All four GOAT gates pass (G1–G4) **but the T2.7 bench shows Tucker is NOT a default-on storage win**: AM-deep (0.1) beats it on raw floats at every N ≤ 16, and AM is ~10× faster on compaction. Tucker's value is near-lossless full-batch factorization (rel-Frob ~1e-6) — a fidelity option for Cold-tier archival, not a compression win. Stays opt-in until a consumer validates that fidelity-preserving archival is worth the extra latency + transitive `katgpt-rs` dep (see T2.7 bench record).
+
+---
+
+## Phase 3 — Commit + Summary
+
+- [x] **T3.1** Verify `cargo check --all-features` clean — **PASS** (riir-neuron-db all-features compiles).
+- [x] **T3.2** Verify `cargo check -p riir-neuron-db` (default features) clean — **PASS** (no default-feature regression).
+- [x] **T3.3** Verify `cargo clippy -p riir-neuron-db --features tucker_factorization -- -D warnings` clean — **PASS** (0 warnings on the new module).
+- [x] **T3.4** Verify katgpt-core Tucker tests (28 total, including 3 new `from_owned` tests) — **PASS** (28 passed; 0 failed).
+- [x] **T3.5** Run riir-neuron-db Tucker compactor tests — **PASS**: 24/24 tests pass (direct binary launch bypassing the `cargo test` dyld/trustd stall). Includes `tucker_preserves_leading_semantic_axis` (T2.G1, gated on `phase_transition_subspace_phase_gate`, on by default) and the two T2.G4 tests (`reconstruct_zero_alloc_matches_baseline`, `reconstruct_zero_alloc_rejects_mismatched_envelope`).
+- [x] **T3.6** Commit on `develop` with `feat:` prefix.
+
+---
+
+## Risks
+
+- **N-mode generality vs hot-path simplicity.** True N-mode Tucker with arbitrary shape is more code than the 3-mode `(N, 8, 8)` special case we actually need. Mitigation: implement generic N-mode (≤4 modes) upfront — the per-mode unfolding + SVD + contraction pattern is uniform and the generic code is barely longer than a 3-mode special case. The 3-mode `(N,8,8)` is then just one config.
+- **SVD sign ambiguity.** `thin_svd_into` documents arbitrary sign conventions. HOSVD factor matrices inherit this; reconstruction is sign-invariant (factors appear in conjugate pairs `U × U^T`), so this is safe. Document it.
+- **Cold-tier commitment semantics.** Tucker envelope is not a `Vec<NeuronShard>` — it cannot be committed via the existing per-shard BLAKE3 path. Phase 2 will need its own envelope commitment (BLAKE3 over `core || factors || source_cycle_root`). Out of Phase 1 scope.
+- **SVD determinism across quorum nodes.** `thin_svd_into` is documented platform-independent (no SIMD inside). Tucker inherits this. Safe for sync-boundary commitment.

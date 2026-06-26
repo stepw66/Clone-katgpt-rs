@@ -13,6 +13,8 @@
 //! 4. **Fréchet mean** — SIMD-accelerated Riemannian centroid in Poincaré ball
 //! 5. **SlodPruner** — ConstraintPruner that routes between spectral tiers at O(1)
 
+#![allow(clippy::needless_range_loop)]
+
 use crate::simd::simd_dot_f32;
 
 // ── Configuration ─────────────────────────────────────────────────
@@ -23,6 +25,9 @@ pub struct SlodConfig {
     /// k for kNN graph construction.
     /// Default: computed as `max(10, min(sqrt(N), 50))`.
     pub knn_k: usize,
+    /// Max Fréchet mean iterations.
+    /// Default: 15.
+    pub max_iterations: usize,
     /// Composite score weights: [participation, diffusion_entropy, spectral_concentration].
     /// Default: [1/3, 1/3, 1/3].
     pub alpha: [f32; 3],
@@ -32,9 +37,6 @@ pub struct SlodConfig {
     /// Spectral gap threshold for K* selection.
     /// Default: 2.0.
     pub gap_threshold: f32,
-    /// Max Fréchet mean iterations.
-    /// Default: 15.
-    pub max_iterations: usize,
     /// Fréchet mean step size (η).
     /// Default: 1.0.
     pub step_size: f32,
@@ -47,10 +49,10 @@ impl Default for SlodConfig {
     fn default() -> Self {
         Self {
             knn_k: 0, // sentinel: compute from N
+            max_iterations: 15,
             alpha: [1.0 / 3.0; 3],
             mad_beta: 2.0,
             gap_threshold: 2.0,
-            max_iterations: 15,
             step_size: 1.0,
             tolerance: 1e-6,
         }
@@ -74,10 +76,10 @@ impl SlodConfig {
 pub struct ScaleBoundary {
     /// Diffusion scale σ at which this boundary was detected.
     pub sigma: f32,
-    /// Effective rank K* (number of significant eigenmodes) at this scale.
-    pub k_star: usize,
     /// Composite boundary score S(σ).
     pub score: f32,
+    /// Effective rank K* (number of significant eigenmodes) at this scale.
+    pub k_star: usize,
 }
 
 // ── SLoD Operator ─────────────────────────────────────────────────
@@ -85,30 +87,19 @@ pub struct ScaleBoundary {
 /// Core spectral operator: eigenpairs + detected boundaries.
 #[derive(Debug, Clone)]
 pub struct SlodOperator {
+    /// Configuration used to build this operator.
+    pub config: SlodConfig,
     /// Eigenvalues λ_k (descending order).
     pub eigenvalues: Vec<f32>,
     /// Eigenvectors as flat buffer [K_eigs * N], row-major.
     pub eigenvectors: Vec<f32>,
     /// Detected scale boundaries.
     pub boundaries: Vec<ScaleBoundary>,
-    /// Configuration used to build this operator.
-    pub config: SlodConfig,
 }
 
 // ── Poincaré Ball Geometry ────────────────────────────────────────
 
 // clamp_norm removed — was unused
-
-/// Compute squared Euclidean distance.
-#[inline]
-fn sq_dist(a: &[f32], b: &[f32], dim: usize) -> f32 {
-    let mut s = 0.0f32;
-    for i in 0..dim {
-        let d = a[i] - b[i];
-        s += d * d;
-    }
-    s
-}
 
 /// Hyperbolic distance in the Poincaré ball model.
 ///
@@ -116,26 +107,45 @@ fn sq_dist(a: &[f32], b: &[f32], dim: usize) -> f32 {
 ///
 /// Points are clamped to remain inside the unit ball.
 pub fn poincare_distance(a: &[f32], b: &[f32], dim: usize) -> f32 {
-    let norm_a_sq = simd_dot_f32(a, a, dim);
-    let norm_b_sq = simd_dot_f32(b, b, dim);
+    let norm_a_sq = crate::simd::simd_sum_sq(a, dim);
+    let norm_b_sq = crate::simd::simd_sum_sq(b, dim);
 
     // Clamp norms to < 1 for numerical stability
     let norm_a_sq = norm_a_sq.min(1.0 - 1e-5);
     let norm_b_sq = norm_b_sq.min(1.0 - 1e-5);
 
-    let diff_sq = sq_dist(a, b, dim);
+    let diff_sq = crate::simd::simd_dist_sq(a, b, dim);
     let denom = (1.0 - norm_a_sq) * (1.0 - norm_b_sq);
 
     let inner = 1.0 + 2.0 * diff_sq / denom;
     inner.acosh()
 }
 
-/// Möbius addition in the Poincaré ball: a ⊕ b.
+/// Poincaré distance with pre-computed ||a||² and ||b||².
 ///
-/// a ⊕ b = ((1 + 2<a,b> + ||b||²)a + (1 - ||a||²)b) / (1 + 2<a,b> + ||a||²||b||²)
-fn mobius_add(a: &[f32], b: &[f32], dim: usize) -> Vec<f32> {
-    let norm_a_sq = simd_dot_f32(a, a, dim).min(1.0 - 1e-5);
-    let norm_b_sq = simd_dot_f32(b, b, dim).min(1.0 - 1e-5);
+/// Identical to [`poincare_distance`] but skips the two `simd_sum_sq` calls —
+/// useful when calling distance repeatedly over the same set of points (kNN graph
+/// construction, retrieval). The caller is responsible for passing `norm_a_sq`
+/// and `norm_b_sq` already clamped to `< 1 - 1e-5` for numerical stability.
+#[inline]
+pub fn poincare_distance_precomputed(
+    a: &[f32],
+    b: &[f32],
+    norm_a_sq: f32,
+    norm_b_sq: f32,
+    dim: usize,
+) -> f32 {
+    let diff_sq = crate::simd::simd_dist_sq(a, b, dim);
+    let denom = (1.0 - norm_a_sq) * (1.0 - norm_b_sq);
+    let inner = 1.0 + 2.0 * diff_sq / denom;
+    inner.acosh()
+}
+
+/// In-place Möbius addition — zero-allocation hot path.
+#[inline]
+fn mobius_add_into(result: &mut [f32], a: &[f32], b: &[f32], dim: usize) {
+    let norm_a_sq = crate::simd::simd_sum_sq(a, dim).min(1.0 - 1e-5);
+    let norm_b_sq = crate::simd::simd_sum_sq(b, dim).min(1.0 - 1e-5);
     let a_dot_b = simd_dot_f32(a, b, dim);
 
     let denom = 1.0 + 2.0 * a_dot_b + norm_a_sq * norm_b_sq;
@@ -144,11 +154,9 @@ fn mobius_add(a: &[f32], b: &[f32], dim: usize) -> Vec<f32> {
     let s1 = (1.0 + 2.0 * a_dot_b + norm_b_sq) * inv_denom;
     let s2 = (1.0 - norm_a_sq) * inv_denom;
 
-    let mut result = vec![0.0f32; dim];
-    for i in 0..dim {
-        result[i] = s1 * a[i] + s2 * b[i];
-    }
-    result
+    // Fused: result = s2 * b, then result += s1 * a (two SIMD passes instead of scalar loop)
+    crate::simd::simd_fused_decay_write(&mut result[..dim], 0.0, &b[..dim], s2);
+    crate::simd::simd_fused_scale_acc(&mut result[..dim], &a[..dim], s1, dim);
 }
 
 /// Riemannian log map: project `point` onto the tangent space at `base`.
@@ -156,22 +164,44 @@ fn mobius_add(a: &[f32], b: &[f32], dim: usize) -> Vec<f32> {
 /// Returns a tangent vector in T_base B^n.
 /// log_x(y) = (d(x,y) / ||(-x) ⊕ y||) · ((-x) ⊕ y)
 pub fn log_map(base: &[f32], point: &[f32], dim: usize) -> Vec<f32> {
+    let mut out = vec![0.0f32; dim];
+    let mut neg_base = vec![0.0f32; dim];
+    let mut mob_result = vec![0.0f32; dim];
+    log_map_into(&mut out, &mut neg_base, &mut mob_result, base, point, dim);
+    out
+}
+
+/// In-place log map — zero-allocation hot path.
+///
+/// Scratch buffers: `neg_base[dim]`, `mob_result[dim]`.
+#[inline]
+pub fn log_map_into(
+    out: &mut [f32],
+    neg_base: &mut [f32],
+    mob_result: &mut [f32],
+    base: &[f32],
+    point: &[f32],
+    dim: usize,
+) {
     let dist = poincare_distance(base, point, dim);
     if dist < 1e-10 {
-        return vec![0.0; dim];
+        out[..dim].fill(0.0);
+        return;
     }
 
-    // Möbius addition: (-base) ⊕ point
-    let neg_base: Vec<f32> = base.iter().map(|&x| -x).collect();
-    let mob = mobius_add(&neg_base, point, dim);
-    let mob_norm = simd_dot_f32(&mob, &mob, dim).sqrt();
+    // neg_base = -base (SIMD-accelerated negate)
+    crate::simd::simd_fused_decay_write(&mut neg_base[..dim], 0.0, &base[..dim], -1.0);
+
+    mobius_add_into(mob_result, neg_base, point, dim);
+    let mob_norm = simd_dot_f32(mob_result, mob_result, dim).sqrt();
 
     if mob_norm < 1e-10 {
-        return vec![0.0; dim];
+        out[..dim].fill(0.0);
+        return;
     }
 
     let scale = dist / mob_norm;
-    mob.iter().map(|&v| v * scale).collect()
+    crate::simd::simd_fused_decay_write(&mut out[..dim], 0.0, &mob_result[..dim], scale);
 }
 
 /// Riemannian exp map: project tangent vector back to the Poincaré ball.
@@ -179,37 +209,53 @@ pub fn log_map(base: &[f32], point: &[f32], dim: usize) -> Vec<f32> {
 /// exp_x(v) = x ⊕ tanh(||v||/2) / ||v|| · v
 /// where the tangent vector v encodes the conformal factor from log_map.
 pub fn exp_map(base: &[f32], tangent: &[f32], dim: usize) -> Vec<f32> {
-    let _norm_base_sq = simd_dot_f32(base, base, dim).min(1.0 - 1e-5);
+    let mut out = vec![0.0f32; dim];
+    let mut dir = vec![0.0f32; dim];
+    let mut mob_result = vec![0.0f32; dim];
+    exp_map_into(&mut out, &mut dir, &mut mob_result, base, tangent, dim);
+    out
+}
+
+/// In-place exp map — zero-allocation hot path.
+///
+/// Scratch buffers: `dir[dim]`, `mob_result[dim]`.
+#[inline]
+pub fn exp_map_into(
+    out: &mut [f32],
+    dir: &mut [f32],
+    mob_result: &mut [f32],
+    base: &[f32],
+    tangent: &[f32],
+    dim: usize,
+) {
     let tangent_norm = simd_dot_f32(tangent, tangent, dim).sqrt();
 
     if tangent_norm < 1e-10 {
-        return base.to_vec();
+        out[..dim].copy_from_slice(&base[..dim]);
+        return;
     }
 
     // Compute direction: tanh(||v||/2) * v/||v||
     let s = (tangent_norm / 2.0).tanh() / tangent_norm;
-    let mut dir = vec![0.0f32; dim];
-    for i in 0..dim {
-        dir[i] = s * tangent[i];
-    }
+    crate::simd::simd_fused_decay_write(&mut dir[..dim], 0.0, &tangent[..dim], s);
 
     // Project dir into ball
-    let dir_norm_sq = simd_dot_f32(&dir, &dir, dim);
+    let dir_norm_sq = simd_dot_f32(dir, dir, dim);
     if dir_norm_sq >= 1.0 - 1e-5 {
         let scale = (1.0 - 1e-5) / dir_norm_sq.sqrt();
-        dir.iter_mut().for_each(|v| *v *= scale);
+        crate::simd::simd_scale_inplace(&mut dir[..dim], scale);
     }
 
     // Möbius addition: base ⊕ dir
-    let result = mobius_add(base, &dir, dim);
+    mobius_add_into(mob_result, base, dir, dim);
 
     // Final clamp into ball
-    let norm_r_sq = simd_dot_f32(&result, &result, dim);
+    let norm_r_sq = simd_dot_f32(mob_result, mob_result, dim);
     if norm_r_sq >= 1.0 - 1e-5 {
         let scale = (1.0 - 1e-5) / norm_r_sq.sqrt();
-        result.iter().map(|v| v * scale).collect()
+        crate::simd::simd_fused_decay_write(&mut out[..dim], 0.0, &mob_result[..dim], scale);
     } else {
-        result
+        out[..dim].copy_from_slice(&mob_result[..dim]);
     }
 }
 
@@ -236,51 +282,71 @@ impl SlodOperator {
 
         let k = config.effective_knn_k(n).min(n - 1).max(1);
 
-        // Build kNN adjacency + weight matrix
-        let mut w = vec![0.0f32; n * n];
+        // Build kNN adjacency + weight matrix directly into Laplacian storage.
+        // Single n×n allocation: reuse for both W and L.
+        let mut lap = vec![0.0f32; n * n];
+        // Pre-allocate distance buffer — reused across iterations
+        let mut dists: Vec<(usize, f32)> = Vec::with_capacity(n);
+        // Pre-compute ||x||² for every embedding once. `poincare_distance` recomputes
+        // both ||a||² and ||b||² on every call — for the n×n outer product here that's
+        // O(n²·dim) redundant work. Hoisting reduces to O(n·dim).
+        // Bit-identical to the prior scalar recomputation (same value, fewer times).
+        let norm_sq: Vec<f32> = (0..n)
+            .map(|i| {
+                crate::simd::simd_sum_sq(&embeddings[i * dim..(i + 1) * dim], dim).min(1.0 - 1e-5)
+            })
+            .collect();
 
         for i in 0..n {
             let a_i = &embeddings[i * dim..(i + 1) * dim];
             // Compute distances to all other points
-            let mut dists: Vec<(usize, f32)> = (0..n)
-                .filter(|&j| j != i)
-                .map(|j| {
-                    let a_j = &embeddings[j * dim..(j + 1) * dim];
-                    (j, poincare_distance(a_i, a_j, dim))
-                })
-                .collect();
-            dists.sort_unstable_by(|a, b| {
-                a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal)
-            });
+            dists.clear();
+            for j in 0..n {
+                if j == i {
+                    continue;
+                }
+                let a_j = &embeddings[j * dim..(j + 1) * dim];
+                dists.push((
+                    j,
+                    poincare_distance_precomputed(a_i, a_j, norm_sq[i], norm_sq[j], dim),
+                ));
+            }
+            // Partial sort: O(n) to partition top-k nearest
+            // Clamp k to dists.len() since we skipped self (dists has n-1 elements)
+            let k_eff = k.min(dists.len());
+            if k_eff == 0 {
+                continue;
+            }
+            dists.select_nth_unstable_by(k_eff - 1, |a, b| a.1.total_cmp(&b.1));
 
             // Take top-k nearest neighbors
-            for &(j, d) in dists.iter().take(k) {
+            for &(j, d) in dists.iter().take(k_eff) {
                 let weight = (-d).exp();
-                w[i * n + j] = weight;
-                w[j * n + i] = weight; // symmetrize
+                lap[i * n + j] = weight;
+                lap[j * n + i] = weight; // symmetrize
             }
         }
 
-        // Degree vector
-        let mut degree = vec![0.0f32; n];
+        // Degree vector + inv_sqrt(degree) in fused pass — avoids separate allocation
+        let mut inv_sqrt_d = vec![0.0f32; n];
         for i in 0..n {
-            for j in 0..n {
-                degree[i] += w[i * n + j];
-            }
-            degree[i] = degree[i].max(1e-10);
+            let row_off = i * n;
+            let degree = crate::simd::simd_sum_f32(&lap[row_off..row_off + n]).max(1e-10);
+            inv_sqrt_d[i] = 1.0 / degree.sqrt();
         }
 
         // Normalized Laplacian: L = I - D^{-1/2} W D^{-1/2}
-        let mut lap = vec![0.0f32; n * n];
+        // Transform W in-place into L
         for i in 0..n {
-            for j in 0..n {
-                let idx = i * n + j;
-                if i == j {
-                    lap[idx] = 1.0 - w[idx] / (degree[i] * degree[j]).sqrt();
-                } else {
-                    lap[idx] = -w[idx] / (degree[i] * degree[j]).sqrt();
-                }
-            }
+            let isd_i = inv_sqrt_d[i];
+            let row_off = i * n;
+            crate::simd::simd_scale_inplace(&mut lap[row_off..row_off + n], isd_i);
+            crate::simd::simd_scale_mul_inplace(
+                &mut lap[row_off..row_off + n],
+                &inv_sqrt_d[..n],
+                -1.0,
+            );
+            lap[row_off + i] += 1.0;
         }
 
         // Eigendecompose — reuse Jacobi from spectral_hierarchy
@@ -291,33 +357,27 @@ impl SlodOperator {
         // top_k_eigenvectors returns [k_eigs * n] row-major eigenvectors
         // We need eigenvalues too — compute from Lap * v = λ * v
         let mut eigenvalues = Vec::with_capacity(k_eigs);
+        // Pre-allocate Lv buffer — reused across eigenvectors
+        let mut lv = vec![0.0f32; n];
         for eig_idx in 0..k_eigs {
+            lv[..n].fill(0.0);
             let v = &eigvecs[eig_idx * n..(eig_idx + 1) * n];
             // Compute Lv
-            let mut lv = vec![0.0f32; n];
-            for i in 0..n {
-                for j in 0..n {
-                    lv[i] += lap[i * n + j] * v[j];
-                }
-            }
+            crate::simd::simd_matvec(&mut lv, &lap, v, n, n);
             // λ = (v^T Lv) / (v^T v)
             let numerator = simd_dot_f32(v, &lv, n);
-            let denominator = simd_dot_f32(v, v, n).max(1e-10);
+            let denominator = crate::simd::simd_sum_sq(v, n).max(1e-10);
             eigenvalues.push(numerator / denominator);
         }
 
         // Sort eigenvalues descending (and reorder eigenvectors to match)
-        let mut indexed: Vec<(usize, f32)> = eigenvalues
-            .iter()
-            .enumerate()
-            .map(|(i, &v)| (i, v))
-            .collect();
-        indexed.sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        let mut indices: Vec<usize> = (0..eigenvalues.len()).collect();
+        indices.sort_unstable_by(|&a, &b| eigenvalues[b].total_cmp(&eigenvalues[a]));
 
-        let sorted_eigenvalues: Vec<f32> = indexed.iter().map(|&(_, v)| v).collect();
+        let sorted_eigenvalues: Vec<f32> = indices.iter().map(|&i| eigenvalues[i]).collect();
         let sorted_eigvecs = {
             let mut buf = vec![0.0f32; k_eigs * n];
-            for (out_row, &(src_row, _)) in indexed.iter().enumerate() {
+            for (out_row, &src_row) in indices.iter().enumerate() {
                 let src_off = src_row * n;
                 let dst_off = out_row * n;
                 buf[dst_off..dst_off + n].copy_from_slice(&eigvecs[src_off..src_off + n]);
@@ -356,12 +416,11 @@ impl SlodOperator {
         let log_min = sigma_min.ln();
         let log_max = sigma_max.ln();
 
-        let sigmas: Vec<f32> = (0..n_sigma)
-            .map(|i| {
-                let t = i as f32 / (n_sigma - 1) as f32;
-                (log_min + t * (log_max - log_min)).exp()
-            })
-            .collect();
+        let mut sigmas = [0.0f32; 100];
+        for (i, sigma_slot) in sigmas.iter_mut().enumerate() {
+            let t = i as f32 / (n_sigma - 1) as f32;
+            *sigma_slot = (log_min + t * (log_max - log_min)).exp();
+        }
 
         // Compute query spectral coefficients: φ_k^T e_focus
         let query_coeffs: Vec<f32> = (0..k_eigs)
@@ -372,14 +431,15 @@ impl SlodOperator {
             .collect();
 
         // Compute three signals at each σ
-        let mut v_signal = vec![0.0f32; n_sigma];
-        let mut d_signal = vec![0.0f32; n_sigma];
-        let mut c_signal = vec![0.0f32; n_sigma];
+        let mut v_signal = [0.0f32; 100];
+        let mut d_signal = [0.0f32; 100];
+        let mut c_signal = [0.0f32; 100];
+        // Pre-allocate weights — reused across sigma iterations
+        let mut weights = vec![0.0f32; n];
 
         for (si, &sigma) in sigmas.iter().enumerate() {
             // Compute heat kernel weights for each node
-            let mut weights = vec![0.0f32; n];
-            let mut _total_energy = 0.0f32;
+            weights[..n].fill(0.0);
 
             for k in 0..k_eigs {
                 let decay = (-eigenvalues[k] * sigma).exp();
@@ -389,17 +449,16 @@ impl SlodOperator {
                 for i in 0..n {
                     weights[i] += amp * v[i] * v[i];
                 }
-                _total_energy += amp;
             }
 
             // V(σ): participation — effective number of active nodes
-            let w_sum: f32 = weights.iter().copied().sum::<f32>().max(1e-10);
-            let w_sq_sum: f32 = weights.iter().map(|w| w * w).sum();
+            let w_sum = crate::simd::simd_sum_f32(&weights[..n]).max(1e-10);
+            let w_sq_sum = crate::simd::simd_sum_sq(&weights[..n], n);
             v_signal[si] = (w_sum * w_sum / w_sq_sum.max(1e-10)) / n as f32;
 
             // D_w(σ): diffusion entropy
             let mut entropy = 0.0f32;
-            for &w in &weights {
+            for &w in weights.iter().take(n) {
                 if w > 1e-10 {
                     let p = w / w_sum;
                     entropy -= p * p.ln();
@@ -409,28 +468,29 @@ impl SlodOperator {
 
             // C_k(σ): spectral concentration — effective rank
             let mut c_energy = 0.0f32;
+            let mut c_total = 0.0f32;
             for &eig in eigenvalues.iter().take(k_eigs) {
                 let decay = (-eig * sigma).exp();
                 c_energy += decay * decay;
+                c_total += decay;
             }
-            let c_total: f32 = eigenvalues
-                .iter()
-                .take(k_eigs)
-                .map(|&eig| (-eig * sigma).exp())
-                .sum::<f32>()
-                .max(1e-10);
-            c_signal[si] = c_energy / (c_total * c_total);
+            c_signal[si] = c_energy / (c_total * c_total).max(1e-10);
         }
 
-        // Z-score normalize each signal
-        let z_v = zscore(&v_signal);
-        let z_d = zscore(&d_signal);
-        let z_c = zscore(&c_signal);
+        // Z-score normalize each signal (stack-allocated scratch buffers)
+        let mut z_v = [0.0f32; 100];
+        let mut z_d = [0.0f32; 100];
+        let mut z_c = [0.0f32; 100];
+        zscore_into(&v_signal, &mut z_v);
+        zscore_into(&d_signal, &mut z_d);
+        zscore_into(&c_signal, &mut z_c);
 
-        // Composite score
-        let composite: Vec<f32> = (0..n_sigma)
-            .map(|i| config.alpha[0] * z_v[i] + config.alpha[1] * z_d[i] + config.alpha[2] * z_c[i])
-            .collect();
+        // Composite score (stack-allocated)
+        let mut composite = [0.0f32; 100];
+        for i in 0..n_sigma {
+            composite[i] =
+                config.alpha[0] * z_v[i] + config.alpha[1] * z_d[i] + config.alpha[2] * z_c[i];
+        }
 
         // MAD peak picker
         mad_peak_picker(&composite, &sigmas, eigenvalues, config)
@@ -465,36 +525,56 @@ pub fn heat_kernel_weights(
     n: usize,
     dim: usize,
 ) -> Vec<f32> {
+    let mut weights = vec![0.0f32; n];
+    heat_kernel_weights_into(
+        &mut weights,
+        eigenvalues,
+        eigenvectors,
+        query,
+        sigma,
+        n,
+        dim,
+    );
+    weights
+}
+
+/// In-place heat kernel weights — zero-allocation hot path.
+#[inline]
+pub fn heat_kernel_weights_into(
+    weights: &mut [f32],
+    eigenvalues: &[f32],
+    eigenvectors: &[f32],
+    query: &[f32],
+    sigma: f32,
+    n: usize,
+    dim: usize,
+) {
     let k_eigs = eigenvalues.len();
     if k_eigs == 0 || n == 0 {
-        return vec![0.0; n];
+        return;
     }
 
     // Project query onto eigenvectors: ⟨φ_k, query⟩
     // query has dimension `dim`, but eigenvectors have dimension `n`
     // We use the first min(dim, n) components
     let proj_dim = dim.min(n);
-    let mut query_coeffs = vec![0.0f32; k_eigs];
-    for k in 0..k_eigs {
-        let v = &eigenvectors[k * n..(k + 1) * n];
-        if proj_dim > 0 && proj_dim <= n {
-            query_coeffs[k] = simd_dot_f32(&query[..proj_dim], &v[..proj_dim], proj_dim);
-        }
+    if proj_dim == 0 {
+        return;
     }
 
-    // Accumulate weights
-    let mut weights = vec![0.0f32; n];
+    weights[..n].fill(0.0);
+
     for k in 0..k_eigs {
+        let v = &eigenvectors[k * n..(k + 1) * n];
+        let coeff = if proj_dim <= n {
+            simd_dot_f32(&query[..proj_dim], &v[..proj_dim], proj_dim)
+        } else {
+            0.0
+        };
         let decay = (-eigenvalues[k] * sigma).exp();
-        let coeff_sq = query_coeffs[k] * query_coeffs[k];
-        let amp = decay * coeff_sq;
-        let v = &eigenvectors[k * n..(k + 1) * n];
-        for i in 0..n {
-            weights[i] += amp * v[i];
-        }
+        let amp = decay * coeff * coeff;
+        crate::simd::simd_fused_scale_acc(&mut weights[..n], &v[..n], amp, n);
     }
-
-    weights
 }
 
 // ── Fréchet Mean (SIMD-accelerated) ───────────────────────────────
@@ -523,41 +603,58 @@ pub fn frechet_mean(
     let start_idx = weights
         .iter()
         .enumerate()
-        .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
+        .max_by(|a, b| a.1.total_cmp(b.1))
         .map(|(i, _)| i)
         .unwrap_or(0);
 
     let mut mu = embeddings[start_idx * dim..(start_idx + 1) * dim].to_vec();
 
-    // Clamp initial point into ball
+    // Clamp initial point into ball (SIMD-accelerated)
     let norm_sq = simd_dot_f32(&mu, &mu, dim);
     if norm_sq >= 1.0 - 1e-5 {
-        let scale = (1.0 - 1e-5) / norm_sq.sqrt();
-        mu.iter_mut().for_each(|v| *v *= scale);
+        crate::simd::simd_scale_inplace(&mut mu, (1.0 - 1e-5) / norm_sq.sqrt());
     }
 
-    let weight_sum: f32 = weights.iter().sum();
+    let weight_sum: f32 = crate::simd::simd_sum_f32(weights);
+
+    // Pre-allocate scratch buffers once — reused across iterations
+    let mut avg_tangent = vec![0.0f32; dim];
+    let mut log_neg_base = vec![0.0f32; dim];
+    let mut log_mob = vec![0.0f32; dim];
+    let mut log_out = vec![0.0f32; dim];
+    let mut exp_dir = vec![0.0f32; dim];
+    let mut exp_mob = vec![0.0f32; dim];
+    let mut exp_out = vec![0.0f32; dim];
 
     for _ in 0..config.max_iterations {
         // Weighted average of log-maps in tangent space
-        let mut avg_tangent = vec![0.0f32; dim];
+        avg_tangent[..dim].fill(0.0);
 
         for i in 0..n {
             if weights[i] < 1e-10 {
                 continue;
             }
             let point = &embeddings[i * dim..(i + 1) * dim];
-            let tangent = log_map(&mu, point, dim);
-            for d in 0..dim {
-                avg_tangent[d] += weights[i] * tangent[d];
-            }
+            log_map_into(
+                &mut log_out,
+                &mut log_neg_base,
+                &mut log_mob,
+                &mu,
+                point,
+                dim,
+            );
+            // SIMD fused scale-accumulate: avg_tangent += weights[i] * log_out
+            crate::simd::simd_fused_scale_acc(
+                &mut avg_tangent[..dim],
+                &log_out[..dim],
+                weights[i],
+                dim,
+            );
         }
 
-        // Normalize by total weight
+        // Normalize by total weight (SIMD-accelerated)
         let norm = weight_sum.max(1e-10);
-        for v in avg_tangent.iter_mut() {
-            *v /= norm;
-        }
+        crate::simd::simd_scale_inplace(&mut avg_tangent[..dim], 1.0 / norm);
 
         // Check convergence
         let tangent_norm = simd_dot_f32(&avg_tangent, &avg_tangent, dim).sqrt();
@@ -565,9 +662,19 @@ pub fn frechet_mean(
             break;
         }
 
-        // Exp step
-        let step_tangent: Vec<f32> = avg_tangent.iter().map(|&v| v * config.step_size).collect();
-        mu = exp_map(&mu, &step_tangent, dim);
+        // Scale in-place instead of allocating step_tangent (SIMD-accelerated)
+        crate::simd::simd_scale_inplace(&mut avg_tangent[..dim], config.step_size);
+
+        // Exp step — result goes into exp_out, then copy to mu
+        exp_map_into(
+            &mut exp_out,
+            &mut exp_dir,
+            &mut exp_mob,
+            &mu,
+            &avg_tangent,
+            dim,
+        );
+        mu[..dim].copy_from_slice(&exp_out[..dim]);
     }
 
     mu
@@ -595,22 +702,32 @@ impl std::fmt::Debug for SlodPruner {
     }
 }
 
+impl SlodPruner {
+    /// Map depth to tier index. Returns None when no tiers exist or boundary
+    /// score indicates a weak boundary (accept-all shortcut).
+    #[inline]
+    fn tier_index(&self, depth: usize) -> Option<usize> {
+        let n_tiers = self.tier_pruners.len();
+        if n_tiers == 0 {
+            return None;
+        }
+        let tier_idx = depth.min(n_tiers - 1);
+        // Weak boundary → accept-all shortcut
+        if let Some(boundary) = self.operator.boundaries.get(tier_idx)
+            && boundary.score < 0.1
+        {
+            return None;
+        }
+        Some(tier_idx)
+    }
+}
+
 impl crate::traits::ConstraintPruner for SlodPruner {
     fn is_valid(&self, depth: usize, token_idx: usize, parent_tokens: &[usize]) -> bool {
-        // Route to appropriate tier based on depth
-        let tier = match self.tier_pruners.len() {
-            0 => return true, // no tiers → accept all
-            n_tiers => {
-                // Map depth to tier via spectral boundaries
-                let tier_idx = depth.min(n_tiers - 1);
-                // Use boundary K* to modulate: deeper → more permissive
-                match self.operator.boundaries.get(tier_idx) {
-                    Some(boundary) if boundary.score < 0.1 => return true, // weak boundary → accept
-                    _ => tier_idx,
-                }
-            }
+        let tier = match self.tier_index(depth) {
+            Some(t) => t,
+            None => return true,
         };
-
         match self.tier_pruners.get(tier) {
             Some(pruner) => pruner.is_valid(depth, token_idx, parent_tokens),
             None => true,
@@ -624,66 +741,67 @@ impl crate::traits::ConstraintPruner for SlodPruner {
         parent_tokens: &[usize],
         results: &mut [bool],
     ) {
-        match self.tier_pruners.len() {
-            0 => {
+        let tier = match self.tier_index(depth) {
+            Some(t) => t,
+            None => {
                 let len = candidates.len().min(results.len());
                 results[..len].fill(true);
+                return;
             }
-            _ => {
-                // Delegate to the routed tier pruner's batch method
-                let tier = depth.min(self.tier_pruners.len() - 1);
-                match self.tier_pruners.get(tier) {
-                    Some(pruner) => {
-                        pruner.batch_is_valid(depth, candidates, parent_tokens, results)
-                    }
-                    None => {
-                        let len = candidates.len().min(results.len());
-                        results[..len].fill(true);
-                    }
-                }
+        };
+        match self.tier_pruners.get(tier) {
+            Some(pruner) => pruner.batch_is_valid(depth, candidates, parent_tokens, results),
+            None => {
+                let len = candidates.len().min(results.len());
+                results[..len].fill(true);
             }
         }
     }
 
     fn propagate(&mut self, depth: usize, token_idx: usize, parent_token: &[usize]) -> bool {
-        match self.tier_pruners.len() {
-            0 => true,
-            _ => {
-                let tier = depth.min(self.tier_pruners.len() - 1);
-                match self.tier_pruners.get_mut(tier) {
-                    Some(pruner) => pruner.propagate(depth, token_idx, parent_token),
-                    None => true,
-                }
-            }
+        let tier = match self.tier_index(depth) {
+            Some(t) => t,
+            None => return true,
+        };
+        match self.tier_pruners.get_mut(tier) {
+            Some(pruner) => pruner.propagate(depth, token_idx, parent_token),
+            None => true,
         }
     }
 
     fn manifold_score(&self, depth: usize, token_idx: usize, parent_tokens: &[usize]) -> f32 {
-        match self.tier_pruners.len() {
-            0 => 1.0,
-            _ => {
-                let tier = depth.min(self.tier_pruners.len() - 1);
-                match self.tier_pruners.get(tier) {
-                    Some(pruner) => pruner.manifold_score(depth, token_idx, parent_tokens),
-                    None => 1.0,
-                }
-            }
+        let tier = match self.tier_index(depth) {
+            Some(t) => t,
+            None => return 1.0,
+        };
+        match self.tier_pruners.get(tier) {
+            Some(pruner) => pruner.manifold_score(depth, token_idx, parent_tokens),
+            None => 1.0,
         }
     }
 }
 
 // ── Helper Functions ──────────────────────────────────────────────
 
-/// Z-score normalize a signal. Returns zero-centered signal.
-fn zscore(signal: &[f32]) -> Vec<f32> {
+/// Z-score normalize into a pre-allocated buffer (zero-allocation hot path).
+fn zscore_into(signal: &[f32], out: &mut [f32]) {
     if signal.is_empty() {
-        return Vec::new();
+        return;
     }
-    let mean: f32 = signal.iter().sum::<f32>() / signal.len() as f32;
-    let variance: f32 =
-        signal.iter().map(|x| (x - mean) * (x - mean)).sum::<f32>() / signal.len() as f32;
-    let std = variance.sqrt().max(1e-10);
-    signal.iter().map(|&x| (x - mean) / std).collect()
+    let n = signal.len().min(out.len());
+    if n == 0 {
+        return;
+    }
+    // Use SIMD sum for mean
+    let mean: f32 = crate::simd::simd_sum_f32(&signal[..n]) / n as f32;
+    // Center into output buffer: out[i] = signal[i] - mean
+    out[..n].copy_from_slice(&signal[..n]);
+    crate::simd::simd_add_scalar_inplace(&mut out[..n], -mean);
+    // Compute variance via SIMD sum-of-squares on centered data
+    let variance: f32 = crate::simd::simd_sum_sq(&out[..n], n) / n as f32;
+    let inv_std = 1.0 / variance.sqrt().max(1e-10);
+    // Scale in-place
+    crate::simd::simd_scale_inplace(&mut out[..n], inv_std);
 }
 
 /// MAD (Median Absolute Deviation) peak picker.
@@ -701,16 +819,20 @@ fn mad_peak_picker(
         return Vec::new();
     }
 
-    // Compute median
-    let mut sorted = composite.to_vec();
-    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    let median = sorted[n / 2];
+    // Reuse a single scratch buffer for both median and MAD computation
+    let mut scratch: Vec<f32> = composite.to_vec();
+    let mid = n / 2;
 
-    // Compute MAD
-    let deviations: Vec<f32> = composite.iter().map(|&x| (x - median).abs()).collect();
-    let mut sorted_dev = deviations;
-    sorted_dev.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    let mad = sorted_dev[n / 2].max(1e-10);
+    // Compute median (O(n) via select_nth_unstable_by)
+    scratch.select_nth_unstable_by(mid, |a, b| a.total_cmp(b));
+    let median = scratch[mid];
+
+    // Compute MAD using same scratch buffer — fill with |x - median|
+    for (i, &x) in composite.iter().enumerate() {
+        scratch[i] = (x - median).abs();
+    }
+    scratch.select_nth_unstable_by(mid, |a, b| a.total_cmp(b));
+    let mad = scratch[mid].max(1e-10);
 
     // Find peaks where composite > median + β * MAD * 1.4826
     // (1.4826 is the consistency constant for normal distribution)
@@ -832,7 +954,8 @@ mod tests {
     #[test]
     fn zscore_zero_mean() {
         let signal = [1.0f32, 2.0, 3.0, 4.0, 5.0];
-        let z = zscore(&signal);
+        let mut z = [0.0f32; 5];
+        zscore_into(&signal, &mut z);
         let mean: f32 = z.iter().sum::<f32>() / z.len() as f32;
         assert!(near(mean, 0.0, 1e-5));
     }

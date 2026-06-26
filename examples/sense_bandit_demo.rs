@@ -95,10 +95,10 @@ fn main() {
         let kind = brain.modules[best_idx].kind;
         trial_log.record(SenseTrial {
             npc_id: 1,
-            sense_kind: kind,
-            activation: *best_act,
             action_taken: best_idx as u32,
+            activation: *best_act,
             reward,
+            sense_kind: kind,
         });
 
         // AbsorbCompress: update module confidence via EMA
@@ -146,10 +146,10 @@ fn main() {
         let kind = brain.modules[best_idx].kind;
         trial_log.record(SenseTrial {
             npc_id: 1,
-            sense_kind: kind,
-            activation: *best_act,
             action_taken: best_idx as u32,
+            activation: *best_act,
             reward,
+            sense_kind: kind,
         });
 
         decay_direction(

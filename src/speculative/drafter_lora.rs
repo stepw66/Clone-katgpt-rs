@@ -87,15 +87,16 @@ impl DrafterLoraWeights {
         }
     }
 
-    /// Collect all LoRA params into a flat vector for gradient computation.
+    /// Write all LoRA params into a reusable buffer (zero-alloc after first call).
     /// Order: [Q_A, Q_B, K_A, K_B, V_A, V_B, O_A, O_B, MLP1_A, MLP1_B, MLP2_A, MLP2_B]
-    fn params_flat(&self) -> Vec<f32> {
-        let mut params = Vec::with_capacity(self.total_params());
+    /// The buffer is cleared and extended in-place, preserving its capacity across calls.
+    fn params_flat_into(&self, out: &mut Vec<f32>) {
+        out.clear();
+        out.reserve(self.total_params());
         for adapter in &self.adapters() {
-            params.extend_from_slice(&adapter.a);
-            params.extend_from_slice(&adapter.b);
+            out.extend_from_slice(&adapter.a);
+            out.extend_from_slice(&adapter.b);
         }
-        params
     }
 
     /// Set all LoRA params from a flat vector (same order as params_flat).
@@ -108,6 +109,27 @@ impl DrafterLoraWeights {
             offset += a_len;
             adapter.b.copy_from_slice(&params[offset..offset + b_len]);
             offset += b_len;
+        }
+    }
+
+    /// Set a single LoRA param at flat index `i` (same order as params_flat).
+    ///
+    /// O(adapters) = O(6) — avoids the O(P) full-vector copy in `set_params_flat`
+    /// when perturbing one parameter at a time (finite-difference gradients).
+    fn set_param_flat(&mut self, mut idx: usize, val: f32) {
+        for adapter in self.adapters_mut() {
+            let a_len = adapter.a.len();
+            if idx < a_len {
+                adapter.a[idx] = val;
+                return;
+            }
+            idx -= a_len;
+            let b_len = adapter.b.len();
+            if idx < b_len {
+                adapter.b[idx] = val;
+                return;
+            }
+            idx -= b_len;
         }
     }
 
@@ -485,17 +507,21 @@ impl DrafterForwardContext {
 // ── Loss computation ────────────────────────────────────────
 
 /// Run drafter forward on a token sequence, returning the final logits.
-fn run_drafter_sequence(
-    ctx: &mut DrafterForwardContext,
+///
+/// Note: returns a reference into `ctx.logits` to avoid cloning the full
+/// vocab-size vector. The caller must not mutably borrow `ctx` while using
+/// the returned slice.
+fn run_drafter_sequence<'a>(
+    ctx: &'a mut DrafterForwardContext,
     config: &Config,
     weights: &TransformerWeights,
     lora: &DrafterLoraWeights,
     tokens: &[usize],
-) -> Vec<f32> {
+) -> &'a [f32] {
     for (pos, &token) in tokens.iter().enumerate() {
         ctx.forward_lora(config, weights, lora, token, pos);
     }
-    ctx.logits.clone()
+    &ctx.logits
 }
 
 /// Cross-entropy loss: -log(softmax(logits)[target]).
@@ -518,7 +544,7 @@ fn compute_lora_loss(
     pair: &TrainingPair,
 ) -> f32 {
     let logits = run_drafter_sequence(ctx, config, weights, lora, &pair.input_tokens);
-    cross_entropy(&logits, pair.target_token)
+    cross_entropy(logits, pair.target_token)
 }
 
 // ── Training loop (T2) ──────────────────────────────────────
@@ -544,6 +570,15 @@ pub fn train_drafter_lora(
     let mut ctx = DrafterForwardContext::new(drafter_config, lora.q_lora.rank);
     let mut best_loss = f32::MAX;
 
+    // Hoist scratch buffers outside the pair loop: total_params is constant for
+    // a given config/rank, so these allocate exactly once and are reused via
+    // clear()+extend / fill across every pair and epoch.
+    // Before: 2 × pairs.len() × epochs heap allocations of n_params f32 each.
+    // After: 2 allocations total for the entire training run.
+    let n_params = lora.total_params();
+    let mut params: Vec<f32> = Vec::with_capacity(n_params);
+    let mut gradients = vec![0.0f32; n_params];
+
     for _epoch in 0..epochs {
         let mut epoch_loss = 0.0f32;
 
@@ -552,28 +587,30 @@ pub fn train_drafter_lora(
             let base_loss =
                 compute_lora_loss(&mut ctx, drafter_config, drafter_weights, lora, pair);
 
-            // Snapshot current params
-            let original_params = lora.params_flat();
-            let mut gradients = vec![0.0f32; original_params.len()];
+            // Refresh the param snapshot from the (just-updated) weights,
+            // reusing the pre-allocated buffer — zero alloc.
+            lora.params_flat_into(&mut params);
+            gradients.fill(0.0);
 
-            // Compute gradients via finite differences
-            for i in 0..original_params.len() {
-                let mut perturbed = original_params.clone();
-                perturbed[i] += eps;
-                lora.set_params_flat(&perturbed);
+            for i in 0..n_params {
+                let prev = params[i];
+                params[i] += eps;
+                lora.set_param_flat(i, params[i]);
 
                 let perturbed_loss =
                     compute_lora_loss(&mut ctx, drafter_config, drafter_weights, lora, pair);
                 gradients[i] = (perturbed_loss - base_loss) / eps;
+
+                // Restore both the snapshot and the live weights for the next iter.
+                params[i] = prev;
+                lora.set_param_flat(i, prev);
             }
 
-            // Restore original params, then apply gradient descent
-            lora.set_params_flat(&original_params);
-            let mut updated = lora.params_flat();
-            for i in 0..updated.len() {
-                updated[i] -= learning_rate * gradients[i];
+            // Apply gradient descent in-place on the snapshot, then commit.
+            for i in 0..n_params {
+                params[i] -= learning_rate * gradients[i];
             }
-            lora.set_params_flat(&updated);
+            lora.set_params_flat(&params);
 
             epoch_loss += base_loss;
         }

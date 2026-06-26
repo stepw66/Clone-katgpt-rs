@@ -54,6 +54,25 @@ pub struct RetrievalProjection {
     low_dim: usize,
 }
 
+/// Pre-compute per-dimension variance scale: `sigmoid(log(1 + v))`.
+///
+/// Depends only on the dimension index (via `gate_variance[i]`), not on the
+/// query or key vector. Hoisting this out of the per-key loop eliminates
+/// `n_keys × head_dim` redundant `ln_1p`+`exp` calls.
+///
+/// Returns a stack-allocated array of length `head_dim` (bounded by 256).
+#[inline]
+fn compute_var_scales(gate_variance: &[f32], head_dim: usize) -> [f32; 256] {
+    let mut out = [1.0f32; 256];
+    for i in 0..head_dim {
+        if i < gate_variance.len() && gate_variance[i] > 0.0 {
+            let v = gate_variance[i];
+            out[i] = 1.0 / (1.0 + (-v.ln_1p()).exp());
+        }
+    }
+    out
+}
+
 impl RetrievalProjection {
     /// Stride per head in the weight arrays: `head_dim * low_dim`.
     #[inline]
@@ -401,11 +420,81 @@ impl RetrievalProjection {
                     k_proj[j] += ki * w_k[row + j]; // sequential access — cache-friendly
                 }
             }
-            // Dot product with projected query
-            let mut score = 0.0f32;
-            for j in 0..self.low_dim {
-                score += q_proj[j] * k_proj[j];
+            // Dot product with projected query.
+            // low_dim is typically 16; for larger low_dim (32, 64) the SIMD kernel
+            // wins clearly, and for 16 it is at worst parity with the scalar loop
+            // while guaranteeing vectorization on targets where the autovectorizer
+            // would otherwise fall back.
+            scores[n] = crate::simd::simd_dot_f32(q_proj, k_proj, self.low_dim);
+        }
+
+        scores
+    }
+
+    // -----------------------------------------------------------------------
+    // Wall gate-aware scoring (Plan 173 Task 7)
+    // -----------------------------------------------------------------------
+
+    /// Variance-weighted batch projection scoring.
+    ///
+    /// Same as `batch_project_scores` but weights the projection by gate variance
+    /// statistics from Wall Attention. High-variance channels ("dynamic" =
+    /// content-dependent) get more weight; low-variance ("always-on") get less.
+    ///
+    /// `gate_variance`: per-channel variance from `WallPrefixState::gate_statistics()`.
+    /// Length must equal `head_dim`. If empty or all zeros, falls back to uniform.
+    ///
+    /// The weighting is applied as a multiplicative scale on the key elements
+    /// before projection, not on the weights themselves (preserves learned structure).
+    pub fn batch_project_scores_weighted(
+        &self,
+        head_idx: usize,
+        q_pre: &[f32],
+        k_cache: &[f32],
+        n_keys: usize,
+        gate_variance: &[f32],
+    ) -> Vec<f32> {
+        let hd = self.head_dim;
+        let ld = self.low_dim;
+        let stride = self.head_stride();
+        let head_off = head_idx * stride;
+
+        // Project query once (same as standard)
+        let mut q_proj = [0.0f32; 64]; // stack alloc for low_dim ≤ 64
+        let q_slice = &mut q_proj[..ld];
+        let w_q_head = &self.w_q[head_off..head_off + hd * ld];
+        // Pre-compute per-dimension variance scale once — `sigmoid(log(1+v))` depends
+        // only on the dimension index `i`, not on the query/key vector. Previously this
+        // recomputed `ln_1p`+`exp` inside the per-key loop (n_keys × head_dim times).
+        let var_scales = compute_var_scales(gate_variance, hd);
+        for i in 0..hd {
+            let qi = q_pre[i];
+            let var_scale = var_scales[i];
+            let row = i * ld;
+            for j in 0..ld {
+                q_slice[j] += qi * var_scale * w_q_head[row + j];
             }
+        }
+
+        // Score each key
+        let mut scores = vec![0.0f32; n_keys];
+        let w_k_head = &self.w_k[head_off..head_off + hd * ld];
+
+        let mut k_proj = [0.0f32; 64];
+        let k_slice = &mut k_proj[..ld];
+
+        for n in 0..n_keys {
+            k_slice.fill(0.0);
+            let k_off = n * hd;
+            for i in 0..hd {
+                let ki = k_cache[k_off + i];
+                let var_scale = var_scales[i];
+                let row = i * ld;
+                for j in 0..ld {
+                    k_slice[j] += ki * var_scale * w_k_head[row + j];
+                }
+            }
+            let score = crate::simd::simd_dot_f32(q_slice, k_slice, ld);
             scores[n] = score;
         }
 
@@ -413,41 +502,32 @@ impl RetrievalProjection {
     }
 
     // -----------------------------------------------------------------------
-    // Serialization
+    // Serialization (binary — postcard, no JSON)
     // -----------------------------------------------------------------------
 
-    /// Serialize to JSON string.
-    pub fn to_json(&self) -> serde_json::Result<String> {
-        serde_json::to_string(self)
+    /// Serialize to binary (postcard).
+    pub fn to_bytes(&self) -> Result<Vec<u8>, postcard::Error> {
+        postcard::to_allocvec(self)
     }
 
-    /// Serialize to JSON bytes.
-    pub fn to_json_bytes(&self) -> serde_json::Result<Vec<u8>> {
-        serde_json::to_vec(self)
+    /// Deserialize from binary (postcard).
+    pub fn from_bytes(data: &[u8]) -> Result<Self, postcard::Error> {
+        postcard::from_bytes(data)
     }
 
-    /// Deserialize from JSON string.
-    pub fn from_json(json: &str) -> serde_json::Result<Self> {
-        serde_json::from_str(json)
-    }
-
-    /// Deserialize from JSON bytes.
-    pub fn from_json_bytes(bytes: &[u8]) -> serde_json::Result<Self> {
-        serde_json::from_slice(bytes)
-    }
-
-    /// Save projection weights to a JSON file.
+    /// Save projection weights to a binary file.
     pub fn save(&self, path: &std::path::Path) -> std::io::Result<()> {
-        let json = self
-            .to_json_bytes()
+        let bytes = self
+            .to_bytes()
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-        std::fs::write(path, json)
+        std::fs::write(path, bytes)
     }
 
-    /// Load projection weights from a JSON file.
-    pub fn load(path: &std::path::Path) -> serde_json::Result<Self> {
-        let bytes = std::fs::read(path).map_err(serde_json::Error::io)?;
-        Self::from_json_bytes(&bytes)
+    /// Load projection weights from a binary file.
+    pub fn load(path: &std::path::Path) -> Result<Self, std::io::Error> {
+        let bytes = std::fs::read(path)?;
+        Self::from_bytes(&bytes)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
     }
 
     /// Validate internal consistency of the projection weights.
@@ -633,6 +713,9 @@ mod tests {
     }
 
     #[test]
+    // Allow: head 0 uses stride indexing `0 * stride + ...` which reads as a
+    // zero offset but documents the per-head layout consistently with heads 1/2.
+    #[allow(clippy::erasing_op, clippy::identity_op)]
     fn test_multi_head_isolation() {
         // Different heads should produce different projections
         let mut proj = RetrievalProjection::zeros(3, 32, 8);
@@ -749,10 +832,10 @@ mod tests {
     // --- Serialization Tests ---
 
     #[test]
-    fn test_json_roundtrip() {
+    fn test_binary_roundtrip() {
         let proj = RetrievalProjection::xavier(3, 64, 16);
-        let json = proj.to_json().unwrap();
-        let loaded = RetrievalProjection::from_json(&json).unwrap();
+        let bytes = proj.to_bytes().unwrap();
+        let loaded = RetrievalProjection::from_bytes(&bytes).unwrap();
 
         assert_eq!(loaded.n_retrieval_heads, 3);
         assert_eq!(loaded.head_dim, 64);
@@ -765,7 +848,7 @@ mod tests {
     fn test_file_roundtrip() {
         let dir = test_dir();
         std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("test_projection.json");
+        let path = dir.join("test_projection.bin");
 
         let proj = RetrievalProjection::identity(2, 32, 8);
         proj.save(&path).unwrap();

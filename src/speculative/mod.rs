@@ -1,16 +1,24 @@
 pub mod budget_compat;
+pub mod acceptance_forecast;
 
 #[cfg(feature = "belief_drafter")]
 pub mod belief_cache;
 #[cfg(feature = "belief_drafter")]
 pub mod belief_drafter;
+
 pub mod dd_tree;
+#[cfg(feature = "dendritic_gate")]
+pub mod dendritic_gate;
 pub mod dflash;
 #[cfg(feature = "domino_correction")]
 pub mod domino;
 #[cfg(feature = "domino_lora")]
 pub mod domino_lora;
 pub mod drafter_lora;
+#[cfg(feature = "echo_env_predictor")]
+pub mod echo_env;
+#[cfg(feature = "echo_env_predictor")]
+pub mod echo_env_integration;
 pub mod prefill;
 pub mod residency_audit;
 pub mod sampling;
@@ -70,6 +78,11 @@ pub use dd_tree::build_dd_tree_screened_with_schedule;
 
 #[cfg(feature = "gdsd_distill")]
 pub use dd_tree::build_dd_tree_gdsd;
+
+#[cfg(feature = "dendritic_gate")]
+pub use dd_tree::build_dd_tree_dendritic;
+#[cfg(feature = "dendritic_gate")]
+pub use dendritic_gate::{DendriticGate, dendritic_sigmoid};
 
 #[cfg(feature = "and_or_dtree")]
 pub use dd_tree::build_dd_tree_and_or;
@@ -366,6 +379,9 @@ pub use caddtree_budget::{
     build_dd_tree_adaptive_screened,
 };
 
+#[cfg(all(feature = "caddtree_budget", feature = "mux_demux", feature = "rcd_residual"))]
+pub use caddtree_budget::build_dd_tree_adaptive_mux_residual;
+
 // ── Self-Learning Selectivity Router (Plan 204, feature: selectivity_router) ──
 #[cfg(feature = "selectivity_router")]
 pub mod selectivity_router;
@@ -459,6 +475,21 @@ pub mod nf_flow_fold;
 
 #[cfg(all(feature = "nf_flow_score", feature = "chain_fold"))]
 pub use nf_flow_fold::{FoldDecision, evaluate_fold, evaluate_fold_batch};
+
+// ── NFCoT × QGF Fusion — Q-gradient-guided generation with flow-density scoring (Plan 268 T6) ──
+//
+// Composes QGuidedDrafter (Plan 268 F1) with NfFlowScore (Plan 229).
+// QGF steers generation via gradient tilt; NFCoT scores candidates by flow
+// density + QGF bonus. Feature-gated on both `nf_flow_score` + `qgf_drafter`,
+// default OFF until GOAT proof.
+#[cfg(all(feature = "nf_flow_score", feature = "qgf_drafter"))]
+pub mod nf_flow_qgf;
+
+#[cfg(all(feature = "nf_flow_score", feature = "qgf_drafter"))]
+pub use nf_flow::{score_with_qgf, score_with_qgf_at, score_with_qgf_batch, select_best_qgf};
+
+#[cfg(all(feature = "nf_flow_score", feature = "qgf_drafter"))]
+pub use nf_flow_qgf::NfQgfDrafter;
 
 // ── Deep Manifold Part 2 — Plan 231 (Research 205) ──
 #[cfg(feature = "union_bound_confidence")]

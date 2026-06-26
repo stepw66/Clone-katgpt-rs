@@ -60,7 +60,7 @@ PRUDENT-BANKER Architecture:
 | Δ-gated exploration | `DeltaBanditPruner` — δ-weighted blind spot detection | Already uses bandit for relevance |
 | Phased aggression (partial) | `ConfiguratorBandit` — PlanNew/PlanExtend/PlanSkip | SR²AM configurator as bandit arms |
 | Context-aware selection | `ConfiguratorBandit` keyed by `(domain, entropy_bin)` | Already context-sensitive |
-| Game-specific bandit tuning | `BomberFrozenBandit`, `GoFrozenBandit` | Per-game frozen bandit data |
+| Game-specific bandit tuning | Per-game frozen bandit configs (private) | See riir-ai (private) |
 
 ### What's Worth Distilling (New)
 
@@ -79,7 +79,7 @@ PRUDENT-BANKER Architecture:
 3. **Banker-OMD step-size credit accounting**
    - Instead of fixed learning rate, maintain per-round "credit" budget that accounts for pending feedback
    - When feedback is missing, reduce effective learning rate proportionally
-   - **Value:** Our `BanditStats` already tracks visits/pulls but doesn't account for in-flight observations. In game loop (20Hz ticks, bandit at 5Hz), some observations are "pending" between bandit evaluations.
+   - **Value:** Our `BanditStats` already tracks visits/pulls but doesn't account for in-flight observations. When the game loop runs at a higher Hz than bandit evaluation (per-game ratio, private), some observations are "pending" between bandit evaluations.
 
 ### What's NOT Worth Distilling
 
@@ -93,16 +93,9 @@ PRUDENT-BANKER Architecture:
 
 ## Connection to MMO GOAT Pillars
 
-Per [27_mmo_goat_pillars_decision_matrix.md](../../riir-ai/.docs/27_mmo_goat_pillars_decision_matrix.md):
+**Game application:** Moved to riir-ai (private). The generic delay-adversarial bandit primitive stays here as open math.
 
-| Pillar | Connection |
-|--------|-----------|
-| Pillar 1: Fourier Spatial AI | Bandit selects which Fourier periods to activate. Safe baseline = default frequencies. Delay = MCTS computation latency. |
-| Pillar 2: WASM Validators | Bandit selects validator strictness level. Safe baseline = always-validate. Delay = WASM round-trip. |
-| Pillar 3: NPC Dialog | Bandit selects dialog strategy. Safe baseline = template fallback. Delay = player response latency. |
-| Pillar 4: Frame-Sampling | **Strongest connection.** Bandit selects frame ratio. Safe baseline = fixed ratio. Delay = frame sampling gap. ξ(D) directly applicable. |
-
-**Super GOAT potential:** The phased aggression + delay-calibrated restart is exactly what the frame-sampling bridge needs. When the game runs at 20Hz and AI evaluates at 5Hz (4:1 ratio), the bandit gets feedback 4 ticks late. PrudentBanker's ξ(D) buffer prevents the frame-ratio bandit from oscillating between aggressive (low ratio) and conservative (high ratio) modes when frame samples are sparse. This stays in **riir-ai** as it's game-specific.
+We have a private delay-aware bandit application for real-time game frame-sampling. See riir-ai (private).
 
 ---
 
@@ -119,7 +112,7 @@ Generic phased aggression logic            MMO tick-delay bandit wrappers
 "plug socket"                              "plug"
 ```
 
-**Rule:** The safe-phased bandit strategy and generic delay-credit accounting go in katgpt-rs. Game-specific baselines (Bomber safety heuristic, Go komi threshold, NPC template fallback), per-game delay estimates (frame-sampling ratio, MCTS latency), and the tuned ξ parameters stay private in riir-ai.
+**Rule:** The safe-phased bandit strategy and generic delay-credit accounting go in katgpt-rs. Game-specific baselines, per-game delay estimates, and the tuned ξ parameters stay private in riir-ai.
 
 ---
 
@@ -137,4 +130,4 @@ Generic phased aggression logic            MMO tick-delay bandit wrappers
 
 **Feature gate:** `safe_bandit` (opt-in, NOT default-on) — new `BanditStrategy::SafePhased` variant.
 
-**Super GOAT (secret, riir-ai only):** Per-game delay-calibrated frame-sampling bandit. The ξ(D) slack term tuned per game domain (Bomber: high D due to real-time combat, Go: low D due to turn-based) is a genuine selling point — nobody else does delay-aware safe exploration in game AI bandits.
+**Super-GOAT (private):** Game-specific delay-aware frame-sampling bandit → moved to riir-ai/.research/124. The generic bandit math stays here.

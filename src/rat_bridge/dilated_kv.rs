@@ -5,16 +5,13 @@
 
 use katgpt_core::types::DilationConfig;
 
-/// Sigmoid activation — used instead of softmax per project constraints.
-#[inline]
-fn sigmoid(x: f32) -> f32 {
-    1.0 / (1.0 + (-x).exp())
-}
 
 /// Dilated decode step — replace full KV scan with D-strided access + bridge readout.
 /// Returns attention-weighted output from dilated KV positions.
 ///
 /// Uses sigmoid (not softmax) for all attention weights.
+///
+/// Allocating wrapper — prefer [`dilated_decode_step_into`] in hot paths.
 pub fn dilated_decode_step(
     query: &[f32],
     kv_cache_keys: &[Vec<f32>],
@@ -22,57 +19,58 @@ pub fn dilated_decode_step(
     dilation: DilationConfig,
     gdn2_readout: &[f32],
 ) -> (Vec<f32>, f32) {
-    // 1. Get dilated KV positions
+    let dim = query.len();
+    let mut output = vec![0.0f32; dim];
+    let alpha = dilated_decode_step_into(
+        query,
+        kv_cache_keys,
+        kv_cache_vals,
+        dilation,
+        gdn2_readout,
+        &mut output,
+    );
+    (output, alpha)
+}
+
+/// Zero-alloc variant of [`dilated_decode_step`]. Writes the blended output
+/// into `out` and returns the gate value α.
+///
+/// Internally delegates to [`super::fuse::bridge_attention_into`] which fuses
+/// the attention/bridge/α-blend stages into a single pass. The previous
+/// implementation used `.fold(vec![...], ...).collect()` which allocated a
+/// `Vec<f32>` per fold step (O(n_kv) allocations + O(n_kv * dim) extra work
+/// per call).
+pub fn dilated_decode_step_into(
+    query: &[f32],
+    kv_cache_keys: &[Vec<f32>],
+    kv_cache_vals: &[Vec<f32>],
+    dilation: DilationConfig,
+    gdn2_readout: &[f32],
+    out: &mut [f32],
+) -> f32 {
+    // 1. Compute sigmoid gate α = sigmoid(⟨q, gdn2_readout⟩)
+    //
+    // (Independent of dilation — compute once.)
+    let alpha = super::fuse::bridge_attention_gate(query, gdn2_readout);
+
+    // 2. Gather dilated KV references. Small alloc (n_dilated pointers) — for
+    //    the hottest decode loops, callers should call bridge_attention_into
+    //    directly with pre-built dilated slice references.
     let indices = DilatedKvAccessor::dilated_indices(kv_cache_keys.len(), dilation);
     let keys_dilated: Vec<&Vec<f32>> = indices.iter().map(|&i| &kv_cache_keys[i]).collect();
     let vals_dilated: Vec<&Vec<f32>> = indices.iter().map(|&i| &kv_cache_vals[i]).collect();
 
-    // 2. Compute sigmoid gate α = sigmoid(⟨q, gdn2_readout⟩)
-    let alpha = sigmoid(
-        query
-            .iter()
-            .zip(gdn2_readout.iter())
-            .map(|(q, r)| q * r)
-            .sum(),
+    // 3. Fused attention + bridge + α-blend, written directly into `out`.
+    super::fuse::bridge_attention_into(
+        query,
+        &keys_dilated,
+        &vals_dilated,
+        gdn2_readout,
+        alpha,
+        out,
     );
 
-    // 3. Dilated attention with sigmoid (not softmax)
-    let weights: Vec<f32> = keys_dilated
-        .iter()
-        .map(|k| sigmoid(k.iter().zip(query.iter()).map(|(ki, qi)| ki * qi).sum()))
-        .collect();
-    let w_sum: f32 = weights.iter().sum();
-
-    let dim = query.len();
-    let attn_out: Vec<f32> = if w_sum > 0.0 {
-        vals_dilated
-            .iter()
-            .zip(weights.iter())
-            .fold(vec![0.0; dim], |acc, (v, w)| {
-                acc.iter()
-                    .zip(v.iter())
-                    .map(|(a, vi)| a + vi * w / w_sum)
-                    .collect()
-            })
-    } else {
-        vec![0.0; dim]
-    };
-
-    // 4. Bridge readout: S · q
-    let bridge_out: Vec<f32> = gdn2_readout
-        .iter()
-        .zip(query.iter())
-        .map(|(s, q)| s * q)
-        .collect();
-
-    // 5. α-blend: α · attn + (1-α) · bridge
-    let output: Vec<f32> = attn_out
-        .iter()
-        .zip(bridge_out.iter())
-        .map(|(a, b)| alpha * a + (1.0 - alpha) * b)
-        .collect();
-
-    (output, alpha)
+    alpha
 }
 
 /// Zero-copy accessor for dilated KV cache views.

@@ -152,17 +152,26 @@ fn dag_shortest_path(graph: &TokenisationGraph, selected_set: &[bool]) -> f64 {
     let mut dist = vec![f64::INFINITY; graph.n_vertices];
     dist[source] = 0.0;
 
-    // Build adjacency list: (to_vertex, cost)
-    // We process in topological order (vertex index order), so we need
-    // outgoing edges grouped by source vertex.
-    // Count out-degree per vertex for pre-allocation
+    // Build adjacency list: (to_vertex, cost). Process in topological order
+    // (vertex index order), so a single forward pass over `dist` suffices —
+    // no explicit topological sort needed.
+    //
+    // Pre-count out-degree per vertex (free edges always + priced edges whose
+    // colour is selected) to avoid Vec reallocations during adjacency fill.
     let mut out_deg = vec![0usize; graph.n_vertices];
     for &(from, _) in &graph.free_edges {
         out_deg[from.0 as usize] += 1;
     }
-    for &(from, _to, colour) in &graph.priced_edges {
-        let colour_idx = colour.0 as usize;
-        if selected_set.get(colour_idx).copied() == Some(true) {
+    // Track which priced edges are usable so we don't filter twice.
+    let usable_priced: Vec<bool> = graph
+        .priced_edges
+        .iter()
+        .map(|&(_, _, colour)| {
+            selected_set.get(colour.0 as usize).copied() == Some(true)
+        })
+        .collect();
+    for (&usable, &(from, _to, _colour)) in usable_priced.iter().zip(graph.priced_edges.iter()) {
+        if usable {
             out_deg[from.0 as usize] += 1;
         }
     }
@@ -174,16 +183,10 @@ fn dag_shortest_path(graph: &TokenisationGraph, selected_set: &[bool]) -> f64 {
         adj[from.0 as usize].push((to.0 as usize, 1.0));
     }
 
-    // Priced edges: cost 1 only if colour selected, otherwise impassable
-    for &(from, to, colour) in &graph.priced_edges {
-        let colour_idx = colour.0 as usize;
-        let cost = match selected_set.get(colour_idx).copied() {
-            Some(true) => 1.0,
-            _ => f64::INFINITY,
-        };
-        // Only add edges that are actually usable to avoid polluting the adjacency list
-        if cost.is_finite() {
-            adj[from.0 as usize].push((to.0 as usize, cost));
+    // Priced edges: cost 1 only if colour selected — skip unusable ones.
+    for (usable, &(from, to, _colour)) in usable_priced.iter().zip(graph.priced_edges.iter()) {
+        if *usable {
+            adj[from.0 as usize].push((to.0 as usize, 1.0));
         }
     }
 

@@ -172,4 +172,38 @@ For Config::micro (embd=16): MLP has ~1.5K params. For Config::bpe (embd=32): ~6
 - **Fuel (SaaS):** Pre-trained `nextlat.bin` from riir-ai NextLat training
 - **Flywheel:** Better belief states → better translations → better validators → better marketplace
 
-TL;DR: Replace draft model with tiny MLP that recursively predicts next hidden states for variable-length speculative decoding. Phased: types → integration → DDTree fusion → pruner → cache → GOAT proof → default-on.
+## Upstream Audit Notes (2026-06-17)
+
+Source-of-truth verified against `.raw/NextLat/models/model_nextlat.py` after the initial ship. Two findings worth pinning down so future readers don't get tripped up by the upstream code's own internal naming.
+
+### Loss is Smooth L1 (Huber), not MSE — despite upstream variable names
+
+`model_nextlat.py:303` calls `F.smooth_l1_loss(pred_h_t_next, h_t_next.detach(), reduction="none")` for the latent-state regression term. However, the surrounding upstream code is **internally misnamed**: the function is `_nextlat_loss_function`, the local variable is `MSE`, the mask is `mse_mask`, and `NextLatConfig.lambda_mse` is the config field. The docstring on line 295 also says "Hidden-state MSE". All of these are misnomers — the actual op is Huber / Smooth L1. R192 (line 45) already records this correctly as "Smooth L1"; this note exists to explain the discrepancy if anyone greps upstream and sees `MSE` everywhere.
+
+Practical implication for our port: if we ever wire the training loss in `riir-ai` (currently out of scope — Plan 217 ships modelless inference only), use Smooth L1 to match the published paper results, not MSE. MSE would over-penalize the large-magnitude hidden-state outliers that Smooth L1 tolerates.
+
+### Hidden-dim formula `128 * round(proj_factor * 2*n_embd / 128)` degenerates for n_embd < 64
+
+Upstream `NextLatDynamicsModel.__init__` (lines 51–66) computes:
+
+```python
+input_dim  = config.n_embd * 2
+hidden_dim = 128 * round(config.proj_factor * input_dim / 128)
+```
+
+This rounding-to-128 grid is fine for the paper's `n_embd=768` (gives `hidden_dim=1536` at `proj_factor=1.0`), but it **breaks at our micro scale**:
+
+| n_embd | input_dim | round(input_dim/128) | hidden_dim |
+|---|---|---|---|
+| 768 (paper)  | 1536 | 12   | 1536 |
+| 64           | 128  | 1    | 128  |
+| 32 (bpe)     | 64   | 0    | **0 (invalid!)** |
+| 16 (micro)   | 32   | 0    | **0 (invalid!)** |
+
+For any `n_embd < 64`, `round(input_dim/128)` rounds to 0 and the MLP collapses. Upstream never hits this because they only train at GPT-2 scale. Plan 217's `LatentDynamicsMLP` struct deliberately uses the shape `[2*n_embd → n_embd → n_embd → n_embd]` directly (no 128-grid rounding), which is well-defined at every config we ship. This is a **divergence from upstream**, not a bug — it is required for the micro / bpe ports to exist.
+
+Net capacity impact at micro scale: ~1.1K params (vs the paper's ~3M at GPT-2 scale). The drafter still passes GOAT gates G1–G3 at this capacity because (a) the latent dynamics it learns at micro scale are correspondingly simpler, and (b) the entropy-gated variable-length stop compensates for any single-step quality loss.
+
+---
+
+TL;DR: Replace draft model with tiny MLP that recursively predicts next hidden states for variable-length speculative decoding. Phased: types → integration → DDTree fusion → pruner → cache → GOAT proof → default-on. Upstream audit (2026-06-17): loss is Smooth L1 despite upstream `MSE` variable naming; our MLP shape diverges from upstream's 128-grid rounding because that formula produces `hidden_dim=0` for `n_embd<64`.

@@ -48,7 +48,7 @@ pub struct TransformerConfig {
     /// FFN hidden dimension.
     pub d_ffn: usize,
     /// Stop token name (e.g., `"halt"`).
-    pub stop_token: String,
+    pub stop_token: &'static str,
     /// Maximum tokens to generate (safety limit).
     pub max_gen: usize,
 }
@@ -60,7 +60,7 @@ impl Default for TransformerConfig {
             n_heads: 18,
             n_layers: 7,
             d_ffn: 36,
-            stop_token: "halt".to_string(),
+            stop_token: "halt",
             max_gen: 5000,
         }
     }
@@ -258,6 +258,12 @@ impl VanillaTransformer {
         // Pre-allocated scratch buffers (reused across all positions and layers)
         let mut scratch = ForwardScratch::new(&self.config);
 
+        // Flatten tie-break flags into a single contiguous lookup table indexed by
+        // `layer_idx * n_heads + head`. Built once here so the per-head-per-layer
+        // hot loop does a single slice index instead of two nested Vec lookups
+        // (head_tiebreak[layer].get(head)) every call.
+        let tiebreak_flat = self.build_tiebreak_table();
+
         // Residual buffer (reused across positions)
         let mut residual = vec![0.0f64; d];
 
@@ -273,7 +279,13 @@ impl VanillaTransformer {
             add_position_encoding(&mut residual, pos);
 
             // Forward pass through all layers + prediction
-            let predicted = self.forward_step(&mut residual, pos, &mut caches, &mut scratch);
+            let predicted = self.forward_step(
+                &mut residual,
+                pos,
+                &mut caches,
+                &mut scratch,
+                &tiebreak_flat,
+            );
 
             // At the boundary, append predicted token
             if pos + 1 == token_ids.len() {
@@ -326,8 +338,8 @@ impl VanillaTransformer {
         pos: usize,
         caches: &mut [HardAttentionHead],
         scratch: &mut ForwardScratch,
+        tiebreak_flat: &[TieBreak],
     ) -> usize {
-        let d = self.config.d_model;
         let n_layers = self.config.n_layers;
         let n_heads = self.config.n_heads;
         let qkv = &mut scratch.qkv;
@@ -337,8 +349,9 @@ impl VanillaTransformer {
         let gated = &mut scratch.gated;
 
         for layer_idx in 0..n_layers {
-            let seq = (pos * n_layers + layer_idx) as i64;
+            let seq = (pos * n_layers + layer_idx) as i32;
             let head_start = layer_idx * n_heads;
+            let tb_start = layer_idx * n_heads;
 
             // Attention sublayer
             self.apply_attention(
@@ -349,19 +362,20 @@ impl VanillaTransformer {
                 qkv,
                 head_out,
                 sublayer_out,
+                &tiebreak_flat[tb_start..tb_start + n_heads],
             );
 
             // Residual connection
-            for i in 0..d {
-                residual[i] += sublayer_out[i];
+            for (r, s) in residual.iter_mut().zip(sublayer_out.iter()) {
+                *r += s;
             }
 
             // FFN sublayer
             self.apply_ffn(layer_idx, residual, ff, gated, sublayer_out);
 
             // Residual connection
-            for i in 0..d {
-                residual[i] += sublayer_out[i];
+            for (r, s) in residual.iter_mut().zip(sublayer_out.iter()) {
+                *r += s;
             }
         }
 
@@ -379,11 +393,12 @@ impl VanillaTransformer {
         &self,
         layer_idx: usize,
         residual: &[f64],
-        seq: i64,
+        seq: i32,
         heads: &mut [HardAttentionHead],
         qkv: &mut [f64],
         head_out: &mut [f64],
         out: &mut [f64],
+        tiebreak_row: &[TieBreak],
     ) {
         let d = self.config.d_model;
         let n_heads = self.config.n_heads;
@@ -404,7 +419,7 @@ impl VanillaTransformer {
             let val = [v_slice[h * 2], v_slice[h * 2 + 1]];
             let query = [q_slice[h * 2], q_slice[h * 2 + 1]];
 
-            let tie_break = self.get_tie_break(layer_idx, h);
+            let tie_break = tiebreak_row[h];
 
             // Insert key-value pair into hull cache
             heads[h].insert(key, val, seq);
@@ -441,8 +456,8 @@ impl VanillaTransformer {
 
         // ReGLU: relu(gate) * value
         let (gate, value) = ff.split_at(d_ffn);
-        for i in 0..d_ffn {
-            gated[i] = relu(gate[i]) * value[i];
+        for ((out, g), v) in gated.iter_mut().zip(gate.iter()).zip(value.iter()) {
+            *out = relu(*g) * *v;
         }
 
         // FFN output: [d_model, d_ffn] @ [d_ffn] → [d_model]
@@ -469,10 +484,40 @@ impl VanillaTransformer {
         best_id
     }
 
+    /// Build a flat tie-break lookup table indexed by `layer * n_heads + head`.
+    ///
+    /// Materializes the nested `head_tiebreak[layer][head]` flags into a single
+    /// contiguous `[TieBreak]` slice so the forward hot loop can index with O(1)
+    /// instead of two nested `Vec` lookups per head per layer.
+    fn build_tiebreak_table(&self) -> Vec<TieBreak> {
+        let total = self.config.n_layers * self.config.n_heads;
+        let mut table = Vec::with_capacity(total);
+        for layer_idx in 0..self.config.n_layers {
+            match self.weights.head_tiebreak.get(layer_idx) {
+                Some(row) => {
+                    for head in 0..self.config.n_heads {
+                        let tb = match row.get(head) {
+                            Some(true) => TieBreak::Latest,
+                            _ => TieBreak::Average,
+                        };
+                        table.push(tb);
+                    }
+                }
+                None => {
+                    for _ in 0..self.config.n_heads {
+                        table.push(TieBreak::Average);
+                    }
+                }
+            }
+        }
+        table
+    }
+
     /// Get tie-break mode for a specific (layer, head) pair.
     ///
     /// Returns [`TieBreak::Latest`] if the head's tiebreak flag is set,
     /// [`TieBreak::Average`] otherwise (including when metadata is missing).
+    #[allow(dead_code)]
     fn get_tie_break(&self, layer_idx: usize, head: usize) -> TieBreak {
         match self.weights.head_tiebreak.get(layer_idx) {
             Some(row) => match row.get(head) {
@@ -527,15 +572,11 @@ fn matvec(w: &[Vec<f64>], x: &[f64], y: &mut [f64]) {
 
 /// Dot product of two f64 slices.
 ///
-/// Written as an index-based accumulation loop to help LLVM auto-vectorize.
+/// Uses `iter().zip()` so the loop bound is the shorter slice (defensive against
+/// mismatched lengths) and the body is branch-free, which lets LLVM auto-vectorize.
 #[inline]
 fn dot_product(a: &[f64], b: &[f64]) -> f64 {
-    let len = a.len().min(b.len());
-    let mut sum = 0.0f64;
-    for i in 0..len {
-        sum += a[i] * b[i];
-    }
-    sum
+    a.iter().zip(b.iter()).map(|(x, y)| x * y).sum()
 }
 
 // ── Token Encoding / Decoding ──────────────────────────────────
@@ -867,7 +908,7 @@ mod tests {
             n_heads: 2,
             n_layers: 1,
             d_ffn: 4,
-            stop_token: "halt".to_string(),
+            stop_token: "halt",
             max_gen: 10,
         };
         let vocab = TransformerVocab::new(
@@ -894,7 +935,7 @@ mod tests {
             n_heads,
             n_layers,
             d_ffn,
-            stop_token: "halt".to_string(),
+            stop_token: "halt",
             max_gen: 10,
         };
         let vocab = TransformerVocab::new(
@@ -921,7 +962,7 @@ mod tests {
             n_heads: 2,
             n_layers: 1,
             d_ffn: d,
-            stop_token: "halt".to_string(),
+            stop_token: "halt",
             max_gen: 5,
         };
         let vocab = TransformerVocab::new(vec!["halt".to_string(), "a".to_string()], "halt");
@@ -939,7 +980,7 @@ mod tests {
             n_heads: 2,
             n_layers: 1,
             d_ffn: 4,
-            stop_token: "halt".to_string(),
+            stop_token: "halt",
             max_gen: 10,
         };
         let vocab = TransformerVocab::new(vec!["halt".to_string()], "halt");
@@ -963,7 +1004,7 @@ mod tests {
             n_heads: 2,
             n_layers: 1,
             d_ffn: d,
-            stop_token: "c".to_string(),
+            stop_token: "c",
             max_gen: 10,
         };
         let vocab = TransformerVocab::new(
@@ -984,7 +1025,7 @@ mod tests {
             n_heads: 2,
             n_layers: 1,
             d_ffn: 4,
-            stop_token: "halt".to_string(),
+            stop_token: "halt",
             max_gen: 10,
         };
         let vocab = TransformerVocab::new(vec!["halt".to_string()], "halt");
@@ -1003,7 +1044,7 @@ mod tests {
             n_heads: 2,
             n_layers: 1,
             d_ffn: 4,
-            stop_token: "halt".to_string(),
+            stop_token: "halt",
             max_gen: 10,
         };
         let vocab = TransformerVocab::new(vec!["halt".to_string()], "halt");
@@ -1020,7 +1061,7 @@ mod tests {
             n_heads: 2,
             n_layers: 1,
             d_ffn: 4,
-            stop_token: "halt".to_string(),
+            stop_token: "halt",
             max_gen: 10,
         };
         let vocab = TransformerVocab::new(vec!["halt".to_string()], "halt");

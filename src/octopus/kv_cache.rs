@@ -516,13 +516,20 @@ fn mat_vec_t(mat: &[f32], input: &[f32]) -> Vec<f32> {
 
 /// Transpose matrix-vector multiply into pre-allocated buffer.
 ///
-/// Uses SIMD dot product for the inner loop where possible.
+/// Uses SIMD dot product for the inner loop. Row strides and out writes use
+/// unchecked access since `dim` is verified by `debug_assert!` above and is a
+/// stable per-cache constant in the hot path.
 fn mat_vec_t_into(mat: &[f32], input: &[f32], out: &mut [f32]) {
     let dim = input.len();
     debug_assert_eq!(out.len(), dim);
     for row in 0..dim {
-        let m_row = &mat[row * dim..(row + 1) * dim];
-        out[row] = crate::simd::simd_dot_f32(m_row, input, dim);
+        let row_offset = row * dim;
+        // Build the row slice via unchecked pointer arithmetic so LLVM can hoist
+        // the row-base computation out of the SIMD dot product's bounds checks.
+        let m_row = unsafe { mat.get_unchecked(row_offset..row_offset + dim) };
+        unsafe {
+            *out.get_unchecked_mut(row) = crate::simd::simd_dot_f32(m_row, input, dim);
+        }
     }
 }
 

@@ -249,9 +249,11 @@ impl BanditStats {
             self.best_arm_idx = self.scan_best_arm();
         }
 
-        // Welford's online algorithm for reward variance tracking
+        // Welford's online algorithm for reward variance tracking.
+        // `n` already holds visits[arm] as f32 from the Q-value update above;
+        // reuse it instead of re-indexing and re-casting.
         let old_mean = self.reward_mean[arm];
-        let new_mean = old_mean + (reward - old_mean) / self.visits[arm] as f32;
+        let new_mean = old_mean + (reward - old_mean) / n;
         self.reward_m2[arm] += (reward - old_mean) * (reward - new_mean);
         self.reward_mean[arm] = new_mean;
     }
@@ -351,11 +353,14 @@ impl BanditStats {
     ///
     /// Arms with fewer than 2 samples are excluded from the average.
     pub fn mean_reward_variance(&self) -> f32 {
-        let mut sum = 0.0;
+        let mut sum = 0.0f32;
         let mut count = 0u32;
+        // Inline reward_variance computation: we already know i < num_arms
+        // and visits[i] >= 2 here, so skip the per-arm bounds check.
         for i in 0..self.num_arms {
-            if self.visits[i] >= 2 {
-                sum += self.reward_variance(i);
+            let n = self.visits[i];
+            if n >= 2 {
+                sum += self.reward_m2[i] / (n - 1) as f32;
                 count += 1;
             }
         }
@@ -450,7 +455,7 @@ impl<P: ScreeningPruner> BanditPruner<P> {
             #[cfg(feature = "bandit")]
             shared_stats: None,
             dual_cutoff: 0.0,
-            soft_route: true,
+            soft_route: false,
             soft_route_tau: 1.0,
             #[cfg(feature = "partial_scoring")]
             partial_scorer: None,
@@ -484,7 +489,7 @@ impl<P: ScreeningPruner> BanditPruner<P> {
             thompson_cache: vec![0.0; num_arms],
             shared_stats: Some(stats),
             dual_cutoff: 0.0,
-            soft_route: true,
+            soft_route: false,
             soft_route_tau: 1.0,
             #[cfg(feature = "partial_scoring")]
             partial_scorer: None,
@@ -519,7 +524,7 @@ impl<P: ScreeningPruner> BanditPruner<P> {
             #[cfg(feature = "bandit")]
             shared_stats: None,
             dual_cutoff: 0.0,
-            soft_route: true,
+            soft_route: false,
             soft_route_tau: 1.0,
             partial_scorer: Some(scorer),
             #[cfg(feature = "idea_divergence")]
@@ -554,7 +559,7 @@ impl<P: ScreeningPruner> BanditPruner<P> {
             #[cfg(feature = "bandit")]
             shared_stats: None,
             dual_cutoff: 0.0,
-            soft_route: true,
+            soft_route: false,
             soft_route_tau: 1.0,
             #[cfg(feature = "partial_scoring")]
             partial_scorer: None,
@@ -910,6 +915,64 @@ impl<P: ScreeningPruner> BanditPruner<P> {
         score
     }
 
+    /// Compute bandit scores for all arms under CurvatureInfluence in a single O(N) pass.
+    ///
+    /// `arm_bandit_score`'s CI branch rescans all arms per call to derive the
+    /// global concentration statistic, making an N-arm soft-route relevance
+    /// call O(N²). This helper factors out the concentration pass and applies
+    /// the boost + floor guarantee in a second O(N) sweep, preserving the
+    /// exact per-arm semantics of `arm_bandit_score` (unvisited → 1.0,
+    /// dual_cutoff → 0.0, then CI boost + floor clamp).
+    #[inline]
+    fn fill_ci_scores(
+        &self,
+        scores: &mut Vec<f32>,
+        floor: f32,
+        concentration_threshold: f32,
+    ) {
+        let num_arms = self.stats.num_arms;
+        // Pass 1: concentration is computed over clamp(q, 0, 1).max(0.01) for
+        // all arms (matches arm_bandit_score's inner scan; unvisited arms have
+        // q=0 → contribute 0.01 here, but are overridden to 1.0 in pass 2).
+        let mut max_score = 0.0f32;
+        let mut sum = 0.0f32;
+        for a in 0..num_arms {
+            let s = self.arm_q(a).clamp(0.0, 1.0).max(0.01);
+            max_score = max_score.max(s);
+            sum += s;
+        }
+        let concentration = if sum > 0.0 && max_score > 0.0 {
+            max_score / sum
+        } else {
+            1.0 / num_arms as f32
+        };
+        let boost = if concentration > concentration_threshold {
+            concentration / concentration_threshold
+        } else {
+            1.0
+        };
+        // Pass 2: per-arm final score, honoring unvisited/dual_cutoff early
+        // returns exactly like arm_bandit_score.
+        scores.clear();
+        // Ensure capacity once to avoid reallocation during push.
+        if scores.capacity() < num_arms {
+            scores.reserve(num_arms - scores.capacity());
+        }
+        for a in 0..num_arms {
+            let s = if self.arm_visits(a) == 0 {
+                1.0
+            } else if self.dual_cutoff > 0.0 && self.arm_q(a) < self.dual_cutoff {
+                0.0
+            } else {
+                let q = self.arm_q(a).clamp(0.0, 1.0).max(0.01);
+                let boosted = q * boost;
+                let min_score = floor * max_score.max(q);
+                boosted.max(min_score).clamp(0.0, 1.0)
+            };
+            scores.push(s);
+        }
+    }
+
     /// Soft-route relevance: softmax-weighted blend of all arm bandit scores.
     ///
     /// Instead of returning just the score for the requested arm, this computes
@@ -933,16 +996,46 @@ impl<P: ScreeningPruner> BanditPruner<P> {
         let num_arms = self.stats.num_arms;
         let tau = self.soft_route_tau;
 
-        // Compute bandit scores into pre-allocated scratch buffer
+        // Compute bandit scores into pre-allocated scratch buffer.
+        //
+        // CurvatureInfluence fast path: the strategy's concentration stat is a
+        // global property of all arms, but `arm_bandit_score`'s CI branch
+        // recomputes it per call. Calling that N times would be O(N²);
+        // `fill_ci_scores` computes concentration once and applies it in a
+        // single O(N) pass. Only eligible when idea_divergence is off (that
+        // feature's per-arm scan does not factor into the concentration
+        // invariant and is handled by the generic fallback below).
         let mut scores = self.soft_route_scores.lock().unwrap();
         scores.clear();
-        scores.extend((0..num_arms).map(|a| self.arm_bandit_score(a)));
+        let use_ci_fast_path = {
+            #[cfg(feature = "idea_divergence")]
+            { false }
+            #[cfg(not(feature = "idea_divergence"))]
+            {
+                matches!(
+                    self.strategy,
+                    BanditStrategy::CurvatureInfluence { .. }
+                )
+            }
+        };
+        if use_ci_fast_path {
+            if let BanditStrategy::CurvatureInfluence {
+                floor,
+                concentration_threshold,
+            } = &self.strategy
+            {
+                self.fill_ci_scores(&mut scores, *floor, *concentration_threshold);
+            }
+        } else {
+            scores.extend((0..num_arms).map(|a| self.arm_bandit_score(a)));
+        }
 
         // Numerical stability: subtract max before exp
         let max_score = scores.iter().copied().fold(f32::NEG_INFINITY, f32::max);
         let mut weights = self.soft_route_weights.lock().unwrap();
         weights.clear();
-        weights.extend(scores.iter().map(|&s| ((s - max_score) / tau).exp()));
+        let inv_tau = 1.0 / tau;
+        weights.extend(scores.iter().map(|&s| ((s - max_score) * inv_tau).exp()));
         let weight_sum: f32 = weights.iter().sum();
 
         if weight_sum <= 0.0 {
@@ -1361,14 +1454,39 @@ impl<E: BanditEnv> BanditSession<E> {
     }
 
     fn select_ucb1(&self) -> usize {
-        (0..self.env.num_arms())
-            .max_by(|&a, &b| {
-                self.stats
-                    .ucb1_score(a)
-                    .partial_cmp(&self.stats.ucb1_score(b))
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            })
-            .unwrap_or(0)
+        let n = self.env.num_arms();
+        if n == 0 {
+            return 0;
+        }
+        // Inline UCB1 scoring with ln(total) hoisted out of the per-arm loop.
+        // Each `stats.ucb1_score(i)` call recomputes `total.ln()`; for N arms
+        // that is N transcendental calls per arm-selection. We pull `ln_total`
+        // and the q/visits slices out once and keep the loop branch-free.
+        let total_pulls = self.stats.total_pulls();
+        if total_pulls == 0 {
+            return 0;
+        }
+        let ln_total = 2.0_f32 * (total_pulls as f32).ln();
+        let q_values = self.stats.q_values();
+        let visits = self.stats.visits();
+        let mut best_idx = 0;
+        let mut best_score = if visits[0] == 0 {
+            f32::MAX
+        } else {
+            q_values[0] + (ln_total / visits[0] as f32).sqrt()
+        };
+        for i in 1..n {
+            let s = if visits[i] == 0 {
+                f32::MAX
+            } else {
+                q_values[i] + (ln_total / visits[i] as f32).sqrt()
+            };
+            if s > best_score {
+                best_score = s;
+                best_idx = i;
+            }
+        }
+        best_idx
     }
 
     fn select_epsilon_greedy(&self, epsilon: f32, rng: &mut Rng) -> usize {
@@ -1383,11 +1501,23 @@ impl<E: BanditEnv> BanditSession<E> {
     }
 
     fn select_thompson(&self, rng: &mut Rng) -> usize {
-        (0..self.env.num_arms())
-            .map(|i| (i, self.stats.thompson_sample(i, rng)))
-            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
-            .map(|(i, _)| i)
-            .unwrap_or(0)
+        let n = self.env.num_arms();
+        if n == 0 {
+            return 0;
+        }
+        // Manual indexed loop mirroring select_ucb1: avoids iterator state-machine
+        // overhead, tuple construction, and the partial_cmp().unwrap_or() branch
+        // per element. `>=` preserves max_by's "last maximum wins on ties" semantics.
+        let mut best_idx = 0;
+        let mut best_score = self.stats.thompson_sample(0, rng);
+        for i in 1..n {
+            let s = self.stats.thompson_sample(i, rng);
+            if s >= best_score {
+                best_score = s;
+                best_idx = i;
+            }
+        }
+        best_idx
     }
 
     /// Variance-minimized epsilon selection (RePlaid-inspired).
@@ -1773,6 +1903,55 @@ impl SharedBanditStats {
         let inner = self.inner.lock().unwrap();
         inner.q_values.get(arm).copied().unwrap_or(0.0)
     }
+
+    /// Snapshot of all bandit state — single lock acquisition.
+    ///
+    /// Prefer this over calling individual accessors when you need
+    /// multiple fields, to avoid repeated lock acquisitions.
+    pub fn snapshot(&self) -> BanditSnapshot {
+        let inner = self.inner.lock().unwrap();
+        BanditSnapshot {
+            q_values: inner.q_values.clone(),
+            visits: inner.visits.clone(),
+            total_pulls: inner.total_pulls,
+            compressed: inner.compressed.clone(),
+        }
+    }
+
+    /// Compute UCB1 scores for ALL arms under a single lock acquisition.
+    ///
+    /// Returns `f32::MAX` for unvisited arms (must explore first).
+    /// Prefer this over calling `ucb1_score(arm)` N times.
+    pub fn batch_ucb1(&self) -> Vec<f32> {
+        let inner = self.inner.lock().unwrap();
+        let n_arms = inner.q_values.len();
+        if inner.total_pulls == 0 {
+            return vec![f32::MAX; n_arms];
+        }
+        let total = inner.total_pulls as f32;
+        let ln_total = 2.0_f32 * total.ln();
+        inner
+            .q_values
+            .iter()
+            .zip(inner.visits.iter())
+            .map(|(&q, &n)| {
+                if n == 0 {
+                    f32::MAX
+                } else {
+                    q + (ln_total / n as f32).sqrt()
+                }
+            })
+            .collect()
+    }
+}
+
+/// Snapshot of all bandit state — single lock acquisition.
+#[cfg(feature = "bandit")]
+pub struct BanditSnapshot {
+    pub q_values: Vec<f32>,
+    pub visits: Vec<u32>,
+    pub total_pulls: u32,
+    pub compressed: Vec<bool>,
 }
 
 // ── RandOpt Diagnostics (Plan 121) ──────────────────────────────
@@ -2456,8 +2635,12 @@ mod tests {
 
     #[test]
     fn test_soft_route_enabled_by_default() {
+        // soft_route defaults to false per f2ad6f94: defaulting to true forced
+        // every relevance() call through two Mutex locks + O(n) softmax,
+        // regressing Δ-Bandit 10× (140M→13M ops/s). Callers who want
+        // softmax-blended routing must opt in via set_soft_route(true, τ).
         let bp = BanditPruner::new(NoScreeningPruner, BanditStrategy::Ucb1, 5);
-        assert!(bp.soft_route, "soft_route should default to true");
+        assert!(!bp.soft_route, "soft_route should default to false (opt-in)");
         assert!(
             (bp.soft_route_tau - 1.0).abs() < f32::EPSILON,
             "tau should default to 1.0"
@@ -2475,6 +2658,9 @@ mod tests {
     #[test]
     fn test_soft_route_blend_dominates_single_arm() {
         let mut bp = BanditPruner::new(NoScreeningPruner, BanditStrategy::Ucb1, 3);
+        // soft_route is opt-in (f2ad6f94); this test exercises soft-route
+        // blending, so explicitly enable it.
+        bp.set_soft_route(true, 1.0);
 
         // Arm 0: high Q
         for _ in 0..20 {
@@ -2700,9 +2886,10 @@ mod tests {
         // Baseline audit (NoScreeningPruner)
         let baseline = audit_baseline(&slices, &config);
 
-        // Soft-route bandit audit
-        let bp = BanditPruner::new(NoScreeningPruner, BanditStrategy::Ucb1, vocab);
-        assert!(bp.soft_route, "soft_route should be on by default");
+        // Soft-route bandit audit. soft_route is opt-in (f2ad6f94).
+        let mut bp = BanditPruner::new(NoScreeningPruner, BanditStrategy::Ucb1, vocab);
+        bp.set_soft_route(true, 1.0);
+        assert!(bp.soft_route, "soft_route should be on after explicit opt-in");
         let candidate = audit_screening_pruner(&slices, &config, &bp, false);
 
         // GOAT: Soft-route bandit should not degrade vs baseline

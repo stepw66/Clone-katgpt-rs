@@ -30,7 +30,7 @@
 
 use super::rope::RopeFreqs;
 use super::types::{ShardCalibration, ShardConfig, ShardLayer};
-use crate::simd::simd_scale_inplace;
+use crate::simd::{simd_scale_inplace, simd_sum_sq};
 use crate::spectralquant::spectral::{BitAllocator, LloydMaxQuantizer, waterfill_bits};
 use crate::spectralquant::spectral_rotation::SpectralRotation;
 use crate::spectralquant::types::LloydMaxCodebook;
@@ -44,6 +44,7 @@ pub struct ShardKVCache {
     pos: usize,
     n_layers: usize,
     kv_dim: usize,
+    #[allow(dead_code)]
     head_dim: usize,
     max_seq_len: usize,
     sink_tokens: usize,
@@ -682,9 +683,9 @@ impl ShardKVCache {
             for g in 0..n_groups {
                 let idx = indices[g] as usize;
                 let base = g * gs;
-                for d in 0..gs {
-                    self.scratch_rotated[base + d] = cb.centroids[idx * gs + d];
-                }
+                // memcpy of `gs` consecutive centroids beats scalar loop.
+                self.scratch_rotated[base..base + gs]
+                    .copy_from_slice(&cb.centroids[idx * gs..idx * gs + gs]);
             }
         }
 
@@ -797,16 +798,7 @@ impl crate::types::QuantizedKVCache for ShardKVCache {
 // ── Internal helpers ──────────────────────────────────────────────────
 
 fn simd_norm(v: &[f32]) -> f32 {
-    let mut sum = 0.0f32;
-    // Process in chunks of 4 to help auto-vectorization (most KV dims are multiples of 4).
-    let chunks = v.chunks_exact(4);
-    for c in chunks {
-        sum += c[0] * c[0] + c[1] * c[1] + c[2] * c[2] + c[3] * c[3];
-    }
-    for &x in v.chunks_exact(4).remainder() {
-        sum += x * x;
-    }
-    sum.sqrt()
+    simd_sum_sq(v, v.len()).sqrt()
 }
 
 /// In-place Walsh-Hadamard transform.
@@ -844,18 +836,38 @@ fn hadamard_transform_inplace(x: &mut [f32]) {
 fn quantize_to_idx(value: f32, centroids: &[f32]) -> u8 {
     let n = centroids.len();
     debug_assert!(n <= 256, "codebook too large for u8 index");
-    // Unrolled scan for small codebooks (common: 2, 4, 8, 16, 256 entries).
-    // Avoids iterator overhead and partial_cmp per element.
-    let mut best_idx = 0u8;
-    let mut best_dist = (value - centroids[0]).abs();
-    for i in 1..n {
-        let dist = (value - centroids[i]).abs();
-        if dist < best_dist {
-            best_dist = dist;
-            best_idx = i as u8;
+    if n <= 1 {
+        return 0;
+    }
+    // Lloyd-Max codebook centroids are sorted ascending (see
+    // `LloydMaxQuantizer::fit` — initialized via sorted quantile placement).
+    // Binary search gives O(log n) instead of O(n) on the per-token-per-channel
+    // quantize hot path. Matches `spectral_kv_cache::quantize_to_idx`.
+    if value <= centroids[0] {
+        return 0;
+    }
+    if value >= centroids[n - 1] {
+        return (n - 1) as u8;
+    }
+    // Find the bracket [lo, lo+1].
+    let mut lo = 0usize;
+    let mut hi = n - 1;
+    while lo + 1 < hi {
+        let mid = lo + (hi - lo) / 2;
+        if centroids[mid] <= value {
+            lo = mid;
+        } else {
+            hi = mid;
         }
     }
-    best_idx
+    // Pick the closer of the two brackets.
+    let d_lo = value - centroids[lo];
+    let d_hi = centroids[hi] - value;
+    if d_lo <= d_hi {
+        lo as u8
+    } else {
+        hi as u8
+    }
 }
 
 fn dequantize_idx(idx: u8, centroids: &[f32]) -> f32 {
@@ -937,13 +949,22 @@ fn kmeans_fit(
 }
 
 /// Pack variable-bit indices into bytes (LSB-first).
+/// `bits_per_dim.len()` must be `>= indices.len()` (callers always pass a full-length array).
 fn pack_variable_bits(indices: &[u8], bits_per_dim: &[u8], out: &mut Vec<u8>) {
     out.clear();
+    // Pre-reserve to avoid reallocation in the push loop. Inner Vecs were pre-sized
+    // with `kv_dim` capacity at construction; reserve keeps us within that capacity.
+    let total_bits: usize = bits_per_dim
+        .iter()
+        .take(indices.len())
+        .map(|&b| b as usize)
+        .sum();
+    out.reserve(total_bits.div_ceil(8));
     let mut bit_buffer = 0u64;
     let mut bits_in_buffer = 0u32;
 
     for (i, &idx) in indices.iter().enumerate() {
-        let bits = bits_per_dim.get(i).copied().unwrap_or(1) as u32;
+        let bits = bits_per_dim[i] as u32;
         bit_buffer |= (idx as u64) << bits_in_buffer;
         bits_in_buffer += bits;
 
@@ -959,13 +980,14 @@ fn pack_variable_bits(indices: &[u8], bits_per_dim: &[u8], out: &mut Vec<u8>) {
 }
 
 /// Unpack variable-bit indices from bytes (LSB-first).
+/// `bits_per_dim.len()` must be `>= n_dims` (callers always pass a full-length array).
 fn unpack_variable_bits(packed: &[u8], bits_per_dim: &[u8], n_dims: usize, out: &mut [u8]) {
     let mut bit_buffer = 0u64;
     let mut bits_in_buffer = 0u32;
     let mut byte_idx = 0;
 
     for (i, o) in out.iter_mut().enumerate().take(n_dims) {
-        let bits = bits_per_dim.get(i).copied().unwrap_or(1) as u32;
+        let bits = bits_per_dim[i] as u32;
         while bits_in_buffer < bits && byte_idx < packed.len() {
             bit_buffer |= (packed[byte_idx] as u64) << bits_in_buffer;
             bits_in_buffer += 8;

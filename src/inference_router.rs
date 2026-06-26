@@ -8,7 +8,7 @@
 //! GPU and ANE backends are optional (`Option<Box<dyn InferenceBackend>>`).
 //! When a backend is `None` the router falls back to CPU transparently.
 
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::time::Instant;
 
 use crate::inference_backend::InferenceBackend;
@@ -25,8 +25,64 @@ use crate::trigger_gate::RvThresholds;
 #[cfg(all(feature = "critical_interval_gate", feature = "rv_gated_routing"))]
 use crate::dllm_solver::{CriticalIntervalConfig, CriticalTierDecision, critical_tier_decision};
 
+#[cfg(feature = "rcd_residual")]
+use crate::dllm_solver::{ResidualMode, tier_to_residual_mode};
+
+// Plan 267 — Thicket Variance Probe (TVP) decoding-space density signal.
+// Composes with RV (Plan 202) for the G4 ablation gate: TVP+RV ≥ max(TVP, RV).
+//
+// The `TvpConfig` / `TvpSignal` / `TvpTierDecision` types are imported here so
+// the inline `tier_after_tvp` block in `forward()` and the `router_tests`
+// submodule (via `super::*`) can refer to them unqualified. The actual
+// TVP-facing impl methods live in `router_tvp.rs` (Issue 018 split).
+#[cfg(feature = "thicket_variance_probe")]
+use crate::pruners::thicket_variance_probe::{TvpConfig, TvpSignal, TvpTierDecision};
+
+// Plan 269 — CHIAR (Chiaroscuro Attention) router observation hook.
+// Observation-only: exposes CHIAR KV strategy utilization and regime gate
+// via RouterStats. Does NOT influence tier routing (CHIAR is per-token).
+#[cfg(feature = "chiaroscuro")]
+use crate::chiaroscuro::{ChiarRouterHook, ChiarRouterStats};
+
 #[cfg(feature = "modality_pruned_load")]
 use crate::pipeline_pruner::QueryClassifier;
+
+// ---------------------------------------------------------------------------
+// Issue 018 — sibling-module split.
+//
+// Cohesive sub-systems that used to live inline here have been moved to
+// sibling files to keep `inference_router.rs` under the 2048-line ceiling
+// in the user's AGENTS.md Rust rules. Every moved item keeps its original
+// `#[cfg(feature = ...)]` gate; the public API surface is preserved via
+// `pub use` re-exports below so downstream callers (e.g.
+// `examples/module_aware_routing.rs`) can still write
+// `katgpt::inference_router::{ComputeTarget, route_by_module_energy, ...}`.
+//
+// Layout:
+//   router_compute_target.rs — ComputeTarget + ModuleEnergyProfile +
+//                              route_by_module_energy + their unit tests
+//                              (Plan 264, gated on `module_energy_route`).
+//   router_tvp.rs            — TVP-facing impl block on `InferenceRouter`
+//                              (Plan 267, gated on `thicket_variance_probe`).
+//   router_tests.rs          — integration/unit tests for the router
+//                              (cfg(test) only).
+// ---------------------------------------------------------------------------
+#[cfg(feature = "module_energy_route")]
+mod router_compute_target;
+#[cfg(feature = "module_energy_route")]
+pub use router_compute_target::{ComputeTarget, ModuleEnergyProfile, route_by_module_energy};
+
+#[cfg(feature = "thicket_variance_probe")]
+mod router_tvp;
+// TVP types (`TvpSignal`, `TvpConfig`, `TvpTierDecision`) are NOT re-exported
+// here — they remain accessible only at their canonical path
+// `crate::pruners::thicket_variance_probe::*`, matching the pre-split
+// behavior. The private `use` import at the top of this file still brings
+// them into module scope so `router_tests` (via `super::*`) and the inline
+// `tier_after_tvp` block in `forward()` can refer to them unqualified.
+
+#[cfg(test)]
+mod router_tests;
 
 // ---------------------------------------------------------------------------
 // RouterStats
@@ -56,6 +112,16 @@ pub struct RouterStats {
     /// Current Lodestar budget remaining (-1 if unavailable).
     #[cfg(feature = "lodestar")]
     pub lodestar_budget_remaining: i32,
+    /// Breakeven routing stats (Plan 250).
+    #[cfg(feature = "breakeven_routing")]
+    pub breakeven: crate::breakeven::BreakevenStats,
+    /// Current TVP signal (Plan 267). `None` if `thicket_variance_probe` disabled.
+    #[cfg(feature = "thicket_variance_probe")]
+    pub tvp_signal: Option<TvpSignal>,
+    /// CHIAR (Plan 269) router observation stats. `None` if `chiaroscuro` disabled
+    /// or no keys observed yet.
+    #[cfg(feature = "chiaroscuro")]
+    pub chiar_stats: Option<ChiarRouterStats>,
 }
 
 // ---------------------------------------------------------------------------
@@ -69,14 +135,18 @@ pub struct RouterStats {
 /// On tier-up: attempts compilation; falls back to CPU on failure.
 /// On tier-down: releases GPU/ANE, returns to CPU-only.
 pub struct InferenceRouter {
-    gpu: Option<Box<dyn InferenceBackend>>,
+    // NOTE: `gpu` and `gate` are `pub(crate)` so the TVP impl block in
+    // `router_tvp.rs` (Issue 018 split) can read gate config / GPU presence
+    // without exposing them on the public API.
+    pub(crate) gpu: Option<Box<dyn InferenceBackend>>,
     ane: Option<Box<dyn InferenceBackend>>,
-    gate: TriggerGate,
+    pub(crate) gate: TriggerGate,
     config: Config,
     /// Monotonically increasing inference counter (atomic for borrow-checker compatibility).
     total_inferences: AtomicU64,
-    /// Number of tier transitions since creation.
-    tier_transitions: AtomicU64,
+    /// Number of tier transitions since creation. Bounded by total_inferences,
+    /// so u32 (4B cap) is more than enough — saves 4 bytes vs AtomicU64.
+    tier_transitions: AtomicU32,
     last_backend: &'static str,
     /// Trust signal from speculative verification (0.0 = low trust, 1.0 = high trust).
     /// Updated externally via `update_trust()`. Influences tier transitions.
@@ -103,6 +173,25 @@ pub struct InferenceRouter {
     /// Last observed critical interval entropy (Plan 222 T15).
     #[cfg(all(feature = "critical_interval_gate", feature = "rv_gated_routing"))]
     last_critical_entropy: f32,
+    /// Breakeven bandit for cost-aware tier routing (Plan 250).
+    #[cfg(feature = "breakeven_routing")]
+    breakeven: crate::breakeven::BreakevenBandit,
+    /// TVP signal (Plan 267) — decoding-space disagreement from K parallel probes.
+    /// Starts as `None` (no probes run yet). Updated via `update_tvp()` after
+    /// the probe-runner completes. When `None`, has zero routing impact.
+    ///
+    /// `pub(crate)` so the TVP impl block in `router_tvp.rs` (Issue 018 split)
+    /// can read/mutate it without exposing it on the public API.
+    #[cfg(feature = "thicket_variance_probe")]
+    pub(crate) tvp_signal: Option<TvpSignal>,
+    /// TVP config (Plan 267) — promote/demote thresholds + probe knobs.
+    /// `pub(crate)` for the same reason as `tvp_signal` above.
+    #[cfg(feature = "thicket_variance_probe")]
+    pub(crate) tvp_config: TvpConfig,
+    /// CHIAR observation hook (Plan 269 T15) — KV strategy utilization + regime gate.
+    /// Observation-only; does NOT influence tier routing.
+    #[cfg(feature = "chiaroscuro")]
+    chiar_hook: ChiarRouterHook,
 }
 
 impl InferenceRouter {
@@ -134,7 +223,7 @@ impl InferenceRouter {
             gate: TriggerGate::new(gate_config, gpu_available, ane_available),
             config: model_config,
             total_inferences: AtomicU64::new(0),
-            tier_transitions: AtomicU64::new(0),
+            tier_transitions: AtomicU32::new(0),
             last_backend: "CPU",
             trust_signal: 1.0,
             #[cfg(feature = "rv_gated_routing")]
@@ -151,6 +240,14 @@ impl InferenceRouter {
             critical_interval_config: CriticalIntervalConfig::default(),
             #[cfg(all(feature = "critical_interval_gate", feature = "rv_gated_routing"))]
             last_critical_entropy: 0.0,
+            #[cfg(feature = "breakeven_routing")]
+            breakeven: crate::breakeven::BreakevenBandit::with_defaults(),
+            #[cfg(feature = "thicket_variance_probe")]
+            tvp_signal: None,
+            #[cfg(feature = "thicket_variance_probe")]
+            tvp_config: TvpConfig::default(),
+            #[cfg(feature = "chiaroscuro")]
+            chiar_hook: ChiarRouterHook::new(),
         }
     }
 
@@ -186,10 +283,24 @@ impl InferenceRouter {
         None
     }
 
+    fn signal_recompile_for_tier(&mut self, tier: ComputeTier) {
+        if matches!(tier, ComputeTier::CpuGpu | ComputeTier::CpuGpuAne)
+            && let Some(ref mut gpu) = self.gpu
+        {
+            gpu.recompile_hint();
+        }
+        if matches!(tier, ComputeTier::CpuGpuAne)
+            && let Some(ref mut ane) = self.ane
+        {
+            ane.recompile_hint();
+        }
+    }
+
     /// Run one forward pass, routing to the appropriate backend.
     ///
     /// Checks the [`TriggerGate`] for tier changes, selects the backend, and
     /// records inference timing for future load estimation.
+    #[inline]
     pub fn forward<'a>(
         &mut self,
         ctx: &'a mut ForwardContext,
@@ -202,17 +313,7 @@ impl InferenceRouter {
         if let Some(new_tier) = self.gate.evaluate() {
             log::info!("Router tier transition → {new_tier}");
             self.tier_transitions.fetch_add(1, Ordering::Relaxed);
-            // Signal recompile to GPU/ANE backends when they exist.
-            if matches!(new_tier, ComputeTier::CpuGpu | ComputeTier::CpuGpuAne)
-                && let Some(ref mut gpu) = self.gpu
-            {
-                gpu.recompile_hint();
-            }
-            if matches!(new_tier, ComputeTier::CpuGpuAne)
-                && let Some(ref mut ane) = self.ane
-            {
-                ane.recompile_hint();
-            }
+            self.signal_recompile_for_tier(new_tier);
         }
 
         let start = Instant::now();
@@ -223,28 +324,31 @@ impl InferenceRouter {
         // Trust-triggered tier adjustment (Plan 182)
         let tier_after_trust = if self.trust_signal < 0.4 && tier == ComputeTier::CpuOnly {
             // Low trust on CPU → tier up to GPU if available
-            if self.gpu.is_some() {
-                log::info!(
-                    "Router trust-triggered tier-up: trust={:.2}, CPU→CPU+GPU",
-                    self.trust_signal
-                );
-                ComputeTier::CpuGpu
-            } else {
-                tier
+            match self.gpu.is_some() {
+                true => {
+                    log::info!(
+                        "Router trust-triggered tier-up: trust={:.2}, CPU→CPU+GPU",
+                        self.trust_signal
+                    );
+                    ComputeTier::CpuGpu
+                }
+                false => tier,
             }
         } else if self.trust_signal > 0.8 && tier == ComputeTier::CpuGpu {
-            // High trust on GPU → allow tier down to CPU
-            // Only if GPU is not under load (check estimated QPS)
-            if self.gate.estimated_qps()
-                < self.gate.config().gpu_activate_qps * self.gate.config().hysteresis_factor
-            {
-                log::info!(
-                    "Router trust-triggered tier-down: trust={:.2}, CPU+GPU→CPU",
-                    self.trust_signal
-                );
-                ComputeTier::CpuOnly
-            } else {
-                tier
+            // High trust on GPU → allow tier down to CPU.
+            // Snapshot gate config once to avoid repeated method calls.
+            let cfg = self.gate.config();
+            let low_load =
+                self.gate.estimated_qps() < cfg.gpu_activate_qps * cfg.hysteresis_factor;
+            match low_load {
+                true => {
+                    log::info!(
+                        "Router trust-triggered tier-down: trust={:.2}, CPU+GPU→CPU",
+                        self.trust_signal
+                    );
+                    ComputeTier::CpuOnly
+                }
+                false => tier,
             }
         } else {
             tier
@@ -287,19 +391,52 @@ impl InferenceRouter {
         #[cfg(not(all(feature = "critical_interval_gate", feature = "rv_gated_routing")))]
         let tier_after_critical = tier_after_rv;
 
+        // TVP tier adjustment (Plan 267 T10) — decoding-space disagreement.
+        // Sits AFTER critical-interval (entropy-driven) and BEFORE breakeven
+        // (cost-amortization veto). The decision logic is extracted into
+        // [`crate::pruners::thicket_variance_probe::tvp_tier_decision`] so it
+        // can be unit-tested without running the full forward pass.
+        //
+        // Format-only disagreement (TvpSignal.format_disagreement) is intentionally
+        // routed to canonicalization, NOT to compute promotion — see G5.
+        #[cfg(feature = "thicket_variance_probe")]
+        let tier_after_tvp = match self.observe_tvp_decision(tier_after_critical) {
+            TvpTierDecision::PromoteGpu => ComputeTier::CpuGpu,
+            TvpTierDecision::DemoteCpu => ComputeTier::CpuOnly,
+            _ => tier_after_critical,
+        };
+        #[cfg(not(feature = "thicket_variance_probe"))]
+        let tier_after_tvp = tier_after_critical;
+
+        // Breakeven tier adjustment (Plan 250)
+        // Cost-aware override: promote when tier upgrade has amortized, defer when not.
+        #[cfg(feature = "breakeven_routing")]
+        let tier_final = match self.breakeven.select_tier(tier_after_tvp) {
+            Some(breakeven_tier) if breakeven_tier != tier_after_tvp => {
+                log::info!(
+                    "Router breakeven tier override: {tier_after_tvp}→{breakeven_tier}"
+                );
+                breakeven_tier
+            }
+            _ => tier_after_tvp,
+        };
+        #[cfg(not(feature = "breakeven_routing"))]
+        let tier_final = tier_after_tvp;
+
         // Route to the appropriate backend.
         //
         // We populate ctx.logits via forward(), then return a borrow of ctx.logits
         // (not from self) to satisfy the lifetime constraint that the returned slice
         // borrows from `ctx`.
-        let backend_name = match tier_after_critical {
+        //
+        // CpuGpu and CpuGpuAne both route through dispatch_gpu_or_cpu: the ANE
+        // compile path is not yet implemented, so ANE falls back to GPU dispatch.
+        let backend_name = match tier_final {
             ComputeTier::CpuOnly => {
                 crate::transformer::forward(ctx, weights, cache, token, pos, &self.config);
                 "CPU"
             }
-            ComputeTier::CpuGpu => self.dispatch_gpu_or_cpu(ctx, weights, cache, token, pos),
-            ComputeTier::CpuGpuAne => {
-                // ANE compile not yet implemented; route to GPU if available.
+            ComputeTier::CpuGpu | ComputeTier::CpuGpuAne => {
                 self.dispatch_gpu_or_cpu(ctx, weights, cache, token, pos)
             }
         };
@@ -310,16 +447,41 @@ impl InferenceRouter {
         self.total_inferences.fetch_add(1, Ordering::Relaxed);
         self.last_backend = backend_name;
 
+        // Feed timing into breakeven bandit (Plan 250).
+        #[cfg(feature = "breakeven_routing")]
+        {
+            use crate::breakeven::BreakevenTierPair;
+            match tier_final {
+                ComputeTier::CpuOnly => {
+                    // CPU is the baseline for CpuToGpu pair.
+                    self.breakeven
+                        .observe_baseline(BreakevenTierPair::CpuToGpu, elapsed_us);
+                }
+                ComputeTier::CpuGpu => {
+                    // GPU is the upgraded tier for CpuToGpu pair.
+                    self.breakeven
+                        .observe_tier(BreakevenTierPair::CpuToGpu, elapsed_us);
+                }
+                ComputeTier::CpuGpuAne => {
+                    // ANE is the upgraded tier for GpuToAne pair.
+                    self.breakeven
+                        .observe_tier(BreakevenTierPair::GpuToAne, elapsed_us);
+                }
+            }
+        }
+
         // Return logits borrowed from ctx (not from self).
         &ctx.logits[..self.config.vocab_size]
     }
 
     /// Update trust signal from verifier (called after each speculative decode).
+    #[inline]
     pub fn update_trust(&mut self, trust: f32) {
         self.trust_signal = trust;
     }
 
     /// Get current trust signal.
+    #[inline]
     pub fn trust_signal(&self) -> f32 {
         self.trust_signal
     }
@@ -331,6 +493,7 @@ impl InferenceRouter {
     /// Call after each speculative decode verification.
     /// No-op when `rv_gated_routing` is disabled.
     #[cfg(feature = "rv_gated_routing")]
+    #[inline]
     pub fn observe_acceptance(&mut self, accepted: bool) {
         if let Some(ref mut tracker) = self.rv_tracker {
             tracker.observe(accepted);
@@ -342,6 +505,7 @@ impl InferenceRouter {
     /// RV ∈ [0.0, 0.25] for Bernoulli acceptance data.
     /// 0.0 = all accept/reject (confident). 0.25 = 50/50 (uncertain).
     #[cfg(feature = "rv_gated_routing")]
+    #[inline]
     pub fn rv_signal(&self) -> f64 {
         self.rv_tracker.as_ref().map(|t| t.rv()).unwrap_or(-1.0)
     }
@@ -349,6 +513,7 @@ impl InferenceRouter {
     /// Reset the RV tracker (call at query boundaries).
     /// No-op when `rv_gated_routing` is disabled.
     #[cfg(feature = "rv_gated_routing")]
+    #[inline]
     pub fn reset_rv(&mut self) {
         if let Some(ref mut tracker) = self.rv_tracker {
             tracker.reset();
@@ -377,6 +542,7 @@ impl InferenceRouter {
     /// - `PromoteGpu` — critical interval + low load, promote to GPU
     /// - `StayCpu` — critical interval + high load, stay on CPU with fast solver
     #[cfg(all(feature = "critical_interval_gate", feature = "rv_gated_routing"))]
+    #[inline]
     pub fn observe_critical_entropy(&mut self, entropy: f32) -> CriticalTierDecision {
         self.last_critical_entropy = entropy;
         let current_tier = self.gate.current_tier();
@@ -481,6 +647,7 @@ impl InferenceRouter {
     /// Central routing point for GPU dispatch:
     /// 1. Auto-compiles weights on first use (lazy compile)
     /// 2. Dispatches to GPU if compiled, else falls back to CPU
+    #[inline]
     fn dispatch_gpu_or_cpu(
         &mut self,
         ctx: &mut ForwardContext,
@@ -490,13 +657,25 @@ impl InferenceRouter {
         pos: usize,
     ) -> &'static str {
         if let Some(ref mut gpu) = self.gpu {
-            if !gpu.is_compiled() {
+            // Single is_compiled() probe: if not yet compiled, attempt compile
+            // once and capture readiness, avoiding a redundant probe afterwards.
+            let ready = if gpu.is_compiled() {
+                true
+            } else {
                 match gpu.compile(weights, &self.config) {
-                    Ok(()) => log::info!("TriggerGate: CPU → CPU+GPU (compiled)"),
-                    Err(e) => log::info!("Router: GPU compile failed ({e}), falling back to CPU"),
+                    Ok(()) => {
+                        log::info!("TriggerGate: CPU → CPU+GPU (compiled)");
+                        true
+                    }
+                    Err(e) => {
+                        log::info!(
+                            "Router: GPU compile failed ({e}), falling back to CPU"
+                        );
+                        false
+                    }
                 }
-            }
-            if gpu.is_compiled() {
+            };
+            if ready {
                 gpu.forward(ctx, weights, cache, token, pos, &self.config);
                 return "GPU";
             }
@@ -512,7 +691,7 @@ impl InferenceRouter {
             total_inferences: self.total_inferences.load(Ordering::Relaxed),
             estimated_qps: self.gate.estimated_qps(),
             last_backend: self.last_backend,
-            tier_transitions: self.tier_transitions.load(Ordering::Relaxed),
+            tier_transitions: self.tier_transitions.load(Ordering::Relaxed) as u64,
             trust_signal: self.trust_signal,
             #[cfg(feature = "rv_gated_routing")]
             rv_signal: self.rv_signal(),
@@ -520,6 +699,15 @@ impl InferenceRouter {
             lodestar_distance: self.lodestar_distance,
             #[cfg(feature = "lodestar")]
             lodestar_budget_remaining: self.lodestar_budget_remaining,
+            #[cfg(feature = "breakeven_routing")]
+            breakeven: self.breakeven.stats(),
+            #[cfg(feature = "thicket_variance_probe")]
+            tvp_signal: self.tvp_signal,
+            #[cfg(feature = "chiaroscuro")]
+            chiar_stats: {
+                let s = self.chiar_hook.stats();
+                if s.tokens_observed > 0 { Some(s) } else { None }
+            },
         }
     }
 
@@ -529,16 +717,19 @@ impl InferenceRouter {
     /// tokens, reducing per-inference overhead. On CPU, this is equivalent to calling
     /// `forward()` in a loop but with a single tier evaluation.
     ///
-    /// Returns a vector of logit vectors, one per `(token, pos)` pair.
+    /// Returns a flat buffer of logits with `vocab_size` stride per token.
     /// Unlike `forward()`, this returns owned `Vec<f32>` because the borrow checker
     /// doesn't allow holding multiple mutable borrows of `ctx` across loop iterations.
+    ///
+    /// Layout: `[token0_logits, token1_logits, ...]` where each segment is `config.vocab_size` elements.
+    #[inline]
     pub fn forward_batch(
         &mut self,
         ctx: &mut ForwardContext,
         weights: &TransformerWeights,
         cache: &mut MultiLayerKVCache,
         tokens: &[(usize, usize)],
-    ) -> Vec<Vec<f32>> {
+    ) -> Vec<f32> {
         if tokens.is_empty() {
             return Vec::new();
         }
@@ -547,21 +738,14 @@ impl InferenceRouter {
         if let Some(new_tier) = self.gate.evaluate() {
             log::info!("Router batch tier transition → {new_tier}");
             self.tier_transitions.fetch_add(1, Ordering::Relaxed);
-            if matches!(new_tier, ComputeTier::CpuGpu | ComputeTier::CpuGpuAne)
-                && let Some(ref mut gpu) = self.gpu
-            {
-                gpu.recompile_hint();
-            }
-            if matches!(new_tier, ComputeTier::CpuGpuAne)
-                && let Some(ref mut ane) = self.ane
-            {
-                ane.recompile_hint();
-            }
+            self.signal_recompile_for_tier(new_tier);
         }
 
         let tier = self.gate.current_tier();
         let config = &self.config;
-        let mut results = Vec::with_capacity(tokens.len());
+        let vocab_size = config.vocab_size;
+        let batch_len = tokens.len();
+        let mut flat = Vec::with_capacity(batch_len * vocab_size);
 
         match tier {
             ComputeTier::CpuOnly | ComputeTier::CpuGpu | ComputeTier::CpuGpuAne => {
@@ -571,7 +755,7 @@ impl InferenceRouter {
                 for &(token, pos) in tokens {
                     let logits =
                         crate::transformer::forward(ctx, weights, cache, token, pos, config);
-                    results.push(logits.to_vec());
+                    flat.extend_from_slice(&logits[..vocab_size]);
                 }
                 let elapsed_us = batch_start.elapsed().as_micros() as u64;
                 // Record total batch time as a single inference for QPS estimation.
@@ -580,10 +764,10 @@ impl InferenceRouter {
         }
 
         self.total_inferences
-            .fetch_add(tokens.len() as u64, Ordering::Relaxed);
+            .fetch_add(batch_len as u64, Ordering::Relaxed);
         self.last_backend = "CPU";
 
-        results
+        flat
     }
 
     /// Borrow the inner [`TriggerGate`].
@@ -592,8 +776,51 @@ impl InferenceRouter {
     }
 
     /// Delegate queue-depth recording to the gate.
+    #[inline]
     pub fn record_queue_depth(&self, depth: usize) {
         self.gate.record_queue_depth(depth);
+    }
+
+    /// Borrow the breakeven bandit (Plan 250).
+    #[cfg(feature = "breakeven_routing")]
+    pub fn breakeven(&self) -> &crate::breakeven::BreakevenBandit {
+        &self.breakeven
+    }
+
+    // NOTE: TVP API (`update_tvp`, `tvp_signal`, `set_tvp_config`, `tvp_config`,
+    // `observe_tvp_decision`) moved to `router_tvp.rs` (Issue 018 split).
+
+    // ── CHIAR Observation API (Plan 269 T15) ────────────────────
+
+    /// Observe a key embedding for CHIAR KV strategy classification (Plan 269).
+    ///
+    /// Updates the τ calibrator and dispatches the key to a storage strategy
+    /// (DctTruncated / Quantized / FullPrecision). Call this for each key
+    /// entering the KV cache when the `chiaroscuro` feature is enabled.
+    ///
+    /// Observation-only — does NOT influence tier routing.
+    #[cfg(feature = "chiaroscuro")]
+    #[inline]
+    pub fn observe_chiar_key(&mut self, key: &[f32]) {
+        self.chiar_hook.observe_key(key);
+    }
+
+    /// Observe a prompt token's spectral entropy for CHIAR regime classification (Plan 269).
+    ///
+    /// Updates the Welford variance tracker inside the regime gate.
+    /// Observation-only — does NOT influence tier routing.
+    #[cfg(feature = "chiaroscuro")]
+    #[inline]
+    pub fn observe_chiar_prompt_token(&mut self, h: f32) {
+        self.chiar_hook.observe_prompt_token(h);
+    }
+
+    /// Get the current CHIAR router stats snapshot (Plan 269).
+    /// Returns `None` if no keys have been observed yet.
+    #[cfg(feature = "chiaroscuro")]
+    pub fn chiar_stats(&self) -> Option<ChiarRouterStats> {
+        let s = self.chiar_hook.stats();
+        if s.tokens_observed > 0 { Some(s) } else { None }
     }
 
     /// Classify a query and select the optimal pipeline configuration (Plan 227 Phase 3).
@@ -602,6 +829,16 @@ impl InferenceRouter {
     #[inline]
     pub fn select_pipeline(&self, prompt: &str) -> crate::pipeline_pruner::PipelineConfig {
         self.query_classifier.classify_prompt(prompt)
+    }
+
+    /// Get the current residual mode based on the active compute tier (Plan 258).
+    ///
+    /// Plasma path returns `Skip` for zero overhead.
+    /// Higher tiers return progressively more expensive residual modes.
+    #[cfg(feature = "rcd_residual")]
+    #[inline]
+    pub fn residual_mode(&self) -> ResidualMode {
+        tier_to_residual_mode(self.gate.current_tier())
     }
 
     /// Generate tokens autoregressively using the routed forward path.
@@ -676,361 +913,15 @@ impl InferenceRouter {
     {
         let candidates = generator.generate(condition, rng).unwrap_or_default();
         let validity = pruner.batch_is_valid(&candidates);
-        candidates
-            .into_iter()
-            .zip(validity)
-            .filter_map(|(c, v)| if v { Some(c) } else { None })
-            .collect()
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::types::Rng;
-
-    /// Helper: build a router with a fast gate (tiny min interval) for tests.
-    fn fast_router(gpu: bool, ane: bool) -> InferenceRouter {
-        let gate_config = TriggerGateConfig {
-            gpu_activate_qps: 10_000.0,
-            ane_activate_qps: 100_000.0,
-            hysteresis_factor: 0.7,
-            queue_depth_trigger: 100,
-            latency_p99_trigger_us: 5000,
-            min_tier_change_interval_ms: 10,
-        };
-        InferenceRouter::new(gate_config, Config::micro(), gpu, ane)
-    }
-
-    /// Helper: create micro model fixtures for forward-pass tests.
-    fn micro_fixtures() -> (TransformerWeights, ForwardContext, MultiLayerKVCache) {
-        let config = Config::micro();
-        let mut rng = Rng::new(42);
-        let weights = TransformerWeights::new(&config, &mut rng);
-        let ctx = ForwardContext::new(&config);
-        let cache = MultiLayerKVCache::new(&config);
-        (weights, ctx, cache)
-    }
-
-    #[test]
-    fn test_router_starts_cpu_only() {
-        let router = fast_router(true, true);
-        assert_eq!(router.gate().current_tier(), ComputeTier::CpuOnly);
-    }
-
-    #[test]
-    fn test_router_forward_uses_cpu() {
-        let mut router = fast_router(false, false);
-        let (weights, mut ctx, mut cache) = micro_fixtures();
-
-        let logits = router.forward(&mut ctx, &weights, &mut cache, 0, 0);
-        assert_eq!(logits.len(), Config::micro().vocab_size);
-        assert_eq!(router.last_backend, "CPU");
-    }
-
-    #[test]
-    fn test_router_stats_initial() {
-        let router = fast_router(true, true);
-        let stats = router.stats();
-        assert_eq!(stats.current_tier, ComputeTier::CpuOnly);
-        assert_eq!(stats.total_inferences, 0);
-        assert_eq!(stats.tier_transitions, 0);
-        assert_eq!(stats.last_backend, "CPU");
-    }
-
-    #[test]
-    fn test_router_promotes_under_load() {
-        let mut router = fast_router(true, true);
-        let (weights, mut ctx, mut cache) = micro_fixtures();
-        let block_size = Config::micro().block_size;
-
-        // Run enough inferences quickly to build up QPS.
-        // With gpu_activate_qps=10_000 and min_tier_change_interval_ms=10,
-        // we need enough forwards in a short window to exceed 10k QPS.
-        // Each forward is very fast on micro model, so we do many.
-        // Keep pos within block_size to avoid KV cache overflow.
-        for i in 0..200 {
-            let pos = i % block_size;
-            let token = i % Config::micro().vocab_size;
-            // Reset cache when wrapping around.
-            if pos == 0 && i > 0 {
-                cache = MultiLayerKVCache::new(&Config::micro());
-            }
-            router.forward(&mut ctx, &weights, &mut cache, token, pos);
-        }
-
-        // The tier may or may not have promoted depending on actual timing,
-        // but evaluate() should have been called each time. Verify the router
-        // is still functional and tracking state.
-        let stats = router.stats();
-        assert!(stats.total_inferences > 0);
-        // Tier transitions tracked even if promote didn't fire (timing-dependent).
-        assert!(stats.tier_transitions <= stats.total_inferences);
-    }
-
-    #[test]
-    fn test_router_falls_back_to_cpu_without_gpu() {
-        let mut router = fast_router(true, true);
-        let (weights, mut ctx, mut cache) = micro_fixtures();
-
-        // Manually force the gate into CpuGpu tier by manipulating it.
-        // Since GPU backend is None, it should fall back to CPU.
-        // We'll record a bunch of inferences and queue depth to force promotion.
-        router.record_queue_depth(200); // above queue_depth_trigger=100
-
-        // Run forward — this records inference but evaluate() also checks QPS.
-        // Even without promotion, the CpuGpu path is tested when the gate
-        // stays at CpuOnly (which routes to CPU anyway).
-        let logits = router.forward(&mut ctx, &weights, &mut cache, 0, 0);
-        assert_eq!(logits.len(), Config::micro().vocab_size);
-
-        // The key invariant: regardless of tier, GPU=None means CPU fallback.
-        // Test that explicitly by checking stats shows CPU was used.
-        assert_eq!(router.stats().last_backend, "CPU");
-    }
-
-    #[test]
-    fn test_router_records_inferences() {
-        let mut router = fast_router(false, false);
-        let (weights, mut ctx, mut cache) = micro_fixtures();
-
-        assert_eq!(router.stats().total_inferences, 0);
-
-        router.forward(&mut ctx, &weights, &mut cache, 0, 0);
-        assert_eq!(router.stats().total_inferences, 1);
-
-        router.forward(&mut ctx, &weights, &mut cache, 1, 1);
-        assert_eq!(router.stats().total_inferences, 2);
-
-        router.forward(&mut ctx, &weights, &mut cache, 2, 2);
-        assert_eq!(router.stats().total_inferences, 3);
-    }
-
-    #[test]
-    fn test_router_queue_depth_delegation() {
-        let router = fast_router(true, true);
-
-        router.record_queue_depth(42);
-        // Verify via the gate's public interface that depth was recorded.
-        // The gate stores depth internally; we can't read it back directly
-        // but we can verify it influences should_promote.
-        // With queue_depth_trigger=100, depth=42 should NOT trigger promotion.
-        assert_eq!(router.gate().current_tier(), ComputeTier::CpuOnly);
-        assert!(router.gate().should_promote().is_none());
-
-        // Now set depth above threshold.
-        router.record_queue_depth(150);
-        // should_promote considers QPS too, but the queue depth alone is enough.
-        // Since we have 0 QPS, the queue_depth_trigger path should fire.
-        assert!(router.gate().should_promote().is_some());
-    }
-
-    #[test]
-    fn test_forward_batch_empty() {
-        let mut router = fast_router(false, false);
-        let (weights, mut ctx, mut cache) = micro_fixtures();
-
-        let results = router.forward_batch(&mut ctx, &weights, &mut cache, &[]);
-        assert!(results.is_empty());
-        assert_eq!(router.stats().total_inferences, 0);
-    }
-
-    #[test]
-    fn test_forward_batch_single_token() {
-        let config = Config::micro();
-        let mut rng = Rng::new(42);
-        let weights = TransformerWeights::new(&config, &mut rng);
-        let mut ctx = ForwardContext::new(&config);
-        let mut cache = MultiLayerKVCache::new(&config);
-
-        let mut router = fast_router(false, false);
-
-        let results = router.forward_batch(&mut ctx, &weights, &mut cache, &[(0, 0)]);
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0].len(), config.vocab_size);
-        assert_eq!(router.stats().total_inferences, 1);
-    }
-
-    #[test]
-    fn test_forward_batch_multiple_tokens() {
-        let config = Config::micro();
-        let mut rng = Rng::new(42);
-        let weights = TransformerWeights::new(&config, &mut rng);
-        let mut ctx = ForwardContext::new(&config);
-        let mut cache = MultiLayerKVCache::new(&config);
-
-        let mut router = fast_router(false, false);
-
-        // Build a batch of 5 tokens within block_size.
-        let batch: Vec<(usize, usize)> = (0..5).map(|i| (i, i)).collect();
-        let results = router.forward_batch(&mut ctx, &weights, &mut cache, &batch);
-
-        assert_eq!(results.len(), 5);
-        for (i, logits) in results.iter().enumerate() {
-            assert_eq!(
-                logits.len(),
-                config.vocab_size,
-                "logits[{}] wrong length",
-                i
-            );
-        }
-        assert_eq!(router.stats().total_inferences, 5);
-    }
-
-    #[test]
-    fn test_forward_batch_matches_sequential_forward() {
-        let config = Config::micro();
-        let mut rng = Rng::new(42);
-        let weights = TransformerWeights::new(&config, &mut rng);
-
-        // Sequential forward (one at a time).
-        let mut ctx1 = ForwardContext::new(&config);
-        let mut cache1 = MultiLayerKVCache::new(&config);
-        let mut router1 = fast_router(false, false);
-        let mut sequential_logits = Vec::new();
-        for i in 0..3 {
-            let logits = router1.forward(&mut ctx1, &weights, &mut cache1, i, i);
-            sequential_logits.push(logits.to_vec());
-        }
-
-        // Batch forward.
-        let mut ctx2 = ForwardContext::new(&config);
-        let mut cache2 = MultiLayerKVCache::new(&config);
-        let mut router2 = fast_router(false, false);
-        let batch: Vec<(usize, usize)> = (0..3).map(|i| (i, i)).collect();
-        let batch_logits = router2.forward_batch(&mut ctx2, &weights, &mut cache2, &batch);
-
-        assert_eq!(sequential_logits.len(), batch_logits.len());
-        for (i, (seq, batch)) in sequential_logits
-            .iter()
-            .zip(batch_logits.iter())
-            .enumerate()
-        {
-            for (j, (a, b)) in seq.iter().zip(batch.iter()).enumerate() {
-                assert!(
-                    (a - b).abs() < 1e-6,
-                    "logits mismatch at [{i}][{j}]: {a} vs {b}"
-                );
+        // Pre-allocate with exact valid count to avoid incremental Vec growth
+        // during collect (filter_map yields unknown lower-bound size hint).
+        let valid_count = validity.iter().filter(|&&v| v).count();
+        let mut result = Vec::with_capacity(valid_count);
+        for (c, v) in candidates.into_iter().zip(validity) {
+            if v {
+                result.push(c);
             }
         }
-    }
-
-    #[test]
-    fn test_forward_batch_records_all_inferences() {
-        let config = Config::micro();
-        let mut rng = Rng::new(42);
-        let weights = TransformerWeights::new(&config, &mut rng);
-        let mut ctx = ForwardContext::new(&config);
-        let mut cache = MultiLayerKVCache::new(&config);
-        let mut router = fast_router(false, false);
-
-        assert_eq!(router.stats().total_inferences, 0);
-
-        let batch: Vec<(usize, usize)> = (0..4).map(|i| (i, i)).collect();
-        let _ = router.forward_batch(&mut ctx, &weights, &mut cache, &batch);
-
-        assert_eq!(router.stats().total_inferences, 4);
-    }
-
-    #[cfg(feature = "lodestar")]
-    #[test]
-    fn test_lodestar_route_hook_observe_and_query() {
-        let mut router = InferenceRouter::new(
-            TriggerGateConfig::default(),
-            Config::default(),
-            false,
-            false,
-        );
-        // Before any observation
-        assert_eq!(router.lodestar_distance(), 0);
-        assert_eq!(router.lodestar_budget_remaining(), -1);
-        assert!(!router.lodestar_suggests_cpu());
-
-        // Observe near completion (d=2, budget=10)
-        router.observe_lodestar(2, 10);
-        assert_eq!(router.lodestar_distance(), 2);
-        assert_eq!(router.lodestar_budget_remaining(), 10);
-        assert!(!router.lodestar_suggests_cpu()); // d <= 4, not far
-
-        // Observe far completion with tight budget (d=6, budget=8)
-        router.observe_lodestar(6, 8);
-        assert_eq!(router.lodestar_distance(), 6);
-        assert_eq!(router.lodestar_budget_remaining(), 8);
-        // 8 < 6*2=12, so suggests CPU
-        assert!(router.lodestar_suggests_cpu());
-
-        // Observe far completion with ample budget (d=6, budget=20)
-        router.observe_lodestar(6, 20);
-        assert!(!router.lodestar_suggests_cpu()); // 20 >= 12
-
-        // Reset
-        router.reset_lodestar();
-        assert_eq!(router.lodestar_distance(), 0);
-        assert_eq!(router.lodestar_budget_remaining(), -1);
-        assert!(!router.lodestar_suggests_cpu());
-    }
-
-    // ------------------------------------------------------------------
-    // Plan 222 T15: CriticalIntervalGate + TriggerGate wiring
-    // ------------------------------------------------------------------
-
-    #[cfg(all(feature = "critical_interval_gate", feature = "rv_gated_routing"))]
-    #[test]
-    fn test_observe_critical_entropy_low_entropy_defers() {
-        let mut router = fast_router(false, false);
-        // Low entropy (peaked) → Defer
-        let decision = router.observe_critical_entropy(0.5);
-        assert_eq!(decision, CriticalTierDecision::Defer);
-        assert!((router.last_critical_entropy() - 0.5).abs() < 1e-6);
-    }
-
-    #[cfg(all(feature = "critical_interval_gate", feature = "rv_gated_routing"))]
-    #[test]
-    fn test_observe_critical_entropy_high_entropy_stays_cpu_no_gpu() {
-        let mut router = fast_router(false, false);
-        // High entropy but no GPU → StayCpu
-        let high_entropy = (1000.0f32).ln() * 0.8; // well above H_critical
-        let decision = router.observe_critical_entropy(high_entropy);
-        assert_eq!(decision, CriticalTierDecision::StayCpu);
-    }
-
-    #[cfg(all(feature = "critical_interval_gate", feature = "rv_gated_routing"))]
-    #[test]
-    fn test_observe_critical_entropy_high_entropy_promotes_with_gpu() {
-        let mut router = fast_router(true, false);
-        // High entropy + GPU available + low load (CpuOnly) → PromoteGpu
-        let high_entropy = (32000.0f32).ln() * 0.8;
-        let decision = router.observe_critical_entropy(high_entropy);
-        assert_eq!(decision, CriticalTierDecision::PromoteGpu);
-    }
-
-    #[cfg(all(feature = "critical_interval_gate", feature = "rv_gated_routing"))]
-    #[test]
-    fn test_set_critical_interval_config_updates_threshold() {
-        let mut router = fast_router(false, false);
-        let custom = CriticalIntervalConfig::new(50); // tiny vocab → lower H_critical
-        router.set_critical_interval_config(custom);
-        // Verify config was updated
-        assert_eq!(router.critical_interval_config().vocab_size, 50);
-        // Even low entropy should now be critical with tiny vocab
-        let entropy = (50.0f32).ln() * 0.6; // above H_critical for vocab=50
-        let decision = router.observe_critical_entropy(entropy);
-        // With no GPU, critical → StayCpu
-        assert_eq!(decision, CriticalTierDecision::StayCpu);
-    }
-
-    #[cfg(all(feature = "critical_interval_gate", feature = "rv_gated_routing"))]
-    #[test]
-    fn test_critical_entropy_updates_last_observed() {
-        let mut router = fast_router(false, false);
-        assert_eq!(router.last_critical_entropy(), 0.0);
-        router.observe_critical_entropy(3.15);
-        assert!((router.last_critical_entropy() - 3.15).abs() < 1e-6);
-        router.observe_critical_entropy(2.72);
-        assert!((router.last_critical_entropy() - 2.72).abs() < 1e-6);
+        result
     }
 }

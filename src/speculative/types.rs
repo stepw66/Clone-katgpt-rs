@@ -145,16 +145,17 @@ impl StabilitySnapshot {
         let p50 = sorted_latencies_ns[p50_idx];
         let p99 = sorted_latencies_ns[p99_idx];
 
-        // Variance and CV
+        // Variance and CV — uses `mul_add` so LLVM emits a single fused multiply-add
+        // per element instead of multiply + add (one rounding, one fewer op).
         let variance = if n > 1 {
-            sorted_latencies_ns
+            let sum_sq = sorted_latencies_ns
                 .iter()
                 .map(|&v| {
                     let diff = v as f64 - mean;
-                    diff * diff
+                    diff.mul_add(diff, 0.0)
                 })
-                .sum::<f64>()
-                / (n as f64)
+                .sum::<f64>();
+            sum_sq / (n as f64)
         } else {
             0.0
         };
@@ -875,6 +876,12 @@ pub enum BudgetAdaptation {
     Compression,
     /// Scale by first-marginal entropy (placeholder for future).
     Entropy,
+    /// Scale by ECHO prediction consistency entropy (Plan 247 T5).
+    /// Low inter-branch entropy → confident → contract budget.
+    /// High inter-branch entropy → uncertain → expand budget.
+    /// Signal is the consistency gate entropy, scaled by its own threshold.
+    #[cfg(feature = "echo_env_predictor")]
+    EchoConsistency,
 }
 
 // ── Score Reduction Mode (Research 45, Plan 080) ──────────────
@@ -1180,7 +1187,7 @@ fn compute_entropy(probs: &[f32]) -> f32 {
     probs
         .iter()
         .filter(|&&p| p > 0.0)
-        .map(|&p| -p * p.ln())
+        .map(|&p| (-p).mul_add(p.ln(), 0.0))
         .sum()
 }
 
@@ -2087,19 +2094,34 @@ impl TrajectoryCredit {
             };
         }
 
-        let best = scores
-            .iter()
-            .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(Ordering::Equal));
-        let worst = scores
-            .iter()
-            .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(Ordering::Equal));
+        // Single-pass: track both best and worst simultaneously (was 2 iterator
+        // reductions). Initialize from first element so NaN/edge cases preserve
+        // the original `max_by`/`min_by` semantics (first wins on ties).
+        let &(_, first_score) = &scores[0];
+        let mut best_score = first_score;
+        let mut worst_score = first_score;
+        let mut best_trajectory_idx = scores[0].0;
+        let mut worst_trajectory_idx = scores[0].0;
+
+        for &(idx, score) in &scores[1..] {
+            // max_by: replace only on strictly greater (first-max wins on ties).
+            if score > best_score {
+                best_score = score;
+                best_trajectory_idx = idx;
+            }
+            // min_by: replace only on strictly less (first-min wins on ties).
+            if score < worst_score {
+                worst_score = score;
+                worst_trajectory_idx = idx;
+            }
+        }
 
         Self {
             num_trajectories: scores.len(),
-            best_score: best.map(|(_, s)| *s).unwrap_or(0.0),
-            worst_score: worst.map(|(_, s)| *s).unwrap_or(0.0),
-            best_trajectory_idx: best.map(|(i, _)| *i).unwrap_or(0),
-            worst_trajectory_idx: worst.map(|(i, _)| *i).unwrap_or(0),
+            best_score,
+            worst_score,
+            best_trajectory_idx,
+            worst_trajectory_idx,
         }
     }
 
@@ -2145,16 +2167,18 @@ impl TrajectoryCredit {
             *entry = entry.max(nodes[node_idx].score);
         }
 
-        let scores: Vec<(usize, f32)> = traj_scores.into_iter().collect();
+        // Build scores view without consuming traj_scores — the HashMap stays
+        // available for O(1) per-node lookup in the second loop below.
+        let scores: Vec<(usize, f32)> = traj_scores
+            .iter()
+            .map(|(&id, &s)| (id, s))
+            .collect();
         let credit = Self::from_trajectory_scores(&scores);
 
-        // Assign propagated credit to each node based on its trajectory's max score
+        // Assign propagated credit to each node based on its trajectory's max score.
+        // O(1) HashMap lookup per node (was O(N) linear scan via `scores.find`).
         for (node_idx, &traj_id) in trajectory_ids.iter().enumerate() {
-            let traj_max = scores
-                .iter()
-                .find(|(id, _)| *id == traj_id)
-                .map(|(_, s)| *s)
-                .unwrap_or(0.0);
+            let traj_max = traj_scores.get(&traj_id).copied().unwrap_or(0.0);
             // Weight is the trajectory's normalized credit
             let weight = credit.node_weight(traj_max);
             // Store credit as metadata (don't overwrite propagated_value which is RPUCG)

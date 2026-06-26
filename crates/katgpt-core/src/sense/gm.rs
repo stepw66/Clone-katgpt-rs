@@ -21,9 +21,9 @@ pub enum SenseError {
 #[derive(Clone, Debug)]
 pub struct NpcBrainSnapshot {
     pub npc_id: u32,
+    pub autonomous_disabled: bool,
     pub activations: Vec<(SenseKind, f32)>,
     pub overrides_active: Vec<(SenseKind, f32)>,
-    pub autonomous_disabled: bool,
     pub locked_modules: Vec<SenseKind>,
     pub confidence: Vec<(SenseKind, f32)>,
 }
@@ -72,52 +72,28 @@ pub(crate) trait GmSenseApi {
 // Binary payload helpers
 // ---------------------------------------------------------------------------
 
+#[inline]
 #[allow(dead_code)]
 fn read_u32(payload: &[u8], offset: usize) -> Option<(u32, usize)> {
-    if offset + 4 > payload.len() {
-        return None;
-    }
-    let val = u32::from_le_bytes([
-        payload[offset],
-        payload[offset + 1],
-        payload[offset + 2],
-        payload[offset + 3],
-    ]);
-    Some((val, offset + 4))
+    let bytes: [u8; 4] = payload.get(offset..offset + 4)?.try_into().ok()?;
+    Some((u32::from_le_bytes(bytes), offset + 4))
 }
 
+#[inline]
 #[allow(dead_code)]
 fn read_u64(payload: &[u8], offset: usize) -> Option<(u64, usize)> {
-    if offset + 8 > payload.len() {
-        return None;
-    }
-    let val = u64::from_le_bytes([
-        payload[offset],
-        payload[offset + 1],
-        payload[offset + 2],
-        payload[offset + 3],
-        payload[offset + 4],
-        payload[offset + 5],
-        payload[offset + 6],
-        payload[offset + 7],
-    ]);
-    Some((val, offset + 8))
+    let bytes: [u8; 8] = payload.get(offset..offset + 8)?.try_into().ok()?;
+    Some((u64::from_le_bytes(bytes), offset + 8))
 }
 
+#[inline]
 #[allow(dead_code)]
 fn read_f32(payload: &[u8], offset: usize) -> Option<(f32, usize)> {
-    if offset + 4 > payload.len() {
-        return None;
-    }
-    let val = f32::from_le_bytes([
-        payload[offset],
-        payload[offset + 1],
-        payload[offset + 2],
-        payload[offset + 3],
-    ]);
-    Some((val, offset + 4))
+    let bytes: [u8; 4] = payload.get(offset..offset + 4)?.try_into().ok()?;
+    Some((f32::from_le_bytes(bytes), offset + 4))
 }
 
+#[inline]
 #[allow(dead_code)]
 fn read_u8(payload: &[u8], offset: usize) -> Option<(u8, usize)> {
     if offset >= payload.len() {
@@ -127,6 +103,7 @@ fn read_u8(payload: &[u8], offset: usize) -> Option<(u8, usize)> {
 }
 
 /// Convert raw u8 to SenseKind. Returns None for unknown discriminants.
+#[inline]
 #[allow(dead_code)]
 fn kind_from_u8(raw: u8) -> Option<SenseKind> {
     match raw {
@@ -136,6 +113,8 @@ fn kind_from_u8(raw: u8) -> Option<SenseKind> {
         3 => Some(SenseKind::SpatialSense),
         4 => Some(SenseKind::SocialSense),
         5 => Some(SenseKind::SkillSense),
+        #[cfg(feature = "spectral_threat")]
+        6 => Some(SenseKind::SpectralThreat),
         7 => Some(SenseKind::Reserved),
         _ => None,
     }
@@ -670,8 +649,8 @@ mod tests {
     #[test]
     fn test_dispatch_invalid_sense_kind() {
         let mut api = MockGmSenseApi::new();
-        // kind=6 is not a valid SenseKind
-        let payload = make_pin_payload(1, 6, 0.5);
+        // kind=99 is not a valid SenseKind (7=Reserved exists, anything >7 is invalid)
+        let payload = make_pin_payload(1, 99, 0.5);
         let result = dispatch_gm_action(&mut api, 0x20, &payload);
         assert_eq!(result.unwrap_err(), SenseError::InvalidKind);
     }

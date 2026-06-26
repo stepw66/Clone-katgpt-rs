@@ -25,9 +25,10 @@ use std::fmt;
 /// # Invariants
 ///
 /// - `Or` nodes: `best` is always `< children.len()` when `Some`
-/// - `And` nodes: `solved.len() == children.len()` always
+/// - `And` nodes: `solved_bits` bit i tracks child i solved status (up to 64 children)
 /// - `Leaf` nodes: no children
 #[derive(Debug, Clone)]
+#[repr(u8)]
 pub enum AndOrNode<G, S> {
     /// OR node: any child can succeed. Represents alternative strategies.
     Or {
@@ -39,11 +40,14 @@ pub enum AndOrNode<G, S> {
     /// AND node: all children must succeed. Represents a decomposition.
     And {
         goal: G,
+        children: Vec<AndOrNode<G, S>>,
+        /// Bitfield: bit i = child i is solved. Avoids heap allocation for ≤64 children.
+        solved_bits: u64,
+        /// Number of set bits in `solved_bits`. Maintained incrementally for O(1) `is_solved`.
+        /// u8 suffices: `solved_bits` is u64 so count ≤ 64.
+        solved_count: u8,
         /// Partial solution assuming subgoals succeed.
         sketch: Option<S>,
-        children: Vec<AndOrNode<G, S>>,
-        /// Per-child solved status. `solved.len() == children.len()` invariant.
-        solved: Vec<bool>,
     },
     /// Leaf: a solved or unsolved atomic goal.
     Leaf { goal: G, solution: Option<S> },
@@ -67,9 +71,10 @@ impl<G, S> AndOrNode<G, S> {
     pub fn and(goal: G) -> Self {
         Self::And {
             goal,
-            sketch: None,
             children: Vec::new(),
-            solved: Vec::new(),
+            solved_bits: 0,
+            solved_count: 0,
+            sketch: None,
         }
     }
 
@@ -98,19 +103,32 @@ impl<G, S> AndOrNode<G, S> {
     /// - `Or`: solved if any child is solved (or `best` points to a solved child)
     /// - `And`: solved if all children are solved
     /// - `Leaf`: solved if `solution.is_some()`
+    #[inline]
     pub fn is_solved(&self) -> bool {
         match self {
             Self::Or { children, best, .. } => match best {
-                &Some(idx) => children.get(idx).is_some_and(|c| c.is_solved()),
+                &Some(idx) => {
+                    // `best` is maintained as always `< children.len()` when Some.
+                    // Use unchecked access on the hot path; fall back to safe only if
+                    // the invariant is somehow violated.
+                    if idx < children.len() {
+                        // SAFETY: idx < children.len() per structural invariant.
+                        unsafe { children.get_unchecked(idx).is_solved() }
+                    } else {
+                        children.get(idx).is_some_and(|c| c.is_solved())
+                    }
+                }
                 None => children.iter().any(|c| c.is_solved()),
             },
             Self::And {
-                children, solved, ..
+                children,
+                solved_count,
+                ..
             } => {
                 if children.is_empty() {
                     return false;
                 }
-                solved.iter().all(|&s| s)
+                *solved_count as usize == children.len()
             }
             Self::Leaf { solution, .. } => solution.is_some(),
         }
@@ -158,13 +176,11 @@ impl<G, S> AndOrNode<G, S> {
     }
 
     /// Iterate over direct children.
-    pub fn children(&self) -> impl Iterator<Item = &AndOrNode<G, S>> {
+    #[inline]
+    pub fn children(&self) -> &[AndOrNode<G, S>] {
         match self {
-            Self::Or { children, .. } | Self::And { children, .. } => {
-                // SAFETY: we're creating a valid iterator
-                children.iter()
-            }
-            Self::Leaf { .. } => [].iter(),
+            Self::Or { children, .. } | Self::And { children, .. } => children,
+            Self::Leaf { .. } => &[],
         }
     }
 
@@ -172,33 +188,42 @@ impl<G, S> AndOrNode<G, S> {
 
     /// Add a child to an OR or AND node. No-op for leaves.
     ///
-    /// For AND nodes, this also appends `false` to `solved`.
+    /// For AND nodes, the new child is unsolved by default (bit = 0 in `solved_bits`).
     pub fn push_child(&mut self, child: AndOrNode<G, S>) {
         match self {
             Self::Or { children, .. } => {
                 children.push(child);
             }
             Self::And {
-                children, solved, ..
+                children,
+                solved_bits: _,
+                solved_count: _,
+                ..
             } => {
                 children.push(child);
-                solved.push(false);
+                // solved_bits bit for new child is 0 (unsolved) by default.
+                // solved_count unchanged — new child is unsolved.
             }
             Self::Leaf { .. } => {}
         }
     }
 
     /// Mark child `idx` as solved in an AND node.
-    /// Returns `false` if not an AND node or `idx` out of bounds.
+    /// Returns `false` if not an AND node or `idx` out of bounds or ≥ 64.
     pub fn mark_child_solved(&mut self, idx: usize) -> bool {
         match self {
             Self::And {
-                children: _,
-                solved,
+                children,
+                solved_bits,
+                solved_count,
                 ..
             } => {
-                if idx < solved.len() {
-                    solved[idx] = true;
+                if idx < children.len() && idx < 64 {
+                    let mask = 1u64 << idx;
+                    if *solved_bits & mask == 0 {
+                        *solved_bits |= mask;
+                        *solved_count += 1;
+                    }
                     true
                 } else {
                     false
@@ -261,56 +286,98 @@ impl<G, S> AndOrNode<G, S> {
     // ── Tree metrics ─────────────────────────────────────────────
 
     /// Total number of nodes in this subtree (including self).
+    #[inline]
     pub fn node_count(&self) -> usize {
-        1 + match self {
+        match self {
             Self::Or { children, .. } | Self::And { children, .. } => {
-                children.iter().map(|c| c.node_count()).sum::<usize>()
+                let mut total = 1usize;
+                for child in children {
+                    total += child.node_count();
+                }
+                total
             }
-            Self::Leaf { .. } => 0,
+            Self::Leaf { .. } => 1,
         }
     }
 
     /// Maximum depth of the tree (0 for leaves, 1 + max child depth otherwise).
+    #[inline]
     pub fn depth(&self) -> usize {
         match self {
-            Self::Or { children, .. } | Self::And { children, .. } => children
-                .iter()
-                .map(|c| c.depth())
-                .max()
-                .map_or(0, |d| 1 + d),
+            Self::Or { children, .. } | Self::And { children, .. } => {
+                if children.is_empty() {
+                    return 0;
+                }
+                let mut max_d = 0usize;
+                for child in children {
+                    let d = child.depth();
+                    if d > max_d {
+                        max_d = d;
+                    }
+                }
+                1 + max_d
+            }
             Self::Leaf { .. } => 0,
         }
     }
 
     /// Count of solved leaves in this subtree.
+    ///
+    /// If you also need `unsolved_count`, prefer [`leaf_stats`](Self::leaf_stats)
+    /// which fuses both in a single traversal.
+    #[inline]
     pub fn solved_count(&self) -> usize {
         match self {
             Self::Or { children, .. } | Self::And { children, .. } => {
-                children.iter().map(|c| c.solved_count()).sum()
-            }
-            Self::Leaf { solution, .. } => {
-                if solution.is_some() {
-                    1
-                } else {
-                    0
+                let mut count = 0usize;
+                for child in children {
+                    count += child.solved_count();
                 }
+                count
             }
+            Self::Leaf { solution, .. } => solution.is_some() as usize,
         }
     }
 
     /// Count of unsolved leaves in this subtree.
+    ///
+    /// If you also need `solved_count`, prefer [`leaf_stats`](Self::leaf_stats)
+    /// which fuses both in a single traversal.
+    #[inline]
     pub fn unsolved_count(&self) -> usize {
         match self {
             Self::Or { children, .. } | Self::And { children, .. } => {
-                children.iter().map(|c| c.unsolved_count()).sum()
-            }
-            Self::Leaf { solution, .. } => {
-                if solution.is_none() {
-                    1
-                } else {
-                    0
+                let mut count = 0usize;
+                for child in children {
+                    count += child.unsolved_count();
                 }
+                count
             }
+            Self::Leaf { solution, .. } => solution.is_none() as usize,
+        }
+    }
+
+    /// Fused `(solved_count, unsolved_count)` in a single traversal.
+    ///
+    /// Equivalent to `(self.solved_count(), self.unsolved_count())` but only
+    /// walks the tree once.
+    #[inline]
+    pub fn leaf_stats(&self) -> (usize, usize) {
+        match self {
+            Self::Or { children, .. } | Self::And { children, .. } => {
+                let mut solved = 0usize;
+                let mut unsolved = 0usize;
+                for child in children {
+                    let (s, u) = child.leaf_stats();
+                    solved += s;
+                    unsolved += u;
+                }
+                (solved, unsolved)
+            }
+            Self::Leaf { solution, .. } => match solution.is_some() {
+                true => (1, 0),
+                false => (0, 1),
+            },
         }
     }
 }
@@ -335,17 +402,18 @@ impl<G: fmt::Debug, S: fmt::Debug> fmt::Display for AndOrNode<G, S> {
             Self::And {
                 goal,
                 children,
-                solved,
+                solved_count,
+                solved_bits,
                 ..
             } => {
-                let solved_n = solved.iter().filter(|&&b| b).count();
                 write!(
                     f,
-                    "AND(goal={:?}, children={}, solved={}/{})",
+                    "AND(goal={:?}, children={}, solved={}/{}, bits={:b})",
                     goal,
                     children.len(),
-                    solved_n,
-                    solved.len()
+                    solved_count,
+                    children.len(),
+                    solved_bits
                 )
             }
             Self::Leaf { goal, solution, .. } => {
@@ -553,6 +621,19 @@ mod tests {
         root.push_child(AndOrNode::solved_leaf(g("c"), sol(&[3])));
         assert_eq!(root.solved_count(), 2);
         assert_eq!(root.unsolved_count(), 1);
+    }
+
+    #[test]
+    fn test_leaf_stats_matches_individual() {
+        let mut root: AndOrNode<Goal, Solution> = AndOrNode::or(g("root"));
+        root.push_child(AndOrNode::solved_leaf(g("a"), sol(&[1])));
+        root.push_child(AndOrNode::unsolved_leaf(g("b")));
+        root.push_child(AndOrNode::solved_leaf(g("c"), sol(&[3])));
+
+        let (s, u) = root.leaf_stats();
+        assert_eq!(s, root.solved_count());
+        assert_eq!(u, root.unsolved_count());
+        assert_eq!((s, u), (2, 1));
     }
 
     // ── Goal access ───────────────────────────────────────────────

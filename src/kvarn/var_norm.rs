@@ -5,6 +5,9 @@
 //! iteratively adjusts log-space column and row scales until the imbalance
 //! (max/min ratio of row and column standard deviations) converges.
 
+// Index-based loops are intentional for the dual-scale Sinkhorn numerical kernel.
+#![allow(clippy::needless_range_loop, clippy::too_many_arguments)]
+
 /// Scales produced by variance normalization.
 ///
 /// The normalized tile is: `tile[i,j] = original[i,j] / s_row[i] / s_col[j]`.
@@ -64,27 +67,126 @@ pub fn variance_normalize(
         };
     }
 
+    // Pre-allocate all scratch buffers ONCE.
+    //
+    // Before this refactor, each Sinkhorn iteration allocated 6 Vecs
+    // (cur copy, col_s, row_s, mean, inv_row, inv_col) — 8 iterations × 6 = 48
+    // allocations per call. For a 128×128 KV tile, each `Vec<f32>` is ~512 B – 1 KB,
+    // so this was ~30+ KB of churn per quantize_key_tile / quantize_val_tile.
+    //
+    // Now: 6 allocations total, reused across all iterations.
+    let mut cur = tile.to_vec();
+    let mut col_s = vec![0.0f32; cols];
+    let mut row_s = vec![0.0f32; rows];
+    let mut mean = vec![0.0f32; cols];
+    let mut inv_row = vec![0.0f32; rows];
+    let mut inv_col = vec![0.0f32; cols];
+    // Internal log-scale scratch (see variance_normalize_into).
+    let mut log_s_col = vec![0.0f32; cols];
+    let mut log_s_row = vec![0.0f32; rows];
+    let mut log_s_col_best = vec![0.0f32; cols];
+    let mut log_s_row_best = vec![0.0f32; rows];
+
+    variance_normalize_into(
+        tile,
+        rows,
+        cols,
+        config,
+        &mut cur,
+        &mut col_s,
+        &mut row_s,
+        &mut mean,
+        &mut inv_row,
+        &mut inv_col,
+        &mut log_s_col,
+        &mut log_s_row,
+        &mut log_s_col_best,
+        &mut log_s_row_best,
+    )
+}
+
+/// Zero-allocation variant of [`variance_normalize`].
+///
+/// Caller-owned scratch buffers must have lengths:
+/// - `cur`: `rows * cols`
+/// - `col_s`: `cols`
+/// - `row_s`: `rows`
+/// - `mean`: `cols`
+/// - `inv_row`: `rows`
+/// - `inv_col`: `cols`
+/// - `log_s_col`: `cols` — running column log-scale (overwritten, init value irrelevant)
+/// - `log_s_row`: `rows` — running row log-scale (overwritten, init value irrelevant)
+/// - `log_s_col_best`: `cols` — best-seen column log-scale scratch
+/// - `log_s_row_best`: `rows` — best-seen row log-scale scratch
+///
+/// Contents are overwritten. Useful for batched tile quantization where the
+/// caller can reuse the same scratch across many tiles.
+#[inline]
+pub fn variance_normalize_into(
+    tile: &mut [f32],
+    rows: usize,
+    cols: usize,
+    config: &VarNormConfig,
+    cur: &mut [f32],
+    col_s: &mut [f32],
+    row_s: &mut [f32],
+    mean: &mut [f32],
+    inv_row: &mut [f32],
+    inv_col: &mut [f32],
+    log_s_col: &mut [f32],
+    log_s_row: &mut [f32],
+    log_s_col_best: &mut [f32],
+    log_s_row_best: &mut [f32],
+) -> VarianceNormScales {
+    assert_eq!(tile.len(), rows * cols, "tile size mismatch");
+    assert_eq!(cur.len(), rows * cols, "cur scratch size mismatch");
+    assert_eq!(col_s.len(), cols, "col_s scratch size mismatch");
+    assert_eq!(row_s.len(), rows, "row_s scratch size mismatch");
+    assert_eq!(mean.len(), cols, "mean scratch size mismatch");
+    assert_eq!(inv_row.len(), rows, "inv_row scratch size mismatch");
+    assert_eq!(inv_col.len(), cols, "inv_col scratch size mismatch");
+    assert_eq!(log_s_col.len(), cols, "log_s_col scratch size mismatch");
+    assert_eq!(log_s_row.len(), rows, "log_s_row scratch size mismatch");
+    assert_eq!(
+        log_s_col_best.len(),
+        cols,
+        "log_s_col_best scratch size mismatch"
+    );
+    assert_eq!(
+        log_s_row_best.len(),
+        rows,
+        "log_s_row_best scratch size mismatch"
+    );
+
+    if rows == 0 || cols == 0 {
+        return VarianceNormScales {
+            s_col: vec![],
+            s_row: vec![],
+        };
+    }
+
     let log_clamp_lo = config.log_clamp_lo;
     let log_clamp_hi = config.log_clamp_hi;
 
-    // Initialize log scales to zero (linear scale = 1.0).
-    let mut log_s_col = vec![0.0f32; cols];
-    let mut log_s_row = vec![0.0f32; rows];
+    // Initialize log scales to zero (linear scale = 1.0). Zeroed in-place into
+    // caller-owned scratch — no allocation.
+    log_s_col[..cols].fill(0.0);
+    log_s_row[..rows].fill(0.0);
 
     // Compute initial current = tile / exp(log_s_col) / exp(log_s_row)
-    let mut cur = tile.to_vec();
-    apply_dual_scale(&mut cur, rows, cols, &log_s_row, &log_s_col);
+    cur.copy_from_slice(tile);
+    apply_dual_scale_into(cur, rows, cols, log_s_row, log_s_col, inv_row, inv_col);
 
     // Track best imbalance
-    let mut col_s = col_stds(&cur, rows, cols);
-    let mut row_s = row_stds(&cur, rows, cols);
-    let mut imb_best = imbalance(&col_s, &row_s);
-    let mut log_s_col_best = log_s_col.clone();
-    let mut log_s_row_best = log_s_row.clone();
+    col_stds_into(cur, rows, cols, col_s, mean);
+    row_stds_into(cur, rows, cols, row_s);
+    let mut imb_best = imbalance(col_s, row_s);
+    log_s_col_best[..cols].copy_from_slice(&log_s_col[..cols]);
+    log_s_row_best[..rows].copy_from_slice(&log_s_row[..rows]);
 
     for _k in 0..config.iterations {
         // Column step: update log_s_col based on column std devs
-        for (j, &s) in col_s.iter().enumerate() {
+        for (j, &s) in col_s[..cols].iter().enumerate() {
             let log_s = s.ln();
             let clamped = log_s.clamp(log_clamp_lo, log_clamp_hi);
             log_s_col[j] = (log_s_col[j] + clamped).clamp(log_clamp_lo, log_clamp_hi);
@@ -92,11 +194,11 @@ pub fn variance_normalize(
 
         // Recompute current
         cur.copy_from_slice(tile);
-        apply_dual_scale(&mut cur, rows, cols, &log_s_row, &log_s_col);
+        apply_dual_scale_into(cur, rows, cols, log_s_row, log_s_col, inv_row, inv_col);
 
         // Row step: update log_s_row based on row std devs
-        row_s = row_stds(&cur, rows, cols);
-        for (i, &s) in row_s.iter().enumerate() {
+        row_stds_into(cur, rows, cols, row_s);
+        for (i, &s) in row_s[..rows].iter().enumerate() {
             let log_s = s.ln();
             let clamped = log_s.clamp(log_clamp_lo, log_clamp_hi);
             log_s_row[i] = (log_s_row[i] + clamped).clamp(log_clamp_lo, log_clamp_hi);
@@ -104,24 +206,27 @@ pub fn variance_normalize(
 
         // Recompute current
         cur.copy_from_slice(tile);
-        apply_dual_scale(&mut cur, rows, cols, &log_s_row, &log_s_col);
+        apply_dual_scale_into(cur, rows, cols, log_s_row, log_s_col, inv_row, inv_col);
 
         // Check imbalance
-        col_s = col_stds(&cur, rows, cols);
-        row_s = row_stds(&cur, rows, cols);
-        let imb_cur = imbalance(&col_s, &row_s);
+        col_stds_into(cur, rows, cols, col_s, mean);
+        // row_s already refreshed above
+        let imb_cur = imbalance(col_s, row_s);
 
         if imb_cur <= imb_best {
             imb_best = imb_cur;
-            log_s_col_best = log_s_col.clone();
-            log_s_row_best = log_s_row.clone();
+            log_s_col_best[..cols].copy_from_slice(&log_s_col[..cols]);
+            log_s_row_best[..rows].copy_from_slice(&log_s_row[..rows]);
         }
     }
 
-    // Apply best scales to the tile in-place
-    let s_col: Vec<f32> = log_s_col_best.iter().map(|&l| l.exp()).collect();
-    let s_row: Vec<f32> = log_s_row_best.iter().map(|&l| l.exp()).collect();
-    apply_scales_into(tile, rows, cols, &s_row, &s_col);
+    // Apply best scales to the tile in-place.
+    // The return value still owns two Vecs (unavoidable with the current API),
+    // but we reuse `inv_col` as the per-column reciprocal scratch inside
+    // `apply_scales_into` instead of allocating a fresh one.
+    let s_col: Vec<f32> = log_s_col_best[..cols].iter().map(|&l| l.exp()).collect();
+    let s_row: Vec<f32> = log_s_row_best[..rows].iter().map(|&l| l.exp()).collect();
+    apply_scales_into(tile, rows, cols, &s_row, &s_col, inv_col);
 
     VarianceNormScales { s_col, s_row }
 }
@@ -130,77 +235,145 @@ pub fn variance_normalize(
 // Helpers
 // ---------------------------------------------------------------------------
 
-/// Apply dual scale to a tile: `out[i,j] = cur[i,j] / s_row[i] / s_col[j]`.
+/// Apply dual scale to a tile in-place: `cur[i,j] *= inv_row[i] * inv_col[j]`
+/// where `inv_row[i] = 1 / exp(log_s_row[i])` and similarly for `inv_col`.
+///
+/// Writes the inverted exp of the log scales into the caller-owned scratch
+/// buffers, then applies them to `cur` in a single FMA-friendly multiply per
+/// element. Both scratch buffers must have lengths `>= rows` and `>= cols`
+/// respectively.
 #[inline]
-fn apply_dual_scale(
+fn apply_dual_scale_into(
     cur: &mut [f32],
     rows: usize,
     cols: usize,
     log_s_row: &[f32],
     log_s_col: &[f32],
+    inv_row: &mut [f32],
+    inv_col: &mut [f32],
 ) {
-    // Precompute exp of log scales
-    let inv_row: Vec<f32> = log_s_row.iter().map(|&l| 1.0 / l.exp()).collect();
-    let inv_col: Vec<f32> = log_s_col.iter().map(|&l| 1.0 / l.exp()).collect();
+    // Precompute exp of log scales into caller-owned scratch.
+    // `1.0 / l.exp()` ≡ `(-l).exp()`: one exp call instead of exp + division.
+    for (i, &l) in log_s_row.iter().enumerate() {
+        inv_row[i] = (-l).exp();
+    }
+    for (j, &l) in log_s_col.iter().enumerate() {
+        inv_col[j] = (-l).exp();
+    }
 
     for i in 0..rows {
         let row_scale = inv_row[i];
+        let off = i * cols;
         for j in 0..cols {
-            cur[i * cols + j] *= row_scale * inv_col[j];
+            cur[off + j] *= row_scale * inv_col[j];
         }
     }
 }
 
 /// Apply scales to a tile in-place: `tile[i,j] /= s_row[i] * s_col[j]`.
+///
+/// Precomputes `inv_col[j] = 1.0 / s_col[j]` once per column so the inner loop
+/// becomes `tile *= inv_row * inv_col[j]` (two multiplies) instead of
+/// `tile *= inv_row / s_col[j]` (one multiply + one divide). Replaces
+/// `rows*cols` divides with `cols` divides. Called once per `variance_normalize`
+/// (outside the Sinkhorn loop).
+///
+/// `inv_col_scratch` is caller-owned scratch with length `>= cols`; reused to
+/// avoid a per-call allocation.
 #[inline]
-fn apply_scales_into(tile: &mut [f32], rows: usize, cols: usize, s_row: &[f32], s_col: &[f32]) {
+fn apply_scales_into(
+    tile: &mut [f32],
+    rows: usize,
+    cols: usize,
+    s_row: &[f32],
+    s_col: &[f32],
+    inv_col_scratch: &mut [f32],
+) {
+    let inv_col = &mut inv_col_scratch[..cols];
+    for (j, &s) in s_col.iter().enumerate() {
+        inv_col[j] = 1.0 / s;
+    }
     for i in 0..rows {
         let inv_row = 1.0 / s_row[i];
+        let off = i * cols;
         for j in 0..cols {
-            tile[i * cols + j] *= inv_row / s_col[j];
+            tile[off + j] *= inv_row * inv_col[j];
         }
     }
 }
 
 /// Compute standard deviation of each column in a `[rows, cols]` row-major tile.
+///
+/// Allocating wrapper — only used by tests. Hot paths use [`col_stds_into`].
 #[inline]
+#[cfg(test)]
 pub(crate) fn col_stds(tile: &[f32], rows: usize, cols: usize) -> Vec<f32> {
     let mut result = vec![0.0f32; cols];
     if rows == 0 {
         return result;
     }
-    // Two-pass: mean then variance
     let mut mean = vec![0.0f32; cols];
-    for i in 0..rows {
-        for j in 0..cols {
-            mean[j] += tile[i * cols + j];
-        }
-    }
-    let inv_rows = 1.0 / rows as f32;
-    for m in mean.iter_mut() {
-        *m *= inv_rows;
-    }
-    for i in 0..rows {
-        for j in 0..cols {
-            let d = tile[i * cols + j] - mean[j];
-            result[j] += d * d;
-        }
-    }
-    for r in result.iter_mut() {
-        *r = (*r * inv_rows).sqrt();
-    }
+    col_stds_into(tile, rows, cols, &mut result, &mut mean);
     result
 }
 
-/// Compute standard deviation of each row in a `[rows, cols]` row-major tile.
+/// Zero-alloc variant of [`col_stds`].
+///
+/// Writes per-column std devs into `result[..cols]` and uses `mean[..cols]` as
+/// scratch for the running mean. Both buffers must have length `>= cols`.
 #[inline]
+fn col_stds_into(tile: &[f32], rows: usize, cols: usize, result: &mut [f32], mean: &mut [f32]) {
+    if rows == 0 {
+        return;
+    }
+    // Two-pass: mean then variance. Initialize scratch.
+    for j in 0..cols {
+        mean[j] = 0.0;
+        result[j] = 0.0;
+    }
+    for i in 0..rows {
+        let off = i * cols;
+        for j in 0..cols {
+            mean[j] += tile[off + j];
+        }
+    }
+    let inv_rows = 1.0 / rows as f32;
+    for m in mean[..cols].iter_mut() {
+        *m *= inv_rows;
+    }
+    for i in 0..rows {
+        let off = i * cols;
+        for j in 0..cols {
+            let d = tile[off + j] - mean[j];
+            result[j] += d * d;
+        }
+    }
+    for r in result[..cols].iter_mut() {
+        *r = (*r * inv_rows).sqrt();
+    }
+}
+
+/// Compute standard deviation of each row in a `[rows, cols]` row-major tile.
+///
+/// Allocating wrapper — only used by tests. Hot paths use [`row_stds_into`].
+#[inline]
+#[cfg(test)]
 pub(crate) fn row_stds(tile: &[f32], rows: usize, cols: usize) -> Vec<f32> {
     let mut result = vec![0.0f32; rows];
+    row_stds_into(tile, rows, cols, &mut result);
+    result
+}
+
+/// Zero-alloc variant of [`row_stds`].
+///
+/// Writes per-row std devs into `result[..rows]`. Buffer must have length `>= rows`.
+#[inline]
+fn row_stds_into(tile: &[f32], rows: usize, cols: usize, result: &mut [f32]) {
     if cols == 0 {
-        return result;
+        return;
     }
     let inv_cols = 1.0 / cols as f32;
-    for (i, res) in result.iter_mut().enumerate() {
+    for (i, res) in result[..rows].iter_mut().enumerate() {
         let mut mean = 0.0f32;
         let off = i * cols;
         for j in 0..cols {
@@ -214,7 +387,6 @@ pub(crate) fn row_stds(tile: &[f32], rows: usize, cols: usize) -> Vec<f32> {
         }
         *res = (var * inv_cols).sqrt();
     }
-    result
 }
 
 /// Compute imbalance metric: max/min ratio of column stds + max/min ratio of row stds.
@@ -228,14 +400,23 @@ pub(crate) fn imbalance(col_s: &[f32], row_s: &[f32]) -> f32 {
 }
 
 /// max/min ratio, with epsilon guard to avoid division by zero.
+///
+/// Single-pass min/max fold (was two separate `fold` calls scanning `vals` twice).
 #[inline]
 fn ratio_max_min(vals: &[f32]) -> f32 {
     if vals.is_empty() {
         return 0.0;
     }
-    let lo = vals.iter().copied().fold(f32::MAX, f32::min).max(1e-8);
-    let hi = vals.iter().copied().fold(f32::MIN, f32::max).max(1e-8);
-    hi / lo
+    let (mut lo, mut hi) = (f32::MAX, f32::MIN);
+    for &v in vals {
+        if v < lo {
+            lo = v;
+        }
+        if v > hi {
+            hi = v;
+        }
+    }
+    hi / lo.max(1e-8)
 }
 
 // ---------------------------------------------------------------------------

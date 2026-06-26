@@ -14,11 +14,17 @@ pub const DEFAULT_OBS_PRECISION: f32 = 1.0;
 /// λ_new = λ_old + λ_obs  (precision grows monotonically)
 #[inline]
 pub fn bake_update_precision(lambda_old: &[f32; 8], lambda_obs: f32) -> [f32; 8] {
-    let mut lambda_new = *lambda_old;
-    for val in lambda_new.iter_mut() {
-        *val += lambda_obs;
-    }
-    lambda_new
+    let obs = lambda_obs;
+    [
+        lambda_old[0] + obs,
+        lambda_old[1] + obs,
+        lambda_old[2] + obs,
+        lambda_old[3] + obs,
+        lambda_old[4] + obs,
+        lambda_old[5] + obs,
+        lambda_old[6] + obs,
+        lambda_old[7] + obs,
+    ]
 }
 
 /// BAKE eq 3: Precision-weighted mean update.
@@ -31,10 +37,10 @@ pub fn bake_update_mean(
     observation: &[f32; 8],
     lambda_obs: f32,
 ) -> [f32; 8] {
-    let lambda_new = bake_update_precision(lambda_old, lambda_obs);
     let mut mu_new = [0.0f32; 8];
     for d in 0..8 {
-        mu_new[d] = (lambda_old[d] * mu_old[d] + lambda_obs * observation[d]) / lambda_new[d];
+        let lambda_new_d = lambda_old[d] + lambda_obs;
+        mu_new[d] = (lambda_old[d] * mu_old[d] + lambda_obs * observation[d]) / lambda_new_d;
     }
     mu_new
 }
@@ -47,8 +53,12 @@ pub fn bake_update(
     observation: &[f32; 8],
     lambda_obs: f32,
 ) -> ([f32; 8], [f32; 8]) {
-    let lambda_new = bake_update_precision(lambda_old, lambda_obs);
-    let mu_new = bake_update_mean(mu_old, lambda_old, observation, lambda_obs);
+    let mut mu_new = [0.0f32; 8];
+    let mut lambda_new = [0.0f32; 8];
+    for d in 0..8 {
+        lambda_new[d] = lambda_old[d] + lambda_obs;
+        mu_new[d] = (lambda_old[d] * mu_old[d] + lambda_obs * observation[d]) / lambda_new[d];
+    }
     (mu_new, lambda_new)
 }
 
@@ -62,10 +72,14 @@ pub fn bake_regularize(
     mu_current: &[f32; 8],
     beta: f32,
 ) -> f32 {
+    // Algebraic identity: √(λ·diff²) = |diff| · √λ.
+    // Hoisting √λ out of the (λ·diff²)·sqrt dependency chain lets the FPU pipeline
+    // the sqrt in parallel with the diff subtract.
     let mut penalty = 0.0f32;
     for d in 0..8 {
+        let sqrt_lambda = lambda[d].sqrt();
         let diff = mu_current[d] - mu_old[d];
-        penalty += (lambda[d] * diff * diff).sqrt();
+        penalty += diff.abs() * sqrt_lambda;
     }
     penalty * beta
 }
@@ -75,7 +89,7 @@ pub fn bake_regularize(
 /// Higher average precision → higher confidence.
 #[inline]
 pub fn precision_to_confidence(lambda: &[f32; 8]) -> f32 {
-    let mean_lambda: f32 = lambda.iter().sum::<f32>() / 8.0;
+    let mean_lambda = crate::simd::simd_sum_f32(lambda) * 0.125;
     1.0 / (1.0 + (-(mean_lambda - 1.0)).exp()) // sigmoid
 }
 
@@ -85,11 +99,23 @@ pub fn precision_to_confidence(lambda: &[f32; 8]) -> f32 {
 #[inline]
 pub fn exploration_priority(lambda: &[f32; 8], dimension: usize) -> f32 {
     debug_assert!(dimension < 8, "dimension must be 0..7");
-    let max_lambda = lambda.iter().cloned().fold(0.0f32, f32::max);
-    if max_lambda < 1e-6 {
+    exploration_priority_with_max(lambda, dimension, max_lambda(lambda))
+}
+
+/// Pre-compute max lambda for batch calls to `exploration_priority_with_max`.
+#[inline]
+pub fn max_lambda(lambda: &[f32; 8]) -> f32 {
+    crate::simd::simd_max_f32(lambda)
+}
+
+/// Exploration priority with pre-computed max_lambda — avoids O(8) scan per call.
+#[inline]
+pub fn exploration_priority_with_max(lambda: &[f32; 8], dimension: usize, max_lam: f32) -> f32 {
+    debug_assert!(dimension < 8, "dimension must be 0..7");
+    if max_lam < 1e-6 {
         return 1.0;
     }
-    1.0 - lambda[dimension] / max_lambda
+    1.0 - lambda[dimension] / max_lam
 }
 
 /// Informed prior precision from schema class density.
@@ -157,20 +183,19 @@ mod bake_store {
         /// Apply BAKE update and store result.
         ///
         /// If entity is not tracked, creates an entry with uninformative prior first,
-        /// then applies the update.
+        /// then applies the update. Uses a single papaya pin to avoid double epoch
+        /// overhead.
         pub fn update(&self, entity_hash: u64, observation: &[f32; 8], lambda_obs: f32) {
             let guard = self.entries.pin();
             let entry = guard
                 .get(&entity_hash)
                 .copied()
                 .unwrap_or_else(PrecisionEntry::uninformative);
-            // Release guard before mutation (papaya returns a local guard).
-            drop(guard);
 
             let (new_mean, new_precision) =
                 bake_update(&entry.mean, &entry.precision, observation, lambda_obs);
 
-            self.entries.pin().insert(
+            guard.insert(
                 entity_hash,
                 PrecisionEntry {
                     mean: new_mean,
@@ -241,8 +266,9 @@ mod bake_store {
 
         /// Accumulate an observation (running sum, zero-alloc).
         pub fn observe(&mut self, observation: &[f32; 8]) {
-            for (d, obs) in observation.iter().enumerate() {
-                self.accumulated_obs_sum[d] += obs;
+            // Direct indexing for fixed-size array — LLVM unrolls fully.
+            for (d, obs_d) in observation.iter().enumerate() {
+                self.accumulated_obs_sum[d] += obs_d;
             }
             self.observation_count += 1;
         }
@@ -268,8 +294,8 @@ mod bake_store {
 
             let count = self.observation_count as f32;
             let mut mean_obs = [0.0f32; 8];
-            for (d, mean) in mean_obs.iter_mut().enumerate() {
-                *mean = self.accumulated_obs_sum[d] / count;
+            for (d, mean_d) in mean_obs.iter_mut().enumerate() {
+                *mean_d = self.accumulated_obs_sum[d] / count;
             }
 
             let effective_lambda = DEFAULT_OBS_PRECISION * count;

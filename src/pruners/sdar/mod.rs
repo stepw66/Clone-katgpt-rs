@@ -33,5 +33,7 @@
 pub mod sdar_absorb;
 pub mod sdar_bandit;
 
-pub use sdar_absorb::{PromotionStats, SdarAbsorbConfig, SdarGatedAbsorbCompress};
+#[cfg(debug_assertions)]
+pub use sdar_absorb::PromotionStats;
+pub use sdar_absorb::{SdarAbsorbConfig, SdarGatedAbsorbCompress};
 pub use sdar_bandit::{GateStats, SdarBanditConfig, SdarBanditPruner};

@@ -29,15 +29,16 @@ impl SimHashFingerprint {
     pub fn from_logits(logits: &[f32], projection: &[[f32; 64]]) -> Self {
         // Row-major iteration: outer loop over logits, accumulate all 64 dots
         // in one pass for cache-friendly access to projection rows.
+        // Each per-row update is `dots[..64] += logit * row[..64]` — exactly
+        // the `simd_fused_scale_acc(dst, src, scale, len)` kernel, which dispatches
+        // to NEON vfmaq / AVX2 fmadd_ps for 4–8× the throughput of the scalar
+        // inner loop.
         let mut dots = [0.0f32; 64];
         for (i, logit) in logits.iter().enumerate() {
             if i >= projection.len() {
                 break;
             }
-            let row = &projection[i];
-            for j in 0..64 {
-                dots[j] += row[j] * logit;
-            }
+            crate::simd::simd_fused_scale_acc(&mut dots[..], &projection[i], *logit, 64);
         }
         let mut bits: u64 = 0;
         for (j, &dot) in dots.iter().enumerate() {
@@ -212,11 +213,28 @@ impl BfcpLshCache {
     where
         F: FnOnce(&[f32]) -> BFCP,
     {
+        // Delegate to process_with_hash, discarding the hash (Issue 001 H-28).
+        self.process_with_hash(logits, compute_fn).0
+    }
+
+    /// Like [`process`](Self::process) but also returns the BLAKE3 hash so callers
+    /// needing the hash for downstream CMS / shard operations can avoid
+    /// recomputing it (Issue 001 H-28).
+    ///
+    /// Returns `((partition, level), hash)`. The hash is computed exactly once.
+    pub fn process_with_hash<F>(
+        &mut self,
+        logits: &[f32],
+        compute_fn: F,
+    ) -> ((Arc<BFCP>, u8), [u8; 32])
+    where
+        F: FnOnce(&[f32]) -> BFCP,
+    {
         // L0: exact BLAKE3 lookup
         let hash = blake3_logit_hash(logits);
         if let Some(partition) = self.exact.lookup(&hash) {
             self.l0_hits.fetch_add(1, Ordering::Relaxed);
-            return (partition, 0);
+            return ((partition, 0), hash);
         }
 
         // L1: LSH approximate lookup
@@ -225,7 +243,7 @@ impl BfcpLshCache {
             // Re-insert into L0 for future exact hits
             self.exact.insert(hash, Arc::clone(&partition));
             self.l1_hits.fetch_add(1, Ordering::Relaxed);
-            return (partition, 1);
+            return ((partition, 1), hash);
         }
 
         // Miss: compute fresh partition
@@ -233,7 +251,7 @@ impl BfcpLshCache {
         self.exact.insert(hash, Arc::clone(&partition));
         self.lsh.insert(logits, Arc::clone(&partition));
         self.full_misses.fetch_add(1, Ordering::Relaxed);
-        (partition, 2)
+        ((partition, 2), hash)
     }
 
     /// Warm-start pipeline: for LSH hits, only recompute diff regions.

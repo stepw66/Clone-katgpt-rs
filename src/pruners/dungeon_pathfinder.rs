@@ -221,21 +221,16 @@ fn bfs_floor_sequence(
         return Some(Vec::new());
     }
 
-    // Build adjacency: which floors are reachable from each floor via stairs
-    let mut adjacent: HashMap<usize, Vec<usize>> = HashMap::new();
-    for stair in &dungeon.stairs {
-        let a = stair.from.0;
-        let b = stair.to.0;
-        adjacent.entry(a).or_default().push(b);
-        adjacent.entry(b).or_default().push(a);
-    }
+    // Use pre-computed floor adjacency (built once at DungeonMap construction)
+    let floor_adj = &dungeon.floor_adj;
+    let num_floors = floor_adj.len();
 
-    let mut predecessor: HashMap<usize, usize> = HashMap::new();
-    let mut visited = HashSet::new();
+    let mut predecessor: Vec<Option<usize>> = vec![None; num_floors];
+    let mut visited = vec![false; num_floors];
     let mut queue = VecDeque::new();
 
     queue.push_back(from_floor);
-    visited.insert(from_floor);
+    visited[from_floor] = true;
 
     while let Some(floor) = queue.pop_front() {
         if floor == to_floor {
@@ -244,19 +239,19 @@ fn bfs_floor_sequence(
             let mut cur = to_floor;
             while cur != from_floor {
                 path.push(cur);
-                cur = predecessor[&cur];
+                cur = predecessor[cur].unwrap();
             }
             path.reverse();
             return Some(path);
         }
 
-        if let Some(neighbors) = adjacent.get(&floor) {
-            for &next_floor in neighbors {
-                if visited.contains(&next_floor) {
+        if floor < num_floors {
+            for &next_floor in &floor_adj[floor] {
+                if next_floor >= num_floors || visited[next_floor] {
                     continue;
                 }
-                visited.insert(next_floor);
-                predecessor.insert(next_floor, floor);
+                visited[next_floor] = true;
+                predecessor[next_floor] = Some(floor);
                 queue.push_back(next_floor);
             }
         }
@@ -348,42 +343,44 @@ mod tests {
     fn make_two_floor_dungeon() -> DungeonMap {
         let floor0 = parse_grid(". . .\n. . .\n. . .");
         let floor1 = parse_grid(". . .\n. . .\n. . .");
+        let stairs = vec![StairConnection {
+            from: (0, 2, 2),
+            to: (1, 0, 0),
+        }];
 
-        DungeonMap {
-            floors: vec![floor0, floor1],
-            stairs: vec![StairConnection {
-                from: (0, 2, 2),
-                to: (1, 0, 0),
-            }],
-            start: (0, 0, 0),
-            goal: (1, 2, 2),
-            monsters: vec![],
-            treasures: vec![],
-        }
+        DungeonMap::from_parts(
+            vec![floor0, floor1],
+            stairs,
+            (0, 0, 0),
+            (1, 2, 2),
+            vec![],
+            vec![],
+        )
     }
 
     fn make_three_floor_dungeon() -> DungeonMap {
         let floor0 = parse_grid(". . .\n. . .\n. . .");
         let floor1 = parse_grid(". . .\n. . .\n. . .");
         let floor2 = parse_grid(". . .\n. . .\n. . .");
+        let stairs = vec![
+            StairConnection {
+                from: (0, 2, 2),
+                to: (1, 0, 0),
+            },
+            StairConnection {
+                from: (1, 2, 2),
+                to: (2, 0, 0),
+            },
+        ];
 
-        DungeonMap {
-            floors: vec![floor0, floor1, floor2],
-            stairs: vec![
-                StairConnection {
-                    from: (0, 2, 2),
-                    to: (1, 0, 0),
-                },
-                StairConnection {
-                    from: (1, 2, 2),
-                    to: (2, 0, 0),
-                },
-            ],
-            start: (0, 0, 0),
-            goal: (2, 2, 2),
-            monsters: vec![(1, 1, 1)],
-            treasures: vec![(1, 0, 2)],
-        }
+        DungeonMap::from_parts(
+            vec![floor0, floor1, floor2],
+            stairs,
+            (0, 0, 0),
+            (2, 2, 2),
+            vec![(1, 1, 1)],
+            vec![(1, 0, 2)],
+        )
     }
 
     #[test]
@@ -465,17 +462,18 @@ mod tests {
 
     #[test]
     fn test_bfs_floor_sequence_unreachable() {
-        let dungeon = DungeonMap {
-            floors: vec![parse_grid("."), parse_grid("."), parse_grid(".")],
-            stairs: vec![StairConnection {
-                from: (0, 0, 0),
-                to: (1, 0, 0),
-            }],
-            start: (0, 0, 0),
-            goal: (2, 0, 0),
-            monsters: vec![],
-            treasures: vec![],
-        };
+        let stairs = vec![StairConnection {
+            from: (0, 0, 0),
+            to: (1, 0, 0),
+        }];
+        let dungeon = DungeonMap::from_parts(
+            vec![parse_grid("."), parse_grid("."), parse_grid(".")],
+            stairs,
+            (0, 0, 0),
+            (2, 0, 0),
+            vec![],
+            vec![],
+        );
 
         let sequence = bfs_floor_sequence(&dungeon, 0, 2);
         assert!(sequence.is_none(), "Floor 2 should be unreachable");
@@ -525,24 +523,25 @@ mod tests {
     fn test_blocked_stair_uses_alternative() {
         let floor0 = parse_grid(". . .\n. . .\n. . .");
         let floor1 = parse_grid(". . .\n. . .\n. . .");
+        let stairs = vec![
+            StairConnection {
+                from: (0, 2, 2),
+                to: (1, 0, 0),
+            },
+            StairConnection {
+                from: (0, 0, 2),
+                to: (1, 2, 0),
+            },
+        ];
 
-        let dungeon = DungeonMap {
-            floors: vec![floor0, floor1],
-            stairs: vec![
-                StairConnection {
-                    from: (0, 2, 2),
-                    to: (1, 0, 0),
-                },
-                StairConnection {
-                    from: (0, 0, 2),
-                    to: (1, 2, 0),
-                },
-            ],
-            start: (0, 0, 0),
-            goal: (1, 2, 2),
-            monsters: vec![],
-            treasures: vec![],
-        };
+        let dungeon = DungeonMap::from_parts(
+            vec![floor0, floor1],
+            stairs,
+            (0, 0, 0),
+            (1, 2, 2),
+            vec![],
+            vec![],
+        );
 
         // Block the closer stair at (2, 2)
         let mut blocked = MultiFloorBlocked::new();

@@ -90,8 +90,8 @@ pub fn gdn2_recurrent_step(
     }
 
     // Step 3: Update S += k ⊗ (w⊙v − r)
-    // Compute delta = w⊙v − r, then outer product accumulate (reuse pre-allocated buffer)
-    delta.fill(0.0);
+    // Compute delta = w⊙v − r, then outer product accumulate (reuse pre-allocated buffer).
+    // Note: no need to `delta.fill(0.0)` first — we overwrite every element below.
     match gate_config {
         Gdn2GateConfig::EraseOnly | Gdn2GateConfig::Kda => {
             for j in 0..dv {
@@ -178,7 +178,7 @@ pub fn gdn2_state_update(
     }
 
     // Step 3: Update S += k ⊗ (w⊙v − r)
-    delta.fill(0.0);
+    // No `delta.fill(0.0)` — every element is overwritten below.
     match gate_config {
         Gdn2GateConfig::EraseOnly | Gdn2GateConfig::Kda => {
             for j in 0..dv {
@@ -225,9 +225,13 @@ pub fn gdn2_state_readout(
 }
 
 /// Sigmoid function for gate projections.
+///
+/// Delegates to [`crate::simd::fast_sigmoid`] which adds early-exit for
+/// `|x| > 40` (where σ saturates in f32) — saves an `exp()` call when gate
+/// pre-activations are large.
 #[inline]
 pub fn sigmoid(x: f32) -> f32 {
-    1.0 / (1.0 + (-x).exp())
+    crate::simd::fast_sigmoid(x)
 }
 
 /// L2 normalize a vector in-place: x /= ‖x‖₂ + ε.

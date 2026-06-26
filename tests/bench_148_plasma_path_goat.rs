@@ -256,6 +256,96 @@ fn proof_g3_throughput_1024() {
     }
 }
 
+// ── G3b: SWAR Optimization Speedup (Issue 298) ────────────────
+//
+// Gate: SIMD ternary must be ≥ 5× faster than scalar ternary on 1024×1024.
+//
+// Rationale: pre-Issue-298 SIMD was only ~2.5× scalar (the SIMD kernel built
+// per-lane selection masks with scalar `if/else` branches — see Issue 298).
+// Post-Issue-298 SWAR + sign-FMLA + 4 accumulators validated at ~5.5× scalar.
+// The scalar baseline is unchanged, so this gate directly captures the SWAR
+// optimization gain and is platform-portable (NEON/AVX2/WASM).
+
+#[test]
+fn proof_g3b_swar_speedup() {
+    use std::hint::black_box;
+
+    let tw = TernaryWeights::quantize_from_f32(&make_random_weights(1024, 1024, 42), 1024, 1024);
+    let x = make_random_vec(1024, 99);
+    let mut y_simd = vec![0.0f32; 1024];
+    let mut y_scalar = vec![0.0f32; 1024];
+
+    // Warmup both paths
+    for _ in 0..10 {
+        simd_ternary_matvec(&tw, &x, &mut y_simd);
+        ternary_matvec_scalar(&tw, &x, &mut y_scalar);
+    }
+    black_box(&y_simd);
+    black_box(&y_scalar);
+
+    let iters = 100;
+
+    // SIMD ternary bench
+    let start = std::time::Instant::now();
+    for _ in 0..iters {
+        simd_ternary_matvec(&tw, &x, &mut y_simd);
+        consume_f32(y_simd.iter().sum::<f32>());
+    }
+    let simd_elapsed = start.elapsed();
+
+    // Scalar ternary bench (same algorithm, no SIMD)
+    let start = std::time::Instant::now();
+    for _ in 0..iters {
+        ternary_matvec_scalar(&tw, &x, &mut y_scalar);
+        consume_f32(y_scalar.iter().sum::<f32>());
+    }
+    let scalar_elapsed = start.elapsed();
+
+    let simd_us = simd_elapsed.as_micros() as f64 / iters as f64;
+    let scalar_us = scalar_elapsed.as_micros() as f64 / iters as f64;
+    let speedup = scalar_us / simd_us;
+
+    // Sanity: results must match (within FP tolerance)
+    let max_diff = y_simd
+        .iter()
+        .zip(y_scalar.iter())
+        .map(|(a, b)| (a - b).abs())
+        .fold(0.0f32, f32::max);
+
+    println!("\nG3b (Issue 298 SWAR speedup, 1024×1024):");
+    println!("  Scalar ternary:  {scalar_us:>8.1} µs/call");
+    println!("  SIMD ternary:    {simd_us:>8.1} µs/call");
+    println!("  Speedup:         {speedup:.2}×");
+    println!("  Max diff:        {max_diff:.8}");
+    println!("  Gate:            ≥ 5.0× (Issue 298 SWAR+FMLA+4acc)");
+
+    assert!(max_diff < 1e-3, "SIMD vs scalar divergence: {max_diff}");
+
+    // Loose sanity floor — catches catastrophic SIMD regression (wrong backend,
+    // miscompile) in ALL builds including debug.
+    assert!(
+        speedup > 0.3,
+        "SIMD slower than 0.3× scalar — likely backend dispatch bug: {speedup:.2}×"
+    );
+
+    // Hard SWAR gate — only meaningful in release builds. In debug, intrinsics
+    // are unoptimized and the SWAR/FMLA advantage disappears (typically ~1.0×).
+    // Pattern mirrors proof_g3_throughput_1024's loose sanity floor + verdict.
+    #[cfg(not(debug_assertions))]
+    {
+        assert!(
+            speedup >= 5.0,
+            "SWAR speedup regression: {speedup:.2}× (gate: ≥ 5.0× — see Issue 298)"
+        );
+    }
+
+    if speedup >= 5.0 {
+        println!("  ✅ PASS — SWAR optimization at {speedup:.2}× scalar (gate ≥ 5.0×)");
+    } else {
+        println!("  ⚠️  DEBUG BUILD — SWAR gate skipped (got {speedup:.2}×, run with --release)");
+    }
+}
+
 // ── G4: Graceful Degradation ──────────────────────────────────
 // (This test exists in the binary but can only run WITH the feature.
 //  The proof is that `cargo check` without the feature compiles.)

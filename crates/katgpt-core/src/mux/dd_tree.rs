@@ -7,25 +7,77 @@
 //! effective width (number of valid superposition peaks), and expands all
 //! peaks simultaneously.
 
+use std::sync::Arc;
+
 use crate::mux::span_pruner::MuxSpanPruner;
-use crate::mux::top_k::extract_top_k_peaks;
+use crate::mux::top_k::{MAX_TOP_K, extract_top_k_into};
 
 /// Default superposition width (number of tokens per node).
 pub const DEFAULT_K: usize = 4;
 
+/// Flat storage for leaf paths — avoids one `Vec<usize>` per leaf.
+///
+/// `buf` stores all path indices contiguously; `offsets[i]..offsets[i+1]`
+/// is the i-th leaf's path.
+#[derive(Debug, Clone)]
+pub struct LeafPaths {
+    /// Flat buffer of path indices.
+    pub buf: Vec<usize>,
+    /// `offsets.len() == leaf_count + 1`. Path i is `buf[offsets[i]..offsets[i+1]]`.
+    pub offsets: Vec<usize>,
+}
+
+impl LeafPaths {
+    /// Create an empty `LeafPaths` with no allocation. Intended for reuse
+    /// via [`Self::clear`] across calls to `expand_bfs_frontier_into`.
+    pub fn new() -> Self {
+        Self {
+            buf: Vec::new(),
+            offsets: Vec::new(),
+        }
+    }
+
+    /// Number of leaf paths stored.
+    pub fn len(&self) -> usize {
+        self.offsets.len().saturating_sub(1)
+    }
+
+    /// Returns true if there are no leaf paths.
+    pub fn is_empty(&self) -> bool {
+        self.offsets.len() <= 1
+    }
+
+    /// Access the i-th leaf path.
+    pub fn path(&self, i: usize) -> &[usize] {
+        &self.buf[self.offsets[i]..self.offsets[i + 1]]
+    }
+
+    /// Iterate over all leaf paths.
+    pub fn iter(&self) -> impl Iterator<Item = &[usize]> {
+        (0..self.len()).map(move |i| self.path(i))
+    }
+
+    /// Clear internal buffers for reuse, retaining allocated capacity.
+    pub fn clear(&mut self) {
+        self.buf.clear();
+        self.offsets.clear();
+    }
+}
+
 /// A node in the DD-tree that carries K tokens as a weighted span.
 #[derive(Debug, Clone)]
 pub struct MuxNode {
+    /// Child nodes (branching factor = width at this depth).
+    pub children: Vec<MuxNode>,
     /// Token IDs held in superposition at this node.
     pub tokens: Vec<u32>,
     /// Corresponding weights (logit values) for each token.
-    pub weights: Vec<f32>,
-    /// Child nodes (branching factor = width at this depth).
-    pub children: Vec<MuxNode>,
+    pub weights: Arc<[f32]>,
 }
 
 impl MuxNode {
-    pub fn new(tokens: Vec<u32>, weights: Vec<f32>) -> Self {
+    pub fn new(tokens: Vec<u32>, weights: impl Into<Arc<[f32]>>) -> Self {
+        let weights = weights.into();
         assert_eq!(tokens.len(), weights.len());
         Self {
             tokens,
@@ -48,7 +100,7 @@ impl MuxNode {
 /// Shannon entropy of a probability distribution (in nats).
 /// Zero-alloc, branch-free inner loop.
 #[cfg(feature = "comp_width")]
-fn shannon_entropy(peaks: &[f32]) -> f32 {
+pub(crate) fn shannon_entropy(peaks: &[f32]) -> f32 {
     let total: f32 = peaks.iter().sum();
     if total <= 0.0 {
         return 0.0;
@@ -81,7 +133,7 @@ fn shannon_entropy(peaks: &[f32]) -> f32 {
 /// Uses CM isotropic scale internally for the norm estimate:
 /// `s = (normalized + damping).recip().sqrt()` — one division, one sqrt, zero-alloc.
 #[cfg(feature = "comp_width")]
-fn compositional_width(peaks: &[f32], base: usize) -> usize {
+pub(crate) fn compositional_width(peaks: &[f32], base: usize) -> usize {
     let entropy = shannon_entropy(peaks);
     // max entropy for uniform distribution over len items: ln(n)
     let max_entropy = (peaks.len() as f32).ln();
@@ -97,32 +149,35 @@ fn compositional_width(peaks: &[f32], base: usize) -> usize {
 /// DD-tree wrapper that manages superposition expansion.
 #[derive(Debug, Clone)]
 pub struct MuxDdTree {
+    /// Pruner for validating superposition spans.
+    pub pruner: MuxSpanPruner,
     /// Root node.
     pub root: MuxNode,
     /// Maximum superposition width per node.
     pub k: usize,
     /// Current depth of the tree.
     pub depth: usize,
-    /// Pruner for validating superposition spans.
-    pub pruner: MuxSpanPruner,
 }
 
 impl MuxDdTree {
     pub fn new(k: usize) -> Self {
         let pruner = MuxSpanPruner::new(k, 0.5);
         Self {
-            root: MuxNode::new(Vec::new(), Vec::new()),
             k,
             depth: 0,
+            root: MuxNode::new(Vec::new(), Vec::new()),
             pruner,
         }
     }
 
     /// Initialize the root with an initial superposition from logit distribution.
     pub fn init_root(&mut self, logits: &[f32]) {
-        let peaks = extract_top_k_peaks(logits, self.k);
-        let tokens: Vec<u32> = (0..peaks.len() as u32).collect();
-        self.root = MuxNode::new(tokens, peaks);
+        let mut buf = [0.0f32; MAX_TOP_K];
+        let peaks = extract_top_k_into(logits, self.k, &mut buf);
+        let mut tokens = Vec::with_capacity(peaks.len());
+        tokens.extend(0..peaks.len() as u32);
+        let weights = peaks.to_vec();
+        self.root = MuxNode::new(tokens, weights);
         self.depth = 0;
     }
 
@@ -147,19 +202,37 @@ impl MuxDdTree {
 
     /// Expand a leaf node at the given path using logit distribution.
     /// Creates `width` children, each with top-K tokens from `logits`.
+    ///
+    /// If the caller has already extracted the top-K peaks (e.g. for width
+    /// detection or pruning in the same BFS step), use
+    /// [`Self::expand_node_with_peaks`] to skip the redundant extraction.
     pub fn expand_node(&mut self, path: &[usize], logits: &[f32], width: usize) {
+        let mut buf = [0.0f32; MAX_TOP_K];
+        let peaks = extract_top_k_into(logits, self.k, &mut buf);
+        self.expand_node_with_peaks(path, peaks, width);
+    }
+
+    /// Same contract as [`Self::expand_node`] but accepts pre-extracted
+    /// top-K peaks. Avoids the O(N·K) `extract_top_k_into` pass when the
+    /// caller has already computed the peaks for another purpose.
+    pub fn expand_node_with_peaks(&mut self, path: &[usize], peaks: &[f32], width: usize) {
         let node = Self::get_node_mut(&mut self.root, path);
-        let peaks = extract_top_k_peaks(logits, self.k);
         let effective_width = width.min(peaks.len()).max(1);
 
+        let child_len = peaks.len().min(self.k);
+        let child_weights: Arc<[f32]> = Arc::from(&peaks[..child_len]);
+        node.children.reserve(effective_width);
+        let mut child_token_buf = vec![0u32; child_len];
         for i in 0..effective_width {
             // Distribute peaks across children: each child gets a shifted view
             let offset = (i * self.k / effective_width).min(peaks.len());
-            let child_tokens: Vec<u32> =
-                (offset as u32..(offset + peaks.len().min(self.k)) as u32).collect();
-            let child_weights: Vec<f32> = peaks.iter().take(self.k).copied().collect();
-            node.children
-                .push(MuxNode::new(child_tokens, child_weights));
+            for j in 0..child_len {
+                child_token_buf[j] = (offset + j) as u32;
+            }
+            node.children.push(MuxNode::new(
+                child_token_buf.clone(),
+                Arc::clone(&child_weights),
+            ));
         }
 
         // Track maximum depth
@@ -174,24 +247,47 @@ impl MuxDdTree {
     ///
     /// For each leaf, reads the logit distribution, determines the effective
     /// width via `detect_width`, validates with the pruner, and expands.
+    ///
+    /// Allocates a fresh [`LeafPaths`] each call. For per-step BFS hot loops
+    /// (e.g. speculative decoding), prefer [`Self::expand_bfs_frontier_into`]
+    /// to reuse the leaf-path buffer across calls.
     pub fn expand_bfs_frontier<F>(&mut self, depth: usize, logits_by_leaf: &[F])
     where
         F: AsRef<[f32]>,
     {
-        let leaves = self.collect_leaf_paths();
+        let mut paths = LeafPaths::new();
+        self.expand_bfs_frontier_into(depth, logits_by_leaf, &mut paths);
+    }
+
+    /// Zero-alloc variant of [`Self::expand_bfs_frontier`]: reuses a
+    /// caller-provided `paths` buffer for leaf collection, eliminating the
+    /// per-call `LeafPaths` allocation in the BFS hot loop.
+    pub fn expand_bfs_frontier_into<F>(
+        &mut self,
+        depth: usize,
+        logits_by_leaf: &[F],
+        paths: &mut LeafPaths,
+    ) where
+        F: AsRef<[f32]>,
+    {
+        self.collect_leaf_paths_flat_into(paths);
         assert_eq!(
-            leaves.len(),
+            paths.len(),
             logits_by_leaf.len(),
             "must provide logits for every leaf"
         );
 
-        for (path, logits) in leaves.into_iter().zip(logits_by_leaf.iter()) {
-            let logits = logits.as_ref();
-            let width = self.detect_width(logits);
-            if width > 0 && self.pruner.is_valid(logits, depth) {
-                self.expand_node(&path, logits, width);
+        for i in 0..paths.len() {
+            let logits = logits_by_leaf[i].as_ref();
+            // Extract once — reused for width, validity, and expansion.
+            let mut buf = [0.0f32; MAX_TOP_K];
+            let peaks = extract_top_k_into(logits, self.k, &mut buf);
+            let width = self.detect_width_with_peaks(peaks);
+            if width > 0 && self.pruner.is_valid_with_peaks(peaks) {
+                self.expand_node_with_peaks(paths.path(i), peaks, width);
             }
         }
+        let _ = depth; // preserved for API compat; pruner ignores depth
     }
 
     /// Detect the effective branching width from a logit distribution.
@@ -199,8 +295,19 @@ impl MuxDdTree {
     /// With `comp_width` feature: uses continuous partner-entropy scaling
     /// derived from Compositional Muon's isotropic approximation.
     /// Without: falls back to binary PEAK_DOMINANCE_RATIO threshold.
+    ///
+    /// If the caller has already extracted the top-K peaks, use
+    /// [`Self::detect_width_with_peaks`] to skip the redundant extraction.
     pub fn detect_width(&self, logits: &[f32]) -> usize {
-        let peaks = extract_top_k_peaks(logits, self.k);
+        let mut buf = [0.0f32; MAX_TOP_K];
+        let peaks = extract_top_k_into(logits, self.k, &mut buf);
+        self.detect_width_with_peaks(peaks)
+    }
+
+    /// Same contract as [`Self::detect_width`] but accepts pre-extracted
+    /// top-K peaks.
+    #[inline]
+    pub fn detect_width_with_peaks(&self, peaks: &[f32]) -> usize {
         if peaks.len() < 2 {
             return 1;
         }
@@ -211,7 +318,7 @@ impl MuxDdTree {
 
         #[cfg(feature = "comp_width")]
         {
-            let width = compositional_width(&peaks, self.k);
+            let width = compositional_width(peaks, self.k);
             width.max(1)
         }
 
@@ -227,15 +334,76 @@ impl MuxDdTree {
     }
 
     /// Collect paths to all leaf nodes (BFS order).
+    ///
+    /// Returns paths as a flat buffer + offsets to avoid per-path `Vec` allocation.
+    /// `offsets[i]..offsets[i+1]` in `path_buf` is one leaf path.
+    ///
+    /// Each queue entry stores the full path inline (copied into a stack buffer).
+    /// For trees with depth ≤ ~20 and branching factor ≤ K, the total allocation
+    /// is ~leaf_count × depth elements — one contiguous Vec instead of one Vec per leaf.
+    pub fn collect_leaf_paths_flat(&self) -> LeafPaths {
+        let mut paths = LeafPaths {
+            // Reasonable initial capacity; the vector grows as needed.
+            buf: Vec::with_capacity(self.depth.max(1) * 4),
+            offsets: Vec::with_capacity(8),
+        };
+        self.collect_leaf_paths_flat_into(&mut paths);
+        paths
+    }
+
+    /// Zero-alloc variant of `collect_leaf_paths_flat` that reuses a caller-provided buffer.
+    ///
+    /// Clears `paths` and refills it. Retains heap capacity from prior calls,
+    /// eliminating per-step allocation in the BFS hot loop.
+    pub fn collect_leaf_paths_flat_into(&self, paths: &mut LeafPaths) {
+        paths.clear();
+        // Pre-size stack: worst case is root with all children (branching factor ≤ K).
+        // Start with 1 entry; the stack grows as needed but this avoids the initial
+        // vec![...] heap allocation for small trees.
+        let mut stack: Vec<(*const MuxNode, usize, usize)> =
+            Vec::with_capacity((self.depth + 1) * self.k.max(1));
+        stack.push((&self.root as *const _, 0, 0));
+        paths.offsets.push(0);
+
+        while let Some((node_ptr, path_start, path_len)) = stack.pop() {
+            // SAFETY: node_ptr comes from valid tree references that outlive this fn.
+            let node = unsafe { &*node_ptr };
+            if node.is_leaf() {
+                paths
+                    .buf
+                    .extend_from_within(path_start..path_start + path_len);
+                paths.offsets.push(paths.buf.len());
+            } else {
+                for (i, child) in node.children.iter().enumerate().rev() {
+                    let child_path_start = paths.buf.len();
+                    // Append parent path + this child index
+                    paths
+                        .buf
+                        .extend_from_within(path_start..path_start + path_len);
+                    paths.buf.push(i);
+                    stack.push((child as *const _, child_path_start, path_len + 1));
+                }
+            }
+        }
+    }
+
+    /// Collect paths to all leaf nodes (BFS order).
     pub fn collect_leaf_paths(&self) -> Vec<Vec<usize>> {
-        let mut result = Vec::new();
-        let mut queue: Vec<(Vec<usize>, &MuxNode)> = vec![(Vec::new(), &self.root)];
+        let leaf_count = self.leaf_count();
+        let mut result = Vec::with_capacity(leaf_count);
+        let mut queue: Vec<(Vec<usize>, &MuxNode)> = Vec::with_capacity(leaf_count * 2);
+        queue.push((Vec::new(), &self.root));
         while let Some((path, node)) = queue.pop() {
             if node.is_leaf() {
                 result.push(path);
             } else {
+                let child_count = node.children.len();
+                if queue.capacity() < queue.len() + child_count {
+                    queue.reserve(child_count);
+                }
                 for (i, child) in node.children.iter().enumerate() {
                     let mut child_path = path.clone();
+                    child_path.reserve(1);
                     child_path.push(i);
                     queue.push((child_path, child));
                 }
@@ -256,6 +424,13 @@ impl MuxDdTree {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mux::top_k::{MAX_TOP_K, extract_top_k_into};
+
+    /// Helper: extract top-k peaks for test code (zero-alloc wrapper).
+    fn top_k_peaks(logits: &[f32], k: usize) -> Vec<f32> {
+        let mut buf = [0.0f32; MAX_TOP_K];
+        extract_top_k_into(logits, k, &mut buf).to_vec()
+    }
 
     #[test]
     fn init_root_and_leaf_count() {
@@ -478,7 +653,7 @@ mod tests {
         println!("  {}", "─".repeat(72));
 
         for (name, logits) in &distributions {
-            let peaks = extract_top_k_peaks(logits, base);
+            let peaks = top_k_peaks(logits, base);
 
             let w_fixed = fixed_width(&peaks, base);
             let w_binary = binary_width(&peaks);
@@ -539,7 +714,7 @@ mod tests {
         println!("  {}", "─".repeat(38));
 
         for (name, logits) in &distributions {
-            let peaks = extract_top_k_peaks(logits, base);
+            let peaks = top_k_peaks(logits, base);
             let w = compositional_width(&peaks, base).max(1);
             let w_binary = binary_width(&peaks);
 

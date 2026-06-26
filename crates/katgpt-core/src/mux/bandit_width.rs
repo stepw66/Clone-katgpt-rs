@@ -7,8 +7,8 @@
 #[derive(Debug, Clone)]
 struct Arm {
     width: usize,
-    total_reward: f32,
     pulls: u32,
+    total_reward: f32,
 }
 
 impl Arm {
@@ -20,14 +20,7 @@ impl Arm {
         }
     }
 
-    fn average_reward(&self) -> f32 {
-        if self.pulls == 0 {
-            f32::INFINITY // unexplored arms get priority
-        } else {
-            self.total_reward / self.pulls as f32
-        }
-    }
-
+    #[inline]
     fn update(&mut self, reward: f32) {
         self.total_reward += reward;
         self.pulls += 1;
@@ -37,15 +30,18 @@ impl Arm {
 /// Bandit-based width selector for MUX superposition expansion.
 #[derive(Debug, Clone)]
 pub struct MuxBanditWidth {
-    arms: Vec<Arm>,
     /// Exploration factor (higher = more exploration).
     pub exploration: f32,
+    arms: Vec<Arm>,
 }
 
 impl MuxBanditWidth {
     /// Create a new bandit with arms for widths 1..=k.
     pub fn new(k: usize) -> Self {
-        let arms = (1..=k).map(Arm::new).collect();
+        let mut arms = Vec::with_capacity(k);
+        for width in 1..=k {
+            arms.push(Arm::new(width));
+        }
         Self {
             arms,
             exploration: 1.0,
@@ -53,34 +49,41 @@ impl MuxBanditWidth {
     }
 
     /// Select the best width arm using upper confidence bound.
+    #[inline]
     pub fn select_width(&self, total_steps: u32) -> usize {
         let ln_n = if total_steps > 0 {
             (total_steps as f32).ln()
         } else {
             1.0
         };
+        let two_ln_n = 2.0 * ln_n;
 
-        let best = self
-            .arms
-            .iter()
-            .map(|arm| {
-                let avg = arm.average_reward();
-                let ucb = if arm.pulls == 0 {
-                    f32::INFINITY
-                } else {
-                    avg + self.exploration * (2.0 * ln_n / arm.pulls as f32).sqrt()
-                };
-                (arm.width, ucb)
-            })
-            .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
-
-        best.map(|(w, _)| w).unwrap_or(1)
+        let mut best_width = 1;
+        let mut best_ucb = f32::NEG_INFINITY;
+        for arm in &self.arms {
+            let ucb = if arm.pulls == 0 {
+                f32::INFINITY
+            } else {
+                let inv_pulls = 1.0 / arm.pulls as f32;
+                let avg = arm.total_reward * inv_pulls;
+                avg + self.exploration * (two_ln_n * inv_pulls).sqrt()
+            };
+            if ucb > best_ucb {
+                best_ucb = ucb;
+                best_width = arm.width;
+            }
+        }
+        best_width
     }
 
     /// Update the arm for `width` with the observed `reward`.
+    #[inline]
     pub fn update(&mut self, width: usize, reward: f32) {
-        if let Some(arm) = self.arms.iter_mut().find(|a| a.width == width) {
-            arm.update(reward);
+        match width.checked_sub(1) {
+            Some(idx) if idx < self.arms.len() => {
+                self.arms[idx].update(reward);
+            }
+            _ => {}
         }
     }
 }

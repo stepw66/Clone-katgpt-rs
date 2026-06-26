@@ -82,23 +82,23 @@ impl RegimeCollapseClassifier {
         Self { tolerance }
     }
 
-    /// Compute the standard deviation of failure depths.
+    /// Compute the standard deviation of failure depths using Welford's one-pass algorithm.
     /// Returns 0.0 for empty or single-element sets.
     fn failure_depth_std(&self, stats: &DDTreeStats) -> f64 {
         match stats.failure_depths.len() {
             0 | 1 => 0.0,
-            n => {
-                let mean = stats.failure_depths.iter().map(|&d| d as f64).sum::<f64>() / n as f64;
-                let variance = stats
-                    .failure_depths
-                    .iter()
-                    .map(|&d| {
-                        let diff = d as f64 - mean;
-                        diff * diff
-                    })
-                    .sum::<f64>()
-                    / n as f64;
-                variance.sqrt()
+            _ => {
+                let mut mean = 0.0f64;
+                let mut m2 = 0.0f64;
+                for (i, &d) in stats.failure_depths.iter().enumerate() {
+                    let x = d as f64;
+                    let delta = x - mean;
+                    mean += delta / (i as f64 + 1.0);
+                    let delta2 = x - mean;
+                    m2 += delta * delta2;
+                }
+                let n = stats.failure_depths.len() as f64;
+                (m2 / n).sqrt()
             }
         }
     }
@@ -334,6 +334,45 @@ use std::sync::Mutex;
 
 use katgpt_core::traits::ConstraintPruner;
 
+/// Hash of a failure pattern token sequence, used as a compact HashMap key.
+/// Avoids storing/cloning the full `Vec<usize>` per pattern.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct FailurePatternHash([u8; 32]);
+
+impl FailurePatternHash {
+    /// Compute blake3 hash from depth + token sequence.
+    pub fn from_parts(depth: usize, tokens: &[usize]) -> Self {
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(&(depth as u64).to_le_bytes());
+        for &t in tokens {
+            hasher.update(&(t as u64).to_le_bytes());
+        }
+        Self(hasher.finalize().into())
+    }
+
+    /// Compute blake3 hash from depth + parent tokens + trailing token.
+    ///
+    /// Equivalent to `from_parts(depth, parent_tokens.iter().chain([&token]))`
+    /// but avoids the heap allocation that materializing the concatenated
+    /// `Vec<usize>` would require. This is the hot-path variant used by
+    /// `AdversarialBreaker::is_valid`, which is invoked per-candidate per-node
+    /// during DDTree construction.
+    #[inline]
+    pub fn from_parts_with_token(
+        depth: usize,
+        parent_tokens: &[usize],
+        token: usize,
+    ) -> Self {
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(&(depth as u64).to_le_bytes());
+        for &t in parent_tokens {
+            hasher.update(&(t as u64).to_le_bytes());
+        }
+        hasher.update(&(token as u64).to_le_bytes());
+        Self(hasher.finalize().into())
+    }
+}
+
 /// Token sequence that failed validation, recorded for adversarial analysis.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct FailurePattern {
@@ -341,6 +380,13 @@ pub struct FailurePattern {
     pub tokens: Vec<usize>,
     /// Depth at which failure occurred.
     pub failure_depth: usize,
+}
+
+impl FailurePattern {
+    /// Compute blake3 hash for use as a compact HashMap key.
+    pub fn hash_key(&self) -> FailurePatternHash {
+        FailurePatternHash::from_parts(self.failure_depth, &self.tokens)
+    }
 }
 
 /// A rule extracted from a systematic failure pattern.
@@ -367,7 +413,9 @@ pub struct FailureRule {
 /// [`AdversarialBreaker::generate_synthetic`] perturbations.
 pub struct AdversarialBreaker<P: ConstraintPruner> {
     inner: P,
-    failure_counts: Mutex<HashMap<FailurePattern, u32>>,
+    failure_counts: Mutex<HashMap<FailurePatternHash, u32>>,
+    /// Stores patterns that reached threshold (needed for hot_patterns, extract_failure_rule).
+    hot_patterns: Mutex<HashMap<FailurePatternHash, FailurePattern>>,
     threshold: u32,
 }
 
@@ -377,6 +425,7 @@ impl<P: ConstraintPruner> AdversarialBreaker<P> {
         Self {
             inner,
             failure_counts: Mutex::new(HashMap::new()),
+            hot_patterns: Mutex::new(HashMap::new()),
             threshold,
         }
     }
@@ -388,11 +437,66 @@ impl<P: ConstraintPruner> AdversarialBreaker<P> {
 
     /// Record a failure and check if it exceeds the pattern threshold.
     /// Returns `true` if the pattern count *just* reached the threshold.
+    ///
+    /// Lock discipline: `failure_counts` is acquired and dropped *before*
+    /// `hot_patterns` is taken — never holds both at once. This removes lock-
+    /// held-while-waiting-on-another-lock serialization under concurrent
+    /// `is_valid` calls (which record failures from `ConstraintPruner::is_valid`)
+    /// and eliminates a latent deadlock risk if any future caller locks in
+    /// the opposite order.
     pub fn record_failure(&self, pattern: FailurePattern) -> bool {
-        let mut map = self.failure_counts.lock().unwrap();
-        let count = map.entry(pattern).or_insert(0);
-        *count += 1;
-        *count == self.threshold
+        let key = pattern.hash_key();
+        let reached_threshold = {
+            let mut map = self.failure_counts.lock().unwrap();
+            let count = map.entry(key).or_insert(0);
+            *count += 1;
+            *count == self.threshold
+        };
+        // failure_counts lock is now dropped — safe to acquire hot_patterns.
+        if reached_threshold {
+            self.hot_patterns.lock().unwrap().insert(key, pattern);
+        }
+        reached_threshold
+    }
+
+    /// Hot-path record: hash directly from `parent_tokens` + `token_idx` without
+    /// materializing a `Vec<usize>`, and only build the owning `FailurePattern`
+    /// on the rare threshold-hit path.
+    ///
+    /// Issue 001 H-4: `is_valid` is called per-candidate per-node; failures are
+    /// common but threshold-hits are rare (1 in `threshold` failures). The
+    /// previous code allocated `parent_tokens.to_vec()` on *every* failure just
+    /// to hash it and discard. This variant defers the allocation to the rare
+    /// branch, turning O(failures) allocations into O(threshold_hits).
+    ///
+    /// Produces a hash identical to
+    /// `FailurePattern { tokens: [..parent_tokens, token_idx], failure_depth: depth }.hash_key()`
+    /// so it interoperates with `record_failure` and `hot_patterns` lookups.
+    fn record_failure_from_tokens(
+        &self,
+        depth: usize,
+        token_idx: usize,
+        parent_tokens: &[usize],
+    ) {
+        let key = FailurePatternHash::from_parts_with_token(depth, parent_tokens, token_idx);
+        let reached_threshold = {
+            let mut map = self.failure_counts.lock().unwrap();
+            let count = map.entry(key).or_insert(0);
+            *count += 1;
+            *count == self.threshold
+        };
+        if reached_threshold {
+            // Rare path: now we need the owning Vec for hot_patterns storage.
+            let mut tokens = parent_tokens.to_vec();
+            tokens.push(token_idx);
+            self.hot_patterns.lock().unwrap().insert(
+                key,
+                FailurePattern {
+                    tokens,
+                    failure_depth: depth,
+                },
+            );
+        }
     }
 
     /// Generate synthetic edge cases from a failure pattern.
@@ -413,12 +517,22 @@ impl<P: ConstraintPruner> AdversarialBreaker<P> {
     }
 
     /// Return all failure patterns whose count has reached the threshold.
+    ///
+    /// Lock discipline: snapshot the qualifying keys from `failure_counts`
+    /// first (lock dropped), then look them up in `hot_patterns` — never
+    /// holds both locks at once.
     pub fn hot_patterns(&self) -> Vec<FailurePattern> {
-        let map = self.failure_counts.lock().unwrap();
-        map.iter()
-            .filter(|&(_, &count)| count >= self.threshold)
-            .map(|(pattern, _)| pattern.clone())
-            .collect()
+        let hot_keys: Vec<FailurePatternHash> = {
+            let counts = self.failure_counts.lock().unwrap();
+            counts
+                .iter()
+                .filter(|&(_, &count)| count >= self.threshold)
+                .map(|(key, _)| *key)
+                .collect()
+        };
+        // failure_counts lock is now dropped — safe to acquire hot_patterns.
+        let hot = self.hot_patterns.lock().unwrap();
+        hot_keys.iter().filter_map(|key| hot.get(key).cloned()).collect()
     }
 
     /// Feed synthetic variants through the inner pruner to verify the weakness is genuine.
@@ -444,8 +558,9 @@ impl<P: ConstraintPruner> AdversarialBreaker<P> {
     ///
     /// Returns `None` if the pattern hasn't reached threshold or isn't confirmed.
     pub fn extract_failure_rule(&self, pattern: &FailurePattern) -> Option<FailureRule> {
+        let key = pattern.hash_key();
         let map = self.failure_counts.lock().unwrap();
-        let count = map.get(pattern).copied()?;
+        let count = map.get(&key).copied()?;
         if count < self.threshold {
             return None;
         }
@@ -469,12 +584,9 @@ impl<P: ConstraintPruner> ConstraintPruner for AdversarialBreaker<P> {
     fn is_valid(&self, depth: usize, token_idx: usize, parent_tokens: &[usize]) -> bool {
         let result = self.inner.is_valid(depth, token_idx, parent_tokens);
         if !result {
-            let mut tokens = parent_tokens.to_vec();
-            tokens.push(token_idx);
-            self.record_failure(FailurePattern {
-                tokens,
-                failure_depth: depth,
-            });
+            // Hot path: hash from slices directly; allocate only on the rare
+            // threshold-hit (see `record_failure_from_tokens`).
+            self.record_failure_from_tokens(depth, token_idx, parent_tokens);
         }
         result
     }
@@ -926,6 +1038,55 @@ mod tests {
         assert!(!ab.is_valid(0, 3, &[]));
         let hot = ab.hot_patterns();
         assert_eq!(hot.len(), 1);
+        assert_eq!(hot[0].tokens, vec![3]);
+        assert_eq!(hot[0].failure_depth, 0);
+    }
+
+    /// Issue 001 H-4: the fast-path hash (from slices) must equal the
+    /// owning-Vec hash (from `FailurePattern::hash_key`) so counts and
+    /// `hot_patterns` lookups interoperate between `is_valid` and
+    /// `record_failure`.
+    #[test]
+    fn adversarial_hash_fast_path_matches_owning_vec() {
+        let depth = 7usize;
+        let parents = [1usize, 2, 3, 42];
+        let token = 99usize;
+
+        // Owning path: materialize Vec, hash via FailurePattern.
+        let mut full = parents.to_vec();
+        full.push(token);
+        let owning = FailurePattern {
+            tokens: full,
+            failure_depth: depth,
+        }
+        .hash_key();
+
+        // Fast path: hash from slices directly.
+        let fast = FailurePatternHash::from_parts_with_token(depth, &parents, token);
+
+        assert_eq!(owning, fast);
+    }
+
+    /// Issue 001 H-4: `is_valid` (fast path) and `record_failure` (owning path)
+    /// must share the same counter bucket so counts accumulate across both
+    /// call sites, and the threshold-hit still stores the owning pattern.
+    #[test]
+    fn adversarial_fast_and_owning_paths_share_counter() {
+        let ab = AdversarialBreaker::new(RejectThree, 3);
+        // Two fast-path calls via is_valid (token 3 rejected) at depth 0.
+        assert!(!ab.is_valid(0, 3, &[]));
+        assert!(!ab.is_valid(0, 3, &[]));
+        // One owning-path call via record_failure — same (depth=0, tokens=[3]).
+        // This 3rd call should hit threshold and return true.
+        assert!(
+            ab.record_failure(FailurePattern {
+                tokens: vec![3],
+                failure_depth: 0,
+            }),
+            "combined counter from fast + owning paths should reach threshold"
+        );
+        let hot = ab.hot_patterns();
+        assert_eq!(hot.len(), 1, "threshold should have been hit on combined path");
         assert_eq!(hot[0].tokens, vec![3]);
         assert_eq!(hot[0].failure_depth, 0);
     }

@@ -30,22 +30,32 @@
 /// # Panics
 /// Panics if matrices are empty, non-square, or dimension-mismatched.
 pub fn eigenspace_alignment(gram: &[f32], reference: &[f32], n: usize, k: usize) -> f32 {
-    assert!(n > 0, "gram must be non-empty");
-    assert!(
+    debug_assert!(n > 0, "gram must be non-empty");
+    debug_assert!(
         reference.len() == n * n,
         "dimension mismatch: gram has {} elements, reference has {}",
         gram.len(),
         reference.len()
     );
-    assert_eq!(gram.len(), n * n, "gram must be n×n");
+    debug_assert_eq!(gram.len(), n * n, "gram must be n×n");
 
     let k = k.min(n);
     if k == 0 {
         return 0.0;
     }
 
-    let gram_evecs = top_k_eigenvectors(gram, n, k);
-    let ref_evecs = top_k_eigenvectors(reference, n, k);
+    // Parallel dual eigensolve — the two `top_k_eigenvectors` calls are
+    // independent (each is O(n³) Jacobi), so `rayon::join` cuts wall time
+    // roughly in half on multi-core. Below rayon's ~5µs scheduling floor
+    // (small n) the join overhead would dominate, so fall back to serial.
+    let (gram_evecs, ref_evecs) = if n >= 64 {
+        rayon::join(
+            || top_k_eigenvectors(gram, n, k),
+            || top_k_eigenvectors(reference, n, k),
+        )
+    } else {
+        (top_k_eigenvectors(gram, n, k), top_k_eigenvectors(reference, n, k))
+    };
 
     let mut alignment_sum = 0.0f64;
     for i in 0..k {
@@ -78,7 +88,7 @@ pub fn haar_wavelet_basis(depth: usize) -> (Vec<Vec<f32>>, Vec<Vec<Vec<f32>>>) {
     let n = 1 << depth; // 2^depth leaves
 
     // Scaling function: constant vector [1/sqrt(n), ..., 1/sqrt(n)]
-    let inv_sqrt_n = (1.0 / n as f64).sqrt() as f32;
+    let inv_sqrt_n = 1.0 / (n as f32).sqrt();
     let scaling = vec![inv_sqrt_n; n];
     let scaling_modes = vec![scaling];
 
@@ -89,7 +99,7 @@ pub fn haar_wavelet_basis(depth: usize) -> (Vec<Vec<f32>>, Vec<Vec<Vec<f32>>>) {
         let n_blocks = 1 << level; // number of parent blocks at this level
         let mut level_wavelets = Vec::with_capacity(n_blocks);
 
-        let inv_sqrt_bs = (1.0 / block_size as f64).sqrt() as f32;
+        let inv_sqrt_bs = 1.0 / (block_size as f32).sqrt();
         for block in 0..n_blocks {
             let mut wavelet = vec![0.0f32; n];
             let start = block * block_size;
@@ -238,19 +248,21 @@ pub(crate) fn top_k_eigenvectors(mat: &[f32], n: usize, k: usize) -> Vec<f32> {
                 let sin2 = sin_t * sin_t;
                 let sin_cos = sin_t * cos_t;
 
-                // Rotate matrix.
-                for r in 0..n {
-                    if r == p || r == q {
-                        continue;
+                // Rotate matrix. Split `[0..n)` into three contiguous ranges that
+                // exclude `p` and `q` — eliminates the per-iteration
+                // `if r == p || r == q { continue }` branch (which would otherwise
+                // mispredict twice per `r` sweep).
+                for &(r_lo, r_hi) in &[(0, p), (p + 1, q), (q + 1, n)] {
+                    for r in r_lo..r_hi {
+                        let arp = a[r * n + p];
+                        let arq = a[r * n + q];
+                        let new_rp = cos_t * arp + sin_t * arq;
+                        let new_rq = -sin_t * arp + cos_t * arq;
+                        a[r * n + p] = new_rp;
+                        a[p * n + r] = new_rp;
+                        a[r * n + q] = new_rq;
+                        a[q * n + r] = new_rq;
                     }
-                    let arp = a[r * n + p];
-                    let arq = a[r * n + q];
-                    let new_rp = cos_t * arp + sin_t * arq;
-                    let new_rq = -sin_t * arp + cos_t * arq;
-                    a[r * n + p] = new_rp;
-                    a[p * n + r] = new_rp;
-                    a[r * n + q] = new_rq;
-                    a[q * n + r] = new_rq;
                 }
 
                 let new_pp = cos2 * app + 2.0 * sin_cos * apq + sin2 * aqq;
@@ -277,14 +289,15 @@ pub(crate) fn top_k_eigenvectors(mat: &[f32], n: usize, k: usize) -> Vec<f32> {
     }
 
     // Extract eigenvalues and sort descending.
-    // Build index array via iterator — avoids per-push bounds checks.
-    let mut indexed: Vec<(usize, f64)> = (0..n).map(|i| (i, a[i * n + i])).collect();
-    indexed.sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    // Index-based sort avoids allocating (usize, f64) pairs —
+    // sorts n×8 byte indices instead of n×16 byte pairs.
+    let mut indices: Vec<usize> = (0..n).collect();
+    indices.sort_unstable_by(|&i, &j| a[j * n + j].total_cmp(&a[i * n + i]));
 
     // Return top-k eigenvectors as a flat buffer [k * n], row-major.
     // Single allocation instead of k separate Vec<f32> allocations.
     let mut result = vec![0.0f32; k * n];
-    for (out_row, &(src_col, _)) in indexed[..k].iter().enumerate() {
+    for (out_row, &src_col) in indices[..k].iter().enumerate() {
         let row_off = out_row * n;
         for col in 0..n {
             result[row_off + col] = v[col * n + src_col] as f32;
@@ -523,8 +536,8 @@ mod tests {
         // Sort both descending.
         let mut full_sorted = full_eigs;
         let mut sub_sorted = sub_eigs;
-        full_sorted.sort_unstable_by(|a, b| b.partial_cmp(a).unwrap());
-        sub_sorted.sort_unstable_by(|a, b| b.partial_cmp(a).unwrap());
+        full_sorted.sort_unstable_by(|a, b| b.total_cmp(a));
+        sub_sorted.sort_unstable_by(|a, b| b.total_cmp(a));
 
         let eigenvalues = vec![full_sorted, sub_sorted];
         assert!(

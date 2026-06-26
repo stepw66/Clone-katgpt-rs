@@ -11,13 +11,22 @@ pub fn save_module(module: &SenseModule, mut w: impl Write) -> io::Result<()> {
     w.write_all(MAGIC)?;
     w.write_all(&[VERSION])?;
     w.write_all(&[module.kind as u8])?;
-    let bytes: &[u8] = unsafe {
-        std::slice::from_raw_parts(
-            module as *const SenseModule as *const u8,
+    // Stack buffer to zero padding — avoids cloning the full SenseModule.
+    let mut copy: std::mem::MaybeUninit<SenseModule> = std::mem::MaybeUninit::uninit();
+    unsafe {
+        std::ptr::copy_nonoverlapping(module, copy.as_mut_ptr(), 1);
+        // SAFETY: copy is now a valid SenseModule. Zero padding in directions.
+        let copy_ref = copy.assume_init_mut();
+        for dir in &mut copy_ref.directions {
+            dir.zero_padding();
+        }
+        let bytes: &[u8] = std::slice::from_raw_parts(
+            copy_ref as *const SenseModule as *const u8,
             std::mem::size_of::<SenseModule>(),
-        )
-    };
-    w.write_all(bytes)?;
+        );
+        w.write_all(bytes)?;
+        // SenseModule has no Drop impl — MaybeUninit drops as unit, no cleanup needed.
+    }
     Ok(())
 }
 
@@ -42,9 +51,12 @@ pub fn load_module(mut r: impl Read) -> io::Result<SenseModule> {
     let mut kind_buf = [0u8; 1];
     r.read_exact(&mut kind_buf)?;
 
-    let mut module_bytes = vec![0u8; std::mem::size_of::<SenseModule>()];
+    let mut module_bytes = [0u8; std::mem::size_of::<SenseModule>()];
     r.read_exact(&mut module_bytes)?;
 
+    // SAFETY: buffer is zero-initialized (covers padding), SenseModule is
+    // repr(C) so field layout matches the byte offsets. All fields are
+    // valid for any bit pattern (integers, f32, arrays).
     let module: SenseModule =
         unsafe { std::ptr::read(module_bytes.as_ptr() as *const SenseModule) };
 

@@ -180,15 +180,15 @@ pub fn forward_rt_turbo_decode(
         // Select top-p tokens via blockwise selection
         let top_p_result = select_top_p_blockwise(&scores, config.top_p, config.block_size);
 
-        // Merge with sink indices (union of top-p selected + sinks)
+        // Merge with sink indices (union of top-p selected + sinks).
+        // Single sort + dedup beats the previous sort → binary-search-per-sink →
+        // re-sort sequence: O(n log n) once instead of O(n log n) twice plus
+        // O(sinks · log n) searches, and the binary searches degraded as the
+        // vector grew (unsorted tail forced full re-sort anyway).
         let mut merged: Vec<usize> = top_p_result.selected_indices;
+        merged.extend_from_slice(&sink_indices);
         merged.sort_unstable();
-        for &sink in &sink_indices {
-            if merged.binary_search(&sink).is_err() {
-                merged.push(sink);
-            }
-        }
-        merged.sort_unstable();
+        merged.dedup();
 
         selected_indices.push(merged);
     }
@@ -314,16 +314,17 @@ fn forward_rt_turbo_decode_with_scratch(
         // Select top-p tokens via blockwise selection
         let top_p_result = select_top_p_blockwise(&scores, config.top_p, config.block_size);
 
-        // Merge with sink indices (union of top-p selected + sinks) into scratch buffer
+        // Merge with sink indices (union of top-p selected + sinks) into scratch buffer.
+        // Single sort + dedup replaces the sort → per-sink binary-search → re-sort
+        // pattern for the same reason as the non-scratch variant.
+        // Borrow split: take immutable sink slice first so the mutable merged_buf
+        // extend does not alias it.
+        let sink_indices = &scratch.sink_indices;
         scratch.merged_buf.clear();
         scratch.merged_buf.extend_from_slice(&top_p_result.selected_indices);
+        scratch.merged_buf.extend_from_slice(sink_indices);
         scratch.merged_buf.sort_unstable();
-        for &sink in scratch.sink_indices.iter() {
-            if scratch.merged_buf.binary_search(&sink).is_err() {
-                scratch.merged_buf.push(sink);
-            }
-        }
-        scratch.merged_buf.sort_unstable();
+        scratch.merged_buf.dedup();
 
         selected_indices.push(scratch.merged_buf.clone());
     }

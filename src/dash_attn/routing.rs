@@ -4,6 +4,7 @@
 //! selection via α-entmax (α=1.5). Computes per-head routing probabilities
 //! and normalised routing biases for downstream attention modulation.
 
+use crate::simd::simd_dot_f32;
 use crate::types::DashAttnConfig;
 
 use super::entmax::{entmax_1p5_into, entmax_gqa_aggregate, entmax_support_into};
@@ -89,7 +90,7 @@ pub fn score_blocks_entmax_into(
     let scale = 1.0 / (hd as f32).sqrt() * config.scaling_factor;
     for (i, s) in summaries.iter().enumerate() {
         let s_ref = s.as_ref();
-        let dot: f32 = query.iter().zip(s_ref.iter()).map(|(a, b)| a * b).sum();
+        let dot = simd_dot_f32(query, s_ref, hd);
         scratch.logits[i] = dot * scale;
     }
 
@@ -115,21 +116,27 @@ pub fn score_blocks_entmax_into(
             }
         }));
 
-    let mean_lw = if scratch.log_weights.is_empty() {
-        0.0
+    // Compute mean and variance of log-weights in a single pass.
+    // Original code iterated twice (sum for mean, then squared-deviation sum);
+    // fusing avoids a second scan over `log_weights`.
+    let n_lw = scratch.log_weights.len();
+    let (mean_lw, var_lw): (f32, f32) = if n_lw == 0 {
+        (0.0, 1.0)
+    } else if n_lw == 1 {
+        (*scratch.log_weights.first().unwrap(), 1.0)
     } else {
-        scratch.log_weights.iter().sum::<f32>() / scratch.log_weights.len() as f32
-    };
-
-    let var_lw: f32 = if scratch.log_weights.len() <= 1 {
-        1.0
-    } else {
-        scratch
-            .log_weights
-            .iter()
-            .map(|&x| (x - mean_lw).powi(2))
-            .sum::<f32>()
-            / (scratch.log_weights.len() - 1) as f32
+        let mut sum = 0.0f32;
+        for &x in scratch.log_weights.iter() {
+            sum += x;
+        }
+        let mean = sum / n_lw as f32;
+        let mut sq_sum = 0.0f32;
+        for &x in scratch.log_weights.iter() {
+            let d = x - mean;
+            sq_sum += d * d;
+        }
+        let var = sq_sum / (n_lw - 1) as f32;
+        (mean, var)
     };
     let std_lw = var_lw.sqrt().max(1e-6);
 
@@ -211,6 +218,85 @@ pub fn compute_routing_bias_into(
     let _agg_probs = entmax_gqa_aggregate(&head_probs, n_query_heads, n_kv_heads, n_chunks);
 
     per_head
+}
+
+// ── Wall-aware routing (Plan 173 Task 6) ────────────────────
+
+/// Wall-aware block routing that pre-filters decayed blocks.
+///
+/// Before entmax routing, checks each block's minimum retention via
+/// `WallPrefixState::min_retention_at_block()`. Blocks where ALL channels
+/// have decayed below `retention_threshold` are excluded from routing.
+///
+/// This avoids wasting compute on blocks that the model has already
+/// "forgotten" via the diagonal gate.
+///
+/// `retention_threshold`: blocks with `min_retention < threshold` are skipped.
+/// Default: 0.1 (i.e., block must retain at least 10% signal).
+///
+/// `min_retention_fn`: closure that returns `min_retention(block_idx) -> f32`
+/// for each block. Returns `1.0` for blocks with no Wall information.
+pub fn score_blocks_wall_aware_into<F>(
+    query: &[f32],
+    summaries: &[impl AsRef<[f32]>],
+    config: &DashAttnConfig,
+    scratch: &mut RoutingScratch,
+    retention_threshold: f32,
+    min_retention_fn: F,
+) -> RoutingResult
+where
+    F: Fn(usize) -> f32,
+{
+    let n = summaries.len();
+
+    // Pre-filter: collect only blocks with sufficient retention
+    let alive_summaries: Vec<(usize, &[f32])> = summaries
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| min_retention_fn(*i) >= retention_threshold)
+        .map(|(i, s)| (i, s.as_ref()))
+        .collect();
+
+    // If all blocks are alive (common case), delegate to standard routing
+    if alive_summaries.len() == n {
+        return score_blocks_entmax_into(query, summaries, config, scratch);
+    }
+
+    // If no blocks are alive, return empty routing
+    if alive_summaries.is_empty() {
+        scratch.active_indices.clear();
+        scratch.bias.clear();
+        return RoutingResult {
+            active_indices: vec![],
+            bias: vec![],
+            probs: vec![0.0; n],
+        };
+    }
+
+    // Extract just the summaries for filtered routing
+    let filtered_refs: Vec<&[f32]> = alive_summaries.iter().map(|(_, s)| *s).collect();
+
+    // Run standard entmax routing on alive blocks only
+    let filtered_result = score_blocks_entmax_into(query, &filtered_refs, config, scratch);
+
+    // Remap active indices back to original block indices
+    let original_active: Vec<usize> = filtered_result
+        .active_indices
+        .iter()
+        .map(|&fi| alive_summaries[fi].0)
+        .collect();
+
+    // Build full probs array (0.0 for dead blocks)
+    let mut full_probs = vec![0.0f32; n];
+    for (fi, &orig_i) in original_active.iter().enumerate() {
+        full_probs[orig_i] = filtered_result.probs.get(fi).copied().unwrap_or(0.0);
+    }
+
+    RoutingResult {
+        active_indices: original_active,
+        bias: filtered_result.bias,
+        probs: full_probs,
+    }
 }
 
 #[cfg(test)]
@@ -356,5 +442,77 @@ mod tests {
             (sum - 1.0).abs() < 1e-5 || sum == 0.0,
             "probs should sum to 1.0 or be empty when all logits zero, got {sum}"
         );
+    }
+
+    // ── Wall-aware routing tests (Plan 173 Task 6) ────────────
+
+    #[test]
+    fn test_wall_aware_routing_all_alive() {
+        let config = default_config();
+        let query = vec![1.0, 0.0];
+        let summaries = vec![vec![1.0, 0.0], vec![0.0, 1.0]];
+        let mut scratch = RoutingScratch::new(2, 2);
+
+        // All blocks have retention 1.0 (alive) → same as standard routing
+        let result = score_blocks_wall_aware_into(
+            &query,
+            &summaries,
+            &config,
+            &mut scratch,
+            0.1,
+            |_| 1.0, // all alive
+        );
+
+        let standard = score_blocks_entmax_into(&query, &summaries, &config, &mut scratch);
+        assert_eq!(result.active_indices, standard.active_indices);
+        assert_eq!(result.probs.len(), 2);
+    }
+
+    #[test]
+    fn test_wall_aware_routing_all_dead() {
+        let config = default_config();
+        let query = vec![1.0, 0.0];
+        let summaries = vec![vec![1.0, 0.0], vec![0.0, 1.0]];
+        let mut scratch = RoutingScratch::new(2, 2);
+
+        // All blocks have retention 0.0 (dead) → empty routing
+        let result = score_blocks_wall_aware_into(
+            &query,
+            &summaries,
+            &config,
+            &mut scratch,
+            0.1,
+            |_| 0.0, // all dead
+        );
+
+        assert!(result.active_indices.is_empty());
+        assert!(result.bias.is_empty());
+        assert_eq!(result.probs.len(), 2);
+        assert!(result.probs.iter().all(|&p| p == 0.0));
+    }
+
+    #[test]
+    fn test_wall_aware_routing_partial_filter() {
+        let config = default_config();
+        let query = vec![1.0, 0.0];
+        let summaries = vec![vec![1.0, 0.0], vec![0.5, 0.5], vec![0.0, 1.0]];
+        let mut scratch = RoutingScratch::new(3, 2);
+
+        // Block 1 is dead (retention 0.05), blocks 0 and 2 are alive
+        let result = score_blocks_wall_aware_into(
+            &query,
+            &summaries,
+            &config,
+            &mut scratch,
+            0.1,
+            |block_idx| if block_idx == 1 { 0.05 } else { 1.0 },
+        );
+
+        // Block 1 should not appear in active indices
+        assert!(!result.active_indices.contains(&1));
+        // Should have some active blocks
+        assert!(!result.active_indices.is_empty());
+        // Block 1 should have 0 probability
+        assert_eq!(result.probs[1], 0.0);
     }
 }

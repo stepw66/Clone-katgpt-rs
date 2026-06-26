@@ -89,28 +89,38 @@ impl<P: ScreeningPruner> PhraseBoostPruner<P> {
         hash
     }
 
-    /// Get or compute the active trie states for a given parent path.
-    fn get_active(&self, parent_tokens: &[usize]) -> Vec<usize> {
-        let key = Self::hash_path(parent_tokens);
-        let mut states = self.active_states.write().unwrap();
-        states
-            .entry(key)
-            .or_insert_with(|| {
-                // Walk the trie from root, advancing through each parent token.
-                let mut active = vec![0]; // start at root
-                for &tok in parent_tokens {
-                    active = self.trie.advance(&active, tok);
-                }
-                active
-            })
-            .clone()
-    }
-
     /// Check if `token_idx` is boosted given the current parent path.
+    ///
+    /// Holds the write lock only for the duration of the cache-miss computation;
+    /// the membership test runs via `is_token_boosted` which short-circuits on
+    /// the first matching child and allocates nothing. Previous implementation
+    /// allocated a `vocab_size` bool array + result Vec on every relevance() call.
     fn is_boosted(&self, parent_tokens: &[usize], token_idx: usize) -> bool {
-        let active = self.get_active(parent_tokens);
-        let boosted = self.trie.get_boosted_tokens(&active);
-        boosted.contains(&token_idx)
+        let key = Self::hash_path(parent_tokens);
+
+        // Fast path: cache hit under read lock. Slow path: upgrade to write
+        // lock, walk the trie once, insert into the cache, then fall through
+        // to the same membership test.
+        //
+        // We compute the membership test under the lock so we never clone the
+        // cached Vec<usize> and never allocate the boosted-token set.
+        let read = self.active_states.read().unwrap();
+        match read.get(&key) {
+            Some(active) => self.trie.is_token_boosted(active, token_idx),
+            None => {
+                // Cache miss: drop read, acquire write, re-check, then compute.
+                drop(read);
+                let mut write = self.active_states.write().unwrap();
+                let active = write.entry(key).or_insert_with(|| {
+                    let mut active = vec![0]; // start at root
+                    for &tok in parent_tokens {
+                        active = self.trie.advance(&active, tok);
+                    }
+                    active
+                });
+                self.trie.is_token_boosted(active, token_idx)
+            }
+        }
     }
 }
 

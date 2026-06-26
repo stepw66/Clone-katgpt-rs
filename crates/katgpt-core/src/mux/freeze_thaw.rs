@@ -8,20 +8,20 @@ use std::collections::HashMap;
 /// A frozen superposition pattern: token IDs and their weights.
 #[derive(Debug, Clone)]
 pub struct MuxTarget {
+    /// Depth at which this pattern was recorded.
+    pub depth: usize,
     /// Token IDs in the superposition.
     pub tokens: Vec<u32>,
     /// Weights for each token.
     pub weights: Vec<f32>,
-    /// Depth at which this pattern was recorded.
-    pub depth: usize,
 }
 
 impl MuxTarget {
     pub fn new(tokens: Vec<u32>, weights: Vec<f32>, depth: usize) -> Self {
         Self {
+            depth,
             tokens,
             weights,
-            depth,
         }
     }
 }
@@ -30,6 +30,8 @@ impl MuxTarget {
 /// logit distribution shape.
 #[derive(Debug, Clone, Default)]
 pub struct MuxPatternStore {
+    /// Cached total pattern count — incremented on freeze, avoids O(n) scan on read.
+    total_patterns: usize,
     patterns: HashMap<u64, Vec<MuxTarget>>,
 }
 
@@ -38,12 +40,23 @@ impl MuxPatternStore {
         Self::default()
     }
 
+    /// Create a store with pre-allocated capacity for `n` keys.
+    pub fn with_capacity(n: usize) -> Self {
+        Self {
+            total_patterns: 0,
+            patterns: HashMap::with_capacity(n),
+        }
+    }
+
     /// Freeze a pattern: store it under the given key.
+    #[inline]
     pub fn freeze(&mut self, key: u64, target: MuxTarget) {
         self.patterns.entry(key).or_default().push(target);
+        self.total_patterns += 1;
     }
 
     /// Thaw patterns: retrieve all patterns for a given key.
+    #[inline]
     pub fn thaw(&self, key: u64) -> &[MuxTarget] {
         self.patterns.get(&key).map(|v| v.as_slice()).unwrap_or(&[])
     }
@@ -54,8 +67,9 @@ impl MuxPatternStore {
     }
 
     /// Total number of patterns across all keys.
+    /// O(1) — maintained incrementally on freeze.
     pub fn pattern_count(&self) -> usize {
-        self.patterns.values().map(|v| v.len()).sum()
+        self.total_patterns
     }
 }
 

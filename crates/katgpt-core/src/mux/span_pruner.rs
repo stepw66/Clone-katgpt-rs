@@ -23,20 +23,34 @@ pub struct MuxSpanPruner {
 
 impl MuxSpanPruner {
     pub fn new(k: usize, decay_rate: f32) -> Self {
-        Self { decay_rate, k }
+        Self { k, decay_rate }
     }
 
     /// Returns `true` if the logit distribution exhibits geometric decay
     /// among its top-K peaks, indicating a valid superposition.
     /// Zero-alloc: uses stack buffer for top-K extraction.
+    ///
+    /// If the caller has already extracted the top-K peaks (e.g. for width
+    /// detection or node expansion in the same BFS step), use
+    /// [`Self::is_valid_with_peaks`] to skip the redundant extraction.
     pub fn is_valid(&self, logits: &[f32], _depth: usize) -> bool {
         let mut buf = [0.0f32; MAX_TOP_K];
         let peaks = extract_top_k_into(logits, self.k, &mut buf);
+        self.is_valid_with_peaks(peaks)
+    }
+
+    /// Same contract as [`Self::is_valid`] but accepts pre-extracted top-K
+    /// peaks. Avoids the O(N·K) `extract_top_k_into` pass when the caller
+    /// has already computed the peaks for another purpose (e.g. width
+    /// detection in `MuxBfs::step`).
+    #[inline]
+    pub fn is_valid_with_peaks(&self, peaks: &[f32]) -> bool {
         if peaks.len() < MIN_PEAKS {
             return false;
         }
-        for window in peaks.windows(2) {
-            if window[1] < window[0] * self.decay_rate {
+        // Manual indexed loop — avoids windows(2) iterator overhead for tiny k (≤16).
+        for i in 0..peaks.len() - 1 {
+            if peaks[i + 1] < peaks[i] * self.decay_rate {
                 return false;
             }
         }

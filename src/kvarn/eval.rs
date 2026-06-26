@@ -109,17 +109,17 @@ pub fn pseudo_decode_eval(
         for pos in tile_start..tile_end {
             // Key error
             cache.dequantize_key_into(0, pos, &mut out);
-            let key_mse = per_coord_mse(&keys[pos], &out);
+            let (key_mse, key_max_err) = mse_and_max_error(&keys[pos], &out);
             tile_sq_error += key_mse * kv_dim as f32;
             tile_cosine_sum += cosine_sim(&keys[pos], &out);
-            tile_max_mag_error = tile_max_mag_error.max(max_magnitude_error(&keys[pos], &out));
+            tile_max_mag_error = tile_max_mag_error.max(key_max_err);
 
             // Value error
             cache.dequantize_value_into(0, pos, &mut out);
-            let val_mse = per_coord_mse(&values[pos], &out);
+            let (val_mse, val_max_err) = mse_and_max_error(&values[pos], &out);
             tile_sq_error += val_mse * kv_dim as f32;
             tile_cosine_sum += cosine_sim(&values[pos], &out);
-            tile_max_mag_error = tile_max_mag_error.max(max_magnitude_error(&values[pos], &out));
+            tile_max_mag_error = tile_max_mag_error.max(val_max_err);
 
             tile_count += 2; // key + value
         }
@@ -160,32 +160,48 @@ pub fn pseudo_decode_eval(
 // Helpers
 // ---------------------------------------------------------------------------
 
+/// Cosine similarity. Single-pass over `a` and `b` accumulating dot, |a|², |b|²
+/// simultaneously. The previous implementation made 3 separate passes (dot,
+/// norm_a, norm_b) — fine for one-off calls but wasteful when invoked once per
+/// token per tile in [`pseudo_decode_eval`].
 #[inline]
 fn cosine_sim(a: &[f32], b: &[f32]) -> f32 {
-    let dot: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
-    let na: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
-    let nb: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
+    let mut dot = 0.0f32;
+    let mut na_sq = 0.0f32;
+    let mut nb_sq = 0.0f32;
+    for (&x, &y) in a.iter().zip(b.iter()) {
+        dot += x * y;
+        na_sq += x * x;
+        nb_sq += y * y;
+    }
+    let na = na_sq.sqrt();
+    let nb = nb_sq.sqrt();
     if na < 1e-10 || nb < 1e-10 {
         return 0.0;
     }
     dot / (na * nb)
 }
 
+/// Single-pass computation of both MSE and max-magnitude-error.
+///
+/// [`pseudo_decode_eval`] needs both metrics per `(original, dequantized)` pair.
+/// Fusing them into one pass halves the memory traffic for these two metrics
+/// (one zip iteration instead of two).
 #[inline]
-fn per_coord_mse(a: &[f32], b: &[f32]) -> f32 {
-    a.iter()
-        .zip(b.iter())
-        .map(|(x, y)| (x - y) * (x - y))
-        .sum::<f32>()
-        / a.len() as f32
-}
-
-#[inline]
-fn max_magnitude_error(a: &[f32], b: &[f32]) -> f32 {
-    a.iter()
-        .zip(b.iter())
-        .map(|(x, y)| (x - y).abs())
-        .fold(0.0f32, f32::max)
+fn mse_and_max_error(a: &[f32], b: &[f32]) -> (f32, f32) {
+    debug_assert_eq!(a.len(), b.len());
+    let mut sum_sq = 0.0f32;
+    let mut max_abs = 0.0f32;
+    for (&x, &y) in a.iter().zip(b.iter()) {
+        let d = x - y;
+        let ad = d.abs();
+        sum_sq += d * d;
+        if ad > max_abs {
+            max_abs = ad;
+        }
+    }
+    let mse = sum_sq / a.len() as f32;
+    (mse, max_abs)
 }
 
 // ---------------------------------------------------------------------------

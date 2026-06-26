@@ -47,13 +47,15 @@ pub fn mux_demux(logits: &[f32], k: usize, decay: f32) -> Option<Vec<usize>> {
     let top_val = peaks[0].1;
 
     // Verify geometric decay ordering with 50% tolerance
+    let mut decay_acc = decay;
     for i in 1..peaks.len() {
-        let expected = top_val * decay.powi(i as i32);
+        let expected = top_val * decay_acc;
         let actual = peaks[i].1;
         let tolerance = expected.abs() * 0.5;
         if (actual - expected).abs() > tolerance {
             return None;
         }
+        decay_acc *= decay;
     }
 
     // Reject collapse: top peak should not be >20x the second
@@ -135,7 +137,7 @@ fn extract_top_k(data: &[f32], k: usize) -> Vec<(usize, f32)> {
     for (idx, &val) in data.iter().enumerate() {
         if top.len() < k {
             insert_sorted(&mut top, idx, val);
-        } else if val > top.last().unwrap().1 {
+        } else if val > top[k - 1].1 {
             let last = top.len() - 1;
             top[last] = (idx, val);
             bubble_up(&mut top, last);
@@ -156,6 +158,85 @@ fn bubble_up(buf: &mut [(usize, f32)], mut pos: usize) {
     while pos > 0 && buf[pos].1 > buf[pos - 1].1 {
         buf.swap(pos, pos - 1);
         pos -= 1;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// MUX-RCD Fusion: Superposition-weighted residual (Plan 258 Phase 4)
+// ---------------------------------------------------------------------------
+
+/// Compute MUX-RCD residual from DDTree superposition paths.
+///
+/// Instead of single-step marginal, weights residuals across DDTree branches:
+/// `Δ_i = Σ_path score_path * Δ_path_i`
+///
+/// This requires DDTree node scores to weight the residual contributions
+/// from multiple hypothesis paths.
+///
+/// # Arguments
+/// * `path_scores` — quality score for each path (will be normalized)
+/// * `path_marginals` — marginal distribution per path per position: `[path][pos * vocab..]`
+/// * `wte` — flat embedding matrix `[vocab_size * n_embd]`
+/// * `n_embd` — embedding dimension
+/// * `position` — position to compute residual for
+/// * `vocab_size` — vocabulary size
+/// * `out` — output buffer `[n_embd]`, caller-allocated
+#[cfg(all(feature = "mux_demux", feature = "rcd_residual"))]
+pub fn compute_mux_residual(
+    path_scores: &[f32],
+    path_marginals: &[&[f32]],
+    wte: &[f32],
+    n_embd: usize,
+    position: usize,
+    vocab_size: usize,
+    out: &mut [f32],
+) {
+    debug_assert!(out.len() >= n_embd);
+    out[..n_embd].fill(0.0f32);
+
+    if path_scores.is_empty() || path_marginals.is_empty() {
+        return;
+    }
+
+    // Normalize path scores to probabilities
+    let total_score: f32 = path_scores.iter().copied().filter(|&s| s > 0.0).sum();
+    if total_score <= 0.0 {
+        return;
+    }
+
+    let n_paths = path_scores.len().min(path_marginals.len());
+
+    for path_idx in 0..n_paths {
+        let score = path_scores[path_idx];
+        if score <= 0.0 {
+            continue;
+        }
+        let weight = score / total_score;
+        let marginals = path_marginals[path_idx];
+        let offset = position * vocab_size;
+
+        if offset + vocab_size > marginals.len() {
+            continue;
+        }
+
+        let marginals_p = &marginals[offset..offset + vocab_size];
+
+        // Accumulate weighted codebook sum: weight * Σ_j p_ij * E_j
+        for j in 0..vocab_size {
+            let p_j = marginals_p[j];
+            if p_j < 1e-10 {
+                continue;
+            }
+            let emb_start = j * n_embd;
+            let emb_end = emb_start + n_embd;
+            if emb_end > wte.len() {
+                break;
+            }
+            let contrib = weight * p_j;
+            for (k, &e) in wte[emb_start..emb_end].iter().enumerate() {
+                out[k] += contrib * e;
+            }
+        }
     }
 }
 

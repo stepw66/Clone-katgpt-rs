@@ -322,6 +322,11 @@ fn bench_lt2_ahla_loop() {
                 &sdpa_gate,
                 None,
                 None,
+                #[cfg(feature = "weight_shared_advantage_gate")]
+                None,
+                None,
+                #[cfg(feature = "gain_cost_halt")]
+                None,
             );
         }
     }
@@ -344,6 +349,11 @@ fn bench_lt2_ahla_loop() {
                 &residual_gate,
                 &sdpa_gate,
                 None,
+                None,
+                #[cfg(feature = "weight_shared_advantage_gate")]
+                None,
+                None,
+                #[cfg(feature = "gain_cost_halt")]
                 None,
             ));
         }
@@ -411,6 +421,11 @@ fn bench_lt2_hybrid() {
                 &sdpa_gate,
                 None,
                 None,
+                #[cfg(feature = "weight_shared_advantage_gate")]
+                None,
+                None,
+                #[cfg(feature = "gain_cost_halt")]
+                None,
             );
         }
     }
@@ -433,6 +448,11 @@ fn bench_lt2_hybrid() {
                 &residual_gate,
                 &sdpa_gate,
                 None,
+                None,
+                #[cfg(feature = "weight_shared_advantage_gate")]
+                None,
+                None,
+                #[cfg(feature = "gain_cost_halt")]
                 None,
             ));
         }
@@ -543,6 +563,11 @@ fn proof_lt2_hybrid_throughput() {
                 &sdpa_gate,
                 None,
                 None,
+                #[cfg(feature = "weight_shared_advantage_gate")]
+                None,
+                None,
+                #[cfg(feature = "gain_cost_halt")]
+                None,
             );
         }
     }
@@ -565,6 +590,11 @@ fn proof_lt2_hybrid_throughput() {
                 &residual_gate,
                 &sdpa_gate,
                 None,
+                None,
+                #[cfg(feature = "weight_shared_advantage_gate")]
+                None,
+                None,
+                #[cfg(feature = "gain_cost_halt")]
                 None,
             ));
         }

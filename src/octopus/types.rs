@@ -149,7 +149,6 @@ pub struct OctopusLayer {
 ///
 /// Total index bits per triplet: `2·dir_bits + nrm_bits`.
 #[derive(Debug, Clone, Copy, Default)]
-#[repr(C)]
 pub struct TripletIndices {
     /// Oct-coordinate ξ index → oct codebook.
     pub i_xi: u16,

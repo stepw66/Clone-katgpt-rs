@@ -156,6 +156,60 @@ pub const I64_MEM_OPS: &[(u8, u8)] = &[
 const OP_I64_CONST_LOCAL: u8 = 0x42;
 
 // ===================================================================== //
+//  Compile-time opcode lookup tables                                    //
+// ===================================================================== //
+
+/// Build a 256-entry bool membership table from a slice of opcodes at compile time.
+///
+/// Converts O(n) `.contains(&opcode)` scans into O(1) `TABLE[opcode as usize]` lookups.
+const fn build_opcode_table(const_slice: &[u8]) -> [bool; 256] {
+    let mut table = [false; 256];
+    let mut i = 0;
+    while i < const_slice.len() {
+        table[const_slice[i] as usize] = true;
+        i += 1;
+    }
+    table
+}
+
+/// Build a 256-entry remap table from `(i64_opcode, i32_opcode)` pairs at compile time.
+///
+/// Entries default to `0` (unmapped). Each `(src, dst)` pair sets `table[src] = dst`.
+/// Combined with `build_opcode_table` for membership tests, this converts
+/// O(n) `.iter().find(...)` scans into O(1) array indexing.
+const fn build_remap_table(const_pairs: &[(u8, u8)]) -> [u8; 256] {
+    let mut table = [0u8; 256];
+    let mut i = 0;
+    while i < const_pairs.len() {
+        let (src, dst) = const_pairs[i];
+        table[src as usize] = dst;
+        i += 1;
+    }
+    table
+}
+
+/// Compile-time lookup table for `BASIC_OPS` (O(1) membership check).
+const BASIC_OPS_TABLE: [bool; 256] = build_opcode_table(BASIC_OPS);
+
+/// Compile-time lookup table for `LOWERABLE_BINOPS` (O(1) membership check).
+const LOWERABLE_BINOPS_TABLE: [bool; 256] = build_opcode_table(LOWERABLE_BINOPS);
+
+/// Compile-time lookup table for `LOWERABLE_UNARY` (O(1) membership check).
+const LOWERABLE_UNARY_TABLE: [bool; 256] = build_opcode_table(LOWERABLE_UNARY);
+
+/// Compile-time lookup table for `I64_IDENTITY_OPS` (O(1) membership check).
+const I64_IDENTITY_TABLE: [bool; 256] = build_opcode_table(I64_IDENTITY_OPS);
+
+/// Compile-time remap table for `I64_ARITH_OPS` (O(1) i64→i32 opcode lookup).
+const I64_ARITH_REMAP: [u8; 256] = build_remap_table(I64_ARITH_OPS);
+
+/// Compile-time remap table for `I64_CMP_OPS` (O(1) i64→i32 opcode lookup).
+const I64_CMP_REMAP: [u8; 256] = build_remap_table(I64_CMP_OPS);
+
+/// Compile-time remap table for `I64_MEM_OPS` (O(1) i64→i32 opcode lookup).
+const I64_MEM_REMAP: [u8; 256] = build_remap_table(I64_MEM_OPS);
+
+// ===================================================================== //
 //  Bitwise operation kind                                                //
 // ===================================================================== //
 
@@ -206,11 +260,6 @@ fn ni(op: u8) -> WasmInstr {
 /// Shorthand to create a [`WasmInstr`] with immediates.
 fn instr(op: u8, imm: impl IntoImms) -> WasmInstr {
     WasmInstr::with_imms(op, imm.into_imms())
-}
-
-/// Check if an opcode is in the given slice.
-fn opcode_in(opcode: u8, set: &[u8]) -> bool {
-    set.contains(&opcode)
 }
 
 /// Pre-scan instructions to find locals always set to the same `i32.const`.
@@ -1554,7 +1603,7 @@ pub fn lower_hard_ops(func: &FuncBody, num_params: u32) -> FuncBody {
 
     // Check if any lowering is needed
     let needs_lowering = instrs.iter().any(|ins| {
-        opcode_in(ins.opcode, LOWERABLE_BINOPS) || opcode_in(ins.opcode, LOWERABLE_UNARY)
+        LOWERABLE_BINOPS_TABLE[ins.opcode as usize] || LOWERABLE_UNARY_TABLE[ins.opcode as usize]
     });
     if !needs_lowering {
         return func.clone();
@@ -1586,7 +1635,7 @@ pub fn lower_hard_ops(func: &FuncBody, num_params: u32) -> FuncBody {
 
         if ins.opcode == OP_I32_CONST
             && i + 1 < instrs.len()
-            && opcode_in(instrs[i + 1].opcode, LOWERABLE_BINOPS)
+            && LOWERABLE_BINOPS_TABLE[instrs[i + 1].opcode as usize]
         {
             const_val = Some(ins.immediates[0] & 0xFFFFFFFF);
             binop_idx = Some(i + 1);
@@ -1594,7 +1643,7 @@ pub fn lower_hard_ops(func: &FuncBody, num_params: u32) -> FuncBody {
             let local_idx = ins.immediates[0] as u32;
             if let Some(&cv) = const_locals.get(&local_idx)
                 && i + 1 < instrs.len()
-                && opcode_in(instrs[i + 1].opcode, LOWERABLE_BINOPS)
+                && LOWERABLE_BINOPS_TABLE[instrs[i + 1].opcode as usize]
             {
                 const_val = Some(cv & 0xFFFFFFFF);
                 binop_idx = Some(i + 1);
@@ -1715,14 +1764,14 @@ pub fn lower_i64_ops(func: &FuncBody) -> FuncBody {
     let instrs = &func.instructions;
 
     // Quick check: any i64 ops present?
+    // Uses O(1) table lookups instead of O(n) slice scans per instruction.
     let has_i64 = instrs.iter().any(|ins| {
+        let op = ins.opcode as usize;
         ins.opcode == OP_I64_CONST_LOCAL
-            || I64_IDENTITY_OPS.contains(&ins.opcode)
-            || I64_ARITH_OPS
-                .iter()
-                .any(|(i64_op, _)| ins.opcode == *i64_op)
-            || I64_CMP_OPS.iter().any(|(i64_op, _)| ins.opcode == *i64_op)
-            || I64_MEM_OPS.iter().any(|(i64_op, _)| ins.opcode == *i64_op)
+            || I64_IDENTITY_TABLE[op]
+            || I64_ARITH_REMAP[op] != 0
+            || I64_CMP_REMAP[op] != 0
+            || I64_MEM_REMAP[op] != 0
     });
 
     if !has_i64 {
@@ -1742,31 +1791,32 @@ pub fn lower_i64_ops(func: &FuncBody) -> FuncBody {
         }
 
         // Identity ops (wrap_i64, extend_i32_s/u) → skip
-        if I64_IDENTITY_OPS.contains(&ins.opcode) {
+        if I64_IDENTITY_TABLE[ins.opcode as usize] {
             lowered_count += 1;
             continue;
         }
 
         // i64 arithmetic → i32 equivalent
-        if let Some((_, i32_op)) = I64_ARITH_OPS
-            .iter()
-            .find(|(i64_op, _)| ins.opcode == *i64_op)
-        {
-            new_instrs.push(ni(*i32_op));
+        let op_idx = ins.opcode as usize;
+        let arith_dst = I64_ARITH_REMAP[op_idx];
+        if arith_dst != 0 {
+            new_instrs.push(ni(arith_dst));
             lowered_count += 1;
             continue;
         }
 
         // i64 comparison → i32 equivalent
-        if let Some((_, i32_op)) = I64_CMP_OPS.iter().find(|(i64_op, _)| ins.opcode == *i64_op) {
-            new_instrs.push(ni(*i32_op));
+        let cmp_dst = I64_CMP_REMAP[op_idx];
+        if cmp_dst != 0 {
+            new_instrs.push(ni(cmp_dst));
             lowered_count += 1;
             continue;
         }
 
         // i64 memory ops → i32 equivalents (preserve alignment+offset immediates)
-        if let Some((_, i32_op)) = I64_MEM_OPS.iter().find(|(i64_op, _)| ins.opcode == *i64_op) {
-            new_instrs.push(WasmInstr::with_imms(*i32_op, ins.immediates.clone()));
+        let mem_dst = I64_MEM_REMAP[op_idx];
+        if mem_dst != 0 {
+            new_instrs.push(WasmInstr::with_imms(mem_dst, ins.immediates.clone()));
             lowered_count += 1;
             continue;
         }
@@ -1797,7 +1847,7 @@ pub fn lower_i64_ops(func: &FuncBody) -> FuncBody {
 pub fn check_basic_only(func: &FuncBody) -> HashMap<String, usize> {
     let mut bad: HashMap<String, usize> = HashMap::new();
     for ins in &func.instructions {
-        if !opcode_in(ins.opcode, BASIC_OPS) {
+        if !BASIC_OPS_TABLE[ins.opcode as usize] {
             let name = WASM_OP_NAMES
                 .get(&ins.opcode)
                 .map(|s| (*s).to_owned())

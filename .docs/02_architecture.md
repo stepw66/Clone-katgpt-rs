@@ -69,6 +69,8 @@ pub struct Config {
     // LT2 Looped Inference Pipeline (Plan 108, Research 73)
     pub loop_mode: LoopMode,                // None or WeightShared { loop_count }
     pub hybrid_pattern: HybridPattern,      // Uniform, Interleave, Bookend
+    pub loop_min: usize,                    // elastic override floor (Issue 035, Research 273 — ELT Any-Time)
+    pub loop_max: usize,                    // elastic override ceiling (0 = derive from loop_mode)
     pub gated_attn: bool,                   // whether to use SDPA output gate
     // Parallax Attention (Plan 135)
     pub parallax_gate_scale: f32,            // covariance correction gate scale (0.0=disabled)
@@ -665,7 +667,46 @@ Output: lm_head(h)
 
 **Memory scaling**: AHLA layers use O(d·dv) constant state (no growth with L or T). SDPA layers use O(L·d) KV cache (no growth with T). Hybrid 1:4 achieves ~95% throughput of pure SDPA T=4 with 80% constant-memory layers.
 
+**Any-Time LT2 Dispatch (Issue 035, Research 273 — ELT arXiv:2604.09168)**: the same artifact serves requests at any compute budget by exiting the loop early or over-iterating, without retraining. `forward_looped()` takes a final `elastic_loop_override: Option<usize>` parameter:
+
+- `None` → byte-identical to pre-Issue-035 behavior (uses `loop_mode.loop_count`).
+- `Some(L)` → runs L loops, clamped to `[max(loop_min,1), 2×max(loop_max, base)]` per `Config::effective_loop_count()`.
+  - `Config::loop_min` (default 0 → treated as 1) = floor; refusal to exit below this preserves representational capacity (ELT §1.4: `1N × 32L` collapsed to FID 10.30).
+  - `Config::loop_max` (default 0 → derive from `loop_mode`) = trained max; `2×` is the over-iteration cap (ELT §1.5: modest over-looping regularized).
+- Override refused when `loop_mode` is `None` or `TrainingFree` (no weight-shared loop to exit from).
+
+The parameter is unconditional (no feature gate) — it is a caller input, not a feature. Zero-overhead when `None`. Use cases: crowd NPCs run L_min, hero NPCs run L_max, crisis moments over-iterate to 2×L_max — all from one BLAKE3-committed snapshot.
+
 **Feature gate**: `lt2_looped = ["hla_attention"]` (default-on). GOAT: 11/11 proofs pass.
+
+### Gain/Cost Loop Halting (`transformer.rs` + `katgpt-core::gain_cost_halt`, Plan 304)
+
+**Plan 304 / Research 282 / arXiv:2606.18023 (LoopCoder-v2).** An opt-in primitive that decides — per loop, per dispatch, at runtime — whether to continue iterating or halt, based on the **gain/cost scissors** criterion: *halt when marginal refinement gain < marginal drift cost × τ*. This is the dynamic counterpart to Issue 035's static `elastic_loop_override`: instead of the caller passing `Some(L)`, the halter decides L each loop from the hidden-state trajectory.
+
+**Kernel** (`katgpt-core::gain_cost_halt`): `GainCostLoopHalter` — a 12-byte state struct + `halt_decision(loop_idx, gain, cost, cos_theta) -> HaltDecision`. Returns one of:
+- `Continue` — gain ≥ cost × τ and no oscillation detected.
+- `Halt { reason }` — `GainBelowCost` (scissors crossover) or `Oscillation` (cos θ < 0 for `patience` consecutive loops).
+- `RefusedFloor` — `loop_idx < l_min`; refuse to halt to protect representational capacity (ELT §1.4: sub-floor loops collapse).
+
+**Forward-path wiring** (`forward_looped`, Plan 304 T2.1–T2.3): the function takes a final `#[cfg(feature = "gain_cost_halt")] halter: Option<&mut GainCostLoopHalter>` parameter. When `Some(halter)`, after each loop `tau > 0`:
+1. **gain** = `step_size(ctx.x, ctx.prev_h)` = `||h^(tau) - h^(tau-1)||₂`.
+2. **cost** = fixed tax (`cost_floor`), cached as `0.01 × first_loop_step_size` on `tau == 1` — mirrors LoopCoder-v2's flat Ω(r).
+3. **cos_theta** = `angular_change(curr_step, prev_step)` between successive update directions.
+4. Call `halter.halt_decision(tau + 1, gain, cost, cos_theta)`. On `Halt` → `break`.
+
+**Composition rules:**
+- **With `elastic_loop_override` (Issue 035, T2.2):** static override wins. If the caller passes `Some(L)`, the halter is IGNORED entirely (`halter_active = elastic_loop_override.is_none()`). The caller asked for a specific loop count — respect it.
+- **With `recursion_gate` (Plan 283 T2.2):** both can fire in the same loop. The recursion gate checks dead-compute via logit improvement; the halter checks via gain/cost scissors + oscillation. Either can `break` the loop independently. They compose because they measure different failure modes.
+
+**Open questions (resolved in Phase 2):**
+1. **Cost signal default** → fixed tax (`0.01 × first_step`), overridable. riir-ai can substitute coherence-decay/staleness by not using this code path.
+2. **Gain signal** → **DEVIATION:** the plan called for effective-rank delta, but the per-loop hidden state in `forward_looped` is a single vector (`ctx.x[..n]`, S=1), for which `hidden_erank` returns 0.0 (degenerate). Phase 2 uses `step_size` as the gain signal — monotone in refinement, cheaper than erank, and the kernel ships `step_size` for exactly this use.
+3. **Determinism** → gain/cost are pure functions of deterministic hidden state, so L is deterministic. Tested: `refused_floor_never_halts_when_l_min_above_loop_count` confirms the no-op path.
+4. **TF-Loop interaction** → Phase 2.5 (DEFERRED). Only wired into `forward_looped` (WeightShared path), not `forward_tf_looped`.
+
+**Latent vs Raw:** gain/cost signals are local latent (per-loop hidden-state deltas). The halt count L is a deterministic raw scalar, safe to sync/replay.
+
+**Feature gate:** `gain_cost_halt = ["katgpt-core/gain_cost_halt"]` (opt-in, OFF by default). The `halter = None` path is byte-identical to pre-Plan-304 via `#[cfg]` + `Option::is_none()`. GOAT gate G1–G5 (Research 149 §5) must pass before default promotion; G2 (≥75% crowd-NPC compute savings) and G3 (no important-NPC regression) are the headline gates — **deferred: requires synthetic loop suite harness**.
 
 ## MTP Projection (`transformer.rs`, Plan 055)
 
@@ -773,6 +814,67 @@ Q-values after learning:
 Learning vs Random also verified: Q-values differentiate properly (spread > 0.1) with α=1.0, unlike old binary reward that collapsed all to ~0.85.
 
 Run: `cargo run --example go_08_self_play_freeze --features go`
+
+## CGSP — Curiosity-Guided Self-Play (`crates/katgpt-core/src/cgsp/`, Plan 274)
+
+Modelless, inference-time distillation of the SGS triad (Bailey et al., arXiv:2604.20209). Three frozen role-fillers + one bandit; **no gradient updates**, only priority-table updates on direction vectors. The public-facing entry point is `CgspLoop`, generic over five pluggable trait-fillers wired in at compile time (zero-cost, no dynamic dispatch on the hot path).
+
+```rust
+pub struct CgspLoop<C, G, S, B, Col = EntropyCollapse, Df = NoOpDifficultyFilter, Qg = NoOpBatchGate>
+where
+    C: CuriosityConjecturer,  // samples k candidate directions per cycle
+    G: QualityGuide,          // scores each candidate [0, 1]
+    S: Solver,                // attempts a candidate, returns solve-rate
+    B: HintDeltaBandit,        // absorbs r_synth, exposes priorities
+    Col: CollapseSignal,       // entropy-collapse detector + recovery injector
+    Df: DifficultyFilter,      // breakeven-complexity admission gate
+    Qg: BatchQualityGate;      // degenerate-batch gate (Plan 111 data_gate)
+```
+
+**Per-cycle pipeline** (Plan 274 §2.3, see `crates/katgpt-core/src/cgsp/loop_.rs::cycle()`):
+
+1. Conjecturer samples k candidates → `scratch.candidates`.
+2. Guide scores each → `scratch.guide_scores`.
+3. Difficulty filter admits/rejects → `scratch.admitted`.
+4. Solver attempts admitted candidates → `scratch.solve_rates`.
+5. Compute `r_synth[i] = (1 − solve_rates[i]) · guide_scores[i]`.
+6. BatchQualityGate checks for degeneracy (skip update if degenerate).
+7. Bandit absorbs `r_synth` per admitted candidate (Hint-δ absorb-compress).
+8. CollapseSignal checks entropy; if < τ_low, inject exploration mass.
+
+**Latent/raw boundary:** Only `f32`, `bool`, and `u32` cross the trait boundary (`CycleResult`). `Direction` and `Target` never escape — they are pure latent state. The freeze/thaw bridge is `CuriosityPrioritySnapshot` (BLAKE3-committed, fixed-size binary encoding; snapshot_id is Uuid v7 for monotonic ordering).
+
+**GOAT gate status** (`.benchmarks/274_cgsp_goat.md`, 9 tests at `tests/bench_274_cgsp_goat.rs`):
+
+| Gate | Measurement | Status |
+|------|-------------|--------|
+| G1 transfer-to-target | CGSP 0/64, baseline 0/64 | ⚠ INFORMATIONAL — CGSP is curiosity-driven, not target-seeking (root-cause: `(1 − solve_rate)` factor rewards intermediate-difficulty arms) |
+| G2 collapse recovery | 1 cycle with aware; 200+ without | ✅ PASS |
+| G3 feature isolation | `cargo check` clean both ways | ✅ PASS |
+| G4 per-cycle overhead | 831.3 ns/cycle (release, isolated `--test-threads=1`, Apple Silicon arm64) | ✅ PASS |
+| P2 1000 NPCs/tick | 808 µs/tick (0.81 µs/NPC, Rayon 8 chunks, isolated) | ✅ PASS |
+| P3 allocations | 13.00 allocs/cycle (bounded, not zero) | ✅ PASS (bounded) — optimization tracked in `.issues/021_cgsp_cycle_allocation_reduction.md` |
+| G6 latent/raw boundary | only f32+bool+u32 in CycleResult | ✅ PASS |
+
+**Promotion decision:** KEEP OPT-IN. CGSP is architecturally sound and plasma-tier fast, but its value proposition is collapse recovery + degenerate-batch gating — *not* target-seeking. Promote to default only after riir-ai Plan 299 validates on real game domains.
+
+**Consumer pattern:**
+
+```rust
+use katgpt_rs::cgsp::{
+    CgspConfig, CgspLoop, ColinearityBatchGate, EntropyCollapse,
+    BreakevenDifficultyFilter, HlaProjectionGuide, PoolConjecturer, ScratchBuffers, Target,
+};
+
+let mut lp = CgspLoop::new(conjecturer, guide, solver, bandit, CgspConfig::default())
+    .with_collapse(EntropyCollapse::new(0.30))
+    .with_difficulty_filter(BreakevenDifficultyFilter::default())
+    .with_batch_gate(ColinearityBatchGate::default());
+let mut scratch = ScratchBuffers::new(k, pool_size);
+let result = lp.cycle(&target, &mut scratch);
+```
+
+See `examples/cgsp_minimal.rs` and `examples/cgsp_collapse_recovery.rs` for full runnable demos. Implementation lives in `crates/katgpt-core/src/cgsp/` so `riir-engine` (Plan 299) can consume it without depending on the root application crate; `src/cgsp.rs` is a thin re-export shim preserving the `katgpt_rs::cgsp::*` import path.
 
 ## SpeculativeVerifier (Strategy Pattern)
 
@@ -1470,6 +1572,54 @@ markov → nll → typical_set → claim
 
 **Key types:** `MarkovChain`, `Regime` (Conservative/Typical/Uncertain), `ClaimCard`, `GeometryReport`, `ValidityVerdict`.
 
+## Depth-Invariance Diagnostic (`crates/katgpt-core/src/depth_invariance.rs`, Plan 306)
+
+Root-cause counterpart to four existing symptom-only detectors
+(`BeliefRankPruner`, `GainCostLoopHalter`, `latent_functor/reestimation.rs`,
+`micro_belief/coherence_bench.rs`). Modelless math over flattened `&[f32]`
+state chains from any recursive latent-state kernel. Detects
+`DepthSpecificRefinement` (monotonically growing magnitude — the paper's
+primary signal), `Collapsed` (effective rank trending to 1), `DepthInvariant`
+(flat magnitude + stable cos step), or `Insufficient` (`k+1 < min_samples`).
+
+```text
+recursive kernel: h_{t+1} = f(h_t, x_t)
+        ↓ (capture k+1 chain)
+ classify_chain → { magnitude_slope, mean_cos_step, effective_rank_slope, kind }
+```
+
+| Module | Description |
+|--------|-------------|
+| `depth_invariance.rs` | The primitive: `classify_chain`, `classify_chain_batched`, `Scratch`, `DepthInvarianceConfig`, `DepthInvarianceKind` (`#[repr(u8)]`), `MagnitudeRegularization` enum, `apply_magnitude_regularization`. Zero-alloc hot path (caller-owned `Scratch`). |
+| `speculative/belief_drafter.rs::BeliefDrafter::audit_depth_invariance` | Plan 306 Phase 3 G2 audit hook (behind `depth_invariance` × `belief_drafter`). Also `capture_chain` for the G2c inference-time RmsNorm demonstration. |
+| `micro_belief/attractor.rs::AttractorKernel::audit_depth_invariance` | Plan 306 Phase 4 G3a negative control (behind `depth_invariance` × `micro_belief`). Attractor clamps to `(-1,1)` → classifies `DepthInvariant`. |
+| `micro_belief/leaky.rs::LeakyIntegrator::audit_depth_invariance` | Plan 306 Phase 4 audit hook. The shipped `LeakyIntegrator` also clamps to `[-1,1]`, so it too classifies `DepthInvariant`; the G3b positive control strips the clamp inline in the test (no kernel-level support needed). |
+
+**GOAT verdict (Plan 306):** G1 (8 correctness tests) + G2 (paper finding
+reproduced on random-init `BeliefDrafter`: `DepthSpecificRefinement`,
+locked-drift cos > 0.999) + G3 (negative control on `AttractorKernel` +
+positive control on inline unclamped leaky) + G4 (latency, aspirational —
+classify_chain is O(k·d) so the ≤5% target only holds at d ≥ 1024 k=4) all
+pass. **Fix is split**: for kernels we own (HLA, functor, micro_belief,
+engram, Raven) `MagnitudeRegularization` is the modelless upstream fix; for
+the frozen-pretrained `BeliefDrafter` MLP the fix requires retraining
+(paper §4.4 Table 4: -56% acceptance for inference-time pin on pre-norm) →
+`riir-train`.
+
+**Disambiguation (T8.3):** this is a *different paper + mechanism* than
+Sink-Aware Attention (`sink_aware_attn`, Plan 287, Research 258,
+arXiv:2606.08105). The two are frequently confused:
+
+| Aspect | `depth_invariance` (Plan 306) | `sink_aware_attn` (Plan 287) |
+|---|---|---|
+| Paper | arXiv:2605.09992 (Eldenk et al., *Attention Drift*) | arXiv:2606.08105 (Fesser et al., *A Unifying View of Attention Sinks*) |
+| Mechanism | Drafter-side magnitude accumulation in the recursive residual | Target-side attention-sink classification (NOP vs Broadcast) |
+| Diagnostic | `magnitude_slope` on the hidden-state chain | `value_norm_ratio` + `stable_rank_of_update` per attention head |
+| Fix | Post-norm on the recursive residual (retrain for BeliefDrafter) | Dual-policy attention (sigmoid gate for NOP heads, regular for Broadcast) |
+
+Feature gate: `depth_invariance` (opt-in). Promotion to default is a
+deliberate parent decision pending — G1–G3 pass, G4 is aspirational.
+
 ## SkillOpt (`src/skill_opt/`, Plan 144)
 
 Text-space skill optimization: deterministic edit → apply → gate → buffer → optimizer pipeline. Feature-gated behind `skill_opt`.
@@ -1800,3 +1950,38 @@ Feature gate: `bake_precision` (opt-in, requires `dep:papaya`, `sense_compositio
 RAT+ recurrence bridge via GDN2 state for modelless dilated inference.
 
 Feature gate: `rat_plus_bridge` (opt-in).
+
+---
+
+## MicroRecurrentBeliefState (`crates/katgpt-core/src/micro_belief/`, Plan 276)
+
+Per-entity implicit state-tracking kernel — small frozen recurrent kernels implementing
+`s_t = f(s_{t-1}, x_t)` over a fixed-size latent belief vector, applied once per
+(entity, tick). The belief vector is latent/local (never synced); a bridge projects it to
+bounded raw scalars that cross the sync boundary. Full reference: `.docs/26_micro_belief.md`.
+
+```rust
+pub trait MicroRecurrentBeliefState: Send + Sync {
+    fn dim(&self) -> usize;
+    fn step(&self, state: &mut [f32], input: &[f32]);                 // zero-alloc
+    fn project_to_scalars(&self, state: &[f32], directions: &[f32],   // latent→raw bridge
+                          dim: usize, out: &mut [f32]);
+    fn family(&self) -> RecurrenceFamily;                              // routing
+}
+```
+
+| Module | Family | Status |
+|---|---|---|
+| `micro_belief/attractor.rs` | A — `s_t = 2·σ(W_s·s + W_x·x + b) − 1` | Opt-in experiment (G1.4 + G2.1 FAIL) |
+| `micro_belief/latent_thought.rs` | B — K iters of Family A per tick | Opt-in experiment (G1.6: K=1 bit-identical to A) |
+| `micro_belief/leaky.rs` | C — monotone additive, `±max_delta` clamp | **Promotable** — byte-identical to `evolve_hla` |
+| `micro_belief/snapshot.rs` | freeze/thaw — BLAKE3-committed weights | Opt-in (per-NPC personality divergence) |
+| `micro_belief/bridge.rs` | `project_to_scalars` — sigmoid(dot) | Shared bridge (all families delegate) |
+| `leaky_core.rs` (ungated) | shared `leaky_step` primitive | Single source of truth for Family C math |
+
+**GOAT verdict:** trait unification + `LeakyIntegrator` are the promotable outputs.
+Attractor demoted to Gain (G1.4 latency ~273ns; G2.1 coherence 569× more flip-flops than
+leaky). The `evolve_hla` refactor (Phase 2) made `evolve_hla` delegate to the ungated
+`leaky_core::leaky_step` — zero behavior change, no `micro_belief` feature coupling.
+
+Feature gate: `micro_belief` (opt-in).

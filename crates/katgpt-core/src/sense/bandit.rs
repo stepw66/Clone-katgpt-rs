@@ -2,40 +2,81 @@
 
 use crate::types::{SenseKind, SenseModule};
 
+/// Number of SenseKind variants tracked by the aggregate table.
+const AGGREGATE_KINDS: usize = 8;
+
+/// Per-kind aggregate for O(1) average_reward.
+#[derive(Clone, Copy, Debug, Default)]
+struct KindAggregate {
+    sum: f32,
+    count: u32,
+}
+
 /// A single sense trial for bandit feedback.
 #[derive(Clone, Debug)]
 pub struct SenseTrial {
-    pub sense_kind: SenseKind,
-    pub activation: f32,
-    pub reward: f32,
     pub npc_id: u32,
     pub action_taken: u32,
+    pub activation: f32,
+    pub reward: f32,
+    pub sense_kind: SenseKind,
 }
 
 /// Trial log for sense module self-learning.
+/// Maintains per-kind aggregates for O(1) average_reward queries.
 #[derive(Clone, Debug, Default)]
 pub struct SenseTrialLog {
     pub trials: Vec<SenseTrial>,
+    /// Per-kind running aggregates — O(1) average_reward by kind.
+    aggregates: [KindAggregate; AGGREGATE_KINDS],
 }
 
 impl SenseTrialLog {
+    /// Create a new trial log with pre-allocated capacity.
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            trials: Vec::with_capacity(capacity),
+            aggregates: [KindAggregate::default(); AGGREGATE_KINDS],
+        }
+    }
+
     pub fn record(&mut self, trial: SenseTrial) {
+        let idx = trial.sense_kind as usize;
+        if idx < AGGREGATE_KINDS {
+            self.aggregates[idx].sum += trial.reward;
+            self.aggregates[idx].count += 1;
+        }
         self.trials.push(trial);
     }
 
-    /// Compute average reward for a sense kind — single pass, zero allocation.
+    /// Compute average reward for a sense kind — O(1) via pre-computed aggregates.
+    #[inline]
     pub fn average_reward(&self, kind: SenseKind) -> f32 {
-        let (sum, count) = self
-            .trials
-            .iter()
-            .filter(|t| t.sense_kind == kind)
-            .fold((0.0f32, 0usize), |(s, c), t| (s + t.reward, c + 1));
-        if count == 0 { 0.0 } else { sum / count as f32 }
+        let idx = kind as usize;
+        if idx < AGGREGATE_KINDS {
+            let agg = &self.aggregates[idx];
+            if agg.count == 0 {
+                0.0
+            } else {
+                agg.sum / agg.count as f32
+            }
+        } else {
+            let mut sum = 0.0f32;
+            let mut count = 0usize;
+            for t in &self.trials {
+                if t.sense_kind == kind {
+                    sum += t.reward;
+                    count += 1;
+                }
+            }
+            if count == 0 { 0.0 } else { sum / count as f32 }
+        }
     }
 }
 
 /// Compute exploration-weighted reward for sense trial.
 /// Dimensions with low precision get boosted exploration reward.
+/// Pre-computes max_lambda once — O(8) scan instead of O(8×N).
 #[cfg(feature = "bake_precision")]
 pub fn precision_weighted_reward(
     base_reward: f32,
@@ -45,11 +86,12 @@ pub fn precision_weighted_reward(
     if activated_dims.is_empty() {
         return base_reward;
     }
-    let avg_priority: f32 = activated_dims
-        .iter()
-        .map(|&d| crate::sense::bake::exploration_priority(precision, d))
-        .sum::<f32>()
-        / activated_dims.len() as f32;
+    let max_lam = crate::sense::bake::max_lambda(precision);
+    let mut sum = 0.0f32;
+    for &d in activated_dims {
+        sum += crate::sense::bake::exploration_priority_with_max(precision, d, max_lam);
+    }
+    let avg_priority = sum / activated_dims.len() as f32;
     base_reward * (1.0 + avg_priority)
 }
 
@@ -79,10 +121,10 @@ mod tests {
 
         let trial = SenseTrial {
             npc_id: 1,
-            sense_kind: module.kind,
-            activation: 0.5,
             action_taken: 0,
+            activation: 0.5,
             reward: 0.9,
+            sense_kind: module.kind,
         };
         decay_direction(&mut module, &trial, 0.5);
         assert!(module.confidence > 0.3);
@@ -98,10 +140,10 @@ mod tests {
 
         let trial = SenseTrial {
             npc_id: 1,
-            sense_kind: module.kind,
-            activation: 0.5,
             action_taken: 0,
+            activation: 0.5,
             reward: 0.1,
+            sense_kind: module.kind,
         };
         decay_direction(&mut module, &trial, 0.5);
         assert!(module.confidence < 0.8);
@@ -112,24 +154,24 @@ mod tests {
         let mut log = SenseTrialLog::default();
         log.record(SenseTrial {
             npc_id: 1,
-            sense_kind: SenseKind::FighterSense,
-            activation: 0.5,
             action_taken: 0,
+            activation: 0.5,
             reward: 0.8,
+            sense_kind: SenseKind::FighterSense,
         });
         log.record(SenseTrial {
             npc_id: 2,
-            sense_kind: SenseKind::FighterSense,
-            activation: 0.3,
             action_taken: 1,
+            activation: 0.3,
             reward: 0.6,
+            sense_kind: SenseKind::FighterSense,
         });
         log.record(SenseTrial {
             npc_id: 3,
-            sense_kind: SenseKind::SpatialSense,
-            activation: 0.4,
             action_taken: 0,
+            activation: 0.4,
             reward: 0.2,
+            sense_kind: SenseKind::SpatialSense,
         });
 
         let avg = log.average_reward(SenseKind::FighterSense);

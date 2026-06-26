@@ -9,8 +9,10 @@
 //!
 //! Dequantization: one extra multiply vs standard RTN for the dual-scale reconstruction.
 
+#![allow(clippy::needless_range_loop)]
+
 use super::hadamard;
-use super::var_norm::{VarNormConfig, VarianceNormScales, variance_normalize};
+use super::var_norm::{VarNormConfig, VarianceNormScales, variance_normalize_into};
 
 #[cfg(feature = "targeted_precision")]
 use crate::targeted_precision::PrecisionBudget;
@@ -133,10 +135,33 @@ pub struct KVarNKVCache {
     val_buffer: Vec<f32>,
     // ── Scratch buffers for zero-alloc hot path ──
     /// Scratch for tile operations: [tile_rows * tile_cols].
-    #[allow(dead_code)] // reserved for future SIMD tile ops
+    /// Reused by quantize_key_tile / quantize_val_tile to avoid per-tile allocation.
     scratch_tile: Vec<f32>,
     /// Scratch for batch-unpacked u32 values (reused across dequant calls).
     scratch_unpack: Vec<u32>,
+    /// VarN scratch: copy of the tile being normalized (`rows * cols`).
+    /// Sized to `max(kv_dim, tile_size)² ` to cover both K and V tile shapes.
+    varn_cur: Vec<f32>,
+    /// VarN scratch: per-column std devs (length = max(kv_dim, tile_size)).
+    varn_col_s: Vec<f32>,
+    /// VarN scratch: per-row std devs (length = max(kv_dim, tile_size)).
+    varn_row_s: Vec<f32>,
+    /// VarN scratch: per-column mean (length = max(kv_dim, tile_size)).
+    varn_mean: Vec<f32>,
+    /// VarN scratch: 1 / exp(log_s_row[i]) (length = max(kv_dim, tile_size)).
+    varn_inv_row: Vec<f32>,
+    /// VarN scratch: 1 / exp(log_s_col[j]) (length = max(kv_dim, tile_size)).
+    varn_inv_col: Vec<f32>,
+    /// VarN scratch: running column log-scale (length = max(kv_dim, tile_size)).
+    varn_log_s_col: Vec<f32>,
+    /// VarN scratch: running row log-scale (length = max(kv_dim, tile_size)).
+    varn_log_s_row: Vec<f32>,
+    /// VarN scratch: best-seen column log-scale (length = max(kv_dim, tile_size)).
+    varn_log_s_col_best: Vec<f32>,
+    /// VarN scratch: best-seen row log-scale (length = max(kv_dim, tile_size)).
+    varn_log_s_row_best: Vec<f32>,
+    /// Hadamard column-transform scratch (length = kv_dim; reused by quantize_key_tile).
+    hadamard_col_buf: Vec<f32>,
     // ── Scalar config (usize: 8 bytes each) ──
     /// Current write position.
     pos: usize,
@@ -215,6 +240,12 @@ impl KVarNKVCache {
         let key_buffer_size = cfg.kv_dim * tile_size;
         let val_buffer_size = tile_size * cfg.kv_dim;
 
+        // VarN scratch sizes: key tile is [kv_dim, count], val tile is [count, kv_dim].
+        // Both dimensions are bounded by max(kv_dim, tile_size), so a single square
+        // scratch layout covers both call sites without resizing.
+        let varn_max_dim = cfg.kv_dim.max(tile_size);
+        let varn_tile_size = varn_max_dim * varn_max_dim;
+
         Self {
             key_quantized,
             key_tiles,
@@ -224,6 +255,17 @@ impl KVarNKVCache {
             val_buffer: vec![0.0; val_buffer_size],
             scratch_tile: vec![0.0f32; key_buffer_size.max(val_buffer_size)],
             scratch_unpack: vec![0u32; cfg.kv_dim],
+            varn_cur: vec![0.0f32; varn_tile_size],
+            varn_col_s: vec![0.0f32; varn_max_dim],
+            varn_row_s: vec![0.0f32; varn_max_dim],
+            varn_mean: vec![0.0f32; varn_max_dim],
+            varn_inv_row: vec![0.0f32; varn_max_dim],
+            varn_inv_col: vec![0.0f32; varn_max_dim],
+            varn_log_s_col: vec![0.0f32; varn_max_dim],
+            varn_log_s_row: vec![0.0f32; varn_max_dim],
+            varn_log_s_col_best: vec![0.0f32; varn_max_dim],
+            varn_log_s_row_best: vec![0.0f32; varn_max_dim],
+            hadamard_col_buf: vec![0.0f32; cfg.kv_dim],
             pos: 0,
             n_layers: cfg.n_layers,
             kv_dim: cfg.kv_dim,
@@ -335,7 +377,8 @@ impl KVarNKVCache {
         let rtn_zp = &tile.rtn_zp;
         let s_row = &tile.var_scales.s_row;
 
-        // Specialized hot path per bit-width to avoid generic division/modulo
+        // Specialized hot path per bit-width to avoid generic division/modulo.
+        // Inner loops use `mul_add` so `(q*s + zp)` becomes a single fused FMA.
         match bits {
             4 => {
                 // 4-bit: 2 values per byte, pos_in_tile determines nibble
@@ -345,7 +388,7 @@ impl KVarNKVCache {
                 for ch in 0..kv_dim {
                     let q = ((quantized[ch * bpr + byte_off] >> shift) & mask) as f32;
                     let var_row = s_row[ch];
-                    out[ch] = (q * rtn_scales[ch] + rtn_zp[ch]) * var_col * var_row;
+                    out[ch] = q.mul_add(rtn_scales[ch], rtn_zp[ch]) * var_col * var_row;
                 }
             }
             2 => {
@@ -361,19 +404,19 @@ impl KVarNKVCache {
                         for ch in 0..kv_dim {
                             let q = ((quantized[ch * bpr + byte_off] >> shift) & mask) as f32;
                             let idx = ch * groups_per_row + g.min(groups_per_row - 1);
-                            out[ch] = q * rtn_scales[idx] + rtn_zp[idx];
+                            out[ch] = q.mul_add(rtn_scales[idx], rtn_zp[idx]);
                         }
                     } else {
                         for ch in 0..kv_dim {
                             let q = ((quantized[ch * bpr + byte_off] >> shift) & mask) as f32;
-                            out[ch] = q * rtn_scales[ch] + rtn_zp[ch];
+                            out[ch] = q.mul_add(rtn_scales[ch], rtn_zp[ch]);
                         }
                     }
                 } else {
                     for ch in 0..kv_dim {
                         let q = ((quantized[ch * bpr + byte_off] >> shift) & mask) as f32;
                         let var_row = s_row[ch];
-                        out[ch] = (q * rtn_scales[ch] + rtn_zp[ch]) * var_col * var_row;
+                        out[ch] = q.mul_add(rtn_scales[ch], rtn_zp[ch]) * var_col * var_row;
                     }
                 }
             }
@@ -382,7 +425,7 @@ impl KVarNKVCache {
                 for ch in 0..kv_dim {
                     let q = quantized[ch * bpr + pos_in_tile] as f32;
                     let var_row = s_row[ch];
-                    out[ch] = (q * rtn_scales[ch] + rtn_zp[ch]) * var_col * var_row;
+                    out[ch] = q.mul_add(rtn_scales[ch], rtn_zp[ch]) * var_col * var_row;
                 }
             }
             _ => {
@@ -391,7 +434,8 @@ impl KVarNKVCache {
                     let row_off = ch * bpr;
                     let q = unpack_value(&quantized[row_off..row_off + bpr], pos_in_tile, bits);
                     let var_row = s_row[ch];
-                    out[ch] = (q as f32 * rtn_scales[ch] + rtn_zp[ch]) * var_col * var_row;
+                    out[ch] =
+                        (q as f32).mul_add(rtn_scales[ch], rtn_zp[ch]) * var_col * var_row;
                 }
             }
         }
@@ -430,93 +474,144 @@ impl KVarNKVCache {
         let rtn_zp = &tile.rtn_zp;
         let s_col = &tile.var_scales.s_col;
 
-        // Specialized hot path per bit-width — inline unpack directly into dequant
+        // Specialized hot path per bit-width — inline unpack directly into dequant.
+        // Inner loops use `mul_add` so `(q*s + zp)` becomes a single fused FMA.
         match bits {
             4 => {
-                // 2 values per byte, dequant inline
+                // 2 values per byte, dequant inline.
+                // Split into full-pair loop (branch-free) + odd tail to eliminate the
+                // per-iteration `if 2*i+1 < kv_dim` check on the common even-kv_dim path.
                 let rtn_scale = rtn_scales[pos_in_tile];
                 let rtn_zp_val = rtn_zp[pos_in_tile];
-                for (i, &b) in packed_row.iter().take(kv_dim.div_ceil(2)).enumerate() {
+                let full_pairs = kv_dim / 2;
+                for i in 0..full_pairs {
+                    let b = packed_row[i];
                     let q0 = (b & 0x0F) as f32;
-                    out[2 * i] = (q0 * rtn_scale + rtn_zp_val) * s_col[2 * i] * var_row;
-                    if 2 * i + 1 < kv_dim {
-                        let q1 = (b >> 4) as f32;
-                        out[2 * i + 1] = (q1 * rtn_scale + rtn_zp_val) * s_col[2 * i + 1] * var_row;
-                    }
+                    out[2 * i] = q0.mul_add(rtn_scale, rtn_zp_val) * s_col[2 * i] * var_row;
+                    let q1 = (b >> 4) as f32;
+                    out[2 * i + 1] =
+                        q1.mul_add(rtn_scale, rtn_zp_val) * s_col[2 * i + 1] * var_row;
+                }
+                if kv_dim & 1 == 1 {
+                    let b = packed_row[full_pairs];
+                    let q0 = (b & 0x0F) as f32;
+                    out[2 * full_pairs] =
+                        q0.mul_add(rtn_scale, rtn_zp_val) * s_col[2 * full_pairs] * var_row;
                 }
             }
             2 => {
                 // 4 values per byte
                 if self.skip_varn {
                     if self.group_size > 0 {
-                        // Grouped quantization: per-token, per-channel-group scales
+                        // Grouped quantization: per-token, per-channel-group scales.
+                        //
+                        // Fast path: group_size == 4 means each byte covers exactly
+                        // one group (4 values / 4 = 1 byte per group). This is the
+                        // only configuration that sets group_size > 0 (see with_config:
+                        // `group_size: if cfg.bits <= 2 { 4 } else { 0 }`), so we can
+                        // specialize the branch-free inner loop. The original code
+                        // had 3 `if 4*i+k < kv_dim` checks per byte.
+                        debug_assert_eq!(
+                            self.group_size, 4,
+                            "group_size>0 implies group_size==4 at 2-bit"
+                        );
                         let groups_per_row = kv_dim.div_ceil(self.group_size);
                         let row_base = pos_in_tile * groups_per_row;
-                        for (i, &b) in packed_row.iter().take(kv_dim.div_ceil(4)).enumerate() {
-                            let q0 = (b & 0x03) as f32;
-                            let g0 = (4 * i) / self.group_size;
-                            let idx0 = row_base + g0.min(groups_per_row - 1);
-                            out[4 * i] = q0 * rtn_scales[idx0] + rtn_zp[idx0];
-                            if 4 * i + 1 < kv_dim {
-                                let q1 = ((b >> 2) & 0x03) as f32;
-                                let g1 = (4 * i + 1) / self.group_size;
-                                let idx1 = row_base + g1.min(groups_per_row - 1);
-                                out[4 * i + 1] = q1 * rtn_scales[idx1] + rtn_zp[idx1];
-                            }
-                            if 4 * i + 2 < kv_dim {
-                                let q2 = ((b >> 4) & 0x03) as f32;
-                                let g2 = (4 * i + 2) / self.group_size;
-                                let idx2 = row_base + g2.min(groups_per_row - 1);
-                                out[4 * i + 2] = q2 * rtn_scales[idx2] + rtn_zp[idx2];
-                            }
-                            if 4 * i + 3 < kv_dim {
-                                let q3 = ((b >> 6) & 0x03) as f32;
-                                let g3 = (4 * i + 3) / self.group_size;
-                                let idx3 = row_base + g3.min(groups_per_row - 1);
-                                out[4 * i + 3] = q3 * rtn_scales[idx3] + rtn_zp[idx3];
+                        let full_quads = kv_dim / 4;
+                        for i in 0..full_quads {
+                            let b = packed_row[i];
+                            let g = i.min(groups_per_row - 1);
+                            let idx = row_base + g;
+                            let scale = rtn_scales[idx];
+                            let zp = rtn_zp[idx];
+                            out[4 * i] = ((b & 0x03) as f32).mul_add(scale, zp);
+                            out[4 * i + 1] =
+                                (((b >> 2) & 0x03) as f32).mul_add(scale, zp);
+                            out[4 * i + 2] =
+                                (((b >> 4) & 0x03) as f32).mul_add(scale, zp);
+                            out[4 * i + 3] =
+                                (((b >> 6) & 0x03) as f32).mul_add(scale, zp);
+                        }
+                        // Tail: 0..=3 remaining values packed in the next byte,
+                        // all in the last group.
+                        let tail_start = 4 * full_quads;
+                        if tail_start < kv_dim {
+                            let b = packed_row[full_quads];
+                            let idx = row_base + (groups_per_row - 1);
+                            let scale = rtn_scales[idx];
+                            let zp = rtn_zp[idx];
+                            let shifts = [0u32, 2, 4, 6];
+                            for (j, &sh) in shifts.iter().enumerate() {
+                                let k = tail_start + j;
+                                if k >= kv_dim {
+                                    break;
+                                }
+                                out[k] = (((b >> sh) & 0x03) as f32).mul_add(scale, zp);
                             }
                         }
                     } else {
                         // Non-grouped: per-token scale
                         let rtn_scale = rtn_scales[pos_in_tile];
                         let rtn_zp_val = rtn_zp[pos_in_tile];
-                        for (i, &b) in packed_row.iter().take(kv_dim.div_ceil(4)).enumerate() {
-                            let q0 = (b & 0x03) as f32;
-                            out[4 * i] = q0 * rtn_scale + rtn_zp_val;
-                            if 4 * i + 1 < kv_dim {
-                                let q1 = ((b >> 2) & 0x03) as f32;
-                                out[4 * i + 1] = q1 * rtn_scale + rtn_zp_val;
-                            }
-                            if 4 * i + 2 < kv_dim {
-                                let q2 = ((b >> 4) & 0x03) as f32;
-                                out[4 * i + 2] = q2 * rtn_scale + rtn_zp_val;
-                            }
-                            if 4 * i + 3 < kv_dim {
-                                let q3 = ((b >> 6) & 0x03) as f32;
-                                out[4 * i + 3] = q3 * rtn_scale + rtn_zp_val;
+                        // Branch-free over complete quads; tail handled separately.
+                        let full_quads = kv_dim / 4;
+                        for i in 0..full_quads {
+                            let b = packed_row[i];
+                            out[4 * i] = ((b & 0x03) as f32).mul_add(rtn_scale, rtn_zp_val);
+                            out[4 * i + 1] =
+                                (((b >> 2) & 0x03) as f32).mul_add(rtn_scale, rtn_zp_val);
+                            out[4 * i + 2] =
+                                (((b >> 4) & 0x03) as f32).mul_add(rtn_scale, rtn_zp_val);
+                            out[4 * i + 3] =
+                                (((b >> 6) & 0x03) as f32).mul_add(rtn_scale, rtn_zp_val);
+                        }
+                        let tail_start = 4 * full_quads;
+                        if tail_start < kv_dim {
+                            let tail_byte = packed_row[full_quads];
+                            let shifts = [0u32, 2, 4, 6];
+                            for (j, &sh) in shifts.iter().enumerate() {
+                                let idx = tail_start + j;
+                                if idx >= kv_dim {
+                                    break;
+                                }
+                                out[idx] =
+                                    (((tail_byte >> sh) & 0x03) as f32).mul_add(rtn_scale, rtn_zp_val);
                             }
                         }
                     }
                 } else {
                     let rtn_scale = rtn_scales[pos_in_tile];
                     let rtn_zp_val = rtn_zp[pos_in_tile];
-                    for (i, &b) in packed_row.iter().take(kv_dim.div_ceil(4)).enumerate() {
+                    // Process complete quads branch-free, then handle the 0–3 elem tail.
+                    // Common case (kv_dim divisible by 4) skips all per-iter bounds checks.
+                    let full_quads = kv_dim / 4;
+                    for i in 0..full_quads {
+                        let b = packed_row[i];
                         let q0 = (b & 0x03) as f32;
-                        out[4 * i] = (q0 * rtn_scale + rtn_zp_val) * s_col[4 * i] * var_row;
-                        if 4 * i + 1 < kv_dim {
-                            let q1 = ((b >> 2) & 0x03) as f32;
-                            out[4 * i + 1] =
-                                (q1 * rtn_scale + rtn_zp_val) * s_col[4 * i + 1] * var_row;
-                        }
-                        if 4 * i + 2 < kv_dim {
-                            let q2 = ((b >> 4) & 0x03) as f32;
-                            out[4 * i + 2] =
-                                (q2 * rtn_scale + rtn_zp_val) * s_col[4 * i + 2] * var_row;
-                        }
-                        if 4 * i + 3 < kv_dim {
-                            let q3 = ((b >> 6) & 0x03) as f32;
-                            out[4 * i + 3] =
-                                (q3 * rtn_scale + rtn_zp_val) * s_col[4 * i + 3] * var_row;
+                        out[4 * i] = q0.mul_add(rtn_scale, rtn_zp_val) * s_col[4 * i] * var_row;
+                        let q1 = ((b >> 2) & 0x03) as f32;
+                        out[4 * i + 1] =
+                            q1.mul_add(rtn_scale, rtn_zp_val) * s_col[4 * i + 1] * var_row;
+                        let q2 = ((b >> 4) & 0x03) as f32;
+                        out[4 * i + 2] =
+                            q2.mul_add(rtn_scale, rtn_zp_val) * s_col[4 * i + 2] * var_row;
+                        let q3 = ((b >> 6) & 0x03) as f32;
+                        out[4 * i + 3] =
+                            q3.mul_add(rtn_scale, rtn_zp_val) * s_col[4 * i + 3] * var_row;
+                    }
+                    // Tail: 0..=3 remaining elements packed in the next byte.
+                    // Only access packed_row[full_quads] if a tail actually exists.
+                    let tail_start = 4 * full_quads;
+                    if tail_start < kv_dim {
+                        let tail_byte = packed_row[full_quads];
+                        let shifts = [0u32, 2, 4, 6];
+                        for (j, &sh) in shifts.iter().enumerate() {
+                            let idx = tail_start + j;
+                            if idx >= kv_dim {
+                                break;
+                            }
+                            let q = ((tail_byte >> sh) & 0x03) as f32;
+                            out[idx] = q.mul_add(rtn_scale, rtn_zp_val) * s_col[idx] * var_row;
                         }
                     }
                 }
@@ -526,7 +621,7 @@ impl KVarNKVCache {
                 let rtn_zp_val = rtn_zp[pos_in_tile];
                 for ch in 0..kv_dim {
                     let q = packed_row[ch] as f32;
-                    out[ch] = (q * rtn_scale + rtn_zp_val) * s_col[ch] * var_row;
+                    out[ch] = q.mul_add(rtn_scale, rtn_zp_val) * s_col[ch] * var_row;
                 }
             }
             _ => {
@@ -537,7 +632,7 @@ impl KVarNKVCache {
                 unpack_row(packed_row, bits, scratch);
                 for ch in 0..kv_dim {
                     let q = scratch[ch] as f32;
-                    out[ch] = (q * rtn_scale + rtn_zp_val) * s_col[ch] * var_row;
+                    out[ch] = q.mul_add(rtn_scale, rtn_zp_val) * s_col[ch] * var_row;
                 }
             }
         }
@@ -579,83 +674,122 @@ impl KVarNKVCache {
     fn quantize_key_tile(&mut self, layer: usize, tile_idx: usize, count: usize) {
         let rows = self.kv_dim;
         let cols = count.min(self.tile_size);
-
-        // Copy buffer to scratch
         let tile_size = self.tile_size;
-        let mut tile_data = vec![0.0f32; rows * cols];
-        for ch in 0..rows {
-            for t in 0..cols {
-                tile_data[ch * cols + t] = self.key_buffer[ch * tile_size + t];
-            }
-        }
 
-        // Hadamard rotation per-tile on channel dimension:
-        //   Key tile [kv_dim, tile_size]: Hadamard each column (= each position's channels)
-        //   This is equivalent to per-position Hadamard on kv_dim, but batched at tile time.
-        if self.effective_hadamard && rows.is_power_of_two() {
-            hadamard::hadamard_cols(&mut tile_data, rows, cols);
-        }
+        // Reuse the pre-allocated scratch_tile buffer (kv_dim * tile_size floats).
+        // Drop the mutable borrow before writing back to storage fields.
+        let (var_scales, rtn_scales, rtn_zp, packed, bits) = {
+            let tile_data = &mut self.scratch_tile[..rows * cols];
 
-        // Step 1: Variance normalization
-        //   Static cal tables: O(1) lookup replaces Sinkhorn iterations (Plan 227 Phase 1)
-        #[cfg(feature = "static_cal_tables")]
-        let var_scales = if let Some(ref cal) = self.static_cal {
-            // Use static per-head scales instead of iterative Sinkhorn
-            let s_row: Vec<f32> = (0..rows).map(|ch| cal.get_scale(layer, ch)).collect();
-            // Apply static scales to tile
+            // Strided copy: key_buffer is [kv_dim, tile_size] row-major; compact to [rows, cols].
             for ch in 0..rows {
-                let scale = s_row[ch];
-                for t in 0..cols {
-                    tile_data[ch * cols + t] /= scale;
+                let src = &self.key_buffer[ch * tile_size..ch * tile_size + cols];
+                let dst = &mut tile_data[ch * cols..ch * cols + cols];
+                dst.copy_from_slice(src);
+            }
+
+            // Hadamard rotation per-tile on channel dimension:
+            //   Key tile [kv_dim, tile_size]: Hadamard each column (= each position's channels)
+            //   This is equivalent to per-position Hadamard on kv_dim, but batched at tile time.
+            if self.effective_hadamard && rows.is_power_of_two() {
+                hadamard::hadamard_cols_into(tile_data, rows, cols, &mut self.hadamard_col_buf);
+            }
+
+            // Step 1: Variance normalization
+            //   Static cal tables: O(1) lookup replaces Sinkhorn iterations (Plan 227 Phase 1)
+            #[cfg(feature = "static_cal_tables")]
+            let var_scales = if let Some(ref cal) = self.static_cal {
+                // Use static per-head scales instead of iterative Sinkhorn
+                let s_row: Vec<f32> = (0..rows).map(|ch| cal.get_scale(layer, ch)).collect();
+                // Apply static scales to tile (reciprocal-multiply: one division per row,
+                // not per element — vectorizer-friendly inner loop).
+                for ch in 0..rows {
+                    let inv_scale = 1.0 / s_row[ch];
+                    let row_off = ch * cols;
+                    for t in 0..cols {
+                        tile_data[row_off + t] *= inv_scale;
+                    }
                 }
-            }
-            VarianceNormScales {
-                s_col: vec![1.0f32; cols],
-                s_row,
-            }
-        } else if self.skip_varn {
-            VarianceNormScales {
-                s_col: vec![1.0f32; cols],
-                s_row: vec![1.0f32; rows],
-            }
-        } else {
-            let config = VarNormConfig {
-                tile_size: self.tile_size,
-                ..Default::default()
+                VarianceNormScales {
+                    s_col: vec![1.0f32; cols],
+                    s_row,
+                }
+            } else if self.skip_varn {
+                VarianceNormScales {
+                    s_col: vec![1.0f32; cols],
+                    s_row: vec![1.0f32; rows],
+                }
+            } else {
+                let config = VarNormConfig {
+                    tile_size: self.tile_size,
+                    ..Default::default()
+                };
+                variance_normalize_into(
+                    tile_data,
+                    rows,
+                    cols,
+                    &config,
+                    &mut self.varn_cur[..rows * cols],
+                    &mut self.varn_col_s[..cols],
+                    &mut self.varn_row_s[..rows],
+                    &mut self.varn_mean[..cols],
+                    &mut self.varn_inv_row[..rows],
+                    &mut self.varn_inv_col[..cols],
+                    &mut self.varn_log_s_col[..cols],
+                    &mut self.varn_log_s_row[..rows],
+                    &mut self.varn_log_s_col_best[..cols],
+                    &mut self.varn_log_s_row_best[..rows],
+                )
             };
-            variance_normalize(&mut tile_data, rows, cols, &config)
-        };
 
-        #[cfg(not(feature = "static_cal_tables"))]
-        let var_scales = if self.skip_varn {
-            VarianceNormScales {
-                s_col: vec![1.0f32; cols],
-                s_row: vec![1.0f32; rows],
-            }
-        } else {
-            let config = VarNormConfig {
-                tile_size: self.tile_size,
-                ..Default::default()
+            #[cfg(not(feature = "static_cal_tables"))]
+            let var_scales = if self.skip_varn {
+                VarianceNormScales {
+                    s_col: vec![1.0f32; cols],
+                    s_row: vec![1.0f32; rows],
+                }
+            } else {
+                let config = VarNormConfig {
+                    tile_size: self.tile_size,
+                    ..Default::default()
+                };
+                variance_normalize_into(
+                    tile_data,
+                    rows,
+                    cols,
+                    &config,
+                    &mut self.varn_cur[..rows * cols],
+                    &mut self.varn_col_s[..cols],
+                    &mut self.varn_row_s[..rows],
+                    &mut self.varn_mean[..cols],
+                    &mut self.varn_inv_row[..rows],
+                    &mut self.varn_inv_col[..cols],
+                    &mut self.varn_log_s_col[..cols],
+                    &mut self.varn_log_s_row[..rows],
+                    &mut self.varn_log_s_col_best[..cols],
+                    &mut self.varn_log_s_row_best[..rows],
+                )
             };
-            variance_normalize(&mut tile_data, rows, cols, &config)
-        };
 
-        // Step 2: RTN quantization
-        //   Targeted precision: use budget-allocated bits (Plan 227 Phase 2)
-        #[cfg(feature = "targeted_precision")]
-        let bits = if let Some(ref budget) = self.precision_budget {
-            budget.budget.ceil() as u8 // use ceiling to avoid precision loss
-        } else {
-            self.bits
-        };
+            // Step 2: RTN quantization
+            //   Targeted precision: use budget-allocated bits (Plan 227 Phase 2)
+            #[cfg(feature = "targeted_precision")]
+            let bits = if let Some(ref budget) = self.precision_budget {
+                budget.budget.ceil() as u8 // use ceiling to avoid precision loss
+            } else {
+                self.bits
+            };
 
-        #[cfg(not(feature = "targeted_precision"))]
-        let bits = self.bits;
+            #[cfg(not(feature = "targeted_precision"))]
+            let bits = self.bits;
 
-        let (rtn_scales, rtn_zp, packed) = if self.group_size > 0 {
-            rtn_quantize_rows_grouped(&tile_data, rows, cols, bits, self.group_size)
-        } else {
-            rtn_quantize_rows(&tile_data, rows, cols, bits)
+            let (rtn_scales, rtn_zp, packed) = if self.group_size > 0 {
+                rtn_quantize_rows_grouped(tile_data, rows, cols, bits, self.group_size)
+            } else {
+                rtn_quantize_rows(tile_data, rows, cols, bits)
+            };
+
+            (var_scales, rtn_scales, rtn_zp, packed, bits)
         };
 
         // Store
@@ -679,76 +813,114 @@ impl KVarNKVCache {
         let rows = count.min(self.tile_size);
         let cols = self.kv_dim;
 
-        // Copy buffer to scratch
-        let mut tile_data = vec![0.0f32; rows * cols];
-        let off = 0;
-        tile_data[off..off + rows * cols].copy_from_slice(&self.val_buffer[off..off + rows * cols]);
+        // Reuse the pre-allocated scratch_tile buffer (tile_size * kv_dim floats).
+        // Drop the mutable borrow before writing back to storage fields.
+        let (var_scales, rtn_scales, rtn_zp, packed, bits) = {
+            let tile_data = &mut self.scratch_tile[..rows * cols];
 
-        // Hadamard rotation per-tile (clustered across channels per token)
-        if self.effective_hadamard && cols.is_power_of_two() {
-            hadamard::hadamard_rows(&mut tile_data, cols);
-        }
+            // val_buffer is already [tile_size, kv_dim] row-major contiguous; copy directly.
+            tile_data.copy_from_slice(&self.val_buffer[..rows * cols]);
 
-        // Step 1: Variance normalization
-        //   Static cal tables: O(1) lookup replaces Sinkhorn iterations (Plan 227 Phase 1)
-        #[cfg(feature = "static_cal_tables")]
-        let var_scales = if let Some(ref cal) = self.static_cal {
-            // Use static per-head scales instead of iterative Sinkhorn
-            let s_row: Vec<f32> = (0..rows).map(|ch| cal.get_scale(layer, ch)).collect();
-            // Apply static scales to tile
-            for ch in 0..rows {
-                let scale = s_row[ch];
-                for t in 0..cols {
-                    tile_data[ch * cols + t] /= scale;
+            // Hadamard rotation per-tile (clustered across channels per token)
+            if self.effective_hadamard && cols.is_power_of_two() {
+                hadamard::hadamard_rows(tile_data, cols);
+            }
+
+            // Step 1: Variance normalization
+            //   Static cal tables: O(1) lookup replaces Sinkhorn iterations (Plan 227 Phase 1)
+            #[cfg(feature = "static_cal_tables")]
+            let var_scales = if let Some(ref cal) = self.static_cal {
+                // Use static per-head scales instead of iterative Sinkhorn
+                let s_row: Vec<f32> = (0..rows).map(|ch| cal.get_scale(layer, ch)).collect();
+                // Apply static scales to tile (reciprocal-multiply: one division per row,
+                // not per element — vectorizer-friendly inner loop).
+                for ch in 0..rows {
+                    let inv_scale = 1.0 / s_row[ch];
+                    let row_off = ch * cols;
+                    for t in 0..cols {
+                        tile_data[row_off + t] *= inv_scale;
+                    }
                 }
-            }
-            VarianceNormScales {
-                s_col: vec![1.0f32; cols],
-                s_row,
-            }
-        } else if self.skip_varn {
-            VarianceNormScales {
-                s_col: vec![1.0f32; cols],
-                s_row: vec![1.0f32; rows],
-            }
-        } else {
-            let config = VarNormConfig {
-                tile_size: self.tile_size,
-                ..Default::default()
+                VarianceNormScales {
+                    s_col: vec![1.0f32; cols],
+                    s_row,
+                }
+            } else if self.skip_varn {
+                VarianceNormScales {
+                    s_col: vec![1.0f32; cols],
+                    s_row: vec![1.0f32; rows],
+                }
+            } else {
+                let config = VarNormConfig {
+                    tile_size: self.tile_size,
+                    ..Default::default()
+                };
+                variance_normalize_into(
+                    tile_data,
+                    rows,
+                    cols,
+                    &config,
+                    &mut self.varn_cur[..rows * cols],
+                    &mut self.varn_col_s[..cols],
+                    &mut self.varn_row_s[..rows],
+                    &mut self.varn_mean[..cols],
+                    &mut self.varn_inv_row[..rows],
+                    &mut self.varn_inv_col[..cols],
+                    &mut self.varn_log_s_col[..cols],
+                    &mut self.varn_log_s_row[..rows],
+                    &mut self.varn_log_s_col_best[..cols],
+                    &mut self.varn_log_s_row_best[..rows],
+                )
             };
-            variance_normalize(&mut tile_data, rows, cols, &config)
-        };
 
-        #[cfg(not(feature = "static_cal_tables"))]
-        let var_scales = if self.skip_varn {
-            VarianceNormScales {
-                s_col: vec![1.0f32; cols],
-                s_row: vec![1.0f32; rows],
-            }
-        } else {
-            let config = VarNormConfig {
-                tile_size: self.tile_size,
-                ..Default::default()
+            #[cfg(not(feature = "static_cal_tables"))]
+            let var_scales = if self.skip_varn {
+                VarianceNormScales {
+                    s_col: vec![1.0f32; cols],
+                    s_row: vec![1.0f32; rows],
+                }
+            } else {
+                let config = VarNormConfig {
+                    tile_size: self.tile_size,
+                    ..Default::default()
+                };
+                variance_normalize_into(
+                    tile_data,
+                    rows,
+                    cols,
+                    &config,
+                    &mut self.varn_cur[..rows * cols],
+                    &mut self.varn_col_s[..cols],
+                    &mut self.varn_row_s[..rows],
+                    &mut self.varn_mean[..cols],
+                    &mut self.varn_inv_row[..rows],
+                    &mut self.varn_inv_col[..cols],
+                    &mut self.varn_log_s_col[..cols],
+                    &mut self.varn_log_s_row[..rows],
+                    &mut self.varn_log_s_col_best[..cols],
+                    &mut self.varn_log_s_row_best[..rows],
+                )
             };
-            variance_normalize(&mut tile_data, rows, cols, &config)
-        };
 
-        // Step 2: RTN quantization
-        //   Targeted precision: use budget-allocated bits (Plan 227 Phase 2)
-        #[cfg(feature = "targeted_precision")]
-        let bits = if let Some(ref budget) = self.precision_budget {
-            budget.budget.ceil() as u8
-        } else {
-            self.bits
-        };
+            // Step 2: RTN quantization
+            //   Targeted precision: use budget-allocated bits (Plan 227 Phase 2)
+            #[cfg(feature = "targeted_precision")]
+            let bits = if let Some(ref budget) = self.precision_budget {
+                budget.budget.ceil() as u8
+            } else {
+                self.bits
+            };
 
-        #[cfg(not(feature = "targeted_precision"))]
-        let bits = self.bits;
+            #[cfg(not(feature = "targeted_precision"))]
+            let bits = self.bits;
 
-        let (rtn_scales, rtn_zp, packed) = if self.group_size > 0 {
-            rtn_quantize_rows_grouped(&tile_data, rows, cols, bits, self.group_size)
-        } else {
-            rtn_quantize_rows(&tile_data, rows, cols, bits)
+            let (rtn_scales, rtn_zp, packed) = if self.group_size > 0 {
+                rtn_quantize_rows_grouped(tile_data, rows, cols, bits, self.group_size)
+            } else {
+                rtn_quantize_rows(tile_data, rows, cols, bits)
+            };
+
+            (var_scales, rtn_scales, rtn_zp, packed, bits)
         };
 
         let bpr = packed_bytes_per_row(cols, bits);
@@ -846,9 +1018,12 @@ fn rtn_quantize_rows(
         scales[r] = scale;
         zps[r] = lo;
 
-        // Quantize and pack
+        // Quantize and pack — use precomputed `inv_scale` and `neg_lo_over_scale`
+        // so the hot inner loop becomes a single `mul_add` + round, no division.
+        let inv_scale = 1.0 / scale;
+        let bias = -lo * inv_scale;
         for (c, &v) in row.iter().enumerate() {
-            let normalized = (v - lo) / scale;
+            let normalized = v.mul_add(inv_scale, bias);
             let q = (normalized.round() as u32).clamp(0, levels - 1);
             pack_value(&mut packed[r * bpr..], c, q, bits as usize);
         }
@@ -884,7 +1059,6 @@ fn rtn_quantize_rows_grouped(
         for g in 0..groups_per_row {
             let g_start = g * group_size;
             let g_end = (g_start + group_size).min(cols);
-            let _g_len = g_end - g_start;
 
             // Find min/max within this group
             let mut lo = f32::MAX;
@@ -906,10 +1080,12 @@ fn rtn_quantize_rows_grouped(
             scales[idx] = scale;
             zps[idx] = lo;
 
-            // Quantize and pack elements in this group
+            // Quantize and pack elements in this group — single mul_add per element.
+            let inv_scale = 1.0 / scale;
+            let bias = -lo * inv_scale;
             for c in g_start..g_end {
                 let v = tile[row_off + c];
-                let normalized = (v - lo) / scale;
+                let normalized = v.mul_add(inv_scale, bias);
                 let q = (normalized.round() as u32).clamp(0, levels - 1);
                 pack_value(&mut packed[r * bpr..], c, q, bits as usize);
             }

@@ -7,8 +7,6 @@
 //!
 //! **Source:** Tempus et al. (2026). Tokenisation via Convex Relaxations. arXiv:2605.22821
 
-use std::collections::HashMap;
-
 use good_lp::{
     Expression, ProblemVariables, Solution, SolverModel, Variable, default_solver, variable,
 };
@@ -85,11 +83,12 @@ impl ConvexSolver {
         // Phase 6: Solve via HiGHS
         let solution = model.solve().map_err(|e| format!("LP solve failed: {e}"))?;
 
-        // Phase 7: Extract solution vectors
+        // Phase 7: Extract solution vectors. Compute `lp_value` in a single
+        // fused pass over f + p instead of two separate sums.
         let f: Vec<f64> = f_vars.iter().map(|&v| solution.value(v)).collect();
         let p: Vec<f64> = p_vars.iter().map(|&v| solution.value(v)).collect();
         let c: Vec<f64> = c_vars.iter().map(|&v| solution.value(v)).collect();
-        let lp_value: f64 = f.iter().sum::<f64>() + p.iter().sum::<f64>();
+        let lp_value: f64 = f.iter().chain(p.iter()).copied().sum();
 
         Ok(LpSolution {
             f,
@@ -110,35 +109,59 @@ impl ConvexSolver {
 ///   source: −1 (one unit of net outflow)
 ///   sink:   +1 (one unit of net inflow)
 ///   others:  0 (inflow = outflow)
+///
+/// Hot-path optimization: replace `HashMap<u32, Vec<_>>` incidence map with a
+/// `Vec<Vec<_>>` indexed by `vertex_id` — direct O(1) indexing beats hashing
+/// for the dense vertex-id space. Same for the demand lookup.
 fn add_flow_constraints<M: SolverModel>(
     model: &mut M,
     graph: &TokenisationGraph,
     f_vars: &[Variable],
     p_vars: &[Variable],
 ) {
+    let n = graph.n_vertices;
+
     // Build per-vertex incidence lists: (edge_index, coefficient, is_free)
     // coefficient: +1 for entering, −1 for leaving
-    let mut incidence: HashMap<u32, Vec<(usize, f64, bool)>> = HashMap::new();
+    // Vec<Vec<_>> indexed by vertex_id — O(1) lookup, no hashing.
+    let mut incidence: Vec<Vec<(usize, f64, bool)>> = (0..n).map(|_| Vec::new()).collect();
+
+    // Pre-count outgoing + incoming edges per vertex to avoid Vec reallocations.
+    // One pass through each edge list suffices.
+    let mut deg = vec![0usize; n];
+    for &(from, to) in &graph.free_edges {
+        deg[from.0 as usize] += 1;
+        deg[to.0 as usize] += 1;
+    }
+    for &(from, to, _) in &graph.priced_edges {
+        deg[from.0 as usize] += 1;
+        deg[to.0 as usize] += 1;
+    }
+    for (v, d) in incidence.iter_mut().zip(deg.iter()) {
+        Vec::reserve(v, *d);
+    }
 
     for (e, &(from, to)) in graph.free_edges.iter().enumerate() {
-        incidence.entry(from.0).or_default().push((e, -1.0, true)); // leaves from
-        incidence.entry(to.0).or_default().push((e, 1.0, true)); // enters to
+        incidence[from.0 as usize].push((e, -1.0, true)); // leaves from
+        incidence[to.0 as usize].push((e, 1.0, true)); // enters to
     }
 
     for (e, &(from, to, _)) in graph.priced_edges.iter().enumerate() {
-        incidence.entry(from.0).or_default().push((e, -1.0, false)); // leaves from
-        incidence.entry(to.0).or_default().push((e, 1.0, false)); // enters to
+        incidence[from.0 as usize].push((e, -1.0, false)); // leaves from
+        incidence[to.0 as usize].push((e, 1.0, false)); // enters to
     }
 
-    // Build demand lookup from flow_diff (sparse: only source and sink)
-    let demand: HashMap<u32, f64> = graph
-        .flow_diff
-        .iter()
-        .map(|&(v, d)| (v.0, d as f64))
-        .collect();
+    // Demand lookup: dense Vec indexed by vertex_id. Default 0.0.
+    let mut demand = vec![0.0f64; n];
+    for &(v, d) in &graph.flow_diff {
+        demand[v.0 as usize] = d as f64;
+    }
 
-    // Add flow conservation constraint for each vertex
-    for (vertex_id, incidents) in &incidence {
+    // Add flow conservation constraint for each vertex with incident edges.
+    for (vertex_id, incidents) in incidence.iter().enumerate() {
+        if incidents.is_empty() {
+            continue;
+        }
         let expr: Expression = incidents
             .iter()
             .map(|&(e, coeff, is_free)| {
@@ -147,7 +170,7 @@ fn add_flow_constraints<M: SolverModel>(
             })
             .sum();
 
-        let d = demand.get(vertex_id).copied().unwrap_or(0.0);
+        let d = demand[vertex_id];
         model.add_constraint(expr.eq(d));
     }
 }

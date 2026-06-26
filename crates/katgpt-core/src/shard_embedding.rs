@@ -45,31 +45,29 @@ impl JlProjectionMatrix {
             for val in rows[i].iter_mut() {
                 *val = rng();
             }
-            // Subtract projections onto previous rows (SIMD-accelerated dot)
+            // Subtract projections onto previous rows (SIMD-accelerated)
             #[allow(clippy::needless_range_loop)]
             for k in 0..i {
-                let dot = crate::simd::simd_dot_f32(&rows[i], &rows[k], STYLE_DIM);
-                for j in 0..STYLE_DIM {
-                    rows[i][j] -= dot * rows[k][j];
-                }
+                // split_at_mut to satisfy borrow checker: rows[i] and rows[k] are disjoint
+                let (left, right) = rows.split_at_mut(i);
+                let row_i: &mut [f32; STYLE_DIM] = &mut right[0];
+                let row_k: &[f32; STYLE_DIM] = &left[k];
+                let dot = crate::simd::simd_dot_f32(row_i, row_k, STYLE_DIM);
+                crate::simd::simd_fused_scale_acc(row_i, row_k, -dot, STYLE_DIM);
             }
-            // Normalize to unit length (SIMD-accelerated sum-of-squares)
+            // Normalize to unit length (SIMD-accelerated sum-of-squares + scale)
             let norm_sq: f32 = crate::simd::simd_sum_sq(&rows[i], STYLE_DIM);
             let norm = norm_sq.sqrt();
             if norm > 1e-8 {
                 let inv_norm = 1.0 / norm;
-                for val in rows[i].iter_mut() {
-                    *val *= inv_norm;
-                }
+                crate::simd::simd_scale_inplace(&mut rows[i], inv_norm);
             }
         }
 
-        // Scale by 1/sqrt(d_out) per JL lemma
+        // Scale by 1/sqrt(d_out) per JL lemma (SIMD-accelerated)
         let scale = 1.0 / (EMBED_DIM as f32).sqrt();
         for row in rows.iter_mut() {
-            for val in row.iter_mut() {
-                *val *= scale;
-            }
+            crate::simd::simd_scale_inplace(row, scale);
         }
 
         let mut matrix = Self {

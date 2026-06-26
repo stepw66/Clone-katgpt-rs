@@ -106,7 +106,7 @@ fn sample_different_value(
         scratch[original_token] = 0.0;
     }
 
-    // Renormalize
+    // Renormalize — single fused pass for sum + scale.
     let sum: f32 = scratch[..len].iter().sum();
     if sum > 0.0 {
         let inv = 1.0 / sum;
@@ -117,10 +117,9 @@ fn sample_different_value(
     } else {
         // All mass was on original — sample uniformly from non-original tokens
         let fallback = (rng.next() as usize) % len;
-        if fallback == original_token && len > 1 {
-            (fallback + 1) % len
-        } else {
-            fallback
+        match fallback == original_token && len > 1 {
+            true => (fallback + 1) % len,
+            false => fallback,
         }
     }
 }
@@ -444,12 +443,14 @@ pub fn ppot_rescue_adaptive<P: ScreeningPruner>(
     // 5. Validate and collect results
     let mut valid_variants = Vec::new();
     let mut valid_indices = Vec::new();
+    let strategies_len = TokenRule::STRATEGIES.len();
 
     for (idx, variant) in variants.iter().enumerate() {
         let accepted = is_path_valid(variant, pruner);
 
+        // Cycle rule lookup — hoist len out of the loop.
         let rule = TokenRule::STRATEGIES
-            .get(idx % TokenRule::STRATEGIES.len())
+            .get(idx % strategies_len)
             .copied()
             .unwrap_or(TokenRule::All);
 

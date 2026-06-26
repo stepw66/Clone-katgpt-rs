@@ -90,6 +90,7 @@ pub fn compute_analytics(replay: &GoReplay) -> GoGameAnalytics {
 
     let mut win_rate_trace: Vec<f32> = Vec::with_capacity(replay.moves.len());
     let mut score_trace: Vec<f32> = Vec::with_capacity(replay.moves.len());
+    let mut legal_buf: Vec<(usize, usize)> = Vec::with_capacity(replay.size * replay.size);
 
     let mut category_counts: [f32; 8] = [0.0; 8];
     let mut coincidence_count: usize = 0;
@@ -108,11 +109,11 @@ pub fn compute_analytics(replay: &GoReplay) -> GoGameAnalytics {
             place_move_count += 1;
 
             // Find greedy best move among all legal moves
-            let legal = state.legal_moves();
+            state.legal_moves_into(&mut legal_buf);
             let mut best_score: f32 = f32::NEG_INFINITY;
             let mut best_move: Option<(usize, usize)> = None;
 
-            for &(r, c) in &legal {
+            for &(r, c) in &legal_buf {
                 let gs = greedy_score(&state, r, c);
                 if gs > best_score {
                     best_score = gs;

@@ -150,8 +150,8 @@ impl ContextStats {
 /// normalizes token usage against budget.
 pub struct ConfiguratorBandit {
     /// Per-context Q-values and visit counts.
-    /// Key: `(domain, entropy_bin, desperation_bin)`, Value: stats for 3 arms.
-    stats: HashMap<(usize, usize, usize), ContextStats>,
+    /// Key: `(domain, entropy_bin, desperation_bin, epiplexity_bin)`, Value: stats for 4 arms.
+    stats: HashMap<(usize, u8, u8, u8), ContextStats>,
 }
 
 impl ConfiguratorBandit {
@@ -164,7 +164,12 @@ impl ConfiguratorBandit {
 
     /// Get or create stats for a given context.
     fn get_or_create_stats(&mut self, context: ConfiguratorContext) -> &mut ContextStats {
-        let key = (context.domain, context.entropy_bin, context.desperation_bin);
+        let key = (
+            context.domain,
+            context.entropy_bin,
+            context.desperation_bin,
+            context.epiplexity_bin,
+        );
         self.stats.entry(key).or_insert_with(ContextStats::new)
     }
 
@@ -256,7 +261,12 @@ impl ConfiguratorBandit {
     /// Get Q-value for a specific context and decision.
     /// Returns `None` if context has never been visited.
     pub fn q_value(&self, context: ConfiguratorContext, decision: PlanningDecision) -> Option<f32> {
-        let key = (context.domain, context.entropy_bin, context.desperation_bin);
+        let key = (
+            context.domain,
+            context.entropy_bin,
+            context.desperation_bin,
+            context.epiplexity_bin,
+        );
         self.stats
             .get(&key)
             .map(|s| s.q_values[arm_index(decision)])
@@ -265,7 +275,12 @@ impl ConfiguratorBandit {
     /// Get visit count for a specific context and decision.
     /// Returns `0` if context has never been visited.
     pub fn visit_count(&self, context: ConfiguratorContext, decision: PlanningDecision) -> usize {
-        let key = (context.domain, context.entropy_bin, context.desperation_bin);
+        let key = (
+            context.domain,
+            context.entropy_bin,
+            context.desperation_bin,
+            context.epiplexity_bin,
+        );
         match self.stats.get(&key) {
             Some(s) => s.visits[arm_index(decision)],
             None => 0,
@@ -275,7 +290,12 @@ impl ConfiguratorBandit {
     /// Get total pulls for a specific context.
     /// Returns `0` if context has never been visited.
     pub fn total_pulls(&self, context: ConfiguratorContext) -> usize {
-        let key = (context.domain, context.entropy_bin, context.desperation_bin);
+        let key = (
+            context.domain,
+            context.entropy_bin,
+            context.desperation_bin,
+            context.epiplexity_bin,
+        );
         match self.stats.get(&key) {
             Some(s) => s.total_pulls,
             None => 0,
@@ -286,6 +306,117 @@ impl ConfiguratorBandit {
 impl Default for ConfiguratorBandit {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+// ── Epiplexity-Aware Arm Selection (Plan 130 T4) ─────────────────
+
+/// Epiplexity-contextual arm selection heuristic using S_T (structural information)
+/// and H_T (entropy) signals.
+///
+/// The heuristic provides a warm-start for the bandit: before enough data
+/// has been collected for UCB1 to converge, it suggests which arm to try
+/// based on the epiplexity/entropy regime:
+///
+/// | Regime | S_T | H_T | Heuristic | Rationale |
+/// |--------|-----|-----|-----------|------------|
+/// | Structure-rich, predictable | High | Low | `PlanExtend` | Rich patterns, reuse existing plan |
+/// | Random, unpredictable | Low | High | `PlanSkip` | No structure to exploit, skip planning |
+/// | Complex, needs fresh plan | High | High | `PlanNew` | Rich but uncertain, start fresh |
+/// | Low signal | Low | Low | `PlanSkip` | Neither structure nor uncertainty |
+///
+/// Thresholds use sigmoid-friendly midpoint at 0.5 (bin 5 out of 0..9).
+#[cfg(feature = "epiplexity_bandit")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EpiplexityArmHeuristic;
+
+#[cfg(feature = "epiplexity_bandit")]
+impl EpiplexityArmHeuristic {
+    /// Bin threshold for "high" signal — midpoint of 0..9 bins.
+    const HIGH_THRESHOLD: u8 = 5;
+
+    /// Suggest a planning decision based on epiplexity (S_T) and entropy (H_T) bins.
+    ///
+    /// Returns the heuristic suggestion. The caller should still use UCB1 for
+    /// exploration — this is a warm-start hint, not a replacement.
+    pub fn suggest(epiplexity_bin: u8, entropy_bin: u8) -> PlanningDecision {
+        let high_s = epiplexity_bin >= Self::HIGH_THRESHOLD;
+        let high_h = entropy_bin >= Self::HIGH_THRESHOLD;
+
+        match (high_s, high_h) {
+            // High S_T + Low H_T → structure-rich, predictable → extend existing plan
+            (true, false) => PlanningDecision::PlanExtend,
+            // Low S_T + High H_T → random, unpredictable → skip planning
+            (false, true) => PlanningDecision::PlanSkip,
+            // High S_T + High H_T → complex, needs fresh plan
+            (true, true) => PlanningDecision::PlanNew,
+            // Low S_T + Low H_T → low signal, skip
+            (false, false) => PlanningDecision::PlanSkip,
+        }
+    }
+
+    /// Compute a bonus reward for decisions that match the epiplexity heuristic.
+    ///
+    /// When the bandit selects an arm consistent with the S_T/H_T regime,
+    /// it receives a small bonus to accelerate convergence. Inconsistent
+    /// arms receive zero bonus (not negative — the bandit should still
+    /// explore freely).
+    pub fn consistency_bonus(
+        epiplexity_bin: u8,
+        entropy_bin: u8,
+        decision: PlanningDecision,
+    ) -> f32 {
+        if Self::suggest(epiplexity_bin, entropy_bin) == decision {
+            0.1
+        } else {
+            0.0
+        }
+    }
+}
+
+#[cfg(feature = "epiplexity_bandit")]
+impl ConfiguratorBandit {
+    /// Select with epiplexity-aware warm-start.
+    ///
+    /// For unvisited contexts, uses the S_T/H_T heuristic to suggest an arm.
+    /// For visited contexts, falls back to standard UCB1.
+    /// This accelerates convergence by guiding initial exploration toward
+    /// theoretically-motivated arm choices.
+    pub fn select_with_epiplexity(&mut self, context: ConfiguratorContext) -> PlanningDecision {
+        let key = (
+            context.domain,
+            context.entropy_bin,
+            context.desperation_bin,
+            context.epiplexity_bin,
+        );
+
+        // If context has been visited, use UCB1
+        if self.stats.contains_key(&key) {
+            let stats = self.stats.get_mut(&key).unwrap();
+            let arm = stats.best_ucb1_arm();
+            return from_arm_index(arm);
+        }
+
+        // Unvisited context: use heuristic warm-start
+        EpiplexityArmHeuristic::suggest(context.epiplexity_bin, context.entropy_bin)
+    }
+
+    /// Update with epiplexity consistency bonus.
+    ///
+    /// Adds a small bonus when the decision matches the S_T/H_T regime,
+    /// accelerating convergence toward theoretically-optimal arm selection.
+    pub fn update_with_epiplexity(
+        &mut self,
+        context: ConfiguratorContext,
+        decision: PlanningDecision,
+        reward: f32,
+    ) {
+        let bonus = EpiplexityArmHeuristic::consistency_bonus(
+            context.epiplexity_bin,
+            context.entropy_bin,
+            decision,
+        );
+        self.update(context, decision, reward + bonus);
     }
 }
 

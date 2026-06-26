@@ -78,12 +78,17 @@ pub fn bench_e2e_game_timing(_config: &Config) -> Vec<BenchResult> {
     let warmup_rounds = 3;
     let bench_rounds = 20;
 
-    let mut results = Vec::new();
+    // game_profiles.len() × cache_states.len() = 4 × 4 = 16.
+    let mut results = Vec::with_capacity(game_profiles.len() * cache_states.len());
+    // Reusable token buffer — avoids per-iteration allocation.
+    let mut tokens = Vec::new();
 
     println!("\n🎮 E2E Game Timing (plasma/hot/warm/cold)...");
 
     for &(game_name, n_tokens) in game_profiles {
         println!("   {game_name} ({n_tokens} tok)...");
+        tokens.clear();
+        tokens.reserve(n_tokens);
 
         for &state in &cache_states {
             // Warmup
@@ -91,7 +96,7 @@ pub fn bench_e2e_game_timing(_config: &Config) -> Vec<BenchResult> {
                 let mut ctx = ForwardContext::new(&config);
                 let mut cache = MultiLayerKVCache::new(&config);
                 let mut rng_w = Rng::new(42);
-                let mut tokens = Vec::with_capacity(n_tokens);
+                let mut warm_tokens = Vec::with_capacity(n_tokens);
                 generate_into(
                     &mut ctx,
                     &mut cache,
@@ -99,7 +104,7 @@ pub fn bench_e2e_game_timing(_config: &Config) -> Vec<BenchResult> {
                     &config,
                     &mut rng_w,
                     n_tokens,
-                    &mut tokens,
+                    &mut warm_tokens,
                 );
             }
 
@@ -112,7 +117,7 @@ pub fn bench_e2e_game_timing(_config: &Config) -> Vec<BenchResult> {
                         let mut ctx = ForwardContext::new(&config);
                         let mut cache = MultiLayerKVCache::new(&config);
                         let mut rng_b = Rng::new(42 + i);
-                        let mut tokens = Vec::with_capacity(n_tokens);
+                        tokens.clear();
                         generate_into(
                             &mut ctx,
                             &mut cache,
@@ -128,7 +133,7 @@ pub fn bench_e2e_game_timing(_config: &Config) -> Vec<BenchResult> {
                         let mut ctx = ForwardContext::new(&config);
                         let mut cache = MultiLayerKVCache::new(&config);
                         let mut rng_b = Rng::new(42 + i);
-                        let mut tokens = Vec::with_capacity(n_tokens);
+                        tokens.clear();
                         cache.reset();
                         generate_into(
                             &mut ctx,
@@ -157,7 +162,7 @@ pub fn bench_e2e_game_timing(_config: &Config) -> Vec<BenchResult> {
                             let cache = (*cache_cell.get()).as_mut().unwrap();
                             cache.reset();
                             let mut rng_b = Rng::new(42 + i);
-                            let mut tokens = Vec::with_capacity(n_tokens);
+                            tokens.clear();
                             generate_into(
                                 ctx,
                                 cache,
@@ -185,7 +190,7 @@ pub fn bench_e2e_game_timing(_config: &Config) -> Vec<BenchResult> {
                             let cache = (*cache_cell.get()).as_mut().unwrap();
                             // Don't reset cache — simulate hot path with accumulated state
                             let mut rng_b = Rng::new(42 + i);
-                            let mut tokens = Vec::with_capacity(n_tokens);
+                            tokens.clear();
                             generate_into(
                                 ctx,
                                 cache,

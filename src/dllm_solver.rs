@@ -4,6 +4,8 @@
 //! When marginal entropy exceeds H_critical, switch from DPM-Solver++(2M)
 //! to q-sampling or other strategies.
 
+#![allow(clippy::needless_range_loop)]
+
 /// Solver kind for D2F decode steps.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[repr(u8)]
@@ -20,11 +22,11 @@ pub enum SolverKind {
 /// Configuration for CriticalIntervalGate.
 #[derive(Clone, Debug)]
 pub struct CriticalIntervalConfig {
+    /// Vocab size for computing default threshold.
+    pub vocab_size: usize,
     /// Entropy threshold above which critical interval is detected.
     /// Default: log(vocab_size) * 0.5
     pub h_critical: f32,
-    /// Vocab size for computing default threshold.
-    pub vocab_size: usize,
     /// Whether to use q-sampling during critical steps.
     pub use_q_sample: bool,
 }
@@ -71,12 +73,14 @@ pub fn select_solver(entropy: f32, config: &CriticalIntervalConfig) -> SolverKin
 
 /// Compute Shannon entropy from marginal probabilities.
 /// H = -Σ p_i * log(p_i)
+///
+/// Branch-free: `p.max(1e-10).ln()` compiles to an `fmax` instruction,
+/// avoiding a data-dependent branch per element over the full vocabulary.
 pub fn shannon_entropy(marginals: &[f32]) -> f32 {
     let mut h = 0.0f32;
     for &p in marginals {
-        if p > 1e-10 {
-            h -= p * p.ln();
-        }
+        let lp = p.max(1e-10).ln();
+        h -= p * lp;
     }
     h
 }
@@ -116,18 +120,23 @@ pub fn build_dd_tree_adaptive(
     };
 
     for (depth, marginals) in marginals_per_depth.iter().enumerate() {
-        // Compute Shannon entropy of marginals (zero-alloc: no extra Vec)
+        // Compute Shannon entropy of marginals (zero-alloc: no extra Vec).
+        // Branch-free `p.max(1e-10).ln()` (compiles to `fmax`) unblocks LLVM
+        // auto-vectorization over the vocab-sized inner loop — avoids the
+        // data-dependent `if p > 0.0` branch per element. Matches the pattern
+        // already used in `shannon_entropy` above.
         let entropy: f64 = marginals
             .iter()
             .map(|&p| {
-                let p = p as f64;
-                if p > 0.0 { -p * p.ln() } else { 0.0 }
+                let p = (p as f64).max(1e-10);
+                -p * p.ln()
             })
             .sum();
 
         let prev_solver = *solver_kind;
 
-        if entropy >= default_h_critical {
+        let is_critical = entropy >= default_h_critical;
+        if is_critical {
             // Critical interval — switch to q-sampling if available
             #[cfg(feature = "q_sample_solver")]
             {
@@ -147,7 +156,7 @@ pub fn build_dd_tree_adaptive(
             entropy,
             solver_before: prev_solver,
             solver_after: *solver_kind,
-            critical: entropy >= default_h_critical,
+            critical: is_critical,
         });
     }
 
@@ -268,7 +277,6 @@ pub fn q_sample_refine(
 
     // When alpha == alpha_prev == 1.0 and no noise → argmax commit (identity-like)
     let is_identity = (alpha - 1.0).abs() < 1e-8 && (alpha_prev - 1.0).abs() < 1e-8;
-    let noise_is_zero = noise[..len].iter().all(|&n| n.abs() < 1e-10);
 
     if is_identity {
         // Identity: return marginals through sigmoid for normalization
@@ -277,6 +285,10 @@ pub fn q_sample_refine(
         }
         return;
     }
+
+    // Defer the O(len) all-zero scan until after the `is_identity` short-circuit —
+    // avoids a wasted full pass when the identity fast-path applies.
+    let noise_is_zero = noise[..len].iter().all(|&n| n.abs() < 1e-10);
 
     if noise_is_zero {
         // Deterministic DDIM step: pure interpolation between marginals
@@ -320,21 +332,16 @@ fn sigmoid(x: f32) -> f32 {
 
 /// Find argmax index from a probability-like array.
 /// Returns the index with the highest value, or 0 if empty.
+///
+/// Delegates to `simd_argmax_f32` (NEON/AVX2) for the vocab-sized scan —
+/// called once per position in `SelfCondDraft::store_pass1`'s hot loop.
 #[cfg(any(feature = "q_sample_solver", feature = "self_cond_draft"))]
 #[inline]
 pub fn argmax(values: &[f32]) -> usize {
     if values.is_empty() {
         return 0;
     }
-    let mut best_idx = 0;
-    let mut best_val = values[0];
-    for (i, &v) in values.iter().enumerate().skip(1) {
-        if v > best_val {
-            best_val = v;
-            best_idx = i;
-        }
-    }
-    best_idx
+    katgpt_core::simd::simd_argmax_f32(values).0
 }
 
 // ---------------------------------------------------------------------------
@@ -364,17 +371,26 @@ pub struct SelfCondDraft {
     seq_len: usize,
     /// Vocab size per position.
     vocab_size: usize,
+    /// Scratch buffer for pass-1 output. Avoids per-call `vec![0.0f32; total]`
+    /// allocation inside [`SelfCondDraft::draft`].
+    pass1_buf: Vec<f32>,
+    /// Scratch buffer for pass-2 output. Avoids per-call `vec![0.0f32; total]`
+    /// allocation inside [`SelfCondDraft::draft`].
+    pass2_buf: Vec<f32>,
 }
 
 #[cfg(feature = "self_cond_draft")]
 impl SelfCondDraft {
     /// Create a new SelfCondDraft for the given dimensions.
     pub fn new(seq_len: usize, vocab_size: usize) -> Self {
+        let total = seq_len * vocab_size;
         Self {
-            sc_buffer: vec![0.0f32; seq_len * vocab_size],
+            sc_buffer: vec![0.0f32; total],
             sc_ready: false,
             seq_len,
             vocab_size,
+            pass1_buf: Vec::with_capacity(total),
+            pass2_buf: Vec::with_capacity(total),
         }
     }
 
@@ -387,6 +403,9 @@ impl SelfCondDraft {
         self.sc_buffer[..needed].fill(0.0);
         self.sc_ready = false;
         self.seq_len = seq_len;
+        // Pre-size pass scratch buffers so `draft` doesn't allocate per call.
+        grow_no_zero(&mut self.pass1_buf, needed);
+        grow_no_zero(&mut self.pass2_buf, needed);
     }
 
     /// Whether the SC buffer is ready for pass 2.
@@ -419,17 +438,17 @@ impl SelfCondDraft {
             // Find best token for this position
             let best_idx = argmax(&self.sc_buffer[start..end]);
 
-            // Sigmoid boost: sharpen the distribution around the best token
+            // Sigmoid boost: sharpen the distribution around the best token.
+            // Branch-free: attenuate all tokens by `sigmoid(x - 1.0)` in one pass,
+            // then overwrite the best with `sigmoid(x + 1.0)` using the saved
+            // pre-attenuation value. Avoids the per-element `t == best_idx`
+            // branch on the vocab-sized inner loop.
             let slice = &mut self.sc_buffer[start..end];
-            for (t, val) in slice.iter_mut().enumerate() {
-                if t == best_idx {
-                    // Boost best token: sigmoid(x + sharpen_factor)
-                    *val = sigmoid(*val + 1.0);
-                } else {
-                    // Attenuate others: sigmoid(x - sharpen_factor)
-                    *val = sigmoid(*val - 1.0);
-                }
+            let best_val = slice[best_idx];
+            for val in slice.iter_mut() {
+                *val = sigmoid(*val - 1.0);
             }
+            slice[best_idx] = sigmoid(best_val + 1.0);
         }
 
         self.sc_ready = true;
@@ -475,21 +494,47 @@ impl SelfCondDraft {
         if self.sc_buffer.len() < total {
             self.sc_buffer.resize(total, 0.0);
         }
+        // Ensure pass scratch buffers are sized (no per-call allocation).
+        grow_no_zero(&mut self.pass1_buf, total);
+        grow_no_zero(&mut self.pass2_buf, total);
 
-        // Pass 1: standard prediction
-        let mut pass1_out = vec![0.0f32; total];
-        predict_fn(0, &mut pass1_out);
+        // Pass 1: standard prediction (writes into pre-allocated scratch).
+        predict_fn(0, &mut self.pass1_buf[..total]);
 
-        // Store pass-1 result as self-conditioning
-        self.store_pass1(&pass1_out);
+        // Store pass-1 result as self-conditioning.
+        //
+        // `store_pass1` borrows `self` mutably (writes to `sc_buffer`) while we
+        // need to read `pass1_buf` from the same `self`. Split the borrow by
+        // temporarily moving `pass1_buf` out of `self` via `mem::take`, then
+        // putting it back after the call.
+        let pass1_buf = std::mem::take(&mut self.pass1_buf);
+        self.store_pass1(&pass1_buf[..total]);
+        self.pass1_buf = pass1_buf;
 
         // Pass 2: prediction with self-conditioning awareness
-        let mut pass2_out = vec![0.0f32; total];
-        predict_fn(1, &mut pass2_out);
+        predict_fn(1, &mut self.pass2_buf[..total]);
 
         // Blend pass-2 with SC buffer
-        self.blend_pass2(&pass2_out, blend, output);
+        self.blend_pass2(&self.pass2_buf[..total], blend, output);
     }
+}
+
+/// Grow a Vec to `new_len` without zeroing the new tail.
+///
+/// Caller guarantees the new elements will be fully written before any read.
+/// Avoids the O(n) memset that `Vec::resize` performs on the new tail.
+#[cfg(feature = "self_cond_draft")]
+#[inline]
+fn grow_no_zero(v: &mut Vec<f32>, new_len: usize) {
+    if v.len() >= new_len {
+        return;
+    }
+    if v.capacity() < new_len {
+        v.reserve(new_len - v.capacity());
+    }
+    // SAFETY: capacity is sufficient (via reserve above or pre-existing).
+    // Caller guarantees all `new_len` elements are written before any read.
+    unsafe { v.set_len(new_len) };
 }
 
 // ---------------------------------------------------------------------------
@@ -523,23 +568,428 @@ pub fn mbr_select(
         return top_k_indices[0];
     }
 
-    // MBR: for each candidate, compute risk (sum of quality differences vs all others)
-    let mut best_idx = top_k_indices[0];
-    let mut min_risk = f32::MAX;
+    // MBR: for each candidate, risk = Σ_{j≠i} max(scores[i] - scores[j], 0).
+    // Only paths with lower scores contribute. Sort the top-k by score
+    // descending and use a suffix sum so each candidate's risk is O(1):
+    //   risk_p = (k-p-1) * s_p - suffix_sum[p+1]
+    // This converts the O(k²) pairwise scan into O(k log k).
+    let mut sorted: Vec<(usize, f32)> = top_k_indices.iter().map(|&i| (i, scores[i])).collect();
+    sorted.sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
-    for &i in &top_k_indices {
-        let risk: f32 = top_k_indices
-            .iter()
-            .filter(|&&j| j != i)
-            .map(|&j| (scores[i] - scores[j]).max(0.0))
-            .sum();
+    // suffix_sum[p] = Σ_{j>=p} sorted[j].1; suffix_sum[k] = 0.
+    let mut suffix_sum = vec![0.0f32; k + 1];
+    for p in (0..k).rev() {
+        suffix_sum[p] = suffix_sum[p + 1] + sorted[p].1;
+    }
+
+    let mut best_idx = sorted[0].0;
+    let mut min_risk = f32::MAX;
+    for p in 0..k {
+        let s_p = sorted[p].1;
+        let count_below = (k - p - 1) as f32;
+        let risk = count_below * s_p - suffix_sum[p + 1];
         if risk < min_risk {
             min_risk = risk;
-            best_idx = i;
+            best_idx = sorted[p].0;
         }
     }
 
     best_idx
+}
+
+// ---------------------------------------------------------------------------
+// Residual Context Diffusion (Plan 258, feature: rcd_residual)
+// ---------------------------------------------------------------------------
+
+/// Configuration for Residual Context Diffusion.
+///
+/// Controls entropy-weighted residual context injection from discarded
+/// token probability distributions into the next denoising step's input embeddings.
+#[cfg(feature = "rcd_residual")]
+#[derive(Clone, Debug)]
+pub struct RcdConfig {
+    /// Whether RCD is enabled (runtime toggle).
+    pub enabled: bool,
+    /// Temperature for inference-time residual calibration (default 1.0).
+    pub temperature_residual: f32,
+    /// log(vocab_size), pre-computed once at init.
+    pub log_vocab: f32,
+    /// Pre-allocated scratch buffer for residual computation: `[n_embd]`.
+    /// Reused across positions and steps — zero allocation in hot loop.
+    pub residual_scratch: Vec<f32>,
+}
+
+#[cfg(feature = "rcd_residual")]
+impl RcdConfig {
+    /// Create a new RCD config for the given vocab size and embedding dimension.
+    pub fn new(vocab_size: usize, n_embd: usize) -> Self {
+        Self {
+            enabled: true,
+            temperature_residual: 1.0,
+            log_vocab: (vocab_size as f32).ln(),
+            residual_scratch: vec![0.0f32; n_embd],
+        }
+    }
+
+    /// Disabled RCD config (zero overhead).
+    pub fn disabled() -> Self {
+        Self {
+            enabled: false,
+            temperature_residual: 1.0,
+            log_vocab: 1.0,
+            residual_scratch: Vec::new(),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Three-State Reuse (3SR) Warm-Start (Plan 291, Research 265, feature: d2f_3sr_warm_start)
+// ---------------------------------------------------------------------------
+//
+// Composes the CoFRe paper's three-state warm-start rule with the shipped RCD
+// loop (Plan 258). Tokens are classified per position between consecutive
+// denoising steps into {UnchangedVisible, StillMasked, NewlyRevealed}, each
+// mapping to a different warm-start coefficient γ used to lerp the next step's
+// initial state between the prior step's solved state and the current
+// preprocessing-stack output:
+//
+//     h⁰_t[i] = γ[i] · h⋆_{t+1}[i] + (1 − γ[i]) · h_pre,t[i]
+//
+// Zero-cost when `enabled=false` — the runtime check in `denoise_loop_rcd_3sr`
+// falls through to `denoise_loop_rcd` with no further work.
+
+/// Configuration for Three-State Reuse (3SR) warm-start (Plan 291, Research 265).
+///
+/// When composed with RCD (Plan 258) inside a D2F denoising loop with LT2 looping
+/// enabled, this controls per-position warm-start of the FP solver state across
+/// denoising steps. Per CoFRe paper §1.2, tokens transition between three states
+/// between denoising steps:
+/// - **UnchangedVisible**: committed in both steps → γ=1.0 (full reuse of prior state)
+/// - **StillMasked**: masked in both steps → γ∈[γ_masked_min, γ_masked_max] (partial reuse)
+/// - **NewlyRevealed**: was masked, now visible (or vice versa) → γ=0.2 (weak reuse)
+///
+/// The warm-start lerp is `h⁰_t = γ_t ⊙ h⋆_{t+1} + (1−γ_t) ⊙ h_pre,t`.
+///
+/// Zero-cost when `enabled=false` — the runtime check in `denoise_loop_rcd_3sr` falls
+/// through to `denoise_loop_rcd` with no further work.
+#[cfg(feature = "d2f_3sr_warm_start")]
+#[derive(Clone, Debug)]
+pub struct ThreeStateReuseConfig {
+    /// γ for UnchangedVisible positions — default 1.0 (full reuse).
+    pub gamma_visible: f32,
+    /// γ floor for StillMasked positions — default 0.75 (paper Tables 4-5).
+    pub gamma_masked_min: f32,
+    /// γ ceiling for StillMasked positions — default 0.90 (paper Tables 4-5).
+    pub gamma_masked_max: f32,
+    /// γ for NewlyRevealed positions — default 0.2 (paper §1.2).
+    pub gamma_newly_revealed: f32,
+    /// Runtime on/off toggle. When false, `denoise_loop_rcd_3sr` falls back to `denoise_loop_rcd`.
+    pub enabled: bool,
+}
+
+#[cfg(feature = "d2f_3sr_warm_start")]
+impl Default for ThreeStateReuseConfig {
+    fn default() -> Self {
+        Self {
+            gamma_visible: 1.0,
+            gamma_masked_min: 0.75,
+            gamma_masked_max: 0.90,
+            gamma_newly_revealed: 0.2,
+            enabled: true,
+        }
+    }
+}
+
+#[cfg(feature = "d2f_3sr_warm_start")]
+impl ThreeStateReuseConfig {
+    /// Disabled config (zero overhead — falls back to standard RCD loop).
+    pub fn disabled() -> Self {
+        Self {
+            enabled: false,
+            ..Default::default()
+        }
+    }
+}
+
+/// Per-position transition type between two consecutive D2F denoising steps.
+/// Used by 3SR warm-start (Plan 291) to choose the warm-start coefficient γ.
+#[cfg(feature = "d2f_3sr_warm_start")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub enum TransitionType {
+    /// Visible (committed) in both `z_prev` and `z_t`. γ = `gamma_visible`.
+    UnchangedVisible = 0,
+    /// Still masked in both. γ = lerp([gamma_masked_min, gamma_masked_max], visible_fraction).
+    StillMasked = 1,
+    /// Was masked in `z_prev`, now visible in `z_t` (or vice versa). γ = `gamma_newly_revealed`.
+    NewlyRevealed = 2,
+}
+
+/// Classify each position's transition type between two denoising steps.
+///
+/// `z_prev_tokens`, `z_t_tokens`: token slices for the previous and current step.
+/// `mask_token`: the mask token id.
+/// `out`: output slice of length `z_prev_tokens.len()` (must equal `z_t_tokens.len()`).
+///
+/// Zero allocation — caller-provided output buffer.
+#[cfg(feature = "d2f_3sr_warm_start")]
+#[inline]
+pub fn classify_transitions(
+    z_prev_tokens: &[usize],
+    z_t_tokens: &[usize],
+    mask_token: usize,
+    out: &mut [TransitionType],
+) {
+    debug_assert_eq!(z_prev_tokens.len(), z_t_tokens.len());
+    debug_assert!(out.len() >= z_prev_tokens.len());
+    let n = z_prev_tokens.len().min(out.len());
+    for i in 0..n {
+        let prev_masked = z_prev_tokens[i] == mask_token;
+        let curr_masked = z_t_tokens[i] == mask_token;
+        out[i] = match (prev_masked, curr_masked) {
+            (false, false) => TransitionType::UnchangedVisible,
+            (true, true) => TransitionType::StillMasked,
+            _ => TransitionType::NewlyRevealed,
+        };
+    }
+}
+
+/// Compute per-position γ coefficients from transition types + visible fraction.
+///
+/// - UnchangedVisible → `cfg.gamma_visible`
+/// - StillMasked       → `cfg.gamma_masked_min + (cfg.gamma_masked_max − cfg.gamma_masked_min) * v_t`
+///                       where `v_t = visible_fraction_t` ∈ [0, 1]
+/// - NewlyRevealed     → `cfg.gamma_newly_revealed`
+///
+/// `visible_fraction_t` = fraction of positions visible (committed) in `z_t_tokens`.
+/// This is one scalar per step, not per-position — it modulates all still-masked γs together.
+///
+/// Zero allocation — caller-provided output buffer.
+#[cfg(feature = "d2f_3sr_warm_start")]
+#[inline]
+pub fn compute_gammas(
+    transitions: &[TransitionType],
+    visible_fraction_t: f32,
+    cfg: &ThreeStateReuseConfig,
+    out: &mut [f32],
+) {
+    debug_assert!(out.len() >= transitions.len());
+    let n = transitions.len().min(out.len());
+    let masked_span = cfg.gamma_masked_max - cfg.gamma_masked_min;
+    let v = visible_fraction_t.clamp(0.0, 1.0);
+    for i in 0..n {
+        out[i] = match transitions[i] {
+            TransitionType::UnchangedVisible => cfg.gamma_visible,
+            TransitionType::StillMasked => cfg.gamma_masked_min + masked_span * v,
+            TransitionType::NewlyRevealed => cfg.gamma_newly_revealed,
+        };
+    }
+}
+
+/// Apply per-position γ-weighted warm-start lerp:
+///   `h⁰_t[i] = γ[i] * h_star_next[i] + (1−γ[i]) * h_pre_t[i]`
+///
+/// `h_star_next`: previous step's solved FP solver state, flat [seq_len * n_embd].
+/// `h_pre_t`: current step's preprocessing-stack output, flat [seq_len * n_embd].
+/// `gammas`: per-position γ ∈ [0, 1], length `seq_len`.
+/// `out`: warm-start initial state, length `seq_len * n_embd`.
+///
+/// This is the composition primitive from CoFRe §1.2 — operates per-position on
+/// the embedding/state buffer. Zero allocation; caller-provided buffers.
+#[cfg(feature = "d2f_3sr_warm_start")]
+#[inline]
+pub fn warm_start_lerp(
+    h_star_next: &[f32],
+    h_pre_t: &[f32],
+    gammas: &[f32],
+    n_embd: usize,
+    out: &mut [f32],
+) {
+    let seq = gammas.len();
+    debug_assert!(h_star_next.len() >= seq * n_embd);
+    debug_assert!(h_pre_t.len() >= seq * n_embd);
+    debug_assert!(out.len() >= seq * n_embd);
+    for i in 0..seq {
+        let g = gammas[i].clamp(0.0, 1.0);
+        let inv_g = 1.0 - g;
+        let dst = &mut out[i * n_embd..(i + 1) * n_embd];
+        let star = &h_star_next[i * n_embd..(i + 1) * n_embd];
+        let pre = &h_pre_t[i * n_embd..(i + 1) * n_embd];
+        for k in 0..n_embd {
+            dst[k] = g * star[k] + inv_g * pre[k];
+        }
+    }
+}
+
+/// Compute normalized entropy weight α_i for a single position.
+///
+/// α_i = H(p_i) / log(V)
+/// - Uniform distribution → α = 1.0 (maximum uncertainty, full residual)
+/// - One-hot distribution → α = 0.0 (certain, no residual needed)
+#[cfg(feature = "rcd_residual")]
+#[inline]
+pub fn normalized_entropy(marginals: &[f32], log_vocab: f32) -> f32 {
+    if log_vocab <= 0.0 {
+        return 0.0;
+    }
+    let h = shannon_entropy(marginals);
+    // Clamp to [0, 1] for numerical stability
+    (h / log_vocab).clamp(0.0, 1.0)
+}
+
+/// Compute residual embedding Δ_i = Σ_j p_ij * E_j.
+///
+/// Weighted sum over the embedding codebook using marginal probabilities.
+/// Only meaningful for masked (uncertain) positions.
+///
+/// Writes result into `out` (must have length >= n_embd).
+/// Zero-allocation: caller provides output buffer.
+#[cfg(feature = "rcd_residual")]
+#[inline]
+pub fn compute_residual(
+    marginals: &[f32],
+    wte: &[f32], // Flat embedding matrix [vocab_size * n_embd]
+    n_embd: usize,
+    out: &mut [f32],
+) {
+    debug_assert!(out.len() >= n_embd);
+    out[..n_embd].fill(0.0f32);
+
+    // Hoist the bounds check: the valid j range is bounded by both
+    // `marginals.len()` and `wte.len() / n_embd`. Computing it once avoids
+    // the per-iteration `emb_end > wte.len()` branch in the hot loop.
+    let vocab = marginals.len().min(wte.len() / n_embd);
+    for j in 0..vocab {
+        let p_j = marginals[j];
+        if p_j < 1e-10 {
+            continue; // Skip near-zero probabilities
+        }
+        let emb_start = j * n_embd;
+        // Fused scale-accumulate: out[k] += p_j * wte[emb_start+k].
+        // SIMD-accelerated (NEON/AVX2) — replaces the scalar enumerate loop.
+        katgpt_core::simd::simd_fused_scale_acc(
+            &mut out[..n_embd],
+            &wte[emb_start..emb_start + n_embd],
+            p_j,
+            n_embd,
+        );
+    }
+}
+
+/// Interpolate between mask embedding and residual embedding.
+///
+/// ẽ_i = (1 - α_i) * E_mask + α_i * Δ_i
+///
+/// - α_i = 0.0 → pure mask embedding (certain, no context needed)
+/// - α_i = 1.0 → pure residual embedding (maximally uncertain)
+#[cfg(feature = "rcd_residual")]
+#[inline]
+pub fn interpolate_residual(
+    mask_embedding: &[f32], // E_mask [n_embd]
+    residual: &[f32],       // Δ_i [n_embd]
+    alpha: f32,             // Normalized entropy weight [0, 1]
+    out: &mut [f32],        // Output [n_embd]
+) {
+    let n = out.len().min(mask_embedding.len()).min(residual.len());
+    let inv_alpha = 1.0 - alpha;
+    for i in 0..n {
+        out[i] = inv_alpha * mask_embedding[i] + alpha * residual[i];
+    }
+}
+
+/// Compute entropy weights for all positions in a batch.
+///
+/// Returns a Vec of α_i values, one per position.
+/// Only computes for masked positions; non-masked positions get α = 0.0.
+#[cfg(feature = "rcd_residual")]
+pub fn compute_entropy_weights(
+    logits_flat: &[f32], // [seq_len * vocab_size]
+    tokens: &[usize],
+    mask: usize,
+    vocab_size: usize,
+    log_vocab: f32,
+    softmax_scratch: &mut [f32], // [vocab_size] scratch
+) -> Vec<f32> {
+    let seq_len = tokens.len();
+    let mut alphas = vec![0.0f32; seq_len];
+
+    for p in 0..seq_len {
+        if tokens[p] != mask {
+            continue; // Already committed — no residual needed
+        }
+
+        let logits_p = &logits_flat[p * vocab_size..(p + 1) * vocab_size];
+
+        // Softmax into scratch using SIMD primitives (replaces 3 scalar passes
+        // over the vocab-sized slice with vectorized NEON/AVX2 kernels).
+        let max_l = katgpt_core::simd::simd_max_f32(logits_p);
+        // Copy logits into scratch, subtract max, exp, and sum in fused passes.
+        softmax_scratch[..vocab_size].copy_from_slice(logits_p);
+        katgpt_core::simd::simd_add_scalar_inplace(&mut softmax_scratch[..vocab_size], -max_l);
+        let sum_exp = katgpt_core::simd::simd_exp_sum_inplace(&mut softmax_scratch[..vocab_size]);
+        if sum_exp > 0.0 {
+            katgpt_core::simd::simd_scale_inplace(
+                &mut softmax_scratch[..vocab_size],
+                1.0 / sum_exp,
+            );
+        }
+
+        alphas[p] = normalized_entropy(softmax_scratch, log_vocab);
+    }
+
+    alphas
+}
+
+// ---------------------------------------------------------------------------
+// Tier-Adaptive Routing (Plan 258 Phase 2)
+// ---------------------------------------------------------------------------
+
+/// Residual computation mode, selected by inference tier.
+#[cfg(feature = "rcd_residual")]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[repr(u8)]
+pub enum ResidualMode {
+    /// Skip residual computation entirely — zero overhead.
+    /// Used for Plasma tier (game AI path, frame-budget critical).
+    Skip = 0,
+    /// Confidence-only residual: α_i = max_prob (single register).
+    /// Cheap approximation — avoids full entropy computation.
+    ConfidenceOnly = 1,
+    /// Full RCD: normalized entropy + codebook weighted sum.
+    /// Best quality, moderate compute cost.
+    #[default]
+    Full = 2,
+    /// Full RCD + reference model warm start.
+    /// Maximum quality, highest compute cost.
+    FullWithWarmStart = 3,
+}
+
+/// Map compute tier to residual mode.
+///
+/// - Plasma → Skip (game AI, frame-budget critical)
+/// - CpuOnly → ConfidenceOnly (low resources)
+/// - CpuGpu → Full (balanced)
+/// - CpuGpuAne → FullWithWarmStart (maximum resources)
+#[cfg(feature = "rcd_residual")]
+#[inline]
+pub fn tier_to_residual_mode(tier: crate::trigger_gate::ComputeTier) -> ResidualMode {
+    match tier {
+        crate::trigger_gate::ComputeTier::CpuOnly => ResidualMode::ConfidenceOnly,
+        crate::trigger_gate::ComputeTier::CpuGpu => ResidualMode::Full,
+        crate::trigger_gate::ComputeTier::CpuGpuAne => ResidualMode::FullWithWarmStart,
+    }
+}
+
+/// Quick confidence-based alpha: 1.0 - max_prob.
+/// Cheaper than full entropy computation (avoids softmax + log).
+///
+/// Uses `simd_max_f32` for the vocab-sized max scan — single NEON/AVX2
+/// pass instead of a scalar `fold(f32::max)` reduction on the hot Plasma path.
+#[cfg(feature = "rcd_residual")]
+#[inline]
+pub fn confidence_alpha(marginals: &[f32]) -> f32 {
+    let max_prob = katgpt_core::simd::simd_max_f32(marginals);
+    (1.0 - max_prob).clamp(0.0, 1.0)
 }
 
 #[cfg(test)]
@@ -1019,8 +1469,8 @@ mod tests {
 
         // --- With CriticalIntervalGate: adaptive switching ---
         let mut solver_gated = SolverKind::DpmSolver2M;
-        let transitions_gated = build_dd_tree_adaptive(&depths, 0.0, &mut solver_gated);
-        // With h_critical = 0, everything is critical
+        let transitions_gated = build_dd_tree_adaptive(&depths, 0.001, &mut solver_gated);
+        // With h_critical = 0.001 (near-zero), everything is critical
         assert!(transitions_gated.iter().all(|t| t.critical));
 
         // --- With realistic threshold ---
@@ -1158,5 +1608,299 @@ mod tests {
             bestq_time,
             mbr_time.as_nanos() as f64 / bestq_time.as_nanos().max(1) as f64
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // Plan 258: RCD Tests
+    // -----------------------------------------------------------------------
+
+    #[cfg(feature = "rcd_residual")]
+    #[test]
+    fn test_rcd_normalized_entropy_uniform() {
+        // Uniform distribution → α = 1.0
+        let uniform = vec![1.0 / 100.0; 100]; // all equal probabilities
+        let log_v = (100.0f32).ln();
+        let alpha = super::normalized_entropy(&uniform, log_v);
+        assert!((alpha - 1.0).abs() < 0.01, "uniform → α ≈ 1.0, got {alpha}");
+    }
+
+    #[cfg(feature = "rcd_residual")]
+    #[test]
+    fn test_rcd_normalized_entropy_onehot() {
+        // One-hot distribution → α = 0.0
+        let mut onehot = vec![0.0f32; 100];
+        onehot[42] = 1.0;
+        let log_v = (100.0f32).ln();
+        let alpha = super::normalized_entropy(&onehot, log_v);
+        assert!(alpha.abs() < 0.01, "one-hot → α ≈ 0.0, got {alpha}");
+    }
+
+    #[cfg(feature = "rcd_residual")]
+    #[test]
+    fn test_rcd_normalized_entropy_known() {
+        // Two equal tokens: p = [0.5, 0.5, 0, ..., 0]
+        // H = -2 * 0.5 * ln(0.5) = ln(2)
+        // α = ln(2) / ln(100) ≈ 0.301
+        let mut dist = vec![0.0f32; 100];
+        dist[0] = 0.5;
+        dist[1] = 0.5;
+        let log_v = (100.0f32).ln();
+        let alpha = super::normalized_entropy(&dist, log_v);
+        let expected = 2.0f32.ln() / 100.0f32.ln();
+        assert!(
+            (alpha - expected).abs() < 0.01,
+            "known dist → α ≈ {expected}, got {alpha}"
+        );
+    }
+
+    #[cfg(feature = "rcd_residual")]
+    #[test]
+    fn test_rcd_compute_residual_zero_when_all_mask() {
+        // All probability on mask token → Δ should equal mask embedding
+        let n_embd = 4;
+        let vocab = 3;
+        let mut wte = vec![0.0f32; vocab * n_embd];
+        // token 0 embedding: [1, 0, 0, 0]
+        wte[0..4].copy_from_slice(&[1.0, 0.0, 0.0, 0.0]);
+        // token 1 embedding: [0, 1, 0, 0]
+        wte[4..8].copy_from_slice(&[0.0, 1.0, 0.0, 0.0]);
+        // token 2 (mask) embedding: [0, 0, 1, 0]
+        wte[8..12].copy_from_slice(&[0.0, 0.0, 1.0, 0.0]);
+
+        let mut marginals = vec![0.0f32; vocab];
+        marginals[2] = 1.0; // all probability on mask token
+
+        let mut out = vec![0.0f32; n_embd];
+        super::compute_residual(&marginals, &wte, n_embd, &mut out);
+
+        // Should equal mask embedding
+        assert!((out[0] - 0.0).abs() < 1e-6);
+        assert!((out[1] - 0.0).abs() < 1e-6);
+        assert!((out[2] - 1.0).abs() < 1e-6);
+        assert!((out[3] - 0.0).abs() < 1e-6);
+    }
+
+    #[cfg(feature = "rcd_residual")]
+    #[test]
+    fn test_rcd_compute_residual_weighted_sum() {
+        let n_embd = 4;
+        let vocab = 3;
+        let mut wte = vec![0.0f32; vocab * n_embd];
+        wte[0..4].copy_from_slice(&[1.0, 0.0, 0.0, 0.0]);
+        wte[4..8].copy_from_slice(&[0.0, 1.0, 0.0, 0.0]);
+        wte[8..12].copy_from_slice(&[0.0, 0.0, 1.0, 0.0]);
+
+        // 50/50 between token 0 and token 1
+        let marginals = vec![0.5f32, 0.5, 0.0];
+        let mut out = vec![0.0f32; n_embd];
+        super::compute_residual(&marginals, &wte, n_embd, &mut out);
+
+        // Should be [0.5, 0.5, 0.0, 0.0]
+        assert!((out[0] - 0.5).abs() < 1e-6, "got {}", out[0]);
+        assert!((out[1] - 0.5).abs() < 1e-6, "got {}", out[1]);
+        assert!((out[2] - 0.0).abs() < 1e-6);
+        assert!((out[3] - 0.0).abs() < 1e-6);
+    }
+
+    #[cfg(feature = "rcd_residual")]
+    #[test]
+    fn test_rcd_interpolate_residual() {
+        let mask_emb = [0.0, 0.0, 1.0, 0.0];
+        let residual = [1.0, 0.0, 0.0, 0.0];
+        let mut out = [0.0f32; 4];
+
+        // α = 0.5 → 50/50 blend
+        super::interpolate_residual(&mask_emb, &residual, 0.5, &mut out);
+        assert!((out[0] - 0.5).abs() < 1e-6);
+        assert!((out[1] - 0.0).abs() < 1e-6);
+        assert!((out[2] - 0.5).abs() < 1e-6);
+        assert!((out[3] - 0.0).abs() < 1e-6);
+
+        // α = 0.0 → pure mask
+        super::interpolate_residual(&mask_emb, &residual, 0.0, &mut out);
+        assert!((out[0] - 0.0).abs() < 1e-6);
+        assert!((out[2] - 1.0).abs() < 1e-6);
+
+        // α = 1.0 → pure residual
+        super::interpolate_residual(&mask_emb, &residual, 1.0, &mut out);
+        assert!((out[0] - 1.0).abs() < 1e-6);
+        assert!((out[2] - 0.0).abs() < 1e-6);
+    }
+
+    #[cfg(feature = "rcd_residual")]
+    #[test]
+    fn test_rcd_config_disabled() {
+        let config = super::RcdConfig::disabled();
+        assert!(!config.enabled);
+        assert!(config.residual_scratch.is_empty());
+    }
+
+    #[cfg(feature = "rcd_residual")]
+    #[test]
+    fn test_rcd_config_new() {
+        let config = super::RcdConfig::new(1000, 64);
+        assert!(config.enabled);
+        assert!((config.log_vocab - 1000.0f32.ln()).abs() < 1e-6);
+        assert_eq!(config.residual_scratch.len(), 64);
+    }
+
+    #[cfg(feature = "rcd_residual")]
+    #[test]
+    fn test_residual_mode_default() {
+        assert_eq!(super::ResidualMode::default(), super::ResidualMode::Full);
+    }
+
+    #[cfg(feature = "rcd_residual")]
+    #[test]
+    fn test_confidence_alpha() {
+        // One-hot → confidence_alpha = 0.0
+        let mut onehot = vec![0.0f32; 10];
+        onehot[5] = 1.0;
+        let alpha = super::confidence_alpha(&onehot);
+        assert!(alpha.abs() < 1e-6, "one-hot → 0.0, got {alpha}");
+
+        // Uniform → confidence_alpha ≈ 1 - 1/10 = 0.9
+        let uniform = vec![0.1f32; 10];
+        let alpha = super::confidence_alpha(&uniform);
+        assert!((alpha - 0.9).abs() < 1e-6, "uniform → 0.9, got {alpha}");
+    }
+
+    #[cfg(feature = "rcd_residual")]
+    #[test]
+    fn test_tier_to_residual_mode() {
+        use crate::trigger_gate::ComputeTier;
+        assert_eq!(
+            super::tier_to_residual_mode(ComputeTier::CpuOnly),
+            super::ResidualMode::ConfidenceOnly
+        );
+        assert_eq!(
+            super::tier_to_residual_mode(ComputeTier::CpuGpu),
+            super::ResidualMode::Full
+        );
+        assert_eq!(
+            super::tier_to_residual_mode(ComputeTier::CpuGpuAne),
+            super::ResidualMode::FullWithWarmStart
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Three-State Reuse (3SR) tests (Plan 291, feature: d2f_3sr_warm_start)
+    // -----------------------------------------------------------------------
+
+    #[cfg(feature = "d2f_3sr_warm_start")]
+    #[test]
+    fn test_3sr_config_default() {
+        let cfg = super::ThreeStateReuseConfig::default();
+        assert!((cfg.gamma_visible - 1.0).abs() < 1e-6);
+        assert!((cfg.gamma_masked_min - 0.75).abs() < 1e-6);
+        assert!((cfg.gamma_masked_max - 0.90).abs() < 1e-6);
+        assert!((cfg.gamma_newly_revealed - 0.2).abs() < 1e-6);
+        assert!(
+            cfg.enabled,
+            "default must be enabled (zero-cost gate is runtime)"
+        );
+    }
+
+    #[cfg(feature = "d2f_3sr_warm_start")]
+    #[test]
+    fn test_3sr_config_disabled() {
+        let cfg = super::ThreeStateReuseConfig::disabled();
+        assert!(!cfg.enabled, "disabled() must have enabled=false");
+        // γ values still hold their paper defaults so they're ready if re-enabled.
+        assert!((cfg.gamma_visible - 1.0).abs() < 1e-6);
+        assert!((cfg.gamma_masked_min - 0.75).abs() < 1e-6);
+    }
+
+    #[cfg(feature = "d2f_3sr_warm_start")]
+    #[test]
+    fn test_3sr_classify_transitions() {
+        let mask = 99;
+        // pos 0: visible in both → UnchangedVisible
+        // pos 1: masked in both → StillMasked
+        // pos 2: was mask, now visible → NewlyRevealed
+        // pos 3: was visible, now mask → NewlyRevealed
+        let z_prev = vec![5, mask, mask, 7];
+        let z_t = vec![5, mask, 3, mask];
+        let mut out = vec![super::TransitionType::UnchangedVisible; 4];
+        super::classify_transitions(&z_prev, &z_t, mask, &mut out);
+        assert_eq!(out[0], super::TransitionType::UnchangedVisible);
+        assert_eq!(out[1], super::TransitionType::StillMasked);
+        assert_eq!(out[2], super::TransitionType::NewlyRevealed);
+        assert_eq!(out[3], super::TransitionType::NewlyRevealed);
+    }
+
+    #[cfg(feature = "d2f_3sr_warm_start")]
+    #[test]
+    fn test_3sr_compute_gammas() {
+        let cfg = super::ThreeStateReuseConfig::default();
+        let transitions = vec![
+            super::TransitionType::UnchangedVisible,
+            super::TransitionType::StillMasked,
+            super::TransitionType::NewlyRevealed,
+        ];
+        let mut gammas = vec![0.0f32; 3];
+
+        // v_t = 0.5 → StillMasked γ should be midpoint of [0.75, 0.90] = 0.825.
+        super::compute_gammas(&transitions, 0.5, &cfg, &mut gammas);
+        assert!((gammas[0] - 1.0).abs() < 1e-6, "visible → gamma_visible");
+        assert!(
+            (gammas[1] - 0.825).abs() < 1e-6,
+            "masked(v=0.5) → 0.825, got {}",
+            gammas[1]
+        );
+        assert!(
+            (gammas[2] - 0.2).abs() < 1e-6,
+            "newly-revealed → gamma_newly_revealed"
+        );
+
+        // v_t = 0 → StillMasked γ should clamp to gamma_masked_min (0.75).
+        super::compute_gammas(&transitions, 0.0, &cfg, &mut gammas);
+        assert!(
+            (gammas[1] - 0.75).abs() < 1e-6,
+            "masked(v=0) → 0.75, got {}",
+            gammas[1]
+        );
+
+        // v_t = 1 → StillMasked γ should clamp to gamma_masked_max (0.90).
+        super::compute_gammas(&transitions, 1.0, &cfg, &mut gammas);
+        assert!(
+            (gammas[1] - 0.90).abs() < 1e-6,
+            "masked(v=1) → 0.90, got {}",
+            gammas[1]
+        );
+    }
+
+    #[cfg(feature = "d2f_3sr_warm_start")]
+    #[test]
+    fn test_3sr_warm_start_lerp() {
+        // 2 positions, n_embd = 2.
+        let h_star_next = vec![10.0, 20.0, 30.0, 40.0]; // pos 0 = [10,20], pos 1 = [30,40]
+        let h_pre_t = vec![0.0, 0.0, 0.0, 0.0];
+        let mut out = vec![0.0f32; 4];
+
+        // γ = 1.0 → pure h_star_next.
+        super::warm_start_lerp(&h_star_next, &h_pre_t, &[1.0, 1.0], 2, &mut out);
+        assert!((out[0] - 10.0).abs() < 1e-6);
+        assert!((out[1] - 20.0).abs() < 1e-6);
+        assert!((out[2] - 30.0).abs() < 1e-6);
+        assert!((out[3] - 40.0).abs() < 1e-6);
+
+        // γ = 0.0 → pure h_pre_t.
+        super::warm_start_lerp(&h_star_next, &h_pre_t, &[0.0, 0.0], 2, &mut out);
+        assert!(out.iter().all(|&v| v.abs() < 1e-6));
+
+        // γ = 0.5 → midpoint.
+        super::warm_start_lerp(&h_star_next, &h_pre_t, &[0.5, 0.5], 2, &mut out);
+        assert!((out[0] - 5.0).abs() < 1e-6);
+        assert!((out[1] - 10.0).abs() < 1e-6);
+        assert!((out[2] - 15.0).abs() < 1e-6);
+        assert!((out[3] - 20.0).abs() < 1e-6);
+
+        // Per-position γ mixing: pos 0 γ=1.0, pos 1 γ=0.0.
+        super::warm_start_lerp(&h_star_next, &h_pre_t, &[1.0, 0.0], 2, &mut out);
+        assert!((out[0] - 10.0).abs() < 1e-6, "pos 0 star");
+        assert!((out[1] - 20.0).abs() < 1e-6, "pos 0 star");
+        assert!((out[2] - 0.0).abs() < 1e-6, "pos 1 pre");
+        assert!((out[3] - 0.0).abs() < 1e-6, "pos 1 pre");
     }
 }

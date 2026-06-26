@@ -125,9 +125,24 @@ impl PeiraDistiller {
         &self.loss_history
     }
 
-    /// Get the current predictor matrices (P*, Q*).
-    pub fn predictor(&self) -> (Vec<f64>, Vec<f64>) {
-        self.covariance.predictor()
+    /// Get the current predictor matrices (P*, Q*) by value (allocates).
+    ///
+    /// Convenience wrapper around [`Self::predictor_with_scratch`] for callers
+    /// that need owned `Vec<f64>` and call this rarely (e.g. one-shot reads,
+    /// examples). Hot loops should use [`Self::predictor_with_scratch`] to
+    /// avoid the 2× `to_vec()` allocation.
+    pub fn predictor(&mut self) -> (Vec<f64>, Vec<f64>) {
+        let (p, q) = self.predictor_with_scratch();
+        (p.to_vec(), q.to_vec())
+    }
+
+    /// Get the current predictor matrices (P*, Q*) without allocating.
+    ///
+    /// Reuses the pre-allocated internal buffers of `PeiraCovariance`.
+    /// The returned slices are valid until the next `&mut self` call on this
+    /// distiller (e.g. `step()`, `reset()`, or another `predictor_with_scratch()`).
+    pub fn predictor_with_scratch(&mut self) -> (&[f64], &[f64]) {
+        self.covariance.predictor_with_scratch()
     }
 
     /// Get the dimension k.

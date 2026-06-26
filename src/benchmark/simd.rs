@@ -20,7 +20,8 @@ pub fn bench_simd_perf() -> Vec<BenchResult> {
     println!("║          SIMD / Perf Benchmarks (Feature: SIMD)             ║");
     println!("╚══════════════════════════════════════════════════════════════╝\n");
 
-    let mut results = Vec::new();
+    // 4 sub-benchmarks × ~2 results each.
+    let mut results = Vec::with_capacity(16);
 
     bench_matmul(&mut results);
     bench_plasma_path(&mut results);

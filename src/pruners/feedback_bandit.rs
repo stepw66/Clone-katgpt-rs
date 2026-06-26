@@ -212,7 +212,7 @@ pub struct FeedbackBandit {
     /// Inner SR²AM configurator bandit (always 4 arms).
     inner: ConfiguratorBandit,
     /// Per-context stats for feedback arms (arms 4-5).
-    feedback_stats: HashMap<(usize, usize, usize), FeedbackContextStats>,
+    feedback_stats: HashMap<(usize, u8, u8), FeedbackContextStats>,
     /// FeedbackBandit configuration.
     config: FeedbackBanditConfig,
     /// Trajectory summary for stall detection.
@@ -496,7 +496,7 @@ mod tests {
         // First: give base arms low rewards to create stall condition,
         // then feedback arms become eligible.
         let mut seen = [false; FB_NUM_ARMS];
-        for i in 0..300 {
+        for _ in 0..300 {
             let decision = bandit.select(ctx);
             let idx = match decision {
                 PlanningDecision::PlanNew => 0,

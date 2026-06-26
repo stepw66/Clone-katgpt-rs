@@ -200,7 +200,7 @@ pub fn bench_hla_quality(_config: &Config) -> BenchResult {
     // Generate logits with flat SDPA
     let mut ctx = ForwardContext::new(&bench_config);
     let mut cache = MultiLayerKVCache::new(&bench_config);
-    let mut sdpa_logits: Vec<Vec<f32>> = Vec::new();
+    let mut sdpa_logits: Vec<Vec<f32>> = Vec::with_capacity(n_tokens);
     for pos in 0..n_tokens {
         let logits = forward(&mut ctx, &weights, &mut cache, 0, pos, &bench_config);
         sdpa_logits.push(logits.to_vec());
@@ -209,7 +209,7 @@ pub fn bench_hla_quality(_config: &Config) -> BenchResult {
     // Generate logits with HLA (symmetric)
     let mut ctx_hla = ForwardContext::new(&bench_config);
     let mut cache_hla = MultiLayerHlaCache::new(&bench_config);
-    let mut hla_logits: Vec<Vec<f32>> = Vec::new();
+    let mut hla_logits: Vec<Vec<f32>> = Vec::with_capacity(n_tokens);
     for pos in 0..n_tokens {
         let logits = forward_hla(
             &mut ctx_hla,
@@ -225,7 +225,7 @@ pub fn bench_hla_quality(_config: &Config) -> BenchResult {
     // Generate logits with AHLA (asymmetric)
     let mut ctx_ahla = ForwardContext::new(&bench_config);
     let mut cache_ahla = MultiLayerAhlaCache::new(&bench_config);
-    let mut ahla_logits: Vec<Vec<f32>> = Vec::new();
+    let mut ahla_logits: Vec<Vec<f32>> = Vec::with_capacity(n_tokens);
     for pos in 0..n_tokens {
         let logits = forward_ahla(
             &mut ctx_ahla,
@@ -324,13 +324,14 @@ pub fn bench_simd(_config: &Config) -> BenchResult {
         SimdLevel::Scalar => "Scalar",
         SimdLevel::Neon => "NEON",
         SimdLevel::Avx2 => "AVX2",
+        SimdLevel::WasmSimd128 => "WasmSimd128",
     };
 
     let iters = 10_000;
 
     // ── Matmul benchmarks ──
     let matmul_configs: [(&str, usize); 2] = [("16×16", 16), ("32×32", 32)];
-    let mut matmul_results: Vec<(&str, f64)> = Vec::new();
+    let mut matmul_results: Vec<(&str, f64)> = Vec::with_capacity(matmul_configs.len());
 
     for &(label, dim) in &matmul_configs {
         let weight = vec![0.5f32; dim * dim];
@@ -353,8 +354,8 @@ pub fn bench_simd(_config: &Config) -> BenchResult {
 
     // ── HLA kernel benchmarks ──
     let hd_configs: [usize; 2] = [4, 8];
-    let mut hla_update_tps: Vec<(usize, f64)> = Vec::new();
-    let mut ahla_step_tps: Vec<(usize, f64)> = Vec::new();
+    let mut hla_update_tps: Vec<(usize, f64)> = Vec::with_capacity(hd_configs.len());
+    let mut ahla_step_tps: Vec<(usize, f64)> = Vec::with_capacity(hd_configs.len());
 
     for &hd in &hd_configs {
         // HLA state update

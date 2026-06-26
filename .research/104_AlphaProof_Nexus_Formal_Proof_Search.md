@@ -3,7 +3,7 @@
 **Paper:** [arXiv:2605.22763](https://arxiv.org/abs/2605.22763) — Advancing Mathematics Research with AI-Driven Formal Proof Search
 **Authors:** George Tsoukalas, Anton Kovsharov, Sergey Shirobokov, et al. (Google DeepMind, 2026)
 **Date:** 2026-05-25
-**Verdict:** 🟡 **Conditional Adopt — methodology paper validating our modelless-first + bandit-driven search architecture. Key extractable primitives: Plackett-Luce Elo ranking for partial solutions, P-UCB evolutionary sampling, global goal caching. Proof sketch evolution → Percepta compiler stack (super-GOAT, feature-gated).**
+**Verdict:** 🟡 **Conditional Adopt — methodology paper validating our modelless-first + bandit-driven search architecture. Key extractable primitives: Plackett-Luce Elo ranking for partial solutions, P-UCB evolutionary sampling, global goal caching. Proof sketch evolution → compiler stack (super-GOAT, feature-gated, details private).**
 
 ---
 
@@ -72,7 +72,7 @@ Constrained mutation system:
 - `EVOLVE-VALUE-START/END`: agent can change parameter values
 - Everything else is immutable (theorem statement, imports)
 
-**Distillation for us:** Maps to our Percepta compiler stack's proof sketch system. The constrained mutation pattern prevents hallucinated modifications to problem statements — our `ConstraintPruner` trait serves a similar validation role.
+**Distillation for us:** Maps to our compiler stack's proof sketch system. The constrained mutation pattern prevents hallucinated modifications to problem statements — our `ConstraintPruner` trait serves a similar validation role.
 
 ### 6. Rater Agent Prompt Design
 
@@ -139,7 +139,7 @@ The rater evaluates sketches on three criteria (descending priority):
 
 These are infrastructure improvements, not new features. They enhance what we already have.
 
-**Super-GOAT potential:** The proof sketch evolution pattern (EVOLVE-BLOCK + population database + Elo) applied to our Percepta compiler stack could be a genuine differentiator. If we can evolve proof sketches for our transformer-VM programs the same way Nexus evolves Lean proofs, that's a novel capability. **Feature-gate this** — it's a selling point.
+**Super-GOAT potential:** The proof sketch evolution pattern (EVOLVE-BLOCK + population database + Elo) applied to our compiler stack could be a genuine differentiator. **Feature-gate this** — it's a selling point. Details → riir-ai (private).
 
 **No game-specific distillation needed.** This is pure infrastructure that lives in katgpt-rs. The game domains benefit indirectly through better search.
 

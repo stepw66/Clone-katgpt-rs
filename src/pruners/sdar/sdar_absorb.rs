@@ -44,6 +44,7 @@
 //!
 //! **Source:** [SDAR: Self-Distilled Agentic RL](https://arxiv.org/abs/2605.15155)
 
+#[cfg(debug_assertions)]
 use std::cmp::Ordering;
 
 use crate::pruners::absorb_compress::{AbsorbCompress, AbsorbCompressLayer};
@@ -75,6 +76,9 @@ pub struct SdarAbsorbConfig {
     /// Set to `None` for non-deterministic behavior.
     pub seed: Option<u64>,
     /// Whether to track promotion statistics per arm (default: false).
+    ///
+    /// Only available in debug builds — gated behind `#[cfg(debug_assertions)]`.
+    #[cfg(debug_assertions)]
     pub track_promotion_stats: bool,
 }
 
@@ -84,6 +88,7 @@ impl Default for SdarAbsorbConfig {
             beta: SDAR_BETA,
             min_benefit_ratio_floor: 0.5,
             seed: Some(42),
+            #[cfg(debug_assertions)]
             track_promotion_stats: false,
         }
     }
@@ -98,13 +103,14 @@ impl SdarAbsorbConfig {
         }
     }
 
-    /// Set minimum benefit ratio floor.
+    /// Create config with custom floor.
     pub fn with_floor(mut self, floor: f32) -> Self {
         self.min_benefit_ratio_floor = floor;
         self
     }
 
-    /// Enable promotion statistics tracking.
+    /// Enable promotion statistics tracking (debug builds only).
+    #[cfg(debug_assertions)]
     pub fn with_promotion_stats(mut self) -> Self {
         self.track_promotion_stats = true;
         self
@@ -133,9 +139,14 @@ impl SdarAbsorbConfig {
     }
 }
 
-// ── PromotionStats ──────────────────────────────────────────────
+// ── PromotionStats (debug builds only) ──────────────────────────
 
 /// Per-arm promotion statistics for debugging.
+///
+/// Gated behind `#[cfg(debug_assertions)]` — eliminated in release builds
+/// to remove the per-arm `Vec<PromotionStats>` allocation and the stats
+/// tracking branch in [`SdarGatedAbsorbCompress::observe`].
+#[cfg(debug_assertions)]
 #[derive(Clone, Debug, Default)]
 pub struct PromotionStats {
     /// Number of promotion attempts (compress calls that included this arm).
@@ -152,6 +163,7 @@ pub struct PromotionStats {
     pub last_gate_probability: f32,
 }
 
+#[cfg(debug_assertions)]
 impl PromotionStats {
     /// Mean gate probability across all promotion attempts.
     pub fn mean_gate_probability(&self) -> f32 {
@@ -242,7 +254,8 @@ pub struct SdarGatedAbsorbCompress<P: ScreeningPruner> {
     arm_states: Vec<ArmAbsorbState>,
     /// Configuration thresholds.
     config: SdarAbsorbConfig,
-    /// Per-arm promotion statistics (only when tracking enabled).
+    /// Per-arm promotion statistics (only in debug builds).
+    #[cfg(debug_assertions)]
     promotion_stats: Vec<PromotionStats>,
     /// PRNG state for stochastic promotion decisions.
     rng_state: u64,
@@ -254,6 +267,7 @@ impl<P: ScreeningPruner> SdarGatedAbsorbCompress<P> {
     /// Wraps an existing `AbsorbCompressLayer` with sigmoid soft gating.
     pub fn new(inner: AbsorbCompressLayer<P>, num_arms: usize, config: SdarAbsorbConfig) -> Self {
         let rng_state = config.seed.unwrap_or(0);
+        #[cfg(debug_assertions)]
         let promotion_stats = if config.track_promotion_stats {
             (0..num_arms).map(|_| PromotionStats::default()).collect()
         } else {
@@ -264,6 +278,7 @@ impl<P: ScreeningPruner> SdarGatedAbsorbCompress<P> {
             inner,
             arm_states: (0..num_arms).map(|_| ArmAbsorbState::new()).collect(),
             config,
+            #[cfg(debug_assertions)]
             promotion_stats,
             rng_state,
         }
@@ -293,25 +308,27 @@ impl<P: ScreeningPruner> SdarGatedAbsorbCompress<P> {
 
         // Soft gate: stochastic promotion decision
         let draw = self.next_random();
-        let gate_probability = sdar_benefit_gate(benefit_ratio, self.config.beta);
 
         let promoted = sdar_should_promote(benefit_ratio, self.config.beta, draw);
         if promoted {
             self.inner.absorb(arm, reward);
         }
 
-        // Track statistics if enabled
+        // Track statistics if enabled (debug builds only)
+        #[cfg(debug_assertions)]
         if self.config.track_promotion_stats
-            && let Some(stats) = self.promotion_stats.get_mut(arm) {
-                stats.promotion_attempts += 1;
-                if promoted {
-                    stats.promotions += 1;
-                }
-                stats.benefit_ratio_sum += benefit_ratio;
-                stats.gate_probability_sum += gate_probability;
-                stats.last_benefit_ratio = benefit_ratio;
-                stats.last_gate_probability = gate_probability;
+            && let Some(stats) = self.promotion_stats.get_mut(arm)
+        {
+            let gate_probability = sdar_benefit_gate(benefit_ratio, self.config.beta);
+            stats.promotion_attempts += 1;
+            if promoted {
+                stats.promotions += 1;
             }
+            stats.benefit_ratio_sum += benefit_ratio;
+            stats.gate_probability_sum += gate_probability;
+            stats.last_benefit_ratio = benefit_ratio;
+            stats.last_gate_probability = gate_probability;
+        }
     }
 
     /// Feed an observation with benefit ratio computed from reward vs Q-value.
@@ -359,9 +376,10 @@ impl<P: ScreeningPruner> SdarGatedAbsorbCompress<P> {
             .unwrap_or(0)
     }
 
-    /// Get promotion statistics for a specific arm.
+    /// Get promotion statistics for a specific arm (debug builds only).
     ///
     /// Returns `None` if tracking is disabled or arm is out of bounds.
+    #[cfg(debug_assertions)]
     pub fn promotion_stats(&self, arm: usize) -> Option<&PromotionStats> {
         self.promotion_stats.get(arm)
     }
@@ -378,6 +396,9 @@ impl<P: ScreeningPruner> SdarGatedAbsorbCompress<P> {
     ///
     /// Returns arms sorted by benefit ratio, descending.
     /// Only arms with at least one observation are included.
+    ///
+    /// Diagnostic-only: gated behind `#[cfg(debug_assertions)]`.
+    #[cfg(debug_assertions)]
     pub fn candidate_arms(&self, top_k: usize) -> Vec<usize> {
         let mut indexed: Vec<(usize, f32)> = self
             .arm_states
@@ -514,8 +535,6 @@ mod tests {
 
     #[test]
     fn test_high_benefit_ratio_promotes() {
-        let mut layer = make_layer_with_stats(3);
-
         // High benefit ratio (3.0) → gate ≈ 0.999+ → very likely promoted
         let mut promotions = 0;
         for _ in 0..100 {
@@ -568,8 +587,6 @@ mod tests {
 
     #[test]
     fn test_negative_benefit_ratio_blocks() {
-        let mut layer = make_layer_with_stats(3);
-
         // Negative benefit ratio (0.0) → gate ≈ 0.007 → almost never promoted
         let mut promotions = 0;
         for _ in 0..100 {
@@ -630,8 +647,6 @@ mod tests {
     #[test]
     fn test_floor_blocks_low_benefit_ratio() {
         let config = SdarAbsorbConfig::new(SDAR_BETA).with_floor(2.0);
-        let mut layer = make_layer_with_stats(3);
-
         // Override config
         let inner = AbsorbCompressLayer::new(NoScreeningPruner, 3, CompressConfig::default());
         let mut layer = SdarGatedAbsorbCompress::new(inner, 3, config);

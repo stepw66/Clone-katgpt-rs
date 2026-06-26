@@ -1,6 +1,6 @@
 # katgpt-rs: Model Adaptation Techniques
 
-Fifteen production techniques that adapt the transformer to different tasks and domains **without modifying base weights**. All are feature-gated, zero-copy, and backward-compatible.
+Seventeen production techniques that adapt the transformer to different tasks and domains **without modifying base weights**. All are feature-gated, zero-copy, and backward-compatible.
 
 | # | Technique | Plan | Feature Flag | What It Does |
 |---|-----------|------|-------------|--------------|
@@ -19,6 +19,8 @@ Fifteen production techniques that adapt the transformer to different tasks and 
 | 13 | Hydra-Aware Adaptive Layer Budget | 165 | `hydra_budget` | Emergent self-repair layer skipping via logit lens |
 | 14 | FlashAR Consensus Tri-Mode | 166 | `flashar_consensus` | Dual-path ternary thermal routing for consensus decode |
 | 15 | Budget Adaptation | 167 | `budget_adaptation` | Compression-adaptive decode budget scaling |
+| 16 | CGSP — Curiosity-Guided Self-Play | 274 | `cgsp` | Modelless Solver/Conjecturer/Guide triad — updates direction-vector priorities (NOT weights) via Hint-δ bandit on `(1 − solve_rate) · guide_score`; entropy-collapse detector re-injects exploration when priority mass degenerates. Opt-in (see `.benchmarks/274_cgsp_goat.md`); value is collapse recovery + degenerate-batch gating, not target-seeking. |
+| 17 | Dual-Pool Reachable Memory Router | 282 | `cgsp_dual_pool` | DecentMem distillation — splits CGSP's bandit into E-pool (consolidated successes, local-walk) + X-pool (fresh candidates, teleportation). Sigmoid routing guarantees proactive non-trapping (Theorem 1) and O(log T) regret (Theorem 2). Phase 4 adds backward-compatible E-pool growth + FaithfulnessProbe consolidation gate. Opt-in (G1–G4 PASS, G5 deferred to riir-ai). |
 
 ## Adaptation Pipeline
 
@@ -897,9 +899,127 @@ PFlash ratio measures compression complexity of the prompt. High ratio → compl
 | Budget range | [0.5×, 2.0×] base |
 | Signal | PFlash compression ratio |
 
+## Technique 17: Dual-Pool Reachable Memory Router (Plan 282)
+
+### Problem
+
+Single-pool CGSP (Technique 16) updates a **static** priority table: the arm pool is fixed at spawn (e.g. a faction-template direction superset). If the optimal direction is not in the pool, CGSP can never select it. Worse, single-pool CGSP can only escape priority collapse **reactively** via `EntropyCollapse` once entropy has already degenerated — the NPC is trapped until the detector trips.
+
+### Solution
+
+Distillation of Hao, Long, Zhao 2026 — *"Self-Evolving MAS via Decentralized Memory"* ([arXiv:2605.22721](https://arxiv.org/abs/2605.22721)). Split the bandit's pool into:
+
+- **E-pool** (exploitation) — consolidated past successes (local-walk operator).
+- **X-pool** (exploration) — fresh candidates with **guaranteed nonzero** selection probability (teleportation operator).
+
+A sigmoid router `α = sigmoid(w_E − w_X) ∈ (0, 1)` re-weights the pools from stage-wise binary feedback (DecentMem Eq. 6/7). The X-pool's nonzero floor makes the induced Markov chain irreducible and aperiodic — **proactive** non-trapping by construction, no collapse detector needed.
+
+```text,ignore
+                begin_cycle
+                     │
+              α = sigmoid(w_E − w_X)
+                     │
+        ┌────────────┴────────────┐
+        │                         │
+      E-pool                    X-pool
+   (consolidated)           (fresh, teleport)
+        │                         │
+        └────────────┬────────────┘
+                     │
+                CgspLoop::cycle
+                     │
+                end_cycle
+                     │
+        ┌────────────┴────────────┐
+        │  route_update            │
+        │  (DecentMem Eq. 6/7)     │
+        │  consolidate (Eq. 8)     │
+        │  ├ blend  (Phase 1)      │
+        │  └ grow   (Phase 4)      │
+        │     └ gate(FaithfulnessProbe)
+        └──────────────────────────┘
+```
+
+### Implementation
+
+`DualPoolBandit<B: HintDeltaBandit>` wraps two inner bandits and itself implements `HintDeltaBandit` by delegating to the **active** pool (one pool per cycle). This lets it drop into `CgspLoop` as the `B` type parameter with zero changes to `cycle()`.
+
+```rust
+pub struct DualPoolBandit<B: HintDeltaBandit> {
+    e_pool: B,                 // Exploitation — consolidated successes
+    x_pool: B,                 // Exploration — teleportation operator
+    w_e: f32,                  // E-pool weight (updated by route_update)
+    w_x: f32,                  // X-pool weight (fixed at 1.0 per Eq. 6/7)
+    config: DualPoolConfig,
+    active_pool: PoolId,       // Selected per cycle by sigmoid routing
+    x_arm_rewards: Vec<f32>,   // Per-arm reward (Phase 4 growth)
+    // ... reward accumulators, RNG
+}
+
+impl<B: HintDeltaBandit> DualPoolBandit<B> {
+    pub fn new(e_pool: B, x_pool: B) -> Self { ... }
+    pub fn with_config(e_pool: B, x_pool: B, cfg: DualPoolConfig) -> Self { ... }
+    pub fn begin_cycle(&mut self) { ... }  // sigmoid-select active pool
+    pub fn end_cycle(&mut self) { ... }    // route_update + maybe consolidate
+    pub fn consolidate_growing_gated<F: Fn(usize)->bool>(&mut self, gate: F) { ... }
+}
+```
+
+### Phase 4: Backward-Compatible Growth
+
+E-pool arm growth required extending `HintDeltaBandit` without breaking existing implementors. Two new default methods (no-op / false) were added:
+
+```rust
+pub trait HintDeltaBandit {
+    // ... existing methods
+    fn push_arm(&mut self, _priority: Priority) -> usize { self.num_arms() }  // no-op default
+    fn is_growing(&self) -> bool { false }                                     // static default
+}
+```
+
+`DualPoolConfig` gained three growth fields: `growth_enabled: bool`, `promotion_threshold: f32`, `max_epool_size: usize`. When `growth_enabled && e_pool.is_growing()`, `consolidate()` promotes rewarded X-pool arms into E-pool via `push_arm`, evicting the lowest-priority arm at the cap. `consolidate_growing_gated(gate)` adds an external promotion gate — the `FaithfulnessProbe` (Plan 278) integration point: arms the consumer structurally ignores (no behavioral delta) are rejected from E-pool promotion.
+
+### Sigmoid vs Ratio (AGENTS.md convention)
+
+The paper's ratio form `α = w_E / (w_E + w_X)` is replaced with `α = sigmoid(w_E − w_X)`. Both are monotonically increasing, map to `(0, 1)`, and preserve the strict concavity required by the regret proof (Research 249 §2.3). The O(log T) bound transfers.
+
+A numerical reachability floor `min_exploration_prob` (default `1e-4`) clamps `α` away from 0 and 1: f32 sigmoid saturates at `x ≳ 18`, which would otherwise break `is_reachable()`. The paper's continuous-math theorem holds; the clamp makes it hold in f32.
+
+### Why Proactive Beats Reactive
+
+| Strategy | Per-cycle overhead | Trap recovery | When |
+|----------|-------------------|---------------|------|
+| Dual-pool (proactive) | **0.5 ns/cycle** (sigmoid + RNG) | Constant nonzero P(X-pool) | Always |
+| Single-pool + detector (reactive) | 15.1 ns/cycle (entropy scan) | 1 cycle once entropy < τ trips | After collapse |
+| Single-pool, no detector | 0 ns/cycle | **Never** (permanent trap) | — |
+
+Dual-pool is **30× cheaper per cycle** than the entropy detector AND provides a formal reachability guarantee. The tradeoff: dual-pool pays a constant exploration tax every cycle; single-pool+detector pays zero until collapse, then 1-cycle recovery.
+
+### GOAT Gate Status (Plan 282)
+
+| Gate | Target | Result | Verdict |
+|------|--------|--------|---------|
+| G1 — Reachability | X-pool always selected (α < 1) | Escape ≤ 1.1 cycles balanced, ≤ 79k extreme | **PASS** |
+| G2 — Regret bound | O(log T) on synthetic bandit | regret 24.6 ≤ 5·log(10k) = 46 | **PASS** |
+| G3 — E-pool growth | Discovers strategies outside initial pool | 4 → 5+ arms, optimal promoted | **PASS** |
+| G4 — Faithfulness gate | Dead items rejected from E-pool | 4 live promoted, 4 dead filtered | **PASS** |
+| G5 — CGSP integration | Personality divergence widens | **Deferred to riir-ai** (NpcCgspRuntime) | Pending |
+
+**T6.5 decision:** G1–G4 PASS, G5 deferred. Per Plan 282 rule "If G1–G4 pass but G5.2 shows no divergence improvement → keep opt-in": feature stays **opt-in** until riir-ai validates personality divergence. The reachability guarantee alone justifies the feature for trap-prone domains.
+
+### Performance
+
+| Metric | Value |
+|--------|-------|
+| Feature flag | `cgsp_dual_pool` (opt-in, requires `cgsp`) |
+| Per-cycle overhead (begin_cycle) | 0.5 ns (sigmoid + splitmix64) |
+| Hot-path allocation | Zero (pools pre-allocated; only `consolidate_growing_gated` allocates a small `to_promote` Vec) |
+| E-pool growth cap | 64 arms (configurable via `max_epool_size`) |
+| Consolidation cadence | Every `consolidate_interval` cycles (default 0 = caller-driven) |
+
 ## Interaction Matrix
 
-All sixteen techniques compose without conflicts:
+All seventeen techniques compose without conflicts:
 
 | Technique | Affects Prefill | Affects Decode | Feature Flag |
 |-----------|:-:|:-:|-------------|
@@ -920,6 +1040,7 @@ All sixteen techniques compose without conflicts:
 | Hydra Budget | ✅ layer importance | ✅ layer skipping | `hydra_budget` (default) |
 | FlashAR Consensus | — | ✅ thermal routing | `flashar_consensus` (default, requires `tri_mode`, `plasma_path`) |
 | Budget Adaptation | — | ✅ budget scaling | `budget_adaptation` (default) |
+| Dual-Pool Router | — | ✅ CGSP bandit wrap | `cgsp_dual_pool` (opt-in, requires `cgsp`) |
 | ManifoldPruner Soft Validity | — | ✅ soft sigmoid pruning | `manifold_pruner` (opt-in, Plan 234) |
 
 All are additive and backward-compatible. Standard `forward()` with no features works exactly as before.

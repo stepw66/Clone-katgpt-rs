@@ -68,15 +68,41 @@ pub fn rerank(
         RerankMethod::MaxSim => (Vec::new(), Vec::new()),
     };
 
+    // Cosine path: mean-pool the query ONCE and reuse across all docs.
+    //
+    // Before this hoist, `cosine_rerank_score_into` recomputed `q_mean` (O(lq*dim)
+    // adds + O(dim) scalar muls) and `q_norm` (O(dim) dot + sqrt) for every doc,
+    // despite both being query-invariant. For N docs that was N× redundant work.
+    //
+    // We pre-compute `q_mean` and `q_norm` here and pass them down via a small
+    // helper closure so the per-doc inner loop only touches the document.
+    let q_norm_precalc: f32 = if matches!(method, RerankMethod::Cosine) && lq > 0 {
+        q_mean[..dim].fill(0.0);
+        for t in 0..lq {
+            let offset = t * dim;
+            simd_add_inplace(&mut q_mean[..dim], &query[offset..offset + dim]);
+        }
+        let inv_lq = 1.0 / lq as f32;
+        simd_scale_inplace(&mut q_mean[..dim], inv_lq);
+        simd_dot_f32(&q_mean[..dim], &q_mean[..dim], dim).sqrt()
+    } else {
+        0.0
+    };
+
     let mut results: Vec<RerankedDoc> = docs
         .iter()
         .enumerate()
         .map(|(i, doc_data)| {
             let ld = doc_lengths[i];
             let score = match method {
-                RerankMethod::Cosine => {
-                    cosine_rerank_score_into(query, lq, doc_data, ld, dim, &mut q_mean, &mut d_mean)
-                }
+                RerankMethod::Cosine => cosine_rerank_score_doc_only(
+                    &q_mean[..dim],
+                    q_norm_precalc,
+                    doc_data,
+                    ld,
+                    dim,
+                    &mut d_mean,
+                ),
                 RerankMethod::MaxSim => maxsim_score(query, doc_data, lq, ld, dim),
             };
             RerankedDoc {
@@ -183,6 +209,9 @@ pub fn cosine_score_into(
         if q_norm < 1e-12 {
             continue;
         }
+        // Hoist the query-side reciprocal out of the document loop — one
+        // division per query instead of one per (query, document) pair.
+        let inv_q_norm = 1.0 / q_norm;
         for j in 0..ld {
             let d_row = &documents[j * dim..(j + 1) * dim];
             let d_norm = d_norms[j];
@@ -190,7 +219,8 @@ pub fn cosine_score_into(
                 continue;
             }
             let dot = simd_dot_f32(q_row, d_row, dim);
-            total += dot / (q_norm * d_norm);
+            let inv_d_norm = 1.0 / d_norm;
+            total += dot * (inv_q_norm * inv_d_norm);
             count += 1;
         }
     }
@@ -217,30 +247,26 @@ pub fn mean_cosine_similarity(a: &[f32], b: &[f32], la: usize, lb: usize, dim: u
 
 // ── Internal Helpers ──────────────────────────────────────────
 
-/// Cosine similarity between mean-pooled query and mean-pooled document.
-/// Uses caller-provided scratch buffers to avoid per-call allocation.
+/// Per-document cosine score for reranking.
+///
+/// The query mean (`q_mean`) and its L2 norm (`q_norm`) are query-invariant
+/// and are computed ONCE per query by the caller (see [`rerank`]). This
+/// function only mean-pools the document and returns `dot(q_mean, d_mean) /
+/// (q_norm × d_norm)`.
+///
+/// `d_mean` is caller-owned scratch (length `>= dim`). It's filled each call.
 #[inline]
-fn cosine_rerank_score_into(
-    query: &[f32],
-    lq: usize,
+fn cosine_rerank_score_doc_only(
+    q_mean: &[f32],
+    q_norm: f32,
     doc: &[f32],
     ld: usize,
     dim: usize,
-    q_mean: &mut [f32],
     d_mean: &mut [f32],
 ) -> f32 {
-    if ld == 0 || lq == 0 {
+    if ld == 0 || q_norm < 1e-12 {
         return 0.0;
     }
-
-    // Mean-pool query tokens into `q_mean`.
-    q_mean[..dim].fill(0.0);
-    for t in 0..lq {
-        let offset = t * dim;
-        simd_add_inplace(&mut q_mean[..dim], &query[offset..offset + dim]);
-    }
-    let inv_lq = 1.0 / lq as f32;
-    simd_scale_inplace(&mut q_mean[..dim], inv_lq);
 
     // Mean-pool document tokens into `d_mean`.
     d_mean[..dim].fill(0.0);
@@ -251,14 +277,13 @@ fn cosine_rerank_score_into(
     let inv_ld = 1.0 / ld as f32;
     simd_scale_inplace(&mut d_mean[..dim], inv_ld);
 
-    // Cosine similarity = dot(a, b) / (|a| × |b|)
-    let dot = simd_dot_f32(&q_mean[..dim], &d_mean[..dim], dim);
-    let q_norm = simd_dot_f32(&q_mean[..dim], &q_mean[..dim], dim).sqrt();
+    let dot = simd_dot_f32(q_mean, &d_mean[..dim], dim);
     let d_norm = simd_dot_f32(&d_mean[..dim], &d_mean[..dim], dim).sqrt();
 
-    match q_norm < 1e-12 || d_norm < 1e-12 {
-        true => 0.0,
-        false => dot / (q_norm * d_norm),
+    if d_norm < 1e-12 {
+        0.0
+    } else {
+        dot / (q_norm * d_norm)
     }
 }
 

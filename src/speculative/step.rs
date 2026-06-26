@@ -1,3 +1,6 @@
+// Speculative step pipeline. Index-based loops are intentional for marginal buffer access.
+#![allow(clippy::needless_range_loop)]
+
 use std::collections::HashMap;
 
 #[cfg(feature = "stability_metrics")]
@@ -295,8 +298,8 @@ pub fn speculative_step_conditioned(
     }
 
     // 4. Simulated acceptance (75% cap)
-    let acceptance_rate = 0.75;
-    let max_accept = ((path.len() as f32) * acceptance_rate).ceil() as usize;
+    // Integer arithmetic equivalent of `((path.len() as f32) * 0.75).ceil() as usize`.
+    let max_accept = (path.len() * 3).div_ceil(4);
     let accepted: Vec<usize> = path.into_iter().take(max_accept.max(1)).collect();
 
     // 5. Bonus token if all accepted
@@ -804,8 +807,9 @@ pub fn speculative_step_conditioned_with(
     }
 
     // 4. Simulated acceptance (75% cap)
-    let acceptance_rate = 0.75;
-    let max_accept = ((path.len() as f32) * acceptance_rate).ceil() as usize;
+    // Integer arithmetic equivalent of `((path.len() as f32) * 0.75).ceil() as usize` —
+    // avoids f32 conversion and rounding entirely.
+    let max_accept = (path.len() * 3).div_ceil(4);
     let accepted: Vec<usize> = path.into_iter().take(max_accept.max(1)).collect();
 
     // 5. Bonus token if all accepted
@@ -895,8 +899,8 @@ pub fn speculative_step_conditioned_with_router(
     }
 
     // 6. Simulated acceptance (75% cap)
-    let acceptance_rate = 0.75;
-    let max_accept = ((path.len() as f32) * acceptance_rate).ceil() as usize;
+    // Integer arithmetic equivalent of `((path.len() as f32) * 0.75).ceil() as usize`.
+    let max_accept = (path.len() * 3).div_ceil(4);
     let accepted: Vec<usize> = path.into_iter().take(max_accept.max(1)).collect();
 
     // 7. Bonus token if all accepted
@@ -952,12 +956,9 @@ fn extract_ddtree_paths(tree: &[crate::speculative::types::TreeNode]) -> Vec<Vec
         }
     }
 
-    // Sort roots by score descending, keep top 3
-    roots.sort_by(|a, b| {
-        b.score
-            .partial_cmp(&a.score)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
+    // Sort roots by score descending, keep top 3.
+    // `total_cmp` is branch-free and NaN-deterministic vs `partial_cmp().unwrap_or(Equal)`.
+    roots.sort_by(|a, b| b.score.total_cmp(&a.score));
     roots.truncate(3);
 
     let mut paths = Vec::with_capacity(roots.len());
@@ -1035,10 +1036,14 @@ pub fn speculative_step_with_configurator(
     let num_steps = dflash_predict_with(draft_sctx, draft_weights, draft_config, token, pos);
     let vocab_size = draft_config.vocab_size;
 
-    // Build marginals view — Vec needed to avoid borrow conflict with draft_sctx.accepted_buf
-    let marginals: Vec<&[f32]> = (0..num_steps)
-        .map(|step| draft_sctx.marginal_slice(step, vocab_size))
-        .collect();
+    // Build marginals view — stack array (avoids Vec<&[f32]> heap alloc per step).
+    // Matches the pattern used in speculative_step_rollback_with / conditioned_with.
+    let mut marginals_buf: [&[f32]; 64] = [&[]; 64];
+    let num_steps_bounded = num_steps.min(marginals_buf.len());
+    for step in 0..num_steps_bounded {
+        marginals_buf[step] = draft_sctx.marginal_slice(step, vocab_size);
+    }
+    let marginals: &[&[f32]] = &marginals_buf[..num_steps_bounded];
 
     // 2. Compute entropy and query configurator
     let entropy = marginals.first().map_or(0.0, |m| shannon_entropy(m));
@@ -1055,18 +1060,21 @@ pub fn speculative_step_with_configurator(
             (vec![sample], 1, decision)
         }
         _ => {
-            // PlanNew or PlanExtend → build tree with possible lookahead adjustment
-            let effective_config = match decision {
-                PlanningDecision::PlanExtend => {
+            // PlanNew or PlanExtend → build tree with possible lookahead adjustment.
+            // Clone deferred to PlanExtend arm only — PlanNew borrows draft_config as-is
+            // (common case, avoids Config clone per step).
+            let extended_config: Option<Config> =
+                if matches!(decision, PlanningDecision::PlanExtend) {
                     let mut c = draft_config.clone();
                     c.draft_lookahead = c.draft_lookahead.saturating_add(1).min(c.block_size);
-                    c
-                }
-                _ => draft_config.clone(),
-            };
+                    Some(c)
+                } else {
+                    None
+                };
+            let effective_config: &Config = extended_config.as_ref().unwrap_or(draft_config);
 
             // Build DDTree (reuses pre-allocated heap/tree buffers)
-            let tree = tree_builder.build(&marginals, &effective_config, &NoPruner, false);
+            let tree = tree_builder.build(marginals, effective_config, &NoPruner, false);
             let paths = extract_ddtree_paths(tree);
 
             if paths.is_empty() {

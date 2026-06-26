@@ -45,7 +45,7 @@ impl CumSum {
     /// Uses `kx = 1.0, ky = 0.0` so all entries share the same key,
     /// making them collinear (identical score). The `val` stores
     /// the actual value at index 0 and position at index 1.
-    pub fn insert(&mut self, value: f64, position: f64, seq: i64) {
+    pub fn insert(&mut self, value: f64, position: f64, seq: i32) {
         // Uniform key: all keys are the same, so all tie
         let key = [1.0, 0.0];
         let val = [value, position];
@@ -116,7 +116,7 @@ mod tests {
 
         for i in 1..=5 {
             let val = i as f64;
-            cs.insert(val, i as f64, i as i64);
+            cs.insert(val, i as f64, i as i32);
             expected += val;
             let got = cs.query();
             assert!(
@@ -137,7 +137,7 @@ mod tests {
         let mut expected = 0.0_f64;
 
         for (i, &val) in fibs.iter().enumerate() {
-            cs.insert(val, i as f64, i as i64);
+            cs.insert(val, i as f64, i as i32);
             expected += val;
             let got = cs.query();
             assert!(

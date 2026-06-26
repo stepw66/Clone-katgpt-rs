@@ -63,6 +63,7 @@ fn bench_01_simd_detection() {
         SimdLevel::Scalar => "Scalar (no SIMD)",
         SimdLevel::Neon => "NEON (ARM)",
         SimdLevel::Avx2 => "AVX2+FMA (x86_64)",
+        SimdLevel::WasmSimd128 => "WASM SIMD128 (wasm32)",
     };
 
     println!();

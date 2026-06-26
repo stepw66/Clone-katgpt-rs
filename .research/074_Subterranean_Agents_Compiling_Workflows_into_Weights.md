@@ -152,7 +152,7 @@ Flowchart as directed graph: `F = (N, E, n₀, T)`
    - `MeMo Reflection`: 5-step QA synthesis from game replays
 
 4. **Compiled Knowledge** (Freeze/Thaw)
-   - `BomberFrozenBandit`, `GoFrozenBandit`: bandit knowledge as fixed binary blobs
+   - Per-game frozen bandit configs (private): bandit knowledge as fixed binary blobs
    - Load at runtime, no external orchestrator needed
 
 ### What's Missing (The Gap)

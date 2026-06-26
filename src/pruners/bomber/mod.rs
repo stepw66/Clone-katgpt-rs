@@ -8,6 +8,7 @@ pub mod gate_player;
 pub mod players;
 pub mod replay;
 pub mod replay_backward;
+pub mod sonlt_player;
 pub mod systems;
 
 #[cfg(feature = "bomber-agent")]
@@ -44,6 +45,7 @@ pub mod skill_lifecycle_player;
 pub use arena::ArenaGrid;
 pub use gate_player::GatePlayer;
 pub use players::{BomberPlayer, GreedyPlayer, HLPlayer, RandomPlayer, ValidatorPlayer};
+pub use sonlt_player::SonltPlayer;
 pub use replay_backward::{BackwardSample, BackwardWalkResult, ReplayBackwardWalker};
 
 #[cfg(feature = "bomber-agent")]

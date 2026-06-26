@@ -70,6 +70,12 @@ impl SamplerFeatures {
     /// Extract features from a flat logits slice for one position.
     ///
     /// `logits_p` must be length `vocab`. `mask` token is excluded from stats.
+    ///
+    /// Zero-allocation: tracks top-3 probabilities via branchless comparisons
+    /// during the exp/sum pass (order preserved under division by `sum_exp`).
+    /// Entropy computed via the identity `Σ p·log(p) = (Σ e·log(e))/sum - log(sum)`
+    /// to avoid per-element division. Previously allocated 2 Vec<f32> of
+    /// vocab_size and did a full O(n log n) sort for top-3 mass.
     pub fn from_logits(
         logits_p: &[f32],
         vocab: usize,
@@ -79,71 +85,57 @@ impl SamplerFeatures {
         pos: usize,
         block_size: usize,
     ) -> Self {
-        let max_logit = logits_p.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+        debug_assert_eq!(vocab, logits_p.len(), "vocab size mismatch");
+        let max_logit = logits_p.iter().copied().fold(f32::NEG_INFINITY, f32::max);
 
-        // Softmax denominator over valid (non-mask) tokens
+        // Single fused pass: compute exp, sum_exp, and track top-3 exp values
+        // (order preserved under division by sum_exp → top-3 exp == top-3 prob).
+        // Also accumulate Σ e·log(e) for entropy via the identity
+        //   H = -Σ p·log(p) = -(Σ e·log(e))/sum + log(sum).
         let mut sum_exp = 0.0f32;
-        let mut top_probs: Vec<f32> = Vec::with_capacity(vocab);
+        let mut sum_e_log_e = 0.0f32;
+        // Top-3 trackers (exp values). Initialized to -1 so any valid exp >= 0 wins.
+        let mut t1 = f32::NEG_INFINITY;
+        let mut t2 = f32::NEG_INFINITY;
+        let mut t3 = f32::NEG_INFINITY;
         for (t, &logit) in logits_p.iter().enumerate() {
             if t == mask {
-                top_probs.push(0.0);
                 continue;
             }
-            let prob = (logit - max_logit).exp();
-            top_probs.push(prob);
-            sum_exp += prob;
+            let e = (logit - max_logit).exp();
+            sum_exp += e;
+            // Branchless top-3 update: shift down only if e exceeds current tier.
+            // Compiles to cmov / fmax sequences — no data-dependent branches.
+            if e > t1 {
+                t3 = t2;
+                t2 = t1;
+                t1 = e;
+            } else if e > t2 {
+                t3 = t2;
+                t2 = e;
+            } else if e > t3 {
+                t3 = e;
+            }
+            // e·log(e): e is non-negative; for e near 0 the product is ~0 (lim x·log(x)=0).
+            // Guard with max(1e-10) to avoid log(0). Note: this contributes to the
+            // entropy identity and must use the *un-normalized* exp values.
+            if e > 1e-10 {
+                sum_e_log_e += e * e.ln();
+            }
         }
 
         if sum_exp <= 0.0 {
             return Self::default();
         }
 
-        // Normalize to probabilities
-        for p in &mut top_probs {
-            *p /= sum_exp;
-        }
+        // Normalize top-3 exp values to probabilities.
+        let inv_sum = 1.0 / sum_exp;
+        let top1_prob = t1 * inv_sum;
+        let top2_prob = t2 * inv_sum;
+        let top3_mass = (t1 + t2 + t3) * inv_sum;
 
-        // Find top-1 and top-2
-        let mut top1_prob = 0.0f32;
-        let mut top2_prob = 0.0f32;
-        for (t, &prob) in top_probs.iter().enumerate() {
-            if t == mask {
-                continue;
-            }
-            if prob > top1_prob {
-                top2_prob = top1_prob;
-                top1_prob = prob;
-            } else if prob > top2_prob {
-                top2_prob = prob;
-            }
-        }
-
-        // Top-3 mass
-        let mut top3_mass = 0.0f32;
-        let mut probs_sorted: Vec<f32> = top_probs
-            .iter()
-            .enumerate()
-            .filter(|&(t, _)| t != mask)
-            .map(|(_, &p)| p)
-            .collect();
-        probs_sorted.sort_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
-        for (i, &p) in probs_sorted.iter().enumerate() {
-            if i >= 3 {
-                break;
-            }
-            top3_mass += p;
-        }
-
-        // Entropy: -Σ p·log(p)
-        let mut entropy = 0.0f32;
-        for (t, &p) in top_probs.iter().enumerate() {
-            if t == mask {
-                continue;
-            }
-            if p > 1e-10 {
-                entropy -= p * p.ln();
-            }
-        }
+        // Entropy via identity: H = -(Σ e·log(e))/sum + log(sum).
+        let entropy = -(sum_e_log_e / sum_exp) + sum_exp.ln();
 
         let margin = top1_prob - top2_prob;
         let step_norm = if max_steps > 0 {
@@ -343,9 +335,13 @@ impl MlpSampler {
         }
     }
 
-    /// Forward pass: returns (hidden activations, output logit).
-    fn forward(&self, x: &[f32; N_FEATURES]) -> (Vec<f32>, f32) {
-        let h = &mut vec![0.0f32; self.hidden_dim];
+    /// Forward pass: fills `h_scratch` with hidden activations and returns output logit.
+    ///
+    /// `h_scratch` must have length `>= hidden_dim`. Avoids the per-call `Vec` allocation
+    /// and `clone()` that the previous `(Vec<f32>, f32)` return required.
+    fn forward_into(&self, x: &[f32; N_FEATURES], h_scratch: &mut [f32]) -> f32 {
+        debug_assert!(h_scratch.len() >= self.hidden_dim);
+        let h = &mut h_scratch[..self.hidden_dim];
         for (j, h_j) in h.iter_mut().enumerate() {
             let mut sum = self.b1[j];
             for (i, &xi) in x.iter().enumerate() {
@@ -358,14 +354,23 @@ impl MlpSampler {
         for (&w2j, &hj) in self.w2.iter().zip(h.iter()) {
             logit += w2j * hj;
         }
-
-        (h.clone(), logit)
+        logit
     }
 
     /// Predict P(correct | features) ∈ [0, 1].
+    ///
+    /// Uses a stack-allocated hidden buffer (hidden_dim ≤ 64 for all sampler variants)
+    /// to avoid heap allocation on the inference hot path.
     pub fn predict(&self, features: &SamplerFeatures) -> f32 {
         let x = features.to_array();
-        let (_, logit) = self.forward(&x);
+        let mut h_stack = [0.0f32; 64];
+        let h = if self.hidden_dim <= 64 {
+            &mut h_stack[..self.hidden_dim]
+        } else {
+            // Defensive: fall back to heap only for unusually large hidden_dim.
+            &mut vec![0.0f32; self.hidden_dim]
+        };
+        let logit = self.forward_into(&x, h);
         sigmoid(logit)
     }
 
@@ -384,9 +389,16 @@ impl MlpSampler {
             let mut epoch_loss = 0.0f32;
             let mut n_samples = 0usize;
 
+            // Reusable hidden buffer — allocated once per epoch instead of per-trajectory.
+            // Previous code allocated + cloned a Vec on every `forward()` call.
+            let mut h_buf = vec![0.0f32; self.hidden_dim];
+
             for traj in trajectories {
                 let x = traj.features.to_array();
-                let (hidden, logit) = self.forward(&x);
+                let logit = self.forward_into(&x, &mut h_buf);
+                // Backprop needs the hidden activations; alias the buffer for the
+                // gradient pass below. (h_buf is not mutated during backprop — only read.)
+                let hidden = &h_buf[..];
                 let pred = sigmoid(logit);
                 let y = if traj.correct { 1.0f32 } else { 0.0f32 };
 
@@ -601,8 +613,9 @@ impl DiffusionSampler {
             .map(|t| (self.predict(&t.features), t.correct))
             .collect();
 
-        // Sort by predicted probability descending
-        pairs.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+        // sort_unstable_by is faster than sort_by — doesn't preserve equal-element
+        // order (fine for AUC computation) and avoids O(n) worst-case merges.
+        pairs.sort_unstable_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
 
         // Count positives and negatives
         let n_pos = pairs.iter().filter(|(_, c)| *c).count() as f64;
@@ -691,52 +704,26 @@ pub fn collect_trajectories(
             // Forward pass with block-causal attention
             let _ = forward_block_causal_with(&mut dctx, weights, &tokens, config, block_size);
 
-            for p in 0..seq_len {
-                if tokens[p] != mask {
-                    continue;
-                }
-
-                // Extract features from logits
-                let logits_start = p * vocab;
-                let logits_end = logits_start + vocab;
-                let logits_p = &dctx.logits_flat[logits_start..logits_end];
-
-                let features = SamplerFeatures::from_logits(
-                    logits_p, vocab, mask, step, max_steps, p, seq_len,
-                );
-
-                // Find top-1 prediction
-                let mut top1 = 0usize;
-                let mut top1_val = f32::NEG_INFINITY;
-                for (t, &logit) in logits_p.iter().enumerate() {
-                    if t == mask {
-                        continue;
-                    }
-                    if logit > top1_val {
-                        top1_val = logit;
-                        top1 = t;
-                    }
-                }
-
-                let correct = top1 == target[p];
-                all_trajectories.push(SamplerTrajectory { features, correct });
-
-                // Check cap
-                if max_trajectories > 0 && all_trajectories.len() >= max_trajectories {
-                    return all_trajectories;
-                }
-            }
-
-            // Sample tokens for next step (greedy for determinism)
+            // Single fused pass over masked positions: extract features, record
+            // trajectory, AND commit tokens via confidence remasking.
+            //
+            // Previously this was two separate loops over the same positions, each
+            // recomputing the O(vocab) argmax scan. Merging halves the argmax work.
+            //
+            // Cap handling: if `max_trajectories` is hit mid-step, we return
+            // immediately — the remaining token commits are skipped, matching the
+            // old two-loop behavior (loop 2 never ran after an early return).
             #[allow(clippy::needless_range_loop)]
             for p in 0..seq_len {
                 if tokens[p] != mask {
                     continue;
                 }
+
                 let logits_start = p * vocab;
                 let logits_end = logits_start + vocab;
                 let logits_p = &dctx.logits_flat[logits_start..logits_end];
 
+                // Find top-1 prediction (single argmax scan, reused below)
                 let mut top1 = 0usize;
                 let mut top1_val = f32::NEG_INFINITY;
                 for (t, &logit) in logits_p.iter().enumerate() {
@@ -749,13 +736,25 @@ pub fn collect_trajectories(
                     }
                 }
 
-                // Confidence remasking (same threshold as decode)
-                let max_logit = top1_val;
+                // ── Trajectory recording (was loop 1) ──
+                let features = SamplerFeatures::from_logits(
+                    logits_p, vocab, mask, step, max_steps, p, seq_len,
+                );
+                let correct = top1 == target[p];
+                all_trajectories.push(SamplerTrajectory { features, correct });
+
+                if max_trajectories > 0 && all_trajectories.len() >= max_trajectories {
+                    return all_trajectories;
+                }
+
+                // ── Confidence remasking / token commit (was loop 2) ──
+                // Reuses `top1` and `top1_val` from the single argmax above;
+                // the old code recomputed both in a second O(vocab) scan.
                 let sum_exp: f32 = (0..vocab)
                     .filter(|&t| t != mask)
-                    .map(|t| (logits_p[t] - max_logit).exp())
+                    .map(|t| (logits_p[t] - top1_val).exp())
                     .sum();
-                let top1_prob = (logits_p[top1] - max_logit).exp() / sum_exp;
+                let top1_prob = (logits_p[top1] - top1_val).exp() / sum_exp;
 
                 if top1_prob >= decode_config.confidence_threshold {
                     tokens[p] = top1;

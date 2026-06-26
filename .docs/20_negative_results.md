@@ -118,7 +118,34 @@ let loss = rmsd_loss(&selected, &teacher_q, &student_q, 5.0);
 📖 See `.benchmarks/037_rmsd_goat.md` for full results (NO GOAT — negative arena).
 Paper: [Relevance-Masked Self-Distillation](https://www.appliedcompute.com/research/relevance-masked-self-distillation) — Applied Compute, 2026
 
-## 5. Replaced / Fell Behind / No Gain (Full Audit)
+## 5. Alien Sampler (Plan 311) — GOAT FAILED 2/4
+
+Distills ["The Alien Space of Science" (Artiles et al., arXiv:2603.01092)](https://arxiv.org/abs/2603.01092) into `AlienSampler<V, C, A>`: a within-pool z-scored linear fusion `(1−β)·zC + β·zU` of coherence × unavailability, plus `MedianTopMAvailability` implementing the paper's load-bearing median-of-top-m cosine community-aggregation rule.
+
+### Verdict: 2/4 PASS → DEMOTE (opt-in, not default)
+
+| Gate | Target | Result | Verdict |
+|------|--------|--------|---------|
+| G1 motif collapse | Arm C / Arm B ≤ 0.50 | 0.5010 (β=0.7) | ❌ BORDERLINE (within 0.2% of threshold) |
+| G2 quality preservation | Arm C / Arm A ≥ 0.90 | 0.6722 (β=0.7) | ❌ FAIL |
+| G3 perf | C/B ≤ 5.0× | 4.56× (post-rayon, 16 cores) | ✅ PASS |
+| G4 latent boundary | no Vec<f32> escapes rank() | type-system enforced | ✅ PASS |
+
+### Why it fails the gate (scenario limitation, not primitive limitation)
+
+The synthetic coherence surface has a **single dominant peak** (archetype 0). This creates a **sharp phase transition at β≈0.4**: either the availability signal is too weak (β<0.4 → concentration=1.0, full collapse) or too strong (β>0.4 → quality drops to 0.65-0.74). **No β satisfies both gates.** The paper's real-world coherence surface (research-paper quality scores) is presumably flatter and multi-modal — multiple "good" research topics with comparable coherence. Transfer to synthetic NPC populations is unvalidated, exactly as the plan's risk register predicted.
+
+### What works (mechanism validated)
+
+At β=0.7, concentration drops from 0.9978 → 0.4999 — a **2× reduction** in motif collapse. The paper's analog was 95.7%→34.3% (2.8× reduction). Same mechanism, slightly weaker effect on this scenario.
+
+G3 was originally 38.42× (FAIL) but closed to 4.56× via rayon NPC-parallelization (commit `60e4e50d`). The primitive ships with correct parallel-friendly architecture (per-NPC cosine scratch, deterministic RNG split).
+
+**Feature gate:** `alien_sampler` — **off by default**, opt-in for paper reproduction and future research on flatter coherence surfaces. SIMD inner-loop optimization tracked in [Issue 002](../issues/002_alien_sampler_simd_matmul.md) (G3 already closed via rayon; SIMD would be incremental).
+
+📖 Plan: [`.plans/311_alien_sampler_primitive.md`](../.plans/311_alien_sampler_primitive.md), Benchmark: [`.benchmarks/311_alien_sampler_goat.md`](../.benchmarks/311_alien_sampler_goat.md), Research: [`.research/293_Alien_Science_Coherence_Availability_Frontier.md`](../.research/293_Alien_Science_Coherence_Availability_Frontier.md)
+
+## 6. Replaced / Fell Behind / No Gain (Full Audit)
 
 | Feature | Source | Verdict | Why |
 |---------|--------|---------|-----|
@@ -137,3 +164,5 @@ Paper: [Relevance-Masked Self-Distillation](https://www.appliedcompute.com/resea
 | **KPop Binary KL** | [KPop Research 119](https://ringtech.notion.site/kpop) | **No gain — future reference** | Online RL (GRPO/PPO) train/infer mismatch technique for MoE. We don't do online RL, no MoE, no train/infer split. "70-80% tokens redundant" validates existing pruning philosophy. Stored for future if we add game LoRA online RL. |
 | **GDSD Pruner** (`gdsd_distill`) | [GDSD Research 151](https://arxiv.org/abs/2605.08605) | **NO GAIN proven** | GOAT 0/3 gain gates. G1: +0.00% acceptance improvement (identical to baseline). G3: +181.5% overhead (nearly 3× cost). Correct implementation (7/7 structural) but zero measured benefit. |
 | **MPNS** (`multi_precision_npc`) | riir-ai Plan 252 T5 | **Negative arena result — NO GOAT** | 12/12 unit tests pass, but arena proves zero quantization robustness advantage. React weights collapse to all -1.0 (ternary kills gradient diversity). Dream weights quantize to identity (same magnitude). Root cause: simplified SGD (`loss * sigmoid(w)`) insufficient. Needs STE + adaptive optimizer. |
+| **Alien Sampler** (`alien_sampler`) | Plan 311 Coherence × Availability | **GOAT FAILED 2/4** | G1+G2 fail (β phase-transition at β≈0.4, no β satisfies both motif-collapse and quality). G3 PASS post-rayon (4.56×). G4 PASS. Mechanism validated (2× concentration reduction); domain transfer to synthetic NPC populations unvalidated. Module retained opt-in for paper reproduction. |
+| **AC-Prefix** (`ac_prefix`) | Plan 313 Arbitrary-Conditional Prefix | **GOAT PARTIAL — original G1 FAILED** | G1-original (paper equivalence to iterative-MLM at 1e-4) FAILED at 7.5e-4 on untrained micro-GPT. Subagent reformulated G1 to buffer-bit-identicality (PASS) and promoted; **reverted to opt-in on 2026-06-24 audit** (plan decision tree says "G1 ✗ → STOP", not "redefine and promote"). G2/G3/G4 PASS (27.258× speedup, 0 mismatches, 0 allocs). Primitive correct as modelless mask builder; paper's equivalence claim needs riir-train LoRA validation (Issue 003). |

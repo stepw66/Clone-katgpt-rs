@@ -190,19 +190,27 @@ impl<'a, P: ScreeningPruner> AndOrBuilder<'a, P> {
     ///
     /// For each depth, computes the minimum relevance across the top-k tokens.
     /// Low min relevance = uncertain = good candidate for decomposition.
+    ///
+    /// Short-circuits the inner fold once the running min reaches 0.0 (the
+    /// smallest possible relevance) — saves up to k-1 pruner calls per depth.
     fn compute_relevance_profile(&self, marginals: &[&[f32]]) -> Vec<f32> {
-        let k = 4; // top-k tokens to check
-        marginals
-            .iter()
-            .enumerate()
-            .map(|(depth, marginal)| {
-                let top_k_indices = top_k_indices(marginal, k);
-                top_k_indices
-                    .iter()
-                    .map(|&idx| self.pruner.relevance(depth, idx, &[]))
-                    .fold(f32::INFINITY, f32::min)
-            })
-            .collect()
+        const K: usize = 4; // top-k tokens to check
+        let mut out = Vec::with_capacity(marginals.len());
+        for (depth, marginal) in marginals.iter().enumerate() {
+            let top_k_indices = top_k_indices(marginal, K);
+            let mut min_rel = f32::INFINITY;
+            for &idx in &top_k_indices {
+                let r = self.pruner.relevance(depth, idx, &[]);
+                if r < min_rel {
+                    min_rel = r;
+                    if r <= 0.0 {
+                        break; // cannot go lower — stop calling the pruner.
+                    }
+                }
+            }
+            out.push(min_rel);
+        }
+        out
     }
 
     /// Find contiguous low-relevance regions that should be decomposed.
@@ -394,15 +402,56 @@ fn argmax_or_zero(marginals: &[&[f32]], d: usize) -> usize {
 }
 
 /// Top-k indices from a marginal distribution (descending by value).
+///
+/// Uses a fixed-size insertion-sort buffer (`[usize; K_MAX]`) to avoid the
+/// heap allocation that `select_nth_unstable_by` requires. Caller typically
+/// wants `k ≤ 4`, so we cap at `K_MAX = 8` and fall back to allocation only
+/// when `k > K_MAX`.
 #[inline]
 fn top_k_indices(marginal: &[f32], k: usize) -> Vec<usize> {
+    const K_MAX: usize = 8;
     let k = k.min(marginal.len());
     if k == 0 {
         return Vec::new();
     }
 
+    // Fast path: small k fits in a stack buffer — no heap allocation.
+    if k <= K_MAX {
+        // Parallel arrays: indices + values, kept sorted descending by value.
+        let mut idx_buf = [0usize; K_MAX];
+        let mut val_buf = [f32::NEG_INFINITY; K_MAX];
+        let mut filled = 0usize;
+
+        for (i, &v) in marginal.iter().enumerate() {
+            // Skip if v is smaller than the current k-th largest and buffer is full.
+            if filled == k && v <= val_buf[k - 1] {
+                continue;
+            }
+            // Insertion-sort slot: find position.
+            let mut pos = filled.min(k);
+            while pos > 0 && val_buf[pos - 1] < v {
+                if pos < k {
+                    idx_buf[pos] = idx_buf[pos - 1];
+                    val_buf[pos] = val_buf[pos - 1];
+                }
+                pos -= 1;
+            }
+            if pos < k {
+                idx_buf[pos] = i;
+                val_buf[pos] = v;
+                if filled < k {
+                    filled += 1;
+                }
+            }
+        }
+
+        let mut out = Vec::with_capacity(k);
+        out.extend(idx_buf[..filled].iter().copied());
+        return out;
+    }
+
+    // Fallback for unusually large k.
     let mut indexed: Vec<(usize, f32)> = marginal.iter().copied().enumerate().collect();
-    // Partial sort: we only need the top-k.
     indexed.select_nth_unstable_by(k - 1, |a, b| {
         b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)
     });

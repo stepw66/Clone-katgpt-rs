@@ -22,7 +22,8 @@ use crate::types::Rng;
 /// Each result is tagged with `feature_dim: "TTC"` and
 /// `category: BenchCategory::TestTimeCompute`.
 pub fn bench_ttc() -> Vec<BenchResult> {
-    let mut results = Vec::new();
+    // 3 sub-benchmarks when `bandit` is enabled.
+    let mut results: Vec<BenchResult> = Vec::with_capacity(3);
     let warmup = 100;
     let iters = 5_000;
 

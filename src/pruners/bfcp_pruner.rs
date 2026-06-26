@@ -62,28 +62,25 @@ impl BFCPPruner {
         // Build regions — one per label with non-zero tokens.
         let mut regions = Vec::with_capacity(3);
         if !accept_tokens.is_empty() {
-            regions.push(BorelRegion {
-                constraints: Vec::new(),
-                label: RegionLabel::Accept,
-                token_count: accept_tokens.len(),
-                boundary_precision: 0.0,
-            });
+            regions.push(BorelRegion::new(
+                RegionLabel::Accept,
+                Vec::new(),
+                accept_tokens.len(),
+            ));
         }
         if !reject_tokens.is_empty() {
-            regions.push(BorelRegion {
-                constraints: Vec::new(),
-                label: RegionLabel::Reject,
-                token_count: reject_tokens.len(),
-                boundary_precision: 0.0,
-            });
+            regions.push(BorelRegion::new(
+                RegionLabel::Reject,
+                Vec::new(),
+                reject_tokens.len(),
+            ));
         }
         if !maybe_tokens.is_empty() {
-            regions.push(BorelRegion {
-                constraints: Vec::new(),
-                label: RegionLabel::Maybe,
-                token_count: maybe_tokens.len(),
-                boundary_precision: 0.0,
-            });
+            regions.push(BorelRegion::new(
+                RegionLabel::Maybe,
+                Vec::new(),
+                maybe_tokens.len(),
+            ));
         }
 
         let mut kept_tokens = Vec::with_capacity(accept_tokens.len() + maybe_tokens.len());

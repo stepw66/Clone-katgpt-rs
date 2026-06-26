@@ -97,13 +97,13 @@ fn bench_d2f_pipeline() -> BenchResult {
     let iters = 100;
 
     for _ in 0..warmup {
-        let pipeline = D2fPipeline::new(&config, decode_config.clone(), total_len);
+        let pipeline = D2fPipeline::new(&config, decode_config, total_len);
         pipeline.decode_all(&weights, &pruner, &NoScreeningPruner, &mut rng);
     }
 
     let start = Instant::now();
     for _ in 0..iters {
-        let pipeline = D2fPipeline::new(&config, decode_config.clone(), total_len);
+        let pipeline = D2fPipeline::new(&config, decode_config, total_len);
         pipeline.decode_all(&weights, &pruner, &NoScreeningPruner, &mut rng);
     }
     let elapsed = start.elapsed();
@@ -189,7 +189,8 @@ fn bench_confidence_thresholding() -> BenchResult {
 /// D2F benchmarks are feature-gated behind `dllm`. Confidence thresholding
 /// is always available.
 pub fn bench_diffusion() -> Vec<BenchResult> {
-    let mut results = Vec::new();
+    // Up to 3 results: d2f_block, d2f_pipeline, confidence_thresholding.
+    let mut results = Vec::with_capacity(3);
 
     println!("\n🔬 Diffusion / Denoising Benchmarks...");
 

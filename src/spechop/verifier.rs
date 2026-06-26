@@ -181,6 +181,7 @@ fn normalize_into(text: &str, buf: &mut String) {
 
 /// Normalize text for comparison: lowercase, collapse whitespace, trim.
 /// Allocates a new String each call — use only in tests or non-hot paths.
+#[allow(dead_code)]
 fn normalize(text: &str) -> String {
     let mut buf = String::with_capacity(text.len());
     normalize_into(text, &mut buf);
@@ -230,6 +231,7 @@ fn extract_numbers_into(text: &str, numbers: &mut Vec<String>, acc: &mut String)
 
 /// Extract all numeric values (integers and decimals) from text.
 /// Allocates — use only in tests.
+#[allow(dead_code)]
 fn extract_numbers(text: &str) -> Vec<String> {
     let mut numbers = Vec::new();
     let mut acc = String::new();
@@ -265,6 +267,7 @@ fn numeric_consistent_scratch(target: &str, spec: &str) -> bool {
 
 /// Check numeric consistency: both texts have the same set of numbers.
 /// Allocates — use only in tests.
+#[allow(dead_code)]
 fn numeric_consistent(target: &str, spec: &str) -> bool {
     let mut target_nums = extract_numbers(target);
     let mut spec_nums = extract_numbers(spec);
@@ -300,12 +303,10 @@ fn token_set_jaccard_scratch(target: &str, spec: &str) -> f64 {
             // convenience. We cast to `HashSet<&str>` to insert the actual borrowed
             // strings. The sets are fully cleared before those strings go out of scope.
             let set_a: &mut HashSet<&str> = unsafe {
-                &mut *(&mut *sa.borrow_mut() as *mut HashSet<&'static str>
-                    as *mut HashSet<&str>)
+                &mut *(&mut *sa.borrow_mut() as *mut HashSet<&'static str> as *mut HashSet<&str>)
             };
             let set_b: &mut HashSet<&str> = unsafe {
-                &mut *(&mut *sb.borrow_mut() as *mut HashSet<&'static str>
-                    as *mut HashSet<&str>)
+                &mut *(&mut *sb.borrow_mut() as *mut HashSet<&'static str> as *mut HashSet<&str>)
             };
 
             tokenize_set(target, set_a);

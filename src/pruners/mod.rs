@@ -23,9 +23,34 @@ pub mod game_state; // Always compiled — GameState trait has no bevy_ecs depen
 #[cfg(feature = "subterranean")]
 pub mod subterranean;
 
+#[cfg(feature = "spec_pruner")]
+pub mod spec_compile;
+
 pub mod freeze;
 
 pub mod emotion_vector;
+
+/// Feature class vocabulary tag — detection vs prediction features (Plan 292 Phase 1, Research 267).
+/// Re-export shim for `katgpt_core::FeatureClass` plus unit tests asserting the
+/// default impl returns Detection and `EmotionDirections` is Detection.
+pub mod feature_class;
+
+/// Future Behavior Probe — frozen direction vector for forecasting future
+/// behavior probability (Plan 292 Phase 2, Research 267).
+/// Opt-in until Phase 4 GOAT gate passes.
+#[cfg(feature = "future_probe")]
+pub mod future_probe;
+
+/// FpcgSelector — Future Probe Controlled Generation sample-score-select loop
+/// (Plan 292 Phase 3). Sentence-atomic candidate sampling + probe scoring +
+/// argmax/argmin selection. Never modifies the residual stream.
+/// Opt-in (depends on `future_probe`) until Phase 4 GOAT gate passes.
+#[cfg(feature = "fpcg_selector")]
+pub mod fpcg_selector;
+
+/// Self-advantage from latent recursion pre/post logits (Plan 283, Research 250).
+/// Modelless dead-compute detector distilled from arxiv:2511.16886.
+pub mod self_advantage;
 
 #[cfg(feature = "thinking_prune")]
 pub mod frozen_base_guard;
@@ -49,7 +74,7 @@ pub mod hot_swap;
 pub mod regression;
 
 #[cfg(feature = "bandit")]
-pub mod review_metrics;
+pub use katgpt_core::pruners::review_metrics;
 
 #[cfg(feature = "bandit")]
 pub mod trial_log;
@@ -105,6 +130,9 @@ pub use safe_phased::SafePhasedState;
 #[cfg(feature = "sr2am_configurator")]
 pub use configurator_bandit::{ConfiguratorBandit, ExplorationOutcome, PrunerSchedule};
 
+#[cfg(feature = "epiplexity_bandit")]
+pub use configurator_bandit::EpiplexityArmHeuristic;
+
 #[cfg(feature = "sia_feedback")]
 pub use feedback_bandit::{
     FeedbackBandit, FeedbackBanditConfig, RlAlgorithmHint, TrajectorySummary, WeightUpdateRequest,
@@ -154,10 +182,11 @@ pub mod sdar;
 #[cfg(feature = "sdar_gate")]
 pub mod sdar_gate;
 
+#[cfg(all(feature = "sdar_gate", debug_assertions))]
+pub use sdar::PromotionStats;
 #[cfg(feature = "sdar_gate")]
 pub use sdar::{
-    GateStats, PromotionStats, SdarAbsorbConfig, SdarBanditConfig, SdarBanditPruner,
-    SdarGatedAbsorbCompress,
+    GateStats, SdarAbsorbConfig, SdarBanditConfig, SdarBanditPruner, SdarGatedAbsorbCompress,
 };
 #[cfg(feature = "sdar_gate")]
 pub use sdar_gate::{
@@ -444,9 +473,9 @@ pub mod hydra_budget;
 
 #[cfg(feature = "hydra_budget")]
 pub use hydra_budget::{
-    HydraBudgetResult, HydraSkipPlan, LogitLensScore, adaptive_depth_gate, calibrate_from_prompts,
-    calibrate_profiles, detect_erasure_layers, hydra_adaptive_budget, hydra_layer_skip,
-    logit_lens_score, should_skip_layer,
+    HydraBudgetResult, HydraSkipPlan, LogitLensScore, SkipBitmask, adaptive_depth_gate,
+    calibrate_from_prompts, calibrate_profiles, detect_erasure_layers, hydra_adaptive_budget,
+    hydra_layer_skip, logit_lens_score, should_skip_layer,
 };
 
 #[cfg(all(feature = "hydra_budget", feature = "decode_specialize"))]
@@ -997,9 +1026,10 @@ pub mod regime_transition;
 
 #[cfg(feature = "regime_transition")]
 pub use regime_transition::{
-    AdversarialBreaker, CollapseClassifier, CollapseType, DDTreeStats, FailurePattern, FailureRule,
-    GateResult, ProvenanceChain, ProvenanceStep, PrunerType, RegimeCollapseClassifier,
-    RegimeTransitionGate, RegimeTransitionScheduler, TransitionDeferred, TransportResult,
+    AdversarialBreaker, CollapseClassifier, CollapseType, DDTreeStats, FailurePattern,
+    FailurePatternHash, FailureRule, GateResult, ProvenanceChain, ProvenanceStep, PrunerType,
+    RegimeCollapseClassifier, RegimeTransitionGate, RegimeTransitionScheduler, TransitionDeferred,
+    TransportResult,
 };
 
 #[cfg(feature = "regime_transition")]
@@ -1034,3 +1064,47 @@ pub mod federation_composer;
 
 #[cfg(feature = "regime_transition")]
 pub use four_regime_router::{FourRegimeRouter, Heaviness, Regime, RegimeArm, RegimeFeatures};
+
+// ── Residual Context Diffusion (Plan 258) ──────────────────────
+
+#[cfg(feature = "rcd_residual")]
+pub mod resid_pruner;
+
+#[cfg(feature = "rcd_residual")]
+pub use resid_pruner::ResidPruner;
+
+// ── Semiseparable Pruner (Plan 263) ────────────────────────────
+
+#[cfg(feature = "ss_pruner")]
+pub mod ss_pruner;
+
+#[cfg(feature = "ss_pruner")]
+pub use ss_pruner::SemiseparablePruner;
+
+// ── Thicket Variance Probe (Plan 267) ──────────────────────────
+// Decoding-space density routing signal — composes with RV (Plan 202)
+// for the G4 ablation gate: TVP+RV ≥ max(TVP, RV).
+
+#[cfg(feature = "thicket_variance_probe")]
+pub mod thicket_variance_probe;
+
+#[cfg(feature = "thicket_variance_probe")]
+pub use thicket_variance_probe::{
+    ProbeOutput, SyntheticProbeSource, TvpAggregator, TvpConfig, TvpProbeCountBandit,
+    TvpProbeSource, TvpSignal, TvpSignalFrozen, TvpTierDecision, TvpThresholdAdapter,
+    canonical_format_hash, tvp_tier_decision,
+};
+
+// ── Sigmoid-Graded Reject Confidence (Plan 310 T1) ────────────
+// HarnessBridge Table 7 distillation: tolerant > strict rejection.
+// Trait-level default methods live in katgpt-core; this is the opt-in
+// relax-and-retry caller helper.
+
+#[cfg(feature = "sigmoid_graded_reject")]
+pub mod soft_reject;
+
+#[cfg(feature = "sigmoid_graded_reject")]
+pub use soft_reject::{
+    NoRelaxation, RelaxationStrategy, SoftRejectConfig, SoftRejectVerdict,
+    batch_soft_reject_with_relax, soft_reject_decide, soft_reject_with_relax,
+};

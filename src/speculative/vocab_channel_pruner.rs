@@ -31,6 +31,9 @@ use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
 
 use katgpt_core::traits::ConstraintPruner;
 
+#[cfg(feature = "lattice_operad")]
+use crate::lattice_operad::PrunerExpr;
+
 // ── Phase 1: Core Math ──────────────────────────────────────────────
 
 /// Population skewness (γ₁) of a distribution in a single O(n) pass.
@@ -44,12 +47,18 @@ pub fn skewness(values: &[f32]) -> f32 {
         return 0.0;
     }
 
-    let mean: f32 = values.iter().sum::<f32>() / n;
+    let mean: f32 = values.iter().copied().sum::<f32>() / n;
 
-    let (m2, m3) = values.iter().fold((0.0f32, 0.0f32), |(m2, m3), &x| {
+    // Separate accumulators (not a tuple fold) so LLVM can vectorize m2 and m3
+    // independently. The cross-iteration data dependency in the tuple-fold form
+    // blocked auto-vectorization. FP semantics preserved: `d*d*d` left-to-right.
+    let mut m2 = 0.0f32;
+    let mut m3 = 0.0f32;
+    for &x in values {
         let d = x - mean;
-        (m2 + d * d, m3 + d * d * d)
-    });
+        m2 += d * d;
+        m3 += d * d * d;
+    }
 
     if m2 < 1e-10 {
         return 0.0;
@@ -75,12 +84,17 @@ pub fn excess_kurtosis(values: &[f32]) -> f32 {
         return 0.0;
     }
 
-    let mean: f32 = values.iter().sum::<f32>() / n;
+    let mean: f32 = values.iter().copied().sum::<f32>() / n;
 
-    let (m2, m4) = values.iter().fold((0.0f32, 0.0f32), |(m2, m4), &x| {
+    // Separate accumulators for independent SIMD vectorization (see skewness).
+    // FP semantics preserved: `d*d*d*d` left-to-right matches original fold.
+    let mut m2 = 0.0f32;
+    let mut m4 = 0.0f32;
+    for &x in values {
         let d = x - mean;
-        (m2 + d * d, m4 + d * d * d * d)
-    });
+        m2 += d * d;
+        m4 += d * d * d * d;
+    }
 
     if m2 < 1e-10 {
         return 0.0;
@@ -95,22 +109,29 @@ pub fn excess_kurtosis(values: &[f32]) -> f32 {
 ///
 /// O(d) time, O(d) allocation for the output.
 /// Returns a zero vector if `h` has zero norm (degenerate reflection).
+///
+/// Fused single-pass: `h_norm_sq` and `dot_hx` computed together to halve memory
+/// reads vs the previous two-pass iterator chain.
 #[inline]
 pub fn householder_apply(h: &[f32], x: &[f32]) -> Vec<f32> {
     debug_assert_eq!(h.len(), x.len());
 
-    let h_norm_sq: f32 = h.iter().map(|hi| hi * hi).sum();
+    let mut h_norm_sq = 0.0f32;
+    let mut dot_hx = 0.0f32;
+    for i in 0..h.len() {
+        h_norm_sq += h[i] * h[i];
+        dot_hx += h[i] * x[i];
+    }
     if h_norm_sq < 1e-12 {
         return x.to_vec();
     }
 
-    let dot_hx: f32 = h.iter().zip(x.iter()).map(|(hi, xi)| hi * xi).sum();
     let scale = 2.0 * dot_hx / h_norm_sq;
-
-    x.iter()
-        .zip(h.iter())
-        .map(|(&xi, &hi)| xi - scale * hi)
-        .collect()
+    let mut out = Vec::with_capacity(x.len());
+    for i in 0..x.len() {
+        out.push(x[i] - scale * h[i]);
+    }
+    out
 }
 
 /// Sigmoid function. Clamps input to avoid overflow in exp.
@@ -141,13 +162,17 @@ pub fn vocab_project(
     debug_assert!(lm_head.len() >= vocab_size * n_embd);
 
     let mut logits = vec![0.0f32; vocab_size];
+    // Direct indexed loop enables LLVM auto-vectorization (FMA on AVX2/NEON).
+    // Inner iterator chain (zip+map+sum) prevented vectorization. This is the
+    // inner loop of ROTATE decomposition: called 2× per coordinate per iteration
+    // × 20 iterations × 3 coords = 120 times per channel discovery.
     for t in 0..vocab_size {
-        let row = &lm_head[t * n_embd..(t + 1) * n_embd];
-        logits[t] = row
-            .iter()
-            .zip(neuron_weight.iter())
-            .map(|(&a, &b)| a * b)
-            .sum();
+        let base = t * n_embd;
+        let mut sum = 0.0f32;
+        for i in 0..n_embd {
+            sum += lm_head[base + i] * neuron_weight[i];
+        }
+        logits[t] = sum;
     }
     logits
 }
@@ -218,12 +243,12 @@ fn topk_indices(values: &[f32], k: usize) -> Vec<usize> {
 #[inline]
 fn cosine_sim(a: &[f32], b: &[f32]) -> f32 {
     debug_assert_eq!(a.len(), b.len());
-    let (dot, na, nb): (f32, f32, f32) = a
-        .iter()
-        .zip(b.iter())
-        .fold((0.0, 0.0, 0.0), |(d, na, nb), (&ai, &bi)| {
-            (d + ai * bi, na + ai * ai, nb + bi * bi)
-        });
+    let n = a.len();
+    // Three SIMD dot-product reductions — LLVM cannot vectorize the fused
+    // tuple-fold (cross-iteration data dependency).
+    let dot = crate::simd::simd_dot_f32(a, b, n);
+    let na = crate::simd::simd_dot_f32(a, a, n);
+    let nb = crate::simd::simd_dot_f32(b, b, n);
     let denom = na.sqrt() * nb.sqrt();
     if denom < 1e-12 {
         return 0.0;
@@ -432,21 +457,23 @@ pub fn decompose_layer_channels(
     for neuron_idx in 0..mlp_hidden {
         // Extract column neuron_idx from mlp_w2 (row-major [n_embd, mlp_hidden])
         // neuron weight: w[i] = mlp_w2[i * mlp_hidden + neuron_idx] for i in 0..n_embd
-        let neuron_weight: Vec<f32> = (0..n_embd)
-            .map(|i| mlp_w2[i * mlp_hidden + neuron_idx])
-            .collect();
+        let mut neuron_weight = Vec::with_capacity(n_embd);
+        for i in 0..n_embd {
+            neuron_weight.push(mlp_w2[i * mlp_hidden + neuron_idx]);
+        }
 
         let channels = decomposer.decompose_neuron(&neuron_weight, lm_head, vocab_size, n_embd);
 
-        // Union top-K tokens from each channel into a sorted set
-        let mut token_set: Vec<usize> = Vec::new();
+        // Union top-K tokens from each channel into a sorted set.
+        // collect-all → sort_unstable → dedup is O(N log N) vs the old
+        // per-element binary_search + Vec::insert which was O(N²) due to shifts.
+        let total_tokens: usize = channels.iter().map(|ch| ch.top_tokens.len()).sum();
+        let mut token_set: Vec<usize> = Vec::with_capacity(total_tokens);
         for ch in &channels {
-            for &tok in &ch.top_tokens {
-                if let Err(pos) = token_set.binary_search(&tok) {
-                    token_set.insert(pos, tok);
-                }
-            }
+            token_set.extend_from_slice(&ch.top_tokens);
         }
+        token_set.sort_unstable();
+        token_set.dedup();
 
         result.push(token_set);
     }
@@ -520,14 +547,15 @@ impl VocabChannelMap {
     pub fn layer_union(&self, layer: usize) -> Vec<usize> {
         match self.layers.get(layer) {
             Some(neurons) => {
-                let mut union_set: Vec<usize> = Vec::new();
+                // O(N log N): collect-all with exact capacity → sort_unstable → dedup.
+                // Was O(N²): per-token binary_search + Vec::insert (shifts elements).
+                let total: usize = neurons.iter().map(|t| t.len()).sum();
+                let mut union_set: Vec<usize> = Vec::with_capacity(total);
                 for tokens in neurons {
-                    for &tok in tokens {
-                        if let Err(pos) = union_set.binary_search(&tok) {
-                            union_set.insert(pos, tok);
-                        }
-                    }
+                    union_set.extend_from_slice(tokens);
                 }
+                union_set.sort_unstable();
+                union_set.dedup();
                 union_set
             }
             None => Vec::new(),
@@ -538,16 +566,22 @@ impl VocabChannelMap {
     ///
     /// Returns a sorted Vec.
     pub fn global_union(&self) -> Vec<usize> {
-        let mut union_set: Vec<usize> = Vec::new();
+        // O(N log N): collect-all with exact capacity → sort_unstable → dedup.
+        // Was O(N²): per-token binary_search + Vec::insert across all layers.
+        let total: usize = self
+            .layers
+            .iter()
+            .flat_map(|neurons| neurons.iter())
+            .map(|t| t.len())
+            .sum();
+        let mut union_set: Vec<usize> = Vec::with_capacity(total);
         for neurons in &self.layers {
             for tokens in neurons {
-                for &tok in tokens {
-                    if let Err(pos) = union_set.binary_search(&tok) {
-                        union_set.insert(pos, tok);
-                    }
-                }
+                union_set.extend_from_slice(tokens);
             }
         }
+        union_set.sort_unstable();
+        union_set.dedup();
         union_set
     }
 
@@ -561,7 +595,21 @@ impl VocabChannelMap {
     ///     - u32 LE: num_tokens
     ///     - u32 LE × num_tokens: token indices
     pub fn serialize(&self) -> Vec<u8> {
-        let mut buf = Vec::new();
+        // Pre-compute exact byte size to avoid repeated Vec growth reallocs.
+        // Layout: header (4) + per layer (4) + per neuron (4 + 4 * token_count).
+        let total_bytes: usize = 4
+            + self
+                .layers
+                .iter()
+                .map(|neurons| {
+                    4 + neurons
+                        .iter()
+                        .map(|tokens| 4 + tokens.len() * 4)
+                        .sum::<usize>()
+                })
+                .sum::<usize>();
+
+        let mut buf = Vec::with_capacity(total_bytes);
 
         let num_layers = self.layers.len() as u32;
         buf.extend_from_slice(&num_layers.to_le_bytes());
@@ -844,6 +892,7 @@ impl ConstraintPruner for ComposedPruner {
             .all(|p| p.is_valid(depth, token_idx, parent_tokens))
     }
 
+    #[cfg(not(feature = "lattice_operad"))]
     fn batch_is_valid(
         &self,
         depth: usize,
@@ -855,7 +904,7 @@ impl ConstraintPruner for ComposedPruner {
         // Initialize: all valid
         results[..len].fill(true);
 
-        // AND-reduce across all pruners
+        // AND-reduce across all pruners (ad-hoc)
         let mut buf = vec![false; len];
         for pruner in &self.pruners {
             pruner.batch_is_valid(depth, candidates, parent_tokens, &mut buf);
@@ -863,6 +912,73 @@ impl ConstraintPruner for ComposedPruner {
                 results[i] = results[i] && buf[i];
             }
         }
+    }
+
+    /// When `lattice_operad` feature is on, use canonical PrunerExpr composition
+    /// for batch evaluation. This builds a balanced AND-tree expression,
+    /// canonicalizes it (eliminating redundant evaluations via absorption/idempotency),
+    /// and evaluates per-candidate. For pure AND composition, the result is identical
+    /// to the ad-hoc loop, but the canonical form enables future OR/AND mixtures.
+    #[cfg(feature = "lattice_operad")]
+    fn batch_is_valid(
+        &self,
+        depth: usize,
+        candidates: &[usize],
+        parent_tokens: &[usize],
+        results: &mut [bool],
+    ) {
+        use crate::lattice_operad::ComposedPruner as LatticeComposedPruner;
+
+        let len = candidates.len().min(results.len());
+        if len == 0 {
+            return;
+        }
+
+        // Build a balanced AND-tree expression from all sub-pruners
+        let expr = build_and_tree(self.pruners.len());
+        let pruner_refs: Vec<&dyn ConstraintPruner> =
+            self.pruners.iter().map(|p| p.as_ref()).collect();
+        let lattice_pruner = LatticeComposedPruner::from_expr(expr, pruner_refs);
+
+        // Delegate to lattice operad's batch eval
+        lattice_pruner.batch_is_valid(
+            depth,
+            &candidates[..len],
+            parent_tokens,
+            &mut results[..len],
+        );
+    }
+}
+
+/// Build a balanced AND-tree PrunerExpr from N atoms.
+///
+/// For N=1: Atom(0)
+/// For N=2: And(Atom(0), Atom(1))
+/// For N=4: And(And(Atom(0), Atom(1)), And(Atom(2), Atom(3)))
+///
+/// Balanced trees give better short-circuit behavior than left-chained.
+#[cfg(feature = "lattice_operad")]
+fn build_and_tree(n: usize) -> PrunerExpr {
+    match n {
+        0 => PrunerExpr::Atom(0), // degenerate: single atom, always valid
+        1 => PrunerExpr::Atom(0),
+        _ => build_and_tree_range(0, n),
+    }
+}
+
+#[cfg(feature = "lattice_operad")]
+fn build_and_tree_range(start: usize, end: usize) -> PrunerExpr {
+    let len = end - start;
+    if len == 1 {
+        PrunerExpr::Atom(start)
+    } else if len == 2 {
+        PrunerExpr::and(PrunerExpr::Atom(start), PrunerExpr::Atom(start + 1))
+    } else {
+        let mid = start + len / 2;
+        PrunerExpr::and(
+            build_and_tree_range(start, mid),
+            build_and_tree_range(mid, end),
+        )
     }
 }
 

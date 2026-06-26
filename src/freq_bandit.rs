@@ -112,8 +112,15 @@ pub fn token_stream_spectrum(tokens: &[usize], window_size: usize) -> FrequencyP
         };
     }
 
-    // Compute mean for DC removal
+    // Pre-compute DC-removed signal once (saves repeated per-iter subtraction
+    // and the per-token `as f32` cast inside the DFT inner loop).
+    //
+    // Compute mean inline for DC removal; the mean itself is not needed
+    // afterwards — only the centered signal `sig` is used in the DFT.
     let mean = window.iter().map(|&t| t as f32).sum::<f32>() / n as f32;
+    let mut sig = Vec::with_capacity(n);
+    sig.extend(window.iter().map(|&t| t as f32 - mean));
+    let _ = mean; // captured into sig above; documented for clarity.
 
     // DFT coefficients — only need up to Nyquist (n/2)
     let max_k = n / 2;
@@ -122,35 +129,51 @@ pub fn token_stream_spectrum(tokens: &[usize], window_size: usize) -> FrequencyP
     // DC component (k=0) is discarded after mean removal
     magnitudes[0] = 0.0;
 
-    // Compute |X[k]|² for k=1..max_k via dot-product DFT
-    #[allow(clippy::needless_range_loop)]
+    // Compute |X[k]|² for k=1..max_k using the rotation recurrence instead of
+    // per-element cos/sin calls.
+    //
+    // For fixed k, the sequence angle[i] = (2π k / n) · i increments by a
+    // constant Δ = 2π k / n per index. Using the rotation identities
+    //   cos(a+Δ) = cos(a)cos(Δ) − sin(a)sin(Δ)
+    //   sin(a+Δ) = sin(a)cos(Δ) + cos(a)sin(Δ)
+    // we only need 2 transcendentals per k (cos(Δ), sin(Δ)) instead of 2n,
+    // reducing total transcendental cost from O(n²/2) to O(n/2).
+    //
+    // The recurrence is numerically stable for the short windows we care
+    // about here (n ≤ window_size, typically ≤ 256). For very long windows
+    // we'd periodically renormalize, but that's not needed at this scale.
+    let two_pi_over_n = 2.0 * std::f32::consts::PI / n as f32;
+
     for k in 1..=max_k {
+        let delta = two_pi_over_n * k as f32;
+        let cos_d = delta.cos();
+        let sin_d = delta.sin();
+
+        // Start at angle 0: cos=1, sin=0. After first iteration we'll have
+        // rotated by Δ, giving angle = Δ·1 as expected.
+        let mut cos_a = 1.0f32;
+        let mut sin_a = 0.0f32;
         let mut re = 0.0f32;
         let mut im = 0.0f32;
-        let two_pi_k_over_n = 2.0 * std::f32::consts::PI * k as f32 / n as f32;
 
-        // Chunked loop for better auto-vectorization
-        let mut i = 0;
-        while i + 4 <= n {
-            for j in 0..4 {
-                let idx = i + j;
-                let x = window[idx] as f32 - mean;
-                let angle = two_pi_k_over_n * idx as f32;
-                re += x * angle.cos();
-                im -= x * angle.sin();
-            }
-            i += 4;
-        }
-        // Remainder
-        while i < n {
-            let x = window[i] as f32 - mean;
-            let angle = two_pi_k_over_n * i as f32;
-            re += x * angle.cos();
-            im -= x * angle.sin();
-            i += 1;
+        for i in 0..n {
+            let x = unsafe { *sig.get_unchecked(i) };
+            // FMA contractions for re/im accumulation (inner loop of O(n²) DFT).
+            re = x.mul_add(cos_a, re);
+            im = (-x).mul_add(sin_a, im);
+
+            // Rotate to next angle: (cos_a, sin_a) ← (cos_a·cos_d − sin_a·sin_d,
+            // sin_a·cos_d + cos_a·sin_d). Two FMAs each.
+            let new_cos = cos_a * cos_d - sin_a * sin_d;
+            let new_sin = sin_a * cos_d + cos_a * sin_d;
+            cos_a = new_cos;
+            sin_a = new_sin;
         }
 
-        magnitudes[k] = (re * re + im * im) / (n as f32);
+        unsafe {
+            // FMA: re² + im² in a single rounding.
+            *magnitudes.get_unchecked_mut(k) = re.mul_add(re, im * im) / (n as f32);
+        }
     }
 
     // Band boundaries (in terms of frequency index k)
@@ -339,15 +362,22 @@ impl FrequencyBandit {
             }
         }
 
-        // All arms visited: pick highest UCB1 score
+        // All arms visited: pick highest UCB1 score.
+        // Hoist invariants out of the 3-arm loop: `ln(total)` and the
+        // exploration constant only depend on total pulls, not on the arm.
+        let ln_total = (self.total_pulls as f64).ln();
+        let c = self.exploration_c as f64;
+        let coef = c * (2.0 * ln_total).sqrt();
+
         let mut best_idx = 0;
         let mut best_score = f64::NEG_INFINITY;
 
         for i in 0..3 {
             let q = self.arm_q_values[i];
-            let n = self.arm_counts[i] as f64;
-            let total = self.total_pulls as f64;
-            let exploration = self.exploration_c as f64 * (2.0 * total.ln() / n).sqrt();
+            // exploration = c * sqrt(2 * ln(N) / n)
+            //             = (c * sqrt(2 * ln(N))) / sqrt(n)
+            // The numerator is loop-invariant; only `1/sqrt(n)` varies per arm.
+            let exploration = coef / (self.arm_counts[i] as f64).sqrt();
             let score = q + exploration;
 
             if score > best_score {
@@ -368,8 +398,9 @@ impl FrequencyBandit {
         let i = band.as_index();
         self.arm_counts[i] += 1;
         self.total_pulls += 1;
-        let n = self.arm_counts[i] as f64;
-        self.arm_q_values[i] += (reward - self.arm_q_values[i]) / n;
+        // Pre-compute the reciprocal so we multiply instead of divide below.
+        let inv_n = 1.0 / self.arm_counts[i] as f64;
+        self.arm_q_values[i] += (reward - self.arm_q_values[i]) * inv_n;
     }
 
     /// Map a frequency band to speculative decode configuration.
@@ -432,13 +463,14 @@ impl FrequencyBandit {
         // Welford online variance from Q-value updates.
         // Since we only track incremental mean (Q(a)), not raw samples,
         // we use Q-value spread as a proxy: variance ≈ (Q(a) - Q_mean)².
-        let q_mean: f64 = self
-            .arm_q_values
-            .iter()
-            .copied()
-            .filter(|&q| q != 0.0)
-            .sum::<f64>()
-            / 3.0_f64;
+        // Preserve original semantics: exclude zero Q-values from the mean.
+        let mut q_sum = 0.0_f64;
+        for &q in &self.arm_q_values {
+            if q != 0.0 {
+                q_sum += q;
+            }
+        }
+        let q_mean = q_sum / 3.0_f64;
         let mut variances = [0.0; 3];
         for (i, &q) in self.arm_q_values.iter().enumerate() {
             match self.arm_counts[i] {

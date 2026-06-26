@@ -364,3 +364,37 @@ tests/
 **Feature gate:** `committee_boost = ["bt_rank", "bandit"]` — **opt-in**.
 
 📖 See [`.research/093_Boosting_Weak_Reasoning_Committee_Search.md`](../.research/093_Boosting_Weak_Reasoning_Committee_Search.md) for the paper distillation.
+
+## 10. Induced CWM (Plan 296)
+
+Open half of the Code World Models Super-GOAT, distilled from [arxiv 2510.04542](https://arxiv.org/pdf/2510.04542) (Lehrach et al., DeepMind Oct 2025). A generic, IP-free trait surface for LLM-induced forward-model implementations that are **verifiable** (transition unit tests), **committable** (BLAKE3 over canonical bytes), and **hot-swappable** (atomic slot). The kernel primitive is shipped open in `katgpt-core`; the LLM-induction pipeline itself is private (riir-ai Plan 326).
+
+The primitive exists to let downstream consumers (Bomber, Go, NPC domains, custom IIGs) plug in induced forward models behind a stable trait boundary — `InducedCwmKernel: GameState` — without coupling to any specific induction recipe.
+
+- **`induced_cwm`** — `InducedCwmKernel: GameState` marker + `CwmCommitment` (BLAKE3) + `BeliefInferenceFn<S>` + `TransitionUnitTest` + `verify_transition` (Plan 296 Phase 1).
+- **`induced_cwm_ismcts`** (requires `induced_cwm`) — Information-Set MCTS over an induced CWM + belief fn: `ismcts_search_with_inference<S, B>` + `InformationSet` + `NodeStats` (Plan 296 Phase 2).
+- **`induced_cwm_tournament`** (requires `induced_cwm`) — Value Function Tournament: round-robin arena-play selector over `StateHeuristic` candidates, `ValueFnTournament<S, V>` + `PlayerStats` + `TournamentWinner` (Plan 296 Phase 3).
+
+Phase 4 ships `InducedCwmSlot<K>` — lock-free atomic hot-swap slot for live kernel replacement (under the `induced_cwm` feature).
+
+**GOAT 4/4 PASS** (all gates green, see [`.benchmarks/296_induced_cwm_primitive_goat.md`](../.benchmarks/296_induced_cwm_primitive_goat.md)):
+
+| Gate | Target | Verdict |
+|------|--------|--------|
+| **G1** Verifiability | 100% pass on known-correct transitions; correct diff on mutation | ✅ PASS |
+| **G2** Play strength | ISMCTS picks non-fold ≥ 70% when P(strong) ≥ 0.6 | ✅ PASS |
+| **G3** Latency | `advance()` ≤ 10 µs/call on mock CWM | ✅ PASS (~1–5 ns, ~3 orders of magnitude under budget) |
+| **G4** Commitment integrity | Same logical kernel → identical BLAKE3 across 10 re-runs | ✅ PASS |
+
+The primitive stays **opt-in by design** — it's a primitive surface, not a default-on capability; downstream pipelines opt in by enabling the feature. **Ready for downstream consumption** (riir-ai Plan 326).
+
+### Examples
+
+```bash
+cargo run --example induced_cwm_01_mock_iig            --features induced_cwm_ismcts        # Phase 2: mock Leduc IIG + ISMCTS
+cargo run --example induced_cwm_02_value_tournament    --features induced_cwm_tournament     # Phase 3: value-fn tournament arena
+```
+
+🔧 Feature flags: `induced_cwm`, `induced_cwm_ismcts` (deps `induced_cwm`), `induced_cwm_tournament` (deps `induced_cwm`) — all **opt-in**.
+
+📖 See [`.plans/296_induced_cwm_kernel_primitive.md`](../.plans/296_induced_cwm_kernel_primitive.md) for the plan, [`.research/275_Code_World_Model_Induced_Forward_Model.md`](../.research/275_Code_World_Model_Induced_Forward_Model.md) for the paper distillation, [`.benchmarks/296_induced_cwm_primitive_goat.md`](../.benchmarks/296_induced_cwm_primitive_goat.md) for the GOAT proof (G1–G4 all PASS).

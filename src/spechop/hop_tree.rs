@@ -187,7 +187,7 @@ pub fn build_hop_dd_tree(marginals: &[HopMarginal], config: &HopTreeConfig) -> V
         return Vec::new();
     }
 
-    let mut heap: BinaryHeap<HopTreeNode> = BinaryHeap::new();
+    let mut heap: BinaryHeap<HopTreeNode> = BinaryHeap::with_capacity(config.tree_budget);
     let mut tree: Vec<HopTreeNode> = Vec::with_capacity(config.tree_budget);
 
     // ── Chain seed: build greedy backbone first ────────────────
@@ -297,7 +297,10 @@ pub fn build_hop_dd_tree(marginals: &[HopMarginal], config: &HopTreeConfig) -> V
 
         let next_depth = node.depth + 1;
         let node_idx = tree.len();
-        tree.push(node.clone());
+        // Only `node.score` is read after the push, so capture it and move the
+        // node into the tree instead of deep-cloning its two String fields.
+        let node_score = node.score;
+        tree.push(node);
 
         // Expand to next depth if available
         if next_depth >= marginals.len() {
@@ -313,7 +316,7 @@ pub fn build_hop_dd_tree(marginals: &[HopMarginal], config: &HopTreeConfig) -> V
                 break;
             }
 
-            let child_score = node.score + candidate.log_confidence();
+            let child_score = node_score + candidate.log_confidence();
             heap.push(HopTreeNode {
                 score: child_score,
                 depth: next_depth,
@@ -375,7 +378,7 @@ pub fn build_hop_dd_tree_with_schedule(
         })
         .collect();
 
-    let mut heap: BinaryHeap<HopTreeNode> = BinaryHeap::new();
+    let mut heap: BinaryHeap<HopTreeNode> = BinaryHeap::with_capacity(config.tree_budget);
     let mut tree: Vec<HopTreeNode> = Vec::with_capacity(config.tree_budget);
 
     // ── Chain seed with relaxed intermediate floors ──────────
@@ -484,7 +487,10 @@ pub fn build_hop_dd_tree_with_schedule(
 
         let next_depth = node.depth + 1;
         let node_idx = tree.len();
-        tree.push(node.clone());
+        // Only `node.score` is read after the push, so capture it and move the
+        // node into the tree instead of deep-cloning its two String fields.
+        let node_score = node.score;
+        tree.push(node);
 
         if next_depth >= marginals.len() {
             continue;
@@ -500,7 +506,7 @@ pub fn build_hop_dd_tree_with_schedule(
                 break;
             }
 
-            let child_score = node.score + candidate.log_confidence();
+            let child_score = node_score + candidate.log_confidence();
             heap.push(HopTreeNode {
                 score: child_score,
                 depth: next_depth,
@@ -526,18 +532,22 @@ pub fn extract_best_hop_path(tree: &[HopTreeNode]) -> Vec<(String, String)> {
         return Vec::new();
     }
 
-    let max_depth = tree.iter().map(|n| n.depth).max().unwrap_or(0);
-
-    // Pick the highest-score node at max depth
-    let best = tree
-        .iter()
-        .filter(|n| n.depth == max_depth)
-        .max_by(|a, b| {
-            a.score
-                .partial_cmp(&b.score)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        })
-        .expect("at least one node at max_depth");
+    // Single-pass: track max_depth and best (highest-score) node at that depth together.
+    // Replaces 3 tree traversals (max → filter → max_by) with one.
+    let best = tree.iter().reduce(|acc, n| {
+        use std::cmp::Ordering;
+        match n.depth.cmp(&acc.depth) {
+            Ordering::Greater => n,
+            Ordering::Less => acc,
+            Ordering::Equal => {
+                if n.score > acc.score {
+                    n
+                } else {
+                    acc
+                }
+            }
+        }
+    }).expect("non-empty tree has at least one node");
 
     reconstruct_path(tree, best)
 }
@@ -551,17 +561,22 @@ pub fn extract_deepest_hop_path(tree: &[HopTreeNode]) -> Vec<(String, String)> {
         return Vec::new();
     }
 
-    let max_depth = tree.iter().map(|n| n.depth).max().unwrap_or(0);
-
-    let best_at_max = tree
-        .iter()
-        .filter(|n| n.depth == max_depth)
-        .max_by(|a, b| {
-            a.score
-                .partial_cmp(&b.score)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        })
-        .expect("at least one node at max_depth");
+    // Single-pass: track max_depth and best (highest-score) node at that depth together.
+    // Replaces 3 tree traversals (max → filter → max_by) with one.
+    let best_at_max = tree.iter().reduce(|acc, n| {
+        use std::cmp::Ordering;
+        match n.depth.cmp(&acc.depth) {
+            Ordering::Greater => n,
+            Ordering::Less => acc,
+            Ordering::Equal => {
+                if n.score > acc.score {
+                    n
+                } else {
+                    acc
+                }
+            }
+        }
+    }).expect("non-empty tree has at least one node");
 
     reconstruct_path(tree, best_at_max)
 }
@@ -646,42 +661,55 @@ pub fn verify_hop_tree(
         ..Default::default()
     };
 
-    for (depth, (actual_action, actual_obs)) in actual.iter().enumerate() {
-        // Find speculative nodes at this depth with matching action
-        let candidates: Vec<&HopTreeNode> = tree
-            .iter()
-            .filter(|n| n.depth == depth && n.action == *actual_action)
-            .collect();
+    // Pre-bucket tree nodes by depth in a single pass → O(T) build.
+    // `actual` depths run 0..actual.len(); any tree node deeper than that
+    // can never match and is ignored. This replaces the previous O(D × T)
+    // full-tree rescan per depth (one `.filter` over the whole tree per hop).
+    //
+    // Buckets preserve expansion order, which is best-first by score, so the
+    // "try candidates in score order" semantics below are unchanged.
+    let n_depths = actual.len();
+    let mut buckets: Vec<Vec<usize>> = (0..n_depths).map(|_| Vec::new()).collect();
+    for (idx, node) in tree.iter().enumerate() {
+        if node.depth < n_depths {
+            buckets[node.depth].push(idx);
+        }
+    }
 
-        match candidates.as_slice() {
-            [] => {
-                // No speculative node for this action → direct commit
-                result.direct_commits += 1;
+    for (depth, (actual_action, actual_obs)) in actual.iter().enumerate() {
+        // Scan only this depth's bucket (already filtered by depth) and match
+        // by action — no full-tree rescan, no per-depth Vec allocation.
+        // Track `had_candidate` during the same pass so the direct-commit vs
+        // rollback classification needs no second scan of the bucket.
+        let mut matched = false;
+        let mut had_candidate = false;
+        for &node_idx in &buckets[depth] {
+            let node = &tree[node_idx];
+            if node.action != *actual_action {
+                continue;
+            }
+            had_candidate = true;
+            if verifier.verify(actual_obs, &node.observation) {
+                result.commits += 1;
                 result
                     .path
                     .push((actual_action.clone(), actual_obs.clone()));
+                matched = true;
+                break;
             }
-            nodes => {
-                // Try candidates in score order (best first)
-                let mut matched = false;
-                for node in nodes {
-                    if verifier.verify(actual_obs, &node.observation) {
-                        result.commits += 1;
-                        result
-                            .path
-                            .push((actual_action.clone(), actual_obs.clone()));
-                        matched = true;
-                        break;
-                    }
-                }
-                if !matched {
-                    // All candidates failed → rollback + commit real observation
-                    result.rollbacks += 1;
-                    result
-                        .path
-                        .push((actual_action.clone(), actual_obs.clone()));
-                }
+        }
+
+        if !matched {
+            // "no speculative node for this action" → direct commit;
+            // "candidates existed but all mismatched" → rollback.
+            if had_candidate {
+                result.rollbacks += 1;
+            } else {
+                result.direct_commits += 1;
             }
+            result
+                .path
+                .push((actual_action.clone(), actual_obs.clone()));
         }
     }
 

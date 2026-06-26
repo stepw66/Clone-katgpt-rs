@@ -329,7 +329,9 @@ impl Sudoku9x9 {
                 match self.grid[r][c] {
                     0 => s.push_str(". "),
                     d => {
-                        s.push_str(&format!("{d} "));
+                        // '1'..='9' correspond to ASCII 49..=57.
+                        s.push((b'0' + d) as char);
+                        s.push(' ');
                     }
                 }
             }
@@ -499,11 +501,11 @@ impl StreamingSolver {
 
     /// Solve and collect streaming events.
     pub fn solve_streaming(&mut self) -> bool {
-        self.solve_recursive(0)
+        let filled = self.state.clue_count();
+        self.solve_recursive(0, filled)
     }
 
-    fn solve_recursive(&mut self, depth: usize) -> bool {
-        let filled = self.state.clue_count();
+    fn solve_recursive(&mut self, depth: usize, filled: usize) -> bool {
         self.cache
             .append(Vec2::new(self.step as f32, filled as f32), self.step);
 
@@ -513,7 +515,7 @@ impl StreamingSolver {
         self.cht_head.insert(
             [self.step as f64, filled as f64],
             [self.step as f64, 0.0],
-            self.step as i64,
+            self.step as i32,
         );
 
         self.step += 1;
@@ -537,7 +539,10 @@ impl StreamingSolver {
 
             if self.state.is_valid_move(row, col, digit) {
                 self.state.grid[row][col] = digit;
-                let new_filled = self.state.clue_count();
+                // Incremental: we just placed exactly one digit into an empty cell,
+                // so the new filled count is `filled + 1`. Avoids a full 81-cell
+                // scan on every accepted move in the backtracking recursion.
+                let new_filled = filled + 1;
                 self.events.push(SolveEvent::Accepted {
                     row,
                     col,
@@ -545,7 +550,7 @@ impl StreamingSolver {
                     filled: new_filled,
                 });
 
-                if self.solve_recursive(depth + 1) {
+                if self.solve_recursive(depth + 1, new_filled) {
                     return true;
                 }
 
@@ -637,6 +642,12 @@ impl StreamingSolver {
         let mut prev_filled = 0usize;
         let mut shown_count = 0usize;
 
+        // Pre-size output buffer: each shown event is ~50 chars.
+        out.reserve(shown_indices.len() * 64);
+
+        // write!/writeln! into a String never returns Err.
+        use std::fmt::Write as _;
+
         for &idx in &shown_indices {
             let (row, col, digit, filled, _seq) = accepted_events[idx];
             shown_count += 1;
@@ -645,27 +656,25 @@ impl StreamingSolver {
             if filled < prev_filled && shown_count > 1 {
                 let drop = prev_filled - filled;
                 if drop >= 3 {
-                    out.push_str(&format!(
-                        "Undoing row {} col {}. Going back up.\n",
+                    let _ = writeln!(
+                        out,
+                        "Undoing row {} col {}. Going back up.",
                         row + 1,
                         col + 1,
-                    ));
+                    );
                 } else {
-                    out.push_str(&format!(
-                        "Trying another path at row {}, col {}.\n",
+                    let _ = writeln!(
+                        out,
+                        "Trying another path at row {}, col {}.",
                         row + 1,
                         col + 1,
-                    ));
+                    );
                 }
             }
 
-            out.push_str(&format!(
-                "Trying {digit} at row {}, col {}.\n",
-                row + 1,
-                col + 1,
-            ));
+            let _ = writeln!(out, "Trying {digit} at row {}, col {}.", row + 1, col + 1);
             let phrase = OK_PHRASES[shown_count % OK_PHRASES.len()];
-            out.push_str(&format!("{phrase} ({filled}/81 resolved)\n"));
+            let _ = writeln!(out, "{phrase} ({filled}/81 resolved)");
             prev_filled = filled;
         }
 
@@ -678,11 +687,12 @@ impl StreamingSolver {
             } = event
             {
                 let ratio = *total_trace as f64 / *hull_size as f64;
-                out.push_str(&format!(
+                let _ = writeln!(
+                    out,
                     "\n✅ Solved in {steps} steps!\n\
                      Hull compression: {hull_size} vertices \
-                     from {total_trace} trace entries ({ratio:.1}x)\n"
-                ));
+                     from {total_trace} trace entries ({ratio:.1}x)"
+                );
             }
         }
 

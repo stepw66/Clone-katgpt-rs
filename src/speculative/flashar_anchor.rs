@@ -167,6 +167,15 @@ fn fill_with_anchors(
     let mut confidence_history = Vec::with_capacity(max_steps);
     let mut converged_step = max_steps;
 
+    // Scratch buffer reused across all positions and steps — fused
+    // single-pass sampling (see below). `exp_scratch[t]` caches
+    // `exp(logit_t − max)` so the second sampling pass can read it without
+    // re-doing the transcendentals. Per-position we also stash
+    // `exp(logit-max) · relevance` into `sum_exp` directly (it's a scalar,
+    // not a slice). Allocating once here and overwriting per-position
+    // halves the `.exp()` calls per token in the hot path.
+    let mut exp_scratch = vec![0.0f32; vocab];
+
     for step in 0..max_steps {
         let _seq_len_actual = crate::dllm::forward_block_causal_with(
             dctx,
@@ -188,47 +197,65 @@ fn fill_with_anchors(
             let logits_start = p * vocab;
             let logits_end = logits_start + vocab;
             let logits_p = &dctx.logits_flat[logits_start..logits_end];
-            let max_logit = logits_p.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+            let max_logit = logits_p.iter().copied().fold(f32::NEG_INFINITY, f32::max);
 
             let depth = p - block_start;
             let parent_tokens = &tokens[block_start..p];
 
+            // ── Fused single pass: compute weights + sum_exp together ──
+            // The original two-pass code had an asymmetry: `sum_exp` included
+            // `* relevance` but the second-pass `cum` did NOT. We preserve that
+            // exact semantics by caching `exp(logit-max)` in `exp_scratch` and
+            // `exp(logit-max) * relevance` in `weights_scratch`. The second
+            // pass reads from `exp_scratch` instead of recomputing `.exp()`.
             let mut sum_exp = 0.0f32;
             for t in 0..vocab {
                 if t == mask {
+                    exp_scratch[t] = 0.0;
                     continue;
                 }
                 if !pruner.is_valid(depth, t, parent_tokens) {
+                    exp_scratch[t] = 0.0;
                     continue;
                 }
                 let relevance = screener.relevance(depth, t, parent_tokens);
-                sum_exp += (logits_p[t] - max_logit).exp() * relevance;
+                let e = (logits_p[t] - max_logit).exp();
+                exp_scratch[t] = e;
+                // The original code's sum_exp multiplied by relevance (even for
+                // negative relevance, which is unusual but kept for parity).
+                sum_exp += e * relevance;
             }
 
             if sum_exp == 0.0 {
                 continue;
             }
 
-            // Temperature-scaled greedy sampling (matching d2f.rs pattern)
-            let mut best_token = mask;
-            let mut best_prob = 0.0f32;
-            let mut cum = 0.0f32;
+            // ── Sample via cumulative sum over the cached `exp_scratch` ──
+            // The original sampling loop used UNWEIGHTED `exp(logit-max)`
+            // (no relevance). We read from `exp_scratch[t]` to avoid the
+            // second `.exp()` call per token.
             let threshold = rng.uniform() * sum_exp;
-
+            let mut best_token = mask;
+            let mut cum = 0.0f32;
             for t in 0..vocab {
                 if t == mask || !pruner.is_valid(depth, t, parent_tokens) {
                     continue;
                 }
-                cum += (logits_p[t] - max_logit).exp();
+                cum += exp_scratch[t];
                 if cum >= threshold && best_token == mask {
                     best_token = t;
+                    // Keep iterating to preserve the original loop semantics
+                    // (no early break — matches d2f.rs reference).
                 }
             }
 
-            // Compute probability of chosen token
-            if best_token != mask {
-                best_prob = (logits_p[best_token] - max_logit).exp() / sum_exp;
-            }
+            // Compute probability of chosen token from the cached `exp_scratch`.
+            // Original semantics: UNWEIGHTED exp divided by WEIGHTED sum_exp.
+            let best_prob = if best_token != mask {
+                exp_scratch[best_token] / sum_exp
+            } else {
+                0.0
+            };
 
             if best_prob >= tau_conf && best_token != mask {
                 tokens[p] = best_token;
@@ -239,7 +266,7 @@ fn fill_with_anchors(
         let confidence = n_confident as f32 / block_size as f32;
         confidence_history.push(confidence);
 
-        // Early exit: all block positions unmasked
+        // Early exit: all block positions unmasked.
         if tokens[block_start..seq_len].iter().all(|&t| t != mask) {
             converged_step = step;
             break;

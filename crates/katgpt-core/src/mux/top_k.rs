@@ -16,11 +16,9 @@ pub fn extract_top_k_peaks(logits: &[f32], k: usize) -> Vec<f32> {
     }
     let mut values = logits.to_vec();
     // O(n) partial sort: partition so first k are the largest (unordered), then sort those k
-    let _ = values.select_nth_unstable_by(k - 1, |a, b| {
-        b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal)
-    });
+    let (_, _, _) = values.select_nth_unstable_by(k - 1, |a, b| b.total_cmp(a));
     values.truncate(k);
-    values.sort_unstable_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
+    values.sort_unstable_by(|a, b| b.total_cmp(a));
     values
 }
 
@@ -47,17 +45,15 @@ pub fn extract_top_k_into<'a>(
         if val <= buf[k - 1] {
             continue; // Skip if not in top-k
         }
-        // Find insertion position (descending order)
-        let pos = match buf[..k].binary_search_by(|probe| {
-            probe
-                .partial_cmp(&val)
-                .unwrap_or(std::cmp::Ordering::Equal)
-                .reverse()
-        }) {
-            Ok(idx) | Err(idx) => idx.min(k - 1),
-        };
-        // Shift elements down
-        buf.copy_within(pos..k - 1, pos + 1);
+        // Linear scan for insertion position (faster than binary search for k ≤ 16)
+        let mut pos = 0;
+        while pos < k && buf[pos] >= val {
+            pos += 1;
+        }
+        // Shift elements down (skip if inserting at last position — no copy needed).
+        if pos < k - 1 {
+            buf.copy_within(pos..k - 1, pos + 1);
+        }
         buf[pos] = val;
     }
     &buf[..k]

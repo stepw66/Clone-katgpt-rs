@@ -72,6 +72,15 @@ pub fn adaptive_tree_budget(base_budget: usize, signal: f32, mode: BudgetAdaptat
             let adapted = (base_budget as f32 * scale) as usize;
             adapted.max(base_budget / 2).min(base_budget * 2)
         }
+        #[cfg(feature = "echo_env_predictor")]
+        BudgetAdaptation::EchoConsistency => {
+            // ECHO consistency gate: same scaling curve, but signal is branch entropy
+            // from PredictionConsistencyGate. Uses the config's threshold directly.
+            let t = (signal / ENTROPY_THRESHOLD_NATS).clamp(0.0, 1.0);
+            let scale = 0.5 + 1.5 * t;
+            let adapted = (base_budget as f32 * scale) as usize;
+            adapted.max(base_budget / 2).min(base_budget * 2)
+        }
     }
 }
 

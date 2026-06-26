@@ -101,6 +101,25 @@ impl PhraseTrie {
         result
     }
 
+    /// Zero-alloc membership test: is `token_idx` reachable as a child of any
+    /// active node?
+    ///
+    /// O(active_nodes) — short-circuits on the first match. Replaces the
+    /// previous pattern of `get_boosted_tokens(active).contains(&token_idx)`
+    /// which allocated a `vocab_size` bool array (potentially hundreds of KB)
+    /// and a result Vec on every relevance() call.
+    pub fn is_token_boosted(&self, active: &[usize], token_idx: usize) -> bool {
+        if token_idx >= self.vocab_size {
+            return false;
+        }
+        for &node_idx in active {
+            if self.nodes[node_idx].children[token_idx].is_some() {
+                return true;
+            }
+        }
+        false
+    }
+
     /// Advance the active set by one token. Returns the new set of active node indices.
     ///
     /// - For each active node, follow the edge `token_id` if it exists.

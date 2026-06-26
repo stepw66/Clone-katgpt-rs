@@ -126,7 +126,7 @@ impl ConvexToToastBridge {
             trees.insert(pretoken.to_vec(), tree);
         }
 
-        ToastTokenizer {
+        let mut tokenizer = ToastTokenizer {
             vocab_to_id,
             id_to_vocab,
             trees,
@@ -134,7 +134,10 @@ impl ConvexToToastBridge {
             eos_id,
             pad_id,
             unk_id,
-        }
+            datrie_vocab: None,
+        };
+        tokenizer.post_load();
+        tokenizer
     }
 
     /// Convenience: build a tokenizer with default special tokens.

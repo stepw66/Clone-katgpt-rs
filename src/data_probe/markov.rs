@@ -45,6 +45,7 @@ fn sample_dirichlet_into(k: usize, _alpha: f32, rng: &mut fastrand::Rng, buf: &m
 }
 
 /// Convenience wrapper: returns a new Vec for one-shot use.
+#[allow(dead_code)]
 fn sample_dirichlet(k: usize, alpha: f32, rng: &mut fastrand::Rng) -> Vec<f32> {
     let mut buf = vec![0.0f32; k];
     sample_dirichlet_into(k, alpha, rng, &mut buf);

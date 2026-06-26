@@ -96,26 +96,26 @@ impl SpeculativeVerifier for SimulatedVerifier {
 
         // 4. Simulated acceptance: cap at rate
         let max_accept = ((self.sctx.path_buf.len() as f32) * self.acceptance_rate).ceil() as usize;
+        let take = max_accept.max(1);
         self.sctx.accepted_buf.clear();
         self.sctx
             .accepted_buf
-            .extend(self.sctx.path_buf.iter().take(max_accept.max(1)).copied());
+            .extend(self.sctx.path_buf.iter().take(take).copied());
 
         // 5. Bonus token: if all accepted, sample +1 from last marginal
         if self.sctx.accepted_buf.len() == max_accept && self.sctx.steps_populated > 0 {
             let last_step = self.sctx.steps_populated - 1;
             let start = last_step * vocab_size;
             let end = start + vocab_size;
-            let last_marginal: &[f32] = if end <= self.sctx.marginals_flat.len() {
-                &self.sctx.marginals_flat[start..end]
-            } else {
-                &[]
+            let marginals_flat = &self.sctx.marginals_flat;
+            let last_marginal: &[f32] = match end <= marginals_flat.len() {
+                true => &marginals_flat[start..end],
+                false => &[],
             };
             let bonus = sample_from_distribution(
-                if last_marginal.is_empty() {
-                    &[1.0]
-                } else {
-                    last_marginal
+                match last_marginal.is_empty() {
+                    true => &[1.0],
+                    false => last_marginal,
                 },
                 rng,
             );
@@ -143,6 +143,12 @@ pub struct LeviathanVerifier<'a> {
     drafter_lora: Option<DrafterLoraWeights>,
     /// Pre-allocated forward context for LoRA drafter (avoids re-allocation).
     drafter_fwd_ctx: Option<DrafterForwardContext>,
+    /// Entropy-bounded acceptance forecast for adaptive γ (Issue 023).
+    /// When `Some` and `adaptive_gamma_forecast` is enabled, the draft length
+    /// γ is derived from the forecast acceptance rate instead of the static
+    /// `Config::draft_lookahead`. One instance reused per step — zero-alloc.
+    #[cfg(feature = "adaptive_gamma_forecast")]
+    pub forecast: Option<crate::speculative::acceptance_forecast::AcceptanceForecast>,
 }
 
 impl<'a> LeviathanVerifier<'a> {
@@ -160,6 +166,8 @@ impl<'a> LeviathanVerifier<'a> {
             tree_builder: TreeBuilder::new(draft_config),
             drafter_lora: None,
             drafter_fwd_ctx: None,
+            #[cfg(feature = "adaptive_gamma_forecast")]
+            forecast: None,
         }
     }
 
@@ -187,6 +195,22 @@ impl<'a> LeviathanVerifier<'a> {
     pub fn has_drafter_lora(&self) -> bool {
         self.drafter_lora.is_some()
     }
+
+    /// Attach an [`AcceptanceForecast`] for entropy-bounded adaptive γ
+    /// (Issue 023). No-op when the `adaptive_gamma_forecast` feature is OFF.
+    ///
+    /// When attached, each `speculate()` step:
+    /// 1. Observes the target's next-token logits (computed during Phase 0).
+    /// 2. Forecasts the acceptance rate `α ≈ a − b·H`.
+    /// 3. Sets `γ = clamp(ceil(draft_lookahead / α), 1, draft_lookahead·2)`.
+    #[cfg(feature = "adaptive_gamma_forecast")]
+    pub fn with_forecast(
+        mut self,
+        forecast: crate::speculative::acceptance_forecast::AcceptanceForecast,
+    ) -> Self {
+        self.forecast = Some(forecast);
+        self
+    }
 }
 
 impl SpeculativeVerifier for LeviathanVerifier<'_> {
@@ -201,9 +225,16 @@ impl SpeculativeVerifier for LeviathanVerifier<'_> {
     ) -> Vec<usize> {
         let vocab_size = draft_config.vocab_size;
         let target_temp = self.target_config.temperature;
+        // Cache reciprocal once — division is ~4-7 cycles, softmax is called multiple times per step.
+        let inv_target_temp = 1.0 / target_temp;
 
         // Phase 0 (MTP): Get target hidden state for conditioning + score initial token
         self.target_cache.reset();
+        // Adaptive γ (Issue 023): forecast acceptance rate from the raw target
+        // logits before temperature scaling, so the EMA tracks the model's
+        // intrinsic entropy (not the temperature-scaled one).
+        #[cfg(feature = "adaptive_gamma_forecast")]
+        let mut adaptive_gamma_override: Option<usize> = None;
         {
             let logits = forward(
                 &mut self.target_ctx,
@@ -213,8 +244,24 @@ impl SpeculativeVerifier for LeviathanVerifier<'_> {
                 pos,
                 self.target_config,
             );
+            #[cfg(feature = "adaptive_gamma_forecast")]
+            if let Some(forecast) = self.forecast.as_mut() {
+                let alpha = forecast.observe_and_forecast(logits);
+                // γ = clamp(ceil(draft_lookahead / α), 1, draft_lookahead·2).
+                // The ceiling compensates for lower-than-target acceptance by
+                // drafting more; the max cap prevents pathological blowups when
+                // the forecast drops near zero. The min is 1 so the draft loop
+                // always runs at least once.
+                let base = draft_config.draft_lookahead.max(1);
+                adaptive_gamma_override = Some(forecast.adaptive_gamma(
+                    base,
+                    alpha,
+                    1,
+                    base * 2,
+                ));
+            }
             self.draft_sctx.probs_buf.copy_from_slice(logits);
-            softmax_scaled(&mut self.draft_sctx.probs_buf, 1.0 / target_temp);
+            softmax_scaled(&mut self.draft_sctx.probs_buf, inv_target_temp);
             // Save p_dist[0] from this early target forward (avoids re-scoring later)
             self.draft_sctx.p_distributions_flat[..vocab_size]
                 .copy_from_slice(&self.draft_sctx.probs_buf);
@@ -233,15 +280,33 @@ impl SpeculativeVerifier for LeviathanVerifier<'_> {
 
         let use_lora = self.drafter_lora.is_some() && self.drafter_fwd_ctx.is_some();
 
+        // Shadow draft config with the adaptive γ override (Issue 023).
+        // When the feature is ON and the forecast produced an override, we
+        // clone the draft config with `draft_lookahead` replaced. The clone
+        // cost (≈200 bytes of scalars + typically-empty lora_targets vec) is
+        // negligible vs the transformer forward pass.
+        #[cfg(feature = "adaptive_gamma_forecast")]
+        let draft_config_shadow: Option<Config> = adaptive_gamma_override.map(|gamma| {
+            let mut cfg = draft_config.clone();
+            cfg.draft_lookahead = gamma
+                .min(draft_config.block_size.saturating_sub(pos));
+            cfg
+        });
+        #[cfg(feature = "adaptive_gamma_forecast")]
+        let draft_config_eff: &Config =
+            draft_config_shadow.as_ref().unwrap_or(draft_config);
+        #[cfg(not(feature = "adaptive_gamma_forecast"))]
+        let draft_config_eff: &Config = draft_config;
+
         let gamma = if use_lora {
             // LoRA-trained drafter path (Plan 117 T5):
             // LoRA learns to predict target outputs directly, so MTP conditioning
             // and shared KV preloading are unnecessary.
             let lora = self.drafter_lora.as_ref().unwrap();
             let fwd_ctx = self.drafter_fwd_ctx.as_mut().unwrap();
-            let max_steps = draft_config
+            let max_steps = draft_config_eff
                 .draft_lookahead
-                .min(draft_config.block_size.saturating_sub(pos));
+                .min(draft_config_eff.block_size.saturating_sub(pos));
             let temperature = draft_config.temperature;
             let mut cur_token = token;
 
@@ -299,7 +364,7 @@ impl SpeculativeVerifier for LeviathanVerifier<'_> {
             dflash_predict_ar_with(
                 &mut self.draft_sctx,
                 draft_weights,
-                draft_config,
+                draft_config_eff,
                 token,
                 pos,
                 rng,
@@ -330,7 +395,7 @@ impl SpeculativeVerifier for LeviathanVerifier<'_> {
                 self.target_config,
             );
             self.draft_sctx.probs_buf.copy_from_slice(logits);
-            softmax_scaled(&mut self.draft_sctx.probs_buf, 1.0 / target_temp);
+            softmax_scaled(&mut self.draft_sctx.probs_buf, inv_target_temp);
             let start = (i + 1) * vocab_size;
             self.draft_sctx.p_distributions_flat[start..start + vocab_size]
                 .copy_from_slice(&self.draft_sctx.probs_buf);

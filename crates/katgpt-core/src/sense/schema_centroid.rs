@@ -12,7 +12,7 @@ use super::octree::KgEmbedding;
 ///
 /// Computed once per KG snapshot update, O(d·|E_c|) per class.
 /// Stored in `SchemaCentroidCache` keyed by blake3 class hash.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct CentroidStats {
     /// Mean embedding of all entities in this class: v_c = (1/|E_c|) Σ e_i
     pub mean: [f32; 8],
@@ -25,35 +25,31 @@ pub struct CentroidStats {
 /// Compute centroid statistics from a slice of KgEmbedding values belonging to the same class.
 ///
 /// Returns `None` if `embeddings` is empty (degenerate class).
+/// Uses Welford's online algorithm for single-pass mean + variance.
 /// O(d·|E_c|) — pure arithmetic, zero allocation beyond the return value.
+#[inline]
 pub fn compute_centroid(embeddings: &[KgEmbedding]) -> Option<CentroidStats> {
     if embeddings.is_empty() {
         return None;
     }
 
-    let n = embeddings.len() as f32;
     let mut mean = [0.0f32; 8];
+    let mut m2 = [0.0f32; 8];
 
-    for emb in embeddings {
+    for (k, emb) in embeddings.iter().enumerate() {
+        let inv_k_plus_1 = 1.0 / (k as f32 + 1.0);
         for d in 0..8 {
-            mean[d] += emb.embedding[d];
-        }
-    }
-    for d in 0..8 {
-        mean[d] /= n;
-    }
-
-    let mut variance = [0.0f32; 8];
-    for emb in embeddings {
-        for d in 0..8 {
-            let diff = emb.embedding[d] - mean[d];
-            variance[d] += diff * diff;
+            let delta = emb.embedding[d] - mean[d];
+            mean[d] += delta * inv_k_plus_1;
+            let delta2 = emb.embedding[d] - mean[d];
+            m2[d] += delta * delta2;
         }
     }
 
+    let n = embeddings.len() as f32;
     let mut std_dev = [0.0f32; 8];
     for d in 0..8 {
-        std_dev[d] = (variance[d] / n).sqrt();
+        std_dev[d] = (m2[d] / n).sqrt();
     }
 
     Some(CentroidStats {
@@ -147,31 +143,37 @@ pub fn schema_init_entity(
     gamma: f32,
     rng: &mut fastrand::Rng,
 ) -> [f32; 8] {
-    // Collect (mean, std_dev) for classes found in cache
-    let mut found: Vec<([f32; 8], [f32; 8])> = Vec::new();
+    // Collect (mean, std_dev) for classes found in cache — stack-allocated, max 8 classes.
+    // Single pin() guard reused for all lookups — avoids 8× epoch pin/unpin.
+    let guard = cache.centroids.pin();
+    let mut found: [Option<([f32; 8], [f32; 8])>; 8] = [None; 8];
+    let mut found_count = 0usize;
     for &class_hash in classes {
-        if let Some(stats) = cache.get(class_hash) {
-            found.push((stats.mean, stats.std_dev));
+        if found_count >= 8 {
+            break;
+        }
+        if let Some(stats) = guard.get(&class_hash) {
+            found[found_count] = Some((stats.mean, stats.std_dev));
+            found_count += 1;
         }
     }
+    drop(guard);
 
     // Fallback: random init in [-0.5, 0.5]
-    if found.is_empty() {
+    if found_count == 0 {
         return random_init(rng);
     }
 
-    let n_found = found.len() as f32;
+    let n_found = found_count as f32;
+    let inv_n = 1.0 / n_found;
     let mut result = [0.0f32; 8];
 
-    for (mean, std_dev) in &found {
+    for i in 0..found_count {
+        let (mean, std_dev) = found[i].expect("found[i] invariant: index < found_count");
         for d in 0..8 {
             let noise = rng.f32() * 2.0 - 1.0; // ∈ [-1, 1]
-            result[d] += mean[d] + gamma * std_dev[d] * noise;
+            result[d] += (mean[d] + gamma * std_dev[d] * noise) * inv_n;
         }
-    }
-
-    for d in 0..8 {
-        result[d] /= n_found;
     }
 
     result
@@ -185,6 +187,8 @@ pub fn schema_init_entity(
 ///
 /// This upgrades BAKE's "uninformative prior" to an "informed prior" —
 /// the entity starts closer to optimal, so BAKE converges faster.
+///
+/// Uses a single papaya pin to collect all class stats, avoiding double lookups.
 #[cfg(feature = "bake_precision")]
 pub fn schema_init_with_precision(
     classes: &[u64],
@@ -194,27 +198,41 @@ pub fn schema_init_with_precision(
 ) -> ([f32; 8], [f32; 8]) {
     use crate::sense::bake::informed_prior_precision;
 
-    // Get embedding from schema centroid
-    let embedding = schema_init_entity(classes, cache, gamma, rng);
-
-    // Compute informed prior precision from class density
-    // Use the average count across found classes
-    let mut total_count = 0usize;
+    // Single pin — collect all class stats in one pass
+    let guard = cache.centroids.pin();
+    let mut found_stats: [Option<CentroidStats>; 8] = [None; 8];
     let mut found_count = 0usize;
-    for &class_hash in classes {
-        if let Some(stats) = cache.get(class_hash) {
-            total_count += stats.count;
+    for &class_hash in classes.iter().take(8) {
+        if let Some(stats) = guard.get(&class_hash).cloned() {
+            found_stats[found_count] = Some(stats);
             found_count += 1;
         }
     }
+    drop(guard);
 
-    let precision = if found_count > 0 {
-        let avg_count = total_count / found_count;
-        informed_prior_precision(avg_count)
-    } else {
-        // Fallback: uninformative prior
-        [crate::sense::bake::UNINFORMATIVE_PRECISION; 8]
-    };
+    // Fallback: random init + uninformative prior
+    if found_count == 0 {
+        let embedding = random_init(rng);
+        let precision = [crate::sense::bake::UNINFORMATIVE_PRECISION; 8];
+        return (embedding, precision);
+    }
+
+    let n_found = found_count as f32;
+    let inv_n = 1.0 / n_found;
+    let mut embedding = [0.0f32; 8];
+    let mut total_count = 0usize;
+
+    for i in 0..found_count {
+        let stats = found_stats[i].expect("found_stats[i] invariant: index < found_count");
+        total_count += stats.count;
+        for d in 0..8 {
+            let noise = rng.f32() * 2.0 - 1.0;
+            embedding[d] += (stats.mean[d] + gamma * stats.std_dev[d] * noise) * inv_n;
+        }
+    }
+
+    let avg_count = total_count / found_count;
+    let precision = informed_prior_precision(avg_count);
 
     (embedding, precision)
 }
@@ -308,7 +326,7 @@ mod tests {
         };
         let hash = 42u64;
 
-        cache.insert(hash, stats.clone());
+        cache.insert(hash, stats);
         let retrieved = cache.get(hash).expect("should find inserted");
 
         assert_eq!(retrieved.count, 10);
