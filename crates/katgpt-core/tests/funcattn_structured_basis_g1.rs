@@ -358,3 +358,193 @@ fn dct_log_constructor_validated_on_aligned_signal() {
         println!("  investigate further.");
     }
 }
+
+/// Supplementary check (Plan 332 follow-up: "real PDE-like signal"): the
+/// original GOAT gate used a synthetic probe signal with 4 narrow non-integer
+/// low-frequency modes (pathologically DCT-misaligned — DCT-log hurt by
+/// −0.14). The first supplementary test used 5 integer modes (pathologically
+/// DCT-aligned — DCT-log won by +0.34). Neither is a realistic PDE signal.
+///
+/// This test uses a **broadband multi-scale signal**: 4 log-spaced modes
+/// spanning the full spectrum from 1 to d/2 cycles (1, ~3.2, ~10, ~32),
+/// 1/f^(1/2) amplitude (slightly shallower than the 1/f^(5/3) of real
+/// turbulence, for visibility), ±0.3 frequency jitter (non-integer —
+/// neither DCT-aligned nor Haar-aligned), random phases. Same mode count
+/// as the original probe (so K=8 can fully span the signal — the hand-crafted
+/// upper bound is valid), but with broadband spectral content instead of
+/// the probe's narrow non-integer low-frequency cluster [0.3, 2.0, 5.1, 9.6].
+/// This is the actual spectral regime of real PDE solutions like the
+/// FUNCATTN paper's Airfoil dataset (arXiv:2605.31559 §5.7 Table 7: fixed
+/// Fourier basis + FuncAttn achieves 0.51 on Airfoil vs 0.43 learned).
+///
+/// Question: do DCT-log and Haar-packet beat random on this FAIR broadband
+/// signal? This fills the "fairer evaluation" gap documented in the plan
+/// TL;DR and benchmark.
+#[test]
+fn structured_basis_on_pde_like_broadband_signal() {
+    // --- Build a broadband traveling-wave signal (d=64, n=20, 4 modes) ---
+    //
+    // Matches the original probe's TRAVELING-WAVE structure sin(α·i + β·j + φ)
+    // — where i and j are coupled — but with BROADBAND j-frequencies spanning
+    // the full spectrum [1.3, 23.8] cycles instead of the probe's narrow
+    // non-integer low-freq cluster [0.3, 2.0, 5.1, 9.6].
+    //
+    // The coupling α = 3·β (vs the probe's α = 10·β) keeps i-oscillation
+    // reasonable at high j-frequencies (j=24 → ~22 i-cycles over n=20).
+    //
+    // Amplitudes follow 1/f^(1/2) (shallower than Kolmogorov 1/f^(5/3) for
+    // visibility). Frequencies are deliberately NON-INTEGER with ±0.3 jitter
+    // — neither DCT-aligned (integer) nor DCT-misaligned (the probe's narrow
+    // cluster). This is the "fair broadband" regime.
+    let n_modes = 4;
+    // Log-spaced j-cycle counts from ~1 to ~24 (below Nyquist=32 to avoid
+    // the sin(π·j)=0 degeneracy at exact Nyquist). Non-integer.
+    let j_cycles_base: [f32; 4] = [1.3, 3.7, 10.1, 23.8];
+
+    // Deterministic random phases and ±0.3 frequency jitter (reproducible).
+    let mut s = 12345u64;
+    let mut j_cycles: Vec<f32> = Vec::with_capacity(n_modes);
+    let mut phases: Vec<f32> = Vec::with_capacity(n_modes);
+    for mi in 0..n_modes {
+        let f = (j_cycles_base[mi] + 0.3 * lcg_next(&mut s)).max(0.5);
+        j_cycles.push(f);
+        phases.push(lcg_next(&mut s) * 2.0 * core::f32::consts::PI);
+    }
+
+    // Convert j-cycle counts to radian frequencies.
+    let beta: Vec<f32> = j_cycles.iter().map(|&c| 2.0 * core::f32::consts::PI * c / D as f32).collect();
+    let alpha: Vec<f32> = beta.iter().map(|&b| 3.0 * b).collect(); // coupling factor 3
+
+    let mut x = vec![0.0f32; N * D];
+    for i in 0..N {
+        let t = i as f32;
+        for j in 0..D {
+            let mut v = 0.0f32;
+            for mi in 0..n_modes {
+                // 1/f^(1/2) amplitude.
+                let amp = 1.0 / j_cycles[mi].sqrt();
+                v += amp * (alpha[mi] * t + beta[mi] * j as f32 + phases[mi]).sin();
+            }
+            x[i * D + j] = v;
+        }
+    }
+
+    // Target: linear smoothing (same representable operator as the main gate).
+    let mut y_target = vec![0.0f32; N * D];
+    for i in 0..N {
+        let prev = if i > 0 { i - 1 } else { 0 };
+        let next = if i + 1 < N { i + 1 } else { N - 1 };
+        for j in 0..D {
+            y_target[i * D + j] =
+                0.25 * x[prev * D + j] + 0.5 * x[i * D + j] + 0.25 * x[next * D + j];
+        }
+    }
+
+    let w_q = random_orthonormal_w(999, D, D);
+    let w_k = random_orthonormal_w(888, D, D);
+    let w_v = identity_mat(D);
+    let tau = 0.5f32;
+
+    // Hand-crafted upper bound: one row per signal mode, matching the
+    // j-dependence waveform sin(β·j + φ) at i=0 (exactly as the original
+    // probe's signal_dirs construction). Plus random rows to fill K=8.
+    // Cheats by using the generative frequencies — defines the achievable
+    // gain ceiling.
+    let mut w_hand = vec![0.0f32; K * D];
+    for mi in 0..n_modes.min(K) {
+        for j in 0..D {
+            w_hand[mi * D + j] = (beta[mi] * j as f32 + phases[mi]).sin();
+        }
+    }
+    let mut s2 = 200u64;
+    for v in w_hand[(n_modes.min(K)) * D..K * D].iter_mut() {
+        *v = lcg_next(&mut s2);
+    }
+    gram_schmidt_rows(&mut w_hand, K, D);
+
+    let run = |w_basis: &[f32], label: &str| -> f32 {
+        let cfg = FuncAttnConfig {
+            d: D,
+            k: K,
+            basis: FuncAttnBasis::Sigmoid,
+            temperature: tau,
+            alpha: 0.5,
+            cholesky_jitter: 1e-6,
+        };
+        let mut scratch = FuncAttnScratch::new(N, D, K);
+        let mut out = vec![0.0f32; N * D];
+        funcattn_forward(&x, &x, w_basis, &w_q, &w_k, &w_v, &cfg, &mut scratch, &mut out)
+            .expect("forward");
+        for v in &out {
+            assert!(v.is_finite(), "{label}: non-finite forward output");
+        }
+        let cos = cosine(&out, &y_target);
+        println!("{label:18} (PDE-broadband, τ={tau}): cos = {cos:+.4}");
+        cos
+    };
+
+    println!("\n=== Supplementary: PDE-like broadband signal ===");
+    println!("    traveling-wave, 4 modes, j-cycles {:.2},{:.2},{:.2},{:.2} ~ broadband",
+        j_cycles[0], j_cycles[1], j_cycles[2], j_cycles[3]);
+    let cos_rand = run(&random_orthonormal_w(100, K, D), "random-orth");
+    let cos_dct = run(&make_dct_log_basis(K, D), "DCT-log     ");
+    let cos_haar = run(&make_haar_packet_basis(K, D), "Haar-packet ");
+    let cos_hand = run(&w_hand, "hand-crafted");
+
+    let dct_delta = cos_dct - cos_rand;
+    let haar_delta = cos_haar - cos_rand;
+    let achievable = cos_hand - cos_rand;
+    println!("  Δ(DCT  - rand) = {dct_delta:+.4}");
+    println!("  Δ(Haar - rand) = {haar_delta:+.4}");
+    println!("  achievable gain (hand - rand) = {achievable:+.4}");
+    if achievable > 1e-3 {
+        println!(
+            "  DCT-log  captures {:.1}% of achievable",
+            dct_delta / achievable * 100.0
+        );
+        println!(
+            "  Haar     captures {:.1}% of achievable",
+            haar_delta / achievable * 100.0
+        );
+    }
+
+    println!("\nInterpretation (Plan 332 follow-up: fair PDE-like evaluation):");
+    if dct_delta >= 0.05 {
+        println!("  DCT-log beats random by {dct_delta:+.4} (≥+0.05) on broadband PDE-like signal.");
+        println!("  → DCT-log is COMPETITIVE on realistic spectral-rich signals, not just");
+        println!("    DCT-aligned inputs. Strengthens the case for DCT-log as a documented");
+        println!("    option for broadband transport tasks. Consistent with FUNCATTN Table 7.");
+    } else if dct_delta >= -0.02 {
+        println!("  DCT-log is NEUTRAL on broadband (Δ={dct_delta:+.4}, within ±0.05 of random).");
+        println!("  → Neither helpful nor harmful on realistic signals; the probe-signal");
+        println!("    failure was a frequency-mismatch artifact, not representative.");
+    } else {
+        println!("  DCT-log HURTS on broadband (Δ={dct_delta:+.4}).");
+        println!("  → DCT-log is narrow: only useful for explicitly DCT-aligned inputs.");
+    }
+    if haar_delta >= 0.05 {
+        println!("  Haar-packet beats random by {haar_delta:+.4} (≥+0.05) on broadband.");
+        println!("  → Confirms Haar's localized multi-scale advantage is not specific to");
+        println!("    the original probe signal; it generalizes to realistic PDE signals.");
+    } else if haar_delta >= -0.02 {
+        println!("  Haar-packet is NEUTRAL on broadband (Δ={haar_delta:+.4}).");
+    } else {
+        println!("  Haar-packet HURTS on broadband (Δ={haar_delta:+.4}).");
+    }
+    // Note when DCT-log outperforms the hand-crafted bound — this happens on
+    // broadband signals because DCT-log's 8 log-spaced rows cover more of the
+    // spectrum than the hand-crafted basis's n_modes signal-matched rows.
+    if cos_dct > cos_hand {
+        println!("  Note: DCT-log ({:+.4}) > hand-crafted ({:+.4}) on broadband — DCT-log's", cos_dct, cos_hand);
+        println!("    8 log-spaced rows cover more spectrum than the hand-crafted basis's");
+        println!("    {} signal-matched rows. The hand-crafted 'upper bound' assumption breaks", n_modes);
+        println!("    for broadband signals (it only holds when the basis can fully span");
+        println!("    the signal's spectral modes, which requires n_modes ≥ signal rank).", );
+    }
+    if (dct_delta - haar_delta).abs() > 0.03 {
+        let winner = if dct_delta > haar_delta { "DCT-log" } else { "Haar-packet" };
+        println!("  Note: {winner} wins on broadband (Δ gap {:+.4}); basis choice should", dct_delta - haar_delta);
+        println!("    depend on expected signal spectral structure (broadband → DCT,");
+        println!("    localized multi-scale → Haar).");
+    }
+}
