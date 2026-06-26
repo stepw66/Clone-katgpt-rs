@@ -1204,6 +1204,9 @@ impl<'a> D2fPipeline<'a> {
         let mut total_steps = 0usize;
         let mut n_fully_activated = 0usize;
         let mut n_semi_activated = 0usize;
+        // Reused across blocks: rebuilt in place each iteration instead of
+        // re-cloning the (growing) prefix per block.
+        let mut seq_tokens = Vec::with_capacity(self.config.block_size);
 
         for block_idx in 0..n_blocks {
             let remaining = self.total_len.saturating_sub(block_idx * block_size);
@@ -1245,7 +1248,8 @@ impl<'a> D2fPipeline<'a> {
             }
 
             // Build sequence: prompt + previously decoded blocks + mask for current block
-            let mut seq_tokens = all_tokens.clone();
+            seq_tokens.clear();
+            seq_tokens.extend_from_slice(&all_tokens);
             seq_tokens.extend(std::iter::repeat_n(mask, current_block_size));
 
             let seq_len = seq_tokens.len().min(self.config.block_size);
