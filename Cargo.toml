@@ -1740,6 +1740,17 @@ path = "benches/bench_310_sigmoid_graded_reject_goat.rs"
 required-features = ["sigmoid_graded_reject"]
 harness = false
 
+# Plan 310 T3.1 — Sigmoid-Graded Reject Confidence false-reject-rate GOAT
+# quality bench. G1 tolerant FR rate < strict FR rate; G2 tolerant net reward
+# > strict net; G3 tolerant FP bounded; G4 backward-compat (binary strict ==
+# tolerant); G5 determinism. Controlled corpus with known ground-truth labels;
+# bomber_17 has no false-reject oracle (see bench header for rationale).
+[[bench]]
+name = "bench_310_t31_false_reject_rate_goat"
+path = "benches/bench_310_t31_false_reject_rate_goat.rs"
+required-features = ["sigmoid_graded_reject"]
+harness = false
+
 # Plan 307 Phase 4 — Claim Rubric GOAT gate (correctness round-trip on R287 §4).
 [[test]]
 name = "bench_307_claim_rubric_goat"
