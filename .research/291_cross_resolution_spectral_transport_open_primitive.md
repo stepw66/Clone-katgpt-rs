@@ -185,6 +185,8 @@ basis, cross-resolution transport becomes a change of Apollonian scale rather
 than a change of d. Speculative — depends on Issue 001 resolving with a
 concrete use case.
 
+**UPDATE 2026-06-26 (Plan 332 verdict):** Apollonian-surrogate test via Haar-packet (the closest fixed multi-scale basis to Apollonian harmonics) found a **narrow, k-constrained win**: +0.08 cos over random at k∈{4,8} on multi-scale transport, elbow at k=16, loses at k≥16. Plan 332 Phase 5 (true Apollonian harmonics) is **DEFERRED** — the achievable gain over the simpler Haar-packet is small (+0.02 cos), localized to small k, and unlikely to clear the implementation cost of true d-dim Apollonian harmonics. Revisit F3 only if a concrete use case emerges where the gap between Haar-packet and the achievable bound is the blocking factor. See `.plans/332_structured_basis_selection_for_funcattn.md`.
+
 ---
 
 ## 3. Verdict

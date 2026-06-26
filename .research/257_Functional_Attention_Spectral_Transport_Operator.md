@@ -206,7 +206,7 @@ The paper uses softmax for its basis (Eq. 9). AGENTS.md mandates sigmoid. **The 
 
 4. **Numerical stability of `Φ^T` vs `Φ^†`.** Paper uses transpose (Remark 4.1) — unregularized pseudo-inverse diverges. We must do the same. SchurSolver's `eps_reg=1e-8` is the right stabilization. Document in plan.
 
-5. **k selection.** Paper's k=64 default is for PDE meshes with n~10⁴. For NPC latent dim ~64 and observation sets ~20, k should be much smaller — likely k=4 to k=16. Plan 318 G4 must sweep.
+5. **k selection.** Paper's k=64 default is for PDE meshes with n~10⁴. For NPC latent dim ~64 and observation sets ~20, k should be much smaller — likely k=4 to k=16. **FILLED 2026-06-26 by Plan 332 k-sweep** (`.benchmarks/332_structured_basis_goat_and_k_sweep.md`): swept k ∈ {4, 8, 16, 32} with four basis variants (random-orthogonal, hand-crafted, DCT-log, Haar-packet) on multi-scale transport at d=64, n=20, τ=0.5. **Elbow at k=16** — principled bases (Haar-packet) beat random by +0.08 at k∈{4,8} (the NPC regime) but lose to random at k≥16 (rank saturation: random-orthogonal at k=16 has enough rank to approximate any direction in d=64, so the structural advantage of a fixed basis evaporates). Practical guidance: k∈{4,8} with Haar-packet for localized transport tasks; random-orthogonal fine at k≥16. The strict GOAT gate FAILS (DCT-log loses on this probe signal due to frequency mismatch, Haar loses at sharp τ=0.1) so `funcattn_structured_basis` stays opt-in — see Plan 332 verdict.
 
 ---
 

@@ -130,6 +130,18 @@ Per [27_mmo_goat_pillars_decision_matrix.md](../../riir-ai/.docs/27_mmo_goat_pil
 
 ---
 
+## Plan 332 Followup (2026-06-26) — fixed<learned now has nuance
+
+The EGA finding ("fixed wavelets near-baseline, only learned data-adaptive works") was a strong claim against fixed spectral bases. **Plan 332 added nuance** by testing fixed bases on FUNCATTN's transport task:
+
+- **Fixed localized basis (Haar-packet)** captures **77% of the achievable gain** at k≤8, τ=0.5 on multi-scale transport (`.benchmarks/332_structured_basis_goat_and_k_sweep.md`). Not near-baseline — it's a real, narrow win.
+- **Fixed smooth basis (DCT-log)** fails on the probe signal (frequency mismatch) but wins big (+0.34 cos) on frequency-aligned signals. Constructor verified correct against Wikipedia DCT-II + FUNCATTN reference code.
+- **Cross-reference: FUNCATTN paper Table 7** — fixed Fourier basis achieves 0.51 on Airfoil vs 0.43 for learned. Fixed spectral bases are competitive (~19% worse) on real PDE data with broad spectral content, NOT near-baseline.
+
+**Revised reading of EGA's fixed<learned finding:** the original claim holds for EGA's specific task (LLM attention gating, where learned data-adaptive projection is strongly preferred). It does NOT generalize to all fixed-basis uses — for FUNCATTN-style transport tasks on multi-scale signals, fixed localized bases (Haar) capture most of the achievable gain at small k. The key difference is the task: EGA gates attention pointwise (needs data-adaptive), FUNCATTN transports across a basis (fixed multi-scale structure helps when k≪d). Both findings stand in their respective domains.
+
+---
+
 ## Risks
 
 | Risk | Likelihood | Impact | Mitigation |
