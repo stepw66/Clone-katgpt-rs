@@ -307,10 +307,10 @@ See §2.5 connection map. Most importantly: **the cross-domain isomorphism with 
 
 ## 5. Mandatory outputs (created in this session per anti-deferral rule)
 
-1. **Open primitive** — this research note + `katgpt-rs/.plans/320_closed_unit_compaction_gate.md`. The generic `ClosedUnitCompactionGate<R>` + `Rubric` trait + `FireRule` enum + `Backstop` enum + `CompactionAuditRecord` land in `katgpt-rs/src/compaction/` behind feature `closed_unit_compaction`.
+1. **Open primitive** — this research note + `katgpt-rs/.plans/333_closed_unit_compaction_gate.md`. The generic `ClosedUnitCompactionGate<R>` + `Rubric` trait + `FireRule` enum + `Backstop` enum + `CompactionAuditRecord` land in `katgpt-rs/src/compaction/` behind feature `closed_unit_compaction`.
 2. **Private guide** — `riir-ai/.research/155_Per_NPC_Sub_Goal_Compaction_Guide.md`. The game-runtime selling point: per-NPC sub-goal-triggered memory compaction at MMO scale.
 3. **Cross-ref** — `riir-neuron-db/.research/007_Can_Freeze_As_Cucg_Instance_Crossref.md`. Recognizes `can_freeze` as the shard-side CUCG instance; documents the isomorphism.
-4. **Plan(s)** — `katgpt-rs/.plans/320_closed_unit_compaction_gate.md` (open primitive). Runtime plan for the per-NPC variant deferred to riir-ai (TBD on guide acceptance).
+4. **Plan(s)** — `katgpt-rs/.plans/333_closed_unit_compaction_gate.md` (open primitive). Runtime plan for the per-NPC variant deferred to riir-ai (TBD on guide acceptance).
 
 ---
 
@@ -377,7 +377,7 @@ KG triple emission: a `Compress` decision on a semantic trajectory may emit a KG
 
 - **Paper-LLM-judge dependence.** The paper's predicates are LLM-judged from verbatim quotes. Our latent reframing (§2.4) replaces this with sigmoid projections on coherence/intrinsic-rank/divergence/novelty — but we must validate that the latent predicates track the LLM-judged predicates closely enough to preserve the paper's gains. **Mitigation:** G1 uses the paper's own Figure 1 setup as the existence proof; our latent version must reproduce the "4 verified facts preserved" outcome on a synthetic BrowseComp-like trajectory.
 - **Probe-revert correctness.** The paper's CONTINUE path requires reverting the rubric judgement from the rolling cache. Implementation must guarantee no cache pollution. **Mitigation:** unit test that generates k CONTINUE probes then verifies subsequent generation matches a no-probe baseline byte-for-byte (modulo KV-cache indexing).
-- **Cross-domain isomorphism is a claim, not yet a proof.** `can_freeze` uses `output_converged` (spectral flatness < 0.3) and `input_sufficient` (N ≥ d); CUCG uses C1/C2/C3/N1. The isomorphism is structural (both are multi-predicate Boolean fire rules over audit-able predicates with deterministic records), not semantic (the predicates measure different things). G7 must construct a shard-freeze `Rubric` impl whose decisions match `can_freeze` bit-for-bit. **Mitigation:** Plan 320 P2 task is exactly this construction.
+- **Cross-domain isomorphism is a claim, not yet a proof.** `can_freeze` uses `output_converged` (spectral flatness < 0.3) and `input_sufficient` (N ≥ d); CUCG uses C1/C2/C3/N1. The isomorphism is structural (both are multi-predicate Boolean fire rules over audit-able predicates with deterministic records), not semantic (the predicates measure different things). G7 must construct a shard-freeze `Rubric` impl whose decisions match `can_freeze` bit-for-bit. **Mitigation:** Plan 333 P5 task is exactly this construction.
 - **Skip-if-reliable threshold.** CLR's `(mean_m v_k,m)^M` reliability vote is per-completion; the suppression fuse must decide "is the current answer reliable enough to suppress compaction?". The threshold `τ_reliable` needs calibration. **Mitigation:** start with paper's oracle bound (skip-if-correct gives +11.5 over fixed-interval); tune `τ_reliable` to recover ≥80% of that headroom.
 
 ---

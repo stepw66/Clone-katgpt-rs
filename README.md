@@ -296,7 +296,7 @@ graph LR
 | **Forensic Watermark** | Moved to riir-ai | Recipe impl relocated to Plan 322 (honeypot OPSEC) |
 | **Depth-Invariance Diagnostic** (`depth_invariance`) | 306 | G1/G2/G3 ✅, G4 (re-spec) ✅ | Root-cause attention-drift classifier (`DepthInvariant` / `DepthSpecificRefinement` / `Collapsed`) + `MagnitudeRegularizedResidual` fix for owned kernels. G2 reproduces paper Figure 10 on random-init `BeliefDrafter`; G3 negative control on `micro_belief/attractor` classifies as `DepthInvariant`. SIMD inner-loop via `simd::simd_sum_sq_quartic`. Zero runtime cost unless invoked. Default-on (T7.4, 2026-06-23). |
 | **Claim Rubric Runtime** (`claim_rubric`) | 307 | 17/17 round-trip ✅ | L1/L2/L3 evidence-ladder validator — executable rubric for probe/steering claims. Vocabulary must match evidence ("causally controls" requires L3; "reads" is L1-safe). 17/17 Phase 2 round-trip + 1/1 GOAT gate green. Meta-discipline primitive, zero runtime cost unless invoked. Default-on (T3.3, 2026-06-23). |
-| **Closed-Unit Compaction Gate** (`closed_unit_compaction`) | 320 | 7/7 ✅ | Generic rubric-gated trajectory compaction primitive (SelfCompact, arxiv 2606.23525) — fires at structurally-safe moments (closed-unit ∧ summarizable ∧ progress ∧ ¬stuck). evaluate() **8.91 ns** (target <50ns), **112.9 M/s** (target >=50M). **Super-GOAT**: trajectory compaction and shard freeze are the same primitive (G7 proven structurally). Default-on (Phase 6, 2026-06-25). |
+| **Closed-Unit Compaction Gate** (`closed_unit_compaction`) | 333 | 7/7 ✅ | Generic rubric-gated trajectory compaction primitive (SelfCompact, arxiv 2606.23525) — fires at structurally-safe moments (closed-unit ∧ summarizable ∧ progress ∧ ¬stuck). evaluate() **8.91 ns** (target <50ns), **112.9 M/s** (target >=50M). **Super-GOAT**: trajectory compaction and shard freeze are the same primitive (G7 proven structurally). Default-on (Phase 6, 2026-06-25). |
 
 ## 🎮 Arena Proofs — HL Thesis Validated
 
@@ -1482,6 +1482,60 @@ The load-bearing insight (paper's worked example): without the copy, `x2 → x3 
 **Super-GOAT verdict (Issues 002 + 009, CLOSED 2026-06-26 — negative):** the AC-Prefix × Engram × Latent Field Steering fusion is **not realizable**. Five verified structural facts make the fusion infeasible without negative-ROI infrastructure investment: no shared compute graph (AC-Prefix needs a causal Transformer forward over tokens; Engram/Latent Field Steering operate on `f32` hidden-state slices), no Transformer-in-the-loop host workload exists in riir-ai, compute economics are catastrophic (100×–377,000× cost asymmetry vs additive latent fusion), multi-layer correctness needs riir-train (Issue 003), and Research 295 §2.4 rates the novelty gate borderline-to-negative. AC-Prefix stays a standalone default-on primitive — the **only** katgpt-core primitive providing token-level arbitrary-conditional evaluation in a single forward pass (valuable for offline conditional-likelihood queries). Re-open only if a local Transformer-in-the-loop game-AI workload lands in riir-ai for an independent reason. Full record: [`.plans/313_AC_GPT_Prefix_Primitive.md`](.plans/313_AC_GPT_Prefix_Primitive.md).
 
 Feature gate: `ac_prefix` (**DEFAULT-ON** since 2026-06-24 — §3.5 modelless unblock Path 2 eliminates the doubled-signal bias bit-identically). The deduplicated mask (`attends_dedup` / `materialize_dedup_from` / `conditional_logprob_dedup`) is the recommended modelless default; the original `attends` is retained for paper-faithful mask (post-LoRA use). 📖 Plan: [`.plans/313_AC_GPT_Prefix_Primitive.md`](.plans/313_AC_GPT_Prefix_Primitive.md), Research: [`.research/295_AC_GPT_Arbitrary_Conditionals_Prefix.md`](.research/295_AC_GPT_Arbitrary_Conditionals_Prefix.md), GOAT bench: [`.benchmarks/313_ac_prefix_goat.md`](.benchmarks/313_ac_prefix_goat.md), Modelless bench: [`.benchmarks/313_ac_prefix_modelless.md`](.benchmarks/313_ac_prefix_modelless.md), Paper: [arXiv:2606.14943](https://arxiv.org/abs/2606.14943). Training recipe (LoRA fine-tune for arbitrary conditioning) → riir-train. *(Issues 002/003 — resolved & removed from `.issues/`; full narrative in the plan + benchmarks above.)*
+
+---
+
+### 🧩 Closed-Unit Compaction Gate: Rubric-Gated Trajectory Compaction (Plan 333, Research 300, arxiv 2606.23525)
+
+A generic, modelless primitive that decides **when** to compact a trajectory by firing summarization at **structurally-safe moments** (closed-unit ∧ summarizable ∧ progress ∧ ¬stuck) instead of at fixed token thresholds. Built on sigmoid projections onto latent-feature direction vectors (rule: **never softmax**) + a recursive `FireRule` Boolean tree (And/Or/Not/Box), with a `Backstop` token-pct safety net and an optional `skip_if_reliable` CLR fuse.
+
+**Kernel surface:**
+
+```rust
+pub trait Rubric {
+    const ARITY: usize;
+    fn evaluate(&self, trajectory_prefix: &[u8], scratch: &mut RubricScratch) -> RubricVerdict;
+}
+
+pub struct ClosedUnitCompactionGate<R, const N: usize> { /* rubric + fire_rule + backstop + skip_if_reliable */ }
+
+pub enum FireRule { And(u8), Or(u8), Not(u8), Box(Box, Box) }
+
+pub enum CompactionDecision { Compress { audit }, Continue { audit }, Forced { audit } }
+
+impl<R: Rubric, const N: usize> ClosedUnitCompactionGate<R, N> {
+    pub fn evaluate(&self, trajectory_prefix: &[u8], prompt_len: usize,
+                    ctx_window: usize, clr_vote: Option<f32>,
+                    scratch: &mut RubricScratch) -> CompactionDecision;
+}
+```
+
+**Why sigmoid projections, not LLM-judged verbatim quotes:** the paper (SelfCompact) grounds each rubric predicate in an LLM-judged verbatim quote from the trajectory. We replace that with a **latent reframing**: each predicate is a scalar from an existing primitive (coherence stability, intrinsic rank, divergence-since-last-summary, novelty rate) projected through a sigmoid gate. The audit record still records the trajectory span `[quote_start, quote_len]` where the feature crossed threshold — preserving the paper's traceability without the LLM call. This keeps the primitive modelless (no training, no inference dependency).
+
+**The Super-GOAT: cross-domain isomorphism (G7).** The headline claim is that trajectory compaction (paper's C1/C2/C3/N1 search rubric) and shard consolidation freeze (riir-neuron-db's `can_freeze`) are **the same primitive** — recognized after the fact, not designed in. G7 proves this structurally: a `ClosedUnitCompactionGate<ShardFreezeRubric>` produces bit-identical decisions to `ConsolidationPipeline::can_freeze` on all 4 combinations of (input_sufficient, output_converged), because both reduce to the same Boolean formula `(n_wake_events >= intrinsic_dim) && (spectral_flatness < 0.3) = P0 && P1`. The isomorphism is structural (same thresholds, same formula), NOT a cross-repo runtime dependency — `katgpt-rs` does not depend on `riir-neuron-db`, keeping the open primitive free of private-runtime coupling per the 5-repo commercial strategy.
+
+**Phase 6 GOAT (2026-06-25): PROMOTED to default-on.**
+
+| Gate | Target | Result | Verdict |
+|------|--------|--------|---------|
+| **G1** rubric beats fixed-interval | recall ≥ 0.80, FDR ≤ 0.20 | recall=1.000, FDR=0.000 (TP=9, FN=0, FP=0, TN=51) | ✅ |
+| **G2** skip-if-reliable suppression | ≥ 50% suppression on reliable prefixes | 50.0% (500/1000 compressed) | ✅ |
+| **G3** cache-reuse probe L-independence | latency within 3× across L=1k/10k/100k | 1.4ns / 1.4ns / 1.4ns, ratio=1.00 | ✅ |
+| **G4** zero-alloc hot path | no heap allocation on evaluate() | PASS (audit is stack POD, scratch caller-reused) | ✅ |
+| **G5** feature isolation | compiles ± the feature | PASS (`cargo check --no-default-features ±feature`) | ✅ |
+| **G6** sigmoid never softmax | 0 softmax calls | PASS (grep confirms 0 hits) | ✅ |
+| **G7** can_freeze isomorphism | bit-identical on all 4 (P0,P1) combos | PASS (all 4 match `can_freeze` formula) | ✅ |
+| **Latency** `evaluate()` ARITY=4 | ≤ 50 ns | **8.91 ns** | ✅ |
+| **Throughput** `evaluate()` ARITY=4 | ≥ 50 M decisions/sec | **112.9 M/s** | ✅ |
+
+The 8.91 ns latency is parity with Salience Tri-Gate's 9.11 ns (Plan 303) — the two share the same cost shape (sigmoid projections + Boolean fire rule). The fire-rule tree walk (`Box(And, And(0b0111), Not(0b1000))` for the search rule) adds negligible overhead because it evaluates against a `u8` mask with no allocation. See [`.benchmarks/333_cucg_goat.md`](.benchmarks/333_cucg_goat.md).
+
+Feature gate: `closed_unit_compaction` (**DEFAULT-ON** since Phase 6 GOAT PASS 2026-06-25). 📖 Plan: [`.plans/333_closed_unit_compaction_gate.md`](.plans/333_closed_unit_compaction_gate.md), Research: [`.research/300_Closed_Unit_Compaction_Gate_Rubric_Gated.md`](.research/300_Closed_Unit_Compaction_Gate_Rubric_Gated.md), Paper: [SelfCompact (Li et al., JHU + Apple), arXiv:2606.23525](https://arxiv.org/abs/2606.23525). Private selling-point guide: [riir-ai/.research/155_Per_NPC_Sub_Goal_Compaction_Guide.md](../riir-ai/.research/155_Per_NPC_Sub_Goal_Compaction_Guide.md) (per-NPC sub-goal-triggered compaction at MMO scale). Cross-domain crossref: [riir-neuron-db/.research/007_Can_Freeze_As_Cucg_Instance_Crossref.md](../riir-neuron-db/.research/007_Can_Freeze_As_Cucg_Instance_Crossref.md). Per-NPC runtime wiring (G8) lives in riir-ai.
+
+Examples:
+- `cargo run --example cucg_search_basic`
+- `cargo run --example cucg_shard_freeze_isomorphism`
+- `cargo run --example cucg_skip_if_reliable`
 
 ---
 

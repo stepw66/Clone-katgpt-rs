@@ -5,7 +5,7 @@
 > **Status:** Active — Super-GOAT (fusion)
 > **Classification:** Public — open synthesis (no game IP, no chain IP, no shard IP)
 > **Related Research:** 010 (riir-ai KG × HLA × Role Transport), 141 (riir-ai KG Triple Typology), 146 (riir-ai Entity Cognition Stack), 154 (riir-ai Viable Manifold Graph runtime guide), 155 (riir-ai Per-NPC Sub-Goal Compaction guide), 084 (ActiveGraph event-sourced graphs), 234 (DenseMesh latent node network), 294 (Viable Manifold Graph primitive), 249 (DecentMem dual-pool reachable router)
-> **Related Plans:** 327 (this — open ARG protocol primitives), 312 (VMG), 320 (Closed-Unit Compaction Gate), 092 (Freeze/Thaw), 251 (DEC operators)
+> **Related Plans:** 327 (this — open ARG protocol primitives), 312 (VMG), 333 (Closed-Unit Compaction Gate), 092 (Freeze/Thaw), 251 (DEC operators)
 > **Cross-ref (riir-ai):** Research 160 (ARG-over-Latent-State Runtime Guide — private Super-GOAT moat), Plan 337 (private runtime wiring)
 
 ---

@@ -1,6 +1,6 @@
 //! The gate kernel — `ClosedUnitCompactionGate<R>`.
 //!
-//! This is the heart of CUCG (Plan 320, Research 300). It composes a rubric,
+//! This is the heart of CUCG (Plan 333, Research 300). It composes a rubric,
 //! a fire rule, a token-pct backstop, and an optional skip-if-reliable fuse
 //! into a single `evaluate` entry point that produces a
 //! [`CompactionDecision`] + [`CompactionAuditRecord`].
@@ -48,7 +48,7 @@ use super::rubric::{PredicateReason, PredicateResult, Rubric, RubricScratch, Rub
 ///
 /// # Performance
 ///
-/// Target (Plan 320 T6.1): `evaluate()` ≥ 50M decisions/sec for `N = 4`
+/// Target (Plan 333 T6.1): `evaluate()` ≥ 50M decisions/sec for `N = 4`
 /// (parity with Salience Tri-Gate's 120M/sec — CUCG has the same
 /// two-sigmoid + fire-rule cost shape) and ≤ 50 ns latency.
 pub struct ClosedUnitCompactionGate<R, const N: usize>

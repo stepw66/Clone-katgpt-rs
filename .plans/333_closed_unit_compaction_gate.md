@@ -1,4 +1,4 @@
-# Plan 320: Closed-Unit Compaction Gate — Rubric-Gated Trajectory Compaction (CUCG)
+# Plan 333: Closed-Unit Compaction Gate — Rubric-Gated Trajectory Compaction (CUCG)
 
 **Date:** 2026-06-25
 **Research:** [katgpt-rs/.research/300_Closed_Unit_Compaction_Gate_Rubric_Gated.md](../.research/300_Closed_Unit_Compaction_Gate_Rubric_Gated.md)
@@ -6,7 +6,7 @@
 **Private guide:** [riir-ai/.research/155_Per_NPC_Sub_Goal_Compaction_Guide.md](../../riir-ai/.research/155_Per_NPC_Sub_Goal_Compaction_Guide.md) (game-AI selling point)
 **Cross-ref:** [riir-neuron-db/.research/007_Can_Freeze_As_Cucg_Instance_Crossref.md](../../riir-neuron-db/.research/007_Can_Freeze_As_Cucg_Instance_Crossref.md) (`can_freeze` isomorphism)
 **Target:** `katgpt-rs/src/compaction/` (new module) + Cargo feature `closed_unit_compaction`
-**Status:** COMPLETE — Phase 1-6 all done (2026-06-25). 88 unit tests PASS, G1-G7 GOAT gates PASS. **PROMOTED to default feature.** Phase 7 (examples + docs) is the only remaining work (non-blocking doc-only).
+**Status:** COMPLETE — Phase 1-7 all done (Phase 1-6 on 2026-06-25, Phase 7 on 2026-06-26). 88 unit tests PASS, G1-G7 GOAT gates PASS. **PROMOTED to default feature.** Re-indexed from Plan 320 → 333 on 2026-06-26 to resolve a numbering collision with `.plans/320_misalignment_indicator_probe_bank.md`.
 
 ---
 
@@ -157,7 +157,7 @@ G7 PASSES (all 4 combinations of P0/P1 match can_freeze formula; bit-identical a
 
 ### Acceptance
 
-G1–G7 all PASS with measured numbers in `.benchmarks/320_cucg_goat.md`. **PROMOTED to default** — `closed_unit_compaction` added to the `default = [...]` list in Cargo.toml.
+G1–G7 all PASS with measured numbers in `.benchmarks/333_cucg_goat.md`. **PROMOTED to default** — `closed_unit_compaction` added to the `default = [...]` list in Cargo.toml.
 
 Results: latency 8.91ns (target ≤50ns), throughput 112.9M/s (target ≥50M), G1 recall=1.000/FDR=0.000, G2 50% suppression, G3 ratio=1.00, G7 all 4 combos match.
 
@@ -167,11 +167,11 @@ Results: latency 8.91ns (target ≤50ns), throughput 112.9M/s (target ≥50M), G
 
 ### Tasks
 
-- [ ] **T7.1** `examples/cucg_search_basic.rs` — minimal example: synthetic trajectory, SearchRubric, print decision + audit record.
-- [ ] **T7.2** `examples/cucg_shard_freeze_isomorphism.rs` — demonstrate G7: construct shard-freeze CUCG, compare to `can_freeze`, print bit-identical records.
-- [ ] **T7.3** `examples/cucg_skip_if_reliable.rs` — demonstrate G2: high CLR vote suppresses compaction.
-- [ ] **T7.4** Update `katgpt-rs/README.md` Feature Showcase with Plan 320 CUCG section (format mirrors Plan 303 Salience Tri-Gate section).
-- [ ] **T7.5** Update `katgpt-rs/.docs/01_overview.md` feature table with `closed_unit_compaction` row.
+- [x] **T7.1** `examples/cucg_search_basic.rs` — minimal example: synthetic trajectory, SearchRubric, print decision + audit record.
+- [x] **T7.2** `examples/cucg_shard_freeze_isomorphism.rs` — demonstrate G7: construct shard-freeze CUCG, compare to `can_freeze`, print bit-identical records.
+- [x] **T7.3** `examples/cucg_skip_if_reliable.rs` — demonstrate G2: high CLR vote suppresses compaction.
+- [x] **T7.4** Update `katgpt-rs/README.md` Feature Showcase with Plan 333 CUCG section (format mirrors Plan 303 Salience Tri-Gate section).
+- [x] **T7.5** Update `katgpt-rs/.docs/01_overview.md` feature table with `closed_unit_compaction` row.
 
 ### Acceptance
 

@@ -1,7 +1,7 @@
-# Plan 320 — CUCG (Closed-Unit Compaction Gate) GOAT Gate Benchmark
+# Plan 333 — CUCG (Closed-Unit Compaction Gate) GOAT Gate Benchmark
 
 **Date:** 2026-06-25
-**Plan:** [katgpt-rs/.plans/320_closed_unit_compaction_gate.md](../.plans/320_closed_unit_compaction_gate.md)
+**Plan:** [katgpt-rs/.plans/333_closed_unit_compaction_gate.md](../.plans/333_closed_unit_compaction_gate.md)
 **Research:** [katgpt-rs/.research/300_Closed_Unit_Compaction_Gate_Rubric_Gated.md](../.research/300_Closed_Unit_Compaction_Gate_Rubric_Gated.md)
 **Bench:** `benches/cucg_bench.rs` + `benches/cucg_goat.rs` (`cargo bench --bench cucg_goat --features closed_unit_compaction`)
 **Machine:** macOS dev laptop (Apple Silicon). Numbers are wall-clock medians; reproducible via deterministic synthetic trajectories.
@@ -33,7 +33,7 @@ The 8.91 ns latency is parity with Salience Tri-Gate's 9.11 ns (Plan 303) — th
 
 ## The Super-GOAT: cross-domain isomorphism (G7)
 
-The headline claim of Plan 320 is that trajectory compaction (paper's C1/C2/C3/N1 search rubric) and shard consolidation freeze (riir-neuron-db's `can_freeze`) are **the same primitive**. G7 proves this structurally:
+The headline claim of Plan 333 is that trajectory compaction (paper's C1/C2/C3/N1 search rubric) and shard consolidation freeze (riir-neuron-db's `can_freeze`) are **the same primitive**. G7 proves this structurally:
 
 ```
 can_freeze = input_sufficient && output_converged
@@ -73,19 +73,19 @@ Per AGENTS.md GOAT gate rule: "If all gates pass AND the gain is modelless → p
 
 The promotion is recorded in:
 - `katgpt-rs/Cargo.toml`: `"closed_unit_compaction"` added to the `default = [...]` list.
-- `katgpt-rs/.plans/320_closed_unit_compaction_gate.md`: Phase 6 T6.6 marked `[x]`.
+- `katgpt-rs/.plans/333_closed_unit_compaction_gate.md`: Phase 6 T6.6 marked `[x]`.
 
 ---
 
 ## TL;DR
 
-Plan 320 CUCG passes all 7 GOAT gates: G1 recall=1.000/FDR=0.000, G2 50% suppression, G3 probe latency 1.4ns (ratio=1.00 across L), G4 zero-alloc, G5 feature isolation, G6 0 softmax, G7 can_freeze isomorphism all 4 combos. Latency 8.91 ns (target ≤50ns), throughput 112.9 M/s (target ≥50M). **Promoted to default feature.** The Super-GOAT headline — trajectory compaction and shard freeze are the same primitive — is proven structurally via G7.
+Plan 333 CUCG passes all 7 GOAT gates: G1 recall=1.000/FDR=0.000, G2 50% suppression, G3 probe latency 1.4ns (ratio=1.00 across L), G4 zero-alloc, G5 feature isolation, G6 0 softmax, G7 can_freeze isomorphism all 4 combos. Latency 8.91 ns (target ≤50ns), throughput 112.9 M/s (target ≥50M). **Promoted to default feature.** The Super-GOAT headline — trajectory compaction and shard freeze are the same primitive — is proven structurally via G7.
 
 ---
 
 ## Follow-ups (not blocking promotion)
 
-- **Phase 7 examples** — `examples/cucg_search_basic.rs`, `cucg_shard_freeze_isomorphism.rs`, `cucg_skip_if_reliable.rs`. Doc-only; the bench already demonstrates all three behaviors.
-- **README + `.docs/01_overview.md` update** — feature table row for `closed_unit_compaction`.
+- **Phase 7 examples** — `examples/cucg_search_basic.rs`, `cucg_shard_freeze_isomorphism.rs`, `cucg_skip_if_reliable.rs`. DONE (Plan 333 Phase 7, 2026-06-26).
+- **README + `.docs/01_overview.md` update** — feature table row for `closed_unit_compaction`. DONE (Plan 333 Phase 7, 2026-06-26).
 - **G8 (per-NPC runtime fusion at 20Hz × 1000 NPCs)** — riir-ai's responsibility (Plan 330+). The open primitive ships here; the crowd-scale wiring is private.
 - **LatCal-committed audit trail bridge** — riir-chain Plan TBD (after the sync-boundary contract stabilizes in production).

@@ -40,7 +40,7 @@
 //!
 //! - Does NOT run the LLM forward pass (caller's engine).
 //! - Does NOT manage the KV cache directly (caller's engine).
-//! - Does NOT summarize (the caller supplies a summarizer; see Plan 320
+//! - Does NOT summarize (the caller supplies a summarizer; see Plan 333
 //!   T4.2 — `summarize` is a signature the caller fills in).
 
 use core::ops::Range;

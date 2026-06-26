@@ -1,4 +1,4 @@
-//! Plan 320 Phase 6 T6.2 — CUCG GOAT gate report (G1–G7 pass/fail).
+//! Plan 333 Phase 6 T6.2 — CUCG GOAT gate report (G1–G7 pass/fail).
 //!
 //! Runs all GOAT gates for the CUCG primitive and prints a pass/fail report.
 //! Format mirrors `.benchmarks/303_salience_tri_gate_goat.md`.
@@ -21,7 +21,7 @@ use katgpt_rs::compaction::rubrics::shard_freeze::{
 use katgpt_rs::compaction::{Backstop, ClosedUnitCompactionGate, FireRule, RubricScratch};
 
 fn main() {
-    println!("═══ CUCG GOAT Gate Report (Plan 320, Research 300) ═══");
+    println!("═══ CUCG GOAT Gate Report (Plan 333, Research 300) ═══");
     println!();
 
     // G1: rubric beats fixed-interval (search rubric recall/FDR)

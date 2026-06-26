@@ -1,4 +1,4 @@
-//! Plan 320 Phase 6 T6.1 — CUCG latency + throughput + zero-alloc bench.
+//! Plan 333 Phase 6 T6.1 — CUCG latency + throughput + zero-alloc bench.
 //!
 //! Convention: `std::time::Instant` + `harness = false` (matches
 //! `salience_tri_gate_bench.rs`, `procrustes_bench.rs`, etc. — Criterion is
@@ -171,7 +171,7 @@ fn main() {
         .backstop(Backstop::None)
         .build();
 
-    println!("═══ CUCG Phase 6 Benchmark (Plan 320) ═══");
+    println!("═══ CUCG Phase 6 Benchmark (Plan 333) ═══");
     println!();
 
     // Latency

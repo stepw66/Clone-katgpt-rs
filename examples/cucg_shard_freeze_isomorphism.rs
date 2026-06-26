@@ -1,4 +1,4 @@
-//! Plan 320 Phase 7 T7.2 — CUCG ShardFreezeRubric isomorphism example.
+//! Plan 333 Phase 7 T7.2 — CUCG ShardFreezeRubric isomorphism example.
 //!
 //! Demonstrates the G7 Super-GOAT claim: the CUCG shard-freeze rubric
 //! produces the same decisions as riir-neuron-db's `can_freeze` gate,
@@ -18,7 +18,7 @@ use katgpt_rs::compaction::rubrics::shard_freeze::{
 use katgpt_rs::compaction::{Backstop, ClosedUnitCompactionGate, FireRule, RubricScratch};
 
 fn main() {
-    println!("═══ CUCG × can_freeze Isomorphism (G7, Plan 320) ═══");
+    println!("═══ CUCG × can_freeze Isomorphism (G7, Plan 333) ═══");
     println!();
     println!(
         "can_freeze = (n >= d) && (flatness < {})",

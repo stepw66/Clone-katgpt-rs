@@ -4,7 +4,7 @@
 //! # Source
 //!
 //! SelfCompact (Li et al., JHU + Apple, Jun 2026,
-//! [arXiv:2606.23525](https://arxiv.org/abs/2606.23525)). Plan 320, Research
+//! [arXiv:2606.23525](https://arxiv.org/abs/2606.23525)). Plan 333, Research
 //! 300.
 //!
 //! # What it does
@@ -112,7 +112,7 @@
 //!
 //! # References
 //!
-//! - Plan 320: `.plans/320_closed_unit_compaction_gate.md`
+//! - Plan 333: `.plans/333_closed_unit_compaction_gate.md`
 //! - Research 300: `.research/300_Closed_Unit_Compaction_Gate_Rubric_Gated.md`
 //! - Cross-ref: `riir-neuron-db/.research/007_Can_Freeze_As_Cucg_Instance_Crossref.md`
 

@@ -1,4 +1,4 @@
-//! Plan 320 Phase 7 T7.1 — CUCG SearchRubric basic example.
+//! Plan 333 Phase 7 T7.1 — CUCG SearchRubric basic example.
 //!
 //! Demonstrates the paper's C1/C2/C3/N1 search rubric on a synthetic
 //! trajectory. Shows how a caller sources scalar features, populates the
@@ -13,7 +13,7 @@ use katgpt_rs::compaction::rubrics::search::{SearchRubric, TrajectoryFeatures};
 use katgpt_rs::compaction::{Backstop, ClosedUnitCompactionGate, FireRule, RubricScratch};
 
 fn main() {
-    println!("═══ CUCG SearchRubric Basic Example (Plan 320) ═══");
+    println!("═══ CUCG SearchRubric Basic Example (Plan 333) ═══");
     println!();
 
     let rubric = SearchRubric::default();

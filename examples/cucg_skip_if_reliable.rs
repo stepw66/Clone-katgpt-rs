@@ -1,4 +1,4 @@
-//! Plan 320 Phase 7 T7.3 — CUCG skip-if-reliable suppression example.
+//! Plan 333 Phase 7 T7.3 — CUCG skip-if-reliable suppression example.
 //!
 //! Demonstrates G2: the skip-if-reliable fuse (paper §4.1 skip-if-correct
 //! oracle, modelless via CLR). When the CLR reliability vote exceeds the
@@ -14,7 +14,7 @@ use katgpt_rs::compaction::rubrics::search::SearchRubric;
 use katgpt_rs::compaction::{Backstop, ClosedUnitCompactionGate, FireRule, RubricScratch};
 
 fn main() {
-    println!("═══ CUCG skip-if-reliable Suppression (G2, Plan 320) ═══");
+    println!("═══ CUCG skip-if-reliable Suppression (G2, Plan 333) ═══");
     println!();
 
     // Two gates: one without the skip fuse, one with.
