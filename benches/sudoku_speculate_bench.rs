@@ -118,6 +118,23 @@ fn solve_backtrack() -> SolveStats {
     }
 }
 
+// ─── Mode 4: Fast solver (MRV + constraint propagation) ────────────────────
+
+/// `Sudoku9x9::solve_fast()` — MRV cell selection + bitmask candidate
+/// tracking + naked-singles constraint propagation. Pure modelless rules
+/// engine (no training). This is the "there IS a faster way" answer:
+/// ~27× fewer steps than naive backtracking on Inkala.
+fn solve_fast() -> SolveStats {
+    let mut board = Sudoku9x9::arto_inkala();
+    let (solved, steps) = board.solve_fast();
+    SolveStats {
+        solved,
+        steps,
+        final_board: board,
+        ..Default::default()
+    }
+}
+
 // ─── Mode 2: Iterative speculate + backtrack fallback ──────────────────────
 
 /// After committing a speculated path, check whether any empty cell now has
@@ -358,6 +375,24 @@ fn main() {
     println!("  per-step:        {:.2} µs", bt_per_step_us);
     println!();
 
+    // ── Mode 4: solve_fast (MRV + constraint propagation) ──
+    // The "yes, there IS a faster way" answer. Pure modelless rules engine —
+    // no feature flag needed beyond `sudoku`, no training. Beats backtrack by
+    // ~20-30× on steps because naked-singles propagation + MRV cell ordering
+    // eliminate most of the search.
+    println!("── Mode 4: solve_fast (MRV + constraint propagation) ─────────");
+    let (t_fast, s_fast) = median_batch(solve_fast);
+    println!("  solved:          {}", s_fast.solved);
+    println!("  steps:           {}  (vs backtrack {})", s_fast.steps, s_bt.steps);
+    println!("  median time:     {}/solve", fmt_us(t_fast));
+    let fast_us = t_fast.as_nanos() as f64 / 1000.0;
+    let fast_per_step_us = fast_us / s_fast.steps.max(1) as f64;
+    println!("  per-step:        {:.2} µs", fast_per_step_us);
+    let speedup = bt_us / fast_us.max(1e-9);
+    let step_reduction = s_bt.steps as f64 / s_fast.steps.max(1) as f64;
+    println!("  speedup:         {:.2}× faster ({}× fewer steps)", speedup, step_reduction.round() as u64);
+    println!();
+
     // ── Mode 2: speculate_iterative ──
     println!("── Mode 2: speculate_iterative (DDTree + greedy commit + fallback) ──");
     println!("  (lookahead capped at 8 — TreeNode.parent_path u128 / 16-bit ceiling)");
@@ -459,17 +494,18 @@ fn main() {
     println!("  With p_accept = 1/9 (uniform over digits) on Inkala, that");
     println!("  never holds — exactly what Mode 2 shows above.");
     println!();
-    println!("  TL;DR: hardest Sudoku solves in ~{} via backtrack.", fmt_us(t_bt));
-    println!("         Speculate-way cannot beat it without a trained drafter");
+    println!("  TL;DR: hardest Sudoku solves in ~{} via backtrack,", fmt_us(t_bt));
+    println!("         or ~{} via solve_fast ({:.1}× speedup, modelless MRV + CP).",
+        fmt_us(t_fast), bt_us / fast_us.max(1e-9));
+    println!("         Speculate-way cannot beat backtrack without a trained drafter");
     println!("         AND is hard-capped at 8-deep lookahead by the u128 layout.", );
     println!();
 
     // ── Visual verification + assertions (NOT counted in bench time) ──
-    // Re-run one backtrack and one speculate solve OUTSIDE the timing loop so
+    // Re-run backtrack, speculate, AND solve_fast OUTSIDE the timing loop so
     // the user can visually confirm the solved grid and the bench asserts the
-    // solution is actually correct. These calls do not affect any bench
-    // median above — the `Instant` here is a single-shot representative timing
-    // for bragging, not a benchmark.
+    // solution is actually correct. The `Instant` here is a single-shot
+    // representative timing for bragging, not a benchmark.
     println!("── Visual verification (untimed vs bench) ────────────────────");
 
     let t_vbt0 = Instant::now();
@@ -480,14 +516,20 @@ fn main() {
     let s_verify_sp = solve_speculate_iterative(8, 128);
     let t_vsp = t_vsp0.elapsed();
 
-    // Brag-worthy summary line — single-shot representative solve time.
-    println!("  ⏱  Arto Inkala (World's Hardest Sudoku) solved in {}", fmt_us(t_vbt));
-    println!("     backtrack:   {} ({} steps)", fmt_us(t_vbt), s_verify_bt.steps);
-    println!("     speculate:   {} ({} spec_commits + {} fallback_steps)",
+    let t_vfast0 = Instant::now();
+    let s_verify_fast = solve_fast();
+    let t_vfast = t_vfast0.elapsed();
+
+    // Brag-worthy summary line — lead with the FASTEST solver.
+    println!("  ⏱  Arto Inkala (World's Hardest Sudoku) solved in {}", fmt_us(t_vfast));
+    println!("     solve_fast: {} ({} steps, MRV + constraint propagation)",
+        fmt_us(t_vfast), s_verify_fast.steps);
+    println!("     backtrack:  {} ({} steps)", fmt_us(t_vbt), s_verify_bt.steps);
+    println!("     speculate:  {} ({} spec_commits + {} fallback_steps)",
         fmt_us(t_vsp), s_verify_sp.spec_commits, s_verify_sp.steps);
     println!();
 
-    // Assert correctness — panics here if either solver produced an invalid grid.
+    // Assert correctness — panics here if any solver produced an invalid grid.
     assert!(s_verify_bt.solved, "backtrack did not solve!");
     assert!(
         s_verify_bt.final_board.is_solved(),
@@ -498,18 +540,28 @@ fn main() {
         s_verify_sp.final_board.is_solved(),
         "speculate_iterative final_board is_solved() == false"
     );
+    assert!(s_verify_fast.solved, "solve_fast did not solve!");
+    assert!(
+        s_verify_fast.final_board.is_solved(),
+        "solve_fast final_board is_solved() == false"
+    );
 
-    // Cross-check: Inkala has a unique solution, so both must agree cell-for-cell.
+    // Cross-check: Inkala has a unique solution, so all three must agree.
     assert_eq!(
         s_verify_bt.final_board.grid, s_verify_sp.final_board.grid,
         "backtrack and speculate_iterative produced different grids \
          (Inkala has a unique solution — they must match)"
     );
+    assert_eq!(
+        s_verify_bt.final_board.grid, s_verify_fast.final_board.grid,
+        "backtrack and solve_fast produced different grids \
+         (Inkala has a unique solution — they must match)"
+    );
 
-    println!("  ✅ assertions passed: backtrack.is_solved, speculate.is_solved, grids match");
+    println!("  ✅ assertions passed: all 3 solvers agree, grids match, is_solved=true");
     println!();
 
-    // Print the solved grid (from backtrack; speculate matches per the assert above).
+    // Print the solved grid (from backtrack; speculate + fast match per asserts).
     println!("  Solved grid (Arto Inkala):" );
     println!();
     for line in s_verify_bt.final_board.display().lines() {

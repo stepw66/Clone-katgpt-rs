@@ -19,7 +19,8 @@ the speculate way, and can it beat backtracking?**
 
 | Mode | What it measures |
 |------|------------------|
-| 1. `backtrack` | Canonical `Sudoku9x9::solve()` — ground-truth complete solver. |
+| 1. `backtrack` | Canonical `Sudoku9x9::solve()` — ground-truth complete solver (naive: try 1-9 in order, no MRV). |
+| 4. `solve_fast` | `Sudoku9x9::solve_fast()` — MRV cell selection + bitmask candidates + naked-singles constraint propagation. **The faster way.** |
 | 2. `speculate_iterative` | Iterative DDTree + greedy path commit + backtrack fallback. The realistic "speculative decoding" pattern. |
 | 3. `build_one_tree` | Raw DDTree primitive throughput — nodes/µs for one 8-deep build. |
 
@@ -31,10 +32,26 @@ the speculate way, and can it beat backtracking?**
 |--------|-------|
 | solved | ✅ true |
 | steps  | 49,559 |
-| median time | **2.430 ms/solve** |
+| median time | **2.417 ms/solve** |
 | per-step | 0.05 µs |
 
 Matches the docs baseline (49,559 steps) — bench is correct.
+
+### Mode 4 — solve_fast (MRV + constraint propagation)  ← THE FASTER WAY
+
+| Metric | Value |
+|--------|-------|
+| solved | ✅ true |
+| steps  | **1,851** (vs backtrack 49,559 → **27× fewer**) |
+| median time | **367 µs/solve** |
+| per-step | 0.20 µs |
+| speedup | **6.6× faster** wall time |
+
+Pure modelless: MRV cell ordering + bitmask candidate tracking + naked-singles
+constraint propagation. No training, no gradient descent — just deterministic
+rules. This is the honest answer to "is there a faster way": **yes, and it was
+hiding in plain sight** — the original `solve()` was a deliberately naive
+proof-of-concept for the streaming/hull-attention demo, not a fast solver.
 
 ### Mode 2 — speculate_iterative (DDTree + greedy commit + fallback)
 
@@ -120,9 +137,17 @@ research skill. Filing as an optimization candidate (see `issues/`).
 
 ## TL;DR
 
-Hardest Sudoku (Inkala) solves in **2.430 ms** via backtrack (49,559 steps).
-The speculate way **cannot beat it** with the current DDTree infra: (a) uniform
-marginals give the drafter zero signal, and (b) `TreeNode.parent_path: u128`
-hard-caps lookahead at 8, so a 60-cell puzzle can never be solved in one tree.
-The DDTree primitive runs at ~10 M nodes/sec — fast for token-level speculative
-decoding, but the wrong tool for full-puzzle search.
+Hardest Sudoku (Inkala) solves in **2.417 ms** via naive backtrack (49,559
+steps), or **367 µs** via `solve_fast` (1,851 steps, **6.6× faster**) — a
+pure modelless MRV + constraint-propagation solver.
+
+The speculate way **cannot beat either** with the current DDTree infra:
+(a) uniform marginals give the drafter zero signal, and (b)
+`TreeNode.parent_path: u128` hard-caps lookahead at 8, so a 60-cell puzzle can
+never be solved in one tree. The DDTree primitive runs at ~10 M nodes/sec —
+fast for token-level speculative decoding, but the wrong tool for full-puzzle
+search.
+
+**Lesson**: before asking "can speculate beat backtrack", check whether the
+baseline solver itself is optimal. The 27× step reduction from MRV+CP dwarfs
+anything speculation could deliver on top of a naive backtracker.
