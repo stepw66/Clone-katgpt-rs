@@ -32,18 +32,18 @@ jobs:
       (github.event_name == 'workflow_dispatch' && inputs.command == 'release')
     runs-on: ubuntu-latest
     permissions:
-      contents: write       # push tags, create GitHub releases
-      pull-requests: read   # detect the release PR and its commits
+      contents: write # push tags, create GitHub releases
+      pull-requests: read # detect the release PR and its commits
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
         with:
-          fetch-depth: 0          # release-plz needs full git history
+          fetch-depth: 0 # release-plz needs full git history
           persist-credentials: false
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
       - name: Run release-plz
-        uses: release-plz/[email protected]
+        uses: release-plz/action@v0.5
         with:
           command: release
         env:
@@ -64,8 +64,8 @@ jobs:
       (github.event_name == 'workflow_dispatch' && inputs.command == 'release-pr')
     runs-on: ubuntu-latest
     permissions:
-      contents: write        # push to the release-pr branch
-      pull-requests: write   # create / update the release PR
+      contents: write # push to the release-pr branch
+      pull-requests: write # create / update the release PR
     concurrency:
       # Only one release-pr job per branch at a time — prevents PR conflicts.
       # cancel-in-progress: false → never skip an pending update.
@@ -80,7 +80,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
       - name: Run release-plz
-        uses: release-plz/[email protected]
+        uses: release-plz/action@v0.5
         with:
           command: release-pr
         env:
