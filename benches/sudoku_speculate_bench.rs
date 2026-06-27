@@ -66,7 +66,7 @@ fn uniform_marginals(lookahead: usize) -> Vec<Vec<f32>> {
 
 // ─── Result structs ────────────────────────────────────────────────────────
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone)]
 struct SolveStats {
     solved: bool,
     /// Backtracking steps (Mode 1), or fallback steps (Mode 2).
@@ -79,6 +79,28 @@ struct SolveStats {
     iterations: usize,
     /// Tree nodes built total (Mode 2/3).
     tree_nodes: usize,
+    /// Times the fallback had to revert ALL speculate commits back to the
+    /// initial puzzle (because prior rounds' wrong commits poisoned the board
+    /// so even pre-round backtrack failed). Honest "speculate contributed
+    /// nothing" counter.
+    full_reverts: usize,
+    /// Final board state (for post-timing visual print + assertion).
+    final_board: Sudoku9x9,
+}
+
+impl Default for SolveStats {
+    fn default() -> Self {
+        Self {
+            solved: false,
+            steps: 0,
+            spec_rounds: 0,
+            spec_commits: 0,
+            iterations: 0,
+            tree_nodes: 0,
+            full_reverts: 0,
+            final_board: Sudoku9x9::new([[0; 9]; 9]),
+        }
+    }
 }
 
 // ─── Mode 1: Canonical backtracking ────────────────────────────────────────
@@ -91,6 +113,7 @@ fn solve_backtrack() -> SolveStats {
     SolveStats {
         solved,
         steps: step,
+        final_board: board,
         ..Default::default()
     }
 }
@@ -111,6 +134,28 @@ fn has_dead_end(board: &Sudoku9x9) -> bool {
         }
     }
     false
+}
+
+/// Run backtracking on `board` in place. If it fails (returns false),
+/// reset `board` to the initial Arto Inkala puzzle and backtrack from there
+/// (guaranteed solvable). Returns `(solved, steps, reverted_to_initial)`.
+///
+/// This is the correctness safety net: speculate commits can poison the
+/// board into a globally-unsolvable state that has no immediate dead-end.
+/// When that happens, backtrack from the poisoned state returns false, so we
+/// revert to the known-solvable initial puzzle and solve honestly.
+fn backtrack_with_initial_fallback(board: &mut Sudoku9x9) -> (bool, usize, bool) {
+    let mut cache = KVCache2D::new();
+    let mut step = 0usize;
+    if board.solve(&mut cache, &mut step) {
+        return (true, step, false);
+    }
+    // Poisoned — revert to initial and solve from the known-solvable state.
+    *board = Sudoku9x9::arto_inkala();
+    let mut cache2 = KVCache2D::new();
+    let mut step2 = 0usize;
+    let solved = board.solve(&mut cache2, &mut step2);
+    (solved, step + step2, true)
 }
 
 /// Iterative speculative solve.
@@ -168,12 +213,12 @@ fn solve_speculate_iterative(lookahead_in: usize, tree_budget: usize) -> SolveSt
 
         if tree.is_empty() {
             // No valid speculation — backtrack the rest.
-            let mut cache = KVCache2D::new();
-            let mut step = 0;
-            let solved = board.solve(&mut cache, &mut step);
+            let (solved, step, reverted) = backtrack_with_initial_fallback(&mut board);
             stats.steps += step;
+            stats.full_reverts += reverted as usize;
             stats.solved = solved;
             stats.iterations = iterations;
+            stats.final_board = board;
             return stats;
         }
 
@@ -205,18 +250,19 @@ fn solve_speculate_iterative(lookahead_in: usize, tree_budget: usize) -> SolveSt
         if !board.is_solved() && has_dead_end(&board) {
             // Revert and backtrack from the pre-round state.
             board = pre_round;
-            let mut cache = KVCache2D::new();
-            let mut step = 0;
-            let solved = board.solve(&mut cache, &mut step);
+            let (solved, step, reverted) = backtrack_with_initial_fallback(&mut board);
             stats.steps += step;
+            stats.full_reverts += reverted as usize;
             stats.solved = solved;
             stats.iterations = iterations;
+            stats.final_board = board;
             return stats;
         }
     }
 
     stats.solved = board.is_solved();
     stats.iterations = iterations;
+    stats.final_board = board;
     stats
 }
 
@@ -315,9 +361,9 @@ fn main() {
     // ── Mode 2: speculate_iterative ──
     println!("── Mode 2: speculate_iterative (DDTree + greedy commit + fallback) ──");
     println!("  (lookahead capped at 8 — TreeNode.parent_path u128 / 16-bit ceiling)");
-    println!("{:<10} {:>10} {:>10} {:>12} {:>10} {:>12} {:>10}",
-        "lookahead", "budget", "solved", "spec_commits", "fallback", "tree_nodes", "time");
-    println!("{}", "─".repeat(80));
+    println!("{:<10} {:>10} {:>10} {:>12} {:>10} {:>12} {:>12} {:>10}",
+        "lookahead", "budget", "solved", "spec_commits", "fallback", "full_revert", "tree_nodes", "time");
+    println!("{}", "─".repeat(92));
 
     // A few (lookahead, budget) configs to characterize the trade-off.
     // lookahead > 8 is clamped internally; we pass 16 to prove the clamp works.
@@ -330,12 +376,13 @@ fn main() {
     for &(la, budget) in configs {
         let (t, s) = median_batch(|| solve_speculate_iterative(la, budget));
         println!(
-            "{:<10} {:>10} {:>10} {:>12} {:>10} {:>12} {:>10}",
+            "{:<10} {:>10} {:>10} {:>12} {:>10} {:>12} {:>12} {:>10}",
             la,
             budget,
             s.solved,
             s.spec_commits,
             s.steps,
+            s.full_reverts,
             s.tree_nodes,
             fmt_us(t),
         );
@@ -415,6 +462,55 @@ fn main() {
     println!("  TL;DR: hardest Sudoku solves in ~{} via backtrack.", fmt_us(t_bt));
     println!("         Speculate-way cannot beat it without a trained drafter");
     println!("         AND is hard-capped at 8-deep lookahead by the u128 layout.", );
+    println!();
+
+    // ── Visual verification + assertions (NOT counted in bench time) ──
+    // Re-run one backtrack and one speculate solve OUTSIDE the timing loop so
+    // the user can visually confirm the solved grid and the bench asserts the
+    // solution is actually correct. These calls do not affect any number above.
+    println!("── Visual verification (untimed) ─────────────────────────────");
+    println!("  Re-running one backtrack + one speculate solve for display.");
+    println!();
+
+    let s_verify_bt = solve_backtrack();
+    let s_verify_sp = solve_speculate_iterative(8, 128);
+
+    // Assert correctness — panics here if either solver produced an invalid grid.
+    assert!(s_verify_bt.solved, "backtrack did not solve!");
+    assert!(
+        s_verify_bt.final_board.is_solved(),
+        "backtrack final_board is_solved() == false"
+    );
+    assert!(s_verify_sp.solved, "speculate_iterative did not solve!");
+    assert!(
+        s_verify_sp.final_board.is_solved(),
+        "speculate_iterative final_board is_solved() == false"
+    );
+
+    // Cross-check: Inkala has a unique solution, so both must agree cell-for-cell.
+    assert_eq!(
+        s_verify_bt.final_board.grid, s_verify_sp.final_board.grid,
+        "backtrack and speculate_iterative produced different grids \
+         (Inkala has a unique solution — they must match)"
+    );
+
+    println!("  ✅ assertions passed: backtrack.is_solved, speculate.is_solved, grids match");
+    println!();
+
+    // Print the solved grid (from backtrack; speculate matches per the assert above).
+    println!("  Solved grid (Arto Inkala):" );
+    println!();
+    for (i, line) in s_verify_bt.final_board.display().lines().enumerate() {
+        println!("    {line}");
+        // display() already inserts box separators; no extra work needed.
+        let _ = i;
+    }
+    println!();
+    println!("  speculate_iter(8,128) stats: {} spec_commits, {} fallback_steps, {} full_reverts",
+        s_verify_sp.spec_commits, s_verify_sp.steps, s_verify_sp.full_reverts);
+    println!();
+    println!("── end visual verification ──────────────────────────────────");
+    println!();
 
     // Sink to prevent elision.
     if t_bt.as_nanos() == u128::MAX {
