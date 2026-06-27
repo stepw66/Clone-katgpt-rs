@@ -1,12 +1,17 @@
 # Issue 007: Make katgpt-rs Cargo-consumable — Pillar Reorganization + HLA Substrate Extraction
 
 > **Type:** Architecture / reorganization (unblocks cargo publish + kills cross-repo duplication)
-> **Status:** Open — proposal, awaiting go/no-go
+> **Status:** Audit complete — see [Plan 008](../.plans/008_katgpt_core_substrate_extraction.md) for the corrected, executable scope.
+> **Audit findings (2026-06-27):**
+> - **Phase 5 RESCINDED** — `Cargo.toml:9` + `release-plz.toml:9-12` lock `katgpt-rs` root as `publish = false` permanently ("dev/examples aggregator — never published. Only katgpt-core ships to crates.io"). Decision was made AFTER this issue was filed and overrides its Phase 5.
+> - **Phase 1 step 1 (`types` move) ALREADY DONE** — `katgpt-core/src/types/` has 14 files; root `src/types.rs` is a thin re-export shim.
+> - **Phase 2B premise INVERTED** — `cgsp` is already in core (correctly), `cce` is in root (correctly); no tier move needed.
+> - **What's still real:** the cross-repo DRY violation. `riir-engine/src/` still has divergent `crate::hla`/`transformer`/`types`/`tokenizer`/`dd_tree`/`spec_types`/`mcts`/`sampling`/`delta_mem`/`simd` — confirmed via grep.
 > **Owner:** develop
 > **Created:** 2026-06-27
 > **Cross-repo:** katgpt-rs (primary), riir-ai, riir-neuron-db (consumers). riir-train/riir-chain unaffected.
 > **Origin:** User directive — "I want others to use it as easily as possible aka cargo" + HLA scattering concern.
-> **References:** [Issue 006](./006_x86_64_simd_target_feature.md) (x86_64 gate, now cleared) · `.research/28_Higher_order_Linear_Attention.md`
+> **References:** [Plan 008](../.plans/008_katgpt_core_substrate_extraction.md) (executable scope) · [Issue 006](./006_x86_64_simd_target_feature.md) (x86_64 gate, now cleared) · `.research/28_Higher_order_Linear_Attention.md`
 
 ---
 
