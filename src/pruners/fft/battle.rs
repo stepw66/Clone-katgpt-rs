@@ -8,6 +8,11 @@ use super::types::*;
 
 // ── Battle State ───────────────────────────────────────────────
 
+/// `Clone` added in Plan 298 Phase 4 (FFT EdgeLoRA follow-up) so the FFT
+/// self-play adapter can snapshot state for encode-before/encode-after episode
+/// emission. All fields are `Clone` (`Vec<Unit>`, `Vec<GameEvent>`,
+/// `Vec<ActiveEffect>`, `u32`), so this is semantically free.
+#[derive(Clone)]
 pub struct BattleState {
     pub units: Vec<Unit>,
     pub events: Vec<GameEvent>,

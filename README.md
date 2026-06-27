@@ -297,6 +297,7 @@ graph LR
 | **Depth-Invariance Diagnostic** (`depth_invariance`) | 306 | G1/G2/G3 ✅, G4 (re-spec) ✅ | Root-cause attention-drift classifier (`DepthInvariant` / `DepthSpecificRefinement` / `Collapsed`) + `MagnitudeRegularizedResidual` fix for owned kernels. G2 reproduces paper Figure 10 on random-init `BeliefDrafter`; G3 negative control on `micro_belief/attractor` classifies as `DepthInvariant`. SIMD inner-loop via `simd::simd_sum_sq_quartic`. Zero runtime cost unless invoked. Default-on (T7.4, 2026-06-23). |
 | **Claim Rubric Runtime** (`claim_rubric`) | 307 | 17/17 round-trip ✅ | L1/L2/L3 evidence-ladder validator — executable rubric for probe/steering claims. Vocabulary must match evidence ("causally controls" requires L3; "reads" is L1-safe). 17/17 Phase 2 round-trip + 1/1 GOAT gate green. Meta-discipline primitive, zero runtime cost unless invoked. Default-on (T3.3, 2026-06-23). |
 | **Closed-Unit Compaction Gate** (`closed_unit_compaction`) | 333 | 7/7 ✅ | Generic rubric-gated trajectory compaction primitive (SelfCompact, arxiv 2606.23525) — fires at structurally-safe moments (closed-unit ∧ summarizable ∧ progress ∧ ¬stuck). evaluate() **8.91 ns** (target <50ns), **112.9 M/s** (target >=50M). **Super-GOAT**: trajectory compaction and shard freeze are the same primitive (G7 proven structurally). Default-on (Phase 6, 2026-06-25). |
+| **Sigmoid-Graded Reject Confidence** (`sigmoid_graded_reject`) | 310 T1 | T3.2 6/6 + T3.1 5/5 ✅ | Tolerant soft-reject relax-and-retry on `ConstraintPruner` — default `reject_confidence()` reproduces `is_valid()` bit-identically (zero-behavior-change); sigmoid-graded impl + `soft_reject_with_relax` pipeline routes borderline candidates through relaxation. HarnessBridge Table 7: tolerant > strict because `false_reject_cost > false_pass_cost`. Default Δ **0.000ns**, graded **+3.734ns**, batch **2647M/s**, pipeline **+0.241ns**; tolerant FR **1.69%** vs strict **5.49%** (Δ −3.80pp), net reward **+603.3**, precision ratio **0.9456**. Zero runtime cost unless caller invokes `soft_reject_with_relax`. Default-on (T4.1, 2026-06-26). |
 
 ## 🎮 Arena Proofs — HL Thesis Validated
 
@@ -1575,6 +1576,46 @@ Leaf lattice op throughput: **738.89 Melem/s** (649.63 ns for 480 edges on 16×1
 
 Feature gates: `interest_cohain` (**DEFAULT-ON** in katgpt-core since Plan 335 Phase 7, `9330e6cb`), `lattice_utility` (opt-in — pulls `dec_operators`, consumer-crate boundary). The eggshell **coexists with `pathfinder.rs` A\*** (zone-level KG reasoning vs tactical single-path movement); it does not dominate or replace A\* (G2 framing-corrected — see benchmark). 📖 Plan: [`.plans/335_zone_eggshell_spatial_lattice.md`](../../riir-ai/.plans/335_zone_eggshell_spatial_lattice.md) (riir-ai), GOAT bench: [`../../riir-ai/.benchmarks/335_zone_eggshell_goat.md`](../../riir-ai/.benchmarks/335_zone_eggshell_goat.md).
 
+### 🎚 Sigmoid-Graded Reject Confidence — Tolerant Soft-Reject Relax-and-Retry (Plan 310 T1, Research 131 HarnessBridge Table 7)
+
+Adds a `reject_confidence()` default method to `ConstraintPruner` returning a `[0,1]` sigmoid confidence instead of a hard binary bit, plus a caller-side `soft_reject_with_relax` pipeline that routes borderline candidates through a relaxation retry instead of hard-failing them. HarnessBridge Table 7 proves tolerant rejection strictly beats strict rejection because **false-reject cost > false-pass cost** — a wrongly-rejected good candidate is a missed gain, while a wrongly-accepted bad candidate is caught downstream at partial cost.
+
+```text
+  reject_confidence()         soft_reject_decide()
+       │                           │
+       ▼                           ▼
+  sigmoid(β·evidence)   ──▶  ≤ τ_low  ──▶ Accept (outright)
+                            ≥ τ_high ──▶ Reject (hard)
+                            mid-band  ──▶ RelaxRetry
+                                              │
+                                              ▼
+                                    relaxer.retry(evidence)
+                                              │
+                                              ▼
+                                    accept? ──▶ yes ──▶ Accept
+                                              └─▶ no  ──▶ Reject
+```
+
+The default `reject_confidence()` reproduces `is_valid()` bit-identically (`0.0` for accept, `1.0` for reject), so every existing `ConstraintPruner` impl is unchanged — the SoftReject band is unreachable unless an impl overrides `reject_confidence()` with a real sigmoid. **Zero runtime cost** unless a caller explicitly invokes `soft_reject_with_relax`.
+
+**Plan 310 T1 GOAT — both halves PASS (2026-06-26):**
+
+| Half | Gate | Measurement | Verdict |
+|------|------|-------------|---------|
+| **T3.2 perf** | G2 default Δ | **0.000ns** (LLVM optimizes the match-on-`is_valid` wrapper away) | ✅ PASS |
+| T3.2 perf | G2 graded Δ | **+3.734ns** (real sigmoid `1/(1+e^{-x})`) | ✅ PASS |
+| T3.2 perf | G3 batch (N=1024) | `batch_is_valid`=3292M/s, `batch_reject_confidence`=2647M/s (auto-vectorized) | ✅ PASS |
+| T3.2 perf | G4 pipeline | `soft_reject_with_relax` adds **+0.241ns** over raw `reject_confidence` | ✅ PASS |
+| T3.2 perf | G1 compat / G5 determinism | 2304 samples 0 mismatches / bit-identical | ✅ PASS |
+| **T3.1 quality** | G1 false-reject rate | tolerant **1.69%** vs strict **5.49%** (Δ **−3.80pp**) | ✅ PASS |
+| T3.1 quality | G2 net reward | tolerant **+603.3** higher (cost-weighted: `false_reject_cost=1.0 > false_pass_cost=0.3`) | ✅ PASS |
+| T3.1 quality | G3 accepted-output quality | precision ratio **0.9456** (within ±15% band) | ✅ PASS |
+| T3.1 quality | G4 backward-compat / G5 determinism | binary strict == tolerant (0 mismatches) / bit-identical | ✅ PASS |
+
+Cost model (HarnessBridge Table 7): `false_reject_cost=1.0`, `false_pass_cost=0.3`. The tolerant path cuts FR rate by 3.80pp at the cost of a higher FP rate (10.22% vs 3.97% — informational), but because `false_pass_cost=0.3 < false_reject_cost=1.0`, the net reward improves by **+603.3** (~6.6% gain).
+
+Feature gate: `sigmoid_graded_reject` (**DEFAULT-ON** since Plan 310 T4.1, 2026-06-26). The `soft_reject` module + `WidenToleranceRelax` caller recipe are always compiled; callers opt in by invoking `soft_reject_with_relax` instead of `is_valid`. 📖 Plan: [`../../riir-ai/.plans/310_harnessbridge_ablation_wins.md`](../../riir-ai/.plans/310_harnessbridge_ablation_wins.md) (riir-ai), Perf bench: [`benches/bench_310_sigmoid_graded_reject_goat.rs`](benches/bench_310_sigmoid_graded_reject_goat.rs), Quality bench: [`benches/bench_310_t31_false_reject_rate_goat.rs`](benches/bench_310_t31_false_reject_rate_goat.rs).
+
 ---
 
 ## 🔧 KV Compression
@@ -1785,6 +1826,95 @@ Unlike `PersonalityWeightedComposition`, which *drifts* continuously under a rew
 **Examples:**
 - `cargo run --example committed_blend_01_three_archetypes --features committed_field_blend` — K=3 archetypes × 100 entities, fog-of-war sampling invariance.
 - `cargo run --example committed_blend_02_recommit_on_event --features committed_field_blend` — re-commit lifecycle (v=1 → v=2 personality swap + tamper detection).
+
+## 🚢 Releasing & Deploying
+
+Only **`katgpt-core`** ships to crates.io. The root `katgpt-rs` crate is a
+dev/examples aggregator (`publish = false`) — its version number is never
+bumped, tagged, or consumed by anyone.
+
+### Dev workflow
+
+All work happens on **`develop`** (no feature branches). Use [conventional
+commits](https://www.conventionalcommits.org/) so release-plz can compute the
+next version:
+
+| Prefix | Effect on `katgpt-core` version |
+|---|---|
+| `feat:` | minor bump (`0.2.0` → `0.2.1`) |
+| `fix:` | patch bump (`0.2.0` → `0.2.1`) |
+| `feat!:` / `BREAKING CHANGE:` | major bump (`0.2.0` → `1.0.0`) |
+| `docs:`, `chore:`, `refactor:`, `test:` | no bump |
+
+release-plz also runs `cargo-semver-checks`, so a silent API break (removed
+public fn, changed signature) forces a major bump regardless of the commit
+message.
+
+### Auto release (CI)
+
+Every push to `develop` or `main` triggers `.github/workflows/release-plz.yml`:
+
+- **`develop` push** → opens/updates a "Prepare release" PR with the bumped
+  `katgpt-core` version + generated `CHANGELOG.md`. The PR auto-updates as you
+  keep committing.
+- **`main` push** → publishes unpublished `katgpt-core` versions to crates.io,
+  pushes the `katgpt-core-vX.Y.Z` tag, and creates the GitHub Release.
+
+### Ship it (`scripts/release.sh`)
+
+One command does everything — no manual PR review, no manual merge:
+
+```sh
+./scripts/release.sh
+```
+
+From `develop`, this:
+1. Finds the open release-plz PR (auto-created by CI on your last develop push)
+2. Merges it into `develop` (merge commit)
+3. Promotes `develop` → `main` (fast-forward)
+4. CI auto-publishes `katgpt-core` to crates.io on the `main` push
+
+If there's no open release PR (nothing version-worthy since the last release),
+the script exits cleanly.
+
+Prerequisites (one-time): `brew install gh && gh auth login`.
+
+Fallback — manually trigger just the CI publish job (from `main`):
+```sh
+./scripts/release.sh --publish
+```
+
+### One-time setup
+
+1. **GitHub repo settings → Actions → General → Workflow permissions**: set
+   to *Read and write*, and check *"Allow GitHub Actions to create and approve
+   pull requests"*.
+2. **Add the `CARGO_REGISTRY_TOKEN` secret** (Settings → Secrets and variables
+   → Actions). Generate a crates.io token with `publish-new` + `publish-update`
+   scopes.
+3. **First publish is manual** (crates.io limitation — CI can't publish a
+   brand-new crate name the first time):
+   ```sh
+   cargo publish -p katgpt-core
+   ```
+   After this, release-plz takes over for all subsequent versions.
+
+### Downstream consumers
+
+`katgpt-core` is consumed by downstream projects. After a release, bump the
+version pin in each consumer's `Cargo.toml`:
+
+```toml
+katgpt-core = "0.2"   # was: { path = "../katgpt-rs/crates/katgpt-core" }
+```
+
+For local dev, keep a `[patch.crates-io]` override pointing at your checkout
+so un-published local changes still work:
+
+```toml
+[patch.crates-io]
+katgpt-core = { path = "../katgpt-rs/crates/katgpt-core" }
+```
 
 ## 📁 Project Structure
 
