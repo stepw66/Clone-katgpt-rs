@@ -2,8 +2,8 @@
 # scripts/release.sh — ship the next katgpt-core version. One command.
 #
 # What it does (from develop):
-#   1. Finds the open release-plz PR (auto-created by CI on each develop push)
-#   2. Auto-merges it into develop (merge commit, never squash)
+#   1. If no release PR is open, triggers release-plz to create one (and waits)
+#   2. Merges the release PR into develop (merge commit, never squash)
 #   3. Promotes develop → main (fast-forward)
 #   4. CI auto-publishes katgpt-core to crates.io on the main push
 #
@@ -13,8 +13,6 @@
 #
 # Prerequisites (one-time):
 #   brew install gh && gh auth login
-#
-# See README.md § "Releasing & Deploying" for the full flow.
 set -euo pipefail
 
 # ── Subcommand: --publish (manual CI publish trigger from main) ────────
@@ -39,12 +37,37 @@ BRANCH="$(git branch --show-current)"
 command -v gh >/dev/null 2>&1 || { echo "error: brew install gh" >&2; exit 1; }
 gh auth status >/dev/null 2>&1 || { echo "error: gh auth login" >&2; exit 1; }
 
-# Find the open release-plz PR (branch starts with "release-plz-")
-PR_JSON="$(gh pr list --state open --json number,title,headRefName \
-  --jq '[.[] | select(.headRefName | startswith("release-plz"))] | .[0] // empty')"
+# Push any unpushed develop commits (so release-plz sees the latest)
+git push origin develop 2>/dev/null || true
+
+find_release_pr() {
+  gh pr list --state open --json number,title,headRefName \
+    --jq '[.[] | select(.headRefName | startswith("release-plz"))] | .[0] // empty'
+}
+
+# ── Step 1: ensure a release PR exists ─────────────────────────────────
+PR_JSON="$(find_release_pr)"
 
 if [[ -z "$PR_JSON" ]]; then
-  echo "ℹ no open release PR. Commit a feat:/fix: on develop to trigger one." >&2
+  echo "→ no open release PR. Triggering release-plz release-pr..."
+  gh workflow run release-plz.yml --ref develop -f command=release-pr
+
+  # Wait for the run to register, then watch it
+  sleep 5
+  RUN_ID="$(gh run list --workflow=release-plz.yml --branch=develop \
+    --event=workflow_dispatch --limit=1 --json databaseId --jq '.[0].databaseId')"
+
+  if [[ -n "$RUN_ID" ]]; then
+    echo "→ waiting for release-pr job (run #$RUN_ID)..."
+    gh run watch "$RUN_ID" --exit-status
+  fi
+
+  # Re-check for the PR
+  PR_JSON="$(find_release_pr)"
+fi
+
+if [[ -z "$PR_JSON" ]] || [[ "$PR_JSON" == "null" ]]; then
+  echo "ℹ nothing to release — no version-worthy changes since last release." >&2
   exit 0
 fi
 
@@ -53,14 +76,14 @@ PR_TITLE="$(printf '%s' "$PR_JSON" | jq -r '.title')"
 
 echo "→ found release PR #$PR_NUMBER: $PR_TITLE"
 
-# Merge the PR into develop (merge commit — release-plz needs it for detection)
+# ── Step 2: merge the PR (merge commit, not squash) ───────────────────
 echo "→ merging PR #$PR_NUMBER into develop..."
 gh pr merge "$PR_NUMBER" --merge --delete-branch
 
-# Pull the merged develop
+# ── Step 3: pull the merged develop ───────────────────────────────────
 git pull origin develop
 
-# Promote develop → main
+# ── Step 4: promote develop → main ────────────────────────────────────
 echo "→ promoting develop → main..."
 git checkout main
 git pull origin main
