@@ -9,3 +9,15 @@
 [[package]]
 name = "katgpt-rs"
 release = false  # never version-bump, never tag, never changelog, never publish
+
+[[package]]
+name = "katgpt-core"
+# Use package-prefixed tags to avoid collision with legacy root-crate tags
+# (v0.1.0 "Community engine freeze", v0.2.0 "Release v0.2.0") that predate
+# release-plz. Without this override, release-plz defaults to `v{{version}}`
+# (because only one package is public), finds the legacy `v0.2.0` tag, assumes
+# katgpt-core@0.2.0 was released, then bails with:
+#   "package katgpt-core not found in the registry, but the git tag v0.2.0 exists"
+# With this prefix, release-plz looks for `katgpt-core-v{{version}}` instead,
+# which doesn't exist yet — so katgpt-core is treated as a fresh publish.
+git_tag_name = "katgpt-core-v{{version}}"
