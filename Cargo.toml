@@ -733,6 +733,17 @@ path = "benches/algorithmic_probability_sampler_bench.rs"
 required-features = ["complexity_prior_sampler"]
 harness = false
 
+# Sudoku speculative-solve bench — pure perf, no TUI. Three modes on Arto
+# Inkala's hardest (21 clues, 60 empties): (1) canonical backtracking,
+# (2) iterative DDTree + greedy commit + backtrack fallback,
+# (3) single-tree full-depth oneshot. std::time::Instant + harness=false
+# (matches the crate convention; no Criterion dep).
+[[bench]]
+name = "sudoku_speculate_bench"
+path = "benches/sudoku_speculate_bench.rs"
+required-features = ["sudoku"]
+harness = false
+
 # Issue 001 G3 — Procrustes determinism test (bit-identical same-input).
 [[test]]
 name = "procrustes_determinism"
