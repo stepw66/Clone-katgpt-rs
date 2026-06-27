@@ -1716,6 +1716,7 @@ name = "katgpt-core"
 version = "0.2.0"
 dependencies = [
  "ahash",
+ "arrayvec",
  "blake3",
  "bytemuck",
  "criterion",

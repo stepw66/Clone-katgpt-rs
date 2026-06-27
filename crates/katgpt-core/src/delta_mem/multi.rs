@@ -13,6 +13,7 @@ use std::collections::HashMap;
 use super::state::{DeltaMemoryConfig, DeltaMemorySnapshot, DeltaMemoryState};
 
 /// Aggregation strategy for cross-domain readouts.
+#[repr(u8)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AggregationStrategy {
     /// Use only the routed domain's readout (no cross-domain).
@@ -30,13 +31,20 @@ pub struct MultiDomainMemory {
     states: HashMap<String, DeltaMemoryState>,
     /// Default config for new states.
     config: DeltaMemoryConfig,
+    /// Pre-allocated readout buffer for `read_aggregated` (rank elements).
+    readout_buf: Vec<f32>,
+    /// Pre-allocated weighted accumulation buffer for `read_aggregated` (rank elements).
+    weighted_buf: Vec<f32>,
 }
 
 impl MultiDomainMemory {
     /// Create a new multi-domain memory.
     pub fn new(config: DeltaMemoryConfig) -> Self {
+        let rank = config.rank;
         Self {
             states: HashMap::new(),
+            readout_buf: vec![0.0f32; rank],
+            weighted_buf: vec![0.0f32; rank],
             config,
         }
     }
@@ -46,6 +54,19 @@ impl MultiDomainMemory {
     /// Returns `None` if the domain doesn't exist yet.
     pub fn read_domain(&self, domain: &str, query: &[f32]) -> Option<Vec<f32>> {
         self.states.get(domain).map(|s| s.read(query))
+    }
+
+    /// Read from the specified domain's memory state into a pre-allocated buffer.
+    ///
+    /// Returns `false` if the domain doesn't exist yet.
+    pub fn read_domain_into(&self, domain: &str, query: &[f32], out: &mut [f32]) -> bool {
+        match self.states.get(domain) {
+            Some(s) => {
+                s.read_into(query, out);
+                true
+            }
+            None => false,
+        }
     }
 
     /// Write to a domain's memory state.
@@ -109,39 +130,50 @@ impl MultiDomainMemory {
     ///
     /// `RoutedOnly`: returns the routed domain's readout.
     /// `BanditWeighted`: weighted average of all domain readouts by their update counts.
+    ///
+    /// Takes `&mut self` because `BanditWeighted` reuses the internal
+    /// `readout_buf` / `weighted_buf` scratch buffers (zero-alloc hot path).
     pub fn read_aggregated(
-        &self,
+        &mut self,
         domain: &str,
         query: &[f32],
         strategy: AggregationStrategy,
     ) -> Option<Vec<f32>> {
+        let rank = self.config.rank;
         match strategy {
-            AggregationStrategy::RoutedOnly => self.read_domain(domain, query),
-            AggregationStrategy::BanditWeighted => {
-                let routed = self.read_domain(domain, query)?;
-                if self.states.is_empty() {
-                    return Some(routed);
+            AggregationStrategy::RoutedOnly => {
+                let mut out = vec![0.0f32; rank];
+                if self.read_domain_into(domain, query, &mut out) {
+                    Some(out)
+                } else {
+                    None
                 }
-
-                let rank = self.config.rank;
-                let mut weighted = vec![0.0f32; rank];
+            }
+            AggregationStrategy::BanditWeighted => {
+                self.weighted_buf[..rank].fill(0.0f32);
                 let mut total_weight = 0.0f32;
+                let mut routed_exists = false;
 
                 for state in self.states.values() {
-                    let readout = state.read(query);
-                    let weight = state.update_count() as f32 + 1.0; // +1 for smoothing
-                    for (i, r) in readout.iter().enumerate() {
-                        weighted[i] += r * weight;
+                    state.read_into(query, &mut self.readout_buf[..rank]);
+                    let weight = state.update_count() as f32 + 1.0;
+                    for (i, r) in self.readout_buf[..rank].iter().enumerate() {
+                        self.weighted_buf[i] += r * weight;
                     }
                     total_weight += weight;
+                    routed_exists = true;
+                }
+
+                if !routed_exists {
+                    return None;
                 }
 
                 if total_weight > 0.0 {
-                    for w in weighted.iter_mut() {
+                    for w in self.weighted_buf[..rank].iter_mut() {
                         *w /= total_weight;
                     }
                 }
-                Some(weighted)
+                Some(self.weighted_buf[..rank].to_vec())
             }
         }
     }
@@ -238,5 +270,42 @@ mod tests {
 
         let readout = mem.read_aggregated("coding", &key, AggregationStrategy::RoutedOnly);
         assert!(readout.is_some());
+    }
+
+    /// Bit-identity guard: `read_aggregated(_, _, BanditWeighted)` must agree
+    /// with the per-domain `read_domain` weighted by `update_count + 1`.
+    /// Catches regressions in the scratch-buffer reuse path.
+    #[test]
+    fn test_read_aggregated_bandit_weighted_matches_naive() {
+        let rank = 4;
+        let mut mem =
+            MultiDomainMemory::new(DeltaMemoryConfig { rank, ..Default::default() });
+        let key = vec![1.0, 0.0, 0.0, 0.0];
+        let val = vec![0.0, 1.0, 0.0, 0.0];
+        mem.write_domain("a", &key, &val);
+        mem.write_domain("b", &key, &val);
+
+        // Naive reference implementation using `read_domain` (allocating).
+        let mut weighted = vec![0.0f32; rank];
+        let mut total_weight = 0.0f32;
+        for name in mem.domains() {
+            let readout = mem.read_domain(name, &key).unwrap();
+            let w = (mem.snapshot_all()[name].update_count as f32) + 1.0;
+            for (i, r) in readout.iter().enumerate() {
+                weighted[i] += r * w;
+            }
+            total_weight += w;
+        }
+        for w in weighted.iter_mut() {
+            *w /= total_weight;
+        }
+
+        let aggregated = mem
+            .read_aggregated("a", &key, AggregationStrategy::BanditWeighted)
+            .expect("domains exist");
+        assert_eq!(aggregated.len(), rank);
+        for (a, b) in aggregated.iter().zip(weighted.iter()) {
+            assert!((a - b).abs() < 1e-6, "bandit_weighted drift: {} vs {}", a, b);
+        }
     }
 }

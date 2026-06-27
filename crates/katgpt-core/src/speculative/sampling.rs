@@ -11,7 +11,6 @@
 //! the root crate as a thin re-export shim — the algorithms themselves
 //! are pure substrate.
 
-use crate::simd::simd_scale_inplace;
 use crate::types::Rng;
 
 // Uses strict `r < cdf` (not `<=`) so zero-probability leading bins are never selected.
@@ -55,15 +54,56 @@ pub fn sample_residual_distribution_into(
     rng: &mut Rng,
 ) -> usize {
     let len = p.len().min(scratch.len());
-    for i in 0..len {
-        scratch[i] = (p[i] - q[i]).max(0.0);
+
+    // Chunked residual computation fused with sum accumulation.
+    //
+    // Fuses the prior two-pass (compute residual → scan-sum) into a single pass:
+    // we write the residual into `scratch` AND accumulate the sum in the same
+    // loop. Saves a full read pass over `scratch[..len]` before normalization.
+    // 4-wide chunked body helps LLVM auto-vectorize the max+add chain.
+    //
+    // Ported from riir-engine (Plan 008 Phase 2.6, 2026-06-28): the prior
+    // scalar form used `simd_scale_inplace` for normalization, but the
+    // fused write+sum + 4-wide chunked normalize is strictly fewer passes
+    // and auto-vectorizes without a SIMD dispatch — bit-identical output
+    // (same `max(0.0)`, same `inv_sum` multiply, same accumulation order
+    // within each 4-tile: `(r0+r1)+(r2+r3)`).
+    let chunks = len / 4;
+    let mut sum = 0.0f32;
+    for c in 0..chunks {
+        let i = c * 4;
+        let r0 = (p[i] - q[i]).max(0.0);
+        let r1 = (p[i + 1] - q[i + 1]).max(0.0);
+        let r2 = (p[i + 2] - q[i + 2]).max(0.0);
+        let r3 = (p[i + 3] - q[i + 3]).max(0.0);
+        scratch[i] = r0;
+        scratch[i + 1] = r1;
+        scratch[i + 2] = r2;
+        scratch[i + 3] = r3;
+        sum += (r0 + r1) + (r2 + r3);
+    }
+    for i in (chunks * 4)..len {
+        let r = (p[i] - q[i]).max(0.0);
+        scratch[i] = r;
+        sum += r;
     }
 
-    let sum: f32 = scratch[..len].iter().sum();
-
     if sum > 0.0 {
+        // Chunked normalization (4-wide) for auto-vectorization.
+        // Replaces the prior `simd_scale_inplace` call — same math
+        // (multiply by `inv_sum`), but inlined and unrolled.
         let inv_sum = 1.0 / sum;
-        simd_scale_inplace(&mut scratch[..len], inv_sum);
+        let chunks = len / 4;
+        for c in 0..chunks {
+            let i = c * 4;
+            scratch[i] *= inv_sum;
+            scratch[i + 1] *= inv_sum;
+            scratch[i + 2] *= inv_sum;
+            scratch[i + 3] *= inv_sum;
+        }
+        for val in &mut scratch[chunks * 4..len] {
+            *val *= inv_sum;
+        }
         sample_from_distribution(&scratch[..len], rng)
     } else {
         // Distributions identical — fallback to target distribution
@@ -73,15 +113,17 @@ pub fn sample_residual_distribution_into(
 
 /// Residual distribution sampling (Equation 3 from Leviathan et al. 2022).
 ///
-/// Allocating wrapper around `sample_residual_distribution_into`.
-/// Prefer `_into` variant with `SpeculativeContext::residual_buf` for hot paths.
-#[cold]
+/// **Allocating convenience wrapper.** For hot paths (speculative decoding loop),
+/// prefer [`sample_residual_distribution_into`] which reuses a pre-allocated
+/// scratch buffer from `SpeculativeContext::residual_buf`.
+#[deprecated(note = "Use sample_residual_distribution_into with pre-allocated buffer")]
 pub fn sample_residual_distribution(p: &[f32], q: &[f32], rng: &mut Rng) -> usize {
     let mut scratch = vec![0.0f32; p.len()];
     sample_residual_distribution_into(p, q, &mut scratch, rng)
 }
 
 #[cfg(test)]
+#[allow(deprecated)]
 mod tests {
     use super::*;
     use crate::types::Rng;

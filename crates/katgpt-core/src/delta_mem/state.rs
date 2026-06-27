@@ -65,6 +65,12 @@ pub struct DeltaMemoryState {
     error_history: Vec<f32>,
     /// Error history window size.
     error_window: usize,
+    /// Pre-allocated scratch buffer for `write_segment` key averaging.
+    /// Reused across calls to avoid hot-path allocation.
+    segment_key_buf: Vec<f32>,
+    /// Pre-allocated scratch buffer for `write_segment` value averaging.
+    /// Reused across calls to avoid hot-path allocation.
+    segment_val_buf: Vec<f32>,
     /// Temporal-derivative surprise gate (Plan 277 Phase 3, fusion F2).
     ///
     /// `None` until [`enable_surprise_gate`](Self::enable_surprise_gate) is
@@ -98,6 +104,8 @@ impl DeltaMemoryState {
             update_count: 0,
             error_history: Vec::new(),
             error_window: 64,
+            segment_key_buf: vec![0.0; rank],
+            segment_val_buf: vec![0.0; rank],
             #[cfg(feature = "temporal_deriv")]
             surprise_gate: None,
             #[cfg(feature = "temporal_deriv")]
@@ -115,16 +123,25 @@ impl DeltaMemoryState {
     /// Verified: `delta_impl.py` L1921 `read_t = torch.einsum("bij,bj->bi", current_state, q_t)`
     pub fn read(&self, query: &[f32]) -> Vec<f32> {
         let rank = self.config.rank;
-        assert_eq!(query.len(), rank, "query dimension must match rank");
         let mut result = vec![0.0; rank];
-        for (i, result_slot) in result.iter_mut().enumerate().take(rank) {
-            let mut sum = 0.0f32;
-            for (j, q_val) in query.iter().enumerate().take(rank) {
-                sum += self.state[i * rank + j] * q_val;
-            }
-            *result_slot = sum;
-        }
+        self.read_into(query, &mut result);
         result
+    }
+
+    /// Read into pre-allocated buffer: r_t = S_{t-1} · q_t.
+    /// Zero-alloc variant for hot-path use.
+    ///
+    /// Uses SIMD dot product for each row of the r×r state matrix. Numerically
+    /// equivalent to [`Self::read`] within f32 rounding (SIMD accumulation
+    /// reorders sums; the delta_mem tests tolerate this at 1e-6).
+    pub fn read_into(&self, query: &[f32], out: &mut [f32]) {
+        let rank = self.config.rank;
+        assert_eq!(query.len(), rank, "query dimension must match rank");
+        assert_eq!(out.len(), rank, "output dimension must match rank");
+        for (i, slot) in out.iter_mut().enumerate() {
+            let row_off = i * rank;
+            *slot = crate::simd::simd_dot_f32(&self.state[row_off..row_off + rank], query, rank);
+        }
     }
 
     /// Write: delta-rule update (coupled gates).
@@ -158,10 +175,12 @@ impl DeltaMemoryState {
             }
         }
 
-        // pred_t = S · k_t (prediction: what current state says about this key)
-        let predictions = self.read(key);
-
-        // Per-row delta-rule update
+        // Per-row delta-rule update with fused inline prediction (zero-alloc).
+        // The prediction `pred_i = S[i,:] · k` is computed inline via SIMD dot
+        // product instead of materializing a full `predictions` Vec, matching
+        // the hot-path optimization in riir-engine's divergent copy. Numerically
+        // equivalent within f32 rounding (see `read_into` doc).
+        #[allow(clippy::needless_range_loop)] // i indexes state, beta, and value
         for i in 0..rank {
             let beta_i = self.beta[i];
             let lambda_i = if self.config.couple_gates {
@@ -169,15 +188,16 @@ impl DeltaMemoryState {
             } else {
                 1.0
             };
-            let pred_i = predictions[i];
             let val_i = value[i];
 
-            for (s_val, k_val) in self.state[i * rank..i * rank + rank]
-                .iter_mut()
-                .zip(key.iter())
-            {
-                // S'[i,j] = λ·S[i,j] - β·pred_i·k_j + β·v_i·k_j
-                *s_val = lambda_i * *s_val - beta_i * pred_i * k_val + beta_i * val_i * k_val;
+            // Inline prediction using SIMD dot product
+            let row_off = i * rank;
+            let pred_i = crate::simd::simd_dot_f32(&self.state[row_off..row_off + rank], key, rank);
+
+            // Fused update: S'[i,j] = λ·S[i,j] + β·(v_i - pred_i)·k_j
+            let beta_delta = beta_i * (val_i - pred_i);
+            for (j, &k_j) in key.iter().enumerate() {
+                self.state[row_off + j] = lambda_i * self.state[row_off + j] + beta_delta * k_j;
             }
 
             // Track prediction error for gate adaptation
@@ -192,28 +212,40 @@ impl DeltaMemoryState {
     ///
     /// Verified from `_memory_affine_scan_torch` with `message_mean` granularity:
     ///   average all k_t and v_t over the segment, then single write.
+    ///
+    /// Uses pre-allocated `segment_key_buf` / `segment_val_buf` scratch
+    /// buffers to avoid hot-path allocation. Bit-identical to the previous
+    /// `vec![0.0; rank]` version (same arithmetic, same order).
     pub fn write_segment(&mut self, keys: &[Vec<f32>], values: &[Vec<f32>]) {
         if keys.is_empty() {
             return;
         }
-        let rank = self.config.rank;
 
-        let mut avg_key = vec![0.0f32; rank];
-        let mut avg_val = vec![0.0f32; rank];
-        let n = keys.len() as f32;
+        self.segment_key_buf.fill(0.0f32);
+        self.segment_val_buf.fill(0.0f32);
+        let inv_n = 1.0 / keys.len() as f32;
 
         for k in keys {
             for (j, kj) in k.iter().enumerate() {
-                avg_key[j] += kj / n;
+                self.segment_key_buf[j] += kj * inv_n;
             }
         }
         for v in values {
             for (j, vj) in v.iter().enumerate() {
-                avg_val[j] += vj / n;
+                self.segment_val_buf[j] += vj * inv_n;
             }
         }
 
-        self.write(&avg_key, &avg_val);
+        // SAFETY: `write` only reads key/value (takes `&[f32]`) and mutates
+        // `self.state`/`self.update_count`. It never touches `segment_key_buf`
+        // or `segment_val_buf`, so aliasing here is sound.
+        let key: &[f32] = unsafe {
+            std::slice::from_raw_parts(self.segment_key_buf.as_ptr(), self.segment_key_buf.len())
+        };
+        let val: &[f32] = unsafe {
+            std::slice::from_raw_parts(self.segment_val_buf.as_ptr(), self.segment_val_buf.len())
+        };
+        self.write(key, val);
     }
 
     /// Adaptive gate: adjust β based on recent prediction error variance.
@@ -245,6 +277,8 @@ impl DeltaMemoryState {
         self.beta.fill(self.config.beta_init);
         self.update_count = 0;
         self.error_history.clear();
+        self.segment_key_buf.fill(0.0);
+        self.segment_val_buf.fill(0.0);
         #[cfg(feature = "temporal_deriv")]
         {
             self.writes_total = 0;

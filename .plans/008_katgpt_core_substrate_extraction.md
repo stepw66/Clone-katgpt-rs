@@ -299,7 +299,17 @@ refined strategy doc, stranded in a private fork.
 After each Phase 1 step lands, riir-engine deletes its copy and imports from
 `katgpt_core` the same way `analytic_lattice` / `arg_runtime` already do.
 
-- [ ] 2.1 riir-engine `src/hla/` → `use katgpt_core::hla::{...}` (after step 4). Includes the deferred 4b work: riir-engine deletes its local `types.rs`/`kernel.rs` (substrate half), imports from core; keeps the role-aware wrappers + `ThirdOrderMoment` + `role_transport` as the cognitive composition layer (Category C).
+- [~] **2.1 riir-engine `src/hla/` → `use katgpt_core::hla::{...}`** (2026-06-28, PARTIAL — two blockers deferred)
+
+  **Done:**
+  - `HlaVariant` enum + `floats_per_q_head`/`floats_per_kv_group`/`layer_bytes` impl methods dedup'd — riir-engine now re-exports from `katgpt_core::hla::HlaVariant` (−29 LoC in riir-engine).
+  - Core kernels optimized with riir-engine's hot-path improvements (GOAT direction — core is now canonical optimized version): `hla_state_update`/`hla_per_head_update` skip-zero optimization (when `k[i]==0.0`, skip inner loop — IEEE 754 identity); `hla_readout`/`hla_readout_normalized` loop-interchange + 4-wide chunking for cache locality + auto-vectorization (+53 LoC in core).
+
+  **DEFERRED — Blocker #1 (role field contamination):** riir-engine's `HlaQHeadState`/`AhlaQHeadState` carry `role: Option<SlotLabel>` + `third_order: ThirdOrderMoment` fields (gated `hla_role_aware`). These contaminate the entire type chain (`HlaLayerState.heads` → `MultiLayerHlaCache.layers`). Core's types don't have these fields, so re-exporting would lose role-aware functionality. **Resolution path:** refactor role info into a side-channel (e.g., `HashMap<HeadId, RoleInfo>`) or pass `role` as a kernel parameter. Medium effort — touches all role-aware kernels + forward.rs.
+
+  **DEFERRED — Blocker #2 (`ahla_step` math divergence — needs investigation):** riir-engine's `ahla_step` computes `tmp_r = PKV · q` (via `simd_matvec`), while katgpt-core computes `tmp_r = qᵀ · PKV` (manual loop, matches docstring). Since PKV = Σ k·vᵀ is non-symmetric, `PKV · q ≠ qᵀ · PKV`. riir-engine's docstring claims `qᵀ · PKV` but code computes the transpose — **a long-standing semantic mismatch**. Tests don't catch it (use sparse inputs where the two are identical). Per modelless-first mandate, did NOT change behavior. **Tracked as Issue 009** (`issues/009_ahla_step_math_divergence.md`). Needs decision: is riir-engine's `PKV · q` an intentional variant or a bug? If bug, fixing it changes trained behavior → riir-train follow-up.
+
+  **GOAT gate:** 16/16 core hla tests, 8/8 root hla tests, 22/22 riir-engine hla tests (default), 28/28 hla_role_aware, full lib 2378/2379 (1 pre-existing `g5_epool_persistence`).
 - [x] **2.2 riir-engine `src/transformer/` → consume `katgpt_transformer::{...}`** (2026-06-27)
 
   **Scope:** swapped all substrate types from local definitions to
@@ -362,11 +372,44 @@ After each Phase 1 step lands, riir-engine deletes its copy and imports from
   - Reconcile `PrefillContext` drift (riir-engine `normed_x` vs katgpt-transformer
     `queries`+`residuals`). Requires porting the newer pre-activation caching
     scheme to riir-engine's `forward_prefill` or vice versa.
-- [ ] 2.3 riir-engine `src/types.rs` → `use katgpt_core::types::{...}` (already partially done via `spec_types.rs:11`)
+- [x] **2.3 riir-engine `src/types.rs` → `use katgpt_core::types::{...}`** (2026-06-28)
+
+  **Scope:** riir-engine's `types.rs` already does `pub use katgpt_core::types::*;` at line 10. Only local addition is `NoiseSchedule` (feature-gated `dllm`, engine-specific D2F noise schedule). No further dedup possible — the substrate (Config, Rng, math utils, LoRA, DomainLatent, AttentionMode) is fully re-exported.
 - [ ] 2.4 riir-engine `src/tokenizer.rs` → consume core (after step 3, if it moves)
-- [ ] 2.5 riir-engine `src/dd_tree.rs` + `spec_types.rs` → consume core (after step 5)
-- [ ] 2.6 riir-engine `src/mcts.rs`, `sampling.rs`, `delta_mem/` → consume core (after step 6)
-- [ ] 2.7 riir-engine `src/simd/` → consume core (after step 7)
+- [x] **2.5 riir-engine `src/dd_tree.rs` + `spec_types.rs` → consume core** (2026-06-28)
+
+  **Scope:** riir-engine's `spec_types.rs` local definitions of `TreeNode`, `DraftResult`, `RejectionReason`, `DraftEvent`, `PrefillMode`, `FlashPrefillConfig`, `BlockScores` replaced with `pub use katgpt_core::speculative::types::{...}` re-export. katgpt-core's versions are supersets (additive feature-gated fields/variants like `RejectionReason::KurtosisRejection`, `DraftResult.cost_snapshot`/`stability`/`routing_overlap`, `FlashPrefillConfig.score_reduction`/`budget_adaptation`).
+
+  **Feature surface reconciliation:** added `spec_cost_model` + `stability_metrics` passthrough features to riir-engine `Cargo.toml` (matching the existing `temporal_deriv` pattern from Phase 2.6), added to default. The riir-ai workspace unifies these on via katgpt-rs root's defaults; the explicit passthroughs let `#[cfg(feature = "...")]` gates in riir-engine match the actual katgpt-core feature surface.
+
+  **Construction sites updated:** `dflash.rs` `DraftResult { marginals, sampled_tokens }` literals at L272 and L317 extended with `#[cfg(feature = "domain_latent")] routing_overlap: None`, `#[cfg(feature = "spec_cost_model")] cost_snapshot: None`, `#[cfg(feature = "stability_metrics")] stability: None` — matches the root katgpt-rs pattern.
+
+  **Kept local (composition):** `SpeculativeContext` (references `ForwardContext`, `MultiLayerKVCache` — engine-specific), `DDTreeBranchCache` (references `PagedKVCache`, `forward_paged`). All of `dd_tree.rs` (composition: `build_dd_tree*`, `extract_best_path*`, `TreeBuilder`).
+
+  **GOAT gate:** riir-engine `spec_types::` 15/15, `dflash::` 24/24, `dd_tree::` 37/37, full lib 2378/2379 (1 pre-existing).
+- [x] **2.6 riir-engine `src/mcts.rs`, `sampling.rs`, `delta_mem/` → consume core** (2026-06-28)
+
+  **Scope:** Step-7 pattern (port improvements to core, then dedup consumer). Three sub-tasks done in parallel:
+
+  **2.6a mcts + sampling:**
+  - Ported riir-engine's perf optimizations to core: (1) `sample_residual_distribution_into` 4-wide chunked residual + fused write+sum + chunked normalize (replaces scalar + `simd_scale_inplace`); (2) `MCTSNode.children`/`unexpanded` changed from `Vec<usize>` to `ArrayVec<usize, 16>` (zero heap alloc per node, `MAX_UNEXPANDED=16` covers Bomber=6/Grid=5/Raid=~9); (3) `ucb1_score_cached` (hoist `ln(parent_visits)` out of inner loop, `total_cmp` over `partial_cmp`). Added `arrayvec` dep to katgpt-core.
+  - riir-engine `src/sampling.rs` (164→16 LoC) and `src/mcts.rs` (697→19 LoC) rewritten as re-export shims. Note: `src/mcts.rs` was only used by its own tests (production uses `fourier/mcts.rs`'s `mcts_search_fourier`).
+
+  **2.6b delta_mem:**
+  - Ported riir-engine's hot-path APIs to core: `FeatureHasher::{hash_key_into, hash_value_into, feature_dim, to_vec_into, to_array}` (zero-alloc); `DeltaMemoryState::read_into` + inline-SIMD `write` + pre-allocated `segment_*_buf`; `MultiDomainMemory::{read_domain_into, read_aggregated(&mut self)}` + pre-allocated buffers + `#[repr(u8)]` on `AggregationStrategy`. Used the FourierFeatureHasher transpose trick (column-major generation → row-major storage) to preserve katgpt-core's bit-pattern AND get SIMD performance. Core's `temporal_deriv` surprise gate preserved.
+  - riir-engine `src/delta_mem/{hash,state,multi}.rs` (1213 LoC total) DELETED; `mod.rs` rewritten as re-export shim (Step 6h pattern: inline `pub mod` blocks preserve absolute paths like `crate::delta_mem::state::DEFAULT_THETA_SURPRISE`). Composition (`pruner.rs`, `multi_pruner.rs`, `strategy_memory.rs`) kept local.
+  - Added `temporal_deriv` passthrough feature to riir-engine (default-on).
+
+  **GOAT gate:** core mcts 14/14, sampling 5/5, delta_mem 47/47 (+10 new bit-stability tests); delta_mem bench G3 PASS (suppression 42.90%, recall_loss 0.00% — bit-identical to Step 6 baseline); root 3936/3937; riir-engine delta_mem composition 29/29, fourier 346/346, full lib 2378/2379.
+
+  **Net LoC: −1808 in riir-engine** (substrate deleted), **+445 in katgpt-core** (improvements ported with tests).
+- [x] **2.7 riir-engine `src/simd/` → consume core** (2026-06-28, Step 7)
+
+  **Scope:** riir-engine `simd/mod.rs` now does `pub use katgpt_core::simd::*;` for all targets (was target-gated). Deleted `src/simd/wasm32.rs` (630 LoC). Of its 11 functions: 8 had bit-identical core equivalents; 2 (`simd_sum_sq`, `simd_outer_product_acc`) had missing WASM SIMD128 paths in core — ported; 2 thin ergonomic wrappers (`dot_f32_simd`, `matmul_f32_simd`) dropped; 1 unique substrate (`project_ternary_simd`) ported to core under `plasma_path`. Bonus: fixed latent `mask_f32x4_wasm` missing-import bug in `katgpt-core/src/simd/elementwise.rs:1493`.
+
+  **GOAT gate:** bit-identical, 124/124 core simd tests green (+7 new), 2428/2429 riir-engine lib tests green (1 pre-existing `cgsp_runtime::dual_pool_bridge::g5_epool_persistence`).
+
+  **Commits:** `katgpt-rs/develop` `3a0ed1d5`, `riir-ai/develop` `ad8ea1ea`.
 - [ ] 2.8 Bit-identical verification: `forward_hla`/`forward_gemma2`/`dd_tree` tests pass unchanged in both repos
 
 ### Phase 3-5 — DEFERRED
@@ -396,7 +439,7 @@ Mirrors Issue 007 §Acceptance, updated:
 - [x] **Phase 1 step 4 (substrate half):** `hla` cache types + streaming kernels live in `katgpt-core/src/hla/{types,kernel}.rs`, re-exported from root `src/hla/mod.rs`. Bit-identical forward output vs pre-move (8/8 forward tests + 16/16 substrate tests green). `forward.rs` stays in root (needs `ForwardContext`). Role-aware variants + `ThirdOrderMoment` deferred to Phase 2.1 (riir-engine reconciliation — they're Category C cognitive composition, not substrate).
 - [x] **Phase 1 step 5 (substrate half):** speculative-decoding types live in `katgpt-core/src/speculative/types.rs`, re-exported from root `src/speculative/types.rs`. Bit-identical (32/32 substrate tests + 9 composition tests green).
 - [x] **Phase 1 step 6 (substrate half):** `mcts` algorithm (`mcts_search`, `mcts_search_informed`, UCB1 helpers, `MCTSNode`), `sampling` primitives (CDF + residual samplers), and `delta_mem` substrate (`DeltaMemoryState`, `FeatureHasher`, `MultiDomainMemory`) live in `katgpt-core/src/{mcts.rs, speculative/sampling.rs, delta_mem/}`. Bit-identical behavior: 14+5+37=56 substrate tests green in core; 5 bandit composition tests + 0 sampling composition tests + delta_mem bench G3 (suppression 42.90%, recall_loss 0.00%) all green in root. Composition that needs root-only types (`BanditRolloutPolicy` needs `BanditStats`; `MemorySteeredPruner<P>` / `MultiDomainMemoryPruner<P>` wrap root `ScreeningPruner` impls) stays in root as expected. No call-site changes.
-- [ ] Phase 1 step 7: riir-engine `simd/wasm32.rs` consumes `katgpt_core::simd`.
+- [x] **Phase 1 step 7:** riir-engine `simd/wasm32.rs` consumes `katgpt_core::simd`. (2026-06-28)
 - [ ] Phase 2: riir-engine has zero Category A duplicates; all consume `katgpt_core::`. Bit-identical tests in both repos.
 - [ ] Each phase commit includes GOAT/bench evidence per AGENTS.md "dont defer benchmark task".
 

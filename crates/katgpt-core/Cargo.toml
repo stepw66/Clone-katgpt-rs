@@ -18,6 +18,10 @@ serde = { version = "1", features = ["derive"] }
 postcard = { version = "1", features = ["alloc"] }
 half = "2"
 bytemuck = { version = "1", features = ["derive"] }
+# Stack-allocated Vec for MCTSNode children/unexpanded (Plan 008 Phase 2.6):
+# eliminates per-node heap allocation. Capacity bounded by MAX_UNEXPANDED=16
+# (covers Bomber=6, Grid=5, Raid=~9 branching factors with headroom).
+arrayvec = "0.7"
 papaya = { version = "0.2", optional = true }
 rustfft = { version = "6", optional = true }
 lz4_flex = { version = "0.13", optional = true }

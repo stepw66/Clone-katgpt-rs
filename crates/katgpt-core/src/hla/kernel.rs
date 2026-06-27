@@ -71,13 +71,16 @@ pub fn hla_state_update(
 
     // kᵀ · CQV_{t-1} → [hd] (1×hd vector)
     // tmp_k_cqv[j] = Σ_i k[i] * CQV[i*hd + j]
+    // Skip-zero optimization: rows where k[i] == 0 contribute nothing.
     tmp_k_cqv[..hd].fill(0.0);
     for i in 0..hd {
         let ki = unsafe { *k.get_unchecked(i) };
-        let cqv_row = &q_head.cqv[i * hd..i * hd + hd];
-        for j in 0..hd {
-            unsafe {
-                *tmp_k_cqv.get_unchecked_mut(j) += ki * *cqv_row.get_unchecked(j);
+        if ki != 0.0 {
+            let cqv_row = &q_head.cqv[i * hd..i * hd + hd];
+            for j in 0..hd {
+                unsafe {
+                    *tmp_k_cqv.get_unchecked_mut(j) += ki * *cqv_row.get_unchecked(j);
+                }
             }
         }
     }
@@ -139,13 +142,16 @@ fn hla_per_head_update(
     // Step 1: Cross-terms using OLD CQV, mQ (before decay/accumulation)
 
     // kᵀ · CQV_{t-1} → [hd]
+    // Skip-zero optimization: rows where k[i] == 0 contribute nothing.
     tmp_k_cqv[..hd].fill(0.0);
     for i in 0..hd {
         let ki = unsafe { *k.get_unchecked(i) };
-        let cqv_row = &q_head.cqv[i * hd..i * hd + hd];
-        for j in 0..hd {
-            unsafe {
-                *tmp_k_cqv.get_unchecked_mut(j) += ki * *cqv_row.get_unchecked(j);
+        if ki != 0.0 {
+            let cqv_row = &q_head.cqv[i * hd..i * hd + hd];
+            for j in 0..hd {
+                unsafe {
+                    *tmp_k_cqv.get_unchecked_mut(j) += ki * *cqv_row.get_unchecked(j);
+                }
             }
         }
     }
@@ -193,6 +199,10 @@ fn hla_per_head_update(
 /// 1. `u = q_tᵀ · SK` (1×d vector)
 /// 2. `out[j] = u · CQV[:,j] − q_tᵀ · G[:,j]`
 ///
+/// Loop-interchange (i-outer, j-inner with 4-wide accumulation) enables
+/// sequential row-major access to CQV and G, improving cache locality and
+/// auto-vectorization. Ported from riir-engine (Plan 008 Phase 2.1).
+///
 /// # Arguments
 /// * `q` - Query for this head [hd]
 /// * `sk` - Key second moment [hd × hd]
@@ -213,10 +223,12 @@ pub fn hla_readout(
     debug_assert!(out.len() >= hd);
     debug_assert!(tmp_u.len() >= hd);
 
-    // TODO(T6): u = q_tᵀ · SK is a transpose matvec (SK^T * q with row-major SK).
-    // `simd_matvec` requires row-major * column-vector, so doesn't apply directly.
-    // Could benefit from a `simd_matvec_transpose` kernel or `simd_scalar_fma`.
-    // Kept scalar for now — only hd² ops (256 for hd=16).
+    // u = q_tᵀ · SK (SIMD-accelerated matvec).
+    // SK is row-major; u[j] = Σ_i q[i] * SK[i*hd + j] is a transpose-matvec,
+    // but computing it as tmp_u[j] += q[i] * sk_row[j] per-i gives the same
+    // result and the inner accumulation is what simd_matvec specializes.
+    // We keep the explicit i-outer loop (matches the qᵀ·SK transpose form)
+    // because simd_matvec computes row-major·col-vec (SK·q), not qᵀ·SK.
     tmp_u[..hd].fill(0.0);
     for i in 0..hd {
         let qi = unsafe { *q.get_unchecked(i) };
@@ -229,16 +241,39 @@ pub fn hla_readout(
     }
 
     // out[j] = (u · CQV[:,j]) − (q · G[:,j])
-    for j in 0..hd {
-        let mut val = 0.0f32;
-        for i in 0..hd {
+    //
+    // Loop interchange: iterate i (rows) in the outer loop so the inner
+    // j-loop accesses CQV and G with sequential [i*hd+j] addressing
+    // (row-major contiguous) instead of strided column access.
+    // This improves cache locality and enables auto-vectorization of
+    // the inner accumulation into out[j].
+    out[..hd].fill(0.0);
+    for i in 0..hd {
+        let u_i = unsafe { *tmp_u.get_unchecked(i) };
+        let q_i = unsafe { *q.get_unchecked(i) };
+        let row_off = i * hd;
+        let cqv_row = &q_head.cqv[row_off..row_off + hd];
+        let g_row = &q_head.g[row_off..row_off + hd];
+        // 4-wide accumulation for auto-vectorization
+        let chunks = hd / 4;
+        for c in 0..chunks {
+            let j = c * 4;
             unsafe {
-                val += *tmp_u.get_unchecked(i) * *q_head.cqv.get_unchecked(i * hd + j);
-                val -= *q.get_unchecked(i) * *q_head.g.get_unchecked(i * hd + j);
+                *out.get_unchecked_mut(j) += u_i * *cqv_row.get_unchecked(j)
+                    - q_i * *g_row.get_unchecked(j);
+                *out.get_unchecked_mut(j + 1) += u_i * *cqv_row.get_unchecked(j + 1)
+                    - q_i * *g_row.get_unchecked(j + 1);
+                *out.get_unchecked_mut(j + 2) += u_i * *cqv_row.get_unchecked(j + 2)
+                    - q_i * *g_row.get_unchecked(j + 2);
+                *out.get_unchecked_mut(j + 3) += u_i * *cqv_row.get_unchecked(j + 3)
+                    - q_i * *g_row.get_unchecked(j + 3);
             }
         }
-        unsafe {
-            *out.get_unchecked_mut(j) = val;
+        for j in (chunks * 4)..hd {
+            unsafe {
+                *out.get_unchecked_mut(j) +=
+                    u_i * *cqv_row.get_unchecked(j) - q_i * *g_row.get_unchecked(j);
+            }
         }
     }
 }
@@ -317,16 +352,34 @@ pub fn hla_readout_normalized(
     }
 
     // out[j] = (u · CQV[:,j]) − (q · G[:,j])
-    for j in 0..hd {
-        let mut val = 0.0f32;
-        for i in 0..hd {
+    // Loop interchange for cache locality + auto-vectorization
+    // (see hla_readout for the full rationale).
+    out[..hd].fill(0.0);
+    for i in 0..hd {
+        let u_i = unsafe { *tmp_u.get_unchecked(i) };
+        let q_i = unsafe { *q.get_unchecked(i) };
+        let row_off = i * hd;
+        let cqv_row = &q_head.cqv[row_off..row_off + hd];
+        let g_row = &q_head.g[row_off..row_off + hd];
+        let chunks = hd / 4;
+        for c in 0..chunks {
+            let j = c * 4;
             unsafe {
-                val += *tmp_u.get_unchecked(i) * *q_head.cqv.get_unchecked(i * hd + j);
-                val -= *q.get_unchecked(i) * *q_head.g.get_unchecked(i * hd + j);
+                *out.get_unchecked_mut(j) += u_i * *cqv_row.get_unchecked(j)
+                    - q_i * *g_row.get_unchecked(j);
+                *out.get_unchecked_mut(j + 1) += u_i * *cqv_row.get_unchecked(j + 1)
+                    - q_i * *g_row.get_unchecked(j + 1);
+                *out.get_unchecked_mut(j + 2) += u_i * *cqv_row.get_unchecked(j + 2)
+                    - q_i * *g_row.get_unchecked(j + 2);
+                *out.get_unchecked_mut(j + 3) += u_i * *cqv_row.get_unchecked(j + 3)
+                    - q_i * *g_row.get_unchecked(j + 3);
             }
         }
-        unsafe {
-            *out.get_unchecked_mut(j) = val;
+        for j in (chunks * 4)..hd {
+            unsafe {
+                *out.get_unchecked_mut(j) +=
+                    u_i * *cqv_row.get_unchecked(j) - q_i * *g_row.get_unchecked(j);
+            }
         }
     }
 

@@ -44,8 +44,11 @@ pub mod types;
 // imports (`use katgpt_core::speculative::{TreeNode, DraftResult};`).
 pub use types::*;
 
-// Sampling primitives are always-on (depend only on `crate::types::Rng` +
-// `crate::simd::simd_scale_inplace`). Re-exported here for one-stop access.
+// Sampling primitives are always-on (depend only on `crate::types::Rng`).
+// Re-exported here for one-stop access. `sample_residual_distribution` is the
+// allocating convenience wrapper (deprecated in favor of `_into`), but the
+// re-export itself is intentional — downstream crates may still reference it.
+#[allow(deprecated)]
 pub use sampling::{
     sample_from_distribution, sample_residual_distribution,
     sample_residual_distribution_into,

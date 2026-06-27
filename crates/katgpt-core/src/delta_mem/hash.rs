@@ -6,6 +6,16 @@
 //!   val = W_mv · x                  (no normalization on values)
 //!
 //! We replace learned W with random LSH projection + same normalization.
+//!
+//! # Storage layout (Plan 008 Phase 2.6 reconciliation, 2026-06-28)
+//!
+//! The projection matrix is **generated column-major** then **transposed to
+//! row-major** at construction. This preserves the historical bit-pattern of
+//! `logical(i, j) = rng_call(j * rank + i)` (so any persisted snapshot seeded
+//! under previous versions still hashes consistently) while giving the hot
+//! path contiguous rows for SIMD dot-product acceleration. The transpose
+//! trick is the same one used by `FourierFeatureHasher::init_projection`
+//! (`riir-engine/src/fourier/opponent_hash.rs`).
 
 /// Feature hasher using random projection.
 ///
@@ -14,7 +24,12 @@
 pub struct FeatureHasher {
     /// Memory rank.
     rank: usize,
-    /// Random projection matrix [rank × feature_dim].
+    /// Input feature dimension (cached to avoid recomputation in hot paths).
+    feature_dim: usize,
+    /// Random projection matrix [rank × feature_dim], **row-major**
+    /// (`projection[i * feature_dim + j]` = logical element (i, j)).
+    /// Initialized column-major from `fastrand` for bit-stability, then
+    /// transposed in-place to row-major for SIMD-friendly access.
     projection: Vec<f32>,
     /// Seed for deterministic hashing.
     seed: u64,
@@ -24,17 +39,32 @@ impl FeatureHasher {
     /// Create a new feature hasher with random projection.
     ///
     /// Uses Kaiming-like initialization scaled by sqrt(2/rank).
+    ///
+    /// The RNG sequence is consumed column-major (matching the historical
+    /// katgpt-core bit-pattern) and then transposed to row-major storage
+    /// so the hot path can use contiguous SIMD dot products.
     pub fn new(rank: usize, feature_dim: usize, seed: u64) -> Self {
-        let mut projection = Vec::with_capacity(rank * feature_dim);
         let mut rng = fastrand::Rng::with_seed(seed);
         let scale = (2.0 / rank as f32).sqrt();
 
-        for _ in 0..(rank * feature_dim) {
-            projection.push(rng.f32() * 2.0 * scale - scale);
+        // Generate column-major: cm[j * rank + i] = rng_call(j * rank + i) = logical(i, j).
+        // This matches the historical katgpt-core bit-pattern exactly.
+        let cm: Vec<f32> = (0..(rank * feature_dim))
+            .map(|_| rng.f32() * 2.0 * scale - scale)
+            .collect();
+
+        // Transpose to row-major: rm[i * feature_dim + j] = cm[j * rank + i] = logical(i, j).
+        // Row-major storage lets `project_into` use contiguous SIMD dots.
+        let mut projection = vec![0.0f32; rank * feature_dim];
+        for i in 0..rank {
+            for j in 0..feature_dim {
+                projection[i * feature_dim + j] = cm[j * rank + i];
+            }
         }
 
         Self {
             rank,
+            feature_dim,
             projection,
             seed,
         }
@@ -43,45 +73,71 @@ impl FeatureHasher {
     /// Hash to L2-normalized key/query vector.
     /// `L2_norm(tanh(projection · features))` — same as paper Eq 4.
     pub fn hash_key(&self, features: &[f32]) -> Vec<f32> {
-        let mut buf = self.project(features);
-        // tanh activation in-place (same as paper)
-        for x in buf.iter_mut() {
-            *x = x.tanh();
+        let mut result = vec![0.0; self.rank];
+        self.hash_key_into(features, &mut result);
+        result
+    }
+
+    /// Hash key into pre-allocated buffer. Zero-alloc for hot path.
+    /// `L2_norm(tanh(projection · features))` — same as paper Eq 4.
+    ///
+    /// Produces output bit-identical to [`Self::hash_key`] when called with
+    /// the same `features` and an equally-sized `out` buffer.
+    pub fn hash_key_into(&self, features: &[f32], out: &mut [f32]) {
+        self.project_into(features, out);
+        // tanh in-place
+        for val in out.iter_mut() {
+            *val = val.tanh();
         }
-        // L2 normalize (prevents state explosion — verified from source)
-        let norm: f32 = buf.iter().map(|x| x * x).sum::<f32>().sqrt().max(1e-8);
-        let inv_norm = 1.0 / norm;
-        for x in buf.iter_mut() {
-            *x *= inv_norm;
+        // L2 normalize in-place (prevents state explosion — verified from source).
+        // SIMD-accelerated sum-of-squares for the norm denominator.
+        let norm: f32 = crate::simd::simd_sum_sq(out, out.len()).sqrt().max(1e-8);
+        for val in out.iter_mut() {
+            *val /= norm;
         }
-        buf
     }
 
     /// Hash to raw value vector (no normalization, same as paper).
     /// `projection · features`
     pub fn hash_value(&self, features: &[f32]) -> Vec<f32> {
-        self.project(features)
+        let mut result = vec![0.0; self.rank];
+        self.hash_value_into(features, &mut result);
+        result
     }
 
+    /// Hash value into pre-allocated buffer. Zero-alloc for hot path.
+    /// `projection · features` — no normalization, same as paper.
+    ///
+    /// Produces output bit-identical to [`Self::hash_value`].
+    pub fn hash_value_into(&self, features: &[f32], out: &mut [f32]) {
+        self.project_into(features, out);
+    }
+
+    /// Project into pre-allocated buffer. Zero-alloc for hot path.
     /// Matrix-vector multiply: projection · features
-    fn project(&self, features: &[f32]) -> Vec<f32> {
-        let mut result = vec![0.0; self.rank];
-        for (i, result_slot) in result.iter_mut().enumerate().take(self.rank) {
-            let mut sum = 0.0f32;
-            for (j, feat) in features.iter().enumerate() {
-                if j * self.rank + i < self.projection.len() {
-                    // Column-major access for projection[i, j]
-                    sum += self.projection[j * self.rank + i] * feat;
-                }
-            }
-            *result_slot = sum;
+    ///
+    /// Uses SIMD dot product for each row when feature_dim is large enough.
+    /// Row-major storage means each row is contiguous — ideal for SIMD.
+    #[inline]
+    fn project_into(&self, features: &[f32], out: &mut [f32]) {
+        assert_eq!(out.len(), self.rank, "output dimension must match rank");
+        out.fill(0.0);
+        let fd = self.feature_dim;
+        for (i, slot) in out.iter_mut().enumerate() {
+            let row_off = i * fd;
+            *slot =
+                crate::simd::simd_dot_f32(&self.projection[row_off..row_off + fd], features, fd);
         }
-        result
     }
 
     /// Get the rank dimension.
     pub fn rank(&self) -> usize {
         self.rank
+    }
+
+    /// Get the input feature dimension.
+    pub fn feature_dim(&self) -> usize {
+        self.feature_dim
     }
 
     /// Get the seed used for initialization.
@@ -94,6 +150,7 @@ impl Clone for FeatureHasher {
     fn clone(&self) -> Self {
         Self {
             rank: self.rank,
+            feature_dim: self.feature_dim,
             projection: self.projection.clone(),
             seed: self.seed,
         }
@@ -116,10 +173,44 @@ pub struct ContextFeatures {
 }
 
 impl ContextFeatures {
+    /// Feature vector dimension (always 8).
+    pub const FEATURE_DIM: usize = 8;
+
     /// Convert to feature vector for hashing.
     pub fn to_vec(&self) -> Vec<f32> {
         vec![
             (self.domain & 0xFF) as f32 / 255.0, // Low byte of domain hash
+            ((self.domain >> 8) & 0xFF) as f32 / 255.0,
+            ((self.domain >> 16) & 0xFF) as f32 / 255.0,
+            ((self.domain >> 24) & 0xFF) as f32 / 255.0,
+            self.depth_normalized,
+            self.token_entropy,
+            self.path_length_normalized,
+            self.parent_relevance,
+        ]
+    }
+
+    /// Convert to feature vector into pre-allocated buffer. Zero-alloc for hot path.
+    /// Buffer is cleared and resized if needed.
+    pub fn to_vec_into(&self, buf: &mut Vec<f32>) {
+        buf.clear();
+        buf.extend_from_slice(&[
+            (self.domain & 0xFF) as f32 / 255.0,
+            ((self.domain >> 8) & 0xFF) as f32 / 255.0,
+            ((self.domain >> 16) & 0xFF) as f32 / 255.0,
+            ((self.domain >> 24) & 0xFF) as f32 / 255.0,
+            self.depth_normalized,
+            self.token_entropy,
+            self.path_length_normalized,
+            self.parent_relevance,
+        ]);
+    }
+
+    /// Convert to fixed-size feature array. Zero-alloc, no Vec needed.
+    /// Preferred for hot paths where the caller has stack space.
+    pub fn to_array(&self) -> [f32; 8] {
+        [
+            (self.domain & 0xFF) as f32 / 255.0,
             ((self.domain >> 8) & 0xFF) as f32 / 255.0,
             ((self.domain >> 16) & 0xFF) as f32 / 255.0,
             ((self.domain >> 24) & 0xFF) as f32 / 255.0,
@@ -157,13 +248,27 @@ pub struct OutcomeFeatures {
 }
 
 impl OutcomeFeatures {
+    /// Feature vector dimension (always 3).
+    pub const FEATURE_DIM: usize = 3;
+
     /// Convert to feature vector for memory value.
     pub fn to_vec(&self) -> Vec<f32> {
         vec![self.delta, self.quality, self.success]
     }
+
+    /// Convert to feature vector into pre-allocated buffer. Zero-alloc for hot path.
+    pub fn to_vec_into(&self, buf: &mut Vec<f32>) {
+        buf.clear();
+        buf.extend_from_slice(&[self.delta, self.quality, self.success]);
+    }
+
+    /// Convert to fixed-size feature array. Zero-alloc, no Vec needed.
+    pub fn to_array(&self) -> [f32; 3] {
+        [self.delta, self.quality, self.success]
+    }
 }
 
-// ── Tests ───────────────────────────────────────────────────────
+// ── Tests ────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
@@ -227,6 +332,49 @@ mod tests {
     }
 
     #[test]
+    fn test_hash_key_into_matches_hash_key() {
+        let hasher = FeatureHasher::new(8, 5, 42);
+        let features = vec![1.0, 2.0, 3.0, 4.0, 5.0];
+
+        let key_alloc = hasher.hash_key(&features);
+        let mut key_prealloc = vec![0.0; 8];
+        hasher.hash_key_into(&features, &mut key_prealloc);
+
+        for (a, b) in key_alloc.iter().zip(key_prealloc.iter()) {
+            assert!(
+                (a - b).abs() < 1e-6,
+                "_into should match allocating version"
+            );
+        }
+    }
+
+    #[test]
+    fn test_hash_value_into_matches_hash_value() {
+        let hasher = FeatureHasher::new(8, 5, 42);
+        let features = vec![1.0, 2.0, 3.0, 4.0, 5.0];
+
+        let val_alloc = hasher.hash_value(&features);
+        let mut val_prealloc = vec![0.0; 8];
+        hasher.hash_value_into(&features, &mut val_prealloc);
+
+        for (a, b) in val_alloc.iter().zip(val_prealloc.iter()) {
+            assert!(
+                (a - b).abs() < 1e-6,
+                "_into should match allocating version"
+            );
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "output dimension must match rank")]
+    fn test_project_into_wrong_size_panics() {
+        let hasher = FeatureHasher::new(8, 5, 42);
+        let features = vec![1.0, 2.0, 3.0, 4.0, 5.0];
+        let mut wrong = vec![0.0; 4];
+        hasher.hash_key_into(&features, &mut wrong);
+    }
+
+    #[test]
     fn test_context_features_to_vec() {
         let ctx = ContextFeatures {
             domain: 0x01020304,
@@ -239,6 +387,44 @@ mod tests {
         assert_eq!(vec.len(), 8);
         assert!((vec[0] - 4.0 / 255.0).abs() < 1e-6); // low byte
         assert!((vec[4] - 0.5).abs() < 1e-6); // depth_normalized
+    }
+
+    #[test]
+    fn test_context_features_to_vec_into_matches_to_vec() {
+        let ctx = ContextFeatures {
+            domain: 0x01020304,
+            depth_normalized: 0.5,
+            token_entropy: 0.3,
+            path_length_normalized: 0.2,
+            parent_relevance: 0.8,
+        };
+        let alloc = ctx.to_vec();
+        let mut buf = Vec::new();
+        ctx.to_vec_into(&mut buf);
+        assert_eq!(alloc.len(), buf.len());
+        for (a, b) in alloc.iter().zip(buf.iter()) {
+            assert!(
+                (a - b).abs() < 1e-6,
+                "_into should match allocating version"
+            );
+        }
+    }
+
+    #[test]
+    fn test_context_features_to_array_matches_to_vec() {
+        let ctx = ContextFeatures {
+            domain: 0x01020304,
+            depth_normalized: 0.5,
+            token_entropy: 0.3,
+            path_length_normalized: 0.2,
+            parent_relevance: 0.8,
+        };
+        let vec = ctx.to_vec();
+        let arr = ctx.to_array();
+        assert_eq!(vec.len(), arr.len());
+        for (a, b) in vec.iter().zip(arr.iter()) {
+            assert!((a - b).abs() < 1e-6, "to_array should match to_vec");
+        }
     }
 
     #[test]
@@ -261,6 +447,40 @@ mod tests {
     }
 
     #[test]
+    fn test_outcome_features_to_vec_into_matches_to_vec() {
+        let outcome = OutcomeFeatures {
+            delta: 0.5,
+            quality: 0.8,
+            success: 1.0,
+        };
+        let alloc = outcome.to_vec();
+        let mut buf = Vec::new();
+        outcome.to_vec_into(&mut buf);
+        assert_eq!(alloc.len(), buf.len());
+        for (a, b) in alloc.iter().zip(buf.iter()) {
+            assert!(
+                (a - b).abs() < 1e-6,
+                "_into should match allocating version"
+            );
+        }
+    }
+
+    #[test]
+    fn test_outcome_features_to_array_matches_to_vec() {
+        let outcome = OutcomeFeatures {
+            delta: 0.5,
+            quality: 0.8,
+            success: 1.0,
+        };
+        let vec = outcome.to_vec();
+        let arr = outcome.to_array();
+        assert_eq!(vec.len(), arr.len());
+        for (a, b) in vec.iter().zip(arr.iter()) {
+            assert!((a - b).abs() < 1e-6, "to_array should match to_vec");
+        }
+    }
+
+    #[test]
     fn test_key_tanh_bounds() {
         let hasher = FeatureHasher::new(8, 5, 42);
         // Very large features
@@ -271,5 +491,49 @@ mod tests {
         for &k in &key {
             assert!(k.abs() <= 1.0 + 1e-6, "tanh output should be in [-1, 1]");
         }
+    }
+
+    /// Bit-stability guard: the column-major-then-transpose construction MUST
+    /// produce the same logical projection as the historical katgpt-core
+    /// column-major access pattern. If this test ever fails, the construction
+    /// order changed and persisted snapshots seeded under older versions would
+    /// hash inconsistently.
+    #[test]
+    fn test_projection_logical_values_match_column_major_rng_sequence() {
+        let rank = 8;
+        let feature_dim = 5;
+        let seed = 42;
+        let hasher = FeatureHasher::new(rank, feature_dim, seed);
+
+        // Re-derive the expected logical(i,j) from the raw RNG sequence
+        // (column-major fill: cm[j*rank+i] = rng_call(j*rank+i)).
+        let mut rng = fastrand::Rng::with_seed(seed);
+        let scale = (2.0 / rank as f32).sqrt();
+        let cm: Vec<f32> = (0..(rank * feature_dim))
+            .map(|_| rng.f32() * 2.0 * scale - scale)
+            .collect();
+
+        for i in 0..rank {
+            for j in 0..feature_dim {
+                let expected = cm[j * rank + i];
+                let actual = hasher.projection[i * feature_dim + j];
+                assert!(
+                    (expected - actual).abs() == 0.0,
+                    "projection[({}, {})] bit-drift: expected {} got {}",
+                    i,
+                    j,
+                    expected,
+                    actual
+                );
+            }
+        }
+    }
+
+    /// Sanity: feature_dim accessor returns the configured value.
+    #[test]
+    fn test_feature_dim_accessor() {
+        let hasher = FeatureHasher::new(8, 5, 42);
+        assert_eq!(hasher.feature_dim(), 5);
+        assert_eq!(hasher.rank(), 8);
     }
 }

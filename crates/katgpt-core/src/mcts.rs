@@ -20,6 +20,7 @@
 //! [`crate::traits`]. Any crate can `cargo add katgpt-core` and run MCTS over
 //! its own `GameState` implementation.
 
+use arrayvec::ArrayVec;
 use fastrand::Rng;
 
 use crate::traits::{GameState, RandomRolloutPolicy, RolloutPolicy, StateHeuristic};
@@ -30,6 +31,19 @@ const UCB1_C: f32 = 1.414;
 
 /// Maximum tree nodes before stopping. Prevents unbounded memory growth.
 const MAX_TREE_SIZE: usize = 10_000;
+
+/// Maximum number of unexpanded actions per node (ArrayVec capacity).
+/// Must accommodate the highest branching factor across all game domains.
+/// Bomber=6, Grid=5, Raid=~9. 16 provides comfortable headroom.
+///
+/// Ported from riir-engine (Plan 008 Phase 2.6, 2026-06-28): switching
+/// `children`/`unexpanded` from `Vec<usize>` to `ArrayVec<usize, MAX_UNEXPANDED>`
+/// eliminates per-node heap allocation — a genuine hot-path win because the
+/// tree allocates one node per MCTS iteration. Bit-identical values; only the
+/// backing storage changes. Callers whose `available_actions()` can exceed 16
+/// will hit the `assert!` in `new_root`/`new_child` — bump this const if a new
+/// game domain needs more headroom.
+const MAX_UNEXPANDED: usize = 16;
 
 // ── Tree Node ──────────────────────────────────────────────────
 
@@ -50,40 +64,40 @@ pub(crate) struct MCTSNode {
     action_index: Option<usize>,
     /// Parent node index (None for root).
     parent: Option<usize>,
-    /// Child node indices.
-    children: Vec<usize>,
-    /// Indices of actions not yet expanded into children.
-    unexpanded: Vec<usize>,
+    /// Child node indices. Stack-allocated (no heap) — capacity MAX_UNEXPANDED.
+    children: ArrayVec<usize, { MAX_UNEXPANDED }>,
+    /// Indices of actions not yet expanded into children. Stack-allocated.
+    unexpanded: ArrayVec<usize, { MAX_UNEXPANDED }>,
 }
 
 impl MCTSNode {
     fn new_root(action_count: usize) -> Self {
+        assert!(
+            action_count <= MAX_UNEXPANDED,
+            "MCTSNode::new_root: action_count ({action_count}) exceeds unexpanded capacity ({MAX_UNEXPANDED})"
+        );
         Self {
-            action_index: None,
-            parent: None,
-            children: Vec::with_capacity(action_count),
             total_reward: 0.0,
             visits: 0,
-            unexpanded: {
-                let mut v = Vec::with_capacity(action_count);
-                v.extend(0..action_count);
-                v
-            },
+            action_index: None,
+            parent: None,
+            children: ArrayVec::new(),
+            unexpanded: (0..action_count).collect(),
         }
     }
 
     fn new_child(action_index: usize, parent: usize, action_count: usize) -> Self {
+        assert!(
+            action_count <= MAX_UNEXPANDED,
+            "MCTSNode::new_child: action_count ({action_count}) exceeds unexpanded capacity ({MAX_UNEXPANDED})"
+        );
         Self {
-            action_index: Some(action_index),
-            parent: Some(parent),
-            children: Vec::with_capacity(action_count),
             total_reward: 0.0,
             visits: 0,
-            unexpanded: {
-                let mut v = Vec::with_capacity(action_count);
-                v.extend(0..action_count);
-                v
-            },
+            action_index: Some(action_index),
+            parent: Some(parent),
+            children: ArrayVec::new(),
+            unexpanded: (0..action_count).collect(),
         }
     }
 
@@ -315,16 +329,18 @@ fn select_inline<S: GameState>(
             return (idx, state);
         }
 
-        // Fully expanded with children → select best child by UCB1
-        let parent_visits = node.visits.max(1); // Guard against ln(0)
+        // Fully expanded with children → select best child by UCB1.
+        // Pre-compute ln(parent_visits) once — reused across all child comparisons
+        // in this iteration (avoids redundant `.ln()` per child).
+        let ln_parent = (node.visits.max(1) as f32).ln();
         let best_child = node
             .children
             .iter()
             .copied()
             .max_by(|&a, &b| {
-                let sa = ucb1_score(nodes[a].total_reward, nodes[a].visits, parent_visits);
-                let sb = ucb1_score(nodes[b].total_reward, nodes[b].visits, parent_visits);
-                sa.partial_cmp(&sb).unwrap_or(std::cmp::Ordering::Equal)
+                let sa = ucb1_score_cached(nodes[a].total_reward, nodes[a].visits, ln_parent);
+                let sb = ucb1_score_cached(nodes[b].total_reward, nodes[b].visits, ln_parent);
+                sa.total_cmp(&sb)
             })
             .expect("children non-empty");
 
@@ -453,6 +469,11 @@ fn backpropagate(nodes: &mut [MCTSNode], mut idx: usize, reward: f32) {
 /// `total_reward` = accumulated reward, `visits` = visit count,
 /// `parent_visits` = parent's visit count.
 /// Returns `f32::INFINITY` for unvisited nodes (exploration priority).
+///
+/// Note: the hot path (`select_inline`) uses [`ucb1_score_cached`] which
+/// pre-computes `ln(parent_visits)`. This scalar form is retained for tests
+/// and as the reference implementation.
+#[cfg(test)]
 #[inline]
 fn ucb1_score(total_reward: f32, visits: usize, parent_visits: usize) -> f32 {
     match visits {
@@ -463,6 +484,20 @@ fn ucb1_score(total_reward: f32, visits: usize, parent_visits: usize) -> f32 {
             exploit + explore
         }
     }
+}
+
+/// UCB1 with pre-computed `ln(parent_visits)` to avoid redundant computation
+/// per child in the selection loop. Used by `select_inline` — mathematically
+/// identical to `ucb1_score`; just hoists the `.ln()` call out of the
+/// per-child comparison closure. Ported from riir-engine (Plan 008 Phase 2.6).
+#[inline]
+fn ucb1_score_cached(total_reward: f32, visits: usize, ln_parent: f32) -> f32 {
+    if visits == 0 {
+        return f32::INFINITY;
+    }
+    let exploit = total_reward / visits as f32;
+    let explore = UCB1_C * ln_parent.sqrt() / (visits as f32).sqrt();
+    exploit + explore
 }
 
 // ── Tests ──────────────────────────────────────────────────────
