@@ -467,13 +467,25 @@ fn main() {
     // ── Visual verification + assertions (NOT counted in bench time) ──
     // Re-run one backtrack and one speculate solve OUTSIDE the timing loop so
     // the user can visually confirm the solved grid and the bench asserts the
-    // solution is actually correct. These calls do not affect any number above.
-    println!("── Visual verification (untimed) ─────────────────────────────");
-    println!("  Re-running one backtrack + one speculate solve for display.");
-    println!();
+    // solution is actually correct. These calls do not affect any bench
+    // median above — the `Instant` here is a single-shot representative timing
+    // for bragging, not a benchmark.
+    println!("── Visual verification (untimed vs bench) ────────────────────");
 
+    let t_vbt0 = Instant::now();
     let s_verify_bt = solve_backtrack();
+    let t_vbt = t_vbt0.elapsed();
+
+    let t_vsp0 = Instant::now();
     let s_verify_sp = solve_speculate_iterative(8, 128);
+    let t_vsp = t_vsp0.elapsed();
+
+    // Brag-worthy summary line — single-shot representative solve time.
+    println!("  ⏱  Arto Inkala (World's Hardest Sudoku) solved in {}", fmt_us(t_vbt));
+    println!("     backtrack:   {} ({} steps)", fmt_us(t_vbt), s_verify_bt.steps);
+    println!("     speculate:   {} ({} spec_commits + {} fallback_steps)",
+        fmt_us(t_vsp), s_verify_sp.spec_commits, s_verify_sp.steps);
+    println!();
 
     // Assert correctness — panics here if either solver produced an invalid grid.
     assert!(s_verify_bt.solved, "backtrack did not solve!");
@@ -500,14 +512,9 @@ fn main() {
     // Print the solved grid (from backtrack; speculate matches per the assert above).
     println!("  Solved grid (Arto Inkala):" );
     println!();
-    for (i, line) in s_verify_bt.final_board.display().lines().enumerate() {
+    for line in s_verify_bt.final_board.display().lines() {
         println!("    {line}");
-        // display() already inserts box separators; no extra work needed.
-        let _ = i;
     }
-    println!();
-    println!("  speculate_iter(8,128) stats: {} spec_commits, {} fallback_steps, {} full_reverts",
-        s_verify_sp.spec_commits, s_verify_sp.steps, s_verify_sp.full_reverts);
     println!();
     println!("── end visual verification ──────────────────────────────────");
     println!();
