@@ -116,7 +116,7 @@ If a paper is training-only (after §3.5 check) → note "→ riir-train" in one
 
 ## Distillation targets (5-repo strategy)
 
-Per `katgpt-rs/.research/003_Commercial_Open_Source_Strategy_Verdict.md` (revised 2026-06-22 to reflect the `riir-neuron-db` spin-off from `riir-chain`):
+Per `katgpt-rs/.research/003_Commercial_Open_Source_Strategy_Verdict.md` (public routing-rules subset; full moat analysis at `riir-ai/.research/003_*` internal, revised 2026-06-27 to add the tier model + cognitive/reasoning moat):
 
 | Repo | Role | What lands here |
 |------|------|-----------------|
@@ -403,7 +403,7 @@ Reinforce these when designing game systems or chain state:
 
 - `katgpt-rs/.contexts/optimization.md` — perf rules (zero-alloc, SIMD, rayon, caching)
 - `katgpt-rs/.contexts/ibraheemdev-papaya-v0.2.3-examples.md` — papaya lock-free hashmap usage
-- `katgpt-rs/.research/003_Commercial_Open_Source_Strategy_Verdict.md` — 5-repo strategy source of truth (revised 2026-06-22 for the `riir-neuron-db` spin-off)
+- `katgpt-rs/.research/003_Commercial_Open_Source_Strategy_Verdict.md` — public routing-rules subset (5-repo roles, What/How rule, Super-GOAT routing). **Full strategy doc** (moat analysis, "why hard to replicate", cognitive/reasoning moat, tier model detail) is internal at `riir-ai/.research/003_Commercial_Open_Source_Strategy_Verdict.md` (moved 2026-06-27 — too commercially sensitive for a public MIT repo).
 - `katgpt-rs/.research/004_LoRA_Architecture_Verdict.md` — LoRA / validator terminology
 - `katgpt-rs/.research/005_Artifact_Definition.md` — artifact terminology
 - `katgpt-rs/.research/238_LoRA_Muon_Spectral_Low_Rank_Manifold.md` — canonical research-note example

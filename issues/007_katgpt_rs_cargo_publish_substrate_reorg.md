@@ -73,6 +73,19 @@ These are game product IP per 003 §"What riir-ai Can Do". The audit confirms th
 - The `*_runtime` convention already marks the boundary correctly. The codebase knows the pattern; it just hasn't been applied to the v0.1.0 fork residue.
 - The single biggest DRY win is the substrate chain `types → transformer/weights → hla → dd_tree/spec_types`: move it to core, delete the riir-engine copies, and every downstream repo gets one canonical source.
 
+### Cognitive/reasoning is a NEW MOAT (the basic/GOAT split)
+
+A category of primitives is emerging as a competitive moat beyond pure inference mechanics: **cognitive and reasoning** primitives — `cce` (correlated equilibrium), `cgsp` (curiosity-guided self-play), `clr` (claim-level reliability), `compaction`, `claim_rubric`, etc. These are the decision-level / reasoning-layer mechanisms.
+
+The commercial split for this layer (per refined strategy doc):
+
+- **Basic version stays PUBLIC in `katgpt-rs` root** (engine tier, not core substrate). The adoption funnel — good enough to build on, attract dependency, demonstrate the capability. Ships WITH its examples/benches/related `.md` so the public surface is legible and evaluable.
+- **GOAT/Super-GOAT tuned version stays PRIVATE in `riir-*`** (the `_runtime` modules + tuned parameters + game-coupled extensions). This is the version that actually wins — the validated thresholds, the collapse-recovery tuning, the game-specific wiring. "Good enough to adopt, not good enough to win."
+
+This is why `cce`/`cgsp` belong in root (not core): they're cognitive-layer adoption primitives, not pure substrate. And it's why their `_runtime` siblings (`cce_runtime`, `cgsp_runtime`) correctly stay private in riir-engine — the GOAT tuning is the moat. The `*_runtime` convention already encodes this split; this issue just makes it explicit in the tier model.
+
+**Implication for the reorg:** do NOT push cognitive/reasoning primitives down to core. Core = pure inference substrate only. Root = substrate re-exports + cognitive basics + engine primitives. riir-* = GOAT versions + composition + game/chain/shard IP.
+
 ---
 
 ## Evidence: HLA is duplicated, not just scattered
@@ -178,13 +191,21 @@ After reorg, the remaining blockers to `cargo add katgpt-rs`:
 
 ---
 
-## Cross-repo consumer cleanup (the DRY payoff)
+## Cross-repo consumer cleanup (the DRY payoff — consolidate, don't blindly delete)
 
-Once the substrate is in `katgpt-core`:
+Once the substrate is in `katgpt-core`, the riir-engine copies get retired — but **consolidation, not deletion**. riir-engine forked at v0.1.0 and some copies DIVERGED WITH IMPROVEMENTS. The rule:
 
-- **riir-ai/riir-engine**: delete `src/hla/`, `src/transformer`, `src/types` duplicates → `use katgpt_core::{hla, transformer, types}`. This is the single biggest DRY win — removes the silent divergence risk.
+- **For each Category A module:** diff the riir-engine copy against the new core canonical. If riir-engine added anything (a variant, an optimization, a bug fix, a `*_role_aware` extension) → PORT it into core first, behind a feature flag if needed. Only then delete the riir-engine copy.
+- **Known divergence to consolidate:**
+  - `hla/` — riir-engine added `forward_hla_role_aware` / `forward_ahla_role_aware` + `role_transport` wiring. Port the role-aware kernel variants into core's `hla` (behind `hla_role_aware` feature); keep riir-engine's `role_transport.rs` as the private composition (Category C).
+  - `dd_tree`/`spec_types` — riir-engine's copy may have game-coupled additions; port the generic parts, leave game-specific in riir-engine.
+  - `turboquant.rs` — riir-engine has a STUB; katgpt-rs has the real impl. Consolidation = riir-engine consumes the real one, stub deleted.
+  - `simd/wasm32.rs` — riir-engine reimplemented WASM SIMD128; katgpt-core already ships it. Diff for any riir-engine-only kernel improvements, port if any, then delete the reimplementation.
+
+**After consolidation:**
+- **riir-ai/riir-engine**: deletes every Category A copy, imports from `katgpt_core` the same way `analytic_lattice`/`arg_runtime` already do. Zero divergent copies remain.
 - **riir-neuron-db**: unchanged structurally (still stores `[f32; 8]`), but can now optionally call `katgpt_core::hla` kernels if it ever needs compute, without pulling the root engine.
-- **katgpt-rs root**: `src/hla/`, `src/transformer.rs`, `src/types.rs`, `src/weights.rs` become thin `pub use katgpt_core::{hla, transformer, types, weights};` re-exports (back-compat for existing call sites).
+- **katgpt-rs root**: `src/hla/`, `src/transformer.rs`, `src/types.rs`, `src/weights.rs`, `src/dd_tree.rs`, `src/spec_types.rs`, `src/mcts.rs`, `src/sampling.rs`, `src/tokenizer/`, `src/delta_mem/` become thin `pub use katgpt_core::{...};` re-exports (back-compat for existing call sites).
 
 ---
 
@@ -202,7 +223,7 @@ Each phase is independently shippable and reversible:
   7. Delete `riir-engine/src/simd/wasm32.rs`, consume `katgpt_core::simd` wasm32 path instead
   Each step: copy to core, `pub use katgpt_core::*` re-export at root, run tests. Core version bump: `0.3.0`.
 - [ ] **Phase 2 — Cross-repo dedup.** In riir-ai/riir-engine, delete every Category A copy, import from `katgpt_core` the same way `analytic_lattice`/`arg_runtime` already do. Verify `forward_hla`/`dd_tree` bit-identical on existing tests in both repos. This is the single biggest DRY win.
-- [ ] **Phase 2b — Tier consistency.** Move `cce` down to `katgpt-core` to match `cgsp` (both are public game-theory primitives). Update `cce_runtime` imports from `katgpt_rs::cce` → `katgpt_core::cce`.
+- [ ] **Phase 2b — Cognitive/reasoning tier consistency (move UP, not down).** `cce` is in root, `cgsp` is in core — but both are cognitive/reasoning primitives, not substrate. **Move `cgsp` UP from core to root** to join `cce`, bringing its examples/benches/related `.md` along. Root becomes the home of the public cognitive/reasoning layer; core stays pure inference substrate (SIMD/types/transformer/hla/dd_tree). Do NOT push `cce` down to core — that was the wrong direction. Tier model: core = substrate, root = engine + cognitive basics, riir-* = GOAT/Super-GOAT tuning + composition.
 - [ ] **Phase 3 — Root crate reorg.** Move root `src/*` into `primitives/`/`inference/`/`games/`/`backends/` subdirs per the `_runtime` convention. Top-level `pub use` re-exports preserve all call sites. Pure refactor.
 - [ ] **Phase 4 — Dep audit for publish.** Make `plotters` optional. Verify `cargo check --no-default-features` clean on root.
 - [ ] **Phase 5 — Publish katgpt-rs.** Add to `release-plz.toml` as second package (`git_tag_name = "katgpt-rs-v{{version}}"`), first publish `0.1.0`. Document feature-flag stability tiers in README.
