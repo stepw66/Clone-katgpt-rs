@@ -833,7 +833,7 @@ pub use sleep_time::{
     AmortizationCostModel, AnticipatedQueryDir, AnticipatedQuerySet, AnticipatedSlot,
     DEFAULT_LATENCY_PREMIUM, DotPredictabilityScorer, IdentityFunctorOp, SLEEP_TIME_DEFAULT_K,
     PredictabilityScorer, SleepTimeAnticipator, SleepTimeComputeOp, SleepTimeScratch, commit_direction,
-    consume, consume_gate,
+    consume, consume_gate, consume_with_match_mode, consume_gate_with_match_mode, ConsumeMatchMode,
 };
 
 // PairedLossGap — generic modelless paired token-level loss gap diagnostic

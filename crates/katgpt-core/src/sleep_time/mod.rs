@@ -78,7 +78,7 @@ mod types;
 pub use anticipator::{
     IdentityFunctorOp, SleepTimeAnticipator, SleepTimeComputeOp, SleepTimeScratch,
 };
-pub use consume::{consume, consume_gate};
+pub use consume::{consume, consume_gate, consume_with_match_mode, consume_gate_with_match_mode, ConsumeMatchMode};
 pub use cost_model::AmortizationCostModel;
 pub use predictability::{DotPredictabilityScorer, PredictabilityScorer};
 pub use types::{
