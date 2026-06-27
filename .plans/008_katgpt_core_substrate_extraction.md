@@ -63,14 +63,69 @@ refined strategy doc, stranded in a private fork.
 ### Phase 1 — Substrate extraction to `katgpt-core`
 
 - [x] **Step 1 — `types` → core.** DONE pre-this-plan. `katgpt-core/src/types/` 14 files; root is re-export shim.
-- [ ] **Step 2 — `transformer` + `weights` → core.** ⚠️ `transformer.rs` is **8398 lines** (4× the 2048-line ceiling). MUST be split during move:
-  - [ ] 2a. Map `transformer.rs` internal sections (gemma2 forward, llama forward, kv cache, forward context, etc.)
-  - [ ] 2b. Split into `katgpt-core/src/transformer/{mod,context,kv_cache,gemma2,llama,prefill,...}.rs` — each <2048 lines
-  - [ ] 2c. Move `weights.rs` (472 lines) to `katgpt-core/src/weights.rs` — depends on `TransformerWeights` from 2b
-  - [ ] 2d. Root `src/transformer.rs` + `src/weights.rs` → thin `pub use katgpt_core::{transformer, weights};` re-exports
-  - [ ] 2e. Audit feature gates — transformer has many `#[cfg(feature = "...")]` blocks; verify each still resolves
-  - [ ] 2f. `cargo check` + `cargo test -p katgpt-core --lib` + `cargo test --lib` all green
-  - [ ] 2g. Commit: `feat(core): Plan 008 step 2 — move transformer+weights substrate to katgpt-core`
+- [ ] **Step 2 — `transformer` substrate types + `weights` → core.**
+
+  ⚠️ **AUDIT FINDING (2026-06-27, before execution): the original premise was wrong.**
+  `transformer.rs` is NOT pure substrate. The file is **8398 lines** but splits into:
+  - **~1100 lines of pure data types** (LayerWeights, TransformerWeights + impl,
+    DecodeStage, KV caches, PrefillContext, WallPrefixState, MtpProjection) —
+    these have ZERO root-only deps and CAN move to core.
+  - **~5300 lines of forward functions** (forward, forward_base, forward_coda,
+    forward_looped, forward_prefill, forward_paged, forward_raven,
+    forward_quantized, forward_turboquant, generate_*, etc.) — these call into
+    `crate::hla`, `crate::sleep`, `crate::tf_loop`, `crate::gdn2`,
+    `crate::turboquant`, `crate::pruners::*` (root-only cognitive modules).
+    **They are composition logic, not substrate, and cannot move to core.**
+  - **~2000 lines of tests** (move with their subject).
+
+  `ForwardContext` CANNOT move cleanly: its struct definition has fields typed
+  as root-only `crate::pruners::{CnaModulator, SubstrateMask, HydraSkipPlan}`.
+  Those types have their own root-only dependency chains (not in scope here).
+
+  Bidirectional cycle confirmed at root level: `transformer` ↔ {`hla`,
+  `gdn2`, `sleep`, `tf_loop`, `turboquant`} all use each other's
+  `TransformerWeights`/`ForwardContext` types. The cycle is only resolvable
+  by moving the **type definitions** (used by all) to core, leaving the
+  **forward composition functions** (which call into cognitive modules) in root.
+
+  Corrected subtasks:
+  - [x] 2a. Map `transformer.rs` internal sections — DONE during audit
+  - [x] 2b. Move **data types only** to a NEW crate `katgpt-transformer/` (per user direction: "if move to core is too much, define new one e.g. katgpt-foo and keep core core"):
+    - [x] `lib.rs` — module decls + `DecodeStage` enum + re-exports + `PAGE_SIZE` const
+    - [x] `weights.rs` — `LayerWeights`, `TransformerWeights` + `impl new/init/zero`
+    - [x] `kv_cache.rs` — `KVCache`, `MultiLayerKVCache`, `KVSnapshot`,
+      `KVLayerSnapshot`, `PagedKVCache`, `RavenKVCache` + `preload_kv_cache`
+    - [x] `context.rs` — `PrefillContext`, `WallPrefixState`, `GateStatistics`
+      (NB: `ForwardContext` stays in root — has root-only pruner fields)
+    - [x] `mtp.rs` — `MtpProjection`, `load_mtp_projection`, `project_target_activation`,
+      magic constants + tests
+    - [x] `contiguous.rs` — `ContiguousWeights` + `load_ternary_bits` (moved verbatim
+      from root `src/weights.rs`)
+  - [x] 2c. Deleted root `src/weights.rs`; replaced `pub mod weights;` in
+    root `src/lib.rs` with `pub use katgpt_transformer::{ContiguousWeights, load_ternary_bits};`
+  - [x] 2d. Root `src/transformer.rs` keeps: `ForwardContext`, all forward
+    functions, all tests. Imports types via `pub use katgpt_transformer::{...}`.
+    Stays a single 7055-line file for this commit; splitting forward funcs into
+    `src/transformer/{forward,prefill,raven,paged,generate,...}.rs` is a
+    **follow-up** (out of scope for step 2).
+  - [x] 2e. `katgpt-transformer/src/lib.rs` declares all type modules (no feature gate
+    on the module itself; `wall_attention`-gated items gated at re-export).
+  - [x] 2f. Feature gates audited and forwarded:
+    - `katgpt-rs/Cargo.toml`: `wall_attention`, `delta_routing`, `decode_specialize`,
+      `plasma_path` now forward to `katgpt-transformer/<feature>`
+    - All 3 combos (`--no-default-features`, default, `--all-features`) compile clean.
+  - [x] 2g. `cargo check` + `cargo test -p katgpt-transformer --lib` (11/11 green) +
+    `cargo test --lib transformer::` (80/80 green) + full `cargo test --lib`
+    (3990/3991 green; the 1 failure is an unrelated flake in
+    `pruners::three_mode_bandit::tests::bench_grounding_quality_32k` which passes
+    in isolation).
+  - [ ] 2h. Commit: `feat(core): Plan 008 step 2 — extract katgpt-transformer substrate crate`
+
+  **FOLLOW-UP (separate commit, not step 2):** split root `src/transformer.rs`
+  forward functions into per-family submodules mirroring riir-engine's
+  `transformer/{gemma2,llama,prefill,raven,mtp,attention}.rs` layout. Root
+  file is ~6300 lines after step 2 (forward funcs + ForwardContext + tests),
+  still over the 2048 ceiling — addressed in follow-up.
 - [ ] **Step 3 — `tokenizer` → core.** DEFERRED per Q2 verdict. Audit SentencePiece-sys dep first; if present, leave in root.
 - [ ] **Step 4 — `hla` → core.** 2248 lines total (`forward.rs` 569 + `kernel.rs` 1019 + `types.rs` 606 + `mod.rs` 54). Depends on step 2.
   - [ ] 4a. Move `hla/{mod,types,kernel,forward}.rs` → `katgpt-core/src/hla/`

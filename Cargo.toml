@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/katgpt-core", "."]
+members = ["crates/katgpt-core", "crates/katgpt-transformer", "."]
 resolver = "3"
 
 [package]
@@ -10,6 +10,7 @@ publish = false  # dev/examples aggregator — never published. Only katgpt-core
 
 [dependencies]
 katgpt-core = { path = "crates/katgpt-core" }
+katgpt-transformer = { path = "crates/katgpt-transformer" }
 plotters = "0.3"
 rayon = "1.10"
 log = "0.4"
@@ -107,8 +108,8 @@ tes_loop = ["bandit"]  # SimpleTES evaluation-driven scaling — RPUCG bandit + 
 cna_steering = ["bandit"]  # CNA Contrastive Neuron Attribution — sparse MLP circuit discovery + modulation (Plan 087)
 deep_manifold = []  # Deep Manifold fixed-point residual scoring (Research 51, Plan 085)
 federation = ["bandit"]  # Deep Manifold federated boundary alignment — KL coupling (Research 51, Plan 085)
-delta_routing = []  # Delta Block cross-layer routing (Research 061, Plan 097, GOAT 6/6, default-on)
-decode_specialize = []  # Stage-specialized decode paths for speculative decoding (Plan 102)
+delta_routing = ["katgpt-transformer/delta_routing"]  # Delta Block cross-layer routing (Research 061, Plan 097, GOAT 6/6, default-on)
+decode_specialize = ["katgpt-transformer/decode_specialize"]  # Stage-specialized decode paths for speculative decoding (Plan 102)
 lattice_deduction = []  # LDT Lattice Deduction Transformer — asymmetric pruning + conflict detection + α-operator (Plan 088, GOAT 7/7, default-on)
 unit_distance = []  # Unit Distance GOAT proof — number-theoretic lattice constructions (Plan 090)
 sdar_gate = []  # SDAR sigmoid gating for modelless distillation signals (Plan 072)
@@ -192,7 +193,7 @@ collider_consistency = ["band_conditioner"]  # Fusion C: Collider-Consistency Co
 adaptive_cot_identifiability = ["bckvss"]  # Phase 4: Theory-backed adaptive CoT stopping criterion (Plan 265 Phase 4) — opt-in until GOAT G10 passes
 lt2_looped = ["hla_attention"]  # LT2 looped inference pipeline — weight-shared T-pass loop (Plan 108, Research 73)
 sleep_consolidation = ["lt2_looped", "gdn2_attention"]  # Sleep-time offline recursive memory consolidation at eviction (Plan 154 GOAT 14/14, Research 116) — default-ON
-plasma_path = ["katgpt-core/plasma_path"]  # Bit-plane ternary SIMD matvec — multiplication-free CPU inference (Plan 148, Research 110)
+plasma_path = ["katgpt-core/plasma_path", "katgpt-transformer/plasma_path"]  # Bit-plane ternary SIMD matvec — multiplication-free CPU inference (Plan 148, Research 110)
 peira_distill = ["katgpt-core/peira_distill", "bandit"]  # PEIRA inter-view regressor alignment — collapse-free modelless distillation (Plan 153 GOAT 7/7, Research 115) — default-ON
 ilc_distill = ["bandit"]  # ILC Iterative Latent Clustering — synonym-aware DDTree pruning (Research 136 GOAT 6/6, arXiv:2605.27734) — default-ON
 trd_refined_draft = ["elf_sde", "bandit", "bt_rank"]  # Trajectory-Refined Draft — modelless TRD for speculative decoding (Plan 249 GOAT 7/7, Research 217) — default-ON
@@ -259,7 +260,7 @@ thinking_prune = ["sr2am_configurator"]  # Thinking Prune — FrozenBaseGuard fo
 rim_slots = ["katgpt-core/rim_slots"]  # RiM Reasoning Buffer Slots — fixed latent workspace for DDTree (Plan 172, Research 192)
 budget_adaptation = []  # Compression-adaptive decode budget — PFlash complexity signal (Plan 167, Research R050)
 adaptive_gamma_forecast = []  # AcceptanceForecast — entropy-bounded adaptive γ from proven linear α≈a−b·H bound (Issue 023, Research 243, arXiv:2606.12370 §3,§7.6). GOAT-gated, default OFF until ≥5% throughput gain proven on entropy-varying workload.
-wall_attention = ["katgpt-core/wall_attention"]  # Wall Attention — diagonal forget gates replacing RoPE (Plan 173, Research Wall Attention) — opt-in, requires Wall-trained model weights
+wall_attention = ["katgpt-core/wall_attention", "katgpt-transformer/wall_attention"]  # Wall Attention — diagonal forget gates replacing RoPE (Plan 173, Research Wall Attention) — opt-in, requires Wall-trained model weights
 ane = ["dep:coreml-native", "dep:coreml-proto", "dep:prost"]  # Apple Neural Engine inference backend (Plan 176)
 gpu_inference = ["dep:metal"]  # GPU inference backend via Metal compute pipelines (Plan 176)
 inference_router = ["gpu_inference", "ane"]  # Full inference routing: TriggerGate + InferenceRouter + GPU + ANE (Plan 176)

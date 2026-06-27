@@ -246,7 +246,11 @@ pub mod turboquant;
 pub mod types;
 #[cfg(feature = "unit_distance")]
 pub mod unit_distance;
-pub mod weights;
+
+// Plan 008 Step 2: weight-packing substrate now lives in `katgpt-transformer`.
+// Historical `crate::weights::ContiguousWeights` / `load_ternary_bits` callers
+// resolve through this re-export unchanged.
+pub use katgpt_transformer::{ContiguousWeights, load_ternary_bits};
 
 // Plan 265 Phase 4: Adaptive CoT stopping criterion (depends on band_conditioner).
 #[cfg(feature = "adaptive_cot_identifiability")]

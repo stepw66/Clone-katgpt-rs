@@ -1749,6 +1749,7 @@ dependencies = [
  "good_lp",
  "half",
  "katgpt-core",
+ "katgpt-transformer",
  "log",
  "metal",
  "ordered-float",
@@ -1767,6 +1768,16 @@ dependencies = [
  "tempfile",
  "toml",
  "wasmi",
+]
+
+[[package]]
+name = "katgpt-transformer"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "bytemuck",
+ "katgpt-core",
+ "rayon",
 ]
 
 [[package]]

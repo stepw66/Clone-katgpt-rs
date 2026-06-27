@@ -1,12 +1,13 @@
 # Issue 007: Make katgpt-rs Cargo-consumable — Pillar Reorganization + HLA Substrate Extraction
 
 > **Type:** Architecture / reorganization (unblocks cargo publish + kills cross-repo duplication)
-> **Status:** Audit complete — see [Plan 008](../.plans/008_katgpt_core_substrate_extraction.md) for the corrected, executable scope.
+> **Status:** Phase 1 step 2 (transformer substrate extraction) ✅ landed in new crate `katgpt-transformer` (2026-06-27). Phase 1 steps 3-7 + Phase 2 dedup queued — see [Plan 008](../.plans/008_katgpt_core_substrate_extraction.md).
 > **Audit findings (2026-06-27):**
 > - **Phase 5 RESCINDED** — `Cargo.toml:9` + `release-plz.toml:9-12` lock `katgpt-rs` root as `publish = false` permanently ("dev/examples aggregator — never published. Only katgpt-core ships to crates.io"). Decision was made AFTER this issue was filed and overrides its Phase 5.
 > - **Phase 1 step 1 (`types` move) ALREADY DONE** — `katgpt-core/src/types/` has 14 files; root `src/types.rs` is a thin re-export shim.
+> - **Phase 1 step 2 (`transformer` substrate) ✅ DONE 2026-06-27** — pure data types (LayerWeights, TransformerWeights, KV caches, PrefillContext, WallPrefixState, MtpProjection, ContiguousWeights) moved to new `katgpt-transformer` crate (separate from `katgpt-core` per the audit: forward functions stay in root because they compose cognitive modules — `crate::hla`, `crate::sleep`, `crate::tf_loop`, `crate::gdn2` — that don't exist in substrate; `ForwardContext` also stays because its fields reference root-only pruner types).
 > - **Phase 2B premise INVERTED** — `cgsp` is already in core (correctly), `cce` is in root (correctly); no tier move needed.
-> - **What's still real:** the cross-repo DRY violation. `riir-engine/src/` still has divergent `crate::hla`/`transformer`/`types`/`tokenizer`/`dd_tree`/`spec_types`/`mcts`/`sampling`/`delta_mem`/`simd` — confirmed via grep.
+> - **What's still real:** the cross-repo DRY violation for `hla`, `tokenizer`, `dd_tree`, `spec_types`, `mcts`, `sampling`, `delta_mem`, `simd` — `riir-engine/src/` still has divergent `crate::` copies.
 > **Owner:** develop
 > **Created:** 2026-06-27
 > **Cross-repo:** katgpt-rs (primary), riir-ai, riir-neuron-db (consumers). riir-train/riir-chain unaffected.
