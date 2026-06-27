@@ -87,7 +87,7 @@ git pull origin develop
 echo "→ promoting develop → main..."
 git checkout main
 git pull origin main
-git merge --ff-only develop
+git merge --no-ff develop -m "release: promote develop to main"
 git push origin main
 
 # Switch back to develop for continued work

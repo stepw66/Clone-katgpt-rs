@@ -8,7 +8,8 @@
 
 [[package]]
 name = "katgpt-rs"
-release = false  # never version-bump, never tag, never changelog, never publish
+release = false  # never version-bump, never tag, never changelog
+publish = false  # match Cargo.toml's publish = false (release-plz validates consistency)
 
 [[package]]
 name = "katgpt-core"
