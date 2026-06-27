@@ -52,7 +52,11 @@ const MAX_SPEC_ROUNDS: usize = 200;
 /// Uniform draft marginals over digits 1–9 (index 0 = padding, never drafted).
 /// This is the worst-case drafter — zero information. The pruner supplies all
 /// the constraint signal. A trained drafter would replace this with real logits.
-fn uniform_marginals(lookahead: usize) -> Vec<Vec<f32>> {
+///
+/// `board` is accepted (and ignored) so this matches the
+/// `Fn(&Sudoku9x9, usize) -> Vec<Vec<f32>>` drafter signature, letting the
+/// generic `solve_speculate_with_drafter` swap between uniform and latent.
+fn uniform_marginals(_board: &Sudoku9x9, lookahead: usize) -> Vec<Vec<f32>> {
     (0..lookahead)
         .map(|_| {
             let mut p = vec![0.0f32; SUDOKU_VOCAB];
@@ -137,6 +141,46 @@ fn solve_fast() -> SolveStats {
 
 // ─── Mode 2: Iterative speculate + backtrack fallback ──────────────────────
 
+/// Constraint-aware ("latent") marginals: for each empty cell, compute the
+/// candidate set and produce a marginal that concentrates probability on
+/// forced moves.
+///
+///   - 1 candidate  (naked single) → p = 1.0 on that digit, 0 elsewhere
+///   - N candidates               → uniform 1/N on each valid digit
+///   - 0 candidates (dead cell)   → uniform (will be pruned by the pruner)
+///
+/// This is the modelless "latent drafter": the latent space IS the candidate
+/// bitmask (9-bit, one bit per digit), projected to a categorical marginal.
+/// No training — pure deterministic rules engine, same as solve_fast but
+/// exposed as marginals for the DDTree to consume.
+fn latent_marginals(board: &Sudoku9x9, lookahead: usize) -> Vec<Vec<f32>> {
+    let pruner = SudokuPruner::new(board.clone());
+    let la = lookahead.min(pruner.empty_count());
+    (0..la)
+        .map(|depth| {
+            let mut p = vec![0.0f32; SUDOKU_VOCAB];
+            let Some((row, col)) = pruner.position_at(depth) else { return p; };
+            // Compute candidate bitmask against the CURRENT board.
+            let mut count = 0u32;
+            for d in 1..=9u8 {
+                if board.is_valid_move(row, col, d) {
+                    count += 1;
+                }
+            }
+            if count == 0 {
+                return p; // dead cell
+            }
+            let prob = 1.0 / count as f32;
+            for d in 1..=9u8 {
+                if board.is_valid_move(row, col, d) {
+                    p[d as usize] = prob;
+                }
+            }
+            p
+        })
+        .collect()
+}
+
 /// After committing a speculated path, check whether any empty cell now has
 /// zero valid digits (the speculation painted into a corner).
 fn has_dead_end(board: &Sudoku9x9) -> bool {
@@ -196,6 +240,29 @@ fn backtrack_with_initial_fallback(board: &mut Sudoku9x9) -> (bool, usize, bool)
 /// primitive is architecturally an 8-deep lookahead, designed for token-level
 /// speculative decoding — NOT full-puzzle search.
 fn solve_speculate_iterative(lookahead_in: usize, tree_budget: usize) -> SolveStats {
+    solve_speculate_with_drafter(lookahead_in, tree_budget, uniform_marginals)
+}
+
+/// Same as `solve_speculate_iterative` but uses the constraint-aware
+/// ("latent") drafter instead of uniform marginals.
+fn solve_speculate_latent(lookahead_in: usize, tree_budget: usize) -> SolveStats {
+    solve_speculate_with_drafter(lookahead_in, tree_budget, latent_marginals)
+}
+
+/// Generic iterative speculative solve with a pluggable marginal generator.
+///
+/// `make_marginals(board, lookahead) -> Vec<Vec<f32>>` produces the draft
+/// marginals for the current board state. Passing `uniform_marginals` gives
+/// the zero-signal baseline; passing `latent_marginals` gives the
+/// constraint-aware drafter (naked singles → p=1.0).
+fn solve_speculate_with_drafter<F>(
+    lookahead_in: usize,
+    tree_budget: usize,
+    make_marginals: F,
+) -> SolveStats
+where
+    F: Fn(&Sudoku9x9, usize) -> Vec<Vec<f32>>,
+{
     // Architectural ceiling: u128 parent_path packs 16-bit tokens → max 8.
     const MAX_LOOKAHEAD: usize = 8;
     let lookahead = lookahead_in.min(MAX_LOOKAHEAD);
@@ -222,7 +289,7 @@ fn solve_speculate_iterative(lookahead_in: usize, tree_budget: usize) -> SolveSt
         }
 
         let la = lookahead.min(empty);
-        let margs = uniform_marginals(la);
+        let margs = make_marginals(&board, la);
         let mv: Vec<&[f32]> = margs.iter().map(|s| s.as_slice()).collect();
 
         let tree = build_dd_tree_pruned(&mv, &config, &pruner, false);
@@ -304,7 +371,7 @@ fn build_one_tree(tree_budget: usize) -> usize {
     config.tree_budget = tree_budget;
     config.draft_lookahead = lookahead;
 
-    let margs = uniform_marginals(lookahead);
+    let margs = uniform_marginals(&board, lookahead);
     let mv: Vec<&[f32]> = margs.iter().map(|s| s.as_slice()).collect();
 
     let tree = build_dd_tree_pruned(&mv, &config, &pruner, false);
@@ -424,6 +491,35 @@ fn main() {
     }
     println!();
 
+    // ── Mode 5: speculate with LATENT drafter (constraint-aware marginals) ──
+    // The drafter now reads the board's candidate sets and produces marginals
+    // where naked singles (1 candidate) get p=1.0. This is the modelless
+    // 'latent drafter' — the latent space IS the candidate bitmask (9-bit),
+    // projected to a categorical. Research question: does constraint-aware
+    // drafting make speculation actually beat backtrack?
+    println!("── Mode 5: speculate_latent (constraint-aware drafter) ──────");
+    println!("  drafter: naked single → p=1.0; N candidates → uniform 1/N");
+    println!("  (same 8-deep u128 ceiling; plasma SIMD has nothing extra to");
+    println!("   accelerate here — the marginals are already sharp)");
+    println!("{:<10} {:>10} {:>10} {:>12} {:>10} {:>12} {:>12} {:>10}",
+        "lookahead", "budget", "solved", "spec_commits", "fallback", "full_revert", "tree_nodes", "time");
+    println!("{}", "─".repeat(92));
+    for &(la, budget) in configs {
+        let (t, s) = median_batch(|| solve_speculate_latent(la, budget));
+        println!(
+            "{:<10} {:>10} {:>10} {:>12} {:>10} {:>12} {:>12} {:>10}",
+            la,
+            budget,
+            s.solved,
+            s.spec_commits,
+            s.steps,
+            s.full_reverts,
+            s.tree_nodes,
+            fmt_us(t),
+        );
+    }
+    println!();
+
     // ── Mode 3: DDTree primitive throughput ──
     println!("── Mode 3: DDTree primitive throughput (lookahead=8, Inkala) ─");
     println!("  measures raw build_one_tree() cost — the speculate unit primitive");
@@ -485,14 +581,27 @@ fn main() {
     println!("  constraint-valid via the pruner. So speculate_iter at best matches");
     println!("  backtrack and at worst pays tree-build overhead before falling back.");
     println!();
-    println!("  To beat backtrack, speculation needs a real draft model (e.g.");
-    println!("  MRV cell ordering, or trained digit priors) so the drafter");
-    println!("  proposes the RIGHT digit first, not just a valid one.");
+    println!("  Mode 5 (latent drafter) shows constraint-aware marginals do NOT help:");
+    println!("  identical spec_commits to uniform. Reason: the depth→cell mapping is");
+    println!("  row-major, and Inkala's first 8 empties have NO naked singles (all");
+    println!("  have 2-4 candidates). The marginals only differ from uniform on");
+    println!("  forced cells, which don't appear in the 8-deep window. MRV cell");
+    println!("  ordering (Issue 005 Option A) would fix this, but needs changing");
+    println!("  SudokuPruner's position mapping — a bigger change than the drafter.");
     println!();
-    println!("  Break-even: speculate wins only when (acceptance_rate ×");
-    println!("  commits_per_round × per_commit_savings) > tree_build_overhead.");
-    println!("  With p_accept = 1/9 (uniform over digits) on Inkala, that");
-    println!("  never holds — exactly what Mode 2 shows above.");
+    println!("  GPU parallel DDTree (16× draft): feasible in principle — the DDTree");
+    println!("  builder already uses rayon (par_iter on root expansion). A GPU kernel");
+    println!("  could batch-expand K frontier nodes (K×vocab children) in one dispatch.");
+    println!("  But for Sudoku the tree is tiny (≤2678 nodes) — GPU dispatch overhead");
+    println!("  would dominate. GPU parallel trees win on LLM-scale vocab (32k tokens),");
+    println!("  not 9-digit Sudoku. The real GPU win would be drafting MANY boards in");
+    println!("  parallel (batch of puzzles), not one board's tree.");
+    println!();
+    println!("  plasma_path for the drafter (TRDraft): exists in src/distill/trd.rs");
+    println!("  (find_valid_token + branch_score are cfg-gated on plasma_path for");
+    println!("  SIMD argmax). But it accelerates the f32 marginal scan, not the");
+    println!("  constraint check. With uniform OR latent marginals on a 9-digit");
+    println!("  vocab, the SIMD argmax has nothing to accelerate.");
     println!();
     println!("  TL;DR: hardest Sudoku solves in ~{} via backtrack,", fmt_us(t_bt));
     println!("         or ~{} via solve_fast ({:.1}× speedup, modelless MRV + CP).",
