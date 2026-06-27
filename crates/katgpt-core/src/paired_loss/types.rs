@@ -65,7 +65,7 @@ pub struct PairedLossGap {
 /// length is capped at 255 — more than enough (paper uses N=5; in practice
 /// n ≤ 8). `n ≥ 256` saturates to 255 (the copy status matters more than the
 /// exact n for the filtered aggregates).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum TokenClass {
     /// Open-class content word (state-conditioned readout — paper Pattern i).
@@ -99,6 +99,26 @@ impl TokenClass {
     #[inline(always)]
     pub fn is_open_class(self) -> bool {
         matches!(self, TokenClass::Content | TokenClass::Function)
+    }
+
+    /// Human-readable short label for display in reports/examples (Plan 335
+    /// Phase 3). Used by [`super::ClassGapReport`] pretty-printing and the
+    /// `paired_loss_0*` examples. Keeps display logic in one place rather than
+    /// re-implementing `match` at each consumer.
+    ///
+    /// `CopyN(n)` renders as `"CopyN"` (the `n` is intentionally omitted —
+    /// the display label is a fixed `&'static str`; the full n is available
+    /// via the variant itself).
+    #[inline]
+    pub fn label(self) -> &'static str {
+        match self {
+            TokenClass::Content => "Content",
+            TokenClass::Function => "Function",
+            TokenClass::Other => "Other",
+            TokenClass::BracketOpen => "BracketOpen",
+            TokenClass::BracketClose => "BracketClose",
+            TokenClass::CopyN(_) => "CopyN",
+        }
     }
 }
 
@@ -239,5 +259,90 @@ impl FilterScratch {
         Self {
             mask_buf: Vec::with_capacity(l),
         }
+    }
+}
+
+/// Per-class annotation row pairing the observed mean gap with the
+/// Proposition 1 class-size bound (Plan 335 Phase 3 T3.1).
+///
+/// Produced by [`super::gap::PairedLossGap::annotate_with_class_bounds`].
+/// The `gap_to_bound_ratio = mean_gap / log_v_tau` tells you how much of
+/// the theoretical ceiling the observed A/B gap has consumed:
+///
+/// - **ratio → 1** → near the Proposition 1 ceiling. A richer feature map
+///   (e.g., latent encoding, recurrence) has captured most of the
+///   theoretically available room — little left to gain.
+/// - **ratio → 0** → far from the ceiling. Room remains for a richer feature
+///   to help on this class.
+/// - **ratio < 0** → the A/B is "backwards" on this class (model A is better
+///   than B). The richer feature is *not* helping here; investigate the
+///   sign before concluding anything about the bound.
+/// - **ratio > 1** → would exceed the Proposition 1 bound. Shouldn't happen
+///   for a valid `ClassSizeBound` (V_τ chosen too small) — the bound is
+///   generous, not tight; revisit the assumed V_τ.
+/// - **NaN** → no [`ClassSizeBound`] was provided for this class. `mean_gap`
+///   and `count` are still valid; only the bound/ratio are undefined.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ClassGapRow {
+    /// The class this row annotates.
+    pub class: TokenClass,
+    /// Number of positions in `classes` with this tag.
+    pub count: u32,
+    /// Mean `Δ_i = ℓ_A − ℓ_B` over positions of this class. Equal to
+    /// [`super::gap::PairedLossGap::mean_gap_for_class`] for this class.
+    /// Sign: positive = B-favored.
+    pub mean_gap: f32,
+    /// `log|V_τ|` from the [`ClassSizeBound`] for this class, or `NaN` if no
+    /// bound was supplied.
+    pub log_v_tau: f32,
+    /// `mean_gap / log_v_tau`. See struct docs for the interpretation.
+    /// `NaN` when `log_v_tau` is `NaN` (no bound) or zero (`V_τ = 1`, a
+    /// deterministic class — `mean_gap` should also be ~0 in that case).
+    pub gap_to_bound_ratio: f32,
+}
+
+/// Per-class Proposition 1 annotation report (Plan 335 Phase 3 T3.1).
+///
+/// One [`ClassGapRow`] per distinct [`TokenClass`] present in the input
+/// `classes` array. Rows are sorted by `gap_to_bound_ratio` **descending**
+/// (NaN-aware: rows with NaN ratio sort last), so the classes nearest their
+/// Proposition 1 ceiling appear first — the actionable diagnostic ("where
+/// has the richer feature already saturated the available room?").
+///
+/// Produced by
+/// [`super::gap::PairedLossGap::annotate_with_class_bounds`].
+///
+/// # Zero-alloc note
+///
+/// This is a **cold-path reporting API**, not a hot-path query. It allocates
+/// the `rows` Vec once (one `Vec::with_capacity(distinct_classes)` + one
+/// `HashMap` for accumulation). Use it once per eval report, not per token.
+/// The hot path is [`super::gap::PairedLossGap::filtered_mean_with_scratch`].
+#[derive(Clone, Debug, Default)]
+pub struct ClassGapReport {
+    /// One row per distinct class present in the input, sorted by
+    /// `gap_to_bound_ratio` descending (NaN last).
+    pub rows: Vec<ClassGapRow>,
+}
+
+impl ClassGapReport {
+    /// Look up the row for a specific class. Returns `None` if the class was
+    /// not present in the input `classes` array. O(rows.len()) linear scan —
+    /// `rows` is small (≤ ~10 distinct classes in practice).
+    #[inline]
+    pub fn row_for(&self, class: TokenClass) -> Option<&ClassGapRow> {
+        self.rows.iter().find(|r| r.class == class)
+    }
+
+    /// `true` if no classes were annotated (empty input `classes` array).
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.rows.is_empty()
+    }
+
+    /// Number of annotated classes.
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.rows.len()
     }
 }

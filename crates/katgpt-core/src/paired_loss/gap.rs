@@ -19,7 +19,10 @@
 //!   vectorize the masked sum. The `k = 1` ranking path falls back to the
 //!   3-pass rank-then-mask algorithm (rare; preserved for correctness).
 
-use crate::paired_loss::types::{FilterKind, FilterScratch, PairedLossGap, TokenClass};
+use crate::paired_loss::types::{
+    ClassGapReport, ClassGapRow, ClassSizeBound, FilterKind, FilterScratch, PairedLossGap,
+    TokenClass,
+};
 use crate::simd::{simd_masked_sum_count_f32, simd_sum_f32};
 
 impl PairedLossGap {
@@ -309,5 +312,113 @@ impl PairedLossGap {
             count += m;
         }
         (sum, count)
+    }
+
+    /// Annotate per-class mean gaps with the Proposition 1 class-size bound
+    /// (Plan 335 Phase 3 T3.1).
+    ///
+    /// For each distinct [`TokenClass`] present in `classes`, compute the mean
+    /// `Δ_i` over positions of that class, look up the corresponding
+    /// [`ClassSizeBound`] in `bounds`, and report
+    /// `gap_to_bound_ratio = mean_gap / log_v_tau`.
+    ///
+    /// # Interpretation
+    ///
+    /// See [`ClassGapRow`] for the full ratio semantics. The headline use:
+    /// classes with `|ratio| → 1` are near their Proposition 1 ceiling (the
+    /// richer feature map has saturated the available room); classes with
+    /// `|ratio| → 0` still have room for a richer feature to help.
+    ///
+    /// # Complexity / allocation
+    ///
+    /// O(L) single pass to accumulate per-class `(sum, count)` into a
+    /// `std::collections::HashMap`, then O(distinct_classes) to build rows.
+    /// **This is a cold-path reporting API** — it allocates the `rows` Vec and
+    /// an internal accumulation HashMap. Use once per eval report, not per
+    /// token. The hot path is [`Self::filtered_mean_with_scratch`].
+    ///
+    /// # Missing bounds
+    ///
+    /// A class present in `classes` but absent from `bounds` is still
+    /// reported — its `mean_gap` and `count` are valid; `log_v_tau` and
+    /// `gap_to_bound_ratio` are `NaN`. Sort order puts NaN-ratio rows last.
+    ///
+    /// # Panics
+    ///
+    /// Debug-only: panics if `classes.len() != self.len()` (length mismatch
+    /// is a caller bug).
+    #[inline]
+    pub fn annotate_with_class_bounds(
+        &self,
+        classes: &[TokenClass],
+        bounds: &std::collections::HashMap<TokenClass, ClassSizeBound>,
+    ) -> ClassGapReport {
+        debug_assert_eq!(
+            classes.len(),
+            self.deltas.len(),
+            "annotate_with_class_bounds: classes.len() ({}) != deltas.len() ({})",
+            classes.len(),
+            self.deltas.len()
+        );
+        // O(L) single pass: accumulate (sum, count) per distinct class. The
+        // number of distinct classes is small (≤ ~10 in practice: 5 base
+        // variants + a handful of CopyN(n) values), so the HashMap stays tiny.
+        let mut acc: std::collections::HashMap<TokenClass, (f32, u32)> =
+            std::collections::HashMap::new();
+        for i in 0..self.deltas.len() {
+            let (d, cls) = unsafe {
+                (*self.deltas.get_unchecked(i), *classes.get_unchecked(i))
+            };
+            let entry = acc.entry(cls).or_insert((0.0f32, 0u32));
+            entry.0 += d;
+            entry.1 += 1;
+        }
+        // Build rows. Look up each class's bound; NaN if not provided.
+        let mut rows: Vec<ClassGapRow> = Vec::with_capacity(acc.len());
+        for (cls, (sum, count)) in acc {
+            let mean_gap = if count == 0 { 0.0 } else { sum / (count as f32) };
+            let (log_v_tau, ratio) = match bounds.get(&cls) {
+                Some(b) => {
+                    let lv = b.log_v_tau;
+                    // log_v_tau == 0 (V_τ = 1, deterministic class) → 0/0 = NaN.
+                    // log_v_tau == +inf (V_τ = 0 guard) → finite/inf = 0.0.
+                    let r = if lv == 0.0 {
+                        f32::NAN
+                    } else if lv.is_infinite() {
+                        0.0
+                    } else {
+                        mean_gap / lv
+                    };
+                    (lv, r)
+                }
+                None => (f32::NAN, f32::NAN),
+            };
+            rows.push(ClassGapRow {
+                class: cls,
+                count,
+                mean_gap,
+                log_v_tau,
+                gap_to_bound_ratio: ratio,
+            });
+        }
+        // Sort by gap_to_bound_ratio descending, NaN-aware (NaN sorts last).
+        // sort_by is stable; ties keep insertion (HashMap) order.
+        rows.sort_by(|a, b| {
+            let ra = a.gap_to_bound_ratio;
+            let rb = b.gap_to_bound_ratio;
+            match (ra.is_nan(), rb.is_nan()) {
+                // NaN sorts after any non-NaN (so non-NaN rows come first,
+                // descending by ratio).
+                (true, true) => std::cmp::Ordering::Equal,
+                (true, false) => std::cmp::Ordering::Greater,
+                (false, true) => std::cmp::Ordering::Less,
+                // Both finite: descending = reverse natural order
+                // (rb.partial_cmp(ra) returns Less when ra > rb).
+                (false, false) => rb
+                    .partial_cmp(&ra)
+                    .unwrap_or(std::cmp::Ordering::Equal),
+            }
+        });
+        ClassGapReport { rows }
     }
 }

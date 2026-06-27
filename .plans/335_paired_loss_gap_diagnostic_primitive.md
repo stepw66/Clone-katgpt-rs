@@ -4,7 +4,7 @@
 **Research:** [katgpt-rs/.research/319_Paired_Token_Loss_Gap_Discourse_State_Diagnostic.md](../.research/319_Paired_Token_Loss_Gap_Discourse_State_Diagnostic.md)
 **Source paper:** [arxiv 2606.20936](https://arxiv.org/abs/2606.20936) — Li & Merrill, "Comparing Transformers and Hybrid Models at the Token Level", AI2, Jun 2026
 **Target:** `katgpt-rs/crates/katgpt-core/src/paired_loss/` (new module) + Cargo feature `paired_loss_diagnostic`
-**Status:** Active — Phase 2 COMPLETE (G1–G4 GREEN)
+**Status:** Active — Phase 3 COMPLETE (T3.1–T3.3 done, examples run, Proposition 1 annotation works)
 
 ---
 
@@ -70,9 +70,12 @@ Companion theoretical tool: **Proposition 1** (`DKL(p⋆_τ ‖ p_ϕ,τ) ≤ log
 
 ### Tasks
 
-- [ ] **T3.1** Add `PairedLossGap::annotate_with_class_bounds(&self, classes: &[TokenClass], bounds: &HashMap<TokenClass, ClassSizeBound>) -> ClassGapReport` — for each class, report `(mean_gap, log_v_tau, gap_to_bound_ratio = mean_gap / log_v_tau)`. The ratio tells you how close the observed gap is to the theoretical ceiling — classes with `gap_to_bound_ratio ≈ 1` are near their Proposition 1 ceiling (little room left); classes with `ratio ≈ 0` have room for a richer feature to help.
-- [ ] **T3.2** Write `examples/paired_loss_01_micro_gpt_ab.rs` — the G4 fixture as a runnable example. Shows: two log-prob traces → `PairedLossGap` → tag-stratified means table → filtered means table → Proposition 1 annotation table.
-- [ ] **T3.3** Write `examples/paired_loss_02_class_size_bound.rs` — standalone Proposition 1 demonstration. For a few illustrative classes (boolean: V_τ=2, u8: V_τ=256, open-class noun: V_τ=50000), compute `log|V_τ|` and show the bound. This is the theoretical-validation-of-raw-vs-latent artifact from Research 319 §2.2.
+- [x] **T3.1** Add `PairedLossGap::annotate_with_class_bounds(&self, classes: &[TokenClass], bounds: &HashMap<TokenClass, ClassSizeBound>) -> ClassGapReport` — for each class, report `(mean_gap, log_v_tau, gap_to_bound_ratio = mean_gap / log_v_tau)`. The ratio tells you how close the observed gap is to the theoretical ceiling — classes with `gap_to_bound_ratio ≈ 1` are near their Proposition 1 ceiling (little room left); classes with `ratio ≈ 0` have room for a richer feature to help.
+  - **Result:** `ClassGapReport { rows: Vec<ClassGapRow> }` + `ClassGapRow { class, count, mean_gap, log_v_tau, gap_to_bound_ratio }` added to `types.rs`. `TokenClass` now derives `Hash` (needed for `HashMap` key). Method is a single-pass O(L) accumulation into a `HashMap<TokenClass, (f32, u32)>` + O(distinct_classes) row build. Cold-path reporting API (allocates `rows` Vec + accumulator HashMap once — NOT the hot path). Rows sorted by `gap_to_bound_ratio` **descending**, NaN-aware (classes without a supplied bound sort last). Degenerate cases handled: `V_τ = 1` → `log_v_tau = 0` → ratio `NaN` (0/0 guard); `V_τ = 0` → `log_v_tau = +inf` → ratio `0.0` (finite/inf); negative `mean_gap` → negative ratio (sign preserved, "A/B backwards"). 10 new unit tests in `tests.rs` (per-class means, sort order, NaN handling, distinct CopyN rows, Copy/Send/Sync compile-time assertions). Crate-root re-export now includes `FilterScratch`, `ClassGapReport`, `ClassGapRow`.
+- [x] **T3.2** Write `examples/paired_loss_01_micro_gpt_ab.rs` — the G4 fixture as a runnable example. Shows: two log-prob traces → `PairedLossGap` → tag-stratified means table → filtered means table → Proposition 1 annotation table.
+  - **Result:** Example runs clean. Reproduces the Phase 2 G4 characterized-bias fixture end-to-end (amplification 13.907×, matching the bench). Three rendered tables: (1) tag-stratified raw means, (2) filtered aggregates (`ALL_TOKENS` / `TOP-K∩NO-COPY` / `COPY-N-ONLY`) with amplification verdict, (3) Proposition 1 annotation with NaN-aware sort and per-class bounds. Self-contained xorshift RNG (no external dep).
+- [x] **T3.3** Write `examples/paired_loss_02_class_size_bound.rs` — standalone Proposition 1 demonstration. For a few illustrative classes (boolean: V_τ=2, u8: V_τ=256, open-class noun: V_τ=50000), compute `log|V_τ|` and show the bound. This is the theoretical-validation-of-raw-vs-latent artifact from Research 319 §2.2.
+  - **Result:** Example runs clean. Three sections: (1) Proposition 1 bound across the class-size spectrum (boolean → Unicode code point, 0.69 → 13.92 nats), (2) the raw-vs-latent sync-boundary decision mapping the bound onto the AGENTS.md domain classification (physical = raw/synced, semantic = latent/local, bridge functions), (3) a worked 6-token annotation showing `gap_to_bound_ratio` interpretation with `interpret_ratio()` helper. Cross-refs Research 319 §2.2 and AGENTS.md "Latent vs Raw Space Rules".
 
 **Phase 3 exit:** Examples run. Proposition 1 annotation works. The diagnostic is ready for consumer integration.
 

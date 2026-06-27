@@ -6,7 +6,8 @@
 //! real inference path — not here.
 
 use crate::paired_loss::{
-    ClassSizeBound, CopyNGramTagger, FilterKind, PairedLossGap, TokenClass, TokenTagger,
+    ClassGapReport, ClassGapRow, ClassSizeBound, CopyNGramTagger, FilterKind, PairedLossGap,
+    TokenClass, TokenTagger,
 };
 
 /// Helper: compare two f32 with tolerance (paper-scale gaps are ~0.01–0.1
@@ -494,4 +495,229 @@ fn copy_ngram_tagger_does_not_self_match() {
             i
         );
     }
+}
+
+// ── T3.1 annotate_with_class_bounds: Proposition 1 annotation ─────────────
+
+#[test]
+fn annotate_basic_fixture_per_class_means_and_ratios() {
+    // Reuse the G1 fixture: classes = [Content, Function, Content, CopyN(2),
+    // Other, Content, BracketOpen, BracketClose], deltas = [1,0,2,1,0,3,2,1].
+    let (gap, classes) = g1_fixture();
+
+    // Provide bounds: Content has a big V_τ (room), CopyN(2) has a small V_τ,
+    // Function has a medium V_τ. Other/brackets get no bound → NaN.
+    let mut bounds = std::collections::HashMap::new();
+    bounds.insert(TokenClass::Content, ClassSizeBound::for_vocab_size(50_000));
+    bounds.insert(TokenClass::Function, ClassSizeBound::for_vocab_size(500));
+    bounds.insert(TokenClass::CopyN(2), ClassSizeBound::for_vocab_size(2));
+
+    let report = gap.annotate_with_class_bounds(&classes, &bounds);
+
+    // 5 distinct classes: Content, Function, CopyN(2), Other, BracketOpen,
+    // BracketClose → that's 6.
+    assert_eq!(report.len(), 6);
+    assert!(!report.is_empty());
+
+    // Content: positions 0,2,5 → deltas 1,2,3 → mean = 2.0. log_v_tau =
+    // ln(50000) ≈ 10.8198. ratio = 2.0 / 10.8198 ≈ 0.1848.
+    let content = report.row_for(TokenClass::Content).unwrap();
+    assert_eq!(content.count, 3);
+    assert!(approx(content.mean_gap, 2.0), "content mean = {}", content.mean_gap);
+    assert!(approx(content.log_v_tau, 10.819_778));
+    assert!(approx(content.gap_to_bound_ratio, 2.0 / 10.819_778));
+
+    // Function: position 1 → delta 0 → mean = 0. ratio = 0/anything = 0.
+    let function = report.row_for(TokenClass::Function).unwrap();
+    assert_eq!(function.count, 1);
+    assert!(approx(function.mean_gap, 0.0));
+    assert!(approx(function.gap_to_bound_ratio, 0.0));
+
+    // CopyN(2): position 3 → delta 1 → mean = 1.0. log_v_tau = ln(2) ≈ 0.693.
+    // ratio = 1.0 / 0.693 ≈ 1.4427 → > 1 (exceeds bound; bound is generous, this
+    // just means the A/B gap is larger than log V_τ for this tiny class).
+    let copyn = report.row_for(TokenClass::CopyN(2)).unwrap();
+    assert_eq!(copyn.count, 1);
+    assert!(approx(copyn.mean_gap, 1.0));
+    assert!(approx(copyn.log_v_tau, 0.693_147_18));
+    assert!(approx(copyn.gap_to_bound_ratio, 1.0 / 0.693_147_18));
+
+    // Other: position 4 → delta 0. No bound provided → log_v_tau = NaN,
+    // ratio = NaN.
+    let other = report.row_for(TokenClass::Other).unwrap();
+    assert_eq!(other.count, 1);
+    assert!(approx(other.mean_gap, 0.0));
+    assert!(other.log_v_tau.is_nan(), "missing bound → NaN log_v_tau");
+    assert!(other.gap_to_bound_ratio.is_nan(), "missing bound → NaN ratio");
+}
+
+#[test]
+fn annotate_rows_sorted_by_ratio_descending_nan_last() {
+    // Construct a fixture where CopyN(2) has the highest ratio (small V_τ),
+    // Content has a medium ratio, Function has zero ratio, Other has no bound
+    // (NaN). Sorted order: CopyN(2) > Content > Function=0 > [NaN: Other,
+    // brackets].
+    let (gap, classes) = g1_fixture();
+    let mut bounds = std::collections::HashMap::new();
+    bounds.insert(TokenClass::Content, ClassSizeBound::for_vocab_size(50_000));
+    bounds.insert(TokenClass::Function, ClassSizeBound::for_vocab_size(500));
+    bounds.insert(TokenClass::CopyN(2), ClassSizeBound::for_vocab_size(2));
+
+    let report = gap.annotate_with_class_bounds(&classes, &bounds);
+
+    let ratios: Vec<f32> = report.rows.iter().map(|r| r.gap_to_bound_ratio).collect();
+    // Non-NaN ratios must be descending.
+    let mut last = f32::INFINITY;
+    for &r in &ratios {
+        if !r.is_nan() {
+            assert!(
+                r <= last + 1e-6,
+                "ratios not descending: {} after {}",
+                r,
+                last
+            );
+            last = r;
+        }
+    }
+    // All NaN rows must be at the end.
+    let first_nan = ratios.iter().position(|r| r.is_nan());
+    let last_non_nan = ratios.iter().rposition(|r| !r.is_nan());
+    if let (Some(fn_idx), Some(ln_idx)) = (first_nan, last_non_nan) {
+        assert!(
+            ln_idx < fn_idx,
+            "NaN rows must sort last: last_non_nan={} first_nan={}",
+            ln_idx,
+            fn_idx
+        );
+    }
+    // First row should be CopyN(2) (highest ratio ≈ 1.44).
+    assert_eq!(report.rows[0].class, TokenClass::CopyN(2));
+}
+
+#[test]
+fn annotate_empty_classes_returns_empty_report() {
+    let gap = PairedLossGap::from_log_probs(&[] as &[f32], &[] as &[f32]);
+    let bounds = std::collections::HashMap::new();
+    let report = gap.annotate_with_class_bounds(&[] as &[TokenClass], &bounds);
+    assert!(report.is_empty());
+    assert_eq!(report.len(), 0);
+}
+
+#[test]
+fn annotate_no_bounds_all_nan_ratios() {
+    // All classes present, no bounds provided → every ratio is NaN.
+    let (gap, classes) = g1_fixture();
+    let bounds = std::collections::HashMap::new();
+    let report = gap.annotate_with_class_bounds(&classes, &bounds);
+    assert_eq!(report.len(), 6);
+    for row in &report.rows {
+        assert!(row.log_v_tau.is_nan());
+        assert!(row.gap_to_bound_ratio.is_nan());
+        // mean_gap and count are still valid.
+        assert!(row.count > 0);
+    }
+}
+
+#[test]
+fn annotate_deterministic_class_v_tau_1_yields_nan_ratio() {
+    // V_τ = 1 → log_v_tau = 0 → 0/0 = NaN (guard against division by zero for
+    // deterministic classes). mean_gap should also be ~0 for a deterministic
+    // class in a well-posed A/B, but we don't enforce that — the ratio is NaN
+    // regardless.
+    let a = [1.0f32, 2.0, 3.0];
+    let b = [0.5f32, 1.5, 2.5];
+    let gap = PairedLossGap::from_log_probs(&a, &b);
+    let classes = [TokenClass::Content, TokenClass::Content, TokenClass::Content];
+    let mut bounds = std::collections::HashMap::new();
+    bounds.insert(TokenClass::Content, ClassSizeBound::for_vocab_size(1));
+    let report = gap.annotate_with_class_bounds(&classes, &bounds);
+    let row = report.row_for(TokenClass::Content).unwrap();
+    assert!(approx(row.log_v_tau, 0.0));
+    assert!(row.gap_to_bound_ratio.is_nan(), "0/0 = NaN for V_τ=1");
+}
+
+#[test]
+fn annotate_zero_vocab_bound_yields_zero_ratio() {
+    // V_τ = 0 → ClassSizeBound guard returns log_v_tau = +inf. finite/inf = 0.
+    // (This is a degenerate input; the guard just avoids NaN propagation.)
+    let a = [1.0f32, 2.0];
+    let b = [0.5f32, 1.5];
+    let gap = PairedLossGap::from_log_probs(&a, &b);
+    let classes = [TokenClass::Content, TokenClass::Content];
+    let mut bounds = std::collections::HashMap::new();
+    bounds.insert(TokenClass::Content, ClassSizeBound::for_vocab_size(0));
+    let report = gap.annotate_with_class_bounds(&classes, &bounds);
+    let row = report.row_for(TokenClass::Content).unwrap();
+    assert!(row.log_v_tau.is_infinite() && row.log_v_tau.is_sign_positive());
+    assert!(approx(row.gap_to_bound_ratio, 0.0), "finite/inf = 0");
+}
+
+#[test]
+fn annotate_negative_mean_gap_yields_negative_ratio() {
+    // B worse than A → Δ < 0 → ratio < 0. Sign preserved ("backwards" A/B).
+    let a = [1.0f32, 1.0];
+    let b = [2.0f32, 2.0]; // b > a → Δ = -1
+    let gap = PairedLossGap::from_log_probs(&a, &b);
+    let classes = [TokenClass::Content, TokenClass::Content];
+    let mut bounds = std::collections::HashMap::new();
+    bounds.insert(TokenClass::Content, ClassSizeBound::for_vocab_size(10));
+    let report = gap.annotate_with_class_bounds(&classes, &bounds);
+    let row = report.row_for(TokenClass::Content).unwrap();
+    assert!(approx(row.mean_gap, -1.0));
+    assert!(approx(row.log_v_tau, 10.0f32.ln()));
+    assert!(row.gap_to_bound_ratio < 0.0, "negative mean → negative ratio");
+}
+
+#[test]
+fn annotate_row_for_missing_class_returns_none() {
+    let (gap, classes) = g1_fixture();
+    let bounds = std::collections::HashMap::new();
+    let report = gap.annotate_with_class_bounds(&classes, &bounds);
+    // CopyN(3) never appears in the G1 fixture (only CopyN(2)).
+    assert!(report.row_for(TokenClass::CopyN(3)).is_none());
+}
+
+#[test]
+fn annotate_distinct_copy_n_values_are_separate_rows() {
+    // CopyN(2) and CopyN(3) are distinct HashMap keys → separate rows with
+    // separate bounds. This mirrors the paper's COPY-N-ONLY filter semantics
+    // (exact N).
+    let a = [1.0f32, 2.0, 3.0, 4.0, 5.0];
+    let b = [0.5f32, 1.5, 2.5, 3.5, 4.5]; // all Δ = 0.5
+    let gap = PairedLossGap::from_log_probs(&a, &b);
+    let classes = [
+        TokenClass::CopyN(2),
+        TokenClass::CopyN(3),
+        TokenClass::CopyN(2),
+        TokenClass::CopyN(3),
+        TokenClass::Content,
+    ];
+    let mut bounds = std::collections::HashMap::new();
+    bounds.insert(TokenClass::CopyN(2), ClassSizeBound::for_vocab_size(4));
+    bounds.insert(TokenClass::CopyN(3), ClassSizeBound::for_vocab_size(8));
+    bounds.insert(TokenClass::Content, ClassSizeBound::for_vocab_size(1000));
+
+    let report = gap.annotate_with_class_bounds(&classes, &bounds);
+    assert_eq!(report.len(), 3, "CopyN(2), CopyN(3), Content = 3 distinct");
+
+    let cn2 = report.row_for(TokenClass::CopyN(2)).unwrap();
+    assert_eq!(cn2.count, 2);
+    assert!(approx(cn2.mean_gap, 0.5));
+    assert!(approx(cn2.log_v_tau, 4.0f32.ln()));
+
+    let cn3 = report.row_for(TokenClass::CopyN(3)).unwrap();
+    assert_eq!(cn3.count, 2);
+    assert!(approx(cn3.mean_gap, 0.5));
+    assert!(approx(cn3.log_v_tau, 8.0f32.ln()));
+}
+
+#[test]
+fn annotate_classgaprow_is_copy_and_send_sync() {
+    // Compile-time assertions: the report types must be Copy/Send/Sync so
+    // consumers can pass them across threads and by-value.
+    fn assert_copy<T: Copy>() {}
+    fn assert_send_sync<T: Send + Sync>() {}
+    assert_copy::<ClassGapRow>();
+    assert_send_sync::<ClassGapRow>();
+    assert_send_sync::<ClassGapReport>();
 }

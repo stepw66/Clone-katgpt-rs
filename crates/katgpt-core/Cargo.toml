@@ -570,3 +570,19 @@ required-features = ["non_interference_branches"]
 name = "bench_335_paired_loss_goat"
 harness = false
 required-features = ["paired_loss_diagnostic"]
+
+# Plan 335 Phase 3 T3.2 — runnable micro-GPT A/B diagnostic. Reproduces the
+# Phase 2 G4 characterized-bias fixture end-to-end: two log-prob traces →
+# PairedLossGap → tag-stratified means table → filtered aggregates table →
+# Proposition 1 annotation table.
+[[example]]
+name = "paired_loss_01_micro_gpt_ab"
+required-features = ["paired_loss_diagnostic"]
+
+# Plan 335 Phase 3 T3.3 — Proposition 1 class-size bound demonstration. The
+# theoretical-validation-of-raw-vs-latent artifact (Research 319 §2.2):
+# shows log|V_τ| across the class-size spectrum + the raw-vs-latent sync-
+# boundary decision + a worked annotation example.
+[[example]]
+name = "paired_loss_02_class_size_bound"
+required-features = ["paired_loss_diagnostic"]

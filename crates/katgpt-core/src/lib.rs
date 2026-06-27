@@ -850,5 +850,6 @@ pub use sleep_time::{
 pub mod paired_loss;
 #[cfg(feature = "paired_loss_diagnostic")]
 pub use paired_loss::{
-    ClassSizeBound, CopyNGramTagger, FilterKind, PairedLossGap, TokenClass, TokenTagger,
+    ClassGapReport, ClassGapRow, ClassSizeBound, CopyNGramTagger, FilterKind, FilterScratch,
+    PairedLossGap, TokenClass, TokenTagger,
 };
