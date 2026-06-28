@@ -678,16 +678,20 @@ fn one_sided_jacobi_svd_into(
     // Extract singular values (column norms of A post-rotation) and sort desc.
     //
     // The raw singular values are column norms of work.a (post-Jacobi-rotation).
-    // We compute them into a stack array (k ≤ 16), argsort by descending value,
+    // We compute them into a stack array (k ≤ 64), argsort by descending value,
     // then write the sorted triples into the SOA result. Reading from a stack
     // snapshot avoids the read-then-write aliasing hazard on
     // `result.singular_values` (writing sorted position `out_j` must not
     // clobber the source position `perm[out_j']` for a later `out_j'`).
+    //
+    // The 64-element cap covers ambient dims up to D=64 (e.g. the Plan 301
+    // Phase 2 GOAT uses D=48). PCA via Jacobian SVD is a documented public-API
+    // use case; the previous k ≤ 16 cap panicked on valid inputs (N ≥ 17, D=48).
     let k = m.min(n); // number of singular triples
-    debug_assert!(k <= 16, "one-sided Jacobi result scratch supports k <= 16");
+    debug_assert!(k <= 64, "one-sided Jacobi result scratch supports k <= 64");
 
     // Stack snapshot of raw (unsorted) singular values.
-    let mut raw_sigma: [f32; 16] = [0.0; 16];
+    let mut raw_sigma: [f32; 64] = [0.0; 64];
     for i in 0..k {
         let mut s_sq: f32 = 0.0;
         for r in 0..m {
@@ -698,7 +702,7 @@ fn one_sided_jacobi_svd_into(
     }
 
     // Argsort the column indices by descending singular value.
-    let mut perm: [usize; 16] = [0; 16];
+    let mut perm: [usize; 64] = [0; 64];
     for i in 0..k {
         perm[i] = i;
     }
