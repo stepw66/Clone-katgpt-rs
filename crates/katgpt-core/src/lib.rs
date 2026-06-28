@@ -17,6 +17,16 @@
 
 #[cfg(feature = "tiled_attention")]
 pub mod attention;
+
+// best_belief — ε-quantile Beta lower bound for conservative selection
+// (Plan 336, Research 320, RQGM arXiv:2606.26294 Prop. 4). Complements
+// `sample_beta` (Thompson sampling for EXPLORATION) with a conservative
+// EXPLOITATION / SELECTION counterpart. Opt-in until the G1+G2+G4 GOAT gate
+// passes.
+#[cfg(feature = "best_belief")]
+pub mod best_belief;
+#[cfg(feature = "best_belief")]
+pub use best_belief::{best_belief_score, best_belief_scores, select_best_belief};
 #[cfg(feature = "coda_fusion")]
 pub mod coda;
 #[cfg(feature = "dec_operators")]
