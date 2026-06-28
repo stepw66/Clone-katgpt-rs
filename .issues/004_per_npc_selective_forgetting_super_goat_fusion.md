@@ -1,79 +1,59 @@
-# Issue 004: Per-NPC Selective Forgetting on Personality Swap — Super-GOAT Fusion Validation
+# Issue 004: CLOSED — Per-NPC Selective Forgetting Not Novel (covered by R158/R161/R155)
 
 > **Origin:** Research 320 (Red Queen Gödel Machine — Selective Erasure & Best-Belief Selection, arXiv:2606.26294)
 > **Date:** 2026-06-28
-> **Status:** Open — novelty-gate validation pending
-> **Blocks:** Promotion of Plan 336 (`controlled_utility` feature) beyond GOAT-tier open primitive; potential Super-GOAT guide in `riir-ai/.research/`
+> **Status:** ❌ CLOSED 2026-06-28 — not Super-GOAT; candidate selling point already shipped under different vocabulary.
+> **Resolution:** Candidate selling point was a paraphrase of Research 158 (Committed Personality Blend) §1.3 property #3 + §2.4. No new capability. Plan 336 retained in reduced form (GOAT for `best_belief` only; DRY trait extraction is Gain).
 
 ---
 
-## Context
+## Why this closed (the evidence)
 
-Research 320 distilled RQGM's training-side consistency contract into two modelless inference primitives (`CriterionVersionedRecords` with selective erasure + `BestBeliefSelector` ε-quantile Beta). The verdict was **GOAT** — provable unification of scattered shipped instances (Plan 279 Gram cache invalidation, Plan 315 cascade `invalidate_zone_on_collapse`, Issue 001 HLA eigenbasis BLAKE3-check).
+The original Issue 004 proposed a candidate selling point:
 
-The Super-GOAT angle (§2.3 of Research 320) is **not committed**: it requires all four novelty-gate questions to be answered YES with confidence, and the author of Research 320 was not confident enough on Q1 (no prior art) and Q3 (selling point depends on riir-train) to commit during the research session. Per the research skill rule ("If you are NOT confident enough to commit all 4 YES right now, do not write 'Super-GOAT candidate'. Write 'fusion idea — novelty TBD' and create an issue"), this issue tracks the follow-up.
+> "Our NPCs co-evolve their personality direction vectors and their theory-of-mind models of other NPCs. When an NPC's snapshot is swapped (personality divergence, tame event, faction change), only the memories that depended on the OLD personality are erased — position, HP, wallet balance (raw, synced) survive bit-identical; affect projections, KG triples, cached policies (latent, local) are selectively invalidated."
 
-## The Candidate Selling Point
+Reading the already-committed riir-ai Super-GOAT corpus shows this is **a restatement**, not a new capability:
 
-> Our NPCs co-evolve their personality direction vectors and their theory-of-mind models of other NPCs. When an NPC's snapshot is swapped (personality divergence, tame event, faction change, trauma), only the memories that depended on the OLD personality are erased — position, HP, wallet balance (raw, synced) survive bit-identical; affect projections, KG triples, cached policies (latent, local) are selectively invalidated. This enables emergent social dynamics where personality drift triggers targeted forgetting, not full amnesia — at MMO scale (thousands of NPCs, 20Hz tick).
+### Research 158 (Committed Personality Blend) already ships the headline
 
-## Open Questions to Resolve Before Verdict
+Verbatim from `riir-ai/.research/158_per_npc_committed_personality_blend_guide.md` §1.3 property #3:
 
-### Q1 — No prior art? (NEEDS DEEPER CODE AUDIT)
+> "Sampling invariance — the personality survives observation gaps. Fog-of-war, network desync, snapshot thaw all preserve the committed blend. This is the FAME Proposition 3 property, made real for game AI."
 
-Research 320 grepped `.research/` + `.plans/` + surface-level code. The unified `CriterionVersionedRecords` primitive does not appear as a named abstraction, BUT the following modules need a deeper read before claiming "no prior art" with confidence:
+And §2.4 (sync boundary): only the K-weight vector `π` (K=3 floats = 12 bytes) crosses sync as LatCal-committed raw scalars; HLA state evolution `z(t)` (8-dim) stays local per-NPC. **This IS the "position/HP survive bit-identical; affect stays local" claim** — already committed, BLAKE3-tagged, quorum-verifiable.
 
-- [ ] `riir-ai/crates/riir-engine/src/policy_cache/` — does the cascade invalidation already generalize to multi-slot dep tracking?
-- [ ] `riir-ai/crates/riir-engine/src/adapters/` — does `LoRAHotSwap` / `dispatch_lora_merge` already invalidate dependent cached projections?
-- [ ] `riir-neuron-db/src/consolidation.rs` — does Raven/δ-Mem already implement selective erasure on consolidation boundaries?
-- [ ] `riir-neuron-db/src/mape_k.rs` — does the MAPE-K loop already tag records with criterion versions?
-- [ ] `riir-ai/crates/riir-engine/src/committed_blend/` — does `CommittedFieldBlend` already track per-slot dependency?
+### Research 161 (Cognitive Branch) already ships the per-domain partition
 
-**Resolution rule:** if any of the above already ships a generic multi-slot dep-tracked record store, this fusion is **not novel** → downgrade to GOAT (the unification is still valuable, just not Super-GOAT).
+`riir-ai/.research/161_Per_NPC_Cognitive_Branch_Continual_Adaptation_Guide.md` §1.2: each NPC has a `BranchBank` of ≤ D=8 cognitive branches, each branch accumulates verifier-approved experience **without cross-contamination** (non-interference by orthogonal construction), failures stored branch-local. When a branch is swapped, only that branch's episodic store is affected — by construction. This IS "selective forgetting on swap", at branch granularity.
 
-### Q2 — New class of behavior? (PLAUSIBLE BUT UNVERIFIED)
+### Research 155 (Sub-Goal Compaction) already ships the compaction gate
 
-The *mechanism* (dependency tracking + cache invalidation) is well-known CS. The novelty claim is in the *application* (per-NPC selective forgetting at MMO scale) + the *latent-space reframing* (evaluator = HLA affect direction vector) + the *constraint* (raw/latent sync boundary, deterministic replay, anti-cheat).
+CUCG (closed-unit compaction gate) at MMO scale. The shard-side `can_freeze` gate (riir-neuron-db Plan 002) and the trajectory-side rubric (katgpt-rs Plan 320/333) are already recognized as isomorphic (riir-neuron-db Research 007).
 
-- [ ] Identify a concrete competitor / prior art that does per-NPC selective memory erasure on personality swap at MMO scale. If none found → strengthens Q2.
-- [ ] Verify the raw/latent boundary holds: position/HP/wallet MUST survive personality swap bit-identical; only affect/KG/policy are selectively erased.
+## Q1–Q4 verdict (all answered by the above)
 
-### Q3 — Product selling point? (DEPENDS ON RIIR-TRAIN)
+| Q | Original concern | Answer from existing corpus |
+|---|---|---|
+| **Q1** (no prior art?) | Needs deeper code audit | **Prior art IS Research 158 + 161 + 155.** The "selective forgetting on personality swap" is the design of CommittedFieldBlend. Dead. |
+| **Q2** (new class?) | Plausible but unverified | **Not a new class.** It's the defining property of the already-committed per-NPC committed-personality Super-GOAT (R158). |
+| **Q3** (selling point?) | Depends on riir-train | **Moot** — the selling point is already claimed by R158. No new selling point to validate. |
+| **Q4** (force multiplier?) | ≥5 pillars | **N/A** — applies to R158, not to a new fusion. |
 
-The modelless side (Plan 336) handles *consistency* only. The actual personality-direction co-evolution requires the riir-train side to produce evolving evaluators (per-NPC HLA direction vectors that drift over time, KG triple templates that specialize, quest graders that co-evolve with quest generators).
+## Lesson (for the research workflow)
 
-- [ ] Confirm riir-train has a path to produce per-NPC co-evolving personality direction vectors. If not → the selling point is aspirational, not finishable → downgrade.
-- [ ] Alternatively, scope the selling point to a *deterministic* direction-vector swap (e.g., tame event → COMPANIONS direction flips sign, no training needed) and check whether that alone is a strong enough selling point.
+This is the canonical failure mode the skill warns about: **notes-only grep + paper-vocabulary-only grep misses the riir-ai Super-GOAT guides**. Research 320's fusion protocol §1 step 1 mandates grepping `riir-ai/.research/` + `riir-ai/.plans/` — and the listing was done (158, 161, 155 appeared in `list_directory riir-ai/.research`), but the guides were not READ because the grep was scoped to "selective erasure" / "co-evolution" keywords. The guides frame the same mechanism under "committed personality", "non-interference branches", "sampling invariance" — different vocabulary. **Vocabulary translation across repos is insufficient if the translated terms are only grepped, not read.** Future mitigation: when a candidate selling point mentions per-NPC + memory + swap, mandatorily `read_file` the R136/R146/R149/R152/R155/R158/R161/R163 guide set before claiming novelty.
 
-### Q4 — Force multiplier? (STRONG — ≥5 PILLARS)
+## What survives from Research 320
 
-Already documented in Research 320 §2.3. HLA, latent_functor, NeuronShard, MAPE-K, KG triples, Plan 315, Plan 279 all touched. No further validation needed unless Q1/Q2/Q3 downgrade.
-
-## Decision Protocol
-
-```
-After Plan 336 ships (Phase 1 GOAT gate passes):
-  → Re-audit Q1 (deeper code read of the 5 modules above)
-    → If prior art found: downgrade to GOAT, close this issue as "resolved — not Super-GOAT".
-    → If no prior art found: proceed to Q2.
-  → Re-audit Q2 (competitor scan + raw/latent boundary verification)
-    → If competitor exists or boundary breaks: downgrade to GOAT, close.
-    → If novel + boundary holds: proceed to Q3.
-  → Re-audit Q3 (riir-train path or deterministic-swap scoping)
-    → If riir-train has no path AND deterministic-swap is too weak: downgrade to GOAT, close.
-    → If path exists OR deterministic-swap is strong enough: proceed to verdict.
-  → If all four YES: write Super-GOAT guide in riir-ai/.research/, create riir-ai plan.
-```
-
-## Non-Goals
-
-- This issue does NOT block Plan 336. The GOAT-tier open primitives (`CriterionVersionedRecords`, `BestBeliefSelector`) ship regardless of the Super-GOAT verdict — they unify scattered instances and that gain holds independently.
-- This issue does NOT track the riir-train co-evolution training work. That is a separate concern in `riir-train/.research/` if/when it lands.
+- **`best_belief.rs`** (ε-quantile Beta lower bound for conservative selection) — genuinely new, no prior art in the codebase (confirmed: `sample_beta` exists for Thompson sampling, but no inverse-CDF quantile function for selection). Stays GOAT.
+- **`CriterionVersionedCache<V>` trait extraction** — DRY refactor over `DecCache` (katgpt-core `dec/cache.rs`) + `ZoneGeometryCache` (Plan 335 Phase 2). Both already ship the pattern. Downgraded to **Gain**.
+- **Controlled-utility-evolution freeze/thaw reframe** — architectural observation, no new primitive. Lives as a paragraph in Research 320 §2.2.3, not a plan.
 
 ## References
 
-- [Research 320](../.research/320_Red_Queen_Godel_Machine_Selective_Erasure_Best_Belief.md) — the originating distillation.
-- [Plan 336](../.plans/336_controlled_utility_primitives.md) — the GOAT-tier implementation.
-- RQGM paper: [arXiv:2606.26294](https://arxiv.org/pdf/2606.26294).
-- Research 080 (VPD co-evolution), 021 (G-Zero), 074-riir-ai (NS-RL survey) — prior co-evolution framings.
-- Research 098 (PrudentBanker) — closest cousin on safe-phased aggression + lower-bound selection.
+- [Research 158 (Committed Personality Blend)](../../riir-ai/.research/158_per_npc_committed_personality_blend_guide.md) — the already-committed Super-GOAT that ships the candidate selling point.
+- [Research 161 (Cognitive Branch)](../../riir-ai/.research/161_Per_NPC_Cognitive_Branch_Continual_Adaptation_Guide.md) — per-domain non-interference memory partition.
+- [Research 155 (Sub-Goal Compaction)](../../riir-ai/.research/155_Per_NPC_Sub_Goal_Compaction_Guide.md) — CUCG at MMO scale.
+- [Research 320](../.research/320_Red_Queen_Godel_Machine_Selective_Erasure_Best_Belief.md) — corrected distillation.
+- [Plan 336](../.plans/336_controlled_utility_primitives.md) — reduced to `best_belief` GOAT + DRY trait Gain.

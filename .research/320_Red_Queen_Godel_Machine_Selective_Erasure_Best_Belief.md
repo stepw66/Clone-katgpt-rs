@@ -21,9 +21,10 @@ The combination yields a **controlled-utility-evolution freeze/thaw pattern**: e
 
 **Distilled for katgpt-rs (modelless, inference-time):**
 - The *training loop* (LLM-based evaluator improvement) → riir-train. Not distilled here.
-- The *consistency contract* (selective erasure on criterion change + ε-best-belief promotion gate) → modelless. Ships as two open primitives in `katgpt-core`:
-  - `CriterionVersionedRecords` — generic record store with per-slot `dep_set` tracking + `erase_slot(slot)` that removes only dependent records. BLAKE3-tagged criterion versions. Zero-allocation hot path on no-op erasure.
-  - `BestBeliefSelector` — ε-quantile Beta lower bound over `(successes, failures)` accumulators, used for conservative selection of frozen snapshots / adapters / direction vectors. Complements `BanditStrategy::ThompsonSampling` (exploration) with a conservative-exploitation counterpart.
+- After reading the riir-ai Super-GOAT corpus (R158/R161/R155) and grepping shipped code (`dec/cache.rs`, Plan 335 `zone_cache.rs`), the distillation **shrinks to one genuinely-new primitive**:
+  - `best_belief_score()` / `select_best_belief()` — ε-quantile Beta lower bound over `(successes, failures)` accumulators, used for conservative *selection* of frozen snapshots / archetype blend shards / zone geometry pods. Complements the existing `sample_beta` Thompson sampling (exploration) with a conservative-exploitation counterpart.
+- The originally-proposed `CriterionVersionedRecords<D>` is **NOT new** — `DecCache` (`dec/cache.rs`) and `ZoneGeometryCache` (Plan 335) already ship the criterion-versioned erasure pattern with `topology_version` + `invalidate()` + BLAKE3 source-shard validation. Downgraded to a Gain-tier DRY trait extraction (`CriterionVersionedCache<V>`) over those two existing impls.
+- The Super-GOAT fusion candidate (per-NPC selective forgetting on personality swap) is **dead** — it's a paraphrase of Research 158 (Committed Personality Blend) §1.3 property #3 (sampling invariance) + §2.4 (sync boundary). See Issue 004 (CLOSED).
 
 ---
 
@@ -86,32 +87,17 @@ These are genuine training contributions. Per §3.5 of the research skill, the m
 
 ### 2.2 What stays modelless (distilled here)
 
-#### 2.2.1 Criterion-Versioned Record Store with Selective Erasure
+#### 2.2.1 "Selective erasure" is ALREADY SHIPPED — `DecCache` + `ZoneGeometryCache`
 
-**The primitive.** A generic record store where each record `z` carries:
+**Correction (2026-06-28, after reading Plan 335 + `dec/cache.rs`):** The original draft of this note proposed `CriterionVersionedRecords<D>` as a unification of "scattered instances". That framing understated the prior art. The pattern is **already shipped in two production forms**:
 
-```rust
-struct CriterionVersionedRecord<D> {
-    data: D,
-    dep_set: BitSet,           // evaluator slots whose criterion affected this record
-    criterion_tags: Vec<Hash>, // per-slot BLAKE3 of the active criterion when generated
-    epoch_vector: Vec<u32>,    // epoch index per slot at generation time
-}
-```
+1. **`DecCache`** (`katgpt-core/src/dec/cache.rs`): single-slot criterion-versioned cache. Ships `topology_version: u64`, `is_valid(complex_version)`, `invalidate()`, `mark_face_destroyed(face, version)` (selective dirty-region tracking), AND derived-stat recomputation (`store_hodge(components, version)`, `store_betti(bettis, version)`). This is the full pattern — version tag + validity check + selective invalidation + derived stats.
 
-The store exposes `erase_slot(slot: usize)` which retains records `z` where `slot ∉ z.dep_set OR z.criterion_tags[slot] == current_criterion[slot]`. After erasure, all derived statistics (success/failure counts, CMP, Thompson stats) are recomputed from retained records only.
+2. **`ZoneGeometryCache`** (`katgpt-core/src/dec/zone_cache.rs`, Plan 335 Phase 2): multi-entry papaya lock-free HashMap of mmap-backed `ZoneGeometryPod`s. Each entry carries `topology_version: u32` + `pod_header` (BLAKE3-validated). Ships `get_or_regen(zone_hash, shard, raw_state, regen_fn)`, `invalidate(zone_hash, new_topology_version)`, `evict_lru()`, and `validate_against_shard(shard_blake3)` returning `ZoneValidationError::SourceShardHashMismatch`. This is the full pattern at multi-entry scale with BLAKE3-tagged source commitment.
 
-**Why this is modelless.** The store operates on `&mut` records and a versioned criterion vector. No gradient descent, no LLM calls. The erasure is a pure filter; the recomputation is a pure fold. Zero-allocation on the no-op path (no slot changed).
+The value of distilling RQGM's Prop. 2 here is therefore NOT a new primitive — it's a **DRY trait extraction** (`CriterionVersionedCache<V>`) over these two existing impls, so that future caches (HLA eigenbasis cache from Issue 001, Gram cache from Plan 279, archetype-blend cache) implement one trait instead of reinventing `is_valid` / `invalidate` / source-hash-check vocabulary. That is a **Gain**, not GOAT.
 
-**Why this unifies scattered instances.** Today we have:
-- Plan 279 (`manifold_power_iter_router`): Gram cache with `gram_cache_version: u64`, invalidated on snapshot version bump. Cache entry stores `(M[i], blake3_tag)`.
-- Plan 315-riir-ai (`policy_cache_cascade`): `invalidate_zone_on_collapse()` walks per-NPC hot tier, removes entries whose `spatial_zone` matches the collapsing zone.
-- Issue 001 (`hla_windowed_eigenbasis_recovery`): "When NPC's frozen snapshot is reloaded, the cached eigenbasis must be BLAKE3-checked against the activation window that produced it. Re-derive if mismatch."
-- Plan 253 (`merkle_octree_curator_consensus`): curator reputation update with EMA decay on alpha/beta to handle concept drift.
-
-Each is a single-slot special case of the general primitive. The general primitive lets us express all four as `store.erase_slot(SNAPSHOT_SLOT)` / `store.erase_slot(ZONE_SLOT)` / `store.erase_slot(PERSONALITY_SLOT)`, with the dep_set populated at insert time.
-
-**Consistency guarantee (modelless analog of Prop. 2).** If the store is criterion-consistent before a transition on slot `m`, then after replacing `criterion[m]` and calling `erase_slot(m)`, the store is criterion-consistent under the new criterion vector. This is a pure data-structure invariant — no probability, no convergence assumption.
+The modelless analog of RQGM Prop. 2 (selective erasure preserves criterion consistency) IS the invariant these caches already maintain — `DecCache`'s `mark_face_destroyed` only drops the topology-dependent `hodge_cache`, not the structural `betti_cache`; `ZoneGeometryCache::invalidate(zone, new_version)` only drops the one zone whose version bumped, not the whole map. Both are special cases of RQGM Def. F.2's `Erase_m` operator.
 
 #### 2.2.2 Best-Belief ε-Quantile Beta Selector
 
@@ -170,32 +156,17 @@ This is the modelless analog of RQGM Algorithm 1 lines 22–31. The "anchor" in 
 
 None of these today implement the full 4-part contract (epoch freeze + boundary replacement + anchor validation + selective erasure) as a unified abstraction. They each implement a slice.
 
-### 2.3 Fusion (the Super-GOAT angle — tracked as issue, not committed here)
+### 2.3 Fusion — DEAD (covered by R158/R161/R155)
 
-Fusing RQGM's consistency contract with our existing substrate yields a candidate Super-GOAT: **per-NPC co-evolution with selective forgetting on personality swap at MMO scale.**
+**Correction (2026-06-28):** The original draft proposed a candidate Super-GOAT fusion: "per-NPC co-evolution with selective forgetting on personality swap at MMO scale." Reading the riir-ai Super-GOAT corpus after the fact shows this is **a paraphrase of already-committed work**, not a new capability:
 
-The reframing across the seven Super-GOAT factory modules:
+- **Research 158 (Committed Personality Blend)** §1.3 property #3 verbatim: *"Sampling invariance — the personality survives observation gaps. Fog-of-war, network desync, snapshot thaw all preserve the committed blend."* And §2.4: only the K-weight vector `π` (12 bytes) crosses sync as LatCal-committed raw scalars; HLA state (8-dim) stays local per-NPC. **This IS the "position/HP survive bit-identical; affect stays local" claim.**
+- **Research 161 (Cognitive Branch)** §1.2: each NPC has a `BranchBank` of ≤ D=8 orthogonal cognitive branches, failures stored branch-local, non-interference by construction. When a branch is swapped, only that branch's episodic store is affected. **This IS selective forgetting at branch granularity.**
+- **Research 155 (Sub-Goal Compaction)**: CUCG at MMO scale; `can_freeze` gate (riir-neuron-db Plan 002) and trajectory rubric (Plan 320/333) already recognized as isomorphic (riir-neuron-db Research 007).
 
-| Module | RQGM mechanism reframed |
-|---|---|
-| `katgpt-core/src/sense/` (HLA) | "Evaluator" = HLA affect direction vector. Hot-swap on personality divergence (tame event, faction change, trauma). Selective erasure invalidates only cached affect projections that depended on the old direction. |
-| `latent_functor/` | Coherence-driven re-estimation = the drift-triggered "evaluator replacement". Quality gate = anchor validation. The functor's `coherence < tau_reest` is the analog of "challenger strictly raises ε-best-belief on anchor". |
-| `cgsp_runtime/` | Curiosity signal = Thompson sampling over CMP. Collapse bridge = selective erasure on collapse-triggered snapshot swap. |
-| `riir-neuron-db/src/` (shards) | `MerkleFrozenEnvelope` = epoch freeze. `can_freeze` gate (Plan 002) = anchor lower-bound check. Raven/δ-Mem consolidation = selective erasure + re-scoring. |
-| `riir-chain/src/encoding/latcal*.rs` | LatCal fixed-point commitment = deterministic anchor (raw scalar bridge for the ε-best-belief score). |
-| DEC operators | (Not directly relevant — this paper has no Stokes/divergence/Hodge angle.) |
+Issue 004 tracks the closure with the full Q1–Q4 evidence. **No Super-GOAT guide, no riir-ai plan.** The candidate is dead.
 
-**Candidate selling point:** "Our NPCs co-evolve their personality direction vectors and their theory-of-mind models of other NPCs. When an NPC's snapshot is swapped (personality divergence, tame event, faction change), only the memories that depended on the OLD personality are erased — position, HP, wallet balance (raw, synced) survive bit-identical; affect projections, KG triples, cached policies (latent, local) are selectively invalidated. This enables emergent social dynamics where personality drift triggers targeted forgetting, not full amnesia — at MMO scale (thousands of NPCs, 20Hz tick)."
-
-**Why this is a fusion, not a direct map.** RQGM provides the *consistency contract* (selective erasure + best-belief + epoch-local stationarity). Our substrate provides the *latents* (HLA affect vectors, KG triple directions, NeuronShard style_weights) and the *commitment layer* (MerkleFrozenEnvelope, LatCal). Neither alone produces per-NPC selective forgetting at MMO scale.
-
-**Why this is NOT committed as Super-GOAT in this session.** The four novelty-gate questions need deeper validation than this session can provide:
-- **Q1 (no prior art):** The unified primitive doesn't ship, but scattered instances do (Plan 279, 315, Issue 001). The *unification* is the novelty claim — needs verification that no existing trait/type already abstracts this. The author of this note grepped `.research/` + `.plans/` + code; the unified primitive does not appear, but a deeper code audit (especially `riir-engine/policy_cache/`, `riir-engine/adapters/`, `riir-neuron-db/consolidation.rs`) is warranted before claiming "no prior art" with confidence.
-- **Q2 (new class):** Per-NPC selective forgetting on personality swap is plausibly a new capability class, but the *mechanism* (dependency tracking + cache invalidation) is well-known CS. The novelty is in the application + the latent-space reframing + the MMO-scale constraint.
-- **Q3 (selling point):** Concrete and finishable, but depends on riir-train producing the actual personality-direction co-evolution (the modelless side handles consistency only).
-- **Q4 (force multiplier):** ≥5 pillars touched (HLA, latent_functor, NeuronShard, MAPE-K, KG triples, Plan 315, Plan 279). Strong.
-
-Per the research skill: "If you are NOT confident enough to commit all 4 YES right now, do not write 'Super-GOAT candidate'. Write 'fusion idea — novelty TBD, needs Q1–Q4 check before verdict' and create an issue." → Issue created at `katgpt-rs/.issues/`.
+**Lesson (canonical failure mode):** This is the R269/R296 failure pattern in a new guise. The fusion protocol §1 mandates grepping `riir-ai/.research/` + `riir-ai/.plans/` — and the directory listing WAS done (158, 161, 155 appeared), but the guides were not READ because the grep was scoped to paper vocabulary ("selective erasure", "co-evolution"). The guides frame the same mechanism under different vocabulary ("committed personality", "non-interference branches", "sampling invariance"). **Vocabulary translation across repos is insufficient if the translated terms are only grepped, not read.** When a candidate selling point touches per-NPC + memory + swap, mandatorily `read_file` the R136/R146/R149/R152/R155/R158/R161/R163 guide set before claiming novelty.
 
 ---
 
@@ -210,31 +181,35 @@ Per the research skill: "If you are NOT confident enough to commit all 4 YES rig
 | **Gain** | Incremental improvement | Plan only, behind feature flag. |
 | **Pass** | Not relevant, OR training-only | One-line note. |
 
-**Verdict: GOAT.**
+**Verdict: GOAT (for `best_belief` only) + Gain (for DRY trait extraction).**
 
-**One-line reasoning:** Two modelless primitives (criterion-versioned record store with selective erasure + ε-best-belief Beta quantile selector) are unifications of scattered shipped instances with a provable consistency guarantee and a complementary role to Thompson sampling — provable gain, but not a new capability class on their own. The co-evolution training loop routes to riir-train. The Super-GOAT fusion angle (per-NPC selective forgetting on personality swap at MMO scale) is documented in §2.3 and tracked as an issue for follow-up novelty-gate validation.
+**One-line reasoning:** The ε-best-belief Beta quantile selector is genuinely new (grep confirms `sample_beta` exists for Thompson sampling, but no inverse-CDF quantile for conservative *selection*) — GOAT. The criterion-versioned-erasure pattern is already shipped in `DecCache` + `ZoneGeometryCache`; the value is a DRY trait extraction — Gain. The Super-GOAT fusion (per-NPC selective forgetting) is dead — covered by riir-ai Research 158/161/155 (Issue 004 CLOSED). The co-evolution training loop routes to riir-train.
 
-**Routing:**
-- `katgpt-rs/crates/katgpt-core/src/` — two open primitives:
-  - `selective_erasure.rs` (or `criterion_store.rs`) — `CriterionVersionedRecords<D>` generic store.
-  - `best_belief.rs` — `best_belief_score()`, `select_best_belief()`.
-- Feature gate: `controlled_utility` (opt-in until GOAT gate passes).
-- Plan: [`katgpt-rs/.plans/336_controlled_utility_primitives.md`](../.plans/336_controlled_utility_primitives.md).
-- Issue (Super-GOAT fusion follow-up): [`katgpt-rs/.issues/004_per_npc_selective_forgetting_super_goat_fusion.md`](../.issues/004_per_npc_selective_forgetting_super_goat_fusion.md).
+**Routing (revised):**
+- `katgpt-rs/crates/katgpt-core/src/best_belief.rs` — one new open primitive (`best_belief_score`, `select_best_belief`). Feature gate `best_belief` (opt-in).
+- `katgpt-rs/crates/katgpt-core/src/cache_version.rs` — DRY `CriterionVersionedCache<V>` trait + impls for `DecCache` + `ZoneGeometryCache`. Gain-tier, deferred.
+- Plan: [`katgpt-rs/.plans/336_controlled_utility_primitives.md`](../.plans/336_controlled_utility_primitives.md) (revised — Phase 1 `best_belief` only is GOAT; Phase 3 trait is Gain).
+- Issue: [`katgpt-rs/.issues/004_per_npc_selective_forgetting_super_goat_fusion.md`](../.issues/004_per_npc_selective_forgetting_super_goat_fusion.md) — CLOSED, not Super-GOAT.
 
-**GOAT gate (must pass before promotion to default):**
-- **G1 (correctness):** `CriterionVersionedRecords::erase_slot(m)` preserves criterion consistency under arbitrary transition sequences (modelless analog of Prop. 2). Tested with random transition sequences + fuzz.
-- **G2 (perf):** `erase_slot` on a store with N records and k slots is O(N) worst case, O(0) on no-op (slot unchanged). `best_belief_score` is O(1) (closed-form Beta quantile). Both ≤ 100 ns.
-- **G3 (no regression):** Wiring `erase_slot` into Plan 279 Gram cache + Plan 315 cascade invalidation + Issue 001 HLA eigenbasis produces bit-identical behavior to the existing hand-rolled invalidation.
-- **G4 (alloc-free):** Hot path (no-op erasure, best-belief lookup) is allocation-free. `erase_slot` reuses `Vec::retain` semantics (in-place).
-- **G5 (sigmoid, not softmax):** N/A — this primitive operates on discrete records, not probability distributions. Documented for completeness.
+**GOAT gate (for `best_belief` only — must pass before promotion to default):**
+- **G1 (correctness):** Property test vs reference Beta quantile (e.g. `statrs` test-only dev-dep): max abs error < 1e-4 across grid of `(S ∈ {0..100}, F ∈ {0..100}, ε ∈ {0.01, 0.05, 0.1, 0.25, 0.5})`.
+- **G2 (perf):** `best_belief_score` ≤ 100 ns (closed-form, no alloc). `select_best_belief` on 8 candidates ≤ 500 ns.
+- **G3 (no regression):** N/A — new module.
+- **G4 (alloc-free):** Hot path allocation-free, verified via `dhat`.
+- **G5 (sigmoid, not softmax):** N/A — Beta quantile, not a probability distribution selection.
 
 **What stays open after the GOAT plan ships:**
-- The Super-GOAT fusion (per-NPC selective forgetting) requires the riir-train side to produce actual personality-direction co-evolution. Once that lands, the modelless consistency contract here becomes the runtime substrate, and the Super-GOAT guide can be written in `riir-ai/.research/`.
-- Multi-slot commutative transitions (Rem. 1 of the paper) — the primitive should support batch `erase_slots(&[m1, m2, ...])` with order-independence, but this is a Phase 2 refinement, not a Phase 1 blocker.
+- The DRY `CriterionVersionedCache<V>` trait (Phase 3, Gain) — extract over `DecCache` + `ZoneGeometryCache`. No GOAT gate; just bit-identical `cargo check`.
+- The controlled-utility-evolution architectural observation (§2.2.3) — no plan, lives as documentation here.
 
 ---
 
 ## TL;DR
 
-RQGM (arXiv:2606.26294) is a *training* paper at its headline (co-evolved LLM evaluators under non-stationary utilities) → the training loop routes to riir-train. But it ships two **modelless inference primitives** we lack as unified abstractions: (1) a **criterion-versioned record store with selective erasure** — every record carries a `dep_set` of evaluator slots, and replacing a slot's criterion erases only dependent records (Prop. 2 proves criterion consistency); (2) an **ε-best-belief Beta quantile selector** `BB_ε = I⁻¹_ε(1+S, 1+F)` — a conservative lower bound for *selection* (which snapshot to promote), complementing our Thompson sampling (for *exploration*). Together they reframe our scattered freeze/thaw consistency instances (Plan 279 Gram cache invalidation, Plan 315 cascade `invalidate_zone_on_collapse`, Issue 001 HLA eigenbasis BLAKE3-check) under one epoch-local-stationarity + boundary-replacement + selective-erasure contract. **Verdict: GOAT** — provable unification gain, two new open primitives in `katgpt-core` behind `controlled_utility` feature, GOAT gate G1–G4 defined. The Super-GOAT fusion angle (per-NPC co-evolution with selective forgetting on personality swap at MMO scale) is documented in §2.3 but **not committed** — needs deeper Q1–Q4 novelty validation, tracked as an issue. The four-pillar mapping (HLA affect direction = evaluator; `latent_functor/reestimation` = drift-triggered replacement; `MerkleFrozenEnvelope` = epoch freeze; Raven/δ-Mem = consolidation erasure) shows the latent reframing is strong, but the application novelty (MMO-scale selective forgetting) depends on riir-train delivering the personality co-evolution that the modelless side only keeps consistent.
+RQGM (arXiv:2606.26294) is a *training* paper at its headline (co-evolved LLM evaluators under non-stationary utilities) → the training loop routes to riir-train. The original draft of this note proposed two modelless primitives, but reading the riir-ai Super-GOAT corpus (R158 Committed Personality Blend, R161 Cognitive Branch, R155 Sub-Goal Compaction) + grepping shipped code (`dec/cache.rs` `DecCache`, Plan 335 `ZoneGeometryCache`) forced a correction:
+
+- **`best_belief_score()` / `select_best_belief()`** (ε-quantile Beta lower bound `BB_ε = I⁻¹_ε(1+S, 1+F)`) — **genuinely new**, GOAT. Grep confirms `sample_beta` exists (Jöhnk's, for Thompson *exploration*) but no inverse-CDF quantile for conservative *selection*. Complements the existing sampler.
+- **`CriterionVersionedRecords<D>`** — **NOT new**. `DecCache` and `ZoneGeometryCache` already ship criterion-versioned erasure (`topology_version` + `invalidate` + BLAKE3 source validation + derived-stat recomputation). Downgraded to a Gain-tier DRY trait extraction.
+- **Super-GOAT fusion (per-NPC selective forgetting)** — **DEAD**. Paraphrase of Research 158 §1.3 property #3 (sampling invariance) + §2.4 (sync boundary). Issue 004 CLOSED with evidence.
+
+**Verdict: GOAT for `best_belief` + Gain for DRY trait + Super-GOAT fusion dead.** The intended consumers are freeze/thaw selection (which `ArchetypeBlendShard` to promote) and zone cache promotion (which `ZoneGeometryPod` to keep hot) — using the freeze/thaw + geometry-bin substrate (`MerkleFrozenEnvelope`, `ZoneGeometryCache`), NOT LoRA hot-swap (pre-spinoff vocabulary). Lesson logged: vocabulary translation across repos is insufficient if translated terms are only grepped, not read — the R158/R161/R155 guides frame the same mechanism under "committed personality" / "non-interference branches" / "sampling invariance", invisible to a "selective erasure" grep.
