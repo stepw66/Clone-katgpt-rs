@@ -299,7 +299,7 @@ pub enum RtdcError {
 - **`DepthSelector::select` math inverted** vs the plan's pseudocode. The plan's `above_t0 + above_t1` returned the inverse of the documented semantics (low σ should map to depth 2 / fine, not depth 0 / global). Fixed to `at_or_below_t0 + at_or_below_t1` — matches the docstring and the architectural intent (low diffusion scale = sharp view = finest depth).
 - **`encode_cbor_canonical` deferred** — would require a new `ciborium` dep not currently in `Cargo.toml`. Phase 1 ships only the `DeterministicLeafEncode` trait; the CBOR helper is not on any GOAT gate, so it can land in Phase 2 alongside the LatCal-backed impl in riir-chain.
 - **`thiserror` not added** — replaced the plan's `#[derive(thiserror::Error)]` with hand-rolled `Display` + `std::error::Error` impls to match the existing convention (`engram/tokenizer.rs::SurjectiveMapLoadError`). katgpt-core stays free of the `thiserror` dep.
-- **Phase 1 soundness caveat made explicit**: `prove_at_depth(d=2)` is fully sound; `prove_at_depth(d∈{0,1})` are well-formed but cryptographically unsound until Phase 2's `subtree_inclusion` proof lands (tracked in `riir-chain/issues/002_rtdc_subtree_inclusion_research.md`). Tests `prove_depth_0_trivial` and `prove_depth_1_well_formed_but_phase1_unsound` document this.
+- **Phase 1 soundness caveat made explicit**: `prove_at_depth(d=2)` is fully sound; `prove_at_depth(d∈{0,1})` are well-formed but cryptographically unsound until Phase 2's `subtree_inclusion` proof lands (Candidate C landed; Candidate A — Pedersen — research closed dormant, see `riir-chain/.research/006_RTDC_Candidate_A_Pedersen_Resolution.md`). Tests `prove_depth_0_trivial` and `prove_depth_1_well_formed_but_phase1_unsound` document this.
 - **14 unit tests, all passing** under `cargo test -p katgpt-core --features rtdc`. The pre-existing failure in `curator::tests::test_verification_weight_thresholds` is unrelated (fails with just `merkle_octree`, before `rtdc` is enabled) and was not touched.
 
 ### Phase 1 GOAT gates
@@ -340,7 +340,7 @@ The hard problem: prove that roots[d] is a faithful aggregation of roots[d+1].
 2. FFT-style batch verification via Plan 242 Fourier Smoothed Potential Fields
 3. Probabilistic proof via sampling (curator verifies K random leaves under each internal node)
 
-**Tracked in:** [`riir-chain/.issues/002_rtdc_subtree_inclusion_research.md`](../../riir-chain/.issues/002_rtdc_subtree_inclusion_research.md) (Candidate A — Pedersen on tangent log-maps; dormant until deterministic-soundness trigger fires).
+**Tracked in:** [`riir-chain/.research/006_RTDC_Candidate_A_Pedersen_Resolution.md`](../../riir-chain/.research/006_RTDC_Candidate_A_Pedersen_Resolution.md) (Candidate A — Pedersen on tangent log-maps; research closed 2026-06-28, dormant until deterministic-soundness trigger fires). Original issue `riir-chain/.issues/002_*` closed and removed.
 
 ### Phase 3 status (updated 2026-06-22)
 
@@ -373,7 +373,7 @@ The hard problem: prove that roots[d] is a faithful aggregation of roots[d+1].
       the production answer. If deterministic-per-frequency-cutoff
       soundness ever becomes a hard requirement, the path is Candidate A
       (Pedersen on tangent log-maps), not FFT.
-- [-] **Candidate A (Pedersen)** — **DEFERRED, tracked at** [`riir-chain/.issues/002_rtdc_subtree_inclusion_research.md`](../../riir-chain/.issues/002_rtdc_subtree_inclusion_research.md). Dormant until the trigger condition fires (deterministic per-frequency-cutoff soundness becomes a hard requirement, or a curve dep becomes acceptable). Blocked on curve-dependency decision (`curve25519-dalek` likely), NOT on training. CG6 (latency) expected to fail — group ops are ~1000× BLAKE3 — so Candidate A would ship as an opt-in deterministic-soundness mode alongside (not replacing) Candidate C.
+- [x] **Candidate A (Pedersen)** — **RESEARCH CLOSED 2026-06-28 (dormant).** All four open math questions resolved, trigger conditions evaluated, CG6 outcome predicted from first principles. Verdict: dormant — implementation would be speculative (no consumer requires deterministic soundness today). CG6 definitively fails at ~100–1000× over budget (Ristretto255 scalar-mult floor vs BLAKE3), CG1 conditionally passes with an injectivity-radius gate (Q4), CG3 passes by curve determinism. Candidate A would ship — if a trigger ever fires — as an opt-in `deterministic_soundness` mode alongside (not replacing) Candidate C. Full resolution + Q1–Q4 answers + re-opening protocol: [`riir-chain/.research/006_RTDC_Candidate_A_Pedersen_Resolution.md`](../../riir-chain/.research/006_RTDC_Candidate_A_Pedersen_Resolution.md). Original issue [`riir-chain/.issues/002_rtdc_subtree_inclusion_research.md`](../../riir-chain/.issues/002_rtdc_subtree_inclusion_research.md) closed and removed; research folded into `.research/006`.
 - [x] **Chain wiring** — **LANDED** in `riir-chain` commit `fac46d5`
       (2026-06-22). `chain_rtdc_subtree` feature in `riir-chain/Cargo.toml`,
       bridge glue in `riir-chain/src/encoding/rtdc_bridge.rs` exposes

@@ -426,9 +426,10 @@ pub use curator::{
 // with O(log n) proof at the abstraction level it operates at.
 //
 // Phase 1 ships the open primitive (types + trait + depth-2 sound proofs).
-// Cross-depth soundness (`subtree_inclusion`) is Phase 3 (Candidate C —
-// probabilistic sampling) behind `rtdc_subtree_inclusion` — see
-// `riir-chain/issues/002_rtdc_subtree_inclusion_research.md`.
+// Cross-depth soundness (`subtree_inclusion`) is Phase 3: Candidate C
+// (probabilistic sampling) shipped behind `rtdc_subtree_inclusion`.
+// Candidate A (Pedersen deterministic) research closed dormant — see
+// `riir-chain/.research/006_RTDC_Candidate_A_Pedersen_Resolution.md`.
 // LatCal-backed `DeterministicLeafEncode` impl lives in riir-chain (Plan 003).
 #[cfg(feature = "rtdc")]
 pub mod rtdc;
