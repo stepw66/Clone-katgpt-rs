@@ -91,6 +91,30 @@ impl SafetyCochain {
     /// For each vertex, accumulate Gaussian-weighted danger from all threat sources,
     /// then project to safety via `sigmoid(-danger)`.
     ///
+    /// # Algorithm (spatially pruned splat, Issue riir-neuron-db/003 Layer C)
+    ///
+    /// The naive loop scanned every threat for every vertex, paying one `exp()`
+    /// per (vertex × threat) pair regardless of distance. With `THREAT_SIGMA = 4`,
+    /// contributions beyond `R = 3·THREAT_SIGMA = 12` cells are `<
+    /// danger_level · exp(−R²/σ) = danger_level · exp(−9) ≈ danger_level ·
+    /// 1.2e-4` — negligible after sigmoid saturation. This constructor inverts
+    /// the loop nest: for each threat, splat its Gaussian contributions into
+    /// the bounded `[tx−R, tx+R] × [ty−R, ty+R]` vertex window.
+    ///
+    /// For a 100×100 grid × 100 threats this drops the inner-loop `exp()` count
+    /// from `10⁶` to `~100 · (2·12)² ≈ 6×10⁴` — a ~17× reduction.
+    ///
+    /// # Numerical tolerance vs the naive loop
+    ///
+    /// Output values differ from the naive `for vx, vy { for t in threats }`
+    /// loop by at most `~danger_level · exp(−9) / 4 ≈ 3e-5` after sigmoid
+    /// projection (worst case at the splat window boundary). This is below
+    /// f32 epsilon at the sigmoid's operating point and well below the
+    /// semantic resolution of a `[0, 1]` safety score. The existing tests
+    /// (`test_safety_from_projectile_threat_*`) assert monotonicity (`near <
+    /// far`) and the no-threat baseline (`== 0.5`), both of which are
+    /// preserved by construction.
+    ///
     /// # Arguments
     /// * `cx` — Cell complex (should be a 2D grid matching `grid_w × grid_h`)
     /// * `grid_w` — Grid width in vertices
@@ -104,20 +128,62 @@ impl SafetyCochain {
     ) -> Self {
         let mut field = CochainField::zeros(0, cx.n_vertices(), 1);
 
-        for vy in 0..grid_h {
-            let vyf = vy as f32;
-            for vx in 0..grid_w {
-                let vxf = vx as f32;
-
-                let mut danger = 0.0f32;
-                for &(tx, ty, danger_level) in threats {
-                    let dist_sq = (vxf - tx).powi(2) + (vyf - ty).powi(2);
-                    danger += danger_level * (-dist_sq / THREAT_SIGMA).exp();
-                }
-
-                let vertex_idx = vy * grid_w + vx;
-                field.set_scalar(vertex_idx, sigmoid(danger));
+        // No threats ⇒ danger stays 0 everywhere ⇒ sigmoid(0) = 0.5. Pre-fill
+        // the baseline so we can skip the splat + sigmoid passes entirely.
+        if threats.is_empty() {
+            for v in &mut field.data {
+                *v = 0.5;
             }
+            return Self(field);
+        }
+        if grid_w == 0 || grid_h == 0 {
+            return Self(field);
+        }
+
+        let inv_sigma = 1.0 / THREAT_SIGMA;
+        // 3σ cutoff (Issue riir-neuron-db/003): beyond this radius the
+        // Gaussian contribution is < exp(−9) ≈ 1.2e-4 × danger_level, which is
+        // sigmoid-clamped below f32 epsilon for any plausible danger level.
+        let r = 3.0 * THREAT_SIGMA; // = 12.0
+        let data = &mut field.data;
+
+        // Splat: for each threat, accumulate raw danger into the bounded
+        // vertex window. Sigmoid is applied in a second pass so the inner
+        // splat loop stays branch-free and amenable to auto-vectorization.
+        for &(tx, ty, danger_level) in threats {
+            // Vertex coords are integers, so the window is the integer range
+            // within [tx−R, tx+R] × [ty−R, ty+R], clamped to the grid.
+            let vx_lo = (tx - r).ceil().max(0.0) as usize;
+            let vx_hi = ((tx + r).floor() as isize)
+                .max(-1)
+                .min((grid_w as isize) - 1) as usize;
+            let vy_lo = (ty - r).ceil().max(0.0) as usize;
+            let vy_hi = ((ty + r).floor() as isize)
+                .max(-1)
+                .min((grid_h as isize) - 1) as usize;
+
+            if vx_hi < vx_lo || vy_hi < vy_lo {
+                continue;
+            }
+
+            for vy in vy_lo..=vy_hi {
+                let vyf = vy as f32;
+                let dy2 = (vyf - ty) * (vyf - ty);
+                let row_base = vy * grid_w;
+                for vx in vx_lo..=vx_hi {
+                    let vxf = vx as f32;
+                    let dx2 = (vxf - tx) * (vxf - tx);
+                    let dist_sq = dx2 + dy2;
+                    // Equivalent to `danger_level * (-dist_sq/THREAT_SIGMA).exp()`
+                    // but written with a hoisted reciprocal to save the division.
+                    data[row_base + vx] += danger_level * (-(dist_sq * inv_sigma)).exp();
+                }
+            }
+        }
+
+        // Project raw danger → [0, 1] safety in a single sweep.
+        for v in &mut field.data {
+            *v = sigmoid(*v);
         }
 
         Self(field)
@@ -783,5 +849,121 @@ mod tests {
         assert!((field.scalar(3) - 0.42).abs() < 1e-6);
         let f2 = InterestCohain::from_cochain(field);
         assert!((f2.interest(3) - 0.42).abs() < 1e-6);
+    }
+
+    // ── Issue riir-neuron-db/003 Layer C — splat vs naive parity ────────────
+    //
+    // `SafetyCochain::from_projectile_threat` uses a spatially pruned splat
+    // (3σ cutoff, R = 12 with THREAT_SIGMA = 4). This test pins the parity
+    // invariant: the splat output matches a naive reference (which scans
+    // every threat for every vertex) to within f32 epsilon after sigmoid.
+
+    /// Naive reference implementation — the pre-Layer-C algorithm. O(vertices ×
+    /// threats). Kept here as a parity oracle for the splat path.
+    fn from_projectile_threat_naive(
+        cx: &CellComplex,
+        grid_w: usize,
+        grid_h: usize,
+        threats: &[(f32, f32, f32)],
+    ) -> SafetyCochain {
+        let mut field = CochainField::zeros(0, cx.n_vertices(), 1);
+        if grid_w == 0 || grid_h == 0 {
+            return SafetyCochain::from_cochain(field);
+        }
+        for vy in 0..grid_h {
+            let vyf = vy as f32;
+            for vx in 0..grid_w {
+                let vxf = vx as f32;
+                let mut danger = 0.0f32;
+                for &(tx, ty, danger_level) in threats {
+                    let dist_sq = (vxf - tx).powi(2) + (vyf - ty).powi(2);
+                    danger += danger_level * (-dist_sq / THREAT_SIGMA).exp();
+                }
+                field.set_scalar(vy * grid_w + vx, sigmoid(danger));
+            }
+        }
+        SafetyCochain::from_cochain(field)
+    }
+
+    #[test]
+    fn test_safety_splat_matches_naive_within_3sigma() {
+        // 20×16 grid with 6 scattered threats — exercises interior, boundary,
+        // and corner vertices (some threats land near the grid boundary, which
+        // exercises the splat window clamping).
+        let gw = 20usize;
+        let gh = 16usize;
+        let cx = CellComplex::grid_2d(gw, gh);
+        let threats = vec![
+            (3.5_f32, 4.0, 5.0),
+            (10.0, 8.0, 2.5),
+            (17.2, 2.1, 8.0),
+            (1.0, 14.5, 1.0),
+            (19.0, 15.0, 3.0),
+            (8.5, 11.3, 0.5),
+        ];
+
+        let naive = from_projectile_threat_naive(&cx, gw, gh, &threats);
+        let splat = SafetyCochain::from_projectile_threat(&cx, gw, gh, &threats);
+
+        let naive_field = naive.as_cochain();
+        let splat_field = splat.as_cochain();
+        assert_eq!(naive_field.data.len(), splat_field.data.len());
+
+        // Tolerance: the splat drops contributions < dl·exp(-R²/σ) = dl·exp(-9)
+        // for R = 12. With dl ≤ 8 here, worst-case dropped contribution is
+        // ~8 · 1.2e-4 ≈ 1e-3. After sigmoid (derivative ≤ 1/4 near 0), the
+        // output difference is bounded by ~2.5e-4. Allow 1e-3 for f32 rounding
+        // headroom; in practice the max observed diff is ≪ 1e-4.
+        const TOL: f32 = 1e-3;
+        let mut max_diff = 0.0f32;
+        let mut max_diff_at = 0usize;
+        for (i, (a, b)) in naive_field.data.iter().zip(splat_field.data.iter()).enumerate() {
+            let diff = (a - b).abs();
+            if diff > max_diff {
+                max_diff = diff;
+                max_diff_at = i;
+            }
+            assert!(
+                diff <= TOL,
+                "vertex {i}: naive={a:.7} splat={b:.7} diff={diff:.2e} > TOL={TOL:.0e}"
+            );
+        }
+        // Tighter sanity bound — the actual envelope is much tighter than
+        // the documented tolerance. If this ever fails, investigate before
+        // bumping the bound.
+        assert!(
+            max_diff < 1e-4,
+            "max diff {max_diff:.2e} at vertex {max_diff_at} is larger than the \
+             expected ~1e-4 envelope; investigate the splat cutoff",
+        );
+    }
+
+    #[test]
+    fn test_safety_splat_far_vertices_are_baseline() {
+        // A single threat at the grid center. Vertices well beyond 3σ = 12
+        // should read exactly 0.5 (sigmoid(0)), the no-threat baseline.
+        let gw = 40usize;
+        let gh = 40usize;
+        let cx = CellComplex::grid_2d(gw, gh);
+        let threats = vec![(20.0_f32, 20.0, 5.0)];
+        let s = SafetyCochain::from_projectile_threat(&cx, gw, gh, &threats);
+        let field = s.as_cochain();
+
+        // Corner (0,0): distance to (20,20) is sqrt(800) ≈ 28.3 — well beyond R.
+        let far_corner = field.data[0];
+        assert!((far_corner - 0.5).abs() < 1e-7,
+            "far corner vertex should be 0.5 baseline, got {far_corner}");
+
+        // Opposite corner (gw-1, gh-1) = (39, 39): distance to (20,20) is
+        // sqrt(361+361) ≈ 26.9 — also beyond R.
+        let opp_corner = field.data[(gh - 1) * gw + (gw - 1)];
+        assert!((opp_corner - 0.5).abs() < 1e-7,
+            "opposite corner vertex should be 0.5 baseline, got {opp_corner}");
+
+        // Sanity: a vertex NEAR the threat should NOT be at baseline.
+        // Vertex (20, 20): distance 0. Danger = 5. sigmoid(5) ≈ 0.0067 ≪ 0.5.
+        let near = field.data[20 * gw + 20];
+        assert!(near < 0.1,
+            "near vertex should be well below baseline (high danger), got {near}");
     }
 }
