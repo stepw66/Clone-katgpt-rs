@@ -34,9 +34,7 @@ fn make_mixed_tokens() -> Vec<u32> {
             }
         } else {
             // Repetitive: same token repeated
-            for _ in 0..128 {
-                tokens.push(42);
-            }
+            tokens.extend(std::iter::repeat_n(42, 128));
         }
     }
     tokens

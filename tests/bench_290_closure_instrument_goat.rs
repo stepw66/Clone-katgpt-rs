@@ -260,7 +260,7 @@ fn g3_tar_synthetic_proxy_monotone_with_overlap() {
     // Baseline corpus: 50 PTGs each consisting *only* of the Search→Verify→Branch motif.
     // Observing the motif directly avoids node-id/edge-index desync.
     let baseline: Vec<PrimitiveTransitionGraph> = (0..50)
-        .map(|i| search_verify_branch_motif(i))
+        .map(search_verify_branch_motif)
         .collect();
 
     // Perturbed A: same motifs (TaR should be ~1.0).

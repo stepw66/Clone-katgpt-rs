@@ -45,9 +45,9 @@ fn make_trajectories() -> Vec<Vec<f32>> {
         let mut p = vec![0.0_f32; ACTION_DIM];
         p[dom] = dom_mass;
         let rest = (1.0 - dom_mass) / (ACTION_DIM - 1) as f32;
-        for j in 0..ACTION_DIM {
+        for (j, slot) in p.iter_mut().enumerate() {
             if j != dom {
-                p[j] = rest;
+                *slot = rest;
             }
         }
         out.push(p);

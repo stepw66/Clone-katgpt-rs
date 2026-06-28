@@ -84,9 +84,9 @@ fn sample_decision_point(rng: &mut Lcg) -> (Vec<Vec<f32>>, &'static str) {
                 let mut p = vec![0.0_f32; ACTION_DIM];
                 p[dom] = dom_mass;
                 let rest = (1.0 - dom_mass) / (ACTION_DIM - 1) as f32;
-                for j in 0..ACTION_DIM {
+                for (j, slot) in p.iter_mut().enumerate() {
                     if j != dom {
-                        p[j] = rest * (0.5 + rng.next_f32());
+                        *slot = rest * (0.5 + rng.next_f32());
                     }
                 }
                 normalize(&mut p);
@@ -97,11 +97,11 @@ fn sample_decision_point(rng: &mut Lcg) -> (Vec<Vec<f32>>, &'static str) {
                 let top_count = 2 + (rng.next_u64() % 2) as usize; // 2 or 3
                 let mut p = vec![0.0_f32; ACTION_DIM];
                 let base = 1.0 / top_count as f32;
-                for k in 0..top_count {
-                    p[k] = base * (0.8 + 0.4 * rng.next_f32());
+                for slot in &mut p[..top_count] {
+                    *slot = base * (0.8 + 0.4 * rng.next_f32());
                 }
-                for j in top_count..ACTION_DIM {
-                    p[j] = 0.02 * rng.next_f32();
+                for slot in &mut p[top_count..] {
+                    *slot = 0.02 * rng.next_f32();
                 }
                 normalize(&mut p);
                 p
@@ -109,8 +109,8 @@ fn sample_decision_point(rng: &mut Lcg) -> (Vec<Vec<f32>>, &'static str) {
             _ => {
                 // Near-uniform noise.
                 let mut p = vec![0.0_f32; ACTION_DIM];
-                for j in 0..ACTION_DIM {
-                    p[j] = 1.0 + rng.next_f32();
+                for slot in &mut p {
+                    *slot = 1.0 + rng.next_f32();
                 }
                 normalize(&mut p);
                 p

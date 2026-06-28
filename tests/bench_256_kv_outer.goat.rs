@@ -107,6 +107,8 @@ fn q_outer_baseline(
     let mut lse = vec![f32::NEG_INFINITY; n_queries];
 
     // Phase 2: for each query → route → attend (Q-outer, no reverse index).
+    // q needed for stride q_start = q*hd and LSE slot lse[q]
+    #[allow(clippy::needless_range_loop)]
     for q in 0..n_queries {
         let q_start = q * hd;
         let query = &queries[q_start..q_start + hd];
@@ -134,6 +136,8 @@ fn q_outer_baseline(
             // Weighted value accumulation
             let mut local_out = [0.0f32; 256];
             let actual_hd = hd.min(256);
+            // t needed for stride v_off = t*hd
+            #[allow(clippy::needless_range_loop)]
             for t in 0..actual_bs {
                 let w = scores[t] * inv_sum;
                 let v_off = t * hd;
@@ -177,6 +181,8 @@ fn compute_scores(
 ) {
     let chunks = head_dim / 4;
     let rem = head_dim % 4;
+    // t needed for stride k_start = t*head_dim
+    #[allow(clippy::needless_range_loop)]
     for t in 0..block_size {
         let k_start = t * head_dim;
         let mut d0 = 0.0f32;
@@ -355,7 +361,7 @@ fn bench_kv_outer_vs_q_outer() {
     println!("    ────────────────────────────────────────────────────────────");
 
     // Only assert the benchmark ran (not the verdict).
-    assert!(true, "benchmark completed");
+    // (marker: benchmark completed)
 }
 
 fn format_ctx(tokens: usize) -> String {

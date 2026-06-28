@@ -304,7 +304,7 @@ fn goat_169_t5_bandit_integration() {
     for arm in 0..num_arms {
         let rel = gdsd.relevance(0, arm, &[]);
         assert!(
-            rel >= 0.0 && rel <= 1.0,
+            (0.0..=1.0).contains(&rel),
             "relevance should be in [0,1], got {rel} for arm {arm}"
         );
     }
@@ -365,7 +365,8 @@ fn goat_169_t6_advantage_functions() {
         .collect();
     let slices: Vec<&[f32]> = marginals.iter().map(|m| m.as_slice()).collect();
 
-    let adv_fns: &[(&str, fn(f32) -> f32)] = &[
+    type AdvFn = fn(f32) -> f32;
+    let adv_fns: &[(&str, AdvFn)] = &[
         ("identity", identity_advantage),
         ("sigmoid", sigmoid_advantage),
         ("tanh", tanh_advantage),
@@ -385,7 +386,7 @@ fn goat_169_t6_advantage_functions() {
         for arm in 0..vocab.min(20) {
             let rel = pruner.relevance(0, arm, &[]);
             assert!(
-                rel >= 0.0 && rel <= 1.0,
+                (0.0..=1.0).contains(&rel),
                 "{name}: relevance out of range at arm {arm}: {rel}"
             );
         }
@@ -459,7 +460,7 @@ fn goat_169_g1_acceptance_rate() {
     use katgpt_rs::pruners::{
         BanditPruner, BanditStrategy, GdsdConfig, GdsdPruner, identity_advantage,
     };
-    use katgpt_rs::speculative::types::{NoScreeningPruner, ScreeningPruner};
+    use katgpt_rs::speculative::types::NoScreeningPruner;
     use katgpt_rs::speculative::{build_dd_tree_screened, extract_best_path};
     use katgpt_rs::types::Config;
 
@@ -537,7 +538,7 @@ fn goat_169_g1_acceptance_rate() {
     println!("   GDSD path score:                      {gdsd_score:.2}");
     println!("   Improvement:                          {improvement:+.2}%");
 
-    let pass = improvement >= 5.0;
+    let _pass = improvement >= 5.0;
     assert!(
         improvement >= 5.0,
         "G1 FAIL: GDSD acceptance rate improvement must be ≥5%, got {improvement:.2}%"

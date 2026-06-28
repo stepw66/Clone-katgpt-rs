@@ -315,7 +315,7 @@ fn test_fork_and_replay_counterfactual() {
     let elapsed_fork = start_fork.elapsed();
 
     // Apply alternative strategy to fork
-    let alt_actions: Vec<BenchAction> = (0..250).map(|i| BenchAction::Score(i)).collect();
+    let alt_actions: Vec<BenchAction> = (0..250).map(BenchAction::Score).collect();
     for action in &alt_actions {
         forked.push(EventType::Action, action.clone(), Actor::Player(1), None);
     }

@@ -212,6 +212,7 @@ fn anisotropic_dataset(rng: &mut Rng) -> (Vec<f32>, Vec<f32>) {
 
 // ── Training infrastructure (mirrors G3 test) ────────────────────────────
 
+#[allow(clippy::too_many_arguments)] // test helper: fixed FUNCATTN I/O shape
 fn forward_mse(
     x_basis: &[f32],
     x_value: &[f32],
@@ -241,6 +242,7 @@ fn forward_mse(
     s / (N * D) as f32
 }
 
+#[allow(clippy::too_many_arguments)] // test helper: fixed FUNCATTN I/O shape
 fn fd_sgd_step(
     x_basis: &[f32],
     x_value: &[f32],
@@ -296,6 +298,7 @@ fn fd_sgd_step(
     forward_mse(x_basis, x_value, y, w_basis, w_q, w_k, w_v, scratch, out)
 }
 
+#[allow(clippy::too_many_arguments)] // test helper: fixed FUNCATTN I/O shape
 fn train_variant(
     label: &str,
     x_basis: &[f32],

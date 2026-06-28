@@ -641,7 +641,7 @@ fn p2_batched_1000_npcs_throughput() {
 
     let start = Instant::now();
     let chunks = 8usize; // Apple Silicon efficiency cores + performance cores
-    let chunk_size = (N_NPCS + chunks - 1) / chunks;
+    let chunk_size = N_NPCS.div_ceil(chunks);
     npcs.par_chunks_mut(chunk_size).for_each(|chunk| {
         for (lp, scratch, target) in chunk.iter_mut() {
             let _ = lp.cycle(target, scratch);
@@ -690,6 +690,7 @@ fn p2_batched_1000_npcs_throughput() {
 ///   1. `scratch.candidates.resize(k, placeholder)` after `clear()` — cloned
 ///      a `Candidate { direction: Vec<f32> }` per slot.
 ///   2. `let cand = candidates[i].clone()` to dodge a borrow-checker conflict.
+///
 /// Both are fixed (Option A: `Solver::attempt` now takes `&Direction`;
 /// Option B: `ScratchBuffers::ensure_len` materialises slots once). The
 /// remaining ~1 alloc/cycle is allocator small-block churn, not CGSP itself.

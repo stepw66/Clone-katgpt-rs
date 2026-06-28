@@ -92,7 +92,7 @@ const ALPHA: f32 = 0.01;
 /// FUNCATTN sigmoid basis temperature. Per G3 finding, sigmoid needs τ ≤ 0.1
 /// at small input scales to produce non-uniform Φ.
 const TEMPERATURE: f32 = 0.1;
-const SEED: u64 = 0xA11CE_2222u64;
+const SEED: u64 = 0x000A_11CE_2222_u64;
 
 // ── Deterministic xorshift64* PRNG (mirrors G3 test) ─────────────────────
 
@@ -245,6 +245,7 @@ fn apply_projection(x: &[f32], w: &[f32], out: &mut [f32]) {
 
 // ── FUNCATTN variant ─────────────────────────────────────────────────────
 
+#[allow(clippy::too_many_arguments)] // test helper: fixed FUNCATTN I/O shape
 fn funcattn_forward_mse(
     x: &[f32],
     y: &[f32],
@@ -268,6 +269,7 @@ fn funcattn_forward_mse(
     mse(out, y)
 }
 
+#[allow(clippy::too_many_arguments)] // test helper: fixed FUNCATTN I/O shape
 fn funcattn_forward_rel_l2(
     x: &[f32],
     y: &[f32],
@@ -291,6 +293,7 @@ fn funcattn_forward_rel_l2(
     relative_l2(out, y)
 }
 
+#[allow(clippy::too_many_arguments)] // test helper: fixed FUNCATTN I/O shape
 fn funcattn_fd_sgd_step(
     x: &[f32],
     y: &[f32],
@@ -850,8 +853,8 @@ fn g2_funcattn_vs_parallax_vs_sdpa() {
     let strict_pass =
         fa_vs_sd.is_finite() && fa_vs_sd <= 0.1 && fa_vs_px.is_finite() && fa_vs_px <= 0.5;
     let competitive_pass = fa_finite
-        && ((sd_finite && fa_mse <= sd_mse) || !sd_finite)
-        && ((px_finite && fa_mse <= px_mse) || !px_finite);
+        && (!sd_finite || fa_mse <= sd_mse)
+        && (!px_finite || fa_mse <= px_mse);
     if strict_pass {
         eprintln!("  → G2 STRICT PASS — promote candidate per Plan 286 T4.2.");
     } else if competitive_pass {

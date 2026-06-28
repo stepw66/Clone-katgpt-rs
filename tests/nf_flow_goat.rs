@@ -703,8 +703,8 @@ fn test_bench_flow_score_vs_max_prob_selection() {
             // Redistribute remaining mass: one token gets most, rest get tiny
             let remaining = 1.0 - 1.0 / v as f32;
             dist[1] = remaining * 0.99;
-            for j in 2..v {
-                dist[j] = remaining * 0.01 / (v - 2) as f32;
+            for slot in &mut dist[2..] {
+                *slot = remaining * 0.01 / (v - 2) as f32;
             }
             marginals_y.push(dist);
         }

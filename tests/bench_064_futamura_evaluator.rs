@@ -124,14 +124,7 @@ mod tests {
         // Create a token prefix from the program
         let _prefix: Vec<String> = program
             .iter()
-            .enumerate()
-            .map(|(i, inst)| {
-                if i == 0 {
-                    format!("inst_{}", inst.opcode as usize)
-                } else {
-                    format!("inst_{}", inst.opcode as usize)
-                }
-            })
+            .map(|inst| format!("inst_{}", inst.opcode as usize))
             .collect();
 
         // For the evaluator, we need the proper prefix format

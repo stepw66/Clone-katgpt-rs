@@ -289,7 +289,7 @@ fn t1_12_splat_msa_rescue_at_50pct_density() {
 
     // ── Assertions ───────────────────────────────────────────────────
     // The benchmark must run (sanity).
-    assert!(splat_recall >= 0.0 && splat_recall <= 1.0 + 1e-6);
+    assert!((0.0..=1.0 + 1e-6).contains(&splat_recall));
 
     // Gate 1: SPLAT recall ≥ 0.90.
     assert!(

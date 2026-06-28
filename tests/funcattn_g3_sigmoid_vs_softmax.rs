@@ -182,6 +182,7 @@ fn relative_l2(out: &[f32], y: &[f32]) -> f32 {
 ///
 /// MSE has a cleaner gradient than relative-L2 (no singularity as out→y),
 /// so we train on MSE and report relative-L2 only for the final verdict.
+#[allow(clippy::too_many_arguments)] // test helper: fixed FUNCATTN I/O shape
 fn forward_mse(
     x_basis: &[f32],
     x_value: &[f32],
@@ -213,6 +214,7 @@ fn forward_mse(
 }
 
 /// Forward-only relative-L2 (for the final verdict, not for training).
+#[allow(clippy::too_many_arguments)] // test helper: fixed FUNCATTN I/O shape
 fn forward_rel_l2(
     x_basis: &[f32],
     x_value: &[f32],
@@ -246,6 +248,7 @@ fn forward_rel_l2(
 /// after its gradient is computed, so subsequent gradient evaluations in the
 /// same step use partially-updated weights. For LR=0.05 and FD_EPS=1e-3, the
 /// distortion is well below FD noise — equivalent to Jacobi for our purposes.
+#[allow(clippy::too_many_arguments)] // test helper: fixed FUNCATTN I/O shape
 fn fd_sgd_step(
     x_basis: &[f32],
     x_value: &[f32],
@@ -323,6 +326,7 @@ fn fd_sgd_step(
 }
 
 /// Train one variant for `STEPS` steps. Returns (final MSE, final rel-L2).
+#[allow(clippy::too_many_arguments)] // test helper: fixed FUNCATTN I/O shape
 fn train_variant(
     x_basis: &[f32],
     x_value: &[f32],

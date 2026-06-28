@@ -61,9 +61,7 @@ fn make_mixed_content(total: usize) -> (Vec<u32>, Vec<(usize, &'static str)>) {
 
     // Repetitive block
     let start = tokens.len();
-    for _ in 0..n_repetitive {
-        tokens.push(5u32);
-    }
+    tokens.extend(std::iter::repeat_n(5u32, n_repetitive));
     labels.push((start, "repetitive"));
 
     // Medium-diversity block: small range of values
@@ -253,7 +251,7 @@ fn bench_adaptive_compression_ratio_distribution() {
     let window_size = config.window_size;
 
     let buf = LatentContextBuffer::new_adaptive(&tokens, config, slod.clone());
-    let ctx = buf.context();
+    let _ctx = buf.context();
 
     println!();
     println!("╔══════════════════════════════════════════════════════════════════╗");

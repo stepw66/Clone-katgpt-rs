@@ -155,7 +155,7 @@ mod tests {
                 tokenizer
                     .id_to_vocab
                     .get(id)
-                    .is_some_and(|v| v.as_bytes().len() == 1)
+                    .is_some_and(|v| v.len() == 1)
             })
             .count()
     }

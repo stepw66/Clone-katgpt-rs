@@ -142,7 +142,7 @@ const ALPHA: f32 = 0.5;
 const TEMPERATURE: f32 = 0.1;
 /// Fixed reproducible seed (literal kept short on purpose so it's easy to
 /// grep for). Same seed across debug/release so the G6 verdict is stable.
-const SEED_U64: u64 = 0xC0FFEE_42AA_u64;
+const SEED_U64: u64 = 0x00C0_FFEE_42AA_u64;
 
 // ── Deterministic xorshift64* PRNG (mirrors G2/G3 tests) ─────────────────
 
@@ -301,8 +301,8 @@ fn softmax_rows_v(logits: &[f32], probs: &mut [f32]) {
             sum += e;
         }
         let inv = 1.0 / sum.max(1e-20);
-        for v in 0..V {
-            out_row[v] *= inv;
+        for o in out_row {
+            *o *= inv;
         }
     }
 }
@@ -472,9 +472,9 @@ impl FuncattnPredictor {
         let row = &self.probs[masked_pos * V..(masked_pos + 1) * V];
         let mut best = 0usize;
         let mut best_p = row[0];
-        for v in 1..V {
-            if row[v] > best_p {
-                best_p = row[v];
+        for (v, &p) in row.iter().enumerate().skip(1) {
+            if p > best_p {
+                best_p = p;
                 best = v;
             }
         }
@@ -656,9 +656,9 @@ impl SdpaPredictor {
         let row = &self.probs[masked_pos * V..(masked_pos + 1) * V];
         let mut best = 0usize;
         let mut best_p = row[0];
-        for v in 1..V {
-            if row[v] > best_p {
-                best_p = row[v];
+        for (v, &p) in row.iter().enumerate().skip(1) {
+            if p > best_p {
+                best_p = p;
                 best = v;
             }
         }
