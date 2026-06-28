@@ -453,8 +453,8 @@ fn rms_norm(x: &[f32], dim: usize, eps: f32) -> Vec<f32> {
                 + row[base + 2] * row[base + 2]
                 + row[base + 3] * row[base + 3];
         }
-        for j in (chunks * 4)..(chunks * 4 + remainder) {
-            sum_sq += row[j] * row[j];
+        for &v in &row[chunks * 4..chunks * 4 + remainder] {
+            sum_sq += v * v;
         }
 
         let mean_sq = sum_sq / dim as f32;

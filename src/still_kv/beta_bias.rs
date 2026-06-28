@@ -214,6 +214,8 @@ impl AttentionDistribution {
 
         // Per-latent mass: sum of attention weights across original tokens
         let mut per_latent_mass = vec![0.0f32; compact_len];
+        // stride math: `i` drives both `per_latent_mass[i]` write and `row_start = i * original_len`
+        #[allow(clippy::needless_range_loop)]
         for i in 0..compact_len {
             let row_start = i * original_len;
             let row_end = row_start + original_len;

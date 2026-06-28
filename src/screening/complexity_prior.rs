@@ -216,6 +216,14 @@ impl Lz4Complexity {
 }
 
 #[cfg(feature = "lz4_proxy")]
+impl Default for Lz4Complexity {
+    #[inline]
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(feature = "lz4_proxy")]
 impl ComplexityProxy for Lz4Complexity {
     #[inline]
     fn k_tilde(&self, _candidate: &[u8]) -> f32 {
@@ -242,6 +250,14 @@ impl Blake3CanonicalLengthComplexity {
     #[must_use]
     pub const fn new() -> Self {
         Self
+    }
+}
+
+#[cfg(feature = "blake3_proxy")]
+impl Default for Blake3CanonicalLengthComplexity {
+    #[inline]
+    fn default() -> Self {
+        Self::new()
     }
 }
 

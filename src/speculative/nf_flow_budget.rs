@@ -45,8 +45,8 @@ pub fn normalize_budget(raw: &[f32], total: usize) -> Vec<usize> {
         let each = total / raw.len();
         let mut out = vec![each; raw.len()];
         let rem = total - each * raw.len();
-        for i in 0..rem {
-            out[i] += 1;
+        for slot in out.iter_mut().take(rem) {
+            *slot += 1;
         }
         return out;
     }

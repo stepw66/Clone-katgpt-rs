@@ -116,6 +116,8 @@ pub fn dflash_predict_ar_with(
 /// After base logits are computed, applies DominoAdapter correction ΔL.
 /// GRU state is maintained across positions in the draft block.
 #[cfg(feature = "domino_lora")]
+// hot-path leaf: drafter carries 8 tightly-coupled state refs
+#[allow(clippy::too_many_arguments)]
 pub fn dflash_predict_ar_with_domino(
     sctx: &mut SpeculativeContext,
     draft_weights: &TransformerWeights,
@@ -245,6 +247,8 @@ pub fn dflash_predict_conditioned_with(
 ///
 /// When `routing_config` is `None`, delegates to `dflash_predict_conditioned_with`.
 #[cfg(feature = "dflare_kv_routing")]
+// hot-path leaf: 9 drafter args (state + routing/relevance knobs)
+#[allow(clippy::too_many_arguments)]
 pub fn dflash_predict_conditioned_with_routing(
     sctx: &mut SpeculativeContext,
     draft_weights: &TransformerWeights,
@@ -294,6 +298,8 @@ pub fn dflash_predict_conditioned_with_routing(
                 layer.value[target_dim..draft_kv_dim].fill(0.0);
             } else {
                 // Scale seeding by blend factor
+                // multi-array write: key[i] and value[i] both seeded from target_hidden_state[i]
+                #[allow(clippy::needless_range_loop)]
                 for i in 0..target_dim {
                     layer.key[i] = blend * target_hidden_state[i];
                     layer.value[i] = blend * target_hidden_state[i];
@@ -487,6 +493,8 @@ pub fn dflash_predict_conditioned(
 /// # Feature flag
 /// `dflare_fusion` — Plan 174 Task 1c
 #[cfg(feature = "dflare_fusion")]
+// hot-path leaf: 8 drafter args (state + fusion config)
+#[allow(clippy::too_many_arguments)]
 pub fn dflash_predict_ar_with_fusion(
     sctx: &mut SpeculativeContext,
     draft_weights: &TransformerWeights,

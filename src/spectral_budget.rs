@@ -375,6 +375,8 @@ pub fn rank_p_retain(
     }
 
     // Compute row norms
+    // stride math: `i` drives both `row_norms_buf[i]` write and `row_start = i * cols`
+    #[allow(clippy::needless_range_loop)]
     for i in 0..rows {
         let row_start = i * cols;
         let row_end = row_start + cols;

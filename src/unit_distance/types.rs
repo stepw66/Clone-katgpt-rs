@@ -271,8 +271,7 @@ pub fn count_unit_distances(points: &[C64], eps: f64) -> u64 {
         let pi = points[i];
         let pi_re = pi.re;
         let pi_im = pi.im;
-        for j in (i + 1)..points.len() {
-            let pj = points[j];
+        for &pj in &points[i + 1..] {
             let dr = pi_re - pj.re;
             let di = pi_im - pj.im;
             let d_sq = dr * dr + di * di;

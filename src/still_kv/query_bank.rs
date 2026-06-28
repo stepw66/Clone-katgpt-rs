@@ -156,7 +156,7 @@ impl QueryBank for ClusterQueryBank {
         for _ in 0..max_iters {
             // Assign each point to nearest centroid (borrowed slices, no alloc)
             let mut changed = false;
-            for t in 0..seq_len {
+            for (t, slot) in assignments.iter_mut().enumerate() {
                 let point = token_slice(kv_cache, t, kv_dim);
                 let (best_idx, _) = centroids
                     .iter()
@@ -166,9 +166,9 @@ impl QueryBank for ClusterQueryBank {
                         (0, f32::INFINITY),
                         |acc, (i, d)| if d < acc.1 { (i, d) } else { acc },
                     );
-                if assignments[t] != best_idx {
+                if *slot != best_idx {
                     changed = true;
-                    assignments[t] = best_idx;
+                    *slot = best_idx;
                 }
             }
 
@@ -179,8 +179,7 @@ impl QueryBank for ClusterQueryBank {
             // Update centroids as mean of assigned points
             sums.fill(0.0);
             counts.fill(0);
-            for t in 0..seq_len {
-                let c = assignments[t];
+            for (t, &c) in assignments.iter().enumerate() {
                 let point = token_slice(kv_cache, t, kv_dim);
                 let sum_row = &mut sums[c * self.latent_dim..(c + 1) * self.latent_dim];
                 for (s, p) in sum_row.iter_mut().zip(point.iter()) {

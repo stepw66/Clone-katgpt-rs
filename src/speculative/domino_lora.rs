@@ -97,6 +97,8 @@ impl DominoGRU {
 
         // Reset gate: z = σ(Wz·[x,h] + bz)
         matmul(&mut gate_buf[..hs], &self.wz, concat_buf, hs, concat_dim);
+        // multi-array: gate_buf[i] read+write paired with bz[i]
+        #[allow(clippy::needless_range_loop)]
         for i in 0..hs {
             gate_buf[i] = sigmoid(gate_buf[i] + self.bz[i]);
         }
@@ -104,6 +106,8 @@ impl DominoGRU {
 
         // Update gate: r = σ(Wr·[x,h] + br)
         matmul(&mut h_out[..hs], &self.wr, concat_buf, hs, concat_dim);
+        // multi-array: h_out[i] read+write paired with br[i]
+        #[allow(clippy::needless_range_loop)]
         for i in 0..hs {
             h_out[i] = sigmoid(h_out[i] + self.br[i]);
         }
@@ -115,6 +119,8 @@ impl DominoGRU {
 
         // New gate: n = tanh(Wn·[x, r⊙h] + bn)
         matmul(&mut h_out[..hs], &self.wn, concat_buf, hs, concat_dim);
+        // multi-array: h_out[i] read+write paired with bn[i]
+        #[allow(clippy::needless_range_loop)]
         for i in 0..hs {
             h_out[i] = (h_out[i] + self.bn[i]).tanh();
         }

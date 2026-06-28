@@ -106,7 +106,7 @@ fn predict_anchors(
     let mut cur_token = seed_token;
     let mut ar_logits_buf = vec![0.0f32; vocab];
 
-    for pos_in_block in 0..block_size {
+    for (pos_in_block, slot) in token_buf.iter_mut().enumerate().take(block_size) {
         let global_pos = start_pos + pos_in_block;
 
         // Forward pass at this position
@@ -119,7 +119,7 @@ fn predict_anchors(
 
         // Anchor: store at stride positions (stride-1, 2*stride-1, ...)
         if (pos_in_block + 1) % stride == 0 {
-            token_buf[pos_in_block] = next_token;
+            *slot = next_token;
             n_anchors += 1;
         }
 
@@ -237,11 +237,11 @@ fn fill_with_anchors(
             let threshold = rng.uniform() * sum_exp;
             let mut best_token = mask;
             let mut cum = 0.0f32;
-            for t in 0..vocab {
+            for (t, &exp_val) in exp_scratch.iter().enumerate().take(vocab) {
                 if t == mask || !pruner.is_valid(depth, t, parent_tokens) {
                     continue;
                 }
-                cum += exp_scratch[t];
+                cum += exp_val;
                 if cum >= threshold && best_token == mask {
                     best_token = t;
                     // Keep iterating to preserve the original loop semantics

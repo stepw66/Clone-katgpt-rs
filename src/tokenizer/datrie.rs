@@ -238,8 +238,8 @@ impl Datrie {
         let mut state: usize = 0;
         let mut best: Option<(u32, usize)> = None;
 
-        for i in start..input.len() {
-            let child = (self.base[state] as usize).wrapping_add(input[i] as usize);
+        for (i, &byte) in input.iter().enumerate().skip(start) {
+            let child = (self.base[state] as usize).wrapping_add(byte as usize);
             if child >= self.check.len() || self.check[child] != state as u32 {
                 break;
             }

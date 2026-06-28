@@ -87,7 +87,7 @@ impl SscDrafter {
     /// Create a new drafter. `k` is capped at 8 per paper findings.
     pub fn new(k: usize) -> Self {
         Self {
-            k: k.min(8).max(1),
+            k: k.clamp(1, 8),
             context_summaries: Vec::new(),
         }
     }

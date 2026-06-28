@@ -103,7 +103,7 @@ impl ShardKVCache {
 
         let mut layers: Vec<ShardLayer> = k_calibrations
             .iter()
-            
+
             .map(|k_cal| {
                 let d_eff = (k_cal.k_d_eff.ceil() as usize).max(1).min(head_dim);
 
@@ -680,6 +680,8 @@ impl ShardKVCache {
             let gs = cb.group_size;
             let indices = &self.val_indices[layer][pos];
             let n_groups = indices.len().min(self.kv_dim / gs);
+            // stride math: `g` drives both `indices[g]` and `base = g * gs`
+            #[allow(clippy::needless_range_loop)]
             for g in 0..n_groups {
                 let idx = indices[g] as usize;
                 let base = g * gs;

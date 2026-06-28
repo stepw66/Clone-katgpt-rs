@@ -166,6 +166,8 @@ pub fn vocab_project(
     // Inner iterator chain (zip+map+sum) prevented vectorization. This is the
     // inner loop of ROTATE decomposition: called 2× per coordinate per iteration
     // × 20 iterations × 3 coords = 120 times per channel discovery.
+    // stride math: `t` drives both `logits[t]` write and `base = t * n_embd`
+    #[allow(clippy::needless_range_loop)]
     for t in 0..vocab_size {
         let base = t * n_embd;
         let mut sum = 0.0f32;
@@ -226,8 +228,7 @@ fn topk_indices(values: &[f32], k: usize) -> Vec<usize> {
     let mut top: Vec<(usize, f32)> = (0..k).map(|i| (i, values[i])).collect();
     top.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
-    for i in k..values.len() {
-        let val = values[i];
+    for (i, &val) in values.iter().enumerate().skip(k) {
         if val > top.last().map(|&(_, v)| v).unwrap_or(f32::NEG_INFINITY) {
             // Find insertion point
             let pos = top.partition_point(|&(_, v)| v > val);

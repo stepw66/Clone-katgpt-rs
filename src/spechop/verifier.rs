@@ -296,6 +296,12 @@ fn tokenize_set<'a>(text: &'a str, scratch: &mut HashSet<&'a str>) {
 }
 
 /// Compute token-set Jaccard similarity using thread-local scratch buffers.
+///
+/// NOTE: the `as *mut HashSet<&str>` cast below looks redundant to clippy
+/// (`unnecessary_cast`) but is load-bearing: `HashSet<T>` is invariant in `T`,
+/// so without the explicit pointer-type cast the borrow checker refuses to
+/// view `HashSet<&'static str>` as `HashSet<&str>`. See the SAFETY comment.
+#[allow(clippy::unnecessary_cast)]
 fn token_set_jaccard_scratch(target: &str, spec: &str) -> f64 {
     TOKEN_SET_A.with(|sa| {
         TOKEN_SET_B.with(|sb| {
