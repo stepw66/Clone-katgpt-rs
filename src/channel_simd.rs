@@ -110,8 +110,8 @@ impl AlignedWeightMatrix {
     /// Batch matvec with pre-allocated output buffer (zero-alloc on repeated calls).
     pub fn matvec_into(&self, x: &[f32], out: &mut [f32]) {
         debug_assert_eq!(out.len(), self.num_rows, "output length mismatch");
-        for i in 0..self.num_rows {
-            out[i] = self.dot_row(x, i);
+        for (i, o) in out.iter_mut().enumerate() {
+            *o = self.dot_row(x, i);
         }
     }
 

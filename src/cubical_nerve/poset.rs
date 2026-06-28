@@ -69,6 +69,7 @@ impl ZonePoset {
     ///
     /// Internally computes the transitive closure of the order relation
     /// so that `leq` and `meet` are O(1) / O(n) respectively.
+    #[allow(clippy::needless_range_loop)] // stride math: Warshall needs leq_matrix[i][j]/[k][j]/[i][k]
     pub fn from_edges(zones: Vec<ZoneId>, order_pairs: Vec<(ZoneId, ZoneId)>) -> Self {
         let n = zones.len();
 
@@ -85,8 +86,8 @@ impl ZonePoset {
         let mut leq_matrix = vec![vec![false; n]; n];
 
         // Reflexive closure: every element is ≤ itself
-        for i in 0..n {
-            leq_matrix[i][i] = true;
+        for (i, row) in leq_matrix.iter_mut().enumerate() {
+            row[i] = true;
         }
 
         // Add explicit order pairs

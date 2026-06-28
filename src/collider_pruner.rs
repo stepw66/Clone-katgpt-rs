@@ -440,11 +440,9 @@ impl InterleavedTaskBenchmark {
             let mut h = vec![0.0_f32; d_hidden];
             let task = (pos - 1) % n_tasks;
             let sub = d_hidden / n_tasks.max(1);
-            for j in task * sub..(task + 1) * sub {
-                if j < d_hidden {
-                    h[j] = 1.0;
-                }
-            }
+            let start = task * sub;
+            let end = ((task + 1) * sub).min(d_hidden);
+            h[start..end].fill(1.0);
             boundary_hidden.push(h);
             pos += seg_len;
         }

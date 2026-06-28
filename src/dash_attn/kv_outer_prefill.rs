@@ -155,6 +155,7 @@ impl KvOuterPrefill {
     /// * `n_queries` — number of query tokens
     /// * `n_blocks` — number of KV blocks
     /// * `top_k` — blocks per query to select
+    #[allow(clippy::needless_range_loop)] // stride math: t indexes scores[t] AND t*hd offset into block_vals
     pub fn prefill_sparse(
         &self,
         queries: &[f32],
@@ -290,6 +291,7 @@ impl KvOuterPrefill {
 ///
 /// Uses `simd_dot_f32` (NEON/AVX2) for the per-token dot product.
 #[inline]
+#[allow(clippy::needless_range_loop)] // stride math: t indexes scores[t] AND t*head_dim offset into block_keys
 fn compute_scores(
     query: &[f32],
     block_keys: &[f32],

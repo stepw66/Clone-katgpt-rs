@@ -758,7 +758,7 @@ pub fn classify_transitions(
 ///
 /// - UnchangedVisible → `cfg.gamma_visible`
 /// - StillMasked       → `cfg.gamma_masked_min + (cfg.gamma_masked_max − cfg.gamma_masked_min) * v_t`
-///                       where `v_t = visible_fraction_t` ∈ [0, 1]
+///   where `v_t = visible_fraction_t` ∈ [0, 1]
 /// - NewlyRevealed     → `cfg.gamma_newly_revealed`
 ///
 /// `visible_fraction_t` = fraction of positions visible (committed) in `z_t_tokens`.

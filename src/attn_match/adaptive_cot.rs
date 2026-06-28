@@ -184,6 +184,7 @@ impl AdaptiveTraceCompactor {
     /// On a successful compaction, `compacts_done` is incremented and the
     /// bandit's last-selected arm is updated with the trace's eventual reward
     /// via [`update_reward`].
+    #[allow(clippy::too_many_arguments)] // hot-path: lane buffers bundled for zero-alloc inference
     pub fn maybe_compact_adaptive(
         &mut self,
         kv_keys: &[f32],

@@ -472,6 +472,7 @@ impl SyntheticScm {
         Self::generate_inner(n_steps, d, n_tasks, rho, 0.0, seed, block_size, true)
     }
 
+    #[allow(clippy::too_many_arguments)] // hot-path: lane buffers bundled for zero-alloc inference
     fn generate_inner(
         n_steps: usize,
         d: usize,

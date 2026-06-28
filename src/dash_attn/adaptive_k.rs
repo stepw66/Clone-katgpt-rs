@@ -105,8 +105,8 @@ pub fn compute_adaptive_k(scores: &[f32], n_blocks: usize, config: &AdaptiveKCon
     }
     let mut mean = (m0 + m1 + m2 + m3) * inv;
     let rem = effective_n % 4;
-    for i in (effective_n - rem)..effective_n {
-        mean += scores[i] * inv;
+    for &s in scores[effective_n - rem..effective_n].iter() {
+        mean += s * inv;
     }
 
     let mut v0 = 0.0f32;
@@ -125,8 +125,8 @@ pub fn compute_adaptive_k(scores: &[f32], n_blocks: usize, config: &AdaptiveKCon
         v3 += d3 * d3;
     }
     let mut variance = (v0 + v1 + v2 + v3) * inv;
-    for i in (effective_n - rem)..effective_n {
-        let d = scores[i] - mean;
+    for &s in scores[effective_n - rem..effective_n].iter() {
+        let d = s - mean;
         variance += d * d * inv;
     }
 

@@ -55,9 +55,9 @@ impl<'a> SummedAreaTable<'a> {
 
         // Row 0: running prefix sum (no upper row).
         let mut row_sum = 0.0f32;
-        for j in 0..n {
-            row_sum += data[j];
-            data[j] = row_sum;
+        for d in data[..n].iter_mut() {
+            row_sum += *d;
+            *d = row_sum;
         }
 
         // Rows 1..n: column 0 special-cased (no left neighbor),
@@ -94,9 +94,9 @@ impl<'a> SummedAreaTable<'a> {
 
         // Row 0: running prefix sum (no upper row).
         let mut row_sum = 0.0f32;
-        for j in 0..n {
-            row_sum += attention[0][j];
-            attention[0][j] = row_sum;
+        for d in attention[0].iter_mut() {
+            row_sum += *d;
+            *d = row_sum;
         }
 
         // Rows 1..n: column 0 special-cased (no left neighbor),

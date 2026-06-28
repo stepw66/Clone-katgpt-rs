@@ -300,8 +300,7 @@ where
 
     for i in 0..n_edges {
         let (a, b) = edges[i];
-        for j in (i + 1)..n_edges {
-            let (c, d) = edges[j];
+        for &(c, d) in &edges[i + 1..n_edges] {
 
             // All four corners must be distinct.
             if a == c || a == d || b == c || b == d {

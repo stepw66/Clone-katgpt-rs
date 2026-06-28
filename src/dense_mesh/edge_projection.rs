@@ -37,6 +37,7 @@ impl ProjectionEdge {
 
     /// Apply projection to one row of `input` (length `in_dim`).
     #[inline]
+    #[allow(clippy::needless_range_loop)] // stride math: o indexes out[o] AND o*self.in_dim offset into matrix
     fn project_row(&self, input_row: &[f32], out: &mut [f32]) {
         debug_assert_eq!(input_row.len(), self.in_dim);
         debug_assert_eq!(out.len(), self.out_dim);

@@ -73,6 +73,7 @@ impl LoraEdge {
     ///
     /// `rank_buf` is a caller-provided scratch of length `rank`.
     #[inline]
+    #[allow(clippy::needless_range_loop)] // stride math: r indexes rank_buf[r] AND r*self.in_dim offset into lora_a
     fn lora_row(&self, input_row: &[f32], out: &mut [f32], effective_scale: f32, rank_buf: &mut [f32]) {
         debug_assert_eq!(rank_buf.len(), self.rank);
         // rank_buf = A @ input  (rank-length)

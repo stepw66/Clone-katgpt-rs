@@ -299,14 +299,14 @@ fn partial_correlation(x: &[f32], y: &[f32], z_columns: &[&[f32]], n: usize) -> 
         for prev in 0..basis_cols {
             let mut dot = 0.0f32;
             let mut norm = 0.0f32;
-            for i in 0..n {
-                dot += basis[i][basis_cols] * basis[i][prev];
-                norm += basis[i][prev] * basis[i][prev];
+            for row in basis.iter() {
+                dot += row[basis_cols] * row[prev];
+                norm += row[prev] * row[prev];
             }
             if norm > 1e-12 {
                 let coef = dot / norm;
-                for i in 0..n {
-                    basis[i][basis_cols] -= coef * basis[i][prev];
+                for row in basis.iter_mut() {
+                    row[basis_cols] -= coef * row[prev];
                 }
             }
         }
@@ -325,6 +325,7 @@ fn partial_correlation(x: &[f32], y: &[f32], z_columns: &[&[f32]], n: usize) -> 
 
 /// Subtract from `v` its projection onto the `cols` columns of `basis`.
 /// `basis[i][j]` for `i in 0..n, j in 0..cols`.
+#[allow(clippy::needless_range_loop)] // stride math: j indexes the 2nd dim of `basis[i][j]`
 fn project_out(v: &mut [f32], basis: &[[f32; 8]], cols: usize, n: usize) {
     for j in 0..cols {
         let mut dot = 0.0f32;

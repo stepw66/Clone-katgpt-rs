@@ -183,6 +183,7 @@ impl LayerwiseTopology {
     ///
     /// Reuses the caller-provided `scratch` for aggregation/edge output —
     /// plasma-tier zero-alloc in the steady state.
+    #[allow(clippy::needless_range_loop)] // stride math: i indexes current[i] AND i*width_next+j offset into edges_l
     fn forward_layer_sequential(
         &self,
         l: usize,
@@ -242,6 +243,7 @@ impl LayerwiseTopology {
     ///
     /// `_input` is unused; edges route from `current`. Kept in the signature
     /// for symmetry with [`Self::forward_layer_sequential`] and future routing.
+    #[allow(clippy::needless_range_loop)] // stride math: i indexes current[i] AND i*width_next+j offset into edges_l
     fn forward_layer_parallel(
         &self,
         l: usize,
@@ -335,6 +337,7 @@ impl LayerwiseTopology {
     /// trait exposes only `forward_dense` — the shared `TransformerNode`'s
     /// `weights` / `ctx_pool` / `cache_pool` are private. That fusion is
     /// documented in issue 020 as a DenseNode trait extension follow-up.
+    #[allow(clippy::needless_range_loop)] // stride math: i indexes current[i] AND i*width_next+j offset into edges_l
     fn forward_layer_parallel_pooled(
         &self,
         l: usize,
