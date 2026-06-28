@@ -638,9 +638,9 @@ fn unfold_into(x: &[f32], shape: &[usize], mode: usize, out: &mut [f32]) {
     let mut col = 0usize;
 
     out[0] = x[0];
-    for flat in 1..total {
+    for &x_val in x.iter().skip(1) {
         advance_multi(&mut multi, shape, &mut row, &mut col, &row_delta, &col_delta);
-        out[row * m + col] = x[flat];
+        out[row * m + col] = x_val;
     }
 }
 
@@ -665,9 +665,9 @@ fn fold_into(mat: &[f32], shape: &[usize], mode: usize, out: &mut [f32]) {
     let mut col = 0usize;
 
     out[0] = mat[0];
-    for flat in 1..total {
+    for out_slot in out.iter_mut().skip(1) {
         advance_multi(&mut multi, shape, &mut row, &mut col, &row_delta, &col_delta);
-        out[flat] = mat[row * m + col];
+        *out_slot = mat[row * m + col];
     }
 }
 
