@@ -86,7 +86,7 @@ In the combined scenario (event spike + RMT pump), the cheapest item (item 0, ba
 
 ## Wrapper orthogonality (T3.3 decision)
 
-**The `riir-neuron-db::ShardCompactor::compact_tucker` integration wrapper is orthogonal to Plan 328.** Both consumers import `katgpt_core::linalg::tucker` **directly** — neither touches the riir-neuron-db wrapper. Plan 328's two consumers validate the **primitive** (already default-on in katgpt-core, never in question), but they do NOT resolve the open question about the **wrapper** (which has its own adoption criteria and soak window in [`riir-neuron-db/issues/002`](../../riir-neuron-db/issues/002_compact_tucker_consumer_adoption_or_removal.md)).
+**The `riir-neuron-db::ShardCompactor::compact_tucker` integration wrapper is orthogonal to Plan 328.** Both consumers import `katgpt_core::linalg::tucker` **directly** — neither touches the riir-neuron-db wrapper. Plan 328's two consumers validate the **primitive** (already default-on in katgpt-core, never in question), but they do NOT resolve the open question about the **wrapper** (which has its own adoption criteria and soak window in [`riir-neuron-db/.issues/002`](../../riir-neuron-db/.issues/002_compact_tucker_consumer_adoption_or_removal.md)).
 
 Issue 002's adoption criteria are "Cold-tier replay/audit" or "Cross-zone batch transfer" — neither of which Plan 328's analytics consumers touch. Issue 002 continues under its existing 30-day soak window (re-evaluate 2026-07-25), unchanged.
 
@@ -105,7 +105,7 @@ This satisfies the modelless-first mandate of `katgpt-rs`. Neither consumer has 
 - **Plan 328:** `.plans/328_tucker_consumer_applications.md`
 - **Consumer 1 source:** `riir-chain/src/consensus/collusion_tucker.rs`
 - **Consumer 2 source:** `seal-online-remaster/crates/seal-gm-tools/src/analytics/rmt_tucker.rs`
-- **Wrapper decision:** `riir-neuron-db/issues/002_compact_tucker_consumer_adoption_or_removal.md`
+- **Wrapper decision:** `riir-neuron-db/.issues/002_compact_tucker_consumer_adoption_or_removal.md`
 
 ## TL;DR
 
