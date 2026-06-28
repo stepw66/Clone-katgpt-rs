@@ -47,19 +47,21 @@ Ship the `(max, +)` tropical semiring as a modelless inference primitive: `tropi
   2. **HLA pairs** (8-dim, 64 random NPC pairs) — compare `extract_functor` coherence (mean-cosine) vs tropical coherence (`max_k cos(target_k − source_k, f)`). Metric: rank correlation (Spearman) between the two coherence orderings. **PASS threshold: Spearman < 0.85** (else redundant). Stretch: < 0.7.
   3. **Path bottleneck vs path total** (DEC rank-1 cochain, 10 random paths on a 16×16 grid) — `tropical_line_integral` (bottleneck) vs `line_integral` (sum, from Plan 314). Metric: rank correlation of the 10 paths by each metric. **PASS threshold: Spearman < 0.85.** Stretch: < 0.7.
 - [x] **T2.4** Run the bench. Record results in `.benchmarks/337_tropical_goat.md` (create folder if needed) with the **honest** outcome — PASS, FAIL, or partial.
-- [ ] **T2.5** **Decision point (this task closes Phase 2):**
+- [x] **T2.5** **Decision point (this task closes Phase 2):**
   - **If ≥2 of 3 substrates PASS** → tropical signal is non-redundant. Proceed to Phase 3 (promote toward default), amend Research 321 to Super-GOAT, create riir-ai guide.
   - **If 1 of 3 PASS** → marginal. Keep opt-in, document the partial result, defer promotion pending a stronger substrate.
   - **If 0 of 3 PASS** → tropical is redundant with linear on our substrate. Keep `tropical_algebra` as opt-in curiosity, mark Research 321 §3 as "GOAT FAILED, demoted to opt-in", document in `.docs/20_negative_results.md`. Do NOT promote.
+
+  **RESOLVED 2026-06-28: 3/3 PASS → proceeded to Phase 3.** All Phase 3 tasks executed; `tropical_algebra` promoted to default-on after G2 unblock (NEON specialization).
 
 ## Phase 3 — Promotion (only if Phase 2 PASS ≥2/3)
 
 ### Tasks
 
-- [ ] **T3.1** Promote `tropical_algebra` to default-on in `katgpt-core/Cargo.toml` (flip `tropical_algebra = []` → remove from opt-in list, add to default). Run `cargo check --all-features` + `cargo check --no-default-features` (the CI guard).
+- [x] **T3.1** Promote `tropical_algebra` to default-on in `katgpt-core/Cargo.toml` (flip `tropical_algebra = []` → remove from opt-in list, add to default). Run `cargo check --all-features` + `cargo check --no-default-features` (the CI guard). **DONE 2026-06-28: both checks clean, 9/9 tests pass with default features.**
 - [ ] **T3.2** Amend Research 321 §3 verdict to **Super-GOAT** with the gate result. Create the mandatory riir-ai guide `riir-ai/.research/164_Tropical_Game_Map_Worst_Case_Threat_Guide.md` (next free riir-ai number after 163) covering: TL;DR (selling point = "NPCs compute worst-case survival paths via tropical line integrals, complementing the expected-engagement sum-path"), distilled primitive, connection map (DEC × HLA × game maps), latent-vs-raw boundary (tropical cochain fields stay local; only the bottleneck-edge scalar crosses sync), validation protocol (G1–G3), implementation priority P0–P3.
-- [ ] **T3.3** Bench: tropical matvec vs `simd_matvec` at D=8/64/128. Expect tropical to be FASTER (no FMA dependency chain — `max` is a single-cycle op on most SIMD ISAs). Record in `.benchmarks/337_tropical_goat.md`.
-- [ ] **T3.4** SIMD specialization: `tropical_matvec_into` with explicit NEON/AVX2 paths via `std::arch::aarch64::*` / `std::arch::x86_64::*` gated by `target_feature`. Mirror `simd.rs` SIMD-level pattern.
+- [x] **T3.3** Bench: tropical matvec vs `simd_matvec` at D=8/64/128. Expect tropical to be FASTER (no FMA dependency chain — `max` is a single-cycle op on most SIMD ISAs). Record in `.benchmarks/337_tropical_goat.md`. **DONE 2026-06-28: hypothesis was WRONG.** Auto-vec baseline was 4-9× slower (single-acc max chain is latency-bound — the exact anti-pattern `simd_dot_f32`'s comment warns about). After NEON specialization (T3.4): D=64 0.96×, D=128 1.03× (PASS at gate dims). D=8 0.82× (caveat — not a production use case). Full table + honest analysis in `.benchmarks/337_tropical_goat.md`.
+- [x] **T3.4** SIMD specialization: `tropical_matvec_into` with explicit NEON/AVX2 paths via `std::arch::aarch64::*` / `std::arch::x86_64::*` gated by `target_feature`. Mirror `simd.rs` SIMD-level pattern. **DONE 2026-06-28 (NEON only):** `neon_tropical_row_max_sum` with 4× `float32x4_t` accumulators (16 lanes), `vmaxq_f32` + `vaddq_f32`, `vmaxvq_f32` horizontal reduce. Scalar fallback uses 4 independent `f32` accumulators (same tree-reduce pattern). AVX2 path deferred (this dev machine is aarch64; x86 uses the 4-acc scalar fallback which is competitive).
 
 ## Phase 4 — Fusion hooks (only if Phase 2 PASS ≥1/3)
 
