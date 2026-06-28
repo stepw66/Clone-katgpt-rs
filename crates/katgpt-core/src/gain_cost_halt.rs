@@ -15,7 +15,6 @@
 //! Gain/cost signals are local latent (per-loop hidden-state deltas). The halt
 //! count L is a deterministic raw scalar safe to sync/replay.
 
-#![cfg(feature = "gain_cost_halt")]
 #![allow(clippy::float_cmp)] // float comparisons in tests against exact constants
 
 // ─────────────────────────────────────────────────────────────────────

@@ -123,7 +123,7 @@ pub trait Solver {
 /// - `absorb(arm, reward)` — incremental update, no allocation.
 /// - `priority(arm)`       — returns the current priority ∈ `[0, 1]`.
 /// - `priorities_mut()`    — exposes the priority table for collapse checks
-///                           and snapshotting.
+///   and snapshotting.
 pub trait HintDeltaBandit {
     /// Absorb a synthetic reward `(1 − solve_rate) · guide_score` for `arm`.
     fn absorb(&mut self, arm: usize, reward: f32);

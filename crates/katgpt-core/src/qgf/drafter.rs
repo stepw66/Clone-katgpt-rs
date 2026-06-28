@@ -209,6 +209,7 @@ where
     /// - `steepness` — transition sharpness (typical: `4.0` to `8.0`).
     #[cfg(feature = "qgf_adaptive")]
     #[inline]
+    #[allow(clippy::too_many_arguments)] // QGF adaptive-tilt hot path; all params consumed
     pub fn tilt_logits_adaptive(
         &self,
         condition: &G::Condition,

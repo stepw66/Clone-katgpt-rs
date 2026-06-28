@@ -315,6 +315,7 @@ impl BudgetCompiler {
     #[allow(unused_assignments)] // `remaining` is decremented by `admit!` on the
                                  // final successful admission; the value is not
                                  // read afterward because the loop is over.
+    #[allow(clippy::too_many_arguments)] // 17 lanes: branching compiler material/context API, bundling fragments generics
     pub fn compile<E, F, W, Q, S, O>(
         &self,
         materials: &RetrievedMaterials<E, F, W, Q, S>,

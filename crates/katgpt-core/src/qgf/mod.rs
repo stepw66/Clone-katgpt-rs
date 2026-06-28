@@ -44,8 +44,6 @@
 //! See `.research/236_QGF_Test_Time_Q_Guided_Flow.md` and
 //! `.plans/268_qgf_test_time_q_guided_flow.md`.
 
-#![cfg(feature = "qgf")]
-
 pub mod projector;
 
 pub use projector::{project_batch, project_one_step};

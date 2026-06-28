@@ -78,8 +78,8 @@ impl PriScores {
 ///    least one PTG of family `family_idx`.
 /// 3. **Per-PTG dedup via rolling tag.** A stack `[u32; PRIM_SPACE]` tag array
 ///    + a wrapping generation counter lets us dedupe primitives within one
-///    PTG without allocating (or clearing) a `HashSet` per PTG — touched
-///    entries are detected by `tag[i] == cur_gen`.
+///      PTG without allocating (or clearing) a `HashSet` per PTG — touched
+///      entries are detected by `tag[i] == cur_gen`.
 /// 4. **Popcount per primitive.** Final PRI = `popcount(row) / F`.
 ///
 /// # Arguments

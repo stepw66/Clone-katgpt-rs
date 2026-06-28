@@ -18,7 +18,7 @@
 //! - `nominal_gain := g_confirmed + g_uncertain + g_lowconf`
 //! - `penalty_silent := lambda * (g_uncertain + g_lowconf)`
 //! - `score := nominal_gain - penalty_silent`
-//!          `= g_confirmed + (1 - lambda) * (g_uncertain + g_lowconf)`
+//!   `= g_confirmed + (1 - lambda) * (g_uncertain + g_lowconf)`
 //!
 //! For any `lambda > 0` and equal nominal gain `G`:
 //! - all-confirmed  → score = G
