@@ -119,11 +119,11 @@ This is pure DRY — no new behavior, no new capability. Existing impls get blan
 
 ### Tasks (Phase 3, deferred)
 
-- [ ] **T3.1** Define `CriterionVersionedCache` trait in `katgpt-core/src/cache_version.rs`.
-- [ ] **T3.2** `impl CriterionVersionedCache for DecCache` (single-slot — Key = ()).
-- [ ] **T3.3** `impl CriterionVersionedCache for ZoneGeometryCache` (multi-entry — Key = ZoneHash).
-- [ ] **T3.4** Document the pattern in `katgpt-core/src/dec/cache.rs` doc-comment, pointing to the trait.
-- [ ] **T3.5** No GOAT gate (Gain-tier DRY refactor). Just `cargo check --all-features` + existing tests pass bit-identically.
+- [-] **T3.1** Define `CriterionVersionedCache` trait in `katgpt-core/src/cache_version.rs`.
+- [-] **T3.2** `impl CriterionVersionedCache for DecCache` (single-slot — Key = ()).
+- [-] **T3.3** `impl CriterionVersionedCache for ZoneGeometryCache` (multi-entry — Key = ZoneHash).
+- [-] **T3.4** Document the pattern in `katgpt-core/src/dec/cache.rs` doc-comment, pointing to the trait.
+- [-] **T3.5** No GOAT gate (Gain-tier DRY refactor). Just `cargo check --all-features` + existing tests pass bit-identically.
 
 ## Phase 3 — Architectural Blocker (2026-06-28)
 
