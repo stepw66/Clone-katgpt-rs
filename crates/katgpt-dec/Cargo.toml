@@ -17,19 +17,10 @@ categories = ["mathematics", "science"]
 
 [features]
 # katgpt-dec compiles all DEC code unconditionally — the crate's entire purpose
-# is DEC. The features below are pass-through tracking flags so katgpt-core can
-# preserve its historical feature surface (`dec_operators` enables this crate;
-# `dec_terrain_ai` / `lattice_utility` / `interest_cochain` are promotion-tracking
-# flags that imply `dec_operators` in katgpt-core). They gate nothing inside
-# katgpt-dec itself — mirroring the pre-promotion behavior where the whole
-# `dec` module compiled whenever `dec_operators` was on.
+# is DEC. The historical pass-through tracking flags (`dec_terrain_ai`,
+# `lattice_utility`, `interest_cochain`) were removed on 2026-06-28 (katgpt-rs
+# Issue 008): the eggshell IP they tracked was migrated to the private
+# `riir-neuron-db` crate (`dec_arena` module). The remaining katgpt-core
+# `dec_operators` flag enables this crate; nothing inside katgpt-dec gates
+# on a feature.
 default = []
-
-# Tracking flag: dynamic DEC topology + terrain cochains (Plan 261).
-dec_terrain_ai = []
-
-# Tracking flag: SIMD lattice-edge utility op (Plan 335 Phase 5/6/7 GOAT gate).
-lattice_utility = []
-
-# Tracking flag: InterestCohain type for fame/notability (Plan 335 Phase 1).
-interest_cochain = []

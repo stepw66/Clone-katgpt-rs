@@ -3,7 +3,7 @@
 //! Measures **route quality** of Hodge-decomposed navigation fields produced by
 //! `DecFlowField` vs A* optimal paths on terrain modified by destructions.
 //!
-//! Run: `cargo run --release --example dec_terrain_quality_bench --features dec_terrain_ai`
+//! Run: `cargo run --release --example dec_terrain_quality_bench --features dec_operators`
 //!
 //! # What This Measures (Plan 261 line 46)
 //!

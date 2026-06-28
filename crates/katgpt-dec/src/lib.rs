@@ -14,8 +14,6 @@
 //! - **Hodge Laplacian** — Δₖ = δₖ₊₁dₖ + dₖ₋₁δₖ (conservation-by-construction)
 //! - **Stokes calculus** — boundary flux, line integrals, belief-mass divergence
 //! - **Hodge decomposition** — exact ⊕ harmonic ⊕ coexact (Helmholtz split)
-//! - **Terrain cochains** — occupancy/safety/threat/destruction/interest fields
-//! - **Lattice utility** — SIMD lattice-edge utility projection (Plan 335)
 //!
 //! # Conservation Guarantees
 //!
@@ -52,11 +50,9 @@ pub mod backend;
 pub mod cache;
 pub mod flow;
 pub mod hodge;
-pub mod lattice_utility;
 pub mod operators;
 pub mod simd;
 pub mod stokes_calculus;
-pub mod terrain_cochains;
 pub mod types;
 
 pub use backend::{DecBackend, select_backend};
@@ -66,7 +62,6 @@ pub use hodge::{
     HodgeComponents, betti_numbers, dec_relevance_score, harmonic_projector, hodge_decompose,
     hodge_energy, hodge_residual, hodge_spectrum,
 };
-pub use lattice_utility::{HlaToCohainWeights, lattice_edge_utility_into};
 pub use operators::{
     codifferential, exterior_derivative, graph_laplacian, hodge_laplacian, hodge_star,
 };
@@ -76,7 +71,3 @@ pub use stokes_calculus::{
 };
 
 pub use types::{CellComplex, CoboundaryIndex, CochainField, MAX_RANK};
-
-pub use terrain_cochains::{
-    DestructionCochain, InterestCohain, OccupancyCochain, SafetyCochain, ThreatCochain,
-};

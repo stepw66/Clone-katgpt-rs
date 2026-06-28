@@ -3,7 +3,7 @@
 //! Compares DEC-based navigation field update vs naive grid re-scan after
 //! terrain destruction events of varying scale.
 //!
-//! Run: `cargo run --example dec_terrain_bench --features dec_terrain_ai`
+//! Run: `cargo run --example dec_terrain_bench --features dec_operators`
 //!
 //! # What This Measures
 //!
