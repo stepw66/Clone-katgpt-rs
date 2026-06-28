@@ -178,7 +178,11 @@ fn make_sq_cache(head_dim: usize, max_seq_len: usize, avg_bits: f32) -> Spectral
         head_dim,
     };
 
-    SpectralQuantKVCache::from_calibration(&config, std::slice::from_ref(&cal), &[cal])
+    // NOTE: cal.clone() in arg 2 is load-bearing — arg 3 (&[cal]) moves `cal`,
+    // so we cannot borrow cal via from_ref for arg 2. clippy's
+    // cloned_ref_to_slice_refs suggestion breaks the borrow checker here.
+    #[allow(clippy::cloned_ref_to_slice_refs)]
+    SpectralQuantKVCache::from_calibration(&config, &[cal.clone()], &[cal])
 }
 
 /// Build a TurboQuantKVCache with symmetric bit allocation.
