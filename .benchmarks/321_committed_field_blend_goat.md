@@ -3,7 +3,7 @@
 **Date:** 2026-06-25
 **Plan:** [321_sampling_invariant_per_entity_moe_primitive](../.plans/321_sampling_invariant_per_entity_moe_primitive.md)
 **Research:** 302_FAME_Sampling_Invariant_Per_Entity_MoE (arXiv:2510.00621)
-**Feature:** `committed_field_blend = ["personality_composition"]` (opt-in)
+**Feature:** `committed_field_blend = ["personality_composition"]` (DEFAULT-ON since 2026-06-28, [Issue 005](../.issues/005_committed_field_blend_default_on_promotion.md) executed)
 **Verdict:** ✅ **ALL GATES PASS** — G1 mechanics, G2 sampling invariance (defining property), G3 no-regression, G4 zero-alloc, G5 BLAKE3 commitment.
 
 ---
@@ -82,7 +82,7 @@ Per AGENTS.md feature-flag discipline: **the GOAT gate (G1–G5) passes with mod
 - ✅ **Plan 321 Phase 4** (examples + docs) — SHIPPED commit `76ac861c`.
 - ✅ **riir-ai Plan 336 runtime-integration validation** — SHIPPED 2026-06-26 (all 7 phases done; G6a–G6e crowd-scale gates + G7a frozen-restoration bit-identical; `committed_personality_runtime` promoted to default-on in `riir-engine/Cargo.toml`).
 
-The **promotion proposal is open** at [Issue 005](../.issues/005_committed_field_blend_default_on_promotion.md) — a one-token Cargo.toml flip + root passthrough + doc updates, with acceptance gates A1–A4. The feature stays opt-in (`committed_field_blend = ["personality_composition"]`) until Issue 005 lands; the proposal is OPEN per Plan 336 T7.2's "do NOT unilaterally execute" constraint (it's a different repo's decision).
+**PROMOTED to default-on** (2026-06-28, [Issue 005](../.issues/005_committed_field_blend_default_on_promotion.md) executed). The Cargo.toml flip landed in both `crates/katgpt-core/Cargo.toml` (default list) and root `Cargo.toml` (default list + passthrough feature). Acceptance gates A1–A4 ALL PASS: A1 default check clean on both crates (no new warnings); A2 katgpt-core `--no-default-features` clean (Issue 005 adds zero new errors — a pre-existing unrelated breakage in root `speculative/dflash.rs` no-default build is documented in Issue 005 and is out of scope); A3 13/13 lib tests green + G4a (apply_blended 1000 iters) = 0 allocs + G4b (commit 100 re-commits) = 0 allocs; A4 this doc + README + overview all flipped to DEFAULT-ON. The promotion is the formal flip from "opt-in" to "available by default" — the primitive code itself is untouched.
 
 ---
 
