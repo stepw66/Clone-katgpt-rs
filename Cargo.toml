@@ -1213,13 +1213,9 @@ required-features = ["bfcf_lfu_shard"]
 name = "coexplain_demo"
 required-features = ["coexplain_riir"]
 
-[[example]]
-name = "sense_composition"
-required-features = ["octree_ctc"]
-
-[[example]]
-name = "sense_bandit_demo"
-required-features = ["octree_ctc"]
+# (Moved to riir-engine/examples/: sense_composition, sense_bandit_demo —
+#  Issue 007 Phase C follow-up, 2026-06-28. They use riir_engine::sense::brain
+#  which is private NPC runtime IP, no longer in katgpt-core.)
 
 # Plan 276 T4.2 — MicroRecurrentBeliefState lifecycle demo.
 [[example]]
@@ -1352,13 +1348,8 @@ required-features = ["mux_latent_wire"]
 name = "mux_latent_octree_bridge"
 required-features = ["mux_latent_wire"]
 
-[[test]]
-name = "octree_ctc_recall_test"
-required-features = ["sense_composition"]
-
-[[example]]
-name = "octree_ctc_demo"
-required-features = ["octree_ctc"]
+# (Moved to riir-engine: octree_ctc_demo + octree_ctc_recall_test —
+#  Issue 007 Phase C follow-up, 2026-06-28. They use riir_engine::sense::brain.)
 
 [[example]]
 name = "gpart_adapter_demo"
@@ -1383,17 +1374,10 @@ required-features = ["gpart_adapter"]
 name = "bench_008_gpart_pruning_goat"
 required-features = ["gpart_pruning"]
 
-[[example]]
-name = "ane_npc_goat"
-required-features = ["sense_composition"]
-
-[[example]]
-name = "ane_npc_power"
-required-features = ["sense_composition"]
-
-[[example]]
-name = "ane_npc_arena"
-required-features = ["sense_composition"]
+# (Moved to riir-engine/examples/: ane_npc_arena, ane_npc_goat, ane_npc_power —
+#  Issue 007 Phase C follow-up, 2026-06-28. They depend on riir_engine's
+#  npc_brain_router + npc_ane_backend (NPC runtime IP). All ANE code stays
+#  opt-in behind the `ane_npc` feature flag — never default-on.)
 
 # ── DEC Dynamic Topology (Plan 261) ───────────────────────────
 # Note: `dec_terrain_ai` was removed in Issue 008 (2026-06-28) when the eggshell
