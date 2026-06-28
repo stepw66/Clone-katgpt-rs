@@ -54,8 +54,7 @@ fn main() {
             .segments
             .iter()
             .find(|s| s.segment_id() == Some(sid))
-        {
-            if let LatentSegment::Compressed { weights, .. } = seg {
+            && let LatentSegment::Compressed { weights, .. } = seg {
                 let first_3 = &weights[..3.min(weights.len())];
                 println!(
                     "  Segment {sid}: [{:.3}, {:.3}, {:.3}, ...] ({} weights)",
@@ -65,7 +64,6 @@ fn main() {
                     weights.len()
                 );
             }
-        }
     }
     println!();
 
@@ -120,8 +118,7 @@ fn main() {
             .segments
             .iter()
             .find(|s| s.segment_id() == Some(sid))
-        {
-            if let LatentSegment::Compressed { weights, .. } = seg {
+            && let LatentSegment::Compressed { weights, .. } = seg {
                 let first_3 = &weights[..3.min(weights.len())];
                 println!(
                     "  Segment {sid}: [{:.3}, {:.3}, {:.3}, ...] ({} weights)",
@@ -131,7 +128,6 @@ fn main() {
                     weights.len()
                 );
             }
-        }
     }
     println!();
 

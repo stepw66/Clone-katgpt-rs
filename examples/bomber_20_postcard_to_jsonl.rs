@@ -115,7 +115,7 @@ fn main() {
         }
         samples_written += 1;
 
-        if samples_written % report_interval == 0 {
+        if samples_written.is_multiple_of(report_interval) {
             let pct = if file_size > 0 {
                 (bytes_read as f64 / file_size as f64) * 100.0
             } else {

@@ -124,7 +124,7 @@ fn main() {
     };
 
     // Report LoRA load status from player 0.
-    let lora_active = party[0].as_any_mut().downcast_ref::<FftLoRAPlayer>().map_or(false, |p| p.lora_active());
+    let lora_active = party[0].as_any_mut().downcast_ref::<FftLoRAPlayer>().is_some_and(|p| p.lora_active());
     println!(
         "  LoRA active: {}",
         if lora_active { "yes ✓" } else { "NO — running in heuristic-fallback mode" }

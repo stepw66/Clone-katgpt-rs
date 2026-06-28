@@ -55,7 +55,7 @@ fn main() {
         let label = if (*score - worst) * 2 >= span { "seen-like (compresses well)" } else { "unseen-like (adds entropy)" };
         // Strip trailing '\n' / '\0' for display cleanliness.
         let display = String::from_utf8_lossy(cand)
-            .trim_end_matches(|c: char| c == '\n' || c == '\0')
+            .trim_end_matches(['\n', '\0'])
             .to_string();
         println!("  {:>20}  →  {:>4}  ({})", display, score, label);
     }
@@ -63,7 +63,7 @@ fn main() {
     // 3. Argmax pick — the candidate the compressor "remembers" best.
     let (best_idx, best_score) = scores.iter().enumerate().max_by_key(|&(_, &s)| s).unwrap();
     let best_display = String::from_utf8_lossy(candidates[best_idx])
-        .trim_end_matches(|c: char| c == '\n' || c == '\0')
+        .trim_end_matches(['\n', '\0'])
         .to_string();
     println!("\nArgmax: '{}' (score {})", best_display, best_score);
 

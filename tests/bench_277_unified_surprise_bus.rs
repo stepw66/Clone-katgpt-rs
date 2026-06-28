@@ -451,7 +451,7 @@ fn unified_surprise_bus_sweep() {
     let (f1_p, f1_best, f1_within) = within_higher(f1_paper, &f1_flat);
 
     println!("\n── F1: HLA Surprise Companion (N=8) ──");
-    print_grid_f32("recall·(1−FPR)", "score", |af, as_| f1_metric(af, as_));
+    print_grid_f32("recall·(1−FPR)", "score", f1_metric);
     println!("  paper ({},{}) = {:.4}  |  best = {:.4}  |  within ±{:.0}%: {}",
              PAPER_AF, PAPER_AS, f1_p, f1_best, WITHIN_FRAC * 100.0,
              if f1_within { "YES ✓" } else { "NO ✗" });
@@ -512,7 +512,7 @@ fn unified_surprise_bus_sweep() {
     let f4_paper = f4_metric(PAPER_AF, PAPER_AS);
     let (_f4_p, f4_best, f4_within) = within_lower(f4_paper as f32, &f4_valid);
 
-    print_grid_usize("recovery cycles", "cycles", |af, as_| f4_metric(af, as_));
+    print_grid_usize("recovery cycles", "cycles", f4_metric);
     println!("  paper ({},{}) = {}  |  best = {}  |  within ±{:.0}%: {}",
              PAPER_AF, PAPER_AS, f4_paper, f4_best as usize, WITHIN_FRAC * 100.0,
              if f4_within { "YES ✓" } else { "NO ✗"});

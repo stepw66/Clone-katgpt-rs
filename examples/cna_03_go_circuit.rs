@@ -69,7 +69,7 @@ fn encode_board(state: &GoState, player_id: u8) -> Vec<(usize, Vec<f32>)> {
         layers[0][idx] = val * corner_weight;
 
         // Layer 1 (edges): weight cells near edge (lines 1-3)
-        let edge_weight = if line >= 1 && line <= 3 { 1.5 } else { 0.3 };
+        let edge_weight = if (1..=3).contains(&line) { 1.5 } else { 0.3 };
         layers[1][idx] = val * edge_weight;
 
         // Layer 2 (center): weight center region
@@ -287,7 +287,7 @@ fn main() {
     }
 
     // Layer distribution
-    let mut layer_counts = vec![0usize; N_LAYERS];
+    let mut layer_counts = [0usize; N_LAYERS];
     for n in &circuit.neurons {
         if n.layer < N_LAYERS {
             layer_counts[n.layer] += 1;

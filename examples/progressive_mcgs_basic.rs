@@ -118,7 +118,7 @@ fn main() {
         let t_norm = search.step_count() as f32 / max_expansions as f32;
 
         // Sample entropy at 50 points.
-        if search.step_count() % (max_expansions / 50).max(1) == 0 {
+        if search.step_count().is_multiple_of((max_expansions / 50).max(1)) {
             let h = EntropyGatedScheduler::branch_selection_entropy(
                 search.branch_selection_counts(),
             );

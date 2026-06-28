@@ -669,8 +669,8 @@ fn main() {
     println!("╚{}╝", "═".repeat(w + 2));
     println!();
     println!("Leaderboard (single-shot, this run):");
-    println!("  🥇  solve_fast   {:>10}   {:>7} steps   {}/speed",
-        fmt_us(t_vfast), s_verify_fast.steps, "—");
+    println!("  🥇  solve_fast   {:>10}   {:>7} steps   —/speed",
+        fmt_us(t_vfast), s_verify_fast.steps);
     println!("  🥈  backtrack    {:>10}   {:>7} steps   {:.1}× slower",
         fmt_us(t_vbt), s_verify_bt.steps, speedup_vs_bt);
     println!("  🥉  speculate    {:>10}   fell back    {:.1}× slower",

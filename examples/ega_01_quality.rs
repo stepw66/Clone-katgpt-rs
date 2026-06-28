@@ -143,12 +143,11 @@ fn main() {
     z_normalize(&mut z_energy);
 
     println!(
-        "  {:>4}  {:>10}  {:>10}  {:>8}  {}",
-        "Pos", "Energy", "Z-Norm", "Gate", "Type"
+        "  {:>4}  {:>10}  {:>10}  {:>8}  Type",
+        "Pos", "Energy", "Z-Norm", "Gate"
     );
     println!(
-        "  {}  {}  {}  {}  {}",
-        "────", "──────────", "──────────", "────────", "──────"
+        "  ────  ──────────  ──────────  ────────  ──────"
     );
     for pos in 0..SEQ_LEN {
         let kind = if is_signal(pos) { "SIGNAL" } else { "noise" };

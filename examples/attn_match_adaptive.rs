@@ -109,19 +109,15 @@ fn run_trace(
         adaptive.observe_entropy(&logits);
 
         // Adaptive path.
-        match adaptive
+        if let Some(r) = adaptive
             .maybe_compact_adaptive(&keys, &values, &queries, pos, d, n, cfg)
-            .expect("adaptive ok")
-        {
-            Some(r) => {
-                adaptive_compacts += 1;
-                keys = r.online.compact_prefix.compact_keys.clone();
-                keys.extend_from_slice(&r.online.recent_keys);
-                values = r.online.compact_prefix.compact_values.clone();
-                values.extend_from_slice(&r.online.recent_values);
-                pos = r.online.total_logical_len;
-            }
-            None => {}
+            .expect("adaptive ok") {
+            adaptive_compacts += 1;
+            keys = r.online.compact_prefix.compact_keys.clone();
+            keys.extend_from_slice(&r.online.recent_keys);
+            values = r.online.compact_prefix.compact_values.clone();
+            values.extend_from_slice(&r.online.recent_values);
+            pos = r.online.total_logical_len;
         }
 
         // Blind online path (run independently from the same starting state).
@@ -197,7 +193,7 @@ fn main() {
 
         // Reward signal: traces that compacted moderately (not too few, not
         // too many) and preserved at spikes get positive reward.
-        let reward = if cmp >= 1 && cmp <= 6 { 1.0 } else { -0.5 };
+        let reward = if (1..=6).contains(&cmp) { 1.0 } else { -0.5 };
         adaptive2.update_reward(reward);
 
         trace_stats.push((cmp, adaptive2.thresholds().0));

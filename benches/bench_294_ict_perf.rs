@@ -79,7 +79,7 @@ fn main() {
     let mut sink = 0.0_f32;
     for _ in 0..WARMUP_ITERS {
         det.observe_and_detect_into(&traj_refs, &mut report);
-        sink = sink + report.uniqueness_scores[0];
+        sink += report.uniqueness_scores[0];
     }
     if black_box(sink.is_nan()) {
         eprintln!("warmup sink nan (impossible for finite inputs)");
@@ -92,7 +92,7 @@ fn main() {
         let t0 = Instant::now();
         det.observe_and_detect_into(black_box(&traj_refs), black_box(&mut report));
         let dt = t0.elapsed();
-        sink2 = sink2 + report.uniqueness_scores[0];
+        sink2 += report.uniqueness_scores[0];
         samples_us.push(dt.as_micros() as u64);
     }
     if black_box(sink2.is_nan()) {

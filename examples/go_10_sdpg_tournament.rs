@@ -356,8 +356,8 @@ fn compute_variance(values: &[f32]) -> f32 {
         return 0.0;
     }
     let mean = values.iter().sum::<f32>() / values.len() as f32;
-    let var = values.iter().map(|&x| (x - mean).powi(2)).sum::<f32>() / values.len() as f32;
-    var
+    
+    values.iter().map(|&x| (x - mean).powi(2)).sum::<f32>() / values.len() as f32
 }
 
 // ── Main ───────────────────────────────────────────────────────

@@ -272,7 +272,7 @@ fn generate_corpus(n: usize, seed: u64) -> Vec<DecisionSample> {
             reward_delta,
             stall_count,
             trace: ActiveStateSignal {
-                compression_ratio_mean: compression_ratio_mean,
+                compression_ratio_mean,
                 constraint_trend,
                 hla_arousal,
             },
@@ -524,16 +524,15 @@ fn gate_g5_determinism() -> bool {
     let mut last: Option<(PolicyStats, PolicyStats)> = None;
     for _ in 0..DETERMINISM_REPS {
         let (baseline, trace, _) = sweep();
-        if let Some((prev_b, prev_t)) = last {
-            if baseline.total_regret != prev_b.total_regret
+        if let Some((prev_b, prev_t)) = last
+            && (baseline.total_regret != prev_b.total_regret
                 || baseline.correct != prev_b.correct
                 || trace.total_regret != prev_t.total_regret
-                || trace.correct != prev_t.correct
+                || trace.correct != prev_t.correct)
             {
                 println!("  ❌ G5-T2 FAIL: non-deterministic across reps");
                 return false;
             }
-        }
         last = Some((baseline, trace));
     }
     println!(

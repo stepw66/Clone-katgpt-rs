@@ -163,7 +163,7 @@ fn bench_lookup_latency() {
         for _ in 0..1000 {
             for key in &all_keys {
                 black_box(vocab.get(*key));
-                black_box(datrie.lookup(*key));
+                black_box(datrie.lookup(key));
             }
         }
 

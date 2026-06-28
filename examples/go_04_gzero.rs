@@ -479,7 +479,7 @@ fn main() {
         .and_then(|s| s.parse().ok())
         .unwrap_or(DEFAULT_BOARD_SIZE);
 
-    let delta_gating = env::var("GO_NO_DELTA").ok().map_or(true, |v| v != "1");
+    let delta_gating = env::var("GO_NO_DELTA").ok().is_none_or(|v| v != "1");
 
     // Select which sections to run
     let section_set = env::var("GO_SET").ok().unwrap_or_else(|| "all".to_string());

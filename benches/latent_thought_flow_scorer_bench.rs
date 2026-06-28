@@ -264,7 +264,7 @@ fn run_trajectory(
         // The kernel was constructed with K=1; we manually loop to produce
         // variable-length trajectories without rebuilding the kernel.
         for _ in 0..k_iters {
-            kernel.step(&mut state, &input);
+            kernel.step(&mut state, input);
         }
     }
     state

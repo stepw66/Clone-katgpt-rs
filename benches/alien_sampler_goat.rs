@@ -448,7 +448,7 @@ impl ArmC {
     fn step(&mut self, archetypes: &[Vec<f32>], rng: &mut Lcg) -> Vec<(usize, Vec<f32>)> {
         // Rebuild the cached scorer every REBUILD_EVERY cycles (or on first
         // call, or when the bank is empty).
-        if self.cycle_count % REBUILD_EVERY == 0 || self.cached_avail.is_none() {
+        if self.cycle_count.is_multiple_of(REBUILD_EVERY) || self.cached_avail.is_none() {
             self.cached_avail = Some(MedianTopMAvailability::new(self.zone_bank.clone(), M));
         }
         self.cycle_count = self.cycle_count.wrapping_add(1);

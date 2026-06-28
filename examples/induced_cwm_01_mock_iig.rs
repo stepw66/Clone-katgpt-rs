@@ -228,7 +228,7 @@ fn run_ismcts_and_collect_stats(
 
         for action in action_scratch.iter() {
             let key = action_hash(action);
-            hash_to_action.entry(key).or_insert_with(|| action.clone());
+            hash_to_action.entry(key).or_insert_with(|| *action);
 
             let child = sample.advance(action, player_id);
             let reward = if child.is_terminal() {
@@ -245,7 +245,7 @@ fn run_ismcts_and_collect_stats(
                         break;
                     }
                     let pick = rng.usize(0..rollout_scratch.len());
-                    let a = rollout_scratch[pick].clone();
+                    let a = rollout_scratch[pick];
                     cur = cur.advance(&a, player_id);
                 }
                 cur.reward(player_id)

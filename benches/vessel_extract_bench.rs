@@ -177,7 +177,7 @@ fn main() {
     config.consume_fuel(true);
     let engine = wasmi::Engine::new(&config);
     let mut store = wasmi::Store::new(&engine, ());
-    ensure_compiled(&mut project_vessel, &mut store, &engine).expect("compile");
+    ensure_compiled(&project_vessel, &mut store, &engine).expect("compile");
 
     let projector = WasmDotProjector {
         export_name: "project",
@@ -201,14 +201,14 @@ fn main() {
     let cache = VesselCache::new();
     let vessel_arc = cache.get_or_load(&project_encoded).expect("load into cache");
     let cached_addr = vessel_arc.content_addr;
-    let qhash = query_hash(&query_slice); // pre-hash ONCE
+    let qhash = query_hash(query_slice); // pre-hash ONCE
     // Prime the result cache with one call.
     let _ = cache
-        .project_cached_with_hash(cached_addr, &query_slice, qhash, &projector, &mut store, &engine)
+        .project_cached_with_hash(cached_addr, query_slice, qhash, &projector, &mut store, &engine)
         .expect("prime");
     let project_cached_ns = bench_ns("  VesselCache::project_cached_with_hash() [HIT]", WARMUP, ITERS.min(10_000), || {
         let out = cache
-            .project_cached_with_hash(cached_addr, &query_slice, qhash, &projector, &mut store, &engine)
+            .project_cached_with_hash(cached_addr, query_slice, qhash, &projector, &mut store, &engine)
             .expect("project");
         std::hint::black_box(out);
     });

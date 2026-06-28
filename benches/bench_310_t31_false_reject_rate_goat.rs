@@ -532,20 +532,19 @@ fn gate_g5_determinism() -> bool {
     let mut last: Option<AggregateStats> = None;
     for _ in 0..DETERMINISM_REPS {
         let agg = sweep_corpus_variants();
-        if let Some(prev) = last {
-            if agg.strict.true_accepts != prev.strict.true_accepts
+        if let Some(prev) = last
+            && (agg.strict.true_accepts != prev.strict.true_accepts
                 || agg.strict.true_rejects != prev.strict.true_rejects
                 || agg.strict.false_accepts != prev.strict.false_accepts
                 || agg.strict.false_rejects != prev.strict.false_rejects
                 || agg.tolerant.true_accepts != prev.tolerant.true_accepts
                 || agg.tolerant.true_rejects != prev.tolerant.true_rejects
                 || agg.tolerant.false_accepts != prev.tolerant.false_accepts
-                || agg.tolerant.false_rejects != prev.tolerant.false_rejects
+                || agg.tolerant.false_rejects != prev.tolerant.false_rejects)
             {
                 println!("  ❌ G5-T1.1 FAIL: non-deterministic across reps");
                 return false;
             }
-        }
         last = Some(agg);
     }
     println!(

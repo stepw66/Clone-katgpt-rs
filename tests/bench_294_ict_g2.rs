@@ -239,7 +239,7 @@ fn g2_inflection_at_approximately_10_percent() {
     // cite. Per Plan §Implementation Order the G3 decision point (not G2)
     // decides Super-GOAT vs Gain — G2 borderline-fail just means we sweep
     // k_percent empirically rather than hard-coding 0.10.
-    let pass = median >= 0.05 && median <= 0.20;
+    let pass = (0.05..=0.20).contains(&median);
     if pass {
         println!("\nG2 PASS: median inflection location {:.1}% ∈ [5%, 20%]", 100.0 * median);
     } else {
@@ -263,7 +263,7 @@ fn g2_inflection_at_approximately_10_percent() {
     // 5%-20% band is reported above as a verdict, not enforced as a panic —
     // a borderline-fail G2 is informative, not a build break.)
     assert!(
-        median >= 0.0 && median <= 1.0,
+        (0.0..=1.0).contains(&median),
         "G2 sanity: median inflection must be a fraction in [0, 1], got {median}"
     );
 }

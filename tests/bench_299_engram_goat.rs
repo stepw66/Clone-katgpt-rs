@@ -364,7 +364,7 @@ fn spearman_rho(a: &[(usize, f32)], b: &[(usize, f32)]) -> f64 {
     let mut n = 0u64;
     for (id, ra) in &rank_a {
         if let Some(rb) = rank_b.get(id) {
-            let (x, y) = (*ra as f64, *rb as f64);
+            let (x, y) = ((*ra), (*rb));
             sum_xy += x * y;
             sum_x += x;
             sum_y += y;

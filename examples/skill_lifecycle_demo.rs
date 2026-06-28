@@ -159,8 +159,8 @@ fn main() {
     let best_arm = {
         // Determine best arm from memory
         let entries = memory.recent(memory.total_entries() as usize);
-        let mut arm_rewards = vec![0.0f32; NUM_ARMS];
-        let mut arm_counts = vec![0u32; NUM_ARMS];
+        let mut arm_rewards = [0.0f32; NUM_ARMS];
+        let mut arm_counts = [0u32; NUM_ARMS];
         for e in &entries {
             arm_rewards[e.arm as usize] += e.reward;
             arm_counts[e.arm as usize] += 1;
@@ -234,8 +234,8 @@ fn main() {
 
     // Final best arm and Q-value
     let final_entries = memory.recent(memory.total_entries() as usize);
-    let mut arm_rewards = vec![0.0f32; NUM_ARMS];
-    let mut arm_counts = vec![0u32; NUM_ARMS];
+    let mut arm_rewards = [0.0f32; NUM_ARMS];
+    let mut arm_counts = [0u32; NUM_ARMS];
     for e in &final_entries {
         arm_rewards[e.arm as usize] += e.reward;
         arm_counts[e.arm as usize] += 1;

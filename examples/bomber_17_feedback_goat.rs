@@ -401,7 +401,7 @@ fn main() {
         );
 
         // Print FeedbackBandit decision stats and accumulate
-        if let Some(_) = matchup.players.iter().position(|p| *p == FB_LABEL) {
+        if matchup.players.iter().position(|p| *p == FB_LABEL).is_some() {
             for player in &players {
                 if let Some(sr2am) = player.as_any().downcast_ref::<Sr2amPlayer>() {
                     let (plan_new, plan_extend, plan_skip, plan_spechop) = sr2am.decision_stats();

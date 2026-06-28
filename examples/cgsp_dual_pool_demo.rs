@@ -252,7 +252,7 @@ fn demo_faithfulness_gate() {
     for arm in 0..8 {
         dp_on.absorb(arm, 0.3); // All arms cross threshold 0.05.
     }
-    dp_on.consolidate_growing_gated(&gate);
+    dp_on.consolidate_growing_gated(gate);
     let on_size = dp_on.e_pool().num_arms();
     println!("    E-pool size: {on_size} (expected: 1 initial + 4 live = 5)");
 

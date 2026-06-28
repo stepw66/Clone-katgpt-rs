@@ -307,7 +307,7 @@ fn print_final_table(results: &[MatchupResult]) {
     println!("  FINAL RESULTS");
     println!("════════════════════════════════════════════════════════════");
     println!("  {:<14} {:<12} {:>6}", "Player", "vs Random", "Win%");
-    println!("  {}  {}  {}", "──────────────", "───────────", "─────");
+    println!("  ──────────────  ───────────  ─────");
 
     for result in results {
         let wins = result.wins();

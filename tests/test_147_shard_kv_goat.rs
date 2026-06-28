@@ -288,7 +288,7 @@ fn compute_covariance_eigenvalues(data: &[Vec<f32>], dim: usize) -> Vec<f32> {
         // Deflate: subtract rank-1 component
         for i in 0..dim {
             for j in 0..dim {
-                remaining_cov[i * dim + j] -= eigenvalue as f64 * v[i] * v[j];
+                remaining_cov[i * dim + j] -= eigenvalue * v[i] * v[j];
             }
         }
     }
