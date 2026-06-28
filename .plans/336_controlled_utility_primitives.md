@@ -123,6 +123,10 @@ Deferred. After Phase 2 promotes the primitives, a follow-up plan (TBD number) w
 - **OQ1:** Should `CriterionVersionedRecords` implement a `recompute_derived_stats` hook (for CMP, Thompson accumulators), or should that stay in the consumer? Lean: consumer-side — the primitive is a pure record store, derived stats are domain-specific. Document this in the doc-comment.
 - **OQ2:** For >64 slots, fall back to `bitvec` or hand-roll a `SmallVec<[u64; 1]>`? Lean: `SmallVec<[u64; 1]>` — covers up to 64 slots inline, heaps beyond. Typical case is ≤4 slots.
 - **OQ3:** Should `best_belief_score` expose a `Beta` struct (reusable across calls) or stay as a free function? Lean: free function for now; if Phase 2 perf misses, consider a precomputed table for common (S, F) pairs.
+- **OQ4 (crate-promotion coordination — riir-ai Issue 007 Phase E):** Issue 007 (riir-ai/.issues/007) Phase E defers breaking `katgpt-core` into smaller publishable crates (`katgpt-dec`, `katgpt-simd`, `katgpt-micro-belief`, `katgpt-hla`, `katgpt-personality`, `katgpt-sleep`, `katgpt-sense`, ...). When that lands, the two files added by this plan should be re-homed:
+  - `best_belief.rs` → future `katgpt-bandits` (alongside `BanditPruner` / `BanditStrategy`). It's a Beta-quantile selection function, same family.
+  - `criterion_store.rs` → future `katgpt-consistency` or `katgpt-freeze` (generic consistency primitive, no bandit semantics).
+  Adding them to `katgpt-core/src/` now is fine — Phase E is explicitly deferred ("separate plans"), and re-homing 2 files later is trivial. This OQ exists so the Phase E implementer knows to claim both files. **No hold on this plan** — Issue 007's refactor is subtractive (removes `sense/` IP) + splits; this plan is additive (new generic substrate); zero file overlap.
 
 ## References
 
