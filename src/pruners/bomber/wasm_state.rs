@@ -446,6 +446,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::erasing_op)] // 0 * ARENA_W documents the y*ARENA_W+x token formula for (y=0,x=0)
     fn grid_with_all_cell_types() {
         let mut grid = empty_grid();
         grid.cells[0][0] = Cell::Floor;
