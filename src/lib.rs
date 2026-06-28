@@ -63,10 +63,9 @@ pub mod ssd_block;
 pub mod dash_attn;
 #[cfg(feature = "data_probe")]
 pub mod data_probe;
-#[cfg(all(target_os = "macos", feature = "ane_npc"))]
-pub mod npc_ane_backend;
-#[cfg(feature = "sense_composition")]
-pub mod npc_brain_router;
+// Issue 007 Phase C: `npc_ane_backend` and `npc_brain_router` moved to
+// riir-engine (NPC runtime IP). They depended on `katgpt_core::sense::backend`
+// which moved, and are themselves gameplay-runtime IP per the 5-repo strategy.
 // Shared diagonal gate abstraction (GDN2 + Wall).
 // Available when either gdn2_attention or wall_attention is enabled.
 #[cfg(feature = "cubical_nerve")]

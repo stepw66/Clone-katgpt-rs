@@ -257,8 +257,8 @@ fn g1_4_attractor_step_32_under_100ns() {
 
 /// **G1.5** — Readers never see a torn kernel swap.
 ///
-/// Plan 276 T0.4 decided to reuse the `SenseHotSwap` `AtomicPtr` pattern from
-/// `katgpt-rs/crates/katgpt-core/src/sense/hotswap.rs` for the future
+/// Plan 276 T0.4 decided to reuse the `SenseHotSwap` `AtomicPtr` pattern
+/// (now in riir-engine::sense::hotswap after Issue 007 Phase C) for the future
 /// `KernelHotSwap` primitive. That primitive itself is NOT built in Phase 1
 /// (it's a wiring concern for the orchestrator). What we CAN test here is the
 /// *pattern*: multiple reader threads call `step()` on a kernel obtained via
