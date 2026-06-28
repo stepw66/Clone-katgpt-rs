@@ -172,13 +172,7 @@ pub fn js_divergence(p: &[f32], q: &[f32], scratch_m: &mut [f32]) -> f32 {
     // Clamp to [0, ln 2] — numerical drift can put us microseconds above ln 2
     // on disjoint supports; the bound is a theorem, not a guarantee of f32
     // arithmetic.
-    if js < 0.0 {
-        0.0
-    } else if js > core::f32::consts::LN_2 {
-        core::f32::consts::LN_2
-    } else {
-        js
-    }
+    js.clamp(0.0, core::f32::consts::LN_2)
 }
 
 /// Batch JS-divergence-to-mean over a population of distributions.
@@ -214,8 +208,8 @@ pub fn js_divergence_batch(dists: &[&[f32]], scratch_m: &mut [f32]) -> Vec<f32> 
         }
     }
     let inv_k = 1.0_f32 / (k as f32);
-    for a in 0..n {
-        scratch_m[a] *= inv_k;
+    for slot in scratch_m[..n].iter_mut() {
+        *slot *= inv_k;
     }
     // For each dist, JS(dist, mean). We need a second scratch slot for the
     // (dist + mean)/2 mid-point — reuse the lower half of scratch_m? No: the
@@ -252,11 +246,7 @@ pub fn js_divergence_batch(dists: &[&[f32]], scratch_m: &mut [f32]) -> Vec<f32> 
                 }
             }
         }
-        if js < 0.0 {
-            js = 0.0;
-        } else if js > core::f32::consts::LN_2 {
-            js = core::f32::consts::LN_2;
-        }
+        js = js.clamp(0.0, core::f32::consts::LN_2);
         out.push(js);
     }
     out

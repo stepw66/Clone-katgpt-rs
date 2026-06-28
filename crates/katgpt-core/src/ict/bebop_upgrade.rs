@@ -67,13 +67,7 @@ impl AcceptanceForecastH2 {
 
     /// Override the default EMA decay (0.9). Clamped to `[0, 1]`.
     pub fn with_ema_decay(mut self, decay: f32) -> Self {
-        self.ema_decay = if decay < 0.0 {
-            0.0
-        } else if decay > 1.0 {
-            1.0
-        } else {
-            decay
-        };
+        self.ema_decay = decay.clamp(0.0, 1.0);
         self
     }
 

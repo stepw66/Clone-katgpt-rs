@@ -366,16 +366,16 @@ pub fn stable_rank_update_into(
 /// # Arguments
 /// * `position`     — index `s` of the candidate sink.
 /// * `attn_column`  — `A_is` for `i ∈ I`, the attention column received by `s`.
-///                    Need not be normalized — `strength` is just `mean`.
+///   Need not be normalized — `strength` is just `mean`.
 /// * `values`       — `V ∈ ℝ^{n × d_h}`, value matrix (one row per token).
 /// * `update_O`     — optional per-head output `O = A · V`. When provided,
-///                    stable rank is computed; when `None`, classification
-///                    falls back to `value_norm_ratio` alone (Broadcast test
-///                    will fail unless ratio is in `[min, max]` AND
-///                    `broadcast_stable_rank_max` is `f32::INFINITY`).
+///   stable rank is computed; when `None`, classification
+///   falls back to `value_norm_ratio` alone (Broadcast test
+///   will fail unless ratio is in `[min, max]` AND
+///   `broadcast_stable_rank_max` is `f32::INFINITY`).
 /// * `cfg`          — thresholds.
 /// * `scratch`      — power-iteration scratch (only touched if `update_O`
-///                    is `Some`).
+///   is `Some`).
 ///
 /// # Returns
 /// A [`SinkDiagnostic`] with all fields populated. `update_stable_rank` is
@@ -492,7 +492,7 @@ pub fn classify_sink_at(
 ///
 /// # Arguments
 /// * `attn`    — `(n, n)` row-major attention map. `attn[i]` is row `i`
-///               (attention paid by query `i`), length `n`.
+///   (attention paid by query `i`), length `n`.
 /// * `values`  — `(n, d_h)` value matrix, one row per token.
 /// * `cfg`     — thresholds.
 /// * `scratch` — power-iteration scratch (reused across positions).
@@ -536,8 +536,8 @@ pub fn classify_all_sinks(
     let mut candidates_heap: Vec<(usize, f32)> = Vec::new();
     let mut n_candidates = 0usize;
     let mut overflow = false;
-    for j in 0..n {
-        let strength_j = col_sums[j] * inv_n;
+    for (j, &col_sum_j) in col_sums[..n].iter().enumerate() {
+        let strength_j = col_sum_j * inv_n;
         if strength_j <= cfg.sink_strength_threshold {
             continue;
         }
@@ -615,9 +615,9 @@ pub enum SinkAwarePolicy {
 /// * `values`     — `(n, d_h)` value matrix.
 /// * `o`          — input `(n, d_h)` output to filter.
 /// * `policy`     — [`SinkAwarePolicy::Uniform`] is a no-op (copies `o` to
-///                  `out`); [`SinkAwarePolicy::DualPolicy`] runs classifier.
+///   `out`); [`SinkAwarePolicy::DualPolicy`] runs classifier.
 /// * `gate_scale` — pre-sigmoid logit (e.g. `X · W_θ`). `σ(gate_scale)` is
-///                  the multiplicative gate applied to NOP heads.
+///   the multiplicative gate applied to NOP heads.
 /// * `scratch`    — power-iteration scratch.
 /// * `out`        — caller-allocated `(n, d_h)` output buffer.
 ///
@@ -1003,7 +1003,8 @@ pub fn stable_rank_update_into_flat(
 /// See [`classify_sink_at`] for argument semantics. The flat layout adds
 /// `n` and `d` parameters; `update_O` becomes `Option<(&[f32], usize, usize)>`
 /// = `(flat_O, n_O, d_O)`.
-#[allow(non_snake_case)]
+// sink-classification hot path; lanes + scratch, bundling adds indirection
+#[allow(non_snake_case, clippy::too_many_arguments)]
 pub fn classify_sink_at_flat(
     position: usize,
     attn_column: &[f32],
@@ -1078,9 +1079,9 @@ pub fn classify_sink_at_flat(
     };
 
     // ── Decision rule (Research 258 §2.1) ──────────────────────
-    let kind = if degenerate {
-        SinkKind::None
-    } else if strength <= cfg.sink_strength_threshold {
+    // `degenerate` (n==0 || d==0 || all-zero values) and sub-threshold
+    // strength both collapse to `None`; merged to satisfy clippy::if_same_then_else.
+    let kind = if degenerate || strength <= cfg.sink_strength_threshold {
         SinkKind::None
     } else if value_norm_ratio <= cfg.nop_value_ratio_max {
         SinkKind::Nop
@@ -1149,8 +1150,8 @@ pub fn classify_all_sinks_flat(
     let mut candidates_heap: Vec<(usize, f32)> = Vec::new();
     let mut n_candidates = 0usize;
     let mut overflow = false;
-    for j in 0..n {
-        let strength_j = col_sums[j] * inv_n;
+    for (j, &col_sum_j) in col_sums[..n].iter().enumerate() {
+        let strength_j = col_sum_j * inv_n;
         if strength_j <= cfg.sink_strength_threshold {
             continue;
         }
@@ -1189,6 +1190,8 @@ pub fn classify_all_sinks_flat(
 /// This is the variant intended for direct integration with
 /// `parallax_attn::tiled_attention_parallax_forward` and
 /// `funcattn::funcattn_forward`, which produce flat `output: &mut [f32]`.
+// sink-classification hot path; lanes + scratch, bundling adds indirection
+#[allow(clippy::too_many_arguments)]
 pub fn apply_dual_policy_gate_flat(
     attn: &[f32],
     values: &[f32],
@@ -1271,6 +1274,8 @@ pub fn apply_dual_policy_gate_flat(
 /// function's docs for the caching contract. Flat layout enables direct
 /// composition with parallax/funcattn forward paths without `Vec<Vec<f32>>`
 /// materialization.
+// sink-classification hot path; lanes + scratch, bundling adds indirection
+#[allow(clippy::too_many_arguments)]
 pub fn apply_dual_policy_gate_cached_flat(
     attn: &[f32],
     values: &[f32],
