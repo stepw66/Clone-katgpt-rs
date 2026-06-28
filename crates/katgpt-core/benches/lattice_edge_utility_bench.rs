@@ -160,7 +160,7 @@ fn bench_lattice_edge_utility_16x16(c: &mut Criterion) {
     let weights = HlaToCohainWeights::default();
 
     let n_edges = edge_src_vertex_idx.len();
-    let mut group = c.benchmark_group("zone_lattice_goat/lattice_edge_utility");
+    let mut group = c.benchmark_group("lattice_edge_utility");
     group.throughput(Throughput::Elements(n_edges as u64));
     group.sample_size(300);
 

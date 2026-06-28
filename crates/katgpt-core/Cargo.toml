@@ -201,7 +201,7 @@ paired_loss_diagnostic = []  # Paired Token-Level Loss Gap Diagnostic — generi
 # grid (480 edges) + G4 zero-alloc code-review note. Leaf-clean: raw slices
 # only, no riir-ai / riir-neuron-db types (those live in the integrated bench).
 [[bench]]
-name = "zone_lattice_goat"
+name = "lattice_edge_utility_bench"
 harness = false
 required-features = ["lattice_utility"]
 
@@ -238,11 +238,6 @@ harness = false
 required-features = ["rtdc_subtree_inclusion"]
 
 [[bench]]
-name = "npc_brain_bench"
-harness = false
-required-features = ["sense_composition"]
-
-[[bench]]
 name = "latent_physics_bench"
 harness = false
 required-features = ["sector_projection", "action_bridge"]
@@ -266,11 +261,6 @@ required-features = ["cgsp", "temporal_deriv"]
 name = "micro_belief_bench"
 harness = false
 required-features = ["micro_belief", "bom_sampling"]
-
-[[bench]]
-name = "personality_composition_bench"
-harness = false
-required-features = ["personality_composition"]
 
 # Plan 299 T2.6 — Engram lookup_into / multi_head_hash / sigmoid_fuse_into
 # / fuse_into_hidden_state micro-benchmarks. The G1 latency gate lives in

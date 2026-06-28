@@ -1,9 +1,11 @@
 //! Sleep-Time consume() hot-path latency benchmark — GOAT gate G6 (Plan 334).
 //!
-//! Target: `consume()` ≤ 200 ns/call at D=64 (the style_weights scale, the
-//! largest expected wake-time artifact). For D=8 (HLA scale) the target is
+//! Target: `consume()` ≤ 200 ns/call at D=64. For D=8 the target is
 //! ≤ 100 ns/call. Matches `EmotionDirections::project` and KARC `forecast`
 //! latency profiles (Bench 292 / Bench 308).
+//!
+//! Note: dimension labels (D8/D64) are intentionally generic. The mapping of
+//! these dims to specific runtime artifacts is private (riir-ai).
 //!
 //! # Run
 //!
@@ -66,7 +68,7 @@ fn bench_consume(c: &mut Criterion) {
     let mut group = c.benchmark_group("sleep_time_consume");
     group.throughput(criterion::Throughput::Elements(1));
 
-    // ── D=8, K=4 (HLA scale — ambient NPC) ─────────────────────────────────
+    // ── D=8, K=4 (small latent dim, small catalog) ─────────────────────────
     {
         const D: usize = 8;
         const K: usize = 4;
@@ -88,7 +90,7 @@ fn bench_consume(c: &mut Criterion) {
         });
     }
 
-    // ── D=8, K=8 (HLA scale — shopkeeper NPC, full catalog) ────────────────
+    // ── D=8, K=8 (small latent dim, full catalog) ──────────────────────────
     {
         const D: usize = 8;
         const K: usize = 8;
@@ -104,7 +106,7 @@ fn bench_consume(c: &mut Criterion) {
         });
     }
 
-    // ── D=64, K=8 (style_weights scale — the largest expected artifact) ────
+    // ── D=64, K=8 (large latent dim, full catalog) ─────────────────────────
     {
         const D: usize = 64;
         const K: usize = 8;
