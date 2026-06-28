@@ -659,7 +659,7 @@ impl TvpProbeCountBandit {
     /// Select next K via UCB1. Called at the start of each query.
     pub fn select(&mut self) -> u8 {
         let total: u32 = self.visits.iter().sum();
-        if total == 0 || self.visits.iter().any(|&v| v == 0) {
+        if total == 0 || self.visits.contains(&0) {
             // Pull each unvisited arm first.
             for (i, &v) in self.visits.iter().enumerate() {
                 if v == 0 {

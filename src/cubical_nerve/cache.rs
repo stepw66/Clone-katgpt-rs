@@ -83,10 +83,7 @@ impl NerveFlowField {
 
         // Already at goal?
         let next_idx = idx + 1;
-        match self.path.get(next_idx) {
-            Some(&next) => Some(next),
-            None => None, // At goal or past end
-        }
+        self.path.get(next_idx).map(|&next| next)
     }
 
     /// Return a navigation hint for the current zone.

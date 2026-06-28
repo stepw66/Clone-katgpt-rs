@@ -97,7 +97,7 @@ impl DilatedKvAccessor {
     /// Useful for pre-allocating output buffers.
     #[inline]
     pub fn dilated_len(len: usize, d: DilationConfig) -> usize {
-        (len + d.stride() - 1) / d.stride()
+        len.div_ceil(d.stride())
     }
 }
 

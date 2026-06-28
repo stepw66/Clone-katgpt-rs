@@ -48,7 +48,7 @@ pub fn encode_battle_state(state: &BattleState, out: &mut [u8]) {
     for i in 0..FFT_UNIT_COUNT {
         let base = 1 + i * FFT_TOKENS_PER_UNIT;
         if let Some(unit) = state.units.get(i) {
-            out[base + 0] = encode_team(unit.team);
+            out[base] = encode_team(unit.team);
             out[base + 1] = encode_class(unit.class);
             out[base + 2] = encode_hp_bucket(unit);
             out[base + 3] = encode_mp_bucket(unit);

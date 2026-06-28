@@ -267,7 +267,7 @@ impl SkillLifecyclePlayer {
         self.stats.best_arm_q = best_q;
 
         // 5. Periodic validation
-        if self.episode_count % self.validate_every == 0 {
+        if self.episode_count.is_multiple_of(self.validate_every) {
             self.run_validation();
         }
 
@@ -451,12 +451,11 @@ impl SkillLifecyclePlayer {
             return;
         }
         for arm_idx in 0..ACTION_COUNT {
-            if let Some(desc) = self.catalog.get(arm_idx) {
-                if desc.test_status == TestStatus::Validated {
+            if let Some(desc) = self.catalog.get(arm_idx)
+                && desc.test_status == TestStatus::Validated {
                     // Promote validated skills after sufficient experience
                     self.catalog.update_status(arm_idx, TestStatus::Active);
                 }
-            }
         }
     }
 

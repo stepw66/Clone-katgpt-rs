@@ -35,8 +35,8 @@ impl DensityBudget {
         // i64 round-trip lets us clamp into [1, d_total] without overflow at the
         // usize boundary on extreme inputs (already guarded by clamp above, but
         // belt-and-braces).
-        let k = k.max(1).min(self.d_total as i64) as usize;
-        k
+        
+        k.max(1).min(self.d_total as i64) as usize
     }
 }
 

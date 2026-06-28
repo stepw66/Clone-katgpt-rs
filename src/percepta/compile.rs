@@ -1040,7 +1040,7 @@ pub fn format_prefix(program: &[DispatchEntry]) -> String {
         let bytes = int_to_bytes(*imm as i64);
         // Inline write avoids allocating an intermediate Vec<String>.
         use std::fmt::Write as _;
-        let _ = write!(out, "{op} {:02x} {:02x} {:02x} {:02x}\n", bytes[0], bytes[1], bytes[2], bytes[3]);
+        let _ = writeln!(out, "{op} {:02x} {:02x} {:02x} {:02x}", bytes[0], bytes[1], bytes[2], bytes[3]);
     }
     out.push('}');
     out.push('\n');

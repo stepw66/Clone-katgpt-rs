@@ -41,7 +41,7 @@ pub fn load_certificates(path: &Path) -> Result<Vec<ProofCertificate>, String> {
     if buf.len() < 12 {
         return Err("Certificate file too small".into());
     }
-    if &buf[..4] != &CERT_MAGIC {
+    if buf[..4] != CERT_MAGIC {
         return Err("Invalid certificate file (bad magic)".into());
     }
     let version = u32::from_le_bytes(

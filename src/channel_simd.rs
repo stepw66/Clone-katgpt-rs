@@ -46,7 +46,7 @@ impl AlignedWeightMatrix {
             data.extend_from_slice(row);
             // Pad with zeros
             let padding = padded_dim - row.len();
-            data.extend(std::iter::repeat(0.0f32).take(padding));
+            data.extend(std::iter::repeat_n(0.0f32, padding));
         }
 
         Self {
@@ -61,7 +61,7 @@ impl AlignedWeightMatrix {
     /// Pad dimension to cache line boundary.
     fn pad_dim(dim: usize) -> usize {
         let f32_per_line = CACHE_LINE / std::mem::size_of::<f32>();
-        ((dim + f32_per_line - 1) / f32_per_line) * f32_per_line
+        dim.div_ceil(f32_per_line) * f32_per_line
     }
 
     /// Get a pointer to the start of row i (aligned to cache line).

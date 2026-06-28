@@ -254,10 +254,7 @@ impl AdaptiveTraceCompactor {
     /// Forwards to [`FrequencyBandit::update`] with the last-selected arm.
     /// No-op if the bandit has not yet selected an arm this trace.
     pub fn update_reward(&mut self, reward: f32) {
-        match self.bandit.last_selected() {
-            Some(band) => self.bandit.update(band, reward as f64),
-            None => {}
-        }
+        if let Some(band) = self.bandit.last_selected() { self.bandit.update(band, reward as f64) }
     }
 
     /// Current `(theta_low, theta_high)`.

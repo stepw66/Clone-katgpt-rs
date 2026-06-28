@@ -100,7 +100,7 @@ impl PrunerDivergence {
     ///
     /// Only logs when `token_count` is a multiple of `interval` to avoid log spam.
     pub fn emit_diagnostic(&self, pruner_name: &str, token_count: usize, interval: usize) {
-        if interval == 0 || token_count % interval != 0 {
+        if interval == 0 || !token_count.is_multiple_of(interval) {
             return;
         }
         log::info!(

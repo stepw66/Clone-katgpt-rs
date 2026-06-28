@@ -177,12 +177,8 @@ impl QueryBank for ClusterQueryBank {
             }
 
             // Update centroids as mean of assigned points
-            for s in &mut sums {
-                *s = 0.0;
-            }
-            for c in &mut counts {
-                *c = 0;
-            }
+            sums.fill(0.0);
+            counts.fill(0);
             for t in 0..seq_len {
                 let c = assignments[t];
                 let point = token_slice(kv_cache, t, kv_dim);
@@ -412,7 +408,7 @@ impl QueryBank for BfcfQueryBank {
         }
 
         let num_regions = budget.min(seq_len);
-        let chunk_size = (seq_len + num_regions - 1) / num_regions; // ceil div
+        let chunk_size = seq_len.div_ceil(num_regions); // ceil div
 
         // Compute centroid for each region
         let mut regions: Vec<Vec<f32>> = Vec::with_capacity(num_regions);
@@ -503,7 +499,7 @@ impl QueryBank for MuxQueryBank {
                 h ^= h >> 33;
                 h = h.wrapping_mul(0xFF51AFD7ED558CCD);
                 h ^= h >> 33;
-                let sign: f32 = if h.count_ones() % 2 == 0 {
+                let sign: f32 = if h.count_ones().is_multiple_of(2) {
                     scale
                 } else {
                     -scale

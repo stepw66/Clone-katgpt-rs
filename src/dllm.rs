@@ -2403,7 +2403,7 @@ pub fn denoise_loop_rcd_3sr(
     tsr_config: Option<&crate::dllm_solver::ThreeStateReuseConfig>,
 ) -> (Vec<usize>, usize) {
     // Zero-overhead runtime gate: if 3SR is disabled at runtime, delegate to RCD.
-    let tsr_enabled = tsr_config.map_or(false, |c| c.enabled);
+    let tsr_enabled = tsr_config.is_some_and(|c| c.enabled);
     if !tsr_enabled {
         return denoise_loop_rcd(
             weights,
@@ -2420,7 +2420,7 @@ pub fn denoise_loop_rcd_3sr(
     // 3SR implies rcd_residual (via Cargo feature deps), so we can rely on
     // rcd_config being meaningful. If RCD itself is disabled at runtime,
     // h_pre,t degenerates to the standard mask embedding — still well-defined.
-    let rcd_enabled = rcd_config.as_ref().map_or(false, |c| c.enabled);
+    let rcd_enabled = rcd_config.as_ref().is_some_and(|c| c.enabled);
     if !rcd_enabled {
         // RCD disabled: 3SR still runs, but h_pre,t falls back to the mask
         // embedding for every still-masked position. This is the
@@ -2536,7 +2536,7 @@ pub fn denoise_loop_rcd_3sr(
                 &mut residual_scratch,
             );
             interpolate_residual(
-                &mask_emb,
+                mask_emb,
                 &residual_scratch,
                 alpha,
                 &mut bctx.rcd_residual_embeddings[p * n..(p + 1) * n],

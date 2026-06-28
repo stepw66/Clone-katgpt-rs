@@ -69,6 +69,7 @@ impl Default for ColliderConstraintConfig {
 /// - `active_task_colliders`: 1-indexed task ids whose colliders must be
 ///   preserved by any accepted branch. Empty = no constraint (fast path).
 #[derive(Clone, Debug)]
+#[derive(Default)]
 pub struct ColliderConstraint {
     /// Sorted ascending 1-indexed token positions of segment boundaries.
     pub segment_boundaries: Vec<usize>,
@@ -78,15 +79,6 @@ pub struct ColliderConstraint {
     pub config: ColliderConstraintConfig,
 }
 
-impl Default for ColliderConstraint {
-    fn default() -> Self {
-        Self {
-            segment_boundaries: Vec::new(),
-            active_task_colliders: Vec::new(),
-            config: ColliderConstraintConfig::default(),
-        }
-    }
-}
 
 impl ColliderConstraint {
     /// Construct with explicit boundaries + colliders.
@@ -199,8 +191,8 @@ impl ColliderConstraint {
                 Some(s) if !s.is_empty() => *s,
                 _ => continue,
             };
-            let k_seg = (boundary + segment_len - 1) / segment_len;
-            let v_seg = (v_pos + segment_len - 1) / segment_len;
+            let k_seg = boundary.div_ceil(segment_len);
+            let v_seg = v_pos.div_ceil(segment_len);
             if k_seg >= v_seg {
                 continue;
             }

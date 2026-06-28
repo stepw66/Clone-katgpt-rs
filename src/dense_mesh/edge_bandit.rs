@@ -86,7 +86,7 @@ impl EdgeBandit {
     /// α += reward, β += (1 - reward). This is the Bernoulli-bandit
     /// generalisation to continuous rewards.
     pub fn update(&mut self, idx: usize, reward: f32) {
-        debug_assert!(reward >= 0.0 && reward <= 1.0, "reward must be in [0,1]");
+        debug_assert!((0.0..=1.0).contains(&reward), "reward must be in [0,1]");
         self.alpha[idx] += reward;
         self.beta[idx] += 1.0 - reward;
         self.cumulative_reward[idx] += reward;

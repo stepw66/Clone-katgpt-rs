@@ -792,11 +792,10 @@ impl ConstraintPruner for VocabChannelPruner {
         let layer = self.active_layer.load(AtomicOrdering::Relaxed);
 
         // Try neuron-specific check first
-        if let Ok(neurons) = self.active_neurons.read() {
-            if !neurons.is_empty() {
+        if let Ok(neurons) = self.active_neurons.read()
+            && !neurons.is_empty() {
                 return self.is_valid_with_neurons(layer, &neurons, token_idx);
             }
-        }
 
         // Fallback: per-layer union
         self.is_valid_layer_union(layer, token_idx)
@@ -812,15 +811,14 @@ impl ConstraintPruner for VocabChannelPruner {
         let layer = self.active_layer.load(AtomicOrdering::Relaxed);
 
         // Try neuron-specific check first
-        if let Ok(neurons) = self.active_neurons.read() {
-            if !neurons.is_empty() {
+        if let Ok(neurons) = self.active_neurons.read()
+            && !neurons.is_empty() {
                 let len = candidates.len().min(results.len());
                 for i in 0..len {
                     results[i] = self.is_valid_with_neurons(layer, &neurons, candidates[i]);
                 }
                 return;
             }
-        }
 
         // Fallback: per-layer union batch check
         let len = candidates.len().min(results.len());

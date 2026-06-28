@@ -108,7 +108,7 @@ pub fn apply_rotation(
                 output[base + 3] = r[3];
             }
             // Tail: partial last group (zero-padded)
-            if dim % 4 != 0 {
+            if !dim.is_multiple_of(4) {
                 let g = n_full_groups;
                 let base = g * 4;
                 let mut v = [0.0f32; 4];
@@ -136,7 +136,7 @@ pub fn apply_rotation(
                 output[base + 2] = r[2];
                 output[base + 3] = r[3];
             }
-            if dim % 4 != 0 {
+            if !dim.is_multiple_of(4) {
                 let g = n_full_groups;
                 let base = g * 4;
                 let mut v = [0.0f32; 4];
@@ -181,7 +181,7 @@ pub fn apply_inverse_rotation(
                 output[base + 2] = r[2];
                 output[base + 3] = r[3];
             }
-            if dim % 4 != 0 {
+            if !dim.is_multiple_of(4) {
                 let g = n_full_groups;
                 let base = g * 4;
                 let mut v = [0.0f32; 4];
@@ -209,7 +209,7 @@ pub fn apply_inverse_rotation(
                 output[base + 2] = r[2];
                 output[base + 3] = r[3];
             }
-            if dim % 4 != 0 {
+            if !dim.is_multiple_of(4) {
                 let g = n_full_groups;
                 let base = g * 4;
                 let mut v = [0.0f32; 4];

@@ -107,7 +107,7 @@ impl<N: Clone> ProgressiveMcgs<N> {
     ) -> NodeId {
         let id = NodeId(self.payloads.len() as u32);
         assert!(
-            (id.idx() as usize) < self.max_nodes,
+            id.idx() < self.max_nodes,
             "max_nodes exceeded ({} >= {})",
             id.idx(),
             self.max_nodes
@@ -159,7 +159,7 @@ impl<N: Clone> ProgressiveMcgs<N> {
     pub fn add_reference(&mut self, child: NodeId, referenced: NodeId) {
         let edges = &mut self.reference_edges[child.idx()];
         // No-op if already referenced (dedup).
-        if edges.iter().any(|&e| e == referenced) {
+        if edges.contains(&referenced) {
             return;
         }
         if edges.len() >= self.max_refs_per_node {

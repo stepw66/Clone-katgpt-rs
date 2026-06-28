@@ -317,7 +317,7 @@ impl BomberInner {
     ) -> Option<BatchResult> {
         // Clone TypedFunc to release borrow on self before mutable operations.
         // TypedFunc wraps a Func handle (cheap index copy).
-        let batch_fn = self.batch_is_valid_fn.as_ref()?.clone();
+        let batch_fn = *self.batch_is_valid_fn.as_ref()?;
 
         let n = players.len().min(MAX_PLAYERS);
         if n == 0 {
@@ -400,7 +400,7 @@ impl BomberInner {
         bombs: &[((i32, i32), u32, u32)],
     ) -> Option<BatchRelevanceResult> {
         // Clone TypedFunc to release borrow on self before mutable operations.
-        let batch_fn = self.batch_relevance_fn.as_ref()?.clone();
+        let batch_fn = *self.batch_relevance_fn.as_ref()?;
 
         let n = players.len().min(MAX_PLAYERS);
         if n == 0 {

@@ -219,17 +219,11 @@ impl BandConditionerSelectorConfig {
 /// Hot path: `select_batch` accepts caller-provided scratch and performs
 /// **zero** heap allocations beyond the returned index `Vec`.
 #[derive(Clone, Copy, Debug)]
+#[derive(Default)]
 pub struct BandConditionerSelector {
     cfg: BandConditionerSelectorConfig,
 }
 
-impl Default for BandConditionerSelector {
-    fn default() -> Self {
-        Self {
-            cfg: BandConditionerSelectorConfig::default(),
-        }
-    }
-}
 
 impl BandConditionerSelector {
     /// Construct from config.
@@ -472,7 +466,7 @@ impl SyntheticScm {
         block_size: usize,
     ) -> Self {
         debug_assert!(
-            d % n_tasks == 0,
+            d.is_multiple_of(n_tasks),
             "d ({d}) must be divisible by n_tasks ({n_tasks}) for subspace separation"
         );
         Self::generate_inner(n_steps, d, n_tasks, rho, 0.0, seed, block_size, true)

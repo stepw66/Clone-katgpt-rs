@@ -569,8 +569,8 @@ fn play_internal_game(
         }
 
         let action = match state.to_play {
-            GoCell::Black => player1.select_move(&state, &legal_moves, rng),
-            GoCell::White => player2.select_move(&state, &legal_moves, rng),
+            GoCell::Black => player1.select_move(&state, legal_moves, rng),
+            GoCell::White => player2.select_move(&state, legal_moves, rng),
             GoCell::Empty => GoAction::Pass,
         };
 

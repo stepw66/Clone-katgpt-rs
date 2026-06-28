@@ -1003,8 +1003,8 @@ pub fn forward_looped<'a>(
         // refinement, cheaper than erank, and the kernel ships `step_size`
         // exactly for this use (see plan Open Question 2 resolution).
         #[cfg(feature = "gain_cost_halt")]
-        if halter_active && tau > 0 {
-            if let Some(h) = halter.as_deref_mut() {
+        if halter_active && tau > 0
+            && let Some(h) = halter.as_deref_mut() {
                 // gain = ||h^(tau) - h^(tau-1)||₂. `ctx.prev_h` was saved at
                 // the top of this iteration (before the layer pass), so it
                 // holds h^(tau-1); `ctx.x` now holds h^(tau) post-pass.
@@ -1057,7 +1057,6 @@ pub fn forward_looped<'a>(
                 std::mem::swap(&mut curr_step_buf, &mut prev_step_buf);
                 h.update_prev_step(gain);
             }
-        }
     }
 
     // Snapshot hidden state

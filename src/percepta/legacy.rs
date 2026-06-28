@@ -456,7 +456,7 @@ impl Sudoku9x9 {
                 if n == 0 {
                     return false; // dead cell
                 }
-                if best.map_or(true, |(_, _, bm)| n < bm.count_ones()) {
+                if best.is_none_or(|(_, _, bm)| n < bm.count_ones()) {
                     best = Some((r, c, mask));
                     if n == 2 {
                         break; // can't beat 2 candidates; early-exit the scan

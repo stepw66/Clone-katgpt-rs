@@ -45,10 +45,7 @@ impl IntervalMask {
     ///
     /// `gap_threshold = 0` means no merging — returns a clone.
     pub fn close_intervals(&self, gap_threshold: usize) -> Self {
-        match gap_threshold {
-            0 => return self.clone(),
-            _ => {}
-        }
+        if gap_threshold == 0 { return self.clone() }
 
         let intervals = self.valid_intervals();
         match intervals.len() {

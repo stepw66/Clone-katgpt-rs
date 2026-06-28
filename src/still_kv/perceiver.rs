@@ -90,13 +90,13 @@ impl StillPerceiver {
     /// Create a new perceiver with the given configuration.
     pub fn new(config: StillPerceiverConfig) -> Self {
         assert!(
-            config.latent_dim % config.cross_attn_heads == 0,
+            config.latent_dim.is_multiple_of(config.cross_attn_heads),
             "latent_dim ({}) must be divisible by cross_attn_heads ({})",
             config.latent_dim,
             config.cross_attn_heads,
         );
         assert!(
-            config.latent_dim % config.self_attn_heads == 0,
+            config.latent_dim.is_multiple_of(config.self_attn_heads),
             "latent_dim ({}) must be divisible by self_attn_heads ({})",
             config.latent_dim,
             config.self_attn_heads,

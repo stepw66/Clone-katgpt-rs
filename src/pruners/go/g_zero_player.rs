@@ -830,7 +830,7 @@ pub fn run_gzero_selfplay(
             let template = proposer.select_template();
 
             // Propose matching moves
-            let candidates = proposer.propose_moves(template, &state, &legal_moves);
+            let candidates = proposer.propose_moves(template, &state, legal_moves);
 
             // Pick best candidate by greedy score
             let best_move = candidates
@@ -848,7 +848,7 @@ pub fn run_gzero_selfplay(
                 &state,
                 template,
                 best_move,
-                &legal_moves,
+                legal_moves,
                 proposer.last_move,
                 &mut board_tokens_buf,
             );

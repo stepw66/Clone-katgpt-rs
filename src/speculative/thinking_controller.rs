@@ -573,7 +573,7 @@ impl ThinkingController {
                     ThinkingMode::Latent
                 }
             }
-            rv if rv < RV_THETA_LOW && rv >= 0.0 => {
+            rv if (0.0..RV_THETA_LOW).contains(&rv) => {
                 // Low RV → model confident → Direct mode
                 ThinkingMode::Direct
             }

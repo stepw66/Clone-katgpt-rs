@@ -201,7 +201,7 @@ impl FsmEnumerator {
     /// hash the behavioral fingerprint with blake3, and keep only distinct ones.
     pub fn enumerate(n_states: u8) -> Vec<FsmStrategy> {
         let n = n_states as usize;
-        debug_assert!(n >= 1 && n <= MAX_STATES);
+        debug_assert!((1..=MAX_STATES).contains(&n));
 
         let mut raw = Vec::new();
         Self::enumerate_raw(n_states, &mut raw);

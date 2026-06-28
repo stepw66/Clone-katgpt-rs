@@ -25,10 +25,7 @@ pub fn sample_masks(
     rng: &mut fastrand::Rng,
 ) -> Vec<AblationMask> {
     let mut out = Vec::with_capacity(m);
-    match n_heads {
-        0 => return out,
-        _ => {}
-    }
+    if n_heads == 0 { return out }
     // Exact ablation count, capped at n_heads − 1 so we never produce an
     // all-zero mask (which would carry no per-head signal).
     let n_ablate_raw = (ablation_fraction * n_heads as f32).round() as i64;

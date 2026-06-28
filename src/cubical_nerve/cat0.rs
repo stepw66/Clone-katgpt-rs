@@ -247,8 +247,8 @@ where
     let n = elements.len();
     for i in 0..n {
         for j in (i + 1)..n {
-            let path_forward = cat0_geodesic_with_adj(&complex, &adj, elements[i], elements[j]);
-            let path_backward = cat0_geodesic_with_adj(&complex, &adj, elements[j], elements[i]);
+            let path_forward = cat0_geodesic_with_adj(complex, &adj, elements[i], elements[j]);
+            let path_backward = cat0_geodesic_with_adj(complex, &adj, elements[j], elements[i]);
 
             // Both must find a path.
             if path_forward.is_empty() || path_backward.is_empty() {

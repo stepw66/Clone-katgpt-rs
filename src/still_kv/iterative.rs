@@ -238,7 +238,7 @@ impl IterativeChunkCompactor {
         // Step 1: Un-rotate RoPE from keys (position-free space)
         let pos_free_compactor = PositionFreeCompactor::new(self.rope_theta, kv_dim);
         let unrotated_keys =
-            pos_free_compactor.un_rotate_keys(&combined_keys_f16, combined_start_pos);
+            pos_free_compactor.un_rotate_keys(combined_keys_f16, combined_start_pos);
 
         // Step 2: Convert values to f32 and concat [K_free; V] → 2d-dim input
         let unrotated_values_f32: Vec<f32> =

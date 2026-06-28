@@ -176,7 +176,7 @@ fn dag_shortest_path(graph: &TokenisationGraph, selected_set: &[bool]) -> f64 {
         }
     }
     let mut adj: Vec<Vec<(usize, f64)>> =
-        out_deg.into_iter().map(|d| Vec::with_capacity(d)).collect();
+        out_deg.into_iter().map(Vec::with_capacity).collect();
 
     // Free edges: always cost 1
     for &(from, to) in &graph.free_edges {

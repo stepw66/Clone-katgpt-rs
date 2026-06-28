@@ -103,8 +103,8 @@ impl ShardKVCache {
 
         let mut layers: Vec<ShardLayer> = k_calibrations
             .iter()
-            .enumerate()
-            .map(|(_layer_idx, k_cal)| {
+            
+            .map(|k_cal| {
                 let d_eff = (k_cal.k_d_eff.ceil() as usize).max(1).min(head_dim);
 
                 // K-path: bit allocation via water-fill
