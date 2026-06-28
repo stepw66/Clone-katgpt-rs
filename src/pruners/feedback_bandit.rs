@@ -403,6 +403,20 @@ impl FeedbackBandit {
         &self.trajectory
     }
 
+    /// Record an externally-forced `WeightUpdate` arm pull (Issue 002 T2.7).
+    ///
+    /// `TraceInformedFeedbackBandit` calls this when the active-state trace
+    /// signal fires and forces `WeightUpdate` over the inner UCB1's choice.
+    /// Keeps the trajectory summary's `arm_pulls` histogram consistent with
+    /// the decisions that actually executed, so downstream analytics
+    /// (decision distribution, lever usage) stay accurate.
+    ///
+    /// Does **not** emit a `WeightUpdateRequest` — the trace-informed path
+    /// handles request emission itself via the normal `select()` call.
+    pub fn record_override_weight_update(&mut self) {
+        self.trajectory.record_arm(PlanningDecision::WeightUpdate);
+    }
+
     /// Get reference to inner configurator bandit.
     pub fn inner(&self) -> &ConfiguratorBandit {
         &self.inner

@@ -88,6 +88,13 @@ pub mod configurator_bandit;
 #[cfg(feature = "sia_feedback")]
 pub mod feedback_bandit;
 
+/// TraceInformedFeedbackBandit — active-state-trace-biased wrapper around
+/// FeedbackBandit (Issue 002 T2.7). Leading trace signal overrides the
+/// stall-only harness-vs-weight decision. IP-clean: generic `ActiveStateTrace`
+/// trait keeps the IP-heavy `ActiveStateEvent` struct private to riir-games.
+#[cfg(feature = "sia_feedback")]
+pub mod trace_informed_feedback_bandit;
+
 #[cfg(feature = "dreamer")]
 pub mod dreamer;
 
@@ -136,6 +143,11 @@ pub use configurator_bandit::EpiplexityArmHeuristic;
 #[cfg(feature = "sia_feedback")]
 pub use feedback_bandit::{
     FeedbackBandit, FeedbackBanditConfig, RlAlgorithmHint, TrajectorySummary, WeightUpdateRequest,
+};
+#[cfg(feature = "sia_feedback")]
+pub use trace_informed_feedback_bandit::{
+    ActiveStateTrace, EmptyTrace, TraceInformedConfig, TraceInformedFeedbackBandit,
+    DEFAULT_TRACE_SIGNAL_THRESHOLD, trace_signal,
 };
 
 #[cfg(feature = "posterior_evolution")]
