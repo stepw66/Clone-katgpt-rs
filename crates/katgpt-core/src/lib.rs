@@ -370,7 +370,7 @@ pub use subspace_phase_gate::{
 
 #[cfg(feature = "latent_trajectory_geometry")]
 pub use latent_trajectory_geometry::{
-    BifurcationResult, LatentTrajectoryGeometry, bifurcation_ratio, from_states,
+    BifurcationResult, LatentTrajectoryGeometry, bifurcation_ratio, fast_acos, from_states,
 };
 
 #[cfg(feature = "viable_manifold_graph")]

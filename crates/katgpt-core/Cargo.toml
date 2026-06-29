@@ -658,3 +658,12 @@ required-features = ["tropical_algebra"]
 name = "bench_341_temp_loss_fingerprint_goat"
 harness = false
 required-features = ["temp_loss_fingerprint"]
+
+# Plan 342 Phase 4 T4.1 G2 — Latent Trajectory Geometry perf bench.
+# from_states + bifurcation_ratio median latency across realistic trajectory
+# shapes (HLA dim=8, diagnostic dim=32, transformer hidden dim=768). Target:
+# 100x32 trajectory < 5 us. Convention: std::time::Instant + harness = false.
+[[bench]]
+name = "bench_342_latent_trajectory_geometry_goat"
+harness = false
+required-features = ["latent_trajectory_geometry"]
