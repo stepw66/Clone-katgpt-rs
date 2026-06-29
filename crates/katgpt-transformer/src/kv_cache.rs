@@ -88,6 +88,19 @@ impl MultiLayerKVCache {
         self.fill_pos
     }
 
+    /// Set the fill_pos tracker directly, WITHOUT touching the K/V buffers.
+    ///
+    /// Use this when a caller has already reshaped the buffer contents in-place
+    /// (e.g. sliding-window eviction's `copy_within` shift) and only needs to
+    /// advance/shrink the logical fill marker. Distinct from `reset()`, which
+    /// also zeroes the K/V data — calling `reset()` after an in-place shift
+    /// would wipe the just-copied entries (Issue: sleep eviction
+    /// sliding_window_retains_recent failure, 2026-06-29).
+    #[inline]
+    pub fn set_fill_pos(&mut self, pos: usize) {
+        self.fill_pos = pos;
+    }
+
     /// Snapshot KV cache state up to position `pos`.
     /// Copies only filled slots [0..pos) per layer — cheap at our model scale.
     pub fn snapshot(&self, pos: usize, config: &Config) -> KVSnapshot {

@@ -886,7 +886,16 @@ mod tests {
         }
 
         let (new, extend, skip, spechop) = player.decision_stats();
-        let total = new + extend + skip + spechop;
+        let mut total = new + extend + skip + spechop;
+        // Under `sia_feedback`, the ConfiguratorBandit can also pick
+        // HarnessUpdate / WeightUpdate, which are tracked separately in
+        // `feedback_decision_stats()` (not the 4-tuple). Include them so the
+        // total accounts for every decision arm the configurator can take.
+        #[cfg(feature = "sia_feedback")]
+        {
+            let (harness, weight) = player.feedback_decision_stats();
+            total += harness + weight;
+        }
         assert_eq!(total, 30, "all 30 ticks should have a decision recorded");
         // UCB1 explores all arms, so we expect at least some of each type
         assert!(new > 0, "PlanNew should be selected at least once");
