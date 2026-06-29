@@ -328,6 +328,15 @@ pub mod irrep_pruner;
 #[cfg(feature = "subspace_phase_gate")]
 pub mod subspace_phase_gate;
 
+// Latent Trajectory Geometry — probe-free geometric diagnostic (length +
+// mean turning-angle curvature + min adjacent cosine + bifurcation ratio).
+// Distilled from Pandey et al., arXiv:2606.09287 (Plan 342, Research 324).
+// Pure numeric over `&[&[f32]]`, no extra deps. Opt-in until the Phase 3
+// game-related gate (curvature catches the oscillation failure mode entropy
+// misses) passes; promotion to a routing role is a separate follow-up plan.
+#[cfg(feature = "latent_trajectory_geometry")]
+pub mod latent_trajectory_geometry;
+
 // Viable Manifold Graph — discrete safe-manifold navigation primitive.
 // Distillation of arXiv:2206.00106 (González-Duque et al., *Mario Plays on a
 // Manifold*, 2022). Generic over any smooth map `f: R^n → R^m` (closure) and
@@ -357,6 +366,11 @@ pub use subspace_phase_gate::{
     IntrinsicDimMethod, JacobianSvdScratch, SvdResult, SvdResultScratch, SvdScratch,
     estimate_intrinsic_dim, jacobian_svd_at, numerical_rank, participation_ratio,
     phase_transition_gate, thin_svd, thin_svd_into,
+};
+
+#[cfg(feature = "latent_trajectory_geometry")]
+pub use latent_trajectory_geometry::{
+    BifurcationResult, LatentTrajectoryGeometry, bifurcation_ratio, from_states,
 };
 
 #[cfg(feature = "viable_manifold_graph")]
