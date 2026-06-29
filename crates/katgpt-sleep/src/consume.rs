@@ -35,7 +35,7 @@
 //! through the live consume() path — when the sleep-time forecast was accurate,
 //! the nearest precomputed slot is the player's true topic.
 
-use katgpt_types::simd::{fast_sigmoid, simd_dot_f32};
+use katgpt_types::simd::{fast_sigmoid, simd_dist_sq, simd_dot_f32};
 use crate::types::AnticipatedQuerySet;
 
 /// How [`consume_with_match_mode`] / [`consume_gate_with_match_mode`] match a
@@ -92,16 +92,14 @@ fn find_best_match<const D: usize, const K: usize>(
         }
         ConsumeMatchMode::Precomputed => {
             // argmin_i ||slot_i.precomputed − q||² — forecast-dependent
-            // answer-retrieval match. No sqrt (argmin identical); branch-free
-            // inner accumulation per AGENTS.md hot-loop rules.
+            // answer-retrieval match. No sqrt (argmin identical). Use the
+            // SIMD dist_sq kernel for consistency with the Direction branch
+            // (which uses simd_dot_f32) — one NEON/AVX2 reduction per slot
+            // instead of a scalar accumulate loop.
             let mut best_i = 0usize;
             let mut best_dist = f32::INFINITY;
             for i in 0..K {
-                let mut dist_sq = 0.0f32;
-                for (q_val, &pre) in q.iter().zip(c_prime.slots[i].precomputed.iter()).take(D) {
-                    let d = pre - q_val;
-                    dist_sq += d * d;
-                }
+                let dist_sq = simd_dist_sq(q, &c_prime.slots[i].precomputed, D);
                 if dist_sq < best_dist {
                     best_dist = dist_sq;
                     best_i = i;
@@ -162,9 +160,12 @@ where
     //    primitive concern.)
     let z = c_prime.slots[best_i].precomputed;
     let fresh = fresh_think(q);
+    // Hoist `1.0 - gate` out of the blend loop (loop-invariant; LLVM usually
+    // hoists it but explicit is guaranteed and clearer).
+    let inv_gate = 1.0 - gate;
     let mut out = [0.0f32; D];
     for j in 0..D {
-        out[j] = gate * z[j] + (1.0 - gate) * fresh[j];
+        out[j] = gate * z[j] + inv_gate * fresh[j];
     }
     out
 }
