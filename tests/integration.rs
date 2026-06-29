@@ -198,6 +198,7 @@ fn test_matmul_zero_weight() {
 }
 
 #[test]
+#[allow(deprecated)] // exercises the deprecated `sample_token` public API for backward-compat coverage
 fn test_sample_token_valid() {
     let config = types::Config::micro();
     let mut rng = types::Rng::new(42);

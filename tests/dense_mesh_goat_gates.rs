@@ -206,11 +206,6 @@ fn run_gate3_at_scale(config: &Config, config_name: &str) -> bool {
     pass
 }
 
-/// Build a `TransformerNode` from an existing config + weights (avoids re-seeding).
-fn make_node(config: Config, weights: TransformerWeights, token: usize, pos: usize) -> TransformerNode {
-    TransformerNode::new(config, weights, token, pos)
-}
-
 /// Build a `TransformerNode` by constructing fresh weights with the given seed.
 /// Used when we can't clone `TransformerWeights` (it doesn't derive Clone).
 fn make_node_with_seed(config: Config, seed: u64, token: usize, pos: usize) -> TransformerNode {

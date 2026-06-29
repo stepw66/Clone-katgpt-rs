@@ -13,9 +13,7 @@
 
 use katgpt_core::traits::{NoScreeningPruner, ScreeningPruner};
 use katgpt_rs::pruners::bandit::{BanditPruner, BanditStrategy};
-use katgpt_rs::pruners::dynamic_rank::{
-    DynamicRankPruner, StaticRankingReport, static_ranking_diagnostic,
-};
+use katgpt_rs::pruners::dynamic_rank::{DynamicRankPruner, static_ranking_diagnostic};
 
 const VOCAB: usize = 32;
 const MAX_DEPTH: usize = 6;

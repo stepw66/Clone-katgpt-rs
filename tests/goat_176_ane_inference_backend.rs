@@ -8,7 +8,7 @@
 
 use katgpt_rs::inference_backend::{BackendKind, CpuBackend, InferenceBackend, auto_backend};
 use katgpt_rs::transformer::{self, ForwardContext, MultiLayerKVCache, TransformerWeights};
-use katgpt_rs::types::{Config, Rng, sample_token, softmax_scaled};
+use katgpt_rs::types::{Config, Rng, sample_token_into, softmax_scaled};
 
 fn setup() -> (Config, TransformerWeights) {
     let config = Config::micro();
@@ -94,6 +94,7 @@ fn goat_p6_cpu_backend_generation_valid_tokens() {
     let mut ctx = ForwardContext::new(&config);
     let mut cache = MultiLayerKVCache::new(&config);
     let mut rng = Rng::new(42);
+    let mut cdf = Vec::with_capacity(config.vocab_size);
 
     let mut token = config.bos_token;
     let mut generated = Vec::new();
@@ -101,7 +102,7 @@ fn goat_p6_cpu_backend_generation_valid_tokens() {
     for pos in 0..10 {
         let logits = backend.forward(&mut ctx, &weights, &mut cache, token, pos, &config);
         softmax_scaled(logits, 1.0 / config.temperature);
-        let next = sample_token(&ctx.logits, &mut rng);
+        let next = sample_token_into(&ctx.logits, &mut rng, &mut cdf);
         assert!(
             next < config.vocab_size,
             "token {next} >= vocab_size {}",

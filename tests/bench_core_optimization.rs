@@ -13,6 +13,7 @@
 use std::hint::black_box;
 use std::time::Instant;
 
+#[allow(deprecated)] // `sample_token` is imported for bench_03_math_utilities, which benchmarks its allocator overhead by design
 use katgpt_core::{
     Config, Rng, SimdLevel, matmul, matmul_relu, rmsnorm, sample_token, softmax, softmax_scaled,
 };
@@ -148,7 +149,7 @@ fn bench_02_simd_primitives() {
 // ── Section 3: Math Utilities ────────────────────────────────
 
 #[test]
-
+#[allow(deprecated)] // benchmarks the deprecated `sample_token` allocator overhead by design
 #[ignore = "pure measurement benchmark (no assertions), slow in debug; run with --release --ignored"]
 fn bench_03_math_utilities() {
     println!();
