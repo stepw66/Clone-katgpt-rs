@@ -183,18 +183,21 @@ fn compute_game_delta(
 
 /// Compute scalar reward from game state.
 ///
-/// Same weights as `RubricTemplate::bomber()`:
+/// Weights are hardcoded and intentionally NOT synchronized with
+/// `RubricTemplate::bomber()` (which uses `[4.0, 2.0, 1.0]`, normalized
+/// `[0.571, 0.286, 0.143]`). These weights predate the template; retuning
+/// them would shift reward magnitudes and break SDAR/RMSD training baselines.
 ///
-/// | Component | Weight |
-/// |-----------|--------|
-/// | Survival  | 0.50   |
-/// | Safety    | 0.35   |
-/// | Completeness | 0.15 |
+/// | Component    | Weight |
+/// |--------------|--------|
+/// | Survival     | 0.50   |
+/// | Safety       | 0.35   |
+/// | Completeness | 0.15   |
 fn compute_sdar_reward(alive: bool, danger: f32, powerups_collected: u32) -> f32 {
     let survival = if alive { 1.0 } else { 0.0 };
     let safety = 1.0 - danger.clamp(0.0, 1.0);
     let completeness = (powerups_collected as f32 / 3.0).min(1.0);
-    // Weighted blend — same weights as RubricTemplate::bomber()
+    // Weighted blend — hardcoded weights, see doc note above
     survival * 0.5 + safety * 0.35 + completeness * 0.15
 }
 

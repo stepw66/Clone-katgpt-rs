@@ -82,13 +82,15 @@ These pass single-threaded with `--test-threads=1` and fail only under parallel 
   `sdar_player` pattern: compute `expected` from the weights, assert at
   1e-6. Kept a weaker secondary assertion (`reward < 0.85`) to confirm danger
   is still penalized relative to the safe case.
-- **Side note (not fixed here):** the doc comment "same weights as
-  `RubricTemplate::bomber()`" is inaccurate — the template uses `[4.0, 2.0,
-  1.0]` (normalized `[0.571, 0.286, 0.143]`) while the function hardcodes
-  `[0.5, 0.35, 0.15]`. The hardcoded weights predate the template and are
-  what every other test in both files expects; retuning them to match the
-  template is a separate decision that would change reward magnitudes and
-  break downstream SDAR/RMSD training baselines.
+- **Side note (RESOLVED 2026-06-29):** the doc comments on `compute_sdar_reward`
+  (rmsd_player.rs, sdar_player.rs) and `compute_sdpg_reward` (sdpg_player.rs)
+  previously claimed "same weights as `RubricTemplate::bomber()`" — this was
+  inaccurate. The template uses `[4.0, 2.0, 1.0]` (normalized
+  `[0.571, 0.286, 0.143]`) while the functions hardcode `[0.5, 0.35, 0.15]`.
+  The doc comments now accurately document that these weights are hardcoded,
+  predate the template, and are intentionally NOT synchronized with it
+  (retuning would shift reward magnitudes and break SDAR/RMSD/SDPG training
+  baselines). The actual weight VALUES are unchanged — this is a doc-only fix.
 
 ## GOAT-gate failures
 
@@ -116,6 +118,23 @@ The single failure is `fpcg_probe_forecast_bench` (katgpt-rs): G6 perf gate at `
 - `cargo build --examples --all-features` — **211/211 compile clean**.
 - Smoke-ran a diverse 30-example sample (non-TUI, 20s timeout each) spanning bandit / bomber / attn / cache / cgsp / go / monopoly / ruliology / spectral domains — **30/30 PASS, 0 timeouts**.
 - TUI examples (`bear_02_tui`, `bomber_02_tui`, `dungeon_01_tui`, `go_07_tui`, `monopoly_02_tui`, `sudoku_03_tui`, `tactical_06_tui`, `tactical_09_fog_tui`) were skipped — they block on the terminal and are not smoke-testable headless.
+
+## Repository hygiene (RESOLVED 2026-06-29)
+
+Cleaned up pre-existing compiler warnings flagged in the prior session summary:
+
+- **Unused import** `StaticRankingReport` in `tests/goat_232_dynamic_rank.rs` — removed.
+- **Dead code** `make_node` in `tests/dense_mesh_goat_gates.rs` — removed (only `make_node_with_seed` is used; `TransformerWeights` doesn't derive `Clone`).
+- **Deprecated `sample_token` usage** (6 sites, 4 files):
+  - `tests/bench_176_ane_inference_backend.rs`, `tests/goat_176_ane_inference_backend.rs` — migrated to `sample_token_into` with a pre-allocated CDF buffer (these use it for token generation, not benchmarking the function).
+  - `tests/bench_core_optimization.rs` (`bench_03_math_utilities`) — `#[allow(deprecated)]` on the function and import; this benchmark intentionally measures the deprecated function's allocator overhead.
+  - `tests/integration.rs` (`test_sample_token_valid`) — `#[allow(deprecated)]`; this test exercises the deprecated public API for backward-compat coverage.
+
+Result: `cargo check --tests --all-features` is now **warning-free**.
+
+## Pre-existing environmental issue (NOT fixed — out of scope)
+
+- `goat_176_ane_inference_backend::goat_p3_auto_backend_auto_fallback` asserts `auto_backend(BackendKind::Auto, None).device_name() == "CPU"`, but on Apple Silicon hosts with ANE available it returns `"ANE"`. This is an environmental/detection issue unrelated to any change in this issue — it was surfaced when running the goat_176 suite but is not caused by the `sample_token` migration (which only touches `goat_p6`). Left as-is per the "don't fix unrelated bugs" rule.
 
 ## Reproduction
 

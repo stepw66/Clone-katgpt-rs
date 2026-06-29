@@ -186,18 +186,21 @@ fn compute_game_delta(
 
 /// Compute scalar reward from game state.
 ///
-/// Same weights as `RubricTemplate::bomber()`:
+/// Weights are hardcoded and intentionally NOT synchronized with
+/// `RubricTemplate::bomber()` (which uses `[4.0, 2.0, 1.0]`, normalized
+/// `[0.571, 0.286, 0.143]`). These weights predate the template; retuning
+/// them would shift reward magnitudes and break SDAR/RMSD training baselines.
 ///
-/// | Component | Weight |
-/// |-----------|--------|
-/// | Survival  | 0.50   |
-/// | Safety    | 0.35   |
-/// | Completeness | 0.15 |
+/// | Component    | Weight |
+/// |--------------|--------|
+/// | Survival     | 0.50   |
+/// | Safety       | 0.35   |
+/// | Completeness | 0.15   |
 fn compute_sdar_reward(alive: bool, danger: f32, powerups_collected: u32) -> f32 {
     let survival = if alive { 1.0 } else { 0.0 };
     let safety = 1.0 - danger.clamp(0.0, 1.0);
     let completeness = (powerups_collected as f32 / 3.0).min(1.0);
-    // Weighted blend — same weights as RubricTemplate::bomber()
+    // Weighted blend — hardcoded weights, see doc note above
     survival * 0.5 + safety * 0.35 + completeness * 0.15
 }
 
@@ -704,10 +707,10 @@ mod tests {
         // completeness*0.15` evaluates to 0.57 for that input, and no set of
         // weights that also satisfies the `alive_safe` (0.85) and `all_zero`
         // (0.35) constraints can drive this case under 0.5. The survival
-        // term dominates by design (weight 0.5, same as
-        // `RubricTemplate::bomber()` where TaskFulfillment carries the
-        // largest weight). Aligns with the `sdar_player` version of this
-        // test, which computes `expected` from the formula directly.
+        // term dominates by design (hardcoded weight 0.5 — see the doc note
+        // on `compute_sdar_reward`; NOT synchronized with
+        // `RubricTemplate::bomber()`). Aligns with the `sdar_player` version
+        // of this test, which computes `expected` from the formula directly.
         let reward = compute_sdar_reward(true, 0.8, 0);
         let expected = 1.0 * 0.5 + 0.2 * 0.35 + 0.0 * 0.15;
         assert!(

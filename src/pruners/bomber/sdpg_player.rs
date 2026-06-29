@@ -181,13 +181,17 @@ fn compute_game_delta(
 
 /// Compute scalar reward from game state.
 ///
-/// Same weights as `RubricTemplate::bomber()` and `compute_sdar_reward`:
+/// Weights are hardcoded and intentionally NOT synchronized with
+/// `RubricTemplate::bomber()` (which uses `[4.0, 2.0, 1.0]`, normalized
+/// `[0.571, 0.286, 0.143]`). These weights predate the template; retuning
+/// them would shift reward magnitudes and break SDPG training baselines.
+/// Same convention as `compute_sdar_reward` in `rmsd_player.rs` / `sdar_player.rs`.
 ///
-/// | Component | Weight |
-/// |-----------|--------|
-/// | Survival  | 0.50   |
-/// | Safety    | 0.35   |
-/// | Completeness | 0.15 |
+/// | Component    | Weight |
+/// |--------------|--------|
+/// | Survival     | 0.50   |
+/// | Safety       | 0.35   |
+/// | Completeness | 0.15   |
 fn compute_sdpg_reward(alive: bool, danger: f32, powerups_collected: u32) -> f32 {
     let survival = if alive { 1.0 } else { 0.0 };
     let safety = 1.0 - danger.clamp(0.0, 1.0);
