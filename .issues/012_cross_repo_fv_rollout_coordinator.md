@@ -37,7 +37,7 @@ aligned with:
 | Repo | `.proofs/` exists? | Theorems shipped | Sibling issue |
 |---|---|---|---|
 | `katgpt-rs` (public) | ✅ `KatgptProof` (Plan 293) | `action_bridge_ranking_preserved`, `action_bridge_argmax_preserved` | this issue (coordinator) |
-| `riir-chain` (private) | ✅ `RiirChainProof` (Plans 004 + 008) | LatCal round-trip (3), quorum determinism (4), chain-side `merkle_root` (4) | `riir-chain/.issues/001_*` (T1–T5, T8, T9 done; T6/T7 deferred) |
+| `riir-chain` (private) | ✅ `RiirChainProof` (Plans 004 + 008 + 009) | LatCal round-trip (3), quorum determinism (4), chain-side `merkle_root` (4), **slashing monotonicity (8)**, **split-key security (10)** | `riir-chain/.issues/001_*` (**CLOSED** — T1–T9 all done) |
 | `riir-neuron-db` (private) | ✅ `NeuronDbProof` (Plans 007 + 008) | `Shard/Layout` (7 thms), `Consolidation/FreezeGate` (8 thms), `Merkle/Soundness` (4 thms) | `riir-neuron-db/.issues/004_*` (Phase 1 + P1 done; P2 pending) |
 | `riir-ai` (private) | ❌ none | — | `riir-ai/.issues/348_*` (P1, now unblocked) |
 | `riir-train` (private) | ❌ none | — | `riir-train/.issues/308_*` (**EXCLUDED**) |
@@ -68,8 +68,20 @@ aligned with:
     `tests/merkle_soundness_spec_match.rs` (7/7, incl. 1000-trial tamper stress
     + 16K single-byte tampers) validates BLAKE3 satisfies the `h_inj`
     hypothesis empirically.
-  - 🟡 **chain split-key security + slashing monotonicity** — still open
-    (`riir-chain/.issues/001_*` T6/T7).
+  - ✅ **chain split-key security + slashing monotonicity** — DONE (Plan 009,
+    2026-06-30). Shipped `Economics/SlashingMonotone.lean` (8 axiom-free thms:
+    `slashed_is_absorbing` — once slashed, no sequence of slashes can un-slash;
+    `slash_evidence_first_writer_wins` — idempotency for the Plan 212 penalty
+    tracker; + 6 helpers/corollaries) and `Crypto/SplitKey.lean` (10 thms:
+    `wire_safe_only_commitment` — only `txCommitment` is wire-safe;
+    `combine_not_const_in_alpha` / `combine_not_const_in_beta` — under
+    `CombineNonDegenerate`, `combine` depends on each argument). Parameterized
+    over `combine` (Approach B, matching neuron-db Plan 008) so the crypto
+    assumption is a hypothesis. Spec-match tests: 8/8 slashing (incl. 1000-trial
+    × 16-reslash stress) + 7/7 split-key (incl. 10K-input BLAKE3
+    non-degeneracy corpus). Closes `riir-chain/.issues/001_*` (T1–T9 all ✅).
+
+  **Phase 3 COMPLETE.**
 - 🟡 **Phase 4 (P1): riir-ai** — `hla_scalar_boundedness` (cheap, extends
   KatgptProof) + freeze/thaw reader invariant (the hard long pole).
 - 🟡 **Phase 5 (P2/P3): riir-ai** — bridge ordering over learned directions.
