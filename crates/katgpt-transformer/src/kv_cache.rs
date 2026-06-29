@@ -105,6 +105,40 @@ impl MultiLayerKVCache {
         KVSnapshot { pos, layers }
     }
 
+    /// Zero-alloc variant of [`snapshot`](Self::snapshot) that refills a reusable
+    /// [`KVSnapshot`] in place. The snapshot's per-layer `key`/`value` buffers
+    /// are `resize`d to the new length (reusing their existing allocation when
+    /// possible) and overwritten — no new `Vec` is allocated in steady state.
+    ///
+    /// # Allocation
+    ///
+    /// On the first call (or when `out` was previously shorter), the inner
+    /// Vecs grow. On every subsequent call with the same or smaller `pos`,
+    /// the existing allocations are reused — zero new heap allocations. This
+    /// is the variant to use on the per-speculation-step hot path.
+    ///
+    /// # Layer-count changes
+    ///
+    /// If `out.layers.len() != self.layers.len()`, the outer Vec is resized.
+    /// In steady state (same model), this branch is never taken.
+    pub fn snapshot_into(&self, pos: usize, config: &Config, out: &mut KVSnapshot) {
+        let kd = types::kv_dim(config);
+        let end = pos * kd;
+        out.pos = pos;
+        if out.layers.len() != self.layers.len() {
+            out.layers.resize_with(self.layers.len(), || KVLayerSnapshot {
+                key: Vec::new(),
+                value: Vec::new(),
+            });
+        }
+        for (src, dst) in self.layers.iter().zip(out.layers.iter_mut()) {
+            dst.key.resize(end, 0.0);
+            dst.value.resize(end, 0.0);
+            dst.key[..end].copy_from_slice(&src.key[..end]);
+            dst.value[..end].copy_from_slice(&src.value[..end]);
+        }
+    }
+
     /// Restore KV cache from a snapshot.
     /// Writes snapshot data back and zeros out positions [snapshot.pos..block_size)
     /// to prevent stale data leaking into the next sequence. The tail zeroing is
@@ -364,13 +398,18 @@ impl PagedKVCache {
         // Issue 053: use ref counts for O(1) exclusive-page detection instead of
         // building a HashSet by scanning all sequences across all layers (O(N×P×L)).
         // Decrement ref count for each removed page; if count reaches 0, it's exclusive.
+        //
+        // Pop from the end (no intermediate Vec) — the previous form allocated
+        // a `Vec<usize>` per layer per rollback just to iterate it once.
         for layer_tables in &mut self.layer_page_tables {
             if seq_idx >= layer_tables.len() {
                 continue;
             }
             let table = &mut layer_tables[seq_idx];
-            let removed: Vec<usize> = table.drain(keep_count..).collect();
-            for pidx in removed {
+            while table.len() > keep_count {
+                // SAFETY: we just checked `table.len() > keep_count`, so the
+                // table is non-empty; `pop` returns the last element.
+                let pidx = table.pop().expect("checked non-empty above");
                 self.page_ref_counts[pidx] -= 1;
                 if self.page_ref_counts[pidx] == 0 {
                     self.free_pages.push(pidx);

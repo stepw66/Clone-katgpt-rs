@@ -360,6 +360,10 @@ pub fn sparse_matmul(
 ///
 /// **Allocates a CDF buffer on every call.** For the hot decode loop, prefer
 /// [`sample_token_into`] which reuses a pre-allocated buffer.
+#[deprecated(
+    since = "0.1.0",
+    note = "allocates a vocab-sized Vec per call; use `sample_token_into` on hot paths"
+)]
 pub fn sample_token(probs: &[f32], rng: &mut Rng) -> usize {
     // Redraw on exactly 0.0: `rng.uniform()` can return 0.0 (notably the first draw
     // for low-entropy seeds), which deterministically maps to the first nonzero-mass
@@ -419,4 +423,3 @@ pub fn sample_token_into(probs: &[f32], rng: &mut Rng, cdf: &mut Vec<f32>) -> us
     let idx = cdf[..n].partition_point(|&c| c <= r);
     idx.min(n - 1)
 }
-

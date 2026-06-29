@@ -490,16 +490,19 @@ pub fn ahla_step(
         }
     }
 
-    // TODO(T6): transpose matvec (E^T * q with row-major E) — see hla_readout comment
-    for j in 0..hd {
-        let mut val = 0.0f32;
-        for i in 0..hd {
+    // transpose-matvec (E^T · q with row-major E): loop-interchanged to
+    // i-outer / j-inner so the inner loop reads `e_row[j]` sequentially
+    // (row-major contiguous) instead of strided `e[i*hd + j]` column access.
+    // Matches the cache-friendly pattern used in `hla_readout` / `hla_denom`.
+    // The TODO(T6) above is resolved by this interchange.
+    out[..hd].fill(0.0);
+    for i in 0..hd {
+        let qi = unsafe { *q.get_unchecked(i) };
+        let e_row = unsafe { q_head.e.get_unchecked(i * hd..i * hd + hd) };
+        for j in 0..hd {
             unsafe {
-                val += *q.get_unchecked(i) * *q_head.e.get_unchecked(i * hd + j);
+                *out.get_unchecked_mut(j) += qi * *e_row.get_unchecked(j);
             }
-        }
-        unsafe {
-            *out.get_unchecked_mut(j) = val;
         }
     }
 }
@@ -672,16 +675,16 @@ fn ahla_per_head_step(
         }
     }
 
-    // TODO(T6): transpose matvec (E^T * q with row-major E) — see hla_readout comment
-    for j in 0..hd {
-        let mut val = 0.0f32;
-        for i in 0..hd {
+    // transpose-matvec (E^T · q with row-major E): loop-interchanged to
+    // i-outer / j-inner for sequential `e_row[j]` reads (see ahla_step).
+    out[..hd].fill(0.0);
+    for i in 0..hd {
+        let qi = unsafe { *q.get_unchecked(i) };
+        let e_row = unsafe { q_head.e.get_unchecked(i * hd..i * hd + hd) };
+        for j in 0..hd {
             unsafe {
-                val += *q.get_unchecked(i) * *q_head.e.get_unchecked(i * hd + j);
+                *out.get_unchecked_mut(j) += qi * *e_row.get_unchecked(j);
             }
-        }
-        unsafe {
-            *out.get_unchecked_mut(j) = val;
         }
     }
 }

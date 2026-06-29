@@ -22,6 +22,7 @@
 use crate::branching::types::{
     BranchId, BranchLifecycle, CognitiveBranch,
 };
+use std::collections::HashSet;
 
 /// Default maximum active branches. Matches the G2 perf target (router < 1µs
 /// at ≤64 branches). Callers may override via [`BranchBank::new`].
@@ -300,10 +301,17 @@ impl<E: Clone> BranchBank<E> {
             .collect();
 
         let mut n_merges = 0;
-        let mut merged: Vec<BranchId> = Vec::new();
+        // HashSet for O(1) membership — the previous Vec::contains made this
+        // loop O(n_active^3). This is a cold lifecycle sweep but n_active can
+        // still reach the hundreds on long-running sessions.
+        let mut merged: HashSet<BranchId> = HashSet::with_capacity(active_ids.len());
+        // Track which sources are still in play (not yet merged). Membership
+        // test against this is also O(1).
+        let mut available: HashSet<BranchId> = active_ids.iter().copied().collect();
 
         for &i in &active_ids {
-            if merged.contains(&i) {
+            if !available.remove(&i) {
+                // i was already merged into something else.
                 continue;
             }
             let i_util = self
@@ -312,7 +320,7 @@ impl<E: Clone> BranchBank<E> {
                 .unwrap_or(0);
 
             for &j in &active_ids {
-                if i == j || merged.contains(&j) {
+                if i == j || !available.contains(&j) {
                     continue;
                 }
                 // Both must still be active (a prior merge may have pruned one).
@@ -333,7 +341,8 @@ impl<E: Clone> BranchBank<E> {
 
                 if self.merge(target, source).is_some() {
                     n_merges += 1;
-                    merged.push(source);
+                    merged.insert(source);
+                    available.remove(&source);
                 }
                 break; // i has merged once; move to the next i
             }

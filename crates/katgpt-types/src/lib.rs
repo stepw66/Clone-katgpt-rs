@@ -106,9 +106,11 @@ pub use looping::{CacheStrategy, IterationMode, SubStepStrategy, TrainingFreeLoo
 pub use lora::{LoraAdapter, LoraPair, lora_apply};
 pub use math::{
     gegelu, gegelu_tanh, matmul, matmul_f16, matmul_f16_parallel, matmul_parallel, matmul_relu,
-    rmsnorm, rmsnorm_with_gamma, rmsnorm_with_gamma_eps, sample_token, sample_token_into, silu,
+    rmsnorm, rmsnorm_with_gamma, rmsnorm_with_gamma_eps, sample_token_into, silu,
     softmax, softmax_scaled, swiglu,
 };
+#[allow(deprecated)]
+pub use math::sample_token;
 pub use leaky_core::leaky_step;
 #[cfg(feature = "sparse_mlp")]
 pub use math::sparse_matmul;

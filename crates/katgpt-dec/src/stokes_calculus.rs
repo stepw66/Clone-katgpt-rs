@@ -138,6 +138,54 @@ pub fn boundary_flux_mass(
     (mass, error_bound)
 }
 
+/// Pre-computed-decomposition variant of [`boundary_flux_mass`].
+///
+/// Same result, but the caller passes an already-computed
+/// [`HodgeComponents`](crate::hodge::HodgeComponents) so the per-call
+/// `hodge_decompose` (CG solver, `O(E · iters)`) is skipped.
+///
+/// # When to use this
+///
+/// Per the function-level doc on [`boundary_flux_mass`], the decomposition
+/// depends only on `(cx, field)` — not on `region_cells`. If a caller issues
+/// many region queries against the same field on the same complex (the common
+/// case for per-tick belief-region mass checks), compute the decomposition
+/// once and reuse it across all queries. This turns an `O(Q · E · iters)` total
+/// cost into `O(E · iters + Q · |B_{k+1}|)`.
+///
+/// # Arguments
+/// * `cx` — Cell complex (must be the same one `decomp` was built against).
+/// * `region_cells` — Indices of (k+1)-cells defining the region.
+/// * `field` — k-cochain (must be the same field `decomp` was built against).
+/// * `decomp` — Pre-computed Hodge decomposition of `field` on `cx`.
+///
+/// # Returns
+/// `(mass, error_bound)` — identical to [`boundary_flux_mass`].
+///
+/// # Panics (debug)
+/// Debug-asserts that `decomp` was built for `field` (same rank, cell count,
+/// dimension). Mismatches silently produce wrong results in release builds.
+pub fn boundary_flux_mass_with_decomp(
+    cx: &CellComplex,
+    region_cells: &[u32],
+    field: &CochainField,
+    decomp: &crate::hodge::HodgeComponents,
+) -> (f32, f32) {
+    let mass = boundary_flux_mass_only(cx, region_cells, field);
+    debug_assert_eq!(
+        decomp.harmonic.rank, field.rank,
+        "boundary_flux_mass_with_decomp: decomp rank {} != field rank {}",
+        decomp.harmonic.rank, field.rank
+    );
+    debug_assert_eq!(
+        decomp.harmonic.n_cells(), field.n_cells(),
+        "boundary_flux_mass_with_decomp: decomp cell count {} != field cell count {}",
+        decomp.harmonic.n_cells(), field.n_cells()
+    );
+    let error_bound: f32 = decomp.harmonic.data.iter().copied().map(f32::abs).sum();
+    (mass, error_bound)
+}
+
 /// Boundary-flux mass only (no error bound).
 ///
 /// Same as [`boundary_flux_mass`] but skips the `hodge_decompose` call.

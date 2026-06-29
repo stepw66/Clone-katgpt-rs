@@ -257,12 +257,19 @@ impl DeltaMemoryState {
         if recent_errors.is_empty() {
             return;
         }
-        let mean: f32 = recent_errors.iter().sum::<f32>() / recent_errors.len() as f32;
-        let variance: f32 = recent_errors
-            .iter()
-            .map(|e| (e - mean).powi(2))
-            .sum::<f32>()
-            / recent_errors.len() as f32;
+        // Single-pass mean + variance via the sum / sum-of-squares identity
+        // (`Var = E[x²] − E[x]²`). The two-pass form was numerically stabler,
+        // but `variance` here only feeds a heavily-clamped `beta_adjustment`
+        // (`.min(0.05)`), so order-of-magnitude precision is all that matters —
+        // cancellation is irrelevant. One pass beats two on the hot path.
+        let n = recent_errors.len() as f32;
+        let (mut sum, mut sum_sq) = (0.0f32, 0.0f32);
+        for &e in recent_errors {
+            sum += e;
+            sum_sq += e * e;
+        }
+        let mean = sum / n;
+        let variance = (sum_sq / n) - mean * mean;
 
         // Map variance to β adjustment: high variance → increase β
         let beta_adjustment = (variance * 0.1).min(0.05); // Cap adjustment

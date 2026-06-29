@@ -184,9 +184,11 @@ pub use types::{
     DilationConfig, HlaMode, HybridPattern, InferenceOverrides, InferenceResult, LoopMode,
     LoraAdapter, LoraPair, ModelArchitecture, ResidualGate, RetrievalHeadRole, Rng, RtTurboConfig,
     SdpaOutputGate, ShardEmbedding, WeightDtype, kv_dim, lora_apply, matmul, matmul_f16,
-    matmul_f16_parallel, matmul_parallel, matmul_relu, rmsnorm, sample_token, sample_token_into,
+    matmul_f16_parallel, matmul_parallel, matmul_relu, rmsnorm, sample_token_into,
     softmax, softmax_scaled,
 };
+#[allow(deprecated)]
+pub use types::sample_token;
 
 #[cfg(feature = "domain_latent")]
 pub use types::DomainLatent;
@@ -917,4 +919,21 @@ pub mod paired_loss;
 pub use paired_loss::{
     ClassGapReport, ClassGapRow, ClassSizeBound, CopyNGramTagger, FilterKind, FilterScratch,
     PairedLossGap, TokenClass, TokenTagger,
+};
+
+// TEMP — Perturbed-Loss-Vector Diversity Fingerprint (Plan 341, Research 323,
+// arXiv:2606.26797 Jin et al. ICML 2026). Modelless diversity selector: given
+// two committed snapshots S_0, S_1, extrapolate K checkpoints along v = S_1 − S_0,
+// compute per-candidate short-prefix loss vectors, and select the K-subset with
+// maximal Lipschitz-bound spread — gradient-diversity ranking without gradients.
+// Theorem 3.1 modelless reframe: similar loss vectors across K extrapolated
+// checkpoints ⇒ similar gradients along v during the next weight-mutation cycle.
+// Composes with ac_prefix::ConditionalLogprob, HLA surprise, RavenSlotLossKernel
+// (riir-neuron-db Plan 005). Opt-in until G1–G5 GOAT gate passes.
+#[cfg(feature = "temp_loss_fingerprint")]
+pub mod diversity;
+#[cfg(feature = "temp_loss_fingerprint")]
+pub use diversity::temp::{
+    LossKernel, extrapolated_snapshot_schedule, lipschitz_gradient_bound, pairwise_bound,
+    perturbed_loss_vector, select_diverse_subset,
 };
