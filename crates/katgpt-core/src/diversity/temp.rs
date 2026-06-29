@@ -673,4 +673,354 @@ mod tests {
         let picked = select_diverse_subset(&lvs, 1, &mut scratch);
         assert_eq!(picked, vec![0]);
     }
+
+    // ────────────────────────────────────────────────────────────────────
+    // Plan 341 Phase 2 — GOAT gate tests (G1, G2, G4)
+    // ────────────────────────────────────────────────────────────────────
+
+    /// Deterministic xorshift RNG for GOAT-gate fixture generation.
+    struct FixtureRng(u64);
+    impl FixtureRng {
+        fn new(seed: u64) -> Self {
+            Self(if seed == 0 { 1 } else { seed })
+        }
+        fn next_u64(&mut self) -> u64 {
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 7;
+            self.0 ^= self.0 << 17;
+            self.0
+        }
+        fn uniform(&mut self) -> f32 {
+            let bits = ((self.next_u64() >> 40) as u32 & 0x007f_ffff) | 0x3f80_0000;
+            f32::from_bits(bits) - 1.0
+        }
+        /// Approx standard normal via Box-Muller (fixture generation only).
+        fn normal(&mut self) -> f32 {
+            let u1 = self.uniform().max(1e-10);
+            let u2 = self.uniform();
+            (-2.0 * u1.ln()).sqrt() * (2.0 * std::f32::consts::PI * u2).cos()
+        }
+    }
+
+    /// Sequential dot kernel: interprets `z_prefix` as N tokens of dim D,
+    /// computes `sum_t softplus(-dot(theta, z_prefix[t*D..(t+1)*D]))`.
+    /// Used for the G2 prefix-length sweep where N must be variable.
+    struct SequentialDotKernel {
+        d: usize,
+    }
+    impl LossKernel for SequentialDotKernel {
+        fn short_prefix_loss(&self, theta: &[f32], z_prefix: &[f32]) -> f32 {
+            let d = self.d.min(theta.len());
+            let n_tokens = z_prefix.len() / d;
+            let mut total = 0.0_f32;
+            for t in 0..n_tokens {
+                let mut dot = 0.0_f32;
+                for i in 0..d {
+                    dot += theta[i] * z_prefix[t * d + i];
+                }
+                total += softplus(-dot);
+            }
+            total
+        }
+    }
+
+    /// Minimum pairwise Lipschitz bound over all C(k, 2) pairs in a subset.
+    /// Returns +∞ for subsets of size < 2 (no pairs). This is the quantity
+    /// the greedy max-min algorithm directly optimizes: it picks the subset
+    /// whose worst-case (minimum) pairwise bound is as large as possible.
+    fn min_pairwise_bound(
+        subset: &[usize],
+        lvs: &[&[f32]],
+        lambda: f32,
+        g: f32,
+        tau: f32,
+        c_h: f32,
+        epsilon: f32,
+    ) -> f32 {
+        let mut min_bound = f32::INFINITY;
+        for a in 0..subset.len() {
+            for b in (a + 1)..subset.len() {
+                let delta = l_inf_distance(lvs[subset[a]], lvs[subset[b]]);
+                let bound = lipschitz_gradient_bound(delta, lambda, g, tau, c_h, epsilon);
+                if bound < min_bound {
+                    min_bound = bound;
+                }
+            }
+        }
+        min_bound
+    }
+
+    /// Kendall tau rank correlation between two equally-sized value slices.
+    /// Returns a value in [-1, 1]. Ties contribute 0 to numerator and
+    /// denominator (standard Kendall tau-a convention).
+    fn kendall_tau(a: &[f32], b: &[f32]) -> f32 {
+        assert_eq!(a.len(), b.len());
+        let n = a.len();
+        if n < 2 {
+            return 1.0;
+        }
+        let mut concordant: i64 = 0;
+        let mut discordant: i64 = 0;
+        for i in 0..n {
+            for j in (i + 1)..n {
+                let da = a[i] - a[j];
+                let db = b[i] - b[j];
+                if (da > 0.0 && db > 0.0) || (da < 0.0 && db < 0.0) {
+                    concordant += 1;
+                } else if (da > 0.0 && db < 0.0) || (da < 0.0 && db > 0.0) {
+                    discordant += 1;
+                }
+            }
+        }
+        let total = (n * (n - 1) / 2) as f32;
+        if total == 0.0 {
+            1.0
+        } else {
+            (concordant - discordant) as f32 / total
+        }
+    }
+
+    // ── T2.1 G1 — Bound preservation under diversity selection ──────────
+
+    #[test]
+    fn g1_bound_preservation_under_diversity_selection() {
+        // n=64 candidates drawn from a Gaussian mixture: 50 from a tight
+        // cluster N(0, 0.5) and 14 from a wide spread N(0, 5.0) in each of 8
+        // dims. The greedy max-min selector picks 8 spread-out candidates
+        // (mostly from the wide component) whose minimum pairwise L_inf delta
+        // is ~5–10. A random 8-subset is dominated by the 50 cluster points
+        // (expected ~6.25 from the cluster), whose minimum pairwise delta is
+        // ~0.5–1.5. The MINIMUM pairwise Lipschitz bound — the quantity the
+        // greedy algorithm directly optimizes — should be ≥ 2× higher for the
+        // selected subset than for a random subset (median over 50 trials).
+        //
+        // This directly validates Theorem 3.1: the diverse selector picks the
+        // subset whose members would induce maximally-different gradients
+        // along v — even the worst-case pair has a high bound.
+        let k_dim: usize = 8;
+        let k_subset: usize = 8;
+        let n: usize = 64;
+        let n_cluster: usize = 50;
+
+        let mut rng = FixtureRng::new(42);
+        let loss_vecs: Vec<Vec<f32>> = (0..n)
+            .map(|i| {
+                let scale = if i < n_cluster { 0.5 } else { 5.0 };
+                (0..k_dim).map(|_| rng.normal() * scale).collect()
+            })
+            .collect();
+        let lvs_refs: Vec<&[f32]> = loss_vecs.iter().map(|v| v.as_slice()).collect();
+
+        let mut scratch = vec![0_usize; k_subset];
+        let selected = select_diverse_subset(&lvs_refs, k_subset, &mut scratch);
+        assert_eq!(selected.len(), k_subset);
+
+        // Bound params: small lambda amplifies delta's contribution.
+        let lambda = 0.1_f32;
+        let g = 0.5_f32;
+        let tau = 0.1_f32;
+        let c_h = 0.01_f32;
+        let epsilon = 0.001_f32;
+
+        let selected_min_bound =
+            min_pairwise_bound(&selected, &lvs_refs, lambda, g, tau, c_h, epsilon);
+
+        // Min pairwise bound for 50 deterministic random 8-subsets; report the
+        // median (robust to outlier subsets that happen to be well-spread).
+        let mut random_min_bounds: Vec<f32> = Vec::with_capacity(50);
+        for seed in 100..150 {
+            let mut s_rng = FixtureRng::new(seed);
+            let mut idxs: Vec<usize> = (0..n).collect();
+            for i in 0..k_subset {
+                let j = i + (s_rng.next_u64() as usize) % (n - i);
+                idxs.swap(i, j);
+            }
+            random_min_bounds.push(min_pairwise_bound(
+                &idxs[..k_subset],
+                &lvs_refs,
+                lambda,
+                g,
+                tau,
+                c_h,
+                epsilon,
+            ));
+        }
+        random_min_bounds.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let random_median = random_min_bounds[random_min_bounds.len() / 2];
+        let ratio = selected_min_bound / random_median;
+
+        eprintln!(
+            "G1: selected_min_bound={:.4} random_median_min_bound={:.4} ratio={:.2}x (target >= 2.0x)",
+            selected_min_bound, random_median, ratio
+        );
+        assert!(
+            selected_min_bound >= 2.0 * random_median,
+            "G1 FAIL: selected min bound {:.4} should be >= 2x random median min bound {:.4} (ratio {:.2}x)",
+            selected_min_bound,
+            random_median,
+            ratio
+        );
+    }
+
+    // ── T2.2 G2 — Prefix-length sweep (Kendall tau >= 0.85 at N=32 vs N=256) ──
+
+    #[test]
+    fn g2_prefix_length_sweep_kendall_tau() {
+        // n=32 candidates, each with 256-token prefix (D=8 per token).
+        // K=8 checkpoints. Per-candidate diversity score = sum of L_inf
+        // distances to all other candidates' loss vectors. The Kendall tau
+        // between the N=32 and N=256 rankings must be >= 0.85 — the modelless
+        // analog of paper Fig. 6 (short prefix captures full-trace signal).
+        //
+        // Fixture: each candidate has a well-separated unit direction d_i.
+        // Tokens are d_i scaled to amplitude 5.0 + small Gaussian noise
+        // (std 0.15). The signal-to-noise ratio is ~33:1 per token; at N=32
+        // the averaging effect gives SNR ~190:1, which stabilizes the ranking.
+        let n: usize = 32;
+        let d: usize = 8;
+        let k: usize = 8;
+        let n_max: usize = 256;
+        let signal_scale: f32 = 5.0;
+        let noise_std: f32 = 0.15;
+
+        let mut rng = FixtureRng::new(12345);
+
+        // 32 well-separated unit directions.
+        let mut directions: Vec<Vec<f32>> = Vec::with_capacity(n);
+        for _ in 0..n {
+            let dir: Vec<f32> = (0..d).map(|_| rng.normal()).collect();
+            let norm: f32 = dir.iter().map(|x| x * x).sum::<f32>().sqrt().max(1e-10);
+            directions.push(dir.iter().map(|x| x / norm).collect());
+        }
+
+        // Each candidate: 256 tokens of (signal_scale * dir_i + noise_std * noise).
+        let prefixes: Vec<Vec<f32>> = directions
+            .iter()
+            .map(|dir| {
+                let mut z = vec![0.0_f32; n_max * d];
+                for t in 0..n_max {
+                    for i in 0..d {
+                        z[t * d + i] = signal_scale * dir[i] + noise_std * rng.normal();
+                    }
+                }
+                z
+            })
+            .collect();
+
+        // K=8 checkpoints: s0 = origin, s1 = random unit vector.
+        let s0 = vec![0.0_f32; d];
+        let s1: Vec<f32> = {
+            let v: Vec<f32> = (0..d).map(|_| rng.normal()).collect();
+            let norm: f32 = v.iter().map(|x| x * x).sum::<f32>().sqrt().max(1e-10);
+            v.iter().map(|x| x / norm).collect()
+        };
+        let lambda = [
+            0.0_f32, 1.0 / 7.0, 2.0 / 7.0, 3.0 / 7.0, 4.0 / 7.0, 5.0 / 7.0, 6.0 / 7.0, 1.0,
+        ];
+        let seeds = [0u64; 8];
+        let mut theta_schedule = vec![Vec::with_capacity(d); k];
+        extrapolated_snapshot_schedule(&s0, &s1, &lambda, &seeds, 0.0, &mut theta_schedule);
+
+        let kernel = SequentialDotKernel { d };
+
+        let n_values: [usize; 6] = [8, 16, 32, 64, 128, 256];
+        let mut scores_by_n: Vec<Vec<f32>> = Vec::with_capacity(n_values.len());
+        for &n_tokens in &n_values {
+            let mut loss_vecs: Vec<[f32; 8]> = vec![[0.0_f32; 8]; n];
+            for i in 0..n {
+                let z_slice = &prefixes[i][..n_tokens * d];
+                perturbed_loss_vector(&kernel, &theta_schedule, z_slice, &mut loss_vecs[i]);
+            }
+            let mut scores = vec![0.0_f32; n];
+            for i in 0..n {
+                for j in 0..n {
+                    if i != j {
+                        scores[i] += l_inf_distance(&loss_vecs[i], &loss_vecs[j]);
+                    }
+                }
+            }
+            scores_by_n.push(scores);
+        }
+
+        // Kendall tau vs N=256 (last entry).
+        let ref_idx = n_values.len() - 1;
+        let ref_scores = &scores_by_n[ref_idx];
+        let n_ref = n_values[ref_idx];
+        for (idx, &n_tokens) in n_values.iter().enumerate() {
+            let tau = kendall_tau(ref_scores, &scores_by_n[idx]);
+            eprintln!(
+                "G2: Kendall tau at N={} vs N={}: {:.4}",
+                n_tokens, n_ref, tau
+            );
+        }
+
+        let tau_32 = kendall_tau(ref_scores, &scores_by_n[2]);
+        assert!(
+            tau_32 >= 0.85,
+            "G2 FAIL: Kendall tau at N=32 vs N=256 is {:.4}, should be >= 0.85",
+            tau_32
+        );
+    }
+
+    // ── T2.4 G4 — Determinism / quorum-reproducibility ─────────────────
+
+    #[test]
+    fn g4_determinism_bit_identical() {
+        // Two independent runs with the same (s0, s1, lambda, seeds, noise,
+        // candidates) must produce bit-identical theta schedule, loss vectors,
+        // and selected subset. This is the sync-boundary requirement.
+        let n: usize = 32;
+        let d: usize = 8;
+        let k: usize = 8;
+
+        let mut rng = FixtureRng::new(999);
+        let s0: Vec<f32> = (0..d).map(|_| rng.uniform()).collect();
+        let s1: Vec<f32> = (0..d).map(|_| rng.uniform()).collect();
+        let lambda = [0.0_f32, 0.15, 0.3, 0.45, 0.6, 0.75, 0.9, 1.0];
+        let seeds = [42u64, 43, 44, 45, 46, 47, 48, 49];
+        let noise_sigma = 0.05_f32;
+
+        let prefixes: Vec<Vec<f32>> = (0..n)
+            .map(|_| (0..d).map(|_| rng.uniform()).collect())
+            .collect();
+
+        let kernel = SequentialDotKernel { d };
+
+        fn run(
+            s0: &[f32],
+            s1: &[f32],
+            lambda: &[f32],
+            seeds: &[u64],
+            noise_sigma: f32,
+            prefixes: &[Vec<f32>],
+            kernel: &SequentialDotKernel,
+            d: usize,
+            k: usize,
+            n: usize,
+        ) -> (Vec<Vec<f32>>, Vec<[f32; 8]>, Vec<usize>) {
+            let mut theta = vec![Vec::with_capacity(d); k];
+            extrapolated_snapshot_schedule(s0, s1, lambda, seeds, noise_sigma, &mut theta);
+            let mut loss_vecs: Vec<[f32; 8]> = vec![[0.0_f32; 8]; n];
+            for i in 0..n {
+                perturbed_loss_vector(kernel, &theta, &prefixes[i], &mut loss_vecs[i]);
+            }
+            let lvs: Vec<&[f32]> = loss_vecs.iter().map(|v| v.as_slice()).collect();
+            let mut scratch = vec![0_usize; 8];
+            let selected = select_diverse_subset(&lvs, 8, &mut scratch);
+            (theta, loss_vecs, selected)
+        }
+
+        let (theta1, loss_vecs1, selected1) =
+            run(&s0, &s1, &lambda, &seeds, noise_sigma, &prefixes, &kernel, d, k, n);
+        let (theta2, loss_vecs2, selected2) =
+            run(&s0, &s1, &lambda, &seeds, noise_sigma, &prefixes, &kernel, d, k, n);
+
+        for j in 0..k {
+            assert_eq!(theta1[j], theta2[j], "theta[{}] differs across runs", j);
+        }
+        for i in 0..n {
+            assert_eq!(loss_vecs1[i], loss_vecs2[i], "loss_vec[{}] differs", i);
+        }
+        assert_eq!(selected1, selected2, "selected subset differs across runs");
+    }
 }

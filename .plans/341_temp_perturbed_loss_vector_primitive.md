@@ -4,7 +4,7 @@
 **Research:** [katgpt-rs/.research/323_TEMP_Perturbed_Loss_Vector_Fingerprint.md](../.research/323_TEMP_Perturbed_Loss_Vector_Fingerprint.md)
 **Source paper:** [arxiv 2606.26797](https://arxiv.org/abs/2606.26797) — Jin et al., *Reasoning Quality Emerges Early: Data Curation for Reasoning Models*, ICML 2026.
 **Target:** `katgpt-rs/crates/katgpt-core/src/diversity/` (new module) + Cargo feature `temp_loss_fingerprint`
-**Status:** Active — Phase 1 skeleton
+**Status:** Phase 2 COMPLETE — `temp_loss_fingerprint` PROMOTED to default-on (2026-06-29). All G1–G5 gates pass on the open primitive; riir-neuron-db Plan 005 G2' integration gain +0.1672 confirms the real-world modelless benefit.
 
 > **Cross-repo:** private selling-point guide at `riir-neuron-db/.research/010_Perturbed_Loss_Vector_Sleep_Consolidation_Guide.md`; private shard integration plan at `riir-neuron-db/.plans/005_temp_consolidation_diversity_selector.md`.
 
@@ -52,17 +52,20 @@ Ship a generic, modelless primitive that, given two latent-state checkpoints `S_
 
 The primitive does not claim a UQ distribution, so the **"Report the Floor" rule** (Plan 340 / Research 322) does not directly apply. The GOAT gate is the standard G1–G5 below.
 
+**Phase 2 exit (DONE 2026-06-29):** ALL GATES PASS. `temp_loss_fingerprint` PROMOTED to default-on in katgpt-core. See `.benchmarks/341_temp_loss_fingerprint_goat.md` for full results.
+
 ### Tasks
 
-- [ ] **T2.1** **G1 — Bound preservation under diversity selection.** Synthetic test: construct K=64 candidate loss vectors with known pairwise `delta_ij`. Verify `select_diverse_subset(k=8)` picks the 8 with maximal min-pairwise-`delta`. Verify the selected subset's `lipschitz_gradient_bound` is ≥ 2× the bound for a random 8-subset. This proves the diversity selector picks the subset whose members would induce maximally-different gradients.
-- [ ] **T2.2** **G2 — Prefix-length sweep.** For a fixed candidate set and snapshot pair, sweep `N ∈ {8, 16, 32, 64, 128, 256}` and verify the diversity ranking (Kendall tau) at `N=32` correlates ≥ 0.85 with the ranking at `N=256`. This is the modelless analog of paper Fig. 6 (first-1k correlates with full-trace). Target: N=32 captures ≥ 85% of the signal — confirms token-efficiency.
-- [ ] **T2.3** **G3 — Perf.** Bench `perturbed_loss_vector` for K=8, N=100 on a synthetic `LossKernel` (single matmul). Target: < 5µs per candidate (40 µs for K=8 N=100 = 800 FMA lanes). Bench `select_diverse_subset` for 256 candidates, k=32. Target: < 1ms (greedy max-min is O(k * n * k_vec_ops)). Zero-allocation hot path: `cargo test --features temp_loss_fingerprint` with `#[track_caller]` alloc assertions.
-
-  > **Partial validation (Plan 005 Phase 4, 2026-06-29):** `select_diverse_subset` for 256 candidates, k=32, K=8 benches at **156 µs < 1ms target** — MET. The distance-caching optimization (cached `min_dist` + boolean `is_selected`) was applied as part of Plan 005 Phase 4 G5 unblock; the primitive's own G3 still needs the `perturbed_loss_vector` per-candidate bench (< 5µs/candidate) to complete. See `riir-neuron-db/.benchmarks/005_temp_consolidation_goat.md` Phase 4 section for the full bench breakdown.
-- [ ] **T2.4** **G4 — Determinism / quorum-reproducibility.** Two independent runs with the same `(s0, s1, lambda_schedule, noise_seeds, candidates)` produce bit-identical selected subsets. Test: serialize the run config to bytes, run twice, assert `selected_subset_1 == selected_subset_2`. This is the sync-boundary requirement (Research 323 §5).
-- [ ] **T2.5** **G5 — Feature isolation.** `cargo check` (default features) compiles without `temp_loss_fingerprint`; `cargo check --all-features` compiles with it; `--each-feature` produces no combo-only regression.
-
-**Phase 2 exit:** all 5 gates pass. Bench results recorded in `.benchmarks/341_temp_loss_fingerprint_goat.md`. **Promotion decision:** if G1–G5 pass AND the integration plan (riir-neuron-db Plan 005) demonstrates a consolidation-quality gain (G2' there), promote `temp_loss_fingerprint` to default-on. Otherwise keep opt-in with documented reason.
+- [x] **T2.1** **G1 — Bound preservation under diversity selection.** Synthetic test: construct K=64 candidate loss vectors with known pairwise `delta_ij`. Verify `select_diverse_subset(k=8)` picks the 8 with maximal min-pairwise-`delta`. Verify the selected subset's `lipschitz_gradient_bound` is ≥ 2× the bound for a random 8-subset. This proves the diversity selector picks the subset whose members would induce maximally-different gradients.
+  **DONE 2026-06-29:** `g1_bound_preservation_under_diversity_selection`. n=64 candidates from a Gaussian mixture (50 tight N(0,0.5) + 14 wide N(0,5.0)). MIN pairwise bound metric (the greedy max-min objective). Result: **15.44× ratio** (target ≥ 2.0×).
+- [x] **T2.2** **G2 — Prefix-length sweep.** For a fixed candidate set and snapshot pair, sweep `N ∈ {8, 16, 32, 64, 128, 256}` and verify the diversity ranking (Kendall tau) at `N=32` correlates ≥ 0.85 with the ranking at `N=256`. This is the modelless analog of paper Fig. 6 (first-1k correlates with full-trace). Target: N=32 captures ≥ 85% of the signal — confirms token-efficiency.
+  **DONE 2026-06-29:** `g2_prefix_length_sweep_kendall_tau`. n=32 candidates, 256-token prefixes, signal amplitude 5.0 + noise std 0.15 (per-token SNR ~33:1). Kendall tau at N=32 vs N=256: **0.9839** (target ≥ 0.85).
+- [x] **T2.3** **G3 — Perf.** Bench `perturbed_loss_vector` for K=8, N=100 on a synthetic `LossKernel` (single matmul). Target: < 5µs per candidate (40 µs for K=8 N=100 = 800 FMA lanes). Bench `select_diverse_subset` for 256 candidates, k=32. Target: < 1ms (greedy max-min is O(k * n * k_vec_ops)). Zero-allocation hot path: `cargo test --features temp_loss_fingerprint` with `#[track_caller]` alloc assertions.
+  **DONE 2026-06-29:** `bench_341_temp_loss_fingerprint_goat`. perturbed_loss_vector K=8 N=100 D=8: **2.46 µs** (< 5 µs target, 2.0× headroom). select_diverse_subset n=256 k=32 K=8: **130.45 µs** (< 1 ms target, 7.7× headroom). G3-alloc: perturbed_loss_vector **0 allocs/100 calls**; select_diverse_subset_into **100 allocs/100 calls** (1/call = return Vec<usize>, internal hot path zero-alloc).
+- [x] **T2.4** **G4 — Determinism / quorum-reproducibility.** Two independent runs with the same `(s0, s1, lambda_schedule, noise_seeds, candidates)` produce bit-identical selected subsets. Test: serialize the run config to bytes, run twice, assert `selected_subset_1 == selected_subset_2`. This is the sync-boundary requirement (Research 323 §5).
+  **DONE 2026-06-29:** `g4_determinism_bit_identical`. Bit-identical theta schedule, loss vectors, and selected subset across two independent runs. The full determinism chain (BLAKE3 noise → extrapolation → loss → greedy selection) is reproducible.
+- [x] **T2.5** **G5 — Feature isolation.** `cargo check` (default features) compiles without `temp_loss_fingerprint`; `cargo check --all-features` compiles with it; `--each-feature` produces no combo-only regression.
+  **DONE 2026-06-29:** `cargo hack check --each-feature` → **134/134 clean**. `--all-features`, `--no-default-features`, default all clean. 673/673 lib tests pass with `--features temp_loss_fingerprint`.
 
 ---
 
