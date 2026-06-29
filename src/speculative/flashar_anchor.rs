@@ -399,6 +399,26 @@ mod tests {
         Config::micro_dllm()
     }
 
+    /// Train a mini D2F model on pattern data (same recipe as
+    /// `speculative::d2f::tests::test_decode_with_trained_model`).
+    ///
+    /// The anchor-then-fill tests assert properties that only hold for a
+    /// trained model — a random `TransformerWeights::new` produces a
+    /// degenerate all-mask baseline that trivially converges in 1 step by
+    /// emitting the same token at every position, which inverts the
+    /// step-reduction comparison the tests are trying to verify.
+    fn make_trained_weights() -> (Config, TransformerWeights) {
+        use crate::dllm::{generate_pattern_dataset, train_mini_dllm};
+        let config = make_config();
+        let mut train_rng = Rng::new(123);
+        let train_data =
+            generate_pattern_dataset(&mut train_rng, 20, config.block_size, config.vocab_size - 1);
+        let test_data =
+            generate_pattern_dataset(&mut train_rng, 5, config.block_size, config.vocab_size - 1);
+        let (weights, _) = train_mini_dllm(&config, &train_data, &test_data, 200, 0.01, 0.3, 42);
+        (config, weights)
+    }
+
     #[test]
     fn test_anchor_config_default_stride() {
         let cfg = AnchorConfig::default();
@@ -488,9 +508,10 @@ mod tests {
 
     #[test]
     fn test_anchor_then_fill_produces_valid_output() {
-        let config = make_config();
+        // Uses a trained mini D2F model — random weights produce a degenerate
+        // all-same-token output that doesn't exercise the fill path.
+        let (config, weights) = make_trained_weights();
         let mut rng = Rng::new(42);
-        let weights = TransformerWeights::new(&config, &mut rng);
         let block_size = 8;
 
         let decode_config = D2fDecodeConfig::with_block_size(block_size);
@@ -563,9 +584,12 @@ mod tests {
 
     #[test]
     fn test_anchor_then_fill_reduces_steps() {
-        let config = make_config();
+        // The "anchors reduce denoising steps" property only holds for a
+        // trained model — with random weights, the all-mask baseline
+        // degenerately converges in 1 step (same token at every position),
+        // inverting the comparison. See `make_trained_weights` doc.
+        let (config, weights) = make_trained_weights();
         let mut rng = Rng::new(42);
-        let weights = TransformerWeights::new(&config, &mut rng);
         let block_size = 8;
 
         let decode_config = D2fDecodeConfig::with_block_size(block_size);

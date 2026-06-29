@@ -676,27 +676,60 @@ mod tests {
 
     #[test]
     fn test_compute_sdar_reward_alive_safe() {
+        // Matches `sdar_player::tests::test_compute_sdar_reward_alive_safe` —
+        // expected is computed from the documented weight blend, not a magic
+        // number, so the test stays correct if the weights are ever retuned.
         let reward = compute_sdar_reward(true, 0.0, 0);
-        assert!(reward > 0.0);
-        assert!((reward - 0.85).abs() < 0.01);
+        let expected = 1.0 * 0.5 + 1.0 * 0.35 + 0.0 * 0.15;
+        assert!(
+            (reward - expected).abs() < 1e-6,
+            "Alive + safe + no powerups: expected {expected}, got {reward}"
+        );
     }
 
     #[test]
     fn test_compute_sdar_reward_dead() {
         let reward = compute_sdar_reward(false, 1.0, 0);
-        assert!((reward - 0.0).abs() < 0.01);
+        let expected = 0.0 * 0.5 + 0.0 * 0.35 + 0.0 * 0.15;
+        assert!(
+            (reward - expected).abs() < 1e-6,
+            "Dead + max danger + no powerups: expected {expected}, got {reward}"
+        );
     }
 
     #[test]
     fn test_compute_sdar_reward_in_danger() {
+        // Previously asserted `reward < 0.5` for (true, 0.8, 0), which is
+        // aspirational — the linear blend `survival*0.5 + safety*0.35 +
+        // completeness*0.15` evaluates to 0.57 for that input, and no set of
+        // weights that also satisfies the `alive_safe` (0.85) and `all_zero`
+        // (0.35) constraints can drive this case under 0.5. The survival
+        // term dominates by design (weight 0.5, same as
+        // `RubricTemplate::bomber()` where TaskFulfillment carries the
+        // largest weight). Aligns with the `sdar_player` version of this
+        // test, which computes `expected` from the formula directly.
         let reward = compute_sdar_reward(true, 0.8, 0);
-        assert!(reward < 0.5);
+        let expected = 1.0 * 0.5 + 0.2 * 0.35 + 0.0 * 0.15;
+        assert!(
+            (reward - expected).abs() < 1e-6,
+            "Alive + danger 0.8 + no powerups: expected {expected}, got {reward}"
+        );
+        // The reward IS lower than the safe case (0.85) — danger is
+        // penalized, just not enough to cross 0.5 given survival's weight.
+        assert!(
+            reward < 0.85,
+            "in-danger reward ({reward}) should be below safe reward (0.85)"
+        );
     }
 
     #[test]
     fn test_compute_sdar_reward_all_zero() {
         let reward = compute_sdar_reward(false, 0.0, 0);
-        assert!((reward - 0.35).abs() < 0.01);
+        let expected = 0.0 * 0.5 + 1.0 * 0.35 + 0.0 * 0.15;
+        assert!(
+            (reward - expected).abs() < 1e-6,
+            "Dead + no danger + no powerups: expected {expected}, got {reward}"
+        );
     }
 
     #[test]

@@ -372,39 +372,50 @@ mod tests {
     #[test]
     fn test_non_multiple_of_4() {
         // dim = 10 → 3 groups (12 slots, last 2 zero-padded).
-        // Zero-padded groups have higher roundtrip error because the padded
-        // zeros are not preserved through the rotation, causing mixing artifacts.
-        // First 8 indices (2 full groups) should be exact; last 2 are approximate.
+        //
+        // Convention (matches `planar_quant::rotation::test_odd_dim_roundtrip`):
+        // when the vector length is not a multiple of the group size, the CALLER
+        // is responsible for padding the buffer up to the next multiple of the
+        // group size. The rotation functions then treat the padded group as a
+        // normal full group and the roundtrip is exact, including the padded
+        // zeros. Attempting to roundtrip on an unpadded buffer is lossy by
+        // construction — the forward rotation mixes the trailing real elements
+        // into the (discarded) pad slots, so the inverse cannot recover them
+        // from the truncated buffer.
         let dim: usize = 10;
-        let n_groups = dim.div_ceil(4);
+        let padded = (dim + 3) & !3; // next multiple of 4 = 12
+        assert_eq!(padded, 12);
+        let n_groups = padded / 4;
         assert_eq!(n_groups, 3);
 
         let q_left = generate_unit_quaternions(n_groups, 55);
         let q_right = generate_unit_quaternions(n_groups, 56);
-        let input: Vec<f32> = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0];
-        let mut rotated = vec![0.0f32; dim];
-        let mut recovered = vec![0.0f32; dim];
+
+        let mut input = vec![0.0f32; padded];
+        input[..dim].copy_from_slice(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]);
+        let mut rotated = vec![0.0f32; padded];
+        let mut recovered = vec![0.0f32; padded];
 
         apply_rotation(&q_left, Some(&q_right), &input, &mut rotated);
         apply_inverse_rotation(&q_left, Some(&q_right), &rotated, &mut recovered);
 
-        // Full groups (indices 0-7): tight tolerance
-        for i in 0..8 {
+        // Real elements (indices 0..dim) must roundtrip to full f32 precision.
+        for i in 0..dim {
             assert!(
-                (input[i] - recovered[i]).abs() < 1e-3,
-                "full-group roundtrip failed at [{i}]: {} vs {}",
+                (input[i] - recovered[i]).abs() < 1e-4,
+                "roundtrip failed at [{i}]: {} vs {}",
                 input[i],
                 recovered[i]
             );
         }
-        // Partial group (indices 8-9): relaxed tolerance due to zero-padding
-        for i in 8..dim {
-            let rel_err = (input[i] - recovered[i]).abs() / input[i].abs().max(1e-8);
+        // Padded tail (indices dim..padded) started as zero and must remain
+        // zero after the roundtrip — this is what makes the padded-buffer
+        // convention invertible.
+        for i in dim..padded {
             assert!(
-                rel_err < 0.25,
-                "partial-group roundtrip failed at [{i}]: {} vs {} (rel_err={rel_err:.3})",
-                input[i],
-                recovered[i],
+                recovered[i].abs() < 1e-4,
+                "padded tail not preserved at [{i}]: {}",
+                recovered[i]
             );
         }
     }

@@ -1,6 +1,6 @@
 # Issue 011 — Remaining test failures from 2026-06-29 full run
 
-**Status:** open
+**Status:** B1–B4 resolved (2026-06-29, follow-up commit); G1 + thermal items still open.
 **Discovered:** 2026-06-29 full `cargo test --workspace --all-features` run (debug, ~16-core parallel, thermal-throttled host).
 **Context:** This run unblocked three separate compile failures and fixed two real bugs:
 - Workspace compile (commit `0482eee0`): `katgpt_rs::weights::ContiguousWeights` → `katgpt_rs::ContiguousWeights` (leftover from the microgpt→katgpt rename `acf08551`).
@@ -24,27 +24,71 @@ These pass single-threaded with `--test-threads=1` and fail only under parallel 
 
 ## Real bugs needing root-cause work (deterministic, fail single-threaded)
 
-### B1 — `iso_quant::rotation::tests::test_non_multiple_of_4`
-- `src/iso_quant/rotation.rs:403`
-- Partial-group (dim not multiple of 4) inverse rotation is wrong: `input[8]=9.0` round-trips to `-0.5684246`, `rel_err=1.063` (tolerance 0.25). Full groups 0-7 round-trip within 1e-3, so the bug is specifically in the zero-padded partial-group inverse path of `apply_inverse_rotation`.
-- **Not a guess-fix.** Needs the quaternion left/right-pair inverse math for the trailing `< n_groups*4` elements audited.
+### B1 — `iso_quant::rotation::tests::test_non_multiple_of_4` — RESOLVED
+- `src/iso_quant/rotation.rs:373`
+- **Root cause:** NOT a math bug — a **test design bug**. The partial-group
+  (dim not multiple of 4) forward rotation zero-pads to 4D, rotates, and
+  **discards** the rotated tail (`r[2], r[3]`). The inverse path re-pads
+  with zeros, so it cannot recover the discarded components — the loss is
+  fundamental, not a code bug. Verified by scratch program: forward on
+  `[9,10,0,0]` → `[-0.5, 9.5, 0.5, -9.5]`, stored `[-0.5, 9.5]`, inverse of
+  `[-0.5, 9.5, 0, 0]` → `[4.5, 5.0]` (wrong); inverse of the full
+  `[-0.5, 9.5, 0.5, -9.5]` → `[9, 10, 0, 0]` (correct roundtrip).
+- **Fix:** adopted the `planar_quant::rotation::test_odd_dim_roundtrip`
+  convention — the CALLER pads the buffer to the next multiple of the group
+  size. The rotation functions are then trivially invertible on the padded
+  buffer (the partial group becomes a full 4D group of zeros, roundtripped
+  exactly). Test now pads dim=10 → padded=12, asserts 1e-4 roundtrip on the
+  real elements + zero preservation on the padded tail. All 11 iso_quant
+  rotation tests pass; production callers (`IsoQuantKVCache`, always
+  multiple-of-4 kv_dim) are unaffected.
 
-### B2 — `speculative::flashar_anchor::tests::test_anchor_then_fill_reduces_steps`
-- `src/speculative/flashar_anchor.rs:593`
-- Asserts `fill_steps_used <= baseline_steps_used` but got `fill=8 > baseline=1`. Anchors are supposed to reduce the denoising search space; here they do not. Deterministic (seed `Rng::new(42)`).
-- Needs the anchor-fill step accounting vs baseline-step accounting audited — the `1` baseline looks suspiciously low (anchor run is `8` vs baseline `1`).
+### B2 — `speculative::flashar_anchor::tests::test_anchor_then_fill_reduces_steps` — RESOLVED
+- `src/speculative/flashar_anchor.rs:565`
+- **Root cause:** NOT a code bug — a **test setup bug**. The test used
+  `TransformerWeights::new` (random initialization). A random bidirectional
+  model on all-mask input produces a degenerate "always emit the same token"
+  output that converges in 1 step (baseline `steps_used=1`, all positions
+  emit token 15). The anchors break this degeneracy, so the fill must do
+  honest denoising work (`fill_steps_used=8`, never converges on position 2).
+  The comparison `fill ≤ baseline` thus compares "honest work" vs "degenerate
+  shortcut" and is inverted for random weights.
+- **Fix:** train a mini D2F model in the test using the existing
+  `train_mini_dllm` + `generate_pattern_dataset` recipe (same as
+  `speculative::d2f::tests::test_decode_with_trained_model`). With trained
+  weights: `fill_steps=1 <= baseline_steps=2`, `step_reduction=1`. Added
+  `make_trained_weights()` helper.
 
-### B3 — `speculative::flashar_anchor::tests::test_anchor_then_fill_produces_valid_output`
-- `src/speculative/flashar_anchor.rs:521`
-- Token at position 2 is the mask token (26) when it should not be. Likely the same root cause as B2 (fill not converging / not replacing mask tokens).
-- Fix B2 first; re-check B3.
+### B3 — `speculative::flashar_anchor::tests::test_anchor_then_fill_produces_valid_output` — RESOLVED
+- `src/speculative/flashar_anchor.rs:490`
+- **Root cause:** same as B2 — random weights left position 2 perpetually
+  masked (`best_prob` oscillated 0.11–0.32 across 8 steps, never reaching
+  `tau_conf=0.7`).
+- **Fix:** same as B2 — use trained weights. Fill converges, all 8 tokens
+  non-mask.
 
-### B4 — `pruners::bomber::rmsd_player::tests::test_compute_sdar_reward_in_danger` (test-vs-formula discrepancy, needs a decision)
-- `src/pruners/bomber/rmsd_player.rs:693`
-- `compute_sdar_reward(true, 0.8, 0)` returns `0.57` by the documented formula `survival*0.5 + safety*0.35 + completeness*0.15` (= `1.0*0.5 + 0.2*0.35 + 0.0*0.15`).
-- The test asserts `reward < 0.5`.
-- Three sibling tests (`alive_safe`→0.85, `dead`→0.0, `all_zero`→0.35) all match the formula exactly, so the **formula is internally consistent**; the `in_danger` threshold is the outlier.
-- **Open question:** is the formula under-weighting `danger` (survival dominates: alive+80%-danger still scores 0.57), or is the test aspirational? Not auto-fixable — needs the intended reward-shape decision. If the formula stands, the test should assert `< 0.6` (or compare relative to the safe case).
+### B4 — `pruners::bomber::rmsd_player::tests::test_compute_sdar_reward_in_danger` — RESOLVED
+- `src/pruners/bomber/rmsd_player.rs:691`
+- **Root cause:** the test asserted `reward < 0.5` for `(true, 0.8, 0)`, but
+  the formula `survival*0.5 + safety*0.35 + completeness*0.15` evaluates to
+  **0.57** for that input. The assertion is **mathematically unsatisfiable**
+  alongside the other three reward tests: `alive_safe` forces `ws+wy=0.85`,
+  `all_zero` forces `wy=0.35`, hence `ws=0.50`, hence `in_danger` =
+  `0.50 + 0.2*0.35 = 0.57 > 0.5`. No linear weight set satisfies all four.
+- **Decision:** formula is the source of truth — 3/4 rmsd tests + all 4
+  sibling `sdar_player.rs` tests match it, and the `sdar_player` version of
+  this exact test computes `expected` from the formula (the established
+  convention). Aligned `rmsd_player::test_compute_sdar_reward_*` with the
+  `sdar_player` pattern: compute `expected` from the weights, assert at
+  1e-6. Kept a weaker secondary assertion (`reward < 0.85`) to confirm danger
+  is still penalized relative to the safe case.
+- **Side note (not fixed here):** the doc comment "same weights as
+  `RubricTemplate::bomber()`" is inaccurate — the template uses `[4.0, 2.0,
+  1.0]` (normalized `[0.571, 0.286, 0.143]`) while the function hardcodes
+  `[0.5, 0.35, 0.15]`. The hardcoded weights predate the template and are
+  what every other test in both files expects; retuning them to match the
+  template is a separate decision that would change reward magnitudes and
+  break downstream SDAR/RMSD training baselines.
 
 ## GOAT-gate failing by design (not a bug to silence)
 
