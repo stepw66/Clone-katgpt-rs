@@ -39,7 +39,7 @@ aligned with:
 | `katgpt-rs` (public) | ✅ `KatgptProof` (Plan 293) | `action_bridge_ranking_preserved`, `action_bridge_argmax_preserved` | this issue (coordinator) |
 | `riir-chain` (private) | ✅ `RiirChainProof` (Plans 004 + 008 + 009) | LatCal round-trip (3), quorum determinism (4), chain-side `merkle_root` (4), **slashing monotonicity (8)**, **split-key security (10)** | `riir-chain/.issues/001_*` (**CLOSED** — T1–T9 all done) |
 | `riir-neuron-db` (private) | ✅ `NeuronDbProof` (Plans 007 + 008) | `Shard/Layout` (7 thms), `Consolidation/FreezeGate` (8 thms), `Merkle/Soundness` (4 thms) | `riir-neuron-db/.issues/004_*` (Phase 1 + P1 done; P2 pending) |
-| `riir-ai` (private) | ❌ none | — | `riir-ai/.issues/348_*` (P1, now unblocked) |
+| `riir-ai` (private) | ✅ `RiirAiProof` (Plan 353) | HLA boundedness (13 thms: sigmoid open-interval `(0,1)` + clamp closed-interval `[0,1]` + composite `curiosity_drive_bounded`) | `riir-ai/.issues/348_*` (T1/T3/T5/T6 done; T2 freeze/thaw deferred) |
 | `riir-train` (private) | ❌ none | — | `riir-train/.issues/308_*` (**EXCLUDED**) |
 
 ### Phase progress
@@ -84,6 +84,17 @@ aligned with:
   **Phase 3 COMPLETE.**
 - 🟡 **Phase 4 (P1): riir-ai** — `hla_scalar_boundedness` (cheap, extends
   KatgptProof) + freeze/thaw reader invariant (the hard long pole).
+  - ✅ **HLA scalar boundedness** — DONE (Plan 353, 2026-06-30). Bootstrapped
+    `riir-ai/.proofs/RiirAiProof` (fourth FV instance, Mathlib-required,
+    toolchain v4.32.0-rc1). Shipped `Hla/Basic.lean` (spec: `dot`, `clamp01`,
+    `NpcEmotionScalars`, `clamped`, `curiosity_drive`) and `Hla/Bounded.lean`
+    (13 theorems across 2 classes: Class A — sigmoid open-interval `(0,1)`, 4
+    thms, extends `KatgptProof` from ranking to boundedness; Class B — clamp
+    closed-interval `[0,1]`, 7 thms, the actual sync invariant + composite
+    `curiosity_drive_bounded`). All within `{propext, Classical.choice, Quot.sound}`
+    axiom budget. Spec-match test 6/6 green (incl. f32 saturation caveat +
+    NaN/Inf edge cases). **T2 freeze/thaw remains open** — 1–2 week effort,
+    memory-model abstraction, candidate for a dedicated future plan.
 - 🟡 **Phase 5 (P2/P3): riir-ai** — bridge ordering over learned directions.
 
 ## 3. Recommended sequencing
