@@ -269,11 +269,11 @@ Three sub-gates. **Promotion requires all three pass.** Each sub-gate has a nume
 
 ### Tasks (forward-references for the riir-ai plan)
 
-- [-] **T4.1** Create `riir-ai/crates/riir-engine/src/latent_functor/zone_scheduling.rs` as a **sibling** module to `zone_gating.rs`. Imports `katgpt_core::zone_density::{zone_density_classify, schedule_outer_first, ZoneDensityCache, DensityTier, DensityClassifyConfig}`.
-- [-] **T4.2** Add `NpcFunctorRuntime::with_physical_scheduling()` constructor that composes the cognitive tier (existing `ZoneGatingProfile`) with the physical tier (new `DensityClassifyConfig` + `ZoneDensityCache`). The two run in sequence: cognitive gating picks `tau/beta/budget`, physical scheduling picks `compute-this-tick: bool` + cache hit/miss.
-- [-] **T4.3** Wire `belief_mass_divergence` (Plan 314) as the optional stampede detector. When it exceeds τ, call `cache.invalidate_all()`.
-- [-] **T4.4** Run the actual 60s sim with real game zones (not synthetic). Compare to the mean-aggregation baseline. This is the *real* G5 verdict (T3.1 is the synthetic proxy).
-- [-] **T4.5** If T4.4 reveals emergent crowd behavior (lanes, queues, stampedes from local density gradients), file the Super-GOAT-promotion note + riir-ai guide (per Research 350 §4 conditional path).
+- [x] **T4.1** Create `riir-ai/crates/riir-engine/src/latent_functor/zone_scheduling.rs` as a **sibling** module to `zone_gating.rs`. Imports `katgpt_core::zone_density::{zone_density_classify, schedule_outer_first, ZoneDensityCache, DensityTier, DensityClassifyConfig}`. **✅ Done in riir-ai Plan 352 Phase 1 (commit `bb73cee3`).**
+- [x] **T4.2** Add `NpcFunctorRuntime::with_physical_scheduling()` constructor that composes the cognitive tier (existing `ZoneGatingProfile`) with the physical tier (new `DensityClassifyConfig` + `ZoneDensityCache`). The two run in sequence: cognitive gating picks `tau/beta/budget`, physical scheduling picks `compute-this-tick: bool` + cache hit/miss. **✅ Done in riir-ai Plan 352 Phase 2 (commit `bb73cee3`).**
+- [x] **T4.3** Wire `belief_mass_divergence` (Plan 314) as the optional stampede detector. When it exceeds τ, call `cache.invalidate_all()`. **✅ Done in riir-ai Plan 352 Phase 3 (commit `bb73cee3`) — `detect_stampede()` + `tick_physical_with_stampede()` behind `zone_stampede_detector` feature.**
+- [x] **T4.4** Run the actual 60s sim with real game zones (not synthetic). Compare to the mean-aggregation baseline. This is the *real* G5 verdict (T3.1 was the synthetic proxy). **✅ Done in riir-ai Plan 352 Phase 4 — `bench_352_physical_tier_real_sim` on a 4×4 zone grid, ALL 3 GATES PASS: G5a +41.54%, G5b 94.45% hit rate, G5c detector fires correctly + 0 stale reads. See `riir-ai/.benchmarks/352_physical_tier_real_sim.md`.**
+- [x] **T4.5** If T4.4 reveals emergent crowd behavior (lanes, queues, stampedes from local density gradients), file the Super-GOAT-promotion note + riir-ai guide (per Research 350 §4 conditional path). **✅ No emergent behavior observed — detector responded to an INJECTED stampede, not self-organizing dynamics. No Super-GOAT note filed (explicit non-pre-claim held). Emergence requires a real Bevy sim (Plan 350).**
 
 ---
 
