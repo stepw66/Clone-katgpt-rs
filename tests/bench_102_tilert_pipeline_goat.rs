@@ -22,7 +22,7 @@ use std::time::Instant;
 use katgpt_rs::speculative::StabilitySnapshot;
 use katgpt_rs::transformer::{ForwardContext, MultiLayerKVCache, TransformerWeights, forward};
 use katgpt_rs::types::{Config, Rng};
-use katgpt_rs::weights::ContiguousWeights;
+use katgpt_rs::ContiguousWeights;
 
 // ── Helpers ───────────────────────────────────────────────────
 
