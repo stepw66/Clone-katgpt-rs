@@ -348,6 +348,14 @@ pub mod latent_trajectory_geometry;
 #[cfg(feature = "viable_manifold_graph")]
 pub mod viable_manifold_graph;
 
+// Zone Affective Manifold — crowd-scale PCA via power iteration + deflation
+// on the (N, D) crowd-activation covariance (Issue 001). Top-k principal
+// directions ("zone mood axes") + per-NPC projections. Rayon-parallel for
+// N > parallel_threshold, cold-start identity fallback for small crowds,
+// sign-fixed for temporal continuity. Pure modelless. Opt-in until G1-G6 pass.
+#[cfg(feature = "zone_affective_manifold")]
+pub mod zone_manifold;
+
 // AC-GPT Arbitrary-Conditional Prefix — modelless mask builder + sequence
 // augmenter that turns any causal Transformer forward into a single-pass
 // arbitrary-conditional forward p(xe | xc) via position-aware copies of xc at
