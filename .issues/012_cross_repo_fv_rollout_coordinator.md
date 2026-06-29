@@ -32,15 +32,36 @@ aligned with:
 - The lessons-learned bug class — every past bug was an invariant violation
   we asserted but didn't prove.
 
-## 2. Current state (2026-06-29)
+## 2. Current state (2026-06-30)
 
 | Repo | `.proofs/` exists? | Theorems shipped | Sibling issue |
 |---|---|---|---|
 | `katgpt-rs` (public) | ✅ `KatgptProof` (Plan 293) | `action_bridge_ranking_preserved`, `action_bridge_argmax_preserved` | this issue (coordinator) |
-| `riir-chain` (private) | ✅ `RiirChainProof` (Plan 004) | LatCal fixed-point round-trip | `riir-chain/.issues/001_*` (extend) |
-| `riir-neuron-db` (private) | ❌ none | — | `riir-neuron-db/.issues/004_*` (P0, **start here**) |
-| `riir-ai` (private) | ❌ none | — | `riir-ai/.issues/348_*` (P1) |
+| `riir-chain` (private) | ✅ `RiirChainProof` (Plans 004 + 008) | LatCal round-trip (3), quorum determinism (4), chain-side `merkle_root` (4) | `riir-chain/.issues/001_*` (T1–T5, T8, T9 done; T6/T7 deferred) |
+| `riir-neuron-db` (private) | ✅ `NeuronDbProof` (Plan 007) | `Shard/Layout` (7 thms), `Consolidation/FreezeGate` (8 thms) | `riir-neuron-db/.issues/004_*` (Phase 1 done; P1/P2 pending) |
+| `riir-ai` (private) | ❌ none | — | `riir-ai/.issues/348_*` (P1, now unblocked) |
 | `riir-train` (private) | ❌ none | — | `riir-train/.issues/308_*` (**EXCLUDED**) |
+
+### Phase progress
+
+- ✅ **Phase 1 (P0): riir-neuron-db** — DONE (Plan 007, commit `179b336`).
+  Shipped `Shard/Layout.lean` (7 axiom-free thms: gap-free layout, monotone
+  offsets, every constructor sets `merkle_root` to `zeros32`) and
+  `Consolidation/FreezeGate.lean` (8 thms: `can_freeze = input ∧ output`,
+  implications, sufficiency, `WellFormed` contract).
+- ✅ **Phase 2 (P0): riir-chain** — DONE (Plan 008). Shipped
+  `Consensus/QuorumDeterminism.lean` (4 axiom-free thms: `compute_congr`,
+  `compute_refl`, `compute_congr_tier_roots`, `compute_congr_block_root` —
+  the sync-boundary determinism rule as a theorem) and
+  `Shard/MerkleRoot.lean` (4 thms: `commit_stamp_all` axiom-free, plus
+  length-preservation and per-element corollaries). Coordinated with Phase 1:
+  constructors init `merkle_root = zeros32`, commit functions override to
+  batch root — together they close the bug class across both repos.
+- 🟡 **Phase 3 (P1): neuron-db + chain fill-ins** — Merkle proof soundness,
+  split-key security, slashing monotonicity.
+- 🟡 **Phase 4 (P1): riir-ai** — `hla_scalar_boundedness` (cheap, extends
+  KatgptProof) + freeze/thaw reader invariant (the hard long pole).
+- 🟡 **Phase 5 (P2/P3): riir-ai** — bridge ordering over learned directions.
 
 ## 3. Recommended sequencing
 
@@ -105,19 +126,34 @@ These must be agreed once and applied uniformly:
 ## 5. Tasks (coordinator-level)
 
 - [ ] **T1** Confirm C1-C6 conventions with the team (this issue's §4).
-- [ ] **T2** Track Phase 1 (`riir-neuron-db/.issues/004_*`) to P0 theorem
+      Status: applied empirically in Phases 1 + 2 (Lean 4 v4.31.0, axiom
+      budget `{propext, Classical.choice, Quot.sound}`, spec-match tests in
+      all three repos, `.lake/` gitignored, READMEs updated). The conventions
+      work; not yet formally ratified as a doc, but the rollout has validated
+      them.
+- [x] **T2** Track Phase 1 (`riir-neuron-db/.issues/004_*`) to P0 theorem
       completion. This is the rollout's first concrete deliverable.
-- [ ] **T3** Track Phase 2 (`riir-chain/.issues/001_*`) — coordinate the
+      ✅ DONE (Plan 007, commit `179b336`).
+- [x] **T3** Track Phase 2 (`riir-chain/.issues/001_*`) — coordinate the
       shared `merkle_root` audit between `riir-neuron-db` (shard constructors)
       and `riir-chain` (chain-side shard wrappers). Same bug class, two repos,
       must be consistent.
+      ✅ DONE (Plan 008). The two-repo audit is closed: leaf-crate Plan 007
+      proves constructors init `merkle_root = zeros32`; chain Plan 008 proves
+      commit functions override to batch root. Coordinated spec-match test
+      (`shard_merkle_root_spec_match.rs::spec_commit_overrides_constructor_default`)
+      cross-references both invariants.
 - [ ] **T4** Update Research 003 §167 ("9 GOAT proofs") to reference the FV
       rollout — the public capability claim should cite the actual theorems
       once they exist, not just empirical gates.
+      Status: deferred until Phase 4 lands (the public claim is about the full
+      quintet, so waiting until `riir-ai/.proofs/` exists is reasonable).
 - [ ] **T5** Once Phase 1 ships, write a `.research/` note in `katgpt-rs`
       distilling the cross-repo FV pattern (open primitive + private guides +
       spec-match tests) as a reusable Super-GOAT capture protocol. This is
       process IP worth capturing.
+      Status: deferred. Phases 1 + 2 have now shipped enough to write this note
+      with two concrete examples (neuron-db + chain). Candidate for next session.
 
 ## 6. Tractability summary (honest cost forecast)
 
