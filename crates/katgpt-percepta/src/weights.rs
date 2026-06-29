@@ -25,15 +25,15 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::percepta::graph::types::{DimId, DimensionKind, Expression, LookupId, ProgramGraph};
-use crate::percepta::scheduler::{Schedule, StdLayer};
-use crate::percepta::types::TieBreak;
+use crate::graph::types::{DimId, DimensionKind, Expression, LookupId, ProgramGraph};
+use crate::scheduler::{Schedule, StdLayer};
+use crate::types::TieBreak;
 
 // ── Constants ──────────────────────────────────────────────────
 
 /// Softmax temperature scaling to approximate hardmax (argmax) attention.
 ///
-/// Must match `HARD_K` in [`crate::percepta::types::HARD_K`].
+/// Must match `HARD_K` in [`crate::types::HARD_K`].
 const HARD_K: f64 = 1e10;
 
 /// Square root of 2, used for attention head scaling.
@@ -859,8 +859,8 @@ fn build_ffn_layer_weights(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::percepta::graph::types::GraphBuilder;
-    use crate::percepta::scheduler::milp_schedule;
+    use crate::graph::types::GraphBuilder;
+    use crate::scheduler::milp_schedule;
 
     // ── expr_to_vector tests ─────────────────────────────────
 

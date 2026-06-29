@@ -1,4 +1,5 @@
-use katgpt_rs::{benchmark, benchmark::BenchCategory, percepta, plot, transformer, types};
+use katgpt_rs::{benchmark, benchmark::BenchCategory, plot, transformer, types};
+use katgpt_percepta as percepta;
 
 fn main() {
     let config = types::Config::micro();
@@ -351,7 +352,7 @@ fn percepta_benchmark() {
 /// O(N) full rebuild. Both use O(log H) query (binary/ternary search on hull).
 #[cfg(feature = "percepta")]
 fn percepta_cht_benchmark() {
-    use katgpt_rs::percepta::{HardAttentionHead, TieBreak};
+    use katgpt_percepta::{HardAttentionHead, TieBreak};
 
     let trace_sizes = [1_000, 10_000, 100_000];
 

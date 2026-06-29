@@ -17,7 +17,7 @@ fn main() {
 
 #[cfg(all(feature = "domino_correction", feature = "sudoku"))]
 fn main() {
-    use katgpt_rs::percepta::Sudoku9x9;
+    use katgpt_percepta::Sudoku9x9;
     use katgpt_rs::pruners::SudokuPruner;
     use katgpt_rs::speculative::{
         ConstraintPruner, PrefixCorrectionTable, build_dd_tree_pruned, domino_correct_marginals,

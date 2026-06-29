@@ -28,7 +28,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::percepta::wasm::decoder::{
+use crate::wasm::decoder::{
     self, DecodeError, ExportKind, FuncBody, ImportKind, OP_BLOCK, OP_BR, OP_BR_IF, OP_BR_TABLE,
     OP_CALL, OP_DROP, OP_ELSE, OP_END, OP_GLOBAL_GET, OP_GLOBAL_SET, OP_I32_ADD, OP_I32_CONST,
     OP_I32_EQ, OP_I32_EQZ, OP_I32_GE_S, OP_I32_GE_U, OP_I32_GT_S, OP_I32_GT_U, OP_I32_LE_S,
@@ -37,7 +37,7 @@ use crate::percepta::wasm::decoder::{
     OP_IF, OP_LOCAL_GET, OP_LOCAL_SET, OP_LOCAL_TEE, OP_LOOP, OP_NOP, OP_RETURN, OP_SELECT,
     OP_UNREACHABLE, WASM_OP_NAMES, WasmModule,
 };
-use crate::percepta::wasm::lower::{lower_hard_ops, lower_i64_ops};
+use crate::wasm::lower::{lower_hard_ops, lower_i64_ops};
 
 // ── Constants ──────────────────────────────────────────────────
 
@@ -1142,7 +1142,7 @@ pub fn compile_program(c_source: &str, input_str: &str) -> Result<CompiledProgra
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::percepta::wasm::decoder::{Export, FuncType, Global, Import, WasmInstr};
+    use crate::wasm::decoder::{Export, FuncType, Global, Import, WasmInstr};
 
     #[test]
     fn test_int_to_bytes() {

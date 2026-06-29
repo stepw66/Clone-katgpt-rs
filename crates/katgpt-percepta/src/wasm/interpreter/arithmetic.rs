@@ -23,7 +23,7 @@
 //! result  = diff + 256·borrow
 //! ```
 
-use crate::percepta::graph::types::{Expression, GraphBuilder};
+use crate::graph::types::{Expression, GraphBuilder};
 
 // ── Byte value helper ──────────────────────────────────────────
 
@@ -224,18 +224,18 @@ pub fn build_branch_sub(
     const_byte: Expression,
     call_stack_byte: Expression,
     carry: Expression,
-    dispatch: &mut crate::percepta::wasm::interpreter::dispatch::OpcodeDispatch,
+    dispatch: &mut crate::wasm::interpreter::dispatch::OpcodeDispatch,
 ) -> (Expression, Expression) {
     let one_expr = Expression::from_dim(builder.one);
 
     // Mask call_stack_byte and carry to only the return opcode
     let csb = builder.reglu(
         call_stack_byte,
-        dispatch.op_dot(crate::percepta::wasm::interpreter::dispatch::Opcode::Return),
+        dispatch.op_dot(crate::wasm::interpreter::dispatch::Opcode::Return),
     );
     let cc = builder.reglu(
         carry,
-        dispatch.op_dot(crate::percepta::wasm::interpreter::dispatch::Opcode::Return),
+        dispatch.op_dot(crate::wasm::interpreter::dispatch::Opcode::Return),
     );
 
     // branch_sub_val = const_byte − call_stack_byte − carry
@@ -325,7 +325,7 @@ mod tests {
 
     #[test]
     fn test_branch_sub_build_creates_expressions() {
-        use crate::percepta::wasm::interpreter::dispatch::OpcodeDispatch;
+        use crate::wasm::interpreter::dispatch::OpcodeDispatch;
 
         let mut builder = GraphBuilder::new();
         let one_expr = Expression::from_dim(builder.one);

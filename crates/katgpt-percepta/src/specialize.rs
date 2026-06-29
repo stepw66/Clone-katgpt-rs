@@ -48,10 +48,10 @@ use std::collections::HashMap;
 
 use log::info;
 
-use crate::percepta::graph::types::{Expression, GraphBuilder, ProgramGraph};
-use crate::percepta::scheduler::{self, Schedule, ScheduleError};
-use crate::percepta::wasm::interpreter::{self, ProgramInstruction};
-use crate::percepta::weights::{self, TransformerWeights};
+use crate::graph::types::{Expression, GraphBuilder, ProgramGraph};
+use crate::scheduler::{self, Schedule, ScheduleError};
+use crate::wasm::interpreter::{self, ProgramInstruction};
+use crate::weights::{self, TransformerWeights};
 
 // ── Error Type ────────────────────────────────────────────────
 
@@ -439,7 +439,7 @@ fn log_reduction(reduction: &SpecializationReduction) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::percepta::wasm::interpreter::Opcode;
+    use crate::wasm::interpreter::Opcode;
 
     /// Helper: create a simple 3-instruction program (load const, output, halt).
     fn simple_program() -> Vec<ProgramInstruction> {
@@ -536,7 +536,7 @@ mod tests {
     fn test_specialized_graph_has_reglu_dims_for_piecewise_lookup() {
         // The specialized graph should contain ReGLU dimensions that encode the
         // piecewise-constant step functions for instruction decode.
-        use crate::percepta::graph::types::DimensionKind;
+        use crate::graph::types::DimensionKind;
 
         let program = arithmetic_program();
         let mut builder = GraphBuilder::new();

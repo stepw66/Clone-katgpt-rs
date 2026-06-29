@@ -23,7 +23,7 @@
 
 #![cfg(feature = "sudoku")]
 
-use katgpt_rs::percepta::{KVCache2D, Sudoku9x9};
+use katgpt_percepta::{KVCache2D, Sudoku9x9};
 use katgpt_rs::pruners::SudokuPruner;
 use katgpt_rs::speculative::{build_dd_tree_pruned, extract_parent_tokens};
 use katgpt_rs::types::Config;

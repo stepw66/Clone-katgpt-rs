@@ -33,10 +33,10 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::percepta::graph::types::{
+use crate::graph::types::{
     DimId, DimensionKind, Expression, LookUp, LookupId, ProgramGraph,
 };
-use crate::percepta::types::TieBreak;
+use crate::types::TieBreak;
 
 // ── Error Type ─────────────────────────────────────────────────
 
@@ -96,7 +96,7 @@ struct AttentionEntry {
 /// entries. This is correct but slower than the CHT-based O(log n) method used
 /// in the transformer. For large programs, consider using the transformer instead.
 ///
-/// [`GraphBuilder`]: crate::percepta::graph::types::GraphBuilder
+/// [`GraphBuilder`]: crate::graph::types::GraphBuilder
 pub struct GraphEvaluator {
     /// Token name → Expression for input tokens (embeddings).
     input_tokens: HashMap<String, Expression>,
@@ -615,8 +615,8 @@ impl GraphEvaluator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::percepta::graph::types::GraphBuilder;
-    use crate::percepta::types::TieBreak;
+    use crate::graph::types::GraphBuilder;
+    use crate::types::TieBreak;
 
     /// Extract the single DimId from an expression (assumes 1-term expression).
     fn expr_to_dim(expr: &Expression) -> DimId {

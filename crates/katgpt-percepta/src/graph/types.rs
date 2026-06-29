@@ -29,7 +29,7 @@ use std::collections::HashMap;
 
 use ordered_float::OrderedFloat;
 
-use crate::percepta::TieBreak;
+use crate::TieBreak;
 
 // ── Constants ──────────────────────────────────────────────────
 

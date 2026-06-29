@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/katgpt-core", "crates/katgpt-dec", "crates/katgpt-hla", "crates/katgpt-micro-belief", "crates/katgpt-personality", "crates/katgpt-sleep", "crates/katgpt-speculative", "crates/katgpt-transformer", "crates/katgpt-types", "."]
+members = ["crates/katgpt-core", "crates/katgpt-dec", "crates/katgpt-hla", "crates/katgpt-micro-belief", "crates/katgpt-percepta", "crates/katgpt-personality", "crates/katgpt-sleep", "crates/katgpt-speculative", "crates/katgpt-transformer", "crates/katgpt-types", "."]
 resolver = "3"
 
 [package]
@@ -30,8 +30,12 @@ proc-macro2 = { version = "1", optional = true }
 bevy_ecs = { version = "0.15", optional = true }  # Standalone ECS (Plan 033)
 wasmi = { version = "1.0", optional = true }       # WASM bomber validator (Plan 034, wasmi migration Plan 167)
 papaya = { version = "0.2", optional = true }      # Lock-free concurrent HashMap (Plan 037)
-ordered-float = { version = "4", optional = true } # Ord wrapper for f64 — CHT breakpoints (Plan 064 TG-A)
-good_lp = { version = "1", optional = true, default-features = false, features = ["highs", "microlp"] } # MILP solver — scheduling (Plan 064 TG-D), highs primary + microlp fallback
+good_lp = { version = "1", optional = true, default-features = false, features = ["highs", "microlp"] } # MILP solver — ConvexTok (Plan 127) + percepta scheduling (Plan 064 TG-D, now in katgpt-percepta crate). Root retains for tokenizer/convex_solver.rs.
+# katgpt-percepta (Plan 064): extracted to standalone crate. Non-optional — legacy module
+# (KVCache2D, Sudoku9x9, StreamingSolver) is zero-dep and always compiled, matching the
+# pre-extraction behavior where `pub mod percepta` was unconditional. Feature ladder gates
+# only the advanced parts (CHT, gates, graph, wasm, compile).
+katgpt-percepta = { path = "crates/katgpt-percepta" }
 reqwest = { version = "0.12", features = ["blocking", "json"], optional = true } # AutoGo REST API client (Plan 065)
 toml = "0.8"
 bytemuck = { version = "1", features = ["extern_crate_alloc"] }  # extern_crate_alloc: enables pod_collect_to_vec (used by transformer.rs weight loading). On native this is unified transitively via plotters→image, but wasm32 builds skip plotters so the feature must be explicit. See Plan 316.
@@ -247,12 +251,15 @@ problem_mutator = ["bandit", "katgpt-core/problem_mutator"]  # ProblemMutator ga
 idea_divergence = ["bandit", "partial_scoring", "katgpt-core/idea_divergence"]  # IdeaDivergence strategic novelty filter (Plan 191, Research 171)
 speculative_generator = ["katgpt-core/speculative_generator"]  # SpeculativeGenerator trait unification — generic generate+validate contract (Plan 193 Phase 1)
 comp_width = ["mux_bfs", "katgpt-core/comp_width"]  # Compositional DDTree partner-entropy width — continuous replacement for PEAK_DOMINANCE_RATIO (Plan 205, Research 181)
-# ── Percepta (transformer-vm RIIR, Plan 064) ──────────────────
-percepta = ["ordered-float"]  # CHT hull cache: upper+lower, HullMeta, tie-break, cumsum (TG-A)
-percepta_gates = ["percepta"]  # + ReGLU, stepglu, multiply, persist primitives (TG-B)
-percepta_graph = ["percepta_gates"]  # + Expression/Dimension DSL, ProgramGraph (TG-C)
-percepta_wasm = ["percepta_graph"]  # + WASM decoder + lowering + interpreter — pure Rust, NOT wasmtime (TG-E+F)
-percepta_compile = ["percepta_wasm", "dep:good_lp"]  # + MILP + weights + transformer + Futamura + CLI (TG-D+G-J)
+# ── Percepta (transformer-vm RIIR, Plan 064) ─ now in katgpt-percepta crate ─
+# ordered-float + good_lp(MILP) live in the katgpt-percepta crate; root only forwards features.
+# Root good_lp is retained for tokenizer/convex_solver.rs (gated by convex_tok).
+# katgpt-percepta is non-optional (legacy module is zero-dep, always compiled).
+percepta = ["katgpt-percepta/percepta"]  # CHT hull cache: upper+lower, HullMeta, tie-break, cumsum (TG-A)
+percepta_gates = ["percepta", "katgpt-percepta/percepta_gates"]  # + ReGLU, stepglu, multiply, persist primitives (TG-B)
+percepta_graph = ["percepta_gates", "katgpt-percepta/percepta_graph"]  # + Expression/Dimension DSL, ProgramGraph (TG-C)
+percepta_wasm = ["percepta_graph", "katgpt-percepta/percepta_wasm"]  # + WASM decoder + lowering + interpreter — pure Rust, NOT wasmtime (TG-E+F)
+percepta_compile = ["percepta_wasm", "katgpt-percepta/percepta_compile"]  # + MILP + weights + transformer + Futamura + CLI (TG-D+G-J). good_lp now in katgpt-percepta, not root.
 feedback = []  # E2E feedback loop — sends inference results to REST endpoint (Plan 042, requires consumer in riir-gpu)
 rest = []  # REST bridge test + merge stub (Plan 009, client lives in riir-ai/riir-rest)
 embedding_router = []  # Semantic embedding routing (Plan 024, not yet started)

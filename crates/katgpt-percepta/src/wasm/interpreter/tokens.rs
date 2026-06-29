@@ -27,7 +27,7 @@
 
 use std::collections::HashMap;
 
-use crate::percepta::graph::types::{DimId, Expression};
+use crate::graph::types::{DimId, Expression};
 
 use super::dispatch::{Opcode, unique_stack_pairs};
 
@@ -355,7 +355,7 @@ pub fn build_output_tokens(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::percepta::graph::types::GraphBuilder;
+    use crate::graph::types::GraphBuilder;
 
     /// Helper: create InputDims for universal mode testing.
     fn make_universal_dims(builder: &mut GraphBuilder) -> (InputDims, DimId) {

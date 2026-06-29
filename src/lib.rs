@@ -146,7 +146,6 @@ pub mod off_principal;
 pub mod octopus;
 #[cfg(feature = "osc_kv")]
 pub mod osc_kv;
-pub mod percepta;
 #[cfg(feature = "modality_pruned_load")]
 pub mod pipeline_pruner;
 #[cfg(feature = "planar_quant")]

@@ -25,8 +25,8 @@ use good_lp::{
 };
 use log::info;
 
-use crate::percepta::TieBreak;
-use crate::percepta::graph::*;
+use crate::TieBreak;
+use crate::graph::*;
 
 /// Maximum time (seconds) for the MILP solver before timeout.
 /// HiGHS respects this limit and returns the best solution found so far.

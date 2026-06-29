@@ -16,7 +16,7 @@
 //! × 4 sign combinations = 64 circle points, of which the first 36 are assigned
 //! to the 36 interpreter opcodes.
 
-use crate::percepta::graph::types::{Expression, GraphBuilder};
+use crate::graph::types::{Expression, GraphBuilder};
 
 // ── Constants ──────────────────────────────────────────────────
 

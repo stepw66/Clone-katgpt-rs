@@ -11,7 +11,7 @@
 
 use std::sync::Arc;
 
-use katgpt_rs::percepta::Sudoku9x9;
+use katgpt_percepta::Sudoku9x9;
 use katgpt_rs::pruners::{RosettaPruner, SudokuPruner};
 use katgpt_rs::speculative::{ConstraintPruner, ScreeningPruner, build_dd_tree_pruned};
 use katgpt_rs::types::Config;

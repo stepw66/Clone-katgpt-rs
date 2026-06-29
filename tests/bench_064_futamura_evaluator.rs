@@ -11,10 +11,10 @@
 mod tests {
     use std::collections::HashMap;
 
-    use katgpt_rs::percepta::compile::{compile_rust_program, find_rustc, rust_template};
-    use katgpt_rs::percepta::graph::types::{Expression, GraphBuilder};
-    use katgpt_rs::percepta::runner::Runner;
-    use katgpt_rs::percepta::wasm::interpreter::{self, Opcode, ProgramInstruction};
+    use katgpt_percepta::compile::{compile_rust_program, find_rustc, rust_template};
+    use katgpt_percepta::graph::types::{Expression, GraphBuilder};
+    use katgpt_percepta::runner::Runner;
+    use katgpt_percepta::wasm::interpreter::{self, Opcode, ProgramInstruction};
 
     // ── Helpers ──────────────────────────────────────────────────
 
@@ -30,7 +30,7 @@ mod tests {
 
     /// Build the universal WASM interpreter graph for evaluation.
     fn build_universal_graph() -> (
-        katgpt_rs::percepta::graph::types::ProgramGraph,
+        katgpt_percepta::graph::types::ProgramGraph,
         HashMap<String, Expression>,
         HashMap<String, Expression>,
     ) {
@@ -44,7 +44,7 @@ mod tests {
     fn build_specialized_graph(
         program: &[ProgramInstruction],
     ) -> (
-        katgpt_rs::percepta::graph::types::ProgramGraph,
+        katgpt_percepta::graph::types::ProgramGraph,
         HashMap<String, Expression>,
         HashMap<String, Expression>,
     ) {

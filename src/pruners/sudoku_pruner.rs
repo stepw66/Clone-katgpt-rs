@@ -1,7 +1,7 @@
 //! Sudoku constraint pruner — maps DDTree depth to (row, col) and validates
 //! drafted digits against Sudoku rules. Gated behind `sudoku` feature.
 
-use crate::percepta::Sudoku9x9;
+use katgpt_percepta::Sudoku9x9;
 use crate::speculative::types::ConstraintPruner;
 
 /// Sudoku constraint pruner: maps DDTree depth → (row, col) and

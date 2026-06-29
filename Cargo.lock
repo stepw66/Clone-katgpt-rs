@@ -1773,6 +1773,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "katgpt-percepta"
+version = "0.1.0"
+dependencies = [
+ "good_lp",
+ "log",
+ "ordered-float",
+]
+
+[[package]]
 name = "katgpt-personality"
 version = "0.1.0"
 dependencies = [
@@ -1797,11 +1806,11 @@ dependencies = [
  "good_lp",
  "half",
  "katgpt-core",
+ "katgpt-percepta",
  "katgpt-speculative",
  "katgpt-transformer",
  "log",
  "metal",
- "ordered-float",
  "papaya",
  "plotters",
  "postcard",

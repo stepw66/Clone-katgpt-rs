@@ -29,15 +29,15 @@
 
 use std::collections::HashMap;
 
-use crate::percepta::compile::{self, CompileError, CompiledProgram};
-use crate::percepta::evaluator::{EvalError, GraphEvaluator};
-use crate::percepta::graph::types::{Expression, GraphBuilder, ProgramGraph};
-use crate::percepta::scheduler::{Schedule, ScheduleError, milp_schedule};
-use crate::percepta::transformer::{
+use crate::compile::{self, CompileError, CompiledProgram};
+use crate::evaluator::{EvalError, GraphEvaluator};
+use crate::graph::types::{Expression, GraphBuilder, ProgramGraph};
+use crate::scheduler::{Schedule, ScheduleError, milp_schedule};
+use crate::transformer::{
     GenerationResult, TransformerConfig, TransformerVocab, VanillaTransformer,
 };
-use crate::percepta::wasm::interpreter;
-use crate::percepta::weights::{TransformerWeights, build_weights};
+use crate::wasm::interpreter;
+use crate::weights::{TransformerWeights, build_weights};
 
 // ── Error Type ─────────────────────────────────────────────────
 
@@ -653,7 +653,7 @@ mod tests {
     #[test]
     #[ignore = "MILP solver too slow for unit tests; run with --ignored flag"]
     fn test_runner_specialize_simple_program_succeeds() {
-        use crate::percepta::wasm::interpreter::Opcode;
+        use crate::wasm::interpreter::Opcode;
 
         let program = vec![
             interpreter::ProgramInstruction::with_i32(Opcode::I32Const, 42),

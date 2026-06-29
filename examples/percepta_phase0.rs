@@ -11,9 +11,9 @@
 
 use std::time::Instant;
 
-use katgpt_rs::percepta::compile::{compile_rust_program, rust_template};
-use katgpt_rs::percepta::runner::Runner;
-use katgpt_rs::percepta::weights::TransformerWeights;
+use katgpt_percepta::compile::{compile_rust_program, rust_template};
+use katgpt_percepta::runner::Runner;
+use katgpt_percepta::weights::TransformerWeights;
 
 fn mat_f64(m: &[Vec<f64>]) -> usize {
     m.iter().map(|r| r.len()).sum()

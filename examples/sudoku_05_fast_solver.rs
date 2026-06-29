@@ -3,7 +3,7 @@
 
 #![cfg(feature = "sudoku")]
 
-use katgpt_rs::percepta::Sudoku9x9;
+use katgpt_percepta::Sudoku9x9;
 
 fn main() {
     let mut b = Sudoku9x9::arto_inkala();

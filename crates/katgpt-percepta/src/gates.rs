@@ -223,7 +223,7 @@ impl std::fmt::Display for GateKind {
 
 #[cfg(test)]
 mod tests {
-    use crate::percepta::types::EPS;
+    use crate::types::EPS;
 
     use super::*;
 
