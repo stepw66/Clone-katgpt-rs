@@ -48,6 +48,12 @@ pub mod bomber_state;
 
 /// Bomber-specific SDPG helpers (`from_replay`) — moved here from katgpt-pruners
 /// during Plan 005 because they depend on bomber's `ReplaySample` type.
+///
+/// Gated on `sdpg_bandit` (matching `sdpg_player`) because it imports
+/// `katgpt_pruners::sdpg::*`, which only exists under that feature. Ungated, it
+/// breaks `--all-features` builds of downstream crates (riir-ai, riir-train)
+/// that enable `bomber` without `sdpg_bandit`.
+#[cfg(feature = "sdpg_bandit")]
 pub mod sdpg_helpers;
 
 pub use bomber_state::{BombSnapshot, BomberHeuristic, BomberState, PlayerSnapshot};
