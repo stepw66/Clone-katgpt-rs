@@ -39,7 +39,7 @@ aligned with:
 | `katgpt-rs` (public) | ✅ `KatgptProof` (Plan 293) | `action_bridge_ranking_preserved`, `action_bridge_argmax_preserved` | this issue (coordinator) |
 | `riir-chain` (private) | ✅ `RiirChainProof` (Plans 004 + 008 + 009) | LatCal round-trip (3), quorum determinism (4), chain-side `merkle_root` (4), **slashing monotonicity (8)**, **split-key security (10)** | `riir-chain/.issues/001_*` (**CLOSED** — T1–T9 all done) |
 | `riir-neuron-db` (private) | ✅ `NeuronDbProof` (Plans 007 + 008) | `Shard/Layout` (7 thms), `Consolidation/FreezeGate` (8 thms), `Merkle/Soundness` (4 thms) | `riir-neuron-db/.issues/004_*` (Phase 1 + P1 done; P2 pending) |
-| `riir-ai` (private) | ✅ `RiirAiProof` (Plan 353) | HLA boundedness (13 thms: sigmoid open-interval `(0,1)` + clamp closed-interval `[0,1]` + composite `curiosity_drive_bounded`) | `riir-ai/.issues/348_*` (T1/T3/T5/T6 done; T2 freeze/thaw deferred) |
+| `riir-ai` (private) | ✅ `RiirAiProof` (Plan 353 + Issue 348 T2) | HLA boundedness (13 thms: sigmoid open-interval `(0,1)` + clamp closed-interval `[0,1]` + composite `curiosity_drive_bounded`) + freeze/thaw reader invariant (2 thms: `read_snapshot_consistent` MAIN + `read_snapshot_no_torn_ab_pair`) | `riir-ai/.issues/348_*` (**T1–T8 all done** — Phase 4 COMPLETE) |
 | `riir-train` (private) | ❌ none | — | `riir-train/.issues/308_*` (**EXCLUDED**) |
 
 ### Phase progress
@@ -82,8 +82,8 @@ aligned with:
     non-degeneracy corpus). Closes `riir-chain/.issues/001_*` (T1–T9 all ✅).
 
   **Phase 3 COMPLETE.**
-- 🟡 **Phase 4 (P1): riir-ai** — `hla_scalar_boundedness` (cheap, extends
-  KatgptProof) + freeze/thaw reader invariant (the hard long pole).
+- ✅ **Phase 4 (P1): riir-ai** — `hla_scalar_boundedness` + freeze/thaw
+  reader invariant. **COMPLETE (2026-06-30).**
   - ✅ **HLA scalar boundedness** — DONE (Plan 353, 2026-06-30). Bootstrapped
     `riir-ai/.proofs/RiirAiProof` (fourth FV instance, Mathlib-required,
     toolchain v4.32.0-rc1). Shipped `Hla/Basic.lean` (spec: `dot`, `clamp01`,
@@ -93,9 +93,30 @@ aligned with:
     closed-interval `[0,1]`, 7 thms, the actual sync invariant + composite
     `curiosity_drive_bounded`). All within `{propext, Classical.choice, Quot.sound}`
     axiom budget. Spec-match test 6/6 green (incl. f32 saturation caveat +
-    NaN/Inf edge cases). **T2 freeze/thaw remains open** — 1–2 week effort,
-    memory-model abstraction, candidate for a dedicated future plan.
+    NaN/Inf edge cases).
+  - ✅ **Freeze/thaw reader invariant** — DONE (Issue 348 T2, 2026-06-30). The
+    path was the canonical FV-as-bug-finder story: scoping T2 revealed the
+    `LoRAWeightVersion` code violated the invariant (Issue 354 — torn-read
+    hazard from three independent atomics). The Issue 354 fix (single-
+    `ArcSwap<Inner>` packing) made the invariant hold by construction. The
+    Lean proof then reduced to a definitional unfold. Shipped
+    `Runtime/Basic.lean` (spec) + `Runtime/FreezeThaw.lean` (2 theorems:
+    `read_snapshot_consistent` MAIN + `read_snapshot_no_torn_ab_pair`
+    corollary). **Notably: the T2 theorems depend ONLY on `[propext]`** — not
+    even Classical.choice or Quot.sound, because the SC atomicity is
+    structural in the single-field `ArcSwap` model. The
+    `arcswap_store_atomicity` axiom is documentation-only. Spec-match stress
+    test `concurrent_lora_no_torn_read` (100K iterations, hard-fails on any
+    torn read) shipped with the Issue 354 fix.
 - 🟡 **Phase 5 (P2/P3): riir-ai** — bridge ordering over learned directions.
+  Status: **largely redundant** with the public `action_bridge_ranking_preserved`
+  theorem (which is already fully parameterized over arbitrary direction
+  vectors). The Phase 5 specialization to riir-ai's learned directions is
+  mathematically covered by instantiation. The substantive remaining work
+  would be a NEW theorem (e.g. linear independence of the committed-blend
+  direction basis) — but that's a different theorem, not the originally-
+  scoped ordering preservation. Phase 5 may close as "covered by
+  specialization" with a thin documentation file, pending a decision.
 
 ## 3. Recommended sequencing
 
@@ -180,14 +201,25 @@ These must be agreed once and applied uniformly:
 - [ ] **T4** Update Research 003 §167 ("9 GOAT proofs") to reference the FV
       rollout — the public capability claim should cite the actual theorems
       once they exist, not just empirical gates.
-      Status: deferred until Phase 4 lands (the public claim is about the full
-      quintet, so waiting until `riir-ai/.proofs/` exists is reasonable).
+      Status: **UNBLOCKED 2026-06-30** — Phase 4 is complete (HLA boundedness
+      + freeze/thaw reader invariant both shipped). The public capability
+      claim can now cite all 4 FV instances (KatgptProof + RiirChainProof +
+      NeuronDbProof + RiirAiProof) with concrete theorem counts. Additionally,
+      the Issue 354 torn-read finding is strong evidence that the FV investment
+      pays for itself in caught bugs — worth citing in the capability claim.
+      Candidate for a `.research/` note update.
 - [ ] **T5** Once Phase 1 ships, write a `.research/` note in `katgpt-rs`
       distilling the cross-repo FV pattern (open primitive + private guides +
       spec-match tests) as a reusable Super-GOAT capture protocol. This is
       process IP worth capturing.
-      Status: deferred. Phases 1 + 2 have now shipped enough to write this note
-      with two concrete examples (neuron-db + chain). Candidate for next session.
+      Status: **UNBLOCKED 2026-06-30** — Phase 4 complete. Four concrete
+      examples now exist (KatgptProof, RiirChainProof, NeuronDbProof,
+      RiirAiProof), plus the Issue 354 bug-finding story as a case study.
+      The note should cover: (a) the C1–C6 conventions (now empirically
+      validated across all 4 instances); (b) the spec-match test pattern
+      (Lean proves the math, Rust catches spec drift); (c) the bug-finding
+      payoff (Issue 354 — a real concurrency bug surfaced by the proof
+      scoping effort, not by testing).
 
 ## 6. Tractability summary (honest cost forecast)
 
@@ -222,3 +254,14 @@ start here — two bug-shaped invariants, most tractable) → `riir-chain`
 extend (P0) → fill-ins (P1) → `riir-ai` (P1, freeze/thaw is the hard long
 pole). Lock C1-C6 conventions before Phase 1 starts. This issue coordinates
 the rollout; sibling issues own each repo's concrete theorems.
+
+**Rollout status (2026-06-30):** Phases 1–4 COMPLETE ✅. Four FV instances
+shipped (KatgptProof, RiirChainProof, NeuronDbProof, RiirAiProof) with 71+
+theorems total across the quintet. Phase 4 (riir-ai) shipped both the HLA
+boundedness (Plan 353, 13 thms) AND the freeze/thaw reader invariant (T2,
+2 thms depending only on `propext`) — the long pole collapsed after the
+Issue 354 fix made the invariant hold by construction. The freeze/thaw
+proof effort also surfaced a real torn-read bug (Issue 354), validating
+FV as a bug-finding tool. Only Phase 5 (bridge ordering, P2/P3, largely
+redundant with the public theorem) remains. Coordinator T4/T5 (Research
+003 update + .research/ note) are now unblocked.
