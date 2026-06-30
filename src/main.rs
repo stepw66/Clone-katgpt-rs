@@ -207,10 +207,13 @@ fn main() {
             continue;
         }
         let plot_path = format!("bench/{:03}_{suffix}.svg", index);
+        #[cfg(feature = "plot")]
         match plot::plot_results(&cat_results, &plot_path, title, x_label) {
             Ok(()) => println!("📈 {title} chart saved to: {plot_path}"),
             Err(e) => eprintln!("⚠️  Plot failed for {title}: {e}"),
         }
+        #[cfg(not(feature = "plot"))]
+        let _ = plot_path;  // suppress unused when plot feature is off
     }
 
     // Save results to CSV for regression tracking (same index as PNG)
@@ -225,6 +228,7 @@ fn main() {
         Ok(()) => println!("📝 Time series appended to bench/timeseries.csv"),
         Err(e) => eprintln!("⚠️  Timeseries CSV append failed: {e}"),
     }
+    #[cfg(feature = "plot")]
     match plot::plot_timeseries("bench/timeseries.csv", "bench") {
         Ok(regressions) => {
             println!("📈 Time series charts saved to bench/timeseries_*.svg");
@@ -234,6 +238,8 @@ fn main() {
         }
         Err(e) => eprintln!("⚠️  Timeseries plot failed: {e}"),
     }
+    #[cfg(not(feature = "plot"))]
+    println!("💡 Rebuild with --features plot to enable SVG chart output (plotters is optional per Issue 355 Phase 2a)");
 
     // ── Budget Sweep ───────────────────────────────────────────────
     println!("\n📊 DDTree Budget Sweep");

@@ -143,7 +143,8 @@ pub mod octopus;
 pub mod pipeline_pruner;
 #[cfg(feature = "planar_quant")]
 pub mod planar_quant;
-pub mod plot;
+#[cfg(feature = "plot")]
+pub mod plot;  // Issue 355 Phase 2a: gated behind `plot` feature (plotters is now optional). DEFAULT-ON.
 // Orthogonal Procrustes — cross-frame embedding alignment via polar
 // decomposition (Newton-Schulz on B^T A). Issue 001 (katgpt-rs). GOAT
 // candidate — gated behind `orthogonal_procrustes` until benchmark gates
