@@ -1,6 +1,10 @@
 # Issue 012 — Cross-repo Lean 4 FV rollout coordinator
 
-> **Status:** 🟡 OPEN — coordination/tracking task across the 5-repo quintet
+> **Status:** 🟡 OPEN — Phase 5 (riir-ai bridge ordering, P2/P3, largely
+> redundant) pending decision. All coordination tasks T1–T5 are ✅ DONE.
+> Phases 1–4 COMPLETE (79 Lean 4 theorems across 4 instances). Can be
+> CLOSED once Phase 5 is resolved (close as "covered by specialization"
+> is the recommended path).
 > **Type:** Formal verification (Lean 4) — cross-repo strategy
 > **Origin:** Discussion following `katgpt-rs/.proofs/KatgptProof` (Plan 293)
 > audit (2026-06-29). Question: "we proved katgpt-rs which is prod — should we
@@ -180,12 +184,19 @@ These must be agreed once and applied uniformly:
 
 ## 5. Tasks (coordinator-level)
 
-- [ ] **T1** Confirm C1-C6 conventions with the team (this issue's §4).
-      Status: applied empirically in Phases 1 + 2 (Lean 4 v4.31.0, axiom
-      budget `{propext, Classical.choice, Quot.sound}`, spec-match tests in
-      all three repos, `.lake/` gitignored, READMEs updated). The conventions
-      work; not yet formally ratified as a doc, but the rollout has validated
-      them.
+- [x] **T1** Confirm C1-C6 conventions with the team (this issue's §4).
+      ✅ DONE (2026-06-30). Applied empirically in Phases 1–4 and formally
+      distilled in `katgpt-rs/.research/351_*` (T5). All 4 FV instances
+      (KatgptProof, RiirChainProof, NeuronDbProof, RiirAiProof) follow C1–C6
+      with zero exceptions across 79 theorems. The conventions are
+      load-bearing, not aspirational — the rollout never needed an escape
+      hatch. Per-toolchain pins (C1: 3/4 on v4.31.0, riir-ai on v4.32.0-rc1
+      for Mathlib), axiom budget (C2: all 79 within {propext, Classical.choice,
+      Quot.sound}, with the freeze/thaw thms under-shooting to propext-only),
+      spec-match tests (C3: every theorem has a paired Rust test), private
+      proofs stay private (C4), build isolation (C5: .lake/ gitignored, lake
+      build separate CI layer), README discipline (C6: all 4 instances have
+      regeneration protocols).
 - [x] **T2** Track Phase 1 (`riir-neuron-db/.issues/004_*`) to P0 theorem
       completion. This is the rollout's first concrete deliverable.
       ✅ DONE (Plan 007, commit `179b336`).
@@ -198,28 +209,45 @@ These must be agreed once and applied uniformly:
       commit functions override to batch root. Coordinated spec-match test
       (`shard_merkle_root_spec_match.rs::spec_commit_overrides_constructor_default`)
       cross-references both invariants.
-- [ ] **T4** Update Research 003 §167 ("9 GOAT proofs") to reference the FV
+- [x] **T4** Update Research 003 §167 ("9 GOAT proofs") to reference the FV
       rollout — the public capability claim should cite the actual theorems
       once they exist, not just empirical gates.
-      Status: **UNBLOCKED 2026-06-30** — Phase 4 is complete (HLA boundedness
-      + freeze/thaw reader invariant both shipped). The public capability
-      claim can now cite all 4 FV instances (KatgptProof + RiirChainProof +
-      NeuronDbProof + RiirAiProof) with concrete theorem counts. Additionally,
-      the Issue 354 torn-read finding is strong evidence that the FV investment
-      pays for itself in caught bugs — worth citing in the capability claim.
-      Candidate for a `.research/` note update.
-- [ ] **T5** Once Phase 1 ships, write a `.research/` note in `katgpt-rs`
+      ✅ DONE (2026-06-30, commit `f30daf00` in riir-ai). Updated
+      `riir-ai/.research/003_Commercial_Open_Source_Strategy_Verdict.md`
+      (the internal full strategy doc; the public katgpt-rs `.research/003_*`
+      is the trimmed routing-rules subset and needs no FV citations).
+      Changes: (a) riir-ai capability section — freeze/thaw "readers never
+      see a torn snapshot" now cites `read_snapshot_consistent` (2 thms,
+      propext-only); sigmoid-gated scalar boundedness now cites the 14
+      Hla/Bounded.lean theorems. (b) riir-chain capability — replaced the
+      outdated "9 GOAT proofs" line with the 32 Lean theorems (LatCal,
+      quorum determinism, merkle_root, slashing, split-key). (c) riir-neuron-db
+      capability — layout consistency (16 thms), tamper-evidence (4 thms),
+      freeze gate contract (8 thms) all cited. (d) All three "Why Hard to
+      Replicate" moat sections updated to cite theorems as moat (correct
+      implementation *defined* by proof, not just tested). (e) New dedicated
+      section "Formal Verification — the Modelless Correctness Guarantee"
+      with full theorem-count table, axiom discipline notes, spec-match
+      pattern, and the Issue 354 bug-finding case study. (f) Related table
+      updated to cite coordinator (012) + T5 note (351).
+- [x] **T5** Once Phase 1 ships, write a `.research/` note in `katgpt-rs`
       distilling the cross-repo FV pattern (open primitive + private guides +
       spec-match tests) as a reusable Super-GOAT capture protocol. This is
       process IP worth capturing.
-      Status: **UNBLOCKED 2026-06-30** — Phase 4 complete. Four concrete
-      examples now exist (KatgptProof, RiirChainProof, NeuronDbProof,
-      RiirAiProof), plus the Issue 354 bug-finding story as a case study.
-      The note should cover: (a) the C1–C6 conventions (now empirically
-      validated across all 4 instances); (b) the spec-match test pattern
-      (Lean proves the math, Rust catches spec drift); (c) the bug-finding
-      payoff (Issue 354 — a real concurrency bug surfaced by the proof
-      scoping effort, not by testing).
+      ✅ DONE (2026-06-30, commit `fc0c0b80` in katgpt-rs). Shipped
+      `katgpt-rs/.research/351_cross_repo_lean4_fv_pattern.md` (184 lines).
+      Covers: (a) the four instances (3 + 32 + 28 + 16 = 79 theorems, full
+      breakdown); (b) the C1–C6 conventions, empirically validated across
+      all 4 instances; (c) the spec-match test pattern (3 concrete examples:
+      what Lean catches vs what Rust catches, neither sufficient alone);
+      (d) the bug-finding payoff — the Issue 354 torn-read case study; (e)
+      the "fix the code, not the proof" move (collapsing the 1–2 week long
+      pole into a definitional unfold); (f) when to apply vs not apply the
+      pattern (static + invariant-shaped vs probabilistic/behavioral);
+      (g) a 9-step reusable scaffold for the next FV effort; (h) open
+      questions (Phase 5 redundancy, UQ floor gate, cross-instance lemma
+      sharing, richer memory models). Classification: Public (process note).
+      This is the process-IP counterpart to T4's capability-face update.
 
 ## 6. Tractability summary (honest cost forecast)
 
@@ -262,6 +290,10 @@ shipped both the HLA boundedness (Plan 353, 14 thms) AND the freeze/thaw
 reader invariant (T2, 2 thms depending only on `propext`) — the long pole
 collapsed after the Issue 354 fix made the invariant hold by construction.
 The freeze/thaw proof effort also surfaced a real torn-read bug (Issue 354),
-validating FV as a bug-finding tool. Only Phase 5 (bridge ordering, P2/P3,
-largely redundant with the public theorem) remains. Coordinator T4/T5
-(Research 003 update + .research/ note) are now unblocked.
+validating FV as a bug-finding tool. **All coordination tasks T1–T5 are
+DONE** — C1–C6 conventions empirically validated (T1), all 4 phases tracked
+(T2/T3), the capability doc cites all 4 instances (T4, commit `f30daf00`),
+and the cross-repo FV pattern is distilled as a reusable Super-GOAT capture
+protocol (T5, `katgpt-rs/.research/351_*`, commit `fc0c0b80`). **Only Phase 5
+(bridge ordering, P2/P3, largely redundant with the public theorem) remains**
+— recommended path: close as "covered by specialization" with a thin doc.
