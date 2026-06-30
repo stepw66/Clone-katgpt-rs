@@ -1,7 +1,7 @@
 # Issue 010: Retroactive "Report the Floor" — conformal-naive floor comparison for existing UQ-bearing primitives
 
 **Filed:** 2026-06-28
-**Last updated:** 2026-06-30 (T1 unblocked — Plan 340 Phase 1 shipped; Plan 340 Phase 2 KARC adapter shipped; T2 shipped — floor-comparison harness live)
+**Last updated:** 2026-06-30 (T1 unblocked — Plan 340 Phase 1 shipped; Plan 340 Phase 2 KARC adapter shipped; T2 shipped — floor-comparison harness live; T3 shipped — BoMSampler compared & EXCLUDED)
 **Policy source:** Research 322 (`.research/322_Conformal_Seasonal_Pools_Calibrated_UQ_Overlay.md`), Plan 340 (`.plans/340_conformal_predictive_intervals_primitive.md`), `katgpt-rs/AGENTS.md` Feature Flag Discipline, research skill `SKILL.md` §Workflow 2.
 **Companion paper:** *Report the Floor* (arXiv:2606.09473) — argues a training-free conformal interval is a mandatory baseline for any probabilistic forecaster.
 **Blocking dependency:** ✅ RESOLVED 2026-06-30 — Plan 340 Phase 1 shipped `ConformalIntervalCalibrator<SeasonalNaiveForecaster>` (the floor instance) behind `conformal_predictive_intervals`. GOAT gate PASSED (see `.benchmarks/340_conformal_goat.md`). Plan 340 Phase 2 additionally shipped the `KarcChannelForecaster` adapter + the Lorenz-63 coverage demonstration (x=0.9425, y=0.9520, z=0.9485 at α=0.05). The retroactive comparison work (T2–T7) is now ACTIONABLE.
@@ -18,7 +18,7 @@ The policy applies **prospectively** to all future UQ primitives (enforced from 
 
 | Primitive | Plan | Current state | Floor comparison needed at |
 |---|---|---|---|
-| **BoMSampler** | 281 | shipped | next re-gate or feature-touch |
+| **BoMSampler** | 281 | shipped | **DONE 2026-06-30 — EXCLUDED** (see T3). The comparison was run; BoM's hypothesis spread is exploration noise (σ-controlled), not calibrated UQ. False-confidence signature: wins CRPS (0.87/0.31 ratio) but covers only 5–15% vs nominal 95%, Winkler 4–14× the floor. Excluded per T3 escape hatch; `bom_sampling` stays DEFAULT-ON (its GOAT gate is planning quality, not UQ). See `.benchmarks/010_bom_floor_comparison.md`. |
 | **Sleep-Time Query Anticipator** | 334 (open) / 341 (riir-ai runtime) | shipped | next re-gate or feature-touch |
 | **Best-Belief Beta Selector** | 336 | shipped (G2 FAIL, LUT unblock in progress) | next re-gate or feature-touch |
 | **KARC + conformal overlay** | 308 + 340 | KARC shipped (DEFAULT-ON); overlay in Plan 340 | Plan 340 Phase 2 (KARC adapter) — the overlay itself defines the floor, so this is the reference, not a comparison target |
@@ -47,7 +47,11 @@ These are **not** UQ-bearing under the policy definition (they don't claim a dis
     - `OverallVerdict` — `BeatsFloor` / `TiesFloor` / `LosesToFloor` / `Mixed` / `NotApplicable`. Coverage policy: over-coverage is acceptable (penalized via CRPS width); only under-coverage fails the gate.
     - 13 unit tests + 10 integration tests, all green. See `.benchmarks/340_conformal_floor_harness.md`.
   - T3–T7 adapters each reduce to: implement `UqPrimitiveUnderTest` for primitive X, then call `run_floor_comparison`.
-- [ ] **T3** Run the floor comparison on BoMSampler (Plan 281). The comparison angle: BoMSampler produces a discrete hypothesis distribution; the floor produces a continuous interval. Reconcile by evaluating both on a task where the ground truth is a continuous value that both must predict (e.g., next HLA channel value). If BoMSampler can't be evaluated on a continuous metric, document why and exclude it from the policy (it's a discrete selector, not a continuous UQ primitive).
+- [x] **T3** Run the floor comparison on BoMSampler (Plan 281). The comparison angle: BoMSampler produces a discrete hypothesis distribution; the floor produces a continuous interval. Reconcile by evaluating both on a task where the ground truth is a continuous value that both must predict (e.g., next HLA channel value). If BoMSampler can't be evaluated on a continuous metric, document why and exclude it from the policy (it's a discrete selector, not a continuous UQ primitive).
+  - **DONE 2026-06-30 — EXCLUDED.** Adapter + 5 tests shipped at `crates/katgpt-core/tests/conformal_floor_bom.rs` (gated `conformal_predictive_intervals` + `bom_sampling`). The comparison WAS run (BoM can be evaluated on a continuous metric via `from_samples` → empirical quantile); the result is the evidence for exclusion.
+  - **False-confidence finding:** BoM *wins on CRPS* (seasonal ratio 0.866, white-noise ratio 0.306) because its σ-bound intervals are narrow and CRPS rewards narrowness. But it *loses catastrophically on coverage* (5.5% / 15.1% vs nominal 95%) — the textbook false-confidence failure mode. Winkler (penalty 2/α = 40 per miss) exposes it: 13.79× / 4.11× the floor.
+  - **Structural smoking gun (width-vs-volatility test):** BoM's interval width ratio across a 15× volatility change is **0.990** (≈1.0, not 15.0). Its width tracks σ (the hyperparameter), not the data's residual stream. This is why no σ gives both competitive CRPS AND nominal coverage (σ-sweep: even σ=0.5 reaches only 0.254 coverage).
+  - **Verdict:** BoM is a belief-space exploration sampler, not a calibrated forecaster. Its GOAT gate (Plan 281 G2) measures *planning* win rate (+31.49pp on the riir-ai arena, Plan 314), NOT calibrated UQ. Excluding it from the UQ policy does NOT demote it — `bom_sampling` stays DEFAULT-ON. See `.benchmarks/010_bom_floor_comparison.md` for the full report.
 - [ ] **T4** Run the floor comparison on Sleep-Time Query Anticipator (Plan 334/341). The comparison angle: predictability scores from the anticipator vs interval-width from the floor. Both should correlate with actual forecast difficulty; the one with higher correlation wins.
 - [ ] **T5** Run the floor comparison on Best-Belief Beta Selector (Plan 336). The comparison angle: conservative candidate selection via Beta ε-quantile vs via empirical ε-quantile (the floor). Both are inverse-CDF reads; the question is whether the Beta prior (discrete, parametric) beats the empirical prior (continuous, nonparametric) on selection quality.
 - [ ] **T6** Decide on Alien Sampler (Plan 311): UQ-bearing or not? If yes, run floor comparison.

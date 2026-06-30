@@ -539,6 +539,13 @@ required-features = ["karc_forecaster"]
 name = "conformal_floor_harness"
 required-features = ["conformal_predictive_intervals"]
 
+# Issue 010 T3 — BoMSampler floor comparison. The BoM adapter + the canonical
+# evidence runs (seasonal, white noise, σ-sweep, volatility-regime width test).
+# Needs BOTH the floor harness and the BoM sampler.
+[[test]]
+name = "conformal_floor_bom"
+required-features = ["conformal_predictive_intervals", "bom_sampling"]
+
 # Plan 321 Phase 2 — CommittedFieldBlend G4 zero-alloc GOAT gate. CountingAllocator
 # audit of apply_blended (1000 iters) + commit (100 re-commits). Gated on
 # committed_field_blend so default features compile cleanly.

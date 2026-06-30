@@ -107,6 +107,7 @@ pub struct NoiseQueryConfig {
 | **G1.3** | σ=0 degeneracy | BoM with σ=0 reproduces deterministic `step()` | Unit test (T1.5c) |
 | **G2** | **Planning quality (the GOAT gate)** | K-hypothesis belief planning (minimax over K beliefs) ≥ deterministic-belief planning + DDTree action diversity, on a bomber/go arena benchmark, by ≥ +5pp win rate or HL score | Arena benchmark (deferred to riir-ai if needed — but the primitive must be usable from a test harness) |
 | **G3** | Latency | `sample_k_states(K=8)` ≤ 2× the cost of a single `step()` call (batched matvec should be near-1×, the K noise additions + sigmoids add ≤ 2×). Measured on CPU SIMD plasma-tier path. | `micro_belief_bench` extension |
+| **G-UQ** (Issue 010 T3) | "Report the Floor" UQ comparison | **N/A — EXCLUDED.** BoM's hypothesis spread is exploration noise (σ-controlled), not calibrated predictive UQ. Evidence: wins CRPS (0.87/0.31) but covers 5–15% vs nominal 95% (false confidence); Winkler 4–14× the floor; width ratio 0.990 across a 15× volatility change (σ-bound, not data-bound). BoM's selling point is planning (G2: +31.49pp), not UQ calibration. | `tests/conformal_floor_bom.rs`, `.benchmarks/010_bom_floor_comparison.md` |
 
 ### Tasks
 
