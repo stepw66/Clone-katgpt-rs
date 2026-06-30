@@ -144,7 +144,7 @@ pub fn fast_acos(x: f32) -> f32 {
     r = r * x + 0.0742610;
     r = r * x - 0.2121144;
     r = r * x + 1.5707288;
-    r = r * (1.0_f32 - x).sqrt();
+    r *= (1.0_f32 - x).sqrt();
     if negate {
         std::f32::consts::PI - r
     } else {

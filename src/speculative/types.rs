@@ -36,11 +36,32 @@ pub use katgpt_core::traits::{
     NoScreeningPruner, ScreeningPruner,
 };
 
+// Always-available speculative substrate types (no feature gate in katgpt-core).
 pub use katgpt_core::speculative::types::{
-    BlockScores, BudgetAdaptation, DecodeStrategy, DraftEvent, DraftResult, EarlyStopGate,
-    FlashPrefillConfig, PrefillMode, RejectionReason, RoutingOverlapSnapshot, SdeConfig,
-    ScoreReduction, SpecCostSnapshot, StabilitySnapshot, TreeNode,
+    BlockScores, BudgetAdaptation, DecodeStrategy, DraftEvent, DraftResult,
+    FlashPrefillConfig, PrefillMode, RejectionReason, SdeConfig, ScoreReduction, TreeNode,
 };
+
+// Feature-gated re-exports — MUST mirror katgpt-core's gates.
+//
+// `EarlyStopGate` / `SpecCostSnapshot` / `StabilitySnapshot` are gated in
+// katgpt-core behind `elf_sde` / `spec_cost_model` / `stability_metrics`
+// respectively. `RoutingOverlapSnapshot` is gated behind `domain_latent`
+// (which katgpt-core turns on transitively via `octree_ctc → sense_composition`,
+// so it's almost always available — but we still gate the re-export on root's
+// `domain_latent` so root's API surface matches root's feature flags).
+//
+// See Issue 016: the prior unconditional re-export broke
+// `cargo check --no-default-features` because the gated names don't exist in
+// katgpt-core when their features are off.
+#[cfg(feature = "elf_sde")]
+pub use katgpt_core::speculative::types::EarlyStopGate;
+#[cfg(feature = "domain_latent")]
+pub use katgpt_core::speculative::types::RoutingOverlapSnapshot;
+#[cfg(feature = "spec_cost_model")]
+pub use katgpt_core::speculative::types::SpecCostSnapshot;
+#[cfg(feature = "stability_metrics")]
+pub use katgpt_core::speculative::types::StabilitySnapshot;
 
 // NB: `katgpt_core::speculative::types` also exports feature-gated substrate
 // types (`MarginalFusionConfig`, `KvRoutingConfig`, `PositionWeightedBudget`,

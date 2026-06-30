@@ -221,6 +221,34 @@ pub struct DraftResult {
     pub stability: Option<StabilitySnapshot>,
 }
 
+impl DraftResult {
+    /// Construct a `DraftResult` from marginals and sampled tokens.
+    ///
+    /// All feature-gated diagnostic fields (`routing_overlap`, `cost_snapshot`,
+    /// `stability`) default to `None`. This constructor is the recommended way
+    /// for **consumer crates** (e.g. katgpt-rs root) to build a `DraftResult`
+    /// because it encapsulates the feature gates inside katgpt-core, where
+    /// `#[cfg(feature = "...")]` actually matches the struct definition.
+    ///
+    /// Consumer crates that gate on their own (e.g. root's `domain_latent`)
+    /// can diverge from katgpt-core's feature state due to transitive feature
+    /// activation (katgpt-core's `octree_ctc → sense_composition → domain_latent`
+    /// is ON by default even when root's `domain_latent` is OFF). Using this
+    /// constructor avoids that mismatch (Issue 016).
+    pub fn new(marginals: Vec<Vec<f32>>, sampled_tokens: Vec<usize>) -> Self {
+        Self {
+            marginals,
+            sampled_tokens,
+            #[cfg(feature = "domain_latent")]
+            routing_overlap: None,
+            #[cfg(feature = "spec_cost_model")]
+            cost_snapshot: None,
+            #[cfg(feature = "stability_metrics")]
+            stability: None,
+        }
+    }
+}
+
 // ── Draft Event Streaming (Plan 029, Dynamo Lesson 2) ────────────
 
 /// Reason a drafted branch was rejected during verification.

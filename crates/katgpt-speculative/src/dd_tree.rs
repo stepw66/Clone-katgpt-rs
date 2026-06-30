@@ -200,8 +200,8 @@ pub fn extract_best_path_into(tree: &[TreeNode], path: &mut Vec<usize>) {
     }
 
     // Emit one token per contiguous depth; stop at first missing depth.
-    for depth in 0..=max_depth {
-        match best_token[depth] {
+    for &tok in best_token.iter() {
+        match tok {
             usize::MAX => break,
             tok => path.push(tok),
         }
