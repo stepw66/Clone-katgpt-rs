@@ -1,9 +1,12 @@
 # Issue 012 — Cross-repo Lean 4 FV rollout coordinator
 
-> **Status:** ✅ READY TO CLOSE — all phases resolved (1–4 COMPLETE, Phase 5
-> CLOSED as "covered by specialization"). All coordination tasks T1–T5 DONE.
-> 79 Lean 4 theorems across 4 instances. The cross-repo FV rollout is
-> complete; this issue can be closed.
+> **Status:** ✅ CLOSED (2026-06-30). All phases resolved (1–4 COMPLETE,
+> Phase 5 CLOSED as "covered by specialization"). All coordination tasks
+> T1–T5 DONE. 79 Lean 4 theorems across 4 instances. The last open item
+> anywhere in the rollout — Issue 354 T5 (perf gate for the freeze/thaw
+> fix) — PASSED on 2026-06-30 (`.benchmarks/354_lora_read_layout_perf_gate.md`):
+> single-`ArcSwap<Inner>` wins on the read hot path at every matrix size.
+> The cross-repo FV rollout is complete; this issue is closed.
 > **Type:** Formal verification (Lean 4) — cross-repo strategy
 > **Origin:** Discussion following `katgpt-rs/.proofs/KatgptProof` (Plan 293)
 > audit (2026-06-29). Question: "we proved katgpt-rs which is prod — should we
@@ -285,20 +288,23 @@ extend (P0) → fill-ins (P1) → `riir-ai` (P1, freeze/thaw is the hard long
 pole). Lock C1-C6 conventions before Phase 1 starts. This issue coordinates
 the rollout; sibling issues own each repo's concrete theorems.
 
-**Rollout status (2026-06-30):** ✅ **ALL PHASES COMPLETE.** Four FV
-instances shipped (KatgptProof, RiirChainProof, NeuronDbProof, RiirAiProof)
-with **79 theorems total** across the quintet (3 + 32 + 28 + 16). Phase 4
-(riir-ai) shipped both the HLA boundedness (Plan 353, 14 thms) AND the
-freeze/thaw reader invariant (T2, 2 thms depending only on `propext`) — the
-long pole collapsed after the Issue 354 fix made the invariant hold by
-construction. The freeze/thaw proof effort also surfaced a real torn-read
-bug (Issue 354), validating FV as a bug-finding tool. **All coordination
-tasks T1–T5 are DONE** — C1–C6 conventions empirically validated (T1), all
-phases tracked (T2/T3), the capability doc cites all 4 instances (T4,
-commit `f30daf00`), and the cross-repo FV pattern is distilled as a reusable
-Super-GOAT capture protocol (T5, `katgpt-rs/.research/351_*`, commit
-`fc0c0b80`). **Phase 5 (bridge ordering) CLOSED** as "covered by
-specialization" — the public theorem is fully parameterized over arbitrary
-direction vectors, so riir-ai's learned directions are covered by
-instantiation (commit `adcc3bee`, `Phase5Specialization.lean`). The
-cross-repo FV rollout is complete; this issue can be closed.
+**Rollout status (2026-06-30):** ✅ **CLOSED — ALL PHASES COMPLETE.** Four
+FV instances shipped (KatgptProof, RiirChainProof, NeuronDbProof,
+RiirAiProof) with **79 theorems total** across the quintet (3 + 32 + 28 +
+16). Phase 4 (riir-ai) shipped both the HLA boundedness (Plan 353, 14 thms)
+AND the freeze/thaw reader invariant (T2, 2 thms depending only on
+`propext`) — the long pole collapsed after the Issue 354 fix made the
+invariant hold by construction. The freeze/thaw proof effort also surfaced a
+real torn-read bug (Issue 354), validating FV as a bug-finding tool. The
+Issue 354 perf gate (T5) — the last open item in the rollout — PASSED
+2026-06-30: the fix is a WIN on the read hot path (4.5-13.3% faster at all
+matrix sizes), so the correctness guarantee costs nothing and gains perf.
+**All coordination tasks T1–T5 are DONE** — C1–C6 conventions empirically
+validated (T1), all phases tracked (T2/T3), the capability doc cites all 4
+instances (T4, commit `f30daf00`), and the cross-repo FV pattern is
+distilled as a reusable Super-GOAT capture protocol (T5,
+`katgpt-rs/.research/351_*`, commit `fc0c0b80`). **Phase 5 (bridge ordering)
+CLOSED** as "covered by specialization" — the public theorem is fully
+parameterized over arbitrary direction vectors, so riir-ai's learned
+directions are covered by instantiation (commit `adcc3bee`,
+`Phase5Specialization.lean`). The cross-repo FV rollout is complete.
