@@ -609,8 +609,17 @@ unsafe fn avx2_outer_product_acc_scaled(
 
 /// SIMD-accelerated matvec: `acc[i] = Σ mat[i*cols + j] * vec[j]` for each row.
 ///
-/// Used for HLA readout (qᵀ·SK, qᵀ·PKV, etc.).
+/// I.e. computes `acc = mat · vec` (standard row-major `M·v`).
 /// `mat` is `[rows × cols]` row-major, `vec` is `[cols]`, `acc` is `[rows]`.
+///
+/// WARNING: this is NOT the HLA `qᵀ · M` readout kernel. For HLA readouts
+/// (`qᵀ·SK`, `qᵀ·PKV`, `qᵀ·E`) use `katgpt_hla::transpose_matvec_into` /
+/// the per-crate mirror in riir-engine — those compute the *transpose*
+/// product `out[j] = Σ_i vec[i]·mat[i,j]`, which is structurally different
+/// from this `M·v` for the non-symmetric matrices (PKV, E) used in AHLA.
+/// Issue 009 (2026-06-30): confusing this docstring's old claim "Used for
+/// HLA readout (qᵀ·SK, qᵀ·PKV)" with the function's actual `M·v` semantics
+/// caused a 5-site silent regression in riir-engine (commit 0d3f9c19).
 #[inline(always)]
 pub fn simd_matvec(acc: &mut [f32], mat: &[f32], vec: &[f32], rows: usize, cols: usize) {
     for r in 0..rows {
