@@ -398,3 +398,35 @@ cargo run --example induced_cwm_02_value_tournament    --features induced_cwm_to
 🔧 Feature flags: `induced_cwm`, `induced_cwm_ismcts` (deps `induced_cwm`), `induced_cwm_tournament` (deps `induced_cwm`) — all **opt-in**.
 
 📖 See [`.plans/296_induced_cwm_kernel_primitive.md`](../.plans/296_induced_cwm_kernel_primitive.md) for the plan, [`.research/275_Code_World_Model_Induced_Forward_Model.md`](../.research/275_Code_World_Model_Induced_Forward_Model.md) for the paper distillation, [`.benchmarks/296_induced_cwm_primitive_goat.md`](../.benchmarks/296_induced_cwm_primitive_goat.md) for the GOAT proof (G1–G4 all PASS).
+
+## 11. HLA Windowed Eigenbasis Recovery (Issue 001)
+
+Per-NPC eigenbasis recovery from a windowed HLA activation matrix — **modelless**, no LAPACK, no training. Power iteration with deflation on the D×D Gram `W^T W` (D = HLA dim, 8 today) recovers the top-`k` orthogonal principal directions of a single NPC's recent affective trajectory. Those eigenvectors are the right singular vectors `V` of `W`; their eigenvalues are `σ²`. The recovered basis is a per-NPC rotation/projection matrix usable for emotion routing, zone attention, or adapter selection — every NPC currently shares the same hand-tuned universal basis (Research 032); this exposes individualized affective geometry from the NPC's *own* experience.
+
+The deterministic seed is `1/sqrt(D)` (no RNG), mirroring `stable_rank_update_into` — the same cross-platform determinism surface.
+
+Three entry points serve three operating points:
+
+| Entry point | Path | When to use |
+|------------|------|-------------|
+| `recover_eigenbasis_from_window` | cold (BLAKE3 + `Uuid::now_v7` provenance) | freeze/thaw cache validation |
+| `recover_eigenbasis_from_window_fast` | cold-start (no provenance, rebuilds Gram) | first-time recovery from a stored window |
+| `EigenbasisTracker` | plasma-tier hot path (incremental Gram, O(D²)/tick) | live NPC, one push + one recover per tick |
+
+**GOAT gate PASS (synthetic, 2026-06-30)** — see [`.benchmarks/001_hla_eigenbasis_recovery_goat.md`](../.benchmarks/001_hla_eigenbasis_recovery_goat.md):
+
+| Gate | Target | Verdict |
+|------|--------|--------|
+| **G1** Latency (`EigenbasisTracker` hot path) | ≤ 2 µs/tick, T=512 D=8 k=4 | ✅ PASS (613.9 ns/tick, 3.25× margin) |
+| **G2** Determinism (same-binary) | 0 bit diffs | ✅ PASS (cross-platform protocol in `tests/hla_eigenbasis_determinism.rs`) |
+| **G3** Quality (reconstruction error) | < 0.10, k=4, rank-3 ground truth | ✅ PASS (0.0003, 333× margin) |
+| **G4** Behavioral divergence | > 50% of 1000-NPC pairs cos < 0.7 | ✅ PASS (87.8%) |
+| **G5** Memory (per-NPC) | ≤ 256 bytes at D=8, k=4 | ✅ PASS (144 bytes, 1.78× margin) |
+
+**Opt-in by design.** The issue's GOAT outcome requires a head-to-head against Research 032's hand-tuned axes + a private `riir-ai` architectural guide before promotion to default — both cross the repo boundary and are tracked as `riir-ai` follow-ups. The stateless path (~9 µs) and full provenance path (~17 µs) are reported for transparency; only the `EigenbasisTracker` hot path is the G1 budget path.
+
+**Sync-boundary compliant** (per AGENTS.md): the recovered eigenbasis stays local to the NPC — never synced, never crosses `LatCalFixed`/`SyncBlock`, never used for anti-cheat. `EigenbasisProvenance.window_hash` is a cache key, not a synced value.
+
+🔧 Feature flag: `hla_eigenbasis_recovery` — **opt-in**.
+
+📖 See [`.benchmarks/001_hla_eigenbasis_recovery_goat.md`](../.benchmarks/001_hla_eigenbasis_recovery_goat.md) for the full GOAT proof and the G1 three-path latency breakdown.
