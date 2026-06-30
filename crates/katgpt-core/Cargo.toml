@@ -530,6 +530,14 @@ required-features = ["conformal_predictive_intervals", "karc_forecaster"]
 name = "conformal_karc_no_regression"
 required-features = ["karc_forecaster"]
 
+# Issue 010 T2 — "Report the Floor" comparison harness integration tests.
+# Exercises the harness end-to-end on multiple scenarios (floor-vs-floor,
+# oracle, over-wide, samples-only, mean-tracker, multi-corpus sweep) and serves
+# as the canonical usage example for T3–T7 adapter authors.
+[[test]]
+name = "conformal_floor_harness"
+required-features = ["conformal_predictive_intervals"]
+
 # Plan 321 Phase 2 — CommittedFieldBlend G4 zero-alloc GOAT gate. CountingAllocator
 # audit of apply_blended (1000 iters) + commit (100 re-commits). Gated on
 # committed_field_blend so default features compile cleanly.

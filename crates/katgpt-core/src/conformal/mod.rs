@@ -52,12 +52,22 @@ mod ring;
 mod seasonal;
 #[cfg(all(feature = "conformal_predictive_intervals", feature = "karc_forecaster"))]
 mod karc_adapter;
+// Issue 010 T2 — "Report the Floor" comparison harness. Gated on
+// `conformal_predictive_intervals` because it depends on the floor
+// (`ConformalIntervalCalibrator<SeasonalNaiveForecaster>`).
+#[cfg(feature = "conformal_predictive_intervals")]
+mod floor_harness;
 
 pub use metrics::{crps, empirical_coverage, winkler_score};
 pub use ring::{ResidualRingBuffer, RingBuffer};
 pub use seasonal::{seasonal_naive_floor, SeasonalNaiveForecaster, SeasonalPoolForecaster};
 #[cfg(all(feature = "conformal_predictive_intervals", feature = "karc_forecaster"))]
 pub use karc_adapter::KarcChannelForecaster;
+#[cfg(feature = "conformal_predictive_intervals")]
+pub use floor_harness::{
+    empirical_quantile_interval, FloorAdapter, FloorComparisonReport, OverallVerdict,
+    PredictiveOutput, TrajectoryCorpus, UqMetrics, UqPrimitiveUnderTest, run_floor_comparison,
+};
 
 /// A point forecaster that produces a single deterministic forecast.
 ///

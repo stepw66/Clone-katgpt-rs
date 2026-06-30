@@ -49,6 +49,13 @@ pub use conformal::metrics::{crps, crps_interval, empirical_coverage, mean_crps_
 // Gated on BOTH features: needs the conformal substrate AND the KARC forecaster.
 #[cfg(all(feature = "conformal_predictive_intervals", feature = "karc_forecaster"))]
 pub use conformal::KarcChannelForecaster;
+// Issue 010 T2 — "Report the Floor" comparison harness. Re-exported for
+// T3–T7 (BoMSampler, Sleep-Time, Best-Belief, Alien Sampler adapters).
+#[cfg(feature = "conformal_predictive_intervals")]
+pub use conformal::{
+    empirical_quantile_interval, FloorAdapter, FloorComparisonReport, OverallVerdict,
+    PredictiveOutput, TrajectoryCorpus, UqMetrics, UqPrimitiveUnderTest, run_floor_comparison,
+};
 #[cfg(feature = "coda_fusion")]
 pub mod coda;
 #[cfg(feature = "dec_operators")]

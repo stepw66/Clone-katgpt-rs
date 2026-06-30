@@ -1,7 +1,7 @@
 # Issue 010: Retroactive "Report the Floor" — conformal-naive floor comparison for existing UQ-bearing primitives
 
 **Filed:** 2026-06-28
-**Last updated:** 2026-06-30 (T1 unblocked — Plan 340 Phase 1 shipped; Plan 340 Phase 2 KARC adapter shipped)
+**Last updated:** 2026-06-30 (T1 unblocked — Plan 340 Phase 1 shipped; Plan 340 Phase 2 KARC adapter shipped; T2 shipped — floor-comparison harness live)
 **Policy source:** Research 322 (`.research/322_Conformal_Seasonal_Pools_Calibrated_UQ_Overlay.md`), Plan 340 (`.plans/340_conformal_predictive_intervals_primitive.md`), `katgpt-rs/AGENTS.md` Feature Flag Discipline, research skill `SKILL.md` §Workflow 2.
 **Companion paper:** *Report the Floor* (arXiv:2606.09473) — argues a training-free conformal interval is a mandatory baseline for any probabilistic forecaster.
 **Blocking dependency:** ✅ RESOLVED 2026-06-30 — Plan 340 Phase 1 shipped `ConformalIntervalCalibrator<SeasonalNaiveForecaster>` (the floor instance) behind `conformal_predictive_intervals`. GOAT gate PASSED (see `.benchmarks/340_conformal_goat.md`). Plan 340 Phase 2 additionally shipped the `KarcChannelForecaster` adapter + the Lorenz-63 coverage demonstration (x=0.9425, y=0.9520, z=0.9485 at α=0.05). The retroactive comparison work (T2–T7) is now ACTIONABLE.
@@ -37,7 +37,16 @@ These are **not** UQ-bearing under the policy definition (they don't claim a dis
 
 - [x] **T1** Wait for Plan 340 Phase 1 to ship `ConformalIntervalCalibrator<SeasonalNaiveForecaster>` (the floor instance).
   - **DONE 2026-06-30.** Plan 340 Phase 1 shipped behind `conformal_predictive_intervals`. GOAT gate PASSED: G1 coverage [0.9445, 0.9493], G2 interval_into H=1 = 642ns, G3 zero-alloc, G4 bit-reproducible. AirPassengers CRPS 115.06 (4× sharper than ±2σ baseline). See `.benchmarks/340_conformal_goat.md`.
-- [ ] **T2** Define the floor-comparison harness: a reusable benchmark fixture that wraps any UQ-bearing primitive, runs it on a standard trajectory corpus, and compares CRPS / coverage / Winkler against the floor. File as a follow-up plan or as an addition to Plan 340 Phase 2.
+- [x] **T2** Define the floor-comparison harness: a reusable benchmark fixture that wraps any UQ-bearing primitive, runs it on a standard trajectory corpus, and compares CRPS / coverage / Winkler against the floor. File as a follow-up plan or as an addition to Plan 340 Phase 2.
+  - **DONE 2026-06-30.** Shipped as `crates/katgpt-core/src/conformal/floor_harness.rs` (gated on `conformal_predictive_intervals`). The harness exposes:
+    - `UqPrimitiveUnderTest` trait (`name`, `predict_next`, `observe`) — adapters implement this for each primitive.
+    - `FloorAdapter` — wraps the canonical `ConformalIntervalCalibrator<SeasonalNaiveForecaster>` (m=1, capacity 256, no recency decay) as a `UqPrimitiveUnderTest`.
+    - `PredictiveOutput` — holds samples and/or interval; `into_interval` normalizes samples → interval via empirical quantile.
+    - `run_floor_comparison(&mut primitive, corpus, α, warmup, name) -> FloorComparisonReport` — the one-call entry point.
+    - `TrajectoryCorpus` — standard fixtures (`stationary_seasonal`, `white_noise`, `from_slice`) with deterministic SplitMix64 RNG.
+    - `OverallVerdict` — `BeatsFloor` / `TiesFloor` / `LosesToFloor` / `Mixed` / `NotApplicable`. Coverage policy: over-coverage is acceptable (penalized via CRPS width); only under-coverage fails the gate.
+    - 13 unit tests + 10 integration tests, all green. See `.benchmarks/340_conformal_floor_harness.md`.
+  - T3–T7 adapters each reduce to: implement `UqPrimitiveUnderTest` for primitive X, then call `run_floor_comparison`.
 - [ ] **T3** Run the floor comparison on BoMSampler (Plan 281). The comparison angle: BoMSampler produces a discrete hypothesis distribution; the floor produces a continuous interval. Reconcile by evaluating both on a task where the ground truth is a continuous value that both must predict (e.g., next HLA channel value). If BoMSampler can't be evaluated on a continuous metric, document why and exclude it from the policy (it's a discrete selector, not a continuous UQ primitive).
 - [ ] **T4** Run the floor comparison on Sleep-Time Query Anticipator (Plan 334/341). The comparison angle: predictability scores from the anticipator vs interval-width from the floor. Both should correlate with actual forecast difficulty; the one with higher correlation wins.
 - [ ] **T5** Run the floor comparison on Best-Belief Beta Selector (Plan 336). The comparison angle: conservative candidate selection via Beta ε-quantile vs via empirical ε-quantile (the floor). Both are inverse-CDF reads; the question is whether the Beta prior (discrete, parametric) beats the empirical prior (continuous, nonparametric) on selection quality.

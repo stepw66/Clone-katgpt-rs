@@ -287,6 +287,100 @@ If the coverage gate fails (any channel < 0.90), investigate: (a) KARC fit quali
 
 ---
 
+## Phase 2.5 — "Report the Floor" comparison harness (Issue 010 T2) ✅ COMPLETE (2026-06-30)
+
+Issue 010 T2 required a reusable benchmark fixture that wraps any UQ-bearing primitive, runs it on a standard trajectory corpus, and compares CRPS / coverage / Winkler against the canonical conformal-naive floor. This is the enforcement substrate for the "Report the Floor" policy — without it, T3–T7 (per-primitive retroactive comparison on BoMSampler, Sleep-Time, Best-Belief, Alien Sampler) each require bespoke benchmark boilerplate.
+
+### What shipped
+
+| File | Role |
+|---|---|
+| `src/conformal/floor_harness.rs` | The harness module. `UqPrimitiveUnderTest` trait, `FloorAdapter`, `PredictiveOutput`, `run_floor_comparison`, `TrajectoryCorpus`, `FloorComparisonReport`, `OverallVerdict`. Gated on `conformal_predictive_intervals`. |
+| `tests/conformal_floor_harness.rs` | 10 integration tests covering: floor-vs-floor tie, true-oracle win, over-wide loss, samples-only path, empty/NotApplicable path, mean-tracker beats-floor-on-white-noise, mean-tracker loses-on-seasonal, multi-corpus sweep, pretty-print smoke, alpha propagation. |
+
+### The harness API
+
+```text
+trait UqPrimitiveUnderTest {
+    fn name(&self) -> &str;
+    fn predict_next(&mut self) -> PredictiveOutput;  // BEFORE observe
+    fn observe(&mut self, y: f32);                   // AFTER predict_next
+}
+
+fn run_floor_comparison<P: UqPrimitiveUnderTest>(
+    primitive: &mut P,
+    corpus: &[f32],
+    alpha: f32,
+    warmup: usize,
+    corpus_name: &str,
+) -> FloorComparisonReport
+```
+
+A primitive produces a `PredictiveOutput` (samples, interval, or both). The harness normalizes samples → interval via `empirical_quantile_interval` (type-7 quantile, R default) so both primitive and floor are scored on the same interval metrics.
+
+### The floor is fixed
+
+`FloorAdapter` constructs `ConformalIntervalCalibrator<SeasonalNaiveForecaster>` with `m=1`, `exp_lambda=0.0`, `HStep` residual mode, capacity 256. The floor config is pinned so comparisons across primitives are apples-to-apples.
+
+### Verdict logic (the policy substrate)
+
+`OverallVerdict` is computed conservatively from CRPS ratio, Winkler ratio, and coverage:
+- **BeatsFloor**: meaningfully better (>5%) on at least one lower-better metric, no loss on the other, AND no under-coverage.
+- **TiesFloor**: within ±5% on all metrics.
+- **LosesToFloor**: meaningfully worse on at least one lower-better metric, no compensating win.
+- **Mixed**: better on some, worse on others.
+- **NotApplicable**: primitive produced no scorable output.
+
+**Coverage policy (important):** over-coverage (coverage > nominal) is ACCEPTABLE — a conservative primitive that covers more than the floor is not penalized by the verdict, because the extra width is already penalized via CRPS. Only **under-coverage** (false confidence — claiming tighter intervals than warranted) fails the gate. This is why a TRUE oracle (coverage=1.0, width≈0) correctly gets `BeatsFloor` despite "over-covering": its CRPS is vanishingly small.
+
+### Standard corpora
+
+`TrajectoryCorpus` ships with constructors for the canonical "Report the Floor" fixtures:
+- `stationary_seasonal(m, σ, n, seed)` — the Plan 340 G1 fixture. `y_t = sin(2πt/m) + N(0,σ)`.
+- `white_noise(σ, n, seed)` — the degenerate case where the floor (forecast=last value) is worst-case; the optimal forecast is the mean.
+- `from_slice(name, values, warmup)` — for Lorenz-63, real data, etc.
+
+All constructors use a deterministic SplitMix64 RNG (matches `examples/conformal_airpassengers.rs`) for bit-reproducible corpora.
+
+### What T3–T7 adapters look like
+
+Each retroactive comparison (T3 BoMSampler, T4 Sleep-Time, T5 Best-Belief, T6 Alien Sampler) reduces to:
+
+```rust
+struct BoMSamplerAdapter { /* wrap BoMSampler + track state */ }
+impl UqPrimitiveUnderTest for BoMSamplerAdapter {
+    fn name(&self) -> &str { "BoMSampler" }
+    fn predict_next(&mut self) -> PredictiveOutput { /* ... */ }
+    fn observe(&mut self, y: f32) { /* ... */ }
+}
+
+let corpus = TrajectoryCorpus::stationary_seasonal(12, 0.5, 1000, 0xCAFE);
+let mut adapter = BoMSamplerAdapter::new(/* ... */);
+let report = run_floor_comparison(&mut adapter, &corpus.values, 0.05,
+                                  corpus.recommended_warmup, &corpus.name);
+report.pretty_print();
+```
+
+### Gate results
+
+- 13 unit tests pass (harness internals: quantile conversion, corpus determinism, floor lifecycle, all 5 verdict paths).
+- 10 integration tests pass (end-to-end scenarios including the policy-critical mean-tracker-beats-floor-on-white-noise and multi-corpus sweep).
+- 0 regressions: all 24 Phase 1 + 7 Phase 2 conformal tests still pass; KARC no-regression gate still passes.
+- Feature matrix: `--all-features`, `--no-default-features --features conformal_predictive_intervals`, and default all compile clean.
+- 0 warnings, 0 diagnostics on new files.
+
+### Unblocks
+
+- **T3** BoMSampler comparison — adapter implements `UqPrimitiveUnderTest`.
+- **T4** Sleep-Time comparison — adapter implements `UqPrimitiveUnderTest`.
+- **T5** Best-Belief comparison — adapter implements `UqPrimitiveUnderTest`.
+- **T6** Alien Sampler decision + comparison (if applicable).
+- **T7** Document results across all primitives.
+
+See `.benchmarks/340_conformal_floor_harness.md` for the full reference results.
+
+---
+
 ## Phase 3 — riir-ai Runtime Integration (private, separate plan)
 
 File as `riir-ai/.plans/342_conformal_uq_runtime_integration.md` after Phase 1 lands. See `riir-ai/.research/165_Per_NPC_Conformal_UQ_Guide.md` §6 for the full task breakdown.
