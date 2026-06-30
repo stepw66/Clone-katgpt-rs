@@ -50,6 +50,120 @@ impl SudokuPruner {
     pub fn board(&self) -> &Sudoku9x9 {
         &self.board
     }
+
+    /// Count valid candidate digits for `(row, col)` against the current board.
+    /// Shared by MRV ordering (Issue 005 Option A) and the CP drafter
+    /// (Issue 005 Option B). Pure deterministic rules engine — no training.
+    ///
+    /// Returns `(count, bitmask)` where bit `(d-1)` is set ⇒ digit `d` is valid.
+    fn candidate_set(board: &Sudoku9x9, row: usize, col: usize) -> (u32, u16) {
+        let mut count = 0u32;
+        let mut mask = 0u16;
+        for d in 1..=9u8 {
+            if board.is_valid_move(row, col, d) {
+                count += 1;
+                mask |= 1 << (d - 1);
+            }
+        }
+        (count, mask)
+    }
+}
+
+/// Issue 005 Option A — MRV (Minimum Remaining Values) cell ordering.
+///
+/// Gated on `sudoku_mrv`. Provides `SudokuPruner::new_mrv()`, which orders
+/// the depth→(row,col) map by ascending candidate count (fewest valid digits
+/// first), with row-major tiebreak for determinism. `new()` stays row-major so
+/// existing examples/tests are unaffected — MRV is strictly opt-in.
+///
+/// Why this matters for the speculate drafter: the DDTree primitive is
+/// hard-capped at 8-deep (`TreeNode.parent_path: u128` packs 16-bit tokens →
+/// 128/16 = 8). With row-major ordering, Inkala's first 8 empties all have
+/// 2–4 candidates and zero naked singles, so the latent drafter (Option B)
+/// can't sharpen marginals inside the window. MRV reorders so any forced
+/// cells (1 candidate) sit at depths 0–7, where the drafter assigns `p=1.0`
+/// and speculation commits them with certainty instead of guessing.
+#[cfg(feature = "sudoku_mrv")]
+impl SudokuPruner {
+    /// Construct a pruner whose depth→(row,col) map is sorted by MRV:
+    /// ascending candidate count, row-major tiebreak. The path-aware cross-
+    /// depth conflict logic in `is_valid` is unchanged — it keys off
+    /// `positions[depth]` vs `positions[parent_depth]`, so reordering the
+    /// vector is transparent to the constraint checks.
+    ///
+    /// A cell with 0 candidates (dead) sorts first; the pruner then rejects
+    /// every digit at that depth, the tree comes back empty, and the caller's
+    /// fallback fires. This surfaces dead-ends immediately rather than after
+    /// building a fruitless 8-deep tree.
+    pub fn new_mrv(board: Sudoku9x9) -> Self {
+        // Collect (candidate_count, row, col) for every empty cell.
+        let mut keyed: Vec<(u32, usize, usize)> = Vec::with_capacity(60);
+        for r in 0..9 {
+            for c in 0..9 {
+                if board.grid[r][c] == 0 {
+                    let (count, _) = Self::candidate_set(&board, r, c);
+                    keyed.push((count, r, c));
+                }
+            }
+        }
+        // Sort by (candidate_count, row, col): fewest candidates first,
+        // deterministic row-major tiebreak. Stable sort not required — the
+        // key is fully ordering-deterministic.
+        keyed.sort_unstable_by_key(|&(cnt, r, c)| (cnt, r, c));
+        let positions = keyed.into_iter().map(|(_, r, c)| (r, c)).collect();
+        Self { board, positions }
+    }
+}
+
+/// Issue 005 Option B — constraint-propagation drafter signal.
+///
+/// Gated on `sudoku_cp`. Exposes `SudokuPruner::latent_marginals()`, which
+/// produces draft marginals where naked singles (1 candidate) get `p=1.0` and
+/// N-candidate cells get uniform `1/N`. Pure deterministic rules engine —
+/// the latent space IS the 9-bit candidate bitmask, projected to a
+/// categorical marginal. No training, no gradient descent.
+///
+/// Combines with `sudoku_mrv` (Option A): MRV ordering puts the naked singles
+/// inside the 8-deep DDTree window, then this drafter sharpened their
+/// marginals to certainty so speculation commits them without branching.
+#[cfg(feature = "sudoku_cp")]
+impl SudokuPruner {
+    /// Draft marginals for the first `lookahead` depths of this pruner's
+    /// position map. Returns a `Vec` of length `min(lookahead, empty_count)`,
+    /// each entry a 10-slot categorical (index 0 = padding, never drafted).
+    ///
+    /// - 1 candidate  (naked single) → `p = 1.0` on that digit, `0.0` elsewhere
+    /// - N candidates               → uniform `1/N` on each valid digit
+    /// - 0 candidates (dead cell)   → all-zero (the pruner rejects every digit)
+    ///
+    /// Reads the CURRENT board state — call once per speculate round after
+    /// rebuilding the pruner. Caller owns the returned `Vec`; reuse across
+    /// rounds via `clear()` to keep the drafter allocation off the hot path
+    /// (Issue 005 G4 aspiration).
+    pub fn latent_marginals(&self, lookahead: usize) -> Vec<Vec<f32>> {
+        let la = lookahead.min(self.positions.len());
+        let mut out = Vec::with_capacity(la);
+        for depth in 0..la {
+            let mut p = vec![0.0f32; 10];
+            let Some(&(row, col)) = self.positions.get(depth) else {
+                out.push(p);
+                continue;
+            };
+            let (count, mask) = Self::candidate_set(&self.board, row, col);
+            if count == 0 {
+                out.push(p); // dead cell — all-zero, pruner will reject
+                continue;
+            }
+            let prob = 1.0 / count as f32;
+            for d in 1..=9u8 {
+                if mask & (1 << (d - 1)) != 0 {
+                    p[d as usize] = if count == 1 { 1.0 } else { prob };
+                }
+            }
+            out.push(p);
+        }
+        out
+    }
 }
 
 #[cfg(feature = "sudoku")]
@@ -502,5 +616,139 @@ mod tests {
             aware_invalid, 0,
             "path-aware tree should have zero cross-depth conflicts"
         );
+    }
+
+    // ── Issue 005 Option A: MRV cell ordering ────────────────────────────────
+    #[cfg(feature = "sudoku_mrv")]
+    #[test]
+    fn test_mrv_preserves_empty_count() {
+        let board = make_board();
+        let row_major = SudokuPruner::new(board.clone());
+        let mrv = SudokuPruner::new_mrv(board);
+        assert_eq!(
+            mrv.empty_count(),
+            row_major.empty_count(),
+            "MRV must not change the empty-cell count"
+        );
+        assert_eq!(mrv.empty_count(), 60, "Inkala has 60 empties");
+    }
+
+    #[cfg(feature = "sudoku_mrv")]
+    #[test]
+    fn test_mrv_orders_by_candidate_count() {
+        // Nearly-complete board: only (0,0) is empty. Every peer of (0,0)
+        // (row 0, col 0, box(0,0)) is filled with 8 distinct digits, so (0,0)
+        // is a naked single — exactly one digit is valid. MRV must place it
+        // at depth 0 (it has 1 candidate; every other empty would have more,
+        // but here it's the ONLY empty, so it trivially sorts first).
+        let grid = [
+            [0, 2, 3, 4, 5, 6, 7, 8, 9],
+            [4, 5, 6, 7, 8, 9, 1, 2, 3],
+            [7, 8, 9, 1, 2, 3, 4, 5, 6],
+            [2, 3, 4, 5, 6, 7, 8, 9, 1],
+            [5, 6, 7, 8, 9, 1, 2, 3, 4],
+            [8, 9, 1, 2, 3, 4, 5, 6, 7],
+            [3, 4, 5, 6, 7, 8, 9, 1, 2],
+            [6, 7, 8, 9, 1, 2, 3, 4, 5],
+            [9, 1, 2, 3, 4, 5, 6, 7, 8],
+        ];
+        let board = Sudoku9x9::new(grid);
+        let pruner = SudokuPruner::new_mrv(board.clone());
+
+        // Only (0,0) is empty → it must be at depth 0.
+        assert_eq!(pruner.position_at(0), Some((0, 0)));
+        assert_eq!(pruner.empty_count(), 1);
+        // Row 0 has {2..9}, col 0 has {4,7,2,5,8,3,6,9}, box(0,0) has
+        // {2,3,4,5,6,7,8,9}. Union of peers = {2,3,4,5,6,7,8,9} → only 1 fits.
+        assert!(pruner.is_valid(0, 1, &[]), "naked single 1 must be valid");
+        for d in 2..=9u8 {
+            assert!(!pruner.is_valid(0, d as usize, &[]), "digit {d} must be pruned at the naked single");
+        }
+        // sanity: count via the shared helper (4 candidates → not naked-single,
+        // confirms the helper returns sensible counts on a multi-candidate cell).
+        let (cnt, _) = SudokuPruner::candidate_set(&board, 0, 0);
+        assert_eq!(cnt, 1, "(0,0) is a naked single");
+    }
+
+    #[cfg(feature = "sudoku_mrv")]
+    #[test]
+    fn test_mrv_path_aware_still_zero_invalid() {
+        // The path-aware cross-depth logic keys off positions[depth] vs
+        // positions[parent_depth]. Reordering the vector must NOT break it —
+        // every committed node must still be valid against its accumulated board.
+        use katgpt_speculative::dd_tree::build_dd_tree_pruned;
+        use katgpt_types::Config;
+
+        let board = make_board();
+        let pruner = SudokuPruner::new_mrv(board);
+
+        let marginals: Vec<Vec<f32>> = (0..8)
+            .map(|_| {
+                let mut probs = vec![0.0f32; 10];
+                for d in 1..=9u8 {
+                    probs[d as usize] = 1.0 / 9.0;
+                }
+                probs
+            })
+            .collect();
+        let config = Config { tree_budget: 50, ..Config::draft() };
+        let mv: Vec<&[f32]> = marginals.iter().map(|s| s.as_slice()).collect();
+        let tree = build_dd_tree_pruned(&mv, &config, &pruner, false);
+        assert!(!tree.is_empty(), "MRV tree should have nodes");
+        let invalid = count_invalid_accumulated(&pruner, &tree);
+        assert_eq!(invalid, 0, "MRV reorder must not break path-aware checking");
+    }
+
+    // ── Issue 005 Option B: constraint-propagation drafter ──────────────────
+    #[cfg(feature = "sudoku_cp")]
+    #[test]
+    fn test_cp_drafter_naked_single_is_certain() {
+        // Same nearly-complete board: only (0,0) empty, naked single = 1.
+        let grid = [
+            [0, 2, 3, 4, 5, 6, 7, 8, 9],
+            [4, 5, 6, 7, 8, 9, 1, 2, 3],
+            [7, 8, 9, 1, 2, 3, 4, 5, 6],
+            [2, 3, 4, 5, 6, 7, 8, 9, 1],
+            [5, 6, 7, 8, 9, 1, 2, 3, 4],
+            [8, 9, 1, 2, 3, 4, 5, 6, 7],
+            [3, 4, 5, 6, 7, 8, 9, 1, 2],
+            [6, 7, 8, 9, 1, 2, 3, 4, 5],
+            [9, 1, 2, 3, 4, 5, 6, 7, 8],
+        ];
+        let board = Sudoku9x9::new(grid);
+        // Both orderings put the sole empty at depth 0; use new() so this
+        // test passes even without `sudoku_mrv`.
+        let pruner = SudokuPruner::new(board);
+
+        let margs = pruner.latent_marginals(1);
+        assert_eq!(margs.len(), 1);
+        // The naked single's marginal must put p=1.0 on digit 1.
+        assert_eq!(margs[0][1], 1.0, "naked single must get p=1.0");
+        for d in 2..=9u8 {
+            assert!(margs[0][d as usize] == 0.0, "digit {d} must get 0");
+        }
+        let sum: f32 = margs[0][1..=9].iter().sum();
+        assert!((sum - 1.0).abs() < 1e-6, "marginal must sum to 1, got {sum}");
+    }
+
+    #[cfg(feature = "sudoku_cp")]
+    #[test]
+    fn test_cp_drafter_multicell_uniform() {
+        // Inkala row-major depth 0 = (0,1) has 4 candidates {1,2,4,6}.
+        // Without MRV, the CP drafter must assign 1/4 to each, 0 elsewhere.
+        let board = make_board();
+        let pruner = SudokuPruner::new(board); // row-major
+        let margs = pruner.latent_marginals(1);
+        assert_eq!(margs.len(), 1);
+        let p = &margs[0];
+        // Valid digits at (0,1) per the existing test: 1,2,4,6.
+        for d in [1u8, 2, 4, 6] {
+            assert!((p[d as usize] - 0.25).abs() < 1e-6, "digit {d} should get 1/4");
+        }
+        for d in [3u8, 5, 7, 8, 9] {
+            assert!(p[d as usize] == 0.0, "digit {d} should get 0");
+        }
+        let sum: f32 = p[1..=9].iter().sum();
+        assert!((sum - 1.0).abs() < 1e-6, "marginal must sum to 1, got {sum}");
     }
 }

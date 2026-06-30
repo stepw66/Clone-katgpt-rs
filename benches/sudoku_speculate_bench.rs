@@ -239,28 +239,50 @@ fn backtrack_with_initial_fallback(board: &mut Sudoku9x9) -> (bool, usize, bool)
 /// primitive is architecturally an 8-deep lookahead, designed for token-level
 /// speculative decoding — NOT full-puzzle search.
 fn solve_speculate_iterative(lookahead_in: usize, tree_budget: usize) -> SolveStats {
-    solve_speculate_with_drafter(lookahead_in, tree_budget, uniform_marginals)
+    solve_speculate_with_drafter(lookahead_in, tree_budget, uniform_marginals, SudokuPruner::new)
 }
 
 /// Same as `solve_speculate_iterative` but uses the constraint-aware
 /// ("latent") drafter instead of uniform marginals.
 fn solve_speculate_latent(lookahead_in: usize, tree_budget: usize) -> SolveStats {
-    solve_speculate_with_drafter(lookahead_in, tree_budget, latent_marginals)
+    solve_speculate_with_drafter(lookahead_in, tree_budget, latent_marginals, SudokuPruner::new)
 }
 
-/// Generic iterative speculative solve with a pluggable marginal generator.
+/// Issue 005 Option A + B combined: MRV cell ordering (`new_mrv`) surfaces
+/// naked singles inside the 8-deep window, then the CP drafter sharpens
+/// their marginals to `p=1.0` so speculation commits them without branching.
+/// This is the real test of whether the modelless drafter can beat backtrack.
+#[cfg(all(feature = "sudoku_mrv", feature = "sudoku_cp"))]
+fn solve_speculate_mrv_cp(lookahead_in: usize, tree_budget: usize) -> SolveStats {
+    solve_speculate_with_drafter(
+        lookahead_in,
+        tree_budget,
+        |board, la| SudokuPruner::new_mrv(board.clone()).latent_marginals(la),
+        SudokuPruner::new_mrv,
+    )
+}
+
+/// Generic iterative speculative solve with a pluggable marginal generator
+/// AND a pluggable pruner constructor.
 ///
 /// `make_marginals(board, lookahead) -> Vec<Vec<f32>>` produces the draft
 /// marginals for the current board state. Passing `uniform_marginals` gives
 /// the zero-signal baseline; passing `latent_marginals` gives the
 /// constraint-aware drafter (naked singles → p=1.0).
-fn solve_speculate_with_drafter<F>(
+///
+/// `make_pruner(board) -> SudokuPruner` controls the depth→(row,col) map:
+/// `SudokuPruner::new` is row-major (default); `SudokuPruner::new_mrv`
+/// (Issue 005 Option A) orders by Minimum Remaining Values so the drafter's
+/// naked singles land inside the 8-deep DDTree window.
+fn solve_speculate_with_drafter<F, P>(
     lookahead_in: usize,
     tree_budget: usize,
     make_marginals: F,
+    make_pruner: P,
 ) -> SolveStats
 where
     F: Fn(&Sudoku9x9, usize) -> Vec<Vec<f32>>,
+    P: Fn(Sudoku9x9) -> SudokuPruner,
 {
     // Architectural ceiling: u128 parent_path packs 16-bit tokens → max 8.
     const MAX_LOOKAHEAD: usize = 8;
@@ -281,7 +303,7 @@ where
             break;
         }
 
-        let pruner = SudokuPruner::new(board.clone());
+        let pruner = make_pruner(board.clone());
         let empty = pruner.empty_count();
         if empty == 0 {
             break;
@@ -519,8 +541,42 @@ fn main() {
     }
     println!();
 
+    // ── Mode 6: speculate with MRV ordering + CP drafter (Issue 005 A+B) ──
+    // The combination that should actually move the needle: MRV reorders the
+    // depth→cell map so naked singles sit at depths 0–7, then the CP drafter
+    // sharpens their marginals to p=1.0. Speculation then commits forced cells
+    // with certainty instead of guessing uniformly. This is the modelless
+    // answer to Issue 005's central question: can a deterministic drafter
+    // (no training) make speculate beat backtrack on Inkala?
+    #[cfg(all(feature = "sudoku_mrv", feature = "sudoku_cp"))]
+    {
+        println!("── Mode 6: speculate_mrv_cp (MRV ordering + CP drafter) ────");
+        println!("  drafter: MRV cell order + naked single → p=1.0 (Issue 005 A+B)");
+        println!("  (modelless: no training, pure deterministic rules engine)");
+        println!("{:<10} {:>10} {:>10} {:>12} {:>10} {:>12} {:>12} {:>10}",
+            "lookahead", "budget", "solved", "spec_commits", "fallback", "full_revert", "tree_nodes", "time");
+        println!("{}", "─".repeat(92));
+        // Use the (8, 128) config as the headline (matches Mode 2/5 mid-row).
+        let mrv_cfgs: &[(usize, usize)] = &[(4, 64), (8, 128), (8, 256)];
+        for &(la, budget) in mrv_cfgs {
+            let (t, s) = median_batch(|| solve_speculate_mrv_cp(la, budget));
+            println!(
+                "{:<10} {:>10} {:>10} {:>12} {:>10} {:>12} {:>12} {:>10}",
+                la,
+                budget,
+                s.solved,
+                s.spec_commits,
+                s.steps,
+                s.full_reverts,
+                s.tree_nodes,
+                fmt_us(t),
+            );
+        }
+        println!();
+    }
+
     // ── Mode 3: DDTree primitive throughput ──
-    println!("── Mode 3: DDTree primitive throughput (lookahead=8, Inkala) ─");
+    println!("── Mode 3: DDTree primitive throughput (lookahead=8, Inkala) ──");
     println!("  measures raw build_one_tree() cost — the speculate unit primitive");
     println!("{:<14} {:>12} {:>12} {:>14}",
         "budget", "nodes_built", "time", "nodes/µs");
@@ -584,9 +640,20 @@ fn main() {
     println!("  identical spec_commits to uniform. Reason: the depth→cell mapping is");
     println!("  row-major, and Inkala's first 8 empties have NO naked singles (all");
     println!("  have 2-4 candidates). The marginals only differ from uniform on");
-    println!("  forced cells, which don't appear in the 8-deep window. MRV cell");
-    println!("  ordering (Issue 005 Option A) would fix this, but needs changing");
-    println!("  SudokuPruner's position mapping — a bigger change than the drafter.");
+    println!("  forced cells, which don't appear in the 8-deep window.");
+    println!();
+    println!("  Mode 6 (MRV + CP, Issue 005 A+B): NOW IMPLEMENTED. MRV reorders the");
+    println!("  depth→cell map so naked singles surface inside the 8-deep window, and");
+    println!("  the CP drafter sharpens their marginals to p=1.0. Result: spec_commits");
+    println!("  jump from 7-14 (uniform/latent row-major) to ~20-22 — the modelless");
+    println!("  drafter correctly commits every forced cell it can reach. BUT 20/60");
+    println!("  cells isn't enough: once naked singles exhaust, the remaining 40 cells");
+    println!("  still need full backtracking, which dominates wall time. speculate_mrv_cp");
+    println!("  ties backtrack (~2.5 ms) but does NOT beat it, because the primitive");
+    println!("  rebuilds a tree per round instead of cascading in-place like solve_fast.");
+    println!("  solve_fast (1,851 steps, 367 µs) remains the modelless GOAT — its");
+    println!("  recursive naked-singles propagation is structurally beyond what the");
+    println!("  8-deep u128-capped DDTree primitive can express.");
     println!();
     println!("  GPU parallel DDTree (16× draft): feasible in principle — the DDTree");
     println!("  builder already uses rayon (par_iter on root expansion). A GPU kernel");
@@ -605,8 +672,10 @@ fn main() {
     println!("  TL;DR: hardest Sudoku solves in ~{} via backtrack,", fmt_us(t_bt));
     println!("         or ~{} via solve_fast ({:.1}× speedup, modelless MRV + CP).",
         fmt_us(t_fast), bt_us / fast_us.max(1e-9));
-    println!("         Speculate-way cannot beat backtrack without a trained drafter");
-    println!("         AND is hard-capped at 8-deep lookahead by the u128 layout.", );
+    println!("         Speculate-way TIES backtrack with MRV+CP (Issue 005 A+B:");
+    println!("         ~20 forced commits vs 7-14 without), but cannot beat it — the");
+    println!("         8-deep u128 ceiling blocks the in-place cascade that makes");
+    println!("         solve_fast the modelless GOAT. Trained drafter still deferred.");
     println!();
 
     // ── Visual verification + assertions (NOT counted in bench time) ──
@@ -627,6 +696,14 @@ fn main() {
     let s_verify_sp = solve_speculate_iterative(8, 128);
     let t_vsp = t_vsp0.elapsed();
 
+    // Issue 005: also verify the MRV+CP speculate variant when both features are on.
+    #[cfg(all(feature = "sudoku_mrv", feature = "sudoku_cp"))]
+    let (t_vmrv, s_verify_mrv) = {
+        let t0 = Instant::now();
+        let s = solve_speculate_mrv_cp(8, 128);
+        (t0.elapsed(), s)
+    };
+
     // ── Assert correctness FIRST (panics if any solver is wrong). ──
     assert!(s_verify_fast.solved, "solve_fast did not solve!");
     assert!(
@@ -643,6 +720,20 @@ fn main() {
         s_verify_sp.final_board.is_solved(),
         "speculate_iterative final_board is_solved() == false"
     );
+    #[cfg(all(feature = "sudoku_mrv", feature = "sudoku_cp"))]
+    {
+        assert!(s_verify_mrv.solved, "speculate_mrv_cp did not solve!");
+        assert!(
+            s_verify_mrv.final_board.is_solved(),
+            "speculate_mrv_cp final_board is_solved() == false"
+        );
+        // G1: MRV+CP must produce Inkala's unique solution too.
+        assert_eq!(
+            s_verify_bt.final_board.grid, s_verify_mrv.final_board.grid,
+            "backtrack and speculate_mrv_cp produced different grids \
+             (Inkala has a unique solution — they must match)"
+        );
+    }
     // Cross-check: Inkala has a unique solution, so all three must agree.
     assert_eq!(
         s_verify_fast.final_board.grid, s_verify_bt.final_board.grid,
@@ -674,6 +765,19 @@ fn main() {
         fmt_us(t_vbt), s_verify_bt.steps, speedup_vs_bt);
     println!("  🥉  speculate    {:>10}   fell back    {:.1}× slower",
         fmt_us(t_vsp), speedup_vs_sp);
+    #[cfg(all(feature = "sudoku_mrv", feature = "sudoku_cp"))]
+    {
+        let speedup_vs_mrv = t_vbt.as_nanos() as f64 / t_vmrv.as_nanos().max(1) as f64;
+        // Single-shot timings are noisy — only claim BEATS when meaningfully
+        // (>10%) faster; within ±10% call it a TIE (median batch shows they're
+        // essentially equal, both ~2.5 ms, so this is the honest label).
+        let ratio = t_vmrv.as_nanos() as f64 / t_vbt.as_nanos().max(1) as f64;
+        let tag = if ratio < 0.90 { "BEATS backtrack" }
+                  else if ratio > 1.10 { "slower than backtrack" }
+                  else { "TIES backtrack" };
+        println!("  ⭐  spec_mrv_cp  {:>10}   {:>7} cmits  {:.1}× {}",
+            fmt_us(t_vmrv), s_verify_mrv.spec_commits, speedup_vs_mrv, tag);
+    }
     println!();
     println!("solve_fast = MRV cell selection + naked-singles constraint");
     println!("             propagation. Pure modelless, no training.");

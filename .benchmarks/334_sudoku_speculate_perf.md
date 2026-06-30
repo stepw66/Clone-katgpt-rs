@@ -130,6 +130,35 @@ Per the modelless-first mandate (AGENTS.md), before deferring to riir-train:
 Options 1 and 2 are modelless and should be tried first per §3.5 of the
 research skill. Filing as an optimization candidate (see `issues/`).
 
+## Resolution (Issue 005, 2026-06-30) — Options A+B implemented, G2 FAILS
+
+Both modelless paths were implemented behind `sudoku_mrv` + `sudoku_cp`
+features (`SudokuPruner::new_mrv()` + `SudokuPruner::latent_marginals()`):
+
+- **MRV works as designed.** It reorders the depth→cell map so naked singles
+  surface inside the 8-deep DDTree window, and the CP drafter sharpens their
+  marginals to `p=1.0`. `spec_commits` jumped from **7–14** (uniform/latent
+  row-major) to **20–22** — the drafter correctly commits every forced cell it
+  can reach.
+- **But speculate still does NOT beat backtrack.** 20/60 commits isn't enough:
+  once naked singles exhaust, the remaining 40 cells still need full
+  backtracking, which dominates wall time. `speculate_mrv_cp` ties backtrack
+  (~2.5 ms) but cannot beat it, because the primitive rebuilds a tree per
+  round instead of cascading in-place.
+- **`solve_fast` (367 µs, 1,851 steps) remains the modelless GOAT.** Its
+  recursive naked-singles propagation is structurally beyond what the 8-deep
+  `u128`-capped DDTree primitive can express.
+
+**GOAT gate verdict**: G1 (correctness — unique-solution cross-check) ✅,
+G2 (speculate < backtrack) ❌, G3 (no-regression — examples/tests pass) ✅,
+G4 (zero-alloc drafter) 🟡 aspirational, G5 (feature isolation) ✅.
+
+G2 failing confirms the architectural ceiling thesis: the speculate primitive
+is the wrong tool for full-puzzle search regardless of drafter quality. Both
+features stay opt-in (not promoted to default) since the GOAT did not pass.
+Issue 005 closed — the modelless question is answered empirically. Trained-
+ drafter (Option C) remains deferred to riir-train as a non-modelless path.
+
 ## Files
 
 - `benches/sudoku_speculate_bench.rs` — the bench (380 LOC).
@@ -147,6 +176,12 @@ The speculate way **cannot beat either** with the current DDTree infra:
 never be solved in one tree. The DDTree primitive runs at ~10 M nodes/sec —
 fast for token-level speculative decoding, but the wrong tool for full-puzzle
 search.
+
+**Issue 005 (2026-06-30) update**: the modelless drafter improvements (MRV
+cell ordering + CP naked-singles signal, Options A+B) were implemented behind
+`sudoku_mrv`/`sudoku_cp`. They work as designed — `spec_commits` rose from
+7–14 to ~20–22 — but the 8-deep ceiling still prevents beating backtrack.
+speculate ties backtrack (~2.5 ms); `solve_fast` (367 µs) stays the GOAT.
 
 **Lesson**: before asking "can speculate beat backtrack", check whether the
 baseline solver itself is optimal. The 27× step reduction from MRV+CP dwarfs

@@ -119,6 +119,14 @@ replaid_schedules = []
 
 # Sudoku (gates sudoku_pruner module — consumed by main crate's sudoku feature)
 sudoku = []
+# Issue 005 Option A: MRV cell ordering constructor (`SudokuPruner::new_mrv`).
+# Opt-in — `new()` stays row-major so existing examples/tests are unaffected.
+sudoku_mrv = ["sudoku"]
+# Issue 005 Option B: constraint-propagation drafter (`SudokuPruner::latent_marginals`).
+# Naked/hidden-singles → p=1.0; N candidates → uniform 1/N. Pure deterministic
+# rules engine, no training. Composes with `sudoku_mrv` to surface forced cells
+# inside the 8-deep DDTree window.
+sudoku_cp = ["sudoku"]
 
 # Bomber lives in the main katgpt-rs crate, but a few helpers inside this crate
 # (sdpg::from_replay, sdpg::load_teacher_q_from_replay) read bomber's ReplaySample
@@ -258,4 +266,6 @@ unexpected_cfgs = { level = "warn", check-cfg = [
     'cfg(feature, values("bake_precision"))',
     'cfg(feature, values("product_policy_sharpen"))',
     'cfg(feature, values("advantage_freeze_thaw"))',
+    'cfg(feature, values("sudoku_mrv"))',
+    'cfg(feature, values("sudoku_cp"))',
 ] }
