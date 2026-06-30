@@ -113,7 +113,7 @@ over identity) lives in the riir-ai runtime plan (P355).**
 - [x] **T2.3 (G3 — latency)** *(PASS at production target: 21.96µs at N=64 < 25µs. DEFERRED at speculative 5µs target — needs SIMD; the inner k=4 dot product + d=8 accumulation are perfect for NEON/AVX2. N=16: 1.75µs, N=32: 5.93µs meet the NPC-zone target. See `.benchmarks/354_set_attention_goat.md`.)*
 - [x] **T2.4 (G4 — zero-alloc)** *(PASS: 0 allocations on the dense path, verified via counting allocator in the bench. The unit-test version was replaced with a "by construction" check — the dense path has no Vec/Box/format!/collect/clone primitives, only caller-supplied &mut [f32] scratch.)*
 - [x] **T2.5 (G5 — sigmoid-not-softmax correctness)** *(PASS. Honest framing: with finite β, a lonely entity still moves slightly toward peers (sigmoid never fully zeros out). The test verifies the SHAPE — sharper β reduces lonely motion, which softmax cannot do because it forces Σα=1.)*
-- [x] **T2.6** If all G1–G5 pass, file results in `katgpt-rs/.benchmarks/354_set_attention_goat.md`. Promote `set_attention` from opt-in to default-on per AGENTS.md feature-flag discipline (only if the Super-GOAT G6 also passes in riir-ai P355 — keep opt-in until both clear). *(Bench doc filed. Stays opt-in — pending riir-ai Plan 355 G6 fusion gate.)*
+- [x] **T2.6** If all G1–G5 pass, file results in `katgpt-rs/.benchmarks/354_set_attention_goat.md`. Promote `set_attention` from opt-in to default-on per AGENTS.md feature-flag discipline (only if the Super-GOAT G6 also passes in riir-ai P355 — keep opt-in until both clear). *(Bench doc filed. PROMOTED to default-on 2026-07-01 after Plan 355 G6 (fusion adds value), G7 (crowd stability), and G9 (production latency 75.7µs/tick at 100 NPCs) all passed. G8 collective inference FAILED (Super-GOAT→GOAT) — averaging cannot amplify detection; this is a use-case limitation, NOT a primitive defect. The validated selling point is crowd coherence (belief sync, noise reduction, contextual awareness), not collective threat detection.)*
 
 ### Acceptance
 
@@ -158,6 +158,10 @@ sigmoid-gated (NEVER softmax), permutation-equivariant cross-entity set-attentio
 kernel behind the `set_attention` feature flag. Five-gate GOAT: G1 (permutation
 equivariance bit-exact) + G2 (identity-floor meaningfulness on 2-cluster) + G3
 (latency < 5 µs at N=64) + G4 (zero-alloc) + G5 (sigmoid-not-softmax lonely-query
-correctness). Promote to default-on only when both this gate AND the riir-ai
-runtime G6 (CS-ranking fusion adds value) pass. The training half (BERT-style
-masking, end-to-end Q/K/V backprop) stays in riir-train.
+correctness). **PROMOTED to default-on 2026-07-01** after Plan 355 G6 (fusion adds
+value), G7 (crowd stability), and G9 (production latency 75.7µs/tick at 100 NPCs)
+all passed. G8 collective inference FAILED (Super-GOAT→GOAT) — averaging cannot
+amplify detection; that's a use-case limitation, NOT a primitive defect. The
+validated selling point is crowd coherence (belief sync, noise reduction,
+contextual awareness). The training half (BERT-style masking, end-to-end Q/K/V
+backprop) stays in riir-train.
