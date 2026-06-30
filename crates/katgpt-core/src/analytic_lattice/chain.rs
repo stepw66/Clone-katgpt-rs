@@ -149,9 +149,9 @@ pub fn compose_chain_into(
             // tmp = C[1] × C[0]
             matmul_row_major(&ops[1].data, &ops[0].data, scratch, k);
             // for i in 2..n-1: tmp = C[i] × tmp
-            for i in 2..ops.len() - 1 {
+            for op in ops[2..ops.len() - 1].iter() {
                 // out = C[i] × tmp
-                matmul_row_major(&ops[i].data, scratch, &mut out.data, k);
+                matmul_row_major(&op.data, scratch, &mut out.data, k);
                 // tmp = out  (swap roles; avoids a copy by ping-ponging)
                 scratch.copy_from_slice(&out.data);
             }

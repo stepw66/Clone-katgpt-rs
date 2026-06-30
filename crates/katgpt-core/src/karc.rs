@@ -278,8 +278,8 @@ impl<const M: usize> KarcBasis<M> for BSplineBasis<M> {
         let mut cur = [0.0f32; 64];
         debug_assert!(n_deg0 <= 64, "BSplineBasis scratch overflow (M too large)");
         // Degree 0.
-        for i in 0..n_deg0 {
-            prev[i] = Self::b0(&self.knots, i, x);
+        for (i, slot) in prev[..n_deg0].iter_mut().enumerate() {
+            *slot = Self::b0(&self.knots, i, x);
         }
         // Recurse up to degree d.
         let mut s = 1;
@@ -305,9 +305,7 @@ impl<const M: usize> KarcBasis<M> for BSplineBasis<M> {
             s += 1;
         }
         // At degree d the first M entries of prev are the M basis functions.
-        for j in 0..M {
-            out[j] = prev[j];
-        }
+        out[..M].copy_from_slice(&prev[..M]);
     }
 
     fn name(&self) -> &'static str {
@@ -486,8 +484,8 @@ pub fn feature_expand_higher_order<B: KarcBasis<M>, const M: usize, const R: usi
             let mut idx = 0;
             for f1 in 0..d_h_1 {
                 let p1 = first_order[f1];
-                for f2 in f1..d_h_1 {
-                    pairs[idx] = p1 * first_order[f2];
+                for &fv in first_order[f1..d_h_1].iter() {
+                    pairs[idx] = p1 * fv;
                     idx += 1;
                 }
             }
@@ -814,6 +812,7 @@ pub fn jacobi_eigen(
 /// # Panics
 ///
 /// Panics if `r == 0`, `r > d_h`, `λ ≤ 0`, or any buffer is undersized.
+#[allow(clippy::too_many_arguments)]
 pub fn low_rank_fit(
     gram: &[f64],
     cov: &[f64],
@@ -1112,6 +1111,7 @@ pub fn low_rank_fit(
 ///
 /// Panics if `r == 0`, `r > d_h`, `λ ≤ 0`, `a_frozen.len() != d_out*r`, or
 /// `b_out.len() < r*d_h`.
+#[allow(clippy::too_many_arguments)]
 pub fn low_rank_fit_b_with_frozen_a(
     gram: &[f64],
     cov: &[f64],
@@ -1230,6 +1230,7 @@ pub fn low_rank_fit_b_with_frozen_a(
 /// For the higher-order path, expand `psi` via [`feature_expand_higher_order`]
 /// first, then call this function.
 #[inline]
+#[allow(clippy::too_many_arguments)]
 pub fn forecast_low_rank_apply(
     a: &[f32],
     b: &[f32],
@@ -1540,10 +1541,10 @@ impl<B: KarcBasis<M>, const D: usize, const M: usize, const K: usize> KarcForeca
         for r in 0..n {
             let row = &self.features_buf[r * d_h..(r + 1) * d_h];
             let target = &self.targets_buf[r * D..(r + 1) * D];
-            for i in 0..d_h {
-                let ri = row[i] as f64;
-                for c in 0..D {
-                    s.cov[i * D + c] += ri * target[c] as f64;
+            for (i, &ri) in row.iter().enumerate() {
+                let ri = ri as f64;
+                for (c, &tv) in target.iter().enumerate() {
+                    s.cov[i * D + c] += ri * tv as f64;
                 }
             }
         }
@@ -1758,10 +1759,10 @@ impl<B: KarcBasis<M>, const D: usize, const M: usize, const K: usize> KarcForeca
         for row_idx in 0..n {
             let row = &self.features_buf[row_idx * d_h..(row_idx + 1) * d_h];
             let target = &self.targets_buf[row_idx * D..(row_idx + 1) * D];
-            for i in 0..d_h {
-                let ri = row[i] as f64;
-                for d in 0..D {
-                    s.cov[i * D + d] += ri * target[d] as f64;
+            for (i, &ri) in row.iter().enumerate() {
+                let ri = ri as f64;
+                for (d, &tv) in target.iter().enumerate() {
+                    s.cov[i * D + d] += ri * tv as f64;
                 }
             }
         }
@@ -1887,10 +1888,10 @@ impl<B: KarcBasis<M>, const D: usize, const M: usize, const K: usize> KarcForeca
         for row_idx in 0..n {
             let row = &self.features_buf[row_idx * d_h..(row_idx + 1) * d_h];
             let target = &self.targets_buf[row_idx * D..(row_idx + 1) * D];
-            for i in 0..d_h {
-                let ri = row[i] as f64;
-                for d in 0..D {
-                    s.cov[i * D + d] += ri * target[d] as f64;
+            for (i, &ri) in row.iter().enumerate() {
+                let ri = ri as f64;
+                for (d, &tv) in target.iter().enumerate() {
+                    s.cov[i * D + d] += ri * tv as f64;
                 }
             }
         }

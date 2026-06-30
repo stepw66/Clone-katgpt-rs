@@ -382,8 +382,7 @@ pub fn zone_affective_manifold<'a>(
     }
 
     // ── Phase 3: sign-fixing for temporal continuity ──────────────
-    if config.sign_fix && prev_zone_axes.is_some() {
-        let prev = prev_zone_axes.unwrap();
+    if let Some(prev) = prev_zone_axes.filter(|_| config.sign_fix) {
         let prev_k = (prev.len() / d).min(k);
         let axes = &mut out_zone_axes[..d * k];
         for j in 0..prev_k {
@@ -527,8 +526,8 @@ fn compute_grouped<'a>(
                 }
             }
             let inv_n = 1.0 / group_n as f32;
-            for j in 0..d {
-                local_mean[j] *= inv_n;
+            for slot in local_mean[..d].iter_mut() {
+                *slot *= inv_n;
             }
         } else {
             local_mean.fill(0.0);
@@ -548,19 +547,17 @@ fn compute_grouped<'a>(
         }
 
         // Per-group sign-fixing.
-        if config.sign_fix {
-            if let Some(prev) = prev_zone_axes {
-                let prev_offset = grp * dk;
-                if prev_offset + dk <= prev.len() {
-                    let prev_group_axes = &prev[prev_offset..prev_offset + dk];
-                    for j in 0..k {
-                        let new_axis = &mut group_axes[j * d..(j + 1) * d];
-                        let prev_axis = &prev_group_axes[j * d..(j + 1) * d];
-                        let dot = simd::simd_dot_f32(new_axis, prev_axis, d);
-                        if dot < 0.0 {
-                            for x in new_axis.iter_mut() {
-                                *x = -*x;
-                            }
+        if let Some(prev) = prev_zone_axes.filter(|_| config.sign_fix) {
+            let prev_offset = grp * dk;
+            if prev_offset + dk <= prev.len() {
+                let prev_group_axes = &prev[prev_offset..prev_offset + dk];
+                for j in 0..k {
+                    let new_axis = &mut group_axes[j * d..(j + 1) * d];
+                    let prev_axis = &prev_group_axes[j * d..(j + 1) * d];
+                    let dot = simd::simd_dot_f32(new_axis, prev_axis, d);
+                    if dot < 0.0 {
+                        for x in new_axis.iter_mut() {
+                            *x = -*x;
                         }
                     }
                 }
@@ -620,8 +617,8 @@ fn compute_mean_and_covariance(
             }
         }
         let inv_n = 1.0 / n as f32;
-        for j in 0..d {
-            mean[j] *= inv_n;
+        for slot in mean[..d].iter_mut() {
+            *slot *= inv_n;
         }
     } else {
         mean.fill(0.0);
@@ -631,8 +628,8 @@ fn compute_mean_and_covariance(
         // Chunk geometry: aim for ~8 chunks per rayon worker.
         let n_workers = rayon::current_num_threads().max(1);
         let target_chunks = n_workers * 8;
-        let chunk_size = ((n + target_chunks - 1) / target_chunks).max(1);
-        let num_chunks = (n + chunk_size - 1) / chunk_size;
+        let chunk_size = n.div_ceil(target_chunks).max(1);
+        let num_chunks = n.div_ceil(chunk_size);
         let needed = num_chunks * dd;
         if scratch.chunk_cov.len() < needed {
             scratch.chunk_cov.resize(needed, 0.0);
@@ -653,8 +650,8 @@ fn compute_mean_and_covariance(
         // Serial reduce into scratch.cov.
         scratch.cov[..dd].fill(0.0);
         for chunk_slice in chunk_buf.chunks_exact(dd) {
-            for idx in 0..dd {
-                scratch.cov[idx] += chunk_slice[idx];
+            for (idx, &v) in chunk_slice.iter().enumerate() {
+                scratch.cov[idx] += v;
             }
         }
     } else {

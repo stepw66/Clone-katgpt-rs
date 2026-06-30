@@ -383,9 +383,8 @@ impl<V: Clone> ZoneDensityCache<V> {
         invalidation_delta: f32,
     ) -> Option<V> {
         // Sparse-tier zones are NEVER cached — short-circuit before touching the map.
-        match current_tier {
-            DensityTier::Sparse => return None,
-            _ => {}
+        if current_tier == DensityTier::Sparse {
+            return None;
         }
 
         // Decide under the pin; act (remove) within the same pin. papaya 0.2's
@@ -393,10 +392,7 @@ impl<V: Clone> ZoneDensityCache<V> {
         // chain them without dropping the guard. The entry reference is valid
         // for the lifetime of the guard (epoch-based reclamation).
         let pin = self.map.pin();
-        let entry = match pin.get(&zone_id) {
-            None => return None,
-            Some(e) => e,
-        };
+        let entry = pin.get(&zone_id)?;
 
         let tier_changed = entry.cached_tier != current_tier;
         let drift = (entry.cached_density - current_density).abs();
@@ -426,9 +422,8 @@ impl<V: Clone> ZoneDensityCache<V> {
         value: V,
     ) {
         // Sparse-tier zones are NEVER cached.
-        match tier {
-            DensityTier::Sparse => return,
-            _ => {}
+        if tier == DensityTier::Sparse {
+            return;
         }
         let entry = CacheEntry {
             value,

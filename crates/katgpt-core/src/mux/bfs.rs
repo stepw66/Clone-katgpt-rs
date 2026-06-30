@@ -88,10 +88,10 @@ impl MuxBfs {
             "logits count must match leaf count"
         );
 
-        for i in 0..leaves.len() {
+        for (i, logits) in logits_by_leaf.iter().enumerate() {
             // Extract once — reused for width, validity, and expansion.
             let mut buf = [0.0f32; MAX_TOP_K];
-            let peaks = extract_top_k_into(&logits_by_leaf[i], tree.k, &mut buf);
+            let peaks = extract_top_k_into(logits, tree.k, &mut buf);
             let width = self.detect_width_with_peaks(peaks);
             if tree.pruner.is_valid_with_peaks(peaks) {
                 tree.expand_node_with_peaks(leaves.path(i), peaks, width);
@@ -124,11 +124,11 @@ impl MuxBfs {
             "logits count must match leaf count"
         );
 
-        for i in 0..leaves.len() {
+        for (i, logits) in logits_by_leaf.iter().enumerate() {
             // Extract once — reused for width and expansion (pruner check skipped here
             // since the original used is_valid inside the guard; preserved below).
             let mut buf = [0.0f32; MAX_TOP_K];
-            let peaks = extract_top_k_into(&logits_by_leaf[i], tree.k, &mut buf);
+            let peaks = extract_top_k_into(logits, tree.k, &mut buf);
             if tree.pruner.is_valid_with_peaks(peaks) {
                 let base_width = self.detect_width_with_peaks(peaks);
                 let nmda_gate = gate.compute_gate(
@@ -160,10 +160,10 @@ impl MuxBfs {
             "logits count must match leaf count"
         );
 
-        for i in 0..leaves.len() {
+        for (i, logits) in logits_by_leaf.iter().enumerate() {
             // Extract once — reused for width, validity, and expansion.
             let mut buf = [0.0f32; MAX_TOP_K];
-            let peaks = extract_top_k_into(&logits_by_leaf[i], tree.k, &mut buf);
+            let peaks = extract_top_k_into(logits, tree.k, &mut buf);
             let width = self.detect_width_with_peaks(peaks);
             if tree.pruner.is_valid_with_peaks(peaks) {
                 tree.expand_node_with_peaks(leaves.path(i), peaks, width);

@@ -19,7 +19,7 @@ pub const DEFAULT_K: usize = 4;
 ///
 /// `buf` stores all path indices contiguously; `offsets[i]..offsets[i+1]`
 /// is the i-th leaf's path.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct LeafPaths {
     /// Flat buffer of path indices.
     pub buf: Vec<usize>,
@@ -31,10 +31,7 @@ impl LeafPaths {
     /// Create an empty `LeafPaths` with no allocation. Intended for reuse
     /// via [`Self::clear`] across calls to `expand_bfs_frontier_into`.
     pub fn new() -> Self {
-        Self {
-            buf: Vec::new(),
-            offsets: Vec::new(),
-        }
+        Self::default()
     }
 
     /// Number of leaf paths stored.
@@ -226,8 +223,8 @@ impl MuxDdTree {
         for i in 0..effective_width {
             // Distribute peaks across children: each child gets a shifted view
             let offset = (i * self.k / effective_width).min(peaks.len());
-            for j in 0..child_len {
-                child_token_buf[j] = (offset + j) as u32;
+            for (j, slot) in child_token_buf.iter_mut().enumerate() {
+                *slot = (offset + j) as u32;
             }
             node.children.push(MuxNode::new(
                 child_token_buf.clone(),
@@ -277,8 +274,8 @@ impl MuxDdTree {
             "must provide logits for every leaf"
         );
 
-        for i in 0..paths.len() {
-            let logits = logits_by_leaf[i].as_ref();
+        for (i, logits_entry) in logits_by_leaf.iter().enumerate() {
+            let logits = logits_entry.as_ref();
             // Extract once — reused for width, validity, and expansion.
             let mut buf = [0.0f32; MAX_TOP_K];
             let peaks = extract_top_k_into(logits, self.k, &mut buf);

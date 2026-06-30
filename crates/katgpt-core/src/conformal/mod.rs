@@ -137,7 +137,7 @@ fn horizon_lag(h: usize, m: usize, mode: ResidualMode) -> usize {
     debug_assert!(h >= 1, "horizon h is 1-indexed");
     match mode {
         ResidualMode::Paper => m,
-        ResidualMode::HStep => m * ((h + m - 1) / m),
+        ResidualMode::HStep => m * h.div_ceil(m),
     }
 }
 
@@ -226,6 +226,7 @@ impl<F: PointForecaster> ConformalIntervalCalibrator<F> {
     /// - `decay_unit`: `Step` (default) or `Cycle`.
     /// - `residual_mode`: `HStep` (default) or `Paper`.
     /// - `orientation`: quantile-orientation correction flag.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         forecaster: F,
         n_channels: usize,
@@ -262,7 +263,7 @@ impl<F: PointForecaster> ConformalIntervalCalibrator<F> {
         // need `ceil(max_h/m)` buckets.
         match mode {
             ResidualMode::Paper => 1,
-            ResidualMode::HStep => (max_h + m - 1) / m,
+            ResidualMode::HStep => max_h.div_ceil(m),
         }
     }
 
@@ -276,7 +277,7 @@ impl<F: PointForecaster> ConformalIntervalCalibrator<F> {
         }
         let raw = match self.residual_mode {
             ResidualMode::Paper => 0,
-            ResidualMode::HStep => (h + self.m - 1) / self.m - 1,
+            ResidualMode::HStep => h.div_ceil(self.m) - 1,
         };
         // Clamp to the last bucket if `h` exceeds the configured `max_h`.
         raw.min(n_buckets.saturating_sub(1))
@@ -435,11 +436,11 @@ impl<F: PointForecaster> ConformalIntervalCalibrator<F> {
                 DecayUnit::Step => 1.0,
                 DecayUnit::Cycle => self.m as f32,
             };
-            for i in 0..n {
+            for (i, w_slot) in weights.iter_mut().enumerate().take(n) {
                 let (_, pushed_tick) = view.get_sorted(i);
                 let age = (tick_now.saturating_sub(pushed_tick)) as f32 / unit_scale;
                 let w = (-lambda * age).exp();
-                weights[i] = w;
+                *w_slot = w;
                 total_w += w;
             }
             if total_w <= 0.0 {
@@ -472,10 +473,10 @@ impl<F: PointForecaster> ConformalIntervalCalibrator<F> {
         let target = p * total_w;
         let mut acc = 0.0_f32;
         let mut prev_val = view.get_sorted(0).0;
-        for i in 0..n {
+        for (i, &w) in weights.iter().enumerate() {
             let (val, _) = view.get_sorted(i);
             prev_val = val;
-            acc += weights[i];
+            acc += w;
             if acc >= target {
                 if orientation && i + 1 < n && acc == target {
                     let next_val = view.get_sorted(i + 1).0;

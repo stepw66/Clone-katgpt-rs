@@ -71,6 +71,12 @@ impl SeasonalPoolForecaster {
         self.history.len()
     }
 
+    /// Whether the history ring is empty.
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.history.is_empty()
+    }
+
     /// Forecast the value at horizon `h` (1-indexed). The forecast is:
     ///
     /// ```text
@@ -88,7 +94,7 @@ impl SeasonalPoolForecaster {
         if n == 0 {
             return 0.0;
         }
-        let lag = self.m * ((h + self.m - 1) / self.m); // L_h = m·⌈h/m⌉
+        let lag = self.m * h.div_ceil(self.m); // L_h = m·⌈h/m⌉
         if lag > n {
             // Not enough history — fall back to the most recent observation.
             return self.history.back(0).unwrap_or(0.0);

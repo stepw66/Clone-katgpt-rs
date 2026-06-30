@@ -118,10 +118,10 @@ pub fn build_proof_from_levels(levels: &[Vec<[u8; 32]>], leaf_index: usize) -> V
     let tree_depth = levels.len() - 1; // levels[0] = leaves, last = root
     let mut siblings: Vec<[u8; 32]> = Vec::with_capacity(tree_depth);
     let mut idx = leaf_index;
-    for level in 0..tree_depth {
+    for level_nodes in levels[..tree_depth].iter() {
         let sib = idx ^ 1;
-        // levels[level] has the nodes at this level; sibling is at sib.
-        if let Some(&hash) = levels[level].get(sib) {
+        // `level_nodes` has the nodes at this level; sibling is at sib.
+        if let Some(&hash) = level_nodes.get(sib) {
             siblings.push(hash);
         } else {
             // Should not happen if levels are correctly built (padded to pow2).
