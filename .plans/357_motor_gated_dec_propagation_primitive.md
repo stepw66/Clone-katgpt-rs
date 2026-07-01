@@ -5,7 +5,7 @@
 **Source paper:** [arXiv:2602.18690](https://arxiv.org/abs/2602.18690) — Nunley, *Neural Fields as World Models* (CogSci 2026)
 **Private guide:** [riir-ai/.research/168_Motor_Gated_Isomorphic_World_Model_Game_Runtime_Guide.md](../../riir-ai/.research/168_Motor_Gated_Isomorphic_World_Model_Game_Runtime_Guide.md)
 **Target:** `katgpt-rs/crates/katgpt-dec/src/motor_gated.rs` (new module) + Cargo feature `motor_gated_field` (opt-in)
-**Status:** Phase 1–4 COMPLETE. G1–G4 PASS; G5 borderline FAIL (~120 µs vs 100 µs target, memory-bandwidth bound) → stays opt-in, follow-up `issues/001`. Primitive is correct, zero-alloc, modelless, and 8× under the paper's GPU baseline.
+**Status:** Phase 1–4 COMPLETE. G1–G5 ALL PASS (G5 closed by grid-stencil fast path: 120 µs → 29 µs, 4.1× speedup). `motor_gated_field` is **ready for downstream consumption** (riir-ai Research 168 Phase 2), stays opt-in by design.
 
 ---
 
@@ -48,7 +48,7 @@ Ship the **missing glue primitive** that unifies the DEC substrate (Plan 251 `ho
 - [x] **T2.2 G2 — Motor-gate locality.** Apply motor gate to channels 0..M on a 16-channel field; verify only those channels shift, others conserve. **Gate:** channel-isolation ratio > 100× (gated channel L1 shift / ungated channel L1 shift). **Result: PASS — ∞ (no leak; ungated channels bit-identical motor-on vs motor-off).**
 - [x] **T2.3 G3 — Conservation.** **Gate:** divergence < 5% of field L1 norm. **Result: PASS — 0.0000.** **Deviation:** the plan's `belief_mass_divergence(cx, &h_propagated)` on the propagated field conflates the by-design Amari decay term (`-dt·h`, an explicit mass sink) with the propagation conservation. The implemented gate measures `|Σ K[ReLU(h)]| / L1(h)` — the graph Laplacian's signed sum, which is ≈ 0 by the `d∘d=0` identity (only boundary vertices leak). `belief_mass_divergence` of the gradient flow is reported as an informational DEC-native metric. See `.benchmarks/357_motor_gated_field_goat.md`.
 - [x] **T2.4 G4 — Zero-alloc steady state.** `TrackingAllocator` audit on the hot path (1000 ticks, 64×64 grid, 16 channels). **Gate:** 0 allocations after warmup. **Result: PASS — 0 allocs/1000 ticks.**
-- [-] **T2.5 G5 — Latency.** Bench: 64×64 grid, 16 channels, single `evolve_motor_gated_field` call. **Gate:** < 100µs. **Result: FAIL — ~120 µs (1.2× over, borderline).** Memory-bandwidth bound (3× 4 MB arrays = 12 MB working set, ~28 MB traffic/tick). 8× under the paper's GPU ~ms baseline. Follow-up: `issues/001_motor_gated_field_g5_latency.md`.
+- [x] **T2.5 G5 — Latency.** Bench: 64×64 grid, 16 channels, single `evolve_motor_gated_field` call. **Gate:** < 100µs. **Result: PASS — ~29 µs (3.4× margin).** Initial run was ~120 µs (FAIL, borderline) due to scattered read-modify-write in the edge-list `graph_laplacian_into`; closed by the grid-stencil fast path (Issue 001): `CellComplex::grid_dims` dispatch in `graph_laplacian_into` → `graph_laplacian_grid_into` (5-point stencil, sequential row-major read-once-write-once). 4.1× speedup. See `.benchmarks/357_motor_gated_field_goat.md`.
 - [x] **T2.6** Write `.benchmarks/357_motor_gated_field_goat.md` with the G1–G5 results table + promotion decision.
 
 **Promotion rule:** all 5 PASS → keep `motor_gated_field` opt-in but mark ready for downstream consumption (riir-ai Research 168 Phase 2). Any FAIL → stay opt-in, file `.issues/NNN_*` follow-up, do NOT promote.
@@ -59,8 +59,8 @@ Ship the **missing glue primitive** that unifies the DEC substrate (Plan 251 `ho
 
 ### Tasks
 
-- [-] **T3.1** If G5 latency is within 2× of target (50–100µs), add explicit SIMD chunking to the motor-gate step (mirrors `hodge_laplacian_into`'s 4-wide chunk pattern in `katgpt-dec/src/operators.rs`). **Attempted + reverted:** (1) fused relu-on-read inside the laplacian stencil (`graph_laplacian_of_relu_into`) — 134 µs, SLOWER (scattered reads recompute relu ~4×/vertex); (2) 8-wide chunked blend loop — no improvement (iterator-zip already auto-vectorizes via non-aliasing slice split). Root cause is DRAM/cache bandwidth, not compute SIMD. See `.benchmarks/357_motor_gated_field_goat.md`.
-- [-] **T3.2** Re-run G5; document speedup. **Result: no speedup from SIMD; deferred to `issues/001` (f16 fields / tiled laplacian / target relaxation).**
+- [x] **T3.1** If G5 latency is within 2× of target (50–100µs), add explicit SIMD chunking to the motor-gate step (mirrors `hodge_laplacian_into`'s 4-wide chunk pattern in `katgpt-dec/src/operators.rs`). **Initial SIMD attempts did NOT help** (fused relu-on-read: 134 µs slower; 8-wide chunked blend: no gain — iterator-zip already vectorizes). **Root cause re-diagnosed:** the bottleneck was NOT DRAM bandwidth (the initial "12 MB working set" analysis had an arithmetic error — actual working set is 768 KB, fits in L2) but the **scattered read-modify-write pattern** in the edge-list `graph_laplacian_into`. **Fix:** added `grid_dims: Option<(w,h)>` to `CellComplex` + a `graph_laplacian_grid_into` 5-point-stencil fast path that iterates vertices row-major and writes each output element exactly once (no zero-fill, no scattered RMW). Dispatch is automatic when `cx.grid_dims()` is `Some`; cleared on any topology mutation per the `merkle_root` lesson. 4.1× speedup (120 µs → 29 µs). Equivalence to the edge-list path verified by `graph_laplacian_grid_matches_edge_list_{1ch,multich}` tests (max diff < 1e-4).
+- [x] **T3.2** Re-run G5; document speedup. **Result: PASS — 29 µs (4.1× speedup, 3.4× margin under 100 µs target).** G5 closed; Issue 001 resolved.
 
 ---
 

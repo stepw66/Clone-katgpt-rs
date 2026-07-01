@@ -80,6 +80,13 @@ pub struct CellComplex {
     /// (all 5 paths in `remove_face` / `remove_cell` × 4 ranks) per the
     /// `merkle_root` lesson.
     coboundaries: [Option<CoboundaryIndex>; MAX_RANK as usize],
+    /// Regular-grid dimensions `(w, h)` if this complex was produced by
+    /// [`grid_2d`](Self::grid_2d) and has not been mutated since. Enables the
+    /// cache-friendly 5-point-stencil fast path in `graph_laplacian_into`
+    /// (Plan 357 G5 fix). `None` for non-grid complexes or after any topology
+    /// mutation (remove_face/remove_cell) — a grid with a missing face is no
+    /// longer a regular grid, so the stencil would be wrong at the gap.
+    grid_dims: Option<(usize, usize)>,
 }
 
 impl CellComplex {
@@ -93,6 +100,7 @@ impl CellComplex {
             boundaries: [Vec::new(), Vec::new(), Vec::new()],
             topology_version: 0,
             coboundaries: [const { None }; MAX_RANK as usize],
+            grid_dims: None,
         }
     }
 
@@ -111,6 +119,9 @@ impl CellComplex {
         let n_faces = (w - 1) * (h - 1);
 
         let mut cx = Self::new(n_vertices, n_edges, n_faces, 0);
+        // Mark as a regular grid so graph_laplacian_into can take the 5-point-
+        // stencil fast path (Plan 357 G5 latency fix). Cleared by any mutation.
+        cx.grid_dims = Some((w, h));
 
         // Pre-allocate boundary vectors to exact capacity — avoids re-allocations during push.
         cx.boundaries[0].reserve_exact(2 * n_edges);
@@ -272,6 +283,15 @@ impl CellComplex {
     #[inline]
     pub fn n_volumes(&self) -> usize {
         self.n_cells[3]
+    }
+
+    /// Regular-grid dimensions `(w, h)` if this complex is an unmutated
+    /// [`grid_2d`](Self::grid_2d) product. `None` for arbitrary complexes or
+    /// after any topology mutation. The graph Laplacian uses this to take a
+    /// cache-friendly 5-point-stencil fast path when available (Plan 357 G5).
+    #[inline]
+    pub fn grid_dims(&self) -> Option<(usize, usize)> {
+        self.grid_dims
     }
 
     // -----------------------------------------------------------------------
@@ -450,6 +470,11 @@ impl CellComplex {
     #[inline]
     fn invalidate_coboundary_cache(&mut self) {
         self.coboundaries = [const { None }; MAX_RANK as usize];
+        // A mutation breaks the regular-grid invariant (a grid with a removed
+        // face/cell is no longer a regular grid), so the 5-point-stencil fast
+        // path would be wrong at the gap. Following the `merkle_root` lesson:
+        // every mutation path invalidates every topology-derived invariant.
+        self.grid_dims = None;
     }
 }
 

@@ -300,9 +300,36 @@ pub fn graph_laplacian(cx: &CellComplex, potential: &CochainField) -> CochainFie
 /// Zero-alloc `graph_laplacian` writing into pre-allocated `output`.
 ///
 /// `output` must have `rank == 0`, `dim == potential.dim`, and
-/// `data.len() >= cx.n_vertices() * dim`. Its data is zero-filled then accumulated.
+/// `data.len() >= cx.n_vertices() * dim`. Its data is zero-filled then accumulated,
+/// unless `cx` is an unmutated `grid_2d` product — in that case the 5-point-stencil
+/// fast path writes every element exactly once (no zero-fill).
 #[inline]
 pub fn graph_laplacian_into(
+    cx: &CellComplex,
+    potential: &CochainField,
+    output: &mut CochainField,
+) {
+    debug_assert_eq!(potential.rank, 0, "graph_laplacian requires rank-0 cochain");
+    // Plan 357 G5 fix: regular grids take the cache-friendly 5-point-stencil
+    // fast path. The generic edge-list path is correct but does scattered
+    // read-modify-writes on `output` (each vertex touched degree(v) times,
+    // each touch on a different cache line for large grids), which is the G5
+    // bottleneck. The stencil reads vertices in row-major order and writes
+    // each output element exactly once — no zero-fill, no scatter, no
+    // read-modify-write store-forwarding stalls.
+    if let Some((w, h)) = cx.grid_dims() {
+        graph_laplacian_grid_into(w, h, potential, output);
+        return;
+    }
+    graph_laplacian_edge_list_into(cx, potential, output);
+}
+
+/// Generic edge-list graph Laplacian (the pre-stencil path). Public via
+/// [`graph_laplacian_into`] for non-grid complexes; kept separate so the grid
+/// fast path has a clean dispatch point. Zero-fills `output` then accumulates
+/// one `(+=diff, -=diff)` pair per edge.
+#[inline]
+fn graph_laplacian_edge_list_into(
     cx: &CellComplex,
     potential: &CochainField,
     output: &mut CochainField,
@@ -347,6 +374,131 @@ pub fn graph_laplacian_into(
             let diff = potential.data[tail_start + off] - potential.data[head_start + off];
             output.data[tail_start + off] += diff;
             output.data[head_start + off] -= diff;
+        }
+    }
+}
+
+/// 5-point-stencil graph Laplacian for a regular `w×h` vertex grid (Plan 357 G5).
+///
+/// Computes `Δ₀[v] = deg(v)·potential[v] − Σ potential[neighbor]` with
+/// deg(v) = 4 (interior), 3 (edge), 2 (corner). Reads vertices in row-major
+/// order and writes each `output` element exactly once — no zero-fill, no
+/// scattered read-modify-write. The interior loop is branch-free and
+/// auto-vectorizes cleanly (4 FMA per element on the unrolled dim-chunks);
+/// the boundary is `O(w+h)` and handled with explicit neighbor-count checks.
+///
+/// Mathematically identical to the edge-list path on the same grid (both
+/// realize `δ₁d₀`); the f32 results can differ by ULP-level rounding because
+/// the accumulation order differs, which is acceptable for every consumer
+/// (the hodge.rs tests use `TOL = 1e-3`; the operators tests check structural
+/// properties like `Δ(linear) = 0` which hold exactly under either path).
+#[inline]
+fn graph_laplacian_grid_into(
+    w: usize,
+    h: usize,
+    potential: &CochainField,
+    output: &mut CochainField,
+) {
+    debug_assert_eq!(potential.rank, 0, "graph_laplacian requires rank-0 cochain");
+    let dim = potential.dim;
+    let p = potential.data.as_ptr();
+    let o = output.data.as_mut_ptr();
+    let stride = w * dim;
+
+    // Interior: 4 neighbors each, branch-free. The bulk path for any grid
+    // larger than ~5×5; iterates (w-2)·(h-2) vertices.
+    if w >= 3 && h >= 3 {
+        for y in 1..(h - 1) {
+            let row = y * stride;
+            let up_row = row - stride;
+            let down_row = row + stride;
+            for x in 1..(w - 1) {
+                let base = row + x * dim;
+                let left = base - dim;
+                let right = base + dim;
+                let up = up_row + x * dim;
+                let down = down_row + x * dim;
+                // Safety: base, left, right are within [row, row+stride); up/down
+                // are within [(y-1)*stride, (y+2)*stride) ⊂ [0, w*h*dim).
+                unsafe {
+                    for c in 0..dim {
+                        let center = *p.add(base + c);
+                        *o.add(base + c) = 4.0 * center
+                            - *p.add(left + c)
+                            - *p.add(right + c)
+                            - *p.add(up + c)
+                            - *p.add(down + c);
+                    }
+                }
+            }
+        }
+    }
+
+    // Boundary: top + bottom rows (full width). deg = 2 at corners, 3 on edges.
+    for &(y, up_off, down_off, has_up, has_down) in [
+        (0usize, 0usize, stride, false, true),
+        (h - 1, stride, 0usize, true, false),
+    ]
+    .iter()
+    {
+        let row = y * stride;
+        let up_row = row.wrapping_sub(up_off);
+        let down_row = row + down_off;
+        for x in 0..w {
+            let base = row + x * dim;
+            let has_left = x > 0;
+            let has_right = x < w - 1;
+            let deg = (has_left as u8 + has_right as u8
+                + has_up as u8 + has_down as u8) as f32;
+            // wrapping_sub/add: offsets are only dereferenced when has_left/has_right
+            // is true, so the underflowing values at corners (x==0 or x==w-1) are
+            // never read. Raw-pointer arithmetic on out-of-bounds offsets is sound
+            // as long as we don't load through them.
+            let left = base.wrapping_sub(dim);
+            let right = base.wrapping_add(dim);
+            let up = up_row + x * dim;
+            let down = down_row + x * dim;
+            unsafe {
+                for c in 0..dim {
+                    let center = *p.add(base + c);
+                    let mut acc = deg * center;
+                    if has_left { acc -= *p.add(left + c); }
+                    if has_right { acc -= *p.add(right + c); }
+                    if has_up { acc -= *p.add(up + c); }
+                    if has_down { acc -= *p.add(down + c); }
+                    *o.add(base + c) = acc;
+                }
+            }
+        }
+    }
+
+    // Boundary: left + right columns (excluding corners already written above).
+    if h >= 3 {
+        for &(x, left_off, right_off, has_left, has_right) in [
+            (0usize, 0usize, dim, false, true),
+            (w - 1, dim, 0usize, true, false),
+        ]
+        .iter()
+        {
+            for y in 1..(h - 1) {
+                let row = y * stride;
+                let base = row + x * dim;
+                let left = base.wrapping_sub(left_off);
+                let right = base.wrapping_add(right_off);
+                let up = row - stride + x * dim;
+                let down = row + stride + x * dim;
+                unsafe {
+                    for c in 0..dim {
+                        let center = *p.add(base + c);
+                        let mut acc = 3.0 * center;
+                        if has_left { acc -= *p.add(left + c); }
+                        if has_right { acc -= *p.add(right + c); }
+                        acc -= *p.add(up + c);
+                        acc -= *p.add(down + c);
+                        *o.add(base + c) = acc;
+                    }
+                }
+            }
         }
     }
 }
@@ -495,5 +647,126 @@ mod tests {
                 max_val
             );
         }
+    }
+
+    // ── Plan 357 G5: grid-stencil fast-path equivalence ───────────────────
+    //
+    // The grid_dims dispatch in `graph_laplacian_into` swaps the edge-list
+    // accumulation path for a 5-point-stencil direct-write path on unmutated
+    // `grid_2d` complexes. The two are mathematically identical (both realize
+    // δ₁d₀); the only permissible difference is ULP-level f32 rounding from
+    // the changed accumulation order. These tests pin that contract.
+
+    /// Compute the edge-list path directly (bypassing the grid dispatch) on
+    /// the same grid complex. `graph_laplacian_edge_list_into` reads
+    /// `cx.boundary_entries(0)` and ignores `grid_dims`, so passing a
+    /// `grid_2d` complex exercises the pre-stencil accumulation path.
+    fn edge_list_laplacian(cx: &CellComplex, potential: &CochainField) -> CochainField {
+        let mut out = CochainField::zeros(0, cx.n_vertices(), potential.dim);
+        graph_laplacian_edge_list_into(cx, potential, &mut out);
+        out
+    }
+
+    #[test]
+    fn graph_laplacian_grid_matches_edge_list_1ch() {
+        // Single-channel: the stencil and edge-list paths must agree to within
+        // 1 ULP (allow a tiny tolerance for accumulation-order rounding).
+        let (w, h) = (8usize, 6usize);
+        let cx = CellComplex::grid_2d(w, h);
+        let mut potential = CochainField::zeros(0, cx.n_vertices(), 1);
+        for i in 0..cx.n_vertices() {
+            potential.set_scalar(i, ((i as f32) * 0.37).sin());
+        }
+        let lap_grid = graph_laplacian(&cx, &potential);
+        let lap_edges = edge_list_laplacian(&cx, &potential);
+        let mut max_diff = 0.0f32;
+        for i in 0..cx.n_vertices() {
+            let d = (lap_grid.scalar(i) - lap_edges.scalar(i)).abs();
+            if d > max_diff {
+                max_diff = d;
+            }
+        }
+        assert!(
+            max_diff < 1e-5,
+            "grid vs edge-list laplacian diverged by {max_diff:e} (expected < 1e-5)"
+        );
+    }
+
+    #[test]
+    fn graph_laplacian_grid_matches_edge_list_multich() {
+        // Multi-channel (dim=16, the G5 workload shape): same contract.
+        let (w, h) = (7usize, 5usize);
+        let dim = 16usize;
+        let cx = CellComplex::grid_2d(w, h);
+        let mut potential = CochainField::zeros(0, cx.n_vertices(), dim);
+        for cell in 0..cx.n_vertices() {
+            for ch in 0..dim {
+                let v = ((cell as f32 * 0.11 + ch as f32 * 0.73).sin()) * 2.0;
+                potential.data[cell * dim + ch] = v;
+            }
+        }
+        let lap_grid = graph_laplacian(&cx, &potential);
+        let lap_edges = edge_list_laplacian(&cx, &potential);
+        let len = cx.n_vertices() * dim;
+        let mut max_diff = 0.0f32;
+        for i in 0..len {
+            let d = (lap_grid.data[i] - lap_edges.data[i]).abs();
+            if d > max_diff {
+                max_diff = d;
+            }
+        }
+        assert!(
+            max_diff < 1e-4,
+            "grid vs edge-list multichannel diverged by {max_diff:e} (expected < 1e-4)"
+        );
+    }
+
+    #[test]
+    fn graph_laplacian_grid_linear_function_is_zero() {
+        // The grid path must preserve the Δ(linear)=0 identity at interior
+        // vertices exactly (no rounding — 4f - 4 neighbors of a linear func
+        // cancels bit-identically when f is integer-valued).
+        let (w, h) = (6usize, 6usize);
+        let cx = CellComplex::grid_2d(w, h);
+        let mut potential = CochainField::zeros(0, cx.n_vertices(), 1);
+        for y in 0..h {
+            for x in 0..w {
+                potential.set_scalar(y * w + x, (x + y) as f32);
+            }
+        }
+        let lap = graph_laplacian(&cx, &potential);
+        for y in 1..(h - 1) {
+            for x in 1..(w - 1) {
+                let v = lap.scalar(y * w + x);
+                assert!(
+                    v.abs() < 1e-6,
+                    "grid Δ(linear) at ({x},{y}) should be 0, got {v}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn graph_laplacian_grid_dims_cleared_on_remove_face() {
+        // The `merkle_root` lesson applied to grid_dims: any topology mutation
+        // invalidates the regular-grid invariant. A grid with a removed face
+        // is no longer a regular grid, so the stencil would be wrong at the
+        // gap — grid_dims must be None after remove_face.
+        let mut cx = CellComplex::grid_2d(5, 5);
+        assert_eq!(cx.grid_dims(), Some((5, 5)));
+        cx.remove_face(0);
+        assert_eq!(cx.grid_dims(), None, "grid_dims must clear after remove_face");
+    }
+
+    #[test]
+    fn graph_laplacian_grid_dims_cleared_on_remove_cell() {
+        // Same contract for remove_cell at every rank.
+        let mut cx = CellComplex::grid_2d(5, 5);
+        cx.remove_cell(0, 0); // remove vertex 0
+        assert_eq!(cx.grid_dims(), None, "grid_dims must clear after remove_cell(0)");
+
+        let mut cx = CellComplex::grid_2d(5, 5);
+        cx.remove_cell(1, 0); // remove edge 0
+        assert_eq!(cx.grid_dims(), None, "grid_dims must clear after remove_cell(1)");
     }
 }
