@@ -462,7 +462,9 @@ impl<E: BanditEnv + Clone> TesLoop for SimpleTesLoop<E> {
 mod tests {
     use super::*;
     use crate::bandit::BanditStrategy;
-    use katgpt_speculative::{TesConfig, TesNode};
+    // TesConfig lives in this module (moved from the main crate's speculative/types.rs
+    // per Plan 005); TesNode still lives in katgpt-speculative.
+    use katgpt_speculative::TesNode;
 
     /// Minimal TesLoop implementor for testing.
     struct MockTesLoop {

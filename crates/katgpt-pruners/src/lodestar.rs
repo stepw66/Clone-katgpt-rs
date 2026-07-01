@@ -560,46 +560,14 @@ impl CompletionHorizon for LodestarPruner {
 }
 
 // ── Lodestar DDTree Configuration ───────────────────────────────────────
-
-/// Configuration for `build_dd_tree_lodestar` — controls A* ordering and jump-ahead.
-///
-/// Default reproduces pure log-prob best-first (λ = 0, jump-ahead disabled).
-#[derive(Clone, Debug)]
-pub struct LodestarConfig {
-    /// A* distance weight λ. Heap key = `score − λ·d(s)`.
-    /// λ = 0 (default) → pure log-prob ordering, byte-identical to `build_dd_tree_pruned`.
-    /// λ > 0 → prefer branches closer to completion (A* admissible heuristic).
-    pub astar_lambda: f32,
-    /// Enable jump-ahead: collapse singular spans into one tree node.
-    /// When `true`, deterministic forced paths are emitted as a single expansion step
-    /// instead of per-token, reducing tree nodes and speeding up traversal.
-    pub jump_ahead: bool,
-}
-
-impl Default for LodestarConfig {
-    fn default() -> Self {
-        Self {
-            astar_lambda: 0.0,
-            jump_ahead: false,
-        }
-    }
-}
-
-impl LodestarConfig {
-    /// Pure log-prob ordering, no jump-ahead (default).
-    #[inline]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// A* ordering with jump-ahead enabled.
-    pub fn thinking(lambda: f32) -> Self {
-        Self {
-            astar_lambda: lambda,
-            jump_ahead: true,
-        }
-    }
-}
+//
+// `LodestarConfig` now lives in `katgpt-speculative/src/dd_tree.rs` next to
+// `build_dd_tree_lodestar` (the builder that consumes it). Re-exported here
+// for back-compat with the historical `katgpt_pruners::lodestar::LodestarConfig`
+// / `katgpt_rs::pruners::LodestarConfig` paths. Gated behind `lodestar`
+// which forwards to `katgpt-speculative/lodestar`.
+#[cfg(feature = "lodestar")]
+pub use katgpt_speculative::dd_tree::LodestarConfig;
 
 // ── Tests ──────────────────────────────────────────────────────────────
 

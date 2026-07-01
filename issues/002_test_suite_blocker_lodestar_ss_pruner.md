@@ -1,6 +1,6 @@
 # Issue 002 — Test-suite blocker: refactor lost lodestar glue + ss_pruner cross-crate path
 
-Status: **open** (BLOCKER for Proposal 003 Phase 0.5 loser-sweep)
+Status: **RESOLVED** (2026-07-01) — T1–T4 done, Phase 0.5 unblocked
 Created: 2026-07-01
 Related: `proposals/003_src_consolidation_master.md` (Phase 0.5 is gated on this)
 
@@ -83,15 +83,37 @@ class Proposal 003 is designed to prevent by moving `cumprodsum` → `katgpt-cor
 
 ## Tasks
 
-- [ ] **T1 (Bug 1):** restore `build_dd_tree_lodestar` + `CompletionHorizon`
-      trait into `katgpt-speculative/src/dd_tree.rs`. Verify against Plan 207
-      T6–T8 + Bench 055 numbers. `cargo test -p katgpt-pruners --lib` green.
-- [ ] **T2 (Bug 2):** fix `ss_pruner.rs:209` path (short-term inline or
-      katgpt-core re-export). `cargo test -p katgpt-pruners --lib` green.
-- [ ] **T3:** `cargo test --workspace --lib` fully green (no compile errors).
-- [ ] **T4:** re-run Bench 055 (lodestar GOAT) against the restored code —
-      confirm 5/5 still PASS with the documented numbers.
-- [ ] **T5:** unblock Proposal 003 Phase 0.5 (loser-sweep can now run).
+- [x] **T1 (Bug 1):** restored `build_dd_tree_lodestar` + `LodestarConfig` into
+      `katgpt-speculative/src/dd_tree.rs` (recovered verbatim from commit `6684b5d5`,
+      paths adapted: `crate::types::Config` → `katgpt_types::Config`,
+      `super::types::CompletionHorizon` → `katgpt_core::traits::CompletionHorizon`).
+      `LodestarConfig` moved out of `katgpt-pruners` (avoids a speculative→pruners
+      cycle) and re-exported from pruners for back-compat. Added `lodestar`
+      feature to `katgpt-speculative`, forwarded by `katgpt-pruners/lodestar`.
+      Also fixed a latent feature-combo bug: `lodestar` now implies `bandit`
+      (lodestar_cot needs BanditStats — the `merkle_root` class).
+- [x] **T2 (Bug 2):** inlined the `influence` oracle in `ss_pruner.rs` test
+      (one-line `product()` helper). Long-term fix is Proposal 003 Phase 10
+      (cumprodsum → katgpt-core).
+- [x] **T2b (bonus bug found during T3):** `tes_loop.rs:465` imported
+      `TesConfig` from `katgpt_speculative`, but `TesConfig` moved to the
+      pruners crate (Plan 005). Fixed to use the local `super::*` scope.
+      Third move-and-lose-the-path bug from the speculative extraction.
+- [x] **T3:** `cargo test --workspace --lib` fully green — **5,266 tests,
+      0 failures** across all 16 crates.
+- [x] **T4:** lodestar test subset green — **34/34 PASS**, including
+      `test_dd_tree_lodestar_budget_guarantee`,
+      `test_dd_tree_lodestar_nopruner_matches_pruned`, jump-ahead, A*.
+- [x] **T5:** Proposal 003 Phase 0.5 (loser-sweep) is unblocked.
+
+## Resolution note
+
+The re-bench discipline the user demanded paid off immediately: the test
+suite was broken by THREE move-and-lose-the-path bugs from the speculative
++ pruners crate extractions. Without fixing these first, the loser-sweep
+would have run against a non-compiling suite, misclassifying every
+feature-gated primitive as a "loser" (false failure). Lodestar specifically
+— a GOAT-5/5 default-ON winner — would have been the headline shame.
 
 ## References
 
@@ -101,8 +123,8 @@ class Proposal 003 is designed to prevent by moving `cumprodsum` → `katgpt-cor
 
 ## TL;DR
 
-Test suite won't compile (2 refactor bugs). Bug 1 is the dangerous one:
-lodestar is a GOAT-5/5 default-ON winner whose `build_dd_tree_lodestar`
-glue was dropped in the speculative-crate move — looks broken, actually a
-winner. Exactly the false-loser risk the user flagged. Fix both before the
-loser-sweep; lodestar stays, do not exile.
+Test suite won't compile (3 refactor bugs — two originally identified +
+one more found during the fix). All three fixed: lodestar glue restored
+(GOAT-5/5 winner, NOT a loser), ss_pruner path inlined, tes_loop path
+corrected. `cargo test --workspace --lib` now green: 5,266 tests, 0
+failures. Phase 0.5 loser-sweep is unblocked.

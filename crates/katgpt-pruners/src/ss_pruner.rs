@@ -200,13 +200,26 @@ mod tests {
 
     #[test]
     fn test_influence_cache_correctness() {
+        // Reference oracle: cumulative product of a[from+1..=to], matching the
+        // `katgpt-rs/src/cumprodsum.rs::influence` semantics (1.0 when from>=to).
+        // Inlined here because `cumprodsum` lives in the root crate, not in
+        // katgpt-pruners; a root dep would be circular. Proposal 003 Phase 10
+        // moves cumprodsum -> katgpt-core, after which this can become
+        // `katgpt_core::cumprodsum::influence` again.
+        fn influence(a: &[f32], from: usize, to: usize) -> f32 {
+            if from >= to {
+                return 1.0;
+            }
+            (from + 1..=to).map(|i| a[i]).product()
+        }
+
         // Non-uniform decay factors for thorough verification
         let decay_factors: Vec<f32> = (0..32).map(|i| 0.95 - i as f32 * 0.01).collect();
         let pruner = SemiseparablePruner::new(decay_factors.clone(), 0.1);
 
-        // influence_cache[i] should match crate::cumprodsum::influence(&decay_factors, 0, i)
+        // influence_cache[i] should match influence(&decay_factors, 0, i)
         for depth in 0..32 {
-            let expected = crate::cumprodsum::influence(&decay_factors, 0, depth);
+            let expected = influence(&decay_factors, 0, depth);
             let actual = pruner.influence_at(depth);
             assert!(
                 (actual - expected).abs() < 1e-6,

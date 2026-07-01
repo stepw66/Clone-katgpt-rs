@@ -22,5 +22,13 @@ rayon = "1.10"
 # Default-off mirrors katgpt-types / katgpt-core / katgpt-rs.
 sr2am_configurator = ["katgpt-types/sr2am_configurator"]
 
+# Lodestar completion-distance pruning (Plan 207). Gates
+# `build_dd_tree_lodestar` + `LodestarConfig` in dd_tree.rs. The pruner
+# (`LodestarPruner`) and automaton live in katgpt-pruners; the tree builder
+# lives here because it composes `TreeBuilder` internals. katgpt-pruners
+# forwards this feature so callers enabling `katgpt-pruners/lodestar` get
+# both halves.
+lodestar = []
+
 [dev-dependencies]
 katgpt-transformer = { path = "../katgpt-transformer" }

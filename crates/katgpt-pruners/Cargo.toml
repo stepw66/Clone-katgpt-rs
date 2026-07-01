@@ -89,7 +89,12 @@ ruliology = ["bandit"]
 spechop = ["bandit"]
 self_distilling_bandit = ["egcs"]
 egcs = []
-lodestar = []
+# Forward to katgpt-speculative/lodestar so callers enabling this get both
+# the pruner (here) AND the tree builder (build_dd_tree_lodestar there).
+# Implies `bandit` because lodestar_cot (AdaptiveCoTBudget, also gated by
+# this feature) uses BanditStats — without this, `lodestar` alone breaks the
+# bandit feature combo (the merkle_root / can_freeze class of bug).
+lodestar = ["katgpt-speculative/lodestar", "bandit"]
 bt_rank = []
 future_probe = []
 fpcg_selector = ["future_probe"]
