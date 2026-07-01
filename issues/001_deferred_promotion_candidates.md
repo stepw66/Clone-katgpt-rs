@@ -1,8 +1,11 @@
 # Issue 001 — Deferred crate-promotion candidates
 
-Status: **open** (tracking, not blocked)
+Status: **SUPERSEDED** by Proposal 003 (`003_src_consolidation_master.md`).
+All candidates below are now scheduled phases of the master consolidation
+plan (002→Phase 2, mux_latent→Phase 6 as part of speculative/mux absorption,
+proof_cert→tracked as a cross-repo decision in Phase 12 out-of-scope).
 Created: 2026-07-01
-Related proposal: `proposals/001_quant_crate_promotion.md`
+Related proposal: `proposals/003_src_consolidation_master.md`
 
 ## Context
 

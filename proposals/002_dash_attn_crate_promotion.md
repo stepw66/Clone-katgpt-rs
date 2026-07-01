@@ -1,6 +1,9 @@
 # Proposal 002 — Promote the DashAttention primitive family to `katgpt-dash-attn`
 
-Status: **proposed** (not yet implemented)
+Status: **SUPERSEDED** by Proposal 003 (`003_src_consolidation_master.md`), Phase 2.
+The narrow `katgpt-dash-attn` is widened to the full attention stack
+(`katgpt-attn`) absorbing base primitives from core + ega + diagonal_gate +
+gdn2 + hla + dash_attn + rat_bridge + static_cal + chiaroscuro + funcattn_compose.
 Branch: `develop` (per global rule — no feature branches)
 Owner: unassigned
 Predecessor: `proposals/001_quant_crate_promotion.md`

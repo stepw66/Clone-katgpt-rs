@@ -1,6 +1,7 @@
 # Proposal 001 — Promote the rotation/codebook quant family to `katgpt-quant`
 
-Status: **proposed** (not yet implemented)
+Status: **SUPERSEDED** by Proposal 003 (`003_src_consolidation_master.md`), Phase 1.
+The quant promotion is absorbed unchanged into the master plan.
 Branch: `develop` (per global rule — no feature branches)
 Owner: unassigned
 
