@@ -424,10 +424,10 @@ mod tests {
     /// Helper: build a tree with varied leaf data (non-zero spectral variance).
     fn varied_tree() -> MerkleOctree {
         let mut leaf_hashes = [[0u8; HASH_SIZE]; MERKLE_OCTREE_LEAVES];
-        for i in 0..MERKLE_OCTREE_LEAVES {
+        for (i, leaf_hash) in leaf_hashes.iter_mut().enumerate() {
             let mut buf = [0u8; 32];
             buf[0..8].copy_from_slice(&(i as u64).to_le_bytes());
-            leaf_hashes[i] = *blake3::hash(&buf).as_bytes();
+            *leaf_hash = *blake3::hash(&buf).as_bytes();
         }
         MerkleOctree::build_from_leaves(&leaf_hashes)
     }
