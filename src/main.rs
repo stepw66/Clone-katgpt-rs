@@ -1,4 +1,6 @@
-use katgpt_rs::{benchmark, benchmark::BenchCategory, plot, transformer, types};
+use katgpt_rs::{benchmark, benchmark::BenchCategory, transformer, types};
+#[cfg(feature = "plot")]
+use katgpt_rs::plot;
 use katgpt_percepta as percepta;
 
 fn main() {
