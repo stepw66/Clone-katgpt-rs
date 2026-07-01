@@ -27,6 +27,14 @@ serde = { version = "1", features = ["derive"] }
 # Diagnostics in outlier_guard / spectral.
 log = "0.4"
 
+# Optional: snapshot hashing in manifold_power_iter_router + off_principal
+# (Phase 4 absorptions). Gated by the `manifold_power_iter_router` /
+# `off_principal_retrieval` features.
+blake3 = { version = "1", optional = true }
+
+# RNG for peira's synthetic_cca_sample public API (Phase 4 absorption).
+fastrand = "2"
+
 [features]
 # All flags are empty tracking gates mirroring the historical katgpt-rs
 # feature surface. The root crate forwards them via
@@ -53,3 +61,45 @@ dual_gram_pca = []
 
 # TurboQuant random rotation export gate.
 turboquant = []
+
+# ── Phase 4 (Proposal 003) absorptions. Each forwards the substrate dep it
+# needs (newton_schulz lives in katgpt-core; blake3 is an optional crate dep).
+
+# Gauge-invariant adapter composition (Plan 270, Research 238) — LoRA-Muon
+# distillation. Needs newton_schulz for the PSD inverse-sqrt path.
+gauge_invariant = ["katgpt-core/newton_schulz"]
+
+# Manifold Power Iteration MoE Router (Plan 279, Research 246). Needs blake3
+# for snapshot hashing.
+manifold_power_iter_router = ["blake3"]
+
+# Off-Principal Task Vector Retrieval (Plan 264 Phase 2, Research 231).
+# Needs newton_schulz for the principal-direction recovery and blake3 for the
+# source-weight hash. Also enables the local `newton_schulz` feature so the
+# internal `#[cfg(feature = "newton_schulz")]` gate on `OffPrincipalIndex::new`
+# resolves.
+off_principal_retrieval = ["katgpt-core/newton_schulz", "blake3", "newton_schulz"]
+
+# Spectral Budget Router (Plan 253, Research 222) — layer-adaptive NS depth.
+# Tests exercise katgpt_core::newton_schulz directly and are gated by the
+# local `newton_schulz` feature.
+spectral_budget = ["katgpt-core/newton_schulz", "newton_schulz"]
+
+# Orthogonal Procrustes cross-frame alignment (Issue 001).
+orthogonal_procrustes = []
+
+# River-valley diagnostic metrics (Plan 152, Research 114). Tracking flag
+# for the internal `#[cfg(feature = "river_valley")]` gates on the public
+# diagnostic functions; the module itself is always present.
+river_valley = []
+
+# Newton-Schulz orthogonalization passthrough. The substrate lives in
+# katgpt-core; this alias lets the internal `#[cfg(feature = "newton_schulz")]`
+# gates in `off_principal.rs` and `spectral_budget.rs` resolve. Always implied
+# by `gauge_invariant`, `off_principal_retrieval`, and `spectral_budget`.
+newton_schulz = ["katgpt-core/newton_schulz"]
+
+# PEIRA modelless distillation (Plan 153, Research 115). Forwards the
+# peira_distill flag on katgpt-core where the PeiraConfig/PeiraCovariance
+# types live.
+peira_distill = ["katgpt-core/peira_distill"]

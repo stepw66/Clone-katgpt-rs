@@ -27,6 +27,35 @@ pub mod spectral_kv_cache;
 pub mod spectral_rotation;
 pub mod types;
 
+// ── Phase 4 (Proposal 003) absorptions: spectral diagnostics, alignment,
+// and decomposition primitives. Moved out of `katgpt-rs/src/` because they
+// are pure linear-algebra on eigenbases / factor pairs and belong with the
+// spectral substrate, not the root crate.
+
+/// Shared power-iteration + L2 retraction helpers (always-on — consumed by
+/// `gauge_invariant` and `manifold_power_iter_router` which are both
+// default-ON at root).
+pub mod spectral_retract;
+/// River-valley diagnostic metrics — always-on (Plan 152 GOAT 25/25).
+pub mod river_valley;
+/// Spectral concentration adaptive rank — always-on (Plan 264 Phase 3).
+pub mod spectral_concentration;
+
+#[cfg(feature = "gauge_invariant")]
+pub mod gauge_invariant;
+#[cfg(feature = "manifold_power_iter_router")]
+pub mod manifold_power_iter_router;
+#[cfg(feature = "off_principal_retrieval")]
+pub mod off_principal;
+#[cfg(feature = "spectral_budget")]
+pub mod spectral_budget;
+#[cfg(feature = "orthogonal_procrustes")]
+pub mod procrustes;
+#[cfg(feature = "peira_distill")]
+pub mod peira;
+#[cfg(feature = "stiff_anomaly")]
+pub mod stiff_anomaly;
+
 #[cfg(feature = "outlier_guard")]
 pub mod outlier_guard;
 

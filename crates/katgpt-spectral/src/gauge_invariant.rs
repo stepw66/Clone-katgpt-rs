@@ -40,7 +40,7 @@
 //! # Example
 //!
 //! ```
-//! use katgpt_rs::gauge_invariant::{gauge_rebalance, GaugeRebalanceScratch};
+//! use katgpt_spectral::gauge_invariant::{gauge_rebalance, GaugeRebalanceScratch};
 //!
 //! // Two factor pairs representing the same W = A·B^T but at different gauges.
 //! // Pair 1: balanced (c=1).

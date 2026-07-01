@@ -1942,7 +1942,9 @@ dependencies = [
 name = "katgpt-spectral"
 version = "0.1.0"
 dependencies = [
+ "blake3",
  "bytemuck",
+ "fastrand",
  "half",
  "katgpt-core",
  "katgpt-transformer",

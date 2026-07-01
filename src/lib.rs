@@ -146,16 +146,16 @@ pub use katgpt_quant::iso_quant;
 #[cfg(feature = "lattice_operad")]
 pub mod lattice_operad;
 #[cfg(feature = "gauge_invariant")]
-pub mod gauge_invariant;
-pub mod spectral_retract;
+pub use katgpt_spectral::gauge_invariant;
+pub use katgpt_spectral::spectral_retract;
 #[cfg(feature = "manifold_power_iter_router")]
-pub mod manifold_power_iter_router;
+pub use katgpt_spectral::manifold_power_iter_router;
 #[cfg(feature = "kog_cpu_fusion")]
 pub mod mbu;
 #[cfg(feature = "newton_schulz")]
 pub use katgpt_core::newton_schulz;  // Extracted to katgpt-core per Issue 355 Phase 1a; re-export preserves historical `katgpt_rs::newton_schulz::*` paths.
 #[cfg(feature = "off_principal_retrieval")]
-pub mod off_principal;
+pub use katgpt_spectral::off_principal;
 #[cfg(feature = "hla_eigenbasis_recovery")]
 pub mod hla_eigenbasis;  // Issue 001: per-NPC eigenbasis recovery from windowed HLA activations
 #[cfg(feature = "octopus")]
@@ -170,8 +170,9 @@ pub mod plot;  // Issue 355 Phase 2a: gated behind `plot` feature (plotters is n
 // decomposition (Newton-Schulz on B^T A). Issue 001 (katgpt-rs). GOAT
 // candidate — gated behind `orthogonal_procrustes` until benchmark gates
 // G1–G6 (Issue 001) pass. Promotes to default-on if GOAT, demoted if not.
+// Substrate moved to katgpt-spectral (Proposal 003 Phase 4).
 #[cfg(feature = "orthogonal_procrustes")]
-pub mod procrustes;
+pub use katgpt_spectral::procrustes;
 #[cfg(feature = "precision_aware_draft")]
 pub mod precision_aware_draft;
 #[cfg(feature = "progressive_mcgs")]
@@ -191,7 +192,7 @@ pub use katgpt_attn::rat_bridge;
 #[cfg(feature = "maxsim")]
 pub mod rerank;
 #[cfg(feature = "river_valley")]
-pub mod river_valley;
+pub use katgpt_spectral::river_valley;
 #[cfg(feature = "rt_turbo")]
 pub mod rt_turbo;
 #[cfg(feature = "ruliology")]
@@ -259,9 +260,9 @@ pub mod spec_reconciliation;
 #[cfg(feature = "spechop")]
 pub mod spechop;
 #[cfg(feature = "spectral_budget")]
-pub mod spectral_budget;
+pub use katgpt_spectral::spectral_budget;
 #[cfg(feature = "spectral_rank")]
-pub mod spectral_concentration;
+pub use katgpt_spectral::spectral_concentration;
 #[cfg(feature = "spectral_quant")]
 pub mod spectralquant {
     //! Spectralquant re-export shim (Issue 015 Phase 5).
@@ -279,7 +280,7 @@ pub mod swir;
 #[cfg(feature = "static_cal_tables")]
 pub use katgpt_attn::static_cal;
 #[cfg(feature = "stiff_anomaly")]
-pub mod stiff_anomaly;
+pub use katgpt_spectral::stiff_anomaly;
 // thinking_cot — adaptive CoT framework (Plan 194). The feature is a
 // meta-feature that pulls in the bandit/prune/probe machinery required by
 // speculative::thinking_controller; the module itself owns the shared

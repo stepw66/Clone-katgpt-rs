@@ -58,7 +58,7 @@
 //! # References
 //!
 //! - Issue 001: `riir-chain/.issues/001_orthogonal_procrustes_kg_shard_alignment.md`
-//! - Newton-Schulz orthogonalization: [`crate::newton_schulz`] (Plan 152).
+//! - Newton-Schulz orthogonalization: `katgpt_core::newton_schulz` (Plan 152).
 //! - Schönemann, P. (1966) — original Procrustes solution via SVD.
 //! - Higham, N. (1986) — Newton-Schulz iteration for polar factor.
 
@@ -281,7 +281,7 @@ pub struct ProcrustesReport {
 /// # Example
 ///
 /// ```
-/// # use katgpt_rs::procrustes::*;
+/// # use katgpt_spectral::procrustes::*;
 /// // 4 anchors in 2-d source frame, rotated 90° to target frame.
 /// let a: [f32; 8] = [1.0, 0.0,  0.0, 1.0,  -1.0, 0.0,  0.0, -1.0];
 /// // 90° rotation: (x, y) → (-y, x)

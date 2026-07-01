@@ -409,9 +409,56 @@ Ordering: foundation first (hoists, splits), then domain crates biggest-first.
   sdpg_bandit, delta_mem, rmsd_distill, manifold_pruner, compression_drafter,
   stepcode) deferred to Phases 8/10 absorption. See `.docs/001_loser_sweep_audit.md`.
   **DONE 2026-07-01.**
-- [ ] **Phase 4 — `katgpt-spectral` absorption.** Add `spectral_*`,
+- [x] **Phase 4 — `katgpt-spectral` absorption.** Add `spectral_*`,
   `stiff_anomaly`, `gauge_invariant`, `manifold_power_iter_router`,
   `off_principal`, `procrustes`, `river_valley`, `distill/peira`.
+  - New modules in `crates/katgpt-spectral/src/`: `spectral_retract.rs`,
+    `gauge_invariant.rs`, `manifold_power_iter_router.rs`, `off_principal.rs`,
+    `spectral_budget.rs`, `spectral_concentration.rs`, `procrustes.rs`,
+    `river_valley.rs`, `peira.rs` (moved from `src/distill/peira.rs`),
+    `stiff_anomaly/` (4 files: mod/baseline/stability/subspace).
+    13 files total, ~7400 lines.
+  - **Always-on modules** (no feature gate at module level): `spectral_retract`,
+    `river_valley`, `spectral_concentration`. The latter two retain internal
+    `#[cfg(feature = "river_valley")]` / tracking-flag gates on individual
+    public functions; `spectral_concentration` is ungated internally.
+  - **Feature-gated modules**: `gauge_invariant`, `manifold_power_iter_router`,
+    `off_principal_retrieval`, `spectral_budget`, `orthogonal_procrustes`,
+    `peira_distill`, `stiff_anomaly`.
+  - **distill/ split (Phase 4 half)**: `peira.rs` moved to katgpt-spectral;
+    `ilc.rs` + `trd.rs` stay in root `src/distill/` for Phase 6
+    (katgpt-speculative). `src/distill/mod.rs` now re-exports
+    `katgpt_spectral::peira` to preserve `katgpt_rs::distill::peira::*` paths.
+  - Import fixes: `crate::newton_schulz::*` → `katgpt_core::newton_schulz::*`
+    (off_principal.rs prod + spectral_budget.rs tests); intra-katgpt-spectral
+    `crate::spectral_retract` / `crate::stiff_anomaly::subspace` refs
+    unchanged (both endpoints moved together). Doctest paths updated:
+    `katgpt_rs::gauge_invariant` → `katgpt_spectral::gauge_invariant`,
+    `katgpt_rs::procrustes` → `katgpt_spectral::procrustes`.
+  - Cargo.toml: added `blake3` (optional, for manifold_power_iter_router +
+    off_principal), `fastrand` (for peira's public `synthetic_cca_sample`),
+    and 9 new feature gates. `newton_schulz` added as a katgpt-spectral
+    feature alias (forwards `katgpt-core/newton_schulz`) so the internal
+    `#[cfg(feature = "newton_schulz")]` gates in off_principal.rs and
+    spectral_budget.rs resolve; `off_principal_retrieval` and `spectral_budget`
+    both enable it.
+  - Root re-exports: 9 modules `pub mod X` → `pub use katgpt_spectral::X`
+    (spectral_retract, gauge_invariant, manifold_power_iter_router,
+    off_principal, procrustes, river_valley, spectral_budget,
+    spectral_concentration, stiff_anomaly). distill/mod.rs: `pub mod peira`
+    → `pub use katgpt_spectral::peira`.
+  - Feature forwarding: 9 root features updated to forward to katgpt-spectral
+    (gauge_invariant, manifold_power_iter_router, off_principal_retrieval,
+    spectral_budget, orthogonal_procrustes, river_valley, peira_distill,
+    stiff_anomaly, spectral_rank). `spectral_rank` became a tracking-only flag
+    since `spectral_concentration` is always-on in katgpt-spectral.
+  - GOAT gate G3: `cargo check --workspace --all-features` clean; default clean.
+    206 tests pass in katgpt-spectral (+2 doctests). 1681 tests pass in root
+    lib (0 failures; ~83 tests moved with their modules into katgpt-spectral).
+    Integration tests green: procrustes_determinism (3), bench_270_gauge
+    (17), bench_279_mpi (9), composition_279_spectral_budget (4). All 6
+    affected examples build. Clippy clean.
+  **DONE 2026-07-01.**
 - [ ] **Phase 5 — `katgpt-kv` absorption.** `cache_prune`,
   `segment_checkpoint`, `async_qdq`.
 - [ ] **Phase 6 — `katgpt-speculative` absorption.** `distill/{ilc,trd}`,

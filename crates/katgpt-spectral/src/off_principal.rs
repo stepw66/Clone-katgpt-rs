@@ -9,7 +9,7 @@
 //! # Modelless design
 //!
 //! - `OffPrincipalIndex::new(base_weight, shape, k_frac)` runs a 5-step
-//!   Newton-Schulz orthogonalization on `W^T W` (via `crate::newton_schulz`) and
+//!   Newton-Schulz orthogonalization on `W^T W` (via `katgpt_core::newton_schulz`) and
 //!   caches the resulting top-k left singular vectors `U_k`. No training, no
 //!   external data — pure linear algebra at adapter load time.
 //! - `off_principal_project(q, u_k, k, scratch)` projects a query off the
@@ -232,8 +232,8 @@ impl OffPrincipalIndex {
         // projector: P = I − U_k U_k^T needs U_k orthonormal).
         let mut principal = vec![0.0_f32; d];
         {
-            let mut scratch = crate::newton_schulz::NewtonSchulzScratch::new(d, 1);
-            crate::newton_schulz::newton_schulz_n_into(
+            let mut scratch = katgpt_core::newton_schulz::NewtonSchulzScratch::new(d, 1);
+            katgpt_core::newton_schulz::newton_schulz_n_into(
                 base_weight,
                 d,
                 1,

@@ -725,8 +725,8 @@ mod tests {
         let mut out5 = vec![0.0f32; 64];
         let mut out_n = vec![0.0f32; 64];
 
-        crate::newton_schulz::newton_schulz5(&g, 8, 8, &mut out5);
-        crate::newton_schulz::newton_schulz_n(&g, 8, 8, &mut out_n, 5);
+        katgpt_core::newton_schulz::newton_schulz5(&g, 8, 8, &mut out5);
+        katgpt_core::newton_schulz::newton_schulz_n(&g, 8, 8, &mut out_n, 5);
 
         for i in 0..64 {
             assert!(
@@ -752,8 +752,8 @@ mod tests {
         let mut out5 = vec![0.0f32; 64];
         let mut out10 = vec![0.0f32; 64];
 
-        crate::newton_schulz::newton_schulz_n(&g, 8, 8, &mut out5, 5);
-        crate::newton_schulz::newton_schulz_n(&g, 8, 8, &mut out10, 10);
+        katgpt_core::newton_schulz::newton_schulz_n(&g, 8, 8, &mut out5, 5);
+        katgpt_core::newton_schulz::newton_schulz_n(&g, 8, 8, &mut out10, 10);
 
         // Measure orthogonality: off-diagonal of X*X^T should be small
         let off_diag5 = max_off_diag(&out5, 8);
@@ -771,8 +771,8 @@ mod tests {
         let mut out5 = vec![0.0f32; 72];
         let mut out_n = vec![0.0f32; 72];
 
-        crate::newton_schulz::newton_schulz5(&g, 12, 6, &mut out5);
-        crate::newton_schulz::newton_schulz_n(&g, 12, 6, &mut out_n, 5);
+        katgpt_core::newton_schulz::newton_schulz5(&g, 12, 6, &mut out5);
+        katgpt_core::newton_schulz::newton_schulz_n(&g, 12, 6, &mut out_n, 5);
 
         for i in 0..72 {
             assert!((out5[i] - out_n[i]).abs() < 1e-6, "mismatch at {i}");
@@ -823,7 +823,7 @@ mod tests {
         // the selection is correct (kept >= discarded norms).
         let g: Vec<f32> = (0..64).map(|i| (i as f32 * 0.17 + 1.0).sin()).collect();
         let mut ns_out = vec![0.0f32; 64];
-        crate::newton_schulz::newton_schulz5(&g, 8, 8, &mut ns_out);
+        katgpt_core::newton_schulz::newton_schulz5(&g, 8, 8, &mut ns_out);
 
         // Compute original row norms
         let orig_norms: Vec<f32> = (0..8)
