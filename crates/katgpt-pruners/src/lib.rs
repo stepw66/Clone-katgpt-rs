@@ -38,6 +38,23 @@ pub mod freeze;
 
 pub mod emotion_vector;
 
+// ── ThinkingMode (canonical definition) ────────────────────────────────
+// Per-query thinking mode tag. This is the SINGLE canonical definition — both
+// `collapse_detector` (this crate) and `katgpt_rs::speculative::thinking_controller`
+// (root crate) reference this type. Previously duplicated to break a dependency
+// cycle; the cycle is resolved by defining the shared tag here (the lower crate)
+// and having the root crate re-export it.
+///
+/// Crosses the crate boundary as plain `u8` via `#[repr(u8)]` for FFI/persistence.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(u8)]
+pub enum ThinkingMode {
+    Direct,
+    Latent,
+    CpuResample,
+    Dendritic,
+}
+
 /// Feature class vocabulary tag — detection vs prediction features (Plan 292 Phase 1, Research 267).
 /// Re-export shim for `katgpt_core::FeatureClass` plus unit tests asserting the
 /// default impl returns Detection and `EmotionDirections` is Detection.

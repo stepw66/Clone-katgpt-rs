@@ -690,8 +690,9 @@ mod tests {
         let mut scratch = PhaseRotationScratch::new(d);
         let a = vec![1.0f32; d];
         let b = vec![0.5f32; d];
-        let cos_alpha = vec![0.7071f32; d];
-        let sin_alpha = vec![0.7071f32; d];
+        let inv_sqrt2 = core::f32::consts::FRAC_1_SQRT_2;
+        let cos_alpha = vec![inv_sqrt2; d];
+        let sin_alpha = vec![inv_sqrt2; d];
         let mut out = vec![0.0f32; d];
 
         // Mix hot path — scratch is not even borrowed here (it doesn't need it).

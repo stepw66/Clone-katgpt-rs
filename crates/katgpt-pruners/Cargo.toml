@@ -96,6 +96,7 @@ egcs = []
 # bandit feature combo (the merkle_root / can_freeze class of bug).
 lodestar = ["katgpt-speculative/lodestar", "bandit"]
 bt_rank = []
+rosetta_pruner = ["papaya"]  # Universal cross-domain meta-pruner (Plan 201); root forwards via katgpt-pruners/rosetta_pruner
 future_probe = []
 fpcg_selector = ["future_probe"]
 feature_class = []

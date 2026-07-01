@@ -41,21 +41,11 @@ use katgpt_core::types::ThinkingBudget;
 use katgpt_core::temporal_deriv::TemporalDerivativeKernel;
 
 use crate::freeze::{load_frozen, save_frozen};
-// ThinkingMode was previously imported from crate::speculative::thinking_controller.
-// That module is local to the main katgpt-rs crate (it depends on BanditStrategy
-// from this crate via a cycle), so we cannot import it here. Define the enum
-// locally — it is a pure-data 4-variant tag with no main-crate state, and
-// collapse_detector only uses it as a parameter tag for efficiency_reward().
-// The main crate's ThinkingMode is structurally identical; values cross the
-// boundary as plain u8 via #[repr(u8)].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[repr(u8)]
-pub enum ThinkingMode {
-    Direct,
-    Latent,
-    CpuResample,
-    Dendritic,
-}
+// ThinkingMode is the canonical definition at `crate::ThinkingMode` (lib.rs).
+// Previously duplicated here to break a dependency cycle with the main crate's
+// `speculative::thinking_controller`; the cycle is resolved by defining the
+// shared tag in this (lower) crate and having the root crate re-export it.
+use crate::ThinkingMode;
 
 // ── Frozen persistence struct (16 bytes, repr(C)) ─────────────────────
 

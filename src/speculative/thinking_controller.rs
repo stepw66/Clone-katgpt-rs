@@ -15,24 +15,12 @@ use crate::pruners::freeze::{load_frozen, save_frozen};
 
 // ── T1: Types ──────────────────────────────────────────────────────────
 
-/// Per-query thinking mode — the adaptive controller decides which to use.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[repr(u8)]
-pub enum ThinkingMode {
-    /// No thinking — direct answer via DDTree + ScreeningPruner (baseline).
-    /// Zero overhead. The existing pipeline unchanged.
-    Direct,
-    /// Latent thinking — RiM buffer slots activated, multiple reasoning passes.
-    /// Uses DDTree with expanded budget + FrozenBaseGuard intermediate steps.
-    Latent,
-    /// CPU-only thinking — PPoT resample high-entropy tokens on CPU.
-    /// Zero GPU overhead beyond initial forward pass. Good when GPU is loaded.
-    CpuResample,
-    /// NMDA-gated adaptive thinking — deterministic gate replaces bandit.
-    /// Uses entropy + coincidence to modulate thinking budget. Zero randomness.
-    /// Feature-gated behind `dendritic_gate`.
-    Dendritic,
-}
+// ThinkingMode is defined canonically in `katgpt_pruners` (the lower crate)
+// and re-exported here so `katgpt_rs::speculative::ThinkingMode` resolves to
+// the same type consumed by `katgpt_pruners::collapse_detector::efficiency_reward`.
+// This eliminates a prior DRY violation where two structurally identical but
+// nominally distinct enums caused type-mismatch errors at call sites.
+pub use katgpt_pruners::ThinkingMode;
 
 /// How the thinking mode is selected per-query.
 #[derive(Debug, Clone)]

@@ -300,9 +300,9 @@ fn g5_lonely_query_is_near_identity() {
     // Entity 0 is far from entities 1 and 2 in feature space; entities 1 and 2
     // are close to each other.
     let mut states = vec![0.5f32; n * d];
-    states[0 * d + 0] = 0.1; // entity 0: valence = 0.1
-    states[1 * d + 0] = 0.9; // entities 1, 2: valence = 0.9
-    states[2 * d + 0] = 0.9;
+    states[0] = 0.1; // entity 0: valence = 0.1
+    states[d] = 0.9; // entities 1, 2: valence = 0.9
+    states[2 * d] = 0.9;
 
     let w = identity(d);
     // Very sharp attention: cross-cluster pairs (α_01, α_02) gated to ~0.
@@ -318,8 +318,8 @@ fn g5_lonely_query_is_near_identity() {
     .unwrap();
 
     // Entity 0's output should be very close to its input (lonely).
-    let entity_0_in = &states[0 * d..1 * d];
-    let entity_0_out = &output[0 * d..1 * d];
+    let entity_0_in = &states[0..d];
+    let entity_0_out = &output[0..d];
     let delta_0: f32 = entity_0_in
         .iter()
         .zip(entity_0_out.iter())
@@ -369,7 +369,7 @@ fn g5_lonely_query_is_near_identity() {
         &mut sa2,
     )
     .unwrap();
-    let entity_0_out_sharp = &output_sharp[0 * d..1 * d];
+    let entity_0_out_sharp = &output_sharp[0..d];
     let delta_0_sharp: f32 = entity_0_in
         .iter()
         .zip(entity_0_out_sharp.iter())
