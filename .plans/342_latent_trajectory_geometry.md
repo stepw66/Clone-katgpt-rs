@@ -31,15 +31,15 @@ Plus one pairwise API:
 
 ## Constraint Checklist (per AGENTS.md + skill)
 
-- [ ] Modelless (inference-time only, no backprop) — by construction (pure linear algebra over `&[f32]`)
-- [ ] Latent-to-latent preferred (sigmoid not softmax) — N/A (no gating in this primitive; raw geometric measurements only)
-- [ ] Freeze/thaw over fine-tuning — N/A (no weight mutation)
-- [ ] 5-repo discipline (open primitive in katgpt-rs, no game/chain/shard IP) — ✓ (synthetic two-attractor scenario is generic, no product IP)
-- [ ] SOLID, DRY, zero-alloc hot paths — ✓ (streaming fold, no allocation in `from_states`)
-- [ ] CPU/SIMD auto-vectorization — ✓ (chunked loops for `cos`/`arccos` reduction, mirroring `subspace_phase_gate.rs` patterns)
-- [ ] File < 2048 lines — ✓ (target ~250 LOC + ~200 LOC tests)
-- [ ] `Uuid::now_v7()` if any snapshot id — N/A (no snapshots)
-- [ ] blake3 if any commitment — N/A (no commitments)
+- [x] Modelless (inference-time only, no backprop) — by construction (pure linear algebra over `&[f32]`)
+- [x] Latent-to-latent preferred (sigmoid not softmax) — N/A (no gating in this primitive; raw geometric measurements only)
+- [x] Freeze/thaw over fine-tuning — N/A (no weight mutation)
+- [x] 5-repo discipline (open primitive in katgpt-rs, no game/chain/shard IP) — ✓ (synthetic two-attractor scenario is generic, no product IP)
+- [x] SOLID, DRY, zero-alloc hot paths — ✓ (streaming fold, no allocation in `from_states`)
+- [x] CPU/SIMD auto-vectorization — ✓ (chunked loops for `cos`/`arccos` reduction, mirroring `subspace_phase_gate.rs` patterns)
+- [x] File < 2048 lines — ✓ (target ~250 LOC + ~200 LOC tests)
+- [x] `Uuid::now_v7()` if any snapshot id — N/A (no snapshots)
+- [x] blake3 if any commitment — N/A (no commitments)
 
 ---
 

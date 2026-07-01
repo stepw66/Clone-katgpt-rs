@@ -101,7 +101,7 @@ This is the **open** counterpart of the private Super-GOAT at `riir-neuron-db/.r
 
 - [x] **T5.1** If G1 passes (phase transition reproduces) AND G3-precursor passes (Jacobian SVD recovers known singular vectors): add `subspace_phase_gate` to the default feature list in `katgpt-rs/Cargo.toml`. **DONE** (2026-07-02): added `"subspace_phase_gate"` to the `default` feature list in `katgpt-rs/Cargo.toml` (after `viable_manifold_graph`), and updated the feature-definition comment to DEFAULT-ON with the full GOAT gate summary. Follows the `newton_schulz` precedent — NOT also added to katgpt-core's `default` (already transitively enabled by the default-on `tucker_factorization` and `viable_manifold_graph`; root forwarder activates it for umbrella consumers).
 - [x] **T5.2** Update `katgpt-rs/README.md` Feature Showcase section with a new entry: "Subspace Phase-Gate (Plan 301)". **DONE** (2026-07-02): entry inserted at the end of the Feature Showcase section (after QGF/Plan 268, before `## 🔧 KV Compression`). Covers the four operations, the determinism contract, the G1 phase-transition result table, the G3-precursor/T3.4/G4 gates, the T4.1 allocation-elimination win, and downstream consumers.
-- [ ] **T5.3** If G1 fails: downgrade to opt-in, document the failure mode in `katgpt-rs/.benchmarks/301_*.md`, create an issue. _(N/A — G1 PASSES; the block is the T3.4 latency gate, not G1. No downgrade; the feature correctly stays opt-in pending the SIMD latency fix.)_
+- [x] **T5.3** If G1 fails: downgrade to opt-in, document the failure mode in `katgpt-rs/.benchmarks/301_*.md`, create an issue. _(N/A — G1 PASSES; the block is the T3.4 latency gate, not G1. No downgrade; the feature correctly stays opt-in pending the SIMD latency fix.)_
 
 ---
 
