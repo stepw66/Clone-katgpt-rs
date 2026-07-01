@@ -1,5 +1,7 @@
 # Issue 016 — `cargo check --no-default-features` broken by speculative re-export drift
 
+**Status:** RESOLVED 2026-07-01 (fix applied in commit `910046a8` "fix(speculative): feature-gate re-exports + DraftResult::new constructor (Issue 016)").
+
 ## TL;DR
 
 `cargo check --no-default-features --lib` on katgpt-rs root fails with 3 errors.
@@ -119,14 +121,30 @@ L468) need either:
 
 ## Acceptance
 
-- [ ] `cargo check --no-default-features --lib` clean on root
-- [ ] `cargo check --workspace` (default) still clean
-- [ ] `cargo check --workspace --all-features` still clean
-- [ ] `cargo check --features domain_latent --no-default-features --lib` clean (the gate fires)
-- [ ] `cargo check --features spec_cost_model --no-default-features --lib` clean
-- [ ] `cargo check --features stability_metrics --no-default-features --lib` clean
-- [ ] `cargo check --features elf_sde --no-default-features --lib` clean (EarlyStopGate re-export fires)
-- [ ] Unblocks Issue 355 Phase 2c
+All 7 re-verified clean on `develop` @ `7d547472` (2026-07-01, this session):
+
+- [x] `cargo check --no-default-features --lib` clean on root
+- [x] `cargo check --workspace` (default) still clean
+- [x] `cargo check --workspace --all-features` still clean
+- [x] `cargo check --features domain_latent --no-default-features --lib` clean (the gate fires)
+- [x] `cargo check --features spec_cost_model --no-default-features --lib` clean
+- [x] `cargo check --features stability_metrics --no-default-features --lib` clean
+- [x] `cargo check --features elf_sde --no-default-features --lib` clean (EarlyStopGate re-export fires)
+- [x] Unblocks Issue 355 Phase 2c
+
+## Resolution
+
+Fix shipped in commit `910046a8` using **Option A** from the fix sketch above:
+gate each re-export (`elf_sde` / `domain_latent` / `spec_cost_model` /
+`stability_metrics`) to mirror katgpt-core's gates, and introduce a
+`DraftResult::new` constructor so the two literal initializers in
+`src/speculative/dflash.rs` no longer have to enumerate gated fields directly.
+
+See `src/speculative/types.rs:39-64` for the gated re-export block (with an
+inline comment explicitly citing this issue). The commit message also tags it.
+
+The issue file was not updated at fix time; this update closes the tracker
+gap. Issue closed.
 
 ## Priority
 
