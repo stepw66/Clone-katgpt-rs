@@ -326,9 +326,10 @@ impl GraphEvaluator {
                     // same lookup within one step share one attention pass.
                     // The miss path inserts first, then borrows from the map,
                     // avoiding a redundant `Vec<f64>` clone.
-                    if !processed_lookups.contains_key(&lookup_id) {
+                    use std::collections::hash_map::Entry;
+                    if let Entry::Vacant(e) = processed_lookups.entry(lookup_id) {
                         let lookup = lookup_data
-                            .get(&lookup_id)
+                            .get(e.key())
                             .expect("lookup_id exists in graph");
                         let result = Self::attention_insert_and_query(
                             &mut self.attention_entries,
@@ -337,7 +338,7 @@ impl GraphEvaluator {
                             lookup,
                             vals,
                         );
-                        processed_lookups.insert(lookup_id, result);
+                        e.insert(result);
                     }
                     let result = &processed_lookups[&lookup_id];
                     if let Some(&val) = result.get(value_index) {

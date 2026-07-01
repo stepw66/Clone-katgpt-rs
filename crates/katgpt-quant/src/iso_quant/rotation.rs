@@ -411,11 +411,11 @@ mod tests {
         // Padded tail (indices dim..padded) started as zero and must remain
         // zero after the roundtrip — this is what makes the padded-buffer
         // convention invertible.
-        for i in dim..padded {
+        for &v in &recovered[dim..padded] {
             assert!(
-                recovered[i].abs() < 1e-4,
-                "padded tail not preserved at [{i}]: {}",
-                recovered[i]
+                v.abs() < 1e-4,
+                "padded tail not preserved: {}",
+                v
             );
         }
     }

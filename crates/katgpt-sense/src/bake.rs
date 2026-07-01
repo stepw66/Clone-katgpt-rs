@@ -489,9 +489,9 @@ mod tests {
             for _ in 0..100 {
                 store.update(entity, &obs, 1.0);
                 let entry = store.get(entity).expect("entity should be tracked");
-                for d in 0..8 {
+                for (prec, &prev) in entry.precision.iter().zip(&prev_precision) {
                     assert!(
-                        entry.precision[d] >= prev_precision[d],
+                        *prec >= prev,
                         "precision should be monotonically non-decreasing via store update"
                     );
                 }

@@ -105,7 +105,7 @@ fn g1_coverage_m12_sigma_list() {
     let alpha = 0.05_f32;
     for &m in &[12_usize, 24, 48] {
         for &sigma in &[0.1_f32, 0.5, 1.0] {
-            let cov = run_coverage(m, sigma, alpha, 10_000, 0xC0FFEE_0000 | (m as u64));
+            let cov = run_coverage(m, sigma, alpha, 10_000, 0x00C0_FFEE_0000 | (m as u64));
             // Log for debugging.
             eprintln!("m={m} sigma={sigma} alpha={alpha} → coverage {cov:.4}");
             assert!(

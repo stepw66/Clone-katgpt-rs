@@ -29,3 +29,10 @@ feedback = []
 # Number-theory Erdos unit-distance research toy (Plan 090). No inference role.
 # Exiled from src/unit_distance/. TODO(deprecated): delete after confirming no regression.
 unit_distance = []
+# Forward sr2am_configurator to katgpt-core (→ katgpt-types) so the
+# InferenceResult struct literals in feedback.rs tests stay in sync with the
+# #[cfg(feature = "sr2am_configurator")] fields plan_horizon_used /
+# planning_decision (Plan 112). Mirrors katgpt-speculative/Cargo.toml. Without
+# this, --all-features enables the fields in katgpt-types but not the guards
+# here, producing E0063 missing-field errors.
+sr2am_configurator = ["katgpt-core/sr2am_configurator"]

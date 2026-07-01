@@ -301,7 +301,7 @@ fn filtered_mean_amplifies_gap_vs_aggregate() {
 fn class_size_bound_boolean() {
     let b = ClassSizeBound::for_vocab_size(2);
     assert!(approx(b.log_v_tau, 2.0f32.ln()));
-    assert!(approx(b.log_v_tau, 0.693_147_18));
+    assert!(approx(b.log_v_tau, core::f32::consts::LN_2));
     assert!(approx(b.reducible_loss_ceiling(), b.log_v_tau));
 }
 
@@ -539,8 +539,8 @@ fn annotate_basic_fixture_per_class_means_and_ratios() {
     let copyn = report.row_for(TokenClass::CopyN(2)).unwrap();
     assert_eq!(copyn.count, 1);
     assert!(approx(copyn.mean_gap, 1.0));
-    assert!(approx(copyn.log_v_tau, 0.693_147_18));
-    assert!(approx(copyn.gap_to_bound_ratio, 1.0 / 0.693_147_18));
+    assert!(approx(copyn.log_v_tau, core::f32::consts::LN_2));
+    assert!(approx(copyn.gap_to_bound_ratio, 1.0 / core::f32::consts::LN_2));
 
     // Other: position 4 → delta 0. No bound provided → log_v_tau = NaN,
     // ratio = NaN.
