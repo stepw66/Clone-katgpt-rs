@@ -339,8 +339,21 @@ pub mod linoss;
 #[cfg(feature = "mux_pruner")]
 pub mod mux;
 
+// Sense substrate was spun out to the `katgpt-sense` crate (Issue 007 Phase E
+// Tier 2 #7, Plan 338). `spectral_threat` stayed local (depends on `linoss`);
+// it lives at `crate::sense_threat` and is re-exported through the
+// `sense::spectral_threat` shim path below to preserve external consumers'
+// `katgpt_core::sense::spectral_threat::*` paths bit-for-bit.
 #[cfg(feature = "sense_composition")]
-pub mod sense;
+pub mod sense {
+    pub use katgpt_sense::*;
+    #[cfg(feature = "spectral_threat")]
+    pub mod spectral_threat {
+        pub use crate::sense_threat::*;
+    }
+}
+#[cfg(feature = "spectral_threat")]
+pub mod sense_threat;
 
 #[cfg(feature = "slod")]
 pub mod slod;

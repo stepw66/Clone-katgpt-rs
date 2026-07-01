@@ -89,7 +89,7 @@ pub fn bake_regularize(
 /// Higher average precision → higher confidence.
 #[inline]
 pub fn precision_to_confidence(lambda: &[f32; 8]) -> f32 {
-    let mean_lambda = crate::simd::simd_sum_f32(lambda) * 0.125;
+    let mean_lambda = katgpt_types::simd::simd_sum_f32(lambda) * 0.125;
     1.0 / (1.0 + (-(mean_lambda - 1.0)).exp()) // sigmoid
 }
 
@@ -105,7 +105,7 @@ pub fn exploration_priority(lambda: &[f32; 8], dimension: usize) -> f32 {
 /// Pre-compute max lambda for batch calls to `exploration_priority_with_max`.
 #[inline]
 pub fn max_lambda(lambda: &[f32; 8]) -> f32 {
-    crate::simd::simd_max_f32(lambda)
+    katgpt_types::simd::simd_max_f32(lambda)
 }
 
 /// Exploration priority with pre-computed max_lambda — avoids O(8) scan per call.

@@ -1735,6 +1735,7 @@ dependencies = [
  "katgpt-hla",
  "katgpt-micro-belief",
  "katgpt-personality",
+ "katgpt-sense",
  "katgpt-sleep",
  "katgpt-types",
  "log",
@@ -1871,6 +1872,16 @@ dependencies = [
  "toml",
  "uuid",
  "wasmi",
+]
+
+[[package]]
+name = "katgpt-sense"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "fastrand",
+ "katgpt-types",
+ "papaya",
 ]
 
 [[package]]

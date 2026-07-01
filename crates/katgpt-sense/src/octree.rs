@@ -1,8 +1,6 @@
 //! Sense octree builder — KG embeddings → bit-plane octree.
 
-use crate::types::SenseKind;
-use crate::types::SenseModule;
-use crate::types::TernaryDir;
+use katgpt_types::{SenseKind, SenseModule, TernaryDir};
 
 /// Lightweight KG embedding for octree construction.
 #[derive(Clone, Debug)]
@@ -161,7 +159,7 @@ impl SenseOctreeBuilder {
         &self,
         kind: SenseKind,
         embeddings: &[KgEmbedding],
-    ) -> (SenseModule, crate::merkle::MerkleOctree) {
+    ) -> (SenseModule, katgpt_types::MerkleOctree) {
         let mut module = self.build(kind, embeddings);
         let tree = Self::build_merkle_only(embeddings);
 
@@ -178,8 +176,8 @@ impl SenseOctreeBuilder {
     ///
     /// Leaf data layout per embedding: entity_hash(8) || relation_hash(8) || embedding(32) || confidence(4) || sign(1) = 53 bytes.
     #[cfg(feature = "merkle_octree")]
-    pub fn build_merkle_only(embeddings: &[KgEmbedding]) -> crate::merkle::MerkleOctree {
-        use crate::merkle::{HASH_SIZE, MERKLE_OCTREE_LEAVES};
+    pub fn build_merkle_only(embeddings: &[KgEmbedding]) -> katgpt_types::MerkleOctree {
+        use katgpt_types::merkle::{HASH_SIZE, MERKLE_OCTREE_LEAVES};
 
         let mut leaf_hashes = [[0u8; HASH_SIZE]; MERKLE_OCTREE_LEAVES];
         let mut scratch = [0u8; 53]; // entity_hash(8) + relation_hash(8) + embedding(32) + confidence(4) + sign(1)
@@ -199,7 +197,7 @@ impl SenseOctreeBuilder {
             leaf_hashes[i] = *blake3::hash(&scratch).as_bytes();
         }
 
-        crate::merkle::MerkleOctree::build_from_leaves(&leaf_hashes)
+        katgpt_types::MerkleOctree::build_from_leaves(&leaf_hashes)
     }
 }
 
@@ -300,7 +298,7 @@ mod tests {
     #[cfg(feature = "merkle_octree")]
     #[test]
     fn test_build_with_merkle() {
-        use crate::merkle::MerkleProof;
+        use katgpt_types::MerkleProof;
 
         let builder = SenseOctreeBuilder::new(3);
         let embeddings: Vec<KgEmbedding> = (0..8)

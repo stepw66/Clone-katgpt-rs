@@ -196,7 +196,7 @@ pub fn schema_init_with_precision(
     gamma: f32,
     rng: &mut fastrand::Rng,
 ) -> ([f32; 8], [f32; 8]) {
-    use crate::sense::bake::informed_prior_precision;
+    use crate::bake::informed_prior_precision;
 
     // Single pin — collect all class stats in one pass
     let guard = cache.centroids.pin();
@@ -213,7 +213,7 @@ pub fn schema_init_with_precision(
     // Fallback: random init + uninformative prior
     if found_count == 0 {
         let embedding = random_init(rng);
-        let precision = [crate::sense::bake::UNINFORMATIVE_PRECISION; 8];
+        let precision = [crate::bake::UNINFORMATIVE_PRECISION; 8];
         return (embedding, precision);
     }
 

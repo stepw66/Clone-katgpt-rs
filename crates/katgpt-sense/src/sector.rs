@@ -6,7 +6,7 @@
 //!
 //! Zero allocation, fixed-size. Uses `sigmoid(dot())` — never softmax.
 
-// Sigmoid delegates to shared crate::simd::fast_sigmoid (bounded (0,1), libm-exp).
+// Sigmoid delegates to shared katgpt_types::simd::fast_sigmoid (bounded (0,1), libm-exp).
 
 #![allow(clippy::needless_range_loop)]
 
@@ -80,7 +80,7 @@ impl<const N: usize, const D: usize> SectorProjection<N, D> {
             for j in 0..D {
                 dot = observation[j].mul_add(dir[j], dot);
             }
-            self.scores[i] = crate::simd::fast_sigmoid(dot);
+            self.scores[i] = katgpt_types::simd::fast_sigmoid(dot);
         }
         &self.scores
     }
@@ -219,7 +219,7 @@ mod tests {
         let scores = proj.project(&obs);
 
         assert_eq!(scores.len(), 1);
-        let expected = crate::simd::fast_sigmoid(2.0);
+        let expected = katgpt_types::simd::fast_sigmoid(2.0);
         assert!(
             (scores[0] - expected).abs() < 1e-5,
             "expected {expected}, got {}",

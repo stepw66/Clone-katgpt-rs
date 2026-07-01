@@ -1,6 +1,6 @@
 //! SenseModule serialization — binary format with BLAKE3 verification.
 
-use crate::types::SenseModule;
+use katgpt_types::SenseModule;
 use std::io::{self, Read, Write};
 
 const MAGIC: &[u8; 4] = b"SNSE";
@@ -72,8 +72,8 @@ pub fn load_module(mut r: impl Read) -> io::Result<SenseModule> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sense::octree::{KgEmbedding, SenseOctreeBuilder};
-    use crate::types::SenseKind;
+    use crate::octree::{KgEmbedding, SenseOctreeBuilder};
+    use katgpt_types::SenseKind;
 
     #[test]
     fn test_roundtrip() {

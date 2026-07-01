@@ -11,10 +11,10 @@
 
 #![allow(clippy::needless_range_loop)]
 
-use crate::types::SenseModule;
+use katgpt_types::SenseModule;
 
 #[cfg(feature = "temporal_deriv")]
-use crate::temporal_deriv::TemporalDerivativeKernel;
+use katgpt_types::TemporalDerivativeKernel;
 
 /// Morton-code identifier for an octree node.
 /// Encodes spatial position in the KG latent embedding space.
@@ -179,11 +179,11 @@ impl ReconstructionConfig {
     /// Returns `true` if SIMD level is available and the workload justifies it.
     #[inline]
     pub fn simd_beneficial(&self) -> bool {
-        let level = crate::simd::simd_level();
+        let level = katgpt_types::simd::simd_level();
         // SIMD is beneficial when:
         // - NEON or AVX2 is available
         // - max_steps >= 3 (amortizes setup cost over multiple steps)
-        !matches!(level, crate::simd::SimdLevel::Scalar) && self.max_steps >= 3
+        !matches!(level, katgpt_types::simd::SimdLevel::Scalar) && self.max_steps >= 3
     }
 }
 
@@ -251,7 +251,7 @@ impl TripleEvidence {
     ///
     /// Returns `[k0,k1,k2,k3,k4,k5,k0,k1]` — the activations laid out per
     /// [`KIND_MAP`](Self::KIND_MAP). This is the `input` passed to the shared
-    /// leaky-integrator core ([`crate::leaky_core::leaky_step`]).
+    /// leaky-integrator core ([`katgpt_types::leaky_core::leaky_step`]).
     ///
     /// NOTE: the normalization `total` is NOT `Σ padded` — it is `Σ padded[..6]`
     /// (the 6 distinct source activations). See [`evolve_hla`] and the
@@ -367,7 +367,7 @@ impl BatchProjectionWeights {
 
             // One matvec: [6×8] × [8] → [6] raw dots
             let mut dots = [0.0f32; 6];
-            crate::simd::simd_matmul_rows(
+            katgpt_types::simd::simd_matmul_rows(
                 &mut dots,
                 &self.weights.matrix,
                 &hla_batch[hla_off..hla_off + 8],
@@ -375,14 +375,14 @@ impl BatchProjectionWeights {
                 8,
             );
 
-            // Sigmoid + confidence. Uses crate::simd::fast_sigmoid for numerical
+            // Sigmoid + confidence. Uses katgpt_types::simd::fast_sigmoid for numerical
             // equivalence with scalar `SenseModule::project` (the rational
             // approximation overshoots (0,1) for |x| > 2.67 — see simd.rs docs).
             // NOTE: `simd_sigmoid_inplace` was benchmarked and rejected for the
             // 6-element expand path — see `expand_with_weights` for details.
             for m in 0..6 {
                 activations_out[act_off + m] =
-                    self.weights.confidence[m] * crate::simd::fast_sigmoid(dots[m]);
+                    self.weights.confidence[m] * katgpt_types::simd::fast_sigmoid(dots[m]);
             }
         }
     }
@@ -553,7 +553,7 @@ impl ReconstructionState {
 
     /// Directly overwrite the per-SenseKind activation drive signal.
     ///
-    /// Plan 331 Phase 1 audit helper: lets [`crate::sense::reconstruction_depth_invariance`]
+    /// Plan 331 Phase 1 audit helper: lets [`crate::reconstruction_depth_invariance`]
     /// inject a controlled per-tick stimulus into the leaky integrator without
     /// going through `accumulate()` (which *adds* rather than *sets*). Only the
     /// `kind_activations` field is touched — `confidence_sum` / `count` are
@@ -701,13 +701,13 @@ impl ReconstructionState {
             }
 
             // SIMD dot: sign_scaled · hla
-            let dot = crate::simd::simd_dot_f32(&sign_scaled, &self.hla, 8);
+            let dot = katgpt_types::simd::simd_dot_f32(&sign_scaled, &self.hla, 8);
 
-            // Fast sigmoid * confidence. Uses crate::simd::fast_sigmoid for
+            // Fast sigmoid * confidence. Uses katgpt_types::simd::fast_sigmoid for
             // numerical equivalence with the scalar `SenseModule::project` path
             // (the previous rational approximation `0.5 + x/(2+sqrt(4+x^2))`
             // overshoots (0,1) for |x| > 2.67 — see simd.rs docs).
-            activations[kind_idx] = module.confidence * crate::simd::fast_sigmoid(dot);
+            activations[kind_idx] = module.confidence * katgpt_types::simd::fast_sigmoid(dot);
         }
 
         activations
@@ -762,9 +762,9 @@ impl ReconstructionState {
     pub fn expand_with_weights(&self, weights: &ProjectionWeights) -> [f32; 6] {
         // One matvec: [6×8] × [8] → [6] raw dot products
         let mut dots = [0.0f32; 6];
-        crate::simd::simd_matmul_rows(&mut dots, &weights.matrix, &self.hla, 6, 8);
+        katgpt_types::simd::simd_matmul_rows(&mut dots, &weights.matrix, &self.hla, 6, 8);
 
-        // Elementwise sigmoid + confidence. Uses crate::simd::fast_sigmoid for
+        // Elementwise sigmoid + confidence. Uses katgpt_types::simd::fast_sigmoid for
         // numerical equivalence with scalar `SenseModule::project` (the rational
         // approximation `0.5 + x/(2+sqrt(4+x^2))` overshoots (0,1) for |x| > 2.67).
         //
@@ -778,7 +778,7 @@ impl ReconstructionState {
         // `fast_sigmoid` loop is the GOAT here.
         let mut activations = [0.0f32; 6];
         for i in 0..6 {
-            activations[i] = weights.confidence[i] * crate::simd::fast_sigmoid(dots[i]);
+            activations[i] = weights.confidence[i] * katgpt_types::simd::fast_sigmoid(dots[i]);
         }
 
         activations
@@ -835,7 +835,7 @@ impl ReconstructionState {
         let mut padded = [0.0f32; 8];
         padded[..6].copy_from_slice(activations);
 
-        let total = crate::simd::simd_sum_f32(&padded);
+        let total = katgpt_types::simd::simd_sum_f32(&padded);
         if total < 1e-8 {
             return [false; 6];
         }
@@ -890,7 +890,7 @@ impl ReconstructionState {
     /// Zero-allocation. Clamp to valid range [-1, 1].
     ///
     /// Plan 276 T2.1: now a thin delegate over the shared leaky-integrator core
-    /// ([`crate::leaky_core::leaky_step`]). The `KIND_MAP` gather lives in
+    /// ([`katgpt_types::leaky_core::leaky_step`]). The `KIND_MAP` gather lives in
     /// [`TripleEvidence::kind_activations_padded`], and the normalization total
     /// is `Σ kind_activations[0..6]` (the 6 source activations — NOT the
     /// gathered 8; see `leaky_core` module docs). Behavior is byte-identical to
@@ -901,7 +901,7 @@ impl ReconstructionState {
         // scale and break the shipped HLA benchmarks).
         let total: f32 = self.evidence.kind_activations.iter().copied().sum();
         let input = self.evidence.kind_activations_padded();
-        crate::leaky_core::leaky_step(
+        katgpt_types::leaky_core::leaky_step(
             &mut self.hla,
             &input,
             total,
@@ -934,7 +934,7 @@ impl ReconstructionState {
         // 6 distinct activations, matching the scalar path's Σ[0..6]).
         let mut padded_activations = [0.0f32; 8];
         padded_activations[..6].copy_from_slice(&self.evidence.kind_activations);
-        let total_activation = crate::simd::simd_sum_f32(&padded_activations);
+        let total_activation = katgpt_types::simd::simd_sum_f32(&padded_activations);
 
         if total_activation < 1e-8 {
             return;
@@ -949,7 +949,7 @@ impl ReconstructionState {
 
         // SIMD: delta = (delta - 0.5 * total) * scale  →  fused sub-scale
         let sub_val = 0.5 * total_activation;
-        crate::simd::simd_fused_sub_scale_inplace(&mut delta, sub_val, scale);
+        katgpt_types::simd::simd_fused_sub_scale_inplace(&mut delta, sub_val, scale);
 
         // Clamp delta and apply to HLA
         for (d, h) in delta.iter_mut().zip(self.hla.iter_mut()) {
@@ -1000,7 +1000,7 @@ impl ReconstructionState {
     /// instead of 6 individual `module.project()` calls.
     ///
     /// **Note**: Since the matvec path is now numerically equivalent to the
-    /// scalar path (both use `crate::simd::fast_sigmoid`), `reconstruct_inner`
+    /// scalar path (both use `katgpt_types::simd::fast_sigmoid`), `reconstruct_inner`
     /// dispatches to `expand_matvec` directly when `sense_composition` is on.
     /// This function is kept for explicit callers that want the matvec path
     /// without depending on feature-flag dispatch.
@@ -1104,7 +1104,7 @@ impl ReconstructionState {
         // Resolve SIMD availability once at entry
         #[cfg(feature = "sense_composition")]
         let simd_available =
-            use_simd && !matches!(crate::simd::simd_level(), crate::simd::SimdLevel::Scalar);
+            use_simd && !matches!(katgpt_types::simd::simd_level(), katgpt_types::simd::SimdLevel::Scalar);
         #[cfg(not(feature = "sense_composition"))]
         let simd_available = false;
 
@@ -1118,7 +1118,7 @@ impl ReconstructionState {
             // `simd_matmul_rows` for all 6 modules) and reused for every
             // subsequent step. Benchmarks show ~1.27× per-step expand speedup
             // (20.4ns vs 25.9ns). Numerically equivalent to scalar `expand`
-            // since both paths now use `crate::simd::fast_sigmoid`.
+            // since both paths now use `katgpt_types::simd::fast_sigmoid`.
             //
             // Constraint: a `ReconstructionState` is bound to one brain
             // configuration once `expand_matvec` is called (it caches the
@@ -1708,7 +1708,7 @@ mod tests {
     /// Plan 276 T2.3 — zero-behavior-change regression gate.
     ///
     /// Runs a known evidence pattern through the refactored `evolve_hla`
-    /// (now a delegate over `crate::leaky_core::leaky_step`) and asserts the
+    /// (now a delegate over `katgpt_types::leaky_core::leaky_step`) and asserts the
     /// resulting HLA is **bit-for-bit identical** to the original inline math
     /// (sum-over-6 total, `KIND_MAP = [0,1,2,3,4,5,0,1]` gather, config-sourced
     /// lr / max_delta). Runs whenever `sense` compiles — `micro_belief` is NOT

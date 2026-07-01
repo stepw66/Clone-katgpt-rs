@@ -1,12 +1,20 @@
-//! Sense Composition — KG Latent Octree (Plan 221).
+//! katgpt-sense — KG Latent Octree Sense substrate (Plan 221 / 235 / 236 / 237 / 240 / 262 / 331).
 //!
-//! Compresses game domain knowledge into fixed-type ternary bit-plane sense modules.
-//! NPCs compose modules at spawn time and query at ~45ns/tick via bitwise dot-product.
+//! Generic sense substrate: octree construction, reconstruction, BAKE
+//! precision-gated embedding update, LOD routing, schema-centroid init,
+//! sector projection, and SenseModule serialization. NPCs compose modules at
+//! spawn time and query at ~45ns/tick via bitwise dot-product.
 //!
-//! Issue 007 Phase C (2026-06-28): the NPC-runtime half of this module
-//! (`brain`, `backend`, `batch`, `gm`, `hotswap`, `bandit`) moved to
-//! `riir-engine::sense::*`. Only the generic sense substrate (octree,
-//! reconstruction, bake, lod, etc.) remains here.
+//! Spun out of `katgpt-core::sense` (Issue 007 Phase E Tier 2 #7, Plan 338).
+//! The NPC-runtime half (`brain`, `backend`, `batch`, `gm`, `hotswap`,
+//! `bandit`) had already moved to `riir-engine::sense::*` in Phase C. The
+//! tightly-coupled `spectral_threat` (depends on `linoss`) stayed in
+//! katgpt-core as composition code (`katgpt_core::sense_threat`), re-exported
+//! back through the `katgpt_core::sense::spectral_threat` shim path.
+//!
+//! Depends only on `katgpt-types` (the leaf): SIMD kernels, ScaleBoundary,
+//! TemporalDerivativeKernel, MerkleOctree/MerkleProof, depth-invariance
+//! classifier, leaky_step. Zero katgpt-core dependency — the cycle is broken.
 
 pub mod bake;
 #[cfg(feature = "sense_lod")]
@@ -20,8 +28,6 @@ pub mod schema_centroid;
 #[cfg(feature = "sector_projection")]
 pub mod sector;
 pub mod serialize;
-#[cfg(feature = "spectral_threat")]
-pub mod spectral_threat;
 
 #[cfg(feature = "bake_precision")]
 pub use bake::{BakePrecisionStore, BakeSession, PrecisionEntry};
@@ -42,5 +48,3 @@ pub use schema_centroid::{
 };
 #[cfg(feature = "sector_projection")]
 pub use sector::SectorProjection;
-#[cfg(feature = "spectral_threat")]
-pub use spectral_threat::{CombatRhythmTracker, SpectralThreatFeatures};

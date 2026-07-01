@@ -53,7 +53,7 @@ impl ReconstructionState {
     /// Runs `evolve_hla` for `k` ticks under the supplied `stimulus` schedule,
     /// capturing the HLA chain (`h_0 … h_k`, each `[f32; 8]`) into the
     /// caller-owned `states_out` buffer, then classifies the chain via
-    /// [`crate::classify_chain`].
+    /// [`katgpt_types::classify_chain`].
     ///
     /// **Stimulus mechanism:** each tick, `evidence.kind_activations` is
     /// overwritten with the schedule's per-tick value (not accumulated — the
@@ -68,7 +68,7 @@ impl ReconstructionState {
     ///
     /// - `k`: number of ticks to evolve (chain length is `k+1`).
     /// - `stimulus`: per-tick drive schedule (see [`AuditStimulus`]).
-    /// - `cfg`: classifier thresholds (see [`crate::DepthInvarianceConfig`]).
+    /// - `cfg`: classifier thresholds (see [`katgpt_types::DepthInvarianceConfig`]).
     /// - `scratch`: classifier scratch (cleared + filled; not read).
     /// - `states_out`: receives the flattened `[k+1][8]` HLA chain (caller-owned).
     ///
@@ -78,10 +78,10 @@ impl ReconstructionState {
         &mut self,
         k: usize,
         stimulus: AuditStimulus,
-        cfg: &crate::DepthInvarianceConfig,
-        scratch: &mut crate::Scratch,
+        cfg: &katgpt_types::DepthInvarianceConfig,
+        scratch: &mut katgpt_types::Scratch,
         states_out: &mut Vec<f32>,
-    ) -> crate::DepthInvarianceDiagnostic {
+    ) -> katgpt_types::DepthInvarianceDiagnostic {
         // ── Snapshot h_0 ──
         states_out.clear();
         // Pre-grow once (reserve is a no-op if capacity already suffices). This
@@ -110,13 +110,13 @@ impl ReconstructionState {
         }
 
         // ── Classify the captured chain ──
-        crate::classify_chain(states_out, /*d=*/ 8, cfg, scratch)
+        katgpt_types::classify_chain(states_out, /*d=*/ 8, cfg, scratch)
     }
 
     /// Regularized variant of `evolve_hla` (Plan 331 T1.3).
     ///
     /// Runs the raw [`Self::evolve_hla`] update unchanged, then applies
-    /// [`crate::MagnitudeRegularization`] in-place to the 8-dim HLA state.
+    /// [`katgpt_types::MagnitudeRegularization`] in-place to the 8-dim HLA state.
     /// This is the modelless Layer-1 magnitude-hygiene fix per Research 151 /
     /// arXiv:2605.09992 §4.4.
     ///
@@ -129,20 +129,20 @@ impl ReconstructionState {
     /// RMS computation (reserved for future learned γ/β extensions in Plan 306;
     /// unused by pure RmsNorm in Phase 1 but required for API stability).
     ///
-    /// - `regularization`: mode ([`crate::MagnitudeRegularization::RmsNorm`] is
+    /// - `regularization`: mode ([`katgpt_types::MagnitudeRegularization::RmsNorm`] is
     ///   the paper's prescription; `ScalarPinch` is a gentler alternative when
     ///   `RmsNorm` proves too aggressive — see Plan 331 T1.6 fallback).
     /// - `scratch`: length-`d` caller-owned scratch (length 8 for HLA).
     #[inline]
     pub fn evolve_hla_regularized(
         &mut self,
-        regularization: crate::MagnitudeRegularization,
+        regularization: katgpt_types::MagnitudeRegularization,
         scratch: &mut [f32],
     ) {
         // Raw leaky-integrator update — byte-identical to evolve_hla().
         self.evolve_hla();
         // Apply magnitude regularization in-place on the 8-dim latent state.
-        crate::apply_magnitude_regularization(self.hla_mut(), regularization, scratch);
+        katgpt_types::apply_magnitude_regularization(self.hla_mut(), regularization, scratch);
     }
 }
 
@@ -153,8 +153,8 @@ impl ReconstructionState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sense::reconstruction::{ReconstructionConfig, ReconstructionState};
-    use crate::{DepthInvarianceConfig, DepthInvarianceKind, MagnitudeRegularization, Scratch};
+    use crate::reconstruction::{ReconstructionConfig, ReconstructionState};
+    use katgpt_types::{DepthInvarianceConfig, DepthInvarianceKind, MagnitudeRegularization, Scratch};
 
     /// Default config for the audit (k=1000 chain → scratch sized for 1001 samples).
     const AUDIT_K: usize = 1000;
@@ -282,7 +282,7 @@ mod tests {
             states.extend_from_slice(state.hla());
         }
 
-        let diag = crate::classify_chain(&states, 8, &cfg, &mut classify_scratch);
+        let diag = katgpt_types::classify_chain(&states, 8, &cfg, &mut classify_scratch);
         assert_eq!(
             diag.kind,
             DepthInvarianceKind::DepthInvariant,

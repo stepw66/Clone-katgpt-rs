@@ -207,19 +207,20 @@ reconstruction files alone (`octree.rs` + `reconstruction.rs` + `serialize.rs`
 
 ### Phase 3 — Promote katgpt-sense (9 substrate files)
 
-- [ ] **T3.1** Create `crates/katgpt-sense/` with `Cargo.toml` declaring
+- [x] **T3.1** Create `crates/katgpt-sense/` with `Cargo.toml` declaring
   deps: `katgpt-types` only (after Phase 1+2+2.5, all external deps resolve
   here). Forward features: `sense_lod`, `depth_invariance`,
-  `schema_centroid`, `sector_projection`, `merkle_octree`, `bake_precision`.
-- [ ] **T3.2** `git mv` 9 files from `crates/katgpt-core/src/sense/` →
+  `schema_centroid`, `sector_projection`, `merkle_octree`, `bake_precision`,
+  plus tracking flags `sense_composition`, `temporal_deriv`, `self_advantage_gate`.
+- [x] **T3.2** `git mv` 9 files from `crates/katgpt-core/src/sense/` →
   `crates/katgpt-sense/src/`:
   - `bake.rs`, `lod.rs`, `mod.rs` (→ `lib.rs`), `octree.rs`,
     `reconstruction.rs`, `reconstruction_depth_invariance.rs`,
     `schema_centroid.rs`, `sector.rs`, `serialize.rs`.
-- [ ] **T3.3** KEEP `spectral_threat.rs` in `katgpt-core/src/sense_threat.rs`
+- [x] **T3.3** KEEP `spectral_threat.rs` in `katgpt-core/src/sense_threat.rs`
   (rename to avoid clash). It needs `crate::linoss` which stays in
   katgpt-core.
-- [ ] **T3.4** Rename `mod.rs` → `lib.rs`, update internal paths:
+- [x] **T3.4** Rename `mod.rs` → `lib.rs`, update internal paths:
   - `crate::<module>::` → `crate::` (within the new crate).
   - `crate::types::` → `katgpt_types::`.
   - `crate::slod::` → `katgpt_types::` (after Phase 1).
@@ -229,7 +230,7 @@ reconstruction files alone (`octree.rs` + `reconstruction.rs` + `serialize.rs`
   - `crate::leaky_core::` → `katgpt_types::leaky_core::`.
   - `crate::{classify_chain, apply_magnitude_regularization, Scratch, DepthInvarianceConfig, ...}` → `katgpt_types::`.
   - `super::` refs stay valid (same crate, modules flatten).
-- [ ] **T3.5** Add re-export shim in `katgpt-core/src/lib.rs` that preserves
+- [x] **T3.5** Add re-export shim in `katgpt-core/src/lib.rs` that preserves
   `katgpt_core::sense::*` **bit-for-bit**. Because `spectral_threat` stays
   local but the 9 substrate files move out, the shim is a `pub mod sense`
   that re-exports katgpt-sense AND adds the local `spectral_threat`:
@@ -244,11 +245,14 @@ reconstruction files alone (`octree.rs` + `reconstruction.rs` + `serialize.rs`
   External paths preserved: `katgpt_core::sense::octree::*`,
   `katgpt_core::sense::reconstruction::*`, `katgpt_core::sense::lod::*`,
   `katgpt_core::sense::serialize::*`, `katgpt_core::sense::spectral_threat::*`.
-- [ ] **T3.6** Feature-forwarding: `sense_composition` Cargo feature in
+- [x] **T3.6** Feature-forwarding: `sense_composition` Cargo feature in
   katgpt-core changes to preserve existing sub-deps (`plasma_path`,
   `domain_latent`) + add `dep:katgpt-sense`. `spectral_threat` feature keeps
-  `linoss` + activates the local `sense_threat` mod.
-- [ ] **T3.7** Remove katgpt-core's `sense/mod.rs` (substrate moved out);
+  `linoss` + activates the local `sense_threat` mod. Also forwards
+  `schema_centroid`, `bake_precision`, `sense_lod`, `merkle_octree`,
+  `sector_projection`, `depth_invariance`, `self_advantage_gate` to
+  katgpt-sense.
+- [x] **T3.7** Remove katgpt-core's `sense/mod.rs` (substrate moved out);
   the shim in T3.5 replaces it.
 
 ### Phase 4 — Verification (cross-cutting, riir-engine REQUIRED)

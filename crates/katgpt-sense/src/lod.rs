@@ -2,8 +2,8 @@
 //!
 //! Level-of-detail routing for sense modules based on spectral scale boundaries.
 
-use crate::slod::ScaleBoundary;
-use crate::types::SenseKind;
+use katgpt_types::ScaleBoundary;
+use katgpt_types::SenseKind;
 
 /// Level-of-detail for sense module activation.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -133,7 +133,7 @@ impl SenseLodMask {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::slod::ScaleBoundary;
+    use katgpt_types::ScaleBoundary;
 
     fn router() -> SenseLodRouter {
         SenseLodRouter::new(&[boundary(10.0), boundary(50.0)], 10.0, 50.0)
