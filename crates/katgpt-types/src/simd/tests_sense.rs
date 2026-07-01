@@ -93,15 +93,15 @@
         let mut neg_bits = vec![0u8; 8];
         // Reference scalar computation
         let mut expected = 0.0f32;
-        for i in 0..64 {
+        for (i, &val) in input.iter().enumerate().take(64) {
             let byte = i / 8;
             let bit = i % 8;
             if i % 3 == 0 {
                 pos_bits[byte] |= 1 << bit;
-                expected += input[i];
+                expected += val;
             } else if i % 3 == 1 {
                 neg_bits[byte] |= 1 << bit;
-                expected -= input[i];
+                expected -= val;
             }
             // i % 3 == 2 → zero weight, no contribution
         }

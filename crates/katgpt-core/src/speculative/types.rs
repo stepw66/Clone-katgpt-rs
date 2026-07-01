@@ -1323,7 +1323,7 @@ mod tests {
         }
         #[cfg(feature = "kurtosis_gate")]
         {
-            let reasons = vec![
+            let reasons = [
                 RejectionReason::LowProbability,
                 RejectionReason::ConstraintViolation,
                 RejectionReason::LowRelevance { score: 0.0 },
