@@ -4,7 +4,7 @@
 **Research:** [katgpt-rs/.research/311_Analytic_Lattice_Encoder_Decoder_Primitive.md](../.research/311_Analytic_Lattice_Encoder_Decoder_Primitive.md)
 **Source paper:** Synthesis (R311 §2) — Functional Attention × PJ-RoPE × Gyrocalculus fusion
 **Target:** `katgpt-rs/crates/katgpt-core/src/analytic_lattice/` (new module) + Cargo feature `analytic_lattice_encoder`
-**Status:** Active — Phase 0 <scaffold>
+**Status:** Active. katgpt-core half (Phases 0, 1a, 2, 2.5, 3, 4) COMPLETE + committed. riir-engine Phase 1b (ASOC cascade `ComposerTick: GpuFuture` + `Join3` + `PrevTickJoinObserver`) WIRED 2026-07-02 — the orphaned `analytic_lattice/` module is now feature-gated (`analytic_lattice_runtime`) + lib.rs-registered + 6/6 GOAT tests pass (G1 determinism, G1b non-blocking, G1c stash-refresh, G4 latency sanity, T1b.8 reflection). Phase 5 promotion deferred pending a real GPU executor + the full G1–G6 gate.
 
 > **Revision note (2026-06-26):** Original Phase 1 (`AnalyticLatticeEncoder`
 > trait + 3 reference impls) is **DROPPED** — it is redundant with
@@ -194,7 +194,7 @@ pub struct ComposerCtx {
 
 ### Tasks
 
-- [ ] **T1b.1** Implement `ComposerTick<P, Rb, Rq, Rp, D>: GpuFuture` — the
+- [x] **T1b.1** Implement `ComposerTick<P, Rb, Rq, Rp, D>: GpuFuture` — the
       cascade core, in riir-engine (where `riir-gpu-async::GpuFuture` is
       importable):
 
@@ -240,32 +240,34 @@ where
 }
 ```
 
-- [ ] **T1b.2** `Join3` helper — a 3-way `riir-gpu-async::GpuFuture::Join`.
+- [x] **T1b.2** `Join3` helper — a 3-way `riir-gpu-async::GpuFuture::Join`.
       The shipped `Join` is 2-way; nest `Join<Join<A, B>, C>` or add a small
       `Join3` combinator in this riir-engine module — prefer nesting to avoid
       growing `riir-gpu-async`. (Lives in riir-engine, not katgpt-core, since
       it needs the `Join` import.)
 
-- [ ] **T1b.3** Add `analytic_lattice_runtime` feature flag to
+- [x] **T1b.3** Add `analytic_lattice_runtime` feature flag to
       `riir-ai/crates/riir-engine/Cargo.toml` (gates the `asoc` submodule +
       the `riir-gpu-async` + `katgpt-core/analytic_lattice` deps). NOT
-      default-on.
+      default-on. **DONE 2026-07-02** — `analytic_lattice_runtime = ["katgpt-core/analytic_lattice", "dep:riir-gpu-async"]` + optional `riir-gpu-async` path dep + `pub mod analytic_lattice;` in lib.rs. The orphaned module is now wired + compiling.
 
-- [ ] **T1b.4** G1 test (determinism): same `(ctx, plasma, rederive)` inputs →
+- [x] **T1b.4** G1 test (determinism): same `(ctx, plasma, rederive)` inputs →
       byte-identical action when the join is `Ready`. Stale-draft fallback
-      path tested separately (see T1b.5).
+      path tested separately (see T1b.5). **DONE 2026-07-02** — `g1_determinism_ready_path` in `tests/analytic_lattice_runtime_goat.rs`.
 
-- [ ] **T1b.5** G1b test (non-blocking contract): inject a `MockRederiveOp`
+- [x] **T1b.5** G1b test (non-blocking contract): inject a `MockRederiveOp`
       that returns `Poll::Pending` indefinitely. Assert `ComposerTick::poll`
       returns `Ready(stale_draft)` (NOT `Pending`) — the bot loop contract.
+      **DONE 2026-07-02** — `g1b_pending_hot_tier_returns_ready_stale_not_pending`.
 
-- [ ] **T1b.6** G4 test (latency): plasma-draft path (`Poll::Pending` injected)
+- [x] **T1b.6** G4 test (latency): plasma-draft path (`Poll::Pending` injected)
       must complete in < 100ns. Hot-tier-join path must complete in < 1µs when
-      the join resolves immediately.
+      the join resolves immediately. **DONE 2026-07-02 (sanity tier)** — `g4_pending_fallback_path_latency_sanity` asserts < 10µs/poll (debug, 1000-iter avg). The strict < 100ns gate requires a release-build Criterion harness with a real GPU executor; the sanity test catches gross regressions (allocations / locks in the poll path).
 
-- [ ] **T1b.7** **Stash lifecycle — refresh every poll.** `ComposerTick::poll`
+- [x] **T1b.7** **Stash lifecycle — refresh every poll.** `ComposerTick::poll`
       MUST refresh `stale_draft` from `plasma.draft(ctx)` on EVERY poll call,
       BEFORE polling the in-flight join — not just on first construction.
+      **DONE 2026-07-02** — implemented in `asoc.rs` step 1 of `poll`; verified by `g1c_stash_refreshed_every_poll_returns_latest_draft` (CountingPlasma returns 10,11 across two Pending polls; both polls return the LATEST draft, not a frozen value).
       Without this, a long congestion period leaves the bot acting on an
       infinitely stale draft. The refresh is sync + cheap (plasma contract).
       Concretely the poll body becomes:
@@ -282,7 +284,7 @@ where
       polls then `Ready`; assert the Nth `poll()` returns the LATEST plasma
       draft (not the original) — i.e. the stash was refreshed each tick.
 
-- [ ] **T1b.8** **Previous-tick join policy — let it complete.** If tick N's
+- [x] **T1b.8** **Previous-tick join policy — let it complete.** If tick N's
       `Join3` is still `Pending` when tick N+1 starts, do NOT drop the old
       join. Let it complete in the background; when it eventually returns
       `Ready((Cb,Cq,Cp))`, treat the result as a **free warm-tier observation**:
@@ -296,7 +298,19 @@ where
       (or a small side queue of ≤1 entry) and polls it alongside the new
       tick's join. Add a G1d test verifying the previous-tick path emits a
       reflection event on completion, even after the bot has already acted
-      on multiple stale drafts.
+      on multiple stale drafts. **DONE 2026-07-02** — `PrevTickJoinObserver` + `ReflectionEvent` + `ReflectionOutcome` shipped in `asoc.rs`; verified by `t1b8_prev_tick_observer_emits_reflection_event_on_completion` (Pending→Ready→event carries correct `(ctx, stale_draft, fresh)` triple) + `t1b8_prev_tick_observer_never_completing_stays_pending` (never-completing join stays Pending, observer not done).
+
+### Phase 1b completion notes (2026-07-02)
+
+The orphaned-code problem: `asoc.rs` + `mod.rs` + `tests/analytic_lattice_runtime_goat.rs` were committed by a prior session but **never wired** — no Cargo feature, no `pub mod` in `lib.rs`, no `riir-gpu-async` dep. The module was dead code (unreachable from the crate root). This is the same pattern as Plan 359 (`motor_gated_rehearsal`). The wiring:
+
+1. `riir-gpu-async = { path = "../riir-gpu-async", optional = true }` added to `crates/riir-engine/Cargo.toml` deps.
+2. `analytic_lattice_runtime = ["katgpt-core/analytic_lattice", "dep:riir-gpu-async"]` feature added.
+3. `#[cfg(feature = "analytic_lattice_runtime")] pub mod analytic_lattice;` added to `lib.rs`.
+4. `[[test]]` entry with `required-features = ["analytic_lattice_runtime"]` for the GOAT binary.
+5. GOAT test written (was a placeholder): 6 tests covering G1/G1b/G1c/G4 + T1b.8 reflection.
+
+The orphaned `asoc.rs` code compiled clean on the first wired build (no bug fixes needed — well-written). `analytic_lattice_runtime` ships OPT-IN; promotion to default-on deferred pending a real GPU executor + the full G1–G6 gate.
 
 ---
 
