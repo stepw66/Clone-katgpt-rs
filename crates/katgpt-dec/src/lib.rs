@@ -14,6 +14,9 @@
 //! - **Hodge Laplacian** — Δₖ = δₖ₊₁dₖ + dₖ₋₁δₖ (conservation-by-construction)
 //! - **Stokes calculus** — boundary flux, line integrals, belief-mass divergence
 //! - **Hodge decomposition** — exact ⊕ harmonic ⊕ coexact (Helmholtz split)
+//! - **Motor-gated field** (opt-in, `motor_gated_field` feature, Plan 357) —
+//!   Amari-style neural-field evolution step unifying the Hodge Laplacian with
+//!   a per-channel motor gain (`evolve_motor_gated_field`).
 //!
 //! # Conservation Guarantees
 //!
@@ -50,6 +53,8 @@ pub mod backend;
 pub mod cache;
 pub mod flow;
 pub mod hodge;
+#[cfg(feature = "motor_gated_field")]
+pub mod motor_gated;
 pub mod operators;
 pub mod simd;
 pub mod stokes_calculus;
@@ -69,5 +74,8 @@ pub use stokes_calculus::{
     belief_mass_divergence, boundary_flux_mass, boundary_flux_mass_indexed,
     boundary_flux_mass_only, circulation_integral, line_integral,
 };
+
+#[cfg(feature = "motor_gated_field")]
+pub use motor_gated::{evolve_motor_gated_field, relu_gate_into};
 
 pub use types::{CellComplex, CoboundaryIndex, CochainField, MAX_RANK};

@@ -16,11 +16,19 @@ categories = ["mathematics", "science"]
 # fallbacks matching katgpt-core's implementations.
 
 [features]
-# katgpt-dec compiles all DEC code unconditionally — the crate's entire purpose
-# is DEC. The historical pass-through tracking flags (`dec_terrain_ai`,
+# katgpt-dec compiles its core DEC code unconditionally — the crate's entire
+# purpose is DEC. The historical pass-through tracking flags (`dec_terrain_ai`,
 # `lattice_utility`, `interest_cochain`) were removed on 2026-06-28 (katgpt-rs
 # Issue 008): the eggshell IP they tracked was migrated to the private
 # `riir-neuron-db` crate (`dec_arena` module). The remaining katgpt-core
-# `dec_operators` flag enables this crate; nothing inside katgpt-dec gates
-# on a feature.
+# `dec_operators` flag enables this crate.
+#
+# `motor_gated_field` (Plan 357, Research 359) is the one opt-in primitive
+# inside this crate: the Amari-style motor-gated neural-field evolution step
+# (`evolve_motor_gated_field`). It composes the existing DEC surface
+# (`hodge_laplacian` / `graph_laplacian_into`) + a ReLU gate + a per-channel
+# motor gain — no new deps. Stays opt-in by design (it's a primitive, not a
+# default-on capability); promotion to downstream consumption (riir-ai
+# Research 168) is gated on the Plan 357 Phase 2 GOAT (G1–G5).
 default = []
+motor_gated_field = []
