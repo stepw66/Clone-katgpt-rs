@@ -574,6 +574,16 @@ required-features = ["conformal_predictive_intervals", "bom_sampling"]
 name = "conformal_floor_sleep_time"
 required-features = ["conformal_predictive_intervals", "sleep_time_anticipation"]
 
+# Issue 010 T5 — Best-Belief Beta Selector floor comparison. NOT an interval-
+# calibration comparison — it's a selection-quality comparison (selection
+# regret: θ_best − θ_selected). The floor is the empirical MLE (S/(S+F), no
+# regularization); Best-Belief adds the Beta(1,1) prior + ε-quantile
+# conservatism. Needs the floor harness (for the conformal_predictive_intervals
+# gate that brings in the policy context) and best_belief.
+[[test]]
+name = "conformal_floor_best_belief"
+required-features = ["conformal_predictive_intervals", "best_belief"]
+
 # Plan 321 Phase 2 — CommittedFieldBlend G4 zero-alloc GOAT gate. CountingAllocator
 # audit of apply_blended (1000 iters) + commit (100 re-commits). Gated on
 # committed_field_blend so default features compile cleanly.
