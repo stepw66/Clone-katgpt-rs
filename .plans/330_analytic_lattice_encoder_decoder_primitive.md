@@ -601,7 +601,7 @@ pub fn direction_vector_decode<const N: usize>(
   **katgpt-core half DONE.** riir-engine half deferred to Phase 1b.
 - [ ] **T5.3** If all gates pass: promote `analytic_lattice` to `default` in katgpt-core Cargo.toml. Separately promote `analytic_lattice_runtime` to default in riir-engine ONLY if `riir-gpu-async` is itself default-on (it is not today — keep opt-in).
   **NOT DONE (katgpt-core half):** feature stays opt-in pending user review of the GOAT results. See `.benchmarks/330_analytic_lattice_goat.md`. The math gates (G1, G2, G3, G5, G6) all pass, but the headline primitive (`ComposerTick: GpuFuture`) hasn't shipped yet (Phase 1b) — the katgpt-core half is only useful when composed with the runtime half. Decision left to user.
-- [ ] **T5.4** If any gate fails: keep opt-in, document the failure in `.issues/`, decide modelless unblock path per workflow §3.5 (check freeze/thaw, raw/lora, latent correction before any riir-train deferral).
+- [x] **T5.4** If any gate fails: keep opt-in, document the failure in `.issues/`, decide modelless unblock path per workflow §3.5 (check freeze/thaw, raw/lora, latent correction before any riir-train deferral).
   **N/A (katgpt-core half):** all gates passed.
 
 ---

@@ -92,8 +92,8 @@ The plan's T1.1 originally specified "uses polynomial-Padé cos/sin (reuse Plan 
 
 ### Tasks
 
-- [ ] **T3.1** If scalar D=8 latency > 50ns: hand-written SIMD inner loop for the mix (`c·a + s·b` is a textbook FMA kernel — 2 mul + 1 add per element, fully vectorizable).
-- [ ] **T3.2** If per-channel D=64 latency > 600ns even with polynomial-Padé: precompute cos/sin lookup tables for α ∈ [0, π/2] at 1024 entries; linear interpolation. Trade 4KB table for O(1) cos/sin. (This is the same LUT pattern AGENTS.md mandates for bounded-domain ops.)
+- [x] **T3.1** If scalar D=8 latency > 50ns: hand-written SIMD inner loop for the mix (`c·a + s·b` is a textbook FMA kernel — 2 mul + 1 add per element, fully vectorizable). _(N/A — G3 measured 18.9ns ≪ 50ns budget; SIMD optimization unnecessary. Would only matter if a future hot-path caller needed <6ns.)_
+- [x] **T3.2** If per-channel D=64 latency > 600ns even with polynomial-Padé: precompute cos/sin lookup tables for α ∈ [0, π/2] at 1024 entries; linear interpolation. Trade 4KB table for O(1) cos/sin. _(N/A — G3 measured 355.7ns ≪ 600ns trigger threshold [and ≪ 1500ns budget]; LUT optimization unnecessary.)_
 
 ---
 
