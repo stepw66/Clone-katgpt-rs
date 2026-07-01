@@ -7,7 +7,7 @@
 - van Toll, Pettré et al. — density-aware navigation meshes (line of work)
 - Fokker-Planck / continuity equation on cochains — internal mapping via [Plan 314](314_stokes_calculus_wrappers.md)
 **Target:** `katgpt-rs/crates/katgpt-core/src/zone_density.rs` (new module, ~500 LOC + tests) + Cargo feature `zone_density_routing` (opt-in, NOT default until G5a+G5b+G5c pass).
-**Status:** Active — Phase 1 starting.
+**Status:** COMPLETE — Phase 1-4 done. **PROMOTED to DEFAULT-ON** (Phase 3 T3.5, 2026-06-29) after G5a (+19.4%), G5b (99.1%), G5c (0 stale reads) all passed. Real-sim re-confirmed in Plan 352 (commit `bb73cee3`): G5a +41.54%, G5b 94.45% hit rate, G5c detector fires correctly.
 
 ---
 
@@ -356,15 +356,18 @@ Promotion to default requires G5a AND G5b AND G5c passing (T3.5). G5c is a hard 
 
 ## Validation
 
-- [ ] All Phase-2 unit tests pass (≥18 tests).
-- [ ] G5a synthetic benchmark: ≥ +15% Shannon entropy vs mean-aggregation baseline.
-- [ ] G5b compute benchmark: ≥ 50% per-tick reduction on dense-dominated workload.
-- [ ] G5c stampede correctness: zero stale reads during tier transitions.
-- [ ] Determinism: same input + same config → bit-identical output across two calls.
-- [ ] Zero-alloc hot path confirmed (no allocations after warmup; papaya is the only allocator).
-- [ ] File < 2048 lines (target ~750 LOC + tests).
-- [ ] `cargo check --features zone_density_routing` clean, no warnings.
-- [ ] `cargo test -p katgpt-core --features zone_density_routing --lib` clean.
+All items verified at Phase 3 promotion (2026-06-29) and re-confirmed by Phase 4 real-sim (Plan 352, commit `bb73cee3`).
+
+- [x] All Phase-2 unit tests pass (22 tests; ≥18 required).
+- [x] G5a synthetic benchmark: **+19.4%** Shannon entropy vs mean-aggregation baseline (target ≥15%). Real-sim (Plan 352 T4.4): **+41.54%**.
+- [x] G5b compute benchmark: **99.1%** per-tick reduction on dense-dominated workload (target ≥50%). Real-sim hit rate 94.45%.
+- [x] G5c stampede correctness: **0** stale reads during tier transitions (target: 0).
+- [x] Determinism: same input + same config → bit-identical output across two calls (T2.1.5).
+- [x] Zero-alloc hot path confirmed (no allocations after warmup; papaya is the only allocator).
+- [x] File < 2048 lines (`zone_density.rs` ~500 LOC + tests).
+- [x] `cargo check --features zone_density_routing` clean, no warnings.
+- [x] `cargo test -p katgpt-core --features zone_density_routing --lib` clean (689/689 at Phase 1).
+- [x] **PROMOTED to DEFAULT-ON** (Phase 3 T3.5) — all three gates passed.
 
 ## Honest Risk Notes
 
