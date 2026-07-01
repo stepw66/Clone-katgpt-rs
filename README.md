@@ -1747,6 +1747,34 @@ Examples:
 
 ---
 
+### 📐 Subspace Phase-Gate: N≥d Phase Transition + Runtime Jacobian SVD (Plan 301, arXiv:2409.02426)
+
+Generic, modelless numeric primitive exposing four inference-time operations distilled from Wang et al., *Breaking the Curse of Dimensionality* (Theorem 4):
+
+1. **`participation_ratio(spectrum)`** — effective dimensionality `d_eff = (Σλ)² / Σ(λ²)`.
+2. **`numerical_rank(spectrum, η)`** — smallest `r` capturing η-fraction of spectral energy (paper eq. 52, η = 0.99).
+3. **`phase_transition_gate(n_samples, intrinsic_dim)`** → bool — the Wang et al. Theorem 4 *necessary* condition: subspace recovery is possible iff `n_samples ≥ intrinsic_dim`.
+4. **`jacobian_svd_at_into(f, x, ε, scratch)`** — runtime Jacobian SVD of map `f: Rⁿ → Rᵐ` at point `x` via forward differences, written zero-allocation into a reusable `JacobianSvdScratch` SOA buffer. Generic over the map (closure); no game/shard semantics.
+
+**Determinism contract.** All SVD math is scalar and platform-independent — no SIMD dispatch inside the math, no FP reordering. Required for the anti-cheat / cold-tier Tucker consumers: the phase-transition gate decision must be bit-identical across quorum nodes. The zero-alloc `_into` hot path and the allocating `_at` convenience wrapper produce byte-identical results.
+
+| Gate | Target | Result | Status |
+|------|--------|--------|--------|
+| **G1** phase transition (N<d → err>0.5) | 2/2 fail-side rows | 2/2 (N=3: 2.40, N=5: 1.41) | ✅ PASS |
+| **G1** phase transition (N≥d → err<0.1) | 5/5 recover-side rows | 5/5 (N∈{6,7,10,50,200}: 0.00) | ✅ PASS |
+| **G3-precursor** Jacobian SVD rank-3 recovery | σ={10,5,2}, |dot|>0.999 | top-3 σ match + V recovery | ✅ PASS |
+| **G3-precursor** non-linear sigmoid map | row-space containment | ‖P_true·r‖≈‖r‖ to 5e-3 | ✅ PASS |
+| **T3.4** latency (`_into`, R⁸→R⁸, release) | < 1 µs | ~800 ns/call | ✅ PASS |
+| **G4** zero-alloc hot path | 0 allocs/1000 calls | 0 allocs / 0 deallocs | ✅ PASS |
+
+**T4.1 allocation elimination (the actual win).** The original plan premised SIMD on the Jacobi inner loops, but a breakdown probe showed the SVD math is only ~24% of the `_at` cost — the dominant cost (~36%) was the 17-`Vec` SOA→owned conversion. Adding `jacobian_svd_at_into` (writes directly into the scratch's internal SOA buffer) + `JacobianSvdScratch::svd_result()` getter closes the latency gate with **zero FP change** (the SVD math is byte-identical). SIMD on the Jacobi dot loops remains non-blocking future work — the gate passes, and the determinism contract discourages SIMD dispatch in the math.
+
+**Downstream consumers.** `katgpt-core::tucker_factorization` (HOSVD) and `katgpt-core::viable_manifold_graph` (safe-manifold navigation) depend on this primitive transitively. `riir-neuron-db` wraps it as the two-sided consolidation freeze gate (input N≥d + output spectral-flatness). `riir-ai` will wrap it for HLA self-discovery.
+
+Feature gate: `subspace_phase_gate` (**default-ON** since Plan 301 Phase 5 T5.1, 2026-07-02). Zero runtime cost unless a caller invokes the gate. 📖 Plan: [`.plans/301_runtime_subspace_phase_gate_primitive.md`](.plans/301_runtime_subspace_phase_gate_primitive.md). Research: [`.research/279_Diffusion_Curse_Dimensionality_Subspace_Clustering_Fusion.md`](.research/279_Diffusion_Curse_Dimensionality_Subspace_Clustering_Fusion.md). GOAT bench: [`.benchmarks/301_subspace_phase_gate_g1.md`](.benchmarks/301_subspace_phase_gate_g1.md). Paper: [arXiv:2409.02426](https://arxiv.org/abs/2409.02426).
+
+---
+
 ## 🔧 KV Compression
 
 Default: **Hybrid OCT+PQ** (OCTOPUS triplet encoding + PlanarQuant 2D Givens rotation). Best MSE + 64× fewer rotation FMAs.
