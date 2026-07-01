@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-28 (filed retroactively 2026-07-02; infrastructure shipped 2026-06-30)
 **Severity:** 🟡 POLICY / TRACKING (enforcement substrate, not a bug)
-**Status:** ✅ **T1–T5 COMPLETE.** T6 (Alien Sampler) + T7 (cross-primitive doc) remain open as non-blocking follow-ups. The rule is **enforceable** since Plan 340 Phase 1 shipped the floor.
+**Status:** ✅ **ALL TASKS (T1–T7) COMPLETE.** The rule is **enforceable** since Plan 340 Phase 1 shipped the floor. See `.benchmarks/010_report_the_floor_consolidated.md` for the cross-primitive audit doc (T7).
 **Plan:** [340_conformal_predictive_intervals_primitive.md](../.plans/340_conformal_predictive_intervals_primitive.md) (Phases 1, 2, 2.5)
 **Benchmarks:** [340_conformal_floor_harness.md](../.benchmarks/340_conformal_floor_harness.md)
 **Rule source:** `katgpt-rs/AGENTS.md` → Feature Flag Discipline → "UQ-bearing primitive GOAT gate extension"
@@ -33,7 +33,7 @@ Per `AGENTS.md`, four existing UQ-bearing primitives are grandfathered (shipped 
 | 2 | Sleep-Time Query Anticipator | [334](../.plans/334_sleep_time_query_anticipator_primitive.md) | `sleep_time_anticipation` | T4 | ✅ DONE |
 | 3 | Best-Belief Beta Selector | [336](../.plans/336_controlled_utility_primitives.md) | `best_belief` | T5 | ✅ DONE |
 | 4 | KARC + conformal overlay | [308](../.plans/308_karc_delay_basis_ridge_forecaster.md) + [340](../.plans/340_conformal_predictive_intervals_primitive.md) Ph.2 | `karc_forecaster` + `conformal_predictive_intervals` | (covered by `conformal_karc_overlay` example) | ✅ DONE |
-| (5) | Alien Sampler | [311](../.plans/311_alien_sampler_primitive.md) | `alien_sampler` | T6 | ⬜ NOT STARTED — decision + comparison pending |
+| (5) | Alien Sampler | [311](../.plans/311_alien_sampler_primitive.md) | `alien_sampler` | T6 | ✅ DONE — **EXCLUDED** (not UQ-bearing; see verdict) |
 
 ---
 
@@ -86,18 +86,24 @@ BoM *wins on CRPS* because its intervals are narrow (σ-bound), and CRPS rewards
 
 **Why this is a different comparison:** the Best-Belief `BB_ε(S, F) = I⁻¹_ε(1+S, 1+F)` is an inverse-CDF read (the ε-quantile of the Beta(1+S, 1+F) posterior). The honest floor is the **empirical MLE** `S/(S+F)` (maximum-likelihood point estimate, no regularization). The question: does the Beta prior (regularizes low-data candidates toward 0.5) + ε-quantile conservatism beat raw MLE on selection quality? Expected: Best-Belief WINS at low observation counts (MLE over-fits noise — 2/2 looks perfect under MLE but mediocre under Beta), TIES at high counts.
 
-### T6 — Alien Sampler (Plan 311) floor comparison ⬜ NOT STARTED
+### T6 — Alien Sampler (Plan 311) floor comparison ✅ DONE — EXCLUDED
 
-- [ ] Decision: is Alien Sampler UQ-bearing? (Produces diverse samples — same question as BoM.)
-- [ ] If UQ-bearing: adapter + `run_floor_comparison`.
+- [x] Decision: is Alien Sampler UQ-bearing? **NO — EXCLUDED.**
+- [x] ~~If UQ-bearing: adapter + `run_floor_comparison`.~~ N/A — see verdict.
 
-**Non-blocking.** Alien Sampler is opt-in and not up for re-gate. This task exists because the harness test header (`conformal_floor_harness.rs` line 5) references "T3–T7 adapter authors" including Alien Sampler as the canonical example. When Alien Sampler comes up for any GOAT re-gate, this task fires.
+**Verdict: EXCLUDED from the "Report the Floor" policy.** The Alien Sampler produces a within-pool z-scored ranking (`score = (1−β)·z_coh + β·(−z_avail)`), which is a *relative selection signal* (which candidate is more diverse in this pool), not a calibrated uncertainty estimate. It claims no probability distribution, predictive interval, quantile, coverage guarantee, or confidence score. Its GOAT gate (Plan 311 Phase 3) measures motif-collapse reduction (population diversity), not coverage/CRPS/Winkler.
 
-### T7 — Cross-primitive documentation ⬜ NOT STARTED
+**Structural exclusion — same class as BoM (T3, planning), Sleep-Time (T4, compute gating).** Unlike BoM (which at least produces K samples that can be projected to an empirical-quantile interval), Alien Sampler's output is a single ranking scalar per candidate — there is no spread, distribution, or interval to feed the harness. Running `run_floor_comparison` would require inventing a UQ interpretation the primitive does not make.
 
-- [ ] Consolidate T3–T6 verdicts into a single `.benchmarks/` doc.
+**Additional context (post-T6 discovery):** Alien Sampler has since been **exiled to `katgpt-deprecated`** (Proposal 003 Phase 3a) following its GOAT gate failure (1/4 PASS: G1 borderline-fail 0.5010, G2 fail 0.6722, G3 fail 38.86×, G4 pass — see `.benchmarks/311_alien_sampler_goat.md`). The primitive is already demoted on its own GOAT merits, so the UQ-policy question is doubly moot.
 
-**Non-blocking.** The verdicts currently live in the individual test file headers. A consolidated doc is a nice-to-have for auditability but not required for the rule to be enforceable.
+**Citation note (not fixed here, out of scope):** Proposal 003 line 161 and `Cargo.toml` line 188 both cite "`issues/010` T6" as the source of the "1/4 PASS — demoted to opt-in" verdict. That is a citation error — the 1/4 PASS GOAT verdict comes from **Plan 311 Phase 3** + `.benchmarks/311_alien_sampler_goat.md`, not from this issue's T6 (which was always about the UQ floor comparison, a separate question). Filed as a non-blocking doc-cleanup follow-up; the demotion itself is correct, only the citation chain is wrong.
+
+### T7 — Cross-primitive documentation ✅ DONE
+
+- [x] Consolidate T3–T6 verdicts into a single `.benchmarks/` doc.
+
+**Deliverable:** [`.benchmarks/010_report_the_floor_consolidated.md`](../.benchmarks/010_report_the_floor_consolidated.md). Consolidates all five grandfathered-primitive verdicts (BoM T3, Sleep-Time T4, Best-Belief T5, KARC+overlay, Alien Sampler T6) into one auditability doc with a master verdict table, the common false-confidence signature, and per-primitive one-line summaries with links to the full benchmark files.
 
 ---
 
