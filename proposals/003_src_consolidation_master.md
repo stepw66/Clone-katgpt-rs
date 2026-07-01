@@ -353,10 +353,12 @@ Ordering: foundation first (hoists, splits), then domain crates biggest-first.
   `skill_opt`, `ssd_block`, `channel_simd`, `alien_sampler`.
 - [ ] **Phase 11 — new domain crates.** `katgpt-band`, `katgpt-claim`,
   `katgpt-sparse`, `katgpt-ruliology`, `katgpt-validator`, `katgpt-bench`.
-- [ ] **Phase 12 — final sweep.** `src/` should contain only: `main.rs`,
-  `lib.rs`, `transformer.rs`, the retained forward-glue modules,
-  backend dispatch files, and `types.rs` (re-export shim). Audit with
-  `find src -type f`. Anything else is a missed move — log + fix.
+- [ ] **Phase 12 — final sweep.** `src/` should contain only:
+    - **`lib.rs`** — minimal: `pub mod transformer` + retained forward-glue `mod`s + back-compat `pub use katgpt_*` re-exports. **No domain logic.** It is the feature-aggregation surface (cross-crate feature combos in `Cargo.toml` like `cgsp`/`sr2am_configurator` that forward to multiple sibling crates) + the transformer-runtime home (`ForwardContext`). Stays `publish = false` per repo policy — only `katgpt-core` ships to crates.io.
+    - **`transformer.rs`** — owns `ForwardContext` (linchpin).
+    - retained forward-glue: `gdn2/forward.rs`, `hla/forward.rs`, `dash_attn/forward.rs` + `tests.rs`, `sp_kv_forward_mod.rs`, `attn_match_adaptive_cot.rs`, backend dispatch (`inference_backend.rs`, `inference_router.rs`, `gpu_backend.rs`, `ane_backend.rs`), `types.rs` (re-export shim).
+    - **DELETE `main.rs`** — it's a redundant binary bench runner; `examples/` (200+ entries) already covers every bench/demo need via `[[example]]`. The implicit `[[bin]]` forces the root crate to ship a binary it doesn't need. `rm src/main.rs`.
+  Audit with `find src -type f`. Anything beyond the list above is a missed move — log + fix.
 - [ ] **Phase 13 — commit + record.** Commit on `develop` with `refactor:`
   prefix per phase. Update this proposal status to **done** at Phase 12.
 
@@ -376,7 +378,15 @@ Ordering: foundation first (hoists, splits), then domain crates biggest-first.
 
 - Growing `katgpt-transformer` to own forward-pass logic (so `ForwardContext`
   + forward glue can finally leave root). That's a separate architectural
-  decision — it would unblock the last retained glue.
+  decision — it would unblock the last retained glue AND enable fully
+  deleting `lib.rs` (turning the repo into a pure `[workspace]` with no root
+  package). Deferred — the feature-aggregation role still needs a root package
+  unless every consumer (riir-ai, examples, tests) takes over cross-crate
+  feature orchestration itself.
+- Publishing `katgpt-rs` to crates.io. Policy is explicit and unchanged:
+  `publish = false` (Cargo.toml L9), `release = false` (release-plz.toml L11),
+  "only katgpt-core ships to crates.io." `lib.rs` existing does NOT make it
+  publishable — it's a local aggregator, not a shippable artifact.
 - Cross-repo moves (anything into riir-ai / riir-chain / riir-neuron-db /
   riir-train). This proposal is katgpt-rs-internal only.
 - Deleting `katgpt-deprecated` contents — exile only; deletion is a follow-up.
