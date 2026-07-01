@@ -613,6 +613,19 @@ pub use funcattn::{
 #[cfg(feature = "funcattn_structured_basis")]
 pub use funcattn::{make_dct_log_basis, make_haar_packet_basis};
 
+// Plan 353 — Head Substitution Gate (Gain-tier, opt-in). Small decision
+// struct that decides when a FuncAttn-style surrogate should substitute for
+// a real attention head, using the paper's IoU cheap-proxy (§3 Fig 5b r>0.9)
+// + cached FaithfulnessProfile veto (Plan 287 SinkAware cadence). NOT a new
+// primitive — the original draft proposed a redundant ProgramSynthesizedHead
+// primitive that was dropped after re-review identified FuncAttn (above) as
+// the existing primitive surface. Stays opt-in: Gain-tier, and the plan's
+// own Risk note flags it as borderline-thin for a feature flag.
+#[cfg(feature = "functional_substitution_gate")]
+pub mod functional_substitution;
+#[cfg(feature = "functional_substitution_gate")]
+pub use functional_substitution::{HeadSubstitutionGate, iou, worst_case_behavior_delta};
+
 // Cross-Resolution Spectral Transport — asymmetric-basis FUNCATTN (Plan 310,
 // Research 291, arxiv 2605.31559). Generalizes FUNCATTN to d_src ≠ d_dst,
 // enabling train-on-small-deploy-on-large latent transfer without retraining.

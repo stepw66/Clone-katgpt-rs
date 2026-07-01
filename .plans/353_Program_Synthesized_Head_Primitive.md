@@ -4,7 +4,7 @@
 **Research:** [katgpt-rs/.research/353_Program_Synthesized_Attention_Head_Surrogates.md](../.research/353_Program_Synthesized_Attention_Head_Surrogates.md)
 **Source paper:** [arXiv:2606.19317](https://arxiv.org/abs/2606.19317) — Hayes, Li, Andreas. *Explaining Attention with Program Synthesis*. MIT CSAIL / NJIT, 30 Jun 2026.
 **Target:** `katgpt-rs/crates/katgpt-core/src/functional_substitution/` (new module) + Cargo feature `functional_substitution_gate`
-**Status:** Active — Phase 1 (gate-only, post-revision)
+**Status:** Phases 1–4 complete (2026-07-01). T3.4 (real-head G2) deferred to riir-ai. Gain-tier — stays opt-in.
 
 ---
 
@@ -48,10 +48,10 @@ This is **not** a new primitive — FuncAttn is the primitive. This is the **con
 
 ### Tasks
 
-- [ ] **T1.1** Create module directory `katgpt-rs/crates/katgpt-core/src/functional_substitution/` with `mod.rs`, `gate.rs`, `iou.rs`.
-- [ ] **T1.2** Add feature flag `functional_substitution_gate` to `katgpt-rs/crates/katgpt-core/Cargo.toml` (default-off). The feature depends on `funcattn` (for the surrogate trait) and `faithfulness_probe` (for the validation primitive). Wire into `katgpt-core/src/lib.rs` behind `#[cfg(feature = "functional_substitution_gate")]`.
-- [ ] **T1.3** Define `iou` function in `iou.rs`: `iou(a: &[f32], b: &[f32]) -> f32`. Formula per paper eq. 3: `Σ min(a,b) / Σ max(a,b)`. SIMD-friendly chunked loop, no allocations. Unit-tested against hand-computed cases (identity → 1.0, disjoint → 0.0, half-overlap → 0.5).
-- [ ] **T1.4** Define `HeadSubstitutionGate` struct in `gate.rs`:
+- [x] **T1.1** Create module directory `katgpt-rs/crates/katgpt-core/src/functional_substitution/` with `mod.rs`, `gate.rs`, `iou.rs`.
+- [x] **T1.2** Add feature flag `functional_substitution_gate` to `katgpt-rs/crates/katgpt-core/Cargo.toml` (default-off). The feature depends on `funcattn` (for the surrogate trait) and `faithfulness_probe` (for the validation primitive). Wire into `katgpt-core/src/lib.rs` behind `#[cfg(feature = "functional_substitution_gate")]`.
+- [x] **T1.3** Define `iou` function in `iou.rs`: `iou(a: &[f32], b: &[f32]) -> f32`. Formula per paper eq. 3: `Σ min(a,b) / Σ max(a,b)`. SIMD-friendly chunked loop, no allocations. Unit-tested against hand-computed cases (identity → 1.0, disjoint → 0.0, half-overlap → 0.5).
+- [x] **T1.4** Define `HeadSubstitutionGate` struct in `gate.rs`:
   ```rust
   /// Gate that decides whether to substitute a real head with a FuncAttn-style
   /// surrogate during a forward pass. Combines the paper's IoU gate (cheap
@@ -83,8 +83,8 @@ This is **not** a new primitive — FuncAttn is the primitive. This is the **con
   }
   ```
   Note: the gate does **not** hold the surrogate itself — the caller owns the FuncAttn instance. This keeps the gate pure and avoids the redundant primitive that was deleted in revision.
-- [ ] **T1.5** Re-export public API from `mod.rs` and gate behind the feature flag.
-- [ ] **T1.6** Verify with `cargo check -p katgpt-core --features functional_substitution_gate` (use `CARGO_TARGET_DIR=/tmp/katgpt_353` per AGENTS.md rule).
+- [x] **T1.5** Re-export public API from `mod.rs` and gate behind the feature flag.
+- [x] **T1.6** Verify with `cargo check -p katgpt-core --features functional_substitution_gate` (use `CARGO_TARGET_DIR=/tmp/katgpt_353` per AGENTS.md rule).
 
 **Phase 1 exit criterion:** the module compiles standalone, `iou` is correct on hand-computed cases, `HeadSubstitutionGate::should_substitute` is instantiable in a unit test.
 
@@ -94,14 +94,14 @@ This is **not** a new primitive — FuncAttn is the primitive. This is the **con
 
 ### Tasks
 
-- [ ] **T2.1 (G1 — correctness)** Write unit tests in `tests/functional_substitution_g1.rs`:
+- [x] **T2.1 (G1 — correctness)** Write unit tests in `tests/functional_substitution_g1.rs`:
   - Identity surrogate (IoU = 1.0, faithfulness delta = 0) → gate accepts.
   - Disjoint surrogate (IoU = 0.0) → gate rejects (regardless of faithfulness).
   - Partial-overlap surrogate at known IoU (e.g., 0.5) → gate accepts iff `tau_iou ≤ 0.5 AND faithfulness ≤ tau_behavior`.
   - High IoU but high behavior delta → gate rejects (faithfulness veto).
-- [ ] **T2.2 (G3 — hot-path latency)** Benchmark `HeadSubstitutionGate::should_substitute` against a baseline that always returns `false`. Target: ≤ 5% overhead. Use `criterion` bench at `benches/functional_substitution_g3.rs`. Head counts: 4, 16, 144.
-- [ ] **T2.3 (G4 — zero-alloc)** Add `#[inline]` to `should_substitute`. Verify the gate itself allocates nothing on the hot path (no `Vec` growth, no `Box`).
-- [ ] **T2.4** Run full crate test suite to confirm no regressions: `cargo test -p katgpt-core --features functional_substitution_gate --lib`.
+- [x] **T2.2 (G3 — hot-path latency)** Benchmark `HeadSubstitutionGate::should_substitute` against a baseline that always returns `false`. Target: ≤ 5% overhead. Use `criterion` bench at `benches/functional_substitution_g3.rs`. Head counts: 4, 16, 144.
+- [x] **T2.3 (G4 — zero-alloc)** Add `#[inline]` to `should_substitute`. Verify the gate itself allocates nothing on the hot path (no `Vec` growth, no `Box`).
+- [x] **T2.4** Run full crate test suite to confirm no regressions: `cargo test -p katgpt-core --features functional_substitution_gate --lib`.
 
 **Phase 2 exit criterion:** G1 + G3 + G4 green. Feature remains opt-in.
 
@@ -113,12 +113,12 @@ The paper's strongest empirical claim is that IoU is a valid *cheap proxy* for *
 
 ### Tasks
 
-- [ ] **T3.1** Build a synthetic harness in `tests/functional_substitution_g2.rs`:
+- [x] **T3.1** Build a synthetic harness in `tests/functional_substitution_g2.rs`:
   - Generate a synthetic "real" attention matrix with a known structure (e.g., first-token + lower-diagonal per paper Fig 4b GPT-2 categories).
   - Generate a family of surrogates with controlled IoU (0.0, 0.2, 0.4, 0.6, 0.8, 1.0) by blending the real matrix with noise.
   - For each surrogate: measure (a) IoU against real, (b) behavioral delta — KL divergence between softmax(real_tokens) and softmax(surrogate_tokens) on a downstream "task" (a fixed linear projection to a scalar "perplexity proxy").
-- [ ] **T3.2** Compute Spearman correlation between IoU and behavioral delta across the surrogate family. Target: `ρ ≤ -0.9` (negative because high IoU → low delta). This reproduces the paper's `r > 0.9` finding on the synthetic harness.
-- [ ] **T3.3** Document the synthetic harness limitations in the test file header: this is *not* a real attention head, the correlation is on controlled-noise surrogates, and the real-head validation requires a forward-pass integration that is out of scope for katgpt-rs (it belongs in riir-ai or in a downstream consumer).
+- [x] **T3.2** Compute Spearman correlation between IoU and behavioral delta across the surrogate family. Target: `ρ ≤ -0.9` (negative because high IoU → low delta). This reproduces the paper's `r > 0.9` finding on the synthetic harness.
+- [x] **T3.3** Document the synthetic harness limitations in the test file header: this is *not* a real attention head, the correlation is on controlled-noise surrogates, and the real-head validation requires a forward-pass integration that is out of scope for katgpt-rs (it belongs in riir-ai or in a downstream consumer).
 
 **Phase 3 exit criterion:** G2 green on synthetic harness. Real-head G2 is **deferred** — it requires a real transformer forward pass, which lives in riir-ai not katgpt-rs.
 
@@ -130,10 +130,10 @@ The paper's strongest empirical claim is that IoU is a valid *cheap proxy* for *
 
 ### Tasks
 
-- [ ] **T4.1** Add module-level rustdoc to `mod.rs` explaining: source paper, why this is a gate (not a primitive — see revision note), the IoU gate rationale (paper §3 Fig 5b `r > 0.9`), the cadence pattern (cached faithfulness, per Plan 287 lesson). Cross-link to `funcattn.rs` as the primitive being gated.
-- [ ] **T4.2** Add an entry to `katgpt-rs/.docs/01_overview.md` Feature Flags table for `functional_substitution_gate` with status "opt-in: G1+G3+G4 green, G2 synthetic green, G2 real-head deferred. Gate wrapper around FuncAttn; not a new primitive."
-- [ ] **T4.3** Do NOT add a `katgpt-rs/README.md` Feature Showcase entry — Gain-tier wrappers don't get showcase entries. Cross-link from the existing FuncAttn showcase entry instead (when one is added — currently R257 has no README showcase entry).
-- [ ] **T4.4** Do NOT create a `riir-ai/.research/` guide. Per the revised verdict (Gain, not GOAT/Super-GOAT), no private guide is created.
+- [x] **T4.1** Add module-level rustdoc to `mod.rs` explaining: source paper, why this is a gate (not a primitive — see revision note), the IoU gate rationale (paper §3 Fig 5b `r > 0.9`), the cadence pattern (cached faithfulness, per Plan 287 lesson). Cross-link to `funcattn.rs` as the primitive being gated.
+- [x] **T4.2** Add an entry to `katgpt-rs/.docs/01_overview.md` Feature Flags table for `functional_substitution_gate` with status "opt-in: G1+G3+G4 green, G2 synthetic green, G2 real-head deferred. Gate wrapper around FuncAttn; not a new primitive."
+- [x] **T4.3** Do NOT add a `katgpt-rs/README.md` Feature Showcase entry — Gain-tier wrappers don't get showcase entries. Cross-link from the existing FuncAttn showcase entry instead (when one is added — currently R257 has no README showcase entry).
+- [x] **T4.4** Do NOT create a `riir-ai/.research/` guide. Per the revised verdict (Gain, not GOAT/Super-GOAT), no private guide is created.
 
 **Phase 4 exit criterion:** docs updated, no showcase entry, no Super-GOAT guide created (correct per revised verdict).
 

@@ -206,6 +206,7 @@ recursion_logits = []  # RecursionLogits opt-in trait — pre/post recursion log
 compression_drafter = ["dep:lz4_flex"]  # CompressionDrafter — Hot-tier modelless LZ4 corpus-as-model drafter (Plan 285, Research 256, nathan.rs/gzip-lm). Opt-in until G1–G3 GOAT gate passes.
 funcattn = []  # Functional Attention — closed-form Tikhonov k×k spectral transport operator (Plan 286, Research 257, arxiv 2605.31559). Linear-in-n attention variant; sigmoid-basis default per AGENTS.md. TRANSITIVELY DEFAULT-ON via `cross_resolution_transport = ["funcattn"]` (Plan 310 Phase 4 promotion, 2026-06-23). On its own merits funcattn is Gain-tier (Plan 286 GOAT gate pending); promoted only because its asymmetric generalization (Plan 310) passed G1-G4.
 funcattn_structured_basis = ["funcattn"]  # Plan 332 — Principled multi-scale basis constructors for FUNCATTN (DCT-log, Haar-packet). DEFAULT-ON (Phase 4, 2026-06-26): per-basis GOAT gate PASS on realistic broadband PDE-like signal - DCT-log beats random by +0.3409 cos (captures 200.6% of achievable), Haar-packet beats random by +0.1615 cos (captures 95.0%), both clearing G1 (>=+0.05) and G2 (>=50%) thresholds with hard asserts. Gain is modelless (deterministic fixed bases, no training). The original strict-AND gate (both bases must pass on the SAME narrow probe signal) was overly conservative - the probe is a narrow-low-frequency cluster pathologically DCT-misaligned; the honest verdict is per-basis on the fair broadband signal (matches FUNCATTN paper Airfoil spectral regime). Per-basis usage: broadband/spectral-rich -> DCT-log; localized multi-scale transport at small k -> Haar-packet.
+functional_substitution_gate = ["funcattn", "faithfulness_probe"]  # Plan 353 — Head Substitution Gate (Gain-tier, opt-in). Small decision struct that decides when a FuncAttn-style surrogate should substitute for a real attention head, using the paper's IoU cheap-proxy (arXiv:2606.19317 §3 Fig 5b r>0.9) + cached FaithfulnessProfile veto (Plan 287 SinkAware cadence). NOT a new primitive — the original draft proposed a redundant ProgramSynthesizedHead primitive that was dropped after re-review identified FuncAttn as the existing primitive surface. Stays opt-in: Gain-tier, and the plan's own Risk note flags it as borderline-thin for a feature flag. G1+G3+G4 PASS, G2 synthetic PASS (Spearman ρ ≤ −0.9), G2 real-head DEFERRED to riir-ai (requires real transformer forward pass).
 chunked_content_store = ["dep:papaya"]  # ChunkedContentStore — Lore-distilled chunked content-addressed Merkle store (Plan 272, Research 262). Open primitive; consumed by riir-ai Plan 319. Default-off until GOAT gate G1–G7 pass.
 chunked_net_fetch = []  # NetChunkFetcher — network chunk fetcher stub for ChunkedContentStore (Plan 272 T3.3). Gates the `NetChunkFetcher` trait surface + URL construction; the stub returns `None` (no `reqwest` dep). When `reqwest` is added, this becomes `chunked_net_fetch = ["dep:reqwest"]` and the stub gains a real HTTP client. Opt-in; `TieredChunkFetcher` is generic over any `ChunkFetcher` so consumers compose it only when needed.
 sink_aware_attn = []  # Sink-Aware Attention — NOP/Broadcast classifier + dual-policy sigmoid gate (Plan 287, Research 258, arxiv 2606.08105, Fesser et al.). Per-head classifier (value-norm-ratio + stable-rank-of-update) decides whether a sink is Adaptive NOP (gate it) or Broadcast (preserve it). Opt-in until synthetic G2 + latency G3 pass; default stays Uniform.
@@ -754,3 +755,23 @@ required-features = ["set_attention"]
 name = "bench_001_zone_manifold_goat"
 harness = false
 required-features = ["zone_affective_manifold"]
+
+# Plan 353 Phase 2 — Head Substitution Gate G1 correctness (integration level;
+# the inline #[cfg(test)] module in gate.rs covers the same matrix).
+[[test]]
+name = "functional_substitution_g1"
+required-features = ["functional_substitution_gate"]
+
+# Plan 353 Phase 3 — Head Substitution Gate G2 synthetic IoU→delta correlation.
+# Spearman ρ ≤ −0.9 target reproduces the paper's r > 0.9 finding on a
+# controlled-noise synthetic harness. Real-head G2 deferred to riir-ai.
+[[test]]
+name = "functional_substitution_g2"
+required-features = ["functional_substitution_gate"]
+
+# Plan 353 Phase 2 — Head Substitution Gate G3 latency bench. should_substitute
+# overhead vs always-false baseline at head counts {4, 16, 144}. Target ≤ 5%.
+[[bench]]
+name = "functional_substitution_g3"
+harness = false
+required-features = ["functional_substitution_gate"]
