@@ -97,7 +97,7 @@ This is fundamental: compression-based generation requires exploring multiple ca
 - [x] **Phase 7 executed**: re-bench with beam search + MatchLengthScorer. G1 improved 12× but still misses 3× bar. G2 worse due to beam search amplification.
 - [x] **Final demotion**: `compression_drafter` and `quest_compression_draft` stay opt-in. Neither promotes.
 - [x] **Honest negative result documented** (this file).
-- [ ] **Issue tracking**: `.issues/029_compression_beam_search_followups.md` to track the two paths that might still work:
+- [x] **Issue tracking**: Issue 029 (`compression_beam_search_followups`) closed + removed; this benchmark is the canonical record. The two paths that might still work:
   - **Per-NPC corpus** (different corpora → different outputs, addresses G1).
   - **Warm-tier positioning** (accept ms latency, position as Warm-tier quest generation for offline/NPC-sleep-cycle use, not Hot-tier runtime).
 

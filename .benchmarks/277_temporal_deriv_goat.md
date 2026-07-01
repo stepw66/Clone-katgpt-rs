@@ -199,7 +199,7 @@ All 4 fusions passed. T6.5 asks whether the "unified surprise bus" pattern (one 
 
 **All four use the same paper-default α-pair (0.3, 0.03).** The unified surprise bus works with a single α-schedule. Per T6.5, this warrants a **Super-GOAT escalation issue** — but per the plan, we do NOT claim Super-GOAT here. That requires a separate validation note.
 
-**Action:** Open `.issues/026_temporal_deriv_super_goat_escalation.md` referencing Research 243 §2.5.
+**Action:** Open (Issue 026 was closed + removed; this benchmark is the canonical record) referencing Research 243 §2.5.
 
 ---
 

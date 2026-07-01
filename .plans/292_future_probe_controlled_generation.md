@@ -301,7 +301,7 @@ Deferred. Only kicks in if Phase 5 promotes. Sketch:
   - [`.plans/274_curiosity_guided_self_play.md`](274_curiosity_guided_self_play.md) — sample-score-select skeleton
   - [`.plans/277_temporal_derivative_kernel.md`](277_temporal_derivative_kernel.md) — prediction-error channel
   - [`.plans/278_faithfulness_probe_modelless.md`](278_faithfulness_probe_modelless.md) — behavioral delta
-- **Closest cousin issue:** [`.issues/023_adaptive_gamma_from_entropy_forecast.md`](../.issues/023_adaptive_gamma_from_entropy_forecast.md) — linear forecast from cheap signal (land first if not already shipped)
+- **Closest cousin issue:** Issue 023 (closed + removed, GOAT failed -9.25%, kept opt-in) — linear forecast from cheap signal (land first if not already shipped)
 
 ---
 

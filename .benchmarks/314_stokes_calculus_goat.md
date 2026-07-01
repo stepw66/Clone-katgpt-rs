@@ -225,4 +225,4 @@ tests (stokes_calculus.rs).
 ### Cross-refs
 
 - Plan 318 — Coboundary Index for `boundary_flux_mass`
-- Issue 006 — `.issues/006_coboundary_index_for_boundary_flux.md` (CLOSED)
+- Issue 006 — originally tracked in Issue 006 (closed + removed; this benchmark is the canonical record).

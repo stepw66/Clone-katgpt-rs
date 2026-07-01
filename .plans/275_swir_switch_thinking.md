@@ -194,7 +194,7 @@ Goal: prove the GOAT gate on a real model (Gemma 2 or Qwen3 family already suppo
 
 **Exit criteria for Phase 3:** ✅ MET (synthetic scope). G3-G8, G1c, G2p verdict recorded in `.benchmarks/275_swir_switch_thinking_goat.md`. Decision: **keep opt-in** — G1/G2 (accuracy/efficiency on real model) deferred to riir-ai Plan 313. Phase 4 (default promotion) gated on riir-ai validation.
 
-**Key honest finding:** the convergence guard (CloseThink enqueued on every Explicit step in `[½c_max, c_max]`) caused a livelock that blocked termination on synthetic schedules (the inject-queue drain preempted the mode-switch logic, freezing switch_count). **FIXED** — the guards now fire only on the step where a Latent→Explicit switch just happened (`switched_to == Some(Explicit)`), matching the paper's one-shot-trigger intent. G2p now passes with the REAL `c_convergence_fraction=0.5` (no workaround). See `.issues/022_swir_convergence_guard_termination_interaction.md` (CLOSED).
+**Key honest finding:** the convergence guard (CloseThink enqueued on every Explicit step in `[½c_max, c_max]`) caused a livelock that blocked termination on synthetic schedules (the inject-queue drain preempted the mode-switch logic, freezing switch_count). **FIXED** — the guards now fire only on the step where a Latent→Explicit switch just happened (`switched_to == Some(Explicit)`), matching the paper's one-shot-trigger intent. G2p now passes with the REAL `c_convergence_fraction=0.5` (no workaround). See issue 022 (closed + removed, resolved).
 
 ---
 

@@ -1,7 +1,7 @@
 # Issue 001 — HLA Windowed Eigenbasis Recovery: GOAT gate
 
 **Date:** 2026-06-30
-**Issue:** `.issues/001_hla_windowed_eigenbasis_recovery.md`
+**Issue:** originally tracked in Issue 001 (closed + removed; this benchmark is the canonical record).
 **Feature:** `hla_eigenbasis_recovery` (opt-in)
 **Host:** M-series aarch64, release build, isolated `CARGO_TARGET_DIR=/tmp/issue001-target`
 **Run:** `cargo bench --bench hla_eigenbasis_bench --features hla_eigenbasis_recovery`

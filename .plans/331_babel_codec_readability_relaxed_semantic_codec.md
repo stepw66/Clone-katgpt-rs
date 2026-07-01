@@ -140,7 +140,7 @@ Ship a generic `BabelCodec` trait + two deterministic implementations:
 - Latent-level cousin (already shipped): [riir-ai/.research/133_NPC_Mind_Reading_Adaptive_Bandwidth_Guide.md](../../riir-ai/.research/133_NPC_Mind_Reading_Adaptive_Bandwidth_Guide.md), Plan 311
 - CompressionDrafter failure precedent: Plan 285, Plan 287, [`.benchmarks/285_compression_drafter_goat.md`](../.benchmarks/285_compression_drafter_goat.md)
 - Compressor-reader pair analog: Plan 025 (`LoraPair { reader, writer }`)
-- Super-GOAT-conditional follow-up: [`.issues/002_deterministic_babeltele_chain_commitment.md`](../.issues/002_deterministic_babeltele_chain_commitment.md)
+- Super-GOAT-conditional follow-up: Issue 002 (closed + removed, closed as moot — Plan 331 G2 FAILED, 1.14× vs 2×)
 
 ## TL;DR
 

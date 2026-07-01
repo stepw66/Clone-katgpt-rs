@@ -212,7 +212,7 @@ read as **superseded by this section**.
 ## References
 
 - [Research 320](../.research/320_Red_Queen_Godel_Machine_Selective_Erasure_Best_Belief.md) (corrected).
-- [Issue 004](../.issues/004_per_npc_selective_forgetting_super_goat_fusion.md) (CLOSED — not novel).
+- Issue 004 (closed + removed, not novel — covered by R158/R161/R155).
 - RQGM paper §3.5 (Controlled Utility Evolution), App. F Prop. 4 (best-belief lower bound).
 - `katgpt-core/src/pruners/bandit.rs` `sample_beta` (Jöhnk's) — the existing Beta *sampler* (exploration) that `best_belief_score` complements as the Beta *quantile* (conservative selection).
 - `katgpt-core/src/dec/cache.rs` `DecCache` — existing criterion-versioned cache (single-slot, with derived stats). Phase 3 trait extraction target.

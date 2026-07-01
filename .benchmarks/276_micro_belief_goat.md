@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-16
 **Plan:** [276_micro_recurrent_belief_state.md](../.plans/276_micro_recurrent_belief_state.md)
-**Issue:** [024_micro_belief_g1_4_attractor_latency.md](../.issues/024_micro_belief_g1_4_attractor_latency.md)
+**Issue:** originally tracked in `024_micro_belief_g1_4_attractor_latency.md` (closed + removed; this benchmark is the canonical record)
 **Features:** `micro_belief` (opt-in)
 
 ---
@@ -37,7 +37,7 @@ The G1.* gates test the *mechanics* (determinism, boundedness, bridge correctnes
 | **G1.1** Determinism | `g1_1_determinism` + `g1_1_determinism_across_instances` | ✅ PASS | Bit-identical `s_T` for fixed `(s_0, x_1..x_T)` across runs and across kernel instances with the same seed. |
 | **G1.2** Boundedness | `g1_2_boundedness_attractor` + `g1_2_boundedness_extreme_input` | ✅ PASS | `‖s_t‖` stays in `(-1, 1)` over 10 000 random inputs AND 100 extreme `±1e30` inputs. State is finite. |
 | **G1.3** Bridge ranking | `g1_3_bridge_ranking_preservation` | ✅ PASS | `dot_a > dot_b ⟺ σ(dot_a) > σ(dot_b)` over 1000 random triples. |
-| **G1.4** Latency | `g1_4_attractor_step_32_under_100ns` | ❌ **FAIL** | **273.2 ns/step** in release (Apple Silicon arm64), target <100 ns. See [Issue 024](../.issues/024_micro_belief_g1_4_attractor_latency.md). Root cause: 32 scalar `fast_sigmoid` calls + 64 small-dim `simd_dot_f32` calls. Does NOT block Phase 1 exit. |
+| **G1.4** Latency | `g1_4_attractor_step_32_under_100ns` | ❌ **FAIL** | **273.2 ns/step** in release (Apple Silicon arm64), target <100 ns. Originally tracked in Issue 024 (`024_micro_belief_g1_4_attractor_latency`, closed + removed; this benchmark is the canonical record). Root cause: 32 scalar `fast_sigmoid` calls + 64 small-dim `simd_dot_f32` calls. Does NOT block Phase 1 exit. |
 | **G1.5** Snapshot atomicity | `g1_5_snapshot_atomicity` | ✅ PASS | 4 reader threads × 50 000 steps, swapper hot-swaps the kernel every 100 µs. No reader ever sees NaN / Inf / torn state. |
 | **G1.6** K=1 ≡ Family A | `latent_thought::tests::k_equals_one_is_bit_identical_to_attractor` | ✅ PASS | `LatentThoughtKernel(seed=42, dim=16, k=1)` produces byte-identical state to `AttractorKernel(seed=42, dim=16)` over a 100-step sequence. |
 
@@ -185,7 +185,7 @@ cargo test -p katgpt-core --no-default-features \
 ## Cross-references
 
 - **Plan:** [276_micro_recurrent_belief_state.md](../.plans/276_micro_recurrent_belief_state.md) — Phases 1, 3, 5.
-- **Issue:** [024_micro_belief_g1_4_attractor_latency.md](../.issues/024_micro_belief_g1_4_attractor_latency.md) — G1.4 latency failure (~270 ns/step).
+- **Issue:** `024_micro_belief_g1_4_attractor_latency` — G1.4 latency failure (~270 ns/step) (closed + removed; this benchmark is the canonical record).
 - **Research:** [242_Topological_State_Tracking_Recurrent_Belief.md](../.research/242_Topological_State_Tracking_Recurrent_Belief.md)
 - **Source paper:** [arXiv:2604.17121](https://arxiv.org/abs/2604.17121) — Mozer et al., DeepMind, Jun 2026.
 - **Code:**

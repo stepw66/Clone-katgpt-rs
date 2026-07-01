@@ -80,7 +80,7 @@ Measured via `cargo test bench_turboquant -- --nocapture` on pre-Plan 051 code:
 |---|---|
 | `src/turboquant/kv_cache.rs` | Scratch buffers, `mat_vec_into`, `mat_vec_t_into`, `pack_indices_into`, `unpack_indices_into`, zero-alloc `store_key`/`store_value`/`dequantize_key_into`/`dequantize_value_into` |
 | `tests/bench_turboquant_zero_alloc.rs` | New: 4 benchmark tests with before/after comparison |
-| `.issues/054_turboquant_zero_alloc.md` | New: issue documenting the problem |
+| 054 (turboquant zero-alloc) | Issue closed + removed: documented the problem |
 | `.plans/051_turboquant_zero_alloc.md` | This file |
 
 ## Key Design Decisions

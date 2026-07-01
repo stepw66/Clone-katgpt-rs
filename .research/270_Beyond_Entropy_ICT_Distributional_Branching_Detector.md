@@ -46,7 +46,7 @@ fusion on real NPCs) live in riir-ai Plan 324.
 | Gate | Target | Measured | Verdict |
 |------|--------|----------|---------|
 | G1 | β distinguishes where H₁ cannot (paper Fig 1a) | ΔH₁ = 1.2e-7, Δβ = 0.12 | ✅ PASS |
-| G2 | Median inflection ∈ [5%, 20%] (paper §A.4.1 ~10%) | median 37.5% on synthetic-NPC suite | ⚠️ BORDERLINE-FAIL — paper's 10% is LLM-token-specific. [Issue 033](../.issues/033_ict_g2_inflection_37_percent_npc_domain.md). Does NOT block G3. |
+| G2 | Median inflection ∈ [5%, 20%] (paper §A.4.1 ~10%) | median 37.5% on synthetic-NPC suite | ⚠️ BORDERLINE-FAIL — paper's 10% is LLM-token-specific. [Issue 033](../.issues/033_ict_g2_inflection_37_percent_npc_domain.md) (Issue 033 was closed + removed; documented finding, k_percent tunable via API). Does NOT block G3. |
 | G3 ⭐ | Spearman ρ(H₁, JS-uniqueness) < 0.5 (**MAKE-OR-BREAK**) | ρ = 0.0652, 95% CI [-0.017, 0.150] | ✅ **PASS** — Super-GOAT verdict stands. |
 | G4 | ≤ 50µs/call (K=8, action_dim=32) | mean 1.96µs, p99 2.00µs | ✅ PASS (25× headroom) |
 | G5 | 0 allocs/call after warmup | 0 across 1000 calls | ✅ PASS |

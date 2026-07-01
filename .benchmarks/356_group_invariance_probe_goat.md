@@ -69,4 +69,4 @@ The primitive is correct and zero-alloc but has no shipped consumer yet. Promoti
 
 - Plan: [`katgpt-rs/.plans/356_group_invariance_probe.md`](../.plans/356_group_invariance_probe.md)
 - Research: [`katgpt-rs/.research/355_LieFlow_Symmetry_Discovery_Group_Orbit_Support.md`](../.research/355_LieFlow_Symmetry_Discovery_Group_Orbit_Support.md)
-- Fusion follow-up: [`katgpt-rs/.issues/011_lieflow_fusion_super_goat_investigation.md`](../.issues/011_lieflow_fusion_super_goat_investigation.md)
+- Fusion follow-up: Issue 011 `lieflow_fusion_super_goat_investigation` (closed + removed; investigation complete; this benchmark is the canonical record).

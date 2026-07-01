@@ -189,7 +189,7 @@ Issue 004 tracks the closure with the full Q1–Q4 evidence. **No Super-GOAT gui
 - `katgpt-rs/crates/katgpt-core/src/best_belief.rs` — one new open primitive (`best_belief_score`, `select_best_belief`). Feature gate `best_belief` (opt-in).
 - `katgpt-rs/crates/katgpt-core/src/cache_version.rs` — DRY `CriterionVersionedCache<V>` trait + impls for `DecCache` + `ZoneGeometryCache`. Gain-tier, deferred.
 - Plan: [`katgpt-rs/.plans/336_controlled_utility_primitives.md`](../.plans/336_controlled_utility_primitives.md) (revised — Phase 1 `best_belief` only is GOAT; Phase 3 trait is Gain).
-- Issue: [`katgpt-rs/.issues/004_per_npc_selective_forgetting_super_goat_fusion.md`](../.issues/004_per_npc_selective_forgetting_super_goat_fusion.md) — CLOSED, not Super-GOAT.
+- Issue: `katgpt-rs/.issues/004_per_npc_selective_forgetting_super_goat_fusion.md` (Issue 004 was closed + removed; covered by R158/R161/R155) — CLOSED, not Super-GOAT.
 
 **GOAT gate (for `best_belief` only — must pass before promotion to default):**
 - **G1 (correctness):** Property test vs reference Beta quantile (e.g. `statrs` test-only dev-dep): max abs error < 1e-4 across grid of `(S ∈ {0..100}, F ∈ {0..100}, ε ∈ {0.01, 0.05, 0.1, 0.25, 0.5})`.

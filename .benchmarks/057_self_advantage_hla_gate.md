@@ -11,7 +11,7 @@
 
 **Date:** 2026-06-17
 **Plan:** [283_self_advantage_recursion_gate.md](../.plans/283_self_advantage_recursion_gate.md) — Phase 5, T5.1
-**Issue:** [028_self_advantage_gate_integration_followups.md](../.issues/028_self_advantage_gate_integration_followups.md)
+**Issue:** originally tracked in `028_self_advantage_gate_integration_followups.md` (closed + removed; integrations deferred per Plan 283; this benchmark is the canonical record).
 **Feature:** `self_advantage_gate` (root) → `katgpt-core/self_advantage_gate` (forwarded)
 **Bench:** `crates/katgpt-core/benches/self_advantage_hla_bench.rs`
 **Paper:** [arxiv:2511.16886](https://arxiv.org/abs/2511.16886) — Eq. 18 advantage-margin gate

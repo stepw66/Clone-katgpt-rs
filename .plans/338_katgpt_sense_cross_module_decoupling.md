@@ -1,6 +1,6 @@
 # Plan 338: katgpt-sense Cross-Module Decoupling (Issue 007 Phase E Tier 2 #7)
 
-> **Origin:** [Issue 007](../../../riir-ai/.issues/007_katgpt_runtime_ip_exfiltration_from_public_mit_repo.md) Phase E Tier 2 #7
+> **Origin:** Issue 007 (riir-ai, closed + removed) Phase E Tier 2 #7
 > **Status:** COMPLETE (2026-07-01) — defects corrected, Strategy C Revised executed. Phase 1–4 all green (incl. REQUIRED riir-engine/riir-games cross-repo gates). Phase 5 deferred (tracker path was inaccurate).
 > **Branch:** `develop`
 > **Created:** 2026-06-28

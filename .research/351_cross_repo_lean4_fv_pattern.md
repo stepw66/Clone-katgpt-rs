@@ -1,8 +1,8 @@
 # Research 351: Cross-Repo Lean 4 Formal Verification Pattern — The Super-GOAT Capture Protocol
 
-> **Cross-reference note.** Coordinator: `katgpt-rs/.issues/012_cross_repo_fv_rollout_coordinator.md` (Phases 1–4 COMPLETE).
+> **Cross-reference note.** Coordinator: `katgpt-rs/.issues/012_cross_repo_fv_lean4_rollout_coordinator.md` (Phases 1–4 COMPLETE).
 > Capability-face doc: `riir-ai/.research/003_Commercial_Open_Source_Strategy_Verdict.md` §"Formal Verification".
-> Bug-finding case study: `riir-ai/.issues/354_lora_weight_version_torn_read.md`.
+> Bug-finding case study: `riir-ai/.issues/354_lora_weight_version_torn_read.md` (riir-ai issue, closed + removed; all tasks DONE).
 > Predecessor (gap analysis): `katgpt-rs/.research/292_Bridge_Neuro_Symbolic_Formal_Verification_Gap.md` (written when zero proofs existed).
 > **Date:** 2026-06-30
 > **Status:** Active — Super-GOAT process IP (the FV rollout pattern itself is the reusable capture).
@@ -169,11 +169,11 @@ The scaffold is deliberately small. The pattern's value is that it's *repeatable
 
 ## 7. Cross-references
 
-- **Coordinator:** `katgpt-rs/.issues/012_cross_repo_fv_rollout_coordinator.md` (Phases 1–4 COMPLETE, 79 thms)
+- **Coordinator:** `katgpt-rs/.issues/012_cross_repo_fv_lean4_rollout_coordinator.md` (Phases 1–4 COMPLETE, 79 thms)
 - **Capability-face:** `riir-ai/.research/003_Commercial_Open_Source_Strategy_Verdict.md` §"Formal Verification"
 - **Predecessor (gap analysis):** `katgpt-rs/.research/292_Bridge_Neuro_Symbolic_Formal_Verification_Gap.md`
-- **Bug-finding case study:** `riir-ai/.issues/354_lora_weight_version_torn_read.md`
-- **riir-ai FV sibling issue:** `riir-ai/.issues/348_freeze_thaw_runtime_lean_proofs.md` (T1–T8 all done)
+- **Bug-finding case study:** `riir-ai/.issues/354_lora_weight_version_torn_read.md` (riir-ai issue, closed + removed; all tasks DONE)
+- **riir-ai FV sibling issue:** `riir-ai/.issues/348_freeze_thaw_runtime_lean_proofs.md` (riir-ai issue, closed + removed; all tasks DONE) (T1–T8 all done)
 - **Sibling proof instances:** `katgpt-rs/.proofs/KatgptProof/` (public), `riir-chain/.proofs/RiirChainProof/`, `riir-neuron-db/.proofs/NeuronDbProof/`, `riir-ai/.proofs/RiirAiProof/`
 - **Past bugs prevented:** `merkle_root` (riir-neuron-db AGENTS.md), `can_freeze` (riir-neuron-db Plan 002 Phase 5), AC-Prefix G1 (`katgpt-rs` Plan 313), torn-read (riir-ai Issue 354)
 

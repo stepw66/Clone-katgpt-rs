@@ -1,7 +1,7 @@
 # Plan 317: Circulation Integral — Rank-2 Stokes Wrapper (Issue 005 Resolution)
 
 **Date:** 2026-06-24
-**Status:** **COMPLETE** — committed as `3a53b8e4` on `develop`. `circulation_integral` implemented + tested + benchmarked. G-C2 fails empirically (as predicted). Primitive is correct. `stokes_calculus` stays opt-in. Resolves [`.issues/005_stokes_calculus_g_c_turn_penalty.md`](../.issues/005_stokes_calculus_g_c_turn_penalty.md).
+**Status:** **COMPLETE** — committed as `3a53b8e4` on `develop`. `circulation_integral` implemented + tested + benchmarked. G-C2 fails empirically (as predicted). Primitive is correct. `stokes_calculus` stays opt-in. Resolves issue 005 (closed + removed, resolved).
 **Origin:** Issue 005 (Plan 314 Phase 3 G-C structural fail)
 **Target:** `katgpt-rs/crates/katgpt-core/src/dec/stokes_calculus.rs` (+ bench + tests)
 **Feature gate:** `stokes_calculus` (root alias for `katgpt-core/dec_operators`) — stays opt-in.

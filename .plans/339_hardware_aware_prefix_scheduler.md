@@ -142,7 +142,7 @@ graph TD
 
 ## Cross-references
 
-- Issue: `.issues/003_hardware_aware_prefix_scheduler.md`
+- Issue: 003 (closed + removed, resolved — Plan 339 shipped)
 - Research: `.research/316_DSpark_Confidence_Scheduled_Speculative_Decoding.md`
 - Per-request analog: `src/speculative/caddtree_budget.rs`, `src/speculative/budget.rs`
 - Survival-prob producer: `src/speculative/acceptance_forecast.rs` (`AcceptanceForecast`, Bebop Plan 243)

@@ -853,7 +853,7 @@ where
 | G3 feature isolation | `cargo check` clean both ways | ✅ PASS |
 | G4 per-cycle overhead | 831.3 ns/cycle (release, isolated `--test-threads=1`, Apple Silicon arm64) | ✅ PASS |
 | P2 1000 NPCs/tick | 808 µs/tick (0.81 µs/NPC, Rayon 8 chunks, isolated) | ✅ PASS |
-| P3 allocations | 13.00 allocs/cycle (bounded, not zero) | ✅ PASS (bounded) — optimization tracked in `.issues/021_cgsp_cycle_allocation_reduction.md` |
+| P3 allocations | 13.00 allocs/cycle (bounded, not zero) | ✅ PASS (bounded) — optimization is incremental (allocations are bounded, not on the hot path) |
 | G6 latent/raw boundary | only f32+bool+u32 in CycleResult | ✅ PASS |
 
 **Promotion decision:** KEEP OPT-IN. CGSP is architecturally sound and plasma-tier fast, but its value proposition is collapse recovery + degenerate-batch gating — *not* target-seeking. Promote to default only after riir-ai Plan 299 validates on real game domains.

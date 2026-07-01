@@ -200,4 +200,4 @@ for the integration guide.
 - [katgpt-rs/.research/257_Functional_Attention_Spectral_Transport_Operator.md](../.research/257_Functional_Attention_Spectral_Transport_Operator.md) — FUNCATTN research
 - [katgpt-rs/.research/219_Topological_Neural_Operators_DEC_Inference.md](../.research/219_Topological_Neural_Operators_DEC_Inference.md) — TNO/DEC (topological cousin)
 - [katgpt-rs/.research/280_Resolution_Tiered_Deterministic_Commitment.md](../.research/280_Resolution_Tiered_Deterministic_Commitment.md) — resolution tiering (chain-side cousin)
-- [katgpt-rs/.issues/001_apollonian_sphere_manifold_exploration.md](../.issues/001_apollonian_sphere_manifold_exploration.md) — F3 speculative fusion target
+- Issue 001 (closed + removed, promoted to Plan 332, default-on) — F3 speculative fusion target

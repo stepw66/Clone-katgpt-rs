@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-24
 **Status:** In Progress
-**Origin:** Issue 006 (`.issues/006_coboundary_index_for_boundary_flux.md`)
+**Origin:** Issue 006 (closed + removed, resolved)
 **Parent:** Plan 314 (Stokes Calculus Wrappers), Plan 251 (DEC Operators / CellComplex)
 **Severity:** Low — G-B already passes at 5.36×; this widens the margin for multi-query scenarios.
 

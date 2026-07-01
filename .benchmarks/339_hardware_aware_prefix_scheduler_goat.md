@@ -3,7 +3,7 @@
 **Date:** 2026-06-28
 **Feature:** `hardware_aware_scheduler` (opt-in, default-OFF)
 **Plan:** [`.plans/339_hardware_aware_prefix_scheduler.md`](../.plans/339_hardware_aware_prefix_scheduler.md)
-**Issue:** [#003](../.issues/003_hardware_aware_prefix_scheduler.md) (resolved by this implementation)
+**Issue:** originally tracked in `003_hardware_aware_prefix_scheduler` (resolved + removed; this benchmark is the canonical record)
 **Source:** DSpark (DeepSeek-AI, 2026) §3.2.2, Algorithm 1, Appendix A
 **Research:** [`.research/316_DSpark_Confidence_Scheduled_Speculative_Decoding.md`](../.research/316_DSpark_Confidence_Scheduled_Speculative_Decoding.md)
 

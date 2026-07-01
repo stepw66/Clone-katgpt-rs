@@ -1,6 +1,6 @@
 # 001 Pruners Optimization Plan
 
-Implementation of `.issues/001_pruners_optimization.md` findings.
+Implementation of issue 001 (pruners optimization) findings — issue closed + removed (extracted to `go/utils`).
 
 ## Tasks
 
