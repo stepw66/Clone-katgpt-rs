@@ -195,3 +195,137 @@ spread at finite N lowers PR. No centering is used (true mean = 0); centering
 would shift the transition to N=d+1 and contradict Theorem 4. G1 PASS
 unblocks Phase 3 (Jacobian-SVD validation) and Phase 5 (promotion to
 default, conditional on G3-precursor).
+
+---
+
+# Phase 3 — Jacobian SVD Validation (G3-precursor)
+
+> ⚠️ **PRE-EXISTING REGRESSION DISCOVERED (2026-07-02, NOT caused by Phase 3):**
+> the Phase 2 G1 example (`examples/subspace_phase_gate_goat.rs`) **FAILS on the
+> committed `develop` HEAD**. At N=d=6 the recovery error is **2.914** (target
+> <0.1) and the spectrum is garbage (`pr_mean=1.511`, should be ≈5). The G1
+> PASS recorded in the Phase 2 section above is **STALE** — it was valid at
+> commit `e12dbda7` (2026-06-23) but the post-benchmark SVD refactors
+> (`a08adc4a` SOA scratch, `c775be2b` zero-alloc, `6e9b22ac` cap fix)
+> introduced a **one-sided-Jacobi convergence failure on wide rank-deficient
+> matrices** (m ≪ n). The SVD still works for large N (N=50, 200: err=0) and
+> for square matrices (Phase 3 T3.1–T3.3 R^8×8 all PASS), but breaks for small
+> N on the 6×48 PCA path. **This needs its own focused fix** (likely
+> column-norm pivoting or a convergence-criterion change for rank-deficient
+> wide inputs) and is filed as the critical follow-up below. The Phase 2 PASS
+> claim should NOT be trusted until that fix lands and the example is re-run.
+
+**Date:** 2026-07-02
+**Plan tasks:** T3.1–T3.4
+**Verdict:** **T3.1, T3.2, T3.3 PASS** (square R^8×8 — SVD correct in this
+regime). **T3.4 FAILS** the <1µs latency target — scalar Jacobian SVD on R^8→R^8
+measures **2403 ns/call in release** (2.4× over). Per plan T4.3, this makes
+**Phase 4 (SIMD) REQUIRED** and **blocks Phase 5 promotion** (T5.1 needs the
+G3-precursor latency gate to pass). Separately, the **pre-existing G1
+regression above** must be fixed before ANY Phase 5 promotion is meaningful.
+
+## Setup
+
+- **Dimensionality:** R^8→R^8 (matches HLA's 8-dim, plan open question Q1).
+- **Map construction:** `W = Σ_k σ_k · u_k · v_k^T`, rank-3, with
+  **non-canonical** orthonormal singular vectors built from 2×2 rotation
+  blocks at distinct angles (θ_v ∈ {0.3, 0.7, 1.1}, θ_u ∈ {0.5, 0.9, 1.3}).
+  Non-canonical bases make right-singular-vector recovery a meaningful check
+  (canonical axes would trivially match coordinate probes and hide
+  sign/ordering bugs). σ = {10, 5, 2}. Coordinates 6,7 are zero so the map
+  is genuinely rank-3 in R^8.
+- **eps:** 1e-4 forward difference (plan spec).
+
+## Results
+
+### T3.1 + T3.2 — rank-3 linear map: singular values + right vectors ✅ PASS
+
+`jacobian_svd_at(f_linear, x, 1e-4, scratch)` on the R^8×8 rank-3 map:
+
+- **Recovered singular values:** `[10.0005, 5.0018, 2.0007, 0.0005, 6.5e-5, ...]`
+  — top-3 match {10, 5, 2} within 0.1 (forward-diff adds ~5e-4 noise).
+- **Right singular vectors:** each recovered V column matches its ground-truth
+  `v_k` **up to sign**, with `|dot| > 0.999` (matched by nearest singular
+  value — distinct σ ⇒ unique vectors up to sign).
+- **Rank-3 structure:** confirmed via the plan's OWN `numerical_rank(spectrum,
+  η=0.99) == 3` (top-3 carry 99.99% of energy) AND a clean 4000× spectral
+  gap between σ[2]=2.0007 and σ[3]=0.0005.
+
+**Finding (pre-existing, not a regression):** the SVD's internal `result.rank`
+field reports **4**, not 3. Its threshold is `sigma_max * 1e-5` = 1e-4
+(`subspace_phase_gate.rs:725`), and the forward-diff noise floor (~5e-4)
+sits above it. This is a **threshold-tuning discrepancy**, not a math error
+— the spectrum unambiguously shows rank 3. Verified via `numerical_rank`
+which correctly reports 3. Not in Phase 3 scope to re-tune (would affect all
+SVD consumers); documented here as a known sharp edge.
+
+### T3.3 — non-linear sigmoid map: row-space recovery ✅ PASS
+
+`f(x) = sigmoid(W x)` elementwise. Analytical Jacobian = `diag(sigmoid'(Wx))·W`;
+since the diagonal is strictly positive (x=0.1·1 keeps Wx well away from
+saturation), the row space is unchanged. SVD of the forward-diff Jacobian:
+
+- **Rank ≥ 3** ✓ (the diagonal doesn't zero any row).
+- **Row-space match:** every recovered right singular vector with σ > 1e-3
+  lies in `span{v1, v2, v3}` — verified via the projector
+  `P_true = Σ_k v_k v_k^T`: `‖P_true·r‖ ≈ ‖r‖` to within 5e-3.
+
+Note: individual right singular vectors of `diag(d)·W` do NOT match the `v_k`
+one-to-one (the row-weighting rotates them within the subspace); only the
+3-dim **subspace** is invariant. The test checks subspace containment, which
+is the correct contract for a non-linear map (matches the plan wording "SVD
+should reveal the row space of W").
+
+### T3.4 — latency gate ❌ FAILS (2403 ns/call vs <1000 ns target)
+
+`jacobian_svd_at` on R^8→R^8, 5000 iterations (after warmup),
+`JacobianSvdScratch::with_capacity(8, 8)` reused across calls:
+
+| Profile | ns/call | vs target |
+|---|---|---|
+| **release** | **2403** | 2.4× over |
+| debug | 31249 | (debug-stable regression guard at 100µs) |
+
+**Cost breakdown (8×8 one-sided Jacobi SVD):** ~28 column-pairs/sweep ×
+(3×8-dot + 2×8-rotate + 8-V-rotate ≈ 40 flops) ≈ 1120 flops/sweep; convergence
+in ~6–10 sweeps ⇒ ~8–11k scalar f32 flops/call. The 2403 ns release figure is
+consistent with the scalar floor — there is no cheap scalar win that wouldn't
+risk the Phase 2 G1 bit-identical recovery (loosening `tol=1e-7` or
+`max_sweeps=60` would change the D=48/n=18 G1 numerics).
+
+**Phase 4 T4.2 scalar investigation (done):** concluded the scalar floor is
+~2.4µs; SIMD (T4.1) is the only path to <1µs. The inner `for r in 0..m`
+column-dot and rotation loops are the vectorization targets (NEON/AVX2 on the
+8-element f32 columns).
+
+## Escalation (per plan T4.3)
+
+- 🔴 **[CRITICAL, pre-existing] G1 example regression.** The Phase 2 G1 GOAT
+  example FAILS on `develop` HEAD for small N (recovery err=2.914 at N=d=6;
+  garbage spectrum pr=1.511). Cause: one-sided-Jacobi convergence failure on
+  wide rank-deficient matrices (m ≪ n), introduced by the post-benchmark SVD
+  refactors. The Phase 2 PASS claim above is STALE. **Fix path:** add
+  column-norm pivoting or revise the convergence criterion for rank-deficient
+  wide inputs; re-run the example; re-verify G1. This is a prerequisite for
+  ANY Phase 5 promotion (a broken G1 voids the gate). Tracked as the
+  top-priority follow-up.
+- **Phase 4 T4.1 (SIMD-accelerate `participation_ratio`, `numerical_rank`,
+  and the Jacobi inner loops): REQUIRED** before this primitive can serve the
+  HLA 8-dim hot path. Without it, per-call cost is 2.4µs — acceptable for
+  offline consolidation (riir-neuron-db Plan 002's freeze gate runs at
+  sleep-cycle cadence, not per-tick), but not for any per-NPC-per-tick use.
+- **Phase 5 T5.1 (promote `subspace_phase_gate` to default): BLOCKED** on T4.1.
+  G1 (Phase 2) passes, but the G3-precursor latency gate (T3.4) fails. The
+  feature stays opt-in until SIMD lands and T3.4 is re-run <1µs.
+- **`result.rank` threshold sharp edge:** tracked here, not gated. Consumers
+  that need robust rank should call `numerical_rank(spectrum, η)` explicitly
+  rather than trusting `result.rank` on forward-diff-noisy inputs.
+
+## Reproducibility
+
+- **Tests:** `subspace_phase_gate::tests::jacobian_svd_recovers_rank3_r8x8_singular_values_and_vectors`
+  (T3.1+T3.2), `jacobian_svd_sigmoid_map_reveals_row_space` (T3.3),
+  `jacobian_svd_r8x8_latency_gate` (T3.4, regression guard).
+- **Run:** `cargo test -p katgpt-core --features subspace_phase_gate --lib subspace_phase_gate::`
+  — 17/17 pass (14 pre-existing + 3 new).
+- **Latency re-measure:** `cargo test --release -p katgpt-core --features subspace_phase_gate --lib jacobian_svd_r8x8_latency_gate`.

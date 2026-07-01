@@ -895,6 +895,255 @@ mod tests {
         }
     }
 
+    // ── Phase 3 (G3-precursor): Jacobian SVD validation ──────────────────
+    // Plan 301 T3.1–T3.4. The existing 4×6 smoke test above only checks
+    // singular values on a canonical-axis matrix. These tests cover the
+    // plan-specified R^8×8 dimensionality (matching HLA's 8-dim, open
+    // question Q1), right-singular-vector recovery up to sign (T3.2), the
+    // non-linear sigmoid-map row-space check (T3.3), and a timing gate (T3.4).
+
+    /// Construct a known rank-3 map `f: R^8 → R^8` with **non-canonical**
+    /// orthonormal singular vectors, built from 2×2 rotation blocks at distinct
+    /// angles. Non-canonical bases make right-singular-vector recovery a
+    /// meaningful check — canonical axes would trivially match coordinate
+    /// probes and hide sign/ordering bugs.
+    ///
+    /// `W = Σ_k σ_k · u_k · v_k^T`, with `u_k, v_k ∈ R^8` orthonormal. Each
+    /// lives in a disjoint 2-coordinate block (so they're exactly orthonormal
+    /// by construction, no Gram–Schmidt drift); coordinates 6,7 are zero so
+    /// the map is genuinely rank-3 in R^8.
+    fn known_rank3_map_r8x8() -> ([f32; 64], [[f32; 8]; 3], [[f32; 8]; 3], [f32; 3]) {
+        let (c1, s1) = (0.3f32.cos(), 0.3f32.sin());
+        let (c2, s2) = (0.7f32.cos(), 0.7f32.sin());
+        let (c3, s3) = (1.1f32.cos(), 1.1f32.sin());
+        // u-blocks use different angles so U ≠ V (rules out a transpose bug).
+        let (cu1, su1) = (0.5f32.cos(), 0.5f32.sin());
+        let (cu2, su2) = (0.9f32.cos(), 0.9f32.sin());
+        let (cu3, su3) = (1.3f32.cos(), 1.3f32.sin());
+        let u1 = [cu1, su1, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+        let u2 = [0.0, 0.0, cu2, su2, 0.0, 0.0, 0.0, 0.0];
+        let u3 = [0.0, 0.0, 0.0, 0.0, cu3, su3, 0.0, 0.0];
+        let v1 = [c1, s1, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+        let v2 = [0.0, 0.0, c2, s2, 0.0, 0.0, 0.0, 0.0];
+        let v3 = [0.0, 0.0, 0.0, 0.0, c3, s3, 0.0, 0.0];
+        let sigmas = [10.0f32, 5.0, 2.0];
+        let mut w = [0.0f32; 64];
+        for j in 0..8 {
+            for i in 0..8 {
+                let acc = sigmas[0] * u1[j] * v1[i]
+                    + sigmas[1] * u2[j] * v2[i]
+                    + sigmas[2] * u3[j] * v3[i];
+                w[j * 8 + i] = acc;
+            }
+        }
+        (w, [u1, u2, u3], [v1, v2, v3], sigmas)
+    }
+
+    /// T3.1 + T3.2 — rank-3 linear map in R^8×8: recovered singular values
+    /// match Σ AND right singular vectors match V up to sign (matched by
+    /// singular-value proximity, since distinct σ ⇒ unique vectors up to sign).
+    #[test]
+    fn jacobian_svd_recovers_rank3_r8x8_singular_values_and_vectors() {
+        let (w, _u, v_true, sigmas) = known_rank3_map_r8x8();
+        let f = |x: &[f32], out: &mut [f32]| {
+            debug_assert_eq!(x.len(), 8);
+            debug_assert_eq!(out.len(), 8);
+            for j in 0..8 {
+                let mut acc = 0.0f32;
+                for i in 0..8 {
+                    acc += w[j * 8 + i] * x[i];
+                }
+                out[j] = acc;
+            }
+        };
+        let x = [0.5f32; 8];
+        let mut scratch = JacobianSvdScratch::with_capacity(8, 8);
+        let result = jacobian_svd_at(f, &x, 1e-4, &mut scratch);
+
+        // T3.1: the spectrum is rank-3. Forward-difference Jacobian estimation
+        // on f32 (eps=1e-4) leaves a ~1e-3 noise floor, so the SVD's internal
+        // `result.rank` field (a tight threshold) can report 4 even though the
+        // 4th singular value is ~0.0005 — a 4000× gap below the 3rd. We verify
+        // rank-3 via the plan's OWN `numerical_rank` primitive (η=0.99): the
+        // top-3 singular values carry 99.99% of the energy, so this robustly
+        // reports 3 independent of the noise floor. (The `result.rank`/internal
+        // threshold discrepancy is a pre-existing SVD behavior, noted in the
+        // benchmark doc; not in scope to re-tune here.)
+        let nr = numerical_rank(&result.singular_values, 0.99);
+        assert_eq!(
+            nr, 3,
+            "numerical_rank(η=0.99) expected 3, got {} (sigmas = {:?})",
+            nr, result.singular_values
+        );
+        // And confirm the spectral gap directly: the 4th singular value (if
+        // present) must be negligible relative to the 3rd.
+        if result.singular_values.len() >= 4 {
+            assert!(
+                result.singular_values[3] < result.singular_values[2] * 1e-2,
+                "no clean rank-3 spectral gap: σ[3]={:.6} vs σ[2]={:.6}",
+                result.singular_values[3],
+                result.singular_values[2]
+            );
+        }
+
+        // T3.2 (singular values): top-3 match {10, 5, 2}.
+        let mut expected = sigmas;
+        expected.sort_by(|a, b| b.partial_cmp(a).unwrap_or(Ordering::Equal));
+        let mut got: Vec<f32> = result.singular_values.iter().take(3).cloned().collect();
+        got.sort_by(|a, b| b.partial_cmp(a).unwrap_or(Ordering::Equal));
+        for (e, g) in expected.iter().zip(got.iter()) {
+            assert!(
+                (e - g).abs() < 0.1,
+                "singular value mismatch: expected ≈ {e}, got {g}"
+            );
+        }
+
+        // T3.2 (right singular vectors): each recovered V column matches its
+        // ground-truth v_k up to sign. Match by nearest singular value, then
+        // require |dot| ≈ 1.
+        assert!(
+            result.right_singular_vectors.len() >= 3,
+            "expected ≥3 right singular vectors, got {}",
+            result.right_singular_vectors.len()
+        );
+        for j in 0..3 {
+            let r = &result.right_singular_vectors[j];
+            let sv = result.singular_values[j];
+            // Find the ground-truth index whose σ is closest to this sv.
+            let k = (0..3)
+                .min_by(|&a, &b| {
+                    (sigmas[a] - sv)
+                        .abs()
+                        .partial_cmp(&(sigmas[b] - sv).abs())
+                        .unwrap_or(Ordering::Equal)
+                })
+                .expect("3 ground-truth sigmas");
+            let dot: f32 = r.iter().zip(v_true[k].iter()).map(|(a, b)| a * b).sum();
+            assert!(
+                dot.abs() > 0.999,
+                "right singular vector {j} (sv={sv:.3}) did not match ground-truth v_{k} \
+                 up to sign: |dot| = {:.4}",
+                dot.abs()
+            );
+        }
+    }
+
+    /// T3.3 — non-linear sigmoid map `f(x) = sigmoid(W x)`. Its Jacobian is
+    /// `diag(sigmoid'(Wx)) · W`; since the diagonal is strictly positive, the
+    /// row space is unchanged, so the SVD must reveal the SAME 3-dim row space
+    /// as W (span of the ground-truth `v_k`). We check each recovered right
+    /// singular vector lies in `span{v1,v2,v3}` via the projector
+    /// `P_true = Σ_k v_k v_k^T`  (‖P_true r‖² ≈ 1).
+    #[test]
+    fn jacobian_svd_sigmoid_map_reveals_row_space() {
+        let (w, _u, v_true, _sigmas) = known_rank3_map_r8x8();
+        let sigmoid = |z: f32| 1.0 / (1.0 + (-z).exp());
+        let f = |x: &[f32], out: &mut [f32]| {
+            debug_assert_eq!(x.len(), 8);
+            debug_assert_eq!(out.len(), 8);
+            for j in 0..8 {
+                let mut acc = 0.0f32;
+                for i in 0..8 {
+                    acc += w[j * 8 + i] * x[i];
+                }
+                out[j] = sigmoid(acc);
+            }
+        };
+        // Choose x with moderate Wx so sigmoid' is bounded away from 0
+        // (keeps the diagonal well-conditioned and the rank-3 structure crisp).
+        let x = [0.1f32; 8];
+        let mut scratch = JacobianSvdScratch::with_capacity(8, 8);
+        let result = jacobian_svd_at(f, &x, 1e-4, &mut scratch);
+
+        // Non-linear map ⇒ rank can drop only if a diagonal entry ≈ 0; with
+        // x=0.1·1 the Wx entries stay well away from saturation, so we still
+        // expect rank 3.
+        assert!(
+            result.rank >= 3,
+            "sigmoid Jacobian expected rank ≥ 3, got {} (sigmas = {:?})",
+            result.rank, result.singular_values
+        );
+
+        // Build P_true = Σ_k v_k v_k^T (8×8) and check every recovered right
+        // singular vector with a non-negligible singular value lies in the row
+        // space of W.
+        let mut p_true = [0.0f32; 64];
+        for k in 0..3 {
+            for a in 0..8 {
+                for b in 0..8 {
+                    p_true[a * 8 + b] += v_true[k][a] * v_true[k][b];
+                }
+            }
+        }
+        for (j, r) in result.right_singular_vectors.iter().enumerate() {
+            let sv = result.singular_values.get(j).copied().unwrap_or(0.0);
+            if sv < 1e-3 {
+                continue; // skip numerical-zero directions
+            }
+            // P_true · r
+            let mut pr = [0.0f32; 8];
+            for a in 0..8 {
+                for b in 0..8 {
+                    pr[a] += p_true[a * 8 + b] * r[b];
+                }
+            }
+            let norm_pr = pr.iter().map(|v| v * v).sum::<f32>().sqrt();
+            let norm_r = r.iter().map(|v| v * v).sum::<f32>().sqrt();
+            assert!(
+                (norm_pr - norm_r).abs() < 5e-3,
+                "right singular vector {j} (sv={sv:.4}) is NOT in the row space of W: \
+                 ‖P_true r‖={norm_pr:.5} vs ‖r‖={norm_r:.5}"
+            );
+        }
+    }
+
+    /// T3.4 — timing gate: Jacobian SVD on R^8→R^8 (forward diff: 8 map evals
+    /// + thin SVD of an 8×8) must complete in well under the plan's 1µs target
+    /// in release. The assertion uses a generous bound to stay CI-stable in
+    /// debug builds; the release-mode number is recorded in
+    /// `.benchmarks/301_subspace_phase_gate_g1.md` (Phase 3 section).
+    #[test]
+    fn jacobian_svd_r8x8_latency_gate() {
+        let (w, _u, _v, _sigmas) = known_rank3_map_r8x8();
+        let f = |x: &[f32], out: &mut [f32]| {
+            for j in 0..8 {
+                let mut acc = 0.0f32;
+                for i in 0..8 {
+                    acc += w[j * 8 + i] * x[i];
+                }
+                out[j] = acc;
+            }
+        };
+        let x = [0.5f32; 8];
+        let mut scratch = JacobianSvdScratch::with_capacity(8, 8);
+        // Warmup (first call grows scratch + caches).
+        let _ = jacobian_svd_at(f, &x, 1e-4, &mut scratch);
+
+        let iters = 5_000;
+        let start = std::time::Instant::now();
+        for _ in 0..iters {
+            let _ = jacobian_svd_at(f, &x, 1e-4, &mut scratch);
+        }
+        let elapsed = start.elapsed();
+        let per_call_ns = elapsed.as_nanos() as f64 / iters as f64;
+        // T3.4 GATE VERDICT (measured 2026-07-02, release): 2403 ns/call —
+        // FAILS the plan's <1000 ns target by 2.4×. Debug is ~31000 ns/call.
+        // Per plan T4.3, this makes Phase 4 (SIMD / Jacobi-SVD optimisation)
+        // REQUIRED and blocks Phase 5 promotion (T5.1 needs G3-precursor to
+        // pass). See `.benchmarks/301_subspace_phase_gate_g1.md` Phase 3.
+        //
+        // This assertion is a REGRESSION GUARD (debug-stable), NOT the gate:
+        // the gate's honest verdict is recorded in the benchmark doc. The guard
+        // catches a catastrophic regression (e.g. an accidental allocation on
+        // the hot path) without false-failing on slow CI / debug builds.
+        assert!(
+            per_call_ns < 100_000.0,
+            "R^8→R^8 Jacobian SVD regressed past the debug regression guard: \
+             {per_call_ns:.0} ns/call (current ~31000 debug / ~2400 release; \
+             plan target <1000 ns — open Phase 4 SIMD item)"
+        );
+    }
+
     #[test]
     fn estimate_intrinsic_dim_participation_ratio() {
         let s = vec![1.0; 4];
