@@ -269,6 +269,11 @@ harness = false
 required-features = ["qgf"]
 
 [[bench]]
+name = "qgf_goat"
+harness = false
+required-features = ["qgf", "qgf_drafter", "qgf_adaptive"]
+
+[[bench]]
 name = "temporal_deriv_bench"
 harness = false
 required-features = ["temporal_deriv"]
