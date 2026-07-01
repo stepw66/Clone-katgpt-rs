@@ -107,7 +107,15 @@ surface). It is *not* deferred — it's the natural Proposal 002 follow-up
 to the quant promotion. Distinct from both `katgpt-core`'s base attention
 primitives and `katgpt-attn-match` (KV compaction, Plan 271).
 
-- [ ] Write Proposal 002 — `katgpt-dash-attn` crate promotion.
+- [x] Write Proposal 002 — `katgpt-dash-attn` crate promotion. See
+      `proposals/002_dash_attn_crate_promotion.md`.
+      **Key nuance captured:** unlike the quant family, `dash_attn` is NOT
+      a clean leaf — `forward.rs` + `tests.rs` are hard-coupled to
+      `crate::transformer::ForwardContext` (which lives in root, not in
+      the types-only `katgpt-transformer` crate). Proposal 002 splits the
+      module: 13 primitive/routing files promote to the crate; 2
+      transformer-integration files stay in root. Mirrors the
+      `katgpt-attn-match` (Plan 271 / Issue 359) precedent.
 
 ---
 
