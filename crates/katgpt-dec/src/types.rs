@@ -490,6 +490,7 @@ impl CellComplex {
 /// - Rank 1 (edges): circulations, gradients, flow, threat direction
 /// - Rank 2 (faces): fluxes, vorticity, area-normalized quantities
 /// - Rank 3 (volumes): densities, mass, occupancy
+#[derive(Clone, Debug)]
 pub struct CochainField {
     /// Flat feature data: `[n_k × dim]`, row-major.
     /// `data[cell_idx * dim + d]` is the d-th feature of cell `cell_idx`.
