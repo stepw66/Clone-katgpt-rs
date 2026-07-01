@@ -37,18 +37,18 @@ Ship three modelless primitives that turn a per-zone population count into a com
 
 All constraints verifiable by construction during Phase 1.
 
-- [ ] Modelless (inference-time only, no backprop) — ✓ by construction (pure functions + papaya cache)
-- [ ] Latent-to-latent preferred (sigmoid not softmax) — ✓ (mobility = `fast_sigmoid(-β·(ρ−ρ₀))`)
-- [ ] Freeze/thaw over fine-tuning — ✓ (no weight mutation; cache is data, not weights)
-- [ ] 5-repo discipline (open primitive in katgpt-rs) — ✓
-- [ ] SOLID, DRY, modular, generic, decouple — ✓ (generic over `V` for cache value; no game-IP semantics)
-- [ ] Zero-alloc hot path — ✓ (caller-owned output slices; papaya is lock-free)
-- [ ] CPU/SIMD auto-route — ✓ (reuses `katgpt_core::simd::fast_sigmoid`)
-- [ ] File < 2048 lines — ✓ (target ~500 LOC + tests)
-- [ ] `papaya` for lock-free HashMap — ✓ (`ZoneDensityCache` backend)
-- [ ] `Uuid::now_v7()` if any UUIDs — N/A (none needed; cache key is composite u64, not UUID)
-- [ ] `blake3` for commitment — N/A (no commitment in this primitive; density bucket is decodable composite, not a hash)
-- [ ] `match` over `if` — ✓ (tier classification, cache bypass)
+- [x] Modelless (inference-time only, no backprop) — ✓ by construction (pure functions + papaya cache)
+- [x] Latent-to-latent preferred (sigmoid not softmax) — ✓ (mobility = `fast_sigmoid(-β·(ρ−ρ₀))`)
+- [x] Freeze/thaw over fine-tuning — ✓ (no weight mutation; cache is data, not weights)
+- [x] 5-repo discipline (open primitive in katgpt-rs) — ✓
+- [x] SOLID, DRY, modular, generic, decouple — ✓ (generic over `V` for cache value; no game-IP semantics)
+- [x] Zero-alloc hot path — ✓ (caller-owned output slices; papaya is lock-free)
+- [x] CPU/SIMD auto-route — ✓ (reuses `katgpt_core::simd::fast_sigmoid`)
+- [x] File < 2048 lines — ✓ (target ~500 LOC + tests)
+- [x] `papaya` for lock-free HashMap — ✓ (`ZoneDensityCache` backend)
+- [x] `Uuid::now_v7()` if any UUIDs — N/A (none needed; cache key is composite u64, not UUID)
+- [x] `blake3` for commitment — N/A (no commitment in this primitive; density bucket is decodable composite, not a hash)
+- [x] `match` over `if` — ✓ (tier classification, cache bypass)
 
 ---
 
