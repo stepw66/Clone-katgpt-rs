@@ -223,8 +223,8 @@ impl AttractorKernel {
         }
         #[cfg(not(feature = "simd_sigmoid"))]
         {
-            for j in 0..dim {
-                next[j] = (2.0 * fast_sigmoid(next[j]) - 1.0).clamp(-clamp, clamp);
+            for v in next[..dim].iter_mut() {
+                *v = (2.0 * fast_sigmoid(*v) - 1.0).clamp(-clamp, clamp);
             }
         }
 
@@ -432,8 +432,8 @@ impl MicroRecurrentBeliefState for AttractorKernel {
         }
         #[cfg(not(feature = "simd_sigmoid"))]
         {
-            for j in 0..dim {
-                next[j] = (2.0 * fast_sigmoid(next[j]) - 1.0).clamp(-clamp, clamp);
+            for v in next[..dim].iter_mut() {
+                *v = (2.0 * fast_sigmoid(*v) - 1.0).clamp(-clamp, clamp);
             }
         }
 

@@ -324,6 +324,10 @@ impl ProjectionWeights {
 ///
 /// Layout: `matrix[module_idx * 8 + dim]` (same as single-entity).
 /// HLA states are stacked externally: `[N × 8]` row-major.
+//
+// Fields are read by `expand_batch`, which is gated on `sense_composition`;
+// without that feature they appear dead to clippy.
+#[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub struct BatchProjectionWeights {
     /// Shared weight matrix `[6 × 8]` (same brain config for all entities).
@@ -1101,12 +1105,13 @@ impl ReconstructionState {
         modules: &[SenseModule],
         use_simd: bool,
     ) -> [f32; 6] {
-        // Resolve SIMD availability once at entry
+        // Resolve SIMD availability once at entry. Without `sense_composition`
+        // both bindings are unused — consume the param to satisfy clippy.
         #[cfg(feature = "sense_composition")]
         let simd_available =
             use_simd && !matches!(katgpt_types::simd::simd_level(), katgpt_types::simd::SimdLevel::Scalar);
         #[cfg(not(feature = "sense_composition"))]
-        let simd_available = false;
+        let _ = use_simd;
 
         // Plan 283 T5.1: previous-step activations for the advantage gate.
         #[cfg(feature = "self_advantage_gate")]

@@ -14,10 +14,13 @@
 //! `crate::game_state::BanditRolloutPolicy`) resolve unchanged via
 //! the re-exports.
 
+#[cfg(feature = "bandit")]
 use std::marker::PhantomData;
 
+#[cfg(feature = "bandit")]
 use fastrand::Rng;
 
+#[cfg(feature = "bandit")]
 use katgpt_core::traits::{GameState, RolloutPolicy};
 
 #[cfg(feature = "bandit")]

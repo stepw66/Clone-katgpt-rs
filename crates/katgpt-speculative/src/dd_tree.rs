@@ -2,7 +2,9 @@ use std::collections::BinaryHeap;
 
 #[cfg(test)]
 use katgpt_core::traits::NoScreeningPruner;
-use katgpt_core::traits::{CompletionHorizon, ConstraintPruner, NoPruner, ScreeningPruner};
+#[cfg(feature = "lodestar")]
+use katgpt_core::traits::CompletionHorizon;
+use katgpt_core::traits::{ConstraintPruner, NoPruner, ScreeningPruner};
 use katgpt_core::speculative::types::{SdeConfig, TreeNode};
 use katgpt_types::{InferenceResult, Rng};
 use rayon::prelude::*;
