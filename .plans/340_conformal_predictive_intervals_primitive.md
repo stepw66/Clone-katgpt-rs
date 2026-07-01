@@ -6,7 +6,7 @@
 **Source paper:** [arXiv:2605.03789](https://arxiv.org/abs/2605.03789) — Manokhin, *Training-Free Probabilistic Time-Series Forecasting with Conformal Seasonal Pools*, 2026
 **Companion paper:** [arXiv:2606.09473](https://arxiv.org/abs/2606.09473) — *Report the Floor* (conformal interval as mandatory baseline)
 **Target:** `katgpt-rs/crates/katgpt-core/src/conformal.rs` (new module) + Cargo feature `conformal_predictive_intervals`
-**Status:** Active — Phase 1 (open primitive skeleton + seasonal pool + conformal overlay). KARC adapter (Phase 2) and riir-ai runtime integration (Phase 3+) filed separately after Phase 1 lands.
+**Status:** Phases 1 + 2 + 2.5 COMPLETE (2026-06-30). Open primitive skeleton (Phase 1), KARC adapter + Lorenz-63 coverage demo (Phase 2), and "Report the Floor" comparison harness (Phase 2.5, Issue 010 T2) all shipped behind `conformal_predictive_intervals` (opt-in). Phase 3 (riir-ai runtime integration) and Phase 4 (riir-neuron-db + riir-chain) filed as separate cross-repo plans. GOAT gate: `.benchmarks/340_conformal_goat.md`. The `ConformalIntervalCalibrator<SeasonalNaiveForecaster>` m=1 instance is the canonical UQ floor (per the "Report the Floor" rule).
 
 ---
 
