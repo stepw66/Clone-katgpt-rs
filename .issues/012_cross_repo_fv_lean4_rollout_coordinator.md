@@ -22,7 +22,7 @@ The 5-repo quintet (katgpt-rs / riir-ai / riir-chain / riir-neuron-db / riir-tra
 | 1 | `RiirChainProof` | `riir-chain` (private) | [004](../../riir-chain/.plans/004_latcal_lean4_roundtrip_proof.md) + [008](../../riir-chain/.plans/008_chain_fv_phase2_quorum_and_merkle_root.md) + [009](../../riir-chain/.plans/009_chain_fv_phase3_slashing_and_split_key.md) | `v4.31.0` (Mathlib-free) | ~25 (LatCal roundtrip, quorum determinism, `merkle_root` stamping, slashing monotonicity, split-key wire-safety) | `{propext}` or **none** (most theorems axiom-free) | ✅ Phases 1–3 COMPLETE |
 | 2 | `KatgptProof` | `katgpt-rs` (public MIT) | [293](../.plans/293_action_bridge_lean4_monotonicity_proof.md) | `v4.32.0-rc1` (Mathlib) | 2 (sigmoid ranking preservation + argmax preservation) | `{propext, Classical.choice, Quot.sound}` | ✅ COMPLETE |
 | 3 | `NeuronDbProof` | `riir-neuron-db` (private) | [007](../../riir-neuron-db/.plans/007_neuron_shard_fv_phase1_layout_and_freeze_gate.md) + [008](../../riir-neuron-db/.plans/008_neuron_shard_fv_phase2_merkle_proof_soundness.md) | `v4.31.0` (Mathlib-free) | 19 (shard layout, freeze gate self-consistency, Merkle tamper-evidence) | `{propext, Classical.choice, Quot.sound}` or **none** (7 layout + 4 Merkle axiom-free) | ✅ Phases 1–2 COMPLETE |
-| 4 | `RiirAiProof` | `riir-ai` (private) | [353](../../riir-ai/.plans/353_*.md) + [Issue 348 T2](../../riir-ai/.issues/348_*.md) | `v4.32.0-rc1` (Mathlib) | 16 (HLA boundedness + freeze/thaw reader invariant) + Phase 5 specialization | `{propext, Classical.choice, Quot.sound}` (FreezeThaw: `{propext}` only) | ✅ COMPLETE (Phase 5 CLOSED via specialization) |
+| 4 | `RiirAiProof` | `riir-ai` (private) | [353](../../riir-ai/.plans/353_*.md) + [T2 freeze/thaw](../../riir-ai/.proofs/RiirAiProof/Runtime/FreezeThaw.lean) | `v4.32.0-rc1` (Mathlib) | 16 (HLA boundedness + freeze/thaw reader invariant) + Phase 5 specialization | `{propext, Classical.choice, Quot.sound}` (FreezeThaw: `{propext}` only) | ✅ COMPLETE (Phase 5 CLOSED via specialization) |
 
 **Total: ~62 theorems across 4 instances, 4 theorem classes, zero `sorry`.**
 
@@ -100,4 +100,4 @@ Verified via grep of `riir-ai/AGENTS.md` (Static vs Dynamic Verification Split t
 - **Chain sibling:** `riir-chain/.proofs/RiirChainProof` (Plans 004 + 008 + 009).
 - **Neuron-db sibling:** `riir-neuron-db/.proofs/NeuronDbProof` (Plans 007 + 008).
 - **riir-ai instance:** `riir-ai/.proofs/RiirAiProof` (Plan 353 + Issue 348 T2).
-- **riir-ai issue tracker:** `riir-ai/.issues/348_*` (T1/T3/T5/T6 done; T2 freeze/thaw done; T4 blocked on T2; T7/T8 quick follow-ups).
+- **riir-ai issue tracker:** `riir-ai/.issues/348_*` was **removed** (all 8 tasks T1-T8 DONE 2026-06-30, commit `97902de7`). The FV instance is fully landed - see the table above.
