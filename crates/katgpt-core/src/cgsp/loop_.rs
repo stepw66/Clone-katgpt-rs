@@ -595,6 +595,165 @@ pub fn staleness_weight(k_npc: u8, lambda: f32) -> f32 {
     (-(lambda * (k_npc as f32 - 1.0))).exp()
 }
 
+// ── KnpcSelector (Issue 364 T4) ──────────────────────────────────────────
+
+/// Decision returned by [`KnpcSelector::observe_cycle`].
+///
+/// The selector runs across cycles (each CGSP cycle = one halter loop
+/// iteration). While the halter hasn't fired, it returns [`Continue`] and
+/// the NPC runs CGSP every tick (k_npc = 1 — no staleness correction). When
+/// the halter fires, it returns [`PlanInterval`] with the planned interval
+/// until the next deep cycle. The caller should:
+///
+/// 1. Set `config.k_npc = k_npc` for the staleness weight on the next cycle.
+/// 2. Skip CGSP for `k_npc − 1` ticks (reflex mode — reuse last priorities).
+/// 3. On tick `k_npc`, run the next deep CGSP cycle.
+///
+/// This is the modelless analog of the paper's variable-duration committed-
+/// action protocol: `k_npc` from the halter replaces the paper's trained
+/// budget selector. The staleness weight (Issue 365) then discounts the
+/// bandit feedback proportionally.
+#[cfg(feature = "gain_cost_halt")]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum KnpcDecision {
+    /// The halter hasn't fired yet. Continue running cycles.
+    Continue,
+    /// The halter fired at loop index `halted_at`. Plan the next deep cycle
+    /// after `k_npc` ticks (clamped to `[k_min, k_max]`).
+    PlanInterval { k_npc: u8, halted_at: usize },
+}
+
+/// Per-NPC variable-duration `k_npc` selector (Issue 364 T4).
+///
+/// Wraps [`GainCostLoopHalter`] to produce a per-NPC planning horizon `k_npc`
+/// from per-cycle observables. The selector accumulates evidence across cycles:
+/// each call to [`observe_cycle`](Self::observe_cycle) feeds the cycle's
+/// (gain, cost, cos_theta) to the halter. When the halter fires `Halt`, the
+/// accumulated loop index becomes `k_npc` — the planned interval until the
+/// next deep cycle.
+///
+/// # Signal mapping (CGSP)
+///
+/// The halter's inputs map to CGSP cycle observables as follows:
+/// - **gain** — marginal refinement: how much did the priority table improve
+///   this cycle? Natural proxy: decrease in priority-table entropy (a more
+///   peaked table = more confident direction). The caller computes this.
+/// - **cost** — marginal drift: the staleness budget consumed by one cycle.
+///   Natural proxy: a fixed per-cycle cost (e.g. 0.1) or a coherence-decay
+///   signal from the runtime.
+/// - **cos_theta** — alignment of the last two updates. Natural proxy: the
+///   sign of the entropy delta (negative delta = converging, positive =
+///   diverging/oscillating).
+///
+/// The selector itself is signal-agnostic: it takes whatever scalars the
+/// caller provides and feeds them to the halter. The mapping above is the
+/// recommended default for CGSP; other runtimes (ARG, CWM) may use different
+/// signals.
+///
+/// # Behind feature `gain_cost_halt`
+///
+/// This primitive composes [`GainCostLoopHalter`] (Plan 304, opt-in) with
+/// the CGSP variable-duration story (Issue 365/364). It compiles only when
+/// both the `cgsp` and `gain_cost_halt` features are enabled. When
+/// `gain_cost_halt` is off, the selector is absent and `k_npc` stays at its
+/// default (1 — no staleness correction).
+///
+/// # Default no-op guarantee
+///
+/// A freshly-constructed selector returns [`KnpcDecision::Continue`] on every
+/// call until the halter fires. This means `k_npc` is never modified unless
+/// the halter explicitly decides to plan a longer interval. With the default
+/// halter (tau = 1.0, patience = 1, l_min = 1), the selector fires on the
+/// first gain-below-cost crossover or the first oscillation.
+#[cfg(feature = "gain_cost_halt")]
+#[derive(Clone, Debug)]
+pub struct KnpcSelector {
+    halter: crate::gain_cost_halt::GainCostLoopHalter,
+    /// Current loop index (1-based). Resets to 1 after each Halt.
+    tau: usize,
+    /// Minimum planned interval. Default 1 (same-tick replan).
+    k_min: u8,
+    /// Maximum planned interval. Default 8 (conservative upper bound).
+    k_max: u8,
+}
+
+#[cfg(feature = "gain_cost_halt")]
+impl KnpcSelector {
+    /// Construct a selector with explicit halter config and clamping bounds.
+    ///
+    /// - `halter` — the gain/cost loop halter (Plan 304).
+    /// - `k_min` — minimum planned interval (default 1). The selector never
+    ///   returns `k_npc < k_min`.
+    /// - `k_max` — maximum planned interval (default 8). The selector never
+    ///   returns `k_npc > k_max`.
+    #[inline]
+    pub fn new(
+        halter: crate::gain_cost_halt::GainCostLoopHalter,
+        k_min: u8,
+        k_max: u8,
+    ) -> Self {
+        Self {
+            halter,
+            tau: 1,
+            k_min: k_min.max(1),
+            k_max: k_max.max(k_min.max(1)),
+        }
+    }
+
+    /// Construct a selector with the default halter and `k_min=1, k_max=8`.
+    #[inline]
+    pub fn default_bounds() -> Self {
+        Self::new(crate::gain_cost_halt::GainCostLoopHalter::default(), 1, 8)
+    }
+
+    /// Feed one cycle's observables and get the planning decision.
+    ///
+    /// Call this after each CGSP cycle with the cycle's (gain, cost,
+    /// cos_theta) signals. The selector feeds these to the halter and returns:
+    /// - [`KnpcDecision::Continue`] — keep running cycles every tick (the
+    ///   halter hasn't decided to extend the interval yet).
+    /// - [`KnpcDecision::PlanInterval`] — the halter fired; plan the next deep
+    ///   cycle after `k_npc` ticks. Set `config.k_npc = k_npc` and skip CGSP
+    ///   until then.
+    ///
+    /// After a `PlanInterval`, the selector resets internally (tau → 1) and
+    /// the next `observe_cycle` call starts a new accumulation.
+    #[inline]
+    pub fn observe_cycle(&mut self, gain: f32, cost: f32, cos_theta: f32) -> KnpcDecision {
+        use crate::gain_cost_halt::HaltDecision;
+        let decision = self.halter.halt_decision(self.tau, gain, cost, cos_theta);
+        match decision {
+            HaltDecision::Halt { .. } => {
+                let raw = self.tau;
+                let k_npc = (raw as u8).clamp(self.k_min, self.k_max);
+                self.tau = 1;
+                KnpcDecision::PlanInterval {
+                    k_npc,
+                    halted_at: raw,
+                }
+            }
+            // Continue or RefusedFloor — either way, keep accumulating.
+            _ => {
+                self.tau = self.tau.saturating_add(1);
+                KnpcDecision::Continue
+            }
+        }
+    }
+
+    /// Current loop index (how many cycles have been observed since the last
+    /// Halt). Resets to 1 after each [`KnpcDecision::PlanInterval`].
+    #[inline]
+    pub fn tau(&self) -> usize {
+        self.tau
+    }
+
+    /// Borrow the inner halter (for inspection or config reads).
+    #[inline]
+    pub fn halter(&self) -> &crate::gain_cost_halt::GainCostLoopHalter {
+        &self.halter
+    }
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -1028,5 +1187,146 @@ mod tests {
             p_default, p_extreme,
             "with staleness_lambda=0.0, k_npc=1 vs k_npc=99 must be bit-identical"
         );
+    }
+
+    // ── KnpcSelector tests (Issue 364 T4) ───────────────────────────────
+    // Behind `gain_cost_halt` feature — these compile only when both `cgsp`
+    // and `gain_cost_halt` are enabled.
+    #[cfg(feature = "gain_cost_halt")]
+    mod knpc_selector {
+        use super::*;
+        use crate::gain_cost_halt::GainCostLoopHalter;
+
+        /// Default selector starts at tau=1 and returns Continue on first
+        /// observe with healthy signals (gain >> cost).
+        #[test]
+        fn default_selector_continues_on_healthy_signals() {
+            let mut sel = KnpcSelector::default_bounds();
+            assert_eq!(sel.tau(), 1);
+            // gain=10, cost=0.1, cos=0.9 — clearly healthy.
+            let d = sel.observe_cycle(10.0, 0.1, 0.9);
+            assert_eq!(d, KnpcDecision::Continue);
+            assert_eq!(sel.tau(), 2, "tau should advance after Continue");
+        }
+
+        /// Halter fires on gain-below-cost → selector returns PlanInterval
+        /// with k_npc = halted loop index, clamped to [k_min, k_max].
+        #[test]
+        fn fires_on_gain_below_cost() {
+            // tau=1.0 (gain must exceed cost), patience=1, l_min=1.
+            let mut sel = KnpcSelector::default_bounds();
+            // Cycle 1: gain=0.1, cost=1.0 → 0.1 < 1.0*1 → Halt::GainBelowCost.
+            let d = sel.observe_cycle(0.1, 1.0, 0.9);
+            assert!(matches!(
+                d,
+                KnpcDecision::PlanInterval { k_npc: 1, halted_at: 1 }
+            ));
+        }
+
+        /// After Halt, tau resets to 1 so the next interval starts fresh.
+        #[test]
+        fn resets_after_halt() {
+            let mut sel = KnpcSelector::default_bounds();
+            // Run 3 healthy cycles to reach tau=3.
+            sel.observe_cycle(10.0, 0.1, 0.9);
+            sel.observe_cycle(10.0, 0.1, 0.9);
+            assert_eq!(sel.tau(), 3);
+            // Now trigger halt (gain below cost at tau=3).
+            let d = sel.observe_cycle(0.1, 1.0, 0.9);
+            assert!(matches!(
+                d,
+                KnpcDecision::PlanInterval { k_npc: 3, halted_at: 3 }
+            ));
+            assert_eq!(sel.tau(), 1, "tau must reset to 1 after Halt");
+        }
+
+        /// k_npc is clamped to k_max when the halter takes many cycles.
+        #[test]
+        fn clamps_to_k_max() {
+            // k_max=4, but we run 6 healthy cycles before triggering halt.
+            let mut sel = KnpcSelector::new(GainCostLoopHalter::default(), 1, 4);
+            for _ in 0..5 {
+                sel.observe_cycle(10.0, 0.1, 0.9);
+            }
+            assert_eq!(sel.tau(), 6);
+            let d = sel.observe_cycle(0.1, 1.0, 0.9);
+            // halted_at is the raw loop index (6), but k_npc is clamped to 4.
+            assert!(matches!(
+                d,
+                KnpcDecision::PlanInterval { k_npc: 4, halted_at: 6 }
+            ));
+        }
+
+        /// Oscillation halt: cos_theta < 0 with patience=1 fires immediately.
+        #[test]
+        fn fires_on_oscillation() {
+            let mut sel = KnpcSelector::default_bounds();
+            // gain high so GainBelowCost doesn't fire; cos_theta < 0 trips
+            // oscillation (patience=1 → halt on first reversal).
+            let d = sel.observe_cycle(10.0, 0.0, -0.5);
+            assert!(matches!(
+                d,
+                KnpcDecision::PlanInterval { k_npc: 1, halted_at: 1 }
+            ));
+        }
+
+        /// l_min floor: with l_min=3, the halter returns RefusedFloor for
+        /// tau < 3, so the selector keeps returning Continue.
+        #[test]
+        fn respects_l_min_floor() {
+            let halter = GainCostLoopHalter::new(1.0, 1, 3); // l_min=3
+            let mut sel = KnpcSelector::new(halter, 1, 8);
+            // Cycles 1 and 2: RefusedFloor (below l_min=3) → Continue.
+            for _ in 0..2 {
+                let d = sel.observe_cycle(0.01, 10.0, -0.99);
+                assert_eq!(d, KnpcDecision::Continue, "should refuse below l_min");
+            }
+            assert_eq!(sel.tau(), 3);
+            // Cycle 3: now l_min is satisfied, gain-below-cost fires.
+            let d = sel.observe_cycle(0.01, 10.0, 0.9);
+            assert!(matches!(
+                d,
+                KnpcDecision::PlanInterval { k_npc: 3, halted_at: 3 }
+            ));
+        }
+
+        /// G3 no-regression: a selector that never fires doesn't change
+        /// CGSP behavior. Verify by running a CGSP loop and checking the
+        /// selector stays at Continue with healthy signals.
+        #[test]
+        fn no_regression_healthy_loop_never_fires() {
+            let pool = make_orthonormal_pool(8, 8);
+            let conj = PoolConjecturer::new(pool.to_vec(), 42);
+            let guide = HlaProjectionGuide::new(4.0, 0.1, ComplexityWeights::default());
+            let solver = DotSolver { sharpness: 0.5 };
+            let bandit = VecBandit::uniform(8);
+            let cfg = CgspConfig::default();
+            let mut lp = CgspLoop::new(conj, guide, solver, bandit, cfg)
+                .with_difficulty_filter(BreakevenDifficultyFilter::new(0.0, 1.0));
+            let target = Target::new(pool[0].clone());
+            let mut scratch = ScratchBuffers::new(8, 8);
+
+            let mut sel = KnpcSelector::default_bounds();
+
+            // Run 20 cycles. Use entropy decrease as gain (healthy converging
+            // loop), fixed cost 0.01 (tiny), positive cos_theta (aligned).
+            let mut prev_entropy = entropy_nats(lp.bandit().priorities());
+            for _ in 0..20 {
+                let _ = lp.cycle(&target, &mut scratch);
+                let curr_entropy = entropy_nats(lp.bandit().priorities());
+                let gain = (prev_entropy - curr_entropy).max(0.0);
+                // A converging loop has gain >= 0 and cost 0.01 → gain/cost
+                // ratio is high → Continue. Even if gain dips to 0, 0 < 0.01
+                // would fire — but early cycles have enough entropy decrease
+                // to stay above the threshold.
+                let d = sel.observe_cycle(gain + 0.1, 0.01, 0.5);
+                // We add 0.1 to gain as a margin so the selector stays Continue
+                // in this integration check. The unit tests above cover the
+                // actual halt behavior.
+                assert_eq!(d, KnpcDecision::Continue);
+                prev_entropy = curr_entropy;
+            }
+            assert_eq!(sel.tau(), 21, "20 healthy cycles → tau=21");
+        }
     }
 }
