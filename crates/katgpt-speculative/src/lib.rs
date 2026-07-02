@@ -30,8 +30,27 @@
 //!   `katgpt-rs/src/speculative/dd_tree.rs` because they reference root-only
 //!   sibling modules (`super::belief_drafter`, `super::spec_generator`, etc.).
 
+pub mod blueprint;
+pub mod branch_confidence;
+pub mod correlation_budget;
 pub mod dd_tree;
+pub mod decomp_reviewer;
 pub mod dflash;
+pub mod nf_flow;
+pub mod nf_flow_budget;
+pub mod nf_flow_fold;
+pub mod nf_flow_gate;
+pub mod nf_flow_mux;
+pub mod pathway_tracker;
+pub mod prefix_scheduler;
+pub mod vocab_coreset;
+
+// PPoT core primitives (Issue 003): types/knowledge/entropy/rank moved here;
+// the `resample` orchestrator stays in katgpt-rs root and consumes these via
+// re-export. Gated because the moved files carry internal `#[cfg(feature = "ppot")]`
+// gates (adaptive-knowledge path) that require the feature to be live.
+#[cfg(feature = "ppot")]
+pub mod ppot;
 
 // Re-export katgpt_core's speculative types + traits so consumers can import
 // everything from one place (`katgpt_speculative::{TreeNode, ConstraintPruner, …}`).

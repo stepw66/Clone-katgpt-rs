@@ -31,5 +31,11 @@ sr2am_configurator = ["katgpt-types/sr2am_configurator"]
 # both halves.
 lodestar = []
 
+# PPoT core primitives (types, knowledge, entropy, rank). The `resample`
+# orchestrator stays in katgpt-rs root (12 root-only refs); this crate owns the
+# four zero-root-coupling leaves (Issue 003). Forwarded from root `ppot`.
+ppot = []
+
 [dev-dependencies]
 katgpt-transformer = { path = "../katgpt-transformer" }
+fastrand = "2"  # correlation_budget tests (Issue 003 move from root, which has fastrand as a dep)

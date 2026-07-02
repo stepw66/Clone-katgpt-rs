@@ -149,7 +149,7 @@ validator = ["syn", "proc-macro2"]
 # `vessel_extract_bench`, `vessel_minimal`, and `vessel_project` entries
 # below were also removed in the same migration.
 sparse_mlp = ["katgpt-core/sparse_mlp", "katgpt-pruners/sparse_mlp", "katgpt-forward/sparse_mlp", "katgpt-attn/sparse_mlp"]  # TwELL-inspired sparse MLP matmul (Plan 022). Forwarded to katgpt-forward so ForwardContext.active_indices/values compile (Issue 007 Phase F) AND so forward_hla/forward_ahla's sparse MLP path compiles (Issue 007 Phase F.4b — HLA forward lives in katgpt-forward). Forwarded to katgpt-attn so forward_gdn2's sparse MLP path compiles (Issue 007 Phase F.4a).
-ppot = ["katgpt-pruners/ppot"]  # PPoT logit-parameterized CPU resampling (Plan 026 + 027)
+ppot = ["katgpt-pruners/ppot", "katgpt-speculative/ppot"]  # PPoT logit-parameterized CPU resampling (Plan 026 + 027). Also forwards to katgpt-speculative so the extracted types/knowledge/entropy/rank primitives (Issue 003) compile; the `resample` orchestrator stays in root.
 domain_latent = ["katgpt-core/domain_latent", "katgpt-pruners/domain_latent"]  # Free Transformer mid-layer domain conditioning (Plan 038)
 bandit = ["katgpt-core/review_metrics", "katgpt-pruners/bandit"]  # Multi-armed bandit adaptive ScreeningPruner (Plan 030). Enables katgpt-core/review_metrics so the relocated ReviewMetrics (Plan 308 Phase 3 move from root) is re-exported at crate::pruners::review_metrics.
 delta_mem = ["bandit", "katgpt-pruners/delta_mem"]  # δ-Mem modelless distillation — associative bandit memory (Plan 053)

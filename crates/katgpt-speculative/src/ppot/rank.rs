@@ -17,7 +17,7 @@
 //! - `rank_by_consistency`: serial O(m²×L) — rayon overhead dominates for m≤16
 //! - `select_best_variant`: returns index of best variant (zero-allocation)
 
-use crate::speculative::types::ScreeningPruner;
+use katgpt_core::traits::ScreeningPruner;
 
 // ── Agreement Counting ──────────────────────────────────────────
 
@@ -389,7 +389,7 @@ fn rank_by_consistency_weighted_subset(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::speculative::types::NoScreeningPruner;
+    use katgpt_core::traits::NoScreeningPruner;
 
     // ── count_agreements tests ──
 

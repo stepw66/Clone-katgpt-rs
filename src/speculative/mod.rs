@@ -324,14 +324,15 @@ pub use thinking_controller::{
 };
 
 #[cfg(feature = "vocab_coreset")]
-pub mod vocab_coreset;
+pub use katgpt_speculative::vocab_coreset;
 
 #[cfg(feature = "vocab_coreset")]
 pub use vocab_coreset::{should_use_delta_sparse, vocab_coreset};
 
 // ── AND-OR DDTree Blueprint Decomposition (Plan 190, Research 170) ──
+// blueprint extracted to katgpt-speculative crate (Issue 003).
 #[cfg(feature = "and_or_dtree")]
-pub mod blueprint;
+pub use katgpt_speculative::blueprint;
 
 #[cfg(feature = "and_or_dtree")]
 pub use blueprint::BlueprintPass;
@@ -350,15 +351,17 @@ pub use trust_region::{
 };
 
 // ── AND-OR DDTree Decomposition (Plan 190, feature: and_or_dtree) ──
+// decomp_reviewer extracted to katgpt-speculative crate (Issue 003).
 #[cfg(feature = "and_or_dtree")]
-pub mod decomp_reviewer;
+pub use katgpt_speculative::decomp_reviewer;
 
 #[cfg(feature = "and_or_dtree")]
 pub use decomp_reviewer::DecompositionReviewer;
 
 // ── Correlation Budget Allocation (Plan 200, feature: corr_budget) ──
+// correlation_budget extracted to katgpt-speculative crate (Issue 003).
 #[cfg(feature = "corr_budget")]
-pub mod correlation_budget;
+pub use katgpt_speculative::correlation_budget;
 
 #[cfg(feature = "corr_budget")]
 pub use correlation_budget::CorrelationBudgetAllocator;
@@ -391,7 +394,7 @@ pub use caddtree_budget::build_dd_tree_adaptive_mux_residual;
 // early-stop (DSpark Appendix A correctness theorem — lossless distribution
 // preservation). Opt-in until a real multi-request batch caller exercises it.
 #[cfg(feature = "hardware_aware_scheduler")]
-pub mod prefix_scheduler;
+pub use katgpt_speculative::prefix_scheduler;
 
 #[cfg(feature = "hardware_aware_scheduler")]
 pub use prefix_scheduler::{HardwareAwarePrefixScheduler, SpsCurve};
@@ -421,15 +424,17 @@ pub mod precision_aware_generator;
 pub use precision_aware_generator::PrecisionAwareGenerator;
 
 // ── NFCoT FlowBudget — Speculative Depth Allocation (Plan 229 T4, feature: nf_flow_budget) ──
+// nf_flow_budget extracted to katgpt-speculative crate (Issue 003).
 #[cfg(feature = "nf_flow_budget")]
-pub mod nf_flow_budget;
+pub use katgpt_speculative::nf_flow_budget;
 
 #[cfg(feature = "nf_flow_budget")]
 pub use nf_flow_budget::{FlowBudgetAllocator, allocate_budget};
 
 // ── NFCoT FlowScore — Modelless Normalizing Flow Density Scoring (Plan 229, feature: nf_flow_score) ──
+// nf_flow extracted to katgpt-speculative crate (Issue 003).
 #[cfg(feature = "nf_flow_score")]
-pub mod nf_flow;
+pub use katgpt_speculative::nf_flow;
 
 #[cfg(feature = "nf_flow_score")]
 pub use nf_flow::{
@@ -445,8 +450,9 @@ pub mod nf_flow_generator;
 pub use nf_flow_generator::{FlowScoredError, FlowScoredGenerator, ScoredToken};
 
 // ── NFCoT FlowGate — Adaptive Acceptance Criterion (Plan 229 T3, feature: nf_flow_gate) ──
+// nf_flow_gate extracted to katgpt-speculative crate (Issue 003).
 #[cfg(feature = "nf_flow_gate")]
-pub mod nf_flow_gate;
+pub use katgpt_speculative::nf_flow_gate;
 
 #[cfg(feature = "nf_flow_gate")]
 pub use nf_flow_gate::NfFlowGate;
@@ -477,15 +483,17 @@ pub use domino::{
 };
 
 // ── NFCoT FlowMUX — Flow Scoring for MUX Trajectories (Plan 229 T6) ──
+// nf_flow_mux extracted to katgpt-speculative crate (Issue 003).
 #[cfg(all(feature = "nf_flow_score", feature = "mux_pruner"))]
-pub mod nf_flow_mux;
+pub use katgpt_speculative::nf_flow_mux;
 
 #[cfg(all(feature = "nf_flow_score", feature = "mux_pruner"))]
 pub use nf_flow_mux::{MuxFlowScore, aggregate_mux_score, score_mux_trajectory};
 
 // ── NFCoT FlowFold — Confidence-Gated Chain Folding (Plan 229 T7) ──
+// nf_flow_fold extracted to katgpt-speculative crate (Issue 003).
 #[cfg(all(feature = "nf_flow_score", feature = "chain_fold"))]
-pub mod nf_flow_fold;
+pub use katgpt_speculative::nf_flow_fold;
 
 #[cfg(all(feature = "nf_flow_score", feature = "chain_fold"))]
 pub use nf_flow_fold::{FoldDecision, evaluate_fold, evaluate_fold_batch};
@@ -506,8 +514,11 @@ pub use nf_flow::{score_with_qgf, score_with_qgf_at, score_with_qgf_batch, selec
 pub use nf_flow_qgf::NfQgfDrafter;
 
 // ── Deep Manifold Part 2 — Plan 231 (Research 205) ──
+// branch_confidence extracted to katgpt-speculative crate (Issue 003).
+// Module-level re-export preserves `speculative::branch_confidence::*` paths.
 #[cfg(feature = "union_bound_confidence")]
-pub mod branch_confidence;
+pub use katgpt_speculative::branch_confidence;
 
+// pathway_tracker extracted to katgpt-speculative crate (Issue 003).
 #[cfg(feature = "pathway_tracker")]
-pub mod pathway_tracker;
+pub use katgpt_speculative::pathway_tracker;

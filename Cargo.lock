@@ -1974,6 +1974,7 @@ dependencies = [
 name = "katgpt-speculative"
 version = "0.1.0"
 dependencies = [
+ "fastrand",
  "katgpt-core",
  "katgpt-transformer",
  "katgpt-types",
