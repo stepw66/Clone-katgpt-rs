@@ -605,8 +605,14 @@ pub fn direction_vector_decode<const N: usize>(
   - **riir-engine** (`riir-ai/crates/riir-engine/tests/analytic_lattice_runtime_goat.rs`): G1 ASOC `ComposerTick` Ready path, G1b non-blocking contract (returns stale draft on `Poll::Pending`), G4 latency (plasma-draft path < 100ns, hot-join path < 1µs, batched N=64 ≥ 4× vs naive). **DEFERRED to Phase 1b.**
 - [x] **T5.2** Write benchmark to `katgpt-rs/.benchmarks/330_analytic_lattice_goat.md` (math primitives) + `riir-ai/.benchmarks/330_analytic_lattice_runtime_goat.md` (ASOC cascade).
   **katgpt-core half DONE.** riir-engine half deferred to Phase 1b.
-- [ ] **T5.3** If all gates pass: promote `analytic_lattice` to `default` in katgpt-core Cargo.toml. Separately promote `analytic_lattice_runtime` to default in riir-engine ONLY if `riir-gpu-async` is itself default-on (it is not today — keep opt-in).
-  **NOT DONE (katgpt-core half):** feature stays opt-in pending user review of the GOAT results. See `.benchmarks/330_analytic_lattice_goat.md`. The math gates (G1, G2, G3, G5, G6) all pass, but the headline primitive (`ComposerTick: GpuFuture`) hasn't shipped yet (Phase 1b) — the katgpt-core half is only useful when composed with the runtime half. Decision left to user.
+- [-] **T5.3** If all gates pass: promote `analytic_lattice` to `default` in katgpt-core Cargo.toml. Separately promote `analytic_lattice_runtime` to default in riir-engine ONLY if `riir-gpu-async` is itself default-on (it is not today — keep opt-in).
+  **DEFERRED to Phase 1b:** the math gates (G1, G2, G3, G5, G6) all pass
+  (see `.benchmarks/330_analytic_lattice_goat.md`), but the headline primitive
+  (`ComposerTick: GpuFuture`) hasn't shipped yet (Phase 1b) — the katgpt-core
+  half is only useful when composed with the runtime half. Promoting to
+  default now would add a default feature with no consumer. Revisit after
+  Phase 1b ships `ComposerTick`. T2.5.3/T2.5.4 also deferred to the same
+  Phase 1b milestone.
 - [x] **T5.4** If any gate fails: keep opt-in, document the failure in `.issues/`, decide modelless unblock path per workflow §3.5 (check freeze/thaw, raw/lora, latent correction before any riir-train deferral).
   **N/A (katgpt-core half):** all gates passed.
 
