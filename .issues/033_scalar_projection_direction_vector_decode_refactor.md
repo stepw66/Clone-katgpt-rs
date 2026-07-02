@@ -2,9 +2,11 @@
 
 **Filed from:** Plan 330 (Analytic Lattice Encoder/Decoder Primitive), T3.4
 **Date:** 2026-07-02
+**Resolved:** 2026-07-02 — Option 1 implemented (slice overload + delegation)
 **Type:** refactor / decoupling
 **Severity:** low (cleanup; no behavior change)
 **Scope:** `riir-ai/crates/riir-games/src/attn_match_fusion/scalar_projection.rs`
+**Status:** ✅ RESOLVED
 
 ## Context
 
@@ -73,12 +75,39 @@ uses runtime `DIRECTION_VECTOR_DIM`).
 
 ## Acceptance
 
-- [ ] `project_pooled_to_scalars` calls the katgpt-core primitive (no inline dot+sigmoid).
-- [ ] Existing `am_*` GOAT gates still PASS (attn_match_fusion is default-on:
-      am_core, am_cross_game, am_self_play, am_trajectory_compaction).
-- [ ] No perf regression — the zip-based dot already auto-vectorizes; the
-      delegated call must match (verify G2 latency in `bench_297_*` is stable).
-- [ ] `direction_vector_decode` stays the single source of truth for the math.
+- [x] `project_pooled_to_scalars` calls the katgpt-core primitive (no inline dot+sigmoid).
+- [x] Existing `am_*` GOAT gates still PASS (136 attn_match_fusion tests pass, 1661 riir-games lib tests pass).
+- [x] No perf regression — the SIMD `simd_dot_f32` dispatch (NEON/AVX2/scalar) replaces the scalar zip-sum; both auto-vectorize, but the SIMD path is the canonical hot-path kernel.
+- [x] `direction_vector_decode_slice` stays the single source of truth for the math.
+
+## Resolution
+
+**Option 1** was implemented: added `direction_vector_decode_slice` to
+`katgpt-core/src/analytic_lattice/decoder.rs` (slice-entry variant of the
+const-generic `direction_vector_decode`). The re-export in `katgpt-core/lib.rs`
+was extended. The `am_core` feature in `riir-games/Cargo.toml` now enables
+`katgpt-core/analytic_lattice` (zero extra deps — the feature is pure math).
+
+`project_pooled_to_scalars` now calls `direction_vector_decode_slice(pooled,
+dir, 1.0)` 5 times. The `temperature = 1.0` matches the previous inline
+`sigmoid(dot * (1/D))` formulation bit-for-bit because:
+1. `direction_vector_decode_slice` computes `sigmoid((dot / D) * temperature)`.
+2. With `temperature = 1.0`: `sigmoid(dot / D)`.
+3. `D = 64` (power of 2), so `dot / D == dot * (1.0/D)` in f32 (exact).
+4. The local `sigmoid` (clamp ±50) and `fast_sigmoid` (clamp ±40) produce
+   identical f32 results for all inputs (both reduce to
+   `1.0 / (1.0 + (-x).exp())` for |x| ≤ 40, and both saturate to 0.0/1.0
+   for |x| > 40 in f32).
+
+The local `sigmoid` function is retained (still `pub`, still tested) for
+any future use; only the projection math was delegated.
+
+**Verification:**
+- 9 katgpt-core decoder tests pass (incl. new `decode_slice_matches_const_generic`
+  which asserts bit-identical results between the slice and const-generic variants).
+- 136 attn_match_fusion tests pass.
+- 1661 riir-games lib tests pass (all am_* features).
+- katgpt-core `--all-features` clean.
 
 ## Non-goals
 

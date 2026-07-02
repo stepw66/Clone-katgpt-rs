@@ -655,7 +655,7 @@ pub use analytic_lattice::{
     ChainError, ComposerCtx, LatticeVector, PlasmaDraft, RederiveOp, TransportOperator,
     apply_operator_into, audit::AuditReport, audit::spectral_audit, batch_compose_chain,
     batch_compose_chain_into, compose_chain, compose_chain_into, decoder::direction_vector_decode,
-    decoder::direction_vector_decode_into,
+    decoder::direction_vector_decode_into, decoder::direction_vector_decode_slice,
 };
 
 // Functional Attention — closed-form Tikhonov spectral transport operator
