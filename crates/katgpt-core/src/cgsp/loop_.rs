@@ -44,6 +44,22 @@ pub struct CgspConfig {
     pub solve_rate_floor: f32,
     /// Estimated solve-rate ceiling — drop candidates above this as "too hard".
     pub solve_rate_ceiling: f32,
+    /// Variable-duration planning horizon per NPC (Issue 365).
+    ///
+    /// 1 = single-cycle plan (default — no staleness correction). Values > 1
+    /// come from the gain/cost halter (Plan 304) via the async commit bridge
+    /// (Issue 364): the NPC's reflex-hold count before the next committed
+    /// CGSP action. Read by [`staleness_weight`] to discount staler bandit
+    /// feedback so priority updates stay comparable across NPCs of different
+    /// planning depths.
+    pub k_npc: u8,
+    /// Staleness decay rate λ for variable-duration CGSP (Issue 365).
+    ///
+    /// 0.0 = disabled (default — the absorbed reward is bit-identical to
+    /// pre-Issue-365 behavior: `r_synth * 1.0 == r_synth` for all f32).
+    /// Values > 0 produce `exp(-λ·(k_npc−1))` discounting on absorbed
+    /// rewards via [`staleness_weight`].
+    pub staleness_lambda: f32,
 }
 
 impl Default for CgspConfig {
@@ -54,6 +70,8 @@ impl Default for CgspConfig {
             exploration_magnitude: 0.35,
             solve_rate_floor: 0.05,
             solve_rate_ceiling: 0.95,
+            k_npc: 1,
+            staleness_lambda: 0.0,
         }
     }
 }
@@ -293,14 +311,19 @@ where
             .is_degenerate(candidates, admitted, guide_scores);
 
         // ── Step 7: Bandit absorb-compress (skip if degenerate) ─────────
+        // Variable-duration staleness weight (Issue 365): with the default
+        // config (k_npc=1, staleness_lambda=0.0) `staleness_w` is 1.0 and
+        // the absorb is bit-identical to pre-Issue-365 behavior.
         if !degenerate {
+            let staleness_w =
+                staleness_weight(self.config.k_npc, self.config.staleness_lambda);
             for i in 0..k {
                 if !admitted[i] {
                     continue;
                 }
                 let arm = candidates[i].pool_index;
                 if arm != usize::MAX {
-                    self.bandit.absorb(arm, r_synth[i]);
+                    self.bandit.absorb(arm, r_synth[i] * staleness_w);
                 }
             }
         }
@@ -530,6 +553,46 @@ pub fn renormalize_priorities(p: &mut [Priority]) {
         let sanitized = if v.is_finite() && *v >= 0.0 { *v } else { 0.0 };
         *v = sanitized / max;
     }
+}
+
+/// Staleness weight for variable-duration CGSP bandit updates (Issue 365).
+///
+/// When an NPC's planning horizon `k_npc` > 1 (the async commit bridge,
+/// Issue 364), the bandit feedback that arrives after `k_npc` cycles is
+/// staler than feedback from a single-cycle plan. This weight discounts
+/// the reward absorbed by [`HintDeltaBandit::absorb`] so that deep-planning
+/// NPCs bias the priority table more slowly per unit reward than
+/// fast-planning ones — keeping priority updates comparable across NPCs of
+/// different planning depths.
+///
+/// This is the **bandit-update analog** of the paper's `γ^k` variable-duration
+/// GAE correction (arXiv:2606.26463 Appendix C). CGSP has no γ-discounted
+/// advantage path — its update signal is `r_synth` consumed by `absorb`,
+/// not a TD advantage — so the literal "replace γ with γ^k" substitution has
+/// no target. The functional role (duration-comparability across the crowd)
+/// is preserved by discounting the absorbed reward instead. See
+/// `riir-ai/.issues/365_*` §"The correction" for why the original
+/// "one-line γ→γ^k" framing was wrong.
+///
+/// # Contract
+///
+/// - `k_npc <= 1` or `lambda <= 0` → returns `1.0` (no staleness, no
+///   discount). This is the default; with the default config the cycle is
+///   bit-identical to pre-Issue-365 behavior (`x * 1.0 == x` for all f32).
+/// - `lambda > 0`, `k_npc > 1` → `exp(-lambda * (k_npc - 1))`, strictly
+///   decreasing in `k_npc`. Bounded in `(0, 1]`.
+/// - NaN / non-finite `lambda` → returns `1.0` (safe no-op).
+///
+/// Uses `exp(-λ·(k−1))` for strict monotone-decreasing behavior matching
+/// geometric decay. The rational alternative `1/(1+λ·(k−1))` is cheaper
+/// but not equivalent to geometric discount; since this fires once per
+/// cycle (not per sample-per-position), the `exp` cost is negligible.
+#[inline]
+pub fn staleness_weight(k_npc: u8, lambda: f32) -> f32 {
+    if k_npc <= 1 || !lambda.is_finite() || lambda <= 0.0 {
+        return 1.0;
+    }
+    (-(lambda * (k_npc as f32 - 1.0))).exp()
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────
@@ -789,6 +852,181 @@ mod tests {
         assert!(
             h_after > h_before,
             "exploration must raise entropy: {h_before} -> {h_after}"
+        );
+    }
+
+    // ── Issue 365: Variable-duration CGSP staleness weight ────────────────
+
+    /// T4 (G1 correctness) — `staleness_weight` unit properties.
+    #[test]
+    fn t4_staleness_weight_unit_properties() {
+        // k_npc=1 → always 1.0 regardless of lambda (no staleness for
+        // single-cycle plans — the default case).
+        assert_eq!(staleness_weight(1, 0.0), 1.0);
+        assert_eq!(staleness_weight(1, 0.5), 1.0);
+        assert_eq!(staleness_weight(1, 10.0), 1.0);
+
+        // lambda=0 → always 1.0 regardless of k_npc (disabled).
+        assert_eq!(staleness_weight(4, 0.0), 1.0);
+        assert_eq!(staleness_weight(8, 0.0), 1.0);
+
+        // NaN / non-finite lambda → 1.0 (safe no-op, guards hot path).
+        assert_eq!(staleness_weight(4, f32::NAN), 1.0);
+        assert_eq!(staleness_weight(4, f32::INFINITY), 1.0);
+        assert_eq!(staleness_weight(4, f32::NEG_INFINITY), 1.0);
+
+        // Negative lambda → 1.0 (would invert the signal — reject).
+        assert_eq!(staleness_weight(4, -0.5), 1.0);
+
+        // Monotone strictly decreasing in k_npc for lambda > 0.
+        let w1 = staleness_weight(1, 0.5);
+        let w2 = staleness_weight(2, 0.5);
+        let w4 = staleness_weight(4, 0.5);
+        let w8 = staleness_weight(8, 0.5);
+        assert_eq!(w1, 1.0);
+        assert!(w2 < w1, "w2={w2} should be < w1={w1}");
+        assert!(w4 < w2, "w4={w4} should be < w2={w2}");
+        assert!(w8 < w4, "w8={w8} should be < w4={w4}");
+
+        // All weights bounded in (0, 1] for a realistic lambda sweep.
+        for k_npc in 1..=16u8 {
+            let w = staleness_weight(k_npc, 0.5);
+            assert!(w > 0.0 && w <= 1.0, "k_npc={k_npc} w={w} out of (0,1]");
+        }
+    }
+
+    /// T4 (G1) — default config (k_npc=1, staleness_lambda=0.0) still
+    /// drives correct behavior (target arm grows). Combined with T6 this
+    /// establishes the bit-identical no-op property.
+    #[test]
+    fn t4_default_config_target_arm_grows() {
+        let pool = make_orthonormal_pool(8, 8);
+        let conj = PoolConjecturer::new(pool.clone(), 42);
+        let guide = HlaProjectionGuide::new(4.0, 0.1, ComplexityWeights::default());
+        let solver = DotSolver { sharpness: 0.5 };
+        let bandit = VecBandit::uniform(8);
+        let cfg = CgspConfig::default();
+        // Sanity: defaults are the no-op values.
+        assert_eq!(cfg.k_npc, 1);
+        assert_eq!(cfg.staleness_lambda, 0.0);
+        let mut lp = CgspLoop::new(conj, guide, solver, bandit, cfg)
+            .with_difficulty_filter(BreakevenDifficultyFilter::new(0.0, 1.0));
+        let target = Target::new(pool[0].clone());
+        let mut scratch = ScratchBuffers::new(8, 8);
+
+        let before = lp.bandit().priority(0);
+        for _ in 0..100 {
+            let _ = lp.cycle(&target, &mut scratch);
+        }
+        let after = lp.bandit().priority(0);
+        assert!(
+            after >= before,
+            "target arm should grow with default config: before={before}, after={after}"
+        );
+    }
+
+    /// T5 (G2 fairness) — high-k_npc NPCs converge more slowly (higher
+    /// priority-table entropy after the same cycle count). This is the
+    /// bandit-update analog of γ^k: variable-duration feedback stays
+    /// comparable across the crowd by being more conservative for
+    /// deeper-planning NPCs.
+    ///
+    /// "Not starved" = the high-k table is still learning (entropy is
+    /// finite, strictly below uniform-log entropy). This catches the
+    /// degenerate case where the weight zeroes out all learning.
+    #[test]
+    fn t5_staleness_weight_high_k_higher_entropy_not_starved() {
+        let pool = make_orthonormal_pool(8, 8);
+
+        // Helper: run `n` cycles and return (entropy, target_arm_priority).
+        fn run(pool: &[Direction], n: usize, k_npc: u8) -> (f32, f32) {
+            let conj = PoolConjecturer::new(pool.to_vec(), 42);
+            let guide = HlaProjectionGuide::new(4.0, 0.1, ComplexityWeights::default());
+            let solver = DotSolver { sharpness: 0.5 };
+            let bandit = VecBandit::uniform(8);
+            let cfg = CgspConfig {
+                k_npc,
+                staleness_lambda: 0.5,
+                ..CgspConfig::default()
+            };
+            let mut lp = CgspLoop::new(conj, guide, solver, bandit, cfg)
+                .with_difficulty_filter(BreakevenDifficultyFilter::new(0.0, 1.0));
+            let target = Target::new(pool[0].clone());
+            let mut scratch = ScratchBuffers::new(8, 8);
+            for _ in 0..n {
+                let _ = lp.cycle(&target, &mut scratch);
+            }
+            let h = entropy_nats(lp.bandit().priorities());
+            let target_p = lp.bandit().priority(0);
+            (h, target_p)
+        }
+
+        let (h_low, p_low) = run(&pool, 50, 1);
+        let (h_high, p_high) = run(&pool, 50, 8);
+
+        // High-k NPC has higher entropy (less peaked table → more exploration
+        // headroom — the correct semantic for staler feedback).
+        assert!(
+            h_high > h_low,
+            "high-k entropy ({h_high}) should be > low-k ({h_low}) — \
+             staleness delays convergence"
+        );
+
+        // "Not starved": both tables have departed from uniform (entropy
+        // strictly below ln(8) ≈ 2.079, and strictly above 0).
+        let uniform_h = (8.0f32).ln();
+        assert!(
+            h_low < uniform_h && h_high < uniform_h,
+            "both tables should have departed from uniform: h_low={h_low}, h_high={h_high}, uniform={uniform_h}"
+        );
+        assert!(
+            h_low > 0.0 && h_high > 0.0,
+            "neither table should be one-hot starved: h_low={h_low}, h_high={h_high}"
+        );
+
+        // Both target arms are the max in their tables (renormalized to 1.0),
+        // but the high-k table's non-target arms are higher (less peaked).
+        // We verify via entropy (above). The target arm itself should still
+        // be the highest priority in both tables (learning happened, just
+        // more slowly for high-k).
+        assert_eq!(p_low, 1.0, "low-k target arm should be renormalized max");
+        assert_eq!(p_high, 1.0, "high-k target arm should be renormalized max");
+    }
+
+    /// T6 (G3 no-regression) — with staleness_lambda=0.0, k_npc has zero
+    /// effect on the priority table. Two loops with identical setup but
+    /// different k_npc values (1 vs 99) produce bit-identical priorities.
+    /// This is the strongest possible no-regression guarantee: the default
+    /// config is a true no-op, not just "close enough."
+    #[test]
+    fn t6_default_config_k_npc_has_no_effect() {
+        let pool = make_orthonormal_pool(8, 8);
+
+        fn run(pool: &[Direction], k_npc: u8) -> Vec<f32> {
+            let conj = PoolConjecturer::new(pool.to_vec(), 42);
+            let guide = HlaProjectionGuide::new(4.0, 0.1, ComplexityWeights::default());
+            let solver = DotSolver { sharpness: 0.5 };
+            let bandit = VecBandit::uniform(8);
+            let cfg = CgspConfig {
+                k_npc,
+                staleness_lambda: 0.0,
+                ..CgspConfig::default()
+            };
+            let mut lp = CgspLoop::new(conj, guide, solver, bandit, cfg)
+                .with_difficulty_filter(BreakevenDifficultyFilter::new(0.0, 1.0));
+            let target = Target::new(pool[0].clone());
+            let mut scratch = ScratchBuffers::new(8, 8);
+            for _ in 0..30 {
+                let _ = lp.cycle(&target, &mut scratch);
+            }
+            lp.bandit().priorities().to_vec()
+        }
+
+        let p_default = run(&pool, 1);
+        let p_extreme = run(&pool, 99);
+        assert_eq!(
+            p_default, p_extreme,
+            "with staleness_lambda=0.0, k_npc=1 vs k_npc=99 must be bit-identical"
         );
     }
 }
