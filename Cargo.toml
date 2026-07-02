@@ -2205,3 +2205,12 @@ name = "depth_invariance_bench"
 path = "benches/depth_invariance_bench.rs"
 required-features = ["depth_invariance", "belief_drafter"]
 harness = false
+
+# Plan 358 Phase 3 — CausalHeadImportance G2 (bystander discrimination) gate.
+# Compares causal partition vs RTPurbo's real calibrate_from_scores on a
+# synthetic bystander harness. Lives in root tests/ because it needs the root
+# rt_turbo::calibrate_from_scores (katgpt-core can't depend on the root).
+[[test]]
+name = "causal_head_importance_g2"
+path = "tests/causal_head_importance_g2.rs"
+required-features = ["causal_head_importance", "rt_turbo"]

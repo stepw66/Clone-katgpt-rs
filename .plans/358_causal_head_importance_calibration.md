@@ -4,7 +4,7 @@
 **Research:** [katgpt-rs/.research/362_HydraHead_Causal_Head_Importance_Hybrid_Attention.md](../.research/362_HydraHead_Causal_Head_Importance_Hybrid_Attention.md)
 **Source paper:** [arXiv:2606.20097](https://arxiv.org/abs/2606.20097) — Tan et al., HydraHead, Alibaba, Jun 2026
 **Target:** `katgpt-rs/crates/katgpt-core/src/causal_head_importance/` (new module) + Cargo feature `causal_head_importance` (opt-in); RTPurbo wiring in `katgpt-rs/src/rt_turbo/calibration.rs`
-**Status:** Active — Phase 1 ✅ + Phase 2 ✅ COMPLETE (G1/G3/G4 PASS, 32 tests green), Phase 3–5 pending.
+**Status:** Active — Phase 1 ✅ + Phase 2 ✅ + Phase 3 ✅ COMPLETE (G1/G2/G3/G4 ALL PASS, causal strictly dominates on bystander workload), Phase 4–5 pending.
 
 ---
 
@@ -344,16 +344,22 @@ The paper's strongest quality claim for the causal score is that it filters *cor
 
 ### Tasks
 
-- [ ] **T3.1** Build the bystander harness in `tests/causal_head_importance_g2.rs`:
+- [x] **T3.1** Build the bystander harness in `tests/causal_head_importance_g2.rs` (lives in **root** `tests/` because it needs the real `calibrate_from_scores` from `rt_turbo` for an apples-to-apples comparison — katgpt-core can't depend on the root crate):
   - Generate `n_heads = 16` synthetic heads. For each head, define (a) an attention pattern (where it attends — needle vs local), (b) an output projection (does its output actually move the readout).
-  - **K load-bearing** heads: attend to needle AND project into the readout direction.
-  - **M correlated-bystander** heads: attend to needle (high attention-mass score!) but project to zero (output orthogonal to readout).
-  - **N local** heads: attend locally, project to zero.
-- [ ] **T3.2** Compute two partitions:
-  - **Attention-mass** (RTPurbo-style): rank by needle attention mass → top-K includes bystanders.
-  - **Causal necessity** (this plan): rank by IE score → top-K excludes bystanders (their IE = 0 because patching them doesn't move the readout).
-- [ ] **T3.3** Assert the discrimination: causal partition's top-K set is *exactly* the load-bearing set (Jaccard = 1.0); attention-mass partition's top-K set includes ≥ 1 bystander (Jaccard < 1.0). Compute the head-set difference: `|causal_K ∩ load_bearing| / K = 1.0` and `|attention_mass_K ∩ load_bearing| / K < 1.0`.
-- [ ] **T3.4** Vary the bystander fraction (0%, 25%, 50%) and show causal partition is invariant to bystander fraction while attention-mass partition degrades. Plot or table.
+  - **K load-bearing** heads: attend to needle (moderate, 0.78) AND project into the readout direction (1.0).
+  - **M correlated-bystander** heads: attend to needle STRONGLY (0.92 — MORE than load-bearing, modeling the real pathology where bystanders win on pure attention-mass) but project to zero (output orthogonal to readout).
+  - **N local** heads: attend locally (0.08), project to zero.
+- [x] **T3.2** Compute two partitions (both at the SAME ratio 4/16=0.25 → K=4, via `fair_config()` setting `retrieval_head_ratio` to match):
+  - **Attention-mass** (RTPurbo-style, real `calibrate_from_scores`): rank by needle attention mass → top-K includes bystanders.
+  - **Causal necessity** (this plan, `partition_by_causal_score`): rank by IE score → top-K excludes bystanders (their IE = 0 because patching them doesn't move the readout).
+- [x] **T3.3** Assert the discrimination: causal partition's top-K set is *exactly* the load-bearing set (Jaccard = 1.0); attention-mass partition's top-K set includes ≥ 1 bystander (Jaccard < 1.0). Compute the head-set difference: `|causal_K ∩ load_bearing| / K = 1.0` and `|attention_mass_K ∩ load_bearing| / K < 1.0`. **PASS ✅** (3 tests): at 4 bystanders, causal Jaccard 1.0 vs attention-mass 0.0 (bystanders attend 0.92 > load-bearing 0.78 → they displace ALL load-bearing in the top-K).
+- [x] **T3.4** Vary the bystander fraction (0%, 25%, 50%) and show causal partition is invariant to bystander fraction while attention-mass partition degrades. **PASS ✅**: causal Jaccard 1.000 at all fractions {0,4,8 bystanders}; attention-mass Jaccard 1.000→0.000→0.000 (collapses once bystanders exist). Table:
+
+  | bystanders | causal_jac | attn_jac | verdict |
+  |---|---|---|---|
+  | 0 | 1.000 | 1.000 | tie/agree |
+  | 4 | 1.000 | 0.000 | causal wins |
+  | 8 | 1.000 | 0.000 | causal wins |
 
 **Phase 3 exit criterion:** G2 demonstrates causal > attention-mass on the bystander workload. Promote/demote decision per the §Goal tracking rule.
 
