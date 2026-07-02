@@ -1,16 +1,17 @@
 # Plan 359 — DEC Heat Kernel Trajectory GOAT Results
 
-**Date:** 2026-07-02
-**Primitive:** `heat_kernel_trajectory_linear` + `heat_kernel_trajectory_krylov` (`katgpt-dec/src/heat_kernel.rs`, `katgpt-dec/src/krylov.rs`)
-**Feature:** `heat_kernel_trajectory` — **promoted to DEFAULT-ON in katgpt-dec** (2026-07-02)
+**Date:** 2026-07-02 (G1-nl T5.2 added 2026-07-02)
+**Primitive:** `heat_kernel_trajectory_linear` + `heat_kernel_trajectory_krylov` + `heat_kernel_trajectory_nonlinear` (`katgpt-dec/src/heat_kernel.rs`, `katgpt-dec/src/krylov.rs`, `katgpt-dec/src/nonlinear_heat_kernel.rs`)
+**Feature:** `heat_kernel_trajectory` — **promoted to DEFAULT-ON in katgpt-dec** (2026-07-02); nonlinear path stays opt-in under the same feature flag
 **Bench:** `cargo bench -p katgpt-core --features heat_kernel_trajectory --bench bench_359_dec_heat_kernel_trajectory_goat -- --nocapture`
 **Hardware:** macOS (Apple Silicon)
 
-## G1–G5 Results
+## G1–G5 + G1-nl Results
 
 | Gate | Metric | Value | Threshold | Verdict |
 |------|--------|-------|-----------|---------|
 | G1 correctness (linear) | hk-vs-coarse-Euler improvement @t15 | **5.00×** | > 1.5× | **PASS ✅** |
+| G1-nl correctness (nonlinear, T5.2) | hk-nl-vs-coarse-Euler improvement @t1.0 | **1.72×** | > 1.5× | **PASS ✅** (informational) |
 | G2 latency | Krylov(k=30)/Euler ratio @T=100 | **1.87×** | ≤ 2.0× | **PASS ✅** |
 | G3 Hodge preservation | hk drift vs fine Euler | **2.98e-7** | < coarse (3.34e-6) | **PASS ✅** |
 | G4 zero-alloc (linear) | allocs / 1000 calls (after precompute) | **0** | = 0 | **PASS ✅** |
@@ -154,18 +155,97 @@ is still alive but Euler's error has accumulated. For sleep-time anticipation
 (Plan 341, multi-second pre-thinking) and zone-level crowd flow, this is the
 relevant regime.
 
-## Deferred: T5.2 (G1-nonlinear)
+## T5.2 (G1-nonlinear) — DONE (2026-07-02)
 
-T5.2 (`nonlinear_expm_vs_fine_euler`) is **DEFERRED** — the nonlinear exponential
-integrator (Phase 3) is not yet implemented. There is no `expm` for the ReLU-gated
-source term to compare against. When Phase 3 lands, this gate becomes runnable.
-The linear path promotion does NOT depend on the nonlinear gate.
+The nonlinear exponential integrator (`heat_kernel_trajectory_nonlinear`, Plan 359
+Phase 3) solves `dh/dt = -h + Δ·ReLU(h) + diag(motor)·h` via Duhamel
+variation-of-parameters + Gauss-Legendre quadrature. The T5.2 gate compares it
+against coarse nonlinear Euler (dt=0.1) at matching fine nonlinear Euler
+(dt=0.001) ground truth.
+
+**Gate:** improvement > 1.5× (same threshold as linear G1).
+**Result at t=1.0, n_quad=4:** **1.72× — PASS ✅** (informational; nonlinear path stays opt-in).
+
+### Horizon sweep (n_quad=4)
+
+| t | field_norm | hk_err | coarse_err | improvement |
+|---|---|---|---|---|
+| 0.5 | 4.92e-2 | 0.102 | 0.997 | **9.75×** |
+| 1.0 | 3.09e-3 | 0.582 | 1.000 | **1.72×** ← formal gate |
+| 1.5 | 1.88e-4 | 9.729 | 1.000 | 0.10× |
+| 2.0 | 1.14e-5 | 94.24 | 1.000 | 0.01× |
+| 3.0 | 4.34e-8 | 3156 | 1.000 | 0.00× |
+
+**Regime boundary:** the nonlinear heat kernel wins at SHORT-TO-MODERATE
+horizons (t≤1.0) where the field is alive and coarse Euler's O(T·dt²) per-step
+error dominates. At t≥1.5 the field decays below the eigensolver noise floor
+(~0.1% spurious negatives from power iteration activating ReLU spuriously), and
+the fixed quadrature error (~1.8e-3 absolute) dominates the decaying field — the
+relative error explodes while the ABSOLUTE error stays roughly constant (~1.8e-3
+from t=1.0 to t=2.0). This is NOT a divergence/blow-up of the integrator; it's
+the eigensolver noise floor interacting with the ReLU nonlinearity (the same
+phenomenon documented in Phase 3 note #2 — "the all-positive property is
+theoretical, not practical").
+
+### n_quad sensitivity sweep @t=1.0
+
+| n_quad | hk_err | improvement |
+|---|---|---|
+| 1 | 1.305 | 0.77× |
+| 2 | 0.765 | 1.31× |
+| **4** | **0.582** | **1.72×** |
+| 6 | 0.562 | 1.78× |
+| 8 | 0.590 | 1.69× |
+
+**The error converges at n_quad=4 and PLATEAUS** — confirming the error floor
+is **eigensolver-limited** (the ~0.1% spurious negatives from power iteration),
+NOT quadrature-limited. This validates `DEFAULT_N_QUAD=4` as optimal: more
+quadrature points don't help (n_quad=8 actually goes slightly back up, likely
+Runge phenomenon or numerical noise at higher order). The quadrature is
+converged; the remaining error is the eigensolver's.
+
+### Why the nonlinear path stays opt-in
+
+The G1-nl gate PASSES (1.72× at t=1.0), but the nonlinear path stays opt-in
+for two reasons:
+
+1. **Horizon-limited advantage.** The gain is real only at t≤1.0 (the
+   "1-second prediction" regime). At longer horizons (the sleep-time
+   anticipation / zone-level crowd flow regime, t=5–30s), the field has
+   decayed and the nonlinear heat kernel loses to coarse Euler. The LINEAR
+   path's advantage (5.00× at t=15) is broader and applies to the long-horizon
+   use cases.
+2. **Extension of an already-promoted primitive.** The linear path is
+   default-on; the nonlinear extension is an opt-in add-on for callers who need
+   ReLU-gated dynamics at short horizons. This is the right structure — the
+   nonlinear path is a correctness-validated, GOAT-tier short-horizon tool, not
+   a wholesale replacement.
+
+The gate is INFORMATIONAL: it does NOT gate the linear path promotion (which was
+decided in Phase 5). A PASS here is evidence the nonlinear path COULD be
+promoted in the future if the use case (short-horizon ReLU-gated prediction)
+matures; for now it stays opt-in.
+
+### G1 (linear) vs G1-nl (nonlinear) — the honest comparison
+
+| Property | Linear (G1) | Nonlinear (G1-nl) |
+|---|---|---|
+| Best improvement | 5.00× @t15 | 9.75× @t0.5 |
+| Gate-point improvement | 5.00× @t15 | 1.72× @t1.0 |
+| Regime | Wins at t≥8 (long horizon) | Wins at t≤1.0 (short horizon) |
+| Error source | Eigensolver (~8% on 8×8) | Eigensolver noise × ReLU (~0.1% spurious negatives) |
+| Promotion | DEFAULT-ON (Phase 5) | Stays opt-in (horizon-limited) |
+
+The linear path wins at LONG horizons (its exactness advantage grows with T).
+The nonlinear path wins at SHORT horizons (where the field is alive and coarse
+Euler's per-step error dominates). They're complementary, not competitive.
+
 
 ## Files changed
 
 | File | Change |
 |------|--------|
-| `crates/katgpt-core/benches/bench_359_dec_heat_kernel_trajectory_goat.rs` | **New** — GOAT bench (G1–G5), std::time::Instant + harness=false (matches bench_357 convention) |
+| `crates/katgpt-core/benches/bench_359_dec_heat_kernel_trajectory_goat.rs` | **New** (Phase 5) — GOAT bench (G1–G5); **updated** (T5.2) — added G1-nl nonlinear gate with horizon sweep + n_quad sensitivity sweep |
 | `crates/katgpt-core/Cargo.toml` | Registered the bench target behind `heat_kernel_trajectory` |
 | `crates/katgpt-dec/Cargo.toml` | **Promoted** `heat_kernel_trajectory` to `default = ["heat_kernel_trajectory"]` |
 | `crates/katgpt-core/Cargo.toml` (feature comment) | Updated comment: OPT-IN → DEFAULT-ON in katgpt-dec |

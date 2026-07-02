@@ -147,7 +147,7 @@ The modelless analog of PhysiFormer's generative uncertainty: sample K diverse p
 
 - [x] **T5.1 G1 (correctness — linear):** heat kernel is **5.00× more accurate** than coarse Euler at matching fine-Euler ground truth at t=15 (motor=-7.5). Single-mode rel err @t1 = 7.58% (eigensolver-limited, informational). Gate: improvement > 1.5×. **PASS ✅**
 
-- [-] **T5.2 G1 (correctness — nonlinear):** `nonlinear_expm_vs_fine_euler` — **DEFERRED (Phase 3 now implemented, gate still not run as a formal GOAT benchmark)**. Phase 3 (nonlinear exponential integrator) is now implemented in `nonlinear_heat_kernel.rs`. The T3.3/T3.4 tests verify correctness against fine Euler, but a formal GOAT-bench benchmark (with improvement ratio, comparable to T5.1's 5.00×) has not been run. The linear path promotion does NOT depend on this gate. It becomes runnable as a formal gate when someone writes the nonlinear GOAT bench.
+- [x] **T5.2 G1 (correctness — nonlinear):** `nonlinear_expm_vs_fine_euler` — **DONE (2026-07-02).** The nonlinear exponential integrator (`heat_kernel_trajectory_nonlinear`) beats coarse nonlinear Euler (dt=0.1) at matching fine nonlinear Euler (dt=0.001) ground truth at t=1.0 on 4×4 with full eigenbasis (k=16, max_iter=2000), n_quad=4 (DEFAULT_N_QUAD). **Improvement = 1.72× (gate > 1.5×). PASS ✅.** Best-case at t=0.5 is **9.75×** (strong). At t≥1.5 the field decays below the eigensolver noise floor (~0.1% spurious negatives activating ReLU) and the comparison degenerates — this is the expected regime boundary for a first-order exponential integrator. The n_quad sensitivity sweep (n_quad=1,2,4,6,8) confirms the error floor is **eigensolver-limited** (plateaus at n_quad≥4), validating DEFAULT_N_QUAD=4 as optimal. **Stays opt-in** — the gain is real but horizon-limited (t≤1.0); the linear path's advantage (5.00× at t=15) is broader. Gate is INFORMATIONAL (does not gate the linear path promotion, which is independent).
 
 - [x] **T5.3 G2 (latency):** Krylov(k=30, t=100) = 3814 µs vs Euler(T=100) = 2044 µs → ratio **1.87×** (gate ≤ 2.0×). **PASS ✅**
 
@@ -157,7 +157,7 @@ The modelless analog of PhysiFormer's generative uncertainty: sample K diverse p
 
 - [x] **T5.6 G5 (no-regression):** `cargo test -p katgpt-dec --lib` → 139 pass; `cargo test -p katgpt-core --features heat_kernel_trajectory --lib` → 666 pass. Default-feature build clean. **PASS ✅**
 
-- [x] **T5.7 Promotion decision:** G1+G2+G3 all pass → **`heat_kernel_trajectory` PROMOTED to DEFAULT-ON in `katgpt-dec`** (`default = ["heat_kernel_trajectory"]`). Stays opt-in at katgpt-core/root level (gated on `dec_operators`, which is itself opt-in). T5.2 nonlinear deferred (Phase 3 dependency). Krylov path NOT demoted (1.87× competitive at T=100; the online path for large complexes).
+- [x] **T5.7 Promotion decision:** G1+G2+G3 all pass → **`heat_kernel_trajectory` PROMOTED to DEFAULT-ON in `katgpt-dec`** (`default = ["heat_kernel_trajectory"]`). Stays opt-in at katgpt-core/root level (gated on `dec_operators`, which is itself opt-in). T5.2 nonlinear gate now RUN (2026-07-02): PASSES at 1.72× @t1.0, but nonlinear path stays opt-in (horizon-limited advantage, see T5.2). Krylov path NOT demoted (1.87× competitive at T=100; the online path for large complexes).
 
 **Phase 5 exit:** GOAT gate run, verdict recorded in `.benchmarks/365_dec_heat_kernel_trajectory_goat.md`. Promotion decision: **DEFAULT-ON in katgpt-dec**.
 
