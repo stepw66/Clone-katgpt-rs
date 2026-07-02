@@ -122,6 +122,7 @@ fn run_decode_bench(seq_len: usize, rng: &mut SeedRng) -> DecodeBenchResult {
         sliding_window: 8192,
         sink_tokens: 4,
         block_size: 64,
+        ..katgpt_rs::types::RtTurboConfig::default()
     };
 
     // Build calibration: first 2 heads are retrieval (highest scores)

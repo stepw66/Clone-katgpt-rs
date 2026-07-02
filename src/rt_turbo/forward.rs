@@ -513,6 +513,7 @@ mod tests {
             sliding_window: 8,
             sink_tokens: 2,
             block_size: 4,
+            ..RtTurboConfig::default()
         }
     }
 

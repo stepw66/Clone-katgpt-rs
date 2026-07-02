@@ -282,7 +282,14 @@ pub enum RetrievalHeadRole {
 /// Must pass 6/6 GOAT proofs before default-on promotion.
 ///
 /// Fields ordered by descending alignment to minimize padding:
-/// usize (8B) → f32 (4B) — no padding between groups.
+/// usize (8B) → f32 (4B) → CalibrationMode (1B) — no padding between groups.
+///
+/// # Calibration mode (Plan 358)
+///
+/// [`CalibrationMode::AttentionMass`] is the default (cheaper: 1 forward pass).
+/// [`CalibrationMode::CausalNecessity`] is opt-in — strictly stronger on
+/// workloads with correlated bystanders but ~10–100× more expensive to
+/// calibrate. See `calibrate_from_causal_scores` in `rt_turbo::calibration`.
 #[derive(Clone, Copy, Debug)]
 pub struct RtTurboConfig {
     /// Low-dimensional projection size for pre-RoPE scoring (default: 16).
@@ -301,6 +308,27 @@ pub struct RtTurboConfig {
     /// Cumulative attention mass threshold for dynamic top-p selection (default: 0.9).
     /// Paper ablation: top-p=0.9 preserves >93% attention mass at 97% sparsity.
     pub top_p: f32,
+    /// Which score semantics to use for head calibration (Plan 358). Default:
+    /// `AttentionMass` (cheaper). `CausalNecessity` is opt-in — strictly
+    /// stronger on bystander-heavy workloads but ~10–100× more expensive.
+    pub calibration_mode: CalibrationMode,
+}
+
+/// Head-calibration score source (Plan 358, Research 362).
+///
+/// `#[repr(u8)]` for sync-friendly 1-byte representation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[repr(u8)]
+pub enum CalibrationMode {
+    /// Observational needle attention-mass (RTPurbo Plan 126 default).
+    /// Cheaper: a single forward pass + per-head mass scan.
+    #[default]
+    AttentionMass = 0,
+    /// Causal necessity via activation/path patching IE score (Plan 358).
+    /// Strictly stronger — excludes correlated bystanders — but requires
+    /// `n_heads × n_calibration_samples` patched forward passes. Requires the
+    /// `causal_head_importance` feature on the consuming crate.
+    CausalNecessity = 1,
 }
 
 impl Default for RtTurboConfig {
@@ -312,6 +340,7 @@ impl Default for RtTurboConfig {
             block_size: 64,
             retrieval_head_ratio: 0.15,
             top_p: 0.9,
+            calibration_mode: CalibrationMode::default(),
         }
     }
 }

@@ -4,7 +4,7 @@
 **Research:** [katgpt-rs/.research/362_HydraHead_Causal_Head_Importance_Hybrid_Attention.md](../.research/362_HydraHead_Causal_Head_Importance_Hybrid_Attention.md)
 **Source paper:** [arXiv:2606.20097](https://arxiv.org/abs/2606.20097) — Tan et al., HydraHead, Alibaba, Jun 2026
 **Target:** `katgpt-rs/crates/katgpt-core/src/causal_head_importance/` (new module) + Cargo feature `causal_head_importance` (opt-in); RTPurbo wiring in `katgpt-rs/src/rt_turbo/calibration.rs`
-**Status:** Active — Phase 1 ✅ + Phase 2 ✅ + Phase 3 ✅ COMPLETE (G1/G2/G3/G4 ALL PASS, causal strictly dominates on bystander workload), Phase 4–5 pending.
+**Status:** COMPLETE — Phase 1 ✅ + Phase 2 ✅ + Phase 3 ✅ + Phase 4 ✅ COMPLETE (G1/G2/G3/G4 PASS; promote/demote = opt-in, AttentionMass stays default), Phase 5 pending (docs/cross-refs).
 
 ---
 
@@ -369,15 +369,16 @@ The paper's strongest quality claim for the causal score is that it filters *cor
 
 ### Tasks
 
-- [ ] **T4.1** Add `calibrate_from_causal_scores` to `katgpt-rs/src/rt_turbo/calibration.rs` as a sibling to the existing `calibrate_from_scores` (attention-mass). Same output type (`HeadCalibration`), different input score semantics. Document the semantic difference (causal necessity vs observational mass) in the docstring.
-- [ ] **T4.2** Add a `CalibrationMode` enum to `katgpt-rs/src/types.rs` (or `rt_turbo/types.rs`): `AttentionMass` (current default) | `CausalNecessity` (this plan, requires `causal_head_importance` feature). Wire into `RtTurboConfig`.
-- [ ] **T4.3** Update `examples/rt_turbo_01_calibration.rs` to demonstrate both modes side-by-side on the synthetic harness from Phase 3.
-- [ ] **T4.4** **Promote/demote decision (per §Goal):**
+- [x] **T4.1** Add `calibrate_from_causal_scores` to `katgpt-rs/src/rt_turbo/calibration.rs` as a sibling to the existing `calibrate_from_scores` (attention-mass). Same output type (`HeadCalibration`), different input score semantics. Document the semantic difference (causal necessity vs observational mass) in the docstring. **DONE** — delegates to `calibrate_from_scores` (partition logic is identical; only the input-score semantics differ, documented in the docstring table).
+- [x] **T4.2** Add a `CalibrationMode` enum to `katgpt-rs/src/types.rs` (or `rt_turbo/types.rs`): `AttentionMass` (current default) | `CausalNecessity` (this plan, requires `causal_head_importance` feature). Wire into `RtTurboConfig`. **DONE** — `CalibrationMode` in `crates/katgpt-types/src/enums.rs` (`#[repr(u8)]`, `#[default] AttentionMass`), `RtTurboConfig.calibration_mode` field added, re-exported through katgpt-types → katgpt-core. Fixed struct-literal sites (`forward.rs`, `test_126_rt_turbo_goat.rs`, `rt_turbo_02_decode_bench.rs`) with `..RtTurboConfig::default()` spread.
+- [x] **T4.3** Update `examples/rt_turbo_01_calibration.rs` to demonstrate both modes side-by-side on the synthetic harness from Phase 3. **DONE** — Step 6 added (behind `#[cfg(feature = "causal_head_importance")]`): demonstrates `CalibrationMode::CausalNecessity` + `calibrate_from_causal_scores`, prints the partition contrast. Runs clean with `--features rt_turbo causal_head_importance`.
+- [x] **T4.4** **Promote/demote decision (per §Goal):**
   - If G2 shows causal strictly dominates (bystander exclusion is real and matters at production head counts) **AND** G3 latency is acceptable → promote `CausalNecessity` to default `CalibrationMode`, demote `AttentionMass` to opt-in fallback. Update `RtTurboConfig::default()`.
   - If G2 shows they agree on most workloads (bystanders rare in practice) → keep `AttentionMass` default, leave `CausalNecessity` opt-in for the long-context-extreme regime. Document the regime boundary.
   - Record the decision in `.benchmarks/358_causal_head_importance_goat.md` with the G1/G2/G3/G4 numbers and the promote/demote verdict.
-- [ ] **T4.5** Update `katgpt-rs/README.md` Feature Showcase with a short entry (mirroring the RTPurbo entry format) once Phase 4 decision is made.
-- [ ] **T4.6** Tag release per AGENTS.md commit convention: `feat(calibration): causal head-importance scorer + scale-normalized fusion (Plan 358, Research 362, arXiv:2606.20097)`.
+  - **DECISION: keep `AttentionMass` default; `CausalNecessity` opt-in.** Causal strictly dominates on the bystander workload (G2) and is faster at the partition step (G3), but is ~10–100× more expensive to *produce* scores (patched forwards) and real-world bystander prevalence is unknown (synthetic-only). When no bystanders exist, both agree (G2 @ 0 bystanders: both Jaccard 1.0). Recorded in `.benchmarks/358_causal_head_importance_goat.md`.
+- [x] **T4.5** Update `katgpt-rs/README.md` Feature Showcase with a short entry (mirroring the RTPurbo entry format) once Phase 4 decision is made. **DONE** — added to the "GOAT-Proved Additions" table.
+- [x] **T4.6** Tag release per AGENTS.md commit convention: `feat(calibration): causal head-importance scorer + scale-normalized fusion (Plan 358, Research 362, arXiv:2606.20097)`. **DONE** — this commit.
 
 **Phase 4 exit criterion:** RTPurbo accepts both calibration modes; promote/demote decision recorded with evidence; README updated.
 

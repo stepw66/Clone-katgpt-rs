@@ -413,6 +413,7 @@ fn test_goat_4_decode_routing_efficiency() {
         sliding_window: 8192,
         sink_tokens: 4,
         block_size: 64,
+        ..RtTurboConfig::default()
     };
 
     let calibration = make_calibration(n_heads, 2, &config);

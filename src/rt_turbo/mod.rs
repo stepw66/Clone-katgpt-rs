@@ -46,8 +46,8 @@ pub mod top_p;
 pub mod sat_retrieval;
 
 pub use calibration::{
-    CalibrationConfigSnapshot, HeadCalibration, HeadClassification, calibrate_from_scores,
-    compute_all_retrieval_scores, compute_retrieval_score,
+    CalibrationConfigSnapshot, HeadCalibration, HeadClassification, calibrate_from_causal_scores,
+    calibrate_from_scores, compute_all_retrieval_scores, compute_retrieval_score,
 };
 pub use forward::{
     RtTurboCache, RtTurboDecodeResult, RtTurboPrefillResult, forward_rt_turbo_decode,

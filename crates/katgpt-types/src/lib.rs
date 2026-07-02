@@ -90,7 +90,7 @@ pub use config::{Config, InferenceOverrides, kv_dim};
 #[cfg(feature = "domain_latent")]
 pub use domain::DomainLatent;
 pub use enums::{
-    AttentionMode, AttentionProjection, CacheLayout, ConvergenceSelector, DashAttnConfig,
+    AttentionMode, AttentionProjection, CacheLayout, CalibrationMode, ConvergenceSelector, DashAttnConfig,
     DepthTier, HlaMode, HybridPattern, LoopMode, ModelArchitecture, ResidualGate,
     RetrievalHeadRole, RtTurboConfig, SdpaOutputGate, WeightDtype,
 };

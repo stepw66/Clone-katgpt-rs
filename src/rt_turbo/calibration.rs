@@ -252,6 +252,52 @@ pub fn calibrate_from_scores(scores: &[f32], config: &RtTurboConfig) -> HeadCali
     }
 }
 
+/// Partition heads into retrieval/local sets from **causal-necessity** scores
+/// (Plan 358, Research 362, arXiv:2606.20097 HydraHead).
+///
+/// Sibling to [`calibrate_from_scores`] (which takes observational
+/// attention-mass scores). Same output type (`HeadCalibration`), same ratio /
+/// threshold logic — only the **input score semantics** differ:
+///
+/// | | `calibrate_from_scores` | `calibrate_from_causal_scores` |
+/// |---|---|---|
+/// | Input | Needle attention-mass R_h (observational) | Causal IE score (activation/path patching) |
+/// | Semantics | "attends to needle" | "necessary for capability — patching it collapses the readout" |
+/// | Bystander pathology | Misclassifies correlated bystanders (attend strongly but are overridden downstream) | Correctly excludes bystanders (IE = 0 because patching doesn't move the readout) |
+/// | Calibration cost | O(1) forward pass + per-head mass scan | O(n_heads × n_calibration_samples) patched forward passes |
+///
+/// `causal_scores[h]` should be the per-head IE (indirect effect) value from
+/// [`katgpt_core::causal_head_importance::direct_effect_importance`] or the
+/// fused cross-capability score from
+/// [`katgpt_core::causal_head_importance::fuse_across_capabilities`]. Heads with
+/// the highest causal necessity become the retrieval set; the rest are local.
+///
+/// # Modelless discipline
+///
+/// The IE scores are produced by forward-pass-only causal intervention (no
+/// backprop). This function is the *partition* step; the patched forward passes
+/// that produce the scores are the caller's responsibility (riir-engine /
+/// riir-games territory per Plan 358 Risk #1).
+///
+/// # Promote/demote status (Plan 358 Phase 4)
+///
+/// `AttentionMass` remains the **default** `CalibrationMode` (cheaper: 1 forward
+/// pass). `CausalNecessity` is **opt-in** — strictly stronger on workloads with
+/// correlated bystanders (G2 Jaccard 1.0 vs 0.0), but ~10–100× more expensive to
+/// calibrate and the bystander prevalence in production models is unknown
+/// (synthetic-only validation). Use `CausalNecessity` for the long-context-
+/// extreme regime where bystander heads matter.
+pub fn calibrate_from_causal_scores(
+    causal_scores: &[f32],
+    config: &RtTurboConfig,
+) -> HeadCalibration {
+    // The partition logic is identical to calibrate_from_scores — only the
+    // semantic meaning of the input scores differs (causal necessity vs
+    // attention mass). Delegate to keep the partition logic DRY; the doc above
+    // carries the semantic distinction.
+    calibrate_from_scores(causal_scores, config)
+}
+
 // ---------------------------------------------------------------------------
 // HeadCalibration impl
 // ---------------------------------------------------------------------------

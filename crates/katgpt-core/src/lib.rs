@@ -246,7 +246,7 @@ pub use traits::{AllGoalsUpdate, LeoHead, sigmoid_bounded_q};
 // Re-export key types at crate root for convenience
 pub use shard_embedding::{EMBED_DIM, JlProjectionMatrix, STYLE_DIM as JL_STYLE_DIM};
 pub use types::{
-    AttentionMode, AttentionProjection, CacheLayout, Config, ConvergenceSelector, DashAttnConfig,
+    AttentionMode, AttentionProjection, CacheLayout, CalibrationMode, Config, ConvergenceSelector, DashAttnConfig,
     DilationConfig, HlaMode, HybridPattern, InferenceOverrides, InferenceResult, LoopMode,
     LoraAdapter, LoraPair, ModelArchitecture, ResidualGate, RetrievalHeadRole, Rng, RtTurboConfig,
     SdpaOutputGate, ShardEmbedding, WeightDtype, kv_dim, lora_apply, matmul, matmul_f16,
