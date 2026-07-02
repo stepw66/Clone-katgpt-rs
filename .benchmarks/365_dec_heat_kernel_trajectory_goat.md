@@ -241,12 +241,103 @@ The nonlinear path wins at SHORT horizons (where the field is alive and coarse
 Euler's per-step error dominates). They're complementary, not competitive.
 
 
+## Phase 4 (BoM Trajectory) — DONE (2026-07-02)
+
+The BoM Trajectory sampler (`heat_kernel_trajectory_bom`, Plan 359 Phase 4)
+perturbs the initial state `h₀` along the **near-harmonic subspace** (the `n`
+eigenmodes with smallest `|a_k|` where `a_k = motor_d - 1 + λ_k`) and applies
+the linear heat kernel to each of K hypotheses. The near-harmonic modes decay
+slowest under `exp(t·A)`, so perturbations along them persist → genuinely
+different futures.
+
+This is the modelless analog of PhysiFormer's generative uncertainty +
+BoMSampler's K-hypothesis diverse sampling (Plan 281), in trajectory space.
+
+### Primitive verification (T4.1, T4.2)
+
+8 unit tests in `bom_heat_kernel.rs`, all green:
+
+| Test | Verifies |
+|---|---|
+| `near_harmonic_indices_returns_smallest_abs_a` | Direction selection picks smallest `\|a_k\|` |
+| `near_harmonic_indices_caps_at_k` | Caps at `eig.k()` |
+| `bom_returns_k_trajectories` | Returns K trajectories of correct shape |
+| `bom_into_matches_allocating` | Zero-alloc variant matches allocating variant (bit-identical) |
+| **`bom_produces_diverse_trajectories`** | K trajectories have non-trivial L2 spread (T4.2 core) |
+| `bom_zero_sigma_returns_baseline` | σ=0 → all trajectories equal unperturbed linear heat kernel |
+| `bom_trajectories_are_finite_and_bounded` | Stability: no NaN/inf, decays under stable motor |
+| `bom_diversity_grows_with_sigma` | σ-sweep: spread increases monotonically with σ |
+
+The topological-invariant preservation (Hodge decomposition) holds by
+construction — the heat kernel preserves the DEC structure (Phase 1 T1.6).
+
+### UQ floor comparison (T4.3) — EXCLUDED
+
+`crates/katgpt-core/tests/conformal_floor_bom_trajectory.rs` wraps
+`heat_kernel_trajectory_bom` as a `UqPrimitiveUnderTest` and runs it against
+the conformal-naive floor. The adapter embeds the scalar observation as a
+uniform rank-0 field on a 4×4 grid, samples K=8 perturbed trajectories at t=1
+(near-harmonic 4 dirs, motor=0, σ=0.1), and projects each to cell 0.
+
+**Verdict: EXCLUDED from the "Report the Floor" policy** — same structural
+class as BoMSampler (Issue 010 T3). The K-trajectory spread is exploration
+diversity (σ-controlled), not calibrated predictive uncertainty.
+
+| Corpus | CRPS ratio | Winkler ratio | Coverage (nom 0.95) | Verdict |
+|---|---|---|---|---|
+| seasonal | 0.770 | 10.07 | 0.128 | Mixed |
+| white noise | 0.336 | 3.62 | 0.232 | Mixed |
+
+The BoM Trajectory *wins on CRPS* (narrow σ-bound intervals flatter the
+narrowness-rewarding metric) but *loses catastrophically on coverage* (13–23%
+vs nominal 95%) — the textbook **false-confidence** signature. The Winkler
+score (penalizes misses by 2/α = 40) exposes the under-coverage: 3.6–10× the
+floor.
+
+**σ-sweep (seasonal corpus):**
+
+| σ | CRPS ratio | Coverage | Verdict |
+|---|---|---|---|
+| 0.05 | 0.764 | 0.024 | Mixed |
+| 0.10 | 0.773 | 0.103 | Mixed |
+| 0.30 | 0.939 | 0.452 | Mixed |
+| 0.50 | 1.280 | 0.687 | LosesToFloor |
+
+Widening σ lifts coverage (0.024→0.687) but CRPS ratio regresses (0.764→1.280).
+No σ value produces a `BeatsFloor` verdict. At σ=0.5 the primitive
+**LosesToFloor** outright (CRPS ratio > 1.05 + under-coverage).
+
+**Width-ratio test (the structural evidence):** low-volatility regime
+(σ_data=0.02) vs high-volatility regime (σ_data=0.30): interval width ratio =
+**1.001**. A data-driven floor would show ~15× (the volatility ratio). The BoM
+Trajectory's width is σ-controlled (hyperparameter), not volatility-controlled
+(data-driven). This is the same structural exclusion as BoMSampler T3.
+
+### Why the BoM Trajectory is valuable despite the UQ exclusion
+
+The BoM Trajectory is NOT a calibrated forecaster — and it doesn't claim to be.
+Its value proposition is **trajectory-space exploration**: K diverse plausible
+futures for planning, speculation, and game-tree search. This is orthogonal to
+calibrated UQ (which answers "how confident am I in this prediction?"). The
+BoM Trajectory answers "what are K different ways the future could unfold?" —
+the generative-uncertainty question, distilled modellessly from PhysiFormer.
+
+The floor comparison documents this classification with evidence, satisfying
+the "Report the Floor" rule's purpose (force the comparison to be reported,
+not ban primitives that lose). The primitive ships opt-in behind
+`heat_kernel_trajectory` for planning consumers; it does not claim UQ coverage.
+
+
 ## Files changed
 
 | File | Change |
 |------|--------|
+| `crates/katgpt-dec/src/bom_heat_kernel.rs` | **New** (Phase 4) — BoM trajectory sampler (`heat_kernel_trajectory_bom`, `heat_kernel_trajectory_bom_into`, `near_harmonic_indices`) + 8 unit tests |
+| `crates/katgpt-dec/src/lib.rs` | Registered `bom_heat_kernel` module + re-exports |
+| `crates/katgpt-core/tests/conformal_floor_bom_trajectory.rs` | **New** (Phase 4 T4.3) — "Report the Floor" comparison: `BomTrajectoryAdapter` + 4 evidence tests (seasonal, white noise, width-ratio, σ-sweep) |
+| `crates/katgpt-core/Cargo.toml` | Registered `conformal_floor_bom_trajectory` test behind `conformal_predictive_intervals,heat_kernel_trajectory` |
 | `crates/katgpt-core/benches/bench_359_dec_heat_kernel_trajectory_goat.rs` | **New** (Phase 5) — GOAT bench (G1–G5); **updated** (T5.2) — added G1-nl nonlinear gate with horizon sweep + n_quad sensitivity sweep |
-| `crates/katgpt-core/Cargo.toml` | Registered the bench target behind `heat_kernel_trajectory` |
+| `crates/katgpt-core/Cargo.toml` (bench registration) | Registered the bench target behind `heat_kernel_trajectory` |
 | `crates/katgpt-dec/Cargo.toml` | **Promoted** `heat_kernel_trajectory` to `default = ["heat_kernel_trajectory"]` |
 | `crates/katgpt-core/Cargo.toml` (feature comment) | Updated comment: OPT-IN → DEFAULT-ON in katgpt-dec |
 | `Cargo.toml` (root feature comment) | Updated comment: OPT-IN → DEFAULT-ON in katgpt-dec |

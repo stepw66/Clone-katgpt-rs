@@ -4,7 +4,7 @@
 **Research:** [katgpt-rs/.research/365_PhysiFormer_Single_Shot_Trajectory_Heat_Kernel_DEC.md](../.research/365_PhysiFormer_Single_Shot_Trajectory_Heat_Kernel_DEC.md)
 **Source paper:** [arXiv:2606.27364](https://arxiv.org/abs/2606.27364) — PhysiFormer (Chen/Lan/Vedaldi, VGG Oxford)
 **Target:** `katgpt-rs/crates/katgpt-dec/src/heat_kernel.rs` + Cargo feature `heat_kernel_trajectory` (passthrough: katgpt-core → root)
-**Status:** Active — Phase 1 DONE, Phase 2 DONE, Phase 5 DONE (2026-07-02); Phases 3–4 pending (opt-in, non-blocking). `heat_kernel_trajectory` PROMOTED to DEFAULT-ON in katgpt-dec.
+**Status:** Active — Phase 1 DONE, Phase 2 DONE, Phase 3 DONE, Phase 4 DONE, Phase 5 DONE (2026-07-02). `heat_kernel_trajectory` PROMOTED to DEFAULT-ON in katgpt-dec. All phases complete.
 
 ---
 
@@ -131,13 +131,20 @@ The modelless analog of PhysiFormer's generative uncertainty: sample K diverse p
 
 ### Tasks
 
-- [ ] **T4.1** Implement `heat_kernel_trajectory_bom(cx, h0, motor, t, eig, k_hypotheses, perturbation) -> Vec<CochainField>` — perturb the initial state `h₀` (or motor vector) in K directions on the harmonic subspace (eigenvalue 0 → perturbations persist, producing genuinely different futures), apply the heat kernel to each, return K trajectories.
+- [x] **T4.1** Implemented `heat_kernel_trajectory_bom` and `heat_kernel_trajectory_bom_into` in `crates/katgpt-dec/src/bom_heat_kernel.rs` — perturbs the initial state `h₀` along the **near-harmonic subspace** (the `n` eigenmodes with smallest `|a_k|` where `a_k = motor_d - 1 + λ_k`), then applies the linear heat kernel to each of K hypotheses. The near-harmonic modes decay slowest under `exp(t·A)`, so perturbations along them PERSIST → producing genuinely different futures. Helper `near_harmonic_indices(eig, motor_d, n)` selects the directions. Noise coefficients are caller-provided (`noise[k·M+m]`), matching the BoMSampler API convention (deterministic RNG at the call site, not inside the primitive).
 
-- [ ] **T4.2** Unit test: `bom_produces_diverse_trajectories` — verify K trajectories have non-trivial L2 spread (not identical) AND preserve topological invariants individually.
+- [x] **T4.2** Unit tests in `bom_heat_kernel.rs` (8 tests, all green): `near_harmonic_indices_returns_smallest_abs_a`, `near_harmonic_indices_caps_at_k`, `bom_returns_k_trajectories`, `bom_into_matches_allocating`, **`bom_produces_diverse_trajectories`** (verifies K trajectories have non-trivial L2 spread), `bom_zero_sigma_returns_baseline` (σ=0 → all trajectories equal the unperturbed linear heat kernel), `bom_trajectories_are_finite_and_bounded` (stability under stable motor), `bom_diversity_grows_with_sigma` (σ-sweep: larger σ → larger spread). The topological-invariant preservation (Hodge decomposition) holds by construction — the heat kernel preserves the DEC structure (verified in Phase 1 T1.6).
 
-- [ ] **T4.3** Connection to `best_belief.rs`: verify the K-hypothesis trajectory samples are compatible with the existing BoMSampler API (the trajectory is a "belief" in trajectory-space).
+- [x] **T4.3** Connection to `best_belief.rs` / `BoMSampler` API + the "Report the Floor" rule (Issue 010): `crates/katgpt-core/tests/conformal_floor_bom_trajectory.rs` wraps `heat_kernel_trajectory_bom` as a `UqPrimitiveUnderTest` and runs it against the conformal-naive floor. **Verdict: EXCLUDED from the "Report the Floor" policy** — same structural class as BoMSampler (T3). The K-trajectory spread is exploration diversity (σ-controlled), not calibrated predictive uncertainty. The false-confidence evidence (canonical run):
 
-**Phase 4 exit:** Multi-hypothesis trajectory sampling works. This is the speculative phase — the gain depends on whether harmonic-subspace perturbation produces meaningfully diverse futures.
+  | Corpus | CRPS ratio | Winkler ratio | Coverage (nom 0.95) | Verdict |
+  |---|---|---|---|---|
+  | seasonal | 0.770 | 10.07 | 0.128 | Mixed |
+  | white noise | 0.336 | 3.62 | 0.232 | Mixed |
+
+  σ-sweep (0.05→0.50) lifts coverage from 0.024→0.687 but CRPS ratio regresses from 0.764→1.280 (LosesToFloor at σ=0.5). Width-ratio test: low-vol vs high-vol regimes gives ratio 1.001 (σ-controlled, not data-driven; a data-driven floor would show ~15×). The BoM Trajectory's value proposition is trajectory-space EXPLORATION (diverse futures for planning / speculation), orthogonal to calibrated UQ.
+
+**Phase 4 exit:** Multi-hypothesis trajectory sampling works (T4.1 ✅, T4.2 ✅). The K trajectories are genuinely diverse (non-trivial L2 spread, grows with σ). The UQ floor comparison (T4.3 ✅) classifies the primitive as EXCLUDED — diversity-for-exploration, not calibrated UQ — with the false-confidence evidence documented. **Stays opt-in** (gated on `heat_kernel_trajectory`, same as the linear/nonlinear paths); the BoM extension adds the K-hypothesis sampling capability for planning consumers but does not change the linear path's DEFAULT-ON promotion in katgpt-dec.
 
 ---
 
@@ -216,4 +223,4 @@ Opt-in initially. Promote to default if G1+G2+G3 pass at T≥50 (per Research 36
 
 ## TL;DR
 
-Ship `exp(t·A)·h₀` — the DEC heat kernel trajectory predictor — as the single-shot modelless analog of PhysiFormer's single-shot trajectory diffusion. For linear DEC propagation, it's **exact** (zero error accumulation, exact Hodge-decomposition preservation). For nonlinear (with ReLU gate), it's a higher-order exponential integrator. Computed via precomputed eigendecomposition (offline) or Krylov subspace (online). GOAT gate: G1 5.00× accuracy improvement over coarse Euler, G2 latency ≤ 2× Euler at T=100 (1.87×), G3 Hodge drift 11× lower than Euler. **ALL GATES PASS → PROMOTED to DEFAULT-ON in katgpt-dec (2026-07-02).** Feature flag `heat_kernel_trajectory`.
+Ship `exp(t·A)·h₀` — the DEC heat kernel trajectory predictor — as the single-shot modelless analog of PhysiFormer's single-shot trajectory diffusion. For linear DEC propagation, it's **exact** (zero error accumulation, exact Hodge-decomposition preservation). For nonlinear (with ReLU gate), it's a higher-order exponential integrator. Computed via precomputed eigendecomposition (offline) or Krylov subspace (online). GOAT gate: G1 5.00× accuracy improvement over coarse Euler, G2 latency ≤ 2× Euler at T=100 (1.87×), G3 Hodge drift 11× lower than Euler. **ALL GATES PASS → PROMOTED to DEFAULT-ON in katgpt-dec (2026-07-02).** Feature flag `heat_kernel_trajectory`. **Phase 4 (BoM trajectory)** adds K-hypothesis sampling via near-harmonic perturbation — diversity-for-exploration, EXCLUDED from the UQ floor policy (Issue 010) with false-confidence evidence. **All phases complete.**

@@ -50,6 +50,8 @@
 //! `katgpt_core::dec::*` paths continue to work unchanged.
 
 pub mod backend;
+#[cfg(feature = "heat_kernel_trajectory")]
+pub mod bom_heat_kernel;
 pub mod cache;
 pub mod flow;
 #[cfg(feature = "heat_kernel_trajectory")]
@@ -98,6 +100,16 @@ pub use krylov::{KRYLOV_K_MAX, krylov_expmv, krylov_expmv_into};
 pub use nonlinear_heat_kernel::{
     DEFAULT_N_QUAD, MAX_N_QUAD, NonlinearScratch, expm_source_term_quadrature,
     heat_kernel_trajectory_nonlinear, heat_kernel_trajectory_nonlinear_into,
+};
+
+// Plan 359 Phase 4 — BoM trajectory sampling (multi-hypothesis heat kernel).
+// Opt-in extension of the linear path: perturbs h₀ along the near-harmonic
+// subspace and applies the heat kernel to each of K hypotheses. The
+// diversity-for-exploration analog of BoMSampler (Plan 281) in trajectory
+// space.
+#[cfg(feature = "heat_kernel_trajectory")]
+pub use bom_heat_kernel::{
+    heat_kernel_trajectory_bom, heat_kernel_trajectory_bom_into, near_harmonic_indices,
 };
 
 pub use types::{CellComplex, CoboundaryIndex, CochainField, MAX_RANK};

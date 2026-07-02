@@ -620,6 +620,16 @@ required-features = ["conformal_predictive_intervals", "sleep_time_anticipation"
 name = "conformal_floor_best_belief"
 required-features = ["conformal_predictive_intervals", "best_belief"]
 
+# Plan 359 Phase 4 T4.3 — BoM Trajectory floor comparison. The BoM Trajectory
+# adapter (`heat_kernel_trajectory_bom`) wraps the near-harmonic perturbation
+# sampler as a `UqPrimitiveUnderTest` and runs it against the conformal-naive
+# floor. Verdict: EXCLUDED (same structural class as BoMSampler T3 —
+# diversity-for-exploration, not calibrated UQ). Needs BOTH the floor harness
+# and the heat kernel trajectory primitive.
+[[test]]
+name = "conformal_floor_bom_trajectory"
+required-features = ["conformal_predictive_intervals", "heat_kernel_trajectory"]
+
 # Plan 321 Phase 2 — CommittedFieldBlend G4 zero-alloc GOAT gate. CountingAllocator
 # audit of apply_blended (1000 iters) + commit (100 re-commits). Gated on
 # committed_field_blend so default features compile cleanly.
