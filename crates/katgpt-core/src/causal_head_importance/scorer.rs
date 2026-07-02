@@ -43,39 +43,38 @@ pub fn fuse_across_capabilities(
         return vec![0.0; n_heads];
     }
 
-    // Per-capability min-max normalization across heads.
-    let mut normalized: Vec<Vec<f32>> = (0..n_heads).map(|_| Vec::with_capacity(n_caps)).collect();
-    for c in 0..n_caps {
-        let mut mn = f32::INFINITY;
-        let mut mx = f32::NEG_INFINITY;
-        for h in 0..n_heads {
+    // Per-capability min/max in one pass. Two flat Vecs (3 allocs total)
+    // instead of Vec<Vec<f32>> (n_heads + 2 allocs) — the normalized matrix
+    // never needs to materialize; we fuse normalize + weighted-mean in the
+    // second pass.
+    let mut cap_min = vec![f32::INFINITY; n_caps];
+    let mut cap_max = vec![f32::NEG_INFINITY; n_caps];
+    for h in 0..n_heads {
+        for c in 0..n_caps {
             let s = per_head_per_capability[h][c].1;
-            if s < mn {
-                mn = s;
+            if s < cap_min[c] {
+                cap_min[c] = s;
             }
-            if s > mx {
-                mx = s;
+            if s > cap_max[c] {
+                cap_max[c] = s;
             }
-        }
-        let range = mx - mn;
-        for h in 0..n_heads {
-            let s = per_head_per_capability[h][c].1;
-            normalized[h].push(if range.abs() < f32::EPSILON {
-                0.0
-            } else {
-                (s - mn) / range
-            });
         }
     }
 
-    // Weighted-mean fusion across capabilities (normalize weights to sum 1).
+    // Weighted-mean fusion across capabilities with fused min-max normalization.
     let mut out = vec![0.0f32; n_heads];
     for h in 0..n_heads {
         let mut total_w = 0.0f32;
         let mut acc = 0.0f32;
         for c in 0..n_caps {
-            let w = per_head_per_capability[h][c].0;
-            acc += w * normalized[h][c];
+            let (w, s) = per_head_per_capability[h][c];
+            let range = cap_max[c] - cap_min[c];
+            let norm = if range.abs() < f32::EPSILON {
+                0.0
+            } else {
+                (s - cap_min[c]) / range
+            };
+            acc += w * norm;
             total_w += w;
         }
         out[h] = if total_w > 0.0 { acc / total_w } else { 0.0 };
@@ -107,7 +106,7 @@ pub fn partition_by_causal_score(
 
     // Rank heads by score descending; ties broken by ascending index.
     let mut order: Vec<usize> = (0..n).collect();
-    order.sort_by(|&a, &b| {
+    order.sort_unstable_by(|&a, &b| {
         // Higher score first; on tie, lower index first.
         scores[b]
             .partial_cmp(&scores[a])
@@ -132,49 +131,34 @@ pub fn partition_by_causal_score(
     // Constrained Global Screening: ensure at least one critical head per layer.
     if min_one_per_layer {
         if let Some(layers) = layer_ids {
-            debug_assert_eq!(
-                layers.len(),
-                n,
-                "layer_ids must have one entry per head"
-            );
-            // Collect layers already represented in the critical set.
-            let represented: std::collections::HashSet<usize> =
-                critical.iter().map(|&h| layers[h]).collect();
-
-            // For each unrepresented layer, promote its highest-scoring head
-            // from the convertible set. `convertible` is still sorted by score
-            // desc (it was the tail of `order`), so the first match is the
-            // highest-scoring head in that layer.
-            let mut to_promote: Vec<usize> = Vec::new();
-            for (pos, &h) in convertible.iter().enumerate() {
+            debug_assert_eq!(layers.len(), n, "layer_ids must have one entry per head");
+            // Dense layer-coverage bitset indexed by layer id (O(1) lookup,
+            // no hashing) instead of HashSet<usize>.
+            let max_layer = layers.iter().copied().max().unwrap_or(0);
+            let mut layer_covered = vec![false; max_layer + 1];
+            for &h in &critical {
+                layer_covered[layers[h]] = true;
+            }
+            // Scan convertible in score-desc order (it's the tail of `order`,
+            // still sorted desc). The first head of each uncovered layer we
+            // encounter is its highest-scoring head — promote it. Single pass,
+            // no swap_remove (preserves scan order).
+            let mut promoted: Vec<usize> = Vec::new();
+            for &h in &convertible {
                 let layer = layers[h];
-                if !represented.contains(&layer) {
-                    to_promote.push(pos);
-                    // Mark this layer represented so we don't promote twice.
-                    // (Cannot mutate the HashSet in the loop borrow, so track
-                    // newly-promoted layers here.)
+                if !layer_covered[layer] {
+                    layer_covered[layer] = true;
+                    promoted.push(h);
                 }
             }
-            // Promote, tracking newly-covered layers to avoid double-promotion.
-            let mut newly_covered: std::collections::HashSet<usize> = std::collections::HashSet::new();
-            // Iterate in ascending position so removal indices stay valid;
-            // remove from the back to avoid shifting earlier positions.
-            let mut promoted_indices: Vec<usize> = Vec::new();
-            for &pos in &to_promote {
-                let h = convertible[pos];
-                let layer = layers[h];
-                if represented.contains(&layer) || newly_covered.contains(&layer) {
-                    continue;
+            if !promoted.is_empty() {
+                // Dense head-id bitset for O(1) retain (no HashSet hashing).
+                let mut is_promoted = vec![false; n];
+                for &h in &promoted {
+                    is_promoted[h] = true;
                 }
-                newly_covered.insert(layer);
-                promoted_indices.push(h);
-            }
-            // Remove promoted heads from convertible and add to critical.
-            for &h in &promoted_indices {
-                if let Some(pos) = convertible.iter().position(|&x| x == h) {
-                    convertible.swap_remove(pos);
-                }
-                critical.push(h);
+                convertible.retain(|&h| !is_promoted[h]);
+                critical.extend(promoted);
             }
         }
     }

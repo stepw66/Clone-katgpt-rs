@@ -96,7 +96,7 @@ let calibration = calibrate_from_causal_scores(&ie_scores, &cfg);
 ```rust
 use katgpt_core::causal_head_importance::ScaleNormalizedFusion;
 let fusion = ScaleNormalizedFusion::new(n_heads, 1e-5);
-fusion.fuse_into(&[&fa_head, &gdn_head], head_dim, &mut out, &mut scratch);
+fusion.fuse_into(&[&fa_head, &gdn_head], head_dim, &mut out);
 ```
 
 ---

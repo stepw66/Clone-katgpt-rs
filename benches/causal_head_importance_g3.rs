@@ -99,7 +99,8 @@ fn main() {
 
     // ── G4 spot-check: the hot-path scoring fns allocate nothing ───────────
     // (direct_effect_importance / indirect_effect_importance are #[inline] f32
-    //  arithmetic; ScaleNormalizedFusion::fuse_into writes into caller scratch.)
+    //  arithmetic; ScaleNormalizedFusion::fuse_into writes directly into out,
+    //  fused RMSNorm+gamma-scale single loop.)
     // This is verified by inspection + the unit tests; the bench confirms the
     // partition step is also allocation-light (sub-microsecond at n=144).
     println!("\nG4 (zero-alloc hot path): direct_effect_importance / indirect_effect_importance");

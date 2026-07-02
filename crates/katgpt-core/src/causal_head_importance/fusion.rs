@@ -41,36 +41,31 @@ impl ScaleNormalizedFusion {
     /// output is independently RMSNormed, then multiplied by `gamma[h]`, then
     /// written into `out` at the head's index-preserving slot.
     ///
-    /// Zero-allocation: scratch `norm_buf` is caller-supplied (length `head_dim`).
+    /// Zero-allocation: writes directly into `out`; the RMSNorm + γ-scale are
+    /// fused into a single loop (2 loops/head, no scratch buffer needed).
     #[inline]
     pub fn fuse_into(
         &self,
         per_head_outputs: &[&[f32]], // [n_heads][head_dim]
         head_dim: usize,
-        out: &mut [f32],          // [n_heads * head_dim]
-        norm_scratch: &mut [f32], // [head_dim]
+        out: &mut [f32], // [n_heads * head_dim]
     ) {
         let n_heads = per_head_outputs.len();
         debug_assert_eq!(out.len(), n_heads * head_dim);
-        debug_assert_eq!(norm_scratch.len(), head_dim);
         for h in 0..n_heads {
             let src = per_head_outputs[h];
             debug_assert_eq!(src.len(), head_dim);
-            // RMSNorm in-place into scratch
+            // RMSNorm: compute inv_rms once per head.
             let mut sum_sq = 0.0f32;
             for v in src {
                 sum_sq += v * v;
             }
-            let rms = (sum_sq / head_dim as f32 + self.eps).sqrt();
-            let inv_rms = 1.0 / rms;
-            for j in 0..head_dim {
-                norm_scratch[j] = src[j] * inv_rms;
-            }
-            // γ-scale + write into index-preserving slot
+            let inv_rms = 1.0 / (sum_sq / head_dim as f32 + self.eps).sqrt();
+            // Fused RMSNorm + γ-scale + write into index-preserving slot.
             let g = self.gamma[h];
             let slot = h * head_dim;
             for j in 0..head_dim {
-                out[slot + j] = g * norm_scratch[j];
+                out[slot + j] = g * src[j] * inv_rms;
             }
         }
     }
@@ -99,8 +94,7 @@ mod tests {
         let h1 = [0.5, -0.5, 2.0, -2.0];
         let per_head: Vec<&[f32]> = vec![&h0, &h1];
         let mut out = vec![0.0f32; n_heads * head_dim];
-        let mut scratch = vec![0.0f32; head_dim];
-        fusion.fuse_into(&per_head, head_dim, &mut out, &mut scratch);
+        fusion.fuse_into(&per_head, head_dim, &mut out);
 
         let ref0 = rmsnorm_ref(&h0, eps);
         let ref1 = rmsnorm_ref(&h1, eps);
@@ -123,8 +117,7 @@ mod tests {
         let h0 = [3.0, 4.0, 5.0];
         let per_head: Vec<&[f32]> = vec![&h0];
         let mut out = vec![0.0f32; n_heads * head_dim];
-        let mut scratch = vec![0.0f32; head_dim];
-        fusion.fuse_into(&per_head, head_dim, &mut out, &mut scratch);
+        fusion.fuse_into(&per_head, head_dim, &mut out);
         assert!(out.iter().all(|v| v.abs() < 1e-12));
     }
 
@@ -139,8 +132,7 @@ mod tests {
         let h0 = [1.0, 1.0, 1.0];
         let per_head: Vec<&[f32]> = vec![&h0];
         let mut out = vec![0.0f32; n_heads * head_dim];
-        let mut scratch = vec![0.0f32; head_dim];
-        fusion.fuse_into(&per_head, head_dim, &mut out, &mut scratch);
+        fusion.fuse_into(&per_head, head_dim, &mut out);
         let ref0 = rmsnorm_ref(&h0, eps);
         for j in 0..head_dim {
             assert!((out[j] - 2.0 * ref0[j]).abs() < 1e-6, "mismatch at {j}");
@@ -161,8 +153,7 @@ mod tests {
         let gdn = [0.1, 0.1, 0.1, 0.1];
         let per_head: Vec<&[f32]> = vec![&fa, &gdn];
         let mut out = vec![0.0f32; n_heads * head_dim];
-        let mut scratch = vec![0.0f32; head_dim];
-        fusion.fuse_into(&per_head, head_dim, &mut out, &mut scratch);
+        fusion.fuse_into(&per_head, head_dim, &mut out);
 
         // Compute the per-head output RMS (should be ~1 for both since γ=1).
         // Note: RMSNorm with eps pulls RMS slightly below 1.0, more so for

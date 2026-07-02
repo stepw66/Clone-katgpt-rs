@@ -33,7 +33,7 @@ agrees with causal when no bystanders are present).**
 | **G1** (correctness — IE discrimination) | load-bearing IE > threshold; bystander IE < threshold; ranking Spearman ρ = 1.0; knockout faithfulness | load-bearing IE=0.25 > 0.01; bystander IE=0; partition Jaccard=1.0; IE-ordered knockout ratio 0.0 < 0.2; random mean ratio 0.875 > 0.8 (2000 trials) | **PASS ✅** |
 | **G2** (bystander discrimination) | causal top-K = load-bearing set (Jaccard 1.0); attention-mass top-K includes bystanders (Jaccard < 1.0) | causal Jaccard 1.000 at all bystander fractions {0,4,8}; attention-mass Jaccard 1.000→0.000→0.000 | **PASS ✅** |
 | **G3** (calibration latency) | causal partition ≤ 2× attention-mass | n=16: **1.11×**; n=64: **0.51×** (causal faster); n=144: **0.77×** (causal faster) | **PASS ✅** |
-| **G4** (zero-alloc hot path) | scoring fns allocation-free | `direct/indirect_effect_importance`/`per_capability_score` pure f32 arithmetic; `SpanLogitDiffReadout::readout` `&[(f32,f32)]`→f32; `ScaleNormalizedFusion::fuse_into` caller scratch; `partition_by_causal_score` (offline) n=144: 1527 ns | **PASS ✅** |
+| **G4** (zero-alloc hot path) | scoring fns allocation-free | `direct/indirect_effect_importance`/`per_capability_score` pure f32 arithmetic; `SpanLogitDiffReadout::readout` `&[(f32,f32)]`→f32; `ScaleNormalizedFusion::fuse_into` fused RMSNorm+γ-scale single loop, writes directly into `out`; `partition_by_causal_score` (offline) n=144: 1527 ns | **PASS ✅** |
 
 ---
 
