@@ -864,6 +864,12 @@ required-features = ["zone_affective_manifold"]
 name = "functional_substitution_g1"
 required-features = ["functional_substitution_gate"]
 
+# Plan 358 Phase 2 — Causal Head-Importance G1 correctness gate (synthetic
+# bystander harness + IE discrimination + knockout faithfulness).
+[[test]]
+name = "causal_head_importance_g1"
+required-features = ["causal_head_importance"]
+
 # Plan 353 Phase 3 — Head Substitution Gate G2 synthetic IoU→delta correlation.
 # Spearman ρ ≤ −0.9 target reproduces the paper's r > 0.9 finding on a
 # controlled-noise synthetic harness. Real-head G2 deferred to riir-ai.
