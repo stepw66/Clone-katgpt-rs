@@ -597,3 +597,181 @@ fn goat_g5_adaptive_extremes_saturate_correctly() {
         prev = w;
     }
 }
+
+// ───────────────────────────────────────────────────────────────────────────
+// T11: Variance comparison — paper Fig 3 reproduction (katgpt-core mechanism)
+// ───────────────────────────────────────────────────────────────────────────
+//
+// The QGF paper Fig 3 shows the drop-Jacobian estimator (QGF) has LOWER
+// gradient variance than OOD-sampling or BPTT, measured as higher cosine
+// similarity `cos(G(s, a), G(s, a + ε))` for small perturbations ε.
+//
+// katgpt-core cannot run a real generator's BPTT/OOD estimator surface (that's
+// riir-engine scope). But we CAN prove the *mechanism* property that drives
+// Fig 3: the QGF primitive's `q_gradient_into` is a pure function of
+// `(state, projected_action)` with no Jacobian propagation, so its output is
+// stable under action perturbation — by construction, not by measurement.
+//
+// The test constructs three estimator models:
+//   1. QGF (deterministic `∇Q` — our primitive)
+//   2. BPTT-like (deterministic `∇Q` + a noisy Jacobian term that amplifies
+//      under perturbation — models chain-rule variance)
+//   3. OOD-like (`∇Q` + independent per-call sampling noise — models
+//      estimator sampling variance)
+// and shows QGF has the highest cosine similarity between nearby-action
+// gradients, matching the paper's qualitative finding.
+
+/// Cosine similarity between two vectors. Returns 0.0 for zero-norm inputs.
+fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
+    let n = a.len().min(b.len());
+    let mut dot = 0.0f32;
+    let mut na = 0.0f32;
+    let mut nb = 0.0f32;
+    for i in 0..n {
+        dot += a[i] * b[i];
+        na += a[i] * a[i];
+        nb += b[i] * b[i];
+    }
+    let denom = na.sqrt() * nb.sqrt();
+    if denom == 0.0 { 0.0 } else { dot / denom }
+}
+
+/// Deterministic QGF estimator: returns the stored gradient verbatim.
+/// This is the `QGradientOracle::q_gradient_into` contract — pure, no noise.
+struct QgfEstimator {
+    gradient: Vec<f32>,
+}
+impl QgfEstimator {
+    fn estimate(&self, _action_seed: u64) -> &[f32] {
+        // QGF: drop-Jacobian → output depends only on (state, projected_action),
+        // NOT on the action seed / sampling noise. Bit-identical every call.
+        &self.gradient
+    }
+}
+
+/// BPTT-like estimator: gradient + a Jacobian-amplified noise term that grows
+/// with the action perturbation. Models the chain-rule variance the paper shows
+/// in Fig 3 — BPTT propagates through the generator, so small action changes
+/// produce amplified gradient changes.
+struct BpttLikeEstimator {
+    base_gradient: Vec<f32>,
+    /// Noise amplification factor. Higher = more Jacobian-induced variance.
+    amplification: f32,
+}
+impl BpttLikeEstimator {
+    fn estimate(&self, action_seed: u64) -> Vec<f32> {
+        // Pseudo-random perturbation seeded by the action (deterministic per
+        // action, but varies across actions → low cosine sim under perturbation).
+        let mut rng = fastrand::Rng::with_seed(action_seed);
+        self.base_gradient
+            .iter()
+            .map(|&g| g + (rng.f32() - 0.5) * 2.0 * self.amplification)
+            .collect()
+    }
+}
+
+/// OOD-like estimator: gradient + independent per-call sampling noise.
+/// Models the variance from sampling an off-distribution estimator — each
+/// call adds fresh noise uncorrelated with the action.
+struct OodLikeEstimator {
+    base_gradient: Vec<f32>,
+    /// Per-call noise magnitude.
+    noise_magnitude: f32,
+}
+impl OodLikeEstimator {
+    fn estimate(&self, call_idx: u64) -> Vec<f32> {
+        let mut rng = fastrand::Rng::with_seed(call_idx.wrapping_mul(0x9E3779B97F4A7C15));
+        self.base_gradient
+            .iter()
+            .map(|&g| g + (rng.f32() - 0.5) * 2.0 * self.noise_magnitude)
+            .collect()
+    }
+}
+
+#[test]
+fn t11_qgf_has_highest_cosine_similarity_under_perturbation() {
+    // Paper Fig 3 setup: measure cos(G(a), G(a + ε)) across perturbations.
+    // QGF should have cos ≈ 1.0 (deterministic); BPTT/OOD should have cos < 1.
+    let true_gradient = vec![1.0f32, 2.0, 3.0, 4.0, 5.0];
+
+    let qgf = QgfEstimator { gradient: true_gradient.clone() };
+    let bptt = BpttLikeEstimator {
+        base_gradient: true_gradient.clone(),
+        amplification: 0.5, // moderate Jacobian amplification
+    };
+    let ood = OodLikeEstimator {
+        base_gradient: true_gradient.clone(),
+        noise_magnitude: 0.5, // moderate sampling noise
+    };
+
+    // For QGF: perturbing the action doesn't change the gradient (drop-Jacobian).
+    // Cosine similarity across any perturbation is 1.0.
+    let qgf_cos: Vec<f32> = (0..20)
+        .map(|seed| cosine_similarity(qgf.estimate(seed), qgf.estimate(seed + 1)))
+        .collect();
+    let qgf_mean_cos = qgf_cos.iter().sum::<f32>() / qgf_cos.len() as f32;
+    assert!(
+        (qgf_mean_cos - 1.0).abs() < 1e-6,
+        "QGF must have cos≈1.0 (deterministic), got {qgf_mean_cos}"
+    );
+
+    // For BPTT-like: perturbing the action changes the noise seed → lower cos.
+    let bptt_cos: Vec<f32> = (0..20)
+        .map(|seed| cosine_similarity(&bptt.estimate(seed), &bptt.estimate(seed + 1)))
+        .collect();
+    let bptt_mean_cos = bptt_cos.iter().sum::<f32>() / bptt_cos.len() as f32;
+
+    // For OOD-like: each call adds fresh noise → lower cos.
+    let ood_cos: Vec<f32> = (0..20)
+        .map(|i| cosine_similarity(&ood.estimate(i), &ood.estimate(i + 1)))
+        .collect();
+    let ood_mean_cos = ood_cos.iter().sum::<f32>() / ood_cos.len() as f32;
+
+    // The paper's headline: QGF > BPTT and QGF > OOD in cosine similarity.
+    assert!(
+        qgf_mean_cos > bptt_mean_cos,
+        "QGF cos ({qgf_mean_cos:.4}) must exceed BPTT-like cos ({bptt_mean_cos:.4})"
+    );
+    assert!(
+        qgf_mean_cos > ood_mean_cos,
+        "QGF cos ({qgf_mean_cos:.4}) must exceed OOD-like cos ({ood_mean_cos:.4})"
+    );
+}
+
+#[test]
+fn t11_qgf_variance_is_zero_across_calls() {
+    // Stronger property: the QGF primitive's gradient is not just low-variance
+    // but ZERO-variance across repeated calls at the same (state, action).
+    // This is the structural reason Fig 3 favors QGF — there's no estimator
+    // noise to average away.
+    let oracle = KnownLandscapeOracle { q_values: vec![1.0, 2.0, 3.0, 4.0] };
+    let mut g1 = [0.0f32; 4];
+    let mut g2 = [0.0f32; 4];
+    let mut g3 = [0.0f32; 4];
+    oracle.q_gradient_into(&(), &(), &mut g1);
+    oracle.q_gradient_into(&(), &(), &mut g2);
+    oracle.q_gradient_into(&(), &(), &mut g3);
+    assert_eq!(g1, g2, "QGF gradient must be deterministic across calls");
+    assert_eq!(g2, g3, "QGF gradient must be deterministic across calls");
+
+    // And cosine similarity of identical vectors is 1.0.
+    assert!((cosine_similarity(&g1, &g2) - 1.0).abs() < 1e-6);
+}
+
+#[test]
+fn t11_qgf_drop_jacobian_documented_in_trait() {
+    // The trait doc explicitly states the Jacobian is dropped (J ≈ I) and warns
+    // against adding chain-rule backprop. This test is a static assertion that
+    // the contract holds: `q_gradient_into` takes only (state, action, out) —
+    // there's no generator/Jacobian parameter, so chain-rule backprop is
+    // structurally impossible at the trait level.
+    //
+    // If someone added a `generator: &G` parameter to enable BPTT, this test
+    // would fail to compile (the function signature changed), forcing a
+    // conscious review of the variance implications.
+    let oracle = KnownLandscapeOracle { q_values: vec![1.0, 2.0] };
+    let mut out = [0.0f32; 2];
+    // Signature: (state, action, out) — no generator, no Jacobian.
+    oracle.q_gradient_into(&(), &(), &mut out);
+    assert_eq!(out, [1.0, 2.0]);
+}

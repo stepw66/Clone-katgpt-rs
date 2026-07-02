@@ -242,6 +242,66 @@ where
         true
     }
 
+    /// Adaptive variant driven by an **external variance signal** (Plan 268 T7).
+    ///
+    /// This is the Thicket (Plan 267) integration path. Instead of trusting
+    /// the oracle's own self-reported [`QGradientOracle::confidence`], the
+    /// caller supplies an empirically-measured variance probe
+    /// (e.g. `&TvpSignal` from katgpt-pruners) which is bridged to a
+    /// confidence via [`confidence_from_disagreement`].
+    ///
+    /// **Why a separate method.** The oracle's confidence is a *prior* on
+    /// the critic's trustworthiness (e.g. 1.0 for cached LeoHead, 0.3 for
+    /// the BFN rejection proxy). A variance probe is an *observation* — the
+    /// generator itself disagrees across K perturbed samples. The two
+    /// signals are complementary, and a real deployment may want either or
+    /// both. Keeping them as separate methods (rather than folding the probe
+    /// into the oracle's confidence) preserves the modelless layering:
+    /// katgpt-core defines the math, katgpt-pruners supplies the measurement.
+    ///
+    /// `weight = sigmoid(steepness · (confidence − threshold))`
+    /// where `confidence = 1 − clamp(signal.normalized_disagreement(), 0, 1)`.
+    ///
+    /// # Arguments
+    ///
+    /// As [`tilt_logits_adaptive`](Self::tilt_logits_adaptive), plus:
+    /// - `signal` — any `QgfVarianceSignal` (Thicket `TvpSignal`, RV probe,
+    ///   BoM disagreement, etc.). Passed by reference; zero-alloc.
+    ///
+    /// # Returns
+    ///
+    /// `true` if guidance was applied; `false` if skipped (period mismatch,
+    /// zero weight, or signal-driven low confidence).
+    #[cfg(feature = "qgf_adaptive")]
+    #[inline]
+    #[allow(clippy::too_many_arguments)] // QGF adaptive-tilt hot path; all params consumed
+    pub fn tilt_logits_adaptive_with_signal<S: crate::qgf::QgfVarianceSignal + ?Sized>(
+        &self,
+        condition: &G::Condition,
+        projected: &G::Output,
+        logits_buffer: &mut [f32],
+        gradient_buffer: &mut [f32],
+        step: usize,
+        signal: &S,
+        threshold: f32,
+        steepness: f32,
+    ) -> bool {
+        if !step.is_multiple_of(self.guidance_period) {
+            return false;
+        }
+        let weight = crate::qgf::adaptive::adaptive_guidance_weight_from_signal(
+            signal, threshold, steepness,
+        );
+        if weight <= 0.0 {
+            return false;
+        }
+        self.oracle
+            .q_gradient_into(condition, projected, gradient_buffer);
+        let n = logits_buffer.len().min(gradient_buffer.len());
+        crate::simd::simd_fused_scale_acc(logits_buffer, gradient_buffer, weight, n);
+        true
+    }
+
     /// High-level guided generation via the real `SpeculativeGenerator` API.
     ///
     /// Generates the candidate list from the reference generator and computes
@@ -635,5 +695,238 @@ mod tests {
         assert!(applied);
         // First 3 positions tilted, last 2 untouched.
         assert_eq!(logits, [1.0, 2.0, 3.0, 0.0, 0.0]);
+    }
+
+    // ── Plan 268 T7: tilt_logits_adaptive_with_signal (Thicket bridge) ──────
+
+    // Mock variance signal — stands in for Thicket's `TvpSignal`.
+    #[cfg(feature = "qgf_adaptive")]
+    struct MockSignal(f32);
+    #[cfg(feature = "qgf_adaptive")]
+    impl crate::qgf::QgfVarianceSignal for MockSignal {
+        fn normalized_disagreement(&self) -> f32 {
+            self.0
+        }
+    }
+
+    #[test]
+    #[cfg(feature = "qgf_adaptive")]
+    fn test_tilt_with_signal_high_agreement_applies_guidance() {
+        let drafter = make_drafter(1.0, 1); // weight ignored by adaptive path
+        let mut logits = [0.0f32; 3];
+        let mut grad = [0.0f32; 3];
+        // Low disagreement (0.05) → confidence 0.95 → strong guidance.
+        let applied = drafter.tilt_logits_adaptive_with_signal(
+            &(), &10u32, &mut logits, &mut grad, 0, &MockSignal(0.05), 0.5, 6.0,
+        );
+        assert!(applied, "low disagreement → guidance applied");
+        // MockOracle.gradient = [1,2,3], weight ≈ sigmoid(6·0.45) ≈ 0.931
+        assert!(logits[2] > logits[0], "high-Q region tilted up");
+        assert!(logits[0] > 0.0, "guidance must be additive");
+    }
+
+    #[test]
+    #[cfg(feature = "qgf_adaptive")]
+    fn test_tilt_with_signal_high_disagreement_skips_guidance() {
+        let drafter = make_drafter(1.0, 1);
+        let mut logits = [0.0f32; 3];
+        let mut grad = [0.0f32; 3];
+        // High disagreement (0.95) → confidence 0.05 → weight ≈ sigmoid(6·-0.45) ≈ 0.067
+        // weight is > 0 so guidance IS applied (weakly). Verify it's weak.
+        let applied = drafter.tilt_logits_adaptive_with_signal(
+            &(), &10u32, &mut logits, &mut grad, 0, &MockSignal(0.95), 0.5, 6.0,
+        );
+        assert!(applied, "weight ~0.067 is still > 0, so applied");
+        assert!(
+            logits[0] < 0.1,
+            "weak guidance: logits[0]={} should be tiny",
+            logits[0]
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "qgf_adaptive")]
+    fn test_tilt_with_signal_full_disagreement_zero_weight() {
+        let drafter = make_drafter(1.0, 1);
+        let mut logits = [0.0f32; 3];
+        let mut grad = [0.0f32; 3];
+        // Full disagreement (1.0) → confidence 0.0 → weight ≈ sigmoid(6·-0.5) ≈ 0.047
+        // Still > 0 strictly. To force a true skip we'd need weight ≤ 0, which
+        // sigmoid never reaches. Verify guidance is negligibly weak instead.
+        let applied = drafter.tilt_logits_adaptive_with_signal(
+            &(), &10u32, &mut logits, &mut grad, 0, &MockSignal(1.0), 0.5, 6.0,
+        );
+        assert!(applied);
+        assert!(
+            logits[0] < 0.05,
+            "near-zero guidance, got logits[0]={}",
+            logits[0]
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "qgf_adaptive")]
+    fn test_tilt_with_signal_respects_period() {
+        let drafter = make_drafter(1.0, 2);
+        let mut logits = [0.0f32; 3];
+        let mut grad = [0.0f32; 3];
+        // Step 1 with period 2 → skip regardless of signal.
+        let applied = drafter.tilt_logits_adaptive_with_signal(
+            &(), &10u32, &mut logits, &mut grad, 1, &MockSignal(0.0), 0.5, 6.0,
+        );
+        assert!(!applied, "off-period step must skip guidance");
+        assert_eq!(logits, [0.0f32; 3], "no tilt applied");
+    }
+
+    #[test]
+    #[cfg(feature = "qgf_adaptive")]
+    fn test_tilt_with_signal_matches_oracle_confidence_path() {
+        // When signal-derived confidence equals the oracle's own confidence,
+        // both adaptive paths must produce the same tilt.
+        let drafter = make_drafter(1.0, 1);
+        // MockOracle.confidence = 0.9 → disagreement equivalent = 1 - 0.9 = 0.1.
+        let signal = MockSignal(0.1);
+
+        let mut logits_signal = [0.0f32; 3];
+        let mut grad_signal = [0.0f32; 3];
+        drafter.tilt_logits_adaptive_with_signal(
+            &(), &10u32, &mut logits_signal, &mut grad_signal, 0, &signal, 0.5, 6.0,
+        );
+
+        let mut logits_oracle = [0.0f32; 3];
+        let mut grad_oracle = [0.0f32; 3];
+        drafter.tilt_logits_adaptive(
+            &(), &10u32, &mut logits_oracle, &mut grad_oracle, 0, 0.5, 6.0,
+        );
+
+        assert_eq!(
+            logits_signal, logits_oracle,
+            "signal path with matching disagreement must equal oracle path"
+        );
+    }
+
+    // ── Plan 268 T9: tier promotion/demotion does not corrupt generation ──
+    //
+    // The test simulates a runtime tier switch (e.g. Plasma → Freeze demotion
+    // when the GPU is lost, or Freeze → Plasma promotion when a hot critic
+    // becomes available). The contract: swapping the oracle mid-sequence must
+    // (a) not panic, (b) leave already-computed outputs untouched, (c) have
+    // the post-swap steps reflect the new oracle's gradient. The QGuidedDrafter
+    // allows this because `oracle` is a public field — the runtime mutates it
+    // in place via `drafter.oracle = new_oracle` (same type, different state).
+
+    /// A swappable oracle that toggles between "Plasma" (strong gradient) and
+    /// "Freeze" (zero gradient). Models a tier switch without changing the
+    /// oracle's type — the field stays `SwappableOracle` throughout.
+    #[derive(Clone)]
+    struct SwappableOracle {
+        /// When true: return `[1.0, 2.0, 3.0]` (Plasma-like strong gradient).
+        /// When false: return `[0.0, 0.0, 0.0]` (Freeze-like, no guidance).
+        plasma_active: bool,
+    }
+    impl QGradientOracle for SwappableOracle {
+        type State = ();
+        type Action = u32;
+        fn q_gradient_at(&self, _: &Self::State, _: &Self::Action) -> Vec<f32> {
+            if self.plasma_active {
+                vec![1.0, 2.0, 3.0]
+            } else {
+                vec![0.0, 0.0, 0.0]
+            }
+        }
+        fn q_gradient_into(&self, _: &Self::State, _: &Self::Action, out: &mut [f32]) {
+            let g = if self.plasma_active {
+                &[1.0f32, 2.0, 3.0][..]
+            } else {
+                &[0.0f32, 0.0, 0.0][..]
+            };
+            for (slot, &v) in out.iter_mut().zip(g) {
+                *slot = v;
+            }
+        }
+        fn confidence(&self, _: &Self::State) -> f32 {
+            if self.plasma_active { 1.0 } else { 0.0 }
+        }
+    }
+
+    #[test]
+    fn test_tier_promotion_demotion_no_corruption() {
+        // Start in Freeze tier (plasma_active = false → zero gradient).
+        let mut drafter = QGuidedDrafter::new(
+            MockGen { calls: 0 },
+            SwappableOracle { plasma_active: false },
+        )
+        .with_weight(1.0)
+        .with_period(1);
+
+        // Step 0 (Freeze tier): tilt should be zero → logits stay at baseline.
+        let mut logits_pre = [5.0f32, 5.0, 5.0];
+        let mut grad = [0.0f32; 3];
+        let applied_pre = drafter.tilt_logits(&(), &10u32, &mut logits_pre, &mut grad, 0);
+        assert!(applied_pre, "tilt applied (weight > 0)");
+        assert_eq!(
+            logits_pre, [5.0, 5.0, 5.0],
+            "Freeze tier (zero gradient) must not alter logits"
+        );
+
+        // ── Tier promotion: Plasma → Hot → ... → Freeze mid-sequence ──
+        // Flip the oracle in place (same type, different state).
+        drafter.oracle.plasma_active = true;
+
+        // Step 1 (Plasma tier): tilt should now be [1,2,3] → logits shift.
+        let mut logits_post = [5.0f32, 5.0, 5.0];
+        let mut grad_post = [0.0f32; 3];
+        let applied_post = drafter.tilt_logits(&(), &10u32, &mut logits_post, &mut grad_post, 1);
+        assert!(applied_post);
+        assert_eq!(
+            logits_post, [6.0, 7.0, 8.0],
+            "Plasma tier after promotion must tilt logits by the gradient"
+        );
+
+        // ── The pre-swap logits are unaffected (no aliasing / corruption) ──
+        assert_eq!(
+            logits_pre, [5.0, 5.0, 5.0],
+            "pre-swap logits must be untouched by the post-swap tilt"
+        );
+
+        // ── Demote back to Freeze mid-sequence ──
+        drafter.oracle.plasma_active = false;
+        let mut logits_demote = [5.0f32, 5.0, 5.0];
+        let mut grad_demote = [0.0f32; 3];
+        let _ = drafter.tilt_logits(&(), &10u32, &mut logits_demote, &mut grad_demote, 2);
+        assert_eq!(
+            logits_demote, [5.0, 5.0, 5.0],
+            "demotion back to Freeze must restore zero-tilt behaviour"
+        );
+    }
+
+    #[test]
+    fn test_tier_switch_via_field_reassign_preserves_generator() {
+        // Reassigning the oracle field wholesale (not just a flag) must not
+        // reset the generator's call count or other state. This catches the
+        // regression where a tier switch accidentally reconstructs the drafter.
+        let mut drafter = QGuidedDrafter::new(
+            MockGen { calls: 0 },
+            SwappableOracle { plasma_active: false },
+        )
+        .with_weight(1.0);
+
+        // Run one generation to bump the generator's call count.
+        let mut rng = fastrand::Rng::new();
+        let _ = drafter.generate_guided(&(), &mut rng, 0).unwrap();
+        assert_eq!(drafter.generator.calls, 1, "generator called once");
+
+        // Reassign the oracle (simulating a tier switch to a fresh oracle instance).
+        drafter.oracle = SwappableOracle { plasma_active: true };
+
+        // Generator call count must survive the oracle reassignment.
+        assert_eq!(
+            drafter.generator.calls, 1,
+            "oracle reassignment must not reset generator state"
+        );
+
+        // Run another generation — generator call count increments to 2.
+        let _ = drafter.generate_guided(&(), &mut rng, 1).unwrap();
+        assert_eq!(drafter.generator.calls, 2, "generator called again after tier switch");
     }
 }

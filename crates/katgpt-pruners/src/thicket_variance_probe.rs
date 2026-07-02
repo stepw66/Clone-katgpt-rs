@@ -160,6 +160,37 @@ impl TvpSignal {
     }
 }
 
+// ── Plan 268 T7: QGF F4 adaptive-guidance bridge ──────────────────
+//
+// `TvpSignal` is the canonical implementor of katgpt-core's
+// `QgfVarianceSignal` trait. The bridge is one line of math:
+// disagreement (high = bad) ↔ confidence (high = good) via
+// `confidence = 1 − clamp(disagreement, 0, 1)`, performed inside
+// `katgpt_core::qgf::adaptive::confidence_from_disagreement`.
+//
+// Why `reasoning_disagreement` and not `format_disagreement` or `logit_kl`?
+// - `reasoning_disagreement` is the net substantive signal (answer minus
+//   cosmetic format variance) — already the primary router input and the
+//   field the paper treats as δ(m).
+// - `format_disagreement` is explicitly cosmetic (same answer, different
+//   surface form) and MUST NOT drive compute upgrades (see G3 in the TVP
+//   test suite). Routing it into guidance strength would re-introduce the
+//   exact cosmetic noise the canonicalization step was built to remove.
+// - `logit_kl` is unbounded (mean pairwise KL), so it would need a separate
+//   normalization. The bounded `[0,1]` reasoning field needs none.
+#[cfg(feature = "qgf_adaptive")]
+impl katgpt_core::qgf::QgfVarianceSignal for TvpSignal {
+    #[inline]
+    fn normalized_disagreement(&self) -> f32 {
+        // Defensive clamp — `reasoning_disagreement` is constructed in `[0,1]`
+        // by `TvpAggregator::aggregate` (it's `max(0.0, answer - format)`
+        // where both inputs are in `[0,1]`), but a future constructor or a
+        // deserialized/fuzzed value could violate the invariant. Clamp guards
+        // the downstream `confidence_from_disagreement` against out-of-range.
+        self.reasoning_disagreement.clamp(0.0, 1.0)
+    }
+}
+
 // ── Router tier decision ─────────────────────────────────────────
 
 /// Decision returned by [`tvp_tier_decision`] for the InferenceRouter.
@@ -1346,6 +1377,93 @@ mod tests {
         // format_dis = 0, reasoning = 0.75.
         assert!((s.reasoning_disagreement - 0.75).abs() < 1e-6);
         assert_eq!(s.probe_count_used, 4);
+    }
+
+    // --- Plan 268 T7: QGF F4 adaptive-guidance bridge ---
+
+    #[test]
+    #[cfg(feature = "qgf_adaptive")]
+    fn test_qgf_variance_signal_reads_reasoning_disagreement() {
+        // The bridge MUST surface `reasoning_disagreement`, not format or KL.
+        let s = TvpSignal {
+            reasoning_disagreement: 0.3,
+            format_disagreement: 0.9, // must be ignored
+            logit_kl: 5.0,           // must be ignored
+            probe_count_used: 4,
+        };
+        use katgpt_core::qgf::QgfVarianceSignal;
+        assert!((s.normalized_disagreement() - 0.3).abs() < 1e-6);
+    }
+
+    #[test]
+    #[cfg(feature = "qgf_adaptive")]
+    fn test_qgf_variance_signal_endpoints() {
+        use katgpt_core::qgf::QgfVarianceSignal;
+        let agree = TvpSignal {
+            reasoning_disagreement: 0.0,
+            ..TvpSignal::zero()
+        };
+        assert_eq!(agree.normalized_disagreement(), 0.0);
+        let disagree = TvpSignal {
+            reasoning_disagreement: 1.0,
+            ..TvpSignal::zero()
+        };
+        assert_eq!(disagree.normalized_disagreement(), 1.0);
+    }
+
+    #[test]
+    #[cfg(feature = "qgf_adaptive")]
+    fn test_qgf_variance_signal_clamps_out_of_range() {
+        use katgpt_core::qgf::QgfVarianceSignal;
+        // A fuzzed / deserialized value above 1 must clamp, not panic.
+        let over = TvpSignal {
+            reasoning_disagreement: 2.5,
+            ..TvpSignal::zero()
+        };
+        assert_eq!(over.normalized_disagreement(), 1.0);
+        let under = TvpSignal {
+            reasoning_disagreement: -0.5,
+            ..TvpSignal::zero()
+        };
+        assert_eq!(under.normalized_disagreement(), 0.0);
+    }
+
+    #[test]
+    #[cfg(feature = "qgf_adaptive")]
+    fn test_qgf_variance_signal_round_trip_to_guidance_weight() {
+        // End-to-end: TvpSignal → confidence → adaptive guidance weight.
+        // Low disagreement (0.1 → confidence 0.9) should yield strong guidance.
+        use katgpt_core::qgf::{adaptive_guidance_weight_from_signal, QgfVarianceSignal};
+        let confident = TvpSignal {
+            reasoning_disagreement: 0.1,
+            ..TvpSignal::zero()
+        };
+        let w = adaptive_guidance_weight_from_signal(&confident, 0.5, 6.0);
+        assert!(w > 0.9, "low TVP disagreement → strong guidance, got {w}");
+
+        // High disagreement (0.9 → confidence 0.1) should yield weak guidance.
+        let uncertain = TvpSignal {
+            reasoning_disagreement: 0.9,
+            ..TvpSignal::zero()
+        };
+        let w2 = adaptive_guidance_weight_from_signal(&uncertain, 0.5, 6.0);
+        assert!(w2 < 0.1, "high TVP disagreement → weak guidance, got {w2}");
+
+        // Sanity: the trait path matches the underlying field.
+        assert!((confident.normalized_disagreement() - 0.1).abs() < 1e-6);
+    }
+
+    #[test]
+    #[cfg(feature = "qgf_adaptive")]
+    fn test_qgf_variance_signal_trait_object_erasure() {
+        // The impl must be object-safe so the router / drafter can hold a
+        // `Box<dyn QgfVarianceSignal>` if it wants to swap probe sources.
+        use katgpt_core::qgf::QgfVarianceSignal;
+        let s: &dyn QgfVarianceSignal = &TvpSignal {
+            reasoning_disagreement: 0.2,
+            ..TvpSignal::zero()
+        };
+        assert!((s.normalized_disagreement() - 0.2).abs() < 1e-6);
     }
 }
 

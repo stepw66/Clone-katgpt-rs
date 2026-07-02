@@ -269,6 +269,13 @@ ss_pruner = []
 rv_gated_routing = []
 thicket_variance_probe = ["rv_gated_routing"]
 
+# Plan 268 T7: bridge Thicket's `TvpSignal` to QGF's F4 adaptive guidance.
+# Enables the `QgfVarianceSignal` impl on `TvpSignal` (in
+# `thicket_variance_probe.rs`), so a `&TvpSignal` can be passed directly to
+# `QGuidedDrafter::tilt_logits_adaptive_with_signal`. Forwards the QGF
+# adaptive feature into katgpt-core (which owns the trait + the math).
+qgf_adaptive = ["katgpt-core/qgf_adaptive"]
+
 # Soft reject
 sigmoid_graded_reject = []
 

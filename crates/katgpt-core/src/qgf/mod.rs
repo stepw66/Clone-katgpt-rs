@@ -59,12 +59,26 @@ pub use drafter::QGuidedDrafter;
 #[cfg(feature = "qgf_adaptive")]
 pub mod adaptive;
 #[cfg(feature = "qgf_adaptive")]
-pub use adaptive::adaptive_guidance_weight;
+pub use adaptive::{
+    adaptive_guidance_weight, adaptive_guidance_weight_from_signal,
+    confidence_from_disagreement, QgfVarianceSignal,
+};
 
 #[cfg(feature = "qgf_drafter")]
 pub mod route;
 #[cfg(feature = "qgf_drafter")]
 pub use route::{route_for, QgfComputeRoute};
+
+// Plan 268 T8: backend dispatch for batched Q-gradient queries.
+// CPU SIMD path is concrete (reuses the oracle's `q_gradient_into`, which
+// already calls `simd::dot_f32_i8` + `fast_sigmoid` for ActionBridge);
+// GPU/ANE paths are trait delegates that upper layers implement.
+#[cfg(feature = "qgf_drafter")]
+pub mod dispatch;
+#[cfg(feature = "qgf_drafter")]
+pub use dispatch::{
+    QgfAneDelegate, QgfBackendDispatch, QgfGpuDelegate,
+};
 
 // Re-export the trait and no-op oracle from `traits.rs`.
 #[cfg(feature = "qgf_oracle")]
