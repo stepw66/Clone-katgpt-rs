@@ -10,12 +10,29 @@
 //!
 //! Reference: Zhang, Qin, Wang, Gu (2026). "Higher-order Linear Attention."
 //! See `.research/28_Higher_order_Linear_Attention.md` for full derivation.
+//!
+//! # Origin
+//!
+//! Moved from `katgpt-rs/src/hla/forward.rs` (Issue 007 Phase F.4b, 2026-07-02).
+//! The composition layer previously stayed in root because `ForwardContext` was
+//! root-only; now that `ForwardContext` lives in this crate (katgpt-forward,
+//! Phase F.1-F.3), the file moved here to join it.
+//!
+//! # Why katgpt-forward and not katgpt-hla?
+//!
+//! `forward_hla` needs `ForwardContext` (this crate) + HLA cache types
+//! (`katgpt-hla`). It can't live in `katgpt-hla` because `katgpt-core` depends
+//! on `katgpt-hla` (substrate re-export), and this crate depends on
+//! `katgpt-core` — so `katgpt-hla → katgpt-forward → katgpt-core → katgpt-hla`
+//! would be a cycle. Placing the composition here (katgpt-forward → katgpt-hla)
+//! is acyclic: katgpt-hla is a pure leaf depending only on katgpt-types.
 
-use crate::hla::kernel::{ahla_layer_step, hla_layer_readout, hla_layer_update};
-use crate::hla::types::{MultiLayerAhlaCache, MultiLayerHlaCache};
+use crate::ForwardContext;
 use katgpt_core::simd::{simd_add_inplace, simd_add_into};
-use crate::transformer::{ForwardContext, TransformerWeights};
-use crate::types::{self, Config};
+use katgpt_core::types::{self, Config};
+use katgpt_hla::kernel::{ahla_layer_step, hla_layer_readout, hla_layer_update};
+use katgpt_hla::types::{MultiLayerAhlaCache, MultiLayerHlaCache};
+use katgpt_transformer::TransformerWeights;
 
 // ── Symmetric Second-Order HLA Forward ─────────────────────────
 
@@ -326,7 +343,7 @@ pub fn generate_hla_into(
     cache: &mut MultiLayerHlaCache,
     weights: &TransformerWeights,
     config: &Config,
-    rng: &mut crate::types::Rng,
+    rng: &mut katgpt_core::types::Rng,
     n_tokens: usize,
     tokens: &mut Vec<usize>,
 ) {
@@ -350,7 +367,7 @@ pub fn generate_ahla_into(
     cache: &mut MultiLayerAhlaCache,
     weights: &TransformerWeights,
     config: &Config,
-    rng: &mut crate::types::Rng,
+    rng: &mut katgpt_core::types::Rng,
     n_tokens: usize,
     tokens: &mut Vec<usize>,
 ) {
@@ -369,12 +386,11 @@ pub fn generate_ahla_into(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::transformer::TransformerWeights;
-    use crate::types::Config;
+    use katgpt_core::types::Config;
 
     /// Helper: create random weights for testing.
     fn random_weights(config: &Config) -> TransformerWeights {
-        let mut rng = crate::types::Rng::new(42);
+        let mut rng = katgpt_core::types::Rng::new(42);
         TransformerWeights::new(config, &mut rng)
     }
 
@@ -417,7 +433,7 @@ mod tests {
         let weights = random_weights(&config);
         let mut ctx = ForwardContext::new(&config);
         let mut cache = MultiLayerHlaCache::new(&config);
-        let mut rng = crate::types::Rng::new(42);
+        let mut rng = katgpt_core::types::Rng::new(42);
         let mut tokens = Vec::new();
 
         generate_hla_into(
@@ -443,7 +459,7 @@ mod tests {
         let weights = random_weights(&config);
         let mut ctx = ForwardContext::new(&config);
         let mut cache = MultiLayerAhlaCache::new(&config);
-        let mut rng = crate::types::Rng::new(42);
+        let mut rng = katgpt_core::types::Rng::new(42);
         let mut tokens = Vec::new();
 
         generate_ahla_into(
@@ -547,7 +563,7 @@ mod tests {
         }
 
         // Multi-token streaming
-        let mut rng = crate::types::Rng::new(42);
+        let mut rng = katgpt_core::types::Rng::new(42);
         let mut tokens = Vec::new();
         generate_ahla_into(
             &mut ctx,

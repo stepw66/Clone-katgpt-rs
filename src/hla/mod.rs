@@ -53,15 +53,19 @@
 //! Reference: Zhang, Qin, Wang, Gu (2026). "Higher-order Linear Attention."
 //! See `.research/28_Higher_order_Linear_Attention.md` for full derivation.
 
-// Substrate re-export from katgpt-core (Plan 008 Step 4, 2026-06-28).
+// Substrate re-export from katgpt-hla (Plan 008 Step 4, 2026-06-28; Issue 007
+// Phase E Tier 2 #4). katgpt-core re-exports katgpt-hla as `katgpt_core::hla`.
 // The types + kernels moved down so any crate can `cargo add katgpt-core`
 // and get the HLA substrate without pulling the root engine.
 pub use katgpt_core::hla::{kernel, types};
 
-// Composition layer stays in root — depends on ForwardContext (root-only).
-pub mod forward;
-
-pub use forward::{forward_ahla, forward_hla, generate_ahla_into, generate_hla_into};
+// Composition layer re-export (Issue 007 Phase F.4b, 2026-07-02):
+// `forward_hla` / `forward_ahla` / `generate_*` moved from root
+// `src/hla/forward.rs` into katgpt-forward (not katgpt-hla — katgpt-core
+// depends on katgpt-hla for substrate re-export, so katgpt-hla can't depend
+// on katgpt-forward without a cycle). Re-exported here so all historical
+// `crate::hla::forward_hla` call sites resolve unchanged.
+pub use katgpt_forward::{forward_ahla, forward_hla, generate_ahla_into, generate_hla_into};
 
 // Re-export the substrate API at `crate::hla::*` for backward compatibility
 // with all existing call sites (`crate::hla::MultiLayerHlaCache`, etc.).

@@ -9,6 +9,12 @@ publish = false
 
 [dependencies]
 katgpt-core = { path = "../katgpt-core" }
+# katgpt-forward + katgpt-transformer (Issue 007 Phase F.4a, 2026-07-02):
+# the gdn2/forward.rs + dash_attn/forward.rs composition layers moved here
+# from root. Activated by `gdn2_attention` / `dash_attn` features respectively
+# (the forward modules live inside those feature-gated parent modules).
+katgpt-forward = { path = "../katgpt-forward", default-features = false, optional = true }
+katgpt-transformer = { path = "../katgpt-transformer", optional = true }
 # katgpt-spectral: needed by funcattn_compose/spectral_pre_rotate (calibrate_eigenbasis).
 # Optional — only pulled when the funcattn_spectral_pre_rotate feature is on.
 katgpt-spectral = { path = "../katgpt-spectral", optional = true }
@@ -25,16 +31,22 @@ serde_json = "1"
 
 [features]
 default = []
-# GDN2 recurrent attention kernels (types + kernel). The composition layer
-# (forward_gdn2) stays in root — it depends on ForwardContext.
-gdn2_attention = ["dep:blake3"]
+# GDN2 recurrent attention kernels (types + kernel) AND the composition layer
+# (forward_gdn2, Issue 007 Phase F.4a). The forward module moved here from root;
+# pulls katgpt-forward (ForwardContext) + katgpt-transformer (TransformerWeights).
+gdn2_attention = ["dep:blake3", "dep:katgpt-forward", "dep:katgpt-transformer"]
 # Wall Attention diagonal gate — shared DiagonalGate trait used by both GDN2
 # and Wall attention. Gated alongside gdn2_attention / wall_attention in root.
 diagonal_gate = []
-# DashAttention clean core (entmax, routing, chunk_summary). The VortexFlow
-# cluster + forward/tests/meta_router/sat_analysis stay in root (cross-domain
-# deps on pruners::bandit, speculative::types, cache_prune).
-dash_attn = []
+# DashAttention clean core (entmax, routing, chunk_summary) AND the composition
+# layer (forward_dash_attn_prefill / forward_dash_attn_decode, Issue 007 Phase
+# F.4a). The forward module moved here from root; pulls katgpt-forward
+# (ForwardContext) + katgpt-transformer (TransformerWeights/MultiLayerKVCache).
+# NOTE: forward_dash_attn_decode_vortex was STRIPPED — see
+# dash_attn/forward.rs module comment. The VortexFlow cluster (vortex_flow,
+# block_topk, channel_aware, entmax_router, meta_router, value_energy) stays in
+# root because meta_router depends on pruners::bandit + speculative::types.
+dash_attn = ["dep:katgpt-forward", "dep:katgpt-transformer"]
 # Chiaroscuro attention — per-token DCT spectral entropy operator routing.
 chiaroscuro = ["dep:rustfft"]
 # RAT+ Recurrence Bridge — modelless dilated inference via GDN2 state.
@@ -47,3 +59,7 @@ static_cal_tables = ["dep:blake3"]
 funcattn_freeze_thaw = ["dep:blake3", "dep:serde"]
 funcattn_spectral_pre_rotate = ["dep:katgpt-spectral"]
 funcattn_chiar_blend = ["chiaroscuro"]
+# sparse_mlp: gates the `#[cfg(feature = "sparse_mlp")]` MLP path in
+# gdn2/forward.rs. Forwards to katgpt-core (for sparse_matmul) and
+# katgpt-forward (for ForwardContext.active_indices/active_values).
+sparse_mlp = ["katgpt-core/sparse_mlp", "katgpt-forward/sparse_mlp"]

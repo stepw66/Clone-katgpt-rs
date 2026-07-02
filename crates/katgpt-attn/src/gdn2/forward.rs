@@ -19,11 +19,23 @@
 //!
 //! Reference: "Gated DeltaNet" (2024). See `.research/` for derivation.
 //! Plan 105: GDN2 module.
+//!
+//! # Origin
+//!
+//! Moved from `katgpt-rs/src/gdn2/forward.rs` (Issue 007 Phase F.4a, 2026-07-02).
+//! The composition layer previously stayed in root because `ForwardContext` was
+//! root-only; now that `ForwardContext` lives in `katgpt-forward` (Phase F.1-F.3),
+//! this file moved into the katgpt-attn leaf to join the GDN2 substrate (kernel +
+//! types already here). Path rewrites: `crate::transformer::ForwardContext` →
+//! `katgpt_forward`, `crate::transformer::TransformerWeights` → `katgpt_transformer`,
+//! `crate::gdn2::{kernel,types}` stays as `crate::gdn2::{kernel,types}` (this file
+//! lives inside the gdn2 module of katgpt-attn), `crate::types` → `katgpt_core::types`.
 
 use crate::gdn2::kernel::{gdn2_state_readout, gdn2_state_update, l2_normalize};
 use crate::gdn2::types::MultiLayerGdn2Cache;
-use crate::transformer::{ForwardContext, TransformerWeights};
-use crate::types::{self, Config};
+use katgpt_core::types::{self, Config};
+use katgpt_forward::ForwardContext;
+use katgpt_transformer::TransformerWeights;
 
 // ── GDN2 Forward Pass ──────────────────────────────────────────
 
@@ -223,7 +235,7 @@ pub fn generate_gdn2_into(
     cache: &mut MultiLayerGdn2Cache,
     weights: &TransformerWeights,
     config: &Config,
-    rng: &mut crate::types::Rng,
+    rng: &mut katgpt_core::types::Rng,
     n_tokens: usize,
     tokens: &mut Vec<usize>,
 ) {
@@ -244,11 +256,11 @@ pub fn generate_gdn2_into(
 mod tests {
     use super::*;
     use crate::gdn2::types::Gdn2GateConfig;
-    use crate::types::Config;
+    use katgpt_core::types::Config;
 
     /// Helper: create random weights for testing.
     fn random_weights(config: &Config) -> TransformerWeights {
-        let mut rng = crate::types::Rng::new(42);
+        let mut rng = katgpt_core::types::Rng::new(42);
         TransformerWeights::new(config, &mut rng)
     }
 
@@ -275,7 +287,7 @@ mod tests {
         let weights = random_weights(&config);
         let mut ctx = ForwardContext::new(&config);
         let mut cache = MultiLayerGdn2Cache::new(&config);
-        let mut rng = crate::types::Rng::new(42);
+        let mut rng = katgpt_core::types::Rng::new(42);
         let mut tokens = Vec::new();
 
         generate_gdn2_into(
@@ -363,7 +375,7 @@ mod tests {
         }
 
         // Multi-token streaming
-        let mut rng = crate::types::Rng::new(42);
+        let mut rng = katgpt_core::types::Rng::new(42);
         let mut tokens = Vec::new();
         generate_gdn2_into(
             &mut ctx,

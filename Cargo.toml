@@ -126,7 +126,7 @@ tiled_attention = ["katgpt-core/tiled_attention", "katgpt-forward/tiled_attentio
 parallax_attn = ["tiled_attention", "newton_schulz", "katgpt-core/parallax_attn"]  # Parallax parameterized local linear attention — R projection + covariance correction (Plan 135, Research 135) — opt-in, requires Muon-trained weights
 sink_aware_attn = ["data_probe"]  # Sink-Aware Attention — dual-policy sigmoid gate (Plan 287 Phase 3, Research 258, arxiv 2606.08105). Implies data_probe for the classifier primitive. Opt-in: default stays Uniform pending G2/G3 GOAT gate. Standalone apply_dual_policy_gate ships now; direct wiring into parallax_attn / funcattn forward paths deferred.
 depth_invariance = ["katgpt-core/depth_invariance"]  # Depth-Invariance Diagnostic + MagnitudeRegularizedResidual — root-cause counterpart to BeliefRankPruner / GainCostLoopHalter / latent_functor/reestimation / micro_belief/coherence_bench (Plan 306, Research 286, arXiv:2605.09992). Detects DepthSpecificRefinement / Collapsed / DepthInvariant on flattened &[f32] state chains. Disambiguation: different paper + mechanism than sink_aware_attn (Plan 287 / arXiv:2606.08105) — drafter-side magnitude accumulation vs target-side sink classification. DEFAULT-ON (Plan 306 T7.4, 2026-06-23): G1/G2/G3 PASS; G4 re-spec'd to absolute-latency at HLA scale (all PASS with headroom); SIMD inner-loop landed. Zero runtime cost unless a caller invokes classify_chain / apply_magnitude_regularization.
-dash_attn = ["katgpt-attn/dash_attn"]  # DashAttention adaptive sparse hierarchical attention via α-entmax routing (Plan 106, Research 68). Clean core (entmax/routing/chunk_summary) in katgpt-attn; VortexFlow cluster + forward glue stay root.
+dash_attn = ["katgpt-attn/dash_attn"]  # DashAttention adaptive sparse hierarchical attention via α-entmax routing (Plan 106, Research 68). Clean core (entmax/routing/chunk_summary) + forward composition in katgpt-attn (Issue 007 Phase F.4a); VortexFlow cluster stays root (cross-domain deps).
 vortex_flow = ["dash_attn"]  # VortexFlow composable sparse routing (Plan 196 GOAT 72/72, default-ON)
 msa_sparse = ["vortex_flow"]  # MSA blockwise sparse distillation — max-pool/stddev scoring + SIMD argtopk (Plan 256 GOAT gate, opt-in until proven)
 msa_per_group = ["msa_sparse"]  # Per-GQA-group independent top-k (Plan 256 Phase 2 GOAT gate)
@@ -148,7 +148,7 @@ validator = ["syn", "proc-macro2"]
 # riir-neuron-db/.plans/006_vessel_primitive_migration.md. The
 # `vessel_extract_bench`, `vessel_minimal`, and `vessel_project` entries
 # below were also removed in the same migration.
-sparse_mlp = ["katgpt-core/sparse_mlp", "katgpt-pruners/sparse_mlp", "katgpt-forward/sparse_mlp"]  # TwELL-inspired sparse MLP matmul (Plan 022). Forwarded to katgpt-forward so ForwardContext.active_indices/values compile (Issue 007 Phase F).
+sparse_mlp = ["katgpt-core/sparse_mlp", "katgpt-pruners/sparse_mlp", "katgpt-forward/sparse_mlp", "katgpt-attn/sparse_mlp"]  # TwELL-inspired sparse MLP matmul (Plan 022). Forwarded to katgpt-forward so ForwardContext.active_indices/values compile (Issue 007 Phase F) AND so forward_hla/forward_ahla's sparse MLP path compiles (Issue 007 Phase F.4b — HLA forward lives in katgpt-forward). Forwarded to katgpt-attn so forward_gdn2's sparse MLP path compiles (Issue 007 Phase F.4a).
 ppot = ["katgpt-pruners/ppot"]  # PPoT logit-parameterized CPU resampling (Plan 026 + 027)
 domain_latent = ["katgpt-core/domain_latent", "katgpt-pruners/domain_latent"]  # Free Transformer mid-layer domain conditioning (Plan 038)
 bandit = ["katgpt-core/review_metrics", "katgpt-pruners/bandit"]  # Multi-armed bandit adaptive ScreeningPruner (Plan 030). Enables katgpt-core/review_metrics so the relocated ReviewMetrics (Plan 308 Phase 3 move from root) is re-exported at crate::pruners::review_metrics.
@@ -261,7 +261,7 @@ dual_gram_pca = ["katgpt-core/dual_gram_pca", "katgpt-spectral/dual_gram_pca"]  
 roofline_cost = ["katgpt-core/roofline_cost"]  # Roofline cost model for GPU operator runtime prediction (Research R130, Plan 159 GOAT) — default-ON
 bandit_mcts = ["game_state"]  # Bandit-guided MCTS rollout policy — NFSP/MCTS duality (Plan 067)
 hla_attention = []  # Higher-order Linear Attention — O(1) inference cache (Plan 057)
-gdn2_attention = ["katgpt-attn/gdn2_attention", "katgpt-attn/diagonal_gate"]  # Gated DeltaNet-2 recurrent attention — O(1) decode (Plan 105, Research 70). Kernel+types in katgpt-attn; forward glue stays root.
+gdn2_attention = ["katgpt-attn/gdn2_attention", "katgpt-attn/diagonal_gate"]  # Gated DeltaNet-2 recurrent attention — O(1) decode (Plan 105, Research 70). Kernel+types+forward in katgpt-attn (Issue 007 Phase F.4a); root re-exports.
 cumprodsum = []  # Cumprodsum primitive — atomic 1-SS matrix multiplication (Plan 263, Research 231) — always compiled, feature reserved for future SIMD gate
 ssd_block = []  # Dual-mode SSD block decomposition — chunked semiseparable computation (Plan 263, Phase 2, GOAT PASS 33-661x speedup, default-ON)
 ss_pruner = ["katgpt-pruners/ss_pruner"]  # SemiseparablePruner — cumprodsum temporal influence pruning for DDTree (Plan 263, Phase 3, GOAT PASS 25-56% branching reduction, default-ON)

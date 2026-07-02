@@ -46,11 +46,11 @@ katgpt-types = { path = "../katgpt-types" }
 # for backwards compatibility.
 katgpt-micro-belief = { path = "../katgpt-micro-belief", optional = true }
 # katgpt-hla houses the Higher-order Linear Attention substrate (cache types +
-# streaming kernels) spun out of katgpt-core::hla (Issue 007 Phase E Tier 2 #4).
-# Always-on — the HLA substrate is unconditional substrate (mirrors the
-# pre-promotion `pub mod hla;`), re-exported as `katgpt_core::hla` for
-# backwards compatibility. The composition layer (`forward_hla` /
-# `forward_ahla`) stays in katgpt-core because it depends on ForwardContext.
+# streaming kernels) AND the composition layer (forward_hla / forward_ahla,
+# Issue 007 Phase F.4b) spun out of katgpt-core::hla. Always-on — re-exported
+# as `katgpt_core::hla` for backwards compatibility. The composition layer
+# moved from root `src/hla/forward.rs` into katgpt-hla now that ForwardContext
+# lives in katgpt-forward.
 katgpt-hla = { path = "../katgpt-hla" }
 # katgpt-personality houses the Personality-Weighted Latent Layer Composition
 # substrate (sigmoid + kernel + snapshot + types) spun out of

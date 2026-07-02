@@ -20,6 +20,11 @@ katgpt-core = { path = "../katgpt-core" }
 katgpt-types = { path = "../katgpt-types" }        # Config, kv_dim, DepthTier, simd (re-exported here as katgpt_core::simd)
 katgpt-transformer = { path = "../katgpt-transformer" }  # WallPrefixState, TransformerWeights
 katgpt-pruners = { path = "../katgpt-pruners", default-features = false }  # CnaModulator, SubstrateMask, HydraSkipPlan
+# katgpt-hla (Issue 007 Phase F.4b, 2026-07-02): HLA cache types + streaming
+# kernels. forward_hla / forward_ahla moved here from root `src/hla/forward.rs`.
+# katgpt-forward → katgpt-hla is safe (no cycle: katgpt-hla depends only on
+# katgpt-types, which katgpt-forward already pulls transitively).
+katgpt-hla = { path = "../katgpt-hla" }
 # DflashCtx<TransformerWeights> impl for ForwardContext lives here (Issue 007
 # Phase F): the impl must travel with the type now that ForwardContext moved
 # out of root, otherwise the orphan rule blocks root's dflash.rs. No cycle —

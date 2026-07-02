@@ -417,3 +417,10 @@ impl katgpt_speculative::dflash::DflashCtx<TransformerWeights> for ForwardContex
         );
     }
 }
+
+// HLA forward-pass composition (Issue 007 Phase F.4b, 2026-07-02).
+// Moved from root `src/hla/forward.rs`. Lives here (not in katgpt-hla) because
+// katgpt-core depends on katgpt-hla for substrate re-export, and this crate
+// depends on katgpt-core — placing it in katgpt-hla would create a cycle.
+pub mod hla_forward;
+pub use hla_forward::{forward_ahla, forward_hla, generate_ahla_into, generate_hla_into};

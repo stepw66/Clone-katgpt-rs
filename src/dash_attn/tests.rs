@@ -4,7 +4,7 @@
 
 use super::chunk_summary::{ChunkSummaryCache, ChunkSummaryQuery, summarize_chunk};
 use super::entmax::{entmax_1p5, entmax_gqa_aggregate};
-use super::forward::{forward_dash_attn_decode, forward_dash_attn_prefill};
+use super::{forward_dash_attn_decode, forward_dash_attn_prefill};
 use super::routing::{compute_routing_bias, score_blocks_entmax};
 use crate::transformer::{ForwardContext, MultiLayerKVCache, TransformerWeights};
 use crate::types::{Config, DashAttnConfig, Rng};

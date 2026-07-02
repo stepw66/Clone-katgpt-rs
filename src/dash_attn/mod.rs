@@ -18,23 +18,23 @@
 #[cfg(test)]
 mod tests;
 
-// Clean core (entmax, routing, chunk_summary) moved to katgpt-attn (Proposal 003
-// Phase 2). Re-exported here so `crate::dash_attn::chunk_summary` and all
+// Clean core (entmax, routing, chunk_summary) + composition layer (forward)
+// moved to katgpt-attn (Proposal 003 Phase 2; Issue 007 Phase F.4a, 2026-07-02).
+// Re-exported here so `crate::dash_attn::chunk_summary` and all
 // `super::chunk_summary` / `super::entmax` / `super::routing` refs in the
-// root-kept forward.rs + tests.rs resolve unchanged.
+// root-kept tests.rs + sat_analysis.rs resolve unchanged.
 pub use katgpt_attn::dash_attn::{chunk_summary, entmax, routing};
 
-pub mod forward;
+// Composition layer re-export (Issue 007 Phase F.4a, 2026-07-02):
+// `forward_dash_attn_prefill` / `forward_dash_attn_decode` moved from root
+// `src/dash_attn/forward.rs` into the katgpt-attn leaf.
+pub use katgpt_attn::dash_attn::forward::{forward_dash_attn_decode, forward_dash_attn_prefill};
 
 #[cfg(all(feature = "dash_attn", feature = "cache_prune"))]
 pub mod sat_analysis;
 
 pub use katgpt_attn::dash_attn::chunk_summary::{ChunkSummaryCache, ChunkSummaryQuery};
 pub use katgpt_attn::dash_attn::entmax::{entmax_1p5, entmax_gqa_aggregate, entmax_support};
-pub use forward::{forward_dash_attn_decode, forward_dash_attn_prefill};
-
-#[cfg(feature = "vortex_flow")]
-pub use forward::forward_dash_attn_decode_vortex;
 pub use katgpt_attn::dash_attn::routing::{compute_routing_bias, score_blocks_entmax};
 
 #[cfg(all(feature = "dash_attn", feature = "cache_prune"))]

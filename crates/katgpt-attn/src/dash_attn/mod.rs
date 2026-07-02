@@ -19,7 +19,13 @@
 pub mod chunk_summary;
 pub mod entmax;
 pub mod routing;
+// Composition layer (Issue 007 Phase F.4a, 2026-07-02):
+// forward_dash_attn_prefill / forward_dash_attn_decode moved here from root
+// `src/dash_attn/forward.rs`. NOTE: forward_dash_attn_decode_vortex was
+// STRIPPED (vortex_flow cluster stays root-only) — see forward.rs comment.
+pub mod forward;
 
 pub use chunk_summary::{ChunkSummaryCache, ChunkSummaryQuery};
 pub use entmax::{entmax_1p5, entmax_gqa_aggregate, entmax_support};
 pub use routing::{compute_routing_bias, score_blocks_entmax};
+pub use forward::{forward_dash_attn_decode, forward_dash_attn_prefill};

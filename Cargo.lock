@@ -1727,7 +1727,9 @@ dependencies = [
  "blake3",
  "fastrand",
  "katgpt-core",
+ "katgpt-forward",
  "katgpt-spectral",
+ "katgpt-transformer",
  "rustfft",
  "serde",
  "serde_json",
@@ -1794,6 +1796,7 @@ name = "katgpt-forward"
 version = "0.1.0"
 dependencies = [
  "katgpt-core",
+ "katgpt-hla",
  "katgpt-pruners",
  "katgpt-speculative",
  "katgpt-transformer",

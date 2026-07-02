@@ -6,18 +6,43 @@
 //! Current status: MVP — chunk summaries are computed during prefill and
 //! stored, but attention still uses the standard dense path. Full sparse
 //! attention on active chunks will be added in a follow-up.
+//!
+//! # Origin
+//!
+//! Moved from `katgpt-rs/src/dash_attn/forward.rs` (Issue 007 Phase F.4a,
+//! 2026-07-02). The composition layer previously stayed in root because
+//! `ForwardContext` was root-only; now that `ForwardContext` lives in
+//! `katgpt-forward` (Phase F.1-F.3), this file moved into the katgpt-attn
+//! leaf to join the DashAttention substrate (chunk_summary + entmax + routing
+//! already here). Path rewrites: `crate::transformer::ForwardContext` →
+//! `katgpt_forward`, `crate::transformer::{MultiLayerKVCache,TransformerWeights}`
+//! → `katgpt_transformer`, `crate::types` → `katgpt_core::types`. The
+//! `super::{chunk_summary,routing}` paths stay unchanged (both modules are
+//! siblings in this leaf).
+//!
+//! # Stripped: `forward_dash_attn_decode_vortex`
+//!
+//! The root original had a `#[cfg(feature = "vortex_flow")]` function
+//! `forward_dash_attn_decode_vortex` that used `super::vortex_flow::{VortexRouter,
+//! VortexRouterCache, VortexFlowExt, VortexScratch}`. The `vortex_flow` module
+//! and its cluster (block_topk, channel_aware, entmax_router, meta_router,
+//! value_energy) STAY IN ROOT because `meta_router` depends on
+//! `pruners::bandit` + `speculative::types` (root-only modules) and `vortex_flow`
+//! depends on `meta_router` — a chain that can't resolve in katgpt-attn without
+//! pulling root-only deps. The vortex decode path was stripped from this leaf
+//! migration; to re-add it, either (a) move the vortex_flow cluster into a
+//! separate crate that can depend on bandit/speculative, or (b) inject the
+//! router via a trait. Tracked as a non-blocking follow-up — `vortex_flow` is
+//! default-on in root but the decode path is rarely the hot path (prefill +
+//! standard decode cover the common cases).
 
 use katgpt_core::simd;
-use crate::transformer::{ForwardContext, MultiLayerKVCache, TransformerWeights};
-use crate::types::{self, Config, DashAttnConfig};
+use katgpt_core::types::{self, Config, DashAttnConfig};
+use katgpt_forward::ForwardContext;
+use katgpt_transformer::{MultiLayerKVCache, TransformerWeights};
 
 use super::chunk_summary::{ChunkSummaryCache, ChunkSummaryQuery, summarize_chunk_into};
 use super::routing::score_blocks_entmax_into;
-
-#[cfg(feature = "vortex_flow")]
-use super::vortex_flow::{
-    VortexFlow, VortexFlowExt, VortexRouter, VortexRouterCache, VortexScratch,
-};
 
 // ---------------------------------------------------------------------------
 // Prefill (batch prompt processing)
@@ -249,112 +274,10 @@ pub fn forward_dash_attn_decode<'a>(
     &mut ctx.logits
 }
 
-// ---------------------------------------------------------------------------
-// Decode with VortexFlow router (feature-gated)
-// ---------------------------------------------------------------------------
-
-#[cfg(feature = "vortex_flow")]
-/// Forward pass for DashAttention in decode mode using a VortexFlow router.
-///
-/// Identical to [`forward_dash_attn_decode`] except that block selection
-/// uses the provided VortexFlow router instead of the hardcoded entmax path.
-/// This is the Phase 1 wiring — the router runs but attention is still dense.
-///
-/// # Arguments
-/// * `router` — VortexFlow router for block selection
-/// * `router_cache` — Router cache (populated during prefill via `forward_cache`)
-/// * `vortex_ext` — VortexFlow configuration (must have `is_vortex() == true`)
-#[allow(clippy::too_many_arguments)]
-pub fn forward_dash_attn_decode_vortex<'a>(
-    ctx: &'a mut ForwardContext,
-    weights: &TransformerWeights,
-    _cache: &mut MultiLayerKVCache,
-    token: usize,
-    pos: usize,
-    config: &Config,
-    _dash_config: &DashAttnConfig,
-    _summary_query: &ChunkSummaryQuery,
-    _summary_cache: &ChunkSummaryCache,
-    router: &VortexRouter,
-    router_cache: &VortexRouterCache,
-    _vortex_ext: &VortexFlowExt,
-) -> &'a mut [f32] {
-    let n = config.n_embd;
-    let hd = config.head_dim;
-    let tok_off = token * n;
-    let pos_off = pos * n;
-    ctx.x[..n].fill(0.0);
-    simd::simd_add_inplace(&mut ctx.x[..n], &weights.wte[tok_off..tok_off + n]);
-    simd::simd_add_inplace(&mut ctx.x[..n], &weights.wpe[pos_off..pos_off + n]);
-
-    // Pre-allocate VortexFlow scratch outside the layer loop for reuse
-    let n_blocks = router_cache.n_blocks();
-    let mut vortex_scratch = VortexScratch::new(n_blocks.max(1));
-    // Default top_k for routing (Phase 1: use chunk_size as proxy)
-    let top_k = n_blocks;
-
-    for layer_weights in &weights.layers {
-        types::rmsnorm(&mut ctx.x);
-        ctx.xr[..n].copy_from_slice(&ctx.x[..n]);
-        types::rmsnorm(&mut ctx.x);
-
-        types::matmul(&mut ctx.q, &layer_weights.attn_wq, &ctx.x, n, n);
-        types::matmul(
-            &mut ctx.k,
-            &layer_weights.attn_wk,
-            &ctx.x,
-            types::kv_dim(config),
-            n,
-        );
-        types::matmul(
-            &mut ctx.v,
-            &layer_weights.attn_wv,
-            &ctx.x,
-            types::kv_dim(config),
-            n,
-        );
-
-        // VortexFlow routing: use the router for block selection
-        if n_blocks > 0 {
-            let q_head = &ctx.q[..hd];
-            let _decision =
-                router.forward_indexer(q_head, router_cache, n_blocks, top_k, &mut vortex_scratch);
-            // TODO: Use decision.blocks to select sparse KV blocks
-        }
-
-        types::matmul(&mut ctx.attn_out, &layer_weights.attn_wo, &ctx.q, n, n);
-        simd::simd_add_inplace(&mut ctx.x[..n], &ctx.attn_out[..n]);
-        simd::simd_add_inplace(&mut ctx.x[..n], &ctx.xr[..n]);
-
-        ctx.xr2[..n].copy_from_slice(&ctx.x[..n]);
-        types::rmsnorm(&mut ctx.x);
-        types::matmul_relu(
-            &mut ctx.hidden,
-            &layer_weights.mlp_w1,
-            &ctx.x,
-            config.mlp_hidden,
-            n,
-        );
-        types::matmul(
-            &mut ctx.x,
-            &layer_weights.mlp_w2,
-            &ctx.hidden,
-            n,
-            config.mlp_hidden,
-        );
-        simd::simd_add_inplace(&mut ctx.x[..n], &ctx.xr2[..n]);
-    }
-
-    ctx.hidden_state[..n].copy_from_slice(&ctx.x[..n]);
-    types::matmul(
-        &mut ctx.logits,
-        &weights.lm_head,
-        &ctx.x,
-        config.vocab_size,
-        n,
-    );
-    &mut ctx.logits
-}
+// NOTE: `forward_dash_attn_decode_vortex` (the `#[cfg(feature = "vortex_flow")]`
+// variant) was STRIPPED during the leaf migration — see the module-level comment
+// above for the full rationale (vortex_flow cluster stays root-only). Re-add by
+// resolving the root-only vortex_flow/meta_router dependency chain first.
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -363,8 +286,8 @@ pub fn forward_dash_attn_decode_vortex<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::transformer::TransformerWeights;
-    use crate::types::{Config, DashAttnConfig, Rng};
+    use katgpt_core::types::{Config, DashAttnConfig, Rng};
+    use katgpt_transformer::TransformerWeights;
 
     fn random_weights(config: &Config) -> TransformerWeights {
         let mut rng = Rng::new(42);
