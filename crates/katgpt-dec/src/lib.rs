@@ -59,6 +59,8 @@ pub mod hodge;
 pub mod motor_gated;
 #[cfg(feature = "heat_kernel_trajectory")]
 pub mod krylov;
+#[cfg(feature = "heat_kernel_trajectory")]
+pub mod nonlinear_heat_kernel;
 pub mod operators;
 pub mod simd;
 pub mod stokes_calculus;
@@ -91,5 +93,11 @@ pub use heat_kernel::{
 
 #[cfg(feature = "heat_kernel_trajectory")]
 pub use krylov::{KRYLOV_K_MAX, krylov_expmv, krylov_expmv_into};
+
+#[cfg(feature = "heat_kernel_trajectory")]
+pub use nonlinear_heat_kernel::{
+    DEFAULT_N_QUAD, MAX_N_QUAD, NonlinearScratch, expm_source_term_quadrature,
+    heat_kernel_trajectory_nonlinear, heat_kernel_trajectory_nonlinear_into,
+};
 
 pub use types::{CellComplex, CoboundaryIndex, CochainField, MAX_RANK};

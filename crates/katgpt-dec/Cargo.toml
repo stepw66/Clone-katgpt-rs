@@ -44,6 +44,12 @@ publish = false  # only katgpt-core ships to crates.io
 # G5 finite + stable decay. Eigensolver accuracy (~8% on 8×8) is the limiting
 # factor, NOT the heat-kernel math (which is exact); for large complexes use
 # the Krylov path. See .benchmarks/365_dec_heat_kernel_trajectory_goat.md.
+#
+# Phase 3 (2026-07-02): nonlinear exponential integrator added in
+# `nonlinear_heat_kernel.rs` — Duhamel integral + Gauss-Legendre quadrature
+# for the ReLU-gated source term (`heat_kernel_trajectory_nonlinear`).
+# Extends the linear path to handle the ReLU nonlinearity in motor-gated
+# field evolution. 13 unit tests pass; T5.2 formal GOAT bench still deferred.
 default = ["heat_kernel_trajectory"]
 motor_gated_field = []
 heat_kernel_trajectory = []
