@@ -4,6 +4,8 @@
 //! loop from the concrete compute backend (CPU, Apple Neural Engine, etc.).
 //!
 //! The default [`CpuBackend`] delegates to [`crate::transformer::forward`].
+//!
+//! _Root-resident by design (Issue 033 §C, Option C)._ Defines the `InferenceBackend` trait (the forward abstraction itself — same signature as a proposed `ForwardPass` trait would have). Its providers (CpuBackend/AneBackend/GpuBackend) all delegate to root's `crate::transformer::forward`. The trait cannot move without its providers; the providers cannot move without root's forward. A redundant `ForwardPass` trait was rejected as non-production-grade.
 
 use std::fmt;
 

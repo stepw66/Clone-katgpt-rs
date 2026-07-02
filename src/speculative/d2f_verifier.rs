@@ -3,6 +3,8 @@
 //! Plan 089: Tri-Mode Inference — "self-speculation" mode.
 //! Uses existing D2F block decode as drafter + existing AR as verifier.
 //! Behind `tri_mode` feature gate.
+//!
+//! _Root-resident by design (Issue 033 §C, Option C)._ Calls `crate::transformer::forward` + depends on root-only `crate::dllm` + `crate::speculative::{d2f, types, verifier}` siblings.
 
 use crate::dllm::D2fContext;
 use crate::speculative::d2f::{D2fDecodeConfig, d2f_decode_block_with_prompt_with};

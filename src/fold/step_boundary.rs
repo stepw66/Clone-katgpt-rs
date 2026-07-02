@@ -3,6 +3,10 @@
 //! Detects reasoning step boundaries in CoT text by scanning for structural
 //! markers: double newlines (`\n\n`), think-tag transitions (`<think...>`,
 //! `</think...>`), and other reasoning delimiters.
+//!
+//! _Root-resident by design (Issue 033 §C, Option C)._ Boundary output is
+//! consumed by the fold→root-only `crate::speculative::types::ScreeningPruner`
+//! composition pipeline.
 
 use super::types::StepBoundary;
 

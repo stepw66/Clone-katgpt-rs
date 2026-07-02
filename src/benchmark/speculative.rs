@@ -1,3 +1,5 @@
+//! _Root-resident by design (Issue 033 §C, Option C)._ Calls `crate::transformer::forward` + composes root-only `crate::speculative::{verifier, dd_tree, dflash, types}` for speculative decode benchmarking.
+
 use super::{BenchCategory, BenchResult};
 use crate::speculative::{
     LeviathanVerifier, NoPruner, NoScreeningPruner, SimulatedVerifier, SpeculativeContext,

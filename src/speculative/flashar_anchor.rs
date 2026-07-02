@@ -17,6 +17,8 @@
 //! # Feature Gate
 //!
 //! `flashar_anchor` (requires `dllm`)
+//!
+//! _Root-resident by design (Issue 033 §C, Option C)._ Calls `crate::transformer::forward` + depends on root-only `crate::dllm` + `crate::speculative::{d2f, types}` siblings.
 
 #![allow(clippy::too_many_arguments)]
 

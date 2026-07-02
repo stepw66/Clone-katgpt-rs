@@ -1,3 +1,5 @@
+//! _Root-resident by design (Issue 033 §C, Option C)._ Calls `crate::transformer::forward` for HLA-vs-flat benchmark comparison. Benchmark harness is engine-tier by nature.
+
 use super::{BenchCategory, BenchResult};
 use crate::hla::{MultiLayerAhlaCache, MultiLayerHlaCache, forward_ahla, forward_hla};
 use crate::transformer::{ForwardContext, MultiLayerKVCache, TransformerWeights, forward};

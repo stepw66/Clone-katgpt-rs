@@ -5,6 +5,8 @@
 //! 2. PlasmaPath bit-plane ternary SIMD matvec (feature-gated)
 //! 3. Zero-alloc forward pass throughput
 //! 4. Minkowski lattice embedding lookup
+//!
+//! _Root-resident by design (Issue 033 §C, Option C)._ Calls `crate::transformer::forward` for zero-alloc forward throughput benchmark. Benchmark harness is engine-tier by nature.
 
 use super::{BenchCategory, BenchResult};
 use crate::transformer::{ForwardContext, MultiLayerKVCache, TransformerWeights, forward};

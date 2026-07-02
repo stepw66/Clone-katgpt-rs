@@ -8,6 +8,10 @@
 //! Plan 245 T25: `compact_trace()` uses StillKV to compact the KV cache
 //! of surviving tokens after folding, providing synthesis-based reduction
 //! in addition to selection-based folding.
+//!
+//! _Root-resident by design (Issue 033 §C, Option C)._ Implements root-only
+//! `crate::speculative::types::ScreeningPruner` and integrates with root-only
+//! `ThinkingController` (Plan 194).
 
 use super::attention_importance::AttentionImportance;
 use super::types::{FoldContext, FoldDecision, FoldResult, StepBoundary};

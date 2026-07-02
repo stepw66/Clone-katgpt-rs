@@ -3,6 +3,10 @@
 //! Ranks reasoning steps by mean attention weight. The idea: steps with
 //! higher mean attention from later tokens are more "essential" to the
 //! reasoning chain and should be kept during folding.
+//!
+//! _Root-resident by design (Issue 033 §C, Option C)._ Feeds root-only
+//! `crate::speculative::types::ScreeningPruner` (via `chain_folder`) with
+//! step-importance scores derived from root-only `ForwardContext` attention.
 
 use super::types::StepBoundary;
 

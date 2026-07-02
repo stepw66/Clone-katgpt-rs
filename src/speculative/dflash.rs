@@ -1,3 +1,4 @@
+//! _Root-resident by design (Issue 033 §C, Option C)._ Calls `crate::transformer::forward` + depends on root-only `crate::speculative::types` and the root `dflash` composition (leaf `katgpt-speculative` only has the shared-core `_with` delegations).
 // `sample_from_distribution` is only used by the feature-gated dflash variants
 // (`domino_lora`, `dflare_kv_routing`); the three shared-core `_with` delegations
 // do their sampling inside `katgpt_speculative::dflash`.

@@ -2,6 +2,10 @@
 //!
 //! Defines `FoldDecision`, `FoldResult`, `FoldContext`, `FoldStats`, and
 //! `StepBoundary` used across all chain-folding submodules.
+//!
+//! _Root-resident by design (Issue 033 §C, Option C)._ Defines fold types
+//! consumed by root-only `crate::speculative::types::ScreeningPruner` and
+//! `ThinkingController`.
 
 // ── StepBoundary ────────────────────────────────────────────────
 

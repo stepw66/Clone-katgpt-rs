@@ -3,6 +3,8 @@
 //! Uses the draft model's attention scores to estimate per-token importance,
 //! then compresses the prompt to top-`keep_ratio` spans before target prefill.
 //! Inspired by [Cross-Family Speculative Prefill](https://arxiv.org/abs/2603.02631).
+//!
+//! _Root-resident by design (Issue 033 §C, Option C)._ Calls `crate::transformer::forward` + depends on root-only `crate::speculative::types`.
 
 use crate::speculative::types::{FlashPrefillConfig, PrefillMode, SpeculativeContext};
 use crate::transformer::{TransformerWeights, forward};

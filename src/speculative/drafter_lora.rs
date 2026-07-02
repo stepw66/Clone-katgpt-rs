@@ -3,6 +3,8 @@
 //! Implements a LoRA-trained drafter that learns to predict target model outputs.
 //! At Config::draft() scale (372 base params, ~288 LoRA params at rank-4),
 //! training is trivially fast using finite-difference gradients.
+//!
+//! _Root-resident by design (Issue 033 §C, Option C)._ Calls `crate::transformer::forward` — drafter LoRA training composes root forward + root-only `crate::types::LoraAdapter`.
 
 use std::path::Path;
 

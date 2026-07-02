@@ -13,6 +13,10 @@
 //! | TAHG (annealing) | Blended | Gradual hardening |
 //!
 //! Positions within the sliding window always get bias = 0 (unconditionally attended).
+//!
+//! _Root-resident by design (Issue 033 §C, Option C)._ Depends on root-only
+//! `crate::sp_kv::types` and `crate::transformer::ForwardContext` for self-pruned
+//! KV forward composition.
 
 use katgpt_core::simd::simd_dot_f32;
 

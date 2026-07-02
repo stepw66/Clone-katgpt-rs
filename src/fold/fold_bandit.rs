@@ -3,6 +3,10 @@
 //! Selects the optimal fold budget (fraction of steps to keep) using a
 //! multi-armed bandit with Thompson sampling. Each arm represents a
 //! different fold aggressiveness level.
+//!
+//! _Root-resident by design (Issue 033 §C, Option C)._ Tuning loop for the
+//! fold→`crate::speculative::types::ScreeningPruner` composition; reward
+//! signal is root-only speculative acceptance variance.
 
 use crate::types::Rng;
 

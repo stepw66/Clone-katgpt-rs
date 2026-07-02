@@ -1,3 +1,5 @@
+//! _Root-resident by design (Issue 033 §C, Option C)._ Calls `crate::transformer::forward` + depends on root-only `crate::speculative::{dd_tree, dflash, drafter_lora, types}` siblings.
+
 use crate::speculative::dd_tree::{TreeBuilder, extract_best_path_into};
 use crate::speculative::dflash::dflash_predict_with;
 use katgpt_core::speculative::sampling::sample_from_distribution;

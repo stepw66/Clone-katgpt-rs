@@ -2,6 +2,9 @@
 //!
 //! Extension functions to integrate chain folding with the ThinkingController
 //! feedback loop. Converts fold statistics into thinking feedback.
+//!
+//! _Root-resident by design (Issue 033 §C, Option C)._ Integrates with
+//! root-only `ThinkingController` (Plan 194) for thinking-mode feedback.
 
 use super::types::{FoldResult, FoldStats, ThinkingFoldFeedback};
 

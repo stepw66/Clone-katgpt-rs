@@ -3,6 +3,10 @@
 //! Provides the interface for truncating and replaying KV cache entries
 //! based on fold decisions. This is a lightweight wrapper since actual
 //! KV cache access is managed by the transformer forward pass.
+//!
+//! _Root-resident by design (Issue 033 §C, Option C)._ Plans KV-cache
+//! rollback for fold decisions that feed root-only `crate::speculative` /
+//! `crate::transformer::ForwardContext` forward passes.
 
 use super::types::{FoldDecision, StepBoundary};
 

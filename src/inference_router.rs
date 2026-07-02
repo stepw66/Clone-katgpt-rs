@@ -7,6 +7,10 @@
 //!
 //! GPU and ANE backends are optional (`Option<Box<dyn InferenceBackend>>`).
 //! When a backend is `None` the router falls back to CPU transparently.
+//!
+//! _Root-resident by design (Issue 033 §C, Option C)._ Depends on root-only
+//! `crate::trigger_gate`, `crate::dllm_solver`, and `crate::pruners::acceptance_variance`
+//! for dynamic tier routing.
 
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::time::Instant;

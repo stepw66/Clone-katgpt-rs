@@ -1,7 +1,7 @@
-# Issue 033: The `forward()` join point — architectural decision for the 30 root-pinned composition files
+# Issue 033: The `forward()` join point — architectural decision for the root-pinned composition files
 
 > **Type:** Architecture / decision (spin-out from Issue 007 Phase F.4)
-> **Status:** **OPEN — decision needed** (Option A vs C, or hybrid). Phase F.4a+F.4b shipped 4 of 34 files (commit `c76722d2`); the remaining 30 are blocked on this decision.
+> **Status:** **RESOLVED (2026-07-02) — all Option C.** Empirical audit found the proposed hybrid infeasible: both Option-A candidates turned out to be engine-tier. `inference_backend.rs` already defines the `InferenceBackend` trait (same signature as a proposed `ForwardPass`); `speculative/step.rs` has 6 root-only sibling deps beyond `forward()`. All 22 audited blocked files are documented root-resident by design. Option A rejected as redundant/insufficient; Option B rejected (low yield); Option C adopted for ALL.
 > **Owner:** develop
 > **Created:** 2026-07-02
 > **Origin:** Issue 007 Phase F.4 pre-dispatch import audit — discovered a second, deeper join point (`crate::transformer::forward` the *function*, not just `ForwardContext` the *type*).
@@ -16,11 +16,11 @@
 
 `ForwardContext` (the type) was lifted into `katgpt-forward` in Phase F.1–F.3 — but the **function** `crate::transformer::forward` was not, and it is the deeper binding. Root's `forward()` composes root-only cognitive modules (`cce`, `clr`, `compaction`, `tf_loop`, `pruners::*`), so **any file that calls `forward()` is pinned to root** — a leaf can't depend on root (that's the cycle Phase F was supposed to kill). This pins 30 of the 34 Phase F.4 target files.
 
-**Verdict (proposed, pending confirmation):** hybrid.
-- **Option (A) trait-based `ForwardPass` dispatch** for the 2 high-value files (`speculative/step.rs`, `inference_backend.rs`) — these are the genuinely reusable leaves worth the trait-threading cost.
-- **Option (C) accept root residency** for the other 28 — they ARE the engine tier that Issue 007 §F step 5 explicitly says stays in root. Declaring them intentionally-root-resident is honest, not a deferral.
+**Verdict (adopted 2026-07-02): all Option C.** The proposed hybrid was abandoned after empirical audit of the two Option-A candidates:
+- **`inference_backend.rs`** already defines `InferenceBackend` — a trait with the *exact same signature* as a proposed `ForwardPass`. Creating a second trait would be redundant. Its providers (`CpuBackend`/`AneBackend`/`GpuBackend`) are all 1-line delegations to root's `forward()` and must stay in root.
+- **`speculative/step.rs`** has 6 root-only sibling deps beyond `forward()` (`crate::speculative::{verifier, dd_tree, dflash, types, kurtosis_gate, selectivity_router}` — all root modules, not `katgpt-speculative` leaf). A `ForwardPass` trait solves 1 of 7 deps; it cannot unblock the file.
 
-Option (B) (split `forward()` into generic + root-specific halves) is **rejected** — most callers need the full forward, so the split unblocks little.
+**All 22 blocked files are Option C (root-resident by design).** Option A rejected as redundant/insufficient; Option B rejected (low yield).
 
 ---
 
@@ -46,15 +46,17 @@ This is a *deeper* join point than `ForwardContext`. Lifting the type was necess
 
 ---
 
-## The 30 blocked files (inventory)
+## The blocked files (inventory — 22 audited)
+
+> **Count correction:** the original filing estimated "~30 blocked" with F.4e sibling-deps at "~17". The empirical audit (2026-07-02) found the actual count is **22**: F.4e sibling-deps is 9 (not ~17). All 22 are now documented root-resident by design.
 
 | Batch | Files | Count | Blocker |
 |---|---|---|---|
 | **F.4c** | `speculative/step.rs`, `speculative/prefill.rs`, `speculative/dflash.rs`, `speculative/verifier.rs`, `speculative/d2f_verifier.rs`, `speculative/drafter_lora.rs`, `speculative/flashar_anchor.rs`, `speculative/flashar_consensus.rs` | 8 | All import `crate::transformer::forward`; also depend on root-only `crate::dllm`, `crate::speculative::{d2f,kurtosis_gate,selectivity_router,...}` siblings |
 | **F.4d** | `sleep/consolidation.rs` | 1 | **Wrong crate** — `crates/katgpt-sleep/` is the Sleep-Time Query Anticipator (arXiv:2504.13171, Plan 334); `src/sleep/consolidation.rs` is Sleep Consolidation (Plan 154, GDN2 fast-weight eviction). Unrelated features sharing the word "sleep." Also depends on root-only `super::{eviction,types}` + `crate::gdn2` |
 | **F.4e** (forward-join) | `inference_backend.rs`, `benchmark/hla.rs`, `benchmark/simd.rs`, `benchmark/speculative.rs` | 4 | All call `forward()` directly |
-| **F.4e** (sibling-deps) | `inference_router.rs`, `fold/*`, `sp_kv_forward_mod.rs` | ~17 | Depend on root-only siblings (`crate::trigger_gate`, `crate::dllm_solver`, `crate::pruners::acceptance_variance`, `crate::sp_kv::types`, `ThinkingController`, `ScreeningPruner`) |
-| | **Total blocked** | **30** | |
+| **F.4e** (sibling-deps) | `inference_router.rs`, `fold/{attention_importance,chain_folder,fold_bandit,fold_cache,step_boundary,thinking_ext,types}.rs`, `sp_kv_forward_mod.rs` | 9 | Depend on root-only siblings (`crate::trigger_gate`, `crate::dllm_solver`, `crate::pruners::acceptance_variance`, `crate::sp_kv::types`, `ThinkingController`, `ScreeningPruner`) |
+| | **Total** | **22** | |
 
 **Migrated (commit `c76722d2`):** 4 files — `gdn2/forward.rs`, `dash_attn/forward.rs` (both → `katgpt-attn`), `hla/forward.rs` (→ `katgpt-forward`, redirected to avoid the `katgpt-core → katgpt-hla → katgpt-forward → katgpt-core` cycle).
 
@@ -62,7 +64,7 @@ This is a *deeper* join point than `ForwardContext`. Lifting the type was necess
 
 ## The three options
 
-### (A) Trait-based `ForwardPass` dispatch — recommended for high-value files
+### (A) Trait-based `ForwardPass` dispatch — REJECTED after empirical audit
 
 Define a trait in `katgpt-forward`:
 
@@ -76,9 +78,12 @@ pub trait ForwardPass {
 
 Root's `forward()` impls this trait. Blocked files move to their leaves and take `impl ForwardPass` as a parameter instead of calling `forward()` directly.
 
-- **Pros:** forward becomes injectable; the root dependency is broken cleanly; testable with mock forward; aligns with the existing `DflashCtx` / `SpeculativeGenerator` trait patterns already in the codebase.
+- **Pros:** forward becomes injectable; the root dependency is broken cleanly; testable with mock forward.
 - **Cons:** threads a trait parameter through ~20 call sites; signature churn touches every `forward()` caller.
-- **Best fit:** `speculative/step.rs` (the core spec-decode step — genuinely reusable) and `inference_backend.rs` (`CpuBackend` delegates to `forward()` — the natural seam for a trait).
+- **REJECTED because:**
+  1. **`inference_backend.rs` already defines `InferenceBackend`** — a trait with the *exact same signature* (line 50-58: `fn forward<'a>(&'a mut self, ctx: &'a mut ForwardContext, ...) -> &'a mut [f32]`). Creating a second `ForwardPass` trait would duplicate it. The `CpuBackend`/`AneBackend`/`GpuBackend` providers are 1-line delegations to root's `forward()`; they must stay in root regardless.
+  2. **`speculative/step.rs` has 6 root-only sibling deps** beyond `forward()` (`crate::speculative::{verifier, dd_tree, dflash, types, kurtosis_gate, selectivity_router}` — all root modules, the `katgpt-speculative` leaf only has `dd_tree` + `dflash`). A `ForwardPass` trait solves 1 of 7 dependencies. Moving the file requires either abstracting all 7 behind traits (massive churn) or cascading all 7 into the leaf. The trait alone is insufficient.
+  3. Creating a redundant trait that doesn't enable migration would violate "production grade only."
 
 ### (B) Split `forward()` into generic + root-specific halves — REJECTED
 
@@ -86,34 +91,35 @@ Move the generic half (QKV projection, attention, MLP — no cognitive modules) 
 
 - **Why rejected:** most speculative/benchmark callers invoke the *full* `forward()` (they need the cognitive composition to produce realistic logits). Auditing which callers need which half would be high-effort for low unblock yield. The trait approach (A) achieves the same injectability without the audit.
 
-### (C) Accept the engine tier stays in root — recommended for the remaining 28
+### (C) Accept the engine tier stays in root — ADOPTED FOR ALL 22 FILES
 
-Issue 007 §F step 5 already says root keeps "the 33 forward passes + the engine tier." The 30 blocked files **are** that engine tier — they are root-engine composition by nature (`fold/`, `inference_router.rs`, `benchmark/*`, `flashar_consensus.rs`, etc.).
+Issue 007 §F step 5 already says root keeps "the 33 forward passes + the engine tier." The 22 blocked files **are** that engine tier — they are root-engine composition by nature (`fold/`, `inference_router.rs`, `benchmark/*`, `flashar_consensus.rs`, etc.).
 
 - **Pros:** zero churn; honest about the architecture (the engine tier composes cognitive modules that live nowhere else); matches the documented intent.
-- **Cons:** leaves 30 files in root `src/`, so the "composition layer fully extracted" goal of Phase F is only partially met. But Phase F's actual goal was killing the `ForwardContext` cycle — that's done.
-- **Best fit:** `fold/*`, `inference_router.rs`, `benchmark/*`, `flashar_*`, `drafter_lora.rs`, `sp_kv_forward_mod.rs`, `sleep/consolidation.rs`.
+- **Cons:** leaves 22 files in root `src/`, so the "composition layer fully extracted" goal of Phase F is only partially met. But Phase F's actual goal was killing the `ForwardContext` cycle — that's done.
+- **ADOPTED:** each of the 22 files carries a `//! _Root-resident by design (Issue 033 §C, Option C)._` doc comment listing its specific root-only deps.
 
 ---
 
-## Proposed verdict (hybrid)
+## Adopted verdict (all Option C)
 
-- **Option (A)** for `speculative/step.rs` + `inference_backend.rs` (2 files). These are the highest-value reusable leaves; the trait seam is natural and the ~20 call-site churn is justified.
-- **Option (C)** for the other 28 files. Document them as intentionally-root-resident engine composition; do not churn them through a trait they don't need.
-- **Option (B)** rejected.
-- **F.4d** (`sleep/consolidation.rs`): handle separately — it needs its own crate or a rename, NOT a trait. Tracked as a non-blocking follow-up; not part of the A/C decision.
+- **Option (C) for ALL 22 files.** Each documented as root-resident by design with a `//!` module doc comment listing its specific root-only deps.
+- **Option (A) rejected** — `inference_backend.rs` already has the equivalent `InferenceBackend` trait; `speculative/step.rs` is pinned by 6 additional siblings. See §(A) above for the full audit.
+- **Option (B) rejected** — low yield (most callers need the full forward).
+- **F.4d** (`sleep/consolidation.rs`): classified Option C (composes root-only GDN2 eviction). The "wrong crate" note (cannot go to `katgpt-sleep` — unrelated feature) remains as a non-blocking follow-up if extraction is ever desired.
 
-**Net Phase F outcome under this verdict:** 4 (done) + 2 (Option A) = 6 of 34 files in leaves; 28 declared engine-tier-by-design in root. Phase F's cycle-breaking goal is fully achieved; the leaf-extraction goal is 6/34 with the remainder documented as intentional.
+**Net Phase F outcome:** 4 (done, F.4a/F.4b) of 26 audited composition files in leaves; 22 declared engine-tier-by-design in root. Phase F's cycle-breaking goal is fully achieved; the leaf-extraction goal is 4/26 with the remainder documented as intentional.
 
 ---
 
 ## Acceptance criteria
 
-- [ ] **Decision recorded** (A vs C vs hybrid) in this issue's status line + Issue 007 §Phase F.
-- [ ] **If Option (A) chosen:** `ForwardPass` trait defined in `katgpt-forward`; root `forward()` impls it; `speculative/step.rs` + `inference_backend.rs` migrated to leaves taking `impl ForwardPass`. GOAT gate: `cargo check --workspace --all-features` clean + `cargo test --lib` green (bit-identical — trait dispatch must not change behavior).
-- [ ] **If Option (C) chosen for the 28:** each documented as intentionally-root-resident in its module header (one-line comment: `// Engine tier — root-resident by design (Issue 033 §C). Composes cognitive modules that live nowhere else.`).
-- [ ] **Issue 007 Phase F checkbox** flipped to `[x]` once this issue is resolved (the 4 migrated files unblock acceptance; the 30 are tracked here, not blocking).
-- [ ] **F.4d follow-up** filed separately if `sleep/consolidation.rs` is to be extracted (needs its own crate decision — out of scope for the A/C verdict).
+- [x] **Decision recorded** — all Option C, documented in this issue's status line + Issue 007 §Phase F.
+- [x] **Option (A) rejected after audit** — `inference_backend.rs` already defines `InferenceBackend` (same signature as proposed `ForwardPass`); `speculative/step.rs` has 6 root-only sibling deps. No redundant trait created (production-grade constraint).
+- [x] **All 22 blocked files documented** — each carries a `//! _Root-resident by design (Issue 033 §C, Option C)._` doc comment with file-specific root-only deps. Verified: F.4c (8) + F.4d (1) + F.4e forward-join (4) + F.4e sibling-deps (9) = 22.
+- [x] **Issue 007 Phase F checkbox** is `[x]` (flipped in commit `4666722f`).
+- [x] **GOAT gate:** `cargo check --workspace` clean (doc-only changes — verified by 3 parallel subagent batches with isolated `CARGO_TARGET_DIR`). No code changed.
+- [-] **F.4d follow-up** — `sleep/consolidation.rs` classified Option C (root-resident). The "needs own crate if extracted" note is deferred; not blocking.
 
 ---
 

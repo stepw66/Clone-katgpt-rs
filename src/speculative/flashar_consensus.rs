@@ -17,6 +17,8 @@
 //!     HOT     (ternary=±1, high conf)  → accept winner
 //!     WARM    (ternary=±1, mid conf)   → AR spot-check
 //!     COLD    (both low conf)          → fallback prefix-match
+//!
+//! _Root-resident by design (Issue 033 §C, Option C)._ Calls `crate::transformer::forward` + depends on root-only `crate::dllm` + `crate::speculative::{d2f, types, verifier}` siblings.
 
 #![allow(clippy::too_many_arguments, clippy::needless_range_loop)]
 

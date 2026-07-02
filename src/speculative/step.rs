@@ -1,5 +1,6 @@
 // Speculative step pipeline. Index-based loops are intentional for marginal buffer access.
 #![allow(clippy::needless_range_loop)]
+//! _Root-resident by design (Issue 033 §C, Option C)._ Composes root-only speculative siblings (`crate::speculative::{verifier, dd_tree, dflash, types, kurtosis_gate, selectivity_router}`) + calls `crate::transformer::forward`. 6 root-only deps beyond forward() — trait indirection on forward alone cannot unblock.
 
 use std::collections::HashMap;
 
