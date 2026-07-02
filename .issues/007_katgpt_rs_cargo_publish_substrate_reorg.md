@@ -9,6 +9,8 @@
 > - **Q5 RESOLVED (2026-07-02, policy A — lock down):** all 18 substrate leaf crates now carry `publish = false`, matching the established `release-plz.toml` policy ("only katgpt-core ships to crates.io"). The 11 crates previously defaulting to `publish = true` (katgpt-dec, katgpt-hla, katgpt-kv, katgpt-micro-belief, katgpt-personality, katgpt-sense, katgpt-sleep, katgpt-spectral, katgpt-speculative, katgpt-transformer, katgpt-types) are now consistent with the 7 that already had the line. See §Open questions Q5 for the resolution record.
 > - katgpt-core lib tests: **661 passed / 0 failed** (re-verified 2026-07-01, isolated `CARGO_TARGET_DIR`).
 > Phase 3 (cosmetic root subdir reorg) still deferred. Phase 5 (publish root) RESCINDED. See [Plan 008](../.plans/008_katgpt_core_substrate_extraction.md) for the full execution log + GOAT gates.
+>
+> **Composition-layer pin — NEWLY DIAGNOSED (2026-07-02), see §'The composition-layer pin' below.** The substrate dedup (Phase 1/E) is done — one definition per module lives in a leaf crate, root re-exports it. BUT **34 composition files** (`dash_attn/forward.rs`, `gdn2/forward.rs`, `hla/forward.rs`, `speculative/*`, `sleep/consolidation.rs`, benchmarks…) remain structurally pinned to root `src/` because they take `&mut ForwardContext`, and `ForwardContext` is the **DAG join point** that references both transformer substrate types AND 3 pruner types (`CnaModulator`, `SubstrateMask`, `HydraSkipPlan`). Those 3 pruner types already live in `katgpt-pruners`, which **already depends on `katgpt-transformer`** — so `ForwardContext` cannot move into either leaf without a cycle. **Resolution adopted (Option 2): new `katgpt-forward` crate on top of both, hosting `ForwardContext` + the composition layer. See §'The composition-layer pin' + Phase F below.** This is the structural fix that lets the 34 composition files finally `mv` out of root `src/`. *Note: the user's `dash_attn` example is NOT a copy-paste dupe — root's `src/dash_attn/mod.rs` is already a re-export shim (`pub use katgpt_attn::dash_attn::{chunk_summary, entmax, routing}`); what stays in root is `forward.rs` (composition), pinned by `ForwardContext`.*
 > **Audit findings (2026-06-27):**
 > - **Phase 5 RESCINDED** — `Cargo.toml:9` + `release-plz.toml:9-12` lock `katgpt-rs` root as `publish = false` permanently ("dev/examples aggregator — never published. Only katgpt-core ships to crates.io"). Decision was made AFTER this issue was filed and overrides its Phase 5.
 > - **Phase 1 step 1 (`types` move) ALREADY DONE** — `katgpt-core/src/types/` has 14 files; root `src/types.rs` is a thin re-export shim.
@@ -130,6 +132,54 @@ The `crate::` prefix means riir-engine has its **own** `hla/`, `transformer`, an
 
 ---
 
+## The composition-layer pin (newly diagnosed 2026-07-02)
+
+Phase 1/E extracted the **substrate** (kernels, pure types) to 18 leaf crates, and root `lib.rs`/`mod.rs` files were converted to re-export shims (`pub use katgpt_attn::dash_attn::{chunk_summary, entmax, routing}`). That dedup IS done — verified: every same-name module dir in root references its leaf; zero blind copy-paste remains.
+
+**But the composition layer is structurally pinned to root.** A second tier of files — `src/dash_attn/forward.rs`, `src/gdn2/forward.rs`, `src/hla/forward.rs`, `src/speculative/{step,prefill,dflash,verifier,...}.rs`, `src/sleep/consolidation.rs`, `src/benchmark/*`, `src/inference_backend.rs`, etc. (34 files) — cannot move into their leaf crates because they all take `&mut ForwardContext`, and `ForwardContext` is the **join point** at the top of the dependency DAG.
+
+### Why `ForwardContext` can't move to either existing leaf
+
+`ForwardContext` (`src/transformer.rs:59`) holds:
+- ~40 transformer buffers (`x`, `q`, `k`, `v`, `scores`, `attn_out`, `kv_group_lut`, `wall_prefix: WallPrefixState`, …) — pure substrate, lives in `katgpt-transformer`.
+- 3 pruner handles behind feature gates:
+  - `cna_modulator: Option<crate::pruners::CnaModulator>` (`cna_steering`)
+  - `substrate_mask: Option<crate::pruners::SubstrateMask>` (`substrate_gate`)
+  - `hydra_skip_plan: Option<crate::pruners::HydraSkipPlan>` (`hydra_budget`)
+
+Those 3 types already live in `katgpt-pruners` (verified: `cna.rs:90`, `substrate_types.rs:18`, `hydra_budget.rs:69`). And **`katgpt-pruners` already depends on `katgpt-transformer`** (`katgpt-pruners/Cargo.toml`). So:
+
+- Move `ForwardContext` → `katgpt-transformer`: would require `katgpt-transformer` to depend on `katgpt-pruners` → **cycle** (`katgpt-transformer` → `katgpt-pruners` → `katgpt-transformer`).
+- Move `ForwardContext` → `katgpt-pruners`: inverts the layering (a pruner crate would own the canonical transformer context), and pruners shouldn't own forward-pass buffers.
+
+`ForwardContext` is therefore the **topmost type** — it sits above BOTH transformer substrate and pruners, and can only live in a crate that depends on both. Today that crate is the root.
+
+### Why a simple `mv` doesn't work (the user's `dash_attn` example)
+
+`src/dash_attn/forward.rs` does `use crate::transformer::ForwardContext` and defines `forward_dash_attn_prefill(ctx: &mut ForwardContext, …)`. If it moves into `katgpt-attn`, then `katgpt-attn` needs `ForwardContext`, which needs the pruner types, which need `katgpt-transformer`… → cycle. The same chain pins all 34 composition files. **The fix is to lift `ForwardContext` into a new top-tier crate so the composition layer can move with it (or beside it).**
+
+### Resolution: Option 2 — new `katgpt-forward` crate
+
+A thin top-tier crate, sitting above `katgpt-transformer` + `katgpt-pruners`, hosting:
+1. `ForwardContext` (struct + `new()` + `reset_dequant` + simple accessors) — `pub(crate)` fields become `pub`.
+2. The `depth_route_with_indices` helper (currently `src/transformer.rs:1694`, called by `ForwardContext::depth_route_blocks`) moves here too.
+3. Composition files migrate per-leaf in dependency order (Phase F steps below).
+
+DAG after the fix:
+
+```
+katgpt-forward ──► katgpt-pruners ──► katgpt-transformer ──► katgpt-core
+      │                  ▲
+      └─► composition files (dash_attn/gdn2/hla/speculative/…) move
+          into their respective leaves, which then depend on katgpt-forward
+```
+
+The three considered alternatives (rejected):
+- **(1) Trait-abstract the 3 pruner fields** (`Box<dyn Any>` / generic param): ugly type erasure, or threads a generic through every call site. Rejected.
+- **(3) Keep composition in root (status quo):** leaves the 34-file mess in `src/` and doesn't fulfill the cargo-consumable goal. Rejected.
+
+---
+
 ## Proposed reorganization
 
 ### Tier 0 — `katgpt-core` (the leaf, already on crates.io)
@@ -240,6 +290,17 @@ Each phase is independently shippable and reversible:
 - [ ] **Phase 3 — Root crate reorg.** Move root `src/*` into `primitives/`/`inference/`/`games/`/`backends/` subdirs per the `_runtime` convention. Top-level `pub use` re-exports preserve all call sites. Pure refactor.
 - [ ] **Phase 4 — Dep audit for publish.** Make `plotters` optional. Verify `cargo check --no-default-features` clean on root.
 - [ ] **Phase 5 — Publish katgpt-rs.** Add to `release-plz.toml` as second package (`git_tag_name = "katgpt-rs-v{{version}}"`), first publish `0.1.0`. Document feature-flag stability tiers in README.
+- [ ] **Phase F — Composition-layer unblock (new `katgpt-forward` crate).** Lifts the 34 composition files out of root `src/` by extracting their shared join point (`ForwardContext`) into a top-tier crate. This is the structural fix for the "src/ is still full of files" symptom that substrate extraction (Phase 1/E) could not reach on its own. Steps in strict dependency order (each its own commit, build green before next):
+  1. **Scaffold `katgpt-forward` crate.** New crate under `crates/katgpt-forward/`. Deps: `katgpt-transformer` (for buffer types + `WallPrefixState`), `katgpt-pruners` (for the 3 pruner types), `katgpt-core` (for `Config`/SIMD). Add the ~11 feature gates `ForwardContext` needs (`cna_steering`, `sparse_mlp`, `substrate_gate`, `delta_routing`, `coda_fusion`, `mls_aggregate`, `tiled_attention`, `tf_loop`, `hydra_budget`, `wall_attention`, `turboquant`) — forwarding to the upstream crates where applicable. Root `Cargo.toml` adds `katgpt-forward` dep + forwards the features.
+  2. **Move `ForwardContext` + `depth_route_with_indices` into `katgpt-forward`.** `pub(crate)` fields → `pub`. `crate::pruners::{CnaModulator,SubstrateMask,HydraSkipPlan}` → `katgpt_pruners::{…}`. `types::kv_dim`/`DepthTier` → `katgpt_types`/`katgpt_core`. `WallPrefixState` → from `katgpt-transformer` (already there). Root `src/transformer.rs` keeps `forward*` functions + `attention_head` (the 33 real forward passes that compose cognitive modules) and re-exports `ForwardContext` from the new crate.
+  3. **Verify build** — `cargo check --workspace` + `cargo test -p katgpt-core --lib` + root lib tests green. This is the GOAT gate for the crate move.
+  4. **(Parallel subagents, disjoint write sets) Migrate composition files into their leaves.** Each leaf adds a `katgpt-forward` dep, the composition file(s) `mv` in, `crate::transformer::ForwardContext` → `katgpt_forward::ForwardContext`. Batches:
+     - **F.4a — `katgpt-attn`:** `dash_attn/{forward,tests,sat_analysis,...}.rs`, `gdn2/{forward,...}.rs`.
+     - **F.4b — `katgpt-hla`:** `hla/forward.rs`.
+     - **F.4c — `katgpt-speculative`:** `speculative/{step,prefill,dflash,verifier,d2f_verifier,drafter_lora,flashar_*}.rs` (feature-gated `dd_tree` variants stay root — they reference root-only siblings).
+     - **F.4d — `katgpt-sleep`:** `sleep/consolidation.rs`.
+     - **F.4e — `katgpt-forward` itself:** `inference_backend.rs`, `inference_router.rs`, `sp_kv_forward_mod.rs`, `fold/`, `benchmark/*` (these are generic engine composition, belong with `ForwardContext`).
+  5. Root `src/` shrinks to: `lib.rs` + the 33 `transformer.rs` forward passes (still compose root-only cognitive modules: `tf_loop`, `gdn2`, `hla` re-exports, cognitive primitives `cce`/`clr`/`compaction`/…) + game IP (`pruners/bomber/`). That residual is the *engine tier* by design — Phase 3 subdir reorg handles its cosmetics.
 
 Phases 1–2 are the high-value, low-risk core (kills the duplication, unblocks clean consumption). Phases 3–5 are the cargo-publish polish. **Phase 1+2 alone deliver most of the value** — any repo can then `cargo add katgpt-core` and get the full inference substrate including HLA, DDTree, transformer.
 
@@ -253,6 +314,7 @@ Phases 1–2 are the high-value, low-risk core (kills the duplication, unblocks 
 4. **`tokenizer` may have deps that disqualify it from core** (SentencePiece C++ via `sentencepiece-sys`). **Mitigation:** audit first; if it pulls a C++ build dep, leave `tokenizer` in root and only move the trait/types. The riir-engine `tokenizer.rs` is already `#[cfg(not(target_arch = "wasm32"))]`-gated — core must preserve that.
 5. **`dd_tree`/`spec_types` reconciliation** — riir-engine's copy may have diverged from whatever katgpt-rs root has (root `spec_types.rs` doesn't even exist per the audit). **Mitigation:** treat core as the new canonical source; port any riir-engine-only improvements during Phase 2; the traits are already in core so the hard part (the trait boundary) is done.
 6. **Game-state coupling** — `mcts.rs` imports `crate::game_state::GameState`, which is Category C (game IP). **Mitigation:** `mcts` the algorithm (tree policy, UCB1, backprop) is public mechanics; `GameState` the trait stays wherever it is. Move the generic MCTS, parameterize over a `Game` trait from core if needed, leave game-specific impls in riir-engine.
+7. **`ForwardContext` cycle (Phase F).** `ForwardContext` references 3 pruner types that live in `katgpt-pruners`, which already depends on `katgpt-transformer`. Moving it into either existing leaf creates a cycle. **Mitigation:** the new `katgpt-forward` crate sits ABOVE both (Option 2). Verified: `katgpt-pruners` has no `ForwardContext`/`TransformerWeights` field-level references that would re-introduce a back-edge (only two files reference the names, in comments/players — re-audit before F.2). **Visibility churn:** ~40 `pub(crate)` fields become `pub` — audit that no field was deliberately hidden as an invariant (the struct is a pre-allocated scratch buffer, so wide visibility is acceptable).
 
 ---
 
@@ -266,6 +328,7 @@ Phases 1–2 are the high-value, low-risk core (kills the duplication, unblocks 
 - [-] **Phase 5:** ~~RESCINDED~~ — conflicts with `Cargo.toml:9` + `release-plz.toml:9-12` decision to keep root private permanently. Only `katgpt-core` ships.
 - [x] **Phase E (post-original-issue, 2026-06-28+):** substrate extraction went beyond Phases 1-2 into 16 publishable leaf crates (`katgpt-types`/`katgpt-hla`/`katgpt-transformer`/`katgpt-tokenizer`/`katgpt-speculative`/`katgpt-kv`/`katgpt-dec`/`katgpt-sense`/`katgpt-sleep`/`katgpt-spectral`/`katgpt-micro-belief`/`katgpt-personality`/`katgpt-attn-match`/`katgpt-pruners`/`katgpt-quant`/`katgpt-attn`). `katgpt-core` re-exports the consumed surface (e.g. `pub use katgpt_hla as hla;`). katgpt-core lib: **661/0 green** (re-verified 2026-07-01).
 - [x] This issue updated with GOAT/bench evidence at each phase — every step's GOAT gate reported inline in [Plan 008](../.plans/008_katgpt_core_substrate_extraction.md); 2.8 bit-identical verification 2026-07-01.
+- [ ] **Phase F (composition-layer unblock):** `katgpt-forward` crate created; `ForwardContext` moved there; root `src/transformer.rs` re-exports it + keeps the 33 `forward*` composition functions. 34 composition files migrated to their leaves (F.4a–F.4e). `cargo check --workspace` + `cargo test -p katgpt-core --lib` + root lib tests green after each step. GOAT gate: build green + the 34 files no longer live in root `src/`. *Tracking issue for execution: see §'The composition-layer pin' above.*
 
 ---
 
