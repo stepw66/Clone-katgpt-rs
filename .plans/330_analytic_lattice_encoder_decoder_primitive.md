@@ -522,18 +522,20 @@ pub fn batch_compose_chain_into(
 - [x] **T2.5.2** G2 test (ranking preservation vs naive): for 100 random
       `(prefix, suffix_i)` sets, the batched output matches the per-player
       `compose_chain` output within Frobenius ≤ 1e-6.
-- [ ] **T2.5.3** G4 benchmark: `batch_compose_chain` at N=64 players, k=8 must
+- [-] **T2.5.3** G4 benchmark: `batch_compose_chain` at N=64 players, k=8 must
       be ≥ 4× faster than 64× `compose_chain` (theoretical 8×; allow
       overhead). Write to `.benchmarks/330_batch_compose_chain.md`.
       **NOTE (katgpt-core half):** the G4 latency benchmark is deferred to
       riir-engine (Phase 1b) — it measures the ASOC cascade end-to-end. The
       katgpt-core half ships the correctness gate (G2) only.
-- [ ] **T2.5.4** Integration with ASOC: when the `ComposerCtx` carries a zone
+  *Deferred (cross-repo): the G4 latency bench measures the ASOC cascade end-to-end, which only exists once riir-engine ships ComposerTick (Phase 1b). katgpt-core half shipped the G2 correctness gate (T2.5.2).*
+- [-] **T2.5.4** Integration with ASOC: when the `ComposerCtx` carries a zone
       with N>1 players, `ComposerTick` switches from per-player
       `compose_chain` to per-zone `batch_compose_chain` and emits N actions
       per tick instead of 1. Document the API extension on `ComposerTick`.
       **NOTE (katgpt-core half):** deferred to Phase 1b — `ComposerTick`
       ships in riir-engine.
+  *Deferred (cross-repo): ComposerTick ships in riir-engine (Phase 1b). The batched-integration API extension belongs to that plan, not the katgpt-core math half.*
 
 ---
 

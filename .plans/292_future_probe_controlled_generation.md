@@ -263,9 +263,12 @@ Benchmark vs the existing detection-side primitives. The headline is the **perpl
 
 Deferred. Only kicks in if Phase 5 promotes. Sketch:
 
-- [ ] **T6.1** Create `riir-ai/.research/140_Future_Probe_NPC_Dialogue_Steering_Guide.md` — private guide for NPC dialogue steering without voice breakage. Includes the latent-vs-raw boundary audit (probe stays latent; only scalar probability crosses).
-- [ ] **T6.2** Create `riir-ai/.plans/3XX_npc_future_probe_dialogue.md` — runtime integration with `riir-engine` adapter stack. Per-NPC probe direction vectors versioned via freeze/thaw.
-- [ ] **T6.3** Wire into `riir-games/src/npc/` dialogue generation path. Quest director can request "steer this NPC towards refusing the bribe" via FPCG selector.
+- [-] **T6.1** Create `riir-ai/.research/140_Future_Probe_NPC_Dialogue_Steering_Guide.md` — private guide for NPC dialogue steering without voice breakage. Includes the latent-vs-raw boundary audit (probe stays latent; only scalar probability crosses).
+  *Deferred (cross-repo): riir-ai owns the NPC dialogue runtime. Phase 6 is explicitly a post-GOAT marker phase, not this plan's deliverable.*
+- [-] **T6.2** Create `riir-ai/.plans/3XX_npc_future_probe_dialogue.md` — runtime integration with `riir-engine` adapter stack. Per-NPC probe direction vectors versioned via freeze/thaw.
+  *Deferred (cross-repo): riir-ai owns riir-engine integration.*
+- [-] **T6.3** Wire into `riir-games/src/npc/` dialogue generation path. Quest director can request "steer this NPC towards refusing the bribe" via FPCG selector.
+  *Deferred (cross-repo): riir-ai owns riir-games/npc wiring.*
 
 **This phase does NOT execute in the current session.** It's a marker for follow-up.
 

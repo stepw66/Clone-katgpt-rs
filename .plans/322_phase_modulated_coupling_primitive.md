@@ -97,14 +97,18 @@ The plan's T1.1 originally specified "uses polynomial-Padé cos/sin (reuse Plan 
 
 ---
 
-## Phase 4 — Fusion Guides (deferred until Phase 2 promotes)
+## Phase 4 — Fusion Guides (promotion condition now met — Phase 2 promoted DEFAULT-ON 2026-06-25; these are separate-plan / cross-repo follow-ups)
 
 ### Tasks
 
-- [ ] **T4.1** If promoted to default: write `riir-ai/.plans/NNN_hla_phase_rotation_runtime.md` — HLA (a, b) split + per-faction direction artifacts + CCE crowd phase broadcast. Runtime gates G5 (long-horizon drift) + G6 (crowd coherence).
-- [ ] **T4.2** If promoted: write `riir-chain/.research/NNN_committed_phase_latcal_bridge.md` — LatCal fixed-point commitment of the phase angle. Chain gate G7 (bit-identical replay).
-- [ ] **T4.3** If promoted: write `katgpt-rs/.plans/NNN_dec_hodge_phase_mixer.md` — DEC wrapper `cos α ⊙ exact + sin α ⊙ coexact + harmonic` over shipped `hodge_decompose`.
-- [ ] **T4.4** Optional: `riir-neuron-db/.research/NNN_shard_half_retrieval.md` — shard spectral/spatial half retrieval.
+- [-] **T4.1** If promoted to default: write `riir-ai/.plans/NNN_hla_phase_rotation_runtime.md` — HLA (a, b) split + per-faction direction artifacts + CCE crowd phase broadcast. Runtime gates G5 (long-horizon drift) + G6 (crowd coherence).
+  *Deferred (cross-repo): riir-ai owns the HLA runtime. Promotion condition IS met (Phase 2 DEFAULT-ON since 2026-06-25), but this is a new plan in a sibling repo, not this plan's deliverable.*
+- [-] **T4.2** If promoted: write `riir-chain/.research/NNN_committed_phase_latcal_bridge.md` — LatCal fixed-point commitment of the phase angle. Chain gate G7 (bit-identical replay).
+  *Deferred (cross-repo): riir-chain owns LatCal commitment. Promotion condition met.*
+- [-] **T4.3** If promoted: write `katgpt-rs/.plans/NNN_dec_hodge_phase_mixer.md` — DEC wrapper `cos α ⊙ exact + sin α ⊙ coexact + harmonic` over shipped `hodge_decompose`.
+  *Deferred (separate plan, same repo): promotion condition met, but this is a distinct DEC-fusion plan, not this plan's primitive. Open when a consumer needs the Hodge-mixed phase.*
+- [-] **T4.4** Optional: `riir-neuron-db/.research/NNN_shard_half_retrieval.md` — shard spectral/spatial half retrieval.
+  *Deferred (cross-repo, optional): riir-neuron-db owns shard retrieval. Marked optional in the original plan.*
 
 ---
 

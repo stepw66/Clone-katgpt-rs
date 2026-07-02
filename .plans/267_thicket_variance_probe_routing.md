@@ -79,13 +79,13 @@ TVP runs after critical-entropy gate, before breakeven amortization. Order ensur
 
 ### Phase 2: Probe Sources (free knobs first)
 
-- [ ] **T4: `TemperatureProbeSource<P>` — perturb sampling temperature** _(deferred — `SyntheticProbeSource` covers GOAT proof; production wrapper requires real model integration)_
+- [-] **T4: `TemperatureProbeSource<P>` — perturb sampling temperature** _(deferred — `SyntheticProbeSource` covers GOAT proof; production wrapper requires real model integration)_
   - Wraps any `P: TvpProbeSource` (or a closure `Fn(f32, f32) -> u32`)
   - For arm `i`: `T_i = T_base + (i as f32 - K/2.0) * ΔT`
   - Symmetric around base → unbiased exploration
   - Default free-knob source
 
-- [ ] **T5: `SeedProbeSource<P>` — perturb drafter seed** _(deferred — same as T4)_
+- [-] **T5: `SeedProbeSource<P>` — perturb drafter seed** _(deferred — same as T4)_
   - Wraps speculative drafter, replays with `seed_i = base_seed + i`
   - Free knob — only changes RNG state
   - Composes with `TemperatureProbeSource` (chain pattern)

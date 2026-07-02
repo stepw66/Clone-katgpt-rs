@@ -9,7 +9,7 @@
 - [x] Update `FogState::update` to track boss sightings in visible range
 - [x] Add `dodge_boss_if_adjacent` — minimal adjacent-step dodge (both files)
 - [x] Run benchmark and validate improvement
-- [ ] ~~Hybrid still underperforms — cluster exploration causes timeouts~~ (future work, separate from boss avoidance)
+- [-] ~~Hybrid still underperforms — cluster exploration causes timeouts~~ (future work, separate from boss avoidance)
 - [x] Update plan 104 task as complete
 - [x] Commit
 

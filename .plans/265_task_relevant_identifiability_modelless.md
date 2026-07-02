@@ -107,17 +107,24 @@ Paper's Algorithm 1 + Theorem 1 give a *theory-backed* stopping criterion for ad
 - [x] T5.1 Run full benchmark suite with all three features on. (`cargo test --features ... --lib` for each feature; all pass.)
 - [x] T5.2 Confirm G0a, G0b, G1-G10 all pass. (G0a/G0b from Phase 0 still pass; G1-G10 all pass — see test output above.)
 - [ ] T5.3 If all pass → promote `band_conditioner`, `specialist_projection`, `collider_consistency` to `default` feature set. **DEFERRED** — requires user sign-off. Features remain opt-in.
-- [ ] T5.4 If SPLAT-masked attention (G6) beats prior MSA implementation → demote `msa_blockwise_sparse` (Plan 256) to non-default per user rules ("demote loser"). **DEFERRED** — G6 passes on synthetic benchmark, but real-model comparison needed before demotion.
-- [ ] T5.5 Update README with showcase entry under "GOAT-Proved Additions" — three new items. **OUT OF SCOPE** — README not in write scope for this task.
+  *(Open user decision — promotion pending user sign-off. G0a/G0b/G1-G10 all pass per T5.2, but default-on flip waits for user. See Plan 330 T5.3 for the analogous pending-decision pattern.)*
+- [-] T5.4 If SPLAT-masked attention (G6) beats prior MSA implementation → demote `msa_blockwise_sparse` (Plan 256) to non-default per user rules ("demote loser"). **DEFERRED** — G6 passes on synthetic benchmark, but real-model comparison needed before demotion.
+  *(Deferred: real-model comparison not available modellessly in this repo; would need riir-ai runtime data. The "demote loser" rule requires evidence the loser actually lost in production, not just on synthetic.)*
+- [-] T5.5 Update README with showcase entry under "GOAT-Proved Additions" — three new items. **OUT OF SCOPE** — README not in write scope.
+  *(Deferred: README showcase is gated on T5.3 promotion. The three features remain opt-in pending user sign-off; adding a showcase entry for non-default features is premature. Revisit when T5.3 promotes.)*
 - [x] T5.6 Mark Plan 264 Phase 2 unblocked (SPLAT is the consumer). **DONE** — `SpecialistMask::as_sparse_task_vector()` (src/specialist_projection.rs:333-337) exposes the underlying `SparseTaskVector` storage. Plan 264 Phase 2 ultimately chose an SVD-based `OffPrincipalIndex` instead (T2.1-T2.8 all `[x]`), so SPLAT remains an *available-but-unconsumed* primitive in katgpt-rs — likely consumer is riir-ai model-based training (Plan 300) for TJS-LoRA mask composition.
-- [ ] T5.7 Cross-link Plan 300 (riir-ai model-based) — riir-ai consumes the engine primitives for TJS-LoRA training. **OUT OF SCOPE** — riir-ai repo.
+- [-] T5.7 Cross-link Plan 300 (riir-ai model-based) — riir-ai consumes the engine primitives for TJS-LoRA training. **OUT OF SCOPE** — riir-ai repo.
+  *(Deferred (cross-repo): riir-ai owns the TJS-LoRA training consumer.)*
 
 ### Phase 6 — Documentation
 
 - [x] T6.1 Add module-level docs explaining the three theorems (Thm 1, Prop 2, Thm 2) with one-paragraph summaries. (Added to all 4 new `.rs` files.)
-- [ ] T6.2 Add cross-references from `ConstraintPruner` trait doc to CCCP impl. **OUT OF SCOPE** — `katgpt-core/src/traits.rs` not in write scope.
-- [ ] T6.3 Add cross-references from `SparseTaskVector` (Plan 264) doc to SPLAT consumer. **OUT OF SCOPE** — `src/sparse_task_vector.rs` not in write scope (owned by Plan 264).
-- [ ] T6.4 Note in README that this research rescues MSA (Plan 256 GOAT-FAILED). **OUT OF SCOPE** — README not in write scope.
+- [-] T6.2 Add cross-references from `ConstraintPruner` trait doc to CCCP impl. **OUT OF SCOPE** — `katgpt-core/src/traits.rs` not in write scope.
+  *(Deferred: `katgpt-core/src/traits.rs` is owned by the substrate crate; cross-ref would be a separate small docs PR.)*
+- [-] T6.3 Add cross-references from `SparseTaskVector` (Plan 264) doc to SPLAT consumer. **OUT OF SCOPE** — `src/sparse_task_vector.rs` not in write scope (owned by Plan 264).
+  *(Deferred: owned by Plan 264; cross-ref would be a separate small docs PR.)*
+- [-] T6.4 Note in README that this research rescues MSA (Plan 256 GOAT-FAILED). **OUT OF SCOPE** — README not in write scope.
+  *(Deferred: gated on T5.3 promotion — the MSA-rescue note belongs in the showcase entry, which is premature while features remain opt-in.)*
 
 ---
 

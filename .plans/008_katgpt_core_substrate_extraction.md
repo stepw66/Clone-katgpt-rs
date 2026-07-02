@@ -414,9 +414,9 @@ After each Phase 1 step lands, riir-engine deletes its copy and imports from
 
 ### Phase 3-5 — DEFERRED
 
-- [ ] **Phase 3** (root subdir reorg into `primitives/`/`inference/`/`games/`/`backends/`) — cosmetic, not worth churn while 100+ features flatten at root. Revisit if/when root module count becomes unnavigable.
+- [-] **Phase 3** (root subdir reorg into `primitives/`/`inference/`/`games/`/`backends/`) — cosmetic, not worth churn while 100+ features flatten at root. Revisit if/when root module count becomes unnavigable.
 - [x] **Phase 4** (`plotters` optional, `cargo check --no-default-features` clean on root) — ✅ DONE (Issue 355 Phase 2a, outside this plan): `plotters = { version = "0.3", optional = true }` behind the `plot` feature (DEFAULT-ON to preserve historical behavior; riir-ai sets `default-features = false` to drop it). Re-verified 2026-07-01.
-- [ ] ~~**Phase 5** (publish `katgpt-rs` to crates.io)~~ — **RESCINDED.** Conflicts with the post-issue decision in `Cargo.toml:9` + `release-plz.toml:9-12` to keep root private permanently. Only `katgpt-core` ships.
+- [-] ~~**Phase 5** (publish `katgpt-rs` to crates.io)~~ — **RESCINDED.** Conflicts with the post-issue decision in `Cargo.toml:9` + `release-plz.toml:9-12` to keep root private permanently. Only `katgpt-core` ships.
 
 ---
 
