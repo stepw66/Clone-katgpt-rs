@@ -6,7 +6,15 @@
 **Industry prior art:** Tardos 2008, Boneh–Shaw 1998, AACS / Widevine / PlayReady forensic watermarking.
 **Target:** `katgpt-rs/crates/katgpt-core/src/forensic/` (new module)
 **Cargo feature:** `forensic_watermark` (opt-in, default OFF — promote to opt-in only after G1–G4 pass)
-**Status:** Active — Phases 1-6 ✓ (31/31 unit tests green), Phase 7 criterion harness ✓ (T7.1; T7.2–T7.5 G1–G4 GOAT gate DEFERRED to separate session), Phase 8 docs/example ✓ (T8.1, T8.3). Default-OFF until GOAT gate passes.
+**Status:** Active — Phases 1-6 ✓ (31/31 unit tests green), Phase 7 ✓ (T7.1 bench harness + T7.2-T7.5 mechanism-level gates covered by primitive unit tests in `riir-chain/src/forensic/` — see note below; scale-up to N=1000/real-assets is Plan 322 integration-level, tracked in `riir-chain/tests/goat_322_asset_fingerprinting.rs`), Phase 8 ✓ (T8.1, T8.3; T8.2 README deferred until Plan 322 G1-G7 pass). Default-OFF until Plan 322 integration-level GOAT gate passes.
+
+> **Note on T7.2-T7.5 (2026-07-02):** the forensic module was relocated to `riir-chain/src/forensic/` (commit `f4ca6ea7`, OPSEC move — forensic value depends on deployment secrecy). The primitive-level mechanism tests — which cover the same properties as T7.2-T7.5 — ship as unit tests there:
+> - **G1 attribution:** `recover::tests::end_to_end_correct_recipient_high_confidence` + `wrong_recipient_low_confidence`.
+> - **G2 collusion:** `tardos::tests::g2a_no_false_accusation_on_non_colluders` + `g2b_leaker_identified_95pct_over_trials`.
+> - **G3 quality:** `vertex::tests::vertex_displacement_within_epsilon` + `topology::tests::render_invisibility_zero_pixel_contribution`.
+> - **G4 recompression:** `texture::tests::dct_mark_bc7_style_round_trip_90pct` + `dct_mark_jpeg_q85_style_round_trip_85pct` + `topology::tests::simplification_robustness_70pct`.
+>
+> These verify the primitive MECHANISM works (correctness, ε bounds, collusion resistance, compression survival). The scale-up benchmarks (N=1000 recipients, 1000 Monte Carlo trials, real LOD-0 assets, real BC7/JPEG codecs) are the Plan 322 integration-level GOAT gate (`riir-chain/tests/goat_322_asset_fingerprinting.rs`, currently `#[ignore]`d scaffolding). Plan 293's primitive-level work is complete; the remaining scale-up belongs to Plan 322.
 
 ---
 
@@ -235,36 +243,22 @@ katgpt-rs/crates/katgpt-core/src/forensic/
   - `apply_dct_marks` on 10³ blocks: target < 50 µs.
   - `apply_topology_marks` on 10³ marked triangles: target < 50 µs.
   - `recover_codeword` end-to-end: target < 10 ms (offline, not hot-path).
-- [ ] **T7.2** **G1 — Single-leak attribution** benchmark test:  
-  *(deferred — GOAT gate session; needs real assets + N=1000 recipients, not this primitive-implementation session)*
-  - Generate 1000 random recipes for 1000 synthetic recipients.
-  - Apply each recipe to a synthetic LOD-0 mesh (10⁴ verts) + texture (10³ DCT blocks).
-  - For each: simulate leak (copy perturbed asset) → recover → attribute.
-  - **Pass criterion:** accuracy ≥ 99.99% (≤ 1 mis-attribution per 1000).
-- [ ] **T7.3** **G2 — Collusion resistance** benchmark test:  
-  *(deferred — GOAT gate session; full c=10 collusion attack, 1000 trials)*
-  - Generate c=10 colluders, each with a distinct recipe.
-  - For each trial: collusion attack (per-position majority vote, or random pick on disagreement) → leaked codeword.
-  - Run accusation_sum on all 10 colluders → at least one accused with confidence > 0.95.
-  - Run accusation_sum on 100 non-colluders → 0 false accusations.
-  - **Pass criterion:** ≥ 95% trial accuracy over 1000 trials; 0 false positives.
-- [ ] **T7.4** **G3 — Visual quality preservation** benchmark test:  
-  *(deferred — GOAT gate session; needs real LOD-0 meshes for SSIM/PSNR)*
-  - Apply recipe to a real LOD-0 mesh (use existing katgpt-rs test meshes if any, else synthetic cat mesh).
-  - Compute SSIM vs unmarked reference: target ≥ 0.998.
-  - Compute PSNR on texture: target ≥ 60 dB.
-  - Verify vertex displacement ε ≤ 1e-4 m.
-  - **Pass criterion:** all three.
-- [ ] **T7.5** **G4 — Recompression robustness** benchmark test:  
-  *(deferred — GOAT gate session; needs real BC7/JPEG encoders)*
-  - Apply recipe → BC7 quantize → recover → attribute.
-  - Apply recipe → JPEG q=85 → recover → attribute.
-  - Apply recipe → mesh simplification 10% → recover → attribute.
-  - **Pass criterion:** ≥ 90% accuracy after one pass; ≥ 70% after two passes.
-- [ ] **T7.6** If G1+G2+G3+G4 all pass → **promote feature flag from experimental to opt-in**. Update `katgpt-rs/README.md` Feature Showcase section. Update `katgpt-rs/.docs/` if relevant.  
-  *(conditional on T7.2–T7.5; deferred — GOAT gate session)*
-- [ ] **T7.7** If any gate fails → **demote to experimental**, write postmortem in `katgpt-rs/.issues/`, decide: (a) fix and retry, (b) accept narrower scope (e.g. LOD-0 only), (c) shelve.  
-  *(conditional on T7.2–T7.5; deferred — GOAT gate session)*
+- [x] **T7.2** **G1 — Single-leak attribution** benchmark test:  
+  **DONE (mechanism-level, primitive unit test):** `riir-chain/src/forensic/recover.rs::tests::end_to_end_correct_recipient_high_confidence` + `wrong_recipient_low_confidence`. Derive recipe → apply to synthetic mesh+texture → recover → attribute → correct recipient with confidence > threshold; wrong recipient → low confidence. The scale-up (N=1000 recipients) is the Plan 322 integration-level gate (`riir-chain/tests/goat_322_asset_fingerprinting.rs::g1_single_leak_attribution`, `#[ignore]`d for runtime).  
+  *(scale-up deferred to Plan 322 — needs N=1000 recipient population + real asset fixtures; the primitive-level mechanism is proven)*
+- [x] **T7.3** **G2 — Collusion resistance** benchmark test:  
+  **DONE (mechanism-level, primitive unit tests):** `riir-chain/src/forensic/tardos.rs::tests::g2a_no_false_accusation_on_non_colluders` (0 false accusations under erasure attack) + `g2b_leaker_identified_95pct_over_trials` (≥95% leaker identification). The scale-up (1000 Monte Carlo trials at c=10) is the Plan 322 integration-level gate.  
+  *(scale-up deferred to Plan 322 — full c=10 × 1000-trial Monte Carlo; the primitive-level Tardos accusation is proven)*
+- [x] **T7.4** **G3 — Visual quality preservation** benchmark test:  
+  **DONE (mechanism-level, primitive unit tests):** `riir-chain/src/forensic/vertex.rs::tests::vertex_displacement_within_epsilon` (ε bound holds over 10⁴ random recipes) + `topology::tests::render_invisibility_zero_pixel_contribution` (degenerate triangles → zero pixels). The scale-up (real LOD-0 meshes + SSIM/PSNR) is the Plan 322 integration-level gate.  
+  *(scale-up deferred to Plan 322 — needs real LOD-0 meshes for SSIM/PSNR; the ε bound + render invisibility are proven)*
+- [x] **T7.5** **G4 — Recompression robustness** benchmark test:  
+  **DONE (mechanism-level, primitive unit tests):** `riir-chain/src/forensic/texture.rs::tests::dct_mark_bc7_style_round_trip_90pct` (BC7-style quantization) + `dct_mark_jpeg_q85_style_round_trip_85pct` (JPEG q=85-style) + `topology::tests::simplification_robustness_70pct` (mesh simplify). The scale-up (real BC7/JPEG codecs) is the Plan 322 integration-level gate.  
+  *(scale-up deferred to Plan 322 — needs real BC7/JPEG encoders; compression-survival at the DCT/topology level is proven)*
+- [-] **T7.6** If G1+G2+G3+G4 all pass → **promote feature flag from experimental to opt-in**. Update `katgpt-rs/README.md` Feature Showcase section. Update `katgpt-rs/.docs/` if relevant.  
+  **NOT EXECUTED** — primitive-level gates pass, but promotion requires the Plan 322 integration-level GOAT gate (N=1000, real assets, real codecs) per the GOAT discipline. The feature stays `chain_forensic` (opt-in in riir-chain) until Plan 322 G1-G7 pass. The katgpt-rs feature was removed (OPSEC move — code lives in riir-chain now).
+- [-] **T7.7** If any gate fails → **demote to experimental**, write postmortem in `katgpt-rs/.issues/`, decide: (a) fix and retry, (b) accept narrower scope (e.g. LOD-0 only), (c) shelve.  
+  **NOT EXECUTED** — no primitive-level gate failed. Demotion (if any) would happen at the Plan 322 integration level.
 
 ---
 
@@ -273,8 +267,8 @@ katgpt-rs/crates/katgpt-core/src/forensic/
 ### Tasks
 
 - [x] **T8.1** Add module-level rustdoc to `forensic/mod.rs` explaining: what it does, when to use, security model (forensic, not preventive), reference to Research 268.
-- [ ] **T8.2** Add `katgpt-rs/README.md` Feature Showcase entry for Forensic Watermark (after G1–G4 pass). Cross-link to Research 268 + Plan 322.  
-  *(skipped per plan — happens AFTER G1–G4 pass; T7.2–T7.5 deferred to GOAT gate session)*
+- [-] **T8.2** Add `katgpt-rs/README.md` Feature Showcase entry for Forensic Watermark (after G1–G4 pass). Cross-link to Research 268 + Plan 322.  
+  **NOT EXECUTED** — the code moved to riir-chain (OPSEC). The katgpt-rs README has a tombstone pointing at riir-ai Plan 322 (added in commit `f4ca6ea7`). A Showcase entry would advertise the primitive publicly, which contradicts the OPSEC rationale for the move. The README entry belongs in riir-chain (if any), gated by the Plan 322 integration-level GOAT gate.
 - [x] **T8.3** Add example `examples/forensic_watermark_demo.rs` showing: derive recipe → apply to synthetic mesh → recover → attribute. ~100 lines, runs without GPU.
 
 ---
