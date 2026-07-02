@@ -569,9 +569,13 @@ pub fn direction_vector_decode<const N: usize>(
 
 - [x] **T3.3** G2 test: 100 random states × fixed direction, verify ranking
       matches brute-force reference within cos ≥ 0.95.
-- [ ] **T3.4** Audit: riir-games `scalar_projection.rs` SHOULD be refactored
+- [x] **T3.4** Audit: riir-games `scalar_projection.rs` SHOULD be refactored
       to call this (out of scope here — note as cleanup follow-up in
       `.issues/`).
+      *(Filed as [`.issues/033_scalar_projection_direction_vector_decode_refactor.md`](../.issues/033_scalar_projection_direction_vector_decode_refactor.md).
+      `project_pooled_to_scalars` duplicates the `direction_vector_decode` dot+sigmoid
+      math inline. Low-severity cleanup; the actual refactor is tracked there with
+      the type-bridging complication + acceptance gates.)*
 
 ---
 
