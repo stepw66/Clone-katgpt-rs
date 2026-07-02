@@ -2158,6 +2158,7 @@ benches/                 Criterion benchmarks
 - [CCE moderator](.docs/cce_moderator.md)
 - [Claim rubric audit](.docs/claim_rubric_audit.md)
 - [Faithfulness probe](.docs/faithfulness_probe.md)
+- [Causal head-importance calibration](.docs/causal_head_importance.md)
 - [Progressive MCGS — graph search with reference edges](.docs/progressive_mcgs.md)
 - [Open-ended problem evolution arena](.docs/191_open_ended_problem_evolution_arena.md)
 - [210+ examples grouped by category](examples/README.md)

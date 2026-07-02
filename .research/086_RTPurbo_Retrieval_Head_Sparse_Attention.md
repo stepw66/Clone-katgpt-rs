@@ -152,6 +152,8 @@ For each attention layer:
 
 This combines DashAttention's α-entmax block routing with RTPurbo's head-level specialization and token-level top-p.
 
+> **See also: Research 362 — HydraHead causal head-importance.** Research 362 (Plan 358) distills a **causal alternative** to RTPurbo's observational attention-mass calibration: activation/path-patching IE scores rank heads by causal *necessity* (does patching the head collapse the capability?) rather than observational mass (does it attend to the needle?). Causal scoring strictly dominates attention-mass on workloads with correlated bystanders (heads that attend strongly but project to zero downstream) — G2 Jaccard 1.0 vs 0.0. Ships as `CalibrationMode::CausalNecessity` opt-in; `AttentionMass` stays the default (causal score production is ~10–100× more expensive). Use causal for the long-context-extreme regime.
+
 ---
 
 ## Benchmark Data (from paper)

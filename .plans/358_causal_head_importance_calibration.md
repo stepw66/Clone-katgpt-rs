@@ -4,7 +4,7 @@
 **Research:** [katgpt-rs/.research/362_HydraHead_Causal_Head_Importance_Hybrid_Attention.md](../.research/362_HydraHead_Causal_Head_Importance_Hybrid_Attention.md)
 **Source paper:** [arXiv:2606.20097](https://arxiv.org/abs/2606.20097) — Tan et al., HydraHead, Alibaba, Jun 2026
 **Target:** `katgpt-rs/crates/katgpt-core/src/causal_head_importance/` (new module) + Cargo feature `causal_head_importance` (opt-in); RTPurbo wiring in `katgpt-rs/src/rt_turbo/calibration.rs`
-**Status:** COMPLETE — Phase 1 ✅ + Phase 2 ✅ + Phase 3 ✅ + Phase 4 ✅ COMPLETE (G1/G2/G3/G4 PASS; promote/demote = opt-in, AttentionMass stays default), Phase 5 pending (docs/cross-refs).
+**Status:** ✅ FULLY COMPLETE — All 5 phases done (G1/G2/G3/G4 PASS; promote/demote = opt-in, AttentionMass stays default; docs + cross-refs shipped).
 
 ---
 
@@ -388,10 +388,10 @@ The paper's strongest quality claim for the causal score is that it filters *cor
 
 ### Tasks
 
-- [ ] **T5.1** Add `.docs/causal_head_importance.md` (mirroring `.docs/faithfulness_probe.md` format) documenting the primitive, the calibration-slot competition, and the promote/demote outcome.
-- [ ] **T5.2** Cross-ref from `.research/086_RTPurbo_Retrieval_Head_Sparse_Attention.md` (add a "See also: Research 362 — causal alternative to attention-mass calibration" note in the Distillation section).
-- [ ] **T5.3** Cross-ref from `.research/244_Self_Evolver_Faithfulness_Cognitive_Integrity.md` (add a "See also: Research 362 — path-patching indirect-effect extension to direct-effect FaithfulnessProbe" note).
-- [ ] **T5.4** Note the deferred riir-ai / riir-neuron-db follow-ups in their respective `.research/` folders (or `.issues/` if those repos prefer): HLA direction-vector importance, NeuronShard dendritic-branch importance. **Do NOT implement** — just note the cross-ref for when those repos scope the work.
+- [x] **T5.1** Add `.docs/causal_head_importance.md` (mirroring `.docs/faithfulness_probe.md` format) documenting the primitive, the calibration-slot competition, and the promote/demote outcome. **DONE.**
+- [x] **T5.2** Cross-ref from `.research/086_RTPurbo_Retrieval_Head_Sparse_Attention.md` (add a "See also: Research 362 — causal alternative to attention-mass calibration" note in the Distillation section). **DONE** — added after the "Novel Combination" section.
+- [x] **T5.3** Cross-ref from `.research/244_Self_Evolver_Faithfulness_Cognitive_Integrity.md` (add a "See also: Research 362 — path-patching indirect-effect extension to direct-effect FaithfulnessProbe" note). **DONE** — added after §2.2 Attribution Surrogate.
+- [x] **T5.4** Note the deferred riir-ai / riir-neuron-db follow-ups in their respective `.research/` folders (or `.issues/` if those repos prefer): HLA direction-vector importance, NeuronShard dendritic-branch importance. **Do NOT implement** — just note the cross-ref for when those repos scope the work. **DONE** — documented in `.docs/causal_head_importance.md` §"What's out of scope" (→ riir-ai HLA direction-vector importance §2.5(a); → riir-neuron-db dendritic-branch importance §2.5(e)). Cross-repo folders are private/sibling repos; the deferral is recorded in katgpt-rs for when those repos scope the work.
 
 **Phase 5 exit criterion:** docs land; cross-refs in place; private-repo follow-ups noted.
 
