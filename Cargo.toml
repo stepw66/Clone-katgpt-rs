@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/katgpt-attn", "crates/katgpt-attn-match", "crates/katgpt-core", "crates/katgpt-dec", "crates/katgpt-deprecated", "crates/katgpt-hla", "crates/katgpt-kv", "crates/katgpt-micro-belief", "crates/katgpt-percepta", "crates/katgpt-personality", "crates/katgpt-pruners", "crates/katgpt-quant", "crates/katgpt-sense", "crates/katgpt-sleep", "crates/katgpt-spectral", "crates/katgpt-speculative", "crates/katgpt-tokenizer", "crates/katgpt-transformer", "crates/katgpt-types", "."]
+members = ["crates/katgpt-attn", "crates/katgpt-attn-match", "crates/katgpt-core", "crates/katgpt-dec", "crates/katgpt-deprecated", "crates/katgpt-forward", "crates/katgpt-hla", "crates/katgpt-kv", "crates/katgpt-micro-belief", "crates/katgpt-percepta", "crates/katgpt-personality", "crates/katgpt-pruners", "crates/katgpt-quant", "crates/katgpt-sense", "crates/katgpt-sleep", "crates/katgpt-spectral", "crates/katgpt-speculative", "crates/katgpt-tokenizer", "crates/katgpt-transformer", "crates/katgpt-types", "."]
 resolver = "3"
 
 [package]
@@ -11,6 +11,14 @@ publish = false  # dev/examples aggregator — never published. Only katgpt-core
 [dependencies]
 katgpt-core = { path = "crates/katgpt-core" }
 katgpt-transformer = { path = "crates/katgpt-transformer" }
+# katgpt-forward (Issue 007 Phase F, 2026-07-02): the top-tier crate hosting
+# `ForwardContext` — the composition-layer join point that sits ABOVE both
+# katgpt-transformer (buffer types + WallPrefixState) and katgpt-pruners
+# (CnaModulator/SubstrateMask/HydraSkipPlan). Neither leaf could host it
+# without a cycle. Root re-exports `ForwardContext` from `crate::transformer`
+# so every historical call site resolves unchanged. Non-optional — the 33
+# root forward-pass functions access ctx.<field> directly.
+katgpt-forward = { path = "crates/katgpt-forward", default-features = false }
 # katgpt-deprecated (Proposal 003 Phase 3a, 2026-07-01): the loser crate.
 # Exiled primitives (dead stubs, GOAT-failed, off-topic). Never default-on.
 katgpt-deprecated = { path = "crates/katgpt-deprecated" }
@@ -114,7 +122,7 @@ dual_leo = ["leo_all_goals", "katgpt-core/dual_leo"]  # Dual LEO teacher-student
 flow_field_nav = ["katgpt-core/flow_field_nav"]  # Fourier-smoothed flow fields for LEO crowd navigation (Plan 242, GOAT PASS 46.9%)
 ega_attn = ["katgpt-attn/ega_attn"]  # Energy-Gated Attention spectral salience gating (Plan 139)
 sp_kv = ["katgpt-kv/sp_kv"]  # SP-KV self-pruned key-value attention (Plan 070)
-tiled_attention = ["katgpt-core/tiled_attention"]  # Tiled online-softmax flash attention for CPU SIMD (Plan 115)
+tiled_attention = ["katgpt-core/tiled_attention", "katgpt-forward/tiled_attention"]  # Tiled online-softmax flash attention for CPU SIMD (Plan 115). Forwarded to katgpt-forward so ForwardContext's tiled_* repacking buffers compile (Issue 007 Phase F).
 parallax_attn = ["tiled_attention", "newton_schulz", "katgpt-core/parallax_attn"]  # Parallax parameterized local linear attention — R projection + covariance correction (Plan 135, Research 135) — opt-in, requires Muon-trained weights
 sink_aware_attn = ["data_probe"]  # Sink-Aware Attention — dual-policy sigmoid gate (Plan 287 Phase 3, Research 258, arxiv 2606.08105). Implies data_probe for the classifier primitive. Opt-in: default stays Uniform pending G2/G3 GOAT gate. Standalone apply_dual_policy_gate ships now; direct wiring into parallax_attn / funcattn forward paths deferred.
 depth_invariance = ["katgpt-core/depth_invariance"]  # Depth-Invariance Diagnostic + MagnitudeRegularizedResidual — root-cause counterpart to BeliefRankPruner / GainCostLoopHalter / latent_functor/reestimation / micro_belief/coherence_bench (Plan 306, Research 286, arXiv:2605.09992). Detects DepthSpecificRefinement / Collapsed / DepthInvariant on flattened &[f32] state chains. Disambiguation: different paper + mechanism than sink_aware_attn (Plan 287 / arXiv:2606.08105) — drafter-side magnitude accumulation vs target-side sink classification. DEFAULT-ON (Plan 306 T7.4, 2026-06-23): G1/G2/G3 PASS; G4 re-spec'd to absolute-latency at HLA scale (all PASS with headroom); SIMD inner-loop landed. Zero runtime cost unless a caller invokes classify_chain / apply_magnitude_regularization.
@@ -125,7 +133,7 @@ msa_per_group = ["msa_sparse"]  # Per-GQA-group independent top-k (Plan 256 Phas
 msa_kv_outer = ["msa_sparse"]  # KV-outer sparse prefill (Plan 256 Phase 2 GOAT gate)
 msa_adaptive_k = ["msa_sparse"]  # Adaptive k budget via sigmoid gate (Plan 256 Phase 2 GOAT gate)
 rt_turbo = ["dash_attn"]  # RTPurbo retrieval head sparse decode via low-dim indexing (Plan 126, Research 86)
-mls_aggregate = []  # MLS Multi-Layer Sum aggregation of last K layer residuals (Plan 104, Research 68)
+mls_aggregate = ["katgpt-forward/mls_aggregate"]  # MLS Multi-Layer Sum aggregation of last K layer residuals (Plan 104, Research 68). Forwarded to katgpt-forward so ForwardContext.mls_buf compiles (Issue 007 Phase F).
 dllm = []  # D2F Discrete Diffusion Forcing — mini dLLM research (Plan 066)
 dmax_spd = ["dllm", "katgpt-core/dmax_spd"]  # DMax Soft Parallel Decode — hybrid embedding D2F enhancement (Plan 109, Research 72)
 tri_mode = ["dllm", "katgpt-core/tri_mode"]  # Tri-Mode inference — AR + Diffusion + Self-Speculation (Plan 089, Research 55)
@@ -140,7 +148,7 @@ validator = ["syn", "proc-macro2"]
 # riir-neuron-db/.plans/006_vessel_primitive_migration.md. The
 # `vessel_extract_bench`, `vessel_minimal`, and `vessel_project` entries
 # below were also removed in the same migration.
-sparse_mlp = ["katgpt-core/sparse_mlp", "katgpt-pruners/sparse_mlp"]  # TwELL-inspired sparse MLP matmul (Plan 022)
+sparse_mlp = ["katgpt-core/sparse_mlp", "katgpt-pruners/sparse_mlp", "katgpt-forward/sparse_mlp"]  # TwELL-inspired sparse MLP matmul (Plan 022). Forwarded to katgpt-forward so ForwardContext.active_indices/values compile (Issue 007 Phase F).
 ppot = ["katgpt-pruners/ppot"]  # PPoT logit-parameterized CPU resampling (Plan 026 + 027)
 domain_latent = ["katgpt-core/domain_latent", "katgpt-pruners/domain_latent"]  # Free Transformer mid-layer domain conditioning (Plan 038)
 bandit = ["katgpt-core/review_metrics", "katgpt-pruners/bandit"]  # Multi-armed bandit adaptive ScreeningPruner (Plan 030). Enables katgpt-core/review_metrics so the relocated ReviewMetrics (Plan 308 Phase 3 move from root) is re-exported at crate::pruners::review_metrics.
@@ -151,7 +159,7 @@ sr2am_configurator = ["bandit", "g_zero", "katgpt-core/sr2am_configurator", "kat
 sia_feedback = ["sr2am_configurator", "katgpt-core/sia_feedback", "katgpt-pruners/sia_feedback"]  # FeedbackBandit — harness + weight co-evolution (Plan 163, Research 033)
 gepa_reflective = ["bandit", "memo_reflections", "katgpt-pruners/gepa_reflective"]  # GEPA-D Reflective Config Evolution — Pareto bandit config distillation (Research 146, Plan 164)
 phrase_boost = ["katgpt-pruners/phrase_boost"]  # PhraseBoost — context trie phrase boosting for DDTree (Research 147, Plan 164)
-hydra_budget = ["katgpt-core/hydra_budget", "katgpt-pruners/hydra_budget"]  # Hydra-Aware Adaptive Layer Budget — emergent self-repair layer skipping (Research 148, Plan 165)
+hydra_budget = ["katgpt-core/hydra_budget", "katgpt-pruners/hydra_budget", "katgpt-forward/hydra_budget"]  # Hydra-Aware Adaptive Layer Budget — emergent self-repair layer skipping (Research 148, Plan 165). Forwarded to katgpt-forward so ForwardContext.hydra_skip_plan compiles (Issue 007 Phase F).
 deltanet_inference = ["katgpt-core/deltanet_inference"]  # DeltaNet GPU inference — hybrid DeltaNet/Attention decode (Plan 182, Research R036)
 data_gate = ["katgpt-core/data_gate", "bandit", "katgpt-pruners/data_gate"]  # Task-level data gating for self-play training stability (Plan 111, Research 075)
 cgsp = ["katgpt-core/cgsp", "bandit", "collapse_aware_thinking", "data_gate", "breakeven_routing"]  # Curiosity-Guided Self-Play — modelless Solver/Conjecturer/Guide triad (Plan 274, Research 240). Implementation lives in katgpt-core/cgsp so riir-engine (Plan 299) can consume it; root re-exports at katgpt::cgsp for Plan 274 benchmarks. Opt-in until riir-ai Plan 299 Phase 3 GOAT gate validates on real game domains.
@@ -166,10 +174,10 @@ spec_pruner = ["katgpt-pruners/spec_pruner"]  # SpecAsPruner — compile NL spec
 spec_compile = ["spec_pruner", "katgpt-pruners/spec_compile"]  # Full spec compilation suite — SpecAsPruner + SpecAsMarginals + SpecDFA + SpecProof + SpecChain
 ropd_rubric = ["bandit", "katgpt-pruners/ropd_rubric"]  # ROPD rubric modelless distillation — multi-criteria reward (Plan 071)
 tes_loop = ["bandit", "katgpt-core/tes_loop", "katgpt-pruners/tes_loop"]  # SimpleTES evaluation-driven scaling — RPUCG bandit + trajectory pruning (Plan 086, GOAT 8/8, default-on)
-cna_steering = ["bandit", "katgpt-pruners/cna_steering"]  # CNA Contrastive Neuron Attribution — sparse MLP circuit discovery + modulation (Plan 087)
+cna_steering = ["bandit", "katgpt-pruners/cna_steering", "katgpt-forward/cna_steering"]  # CNA Contrastive Neuron Attribution — sparse MLP circuit discovery + modulation (Plan 087). Forwarded to katgpt-forward so ForwardContext.cna_modulator compiles (Issue 007 Phase F).
 deep_manifold = ["katgpt-pruners/deep_manifold"]  # Deep Manifold fixed-point residual scoring (Research 51, Plan 085)
 federation = ["bandit", "katgpt-pruners/federation"]  # Deep Manifold federated boundary alignment — KL coupling (Research 51, Plan 085)
-delta_routing = ["katgpt-transformer/delta_routing"]  # Delta Block cross-layer routing (Research 061, Plan 097, GOAT 6/6, default-on)
+delta_routing = ["katgpt-transformer/delta_routing", "katgpt-forward/delta_routing"]  # Delta Block cross-layer routing (Research 061, Plan 097, GOAT 6/6, default-on). Forwarded to katgpt-forward so ForwardContext.block_deltas + depth_route_with_indices compile (Issue 007 Phase F).
 decode_specialize = ["katgpt-transformer/decode_specialize", "katgpt-pruners/decode_specialize"]  # Stage-specialized decode paths for speculative decoding (Plan 102). Also forwards to katgpt-pruners so should_skip_layer_stage compiles (bench_165).
 lattice_deduction = ["katgpt-core/lattice_deduction"]  # LDT Lattice Deduction Transformer — asymmetric pruning + conflict detection + α-operator (Plan 088, GOAT 7/7, default-on)
 unit_distance = ["katgpt-deprecated/unit_distance"]  # Unit Distance GOAT proof — EXILED to katgpt-deprecated (Phase 3a, Proposal 003): number-theory Erdos research toy (Plan 090), no inference role. Re-exported here for back-compat. TODO(deprecated): delete after confirming no regression.
@@ -181,7 +189,7 @@ elf_sde = ["katgpt-core/elf_sde"]  # ELF SDE noise injection + logit-normal sche
 eqr_convergence = ["elf_sde"]  # EqR convergence-based rollout selection — Top1Converged residual proxy (Plan 119, Research 79)
 spec_cost_model = ["katgpt-core/spec_cost_model"]  # Amdahl cost model for LeviathanVerifier (Research 59, Plan 096)
 stability_metrics = ["katgpt-core/stability_metrics"]  # Per-step execution stability instrumentation — P50/P99/CV/stability_score, +0.6% overhead (Plan 102, default-on)
-coda_fusion = ["katgpt-core/coda_fusion"]  # CODA-inspired fused SIMD kernels — matmul+residual+rmsnorm+activation in single-pass (Plan 103)
+coda_fusion = ["katgpt-core/coda_fusion", "katgpt-forward/coda_fusion"]  # CODA-inspired fused SIMD kernels — matmul+residual+rmsnorm+activation in single-pass (Plan 103). Forwarded to katgpt-forward so ForwardContext.coda_partial_sums compiles (Issue 007 Phase F).
 maxsim = ["katgpt-core/maxsim", "katgpt-spectral/maxsim", "katgpt-quant/maxsim"]  # MaxSim late-interaction scoring (Research 45, Plan 080). Forwards to katgpt-quant/maxsim so the TurboQuant + OCTOPUS late-interaction helpers (gated on `all(feature = "turboquant"|"octopus", feature = "maxsim")` in katgpt-quant/src/*/forward.rs) compile from the root.
 salience_tri_gate = []  # Salience Tri-Gate Primitive — 3-way per-tick emit gate (Speak / Silent / Delegate) with silence as a first-class variant, two stacked sigmoids (never softmax), zero-allocation hot path (Plan 303, Research 281, arxiv 2606.14777, JoyAI-VL-Interaction). Open primitive; NPC wiring lives in riir-ai Plan 330. Opt-in until G1 (determinism + monotonicity) + G2 (two-sigmoid ablation parity) + <50ns decide() latency gates pass.
 closed_unit_compaction = []  # Closed-Unit Compaction Gate (CUCG) — generic rubric-gated trajectory compaction primitive (Plan 333, Research 300, arxiv 2606.23525, SelfCompact Li et al. JHU+Apple Jun 2026). ClosedUnitCompactionGate<R> + Rubric trait + FireRule enum + Backstop + CompactionAuditRecord. Cross-domain isomorphic with riir-neuron-db `can_freeze` (G7). Latent-reframed predicates (sigmoid projections, never softmax). Zero-alloc hot path. Open primitive; per-NPC sub-goal wiring lives in riir-ai (G8). DEFAULT-ON since Phase 6 (7/7 GOAT gates PASS).
@@ -195,7 +203,7 @@ bandit_k_prior = ["complexity_prior_sampler"]  # Plan 305 T3.2 — bandit K-prio
 spec_k_prior = ["complexity_prior_sampler"]  # Plan 305 T3.3 — speculative drafter post-drafting re-ranker (KPriorDrafter<K>::rerank). Composes with CompressionDrafter (R256) + DendriticGate (R260).
 spectral_quant = ["katgpt-spectral/spectral_quant"]  # SpectralQuant calibrated eigenbasis + water-fill (Plan 077) — default-on, 9.1× compression vs TQ 5.3×, cosine 0.9917 vs TQ 0.9692 (Bench 013)
 octopus = ["katgpt-quant/octopus"]  # OCTOPUS octahedral triplet codec — data-oblivious, dominates SQ at all bit widths: -22% to -49% MSE (Bench 022, Plan 099, default-on)
-turboquant = ["katgpt-spectral/turboquant", "katgpt-quant/turboquant"]  # TurboQuant rotation + uniform codebook — legacy baseline for bench/educate only (Plan 063). Forwards to both katgpt-spectral (preserves the historical RandomRotation export) and katgpt-quant (Proposal 003 Phase 1 codec extraction).
+turboquant = ["katgpt-spectral/turboquant", "katgpt-quant/turboquant", "katgpt-forward/turboquant"]  # TurboQuant rotation + uniform codebook — legacy baseline for bench/educate only (Plan 063). Forwards to both katgpt-spectral (preserves the historical RandomRotation export) and katgpt-quant (Proposal 003 Phase 1 codec extraction). Also forwards to katgpt-forward so ForwardContext.reset_tq_dequant alias compiles (Issue 007 Phase F).
 asymmetric_kv = ["turboquant", "katgpt-quant/asymmetric_kv"]  # Asymmetric K/V cache compression benchmarks (Plan 123, Research 081). Forwards to katgpt-quant so `TurboQuantKVCache::new_asymmetric` compiles.
 shard_kv = ["katgpt-kv/shard_kv", "spectral_quant", "turboquant"]  # ShardKV asymmetric K/V compression — undo RoPE + PCA K path, Hadamard V path (Plan 147, Research 109)
 planar_quant = ["turboquant", "katgpt-quant/planar_quant"]  # PlanarQuant 2D Givens rotation KV cache — O(d) vs TQ O(d²), 256 FMAs for d=128
@@ -294,7 +302,7 @@ state_source = ["bandit", "katgpt-pruners/state_source"]  # State-Source Modelle
 nexus_elo = ["state_source", "proof_sketch_evolution", "katgpt-pruners/nexus_elo"]  # Nexus Elo — Plackett-Luce + P-UCB + goal cache for DDTree/SR²AM (Plan 143, Research 104)
 skill_opt = []  # SkillOpt text-space skill optimization — generic framework for game rule optimization (Plan 144, Research 105)
 proof_cert = []  # Hierarchical GOAT Proof Certificates — formal verification methodology (Plan 145, Research 106)
-tf_loop = ["katgpt-core/tf_loop", "lt2_looped"]  # Training-free loop wrapper — ODE-refined sub-stepping (Plan 136)
+tf_loop = ["katgpt-core/tf_loop", "lt2_looped", "katgpt-forward/tf_loop"]  # Training-free loop wrapper — ODE-refined sub-stepping (Plan 136). Forwarded to katgpt-forward so ForwardContext.tf_* window buffers compile (Issue 007 Phase F).
 and_or_dtree = ["proof_sketch_evolution", "bandit", "katgpt-core/and_or_dtree", "katgpt-pruners/and_or_dtree"]  # AND-OR DDTree — blueprint-driven subgoal decomposition (Plan 190, Research 170)
 partial_scoring = ["bandit", "katgpt-core/partial_scoring", "katgpt-pruners/partial_scoring"]  # PartialScorer graduated reward for game episodes (Plan 191, Research 171)
 problem_mutator = ["bandit", "katgpt-core/problem_mutator", "katgpt-pruners/problem_mutator"]  # ProblemMutator game config evolution (Plan 191, Research 171)
@@ -333,7 +341,7 @@ thinking_prune = ["sr2am_configurator", "katgpt-pruners/thinking_prune"]  # Thin
 rim_slots = ["katgpt-core/rim_slots", "katgpt-pruners/rim_slots"]  # RiM Reasoning Buffer Slots — fixed latent workspace for DDTree (Plan 172, Research 192)
 budget_adaptation = []  # Compression-adaptive decode budget — PFlash complexity signal (Plan 167, Research R050)
 adaptive_gamma_forecast = []  # AcceptanceForecast — entropy-bounded adaptive γ from proven linear α≈a−b·H bound (Issue 023, Research 243, arXiv:2606.12370 §3,§7.6). GOAT-gated, default OFF until ≥5% throughput gain proven on entropy-varying workload.
-wall_attention = ["katgpt-core/wall_attention", "katgpt-transformer/wall_attention", "katgpt-attn/diagonal_gate"]  # Wall Attention — diagonal forget gates replacing RoPE (Plan 173, Research Wall Attention) — opt-in, requires Wall-trained model weights
+wall_attention = ["katgpt-core/wall_attention", "katgpt-transformer/wall_attention", "katgpt-attn/diagonal_gate", "katgpt-forward/wall_attention"]  # Wall Attention — diagonal forget gates replacing RoPE (Plan 173, Research Wall Attention) — opt-in, requires Wall-trained model weights. Forwarded to katgpt-forward so ForwardContext.wall_prefix compiles (Issue 007 Phase F).
 ane = ["dep:coreml-native", "dep:coreml-proto", "dep:prost", "kog_cpu_fusion"]  # Apple Neural Engine inference backend (Plan 176). Implies kog_cpu_fusion: ane_backend reads attn_norm_gamma / mlp_norm_gamma unconditionally.
 gpu_inference = ["dep:metal", "kog_cpu_fusion"]  # GPU inference backend via Metal compute pipelines (Plan 176). Implies kog_cpu_fusion: gpu_backend reads attn_norm_gamma / mlp_norm_gamma unconditionally.
 inference_router = ["gpu_inference", "ane"]  # Full inference routing: TriggerGate + InferenceRouter + GPU + ANE (Plan 176)
@@ -434,7 +442,7 @@ auto_constraint_synthesis = ["three_mode_router", "egcs", "katgpt-pruners/auto_c
 safe_exploration_budget = ["three_mode_router", "katgpt-pruners/safe_exploration_budget"]  # Safe Exploration Budget — configurable verification tier limits (Plan 211 F3, opt-in)
 percept_route = ["katgpt-pruners/percept_route"]  # Symbolic Percept Router — compute routing from BFCP complexity (Plan 213 P4)
 bfcf_tree = ["and_or_dtree", "bandit", "percept_route", "katgpt-pruners/bfcf_tree"]  # BFCF Tree — perceptual region folding for O(regions) pruning (Plan 213, GOAT candidate)
-substrate_gate = ["sparse_mlp", "cna_steering", "katgpt-pruners/substrate_gate"]  # SubstrateGate — inference-time capability substrate routing (Plan 216, GOAT candidate)
+substrate_gate = ["sparse_mlp", "cna_steering", "katgpt-pruners/substrate_gate", "katgpt-forward/substrate_gate"]  # SubstrateGate — inference-time capability substrate routing (Plan 216, GOAT candidate). Forwarded to katgpt-forward so ForwardContext.substrate_mask compiles (Issue 007 Phase F).
 belief_drafter = ["katgpt-core/belief_drafter", "papaya", "katgpt-pruners/belief_drafter"]  # NextLat Belief-State Speculative Drafter — lightweight MLP recursive hidden state prediction (Plan 217, GOAT 43 tests + 7 benchmarks, default-on)
 echo_env_predictor = ["katgpt-core/echo_env_predictor"]  # ECHO Environment Predictor — inference-time prediction scoring (Plan 247, GOAT candidate)
 ted_lite = ["katgpt-pruners/ted_lite"]  # TED-Lite Divergence Metric — pruner drift measurement (Plan 214 P1)

@@ -1,0 +1,71 @@
+[package]
+name = "katgpt-forward"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Forward-pass composition context (ForwardContext) — the top-tier join point above katgpt-transformer + katgpt-pruners (Issue 007 Phase F)"
+repository = "https://github.com/katopz/katgpt-rs"
+keywords = ["transformer", "forward", "inference", "context", "modelless"]
+categories = ["data-structures", "science"]
+publish = false  # only katgpt-core ships to crates.io
+
+[dependencies]
+# ForwardContext is the topmost type in the inference DAG — it composes
+# transformer substrate (buffer types + WallPrefixState + TransformerWeights
+# type hint) with pruner handles (CnaModulator/SubstrateMask/HydraSkipPlan).
+# Both katgpt-transformer and katgpt-pruners sit BELOW this crate; neither can
+# host ForwardContext without creating a cycle (katgpt-pruners already depends
+# on katgpt-transformer). See Issue 007 §"The composition-layer pin".
+katgpt-core = { path = "../katgpt-core" }
+katgpt-types = { path = "../katgpt-types" }        # Config, kv_dim, DepthTier, simd (re-exported here as katgpt_core::simd)
+katgpt-transformer = { path = "../katgpt-transformer" }  # WallPrefixState, TransformerWeights
+katgpt-pruners = { path = "../katgpt-pruners", default-features = false }  # CnaModulator, SubstrateMask, HydraSkipPlan
+# DflashCtx<TransformerWeights> impl for ForwardContext lives here (Issue 007
+# Phase F): the impl must travel with the type now that ForwardContext moved
+# out of root, otherwise the orphan rule blocks root's dflash.rs. No cycle —
+# katgpt-speculative depends only on katgpt-core + katgpt-types.
+katgpt-speculative = { path = "../katgpt-speculative" }
+
+rayon = "1.10"
+
+[features]
+default = []
+
+# ── Feature gates mirrored from root that ForwardContext fields read ──
+# Each is an empty tracking flag here — it gates a field/impl in this crate.
+# Root forwards its feature to this crate so the cfg blocks resolve when the
+# root feature is enabled. Upstream crates (katgpt-transformer, katgpt-pruners)
+# get their own feature forwarded by the root independently.
+
+# CNA: contrastive neuron attribution runtime modulator (Plan 087).
+cna_steering = ["katgpt-pruners/cna_steering"]
+
+# Sparse MLP active-indices/value buffers (Plan 022).
+sparse_mlp = ["katgpt-core/sparse_mlp"]
+
+# SubstrateGate: per-sequence capability mask for dual sparsity (Plan 216).
+substrate_gate = ["katgpt-pruners/substrate_gate", "sparse_mlp"]
+
+# Delta routing block-delta accumulation (Plan 097).
+delta_routing = ["katgpt-transformer/delta_routing"]
+
+# CODA fused kernels: partial RMS accumulation buffer (Plan 103).
+coda_fusion = []
+
+# MLS Multi-Layer Sum aggregation (Plan 104).
+mls_aggregate = []
+
+# Tiled attention repacking buffers (Plan 115).
+tiled_attention = ["katgpt-core/tiled_attention"]
+
+# Training-free loop window buffers (Issue 091).
+tf_loop = []
+
+# Hydra Adaptive Layer Budget: pre-computed skip plan (Research 148, Plan 165).
+hydra_budget = ["katgpt-pruners/hydra_budget"]
+
+# Wall Attention: per-head prefix sum state (Plan 173).
+wall_attention = ["katgpt-transformer/wall_attention"]
+
+# TurboQuant incremental dequant reset alias (back-compat for reset_tq_dequant).
+turboquant = []

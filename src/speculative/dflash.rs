@@ -6,7 +6,10 @@ use katgpt_core::speculative::sampling::sample_from_distribution;
 use crate::speculative::types::{DraftResult, SpeculativeContext};
 use crate::transformer::{ForwardContext, MultiLayerKVCache, TransformerWeights, forward};
 use crate::types::{Config, Rng, softmax_scaled};
-use katgpt_speculative::dflash::{DflashCache, DflashCtx};
+use katgpt_speculative::dflash::DflashCache;
+// NOTE: `DflashCtx<TransformerWeights> for ForwardContext` now lives in
+// katgpt-forward (Issue 007 Phase F) — the impl travels with the type. The
+// trait import is intentionally dropped here; the impl is auto-discovered.
 use rayon::prelude::*;
 
 // ── Issue 013 Phase B: shared-core backend adapters ───────────
@@ -17,10 +20,11 @@ use rayon::prelude::*;
 // katgpt-rs-specific `_with` entry points (disjoint field borrow on
 // `SpeculativeContext`) and delegates to the shared core.
 //
-// Orphan-rule note: `ForwardContext` is local to katgpt-rs, so the
-// `DflashCtx<TransformerWeights>` impl is fine. `MultiLayerKVCache` is foreign
-// (defined in katgpt-transformer), so the `DflashCache` impl rides on a local
-// borrowing adapter `CacheAdapter<'a>` instead of the foreign concrete type.
+// Orphan-rule note (Issue 007 Phase F update): `ForwardContext` now lives in
+// `katgpt-forward`, so the `DflashCtx<TransformerWeights>` impl travels with
+// it (defined in katgpt-forward/src/lib.rs) — root can no longer provide it.
+// `MultiLayerKVCache` is foreign (defined in katgpt-transformer), so the
+// `DflashCache` impl still rides on a local borrowing adapter `CacheAdapter<'a>`.
 
 /// Borrowing adapter that satisfies `DflashCache` for our (foreign)
 /// `MultiLayerKVCache` without violating the orphan rule. Constructed locally
@@ -52,35 +56,13 @@ impl DflashCache for CacheAdapter<'_> {
     }
 }
 
-impl DflashCtx<TransformerWeights> for ForwardContext {
-    #[inline]
-    fn logits_slice(&self) -> &[f32] {
-        &self.logits
-    }
-
-    fn apply_mtp_conditioning(
-        &mut self,
-        weights: &TransformerWeights,
-        mtp_ctx: &[f32],
-        n_embd: usize,
-        vocab_size: usize,
-    ) {
-        let n = n_embd.min(mtp_ctx.len());
-        for i in 0..n {
-            // safety: i < n <= n_embd == hidden_state.len() and i < mtp_ctx.len()
-            unsafe {
-                *self.hidden_state.get_unchecked_mut(i) += *mtp_ctx.get_unchecked(i);
-            }
-        }
-        crate::types::matmul(
-            &mut self.logits,
-            &weights.lm_head,
-            &self.hidden_state,
-            vocab_size,
-            n_embd,
-        );
-    }
-}
+// `DflashCtx<TransformerWeights> for ForwardContext` impl moved to
+// `katgpt-forward/src/lib.rs` (Issue 007 Phase F) — it must live with the type
+// now that ForwardContext is foreign to root (orphan rule). The impl is in
+// scope here automatically: `ForwardContext` is re-exported via
+// `crate::transformer::ForwardContext` (→ katgpt_forward::ForwardContext) and
+// `DflashCtx` is imported above from katgpt_speculative; the trait impl
+// travels with the type, so the generic `_with` calls below resolve.
 
 /// Trampoline matching the shared core's `forward_fn` shape
 /// (`Fn(&mut Ctx, &Weights, &mut Cache, usize, usize, &Config)`). Discards

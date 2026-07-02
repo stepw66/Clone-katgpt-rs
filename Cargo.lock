@@ -1790,6 +1790,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "katgpt-forward"
+version = "0.1.0"
+dependencies = [
+ "katgpt-core",
+ "katgpt-pruners",
+ "katgpt-speculative",
+ "katgpt-transformer",
+ "katgpt-types",
+ "rayon",
+]
+
+[[package]]
 name = "katgpt-hla"
 version = "0.1.0"
 dependencies = [
@@ -1892,6 +1904,7 @@ dependencies = [
  "katgpt-attn-match",
  "katgpt-core",
  "katgpt-deprecated",
+ "katgpt-forward",
  "katgpt-kv",
  "katgpt-percepta",
  "katgpt-pruners",
