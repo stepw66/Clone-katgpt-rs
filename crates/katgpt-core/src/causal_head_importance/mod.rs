@@ -39,7 +39,16 @@ pub mod patching;
 pub mod readout;
 pub mod scorer;
 
+// Adaptive Causal Calibration (Proposal 004) — cheap OV-circuit proxy
+// escalates to causal patching only on k suspects instead of all n_heads.
+// OUR INVENTION, not from HydraHead. Opt-in; promotion blocked on G1+G2
+// (deferred to riir-engine). See `adaptive.rs` for the honest caveats.
+#[cfg(feature = "adaptive_causal_calibration")]
+pub mod adaptive;
+
 pub use fusion::ScaleNormalizedFusion;
 pub use patching::{direct_effect_importance, indirect_effect_importance};
 pub use readout::SpanLogitDiffReadout;
 pub use scorer::{fuse_across_capabilities, partition_by_causal_score, per_capability_score};
+#[cfg(feature = "adaptive_causal_calibration")]
+pub use adaptive::{adaptive_partition, suspect_indices};

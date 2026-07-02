@@ -49,6 +49,9 @@ pub use calibration::{
     CalibrationConfigSnapshot, HeadCalibration, HeadClassification, calibrate_from_causal_scores,
     calibrate_from_scores, compute_all_retrieval_scores, compute_retrieval_score,
 };
+// Adaptive Causal Calibration (Proposal 004) — opt-in convenience wrapper.
+#[cfg(feature = "adaptive_causal_calibration")]
+pub use calibration::calibrate_from_adaptive_causal;
 pub use forward::{
     RtTurboCache, RtTurboDecodeResult, RtTurboPrefillResult, forward_rt_turbo_decode,
     forward_rt_turbo_prefill,

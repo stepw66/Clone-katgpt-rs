@@ -298,6 +298,115 @@ pub fn calibrate_from_causal_scores(
     calibrate_from_scores(causal_scores, config)
 }
 
+/// Partition heads into retrieval/local sets via **adaptive causal calibration**
+/// (Proposal 004 — OUR INVENTION, not from HydraHead).
+///
+/// Third mode alongside [`calibrate_from_scores`] (attention-mass) and
+/// [`calibrate_from_causal_scores`] (full causal). Uses an OV-circuit cheap
+/// proxy to detect bystander suspects in a single observational pass, then the
+/// caller escalates to causal patching on those `k` suspects only — instead of
+/// all `n_heads`. Pays zero patched forwards when there are no bystanders
+/// (degenerates to `AttentionMass`).
+///
+/// # How to use (the caller-supplied escalation flow)
+///
+/// 1. Run one forward pass; extract per-head `attention_mass` and per-head
+///    `ov_output_norm` (the `||OV · attn(·, t_readout)||` norm at the readout
+///    position). **Both are caller territory — katgpt-rs cannot produce them.**
+/// 2. Call [`katgpt_core::causal_head_importance::suspect_indices`] to get the
+///    `k` suspect head indices.
+/// 3. Run Plan 358's patched forwards on those `k` suspects only (NOT all
+///    `n_heads`) → per-suspect causal IE scores.
+/// 4. Call this function with all four inputs. It fuses suspect IE scores with
+///    non-suspect attention-mass scores, then delegates to
+///    [`calibrate_from_scores`] for the partition.
+///
+/// Or equivalently: call [`katgpt_core::causal_head_importance::adaptive_partition`]
+/// directly for the raw `(critical, convertible)` partition, then build a
+/// `HeadCalibration` from it.
+///
+/// # Honest caveats
+///
+/// - **The OV-circuit proxy is an UNVALIDATED hypothesis.** Promotion to
+///   default is blocked on G1 (proxy precision ≥ 0.8 @ recall ≥ 0.9) + G2 (cost
+///   reduction holds at production head counts), both deferred to riir-engine.
+/// - **Cross-group scale is part of G1.** The raw merge trusts that
+///   attention-mass and causal IE are roughly comparable in scale. See
+///   [`katgpt_core::causal_head_importance::adaptive_partition`] for details.
+/// - Unlike the other two calibration modes, this requires per-head OV norms
+///   from a real transformer forward — see `CalibrationMode::AdaptiveCausal`.
+///
+/// # Promote/demote status (Proposal 004)
+///
+/// `AttentionMass` remains the **default** `CalibrationMode`. `AdaptiveCausal`
+/// is **opt-in, unvalidated** — the cost win is hypothetical until G1+G2 pass
+/// empirically in riir-engine. Do not select this mode in production until
+/// then.
+///
+/// # Arguments
+///
+/// * `attention_mass` — per-head needle attention-mass for all `n_heads`.
+/// * `ov_output_norm` — per-head `||OV · attn(·, t_readout)||` norm (caller-
+///   supplied from a real transformer forward). Same length as `attention_mass`.
+/// * `suspect_causal_scores` — per-suspect causal IE, **parallel to the suspect
+///   indices** yielded by [`suspect_indices`] (ascending head index).
+/// * `tau_suspect` — escalation threshold. No universal default; tune via G1.
+/// * `config` — RTPurbo config (uses `retrieval_head_ratio`).
+#[cfg(feature = "adaptive_causal_calibration")]
+pub fn calibrate_from_adaptive_causal(
+    attention_mass: &[f32],
+    ov_output_norm: &[f32],
+    suspect_causal_scores: &[f32],
+    tau_suspect: f32,
+    config: &RtTurboConfig,
+) -> HeadCalibration {
+    use katgpt_core::causal_head_importance::suspect_indices;
+
+    let n_heads = attention_mass.len();
+    assert!(n_heads > 0, "Cannot calibrate with zero heads");
+    assert_eq!(
+        ov_output_norm.len(),
+        n_heads,
+        "ov_output_norm must have one entry per head"
+    );
+
+    // Cheap proxy: detect suspects in a single observational pass (zero alloc).
+    let suspects: Vec<usize> =
+        suspect_indices(attention_mass, ov_output_norm, tau_suspect).collect();
+
+    // G3 degenerate fast path: no suspects → pure attention-mass partition.
+    // The caller pays nothing extra; the output is identical to
+    // calibrate_from_scores(attention_mass, config).
+    if suspects.is_empty() {
+        debug_assert_eq!(suspect_causal_scores.len(), 0);
+        return calibrate_from_scores(attention_mass, config);
+    }
+
+    // Fuse: non-suspects keep attention_mass, suspects get their causal IE.
+    // Parallel walk — suspects and suspect_causal_scores are index-aligned.
+    assert_eq!(
+        suspect_causal_scores.len(),
+        suspects.len(),
+        "suspect_causal_scores must be parallel to the suspect indices"
+    );
+    let mut is_suspect = vec![false; n_heads];
+    for &h in &suspects {
+        is_suspect[h] = true;
+    }
+    let mut fused = attention_mass.to_vec();
+    let mut sus_idx = 0usize;
+    for h in 0..n_heads {
+        if is_suspect[h] {
+            fused[h] = suspect_causal_scores[sus_idx];
+            sus_idx += 1;
+        }
+    }
+    debug_assert_eq!(sus_idx, suspects.len());
+
+    // Delegate to the shared partition logic (DRY with the other two modes).
+    calibrate_from_scores(&fused, config)
+}
+
 // ---------------------------------------------------------------------------
 // HeadCalibration impl
 // ---------------------------------------------------------------------------
@@ -797,5 +906,47 @@ mod tests {
 
         assert_eq!(calibration.config_snapshot.retrieval_head_ratio, 0.12);
         assert_eq!(calibration.config_snapshot.n_query_heads, 10);
+    }
+
+    // -----------------------------------------------------------------------
+    // calibrate_from_adaptive_causal (Proposal 004) — feature-gated.
+    // -----------------------------------------------------------------------
+
+    #[cfg(feature = "adaptive_causal_calibration")]
+    #[test]
+    fn test_adaptive_g3_no_suspects_matches_attention_mass() {
+        // G3: when the proxy flags no suspects, the adaptive calibration must
+        // produce the EXACT same HeadCalibration as plain attention-mass.
+        // Set tau very high so no head qualifies as a suspect.
+        let config = default_config();
+        let am = vec![0.9f32, 0.1, 0.8, 0.2, 0.7, 0.3, 0.6, 0.4];
+        let ov = vec![1.0f32; 8]; // high ov → low ratio → no suspects at tau=1e9
+        let expected = calibrate_from_scores(&am, &config);
+        let got = calibrate_from_adaptive_causal(&am, &ov, &[], 1e9, &config);
+        assert_eq!(got.retrieval_set, expected.retrieval_set);
+        assert_eq!(got.local_set, expected.local_set);
+        assert!((got.threshold - expected.threshold).abs() < 1e-6);
+        assert_eq!(got.config_snapshot, expected.config_snapshot);
+    }
+
+    #[cfg(feature = "adaptive_causal_calibration")]
+    #[test]
+    fn test_adaptive_demotes_confirmed_bystander() {
+        // A suspect confirmed as a bystander (low IE) drops out of retrieval.
+        let config = RtTurboConfig {
+            retrieval_head_ratio: 0.25, // 2 retrieval of 8
+            ..RtTurboConfig::default()
+        };
+        // head0 has the highest attention-mass but is a bystander.
+        let am = vec![0.9f32, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2];
+        let ov = vec![0.01f32, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]; // head0 low ov
+        let suspect_ie = vec![0.001f32]; // head0 confirmed bystander
+        // tau=1.0 → head0 ratio 90.0 > 1.0 → suspect; all others 0.x < 1.0.
+        let cal = calibrate_from_adaptive_causal(&am, &ov, &suspect_ie, 1.0, &config);
+        // Fused: [0.001, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2].
+        // Top-2: head1 (0.8), head2 (0.7). head0 demoted to local.
+        assert!(!cal.retrieval_set.contains(&0), "bystander head0 must be local");
+        assert!(cal.local_set.contains(&0));
+        assert_eq!(cal.n_retrieval(), 2);
     }
 }

@@ -311,6 +311,8 @@ pub struct RtTurboConfig {
     /// Which score semantics to use for head calibration (Plan 358). Default:
     /// `AttentionMass` (cheaper). `CausalNecessity` is opt-in — strictly
     /// stronger on bystander-heavy workloads but ~10–100× more expensive.
+    /// `AdaptiveCausal` (Proposal 004) is opt-in — cheap-proxy escalate,
+    /// unvalidated, requires per-head OV norms from the caller.
     pub calibration_mode: CalibrationMode,
 }
 
@@ -329,6 +331,18 @@ pub enum CalibrationMode {
     /// `n_heads × n_calibration_samples` patched forward passes. Requires the
     /// `causal_head_importance` feature on the consuming crate.
     CausalNecessity = 1,
+    /// Adaptive cheap-proxy escalate (Proposal 004 — OUR INVENTION, not from
+    /// HydraHead). Uses an OV-circuit proxy (`attention_mass / ||OV_out||`)
+    /// to detect bystander suspects, then escalates to Plan 358's causal
+    /// patching only on those `k` suspects instead of all `n_heads`. Pays zero
+    /// patched forwards when there are no bystanders (degenerates to
+    /// `AttentionMass`). Requires the `adaptive_causal_calibration` feature.
+    ///
+    /// **UNVALIDATED.** Promotion to default is blocked on G1 (proxy precision)
+    /// + G2 (cost reduction), both deferred to riir-engine. Unlike the other
+    /// two modes, the caller must supply per-head OV output norms (from a real
+    /// transformer forward) — see `calibrate_from_adaptive_causal`.
+    AdaptiveCausal = 2,
 }
 
 impl Default for RtTurboConfig {

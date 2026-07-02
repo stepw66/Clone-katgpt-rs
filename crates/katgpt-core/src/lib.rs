@@ -507,6 +507,10 @@ pub use causal_head_importance::{
     fuse_across_capabilities, indirect_effect_importance,
     partition_by_causal_score, per_capability_score,
 };
+// Adaptive Causal Calibration (Proposal 004) — cheap-proxy escalate. Opt-in.
+// Re-exported alongside the causal head-importance primitives it builds on.
+#[cfg(feature = "adaptive_causal_calibration")]
+pub use causal_head_importance::{adaptive_partition, suspect_indices};
 
 #[cfg(feature = "latent_trajectory_geometry")]
 pub use latent_trajectory_geometry::{
