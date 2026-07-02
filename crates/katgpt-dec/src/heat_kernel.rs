@@ -357,7 +357,205 @@ pub fn heat_kernel_trajectory_linear_into(
 }
 
 // =============================================================================
-// Tests — Plan 359 Phase 1 (T1.1–T1.6) + extras
+// Krylov online path (Plan 359 Phase 2)
+// =============================================================================
+//
+// For large complexes where the eigendecomposition is prohibitive
+// (256×256 = 65k vertices), the Krylov path computes exp(t·A)·h₀ without
+// eigendecomposition, using Arnoldi iteration + a small Hessenberg matrix
+// exponential. The generic Krylov machinery lives in [`crate::krylov`];
+// this module provides the DEC-specific wrapper that builds the
+// `A·v` matvec closure from the Hodge Laplacian + motor diagonal.
+//
+// The operator A = -I + Δ + diag(motor) is identical to the linear path's;
+// the difference is HOW exp(t·A)·h₀ is computed (Krylov approximation vs
+// spectral reconstruction). For stable configurations (all a_k < 0), both
+// paths agree to high precision once k is large enough. The Krylov path is
+// preferred for:
+//   - Large complexes (eigendecomposition is O(n²·k), Krylov is O(k·nnz))
+//   - Online use (no offline precompute)
+//   - Unstable spectra (Krylov converges superlinearly regardless)
+
+use crate::krylov::{krylov_expmv, krylov_expmv_into};
+use crate::operators::{graph_laplacian_into, hodge_laplacian};
+
+/// Krylov heat kernel trajectory: `h(t) = exp(t·A)·h₀` via Krylov subspace
+/// approximation, where `A = -I + Δ + diag(motor)`.
+///
+/// The online path — no eigendecomposition precompute needed. Computes the
+/// trajectory from scratch each call using `k` Arnoldi iterations + a small
+/// `k×k` matrix exponential. Preferred for large complexes (65k+ vertices)
+// where eigendecomposition is prohibitive, or for online use where the
+/// complex changes between predictions (no opportunity to amortize the
+/// precompute).
+///
+/// For the SAME operator `A`, this agrees with [`heat_kernel_trajectory_linear`]
+/// once `k` is large enough (superlinear convergence in `k`). The Krylov path
+/// has `O(k · nnz(A))` per-call cost vs `O(n·k_eig)` for the precomputed
+/// spectral path — use the latter when the complex is fixed across many
+/// predictions and `k_eig ≤ K_MAX`.
+///
+/// # Arguments
+///
+/// - `cx` — The cell complex.
+/// - `h0` — The initial field at `t = 0`.
+/// - `motor_vec` — Per-channel motor gain rates (same convention as the linear
+///   path).
+/// - `motor_dim` — Number of motor-gated channels (must be `≤ h0.dim`).
+/// - `t` — The prediction horizon.
+/// - `k` — Krylov subspace dimension. Capped at [`KRYLOV_K_MAX`] (64) and
+///   `h0.n_cells()`. Typical: `k = 20–30` for stable configurations, `k = 40–50`
+///   for stiff/unstable.
+///
+/// # Returns
+///
+/// A new [`CochainField`] of the same rank, `n_cells`, and `dim` as `h0`,
+/// holding `h(t) = exp(t·A)·h₀`.
+///
+/// # Panics
+///
+/// Debug builds assert `motor_dim <= h0.dim`.
+///
+/// # Alloc budget
+///
+/// Allocates the Krylov basis `V_k` (`n·dim·k` floats) and Hessenberg `H_k`
+/// (`k²` floats) internally — the ONE allowed allocation for the Krylov path
+/// (Plan 359 T5.5). Use [`heat_kernel_trajectory_krylov_into`] to avoid
+/// allocating the output field.
+#[inline]
+pub fn heat_kernel_trajectory_krylov(
+    cx: &CellComplex,
+    h0: &CochainField,
+    motor_vec: &[f32],
+    motor_dim: usize,
+    t: f32,
+    k: usize,
+) -> CochainField {
+    let n = h0.n_cells();
+    let dim = h0.dim;
+    let rank = h0.rank;
+    let len = n * dim;
+
+    debug_assert!(
+        motor_dim <= dim,
+        "heat_kernel_trajectory_krylov: motor_dim {motor_dim} > h.dim {dim}"
+    );
+    debug_assert!(
+        motor_vec.len() >= motor_dim,
+        "heat_kernel_trajectory_krylov: motor_vec len {} < motor_dim {motor_dim}",
+        motor_vec.len()
+    );
+
+    // Pre-allocate scratch CochainFields for the matvec closure. These are
+    // reused across all k Arnoldi iterations — not per-iteration allocations.
+    let mut v_field = CochainField::zeros(rank, n, dim);
+    let mut lap_field = CochainField::zeros(rank, n, dim);
+
+    // The A·v closure: A = Δ - I + diag(motor).
+    //
+    // Block-diagonal across channels (Δ acts identically per channel, motor
+    // is per-channel scalar). The matvec handles the full flattened field.
+    let mut a_apply = |v: &[f32], out: &mut [f32]| {
+        // Copy the flat Krylov vector into the CochainField view. This is
+        // O(n·dim) — the Laplacian itself is O(nnz) ≈ O(n·deg·dim), so the
+        // copy is a small fraction of the matvec cost.
+        v_field.data[..len].copy_from_slice(&v[..len]);
+
+        // Apply Laplacian: lap_field = Δ·v.
+        // Rank-0 fast path (zero extra alloc): graph Laplacian.
+        // Rank ≥ 1: allocating hodge_laplacian fallback (one cochain alloc per
+        // matvec call). The heat kernel's primary use case is rank-0 game maps;
+        // rank ≥ 1 callers wanting zero-alloc should compose the DEC operators
+        // directly (see motor_gated.rs for the pattern).
+        if rank == 0 && cx.n_edges() > 0 {
+            graph_laplacian_into(cx, &v_field, &mut lap_field);
+        } else {
+            let lap = hodge_laplacian(cx, &v_field);
+            let m = lap.data.len().min(len);
+            lap_field.data[..m].copy_from_slice(&lap.data[..m]);
+            for slot in &mut lap_field.data[m..] {
+                *slot = 0.0;
+            }
+        }
+
+        // out = lap - v + motor·v  (per channel: A_d = Δ - 1 + motor[d])
+        for cell in 0..n {
+            let base = cell * dim;
+            for d in 0..dim {
+                let idx = base + d;
+                let motor_d = if d < motor_dim { motor_vec[d] } else { 0.0 };
+                out[idx] = lap_field.data[idx] + (motor_d - 1.0) * v[idx];
+            }
+        }
+    };
+
+    let result_data = krylov_expmv(&mut a_apply, &h0.data[..len], t, k);
+    CochainField {
+        data: result_data,
+        dim,
+        rank,
+    }
+}
+
+/// Zero-output-alloc Krylov heat kernel trajectory — writes into `out`.
+///
+/// Same as [`heat_kernel_trajectory_krylov`] but writes into a caller-provided
+/// `out` field (resized to match `h0`). The Krylov basis `V_k` is still
+/// allocated internally (the one allowed allocation per Plan 359 T5.5).
+#[inline]
+pub fn heat_kernel_trajectory_krylov_into(
+    cx: &CellComplex,
+    h0: &CochainField,
+    motor_vec: &[f32],
+    motor_dim: usize,
+    t: f32,
+    k: usize,
+    out: &mut CochainField,
+) {
+    let n = h0.n_cells();
+    let dim = h0.dim;
+    let rank = h0.rank;
+    let len = n * dim;
+
+    debug_assert!(
+        motor_dim <= dim,
+        "heat_kernel_trajectory_krylov_into: motor_dim {motor_dim} > h.dim {dim}"
+    );
+
+    out.data.resize(len, 0.0);
+    out.dim = dim;
+    out.rank = rank;
+
+    let mut v_field = CochainField::zeros(rank, n, dim);
+    let mut lap_field = CochainField::zeros(rank, n, dim);
+
+    let mut a_apply = |v: &[f32], out_buf: &mut [f32]| {
+        v_field.data[..len].copy_from_slice(&v[..len]);
+        if rank == 0 && cx.n_edges() > 0 {
+            graph_laplacian_into(cx, &v_field, &mut lap_field);
+        } else {
+            let lap = hodge_laplacian(cx, &v_field);
+            let m = lap.data.len().min(len);
+            lap_field.data[..m].copy_from_slice(&lap.data[..m]);
+            for slot in &mut lap_field.data[m..] {
+                *slot = 0.0;
+            }
+        }
+        for cell in 0..n {
+            let base = cell * dim;
+            for d in 0..dim {
+                let idx = base + d;
+                let motor_d = if d < motor_dim { motor_vec[d] } else { 0.0 };
+                out_buf[idx] = lap_field.data[idx] + (motor_d - 1.0) * v[idx];
+            }
+        }
+    };
+
+    krylov_expmv_into(&mut a_apply, &h0.data[..len], t, k, &mut out.data[..len]);
+}
+
+// =============================================================================
+// Tests — Plan 359 Phase 1 (T1.1–T1.6) + Phase 2 (T2.1–T2.4) + extras
 // =============================================================================
 
 #[cfg(test)]
@@ -903,5 +1101,181 @@ mod tests {
             "identity reconstruction rel err {:.4} — eigenvectors not complete basis",
             err / norm
         );
+    }
+
+    // =================================================================
+    // Phase 2 (Krylov) tests — T2.1–T2.4 + extras
+    // =================================================================
+
+    /// T2.3: Krylov converges to eigendecomposition at full k.
+    /// On a 4×4 grid with k=n=16, the Krylov approximation captures the
+    /// full operator → matches the eigendecomposition heat kernel.
+    #[test]
+    fn krylov_converges_to_eigendecomposition() {
+        let cx = CellComplex::grid_2d(4, 4);
+        let n = cx.n_vertices();
+
+        // Full eigendecomposition (ground truth for comparison)
+        let eig = DecEigendecomposition::compute(&cx, 0, n, 2000);
+
+        // Stable motor (-10) so all modes damp (no amplification of
+        // approximation errors). Same regime as Phase 1 tests.
+        let motor = [-10.0f32];
+
+        let mut h0 = zero_field(&cx, 1);
+        place_bump(&mut h0, 4, 4, 2, 2, 0, 1.0, 0.8);
+
+        // Linear (eigendecomposition) path
+        let h_eig = heat_kernel_trajectory_linear(&eig, &h0, &motor, 1, 5.0);
+
+        // Krylov path with k=n (full subspace → should match)
+        let h_krylov = heat_kernel_trajectory_krylov(&cx, &h0, &motor, 1, 5.0, n);
+
+        let err = l2_dist(&h_eig, &h_krylov);
+        let norm = l2_norm(&h_eig);
+        assert!(
+            err / norm < 0.05,
+            "krylov vs eig rel err {:.4} should be < 5% at k=n",
+            err / norm
+        );
+    }
+
+    /// T2.3b: Krylov with smaller k should converge toward the eigendecomposition
+    /// result as k increases.
+    #[test]
+    fn krylov_converges_with_increasing_k() {
+        let cx = CellComplex::grid_2d(5, 5);
+        let n = cx.n_vertices(); // 25
+
+        let eig = DecEigendecomposition::compute(&cx, 0, n, 2000);
+        let motor = [-10.0f32];
+
+        let mut h0 = zero_field(&cx, 1);
+        place_bump(&mut h0, 5, 5, 2, 2, 0, 1.0, 0.8);
+
+        let h_eig = heat_kernel_trajectory_linear(&eig, &h0, &motor, 1, 5.0);
+
+        // k=5 (small subspace)
+        let h_krylov_5 = heat_kernel_trajectory_krylov(&cx, &h0, &motor, 1, 5.0, 5);
+        let err_5 = l2_dist(&h_eig, &h_krylov_5) / l2_norm(&h_eig);
+
+        // k=15 (larger subspace)
+        let h_krylov_15 = heat_kernel_trajectory_krylov(&cx, &h0, &motor, 1, 5.0, 15);
+        let err_15 = l2_dist(&h_eig, &h_krylov_15) / l2_norm(&h_eig);
+
+        // k=25 (full subspace)
+        let h_krylov_25 = heat_kernel_trajectory_krylov(&cx, &h0, &motor, 1, 5.0, 25);
+        let err_25 = l2_dist(&h_eig, &h_krylov_25) / l2_norm(&h_eig);
+
+        assert!(err_15 < err_5, "k=15 err {err_15} should be < k=5 err {err_5}");
+        assert!(err_25 < err_15, "k=25 err {err_25} should be < k=15 err {err_15}");
+    }
+
+    /// Krylov at t=0 returns h0 (identity).
+    #[test]
+    fn krylov_t_zero_identity() {
+        let cx = CellComplex::grid_2d(4, 4);
+        let motor = [-10.0f32];
+
+        let mut h0 = zero_field(&cx, 1);
+        place_bump(&mut h0, 4, 4, 2, 2, 0, 1.0, 0.8);
+
+        let result = heat_kernel_trajectory_krylov(&cx, &h0, &motor, 1, 0.0, 10);
+        let err = l2_dist(&result, &h0) / l2_norm(&h0);
+        assert!(err < 1e-6, "krylov t=0 err {err} should be ~0");
+    }
+
+    /// Krylov matches Euler at t=dt (single step) — the linearization agrees.
+    #[test]
+    fn krylov_matches_euler_at_t1() {
+        let cx = CellComplex::grid_2d(4, 4);
+        let n = cx.n_vertices();
+        let motor = [-10.0f32];
+        let dt = 0.01f32;
+
+        let mut h0 = zero_field(&cx, 1);
+        place_bump(&mut h0, 4, 4, 2, 2, 0, 1.0, 0.8);
+
+        // Euler one step (mutates in place)
+        let mut h_euler = h0.clone();
+        linear_euler_step(&cx, &mut h_euler, &motor, 1, dt);
+
+        // Krylov at t=dt (full k → essentially exact linear propagation)
+        let h_krylov = heat_kernel_trajectory_krylov(&cx, &h0, &motor, 1, dt, n);
+
+        let err = l2_dist(&h_euler, &h_krylov);
+        let norm = l2_norm(&h_euler).max(1e-6);
+        // At t=dt, Euler (first-order) and the exact heat kernel agree to
+        // O(dt²) per step. For dt=0.01, this is ~0.01%.
+        assert!(
+            err / norm < 0.02,
+            "krylov vs euler at t=dt: rel err {:.4} should be < 2%",
+            err / norm
+        );
+    }
+
+    /// Krylov into variant matches the allocating variant.
+    #[test]
+    fn krylov_into_matches_allocating() {
+        let cx = CellComplex::grid_2d(4, 4);
+        let motor = [-10.0f32];
+
+        let mut h0 = zero_field(&cx, 1);
+        place_bump(&mut h0, 4, 4, 2, 2, 0, 1.0, 0.8);
+
+        let h_alloc = heat_kernel_trajectory_krylov(&cx, &h0, &motor, 1, 5.0, 10);
+        let mut h_into = zero_field(&cx, 1);
+        heat_kernel_trajectory_krylov_into(&cx, &h0, &motor, 1, 5.0, 10, &mut h_into);
+
+        let err = l2_dist(&h_alloc, &h_into);
+        assert!(err < 1e-5, "krylov into vs alloc: err {err} should be ~0");
+    }
+
+    /// Multi-channel: Krylov handles dim > 1 correctly (block-diagonal operator).
+    #[test]
+    fn krylov_multi_channel_decouples() {
+        let cx = CellComplex::grid_2d(4, 4);
+        let n = cx.n_vertices();
+        let dim = 2usize;
+
+        // Different motor per channel to exercise the block-diagonal structure.
+        let motor = [-10.0f32, -8.0];
+
+        let mut h0 = zero_field(&cx, dim);
+        place_bump(&mut h0, 4, 4, 2, 2, 0, 1.0, 0.8);
+        place_bump(&mut h0, 4, 4, 1, 1, 1, 0.5, 0.6);
+
+        // Full field Krylov
+        let h_full = heat_kernel_trajectory_krylov(&cx, &h0, &motor, dim, 5.0, n);
+
+        // Per-channel Krylov (extract each channel, run separately)
+        for d in 0..dim {
+            let mut h0_d = CochainField::zeros(0, n, 1);
+            for i in 0..n {
+                h0_d.data[i] = h0.data[i * dim + d];
+            }
+            let h_d = heat_kernel_trajectory_krylov(&cx, &h0_d, &motor[d..d + 1], 1, 5.0, n);
+            for i in 0..n {
+                let err = (h_full.data[i * dim + d] - h_d.data[i]).abs();
+                assert!(
+                    err < 1e-3,
+                    "channel {d} mismatch at cell {i}: full={}, single={}",
+                    h_full.data[i * dim + d],
+                    h_d.data[i]
+                );
+            }
+        }
+    }
+
+    /// Krylov handles zero input (all-zero field → all-zero result).
+    #[test]
+    fn krylov_zero_field() {
+        let cx = CellComplex::grid_2d(4, 4);
+        let motor = [-10.0f32];
+        let h0 = zero_field(&cx, 1);
+
+        let result = heat_kernel_trajectory_krylov(&cx, &h0, &motor, 1, 5.0, 10);
+        let max_val = result.data.iter().fold(0.0f32, |a, &b| a.max(b.abs()));
+        assert!(max_val < 1e-30, "krylov zero field should stay zero, max = {max_val}");
     }
 }

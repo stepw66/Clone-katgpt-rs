@@ -57,6 +57,8 @@ pub mod heat_kernel;
 pub mod hodge;
 #[cfg(feature = "motor_gated_field")]
 pub mod motor_gated;
+#[cfg(feature = "heat_kernel_trajectory")]
+pub mod krylov;
 pub mod operators;
 pub mod simd;
 pub mod stokes_calculus;
@@ -82,8 +84,12 @@ pub use motor_gated::{evolve_motor_gated_field, relu_gate_into};
 
 #[cfg(feature = "heat_kernel_trajectory")]
 pub use heat_kernel::{
-    DecEigendecomposition, K_MAX, NULL_SPACE_THRESHOLD, heat_kernel_trajectory_linear,
+    DecEigendecomposition, K_MAX, NULL_SPACE_THRESHOLD, heat_kernel_trajectory_krylov,
+    heat_kernel_trajectory_krylov_into, heat_kernel_trajectory_linear,
     heat_kernel_trajectory_linear_into,
 };
+
+#[cfg(feature = "heat_kernel_trajectory")]
+pub use krylov::{KRYLOV_K_MAX, krylov_expmv, krylov_expmv_into};
 
 pub use types::{CellComplex, CoboundaryIndex, CochainField, MAX_RANK};
