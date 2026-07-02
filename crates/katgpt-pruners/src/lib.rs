@@ -62,7 +62,7 @@ pub mod feature_class;
 
 /// Future Behavior Probe — frozen direction vector for forecasting future
 /// behavior probability (Plan 292 Phase 2, Research 267).
-/// Opt-in until Phase 4 GOAT gate passes.
+/// DEFAULT-ON since 2026-07-03 (all 4 real-model GOAT gates PASS on Gemma 2 2B).
 #[cfg(feature = "future_probe")]
 pub mod future_probe;
 

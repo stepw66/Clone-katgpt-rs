@@ -184,22 +184,58 @@ All three signal types are proven: **correlational, causal, and selection-based.
 
 ---
 
+## Gate 4: Pareto Dominance (G4-real, FPCG vs activation steering) — PASS ✅
+
+**Test:** `fpcg_real_model_g4_pareto_vs_activation_steering` in `bench_292_fpcg_real_model.rs`.
+
+**Design:** The G4 gate asks whether FPCG Pareto-dominates the detection-side baseline (activation steering) on the same 20-prompt refusal corpus. The baseline is `EmotionDirections`-style activation steering: adding `α·w_refusal` to the residual at layer 13 — the same mechanism as the causal steering test, but now measured for BOTH behavior shift AND PPL cost.
+
+**New engine method:** `Gemma2PatchedForward::forward_prefill_with_offset` applies the residual offset at EVERY position during prefill (the deployed-steering configuration), returning per-position log p(next_token) for PPL computation. This is the activation-steering-as-deployed variant of `forward_with_residual_offset`.
+
+**Metrics (both conditions on the same 20-prompt corpus):**
+- Activation steering at magnitude α: `Δpp(α) = refuse_rate(+α) − refuse_rate(−α)`, `Δppl%(α) = (PPL(+α)+PPL(−α))/2/PPL(0) − 1`.
+- FPCG point: `(Δppl%=0%, Δpp=50.0pp)`. Zero PPL cost by construction (FPCG never modifies the residual); 50pp from Gate 3.
+
+**Results (Gemma 2 2B, 5 α magnitudes, 20 prompts × 11 forward passes):**
+
+| α | refuse+ | refuse− | Δpp | Δppl% | Dominated by FPCG? |
+|---|---------|---------|------|-------|--------------------|
+| 0.5 | 100% | 0% | 100pp | 15.07% | NO (more steering) |
+| 1.0 | 100% | 0% | 100pp | 165.29% | NO (more steering) |
+| 2.0 | 45% | 0% | 45pp | 71394% | YES |
+| 4.0 | 0% | 0% | 0pp | 3.7M% | YES |
+| 8.0 | 0% | 0% | 0pp | 26.4M% | YES |
+
+**Gate criterion (per `.benchmarks/292_fpcg_goat.md` §"G4-real"):** FPCG dominates at least one baseline point AND FPCG is itself Pareto-optimal.
+
+**Verdict: PASS ✅**
+- FPCG dominates **3 of 5** activation-steering points (the high-α regime where AS collapses).
+- FPCG is **Pareto-optimal** (no baseline achieves ≤0% PPL at ≥50pp — impossible since all baselines have Δppl% > 0).
+
+**Honest interpretation — complementarity, not strict dominance:**
+
+At low α (0.5–1.0), activation steering achieves HIGHER raw Δpp (100pp vs FPCG's 50pp) at a PPL cost (15–165%). FPCG does **not** dominate those points — they offer more steering at more cost. The two methods are complementary:
+- **FPCG**: zero-cost mild steering (50pp at 0% PPL).
+- **Activation steering**: high-strength steering (100pp at 15%+ PPL cost), collapses at high α.
+
+This matches the paper's headline (complementarity, not strict dominance). The gate confirms FPCG is a viable Pareto-frontier method with a unique zero-cost advantage.
+
 ## Reproduction
 
 ```bash
 # From riir-ai repo root
-# Run ALL three real-model gates (separability + causal + G1 steering):
+# Run ALL four real-model gates (separability + causal + G1 steering + G4 Pareto):
 GEMMA2_2B_GGUF=/Users/katopz/git/riir-train/data/gemma-2-2b-it-f16.gguf \
   cargo test --release -p riir-engine --features causal_validation \
     --test bench_292_fpcg_real_model -- --ignored --nocapture
 
-# Or run just the G1 steering gate:
+# Or run just the G4 Pareto gate:
 GEMMA2_2B_GGUF=/Users/katopz/git/riir-train/data/gemma-2-2b-it-f16.gguf \
   cargo test --release -p riir-engine --features causal_validation \
-    --test bench_292_fpcg_real_model -- fpcg_real_model_steering_g1 --ignored --nocapture
+    --test bench_292_fpcg_real_model -- fpcg_real_model_g4_pareto --ignored --nocapture
 ```
 
-Expected runtime: ~4 min (separability) + ~2 min (causal) + ~2.75 min (G1 steering) ≈ 9 min total.
+Expected runtime: ~4 min (separability) + ~2 min (causal) + ~2.75 min (G1) + ~12 min (G4) ≈ 21 min total. The G4 test is slower because it runs full-prompt forwards at every position (for PPL) across 11 conditions (baseline + 5 α × 2 directions) × 20 prompts.
 
 ---
 
@@ -213,9 +249,10 @@ Expected runtime: ~4 min (separability) + ~2 min (causal) + ~2.75 min (G1 steeri
 
 ## TL;DR
 
-The FPCG real-model validation is **complete** — all three gates PASS:
+The FPCG real-model validation is **complete** — all four gates PASS:
 1. **Separability (correlational):** AUC 1.000 — the refusal direction is perfectly linearly separable.
 2. **Causal steering (causal):** +5.81 logit shift — steering along the direction causally shifts behavior.
-3. **G1-real (selection-based):** Δpp = 50.0pp — the probe-guided token selection flips behavior by 50 percentage points between Positive and Negative.
+3. **G1-real (selection-based):** Δpp = 50.0pp — the probe-guided token selection flips behavior by 50 percentage points.
+4. **G4-real (Pareto dominance):** FPCG is Pareto-optimal and dominates 3 of 5 activation-steering points; complementarity at low α (AS achieves higher Δpp at PPL cost).
 
-The "no GGUF model on disk" blocker in Issue 032 was based on a false claim — the model was in `riir-train/data/`. All three signal types (correlational, causal, selection-based) are now proven on Gemma 2 2B using the modelless mean-difference probe (no training, no gradient descent). Promotion of `future_probe` to default-on is fully justified.
+The "no GGUF model on disk" blocker in Issue 032 was based on a false claim — the model was in `riir-train/data/`. All three signal types (correlational, causal, selection-based) are now proven on Gemma 2 2B using the modelless mean-difference probe (no training, no gradient descent). The G4 Pareto comparison confirms FPCG is a viable Pareto-frontier method with a unique zero-cost advantage. The remaining blocker for `future_probe` promotion is the G6 absolute-200ns-bar at d_model=4096 (the probe is 3.1× faster than its cousin but exceeds the absolute bar at 8B-class residual widths).
