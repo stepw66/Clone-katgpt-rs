@@ -470,6 +470,19 @@ pub mod zone_density;
 // GOAT gates pass.
 #[cfg(feature = "ac_prefix")]
 pub mod ac_prefix;
+
+// Causal Head-Importance Calibration & Scale-Normalized Heterogeneous Fusion
+// (Plan 358, Research 362, arXiv:2606.20097 HydraHead). Modelless
+// causal-intervention head scorer: activation patching (Eq 10) + path patching
+// (Eq 11) + span-level logit-diff readout (Eq 9) + cross-capability fusion
+// (Eq 12) + head partition mirroring RTPurbo's HeadCalibration. Plus
+// scale-normalized heterogeneous-branch fusion (Eq 13–14, currently unused).
+// Pure numeric over `&[f32]` + a caller-supplied patched-forward-pass closure;
+// the patched forward pass itself lives in riir-engine. Sibling of
+// `faithfulness_probe` (causal-intervention diagnostic pattern). Opt-in until
+// G1–G4 GOAT gate passes; competes for the RTPurbo calibration slot.
+#[cfg(feature = "causal_head_importance")]
+pub mod causal_head_importance;
 #[cfg(feature = "spectral_pruner")]
 pub use irrep_pruner::{
     IrrepPruner, IrrepPrunerConfig, irrep_pruner_from_config, spectral_flatness,
@@ -486,6 +499,13 @@ pub use group_invariance_probe::{
     GroupAction, SubgroupClass, SubgroupReport, classify_subgroup,
     classify_subgroup_with, discover_subgroup, discover_subgroup_into,
     invariance_score, score_concentration, score_variance,
+};
+
+#[cfg(feature = "causal_head_importance")]
+pub use causal_head_importance::{
+    ScaleNormalizedFusion, SpanLogitDiffReadout, direct_effect_importance,
+    fuse_across_capabilities, indirect_effect_importance,
+    partition_by_causal_score, per_capability_score,
 };
 
 #[cfg(feature = "latent_trajectory_geometry")]

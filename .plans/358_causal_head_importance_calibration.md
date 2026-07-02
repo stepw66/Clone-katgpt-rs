@@ -4,7 +4,7 @@
 **Research:** [katgpt-rs/.research/362_HydraHead_Causal_Head_Importance_Hybrid_Attention.md](../.research/362_HydraHead_Causal_Head_Importance_Hybrid_Attention.md)
 **Source paper:** [arXiv:2606.20097](https://arxiv.org/abs/2606.20097) — Tan et al., HydraHead, Alibaba, Jun 2026
 **Target:** `katgpt-rs/crates/katgpt-core/src/causal_head_importance/` (new module) + Cargo feature `causal_head_importance` (opt-in); RTPurbo wiring in `katgpt-rs/src/rt_turbo/calibration.rs`
-**Status:** Active — Phase 1 (skeleton)
+**Status:** Active — Phase 1 ✅ COMPLETE (skeleton shipped, 27 unit tests green), Phase 2–5 pending.
 
 ---
 
@@ -34,9 +34,9 @@ Ship two modelless, inference-time primitives distilled from HydraHead (arXiv:26
 
 ### Tasks
 
-- [ ] **T1.1** Create module directory `katgpt-rs/crates/katgpt-core/src/causal_head_importance/` with `mod.rs`, `readout.rs`, `patching.rs`, `scorer.rs`, `fusion.rs`.
-- [ ] **T1.2** Add feature flag `causal_head_importance` to `katgpt-rs/crates/katgpt-core/Cargo.toml` (default-off). No new heavy deps — the primitive operates on `&[f32]` slices and callbacks. Wire into `katgpt-core/src/lib.rs` behind `#[cfg(feature = "causal_head_importance")]`.
-- [ ] **T1.3** Define `SpanLogitDiffReadout` in `readout.rs` (paper Eq 9):
+- [x] **T1.1** Create module directory `katgpt-rs/crates/katgpt-core/src/causal_head_importance/` with `mod.rs`, `readout.rs`, `patching.rs`, `scorer.rs`, `fusion.rs`.
+- [x] **T1.2** Add feature flag `causal_head_importance` to `katgpt-rs/crates/katgpt-core/Cargo.toml` (default-off). No new heavy deps — the primitive operates on `&[f32]` slices and callbacks. Wire into `katgpt-core/src/lib.rs` behind `#[cfg(feature = "causal_head_importance")]`.
+- [x] **T1.3** Define `SpanLogitDiffReadout` in `readout.rs` (paper Eq 9):
   ```rust
   /// Span-level logit-difference readout with exponential decay (paper Eq 9).
   ///
@@ -79,7 +79,7 @@ Ship two modelless, inference-time primitives distilled from HydraHead (arXiv:26
   }
   ```
   Unit tests: single position → returns `correct − counterfactual`; two equal-weight positions with λ=1.0 → mean; λ=0.0 → first-position only; empty span → 0.0 (no division by zero).
-- [ ] **T1.4** Define the activation-patching direct-effect (receiver) score in `patching.rs` (paper Eq 10):
+- [x] **T1.4** Define the activation-patching direct-effect (receiver) score in `patching.rs` (paper Eq 10):
   ```rust
   /// Normalized causal-importance score for a single head (or any patchable unit)
   /// via activation patching (paper Eq 10).
@@ -119,7 +119,7 @@ Ship two modelless, inference-time primitives distilled from HydraHead (arXiv:26
   }
   ```
   Unit tests: `m_patched = m_clean` → IE = 0 (dispensable); `m_patched = m_corrupt` → IE = 1 (load-bearing); `m_clean = m_corrupt` → IE = 0 (undefined, safe default); intermediate → linear interpolation.
-- [ ] **T1.5** Define the path-patching indirect-effect (sender) score in `patching.rs` (paper Eq 11 sender component):
+- [x] **T1.5** Define the path-patching indirect-effect (sender) score in `patching.rs` (paper Eq 11 sender component):
   ```rust
   /// One-step-back indirect-effect (sender) score via path patching.
   ///
@@ -150,7 +150,7 @@ Ship two modelless, inference-time primitives distilled from HydraHead (arXiv:26
       direct_effect_importance(m_clean, m_corrupt, m_path_patched)
   }
   ```
-- [ ] **T1.6** Define the per-capability score + cross-capability fusion in `scorer.rs` (paper Eq 11–12):
+- [x] **T1.6** Define the per-capability score + cross-capability fusion in `scorer.rs` (paper Eq 11–12):
   ```rust
   /// Per-capability head score (paper Eq 11).
   ///
@@ -221,7 +221,7 @@ Ship two modelless, inference-time primitives distilled from HydraHead (arXiv:26
   }
   ```
   Unit tests: single capability + single head → normalized to 0 (range=0 guard); two capabilities equal weight → mean; min-max normalizes per-capability correctly.
-- [ ] **T1.7** Define the head-importance ranking → partition helper in `scorer.rs` (mirrors RTPurbo's `calibrate_from_scores`):
+- [x] **T1.7** Define the head-importance ranking → partition helper in `scorer.rs` (mirrors RTPurbo's `calibrate_from_scores`):
   ```rust
   /// Rank heads by causal-importance score and partition into critical vs
   /// convertible sets, mirroring RTPurbo's `HeadCalibration` shape.
@@ -244,7 +244,7 @@ Ship two modelless, inference-time primitives distilled from HydraHead (arXiv:26
   }
   ```
   Unit tests: empty → empty; single head → critical; `min_one_per_layer` rescues an unrepresented layer; ties broken by index.
-- [ ] **T1.8** Define `ScaleNormalizedFusion` in `fusion.rs` (paper Eq 13–14):
+- [x] **T1.8** Define `ScaleNormalizedFusion` in `fusion.rs` (paper Eq 13–14):
   ```rust
   /// Scale-normalized fusion of heterogeneous attention branch outputs
   /// (paper Eq 13–14). Independent RMSNorm per branch + index-preserving
@@ -311,8 +311,8 @@ Ship two modelless, inference-time primitives distilled from HydraHead (arXiv:26
   }
   ```
   Unit tests: identity γ=1 → output is RMSNorm of input; γ=0 → zeros; γ=2 → 2× RMSNormed; mixed branches (synthetic FA-sharp + GDN-flat inputs) → both normalized to same scale.
-- [ ] **T1.9** Re-export public API from `mod.rs` behind the feature flag.
-- [ ] **T1.10** Verify standalone compile: `CARGO_TARGET_DIR=/tmp/katgpt_358 cargo check -p katgpt-core --features causal_head_importance` (per AGENTS.md rule).
+- [x] **T1.9** Re-export public API from `mod.rs` behind the feature flag.
+- [x] **T1.10** Verify standalone compile: `CARGO_TARGET_DIR=/tmp/katgpt_358 cargo check -p katgpt-core --features causal_head_importance` (per AGENTS.md rule). **PASS** — clean compile; full lib suite 693 pass (666 + 27 new), 0 fail; default-feature build clean.
 
 **Phase 1 exit criterion:** module compiles standalone; all unit tests pass; both primitives are instantiable in isolation.
 
