@@ -1,6 +1,6 @@
 # KatGPT-RS
 
-A **GOAT-proved** neuro-symbolic micro-Transformer with speculative decoding, constraint pruning, and **359 feature flags (144 default-on, all GOAT-proved)** — built in Rust. Pure algorithms, zero side effects, MIT licensed.
+A **GOAT-proved** neuro-symbolic micro-Transformer with speculative decoding, constraint pruning, and **359 feature flags (147 default-on, all GOAT-proved)** — built in Rust. Pure algorithms, zero side effects, MIT licensed.
 
 Inspired by [Andrej Karpathy's microgpt](https://karpathy.github.io/2026/02/12/microgpt/).
 
@@ -148,7 +148,7 @@ graph TD
 
 ## 🔄 E2E Inference Flow — Default GOAT Stack
 
-The default production stack has **144 GOAT-proved default-on features** (359 total flags), but they don't all run on every token. The architecture uses **layered gating** — most features are bandit-driven, Option-gated, or compile-time-only.
+The default production stack has **147 GOAT-proved default-on features** (359 total flags), but they don't all run on every token. The architecture uses **layered gating** — most features are bandit-driven, Option-gated, or compile-time-only.
 
 ```mermaid
 flowchart TD
@@ -333,6 +333,9 @@ graph LR
 | **Off-Principal Retrieval** (`off_principal_retrieval`) | 264 | G3–G4 ✅ | ≥99% principal energy removed, off-principal beats cosine top-1 |
 | **Spectral-Concentration Adaptive Rank** (`spectral_rank`) | 264 | G5–G6 ✅ | ≥30% avg rank reduction via OPD spectrum concentration |
 | **Module-Energy Compute Routing** (`module_energy_route`) | 264 | G7–G8 ✅ | Paper FFN profile match (Plasma/GPU/ANE/SIMD), monotone QPS routing |
+| **Band Conditioner** (`band_conditioner`) | 265 | G0a/G0b ✅ | Band conditioning set + Fisher-z CI test primitives for task-relevant identifiability (arXiv 2605.12733) — band-set exact match to paper Fig 2; Fisher-z power ≥90% at n=1000 α=0.05. Default-on (T5.3, 2026-07-02). |
+| **SPLAT Specialist Projection** (`specialist_projection`) | 265 | G4–G6 ✅ | Specialist latent projection (Fusion B) — ≥30% hidden-dim reduction at parity, mask discovery ≤ d_hidden samples, MSA rescue at 50% density. Default-on (T5.3, 2026-07-02). |
+| **CCCP Collider-Consistency Pruner** (`collider_consistency`) | 265 | G7–G9 ✅ | Collider-consistency ConstraintPruner for DDTree (Fusion C) — dead-branch rejection ≥90%, expansion reduction ≥25%, no-task overhead <5ns. Default-on (T5.3, 2026-07-02). |
 | **Gauge-Invariant Adapter Composition** (`gauge_invariant`) | 270 | 17/17 ✅ | LoRA-Muon NS inv-sqrt + gauge rebalance + compose, 4609%→0% error |
 | **CHIAR Chiaroscuro Attention** (`chiaroscuro`) | 269 | 9/9 ✅ | Per-token DCT spectral entropy KV strategy (3.03× compression), operator routing, collapse discovery |
 | **Attention Matching** (`attn_match`) | 271 | 9/9 ✅ | Modelless KV compaction `(K,V)→(Ck,β,Cv)`: β-recovery 1e-6, Cv Frobenius 0.0, 3.01× SIMD, blocked Cholesky (32×32), adaptive router (scalar/SIMD/rayon/GPU/ANE) |
