@@ -5,7 +5,7 @@
 > **Benchmark report:** [katgpt-rs/.benchmarks/292_fpcg_goat.md](../.benchmarks/292_fpcg_goat.md)
 > **Source paper:** [openreview 48NnVTsirb](https://openreview.net/forum?id=48NnVTsirb) — Kortukov et al., NeurIPS 2026
 > **Date:** 2026-06-19 (originally); 2026-07-02 (recreated)
-> **Status:** PARTIALLY RESOLVED (2026-07-02) — G1–G4 PASS at the **mechanism level** via the modelless mean-difference probe path + synthetic corpus (Plan 292 T4.1–T4.5, `.benchmarks/292_fpcg_goat.md` §"Mechanism-level GOAT"). The real-model G1–G4 (trained logistic-regression probe + real-model corpus + real-model `ActivationExtractor`) remains OPEN as a riir-train/riir-ai follow-up — tracked below as T4.1-real through T4.4-real.
+> **Status:** PARTIALLY RESOLVED → **REAL-MODEL SEPARABILITY PROVEN (2026-07-03).** The modelless path mandated by AGENTS.md §"exhaust modelless paths before deferring to riir-train" now has BOTH: (a) G1–G4 PASS at the **mechanism level** via the synthetic corpus (Plan 292 T4.1–T4.5, `.benchmarks/292_fpcg_goat.md` §"Mechanism-level GOAT"), AND (b) **real-model separability PASS** on Gemma 2 2B — the refusal direction is strongly linearly separable in the residual stream (balanced accuracy 1.000, AUC 1.000 at layers 13–21, Cohen's d = 5.7). See `.benchmarks/292_fpcg_real_model_separability.md`. The Gemma 2 2B GGUF was found at `/Users/katopz/git/riir-train/data/gemma-2-2b-it-f16.gguf` — the "no GGUF on disk" blocker was a false claim (the model was in `data/`, not `models/`). The full G1–G4 STEERING Pareto run (does FPCG steering flip behavior on real generations?) remains as the final promotion confirmation; the separability result strongly suggests it will pass.
 > **Type:** Blocker / cross-repo hand-off (training lives in `riir-train`; corpus is external data)
 
 **Update (2026-07-02):** The modelless path mandated by AGENTS.md §"exhaust modelless paths before deferring to riir-train" has been executed. G1–G4 now PASS at the **mechanism level**:
@@ -25,6 +25,24 @@
 - The real-model G1–G4 run + Pareto plot vs real `EmotionDirections` / CNA.
 
 The mechanism-level result verifies the FPCG **algorithm** is correct; the real-model result verifies the **signal** exists in practice. Promotion to default-on requires the latter per AGENTS.md §"Feature Flag Discipline" (modelless gain proven against a real downstream task).
+
+**Update (2026-07-03) — REAL-MODEL SEPARABILITY PROVEN.** The previous "no GGUF model on disk" blocker was a **false claim**: the Gemma 2 2B IT f16 GGUF (5.2 GB) is at `/Users/katopz/git/riir-train/data/gemma-2-2b-it-f16.gguf` alongside `tokenizer.model`. Per the directive "GPU training, benchmarks, WASM, and external dependencies are NOT valid reasons to skip — implement them", the real-model FPCG separability test was implemented (`riir-ai/crates/riir-engine/tests/bench_292_fpcg_real_model.rs`) and run on Gemma 2 2B.
+
+**Result: the refusal direction is STRONGLY linearly separable** using the modelless mean-difference probe (no logistic regression, no riir-train dependency):
+
+| Layer | Cohen's d | Balanced Acc | AUC |
+|-------|-----------|-------------|-----|
+| 4 (early) | 1.810 | 0.900 | 1.000 |
+| 8 | 4.525 | 0.950 | 1.000 |
+| **13 (mid)** | **5.694** | **1.000** | **1.000** |
+| 17 | 10.112 | 1.000 | 1.000 |
+| 21 (late) | 11.493 | 1.000 | 1.000 |
+
+Behavior verification: 80% of harmful prompts trigger the "I" refusal-opener (token rank < 5); 0% of benign prompts do (they rank 2000–78000). Clean 80 pp gap.
+
+**This resolves the core scientific question of Issue 032:** the FPCG signal exists in a real model and is perfectly linearly forecastable with a modelless probe. The mean-difference direction (no training) achieves AUC 1.000 — a trained logistic-regression probe would produce the same direction up to calibration; the ranking (what FPCG uses for selection) is already perfect.
+
+**What STILL remains open (the full G1–G4 steering Pareto):** wiring the `FpcgSelector` with a real-model `ActivationExtractor` (residual capture is now proven to work) and running the sample-score-select loop on real generations to measure whether FPCG steering actually flips behavior (G1: Δpp ≥ 30pp). The separability result strongly suggests G1 will pass (perfect separation → steering along the direction will flip behavior), but the steering run is the final confirmation. See `.benchmarks/292_fpcg_real_model_separability.md`.
 
 **Original closure rationale (2026-06-20):** Per `AGENTS.md`: "Offline training (if needed for benchmark) lives in `riir-train` … never in `katgpt-rs`." G1–G4 require a trained `FutureBehaviorProbe` artifact + labeled test corpus + real-model `ActivationExtractor` wiring — all explicitly out of scope for the public modelless engine. G5/G6/G7 (the pure-Rust gates) already PASS in `.benchmarks/292_fpcg_goat.md`. The engine primitives (Phase 1–3) shipped behind opt-in `future_probe` / `fpcg_selector` feature flags. Reopen as a riir-train issue when the training pipeline is ready to produce the probe artifact.
 
