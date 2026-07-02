@@ -1,6 +1,6 @@
 # Proposal 004 — Adaptive Causal Calibration: cheap-proxy-escalate for RTPurbo head-importance scoring
 
-Status: **proposed** (not yet implemented — deferred to a plan only after G1/G2 validation)
+Status: **shipped (Phase 1+2), promotion REJECTED (Phase 4)** — G1 FAILED on real Gemma 2 2B (Plan 360 Phase 5b, 2026-07-02). `AdaptiveCausal` stays opt-in; `AttentionMass` remains default.
 Branch: `develop` (per global rule — no feature branches)
 Owner: unassigned
 Fusion of: Plan 353 (`HeadSubstitutionGate` cheap-proxy→expensive-validation pattern) × Plan 358
@@ -20,14 +20,15 @@ exist it pays causal cost only on `k ≈ 4–8` heads, not `n_heads × n_samples
 **This is a `katgpt-rs` invention, not a distillation of HydraHead (arXiv:2606.20097).**
 HydraHead supplies the causal scorer (Plan 358, already shipped). The adaptive
 escalation scheme and the OV-circuit cheap proxy proposed here are **our design**.
-The proxy is an **unvalidated mech-interp hypothesis** — promotion to default is
-blocked on empirical validation that can only run in `riir-engine` (the patched
-forward pass is explicitly out of scope for katgpt-rs per Plan 358 Risk #1/#4).
+**The proxy has been VALIDATED and REFUTED** — G1 on real Gemma 2 2B (Plan 360
+Phase 5b, 2026-07-02) showed precision=0.939 @ recall=0.463 at the best operating
+point. No tau achieves the gate floor (precision ≥ 0.8 @ recall ≥ 0.9). The proxy
+is correlated with bystander status but cannot achieve the required recall.
 
-What lands now: the open decision-rule primitive (pure fn over caller-supplied
-`(attention_mass, output_norm)` pairs — leaf-clean, same pattern as the existing
-causal scorer). What is deferred: G1/G2 validation (needs a real transformer
-forward), and therefore any promotion to default.
+What landed: the open decision-rule primitive (Phase 1+2, shipped behind
+`adaptive_causal_calibration` feature). What was validated: G1/G2 on real Gemma 2
+2B (Plan 360 Phase 5b). **Verdict: promotion REJECTED.** The primitive stays
+opt-in for experimentation; cross-model validation remains open as future work.
 
 ## The problem this solves
 
@@ -158,12 +159,12 @@ ceiling: **GOAT** (provable cost gain at parity quality), not Super-GOAT.
 
 ## GOAT gate
 
-| Gate | Criterion | Where it runs |
-|---|---|---|
-| **G1 — proxy precision** | On a real transformer, does `attention_mass[h] / \|\|OV_out[h]\|\|` predict causal IE = 0 with precision ≥ 0.8 at recall ≥ 0.9? (i.e. when the proxy flags a suspect, is it actually a bystander ≥ 80% of the time, and does it catch ≥ 90% of real bystanders?) | **riir-engine** — needs real transformer forward for OV outputs + patched forward for ground-truth IE. **Cannot run in katgpt-rs.** |
-| **G2 — cost reduction** | At production head counts (n_heads ∈ {16, 64, 144}) and typical bystander fractions (0%, 10%, 25%, 50%), does escalating on k suspects bring total calibration cost within ~2× of pure `AttentionMass`? (Target: `k × n_samples + 1 forward ≪ n_heads × n_samples`.) | riir-engine (real forward cost) + katgpt-rs (partition-step microbench, mirroring Plan 358 G3). |
-| **G3 — no-regression** | When bystanders = 0, `AdaptiveCausal` partition must equal `AttentionMass` partition bit-for-bit (no suspects → no escalation → identical ranking). | katgpt-rs unit test. |
-| **G4 — alloc-free hot path** | The suspect-detection fn is `#[inline]`, takes `&[(f32, f32)]` (or two `&[f32]`), returns a small fixed-size suspect index set, allocates nothing. | katgpt-rs (by inspection + criterion, mirroring Plan 358 G4). |
+| Gate | Criterion | Where it runs | Result |
+|---|---|---|---|
+| **G1 — proxy precision** | On a real transformer, does `attention_mass[h] / \|\|OV_out[h]\|\|` predict causal IE = 0 with precision ≥ 0.8 at recall ≥ 0.9? (i.e. when the proxy flags a suspect, is it actually a bystander ≥ 80% of the time, and does it catch ≥ 90% of real bystanders?) | **riir-engine** — needs real transformer forward for OV outputs + patched forward for ground-truth IE. **Cannot run in katgpt-rs.** | **FAIL** (2026-07-02, Gemma 2 2B F16, 312 heads). Best: precision=0.939 @ recall=0.463. |
+| **G2 — cost reduction** | At production head counts (n_heads ∈ {16, 64, 144}) and typical bystander fractions (0%, 10%, 25%, 50%), does escalating on k suspects bring total calibration cost within ~2× of pure `AttentionMass`? (Target: `k × n_samples + 1 forward ≪ n_heads × n_samples`.) | riir-engine (real forward cost) + katgpt-rs (partition-step microbench, mirroring Plan 358 G3). | PASS (cost model holds; patched≈capture 0.994×). Moot given G1 FAIL. |
+| **G3 — no-regression** | When bystanders = 0, `AdaptiveCausal` partition must equal `AttentionMass` partition bit-for-bit (no suspects → no escalation → identical ranking). | katgpt-rs unit test. | PASS (shipped Phase 2). |
+| **G4 — alloc-free hot path** | The suspect-detection fn is `#[inline]`, takes `&[(f32, f32)]` (or two `&[f32]`), returns a small fixed-size suspect index set, allocates nothing. | katgpt-rs (by inspection + criterion, mirroring Plan 358 G4). | PASS (shipped Phase 2). |
 
 **Promotion rule:**
 - **G1 + G2 + G3 + G4 all pass** → promote `AdaptiveCausal` to default
@@ -172,6 +173,7 @@ ceiling: **GOAT** (provable cost gain at parity quality), not Super-GOAT.
   stays opt-in for the "I want full causal patching regardless of cost" regime.
 - **G1 fails** (proxy imprecise) → `AdaptiveCausal` stays opt-in or is dropped.
   Do NOT promote. The cost win is contingent on the proxy being right often enough.
+  **← THIS BRANCH TAKEN (2026-07-02). G1 FAIL on Gemma 2 2B.**
 - **G2 fails** (suspect count too high in practice) → same: stays opt-in. The win
   requires k ≪ n_heads in production; if real models have ~50% bystanders the
   escalation fires on half the heads and there's no savings.
@@ -225,13 +227,27 @@ pattern: the primitive is the *rule*, the caller supplies the *measurement*.
 - Document in the enum docstring that `AdaptiveCausal` requires the caller to supply per-head OV norms (unlike the other two modes).
 - **Do NOT change `CalibrationMode::default()`** — stays `AttentionMass`.
 
-### Phase 3 — Deferred: G1 + G2 validation (riir-engine)
-- Blocked. Not in this proposal's scope. A riir-ai/riir-engine plan owns this.
-- Outcome of Phase 3 decides Phase 4.
+### Phase 3 — G1 + G2 validation (riir-engine)
+- **COMPLETE — see [Plan 360](../riir-ai/.plans/360_proposal_004_phase3_ov_extraction_g1_g2_validation.md)**
+  and [.benchmarks/360_g1_real_model_gemma2.md](../riir-ai/.benchmarks/360_g1_real_model_gemma2.md).**
+- **G1: FAIL** on Gemma 2 2B (F16, 13 layers × 3 pairs × 8 heads = 312 heads).
+  Best operating point: tau=0.10 → precision=0.939, recall=0.463. No tau achieves
+  precision ≥ 0.8 @ recall ≥ 0.9. The OV-circuit cheap proxy is correlated with
+  bystander status but cannot achieve the required recall floor.
+- **G2: cost model holds** (patched≈capture forward, 0.994× ratio), but moot
+  given G1 FAIL.
 
-### Phase 4 — Promotion decision (katgpt-rs, only after Phase 3 passes)
-- If G1+G2 pass: flip `CalibrationMode::default()` to `AdaptiveCausal`, demote `AttentionMass` to opt-in fallback, record in `.benchmarks/004_*.md`.
-- If G1 or G2 fails: keep `AdaptiveCausal` opt-in, document why, close the proposal as "shipped open primitive, promotion rejected".
+### Phase 4 — Promotion decision (katgpt-rs)
+- **G1 FAILED → `AdaptiveCausal` stays opt-in.** `AttentionMass` remains default.
+- Per the Phase 4 contingency rule: "If G1 or G2 fails: keep `AdaptiveCausal`
+  opt-in, document why, close the proposal as 'shipped open primitive, promotion
+  rejected'."
+- **Proposal 004 status: shipped open primitive (Phase 1+2), promotion REJECTED
+  (Phase 4).** The primitive remains available behind the
+  `adaptive_causal_calibration` feature for callers who want to experiment with
+  the escalation scheme despite the unreliable proxy. Cross-model validation
+  (Llama/Mistral) remains open as future work if a different architecture shows
+  cleaner OV-bystander separation.
 
 ## Risks
 
