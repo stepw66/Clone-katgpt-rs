@@ -426,7 +426,7 @@ where
 /// `jac`, `svd_work`, `svd_result`). The benchmark breakdown for R^8→R^8:
 /// - [`jacobian_svd_at`] (with 17-`Vec` conversion): ~830 ns/call
 /// - [`jacobian_svd_at_into`] (this fn, zero alloc): ~455 ns/call
-/// The ~375 ns difference is the SOA→owned-`Vec` conversion cost.
+///   The ~375 ns difference is the SOA→owned-`Vec` conversion cost.
 ///
 /// # Panics
 ///

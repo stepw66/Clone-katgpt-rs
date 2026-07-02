@@ -358,8 +358,6 @@ fn main() {
         tile_size,
         var_norm: config.clone(),
         hadamard: false,
-        #[cfg(feature = "static_cal_tables")]
-        static_cal: None,
         #[cfg(feature = "targeted_precision")]
         precision_budget: None,
     };
@@ -440,8 +438,6 @@ fn main() {
         tile_size,
         var_norm: config.clone(),
         hadamard: true,
-        #[cfg(feature = "static_cal_tables")]
-        static_cal: None,
         #[cfg(feature = "targeted_precision")]
         precision_budget: None,
     };

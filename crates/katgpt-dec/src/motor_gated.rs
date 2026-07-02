@@ -120,6 +120,7 @@ pub fn relu_gate_into(input: &[f32], relu_slope: f32, output: &mut [f32]) {
 /// paper's experiments and all GOAT gates are rank-0; rank ≥ 1 callers wanting
 /// zero-alloc should compose the DEC operators directly.
 #[inline]
+#[allow(clippy::too_many_arguments, reason = "motor-gated evolution needs mesh + field + motor + dual scratch buffers; matches the paper's operator signature")]
 pub fn evolve_motor_gated_field(
     cx: &CellComplex,
     h: &mut CochainField,
@@ -201,8 +202,8 @@ pub fn evolve_motor_gated_field(
     if motor_dim > 0 {
         for cell in 0..n {
             let base = cell * dim;
-            for ch in 0..motor_dim {
-                h.data[base + ch] *= 1.0 + dt * motor_vec[ch];
+            for (ch, &m) in motor_vec.iter().enumerate().take(motor_dim) {
+                h.data[base + ch] *= 1.0 + dt * m;
             }
         }
     }

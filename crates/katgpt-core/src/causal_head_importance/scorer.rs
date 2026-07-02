@@ -49,9 +49,9 @@ pub fn fuse_across_capabilities(
     // second pass.
     let mut cap_min = vec![f32::INFINITY; n_caps];
     let mut cap_max = vec![f32::NEG_INFINITY; n_caps];
-    for h in 0..n_heads {
+    for row in per_head_per_capability {
         for c in 0..n_caps {
-            let s = per_head_per_capability[h][c].1;
+            let s = row[c].1;
             if s < cap_min[c] {
                 cap_min[c] = s;
             }
@@ -63,11 +63,11 @@ pub fn fuse_across_capabilities(
 
     // Weighted-mean fusion across capabilities with fused min-max normalization.
     let mut out = vec![0.0f32; n_heads];
-    for h in 0..n_heads {
+    for (h, row) in per_head_per_capability.iter().enumerate() {
         let mut total_w = 0.0f32;
         let mut acc = 0.0f32;
         for c in 0..n_caps {
-            let (w, s) = per_head_per_capability[h][c];
+            let (w, s) = row[c];
             let range = cap_max[c] - cap_min[c];
             let norm = if range.abs() < f32::EPSILON {
                 0.0
@@ -129,37 +129,37 @@ pub fn partition_by_causal_score(
     let mut convertible: Vec<usize> = order;
 
     // Constrained Global Screening: ensure at least one critical head per layer.
-    if min_one_per_layer {
-        if let Some(layers) = layer_ids {
-            debug_assert_eq!(layers.len(), n, "layer_ids must have one entry per head");
-            // Dense layer-coverage bitset indexed by layer id (O(1) lookup,
-            // no hashing) instead of HashSet<usize>.
-            let max_layer = layers.iter().copied().max().unwrap_or(0);
-            let mut layer_covered = vec![false; max_layer + 1];
-            for &h in &critical {
-                layer_covered[layers[h]] = true;
+    if min_one_per_layer
+        && let Some(layers) = layer_ids
+    {
+        debug_assert_eq!(layers.len(), n, "layer_ids must have one entry per head");
+        // Dense layer-coverage bitset indexed by layer id (O(1) lookup,
+        // no hashing) instead of HashSet<usize>.
+        let max_layer = layers.iter().copied().max().unwrap_or(0);
+        let mut layer_covered = vec![false; max_layer + 1];
+        for &h in &critical {
+            layer_covered[layers[h]] = true;
+        }
+        // Scan convertible in score-desc order (it's the tail of `order`,
+        // still sorted desc). The first head of each uncovered layer we
+        // encounter is its highest-scoring head — promote it. Single pass,
+        // no swap_remove (preserves scan order).
+        let mut promoted: Vec<usize> = Vec::new();
+        for &h in &convertible {
+            let layer = layers[h];
+            if !layer_covered[layer] {
+                layer_covered[layer] = true;
+                promoted.push(h);
             }
-            // Scan convertible in score-desc order (it's the tail of `order`,
-            // still sorted desc). The first head of each uncovered layer we
-            // encounter is its highest-scoring head — promote it. Single pass,
-            // no swap_remove (preserves scan order).
-            let mut promoted: Vec<usize> = Vec::new();
-            for &h in &convertible {
-                let layer = layers[h];
-                if !layer_covered[layer] {
-                    layer_covered[layer] = true;
-                    promoted.push(h);
-                }
+        }
+        if !promoted.is_empty() {
+            // Dense head-id bitset for O(1) retain (no HashSet hashing).
+            let mut is_promoted = vec![false; n];
+            for &h in &promoted {
+                is_promoted[h] = true;
             }
-            if !promoted.is_empty() {
-                // Dense head-id bitset for O(1) retain (no HashSet hashing).
-                let mut is_promoted = vec![false; n];
-                for &h in &promoted {
-                    is_promoted[h] = true;
-                }
-                convertible.retain(|&h| !is_promoted[h]);
-                critical.extend(promoted);
-            }
+            convertible.retain(|&h| !is_promoted[h]);
+            critical.extend(promoted);
         }
     }
 

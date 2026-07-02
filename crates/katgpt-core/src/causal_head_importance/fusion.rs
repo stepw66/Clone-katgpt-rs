@@ -52,12 +52,11 @@ impl ScaleNormalizedFusion {
     ) {
         let n_heads = per_head_outputs.len();
         debug_assert_eq!(out.len(), n_heads * head_dim);
-        for h in 0..n_heads {
-            let src = per_head_outputs[h];
+        for (h, src) in per_head_outputs.iter().enumerate() {
             debug_assert_eq!(src.len(), head_dim);
             // RMSNorm: compute inv_rms once per head.
             let mut sum_sq = 0.0f32;
-            for v in src {
+            for v in *src {
                 sum_sq += v * v;
             }
             let inv_rms = 1.0 / (sum_sq / head_dim as f32 + self.eps).sqrt();

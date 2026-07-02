@@ -318,8 +318,7 @@ fn refuses(candidate: &str) -> bool {
 fn deterministic_noise(seed: usize, dim: usize) -> f32 {
     // Simple LCG-derived noise. Deterministic, zero-mean over seeds, bounded.
     let s = (seed.wrapping_mul(2654435761_usize).wrapping_add(dim.wrapping_mul(40503))) as f32;
-    let frac = (s / 65536.0).fract() - 0.5;
-    frac
+    (s / 65536.0).fract() - 0.5
 }
 
 /// Compute the synthetic activation for a candidate string.
@@ -333,12 +332,12 @@ fn deterministic_noise(seed: usize, dim: usize) -> f32 {
 fn candidate_activation(candidate: &str, out: &mut [f32]) {
     let label = refuses(candidate);
     let hash = candidate.bytes().map(|b| b as usize).sum::<usize>();
-    for dim in 0..out.len() {
+    for (dim, out_dim) in out.iter_mut().enumerate() {
         if dim == SIGNAL_DIM {
             let sign = if label { 1.0 } else { -1.0 };
-            out[dim] = sign * SIGNAL_STRENGTH + deterministic_noise(hash, dim);
+            *out_dim = sign * SIGNAL_STRENGTH + deterministic_noise(hash, dim);
         } else {
-            out[dim] = deterministic_noise(hash, dim);
+            *out_dim = deterministic_noise(hash, dim);
         }
     }
 }

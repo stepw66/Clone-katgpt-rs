@@ -435,8 +435,8 @@ fn validate_dec_flow_field(scenario: &Scenario) -> bool {
     let cx = CellComplex::grid_2d(W, H);
     let dist = dijkstra_potential(W, H, scenario.goal, &scenario.blocked);
     let mut pot = CochainField::zeros(0, cx.n_vertices(), 1);
-    for v in 0..cx.n_vertices() {
-        pot.set_scalar(v, dist[v]);
+    for (v, &d) in dist.iter().enumerate() {
+        pot.set_scalar(v, d);
     }
 
     // Pure exact flow (alpha=1) — the goal-seeking gradient channel.
@@ -510,7 +510,7 @@ fn main() {
     println!();
 
     // ── G1: Open field — sanity (must be exactly optimal) ──────────
-    let open_agg = aggregate(&[open.clone()]);
+    let open_agg = aggregate(std::slice::from_ref(&open));
     print_aggregate("G1: Open field (sanity)", &open_agg, 1.001, 1.0);
     println!();
 
@@ -573,11 +573,12 @@ fn main() {
     let g2_pass = g2_agg.max_cost_ratio <= 1.05 && g2_agg.success_rate >= 0.98;
     let g3_pass = g3_agg.max_cost_ratio <= 1.10 && g3_agg.success_rate >= 0.95;
 
-    let mut results = Vec::new();
-    results.push(("G1 Open field", g1_pass));
-    results.push(("G2 Random 10%", g2_pass));
-    results.push(("G3 Wall+gap", g3_pass));
-    results.push(("G4 Density scale", g4_all_pass));
+    let results = vec![
+        ("G1 Open field", g1_pass),
+        ("G2 Random 10%", g2_pass),
+        ("G3 Wall+gap", g3_pass),
+        ("G4 Density scale", g4_all_pass),
+    ];
 
     for (name, pass) in &results {
         println!("  {name}: {}", if *pass { "✅ PASS" } else { "❌ FAIL" });
@@ -608,8 +609,8 @@ fn bench_single_route_timing(open: &Scenario, wall: &Scenario) {
     let cx = CellComplex::grid_2d(W, H);
     let dist = dijkstra_potential(W, H, open.goal, &open.blocked);
     let mut pot = CochainField::zeros(0, cx.n_vertices(), 1);
-    for v in 0..cx.n_vertices() {
-        pot.set_scalar(v, dist[v]);
+    for (v, &d) in dist.iter().enumerate() {
+        pot.set_scalar(v, d);
     }
     let _field = DecFlowField::compute(&cx, &pot, 1.0, 0.0, 0.0);
     let _route = dec_route_greedy(&dist, W, H, open.start, open.goal, &open.blocked);
@@ -666,8 +667,8 @@ fn bench_multi_agent_amortisation(scenario: &Scenario) {
     let cx = CellComplex::grid_2d(W, H);
     let dist = dijkstra_potential(W, H, scenario.goal, &scenario.blocked);
     let mut pot = CochainField::zeros(0, cx.n_vertices(), 1);
-    for v in 0..cx.n_vertices() {
-        pot.set_scalar(v, dist[v]);
+    for (v, &d) in dist.iter().enumerate() {
+        pot.set_scalar(v, d);
     }
     let _field = DecFlowField::compute(&cx, &pot, 1.0, 0.0, 0.0);
     let build_us = build_start.elapsed().as_secs_f64() * 1e6;

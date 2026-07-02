@@ -339,7 +339,7 @@ pub enum CalibrationMode {
     /// `AttentionMass`). Requires the `adaptive_causal_calibration` feature.
     ///
     /// **UNVALIDATED.** Promotion to default is blocked on G1 (proxy precision)
-    /// + G2 (cost reduction), both deferred to riir-engine. Unlike the other
+    /// and G2 (cost reduction), both deferred to riir-engine. Unlike the other
     /// two modes, the caller must supply per-head OV output norms (from a real
     /// transformer forward) — see `calibrate_from_adaptive_causal`.
     AdaptiveCausal = 2,

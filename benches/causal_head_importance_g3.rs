@@ -44,7 +44,7 @@ fn time_ns<F: FnMut()>(iters: usize, mut f: F) -> f64 {
     }
     let start = Instant::now();
     for _ in 0..iters {
-        black_box(f());
+        f();
     }
     start.elapsed().as_secs_f64() * 1e9 / iters as f64
 }

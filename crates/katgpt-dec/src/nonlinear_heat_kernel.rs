@@ -71,6 +71,7 @@ pub const MAX_N_QUAD: usize = 8;
 /// rule is exact for polynomials of degree `≤ 2n - 1`.
 ///
 /// Panics for `n = 0` or `n > 8`.
+#[allow(clippy::excessive_precision, reason = "canonical Gauss-Legendre nodes/weights kept at full published precision for traceability vs standard references")]
 fn gauss_legendre_nodes_weights(n: usize) -> (&'static [f64], &'static [f64]) {
     match n {
         1 => (&[0.0_f64], &[2.0_f64]),
@@ -243,6 +244,7 @@ fn resize_field(field: &mut CochainField, rank: u8, dim: usize, len: usize) {
 ///
 /// See [`heat_kernel_trajectory_nonlinear`] — this function shares the same
 /// parameter set, plus `out` (the accumulation target) and `scratch`.
+#[allow(clippy::too_many_arguments, reason = "nonlinear expm quadrature needs mesh + eig + field + motor + t + quad + relu + out + scratch; matches the paper's operator signature")]
 pub fn expm_source_term_quadrature(
     cx: &CellComplex,
     eig: &DecEigendecomposition,
@@ -261,7 +263,7 @@ pub fn expm_source_term_quadrature(
     let rank = h0.rank;
 
     debug_assert!(
-        n_quad >= 1 && n_quad <= MAX_N_QUAD,
+        (1..=MAX_N_QUAD).contains(&n_quad),
         "expm_source_term_quadrature: n_quad={n_quad} must be 1..={MAX_N_QUAD}"
     );
 
@@ -371,6 +373,7 @@ pub fn expm_source_term_quadrature(
 ///
 /// The field state at time `t`: `h(t) = exp(t·L)·h₀ + ∫₀ᵗ exp((t-s)·L)·N(h(s))ds`.
 #[inline]
+#[allow(clippy::too_many_arguments, reason = "nonlinear heat kernel needs mesh + eig + field + motor + t + quad + relu; matches the paper's operator signature")]
 pub fn heat_kernel_trajectory_nonlinear(
     cx: &CellComplex,
     eig: &DecEigendecomposition,
@@ -397,6 +400,7 @@ pub fn heat_kernel_trajectory_nonlinear(
 /// allocates **0 bytes** per call (all internal buffers are pre-allocated and
 /// resized in-place if needed).
 #[inline]
+#[allow(clippy::too_many_arguments, reason = "zero-alloc variant mirrors heat_kernel_trajectory_nonlinear; caller-provided out + scratch add 2 args")]
 pub fn heat_kernel_trajectory_nonlinear_into(
     cx: &CellComplex,
     eig: &DecEigendecomposition,

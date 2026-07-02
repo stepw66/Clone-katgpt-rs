@@ -10,7 +10,7 @@
 //!
 //! Run: `cargo run --example spectral_threat_arena --features spectral_threat`
 
-use katgpt_core::sense::CombatRhythmTracker;
+use katgpt_core::sense_threat::CombatRhythmTracker;
 
 // ── Constants ──────────────────────────────────────────────────
 

@@ -136,6 +136,7 @@ pub fn near_harmonic_indices(
 ///
 /// Debug-asserts that `near_harmonic_indices` and `noise` have compatible
 /// lengths with `k_hypotheses`.
+#[allow(clippy::too_many_arguments, reason = "BoM perturbation sweep needs eig + field + motor + perturbation params; a config struct would obscure the math")]
 pub fn heat_kernel_trajectory_bom(
     eig: &DecEigendecomposition,
     h0: &CochainField,
@@ -183,6 +184,7 @@ pub fn heat_kernel_trajectory_bom(
 /// heat-kernel application (`O(n·k·dim)`) plus the perturbation assembly
 /// (`O(n·M)` where `M = near_harmonic_indices.len()`). The total for K
 /// hypotheses is `O(K · (n·k·dim + n·M))`.
+#[allow(clippy::too_many_arguments, reason = "zero-alloc variant mirrors heat_kernel_trajectory_bom; caller-provided scratch/out add the 2 extra args")]
 pub fn heat_kernel_trajectory_bom_into(
     eig: &DecEigendecomposition,
     h0: &CochainField,
@@ -229,15 +231,13 @@ pub fn heat_kernel_trajectory_bom_into(
     // Vec for the perturbation field, reused across all K hypotheses.
     let mut pert_field: Vec<f32> = vec![0.0f32; n];
 
-    for k_idx in 0..k_hypotheses {
+    for (k_idx, out_k) in out.iter_mut().enumerate().take(k_hypotheses) {
         // 1. Copy h₀ into scratch.
         scratch.data[..n * dim].copy_from_slice(&h0.data[..n * dim]);
 
         // 2. Build the perturbation field: pert_field[i] = σ · Σ_m noise[k·M+m] · v_{dir_m}[i].
         // Zero the perturbation field (reused across hypotheses).
-        for v in &mut pert_field {
-            *v = 0.0;
-        }
+        pert_field.fill(0.0);
         let noise_offset = k_idx * m;
         for (mi, &eig_idx) in near_harmonic_indices.iter().enumerate() {
             let coeff = perturbation_sigma * noise[noise_offset + mi];
@@ -245,22 +245,20 @@ pub fn heat_kernel_trajectory_bom_into(
                 continue;
             }
             let v_m = eig.eigenvector(eig_idx);
-            for i in 0..n {
-                pert_field[i] += coeff * v_m[i];
+            for (i, p) in pert_field.iter_mut().enumerate() {
+                *p += coeff * v_m[i];
             }
         }
 
         // 3. Add the perturbation to every channel of h₀ (broadcast spatial).
-        for i in 0..n {
-            let p = pert_field[i];
+        for (i, &p) in pert_field.iter().enumerate() {
             for d in 0..dim {
                 scratch.data[i * dim + d] += p;
             }
         }
 
         // 4. Apply the linear heat kernel to the perturbed field.
-        let out_k = &mut out[k_idx];
-        heat_kernel_trajectory_linear_into(eig, &scratch, motor_vec, motor_dim, t, out_k);
+        heat_kernel_trajectory_linear_into(eig, scratch, motor_vec, motor_dim, t, out_k);
     }
 }
 

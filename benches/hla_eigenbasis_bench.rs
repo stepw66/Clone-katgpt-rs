@@ -385,10 +385,10 @@ fn gate_g4_divergence() -> (f64, bool) {
         let mut dot = 0.0_f32;
         let mut ni = 0.0_f32;
         let mut nj = 0.0_f32;
-        for d in 0..D {
-            dot += directions[i][d] * directions[j][d];
-            ni += directions[i][d] * directions[i][d];
-            nj += directions[j][d] * directions[j][d];
+        for (&di, &dj) in directions[i].iter().zip(directions[j].iter()).take(D) {
+            dot += di * dj;
+            ni += di * di;
+            nj += dj * dj;
         }
         let cos = (dot / (ni.sqrt() * nj.sqrt())).abs() as f64;
         cos_sum += cos;

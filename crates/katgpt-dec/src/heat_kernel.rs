@@ -159,13 +159,12 @@ impl DecEigendecomposition {
                 .enumerate()
                 .min_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
                 .map(|(i, _)| i)
+                && eigenvalues[min_idx] < NULL_SPACE_THRESHOLD
             {
-                if eigenvalues[min_idx] < NULL_SPACE_THRESHOLD {
-                    eigenvalues[min_idx] = 0.0;
-                    let base = min_idx * n;
-                    for i in 0..n {
-                        eigenvectors[base + i] = inv_sqrt_n;
-                    }
+                eigenvalues[min_idx] = 0.0;
+                let base = min_idx * n;
+                for i in 0..n {
+                    eigenvectors[base + i] = inv_sqrt_n;
                 }
             }
         }
@@ -323,34 +322,33 @@ pub fn heat_kernel_trajectory_linear_into(
     // (motor[d] - 1 + λ_k). For channels d >= motor_dim, motor[d] = 0.
     for d in 0..dim {
         let motor_d = if d < motor_dim {
-            motor_vec[d]
+            motor_vec.get(d).copied().unwrap_or(0.0)
         } else {
             0.0
         };
 
         // Project h0 channel d onto each eigenvector: proj[k] = v_kᵀ · h_d(0).
         // This is O(n·k) — the dominant cost.
-        for ki in 0..k {
+        for (ki, proj_k) in proj.iter_mut().enumerate().take(k) {
             let v_k = eig.eigenvector(ki);
             let mut dot = 0.0f32;
             // Manual dot-product with stride-dim access into h0.
             // (h0[i*dim + d] for i in 0..n)
-            for i in 0..n {
-                dot += v_k[i] * h0.data[i * dim + d];
+            for (i, &vk) in v_k.iter().enumerate() {
+                dot += vk * h0.data[i * dim + d];
             }
-            proj[ki] = dot;
+            *proj_k = dot;
         }
 
         // Reconstruct h_d(t) = Σ_k proj[k] · exp(t·(motor_d - 1 + λ_k)) · v_k.
         // Accumulate into out: out[i*dim + d] += proj[k] · exp(...) · v_k[i].
         // O(n·k) — the second dominant cost. Total per channel: O(n·k).
-        for ki in 0..k {
-            let lambda_k = eig.eigenvalues[ki];
+        for (ki, &lambda_k) in eig.eigenvalues.iter().enumerate().take(k) {
             let a_eig = motor_d - 1.0 + lambda_k;
             let scale = proj[ki] * (t * a_eig).exp();
             let v_k = eig.eigenvector(ki);
-            for i in 0..n {
-                out.data[i * dim + d] += scale * v_k[i];
+            for (i, &vk) in v_k.iter().enumerate() {
+                out.data[i * dim + d] += scale * vk;
             }
         }
     }
@@ -483,7 +481,7 @@ pub fn heat_kernel_trajectory_krylov(
             let base = cell * dim;
             for d in 0..dim {
                 let idx = base + d;
-                let motor_d = if d < motor_dim { motor_vec[d] } else { 0.0 };
+                let motor_d = if d < motor_dim { motor_vec.get(d).copied().unwrap_or(0.0) } else { 0.0 };
                 out[idx] = lap_field.data[idx] + (motor_d - 1.0) * v[idx];
             }
         }
@@ -545,7 +543,7 @@ pub fn heat_kernel_trajectory_krylov_into(
             let base = cell * dim;
             for d in 0..dim {
                 let idx = base + d;
-                let motor_d = if d < motor_dim { motor_vec[d] } else { 0.0 };
+                let motor_d = if d < motor_dim { motor_vec.get(d).copied().unwrap_or(0.0) } else { 0.0 };
                 out_buf[idx] = lap_field.data[idx] + (motor_d - 1.0) * v[idx];
             }
         }

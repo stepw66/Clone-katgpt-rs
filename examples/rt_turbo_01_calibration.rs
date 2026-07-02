@@ -303,8 +303,10 @@ fn main() {
             })
             .collect();
 
-        let mut causal_config = katgpt_rs::types::RtTurboConfig::default();
-        causal_config.calibration_mode = CalibrationMode::CausalNecessity;
+        let causal_config = katgpt_rs::types::RtTurboConfig {
+            calibration_mode: CalibrationMode::CausalNecessity,
+            ..Default::default()
+        };
         let causal_cal = calibrate_from_causal_scores(&causal_scores, &causal_config);
 
         println!("  Causal-necessity partition:");

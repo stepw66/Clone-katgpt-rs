@@ -101,14 +101,14 @@ fn gaussian_population(seed: u64) -> Vec<f32> {
 
     // Scale so the densest zone has population ~13 (mobility ~0.03, Dense tier).
     let scale = 13.0 / max_g;
-    for i in 0..N_ZONES {
+    for (i, p) in pop.iter_mut().enumerate() {
         let x = (i % 8) as f32;
         let y = (i / 8) as f32;
         let dx = x - cx;
         let dy = y - cy;
         let g = (-(dx * dx + dy * dy) / (2.0 * sigma * sigma)).exp();
         let jitter = 1.0 + (rng.next_f32() - 0.5) * 0.15;
-        pop[i] = (g * scale * jitter).max(0.5);
+        *p = (g * scale * jitter).max(0.5);
     }
     pop
 }
@@ -255,7 +255,7 @@ fn g5b_compute_saved() -> (f64, f64, bool) {
     let cfg = DensityClassifyConfig::default();
     let mut pop = vec![0.0f32; N_ZONES];
     let mut rng = Lcg::new(7);
-    for i in 0..N_ZONES {
+    for pop_i in pop.iter_mut() {
         let r = rng.next_f32();
         let p = if r < 0.70 {
             // Dense: high population → low mobility → Dense tier.
@@ -267,7 +267,7 @@ fn g5b_compute_saved() -> (f64, f64, bool) {
             // Sparse: low population → high mobility → Sparse tier.
             0.5 + rng.next_f32() * 1.5 // 0.5-2 NPCs
         };
-        pop[i] = p;
+        *pop_i = p;
     }
 
     // Classify to determine which zones are sparse (recompute) vs cached.
@@ -285,8 +285,8 @@ fn g5b_compute_saved() -> (f64, f64, bool) {
     let weights: [f32; PROJECTION_DIM] = {
         let mut w = [0.0f32; PROJECTION_DIM];
         let mut wrng = Lcg::new(999);
-        for i in 0..PROJECTION_DIM {
-            w[i] = wrng.next_f32() * 2.0 - 1.0;
+        for w_i in w.iter_mut() {
+            *w_i = wrng.next_f32() * 2.0 - 1.0;
         }
         w
     };
@@ -301,8 +301,8 @@ fn g5b_compute_saved() -> (f64, f64, bool) {
                 let len = n_npcs * PROJECTION_DIM;
                 let mut s = vec![0.0f32; len];
                 let mut zrng = Lcg::new((i as u64) * 7919 + 1);
-                for j in 0..len {
-                    s[j] = zrng.next_f32();
+                for s_j in s.iter_mut() {
+                    *s_j = zrng.next_f32();
                 }
                 s
             })
@@ -312,8 +312,8 @@ fn g5b_compute_saved() -> (f64, f64, bool) {
     // ── Baseline: recompute every zone every tick ──
     let baseline_start = Instant::now();
     for _tick in 0..SIM_TICKS {
-        for i in 0..N_ZONES {
-            let _ = black_box(synthetic_projection(&zone_states[i], &weights));
+        for zone_state in &zone_states {
+            let _ = black_box(synthetic_projection(zone_state, &weights));
         }
     }
     let baseline_ns = baseline_start.elapsed().as_nanos() as f64;
@@ -408,7 +408,7 @@ fn g5b_stampede_stress() -> (f64, f64, f64) {
 
     for tick in 1..SIM_TICKS {
         // Stampede: zone 0 gets 10× density for STAMPDE_DURATION ticks.
-        if tick >= STAMPDE_TICK && tick < STAMPDE_TICK + STAMPDE_DURATION {
+        if (STAMPDE_TICK..STAMPDE_TICK + STAMPDE_DURATION).contains(&tick) {
             pop[0] = 150.0;
         } else if tick == STAMPDE_TICK + STAMPDE_DURATION {
             pop[0] = 15.0; // recover

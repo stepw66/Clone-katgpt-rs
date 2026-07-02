@@ -115,9 +115,10 @@ fn jaccard(
 /// apples-to-apples comparison. (RTPurbo's default 0.15 would select K=3 on
 /// n=16, while the causal partition selects K=4 at ratio 4/16=0.25.)
 fn fair_config() -> RtTurboConfig {
-    let mut cfg = RtTurboConfig::default();
-    cfg.retrieval_head_ratio = K_LOAD_BEARING as f32 / N_HEADS as f32;
-    cfg
+    RtTurboConfig {
+        retrieval_head_ratio: K_LOAD_BEARING as f32 / N_HEADS as f32,
+        ..Default::default()
+    }
 }
 
 #[test]
