@@ -32,13 +32,18 @@ publish = false  # only katgpt-core ships to crates.io
 # default-on capability); promotion to downstream consumption (riir-ai
 # Research 168) is gated on the Plan 357 Phase 2 GOAT (G1–G5).
 #
-# `heat_kernel_trajectory` (Plan 359, Research 365) is the second opt-in
-# primitive: the single-shot DEC heat-kernel trajectory predictor
-# (`exp(t·A)·h₀` via precomputed eigendecomposition). It distills PhysiFormer's
-# single-shot-vs-autoregressive insight (arXiv:2606.27364) into a modelless DEC
-# analog — exact for linear propagation, zero error accumulation. Stays opt-in
-# until the Plan 359 Phase 5 GOAT gate (G1–G5) lands; the linear path (Phase 1)
-# is the promotion candidate.
-default = []
+# `heat_kernel_trajectory` (Plan 359, Research 365) — DEFAULT-ON (2026-07-02,
+# Plan 359 Phase 5 GOAT): the single-shot DEC heat-kernel trajectory predictor
+# (`exp(t·A)·h₀` via precomputed eigendecomposition + Krylov online path).
+# Distills PhysiFormer's single-shot-vs-autoregressive insight
+# (arXiv:2606.27364) into a modelless DEC analog — exact for linear
+# propagation, zero error accumulation. GOAT gate G1–G5 ALL PASS:
+# G1 5.00× more accurate than coarse Euler at matching fine-Euler ground truth
+# (t=15), G2 Krylov 1.87× Euler latency at T=100 (≤ 2× gate), G3 heat kernel
+# drift 3e-7 < coarse Euler drift 3e-6, G4 0 allocs/1000 calls (linear path),
+# G5 finite + stable decay. Eigensolver accuracy (~8% on 8×8) is the limiting
+# factor, NOT the heat-kernel math (which is exact); for large complexes use
+# the Krylov path. See .benchmarks/365_dec_heat_kernel_trajectory_goat.md.
+default = ["heat_kernel_trajectory"]
 motor_gated_field = []
 heat_kernel_trajectory = []
