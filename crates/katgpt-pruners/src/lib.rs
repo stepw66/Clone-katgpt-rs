@@ -73,6 +73,12 @@ pub mod future_probe;
 #[cfg(feature = "fpcg_selector")]
 pub mod fpcg_selector;
 
+/// Modelless probe construction — deterministic mean-difference direction-vector
+/// fit from labeled activations (Plan 292 Phase 4 T4.2 modelless path). Closed-form,
+/// no gradient descent. Freeze/thaw-compatible. Gated behind `future_probe`.
+#[cfg(feature = "future_probe")]
+pub mod fpcg_modelless;
+
 /// Self-advantage from latent recursion pre/post logits (Plan 283, Research 250).
 /// Modelless dead-compute detector distilled from arxiv:2511.16886.
 pub mod self_advantage;

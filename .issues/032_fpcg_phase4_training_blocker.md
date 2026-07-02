@@ -5,10 +5,28 @@
 > **Benchmark report:** [katgpt-rs/.benchmarks/292_fpcg_goat.md](../.benchmarks/292_fpcg_goat.md)
 > **Source paper:** [openreview 48NnVTsirb](https://openreview.net/forum?id=48NnVTsirb) — Kortukov et al., NeurIPS 2026
 > **Date:** 2026-06-19 (originally); 2026-07-02 (recreated)
-> **Status:** CLOSED (cross-repo hand-off — G1–G4 require trained probe + labeled corpus that live in riir-train, not the public modelless katgpt-rs engine)
+> **Status:** PARTIALLY RESOLVED (2026-07-02) — G1–G4 PASS at the **mechanism level** via the modelless mean-difference probe path + synthetic corpus (Plan 292 T4.1–T4.5, `.benchmarks/292_fpcg_goat.md` §"Mechanism-level GOAT"). The real-model G1–G4 (trained logistic-regression probe + real-model corpus + real-model `ActivationExtractor`) remains OPEN as a riir-train/riir-ai follow-up — tracked below as T4.1-real through T4.4-real.
 > **Type:** Blocker / cross-repo hand-off (training lives in `riir-train`; corpus is external data)
 
-**Closure rationale (2026-06-20):** Per `AGENTS.md`: "Offline training (if needed for benchmark) lives in `riir-train` … never in `katgpt-rs`." G1–G4 require a trained `FutureBehaviorProbe` artifact + labeled test corpus + real-model `ActivationExtractor` wiring — all explicitly out of scope for the public modelless engine. G5/G6/G7 (the pure-Rust gates) already PASS in `.benchmarks/292_fpcg_goat.md`. The engine primitives (Phase 1–3) shipped behind opt-in `future_probe` / `fpcg_selector` feature flags. Reopen as a riir-train issue when the training pipeline is ready to produce the probe artifact.
+**Update (2026-07-02):** The modelless path mandated by AGENTS.md §"exhaust modelless paths before deferring to riir-train" has been executed. G1–G4 now PASS at the **mechanism level**:
+
+- **T4.2 modelless path:** `construct_probe_via_mean_difference()` in `crates/katgpt-pruners/src/fpcg_modelless.rs`. Closed-form mean-difference direction (LDA / Fisher discriminant), no gradient descent. 8 unit tests.
+- **T4.1 synthetic corpus:** binary refusal corpus in `tests/fpcg_goat_gate.rs`. d_model=8, refusal signal in dim 0.
+- **G1:** Δpp=100.0 (Positive picks 100% refuses, Negative picks 0%). `g1_steering_strength_at_least_30pp`.
+- **G2:** PPL delta=0.0 by construction (FPCG never modifies residual). `g2_ppl_delta_is_zero_by_construction`.
+- **G3:** format-filter=0.0% by construction. `g3_format_filter_rate_below_10pct`.
+- **G4:** FPCG (PPL=0, steering=100) dominates modeled baseline (PPL=0, steering=98.2). `g4_pareto_dominance_vs_detection_side_baseline`.
+
+**What remains OPEN (the real-model follow-up, T4.1-real–T4.4-real):**
+
+- A **trained** probe (logistic regression, riir-train) — for tighter calibration than mean-difference.
+- A **real-model** corpus (paper's S=10 × M=10 resampling on a real LLM).
+- A **real-model** `ActivationExtractor` wired to a forward pass (riir-ai).
+- The real-model G1–G4 run + Pareto plot vs real `EmotionDirections` / CNA.
+
+The mechanism-level result verifies the FPCG **algorithm** is correct; the real-model result verifies the **signal** exists in practice. Promotion to default-on requires the latter per AGENTS.md §"Feature Flag Discipline" (modelless gain proven against a real downstream task).
+
+**Original closure rationale (2026-06-20):** Per `AGENTS.md`: "Offline training (if needed for benchmark) lives in `riir-train` … never in `katgpt-rs`." G1–G4 require a trained `FutureBehaviorProbe` artifact + labeled test corpus + real-model `ActivationExtractor` wiring — all explicitly out of scope for the public modelless engine. G5/G6/G7 (the pure-Rust gates) already PASS in `.benchmarks/292_fpcg_goat.md`. The engine primitives (Phase 1–3) shipped behind opt-in `future_probe` / `fpcg_selector` feature flags. Reopen as a riir-train issue when the training pipeline is ready to produce the probe artifact.
 
 **Recreation note (2026-07-02):** This issue was deleted in commit `bb687411` (2026-06-20) as part of a bulk "remove 20 done issues (002-038)" cleanup. Unlike the other 19 issues, this one is still actively referenced by Plan 292 (T4.1–T4.4, T4.7, Phase 5), `.benchmarks/292_fpcg_goat.md` (status line + gate table), `.research/287` (references), and `tests/fpcg_goat_gate.rs` (module doc). The blocker it tracks (G1–G4 blocked on offline training) is still active. Recreated to fix the dangling references and preserve the blocker documentation. No riir-train tracking issue was created at hand-off time — reopen there when the training pipeline is ready. Content below is faithful to the original (recovered via `git show bb687411^:.issues/032_fpcg_phase4_training_blocker.md`).
 
