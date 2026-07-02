@@ -214,6 +214,8 @@ The paper uses softmax for its basis (Eq. 9). AGENTS.md mandates sigmoid. **The 
 
 FUNCATTN is the **functional-maps framework applied to attention**: replace softmax pairwise affinities with a closed-form ridge-regularized k×k operator between learned adaptive bases. Linear-in-n, resolution-invariant, Lipschitz-bounded by λ. The math (ridge solve, eigenbasis, sigmoid partition-of-unity) is already distributed across our stack (Schur/SpectralQuant/Parallax/latent_functor). **GOAT verdict**: primary value is the riir-ai rank-1 → rank-k latent_functor upgrade (concrete game-domain gain, extends existing Super-GOAT 123/303); katgpt-rs open primitive is Gain-tier behind feature flag (paper itself hasn't shown NLP gain). Not Super-GOAT because (a) no novel math, (b) extends an existing pillar rather than creating one. **Fusion F1 is the headline** — rank-k functor with closed-form ridge re-estimation unblocks multi-axis NPC relations, the difference between linear-affine and manifold-aware NPC minds.
 
+**Issue 363 Update (2026-07-02):** Fusion F1's rank-k operator has been extended to **n-ary coalitions** via `HyperKgFunctorEdge` (`riir-ai/crates/riir-engine/src/kg_hyperedge.rs` Phase 5). The operator maps the mean-pool of participant states to coalition-level state, generalizing from pairwise `(A→B)` to coalition `({A,B,C,...}→state)`. This is the functional edge × hyperedge fusion that the original F1 framing gestured at ("non-translational relations") but didn't wire for n-ary. O(N) coalition prediction vs O(N²) pairwise. See Research 123 §Issue 363 Update for the full gain table.
+
 ---
 
 ## 6. Code Verification Addendum (2026-06-17, post-distillation)
