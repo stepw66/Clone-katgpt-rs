@@ -392,7 +392,7 @@ mux_latent_context = ["katgpt-pruners/mux_latent_context"]  # MUX-Latent Context
 mux_latent_wire = ["mux_latent_context", "domain_latent"]  # MUX-Latent Wire Patch — latent-to-latent patching without decompress/recompress (Plan 243, opt-in)
 lclm_adaptive_lod = ["mux_latent_context"]  # LCLM Adaptive LOD — spectral energy-based adaptive compression ratio (Research 211, Plan 238 Phase 4, opt-in)
 kvarn = ["katgpt-kv/kvarn"]  # KVarN variance-normalized KV-cache quantization (Research 159)
-selectivity_router = ["katgpt-pruners/selectivity_router"]  # Self-Learning Selectivity Router — adaptive CoT via per-position EMA kurtosis (Plan 204, default-OFF until GOAT proof)
+selectivity_router = ["katgpt-pruners/selectivity_router", "kurtosis_gate"]  # Self-Learning Selectivity Router — adaptive CoT via per-position EMA kurtosis (Plan 204, default-OFF until GOAT proof). Implies `kurtosis_gate` because `speculative/step.rs` imports `kurtosis_gate::excess_kurtosis` under this feature gate.
 ruliology = ["bandit", "katgpt-pruners/ruliology"]  # Ruliology Bandit — simple program strategies as bandit arms (Plan 188, Research 168)
 directional_credit = ["katgpt-pruners/directional_credit"]  # Entropy-bifurcated screening — direction-adaptive credit (Plan 184, default on candidate)
 kv_share = ["katgpt-kv/kv_share"]  # Q-K=V projection sharing — 50% KV cache reduction (Plan 185, default on candidate)

@@ -69,7 +69,13 @@ pub fn rim_readout_index(prompt_len: usize, config: &Config) -> usize {
 // the cross-crate access. This is safe: ForwardContext is a pre-allocated
 // scratch buffer, not an invariant-guarded type.
 // ---------------------------------------------------------------------------
-pub use katgpt_forward::{DepthRouteIndicesArgs, ForwardContext, depth_route_with_indices};
+pub use katgpt_forward::ForwardContext;
+// `DepthRouteIndicesArgs` + `depth_route_with_indices` are gated behind the
+// `delta_routing` feature in `katgpt-forward`. Gate the re-export to match —
+// otherwise consumers that depend on katgpt-rs with `default-features = false`
+// hit `unresolved import` when the feature is off (Issue 364 T1 wiring hit this).
+#[cfg(feature = "delta_routing")]
+pub use katgpt_forward::{DepthRouteIndicesArgs, depth_route_with_indices};
 
 /// Fused attention head with GQA support: score → softmax → weighted value sum.
 /// Avoids separate `softmax()` call and write-back of normalized scores.

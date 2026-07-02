@@ -53,6 +53,11 @@ pub use conjecturer::PoolConjecturer;
 pub use filters::{BreakevenDifficultyFilter, ColinearityBatchGate};
 pub use guide::{structural_complexity, ComplexityWeights, HlaProjectionGuide};
 pub use loop_::{CgspConfig, CgspLoop, EntropyCollapse};
+// Issue 364 T4 — modelless k_npc selector wrapping GainCostLoopHalter.
+// Gated on gain_cost_halt (the halter kernel feature); lives in the cgsp
+// module because k_npc is conceptually CGSP's per-cycle planning budget.
+#[cfg(feature = "gain_cost_halt")]
+pub use loop_::{KnpcDecision, KnpcSelector};
 pub use traits::{
     BatchQualityGate, CollapseSignal, CuriosityConjecturer, DifficultyFilter, HintDeltaBandit,
     NoOpBatchGate, NoOpDifficultyFilter, QualityGuide, Solver,

@@ -153,6 +153,12 @@ pub use cgsp::{
 #[cfg(feature = "cgsp_dual_pool")]
 pub use cgsp::{DualPoolBandit, DualPoolConfig, PoolId, ReachableDualPoolRouter};
 
+// Issue 364 T4 — modelless k_npc selector (wraps GainCostLoopHalter, Plan 304).
+// Needs both cgsp (the host module) and gain_cost_halt (the halter kernel).
+// Consumed by riir-ai's per-NPC CLR cadence wiring (Phase 30 of tick_map).
+#[cfg(all(feature = "cgsp", feature = "gain_cost_halt"))]
+pub use cgsp::{KnpcDecision, KnpcSelector};
+
 // ActionBridge — generic latent→raw action bridge (Plan 262).
 #[cfg(feature = "action_bridge")]
 pub mod bridge;
