@@ -500,6 +500,16 @@ name = "bench_331_babel_codec_goat"
 required-features = ["babel_codec"]
 harness = false
 
+# Plan 360 Phase 2 — StagingEngramTable GOAT gate. G1 mutation isolation
+# (source untouched + new table correct), G2 perf (staging COW vs rebuild
+# on 1M-slot × D=64 table, ≥10× bar), G4 allocation accounting (update_slot
+# 1/call, delete_slot 0/call, commit 2 allocs). G3 (no-regression) is the
+# feature-flag build matrix, verified externally.
+[[test]]
+name = "bench_360_engram_staging_goat"
+required-features = ["engram"]
+harness = false
+
 # Plan 330 — Analytic Lattice GOAT gate (katgpt-core half). Pure-math gates:
 # G1 determinism (compose_chain bit-identical), G2 ranking (decoder cos >= 0.95 +
 # batch vs naive Frobenius <= 1e-6), G3 associativity (Frobenius <= 1e-5),

@@ -921,11 +921,11 @@ pub mod engram;
 pub use engram::{
     CacheResult, CacheTier, ColdFetcher, EngramConfig, EngramHash, EngramHotSwap, EngramTable,
     EngramTableBuilder, EngramTableId, HashHead, IDENTITY_KERNEL, InMemoryEngramTable, K_MAX,
-    SigmoidFusionConfig, SurjectiveMap, SurjectiveMapLoadError, TokenId, TokenizerSpec,
-    ZipfianCacheHierarchy, ZipfianStats, ZipfianStatsSnapshot, build_merkle_root,
-    build_surjective_map, compress_token, conv_causal_into, fuse_into_hidden_state,
-    multi_head_hash, rmsnorm_into, sigmoid_fuse_into, sigmoid_fuse_multi_branch_into,
-    try_compress_token,
+    SigmoidFusionConfig, StagingEngramTable, StagingError, SurjectiveMap, SurjectiveMapLoadError,
+    TokenId, TokenizerSpec, ZipfianCacheHierarchy, ZipfianStats, ZipfianStatsSnapshot,
+    build_merkle_root, build_surjective_map, compress_token, conv_causal_into,
+    fuse_into_hidden_state, multi_head_hash, rmsnorm_into, sigmoid_fuse_into,
+    sigmoid_fuse_multi_branch_into, try_compress_token,
 };
 
 // Gain/Cost Loop Halting Primitive — open substrate-agnostic kernel for per-loop
