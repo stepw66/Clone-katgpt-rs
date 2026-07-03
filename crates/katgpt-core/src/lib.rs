@@ -200,7 +200,13 @@ pub use micro_belief::{
 // BoMSampler — K-hypothesis single-pass belief sampling (Plan 281, Research 248).
 // Opt-in extension of MicroRecurrentBeliefState; gated on bom_sampling which implies micro_belief.
 #[cfg(feature = "bom_sampling")]
-pub use micro_belief::{BoMSampler, NoiseQueryConfig, SeedStrategy, dot_product_scorer};
+pub use micro_belief::{BoMSampler, NoiseQueryConfig, QmcMethod, SeedStrategy, dot_product_scorer};
+
+// Plan 370 — QMC noise-fill convenience entry point (constructs the right
+// QmcSource from a QmcMethod tag + seed, zero-alloc). Used by
+// MultiHypothesisBoMMinimaxPlanner when NoiseQueryConfig::qmc_method is Some.
+#[cfg(all(feature = "qmc_sampling", feature = "bom_sampling"))]
+pub use speculative::fill_noise_queries_gaussian_qmc_by_method;
 
 // BoM G2 arena harness — Plan 281 T2.3.
 // Engine-side traits + synthetic reference env. riir-ai implements the traits

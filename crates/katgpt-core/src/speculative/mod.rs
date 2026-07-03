@@ -75,9 +75,12 @@ pub use sampling::sample_k_from_distribution_qmc;
 // Inverse normal CDF (probit) + gaussianize + fill_noise_queries helper. The
 // `sample_k_states_qmc` convenience wrapper additionally requires
 // `bom_sampling` (the BoMSampler trait + NoiseQueryConfig live there).
+//
+// Plan 370 — `fill_noise_queries_gaussian_qmc_by_method` is the QmcMethod-tag
+// convenience entry point used by MultiHypothesisBoMMinimaxPlanner.
 #[cfg(feature = "qmc_sampling")]
 pub use qmc::{
     fill_noise_queries_gaussian_qmc, gaussianize_uniforms_inplace, inverse_normal_cdf,
 };
 #[cfg(all(feature = "qmc_sampling", feature = "bom_sampling"))]
-pub use qmc::sample_k_states_qmc;
+pub use qmc::{fill_noise_queries_gaussian_qmc_by_method, sample_k_states_qmc};

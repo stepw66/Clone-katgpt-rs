@@ -764,6 +764,49 @@ pub fn sample_k_states_qmc<K: crate::BoMSampler>(
     kernel.sample_k_states(s_prev, x, queries, out, cfg);
 }
 
+/// Convenience wrapper: fill `queries` with QMC Gaussian noise using a
+/// [`QmcMethod`](crate::QmcMethod) tag (Plan 370 — BoM Arena × QuasiMoTTo wiring).
+/// Constructs the appropriate [`QmcSource`] on the stack (zero-alloc) from
+/// `method` + `seed`, then delegates to [`fill_noise_queries_gaussian_qmc`].
+///
+/// This is the entry point used by `MultiHypothesisBoMMinimaxPlanner::resample_queries`
+/// when `NoiseQueryConfig::qmc_method` is `Some(method)`. The caller passes a
+/// per-tick `seed` (typically `TICK_SALT + obs_hash`); each call constructs a
+/// fresh source so the QMC batch is deterministic given the seed.
+///
+/// Requires both `qmc_sampling` (this module) and `bom_sampling` (the
+/// `QmcMethod` tag lives in `katgpt-micro-belief`, forwarded via `bom_sampling`).
+///
+/// # Zero-allocation
+///
+/// Each `QmcSource` impl is stack-allocated (1 `f32` for Lattice, 1 `Rng` for
+/// Stratified, fixed-size direction table for Sobol). Writes into caller-provided
+/// `queries`; no heap allocation.
+#[cfg(feature = "bom_sampling")]
+pub fn fill_noise_queries_gaussian_qmc_by_method(
+    method: crate::QmcMethod,
+    seed: u64,
+    k: usize,
+    dim: usize,
+    sigma: f32,
+    queries: &mut [f32],
+) {
+    match method {
+        crate::QmcMethod::Lattice => {
+            let mut src = LatticeQmc::new(seed);
+            fill_noise_queries_gaussian_qmc(&mut src, k, dim, sigma, queries);
+        }
+        crate::QmcMethod::Stratified => {
+            let mut src = StratifiedQmc::new(seed);
+            fill_noise_queries_gaussian_qmc(&mut src, k, dim, sigma, queries);
+        }
+        crate::QmcMethod::Sobol => {
+            let mut src = SobolQmc::new(seed);
+            fill_noise_queries_gaussian_qmc(&mut src, k, dim, sigma, queries);
+        }
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Tests
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1674,4 +1717,46 @@ mod tests {
         sample_k_states_qmc(&kernel, &s_prev, &x, &mut src_b, &cfg, &mut queries_b, &mut out_b);
 
         assert_eq!(out_a, out_b, "same QMC seed must produce bit-identical hypotheses");    }
+
+    // ── Plan 370 T2.3: fill_noise_queries_gaussian_qmc_by_method ────────────
+
+    #[cfg(feature = "bom_sampling")]
+    #[test]
+    fn test_fill_by_method_all_methods_produce_valid_queries() {
+        let k = 8;
+        let dim = 4;
+        let sigma = 0.1;
+        let mut queries = vec![0.0f32; k * dim];
+
+        for method in [crate::QmcMethod::Lattice, crate::QmcMethod::Stratified, crate::QmcMethod::Sobol] {
+            fill_noise_queries_gaussian_qmc_by_method(method, 42, k, dim, sigma, &mut queries);
+            // All values finite.
+            for &q in &queries {
+                assert!(q.is_finite(), "{:?} produced non-finite query {}", method, q);
+            }
+            // Empirical mean ≈ 0 (Gaussian, σ=0.1 → mean in [-0.05, 0.05] for k*dim=32 samples).
+            let mean = queries.iter().sum::<f32>() / queries.len() as f32;
+            assert!(mean.abs() < 0.1, "{:?} mean {} too far from 0", method, mean);
+            // Empirical stddev ≈ σ (in [0.05, 0.2] for 32 samples from N(0,0.1²)).
+            let var = queries.iter().map(|q| (q - mean).powi(2)).sum::<f32>() / queries.len() as f32;
+            let std = var.sqrt();
+            assert!(std > 0.05 && std < 0.2, "{:?} stddev {} outside [0.05, 0.2]", method, std);
+        }
+    }
+
+    #[cfg(feature = "bom_sampling")]
+    #[test]
+    fn test_fill_by_method_is_deterministic_given_seed() {
+        let k = 8;
+        let dim = 4;
+        let sigma = 0.2;
+        let mut a = vec![0.0f32; k * dim];
+        let mut b = vec![0.0f32; k * dim];
+
+        for method in [crate::QmcMethod::Lattice, crate::QmcMethod::Stratified, crate::QmcMethod::Sobol] {
+            fill_noise_queries_gaussian_qmc_by_method(method, 99, k, dim, sigma, &mut a);
+            fill_noise_queries_gaussian_qmc_by_method(method, 99, k, dim, sigma, &mut b);
+            assert_eq!(a, b, "{:?} must be bit-identical for same seed", method);
+        }
+    }
 }

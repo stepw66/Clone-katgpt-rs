@@ -110,7 +110,7 @@ pub(crate) unsafe fn assume_init_slice<const N: usize>(
 
 pub use attractor::AttractorKernel;
 #[cfg(feature = "bom_sampling")]
-pub use bom::{BoMSampler, NoiseQueryConfig, SeedStrategy, dot_product_scorer};
+pub use bom::{BoMSampler, NoiseQueryConfig, QmcMethod, SeedStrategy, dot_product_scorer};
 #[cfg(feature = "bom_sampling")]
 pub use bom_arena::{
     ArenaAction, ArenaEnvironment, BeliefPlanner, BoMMeanPlanner, BoMMinimaxPlanner,

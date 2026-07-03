@@ -62,9 +62,10 @@ use katgpt_types::simd::simd_sigmoid_tanh_clamp_inplace;
 /// # Layout
 ///
 /// Fields are ordered `k` (usize, 8B) → `sigma` (f32, 4B) → `seed_strategy`
-/// (u8, 1B) to eliminate the 4B pad that the natural declaration order would
-/// insert between `sigma` and `k`. Total: 16B vs 24B (33% smaller for a `Copy`
-/// type stored inline in every BoM planner).
+/// (u8, 1B) → `qmc_method` (Option<u8>, 2B) to keep the tail compact. Total:
+/// 16B (the Option<QmcMethod> fits in the padding after `seed_strategy` on
+/// 64-bit — the struct is already 8B-aligned for `k`, so the u8 + Option<u8>
+/// trio packs into the 4B tail slot).
 #[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
 pub struct NoiseQueryConfig {
     /// Number of hypotheses K. Paper trains K=256, evals K=20; plasma-tier
@@ -74,6 +75,10 @@ pub struct NoiseQueryConfig {
     pub sigma: f32,
     /// How seeds are derived per-NPC vs per-class.
     pub seed_strategy: SeedStrategy,
+    /// QMC noise-fill method (Plan 370). `None` (default) → i.i.d. Box–Muller
+    /// (backward compatible). `Some(method)` → QMC Gaussian fill via
+    /// `fill_noise_queries_gaussian_qmc_by_method` in katgpt-core.
+    pub qmc_method: Option<QmcMethod>,
 }
 
 /// Seed strategy for noise query generation.
@@ -87,6 +92,29 @@ pub enum SeedStrategy {
     PerClass = 1,
 }
 
+/// QMC noise-fill method for `NoiseQueryConfig` (Plan 370 — BoM Arena ×
+/// QuasiMoTTo wiring). When `None`, the planner uses i.i.d. Box–Muller noise;
+/// when `Some`, it constructs the corresponding QMC source and fills queries
+/// via `fill_noise_queries_gaussian_qmc_by_method` (katgpt-core).
+///
+/// This is a plain config tag — the QMC machinery (`QmcSource` trait, concrete
+/// source impls, gaussianize) lives in `katgpt-core::speculative::qmc`. The
+/// tag is defined here because `NoiseQueryConfig` (which owns the field) lives
+/// in this leaf crate; katgpt-core re-exports it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[repr(u8)]
+pub enum QmcMethod {
+    /// Rank-1 lattice `{(i/k + Δ) mod 1}` — max coverage, pairwise MI `−∞`.
+    /// Dominates pass@k per Plan 367 G2 (50% sample reduction).
+    Lattice = 0,
+    /// Stratified + Fisher-Yates — pairwise MI `log(k/(k−1))`. Middle ground;
+    /// optimized for RL variance reduction.
+    Stratified = 1,
+    /// Multi-dim Sobol with Owen digital-shift randomization — optimized for
+    /// multi-dimensional coverage.
+    Sobol = 2,
+}
+
 impl Default for NoiseQueryConfig {
     fn default() -> Self {
         // G1.2 will likely require raising sigma from 0.02 for [-1,1] space;
@@ -96,6 +124,7 @@ impl Default for NoiseQueryConfig {
             sigma: 0.1,
             k: 8,
             seed_strategy: SeedStrategy::PerNpc,
+            qmc_method: None,
         }
     }
 }
@@ -122,6 +151,14 @@ impl NoiseQueryConfig {
         self
     }
 
+    /// Builder for qmc_method (Plan 370). Pass `None` for i.i.d. Box–Muller
+    /// (the default); pass `Some(QmcMethod::Lattice)` etc. for QMC noise fill.
+    #[inline]
+    pub fn with_qmc_method(mut self, m: Option<QmcMethod>) -> Self {
+        self.qmc_method = m;
+        self
+    }
+
     /// BLAKE3 commitment over `(sigma_le || k_le || seed_strategy_byte)`.
     ///
     /// Companion artifact to `MicroRecurrentKernelSnapshot`
@@ -136,6 +173,12 @@ impl NoiseQueryConfig {
         hasher.update(&self.sigma.to_le_bytes());
         hasher.update(&(self.k as u64).to_le_bytes());
         hasher.update(&[self.seed_strategy as u8]);
+        // qmc_method: 0xFF sentinel for None (can't collide with any variant
+        // since QmcMethod is #[repr(u8)] with values 0..=2).
+        hasher.update(&[match self.qmc_method {
+            Some(m) => m as u8,
+            None => 0xFF,
+        }]);
         *hasher.finalize().as_bytes()
     }
 
@@ -477,6 +520,45 @@ impl BoMSampler for LeakyIntegrator {
 mod tests {
     use super::*;
     use crate::{AttractorKernel, LeakyIntegrator, MicroRecurrentBeliefState};
+
+    // ── Plan 370 T1.4: QmcMethod + NoiseQueryConfig.qmc_method ─────────────
+
+    #[test]
+    fn qmc_method_serde_roundtrip() {
+        for m in [QmcMethod::Lattice, QmcMethod::Stratified, QmcMethod::Sobol] {
+            let json = serde_json::to_string(&m).unwrap();
+            let back: QmcMethod = serde_json::from_str(&json).unwrap();
+            assert_eq!(m, back);
+        }
+    }
+
+    #[test]
+    fn default_config_has_no_qmc_method() {
+        let cfg = NoiseQueryConfig::default();
+        assert!(cfg.qmc_method.is_none());
+    }
+
+    #[test]
+    fn with_qmc_method_sets_field() {
+        let cfg = NoiseQueryConfig::default().with_qmc_method(Some(QmcMethod::Lattice));
+        assert_eq!(cfg.qmc_method, Some(QmcMethod::Lattice));
+        let cfg2 = cfg.with_qmc_method(None);
+        assert!(cfg2.qmc_method.is_none());
+    }
+
+    #[test]
+    fn commit_differs_for_qmc_vs_iid() {
+        let iid = NoiseQueryConfig::default();
+        let qmc = NoiseQueryConfig::default().with_qmc_method(Some(QmcMethod::Lattice));
+        assert_ne!(iid.commit(), qmc.commit(), "commit must reflect qmc_method");
+    }
+
+    #[test]
+    fn commit_differs_between_qmc_methods() {
+        let lattice = NoiseQueryConfig::default().with_qmc_method(Some(QmcMethod::Lattice));
+        let sobol = NoiseQueryConfig::default().with_qmc_method(Some(QmcMethod::Sobol));
+        assert_ne!(lattice.commit(), sobol.commit());
+    }
 
     // ── G1.1: determinism (fixed queries → bit-identical out) ──────────────
 
