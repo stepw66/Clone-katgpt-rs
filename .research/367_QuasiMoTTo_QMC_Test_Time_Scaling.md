@@ -4,7 +4,7 @@
 > **Date:** 2026-07-03
 > **Status:** Done
 > **Related Research:** 205 (union-bound branch confidence — same ceiling math), 248 (BoM diverse sampling — the i.i.d. baseline this replaces), 318 (sleep-time anticipation — UQ-on-correlated-samples cousin), 322 (conformal floor — open problem)
-> **Related Plans:** 281 (BoMSampler — drop-in target), 316 (per-NPC CLR runtime — crowd-scale fusion consumer)
+> **Related Plans:** 281 (BoMSampler — drop-in target), 316 (per-NPC CLR runtime — crowd-scale fusion consumer), **367 (this research's implementation plan — katgpt-rs/.plans/367_quasi_monte_carlo_sampling.md)**
 > **Cross-ref (riir-ai / riir-neuron-db):** riir-ai R136 (Per-NPC CLR), R142 (Distributional Branching Point), R158 (Committed Personality Blend — vocabulary collision, see §3 disambiguation); riir-neuron-db Plan 005 (TEMP diversity selector — QMC-TEMP fusion)
 > **Classification:** Public
 
