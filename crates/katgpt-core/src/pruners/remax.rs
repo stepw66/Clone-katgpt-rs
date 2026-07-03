@@ -510,4 +510,274 @@ mod tests {
             assert!((a - b).abs() < 1e-6, "Mismatch at [{i}]: alloc={a}, inplace={b}");
         }
     }
+
+    // ============================================================
+    // Phase 2 — G1 Correctness Gate
+    //
+    // Two complementary strategies:
+    //   (A) Monte-Carlo for integer M — direct ground-truth sampling.
+    //   (B) Analytic recurrence for all m > 1 — exact identity, no MC noise.
+    //
+    // Strategy (B) is strictly stronger for non-integer m: it proves the
+    // continuous-m generalization is consistent with the integer-m formula
+    // to machine precision, without needing 10^N samples.
+    // ============================================================
+
+    /// Simple SplitMix64 PRNG — deterministic, passes BigCrush.
+    /// No external dependency; sufficient for Monte-Carlo validation.
+    struct McRng {
+        state: u64,
+    }
+
+    impl McRng {
+        fn new(seed: u64) -> Self {
+            Self { state: seed }
+        }
+
+        #[inline]
+        fn next_u64(&mut self) -> u64 {
+            self.state = self.state.wrapping_add(0x9E37_79B9_7F4A_7C15);
+            let mut z = self.state;
+            z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+            z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+            z ^ (z >> 31)
+        }
+
+        /// Uniform float in [0, 1) using top 24 bits for full mantissa.
+        #[inline]
+        fn next_f32(&mut self) -> f32 {
+            let bits = (self.next_u64() >> 40) as u32;
+            (bits as f32) * (1.0f32 / 16_777_216.0) // 2^24
+        }
+    }
+
+    /// Sample from Dirichlet(1,...,1) — uniform over the probability simplex.
+    /// Uses the exponential representation: K iid Exp(1), normalised.
+    fn sample_dirichlet_flat(rng: &mut McRng, k: usize) -> Vec<f32> {
+        let mut e: Vec<f32> = (0..k)
+            .map(|_| {
+                let u = rng.next_f32().max(1e-10);
+                -u.ln()
+            })
+            .collect();
+        let sum: f32 = e.iter().sum();
+        let inv = 1.0 / sum.max(1e-10);
+        for x in &mut e {
+            *x *= inv;
+        }
+        e
+    }
+
+    /// Sample K iid uniforms from [−1, 1).
+    fn sample_uniform_neg1_pos1(rng: &mut McRng, k: usize) -> Vec<f32> {
+        (0..k).map(|_| rng.next_f32() * 2.0 - 1.0).collect()
+    }
+
+    /// Build cumulative sum of pi for categorical sampling. Forces the last
+    /// entry to exactly 1.0 so binary search never overshoots.
+    fn build_cumulative(pi: &[f32]) -> Vec<f32> {
+        let mut cum = Vec::with_capacity(pi.len());
+        let mut s = 0.0f32;
+        for &p in pi {
+            s += p;
+            cum.push(s);
+        }
+        if let Some(last) = cum.last_mut() {
+            *last = 1.0;
+        }
+        cum
+    }
+
+    /// Sample one action from categorical(cum) via binary search.
+    #[inline]
+    fn categorical_sample(cum: &[f32], u: f32) -> usize {
+        let mut lo = 0usize;
+        let mut hi = cum.len() - 1;
+        while lo < hi {
+            let mid = (lo + hi) >> 1;
+            if cum[mid] < u {
+                lo = mid + 1;
+            } else {
+                hi = mid;
+            }
+        }
+        lo.min(cum.len() - 1)
+    }
+
+    /// G1 (A) — Monte-Carlo validation of `expected_max_over_m` for integer M.
+    ///
+    /// For each (K, M): draw 500K trials of M i.i.d. samples from pi, take the
+    /// max Q-value, average. Compare to the closed form.
+    ///
+    /// Tolerance 3e-3 absorbs MC noise at 500K samples
+    /// (SE ≈ 6e-4 worst case at K=2, M=2) while still catching any formula
+    /// bug, which would produce O(0.01) systematic errors.
+    #[test]
+    fn test_g1_monte_carlo_expected_max() {
+        let mut rng = McRng::new(0x5EED_1234_5678_9ABC);
+        const TRIALS: usize = 500_000;
+        const TOLERANCE: f32 = 3e-3;
+
+        let ks: &[usize] = &[2, 5, 10, 50, 128];
+        let ms: &[usize] = &[2, 3, 5, 10]; // M=1 is the mean, covered elsewhere
+
+        let mut max_err: f32 = 0.0;
+        let mut failures: Vec<String> = Vec::new();
+
+        for &k in ks {
+            let pi = sample_dirichlet_flat(&mut rng, k);
+            let q = sample_uniform_neg1_pos1(&mut rng, k);
+            let cum = build_cumulative(&pi);
+
+            for &m in ms {
+                let closed = expected_max_over_m(&pi, &q, m as f32);
+
+                let mut sum: f64 = 0.0;
+                for _ in 0..TRIALS {
+                    let mut best: f32 = f32::NEG_INFINITY;
+                    for _ in 0..m {
+                        let u = rng.next_f32();
+                        let a = categorical_sample(&cum, u);
+                        if q[a] > best {
+                            best = q[a];
+                        }
+                    }
+                    sum += best as f64;
+                }
+                let mc = (sum / TRIALS as f64) as f32;
+                let err = (mc - closed).abs();
+                if err > max_err {
+                    max_err = err;
+                }
+                if err > TOLERANCE {
+                    failures.push(format!(
+                        "K={k}, M={m}: closed={closed:.6}, mc={mc:.6}, err={err:.6}"
+                    ));
+                }
+            }
+        }
+
+        assert!(
+            failures.is_empty(),
+            "G1 Monte-Carlo FAIL. max_err={max_err:.6} tol={TOLERANCE}\n{}",
+            failures.join("\n")
+        );
+        eprintln!("G1 MC expected_max: max_err={max_err:.6} (tol={TOLERANCE})");
+    }
+
+    /// G1 (A) — Monte-Carlo validation of `expected_improvement` for integer M.
+    ///
+    /// EI_M(R; π, q) = E[(R − max of (M−1) draws)_+]. Validates the scalar EI
+    /// formula directly. Reference R is set above max(q) so EI is nonzero.
+    #[test]
+    fn test_g1_monte_carlo_expected_improvement() {
+        let mut rng = McRng::new(0xCAFE_BABE_DEAD_BEEF);
+        const TRIALS: usize = 500_000;
+        const TOLERANCE: f32 = 3e-3;
+
+        let ks: &[usize] = &[2, 5, 10];
+        let ms: &[usize] = &[2, 3, 5]; // EI uses M−1 draws
+
+        let mut max_err: f32 = 0.0;
+        let mut failures: Vec<String> = Vec::new();
+
+        for &k in ks {
+            let pi = sample_dirichlet_flat(&mut rng, k);
+            let q = sample_uniform_neg1_pos1(&mut rng, k);
+            let cum = build_cumulative(&pi);
+
+            // R above max(q) → EI strictly positive.
+            let q_max = q.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+            let r = q_max + 0.5;
+
+            for &m in ms {
+                let closed = expected_improvement(r, &pi, &q, m as f32);
+                let draws = m.saturating_sub(1).max(1);
+
+                let mut sum: f64 = 0.0;
+                for _ in 0..TRIALS {
+                    let mut best: f32 = f32::NEG_INFINITY;
+                    for _ in 0..draws {
+                        let u = rng.next_f32();
+                        let a = categorical_sample(&cum, u);
+                        if q[a] > best {
+                            best = q[a];
+                        }
+                    }
+                    sum += (r - best).max(0.0) as f64;
+                }
+                let mc = (sum / TRIALS as f64) as f32;
+                let err = (mc - closed).abs();
+                if err > max_err {
+                    max_err = err;
+                }
+                if err > TOLERANCE {
+                    failures.push(format!(
+                        "K={k}, M={m}, R={r:.3}: closed={closed:.6}, mc={mc:.6}, err={err:.6}"
+                    ));
+                }
+            }
+        }
+
+        assert!(
+            failures.is_empty(),
+            "G1 EI Monte-Carlo FAIL. max_err={max_err:.6} tol={TOLERANCE}\n{}",
+            failures.join("\n")
+        );
+        eprintln!("G1 MC EI: max_err={max_err:.6} (tol={TOLERANCE})");
+    }
+
+    /// G1 (B) — Analytic recurrence: J_m − J_{m−1} = E_{A~π}[EI_m(q_A; π, q)].
+    ///
+    /// This identity holds EXACTLY for all m > 1 (both sides reduce to
+    /// Σⱼ (q₍ⱼ₎ − q₍ⱼ₊₁₎) · Cⱼ · (1−Cⱼ)^{m−1}). It validates the continuous-m
+    /// generalisation without MC noise, to machine precision.
+    ///
+    /// This is the strongest correctness check for non-integer m: it
+    /// cross-validates `expected_max_over_m` against
+    /// `expected_improvement_per_action` across the full m spectrum the plan
+    /// asks for, including m ∈ {1.5, 2.0, 3.0} where no MC oracle exists.
+    ///
+    /// Note: m ≤ 1 is excluded because J_{m−1} requires m−1 > 0.
+    #[test]
+    fn test_g1_recurrence_jm_minus_jm1_equals_ei_mean() {
+        let mut rng = McRng::new(0xBEEF_CAFE_1234_5678);
+        const TOLERANCE: f32 = 1e-4;
+
+        let ms: &[f32] = &[1.25, 1.5, 2.0, 2.5, 3.0];
+
+        let mut max_err: f32 = 0.0;
+        let mut failures: Vec<String> = Vec::new();
+
+        for k in [2usize, 5, 10, 50, 128] {
+            let pi = sample_dirichlet_flat(&mut rng, k);
+            let q = sample_uniform_neg1_pos1(&mut rng, k);
+
+            for &m in ms {
+                let j_m = expected_max_over_m(&pi, &q, m);
+                let j_m1 = expected_max_over_m(&pi, &q, m - 1.0);
+                let lhs = j_m - j_m1;
+
+                let q_plus = expected_improvement_per_action(&pi, &q, m);
+                let rhs: f32 = pi.iter().zip(q_plus.iter()).map(|(&p, &e)| p * e).sum();
+
+                let err = (lhs - rhs).abs();
+                if err > max_err {
+                    max_err = err;
+                }
+                if err > TOLERANCE {
+                    failures.push(format!(
+                        "K={k}, m={m}: J_m-J_{{m-1}}={lhs:.8}, E[EI]={rhs:.8}, err={err:.2e}"
+                    ));
+                }
+            }
+        }
+
+        assert!(
+            failures.is_empty(),
+            "G1 Recurrence FAIL. max_err={max_err:.2e} tol={TOLERANCE:.0e}\n{}",
+            failures.join("\n")
+        );
+        eprintln!("G1 recurrence: max_err={max_err:.2e} (tol={TOLERANCE:.0e})");
+    }
 }
