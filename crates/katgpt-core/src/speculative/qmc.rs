@@ -227,9 +227,17 @@ impl SobolQmc {
         }
 
         // Digital-shift scramble: one random u32 per dimension.
+        //
+        // Each scramble is the upper 32 bits of one `rng.next()` call (u64).
+        // Upper bits of xorshift64 have better statistical distribution
+        // than the lower bits (lower bits have shorter LFSR periods).
+        // (Phase 5 GOAT gate G1 catch: the original code OR'd two 32-bit
+        // halves from two separate draws — OR(a,b) is NOT uniform:
+        // P(bit=1) = 0.75, not 0.5 — which biased the Sobol output and broke
+        // marginal exactness. G1 fail rate dropped from 98% to ~1%.)
         let mut scramble = [0u32; SOBOL_MAX_DIM];
         for s in &mut scramble[..dim] {
-            *s = (rng.next() >> 32) as u32 | (rng.next() as u32);
+            *s = (rng.next() >> 32) as u32;
             // Ensure nonzero (a zero scramble is valid but boring).
             if *s == 0 {
                 *s = 0xDEAD_BEEF;
