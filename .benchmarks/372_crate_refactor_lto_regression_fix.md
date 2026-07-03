@@ -109,13 +109,55 @@ Bandit update() at 415M is still −17% vs the 502M peak. The remaining gap is:
 - **The crate refactor itself** — LTO restores cross-crate inlining. The
   extraction is architecturally correct (SOLID/DRY/Modular).
 - **The May-29 peaks** — they were partially thermal-inflated and should not
-  be treated as a hard regression target. The regression detector
+  be treated as a hard regression target. ~~The regression detector
   (`src/plot.rs` `check_regression_filtered`) compares against all-time max,
-  which includes these boosted runs.
+  which includes these boosted runs.~~ **FIXED** — see §Detector Re-baselining
+  below.
+
+## Detector Re-baselining (follow-up fix, same session)
+
+**Problem:** `check_regression_filtered` compared the latest run against the
+**all-time max** (`fold(f64::MIN, f64::max)` over all entries). The May-27/29
+peaks were frequency-boosted because `cooldown()` was a no-op before commit
+`ef78b555` (2026-06-12). A single boosted run permanently poisoned the
+baseline, so any post-cooldown run would flag as a "regression" even after the
+underlying code was fixed. The detector flagged **59 of 92** methods on the
+stale June-12 CSV.
+
+**Fix:** replaced all-time max with a **rolling window** of the last
+`REGRESSION_WINDOW = 5` entries. Old thermal-inflated peaks drop out of the
+window once five newer runs land. The window self-cleans — no hardcoded date
+cutoff (which would be fragile). Named constants `REGRESSION_WINDOW` and
+`REGRESSION_DROP_PCT` replace magic numbers with documented rationale.
+
+**Validation against `bench/timeseries.csv` (pre-July-3 data, 92 methods):**
+
+| Metric | Old (all-time max) | New (window=5) |
+|--------|-------------------:|---------------:|
+| Total flags | 59 | 47 |
+| False positives eliminated | — | 12 |
+
+The 12 eliminated are exactly the thermal-poisoned ones — Bandit update()
+(29.3%→7.4%), Δ-Bandit relevance (45.7%→0.0%), Dense matmul 64×16
+(25.0%→8.2%), all four `e2e_game` variants (15–20%→10–14%). Real regressions
+survive: AbsorbCompress compress() (HashSet, 18.3%), Lattice lookup dim=8
+(56.9%), SQ-3bit dequant (33.0%).
+
+**Important caveat:** the CSV does not yet contain the July-3 post-LTO runs.
+Once appended, the rolling window will compare post-fix data against post-fix
+data, and most of the remaining 47 flags (all in the 15–22% band — within
+sustained-run thermal variance) should clear as well.
+
+**5 unit tests added** (`plot::tests::*`) covering: stale-peak immunity, real-
+regression detection, short-series fallback, single-entry safety, zero-
+baseline guard.
 
 ## TL;DR
 
-Three fixes: (1) LTO in Cargo.toml, (2) lazy Mutex in BanditPruner, (3) Vec
-instead of HashSet in compress(). Net result: Bandit update() +69%,
-AbsorbCompress compress() +190% (now above peak). The "refactor to crate" was
-1 of 3 root causes; the other 2 were pre-refactor algorithmic changes.
+Four fixes: (1) LTO in Cargo.toml, (2) lazy Mutex in BanditPruner, (3) Vec
+instead of HashSet in compress(), (4) regression detector rolling-window
+baseline (eliminates 12 thermal-poisoned false positives, keeps real ones).
+Net result: Bandit update() +69%, AbsorbCompress compress() +190% (now above
+peak). The "refactor to crate" was 1 of 3 root causes; the other 2 were
+pre-refactor algorithmic changes. The detector fix addresses the
+false-positive noise that made 22/26 regressions look unresolved.

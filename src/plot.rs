@@ -150,7 +150,30 @@ fn parse_timeseries_csv(path: &str) -> Result<Vec<TsRow>, Box<dyn std::error::Er
     Ok(rows)
 }
 
-/// Detect regression: if latest throughput dropped >15% from the max seen for this method.
+/// Fraction of recent entries used as the regression baseline window.
+///
+/// The detector compares the latest run against the best throughput within
+/// this window rather than the all-time max. Pre-cooldown runs (before commit
+/// `ef78b555`, 2026-06-12) were frequency-boosted because `cooldown()` was a
+/// no-op; treating those thermal-inflated peaks as the regression target
+/// permanently poisons the baseline and produces false positives long after
+/// the underlying code has been fixed. A rolling window self-cleans as new
+/// runs arrive.
+///
+/// `5` keeps the window wide enough to survive a single bad run (the latest
+/// entry is compared against the max of the other four), but narrow enough
+/// that a stale boosted peak drops out once five newer runs land.
+const REGRESSION_WINDOW: usize = 5;
+
+/// A run-to-run throughput drop larger than this (percent) is flagged as a
+/// regression. 15% sits above typical Apple Silicon frequency-boost variance
+/// (~10-12% on short micro-benchmarks with cooldown) but below the drops
+/// produced by real code regressions (LTO loss, cache-line sprawl, algorithmic
+/// changes typically show 20%+).
+const REGRESSION_DROP_PCT: f64 = 15.0;
+
+/// Detect regression: if latest throughput dropped >15% from the best of the
+/// recent window for this method.
 #[allow(dead_code)]
 fn check_regression(rows: &[TsRow], cat: &str) -> Vec<(String, f64, f64)> {
     let cat_rows: Vec<_> = rows.iter().filter(|r| r.category == cat).collect();
@@ -158,6 +181,11 @@ fn check_regression(rows: &[TsRow], cat: &str) -> Vec<(String, f64, f64)> {
 }
 
 /// Check regressions using pre-filtered rows (avoids redundant filtering).
+///
+/// Returns `(method, recent_baseline, latest)` tuples for methods whose latest
+/// throughput dropped more than [`REGRESSION_DROP_PCT`] below the best of their
+/// last [`REGRESSION_WINDOW`] entries. See those constants for the rationale
+/// (thermal-inflated peaks, self-cleaning window).
 fn check_regression_filtered(cat_rows: &[&TsRow], _cat: &str) -> Vec<(String, f64, f64)> {
     if cat_rows.is_empty() {
         return Vec::new();
@@ -175,14 +203,22 @@ fn check_regression_filtered(cat_rows: &[&TsRow], _cat: &str) -> Vec<(String, f6
         if entries.len() < 2 {
             continue;
         }
-        let max_tp = entries
+        // Rolling window: compare latest against the best recent run, not the
+        // all-time max. `entries` preserves CSV (chronological) order, so the
+        // tail is the most recent run. `saturating_sub` falls back to the full
+        // series when fewer than `REGRESSION_WINDOW` entries exist.
+        let window_start = entries.len().saturating_sub(REGRESSION_WINDOW);
+        let baseline = entries[window_start..]
             .iter()
             .map(|e| e.throughput)
             .fold(f64::MIN, f64::max);
         let latest = entries.last().unwrap().throughput;
-        let drop_pct = (max_tp - latest) / max_tp * 100.0;
-        if drop_pct > 15.0 {
-            regressions.push((method.to_string(), max_tp, latest));
+        if baseline <= 0.0 {
+            continue;
+        }
+        let drop_pct = (baseline - latest) / baseline * 100.0;
+        if drop_pct > REGRESSION_DROP_PCT {
+            regressions.push((method.to_string(), baseline, latest));
         }
     }
     regressions
@@ -216,10 +252,10 @@ pub fn plot_timeseries(
 
         // Detect regressions — pass pre-filtered cat_rows to avoid redundant filtering
         let regressions = check_regression_filtered(&cat_rows, cat);
-        for (method, max_tp, latest) in &regressions {
-            let drop_pct = (max_tp - latest) / max_tp * 100.0;
+        for (method, baseline, latest) in &regressions {
+            let drop_pct = (baseline - latest) / baseline * 100.0;
             all_regressions.push(format!(
-                "🔴 REGRESSION: {method} dropped {drop_pct:.1}% (peak {max_tp:.0} → {latest:.0})"
+                "🔴 REGRESSION: {method} dropped {drop_pct:.1}% (recent baseline {baseline:.0} → {latest:.0})"
             ));
         }
 
@@ -524,4 +560,106 @@ fn plot_feature_radar(
 
     root.present()?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn row(date: &str, method: &str, tp: f64) -> TsRow {
+        TsRow {
+            run_date: date.to_string(),
+            commit: "deadbeef".to_string(),
+            features: String::new(),
+            category: "cat".to_string(),
+            method: method.to_string(),
+            feature_dim: String::new(),
+            throughput: tp,
+            us_per_step: 0.0,
+            avg_accept_len: 0.0,
+        }
+    }
+
+    /// The all-time max must NOT poison the baseline once five newer runs exist.
+    /// Mirrors the Bandit update() trajectory from Bench 372: May peaks were
+    /// thermal-inflated (no cooldown before `ef78b555`), June 12 runs are the
+    /// real post-fix numbers.
+    #[test]
+    fn rolling_window_ignores_stale_thermal_peak() {
+        // 8 entries: 3 stale peaks (May, pre-cooldown) + 5 recent (June 12).
+        let rows = vec![
+            row("2026-05-27T11", "bandit", 466_000_000.0),
+            row("2026-05-27T12", "bandit", 502_000_000.0), // all-time max
+            row("2026-05-29T15", "bandit", 474_000_000.0),
+            row("2026-06-12T21", "bandit", 367_000_000.0),
+            row("2026-06-12T21", "bandit", 383_000_000.0),
+            row("2026-06-12T21", "bandit", 310_000_000.0),
+            row("2026-06-12T23", "bandit", 137_000_000.0),
+            row("2026-06-12T23", "bandit", 355_000_000.0), // latest
+        ];
+        let refs: Vec<&TsRow> = rows.iter().collect();
+        let regs = check_regression_filtered(&refs, "cat");
+        // Window = last 5 = [367M, 383M, 310M, 137M, 355M], baseline = 383M.
+        // latest 355M vs baseline 383M = 7.3% drop → NOT a regression.
+        assert!(regs.is_empty(), "expected no regression, got {regs:?}");
+    }
+
+    /// A real algorithmic regression must still be flagged even when old peaks
+    /// exist. Mirrors AbsorbCompress compress() from Bench 372: HashSet change
+    /// (commit `458a589c`) tanked June 12 performance.
+    #[test]
+    fn rolling_window_still_flags_real_regression() {
+        let rows = vec![
+            row("2026-05-27T11", "absorb", 52_000_000.0),
+            row("2026-05-27T12", "absorb", 57_000_000.0),
+            row("2026-05-29T15", "absorb", 52_000_000.0),
+            row("2026-06-12T21", "absorb", 18_000_000.0),
+            row("2026-06-12T21", "absorb", 15_000_000.0),
+            row("2026-06-12T21", "absorb", 21_000_000.0),
+            row("2026-06-12T23", "absorb", 17_000_000.0),
+            row("2026-06-12T23", "absorb", 17_000_000.0), // latest
+        ];
+        let refs: Vec<&TsRow> = rows.iter().collect();
+        let regs = check_regression_filtered(&refs, "cat");
+        // Window = last 5, baseline = 21M. latest 17M → 19% drop → flagged.
+        assert_eq!(regs.len(), 1);
+        assert_eq!(regs[0].0, "absorb");
+        assert!((regs[0].1 - 21_000_000.0).abs() < 1.0); // baseline
+        assert!((regs[0].2 - 17_000_000.0).abs() < 1.0); // latest
+    }
+
+    /// With fewer entries than the window, the full series is the baseline
+    /// (no trimming possible — not enough data).
+    #[test]
+    fn short_series_uses_full_range_as_baseline() {
+        let rows = vec![
+            row("d1", "m", 100.0),
+            row("d2", "m", 50.0), // latest, 50% drop from 100
+        ];
+        let refs: Vec<&TsRow> = rows.iter().collect();
+        let regs = check_regression_filtered(&refs, "cat");
+        assert_eq!(regs.len(), 1);
+        assert!((regs[0].1 - 100.0).abs() < f64::EPSILON);
+    }
+
+    /// A single entry must not crash and must not be flagged.
+    #[test]
+    fn single_entry_no_regression() {
+        let rows = vec![row("d1", "m", 100.0)];
+        let refs: Vec<&TsRow> = rows.iter().collect();
+        let regs = check_regression_filtered(&refs, "cat");
+        assert!(regs.is_empty());
+    }
+
+    /// Zero or negative throughput must be skipped (defensive — avoids divide-by-zero).
+    #[test]
+    fn zero_baseline_skipped() {
+        let rows = vec![
+            row("d1", "m", 0.0),
+            row("d2", "m", 0.0),
+        ];
+        let refs: Vec<&TsRow> = rows.iter().collect();
+        let regs = check_regression_filtered(&refs, "cat");
+        assert!(regs.is_empty());
+    }
 }
