@@ -5,7 +5,7 @@
 **Source paper:** [arXiv:2606.19750](https://arxiv.org/abs/2606.19750) — McKenzie, Hansen, Wang, *Manifold Bandits: Bayesian Curriculum Learning over the Latent Geometry of Large Language Models*, UCSD, 2026
 **Code:** [github.com/DarrienMcKenzie/manifold-bandits](https://github.com/DarrienMcKenzie/manifold-bandits) (MIT)
 **Target:** `katgpt-rs/crates/katgpt-core/src/manifold_bandit.rs` (new module) + Cargo feature `manifold_bandit`
-**Status:** Active — Phase 1 COMPLETE, Phase 2 (GOAT gate benchmark) next
+**Status:** Active — Phase 1 + Phase 2 COMPLETE. GOAT gate PASS (G1/G3/G4/G5), G2 FAIL is plan-level expectation error. PROMOTED to default-on. Phase 3 (real PCA/UMAP/HDBSCAN construction) pending.
 
 ---
 

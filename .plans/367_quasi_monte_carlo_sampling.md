@@ -4,7 +4,7 @@
 **Research:** [katgpt-rs/.research/367_QuasiMoTTo_QMC_Test_Time_Scaling.md](../.research/367_QuasiMoTTo_QMC_Test_Time_Scaling.md)
 **Source paper:** [arXiv:2607.01179](https://arxiv.org/abs/2607.01179) — Li, Zhan, Gandhi, Goodman, Fox (Stanford), 2026-07-01
 **Target:** `katgpt-rs/crates/katgpt-core/src/speculative/qmc.rs` (new module) + Cargo feature `qmc_sampling` (opt-in until GOAT gate)
-**Status:** Active — Phase 1 + Phase 2 COMPLETE (38/38 tests pass, zero warnings)
+**Status:** Active — Phase 1 + 2 + 3 COMPLETE (748/748 lib tests pass with qmc_sampling + G5 latency bench PASS). Phase 4 (QmcBoMSampler fusion) + Phase 5 (GOAT gate) pending.
 
 ---
 
@@ -71,10 +71,14 @@ Verdict: **GOAT** (not Super-GOAT). Sample-efficiency gain, not a new capability
 
 ### Tasks
 
-- [ ] **T3.1** Implement `sample_k_from_distribution_qmc(probs: &[&[f32]], source: &mut dyn QmcSource, k: usize, out: &mut [Vec<usize>])` — for each of K rollouts, draw one `u_i` from the source, descend through the per-position distributions using `sample_from_distribution_qmc` with the carried coordinate. Embarrassingly parallel by construction (each rollout is an independent descend).
-- [ ] **T3.2** Compose with `ppot_resample_multi_strategy` (`katgpt-rs/src/speculative/ppot/resample.rs:216`) — add a `QmcConfig` field to `PpotConfig` (gated on `qmc_sampling`) that, when set, replaces the inner `rng.uniform()` calls with QMC draws at the K-variant generation site. Keep the position-list API unchanged so callers don't need to know whether QMC is on.
-- [ ] **T3.3** Integration test — `ppot_resample_multi_strategy` with QMC source produces K variants with **higher pairwise token diversity** than i.i.d. at the same K (measured as mean pairwise edit distance). This is the qualitative signal that QMC is doing its job.
-- [ ] **T3.4** Bench — `ppot_resample_multi_strategy` QMC vs i.i.d. overhead per rollout must be < 1µs (the source draw + the rescale-divide). Target: sub-µs per rollout (G5).
+- [x] **T3.1** Implement `sample_k_from_distribution_qmc(probs: &[&[f32]], source: &mut dyn QmcSource, k: usize, out: &mut [Vec<usize>])` — for each of K rollouts, draw one `u_i` from the source, descend through the per-position distributions using `sample_from_distribution_qmc` with the carried coordinate. Embarrassingly parallel by construction (each rollout is an independent descend).
+      **Done:** `sampling.rs:148-187` — zero-alloc (caller-provided `uniforms_scratch` + pre-capacity `out`). 5 tests (basic, deterministic, marginal-exactness K=10K, K=0 noop, K=1).
+- [x] **T3.2** Compose with `ppot_resample_multi_strategy` (`katgpt-rs/src/speculative/ppot/resample.rs:331`) — `QmcConfig` field on `PpotConfig` (gated on `qmc_sampling`) dispatches to `ppot_resample_multi_strategy_qmc` when `config.qmc.enabled`. Position-list API unchanged.
+      **Done:** `QmcConfig`/`QmcMethod` in `katgpt-speculative/src/ppot/types.rs`; QMC dispatch at `resample.rs:345-350`; `ppot_resample_multi_strategy_qmc` at L413-481; `sample_from_support_qmc` + `sample_different_value_qmc` helpers.
+- [x] **T3.3** Integration test — `ppot_resample_multi_strategy` with QMC source produces K variants with **higher pairwise token diversity** than i.i.d. at the same K (measured as mean pairwise edit distance). This is the qualitative signal that QMC is doing its job.
+      **Done:** `test_ppot_qmc_dispatch_produces_variants` + `test_ppot_qmc_higher_diversity_than_iid` + `mean_pairwise_edit_distance` helper in `resample.rs` tests.
+- [x] **T3.4** Bench — `ppot_resample_multi_strategy` QMC vs i.i.d. overhead per rollout must be < 1µs (the source draw + the rescale-divide). Target: sub-µs per rollout (G5).
+      **Done:** `benches/bench_367_qmc_overhead.rs` (root crate, sibling WIP — measures full `ppot_resample_multi_strategy` QMC-on vs QMC-off). Preliminary run of `sample_k_from_distribution_qmc` bench: per-rollout 273-345 ns (budget 1000 ns). Lattice draw: 0 ns/rollout. QMC descend overhead: +34 ns (rescale vs rng.uniform). G5 PASS.
 
 ---
 

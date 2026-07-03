@@ -189,7 +189,7 @@ Ship the closed-form ReMax aggregation operator (`expected_max_over_m`) and Expe
 
 ## Deferred / Fusion (not in this plan)
 
-- [ ] **[-]** ReMax × BoMSampler fusion (R248) — replace K-sample BoM with closed-form expected-max. Needs BoM's value distribution API. Track as issue after GOAT gate.
-- [ ] **[-]** ReMax × AdvantageMarginGate fusion (R250) — use EI as recursion-loop gating signal. Needs the primitive to ship first.
-- [ ] **[-]** ReMax × Manifold Bandit (R370) — expected-max-over-m at Thompson tree nodes. Needs the manifold bandit to stabilize first.
-- [ ] **[-]** riir-ai per-NPC action selection guide (HLA → action with curiosity-driven m). Create `riir-ai/.research/NNN_*.md` only if the GOAT gate passes and the game-AI use case is validated in G3.
+- [-] ReMax × BoMSampler fusion (R248) — replace K-sample BoM with closed-form expected-max. Needs BoM's value distribution API. Track as issue after GOAT gate.
+- [-] ReMax × AdvantageMarginGate fusion (R250) — use EI as recursion-loop gating signal. Needs the primitive to ship first.
+- [-] ReMax × Manifold Bandit (R370) — expected-max-over-m at Thompson tree nodes. Needs the manifold bandit to stabilize first.
+- [-] riir-ai per-NPC action selection guide (HLA → action with curiosity-driven m). Create `riir-ai/.research/NNN_*.md` only if the GOAT gate passes and the game-AI use case is validated in G3.
