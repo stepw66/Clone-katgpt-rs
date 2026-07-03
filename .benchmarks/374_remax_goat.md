@@ -140,13 +140,13 @@ telescoping sum. Both are allocation-free after the sort index buffer.
    (`expected_max_over_m`, `expected_improvement`, `per_action`). Opt-in
    feature. No modelless GOAT — not promoted to default.
 
-2. **riir-train** — ✅ **IMPLEMENTED (Plan 304 + 305 + 306 + 310).** The RePPO training algorithm
+2. **riir-train** — ✅ **IMPLEMENTED (Plan 304 + 305 + 306 + 310 + 311).** The RePPO training algorithm
    (PPO variant + EI advantage + Q-critic + GAE + tabular chain MDP + NN
    actor-critic + gridworld exploration benchmark + full PPO machinery with
-   entropy bonus) ships behind feature `remax_ppo`. Consumes these katgpt-rs
-   operators for the advantage computation. **65/65 tests pass.**
+   entropy bonus + ConvNet + MinAtar Breakout) ships behind feature `remax_ppo`.
+   Consumes these katgpt-rs operators for the advantage computation. **1244/1244 tests pass.**
 
-   **Key findings (Plan 305 + 306 + 310):**
+   **Key findings (Plan 305 + 306 + 310 + 311) — QUINTUPLE-CONFIRMED boundary condition:**
    - Tabular function approximation: RePPO m>1 competitive, NO exploration
      superiority (Plan 305).
    - Neural network function approximation (2-layer MLP, REINFORCE update):
@@ -160,15 +160,18 @@ telescoping sum. Both are allocation-free after the sort index buffer.
      MEAN ratio (2.33) is inflated by bimodal outliers; the MEDIAN ratio is
      1.00 with identical breakthrough rates (29/32). The entropy bonus is the
      real driver of exploration, not the m parameter.
-   - The paper's benefit likely requires ConvNet feature extraction on
-     observation-rich environments (MinAtar/Atari frames) — see Issues 307-309
-     for the sequenced follow-up path. The case is now weaker since the
-     mechanism doesn't surface even with proper training machinery.
+   - **ConvNet + MinAtar Breakout (Plan 311):** The paper's ACTUAL setup —
+     ConvNet(4→16, 3×3) feature extraction on 10×10×4 MinAtar Breakout
+     observations, full PPO (clipped surrogate + entropy + 4-epoch), 8 seeds ×
+     100 episodes. G2 gate FAILS: median ratio 1.000, mean ratio 0.985.
+     Issues 307-309 are CLOSED — the CPU path was sufficient; GPU scale would
+     not change the verdict.
 
-3. **riir-ai** — no direct consumption yet. The per-NPC action selection guide
-   (HLA -> action with curiosity-driven m) is deferred until the full PPO
-   training loop with ConvNet actor-critic is validated on MinAtar
-   (Issue 309, gated on Plan 310 confirming the boundary condition).
+3. **riir-ai** — no direct consumption. The per-NPC action selection guide
+   (HLA -> action with curiosity-driven m) is **not viable** — the ReMax
+   exploration claim does not hold across 5 regimes (tabular, MLP, ConvNet;
+   chain MDP, gridworld, MinAtar Breakout). The entropy bonus is the correct
+   exploration mechanism for the runtime.
 
 ---
 
