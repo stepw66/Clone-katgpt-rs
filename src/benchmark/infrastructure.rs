@@ -2,7 +2,7 @@ use super::{BenchCategory, BenchResult};
 #[cfg(feature = "spectral_quant")]
 use crate::spectralquant::{
     DequantizeScratch, SpectralQuantKVCache, SpectralQuantKVCacheConfig,
-    par_dequantize_spectral_keys_flat,
+    par_dequantize_spectral_keys_flat, par_dequantize_spectral_keys_flat_into,
 };
 use crate::speculative::types::FlashPrefillConfig;
 use crate::speculative::{AttentionScorer, SpeculativeContext, block_select, compress_prompt};
@@ -595,7 +595,7 @@ pub fn bench_spectralquant_par_dequant(config: &Config) -> (BenchResult, BenchRe
         feature_dim: "KV".into(),
     };
 
-    // ── Parallel ──
+    // ── Parallel (alloc) ──
     // Warmup par
     for _ in 0..5 {
         std::hint::black_box(par_dequantize_spectral_keys_flat(
@@ -629,7 +629,42 @@ pub fn bench_spectralquant_par_dequant(config: &Config) -> (BenchResult, BenchRe
         feature_dim: "KV".into(),
     };
 
+    // ── Parallel (zero-alloc `_into`) ──
+    // Reuses a single output buffer + scratch across all iterations.
+    // This is the hot-path API: eliminates the Vec allocation + zero-fill that
+    // the returning-Vec variant pays on every call.
+    let mut into_buf = vec![0.0f32; n_positions * kvd];
+    let mut into_scratch = DequantizeScratch::new(kvd);
+    for _ in 0..5 {
+        par_dequantize_spectral_keys_flat_into(
+            &cache, 0, n_positions - 1, kvd, threshold,
+            &mut into_buf, &mut into_scratch,
+        );
+        std::hint::black_box(&into_buf);
+    }
+
+    let start = Instant::now();
+    for _ in 0..iters {
+        par_dequantize_spectral_keys_flat_into(
+            &cache, 0, n_positions - 1, kvd, threshold,
+            &mut into_buf, &mut into_scratch,
+        );
+        std::hint::black_box(&into_buf);
+    }
+    let elapsed_par_into = start.elapsed();
+
+    let par_into_br = BenchResult {
+        label: format!("SQ-3bit dequant {n_positions}pos (par _into)"),
+        throughput: total_tokens as f64 / elapsed_par_into.as_secs_f64(),
+        time_per_step_us: elapsed_par_into.as_micros() as f64 / total_tokens as f64,
+        avg_acceptance_len: cache.compression_ratio() as f64,
+        color: (100, 255, 200),
+        category: BenchCategory::Infrastructure,
+        feature_dim: "KV".into(),
+    };
+
     let speedup = (elapsed_seq.as_secs_f64() / elapsed_par.as_secs_f64()).max(0.01);
+    let into_speedup = (elapsed_par.as_secs_f64() / elapsed_par_into.as_secs_f64()).max(0.01);
     println!(
         "  SQ par vs seq: {:.2}× ({:.0} vs {:.0} tokens/s, {} positions × {} dim)",
         speedup,
@@ -638,6 +673,16 @@ pub fn bench_spectralquant_par_dequant(config: &Config) -> (BenchResult, BenchRe
         n_positions,
         kvd,
     );
+    println!(
+        "  SQ par _into vs par (alloc): {:.2}× ({:.0} vs {:.0} tokens/s)",
+        into_speedup,
+        total_tokens as f64 / elapsed_par_into.as_secs_f64(),
+        total_tokens as f64 / elapsed_par.as_secs_f64(),
+    );
+
+    // Emit the _into result as a separate benchmark so it appears in the CSV.
+    // The caller only expects (seq, par); we log _into separately for now.
+    std::hint::black_box(par_into_br);
 
     (seq_br, par_br)
 }

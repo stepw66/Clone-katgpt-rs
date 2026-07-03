@@ -32,7 +32,7 @@ mod infrastructure;
 mod llmexec_guard;
 mod noise;
 mod routing;
-mod simd;
+pub mod simd;
 mod sparse;
 mod speculative;
 mod ttc;
@@ -59,6 +59,7 @@ pub use infrastructure::{
 pub use noise::bench_elf_sde;
 #[cfg(feature = "sparse_mlp")]
 pub use sparse::bench_sparse_mlp;
+pub use simd::bench_simd_perf;
 pub use speculative::{
     bench_ar, bench_ddtree_budget_sweep, bench_ddtree_chain_seed, bench_ddtree_screened,
     bench_dflash, bench_dflash_parallel, bench_speculative, bench_speculative_ar,

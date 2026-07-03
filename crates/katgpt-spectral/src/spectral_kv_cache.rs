@@ -886,76 +886,141 @@ impl SpectralQuantKVCache {
     ///
     /// Falls back to sequential for small batches (`n <= threshold`),
     /// where rayon overhead outweighs parallelism benefit.
+    ///
+    /// **Allocates** a `Vec<f32>` of size `(pos+1) * kv_dim` on every call.
+    /// For hot paths that call this repeatedly, prefer
+    /// [`par_dequantize_keys_flat_into`](Self::par_dequantize_keys_flat_into)
+    /// which writes into a caller-reused buffer.
     pub fn par_dequantize_keys_flat(&self, layer: usize, pos: usize, threshold: usize) -> Vec<f32> {
-        let kv_dim = self.kv_dim;
         let n = pos + 1;
-
         if n == 0 {
             return Vec::new();
         }
+        let mut flat = vec![0.0f32; n * self.kv_dim];
+        let mut scratch = DequantizeScratch::new(self.kv_dim);
+        self.par_dequantize_keys_flat_into(layer, pos, threshold, &mut flat, &mut scratch);
+        flat
+    }
+
+    /// Zero-allocation parallel batch dequantize of keys `[0..=pos]`.
+    ///
+    /// Writes directly into `out`, which must have length `>= (pos + 1) * kv_dim`.
+    /// Only `out[..(pos+1)*kv_dim]` is written; the tail is untouched.
+    ///
+    /// `scratch` is used only for the sequential fallback (`n <= threshold`).
+    /// For the parallel path, per-worker scratches are created via rayon's
+    /// `for_each_init` (one per worker thread, reused across items in the call).
+    ///
+    /// This is the hot-path variant — callers should reuse `out` and `scratch`
+    /// across calls to avoid repeated allocation. The returning-`Vec` variant
+    /// [`par_dequantize_keys_flat`](Self::par_dequantize_keys_flat) delegates
+    /// here.
+    pub fn par_dequantize_keys_flat_into(
+        &self,
+        layer: usize,
+        pos: usize,
+        threshold: usize,
+        out: &mut [f32],
+        scratch: &mut DequantizeScratch,
+    ) {
+        let kv_dim = self.kv_dim;
+        let n = pos + 1;
+        if n == 0 {
+            return;
+        }
+        debug_assert!(
+            out.len() >= n * kv_dim,
+            "out too small: {} < {}",
+            out.len(),
+            n * kv_dim
+        );
 
         // Sequential fallback for small batches (rayon overhead > benefit).
-        // Write directly into the flat output's per-token row — no intermediate buf
-        // (matches the parallel path below).
         if n <= threshold {
-            let mut flat = vec![0.0f32; n * kv_dim];
-            let mut scratch = DequantizeScratch::new(kv_dim);
             for t in 0..n {
-                let row = &mut flat[t * kv_dim..(t + 1) * kv_dim];
-                self.dequantize_key_into_with_scratch(layer, t, &mut scratch, row);
+                let row = &mut out[t * kv_dim..(t + 1) * kv_dim];
+                self.dequantize_key_into_with_scratch(layer, t, scratch, row);
             }
-            return flat;
+            return;
         }
 
-        // Parallel: pre-allocate flat output, write directly from rayon workers.
-        // Each worker dequantizes into a per-thread scratch buffer then copies
-        // into its disjoint row of the flat output — avoids Vec<Vec<f32>> allocation.
-        let mut flat = vec![0.0f32; n * kv_dim];
-        flat.par_chunks_mut(kv_dim).enumerate().for_each_init(
-            || DequantizeScratch::new(kv_dim),
-            |scratch, (t, row)| {
-                self.dequantize_key_into_with_scratch(layer, t, scratch, row);
-            },
-        );
-        flat
+        // Parallel: write directly into disjoint rows of the caller's buffer.
+        out[..n * kv_dim]
+            .par_chunks_mut(kv_dim)
+            .enumerate()
+            .for_each_init(
+                || DequantizeScratch::new(kv_dim),
+                |s, (t, row)| {
+                    self.dequantize_key_into_with_scratch(layer, t, s, row);
+                },
+            );
     }
 
     /// Parallel batch dequantize of all value positions `[0..=pos]` using rayon.
     ///
     /// Same pattern as [`par_dequantize_keys_flat`](Self::par_dequantize_keys_flat)
     /// but for value vectors. Takes `&self` — safe for concurrent reads.
+    ///
+    /// **Allocates** on every call; prefer
+    /// [`par_dequantize_values_flat_into`](Self::par_dequantize_values_flat_into)
+    /// for hot paths.
     pub fn par_dequantize_values_flat(
         &self,
         layer: usize,
         pos: usize,
         threshold: usize,
     ) -> Vec<f32> {
-        let kv_dim = self.kv_dim;
         let n = pos + 1;
-
         if n == 0 {
             return Vec::new();
         }
+        let mut flat = vec![0.0f32; n * self.kv_dim];
+        let mut scratch = DequantizeScratch::new(self.kv_dim);
+        self.par_dequantize_values_flat_into(layer, pos, threshold, &mut flat, &mut scratch);
+        flat
+    }
+
+    /// Zero-allocation parallel batch dequantize of values `[0..=pos]`.
+    ///
+    /// See [`par_dequantize_keys_flat_into`](Self::par_dequantize_keys_flat_into)
+    /// for the contract — this is the value-vector counterpart.
+    pub fn par_dequantize_values_flat_into(
+        &self,
+        layer: usize,
+        pos: usize,
+        threshold: usize,
+        out: &mut [f32],
+        scratch: &mut DequantizeScratch,
+    ) {
+        let kv_dim = self.kv_dim;
+        let n = pos + 1;
+        if n == 0 {
+            return;
+        }
+        debug_assert!(
+            out.len() >= n * kv_dim,
+            "out too small: {} < {}",
+            out.len(),
+            n * kv_dim
+        );
 
         if n <= threshold {
-            let mut flat = vec![0.0f32; n * kv_dim];
-            let mut scratch = DequantizeScratch::new(kv_dim);
             for t in 0..n {
-                let row = &mut flat[t * kv_dim..(t + 1) * kv_dim];
-                self.dequantize_value_into_with_scratch(layer, t, &mut scratch, row);
+                let row = &mut out[t * kv_dim..(t + 1) * kv_dim];
+                self.dequantize_value_into_with_scratch(layer, t, scratch, row);
             }
-            return flat;
+            return;
         }
 
-        // Parallel: pre-allocate flat output, write directly from rayon workers.
-        let mut flat = vec![0.0f32; n * kv_dim];
-        flat.par_chunks_mut(kv_dim).enumerate().for_each_init(
-            || DequantizeScratch::new(kv_dim),
-            |scratch, (t, row)| {
-                self.dequantize_value_into_with_scratch(layer, t, scratch, row);
-            },
-        );
-        flat
+        out[..n * kv_dim]
+            .par_chunks_mut(kv_dim)
+            .enumerate()
+            .for_each_init(
+                || DequantizeScratch::new(kv_dim),
+                |s, (t, row)| {
+                    self.dequantize_value_into_with_scratch(layer, t, s, row);
+                },
+            );
     }
 }
 
@@ -1690,5 +1755,81 @@ mod tests {
             result.iter().all(|&v| v == 0.0),
             "empty cache should dequantize to zeros"
         );
+    }
+
+    /// The zero-alloc `_into` variant must produce bit-exact output as the
+    /// allocating variant, both on the parallel path (threshold=1) and the
+    /// sequential fallback (threshold > n_positions).
+    #[test]
+    fn test_par_dequantize_keys_into_matches_alloc() {
+        use super::super::forward::{
+            par_dequantize_spectral_keys_flat, par_dequantize_spectral_keys_flat_into,
+        };
+
+        let kv_dim = 16;
+        let n_positions = 32;
+        let cal = make_test_calibration(kv_dim);
+        let config = make_test_config(1, kv_dim, n_positions);
+        let mut cache = SpectralQuantKVCache::from_calibration(
+            &config,
+            std::slice::from_ref(&cal),
+            std::slice::from_ref(&cal),
+        );
+        for pos in 0..n_positions {
+            let key: Vec<f32> = (0..kv_dim)
+                .map(|i| ((i + pos * 3) as f32 * 0.1).sin())
+                .collect();
+            cache.store_key(0, pos, &key);
+        }
+
+        // Test both parallel (threshold=1) and sequential fallback (threshold=1000)
+        for &threshold in &[1usize, 1000] {
+            let alloc_flat =
+                par_dequantize_spectral_keys_flat(&cache, 0, n_positions - 1, kv_dim, threshold);
+
+            let mut into_buf = vec![0.0f32; n_positions * kv_dim];
+            let mut scratch = DequantizeScratch::new(kv_dim);
+            par_dequantize_spectral_keys_flat_into(
+                &cache,
+                0,
+                n_positions - 1,
+                kv_dim,
+                threshold,
+                &mut into_buf,
+                &mut scratch,
+            );
+
+            assert_eq!(alloc_flat.len(), into_buf.len(), "len mismatch threshold={threshold}");
+            for (i, (a, b)) in alloc_flat.iter().zip(into_buf.iter()).enumerate() {
+                assert_eq!(a, b, "bit mismatch at [{i}] threshold={threshold}: {a} vs {b}");
+            }
+        }
+    }
+
+    /// `_into` variant must handle pos=0 (single position) correctly.
+    #[test]
+    fn test_par_dequantize_keys_into_single_pos() {
+        use super::super::forward::par_dequantize_spectral_keys_flat_into;
+
+        let kv_dim = 16;
+        let cal = make_test_calibration(kv_dim);
+        let config = make_test_config(1, kv_dim, 4);
+        let mut cache = SpectralQuantKVCache::from_calibration(
+            &config,
+            std::slice::from_ref(&cal),
+            std::slice::from_ref(&cal),
+        );
+        let key: Vec<f32> = (0..kv_dim).map(|i| (i as f32 * 0.3).sin()).collect();
+        cache.store_key(0, 0, &key);
+
+        let mut buf = vec![0.0f32; kv_dim];
+        let mut scratch = DequantizeScratch::new(kv_dim);
+        par_dequantize_spectral_keys_flat_into(
+            &cache, 0, 0, kv_dim, 1, &mut buf, &mut scratch,
+        );
+        // Should have written kv_dim floats for position 0
+        assert_eq!(buf.len(), kv_dim);
+        // Values should be non-zero (we stored a non-zero key)
+        assert!(buf.iter().any(|&v| v != 0.0), "expected non-zero dequant output");
     }
 }

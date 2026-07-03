@@ -4,9 +4,7 @@
 //! SpectralQuant KV cache path. The main forward function
 //! (`forward_quantized`) is generic and lives in `katgpt_transformer`.
 
-#[cfg(all(feature = "spectral_quant", feature = "maxsim"))]
-use super::spectral_kv_cache::DequantizeScratch;
-use super::spectral_kv_cache::SpectralQuantKVCache;
+use super::spectral_kv_cache::{DequantizeScratch, SpectralQuantKVCache};
 #[cfg(all(feature = "spectral_quant", feature = "maxsim"))]
 use rayon::prelude::*;
 
@@ -183,6 +181,9 @@ pub fn maxsim_score_spectralquant(
 /// [`DequantizeScratch`] buffers. Takes `&cache` (not `&mut`) — safe for concurrent reads.
 ///
 /// Falls back to sequential for `n <= threshold` where rayon overhead outweighs benefit.
+///
+/// **Allocates** on every call; see [`par_dequantize_spectral_keys_flat_into`]
+/// for the zero-alloc hot-path variant.
 pub fn par_dequantize_spectral_keys_flat(
     cache: &SpectralQuantKVCache,
     layer: usize,
@@ -199,12 +200,33 @@ pub fn par_dequantize_spectral_keys_flat(
     cache.par_dequantize_keys_flat(layer, pos, threshold)
 }
 
+/// Zero-alloc parallel batch dequantize of SpectralQuant keys `[0..=pos]`.
+///
+/// Thin wrapper over [`SpectralQuantKVCache::par_dequantize_keys_flat_into`].
+/// `out` must have length `>= (pos + 1) * kv_dim`. Callers should reuse `out`
+/// and `scratch` across calls.
+pub fn par_dequantize_spectral_keys_flat_into(
+    cache: &SpectralQuantKVCache,
+    layer: usize,
+    pos: usize,
+    kv_dim: usize,
+    threshold: usize,
+    out: &mut [f32],
+    scratch: &mut DequantizeScratch,
+) {
+    debug_assert_eq!(kv_dim, cache.kv_dim());
+    cache.par_dequantize_keys_flat_into(layer, pos, threshold, out, scratch);
+}
+
 /// Parallel batch dequantize of SpectralQuant value vectors for positions `[0..=pos]`.
 ///
 /// Same output as [`dequantize_spectral_values_flat`] but uses rayon with per-thread
 /// [`DequantizeScratch`] buffers. Takes `&cache` (not `&mut`) — safe for concurrent reads.
 ///
 /// Falls back to sequential for `n <= threshold` where rayon overhead outweighs benefit.
+///
+/// **Allocates** on every call; see [`par_dequantize_spectral_values_flat_into`]
+/// for the zero-alloc hot-path variant.
 pub fn par_dequantize_spectral_values_flat(
     cache: &SpectralQuantKVCache,
     layer: usize,
@@ -219,6 +241,22 @@ pub fn par_dequantize_spectral_values_flat(
     debug_assert_eq!(kv_dim, cache.kv_dim());
 
     cache.par_dequantize_values_flat(layer, pos, threshold)
+}
+
+/// Zero-alloc parallel batch dequantize of SpectralQuant values `[0..=pos]`.
+///
+/// Thin wrapper over [`SpectralQuantKVCache::par_dequantize_values_flat_into`].
+pub fn par_dequantize_spectral_values_flat_into(
+    cache: &SpectralQuantKVCache,
+    layer: usize,
+    pos: usize,
+    kv_dim: usize,
+    threshold: usize,
+    out: &mut [f32],
+    scratch: &mut DequantizeScratch,
+) {
+    debug_assert_eq!(kv_dim, cache.kv_dim());
+    cache.par_dequantize_values_flat_into(layer, pos, threshold, out, scratch);
 }
 
 /// Parallel MaxSim scoring on SpectralQuant-compressed KV cache.

@@ -63,7 +63,8 @@ pub mod outlier_guard;
 pub use forward::par_maxsim_score_spectralquant;
 pub use forward::{
     attention_spectralquant, dequantize_spectral_keys_flat, dequantize_spectral_values_flat,
-    par_dequantize_spectral_keys_flat, par_dequantize_spectral_values_flat,
+    par_dequantize_spectral_keys_flat, par_dequantize_spectral_keys_flat_into,
+    par_dequantize_spectral_values_flat, par_dequantize_spectral_values_flat_into,
 };
 pub use nonuniform_quant::{CompressedVector, NonUniformQuantizer};
 #[cfg(all(feature = "outlier_guard", feature = "stiff_anomaly"))]
