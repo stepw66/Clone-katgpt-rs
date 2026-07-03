@@ -28,8 +28,12 @@
 //! - **Beta(α, β) everywhere, sigmoid never softmax** (AGENTS.md §2). The Beta
 //!   posterior is conjugate to Bernoulli reward; the Thompson sample is a single
 //!   Beta draw — no normalization, no softmax.
-//! - **Empirical Bayes = deterministic aggregation.** Parent (α, β) = (Σ α_c,
-//!   Σ β_c) over children — pure arithmetic, no learned parameters.
+//! - **Empirical Bayes = evidence pooling.** Parent (α, β) = (1 + Σ(α_c − 1),
+//!   1 + Σ(β_c − 1)) over children — pools observed successes/failures without
+//!   pseudo-count dilution. Starts at Beta(1, 1) when all children are uniform
+//!   (high variance → explores); concentrates correctly with data (sharper
+//!   than SUM which dilutes signal with per-child pseudo-counts). See Plan 370
+//!   Phase 2 GOAT gate.
 //! - **Frozen tree, mutable sampler state.** Topology is immutable at inference
 //!   time; only Beta posteriors drift. The tree is BLAKE3-committable at build
 //!   time (topology + initial priors); runtime mutations are tracked separately.
@@ -108,8 +112,8 @@ impl ArmPath {
 #[derive(Clone, Debug)]
 pub enum TreeNode {
     /// A branching node. `beta_alpha` / `beta_beta` are the Empirical Bayes
-    /// aggregate of all children's Beta parameters (Σ α_c, Σ β_c), recomputed
-    /// bottom-up after each observation.
+    /// aggregate of all children's Beta parameters (mean of α_c, mean of β_c),
+    /// recomputed bottom-up after each observation.
     Internal {
         /// Child subtrees (ordered by cluster id from the construction pipeline).
         children: Vec<TreeNode>,
@@ -153,20 +157,30 @@ impl TreeNode {
         }
     }
 
-    /// Convenience: construct an internal node with uniform Beta(1, 1) priors
-    /// and the given children. Used by Phase 1 test topology construction; the
-    /// Phase 3 `build()` pipeline will produce real cluster structure.
+    /// Convenience: construct an internal node whose Empirical Bayes aggregate
+    /// pools the **evidence** (observed successes/failures) from children:
+    /// `parent_α = 1 + Σ(child_α - 1)`, `parent_β = 1 + Σ(child_β - 1)`.
+    ///
+    /// This is the standard Beta-Bernoulli evidence pooling: each child's
+    /// pseudocount (the +1 prior) is subtracted before summing, then a single
+    /// +1 is added back. The result starts at Beta(1, 1) when all children are
+    /// uniform (high variance → explores), and concentrates faster than either
+    /// SUM (Beta(N, N) — over-concentrated initially, signal diluted by
+    /// pseudo-counts) or MEAN (never concentrates — too diffuse). See Plan 370
+    /// Phase 2 GOAT gate.
     pub fn internal(children: Vec<TreeNode>) -> Self {
+        let n = children.len() as f32;
         let (a, b) = children
             .iter()
             .fold((0.0_f32, 0.0_f32), |(sa, sb), c| {
                 let (ca, cb) = c.beta_params();
                 (sa + ca, sb + cb)
             });
+        // Evidence pooling: subtract per-child pseudocount, add back one.
         TreeNode::Internal {
             children,
-            beta_alpha: a,
-            beta_beta: b,
+            beta_alpha: (a - n + 1.0).max(1.0),
+            beta_beta: (b - n + 1.0).max(1.0),
             n_obs: 0,
         }
     }
@@ -384,9 +398,9 @@ impl LatentTaskTree {
     /// Observe a reward on an arm.
     ///
     /// Descends to the leaf for `arm_id`, runs the predict-update Bayesian filter,
-    /// then propagates bottom-up via Empirical Bayes (parent α, β = Σ children's
-    /// α, β). O(branching × depth) — the Empirical Bayes recompute iterates all
-    /// children at each level.
+    /// then propagates bottom-up via Empirical Bayes (parent α, β = mean of
+    /// children's α, β). O(branching × depth) — the Empirical Bayes recompute
+    /// iterates all children at each level.
     ///
     /// Zero allocations (the path is copied from the pre-computed lookup as a
     /// stack-local [`ArmPath`]).
@@ -472,15 +486,19 @@ impl LatentTaskTree {
             } => {
                 let child_idx = path[0];
                 Self::observe_recursive(&mut children[child_idx], &path[1..], reward, step);
-                // Recompute this node's aggregate from ALL children (Empirical Bayes).
+                // Recompute this node's aggregate via EVIDENCE pooling: subtract
+                // each child's pseudocount before summing, add back one. This
+                // gives the parent the total observed evidence (successes /
+                // failures) without dilution from unobserved children.
+                let n = children.len() as f32;
                 let (a, b) = children
                     .iter()
                     .fold((0.0_f32, 0.0_f32), |(sa, sb), c| {
                         let (ca, cb) = c.beta_params();
                         (sa + ca, sb + cb)
                     });
-                *beta_alpha = a;
-                *beta_beta = b;
+                *beta_alpha = (a - n + 1.0).max(1.0);
+                *beta_beta = (b - n + 1.0).max(1.0);
                 *n_obs += 1;
             }
         }
@@ -694,26 +712,27 @@ mod tests {
     fn test_observe_propagates_empirical_bayes() {
         let mut tree = build_test_tree(0.0);
 
-        // Before any observation: root has Beta(4, 4) — sum of 4 children × Beta(1,1).
+        // Before any observation: root has Beta(1, 1) — evidence pooling of 4
+        // children × Beta(1,1): 1 + Σ(1-1) = 1 for both α and β.
         let (ra, rb) = tree.root.beta_params();
-        assert!((ra - 4.0).abs() < 1e-5, "root alpha should start at 4, got {ra}");
-        assert!((rb - 4.0).abs() < 1e-5, "root beta should start at 4, got {rb}");
+        assert!((ra - 1.0).abs() < 1e-5, "root alpha should start at 1, got {ra}");
+        assert!((rb - 1.0).abs() < 1e-5, "root beta should start at 1, got {rb}");
 
         // Observe 1 success on arm 0.
         tree.observe(0, 1.0, 0);
 
         // Arm 0's leaf: Beta(2, 1). Its sibling (arm 1): Beta(1, 1).
-        // Left internal: Beta(2+1, 1+1) = Beta(3, 2).
-        // Right internal: Beta(1+1, 1+1) = Beta(2, 2).
-        // Root: Beta(3+2, 2+2) = Beta(5, 4).
+        // Left internal: 1+Σ(α-1)=1+(1+0)=2, 1+Σ(β-1)=1+(0+0)=1 → Beta(2, 1).
+        // Right internal: 1+Σ(α-1)=1+(0+0)=1, 1+Σ(β-1)=1+(0+0)=1 → Beta(1, 1).
+        // Root: 1+Σ(α-1)=1+(1+0)=2, 1+Σ(β-1)=1+(0+0)=1 → Beta(2, 1).
         let (ra, rb) = tree.root.beta_params();
         assert!(
-            (ra - 5.0).abs() < 1e-5,
-            "root alpha should be 5 after 1 success, got {ra}"
+            (ra - 2.0).abs() < 1e-5,
+            "root alpha should be 2 after 1 success, got {ra}"
         );
         assert!(
-            (rb - 4.0).abs() < 1e-5,
-            "root beta should be 4 after 1 success, got {rb}"
+            (rb - 1.0).abs() < 1e-5,
+            "root beta should be 1 after 1 success, got {rb}"
         );
     }
 
