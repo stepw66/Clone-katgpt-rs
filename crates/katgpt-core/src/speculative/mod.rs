@@ -40,6 +40,12 @@
 pub mod sampling;
 pub mod types;
 
+// QMC uniform sources (Plan 367, Research 367 — QuasiMoTTo). Opt-in behind
+// `qmc_sampling`. Produces correlated-but-marginally-exact k-point batches that
+// are a drop-in for i.i.d. `rng.uniform()` in K-rollout paths.
+#[cfg(feature = "qmc_sampling")]
+pub mod qmc;
+
 // Re-export the substrate API at `katgpt_core::speculative::*` for ergonomic
 // imports (`use katgpt_core::speculative::{TreeNode, DraftResult};`).
 pub use types::*;

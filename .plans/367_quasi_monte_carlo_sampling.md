@@ -4,7 +4,7 @@
 **Research:** [katgpt-rs/.research/367_QuasiMoTTo_QMC_Test_Time_Scaling.md](../.research/367_QuasiMoTTo_QMC_Test_Time_Scaling.md)
 **Source paper:** [arXiv:2607.01179](https://arxiv.org/abs/2607.01179) — Li, Zhan, Gandhi, Goodman, Fox (Stanford), 2026-07-01
 **Target:** `katgpt-rs/crates/katgpt-core/src/speculative/qmc.rs` (new module) + Cargo feature `qmc_sampling` (opt-in until GOAT gate)
-**Status:** Active — Phase 0 (planning)
+**Status:** Active — Phase 1 COMPLETE (27/27 tests pass, zero warnings)
 
 ---
 
@@ -30,9 +30,9 @@ Verdict: **GOAT** (not Super-GOAT). Sample-efficiency gain, not a new capability
 
 ### Tasks
 
-- [ ] **T1.1** Add `qmc_sampling = []` opt-in feature to `katgpt-rs/crates/katgpt-core/Cargo.toml` (empty dep list — zero-dep for lattice/stratified; Sobol direction numbers vendored as a `const` table to avoid a new dep).
-- [ ] **T1.2** Create `katgpt-rs/crates/katgpt-core/src/speculative/qmc.rs` gated by `#[cfg(feature = "qmc_sampling")]`.
-- [ ] **T1.3** Define the trait per R367 §2.1:
+- [x] **T1.1** Add `qmc_sampling = []` opt-in feature to `katgpt-rs/crates/katgpt-core/Cargo.toml` (empty dep list — zero-dep for lattice/stratified; Sobol direction numbers vendored as a `const` table to avoid a new dep).
+- [x] **T1.2** Create `katgpt-rs/crates/katgpt-core/src/speculative/qmc.rs` gated by `#[cfg(feature = "qmc_sampling")]`.
+- [x] **T1.3** Define the trait per R367 §2.1:
   ```rust
   /// K marginally-Unif[0,1) points with controlled joint structure.
   /// Contract: each `u_i` is marginally uniform; the joint is low-discrepancy.
@@ -43,12 +43,12 @@ Verdict: **GOAT** (not Super-GOAT). Sample-efficiency gain, not a new capability
   }
   ```
   Zero-allocation contract: caller passes the scratch buffer (per AGENTS.md hot-loop rule — no allocation inside `draw`).
-- [ ] **T1.4** Implement `LatticeQmc` — k points on `{(i/k + Δ) mod 1 : i=0..k-1}` with a single shared `Δ ∼ Unif[0,1)` drawn from the caller-provided `Rng`. Pairwise MI `−∞` (each point determines every other). Stores only the running `Δ` (1 f32).
-- [ ] **T1.5** Implement `StratifiedQmc` — divide `[0,1)` into k equal strata, draw one `Unif[i/k, (i+1)/k)` per stratum, then Fisher-Yates permute using the caller `Rng`. Pairwise MI `= log(k/(k−1))`.
-- [ ] **T1.6** Implement `SobolQmc { dim }` — multi-dim QMC in `[0,1)^dim` (dim = sequence length for token-level coverage). Vendor Joe-Kuo direction numbers as a `const [[u32; 32]; MAX_DIM]` table (or a compact precomputed form). XOR-obfuscate the standard Sobol Owen-scramble using a caller-seeded `Rng` for randomization.
-- [ ] **T1.7** Unit test — **marginal uniformity (KS test)**: for each method, draw N=10⁴ batches of k=64, collect all `N·k` values, run Kolmogorov–Smirnov against `Unif[0,1)`. p > 0.05 required. (KS impl can be a small vendored helper — D = sup|F_emp − F_theo|, compare against the asymptotic KS critical value; no new dep.)
-- [ ] **T1.8** Unit test — **low-discrepancy (star discrepancy)**: for each method, compute the star discrepancy `D*_k = sup_{x∈[0,1]} |F_emp(x) − x|` over a batch of k=64 points. Assert `D*_qmc ≤ D*_iid` (i.i.d. baseline from same RNG). This is the whole point of QMC — if it doesn't beat i.i.d. on star discrepancy, the implementation is wrong.
-- [ ] **T1.9** Unit test — **pairwise MI sanity**: lattice MI `−∞` (each pair perfectly determines the other), stratified MI `≈ log(k/(k−1))`, i.i.d. MI `= 0`. Quick estimator via `H(U_i,U_j) − H(U_i) − H(U_j)` on a binned histogram (informational, not a gate — exact MI for continuous is hard; bin to k bins).
+- [x] **T1.4** Implement `LatticeQmc` — k points on `{(i/k + Δ) mod 1 : i=0..k-1}` with a single shared `Δ ∼ Unif[0,1)` drawn from the caller-provided `Rng`. Pairwise MI `−∞` (each point determines every other). Stores only the running `Δ` (1 f32).
+- [x] **T1.5** Implement `StratifiedQmc` — divide `[0,1)` into k equal strata, draw one `Unif[i/k, (i+1)/k)` per stratum, then Fisher-Yates permute using the caller `Rng`. Pairwise MI `= log(k/(k−1))`.
+- [x] **T1.6** Implement `SobolQmc { dim }` — multi-dim QMC in `[0,1)^dim` (dim = sequence length for token-level coverage). Vendor Joe-Kuo direction numbers as a `const [[u32; 32]; MAX_DIM]` table (or a compact precomputed form). XOR-obfuscate the standard Sobol Owen-scramble using a caller-seeded `Rng` for randomization.
+- [x] **T1.7** Unit test — **marginal uniformity (KS test)**: for each method, draw N=10⁴ batches of k=64, collect all `N·k` values, run Kolmogorov–Smirnov against `Unif[0,1)`. p > 0.05 required. (KS impl can be a small vendored helper — D = sup|F_emp − F_theo|, compare against the asymptotic KS critical value; no new dep.)
+- [x] **T1.8** Unit test — **low-discrepancy (star discrepancy)**: for each method, compute the star discrepancy `D*_k = sup_{x∈[0,1]} |F_emp(x) − x|` over a batch of k=64 points. Assert `D*_qmc ≤ D*_iid` (i.i.d. baseline from same RNG). This is the whole point of QMC — if it doesn't beat i.i.d. on star discrepancy, the implementation is wrong.
+- [x] **T1.9** Unit test — **pairwise MI sanity**: lattice MI `−∞` (each pair perfectly determines the other), stratified MI `≈ log(k/(k−1))`, i.i.d. MI `= 0`. Quick estimator via `H(U_i,U_j) − H(U_i) − H(U_j)` on a binned histogram (informational, not a gate — exact MI for continuous is hard; bin to k bins).
 
 ---
 
