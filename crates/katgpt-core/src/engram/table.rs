@@ -27,6 +27,9 @@ use std::sync::OnceLock;
 /// Construct via [`EngramTableBuilder`]. After `build()`, the slots and
 /// heads are immutable; the only lazy state is the cached BLAKE3
 /// commitment (computed on first call to [`commitment`](EngramTable::commitment)).
+/// For surgical per-slot edits without rebuilding the whole table, see
+/// [`crate::engram::StagingEngramTable`] (Plan 360).
+#[derive(Debug)]
 pub struct InMemoryEngramTable {
     /// Flat `N × D` row-major slot array. Slot `i` occupies
     /// `slots[i*D..(i+1)*D]`. Empty / unpopulated slots are all-zeros.
@@ -56,6 +59,38 @@ impl InMemoryEngramTable {
     #[inline]
     pub fn heads(&self) -> &[HashHead; K_MAX] {
         &self.heads
+    }
+
+    /// Raw slot array access (crate-visible). Used by `StagingEngramTable`
+    /// (Plan 360) to copy-on-write the slot array during surgical per-slot
+    /// mutations. Returns the flat `N × D` row-major slice.
+    #[inline]
+    pub(crate) fn slots(&self) -> &[f32] {
+        &self.slots
+    }
+
+    /// Construct from pre-validated parts (crate-visible). Used by
+    /// `StagingEngramTable::commit()` (Plan 360) to build a new table from a
+    /// mutated slot array without re-validating dimensions — the staging
+    /// table has already validated everything.
+    ///
+    /// `n_slots` MUST equal `slots.len() / d` (debug_asserted). The heads are
+    /// carried from the source table (preserving its identity configuration).
+    #[inline]
+    pub(crate) fn from_parts(
+        slots: Box<[f32]>,
+        heads: Box<[HashHead; K_MAX]>,
+        n_slots: usize,
+        d: usize,
+    ) -> Self {
+        debug_assert_eq!(slots.len(), n_slots.checked_mul(d).expect("n_slots*d overflow"));
+        Self {
+            slots,
+            heads,
+            n_slots,
+            d,
+            commitment_cache: OnceLock::new(),
+        }
     }
 }
 

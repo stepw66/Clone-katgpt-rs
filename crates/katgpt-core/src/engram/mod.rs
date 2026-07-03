@@ -69,6 +69,7 @@ mod forward;
 mod hash;
 mod hotswap;
 mod kernel;
+mod staging;
 mod table;
 mod tokenizer;
 
@@ -83,6 +84,7 @@ pub use hotswap::EngramHotSwap;
 pub use kernel::{
     SigmoidFusionConfig, rmsnorm_into, sigmoid_fuse_into, sigmoid_fuse_multi_branch_into,
 };
+pub use staging::{StagingEngramTable, StagingError};
 pub use table::{EngramTableBuilder, InMemoryEngramTable};
 pub use tokenizer::{
     SurjectiveMap, SurjectiveMapLoadError, TokenizerSpec, build_surjective_map, compress_token,

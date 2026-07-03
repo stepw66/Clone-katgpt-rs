@@ -5,7 +5,7 @@
 **Parent plan:** [katgpt-rs/.plans/299_Engram_Hash_Addressed_Pattern_Memory.md](299_Engram_Hash_Addressed_Pattern_Memory.md) (Phase 2 — `InMemoryEngramTable`, `EngramTableBuilder`)
 **Target:** `katgpt-rs/crates/katgpt-core/src/engram/staging.rs` (new module)
 **Cargo feature:** `engram` (existing — no new feature flag; sibling to `table.rs`)
-**Status:** Active — proposed. Ship behind existing `engram` (still default-off, gated on Plan 299 G6).
+**Status:** Active — Phase 1 DONE (2026-07-03). 17/17 staging tests pass, 112/112 engram tests pass, 666/666 default-feature tests pass (no regression). Phase 2 (GOAT gate) + Phase 3 (docs wiring) + Phase 4 (promotion decision) pending. Ship behind existing `engram` (still default-off, gated on Plan 299 G6).
 
 ---
 
@@ -65,9 +65,10 @@ Option (b) is cleaner — single chokepoint, future-proof if fields change. This
 
 ### Tasks
 
-- [ ] **T1.1** Add `pub(crate) fn from_parts(slots: Box<[f32]>, heads: Box<[HashHead; K_MAX]>, n_slots: usize, d: usize) -> Self` to `InMemoryEngramTable` in `table.rs`. Constructs without re-validating (the staging table has already validated dimensions). Inline. Single-line body — delegates to struct literal.
+- [x] **T1.1** Add `pub(crate) fn from_parts(slots: Box<[f32]>, heads: Box<[HashHead; K_MAX]>, n_slots: usize, d: usize) -> Self` to `InMemoryEngramTable` in `table.rs`. Constructs without re-validating (the staging table has already validated dimensions). Inline. Single-line body — delegates to struct literal.
+  - **Done (2026-07-03).** Also added `pub(crate) fn slots(&self) -> &[f32]` for the COW copy. Discovered `num_slots()` and `dim()` are already on the `EngramTable` trait (no new accessors needed for those). Added `#[derive(Debug)]` to `InMemoryEngramTable` (needed by `unwrap_err()` in tests, useful for general debugging).
 
-- [ ] **T1.2** Create `crates/katgpt-core/src/engram/staging.rs` behind `#[cfg(feature = "engram")]`. Define `StagingEngramTable<'a>`:
+- [x] **T1.2** Create `crates/katgpt-core/src/engram/staging.rs` behind `#[cfg(feature = "engram")]`. Define `StagingEngramTable<'a>`:
   ```rust
   pub struct StagingEngramTable<'a> {
       source: &'a InMemoryEngramTable,
@@ -84,7 +85,7 @@ Option (b) is cleaner — single chokepoint, future-proof if fields change. This
   ```
   No `heads`/`n_slots`/`d` fields — those come from `source` on commit.
 
-- [ ] **T1.3** Implement constructors:
+- [x] **T1.3** Implement constructors:
   ```rust
   impl<'a> StagingEngramTable<'a> {
       /// Borrow `source` immutably. Empty pending list.
@@ -96,7 +97,7 @@ Option (b) is cleaner — single chokepoint, future-proof if fields change. This
   }
   ```
 
-- [ ] **T1.4** Implement mutation methods:
+- [x] **T1.4** Implement mutation methods:
   ```rust
   /// UPDATE-slot: queue a pattern replacement at `slot_idx`.
   /// `pattern.len()` MUST equal `source.dim()` — checked at queue time
@@ -110,7 +111,7 @@ Option (b) is cleaner — single chokepoint, future-proof if fields change. This
   ```
   **Bounds check**: `slot_idx < source.n_slots()`. Returns `Err` if out of bounds. Need a `pub(crate) fn n_slots(&self) -> usize` and `pub(crate) fn dim(&self) -> usize` accessor on `InMemoryEngramTable` (mirror existing private fields). Add these in T1.1 alongside `from_parts`.
 
-- [ ] **T1.5** Implement `commit`:
+- [x] **T1.5** Implement `commit`:
   ```rust
   /// Apply all pending mutations, producing a new immutable table.
   /// Source is untouched (COW). Commitment is lazy — first
@@ -130,7 +131,7 @@ Option (b) is cleaner — single chokepoint, future-proof if fields change. This
   4. `InMemoryEngramTable::from_parts(new_slots, source.heads.clone_boxed(), source.n_slots, source.d)`.
      - `heads` is `Box<[HashHead; K_MAX]>` — needs a clone. `HashHead` is `Copy` so this is `Box::new(*source.heads())`. Add a `pub(crate) fn heads_boxed(&self) -> Box<[HashHead; K_MAX]>` helper, OR clone from the existing `pub fn heads(&self) -> &[HashHead; K_MAX]` accessor.
 
-- [ ] **T1.6** Implement query methods (for the GM panel's UI):
+- [x] **T1.6** Implement query methods (for the GM panel's UI):
   ```rust
   /// Number of pending mutations queued (not yet committed).
   pub fn pending_count(&self) -> usize { self.pending.len() }
@@ -143,19 +144,36 @@ Option (b) is cleaner — single chokepoint, future-proof if fields change. This
   pub fn clear(&mut self) { self.pending.clear(); }
   ```
 
-- [ ] **T1.7** Unit tests in `staging.rs` (`#[cfg(test)] mod tests`):
-  - `update_slot_writes_to_new_table_only` — stage an update, commit, verify the new table has the new pattern at the slot AND the source table is unchanged (compare via `commitment()`).
-  - `delete_slot_zeros_in_new_table` — stage a delete, commit, verify the slot is zero in the new table AND non-zero in the source.
-  - `commit_empty_returns_err` — committing with no pending mutations returns `Err`.
-  - `out_of_bounds_slot_returns_err` — `update_slot(n_slots, ...)` returns `Err`.
-  - `wrong_pattern_len_returns_err` — `update_slot(i, &[0.0; d+1])` returns `Err`.
-  - `later_same_slot_wins` — stage `update_slot(5, A)` then `update_slot(5, B)`, commit, verify slot 5 == B.
-  - `mixed_update_delete_update` — stage U/D/U on different slots, commit, verify each.
-  - `clear_discards_pending` — stage mutations, `clear()`, `pending_count() == 0`.
-  - `commitment_recomputed` — source table has cached commitment C1; after staging + commit, new table has commitment C2 ≠ C1 (BLAKE3 differs because contents differ).
-  - `idempotent_delete` — stage `delete_slot(7)` twice, commit succeeds, slot 7 is zero.
+- [x] **T1.7** Unit tests in `staging.rs` (`#[cfg(test)] mod tests`) — 17 tests total (10 from plan + 7 additional edge cases):
+  - `update_slot_writes_to_new_table_only` ✅
+  - `delete_slot_zeros_in_new_table` ✅
+  - `commit_empty_returns_err` ✅
+  - `out_of_bounds_slot_returns_err` ✅
+  - `wrong_pattern_len_returns_err` ✅
+  - `later_same_slot_wins` ✅
+  - `mixed_update_delete_update` ✅
+  - `clear_discards_pending` ✅
+  - `commitment_recomputed` ✅ (fixed test helper: slot 0 pattern must be non-zero, else delete-slot-0 is a no-op)
+  - `idempotent_delete` ✅
+  - `with_capacity_pre_allocates` ✅ (extra)
+  - `unaffected_slots_match_source_bit_for_bit` ✅ (extra — G1 correctness core)
+  - `builder_chaining_idiom` ✅ (extra — verifies fluent API)
+  - `pending_count_tracks_queue` ✅ (extra)
+  - `delete_then_update_same_slot_update_wins` ✅ (extra — last-write edge case)
+  - `zero_dim_table_hands_back_unchanged_committed_arithmetic` ✅ (extra — n_slots=0 edge case)
+  - `staging_error_display_is_human_readable` ✅ (extra — Display impl sanity)
 
-**Phase 1 exit:** `cargo test -p katgpt-core --features engram --lib` passes (existing 88 engram tests + ~10 new staging tests). The staging table is correct COW.
+**Phase 1 exit:** `cargo test -p katgpt-core --features engram --lib` passes — 112 engram tests (88 existing + 17 staging + 7 module-level integration) all green. `cargo test -p katgpt-core --lib` (default features, engram OFF) — 666 tests pass, staging code properly gated. `cargo check --all-features` clean.
+
+### Phase 1 Implementation Notes (2026-07-03)
+
+Three deviations from the original plan T1.1–T1.7, all surfaced by the compiler:
+
+1. **`commit` signature: `&mut self`, not `self`.** The plan specified `commit(self)` (consuming), but this breaks fluent chaining (`from_table(t).update_slot(i, p)?.commit()?`) because `update_slot`/`delete_slot` return `Result<&mut Self, _>` (borrowing) and you can't move out of a mutable reference. Changed `commit` to `&mut self` + `std::mem::take(&mut self.pending)` to drain the pending list. A second `commit` call returns `NoPendingMutations` (correct — pending is empty). Supports both fluent and imperative styles.
+
+2. **`StagingError` instead of `anyhow::Result`.** `anyhow` is not a katgpt-core dependency. Per AGENTS.md ("Prefer existing dependencies"), defined a small manual `StagingError` enum with `Debug + Clone + Copy + PartialEq + Eq + Display + Error` impls — matches the existing `SurjectiveMapLoadError` pattern in `tokenizer.rs`. Three variants: `SlotOutOfBounds`, `WrongPatternLen`, `NoPendingMutations`.
+
+3. **`#[derive(Debug)]` on both structs.** `unwrap_err()` requires `T: Debug`. Added `#[derive(Debug)]` to `InMemoryEngramTable` (useful for general debugging, not just tests) and `StagingEngramTable` (the `&mut Self` return from update/delete needs Debug for `unwrap_err` in the fluent chain). `PendingMutation` already had `#[derive(Debug, Clone)]`.
 
 ---
 
