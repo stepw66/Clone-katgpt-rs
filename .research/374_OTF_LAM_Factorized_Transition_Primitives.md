@@ -1,6 +1,7 @@
 # Research 374: OTF-LAM — Factorized Transition Primitives for Compositional Action Abstraction
 
 > **Source:** [Latent Actions from Factorized Transition Effects under Agent Ambiguity](https://arxiv.org/abs/2606.30544) — Heejeong Nam, Chandradithya S Jonnalagadda, Harshit Aggarwal, Eric Xu, Randall Balestriero (Brown University), arXiv:2606.30544v1, 30 Jun 2026
+> **Code:** [Hazel-Heejeong-Nam/lam_agent_ambiguity](https://github.com/Hazel-Heejeong-Nam/lam_agent_ambiguity) (MIT) — official implementation; verified §10
 > **Date:** 2026-07-03
 > **Status:** Done — verdict locked (**GOAT for katgpt-rs**)
 > **Classification:** Public (this note). Training recipe → riir-train.
