@@ -246,6 +246,14 @@ paired_loss_diagnostic = []  # Paired Token-Level Loss Gap Diagnostic — generi
 temp_loss_fingerprint = []  # TEMP — Perturbed-Loss-Vector Diversity Fingerprint (Plan 341, Research 323, arXiv:2606.26797 Jin et al. ICML 2026). Modelless diversity selector: given two committed snapshots S_0, S_1, extrapolate K checkpoints along v = S_1 − S_0, compute per-candidate short-prefix loss vectors, and select the K-subset with maximal Lipschitz-bound spread — gradient-diversity ranking without gradients. Theorem 3.1 modelless reframe: similar loss vectors across K extrapolated checkpoints ⇒ similar gradients along v during the next weight-mutation cycle. Composes with ac_prefix::ConditionalLogprob, HLA surprise, RavenSlotLossKernel (riir-neuron-db Plan 005). DEFAULT-ON (Plan 341 Phase 2, 2026-06-29): G1 15.44x>=2x (MIN pairwise bound metric, Gaussian mixture fixture), G2 Kendall tau 0.9839>=0.85 at N=32 vs N=256 (paper Fig. 6 modelless analog), G3 perturbed_loss_vector 2.46us<5us + select_diverse_subset 130us<1ms + 0 allocs hot path, G4 bit-identical determinism, G5 134/134 each-feature clean. riir-neuron-db Plan 005 G2' integration gain +0.1672 (modelless). 673/673 tests pass.
 
 manifold_bandit = []  # Manifold Bandits -- Latent Task Tree + Hierarchical Thompson Sampler + BayesianFilterArm (Plan 370, Research 370, arXiv:2606.19750 McKenzie et al. UCSD 2026). Modelless inference-time routing primitive distilled from the paper's Bayesian Manifold Curriculum (the BMC training loop -> riir-train). Three composable parts: (1) LatentTaskTree -- frozen, BLAKE3-committable hierarchical clustering of an arm space by latent similarity (Phase 1 accepts pre-built topology; Phase 3 adds PCA -> UMAP -> Chart Test -> HDBSCAN construction); (2) top-down Beta posterior Thompson descent with bottom-up Empirical Bayes aggregation (parent = sum of children); (3) BayesianFilterArm -- per-arm non-stationary belief via predict-update drift filter (closes the Plan 030/032/025 contextual + non-stationary bandit gap). Composes with Dual-Pool CGSP (Plan 312, complementary non-stationarity handling) and AutocurriculumSampler (Plan 155, structure-aware upgrade). Pure modelless (closed-form Beta posteriors + deterministic Empirical Bayes, no training). Opt-in until G1-G5 GOAT gate passes.
+mean_field_regime = []  # Mean-Field Crowd Oscillation Regime Classifier — (κ, κ_a, Q) order-parameter aggregator + Hopf boundary detector + four-way regime taxonomy (Plan 371, Research 371, arXiv:2606.30366 Zheng/Miller/Fiete MIT Jun 2026). Three modelless primitives: (1) MeanFieldOverlap — one-pass crowd aggregation of K per-NPC HLA states into the paper's (κ, κ_a, Q) order parameters via dot-product projection onto a frozen direction vector n (population analog of ict::BranchingDetector::last_population_mean but over NPCs not trajectories, onto a learned direction not action probabilities); (2) hopf_boundary + static_boundary — closed-form 2×2 Jacobian eigenvalue check on the (κ, κ_a) planar subsystem, extending Plan 301's subspace_phase_gate from real-eigenvalue phase transitions (N≥d input sufficiency) to complex-eigenvalue (Hopf) phase transitions; (3) RegimeClassifier — combines the above + chaos intensity g (heuristic from Q or caller-injected) into the paper's Regime enum {Static, NoiseSustainedOscillation, IrregularSwitching, GlobalLimitCycle}, #[repr(u8)] for sync-boundary serialization. Wake/sleep/anesthesia biological mapping becomes a runtime knob: β is the per-NPC arousal scalar. Opt-in until G1–G5 GOAT gate + mandatory defend-wrong PoC (Plan 371 Phase 5 T5.1) pass.
+
+# Plan 371 Phase 5 — Mean-Field Regime Classifier GOAT gate (G2/G4/G5).
+# G1 (defend-wrong PoC) ships separately in riir-poc/benches/.
+[[bench]]
+name = "bench_371_mean_field_regime_goat"
+harness = false
+required-features = ["mean_field_regime"]
 
 [[bench]]
 name = "flow_field_bench"
@@ -896,3 +904,13 @@ required-features = ["functional_substitution_gate"]
 name = "functional_substitution_g3"
 harness = false
 required-features = ["functional_substitution_gate"]
+
+# Plan 370 Phase 2 — Manifold Bandit GOAT gate (G1–G5): G1 structural advantage
+# (hier vs flat on 64-arm/8-cluster), G2 diversity preservation, G3 non-stationarity
+# recovery (filter ablation + sliding-window proxy), G4 latency (sample ≤500ns /
+# observe ≤300ns at depth 6 + 0 allocs), G5 bit-reproducibility. Prints verdict.
+# std::time::Instant + CountingAllocator + harness = false (mirrors bench_329).
+[[bench]]
+name = "bench_370_manifold_bandit_goat"
+harness = false
+required-features = ["manifold_bandit"]

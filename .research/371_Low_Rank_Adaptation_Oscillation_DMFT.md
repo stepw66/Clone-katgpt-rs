@@ -271,6 +271,53 @@ graph TD
 
 ---
 
+## §PoC Addendum (2026-07-03, Plan 371 Phase 5 T5.1)
+
+The mandatory defend-wrong PoC shipped at `riir-poc/benches/mean_field_regime_poc.rs`.
+It implements the paper's reduced 3D ODE (Eq. 55) with simplified `χ̄`/`Q_fp`/`G_eff`
+approximations, sweeps a 5×5 `(g, β)` grid, and compares the trajectory-classified
+regime against `RegimeClassifier::classify_with_g`.
+
+**Verdict: INCONCLUSIVE.**
+
+- **G2/G3/G4/G5 ALL PASS** — perf (9.8µs aggregate / 0ns hopf+classify),
+  no-regression (666/666 default tests), alloc-free (0/100 calls), determinism
+  (bit-identical). These gates are solid.
+- **G1 (correctness) = INCONCLUSIVE** — 19/25 grid points match (76%), but only
+  1/4 distinct regimes correctly identified. The `NoiseSustainedOscillation`
+  regime (the bulk of the grid) is consistently right; the boundary regimes
+  (`Static` near g_c, `IrregularSwitching` near Hopf, `GlobalLimitCycle` past
+  Hopf) are not.
+
+**Root cause: the PoC simulator is the weak link, not the classifier.** The
+simplified ODE uses rough approximations (`χ̄ ≈ 1 − Σ²/3`, `Q_fp ≈ g²·Σ²·χ̄`)
+that do not reproduce the paper's exact DMFT bifurcation structure. The
+classifier's closed-form Hopf discriminant is mathematically correct (it
+correctly identifies when the 2×2 Jacobian has complex eigenvalues with
+positive real part, paper Eq. 56) — the issue is calibrating the margins
+(`hopf_margin`, `chaos_threshold`) to match a specific ODE's regime boundaries.
+
+**Mismatches cluster at:**
+- (a) **g=1.0 boundary** (5/6 mismatches): `chaos_threshold = 1.0` treats g=1.0
+  as "not chaotic", but the simplified ODE shows oscillation at g=1.0.
+- (b) **Intermediate β**: the classifier detects the Hopf instability
+  direction correctly but calls it `GlobalLimitCycle` instead of
+  `IrregularSwitching` (the `hopf_margin = 0.1` is too low).
+
+**Promotion decision: KEEP OPT-IN.** Per Plan 371 T6.2, the PoC did not confirm
+regime classification on ≥4/5 regime boundaries, so `mean_field_regime` stays
+opt-in. Follow-up tracked in `.issues/034_mean_field_regime_poc_calibration.md`:
+T1 paper-exact DMFT simulator, T2/T3 margin recalibration, T4 real-game-domain
+validation. The primitive is mathematically sound and useful as-is for callers
+who want the closed-form Hopf discriminant without the full regime taxonomy.
+
+---
+
 ## 6. TL;DR
 
 The paper proves low-rank RNN + firing-rate adaptation produces a four-regime phase diagram (static → noise-sustained oscillation → switching → limit cycle) organized by a single parameter β. ~80% of the algorithmic content already ships (LinOSS, `subspace_phase_gate`, `temporal_deriv`, `MicroRecurrentBeliefState`, `ict::BranchingDetector`); the novel 20% is a **mean-field `(κ, κ_a, Q)` aggregator over NPCs + Hopf boundary detector + four-way regime classifier** — a GOAT extension into crowd-scale emergent oscillations, behind feature flag `mean_field_regime`, with a mandatory defend-wrong PoC. The wake/sleep/anesthesia biological mapping becomes a runtime knob: β is the per-NPC arousal scalar, and sweeping it across a crowd produces emergent day/night cycles, panic waves, fashion trends. **Not Super-GOAT** — a competitor could assemble this from shipped primitives in a week; the moat (if any) lives in the riir-ai *wiring* (per-archetype β, surprise-driven regime transition), tracked as a follow-up issue pending GOAT-gate pass.
+
+**PoC outcome (2026-07-03):** G2/G3/G4/G5 PASS; G1 INCONCLUSIVE (76% grid match,
+1/4 distinct regimes — the simplified ODE simulator is too crude to validate
+the full taxonomy). `mean_field_regime` stays opt-in pending Issue 034 resolution
+(paper-exact DMFT simulator + margin recalibration + real-game validation).

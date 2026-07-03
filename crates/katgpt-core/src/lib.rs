@@ -1149,3 +1149,23 @@ pub use diversity::temp::{
 // primitive. Opt-in until G1–G5 GOAT gate passes.
 #[cfg(feature = "manifold_bandit")]
 pub mod manifold_bandit;
+
+// Mean-Field Crowd Oscillation Regime Classifier — crowd-level (κ, κ_a, Q)
+// order-parameter aggregator + closed-form 2×2 Jacobian Hopf boundary check +
+// four-way regime taxonomy (Static / NoiseSustainedOscillation /
+// IrregularSwitching / GlobalLimitCycle). Distilled from Zheng, Miller, Fiete
+// (arXiv:2606.30366, MIT, Jun 2026). The paper's algorithmic content is ~80%
+// covered by shipped primitives (LinOSS, `subspace_phase_gate`, `temporal_deriv`,
+// `MicroRecurrentBeliefState`, `ict::BranchingDetector`); this ships the
+// missing 20% — the crowd-scale mean-field view + oscillatory-instability
+// detector + regime taxonomy. Extends Plan 301's `subspace_phase_gate` from
+// real-eigenvalue phase transitions (`N ≥ d` input sufficiency) to complex-
+// eigenvalue (Hopf) phase transitions. Opt-in until the G1–G5 GOAT gate +
+// mandatory defend-wrong PoC (Plan 371 Phase 5 T5.1) pass.
+#[cfg(feature = "mean_field_regime")]
+pub mod mean_field;
+#[cfg(feature = "mean_field_regime")]
+pub use mean_field::{
+    DEFAULT_CLASSIFIER, HopfParams, MeanFieldOverlap, Regime, RegimeClassifier,
+    hopf_boundary, static_boundary,
+};
