@@ -5,7 +5,7 @@
 **Source paper:** [arXiv:2606.19750](https://arxiv.org/abs/2606.19750) — McKenzie, Hansen, Wang, *Manifold Bandits: Bayesian Curriculum Learning over the Latent Geometry of Large Language Models*, UCSD, 2026
 **Code:** [github.com/DarrienMcKenzie/manifold-bandits](https://github.com/DarrienMcKenzie/manifold-bandits) (MIT)
 **Target:** `katgpt-rs/crates/katgpt-core/src/manifold_bandit.rs` (new module) + Cargo feature `manifold_bandit`
-**Status:** Active — Phase 1 (skeleton)
+**Status:** Active — Phase 1 COMPLETE, Phase 2 (GOAT gate benchmark) next
 
 ---
 
@@ -171,12 +171,12 @@ impl LatentTaskTree {
 
 ### Tasks
 
-- [ ] **T1.1** Create `katgpt-rs/crates/katgpt-core/src/manifold_bandit.rs` with the type sketch above (`TreeNode`, `BayesianFilterArm`, `LatentTaskTreeConfig`, `LatentTaskTree`). No PCA/UMAP/HDBSCAN yet — `build()` accepts a pre-computed tree topology (for testing) and just stamps the Beta priors.
-- [ ] **T1.2** Implement `BayesianFilterArm::{predict, update, thompson_sample}`. Reuse Jöhnk's Beta sampler from `pruners/bandit.rs` (DRY — no duplicate RNG code). `predict` with `drift_rate=0` must degenerate to stationary Beta (compatibility with flat Thompson).
-- [ ] **T1.3** Implement `LatentTaskTree::sample` (top-down Thompson descent) and `observe` (per-arm filter update + bottom-up Empirical Bayes propagation). O(depth) per sample, O(depth) per observe.
-- [ ] **T1.4** Add the `manifold_bandit` feature flag to `katgpt-core/Cargo.toml` (opt-in, `[]` deps — no new external crates yet; PCA/UMAP/HDBSCAN land in Phase 3).
-- [ ] **T1.5** Unit tests: (a) `sample` on a hand-built 3-level tree returns valid leaf ids; (b) `observe` updates the correct leaf's filter and propagates to parent Beta via Empirical Bayes; (c) `drift_rate=0` matches flat Thompson sample distribution (statistical test over 10K samples); (d) `blake3_root` is stable across rebuilds with identical input.
-- [ ] **T1.6** `cargo test -p katgpt-core --features manifold_bandit --lib` passes. Zero regressions on default features (`cargo test -p katgpt-core --lib` unchanged).
+- [x] **T1.1** Created `katgpt-rs/crates/katgpt-core/src/manifold_bandit.rs` with the type sketch (`TreeNode`, `BayesianFilterArm`, `LatentTaskTreeConfig`, `LatentTaskTree`). No PCA/UMAP/HDBSCAN yet — `from_root()` accepts a pre-computed tree topology (for testing) and stamps the Beta priors.
+- [x] **T1.2** Implemented `BayesianFilterArm::{predict, update, thompson_sample}`. **Sampler swap:** the plan said "reuse Jöhnk's from `pruners/bandit.rs`" but (a) `katgpt-pruners` depends on `katgpt-core` (wrong direction) and (b) Jöhnk's has catastrophically low acceptance for large α, β (acceptance ≈ 0.001% for Beta(16,6) — all 256 iterations reject, returns 0.5). Replaced with the **Gamma-ratio method** (Marsaglia-Tsang gamma + Box-Muller normal) — >90% acceptance regardless of α, β. `predict` with `drift_rate=0` degenerates to stationary Beta (verified by test).
+- [x] **T1.3** Implemented `LatentTaskTree::sample` (top-down Thompson descent) and `observe` (per-arm filter update + bottom-up Empirical Bayes propagation). O(branching × depth) per sample, O(branching × depth) per observe. Zero allocations via `ArmPath` (Copy struct, stack-allocated path lookup).
+- [x] **T1.4** Added the `manifold_bandit = []` feature flag to `katgpt-core/Cargo.toml` (opt-in, `[]` deps — no new external crates; PCA/UMAP/HDBSCAN land in Phase 3).
+- [x] **T1.5** Unit tests: (a) `sample` on a hand-built 3-level tree returns valid leaf ids; (b) `observe` updates the correct leaf's filter and propagates to parent Beta via Empirical Bayes; (c) `drift_rate=0` matches flat Thompson sample distribution (statistical test over 10K samples — empirical mean 0.7273 vs Beta(16,6) mean 0.7273); (d) `blake3_root` is stable across rebuilds with identical input. Plus: non-stationarity drift verification, single-leaf tree, mixed-reward updates, n_obs tracking, invalid-arm panic, path depth, num_arms.
+- [x] **T1.6** `cargo test -p katgpt-core --features manifold_bandit --lib` passes (16/16). Zero regressions on default features (`cargo test -p katgpt-core --lib` — 666/666 unchanged). `cargo check --all-features` + `--no-default-features` clean.
 
 ---
 

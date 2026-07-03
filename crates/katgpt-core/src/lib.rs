@@ -1138,3 +1138,14 @@ pub use diversity::temp::{
     LossKernel, extrapolated_snapshot_schedule, lipschitz_gradient_bound, pairwise_bound,
     perturbed_loss_vector, select_diverse_subset,
 };
+
+// Manifold Bandits — Latent Task Tree + Hierarchical Thompson Sampler +
+// BayesianFilterArm (Plan 370, Research 370, arXiv:2606.19750 McKenzie et al.
+// UCSD 2026). Modelless inference-time routing primitive: frozen, BLAKE3-
+// committable hierarchical clustering of an arm space + top-down Beta posterior
+// descent + per-arm non-stationary Bayesian filtering. Closes the contextual +
+// non-stationary bandit gap (Plans 030/032/025). The BMC training curriculum
+// routes to riir-train; this ships the modelless inference-time routing
+// primitive. Opt-in until G1–G5 GOAT gate passes.
+#[cfg(feature = "manifold_bandit")]
+pub mod manifold_bandit;
