@@ -70,3 +70,14 @@ pub use sampling::sample_from_distribution_qmc;
 // marginally-exact sequences from a per-position distribution array).
 #[cfg(feature = "qmc_sampling")]
 pub use sampling::sample_k_from_distribution_qmc;
+
+// Plan 367 Phase 4 — QMC → Gaussian noise query fill (Fusion A: QmcBoMSampler).
+// Inverse normal CDF (probit) + gaussianize + fill_noise_queries helper. The
+// `sample_k_states_qmc` convenience wrapper additionally requires
+// `bom_sampling` (the BoMSampler trait + NoiseQueryConfig live there).
+#[cfg(feature = "qmc_sampling")]
+pub use qmc::{
+    fill_noise_queries_gaussian_qmc, gaussianize_uniforms_inplace, inverse_normal_cdf,
+};
+#[cfg(all(feature = "qmc_sampling", feature = "bom_sampling"))]
+pub use qmc::sample_k_states_qmc;

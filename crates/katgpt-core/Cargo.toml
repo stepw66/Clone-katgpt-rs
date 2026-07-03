@@ -924,3 +924,12 @@ required-features = ["manifold_bandit"]
 name = "bench_374_remax_goat"
 harness = false
 required-features = ["remax_aggregation"]
+
+# Plan 367 Phase 4 T4.4 — QMC-BoM fill overhead benchmark. Measures
+# fill_noise_queries_gaussian_qmc (Lattice) vs i.i.d. Box-Muller fill, and the
+# end-to-end QMC fill + sample_k_states vs i.i.d. fill + sample_k_states at
+# K=8/D=4, K=8/D=32, K=64/D=4. Target: QMC within 5% of i.i.d. (G5 gate).
+[[bench]]
+name = "bench_367_qmc_bom_overhead"
+harness = false
+required-features = ["qmc_sampling", "bom_sampling"]
