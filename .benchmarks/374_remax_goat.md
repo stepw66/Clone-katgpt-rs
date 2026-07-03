@@ -140,29 +140,35 @@ telescoping sum. Both are allocation-free after the sort index buffer.
    (`expected_max_over_m`, `expected_improvement`, `per_action`). Opt-in
    feature. No modelless GOAT — not promoted to default.
 
-2. **riir-train** — ✅ **IMPLEMENTED (Plan 304 + 305 + 306).** The RePPO training algorithm
+2. **riir-train** — ✅ **IMPLEMENTED (Plan 304 + 305 + 306 + 310).** The RePPO training algorithm
    (PPO variant + EI advantage + Q-critic + GAE + tabular chain MDP + NN
-   actor-critic + gridworld exploration benchmark) ships behind feature
-   `remax_ppo`. Consumes these katgpt-rs operators for the advantage
-   computation. **56/56 tests pass.**
+   actor-critic + gridworld exploration benchmark + full PPO machinery with
+   entropy bonus) ships behind feature `remax_ppo`. Consumes these katgpt-rs
+   operators for the advantage computation. **65/65 tests pass.**
 
-   **Key findings (Plan 305 + Plan 306):**
+   **Key findings (Plan 305 + 306 + 310):**
    - Tabular function approximation: RePPO m>1 competitive, NO exploration
      superiority (Plan 305).
-   - Neural network function approximation (2-layer MLP, shared trunk):
+   - Neural network function approximation (2-layer MLP, REINFORCE update):
      RePPO m>1 competitive, STILL NO exploration superiority on K=4 gridworld
-     (Plan 306, G2 gate FAILS).
+     (Plan 306, G2 gate FAILS, ratio 0.97).
    - **Root cause (proven):** For K=2, advantage normalization makes all m
-     values identical (scalar multiple). For K≥3, the effect is too subtle to
+     values identical (scalar multiple). For K>=3, the effect is too subtle to
      survive advantage normalization + noisy training dynamics.
-   - The paper's benefit likely requires the FULL training infrastructure
-     (ConvNet + entropy bonus + clipped PPO + millions of steps) — see Plan
-     306 §3 and Issues 307-309 for the sequenced follow-up path.
+   - **Full PPO machinery (Plan 310):** Adding clipped surrogate + entropy
+     bonus + multi-epoch updates does NOT surface a robust m>1 benefit. The
+     MEAN ratio (2.33) is inflated by bimodal outliers; the MEDIAN ratio is
+     1.00 with identical breakthrough rates (29/32). The entropy bonus is the
+     real driver of exploration, not the m parameter.
+   - The paper's benefit likely requires ConvNet feature extraction on
+     observation-rich environments (MinAtar/Atari frames) — see Issues 307-309
+     for the sequenced follow-up path. The case is now weaker since the
+     mechanism doesn't surface even with proper training machinery.
 
 3. **riir-ai** — no direct consumption yet. The per-NPC action selection guide
-   (HLA → action with curiosity-driven m) is deferred until the full PPO
-   training loop with neural network actor-critic is validated on MinAtar
-   (Issue 309, gated on Plan 306's G2 gate passing on the full infrastructure).
+   (HLA -> action with curiosity-driven m) is deferred until the full PPO
+   training loop with ConvNet actor-critic is validated on MinAtar
+   (Issue 309, gated on Plan 310 confirming the boundary condition).
 
 ---
 
