@@ -267,9 +267,9 @@ Three deviations from the original plan T1.1–T1.7, all surfaced by the compile
 
 - [x] **T4.3** Promotion decision: **HOLD** — staging is GOAT-gated but stays opt-in via `engram` (which is itself default-off). The G2 10× bar was not met (2.3× measured), but the primitive provides API ergonomics + COW safety + a real CPU speedup. When `engram` promotes (Plan 299 G6), staging promotes with it.
 
-- [ ] **T4.4** Commit the plan completion.
+- [x] **T4.4** Commit the plan completion. Close-out commit on `develop`; primitive shipped behind `engram` feature; cross-repo Proposal 003 P1+P5 marked DONE in `riir-ai` (`f597922c`).
 
-**Phase 4 exit:** GOAT gate recorded, promotion decision documented, plan complete.
+**Phase 4 exit:** GOAT gate recorded, promotion decision documented, plan complete. ✅ ALL PHASES DONE.
 
 ---
 
