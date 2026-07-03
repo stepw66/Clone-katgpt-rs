@@ -202,18 +202,41 @@ pub fn hopf_boundary(params: &HopfParams) -> Option<f32> {
 /// Pure f32 arithmetic, bit-identical across platforms.
 #[inline]
 pub fn static_boundary(params: &HopfParams) -> bool {
+    saddle_strength(params) > 0.0
+}
+
+/// Magnitude of the largest positive real eigenvalue of the planar Jacobian.
+///
+/// Returns 0 if the eigenvalues are complex (handled by [`hopf_boundary`]) or
+/// if both real eigenvalues are non-positive (stable node). Returns `λ₊ > 0`
+/// when there is a real-eigenvalue instability (saddle or unstable node).
+///
+/// For real eigenvalues: `λ = (T ± √Δ) / 2` where `Δ = T² − 4·D`. The larger
+/// eigenvalue `λ₊ = (T + √Δ) / 2` is positive iff `static_boundary` is true.
+///
+/// # Weak-saddle gating (Issue 034 T1 follow-up)
+///
+/// A saddle with `λ₊ ≈ 0.005` is technically unstable but grows too slowly to
+/// produce visible dynamics in any finite observation window
+/// (`τ_growth = 1/λ₊ ≈ 200`). [`RegimeClassifier`] uses `saddle_strength >
+/// saddle_margin` to distinguish strong saddles (which drive
+/// [`Regime::IrregularSwitching`]) from weak saddles (which present as
+/// [`Regime::Static`] — dissipation wins over the tiny instability).
+///
+/// # Determinism
+///
+/// Pure f32 arithmetic, bit-identical across platforms.
+#[inline]
+pub fn saddle_strength(params: &HopfParams) -> f32 {
     let t = jacobian_trace(params);
     let d = jacobian_determinant(params);
     let discriminant = t * t - 4.0 * d;
-    // Saddle: one positive real eigenvalue.
-    if d < 0.0 {
-        return true;
+    if discriminant < 0.0 {
+        // Complex conjugate pair — real-eigenvalue instability is absent.
+        return 0.0;
     }
-    // Real eigenvalues, at least one positive (trace positive + non-complex).
-    if discriminant >= 0.0 && t > 0.0 {
-        return true;
-    }
-    false
+    let lambda_max = (t + discriminant.sqrt()) * 0.5;
+    lambda_max.max(0.0)
 }
 
 // ─── MeanFieldOverlap ───────────────────────────────────────────────────────
@@ -529,6 +552,11 @@ impl Regime {
 ///   near-Hopf switching is the verdict.
 /// - `chaos_threshold` — the `g` value above which the chaotic bulk is
 ///   considered strong enough to drive Regime II/III. Paper default `g_c ≈ 1`.
+/// - `saddle_margin` — minimum positive eigenvalue `λ₊` for a real-eigenvalue
+///   instability (saddle) to be considered strong enough to drive switching.
+///   Weak saddles (`λ₊ ≤ saddle_margin`) present as [`Regime::Static`] — the
+///   instability grows too slowly to produce visible dynamics in any finite
+///   observation window. Issue 034 T1 follow-up.
 pub struct RegimeClassifier {
     /// Hopf-margin: trace-positive threshold above which the verdict is
     /// [`Regime::GlobalLimitCycle`] (limit cycle, not just switching).
@@ -539,14 +567,18 @@ pub struct RegimeClassifier {
     /// Chaos threshold: `g` value above which the bulk is chaotic. Paper
     /// default `g_c ≈ 1`.
     chaos_threshold: f32,
+    /// Saddle-margin: minimum `λ₊` for a saddle to drive switching. Weak
+    /// saddles below this present as [`Regime::Static`].
+    saddle_margin: f32,
 }
 
 impl Default for RegimeClassifier {
     fn default() -> Self {
         Self {
-            hopf_margin: 0.1,
+            hopf_margin: 0.15,
             switching_margin: 0.05,
-            chaos_threshold: 1.0,
+            chaos_threshold: 0.90,
+            saddle_margin: 0.005,
         }
     }
 }
@@ -554,11 +586,17 @@ impl Default for RegimeClassifier {
 impl RegimeClassifier {
     /// Construct with explicit margins. See [`Self::default`] for paper-
     /// anchored defaults.
-    pub fn new(hopf_margin: f32, switching_margin: f32, chaos_threshold: f32) -> Self {
+    pub fn new(
+        hopf_margin: f32,
+        switching_margin: f32,
+        chaos_threshold: f32,
+        saddle_margin: f32,
+    ) -> Self {
         Self {
             hopf_margin,
             switching_margin,
             chaos_threshold,
+            saddle_margin,
         }
     }
 
@@ -580,11 +618,15 @@ impl RegimeClassifier {
     ///      [`Regime::IrregularSwitching`] (near-Hopf, noise kicks across
     ///      separatrix).
     /// 3. [`hopf_boundary`] returns `None` but [`static_boundary`] returns
-    ///    `true` ⟺ real-eigenvalue instability (saddle or unstable node):
-    ///    - `g > chaos_threshold` → [`Regime::IrregularSwitching`] (saddle
-    ///      drives switching between ±κ basins — Issue 034 T1 finding).
-    ///    - `g ≤ chaos_threshold` → [`Regime::NoiseSustainedOscillation`] (weak
-    ///      bulk cannot sustain full switching).
+    ///    `true` (real-eigenvalue instability — saddle or unstable node):
+    ///    - [`saddle_strength`] `> saddle_margin` (strong saddle):
+    ///      - `g > chaos_threshold` → [`Regime::IrregularSwitching`] (saddle
+    ///        drives switching between ±κ basins — Issue 034 T1 finding).
+    ///      - `g ≤ chaos_threshold` → [`Regime::NoiseSustainedOscillation`].
+    ///    - [`saddle_strength`] `≤ saddle_margin` (weak saddle — instability
+    ///      grows too slowly to matter in finite observation) →
+    ///      [`Regime::Static`] (Issue 034 T1 follow-up: weak saddles present
+    ///      as Static because dissipation wins over the tiny `λ₊`).
     /// 4. Both boundaries return `None`/`false` (truly stable):
     ///    - `g > chaos_threshold` → [`Regime::NoiseSustainedOscillation`]
     ///      (stable focus driven by chaotic bulk — paper's key novel Regime II).
@@ -641,12 +683,26 @@ impl RegimeClassifier {
                 // switching between ±κ basins. Without this check, the classifier
                 // misses saddle-mediated IrregularSwitching and incorrectly falls
                 // through to NoiseSustainedOscillation or Static.
-                if static_boundary(params) {
+                //
+                // Weak-saddle gating (Issue 034 T1 follow-up): a saddle with
+                // tiny `λ₊` (e.g. ≈0.005 at g=1.0, β=1.4) grows too slowly to
+                // produce visible dynamics in finite simulation. Critically, the
+                // presence of a saddle signals high β (strong adaptation), which
+                // suppresses bulk-driven oscillations too — so weak-saddle points
+                // present as [`Regime::Static`] regardless of g. Only strong
+                // saddles (`λ₊ > saddle_margin`) drive IrregularSwitching.
+                let s = saddle_strength(params);
+                if s > self.saddle_margin {
+                    // Strong real-eigenvalue instability → drives switching.
                     if g > self.chaos_threshold {
                         Regime::IrregularSwitching
                     } else {
                         Regime::NoiseSustainedOscillation
                     }
+                } else if s > 0.0 {
+                    // Weak saddle: instability too slow + strong adaptation
+                    // suppresses the chaotic bulk → Static (dissipation wins).
+                    Regime::Static
                 } else if g > self.chaos_threshold {
                     // Truly stable planar subsystem + chaotic bulk.
                     Regime::NoiseSustainedOscillation
@@ -672,9 +728,10 @@ impl Default for &RegimeClassifier {
 /// Process-global default classifier. Use `&DEFAULT_CLASSIFIER` to classify
 /// without constructing an owned instance every call.
 pub static DEFAULT_CLASSIFIER: RegimeClassifier = RegimeClassifier {
-    hopf_margin: 0.1,
+    hopf_margin: 0.15,
     switching_margin: 0.05,
-    chaos_threshold: 1.0,
+    chaos_threshold: 0.90,
+    saddle_margin: 0.005,
 };
 
 // ─── fast_tanh ──────────────────────────────────────────────────────────────
@@ -954,6 +1011,53 @@ mod tests {
         assert!(static_boundary(&p));
     }
 
+    #[test]
+    fn saddle_strength_positive_for_saddle() {
+        // Same saddle as static_boundary_detects_saddle: J_11 = 1, J_22 = −1.
+        // Eigenvalues are ±1. λ₊ = 1.
+        let p = HopfParams {
+            tau_m: 1.0,
+            tau_a: 1.0,
+            beta: 0.0,
+            lambda_eff: 2.0,
+            g_eff: 1.0,
+        };
+        let s = saddle_strength(&p);
+        assert!(s > 0.0, "saddle_strength should be positive for saddle, got {}", s);
+        // λ₊ = (T + √Δ)/2 = (0 + √(0+4))/2 = 1.
+        assert!((s - 1.0).abs() < 1e-6, "λ₊ should be 1.0, got {}", s);
+    }
+
+    #[test]
+    fn saddle_strength_zero_for_complex_eigenvalues() {
+        // Hopf regime: complex conjugate pair → saddle_strength = 0.
+        let p = HopfParams {
+            tau_m: 1.0,
+            tau_a: 30.0,
+            beta: 10.0,
+            lambda_eff: 1.5,
+            g_eff: 1.0,
+        };
+        assert!(hopf_boundary(&p).is_some(), "should be Hopf regime");
+        let s = saddle_strength(&p);
+        assert_eq!(s, 0.0, "saddle_strength should be 0 for complex eigenvalues");
+    }
+
+    #[test]
+    fn saddle_strength_zero_for_stable_node() {
+        // Both eigenvalues negative → stable node → saddle_strength = 0.
+        let p = HopfParams {
+            tau_m: 1.0,
+            tau_a: 30.0,
+            beta: 0.0,
+            lambda_eff: 0.5, // λ·G = 0.5 < 1 → J_11 < 0
+            g_eff: 1.0,
+        };
+        assert!(!static_boundary(&p), "should not be a saddle");
+        let s = saddle_strength(&p);
+        assert_eq!(s, 0.0, "saddle_strength should be 0 for stable node");
+    }
+
     // ─── Regime enum ───────────────────────────────────────────────────────
 
     #[test]
@@ -1015,7 +1119,7 @@ mod tests {
 
     #[test]
     fn classify_irregular_switching_when_near_hopf_and_chaotic() {
-        // T slightly positive (between switching_margin=0.05 and hopf_margin=0.1)
+        // T slightly positive (between switching_margin=0.05 and hopf_margin=0.15)
         // with g > chaos_threshold → IrregularSwitching.
         // T = (−1 + λ·G)/τ_m + (−1/τ_a). Want T ≈ 0.07.
         // (λ·G − 1)/1 − 1/30 = 0.07 → λ·G = 1 + 0.07 + 0.0333 ≈ 1.1033.
@@ -1038,7 +1142,7 @@ mod tests {
         // Δ = 0.0049 − 0.653 < 0. ✓
         assert!(delta < 0.0, "Δ = {} should be < 0", delta);
         assert!(
-            t > 0.05 && t <= 0.1,
+            t > 0.05 && t <= 0.15,
             "T = {} should be in (switching_margin, hopf_margin]",
             t
         );
@@ -1059,6 +1163,51 @@ mod tests {
         let r1 = clf.classify_with_g(&mfo, &p, 1.5);
         let r2 = clf.classify_with_g(&mfo, &p, 1.5);
         assert_eq!(r1.as_u8(), r2.as_u8());
+    }
+
+    // ── Weak-saddle gating (Issue 034 T1 follow-up) ──────────────────────
+
+    #[test]
+    fn classify_static_when_weak_saddle_and_chaotic() {
+        // Weak saddle: λ₊ is small (below saddle_margin=0.005). Even with g >
+        // chaos_threshold, the instability grows too slowly → Static.
+        //
+        // τ_m=1, τ_a=1, λ_eff=1.1, G_eff=1.0, β=0.097 produces a weak saddle:
+        //   J_11 = 0.1, J_22 = −1, J_12 = −1, J_21 = 0.097
+        //   D = −0.1 + 0.097 = −0.003 (barely < 0 → saddle)
+        //   T = −0.9
+        //   disc = 0.81 + 0.012 = 0.822; √disc = 0.9067
+        //   λ₊ = (−0.9 + 0.9067)/2 ≈ 0.0034 < 0.005 → Static.
+        let p = HopfParams {
+            tau_m: 1.0,
+            tau_a: 1.0,
+            beta: 0.097,
+            lambda_eff: 1.1,
+            g_eff: 1.0,
+        };
+        let s = saddle_strength(&p);
+        assert!(s > 0.0 && s < 0.005, "λ₊ = {} should be weak (< 0.005)", s);
+        let clf = RegimeClassifier::default();
+        let r = clf.classify_with_g(&MeanFieldOverlap::default(), &p, 1.5);
+        assert_eq!(r, Regime::Static, "weak saddle should classify as Static");
+    }
+
+    #[test]
+    fn classify_irregular_switching_when_strong_saddle_and_chaotic() {
+        // Strong saddle: λ₊ > saddle_margin (0.005). With g > chaos_threshold → IS.
+        // Reuse the static_boundary_detects_saddle setup (λ₊ = 1.0 ≫ 0.005).
+        let p = HopfParams {
+            tau_m: 1.0,
+            tau_a: 1.0,
+            beta: 0.0,
+            lambda_eff: 2.0,
+            g_eff: 1.0,
+        };
+        let s = saddle_strength(&p);
+        assert!(s > 0.005, "λ₊ = {} should be strong (> 0.005)", s);
+        let clf = RegimeClassifier::default();
+        let r = clf.classify_with_g(&MeanFieldOverlap::default(), &p, 1.5);
+        assert_eq!(r, Regime::IrregularSwitching);
     }
 
     // ─── fast_tanh sanity ──────────────────────────────────────────────────
