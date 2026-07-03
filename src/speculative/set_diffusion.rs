@@ -1461,4 +1461,171 @@ mod tests {
         assert_eq!(t[6], prompt[0], "position 6 must match prompt[0] (alternating): {:?}", t);
         assert_eq!(t[7], prompt[1], "position 7 must match prompt[1] (alternating): {:?}", t);
     }
+
+    // ── GOAT gate: set-causal-trained vs bidirectional-trained (Phase 4 unblock) ──
+    //
+    // The prior session deferred `set_diffusion_decoder` promotion to default,
+    // claiming the GOAT gate needs a set-causal-trained model that only
+    // riir-train could produce. This was ANOTHER premature deferral (the
+    // AC-Prefix G1 lesson, round 2): `train_mini_dllm` already trains real
+    // `TransformerWeights` models on CPU, and the set-causal counterpart
+    // (`train_mini_set_causal`) is a straightforward adaptation that reuses
+    // the same backward + SGD infrastructure. The backward compatibility
+    // invariant (softmax Jacobian naturally zeros masked paths) means no new
+    // backward code is needed.
+    //
+    // This test trains BOTH models on directional (Markov) data and compares
+    // their NELBO when evaluated under set-causal attention at the SW-SetDLM
+    // training schedule (w=0.5). The set-causal model should WIN because it
+    // was trained under the exact attention pattern it's evaluated with.
+
+    use crate::dllm::{evaluate_set_causal_nelbo, train_mini_set_causal};
+
+    /// Generate Markov-chain token sequences for directional structure tests.
+    ///
+    /// Each sequence: token[0] = random, token[i] = (token[i-1] + step) % vocab
+    /// where step ∈ {1, 2}. This gives strong left-to-right dependency — the
+    /// key property that distinguishes set-causal training (which learns to
+    /// predict from limited context) from bidirectional training (which learns
+    /// to predict from full context).
+    fn generate_markov_token_dataset(
+        rng: &mut Rng,
+        n_sequences: usize,
+        seq_len: usize,
+        vocab: usize,
+    ) -> Vec<Vec<usize>> {
+        (0..n_sequences)
+            .map(|_| {
+                let mut seq = Vec::with_capacity(seq_len);
+                seq.push((rng.next() as usize) % vocab);
+                for i in 1..seq_len {
+                    let step = 1 + (rng.next() as usize) % 2;
+                    seq.push((seq[i - 1] + step) % vocab);
+                }
+                seq
+            })
+            .collect()
+    }
+
+    /// Train a bidirectional D2F model on Markov data (shared baseline for GOAT gate).
+    fn train_bidirectional_markov_model(
+        seed: u64,
+    ) -> (Config, crate::transformer::TransformerWeights, Vec<Vec<usize>>) {
+        let config = Config::micro_dllm();
+        let mut rng = Rng::new(seed);
+        let train_data = generate_markov_token_dataset(&mut rng, 100, 8, 8);
+        let test_data = generate_markov_token_dataset(&mut rng, 20, 8, 8);
+        let (weights, _loss) =
+            train_mini_dllm(&config, &train_data, &test_data, 300, 0.01, 0.25, seed);
+        (config, weights, test_data)
+    }
+
+    /// Train a set-causal SW-SetDLM model on Markov data (the GOAT candidate).
+    fn train_set_causal_markov_model(
+        seed: u64,
+        schedule: &PositionOffsetSchedule,
+    ) -> (Config, crate::transformer::TransformerWeights, Vec<Vec<usize>>) {
+        let config = Config::micro_dllm();
+        let mut rng = Rng::new(seed);
+        let train_data = generate_markov_token_dataset(&mut rng, 100, 8, 8);
+        let test_data = generate_markov_token_dataset(&mut rng, 20, 8, 8);
+        let (weights, _loss) =
+            train_mini_set_causal(&config, &train_data, &test_data, 300, 0.01, schedule, seed);
+        (config, weights, test_data)
+    }
+
+    #[test]
+    fn test_goat_gate_set_causal_beats_bidirectional_at_sw_schedule() {
+        // The GOAT gate: does a set-causal-trained model provide a GAIN over a
+        // bidirectional-trained model when both are evaluated under set-causal
+        // attention at the SW-SetDLM schedule (w=0.5)?
+        //
+        // This is the test the prior sessions said was "blocked on riir-train".
+        // It is NOT blocked — `train_mini_set_causal` trains the model on CPU.
+        let schedule = PositionOffsetSchedule::new(0.5); // w=0.5, k=1.0 (SW-SetDLM)
+        let seed = 42;
+
+        let (config, bidir_weights, test_data) = train_bidirectional_markov_model(seed);
+        let (_config2, sc_weights, _test_data2) =
+            train_set_causal_markov_model(seed, &schedule);
+
+        // Evaluate both under set-causal attention at the SW-SetDLM schedule.
+        let mut rng_eval = Rng::new(seed + 1000);
+        let bidir_nelbo =
+            evaluate_set_causal_nelbo(&bidir_weights, &test_data, &config, &schedule, &mut rng_eval);
+        let mut rng_eval2 = Rng::new(seed + 1000); // Same seed for apples-to-apples.
+        let sc_nelbo =
+            evaluate_set_causal_nelbo(&sc_weights, &test_data, &config, &schedule, &mut rng_eval2);
+
+        eprintln!(
+            "GOAT gate (w=0.5): bidirectional NELBO={:.4}, set-causal NELBO={:.4}, \
+             improvement={:.4} ({:.1}%)",
+            bidir_nelbo,
+            sc_nelbo,
+            bidir_nelbo - sc_nelbo,
+            (bidir_nelbo - sc_nelbo) / bidir_nelbo * 100.0,
+        );
+
+        // The set-causal model MUST beat the bidirectional model here — it was
+        // trained under the exact attention pattern used for evaluation. The
+        // bidirectional model expects full context and degrades when some
+        // positions are masked.
+        assert!(
+            sc_nelbo < bidir_nelbo,
+            "GOAT gate FAILED: set-causal model ({:.4}) must beat bidirectional model ({:.4}) \
+             when evaluated under SW-SetDLM schedule (w=0.5). \
+             This means the set-diffusion decoder requires a set-causal-trained model \
+             to provide a gain — the substrate alone is not enough.",
+            sc_nelbo,
+            bidir_nelbo,
+        );
+    }
+
+    #[test]
+    fn test_goat_gate_set_causal_trained_model_converges_at_ar_endpoint() {
+        // Sanity check: a set-causal-trained model should produce convergent
+        // output when decoded at the AR-like endpoint (w→0). The bidirectional
+        // model struggles here (early positions see almost nothing), but the
+        // set-causal model was trained with stochastic orderings that include
+        // near-AR patterns.
+        //
+        // This test doesn't compare NELBO — it just confirms the decode
+        // pipeline produces coherent output (no mask tokens remain).
+        let schedule = PositionOffsetSchedule::new(0.5);
+        let (config, sc_weights, _test_data) =
+            train_set_causal_markov_model(42, &schedule);
+
+        let forward = CpuSetCausalForward {
+            weights: &sc_weights,
+            config: &config,
+        };
+        let decode_config = SetDiffusionConfig {
+            mask_token: config.mask_token,
+            vocab_size: config.vocab_size,
+            denoise_steps: 8,
+            confidence_threshold: 0.5,
+            temperature: 0.0,
+        };
+        // 2-token prompt anchors the Markov chain (positions 0,1 = [3, 5]).
+        // Decode 6 more positions with AR gen-steps (strict left-to-right).
+        let prompt: &[usize] = &[3, 5];
+        let gen_steps: Vec<u32> = (0..6u32).collect(); // AR: 0,1,2,3,4,5
+        let mut rng = Rng::new(42);
+
+        let result = set_diffusion_decode(&forward, &decode_config, prompt, &gen_steps, &mut rng);
+
+        assert!(
+            result.converged,
+            "Set-causal-trained model + AR decode should converge. \
+             forward_passes={}, confidence_history={:?}",
+            result.forward_passes,
+            result.confidence_history,
+        );
+        assert_eq!(result.tokens.len(), 8);
+        assert!(
+            result.tokens.iter().all(|&t| t != config.mask_token),
+            "no mask tokens should remain: {:?}",
+            result.tokens,
+        );
+    }
 }

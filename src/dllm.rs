@@ -955,6 +955,177 @@ fn forward_save<'a>(
     }
 }
 
+/// Set-causal forward pass with activation saving (for SW-SetDLM training).
+///
+/// Identical to [`forward_save`] except Phase B applies a set-causal attention
+/// mask: position `q` attends only to positions `t` where
+/// `gen_steps[t] <= gen_steps[q]`. Ineligible positions get zero attention
+/// weight (never enter the softmax denominator). This is the training-time
+/// companion of [`forward_set_causal_positions`] — it produces the same
+/// logits/attention pattern but saves all intermediate activations into
+/// `ctx` so that [`backward`] can compute gradients.
+///
+/// # The backward compatibility invariant
+///
+/// [`backward`] computes the softmax Jacobian-vector product via
+/// [`softmax_backward_into`], whose formula is `d_scores[i] = w[i] * (dy[i] - dot(w, dy))`.
+/// When `w[i] == 0.0` (ineligible position), `d_scores[i]` is identically zero,
+/// so no gradient flows through masked attention paths. This means the
+/// existing [`backward`] works correctly for set-causal WITHOUT modification —
+/// the mask is encoded in the attention weights, not in the backward logic.
+///
+/// # Arguments
+/// - `gen_steps`: generation step per position, length `seq_len`. Position `q`
+///   attends to `t` iff `gen_steps[t] <= gen_steps[q]`. Use
+///   [`crate::speculative::set_diffusion::order_to_gen_steps`] to convert a
+///   sampled ordering to this buffer.
+fn forward_save_set_causal<'a>(
+    weights: &TransformerWeights,
+    tokens: &[usize],
+    config: &Config,
+    gen_steps: &[u32],
+    ctx: &'a mut ForwardSaveContext,
+) -> ForwardActivations<'a> {
+    let n = config.n_embd;
+    let hd = config.head_dim;
+    let kvd = kv_dim(config);
+    let seq_len = tokens.len().min(config.block_size);
+    let scale = 1.0 / (hd as f32).sqrt();
+    let layer = &weights.layers[0];
+
+    debug_assert_eq!(gen_steps.len(), seq_len, "gen_steps length mismatch");
+
+    ctx.reset(seq_len);
+
+    // Phase A: Embeddings + K/V (identical to forward_save — mask-independent).
+    for (p, &token) in tokens.iter().enumerate().take(seq_len) {
+        katgpt_core::simd::simd_add_into(
+            &mut ctx.embeddings[p * n..(p + 1) * n],
+            &weights.wte[token * n..(token + 1) * n],
+            &weights.wpe[p * n..(p + 1) * n],
+        );
+        ctx.x_buf[..n].copy_from_slice(&ctx.embeddings[p * n..(p + 1) * n]);
+        rmsnorm(&mut ctx.x_buf);
+        ctx.after_norm1[p * n..(p + 1) * n].copy_from_slice(&ctx.x_buf[..n]);
+        rmsnorm(&mut ctx.x_buf);
+        ctx.after_norm2[p * n..(p + 1) * n].copy_from_slice(&ctx.x_buf[..n]);
+
+        matmul(&mut ctx.q_all[p * n..], &layer.attn_wq, &ctx.x_buf, n, n);
+        matmul(&mut ctx.k_all[p * kvd..], &layer.attn_wk, &ctx.x_buf, kvd, n);
+        matmul(&mut ctx.v_all[p * kvd..], &layer.attn_wv, &ctx.x_buf, kvd, n);
+    }
+
+    // Phase B: Set-causal attention with masked softmax.
+    //
+    // Mirrors `forward_set_causal_positions` Phase B: for each query q, compute
+    // scores only for eligible positions (gen_steps[t] <= gen_steps[q]), apply
+    // masked softmax (zero for ineligible), and accumulate the weighted value
+    // sum. Saves into ctx.attn_out_all and ctx.attn_weights_all so backward()
+    // sees the same layout as the bidirectional case (with zeros on masked
+    // positions, which the softmax Jacobian handles correctly).
+    for q in 0..seq_len {
+        let q_gen_step = gen_steps[q];
+        ctx.attn_scratch_out[..n].fill(0.0);
+
+        for h in 0..config.n_head {
+            let kv_group = h * config.n_kv_head / config.n_head;
+            let q_off = h * hd;
+            let kv_off = kv_group * hd;
+
+            // Pass 1: scores for eligible positions only, track max for stability.
+            let mut max_score = f32::NEG_INFINITY;
+            for t in 0..seq_len {
+                if gen_steps[t] <= q_gen_step {
+                    let dot = katgpt_core::simd::simd_dot_f32(
+                        &ctx.q_all[q * n + q_off..q * n + q_off + hd],
+                        &ctx.k_all[t * kvd + kv_off..t * kvd + kv_off + hd],
+                        hd,
+                    );
+                    ctx.attn_scratch_scores[t] = dot * scale;
+                    if ctx.attn_scratch_scores[t] > max_score {
+                        max_score = ctx.attn_scratch_scores[t];
+                    }
+                } else {
+                    ctx.attn_scratch_scores[t] = 0.0;
+                }
+            }
+
+            // Pass 2: exp(score - max) for eligible positions, 0 for ineligible.
+            let mut sum_exp = 0.0f32;
+            for t in 0..seq_len {
+                if gen_steps[t] <= q_gen_step {
+                    let e = (ctx.attn_scratch_scores[t] - max_score).exp();
+                    ctx.attn_scratch_scores[t] = e;
+                    sum_exp += e;
+                } else {
+                    ctx.attn_scratch_scores[t] = 0.0;
+                }
+            }
+
+            // Normalize over eligible positions only.
+            let inv_sum = 1.0 / sum_exp;
+            for t in 0..seq_len {
+                if gen_steps[t] <= q_gen_step {
+                    ctx.attn_scratch_scores[t] *= inv_sum;
+                }
+            }
+
+            // Persist attention weights (ineligible positions stay 0.0).
+            ctx.attn_weights_all
+                [q * config.n_head * seq_len + h * seq_len..q * config.n_head * seq_len + (h + 1) * seq_len]
+                .copy_from_slice(&ctx.attn_scratch_scores[..seq_len]);
+
+            // Weighted value sum over eligible positions only.
+            for t in 0..seq_len {
+                let s = ctx.attn_scratch_scores[t];
+                if s > 0.0 {
+                    katgpt_core::simd::simd_fused_scale_acc(
+                        &mut ctx.attn_scratch_out[q_off..q_off + hd],
+                        &ctx.v_all[t * kvd + kv_off..t * kvd + kv_off + hd],
+                        s,
+                        hd,
+                    );
+                }
+            }
+        }
+
+        ctx.attn_out_all[q * n..(q + 1) * n].copy_from_slice(&ctx.attn_scratch_out[..n]);
+    }
+
+    // Phase C: Output projection + residual + MLP + logits (identical to forward_save).
+    for p in 0..seq_len {
+        matmul(&mut ctx.x_proj_buf, &layer.attn_wo, &ctx.attn_out_all[p * n..(p + 1) * n], n, n);
+        katgpt_core::simd::simd_add_inplace(&mut ctx.x_proj_buf, &ctx.after_norm1[p * n..(p + 1) * n]);
+        ctx.after_attn_res[p * n..(p + 1) * n].copy_from_slice(&ctx.x_proj_buf[..n]);
+
+        ctx.x_buf[..n].copy_from_slice(&ctx.x_proj_buf[..n]);
+        rmsnorm(&mut ctx.x_proj_buf);
+        ctx.after_mlp_norm[p * n..(p + 1) * n].copy_from_slice(&ctx.x_proj_buf);
+        matmul_relu(&mut ctx.mlp_hidden_all[p * config.mlp_hidden..], &layer.mlp_w1, &ctx.x_proj_buf, config.mlp_hidden, n);
+        matmul(&mut ctx.x_mlp_buf, &layer.mlp_w2, &ctx.mlp_hidden_all[p * config.mlp_hidden..], n, config.mlp_hidden);
+        katgpt_core::simd::simd_add_inplace(&mut ctx.x_mlp_buf[..n], &ctx.x_buf[..n]);
+        ctx.hidden_final[p * n..(p + 1) * n].copy_from_slice(&ctx.x_mlp_buf);
+        matmul(&mut ctx.logits_all[p * config.vocab_size..], &weights.lm_head, &ctx.x_mlp_buf, config.vocab_size, n);
+    }
+
+    ForwardActivations {
+        embeddings: &ctx.embeddings[..seq_len * n],
+        after_norm1: &ctx.after_norm1[..seq_len * n],
+        after_norm2: &ctx.after_norm2[..seq_len * n],
+        q: &ctx.q_all[..seq_len * n],
+        k: &ctx.k_all[..seq_len * kvd],
+        v: &ctx.v_all[..seq_len * kvd],
+        attn_weights: &ctx.attn_weights_all[..seq_len * config.n_head * seq_len],
+        attn_out: &ctx.attn_out_all[..seq_len * n],
+        after_attn_res: &ctx.after_attn_res[..seq_len * n],
+        after_mlp_norm: &ctx.after_mlp_norm[..seq_len * n],
+        mlp_hidden: &ctx.mlp_hidden_all[..seq_len * config.mlp_hidden],
+        hidden_final: &ctx.hidden_final[..seq_len * n],
+        logits: &ctx.logits_all[..seq_len * config.vocab_size],
+        seq_len,
+    }
+}
+
 // ── Backward Helpers ──
 
 /// RMSNorm backward: dx = (dy - y * mean(dy * y)) / rms
@@ -1551,6 +1722,194 @@ pub fn train_mini_dllm(
     }
 
     (weights, loss_history)
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Research 376 Phase 4: SW-SetDLM Training (set-causal attention)
+// ═══════════════════════════════════════════════════════════════
+
+/// Train a mini transformer with **set-causal attention** (SW-SetDLM training).
+///
+/// This is the set-causal counterpart of [`train_mini_dllm`]. Each training
+/// step samples a generation ordering σ from the [`PositionOffsetSchedule`],
+/// converts it to generation steps, runs a set-causal forward pass via
+/// [`forward_save_set_causal`], computes the NELBO loss (mean cross-entropy
+/// over ALL positions — the all-L-conditionals estimator, Eq. 9), and runs
+/// backprop + SGD update.
+///
+/// # Why this exists (the GOAT-gate unblock)
+///
+/// The set-diffusion decoder substrate (Phase 4 T4.1–T4.3) is validated
+/// against bidirectionally-trained models, but a bidirectional model shows
+/// NO GAIN over direct bidirectional decode at the MDLM endpoint (they're the
+/// same thing). To pass the GOAT gate, the decoder needs a model that was
+/// TRAINED to exploit set-causal attention's flexibility. This function
+/// produces such a model on CPU, mirroring the `train_mini_dllm` precedent.
+///
+/// # Key difference from `train_mini_dllm`
+///
+/// | Aspect | `train_mini_dllm` | `train_mini_set_causal` |
+/// |--------|-------------------|-------------------------|
+/// | Attention | Bidirectional (all ↔ all) | Set-causal (gen-step masked) |
+/// | Input | Corrupted (mask_token substituted) | Clean tokens (no corruption) |
+/// | Targets | Masked positions only | ALL positions |
+/// | Ordering | Fixed (bidirectional) | Sampled from schedule each step |
+///
+/// In SW-SetDLM training, the model sees CLEAN tokens and predicts each token
+/// conditioned on its set-causal context (positions revealed earlier in σ).
+/// The loss is the mean cross-entropy over all L positions — this is the
+/// all-L-conditionals estimator that gives ~3× lower gradient variance than
+/// single-position estimation (paper Table 5, verified in
+/// `riir-train/tests/set_diffusion_variance_376.rs`).
+///
+/// # Arguments
+/// - `schedule`: the position-offset schedule to sample orderings from.
+///   Use [`PositionOffsetSchedule::default`] for the SW-SetDLM setting (w=0.5).
+/// - All other args mirror [`train_mini_dllm`].
+///
+/// # Returns
+/// `(weights, loss_history)` — the trained model and per-epoch mean NELBO.
+pub fn train_mini_set_causal(
+    config: &Config,
+    train_data: &[Vec<usize>],
+    test_data: &[Vec<usize>],
+    n_epochs: usize,
+    lr: f32,
+    schedule: &PositionOffsetSchedule,
+    seed: u64,
+) -> (TransformerWeights, Vec<f32>) {
+    let mut rng = Rng::new(seed);
+    let mut weights = TransformerWeights::new(config, &mut rng);
+    let mut loss_history = Vec::with_capacity(n_epochs);
+    let mut fwd_ctx = ForwardSaveContext::new(config);
+    let mut bwd_ctx = BackwardContext::new(config);
+
+    // In SW-SetDLM training, ALL positions are targets (no masking/corruption).
+    // The model sees clean tokens and predicts each given its set-causal context.
+    let mut is_masked_all: Vec<bool> = vec![true; config.block_size];
+
+    let mut indices: Vec<usize> = (0..train_data.len()).collect();
+    for epoch in 0..n_epochs {
+        let mut epoch_loss = 0.0f32;
+        let mut n_samples = 0usize;
+
+        // Shuffle training data in-place
+        for i in (1..indices.len()).rev() {
+            let j = (rng.next() as usize) % (i + 1);
+            indices.swap(i, j);
+        }
+
+        for &idx in &indices {
+            let tokens = &train_data[idx];
+            let seq_len = tokens.len().min(config.block_size);
+            is_masked_all[..seq_len].fill(true);
+
+            // Sample ordering σ from the schedule, convert to gen_steps.
+            let order = schedule.sample_order(seq_len, &mut rng);
+            let gen_steps = crate::speculative::set_diffusion::order_to_gen_steps(&order);
+
+            // Set-causal forward with activation saving.
+            let act = forward_save_set_causal(&weights, tokens, config, &gen_steps, &mut fwd_ctx);
+
+            // NELBO loss: mean cross-entropy over all positions.
+            let loss = masked_loss_into(
+                act.logits,
+                tokens,
+                &is_masked_all[..seq_len],
+                config.vocab_size,
+                LossAveraging::Global,
+                &mut bwd_ctx.loss_exp_buf,
+            );
+
+            // Backward + SGD update (same as train_mini_dllm — the mask is
+            // encoded in the attention weights, so backward() works as-is).
+            backward(&act, &weights, tokens, &is_masked_all[..seq_len], config, &mut bwd_ctx);
+            sgd_update(&mut weights, &bwd_ctx.grads, lr);
+
+            epoch_loss += loss;
+            n_samples += 1;
+        }
+
+        let avg_loss = if n_samples > 0 {
+            epoch_loss / n_samples as f32
+        } else {
+            0.0
+        };
+        loss_history.push(avg_loss);
+
+        if epoch % 100 == 0 || epoch == n_epochs - 1 {
+            // Evaluate NELBO on test data at the training schedule.
+            let test_nelbo = evaluate_set_causal_nelbo_internal(
+                &weights,
+                test_data,
+                config,
+                schedule,
+                &mut rng,
+                &mut fwd_ctx,
+            );
+            eprintln!(
+                "Epoch {:>4}/{}: train_nelbo={:.4} test_nelbo={:.4}",
+                epoch, n_epochs, avg_loss, test_nelbo,
+            );
+        }
+    }
+
+    (weights, loss_history)
+}
+
+/// Evaluate mean NELBO of a model under set-causal attention at a given schedule.
+///
+/// Samples one ordering per test sequence (matching the training distribution)
+/// and computes the mean NELBO. Allocates its own forward context — use
+/// [`evaluate_set_causal_nelbo_internal`] in hot paths to reuse a context.
+///
+/// Used by the GOAT gate test for cross-model comparison (set-causal vs
+/// bidirectional models at various schedule endpoints).
+pub fn evaluate_set_causal_nelbo(
+    weights: &TransformerWeights,
+    data: &[Vec<usize>],
+    config: &Config,
+    schedule: &PositionOffsetSchedule,
+    rng: &mut Rng,
+) -> f32 {
+    let mut fwd_ctx = ForwardSaveContext::new(config);
+    evaluate_set_causal_nelbo_internal(weights, data, config, schedule, rng, &mut fwd_ctx)
+}
+
+/// Internal allocation-free variant — caller provides the forward context.
+fn evaluate_set_causal_nelbo_internal(
+    weights: &TransformerWeights,
+    data: &[Vec<usize>],
+    config: &Config,
+    schedule: &PositionOffsetSchedule,
+    rng: &mut Rng,
+    fwd_ctx: &mut ForwardSaveContext,
+) -> f32 {
+    let mut total = 0.0f32;
+    let mut count = 0usize;
+    let mut is_masked_all: Vec<bool> = vec![true; config.block_size];
+    let mut exp_buf: Vec<f32> = vec![0.0f32; config.vocab_size];
+    for tokens in data {
+        let seq_len = tokens.len().min(config.block_size);
+        if seq_len == 0 {
+            continue;
+        }
+        is_masked_all[..seq_len].fill(true);
+        let order = schedule.sample_order(seq_len, rng);
+        let gen_steps = crate::speculative::set_diffusion::order_to_gen_steps(&order);
+        let act = forward_save_set_causal(weights, tokens, config, &gen_steps, fwd_ctx);
+        let loss = masked_loss_into(
+            act.logits,
+            tokens,
+            &is_masked_all[..seq_len],
+            config.vocab_size,
+            LossAveraging::Global,
+            &mut exp_buf,
+        );
+        total += loss;
+        count += 1;
+    }
+    if count == 0 { 0.0 } else { total / count as f32 }
 }
 
 // ═══════════════════════════════════════════════════════════════
