@@ -543,7 +543,7 @@ impl Regime {
 /// Combines [`MeanFieldOverlap`] + [`hopf_boundary`] + chaos intensity `g`
 /// into a [`Regime`]. The paper's four-way taxonomy, distilled.
 ///
-/// Three tunable margins (defaults are paper-Section-VIII-anchored):
+/// Tunable margins (defaults are paper-Section-VIII-anchored):
 ///
 /// - `hopf_margin` — how far past the Hopf boundary (`T > 0` magnitude) the
 ///   classifier calls it a [`Regime::GlobalLimitCycle`] vs an
@@ -557,6 +557,14 @@ impl Regime {
 ///   Weak saddles (`λ₊ ≤ saddle_margin`) present as [`Regime::Static`] — the
 ///   instability grows too slowly to produce visible dynamics in any finite
 ///   observation window. Issue 034 T1 follow-up.
+/// - `spinodal_margin` — the product `β · G_eff` above which the system is
+///   considered near the spinodal pole (`1 − β·χ̄ ≈ 0`) where the linearized
+///   Jacobian is unreliable and nonlinear trapping creates a limit cycle.
+///   When a strong saddle coincides with spinodal proximity, the verdict is
+///   [`Regime::GlobalLimitCycle`] instead of [`Regime::IrregularSwitching`].
+///   Issue 034 T1-followup-2 (2026-07-03): the diagnostic confirmed that at
+///   g=1.4 β=1.4, the denominator `1−β·χ̄ ≈ 0.027` and `β·G_eff ≈ 9.7`.
+///   Calibrated default 9.0 (≈90% of the clamped-pole maximum β·G_eff≈10).
 pub struct RegimeClassifier {
     /// Hopf-margin: trace-positive threshold above which the verdict is
     /// [`Regime::GlobalLimitCycle`] (limit cycle, not just switching).
@@ -570,6 +578,11 @@ pub struct RegimeClassifier {
     /// Saddle-margin: minimum `λ₊` for a saddle to drive switching. Weak
     /// saddles below this present as [`Regime::Static`].
     saddle_margin: f32,
+    /// Spinodal-margin: the product `β·G_eff` above which the linearized
+    /// Jacobian is unreliable (near the spinodal pole `1−β·χ̄≈0`). A strong
+    /// saddle coinciding with spinodal proximity indicates nonlinear
+    /// trapping → [`Regime::GlobalLimitCycle`].
+    spinodal_margin: f32,
 }
 
 impl Default for RegimeClassifier {
@@ -579,6 +592,7 @@ impl Default for RegimeClassifier {
             switching_margin: 0.05,
             chaos_threshold: 0.90,
             saddle_margin: 0.005,
+            spinodal_margin: 9.0,
         }
     }
 }
@@ -591,12 +605,14 @@ impl RegimeClassifier {
         switching_margin: f32,
         chaos_threshold: f32,
         saddle_margin: f32,
+        spinodal_margin: f32,
     ) -> Self {
         Self {
             hopf_margin,
             switching_margin,
             chaos_threshold,
             saddle_margin,
+            spinodal_margin,
         }
     }
 
@@ -620,6 +636,9 @@ impl RegimeClassifier {
     /// 3. [`hopf_boundary`] returns `None` but [`static_boundary`] returns
     ///    `true` (real-eigenvalue instability — saddle or unstable node):
     ///    - [`saddle_strength`] `> saddle_margin` (strong saddle):
+    ///      - `β·G_eff > spinodal_margin` (near spinodal pole) →
+    ///        [`Regime::GlobalLimitCycle`] (nonlinear trapping creates limit
+    ///        cycle — Issue 034 T1-followup-2).
     ///      - `g > chaos_threshold` → [`Regime::IrregularSwitching`] (saddle
     ///        drives switching between ±κ basins — Issue 034 T1 finding).
     ///      - `g ≤ chaos_threshold` → [`Regime::NoiseSustainedOscillation`].
@@ -691,10 +710,24 @@ impl RegimeClassifier {
                 // suppresses bulk-driven oscillations too — so weak-saddle points
                 // present as [`Regime::Static`] regardless of g. Only strong
                 // saddles (`λ₊ > saddle_margin`) drive IrregularSwitching.
+                //
+                // Spinodal-pole check (Issue 034 T1-followup-2): when a strong
+                // saddle coincides with spinodal proximity (`β·G_eff` large),
+                // the denominator `1−β·χ̄` is near zero and the linearized
+                // Jacobian eigenvalues are unreliable. Near the spinodal pole,
+                // tanh saturation bounds trajectories into a trapping region →
+                // a limit cycle (GLC) rather than switching (IS). The threshold
+                // `spinodal_margin = 9.0` corresponds to recovered denominator
+                // `1/(1+β·G_eff) < 0.10`, matching the `safe_g_eff` clamp at
+                // 0.1 — it flags points where G_eff was likely clamped.
                 let s = saddle_strength(params);
                 if s > self.saddle_margin {
-                    // Strong real-eigenvalue instability → drives switching.
-                    if g > self.chaos_threshold {
+                    // Strong real-eigenvalue instability.
+                    if params.beta * params.g_eff > self.spinodal_margin {
+                        // Near spinodal pole → nonlinear trapping → limit cycle.
+                        Regime::GlobalLimitCycle
+                    } else if g > self.chaos_threshold {
+                        // Strong saddle, chaotic bulk → drives switching.
                         Regime::IrregularSwitching
                     } else {
                         Regime::NoiseSustainedOscillation
@@ -732,6 +765,7 @@ pub static DEFAULT_CLASSIFIER: RegimeClassifier = RegimeClassifier {
     switching_margin: 0.05,
     chaos_threshold: 0.90,
     saddle_margin: 0.005,
+    spinodal_margin: 9.0,
 };
 
 // ─── fast_tanh ──────────────────────────────────────────────────────────────
@@ -1208,6 +1242,86 @@ mod tests {
         let clf = RegimeClassifier::default();
         let r = clf.classify_with_g(&MeanFieldOverlap::default(), &p, 1.5);
         assert_eq!(r, Regime::IrregularSwitching);
+    }
+
+    // ── Spinodal-pole discriminant (Issue 034 T1-followup-2) ────────────
+
+    #[test]
+    fn classify_glc_when_strong_saddle_near_spinodal_pole() {
+        // Near the spinodal pole: β·G_eff > spinodal_margin (9.0). A strong
+        // saddle coinciding with spinodal proximity → GLC (nonlinear trapping).
+        //
+        // Construct: β=1.4, G_eff=7.0 (β·G_eff=9.8 > 9.0). Need λ₊ >
+        // saddle_margin — set λ_eff high enough that J_11 is positive:
+        //   J_11 = (−1 + λ_eff·G_eff)/τ_m; with λ_eff=1.5, G_eff=7.0:
+        //   J_11 = (−1 + 10.5)/1 = 9.5
+        //   J_22 = −1/τ_a; with τ_a=30: J_22 = −0.033
+        //   T = 9.5 − 0.033 = 9.47 > 0 (trace positive)
+        //   D = 9.5·(−0.033) − (−7.0/1)·(1.4/30) = −0.314 + 0.327 = 0.013 > 0
+        //   disc = T²−4D = 89.7 − 0.052 = 89.6. √disc ≈ 9.47.
+        //   λ₊ = (9.47+9.47)/2 ≈ 9.47, λ₋ ≈ 0.0014. Real eigenvalues.
+        let p = HopfParams {
+            tau_m: 1.0,
+            tau_a: 30.0,
+            beta: 1.4,
+            lambda_eff: 1.5,
+            g_eff: 7.0,
+        };
+        let bg = hopf_boundary(&p);
+        assert!(bg.is_none(), "real eigenvalues → no Hopf");
+        let s = saddle_strength(&p);
+        assert!(s > 0.005, "λ₊ = {} should be strong", s);
+        let bg_eff = p.beta * p.g_eff;
+        assert!(bg_eff > 9.0, "β·G_eff = {} should exceed spinodal_margin", bg_eff);
+        let clf = RegimeClassifier::default();
+        let r = clf.classify_with_g(&MeanFieldOverlap::default(), &p, 1.4);
+        assert_eq!(r, Regime::GlobalLimitCycle,
+            "strong saddle + spinodal proximity → GLC");
+    }
+
+    #[test]
+    fn classify_is_when_strong_saddle_far_from_spinodal_pole() {
+        // Far from the spinodal pole: β·G_eff < spinodal_margin (9.0). A strong
+        // saddle without spinodal proximity → IS (as before).
+        // β=1.4, G_eff=3.0 (β·G_eff=4.2 < 9.0). λ_eff=2.0:
+        //   J_11 = (−1 + 6.0)/1 = 5.0
+        //   T = 5.0 − 0.033 = 4.97
+        //   D = 5.0·(−0.033) − (−3.0)·(0.0467) = −0.167 + 0.14 = −0.027 < 0 (saddle)
+        //   λ₊ > 0, strong saddle. Not near pole → IS.
+        let p = HopfParams {
+            tau_m: 1.0,
+            tau_a: 30.0,
+            beta: 1.4,
+            lambda_eff: 2.0,
+            g_eff: 3.0,
+        };
+        let bg_eff = p.beta * p.g_eff;
+        assert!(bg_eff < 9.0, "β·G_eff = {} should be below spinodal_margin", bg_eff);
+        let s = saddle_strength(&p);
+        assert!(s > 0.005, "λ₊ = {} should be strong", s);
+        let clf = RegimeClassifier::default();
+        let r = clf.classify_with_g(&MeanFieldOverlap::default(), &p, 1.4);
+        assert_eq!(r, Regime::IrregularSwitching,
+            "strong saddle, not near pole → IS");
+    }
+
+    #[test]
+    fn spinodal_check_skipped_when_beta_zero() {
+        // β=0 → β·G_eff=0 < 9.0. The spinodal check is skipped even if G_eff
+        // is large. Strong saddle → IS (as before).
+        let p = HopfParams {
+            tau_m: 1.0,
+            tau_a: 1.0,
+            beta: 0.0,
+            lambda_eff: 2.0,
+            g_eff: 100.0, // huge G_eff, but β·G_eff = 0
+        };
+        let bg_eff = p.beta * p.g_eff;
+        assert_eq!(bg_eff, 0.0, "β=0 → β·G_eff=0");
+        let clf = RegimeClassifier::default();
+        let r = clf.classify_with_g(&MeanFieldOverlap::default(), &p, 1.5);
+        assert_eq!(r, Regime::IrregularSwitching,
+            "β=0 disables spinodal check → strong saddle → IS");
     }
 
     // ─── fast_tanh sanity ──────────────────────────────────────────────────
