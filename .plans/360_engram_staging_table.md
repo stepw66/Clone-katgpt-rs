@@ -212,8 +212,10 @@ Three deviations from the original plan T1.1–T1.7, all surfaced by the compile
   - **Result: PASS.** 1000/1000 update (1/call), 0/1000 delete (0/call), 2 commit allocs.
   - **Stretch (deferred):** `dhat` not added — the CountingAllocator already provides the empirical measurement the stretch goal wanted.
 
-- [-] **T2.6** Add a `criterion` micro-bench to `crates/katgpt-core/benches/engram_micro.rs`:
-  - Deferred — the GOAT gate (T2.1–T2.5) is the load-bearing measurement. The criterion micro-bench is a regression-watch convenience that can be added in a follow-up without blocking the promotion decision. The `update_slot` latency (< 50ns target) is implicitly validated by G4 (1 alloc/call = just a Vec push + memcpy, no surprise overhead).
+- [x] **T2.6** Add a `criterion` micro-bench to `crates/katgpt-core/benches/engram_micro.rs`:
+  - Three bench functions added: `bench_staging_update_slot` (D=128, target < 50 ns), `bench_staging_delete_slot` (target < 10 ns), `bench_staging_commit` (pending counts 1/10/100/1000, 4096-slot × D=64).
+  - **Results (Apple Silicon, release):** `update_slot` **24.9 ns** (2× margin under target), `delete_slot` **2.7 ns** (3.7× margin), `commit` ranges **14.2 µs (p=1) → 32.2 µs (p=1000)** with ~18 ns/mutation marginal cost at scale. Fixed COW cost ~14 µs (1 MB memcpy at ~70 GB/s).
+  - Consistent with G4 findings: `update_slot` 1 alloc/call (the ~20 ns `to_vec` dominates the 25 ns total), `delete_slot` 0 allocs/call (just a `Vec::push(None)`).
 
 ### Phase 2 Implementation Notes (2026-07-03)
 

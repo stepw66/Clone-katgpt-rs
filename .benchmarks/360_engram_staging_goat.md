@@ -59,8 +59,40 @@ Staging is GOAT-gated (G1 + G4 PASS, G3 no-regression) with a documented G2 char
 
 The G2 bar is revised from 10× to 2× for future re-gates — 2× matches the project's common GOAT threshold (e.g., BabelCodec G2's ≥2× compression bar). The original 10× bar was based on the false assumption that per-slot function-call overhead would dominate at 256 MB scale; in practice, memory bandwidth dominates and the per-slot overhead is only 2.3× of the memcpy floor.
 
-## Deferred follow-ups
+## T2.6 — Criterion micro-benchmarks (2026-07-03)
 
-- **T2.6** criterion micro-bench (`update_slot` latency, `commit` at varying pending counts) — not blocking; G4 implicitly validates the alloc profile.
+**Bench:** `crates/katgpt-core/benches/engram_micro.rs` (extended)
+**Run:** `cargo bench -p katgpt-core --features engram --bench engram_micro -- "staging"`
+
+### Per-call latency (Apple Silicon, release)
+
+| Bench | Target | Measured | Verdict |
+|-------|--------|----------|---------|
+| `update_slot` d128 | < 50 ns | **24.9 ns** | ✅ 2× margin |
+| `delete_slot` | < 10 ns | **2.7 ns** | ✅ 3.7× margin |
+
+The `update_slot` cost decomposes as: bounds check (~1 ns) + length check (~1 ns) + `to_vec` alloc + 512-byte memcpy (~20 ns) + `Vec::push` (~3 ns) ≈ 25 ns. Consistent with the G4 finding of 1 alloc/call.
+
+The `delete_slot` cost is: bounds check (~1 ns) + `Vec::push(None)` (~2 ns) ≈ 3 ns. Consistent with G4's 0 allocs/call.
+
+### `commit` latency vs pending count (4096-slot × D=64 table, ~1 MB COW)
+
+| Pending | Measured | Delta vs p1 | Per-mutation marginal |
+|---------|----------|-------------|----------------------|
+| 1 | **14.2 µs** | — | — |
+| 10 | **14.9 µs** | +0.7 µs | ~78 ns/mutation |
+| 100 | **16.5 µs** | +2.3 µs | ~23 ns/mutation |
+| 1000 | **32.2 µs** | +18.0 µs | ~18 ns/mutation |
+
+**Analysis:** the `commit` cost decomposes into:
+- **Fixed COW cost** (~14 µs): slots array clone (1 MB memcpy at ~70 GB/s) + heads clone + `from_parts` construction.
+- **Per-mutation marginal** (~18 ns at scale): each pending mutation is a 256-byte `copy_from_slice` into the slots array.
+
+The per-mutation cost decreases as pending count grows (78 → 18 ns) because the fixed `to_vec` + `into_boxed_slice` overhead amortizes and the mutation loop warms the cache. At p=1000, the per-mutation cost (18 ns) is dominated by the 256-byte `copy_from_slice`, which is the irreducible floor.
+
+For typical GM-edit workloads (O(10s) of mutations), `commit` is ~15 µs — negligible compared to the table's read-side `lookup_into` cost.
+
+## Remaining deferred follow-ups
+
 - **T3.5** Proposal 003 §3.1 update (cross-repo edit to `riir-ai/.proposals/003_*`).
 - **Slice-splitting COW** (Proposal 003 §8) — only optimize if a real consumer benchmarks the 256 MB full-copy as a bottleneck. For typical GM-edit workloads (O(10s) of mutations on tables ≤ 100K slots), the full-copy cost is negligible.
