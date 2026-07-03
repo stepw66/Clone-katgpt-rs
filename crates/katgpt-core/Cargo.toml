@@ -181,6 +181,7 @@ elf_sde = []  # Plan 079 — gates EarlyStopGate<P> depth-aware screening wrappe
 tes_loop = []  # Plan 086 — gates TesNode + TrajectoryCredit (TesConfig stays in consumers; needs BanditStrategy)
 tri_mode = []  # Plan 089 — gates DecodeStrategy::DiscreteDiffusionSoft + SelfSpeculation variants
 dmax_spd = ["dllm"]  # Plan 109 — gates DecodeStrategy::DiscreteDiffusionSoft variant (preferred over dllm's DiscreteDiffusion)
+set_diffusion = ["dllm"]  # Research 376 Phase 4 T4.2 — gates DecodeStrategy::SetDiffusion variant. Implies dllm (set-causal generalizes block-causal). Opt-in until a set-diffusion-trained model exists.
 lattice_deduction = []  # Plan 088 — gates LDT conflict detector + LdtPruneConfig substrate
 echo_env_predictor = []  # Plan 247 — gates BudgetAdaptation::EchoConsistency variant
 dflare_fusion = []  # Plan 174 — gates MarginalFusionConfig (root marks this GOAT-FAILED; kept as substrate for completeness)

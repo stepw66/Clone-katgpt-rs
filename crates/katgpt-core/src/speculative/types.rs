@@ -351,6 +351,12 @@ pub enum DecodeStrategy {
     /// D2F drafts → AR verifies (self-speculation / tri-mode).
     #[cfg(feature = "tri_mode")]
     SelfSpeculation,
+    /// Set Diffusion — sliding-window set decode with per-step KV commit
+    /// (Research 376 Phase 4 T4.1/T4.2). Generalizes DiscreteDiffusion to
+    /// arbitrary position-set orderings via the position-offset schedule.
+    /// Requires a model trained with the set-causal architecture.
+    #[cfg(feature = "set_diffusion")]
+    SetDiffusion,
 }
 
 impl DecodeStrategy {
@@ -372,6 +378,9 @@ impl DecodeStrategy {
         if n_tokens >= block_size {
             return Self::DiscreteDiffusionSoft;
         }
+        // Set Diffusion is opt-in and requires a set-causal-trained model —
+        // never auto-recommended (caller must explicitly opt in). Falls through
+        // to the D2F / speculative / AR ladder below.
         #[cfg(feature = "dllm")]
         if n_tokens >= block_size {
             return Self::DiscreteDiffusion;
@@ -1406,6 +1415,34 @@ mod tests {
             let _s3 = s;
             assert_eq!(s, s2);
         }
+
+        // Research 376 Phase 4 T4.2: SetDiffusion variant is Copy like the rest.
+        #[cfg(feature = "set_diffusion")]
+        {
+            let s = DecodeStrategy::SetDiffusion;
+            let s2 = s;
+            let _s3 = s;
+            assert_eq!(s, s2);
+        }
+    }
+
+    // Research 376 Phase 4 T4.2 — SetDiffusion is never auto-recommended.
+    // It requires a set-causal-trained model, so the caller MUST explicitly
+    // opt in by constructing DecodeStrategy::SetDiffusion directly.
+    // recommend() always falls through to the D2F/speculative/AR ladder.
+    #[test]
+    #[cfg(feature = "set_diffusion")]
+    fn test_decode_strategy_set_diffusion_never_recommended() {
+        // Even with enough tokens and a draft model, recommend() must NOT
+        // return SetDiffusion — it requires explicit opt-in.
+        let s = DecodeStrategy::recommend(4, 8, true);
+        assert_ne!(s, DecodeStrategy::SetDiffusion);
+
+        let s = DecodeStrategy::recommend(4, 8, false);
+        assert_ne!(s, DecodeStrategy::SetDiffusion);
+
+        let s = DecodeStrategy::recommend(16, 4, false);
+        assert_ne!(s, DecodeStrategy::SetDiffusion);
     }
 
     // ── EarlyStopGate Tests (Plan 083) ────────────────────────

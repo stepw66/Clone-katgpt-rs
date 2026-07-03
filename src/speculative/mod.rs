@@ -42,6 +42,11 @@ pub mod peira_pruner;
 #[cfg(feature = "dllm")]
 pub mod d2f;
 
+// Set Diffusion inference decoder (Research 376 Phase 4 T4.1).
+// Substrate for set-causal decoding — generalizes D2F to arbitrary position orderings.
+#[cfg(feature = "set_diffusion")]
+pub mod set_diffusion;
+
 #[cfg(feature = "tri_mode")]
 pub mod d2f_verifier;
 
@@ -200,6 +205,13 @@ pub use d2f::{
 pub use d2f::{
     BlockConvergence, HybridEmbedding, SoftDecodeConfig, check_block_convergence,
     contiguous_prefix_promote, d2f_decode_block_soft,
+};
+
+// ── Set Diffusion Re-exports (Research 376 Phase 4, feature: set_diffusion) ──
+#[cfg(feature = "set_diffusion")]
+pub use set_diffusion::{
+    CpuSetCausalForward, SetCausalForwardFn, SetDiffusionConfig, SetDiffusionResult,
+    set_diffusion_decode,
 };
 
 // ── D2F Drafter Verifier Re-exports (Plan 089, Tri-Mode) ───
