@@ -211,7 +211,8 @@ pub use d2f::{
 #[cfg(feature = "set_diffusion")]
 pub use set_diffusion::{
     CpuSetCausalForward, SetCausalForwardFn, SetDiffusionConfig, SetDiffusionResult,
-    set_diffusion_decode,
+    block_causal_gen_steps, mdlm_gen_steps, order_to_gen_steps, set_diffusion_decode,
+    set_diffusion_decode_scheduled,
 };
 
 // ── D2F Drafter Verifier Re-exports (Plan 089, Tri-Mode) ───

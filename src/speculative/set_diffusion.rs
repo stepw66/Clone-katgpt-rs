@@ -330,6 +330,139 @@ pub fn set_diffusion_decode<F: SetCausalForwardFn>(
     }
 }
 
+// ---------------------------------------------------------------------------
+// Ordering → gen-steps conversion + scheduled convenience entry point
+// ---------------------------------------------------------------------------
+//
+// These land the thin T4.3-CPU-caller bridge (Research 376 Phase 4): the
+// pipeline `PositionOffsetSchedule::sample_order` → `order_to_gen_steps` →
+// `set_diffusion_decode`, available as a single convenience call. The decoder
+// itself remains schedule-agnostic — these helpers just construct the
+// `gen_steps` buffer the decoder already accepts.
+//
+// Mirrors `riir_train::set_diffusion_schedule::{order_to_gen_steps,
+// block_causal_gen_steps, mdlm_gen_steps}` (the training-side reference impl).
+// The runtime copy lives here so callers don't need a training-repo dep to
+// drive set-diffusion inference.
+
+/// Convert an ordering σ to per-position generation steps (the kernel input).
+///
+/// Given `order = [σ_0, σ_1, ..., σ_{L-1}]` (σ_0 generated first), returns
+/// `gen_step[p] = rank of position p in the ordering`. For SW-SetDLM with
+/// singleton sets, this is a permutation of `[0, L)` reinterpreted as `u32`.
+///
+/// The returned buffer is what [`set_diffusion_decode`] consumes as `gen_steps`,
+/// and what `forward_set_causal_positions` / the WGSL set-causal kernel consume
+/// as `position_order` (after a zero-cost `u32 → usize` widening on 64-bit).
+///
+/// # Panics
+///
+/// In debug builds only: panics if `order` is not a valid permutation of
+/// `[0, L)` (i.e. contains an out-of-range position). Release builds skip the
+/// check for perf — callers are expected to pass a permutation from
+/// [`PositionOffsetSchedule::sample_order`](crate::dllm::PositionOffsetSchedule::sample_order).
+///
+/// # Example
+///
+/// ```
+/// # use katgpt_rs::speculative::set_diffusion::order_to_gen_steps;
+/// // Singleton ordering: position 2 first, then 0, then 1.
+/// let order = vec![2, 0, 1];
+/// let gs = order_to_gen_steps(&order);
+/// assert_eq!(gs, vec![1, 2, 0]); // position 0 → step 1, position 1 → step 2, position 2 → step 0
+/// ```
+pub fn order_to_gen_steps(order: &[usize]) -> Vec<u32> {
+    if order.is_empty() {
+        return Vec::new();
+    }
+    let l = order.len();
+    let mut gen_steps = vec![0u32; l];
+    for (step, &pos) in order.iter().enumerate() {
+        debug_assert!(
+            pos < l,
+            "order contains position {pos} >= length {l} (not a valid permutation)"
+        );
+        gen_steps[pos] = step as u32;
+    }
+    gen_steps
+}
+
+/// Block-causal gen-steps: contiguous blocks of `block_size` share a step.
+///
+/// Positions `[0, block_size)` → step 0, `[block_size, 2·block_size)` → step 1,
+/// etc. The final block may be shorter. This is the D2F/block-diffusion
+/// ordering — the special case of set-diffusion where sets are contiguous L→R
+/// blocks. Useful for A/B comparison and for callers that want the D2F path.
+///
+/// # Panics
+///
+/// Panics if `block_size == 0`.
+pub fn block_causal_gen_steps(l: usize, block_size: usize) -> Vec<u32> {
+    assert!(block_size > 0, "block_size must be > 0");
+    (0..l).map(|p| (p / block_size) as u32).collect()
+}
+
+/// MDLM gen-steps: all positions share step 0 (fully bidirectional).
+///
+/// This is the order-agnostic diffusion endpoint — every position attends to
+/// every other position in a single denoise step. Equivalent to
+/// `block_causal_gen_steps(l, l)` but explicit for clarity.
+pub fn mdlm_gen_steps(l: usize) -> Vec<u32> {
+    vec![0u32; l]
+}
+
+/// Run the set-diffusion decode loop with a sampled position ordering.
+///
+/// This is the **T4.3-CPU-caller bridge** (Research 376 Phase 4): a thin
+/// convenience that wraps the schedule → ordering → gen-steps → decode
+/// pipeline. Equivalent to:
+///
+/// ```no_run
+/// # use katgpt_rs::dllm::PositionOffsetSchedule;
+/// # use katgpt_rs::speculative::set_diffusion::*;
+/// # use katgpt_rs::types::Rng;
+/// # fn wrap<F: SetCausalForwardFn>(forward: &F, cfg: &SetDiffusionConfig, sched: &PositionOffsetSchedule, prompt: &[usize], decode_len: usize, mut rng: &mut Rng) {
+/// let order = sched.sample_order(decode_len, &mut rng);
+/// let gen_steps = order_to_gen_steps(&order);
+/// let _ = set_diffusion_decode(forward, cfg, prompt, &gen_steps, &mut rng);
+/// # }
+/// ```
+///
+/// The decoder itself is unchanged — this is pure plumbing that produces the
+/// `gen_steps` buffer from a stochastic schedule draw. Repeated calls with the
+/// same schedule will produce different orderings (and hence different gen-steps
+/// layouts); this is intentional — SW-SetDLM samples a fresh ordering per
+/// inference pass, mirroring training.
+///
+/// # Arguments
+///
+/// - `forward`: the set-causal forward-pass impl (model, mock, etc.).
+/// - `config`: decode hyperparameters (thresholds, step counts).
+/// - `prompt`: already-decoded prefix tokens. May be empty.
+/// - `schedule`: the position-offset reveal-time schedule (controls w/k).
+/// - `decode_len`: number of decode-region positions to generate.
+/// - `rng`: randomness source (used for both ordering + sampling).
+///
+/// # Returns
+///
+/// A [`SetDiffusionResult`] with `tokens.len() == prompt.len() + decode_len`.
+///
+/// # Panics
+///
+/// Panics if `decode_len == 0` (delegates to `set_diffusion_decode`'s assertion).
+pub fn set_diffusion_decode_scheduled<F: SetCausalForwardFn>(
+    forward: &F,
+    config: &SetDiffusionConfig,
+    prompt: &[usize],
+    schedule: &crate::dllm::PositionOffsetSchedule,
+    decode_len: usize,
+    rng: &mut Rng,
+) -> SetDiffusionResult {
+    let order = schedule.sample_order(decode_len, rng);
+    let gen_steps = order_to_gen_steps(&order);
+    set_diffusion_decode(forward, config, prompt, &gen_steps, rng)
+}
+
 /// Sample a token from logits with optional temperature scaling.
 ///
 /// Returns `(token_id, probability)`. Uses greedy argmax when temperature ≤ 0
@@ -838,5 +971,268 @@ mod tests {
                      "logit mismatch at p={p}, v={v}: direct={direct}, adapter={adapter}");
             }
         }
+    }
+
+    // ── T4.3-CPU-caller bridge tests (Phase 4) ─────────────────────
+    //
+    // Covers the schedule → ordering → gen-steps → decode pipeline.
+    // All tests use MockForward (no trained model needed) — the bridge is
+    // pure plumbing and can be fully validated modellessly.
+
+    use crate::dllm::PositionOffsetSchedule;
+
+    #[test]
+    fn test_order_to_gen_steps_identity() {
+        // AR order: gen_steps should be [0, 1, 2, ..., L-1].
+        let order: Vec<usize> = (0..8).collect();
+        let gs = order_to_gen_steps(&order);
+        assert_eq!(gs, vec![0, 1, 2, 3, 4, 5, 6, 7]);
+    }
+
+    #[test]
+    fn test_order_to_gen_steps_reversed() {
+        // Reversed order [L-1, ..., 1, 0]: position 0 is last → gen_step[0] = L-1.
+        let order: Vec<usize> = (0..8).rev().collect();
+        let gs = order_to_gen_steps(&order);
+        assert_eq!(gs[0], 7); // position 0 is revealed last (step 7)
+        assert_eq!(gs[7], 0); // position 7 is revealed first (step 0)
+    }
+
+    #[test]
+    fn test_order_to_gen_steps_round_trip() {
+        // order_to_gen_steps is the inverse of "sort positions by gen_step".
+        // If gs = order_to_gen_steps(order), then sorting (0..L) by gs gives `order`.
+        let order = vec![2, 0, 3, 1];
+        let gs = order_to_gen_steps(&order);
+        // Reconstruct order: sort positions by their gen_step value.
+        let mut indexed: Vec<(u32, usize)> = gs.iter().copied().zip(0..).collect();
+        indexed.sort_by_key(|&(step, _)| step);
+        let reconstructed: Vec<usize> = indexed.into_iter().map(|(_, p)| p).collect();
+        assert_eq!(reconstructed, order);
+    }
+
+    #[test]
+    fn test_order_to_gen_steps_empty() {
+        assert!(order_to_gen_steps(&[]).is_empty());
+    }
+
+    #[test]
+    fn test_order_to_gen_steps_singleton() {
+        assert_eq!(order_to_gen_steps(&[0]), vec![0]);
+    }
+
+    #[test]
+    fn test_block_causal_gen_steps() {
+        // Block size 2: positions [0,1]→0, [2,3]→1, [4,5]→2, [6,7]→3.
+        let gs = block_causal_gen_steps(8, 2);
+        assert_eq!(gs, vec![0, 0, 1, 1, 2, 2, 3, 3]);
+    }
+
+    #[test]
+    fn test_block_causal_gen_steps_uneven_tail() {
+        // L=10, block_size=4: blocks [0..4)→0, [4..8)→1, [8..10)→2 (short tail).
+        let gs = block_causal_gen_steps(10, 4);
+        assert_eq!(gs, vec![0, 0, 0, 0, 1, 1, 1, 1, 2, 2]);
+    }
+
+    #[test]
+    #[should_panic(expected = "block_size must be > 0")]
+    fn test_block_causal_gen_steps_zero_panics() {
+        let _ = block_causal_gen_steps(4, 0);
+    }
+
+    #[test]
+    fn test_mdlm_gen_steps() {
+        let gs = mdlm_gen_steps(4);
+        assert_eq!(gs, vec![0u32; 4]);
+    }
+
+    #[test]
+    fn test_sample_order_returns_valid_permutation() {
+        // Any schedule must produce a valid permutation of [0, L).
+        let schedule = PositionOffsetSchedule::new(0.5);
+        let mut rng = Rng::new(42);
+        let l = 16;
+        let order = schedule.sample_order(l, &mut rng);
+        assert_eq!(order.len(), l);
+        let mut sorted = order.clone();
+        sorted.sort();
+        assert_eq!(sorted, (0..l).collect::<Vec<_>>(), "not a permutation");
+    }
+
+    #[test]
+    fn test_sample_order_empty_and_singleton() {
+        let schedule = PositionOffsetSchedule::new(0.5);
+        let mut rng = Rng::new(0);
+        assert!(schedule.sample_order(0, &mut rng).is_empty());
+        assert_eq!(schedule.sample_order(1, &mut rng), vec![0]);
+    }
+
+    #[test]
+    fn test_sample_order_ar_extreme_is_near_identity() {
+        // AR endpoint (w tiny): ordering should be very close to [0, 1, ..., L-1].
+        // We don't require exact identity (the paper's AR is the limit w→0),
+        // but inversions should be rare.
+        let schedule = PositionOffsetSchedule::ar();
+        let l = 16;
+        let mut total_inversions = 0usize;
+        for seed in 0..50u64 {
+            let mut rng = Rng::new(seed);
+            let order = schedule.sample_order(l, &mut rng);
+            total_inversions += count_inversions(&order);
+        }
+        // Average inversions across 50 draws should be small (≤ 2 per draw).
+        let avg = total_inversions as f32 / 50.0;
+        assert!(avg <= 2.0, "AR endpoint should be near-identity, avg inversions = {avg}");
+    }
+
+    #[test]
+    fn test_sample_order_diffusion_extreme_is_high_inversions() {
+        // Diffusion endpoint (w=1): orderings should be near-uniform-random,
+        // so inversions should be a large fraction of L*(L-1)/2.
+        let schedule = PositionOffsetSchedule::diffusion();
+        let l = 16;
+        let max_inversions = l * (l - 1) / 2;
+        let mut total_inversions = 0usize;
+        for seed in 0..50u64 {
+            let mut rng = Rng::new(seed);
+            let order = schedule.sample_order(l, &mut rng);
+            total_inversions += count_inversions(&order);
+        }
+        let avg = total_inversions as f32 / 50.0;
+        // Uniform random permutation has expected inversions = max/2.
+        // Require at least 30% of max to confirm we're not AR-like.
+        let lower_bound = 0.30 * max_inversions as f32;
+        assert!(
+            avg >= lower_bound,
+            "diffusion endpoint should have high inversions, avg = {avg}, lower bound = {lower_bound}"
+        );
+    }
+
+    /// Count inversions in a permutation (number of pairs i<j with order[i] > order[j]).
+    /// Used to characterize where an ordering sits on the AR ↔ diffusion spectrum.
+    fn count_inversions(order: &[usize]) -> usize {
+        let mut count = 0;
+        for i in 0..order.len() {
+            for j in (i + 1)..order.len() {
+                if order[i] > order[j] {
+                    count += 1;
+                }
+            }
+        }
+        count
+    }
+
+    #[test]
+    fn test_set_diffusion_decode_scheduled_runs_end_to_end() {
+        // The T4.3-CPU-caller bridge: schedule → order → gen_steps → decode.
+        // No trained model — MockForward provides a deterministic strong signal.
+        let mock = MockForward {
+            vocab: 8,
+            mask: 0,
+            confidence_gap: 5.0,
+        };
+        let config = SetDiffusionConfig {
+            mask_token: 0,
+            vocab_size: 8,
+            denoise_steps: 4,
+            confidence_threshold: 0.5,
+            temperature: 1.0,
+        };
+        let schedule = PositionOffsetSchedule::new(0.5);
+        let mut rng = Rng::new(42);
+
+        let result = set_diffusion_decode_scheduled(&mock, &config, &[], &schedule, 8, &mut rng);
+
+        assert_eq!(result.tokens.len(), 8);
+        assert!(result.forward_passes > 0);
+        assert!(
+            result.tokens.iter().all(|&t| t != config.mask_token),
+            "strong signal should commit all positions: {:?}",
+            result.tokens
+        );
+    }
+
+    #[test]
+    fn test_set_diffusion_decode_scheduled_preserves_prompt() {
+        let mock = MockForward {
+            vocab: 8,
+            mask: 0,
+            confidence_gap: 5.0,
+        };
+        let config = SetDiffusionConfig {
+            mask_token: 0,
+            vocab_size: 8,
+            denoise_steps: 4,
+            confidence_threshold: 0.5,
+            temperature: 1.0,
+        };
+        let prompt = vec![5, 6, 7];
+        let schedule = PositionOffsetSchedule::new(0.25);
+        let mut rng = Rng::new(99);
+
+        let result =
+            set_diffusion_decode_scheduled(&mock, &config, &prompt, &schedule, 4, &mut rng);
+
+        assert_eq!(&result.tokens[..prompt.len()], &prompt[..]);
+        assert_eq!(result.tokens.len(), prompt.len() + 4);
+    }
+
+    #[test]
+    fn test_set_diffusion_decode_scheduled_matches_manual_pipeline() {
+        // The convenience function must produce identical output to manually
+        // calling sample_order → order_to_gen_steps → set_diffusion_decode
+        // with the SAME rng state. This catches any hidden non-determinism
+        // (e.g. the convenience function drawing extra samples).
+        let mock = MockForward {
+            vocab: 8,
+            mask: 0,
+            confidence_gap: 5.0,
+        };
+        let config = SetDiffusionConfig {
+            mask_token: 0,
+            vocab_size: 8,
+            denoise_steps: 2,
+            confidence_threshold: 0.5,
+            temperature: 0.0, // Greedy for determinism.
+        };
+        let schedule = PositionOffsetSchedule::new(0.5);
+
+        // Manual pipeline.
+        let mut rng_a = Rng::new(42);
+        let order = schedule.sample_order(8, &mut rng_a);
+        let gen_steps = order_to_gen_steps(&order);
+        let manual = set_diffusion_decode(&mock, &config, &[], &gen_steps, &mut rng_a);
+
+        // Convenience function with same initial seed.
+        let mut rng_b = Rng::new(42);
+        let convenience = set_diffusion_decode_scheduled(&mock, &config, &[], &schedule, 8, &mut rng_b);
+
+        assert_eq!(manual.tokens, convenience.tokens);
+        assert_eq!(manual.forward_passes, convenience.forward_passes);
+    }
+
+    #[test]
+    fn test_set_diffusion_decode_scheduled_ar_converges_quickly_on_strong_signal() {
+        // AR-like schedule (w tiny): one position per gen-step → many gen-steps,
+        // but each commits immediately with strong signal.
+        let mock = MockForward {
+            vocab: 8,
+            mask: 0,
+            confidence_gap: 5.0,
+        };
+        let config = SetDiffusionConfig {
+            mask_token: 0,
+            vocab_size: 8,
+            denoise_steps: 2,
+            confidence_threshold: 0.5,
+            temperature: 1.0,
+        };
+        let schedule = PositionOffsetSchedule::ar();
+        let mut rng = Rng::new(7);
+
+        let result = set_diffusion_decode_scheduled(&mock, &config, &[], &schedule, 4, &mut rng);
+
+        assert!(result.converged, "AR + strong signal should converge");
     }
 }
