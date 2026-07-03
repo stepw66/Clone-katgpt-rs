@@ -1,0 +1,164 @@
+---
+name: goat-audit
+description: Audit cross-repo GOAT/gain primitive cherry-pick status across the 5-repo quintet (katgpt-rs → riir-ai / riir-chain / riir-neuron-db). Detects stalls (default-on in katgpt-rs for ≥7 days with zero runtime wiring in riir-*), DRY violations (duplicated substrate in riir-* that should consume katgpt-core), and SOLID violations. Use when auditing primitive cherry-pick coverage, before opening a plan that consumes a katgpt-rs primitive, or quarterly as a hygiene gate.
+---
+
+# goat-audit — Cross-Repo GOAT/Gain Cherry-Pick Audit
+
+Use this skill when auditing whether the riir-* private repos have consumed the GOAT-validated primitives shipped in `katgpt-rs`. It detects three failure classes:
+
+1. **Stalls** — primitive default-on in katgpt-rs for ≥7 days, zero runtime wiring in riir-*.
+2. **DRY violations** — riir-* ships a local copy of substrate that should consume `katgpt-core` / `katgpt-transformer` / `katgpt-pruners`.
+3. **SOLID violations** — primitive consumed in the wrong layer (e.g. a sync-boundary primitive wired into a latent-only runtime, or vice versa).
+
+## When to use
+
+- **Quarterly hygiene gate** — re-audit after every major katgpt-rs release.
+- **Before opening a plan** that consumes a katgpt-rs primitive — confirm it isn't already wired (avoid duplicate work).
+- **When a user asks** "did riir-* get every good thing from katgpt-rs yet?" (the canonical trigger).
+- **After a promotion in katgpt-rs** — track that the riir-* runtime wiring plan is filed within 7 days.
+
+## DO NOT use for
+
+- Paper distillation (use the `research` skill).
+- Single-repo refactors with no cross-repo angle.
+- Bug fixes with no architectural impact.
+
+## Repos in scope (the 5-repo quintet)
+
+```
+katgpt-rs          ← public engine (substrate: katgpt-core + 16 leaf crates + root)
+riir-ai            ← private runtime/game (cognitive, ARG, CLR, HLA, karc, cwm, etc.)
+riir-chain         ← private chain (LatCal, quorum, asset lifecycle)
+riir-neuron-db     ← private neuron-shard leaf (Pod, freeze, consolidation, AnyRAG)
+riir-train         ← private training vault (OUT OF SCOPE — training-only methods)
+```
+
+## Workflow
+
+### Step 0 — Pre-flight (MANDATORY before any verdict)
+
+Run all of these in parallel; do NOT skip:
+
+1. `read_file katgpt-rs/Cargo.toml` — extract the `default = [...]` feature list. These are the GOAT-validated primitives.
+2. `read_file katgpt-rs/crates/katgpt-core/Cargo.toml` — extract substrate features.
+3. `read_file riir-ai/crates/riir-engine/Cargo.toml` — extract riir-engine features + the katgpt features each one forwards to.
+4. `read_file riir-neuron-db/Cargo.toml` — extract neuron-db features.
+5. `read_file riir-chain/Cargo.toml` + `riir-chain/crates/riir-chaind/Cargo.toml` — extract chain features.
+6. `list_directory katgpt-rs/.benchmarks` — these track the GOAT gate evidence per primitive.
+7. `list_directory riir-ai/.issues` + `riir-ai/.plans` — existing wiring plans/issues to avoid duplication.
+
+### Step 1 — Build the default-on primitive inventory
+
+From `katgpt-rs/Cargo.toml`'s `default = [...]`, build a table:
+
+| Primitive | Default-on since | katgpt-rs plan | Substrate location |
+|---|---|---|---|
+
+Source the "default-on since" from the inline comment in the Cargo.toml (e.g. `# zone_density_routing DEFAULT-ON (Plan 351 Phase 3): ...`). If no date, mark "unknown" and treat as fresh.
+
+### Step 2 — For each primitive, check riir-* consumption (THREE-LAYER check)
+
+**Critical lesson (Issue 003):** feature-name grep returns false negatives. The `salience_tri_gate` feature is consumed via `SalienceTriGate::decide_with_delegate_nudge` in `karc_bridge/anticipation.rs` — a feature-name grep missed this; struct/function-name grep caught it.
+
+For each primitive, run BOTH greps in parallel across `riir-ai/`, `riir-chain/`, `riir-neuron-db/`:
+
+```
+# Layer 1 — feature-name grep (catches Cargo.toml forwards + cfg gates)
+grep "<feature_name>" riir-ai/**/*.toml riir-chain/**/*.toml riir-neuron-db/**/*.toml
+
+# Layer 2 — struct/function-name grep (catches actual code consumption)
+grep "<CamelCaseStruct>|<snake_case_fn>" riir-ai/**/*.rs riir-chain/**/*.rs riir-neuron-db/**/*.rs
+```
+
+**Vocabulary translation before grepping:** list the primitive's 3–5 exported type/function names from the source file (e.g. `katgpt-rs/crates/katgpt-pruners/src/soft_reject.rs` exports `SoftRejectVerdict`, `SoftRejectConfig`, `soft_reject_decide`, `soft_reject_with_relax`, `RelaxationStrategy`, `NoRelaxation`). Grep for ALL of them, not just the feature name.
+
+### Step 3 — Classify each primitive
+
+| Class | Criteria | Action |
+|---|---|---|
+| **Wired (DEFAULT-ON)** | Consumed in riir-* runtime AND promoted to default-on in riir-engine/riir-games | No action |
+| **Wired (opt-in)** | Consumed in riir-* runtime, opt-in feature in riir-* | Check the opt-in reason; if "until GOAT gate passes" and the gate is overdue, flag |
+| **Stall** | Default-on in katgpt-rs ≥7 days, zero riir-* consumer (after BOTH grep layers) | **File `.issues/` in the appropriate riir-* repo** |
+| **Partial** | Consumed in one riir-* repo but the natural second consumer is missing | Note in issue; defer if natural consumer doesn't exist yet |
+| **Deliberate** | Has a documented reason for not being wired (e.g. `claim_rubric` is CI-only by design) | No action |
+| **Too fresh** | Default-on <7 days | Defer; re-audit next quarter |
+
+### Step 4 — DRY / SOLID check
+
+For each katgpt-core/katgpt-transformer/katgpt-pruners substrate module, check riir-engine src for duplicated local copies:
+
+```
+# If riir-engine has its own hla/transformer/types.rs/tokenizer.rs/dd_tree.rs that
+# duplicates katgpt-core, that's a DRY violation (Plan 008 class).
+grep "crate::hla|crate::transformer|crate::types|crate::tokenizer|crate::dd_tree|crate::spec_types|crate::mcts|crate::sampling|crate::delta_mem|crate::simd" riir-ai/crates/riir-engine/src/**/*.rs
+```
+
+All should be `katgpt_core::*` / `katgpt_transformer::*` / `katgpt_speculative::*` (Plan 008 Phase 2 closure). Any remaining `crate::*` is a DRY violation.
+
+For SOLID: check that primitives are consumed in the right layer:
+- Sync-boundary primitives (chain commitment, Merkle root) → riir-chain or riir-neuron-db, NOT riir-ai runtime.
+- Latent-only primitives (emotion projection, set attention) → riir-ai runtime, NOT riir-chain.
+- Substrate (SIMD, transformer, types) → katgpt-core, NOT riir-engine local.
+
+### Step 5 — Output
+
+Write the audit to a new `.issues/NNN_cross_repo_goat_cherry_pick_audit.md` file in the riir-* repo that owns the largest gap (usually riir-ai). Use this format:
+
+```markdown
+# Issue NNN: Cross-Repo GOAT/Gain Cherry-Pick Audit
+
+## TL;DR
+<one paragraph: how many stalls, which is strongest, what's the fix>
+
+## Gap inventory (default-on in katgpt-rs, NOT cherry-picked)
+| # | Primitive | Default-on since | riir-* status | Class |
+|---|---|---|---|---|
+| T1 | ... | ... | ... | TRUE GAP — fix |
+| T2 | ... | ... | ... | Stall — defer |
+
+## What IS wired (the strong half)
+<list of consumed primitives, no action>
+
+## Tasks
+### Phase 1 — T1 <strongest stall>
+- [ ] T1.1 ...
+```
+
+### Step 6 — Commit + report
+
+Per global AGENTS.md rule, commit on `develop` (no feature branches):
+
+```bash
+git add .issues/NNN_cross_repo_goat_cherry_pick_audit.md
+git commit -m "docs: file issue NNN — cross-repo GOAT cherry-pick audit (T1: <strongest stall>)"
+```
+
+Report to the user:
+- Total primitives audited (count of katgpt-rs default-on).
+- Stalls found (with days-since-promotion).
+- DRY violations (count of remaining `crate::*` substrate refs).
+- Top 3 priorities (strongest stalls with clear design intent).
+
+## Common false-positive patterns (DO NOT report as gaps)
+
+1. **Feature-name-only grep miss** — the primitive IS wired under a different name (struct/function). Always run the struct/function grep (Layer 2).
+2. **Bench-only consumer is sufficient** — some primitives (e.g. `future_probe`) ship as benches that validate the primitive; runtime wiring waits for the gate to pass. Mark "Too fresh" not "Stall".
+3. **Meta-discipline validators** — `claim_rubric` is CI-time only by design. Its `claim_rubric_bridge.rs` doc-comment says so explicitly. Don't flag.
+4. **Opt-in by design** — `closed_unit_compaction` is opt-in because compaction is a sleep-cycle op, not hot path. Don't flag unless the opt-in reason is stale.
+5. **Cross-repo transitively** — `subspace_phase_gate` is consumed via riir-neuron-db's freeze gate even though riir-ai runtime doesn't call the diagnostic directly. Mark "Partial" not "Stall".
+
+## The 7-day rule (when a stall becomes actionable)
+
+- **< 7 days default-on:** Too fresh. Note in audit but don't file an issue.
+- **7–14 days default-on:** Stall. File issue with wiring plan.
+- **> 14 days default-on:** Critical stall. File issue + flag for the next standup.
+
+The 7-day window gives the open primitive time to land its bench evidence before the runtime wiring is expected. It mirrors the "promote-or-demote within one cycle" discipline.
+
+## Cross-references
+
+- `katgpt-rs/AGENTS.md` — Feature Flag Discipline (the GOAT gate contract).
+- `katgpt-rs/.agents/skills/research/SKILL.md` — research workflow (paper → 5-repo routing).
+- `riir-ai/.issues/003_cross_repo_goat_cherry_pick_audit.md` — the canonical audit (2026-07-03).
+- `katgpt-rs/.plans/008_katgpt_core_substrate_extraction.md` — the cross-repo DRY closure record.
