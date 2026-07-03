@@ -14,7 +14,8 @@ The ReMax Expected Improvement operator, when used as a per-arm deterministic
 selection score, is **provably equivalent to greedy selection** (argmax EI =
 argmax q, by monotonicity). ReMax's exploration is a training-time phenomenon —
 it emerges from policy gradient on J_m(π, q), not from inference-time action
-selection. The training algorithm (RePPO) is correctly deferred to riir-train.
+selection. The training algorithm (RePPO) is **implemented in riir-train**
+(Plan 304, feature `remax_ppo`).
 
 **Verdict:** Keep `remax_aggregation` as **opt-in**. The primitive is a correct
 building block for RePPO training (riir-train), not a standalone modelless
@@ -139,14 +140,14 @@ telescoping sum. Both are allocation-free after the sort index buffer.
    (`expected_max_over_m`, `expected_improvement`, `per_action`). Opt-in
    feature. No modelless GOAT — not promoted to default.
 
-2. **riir-train** — the RePPO training algorithm (PPO variant + EI advantage +
-   Q-critic) belongs here. This is where ReMax's exploration mechanism actually
-   lives. The katgpt-rs operators are the building blocks for the advantage
-   computation.
+2. **riir-train** — ✅ **IMPLEMENTED (Plan 304).** The RePPO training algorithm
+   (PPO variant + EI advantage + Q-critic) ships behind feature `remax_ppo`.
+   Consumes these katgpt-rs operators for the advantage computation. 28/28
+   tests pass (correctness + toy bandit validation).
 
-3. **riir-ai** — no direct consumption. The per-NPC action selection guide
-   (HLA → action with curiosity-driven m) is deferred until riir-train validates
-   the RePPO training gain.
+3. **riir-ai** — no direct consumption yet. The per-NPC action selection guide
+   (HLA → action with curiosity-driven m) is deferred until the full PPO
+   training loop with neural network actor-critic is validated on MinAtar.
 
 ---
 
