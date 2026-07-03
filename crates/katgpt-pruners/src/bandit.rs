@@ -437,9 +437,15 @@ pub struct BanditPruner<P: ScreeningPruner> {
     #[cfg(feature = "skill_lifecycle")]
     memory: PrunerMemory,
     /// Pre-allocated scratch buffers for soft-route relevance computation.
-    /// Avoids per-call Vec allocation in the hot path.
-    soft_route_scores: Mutex<Vec<f32>>,
-    soft_route_weights: Mutex<Vec<f32>>,
+    /// Lazily allocated — `None` unless `set_soft_route(true, …)` is called,
+    /// so the default `soft_route = false` path pays zero Mutex + zero heap
+    /// cost. Previously these were always-allocated `Mutex<Vec<f32>>`, which
+    /// added ~128 bytes of Mutex state (pthread_mutex_t × 2) + 2 heap Vecs
+    /// to every `BanditPruner` even when soft-route was never enabled.
+    /// Regression audit 2026-07-03: the always-on Mutex fields contributed to
+    /// struct bloat that cost Bandit update() ~30% vs the May-29 peak.
+    soft_route_scores: Option<Mutex<Vec<f32>>>,
+    soft_route_weights: Option<Mutex<Vec<f32>>>,
 }
 
 impl<P: ScreeningPruner> BanditPruner<P> {
@@ -465,8 +471,8 @@ impl<P: ScreeningPruner> BanditPruner<P> {
             arm_score_vectors: vec![vec![]; num_arms],
             #[cfg(feature = "skill_lifecycle")]
             memory: PrunerMemory::new(256, "bandit"),
-            soft_route_scores: Mutex::new(Vec::with_capacity(num_arms)),
-            soft_route_weights: Mutex::new(Vec::with_capacity(num_arms)),
+            soft_route_scores: None,
+            soft_route_weights: None,
         }
     }
 
@@ -499,8 +505,8 @@ impl<P: ScreeningPruner> BanditPruner<P> {
             arm_score_vectors: vec![vec![]; num_arms],
             #[cfg(feature = "skill_lifecycle")]
             memory: PrunerMemory::new(256, "bandit"),
-            soft_route_scores: Mutex::new(Vec::with_capacity(num_arms)),
-            soft_route_weights: Mutex::new(Vec::with_capacity(num_arms)),
+            soft_route_scores: None,
+            soft_route_weights: None,
         }
     }
 
@@ -533,8 +539,8 @@ impl<P: ScreeningPruner> BanditPruner<P> {
             arm_score_vectors: vec![vec![]; num_arms],
             #[cfg(feature = "skill_lifecycle")]
             memory: PrunerMemory::new(256, "bandit"),
-            soft_route_scores: Mutex::new(Vec::with_capacity(num_arms)),
-            soft_route_weights: Mutex::new(Vec::with_capacity(num_arms)),
+            soft_route_scores: None,
+            soft_route_weights: None,
         }
     }
 
@@ -567,8 +573,8 @@ impl<P: ScreeningPruner> BanditPruner<P> {
             arm_score_vectors: vec![vec![]; num_arms],
             #[cfg(feature = "skill_lifecycle")]
             memory: PrunerMemory::new(256, "bandit"),
-            soft_route_scores: Mutex::new(Vec::with_capacity(num_arms)),
-            soft_route_weights: Mutex::new(Vec::with_capacity(num_arms)),
+            soft_route_scores: None,
+            soft_route_weights: None,
         }
     }
 
@@ -816,6 +822,18 @@ impl<P: ScreeningPruner> BanditPruner<P> {
     pub fn set_soft_route(&mut self, enabled: bool, tau: f32) {
         self.soft_route = enabled;
         self.soft_route_tau = tau.max(0.01); // Prevent division by zero
+        // Lazily allocate scratch buffers on first enable. Stays `None`
+        // for the default `soft_route = false` path — zero Mutex + zero heap.
+        if enabled {
+            if self.soft_route_scores.is_none() {
+                self.soft_route_scores =
+                    Some(Mutex::new(Vec::with_capacity(self.stats.num_arms)));
+            }
+            if self.soft_route_weights.is_none() {
+                self.soft_route_weights =
+                    Some(Mutex::new(Vec::with_capacity(self.stats.num_arms)));
+            }
+        }
     }
 
     /// Per-arm bandit score (strategy-dependent), in [0, 1].
@@ -1005,8 +1023,24 @@ impl<P: ScreeningPruner> BanditPruner<P> {
         // single O(N) pass. Only eligible when idea_divergence is off (that
         // feature's per-arm scan does not factor into the concentration
         // invariant and is handled by the generic fallback below).
-        let mut scores = self.soft_route_scores.lock().unwrap();
-        scores.clear();
+        //
+        // Scratch buffers are lazily allocated in `set_soft_route(true, …)`;
+        // if somehow `soft_route` is true but buffers are `None` (e.g. struct
+        // built via `with_dynamic_rank` before enabling), fall back to a local
+        // Vec — correctness over zero-alloc in that rare path.
+        let mut local_scores;
+        let mut scores_guard;
+        let scores: &mut Vec<f32> = match self.soft_route_scores.as_ref() {
+            Some(m) => {
+                scores_guard = m.lock().unwrap();
+                scores_guard.clear();
+                &mut scores_guard
+            }
+            None => {
+                local_scores = Vec::with_capacity(num_arms);
+                &mut local_scores
+            }
+        };
         let use_ci_fast_path = {
             #[cfg(feature = "idea_divergence")]
             { false }
@@ -1024,7 +1058,7 @@ impl<P: ScreeningPruner> BanditPruner<P> {
                 concentration_threshold,
             } = &self.strategy
             {
-                self.fill_ci_scores(&mut scores, *floor, *concentration_threshold);
+                self.fill_ci_scores(scores, *floor, *concentration_threshold);
             }
         } else {
             scores.extend((0..num_arms).map(|a| self.arm_bandit_score(a)));
@@ -1032,8 +1066,19 @@ impl<P: ScreeningPruner> BanditPruner<P> {
 
         // Numerical stability: subtract max before exp
         let max_score = scores.iter().copied().fold(f32::NEG_INFINITY, f32::max);
-        let mut weights = self.soft_route_weights.lock().unwrap();
-        weights.clear();
+        let mut local_weights;
+        let mut weights_guard;
+        let weights: &mut Vec<f32> = match self.soft_route_weights.as_ref() {
+            Some(m) => {
+                weights_guard = m.lock().unwrap();
+                weights_guard.clear();
+                &mut weights_guard
+            }
+            None => {
+                local_weights = Vec::with_capacity(num_arms);
+                &mut local_weights
+            }
+        };
         let inv_tau = 1.0 / tau;
         weights.extend(scores.iter().map(|&s| ((s - max_score) * inv_tau).exp()));
         let weight_sum: f32 = weights.iter().sum();

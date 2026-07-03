@@ -479,11 +479,19 @@ impl<P: ScreeningPruner> AbsorbCompress for AbsorbCompressLayer<P> {
     }
 
     fn compress(&mut self) -> Vec<usize> {
-        // Find candidate arms: visited enough, not already compressed
+        // Find candidate arms: visited enough, not already compressed.
+        //
+        // NOTE: uses `compressed` (Vec) not `compressed_set` (HashSet) here.
+        // The compressed list is short (≤ promote_count × prior compress calls)
+        // and num_arms is small (typically 6–64), so a Vec linear scan beats
+        // HashSet hashing for this size regime. The HashSet is retained for
+        // the `relevance()` hot path where token_idx can be any vocab index.
+        // Regression audit 2026-07-03: switching compress() from Vec to
+        // HashSet lookup (commit 458a589c) was a net loss for small arm counts.
         let mut candidates: Vec<(usize, f32)> = (0..self.arm_visits.len())
             .filter(|&arm| {
                 self.arm_visits[arm] >= self.config.min_visits
-                    && !self.compressed_set.contains(&arm)
+                    && !self.compressed.contains(&arm)
             })
             .filter_map(|arm| self.compress_candidate_score(arm))
             .collect();

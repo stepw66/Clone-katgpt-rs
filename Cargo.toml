@@ -2215,3 +2215,35 @@ harness = false
 name = "causal_head_importance_g2"
 path = "tests/causal_head_importance_g2.rs"
 required-features = ["causal_head_importance", "rt_turbo"]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Workspace release/bench codegen settings — REQUIRED after the multi-crate
+# refactor (Plan 005 katgpt-pruners → Issue 003 katgpt-speculative → Proposal 003
+# katgpt-quant/katgpt-attn → Issue 007 katgpt-forward → Issue 013/014/015 extractions,
+# now 20 in-tree crates).
+#
+# Without LTO, cross-crate calls (e.g. root benchmark → `crate::speculative::*`
+# re-export → `katgpt-speculative::*`, or `crate::pruners::bandit::*` →
+# `katgpt-pruners::*`) cannot be inlined, even when the callee carries
+# `#[inline(always)]`. The Cargo defaults (`lto = false`, `codegen-units = 16`)
+# silently broke the hot-path inlining assumptions documented in
+# `.docs/04_performance.md`, regressing 26/26 perf benchmarks 15–65% (peak
+# AbsorbCompress compress() −65.2%, Bandit update() −42.5%, MTP OFF (BPE)
+# −56.5%) in the 2026-07-03 audit.
+#
+# `lto = "fat"` + `codegen-units = 1` restores cross-crate inlining and
+# constant propagation across the 20-crate graph. The benches run via
+# `cargo run --release` (main.rs → benchmark::run_all), so the release profile
+# is the one that matters; `[profile.bench]` is included for `cargo bench`.
+#
+# Trade-off: link time increases (~2–4×), but the katgpt-rs binary is a
+# benchmark/research runner, not a hot-reload dev loop — the trade is correct.
+# Dev iteration uses `cargo check` (no link), which is unaffected.
+# ─────────────────────────────────────────────────────────────────────────────
+[profile.release]
+lto = "fat"
+codegen-units = 1
+
+[profile.bench]
+lto = "fat"
+codegen-units = 1
