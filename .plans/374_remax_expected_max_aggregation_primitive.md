@@ -4,7 +4,7 @@
 **Research:** [katgpt-rs/.research/373_ReMax_Expected_Max_Retry_Aggregation.md](../.research/373_ReMax_Expected_Max_Retry_Aggregation.md)
 **Source paper:** [arxiv:2606.00151](https://arxiv.org/pdf/2606.00151) — Nishimori et al. ICML 2026, "Emergence of Exploration in Policy Gradient RL via Retrying"
 **Target:** `katgpt-rs/src/pruners/remax.rs` (new module) + Cargo feature `remax_aggregation`
-**Status:** Active — Phase 1 (skeleton)
+**Status:** Phase 1 COMPLETE (2026-07-03). 14/14 unit tests passing, clean compile with/without feature, doctests passing. Ready for Phase 2 (Monte-Carlo G1 gate).
 
 ---
 
@@ -22,41 +22,45 @@ Ship the closed-form ReMax aggregation operator (`expected_max_over_m`) and Expe
 
 ### Tasks
 
-- [ ] **T1.1** Add `remax_aggregation` feature flag to root `Cargo.toml`
-  - Add `remax_aggregation = []` to `[features]`
-  - Do NOT add to `default` or `full` yet (opt-in until GOAT gate passes)
-  - Add to the opt-in features table in README.md "Opt-In & Gated Features" section
+- [x] **T1.1** Add `remax_aggregation` feature flag to `katgpt-core/Cargo.toml` + root forwarding
+  - Added `remax_aggregation = []` to `katgpt-core/Cargo.toml` (opt-in, NOT in `default`)
+  - Added `remax_aggregation = ["katgpt-core/remax_aggregation"]` forwarding to root `Cargo.toml`
+  - Added entry to README.md "Opt-In & Gated Features" table
+  - **Location note:** placed in `katgpt-core/src/pruners/remax.rs` (not root `src/pruners/`),
+    because katgpt-core is the only crate that ships to crates.io and riir-ai depends on
+    it non-optionally. Matches `active_state.rs` pattern (zero-dep pruner in katgpt-core
+    for downstream consumption).
 
-- [ ] **T1.2** Create `src/pruners/remax.rs` with the two core functions
-  - `pub fn expected_max_over_m(pi: &[f32], q: &[f32], m: f32) -> f32`
-    - Assert `pi.len() == q.len()`, assert `m > 0.0`
-    - Sort (q, π) pairs by q descending (use `sort_unstable_by`)
-    - Cumulative sum C[j] = Σ_{u≤j} π_sorted[u]
-    - Compute: `q_sorted[0] + Σ_{j=0..K-2} (q_sorted[j+1] - q_sorted[j]) * (1.0 - C[j]).max(1e-8).powf(m)`
-    - For K=1, return q[0] directly (no aggregation needed)
-  - `pub fn expected_improvement(R: f32, pi: &[f32], q: &[f32], m: f32) -> Vec<f32>`
-    - Compute v_i = (R - q_i).max(0.0) for each action
-    - Sort by q descending (same sort as expected_max)
-    - Cumulative sum C[j]
-    - EI value = `v_sorted[0] + Σ_{j=0..K-2} (v_sorted[j+1] - v_sorted[j]) * (1.0 - C[j]).max(1e-8).powf(m - 1.0)`
-    - Scatter back to original action order, return Vec<f32> of length K
-  - Add `pub fn expected_improvement_inplace(R: f32, pi: &[f32], q: &[f32], m: f32, out: &mut [f32])` — zero-alloc variant for hot paths
+- [x] **T1.2** Create `katgpt-core/src/pruners/remax.rs` with the core functions
+  - `pub fn expected_max_over_m(pi: &[f32], q: &[f32], m: f32) -> f32` — Eq 4, scalar
+  - `pub fn expected_improvement(r: f32, pi: &[f32], q: &[f32], m: f32) -> f32` — Eq 10, scalar
+  - `pub fn expected_improvement_per_action(pi: &[f32], q: &[f32], m: f32) -> Vec<f32>` — Q_plus for RePPO baseline
+  - `pub fn expected_improvement_per_action_inplace(pi, q, m, out: &mut [f32])` — zero-output-alloc variant
+  - **Plan deviation:** T1.2 specified `expected_improvement(R, ...) -> Vec<f32>`. The paper's
+    Eq 10 is a **scalar** formula (verified against Appendix D JAX code). The per-action
+    `Q_plus` is a separate computation. Implemented as scalar `expected_improvement` +
+    separate `expected_improvement_per_action`. See module docs §"Plan deviation note".
 
-- [ ] **T1.3** Re-export from `src/pruners/mod.rs` (feature-gated)
+- [x] **T1.3** Re-export from `katgpt-core/src/pruners/mod.rs` (feature-gated)
   - `#[cfg(feature = "remax_aggregation")] pub mod remax;`
-  - Re-export `expected_max_over_m`, `expected_improvement`, `expected_improvement_inplace`
 
-- [ ] **T1.4** Unit tests (in `remax.rs`, `#[cfg(test)]` module)
-  - `test_m1_equals_mean`: for random pi/q, expected_max_over_m with m=1.0 equals dot(pi, q) within 1e-5
-  - `test_m0_converges_to_max`: as m→0+, expected_max approaches max(q) (since (1-C)^0 = 1 for C<1)
-  - `test_m_inf_converges_to_max`: as m→large, expected_max approaches q_sorted[0] = max(q)
-  - `test_deterministic_bandit_closed_form`: for μ=(0,1), p=π(a=1), expected_max_over_m equals 1-(1-p)^m (the paper's Eq from §2.1)
-  - `test_ei_zero_when_r_below_all_q`: if R < min(q), all v_i = 0, EI = 0
-  - `test_ei_full_when_r_above_all_q`: if R > max(q), EI is bounded and positive
-  - `test_q_replacement_enforces_zero`: when q[action] is replaced by R, EI[action] = 0
-  - `test_k1_returns_q_directly`: K=1 edge case
-  - `test_numerical_stability_m_below_1`: m=0.5 with near-degenerate pi (one arm ~1.0) doesn't NaN/Inf
-  - `test_monotone_in_m`: for fixed pi/q, expected_max is monotone non-decreasing in m (more retries → higher expected best)
+- [x] **T1.4** Unit tests (14 tests, all passing)
+  - `test_m1_equals_mean` ✓
+  - `test_m0_converges_to_min` ✓ (corrected from plan's erroneous "converges_to_max" —
+    (1-C)^0=1 telescopes to q_K = min(q), not max(q))
+  - `test_m_inf_converges_to_max` ✓
+  - `test_deterministic_bandit_closed_form` ✓ (1-(1-p)^m for multiple m values)
+  - `test_ei_zero_when_r_below_all_q` ✓
+  - `test_ei_positive_when_r_above_all_q` ✓
+  - `test_q_replacement_reduces_ei` ✓ (adapted: Q-replacement reduces scalar EI, not
+    zeroes a per-action element — the plan's per-action interpretation was inconsistent)
+  - `test_k1_max_returns_q_directly` ✓
+  - `test_k1_ei_returns_clamped_diff` ✓
+  - `test_numerical_stability_m_below_1` ✓
+  - `test_monotone_in_m` ✓
+  - `test_per_action_matches_scalar` ✓ (bonus: validates per-action against scalar)
+  - `test_baseline_non_negative` ✓ (bonus: validates RePPO baseline property)
+  - `test_inplace_matches_allocating` ✓ (bonus: validates zero-alloc variant)
 
 ---
 

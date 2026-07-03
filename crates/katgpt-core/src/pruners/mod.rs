@@ -20,3 +20,6 @@ pub mod indicator_similarity;
 
 #[cfg(feature = "indicator_cascade")]
 pub mod indicator_cascade;
+
+#[cfg(feature = "remax_aggregation")]
+pub mod remax;
