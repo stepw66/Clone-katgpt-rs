@@ -979,6 +979,7 @@ fn forward_save<'a>(
 ///   attends to `t` iff `gen_steps[t] <= gen_steps[q]`. Use
 ///   [`crate::speculative::set_diffusion::order_to_gen_steps`] to convert a
 ///   sampled ordering to this buffer.
+#[cfg(feature = "set_diffusion")]
 fn forward_save_set_causal<'a>(
     weights: &TransformerWeights,
     tokens: &[usize],
@@ -1727,6 +1728,13 @@ pub fn train_mini_dllm(
 // ═══════════════════════════════════════════════════════════════
 // Research 376 Phase 4: SW-SetDLM Training (set-causal attention)
 // ═══════════════════════════════════════════════════════════════
+//
+// Gate: the functions below reference `crate::speculative::set_diffusion`,
+// which is gated behind the `set_diffusion` feature. Without this gate,
+// `cargo build -p katgpt-rs` fails when `dllm` is enabled but `set_diffusion`
+// is not (feature unification via dev-deps + dev-dep defaults transitively
+// enables `dllm`). Minimal fix: gate each function so they only compile
+// when `set_diffusion` is explicitly requested.
 
 /// Train a mini transformer with **set-causal attention** (SW-SetDLM training).
 ///
@@ -1769,6 +1777,7 @@ pub fn train_mini_dllm(
 ///
 /// # Returns
 /// `(weights, loss_history)` — the trained model and per-epoch mean NELBO.
+#[cfg(feature = "set_diffusion")]
 pub fn train_mini_set_causal(
     config: &Config,
     train_data: &[Vec<usize>],
@@ -1865,6 +1874,7 @@ pub fn train_mini_set_causal(
 ///
 /// Used by the GOAT gate test for cross-model comparison (set-causal vs
 /// bidirectional models at various schedule endpoints).
+#[cfg(feature = "set_diffusion")]
 pub fn evaluate_set_causal_nelbo(
     weights: &TransformerWeights,
     data: &[Vec<usize>],
@@ -1877,6 +1887,7 @@ pub fn evaluate_set_causal_nelbo(
 }
 
 /// Internal allocation-free variant — caller provides the forward context.
+#[cfg(feature = "set_diffusion")]
 fn evaluate_set_causal_nelbo_internal(
     weights: &TransformerWeights,
     data: &[Vec<usize>],
