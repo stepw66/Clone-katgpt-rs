@@ -20,7 +20,7 @@ pub use entropy::{
     identify_positions_by_rule_into, token_entropy,
 };
 
-pub use types::{PpotConfig, TokenRule};
+pub use types::{PpotConfig, QmcConfig, QmcMethod, TokenRule};
 
 // ── Re-exports: Plan 027 Adaptive ──────────────────────────────
 

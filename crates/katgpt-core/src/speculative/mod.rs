@@ -66,3 +66,7 @@ pub use sampling::{
 // sampler; bit-identical to `sample_from_distribution` on fresh i.i.d. draws.
 #[cfg(feature = "qmc_sampling")]
 pub use sampling::sample_from_distribution_qmc;
+// Plan 367 Phase 3 — K-rollout QMC sampler (draws K correlated-but-
+// marginally-exact sequences from a per-position distribution array).
+#[cfg(feature = "qmc_sampling")]
+pub use sampling::sample_k_from_distribution_qmc;

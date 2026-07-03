@@ -17,6 +17,14 @@ use katgpt_core::speculative::sampling::sample_from_distribution;
 use crate::speculative::types::ScreeningPruner;
 use crate::types::Rng;
 
+// Plan 367 Phase 3 — QMC-aware PPoT variant generation.
+#[cfg(feature = "qmc_sampling")]
+use katgpt_core::speculative::qmc::{LatticeQmc, QmcSource, SobolQmc, StratifiedQmc};
+#[cfg(feature = "qmc_sampling")]
+use katgpt_core::speculative::sampling::sample_from_distribution_qmc;
+#[cfg(feature = "qmc_sampling")]
+use super::types::QmcMethod;
+
 use super::entropy::identify_high_entropy_positions;
 use super::entropy::identify_high_entropy_positions_with_entropy_into;
 use super::entropy::identify_positions_adaptive_with_entropy_into;
@@ -124,6 +132,113 @@ fn sample_different_value(
     }
 }
 
+// ── QMC-aware Sampling Helpers (Plan 367 Phase 3) ─────────────
+
+/// QMC-aware variant of [`sample_from_support`]: takes a carried coordinate
+/// `u` instead of an RNG. Uses [`sample_from_distribution_qmc`] for the
+/// inverse-CDF descend + rescale, so the caller can carry `u` across
+/// positions within a rollout (arithmetic coding).
+///
+/// Degenerate fallback (all zero mass) maps `u` to a uniform-over-support
+/// index via arithmetic coding, preserving the carry invariant.
+#[cfg(feature = "qmc_sampling")]
+#[inline]
+fn sample_from_support_qmc(
+    probs: &[f32],
+    support: &[usize],
+    scratch: &mut [f32],
+    u: &mut f32,
+) -> usize {
+    let len = support.len().min(scratch.len());
+    if len == 0 {
+        return 0;
+    }
+
+    // Build restricted distribution (identical to the i.i.d. helper).
+    let mut sum = 0.0f32;
+    for (i, slot) in scratch.iter_mut().enumerate().take(len) {
+        let tok = support[i];
+        debug_assert!(
+            tok < probs.len(),
+            "support token {tok} exceeds vocab size {}",
+            probs.len()
+        );
+        let p = unsafe { *probs.get_unchecked(tok) };
+        *slot = p;
+        sum += p;
+    }
+
+    if sum > 0.0 {
+        let inv = 1.0 / sum;
+        for val in &mut scratch[..len] {
+            *val *= inv;
+        }
+        let idx = sample_from_distribution_qmc(&scratch[..len], u);
+        support[idx.min(len - 1)]
+    } else {
+        // Degenerate: uniform over support via QMC coordinate.
+        let scaled = *u * len as f32;
+        let idx = (scaled as usize).min(len - 1);
+        *u = scaled - idx as f32;
+        support[idx]
+    }
+}
+
+/// QMC-aware variant of [`sample_different_value`]: masks the original token,
+/// renormalizes, and descends via [`sample_from_distribution_qmc`] with
+/// coordinate carry. Because the original token is masked to zero before
+/// sampling, the QMC descend NEVER selects it (strict `u < cdf` skips
+/// zero-mass bins) — no different-value retry needed in the non-degenerate
+/// case.
+///
+/// Degenerate fallback (all mass on original) maps `u` to a non-original
+/// token via arithmetic coding on `len − 1` slots.
+#[cfg(feature = "qmc_sampling")]
+#[inline]
+fn sample_different_value_qmc(
+    probs: &[f32],
+    original_token: usize,
+    scratch: &mut [f32],
+    u: &mut f32,
+) -> usize {
+    let len = probs.len().min(scratch.len());
+    if len == 0 {
+        return 0;
+    }
+
+    // Copy and mask original token (identical to the i.i.d. helper).
+    scratch[..len].copy_from_slice(&probs[..len]);
+    if original_token < len {
+        scratch[original_token] = 0.0;
+    }
+
+    // Renormalize.
+    let sum: f32 = scratch[..len].iter().sum();
+    if sum > 0.0 {
+        let inv = 1.0 / sum;
+        for val in &mut scratch[..len] {
+            *val *= inv;
+        }
+        sample_from_distribution_qmc(&scratch[..len], u)
+    } else {
+        // All mass was on original — pick non-original via QMC coordinate.
+        if len <= 1 {
+            return 0;
+        }
+        // Arithmetic coding on uniform over (len − 1) non-original tokens:
+        // idx ∈ [0, len−1), then shift to skip original_token.
+        let n = (len - 1) as f32;
+        let scaled = *u * n;
+        let idx = (scaled as usize).min(len - 2);
+        *u = scaled - idx as f32;
+        if idx >= original_token {
+            idx + 1
+        } else {
+            idx
+        }
+    }
+}
+
 // ── Core Resampling (Plan 026) ──────────────────────────────────
 
 /// Resample tokens at specified positions from marginals.
@@ -223,6 +338,17 @@ pub fn ppot_resample_multi_strategy(
     scratch: &mut [f32],
     rng: &mut Rng,
 ) -> Vec<Vec<usize>> {
+    // Plan 367 Phase 3 — QMC dispatch: when `config.qmc.enabled` and the
+    // `qmc_sampling` feature is on, replace i.i.d. draws with correlated-but-
+    // marginally-exact QMC draws at the K-variant generation site. The
+    // position-list API is unchanged — callers don't need to know QMC is on.
+    #[cfg(feature = "qmc_sampling")]
+    if config.qmc.enabled {
+        return ppot_resample_multi_strategy_qmc(
+            base_path, marginals, positions, count, preferred, config, scratch,
+        );
+    }
+
     // Pre-allocate all variants as copies of base_path (single bulk allocation).
     // Resampling writes directly into each variant — no per-iteration to_vec().
     let mut variants = Vec::with_capacity(count);
@@ -259,6 +385,90 @@ pub fn ppot_resample_multi_strategy(
                     // If same as original, try once more (simple retry)
                     variant[pos] = if candidate == original && support.len() > 1 {
                         sample_from_support(probs, support, scratch, rng)
+                    } else {
+                        candidate
+                    };
+                }
+            }
+        }
+    }
+
+    variants
+}
+
+/// QMC-aware variant of [`ppot_resample_multi_strategy`] (Plan 367 Phase 3).
+///
+/// Replaces i.i.d. `rng.uniform()` at the K-variant generation site with
+/// correlated-but-marginally-exact QMC draws. For each of the K variants,
+/// draws one `u_i` from the QMC source and descends through the per-position
+/// distributions using [`sample_from_distribution_qmc`] with coordinate carry
+/// (arithmetic coding). The different-value constraint is handled by masking
+/// the original token to zero before the descend — the strict `u < cdf` walk
+/// never selects a zero-mass bin, so no retry is needed.
+///
+/// The position-list API and strategy cycling are identical to the i.i.d.
+/// version. Callers don't need to know QMC is on.
+#[cfg(feature = "qmc_sampling")]
+#[allow(clippy::too_many_arguments)]
+fn ppot_resample_multi_strategy_qmc(
+    base_path: &[usize],
+    marginals: &[&[f32]],
+    positions: &[usize],
+    count: usize,
+    preferred: &[TokenRule],
+    config: &PpotConfig,
+    scratch: &mut [f32],
+) -> Vec<Vec<usize>> {
+    // Construct the QMC source from config.
+    let mut source: Box<dyn QmcSource> = match config.qmc.method {
+        QmcMethod::Lattice => Box::new(LatticeQmc::new(config.qmc.seed)),
+        QmcMethod::Stratified => Box::new(StratifiedQmc::new(config.qmc.seed)),
+        QmcMethod::Sobol => Box::new(SobolQmc::new(config.qmc.seed)),
+    };
+
+    // Draw K marginally-uniform points with QMC joint structure.
+    let mut uniforms = vec![0.0f32; count];
+    source.draw(count, &mut uniforms);
+
+    // Pre-allocate variants (same as i.i.d. path).
+    let mut variants = Vec::with_capacity(count);
+    for _ in 0..count {
+        variants.push(base_path.to_vec());
+    }
+
+    // Build strategy sequence: preferred first, then cycle through STRATEGIES.
+    let mut strategy_iter = preferred
+        .iter()
+        .chain(TokenRule::STRATEGIES.iter().cycle())
+        .take(count);
+
+    for (i, variant) in variants.iter_mut().enumerate() {
+        let &rule = strategy_iter.next().unwrap_or(&TokenRule::All);
+        // The carried coordinate for this rollout — advances across
+        // positions within the rollout via arithmetic coding rescale.
+        let mut u = uniforms[i];
+
+        if matches!(rule, TokenRule::All) {
+            // Unrestricted: different-value constraint via QMC descend.
+            for &pos in positions {
+                if pos < marginals.len() && pos < variant.len() {
+                    variant[pos] =
+                        sample_different_value_qmc(marginals[pos], base_path[pos], scratch, &mut u);
+                }
+            }
+        } else {
+            // Constrained: resample within rule's cached support.
+            let support = config.support_for(rule);
+            for &pos in positions {
+                if pos < marginals.len() && pos < variant.len() {
+                    let probs = marginals[pos];
+                    let original = base_path[pos];
+                    let candidate = sample_from_support_qmc(probs, support, scratch, &mut u);
+                    // If same as original, try once more with the carried
+                    // coordinate (the rescale advanced u, so this will
+                    // likely give a different token).
+                    variant[pos] = if candidate == original && support.len() > 1 {
+                        sample_from_support_qmc(probs, support, scratch, &mut u)
                     } else {
                         candidate
                     };
@@ -962,5 +1172,123 @@ mod tests {
         );
 
         assert_eq!(variants.len(), 3, "should produce 3 variants");
+    }
+
+    // ── Plan 367 Phase 3: QMC dispatch + diversity ────────────────
+
+    #[cfg(feature = "qmc_sampling")]
+    use crate::speculative::ppot::QmcConfig;
+
+    /// Helper: mean pairwise Hamming distance across variants.
+    fn mean_pairwise_edit_distance(variants: &[Vec<usize>]) -> f64 {
+        let k = variants.len();
+        if k < 2 {
+            return 0.0;
+        }
+        let mut total = 0u64;
+        let mut pairs = 0u64;
+        for i in 0..k {
+            for j in (i + 1)..k {
+                let dist = variants[i]
+                    .iter()
+                    .zip(variants[j].iter())
+                    .filter(|(a, b)| a != b)
+                    .count();
+                total += dist as u64;
+                pairs += 1;
+            }
+        }
+        if pairs == 0 {
+            0.0
+        } else {
+            total as f64 / pairs as f64
+        }
+    }
+
+    /// T3.3 — QMC dispatch produces variants (basic smoke test).
+    #[cfg(feature = "qmc_sampling")]
+    #[test]
+    fn test_ppot_qmc_dispatch_produces_variants() {
+        let base_path = vec![0, 1, 2];
+        let p0 = [0.3f32, 0.3, 0.2, 0.2];
+        let p1 = [0.2f32, 0.3, 0.3, 0.2];
+        let p2 = [0.25f32, 0.25, 0.25, 0.25];
+        let marginals: &[&[f32]] = &[&p0, &p1, &p2];
+        let mut scratch = vec![0.0f32; 4];
+        let mut rng = Rng::new(42);
+
+        let mut config = PpotConfig::default().with_cached_support(4);
+        config.enabled = true;
+        config.qmc = QmcConfig {
+            enabled: true,
+            method: QmcMethod::Lattice,
+            seed: 42,
+        };
+
+        let variants = ppot_resample_multi_strategy(
+            &base_path, marginals, &[0, 1, 2], 8, &[], &config, &mut scratch, &mut rng,
+        );
+
+        assert_eq!(variants.len(), 8);
+        for v in &variants {
+            assert_eq!(v.len(), 3);
+            for &t in v {
+                assert!(t < 4);
+            }
+        }
+    }
+
+    /// T3.3 — QMC variants have higher pairwise diversity than i.i.d. at the
+    /// same K. This is the qualitative signal that QMC is doing its job:
+    /// correlated-but-marginally-exact samples cover output space more evenly
+    /// than i.i.d., so the same K rollouts are more spread out.
+    ///
+    /// We use a uniform-ish marginal ([0.25, 0.25, 0.25, 0.25]) at every
+    /// position, so the different-value constraint forces each position away
+    /// from the base path. QMC's lattice structure ensures the K rollouts are
+    /// evenly spread across the remaining tokens, while i.i.d. can cluster.
+    #[cfg(feature = "qmc_sampling")]
+    #[test]
+    fn test_ppot_qmc_higher_diversity_than_iid() {
+        let base_path = vec![0, 0, 0, 0];
+        let uniform = [0.25f32, 0.25, 0.25, 0.25];
+        let marginals: &[&[f32]] = &[&uniform, &uniform, &uniform, &uniform];
+        let positions = [0, 1, 2, 3];
+        let k = 16;
+        let mut scratch = vec![0.0f32; 4];
+
+        // QMC variants (lattice — max coverage).
+        let mut rng_qmc = Rng::new(42);
+        let mut config_qmc = PpotConfig::default().with_cached_support(4);
+        config_qmc.enabled = true;
+        config_qmc.qmc = QmcConfig {
+            enabled: true,
+            method: QmcMethod::Lattice,
+            seed: 42,
+        };
+        let variants_qmc = ppot_resample_multi_strategy(
+            &base_path, marginals, &positions, k, &[], &config_qmc, &mut scratch, &mut rng_qmc,
+        );
+
+        // i.i.d. variants (QMC disabled).
+        let mut rng_iid = Rng::new(42);
+        let config_iid = PpotConfig::default().with_cached_support(4);
+        let variants_iid = ppot_resample_multi_strategy(
+            &base_path, marginals, &positions, k, &[], &config_iid, &mut scratch, &mut rng_iid,
+        );
+
+        let div_qmc = mean_pairwise_edit_distance(&variants_qmc);
+        let div_iid = mean_pairwise_edit_distance(&variants_iid);
+
+        // QMC should have ≥ i.i.d. diversity. With uniform marginals and a
+        // lattice source, the K rollouts are evenly spread — pairwise
+        // distances should be ≥ i.i.d. (which can randomly cluster).
+        //
+        // This is a one-sided gate: QMC ≥ i.i.d. We don't require strict
+        // superiority because both are random and K=16 is modest.
+        assert!(
+            div_qmc >= div_iid * 0.95,
+            "QMC diversity {div_qmc:.3} should be ≮ i.i.d. diversity {div_iid:.3} (±5% slack)",
+        );
     }
 }

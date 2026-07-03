@@ -13,6 +13,12 @@
 
 use crate::types::Rng;
 
+// Plan 367 Phase 3 — QMC K-rollout sampler needs the QmcSource trait.
+// Gated on `qmc_sampling` for feature isolation (G6). No circular dep:
+// `qmc.rs` imports only `crate::types::Rng`, never anything from `sampling`.
+#[cfg(feature = "qmc_sampling")]
+use super::qmc::QmcSource;
+
 // Uses strict `r < cdf` (not `<=`) so zero-probability leading bins are never selected.
 // Additionally, `rng.uniform()` is documented to return [0, 1) and can yield exactly
 // 0.0 (e.g. for low-entropy seeds the first draw is deterministically 0.0). A draw of
@@ -113,6 +119,71 @@ pub fn sample_from_distribution_qmc(probs: &[f32], u: &mut f32) -> usize {
         }
     }
     probs.len().saturating_sub(1)
+}
+
+/// K-rollout QMC sampler: produces K correlated-but-marginally-exact token
+/// sequences from a sequence of per-position distributions (Plan 367 Phase 3,
+/// Research 367 — QuasiMoTTo, arXiv:2607.01179).
+///
+/// For each of the K rollouts, draws one `u_i` from the `source`, then
+/// descends through `probs[0], probs[1], ..., probs[T-1]` using
+/// [`sample_from_distribution_qmc`] with the carried coordinate. Each
+/// rollout is marginally exact (per-position marginal matches the input
+/// distribution); the joint structure is controlled by the source
+/// (Lattice/Stratified/Sobol) for higher coverage than i.i.d. → 25–47%
+/// fewer rollouts for matched pass@k.
+///
+/// # Zero-allocation contract
+///
+/// `uniforms_scratch` must be `>= k` (caller-provided QMC draw buffer).
+/// `out` must be `>= k` elements, each with capacity `>= probs.len()`
+/// (the caller pre-allocates; `clear` + `resize` inside are no-ops given
+/// sufficient capacity). The source's `draw` writes into `uniforms_scratch`
+/// — also caller-pre-allocated.
+///
+/// # Panics
+///
+/// Panics if `uniforms_scratch.len() < k` or `out.len() < k`.
+#[cfg(feature = "qmc_sampling")]
+pub fn sample_k_from_distribution_qmc(
+    probs: &[&[f32]],
+    source: &mut dyn QmcSource,
+    k: usize,
+    uniforms_scratch: &mut [f32],
+    out: &mut [Vec<usize>],
+) {
+    assert!(
+        uniforms_scratch.len() >= k,
+        "uniforms_scratch.len() {} < k {}",
+        uniforms_scratch.len(),
+        k,
+    );
+    assert!(out.len() >= k, "out.len() {} < k {}", out.len(), k);
+
+    if k == 0 || probs.is_empty() {
+        for rollout in &mut out[..k] {
+            rollout.clear();
+        }
+        return;
+    }
+
+    // Draw K marginally-uniform points with QMC joint structure.
+    source.draw(k, &mut uniforms_scratch[..k]);
+
+    // For each rollout, descend through positions with coordinate carry.
+    // Each rollout is an independent descend — embarrassingly parallel by
+    // construction (no cross-rollout data dependency). The `u_i` is carried
+    // across positions WITHIN a rollout via arithmetic coding rescale.
+    let t_len = probs.len();
+    for i in 0..k {
+        let mut u = uniforms_scratch[i];
+        let rollout = &mut out[i];
+        rollout.clear();
+        rollout.resize(t_len, 0);
+        for (t, &probs_t) in probs.iter().enumerate() {
+            rollout[t] = sample_from_distribution_qmc(probs_t, &mut u);
+        }
+    }
 }
 
 /// Residual distribution sampling into pre-allocated scratch buffer (zero-alloc).
@@ -411,5 +482,123 @@ mod tests {
         let tok = sample_from_distribution_qmc(&probs, &mut u);
         assert_eq!(tok, 0, "empty probs → 0 (saturating_sub)");
         assert_eq!(u, 0.42, "empty probs should not modify u");
+    }
+
+    // ── Plan 367 Phase 3: K-rollout QMC sampler ───────────────────────────
+    #[cfg(feature = "qmc_sampling")]
+    use crate::speculative::qmc::LatticeQmc;
+
+    /// T3.1 basic — K rollouts, each of length T, tokens in valid range.
+    #[cfg(feature = "qmc_sampling")]
+    #[test]
+    fn test_sample_k_basic() {
+        let p0 = [0.1f32, 0.2, 0.3, 0.4];
+        let p1 = [0.25f32, 0.25, 0.25, 0.25];
+        let p2 = [0.5f32, 0.5];
+        let probs: &[&[f32]] = &[&p0, &p1, &p2];
+
+        let k = 8;
+        let mut source = LatticeQmc::new(42);
+        let mut uniforms = vec![0.0f32; k];
+        let mut out: Vec<Vec<usize>> = (0..k).map(|_| Vec::with_capacity(3)).collect();
+
+        sample_k_from_distribution_qmc(probs, &mut source, k, &mut uniforms, &mut out);
+
+        assert_eq!(out.len(), k);
+        for rollout in &out {
+            assert_eq!(rollout.len(), 3, "each rollout has T=3 tokens");
+            assert!(rollout[0] < 4, "pos 0 token in [0,4)");
+            assert!(rollout[1] < 4, "pos 1 token in [0,4)");
+            assert!(rollout[2] < 2, "pos 2 token in [0,2)");
+        }
+    }
+
+    /// T3.1 determinism — same source state → same output.
+    #[cfg(feature = "qmc_sampling")]
+    #[test]
+    fn test_sample_k_deterministic() {
+        let p0 = [0.3f32, 0.7];
+        let p1 = [0.4f32, 0.6];
+        let probs: &[&[f32]] = &[&p0, &p1];
+        let k = 16;
+
+        // First run
+        let mut src1 = LatticeQmc::new(123);
+        let mut u1 = vec![0.0f32; k];
+        let mut out1: Vec<Vec<usize>> = (0..k).map(|_| Vec::with_capacity(2)).collect();
+        sample_k_from_distribution_qmc(probs, &mut src1, k, &mut u1, &mut out1);
+
+        // Second run — fresh source with same seed
+        let mut src2 = LatticeQmc::new(123);
+        let mut u2 = vec![0.0f32; k];
+        let mut out2: Vec<Vec<usize>> = (0..k).map(|_| Vec::with_capacity(2)).collect();
+        sample_k_from_distribution_qmc(probs, &mut src2, k, &mut u2, &mut out2);
+
+        assert_eq!(out1, out2, "same seed → same output");
+    }
+
+    /// T3.1 marginal exactness — per-position token frequencies match probs.
+    /// The arithmetic-coding descend preserves marginal exactness at every
+    /// position (linearity of expectation), so K=10000 lattice points should
+    /// reproduce the target distribution at each position.
+    #[cfg(feature = "qmc_sampling")]
+    #[test]
+    fn test_sample_k_marginal_exactness() {
+        let p0 = [0.1f32, 0.2, 0.3, 0.4];
+        let p1 = [0.25f32, 0.75];
+        let probs: &[&[f32]] = &[&p0, &p1];
+
+        let k = 10_000;
+        let mut source = LatticeQmc::new(7);
+        let mut uniforms = vec![0.0f32; k];
+        let mut out: Vec<Vec<usize>> = (0..k).map(|_| Vec::with_capacity(2)).collect();
+        sample_k_from_distribution_qmc(probs, &mut source, k, &mut uniforms, &mut out);
+
+        // Position 0 marginal
+        let mut c0 = [0u32; 4];
+        for r in &out {
+            c0[r[0]] += 1;
+        }
+        for (j, &p) in p0.iter().enumerate() {
+            let emp = c0[j] as f32 / k as f32;
+            assert!((emp - p).abs() < 0.02, "pos 0 tok {j}: emp={emp:.4} vs p={p:.4}");
+        }
+
+        // Position 1 marginal (carried coordinate — arithmetic coding guarantee)
+        let mut c1 = [0u32; 2];
+        for r in &out {
+            c1[r[1]] += 1;
+        }
+        for (j, &p) in p1.iter().enumerate() {
+            let emp = c1[j] as f32 / k as f32;
+            assert!((emp - p).abs() < 0.02, "pos 1 tok {j}: emp={emp:.4} vs p={p:.4}");
+        }
+    }
+
+    /// T3.1 K=0 — no-op.
+    #[cfg(feature = "qmc_sampling")]
+    #[test]
+    fn test_sample_k_zero_is_noop() {
+        let probs: &[&[f32]] = &[&[0.5f32, 0.5]];
+        let mut source = LatticeQmc::new(0);
+        let mut uniforms: [f32; 0] = [];
+        let mut out: Vec<Vec<usize>> = Vec::new();
+        sample_k_from_distribution_qmc(probs, &mut source, 0, &mut uniforms, &mut out);
+        assert!(out.is_empty());
+    }
+
+    /// T3.1 K=1 — single rollout.
+    #[cfg(feature = "qmc_sampling")]
+    #[test]
+    fn test_sample_k_single_rollout() {
+        let probs: &[&[f32]] = &[&[1.0f32]];
+        let k = 1;
+        let mut source = LatticeQmc::new(99);
+        let mut uniforms = [0.0f32];
+        let mut out: Vec<Vec<usize>> = vec![Vec::with_capacity(1)];
+        sample_k_from_distribution_qmc(probs, &mut source, k, &mut uniforms, &mut out);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].len(), 1);
+        assert_eq!(out[0][0], 0, "single-token vocab → token 0");
     }
 }

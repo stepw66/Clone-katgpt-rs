@@ -128,6 +128,64 @@ impl std::fmt::Display for TokenRule {
     }
 }
 
+// ── QMC Config (Plan 367 Phase 3) ──────────────────────────────
+
+/// QMC method selector for PPoT variant generation (Plan 367, Research 367 —
+/// QuasiMoTTo, arXiv:2607.01179).
+///
+/// When [`QmcConfig::enabled`] is true, PPoT replaces i.i.d. `rng.uniform()`
+/// at the K-variant generation site with correlated-but-marginally-exact
+/// QMC draws, improving coverage and reducing the number of variants needed
+/// for matched diversity.
+///
+/// This type is plain data (no dependency on `katgpt-core/qmc_sampling`).
+/// The consuming crate (katgpt-rs root) interprets it using QMC types from
+/// `katgpt-core` when its `qmc_sampling` feature is enabled. When the feature
+/// is off, `enabled = true` is silently ignored (inert).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub enum QmcMethod {
+    /// Rank-1 lattice `{(i/k + Δ) mod 1}` — max coverage, pairwise MI `−∞`.
+    /// Dominates pass@k per the paper (R367 §1.1).
+    Lattice,
+    /// Stratified + Fisher-Yates — pairwise MI `log(k/(k−1))`. Middle ground.
+    Stratified,
+    /// Multi-dim Sobol with Owen digital-shift randomization.
+    Sobol,
+}
+
+/// Configuration for QMC-based PPoT variant generation (Plan 367 Phase 3).
+///
+/// Always present in [`PpotConfig`] as `pub qmc: QmcConfig`. Defaults to
+/// disabled. The behavior is only active when the consuming crate enables
+/// the `qmc_sampling` feature on `katgpt-core`.
+///
+/// # Inert when feature is off
+///
+/// If `katgpt-core/qmc_sampling` is not enabled, `qmc.enabled = true` has
+/// no effect — the PPoT resampler falls back to the i.i.d. path. This avoids
+/// requiring a cross-crate feature forward; the config is always-on data,
+/// the behavior is feature-gated.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct QmcConfig {
+    /// Enable QMC draws for K-variant generation. Default: `false`.
+    pub enabled: bool,
+    /// Which QMC method to use for variant generation.
+    pub method: QmcMethod,
+    /// Seed for the QMC source (SplitMix64-mixed per `Rng::new`).
+    pub seed: u64,
+}
+
+impl Default for QmcConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            method: QmcMethod::Lattice,
+            seed: 0,
+        }
+    }
+}
+
 // ── PPoT Config ────────────────────────────────────────────────
 
 /// Configuration for PPoT (Probabilistic Programs of Thought) rescue.
@@ -193,6 +251,11 @@ pub struct PpotConfig {
     /// Below this threshold, stop reviewing (reviewer is net-negative).
     pub min_review_benefit_ratio: f64,
 
+    // ── Plan 367: QMC variant generation ──
+    /// QMC configuration for variant generation. Always present (plain data);
+    /// inert unless the consuming crate enables `katgpt-core/qmc_sampling`.
+    pub qmc: QmcConfig,
+
     /// Pre-computed support sets for each TokenRule, indexed by `TokenRule::index()`.
     /// Built once from `vocab_size`, avoids realloc per sample.
     cached_support: Option<Box<[Vec<usize>; 5]>>,
@@ -218,6 +281,7 @@ impl Default for PpotConfig {
             max_review_loops: 0,
             inject_rejection_feedback: false,
             min_review_benefit_ratio: 2.0,
+            qmc: QmcConfig::default(),
             cached_support: None,
         }
     }

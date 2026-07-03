@@ -59,7 +59,7 @@ pub use resample::{
     ppot_resample, ppot_resample_different_value, ppot_resample_with_support, ppot_rescue,
 };
 
-pub use types::{PpotConfig, TokenRule};
+pub use types::{PpotConfig, QmcConfig, QmcMethod, TokenRule};
 
 // ── Re-exports: Plan 027 Adaptive ────────────────────────────
 
