@@ -4,7 +4,7 @@
 **Research:** [katgpt-rs/.research/367_QuasiMoTTo_QMC_Test_Time_Scaling.md](../.research/367_QuasiMoTTo_QMC_Test_Time_Scaling.md)
 **Source paper:** [arXiv:2607.01179](https://arxiv.org/abs/2607.01179) — Li, Zhan, Gandhi, Goodman, Fox (Stanford), 2026-07-01
 **Target:** `katgpt-rs/crates/katgpt-core/src/speculative/qmc.rs` (new module) + Cargo feature `qmc_sampling` (opt-in until GOAT gate)
-**Status:** Active — Phase 1 COMPLETE (27/27 tests pass, zero warnings)
+**Status:** Active — Phase 1 + Phase 2 COMPLETE (38/38 tests pass, zero warnings)
 
 ---
 
@@ -58,10 +58,10 @@ Verdict: **GOAT** (not Super-GOAT). Sample-efficiency gain, not a new capability
 
 ### Tasks
 
-- [ ] **T2.1** Add `sample_from_distribution_qmc(probs: &[f32], u: &mut f32) -> usize` — inverse-CDF lookup using `*u` as the draw, then rescale: `*u = (*u − ℓ_t) / p_t` where `ℓ_t` is the lower edge of the selected bin and `p_t` is its probability. Numerically stable — never touches the raw sequence probability `π(x_<t)`.
-- [ ] **T2.2** Verify bit-identical behavior with `sample_from_distribution` when `*u` is a fresh i.i.d. draw each call (no carry) — this is the G3 no-regression floor: the QMC descend must reduce to the i.i.d. descend when the source is i.i.d.
-- [ ] **T2.3** Unit test — **marginal-exactness of the descend**: feed the descend a fixed `u` and a known distribution; assert the sampled token matches the inverse-CDF bin containing `u`. Repeat over a grid of `u ∈ [0,1)` and confirm the empirical token distribution matches `probs` (KS-style: `sup_i |emp_freq_i − p_i| < ε`).
-- [ ] **T2.4** Unit test — **coordinate carry invariance**: descending `[a,b]` then `[c,d]` with carry should equal a single descend on the joint partition. (Property test: the rescaled-coordinate algebra is associative over sequential descent.)
+- [x] **T2.1** Add `sample_from_distribution_qmc(probs: &[f32], u: &mut f32) -> usize` — inverse-CDF lookup using `*u` as the draw, then rescale: `*u = (*u − ℓ_t) / p_t` where `ℓ_t` is the lower edge of the selected bin and `p_t` is its probability. Numerically stable — never touches the raw sequence probability `π(x_<t)`. Carried coordinate clamped to `[0, 1−ULP)` to guard against f32 rounding to exactly `1.0`.
+- [x] **T2.2** Verify bit-identical behavior with `sample_from_distribution` when `*u` is a fresh i.i.d. draw each call (no carry) — this is the G3 no-regression floor: the QMC descend must reduce to the i.i.d. descend when the source is i.i.d.
+- [x] **T2.3** Unit test — **marginal-exactness of the descend**: feed the descend a fixed `u` and a known distribution; assert the sampled token matches the inverse-CDF bin containing `u`. Repeat over a grid of `u ∈ [0,1)` and confirm the empirical token distribution matches `probs` (KS-style: `sup_i |emp_freq_i − p_i| < ε`).
+- [x] **T2.4** Unit test — **coordinate carry invariance**: descending `[a,b]` then `[c,d]` with carry should equal a single descend on the joint partition. (Property test: the rescaled-coordinate algebra is associative over sequential descent.) Tested at cell-interior points (1/4, 1/2, 3/4 of each product cell) to avoid f32 boundary-rounding ambiguity.
 
 ---
 

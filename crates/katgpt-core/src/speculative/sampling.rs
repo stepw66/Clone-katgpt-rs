@@ -38,6 +38,83 @@ pub fn sample_from_distribution(probs: &[f32], rng: &mut Rng) -> usize {
     probs.len().saturating_sub(1)
 }
 
+/// QMC-aware inverse-CDF descend with coordinate carry (Plan 367 Phase 2,
+/// Research 367 — QuasiMoTTo, arXiv:2607.01179).
+///
+/// Given a carried local coordinate `*u ∈ [0,1)` (marginally uniform), find
+/// the bin `t` of the CDF partition containing `*u`, then **rescale** `*u`
+/// into bin `t`'s local frame:
+///
+/// ```text
+/// *u ← (*u − ℓ_t) / p_t   where ℓ_t = Σ_{j<t} p_j
+/// ```
+///
+/// The rescaled `*u` is marginally `Unif[0,1)` again (arithmetic-coding
+/// invariant), so the caller feeds it directly into the next position's
+/// descend — producing a token sequence whose joint is the arithmetic-coding
+/// image of a single uniform, with each per-position marginal matching the
+/// LM exactly.
+///
+/// This is the per-step descend operator that turns any `QmcSource` into a
+/// token-sequence sampler: draw one `u_i` per rollout, descend through the
+/// per-position distributions carrying `u_i` forward. Zero allocation, one
+/// divide per step.
+///
+/// # Numerical stability
+///
+/// - Never touches the raw sequence probability `π(x_<t)` — only the local
+///   coordinate. Stable because `p_t > 0` for any selected bin (zero-prob
+///   bins are skipped by the strict `*u < cdf` walk, matching
+///   [`sample_from_distribution`]).
+/// - The carried coordinate is clamped to `[0, 1 − ULP)` to guard against
+///   f32 rounding pushing the rescale to exactly `1.0` (which would break
+///   the next descend's `u < cdf` walk by sitting past the last bin).
+/// - Falls back to `probs.len() − 1` if the CDF walk exhausts without a hit
+///   (f32 rounding when `*u` is very close to `1.0` and the CDF sums to
+///   slightly less than `1.0`). The carried `*u` is left unmodified in
+///   this branch — matches [`sample_from_distribution`]'s fallback.
+///
+/// # G3 no-regression floor
+///
+/// When `*u` is a fresh i.i.d. draw with `*u > 0` (no carry), the returned
+/// token is bit-identical to [`sample_from_distribution`] with `r = *u`.
+/// The rescale is a pure write-back that does not affect token selection.
+///
+/// # `*u == 0.0`
+///
+/// A valid (measure-zero) input: selects the first bin with nonzero mass,
+/// rescales to `0.0` again (deterministic walk). Unlike
+/// [`sample_from_distribution`], there is no redraw — the caller provided
+/// the coordinate and owns its distribution.
+#[cfg(feature = "qmc_sampling")]
+#[inline]
+pub fn sample_from_distribution_qmc(probs: &[f32], u: &mut f32) -> usize {
+    // Largest f32 < 1.0 (0x3F7FFFFF = 1.0 − 2^−24 ≈ 0.99999994). Upper bound
+    // for the carried coordinate — guards against f32 rounding pushing the
+    // rescale to exactly 1.0, which would break the next descend.
+    const ONE_MINUS_ULP: f32 = f32::from_bits(0x3F7F_FFFF);
+
+    let r = *u;
+    let mut cdf = 0.0f32;
+    for (i, &p) in probs.iter().enumerate() {
+        let lower = cdf;
+        cdf += p;
+        if r < cdf {
+            // p > 0 is guaranteed here: for p == 0, cdf == lower, so
+            // r < cdf ⟺ r < lower, already false at the prior iteration
+            // (or r >= 0 = lower₀ for i = 0). The guard defends the divide
+            // against denormal/zero p from malformed input.
+            *u = if p > 0.0 {
+                ((r - lower) / p).clamp(0.0, ONE_MINUS_ULP)
+            } else {
+                0.0
+            };
+            return i;
+        }
+    }
+    probs.len().saturating_sub(1)
+}
+
 /// Residual distribution sampling into pre-allocated scratch buffer (zero-alloc).
 ///
 /// `p'(x) = normalize(max(0, p(x) - q(x)))`
@@ -183,5 +260,156 @@ mod tests {
         assert!(counts[0] > counts[2], "token 0 should be more frequent");
         assert_eq!(counts[1], 0, "token 1 should never be picked");
         assert_eq!(counts[3], 0, "token 3 should never be picked");
+    }
+
+    // ── Plan 367 Phase 2: QMC descend (arithmetic-coding with carry) ──────
+
+    /// T2.2 — G3 no-regression floor. For any `u ∈ (0, 1)`, the QMC descend
+    /// returns the same token as `sample_from_distribution`'s CDF walk. The
+    /// rescale write-back does not affect token selection.
+    #[cfg(feature = "qmc_sampling")]
+    #[test]
+    fn test_qmc_descend_matches_iid_cdf_walk() {
+        let probs = [0.1f32, 0.2, 0.5, 0.2];
+        let n = 10_000usize;
+        for step in 1..=n {
+            // u ∈ (0, n/(n+1)) ⊂ (0, 1) — skips 0.0 (sample_from_distribution
+            // redraws on it) and ≥1.0 (past the last bin).
+            let u = step as f32 / (n + 1) as f32;
+            let mut u_qmc = u;
+            let tok_qmc = sample_from_distribution_qmc(&probs, &mut u_qmc);
+
+            // Reference: replicate sample_from_distribution's CDF walk verbatim
+            // (minus the redraw-on-zero, which we sidestep by u > 0).
+            let mut cdf = 0.0f32;
+            let mut tok_ref = probs.len() - 1;
+            for (i, &p) in probs.iter().enumerate() {
+                cdf += p;
+                if u < cdf {
+                    tok_ref = i;
+                    break;
+                }
+            }
+            assert_eq!(
+                tok_qmc, tok_ref,
+                "u={u}: QMC descend disagrees with i.i.d. CDF walk"
+            );
+        }
+    }
+
+    /// T2.3 — marginal exactness. Sweep `u` uniformly over `[0,1)` (fresh draw
+    /// per call, no carry). The empirical token frequency must match `probs` —
+    /// arithmetic coding maps a uniform to the target marginal.
+    #[cfg(feature = "qmc_sampling")]
+    #[test]
+    fn test_qmc_descend_marginal_exactness() {
+        let probs = [0.1f32, 0.25, 0.15, 0.5];
+        let n = 10_000usize;
+        let mut counts = [0u32; 4];
+        for step in 0..n {
+            let mut u = step as f32 / n as f32; // [0, 1)
+            let tok = sample_from_distribution_qmc(&probs, &mut u);
+            assert!(tok < 4, "token {tok} out of range for probs of len 4");
+            counts[tok] += 1;
+        }
+        for (i, &p) in probs.iter().enumerate() {
+            let emp = counts[i] as f32 / n as f32;
+            // Grid discretization error is O(1/n) = 1e-4; allow slack.
+            let delta = (emp - p).abs();
+            assert!(
+                delta < 5e-3,
+                "token {i}: emp_freq={emp:.4} vs p={p:.4} (Δ={delta:.4})"
+            );
+        }
+    }
+
+    /// T2.4 — coordinate-carry associativity. Two sequential descends with
+    /// carry (P then Q) must produce the same `(t1, t2)` pair as a single
+    /// descend on the product partition `P ⊗ Q`. This is the arithmetic-coding
+    /// associativity that makes the carry algebra correct over a sequence.
+    ///
+    /// We test cell-interior points (at 1/4, 1/2, 3/4 of each cell) rather
+    /// than a uniform grid: the associativity identity holds over ℝ, but f32
+    /// rounding can flip the cell assignment at exact partition boundaries
+    /// (the descend's strict `u < cdf` vs the reference's `u >= cell_lo` make
+    /// different choices at the boundary). Interior points avoid this.
+    #[cfg(feature = "qmc_sampling")]
+    #[test]
+    fn test_qmc_descend_carry_associativity() {
+        let p = [0.3f32, 0.7]; // 2 bins
+        let q = [0.2f32, 0.5, 0.3]; // 3 bins
+
+        // For each product cell (i, j), probe three interior fractions and
+        // verify the two-step descend maps to (i, j). The fractions 1/4,
+        // 1/2, 3/4 are safely away from cell edges (where f32 rounding could
+        // flip the assignment).
+        for &frac in &[0.25f32, 0.5, 0.75] {
+            let mut p_lo = 0.0f32;
+            for (i, &pi) in p.iter().enumerate() {
+                let mut q_acc = 0.0f32;
+                for (j, &qj) in q.iter().enumerate() {
+                    // Interior point of cell (i, j):
+                    //   p_lo + pi * (q_lo + frac * qj)
+                    let u0 = p_lo + pi * (q_acc + qj * frac);
+
+                    // Two-step descend with carry.
+                    let mut u1 = u0;
+                    let t1 = sample_from_distribution_qmc(&p, &mut u1);
+                    let t2 = sample_from_distribution_qmc(&q, &mut u1);
+
+                    assert_eq!(
+                        (t1, t2), (i, j),
+                        "u0={u0:.6} (frac={frac}, cell ({i},{j})): \
+                         two-step gave ({t1},{t2})"
+                    );
+                    assert!(
+                        u1 >= 0.0 && u1 < 1.0,
+                        "carried u1 out of [0,1) after two-step: {u1}"
+                    );
+
+                    q_acc += qj;
+                }
+                p_lo += pi;
+            }
+        }
+    }
+
+    /// The carried coordinate after any descend must stay in `[0, 1)` — the
+    /// arithmetic-coding invariant that keeps the next descend valid.
+    #[cfg(feature = "qmc_sampling")]
+    #[test]
+    fn test_qmc_descend_carried_coordinate_in_unit_interval() {
+        let probs = [0.1f32, 0.2, 0.3, 0.4];
+        let n = 10_000usize;
+        for step in 0..n {
+            let mut u = step as f32 / n as f32;
+            sample_from_distribution_qmc(&probs, &mut u);
+            assert!(u >= 0.0, "carried u < 0: {u}");
+            assert!(u < 1.0, "carried u >= 1: {u}");
+        }
+    }
+
+    /// `u == 0.0` selects the first bin with nonzero mass and rescales to
+    /// `0.0` again (deterministic walk). Measure-zero edge case.
+    #[cfg(feature = "qmc_sampling")]
+    #[test]
+    fn test_qmc_descend_zero_u_selects_first_nonzero_bin() {
+        let probs = [0.0f32, 0.0, 1.0, 0.0];
+        let mut u = 0.0;
+        let tok = sample_from_distribution_qmc(&probs, &mut u);
+        assert_eq!(tok, 2, "u=0 must skip zero-prob bins and select bin 2");
+        assert_eq!(u, 0.0, "rescale of (0 − 0) / 1 = 0");
+    }
+
+    /// Empty distribution: consistent with `sample_from_distribution`
+    /// (returns 0 via `saturating_sub`). Carried `u` is unmodified.
+    #[cfg(feature = "qmc_sampling")]
+    #[test]
+    fn test_qmc_descend_empty_probs_returns_zero() {
+        let probs: [f32; 0] = [];
+        let mut u = 0.42;
+        let tok = sample_from_distribution_qmc(&probs, &mut u);
+        assert_eq!(tok, 0, "empty probs → 0 (saturating_sub)");
+        assert_eq!(u, 0.42, "empty probs should not modify u");
     }
 }

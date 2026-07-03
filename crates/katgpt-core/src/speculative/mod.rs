@@ -59,3 +59,10 @@ pub use sampling::{
     sample_from_distribution, sample_residual_distribution,
     sample_residual_distribution_into,
 };
+
+// Plan 367 Phase 2 — QMC arithmetic-coding descend with coordinate carry.
+// Gated on `qmc_sampling` for feature isolation (G6). Drop-in per-step
+// descend operator that turns any `qmc::QmcSource` into a token-sequence
+// sampler; bit-identical to `sample_from_distribution` on fresh i.i.d. draws.
+#[cfg(feature = "qmc_sampling")]
+pub use sampling::sample_from_distribution_qmc;
