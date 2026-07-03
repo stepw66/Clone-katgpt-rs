@@ -823,6 +823,15 @@ path = "benches/sudoku_speculate_bench.rs"
 required-features = ["sudoku"]
 harness = false
 
+# Issue 037 — Hint-Receptivity A/B bench. Wires DDTree Sudoku speculation as a
+# CGSP Solver and compares HintPolicy::OrderOnly (bandit absorbs, priorities
+# adapt) vs HintPolicy::Skip (uniform sampling). G-RRM §3 regime test.
+[[bench]]
+name = "cgsp_hint_receptivity_bench"
+path = "benches/cgsp_hint_receptivity_bench.rs"
+required-features = ["cgsp", "sudoku_mrv", "sudoku_cp"]
+harness = false
+
 # Issue 001 G3 — Procrustes determinism test (bit-identical same-input).
 [[test]]
 name = "procrustes_determinism"
