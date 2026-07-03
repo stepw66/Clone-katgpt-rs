@@ -1235,4 +1235,230 @@ mod tests {
 
         assert!(result.converged, "AR + strong signal should converge");
     }
+
+    // ── Trained-model integration tests (Phase 4 T4.3 full inference path) ──
+    //
+    // These are the FIRST tests that exercise the full decode pipeline against
+    // a TRAINED model (not random-init). The prior CPU-adapter tests
+    // (`test_cpu_adapter_wiring_runs_decode_loop`, `test_cpu_adapter_matches_direct_forward_call`)
+    // proved the trait wiring is correct with random-init weights but explicitly
+    // did NOT assert convergence or output quality — "random-init model may
+    // not produce confident predictions."
+    //
+    // These tests close that gap. They train a mini bidirectional D2F model via
+    // `train_mini_dllm` on alternating-pattern data, then drive the set-diffusion
+    // decoder against the trained weights via `CpuSetCausalForward`.
+    //
+    // Key insight (the AC-Prefix G1 lesson, applied): a bidirectionally-trained
+    // model is a SUPERSET of every set-causal attention pattern. The forward
+    // pass applies the set-causal mask regardless of how the weights were
+    // trained, so the decoder runs end-to-end. Quality varies with the
+    // train/infer mismatch:
+    //
+    //   - MDLM gen-steps (all step 0): every position attends to every other →
+    //     ZERO mismatch with bidirectional training → strongest convergence.
+    //   - Block-causal gen-steps: within-block attention preserved, cross-block
+    //     restricted → mild mismatch → still converges on simple patterns.
+    //   - AR-like schedule (w→0): early positions see almost nothing → severe
+    //     mismatch for a bidirectional model → weakest convergence.
+    //
+    // This is NOT a substitute for a true SW-SetDLM-trained model (which would
+    // converge well across the full schedule spectrum). It IS a proof that the
+    // full inference pipeline — schedule → ordering → gen-steps → forward →
+    // sample → commit — produces meaningful, convergent output against real
+    // trained weights, and establishes the quality baseline that a
+    // set-causal-trained model is expected to beat.
+
+    use crate::dllm::{generate_pattern_dataset, train_mini_dllm};
+
+    /// Train a mini bidirectional D2F model on 8-token alternating patterns.
+    ///
+    /// Shared setup for the trained-model tests below. The model learns
+    /// "even positions = a, odd positions = b" from `[a,b,a,b,a,b,a,b]`
+    /// sequences — a simple bidirectional-predictable task.
+    fn train_pattern_model(seed: u64) -> (Config, crate::transformer::TransformerWeights) {
+        let config = Config::micro_dllm();
+        let mut rng = Rng::new(seed);
+        let train_data = generate_pattern_dataset(&mut rng, 100, 8, 8);
+        let test_data = generate_pattern_dataset(&mut rng, 20, 8, 8);
+        let (weights, _loss) =
+            train_mini_dllm(&config, &train_data, &test_data, 300, 0.01, 0.25, seed);
+        (config, weights)
+    }
+
+    #[test]
+    fn test_set_diffusion_decode_trained_model_mdlm_converges() {
+        // MDLM gen-steps: all positions share step 0 → every position attends
+        // to every other. This is EXACTLY bidirectional attention, so there is
+        // ZERO train/infer mismatch with the bidirectionally-trained model.
+        // Expect strong convergence.
+        let (config, weights) = train_pattern_model(42);
+        let forward = CpuSetCausalForward {
+            weights: &weights,
+            config: &config,
+        };
+        let decode_config = SetDiffusionConfig {
+            mask_token: config.mask_token,
+            vocab_size: config.vocab_size,
+            denoise_steps: 8,
+            confidence_threshold: 0.5,
+            temperature: 0.0, // Greedy for determinism.
+        };
+        let gen_steps = mdlm_gen_steps(8);
+        let mut rng = Rng::new(42);
+
+        let result = set_diffusion_decode(&forward, &decode_config, &[], &gen_steps, &mut rng);
+
+        assert!(
+            result.converged,
+            "MDLM gen-steps + bidirectional-trained model should converge (zero mismatch). \
+             forward_passes={}, confidence_history={:?}",
+            result.forward_passes,
+            result.confidence_history,
+        );
+        assert_eq!(result.tokens.len(), 8);
+        assert!(
+            result.tokens.iter().all(|&t| t != config.mask_token),
+            "no mask tokens should remain: {:?}",
+            result.tokens,
+        );
+    }
+
+    #[test]
+    fn test_set_diffusion_decode_trained_model_block_causal_converges() {
+        // Block-causal gen-steps (block_size=4): positions 0-3 → step 0,
+        // positions 4-7 → step 1. Within each block, full attention is
+        // preserved (matching bidirectional training); cross-block attention
+        // is restricted. Mild mismatch — simple patterns should still converge.
+        let (config, weights) = train_pattern_model(42);
+        let forward = CpuSetCausalForward {
+            weights: &weights,
+            config: &config,
+        };
+        let decode_config = SetDiffusionConfig {
+            mask_token: config.mask_token,
+            vocab_size: config.vocab_size,
+            denoise_steps: 8,
+            confidence_threshold: 0.5,
+            temperature: 0.0,
+        };
+        let gen_steps = block_causal_gen_steps(8, 4);
+        let mut rng = Rng::new(42);
+
+        let result = set_diffusion_decode(&forward, &decode_config, &[], &gen_steps, &mut rng);
+
+        assert!(
+            result.converged,
+            "Block-causal gen-steps + bidirectional-trained model should converge on simple patterns. \
+             forward_passes={}, confidence_history={:?}",
+            result.forward_passes,
+            result.confidence_history,
+        );
+        assert_eq!(result.tokens.len(), 8);
+        assert!(
+            result.tokens.iter().all(|&t| t != config.mask_token),
+            "no mask tokens should remain: {:?}",
+            result.tokens,
+        );
+    }
+
+    #[test]
+    fn test_set_diffusion_decode_scheduled_trained_model_diffusion_endpoint() {
+    // Full T4.3-CPU-caller bridge with a TRAINED model: schedule → ordering →
+    // gen-steps → decode. Uses PositionOffsetSchedule::diffusion() (w=1, k=1)
+    // which produces uniform-random orderings — the order-agnostic diffusion
+    // endpoint. Combined with a bidirectional-trained model, this is the
+    // lowest-mismatch point of the schedule spectrum.
+    //
+    // This is the canonical end-to-end validation of the Phase 4 bridge:
+    // every piece of plumbing (sample_order, order_to_gen_steps,
+    // set_diffusion_decode) runs against real trained weights.
+        let (config, weights) = train_pattern_model(42);
+        let forward = CpuSetCausalForward {
+            weights: &weights,
+            config: &config,
+        };
+        let decode_config = SetDiffusionConfig {
+            mask_token: config.mask_token,
+            vocab_size: config.vocab_size,
+            denoise_steps: 8,
+            confidence_threshold: 0.5,
+            temperature: 0.0,
+        };
+        let schedule = PositionOffsetSchedule::diffusion();
+        let mut rng = Rng::new(42);
+
+        let result = set_diffusion_decode_scheduled(
+            &forward,
+            &decode_config,
+            &[],
+            &schedule,
+            8,
+            &mut rng,
+        );
+
+        assert!(
+            result.converged,
+            "Scheduled decode (diffusion endpoint) + trained model should converge. \
+             forward_passes={}, confidence_history={:?}",
+            result.forward_passes,
+            result.confidence_history,
+        );
+        assert_eq!(result.tokens.len(), 8);
+        assert!(
+            result.tokens.iter().all(|&t| t != config.mask_token),
+            "no mask tokens should remain: {:?}",
+            result.tokens,
+        );
+    }
+
+    #[test]
+    fn test_set_diffusion_decode_trained_model_prompt_anchored_alternating_pattern() {
+    // The model was trained on [a,b,a,b,a,b,a,b] alternating patterns.
+    // From an all-masked cold start, order-agnostic diffusion has no anchor
+    // to enforce a globally consistent (a,b) pair — different positions may
+    // lock in to different guesses during the greedy denoise commit. This is
+    // the EXPECTED cold-start behavior of a diffusion model without context.
+    //
+    // With a 2-token prompt [a, b] anchoring the pattern, the decode region
+    // should inherit the prompt's (a,b) pair and produce a globally consistent
+    // alternating sequence. This is the realistic usage pattern (conditioned
+    // generation) and the strongest modelless quality claim we can make.
+    //
+    // MDLM gen-steps isolate the pattern-quality claim from any attention-
+    // restriction artifact (zero train/infer mismatch).
+        let (config, weights) = train_pattern_model(42);
+        let forward = CpuSetCausalForward {
+            weights: &weights,
+            config: &config,
+        };
+        let decode_config = SetDiffusionConfig {
+            mask_token: config.mask_token,
+            vocab_size: config.vocab_size,
+            denoise_steps: 8,
+            confidence_threshold: 0.5,
+            temperature: 0.0,
+        };
+        // 2-token prompt establishes the (a, b) pair. Decode 6 more positions
+        // to complete an 8-token alternating sequence [a, b, ?, ?, ?, ?, ?, ?].
+        let prompt: &[usize] = &[5, 2];
+        let gen_steps = mdlm_gen_steps(6);
+        let mut rng = Rng::new(42);
+
+        let result = set_diffusion_decode(&forward, &decode_config, prompt, &gen_steps, &mut rng);
+
+        assert!(result.converged, "precondition: decoder must converge");
+        assert_eq!(result.tokens.len(), 8);
+        let t = &result.tokens;
+        // Prompt preserved.
+        assert_eq!(&t[..2], prompt, "prompt must be preserved: {:?}", t);
+        // Decode region inherits the prompt's alternating structure.
+        // Expected: [5, 2, 5, 2, 5, 2, 5, 2].
+        assert_eq!(t[2], prompt[0], "position 2 must match prompt[0] (alternating): {:?}", t);
+        assert_eq!(t[3], prompt[1], "position 3 must match prompt[1] (alternating): {:?}", t);
+        assert_eq!(t[4], prompt[0], "position 4 must match prompt[0] (alternating): {:?}", t);
+        assert_eq!(t[5], prompt[1], "position 5 must match prompt[1] (alternating): {:?}", t);
+        assert_eq!(t[6], prompt[0], "position 6 must match prompt[0] (alternating): {:?}", t);
+        assert_eq!(t[7], prompt[1], "position 7 must match prompt[1] (alternating): {:?}", t);
+    }
 }
