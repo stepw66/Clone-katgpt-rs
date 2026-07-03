@@ -422,7 +422,7 @@ pub fn mdlm_gen_steps(l: usize) -> Vec<u32> {
 /// # use katgpt_rs::speculative::set_diffusion::*;
 /// # use katgpt_rs::types::Rng;
 /// # fn wrap<F: SetCausalForwardFn>(forward: &F, cfg: &SetDiffusionConfig, sched: &PositionOffsetSchedule, prompt: &[usize], decode_len: usize, mut rng: &mut Rng) {
-/// let order = sched.sample_order(decode_len, &mut rng);
+/// let order = sched.sample_order_with(decode_len, || rng.uniform());
 /// let gen_steps = order_to_gen_steps(&order);
 /// let _ = set_diffusion_decode(forward, cfg, prompt, &gen_steps, &mut rng);
 /// # }
@@ -458,7 +458,7 @@ pub fn set_diffusion_decode_scheduled<F: SetCausalForwardFn>(
     decode_len: usize,
     rng: &mut Rng,
 ) -> SetDiffusionResult {
-    let order = schedule.sample_order(decode_len, rng);
+    let order = schedule.sample_order_with(decode_len, || rng.uniform());
     let gen_steps = order_to_gen_steps(&order);
     set_diffusion_decode(forward, config, prompt, &gen_steps, rng)
 }
@@ -1053,7 +1053,7 @@ mod tests {
         let schedule = PositionOffsetSchedule::new(0.5);
         let mut rng = Rng::new(42);
         let l = 16;
-        let order = schedule.sample_order(l, &mut rng);
+        let order = schedule.sample_order_with(l, || rng.uniform());
         assert_eq!(order.len(), l);
         let mut sorted = order.clone();
         sorted.sort();
@@ -1064,8 +1064,8 @@ mod tests {
     fn test_sample_order_empty_and_singleton() {
         let schedule = PositionOffsetSchedule::new(0.5);
         let mut rng = Rng::new(0);
-        assert!(schedule.sample_order(0, &mut rng).is_empty());
-        assert_eq!(schedule.sample_order(1, &mut rng), vec![0]);
+        assert!(schedule.sample_order_with(0, || rng.uniform()).is_empty());
+        assert_eq!(schedule.sample_order_with(1, || rng.uniform()), vec![0]);
     }
 
     #[test]
@@ -1078,7 +1078,7 @@ mod tests {
         let mut total_inversions = 0usize;
         for seed in 0..50u64 {
             let mut rng = Rng::new(seed);
-            let order = schedule.sample_order(l, &mut rng);
+            let order = schedule.sample_order_with(l, || rng.uniform());
             total_inversions += count_inversions(&order);
         }
         // Average inversions across 50 draws should be small (≤ 2 per draw).
@@ -1096,7 +1096,7 @@ mod tests {
         let mut total_inversions = 0usize;
         for seed in 0..50u64 {
             let mut rng = Rng::new(seed);
-            let order = schedule.sample_order(l, &mut rng);
+            let order = schedule.sample_order_with(l, || rng.uniform());
             total_inversions += count_inversions(&order);
         }
         let avg = total_inversions as f32 / 50.0;
@@ -1200,7 +1200,7 @@ mod tests {
 
         // Manual pipeline.
         let mut rng_a = Rng::new(42);
-        let order = schedule.sample_order(8, &mut rng_a);
+        let order = schedule.sample_order_with(8, || rng_a.uniform());
         let gen_steps = order_to_gen_steps(&order);
         let manual = set_diffusion_decode(&mock, &config, &[], &gen_steps, &mut rng_a);
 

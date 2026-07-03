@@ -115,6 +115,18 @@ pub mod parallax_attn;
 #[cfg(feature = "tropical_algebra")]
 pub mod algebra;
 pub mod shard_embedding;
+// Position-Offset Reveal-Time Schedule for Set Diffusion (Research 376).
+// Canonical source for `PositionOffsetSchedule` — pure math (CDF/inverse-CDF/
+// ordering), RNG-agnostic via closure-based sampling. No feature gate because
+// it's a zero-dep math substrate consumed by both katgpt-rs (runtime) and
+// riir-train (training). Eliminates the 3-way DRY violation that previously
+// had copies in katgpt-rs/src/dllm.rs, riir-train/.../set_diffusion_schedule.rs,
+// and riir-ai/crates/riir-poc/.
+pub mod set_diffusion_schedule;
+pub use set_diffusion_schedule::{
+    PositionOffsetSchedule, ar_order, block_causal_gen_steps, mdlm_gen_steps,
+    order_to_gen_steps, uniform_order, uniform_order_with,
+};
 // SIMD-accelerated linear algebra kernels (NEON / AVX2 / WASM-SIMD128 /
 // scalar fallback). Spun out to the `katgpt-types` crate (Issue 007 Phase E
 // Tier 1 #2) and re-exported here as `katgpt_core::simd` for backwards

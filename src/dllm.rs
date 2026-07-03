@@ -1814,7 +1814,7 @@ pub fn train_mini_set_causal(
             is_masked_all[..seq_len].fill(true);
 
             // Sample ordering σ from the schedule, convert to gen_steps.
-            let order = schedule.sample_order(seq_len, &mut rng);
+            let order = schedule.sample_order_with(seq_len, || rng.uniform());
             let gen_steps = crate::speculative::set_diffusion::order_to_gen_steps(&order);
 
             // Set-causal forward with activation saving.
@@ -1906,7 +1906,7 @@ fn evaluate_set_causal_nelbo_internal(
             continue;
         }
         is_masked_all[..seq_len].fill(true);
-        let order = schedule.sample_order(seq_len, rng);
+        let order = schedule.sample_order_with(seq_len, || rng.uniform());
         let gen_steps = crate::speculative::set_diffusion::order_to_gen_steps(&order);
         let act = forward_save_set_causal(weights, tokens, config, &gen_steps, fwd_ctx);
         let loss = masked_loss_into(
@@ -2785,168 +2785,16 @@ pub fn denoise_loop(
 // ═══════════════════════════════════════════════════════════════
 // Position-Offset Reveal-Time Schedule (Research 376, arXiv:2607.01775)
 // ═══════════════════════════════════════════════════════════════
-
-/// Position-dependent reveal-time schedule from set diffusion
-/// (Arriola & Kuleshov, arXiv:2607.01775 Eq. 7 + Eq. 46).
-///
-/// Each token ℓ gets a CDF for its reveal time R_ℓ ∈ [a_ℓ, a_ℓ + w]:
-///   α^τ_ℓ = 0                           if τ ≤ a_ℓ
-///         = ((τ - a_ℓ) / w)^k           if a_ℓ < τ < a_ℓ + w
-///         = 1                           if τ ≥ a_ℓ + w
-///
-/// - **w** = active generation interval width (controls L→R bias)
-/// - **k** = shape parameter (k<1 front-loads reveal times)
-/// - **a_ℓ** = (ℓ-1)/(L-1) · (1-w) = evenly spaced offset per position
-///
-/// When w → 1/L: pure AR (strict left-to-right, singleton sets).
-/// When w → 1: order-agnostic diffusion (all positions eligible simultaneously).
-///
-/// This is a **modelless inference primitive** — it controls which positions
-/// are eligible for unmasking at each denoising step, without retraining.
-/// Applied to a bidirectionally-trained D2F model, it biases the unmasking
-/// order to respect directional dependencies in the data.
-#[derive(Clone, Copy, Debug)]
-pub struct PositionOffsetSchedule {
-    /// Active generation interval width ∈ (0, 1]. Controls L→R bias.
-    pub w: f32,
-    /// Shape parameter within each interval. k<1 front-loads reveal times.
-    pub k: f32,
-}
-
-impl PositionOffsetSchedule {
-    /// Create schedule with linear shape (k=1).
-    pub fn new(w: f32) -> Self {
-        Self { w: w.clamp(1e-6, 1.0), k: 1.0 }
-    }
-
-    /// Create schedule with shaped intervals.
-    pub fn shaped(w: f32, k: f32) -> Self {
-        Self { w: w.clamp(1e-6, 1.0), k: k.clamp(1e-6, 100.0) }
-    }
-
-    /// The AR endpoint schedule (w minimal → near-deterministic left-to-right).
-    ///
-    /// Note: this produces near-AR orderings, not exact AR. For exact AR
-    /// (guaranteed `[0, 1, ..., L-1]`), construct `gen_steps` directly via
-    /// `(0..L).map(|p| p as u32).collect()` or `order_to_gen_steps(&(0..L).collect::<Vec<_>>())`.
-    /// The schedule is useful when you want the AR-like endpoint of the
-    /// continuous w axis with a small stochastic perturbation.
-    #[inline]
-    pub fn ar() -> Self {
-        Self { w: 1e-6, k: 1.0 }
-    }
-
-    /// The order-agnostic diffusion endpoint (w=1, k=1) — uniform random orderings.
-    ///
-    /// Every position's reveal-time window is `[0, 1]` (fully overlapping),
-    /// so `sample_order` produces a uniform-random permutation. This is the
-    /// MDLM / order-agnostic diffusion limit.
-    #[inline]
-    pub fn diffusion() -> Self {
-        Self { w: 1.0, k: 1.0 }
-    }
-
-    /// Offset for token ℓ in a sequence of length L.
-    /// a_ℓ = (ℓ-1)/(L-1) · (1-w)
-    #[inline]
-    fn offset(&self, ell: usize, l: usize) -> f32 {
-        if l <= 1 {
-            0.0
-        } else {
-            (ell as f32 / (l - 1) as f32) * (1.0 - self.w)
-        }
-    }
-
-    /// Check if position `ell` is eligible for unmasking at ordering time `tau`.
-    ///
-    /// Eligible if `tau` falls within the position's active generation interval
-    /// [a_ℓ, a_ℓ + w] and the position has a non-zero reveal rate.
-    ///
-    /// At the boundary (tau >= a_ℓ + w), the position is always eligible
-    /// (it must eventually be decoded).
-    #[inline]
-    pub fn is_eligible(&self, ell: usize, l: usize, tau: f32) -> bool {
-        let a = self.offset(ell, l);
-        // Position is eligible if we're past its interval start.
-        // At tau >= a + w, it's past due — always eligible.
-        tau >= a
-    }
-
-    /// Returns the set of positions eligible for unmasking at ordering time `tau`.
-    ///
-    /// A position is eligible if its active generation interval has started
-    /// (tau >= a_ℓ). Positions whose intervals haven't started yet are
-    /// blocked — they can't be committed even if confidence is high.
-    pub fn eligible_positions(&self, l: usize, tau: f32) -> Vec<bool> {
-        (0..l).map(|ell| self.is_eligible(ell, l, tau)).collect()
-    }
-
-    /// Expected inference prediction budget C̄ (Eq. 52 from paper).
-    /// C̄ = L · w · k / (k + 1)
-    pub fn expected_budget(&self, l: usize) -> f32 {
-        l as f32 * self.w * self.k / (self.k + 1.0)
-    }
-
-    // ── Inverse-CDF sampling (for the set-causal decode path) ──────
-    //
-    // The continuous-τ `is_eligible` API above drives the OLD D2F denoise
-    // loop (`denoise_loop_scheduled`). The NEW set-causal decode path
-    // (Phase 4 T4.1 `set_diffusion_decode`) consumes a discrete gen-steps
-    // buffer derived from a sampled ordering σ. These two methods provide
-    // the sampling primitive that bridges the schedule → ordering →
-    // gen-steps pipeline. See `order_to_gen_steps` +
-    // `set_diffusion_decode_scheduled` in `crate::speculative::set_diffusion`.
-
-    /// Inverse-CDF: map a uniform `u ∈ [0, 1]` to a reveal time R_ℓ.
-    ///
-    /// `R_ℓ = a_ℓ + w · u^(1/k)`. Call with `u ~ Uniform(0, 1)` to draw
-    /// from the position-ℓ reveal-time distribution. This is the sampling
-    /// primitive consumed by [`sample_order`](Self::sample_order).
-    ///
-    /// Mirrors `riir_train::set_diffusion_schedule::PositionOffsetSchedule::reveal_time_from_uniform`
-    /// (kept in sync deliberately — runtime owns this copy; training owns
-    /// its own against `fastrand::Rng`).
-    #[inline]
-    pub fn reveal_time_from_uniform(&self, u: f32, ell: usize, l: usize) -> f32 {
-        let a = self.offset(ell, l);
-        // Clamp u to [0, 1] defensively — Rng::uniform returns [0, 1) which
-        // is already in range, but a future caller might pass a raw float.
-        let u = u.clamp(0.0, 1.0);
-        a + self.w * u.powf(1.0 / self.k)
-    }
-
-    /// Sample a generation ordering σ — a permutation of `[0, L)`.
-    ///
-    /// Each position gets an independent reveal time drawn via inverse-CDF
-    /// (`reveal_time_from_uniform`); sorting ascending gives the order. Ties
-    /// (measure-zero for continuous distributions, but possible with extreme
-    /// k) are broken by position index (smaller index first) for deterministic
-    /// left-to-right preference.
-    ///
-    /// Returns `vec![]` for `l == 0`, `vec![0]` for `l == 1`.
-    ///
-    /// Use [`crate::speculative::set_diffusion::order_to_gen_steps`] to convert
-    /// the returned ordering to the `gen_steps: &[u32]` buffer consumed by
-    /// [`crate::speculative::set_diffusion::set_diffusion_decode`].
-    pub fn sample_order(&self, l: usize, rng: &mut Rng) -> Vec<usize> {
-        if l == 0 {
-            return Vec::new();
-        }
-        if l == 1 {
-            return vec![0];
-        }
-        // Draw reveal times, sort by (reveal_time, position) for stable tie-break.
-        let mut indexed: Vec<(f32, usize)> = (0..l)
-            .map(|ell| (self.reveal_time_from_uniform(rng.uniform(), ell, l), ell))
-            .collect();
-        indexed.sort_by(|a, b| {
-            a.0.partial_cmp(&b.0)
-                .unwrap_or(std::cmp::Ordering::Equal)
-                .then(a.1.cmp(&b.1))
-        });
-        indexed.into_iter().map(|(_, idx)| idx).collect()
-    }
-}
+//
+// DRY consolidation (2026-07-04): the canonical `PositionOffsetSchedule` now
+// lives in `katgpt-core::set_diffusion_schedule`. Re-exported here so existing
+// `katgpt_rs::dllm::PositionOffsetSchedule` paths continue to resolve.
+//
+// The katgpt-core version is RNG-agnostic via `sample_order_with(l, || ...)`.
+// Call sites in this file that use `katgpt_types::Rng` pass `|| rng.uniform()`;
+// consumers using `fastrand::Rng` (e.g. riir-train) use `|| rng.f32()` or the
+// `sample_order(l, &mut fastrand::Rng)` convenience wrapper.
+pub use katgpt_core::PositionOffsetSchedule;
 
 /// Denoising loop with position-offset reveal-time scheduling.
 ///
