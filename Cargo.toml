@@ -2175,6 +2175,13 @@ required-features = ["engram"]
 name = "progressive_mcgs_basic"
 required-features = ["progressive_mcgs"]
 
+# Research 376 — Position-Offset Reveal-Time Schedule GOAT gate.
+# Tests modelless inference primitive from set diffusion (arXiv:2607.01775)
+# applied to existing bidirectionally-trained D2F models.
+[[test]]
+name = "test_position_offset_schedule"
+required-features = ["dllm"]
+
 # ── Plan 298 — SmearClassifier GOAT gates (G2 useful discrimination, G3 latency).
 # harness=false + std::time::Instant + fn main() per the repo bench convention
 # (criterion is not a katgpt-rs dev-dep; see benches/faithfulness_probe_bench.rs

@@ -2193,6 +2193,191 @@ pub fn denoise_loop(
     (tokens, converged_step)
 }
 
+// ═══════════════════════════════════════════════════════════════
+// Position-Offset Reveal-Time Schedule (Research 376, arXiv:2607.01775)
+// ═══════════════════════════════════════════════════════════════
+
+/// Position-dependent reveal-time schedule from set diffusion
+/// (Arriola & Kuleshov, arXiv:2607.01775 Eq. 7 + Eq. 46).
+///
+/// Each token ℓ gets a CDF for its reveal time R_ℓ ∈ [a_ℓ, a_ℓ + w]:
+///   α^τ_ℓ = 0                           if τ ≤ a_ℓ
+///         = ((τ - a_ℓ) / w)^k           if a_ℓ < τ < a_ℓ + w
+///         = 1                           if τ ≥ a_ℓ + w
+///
+/// - **w** = active generation interval width (controls L→R bias)
+/// - **k** = shape parameter (k<1 front-loads reveal times)
+/// - **a_ℓ** = (ℓ-1)/(L-1) · (1-w) = evenly spaced offset per position
+///
+/// When w → 1/L: pure AR (strict left-to-right, singleton sets).
+/// When w → 1: order-agnostic diffusion (all positions eligible simultaneously).
+///
+/// This is a **modelless inference primitive** — it controls which positions
+/// are eligible for unmasking at each denoising step, without retraining.
+/// Applied to a bidirectionally-trained D2F model, it biases the unmasking
+/// order to respect directional dependencies in the data.
+#[derive(Clone, Copy, Debug)]
+pub struct PositionOffsetSchedule {
+    /// Active generation interval width ∈ (0, 1]. Controls L→R bias.
+    pub w: f32,
+    /// Shape parameter within each interval. k<1 front-loads reveal times.
+    pub k: f32,
+}
+
+impl PositionOffsetSchedule {
+    /// Create schedule with linear shape (k=1).
+    pub fn new(w: f32) -> Self {
+        Self { w: w.clamp(1e-6, 1.0), k: 1.0 }
+    }
+
+    /// Create schedule with shaped intervals.
+    pub fn shaped(w: f32, k: f32) -> Self {
+        Self { w: w.clamp(1e-6, 1.0), k: k.clamp(1e-6, 100.0) }
+    }
+
+    /// Offset for token ℓ in a sequence of length L.
+    /// a_ℓ = (ℓ-1)/(L-1) · (1-w)
+    #[inline]
+    fn offset(&self, ell: usize, l: usize) -> f32 {
+        if l <= 1 {
+            0.0
+        } else {
+            (ell as f32 / (l - 1) as f32) * (1.0 - self.w)
+        }
+    }
+
+    /// Check if position `ell` is eligible for unmasking at ordering time `tau`.
+    ///
+    /// Eligible if `tau` falls within the position's active generation interval
+    /// [a_ℓ, a_ℓ + w] and the position has a non-zero reveal rate.
+    ///
+    /// At the boundary (tau >= a_ℓ + w), the position is always eligible
+    /// (it must eventually be decoded).
+    #[inline]
+    pub fn is_eligible(&self, ell: usize, l: usize, tau: f32) -> bool {
+        let a = self.offset(ell, l);
+        // Position is eligible if we're past its interval start.
+        // At tau >= a + w, it's past due — always eligible.
+        tau >= a
+    }
+
+    /// Returns the set of positions eligible for unmasking at ordering time `tau`.
+    ///
+    /// A position is eligible if its active generation interval has started
+    /// (tau >= a_ℓ). Positions whose intervals haven't started yet are
+    /// blocked — they can't be committed even if confidence is high.
+    pub fn eligible_positions(&self, l: usize, tau: f32) -> Vec<bool> {
+        (0..l).map(|ell| self.is_eligible(ell, l, tau)).collect()
+    }
+
+    /// Expected inference prediction budget C̄ (Eq. 52 from paper).
+    /// C̄ = L · w · k / (k + 1)
+    pub fn expected_budget(&self, l: usize) -> f32 {
+        l as f32 * self.w * self.k / (self.k + 1.0)
+    }
+}
+
+/// Denoising loop with position-offset reveal-time scheduling.
+///
+/// Identical to [`denoise_loop`] except: at each step, only positions whose
+/// active generation interval has started (per the schedule) are eligible for
+/// commitment. Positions not yet eligible are held as mask even if their
+/// confidence exceeds the threshold.
+///
+/// This biases the unmasking order according to the schedule's `w` parameter:
+/// - Small w (→ 1/L): near-left-to-right unmasking (AR-like)
+/// - Large w (→ 1): all positions eligible immediately (order-agnostic)
+///
+/// **Modelless**: applies to any bidirectionally-trained D2F model. No
+/// retraining needed — the schedule is a pure inference-time filter on the
+/// confidence-based unmasking policy.
+pub fn denoise_loop_scheduled(
+    weights: &TransformerWeights,
+    target_tokens: &[usize],
+    config: &Config,
+    n_steps: usize,
+    confidence_threshold: f32,
+    constraint: &mut dyn DenoiseConstraint,
+    _rng: &mut Rng,
+    schedule: &PositionOffsetSchedule,
+) -> (Vec<usize>, usize) {
+    let seq_len = target_tokens.len().min(config.block_size);
+    let mask = config.mask_token;
+
+    let mut bctx = BidirectionalContext::new(config);
+    let mut tokens = vec![mask; seq_len];
+    let mut converged_step = n_steps;
+    let mut remaining = seq_len;
+    let vocab = config.vocab_size;
+
+    for step in 0..n_steps {
+        // Ordering time τ = step / n_steps — normalized position in [0, 1]
+        let tau = if n_steps > 1 {
+            step as f32 / (n_steps - 1) as f32
+        } else {
+            1.0 // single step: all positions eligible
+        };
+
+        forward_bidirectional_positions_into(weights, &tokens, config, &mut bctx);
+        let mut any_changed = false;
+        constraint.rebuild(&tokens, mask);
+
+        for p in 0..seq_len {
+            if tokens[p] != mask {
+                continue;
+            }
+
+            // Position-offset schedule: skip positions not yet eligible
+            if !schedule.is_eligible(p, seq_len, tau) {
+                continue;
+            }
+
+            let logits_p = &bctx.all_logits[p * vocab..(p + 1) * vocab];
+            let max_l = katgpt_core::simd::simd_max_f32(logits_p);
+            let exp_buf = &mut bctx.all_attn_weights[..vocab];
+            exp_buf[..vocab].copy_from_slice(logits_p);
+            katgpt_core::simd::simd_add_scalar_inplace(&mut exp_buf[..vocab], -max_l);
+            katgpt_core::simd::simd_exp_inplace(&mut exp_buf[..vocab]);
+            let sum_exp = katgpt_core::simd::simd_sum_f32(&exp_buf[..vocab]);
+            let inv_sum = 1.0 / sum_exp;
+
+            let mut best_token = mask;
+            let mut best_exp = 0.0f32;
+            for t in 0..vocab {
+                if t == mask {
+                    continue;
+                }
+                if !constraint.is_valid(p, t, &tokens) {
+                    continue;
+                }
+                let e = exp_buf[t];
+                if e > best_exp {
+                    best_exp = e;
+                    best_token = t;
+                }
+            }
+            let best_prob = best_exp * inv_sum;
+
+            if best_prob >= confidence_threshold && best_token != mask {
+                tokens[p] = best_token;
+                any_changed = true;
+                remaining -= 1;
+            }
+        }
+
+        if !any_changed && remaining == 0 {
+            converged_step = step;
+            break;
+        }
+    }
+
+    if remaining == 0 && converged_step == n_steps {
+        converged_step = n_steps - 1;
+    }
+
+    (tokens, converged_step)
+}
+
 /// Run denoising loop with Residual Context Diffusion (Plan 258).
 ///
 /// After each denoising step, computes entropy-weighted residuals for the
