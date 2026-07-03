@@ -251,7 +251,7 @@ Three deviations from the original plan T1.1–T1.7, all surfaced by the compile
 
 - [x] **T3.4** Run `cargo doc -p katgpt-core --features engram --no-deps`. Verify `StagingEngramTable` appears in the docs with the correct docstring. Fix any broken intra-doc links. **Done in Phase 1 (commit 2ea4e669).**
 
-- [ ] **T3.5** Update Proposal 003 §3.1 to mark P1 as DONE with a link to this plan. (Edit `riir-ai/.proposals/003_engram_crud_table_tier_access_matrix.md`.) **Deferred — cross-repo edit to riir-ai, will do in a follow-up commit.**
+- [x] **T3.5** Update Proposal 003 §3.1 to mark P1 as DONE with a link to this plan. (Edit `riir-ai/.proposals/003_engram_crud_table_tier_access_matrix.md`.) **Done (commit `f597922c`).** Updated: status line (P1+P5 DONE), §1 table (gap→done), §2.3 ops table (UPDATE/DELETE now first-class), §3.1 (DONE + shipped API evolution notes), §7 phasing (P1+P5 rows marked DONE with honest G2 result).
 
 **Phase 3 exit:** staging table is wired into the public API, documented, and Proposal 003 reflects completion.
 
