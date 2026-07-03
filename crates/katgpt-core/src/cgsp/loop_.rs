@@ -23,8 +23,8 @@ use crate::cgsp::traits::{
     NoOpBatchGate, NoOpDifficultyFilter, QualityGuide, Solver,
 };
 use crate::cgsp::types::{
-    entropy_nats, CuriosityPrioritySnapshot, CycleResult, CycleStats, Direction, Priority,
-    ScratchBuffers, Target,
+    entropy_nats, CuriosityPrioritySnapshot, CycleResult, CycleStats, Direction, HintPolicy,
+    Priority, ScratchBuffers, Target,
 };
 
 // ── CgspConfig ────────────────────────────────────────────────────────────
@@ -275,6 +275,14 @@ where
         }
 
         // ── Step 4: Solver attempts admitted candidates ──────────────────
+        // G-RRM §3 (Issue 037): if the solver declares `HintPolicy::Skip`
+        // (overhead-dominated — e.g. a future CDCL SAT backend), its solve-rates
+        // are noise w.r.t. hint quality. We still run the attempts (Step 4) and
+        // record stats, but suppress the bandit absorb (Step 7) so the priority
+        // table — the hint — is not corrupted by that noise. `HintPolicy` is
+        // `Copy`, so this read ends the shared borrow before the mutable
+        // `attempt` calls below.
+        let hint_skip = self.solver.hint_receptivity() == HintPolicy::Skip;
         let mut admitted_count = 0u32;
         let mut solved_count = 0u32;
         let mut guide_sum = 0.0f32;
@@ -310,11 +318,15 @@ where
             .batch_gate
             .is_degenerate(candidates, admitted, guide_scores);
 
-        // ── Step 7: Bandit absorb-compress (skip if degenerate) ─────────
+        // ── Step 7: Bandit absorb-compress (skip if degenerate OR hint-skip) ─
         // Variable-duration staleness weight (Issue 365): with the default
         // config (k_npc=1, staleness_lambda=0.0) `staleness_w` is 1.0 and
         // the absorb is bit-identical to pre-Issue-365 behavior.
-        if !degenerate {
+        //
+        // G-RRM §3 (Issue 037): `hint_skip` suppresses the absorb for
+        // overhead-dominated solvers whose solve-rates do not reflect hint
+        // quality, so their priorities (the hint) are not corrupted by noise.
+        if !degenerate && !hint_skip {
             let staleness_w =
                 staleness_weight(self.config.k_npc, self.config.staleness_lambda);
             for i in 0..k {
@@ -810,6 +822,28 @@ mod tests {
         }
     }
 
+    /// Same solve-rate curve as `DotSolver`, but declares `HintPolicy::Skip` —
+    /// emulates an overhead-dominated solver (G-RRM §3 cadical3 profile) whose
+    /// solve-rates should NOT feed back into the hint priority table.
+    pub(crate) struct SkipDotSolver {
+        pub sharpness: f32,
+    }
+    impl Solver for SkipDotSolver {
+        fn attempt(
+            &mut self,
+            target: &Target,
+            candidate_direction: &Direction,
+            _pool_index: usize,
+        ) -> f32 {
+            let d = candidate_direction.dot(&target.direction);
+            crate::cgsp::types::sigmoid(self.sharpness * d)
+        }
+        #[inline]
+        fn hint_receptivity(&self) -> crate::cgsp::types::HintPolicy {
+            crate::cgsp::types::HintPolicy::Skip
+        }
+    }
+
     fn make_orthonormal_pool(dim: usize, n: usize) -> Vec<Direction> {
         // Build n strictly orthonormal directions (canonical basis vectors).
         // No cross-term so dot products are exactly 0 or 1, giving the guide
@@ -871,6 +905,79 @@ mod tests {
         assert!(
             after >= before,
             "target-aligned arm should grow: before={before}, after={after}"
+        );
+    }
+
+    #[test]
+    fn hint_skip_suppresses_bandit_absorb() {
+        // G-RRM §3 (Issue 037): an overhead-dominated solver declaring
+        // `HintPolicy::Skip` must not corrupt the hint priority table. Its
+        // solve-rates are noise w.r.t. hint quality, so the bandit absorb is
+        // suppressed and priorities stay at their (uniform) starting point.
+        //
+        // Contrast with `cycle_priority_monotone_in_reward`: the hint-receptive
+        // `DotSolver` (default `OrderOnly`) DOES drift the target arm upward.
+        let pool = make_orthonormal_pool(8, 8);
+        let conj = PoolConjecturer::new(pool.clone(), 42);
+        let guide = HlaProjectionGuide::new(4.0, 0.1, ComplexityWeights::default());
+        let solver = SkipDotSolver { sharpness: 0.5 };
+        let bandit = VecBandit::uniform(8);
+        let mut lp = CgspLoop::new(conj, guide, solver, bandit, CgspConfig::default())
+            .with_difficulty_filter(BreakevenDifficultyFilter::new(0.0, 1.0));
+        let target = Target::new(pool[0].clone());
+        let mut scratch = ScratchBuffers::new(8, 8);
+
+        let before: Vec<f32> = lp.bandit().priorities().to_vec();
+        for _ in 0..100 {
+            let _ = lp.cycle(&target, &mut scratch);
+        }
+        let after: Vec<f32> = lp.bandit().priorities().to_vec();
+        // `renormalize_priorities` rescales to max=1.0 each cycle, so absolute
+        // values are not preserved. The invariant we care about is *relative*:
+        // with the absorb suppressed, no arm drifts relative to the others —
+        // the priority table stays uniform (the starting condition), because
+        // the only thing that could make arms diverge (the absorb) is gated
+        // off by `HintPolicy::Skip`. Contrast `cycle_priority_monotone_in_reward`
+        // where the hint-receptive `DotSolver` DOES make the target arm grow.
+        assert_eq!(
+            after.len(),
+            before.len(),
+            "arm count must not change"
+        );
+        let first = after[0];
+        for (i, &p) in after.iter().enumerate() {
+            assert_eq!(
+                p, first,
+                "Skip-policy solver: arm {i} drifted to {p} (hint feedback should be suppressed, \
+                 priorities must stay uniform)"
+            );
+        }
+    }
+
+    #[test]
+    fn hint_skip_solver_still_runs_and_reports_stats() {
+        // The Skip policy only suppresses the bandit absorb — the solver must
+        // still attempt candidates and report honest stats (admitted/solved
+        // counts, mean guide score), so callers can observe the overhead-
+        // dominated solver's behaviour even when it doesn't feed back.
+        let pool = make_orthonormal_pool(8, 8);
+        let conj = PoolConjecturer::new(pool.clone(), 42);
+        let guide = HlaProjectionGuide::new(4.0, 0.1, ComplexityWeights::default());
+        let solver = SkipDotSolver { sharpness: 0.5 };
+        let bandit = VecBandit::uniform(8);
+        let mut lp = CgspLoop::new(conj, guide, solver, bandit, CgspConfig::default())
+            .with_difficulty_filter(BreakevenDifficultyFilter::new(0.0, 1.0));
+        let target = Target::new(pool[0].clone());
+        let mut scratch = ScratchBuffers::new(8, 8);
+
+        let r = lp.cycle(&target, &mut scratch);
+        assert!(
+            r.stats.candidates_admitted > 0,
+            "Skip solver must still attempt admitted candidates"
+        );
+        assert!(
+            r.stats.mean_guide_score > 0.0,
+            "Skip solver must still record guide scores"
         );
     }
 

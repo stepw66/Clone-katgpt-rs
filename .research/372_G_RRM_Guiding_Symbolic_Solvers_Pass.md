@@ -135,7 +135,7 @@ The §3.6 rule warns: *"A PASS verdict backed only by architectural reasoning is
 ## 4. Action Items
 
 - [ ] **None in this session.** The PASS verdict requires no files in `katgpt-rs/.plans/`, `riir-ai/`, `riir-chain/`, or `riir-neuron-db/`.
-- [-] **Deferred:** open an `.issues/` entry for the `HintReceptivity` / `Solver::hint_receptivity()` trait method (§2.3) — a small Gain-tier refinement to gate hint injection for overhead-dominated solvers. Not load-bearing today; relevant only if/when a real CDCL SAT backend is wired in. (Deferring per the rule "Create issue at ./issues for optimization or refactor task, do not create plan".)
+- [x] **Done (commit below):** the `HintReceptivity` / `Solver::hint_receptivity()` trait method (§2.3) is now implemented — `HintPolicy { OrderOnly | PhaseInit | Skip }` in `cgsp/types.rs`, default method on `Solver`, `Skip` suppresses the bandit absorb in `CgspLoop::cycle` so overhead-dominated solve-rates cannot corrupt the hint priority table. Issue 037 was opened and resolved in the same pass; tests `hint_skip_suppresses_bandit_absorb` + `hint_skip_solver_still_runs_and_reports_stats` guard the gate.
 
 ---
 

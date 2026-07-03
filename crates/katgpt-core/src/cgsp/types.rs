@@ -183,6 +183,38 @@ impl SolveRate {
 /// (committed via BLAKE3) are what cross to the cold tier.
 pub type Priority = f32;
 
+// ── Hint policy ───────────────────────────────────────────────────────────
+
+/// How much a [`Solver`](crate::cgsp::traits::Solver) benefits from injected
+/// branching-order hints (the priority-weighted candidate ordering).
+///
+/// Distilled from G-RRM §3 (arXiv 2607.02491): overhead-dominated solvers
+/// (cadical3, 0.896× mean slowdown) see a net regression from hints because
+/// their fixed startup cost dominates the search savings; search-dominated
+/// solvers (backtracking, glucose4 — up to 33.3× speedup) benefit greatly.
+///
+/// The `Skip` policy short-circuits the bandit absorb so an overhead-dominated
+/// solver's noise-dominated solve-rates cannot corrupt the hint priority table.
+///
+/// # Default
+///
+/// `OrderOnly` — every shipped solver is search-dominated and hint-receptive.
+/// This is a non-breaking default: the absorb runs exactly as before.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum HintPolicy {
+    /// Hints only reorder the search — never injected as hard constraints.
+    /// Correct for custom backtracking + DDTree speculation (all shipped solvers).
+    #[default]
+    OrderOnly,
+    /// Hints seed phase initialization (warm-start), then fall back to
+    /// order-only. Future hook for warm-start solvers.
+    PhaseInit,
+    /// Skip hint injection entirely — this solver is overhead-dominated
+    /// (e.g. a future cadical/glucose binding with fixed startup cost).
+    /// The loop suppresses the bandit absorb for this solver.
+    Skip,
+}
+
 /// Aggregated cycle statistics (raw scalars).
 #[derive(Clone, Copy, Debug, Default)]
 pub struct CycleStats {
