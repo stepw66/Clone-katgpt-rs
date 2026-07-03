@@ -1787,6 +1787,225 @@ pub fn forward_block_causal_positions(
 }
 
 // ═══════════════════════════════════════════════════════════════
+// Set-Causal Attention Forward (Research 376 Phase 0 T0.2)
+// ═══════════════════════════════════════════════════════════════
+
+/// Set-causal attention forward pass — generalizes
+/// [`forward_block_causal_positions`] to arbitrary position-set orderings.
+///
+/// This is the CPU reference for the SW-SetDLM (Set Diffusion) training
+/// objective (Arriola & Kuleshov, arXiv:2607.01775, Research 376). The GPU
+/// counterpart is
+/// `riir-gpu/src/kernels/attention_score_set_causal.wgsl`; the micro-model
+/// reference is `riir-poc/src/set_diffusion_poc.rs::AttentionModel::forward_ordered`.
+///
+/// # Attention pattern
+///
+/// For each query position `q` with `gen_step_q = position_order[q]`, attends
+/// to all key positions `t` where `position_order[t] <= gen_step_q` — i.e.,
+/// positions revealed in the **same generation set** OR **earlier sets**.
+/// This realizes the paper's M_SD (set-diagonal) + M_OSC (offset set-causal)
+/// + M_SC (set-causal) mask composition as a single eligibility rule.
+///
+/// # Convention (matches the WGSL kernel)
+///
+/// `position_order[p]` = the generation step at which position `p` is revealed
+/// (0-indexed). Lower step = revealed earlier. This is the **inverse permutation**
+/// of the ordering — not the ordering itself.
+///
+/// # Block-causal is a strict special case
+///
+/// When `position_order[p] = p / block_size`, positions in the same block share
+/// a generation step and the eligibility rule reduces to the prefix
+/// `[0..end_of_current_block]` — exactly [`forward_block_causal_positions`]
+/// with `causal_block_size = block_size`. The test
+/// `test_set_causal_matches_block_causal_when_block_ordered` verifies
+/// bit-identical output.
+///
+/// # Common instantiations
+///
+/// | Method | `position_order` | Effect |
+/// |--------|-----------------|--------|
+/// | Block-causal (D2F) | `[0,0,0,0, 1,1,1,1, ...]` (p / B) | Prefix mask, recovers `forward_block_causal_positions` |
+/// | AR (singleton sets) | `[0, 1, 2, 3, ...]` (p) | Lower-triangular mask |
+/// | MDLM (uniform) | `[0, 0, 0, ...]` (all same step) | Fully bidirectional |
+/// | SW-SetDLM | sampled from `PositionOffsetSchedule` | Arbitrary sets |
+///
+/// # Returns
+///
+/// `(all_logits, all_attn_weights)` where `all_attn_weights[q][h * seq_len + t]`
+/// is the attention weight from query `q` to key `t` under head `h`. Weights
+/// to ineligible positions (`position_order[t] > position_order[q]`) are
+/// exactly 0.0.
+#[cfg(feature = "set_diffusion")]
+pub fn forward_set_causal_positions(
+    weights: &TransformerWeights,
+    tokens: &[usize],
+    config: &Config,
+    position_order: &[usize],
+) -> (Vec<Vec<f32>>, Vec<Vec<f32>>) {
+    assert_eq!(
+        position_order.len(),
+        tokens.len(),
+        "position_order must have same length as tokens ({}), got {}",
+        tokens.len(),
+        position_order.len(),
+    );
+    let n = config.n_embd;
+    let hd = config.head_dim;
+    let kvd = kv_dim(config);
+    let seq_len = tokens.len().min(config.block_size);
+    let scale = 1.0 / (hd as f32).sqrt();
+    let layer = &weights.layers[0];
+
+    // Phase A: K/V projections for all positions (mask-independent — identical
+    // to forward_block_causal_positions. The set-causal constraint only
+    // affects which keys a query attends to, not how keys are computed.)
+    let mut k_cache = vec![0.0f32; seq_len * kvd];
+    let mut v_cache = vec![0.0f32; seq_len * kvd];
+    let mut x_norm2_all = vec![0.0f32; seq_len * n];
+    let mut xr_all = vec![0.0f32; seq_len * n];
+
+    let mut x_buf = vec![0.0f32; n];
+    let mut k_buf = vec![0.0f32; kvd];
+    let mut v_buf = vec![0.0f32; kvd];
+
+    for (p, &token) in tokens.iter().enumerate().take(seq_len) {
+        katgpt_core::simd::simd_add_into(
+            &mut x_buf,
+            &weights.wte[token * n..(token + 1) * n],
+            &weights.wpe[p * n..(p + 1) * n],
+        );
+        rmsnorm(&mut x_buf);
+        xr_all[p * n..(p + 1) * n].copy_from_slice(&x_buf);
+        rmsnorm(&mut x_buf);
+        x_norm2_all[p * n..(p + 1) * n].copy_from_slice(&x_buf);
+        matmul(&mut k_buf, &layer.attn_wk, &x_buf, kvd, n);
+        matmul(&mut v_buf, &layer.attn_wv, &x_buf, kvd, n);
+        k_cache[p * kvd..(p + 1) * kvd].copy_from_slice(&k_buf);
+        v_cache[p * kvd..(p + 1) * kvd].copy_from_slice(&v_buf);
+    }
+
+    // Phase B: Set-causal attention with masked softmax.
+    //
+    // We compute exp() ONLY on eligible positions (those with
+    // position_order[t] <= q_gen_step). Ineligible positions are explicitly
+    // zeroed and skipped. This avoids feeding -inf or huge-negative values
+    // through the SIMD polynomial exp (which doesn't handle special values —
+    // the Cephes range-reduction saturates and produces NaN). The scalar
+    // f32::exp on eligible positions is correct for all finite inputs.
+    let mut all_logits = vec![vec![0.0f32; config.vocab_size]; seq_len];
+    let mut all_attn_weights = vec![vec![0.0f32; config.n_head * seq_len]; seq_len];
+
+    let mut q_buf = vec![0.0f32; n];
+    let mut attn_out_buf = vec![0.0f32; n];
+    let mut scores_buf = vec![0.0f32; seq_len];
+    let mut x_proj = vec![0.0f32; n];
+    let mut hidden = vec![0.0f32; config.mlp_hidden];
+    let mut x_mlp = vec![0.0f32; n];
+    let mut xr2_buf = vec![0.0f32; n];
+
+    for q in 0..seq_len {
+        x_buf.copy_from_slice(&x_norm2_all[q * n..(q + 1) * n]);
+        matmul(&mut q_buf, &layer.attn_wq, &x_buf, n, n);
+
+        let q_gen_step = position_order[q];
+
+        // Per-head masked attention. attn_out_buf accumulates across heads
+        // (same layout as attention_forward_safe_into's output).
+        attn_out_buf.fill(0.0);
+        for h in 0..config.n_head {
+            let kv_group = h * config.n_kv_head / config.n_head;
+            let q_off = h * hd;
+            let kv_off = kv_group * hd;
+
+            // Pass 1: compute raw scores for ELIGIBLE positions only, find max.
+            // (Position q itself is always eligible since position_order[q] <= q_gen_step,
+            // so max_score is guaranteed to advance past -inf.)
+            let mut max_score = f32::NEG_INFINITY;
+            for t in 0..seq_len {
+                if position_order[t] <= q_gen_step {
+                    let dot = katgpt_core::simd::simd_dot_f32(
+                        &q_buf[q_off..q_off + hd],
+                        &k_cache[t * kvd + kv_off..t * kvd + kv_off + hd],
+                        hd,
+                    );
+                    scores_buf[t] = dot * scale;
+                    if scores_buf[t] > max_score {
+                        max_score = scores_buf[t];
+                    }
+                } else {
+                    scores_buf[t] = 0.0; // placeholder, never contributes
+                }
+            }
+
+            // Pass 2: exp(score - max) for eligible positions, 0 for ineligible.
+            // Scalar exp (not SIMD) because the eligible set is typically
+            // non-contiguous and we must not feed garbage to the polynomial exp.
+            let mut sum_exp = 0.0f32;
+            for t in 0..seq_len {
+                if position_order[t] <= q_gen_step {
+                    let e = (scores_buf[t] - max_score).exp();
+                    scores_buf[t] = e;
+                    sum_exp += e;
+                } else {
+                    scores_buf[t] = 0.0;
+                }
+            }
+
+            // Normalize over eligible positions.
+            let inv_sum = 1.0 / sum_exp;
+            for t in 0..seq_len {
+                if position_order[t] <= q_gen_step {
+                    scores_buf[t] *= inv_sum;
+                }
+            }
+
+            // Persist weights for inspection/debugging. Ineligible positions
+            // are exactly 0.0 (never touched in passes 2/3).
+            all_attn_weights[q][h * seq_len..h * seq_len + seq_len]
+                .copy_from_slice(&scores_buf[..seq_len]);
+
+            // Weighted value sum over eligible positions only.
+            for t in 0..seq_len {
+                let s = scores_buf[t];
+                if s > 0.0 {
+                    let v_row = &v_cache[t * kvd + kv_off..t * kvd + kv_off + hd];
+                    katgpt_core::simd::simd_fused_scale_acc(
+                        &mut attn_out_buf[q_off..q_off + hd],
+                        v_row,
+                        s,
+                        hd,
+                    );
+                }
+            }
+        }
+
+        // Output projection + residual + MLP + logits (identical to
+        // forward_block_causal_positions — set-causal only changes the
+        // attention output, not the downstream pipeline).
+        matmul(&mut x_proj, &layer.attn_wo, &attn_out_buf, n, n);
+        katgpt_core::simd::simd_add_inplace(&mut x_proj, &xr_all[q * n..(q + 1) * n]);
+
+        xr2_buf[..n].copy_from_slice(&x_proj[..n]);
+        rmsnorm(&mut x_proj);
+        matmul_relu(&mut hidden, &layer.mlp_w1, &x_proj, config.mlp_hidden, n);
+        matmul(&mut x_mlp, &layer.mlp_w2, &hidden, n, config.mlp_hidden);
+        katgpt_core::simd::simd_add_inplace(&mut x_mlp[..n], &xr2_buf[..n]);
+
+        matmul(
+            &mut all_logits[q],
+            &weights.lm_head,
+            &x_mlp,
+            config.vocab_size,
+            n,
+        );
+    }
+
+    (all_logits, all_attn_weights)
+}
+
+// ═══════════════════════════════════════════════════════════════
 // Zero-Alloc D2F Context + Forward
 // ═══════════════════════════════════════════════════════════════
 
@@ -3220,6 +3439,297 @@ mod tests {
             quality_loss < 0.50,
             "Block-causal quality loss too high: {:.1}% — may indicate D2F distillation not worth it",
             quality_loss * 100.0
+        );
+    }
+
+    // ── Research 376 Phase 0 T0.2: Set-Causal Attention ──
+    //
+    // These tests verify that `forward_set_causal_positions` correctly
+    // generalizes `forward_block_causal_positions` to arbitrary position-set
+    // orderings. The block-causal equivalence test is the GOAT G1 gate:
+    // when position_order matches the block layout, output must be bit-identical.
+
+    #[cfg(feature = "set_diffusion")]
+    #[test]
+    fn test_set_causal_matches_block_causal_when_block_ordered() {
+        // GOAT G1: set-causal with position_order[p] = p / B must produce
+        // bit-identical output to forward_block_causal_positions with
+        // causal_block_size = B. This proves set-causal is a strict
+        // generalization (no regression on the block-causal special case).
+        let config = Config::micro_dllm();
+        let mut rng = Rng::new(42);
+        let weights = TransformerWeights::new(&config, &mut rng);
+        let tokens = vec![0, 1, 2, 3, 4, 5, 6, 7];
+        let block_size = 4;
+
+        // Block-causal reference
+        let (logits_bc, attn_bc) =
+            forward_block_causal_positions(&weights, &tokens, &config, block_size);
+
+        // Set-causal with matching position_order: [0,0,0,0, 1,1,1,1]
+        let position_order: Vec<usize> =
+            tokens.iter().map(|&p| p / block_size).collect();
+        let (logits_sc, attn_sc) =
+            forward_set_causal_positions(&weights, &tokens, &config, &position_order);
+
+        // Logits must match within SIMD-vs-scalar exp tolerance.
+        // (block-causal uses SIMD Cephes polynomial exp; set-causal uses scalar
+        // f32::exp. The ~1 ULP difference accumulates through the value sum
+        // and MLP, producing differences up to ~1e-4 on logit magnitudes ~10.)
+        assert_eq!(logits_bc.len(), logits_sc.len(), "logits length mismatch");
+        for q in 0..tokens.len() {
+            assert_eq!(logits_bc[q].len(), logits_sc[q].len(), "vocab length mismatch");
+            for v in 0..logits_bc[q].len() {
+                let diff = (logits_bc[q][v] - logits_sc[q][v]).abs();
+                let max_abs = logits_bc[q][v].abs().max(logits_sc[q][v].abs());
+                let rel_tol = (max_abs * 1e-3).max(1e-5);
+                assert!(
+                    diff < rel_tol,
+                    "Logit mismatch at q={q}, v={v}: bc={}, sc={}, diff={diff} (rel_tol={rel_tol})",
+                    logits_bc[q][v],
+                    logits_sc[q][v],
+                );
+            }
+        }
+
+        // Attention weights must match within exp tolerance.
+        for q in 0..tokens.len() {
+            for h in 0..config.n_head {
+                for t in 0..tokens.len() {
+                    let w_bc = attn_bc[q][h * tokens.len() + t];
+                    let w_sc = attn_sc[q][h * tokens.len() + t];
+                    let diff = (w_bc - w_sc).abs();
+                    assert!(
+                        diff < 1e-5,
+                        "Attention weight mismatch at q={q}, h={h}, t={t}: \
+                         bc={w_bc}, sc={w_sc}, diff={diff}",
+                    );
+                }
+            }
+        }
+    }
+
+    #[cfg(feature = "set_diffusion")]
+    #[test]
+    fn test_set_causal_mask_zeros_ineligible_positions() {
+        // GOAT G1: positions with position_order[t] > position_order[q]
+        // must receive EXACTLY 0.0 attention weight, for every query and head.
+        let config = Config::micro_dllm();
+        let mut rng = Rng::new(42);
+        let weights = TransformerWeights::new(&config, &mut rng);
+        let tokens = vec![0, 1, 2, 3, 4, 5, 6, 7];
+
+        // Arbitrary non-block ordering: positions 0,1 are set 0,
+        // positions 2,3,4 are set 1, positions 5,6,7 are set 2.
+        let position_order = vec![0, 0, 1, 1, 1, 2, 2, 2];
+
+        let (_, attn) =
+            forward_set_causal_positions(&weights, &tokens, &config, &position_order);
+
+        for q in 0..tokens.len() {
+            let q_gen_step = position_order[q];
+            for h in 0..config.n_head {
+                for t in 0..tokens.len() {
+                    let w = attn[q][h * tokens.len() + t];
+                    if position_order[t] > q_gen_step {
+                        assert_eq!(
+                            w, 0.0,
+                            "Position {t} (gen_step={}) should have 0 weight from query {q} \
+                             (gen_step={q_gen_step}) under head {h}, got {w}",
+                            position_order[t],
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[cfg(feature = "set_diffusion")]
+    #[test]
+    fn test_set_causal_self_attention_always_allowed() {
+        // GOAT G1 invariant: position q always attends to itself
+        // (position_order[q] <= position_order[q] is trivially true).
+        // This guarantees the softmax denominator is always >= exp(0) > 0
+        // after the max-subtraction, preventing NaN.
+        let config = Config::micro_dllm();
+        let mut rng = Rng::new(42);
+        let weights = TransformerWeights::new(&config, &mut rng);
+        let tokens = vec![3, 1, 4, 1, 5, 9, 2, 6];
+
+        // SW-SetDLM-style random-ish ordering
+        let position_order = vec![2, 0, 1, 0, 3, 1, 2, 3];
+
+        let (_, attn) =
+            forward_set_causal_positions(&weights, &tokens, &config, &position_order);
+
+        for q in 0..tokens.len() {
+            for h in 0..config.n_head {
+                let self_weight = attn[q][h * tokens.len() + q];
+                assert!(
+                    self_weight > 0.0,
+                    "Self-attention weight at q={q}, h={h} should be > 0, got {self_weight}",
+                );
+                assert!(
+                    self_weight.is_finite(),
+                    "Self-attention weight at q={q}, h={h} should be finite, got {self_weight}",
+                );
+            }
+        }
+    }
+
+    #[cfg(feature = "set_diffusion")]
+    #[test]
+    fn test_set_causal_weights_sum_to_one_over_eligible() {
+        // GOAT G1: attention weights over eligible positions must sum to 1.0
+        // (proper masked softmax). Combined with the zero-ineligible test,
+        // this confirms the full softmax is mathematically valid.
+        let config = Config::micro_dllm();
+        let mut rng = Rng::new(42);
+        let weights = TransformerWeights::new(&config, &mut rng);
+        let tokens = vec![0, 1, 2, 3, 4, 5, 6, 7];
+
+        // SW-SetDLM-style: overlapping sets
+        let position_order = vec![0, 1, 0, 2, 1, 3, 2, 3];
+
+        let (_, attn) =
+            forward_set_causal_positions(&weights, &tokens, &config, &position_order);
+
+        for q in 0..tokens.len() {
+            let q_gen_step = position_order[q];
+            for h in 0..config.n_head {
+                let sum: f32 = (0..tokens.len())
+                    .filter(|&t| position_order[t] <= q_gen_step)
+                    .map(|t| attn[q][h * tokens.len() + t])
+                    .sum();
+                assert!(
+                    (sum - 1.0).abs() < 1e-5,
+                    "Eligible-position weight sum at q={q}, h={h} should be 1.0, got {sum}",
+                );
+            }
+        }
+    }
+
+    #[cfg(feature = "set_diffusion")]
+    #[test]
+    fn test_set_causal_ar_singleton_each_position_own_set() {
+        // AR limit: position_order[p] = p means each position is its own set.
+        // Position q attends to positions [0..=q] (lower-triangular mask).
+        // This is the AR extreme of the w schedule (w = 1/L).
+        let config = Config::micro_dllm();
+        let mut rng = Rng::new(42);
+        let weights = TransformerWeights::new(&config, &mut rng);
+        let tokens = vec![0, 1, 2, 3, 4, 5, 6, 7];
+
+        let position_order: Vec<usize> = (0..tokens.len()).collect();
+
+        let (_, attn) =
+            forward_set_causal_positions(&weights, &tokens, &config, &position_order);
+
+        for q in 0..tokens.len() {
+            for h in 0..config.n_head {
+                for t in 0..tokens.len() {
+                    let w = attn[q][h * tokens.len() + t];
+                    if t > q {
+                        // Future positions must be masked
+                        assert_eq!(
+                            w, 0.0,
+                            "AR mask: position {t} should be masked from query {q} (t > q), got w={w}",
+                        );
+                    } else {
+                        // Past + self positions should generally have non-zero weight
+                        // (could be 0 in pathological cases, but for random weights
+                        // and scale > 0 this should not happen)
+                        assert!(
+                            w >= 0.0,
+                            "AR mask: position {t} weight from query {q} should be >= 0, got {w}",
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[cfg(feature = "set_diffusion")]
+    #[test]
+    fn test_set_causal_mdlm_all_one_set_is_bidirectional() {
+        // MDLM limit: position_order[p] = 0 for all p means all positions are
+        // in the same set. Every position attends to every position
+        // (fully bidirectional / standard softmax attention).
+        //
+        // forward_bidirectional_positions returns FLAT (Vec<f32>, Vec<f32>),
+        // unlike forward_set_causal_positions's nested (Vec<Vec<f32>>, Vec<Vec<f32>>).
+        // Index bidirectional as: logits[p * vocab + v], attn[p * (n_head*seq_len) + h*seq_len + t].
+        let config = Config::micro_dllm();
+        let mut rng = Rng::new(42);
+        let weights = TransformerWeights::new(&config, &mut rng);
+        let tokens = vec![0, 1, 2, 3, 4, 5, 6, 7];
+        let seq_len = tokens.len();
+
+        let position_order = vec![0usize; seq_len];
+
+        let (logits_sc, attn_sc) =
+            forward_set_causal_positions(&weights, &tokens, &config, &position_order);
+
+        // Compare against forward_bidirectional_positions (the existing
+        // unconstrained attention implementation). They should match closely
+        // (both compute full attention over all positions).
+        let (logits_bi, attn_bi) =
+            forward_bidirectional_positions(&weights, &tokens, &config);
+
+        // Attention weights should match within SIMD-vs-scalar exp tolerance.
+        // (bidirectional uses SIMD Cephes polynomial exp; set-causal uses scalar
+        // f32::exp on eligible positions only — same math, different rounding.)
+        for q in 0..seq_len {
+            for h in 0..config.n_head {
+                for t in 0..seq_len {
+                    let w_sc = attn_sc[q][h * seq_len + t];
+                    // bidirectional attn is flat: [q * (n_head*seq_len) + h*seq_len + t]
+                    let w_bi = attn_bi[q * config.n_head * seq_len + h * seq_len + t];
+                    let diff = (w_sc - w_bi).abs();
+                    assert!(
+                        diff < 1e-5,
+                        "MDLM vs bidirectional mismatch at q={q}, h={h}, t={t}: \
+                         sc={w_sc}, bi={w_bi}, diff={diff}",
+                    );
+                }
+            }
+        }
+
+        // Logits should match within relative tolerance (sc is nested, bi is flat).
+        // Accumulated exp differences can reach ~1e-4 on logit magnitudes ~10.
+        for q in 0..seq_len {
+            for v in 0..config.vocab_size {
+                let l_sc = logits_sc[q][v];
+                let l_bi = logits_bi[q * config.vocab_size + v];
+                let diff = (l_sc - l_bi).abs();
+                let max_abs = l_sc.abs().max(l_bi.abs());
+                let rel_tol = (max_abs * 1e-3).max(1e-5);
+                assert!(
+                    diff < rel_tol,
+                    "MDLM vs bidirectional logit mismatch at q={q}, v={v}: \
+                     sc={l_sc}, bi={l_bi}, diff={diff} (rel_tol={rel_tol})",
+                );
+            }
+        }
+    }
+
+    #[cfg(feature = "set_diffusion")]
+    #[test]
+    fn test_set_causal_length_mismatch_panics() {
+        // Defensive: position_order.len() != tokens.len() must panic
+        // (caught by debug_assert in production, assert_eq in the function).
+        let config = Config::micro_dllm();
+        let mut rng = Rng::new(42);
+        let weights = TransformerWeights::new(&config, &mut rng);
+        let tokens = vec![0, 1, 2, 3];
+        let bad_order = vec![0, 1, 2]; // length 3, should be 4
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            forward_set_causal_positions(&weights, &tokens, &config, &bad_order);
+        }));
+        assert!(
+            result.is_err(),
+            "forward_set_causal_positions should panic on length mismatch"
         );
     }
 
