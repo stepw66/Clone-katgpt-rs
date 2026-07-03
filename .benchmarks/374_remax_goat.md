@@ -140,10 +140,17 @@ telescoping sum. Both are allocation-free after the sort index buffer.
    (`expected_max_over_m`, `expected_improvement`, `per_action`). Opt-in
    feature. No modelless GOAT — not promoted to default.
 
-2. **riir-train** — ✅ **IMPLEMENTED (Plan 304).** The RePPO training algorithm
-   (PPO variant + EI advantage + Q-critic) ships behind feature `remax_ppo`.
-   Consumes these katgpt-rs operators for the advantage computation. 28/28
-   tests pass (correctness + toy bandit validation).
+2. **riir-train** — ✅ **IMPLEMENTED (Plan 304 + 305).** The RePPO training algorithm
+   (PPO variant + EI advantage + Q-critic + GAE + chain MDP benchmark) ships
+   behind feature `remax_ppo`. Consumes these katgpt-rs operators for the
+   advantage computation. 40/40 tests pass.
+
+   **Key finding (Plan 305):** On tabular function approximation, RePPO m>1 is
+   competitive with m=1.0 but does NOT show a clear exploration advantage. The
+   ReMax exploration benefit requires neural network function approximation
+   (shared parameters → global collapse risk). The tabular benchmark validates
+   correctness; the exploration GOAT gate requires the NN training loop (future
+   work, needs riir-gpu integration).
 
 3. **riir-ai** — no direct consumption yet. The per-NPC action selection guide
    (HLA → action with curiosity-driven m) is deferred until the full PPO
