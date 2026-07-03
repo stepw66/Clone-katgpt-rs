@@ -271,45 +271,54 @@ graph TD
 
 ---
 
-## §PoC Addendum (2026-07-03, Plan 371 Phase 5 T5.1)
+## §PoC Addendum (2026-07-03, Plan 371 Phase 5 T5.1; updated Issue 034 T1–T3)
 
-The mandatory defend-wrong PoC shipped at `riir-poc/benches/mean_field_regime_poc.rs`.
-It implements the paper's reduced 3D ODE (Eq. 55) with simplified `χ̄`/`Q_fp`/`G_eff`
-approximations, sweeps a 5×5 `(g, β)` grid, and compares the trajectory-classified
-regime against `RegimeClassifier::classify_with_g`.
+The mandatory defend-wrong PoC ships at `riir-poc/benches/mean_field_regime_poc.rs`.
+It implements the paper's reduced 3D ODE (Eq. 55), sweeps a 5×5 `(g, β)` grid,
+and compares the trajectory-classified regime against `RegimeClassifier::classify_with_g`.
 
-**Verdict: INCONCLUSIVE.**
+### Phase 5 verdict (original): INCONCLUSIVE
 
-- **G2/G3/G4/G5 ALL PASS** — perf (9.8µs aggregate / 0ns hopf+classify),
-  no-regression (666/666 default tests), alloc-free (0/100 calls), determinism
-  (bit-identical). These gates are solid.
+- **G2/G3/G4/G5 ALL PASS.**
 - **G1 (correctness) = INCONCLUSIVE** — 19/25 grid points match (76%), but only
-  1/4 distinct regimes correctly identified. The `NoiseSustainedOscillation`
-  regime (the bulk of the grid) is consistently right; the boundary regimes
-  (`Static` near g_c, `IrregularSwitching` near Hopf, `GlobalLimitCycle` past
-  Hopf) are not.
+  1/4 distinct regimes correctly identified. Root cause: the simplified ODE
+  simulator used rough `χ̄ ≈ 1 − Σ²/3` / `Q_fp ≈ g²·Σ²·χ̄` approximations.
 
-**Root cause: the PoC simulator is the weak link, not the classifier.** The
-simplified ODE uses rough approximations (`χ̄ ≈ 1 − Σ²/3`, `Q_fp ≈ g²·Σ²·χ̄`)
-that do not reproduce the paper's exact DMFT bifurcation structure. The
-classifier's closed-form Hopf discriminant is mathematically correct (it
-correctly identifies when the 2×2 Jacobian has complex eigenvalues with
-positive real part, paper Eq. 56) — the issue is calibrating the margins
-(`hopf_margin`, `chaos_threshold`) to match a specific ODE's regime boundaries.
+### Issue 034 T1–T3 resolution (2026-07-03): IMPROVED to 92%
 
-**Mismatches cluster at:**
-- (a) **g=1.0 boundary** (5/6 mismatches): `chaos_threshold = 1.0` treats g=1.0
-  as "not chaotic", but the simplified ODE shows oscillation at g=1.0.
-- (b) **Intermediate β**: the classifier detects the Hopf instability
-  direction correctly but calls it `GlobalLimitCycle` instead of
-  `IrregularSwitching` (the `hopf_margin = 0.1` is too low).
+Three fixes landed:
 
-**Promotion decision: KEEP OPT-IN.** Per Plan 371 T6.2, the PoC did not confirm
-regime classification on ≥4/5 regime boundaries, so `mean_field_regime` stays
-opt-in. Follow-up tracked in `.issues/034_mean_field_regime_poc_calibration.md`:
-T1 paper-exact DMFT simulator, T2/T3 margin recalibration, T4 real-game-domain
-validation. The primitive is mathematically sound and useful as-is for callers
-who want the closed-form Hopf discriminant without the full regime taxonomy.
+1. **Paper-exact DMFT via 8-point Gauss-Hermite quadrature** — `χ̄ = ⟨sech²(h)⟩`,
+   `Q_fp = Var[tanh(h)]`, computed via GH quadrature over `N(μ, Σ²)` with
+   non-zero mean `μ = σ_m·κ`.
+
+2. **Self-consistent G_eff at κ=0** — the Hopf/saddle bifurcation analysis is a
+   property of the symmetric fixed point κ=0. Computing G_eff from the
+   self-consistent Q_fp (not the transient final state) gives the correct
+   linearized stability prediction.
+
+3. **Sign-preserving G_eff + saddle detection** — when `β·χ̄ > 1`, G_eff is
+   correctly NEGATIVE (adaptation dominates → stabilizing). The classifier's
+   `classify_with_g` was extended to check `static_boundary` (real-eigenvalue
+   saddle) in addition to `hopf_boundary` (complex eigenvalues).
+
+### Results
+
+| Configuration | Grid match | Distinct regimes |
+|---|---|---|
+| Phase 5 (approx, default margins) | 19/25 (76%) | 1/4 |
+| T1 exact (default margins) | 17/25 (68%) | 2/4 |
+| T1+T2+T3 (ct=0.80, hm=0.15) | **23/25 (92%)** | 2/4 |
+
+The calibrated classifier achieves **100% on the two major regimes** (NSO: 11/11,
+IS: 12/12). The 2 remaining mismatches are at extreme β=1.4 where nonlinear
+limit-cycle formation can't be predicted by the linearized analysis.
+
+**Promotion decision: KEEP OPT-IN.** Grid agreement improved dramatically
+(76% → 92%), but `distinct_regimes_correct` is still 2/4 (Static and
+GlobalLimitCycle each have only 1 grid point at extreme β). T4 (real-game-domain
+validation) is the next step. The primitive is mathematically sound and useful
+as-is for callers who want the closed-form Hopf + saddle discriminant.
 
 ---
 
@@ -317,7 +326,8 @@ who want the closed-form Hopf discriminant without the full regime taxonomy.
 
 The paper proves low-rank RNN + firing-rate adaptation produces a four-regime phase diagram (static → noise-sustained oscillation → switching → limit cycle) organized by a single parameter β. ~80% of the algorithmic content already ships (LinOSS, `subspace_phase_gate`, `temporal_deriv`, `MicroRecurrentBeliefState`, `ict::BranchingDetector`); the novel 20% is a **mean-field `(κ, κ_a, Q)` aggregator over NPCs + Hopf boundary detector + four-way regime classifier** — a GOAT extension into crowd-scale emergent oscillations, behind feature flag `mean_field_regime`, with a mandatory defend-wrong PoC. The wake/sleep/anesthesia biological mapping becomes a runtime knob: β is the per-NPC arousal scalar, and sweeping it across a crowd produces emergent day/night cycles, panic waves, fashion trends. **Not Super-GOAT** — a competitor could assemble this from shipped primitives in a week; the moat (if any) lives in the riir-ai *wiring* (per-archetype β, surprise-driven regime transition), tracked as a follow-up issue pending GOAT-gate pass.
 
-**PoC outcome (2026-07-03):** G2/G3/G4/G5 PASS; G1 INCONCLUSIVE (76% grid match,
-1/4 distinct regimes — the simplified ODE simulator is too crude to validate
-the full taxonomy). `mean_field_regime` stays opt-in pending Issue 034 resolution
-(paper-exact DMFT simulator + margin recalibration + real-game validation).
+**PoC outcome (2026-07-03):** G2/G3/G4/G5 PASS; G1 IMPROVED from 76% to 92%
+(23/25) via Issue 034 T1–T3 (exact DMFT simulator + self-consistent G_eff + saddle
+detection). Two major regimes at 100% accuracy (NSO 11/11, IS 12/12). Two
+remaining mismatches at extreme β=1.4 (nonlinear limit-cycle formation).
+`mean_field_regime` stays opt-in pending T4 (real-game-domain validation).

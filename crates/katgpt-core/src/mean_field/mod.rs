@@ -579,7 +579,13 @@ impl RegimeClassifier {
     ///    - `switching_margin < T ≤ hopf_margin` AND `g > chaos_threshold` →
     ///      [`Regime::IrregularSwitching`] (near-Hopf, noise kicks across
     ///      separatrix).
-    /// 3. [`hopf_boundary`] returns `None` (stable):
+    /// 3. [`hopf_boundary`] returns `None` but [`static_boundary`] returns
+    ///    `true` ⟺ real-eigenvalue instability (saddle or unstable node):
+    ///    - `g > chaos_threshold` → [`Regime::IrregularSwitching`] (saddle
+    ///      drives switching between ±κ basins — Issue 034 T1 finding).
+    ///    - `g ≤ chaos_threshold` → [`Regime::NoiseSustainedOscillation`] (weak
+    ///      bulk cannot sustain full switching).
+    /// 4. Both boundaries return `None`/`false` (truly stable):
     ///    - `g > chaos_threshold` → [`Regime::NoiseSustainedOscillation`]
     ///      (stable focus driven by chaotic bulk — paper's key novel Regime II).
     ///    - `g ≤ chaos_threshold` → [`Regime::Static`] (stable node, no chaos).
@@ -628,8 +634,21 @@ impl RegimeClassifier {
                 }
             }
             None => {
-                // Stable planar subsystem.
-                if g > self.chaos_threshold {
+                // No Hopf (complex-eigenvalue) instability.
+                // Check for real-eigenvalue instability (saddle) — Issue 034 T1:
+                // at high β, the symmetric fixed point κ=0 can undergo a saddle
+                // bifurcation (real eigenvalue crossing zero). The saddle drives
+                // switching between ±κ basins. Without this check, the classifier
+                // misses saddle-mediated IrregularSwitching and incorrectly falls
+                // through to NoiseSustainedOscillation or Static.
+                if static_boundary(params) {
+                    if g > self.chaos_threshold {
+                        Regime::IrregularSwitching
+                    } else {
+                        Regime::NoiseSustainedOscillation
+                    }
+                } else if g > self.chaos_threshold {
+                    // Truly stable planar subsystem + chaotic bulk.
                     Regime::NoiseSustainedOscillation
                 } else {
                     Regime::Static
