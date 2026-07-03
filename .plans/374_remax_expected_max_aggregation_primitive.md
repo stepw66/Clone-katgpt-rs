@@ -181,7 +181,8 @@ Ship the closed-form ReMax aggregation operator (`expected_max_over_m`) and Expe
 
 ## Phase 6 — riir-train Cross-Ref (out of scope, noted only)
 
-- [ ] **T6.1** Note the RePPO training algorithm redirect in `riir-train/.research/` (one-line: "ReMax/RePPO training loop — see katgpt-rs Research 373 for the modelless distillation; the training algorithm (PPO variant + EI advantage + Q-critic) belongs here.")
+- [x] **T6.1** Note the RePPO training algorithm redirect in `riir-train/.research/375_remax_reppo_training_crossref.md`
+  - Cross-ref note created with: what ships in katgpt-rs (operators), what belongs in riir-train (RePPO loop), the No Modelless Exploration theorem, and PG derivation pointers (Eq 9, Eq 12, Alg 1).
   - Do NOT implement RePPO in this plan. Training is out of scope for katgpt-rs.
 
 ---
