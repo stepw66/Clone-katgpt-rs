@@ -23,9 +23,10 @@ The codebook is constructed modellessly via **k-means clustering** on observed t
 ### Tasks
 
 - [ ] **T1.1** Create module `katgpt-rs/crates/katgpt-core/src/factorized_action/mod.rs` with:
-  - `pub struct EffectCodebook<const K: usize, const D: usize>` — frozen codebook of K D-dim effect vectors, `#[repr(C)]` Pod-compatible.
+  - `pub struct EffectCodebook<const K: usize, const D: usize>` — frozen codebook of K D-dim effect vectors, `#[repr(C)]` Pod-compatible. **Paper defaults: K=128, D=32** (verified from `configs/otf_vqvae/default_config.yaml`).
   - `pub struct TransitionFactors { assignments: [u16; MAX_PATCHES], weights: [f32; K], n_active: usize }` — per-transition factorization output (occupancy + activation strength).
   - `pub struct FactorizedActionLatent<const D: usize>([f32; D])` — the aggregated action latent.
+  - `pub enum AggregatorType { Gate, Mean }` — **verified from `otf_lam/model.py`**: `"gate"` (default, sigmoid relevance gate) vs `"mean"` (uniform `α_k = 1` ablation). The `Mean` mode is the G2 ablation baseline.
   - Feature gate: `#[cfg(feature = "factorized_action")]`.
 
 - [ ] **T1.2** Implement `EffectCodebook::assign_patch_into(&self, patch: &[f32], out: &mut TransitionFactors, patch_idx: usize)`:
@@ -40,13 +41,23 @@ The codebook is constructed modellessly via **k-means clustering** on observed t
 
 - [ ] **T1.4** Implement `factor_token_into(codebook: &EffectCodebook<K,D>, k: usize, factors: &TransitionFactors, state: &[f32], out: &mut [f32])`:
   - `r_k = Γ(c(k), M(k), w(k), x_t)` — state-aware factor token.
-  - Modelless Γ: concatenate `c(k)`, `w(k)`, and `dot(c(k), state)` (the state-conditioning signal), write into `out`.
-  - Linear projection (flatten + normalize) — no learned MLP.
+  - **Modelless Γ via simplified FiLM** (verified from `otf_lam/model.py::FactorEmbedding` which uses FiLM `(1+γ)*x+β` pervasively):
+    - `γ_k = dot(state, g_proj_k)` — state-conditioned scale.
+    - `β_k = dot(state, b_proj_k)` — state-conditioned shift.
+    - `r_k = (1 + γ_k) * c(k) + β_k` — FiLM-modulated codebook vector.
+  - The projection vectors `g_proj_k`, `b_proj_k` are fixed (random orthonormal init, frozen — not learned).
+  - No learned MLP.
 
-- [ ] **T1.5** Implement `aggregate_action_latent_into<K,D>(codebook: &EffectCodebook<K,D>, factors: &TransitionFactors, state: &[f32], gate_beta: f32, gate_tau: f32, out: &mut FactorizedActionLatent<D>)`:
+- [ ] **T1.5** Implement `aggregate_action_latent_into<K,D>(codebook: &EffectCodebook<K,D>, factors: &TransitionFactors, state: &[f32], gate_beta: f32, gate_tau: f32, aggregator: AggregatorType, out: &mut FactorizedActionLatent<D>)`:
+  - **Verified aggregation** from `otf_lam/model.py::OTFLAM.forward()` step 6:
+    ```python
+    alpha_sum = alpha.sum(dim=1).clamp_min(self.eps)
+    z_factor = (alpha * factor_embedding).sum(dim=1) / alpha_sum
+    ```
   - For each active code k:
     - Compute factor token `r_k` (T1.4).
-    - Sigmoid relevance gate: `α_k = sigmoid(gate_beta * (relevance_score(r_k) - gate_tau))`.
+    - If `aggregator == Gate`: sigmoid relevance gate `α_k = sigmoid(gate_beta * (relevance_score(r_k) - gate_tau))`.
+    - If `aggregator == Mean`: `α_k = 1.0` (uniform — the G2 ablation).
     - Accumulate: `numerator += α_k * r_k`, `denominator += α_k`.
   - Normalized gated average: `z = numerator / (denominator + ε)`.
   - Write into `out.0[..D]`.
@@ -99,18 +110,22 @@ The codebook is constructed modellessly via **k-means clustering** on observed t
 
 ### Tasks
 
-- [ ] **T3.1** Create benchmark `katgpt-rs/benches/bench_375_factorized_action_goat.rs` with the three competitors (per Research 374 §9):
+- [ ] **T3.1** Create benchmark `katgpt-rs/benches/bench_375_factorized_action_goat.rs` with the **four** competitors (per Research 374 §9 + §10 code verification):
   1. **Monolithic baseline** — `extract_functor` + `apply_functor` (single mean displacement).
-  2. **Factorized OTF (modelless)** — k-means codebook (K=32, D=8) + sigmoid gate + normalized weighted average.
-  3. **Identity baseline** — predict `x_{t+1} = x_t`.
+  2. **Factorized OTF (modelless, Gate mode)** — k-means codebook (**K=128, D=32** — paper defaults) + sigmoid gate + normalized weighted average.
+  3. **Factorized OTF (modelless, Mean mode)** — same codebook, `α_k = 1` uniform (the ablation from `aggregator_type: "mean"`).
+  4. **Identity baseline** — predict `x_{t+1} = x_t`.
 
 - [ ] **T3.2** **G1 — Correctness.** Reconstruction MSE on in-distribution transitions (Moving-MNIST-style: 2D digits moving at constant velocity, 1000 transitions). Gate: `factorized_mse ≤ monolithic_mse`.
 
-- [ ] **T3.3** **G2 — Distractor suppression.** Reconstruction MSE on transitions WITH distractor motion (background dot moving independently). Gate: `factorized_mse < 0.7 × monolithic_mse` (≥30% relative improvement — the paper's key claim).
+- [ ] **T3.3** **G2 — Distractor suppression + gate ablation.** Reconstruction MSE on transitions WITH distractor motion (background dot moving independently). **Two sub-gates:**
+  - G2a (factorization gain): `factorized_gate_mse < 0.7 × monolithic_mse` (≥30% relative improvement — the paper's key claim).
+  - G2b (gate adds value): `factorized_gate_mse < factorized_mean_mse` (the sigmoid relevance gate beats uniform aggregation — verified ablation from `otf_lam/model.py::aggregator_type`).
+  If G2a passes but G2b fails → the factorization helps but the modelless sigmoid gate adds no value over uniform mean → note that the trained gate (`GateNetwork` with 4 FiLM layers) is needed → riir-train.
 
 - [ ] **T3.4** **G3 — Cross-carrier transfer.** Codebook fit on digit-{0–4} transitions, evaluated on digit-{5–9}. Transfer degradation `Drop = (E_target - E_source) / E_source`. Gate: `factorized_drop < monolithic_drop`.
 
-- [ ] **T3.5** **G4 — Latency.** Factorized aggregation (K=32, D=8, 16 patches) < 500 ns per transition. Zero-allocation after warmup (TrackingAllocator audit). Bench with criterion.
+- [ ] **T3.5** **G4 — Latency.** Factorized aggregation (**K=128, D=32** — paper defaults, 16 patches) < 1 µs per transition. Zero-allocation after warmup (TrackingAllocator audit). Bench with criterion.
 
 - [ ] **T3.6** **G5 — Sigmoid never softmax.** Static check (grep: no `softmax` in `factorized_action/`) + canary test (sigmoid at logit=0 gives 0.5, softmax of single value gives 1.0 — assert the former).
 

@@ -295,3 +295,50 @@ The GOAT gate must prove the factorized primitive provides a **provable quality 
 **Verdict: GOAT for katgpt-rs.** The factorized mechanism is genuinely novel vs our shipped **monolithic** latent functor (Research 123/Plan 273 — single displacement vector). The transferable inference-time primitive — frozen codebook + sigmoid relevance gate + normalized weighted average — does NOT ship (codebooks exist only for KV compression). The modelless path is viable (k-means codebook + linear encoding + sigmoid gate). Training-only parts (VQ-VAE, behavioral cloning, action decoder) → riir-train. Plan 375 implements the open primitive behind `factorized_action` feature flag; GOAT gate compares factorized vs monolithic on Moving-MNIST-style transitions (G1 correctness, G2 distractor suppression, G3 cross-carrier transfer, G4 latency, G5 sigmoid, G6 isolation).
 
 **Files created this session:** `katgpt-rs/.research/374_OTF_LAM_Factorized_Transition_Primitives.md` (this note) + `katgpt-rs/.plans/375_factorized_transition_action_abstraction.md` (the plan). No private guide (GOAT, not Super-GOAT). No riir-train file (one-line redirect only).
+
+---
+
+## 10. Code Verification Addendum (2026-07-03)
+
+The official code repo ([Hazel-Heejeong-Nam/lam_agent_ambiguity](https://github.com/Hazel-Heejeong-Nam/lam_agent_ambiguity), MIT license) was inspected to verify the distillation above against the actual implementation.
+
+### Verified accurate (my distillation matches the code)
+
+| My claim (§1.2–1.3) | Code evidence | Status |
+|---|---|---|
+| Sigmoid relevance gate `α_k = σ(G_θ(r))` | `GateNetwork.forward()`: `return torch.sigmoid(self.out_linear(x))` | ✅ **Exact match** — sigmoid, not softmax |
+| Normalized gated average `z = Σ α_k r_k / (Σ α_k + ε)` | `OTFLAM.forward()` step 6: `alpha_sum = alpha.sum(dim=1).clamp_min(self.eps); z_factor = (alpha * factor_embedding).sum(dim=1) / alpha_sum` | ✅ **Exact match** |
+| VQ codebook with k-means init + EMA updates | `default_config.yaml`: `codebook_init: kmeans`, `codebook_update: ema`, `ema_decay: 0.99`, `dead_code_steps: 1000`, `kmeans_iters: 20` | ✅ **Exact match** |
+| Motion input `o_t = ϕ(x_{t+τ}) − ϕ(x_t)` (velocity) or acceleration | `motion_transforms.py::compute_motion_signal()`: velocity = `transformed_next - transformed_current`; acceleration = `transformed_next - 2.0 * transformed_current + transformed_previous`. Default is **acceleration** (second-order). | ✅ **Match** (default is acceleration, not velocity) |
+| Inactive codes masked out | `OTFLAM.forward()`: `if self.mask_inactive_factors: alpha = alpha_raw * active_mask.unsqueeze(-1)` | ✅ **Exact match** |
+| Codebook defaults K=128, D=32 | `default_config.yaml`: `codebook_size: 128`, `latent_dim: 32` | ✅ **Match** |
+
+### New findings (refinements to capture)
+
+1. **`aggregator_type` flag — gate vs mean ablation.** The code supports two aggregation modes:
+   - `"gate"` (default): sigmoid relevance gate produces `α_k`, then normalized weighted average.
+   - `"mean"`: `α_k = 1` for all active factors (uniform weighted average, no learned gate).
+   This is the natural ablation for testing whether the sigmoid gate adds value over uniform aggregation. **Plan 375 should support both modes** as a config flag — the `"mean"` mode is the G2 ablation baseline.
+
+2. **FiLM conditioning is pervasive.** The code uses Feature-wise Linear Modulation `(1 + γ) * x + β` at every layer of every module:
+   - State encoder: FiLM on occupancy weights at every encoder block.
+   - Occupancy encoder: FiLM on global state at every conv layer.
+   - Factor embedding: FiLM on `[global_state, occupancy_embedding]`.
+   - Gate network: FiLM on `[global_state, occupancy_embedding]` at every hidden layer (4 linear layers, not 2).
+   - Forward decoder: FiLM on `z_action` (and optionally state features) at every decoder block, with two modes (`"z_action"` vs `"z_action_and_state"`).
+   The modelless version can use a simplified FiLM: `r_k = (1 + γ_k) * c(k) + β_k` where `γ_k, β_k` are derived from `dot(state, projection_k)`.
+
+3. **Factor token construction is richer than concatenation.** The `FactorEmbedding` module concatenates `[codebook_vector, weight, occupancy_embedding]` AND FiLM-conditions on `[global_state, occupancy_embedding]`. The occupancy embedding is itself a CNN/MLP-encoded spatial map, not just a scalar. My note's factor token description was simplified; the code is more elaborate.
+
+4. **Decoder FiLM modes.** The forward decoder supports two FiLM modes:
+   - `"z_action"`: channel-wise FiLM from z_action alone (lighter).
+   - `"z_action_and_state"`: spatially-varying FiLM from z_action AND state features (heavier, default in the class but config defaults to `"z_action"`).
+
+### Impact on Plan 375
+
+- **Add `aggregator_type` config** (`"gate"` | `"mean"`) to the primitive. The `"mean"` mode is the G2 ablation.
+- **Use simplified FiLM** in the modelless factor token: `r_k = (1 + γ_k) * c(k) + β_k` where `γ_k = dot(state, g_proj_k)`, `β_k = dot(state, b_proj_k)`.
+- **Update GOAT gate hyperparameters** to match the paper's defaults: K=128, D=32 (not K=32, D=8).
+- **Default motion input is acceleration** (second-order temporal derivative), which is already shipped as Plan 277 (Temporal Deriv Kernel, DEFAULT-ON).
+
+**Verdict unchanged: GOAT.** The code verification confirms the factorized mechanism is exactly as distilled. The refinements (aggregator_type flag, FiLM pervasiveness, K=128/D=32 defaults) are implementation details that enrich Plan 375 but do not change the novelty assessment or the modelless unblock path.
