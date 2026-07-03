@@ -915,3 +915,11 @@ required-features = ["functional_substitution_gate"]
 name = "bench_370_manifold_bandit_goat"
 harness = false
 required-features = ["manifold_bandit"]
+
+# Plan 374 — ReMax GOAT gate: G2 bandit regret (theorem confirmation that
+# ReMax EI selection = Greedy selection) + G4 latency (expected_max_over_m and
+# expected_improvement_per_action for K in {8..128}, budget 500 ns).
+[[bench]]
+name = "bench_374_remax_goat"
+harness = false
+required-features = ["remax_aggregation"]

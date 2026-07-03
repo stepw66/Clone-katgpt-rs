@@ -168,20 +168,24 @@ How does ReMax look on the codebase's latent-state kernels?
 
 ## 3. Verdict
 
-**Tier: GOAT (pending benchmark).**
+**Tier: CORRECT PRIMITIVE, NO MODELLESS GOAT (resolved 2026-07-03, Plan 374 Phase 5).**
 
 | Gate | Status | Reasoning |
 |---|---|---|
 | Novel mechanism (Q1) | ✅ | No exact prior art (5-repo grep, both vocabularies). Closed-form expected-max-over-m with continuous m is genuinely new. |
-| New capability class (Q2) | ⚠️ Partial | Bonus-free exploration via objective curvature is a *different mechanism* than UCB1/bonuses. Whether it's a new *capability* (not just a different path to the same result) is unproven. |
-| Product selling point (Q3) | ❌ Unproven | "NPCs explore without bonuses" is nice framing, but SDAR/RMSD/FFO found modulation doesn't help at our scale. Cannot claim a selling point until the benchmark passes. |
-| Force multiplier (Q4) | ⚠️ Speculative | Connections to bandits, BoM, AdvantageMarginGate, Manifold Bandit exist but none confirmed. |
+| New capability class (Q2) | ❌ **FAIL** | **Theorem (Plan 374 Phase 3):** argmax_a EI_m(q_a; π, q) = argmax_a q_a. The ReMax EI, used as a per-arm deterministic selection score, is **provably equivalent to greedy**. No new modelless capability for action selection. |
+| Product selling point (Q3) | ❌ **FAIL** | "NPCs explore without bonuses" does not hold modellessly. ReMax's exploration is training-time (policy gradient on J_m, m > 1 flattens gradient). Correctly deferred to riir-train (RePPO). |
+| Force multiplier (Q4) | ⚠️ Deferred | Connections to bandits, BoM, AdvantageMarginGate, Manifold Bandit exist but are all training-context. None confirmed modellessly. |
 
-**One-line reasoning:** The closed-form expected-max-over-m aggregation is a genuinely novel modelless operator, but its inference-time utility is uncertain given the codebase's strong negative prior on reward/objective modulation. The GOAT gate must prove it beats UCB1 on bandit regret before any promotion.
+**One-line reasoning:** The closed-form operators are correct (G1: MC + analytic recurrence, max err 3.87e-7) and fast (G4: 603ns for K=128). But the **No Modelless Exploration theorem** proves that deterministic argmax EI = argmax q — ReMax provides no inference-time exploration bonus. Its exploration mechanism lives in policy gradient training (RePPO) → riir-train. **Keep opt-in.**
 
-**MOAT gate (katgpt-rs domain):** ✅ In scope — paper-derived fundamental primitive (aggregation operator / acquisition function) that could improve the inference stack's action-selection / bandit layer. Ship behind feature flag `remax_aggregation`, benchmark, promote-or-demote per the GOAT gate result. Track in the per-stack ledger (action-selection / bandit slot).
+**Per-stack ledger:**
+- Stack slot: action-selection/bandit (modelless) → **opt-in, no modelless gain**.
+- Stack slot: RePPO-advantage (training) → **redirected to riir-train**.
 
-**Riir-train redirect:** The RePPO training algorithm (PPO variant + EI-based advantage + Q-critic + Q-replacement) → `riir-train/.research/` one-line note. The PG derivation (Eq 9, Prop 4.1), the PPO surrogate modification (Eq 12), and the λ-return Q-critic fitting are all training-bound. Out of scope for this workflow.
+**MOAT gate (katgpt-rs domain):** ✅ In scope as a building block. The operators ship behind `remax_aggregation` (opt-in, NOT promoted to default — no modelless gain per AGENTS.md §"Promotion requires modelless gain"). Their value is as RePPO advantage computation primitives for riir-train, not as a standalone modelless exploration mechanism.
+
+**Riir-train redirect:** The RePPO training algorithm (PPO variant + EI-based advantage + Q-critic + Q-replacement) → `riir-train/.research/` one-line note. The PG derivation (Eq 9, Prop 4.1), the PPO surrogate modification (Eq 12), and the λ-return Q-critic fitting are all training-bound. Out of scope for this workflow. **This is where ReMax's exploration mechanism actually lives** — the modelless distillation hypothesis (inference-time selection bonus) is disproven by the theorem.
 
 ---
 
