@@ -1305,6 +1305,15 @@ pub mod trigger_gate;  // Compute-tier trigger gate — always-on
 pub mod dllm_solver;  // Discrete Critical Interval Solver Switching (Plan 222)
 #[cfg(feature = "modality_pruned_load")]
 pub mod pipeline_pruner;  // Pipeline Pruner — modality-aware inference pipeline selection (Plan 227 Phase 3)
+// ── Phase 12 T4.3: folder moves from katgpt-rs/src/.
+#[cfg(feature = "mux_latent_context")]
+pub mod mux_latent;  // MUX-Latent Context Compression (Research 211, Plan 238)
+#[cfg(feature = "closed_unit_compaction")]
+pub mod compaction;  // Closed-Unit Compaction Gate — CUCG (Plan 333)
+#[cfg(feature = "cubical_nerve")]
+pub mod cubical_nerve;  // CubicalNerve CAT(0) cubical complexes (Plan 252 Phase 3)
+#[cfg(feature = "breakeven_routing")]
+pub mod breakeven;  // Breakeven complexity cost-aware routing (Plan 250)
 // Feature-gated (mirror root feature names):
 #[cfg(feature = "cce_moderator")]
 pub mod cce;

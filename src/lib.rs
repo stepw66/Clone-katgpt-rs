@@ -24,7 +24,9 @@ pub use katgpt_band::band_conditioner;
 #[cfg(feature = "bckvss")]
 pub use katgpt_band::bckvss;
 #[cfg(feature = "breakeven_routing")]
-pub mod breakeven;
+// Phase 12 absorption (Proposal 003, 2026-07-04): module moved to katgpt-core.
+// Re-export preserves `katgpt_rs::breakeven::*` paths.
+pub use katgpt_core::breakeven;
 // Phase 5 absorption (Proposal 003, 2026-07-04): module moved to katgpt-kv.
 // Re-export preserves `katgpt_rs::cache_prune::*` paths.
 #[cfg(feature = "cache_prune")]
@@ -76,9 +78,11 @@ pub use katgpt_core::cumprodsum;
 // Phase 6 (2026-06-25): 7/7 GOAT gates PASS. Re-exports the public surface
 // for ergonomic use.
 #[cfg(feature = "closed_unit_compaction")]
-pub mod compaction;
+// Phase 12 absorption (Proposal 003, 2026-07-04): module moved to katgpt-core.
+// Re-export preserves `katgpt_rs::compaction::*` paths.
+pub use katgpt_core::compaction;
 #[cfg(feature = "closed_unit_compaction")]
-pub use compaction::{
+pub use katgpt_core::compaction::{
     Backstop, ClosedUnitCompactionGate, ClosedUnitCompactionGateBuilder, CombineOp,
     CompactionAuditRecord, CompactionDecision, DecisionKind, FireRule, FireRuleEval, PredicateAudit,
     PredicateReason, PredicateResult, Rubric, RubricScratch, RubricVerdict,
@@ -97,7 +101,9 @@ pub mod data_probe;
 // Shared diagonal gate abstraction (GDN2 + Wall).
 // Available when either gdn2_attention or wall_attention is enabled.
 #[cfg(feature = "cubical_nerve")]
-pub mod cubical_nerve;
+// Phase 12 absorption (Proposal 003, 2026-07-04): module moved to katgpt-core.
+// Re-export preserves `katgpt_rs::cubical_nerve::*` paths.
+pub use katgpt_core::cubical_nerve;
 // Phase 11 absorption (Proposal 003, 2026-07-04): module moved to katgpt-band.
 // Re-export preserves `katgpt_rs::collider_pruner::*` paths.
 #[cfg(feature = "collider_consistency")]
@@ -390,7 +396,9 @@ static GLOBAL_ALLOC: katgpt_core::alloc::TrackingAllocator = katgpt_core::alloc:
 pub use katgpt_core::mux_demux;
 
 #[cfg(feature = "mux_latent_context")]
-pub mod mux_latent;
+// Phase 12 absorption (Proposal 003, 2026-07-04): module moved to katgpt-core.
+// Re-export preserves `katgpt_rs::mux_latent::*` paths.
+pub use katgpt_core::mux_latent;
 
 // Memory Soup LoRA Artifact Importer (Plan 253 T19 G5).
 // Standalone MSP0 binary format parser — uses only std + blake3, no riir-gpu dep.
@@ -411,7 +419,7 @@ pub use katgpt_core::llmexec_guard;
 pub use katgpt_validator as validator;
 
 #[cfg(feature = "breakeven_routing")]
-pub use breakeven::{BreakevenBandit, BreakevenStats, BreakevenTierPair, BreakevenTracker};
+pub use katgpt_core::breakeven::{BreakevenBandit, BreakevenStats, BreakevenTierPair, BreakevenTracker};
 
 #[cfg(feature = "tf_loop")]
 pub mod tf_loop;

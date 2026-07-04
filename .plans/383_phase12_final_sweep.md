@@ -74,7 +74,12 @@ Anything beyond the [stay] list is a missed move — log + fix."*
         forwarded. 5 dllm_solver sub-features added to katgpt-core
         [q_sample_solver, self_cond_draft, mbr_tree_select, d2f_3sr_warm_start,
         rcd_residual]. katgpt_core:: refs in dllm_solver.rs rewritten to crate::.)
-      - [ ] T4.3 — katgpt-core folders: mux_latent, compaction, cubical_nerve, data_probe, breakeven
+      - [x] T4.3 — katgpt-core folders: mux_latent, compaction, cubical_nerve, breakeven ✅
+        (4 folders moved to katgpt-core. data_probe/ DEFERRED — naming conflict
+        with existing katgpt-core/src/data_probe.rs (sink_aware_attn module,
+        Plan 287); root src/data_probe/ is the original Plan 141 diagnostics
+        module with 8 files. Rust can't have both data_probe.rs and data_probe/
+        in the same crate. Needs a rename or merge before moving.)
       - [ ] T4.4 — katgpt-pruners: interval_pruner, lattice_operad, freq_bandit
       - [ ] T4.5 — katgpt-speculative: progressive_mcgs, fold
       - [ ] T4.6 — katgpt-transformer cascade: thinking_cot + swir/strategy_adapter

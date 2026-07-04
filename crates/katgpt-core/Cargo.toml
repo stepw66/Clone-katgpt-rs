@@ -272,6 +272,13 @@ self_cond_draft = []  # Opt-in: 2-pass self-conditioned speculative draft
 mbr_tree_select = []  # Opt-in: MBR selection from DDTree
 d2f_3sr_warm_start = []  # D2F 3SR warm-start config (Plan 291)
 rcd_residual = ["critical_interval_gate"]  # Residual Context Diffusion — entropy-weighted residual injection (Plan 258)
+# Phase 12 T4.3: folder moves from katgpt-rs/src/.
+mux_latent_context = []  # MUX-Latent Context Compression — inference-time context compression via vocabulary superposition (Research 211, Plan 238). DEFAULT-ON in root.
+mux_latent_wire = ["mux_latent_context"]  # MUX-Latent Wire Patch — latent-to-latent patching without decompress/recompress (Plan 243, opt-in)
+lclm_adaptive_lod = ["mux_latent_context"]  # LCLM Adaptive LOD — spectral energy-based adaptive compression ratio (Research 211, Plan 238 Phase 4, opt-in)
+closed_unit_compaction = []  # Closed-Unit Compaction Gate (CUCG) — generic rubric-gated trajectory compaction primitive (Plan 333). DEFAULT-ON in root.
+cubical_nerve = []  # CubicalNerve CAT(0) cubical complexes from zone posets (Plan 252 Phase 3, Research 220). DEFAULT-ON in root.
+breakeven_routing = []  # Breakeven complexity cost-aware inference routing — per-tier amortization tracking (Plan 250). DEFAULT-ON in root.
 cce_moderator = []  # CCE — Coarse Correlated Equilibria moderator primitives (Plan 295 + Plan 300, Research 274). DEFAULT-ON.
 llmexec_guard = []  # LLMExecGuard — entropy-driven verification budgeting (Plan 223). DEFAULT-ON.
 memory_soup_lora = []  # Memory Soup LoRA — MSP0 binary format parser (Plan 290).
