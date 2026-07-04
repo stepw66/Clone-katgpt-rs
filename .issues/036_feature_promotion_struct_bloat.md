@@ -68,11 +68,11 @@ keeping `BanditStats` in a hotter cache line.
 
 ## Tasks
 
-- [ ] Benchmark `BanditPruner` struct size before/after the `Box<Extensions>` refactor
-- [ ] Implement `BanditExtensions` grouping
-- [ ] Verify all 130 katgpt-pruners tests pass
-- [ ] Run full bench suite, confirm Bandit update() ≥ 480M (within 5% of peak)
-- [ ] Apply same pattern to `AbsorbCompressLayer` if bench shows gain
+- [-] Benchmark `BanditPruner` struct size before/after the `Box<Extensions>` refactor — DEFERRED (2026-07-04 verification attempt: workspace build blocked by sibling agent's speculative-crate refactor cycle; decision is stay-deferred regardless — see "Verification attempt" below).
+- [-] Implement `BanditExtensions` grouping — DEFERRED (gain within measurement noise; refactor risk not justified).
+- [-] Verify all 130 katgpt-pruners tests pass — DEFERRED (blocked on T1).
+- [-] Run full bench suite, confirm Bandit update() ≥ 480M (within 5% of peak) — DEFERRED (re-evaluation trigger documented below).
+- [-] Apply same pattern to `AbsorbCompressLayer` if bench shows gain — DEFERRED (AbsorbCompress already *exceeds* May-29 peak after Bench 372 fixes: 60.1M > 57.4M).
 
 ## Deferral Rationale
 
