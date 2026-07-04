@@ -185,12 +185,11 @@ mux_demux = []
 
 # Directional / frequency / wealth
 directional_credit = []
-# freq_bandit lives in the main katgpt-rs crate (src/freq_bandit.rs). It cannot be
-# forwarded here because the integration code in bfcp_lfu_shard.rs references
-# `crate::freq_bandit::*` which only exists in the main crate. The
-# `#[cfg(feature = "freq_bandit")]` blocks in bfcp_lfu_shard.rs compile out
-# (with unexpected_cfg warnings) and the main crate re-implements the
-# integration locally if needed.
+# Phase 12 T4.4 (2026-07-04): modules moved from katgpt-rs/src/.
+freq_bandit = []  # FrequencyBandit — RV-gated pruning arm selection (Plan 202). DEFAULT-ON in root.
+rv_bandit_pruning = []  # RV Bandit Pruning — FrequencyBandit top-ρ arm suppression sub-feature (Plan 202 GOAT). DEFAULT-ON via rv_gated_routing.
+interval_pruner = []  # IntervalPruner — interval-closure for valid token sets (Plan 252 Phase 1). DEFAULT-ON in root.
+lattice_operad = []  # LatticeOperad — canonical AND/OR pruner composition (Plan 252 Phase 2). DEFAULT-ON in root.
 wealth_pruner = ["bandit"]
 nds_proxy = ["bandit"]
 curvature_alloc = ["bandit"]
@@ -334,12 +333,7 @@ mux_latent_context = []
 # declare them as expected cfg values so check-cfg does not flag them; the
 # main crate re-implements the integration locally where needed.
 [lints.rust]
-# `freq_bandit` is the only remaining check-cfg-only entry: it has real
-# `#[cfg(feature = "freq_bandit")]` blocks in bfcp_lfu_shard.rs (~14 refs) but
-# the integration references `crate::freq_bandit::*` which exists only in the
-# main crate (see comment ~line 162). Declaring it as a feature here would
-# break compilation, so it stays in the allowlist. All other cfg'd features
-# in this crate are now declared in [features] above.
-unexpected_cfgs = { level = "warn", check-cfg = [
-    'cfg(feature, values("freq_bandit"))',
-] }
+# All cfg'd features in this crate are now declared in [features] above.
+# The historical freq_bandit check-cfg allowlist entry was removed in Phase 12
+# T4.4 (2026-07-04) — freq_bandit is now a real feature in this crate after
+# the module was moved from katgpt-rs/src/.

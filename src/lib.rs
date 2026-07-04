@@ -155,7 +155,9 @@ pub mod fold;
 #[cfg(feature = "cce_moderator")]
 pub use katgpt_core::cce;
 #[cfg(feature = "freq_bandit")]
-pub mod freq_bandit;
+// Phase 12 absorption (Proposal 003, 2026-07-04): module moved to katgpt-pruners.
+// Re-export preserves `katgpt_rs::freq_bandit::*` paths.
+pub use katgpt_pruners::freq_bandit;
 #[cfg(feature = "gdn2_attention")]
 pub mod gdn2;
 #[cfg(all(target_os = "macos", feature = "gpu_inference"))]
@@ -170,11 +172,15 @@ pub use katgpt_quant::hybrid_oct_pq;
 pub mod inference_backend;
 pub mod inference_router;
 #[cfg(feature = "interval_pruner")]
-pub mod interval_pruner;
+// Phase 12 absorption (Proposal 003, 2026-07-04): module moved to katgpt-pruners.
+// Re-export preserves `katgpt_rs::interval_pruner::*` paths.
+pub use katgpt_pruners::interval_pruner;
 #[cfg(feature = "iso_quant")]
 pub use katgpt_quant::iso_quant;
 #[cfg(feature = "lattice_operad")]
-pub mod lattice_operad;
+// Phase 12 absorption (Proposal 003, 2026-07-04): module moved to katgpt-pruners.
+// Re-export preserves `katgpt_rs::lattice_operad::*` paths.
+pub use katgpt_pruners::lattice_operad;
 #[cfg(feature = "gauge_invariant")]
 pub use katgpt_spectral::gauge_invariant;
 pub use katgpt_spectral::spectral_retract;

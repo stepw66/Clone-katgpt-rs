@@ -19,8 +19,8 @@
 //! `reward = acceptance_rate × latency_improvement` from speculative decode.
 //! Uses **sigmoid** activation (NOT softmax) per project constraint.
 
-use crate::trigger_gate::ComputeTier;
-use crate::types::Rng;
+use katgpt_core::trigger_gate::ComputeTier;
+use katgpt_core::types::Rng;
 
 // ── Frequency Band ─────────────────────────────────────────────
 

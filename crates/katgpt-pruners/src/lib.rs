@@ -1176,3 +1176,14 @@ pub use soft_reject::{
     NoRelaxation, RelaxationStrategy, SoftRejectConfig, SoftRejectVerdict,
     batch_soft_reject_with_relax, soft_reject_decide, soft_reject_with_relax,
 };
+
+// ── Phase 12 T4.4 (2026-07-04): modules moved from katgpt-rs/src/. ──
+// IntervalPruner — interval-closure for valid token sets (Plan 252 Phase 1).
+#[cfg(feature = "interval_pruner")]
+pub mod interval_pruner;
+// LatticeOperad — canonical AND/OR pruner composition (Plan 252 Phase 2).
+#[cfg(feature = "lattice_operad")]
+pub mod lattice_operad;
+// FrequencyBandit — RV-gated pruning arm selection (Plan 202).
+#[cfg(feature = "freq_bandit")]
+pub mod freq_bandit;

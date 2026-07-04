@@ -80,7 +80,12 @@ Anything beyond the [stay] list is a missed move — log + fix."*
         Plan 287); root src/data_probe/ is the original Plan 141 diagnostics
         module with 8 files. Rust can't have both data_probe.rs and data_probe/
         in the same crate. Needs a rename or merge before moving.)
-      - [ ] T4.4 — katgpt-pruners: interval_pruner, lattice_operad, freq_bandit
+      - [x] T4.4 — katgpt-pruners: interval_pruner, lattice_operad, freq_bandit ✅
+        (interval_pruner/ 3 files, lattice_operad/ 5 files, freq_bandit.rs 1 file →
+        katgpt-pruners. freq_bandit.rs imports rewritten: crate::trigger_gate →
+        katgpt_core::trigger_gate, crate::types::Rng → katgpt_core::types::Rng.
+        rv_bandit_pruning sub-feature forwarded. Stale check-cfg allowlist for
+        freq_bandit removed — it's now a real feature.)
       - [ ] T4.5 — katgpt-speculative: progressive_mcgs, fold
       - [ ] T4.6 — katgpt-transformer cascade: thinking_cot + swir/strategy_adapter
       - [ ] T4.7 — katgpt-attn: 8 dash_attn primitives (+ dep wiring for meta_router, sat_analysis)
