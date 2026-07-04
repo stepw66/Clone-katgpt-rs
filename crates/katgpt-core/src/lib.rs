@@ -370,6 +370,14 @@ pub use roofline::{
     roofline_estimate,
 };
 
+#[cfg(feature = "ane_roofline")]
+pub mod ane_roofline;
+#[cfg(feature = "ane_roofline")]
+pub use ane_roofline::{
+    AneBound, AneCost, AneFamily, AneOpShape, AnePeaks, Device, ane_conv3x3_cost, ane_estimate,
+    ane_gemv_cost, ane_gemm_cost,
+};
+
 #[cfg(feature = "and_or_dtree")]
 pub mod and_or;
 #[cfg(feature = "and_or_dtree")]

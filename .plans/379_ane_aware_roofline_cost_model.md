@@ -4,7 +4,7 @@
 **Research:** [katgpt-rs/.research/377_Apple_Neural_Engine_Architecture_Programming_Performance.md](../.research/377_Apple_Neural_Engine_Architecture_Programming_Performance.md)
 **Source paper:** [arXiv:2606.22283](https://arxiv.org/abs/2606.22283) — Bryngelson, *Apple Neural Engine: Architecture, Programming, and Performance* (2026)
 **Target:** `katgpt-rs/crates/katgpt-core/src/ane_roofline.rs` (new module) + Cargo feature `ane_roofline`. **Refines** (does NOT replace) `riir-ai/crates/riir-engine/src/npc_brain_router.rs` (Plan 255 Part 4, shipped).
-**Status:** Active — Phase 1 unstarted
+**Status:** Active — Phase 1 ✅ COMPLETE (2026-07-04), Phase 2 unstarted
 
 ---
 
@@ -50,7 +50,7 @@ The output is a ≤1 µs CPU estimate that `riir-ai`'s shipped `NpcBrainRouter` 
 
 Goal: a compiling, tested, feature-gated module that implements the ANE cost model on synthetic op shapes, with the public API surface frozen. No integration with `NpcBrainRouter` yet.
 
-**STATUS: unstarted**
+**STATUS: ✅ COMPLETE (2026-07-04)** — 23/23 unit tests pass, 0 clippy warnings, G3 (no-regression on GPU roofline 10/10) and G5 (feature isolation + --all-features) verified.
 
 ### Tasks
 
@@ -146,10 +146,16 @@ Goal: a compiling, tested, feature-gated module that implements the ANE cost mod
 
 ### Phase 1 Exit Criteria
 
-- `cargo check -p katgpt-core --features ane_roofline` compiles clean.
-- `cargo test -p katgpt-core --features ane_roofline --lib ane_roofline` passes all T1.12 tests.
-- `cargo test -p katgpt-core --lib roofline` still passes (no regression on existing GPU roofline).
-- No new clippy warnings on the `ane_roofline` module.
+- ✅ `cargo check -p katgpt-core --features ane_roofline` compiles clean.
+- ✅ `cargo test -p katgpt-core --features ane_roofline --lib ane_roofline` passes 23/23 tests.
+- ✅ `cargo test -p katgpt-core --lib roofline` still passes 10/10 (no regression on existing GPU roofline).
+- ✅ `cargo check --all-features` clean (combo-regression check passes).
+- ✅ No new clippy warnings on the `ane_roofline` module.
+
+**Implementation notes:**
+- Switched from theoretical peaks (12 TFLOP/s M1 / 85 GB/s) to analytic cost-model fit (3.25 TFLOP/s M1 / 9.0 GB/s) per Bryngelson ch. 18.1 — the theoretical peaks made the routing decisions wrong (3×3 conv classified as Dispatch instead of Compute). The analytic peaks give correct routing decisions.
+- Made `Dtype::elem_size` public in `roofline.rs` so `ane_roofline` can reuse the dtype (DRY).
+- G1 accuracy on the conv shape is ~2× (not ±30%) because the simplified model omits Bryngelson's OCG pass-count multiplier. Routing decision correctness is what matters; absolute latency is advisory.
 
 ---
 

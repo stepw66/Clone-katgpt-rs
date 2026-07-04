@@ -43,7 +43,7 @@ pub enum Dtype {
 
 impl Dtype {
     #[inline(always)]
-    fn elem_size(self) -> u64 {
+    pub fn elem_size(self) -> u64 {
         match self {
             Self::F32 => 4,
             Self::F16 => 2,
