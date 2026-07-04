@@ -368,6 +368,25 @@ The global verdict tiers (Super-GOAT / GOAT / Gain / Pass) measure *how strong* 
 
 **`katgpt-rs` promote/demote tracking (per stack):** every primitive that lands in the public engine gets a feature flag + benchmark + GOAT gate, and the verdict note MUST record the per-stack outcome — which transformer stack slot (attention / KV / sampling / speculative / pruning) and whether it promoted to default or stayed opt-in. Re-gate on feature touch. Demote the loser when a newer primitive wins the same slot. This per-stack ledger is the engine's quality contract.
 
+### 1.7. Pre-plan cherry-pick audit (if consuming a katgpt-rs primitive)
+
+**If your plan will consume, wire, or fuse with a katgpt-rs primitive into riir-*** — run the `goat-audit` skill before opening the plan. The audit answers two questions that prevent duplicate work:
+
+1. **Is the primitive already wired into riir-\*?** (stall detection — default-on in katgpt-rs for ≥7 days with zero riir-\* consumer = candidate gap, OR already wired = no plan needed)
+2. **Is riir-\* shipping a local duplicate of the substrate?** (DRY violation — the Issue 019 class: `riir-engine/src/kvarn_quality.rs` defines its own `KvCacheQualityReport` instead of consuming `katgpt-kv`)
+
+**When to run goat-audit:**
+- The plan's target repo is riir-ai / riir-chain / riir-neuron-db AND the plan consumes a katgpt-rs feature/struct/function.
+- The plan is a Super-GOAT fusion that touches a katgpt-rs primitive + a riir-\* runtime.
+- Quarterly hygiene gate (re-audit after every major katgpt-rs release).
+
+**When NOT to run goat-audit:**
+- The plan is purely katgpt-rs-internal (no riir-\* consumer).
+- The plan is a bug fix with no cross-repo angle.
+- The plan is training-only (→ riir-train).
+
+Invoke via the `skill` tool with name `goat-audit`. The skill's three-layer grep (feature-name + struct/function-name + consumer-vs-duplicate) catches both false negatives (Issue 003's `salience_tri_gate` miss) and false positives (Issue 019's `kvarn` duplicate flagged as wired).
+
 ### 2. If gain (or GOAT), plan it
 
 Add plan `.md` to `katgpt-rs/.plans/` (modelless), `riir-ai/.plans/` (runtime/game), and/or `riir-chain/.plans/` (chain / LatCal / neuron_db). Use `## Phase N` sections with `- [ ]` per task (mark `- [x]` when done). **Never** plan into `riir-train` from this workflow.
