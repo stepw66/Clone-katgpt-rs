@@ -562,35 +562,7 @@ mod tests {
     use crate::operators::graph_laplacian;
     use crate::types::{CellComplex, CochainField};
 
-    /// Helper: build a rank-0 `w×h` grid cochain with `dim` channels, zeroed.
-    fn zero_field(cx: &CellComplex, dim: usize) -> CochainField {
-        CochainField::zeros(0, cx.n_vertices(), dim)
-    }
-
-    /// Helper: place a Gaussian bump of amplitude `amp` at grid cell `(cx_pos, cy_pos)`
-    /// into channel `ch` of a 2D-grid cochain. Non-negative everywhere (so ReLU
-    /// is identity — used for linear-vs-Euler comparison tests).
-    fn place_bump(
-        field: &mut CochainField,
-        w: usize,
-        h: usize,
-        cx_pos: usize,
-        cy_pos: usize,
-        ch: usize,
-        amp: f32,
-        sigma: f32,
-    ) {
-        let dim = field.dim;
-        for y in 0..h {
-            for x in 0..w {
-                let dx = x as f32 - cx_pos as f32;
-                let dy = y as f32 - cy_pos as f32;
-                let r2 = dx * dx + dy * dy;
-                let v = amp * (-r2 / (2.0 * sigma * sigma)).exp();
-                field.data[(y * w + x) * dim + ch] = v;
-            }
-        }
-    }
+    use crate::test_common::{l2_dist, l2_norm, place_bump, zero_field};
 
     /// Helper: one step of linear (no ReLU gate) Euler propagation.
     /// `h₁ = h₀ + dt·(-h₀ + L·h₀ + motor·h₀)` where L is the graph Laplacian.
@@ -633,22 +605,6 @@ mod tests {
             linear_euler_step(cx, &mut h, motor_vec, motor_dim, dt);
         }
         h
-    }
-
-    /// Helper: L2 norm of a cochain field.
-    fn l2_norm(field: &CochainField) -> f32 {
-        field.data.iter().map(|v| v * v).sum::<f32>().sqrt()
-    }
-
-    /// Helper: L2 distance between two fields.
-    fn l2_dist(a: &CochainField, b: &CochainField) -> f32 {
-        debug_assert_eq!(a.data.len(), b.data.len());
-        a.data
-            .iter()
-            .zip(b.data.iter())
-            .map(|(x, y)| (x - y) * (x - y))
-            .sum::<f32>()
-            .sqrt()
     }
 
     // ── T1.1: DecEigendecomposition struct + compute ──────────────────────────

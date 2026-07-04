@@ -218,35 +218,7 @@ mod tests {
     use super::*;
     use crate::types::{CellComplex, CochainField};
 
-    /// Build a rank-0 `n×n` grid cochain with `dim` channels, zeroed.
-    fn zero_field(cx: &CellComplex, dim: usize) -> CochainField {
-        CochainField::zeros(0, cx.n_vertices(), dim)
-    }
-
-    /// Place a Gaussian bump of amplitude `amp` at grid cell `(cx_pos, cy_pos)`
-    /// into channel `ch` of a 2D-grid cochain. `w`/`h` are the grid dimensions.
-    fn place_bump(
-        field: &mut CochainField,
-        w: usize,
-        h: usize,
-        cx_pos: usize,
-        cy_pos: usize,
-        ch: usize,
-        amp: f32,
-        sigma: f32,
-    ) {
-        let dim = field.dim;
-        for y in 0..h {
-            for x in 0..w {
-                let dx = x as f32 - cx_pos as f32;
-                let dy = y as f32 - cy_pos as f32;
-                let r2 = dx * dx + dy * dy;
-                let v = amp * (-r2 / (2.0 * sigma * sigma)).exp();
-                let idx = (y * w + x) * dim + ch;
-                field.data[idx] = v;
-            }
-        }
-    }
+    use crate::test_common::{place_bump, zero_field};
 
     /// Centroid (energy-weighted) of channel `ch` over a `w×h` grid.
     fn centroid(field: &CochainField, w: usize, h: usize, ch: usize) -> (f32, f32) {

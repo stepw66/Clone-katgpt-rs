@@ -113,3 +113,12 @@ pub use bom_heat_kernel::{
 };
 
 pub use types::{CellComplex, CoboundaryIndex, CochainField, MAX_RANK};
+
+// Shared test helpers for DEC operator tests (Issue 037 T1 verdict).
+// Extracted from 3 duplicated copies in heat_kernel.rs, motor_gated.rs,
+// nonlinear_heat_kernel.rs to eliminate ~80 LOC of drift risk and 3 of 4
+// clippy::too_many_arguments lints. Declared at crate root so all test modules
+// share a single compilation via `crate::test_common::*`.
+#[cfg(test)]
+#[path = "../tests/common/mod.rs"]
+mod test_common;

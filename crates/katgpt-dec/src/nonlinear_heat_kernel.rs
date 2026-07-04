@@ -464,34 +464,7 @@ mod tests {
     use crate::heat_kernel::DecEigendecomposition;
     use crate::types::{CellComplex, CochainField};
 
-    /// Helper: build a rank-0 `w×h` grid cochain with `dim` channels, zeroed.
-    fn zero_field(cx: &CellComplex, dim: usize) -> CochainField {
-        CochainField::zeros(0, cx.n_vertices(), dim)
-    }
-
-    /// Helper: place a Gaussian bump of amplitude `amp` at grid cell `(cx_pos, cy_pos)`
-    /// into channel `ch` of a 2D-grid cochain.
-    fn place_bump(
-        field: &mut CochainField,
-        w: usize,
-        h: usize,
-        cx_pos: usize,
-        cy_pos: usize,
-        ch: usize,
-        amp: f32,
-        sigma: f32,
-    ) {
-        let dim = field.dim;
-        for y in 0..h {
-            for x in 0..w {
-                let dx = x as f32 - cx_pos as f32;
-                let dy = y as f32 - cy_pos as f32;
-                let r2 = dx * dx + dy * dy;
-                let v = amp * (-r2 / (2.0 * sigma * sigma)).exp();
-                field.data[(y * w + x) * dim + ch] = v;
-            }
-        }
-    }
+    use crate::test_common::{l2_dist, l2_norm, place_bump, zero_field};
 
     /// Helper: offset all cells in a channel by a constant (creates mixed-sign fields).
     fn offset_channel(field: &mut CochainField, ch: usize, offset: f32) {
@@ -502,25 +475,6 @@ mod tests {
         }
     }
 
-    /// Helper: L2 norm of a cochain field (all channels).
-    fn l2_norm(field: &CochainField) -> f32 {
-        field.data.iter().map(|&v| v * v).sum::<f32>().sqrt()
-    }
-
-    /// Helper: L2 distance between two cochain fields.
-    fn l2_dist(a: &CochainField, b: &CochainField) -> f32 {
-        debug_assert_eq!(a.data.len(), b.data.len());
-        a.data
-            .iter()
-            .zip(b.data.iter())
-            .map(|(&x, &y)| {
-                let d = x - y;
-                d * d
-            })
-            .sum::<f32>()
-            .sqrt()
-    }
-
     /// Helper: one step of nonlinear (ReLU-gated) Euler propagation.
     ///
     /// Mirrors `evolve_motor_gated_field` (Plan 357) exactly: split-step
@@ -529,6 +483,7 @@ mod tests {
     /// with default features only.
     ///
     /// `h_{t+1} = (1+dt·motor)·((1-dt)·h + dt·Δ·ReLU(h))`
+    #[allow(clippy::too_many_arguments, reason = "test-only reference impl mirroring evolve_motor_gated_field (Plan 357); the 8 args (cx, h, motor_vec, motor_dim, dt, relu_slope, scratch_lap, scratch_relu) match the production operator signature by design — drift between this Euler baseline and the production split-step is what the nonlinear heat kernel tests detect, so the signature must match")]
     fn nonlinear_euler_step(
         cx: &CellComplex,
         h: &mut CochainField,
