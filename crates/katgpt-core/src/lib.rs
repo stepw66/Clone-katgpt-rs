@@ -1156,6 +1156,11 @@ pub use diversity::temp::{
     LossKernel, extrapolated_snapshot_schedule, lipschitz_gradient_bound, pairwise_bound,
     perturbed_loss_vector, select_diverse_subset,
 };
+// Plan 367 Fusion C — QMC variant of `extrapolated_snapshot_schedule`.
+// Low-discrepancy noise coverage → more diverse loss vectors per unit K.
+// Requires both TEMP substrate and the QMC source trait.
+#[cfg(all(feature = "temp_loss_fingerprint", feature = "qmc_sampling"))]
+pub use diversity::temp::extrapolated_snapshot_schedule_qmc;
 
 // Manifold Bandits — Latent Task Tree + Hierarchical Thompson Sampler +
 // BayesianFilterArm (Plan 370, Research 370, arXiv:2606.19750 McKenzie et al.

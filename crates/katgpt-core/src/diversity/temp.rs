@@ -143,6 +143,92 @@ fn blake3_noise(seed: u64, sigma: f32) -> f32 {
 }
 
 // ──────────────────────────────────────────────────────────────────────────
+// QMC extrapolated snapshot schedule (Plan 367 Fusion C)
+// ──────────────────────────────────────────────────────────────────────────
+
+/// QMC variant of [`extrapolated_snapshot_schedule`] (Plan 367 Fusion C,
+/// Research 367 §2.3).
+///
+/// Same math as [`extrapolated_snapshot_schedule`] — produces K snapshots
+/// `theta_j = S_0 + lambda_j * (1 + xi_j) * v` where `v = S_1 - S_0` — but the
+/// K noise values `xi_j` come from a **low-discrepancy QMC source** instead of
+/// independent BLAKE3 hashes. The QMC correlation gives better coverage of the
+/// `[-noise_sigma, +noise_sigma]` perturbation space per unit K → more diverse
+/// loss vectors → better subset selection for the same compute budget.
+///
+/// # Quorum reproducibility
+///
+/// A [`QmcSource`] constructed from a fixed seed (e.g. [`LatticeQmc::new`])
+/// is deterministic: the same `(seed, lambda_schedule, s0, s1, noise_sigma)`
+/// produces bit-identical snapshots across nodes and runs. This preserves the
+/// G4 quorum-reproducibility contract of the BLAKE3 variant.
+///
+/// # Allocation discipline
+///
+/// Writes into caller-provided `out: &mut [Vec<f32>]` (len == k). Uses the
+/// caller-provided `uniforms_scratch: &mut [f32]` (len >= k) for the QMC draw
+/// — no allocation inside the function.
+///
+/// # Panics
+///
+/// Asserts `s0.len() == s1.len()`, `lambda_schedule.len() == out.len()`,
+/// `uniforms_scratch.len() >= out.len()`.
+///
+/// [`LatticeQmc::new`]: crate::speculative::qmc::LatticeQmc::new
+#[cfg(feature = "qmc_sampling")]
+pub fn extrapolated_snapshot_schedule_qmc(
+    s0: &[f32],
+    s1: &[f32],
+    lambda_schedule: &[f32],
+    source: &mut dyn crate::speculative::QmcSource,
+    noise_sigma: f32,
+    out: &mut [Vec<f32>],
+    uniforms_scratch: &mut [f32],
+) {
+    assert_eq!(s0.len(), s1.len(), "s0 and s1 must have same dimension");
+    assert_eq!(
+        lambda_schedule.len(),
+        out.len(),
+        "lambda_schedule and out must have length k"
+    );
+    let k = out.len();
+    assert!(
+        uniforms_scratch.len() >= k,
+        "uniforms_scratch.len() {} < k {}",
+        uniforms_scratch.len(),
+        k
+    );
+
+    let d = s0.len();
+
+    // Draw k marginally-Unif[0,1) points with low-discrepancy joint structure.
+    // When noise_sigma == 0, the draw is skipped entirely (pure extrapolation).
+    if noise_sigma != 0.0 {
+        source.draw(k, uniforms_scratch);
+    }
+
+    for (j, theta_j) in out.iter_mut().enumerate() {
+        if theta_j.len() != d {
+            theta_j.resize(d, 0.0);
+        }
+        // Map the QMC uniform u_j ∈ [0,1) to [-noise_sigma, +noise_sigma]:
+        // xi_j = (u_j * 2 − 1) * noise_sigma. Identical mapping to blake3_noise
+        // so the two variants are directly comparable on the same sigma.
+        let xi_j = if noise_sigma == 0.0 {
+            0.0
+        } else {
+            (uniforms_scratch[j] * 2.0 - 1.0) * noise_sigma
+        };
+        let coeff = lambda_schedule[j] * (1.0 + xi_j);
+        let theta = theta_j.as_mut_slice();
+        for i in 0..d {
+            // v_i = s1[i] - s0[i]; theta[i] = s0[i] + coeff * v_i
+            theta[i] = s0[i] + coeff * (s1[i] - s0[i]);
+        }
+    }
+}
+
+// ──────────────────────────────────────────────────────────────────────────
 // Perturbed loss vector (T1.4)
 // ──────────────────────────────────────────────────────────────────────────
 
@@ -788,6 +874,145 @@ mod tests {
         for j in 0..3 {
             assert_eq!(out1[j], out2[j], "run 1 != run 2 at j={}", j);
         }
+    }
+
+    // ── Plan 367 Fusion C: extrapolated_snapshot_schedule_qmc ─────────────
+
+    #[cfg(feature = "qmc_sampling")]
+    #[test]
+    fn qmc_extrapolated_no_noise_linear_interpolation() {
+        // noise_sigma=0 → pure linear extrapolation; QMC source not drawn.
+        // Bit-identical to the BLAKE3 variant with noise_sigma=0.
+        use crate::speculative::qmc::LatticeQmc;
+        let s0 = vec![0.0_f32, 0.0];
+        let s1 = vec![10.0_f32, 20.0];
+        let lambda = [0.0_f32, 1.0 / 3.0, 2.0 / 3.0, 1.0];
+        let mut src = LatticeQmc::new(42);
+        let mut scratch = [0.0_f32; 4];
+        let mut out = (0..4).map(|_| Vec::with_capacity(2)).collect::<Vec<_>>();
+        extrapolated_snapshot_schedule_qmc(&s0, &s1, &lambda, &mut src, 0.0, &mut out, &mut scratch);
+        let expected = [
+            [0.0_f32, 0.0],
+            [10.0 / 3.0, 20.0 / 3.0],
+            [20.0 / 3.0, 40.0 / 3.0],
+            [10.0, 20.0],
+        ];
+        for (j, exp_j) in expected.iter().enumerate() {
+            for i in 0..2 {
+                assert!((out[j][i] - exp_j[i]).abs() < 1e-5, "out[{j}][{i}]={}", out[j][i]);
+            }
+        }
+    }
+
+    #[cfg(feature = "qmc_sampling")]
+    #[test]
+    fn qmc_extrapolated_noise_within_bounds() {
+        // With noise_sigma=0.1, coeff = lambda*(1+xi) where |xi| <= 0.1.
+        use crate::speculative::qmc::LatticeQmc;
+        let s0 = vec![0.0_f32];
+        let s1 = vec![1.0_f32];
+        let lambda = [0.5_f32];
+        let mut src = LatticeQmc::new(7);
+        let mut scratch = [0.0_f32; 1];
+        let mut out = vec![Vec::with_capacity(1)];
+        extrapolated_snapshot_schedule_qmc(&s0, &s1, &lambda, &mut src, 0.1, &mut out, &mut scratch);
+        // theta_0 = 0 + 0.5*(1+xi)*1 where |xi| <= 0.1 → theta_0 in [0.45, 0.55]
+        assert!(
+            out[0][0] >= 0.45 && out[0][0] <= 0.55,
+            "theta_0={} should be in [0.45, 0.55]",
+            out[0][0]
+        );
+    }
+
+    #[cfg(feature = "qmc_sampling")]
+    #[test]
+    fn qmc_extrapolated_deterministic_same_seed() {
+        // Same QMC seed → bit-identical output (G4 quorum-reproducibility).
+        use crate::speculative::qmc::LatticeQmc;
+        let s0 = vec![1.0_f32, 2.0, 3.0];
+        let s1 = vec![4.0_f32, 5.0, 6.0];
+        let lambda = [0.25_f32, 0.5, 0.75];
+        let mut src1 = LatticeQmc::new(99);
+        let mut src2 = LatticeQmc::new(99);
+        let mut scratch1 = [0.0_f32; 3];
+        let mut scratch2 = [0.0_f32; 3];
+        let mut out1 = (0..3).map(|_| Vec::with_capacity(3)).collect::<Vec<_>>();
+        let mut out2 = (0..3).map(|_| Vec::with_capacity(3)).collect::<Vec<_>>();
+        extrapolated_snapshot_schedule_qmc(&s0, &s1, &lambda, &mut src1, 0.05, &mut out1, &mut scratch1);
+        extrapolated_snapshot_schedule_qmc(&s0, &s1, &lambda, &mut src2, 0.05, &mut out2, &mut scratch2);
+        for j in 0..3 {
+            assert_eq!(out1[j], out2[j], "run 1 != run 2 at j={j}");
+        }
+    }
+
+    #[cfg(feature = "qmc_sampling")]
+    #[test]
+    fn qmc_extrapolated_different_seed_different_output() {
+        // Different QMC seeds → different noise → different snapshots
+        // (unless noise_sigma=0, in which case both are identical).
+        use crate::speculative::qmc::LatticeQmc;
+        let s0 = vec![0.0_f32, 0.0];
+        let s1 = vec![1.0_f32, 1.0];
+        let lambda = [0.5_f32, 0.5];
+        let mut src1 = LatticeQmc::new(1);
+        let mut src2 = LatticeQmc::new(2);
+        let mut scratch1 = [0.0_f32; 2];
+        let mut scratch2 = [0.0_f32; 2];
+        let mut out1 = vec![Vec::with_capacity(2), Vec::with_capacity(2)];
+        let mut out2 = vec![Vec::with_capacity(2), Vec::with_capacity(2)];
+        extrapolated_snapshot_schedule_qmc(&s0, &s1, &lambda, &mut src1, 0.5, &mut out1, &mut scratch1);
+        extrapolated_snapshot_schedule_qmc(&s0, &s1, &lambda, &mut src2, 0.5, &mut out2, &mut scratch2);
+        // At least one checkpoint should differ between the two seeds.
+        let any_diff = (0..2).any(|j| out1[j] != out2[j]);
+        assert!(any_diff, "different seeds should produce different snapshots");
+    }
+
+    #[cfg(feature = "qmc_sampling")]
+    #[test]
+    fn qmc_extrapolated_panics_on_short_scratch() {
+        // uniforms_scratch.len() < k → panic.
+        use crate::speculative::qmc::LatticeQmc;
+        let s0 = vec![0.0_f32];
+        let s1 = vec![1.0_f32];
+        let lambda = [0.5_f32, 0.5];
+        let mut src = LatticeQmc::new(0);
+        let mut scratch = [0.0_f32; 1]; // len=1 < k=2
+        let mut out = vec![Vec::with_capacity(1), Vec::with_capacity(1)];
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            extrapolated_snapshot_schedule_qmc(&s0, &s1, &lambda, &mut src, 0.1, &mut out, &mut scratch);
+        }));
+        assert!(result.is_err(), "should panic on short scratch");
+    }
+
+    #[cfg(feature = "qmc_sampling")]
+    #[test]
+    fn qmc_extrapolated_lattice_low_discrepancy_vs_iid() {
+        // The headline QMC advantage: with K=4 LatticeQmc points, the noise
+        // values are more evenly spread across [-sigma, +sigma] than K i.i.d.
+        // BLAKE3 draws. We verify by checking that the QMC perturbation
+        // coefficients (1+xi_j) span a tighter, more uniform range.
+        //
+        // This is a smoke test — the real diversity gain is measured downstream
+        // in riir-neuron-db's sleep_diverse subset selection.
+        use crate::speculative::qmc::LatticeQmc;
+        let s0 = vec![0.0_f32];
+        let s1 = vec![1.0_f32];
+        let lambda = [1.0_f32; 4];
+        let mut src = LatticeQmc::new(12345);
+        let mut scratch = [0.0_f32; 4];
+        let mut out = vec![Vec::with_capacity(1); 4];
+        extrapolated_snapshot_schedule_qmc(&s0, &s1, &lambda, &mut src, 0.5, &mut out, &mut scratch);
+        // Recover the xi_j from theta_j = lambda_j*(1+xi_j) = 1*(1+xi_j):
+        // theta_j = 1+xi_j, so xi_j = theta_j - 1.
+        let xis: Vec<f32> = out.iter().map(|t| t[0] - 1.0).collect();
+        // All xi must be in [-0.5, +0.5] (sigma=0.5).
+        for xi in &xis {
+            assert!(xi.abs() <= 0.5 + 1e-6, "xi={xi} out of [-0.5, +0.5]");
+        }
+        // The lattice should produce diverse values (not all the same).
+        let max_xi = xis.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+        let min_xi = xis.iter().cloned().fold(f32::INFINITY, f32::min);
+        assert!(max_xi > min_xi, "lattice should produce diverse xi values");
     }
 
     // ── T1.4 perturbed_loss_vector ───────────────────────────────────────

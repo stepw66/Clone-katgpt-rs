@@ -90,7 +90,7 @@ pub use sampling::sample_k_from_distribution_qmc;
 pub use qmc::{
     contiguous_block_bootstrap_pass_at_m, dyadic_bootstrap_pass_at_m_lattice,
     fill_noise_queries_gaussian_qmc, gaussianize_uniforms_inplace, inverse_normal_cdf,
-    BootstrapEstimate,
+    BootstrapEstimate, QmcSource,
 };
 
 // Plan 367 Fusion E — QmcHalter re-exports. Sample-efficiency-aware halting
