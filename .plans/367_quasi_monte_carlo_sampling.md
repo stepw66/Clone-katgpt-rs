@@ -144,7 +144,15 @@ The pre-existing `inverse_normal_cdf` implementation used Acklam's algorithm but
 
 These are consumers of the open primitive, each gets its own plan:
 
-- [ ] **riir-ai CLR × QuasiMoTTo** (R136 / Plan 316 consumer) — replace `sample_multinomial` (`riir-ai/crates/riir-engine/src/swir_validation/gemma2_backend.rs:81`) with a QMC sampler when K>1. Crowd-scale CLR cost drops ~25–47%. **Fusion B per R367 §2.3.** Separate plan in `riir-ai/.plans/`.
+- [x] **riir-ai CLR × QuasiMoTTo** (R136 / Plan 316 consumer) — replace `sample_multinomial` (`riir-ai/crates/riir-engine/src/swir_validation/gemma2_backend.rs:81`) with a QMC sampler when K>1. Crowd-scale CLR cost drops ~25–47%. **Fusion B per R367 §2.3.** Separate plan in `riir-ai/.plans/`.
+      **✅ DONE (2026-07-04)** — shipped directly under Plan 367 (per user instruction "Do NOT start a new plan"). `Gemma2DecodeBackend` gained three additions in `crates/riir-engine/src/swir_validation/gemma2_backend.rs`:
+      - `QmcMethod` enum (`Lattice`/`Stratified`/`Sobol`, default `Lattice` — the pass@k champion per R367 §1.1).
+      - `with_qmc_sampling(temperature, seed, method)` builder — replaces `with_temperature_sampling` for the K>1 path. Sets `qmc_source: Option<Box<dyn QmcSource>>` + carried `qmc_u: f32`; clears `rng` (last-builder-wins semantics).
+      - `prepare_qmc_rollouts(k)` — pre-draws K low-discrepancy initial coordinates in a single `source.draw(k, ...)` batch. **Critical:** Lattice/Stratified sources produce their low-discrepancy structure *within* a batch; calling `draw(1, ...)` K times yields K i.i.d. points (defeating the purpose). `reset()` consumes one pre-drawn coordinate per call; falls back to `draw(1, ...)` if no batch prepared (Sobol-correct, Lattice/Stratified degraded to i.i.d. — harmless for single-rollout Pass@1).
+      - Dispatch wiring in `decode_step()` + `prime()`: QMC descend (`sample_from_distribution_qmc` from `katgpt-core`) when `qmc_source.is_some()`, else i.i.d. `sample_multinomial`, else greedy argmax. Temperature scaling updated to check both `rng` and `qmc_source`.
+      - 8 new tests (12 total pass): builder source validity, default=Lattice, descend determinism given fixed u, marginal-exactness (respects distribution), coordinate carry, **K-batch low-discrepancy beats i.i.d.** (star discrepancy D*_qmc < 0.05 < D*_iid ≈ 0.12 at k=64), marginal uniformity (chi-square GoF over 32K points), trait-object usability.
+      - Feature isolation: `qmc_sampling` is default-on in `katgpt-core` (Plan 367 Phase 5 T5.7); riir-engine inherits it via the katgpt-core path dep. No new Cargo feature needed in riir-engine.
+      - **Modelless per mandate**: no weight mutation. Pure arithmetic construction (lattice offsets / stratified permutations / Sobol direction numbers) + inverse-CDF descend with rescaled-coordinate carry. Rule 3 latent-space update.
 - [ ] **riir-neuron-db QMC-TEMP** (Plan 005 consumer) — replace `ConsolidationPipeline::sleep_diverse`'s i.i.d. BLAKE3-seeded noise with a QMC lattice. **Fusion C per R367 §2.3.** Separate plan in `riir-neuron-db/.plans/`.
 - [ ] **katgpt-rs QmcHalter** (R205 consumer) — sample-efficiency-aware halter that estimates coverage from the actual QMC point set vs the union-bound ceiling `min(1, k·p)`. **Fusion E per R367 §2.3.** Separate plan in `katgpt-rs/.plans/`.
 
