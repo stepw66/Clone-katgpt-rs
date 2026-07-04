@@ -1100,6 +1100,32 @@ pub use branching::{
     RouteResult, VerifierGate, WriteDecision, max_orthogonal_branches,
 };
 
+// Post-Candidate Branch Router — distilled from Local Branch Routing
+// (arXiv:2606.25354, Yin et al. June 2026). The modelless inference mechanism
+// distilled to its open primitive: forward K candidate next-tokens, score each
+// post-candidate hidden state by dot-product onto a frozen direction, commit
+// the argmax (or perturbed-argmax sample with Logistic noise — the sigmoid
+// analog of Gumbel-max).
+//
+// Generalizes the shipped ColliderPruner::batch_is_valid_with_hidden from
+// binary prune/keep to relative route-and-commit. PoC-confirmed modelless
+// quality gain of +9pp to +26pp across 5 noise cells (Plan 377 Phase 1,
+// riir-ai/crates/riir-poc). Set-attention variant adds zero modelless value
+// (PoC §8 — within ±1pp of the dot-product router across v1 and v2) and stays
+// a riir-train follow-up (needs trained Q/K/V projections).
+//
+// Sigmoid (NEVER softmax) per AGENTS.md §2: sampling uses Logistic(0, β)
+// noise whose CDF is sigmoid(x/β), making the categorical sample a
+// sigmoid-family operation without any exp/softmax normalization.
+//
+// Opt-in until Plan 377 Phase 3 GOAT gate (G1 correctness ≥90%, G2 router
+// latency <1µs at K=3 D=64, G3 K=1 bit-identical to standard decode, G4
+// alloc-free hot path, G5 modelless, G6 sigmoid-not-softmax).
+#[cfg(feature = "local_branch_routing")]
+pub mod branch_routing;
+#[cfg(feature = "local_branch_routing")]
+pub use branch_routing::{ColliderRouterAdapter, DotProductRouter, PostCandidateRouter, PreservationScorer};
+
 // Sleep-Time Query Anticipator — open primitive for offline query anticipation
 // (Plan 334, Research 318, arXiv:2504.13171 Lin et al. Letta/Berkeley).
 // Implements the open math half: SleepTimeAnticipator orchestrates per-direction

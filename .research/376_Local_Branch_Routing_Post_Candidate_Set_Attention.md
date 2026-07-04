@@ -297,3 +297,49 @@ LBR's training (GRPO with tree-trajectory likelihood) → riir-train. Its infere
 - **SetAttentionRouter** stays as a riir-train hook — when trained Q/K/V projections become available, swap them in for the paper's full set-attention routing.
 - **The PoC stays as a permanent regression check** in `riir-poc`.
 - **Research 376 verdict**: **GOAT (modelless path)** — confirmed across all three axes (architectural, latency, quality). The set-attention component is a riir-train follow-up; the core post-candidate routing primitive is modelless and proven.
+
+---
+
+## 9. GOAT Gate Addendum (Plan 377 Phase 3, executed 2026-07-04)
+
+**Bench location:** `katgpt-rs/crates/katgpt-core/benches/bench_377_local_branch_routing_goat.rs`.
+**Primitive location:** `katgpt-rs/crates/katgpt-core/src/branch_routing/mod.rs`.
+
+### Shipped scope (simplified per PoC §8 findings)
+
+- `PostCandidateRouter` trait — `route_argmax` (deterministic) + `route_sampled` (Logistic-noise perturbed argmax, the sigmoid-family analog of Gumbel-max for softmax).
+- `DotProductRouter` — dot-product onto a frozen `Box<[f32]>` direction. This is the proven PoC `IndependentRouter` pattern (53 ns / +9–26 pp gain).
+- `ColliderRouterAdapter<PS: PreservationScorer>` — generic adapter wrapping any `PreservationScorer` as a router. The `PreservationScorer` trait decouples katgpt-core from `ColliderConstraint` (which lives in katgpt-rs root); consumers impl the trait on their collider type to wire it in.
+- The set-attention variant was NOT shipped (PoC §8 finding: ±1pp from the dot-product router, adds zero modelless value with identity projections). riir-train follow-up when trained Q/K/V projections exist.
+- The full prune-shift-grow decode loop was deferred — it composes with DDTree infrastructure in katgpt-rs root (not katgpt-core). The trait + routers are the right open-primitive scope; consumer (riir-ai Phase 4) composes the loop.
+
+### GOAT gate results
+
+| Gate | Criterion | Target | Result | Status |
+|------|-----------|--------|--------|--------|
+| **G1** | Correctness | ≥90% on PoC domain; 22 unit tests | 22/22 green | ✅ PASS |
+| **G2** | `route_argmax` latency at K=3 D=64 | <1µs | **51.1 ns** (20× headroom) | ✅ PASS |
+| **G2** | `route_sampled` latency at K=3 D=64 | <1µs | **69.1 ns** (14× headroom) | ✅ PASS |
+| **G3** | K=1 bit-identical to standard decode | 0 diff | Covered by 2 K=1 unit tests | ✅ PASS |
+| **G4** | Alloc-free hot path (100 calls) | 0 allocs | 0 (construction = 1, the `Box<[f32]>` direction; one-time) | ✅ PASS |
+| **G5** | Modelless (no training, no backprop) | Confirmed by construction | `local_branch_routing` has `[]` deps; closed-form dot-product + Logistic-noise inverse-CDF | ✅ PASS |
+| **G6** | Sigmoid not softmax | Confirmed by construction | `route_sampled` uses Logistic(0, β) noise (CDF = sigmoid(x/β)); no `exp` in sampling path; Gumbel-max softmax analog deliberately NOT used | ✅ PASS |
+
+### Promotion
+
+All gates PASS → `local_branch_routing` promoted to `default` in `katgpt-core/Cargo.toml` (2026-07-04). The primitive is now the modelless-validated open post-candidate router for the katgpt-rs engine.
+
+### Deviations from plan (honest)
+
+1. **SetAttentionRouter → DotProductRouter**: PoC §8 found the set-attention variant adds ZERO modelless value (±1pp from independent router, stable across v1 and v2). The plan's T2.2 specified `SetAttentionRouter` composing `set_sigmoid_attention_into`; we shipped `DotProductRouter` instead (the simpler, proven primitive).
+2. **Sampling mechanism**: plan said "sigmoid-weighted over candidates". We considered three sigmoid-family interpretations: (a) sigmoid-weight normalization, (b) anchored sigmoid, (c) Logistic-noise perturbation. (a) saturates at low temperature (all weights → 1.0 → uniform, which is wrong). (b) anchors best-at-0.5 (asymmetric). (c) is the canonical sigmoid-family analog of Gumbel-max for softmax — the Logistic(0, β) distribution has CDF `sigmoid(x/β)`, so adding Logistic noise and taking argmax produces a sigmoid-family categorical sample without `exp` or softmax normalization. Shipped (c) with a clear doc-comment explaining the choice.
+3. **ColliderRouterAdapter is generic, not concrete**: the plan implied wrapping `ColliderPruner` directly. But `ColliderConstraint` lives in katgpt-rs root (which katgpt-core cannot depend on without a cycle). Shipped `ColliderRouterAdapter<PS: PreservationScorer>` with a new `PreservationScorer` trait — consumers impl it on their collider type. Slightly more code at the wiring site, but keeps katgpt-core leaf-clean.
+4. **Prune-shift-grow decode loop deferred**: the loop composes with DDTree infrastructure that lives in katgpt-rs root. The trait + two router implementations are the right open-primitive scope; the multi-step loop is the consumer's composition job. Riir-ai Phase 4 (if executed) will wire it into `entity_cognition/`.
+
+### Final verdict
+
+**Research 376 verdict stands: GOAT (modelless path)**. The primitive is modelless, PoC-confirmed on quality (+9pp to +26pp), and GOAT-gated on latency (51ns) + allocs (0 hot path). Promoted to default. Set-attention component and GRPO training are riir-train follow-ups.
+
+### Cleanup
+
+- `CARGO_TARGET_DIR=/tmp/lbr_goat` and `/tmp/lbr_branch_routing` cleaned up.
