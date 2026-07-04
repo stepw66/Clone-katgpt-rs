@@ -1186,6 +1186,24 @@ pub struct HLPlayer {
     /// one `base_reward` uniformly, each tick carries a blast-zone-shaped
     /// signal so the n-armed bandit can learn context-dependent safety.
     round_rewards: Vec<f32>,
+    /// Per-tick board-state context vector for each action in `round_actions`
+    /// (Issue 371 Option 1 — T6). Parallel Vec — `round_contexts[i]` is the
+    /// 7-dim context `φ(s)` at the moment `round_actions[i]` was chosen.
+    /// Consumed by `update_outcome` so the contextual bandit can update
+    /// `θ_a` per (arm, context) instead of per-arm — the principled fix for
+    /// T3 evidence #3 (the n-armed bandit cannot learn context-dependent
+    /// safety because the same action gets the same Q regardless of board
+    /// state).
+    #[cfg(feature = "contextual_bandit")]
+    round_contexts: Vec<[f32; super::contextual_bandit::CONTEXT_DIM]>,
+    /// Linear contextual bandit (Issue 371 Option 1 — T6). When present,
+    /// replaces the n-armed `arm_q` lookup in `select_action`'s centered blend
+    /// and the `update_arm_q` call in `update_outcome`. The n-armed fields
+    /// (`q_values`, `visits`, ...) stay for `compress_cycle` / `compress_report`
+    /// diagnostics and `SharedBanditStats` compat — they are not updated when
+    /// the contextual bandit is active.
+    #[cfg(feature = "contextual_bandit")]
+    contextual_bandit: super::contextual_bandit::ContextualBandit,
     last_dir: Option<BomberAction>,
     /// Shared bandit stats for multi-agent cooperative learning.
     /// When `Some`, Q-values/visits/compressed are delegated here.
@@ -1220,6 +1238,10 @@ impl HLPlayer {
             compressed: [false; ACTION_COUNT],
             round_actions: Vec::new(),
             round_rewards: Vec::new(),
+            #[cfg(feature = "contextual_bandit")]
+            round_contexts: Vec::new(),
+            #[cfg(feature = "contextual_bandit")]
+            contextual_bandit: super::contextual_bandit::ContextualBandit::default(),
             last_dir: None,
             #[cfg(feature = "bandit")]
             shared_stats: None,
@@ -1259,6 +1281,10 @@ impl HLPlayer {
             compressed: [false; ACTION_COUNT],
             round_actions: Vec::new(),
             round_rewards: Vec::new(),
+            #[cfg(feature = "contextual_bandit")]
+            round_contexts: Vec::new(),
+            #[cfg(feature = "contextual_bandit")]
+            contextual_bandit: super::contextual_bandit::ContextualBandit::default(),
             last_dir: None,
             #[cfg(feature = "bandit")]
             shared_stats: None,
@@ -1295,6 +1321,10 @@ impl HLPlayer {
             compressed: [false; ACTION_COUNT],
             round_actions: Vec::new(),
             round_rewards: Vec::new(),
+            #[cfg(feature = "contextual_bandit")]
+            round_contexts: Vec::new(),
+            #[cfg(feature = "contextual_bandit")]
+            contextual_bandit: super::contextual_bandit::ContextualBandit::default(),
             last_dir: None,
             shared_stats: Some(stats),
             shared_log,
@@ -1432,6 +1462,26 @@ impl HLPlayer {
         // negative signal regardless of whether HL survived the round, so the
         // bandit can learn context-dependent safety without a contextual
         // (state-conditioned) Q implementation.
+        //
+        // Issue 371 Option 1 (T6) — contextual bandit update. When active,
+        // each (action, context) pair updates θ_a via online LMS instead of
+        // the n-armed running-average update below. This is the principled
+        // fix: the same action gets different θ-updates depending on the board
+        // state it was taken in.
+        #[cfg(feature = "contextual_bandit")]
+        {
+            for (i, action) in self.round_actions.iter().enumerate() {
+                let tick_reward = self.round_rewards.get(i).copied().unwrap_or(0.0);
+                let phi = match self.round_contexts.get(i) {
+                    Some(p) => *p,
+                    None => continue,
+                };
+                let combined = base_reward + tick_reward;
+                let idx = action_index(action);
+                self.contextual_bandit.update(idx, &phi, combined);
+            }
+        }
+
         let total = self.round_actions.len();
         let mut action_rewards = [0.0f32; ACTION_COUNT];
         let mut action_weights = [0.0f32; ACTION_COUNT];
@@ -1591,6 +1641,10 @@ impl HLPlayer {
             compressed: frozen.compressed.map(|c| c != 0),
             round_actions: Vec::new(),
             round_rewards: Vec::new(),
+            #[cfg(feature = "contextual_bandit")]
+            round_contexts: Vec::new(),
+            #[cfg(feature = "contextual_bandit")]
+            contextual_bandit: super::contextual_bandit::ContextualBandit::default(),
             last_dir: None,
             #[cfg(feature = "bandit")]
             shared_stats: None,
@@ -1679,6 +1733,20 @@ impl BomberPlayer for HLPlayer {
         // Compute action scores: heuristic (+ LoRA blend when loaded) + strategy bonus
         // + centered bandit Q-value blend (Issue 371: re-enabled, weight 2.0).
         let mut scores: [(BomberAction, f32); ACTION_COUNT] = ALL_ACTIONS.map(|a| (a, 0.0));
+
+        // Issue 371 Option 1 (T6): compute the board-state context vector φ(s)
+        // once per tick. When `contextual_bandit` is active, the per-arm Q
+        // lookup is replaced by the linear model Q(a,s) = θ_a^T·φ(s), so the
+        // same action gets different Q-values in safe vs dangerous board
+        // states — the principled fix for T3 evidence #3.
+        #[cfg(feature = "contextual_bandit")]
+        let phi = super::contextual_bandit::compute_phi(
+            pos,
+            grid,
+            &self.known_bombs,
+            &self.known_powerups,
+            nearest_opponent,
+        );
 
         for (i, action) in ALL_ACTIONS.iter().enumerate() {
             // Skip compressed (hard-blocked) arms
@@ -1791,6 +1859,20 @@ impl BomberPlayer for HLPlayer {
             // Bandit Q-value blend (Issue 371: re-enabled, centered, weight 2.0).
             // Reward arms with Q > 0.5, penalize Q < 0.5. Unvisited arms are neutral
             // (treated as Q = 0.5) so the bandit doesn't suppress early exploration.
+            //
+            // Issue 371 Option 1 (T6): when `contextual_bandit` is active, the
+            // per-arm Q is the sigmoid-bounded linear model output instead of
+            // the n-armed running average. The cold-start gate (visits == 0)
+            // still applies — an arm that has never been pulled in ANY context
+            // contributes 0 (neutral), matching the n-armed behaviour.
+            #[cfg(feature = "contextual_bandit")]
+            let bandit_term = if !self.contextual_bandit.is_cold(i) {
+                let q = self.contextual_bandit.predict(i, &phi);
+                (q - 0.5) * 2.0
+            } else {
+                0.0
+            };
+            #[cfg(not(feature = "contextual_bandit"))]
             let bandit_term = if self.arm_visits(i) > 0 {
                 (self.arm_q(i) - 0.5) * 2.0
             } else {
@@ -1884,6 +1966,8 @@ impl BomberPlayer for HLPlayer {
                 let action = scores[pick].0;
                 self.round_actions.push(action);
                 self.round_rewards.push(shape_tick(action, &self.known_bombs));
+                #[cfg(feature = "contextual_bandit")]
+                self.round_contexts.push(phi);
                 self.last_dir = Some(action);
                 return action;
             }
@@ -1904,6 +1988,8 @@ impl BomberPlayer for HLPlayer {
 
         self.round_actions.push(best);
         self.round_rewards.push(shape_tick(best, &self.known_bombs));
+        #[cfg(feature = "contextual_bandit")]
+        self.round_contexts.push(phi);
         if matches!(
             best,
             BomberAction::Up | BomberAction::Down | BomberAction::Left | BomberAction::Right
@@ -1927,6 +2013,8 @@ impl BomberPlayer for HLPlayer {
         self.known_opponents.clear();
         self.round_actions.clear();
         self.round_rewards.clear();
+        #[cfg(feature = "contextual_bandit")]
+        self.round_contexts.clear();
         self.last_dir = None;
         // NOTE: Q-values, visits, compressed persist across rounds (bandit memory)
     }

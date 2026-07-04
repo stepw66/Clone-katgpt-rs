@@ -11,6 +11,14 @@ pub mod replay_backward;
 pub mod sonlt_player;
 pub mod systems;
 
+/// Contextual bandit for HLPlayer (Issue 371 Option 1 — T6).
+///
+/// Linear per-arm Q model conditioned on board features. Gated by
+/// `contextual_bandit`; the n-armed bandit stays as the default path so the
+/// GOAT comparison is apples-to-apples.
+#[cfg(feature = "contextual_bandit")]
+pub mod contextual_bandit;
+
 #[cfg(feature = "bomber-agent")]
 pub mod validator_agent;
 
@@ -65,6 +73,9 @@ pub use gate_player::GatePlayer;
 pub use players::{BomberPlayer, GreedyPlayer, HLPlayer, RandomPlayer, ValidatorPlayer};
 pub use sonlt_player::SonltPlayer;
 pub use replay_backward::{BackwardSample, BackwardWalkResult, ReplayBackwardWalker};
+
+#[cfg(feature = "contextual_bandit")]
+pub use contextual_bandit::{CONTEXT_DIM, ContextualBandit, DEFAULT_LEARNING_RATE, compute_phi};
 
 #[cfg(feature = "bomber-agent")]
 pub use validator_agent::{

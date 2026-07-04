@@ -288,6 +288,7 @@ gain_cost_halt = ["katgpt-core/gain_cost_halt"]  # Gain/Cost Loop Halting Primit
 advantage_freeze_thaw = ["katgpt-pruners/advantage_freeze_thaw"]  # AdvantageDirectionSnapshot + EMA accumulator — per-NPC personality fingerprint via BLAKE3-committed A(·) direction (Plan 283 T5.3, arxiv:2511.16886). Forwards to katgpt-pruners (where the primitive lives). Opt-in until a real game-side consumer validates the aggregation choice.
 gdsd_distill = ["bandit", "katgpt-pruners/gdsd_distill"]  # GDSD Advantage-Guided Pruner — modelless self-distillation (Plan 169)
 bomber = ["bevy_ecs", "bandit"]  # Bomberman HL Arena (Plan 033)
+contextual_bandit = ["bomber"]  # Issue 371 Option 1 (T6): linear per-arm contextual bandit for HLPlayer. Conditions Q on 7-dim board features (blast proximity, opponent distance, wall density, ...). Online LMS update — modelless (same class as adaptive filters). Opt-in; n-armed bandit stays as default for apples-to-apples GOAT comparison.
 spechop = ["bandit", "katgpt-pruners/spechop", "katgpt-speculative/spechop"]  # SpecHop continuous multi-hop speculation pipeline (Plan 131, Research 091). Phase 6: substrate moved to katgpt-speculative; root re-exports as `katgpt_rs::spechop`.
 parallel_probe = ["katgpt-pruners/parallel_probe"]  # Parallel-Probe 2D controller — consensus-based parallel branch control (Plan 133, Research 094)
 dflare_fusion = ["katgpt-core/dflare_fusion"]  # DFlare Marginal Fusion — multi-source conditioning blend (Plan 174, 🪦 IMPROVEMENT GOAT FAILED — no measurable acceptance gain, research-only)
