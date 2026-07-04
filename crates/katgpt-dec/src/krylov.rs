@@ -504,7 +504,7 @@ mod tests {
         let t = 1.5f32;
         let result = krylov_expmv(&mut |v: &[f32], out: &mut [f32]| {
             out[0] = 1.0 * v[0];
-            out[1] = -1.0 * v[1];
+            out[1] = -v[1];
             out[2] = 2.0 * v[2];
             out[3] = -2.0 * v[3];
         }, &h0, t, 4);
@@ -553,7 +553,7 @@ mod tests {
         let h0 = vec![1.0f32, 2.0, 3.0, 4.0];
         let t = 1.0f32;
         let mut a_apply = |v: &[f32], out: &mut [f32]| {
-            out[0] = -1.0 * v[0];
+            out[0] = -v[0];
             out[1] = -2.0 * v[1];
             out[2] = -3.0 * v[2];
             out[3] = -4.0 * v[3];

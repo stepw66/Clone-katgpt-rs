@@ -577,8 +577,8 @@ mod tests {
         if motor_dim > 0 {
             for cell in 0..n {
                 let base = cell * dim;
-                for ch in 0..motor_dim {
-                    h.data[base + ch] *= 1.0 + dt * motor_vec[ch];
+                for (ch, &motor) in motor_vec.iter().enumerate().take(motor_dim) {
+                    h.data[base + ch] *= 1.0 + dt * motor;
                 }
             }
         }
@@ -683,7 +683,7 @@ mod tests {
         let w = 4;
         let h = 4;
         let dim = 2;
-        let n = (w * h) as usize;
+        let n = w * h;
         let cx = CellComplex::grid_2d(w, h);
         let eig = DecEigendecomposition::compute(&cx, 0, n, 2000);
 
@@ -727,7 +727,7 @@ mod tests {
         let w = 4;
         let h = 4;
         let dim = 2;
-        let n = (w * h) as usize;
+        let n = w * h;
         let cx = CellComplex::grid_2d(w, h);
         let eig = DecEigendecomposition::compute(&cx, 0, n, 2000);
 
@@ -782,7 +782,7 @@ mod tests {
         let w = 4;
         let h = 4;
         let dim = 1;
-        let n_cells = (w * h) as usize;
+        let n_cells = w * h;
         let cx = CellComplex::grid_2d(w, h);
         let eig = DecEigendecomposition::compute(&cx, 0, n_cells, 2000);
 
@@ -907,7 +907,7 @@ mod tests {
         let w = 4;
         let h = 4;
         let dim = 1;
-        let n_cells = (w * h) as usize;
+        let n_cells = w * h;
         let cx = CellComplex::grid_2d(w, h);
         let eig = DecEigendecomposition::compute(&cx, 0, n_cells, 2000);
 

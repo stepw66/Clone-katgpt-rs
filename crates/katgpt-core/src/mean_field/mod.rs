@@ -32,7 +32,7 @@
 //!    simplified) is a one-line sigmoid-compatible gate.
 //! 3. **[`RegimeClassifier`]** — combine [`MeanFieldOverlap`] + [`hopf_boundary`]
 //!    + chaos intensity `g` (heuristic estimate from `Q`, or caller-injected)
-//!    into a [`Regime`] enum: the paper's four-way taxonomy, distilled.
+//!      into a [`Regime`] enum: the paper's four-way taxonomy, distilled.
 //!
 //! # Latent vs raw boundary (per global AGENTS.md)
 //!

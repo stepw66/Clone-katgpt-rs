@@ -434,7 +434,7 @@ mod tests {
                          two-step gave ({t1},{t2})"
                     );
                     assert!(
-                        u1 >= 0.0 && u1 < 1.0,
+                        (0.0..1.0).contains(&u1),
                         "carried u1 out of [0,1) after two-step: {u1}"
                     );
 

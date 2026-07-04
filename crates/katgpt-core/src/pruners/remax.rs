@@ -246,7 +246,7 @@ pub fn expected_improvement_per_action_inplace(
     assert!(m > 0.0, "m must be positive (got {m})");
 
     if k == 1 {
-        out[0] = (q[0] - q[0]).max(0.0); // EI(q_0; q_0) = 0
+        out[0] = 0.0; // EI(q_0; q_0) = 0
         return;
     }
 

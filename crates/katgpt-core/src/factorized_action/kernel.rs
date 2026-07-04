@@ -456,6 +456,6 @@ mod tests {
     /// `MAX_PATCHES ≥ K` for the typical codebook sizes we use.
     #[test]
     fn max_patches_at_least_typical_k() {
-        assert!(MAX_PATCHES >= 32, "MAX_PATCHES too small for typical K");
+        const _: () = assert!(MAX_PATCHES >= 32, "MAX_PATCHES too small for typical K");
     }
 }

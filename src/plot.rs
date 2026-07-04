@@ -587,7 +587,7 @@ mod tests {
     #[test]
     fn rolling_window_ignores_stale_thermal_peak() {
         // 8 entries: 3 stale peaks (May, pre-cooldown) + 5 recent (June 12).
-        let rows = vec![
+        let rows = [
             row("2026-05-27T11", "bandit", 466_000_000.0),
             row("2026-05-27T12", "bandit", 502_000_000.0), // all-time max
             row("2026-05-29T15", "bandit", 474_000_000.0),
@@ -609,7 +609,7 @@ mod tests {
     /// (commit `458a589c`) tanked June 12 performance.
     #[test]
     fn rolling_window_still_flags_real_regression() {
-        let rows = vec![
+        let rows = [
             row("2026-05-27T11", "absorb", 52_000_000.0),
             row("2026-05-27T12", "absorb", 57_000_000.0),
             row("2026-05-29T15", "absorb", 52_000_000.0),
@@ -632,7 +632,7 @@ mod tests {
     /// (no trimming possible — not enough data).
     #[test]
     fn short_series_uses_full_range_as_baseline() {
-        let rows = vec![
+        let rows = [
             row("d1", "m", 100.0),
             row("d2", "m", 50.0), // latest, 50% drop from 100
         ];
@@ -645,7 +645,7 @@ mod tests {
     /// A single entry must not crash and must not be flagged.
     #[test]
     fn single_entry_no_regression() {
-        let rows = vec![row("d1", "m", 100.0)];
+        let rows = [row("d1", "m", 100.0)];
         let refs: Vec<&TsRow> = rows.iter().collect();
         let regs = check_regression_filtered(&refs, "cat");
         assert!(regs.is_empty());
@@ -654,7 +654,7 @@ mod tests {
     /// Zero or negative throughput must be skipped (defensive — avoids divide-by-zero).
     #[test]
     fn zero_baseline_skipped() {
-        let rows = vec![
+        let rows = [
             row("d1", "m", 0.0),
             row("d2", "m", 0.0),
         ];

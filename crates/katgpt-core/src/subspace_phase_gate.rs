@@ -1150,10 +1150,10 @@ mod tests {
         // singular vector with a non-negligible singular value lies in the row
         // space of W.
         let mut p_true = [0.0f32; 64];
-        for k in 0..3 {
+        for v_k in v_true.iter().take(3) {
             for a in 0..8 {
                 for b in 0..8 {
-                    p_true[a * 8 + b] += v_true[k][a] * v_true[k][b];
+                    p_true[a * 8 + b] += v_k[a] * v_k[b];
                 }
             }
         }
@@ -1181,16 +1181,16 @@ mod tests {
 
     /// T3.4 — timing gate: Jacobian SVD on R^8→R^8 (forward diff: 8 map evals
     /// + thin SVD of an 8×8) must complete in well under the plan's 1µs target
-    /// in release. The assertion uses a generous bound to stay CI-stable in
-    /// debug builds; the release-mode number is recorded in
-    /// `.benchmarks/301_subspace_phase_gate_g1.md` (Phase 3 section).
+    ///   in release. The assertion uses a generous bound to stay CI-stable in
+    ///   debug builds; the release-mode number is recorded in
+    ///   `.benchmarks/301_subspace_phase_gate_g1.md` (Phase 3 section).
     ///
     /// Measures BOTH paths so the alloc-conversion overhead is visible:
     /// - `jacobian_svd_at` (with 17-`Vec` SOA→owned conversion)
     /// - `jacobian_svd_at_into` (zero-alloc hot path, Plan 301 T4.1)
-    /// Both are printed; the `_into` path is the one the plan's <1µs target
-    /// applies to (it is the primitive's true hot-path cost). The `_at` path
-    /// includes caller-facing allocation that the primitive does not own.
+    ///   Both are printed; the `_into` path is the one the plan's <1µs target
+    ///   applies to (it is the primitive's true hot-path cost). The `_at` path
+    ///   includes caller-facing allocation that the primitive does not own.
     #[test]
     fn jacobian_svd_r8x8_latency_gate() {
         let (w, _u, _v, _sigmas) = known_rank3_map_r8x8();
@@ -1207,7 +1207,7 @@ mod tests {
         let mut scratch = JacobianSvdScratch::with_capacity(8, 8);
         // Warmup (first call grows scratch + caches).
         let _ = jacobian_svd_at(f, &x, 1e-4, &mut scratch);
-        let _ = jacobian_svd_at_into(f, &x, 1e-4, &mut scratch);
+        jacobian_svd_at_into(f, &x, 1e-4, &mut scratch);
 
         // --- Zero-alloc hot path (`jacobian_svd_at_into`) ---
         // This is the path the plan's <1µs T3.4 target applies to.

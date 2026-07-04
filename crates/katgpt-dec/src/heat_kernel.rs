@@ -701,8 +701,8 @@ mod tests {
             let lv = graph_laplacian(&cx, &cochain);
             // Check ||L·v_k - λ_k·v_k|| / ||v_k|| is small.
             let mut residual_sq = 0.0f32;
-            for i in 0..v_k.len() {
-                let diff = lv.data[i] - lambda_k * v_k[i];
+            for (&lv_i, &vi) in lv.data.iter().zip(v_k.iter()) {
+                let diff = lv_i - lambda_k * vi;
                 residual_sq += diff * diff;
             }
             let residual = residual_sq.sqrt();
@@ -800,9 +800,9 @@ mod tests {
         let hk = heat_kernel_trajectory_linear(&eig, &h0, &motor, 1, t);
         // Check: hk[i] / v_k[i] ≈ exp(t·a_k) for all i where v_k[i] ≠ 0.
         let mut max_rel = 0.0f32;
-        for i in 0..n {
-            if v_k[i].abs() > 0.01 {
-                let hk_scale = hk.data[i] / v_k[i];
+        for (&vi, &hk_i) in v_k.iter().zip(hk.data.iter()).take(n) {
+            if vi.abs() > 0.01 {
+                let hk_scale = hk_i / vi;
                 let rel = (hk_scale - exact_scale).abs() / exact_scale.abs().max(1e-10);
                 max_rel = max_rel.max(rel);
             }
@@ -868,9 +868,9 @@ mod tests {
         // hk[i] / v_k[i] should be constant ≈ exp(t·a_k) for all i.
         let expected_scale = (t * a_k).exp();
         let mut max_rel = 0.0f32;
-        for i in 0..n {
-            if v_k[i].abs() > 0.01 {
-                let ratio = hk.data[i] / v_k[i];
+        for (&vi, &hk_i) in v_k.iter().zip(hk.data.iter()).take(n) {
+            if vi.abs() > 0.01 {
+                let ratio = hk_i / vi;
                 let rel = (ratio - expected_scale).abs() / expected_scale.abs().max(1e-10);
                 max_rel = max_rel.max(rel);
             }

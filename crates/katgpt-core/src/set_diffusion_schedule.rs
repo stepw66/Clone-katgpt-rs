@@ -548,7 +548,7 @@ mod tests {
             for i in 0..100 {
                 let tau = i as f32 / 100.0;
                 let a = s.alpha(tau, ell, 8);
-                assert!(a >= 0.0 && a <= 1.0, "alpha out of [0,1]: {a}");
+                assert!((0.0..=1.0).contains(&a), "alpha out of [0,1]: {a}");
             }
         }
     }
@@ -719,7 +719,7 @@ mod tests {
         }
         // Expected: 1000/8 = 125. Allow [80, 170] for randomness.
         assert!(
-            first_is_zero >= 80 && first_is_zero <= 170,
+            (80..=170).contains(&first_is_zero),
             "diffusion should be ~uniform: position 0 first {first_is_zero}/{n_trials} (expected ~125)"
         );
     }

@@ -23,6 +23,7 @@
 
 #![cfg(test)]
 
+//!
 //! GOAT Gate Results (honest):
 //!
 //! G1 (parity):          ✅ PASS — w=1.0 schedule matches unscheduled
@@ -82,14 +83,14 @@ fn test_schedule_ar_extreme_produces_lr_order() {
     // At τ=0, only position 0 should be eligible
     let elig_0 = schedule.eligible_positions(l, 0.0);
     assert!(elig_0[0], "Position 0 should be eligible at τ=0");
-    for i in 1..l {
-        assert!(!elig_0[i], "Position {i} should NOT be eligible at τ=0");
+    for (i, &eligible) in elig_0.iter().enumerate().skip(1).take(l - 1) {
+        assert!(!eligible, "Position {i} should NOT be eligible at τ=0");
     }
 
     // At τ=1, all positions eligible
     let elig_1 = schedule.eligible_positions(l, 1.0);
-    for i in 0..l {
-        assert!(elig_1[i], "Position {i} should be eligible at τ=1");
+    for (i, &eligible) in elig_1.iter().enumerate().take(l) {
+        assert!(eligible, "Position {i} should be eligible at τ=1");
     }
 }
 
@@ -100,8 +101,8 @@ fn test_schedule_diffusion_extreme_all_eligible() {
     let schedule = PositionOffsetSchedule::new(1.0);
 
     let elig = schedule.eligible_positions(l, 0.0);
-    for i in 0..l {
-        assert!(elig[i], "Position {i} should be eligible at τ=0 with w=1");
+    for (i, &eligible) in elig.iter().enumerate().take(l) {
+        assert!(eligible, "Position {i} should be eligible at τ=0 with w=1");
     }
 }
 

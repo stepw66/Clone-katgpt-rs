@@ -545,8 +545,7 @@ mod tests {
                 let x_t: Vec<f32> = (0..4).map(|_| rng_a.next_f64() as f32).collect();
                 let x_next: Vec<f32> = x_t
                     .iter()
-                    .enumerate()
-                    .map(|(_, &x)| x + 5.0 + (rng_a.next_f64() as f32 - 0.5))
+                    .map(|&x| x + 5.0 + (rng_a.next_f64() as f32 - 0.5))
                     .collect();
                 (x_t, x_next)
             })

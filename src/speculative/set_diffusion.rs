@@ -485,15 +485,15 @@ fn sample_token(
     let mut max_logit = f32::NEG_INFINITY;
     let mut argmax_token = 0usize;
     let mut argmax_logit = f32::NEG_INFINITY;
-    for t in 0..vocab {
+    for (t, &logit) in logits.iter().enumerate().take(vocab) {
         if t == mask {
             continue;
         }
-        if logits[t] > max_logit {
-            max_logit = logits[t];
+        if logit > max_logit {
+            max_logit = logit;
         }
-        if logits[t] > argmax_logit {
-            argmax_logit = logits[t];
+        if logit > argmax_logit {
+            argmax_logit = logit;
             argmax_token = t;
         }
     }
@@ -502,11 +502,11 @@ fn sample_token(
     if temperature <= 0.0 || temperature == 1.0 {
         // Compute the full softmax denominator to get the argmax probability.
         let mut sum_exp = 0.0f32;
-        for t in 0..vocab {
+        for (t, &logit) in logits.iter().enumerate().take(vocab) {
             if t == mask {
                 continue;
             }
-            sum_exp += (logits[t] - max_logit).exp();
+            sum_exp += (logit - max_logit).exp();
         }
         let prob = if sum_exp > 0.0 {
             (argmax_logit - max_logit).exp() / sum_exp
@@ -534,13 +534,13 @@ fn sample_token(
     // Normalize + sample.
     let target = rng.uniform() * sum_exp;
     let mut cumulative = 0.0f32;
-    for t in 0..vocab {
+    for (t, &prob_t) in probs.iter().enumerate().take(vocab) {
         if t == mask {
             continue;
         }
-        cumulative += probs[t];
+        cumulative += prob_t;
         if cumulative >= target {
-            return (t, probs[t] / sum_exp);
+            return (t, prob_t / sum_exp);
         }
     }
     // Fallback (numerical drift): return argmax.

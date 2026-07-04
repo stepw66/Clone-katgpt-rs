@@ -87,9 +87,9 @@ impl QmcSource for LatticeQmc {
         let inv_k = 1.0 / k as f32;
         // Each point: (i/k + Δ) mod 1. The `fract` is a single `% 1.0` —
         // numerically stable since i/k ∈ [0,1) and Δ ∈ [0,1), so i/k+Δ ∈ [0,2).
-        for i in 0..k {
+        for (i, slot) in out.iter_mut().enumerate().take(k) {
             let v = i as f32 * inv_k + delta;
-            out[i] = if v >= 1.0 { v - 1.0 } else { v };
+            *slot = if v >= 1.0 { v - 1.0 } else { v };
         }
     }
 }
@@ -127,9 +127,9 @@ impl QmcSource for StratifiedQmc {
         }
         let inv_k = 1.0 / k as f32;
         // Step 1: draw one uniform per stratum: out[i] ~ Unif[i/k, (i+1)/k).
-        for i in 0..k {
+        for (i, slot) in out.iter_mut().enumerate().take(k) {
             let lo = i as f32 * inv_k;
-            out[i] = lo + self.rng.uniform() * inv_k;
+            *slot = lo + self.rng.uniform() * inv_k;
         }
         // Step 2: Fisher-Yates shuffle — each permutation equally likely.
         // Index i drawn uniformly from [0, i] via next_u64 % (i+1).
@@ -207,7 +207,7 @@ impl SobolQmc {
     /// 1D compatibility). Use [`draw_nd`](Self::draw_nd) for multi-dimensional
     /// output.
     pub fn new_multi(seed: u64, dim: usize) -> Self {
-        let dim = dim.min(SOBOL_MAX_DIM).max(1);
+        let dim = dim.clamp(1, SOBOL_MAX_DIM);
         let mut rng = Rng::new(seed);
 
         // Compute direction numbers for each dimension.
@@ -215,15 +215,15 @@ impl SobolQmc {
 
         // Dimension 0: Van der Corput in base 2 — v[j] = 1 << (BITS-1-j).
         // This is the canonical first Sobol dimension (trivially "primitive").
-        for j in 0..SOBOL_BITS {
-            direction_numbers[0][j] = 1u32 << (SOBOL_BITS - 1 - j);
+        for (j, slot) in direction_numbers[0].iter_mut().enumerate() {
+            *slot = 1u32 << (SOBOL_BITS - 1 - j);
         }
 
         // Dimensions 1..dim: find primitive polynomials and compute direction
         // numbers via the recurrence.
-        for d in 1..dim {
+        for (d, row) in direction_numbers.iter_mut().enumerate().take(dim).skip(1) {
             let (poly, degree) = find_primitive_poly(d as u32);
-            direction_numbers[d] = compute_direction_numbers(poly, degree);
+            *row = compute_direction_numbers(poly, degree);
         }
 
         // Digital-shift scramble: one random u32 per dimension.
@@ -296,10 +296,10 @@ impl QmcSource for SobolQmc {
     #[inline]
     fn draw(&mut self, k: usize, out: &mut [f32]) {
         assert!(out.len() >= k, "SobolQmc::draw: out.len() {} < k {}", out.len(), k);
-        for i in 0..k {
+        for slot in out.iter_mut().take(k) {
             self.advance();
             // Output dimension 0 with scramble.
-            out[i] = u32_to_unit_f32(self.point[0] ^ self.scramble[0]);
+            *slot = u32_to_unit_f32(self.point[0] ^ self.scramble[0]);
         }
     }
 }
@@ -517,8 +517,8 @@ fn compute_direction_numbers(poly: u64, degree: u32) -> [u32; SOBOL_BITS] {
     let deg = degree as usize;
 
     // Initial direction numbers: m_j = 1 for j = 0..degree.
-    for j in 0..deg {
-        v[j] = 1u32 << (SOBOL_BITS - 1 - j);
+    for (j, slot) in v.iter_mut().enumerate().take(deg) {
+        *slot = 1u32 << (SOBOL_BITS - 1 - j);
     }
 
     // Recurrence for j >= degree.
@@ -541,9 +541,9 @@ fn prime_factors_u64(mut n: u64) -> Vec<u64> {
     let mut factors = Vec::new();
     let mut d = 2u64;
     while d * d <= n {
-        if n % d == 0 {
+        if n.is_multiple_of(d) {
             factors.push(d);
-            while n % d == 0 {
+            while n.is_multiple_of(d) {
                 n /= d;
             }
         }
@@ -849,7 +849,7 @@ mod tests {
                 break;
             }
         }
-        q = (2.0 * q).max(0.0).min(1.0);
+        q = (2.0 * q).clamp(0.0, 1.0);
         (d_max, q)
     }
 
@@ -882,7 +882,7 @@ mod tests {
         qmc.draw(8, &mut buf);
         // All values in [0, 1).
         for &v in &buf {
-            assert!(v >= 0.0 && v < 1.0, "lattice value out of [0,1): {v}");
+            assert!((0.0..1.0).contains(&v), "lattice value out of [0,1): {v}");
         }
         // Points are equally spaced at 1/8 intervals (shifted by Δ).
         let mut sorted = buf;
@@ -920,7 +920,7 @@ mod tests {
         let mut buf = [0.0f32; 8];
         qmc.draw(8, &mut buf);
         for &v in &buf {
-            assert!(v >= 0.0 && v < 1.0, "stratified value out of [0,1): {v}");
+            assert!((0.0..1.0).contains(&v), "stratified value out of [0,1): {v}");
         }
         // Each stratum [i/8, (i+1)/8) should contain exactly one point.
         let mut strata = [false; 8];
@@ -943,7 +943,7 @@ mod tests {
         let mut buf = [0.0f32; 16];
         qmc.draw(16, &mut buf);
         for &v in &buf {
-            assert!(v >= 0.0 && v < 1.0, "sobol value out of [0,1): {v}");
+            assert!((0.0..1.0).contains(&v), "sobol value out of [0,1): {v}");
         }
         // The first Sobol point (after skipping the zero) should be ~0.5
         // in dimension 0 (Van der Corput: 0.5, 0.25, 0.75, 0.125, ...).
@@ -962,7 +962,7 @@ mod tests {
         let mut buf = [0.0f32; 32]; // k * dim = 32
         qmc.draw_nd(k, &mut buf);
         for &v in &buf[..k * dim] {
-            assert!(v >= 0.0 && v < 1.0, "sobol nd value out of [0,1): {v}");
+            assert!((0.0..1.0).contains(&v), "sobol nd value out of [0,1): {v}");
         }
     }
 
@@ -1383,7 +1383,7 @@ mod tests {
                 break;
             }
         }
-        q = (2.0 * q).max(0.0).min(1.0);
+        q = (2.0 * q).clamp(0.0, 1.0);
         (d_max, q)
     }
 
@@ -1671,7 +1671,7 @@ mod tests {
         // Output must be valid (in [-1, 1] after AttractorKernel's clamp).
         for &v in &out[..k * dim] {
             assert!(v.is_finite(), "hypothesis contains NaN/inf: {v}");
-            assert!(v >= -1.0 && v <= 1.0, "hypothesis out of [-1,1]: {v}");
+            assert!((-1.0..=1.0).contains(&v), "hypothesis out of [-1,1]: {v}");
         }
 
         // Distinct hypotheses (G1.2 analog): QMC should also produce distinct
