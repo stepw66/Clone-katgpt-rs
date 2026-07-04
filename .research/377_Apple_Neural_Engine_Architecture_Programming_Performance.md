@@ -5,7 +5,17 @@
 > **Date:** 2026-07-04
 > **Status:** Active
 > **Related Research:** katgpt-rs 155 (ANE Backend Verdict), 223 (maderix/ANE Distillation),
-> 224 (coremltools Public API); riir-ai 045 (ANE Compute Backend Verdict), 044 (frame-sampling)
+> 224 (coremltools Public API), 276 (Personality-Weighted Composition, the
+> `InferenceBackend` trait pattern); riir-ai 045 (ANE Compute Backend Verdict),
+> 044 (frame-sampling), 121 (Attention Matching Game AI Fusion → Plan 297 AM core)
+> **Related Plans:** katgpt-rs 175 (ANE-Inspired DDTree), 176 (GPU/ANE Trigger Gate),
+> 255 (ANE-Latent NPC Brain Compute — **shipped**, includes the `npc_brain.mlpackage`
+> model and `NpcBrainRouter`); riir-ai 297 (AM Game AI Fusion)
+> **Shipped code (DO NOT duplicate):** `riir-ai/assets/npc_brain.mlpackage` (deployed
+> CoreML ML Program), `riir-ai/crates/riir-engine/src/{ane_backend.rs,
+> npc_ane_backend.rs, npc_brain_router.rs}` (load + dispatch + auto-route),
+> `riir-ai/crates/riir-engine/examples/ane_npc_{arena,goat,power}.rs` (GOAT bench),
+> `katgpt-rs/scripts/generate_npc_brain_model.py` (model generator)
 > **Classification:** Public
 
 ---
@@ -16,9 +26,15 @@ This paper is a 302-page hardware reference work (not an ML paper) that reverse-
 Apple Neural Engine (ANE) from the silicon datapath up to the system interface, covering A11–A18
 and M1–M5. It is the most thorough public account of the ANE to date.
 
-For our codebase it is **incremental**, not paradigm-shifting: we already have three prior ANE
-verdicts (155/223/224), an `ane_backend.rs` and `npc_ane_backend.rs` in riir-engine, and a
-GPU-only `roofline.rs` primitive. What this paper adds that we do **not** already cover:
+For our codebase it is **incremental**, not paradigm-shifting. We already ship an ANE
+pipeline end-to-end: `riir-ai/assets/npc_brain.mlpackage` is a deployed CoreML ML Program
+(three fused ops: sense projection, emotion projection, zone projection) loaded by
+`AneNpcBrainBackend`, dispatched via CoreML `ComputeUnits::All`, and auto-routed by
+`NpcBrainRouter` against a hardcoded `ANE_BATCH_THRESHOLD = 100` (Plan 255 Part 4,
+shipped, with GOAT bench in `ane_npc_goat.rs`). On top of that we have three prior ANE
+verdicts (155/223/224) and a GPU-only `roofline.rs` primitive.
+
+What this paper adds that we do **not** already cover:
 
 1. **The 2 MB on-chip working-set threshold as a hard cliff** (HAL field `0x1b8`) — operands above
    this tile and stream from DRAM, collapsing arithmetic intensity. Our `roofline.rs` has no
@@ -39,16 +55,20 @@ GPU-only `roofline.rs` primitive. What this paper adds that we do **not** alread
 
 **Distilled for katgpt-rs (modelless, inference-time):**
 
-The transferable primitive is an **ANE-aware roofline cost model** that extends our existing
-GPU-only `roofline.rs` with the ANE's distinct cost shape: a third axis (working-set size) on top
-of compute/memory/launch, plus ANE-specific peaks and a per-family capability gate. This is the
-input the `device_selector.rs` auto-router needs to make defensible CPU-vs-GPU-vs-ANE decisions
-at runtime instead of the current binary `is_ane_available()` check.
+The transferable primitive is an **ANE-aware roofline cost model** that refines the existing
+shipped `NpcBrainRouter`'s hardcoded `ANE_BATCH_THRESHOLD = 100` (Plan 255) into a per-chip,
+per-op-shape threshold. The shipped router's comment justifies the constant as "~95µs ANE
+dispatch overhead vs 75ns × npc_count SIMD cost". Bryngelson measures the *full* firmware round
+trip at **0.23 ms** on M1 — ~2.4× higher than the shipped router assumes — and identifies the
+**2 MB working-set cliff** and **family-floor capability gate** as additional axes the shipped
+router does not model. Extending `roofline.rs` with ANE peaks + these three axes produces the
+input `NpcBrainRouter` needs to make per-chip routing decisions instead of one global constant.
 
 This is a **GOAT**, not Super-GOAT: it produces a provable perf gain (more accurate routing,
-fewer misplacements on small/dispatch-bound ops) over the current binary selector, but does not
-create a new capability class. The product selling point is "our runtime never accidentally
-dispatches a 64×64 matmul to ANE" — useful, not moat-defining.
+fewer misplacements on small/dispatch-bound ops or ops near the 2 MB cliff) over the current
+hardcoded threshold, but does not create a new capability class. The product selling point is
+"our router now knows the difference between M1 (0.23 ms floor, 2 MB working set) and M5
+(0.11 ms floor, 4.72 MB working set)" — useful, not moat-defining.
 
 ---
 
@@ -207,7 +227,8 @@ dispatches a 64×64 matmul to ANE" — useful, not moat-defining.
 | Cousin | Repo | What it ships | Fusion with this paper produces |
 |---|---|---|---|
 | `roofline.rs` | katgpt-rs | GPU-only roofline (M1/M2/M3/M4 Pro peaks, 50µs launch) | **ANE-aware roofline** with 0.23ms dispatch floor + 2MB working-set axis + ANE peaks |
-| `device_selector.rs` + `auto_route_backend()` | riir-engine | Binary `is_ane_available()` check | **Roofline-driven auto-router** that picks CPU/GPU/ANE by op shape, not by availability |
+| `npc_brain_router.rs` + `AneNpcBrainBackend` (Plan 255, **shipped**) | riir-engine | Hardcoded `ANE_BATCH_THRESHOLD = 100`, justifies as "~95µs ANE dispatch vs 75ns × npc_count SIMD" | **Per-chip roofline-driven threshold** that replaces the constant with `chip_family + op_shape → threshold`, accounting for the actual 0.23 ms M1 floor and the 2 MB working-set cliff |
+| `npc_brain.mlpackage` (Plan 255, **shipped**) | riir-ai/assets | Three-fused-op CoreML ML Program (sense/emotion/zone projection, FP16) | **Stream-vs-fold aware weight prep**: int8/blockwise *fold* on M1 → no bandwidth gain → keep weights as fp16 or use int4-LUT / sparse |
 | `MerkleFrozenEnvelope` | riir-neuron-db | Freeze/thaw integrity envelope | **Resident-state buffer aliasing** as the M1 hardware substrate for frozen snapshot hot-swap |
 | Raven RSM (Research 006) | katgpt-rs | O(1) routing-slot memory | **ANE KV-cache substrate** via `share_buffer` (M1) / native state (A15+) |
 | Plan 175 / Plan 176 | katgpt-rs | ANE-Inspired DDTree + GPU/ANE trigger gate | **Family-floor capability gate** that rejects ops below their MinimumFamily at compile time |
@@ -255,16 +276,18 @@ substrate, not new capability classes.
 **GOAT.**
 
 **One-line reasoning:** A modelless ANE-aware roofline cost model produces a provable routing
-gain over the current binary `is_ane_available()` selector — specifically, it correctly rejects
-dispatch of ops below the 0.23 ms dispatch floor or above the 2 MB working-set cliff to the ANE,
-which the current selector cannot do — but it does not create a new capability class.
+gain over the current shipped `NpcBrainRouter`'s hardcoded `ANE_BATCH_THRESHOLD = 100`
+(Plan 255 Part 4) — specifically, it replaces the assumed "~95µs ANE dispatch" with the measured
+0.23 ms M1 / 0.11 ms M5 floor and adds the 2 MB working-set cliff as a second routing axis,
+which the shipped router cannot do — but it does not create a new capability class.
 
 ### Why not Super-GOAT
 
-- **Q1 (No prior art?):** Mixed. The OVERALL topic (ANE as backend) has heavy prior art
-  (155/223/224 + shipped `ane_backend.rs`). The specific NEW contributions (working-set cliff,
-  family floor, stream-vs-fold) are not in our code, but they are *refinements* of an existing
-  area, not greenfield.
+- **Q1 (No prior art?):** Mixed. The OVERALL topic (ANE backend + auto-router) is heavily
+  covered: Plan 255 Part 4 shipped `NpcBrainRouter` + `npc_brain.mlpackage` + `AneNpcBrainBackend`;
+  Research 155/223/224 cover the public-API path; `roofline.rs` covers the GPU cost model. The
+  specific NEW contributions (working-set cliff, family floor, stream-vs-fold, M(n)→H(n+12)
+  naming rule) are not in our code, but they are *refinements* of an existing, shipped area.
 - **Q2 (New class of behavior?):** No. Extends existing `roofline.rs` and `device_selector.rs`;
   does not introduce a capability we lack.
 - **Q3 (Product selling point?):** "Our auto-router never misplaces a 64×64 matmul on ANE" — yes,
@@ -287,7 +310,7 @@ Failing Q2 and Q3 ⇒ GOAT, not Super-GOAT.
 | Stack slot | Current primitive | This paper's contribution | Outcome |
 |---|---|---|---|
 | Roofline cost model | `roofline.rs` (GPU-only, M1/M2/M3/M4 peaks) | ANE peaks + 2 MB working-set axis + 0.23 ms floor + family-floor gate | **Add as opt-in `ane_roofline` feature**; promote to default if GOAT gate passes |
-| Device auto-router | `auto_route_backend()` (binary availability check) | Roofline-driven routing by op shape | **Add as opt-in `roofline_router` feature**; demote binary check to fallback if GOAT passes |
+| NPC brain auto-router | `NpcBrainRouter` with hardcoded `ANE_BATCH_THRESHOLD = 100` (Plan 255 Part 4, shipped) | Per-chip roofline-driven threshold that accounts for actual 0.23 ms M1 floor (vs the shipped 95µs assumption) and the 2 MB working-set cliff | **Add as opt-in `roofline_router` feature**; demote the hardcoded constant to fallback if GOAT passes. **Does NOT replace `NpcBrainRouter` — refines its threshold input.** |
 
 ---
 
@@ -395,12 +418,21 @@ just inference over a graph that includes backward ops.
 ## TL;DR
 
 The Bryngelson ANE reference is the most thorough public account of Apple's Neural Engine, but
-for our codebase it is **incremental** — we already have three prior ANE verdicts and shipped
-ANE backend code. The transferable modelless primitive is an **ANE-aware roofline cost model**
-that extends our GPU-only `roofline.rs` with three ANE-specific axes (2 MB working-set cliff,
-0.23 ms dispatch floor, family-floor capability gate) and an ANE peak table for M1–M5.
+for our codebase it is **incremental** — Plan 255 Part 4 already shipped an end-to-end ANE
+pipeline (`npc_brain.mlpackage` + `AneNpcBrainBackend` + `NpcBrainRouter` with hardcoded
+`ANE_BATCH_THRESHOLD = 100`), Research 155/223/224 already covered the public-API path, and
+`roofline.rs` already covers the GPU cost model.
 
-**Verdict: GOAT.** Provable routing gain over the current binary `is_ane_available()` selector,
-but not a new capability class. Plan into `katgpt-rs/crates/katgpt-core/src/ane_roofline.rs`
-(opt-in `ane_roofline` feature), benchmark against the paper's reference shapes, promote to
-default if GOAT gate passes. The training-loop specifics (ch. 15) → riir-train, not here.
+The transferable modelless primitive is an **ANE-aware roofline cost model** that extends our
+GPU-only `roofline.rs` with three ANE-specific axes (2 MB working-set cliff, 0.23 ms dispatch
+floor, family-floor capability gate) and an ANE peak table for M1–M5. The shipped
+`NpcBrainRouter`'s comment justifies its threshold as "~95µs ANE dispatch overhead"; Bryngelson
+measures the full firmware round trip at 0.23 ms on M1, ~2.4× higher than the shipped
+assumption, plus identifies the working-set cliff as a second routing axis.
+
+**Verdict: GOAT.** Provable routing gain over the shipped hardcoded threshold, but not a new
+capability class. Plan into `katgpt-rs/crates/katgpt-core/src/ane_roofline.rs` (opt-in
+`ane_roofline` feature), benchmark against the paper's reference shapes, and refine
+`NpcBrainRouter`'s threshold to consume the new primitive (do NOT replace the router — only its
+threshold input). Promote to default if GOAT gate passes. The training-loop specifics
+(ch. 15) → riir-train, not here.
