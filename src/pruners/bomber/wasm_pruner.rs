@@ -69,10 +69,14 @@ const VALID: u32 = 1;
 /// Maximum players per batch call.
 const MAX_PLAYERS: usize = 4;
 
-/// Actions per player (Up, Down, Left, Right, Bomb, Wait).
-const ACTION_COUNT: usize = 6;
+/// Actions per player (Up, Down, Left, Right, Bomb, Wait, Detonate).
+///
+/// NOTE: must match `BomberAction::all()` (7 variants). The previous value
+/// of 6 (missing Detonate) caused Issue 016 — the batch API never evaluated
+/// action index 6, so `batch_validate` returned false for all Detonate checks.
+const ACTION_COUNT: usize = 7;
 
-/// Pre-computed actions array: [0,1,2,3,4,5] as u32 LE bytes.
+/// Pre-computed actions array: [0,1,2,3,4,5,6] as u32 LE bytes.
 const ACTIONS_BYTES: [u8; ACTION_COUNT * 4] = [
     0, 0, 0, 0, // Up
     1, 0, 0, 0, // Down
@@ -80,6 +84,7 @@ const ACTIONS_BYTES: [u8; ACTION_COUNT * 4] = [
     3, 0, 0, 0, // Right
     4, 0, 0, 0, // Bomb
     5, 0, 0, 0, // Wait
+    6, 0, 0, 0, // Detonate
 ];
 
 // ── WASM Export Names ──────────────────────────────────────────
@@ -361,7 +366,7 @@ impl BomberInner {
         self.write_memory(players_off, &players_buf[..n * 12])
             .ok()?;
 
-        // 5. Write actions array (always [0,1,2,3,4,5])
+        // 5. Write actions array (always [0,1,2,3,4,5,6] — Issue 016 added Detonate)
         self.write_memory(actions_off, &ACTIONS_BYTES).ok()?;
 
         // 6. Call batch_is_valid
