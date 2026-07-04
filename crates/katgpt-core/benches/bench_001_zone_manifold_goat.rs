@@ -83,6 +83,7 @@ fn fmt_us(d: Duration) -> String {
     format!("{:.1} µs", d.as_secs_f64() * 1e6)
 }
 
+#[allow(clippy::too_many_arguments)] // bench helper mirrors zone_affective_manifold signature
 fn run_once(
     crowd: &[f32],
     n: usize,
@@ -102,10 +103,8 @@ fn main() {
     println!("=== Zone Affective Manifold GOAT Gate (Issue 001) ===\n");
 
     let cfg_single = ZoneManifoldConfig::default(); // n_groups=1
-    let mut cfg_grouped = ZoneManifoldConfig::default();
-    cfg_grouped.n_groups = 0; // auto: ~1 group per rayon worker
-    let mut cfg_grouped_8 = ZoneManifoldConfig::default();
-    cfg_grouped_8.n_groups = 8; // fixed 8 groups (perf cores on Apple Silicon)
+    let cfg_grouped = ZoneManifoldConfig { n_groups: 0, ..ZoneManifoldConfig::default() }; // auto: ~1 group per rayon worker
+    let cfg_grouped_8 = ZoneManifoldConfig { n_groups: 8, ..ZoneManifoldConfig::default() }; // fixed 8 groups (perf cores on Apple Silicon)
 
     let n_workers = rayon::current_num_threads();
     println!("rayon threads: {}\n", n_workers);

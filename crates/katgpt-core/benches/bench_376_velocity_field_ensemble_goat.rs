@@ -115,14 +115,14 @@ fn gate_g4_fit_latency() -> GateResult {
     let xs: Vec<[f32; D]> = (0..N_FIT_PAIRS)
         .map(|i| {
             let mut x = [0.0f32; D];
-            for k in 0..D { x[k] = ((i + k) as f32) * 0.01; }
+            for (k, slot) in x.iter_mut().enumerate().take(D) { *slot = ((i + k) as f32) * 0.01; }
             x
         })
         .collect();
     let ys: Vec<[f32; D]> = (0..N_FIT_PAIRS)
         .map(|i| {
             let mut y = [0.0f32; D];
-            for k in 0..D { y[k] = ((i * 2 + k) as f32) * 0.005; }
+            for (k, slot) in y.iter_mut().enumerate().take(D) { *slot = ((i * 2 + k) as f32) * 0.005; }
             y
         })
         .collect();
@@ -178,14 +178,14 @@ fn gate_g4_eval_latency() -> GateResult {
     let xs_fit: Vec<[f32; D]> = (0..N_FIT_PAIRS)
         .map(|i| {
             let mut x = [0.0f32; D];
-            for k in 0..D { x[k] = ((i + k) as f32) * 0.01; }
+            for (k, slot) in x.iter_mut().enumerate().take(D) { *slot = ((i + k) as f32) * 0.01; }
             x
         })
         .collect();
     let ys_fit: Vec<[f32; D]> = (0..N_FIT_PAIRS)
         .map(|i| {
             let mut y = [0.0f32; D];
-            for k in 0..D { y[k] = ((i * 2 + k) as f32) * 0.005; }
+            for (k, slot) in y.iter_mut().enumerate().take(D) { *slot = ((i * 2 + k) as f32) * 0.005; }
             y
         })
         .collect();
@@ -199,7 +199,7 @@ fn gate_g4_eval_latency() -> GateResult {
 
     // Warmup.
     for _ in 0..WARMUP_ITERS {
-        black_box(ensemble.eval_into(black_box(&x), black_box(&mut out), black_box(&mut eval_scratch)));
+        { ensemble.eval_into(black_box(&x), black_box(&mut out), black_box(&mut eval_scratch)); black_box(()); }
     }
 
     // Measure.
@@ -209,7 +209,7 @@ fn gate_g4_eval_latency() -> GateResult {
     for _ in 0..iters {
         let t0 = Instant::now();
         for _ in 0..BATCH {
-            black_box(ensemble.eval_into(black_box(&x), black_box(&mut out), black_box(&mut eval_scratch)));
+            { ensemble.eval_into(black_box(&x), black_box(&mut out), black_box(&mut eval_scratch)); black_box(()); }
         }
         let dt = t0.elapsed();
         per_call_ns.push((dt.as_nanos() as u64) / (BATCH as u64));
@@ -234,14 +234,14 @@ fn gate_g4_batch_latency() -> GateResult {
     let xs_fit: Vec<[f32; D]> = (0..N_FIT_PAIRS)
         .map(|i| {
             let mut x = [0.0f32; D];
-            for k in 0..D { x[k] = ((i + k) as f32) * 0.01; }
+            for (k, slot) in x.iter_mut().enumerate().take(D) { *slot = ((i + k) as f32) * 0.01; }
             x
         })
         .collect();
     let ys_fit: Vec<[f32; D]> = (0..N_FIT_PAIRS)
         .map(|i| {
             let mut y = [0.0f32; D];
-            for k in 0..D { y[k] = ((i * 2 + k) as f32) * 0.005; }
+            for (k, slot) in y.iter_mut().enumerate().take(D) { *slot = ((i * 2 + k) as f32) * 0.005; }
             y
         })
         .collect();
@@ -253,7 +253,7 @@ fn gate_g4_batch_latency() -> GateResult {
     let batch_x: Vec<[f32; D]> = (0..N_BATCH)
         .map(|i| {
             let mut x = [0.0f32; D];
-            for k in 0..D { x[k] = ((i + k) as f32) * 0.001; }
+            for (k, slot) in x.iter_mut().enumerate().take(D) { *slot = ((i + k) as f32) * 0.001; }
             x
         })
         .collect();
@@ -297,14 +297,14 @@ fn gate_g3_zero_alloc() -> GateResult {
     let xs_fit: Vec<[f32; D]> = (0..N_FIT_PAIRS)
         .map(|i| {
             let mut x = [0.0f32; D];
-            for k in 0..D { x[k] = ((i + k) as f32) * 0.01; }
+            for (k, slot) in x.iter_mut().enumerate().take(D) { *slot = ((i + k) as f32) * 0.01; }
             x
         })
         .collect();
     let ys_fit: Vec<[f32; D]> = (0..N_FIT_PAIRS)
         .map(|i| {
             let mut y = [0.0f32; D];
-            for k in 0..D { y[k] = ((i * 2 + k) as f32) * 0.005; }
+            for (k, slot) in y.iter_mut().enumerate().take(D) { *slot = ((i * 2 + k) as f32) * 0.005; }
             y
         })
         .collect();
@@ -318,12 +318,12 @@ fn gate_g3_zero_alloc() -> GateResult {
 
     // Warmup.
     for _ in 0..100 {
-        black_box(ensemble.eval_into(&x, &mut out, &mut eval_scratch));
+        { ensemble.eval_into(&x, &mut out, &mut eval_scratch); black_box(()); }
     }
 
     let before = ALLOC_COUNT.load(Ordering::Relaxed);
     for _ in 0..1000 {
-        black_box(ensemble.eval_into(&x, &mut out, &mut eval_scratch));
+        { ensemble.eval_into(&x, &mut out, &mut eval_scratch); black_box(()); }
     }
     let delta = ALLOC_COUNT.load(Ordering::Relaxed) - before;
 

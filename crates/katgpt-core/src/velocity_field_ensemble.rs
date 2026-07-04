@@ -1186,11 +1186,11 @@ pub struct HeterogeneousEnsemble<const P: usize, const D: usize> {
 impl<const P: usize, const D: usize> HeterogeneousEnsemble<P, D> {
     /// Construct from `P` entries. All entries' `bases.d_dst` must equal `D`.
     pub fn new(entries: [HeterogeneousEntry; P]) -> Self {
-        for i in 0..P {
+        for (i, entry) in entries.iter().enumerate() {
             assert_eq!(
-                entries[i].bases.d_dst, D,
+                entry.bases.d_dst, D,
                 "HeterogeneousEnsemble::new: entries[{}].bases.d_dst ({}) != D ({})",
-                i, entries[i].bases.d_dst, D
+                i, entry.bases.d_dst, D
             );
         }
         let uniform = 1.0 / (P as f32);
@@ -1286,8 +1286,8 @@ impl<const P: usize, const D: usize> HeterogeneousEnsemble<P, D> {
             project_to_spectral_into(native_buf_i, &self.entries[i].bases, spectral);
             reconstruct_from_spectral_into(spectral, &self.entries[i].bases, &mut scratch.b_at_d_i);
             let eta_i = self.eta[i];
-            for k in 0..D {
-                out[k] += eta_i * scratch.b_at_d_i[k];
+            for (out_k, b_k) in out.iter_mut().zip(scratch.b_at_d_i.iter()).take(D) {
+                *out_k += eta_i * b_k;
             }
         }
     }
@@ -1452,9 +1452,9 @@ mod heterogeneous_tests {
             let id = self.input_dim;
             debug_assert_eq!(x.len(), id);
             debug_assert_eq!(out_native.len(), nd);
-            for r in 0..nd {
+            for (r, out_slot) in out_native.iter_mut().enumerate().take(nd) {
                 let row = &self.w[r * id..(r + 1) * id];
-                out_native[r] = simd_dot_f32(row, x, id);
+                *out_slot = simd_dot_f32(row, x, id);
             }
         }
         fn native_dim(&self) -> usize {
@@ -1551,15 +1551,15 @@ mod heterogeneous_tests {
         //   (b) f32 precision limits the Gram accumulation accuracy at N=50.
         // 5e-4 is still 3 orders of magnitude below the smallest η* component
         // (0.2), so the recovery is unambiguous.
-        for i in 0..P {
+        for (i, (eta_i, eta_star_i)) in ens.eta.iter().zip(eta_star.iter()).enumerate().take(P) {
             assert!(
-                (ens.eta[i] - eta_star[i]).abs() < 5e-4,
+                (eta_i - eta_star_i).abs() < 5e-4,
                 "η[{}] = {} != η*[{}] = {} (diff {})",
                 i,
-                ens.eta[i],
+                eta_i,
                 i,
-                eta_star[i],
-                ens.eta[i] - eta_star[i]
+                eta_star_i,
+                eta_i - eta_star_i
             );
         }
     }

@@ -358,7 +358,7 @@ fn main() {
     println!(
         "    verdict:               {}{}",
         if s1.pass { "PASS" } else { "FAIL" },
-        if s1.stretch { " (STRETCH)" } else if s1.pass { "" } else { "" }
+        if s1.stretch { " (STRETCH)" } else { "" }
     );
     println!(
         "    thresholds:            PASS |Δ△|≥1, STRETCH |Δ△|≥2"
@@ -372,7 +372,7 @@ fn main() {
     println!(
         "    verdict:               {}{}",
         if s2.pass { "PASS" } else { "FAIL" },
-        if s2.stretch { " (STRETCH)" } else if s2.pass { "" } else { "" }
+        if s2.stretch { " (STRETCH)" } else { "" }
     );
     println!("    thresholds:            PASS ρ<0.85, STRETCH ρ<0.70");
     println!();
@@ -384,7 +384,7 @@ fn main() {
     println!(
         "    verdict:               {}{}",
         if s3.pass { "PASS" } else { "FAIL" },
-        if s3.stretch { " (STRETCH)" } else if s3.pass { "" } else { "" }
+        if s3.stretch { " (STRETCH)" } else { "" }
     );
     println!("    thresholds:            PASS ρ<0.85, STRETCH ρ<0.70");
     println!();

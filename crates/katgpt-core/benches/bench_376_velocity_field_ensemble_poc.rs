@@ -135,12 +135,12 @@ struct LinearFieldW {
 
 impl LinearFieldW {
     fn eval(&self, x: &[f32], out: &mut [f32; D]) {
-        for k in 0..D {
+        for (k, out_k) in out.iter_mut().enumerate().take(D) {
             let mut acc = 0.0f32;
-            for j in 0..D {
-                acc += self.w[k * D + j] * x[j];
+            for (j, x_j) in x.iter().enumerate().take(D) {
+                acc += self.w[k * D + j] * x_j;
             }
-            out[k] = acc;
+            *out_k = acc;
         }
     }
 }
@@ -253,17 +253,17 @@ impl Metrics {
             // Argmax of true and predicted.
             let mut true_argmax = 0usize;
             let mut true_max = f32::NEG_INFINITY;
-            for k in 0..D {
-                if true_v[k] > true_max {
-                    true_max = true_v[k];
+            for (k, true_vk) in true_v.iter().enumerate().take(D) {
+                if *true_vk > true_max {
+                    true_max = *true_vk;
                     true_argmax = k;
                 }
             }
             let mut pred_argmax = 0usize;
             let mut pred_max = f32::NEG_INFINITY;
-            for k in 0..D {
-                if pred[k] > pred_max {
-                    pred_max = pred[k];
+            for (k, pred_k) in pred.iter().enumerate().take(D) {
+                if *pred_k > pred_max {
+                    pred_max = *pred_k;
                     pred_argmax = k;
                 }
             }
@@ -358,12 +358,12 @@ fn fit_linear_from_scratch(ds: &Dataset, lambda: f32) -> [f32; D * D] {
 
     for k in 0..D {
         // rhs[j] = (1/N) Σ_n x_n[j] · y_n[k]
-        for j in 0..D {
+        for (j, rhs_j) in rhs.iter_mut().enumerate().take(D) {
             let mut acc = 0.0f32;
             for i in 0..n {
                 acc += ds.x_row(i)[j] * ds.y_row(i)[k];
             }
-            rhs[j] = acc * inv_n;
+            *rhs_j = acc * inv_n;
         }
         // gram_reg = XᵀX + λI.
         gram_reg.copy_from_slice(&xtx);
@@ -436,13 +436,13 @@ fn build_sources(rng: &mut Lcg, w_star: &[f32; D * D], related: bool) -> [Linear
     for (i, src) in sources.iter_mut().enumerate() {
         if related {
             // W_i = W* + Δ_i.
-            for j in 0..(D * D) {
-                src.w[j] = w_star[j] + rng.next_signed(SIGMA_BIAS);
+            for (j, src_w) in src.w.iter_mut().enumerate().take(D * D) {
+                *src_w = w_star[j] + rng.next_signed(SIGMA_BIAS);
             }
         } else {
             // W_i independent random.
-            for j in 0..(D * D) {
-                src.w[j] = rng.next_signed(0.5);
+            for src_w in src.w.iter_mut().take(D * D) {
+                *src_w = rng.next_signed(0.5);
             }
         }
         // Distinct IDs 1..=3 for the Gram.
@@ -596,9 +596,9 @@ fn gate_g2_for_regime(r: &RegimeResult) -> GateResult {
         r.eta[0], r.eta[1], r.eta[2],
     );
     if passed {
-        GateResult::pass(&format!("G2 ({})", r.regime_name), detail)
+        GateResult::pass(format!("G2 ({})", r.regime_name), detail)
     } else {
-        GateResult::fail(&format!("G2 ({})", r.regime_name), detail)
+        GateResult::fail(format!("G2 ({})", r.regime_name), detail)
     }
 }
 

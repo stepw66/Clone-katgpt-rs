@@ -23,9 +23,9 @@
 //! - **G3 (no single-rollout regression)**: For K=1, the QMC path must be
 //!   bit-identical to the i.i.d. path. Verified two ways:
 //!   (a) `sample_from_distribution_qmc(probs, &mut u)` returns the same token
-//!       as a CDF walk with `r = u` (for the same u > 0).
+//!   as a CDF walk with `r = u` (for the same u > 0).
 //!   (b) `sample_k_from_distribution_qmc` with K=1 produces a sequence matching
-//!       a single descend (bit-identical given the same starting u).
+//!   a single descend (bit-identical given the same starting u).
 //!
 //! - **G4 (zero-alloc hot path)**: After warmup, 100 steady-state calls of
 //!   `sample_k_from_distribution_qmc` AND `fill_noise_queries_gaussian_qmc`
@@ -195,10 +195,10 @@ fn gate_g1_marginal_exactness() -> bool {
                 }
                 None => {
                     let mut rng = Rng::new(5000 + batch as u64);
-                    for i in 0..K {
+                    for obs_i in observed.iter_mut().take(K) {
                         for t in 0..T {
                             let tok = sample_from_distribution(&marginals[t], &mut rng);
-                            observed[i][t][tok] += 1;
+                            obs_i[t][tok] += 1;
                         }
                     }
                 }
@@ -207,9 +207,9 @@ fn gate_g1_marginal_exactness() -> bool {
 
         let mut min_p = f64::INFINITY;
         let mut n_fail = 0usize;
-        for i in 0..K {
+        for obs_i in observed.iter().take(K) {
             for t in 0..T {
-                let (_chi2, p) = chi_square_gof(&observed[i][t], &expected[t]);
+                let (_chi2, p) = chi_square_gof(&obs_i[t], &expected[t]);
                 if p < min_p {
                     min_p = p;
                 }
@@ -436,8 +436,8 @@ struct FixedUniformSource {
 
 impl QmcSource for FixedUniformSource {
     fn draw(&mut self, k: usize, out: &mut [f32]) {
-        for i in 0..k {
-            out[i] = self.u;
+        for slot in out.iter_mut().take(k) {
+            *slot = self.u;
         }
     }
 }

@@ -8,7 +8,7 @@
 //!   `sin²α + cos²α = 1` identity must hold to `< 1e-4` across a 1000-point
 //!   α sweep in `[0, π/2]`. Measured both for `phase_safe_cos_sin` (libm sin
 //!   + Pythagorean sqrt recovery — should be essentially f32 rounding noise)
-//!   AND for the full `compute_phase_from_projection` end-to-end path.
+//!   and for the full `compute_phase_from_projection` end-to-end path.
 //!   Also re-verifies the `‖out‖² ≤ ‖a‖² + ‖b‖²` Cauchy-Schwarz bound.
 //!
 //! - **G2 (smooth interpolation)**: Sweeping α ∈ [0, π/2] must move the
@@ -46,6 +46,7 @@
 //! ```
 
 #![cfg(feature = "phase_rotation_coupling")]
+#![allow(clippy::doc_lazy_continuation)] // bench doc: prose continuation in a list item
 
 use katgpt_core::{
     compute_phase_from_projection, compute_phase_per_channel_into, phase_rotation_gate_into,

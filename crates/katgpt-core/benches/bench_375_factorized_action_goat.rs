@@ -146,14 +146,14 @@ impl SplitMix64 {
 }
 
 // ─── Synthetic Moving-MNIST-style transition generator ─────────────────────
-///
-/// Each "digit" is a synthetic 4×4 = 16-pixel sprite with a fixed pattern;
-/// the sprite moves on a 2D grid. The observation `x_t` is the flattened
-/// frame (16 pixels), and `o_t = x_{t+1} − x_t` is the motion input.
-///
-/// Different digits have different sprite patterns → cross-carrier transfer
-/// is meaningful (a codebook fit on digits 0–4 won't perfectly reconstruct
-/// digits 5–9).
+//
+// Each "digit" is a synthetic 4×4 = 16-pixel sprite with a fixed pattern;
+// the sprite moves on a 2D grid. The observation `x_t` is the flattened
+// frame (16 pixels), and `o_t = x_{t+1} − x_t` is the motion input.
+//
+// Different digits have different sprite patterns → cross-carrier transfer
+// is meaningful (a codebook fit on digits 0–4 won't perfectly reconstruct
+// digits 5–9).
 
 const FRAME_SIZE: usize = 16; // 4×4 frame
 
@@ -255,17 +255,17 @@ fn generate_transitions(
 }
 
 // ─── Patchify an extended-frame motion signal into N_PATCHES patches ────────
-///
-/// The motion signal `o_t` has length `ext_size = 2*FRAME_SIZE = 32`.
-/// We patchify it into `N_PATCHES = 16` patches of `PATCH_SIZE = D = 32`
-/// by **replicating** the signal — each "patch" is the full motion signal.
-/// This is a simplification: in the paper, patches are spatial regions of
-/// a 2D frame; here we use 1D replication to keep the synthetic domain
-/// tractable while still exercising the factorization + aggregation path.
-///
-/// The factorization still works because each "patch" gets assigned to
-/// the nearest codebook centroid, and the aggregate is the weighted
-/// average over the K codes.
+//
+// The motion signal `o_t` has length `ext_size = 2*FRAME_SIZE = 32`.
+// We patchify it into `N_PATCHES = 16` patches of `PATCH_SIZE = D = 32`
+// by **replicating** the signal — each "patch" is the full motion signal.
+// This is a simplification: in the paper, patches are spatial regions of
+// a 2D frame; here we use 1D replication to keep the synthetic domain
+// tractable while still exercising the factorization + aggregation path.
+//
+// The factorization still works because each "patch" gets assigned to
+// the nearest codebook centroid, and the aggregate is the weighted
+// average over the K codes.
 
 fn patchify_motion(o_t: &[f32], n_patches: usize, patch_size: usize) -> Vec<Vec<f32>> {
     debug_assert_eq!(patch_size, D);
@@ -291,11 +291,11 @@ fn patchify_motion(o_t: &[f32], n_patches: usize, patch_size: usize) -> Vec<Vec<
 
 // ─── Competitors ────────────────────────────────────────────────────────────
 
-/// Predict the next frame as `x_next_pred = x_t + delta`, where `delta` is
-/// derived from the action latent. The action latent is computed differently
-/// per competitor.
-///
-/// Reconstruction MSE = mean over pixels of `(x_next_pred - x_next)²`.
+// Predict the next frame as `x_next_pred = x_t + delta`, where `delta` is
+// derived from the action latent. The action latent is computed differently
+// per competitor.
+//
+// Reconstruction MSE = mean over pixels of `(x_next_pred - x_next)²`.
 
 /// **Monolithic baseline**: predict `o_t = mean_displacement`, where
 /// `mean_displacement` is the average motion across all observed training
@@ -329,8 +329,8 @@ fn identity_predict(transitions: &[Transition], scratch_o: &mut [f32]) -> f64 {
     let mut count = 0u64;
     for t in transitions {
         motion_input_velocity_into(&t.x_t, &t.x_next, scratch_o);
-        for i in 0..scratch_o.len() {
-            mse += (scratch_o[i] as f64) * (scratch_o[i] as f64);
+        for v in scratch_o.iter() {
+            mse += (*v as f64) * (*v as f64);
             count += 1;
         }
     }
@@ -344,6 +344,7 @@ fn identity_predict(transitions: &[Transition], scratch_o: &mut [f32]) -> f64 {
 /// prediction. We use a simple linear decode: the action latent IS the
 /// predicted motion (averaged across patches). For our 1D-synthetic domain
 /// this means `o_t_pred = z_act[..ext_size]` (zero-padded if D > ext_size).
+#[allow(clippy::too_many_arguments)] // bench helper: 8 params match the paper's factorized-OTF signature
 fn factorized_predict<const K: usize, const D: usize, const S: usize>(
     transitions: &[Transition],
     codebook: &EffectCodebook<K, D>,
@@ -387,9 +388,9 @@ fn factorized_predict<const K: usize, const D: usize, const S: usize>(
 
         // Decode: o_t_pred = out.0[..ext_size] (zero-pad if needed).
         let ext_size = t.x_t.len();
-        for i in 0..ext_size {
+        for (i, scratch_oi) in scratch_o.iter().enumerate().take(ext_size) {
             let pred = if i < D { out.0[i] } else { 0.0 };
-            let e = pred - scratch_o[i];
+            let e = pred - scratch_oi;
             mse += (e as f64) * (e as f64);
             count += 1;
         }
@@ -656,7 +657,7 @@ fn gate_g4_latency() -> GateResult {
 
     // Warmup.
     for _ in 0..G4_WARMUP {
-        black_box(aggregate_action_latent_into::<K, D, S>(
+        aggregate_action_latent_into::<K, D, S>(
             &cb,
             None::<&FilmProjectionBank<K, D, S>>,
             &factors,
@@ -666,7 +667,8 @@ fn gate_g4_latency() -> GateResult {
             AggregatorType::Gate,
             &mut out,
             &mut scratch_token,
-        ));
+        );
+        black_box(());
     }
 
     // Timing.
@@ -674,7 +676,7 @@ fn gate_g4_latency() -> GateResult {
     for _ in 0..(G4_ITERS / G4_BATCH) {
         let t0 = Instant::now();
         for _ in 0..G4_BATCH {
-            black_box(aggregate_action_latent_into::<K, D, S>(
+            aggregate_action_latent_into::<K, D, S>(
                 &cb,
                 None::<&FilmProjectionBank<K, D, S>>,
                 &factors,
@@ -684,7 +686,8 @@ fn gate_g4_latency() -> GateResult {
                 AggregatorType::Gate,
                 &mut out,
                 &mut scratch_token,
-            ));
+            );
+            black_box(());
         }
         let dt = t0.elapsed();
         ns_samples.push(dt.as_nanos() as u64 / G4_BATCH as u64);
@@ -699,7 +702,7 @@ fn gate_g4_latency() -> GateResult {
     // Alloc check.
     let (_, allocs) = alloc_delta(|| {
         for _ in 0..100 {
-            black_box(aggregate_action_latent_into::<K, D, S>(
+            aggregate_action_latent_into::<K, D, S>(
                 &cb,
                 None::<&FilmProjectionBank<K, D, S>>,
                 &factors,
@@ -709,7 +712,8 @@ fn gate_g4_latency() -> GateResult {
                 AggregatorType::Gate,
                 &mut out,
                 &mut scratch_token,
-            ));
+            );
+            black_box(());
         }
     });
 

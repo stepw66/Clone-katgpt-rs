@@ -581,6 +581,10 @@ mod tests {
         // h[i] += dt·(lap[i] - h[i] + motor[ch]·h[i])
         //       = dt·lap[i] + (1 - dt + dt·motor[ch])·h[i] - ... wait, motor is per-channel.
         for cell in 0..n {
+            // `ch` ranges over `0..dim` (not `0..motor_dim`) because it also
+            // addresses `cell*dim+ch` in `h.data`; only the motor lookup is
+            // guarded by `ch < motor_dim`.
+            #[allow(clippy::needless_range_loop)]
             for ch in 0..dim {
                 let motor = if ch < motor_dim { motor_vec[ch] } else { 0.0 };
                 let hi = h.data[cell * dim + ch];

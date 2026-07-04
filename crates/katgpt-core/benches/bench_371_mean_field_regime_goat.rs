@@ -198,7 +198,7 @@ fn gate_g4_alloc_free() -> Vec<GateResult> {
         }
     });
     results.push(if alloc_count == 0 {
-        GateResult::pass("G4.aggregate_into", format!("0 allocs / 100 calls"))
+        GateResult::pass("G4.aggregate_into", "0 allocs / 100 calls".to_string())
     } else {
         GateResult::fail("G4.aggregate_into", format!("{alloc_count} allocs / 100 calls (expected 0)"))
     });
@@ -213,7 +213,7 @@ fn gate_g4_alloc_free() -> Vec<GateResult> {
         }
     });
     results.push(if alloc_count == 0 {
-        GateResult::pass("G4.classify_path", format!("0 allocs / 100 calls"))
+        GateResult::pass("G4.classify_path", "0 allocs / 100 calls".to_string())
     } else {
         GateResult::fail("G4.classify_path", format!("{alloc_count} allocs / 100 calls (expected 0)"))
     });

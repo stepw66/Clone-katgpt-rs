@@ -91,7 +91,7 @@ fn bench_perturbed_loss_vector(c: &mut Criterion) {
     let s1: Vec<f32> = (0..D).map(|i| (i as f32 + 1.0) * 0.1).collect();
     let lambda = [0.0_f32, 0.15, 0.3, 0.45, 0.6, 0.75, 0.9, 1.0];
     let seeds = [0u64; K];
-    let mut theta = vec![Vec::with_capacity(D); K];
+    let mut theta: Vec<Vec<f32>> = (0..K).map(|_| Vec::with_capacity(D)).collect();
     extrapolated_snapshot_schedule(&s0, &s1, &lambda, &seeds, 0.0, &mut theta);
 
     let kernel = MatmulKernel { d: D };

@@ -78,11 +78,11 @@ fn g1_reconstruction_quality() -> bool {
     let b = [0.7f32, -0.3, 0.0, 0.0];
     let c = [0.4f32, 0.9, 0.0, 0.0];
     let mut x = vec![0.0f32; total];
-    for i0 in 0..4 {
-        for i1 in 0..4 {
-            for i2 in 0..4 {
+    for (i0, &a0) in a.iter().enumerate().take(4) {
+        for (i1, &b1) in b.iter().enumerate().take(4) {
+            for (i2, &c2) in c.iter().enumerate().take(4) {
                 let flat = (i0 * 4 + i1) * 4 + i2;
-                x[flat] = a[i0] * b[i1] * c[i2];
+                x[flat] = a0 * b1 * c2;
             }
         }
     }

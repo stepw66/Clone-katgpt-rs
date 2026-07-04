@@ -66,7 +66,7 @@ fn bench_lookup_into_1m(c: &mut Criterion) {
     // Build the table outside the timed region. Populate ~1% of slots so hit
     // rate is realistic (matches G1 gate setup).
     let mut builder = EngramTableBuilder::new(LOOKUP_N_SLOTS, LOOKUP_D);
-    let mut state = 0xC0FFEE_1234u64;
+    let mut state = 0x00C0_FFEE_1234u64;
     let mut lcg = || {
         state = state
             .wrapping_mul(6364136223846793005)

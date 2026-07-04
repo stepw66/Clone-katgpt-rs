@@ -106,6 +106,7 @@ fn generate_ar1(n: usize, phi: f32, sigma: f32, seed: u64) -> Vec<f32> {
 /// - Two linear closure fields with different slopes (regression basis).
 /// - Pre-fit on N_TRAIN AR(1) pairs where target = x_{t+1} - x_t (drift).
 struct VfeForecastAdapter {
+    #[allow(clippy::type_complexity)] // generic ensemble type is inherent to the adapter
     ensemble: VelocityFieldEnsemble<ClosureField<1, fn(&[f32], &mut [f32; 1])>, 2, 1>,
     eval_scratch: [f32; 1],
     /// Estimated residual std from training (calibrates the Gaussian noise

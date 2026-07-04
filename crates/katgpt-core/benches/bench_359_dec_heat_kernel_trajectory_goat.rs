@@ -63,6 +63,7 @@ fn zero_field(cx: &CellComplex, dim: usize) -> CochainField {
     CochainField::zeros(0, cx.n_vertices(), dim)
 }
 
+#[allow(clippy::too_many_arguments)] // bench helper: 8 params describe a 2D Gaussian bump placement
 fn place_bump(
     field: &mut CochainField,
     w: usize,
@@ -113,6 +114,9 @@ fn linear_euler_step(
     let dim = h.dim;
     let lap = graph_laplacian(cx, h);
     for cell in 0..n {
+        // `ch` ranges over `0..dim` (not `0..motor_dim`) because it also
+        // addresses `cell*dim+ch`; only the motor lookup is guarded.
+        #[allow(clippy::needless_range_loop)]
         for ch in 0..dim {
             let motor = if ch < motor_dim { motor_vec[ch] } else { 0.0 };
             let hi = h.data[cell * dim + ch];
@@ -190,6 +194,9 @@ fn nonlinear_euler_step(
     if motor_dim > 0 {
         for cell in 0..n {
             let base = cell * dim;
+            // `ch` addresses `base+ch` in `h.data` AND indexes `motor_vec[ch]`;
+            // range loop is the clearest form.
+            #[allow(clippy::needless_range_loop)]
             for ch in 0..motor_dim {
                 h.data[base + ch] *= 1.0 + dt * motor_vec[ch];
             }
@@ -265,9 +272,9 @@ fn gate_g1_linear_correctness() -> (f32, f32, bool) {
     let hk_single = heat_kernel_trajectory_linear(&eig, &h0_single, &[motor], 1, t_short);
     let exact_scale = (t_short * a_k).exp();
     let mut hk_max_rel = 0.0f32;
-    for i in 0..n {
-        if v_k[i].abs() > 0.01 {
-            let hk_scale = hk_single.data[i] / v_k[i];
+    for (v_k_i, hk_i) in v_k.iter().zip(hk_single.data.iter()).take(n) {
+        if v_k_i.abs() > 0.01 {
+            let hk_scale = hk_i / v_k_i;
             let rel = (hk_scale - exact_scale).abs() / exact_scale.abs().max(1e-10);
             hk_max_rel = hk_max_rel.max(rel);
         }

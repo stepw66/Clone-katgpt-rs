@@ -576,10 +576,10 @@ fn gen_clustered_embeddings_bench(trial: u64) -> Vec<Vec<f32>> {
         .collect();
 
     let mut embeddings = Vec::with_capacity(N_ARMS);
-    for c in 0..N_CLUSTERS {
+    for (_c, center) in centers.iter().enumerate().take(N_CLUSTERS) {
         for _ in 0..ARMS_PER_CLUSTER {
             let point: Vec<f32> = (0..dim)
-                .map(|j| centers[c][j] + rng.next_normal() * 0.5)
+                .map(|j| center[j] + rng.next_normal() * 0.5)
                 .collect();
             embeddings.push(point);
         }
@@ -791,8 +791,10 @@ fn gate_g2_diversity() -> GateResult {
 
     let ratio = if med_flat_c > 0 {
         med_hier_c as f64 / med_flat_c as f64
+    } else if med_hier_c > 0 {
+        f64::INFINITY
     } else {
-        if med_hier_c > 0 { f64::INFINITY } else { 1.0 }
+        1.0
     };
 
     println!("  flat      median clusters (≥{:.0}% sel): {}  reward: {:.1}",

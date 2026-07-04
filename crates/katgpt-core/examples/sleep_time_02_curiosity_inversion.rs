@@ -115,14 +115,14 @@ impl SyntheticKarcRidge {
     fn curiosity_sq<const D: usize>(&self, c: &[f32; D]) -> f32 {
         let mut off_manifold_sq = 0.0f32;
         let mut on_manifold_sq = 0.0f32;
-        for j in 0..D {
+        for (j, &cj) in c.iter().enumerate().take(D) {
             if j < self.manifold_dim {
                 // On-manifold: forecast = decay · x, residual = (1 − decay) · x.
-                let r = (1.0 - self.decay) * c[j];
+                let r = (1.0 - self.decay) * cj;
                 on_manifold_sq += r * r;
             } else {
                 // Off-manifold: forecast = 0, residual = x (the whole thing).
-                off_manifold_sq += c[j] * c[j];
+                off_manifold_sq += cj * cj;
             }
         }
         off_manifold_sq + on_manifold_sq

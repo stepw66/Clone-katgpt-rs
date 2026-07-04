@@ -18,9 +18,9 @@ fn make_fitted_forecaster<const D: usize, const M: usize, const K: usize>(
             let t = i as f32 * 0.05;
             let mut row = [0.0f32; 32];
             let n = D.min(32);
-            for d in 0..n {
+            for (d, row_d) in row.iter_mut().enumerate().take(n) {
                 let freq = 0.3 + 0.2 * d as f32;
-                row[d] = (freq * t).sin() + 0.5 * ((freq + 1.0) * t).cos();
+                *row_d = (freq * t).sin() + 0.5 * ((freq + 1.0) * t).cos();
             }
             row[..D].to_vec()
         })

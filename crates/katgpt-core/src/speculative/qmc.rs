@@ -2204,7 +2204,7 @@ mod tests {
         let m = 4usize;
         let true_pass_at_m = 1.0 - (1.0 - p).powi(m as i32); // = 0.7599
         let n_batches = 200_000;
-        let mut rng = crate::types::Rng::new(0xC0FFEE_BABE);
+        let mut rng = crate::types::Rng::new(0x00C0_FFEE_BABE);
         let mut sum_est = 0.0f64;
         let mut outcomes = [false; 8];
         for _ in 0..n_batches {

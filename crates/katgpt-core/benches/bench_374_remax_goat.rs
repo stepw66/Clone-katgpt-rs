@@ -269,9 +269,9 @@ impl Strategy for Greedy {
         let means = self.means();
         let mut best = 0usize;
         let mut best_m = f32::NEG_INFINITY;
-        for i in 0..k {
-            if means[i] > best_m {
-                best_m = means[i];
+        for (i, &m) in means.iter().enumerate().take(k) {
+            if m > best_m {
+                best_m = m;
                 best = i;
             }
         }
@@ -319,8 +319,8 @@ impl Strategy for Softmax {
         let sum_exp: f64 = exps.iter().sum();
         let u = rng.next_f32() as f64 * sum_exp;
         let mut cum = 0.0f64;
-        for i in 0..k {
-            cum += exps[i];
+        for (i, &e) in exps.iter().enumerate().take(k) {
+            cum += e;
             if u <= cum {
                 return i;
             }
@@ -372,9 +372,9 @@ impl Strategy for ReMaxGreedy {
         expected_improvement_per_action_inplace(&pi, &q, self.m, &mut q_plus);
         let mut best = 0usize;
         let mut best_qp = f32::NEG_INFINITY;
-        for i in 0..k {
-            if q_plus[i] > best_qp {
-                best_qp = q_plus[i];
+        for (i, &qp) in q_plus.iter().enumerate().take(k) {
+            if qp > best_qp {
+                best_qp = qp;
                 best = i;
             }
         }

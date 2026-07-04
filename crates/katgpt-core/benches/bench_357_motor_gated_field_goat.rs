@@ -41,6 +41,7 @@ fn zero_field(cx: &CellComplex, dim: usize) -> CochainField {
     CochainField::zeros(0, cx.n_vertices(), dim)
 }
 
+#[allow(clippy::too_many_arguments)] // bench helper: 8 params describe a 2D Gaussian bump placement
 fn place_bump(
     field: &mut CochainField,
     w: usize,

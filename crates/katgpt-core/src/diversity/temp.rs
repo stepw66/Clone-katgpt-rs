@@ -1039,7 +1039,7 @@ mod tests {
         let lambda = [1.0_f32; 4];
         let mut src = LatticeQmc::new(12345);
         let mut scratch = [0.0_f32; 4];
-        let mut out = vec![Vec::with_capacity(1); 4];
+        let mut out: Vec<Vec<f32>> = (0..4).map(|_| Vec::with_capacity(1)).collect();
         extrapolated_snapshot_schedule_qmc(&s0, &s1, &lambda, &mut src, 0.5, &mut out, &mut scratch);
         // Recover the xi_j from theta_j = lambda_j*(1+xi_j) = 1*(1+xi_j):
         // theta_j = 1+xi_j, so xi_j = theta_j - 1.

@@ -116,8 +116,8 @@ fn print_bound_table() {
     );
     println!();
     println!(
-        "  {:<22} {:>12} {:>12}  {:<18} {}",
-        "class", "|V_τ|", "log|V_τ|", "domain", "recommendation"
+        "  {:<22} {:>12} {:>12}  {:<18} recommendation",
+        "class", "|V_τ|", "log|V_τ|", "domain"
     );
     for row in BOUND_TABLE {
         let bound = ClassSizeBound::for_vocab_size(row.v_tau);
@@ -226,8 +226,8 @@ fn print_worked_annotation() {
     let report = gap.annotate_with_class_bounds(&classes, &bounds);
 
     println!(
-        "  {:<12} {:>8} {:>12} {:>10} {:>14}  {}",
-        "class", "count", "mean Δ", "log|V_τ|", "ratio", "interpretation"
+        "  {:<12} {:>8} {:>12} {:>10} {:>14}  interpretation",
+        "class", "count", "mean Δ", "log|V_τ|", "ratio"
     );
     for row in &report.rows {
         let lv_str = if row.log_v_tau.is_nan() {

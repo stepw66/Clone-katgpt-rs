@@ -214,8 +214,7 @@ fn main() {
     let mut row_buf = vec![0.0f32; d_h_ho];
     {
         let basis = ChebyshevBasis::<M>::new();
-        let mut pair_idx = 0;
-        for t in (K - 1)..(n_total - 1) {
+        for (pair_idx, t) in ((K - 1)..(n_total - 1)).enumerate() {
             let mut delay = [0.0f32; K * D];
             for lag in 0..K {
                 let idx = t - lag;
@@ -224,7 +223,6 @@ fn main() {
             feature_expand_higher_order::<ChebyshevBasis<M>, M, R>(&delay, &basis, &mut row_buf);
             features_ho[pair_idx * d_h_ho..(pair_idx + 1) * d_h_ho].copy_from_slice(&row_buf);
             for d in 0..D { targets_ho[pair_idx * D + d] = traj[(t + 1) * D + d]; }
-            pair_idx += 1;
         }
     }
     // Chunked Gram (no lambda — low_rank_fit / the direct solve adds it).
@@ -333,6 +331,7 @@ fn autonomous_rollout_nrmse(
 
 /// Autonomous rollout with an external Wout matrix (higher-order full-rank).
 /// Returns `(pred, truth)` over `horizon` steps in RAW (un-normalized) space.
+#[allow(clippy::too_many_arguments)] // example helper: 8 params match the higher-order RC rollout signature
 fn autonomous_rollout_higher_order(
     wout: &[f32],
     traj: &[f32],

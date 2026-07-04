@@ -182,8 +182,8 @@ fn generate_states_for_indicator(
         labels.push(true);
         // Negative: pure noise (same std; no direction component).
         let mut n = [0.0f32; D];
-        for d in 0..D {
-            n[d] = NOISE_STD * rand_normal(&mut state);
+        for n_d in n.iter_mut().take(D) {
+            *n_d = NOISE_STD * rand_normal(&mut state);
         }
         states.push(n);
         labels.push(false);
@@ -191,7 +191,7 @@ fn generate_states_for_indicator(
     (states, labels)
 }
 
-// ─── AU-ROC (trapezoidal sweep) ─────────────────────────────────────────────
+// ─── AU-ROC (trapezoidal sweep) ────────────────────────────────────────────
 
 /// Compute AU-ROC from per-example (score, label) pairs.
 /// `labels[k] = true` means positive. Uses the rank-counting identity:
@@ -323,8 +323,8 @@ fn generate_transcript(
     // Negatives: pure noise (no direction component → any firing is spurious).
     for _ in 0..(n_total - n_positive) {
         let mut n = [0.0f32; D];
-        for d in 0..D {
-            n[d] = NOISE_STD * rand_normal(&mut state);
+        for n_d in n.iter_mut().take(D) {
+            *n_d = NOISE_STD * rand_normal(&mut state);
         }
         states.push(n);
         labels.push(false);
@@ -544,9 +544,7 @@ fn gate_g4_hot_path_latency_and_alloc() -> GateResult {
     let state = {
         let mut s = [0.0f32; D];
         let dir = bank.direction(0);
-        for d in 0..D {
-            s[d] = dir[d];
-        }
+        s[..D].copy_from_slice(&dir[..D]);
         s
     };
     let mut scores = [0.0f32; SyntheticIndicator::COUNT];

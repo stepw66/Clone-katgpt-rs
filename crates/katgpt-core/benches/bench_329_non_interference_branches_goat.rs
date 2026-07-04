@@ -219,9 +219,9 @@ fn gate_g1b_write_does_not_contaminate_sibling() -> GateResult {
     }
 
     // Verify every OTHER branch's stores are byte-for-byte unchanged.
-    for k in 1..N {
+    for (k, before_k) in before.iter().enumerate().skip(1).take(N - 1) {
         let after = StoreSnapshot::of(bank.get(BranchId::new(k as u32)).unwrap());
-        if after != before[k] {
+        if after != *before_k {
             return GateResult::fail(
                 "G1b",
                 format!(
@@ -323,13 +323,13 @@ fn gate_g2_router_route_perf() -> GateResult {
     // steady-state hot path the per-tick per-NPC runtime hits.
     let mut bank: BranchBank<()> = BranchBank::new(N_BRANCHES);
     let mut anchors: Vec<[f32; D]> = Vec::with_capacity(N_BRANCHES);
-    let mut rng = Lcg::new(0xC0FFEE_BEEF_DEAD_42);
+    let mut rng = Lcg::new(0xC0FF_EEBE_EFDE_AD42);
     for _ in 0..N_BRANCHES {
         let mut v = [0.0f32; D];
         let mut norm_sq = 0.0;
-        for i in 0..D {
+        for v_i in v.iter_mut().take(D) {
             let x = rng.next_f32() * 2.0 - 1.0;
-            v[i] = x;
+            *v_i = x;
             norm_sq += x * x;
         }
         let inv = 1.0 / norm_sq.sqrt();
@@ -402,9 +402,9 @@ fn gate_g4_alloc_free_hot_path() -> GateResult {
     for k in 0..N_BRANCHES {
         let mut v = [0.0f32; D];
         let mut norm_sq = 0.0;
-        for i in 0..D {
+        for v_i in v.iter_mut().take(D) {
             let x = rng.next_f32() * 2.0 - 1.0;
-            v[i] = x;
+            *v_i = x;
             norm_sq += x * x;
         }
         let inv = 1.0 / norm_sq.sqrt();

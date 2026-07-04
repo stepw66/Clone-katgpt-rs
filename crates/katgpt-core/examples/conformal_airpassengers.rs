@@ -125,10 +125,9 @@ fn main() {
     }
     // Compute residual std on the training set.
     let mut baseline_residuals = Vec::new();
-    for t in m..n_train {
+    for &y in train.iter().take(n_train).skip(m) {
         let mut fc = 0.0_f32;
         baseline_forecaster.forecast_into(&[], 1, &mut fc);
-        let y = train[t];
         baseline_residuals.push(y - fc);
         baseline_forecaster.observe(y);
     }

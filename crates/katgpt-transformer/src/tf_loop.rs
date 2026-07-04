@@ -267,17 +267,8 @@ pub fn restore_cache_positions(
 }
 
 // ── Thinking Prune — FrozenBaseGuard for LT2 Loops (Plan 171) ──────
-
-/// Determine whether the current loop iteration should apply full screening.
-///
-/// In the Thinking Pixel framework (arXiv:2604.25299 §3.3), intermediate
-/// recursion steps should use lightweight processing only. Applied to LT2:
-/// intermediate loop iterations use damped sub-stepping only (no pruner),
-/// while the final iteration applies the full `ConstraintPruner`/`ScreeningPruner`.
-///
-/// # Arguments
-///
-// NOTE: `should_apply_pruner_at_iteration` (Plan 171 thinking_prune gate) lives in
+//
+// `should_apply_pruner_at_iteration` (Plan 171 thinking_prune gate) lives in
 // the katgpt-rs *root* `src/tf_loop.rs` shim, not here. It consumes
 // `katgpt_pruners::PrunerSchedule`, and `katgpt-pruners` depends on
 // `katgpt-transformer` (non-optional) — adding the reverse dep here would

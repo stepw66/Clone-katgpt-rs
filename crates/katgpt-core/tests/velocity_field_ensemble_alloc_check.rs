@@ -69,6 +69,7 @@ fn field_7(x: &[f32], out: &mut [f32; D]) {
     }
 }
 
+#[allow(clippy::type_complexity)] // test fixture builder: generic ensemble return type
 fn build_ensemble() -> VelocityFieldEnsemble<ClosureField<D, fn(&[f32], &mut [f32; D])>, P, D> {
     let fields = [
         ClosureField::<D, _>::new(0, field_0 as fn(&[f32], &mut [f32; D])),
@@ -99,8 +100,8 @@ fn g3_eval_and_batch_zero_alloc_after_warmup() {
     let xs: Vec<[f32; D]> = (0..N_PAIRS)
         .map(|i| {
             let mut x = [0.0f32; D];
-            for k in 0..D {
-                x[k] = ((i + k) as f32) * 0.01;
+            for (k, slot) in x.iter_mut().enumerate().take(D) {
+                *slot = ((i + k) as f32) * 0.01;
             }
             x
         })
@@ -108,8 +109,8 @@ fn g3_eval_and_batch_zero_alloc_after_warmup() {
     let ys: Vec<[f32; D]> = (0..N_PAIRS)
         .map(|i| {
             let mut y = [0.0f32; D];
-            for k in 0..D {
-                y[k] = ((i * 2 + k) as f32) * 0.005;
+            for (k, slot) in y.iter_mut().enumerate().take(D) {
+                *slot = ((i * 2 + k) as f32) * 0.005;
             }
             y
         })
@@ -158,8 +159,8 @@ fn g3_eval_and_batch_zero_alloc_after_warmup() {
     let batch_x: Vec<[f32; D]> = (0..BATCH)
         .map(|i| {
             let mut x = [0.0f32; D];
-            for k in 0..D {
-                x[k] = (i as f32) * 0.1 + (k as f32) * 0.01;
+            for (k, slot) in x.iter_mut().enumerate().take(D) {
+                *slot = (i as f32) * 0.1 + (k as f32) * 0.01;
             }
             x
         })

@@ -41,13 +41,13 @@ impl HeterogeneousVelocityField for LinearNativeField {
     fn eval_native_into(&self, x: &[f32], out_native: &mut [f32]) {
         debug_assert_eq!(x.len(), INPUT_DIM);
         debug_assert_eq!(out_native.len(), self.native_dim);
-        for r in 0..self.native_dim {
+        for (r, out_slot) in out_native.iter_mut().enumerate().take(self.native_dim) {
             let row = &self.w[r * INPUT_DIM..(r + 1) * INPUT_DIM];
             let mut acc = 0.0f32;
             for c in 0..INPUT_DIM {
                 acc += row[c] * x[c];
             }
-            out_native[r] = acc;
+            *out_slot = acc;
         }
     }
     fn native_dim(&self) -> usize {

@@ -994,6 +994,7 @@ mod tests {
     /// lives in a disjoint 2-coordinate block (so they're exactly orthonormal
     /// by construction, no Gram–Schmidt drift); coordinates 6,7 are zero so
     /// the map is genuinely rank-3 in R^8.
+    #[allow(clippy::type_complexity)] // test fixture: rank-3 R^8x8 map decomposition tuple
     fn known_rank3_map_r8x8() -> ([f32; 64], [[f32; 8]; 3], [[f32; 8]; 3], [f32; 3]) {
         let (c1, s1) = (0.3f32.cos(), 0.3f32.sin());
         let (c2, s2) = (0.7f32.cos(), 0.7f32.sin());
