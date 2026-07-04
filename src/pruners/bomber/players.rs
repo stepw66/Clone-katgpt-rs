@@ -1178,6 +1178,14 @@ pub struct HLPlayer {
     total_pulls: u32,
     compressed: [bool; ACTION_COUNT],
     round_actions: Vec<BomberAction>,
+    /// Per-tick shaped reward for each action in `round_actions` (Issue 371
+    /// Option 2). Parallel Vec — `round_rewards[i]` is the shaped reward for
+    /// `round_actions[i]`. Computed at decision time (when board state is
+    /// available) and consumed by `update_outcome` to fix the
+    /// credit-assignment dilution (T3 evidence #3): instead of distributing
+    /// one `base_reward` uniformly, each tick carries a blast-zone-shaped
+    /// signal so the n-armed bandit can learn context-dependent safety.
+    round_rewards: Vec<f32>,
     last_dir: Option<BomberAction>,
     /// Shared bandit stats for multi-agent cooperative learning.
     /// When `Some`, Q-values/visits/compressed are delegated here.
@@ -1211,6 +1219,7 @@ impl HLPlayer {
             total_pulls: 0,
             compressed: [false; ACTION_COUNT],
             round_actions: Vec::new(),
+            round_rewards: Vec::new(),
             last_dir: None,
             #[cfg(feature = "bandit")]
             shared_stats: None,
@@ -1249,6 +1258,7 @@ impl HLPlayer {
             total_pulls: 0,
             compressed: [false; ACTION_COUNT],
             round_actions: Vec::new(),
+            round_rewards: Vec::new(),
             last_dir: None,
             #[cfg(feature = "bandit")]
             shared_stats: None,
@@ -1284,6 +1294,7 @@ impl HLPlayer {
             total_pulls: 0,
             compressed: [false; ACTION_COUNT],
             round_actions: Vec::new(),
+            round_rewards: Vec::new(),
             last_dir: None,
             shared_stats: Some(stats),
             shared_log,
@@ -1411,7 +1422,16 @@ impl HLPlayer {
             + if killed_opponent { 0.5 } else { 0.0 }
             + collected_powerups as f32 * 0.2;
 
-        // Decay-based credit assignment: recent actions get more weight
+        // Decay-based credit assignment: recent actions get more weight.
+        //
+        // Issue 371 Option 2 — per-tick reward shaping. Instead of distributing
+        // one `base_reward` uniformly across all actions, each tick carries its
+        // own blast-zone-shaped reward (`round_rewards[i]`, computed at decision
+        // time in `select_action`). This fixes the credit-assignment dilution
+        // (T3 evidence #3): a move that walked into a blast zone gets a direct
+        // negative signal regardless of whether HL survived the round, so the
+        // bandit can learn context-dependent safety without a contextual
+        // (state-conditioned) Q implementation.
         let total = self.round_actions.len();
         let mut action_rewards = [0.0f32; ACTION_COUNT];
         let mut action_weights = [0.0f32; ACTION_COUNT];
@@ -1419,8 +1439,11 @@ impl HLPlayer {
         for (i, action) in self.round_actions.iter().enumerate() {
             // Exponential decay: later actions get exponentially more credit
             let recency = 0.5_f32.powi((total - 1 - i) as i32);
+            // Per-tick shaped reward (defensive: default 0.0 if Vec lengths
+            // ever diverge — they should always be parallel).
+            let tick_reward = self.round_rewards.get(i).copied().unwrap_or(0.0);
             let idx = action_index(action);
-            action_rewards[idx] += base_reward * recency;
+            action_rewards[idx] += (base_reward + tick_reward) * recency;
             action_weights[idx] += recency;
         }
 
@@ -1567,6 +1590,7 @@ impl HLPlayer {
             total_pulls: frozen.total_pulls,
             compressed: frozen.compressed.map(|c| c != 0),
             round_actions: Vec::new(),
+            round_rewards: Vec::new(),
             last_dir: None,
             #[cfg(feature = "bandit")]
             shared_stats: None,
@@ -1776,6 +1800,62 @@ impl BomberPlayer for HLPlayer {
             scores[i] = (*action, h + strategy_bonus + bandit_term);
         }
 
+        // Per-tick reward shaping (Issue 371 Option 2).
+        //
+        // Computes a blast-zone-shaped reward for a candidate action at the
+        // current board state. This is recorded alongside the action in
+        // `round_rewards` and consumed by `update_outcome` so the n-armed
+        // bandit learns per-tick danger instead of a uniform round-level
+        // reward. Fixes the credit-assignment dilution (T3 evidence #3):
+        // a move that walks into a blast zone now gets a direct negative
+        // signal, regardless of whether HL survives the round.
+        //
+        // `bombs` is passed as a parameter (not captured) so the closure
+        // doesn't hold an immutable borrow of `self` that would conflict
+        // with the later `self.known_bombs.push(...)` / `self.round_rewards.push(...)`.
+        let currently_in_blast = in_blast_zone(pos, grid, &self.known_bombs);
+        let shape_tick = |action: BomberAction, bombs: &[KnownBomb]| -> f32 {
+            match action {
+                BomberAction::Up | BomberAction::Down | BomberAction::Left | BomberAction::Right => {
+                    let target = move_target(&action, pos);
+                    let target_in_blast = in_blast_zone(target, grid, bombs);
+                    if target_in_blast && !currently_in_blast {
+                        -0.5 // entered danger
+                    } else if !target_in_blast && currently_in_blast {
+                        0.5 // escaped danger
+                    } else {
+                        0.0 // neutral
+                    }
+                }
+                BomberAction::Bomb => {
+                    // Placing a bomb with no escape route is dangerous;
+                    // `has_escape_route` does a BFS for a safe cell reachable
+                    // within blast_range+1 steps. Penalty when trapped.
+                    if !has_escape_route(grid, pos, (pos.x, pos.y), DEFAULT_BLAST_RANGE, bombs) {
+                        -0.3
+                    } else {
+                        0.0
+                    }
+                }
+                BomberAction::Wait => {
+                    // Waiting inside a blast zone is fatal.
+                    if currently_in_blast {
+                        -0.5
+                    } else {
+                        0.0
+                    }
+                }
+                BomberAction::Detonate => {
+                    // Detonating while in own blast zone is fatal.
+                    if currently_in_blast {
+                        -0.5
+                    } else {
+                        0.0
+                    }
+                }
+            }
+        };
+
         // ε-greedy: 10% explore (only safe moves — less random than Greedy's 20%)
         if rng.f32() < 0.10 {
             // Pick a random non-compressed, non-hard-blocked, safe action
@@ -1803,6 +1883,7 @@ impl BomberPlayer for HLPlayer {
                 let pick = safe_explore[rng.usize(0..safe_explore.len())];
                 let action = scores[pick].0;
                 self.round_actions.push(action);
+                self.round_rewards.push(shape_tick(action, &self.known_bombs));
                 self.last_dir = Some(action);
                 return action;
             }
@@ -1822,6 +1903,7 @@ impl BomberPlayer for HLPlayer {
         }
 
         self.round_actions.push(best);
+        self.round_rewards.push(shape_tick(best, &self.known_bombs));
         if matches!(
             best,
             BomberAction::Up | BomberAction::Down | BomberAction::Left | BomberAction::Right
@@ -1844,6 +1926,7 @@ impl BomberPlayer for HLPlayer {
         self.known_powerups.clear();
         self.known_opponents.clear();
         self.round_actions.clear();
+        self.round_rewards.clear();
         self.last_dir = None;
         // NOTE: Q-values, visits, compressed persist across rounds (bandit memory)
     }
