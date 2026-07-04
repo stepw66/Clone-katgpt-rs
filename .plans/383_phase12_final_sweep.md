@@ -93,7 +93,12 @@ Anything beyond the [stay] list is a missed move — log + fix."*
         katgpt_core::traits::ScreeningPruner. chain_fold feature pulls katgpt-kv/
         still_kv + half + fastrand optional deps. still_kv + bake_precision
         sub-features added.)
-      - [ ] T4.6 — katgpt-transformer cascade: thinking_cot + swir/strategy_adapter
+      - [x] T4.6 — katgpt-transformer cascade: thinking_cot + swir/strategy_adapter ✅
+        (thinking_cot/ 2 files + swir/strategy_adapter.rs moved to katgpt-transformer.
+        Cascade unblocked: thinking_cot was the blocker that kept strategy_adapter
+        in root. Now both live in katgpt-transformer; crate::thinking_cot resolves
+        within the crate. Root swir/ shim deleted; root re-exports directly from
+        katgpt_transformer::swir + katgpt_transformer::thinking_cot.)
       - [ ] T4.7 — katgpt-attn: 8 dash_attn primitives (+ dep wiring for meta_router, sat_analysis)
       - [ ] T4.8 — katgpt-speculative/katgpt-pruners: ~30 speculative primitives
 - [ ] **T5** — Update `src/lib.rs` comments to reflect the final

@@ -97,13 +97,10 @@ mod convex_hull_check;
 mod entropy;
 mod signal_mix;
 mod soft_embedding;
-// NOTE: `strategy_adapter` stays in the katgpt-rs root crate — it consumes
-// `crate::thinking_cot::{ThinkingStrategy, StepContext, StepDirective,
-// ControlTokenIds}`, which is a root module with its own deep dep tree.
-// Moving it here would require either moving thinking_cot too or creating
-// a cycle. The root shim at `src/swir/mod.rs` re-exports this module's
-// contents AND adds `strategy_adapter` back as a sibling so
-// `katgpt_rs::swir::SwiRStrategyAdapter` still resolves.
+// Phase 12 T4.6 (2026-07-04): strategy_adapter moved here from katgpt-rs root.
+// Now that thinking_cot is also in katgpt-transformer, the cycle is resolved.
+pub mod strategy_adapter;
+pub use strategy_adapter::SwiRStrategyAdapter;
 mod types;
 
 pub use controller::SwiRController;

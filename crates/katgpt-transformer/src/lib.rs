@@ -24,6 +24,11 @@ pub mod tf_loop;
 pub mod dense_mesh;
 #[cfg(feature = "swir_switch_thinking")]
 pub mod swir;
+// Phase 12 T4.6 (2026-07-04): module moved from katgpt-rs root.
+// thinking_cot hosts the ThinkingStrategy trait + StepContext + StepDirective
+// wiring types consumed by swir/strategy_adapter (Plan 194).
+#[cfg(feature = "thinking_cot")]
+pub mod thinking_cot;
 
 pub use contiguous::ContiguousWeights;
 pub use context::PrefillContext;

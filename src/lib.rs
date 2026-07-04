@@ -351,8 +351,10 @@ pub mod spectralquant {
 }
 pub mod speculative;
 // SwiR Switch-Thinking — Explicit↔Latent mode controller (Plan 275, Research 241).
+// Phase 12 T4.6 (2026-07-04): strategy_adapter moved to katgpt-transformer
+// (the thinking_cot cycle is resolved). This shim re-exports everything.
 #[cfg(feature = "swir_switch_thinking")]
-pub mod swir;
+pub use katgpt_transformer::swir;
 #[cfg(feature = "static_cal_tables")]
 pub use katgpt_attn::static_cal;
 #[cfg(feature = "stiff_anomaly")]
@@ -362,7 +364,9 @@ pub use katgpt_spectral::stiff_anomaly;
 // speculative::thinking_controller; the module itself owns the shared
 // ThinkingStrategy trait (Plan 275 Phase 2).
 #[cfg(feature = "thinking_cot")]
-pub mod thinking_cot;
+// Phase 12 absorption (Proposal 003, 2026-07-04): module moved to katgpt-transformer.
+// Re-export preserves `katgpt_rs::thinking_cot::*` paths.
+pub use katgpt_transformer::thinking_cot;
 pub use katgpt_tokenizer as tokenizer;  // re-export (Issue 014): preserves `katgpt_rs::tokenizer::*` paths for tests/examples/validator
 pub mod transformer;
 // Phase 10 absorption (Proposal 003, 2026-07-04): module moved to katgpt-core.
