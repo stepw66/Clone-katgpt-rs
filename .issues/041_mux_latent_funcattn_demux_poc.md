@@ -55,10 +55,52 @@ Three competitors on a fixed workload (e.g., 8 candidate next-states, query vect
 
 ## Tasks
 
-- [ ] **T1** Build the bench harness in `riir-ai/crates/riir-engine/benches/bench_041_mux_funcattn_demux.rs`. Three competitors, K sweep, quality + perf metrics.
-- [ ] **T2** Run on a synthetic dataset (deterministic seed, reproducible) — K=8 candidate vectors sampled from a known distribution, Q sampled independently. Capture results in `.benchmarks/041_mux_funcattn_demux_poc.md`.
-- [ ] **T3** Verdict per the decision rule above. If "noise" → close this issue with the bench artifact retained for posterity. If "gain" → file a Plan in katgpt-rs to implement the composition primitive (with a GOAT gate).
-- [ ] **T4** If verdict is "tradeoff" → document the regime in the PoC report and close this issue with a recommendation that consumers opt-in via feature flag (no default-on promotion).
+- [x] **T1** Build the bench harness in `riir-ai/crates/riir-engine/benches/bench_041_mux_funcattn_demux.rs`. Three competitors, K sweep, quality + perf metrics.
+  - **DONE 2026-07-04 (re-scoped — see finding below).** Did NOT build the bench. Instead, investigated the `mux_latent` and `MuxDemuxVerifier` APIs to determine whether the proposed composition is even semantically well-formed. **Finding: the proposal is based on a category error.** See §"T1 API Investigation Finding" below.
+- [-] **T2** Run on a synthetic dataset. — SKIPPED (T1 found the composition is ill-formed; no bench to run).
+- [x] **T3** Verdict per the decision rule above.
+  - **DONE 2026-07-04.** Verdict: **DO NOT IMPLEMENT.** The proposed composition is based on a category error — `mux_latent` is context compression (token sequences → latent slots), not hypothesis packing (K latent states → 1 vector). The PoC cannot be built as specified because the mux primitive doesn't expose the required API. Close as "proposal premise invalidated."
+- [-] **T4** If verdict is "tradeoff". — SKIPPED (verdict is "invalid premise", not "tradeoff").
+
+## T1 API Investigation Finding
+
+### What `mux_latent` actually is
+
+Investigated the three mux-related APIs in katgpt-rs:
+
+1. **`katgpt-core/src/mux/demux.rs::MuxDemuxVerifier`** — token-level demux: sorts tokens by weight, verifies uniqueness. Operates on `(tokens: &[u32], weights: &[f32])` — **token IDs and scalar weights**, not latent state vectors.
+
+2. **`katgpt-rs/src/mux_latent/`** (Plan 238) — the full MUX-Latent context compression system: `LatentContextBuffer`, `MuxLatentEncoder`, `SpectralLOD`, `MuxLatentConfig`, `expand_all`, `expand_segment`, `select_segments_to_expand`. This is a **context compression** system — it compresses token sequences into latent slots (with configurable compression ratios, spectral LOD, eviction policies). It does NOT pack K alternative latent STATES into one vector.
+
+3. **`katgpt-rs/src/mux_demux.rs::mux_demux`** — recovers token spans from logit superposition using geometric decay. Operates on `logits: &[f32]` — **logit distributions**, not latent state vectors.
+
+### The category error
+
+Gemini's proposal assumed `mux_latent` could "pack K alternative destination hypotheses into one mux'd latent vector." But:
+
+- `mux_latent` packs **token sequences** into latent slots for context compression (Plan 238). Its input is a sequence of tokens; its output is a compressed latent buffer. It is NOT a "multiplexer for K alternative latent states."
+- `MuxDemuxVerifier` operates on token IDs + scalar weights — it sorts tokens by weight and checks uniqueness. It is NOT a "demultiplexer for latent state vectors."
+- The name `mux_latent` is misleading — "latent" refers to the compressed representation (latent slots), not to "latent states" in the cognitive/embedding sense.
+
+### What a correct composition would require
+
+To test Gemini's actual proposal ("pack K alternative destination hypotheses, demux via FUNCATTN"), we would need a NEW primitive that doesn't exist:
+
+```rust
+/// Pack K D-dim latent state vectors into one (D+k)-dim superposition.
+/// Does NOT exist in katgpt-rs.
+fn pack_latent_superposition(states: &[&[f32]], k: usize, dim: usize) -> Vec<f32>
+
+/// Demultiplex: given a packed superposition and a query, recover per-state relevance scores.
+/// Does NOT exist in katgpt-rs.
+fn demux_via_attention(packed: &[f32], query: &[f32], k: usize, dim: usize) -> Vec<f32>
+```
+
+Building these is a NEW primitive (beyond PoC scope) and the gain is still unverified. The existing `mux_latent` API cannot be repurposed for this without a category error.
+
+### Verdict
+
+**DO NOT IMPLEMENT.** The proposed composition is ill-formed — it requires a primitive that doesn't exist (`pack_latent_superposition` / `demux_via_attention`) and misuses the name of one that does (`mux_latent` = context compression, not hypothesis packing). The PoC cannot be built as specified. If someone wants to explore "pack K hypotheses, demux via attention," they should file a NEW issue proposing the `pack_latent_superposition` primitive from scratch, with a clear PoC design that doesn't reference `mux_latent`.
 
 ## Non-Goals
 
@@ -80,4 +122,4 @@ Three competitors on a fixed workload (e.g., 8 candidate next-states, query vect
 
 ## TL;DR
 
-Both `mux_latent` and `FUNCATTN` ship independently in katgpt-rs. Gemini's proposal suggested composing them: pack K alternative destination hypotheses via mux, demultiplex via FUNCATTN on a single PTG edge. The gain is unverified and my prior is "noise" — FUNCATTN may already do this implicitly. This issue tracks a defend-wrong PoC bench in riir-ai: three competitors (K-parallel-edges baseline, mux+FUNCATTN demux, FUNCATTN-only), quality + perf metrics, K ∈ {2,4,8,16,32}. Verdict per a decision rule: noise → close; gain → file a Plan; tradeoff → document regime. P3, deferred until somebody picks it up.
+**CLOSED — proposal premise invalidated (category error).** Investigated the `mux_latent` API to build the PoC and found it's a **context compression** system (Plan 238: token sequences → latent slots), NOT a "pack K alternative latent states into one vector" primitive. `MuxDemuxVerifier` operates on token IDs + scalar weights, not latent state vectors. The name `mux_latent` is misleading — "latent" refers to compressed representation, not cognitive/embedding latent states. Gemini's proposed composition requires a primitive (`pack_latent_superposition` / `demux_via_attention`) that doesn't exist. The PoC cannot be built as specified. If someone wants to explore "pack K hypotheses, demux via attention," file a NEW issue proposing the primitive from scratch.
