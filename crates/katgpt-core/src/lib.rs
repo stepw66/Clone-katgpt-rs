@@ -1187,3 +1187,24 @@ pub use mean_field::{
     DEFAULT_CLASSIFIER, HopfParams, MeanFieldOverlap, Regime, RegimeClassifier,
     hopf_boundary, static_boundary,
 };
+
+// Factorized Transition Action Abstraction — modelless compositional action
+// latent primitive distilled from Nam et al., *Latent Actions from Factorized
+// Transition Effects under Agent Ambiguity* (arXiv:2606.30544, Brown, 2026-06-30).
+// Research 374, Plan 375. The factorized/compositional cousin of the shipped
+// monolithic `latent_functor` (riir-ai Plan 273): frozen codebook of K D-dim
+// effect primitives + Top-1 patch assignment + sigmoid relevance gate +
+// normalized weighted average → compact action latent. Codebook constructed
+// modellessly via Lloyd's k-means (Path 2 of AGENTS.md §3.5 — deterministic,
+// no gradient descent). Sigmoid gating throughout (NEVER softmax per AGENTS.md
+// §2, verified in `otf_lam/model.py::GateNetwork.forward()`). Opt-in until the
+// G1–G6 GOAT gate (bench_375_factorized_action_goat) passes.
+#[cfg(feature = "factorized_action")]
+pub mod factorized_action;
+#[cfg(feature = "factorized_action")]
+pub use factorized_action::{
+    aggregate_action_latent_into, factor_token_into, finalize_factors,
+    fit_codebook_kmeans_into, motion_input_velocity_into, patchify_1d, relevance_score,
+    AggregatorType, EffectCodebook, FactorizedActionLatent, FilmProjectionBank,
+    TransitionFactors, MAX_K, MAX_PATCHES,
+};
