@@ -124,9 +124,50 @@ T3 must include a fixture PTG serialized BEFORE this feature (capture bytes from
 
 ## Tasks
 
-- [ ] **T1** Audit: confirm `latent_functor::apply_functor` signature in riir-ai and decide whether katgpt-rs needs a local lite-version or can depend on a published `katgpt-core::functor_apply` helper (probably the latter, extracted to `crates/katgpt-core/src/functor/apply.rs`).
+- [x] **T1** Audit: confirm `latent_functor::apply_functor` signature in riir-ai and decide whether katgpt-rs needs a local lite-version or can depend on a published `katgpt-core::functor_apply` helper (probably the latter, extracted to `crates/katgpt-core/src/functor/apply.rs`).
+  - **DONE 2026-07-04 (T1 audit by parallel agent).** Findings below; **a critical wire-format discovery changes the design** — see "T1 Wire-Format Finding".
+
+### T1.1 — riir-ai `latent_functor::apply_functor` signature (confirmed)
+
+- `apply_functor(source, functor, dim, out)` at `riir-ai/crates/riir-engine/src/latent_functor/arithmetic.rs:459` — trivially additive: `out[i] = source[i] + functor[i]` for `i ∈ 0..dim`. ~7 LOC.
+- `functor_gate(coherence, beta, tau) -> f32` at line 541 — `sigmoid(beta * (coherence - tau))`. 1 LOC.
+- `extract_functor_into(sources, targets, dim, f_out) -> f32` at line 132 — returns coherence f32 (the alignment quality).
+- **Decision:** katgpt-rs needs only the edge-apply numerics (cosine coherence + sigmoid gate + SAXPY). No riir-ai dependency; the math is ~20 LOC. The full HLA-aware `latent_functor` (rank-k variants, tropical, KARC consumers) stays in riir-ai.
+
+### T1 Wire-Format Finding — `#[serde(skip_serializing_if, default)]` on `PtgEdge.functor` is BROKEN
+
+**The issue's original wire-compat claim (line 93) is incorrect.** Adding `Option<FunctorEdgeParams>` to `PtgEdge` is NOT backward-compatible, regardless of `skip_serializing_if` / `default` annotations. Verified empirically (2026-07-04):
+
+| Approach | Serialize(None) byte-identical to old? | Deserialize those bytes back? |
+|---|---|---|
+| Plain `Option<T>` | NO (+1 byte None discriminant) | YES (but wire changed) |
+| `#[serde(skip_serializing_if, default)]` | YES (bytes identical) | **NO — "Hit end of buffer"** |
+
+The `skip_serializing_if` approach makes serialization byte-identical BUT **the round-trip fails**: `NewSkip(None) → bytes → NewSkip` errors "Hit end of buffer, expected more data". Postcard is positional — `#[serde(default)]` cannot kick in on EOF because the deserializer doesn't know the field is "missing" vs "next byte is the field". This is a fundamental postcard property, not a serde bug.
+
+**Implication:** ANY design that adds a field to `PtgEdge` (Option A in the issue) changes the wire format and breaks round-trip for existing PTGs. The issue's claim "Existing PTGs serialize identically" is wrong.
+
+### T1 Recommended Design — `FunctorPtg` composite (zero wire impact)
+
+Instead of modifying `PtgEdge`, wrap the unchanged PTG with a parallel functor-params array:
+
+```rust
+#[cfg(feature = "ptg_functor_edges")]
+pub struct FunctorPtg {
+    pub ptg: PrimitiveTransitionGraph,  // byte-identical wire format + commitment
+    pub edge_functors: Vec<Option<FunctorEdgeParams>>,  // indexed by edge position
+}
+```
+
+This preserves wire format 100% (no field added to `PtgEdge`), preserves commitment 100% (PTG bytes unchanged → BLAKE3 unchanged), and follows the existing indirection pattern (`direction_set: [u8;32]` — same as Issue 039's `functor_sig_root`, decoupled from the `engram` feature). The feature flag becomes `ptg_functor_edges = ["closure_instrument"]` (NOT `["closure_instrument", "engram"]`).
+
+**If the current `functor_edge.rs` implementation modifies `PtgEdge` (adds `functor: Option<FunctorEdgeParams>` with `skip_serializing_if`), it MUST be redesigned to the `FunctorPtg` composite before promotion. The wire-format round-trip test (`bare_ptg_bytes_identical_to_inner_ptg_bytes`) will fail otherwise.**
+
 - [ ] **T2** Extend `OperatorKind` with `Functor = 4` variant (gated `ptg_functor_edges`). Extend `PtgEdge` with `pub functor: Option<FunctorEdgeParams>`. Update `PtgRecorder` accordingly.
+  - **BLOCKED on T1 design pivot.** With the `FunctorPtg` composite design, `OperatorKind::Functor` is optional (semantic marker only — a functor edge can be `op = Sequence` + `edge_functors[i] = Some(params)`). The `PtgEdge.functor` field MUST NOT be added (wire-format break per T1 finding above). `PtgRecorder` stays unchanged; `FunctorPtg::set_edge_functor(i, params)` replaces `PtgRecorder::exit_functor`.
 - [ ] **T3** Wire-format regression: capture pre-change serialization of a 5-node PTG fixture, verify post-change round-trip is byte-identical (with and without feature flag, on `functor: None` edges).
+  - **With `FunctorPtg` composite (T1 recommendation):** wire format is byte-identical by construction (no field added to `PtgEdge`). Test: `bare_ptg_bytes == FunctorPtg.ptg` serialized bytes. Trivially passes.
+  - **With `PtgEdge.functor` field (old Option A design):** this test WILL FAIL ("Hit end of buffer" per T1 finding). Do not ship.
 - [ ] **T4** Implement `apply_functor_edge_into(state, params, engram_table, &mut out)` in `closure/functor_edge.rs`. Zero-alloc.
 - [ ] **T5** Spec-match + GOAT bench. Record in `.benchmarks/040_ptg_functor_edge_goat.md`.
 - [ ] **T6** If G2 perf target missed (likely — D=64 dot product is ~50ns, but the EngramTable lookup to resolve `direction_index` may dominate): profile and decide whether to cache the direction vector in `FunctorEdgeParams` directly (32 bytes inline, no lookup) vs reference-by-id. Inline wins perf, ref-by-id wins tamper-evidence. Default: inline, with a `FunctorEdgeParamsRef` alternative for commitment use cases.
