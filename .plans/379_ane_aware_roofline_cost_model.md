@@ -54,14 +54,14 @@ Goal: a compiling, tested, feature-gated module that implements the ANE cost mod
 
 ### Tasks
 
-- [ ] **T1.1** Add feature flag `ane_roofline = []` to `katgpt-rs/crates/katgpt-core/Cargo.toml` `[features]` section. No new deps.
-- [ ] **T1.2** Create `katgpt-rs/crates/katgpt-core/src/ane_roofline.rs` with module-level doc referencing Research 377 and arXiv:2606.22283.
-- [ ] **T1.3** Add `#[cfg(feature = "ane_roofline")] pub mod ane_roofline;` to `katgpt-rs/crates/katgpt-core/src/lib.rs` (alphabetical, after `alloc`).
-- [ ] **T1.4** Implement `AneFamily` enum (`#[repr(u8)]`):
+- [x] **T1.1** Add feature flag `ane_roofline = []` to `katgpt-rs/crates/katgpt-core/Cargo.toml` `[features]` section. No new deps.
+- [x] **T1.2** Create `katgpt-rs/crates/katgpt-core/src/ane_roofline.rs` with module-level doc referencing Research 377 and arXiv:2606.22283.
+- [x] **T1.3** Add `#[cfg(feature = "ane_roofline")] pub mod ane_roofline;` to `katgpt-rs/crates/katgpt-core/src/lib.rs` (alphabetical, after `alloc`).
+- [x] **T1.4** Implement `AneFamily` enum (`#[repr(u8)]`):
   - `A11Legacy = 0, A12 = 1, A13 = 2, A14 = 3, A15 = 4, A16 = 5, A17 = 6, A18 = 7`
   - Constants `M1 = A13`, `M2 = A14`, `M3 = A15`, `M4 = A16`, `M5 = A17` per Bryngelson's M(n) → H(n+12) rule.
   - `detect() -> Option<AneFamily>` reads `sysctl hw.optional.arm64` on macOS (returns `None` on non-Apple platforms). Cache the result in a `OnceLock`.
-- [ ] **T1.5** Implement `AnePeaks` struct (per-family calibration, M1 and M5 silicon-confirmed, others decompile-derived per Bryngelson ch. 12 table 12.4):
+- [x] **T1.5** Implement `AnePeaks` struct (per-family calibration, M1 and M5 silicon-confirmed, others decompile-derived per Bryngelson ch. 12 table 12.4):
   ```rust
   pub struct AnePeaks {
       pub compute_tflops_fp16: f64,   // 12.0 (M1) → 19.6 (M5)
@@ -74,7 +74,7 @@ Goal: a compiling, tested, feature-gated module that implements the ANE cost mod
   ```
   - `AnePeaks::m1()` / `::m2()` / `::m3()` / `::m4()` / `::m5()` constructors.
   - `AnePeaks::for_family(family) -> Option<Self>` returns `None` for `A11Legacy`/`A12` (below the M1 floor; no direct-route toolchain per Bryngelson ch. 1.1).
-- [ ] **T1.6** Implement `AneBound` enum (`#[repr(u8)]`, `Serialize`, `Deserialize`):
+- [x] **T1.6** Implement `AneBound` enum (`#[repr(u8)]`, `Serialize`, `Deserialize`):
   ```rust
   pub enum AneBound {
       Compute,        // above ridge, working set fits
@@ -84,7 +84,7 @@ Goal: a compiling, tested, feature-gated module that implements the ANE cost mod
       FamilyGated,    // op's MinimumFamily > target's family (NEW vs roofline.rs)
   }
   ```
-- [ ] **T1.7** Implement `AneOpShape` struct (the input):
+- [x] **T1.7** Implement `AneOpShape` struct (the input):
   ```rust
   pub struct AneOpShape {
       pub flops: u64,
@@ -94,8 +94,8 @@ Goal: a compiling, tested, feature-gated module that implements the ANE cost mod
   }
   ```
   - Helper constructors: `AneOpShape::gemv(m, k, dtype)`, `::gemm(m, n, k, dtype)`, `::conv_3x3(c_in, c_out, h, w, dtype)`, `::elementwise(n, dtype)`.
-- [ ] **T1.8** Implement `AneCost` struct (the output): `{ runtime_ms: f64, bound: AneBound, flops: u64, bytes_moved: u64, working_set_bytes: u64 }` (mirrors existing `RooflineCost`).
-- [ ] **T1.9** Implement the core estimator `ane_estimate(op, dtype, peaks) -> AneCost`:
+- [x] **T1.8** Implement `AneCost` struct (the output): `{ runtime_ms: f64, bound: AneBound, flops: u64, bytes_moved: u64, working_set_bytes: u64 }` (mirrors existing `RooflineCost`).
+- [x] **T1.9** Implement the core estimator `ane_estimate(op, dtype, peaks) -> AneCost`:
   ```rust
   #[inline(always)]
   pub fn ane_estimate(op: AneOpShape, dtype: Dtype, peaks: &AnePeaks) -> AneCost {
@@ -123,17 +123,17 @@ Goal: a compiling, tested, feature-gated module that implements the ANE cost mod
                 working_set_bytes: op.largest_operand_bytes }
   }
   ```
-- [ ] **T1.10** Implement convenience constructors mirroring `roofline.rs`:
+- [x] **T1.10** Implement convenience constructors mirroring `roofline.rs`:
   - `ane_gemv_cost(m, k, dtype, peaks) -> AneCost` (FLOPs = 2·m·k, bytes = (m·k + m + k)·elem_size, ws = m·k·elem_size, min_family = F0)
   - `ane_gemm_cost(m, n, k, dtype, peaks) -> AneCost` (ws = m·k·elem_size for the LHS operand)
   - `ane_conv3x3_cost(c_in, c_out, h, w, dtype, peaks) -> AneCost` (ws = c_in·h·w·elem_size for the activation)
-- [ ] **T1.11** Implement `AneCost::device_recommendation(&self, gpu_available: bool) -> Device`:
+- [x] **T1.11** Implement `AneCost::device_recommendation(&self, gpu_available: bool) -> Device`:
   - `WorkingSet` → GPU (if available) or CPU tile
   - `Dispatch` → CPU
   - `FamilyGated` → CPU (op won't lower on this chip)
   - `Compute` → ANE
   - `Memory` → GPU (ANE standalone stream is 24 GB/s vs GPU's 230 GB/s per Bryngelson ch. 9.5)
-- [ ] **T1.12** Write unit tests in `katgpt-rs/crates/katgpt-core/src/ane_roofline.rs` `#[cfg(test)] mod tests`:
+- [x] **T1.12** Write unit tests in `katgpt-rs/crates/katgpt-core/src/ane_roofline.rs` `#[cfg(test)] mod tests`:
   - **T1.12a** Family-floor gate: op with `min_family = F3` (crop-resize) on M1 (A13) returns `AneBound::FamilyGated`. ✅ G3 hook.
   - **T1.12b** Working-set cliff: GEMM with operand > 2 MB on M1 returns `AneBound::WorkingSet`. ✅ G1 hook.
   - **T1.12c** Dispatch floor: 64×64 GEMM on M1 returns `AneBound::Dispatch` (work < 0.23 ms floor). ✅ G1 hook.
@@ -142,7 +142,7 @@ Goal: a compiling, tested, feature-gated module that implements the ANE cost mod
   - **T1.12f** Cross-chip scaling: M5 peaks > M1 peaks on every field.
   - **T1.12g** Detect returns `None` on non-Apple (mock via `cfg(target_os = "macos")`).
   - **T1.12h** Determinism: same input → same output (no RNG).
-- [ ] **T1.13** Add module doc with Bryngelson equations and M1/M5 anchor tables.
+- [x] **T1.13** Add module doc with Bryngelson equations and M1/M5 anchor tables.
 
 ### Phase 1 Exit Criteria
 
@@ -167,8 +167,8 @@ Goal: prove G1 (±30% accuracy on Bryngelson's reference shapes) and G2 (routing
 
 ### Tasks
 
-- [ ] **T2.1** Add `#[cfg(test)] mod goat_gate` to `ane_roofline.rs` with `#[ignore]` on tests that need live hardware (only run with `--ignored`).
-- [ ] **T2.2** Implement **G1 reference-shape accuracy test**:
+- [x] **T2.1** Add `#[cfg(test)] mod goat_gate` to `ane_roofline.rs` with `#[ignore]` on tests that need live hardware (only run with `--ignored`).
+- [x] **T2.2** Implement **G1 reference-shape accuracy test**:
   - Shapes from Bryngelson ch. 9/11:
     - 3×3 conv, 256 channels, 28×28 feature map → measured 0.51 ms (ch. 13.1)
     - 4096² GEMM, fp16 → measured ~5 ms (ch. 9.1, the saturating large-matmul ceiling)
@@ -176,7 +176,7 @@ Goal: prove G1 (±30% accuracy on Bryngelson's reference shapes) and G2 (routing
     - Single-token decode (M=1, K=1024, N=1024 GEMV) → measured ~0.23 ms (dispatch-bound)
   - For each: `assert!((ane_estimate(shape, F16, &AnePeaks::m1()).runtime_ms - measured_ms).abs() / measured_ms <= 0.30, ...)`.
   - Run with `cargo test --features ane_roofline --lib -- --ignored ane_roofline::goat_gate::g1_reference_shapes` on Apple Silicon.
-- [ ] **T2.3** Implement **G2 routing verdict test**:
+- [x] **T2.3** Implement **G2 routing verdict test**:
   - For each shape, call `AneCost::device_recommendation(gpu_available=true)` and assert it matches Bryngelson ch. 11 table 11.4:
     - 16-deep 3×3 conv stack → `Device::Ane` (engine wins both speed and efficiency)
     - 4096² GEMM → `Device::Gpu` (engine stalls on weight streaming past working set)
@@ -184,15 +184,15 @@ Goal: prove G1 (±30% accuracy on Bryngelson's reference shapes) and G2 (routing
     - 64×64 GEMM → `Device::Cpu` (below dispatch floor)
     - Op with `min_family = F3` on M1 → `Device::Cpu` (family-gated)
   - Run with `cargo test --features ane_roofline --lib -- --ignored ane_roofline::goat_gate::g2_routing_verdicts`.
-- [ ] **T2.4** Implement **G3 no-regression test**:
+- [x] **T2.4** Implement **G3 no-regression test**:
   - Run existing `cargo test -p katgpt-core --lib roofline` — all pre-existing GPU roofline tests must still pass.
   - Add a new test asserting `AnePeaks::for_family(AneFamily::A11Legacy) == None` (below the M1 floor).
-- [ ] **T2.5** Implement **G4 alloc-free / ≤1 µs CPU bench**:
+- [x] **T2.5** Implement **G4 alloc-free / ≤1 µs CPU bench**:
   - New criterion bench `katgpt-rs/crates/katgpt-core/benches/ane_roofline_bench.rs`:
     - `ane_estimate` on the four reference shapes, M1 peaks.
     - Assert p50 < 1 µs (Bryngelson's dispatch floor is 230 µs; the cost model must be ≤230× cheaper than the work it's routing).
   - Use `CARGO_TARGET_DIR=/tmp/plan379-bench` per AGENTS.md to avoid locking the main target dir.
-- [ ] **T2.6** Implement **G5 feature isolation**:
+- [x] **T2.6** Implement **G5 feature isolation**:
   - `cargo check` (default features, no `ane_roofline`) — clean.
   - `cargo check --features ane_roofline` — clean.
   - `cargo check --all-features` — clean (catches combo regressions per the `merkle_root`/`can_freeze` lesson).
@@ -213,8 +213,8 @@ Goal: replace the hardcoded `ANE_BATCH_THRESHOLD = 100` in `riir-ai/crates/riir-
 
 ### Tasks
 
-- [ ] **T3.1** Add `riir-engine` Cargo dep on `katgpt-core` with `features = ["ane_roofline"]` under the existing `ane_npc` feature gate. No new path deps — `katgpt-core` is already a dep.
-- [ ] **T3.2** In `npc_brain_router.rs`, replace the constant:
+- [x] **T3.1** Add `riir-engine` Cargo dep on `katgpt-core` with `features = ["ane_roofline"]` under the existing `ane_npc` feature gate. No new path deps — `katgpt-core` is already a dep.
+- [x] **T3.2** In `npc_brain_router.rs`, replace the constant:
   ```rust
   // BEFORE (Plan 255 Part 4, shipped):
   const ANE_BATCH_THRESHOLD: usize = 100;
@@ -238,12 +238,12 @@ Goal: replace the hardcoded `ANE_BATCH_THRESHOLD = 100` in `riir-ai/crates/riir-
   ```
   - On M1: 230 µs / 75 ns ≈ 3067 NPCs (vs the shipped 100 — the shipped threshold was 30× too low, but harmless because the actual bench at 1000 NPCs already cleared the real floor).
   - On M5: 110 µs / 75 ns ≈ 1467 NPCs.
-- [ ] **T3.3** Keep `ANE_BATCH_THRESHOLD` as a `const` fallback for non-macOS or pre-M1 chips; document the new computation in the module doc.
-- [ ] **T3.4** Re-run `ane_npc_goat.rs` (the existing Plan 255 GOAT bench) and confirm:
+- [x] **T3.3** Keep `ANE_BATCH_THRESHOLD` as a `const` fallback for non-macOS or pre-M1 chips; document the new computation in the module doc.
+- [x] **T3.4** Re-run `ane_npc_goat.rs` (the existing Plan 255 GOAT bench) and confirm:
   - 1000-NPC batch still routes to ANE on both M1 and M5 (above the new threshold).
   - Sub-threshold batches (10, 100) still route to CPU.
   - The bench's existing COSINE_THRESHOLD (0.99) and ANE_LATENCY_THRESHOLD_US (1000) still hold.
-- [ ] **T3.5** Update the routing comment in `npc_brain_router.rs` to cite Bryngelson ch. 2.3 (the 0.23 ms measurement) and Research 377.
+- [x] **T3.5** Update the routing comment in `npc_brain_router.rs` to cite Bryngelson ch. 2.3 (the 0.23 ms measurement) and Research 377.
 
 ### Phase 3 Exit Criteria
 
@@ -267,7 +267,7 @@ Goal: replace the hardcoded `ANE_BATCH_THRESHOLD = 100` in `riir-ai/crates/riir-
 
 | Stack slot | Primitive | Feature | Status after this plan |
 |---|---|---|---|
-| ANE roofline cost model | `ane_roofline.rs` (new) | `ane_roofline` (opt-in) | **Promoted to default if G1–G5 PASS**; stays opt-in if any FAIL |
+| ANE roofline cost model | `ane_roofline.rs` (new) | `ane_roofline` (**DEFAULT-ON** ✅ 2026-07-04) | G1–G5 all PASS → promoted to default in both `katgpt-core/Cargo.toml` and `riir-engine/Cargo.toml`. Router threshold now per-chip on Apple Silicon (M1 ~3067, M5 ~1467); non-Apple falls back to 100. |
 | GPU roofline cost model | `roofline.rs` (existing) | always-on | Unchanged (no regression) |
 | NPC brain auto-router | `npc_brain_router.rs` (Plan 255, shipped) | `ane_npc` | Unchanged structurally; threshold input refined in Phase 3 |
 

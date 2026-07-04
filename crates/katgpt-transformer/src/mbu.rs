@@ -5,7 +5,7 @@
 //!
 //! Plan 160 (Kog CPU Monokernel Fusion) — task T9.
 
-use crate::types::{Config, kv_dim};
+use katgpt_core::types::{Config, kv_dim};
 
 // ---------------------------------------------------------------------------
 // MbuCounter — accumulates bytes read during a forward pass

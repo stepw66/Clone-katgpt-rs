@@ -2003,6 +2003,7 @@ dependencies = [
  "arrayvec",
  "blake3",
  "bytemuck",
+ "fastrand",
  "katgpt-core",
  "rayon",
 ]

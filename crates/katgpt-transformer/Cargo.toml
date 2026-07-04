@@ -20,6 +20,8 @@ bytemuck = { version = "1", features = ["derive", "extern_crate_alloc"] }  # ext
 # ArrayVec for PagedKVCache::ensure_pages/rollback stack-allocated scratch
 # (zero heap alloc, bounded to 128 layers). Ported from riir-engine.
 arrayvec = "0.7"
+# Phase 9: dense_mesh's edge_bandit + edge_projection use fastrand.
+fastrand = "2"
 
 [features]
 # All features default-on to match the historical katgpt-rs root behavior —
@@ -48,3 +50,45 @@ decode_specialize = []
 # Bit-plane ternary SIMD matvec loader (Plan 148, Research 110).
 # Gates: load_ternary_bits function in contiguous.rs.
 plasma_path = []
+
+# ── Phase 9 absorptions (Proposal 003) — modules moved from katgpt-rs root ──
+
+# Memory Bandwidth Utilization diagnostics (Plan 160 T9). Folded under the
+# existing kog_cpu_fusion feature because that's the gate the root used;
+# no separate `mbu` feature exists.
+# (mbu is gated by kog_cpu_fusion above — no new feature line needed.)
+
+# Training-Free Loop Wrapper — ODE-refined sub-stepping (Plan 136).
+# No internal deps; `recfm` and `thinking_prune` are no-op aggregator gates
+# here (the recfm-accelerated functions and the pruner-schedule function both
+# stay inside this module, but the pruner schedule function itself was moved
+# to the katgpt-rs root shim to avoid a katgpt-pruners ↔ katgpt-transformer
+# package cycle).
+tf_loop = []
+
+# RecFM acceleration-bounded sub-stepping (Plan 168 T2). No-op gate here —
+# the substrate is local; root forwards here for feature aggregation.
+recfm = []
+
+# Thinking Prune gate (Plan 171). No-op here — the actual
+# `should_apply_pruner_at_iteration` function lives in the root shim because
+# it consumes `katgpt_pruners::PrunerSchedule` (and katgpt-pruners depends on
+# katgpt-transformer, blocking the reverse dep).
+thinking_prune = []
+
+# DenseMesh latent node network (Plan 266, Research 234). EXPERIMENTAL —
+# gate 2 failed empirically, demoted from GOAT-gated.
+# `node_transformer.rs` stays in katgpt-rs root (consumes `forward`).
+dense_mesh = []
+
+# SwiR Switch-Thinking controller substrate (Plan 275, Research 241).
+# `strategy_adapter.rs` stays in katgpt-rs root (consumes `thinking_cot`).
+swir_switch_thinking = []
+
+# DenseMesh adaptive width controllers.
+# `collapse_aware_thinking` forwards to katgpt-core so the `CollapseDetector`
+# trait is present (consumed by `dense_mesh/adaptive_width.rs::collapse_signal`).
+# `breakeven_routing` is a no-op here — the code path uses only local types
+# (`BreakevenSnapshot`), no external symbols. Both root forwards.
+collapse_aware_thinking = ["katgpt-core/collapse_aware_thinking"]
+breakeven_routing = []

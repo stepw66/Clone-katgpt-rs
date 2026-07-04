@@ -219,7 +219,7 @@ forever.
 ### → `katgpt-transformer`
 | Item | Verdict |
 |---|---|
-| `mbu.rs`, `dense_mesh/`, `swir/`, `tf_loop.rs` | O |
+| `mbu.rs`, `dense_mesh/` (substrate), `swir/` (substrate), `tf_loop.rs` (bulk) | O — DONE Phase 9 (2026-07-04). `dense_mesh/node_transformer.rs` and `swir/strategy_adapter.rs` deferred to Phase 12 (depend on root `forward()` / `thinking_cot`). `tf_loop::should_apply_pruner_at_iteration` stays in root shim (katgpt-pruners cycle). |
 
 ### → `katgpt-band` (NEW)
 | Item | Verdict |
@@ -633,8 +633,54 @@ Ordering: foundation first (hoists, splits), then domain crates biggest-first.
     6/6 PASS. bench_290_closure_instrument_goat 10/10 PASS. bench_maxsim_rerank
     1/1 PASS (NDCG ≥2% better than cosine). Clippy clean on moved modules.
   **DONE 2026-07-04.**
-- [ ] **Phase 9 — `katgpt-transformer` absorption.** `mbu`, `dense_mesh`,
-  `swir`, `tf_loop`.
+- [x] **Phase 9 — `katgpt-transformer` absorption.** `mbu`, `dense_mesh`,
+  `swir`, `tf_loop`. **DONE 2026-07-04.**
+  - `mbu` (223 LOC) — clean move to `crates/katgpt-transformer/src/mbu.rs`.
+    1 import rewrite (`crate::types::{Config, kv_dim}` → `katgpt_core::types::...`).
+    Root `pub mod mbu` → `pub use katgpt_transformer::mbu` shim.
+  - `tf_loop` (639 LOC, minus the pruner-schedule fn) — bulk moved to
+    `crates/katgpt-transformer/src/tf_loop.rs`. The `should_apply_pruner_at_iteration`
+    function (which consumes `katgpt_pruners::PrunerSchedule`) stays in a thin
+    `src/tf_loop.rs` shim — `katgpt-pruners` already depends non-optionally on
+    `katgpt-transformer`, so the reverse dep would create a package cycle.
+    Root shim re-exports the bulk via glob AND defines the pruner fn locally.
+  - `dense_mesh/` (11 of 12 files moved) — substrate (topology, edges, traits,
+    types, etc.) moved to `crates/katgpt-transformer/src/dense_mesh/`.
+    `node_transformer.rs` stays in `src/dense_mesh/` because it consumes
+    `crate::transformer::forward` (the cognitive-primitive composer).
+    `src/dense_mesh/mod.rs` becomes a shim that glob-reexports from the crate
+    + adds `node_transformer` back as a local sibling.
+  - `swir/` (8 of 9 .rs files moved + 2 docs) — substrate (controller, entropy,
+    bench, signal_mix, etc.) moved to `crates/katgpt-transformer/src/swir/`.
+    `strategy_adapter.rs` stays in `src/swir/` because it consumes
+    `crate::thinking_cot::{ThinkingStrategy, StepContext, StepDirective,
+    ControlTokenIds}`. Also: `ControlToken::resolve_via` method was stripped
+    from the moved `types.rs` (depended on `crate::thinking_cot::ControlTokenIds`);
+    its body was inlined into `src/swir/strategy_adapter.rs::resolve_control_token`
+    free function. `src/swir/mod.rs` shim glob-reexports + adds
+    `strategy_adapter` back locally.
+  - 4 new features in `katgpt-transformer/Cargo.toml`: `tf_loop`, `recfm`,
+    `thinking_prune` (all no-op aggregator gates — no internal deps), `dense_mesh`,
+    `swir_switch_thinking`. Plus `collapse_aware_thinking` (forwards to
+    `katgpt-core/collapse_aware_thinking` for `CollapseDetector` trait) and
+    `breakeven_routing` (no-op — uses only local types). Plus `fastrand = "2"`
+    always-on dep (dense_mesh's edge_bandit + edge_projection).
+  - 5 root Cargo.toml features updated to forward: `tf_loop`, `recfm`,
+    `thinking_prune`, `dense_mesh`, `swir_switch_thinking`, plus
+    `collapse_aware_thinking` and `breakeven_routing` (for dense_mesh's
+    adaptive_width).
+  - **GOAT gate G3 — all PASS.** `cargo check --workspace --all-features`,
+    `--workspace` (default), `--workspace --no-default-features` all clean.
+    katgpt-transformer lib tests 122 PASS (was ~50 — added ~70 from mbu,
+    tf_loop, dense_mesh, swir). Root lib 1397 PASS (was 1460 — net delta
+    reflects tests moved to crate minus shim-only files). External consumer
+    tests: bench_160_kog_cpu_fusion 1/1 PASS, test_136_tf_loop 4/4 PASS,
+    bench_168_recfm_goat + test_recfm_lt2 11/11 PASS, dense_mesh_goat_gates
+    5/5 PASS, prof_dense_mesh 5/5 PASS, bench_275_swir_goat 16/16 PASS.
+    Clippy clean on katgpt-transformer.
+  - **Deferred to Phase 12 (or until forward/thinking_cot move):**
+    `dense_mesh/node_transformer.rs`, `swir/strategy_adapter.rs`.
+  **DONE 2026-07-04.**
 - [ ] **Phase 10 — `katgpt-core` absorption.** `alloc`, `cce`, `cumprodsum`,
   `llmexec_guard`, `memory_soup_lora`, `mux_demux`, `salience`, `trigger_gate`,
   `skill_opt`, `ssd_block`, `channel_simd`, `alien_sampler`.

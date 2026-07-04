@@ -158,8 +158,10 @@ pub use katgpt_spectral::gauge_invariant;
 pub use katgpt_spectral::spectral_retract;
 #[cfg(feature = "manifold_power_iter_router")]
 pub use katgpt_spectral::manifold_power_iter_router;
+// Kog CPU Fusion — RMSNorm gamma folding + QKV interleaving (Plan 160 GOAT 3/3 Gemma 2 scale).
+// Phase 9: mbu moved to katgpt-transformer; re-export preserves `katgpt_rs::mbu::*`.
 #[cfg(feature = "kog_cpu_fusion")]
-pub mod mbu;
+pub use katgpt_transformer::mbu;
 #[cfg(feature = "newton_schulz")]
 pub use katgpt_core::newton_schulz;  // Extracted to katgpt-core per Issue 355 Phase 1a; re-export preserves historical `katgpt_rs::newton_schulz::*` paths.
 #[cfg(feature = "off_principal_retrieval")]

@@ -235,12 +235,18 @@ impl ThinkingStrategy for SwiRStrategyAdapter {
 
 /// Resolve a controller-emitted [`ControlToken`] to a concrete vocab id.
 ///
-/// Free-function twin of
-/// [`ControlToken::resolve_via`](crate::swir::ControlToken::resolve_via),
-/// kept here so the adapter reads linearly without flipping files.
+/// Inlined here (rather than calling `ControlToken::resolve_via`) because the
+/// method version lived in `katgpt-transformer::swir::types` and depended on
+/// `crate::thinking_cot::ControlTokenIds` — which doesn't exist in
+/// katgpt-transformer (thinking_cot stays in the katgpt-rs root crate).
+/// Keeping the resolve logic at root avoids a katgpt-transformer → thinking_cot
+/// dependency arrow.
 #[inline]
 fn resolve_control_token(token: ControlToken, ids: &ControlTokenIds) -> u32 {
-    token.resolve_via(ids)
+    match token {
+        ControlToken::CloseThink => ids.think_close,
+        ControlToken::ForceAnswerPrefix => ids.force_answer_prefix,
+    }
 }
 
 #[cfg(test)]

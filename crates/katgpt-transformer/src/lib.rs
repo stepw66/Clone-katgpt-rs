@@ -15,6 +15,16 @@ mod kv_cache;
 mod mtp;
 mod weights;
 
+// Phase 9 absorptions (Proposal 003) — modules moved from katgpt-rs root.
+#[cfg(feature = "kog_cpu_fusion")]
+pub mod mbu;
+#[cfg(feature = "tf_loop")]
+pub mod tf_loop;
+#[cfg(feature = "dense_mesh")]
+pub mod dense_mesh;
+#[cfg(feature = "swir_switch_thinking")]
+pub mod swir;
+
 pub use contiguous::ContiguousWeights;
 pub use context::PrefillContext;
 #[cfg(feature = "wall_attention")]
