@@ -5,11 +5,12 @@ description: Audit cross-repo GOAT/gain primitive cherry-pick status across the 
 
 # goat-audit — Cross-Repo GOAT/Gain Cherry-Pick Audit
 
-Use this skill when auditing whether the riir-* private repos have consumed the GOAT-validated primitives shipped in `katgpt-rs`. It detects three failure classes:
+Use this skill when auditing whether the riir-* private repos have consumed the GOAT-validated primitives shipped in `katgpt-rs`. It detects four failure classes:
 
 1. **Stalls** — primitive default-on in katgpt-rs for ≥7 days, zero runtime wiring in riir-*.
 2. **DRY violations** — riir-* ships a local copy of substrate that should consume `katgpt-core` / `katgpt-transformer` / `katgpt-pruners`.
 3. **SOLID violations** — primitive consumed in the wrong layer (e.g. a sync-boundary primitive wired into a latent-only runtime, or vice versa).
+4. **Fork drift (the Issue 019 class)** — riir-* is a fork of katgpt-rs (e.g. `riir-engine/src/lib.rs` says "Extracted from katgpt-rs (MIT, frozen at v0.1.0)") and a Layer 2 struct-name grep hits a file that defines its own `pub struct SameName` with zero `use katgpt_*::` imports. The audit must distinguish **consumer** (true positive, primitive wired) from **duplicate** (false positive, primitive re-implemented locally — the canonical has bit-rotted since v0.1.0).
 
 ## When to use
 
@@ -61,7 +62,9 @@ Source the "default-on since" from the inline comment in the Cargo.toml (e.g. `#
 
 **Critical lesson (Issue 003):** feature-name grep returns false negatives. The `salience_tri_gate` feature is consumed via `SalienceTriGate::decide_with_delegate_nudge` in `karc_bridge/anticipation.rs` — a feature-name grep missed this; struct/function-name grep caught it.
 
-For each primitive, run BOTH greps in parallel across `riir-ai/`, `riir-chain/`, `riir-neuron-db/`:
+**Critical lesson (Issue 019, 2026-07-04):** struct-name grep returns false POSITIVES in fork-derived repos. `riir-engine/src/kvarn_quality.rs` defines its own `KvCacheQualityReport` with zero `use katgpt_kv::` imports — the prior audit marked `kvarn` as WIRED when it was actually a local duplicate of `katgpt-kv`. Layer 3 (consumer-vs-duplicate discrimination) is mandatory before any WIRED verdict.
+
+For each primitive, run ALL THREE greps in parallel across `riir-ai/`, `riir-chain/`, `riir-neuron-db/`:
 
 ```
 # Layer 1 — feature-name grep (catches Cargo.toml forwards + cfg gates)
@@ -69,7 +72,17 @@ grep "<feature_name>" riir-ai/**/*.toml riir-chain/**/*.toml riir-neuron-db/**/*
 
 # Layer 2 — struct/function-name grep (catches actual code consumption)
 grep "<CamelCaseStruct>|<snake_case_fn>" riir-ai/**/*.rs riir-chain/**/*.rs riir-neuron-db/**/*.rs
+
+# Layer 3 — consumer-vs-duplicate check (MANDATORY for every Layer 2 hit)
+# For each file returned by Layer 2, grep the FILE for katgpt imports.
+# If the file has zero `use katgpt_*::` lines, the hit is a DUPLICATE, not a consumer.
+grep "^use katgpt" <each-file-from-layer-2-results>
 ```
+
+**Layer 3 classification rules:**
+- File has `use katgpt_*::SomeType` AND uses `SomeType` in code → **CONSUMER (true wired)**
+- File has zero `use katgpt` lines but defines `pub struct SameName` → **DUPLICATE (fork drift)** — file the file as a de-fork candidate per Issue 019; do NOT count the primitive as wired
+- File has `use katgpt_*::SomeType` but the Layer 2 hit name is locally defined → **MERGE candidate** — the file consumes some katgpt types but re-defines the queried primitive locally; needs human review
 
 **Vocabulary translation before grepping:** list the primitive's 3–5 exported type/function names from the source file (e.g. `katgpt-rs/crates/katgpt-pruners/src/soft_reject.rs` exports `SoftRejectVerdict`, `SoftRejectConfig`, `soft_reject_decide`, `soft_reject_with_relax`, `RelaxationStrategy`, `NoRelaxation`). Grep for ALL of them, not just the feature name.
 
@@ -77,16 +90,21 @@ grep "<CamelCaseStruct>|<snake_case_fn>" riir-ai/**/*.rs riir-chain/**/*.rs riir
 
 | Class | Criteria | Action |
 |---|---|---|
-| **Wired (DEFAULT-ON)** | Consumed in riir-* runtime AND promoted to default-on in riir-engine/riir-games | No action |
-| **Wired (opt-in)** | Consumed in riir-* runtime, opt-in feature in riir-* | Check the opt-in reason; if "until GOAT gate passes" and the gate is overdue, flag |
-| **Stall** | Default-on in katgpt-rs ≥7 days, zero riir-* consumer (after BOTH grep layers) | **File `.issues/` in the appropriate riir-* repo** |
-| **Partial** | Consumed in one riir-* repo but the natural second consumer is missing | Note in issue; defer if natural consumer doesn't exist yet |
+| **Wired (DEFAULT-ON)** | Layer 3 CONSUMER in riir-* runtime AND promoted to default-on in riir-engine/riir-games | No action |
+| **Wired (opt-in)** | Layer 3 CONSUMER in riir-* runtime, opt-in feature in riir-* | Check the opt-in reason; if "until GOAT gate passes" and the gate is overdue, flag |
+| **Stall** | Default-on in katgpt-rs ≥7 days, zero Layer 3 CONSUMER (Layers 1+2 miss OR Layer 2 hits are all DUPLICATES) | **File `.issues/` in the appropriate riir-* repo** |
+| **Fork drift (Issue 019 class)** | Layer 2 hit but Layer 3 says DUPLICATE — riir-* file defines its own `pub struct SameName` with no `use katgpt_*::` | **File de-fork task in `.issues/` — see Issue 019** for the canonical riir-engine substrate de-fork plan |
+| **Partial** | Layer 3 CONSUMER in one riir-* repo but the natural second consumer is missing | Note in issue; defer if natural consumer doesn't exist yet |
 | **Deliberate** | Has a documented reason for not being wired (e.g. `claim_rubric` is CI-only by design) | No action |
 | **Too fresh** | Default-on <7 days | Defer; re-audit next quarter |
 
 ### Step 4 — DRY / SOLID check
 
-For each katgpt-core/katgpt-transformer/katgpt-pruners substrate module, check riir-engine src for duplicated local copies:
+**Two complementary checks: the `crate::*` scan (catches imports) and the zero-import scan (catches fork drift).**
+
+#### Check A — `crate::*` substrate refs (the Plan 008 lesson)
+
+For each katgpt-core/katgpt-transformer/katgpt-pruners substrate module, check riir-engine src for `crate::*` imports of substrate that should be `katgpt_*::`:
 
 ```
 # If riir-engine has its own hla/transformer/types.rs/tokenizer.rs/dd_tree.rs that
@@ -95,6 +113,27 @@ grep "crate::hla|crate::transformer|crate::types|crate::tokenizer|crate::dd_tree
 ```
 
 All should be `katgpt_core::*` / `katgpt_transformer::*` / `katgpt_speculative::*` (Plan 008 Phase 2 closure). Any remaining `crate::*` is a DRY violation.
+
+#### Check B — Zero-import substrate files (the Issue 019 lesson)
+
+Fork drift can hide in files that have NO `crate::*` substrate refs and NO `use katgpt_*::` lines — pure standalone local impls. Check B finds them:
+
+```
+# List all .rs files in riir-engine/src that have zero katgpt imports.
+# Every substrate-side file in this list is a fork-drift candidate.
+for f in $(find riir-ai/crates/riir-engine/src -name '*.rs'); do
+  if ! grep -q '^use katgpt' "$f"; then
+    echo "ZERO-IMPORT: $f"
+  fi
+done
+```
+
+For each ZERO-IMPORT file, manually classify:
+- **Substrate duplicate** (matches a katgpt-* leaf module) → de-fork candidate per Issue 019
+- **riir-only runtime** (cognitive stack like clr/karc/cgsp with no katgpt equivalent) → KEEP, not a violation
+- **Test/example file** → exempt
+
+The cognitive stack (arg_runtime, bom_arena, cce_runtime, etc.) intentionally has riir-local files; the LLM-substrate layer (transformer, quant, sampling, kv, lora-adapters, mcts, delta_mem) is where drift hides.
 
 For SOLID: check that primitives are consumed in the right layer:
 - Sync-boundary primitives (chain commitment, Merkle root) → riir-chain or riir-neuron-db, NOT riir-ai runtime.
@@ -147,6 +186,7 @@ Report to the user:
 3. **Meta-discipline validators** — `claim_rubric` is CI-time only by design. Its `claim_rubric_bridge.rs` doc-comment says so explicitly. Don't flag.
 4. **Opt-in by design** — `closed_unit_compaction` is opt-in because compaction is a sleep-cycle op, not hot path. Don't flag unless the opt-in reason is stale.
 5. **Cross-repo transitively** — `subspace_phase_gate` is consumed via riir-neuron-db's freeze gate even though riir-ai runtime doesn't call the diagnostic directly. Mark "Partial" not "Stall".
+6. **Fork-drift false WIRED (Issue 019 class)** — Layer 2 struct-name grep hits a file, but Layer 3 reveals the file has zero `use katgpt_*::` imports and defines its own `pub struct SameName`. The primitive is NOT wired — it's locally re-implemented. Report as **Fork drift** (file de-fork task), NOT as WIRED. Without Layer 3, the audit systematically under-counts substrate-side drift in fork-derived repos (canonical case: `riir-engine/src/kvarn_quality.rs` defined `KvCacheQualityReport` locally while `katgpt-kv::kvarn::KvCacheQualityReport` shipped upstream — prior audits marked `kvarn` as WIRED).
 
 ## The 7-day rule (when a stall becomes actionable)
 
@@ -160,5 +200,6 @@ The 7-day window gives the open primitive time to land its bench evidence before
 
 - `katgpt-rs/AGENTS.md` — Feature Flag Discipline (the GOAT gate contract).
 - `katgpt-rs/.agents/skills/research/SKILL.md` — research workflow (paper → 5-repo routing).
-- `riir-ai/.issues/003_cross_repo_goat_cherry_pick_audit.md` — the canonical audit (2026-07-03).
-- `katgpt-rs/.plans/008_katgpt_core_substrate_extraction.md` — the cross-repo DRY closure record.
+- `riir-ai/.issues/003_cross_repo_goat_cherry_pick_audit.md` — the canonical audit (2026-07-03). **Compromised** by the Layer 3 gap — substrate-side primitives marked WIRED in this audit need re-verification per Issue 019.
+- `riir-ai/.issues/019_riir_engine_substrate_de_fork.md` — the LLM-substrate de-fork plan (2026-07-04). Documents the fork-drift failure class and the Layer 3 fix.
+- `katgpt-rs/.plans/008_katgpt_core_substrate_extraction.md` — the cross-repo DRY closure record (cognitive substrate: hla/types/tokenizer/dd_tree).
