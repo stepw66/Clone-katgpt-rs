@@ -36,7 +36,7 @@ This issue tracks the deferred work so it isn't lost.
 
 ## Candidate A — `mux_latent/` (12 files)
 
-**Status:** deferred — fuzzy MUX dependency boundary.
+**Status:** deferred — fuzzy MUX dependency boundary. **(DEFERRAL PREMISE DISPROVED 2026-07-04 — see T1 audit result below.)**
 
 **What it is:** Inference-time context compression via vocabulary
 superposition (distilled from LCLM, arXiv:2606.09659). Pipeline: input
@@ -59,29 +59,80 @@ mux_latent/
 └── wire.rs            # gated mux_latent_wire
 ```
 
-**Why deferred:** `mux_latent` depends on existing MUX infrastructure that
-already lives in `katgpt-core/src/mux/`. Promoting `mux_latent` alone would
-create a circular or awkward dep (new crate → katgpt-core::mux, while
-katgpt-core may want to re-export the new crate). The MUX substrate needs to
-be split out *first* (or `mux_latent` needs to be folded into the existing
-mux module rather than its own crate).
+**Why deferred (ORIGINAL rationale — now disproved at T1):** `mux_latent`
+depends on existing MUX infrastructure that already lives in
+`katgpt-core/src/mux/`. Promoting `mux_latent` alone would create a
+circular or awkward dep (new crate → katgpt-core::mux, while katgpt-core
+may want to re-export the new crate). The MUX substrate needs to be split
+out *first* (or `mux_latent` needs to be folded into the existing mux
+module rather than its own crate).
+
+**⚠ AUDIT RESULT (T1, 2026-07-04): the deferral premise is FALSE.** Grep
+of `src/mux_latent/` shows:
+  - **Zero** `use katgpt_core::...` imports (the entire subsystem is
+    std-only internally; cross-refs are all `crate::mux_latent::*`).
+  - **Zero** references to `katgpt_core::mux` or `core::mux`.
+  - Only one external consumer: `src/lib.rs:320` (`pub mod mux_latent;`
+    under `#[cfg(feature = "mux_latent_context")]`).
+
+  The name collision is misleading: `katgpt-core/src/mux/` holds
+  speculative-decoding multi-token drafting primitives (`dd_tree`, `demux`,
+  `span_pruner`, `top_k`, `bfs`, `bandit_width`, `freeze_thaw`) — i.e.
+  "multiplexed draft tokens". `src/mux_latent/` is LCLM-style context
+  compression via vocabulary superposition into latent slots. They are
+  unrelated subsystems that happen to share the "mux" prefix; there is no
+  primitive/application relationship and no dependency edge in either
+  direction.
+
+  **Consequence:** the circular-dep concern that drove the deferral does
+  not exist. mux_latent is fully self-contained and could be lifted to its
+  own crate without any katgpt-core entanglement. T2's option (b) "fold
+  into katgpt-core::mux" is also wrong — they don't belong together.
 
 **Unblock criteria:**
-- [ ] Audit `katgpt-core/src/mux/` vs `src/mux_latent/` — is the split
-      "mux primitive" (core) vs "mux application" (mux_latent) clean?
-- [ ] Decide: (a) promote mux primitive + mux_latent together into a
-      `katgpt-mux` crate, or (b) fold mux_latent into katgpt-core::mux,
-      or (c) keep as-is.
-- [ ] If (a): write Proposal 003 with the full MUX closure.
+- [x] **T1 — Audit `katgpt-core/src/mux/` vs `src/mux_latent/` — is the
+      split "mux primitive" (core) vs "mux application" (mux_latent) clean?**
+      **ANSWER: there is no split — they are unrelated. mux_latent has
+      zero katgpt-core deps. Deferral premise disproved.** (Audit
+      performed 2026-07-04: grep `use katgpt_core` in `src/mux_latent/`
+      returns zero hits; grep `katgpt_core::mux` returns zero hits; only
+      consumer is `src/lib.rs:320`.)
+- [ ] **T2 — Decide promotion target. Original options reframed by T1
+      finding:**
+      - ~~(a) promote mux primitive + mux_latent together into `katgpt-mux`~~ —
+        **INVALID**: they are unrelated; bundling them would create a false
+        semantic grouping.
+      - ~~(b) fold mux_latent into `katgpt-core::mux`~~ — **INVALID**:
+        they are different concerns; `katgpt-core::mux` is spec-decode
+        multi-token drafting, mux_latent is LCLM context compression.
+      - **(c) keep as-is in root `src/mux_latent/`** — viable but leaves
+        ~104 KB of LCLM code in the root crate.
+      - **(d) NEW — promote mux_latent to its own `katgpt-mux-latent`
+        crate** (or fold into an existing attention/context crate if one
+        emerges from Proposal 003 Phase 2 `katgpt-attn`). Cleanest option
+        given T1: zero cross-crate deps to resolve.
+      - **(e) NEW — fold into `katgpt-sleep` or a future `katgpt-context`
+        crate** if the LCLM context-compression concern groups better with
+        sleep-time anticipation than with attention. Decision needs a
+        semantic call, not a dep-graph call (deps are trivial either way).
+- [-] **T3 — If (a): write Proposal 003 with the full MUX closure.**
+      **DEFERRED — moot.** T1 disproved the premise that made (a) an
+      option. Whatever T2 decides, it won't be "write Proposal 003 with
+      MUX closure" — Proposal 003 doesn't currently cover mux_latent
+      (grep-verified, see status header) and shouldn't be retrofitted to.
+      Replaced by: "if T2 picks (d) or (e), write the matching proposal."
 
 ---
 
 ## Candidate B — `proof_cert/` (7 files)
 
-**Status:** deferred — cross-cuts chain/WASM runtime.
+**Status:** deferred — cross-cuts chain/WASM runtime. **(DEFERRAL PREMISE LARGELY DISPROVED 2026-07-04 — see T1 audit result below.)**
 
 **What it is:** Proof certificate chain — verification/integrity substrate.
-Emits and validates certificates for runtime artifacts.
+Emits and validates certificates for runtime artifacts. Origin: Plan 145
+("Hierarchical GOAT Proof Certificates") — standalone, serializable proof
+certificates with dependency chains, topological verification, and blake3
+checksum integrity.
 
 ```
 proof_cert/
@@ -91,26 +142,96 @@ proof_cert/
 ├── mod.rs
 ├── serde_impls.rs
 ├── wasm_certificates.rs
-├── wasm_proof_witness.rs
+└── wasm_proof_witness.rs   # gated: feature wasm_proof_witness
 ```
 
-**Why deferred:** `proof_cert` cross-cuts the chain runtime (riir-chain has
-its own proof concerns per its AGENTS.md) and the WASM runtime
-(`wasm_certificates.rs`, `wasm_proof_witness.rs`). Promoting it into a
-`katgpt-proof-cert` crate risks duplicating or conflicting with riir-chain's
-proof envelope (`riir-neuron-db` owns `freeze.rs` / `FreezeGateReport`;
-riir-chain owns `catchup/merkle.rs`). The boundary across the 5-repo
-quintet needs design, not just a local lift.
+**Why deferred (ORIGINAL rationale — now largely disproved at T1):**
+`proof_cert` cross-cuts the chain runtime (riir-chain has its own proof
+concerns per its AGENTS.md) and the WASM runtime (`wasm_certificates.rs`,
+`wasm_proof_witness.rs`). Promoting it into a `katgpt-proof-cert` crate
+risks duplicating or conflicting with riir-chain's proof envelope
+(`riir-neuron-db` owns `freeze.rs` / `FreezeGateReport`; riir-chain owns
+`catchup/merkle.rs`). The boundary across the 5-repo quintet needs design,
+not just a local lift.
+
+**⚠ AUDIT RESULT (T1, 2026-07-04): the deferral premise is largely FALSE.**
+Grep of `src/proof_cert/` shows:
+  - **Zero** `use crate::...` imports and **zero** `use katgpt_core::...`
+    imports — the subsystem is fully self-contained (only `super::` refs).
+  - **Zero** runtime deps on a WASM engine. Despite the misleading names
+    (`wasm_certificates.rs`, `wasm_proof_witness.rs`), grep for
+    `wasmi|wasmtime|wasm_bindgen` returns **zero hits**. The "wasm" in the
+    names refers to *certificates that describe wasm-validator outcomes*
+    (e.g. `lora_wasm_delta: i32` as a metric value, `challenger: "wasm"`
+    as a tag) — the module produces certificates *about* wasm validation,
+    it does not *execute* wasm. The entire module compiles std-only.
+  - Only one external consumer: `src/lib.rs:184` (`pub mod proof_cert;`
+    under `#[cfg(feature = "proof_cert")]`). No internal katgpt-rs consumers
+    at all.
+
+  **Consequence:** the "cross-cuts WASM runtime" concern is wrong — there
+  is no wasm runtime dep. The "cross-cuts chain runtime" concern is
+  *semantic*, not technical: proof_cert (Plan 145 GOAT proof certificates)
+  and riir-neuron-db's freeze/Merkle (shard integrity envelopes) serve
+  different proof domains but might overlap conceptually. That's a
+  design/semantic question, not a dep-graph blocker — proof_cert can be
+  lifted cleanly on dep-graph grounds alone.
+
+  **Cross-repo quintet proof surface (audit, 2026-07-04):**
+    - `katgpt-rs/crates/katgpt-core/src/merkle.rs` + `content_store/merkle.rs`
+      — content-addressed blob storage (local).
+    - `katgpt-rs/crates/katgpt-core/src/mux/freeze_thaw.rs` — spec-decode
+      freeze/thaw (unrelated to proof_cert).
+    - `riir-neuron-db/src/freeze.rs` — `FreezeGateReport`, freeze/thaw
+      integrity envelope (shard-level, committed).
+    - `riir-neuron-db/src/merkle.rs` — generic BLAKE3 binary Merkle tree
+      (shard-level proofs).
+    - `riir-chain/src/catchup/merkle.rs` (per riir-chain AGENTS.md) — chain
+      block commitment.
+
+  None of these implement "GOAT gate proof certificates with dependency
+  chains + topological verification" (proof_cert's actual concern). The
+  overlap is at the word "proof" / "certificate", not at the algorithm.
 
 **Unblock criteria:**
-- [ ] Map the proof surface across the quintet: what does katgpt-rs's
-      `proof_cert` prove that riir-chain's merkle proofs and
-      riir-neuron-db's `FreezeGateReport` don't?
-- [ ] Decide: is this a katgpt-rs-local crate, or does it belong in a
-      different repo (riir-chain)?
-- [ ] If katgpt-rs-local: confirm the WASM coupling can be feature-gated
-      so the crate compiles without a WASM runtime.
-- [ ] Write Proposal 004 with the cross-repo boundary decision.
+- [x] **T1 — Map the proof surface across the quintet: what does
+      katgpt-rs's `proof_cert` prove that riir-chain's merkle proofs and
+      riir-neuron-db's `FreezeGateReport` don't?**
+      **ANSWER: proof_cert (Plan 145) implements hierarchical GOAT proof
+      certificates — dependency chains + topological verification of GOAT
+      gate outcomes (ProofProperty/ProofResult/ProofEvidence). The
+      quintet's other proof surfaces are shard-integrity (freeze/Merkle)
+      or chain-commitment (catchup/Merkle) — they do NOT implement GOAT
+      gate dependency chains. The surfaces are disjoint at the algorithm
+      level; the "overlap" was lexical (the word "proof"), not technical.**
+      (Audit 2026-07-04: grep `use katgpt_core` and `use crate::` in
+      `src/proof_cert/` returns zero; grep `wasmi|wasmtime|wasm_bindgen`
+      returns zero; quintet proof-surface map above.)
+- [ ] **T2 — Decide: is this a katgpt-rs-local crate, or does it belong
+      in a different repo (riir-chain)?**
+      Reframed by T1: dep-graph says lift is trivial in either repo.
+      Semantic call: GOAT proof certificates are *engine-side* (the GOAT
+      gate runs in katgpt-rs/riir-ai runtime), so proof_cert belongs with
+      the engine, NOT with the chain. The chain commits *results*; it
+      doesn't *produce* GOAT gate evidence. **Recommendation: katgpt-rs-local
+      `katgpt-proof-cert` crate** (or fold into katgpt-core alongside
+      merkle.rs). riir-chain would *consume* proof certificates if a
+      future bridge commits them on-chain, but it doesn't own the algorithm.
+- [x] **T3 — If katgpt-rs-local: confirm the WASM coupling can be
+      feature-gated so the crate compiles without a WASM runtime.**
+      **ANSWER: yes — it already is.** `wasm_proof_witness` is gated by
+      `#[cfg(feature = "wasm_proof_witness")]` in mod.rs:6,11. The other
+      "wasm" file (`wasm_certificates.rs`) has no wasm-runtime dep at all
+      (T1 finding) — it compiles std-only. So the entire crate compiles
+      with zero wasm deps under the default feature set; only the
+      opt-in `wasm_proof_witness` feature adds the witness generator.
+- [-] **T4 — Write Proposal 004 with the cross-repo boundary decision.**
+      **DEFERRED — pending T2 decision.** T1 + T3 unblock the dep-graph
+      side; T2 is a semantic call that the user should make (the audit's
+      recommendation is katgpt-rs-local, but the call is not the agent's
+      to make unilaterally — it affects the public crate surface). Note:
+      Proposal 004 number is already taken (`004_adaptive_causal_calibration.md`);
+      the actual number for this proposal would be 005+.
 
 ---
 
