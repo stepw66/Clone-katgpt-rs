@@ -80,7 +80,9 @@ pub use sampling::sample_k_from_distribution_qmc;
 // convenience entry point used by MultiHypothesisBoMMinimaxPlanner.
 #[cfg(feature = "qmc_sampling")]
 pub use qmc::{
+    contiguous_block_bootstrap_pass_at_m, dyadic_bootstrap_pass_at_m_lattice,
     fill_noise_queries_gaussian_qmc, gaussianize_uniforms_inplace, inverse_normal_cdf,
+    BootstrapEstimate,
 };
 #[cfg(all(feature = "qmc_sampling", feature = "bom_sampling"))]
 pub use qmc::{fill_noise_queries_gaussian_qmc_by_method, sample_k_states_qmc};

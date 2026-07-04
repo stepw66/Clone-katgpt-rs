@@ -808,6 +808,268 @@ pub fn fill_noise_queries_gaussian_qmc_by_method(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Dyadic bootstrap pass@k estimator (Plan 367 Phase 6 / Theorem 1)
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Theorem 1 of arXiv:2607.01179 (QuasiMoTTo): for a rank-1 lattice QMC
+// batch of size k = 2^L, every stride-`s` subsequence (s = k/m, m a power
+// of two dividing k) starting at offset j ∈ {0, ..., s-1} is itself a
+// valid rank-1 lattice of size m, because the lattice values
+// `{(i/k + Δ) mod 1 : i=0..k-1}` restricted to indices `{j + t·s}` satisfy
+//   ((j + t·s)/k + Δ) mod 1 = (t/m + (Δ + j/k)) mod 1
+// which is a rank-1 lattice of size m with offset `(Δ + j/k) mod 1`, itself
+// marginally Unif[0,1) since both Δ and j/k are.
+//
+// Therefore a single pass@k lattice batch yields `s = k/m` unbiased pass@m
+// lattice-batch estimates (one per starting offset). Their mean is an
+// unbiased point estimate; the Wilson score CI quantifies lattice-resample
+// variance. This converts one expensive pass@k rollout batch into `s`
+// cheaper pass@m estimates for free — no extra rollouts needed.
+//
+// For Sobol/Stratified the dyadic-stride property does NOT hold in general,
+// but contiguous blocks of m points DO preserve the per-method low-
+// discrepancy structure (Sobol: contiguous subsequences are valid shifted
+// Sobol subsequences; Stratified: contiguous blocks span m consecutive
+// strata, a coarser valid stratification). So for those methods we offer a
+// contiguous-block bootstrap with random starts.
+
+/// Result of a bootstrap pass@m estimation.
+///
+/// `point_estimate` is the unbiased pass@m point estimate; `sample_variance`
+/// is the unbiased (n-1) sample variance of the per-resample binary
+/// indicators; `n_resamples` is the number of resamples that contributed.
+/// Use [`wilson_ci`](Self::wilson_ci) for a well-behaved CI at small n.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BootstrapEstimate {
+    /// Unbiased point estimate of pass@m (mean over resamples).
+    pub point_estimate: f64,
+    /// Unbiased (n-1) sample variance of the per-resample binary indicators.
+    pub sample_variance: f64,
+    /// Number of resamples that contributed (s = k/m for dyadic, B for block).
+    pub n_resamples: usize,
+}
+
+impl BootstrapEstimate {
+    /// Wilson score confidence interval for the pass@m proportion.
+    ///
+    /// Preferred over the normal-approximation (`p̂ ± z·√(p̂(1-p̂)/n)`) for
+    /// binary indicators because it has correct coverage at small n and near
+    /// the 0/1 boundaries (Brown, Cai & DasGupta 2001).
+    ///
+    /// `z` is the two-sided critical value (1.96 for 95%, 2.576 for 99%).
+    /// Returns `(low, high)` clamped to `[0, 1]`. For `n_resamples == 0`, the
+    /// uninformative `(0.0, 1.0)` is returned.
+    #[inline]
+    pub fn wilson_ci(&self, z: f64) -> (f64, f64) {
+        let n = self.n_resamples as f64;
+        if n == 0.0 {
+            return (0.0, 1.0);
+        }
+        let p_hat = self.point_estimate;
+        let z2 = z * z;
+        let denom = 1.0 + z2 / n;
+        let center = (p_hat + z2 / (2.0 * n)) / denom;
+        let margin = (z / denom) * (p_hat * (1.0 - p_hat) / n + z2 / (4.0 * n * n)).sqrt();
+        let lo = (center - margin).max(0.0);
+        let hi = (center + margin).min(1.0);
+        (lo, hi)
+    }
+
+    /// Convenience: Wilson score 95% CI (z = 1.959963984540054, Φ⁻¹(0.975)).
+    #[inline]
+    pub fn wilson_ci_95(&self) -> (f64, f64) {
+        self.wilson_ci(1.959_963_984_540_054)
+    }
+
+    /// Sample standard deviation across resamples (√ of [`sample_variance`](Self::sample_variance)).
+    #[inline]
+    pub fn std_dev(&self) -> f64 {
+        self.sample_variance.sqrt()
+    }
+}
+
+/// Lattice dyadic bootstrap pass@m estimator (Theorem 1 of arXiv:2607.01179).
+///
+/// For a [`LatticeQmc`] batch of size k = 2^L, every stride-`s` subsequence
+/// (s = k/m, m a power of two dividing k) starting at offset j ∈ {0,...,s-1}
+/// is itself a valid rank-1 lattice of size m. Therefore a single pass@k
+/// lattice batch yields `s = k/m` unbiased pass@m estimates — one per
+/// starting offset. Their mean is the unbiased pass@m estimate; their
+/// variance drives the Wilson score CI.
+///
+/// This is the strongest of the three QMC-method bootstrap forms: it is
+/// *exhaustive* (no RNG needed — every starting offset is taken) and
+/// *algebraically exact* (each sub-lattice is provably a LatticeQmc batch
+/// of size m, not an approximation).
+///
+/// # Arguments
+///
+/// * `outcomes` - pass/fail of each of the K rollouts (length K = 2^L).
+/// * `m` - sub-sample size (power of two, divides K, 0 < m ≤ K).
+///
+/// # Panics
+///
+/// Panics if `outcomes.len()` is not a power of two, `m` is not a power of
+/// two, `m > outcomes.len()`, or `outcomes.len() % m != 0`.
+///
+/// # Zero-allocation
+///
+/// Single streaming pass; no heap allocation. Hot-path friendly.
+///
+/// # Example
+///
+/// ```
+/// # use katgpt_core::speculative::qmc::dyadic_bootstrap_pass_at_m_lattice;
+/// // 8-rollout lattice batch: 4 pass, 4 fail. Stride-2 sub-lattices at
+/// // m=4 give 2 estimates of pass@4.
+/// let outcomes = [true, false, true, false, true, false, true, false];
+/// let est = dyadic_bootstrap_pass_at_m_lattice(&outcomes, 4);
+/// assert_eq!(est.point_estimate, 0.5);  // one sub-lattice all-pass, one all-fail
+/// assert_eq!(est.n_resamples, 2);
+/// ```
+pub fn dyadic_bootstrap_pass_at_m_lattice(outcomes: &[bool], m: usize) -> BootstrapEstimate {
+    let k = outcomes.len();
+    assert!(
+        k > 0 && k.is_power_of_two(),
+        "dyadic_bootstrap_pass_at_m_lattice: outcomes.len() = {k} must be a power of two"
+    );
+    assert!(
+        m > 0 && m.is_power_of_two(),
+        "dyadic_bootstrap_pass_at_m_lattice: m = {m} must be a power of two"
+    );
+    assert!(
+        m <= k,
+        "dyadic_bootstrap_pass_at_m_lattice: m = {m} > outcomes.len() = {k}"
+    );
+    // k is a power of two and m ≤ k is a power of two ⇒ k % m == 0 by the
+    // divisibility of powers of two. No separate assert needed.
+    let stride = k / m;
+
+    // For each starting offset j ∈ [0, stride), pass@m of the subsequence
+    // {outcomes[j], outcomes[j+stride], ..., outcomes[j+(m-1)*stride]} is the
+    // indicator "any true". Single streaming pass — sum and sum of squares
+    // only.
+    let mut sum: f64 = 0.0;
+    let mut sum_sq: f64 = 0.0;
+    for j in 0..stride {
+        let mut any = false;
+        for t in 0..m {
+            if outcomes[j + t * stride] {
+                any = true;
+                break;
+            }
+        }
+        let x = if any { 1.0f64 } else { 0.0 };
+        sum += x;
+        sum_sq += x * x;
+    }
+
+    let n = stride as f64;
+    let mean = sum / n;
+    let var = sample_variance_binary(mean, sum_sq, n);
+    BootstrapEstimate {
+        point_estimate: mean,
+        sample_variance: var,
+        n_resamples: stride,
+    }
+}
+
+/// Contiguous-block bootstrap for Sobol / Stratified / general orderings.
+///
+/// Unlike the lattice dyadic case (which has provable sub-lattice validity
+/// for strided offsets), [`SobolQmc`] and [`StratifiedQmc`] preserve their
+/// low-discrepancy structure within *contiguous* blocks of m points. We
+/// resample by drawing `n_resamples` random contiguous starting positions
+/// uniformly from {0, 1, ..., K-m} (no wrapping — boundary blocks are full
+/// size) and computing pass@m of each.
+///
+/// This is the standard nonparametric block-bootstrap, adapted to preserve
+/// local QMC structure. Less powerful than the lattice dyadic form (random
+/// starts vs exhaustive; contiguous rather than algebraically exact) but
+/// applicable when the dyadic-stride theorem doesn't hold.
+///
+/// # Arguments
+///
+/// * `outcomes` - pass/fail of each of the K rollouts.
+/// * `m` - block size (sub-batch size).
+/// * `n_resamples` - number of random block starts (B). Must be > 0.
+/// * `rng` - caller-provided [`Rng`] for selecting block starts.
+///
+/// # Panics
+///
+/// Panics if `m == 0`, `m > outcomes.len()`, or `n_resamples == 0`.
+///
+/// # Zero-allocation
+///
+/// Single streaming pass; no heap allocation.
+pub fn contiguous_block_bootstrap_pass_at_m(
+    outcomes: &[bool],
+    m: usize,
+    n_resamples: usize,
+    rng: &mut Rng,
+) -> BootstrapEstimate {
+    let k = outcomes.len();
+    assert!(m > 0, "contiguous_block_bootstrap_pass_at_m: m must be > 0");
+    assert!(
+        m <= k,
+        "contiguous_block_bootstrap_pass_at_m: m = {m} > outcomes.len() = {k}"
+    );
+    assert!(
+        n_resamples > 0,
+        "contiguous_block_bootstrap_pass_at_m: n_resamples must be > 0"
+    );
+    let n_starts = if k > m { k - m + 1 } else { 1 };
+
+    let mut sum: f64 = 0.0;
+    let mut sum_sq: f64 = 0.0;
+    for _ in 0..n_resamples {
+        // Map a u64 to [0, n_starts). For n_starts a power of two this would
+        // be unbiased via masking; for the general case we accept the tiny
+        // modular bias (≤ n_starts/u64::MAX, negligible for n_starts ≤ 2^32).
+        let start = if n_starts > 1 {
+            (rng.next() % (n_starts as u64)) as usize
+        } else {
+            0
+        };
+        let mut any = false;
+        for i in 0..m {
+            if outcomes[start + i] {
+                any = true;
+                break;
+            }
+        }
+        let x = if any { 1.0f64 } else { 0.0 };
+        sum += x;
+        sum_sq += x * x;
+    }
+
+    let n = n_resamples as f64;
+    let mean = sum / n;
+    let var = sample_variance_binary(mean, sum_sq, n);
+    BootstrapEstimate {
+        point_estimate: mean,
+        sample_variance: var,
+        n_resamples,
+    }
+}
+
+/// Unbiased (n-1) sample variance of binary indicators.
+///
+/// For 0/1 indicators with mean `mean` and `sum_sq = Σ x_i² = Σ x_i = sum`
+/// (since x_i² = x_i for binary), this is `(n/(n-1)) · (m2 − mean²)` where
+/// `m2 = sum_sq / n`. Returns 0 for n ≤ 1; clamps tiny negative drift from
+/// f64 rounding to 0.
+#[inline]
+fn sample_variance_binary(mean: f64, sum_sq: f64, n: f64) -> f64 {
+    if n <= 1.0 {
+        return 0.0;
+    }
+    let m2 = sum_sq / n;
+    let v = (n / (n - 1.0)) * (m2 - mean * mean);
+    v.max(0.0)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Tests
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -1758,5 +2020,408 @@ mod tests {
             fill_noise_queries_gaussian_qmc_by_method(method, 99, k, dim, sigma, &mut b);
             assert_eq!(a, b, "{:?} must be bit-identical for same seed", method);
         }
+    }
+
+    // ── Plan 367 Phase 6 / T6.1: Dyadic bootstrap pass@k estimator ────────
+    //
+    // Theorem 1 of arXiv:2607.01179: for a LatticeQmc batch of size k=2^L,
+    // every stride-(k/m) subsequence is itself a valid LatticeQmc batch of
+    // size m. Therefore one pass@k batch yields k/m unbiased pass@m
+    // estimates. For Sobol/Stratified we use contiguous-block bootstrap.
+
+    #[test]
+    fn test_dyadic_bootstrap_all_pass() {
+        // k=8, m=4, stride=2. Both offsets j=0 and j=1 see only passes.
+        let outcomes = [true; 8];
+        let est = dyadic_bootstrap_pass_at_m_lattice(&outcomes, 4);
+        assert_eq!(est.point_estimate, 1.0);
+        assert_eq!(est.sample_variance, 0.0);
+        assert_eq!(est.n_resamples, 2);
+        // Wilson 95% CI at 2/2 successes is wide (~[0.34, 1.0]) — small n.
+        let (lo, hi) = est.wilson_ci_95();
+        assert!((hi - 1.0).abs() < 1e-9, "hi={hi}");
+        assert!(lo > 0.3 && lo < 0.4, "lo={lo} (Wilson at 2/2)");
+    }
+
+    #[test]
+    fn test_dyadic_bootstrap_all_fail() {
+        let outcomes = [false; 8];
+        let est = dyadic_bootstrap_pass_at_m_lattice(&outcomes, 4);
+        assert_eq!(est.point_estimate, 0.0);
+        assert_eq!(est.sample_variance, 0.0);
+        assert_eq!(est.n_resamples, 2);
+        // Wilson 95% CI at 0/2 is (~[0.0, 0.66]) — wide due to small n.
+        let (lo, hi) = est.wilson_ci_95();
+        assert!(lo < 1e-9, "lo={lo}");
+        assert!(hi > 0.6 && hi < 0.7, "hi={hi} (Wilson at 0/2)");
+    }
+
+    #[test]
+    fn test_dyadic_bootstrap_alternating_half_half() {
+        // k=8, m=4, stride=2. Offsets separate even from odd indices.
+        // j=0: outcomes[0,2,4,6] = [T,T,T,T] -> pass@4 = 1.
+        // j=1: outcomes[1,3,5,7] = [F,F,F,F] -> pass@4 = 0.
+        let outcomes = [true, false, true, false, true, false, true, false];
+        let est = dyadic_bootstrap_pass_at_m_lattice(&outcomes, 4);
+        assert_eq!(est.point_estimate, 0.5);
+        assert_eq!(est.n_resamples, 2);
+        // Sample variance of {0, 1} with n=2: ((1-0.5)^2 + (0-0.5)^2)/(n-1)
+        // = (0.25 + 0.25)/1 = 0.5.
+        assert!((est.sample_variance - 0.5).abs() < 1e-12,
+            "sample_variance = {}", est.sample_variance);
+    }
+
+    #[test]
+    fn test_dyadic_bootstrap_m_equals_k_single_estimate() {
+        // m = k -> stride = 1 -> single estimate, the indicator of any pass.
+        // pass@8 of all-pass = 1.
+        let outcomes = [false, false, false, true, false, false, false, false];
+        let est = dyadic_bootstrap_pass_at_m_lattice(&outcomes, 8);
+        assert_eq!(est.point_estimate, 1.0);
+        assert_eq!(est.n_resamples, 1);
+        assert_eq!(est.sample_variance, 0.0, "n=1 -> variance undefined -> 0");
+    }
+
+    #[test]
+    fn test_dyadic_bootstrap_m_equals_k_all_fail() {
+        let outcomes = [false; 16];
+        let est = dyadic_bootstrap_pass_at_m_lattice(&outcomes, 16);
+        assert_eq!(est.point_estimate, 0.0);
+        assert_eq!(est.n_resamples, 1);
+    }
+
+    #[test]
+    fn test_dyadic_bootstrap_m1_recovers_mean_pass() {
+        // m=1 -> each rollout is its own sub-lattice. pass@1 of a single
+        // rollout is just the rollout's outcome indicator. Mean = empirical
+        // pass rate.
+        let outcomes = [
+            true, false, true, true, false, true, false, true,
+            true, false, true, true, false, true, false, true,
+        ];
+        // 10 trues / 16 = 0.625.
+        let est = dyadic_bootstrap_pass_at_m_lattice(&outcomes, 1);
+        assert!((est.point_estimate - 0.625).abs() < 1e-12,
+            "point_estimate = {}", est.point_estimate);
+        assert_eq!(est.n_resamples, 16);
+        // Variance of a Bernoulli(0.625) with n=16: p(1-p) = 0.625*0.375
+        // = 0.234375. Sample variance uses (n/(n-1)) correction.
+        let expected = (16.0 / 15.0) * 0.625 * 0.375;
+        assert!((est.sample_variance - expected).abs() < 1e-10,
+            "sample_variance {} expected {}", est.sample_variance, expected);
+    }
+
+    #[test]
+    fn test_dyadic_bootstrap_stride4_three_passing_offsets() {
+        // k=8, m=2, stride=4. 4 starting offsets, each gives pass@2.
+        // outcomes: [T,T, F,T, F,F, T,F]  (3 passes total at indices 0,1,3,6)
+        // j=0: outcomes[0,4] = [T,F] -> pass@2 = 1
+        // j=1: outcomes[1,5] = [T,F] -> pass@2 = 1
+        // j=2: outcomes[2,6] = [F,T] -> pass@2 = 1
+        // j=3: outcomes[3,7] = [T,F] -> pass@2 = 1
+        let outcomes = [true, true, false, true, false, false, true, false];
+        let est = dyadic_bootstrap_pass_at_m_lattice(&outcomes, 2);
+        assert_eq!(est.point_estimate, 1.0);
+        assert_eq!(est.n_resamples, 4);
+    }
+
+    #[test]
+    fn test_dyadic_bootstrap_wilson_ci_known_values() {
+        // Wilson 95% CI for 7/8 successes, n=8: well-tabulated value
+        // (~0.473, ~0.997) per standard references. Verify roughly.
+        let outcomes = [
+            true, true, true, true, true, true, true, false,
+        ];
+        let est = dyadic_bootstrap_pass_at_m_lattice(&outcomes, 1);
+        // m=1, k=8 -> 8 sub-lattices of size 1. pass@1 of [T]=1, [F]=0.
+        // 7 passes / 8 = 0.875.
+        assert!((est.point_estimate - 0.875).abs() < 1e-12);
+        let (lo, hi) = est.wilson_ci_95();
+        assert!(lo > 0.40 && lo < 0.55, "Wilson lo={lo} (expected ~0.47)");
+        assert!(hi > 0.95 && hi <= 1.0, "Wilson hi={hi} (expected ~0.99)");
+    }
+
+    #[test]
+    fn test_dyadic_bootstrap_wilson_ci_at_extremes() {
+        // n=1, k=1, m=1, single pass -> Wilson CI is degenerate but well-defined.
+        let est = BootstrapEstimate { point_estimate: 1.0, sample_variance: 0.0, n_resamples: 1 };
+        let (lo, hi) = est.wilson_ci_95();
+        // Wilson at 1/1, z=1.96: center ~ 1/(1+3.84) = 0.206, margin tiny
+        assert!(hi <= 1.0 && hi > 0.9, "hi={hi}");
+        assert!(lo > 0.0 && lo < 0.5, "lo={lo}");
+
+        // n=0 -> uninformative.
+        let est_empty = BootstrapEstimate { point_estimate: 0.0, sample_variance: 0.0, n_resamples: 0 };
+        assert_eq!(est_empty.wilson_ci_95(), (0.0, 1.0));
+    }
+
+    #[test]
+    fn test_dyadic_bootstrap_panics_on_non_power_of_two_k() {
+        // k=7 is not a power of two.
+        let outcomes = [true; 7];
+        let result = std::panic::catch_unwind(|| {
+            dyadic_bootstrap_pass_at_m_lattice(&outcomes, 4);
+        });
+        assert!(result.is_err(), "should panic on non-power-of-two k");
+    }
+
+    #[test]
+    fn test_dyadic_bootstrap_panics_on_non_power_of_two_m() {
+        let outcomes = [true; 8];
+        let result = std::panic::catch_unwind(|| {
+            dyadic_bootstrap_pass_at_m_lattice(&outcomes, 3);
+        });
+        assert!(result.is_err(), "should panic on non-power-of-two m");
+    }
+
+    #[test]
+    fn test_dyadic_bootstrap_panics_on_m_greater_than_k() {
+        let outcomes = [true; 4];
+        let result = std::panic::catch_unwind(|| {
+            dyadic_bootstrap_pass_at_m_lattice(&outcomes, 8);
+        });
+        assert!(result.is_err(), "should panic when m > k");
+    }
+
+    #[test]
+    fn test_dyadic_bootstrap_panics_on_empty_outcomes() {
+        let outcomes: [bool; 0] = [];
+        let result = std::panic::catch_unwind(|| {
+            dyadic_bootstrap_pass_at_m_lattice(&outcomes, 1);
+        });
+        assert!(result.is_err(), "should panic on empty outcomes");
+    }
+
+    #[test]
+    fn test_dyadic_bootstrap_empirical_unbiasedness() {
+        // Sanity check on the estimator algebra (NOT on QMC advantage): for
+        // iid Bernoulli(p) outcomes, dyadic_bootstrap pass@m is unbiased for
+        // the true pass@m = 1 - (1-p)^m.
+        //
+        // QMC advantage is a separate question (covariance structure);
+        // this test isolates estimator correctness by feeding iid outcomes.
+        let p = 0.3f64;
+        let m = 4usize;
+        let true_pass_at_m = 1.0 - (1.0 - p).powi(m as i32); // = 0.7599
+        let n_batches = 200_000;
+        let mut rng = crate::types::Rng::new(0xC0FFEE_BABE);
+        let mut sum_est = 0.0f64;
+        let mut outcomes = [false; 8];
+        for _ in 0..n_batches {
+            for o in outcomes.iter_mut() {
+                *o = (rng.uniform() as f64) < p;
+            }
+            let est = dyadic_bootstrap_pass_at_m_lattice(&outcomes, m);
+            sum_est += est.point_estimate;
+        }
+        let mean_est = sum_est / n_batches as f64;
+        // Allow 3 sigma of Monte Carlo error: sqrt(p(1-p)/n_batches).
+        // p = 0.7599, variance ~ 0.7599*0.2401 = 0.1824, sigma = 0.000954.
+        // 4 sigma ~ 0.0038. Use 0.01 for safety.
+        let abs_err = (mean_est - true_pass_at_m).abs();
+        assert!(
+            abs_err < 0.01,
+            "dyadic bootstrap unbiasedness: mean_est = {mean_est}, true pass@m = {true_pass_at_m}, abs_err = {abs_err}"
+        );
+    }
+
+    #[test]
+    fn test_dyadic_bootstrap_strided_subsequence_is_valid_sub_lattice() {
+        // Direct empirical verification of Theorem 1: draw a LatticeQmc
+        // batch of k=8, take stride-2 subsequences, and confirm each is
+        // marginally Unif[0,1) (KS test) AND has the expected lattice
+        // structure (equispaced values).
+        let k = 8usize;
+        let m = 4usize;
+        let stride = k / m;
+        let n_batches = 10_000;
+        let mut batch = vec![0.0f32; k];
+        let mut sub_batch = vec![0.0f32; m];
+        // Collect sub-batch values from offset j=0 across many batches.
+        let mut collected = Vec::with_capacity(n_batches * m);
+        let mut src = LatticeQmc::new(0xABCD_1234);
+        for _ in 0..n_batches {
+            src.draw(k, &mut batch);
+            for t in 0..m {
+                sub_batch[t] = batch[t * stride]; // j=0 subsequence
+            }
+            collected.extend_from_slice(&sub_batch);
+        }
+        // Sub-batch values should be marginally Unif[0,1).
+        let (_, p) = ks_uniform(&collected);
+        assert!(p > 0.01, "sub-lattice marginal uniformity: KS p = {p}");
+
+        // Verify lattice structure within each sub-batch: values should be
+        // equispaced (modulo the wraparound).
+        let mut max_gap_dev = 0.0f32;
+        src = LatticeQmc::new(0xABCD_1234); // reset to same seed
+        for _ in 0..1000 {
+            src.draw(k, &mut batch);
+            for t in 0..m {
+                sub_batch[t] = batch[t * stride];
+            }
+            // Sort; the cyclic gap structure of a size-m lattice has all
+            // pairwise neighbor gaps equal to 1/m (with one wrap gap).
+            let mut sorted = sub_batch.clone();
+            sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            let mut gaps = Vec::with_capacity(m);
+            for i in 0..m - 1 {
+                gaps.push(sorted[i + 1] - sorted[i]);
+            }
+            gaps.push(1.0 - sorted[m - 1] + sorted[0]); // wrap
+            let expected = 1.0 / m as f32;
+            for g in gaps {
+                max_gap_dev = max_gap_dev.max((g - expected).abs());
+            }
+        }
+        assert!(max_gap_dev < 1e-5, "sub-lattice equispacing: max gap dev = {max_gap_dev}");
+    }
+
+    // ── Block bootstrap (Sobol/Stratified) ────────────────────────────────
+
+    #[test]
+    fn test_block_bootstrap_all_pass() {
+        let outcomes = [true; 16];
+        let mut rng = crate::types::Rng::new(42);
+        let est = contiguous_block_bootstrap_pass_at_m(&outcomes, 4, 50, &mut rng);
+        assert_eq!(est.point_estimate, 1.0);
+        assert_eq!(est.sample_variance, 0.0);
+        assert_eq!(est.n_resamples, 50);
+    }
+
+    #[test]
+    fn test_block_bootstrap_all_fail() {
+        let outcomes = [false; 16];
+        let mut rng = crate::types::Rng::new(42);
+        let est = contiguous_block_bootstrap_pass_at_m(&outcomes, 4, 50, &mut rng);
+        assert_eq!(est.point_estimate, 0.0);
+        assert_eq!(est.sample_variance, 0.0);
+    }
+
+    #[test]
+    fn test_block_bootstrap_deterministic_given_seed() {
+        let outcomes = [
+            true, false, true, false, true, true, false, false,
+            true, true, true, false, false, true, false, true,
+        ];
+        let mut r1 = crate::types::Rng::new(7);
+        let mut r2 = crate::types::Rng::new(7);
+        let est1 = contiguous_block_bootstrap_pass_at_m(&outcomes, 4, 100, &mut r1);
+        let est2 = contiguous_block_bootstrap_pass_at_m(&outcomes, 4, 100, &mut r2);
+        assert_eq!(est1, est2, "same seed must produce identical estimates");
+    }
+
+    #[test]
+    fn test_block_bootstrap_m_equals_k_single_block() {
+        // m == k -> only one possible start (0); every resample sees the
+        // whole array. Variance collapses to 0 (all resamples identical).
+        let outcomes = [true, false, true, false];
+        let mut rng = crate::types::Rng::new(42);
+        let est = contiguous_block_bootstrap_pass_at_m(&outcomes, 4, 30, &mut rng);
+        assert_eq!(est.point_estimate, 1.0, "at least one pass -> pass@4 = 1");
+        assert_eq!(est.sample_variance, 0.0);
+        assert_eq!(est.n_resamples, 30);
+    }
+
+    #[test]
+    fn test_block_bootstrap_estimate_in_range() {
+        // For random Bernoulli outcomes, the bootstrap estimate should be
+        // in [0, 1] and the Wilson CI should bracket it.
+        let outcomes = [
+            true, false, true, false, true, true, false, false,
+            true, false, false, true, true, false, true, false,
+        ];
+        let mut rng = crate::types::Rng::new(0xBEEF);
+        let est = contiguous_block_bootstrap_pass_at_m(&outcomes, 4, 1000, &mut rng);
+        assert!(est.point_estimate >= 0.0 && est.point_estimate <= 1.0);
+        assert!(est.sample_variance >= 0.0);
+        let (lo, hi) = est.wilson_ci_95();
+        assert!(lo <= est.point_estimate && est.point_estimate <= hi,
+            "point {} not in CI [{}, {}]", est.point_estimate, lo, hi);
+    }
+
+    #[test]
+    fn test_block_bootstrap_empirical_unbiasedness() {
+        // For iid Bernoulli(p) outcomes, contiguous-block bootstrap pass@m
+        // should be approximately unbiased for true pass@m = 1-(1-p)^m.
+        let p = 0.4f64;
+        let m = 4usize;
+        let true_pass_at_m = 1.0 - (1.0 - p).powi(m as i32); // = 0.8704
+        let n_batches = 100_000;
+        let mut master_rng = crate::types::Rng::new(0xFEED_FACE);
+        let mut sum_est = 0.0f64;
+        let mut outcomes = [false; 16];
+        for _ in 0..n_batches {
+            for o in outcomes.iter_mut() {
+                *o = (master_rng.uniform() as f64) < p;
+            }
+            let est = contiguous_block_bootstrap_pass_at_m(&outcomes, m, 32, &mut master_rng);
+            sum_est += est.point_estimate;
+        }
+        let mean_est = sum_est / n_batches as f64;
+        // Note: contiguous-block bootstrap is biased toward 1 because
+        // overlapping blocks share rollouts (effective sample size < B).
+        // Allow generous tolerance; the main check is that we're in the
+        // right neighborhood and not catastrophically wrong.
+        let abs_err = (mean_est - true_pass_at_m).abs();
+        assert!(
+            abs_err < 0.05,
+            "block bootstrap approximate unbiasedness: mean_est = {mean_est}, true pass@m = {true_pass_at_m}, abs_err = {abs_err}"
+        );
+    }
+
+    #[test]
+    fn test_block_bootstrap_panics_on_zero_m() {
+        let outcomes = [true; 8];
+        let mut rng = crate::types::Rng::new(0);
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            contiguous_block_bootstrap_pass_at_m(&outcomes, 0, 10, &mut rng);
+        }));
+        assert!(result.is_err(), "should panic on m == 0");
+    }
+
+    #[test]
+    fn test_block_bootstrap_panics_on_zero_resamples() {
+        let outcomes = [true; 8];
+        let mut rng = crate::types::Rng::new(0);
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            contiguous_block_bootstrap_pass_at_m(&outcomes, 4, 0, &mut rng);
+        }));
+        assert!(result.is_err(), "should panic on n_resamples == 0");
+    }
+
+    #[test]
+    fn test_block_bootstrap_panics_on_m_greater_than_k() {
+        let outcomes = [true; 4];
+        let mut rng = crate::types::Rng::new(0);
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            contiguous_block_bootstrap_pass_at_m(&outcomes, 8, 10, &mut rng);
+        }));
+        assert!(result.is_err(), "should panic on m > k");
+    }
+
+    // ── BootstrapEstimate methods ────────────────────────────────────────
+
+    #[test]
+    fn test_bootstrap_estimate_std_dev() {
+        let est = BootstrapEstimate {
+            point_estimate: 0.5,
+            sample_variance: 0.25,
+            n_resamples: 10,
+        };
+        assert!((est.std_dev() - 0.5).abs() < 1e-12);
+    }
+
+    #[test]
+    fn test_wilson_ci_zero_failures_one_sample() {
+        // Single sample, single success. Wilson CI should be wide.
+        let est = BootstrapEstimate {
+            point_estimate: 1.0,
+            sample_variance: 0.0,
+            n_resamples: 1,
+        };
+        let (lo, hi) = est.wilson_ci_95();
+        assert!(lo > 0.0 && lo < 0.5, "lo = {lo}");
+        assert!((hi - 1.0).abs() < 1e-12, "hi = {hi}");
     }
 }

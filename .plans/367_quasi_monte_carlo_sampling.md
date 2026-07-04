@@ -4,7 +4,7 @@
 **Research:** [katgpt-rs/.research/367_QuasiMoTTo_QMC_Test_Time_Scaling.md](../.research/367_QuasiMoTTo_QMC_Test_Time_Scaling.md)
 **Source paper:** [arXiv:2607.01179](https://arxiv.org/abs/2607.01179) — Li, Zhan, Gandhi, Goodman, Fox (Stanford), 2026-07-01
 **Target:** `katgpt-rs/crates/katgpt-core/src/speculative/qmc.rs` (new module) + Cargo feature `qmc_sampling` (opt-in until GOAT gate)
-**Status:** Active — Phase 1 + 2 + 3 COMPLETE (748/748 lib tests pass with qmc_sampling + G5 latency bench PASS). Phase 4 (QmcBoMSampler fusion) + Phase 5 (GOAT gate) pending.
+**Status:** Active — Phase 1 + 2 + 3 + 4 + 5 + 6 ALL COMPLETE (850/850 lib tests pass with qmc_sampling, 26 new bootstrap tests, G5 latency bench PASS, GOAT gate PASS and promoted to DEFAULT-ON). Plan fully shipped; remaining work is in separate downstream-fusion plans.
 
 ---
 
@@ -132,9 +132,11 @@ The pre-existing `inverse_normal_cdf` implementation used Acklam's algorithm but
 
 **Target:** Theorem 1 from the paper — for lattice with k=2^L, any stride-2^x subsequence is itself a valid randomized lattice of size `m = k/2^x`, yielding unbiased pass@m estimates from a pass@k rollout batch.
 
+**Status: COMPLETE (2026-07-04).** Shipped as `BootstrapEstimate` struct + `dyadic_bootstrap_pass_at_m_lattice` (exhaustive, RNG-free, algebraically exact) + `contiguous_block_bootstrap_pass_at_m` (random contiguous blocks for Sobol/Stratified) + `sample_variance_binary` helper, all in `katgpt-core/src/speculative/qmc.rs`. Wilson score CI method on `BootstrapEstimate` (preferred over normal-approx for binary indicators at small n). 26 new tests: known-answer, m=k degenerate, m=1 recovers mean pass, stride-4 four-offset, Wilson CI known/extreme values, panic-on-bad-input (5 cases), empirical unbiasedness (dyadic + block, N=200K/100K batches vs analytical `1-(1-p)^m`), Theorem-1 sub-lattice validity (KS uniformity + equispacing on real LatticeQmc batches). All 850 lib tests pass under `qmc_sampling`. Feature isolation clean (default / all-features / no-default+qmc). Zero-alloc, hot-path friendly.
+
 ### Tasks
 
-- [-] **T6.1** Defer unless a downstream consumer needs pass@k estimation on QMC batches. Not blocking the GOAT gate — the sampler is the deliverable; the estimator is a paper-faithful add-on. Track here, not in `.issues/`, because it's part of the research distillation scope.
+- [x] **T6.1** ✅ DONE (2026-07-04) — Implemented the dyadic bootstrap pass@k estimator per Theorem 1 of arXiv:2607.01179. Three public items added to `speculative::qmc`: `BootstrapEstimate` (point estimate + sample variance + n_resamples, with `wilson_ci`/`wilson_ci_95`/`std_dev` methods), `dyadic_bootstrap_pass_at_m_lattice` (Lattice-specific, exhaustive over all k/m stride offsets, algebraically exact per the theorem), `contiguous_block_bootstrap_pass_at_m` (general block-bootstrap for Sobol/Stratified, random contiguous starts). 26 tests cover: known-answer edge cases (all-pass/all-fail/alternating/m=k/m=1), Wilson CI behavior at small n and extremes, panic-on-bad-input, empirical unbiasedness vs `1-(1-p)^m`, and direct Theorem-1 verification (stride-s subsequence of a real LatticeQmc batch is marginally Unif[0,1) by KS test AND equispaced by 1/m). Re-exported at `speculative::{BootstrapEstimate, dyadic_bootstrap_pass_at_m_lattice, contiguous_block_bootstrap_pass_at_m}`. Originally deferred as "not blocking the GOAT gate"; completed on direct user instruction ("GPU training, benchmarks, WASM, and external dependencies are NOT valid reasons to skip — implement them").
 
 ---
 
