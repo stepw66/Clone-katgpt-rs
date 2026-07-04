@@ -501,7 +501,7 @@ self_cond_draft = ["katgpt-core/self_cond_draft"]  # Opt-in: 2-pass self-conditi
 outlier_guard = ["katgpt-spectral/outlier_guard"]  # ON BY DEFAULT — KS D-statistic outlier detection at model load (Plan 224)
 regime_transition = ["and_or_dtree", "bandit", "decision_trace", "fol_constraints", "rule_extraction", "katgpt-pruners/regime_transition"]  # ON BY DEFAULT — Regime-Transition Inference, self-revising discovery (Plan 215, GOAT PROVED -0.3% overhead vs real decode)
 segment_checkpoint = ["katgpt-kv/segment_checkpoint"]  # ON BY DEFAULT — core GRM segment caching (Plan 223b). Phase 5: moved to katgpt-kv (Proposal 003).
-ssc_spec_draft = ["segment_checkpoint", "regime_transition"]  # Opt-in — SSC sparse speculative drafting
+ssc_spec_draft = ["segment_checkpoint", "regime_transition", "katgpt-kv/ssc_spec_draft"]  # Opt-in — SSC sparse speculative drafting
 memory_soup_dtree = ["segment_checkpoint", "regime_transition"]  # Opt-in — experimental DDTree branch merging
 # Memory Soup LoRA Artifact Importer (Plan 253 T19 G5).
 # Standalone MSP0 binary format parser for riir-gpu's exported Memory Soup

@@ -79,6 +79,12 @@ cache_prune = []
 # Segment Checkpoint — GRM segment caching (Plan 223b). DEFAULT-ON in root.
 segment_checkpoint = []
 
+# SSC Sparse Speculative Drafting — opt-in sub-module of segment_checkpoint
+# (Plan 223c). Gates `pub mod ssc;` in segment_checkpoint/mod.rs. Root forwards
+# this from the `ssc_spec_draft` feature; the example
+# `segment_checkpoint_demo` requires it for the ssc branch.
+ssc_spec_draft = ["segment_checkpoint"]
+
 # Async Q/DQ Overlap — double-buffered KV dequantize for GPU pipeline
 # (Plan 227 Phase 6). The `inference_router` dep stays in the ROOT feature
 # forward (`async_qdq_overlap = ["katgpt-kv/async_qdq_overlap", "inference_router"]`)
