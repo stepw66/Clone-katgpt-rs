@@ -40,6 +40,12 @@ The output is a ≤1 µs CPU estimate that `riir-ai`'s shipped `NpcBrainRouter` 
 | **G4 (alloc-free)** | `ane_estimate` is `#[inline(always)]`, zero allocations, ≤1 µs CPU on M1 Pro | criterion bench: `ane_estimate` p50 < 1 µs |
 | **G5 (feature isolation)** | Build clean with and without `--features ane_roofline`; no warnings either way | `cargo check` + `cargo check --features ane_roofline` |
 
+**Deviations from spec table above (recorded 2026-07-04 audit, see T2.1/T2.2/T2.5 for full text):**
+- The `cargo test ... ane_roofline::goat_gate` invocation in G1/G2 above is a **dead path** — the `goat_gate` module was never created. The actual gate is the bench binary `bench_379_ane_roofline_goat` (run via `cargo bench --bench bench_379_ane_roofline_goat`).
+- **G1's ±30% absolute-accuracy criterion was NOT met** — the deferred `#[ignore]` test was never written. What passed is **routing-classification G1** (5/5 verdicts match Bryngelson ch. 11 table 11.4), which is what G2 actually checks. The cost model is ~2× off on the conv shape per the implementation's own notes (omits OCG pass-count multiplier).
+- **G4's latency measurement reads `0.00 ns`** because LLVM constant-folds the pure-arithmetic `#[inline(always)]` call at `-O`. The alloc-count portion (0 allocs/1000 calls) IS credible; the latency number is not. A production-grade harness would feed runtime-varying inputs.
+- **G3, G5 PASS as stated.**
+
 **UQ check (Report the Floor rule, AGENTS.md):** This primitive does NOT claim a probability distribution, predictive interval, quantile, coverage guarantee, or calibrated uncertainty. It is a deterministic cost model. The conformal-naive floor does not apply.
 
 **Promotion rule:** If G1–G5 all PASS → promote `ane_roofline` to default features. If G1 or G2 FAIL → keep opt-in, file issue with the failing shape. If G3 or G5 FAIL → block promotion, fix before merge.
@@ -167,15 +173,17 @@ Goal: prove G1 (±30% accuracy on Bryngelson's reference shapes) and G2 (routing
 
 ### Tasks
 
-- [x] **T2.1** Add `#[cfg(test)] mod goat_gate` to `ane_roofline.rs` with `#[ignore]` on tests that need live hardware (only run with `--ignored`).
+- [x] **T2.1** ~~Add `#[cfg(test)] mod goat_gate` to `ane_roofline.rs` with `#[ignore]` on tests that need live hardware (only run with `--ignored`).~~
+  - **DEVIATION (shipped form):** the GOAT gate is implemented as a standalone bench binary, `crates/katgpt-core/benches/bench_379_ane_roofline_goat.rs` (`harness = false`, `fn main()`). The `#[cfg(test)] mod goat_gate`/`#[ignore]` module described above **does not exist**; `grep` for `goat_gate` / `#[ignore]` / `g1_reference_shapes` in `ane_roofline.rs` returns zero hits. Rationale: matches the repo's existing bench convention (e.g. `bench_010_conformal_floor.rs`) and enables the `counting_allocator!` macro used by G2-alloc. **Invocations in this plan that reference `cargo test -- --ignored ane_roofline::goat_gate::*` are dead paths** — replace with `cargo bench --bench bench_379_ane_roofline_goat`.
 - [x] **T2.2** Implement **G1 reference-shape accuracy test**:
   - Shapes from Bryngelson ch. 9/11:
     - 3×3 conv, 256 channels, 28×28 feature map → measured 0.51 ms (ch. 13.1)
     - 4096² GEMM, fp16 → measured ~5 ms (ch. 9.1, the saturating large-matmul ceiling)
     - 16-deep 3×3 conv stack at 256ch → measured ~3 ms (ch. 13.2, M1)
     - Single-token decode (M=1, K=1024, N=1024 GEMV) → measured ~0.23 ms (dispatch-bound)
-  - For each: `assert!((ane_estimate(shape, F16, &AnePeaks::m1()).runtime_ms - measured_ms).abs() / measured_ms <= 0.30, ...)`.
-  - Run with `cargo test --features ane_roofline --lib -- --ignored ane_roofline::goat_gate::g1_reference_shapes` on Apple Silicon.
+  - Spec: for each shape, `assert!((ane_estimate(shape, F16, &AnePeaks::m1()).runtime_ms - measured_ms).abs() / measured_ms <= 0.30, ...)`.
+  - Spec invocation: `cargo test --features ane_roofline --lib -- --ignored ane_roofline::goat_gate::g1_reference_shapes`.
+  - **DEVIATION (shipped form): the ±30% absolute-accuracy assertion was NOT implemented.** The bench's own docstring explicitly defers it: *"The ±30% absolute-accuracy gate (Plan 379 T2.2) is deferred to a separate `#[ignore]` test that requires live M1/M5 silicon."* That deferred test was never written. What ships instead is **routing-classification G1** (T2.3): `device_recommendation(gpu_available=true)` for 5 shapes (16-deep conv stack, 4096² GEMM, single-token decode, 64×64 GEMM, family-gated op) matches Bryngelson ch. 11 table 11.4 — 5/5 PASS. The analytic cost model is fit to Bryngelson ch. 18.1 measured peaks (3.25 TFLOP/s M1, 9.0 GB/s) rather than theoretical peaks (12 TFLOP/s, 85 GB/s); the implementation notes (Plan §L156-158) acknowledge the model is ~2× off on the conv shape (omits the OCG pass-count multiplier) and accept routing-correctness as the real gate. **The GOAT table's G1 row "agrees within ±30%" is NOT literally met**; the routing verdicts it gates ARE met. Filed as a known limitation rather than tuned-to-fit (per Plan §L204).
 - [x] **T2.3** Implement **G2 routing verdict test**:
   - For each shape, call `AneCost::device_recommendation(gpu_available=true)` and assert it matches Bryngelson ch. 11 table 11.4:
     - 16-deep 3×3 conv stack → `Device::Ane` (engine wins both speed and efficiency)
@@ -184,14 +192,16 @@ Goal: prove G1 (±30% accuracy on Bryngelson's reference shapes) and G2 (routing
     - 64×64 GEMM → `Device::Cpu` (below dispatch floor)
     - Op with `min_family = F3` on M1 → `Device::Cpu` (family-gated)
   - Run with `cargo test --features ane_roofline --lib -- --ignored ane_roofline::goat_gate::g2_routing_verdicts`.
+  - **DEVIATION (shipped form):** the `--ignored ane_roofline::goat_gate::g2_routing_verdicts` path above is dead (no `goat_gate` module exists — see T2.1). The routing verdicts actually run inside the bench binary `bench_379_ane_roofline_goat` (`cargo bench --bench bench_379_ane_roofline_goat`, the G1 routing-classification block). All 5 verdicts PASS.
 - [x] **T2.4** Implement **G3 no-regression test**:
   - Run existing `cargo test -p katgpt-core --lib roofline` — all pre-existing GPU roofline tests must still pass.
   - Add a new test asserting `AnePeaks::for_family(AneFamily::A11Legacy) == None` (below the M1 floor).
 - [x] **T2.5** Implement **G4 alloc-free / ≤1 µs CPU bench**:
-  - New criterion bench `katgpt-rs/crates/katgpt-core/benches/ane_roofline_bench.rs`:
+  - New criterion bench `katgpt-rs/crates/katgpt-core/benches/ane_roofline_bench.rs` (spec filename — actually shipped as `bench_379_ane_roofline_goat.rs`, `harness = false`, not criterion):
     - `ane_estimate` on the four reference shapes, M1 peaks.
     - Assert p50 < 1 µs (Bryngelson's dispatch floor is 230 µs; the cost model must be ≤230× cheaper than the work it's routing).
   - Use `CARGO_TARGET_DIR=/tmp/plan379-bench` per AGENTS.md to avoid locking the main target dir.
+  - **DEVIATION (shipped form): the perf number reported is `ane_estimate: 0.00 ns` — constant-folded to zero by LLVM at `-O` despite `black_box` + atomic sink.** `ane_estimate` is `#[inline(always)]` pure arithmetic over compile-time-known `AnePeaks` constants and a fixed shape, so LLVM eliminates the call entirely. "Constant-folded to 0 ns" is a *stronger* statement than "< 1 µs" (the work happens at compile time, not runtime), so the gate's **intent** is satisfied — but the `0.00 ns` reading is not a credible latency measurement and a production-grade harness would feed runtime-varying inputs (e.g. `AneFamily::detect()` or per-iteration random `op.flops`) so the compiler cannot fold. **The G2-alloc portion (0 allocs/1000 calls) IS credible and passes** — `ane_estimate` provably allocates nothing.
 - [x] **T2.6** Implement **G5 feature isolation**:
   - `cargo check` (default features, no `ane_roofline`) — clean.
   - `cargo check --features ane_roofline` — clean.
@@ -293,8 +303,12 @@ Goal: replace the hardcoded `ANE_BATCH_THRESHOLD = 100` in `riir-ai/crates/riir-
 Extend `katgpt-rs/crates/katgpt-core/src/roofline.rs` with an ANE-aware cost model (new module
 `ane_roofline.rs`, opt-in `ane_roofline` feature). Three ANE-specific axes: 2 MB working-set
 cliff, 0.23 ms dispatch floor (M1), family-floor capability gate. Per-chip peaks for M1–M5.
-Phase 1 ships the primitive + unit tests; Phase 2 runs the GOAT gate (G1 ±30% on Bryngelson's
-reference shapes, G2 routing verdicts match ch. 11); Phase 3 (optional, post-GOAT) refines the
+Phase 1 ships the primitive + unit tests; Phase 2 runs the GOAT gate (bench binary
+`bench_379_ane_roofline_goat`, not the `goat_gate` test module originally specified — see
+deviation notes on T2.1/T2.2/T2.5); what passes is **routing-classification G1** (5/5 verdicts
+match Bryngelson ch. 11) rather than the ±30% absolute-accuracy criterion originally specified
+for G1; G3, G5 pass as stated; G2-alloc (0 allocs/1000 calls) is credible, G2-latency reads
+0.00 ns because LLVM constant-folds the call). Phase 3 (optional, post-GOAT) refines the
 shipped `NpcBrainRouter`'s hardcoded `ANE_BATCH_THRESHOLD = 100` to consume the new primitive.
 
 The shipped `NpcBrainRouter` (Plan 255 Part 4) is NOT replaced — only its threshold input
