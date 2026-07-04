@@ -49,14 +49,14 @@ both are absorbed as phases of the master plan with wider scope.
 
 | Crate | Absorbs from `src/` |
 |---|---|
-| `katgpt-core` | base math/SIMD + `alloc.rs`, `cce/`, `cumprodsum.rs`, `llmexec_guard.rs`, `memory_soup_lora.rs`, `mux_demux.rs`, `salience/`, `trigger_gate.rs`, `skill_opt/`, `ssd_block.rs`, hoist `sigmoid` out of `band_conditioner` |
+| `katgpt-core` | base math/SIMD + `alloc.rs`, `cce/`, `cumprodsum.rs`, `llmexec_guard.rs`, `memory_soup_lora.rs`, `mux_demux.rs`, `salience/`, `trigger_gate.rs`, `skill_opt/`, `ssd_block.rs`, `closure_mining.rs` (re-routed from katgpt-sleep, Phase 7), hoist `sigmoid` out of `band_conditioner` |
 | `katgpt-types` | (shared leaf — no `src/` absorptions, already complete) |
 | `katgpt-transformer` | `transformer.rs` (stays root — owns `ForwardContext`), absorbs `mbu.rs`, `dense_mesh/`, `swir/`, `tf_loop.rs` |
 | `katgpt-kv` | `cache_prune/`, `segment_checkpoint/`, `async_qdq.rs` (already has `sp_kv`) |
 | `katgpt-pruners` | `closure_wire.rs`, `screening/` (already complete otherwise) |
 | `katgpt-spectral` | `spectral_budget.rs`, `spectral_concentration.rs`, `spectral_retract.rs`, `stiff_anomaly/`, `gauge_invariant.rs`, `manifold_power_iter_router.rs`, `off_principal.rs`, `procrustes.rs`, `river_valley.rs`, `distill/peira` (split) |
 | `katgpt-speculative` | `distill/{ilc,trd}` (split), `spechop/`, `rt_turbo/`, `precision_aware_draft.rs`, `sparse_compose.rs`, `spec_reconciliation/` |
-| `katgpt-sleep` | `sleep/` (Plan 154 GDN2 consolidation), `closure_mining.rs` |
+| `katgpt-sleep` | (Phase 7 absorptions deferred — `sleep/` blocked on Phase 9/12 transformer decoupling, `closure_mining` re-routed to katgpt-core due to cyclic package dep) |
 
 ### Existing domain crates (leave as siblings)
 
@@ -145,6 +145,7 @@ forever.
 |---|---|
 | `alloc.rs` | W |
 | `cce/` | W |
+| `closure_mining.rs` | W (re-routed from katgpt-sleep — see Phase 7 blocker) |
 | `cumprodsum.rs` | W |
 | `llmexec_guard.rs` | O |
 | `memory_soup_lora.rs` | O |
@@ -212,7 +213,8 @@ forever.
 ### → `katgpt-sleep`
 | Item | Verdict |
 |---|---|
-| `sleep/` (Plan 154 consolidation), `closure_mining.rs` | O/W |
+| `sleep/` (Plan 154 consolidation) | DEFERRED — transformer-bound glue (Phase 9/12 blocker, see Phase 7 notes) |
+| `closure_mining.rs` | RE-ROUTED to `katgpt-core::closure::mining` (cyclic package dep blocker, see Phase 7 notes) |
 
 ### → `katgpt-transformer`
 | Item | Verdict |
@@ -532,7 +534,68 @@ Ordering: foundation first (hoists, splits), then domain crates biggest-first.
     (1), test_126_rt_turbo_goat (6), precision_aware_draft_goat (5),
     spec_reconciliation_bench (2), spec_reconciliation_proof (11). Clippy clean.
   **DONE 2026-07-04.**
-- [ ] **Phase 7 — `katgpt-sleep` absorption.** `sleep/`, `closure_mining`.
+- [x] **Phase 7 — `katgpt-sleep` absorption.** `sleep/`, `closure_mining`.
+  - **Destination deviation (2026-07-04):** the proposal's literal target
+    (`katgpt-sleep`) was hit by two blockers, so the executable subset
+    (`closure_mining`) was re-routed to `katgpt-core::closure::mining`.
+    The original target is documented here for future re-attempts.
+  - **Blocker 1 — `sleep/*` is transformer-bound glue.** All three files
+    (`mod.rs`, `consolidation.rs`, `eviction.rs`, `types.rs`) depend on
+    `crate::gdn2`, `crate::transformer::{ForwardContext, MultiLayerKVCache,
+    TransformerWeights}`, and `crate::types::{Config, kv_dim}`. `forward_looped`
+    in `src/transformer.rs` directly consumes `crate::sleep::SleepConfig` at
+    lines 449 + 833–837. Moving `sleep/` out of root would require
+    `katgpt-sleep → katgpt-rs` (cycle). The in-source comment in
+    `src/sleep/consolidation.rs` already declares this root-residency
+    ("_Root-resident by design_… Would need its own crate"). Blocked until
+    Phase 9 (katgpt-transformer absorption) or Phase 12 (final sweep).
+  - **Blocker 2 — cyclic package dep on the proposed katgpt-sleep route for
+    `closure_mining`.** katgpt-core already depends on katgpt-sleep
+    (`sleep_time_anticipation` feature re-exports the anticipator substrate
+    as `katgpt_core::sleep_time`). Adding katgpt-sleep → katgpt-core for
+    `closure_mining`'s `MotifMiner` / `compute_pri` / `compute_cdg` deps
+    creates `katgpt-core → katgpt-sleep → katgpt-core`. Verified by
+    `cargo check -p katgpt-sleep --features closure_mining`:
+    `error: cyclic package dependency`. The anticipator re-export cannot be
+    dropped (katgpt_core::sleep_time has 6 external consumers in riir-ai
+    + katgpt-core benches/examples/tests), so the cycle is unbreakable
+    without major restructuring.
+  - **Executed: `closure_mining` → `katgpt-core/src/closure/mining.rs`.**
+    katgpt-core is the natural home — the instrument is a thin wrapper around
+    `katgpt_core::closure::{MotifMiner, MotifAdmitter, compute_pri,
+    compute_cdg}` which already live there. Import rewrites: `use
+    katgpt_core::closure::{...}` → `use crate::closure::{...}`;
+    `use katgpt_core::{compute_cdg, compute_pri}` → `use crate::{...}`.
+    Two doc-link references updated (one pointing to the root-only
+    `closure_wire::PtgTracedPruner::finish_episode`, one fixing a stale
+    `katgpt_rs::sleep::closure_mining::` path that never existed).
+  - **Public API surface preserved:** `katgpt_core::closure::mining::*`
+    exposed via `pub use mining::{SleepCycleClosureReport,
+    fold_cdg_at_sleep_cycle, mine_motifs_at_sleep_cycle}` in
+    `closure/mod.rs`, plus surfaced at the katgpt-core top level via the
+    existing `pub use closure::{...}` block (mining sub-block added).
+    Root `src/lib.rs` keeps the historical `katgpt_rs::closure_mining::*`
+    path alive via `pub use katgpt_core::closure::mining as closure_mining`.
+    External consumer `riir-engine::closure_bridge` verified unchanged
+    (`pub use katgpt_rs::closure_mining::{mine_motifs_at_sleep_cycle,
+    SleepCycleClosureReport}`).
+  - **No Cargo.toml changes at root.** The root `closure_instrument`
+    feature already chains `katgpt-core/closure_instrument`, which now
+    transitively includes mining (the module is unconditional inside
+    `closure/mod.rs`'s `pub mod mining;` declaration, gated only by the
+    outer `#[cfg(feature = "closure_instrument")] pub mod closure;`).
+    katgpt-sleep Cargo.toml untouched — crate remains a pure substrate
+    leaf with no katgpt-core dependency.
+  - GOAT gate G3: `cargo check --workspace --all-features` clean; default
+    clean; `--no-default-features` clean. 1071 katgpt-core lib tests pass
+    (was 1068 — the 3 mining tests moved here from root). 1490 root lib
+    tests pass (3 fewer mining tests at root, partially offset by sibling
+    agent's collider_pruner additions). bench_290_closure_wire_integration
+    6/6 PASS. bench_290_closure_instrument_goat 10/10 PASS with
+    `--test-threads=1` (G2 is a timing-sensitive warm-tier test that flakes
+    under concurrent load — pre-existing, unrelated to this change).
+    Clippy clean on the new module.
+  **DONE 2026-07-04.**
 - [ ] **Phase 8 — `katgpt-pruners` absorption.** `closure_wire`, `screening`.
   Fold `rerank.rs` → `katgpt-attn-match`.
 - [ ] **Phase 9 — `katgpt-transformer` absorption.** `mbu`, `dense_mesh`,

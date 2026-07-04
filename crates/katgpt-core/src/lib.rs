@@ -789,6 +789,9 @@ pub use closure::{
     },
     commitment, deserialize_postcard,
     metrics::{CdgScore, PriScores, compute_cdg, compute_pri, compute_tar_score, motif_multiset},
+    mining::{
+        SleepCycleClosureReport, fold_cdg_at_sleep_cycle, mine_motifs_at_sleep_cycle,
+    },
     motif::{
         FixedU32Set, MAX_MOTIF_EDGES, MAX_MOTIF_NODES, Motif, MotifMiner, RING_BUFFER_K,
         enumerate_subgraph_hashes,

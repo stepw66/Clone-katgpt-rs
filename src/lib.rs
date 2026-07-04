@@ -358,14 +358,25 @@ pub mod tf_loop;
 
 // Closure-Expansion Instrument — runtime wiring (Plan 290 Phase 4 T4.2/T4.3).
 // `closure_wire` decorates any ScreeningPruner (BanditPruner / AbsorbCompressLayer)
-// with PTG recording; `closure_mining` runs motif mining + admission at
-// sleep-cycle boundaries. Both are gated on `closure_instrument`; the
-// AbsorbCompress auto-tracing impl in `closure_wire` additionally needs `bandit`.
+// with PTG recording (wake-phase decorator — Phase 8 katgpt-pruners absorption
+// target). `closure_mining` runs motif mining + admission at sleep-cycle
+// boundaries — Proposal 003 Phase 7 (2026-07-04) hoisted this module into
+// `katgpt-core::closure::mining`. The original proposal targeted katgpt-sleep,
+// but that triggered a cyclic package dep (katgpt-core → katgpt-sleep →
+// katgpt-core, because katgpt-core already depends on katgpt-sleep for the
+// sleep_time_anticipation re-export). katgpt-core is the natural home — the
+// instrument is a thin wrapper around `closure::{MotifMiner, MotifAdmitter,
+// compute_pri, compute_cdg}` which already live there. The historical
+// `katgpt_rs::closure_mining::*` API path is preserved by the `pub use`
+// re-export below; external consumers (riir-engine::closure_bridge) are
+// unaffected. Both `closure_wire` and `closure_mining` are gated on
+// `closure_instrument`; the AbsorbCompress auto-tracing impl in `closure_wire`
+// additionally needs `bandit`.
 #[cfg(feature = "closure_instrument")]
 pub mod closure_wire;
 
 #[cfg(feature = "closure_instrument")]
-pub mod closure_mining;
+pub use katgpt_core::closure::mining as closure_mining;
 
 // Salience Tri-Gate Primitive — open 3-way per-tick emit gate (Speak / Silent /
 // Delegate) distilled from JoyAI-VL-Interaction (Plan 303, Research 281,

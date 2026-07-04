@@ -40,6 +40,7 @@ pub mod bridge;
 #[cfg(feature = "ptg_functor_edges")]
 pub mod functor_edge;
 pub mod metrics;
+pub mod mining;
 pub mod motif;
 pub mod trace;
 
@@ -54,6 +55,19 @@ pub use motif::{
     FixedU32Set, MAX_MOTIF_EDGES, MAX_MOTIF_NODES, Motif, MotifMiner, RING_BUFFER_K,
 };
 pub use trace::{NodeId, PtgRecorder};
+
+// Sleep-cycle boundary mining instrument (Plan 290 T4.3). Hoisted from
+// `katgpt-rs/src/closure_mining.rs` in Proposal 003 Phase 7 (2026-07-04).
+// Runs `MotifMiner::mine_batch` + PRI aggregation + admission sweep at sleep-
+// cycle boundaries. The original proposal targeted katgpt-sleep, but that
+// created a cyclic package dep (katgpt-core → katgpt-sleep → katgpt-core,
+// because katgpt-core already depends on katgpt-sleep for the sleep_time
+// anticipator re-export). katgpt-core is the natural home: the instrument is
+// a thin wrapper around `closure::{MotifMiner, MotifAdmitter, compute_pri,
+// compute_cdg}` which already live here. The root crate re-exports it as
+// `katgpt_rs::closure_mining` for back-compat — external consumers
+// (riir-engine::closure_bridge) keep the historical API path.
+pub use mining::{fold_cdg_at_sleep_cycle, mine_motifs_at_sleep_cycle, SleepCycleClosureReport};
 
 #[cfg(feature = "ptg_functor_edges")]
 pub use functor_edge::{FunctorEdgeParams, FunctorPtg, apply_functor_edge_into, functor_edge_gate};

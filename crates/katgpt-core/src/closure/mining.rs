@@ -41,11 +41,11 @@
 //!
 //! [`MotifMiner::mine_batch`]: katgpt_core::closure::MotifMiner::mine_batch
 
-use katgpt_core::closure::{
+use crate::closure::{
     CdgScore, GateResult, Motif, MotifAdmitter, MotifMiner, PrimitiveTransitionGraph,
     PriScores,
 };
-use katgpt_core::{compute_cdg, compute_pri};
+use crate::{compute_cdg, compute_pri};
 
 /// Per-sleep-cycle report returned by [`mine_motifs_at_sleep_cycle`].
 ///
@@ -73,7 +73,8 @@ pub struct SleepCycleClosureReport {
 ///
 /// **Does not** mutate the miner (mining is `&self`). The caller is
 /// responsible for `miner.observe(ptg)` calls during the wake phase — see
-/// [`crate::closure_wire::PtgTracedPruner::finish_episode`].
+/// [`katgpt_rs::closure_wire::PtgTracedPruner::finish_episode`] (root-level
+/// wake-phase decorator; lives in the katgpt-rs root crate, not katgpt-core).
 ///
 /// # Arguments
 ///
@@ -86,7 +87,7 @@ pub struct SleepCycleClosureReport {
 /// # Example
 ///
 /// ```ignore
-/// use katgpt_rs::sleep::closure_mining::mine_motifs_at_sleep_cycle;
+/// use katgpt_rs::closure_mining::mine_motifs_at_sleep_cycle;
 /// use katgpt_core::closure::{MotifAdmitter, MotifMiner};
 ///
 /// let mut miner = MotifMiner::new();
@@ -183,7 +184,7 @@ pub fn fold_cdg_at_sleep_cycle(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use katgpt_core::closure::{
+    use crate::closure::{
         MotifAdmitter, MotifMiner, OperatorKind, PrimitiveKind, PtgRecorder,
     };
 
