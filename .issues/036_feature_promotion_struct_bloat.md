@@ -83,6 +83,18 @@ This is P2 because:
 3. The `Box<Extensions>` refactor touches every constructor and every field
    access — higher risk than the Bench 372 fixes.
 
+## Verification attempt (2026-07-04)
+
+Attempted to re-benchmark to get current numbers. **Blocked** — the workspace build is currently broken by a sibling agent's in-progress speculative-crate refactor (cyclic dependency: `katgpt-pruners` → `katgpt-speculative` → `katgpt-pruners`). This is sibling WIP, not related to Issue 036; the sibling agent will resolve the cycle.
+
+**Decision: stay deferred.** Even if the build were green, the case for doing this refactor now is weak:
+1. The 502M "peak" (May 29) was partially thermal-inflated — `cooldown()` was a no-op before commit `ef78b555` (2026-06-12), per Bench 372 §"Remaining Gap". The real regression target is lower than 502M.
+2. Run-to-run variance was 321M–415M (~25%) on the *same binary* — the 17% gap (415M vs 502M) is within that noise band.
+3. The refactor touches 31 field-access sites + all constructors (high risk for a gain that may be unmeasurable).
+4. AbsorbCompress compress() — the other benchmark in this family — already *exceeds* the May-29 peak (60.1M > 57.4M) after the Bench 372 fixes.
+
+**Re-evaluation trigger:** revisit if profiling on non-thermal-throttled hardware (e.g., a dedicated benchmark machine with consistent cooling) shows Bandit update() consistently below 420M across 5+ runs. Until then, the expected gain is within measurement noise and the refactor risk is not justified.
+
 ## TL;DR
 
 Feature promotions (May 29 → June 12) bloated `BanditPruner` from 3 → 13
