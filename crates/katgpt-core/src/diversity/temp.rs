@@ -107,17 +107,61 @@ pub fn extrapolated_snapshot_schedule(
         "noise_seeds and out must have length k"
     );
 
-    let d = s0.len();
+    // BLAKE3 variant: per-j hash when noise is on, zero when off.
+    extrapolated_snapshot_schedule_with_noise(
+        s0,
+        s1,
+        lambda_schedule,
+        out,
+        |j| {
+            if noise_sigma == 0.0 {
+                0.0
+            } else {
+                blake3_noise(noise_seeds[j], noise_sigma)
+            }
+        },
+    );
+}
 
+/// Shared extrapolation core: writes `theta_j = s0 + lambda_j·(1+xi_j)·(s1−s0)`
+/// for `j` in `0..k`, where `xi_j` is produced by `noise_fn(j)`.
+///
+/// Both [`extrapolated_snapshot_schedule`] (BLAKE3 per-j) and
+/// [`extrapolated_snapshot_schedule_qmc`] (QMC bulk-then-indexed) delegate to
+/// this helper after pre-drawing/pre-computing their respective `xi_j`. The
+/// resize guard, `coeff = lambda·(1+xi)` formula, and inner `d`-loop are
+/// bit-identical across the two callers (Issue 043 DRY refactor).
+///
+/// # Allocation discipline
+///
+/// Allocates iff `theta_j.len() != d` for some `j` (resize). Hot-path callers
+/// pre-size `out[j] = vec![0.0; d]` so the resize is a no-op.
+///
+/// # Panics
+///
+/// Asserts `s0.len() == s1.len()` and `lambda_schedule.len() == out.len()`.
+/// Callers assert the per-variant noise-source length invariant themselves
+/// before delegating.
+#[inline]
+fn extrapolated_snapshot_schedule_with_noise(
+    s0: &[f32],
+    s1: &[f32],
+    lambda_schedule: &[f32],
+    out: &mut [Vec<f32>],
+    mut noise_fn: impl FnMut(usize) -> f32,
+) {
+    assert_eq!(s0.len(), s1.len(), "s0 and s1 must have same dimension");
+    assert_eq!(
+        lambda_schedule.len(),
+        out.len(),
+        "lambda_schedule and out must have length k"
+    );
+    let d = s0.len();
     for (j, theta_j) in out.iter_mut().enumerate() {
         if theta_j.len() != d {
             theta_j.resize(d, 0.0);
         }
-        let xi_j = if noise_sigma == 0.0 {
-            0.0
-        } else {
-            blake3_noise(noise_seeds[j], noise_sigma)
-        };
+        let xi_j = noise_fn(j);
         let coeff = lambda_schedule[j] * (1.0 + xi_j);
         let theta = theta_j.as_mut_slice();
         for i in 0..d {
@@ -199,33 +243,28 @@ pub fn extrapolated_snapshot_schedule_qmc(
         k
     );
 
-    let d = s0.len();
-
     // Draw k marginally-Unif[0,1) points with low-discrepancy joint structure.
     // When noise_sigma == 0, the draw is skipped entirely (pure extrapolation).
     if noise_sigma != 0.0 {
         source.draw(k, uniforms_scratch);
     }
 
-    for (j, theta_j) in out.iter_mut().enumerate() {
-        if theta_j.len() != d {
-            theta_j.resize(d, 0.0);
-        }
-        // Map the QMC uniform u_j ∈ [0,1) to [-noise_sigma, +noise_sigma]:
-        // xi_j = (u_j * 2 − 1) * noise_sigma. Identical mapping to blake3_noise
-        // so the two variants are directly comparable on the same sigma.
-        let xi_j = if noise_sigma == 0.0 {
-            0.0
-        } else {
-            (uniforms_scratch[j] * 2.0 - 1.0) * noise_sigma
-        };
-        let coeff = lambda_schedule[j] * (1.0 + xi_j);
-        let theta = theta_j.as_mut_slice();
-        for i in 0..d {
-            // v_i = s1[i] - s0[i]; theta[i] = s0[i] + coeff * v_i
-            theta[i] = s0[i] + coeff * (s1[i] - s0[i]);
-        }
-    }
+    // QMC variant: affine map of the bulk-drawn uniform to [-noise_sigma, +noise_sigma].
+    // Identical mapping to blake3_noise so the two variants are directly comparable
+    // on the same sigma.
+    extrapolated_snapshot_schedule_with_noise(
+        s0,
+        s1,
+        lambda_schedule,
+        out,
+        |j| {
+            if noise_sigma == 0.0 {
+                0.0
+            } else {
+                (uniforms_scratch[j] * 2.0 - 1.0) * noise_sigma
+            }
+        },
+    );
 }
 
 // ──────────────────────────────────────────────────────────────────────────

@@ -220,7 +220,8 @@ consumer).
 
 ## Tasks
 
-- [ ] **T1 (Finding A)** Extract `solve_ridge_eta_into` free function. Rewrite both `fit_into` functions to call it after their respective accumulation loops. Verify bit-identical `eta` on existing fit-recovery tests.
+- [x] **T1 (Finding A)** Extract `solve_ridge_eta_into` free function. Rewrite both `fit_into` functions to call it after their respective accumulation loops. Verify bit-identical `eta` on existing fit-recovery tests.
+  - **DONE 2026-07-04.** `solve_ridge_eta_into<const P: usize>` added as a private `#[inline]` free function at `velocity_field_ensemble.rs` (after `accumulate_pair_into`, before the `VelocityFieldEnsemble` impl). Both `VelocityFieldEnsemble::fit_into` and `HeterogeneousEnsemble::fit_into` now call it after their (genuinely different) accumulation loops. Verified: `cargo test -p katgpt-core --features velocity_field_ensemble,velocity_field_ensemble_heterogeneous --lib` → **1031 passed; 0 failed**, including `test_fit_recovers_known_eta` (homogeneous η recovery <1e-4) and `test_heterogeneous_fit_recovers_known_eta` (heterogeneous η recovery <1e-4). G1 bit-identical PASS. Alloc-check tests (`velocity_field_ensemble_alloc_check`, `heterogeneous_velocity_field_ensemble_alloc_check`) both PASS → G3 zero-alloc preserved on both paths.
 - [ ] **T2 (Finding A, optional)** Consider renaming `EnsembleFitScratch::b_out_{i,j}` → `b_at_d_{i,j}` (or vice versa) to match `HeterogeneousFitScratch`. Cosmetic; only worth it if T1 lands and the naming asymmetry becomes confusing.
 - [-] **T3 (Finding B, DEFERRED)** Audit `CountingAllocator` duplication across test files. If extracted, use a `macro_rules! counting_allocator!()` in a `tests/common/` module. P3, defer to next test-infra cleanup.
 

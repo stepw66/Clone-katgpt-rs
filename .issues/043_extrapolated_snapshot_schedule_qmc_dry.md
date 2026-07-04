@@ -143,9 +143,12 @@ This refactor is **not** a candidate for default-on promotion — it's a DRY ref
 
 ## Tasks
 
-- [ ] **T1** Verify the closure-based extraction produces bit-identical output on the existing test fixtures (both BLAKE3 and QMC variants). Run `cargo test -p katgpt-core --features temp_loss_fingerprint,qmc_sampling --lib diversity::temp`.
-- [ ] **T2** Land the refactor: extract `extrapolated_snapshot_schedule_with_noise`, rewrite both public functions as thin wrappers. No API break.
+- [x] **T1** Verify the closure-based extraction produces bit-identical output on the existing test fixtures (both BLAKE3 and QMC variants). Run `cargo test -p katgpt-core --features temp_loss_fingerprint,qmc_sampling --lib diversity::temp`.
+  - **DONE 2026-07-04.** Ran the broader suite: `cargo test -p katgpt-core --features temp_loss_fingerprint,qmc_sampling,velocity_field_ensemble,velocity_field_ensemble_heterogeneous --lib` → **1031 passed; 0 failed**. Includes the existing QMC schedule tests (`diversity::temp::tests::*`) and the BLAKE3 variant's tests. Bit-identical output confirmed (G1 PASS).
+- [x] **T2** Land the refactor: extract `extrapolated_snapshot_schedule_with_noise`, rewrite both public functions as thin wrappers. No API break.
+  - **DONE 2026-07-04.** Helper added at `diversity/temp.rs` (private `fn`, `#[inline]`, takes `impl FnMut(usize) -> f32`). Both `extrapolated_snapshot_schedule` (BLAKE3) and `extrapolated_snapshot_schedule_qmc` (QMC) rewritten as thin wrappers — each does its noise pre-draw/pre-compute, then delegates. Public signatures unchanged. No API break.
 - [ ] **G2 re-bench** Run the existing `temp_loss_fingerprint` GOAT bench (`perturbed_loss_vector 2.46µs` baseline) and confirm no regression. If the closure indirection costs anything (it shouldn't — `#[inline]` + monomorphization), document and decide whether to keep the refactor.
+  - **DEFERRED 2026-07-04.** Not run this session. The helper is `#[inline]` and the closure is monomorphized per-caller (no `dyn`), so LLVM should inline the noise closure at each call site and elide the per-`j` `noise_sigma == 0.0` branch exactly as before. The existing `temp_loss_fingerprint` GOAT bench (`perturbed_loss_vector 2.46µs` baseline) should be re-run before the next release-tag cut; if it regresses beyond noise, revert. All 1031 unit tests (including the gate's correctness checks) pass, so this is a perf-only open item, not a correctness one.
 
 ## Non-Goals
 

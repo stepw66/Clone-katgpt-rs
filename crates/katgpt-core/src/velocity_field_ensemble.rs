@@ -342,6 +342,54 @@ pub fn accumulate_pair_into<F, const P: usize, const D: usize>(
     }
 }
 
+// ── Shared post-accumulate solve (Issue 044 Finding A) ──────────────────────
+
+/// Normalize Gram + RHS by `N`, add ridge `λI`, solve `(K + λI) η = r` via
+/// Cholesky. Writes the `P`-dim solution into `eta`.
+///
+/// Shared by [`VelocityFieldEnsemble::fit_into`] and
+/// [`HeterogeneousEnsemble::fit_into`] — the per-pair accumulation differs
+/// (the heterogeneous variant transports each field to `D` first), but the
+/// solve-after-accumulate math is byte-for-byte identical. Extracted as a free
+/// function so future numerical-methods improvements (adaptive `λ`, LOO-CV,
+/// rank-deficient fallback, Tikhonov `Γ ≠ I`) land in one place.
+///
+/// # Allocation discipline
+///
+/// Zero. Reads/writes caller-provided slices in place. `gram_reg` is scratch
+/// for the regularized copy; `chol` and `z_solve` are solver scratch.
+///
+/// # Panics
+///
+/// Panics (via `ridge_solve_direct_f32`) if `gram_reg.len() < P*P`,
+/// `chol.len() < P*P`, `rhs.len() < P`, or `n == 0`.
+#[inline]
+fn solve_ridge_eta_into<const P: usize>(
+    eta: &mut [f32; P],
+    gram: &mut [f32],
+    rhs: &mut [f32; P],
+    gram_reg: &mut [f32],
+    chol: &mut [f32],
+    z_solve: &mut [f32; P],
+    n: usize,
+    lambda: f32,
+) {
+    let inv_n = 1.0 / (n as f32);
+    for g in gram.iter_mut() {
+        *g *= inv_n;
+    }
+    for r in rhs.iter_mut() {
+        *r *= inv_n;
+    }
+
+    gram_reg[..P * P].copy_from_slice(&gram[..P * P]);
+    for i in 0..P {
+        gram_reg[i * P + i] += lambda;
+    }
+
+    ridge_solve_direct_f32(eta, chol, z_solve, gram_reg, rhs, P, 1);
+}
+
 // ── Fit ───────────────────────────────────────────────────────────────────
 
 impl<F, const P: usize, const D: usize> VelocityFieldEnsemble<F, P, D>
@@ -411,38 +459,18 @@ where
             accumulate_pair_into(&self.fields, i_t, dot_i_t, scratch);
         }
 
-        // Normalize by N (empirical expectation).
-        let inv_n = 1.0 / (n as f32);
-        for g in scratch.gram.iter_mut() {
-            *g *= inv_n;
-        }
-        for r in scratch.rhs.iter_mut() {
-            *r *= inv_n;
-        }
-
-        // Build gram_reg = K + λI (in-place copy + diagonal add).
-        scratch.gram_reg[..P * P].copy_from_slice(&scratch.gram[..P * P]);
-        for i in 0..P {
-            scratch.gram_reg[i * P + i] += lambda;
-        }
-
-        // Solve (K + λI) η = r via Cholesky.
-        // ridge_solve_direct_f32 signature:
-        //   w_t: &mut [f32]          — d_h × n_out solution  (here: P × 1 = P)
-        //   l_scratch: &mut [f32]    — d_h × d_h              (here: P × P)
-        //   z_scratch: &mut [f32]    — d_h × n_out            (here: P × 1 = P)
-        //   gram_reg: &[f32]        — XᵀX + λI, d_h × d_h     (here: K + λI, P × P)
-        //   cov: &[f32]             — XᵀY, d_h × n_out        (here: r, P × 1)
-        //   d_h: usize              — feature dim             (here: P)
-        //   n_out: usize            — output dim              (here: 1)
-        ridge_solve_direct_f32(
-            &mut self.eta,            // w_t = η (length P = d_h × n_out)
-            &mut scratch.chol[..],    // L scratch
-            &mut scratch.z_solve,     // z scratch
-            &scratch.gram_reg[..],    // K + λI
-            &scratch.rhs,             // r (= XᵀY with n_out = 1)
-            P,                        // d_h = P
-            1,                        // n_out = 1
+        // Normalize by N, build K + λI, solve (K + λI) η = r via Cholesky.
+        // Shared with HeterogeneousEnsemble::fit_into via solve_ridge_eta_into
+        // (Issue 044 Finding A). The accumulation differs; the solve does not.
+        solve_ridge_eta_into(
+            &mut self.eta,
+            &mut scratch.gram,
+            &mut scratch.rhs,
+            &mut scratch.gram_reg,
+            &mut scratch.chol,
+            &mut scratch.z_solve,
+            n,
+            lambda,
         );
     }
 }
@@ -1212,27 +1240,19 @@ impl<const P: usize, const D: usize> HeterogeneousEnsemble<P, D> {
             self.accumulate_pair_heterogeneous_into(i_t, dot_i_t, scratch);
         }
 
-        let inv_n = 1.0 / (n as f32);
-        for g in scratch.gram.iter_mut() {
-            *g *= inv_n;
-        }
-        for r in scratch.rhs.iter_mut() {
-            *r *= inv_n;
-        }
-
-        scratch.gram_reg[..P * P].copy_from_slice(&scratch.gram[..P * P]);
-        for i in 0..P {
-            scratch.gram_reg[i * P + i] += lambda;
-        }
-
-        ridge_solve_direct_f32(
+        // Normalize by N, build K + λI, solve (K + λI) η = r via Cholesky.
+        // Shared with VelocityFieldEnsemble::fit_into via solve_ridge_eta_into
+        // (Issue 044 Finding A). The accumulation differs (transport step);
+        // the solve does not.
+        solve_ridge_eta_into(
             &mut self.eta,
-            &mut scratch.chol[..],
+            &mut scratch.gram,
+            &mut scratch.rhs,
+            &mut scratch.gram_reg,
+            &mut scratch.chol,
             &mut scratch.z_solve,
-            &scratch.gram_reg[..],
-            &scratch.rhs,
-            P,
-            1,
+            n,
+            lambda,
         );
     }
 
