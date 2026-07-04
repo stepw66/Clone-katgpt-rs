@@ -5,7 +5,7 @@
 **Source paper:** [arXiv:2606.25354](https://arxiv.org/abs/2606.25354) — Local Branch Routing (LBR), Yin et al. June 2026
 **Target:** `katgpt-rs/crates/katgpt-core/src/branch_routing/` (new module, open primitive) + PoC in `riir-ai/crates/riir-poc/`
 **Cargo feature:** `local_branch_routing` (opt-in until PoC confirms a modelless gain)
-**Status:** Active — Phase 1 (PoC gate) not started
+**Status:** Phase 1 COMPLETE — PoC REFUTED the modelless quality claim. Phase 2 does NOT proceed. See research note §8 PoC Addendum for raw numbers.
 
 ---
 
@@ -37,48 +37,25 @@ A token-level task where the correct next token depends on a hidden state that i
 
 ### Tasks
 
-- [ ] **T1.1** Create `riir-ai/crates/riir-poc/src/lbr_poc.rs` — the PoC library module:
+- [x] **T1.1** Create `riir-ai/crates/riir-poc/src/lbr_poc.rs` — the PoC library module:
   - `RadixGraph` — the synthetic task generator (N=16 nodes, random adjacency, radix-2 encoding).
   - `HiddenStateOracle` — a deterministic function that produces a hidden state for a given (prefix, candidate_token) pair. The post-correct-candidate state encodes reachability info; the pre-branching state does not. This simulates the paper's Figure 4b finding without needing a real LM.
   - `DecodeStrategy` trait — `fn decode(&self, prefix: &[u8], oracle: &HiddenStateOracle) -> DecodeOutcome`.
   - Three implementations (see T1.2–T1.4).
 
-- [ ] **T1.2** `DiscreteCotBaseline` — standard decode (K=1). Commits each token from the pre-branching hidden state. This is the frozen/no-adaptation baseline (competitor 1).
+- [x] **T1.2** `DiscreteCotBaseline` — standard decode (K=1). Commits each token from the pre-branching hidden state. This is the frozen/no-adaptation baseline (competitor 1).
 
-- [ ] **T1.3** `ModellessLbr` — the distilled modelless analog (competitor 2 = "paper's mechanism, distilled"):
-  - Samples K=3 candidate next-tokens.
-  - Forwards each via the oracle (gets post-candidate hidden states).
-  - Compares via `set_sigmoid_attention_into` (the shipped primitive).
-  - Commits the candidate with the highest set-attention score relative to a frozen "target direction" (the reachable target's embedding).
-  - Prunes, shifts, regrows.
+- [x] **T1.3** Implemented as `IndependentRouter` (dot-product, no set-attn) + `SetAttentionRouter` (set-attn + dot-product). Splitting the paper's router into two variants isolates the set-attention contribution.
 
-- [ ] **T1.4** `ColliderRouter` — the shipped runtime analog (competitor 3):
-  - Samples K=3 candidates.
-  - Scores each via collider-preservation-style scoring (reuse `ColliderPruner`'s Fisher-z CI test pattern, or a simpler dot-product variant since this is a synthetic task).
-  - Commits the argmax candidate (generalizing binary prune/keep to route-and-commit).
+- [x] **T1.4** `ColliderRouter` — partial-correlation CI test adapted for routing.
 
-- [ ] **T1.5** Create `riir-ai/crates/riir-poc/benches/lbr_modelless_goat.rs` — the bench:
-  - **Quality verdict table**: for each of the 3 strategies × a grid of task difficulties (graph depth 1–5, branching factor 2–4), report path accuracy %, mean tokens generated, verdict vs. baseline (`RECOVERS ↑` / `ties` / `worse ↓`).
-  - **Latency bench**: per-decode-step latency for each strategy (criterion, `--quiet` for quick run).
-  - Print the verdict table on run.
+- [x] **T1.5** Created `riir-ai/crates/riir-poc/benches/lbr_modelless_goat.rs` — quality verdict table across 5 (σ_pre, σ_post) noise cells + latency bench.
 
-- [ ] **T1.6** Register the bench in `riir-ai/crates/riir-poc/Cargo.toml`:
-  ```toml
-  # Research 376 / Plan 377 — LBR modelless PoC. Tests whether post-candidate
-  # set-attention routing beats pre-branching discrete decode on a synthetic
-  # radix-translated reachability task (paper Figure 4b analog).
-  [[bench]]
-  name = "lbr_modelless_goat"
-  harness = false
-  ```
+- [x] **T1.6** Registered bench in Cargo.toml.
 
-- [ ] **T1.7** Run the PoC with `CARGO_TARGET_DIR=/tmp/lbr_poc` (per AGENTS.md isolation rule). Record raw numbers in the research note's §"PoC Addendum".
+- [x] **T1.7** Ran with `CARGO_TARGET_DIR=/tmp/lbr_poc`. Raw numbers in research note §8.
 
-- [ ] **T1.8** **Verdict checkpoint** — interpret the PoC results:
-  - **If modelless LBR beats discrete CoT baseline by ≥5pp on path accuracy** → quality gain confirmed modellessly → proceed to Phase 2 (open primitive).
-  - **If modelless LBR ties or underperforms discrete CoT** → the modelless path does NOT confirm a quality gain → record the result, keep the verdict at GOAT for architectural coverage only, create an issue in `katgpt-ai/.issues/` tracking the riir-train dependency (RLVR training needed for the quality gain). Do NOT proceed to Phase 2 promotion.
-  - **If ColliderRouter (shipped analog) matches modelless LBR** → the primitive already effectively ships via ColliderPruner → downgrade to Gain, no new module needed.
-  - Clean up `CARGO_TARGET_DIR=/tmp/lbr_poc` after the run.
+- [x] **T1.8** **Verdict checkpoint — QUALITY CLAIM REFUTED.** Post-candidate routing only beats baseline in the clean-signal regime (+11.8pp at σ_pre=σ_post=0.1); ties or loses under moderate noise. SetAttentionRouter ≈ IndependentRouter across ALL cells (set-attention adds zero modelless value with identity projections — the paper's gains require trained Q/K → riir-train). ColliderRouter underperforms at high noise. **Phase 2 does NOT proceed.** Research 376 verdict revised: GOAT → Gain (architectural coverage only). Cleaned up `/tmp/lbr_poc`.
 
 ---
 

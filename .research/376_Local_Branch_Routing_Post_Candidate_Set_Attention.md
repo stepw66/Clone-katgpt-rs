@@ -240,6 +240,55 @@ Each NPC forwards K candidate next-actions, computes the resulting HLA state for
 
 ---
 
-## TL;DR
+## TL;DR (revised post-PoC)
 
-LBR's training (GRPO with tree-trajectory likelihood) → riir-train. Its inference mechanism (prune-shift-grow + set-attention router over forwarded candidate hidden states) is **GOAT for katgpt-rs**: a novel composition of shipped primitives (`ColliderPruner::batch_is_valid_with_hidden` + `set_sigmoid_attention_into` + DDTree). The modelless insight that transfers regardless of training: *route after forwarding candidates, not before* — post-candidate hidden states are more predictive (paper Figure 4b). **Quality parity with the RLVR-trained version is UNPROVEN and mandates a PoC** in `riir-poc` per §3.6 before any parity claim. Per-NPC application (forward K candidate actions, route by resulting HLA state) is a riir-ai fusion connecting to per-NPC test-time scaling and committed personality. Feature-flag as `local_branch_routing`, opt-in until the PoC confirms a modelless gain.
+**PoC REFUTED the modelless quality claim.** The verdict stands on architectural coverage + latency, but the quality axis is honestly downgraded: the modelless post-candidate routing does NOT robustly beat the pre-branching baseline. See §8 PoC Addendum for raw numbers.
+
+LBR's training (GRPO with tree-trajectory likelihood) → riir-train. Its inference mechanism (prune-shift-grow + set-attention router over forwarded candidate hidden states) has architectural coverage in shipped primitives (`ColliderPruner::batch_is_valid_with_hidden` + `set_sigmoid_attention_into` + DDTree), but the PoC showed: (1) post-candidate routing only beats baseline in the clean-signal regime (+11.8pp at σ_pre=σ_post=0.1) and ties or loses under moderate noise; (2) **set-attention adds ZERO modelless value with identity projections** (SetAttentionRouter ≈ IndependentRouter within ±1.0pp across all cells) — the paper's set-attention gains require trained Q/K → riir-train; (3) ColliderRouter (shipped analog) underperforms at high noise. **Phase 2 of Plan 377 does NOT proceed** — the open primitive is not justified by a modelless gain. The quality gap is a riir-train dependency (RLVR training of the router + base model).
+
+---
+
+## 8. PoC Addendum (Plan 377 Phase 1, executed 2026-07-04)
+
+**Location:** `riir-ai/crates/riir-poc/benches/lbr_modelless_goat.rs` + `riir-ai/crates/riir-poc/src/lbr_poc.rs`.
+**Domain:** radix-translated graph reachability (N=16 nodes, D=16 hidden dim, K=3 candidates, 500 tasks per noise cell).
+
+### Raw results
+
+| Strategy | σ_pre=0.1 σ_post=0.1 | σ_pre=0.5 σ_post=0.1 | σ_pre=0.5 σ_post=0.5 | σ_pre=1.0 σ_post=0.5 | σ_pre=1.0 σ_post=1.0 | Latency |
+|---|---|---|---|---|---|---|
+| **DiscreteCoT (baseline)** | 72.8% | 83.0% | 83.0% | 86.4% | 86.4% | **23.7 ns** |
+| **IndependentRouter** | 84.6% (+11.8pp) | 84.6% (+1.6pp) | 83.4% (+0.4pp) | 83.4% (-3.0pp) | 79.6% (-6.8pp) | **53.0 ns** |
+| **SetAttentionRouter** | 84.6% (+11.8pp) | 84.6% (+1.6pp) | 83.2% (-0.2pp) | 83.2% (-3.2pp) | 78.6% (-7.8pp) | **367.8 ns** |
+| **ColliderRouter** | 82.8% (+10.0pp) | 84.0% (+1.0pp) | 79.0% (-4.0pp) | 76.4% (-10.0pp) | 75.6% (-10.8pp) | **63.4 ns** |
+
+### Findings
+
+1. **Post-candidate routing wins ONLY in the clean-signal regime** (+11.8pp at σ_pre=σ_post=0.1). Under moderate-to-high noise, it ties or loses to the baseline. The modelless quality gain is not robust.
+
+2. **The baseline paradoxically improves with noise** (72.8% → 86.4% as σ_pre goes 0.1 → 1.0). Root cause: the baseline uses a 0.3/0.7 weighted blend of (pre-branching state alignment) + (target embedding alignment). Higher σ_pre noise on the pre-branching component is dominated by the target-alignment component, which is noise-free. The post-candidate strategies rely purely on post-candidate signal, which degrades with σ_post.
+
+3. **SetAttentionRouter ≈ IndependentRouter across ALL cells** (within ±1.0pp). **Set-attention adds ZERO modelless value with identity projections.** The paper's cross-subtree set-attention gain (Figure 5) requires trained Q/K/V projections. This is a genuine riir-train dependency — the set-attention mechanism is architecturally available (`set_sigmoid_attention_into`) but needs learned projections to extract routing signal.
+
+4. **ColliderRouter underperforms at high noise** (-10.8pp at σ_pre=σ_post=1.0). The partial-correlation CI test is noise-sensitive — denominator instability when candidate-parent correlation is high.
+
+5. **Latency**: SetAttentionRouter is 7× slower than IndependentRouter (368 ns vs 53 ns) for zero quality gain. If a modelless router were justified, IndependentRouter (53 ns) would be the right choice, not SetAttentionRouter.
+
+### Verdict revision (honest)
+
+| Claim type | Pre-PoC status | Post-PoC status |
+|---|---|---|
+| **Architectural** ("decode loop assemblable from shipped primitives") | ✅ Proven | ✅ Confirmed — the loop runs, all primitives compose. |
+| **Latency** ("modelless, sub-µs") | ⚠️ Plausible | ✅ Confirmed — IndependentRouter 53 ns, well under 1µs. SetAttentionRouter 368 ns also under 1µs but unjustified. |
+| **Quality** ("modelless routing beats discrete CoT") | ❌ Unproven | **❌ REFUTED for the general case.** Only wins in the clean-signal regime. Under moderate noise, the pre-branching baseline's target-alignment boost dominates. The modelless post-candidate routing does NOT robustly beat baseline by ≥5pp. |
+
+### What this means
+
+- **Plan 377 Phase 2 does NOT proceed.** No `PostCandidateRouter` trait, no `local_branch_routing` feature flag, no new module in katgpt-core. The architectural coverage via ColliderPruner + set_attention is sufficient; a dedicated primitive is not justified by a modelless gain.
+- **The quality gain is a riir-train dependency.** The paper's gains come from RLVR training of both the base model and the router (including the set-attention Q/K/V projections). The modelless analog does not reproduce these gains.
+- **The PoC stays as a permanent regression check** in `riir-poc` per §3.6 — if a future modelless router variant (e.g., with frozen pre-trained projections from riir-train) is proposed, this bench re-runs to test it.
+- **Research 376 verdict revised**: GOAT (architectural + latency) → **Gain (architectural coverage only, quality unproven, needs riir-train for the gain)**. The verdict was honestly flagged as needing a PoC; the PoC refuted the quality claim. This is the §3.6 defend-wrong protocol working as designed.
+
+### Surprising finding (baseline target-alignment boost)
+
+The baseline's 0.3/0.7 blend of pre-branching + target-alignment is a strong heuristic that's hard to beat with post-candidate routing alone. This is an artifact of the synthetic task design (embeddings structured by BFS distance from a reference). A real LM's pre-branching distribution would not have this target-alignment boost — the paper's Figure 4b shows the pre-branching state is weakly predictive. The PoC's baseline is stronger than the paper's because the synthetic embeddings leak target information into the pre-branching state. **A follow-up PoC with unstructured embeddings (or a real micro-GPT) would give a fairer test of the post-candidate advantage.** This is tracked as a non-blocking follow-up — the set-attention finding (zero modelless value) holds regardless of the embedding structure.
