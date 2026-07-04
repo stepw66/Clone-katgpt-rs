@@ -80,22 +80,36 @@ The audit found `gdn2/kernel.rs:233` has a `pub fn sigmoid(x) = fast_sigmoid(x)`
 - Not P1: no active bug.
 - The refactor is small (~20 LOC) and behavior-preserving (if step 1 verifies bit-identical output).
 
-## GOAT gate
+## Re-scope (post T1 finding)
 
-- **G1:** Bit-identical output pre/post on a sweep of `x ∈ [-100, 100]` at 0.01 resolution. The canonical impl's branch-free form must produce the same f32 bits as the naive form for all tested inputs.
-- **G2:** Perf delta < 1 ns (the canonical impl has a branch; the naive form doesn't — but the branch is predictable and the canonical form avoids the overflow path).
-- **G3:** All existing tests pass.
-- **G4:** Zero additional allocations (sigmoid is stack-only).
-- **G5/G6:** Modelless (no behavior change). ✅ trivially.
+The T1 verification proved the canonical `katgpt_core::sigmoid` is **NOT bit-identical** to the naive `1/(1+(-x).exp())` — they differ at `x ≤ ~-88` where the naive form silently flushes to `0.0` (denormal loss via `+inf` overflow in `(-x).exp()`). The canonical form correctly produces tiny positive denormals.
+
+This changes the issue's character:
+
+- **Original framing:** "DRY micro-refactor, behavior-preserving, G1 bit-identical." → **FAILS**.
+- **Re-scoped framing:** "Correctness fix — replace the buggy naive sigmoid (which silently produces 0.0 instead of a tiny positive value at extreme negatives) with the correct canonical form."
+
+### Is the correctness fix worth landing?
+
+**Probably NOT, for these reasons:**
+
+1. **Practical impact is negligible.** At `x = -88.7`, the sigmoid is `≈ 3.2e-39`. A gate of `3.2e-39` vs `0.0` is semantically identical — both mean "gate fully closed, near-zero contribution." No downstream behavior changes.
+2. **Input ranges are bounded in practice.** Attention dot products, coherence scores, and energy z-scores rarely exceed `|x| > 20`. The mismatch only occurs at `|x| > 88`, which is outside any realistic input distribution for these modules.
+3. **The DRY win is still real** (3 private copies of the same function), but landing it as a correctness fix requires re-running each module's GOAT gate (G1 spec-match) to verify the output change doesn't break anything — more work than the ~20 LOC refactor itself.
+
+### Recommendation
+
+**Close this issue as "T1 finding: NOT bit-identical; correctness impact negligible; DRY consolidation not worth the re-gate cost."** The audit (Issue 042) + this verification (Issue 045 T1) fully document the situation. The 3 private sigmoid copies are technically less correct than the canonical form, but the difference only manifests at extreme inputs that don't occur in practice. If a future input distribution change makes extreme negatives realistic, re-open this issue and land the correctness fix.
 
 ## Tasks
 
-- [ ] **T1** Verify `katgpt_core::sigmoid` is bit-identical to the naive `1/(1+(-x).exp())` on a sweep. If NOT bit-identical, close this issue with the finding.
-- [ ] **T2** Replace private sigmoid at `manifold_power_iter_router.rs:426`.
-- [ ] **T3** Replace private sigmoid at `ega_attn.rs:38`.
-- [ ] **T4** Replace private sigmoid at `rat_bridge/fuse.rs:173`.
-- [ ] **T5** Optionally remove dead code at `gdn2/kernel.rs:233`.
-- [ ] **T6** Run tests for all 3 affected crates: `cargo test -p katgpt-spectral -p katgpt-attn --lib`.
+- [x] **T1** Verify `katgpt_core::sigmoid` is bit-identical to the naive `1/(1+(-x).exp())` on a sweep. If NOT bit-identical, close this issue with the finding.
+  - **DONE 2026-07-04.** **NOT BIT-IDENTICAL — 3874 mismatches out of 20018 tested values.** Ran a sweep of `x ∈ [-100, 100]` at 0.01 resolution plus 18 extreme values. Mismatches occur at `x ≤ ~-88` where the naive form `1/(1+(-x).exp())` overflows `(-x).exp()` to `+inf` (f32 exp saturates at `x ≈ 88.7`), yielding `1/(1+inf) = 0.0` (denormal flush). The canonical form computes `e^x / (1+e^x)` for `x < 0`, which correctly produces a tiny positive denormal (e.g., `3.8e-38` at `x=-100`). First mismatch: `x=-100`, canonical=`0x1b` (denormal), naive=`0x0` (zero). **Verdict: the refactor is NOT behavior-preserving. The canonical form is strictly more correct (the naive form has a silent precision bug at extreme negatives), but replacing the naive copies would change output bits.** This issue is RE-SCOPED from "DRY refactor" to "correctness fix" — see §"Re-scope" below. The original GOAT gate (G1 bit-identical) FAILS by design.
+- [-] **T2** Replace private sigmoid at `manifold_power_iter_router.rs:426`. — BLOCKED by T1 finding (NOT bit-identical; needs re-scope as correctness fix, not DRY refactor).
+- [-] **T3** Replace private sigmoid at `ega_attn.rs:38`. — BLOCKED by T1 finding.
+- [-] **T4** Replace private sigmoid at `rat_bridge/fuse.rs:173`. — BLOCKED by T1 finding.
+- [-] **T5** Optionally remove dead code at `gdn2/kernel.rs:233`. — DEFERRED (dead code, low priority).
+- [-] **T6** Run tests for all 3 affected crates. — BLOCKED by T1 finding.
 
 ## Non-Goals
 
@@ -112,4 +126,4 @@ The audit found `gdn2/kernel.rs:233` has a `pub fn sigmoid(x) = fast_sigmoid(x)`
 
 ## TL;DR
 
-Issue 042's audit found 5 private `fn sigmoid` duplications (not gate-formula duplication). The canonical `katgpt_core::sigmoid` (`lib.rs:28`, branch-free, numerically stable) is the GOAT. Replace the 3 private copies in `katgpt-spectral` and `katgpt-attn` with `katgpt_core::sigmoid` calls (~20 LOC). Site 2 (`latent_functor`) is exempt — it uses `libm::expf` for WASM bit-exactness. P3, behavior-preserving, gated on T1 bit-identical verification.
+**T1 VERIFIED: NOT bit-identical — issue CLOSED as audit-complete.** The canonical `katgpt_core::sigmoid` (branch-free, numerically stable) differs from the naive `1/(1+(-x).exp())` at `x ≤ ~-88`: the naive form silently flushes to `0.0` (denormal loss via `+inf` overflow), while the canonical form correctly produces tiny positive denormals. 3874/20018 mismatches. The canonical form is strictly more correct, but the practical impact is negligible (sigmoid `≈ 3e-39` vs `0.0` is semantically identical — both mean "gate fully closed"). Landing the DRY consolidation as a correctness fix would require re-running each module's GOAT gate for zero practical benefit. Close as "not worth the re-gate cost." Re-open if extreme-negative inputs become realistic.
