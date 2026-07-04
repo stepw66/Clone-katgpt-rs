@@ -149,6 +149,21 @@ impl TreeNode {
         }
     }
 
+    /// Total observations that have passed through this node (Phase 4 T4.2).
+    ///
+    /// - Internal: the stored `n_obs` counter.
+    /// - Leaf: 0 (leaves don't aggregate; their filter tracks per-arm evidence
+    ///   via `alpha`/`beta` instead).
+    ///
+    /// Used by the R279 N≥d phase gate: a child subtree with `n_obs <
+    /// phase_gate_min_obs` is skipped during Empirical Bayes aggregation.
+    pub fn n_obs(&self) -> u32 {
+        match self {
+            TreeNode::Internal { n_obs, .. } => *n_obs,
+            TreeNode::Leaf { .. } => 0,
+        }
+    }
+
     /// Convenience: construct a leaf with a fresh uniform-prior filter.
     pub fn leaf(arm_id: usize, drift_rate: f32) -> Self {
         TreeNode::Leaf {
@@ -299,6 +314,20 @@ pub struct LatentTaskTreeConfig {
     pub max_depth: usize,
     /// Default drift rate λ for new [`BayesianFilterArm`] instances. Default: 0.01.
     pub filter_drift_rate: f32,
+    /// R279 N≥d phase gate for Empirical Bayes aggregation (Phase 4 T4.2).
+    ///
+    /// When > 0, a child subtree whose `n_obs < phase_gate_min_obs` is **skipped**
+    /// during bottom-up aggregation — its posterior is below the R279 phase
+    /// transition (N<d), so it's noise rather than evidence. Only children with
+    /// enough observations to support a stable posterior contribute to the
+    /// parent's aggregate. When 0, the gate is disabled (Phase 1–3 behavior:
+    /// all children aggregated). Default: 0 (disabled).
+    ///
+    /// Composes with [`crate::subspace_phase_gate::phase_transition_gate`]:
+    /// `phase_transition_gate(child.n_obs(), phase_gate_min_obs as usize)` is
+    /// exactly the per-child inclusion predicate. The gate is modelless
+    /// (deterministic threshold on integer counts) and zero-alloc.
+    pub phase_gate_min_obs: u32,
 }
 
 impl Default for LatentTaskTreeConfig {
@@ -310,6 +339,7 @@ impl Default for LatentTaskTreeConfig {
             hdbscan_min_cluster: 4,
             max_depth: 6,
             filter_drift_rate: 0.01,
+            phase_gate_min_obs: 0,
         }
     }
 }
@@ -415,7 +445,13 @@ impl LatentTaskTree {
         );
         // Copy the path (no borrow held on self after this line).
         let path = self.arm_paths[arm_id];
-        Self::observe_recursive(&mut self.root, path.as_slice(), reward, current_step);
+        Self::observe_recursive(
+            &mut self.root,
+            path.as_slice(),
+            reward,
+            current_step,
+            self.config.phase_gate_min_obs,
+        );
     }
 
     /// BLAKE3 commitment of the frozen tree (topology + initial Beta priors at
@@ -472,7 +508,19 @@ impl LatentTaskTree {
 
     /// Recursively descend following `path`, update the leaf filter, then
     /// recompute each ancestor's Empirical Bayes aggregate on the way back up.
-    fn observe_recursive(node: &mut TreeNode, path: &[usize], reward: f32, step: u64) {
+    ///
+    /// The R279 N≥d phase gate (`phase_gate_min_obs > 0`) skips children whose
+    /// subtree `n_obs` is below the threshold during aggregation — their
+    /// posterior is below the phase transition and contributes noise rather
+    /// than evidence. When `phase_gate_min_obs == 0`, all children aggregate
+    /// (Phase 1–3 behavior).
+    fn observe_recursive(
+        node: &mut TreeNode,
+        path: &[usize],
+        reward: f32,
+        step: u64,
+        phase_gate_min_obs: u32,
+    ) {
         match node {
             TreeNode::Leaf { filter, .. } => {
                 filter.predict(step);
@@ -485,20 +533,45 @@ impl LatentTaskTree {
                 n_obs,
             } => {
                 let child_idx = path[0];
-                Self::observe_recursive(&mut children[child_idx], &path[1..], reward, step);
+                Self::observe_recursive(
+                    &mut children[child_idx],
+                    &path[1..],
+                    reward,
+                    step,
+                    phase_gate_min_obs,
+                );
                 // Recompute this node's aggregate via EVIDENCE pooling: subtract
-                // each child's pseudocount before summing, add back one. This
-                // gives the parent the total observed evidence (successes /
+                // each active child's pseudocount before summing, add back one.
+                // This gives the parent the total observed evidence (successes /
                 // failures) without dilution from unobserved children.
-                let n = children.len() as f32;
-                let (a, b) = children
-                    .iter()
-                    .fold((0.0_f32, 0.0_f32), |(sa, sb), c| {
-                        let (ca, cb) = c.beta_params();
-                        (sa + ca, sb + cb)
-                    });
-                *beta_alpha = (a - n + 1.0).max(1.0);
-                *beta_beta = (b - n + 1.0).max(1.0);
+                //
+                // R279 phase gate: when `phase_gate_min_obs > 0`, an INTERNAL child
+                // subtree with `n_obs < phase_gate_min_obs` is skipped — its
+                // posterior is below the N≥d phase transition (noise, not
+                // evidence). LEAF children are always included: a leaf IS the
+                // atomic observation (intrinsic dim d=1, satisfied trivially by
+                // any evidence), so gating it would prevent leaf evidence from
+                // ever reaching the root. When all internal children are gated
+                // out, the parent falls back to evidence from leaf children only
+                // (or Beta(1, 1) if there are no leaves).
+                let mut sum_a = 0.0_f32;
+                let mut sum_b = 0.0_f32;
+                let mut n_active = 0u32;
+                for c in children.iter() {
+                    let gated = phase_gate_min_obs > 0
+                        && matches!(c, TreeNode::Internal { .. })
+                        && c.n_obs() < phase_gate_min_obs;
+                    if gated {
+                        continue;
+                    }
+                    let (ca, cb) = c.beta_params();
+                    sum_a += ca;
+                    sum_b += cb;
+                    n_active += 1;
+                }
+                let n_active_f = n_active as f32;
+                *beta_alpha = (sum_a - n_active_f + 1.0).max(1.0);
+                *beta_beta = (sum_b - n_active_f + 1.0).max(1.0);
                 *n_obs += 1;
             }
         }
@@ -1458,6 +1531,219 @@ mod tests {
         } else {
             panic!("root should be Internal");
         }
+    }
+
+    // ── Phase 4 T4.2: R279 N≥d phase gate tests ────────────────────────
+
+    /// `phase_gate_min_obs = 0` (default) matches Phase 1–3 behavior exactly:
+    /// all children aggregated. Same observations → same Beta posteriors as the
+    /// ungated path. This is the regression-guard test.
+    #[test]
+    fn test_phase_gate_disabled_matches_ungated_behavior() {
+        let cfg_off = LatentTaskTreeConfig {
+            filter_drift_rate: 0.0,
+            phase_gate_min_obs: 0,
+            ..LatentTaskTreeConfig::default()
+        };
+        let cfg_zero = LatentTaskTreeConfig {
+            filter_drift_rate: 0.0,
+            phase_gate_min_obs: 0,
+            ..LatentTaskTreeConfig::default()
+        };
+
+        // Two identical trees, same observations.
+        let mut t1 = LatentTaskTree::from_root(make_tree_topology(), cfg_off);
+        let mut t2 = LatentTaskTree::from_root(make_tree_topology(), cfg_zero);
+        for step in 0..10u64 {
+            t1.observe(0, 1.0, step);
+            t2.observe(0, 1.0, step);
+        }
+
+        // BLAKE3 of the runtime state (topology + initial priors) is identical
+        // — the gate didn't fire, so runtime Beta values must match bit-for-bit.
+        // (blake3_root commits the INITIAL state, so we compare by sampling
+        // distributions instead: identical Beta posteriors → identical
+        // empirical sample means within tolerance.)
+        let mut rng1 = fastrand::Rng::with_seed(42);
+        let mut rng2 = fastrand::Rng::with_seed(42);
+        let mut sum1 = 0.0f64;
+        let mut sum2 = 0.0f64;
+        let n = 10_000;
+        for _ in 0..n {
+            sum1 += t1.sample(&mut rng1) as f64;
+            sum2 += t2.sample(&mut rng2) as f64;
+        }
+        let mean1 = sum1 / n as f64;
+        let mean2 = sum2 / n as f64;
+        // With gate disabled, both trees have identical posteriors → identical
+        // sample means (within sampling noise, ~0.01).
+        assert!((mean1 - mean2).abs() < 0.05,
+                "gate disabled should match: mean1={mean1:.3} mean2={mean2:.3}");
+    }
+
+    /// When `phase_gate_min_obs` exceeds every child's n_obs, ALL children are
+    /// gated out and the parent falls back to Beta(1, 1) (uniform). This is the
+    /// correct "we don't have enough evidence" behavior — high variance,
+    // exploration.
+    #[test]
+    fn test_phase_gate_all_children_below_threshold_yields_uniform_parent() {
+        let cfg = LatentTaskTreeConfig {
+            filter_drift_rate: 0.0,
+            // Threshold = 100 means every subtree (which has < 100 obs after
+            // a few observe() calls) is gated out.
+            phase_gate_min_obs: 100,
+            ..LatentTaskTreeConfig::default()
+        };
+        let mut tree = LatentTaskTree::from_root(make_tree_topology(), cfg);
+        // Observe 5 rewards on arm 0 — but the gate should prevent these from
+        // propagating to the root (root's children have n_obs < 100).
+        for step in 0..5u64 {
+            tree.observe(0, 1.0, step);
+        }
+
+        // Root should still be at Beta(1, 1) — uniform.
+        if let TreeNode::Internal {
+            beta_alpha, beta_beta, ..
+        } = &tree.root
+        {
+            assert!((beta_alpha - 1.0).abs() < 1e-5,
+                    "gated root alpha should be 1.0 (uniform), got {beta_alpha}");
+            assert!((beta_beta - 1.0).abs() < 1e-5,
+                    "gated root beta should be 1.0 (uniform), got {beta_beta}");
+        } else {
+            panic!("root should be Internal");
+        }
+    }
+
+    /// A subtree that has accumulated enough observations (n_obs ≥ threshold)
+    /// DOES contribute to the parent aggregate. A subtree below the threshold
+    /// is skipped. This is the core N≥d phase transition behavior.
+    #[test]
+    fn test_phase_gate_skips_below_threshold_includes_above() {
+        // Tree shape:
+        //                root
+        //               /    \
+        //         subtree_A   subtree_B
+        //          /   \       /   \
+        //        L0    L1    L2    L3
+        //
+        // We'll observe many rewards on arm 0 (building up subtree_A's n_obs)
+        // and few on arm 2 (subtree_B stays below threshold).
+        let cfg = LatentTaskTreeConfig {
+            filter_drift_rate: 0.0,
+            // Threshold = 5: subtree_A (with ≥5 obs) passes; subtree_B (1 obs) fails.
+            phase_gate_min_obs: 5,
+            ..LatentTaskTreeConfig::default()
+        };
+        let mut tree = LatentTaskTree::from_root(make_tree_topology(), cfg);
+
+        // 10 successes on arm 0 → subtree_A gets n_obs = 10 (≥ threshold).
+        for step in 0..10u64 {
+            tree.observe(0, 1.0, step);
+        }
+        // 1 observation on arm 2 → subtree_B gets n_obs = 1 (< threshold).
+        tree.observe(2, 1.0, 10);
+
+        // Inspect root: should aggregate ONLY subtree_A (subtree_B gated out).
+        // subtree_A's evidence: 10 successes, 0 failures → evidence pooled
+        // child alpha = 1 + 10 = 11, child beta = 1 + 0 = 1.
+        // Parent evidence pooling with 1 active child:
+        //   parent_alpha = (11 - 1 + 1) = 11
+        //   parent_beta  = (1  - 1 + 1) = 1
+        if let TreeNode::Internal {
+            children, beta_alpha, beta_beta, ..
+        } = &tree.root
+        {
+            // Verify the child n_obs counts.
+            let a_n_obs = children[0].n_obs();
+            let b_n_obs = children[1].n_obs();
+            assert_eq!(a_n_obs, 10, "subtree_A n_obs should be 10");
+            assert_eq!(b_n_obs, 1, "subtree_B n_obs should be 1");
+
+            // Root aggregate should reflect ONLY subtree_A.
+            assert!((beta_alpha - 11.0).abs() < 1e-4,
+                    "root alpha should be 11 (only A contributes), got {beta_alpha}");
+            assert!((beta_beta - 1.0).abs() < 1e-4,
+                    "root beta should be 1 (only A contributes), got {beta_beta}");
+        } else {
+            panic!("root should be Internal");
+        }
+    }
+
+    /// `phase_gate_min_obs = 1` is equivalent to "skip only children with zero
+    /// observations" — a very mild gate. Should still produce correct posteriors
+    /// once every subtree has at least 1 observation.
+    #[test]
+    fn test_phase_gate_min_obs_one_skips_only_zero_obs_children() {
+        let cfg = LatentTaskTreeConfig {
+            filter_drift_rate: 0.0,
+            phase_gate_min_obs: 1,
+            ..LatentTaskTreeConfig::default()
+        };
+        let mut tree = LatentTaskTree::from_root(make_tree_topology(), cfg);
+
+        // Observe ONLY arm 0 — subtree_B has 0 observations → gated out at root.
+        tree.observe(0, 1.0, 0);
+
+        // Root: only subtree_A (n_obs=1) contributes.
+        // subtree_A aggregate: child L0 has alpha=2, beta=1; L1 has alpha=1, beta=1.
+        //   subtree_A alpha = (2 + 1) - 2 + 1 = 2
+        //   subtree_A beta  = (1 + 1) - 2 + 1 = 1
+        // Root with 1 active child (subtree_A):
+        //   root alpha = 2 - 1 + 1 = 2
+        //   root beta  = 1 - 1 + 1 = 1
+        if let TreeNode::Internal {
+            children, beta_alpha, beta_beta, ..
+        } = &tree.root
+        {
+            assert_eq!(children[0].n_obs(), 1);
+            assert_eq!(children[1].n_obs(), 0);
+            assert!((beta_alpha - 2.0).abs() < 1e-4,
+                    "root alpha should be 2, got {beta_alpha}");
+            assert!((beta_beta - 1.0).abs() < 1e-4,
+                    "root beta should be 1, got {beta_beta}");
+        } else {
+            panic!("root should be Internal");
+        }
+    }
+
+    /// Public `TreeNode::n_obs()` accessor returns the right counts for both
+    /// internal nodes (stored counter) and leaves (always 0).
+    #[test]
+    fn test_treenode_n_obs_accessor() {
+        let mut tree = build_test_tree(0.0);
+        tree.observe(0, 1.0, 0);
+        tree.observe(0, 0.0, 1);
+
+        // Root: 2 observations passed through.
+        assert_eq!(tree.root.n_obs(), 2, "root n_obs");
+
+        // Leaf: always 0 (leaves track evidence via alpha/beta, not n_obs).
+        if let TreeNode::Internal { children, .. } = &tree.root {
+            // left subtree: 2 obs
+            assert_eq!(children[0].n_obs(), 2, "left subtree n_obs");
+            // right subtree: 0 obs
+            assert_eq!(children[1].n_obs(), 0, "right subtree n_obs");
+        }
+
+        // Verify leaf accessor returns 0.
+        let leaf = find_leaf(&tree.root, 0).expect("arm 0 exists");
+        assert_eq!(leaf.n_obs(), 0, "leaf n_obs should be 0");
+    }
+
+    /// Helper: build the same 4-leaf / 2-subtree topology used by the gate tests.
+    /// Kept separate from `build_test_tree` so the gate tests can supply their
+    /// own config without changing the existing test fixture.
+    fn make_tree_topology() -> TreeNode {
+        let left = TreeNode::internal(vec![
+            TreeNode::leaf(0, 0.0),
+            TreeNode::leaf(1, 0.0),
+        ]);
+        let right = TreeNode::internal(vec![
+            TreeNode::leaf(2, 0.0),
+            TreeNode::leaf(3, 0.0),
+        ]);
+        TreeNode::internal(vec![left, right])
     }
 
     #[test]

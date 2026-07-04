@@ -687,6 +687,91 @@ fn gate_g1_real_tree_structural_advantage() -> GateResult {
     }
 }
 
+/// **Phase 4 T4.2 — R279 N≥d phase gate sweep on G1-real.**
+///
+/// Runs the G1-real structural-advantage benchmark with several
+/// `phase_gate_min_obs` values (d ∈ {0, 1, 2, 4, 8}) to measure whether the
+/// gate improves G1 (faster convergence) or hurts it (under-aggregation).
+///
+/// This is NOT a pass/fail gate — it's a diagnostic sweep. The verdict is in
+/// the comparison: if any d > 0 produces a ratio ≤ the ungated ratio (d=0),
+/// the phase gate is a net win and Phase 4 T4.3 should promote the gate.
+///
+/// Uses fewer trials (50) than the main G1 (200) because it runs 5 configs.
+fn gate_g1_real_phase_gate_sweep() -> GateResult {
+    const TRIALS_SWEEP: usize = 50;
+    const D_VALUES: [u32; 5] = [0, 1, 2, 4, 8];
+
+    println!(
+        "\n--- G1-real Phase Gate Sweep (T4.2): {} arms, {} clusters, T={}, {} trials ---",
+        N_ARMS, N_CLUSTERS, T_G1, TRIALS_SWEEP
+    );
+    println!("    d_values: {:?}", D_VALUES);
+
+    // Flat Thompson baseline is the same across all d values.
+    let mut flat_steps = Vec::with_capacity(TRIALS_SWEEP);
+    for trial in 0..TRIALS_SWEEP {
+        let domain = ClusteredDomain::new_clustered(trial as u64);
+        let optimal = domain.optimal_arm();
+        let mut dom = domain.clone();
+        let mut flat = FlatThompson::new(N_ARMS, 0.0);
+        let r = run_trial(&mut flat, &mut dom, trial as u64, T_G1, optimal, N_CLUSTERS, THRESHOLD_G1);
+        flat_steps.push(r.steps_to_threshold as u64);
+    }
+    let med_flat = median_u64(&mut flat_steps);
+    println!("  flat Thompson median steps-to-90%: {}", med_flat);
+
+    // Sweep d values.
+    let mut best_ratio = f64::INFINITY;
+    let mut best_d: u32 = 0;
+    let mut sweep_results: Vec<(u32, u64, f64)> = Vec::with_capacity(D_VALUES.len());
+
+    for &d in &D_VALUES {
+        let mut hier_steps = Vec::with_capacity(TRIALS_SWEEP);
+        for trial in 0..TRIALS_SWEEP {
+            let domain = ClusteredDomain::new_clustered(trial as u64);
+            let optimal = domain.optimal_arm();
+            let embeddings = gen_clustered_embeddings_bench(trial as u64);
+
+            let mut dom = domain.clone();
+            let config = LatentTaskTreeConfig {
+                filter_drift_rate: 0.0,
+                phase_gate_min_obs: d,
+                ..LatentTaskTreeConfig::default()
+            };
+            let tree = LatentTaskTree::build(&embeddings, config);
+            let mut hier = HierarchicalThompson { tree };
+            let r = run_trial(&mut hier, &mut dom, trial as u64, T_G1, optimal, N_CLUSTERS, THRESHOLD_G1);
+            hier_steps.push(r.steps_to_threshold as u64);
+        }
+        let med_hier = median_u64(&mut hier_steps);
+        let ratio = med_hier as f64 / med_flat as f64;
+        println!("  d={:<2}  hier median steps-to-90%: {:<6}  ratio: {:.3}",
+                 d, med_hier, ratio);
+        sweep_results.push((d, med_hier, ratio));
+        if ratio < best_ratio {
+            best_ratio = ratio;
+            best_d = d;
+        }
+    }
+
+    let baseline_ratio = sweep_results[0].2; // d=0 ratio
+    let improved = best_d > 0 && best_ratio < baseline_ratio;
+    let verdict = if improved {
+        format!("d={best_d} improves G1 (ratio {best_ratio:.3} < baseline {baseline_ratio:.3}) — phase gate is a net win")
+    } else {
+        format!("d=0 (ungated) is best (ratio {baseline_ratio:.3}) — phase gate does not improve G1 on this domain")
+    };
+    println!("  verdict: {verdict}");
+
+    // This gate is informational — always passes (it's a diagnostic, not a gate).
+    // The verdict is in the detail string.
+    GateResult::pass(
+        "G1-real phase gate sweep (T4.2 diagnostic)",
+        format!("flat={med_flat}, best d={best_d} ratio={best_ratio:.3}, {verdict}"),
+    )
+}
+
 fn gate_g2_diversity() -> GateResult {
     println!("\n--- G2: Diversity Preservation (T={}, {} trials, cluster-frac threshold {:.0}%) ---",
              T_G2, TRIALS_G2, CLUSTER_FRAC_THRESHOLD * 100.0);
@@ -1011,11 +1096,12 @@ fn gate_g5_reproducibility() -> GateResult {
 // ─── Main ───────────────────────────────────────────────────────────────────
 
 fn main() {
-    println!("=== Plan 370 - Manifold Bandit GOAT Gate (Phase 2 + Phase 3 G1-real) ===");
+    println!("=== Plan 370 - Manifold Bandit GOAT Gate (Phase 2 + Phase 3 G1-real + Phase 4 T4.2 sweep) ===");
 
     let gates = [
         gate_g1_structural_advantage(),
         gate_g1_real_tree_structural_advantage(),
+        gate_g1_real_phase_gate_sweep(),
         gate_g2_diversity(),
         gate_g3_nonstationarity(),
         gate_g4_latency(),

@@ -182,6 +182,35 @@ impl CellComplex {
         self.n_cells[rank as usize]
     }
 
+    /// Build a 1-complex (vertices + edges only) from an edge list (Plan 370 T4.1).
+    ///
+    /// Each edge connects vertex `tail` → vertex `head` with orientation +1 on
+    /// the head and −1 on the tail (the standard DEC convention from `grid_2d`).
+    /// No faces or volumes. This fills the API gap left by the `add_incidence`
+    /// method referenced in [`new`](Self::new)'s doc — arbitrary graphs (trees,
+    /// DAGs, etc.) can now be constructed as a `CellComplex`.
+    ///
+    /// # Arguments
+    /// * `n_vertices` — number of vertices (indexed `0..n_vertices`).
+    /// * `edges` — `&[(tail, head)]` pairs. Edge `i` connects `tail[i]` → `head[i]`.
+    ///
+    /// # Panics
+    /// If any vertex index in `edges` is `>= n_vertices`.
+    pub fn from_edges(n_vertices: usize, edges: &[(usize, usize)]) -> Self {
+        let n_edges = edges.len();
+        let mut cx = Self::new(n_vertices, n_edges, 0, 0);
+        cx.boundaries[0].reserve_exact(2 * n_edges);
+        for (i, &(tail, head)) in edges.iter().enumerate() {
+            assert!(tail < n_vertices,
+                    "from_edges: tail {tail} >= n_vertices {n_vertices} (edge {i})");
+            assert!(head < n_vertices,
+                    "from_edges: head {head} >= n_vertices {n_vertices} (edge {i})");
+            cx.boundaries[0].push((tail, i, -1));
+            cx.boundaries[0].push((head, i, 1));
+        }
+        cx
+    }
+
     /// Boundary matrix entries for rank k→(k+1): `B_{k+1}` as sparse triplets.
     ///
     /// Returns `&[(row, col, sign)]` where:
@@ -612,6 +641,68 @@ mod tests {
         cf.cell_features_mut(1)[1] = 2.0;
         let f = cf.cell_features(1);
         assert_eq!(f, &[1.0, 2.0]);
+    }
+
+    // -----------------------------------------------------------------------
+    // Plan 370 T4.1: CellComplex::from_edges (tree-shaped 1-complexes)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn from_edges_basic_counts() {
+        // A simple path: 0→1→2→3 (4 vertices, 3 edges).
+        let cx = CellComplex::from_edges(4, &[(0, 1), (1, 2), (2, 3)]);
+        assert_eq!(cx.n_vertices(), 4);
+        assert_eq!(cx.n_edges(), 3);
+        assert_eq!(cx.n_faces(), 0);
+        assert_eq!(cx.n_volumes(), 0);
+    }
+
+    #[test]
+    fn from_edges_boundary_entries() {
+        // A star: vertex 0 is the hub, edges to 1, 2, 3.
+        let cx = CellComplex::from_edges(4, &[(0, 1), (0, 2), (0, 3)]);
+        // B₁: each edge has 2 entries (tail = -1, head = +1).
+        let b1 = cx.boundary_entries(0);
+        assert_eq!(b1.len(), 6); // 3 edges × 2 entries
+        // Edge 0: (0, 1) → entries (0, 0, -1) and (1, 0, +1)
+        // Edge 1: (0, 2) → entries (0, 1, -1) and (2, 1, +1)
+        // Edge 2: (0, 3) → entries (0, 2, -1) and (3, 2, +1)
+        let entries: Vec<(usize, usize, i8)> = b1.to_vec();
+        assert!(entries.contains(&(0, 0, -1)), "tail of edge 0");
+        assert!(entries.contains(&(1, 0, 1)), "head of edge 0");
+        assert!(entries.contains(&(0, 1, -1)), "tail of edge 1");
+        assert!(entries.contains(&(2, 1, 1)), "head of edge 1");
+    }
+
+    #[test]
+    fn from_edges_exterior_derivative_matches_manual() {
+        // A tree: 0→1, 0→2 (2 edges from root 0).
+        // Vertex cochain: f(0)=10, f(1)=20, f(2)=30.
+        // d₀ (exterior_derivative) maps rank-0 → rank-1: df(edge) = f(head) - f(tail).
+        // Edge 0 (0→1): df = 20 - 10 = 10.
+        // Edge 1 (0→2): df = 30 - 10 = 20.
+        let cx = CellComplex::from_edges(3, &[(0, 1), (0, 2)]);
+        let mut f = CochainField::zeros(0, 3, 1);
+        f.set_scalar(0, 10.0);
+        f.set_scalar(1, 20.0);
+        f.set_scalar(2, 30.0);
+        let df = exterior_derivative(&cx, &f);
+        assert_eq!(df.rank, 1);
+        assert_eq!(df.n_cells(), 2);
+        assert!((df.scalar(0) - 10.0).abs() < 1e-5, "edge 0: {}", df.scalar(0));
+        assert!((df.scalar(1) - 20.0).abs() < 1e-5, "edge 1: {}", df.scalar(1));
+    }
+
+    #[test]
+    #[should_panic(expected = "tail 5 >= n_vertices 3")]
+    fn from_edges_panics_on_out_of_bounds_tail() {
+        CellComplex::from_edges(3, &[(5, 1)]);
+    }
+
+    #[test]
+    #[should_panic(expected = "head 99 >= n_vertices 3")]
+    fn from_edges_panics_on_out_of_bounds_head() {
+        CellComplex::from_edges(3, &[(0, 99)]);
     }
 
     // -----------------------------------------------------------------------

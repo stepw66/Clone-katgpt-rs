@@ -198,7 +198,56 @@ Fix: the G1-real gate uses `filter_drift_rate: 0.0` to match. This is expected: 
 3. `BayesianFilterArm` — per-arm non-stationary belief via predict-update drift filter.
 4. Gamma-ratio Beta sampler (Marsaglia-Tsang gamma + Box-Muller normal) — replaces Jöhnk's (catastrophically low acceptance for large α/β).
 5. **Phase 3 construction pipeline:** `pca_into`, `embed_2d`, `chart_test`, `dbscan_adaptive`, `build_recursive` — all modelless, deterministic, zero-dep.
-6. `bench_370_manifold_bandit_goat` — G1–G5 GOAT gate (Phase 2) + **G1-real (Phase 3, real-constructed tree)**.
+6. `bench_370_manifold_bandit_goat` — G1–G5 GOAT gate (Phase 2) + **G1-real (Phase 3, real-constructed tree)** + **G1-real phase-gate sweep (Phase 4 T4.2)**.
+7. **Phase 4 T4.2 R279 phase gate:** `phase_gate_min_obs: u32` config field on `LatentTaskTreeConfig`. Default 0 (disabled). When > 0, internal children with `n_obs < threshold` are skipped during Empirical Bayes aggregation. Leaf children are always included.
+8. **Phase 4 T4.1 DEC-cochain PoC:** `riir-ai/crates/riir-poc/benches/manifold_thompson_cochain.rs`. Three variants: naive, cochain-flat, cochain-dec.
+9. **`CellComplex::from_edges`** (katgpt-dec) — fills the API gap (the doc referenced a non-existent `add_incidence`). Enables tree-shaped cell complexes.
+
+## Phase 4 — DEC-Cochain Fusion Exploration (T4.1–T4.3)
+
+### T4.1 — DEC-cochain PoC results
+
+PoC at `riir-ai/crates/riir-poc/benches/manifold_thompson_cochain.rs` compares three implementations on a 64-arm / 8-cluster tree (73 nodes, 72 edges):
+
+| Variant | sample (p50 ns) | observe (p50 ns) | correctness |
+|---------|-----------------|------------------|-------------|
+| naive recursive (LatentTaskTree) | 542–1167 | 41–42 | ✓ baseline |
+| cochain-flat (SoA arrays) | 583 | 41 | ✓ MATCH |
+| cochain-dec (codifferential) | 583 | 500 | ✗ DIFFER |
+
+**Key findings:**
+
+1. **cochain-flat matches naive** on both correctness and latency. The SoA layout (contiguous `belief_alpha`/`belief_beta` arrays) is cache-friendly and equivalent to the recursive `TreeNode` traversal. This is a viable future optimization candidate but NOT a new capability class.
+
+2. **cochain-dec is 12× slower on observe** and **breaks correctness**. The `codifferential` operator recomputes ALL internal nodes' beliefs in `O(|E|)` per observe call (vs the naive tree's `O(depth)` path-local recompute). Worse, the global recompute uses a different floating-point summation order than the path-local recompute — FP non-associativity introduces tiny belief differences that compound into divergent Thompson sequences over time. **This breaks G5 (bit-reproducibility)**, which is required for deterministic-replay / quorum-commitment downstream.
+
+3. **The DEC substrate is NOT a win** for this use case. The DEC operators are designed for grid-like complexes where global operations are needed (heat kernels, Hodge decompositions). For hierarchical Thompson sampling, the path-local tree traversal is both faster and more cache-friendly.
+
+### T4.2 — R279 N≥d phase gate results
+
+G1-real sweep with `phase_gate_min_obs` ∈ {0, 1, 2, 4, 8} (50 trials each):
+
+| d (threshold) | median steps-to-90% | ratio (hier/flat) |
+|---------------|---------------------|-------------------|
+| 0 (baseline) | 4426 | 0.885 |
+| 1 | 4426 | 0.885 |
+| **2** | **3946** | **0.789** ← best |
+| 4 | 4426 | 0.885 |
+| 8 | 3946 | 0.789 |
+
+**Key findings:**
+
+1. **d=2 and d=8 improve G1 by 11%** (ratio 0.885 → 0.789). The phase gate filters out subtrees that haven't accumulated enough cross-cluster evidence, sharpening the structural advantage.
+
+2. **Leaf children are always included** — a leaf IS the atomic observation (intrinsic dim d=1, trivially satisfied by any evidence). Only INTERNAL children (subspace clusters) are gated.
+
+3. **d=1 has no effect** because every internal node accumulates `n_obs ≥ 1` after the first observation passes through it. The gate only bites at d ≥ 2.
+
+4. **The periodic pattern (d=2,8 same; d=1,4 same)** is likely related to the 8-cluster structure. Further investigation would require a sweep across different domain sizes — out of scope for this exploration.
+
+### T4.3 — Verdict
+
+**DROP Super-GOAT candidacy.** The cochain-dec impl is 12× slower AND breaks G5 bit-reproducibility. The N≥d gate improves G1 (11% faster convergence at d=2), so the gate itself is a win — but it's a config-level optimization on the existing tree, not a Super-GOAT-class reframing. The GOAT from Phase 2 (with the T4.2 phase gate as an opt-in config improvement) stands. No riir-ai private guide created (the §1.5 mandatory outputs trigger is NOT met — this is not a Super-GOAT).
 
 ## Known limitations
 
