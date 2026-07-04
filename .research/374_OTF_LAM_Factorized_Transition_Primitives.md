@@ -123,23 +123,23 @@ The novel combination this paper enables:
 
 ```
                     ┌─────────────────────────────────────────┐
-                    │  Frozen Effect Codebook (K primitives)   │
-                    │  c(1)..c(K) ∈ ℝ^D                        │
-                    │  Stored as: NeuronShard Pod (future)     │
-                    │             OR runtime k-means fit       │
-                    │             OR trained artifact (disk)   │
+                    │  Frozen Effect Codebook (K primitives)  │
+                    │  c(1)..c(K) ∈ ℝ^D                       │
+                    │  Stored as: NeuronShard Pod (future)    │
+                    │             OR runtime k-means fit      │
+                    │             OR trained artifact (disk)  │
                     └─────────────┬───────────────────────────┘
                                   │
     transition (x_t, x_{t+1}) ───►│
                                   ▼
                     ┌─────────────────────────────────────────┐
-                    │  Patchify + assign to codebook           │
-                    │  → occupancy M(k), activation w(k)       │
+                    │  Patchify + assign to codebook          │
+                    │  → occupancy M(k), activation w(k)      │
                     └─────────────┬───────────────────────────┘
                                   │
                          HLA state x_t ──►───┐
-                                  │           │
-                                  ▼           ▼
+                                  │          │
+                                  ▼          ▼
                     ┌─────────────────────────────────────────┐
                     │  State-aware factor token               │
                     │  r_k = Γ(c(k), M(k), w(k), x_t)         │
@@ -151,10 +151,10 @@ The novel combination this paper enables:
                                   │
                                   ▼
                     ┌─────────────────────────────────────────┐
-                    │  Action latent z^act                     │
-                    │  → feeds apply_functor (existing)        │
-                    │  → or InducedCwmKernel::advance          │
-                    │  → or forward dynamics predictor         │
+                    │  Action latent z^act                    │
+                    │  → feeds apply_functor (existing)       │
+                    │  → or InducedCwmKernel::advance         │
+                    │  → or forward dynamics predictor        │
                     └─────────────────────────────────────────┘
 ```
 
