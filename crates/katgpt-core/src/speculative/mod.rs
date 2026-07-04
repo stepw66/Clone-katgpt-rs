@@ -46,6 +46,14 @@ pub mod types;
 #[cfg(feature = "qmc_sampling")]
 pub mod qmc;
 
+// Plan 367 Fusion E — QmcHalter: sample-efficiency-aware halting for QMC
+// rollout budgets (Research 367 §2.3 Fusion E + Research 205 §1 union bound).
+// The sample-efficiency-aware analog of `GainCostLoopHalter` (Plan 304) —
+// decides whether to draw more QMC rollouts based on the union-bound ceiling
+// `min(1, k·p)` vs the empirical coverage from the actual point set.
+#[cfg(feature = "qmc_sampling")]
+pub mod qmc_halter;
+
 // Re-export the substrate API at `katgpt_core::speculative::*` for ergonomic
 // imports (`use katgpt_core::speculative::{TreeNode, DraftResult};`).
 pub use types::*;
@@ -83,6 +91,14 @@ pub use qmc::{
     contiguous_block_bootstrap_pass_at_m, dyadic_bootstrap_pass_at_m_lattice,
     fill_noise_queries_gaussian_qmc, gaussianize_uniforms_inplace, inverse_normal_cdf,
     BootstrapEstimate,
+};
+
+// Plan 367 Fusion E — QmcHalter re-exports. Sample-efficiency-aware halting
+// for QMC rollout budgets (R367 §2.3 Fusion E + R205 §1 union bound).
+#[cfg(feature = "qmc_sampling")]
+pub use qmc_halter::{
+    count_hits_1d, iid_at_least_one, union_bound_ceiling, QmcHalter, QmcHaltDecision,
+    QmcHaltReason,
 };
 #[cfg(all(feature = "qmc_sampling", feature = "bom_sampling"))]
 pub use qmc::{fill_noise_queries_gaussian_qmc_by_method, sample_k_states_qmc};

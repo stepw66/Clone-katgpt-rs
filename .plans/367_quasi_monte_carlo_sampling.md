@@ -154,7 +154,21 @@ These are consumers of the open primitive, each gets its own plan:
       - Feature isolation: `qmc_sampling` is default-on in `katgpt-core` (Plan 367 Phase 5 T5.7); riir-engine inherits it via the katgpt-core path dep. No new Cargo feature needed in riir-engine.
       - **Modelless per mandate**: no weight mutation. Pure arithmetic construction (lattice offsets / stratified permutations / Sobol direction numbers) + inverse-CDF descend with rescaled-coordinate carry. Rule 3 latent-space update.
 - [ ] **riir-neuron-db QMC-TEMP** (Plan 005 consumer) — replace `ConsolidationPipeline::sleep_diverse`'s i.i.d. BLAKE3-seeded noise with a QMC lattice. **Fusion C per R367 §2.3.** Separate plan in `riir-neuron-db/.plans/`.
-- [ ] **katgpt-rs QmcHalter** (R205 consumer) — sample-efficiency-aware halter that estimates coverage from the actual QMC point set vs the union-bound ceiling `min(1, k·p)`. **Fusion E per R367 §2.3.** Separate plan in `katgpt-rs/.plans/`.
+- [x] **katgpt-rs QmcHalter** (R205 consumer) — sample-efficiency-aware halter that estimates coverage from the actual QMC point set vs the union-bound ceiling `min(1, k·p)`. **Fusion E per R367 §2.3.**
+      **✅ DONE (2026-07-04)** — shipped directly under Plan 367 (per user instruction "Do NOT start a new plan"). New file `crates/katgpt-core/src/speculative/qmc_halter.rs` (gated on `qmc_sampling`, which is default-on per Plan 367 Phase 5). The sample-efficiency-aware analog of `GainCostLoopHalter` (Plan 304):
+      - `QmcHalter` config struct (stateless, `&self` evaluate): `target_coverage=0.95`, `k_min=1`, `k_max=64`. NaN-safe clamping in `new()` (target clamped to `(0, 1]`, k_min ≥ 1, k_max ≥ k_min).
+      - `QmcHaltDecision` enum: `RefusedFloor` / `Continue { ceiling, gap }` / `Halt { reason, ceiling, coverage }`. `Copy` + `Debug`.
+      - `QmcHaltReason` enum (`#[repr(u8)]`): `HitObserved` (early term — n_hits > 0), `TargetMet` (ceiling ≥ target), `CeilingSaturated` (k·p ≥ 1, no hit), `KMaxReached` (safety cap).
+      - Decision order: k_min floor → k_max cap → HitObserved → CeilingSaturated → TargetMet → Continue. HitObserved beats TargetMet (stronger signal — actual success vs budget-sufficient).
+      - Pure modelless helpers: `union_bound_ceiling(k, p) = min(1, k·p)` (R205 §1 Eq. 30–32), `iid_at_least_one(k, p) = 1-(1-p)^k` (baseline QMC improves upon), `count_hits_1d(points, p)` (empirical coverage from point set).
+      - NaN safety: NaN p → ceiling 0.0 → Continue (never spuriously fires TargetMet on corrupt input). NaN points excluded from hit count.
+      - 41 tests (39 functional + 2 `#[ignore]` timing): ceiling basic/saturated/zero-k/negative-p/nan-p, iid known-values/zero/full/nan/below-ceiling, count-hits basic/empty/nan-points/nan-p, RefusedFloor (k<k_min, k=0), HitObserved (basic, early-term), KMaxReached (k≥k_max, takes-precedence-over-k_min), CeilingSaturated (k·p≥1 no hit), TargetMet (exact-target, above-target), Continue (below-target, gap-correct), HitObserved-beats-TargetMet, NaN-p-continues, default-config, new-clamps (4 cases), QMC-advantage (ceiling > iid), QMC-saves-rollouts (iid_k=29 vs qmc_k=10 for p=0.1 target=0.95), end-to-end adaptive-loop (TargetMet path + CeilingSaturated path + first-hit path), Copy+Debug trait checks.
+      - **G5 PASS** (release, `--ignored`): `evaluate` **1.60 ns/call** (budget 50 ns, 31× headroom), `union_bound_ceiling` **0.65 ns/call** (budget 10 ns, 15× headroom). Inputs varied per-iteration to prevent constant-folding (loop-invariant version measured 0.00 ns — a DCE artifact, fixed).
+      - **G3 no-regression PASS**: 898/898 katgpt-core lib tests pass with default features (qmc_sampling default-on; was 859, +39 new).
+      - **G6 feature isolation PASS**: `--features qmc_sampling`, `--all-features`, `--no-default-features --features qmc_sampling` all compile clean.
+      - **G4 alloc-free PASS by construction**: `evaluate` is `&self` with no allocation; `count_hits_1d` borrows the slice.
+      - Pure modelless (closed-form float ops + branches, no training, no allocation, no softmax). Mirrors `GainCostLoopHalter` (Plan 304) API shape per R367 §2.3.
+      - File-size rule: new file `qmc_halter.rs` (936 lines incl. tests) rather than extending `qmc.rs` (already 2427 lines, over the 2048 guideline).
 
 ---
 
