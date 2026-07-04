@@ -1005,3 +1005,11 @@ required-features = ["cognitive_architecture_root"]
 name = "bench_040_ptg_functor_edge"
 harness = false
 required-features = ["ptg_functor_edges"]
+
+# Plan 379 — ANE-aware roofline GOAT gate (G1 routing verdicts match Bryngelson
+# ch. 11 + G2 ane_estimate < 1µs + G2-alloc 0 + G4 struct sizes). Pure
+# modelless arithmetic. If all gates PASS, promote `ane_roofline` to `default`.
+[[bench]]
+name = "bench_379_ane_roofline_goat"
+harness = false
+required-features = ["ane_roofline"]

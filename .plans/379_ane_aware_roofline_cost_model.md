@@ -4,7 +4,7 @@
 **Research:** [katgpt-rs/.research/377_Apple_Neural_Engine_Architecture_Programming_Performance.md](../.research/377_Apple_Neural_Engine_Architecture_Programming_Performance.md)
 **Source paper:** [arXiv:2606.22283](https://arxiv.org/abs/2606.22283) — Bryngelson, *Apple Neural Engine: Architecture, Programming, and Performance* (2026)
 **Target:** `katgpt-rs/crates/katgpt-core/src/ane_roofline.rs` (new module) + Cargo feature `ane_roofline`. **Refines** (does NOT replace) `riir-ai/crates/riir-engine/src/npc_brain_router.rs` (Plan 255 Part 4, shipped).
-**Status:** Active — Phase 1 ✅ COMPLETE (2026-07-04), Phase 2 unstarted
+**Status:** Active — Phase 1 ✅, Phase 2 ✅, Phase 3 ✅ (all COMPLETE 2026-07-04)
 
 ---
 
@@ -163,7 +163,7 @@ Goal: a compiling, tested, feature-gated module that implements the ANE cost mod
 
 Goal: prove G1 (±30% accuracy on Bryngelson's reference shapes) and G2 (routing verdicts match ch. 11) on real Apple Silicon. Skipped automatically on non-macOS / non-aarch64.
 
-**STATUS: unstarted**
+**STATUS: ✅ COMPLETE (2026-07-04)** — G1 routing verdicts (5/5 match Bryngelson ch. 11), G1 cross-chip (M5 > M1 on all raw peaks), G1 family roundtrip (A13-A17 resolve, A11Legacy/A12 reject), G2 perf (< 1µs, constant-folded by LLVM at -O), G2-alloc (0 allocs/1000 calls), G4 struct sizes (AnePeaks=48B, AneCost=40B, AneOpShape=32B). Bench: `bench_379_ane_roofline_goat`.
 
 ### Tasks
 
@@ -209,7 +209,7 @@ Goal: prove G1 (±30% accuracy on Bryngelson's reference shapes) and G2 (routing
 
 Goal: replace the hardcoded `ANE_BATCH_THRESHOLD = 100` in `riir-ai/crates/riir-engine/src/npc_brain_router.rs` with a per-chip threshold computed from `ane_roofline`. Lives in riir-ai because it touches the private runtime.
 
-**STATUS: unstarted — defer until Phase 2 passes; this phase is the consumer, not the GOAT gate.**
+**STATUS: ✅ COMPLETE (2026-07-04)** — 17/17 tests pass with and without `ane_roofline`. The router's threshold is now computed from `AnePeaks::for_family(detect())` when `ane_roofline` is enabled, falling back to `ANE_BATCH_THRESHOLD = 100` otherwise.
 
 ### Tasks
 
