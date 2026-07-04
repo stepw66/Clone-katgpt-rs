@@ -1,11 +1,26 @@
 # Issue 001 — Deferred crate-promotion candidates
 
-Status: **SUPERSEDED** by Proposal 003 (`003_src_consolidation_master.md`).
-All candidates below are now scheduled phases of the master consolidation
-plan (002→Phase 2, mux_latent→Phase 6 as part of speculative/mux absorption,
-proof_cert→tracked as a cross-repo decision in Phase 12 out-of-scope).
+Status: **PARTIALLY SUPERSEDED** by Proposal 003 (`003_src_consolidation_master.md`).
+Verified accurate 2026-07-04 by grep against Proposal 003's destination map +
+phase list:
+  - **Candidate C — `dash_attn/`**: ✅ genuinely tracked → Proposal 002 (done)
+    and Proposal 003 Phase 2 (`katgpt-attn` crate).
+  - **Candidate A — `mux_latent/`**: ❌ NOT in Proposal 003. Phase 6
+    (`katgpt-speculative` absorption) lists `distill/{ilc,trd}`, `spechop`,
+    `rt_turbo`, `precision_aware_draft`, `sparse_compose`,
+    `spec_reconciliation` — **mux_latent is absent**. The only `mux*` entry
+    anywhere in Proposal 003 is `mux_demux.rs` (Phase 10, `katgpt-core`),
+    which is the MUX *primitive*, not the mux_latent *application*.
+    The 3 unblock-criteria checkboxes below remain genuinely OPEN.
+  - **Candidate B — `proof_cert/`**: ❌ NOT in Proposal 003. Zero mentions
+    of `proof_cert` or `proof/` anywhere in the proposal (verified by grep).
+    Phase 12 ("final sweep") does not reference it. The 4 unblock-criteria
+    checkboxes below remain genuinely OPEN.
+The earlier "all candidates scheduled in Proposal 003" claim was aspirational
+and inaccurate. This issue remains the live tracker for Candidates A and B.
 Created: 2026-07-01
-Related proposal: `proposals/003_src_consolidation_master.md`
+Status corrected: 2026-07-04
+Related proposal: `proposals/003_src_consolidation_master.md` (covers Candidate C only)
 
 ## Context
 
