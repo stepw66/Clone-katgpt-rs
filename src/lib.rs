@@ -125,7 +125,9 @@ pub mod distill;
 #[allow(clippy::needless_range_loop)]
 pub mod dllm;
 #[cfg(feature = "critical_interval_gate")]
-pub mod dllm_solver;
+// Phase 12 absorption (Proposal 003, 2026-07-04): module moved to katgpt-core.
+// Re-export preserves `katgpt_rs::dllm_solver::*` paths.
+pub use katgpt_core::dllm_solver;
 #[cfg(feature = "ega_attn")]
 pub use katgpt_attn::ega_attn;
 // `feedback` module exiled to `katgpt-deprecated` (Phase 3a, Proposal 003).
@@ -181,11 +183,15 @@ pub use katgpt_core::newton_schulz;  // Extracted to katgpt-core per Issue 355 P
 #[cfg(feature = "off_principal_retrieval")]
 pub use katgpt_spectral::off_principal;
 #[cfg(feature = "hla_eigenbasis_recovery")]
-pub mod hla_eigenbasis;  // Issue 001: per-NPC eigenbasis recovery from windowed HLA activations
+// Phase 12 absorption (Proposal 003, 2026-07-04): module moved to katgpt-spectral.
+// Re-export preserves `katgpt_rs::hla_eigenbasis::*` paths.
+pub use katgpt_spectral::hla_eigenbasis;
 #[cfg(feature = "octopus")]
 pub use katgpt_quant::octopus;
 #[cfg(feature = "modality_pruned_load")]
-pub mod pipeline_pruner;
+// Phase 12 absorption (Proposal 003, 2026-07-04): module moved to katgpt-core.
+// Re-export preserves `katgpt_rs::pipeline_pruner::*` paths.
+pub use katgpt_core::pipeline_pruner;
 #[cfg(feature = "planar_quant")]
 pub use katgpt_quant::planar_quant;
 #[cfg(feature = "plot")]
@@ -260,7 +266,9 @@ pub use katgpt_sparse::specialist_projection;
 #[cfg(feature = "sparse_task_vector")]
 pub use katgpt_sparse::sparse_task_vector;
 #[cfg(feature = "sparse_task_vector")]
-pub mod sparse_compose;
+// Phase 12 absorption (Proposal 003, 2026-07-04): module moved to katgpt-sparse.
+// Re-export preserves `katgpt_rs::sparse_compose::*` paths.
+pub use katgpt_sparse::sparse_compose;
 // Phase 10 absorption (Proposal 003, 2026-07-04): module moved to katgpt-core.
 // Re-export preserves `katgpt_rs::skill_opt::*` paths.
 #[cfg(feature = "skill_opt")]

@@ -262,6 +262,16 @@ factorized_action = []  # Factorized Transition Action Abstraction — modelless
 
 # ── Phase 10 absorption (Proposal 003, 2026-07-04): modules moved from katgpt-rs/src/.
 # Always-on modules (`alloc`, `cumprodsum`, `trigger_gate`) need no feature gate — they declare `pub mod X;` unconditionally in lib.rs. The seven gated modules below mirror their root feature names.
+# ── Phase 12 absorption (Proposal 003, 2026-07-04): more modules moved from katgpt-rs/src/.
+critical_interval_gate = []  # Discrete Critical Interval Solver Switching (Plan 222). DEFAULT-ON in root.
+modality_pruned_load = []  # Modality-Pruned Context Loading — query classifier + pipeline selection (Plan 227 Phase 3). DEFAULT-ON in root.
+# Sub-features consumed by dllm_solver.rs's internal #[cfg(feature = ...)] gates.
+# All are tracking flags — root forwards them so the gated items resolve.
+q_sample_solver = ["critical_interval_gate"]  # Opt-in: q-sampling for critical steps
+self_cond_draft = []  # Opt-in: 2-pass self-conditioned speculative draft
+mbr_tree_select = []  # Opt-in: MBR selection from DDTree
+d2f_3sr_warm_start = []  # D2F 3SR warm-start config (Plan 291)
+rcd_residual = ["critical_interval_gate"]  # Residual Context Diffusion — entropy-weighted residual injection (Plan 258)
 cce_moderator = []  # CCE — Coarse Correlated Equilibria moderator primitives (Plan 295 + Plan 300, Research 274). DEFAULT-ON.
 llmexec_guard = []  # LLMExecGuard — entropy-driven verification budgeting (Plan 223). DEFAULT-ON.
 memory_soup_lora = []  # Memory Soup LoRA — MSP0 binary format parser (Plan 290).

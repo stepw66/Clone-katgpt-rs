@@ -36,6 +36,10 @@ blake3 = { version = "1", optional = true }
 # RNG for peira's synthetic_cca_sample public API (Phase 4 absorption).
 fastrand = "2"
 
+# Uuid::now_v7() for EigenbasisProvenance.window_id (Phase 12 absorption —
+# hla_eigenbasis.rs). Optional, enabled by `hla_eigenbasis_recovery`.
+uuid = { version = "1", features = ["v7"], optional = true }
+
 [features]
 # All flags are empty tracking gates mirroring the historical katgpt-rs
 # feature surface. The root crate forwards them via
@@ -104,3 +108,10 @@ newton_schulz = ["katgpt-core/newton_schulz"]
 # peira_distill flag on katgpt-core where the PeiraConfig/PeiraCovariance
 # types live.
 peira_distill = ["katgpt-core/peira_distill"]
+
+# HLA Windowed Eigenbasis Recovery (Issue 001). Per-NPC eigenbasis recovery
+# from a recent window of that NPC's own HLA activations — power iteration on
+# D×D Gram, modelless. Phase 12 (2026-07-04): module moved here from
+# katgpt-rs/src/hla_eigenbasis.rs; the historical `katgpt_rs::hla_eigenbasis`
+# path is preserved via the root re-export.
+hla_eigenbasis_recovery = ["uuid", "blake3"]

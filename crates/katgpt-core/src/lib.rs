@@ -1299,6 +1299,12 @@ pub use velocity_field_ensemble::{
 pub mod alloc;  // Debug-only TrackingAllocator (consumer gates via #[cfg(debug_assertions)])
 pub mod cumprodsum;  // Cumprodsum primitive (Plan 263) — always-on
 pub mod trigger_gate;  // Compute-tier trigger gate — always-on
+// ── Phase 12 absorption (Proposal 003, 2026-07-04): more modules moved from katgpt-rs/src/.
+// Feature-gated (mirror root feature names):
+#[cfg(feature = "critical_interval_gate")]
+pub mod dllm_solver;  // Discrete Critical Interval Solver Switching (Plan 222)
+#[cfg(feature = "modality_pruned_load")]
+pub mod pipeline_pruner;  // Pipeline Pruner — modality-aware inference pipeline selection (Plan 227 Phase 3)
 // Feature-gated (mirror root feature names):
 #[cfg(feature = "cce_moderator")]
 pub mod cce;

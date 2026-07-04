@@ -67,8 +67,13 @@ Anything beyond the [stay] list is a missed move — log + fix."*
       One commit per cluster (`refactor:` prefix). Each move: file rename
       + import rewrite + root shim re-export + feature forward + GOAT gate.
       Sub-tasks (one per cluster):
-      - [ ] T4.1 — Create `katgpt-proof-cert` crate + move proof_cert/ (6 files)
-      - [ ] T4.2 — Single-file moves: sparse_compose, dllm_solver, pipeline_pruner, hla_eigenbasis
+      - [x] T4.1 — Create `katgpt-proof-cert` crate + move proof_cert/ (6 files) ✅ cf23050a
+      - [x] T4.2 — Single-file moves: sparse_compose, dllm_solver, pipeline_pruner, hla_eigenbasis ✅
+        (dllm_solver + pipeline_pruner → katgpt-core; sparse_compose → katgpt-sparse;
+        hla_eigenbasis → katgpt-spectral. Root re-exports as `pub use`. Features
+        forwarded. 5 dllm_solver sub-features added to katgpt-core
+        [q_sample_solver, self_cond_draft, mbr_tree_select, d2f_3sr_warm_start,
+        rcd_residual]. katgpt_core:: refs in dllm_solver.rs rewritten to crate::.)
       - [ ] T4.3 — katgpt-core folders: mux_latent, compaction, cubical_nerve, data_probe, breakeven
       - [ ] T4.4 — katgpt-pruners: interval_pruner, lattice_operad, freq_bandit
       - [ ] T4.5 — katgpt-speculative: progressive_mcgs, fold

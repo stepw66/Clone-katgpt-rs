@@ -341,7 +341,7 @@ pub fn argmax(values: &[f32]) -> usize {
     if values.is_empty() {
         return 0;
     }
-    katgpt_core::simd::simd_argmax_f32(values).0
+    crate::simd::simd_argmax_f32(values).0
 }
 
 // ---------------------------------------------------------------------------
@@ -867,7 +867,7 @@ pub fn compute_residual(
         let emb_start = j * n_embd;
         // Fused scale-accumulate: out[k] += p_j * wte[emb_start+k].
         // SIMD-accelerated (NEON/AVX2) — replaces the scalar enumerate loop.
-        katgpt_core::simd::simd_fused_scale_acc(
+        crate::simd::simd_fused_scale_acc(
             &mut out[..n_embd],
             &wte[emb_start..emb_start + n_embd],
             p_j,
@@ -922,13 +922,13 @@ pub fn compute_entropy_weights(
 
         // Softmax into scratch using SIMD primitives (replaces 3 scalar passes
         // over the vocab-sized slice with vectorized NEON/AVX2 kernels).
-        let max_l = katgpt_core::simd::simd_max_f32(logits_p);
+        let max_l = crate::simd::simd_max_f32(logits_p);
         // Copy logits into scratch, subtract max, exp, and sum in fused passes.
         softmax_scratch[..vocab_size].copy_from_slice(logits_p);
-        katgpt_core::simd::simd_add_scalar_inplace(&mut softmax_scratch[..vocab_size], -max_l);
-        let sum_exp = katgpt_core::simd::simd_exp_sum_inplace(&mut softmax_scratch[..vocab_size]);
+        crate::simd::simd_add_scalar_inplace(&mut softmax_scratch[..vocab_size], -max_l);
+        let sum_exp = crate::simd::simd_exp_sum_inplace(&mut softmax_scratch[..vocab_size]);
         if sum_exp > 0.0 {
-            katgpt_core::simd::simd_scale_inplace(
+            crate::simd::simd_scale_inplace(
                 &mut softmax_scratch[..vocab_size],
                 1.0 / sum_exp,
             );
@@ -988,7 +988,7 @@ pub fn tier_to_residual_mode(tier: crate::trigger_gate::ComputeTier) -> Residual
 #[cfg(feature = "rcd_residual")]
 #[inline]
 pub fn confidence_alpha(marginals: &[f32]) -> f32 {
-    let max_prob = katgpt_core::simd::simd_max_f32(marginals);
+    let max_prob = crate::simd::simd_max_f32(marginals);
     (1.0 - max_prob).clamp(0.0, 1.0)
 }
 

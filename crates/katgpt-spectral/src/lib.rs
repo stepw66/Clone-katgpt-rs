@@ -59,6 +59,13 @@ pub mod stiff_anomaly;
 #[cfg(feature = "outlier_guard")]
 pub mod outlier_guard;
 
+// ── Phase 12 absorption (Proposal 003, 2026-07-04): module moved from katgpt-rs/src/.
+// HLA Windowed Eigenbasis Recovery — per-NPC eigenbasis recovery from windowed
+// HLA activations (power iteration on D×D Gram, modelless, Issue 001).
+// Gated by `hla_eigenbasis_recovery`; root re-exports as `katgpt_rs::hla_eigenbasis`.
+#[cfg(feature = "hla_eigenbasis_recovery")]
+pub mod hla_eigenbasis;
+
 #[cfg(all(feature = "spectral_quant", feature = "maxsim"))]
 pub use forward::par_maxsim_score_spectralquant;
 pub use forward::{

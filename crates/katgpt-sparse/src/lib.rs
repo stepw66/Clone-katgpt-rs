@@ -33,3 +33,12 @@ pub mod sparse_task_vector;
 
 #[cfg(feature = "specialist_projection")]
 pub mod specialist_projection;
+
+// Sparse Task Vector Composition — Plan 264 Phase 5 (Research 231, arxiv 2606.13657 §4.3).
+// Adapter composition via mask intersection (preserves the overlap floor of two
+// OPD-style task vectors) + union (superposes deltas). Phase 12 (2026-07-04):
+// module moved here from katgpt-rs/src/sparse_compose.rs; the historical
+// `katgpt_rs::sparse_compose::*` path is preserved via the root re-export.
+// Gated by `sparse_task_vector` — composition operates on SparseTaskVector inputs.
+#[cfg(feature = "sparse_task_vector")]
+pub mod sparse_compose;
