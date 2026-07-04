@@ -209,7 +209,12 @@ Key findings per crate:
   dissolving that coupling. Re-evaluate after Phase 12. ✅
 - [x] **T7.** Update `proposals/003_src_consolidation_master.md` Phase 11 →
   DONE (5 of 6 crates; bench deferred). ✅ (see T7 edit below)
-- [ ] **T8.** Commit on `develop` with `refactor:` prefix.
+- [x] **T8.** Commit on `develop` with `refactor:` prefix. ✅
+  - Commit `f18b128b` on `develop`. 52 files changed: 5 new crate Cargo.toml +
+    5 new crate lib.rs + 38 renames (src/* → crates/*/src/*) + root Cargo.toml
+    feature forwards + root src/lib.rs shims + Cargo.lock + Plan 382 +
+    Proposal 003 Phase 11 entry + 1 delete (validator/mod.rs superseded by
+    lib.rs).
 
 ## GOAT gate G3 (per crate)
 
