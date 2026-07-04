@@ -30,7 +30,7 @@
 //! [`PtgTracedPruner::finish_episode`]. Between those calls, every
 //! absorb/compress/trace event appends to the same PTG. `finish_episode`
 //! returns the materialized PTG; the caller hands it to a [`MotifMiner`]
-//! (typically via the sleep-cycle hook in [`crate::sleep::closure_mining`]).
+//! (typically via the sleep-cycle hook in [`katgpt_rs::closure_mining`]).
 //!
 //! # Zero cost when disabled
 //!
@@ -46,17 +46,17 @@
 //! confined to the warm tier, matching the plan's GOAT gate G2 (< 5% of the
 //! admission path).
 //!
-//! [`BanditPruner`]: crate::pruners::BanditPruner
-//! [`AbsorbCompressLayer`]: crate::pruners::AbsorbCompressLayer
+//! [`BanditPruner`]: crate::bandit::BanditPruner
+//! [`AbsorbCompressLayer`]: crate::absorb_compress::AbsorbCompressLayer
 //! [`MotifMiner`]: katgpt_core::closure::MotifMiner
 
 use katgpt_core::closure::{
     NodeId, OperatorKind, PrimitiveKind, PrimitiveTransitionGraph, PtgRecorder,
 };
-use crate::speculative::types::ScreeningPruner;
+use katgpt_core::traits::ScreeningPruner;
 
 #[cfg(feature = "bandit")]
-use crate::pruners::AbsorbCompress;
+use crate::absorb_compress::AbsorbCompress;
 
 /// Reserved primitive id emitted on every `compress()` event.
 ///
@@ -248,7 +248,7 @@ impl<P: ScreeningPruner> ScreeningPruner for PtgTracedPruner<P> {
 // ── AbsorbCompress delegation with auto-tracing ────────────────────────────
 //
 // Gated on `bandit` because that's where the `AbsorbCompress` trait lives
-// (see `crate::pruners::absorb_compress`). Users who only want to trace
+// (see `crate::absorb_compress`). Users who only want to trace
 // custom primitives via `PtgTracedPruner::trace` do not need `bandit`.
 
 #[cfg(feature = "bandit")]
@@ -294,7 +294,7 @@ impl<P: AbsorbCompress> AbsorbCompress for PtgTracedPruner<P> {
     /// Review-gated compression check (Plan 036). Delegates to the inner
     /// pruner — the wrapper adds no opinion of its own on review metrics.
     #[inline]
-    fn should_compress_gated(&self, metrics: Option<&crate::pruners::ReviewMetrics>) -> bool {
+    fn should_compress_gated(&self, metrics: Option<&katgpt_core::pruners::review_metrics::ReviewMetrics>) -> bool {
         self.inner.should_compress_gated(metrics)
     }
 }
@@ -304,8 +304,8 @@ impl<P: AbsorbCompress> AbsorbCompress for PtgTracedPruner<P> {
 #[cfg(all(test, feature = "bandit"))]
 mod tests {
     use super::*;
-    use crate::pruners::{AbsorbCompressLayer, CompressConfig};
-    use crate::speculative::types::{NoScreeningPruner, ScreeningPruner};
+    use crate::absorb_compress::{AbsorbCompressLayer, CompressConfig};
+    use katgpt_core::traits::{NoScreeningPruner, ScreeningPruner};
 
     /// Bare wrapper delegates `relevance` unchanged.
     #[test]

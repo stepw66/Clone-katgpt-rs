@@ -202,7 +202,7 @@ forever.
 ### → `katgpt-pruners`
 | Item | Verdict |
 |---|---|
-| `closure_wire.rs`, `screening/` | O |
+| `closure_wire.rs`, `screening/` | O — DONE Phase 8 (2026-07-04) |
 
 ### → `katgpt-speculative`
 | Item | Verdict |
@@ -254,7 +254,7 @@ forever.
 ### → `katgpt-attn-match` (existing, absorb `rerank`)
 | Item | Verdict |
 |---|---|
-| `rerank.rs` | O |
+| `rerank.rs` | O — DONE Phase 8 (2026-07-04) |
 
 ### → `katgpt-deprecated` (NEW — the loser crate)
 | Item | Verdict | Reason |
@@ -596,8 +596,43 @@ Ordering: foundation first (hoists, splits), then domain crates biggest-first.
     under concurrent load — pre-existing, unrelated to this change).
     Clippy clean on the new module.
   **DONE 2026-07-04.**
-- [ ] **Phase 8 — `katgpt-pruners` absorption.** `closure_wire`, `screening`.
+- [x] **Phase 8 — `katgpt-pruners` absorption.** `closure_wire`, `screening`.
   Fold `rerank.rs` → `katgpt-attn-match`.
+  - **All three modules shipped cleanly** (no blockers, unlike Phase 7).
+  - **`closure_wire.rs`** (451 LOC, 8 tests) → `katgpt-pruners/src/closure_wire.rs`.
+    Deps verified clean via root-shim resolution: `crate::speculative::types::ScreeningPruner`
+    → `katgpt_core::traits::ScreeningPruner`; `crate::pruners::AbsorbCompress` →
+    `katgpt_pruners::absorb_compress::AbsorbCompress`. After move, intra-crate
+    `use crate::absorb_compress::*` + cross-crate `use katgpt_core::traits::*`.
+  - **`screening/`** (1756 LOC, 6 files, ~13 tests) → `katgpt-pruners/src/screening/`.
+    Pure substrate: only `fastrand::Rng` + `core::hint::black_box` deps. Operates on
+    `&[u8]` / `&[f32]` only — no HLA / functor / shard types. riir-ai Plan 331
+    wiring intentionally NOT in katgpt-pruners.
+  - **`rerank.rs`** (526 LOC, 12 tests) → `katgpt-attn-match/src/rerank.rs`.
+    Only dep: `katgpt_core::simd::*`. Added `katgpt-core` as optional dep to
+    katgpt-attn-match (gated by `maxsim` feature). Contains `bt_rank`-gated
+    `SymmetricBoundaryPair` (orthogonal to the `maxsim` module gate).
+  - **New features in katgpt-pruners**: `closure_instrument` (forwards to
+    `katgpt-core/closure_instrument`), `complexity_prior_sampler`,
+    `mcts_k_prior`, `bandit_k_prior`, `spec_k_prior`, `lz4_proxy`, `blake3_proxy`.
+  - **New features in katgpt-attn-match**: `maxsim` (pulls `dep:katgpt-core`),
+    `bt_rank` (empty tracking flag for the SymmetricBoundaryPair impl).
+  - **Root Cargo.toml**: `closure_instrument`, `complexity_prior_sampler`,
+    `mcts_k_prior`, `bandit_k_prior`, `spec_k_prior`, `lz4_proxy`, `blake3_proxy`,
+    `maxsim`, `bt_rank` all now forward to their crate locations.
+  - **Public API surface preserved**: `katgpt_rs::closure_wire::*`,
+    `katgpt_rs::screening::*`, `katgpt_rs::rerank::*` all resolve via root
+    `pub use` re-exports. External consumer `riir-engine::closure_bridge`
+    (`pub use katgpt_rs::closure_mining::*`) unaffected (closure_mining already
+    moved in Phase 7).
+  - GOAT gate G3: `cargo check --workspace --all-features` clean; default clean;
+    `--no-default-features` clean. katgpt-pruners lib 209 tests PASS (was 161 —
+    +8 closure_wire + ~13 screening + ~27 other features in the test run).
+    katgpt-attn-match lib 12 tests PASS (rerank, all green). Root lib 1460 tests
+    PASS (was 1490 — ~30 tests moved to crates). bench_290_closure_wire_integration
+    6/6 PASS. bench_290_closure_instrument_goat 10/10 PASS. bench_maxsim_rerank
+    1/1 PASS (NDCG ≥2% better than cosine). Clippy clean on moved modules.
+  **DONE 2026-07-04.**
 - [ ] **Phase 9 — `katgpt-transformer` absorption.** `mbu`, `dense_mesh`,
   `swir`, `tf_loop`.
 - [ ] **Phase 10 — `katgpt-core` absorption.** `alloc`, `cce`, `cumprodsum`,

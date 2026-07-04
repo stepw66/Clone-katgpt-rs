@@ -121,6 +121,14 @@ pub use value_fitter::{fit_cv_least_squares, ValueFitConfig, ValueFitResult};
 #[cfg(feature = "attn_match")]
 pub use compact_fixed_beta::{compact_with_fixed_beta, BETA_MAX, BETA_MID, BETA_MIN};
 
+// ── MaxSim retrieval reranking (Plan 080, Research 45) ─────────────────────
+// Moved here from `katgpt-rs/src/rerank.rs` per Proposal 003 Phase 8 (2026-07-04).
+// Provides `rerank()` (Cosine vs MaxSim late-interaction scoring) + `ndcg_at()`
+// retrieval quality eval. The `bt_rank` feature additionally gates the
+// `SymmetricBoundaryPair` impl (Plan 085 Deep Manifold Part 2).
+#[cfg(feature = "maxsim")]
+pub mod rerank;
+
 #[cfg(all(test, feature = "attn_match"))]
 mod tests;
 

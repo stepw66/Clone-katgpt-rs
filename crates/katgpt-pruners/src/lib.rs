@@ -95,6 +95,29 @@ pub use sudoku_pruner::SudokuPruner;
 #[cfg(feature = "bandit")]
 pub mod absorb_compress;
 
+/// Closure-Expansion Instrument runtime wiring (Plan 290 Phase 4 T4.2).
+/// Moved here from `katgpt-rs/src/closure_wire.rs` per Proposal 003 Phase 8
+/// (2026-07-04). Bridges the modelless `katgpt_core::closure` measurement
+/// layer to the concrete pruner runtimes (`AbsorbCompressLayer`). The
+/// `AbsorbCompress` auto-tracing impl block is separately gated on `bandit`
+/// (mirrors the historical two-feature gate).
+#[cfg(feature = "closure_instrument")]
+pub mod closure_wire;
+
+/// Algorithmic-Probability Sampler + Coincidence Gate (Plan 305, Research 284,
+/// Dingle & Hutter 2026, *Entropy* 28(2):226). Moved here from
+/// `katgpt-rs/src/screening/` per Proposal 003 Phase 8 (2026-07-04). Operates
+/// on `&[u8]` / `&[f32]` only — no HLA / functor / shard types. riir-ai Plan 331
+/// wires the latent variant into the private runtime; that wiring is
+/// intentionally NOT in katgpt-pruners.
+#[cfg(feature = "complexity_prior_sampler")]
+pub mod screening;
+#[cfg(feature = "complexity_prior_sampler")]
+pub use screening::{
+    CoincidenceGate, ComplexityProxy, CompressionPriorSampler, EntropyComplexity, L1Complexity,
+    LatentCompressionPriorSampler, RleComplexity, quantize_latent,
+};
+
 #[cfg(feature = "bandit")]
 pub mod bandit;
 

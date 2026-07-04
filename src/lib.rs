@@ -199,8 +199,10 @@ pub mod pruners;
 pub mod dense_mesh;
 #[cfg(feature = "rat_plus_bridge")]
 pub use katgpt_attn::rat_bridge;
+// Phase 8 absorption (Proposal 003, 2026-07-04): module moved to katgpt-attn-match.
+// Re-export preserves `katgpt_rs::rerank::*` paths.
 #[cfg(feature = "maxsim")]
-pub mod rerank;
+pub use katgpt_attn_match::rerank;
 #[cfg(feature = "river_valley")]
 pub use katgpt_spectral::river_valley;
 // Phase 6 absorption (Proposal 003, 2026-07-04): module moved to katgpt-speculative.
@@ -372,8 +374,10 @@ pub mod tf_loop;
 // unaffected. Both `closure_wire` and `closure_mining` are gated on
 // `closure_instrument`; the AbsorbCompress auto-tracing impl in `closure_wire`
 // additionally needs `bandit`.
+// Phase 8 absorption (Proposal 003, 2026-07-04): module moved to katgpt-pruners.
+// Re-export preserves `katgpt_rs::closure_wire::*` paths.
 #[cfg(feature = "closure_instrument")]
-pub mod closure_wire;
+pub use katgpt_pruners::closure_wire;
 
 #[cfg(feature = "closure_instrument")]
 pub use katgpt_core::closure::mining as closure_mining;
@@ -403,10 +407,14 @@ pub use salience::{
 // objectives for theorem-backed cross-task transfer. riir-ai Plan 331 wires
 // this to HLA / functor / shard vectors (private).
 // Opt-in until G1 (sampler safety) + G2 (exponential speedup) gates pass.
+// Phase 8 absorption (Proposal 003, 2026-07-04): screening moved to
+// katgpt-pruners. Re-export preserves `katgpt_rs::screening::*` paths.
+// External consumers (algorithmic_probability_sampler_demo / _bench examples)
+// are unaffected.
 #[cfg(feature = "complexity_prior_sampler")]
-pub mod screening;
+pub use katgpt_pruners::screening;
 #[cfg(feature = "complexity_prior_sampler")]
-pub use screening::{
+pub use katgpt_pruners::screening::{
     CoincidenceGate, CompressionPriorSampler, ComplexityProxy, EntropyComplexity, L1Complexity,
     LatentCompressionPriorSampler, RleComplexity, quantize_latent,
 };

@@ -26,6 +26,10 @@ half = { version = "2", optional = true }
 # katgpt-kv: provides still_kv::position_free::PositionFreeCompactor for the
 # RoPE-preserving chunked compaction path. Optional — only for `still_kv`.
 katgpt-kv = { path = "../katgpt-kv", optional = true, default-features = false }
+# katgpt-core: provides simd::{maxsim_score, simd_dot_f32, simd_add_inplace,
+# simd_scale_inplace} used by the rerank module (Plan 080 MaxSim late-interaction
+# scoring, Research 45). Optional — only needed when the `maxsim` feature is on.
+katgpt-core = { path = "../katgpt-core", optional = true }
 
 [features]
 default = []
@@ -37,3 +41,15 @@ attn_match = []
 # RoPE-preserving chunked compaction via PositionFreeCompactor (katgpt-kv).
 # Mirrors the root crate's historical `still_kv` gate on the chunked path.
 still_kv = ["dep:katgpt-kv", "katgpt-kv/still_kv", "dep:half"]
+
+# MaxSim late-interaction scoring + retrieval reranking (Plan 080, Research 45).
+# Moved here from `katgpt-rs/src/rerank.rs` per Proposal 003 Phase 8 (2026-07-04).
+# Provides `rerank()` (Cosine vs MaxSim) and `ndcg_at()` quality eval. Pulls in
+# katgpt-core for the SIMD scoring primitives.
+maxsim = ["dep:katgpt-core"]
+
+# Symmetric Boundary Pair for BT ranking (Plan 085 Deep Manifold Part 2,
+# arXiv:2512.06563 §2.6.2). Gates the `SymmetricBoundaryPair` impl block inside
+# rerank.rs — orthogonal to the `maxsim` gate (the rest of rerank.rs compiles
+# without it). Root forwards via `katgpt-attn-match/bt_rank`.
+bt_rank = []

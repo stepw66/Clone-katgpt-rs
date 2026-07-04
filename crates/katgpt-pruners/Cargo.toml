@@ -87,6 +87,32 @@ sr2am_configurator = ["bandit", "g_zero", "katgpt-core/sr2am_configurator", "kat
 sia_feedback = ["sr2am_configurator", "katgpt-core/sia_feedback"]
 ruliology = ["bandit"]
 spechop = ["bandit"]
+
+# ── Closure-Expansion Instrument wiring (Plan 290 Phase 4 T4.2) ─────────────
+# Closure-wire decorator moved here from src/closure_wire.rs (Proposal 003
+# Phase 8, 2026-07-04). Forwards to katgpt-core/closure_instrument so the
+# `katgpt_core::closure::{MotifMiner, PtgRecorder, ...}` substrate compiles.
+# The `AbsorbCompress` auto-tracing impl inside `closure_wire.rs` is separately
+# gated on `bandit` (mirrors the root's historical two-feature gate).
+closure_instrument = ["katgpt-core/closure_instrument"]
+
+# ── Algorithmic-Probability Sampler + Coincidence Gate (Plan 305) ─────────
+# Screening primitives moved here from src/screening/ (Proposal 003 Phase 8,
+# 2026-07-04). Operate on `&[u8]` / `&[f32]` only — no HLA / functor / shard
+# types. fastrand is an always-on dep of this crate, so empty tracking flags
+# suffice. Sub-features imply `complexity_prior_sampler` so the inner module
+# imports resolve.
+complexity_prior_sampler = []
+mcts_k_prior = ["complexity_prior_sampler"]
+bandit_k_prior = ["complexity_prior_sampler"]
+spec_k_prior = ["complexity_prior_sampler"]
+# Phase 2+ sub-feature stubs (Plan 305 T1.5). Phase 1 ships RLE/Entropy/L1
+# only; activation requires `lz4_flex` dep (lz4_proxy) or wires the existing
+# `blake3` dep (blake3_proxy). Tracked here so the `#[cfg(feature = ...)]`
+# blocks inside screening/complexity_prior.rs resolve cleanly.
+lz4_proxy = ["complexity_prior_sampler"]
+blake3_proxy = ["complexity_prior_sampler"]
+
 self_distilling_bandit = ["egcs"]
 egcs = []
 # Forward to katgpt-speculative/lodestar so callers enabling this get both
