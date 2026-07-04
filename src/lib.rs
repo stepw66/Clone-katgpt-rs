@@ -12,8 +12,10 @@ pub use katgpt_attn_match as attn_match;
 /// (freq_bandit depends on root-only `trigger_gate`).
 #[cfg(feature = "adaptive_cot_compaction")]
 pub mod attn_match_adaptive_cot;
+// Phase 5 absorption (Proposal 003, 2026-07-04): module moved to katgpt-kv.
+// Re-export preserves `katgpt_rs::async_qdq::*` paths.
 #[cfg(feature = "async_qdq_overlap")]
-pub mod async_qdq;
+pub use katgpt_kv::async_qdq;
 pub mod benchmark;
 #[cfg(feature = "band_conditioner")]
 pub mod band_conditioner;
@@ -21,8 +23,10 @@ pub mod band_conditioner;
 pub mod bckvss;
 #[cfg(feature = "breakeven_routing")]
 pub mod breakeven;
+// Phase 5 absorption (Proposal 003, 2026-07-04): module moved to katgpt-kv.
+// Re-export preserves `katgpt_rs::cache_prune::*` paths.
 #[cfg(feature = "cache_prune")]
-pub mod cache_prune;
+pub use katgpt_kv::cache_prune;
 #[cfg(feature = "channel_simd_align")]
 pub mod channel_simd;
 // CGSP inlined from src/cgsp.rs (Proposal 003 Phase 0.3, 2026-07-01): the
@@ -197,8 +201,10 @@ pub use katgpt_spectral::river_valley;
 pub mod rt_turbo;
 #[cfg(feature = "ruliology")]
 pub mod ruliology;
+// Phase 5 absorption (Proposal 003, 2026-07-04): module moved to katgpt-kv.
+// Re-export preserves `katgpt_rs::segment_checkpoint::*` paths.
 #[cfg(feature = "segment_checkpoint")]
-pub mod segment_checkpoint;
+pub use katgpt_kv::segment_checkpoint;
 #[cfg(feature = "chiaroscuro")]
 pub use katgpt_attn::chiaroscuro;
 // Functional Attention composition layer — Plan 286 Phase 5 (T5.1–T5.3). Each

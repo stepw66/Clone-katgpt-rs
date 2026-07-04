@@ -66,3 +66,21 @@ kvarn = []
 # Targeted Precision Budget — per-head bit allocation (Plan 227 Phase 2).
 # Used only by kvarn; promoted to top-level module here for visibility.
 targeted_precision = []
+
+# ── Phase 5 absorption (Proposal 003, 2026-07-04) ─────────────────────────────
+# Moved from `katgpt-rs/src/{cache_prune, segment_checkpoint, async_qdq.rs}`.
+# Root re-export preserves `katgpt_rs::{cache_prune, segment_checkpoint,
+# async_qdq}` paths via `pub use katgpt_kv::X`.
+
+# CachePrune — SAT + rolling hash + sensitivity masking (Plan 140, Research 101).
+# Self-contained: no katgpt-rs internal deps.
+cache_prune = []
+
+# Segment Checkpoint — GRM segment caching (Plan 223b). DEFAULT-ON in root.
+segment_checkpoint = []
+
+# Async Q/DQ Overlap — double-buffered KV dequantize for GPU pipeline
+# (Plan 227 Phase 6). The `inference_router` dep stays in the ROOT feature
+# forward (`async_qdq_overlap = ["katgpt-kv/async_qdq_overlap", "inference_router"]`)
+# because it gates the GPU backend test harness, not the module itself.
+async_qdq_overlap = []

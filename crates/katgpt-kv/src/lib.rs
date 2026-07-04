@@ -17,6 +17,9 @@
 //! | `still_kv` | `still_kv` | `src/still_kv/` | Plan 245 — StillKV perceiver-based compaction |
 //! | `kvarn` | `kvarn` | `src/kvarn/` | Research 159 — KVarN variance-normalized quantization |
 //! | `targeted_precision` | `targeted_precision` | `src/targeted_precision.rs` | Plan 227 Phase 2 — per-head bit allocation |
+//! | `cache_prune` | `cache_prune` | `src/cache_prune/` | Plan 140 — SAT + rolling hash + sensitivity masking |
+//! | `segment_checkpoint` | `segment_checkpoint` | `src/segment_checkpoint/` | Plan 223b — GRM segment caching |
+//! | `async_qdq` | `async_qdq_overlap` | `src/async_qdq.rs` | Plan 227 Phase 6 — double-buffered KV dequantize |
 //!
 //! # Cross-crate deps
 //!
@@ -49,3 +52,15 @@ pub mod still_kv;
 pub mod kvarn;
 #[cfg(feature = "targeted_precision")]
 pub mod targeted_precision;
+
+// Phase 5 absorption (Proposal 003, 2026-07-04): cache_prune, segment_checkpoint,
+// and async_qdq moved from `katgpt-rs/src/`. All three are self-contained (zero
+// `crate::`-external refs) and historically lived as root `pub mod` declarations.
+// Root re-exports (`pub use katgpt_kv::X`) preserve all `katgpt_rs::{cache_prune,
+// segment_checkpoint, async_qdq}` paths.
+#[cfg(feature = "cache_prune")]
+pub mod cache_prune;
+#[cfg(feature = "segment_checkpoint")]
+pub mod segment_checkpoint;
+#[cfg(feature = "async_qdq_overlap")]
+pub mod async_qdq;

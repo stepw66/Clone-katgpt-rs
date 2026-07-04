@@ -461,8 +461,30 @@ Ordering: foundation first (hoists, splits), then domain crates biggest-first.
     (17), bench_279_mpi (9), composition_279_spectral_budget (4). All 6
     affected examples build. Clippy clean.
   **DONE 2026-07-01.**
-- [ ] **Phase 5 — `katgpt-kv` absorption.** `cache_prune`,
-  `segment_checkpoint`, `async_qdq`.
+- [x] **Phase 5 — `katgpt-kv` absorption.** `cache_prune`, `segment_checkpoint`,
+  `async_qdq`.
+  - Moved 3 modules (12 files total): `cache_prune/` (4 files: mod, rolling_hash,
+    sat, sensitivity), `segment_checkpoint/` (7 files: mod, auto_route, bench,
+    gating, memory_soup, ssc), `async_qdq.rs` (1 file). All self-contained —
+    zero external `crate::` refs (segment_checkpoint's 7 `crate::segment_checkpoint::`
+    refs are intra-module and resolve to `katgpt_kv::segment_checkpoint::` post-move).
+  - `katgpt-kv` feature additions: `cache_prune = []`, `segment_checkpoint = []`,
+    `async_qdq_overlap = []`. Root forwards: `cache_prune = ["katgpt-kv/cache_prune"]`,
+    `segment_checkpoint = ["katgpt-kv/segment_checkpoint"]`, `async_qdq_overlap =
+    ["katgpt-kv/async_qdq_overlap", "inference_router"]` (the `inference_router` dep
+    stays root — it gates the GPU backend test harness, not the module itself).
+  - Root re-exports: `pub mod X;` → `pub use katgpt_kv::X;` for all 3, preserving
+    `katgpt_rs::{cache_prune, segment_checkpoint, async_qdq}::*` paths.
+  - 3 root consumers (`spechop/segment_match.rs`, `dash_attn/sat_analysis.rs`,
+    `rt_turbo/sat_retrieval.rs`) use `crate::cache_prune::*` through the re-export —
+    verified to compile unchanged.
+  - GOAT gate G3: `cargo check --workspace --all-features` clean; default clean;
+    `--no-default-features` clean. 65 katgpt-kv tests pass (segment_checkpoint +
+    cache_prune). 6 async_qdq_goat tests pass. 1553/1554 root lib tests pass in
+    debug (1 pre-existing timing flake in `speculative::peira_pruner` unrelated
+    to this change; PASSES in release). All examples + benches referencing the
+    moved modules build through the re-export chain.
+  **DONE 2026-07-04.**
 - [ ] **Phase 6 — `katgpt-speculative` absorption.** `distill/{ilc,trd}`,
   `spechop`, `rt_turbo`, `precision_aware_draft`, `sparse_compose`,
   `spec_reconciliation`.
