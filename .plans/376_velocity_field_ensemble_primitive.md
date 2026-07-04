@@ -4,7 +4,10 @@
 **Research:** [katgpt-rs/.research/375_Kernelized_Stochastic_Interpolant_Velocity_Field_Ensemble.md](../.research/375_Kernelized_Stochastic_Interpolant_Velocity_Field_Ensemble.md)
 **Source paper:** [arxiv 2602.20070](https://arxiv.org/abs/2602.20070) — Coeurdoux et al., ICML 2026 SPIGM
 **Target:** `katgpt-rs/crates/katgpt-core/src/velocity_field_ensemble.rs` (new module) + Cargo feature `velocity_field_ensemble`
-**Status:** Phase 1+2+3 COMPLETE — PROMOTED to default-on (2026-07-04). Phases 4–6 deferred.
+**Status:** Phase 1+2+3 COMPLETE — PROMOTED to default-on (2026-07-04). Phases 4–6 deferred and **filed as tracked issues**:
+- Phase 5 (LatCal commitment) → `riir-chain/.issues/003_velocity_field_ensemble_latcal_commitment.md`
+- Phase 6 (UQ conformal floor) → `katgpt-rs/.issues/038_velocity_field_ensemble_uq_conformal_floor.md`
+- Phase 4 (heterogeneous-d) remains unfiled (only if a concrete use case emerges).
 
 ---
 
@@ -80,25 +83,25 @@ Deferred — only if Phase 3 promotes AND a concrete use case emerges where the 
 
 ## Phase 5 — Optional: LatCal Commitment Bridge (riir-chain)
 
-Deferred — file as a separate plan in riir-chain after Phase 3 promotes.
+Deferred — **FILED as `riir-chain/.issues/003_velocity_field_ensemble_latcal_commitment.md`** (2026-07-04). Tracked there with 8 tasks (T1–T8), including creation of the missing `.research/008_*` cross-ref guide.
 
-### Tasks (deferred)
+### Tasks (deferred — see riir-chain Issue 003)
 
-- [ ] **T5.1** Commit the K solved weights `η ∈ R^P` as K fixed-point scalars via `LatCalMatrix::to_fixed`. Two nodes agree bit-for-bit on the ensemble for a given target.
-- [ ] **T5.2** Cross-ref guide: `riir-chain/.research/008_latcal_committed_ensemble_weights.md`.
+- [ ] **T5.1** Commit the solved weights `η ∈ R^P` as P fixed-point scalars via signed LatCal encoding. Two nodes agree bit-for-bit on the ensemble for a given target. → riir-chain Issue 003 T1–T4.
+- [ ] **T5.2** Cross-ref guide: `riir-chain/.research/008_velocity_field_ensemble_eta_commitment.md` (does not yet exist; creation is riir-chain Issue 003 T8).
 
 ---
 
 ## Phase 6 — Optional: UQ Conformal Floor (Issue 010)
 
-Deferred — mandatory before any UQ claim ("the ensemble generates a calibrated distribution"). Per the §"Report the Floor" rule (adopted 2026-06-28), the GOAT gate MUST benchmark against `ConformalIntervalCalibrator<SeasonalNaiveForecaster>` (Plan 340, m=1) on CRPS / coverage / Winkler score.
+Deferred — **FILED as `katgpt-rs/.issues/038_velocity_field_ensemble_uq_conformal_floor.md`** (2026-07-04). Mandatory before any UQ claim ("the ensemble generates a calibrated distribution"). Per the §"Report the Floor" rule (adopted 2026-06-28), the GOAT gate MUST benchmark against `ConformalIntervalCalibrator<SeasonalNaiveForecaster>` (Plan 340, m=1) on CRPS / coverage / Winkler score. The primitive currently makes NO UQ claim, so this gate is not yet triggered — it activates the moment anyone adds a UQ claim.
 
-### Tasks (deferred)
+### Tasks (deferred — see katgpt-rs Issue 038)
 
-- [ ] **T6.1** Run ensemble + `D*_t` integrator on a UQ benchmark (e.g., the bom_arena QMC benchmark in riir-ai Plan 370). Compute CRPS, empirical coverage, Winkler score.
+- [ ] **T6.1** Run ensemble + `D*_t` integrator on a UQ benchmark (e.g., the bom_arena QMC benchmark in riir-ai Plan 370). Compute CRPS, empirical coverage, Winkler score. → katgpt-rs Issue 038 T1–T4.
 - [ ] **T6.2** Compute the same metrics for the conformal-naive floor.
-- [ ] **T6.3** If ensemble does NOT beat the floor → drop the UQ claim. The primitive ships as a non-UQ algebraic combiner (still valuable — see Phase 3 G2).
-- [ ] **T6.4** If ensemble beats the floor → UQ claim stands, document in `.benchmarks/376_uq_floor.md`.
+- [ ] **T6.3** If ensemble does NOT beat the floor → drop the UQ claim. The primitive ships as a non-UQ algebraic combiner (still valuable — see Phase 3 G2). → katgpt-rs Issue 038 T5.
+- [ ] **T6.4** If ensemble beats the floor → UQ claim stands, document in `.benchmarks/376_uq_floor.md`. → katgpt-rs Issue 038 T5–T6.
 
 ---
 
