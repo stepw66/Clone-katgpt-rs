@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-04
 **Plan:** [katgpt-rs/.plans/376_velocity_field_ensemble_primitive.md](../.plans/376_velocity_field_ensemble_primitive.md) Phase 6
-**Issue:** [katgpt-rs/.issues/038_velocity_field_ensemble_uq_conformal_floor.md](../.issues/038_velocity_field_ensemble_uq_conformal_floor.md)
+**Issue:** `038_velocity_field_ensemble_uq_conformal_floor` (resolved, removed — this benchmark is the canonical record; recover via `git show fce6e44b^:.issues/038_velocity_field_ensemble_uq_conformal_floor.md`)
 **Rule:** "Report the Floor" (Research 322, Plan 340, Issue 010) — any UQ-bearing primitive MUST beat `ConformalIntervalCalibrator<SeasonalNaiveForecaster>` (m=1) on CRPS / coverage / Winkler.
 
 ---
@@ -124,7 +124,7 @@ Adapter: `VfeForecastAdapter` (in the test file)
 ## Cross-References
 
 - **Plan 376 Phase 6:** `.plans/376_velocity_field_ensemble_primitive.md`
-- **Issue 038 (the gate):** `.issues/038_velocity_field_ensemble_uq_conformal_floor.md`
+- **Issue 038 (the gate, resolved + removed):** `.benchmarks/376_uq_floor.md` (this file) is the canonical record. The original issue tracked the conformal-floor gate per the UQ-bearing primitive GOAT extension (Issue 010); recoverable via `git show fce6e44b^:.issues/038_velocity_field_ensemble_uq_conformal_floor.md`.
 - **Issue 010 (the rule):** `.benchmarks/010_report_the_floor_consolidated.md`
 - **Plan 340 (the floor):** `ConformalIntervalCalibrator<SeasonalNaiveForecaster>` (m=1, default-on)
 - **Floor harness:** `crates/katgpt-core/src/conformal/floor_harness.rs` — `run_floor_comparison`, `UqPrimitiveUnderTest`, `FloorAdapter`

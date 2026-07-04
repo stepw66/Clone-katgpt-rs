@@ -574,7 +574,7 @@ pub fn direction_vector_decode<const N: usize>(
 - [x] **T3.4** Audit: riir-games `scalar_projection.rs` SHOULD be refactored
       to call this (out of scope here — note as cleanup follow-up in
       `.issues/`).
-      *(Filed as [`.issues/033_scalar_projection_direction_vector_decode_refactor.md`](../.issues/033_scalar_projection_direction_vector_decode_refactor.md).
+      *(Filed as `033_scalar_projection_direction_vector_decode_refactor` (removed; recover via `git show fce6e44b^:.issues/033_scalar_projection_direction_vector_decode_refactor.md`).
       `project_pooled_to_scalars` duplicates the `direction_vector_decode` dot+sigmoid
       math inline. Low-severity cleanup; the actual refactor is tracked there with
       the type-bridging complication + acceptance gates.)*

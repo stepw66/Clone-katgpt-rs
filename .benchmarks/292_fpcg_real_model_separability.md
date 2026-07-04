@@ -1,7 +1,7 @@
 # Benchmark 292 (Real-Model): FPCG Refusal-Direction Separability on Gemma 2 2B
 
 **Plan:** [`katgpt-rs/.plans/292_future_probe_controlled_generation.md`](../.plans/292_future_probe_controlled_generation.md)
-**Issue:** [`katgpt-rs/.issues/032_fpcg_phase4_training_blocker.md`](../.issues/032_fpcg_phase4_training_blocker.md)
+**Issue:** `032_fpcg_phase4_training_blocker` (resolved, removed — this benchmark is the canonical record; recover via `git show fce6e44b^:.issues/032_fpcg_phase4_training_blocker.md`)
 **Mechanism-level gate:** [`katgpt-rs/.benchmarks/292_fpcg_goat.md`](292_fpcg_goat.md)
 **Test:** [`riir-ai/crates/riir-engine/tests/bench_292_fpcg_real_model.rs`](../../riir-ai/crates/riir-engine/tests/bench_292_fpcg_real_model.rs)
 **Date:** 2026-07-03
@@ -241,7 +241,7 @@ Expected runtime: ~4 min (separability) + ~2 min (causal) + ~2.75 min (G1) + ~12
 
 ## Cross-references
 
-- **Issue 032:** [`katgpt-rs/.issues/032_fpcg_phase4_training_blocker.md`](../.issues/032_fpcg_phase4_training_blocker.md) — the blocker this resolves (the "no GGUF on disk" claim was false; the model was in `riir-train/data/`).
+- **Issue 032** (resolved, removed): the blocker this benchmark resolves — the "no GGUF on disk" claim was false; the model was in `riir-train/data/gemma-2-2b-it-f16.gguf`. This benchmark is the canonical record; the original issue is recoverable via `git show fce6e44b^:.issues/032_fpcg_phase4_training_blocker.md`.
 - **Mechanism-level gate:** [`katgpt-rs/.benchmarks/292_fpcg_goat.md`](292_fpcg_goat.md) — G1–G7 PASS at the synthetic-corpus level.
 - **Test:** [`riir-ai/crates/riir-engine/tests/bench_292_fpcg_real_model.rs`](../../riir-ai/crates/riir-engine/tests/bench_292_fpcg_real_model.rs)
 - **Residual capture:** `forward_gemma2_trace` in `riir-engine/src/transformer/gemma2.rs` (the per-layer residual trace, reused from Plan 360's debug infrastructure).
