@@ -4,8 +4,12 @@
 > "Create issue at ./issues for optimization or refactor task".
 > Numbering follows the shared global counter (latest: 365 in `.benchmarks/`).
 
-Status: **OPEN** — soft / incremental extraction
+Status: **✅ DONE** — all extraction tasks shipped in `51780aba` (2026-07-02);
+per-file checkboxes closed retroactively 2026-07-04 after re-verification
+(`cargo check --all-features` green). Target B deferrals remain documented
+inline; only Target B (2 files) would re-open this issue if pursued.
 Created: 2026-07-02
+Resolved: 2026-07-04 (checkbox closure; extraction shipped 2026-07-02)
 Type: Refactor / modularity
 Related: Issue 013 (katgpt-speculative crate creation, collapsed inline)
 
@@ -45,13 +49,13 @@ These are genuinely speculative-decoding primitives. Move to the existing
 `crates/katgpt-speculative/src/` and re-export from root `speculative::` via
 `pub use katgpt_speculative::...` (mirrors the dd_tree/dflash precedent).
 
-#### NFCoT cluster (move as a unit — internal cross-refs)
+#### NFCoT cluster (move as a unit — internal cross-refs) — ✅ SHIPPED (`51780aba`)
 
-- [ ] `nf_flow.rs` (839 LoC) — FlowScore core. Prod dep: `katgpt_core::simd::fast_sigmoid` only.
-- [ ] `nf_flow_budget.rs` (342 LoC) — std-only. Feature: `nf_flow_budget`.
-- [ ] `nf_flow_gate.rs` (286 LoC) — std-only. Feature: `nf_flow_gate`.
-- [ ] `nf_flow_mux.rs` (193 LoC) — std-only. Feature: `nf_flow_score` + `mux_pruner`.
-- [ ] `nf_flow_fold.rs` (256 LoC) — dep: `super::nf_flow::flow_score`. Moves with cluster.
+- [x] `nf_flow.rs` (839 LoC) — FlowScore core. Prod dep: `katgpt_core::simd::fast_sigmoid` only. → `crates/katgpt-speculative/src/nf_flow.rs`
+- [x] `nf_flow_budget.rs` (342 LoC) — std-only. Feature: `nf_flow_budget`. → `crates/katgpt-speculative/src/nf_flow_budget.rs`
+- [x] `nf_flow_gate.rs` (286 LoC) — std-only. Feature: `nf_flow_gate`. → `crates/katgpt-speculative/src/nf_flow_gate.rs`
+- [x] `nf_flow_mux.rs` (193 LoC) — std-only. Feature: `nf_flow_score` + `mux_pruner`. → `crates/katgpt-speculative/src/nf_flow_mux.rs`
+- [x] `nf_flow_fold.rs` (256 LoC) — dep: `super::nf_flow::flow_score`. Moves with cluster. → `crates/katgpt-speculative/src/nf_flow_fold.rs`
 - [-] `nf_flow_generator.rs` (281 LoC) — dep: `super::spec_generator` (root sibling). DEFER: stays in root; depends on `speculative_generator` root module.
 - [-] `nf_flow_qgf.rs` (625 LoC) — dep: `super::spec_generator` + `katgpt_core::qgf`. DEFER: stays in root.
 
@@ -64,15 +68,15 @@ These are genuinely speculative-decoding primitives. Move to the existing
 - [x] `ppot/rank.rs` (642 LoC) — dep: `katgpt_core::traits::ScreeningPruner` (fixed from `crate::speculative::types` which is private cross-crate).
 - [-] `ppot/resample.rs` (966 LoC) — 12 root refs. DEFER: high coupling, stays in root.
 
-#### Pure-std leaves (independent, move individually)
+#### Pure-std leaves (independent, move individually) — ✅ SHIPPED (`51780aba`)
 
-- [ ] `branch_confidence.rs` (199 LoC) — union-bound scorer trait. Feature: `union_bound_confidence`. std-only.
-- [ ] `prefix_scheduler.rs` (792 LoC) — hardware-aware SPS scheduler. Feature: `hardware_aware_scheduler`. std-only.
-- [ ] `correlation_budget.rs` (323 LoC) — budget allocator. Feature: `corr_budget`. std-only.
-- [ ] `vocab_coreset.rs` (159 LoC) — coreset selection. Feature: `vocab_coreset`. std-only.
-- [ ] `pathway_tracker.rs` (173 LoC) — trajectory tracking. Feature: `pathway_tracker`. std-only.
-- [ ] `blueprint.rs` (129 LoC) — blueprint pass. Feature: `and_or_dtree`. std-only.
-- [ ] `decomp_reviewer.rs` (192 LoC) — decomposition reviewer. Feature: `and_or_dtree`. std-only.
+- [x] `branch_confidence.rs` (199 LoC) — union-bound scorer trait. Feature: `union_bound_confidence`. std-only. → `crates/katgpt-speculative/src/branch_confidence.rs`
+- [x] `prefix_scheduler.rs` (792 LoC) — hardware-aware SPS scheduler. Feature: `hardware_aware_scheduler`. std-only. → `crates/katgpt-speculative/src/prefix_scheduler.rs`
+- [x] `correlation_budget.rs` (323 LoC) — budget allocator. Feature: `corr_budget`. std-only. → `crates/katgpt-speculative/src/correlation_budget.rs`
+- [x] `vocab_coreset.rs` (159 LoC) — coreset selection. Feature: `vocab_coreset`. std-only. → `crates/katgpt-speculative/src/vocab_coreset.rs`
+- [x] `pathway_tracker.rs` (173 LoC) — trajectory tracking. Feature: `pathway_tracker`. std-only. → `crates/katgpt-speculative/src/pathway_tracker.rs`
+- [x] `blueprint.rs` (129 LoC) — blueprint pass. Feature: `and_or_dtree`. std-only. → `crates/katgpt-speculative/src/blueprint.rs`
+- [x] `decomp_reviewer.rs` (192 LoC) — decomposition reviewer. Feature: `and_or_dtree`. std-only. → `crates/katgpt-speculative/src/decomp_reviewer.rs`
 
 ### Target B — `katgpt-core` (generic math/stats, misfiled under speculative)
 
