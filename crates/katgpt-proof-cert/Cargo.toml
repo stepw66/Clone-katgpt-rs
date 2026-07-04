@@ -1,0 +1,29 @@
+[package]
+name = "katgpt-proof-cert"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Hierarchical GOAT Proof Certificates (Plan 145, Research 106). Standalone, serializable proof certificates with dependency chains, topological verification, and blake3 checksum integrity. Extracted from katgpt-rs root per Proposal 003 Phase 12 (2026-07-04)."
+repository = "https://github.com/katopz/katgpt-rs"
+keywords = ["proof-certificate", "goat", "verification", "wasm", "modelless"]
+categories = ["algorithms", "development-tools"]
+publish = false  # only katgpt-core ships to crates.io
+
+[dependencies]
+# serde: ProofCertificate + chain serialization (always-on).
+serde = { version = "1", features = ["derive"] }
+# postcard: binary persistence format for certificate bundles (serde_impls.rs).
+# Always-on — `save_certificates` / `load_certificates` use it unconditionally.
+postcard = { version = "1", features = ["alloc"] }
+# blake3: checksum integrity for saved certificate bundles. Always-on —
+# `serde_impls::save_certificates` and `verify_checksum` use it unconditionally
+# (the always-on binary format includes a checksum). The `wasm_proof_witness`
+# feature additionally uses it for `WasmProofWitness` hashing.
+blake3 = "1"
+
+[features]
+default = []
+
+# Opt-in: WASM proof witness generation. Adds the witness-generation code
+# path (the blake3 dep is already always-on for serde_impls).
+wasm_proof_witness = []

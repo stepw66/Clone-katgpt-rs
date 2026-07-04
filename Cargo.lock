@@ -1875,6 +1875,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "katgpt-proof-cert"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "postcard",
+ "serde",
+]
+
+[[package]]
 name = "katgpt-pruners"
 version = "0.1.0"
 dependencies = [
@@ -1931,6 +1940,7 @@ dependencies = [
  "katgpt-forward",
  "katgpt-kv",
  "katgpt-percepta",
+ "katgpt-proof-cert",
  "katgpt-pruners",
  "katgpt-quant",
  "katgpt-ruliology",

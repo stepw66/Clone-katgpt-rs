@@ -207,8 +207,16 @@ pub use katgpt_speculative::precision_aware_draft;
 #[doc(alias = "graph_search")]
 #[doc(alias = "monte_carlo")]
 pub mod progressive_mcgs;
+// Phase 12 absorption (Proposal 003, 2026-07-04): module moved to katgpt-proof-cert.
+// Re-export preserves `katgpt_rs::proof_cert::*` paths. The `conditional_proof!`
+// macro is also re-exported via `#[macro_export]` at the leaf crate root.
 #[cfg(feature = "proof_cert")]
-pub mod proof_cert;
+pub use katgpt_proof_cert as proof_cert;
+// Macro re-export so `katgpt_rs::conditional_proof!` continues to resolve after
+// the move. `#[macro_export]` at the leaf places it at the leaf crate root; the
+// `pub use` here mirrors the leaf's macro into the root crate's macro namespace.
+#[cfg(feature = "proof_cert")]
+pub use katgpt_proof_cert::conditional_proof;
 pub mod pruners;
 // DenseMesh — latent node network for modelless inference (Plan 266, Research 234).
 #[cfg(feature = "dense_mesh")]

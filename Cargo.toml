@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/katgpt-attn", "crates/katgpt-attn-match", "crates/katgpt-band", "crates/katgpt-claim", "crates/katgpt-core", "crates/katgpt-dec", "crates/katgpt-deprecated", "crates/katgpt-forward", "crates/katgpt-hla", "crates/katgpt-kv", "crates/katgpt-micro-belief", "crates/katgpt-percepta", "crates/katgpt-personality", "crates/katgpt-pruners", "crates/katgpt-quant", "crates/katgpt-ruliology", "crates/katgpt-sense", "crates/katgpt-sleep", "crates/katgpt-sparse", "crates/katgpt-spectral", "crates/katgpt-speculative", "crates/katgpt-tokenizer", "crates/katgpt-transformer", "crates/katgpt-types", "crates/katgpt-validator", "."]
+members = ["crates/katgpt-attn", "crates/katgpt-attn-match", "crates/katgpt-band", "crates/katgpt-claim", "crates/katgpt-core", "crates/katgpt-dec", "crates/katgpt-deprecated", "crates/katgpt-forward", "crates/katgpt-hla", "crates/katgpt-kv", "crates/katgpt-micro-belief", "crates/katgpt-percepta", "crates/katgpt-personality", "crates/katgpt-proof-cert", "crates/katgpt-pruners", "crates/katgpt-quant", "crates/katgpt-ruliology", "crates/katgpt-sense", "crates/katgpt-sleep", "crates/katgpt-sparse", "crates/katgpt-spectral", "crates/katgpt-speculative", "crates/katgpt-tokenizer", "crates/katgpt-transformer", "crates/katgpt-types", "crates/katgpt-validator", "."]
 resolver = "3"
 
 [package]
@@ -111,6 +111,12 @@ katgpt-spectral = { path = "crates/katgpt-spectral" }
 # each module so `katgpt_rs::sparse_task_vector::*` /
 # `katgpt_rs::specialist_projection::*` paths continue to resolve.
 katgpt-sparse = { path = "crates/katgpt-sparse" }
+# katgpt-proof-cert (Proposal 003 Phase 12, 2026-07-04): extracted hierarchical GOAT
+# proof certificates (Plan 145, Research 106). Optional path dep (gated by the
+# `proof_cert` feature); the `wasm_proof_witness` feature additionally enables
+# the blake3-bearing subset. Root re-exports as `katgpt_rs::proof_cert::*` for
+# back-compat (macro `$crate::proof_cert::*` paths preserved via the re-export shim).
+katgpt-proof-cert = { path = "crates/katgpt-proof-cert", optional = true }
 # katgpt-kv (Issue 015 Phase 3): extracted KV-cache namespace. Non-optional — the
 # root re-exports each sub-module behind its historical feature flag
 # (`kv_share`, `osc_kv`, `cs_kv_probe`, `shard_kv`, `sp_kv`, `still_kv`, `kvarn`,
@@ -336,7 +342,7 @@ cache_prune = ["katgpt-kv/cache_prune"]  # CachePrune SAT + rolling hash + sensi
 state_source = ["bandit", "katgpt-pruners/state_source"]  # State-Source Modelless Distillation — state-visitation tracking + P-UCB + retention (Plan 142, Research 103)
 nexus_elo = ["state_source", "proof_sketch_evolution", "katgpt-pruners/nexus_elo"]  # Nexus Elo — Plackett-Luce + P-UCB + goal cache for DDTree/SR²AM (Plan 143, Research 104)
 skill_opt = ["katgpt-core/skill_opt"]  # SkillOpt text-space skill optimization — generic framework for game rule optimization (Plan 144, Research 105). Phase 10 (2026-07-04): module moved to katgpt-core; root forwards.
-proof_cert = []  # Hierarchical GOAT Proof Certificates — formal verification methodology (Plan 145, Research 106)
+proof_cert = ["dep:katgpt-proof-cert"]  # Hierarchical GOAT Proof Certificates — formal verification methodology (Plan 145, Research 106). Phase 12 (2026-07-04): module moved to katgpt-proof-cert; root forwards.
 tf_loop = ["katgpt-core/tf_loop", "lt2_looped", "katgpt-forward/tf_loop", "katgpt-transformer/tf_loop"]  # Training-free loop wrapper — ODE-refined sub-stepping (Plan 136). Forwarded to katgpt-forward so ForwardContext.tf_* window buffers compile (Issue 007 Phase F). Phase 9: bulk moved to katgpt-transformer; only `should_apply_pruner_at_iteration` stays in root shim (katgpt-pruners cycle).
 and_or_dtree = ["proof_sketch_evolution", "bandit", "katgpt-core/and_or_dtree", "katgpt-pruners/and_or_dtree"]  # AND-OR DDTree — blueprint-driven subgoal decomposition (Plan 190, Research 170)
 partial_scoring = ["bandit", "katgpt-core/partial_scoring", "katgpt-pruners/partial_scoring"]  # PartialScorer graduated reward for game episodes (Plan 191, Research 171)
@@ -505,7 +511,7 @@ llmexec_guard = ["katgpt-core/llmexec_guard"]  # Default-on: entropy-driven veri
 hoare_pruner = ["llmexec_guard", "katgpt-pruners/hoare_pruner", "katgpt-validator/hoare_pruner"]  # Opt-in: predicate propagation (Plan 223). Phase 11 (2026-07-04): also forwards to katgpt-validator/hoare_pruner so the SynPruner::propagate impl (line 84 of syn_pruner.rs, moved to katgpt-validator) compiles when both validator + hoare_pruner are on.
 trajectory_doctor = ["hoare_pruner", "katgpt-pruners/trajectory_doctor"]  # Opt-in: failure localization (Plan 223)
 workflow_lattice = ["hoare_pruner", "katgpt-pruners/workflow_lattice"]  # Opt-in: sigmoid-graded relevance (Plan 223)
-wasm_proof_witness = []  # Opt-in: proof certificates (Plan 223)
+wasm_proof_witness = ["proof_cert", "katgpt-proof-cert/wasm_proof_witness"]  # Opt-in: proof certificates (Plan 223). Phase 12 (2026-07-04): module moved to katgpt-proof-cert; root forwards (implies proof_cert).
 posterior_evolution = ["bandit", "katgpt-pruners/posterior_evolution"]  # Posterior-Guided Pruner Evolution — BAKE precision + MUSE lifecycle (Plan 239, Research 211, GOAT 8/8, default-ON)
 shard_embedding = []  # Shard Embedding Projection — JL random orthogonal projection for shard similarity (Plan 230, GOAT candidate)
 breakeven_routing = ["katgpt-transformer/breakeven_routing"]  # Breakeven complexity cost-aware inference routing — per-tier amortization tracking (Plan 250 GOAT 7/7, Research 218) — default-ON. Phase 9: also forwards to katgpt-transformer (dense_mesh adaptive_width BreakevenBandit path).

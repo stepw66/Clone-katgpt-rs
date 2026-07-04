@@ -9,10 +9,10 @@ macro_rules! conditional_proof {
         conditions = [$( $cond:expr ),* $(,)?],
         implies = [$( $imp:expr ),* $(,)?]
     ) => {{
-        $crate::proof_cert::ProofCertificate {
+        $crate::ProofCertificate {
             id: $id.into(),
             property: $prop,
-            result: $crate::proof_cert::ProofResult::Conditional {
+            result: $crate::ProofResult::Conditional {
                 value: $val,
                 threshold: $thresh,
                 conditions: vec![$( $cond.into() ),*],
@@ -20,7 +20,7 @@ macro_rules! conditional_proof {
             prerequisites: vec![],
             implies: vec![$( $imp.into() ),*],
             explanation: String::new(),
-            evidence: $crate::proof_cert::ProofEvidence::Custom {
+            evidence: $crate::ProofEvidence::Custom {
                 data: Vec::new(),
             },
             timestamp: std::time::SystemTime::now()
