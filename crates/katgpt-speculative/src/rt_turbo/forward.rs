@@ -27,7 +27,7 @@
 
 use crate::rt_turbo::top_p::select_top_p_blockwise;
 use crate::rt_turbo::{HeadCalibration, RetrievalProjection};
-use crate::types::RtTurboConfig;
+use katgpt_types::RtTurboConfig;
 
 // ---------------------------------------------------------------------------
 // Result Types
@@ -494,7 +494,7 @@ impl RtTurboCache {
 mod tests {
     use super::*;
     use crate::rt_turbo::calibration::calibrate_from_scores;
-    use crate::types::RtTurboConfig;
+    use katgpt_types::RtTurboConfig;
 
     // -----------------------------------------------------------------------
     // Helpers

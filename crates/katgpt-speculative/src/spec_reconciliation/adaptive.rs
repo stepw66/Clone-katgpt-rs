@@ -8,7 +8,7 @@
 
 use super::reconciler::{ReconciliationResult, SpecReconciler};
 use super::types::{ReconciliationConfig, ReconciliationVerdict, TrajectoryPoint};
-use crate::types::Rng;
+use katgpt_types::Rng;
 
 /// Number of threshold arms (strict, medium, lenient).
 const NUM_ARMS: usize = 3;

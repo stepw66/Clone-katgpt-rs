@@ -24,6 +24,51 @@ pub mod window;
 #[cfg(all(feature = "spechop", feature = "cache_prune"))]
 pub mod segment_match;
 
+/// How ScreeningPruner is applied across hops in SpecHop (Plan 171).
+///
+/// Local mirror of `katgpt_pruners::configurator_bandit::PrunerSchedule` —
+/// defined here to avoid a katgpt-speculative → katgpt-pruners cycle
+/// (katgpt-pruners already depends on katgpt-speculative for sr2am_configurator
+/// forwarding). Only the two variants spechop uses are modeled; the
+/// `EntropyRouted` variant (gated by `directional_credit` in katgpt-pruners)
+/// is not relevant at the hop level.
+///
+/// When `thinking_prune` is enabled at the root, callers passing
+/// `katgpt_pruners::PrunerSchedule` should convert via `.into()` or match
+/// before calling `build_hop_dd_tree_with_schedule`.
+#[cfg(feature = "thinking_prune")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum SpechopSchedule {
+    /// Apply the full ScreeningPruner at every hop/loop step.
+    Uniform,
+    /// Apply FrozenBaseGuard: intermediate hops accept all (relevance 1.0),
+    /// only the final hop applies the full ScreeningPruner.
+    /// This is the default — pure speedup, no quality loss.
+    #[default]
+    FrozenBaseGuard,
+}
+
+#[cfg(feature = "thinking_prune")]
+impl SpechopSchedule {
+    /// Returns true if this schedule applies full screening at every step.
+    #[inline]
+    pub fn is_uniform(&self) -> bool {
+        matches!(self, Self::Uniform)
+    }
+
+    /// Determine if the given hop should apply full screening.
+    ///
+    /// For `FrozenBaseGuard`: only true when `hop_index == total_hops - 1`.
+    /// For `Uniform`: always true.
+    #[inline]
+    pub fn should_screen_full(&self, hop_index: usize, total_hops: usize) -> bool {
+        match self {
+            Self::Uniform => true,
+            Self::FrozenBaseGuard => hop_index >= total_hops.saturating_sub(1),
+        }
+    }
+}
+
 pub use cost_model::{
     InferenceStats, bounded_rel_lat, compute_optimal_k, oracle_rel_lat, should_activate_spechop,
     spechop_configurator_reward, starvation_prob,

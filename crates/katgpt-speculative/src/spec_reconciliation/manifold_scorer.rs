@@ -5,9 +5,22 @@
 //! for offline trajectory verification (Plan 177, Task T4).
 
 use super::types::{ReconciliationConfig, TrajectoryPoint};
-use crate::speculative::types::ScreeningPruner;
+use crate::ScreeningPruner;
 #[cfg(test)]
-use crate::benchmark::cosine_similarity;
+fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
+    // Inlined local copy — the historical `katgpt_rs::benchmark::cosine_similarity`
+    // lives in the root crate, which katgpt-speculative cannot depend on (cycle).
+    if a.len() != b.len() || a.is_empty() {
+        return 0.0;
+    }
+    let dot: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
+    let na: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
+    let nb: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
+    if na < f32::EPSILON || nb < f32::EPSILON {
+        return 0.0;
+    }
+    dot / (na * nb)
+}
 
 /// Cosine-similarity scorer over a flattened speculative manifold.
 ///

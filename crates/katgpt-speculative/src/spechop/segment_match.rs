@@ -10,7 +10,7 @@
 
 use std::collections::VecDeque;
 
-use crate::cache_prune::RollingHash;
+use katgpt_kv::cache_prune::RollingHash;
 
 // ---------------------------------------------------------------------------
 // IndexedSegment

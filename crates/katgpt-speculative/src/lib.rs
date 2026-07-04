@@ -52,6 +52,32 @@ pub mod vocab_coreset;
 #[cfg(feature = "ppot")]
 pub mod ppot;
 
+// ── Proposal 003 Phase 6 absorptions (2026-07-04) ──────────────────────────
+// Modules moved from katgpt-rs/src/. Each is feature-gated to mirror its
+// historical root gate. Root re-exports preserve `katgpt_rs::<module>::*` paths.
+
+// distill umbrella — only ilc moved here (trd stays root: fold dep). peira
+// lives in katgpt-spectral; root re-exports it at katgpt_rs::distill::peira.
+#[cfg(feature = "ilc_distill")]
+pub mod distill;
+
+// RTPurbo retrieval-head sparse decode (Plan 126).
+#[cfg(feature = "rt_turbo")]
+pub mod rt_turbo;
+
+// PASD boundary-aware draft scoring (Plan 227 Phase 4).
+#[cfg(feature = "precision_aware_draft")]
+pub mod precision_aware_draft;
+
+// SpecHop continuous multi-hop speculation pipeline (Plan 131).
+#[cfg(feature = "spechop")]
+pub mod spechop;
+
+// Speculative Reconciliation Engine (Plan 177). Originally ungated in root
+// (the `spec_reconciliation = []` feature was vestigial — the module compiled
+// unconditionally). Preserved here as ungated to match historical behavior.
+pub mod spec_reconciliation;
+
 // Re-export katgpt_core's speculative types + traits so consumers can import
 // everything from one place (`katgpt_speculative::{TreeNode, ConstraintPruner, …}`).
 pub use katgpt_core::speculative::types::*;

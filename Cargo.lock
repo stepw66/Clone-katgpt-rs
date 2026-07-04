@@ -1974,11 +1974,17 @@ dependencies = [
 name = "katgpt-speculative"
 version = "0.1.0"
 dependencies = [
+ "blake3",
  "fastrand",
  "katgpt-core",
+ "katgpt-kv",
  "katgpt-transformer",
  "katgpt-types",
+ "postcard",
  "rayon",
+ "serde",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]

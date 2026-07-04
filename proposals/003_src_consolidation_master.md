@@ -485,9 +485,53 @@ Ordering: foundation first (hoists, splits), then domain crates biggest-first.
     to this change; PASSES in release). All examples + benches referencing the
     moved modules build through the re-export chain.
   **DONE 2026-07-04.**
-- [ ] **Phase 6 — `katgpt-speculative` absorption.** `distill/{ilc,trd}`,
-  `spechop`, `rt_turbo`, `precision_aware_draft`, `sparse_compose`,
-  `spec_reconciliation`.
+- [x] **Phase 6 — `katgpt-speculative` absorption.** `distill/ilc`, `spechop`,
+  `rt_turbo`, `precision_aware_draft`, `spec_reconciliation`.
+  - **Scope reduction** (2026-07-04): `distill/trd` + `sparse_compose` kept in
+    root — both have hard deps on root modules that would create cycles:
+    - **`distill/trd`** — its `prefold_prefix` path depends on `crate::fold::*`
+      (transformer-bound glue, Phase 12 scope). Moving TRD to katgpt-speculative
+      would require katgpt-speculative → katgpt-rs (cycle). The blocker is
+      narrow (`chain_fold`-gated path only); trd stays root alongside `fold/`
+      until fold's own destination (Phase 9 or 12) lands.
+    - **`sparse_compose`** — depends on `crate::sparse_task_vector::SparseTaskVector`
+      (Phase 10 target, stays in root). Same cycle problem. Blocked until Phase 10.
+  - Moved 5 modules (16 files total): `distill/ilc.rs` (1), `spechop/` (9),
+    `rt_turbo/` (7), `precision_aware_draft.rs` (1), `spec_reconciliation/` (7).
+  - **`distill/mod.rs`** in katgpt-speculative created — re-exports `ilc` (the
+    only remaining content; peira lives in katgpt-spectral, trd stays root).
+    Root's `src/distill/mod.rs` now re-exports `katgpt_speculative::distill::ilc`.
+  - Import rewrites: `crate::speculative::*` → `crate::*` (ilc); `crate::types::*`
+    → `katgpt_types::*`; `crate::cache_prune::*` → `katgpt_kv::cache_prune::*`;
+    `crate::speculative::types::*` → `crate::*` (spechop, spec_reconciliation);
+    `crate::benchmark::cosine_similarity` → inlined local fn in manifold_scorer
+    (test-only, cycle-safe).
+  - **`SpechopSchedule` new type** in `spechop/mod.rs` — local 2-variant mirror
+    of `katgpt_pruners::PrunerSchedule` (Uniform + FrozenBaseGuard) for
+    `build_hop_dd_tree_with_schedule`. Needed because katgpt-pruners already
+    depends on katgpt-speculative (cycle). The root-level token-level
+    `build_dd_tree_screened_with_schedule` in `src/speculative/dd_tree.rs` keeps
+    using `katgpt_pruners::PrunerSchedule` directly (no cycle — root has
+    katgpt-pruners as a regular dep).
+  - **Feature gates** added to katgpt-speculative: `ilc_distill`, `spechop`,
+    `rt_turbo`, `precision_aware_draft`, `spec_reconciliation`, `thinking_prune`,
+    `recfm`, `adaptive_causal_calibration`, `cache_prune` (forwards to
+    katgpt-kv), `bandit` (alias, always-on via spechop). katgpt-speculative now
+    has optional deps on `katgpt-kv` (cache_prune), `serde`, `postcard`, `blake3`.
+  - Root Cargo.toml forwards: `spechop`, `rt_turbo`, `precision_aware_draft`,
+    `ilc_distill`, `spec_reconciliation`, `thinking_prune`, `recfm`,
+    `adaptive_causal_calibration` all updated to chain `katgpt-speculative/<feature>`.
+  - Root re-exports: 5 modules `pub mod X` → `pub use katgpt_speculative::X`
+    (precision_aware_draft, rt_turbo, spechop, spec_reconciliation; distill/mod.rs
+    re-routes ilc). Historical `katgpt_rs::*` paths preserved.
+  - GOAT gate G3: `cargo check --workspace --all-features` clean; default clean;
+    `--no-default-features` clean. 471 katgpt-speculative tests pass.
+    1491 root lib tests pass (down from 1554 — ~63 moved with the modules,
+    counted in the 471 above). All 5 affected integration tests green:
+    bench_136_ilc_goat (1), bench_168_recfm_goat (6), bench_171_thinking_prune
+    (1), test_126_rt_turbo_goat (6), precision_aware_draft_goat (5),
+    spec_reconciliation_bench (2), spec_reconciliation_proof (11). Clippy clean.
+  **DONE 2026-07-04.**
 - [ ] **Phase 7 — `katgpt-sleep` absorption.** `sleep/`, `closure_mining`.
 - [ ] **Phase 8 — `katgpt-pruners` absorption.** `closure_wire`, `screening`.
   Fold `rerank.rs` → `katgpt-attn-match`.

@@ -6,7 +6,7 @@
 //!
 //! Feature-gated with both `rt_turbo` and `cache_prune`.
 
-use crate::cache_prune::SummedAreaTable;
+use katgpt_kv::cache_prune::SummedAreaTable;
 
 /// Compute per-head retrieval scores using SAT for O(1) rectangular region queries.
 ///

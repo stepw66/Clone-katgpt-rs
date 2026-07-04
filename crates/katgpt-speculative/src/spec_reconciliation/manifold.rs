@@ -10,7 +10,7 @@
 use std::f32::consts::{PI, TAU};
 
 use super::types::{ReconciliationConfig, TrajectoryPoint};
-use crate::types::Rng;
+use katgpt_types::Rng;
 
 // ── Trait ───────────────────────────────────────────────────────
 

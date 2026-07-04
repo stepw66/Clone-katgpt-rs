@@ -12,10 +12,20 @@ publish = false  # only katgpt-core ships to crates.io
 [dependencies]
 # Types + traits + speculative type substrate (TreeNode, DraftResult, ConstraintPruner, etc.)
 katgpt-core = { path = "../katgpt-core" }
-# Config, Rng, InferenceResult
+# Config, Rng, InferenceResult, RetrievalHeadRole, RtTurboConfig
 katgpt-types = { path = "../katgpt-types" }
 # Parallel BFS expansion
 rayon = "1.10"
+# serde for rt_turbo calibration/projection serialization (Plan 126).
+serde = { version = "1", features = ["derive"], optional = true }
+# postcard for rt_turbo binary calibration roundtrip (Plan 126).
+postcard = { version = "1", features = ["alloc"], optional = true }
+# blake3 for spechop segment_match content-addressed segment hashing.
+blake3 = { version = "1", optional = true }
+# katgpt-kv for cache_prune (RollingHash, SummedAreaTable) consumed by spechop
+# segment_match + rt_turbo sat_retrieval. Optional — only needed when those
+# modules are enabled (Proposal 003 Phase 6).
+katgpt-kv = { path = "../katgpt-kv", default-features = false, optional = true }
 
 [features]
 # Forward sr2am_configurator to katgpt-types so `build_inference_result` can
@@ -36,6 +46,62 @@ lodestar = []
 # four zero-root-coupling leaves (Issue 003). Forwarded from root `ppot`.
 ppot = []
 
+# ── Proposal 003 Phase 6 absorptions (2026-07-04) ──────────────────────────
+# Each feature gates one module moved from katgpt-rs/src/. Root forwards these
+# so historical `katgpt_rs::<module>::*` paths keep resolving via re-export.
+
+# ILC Iterative Latent Clustering — synonym-aware DDTree pruning (Research 136).
+# Moved from src/distill/ilc.rs. No extra deps (uses crate-local dd_tree +
+# re-exported ScreeningPruner/TreeNode + katgpt_types::Config).
+ilc_distill = []
+
+# SpecHop continuous multi-hop speculation pipeline (Plan 131, Research 091).
+# Moved from src/spechop/. Pulls katgpt-kv (cache_prune::RollingHash for
+# segment_match) and serde (IndexedSegment serialization).
+spechop = ["dep:katgpt-kv", "cache_prune", "dep:serde", "dep:blake3", "bandit"]
+
+# bandit alias — gates BanditSpeculator in spechop (originally gated by the
+# root `bandit` feature which pulls katgpt-pruners/bandit). In katgpt-speculative
+# BanditSpeculator is generic over ScreeningPruner (no katgpt-pruners dep), so
+# this is a pure on/off switch. Always enabled by spechop.
+bandit = []
+
+# RecFM recursive cross-scale consistency — DDTree + LT2 + SpecHop (Plan 168,
+# Research 150). Gates CrossHopConfig + observation_velocity in spechop/speculator.
+# Mirrors the root `recfm = []` feature.
+recfm = []
+
+# Adaptive Causal Calibration (Proposal 004) — opt-in convenience wrapper around
+# calibrate_from_adaptive_causal in rt_turbo/calibration. Forwards to
+# katgpt-core/adaptive_causal_calibration which provides suspect_indices
+# (chained: enables katgpt-core/causal_head_importance transitively).
+adaptive_causal_calibration = ["katgpt-core/adaptive_causal_calibration"]
+
+# cache_prune forward — gates segment_match (spechop) + sat_retrieval (rt_turbo).
+# Forwards to katgpt-kv so `use katgpt_kv::cache_prune::*` resolves.
+cache_prune = ["dep:katgpt-kv", "katgpt-kv/cache_prune"]
+
+# RTPurbo retrieval-head sparse decode (Plan 126, Research 86). Moved from
+# src/rt_turbo/. Pulls katgpt-kv (cache_prune::SummedAreaTable for
+# sat_retrieval) + serde + postcard for calibration binary roundtrip.
+rt_turbo = ["cache_prune", "dep:serde", "dep:postcard"]
+
+# PASD boundary-aware draft scoring (Plan 227 Phase 4). Moved from
+# src/precision_aware_draft.rs. Zero external deps.
+precision_aware_draft = []
+
+# Speculative Reconciliation Engine — verify offline trajectories against
+# plausibility manifolds (Plan 177). Moved from src/spec_reconciliation/.
+# No extra deps beyond katgpt-types/katgpt-core (already mandatory).
+spec_reconciliation = []
+
+thinking_prune = []  # Gates the `build_hop_dd_tree_with_schedule` path in spechop/hop_tree.rs
+# (Plan 171 FrozenBaseGuard semantics). No deps — the schedule type is defined
+# locally in katgpt-speculative to avoid a katgpt-pruners cycle (katgpt-pruners
+# already depends on katgpt-speculative for sr2am_configurator forwarding).
+
 [dev-dependencies]
 katgpt-transformer = { path = "../katgpt-transformer" }
 fastrand = "2"  # correlation_budget tests (Issue 003 move from root, which has fastrand as a dep)
+serde_json = "1"  # segment_match IndexedSegment JSON roundtrip tests
+tempfile = "3"  # rt_turbo calibration save/load roundtrip tests

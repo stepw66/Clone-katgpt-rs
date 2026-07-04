@@ -178,7 +178,7 @@ impl HopSpeculator for CacheSpeculator {
 /// This filters out low-confidence predictions, improving speculator
 /// accuracy `p` at the cost of fewer speculation attempts.
 #[cfg(feature = "bandit")]
-pub struct BanditSpeculator<P: crate::speculative::types::ScreeningPruner> {
+pub struct BanditSpeculator<P: crate::ScreeningPruner> {
     /// Inner cache of action → (observation, depth, token_idx).
     cache: HashMap<String, CachedAction>,
     /// Bandit pruner for relevance scoring.
@@ -200,7 +200,7 @@ struct CachedAction {
 }
 
 #[cfg(feature = "bandit")]
-impl<P: crate::speculative::types::ScreeningPruner> BanditSpeculator<P> {
+impl<P: crate::ScreeningPruner> BanditSpeculator<P> {
     /// Create a new bandit speculator with the given pruner and threshold.
     pub fn new(pruner: P, confidence_threshold: f32) -> Self {
         Self {
@@ -240,7 +240,7 @@ impl<P: crate::speculative::types::ScreeningPruner> BanditSpeculator<P> {
 }
 
 #[cfg(feature = "bandit")]
-impl<P: crate::speculative::types::ScreeningPruner> HopSpeculator for BanditSpeculator<P> {
+impl<P: crate::ScreeningPruner> HopSpeculator for BanditSpeculator<P> {
     fn speculate(&self, action: &str) -> Result<String, SpecError> {
         let cached = self.cache.get(action).ok_or_else(|| SpecError::CacheMiss {
             action: action.to_string(),
@@ -347,7 +347,7 @@ mod tests {
             relevance: f32,
         }
 
-        impl crate::speculative::types::ScreeningPruner for FixedRelevance {
+        impl crate::ScreeningPruner for FixedRelevance {
             fn relevance(&self, _depth: usize, _token_idx: usize, _parent_tokens: &[usize]) -> f32 {
                 self.relevance
             }

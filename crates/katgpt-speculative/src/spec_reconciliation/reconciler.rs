@@ -9,7 +9,7 @@ use super::manifold::{DefaultManifoldGenerator, ManifoldGenerator};
 use super::manifold_scorer::ManifoldScorer;
 use super::reconciliation_pruner::ReconciliationPruner;
 use super::types::{ReconciliationConfig, ReconciliationVerdict, TrajectoryPoint};
-use crate::types::Rng;
+use katgpt_types::Rng;
 
 /// Reconciliation result with score breakdown.
 #[derive(Clone, Debug)]

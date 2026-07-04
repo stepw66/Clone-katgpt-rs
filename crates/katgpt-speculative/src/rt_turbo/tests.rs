@@ -7,7 +7,7 @@ use super::calibration::{
     CalibrationConfigSnapshot, HeadCalibration, HeadClassification, calibrate_from_scores,
     compute_all_retrieval_scores, compute_retrieval_score,
 };
-use crate::types::{RetrievalHeadRole, RtTurboConfig};
+use katgpt_types::{RetrievalHeadRole, RtTurboConfig};
 
 // ---------------------------------------------------------------------------
 // Helpers

@@ -97,6 +97,10 @@ pub mod collider_pruner;
 pub use katgpt_core::compression_drafter;
 #[cfg(any(feature = "gdn2_attention", feature = "wall_attention"))]
 pub use katgpt_attn::diagonal_gate;
+// Phase 6 absorption (Proposal 003, 2026-07-04): `ilc` moved to katgpt-speculative;
+// `trd` stays root (depends on `crate::fold` — transformer-bound glue). peira
+// already re-exports katgpt-spectral (Phase 4). The distill/mod.rs shim re-exports
+// ilc from katgpt-speculative so `katgpt_rs::distill::ilc::*` paths still resolve.
 #[cfg(any(
     feature = "peira_distill",
     feature = "ilc_distill",
@@ -177,8 +181,10 @@ pub mod plot;  // Issue 355 Phase 2a: gated behind `plot` feature (plotters is n
 // Substrate moved to katgpt-spectral (Proposal 003 Phase 4).
 #[cfg(feature = "orthogonal_procrustes")]
 pub use katgpt_spectral::procrustes;
+// Phase 6 absorption (Proposal 003, 2026-07-04): module moved to katgpt-speculative.
+// Re-export preserves `katgpt_rs::precision_aware_draft::*` paths.
 #[cfg(feature = "precision_aware_draft")]
-pub mod precision_aware_draft;
+pub use katgpt_speculative::precision_aware_draft;
 #[cfg(feature = "progressive_mcgs")]
 #[doc(alias = "mcts")]
 #[doc(alias = "mcgs")]
@@ -197,8 +203,10 @@ pub use katgpt_attn::rat_bridge;
 pub mod rerank;
 #[cfg(feature = "river_valley")]
 pub use katgpt_spectral::river_valley;
+// Phase 6 absorption (Proposal 003, 2026-07-04): module moved to katgpt-speculative.
+// Re-export preserves `katgpt_rs::rt_turbo::*` paths.
 #[cfg(feature = "rt_turbo")]
-pub mod rt_turbo;
+pub use katgpt_speculative::rt_turbo;
 #[cfg(feature = "ruliology")]
 pub mod ruliology;
 // Phase 5 absorption (Proposal 003, 2026-07-04): module moved to katgpt-kv.
@@ -262,9 +270,14 @@ pub mod sp_kv {
 /// Kept private; surfaced via the `sp_kv::forward` re-export above.
 #[cfg(feature = "sp_kv")]
 mod sp_kv_forward_mod;
-pub mod spec_reconciliation;
+// Phase 6 absorption (Proposal 003, 2026-07-04): module moved to katgpt-speculative.
+// Re-export preserves `katgpt_rs::spec_reconciliation::*` paths. Originally ungated
+// (the `spec_reconciliation = []` feature was vestigial); preserved as ungated.
+pub use katgpt_speculative::spec_reconciliation;
+// Phase 6 absorption (Proposal 003, 2026-07-04): module moved to katgpt-speculative.
+// Re-export preserves `katgpt_rs::spechop::*` paths.
 #[cfg(feature = "spechop")]
-pub mod spechop;
+pub use katgpt_speculative::spechop;
 #[cfg(feature = "spectral_budget")]
 pub use katgpt_spectral::spectral_budget;
 #[cfg(feature = "spectral_rank")]

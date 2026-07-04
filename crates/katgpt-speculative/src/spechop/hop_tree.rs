@@ -337,8 +337,8 @@ pub fn build_hop_dd_tree(marginals: &[HopMarginal], config: &HopTreeConfig) -> V
 /// intermediate hops relax the confidence floor to 0.0 (accept all candidates),
 /// while the final hop uses the full `confidence_floor` from config.
 ///
-/// When `schedule` is [`PrunerSchedule::Uniform`], delegates to [`build_hop_dd_tree`]
-/// unchanged. When `PrunerSchedule::FrozenBaseGuard`, intermediate hops skip
+/// When `schedule` is [`SpechopSchedule::Uniform`], delegates to [`build_hop_dd_tree`]
+/// unchanged. When `SpechopSchedule::FrozenBaseGuard`, intermediate hops skip
 /// the confidence-based pruning, reserving it for the final hop only.
 ///
 /// # Arguments
@@ -354,7 +354,7 @@ pub fn build_hop_dd_tree(marginals: &[HopMarginal], config: &HopTreeConfig) -> V
 pub fn build_hop_dd_tree_with_schedule(
     marginals: &[HopMarginal],
     config: &HopTreeConfig,
-    schedule: crate::pruners::PrunerSchedule,
+    schedule: crate::spechop::SpechopSchedule,
 ) -> Vec<HopTreeNode> {
     if marginals.is_empty() {
         return Vec::new();
@@ -1255,7 +1255,7 @@ mod tests {
     #[cfg(feature = "thinking_prune")]
     #[test]
     fn test_goat_frozen_base_guard_produces_more_nodes() {
-        use crate::pruners::PrunerSchedule;
+        use crate::spechop::SpechopSchedule;
 
         let config = HopTreeConfig {
             tree_budget: 128,
@@ -1270,9 +1270,9 @@ mod tests {
         ];
 
         let uniform_tree =
-            build_hop_dd_tree_with_schedule(&marginals, &config, PrunerSchedule::Uniform);
+            build_hop_dd_tree_with_schedule(&marginals, &config, SpechopSchedule::Uniform);
         let frozen_tree =
-            build_hop_dd_tree_with_schedule(&marginals, &config, PrunerSchedule::FrozenBaseGuard);
+            build_hop_dd_tree_with_schedule(&marginals, &config, SpechopSchedule::FrozenBaseGuard);
 
         // FrozenBaseGuard should produce at least as many nodes
         // (intermediate hops accept low-confidence candidates that Uniform rejects)
@@ -1290,7 +1290,7 @@ mod tests {
     #[cfg(feature = "thinking_prune")]
     #[test]
     fn test_goat_frozen_base_guard_zero_floor_identical() {
-        use crate::pruners::PrunerSchedule;
+        use crate::spechop::SpechopSchedule;
 
         let config = HopTreeConfig {
             tree_budget: 64,
@@ -1304,9 +1304,9 @@ mod tests {
         ];
 
         let standard = build_hop_dd_tree(&marginals, &config);
-        let uniform = build_hop_dd_tree_with_schedule(&marginals, &config, PrunerSchedule::Uniform);
+        let uniform = build_hop_dd_tree_with_schedule(&marginals, &config, SpechopSchedule::Uniform);
         let frozen =
-            build_hop_dd_tree_with_schedule(&marginals, &config, PrunerSchedule::FrozenBaseGuard);
+            build_hop_dd_tree_with_schedule(&marginals, &config, SpechopSchedule::FrozenBaseGuard);
 
         // All three should produce identical trees when floor is 0.0
         assert_eq!(standard.len(), uniform.len());
@@ -1320,7 +1320,7 @@ mod tests {
     #[cfg(feature = "thinking_prune")]
     #[test]
     fn test_goat_frozen_base_single_hop_is_final() {
-        use crate::pruners::PrunerSchedule;
+        use crate::spechop::SpechopSchedule;
 
         let config = HopTreeConfig {
             tree_budget: 64,
@@ -1334,7 +1334,7 @@ mod tests {
         )];
 
         let frozen =
-            build_hop_dd_tree_with_schedule(&marginals, &config, PrunerSchedule::FrozenBaseGuard);
+            build_hop_dd_tree_with_schedule(&marginals, &config, SpechopSchedule::FrozenBaseGuard);
 
         // Should only accept the high-confidence candidate (floor=0.5 applied at final step)
         assert_eq!(frozen.len(), 1);

@@ -14,7 +14,7 @@
 //! | Kill rate  | [`check_kill_rate`] | Chebyshev: `kill_delta / dt <= μ + σ_bound × σ` |
 
 use super::types::{ReconciliationConfig, TrajectoryPoint};
-use crate::speculative::types::ConstraintPruner;
+use crate::ConstraintPruner;
 
 // ── ReconciliationPruner ────────────────────────────────────────
 

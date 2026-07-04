@@ -23,9 +23,8 @@
 
 use std::collections::HashSet;
 
-use crate::speculative::build_dd_tree_screened;
-use crate::speculative::dd_tree::extract_parent_tokens_into;
-use crate::speculative::types::{ScreeningPruner, TreeNode};
+use crate::dd_tree::{build_dd_tree_screened, extract_parent_tokens_into};
+use crate::{ScreeningPruner, TreeNode};
 
 // ── Types ───────────────────────────────────────────────────────
 
@@ -450,7 +449,7 @@ impl<P: ScreeningPruner> ScreeningPruner for SynonymAwarePruner<P> {
 /// where C is bounded by the number of synonym clusters (O(m³) from the paper).
 pub fn build_dd_tree_screened_synonyms(
     marginals: &[&[f32]],
-    config: &crate::types::Config,
+    config: &katgpt_types::Config,
     screener: &dyn ScreeningPruner,
     chain_seed: bool,
     synonym_map: &SynonymMap,

@@ -17,7 +17,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::types::{RetrievalHeadRole, RtTurboConfig};
+use katgpt_types::{RetrievalHeadRole, RtTurboConfig};
 
 // ---------------------------------------------------------------------------
 // Types
