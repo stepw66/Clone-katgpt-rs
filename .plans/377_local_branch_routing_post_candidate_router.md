@@ -177,3 +177,5 @@ Phase 2 shipped the simplified primitive in `katgpt-core/src/branch_routing/mod.
 Phase 3 GOAT gate **PASS**: G2 router latency 51ns (argmax) / 69ns (sampled) at K=3 D=64 (target <1µs, 14-20× headroom), G4 0 allocs/100 calls, G1 22/22 tests, G3 K=1 bit-identical, G5 modelless, G6 sigmoid-not-softmax (Logistic-noise perturbation, NOT softmax). **Promoted to `default`.**
 
 Phase 4 (riir-ai per-NPC HLA routing) is optional, post-promotion, and lives in riir-ai. Training → riir-train, out of scope here.
+
+**Post-promotion follow-up (2026-07-04):** the consumer-side `impl PreservationScorer for ColliderConstraint` shim was wired in `katgpt-rs/src/collider_pruner.rs` (pure forward to the existing `collider_preservation_score` inherent method; closes Research 376 §9 deviation #3). The `collider_consistency` feature now forwards `katgpt-core/local_branch_routing`. 2 unit tests guard the wiring (`preservation_scorer_trait_forward_matches_inherent` + `collider_router_adapter_accepts_collider_constraint`).

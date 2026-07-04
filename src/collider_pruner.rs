@@ -33,6 +33,7 @@
 //! without changing behavior in the no-task regime.
 
 use katgpt_core::ConstraintPruner;
+use katgpt_core::PreservationScorer;
 
 use crate::band_conditioner::{
     BandConditioningSet, CiTestConfig, ComputeTarget, conditional_dependence_fisher_z,
@@ -381,6 +382,34 @@ impl ColliderPruner for ColliderConstraint {
     }
 }
 
+// ── PreservationScorer impl (Plan 377 Phase 2 follow-up) ────────────────────
+//
+// Wires `ColliderConstraint` into katgpt-core's `PostCandidateRouter`
+// ecosystem via the `PreservationScorer` trait. This is the one-line shim
+// noted in Research 376 §9 deviation #3: `ColliderConstraint` lives in
+// katgpt-rs root (which katgpt-core cannot depend on without a cycle), so
+// the adapter `ColliderRouterAdapter<PS: PreservationScorer>` ships generic
+// in katgpt-core and consumers impl the trait here.
+//
+// Pure forward to the existing `collider_preservation_score` inherent method
+// — zero new logic, zero new compute. The trait method and the inherent
+// method have byte-identical signatures.
+
+impl PreservationScorer for ColliderConstraint {
+    /// Forward to the inherent `collider_preservation_score`. Score ∈ [0, 1]
+    /// (higher = more preserving); returns 1.0 when noop (no active
+    /// colliders → trivially preserved).
+    #[inline]
+    fn preservation_score(
+        &self,
+        depth: usize,
+        parent_hidden: &[&[f32]],
+        cand_hidden: &[f32],
+    ) -> f32 {
+        self.collider_preservation_score(depth, parent_hidden, cand_hidden)
+    }
+}
+
 // ── NoPruner parity helper ──────────────────────────────────────────────────
 
 /// Returns `true` iff `constraint.is_valid(...)` is observationally
@@ -682,5 +711,44 @@ mod tests {
         let parent: Vec<&[f32]> = vec![];
         let score = constraint.collider_preservation_score(5, &parent, &[]);
         assert!((score - 1.0).abs() < 1e-6);
+    }
+
+    /// PreservationScorer trait forward matches the inherent method bit-for-bit,
+    /// and the noop fast path returns 1.0 through the trait (Plan 377 Phase 2
+    /// follow-up: ColliderConstraint → PreservationScorer shim).
+    #[test]
+    fn preservation_scorer_trait_forward_matches_inherent() {
+        let constraint = ColliderConstraint::default();
+        let parent: Vec<&[f32]> = vec![];
+        // Through the trait.
+        let trait_score = PreservationScorer::preservation_score(
+            &constraint,
+            5,
+            &parent,
+            &[],
+        );
+        // Through the inherent method.
+        let inherent_score = constraint.collider_preservation_score(5, &parent, &[]);
+        assert!((trait_score - inherent_score).abs() < 1e-6);
+        assert!((trait_score - 1.0).abs() < 1e-6, "noop should be 1.0 through trait");
+    }
+
+    /// `ColliderRouterAdapter::new(constraint, depth)` compiles and routes —
+    /// the end-to-end wiring check that the generic adapter accepts
+    /// `ColliderConstraint` as its `PS: PreservationScorer` type parameter.
+    #[test]
+    fn collider_router_adapter_accepts_collider_constraint() {
+        use katgpt_core::{ColliderRouterAdapter, PostCandidateRouter};
+
+        let constraint = ColliderConstraint::default();
+        let adapter = ColliderRouterAdapter::new(constraint, 3);
+        // Noop constraint → all candidates score 1.0 → argmax picks index 0.
+        let cand_a: Vec<f32> = vec![0.1, 0.2];
+        let cand_b: Vec<f32> = vec![0.3, 0.4];
+        let cands: Vec<&[f32]> = vec![&cand_a, &cand_b];
+        let parent: Vec<&[f32]> = vec![];
+        let idx = adapter.route_argmax(&parent, &cands);
+        assert_eq!(idx, 0, "noop ties at 1.0 → argmax returns first");
+        assert_eq!(adapter.depth(), 3);
     }
 }
