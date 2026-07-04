@@ -27,8 +27,10 @@ pub mod breakeven;
 // Re-export preserves `katgpt_rs::cache_prune::*` paths.
 #[cfg(feature = "cache_prune")]
 pub use katgpt_kv::cache_prune;
+// Phase 10 absorption (Proposal 003, 2026-07-04): module moved to katgpt-core.
+// Re-export preserves `katgpt_rs::channel_simd::*` paths.
 #[cfg(feature = "channel_simd_align")]
-pub mod channel_simd;
+pub use katgpt_core::channel_simd;
 // CGSP inlined from src/cgsp.rs (Proposal 003 Phase 0.3, 2026-07-01): the
 // 37-line shim file is replaced by a direct module re-export. `katgpt::cgsp`
 // resolves to `katgpt_core::cgsp`, so all public types, the `traits` / `types`
@@ -62,7 +64,9 @@ pub use claim_rubric::{
     ChecklistSection, ClaimValidator, EvidenceItem, EvidenceItemId, EvidenceLevel, Grade,
     VocabularyViolation,
 };
-pub mod cumprodsum;
+// Phase 10 absorption (Proposal 003, 2026-07-04): module moved to katgpt-core.
+// Re-export preserves `katgpt_rs::cumprodsum::*` paths.
+pub use katgpt_core::cumprodsum;
 // CUCG — Closed-Unit Compaction Gate (Plan 333, Research 300, arxiv 2606.23525).
 // Generic rubric-gated trajectory compaction primitive. DEFAULT-ON since
 // Phase 6 (2026-06-25): 7/7 GOAT gates PASS. Re-exports the public surface
@@ -75,8 +79,10 @@ pub use compaction::{
     CompactionAuditRecord, CompactionDecision, DecisionKind, FireRule, FireRuleEval, PredicateAudit,
     PredicateReason, PredicateResult, Rubric, RubricScratch, RubricVerdict,
 };
+// Phase 10 absorption (Proposal 003, 2026-07-04): module moved to katgpt-core.
+// Re-export preserves `katgpt_rs::ssd_block::*` paths.
 #[cfg(feature = "ssd_block")]
-pub mod ssd_block;
+pub use katgpt_core::ssd_block;
 #[cfg(feature = "dash_attn")]
 pub mod dash_attn;
 #[cfg(feature = "data_probe")]
@@ -130,8 +136,10 @@ pub mod fold;
 // CWMs (er_heterogeneous(ρ⋆) ≤ 1e-3), G3 primal-dual convergence at log-log
 // slope -1.0 (beats paper's -0.5 O(N⁻¹ᐟ²) bound — Plan 300 T4.3b), G4 16-player
 // latency = 33.97ms < 50ms target.
+// Phase 10 absorption (Proposal 003, 2026-07-04): module moved to katgpt-core.
+// Re-export preserves `katgpt_rs::cce::*` paths.
 #[cfg(feature = "cce_moderator")]
-pub mod cce;
+pub use katgpt_core::cce;
 #[cfg(feature = "freq_bandit")]
 pub mod freq_bandit;
 #[cfg(feature = "gdn2_attention")]
@@ -234,8 +242,10 @@ pub mod specialist_projection;
 pub mod sparse_task_vector;
 #[cfg(feature = "sparse_task_vector")]
 pub mod sparse_compose;
+// Phase 10 absorption (Proposal 003, 2026-07-04): module moved to katgpt-core.
+// Re-export preserves `katgpt_rs::skill_opt::*` paths.
 #[cfg(feature = "skill_opt")]
-pub mod skill_opt;
+pub use katgpt_core::skill_opt;
 #[cfg(feature = "sleep_consolidation")]
 pub mod sleep;
 #[cfg(feature = "kv_share")]
@@ -312,7 +322,9 @@ pub use katgpt_spectral::stiff_anomaly;
 pub mod thinking_cot;
 pub use katgpt_tokenizer as tokenizer;  // re-export (Issue 014): preserves `katgpt_rs::tokenizer::*` paths for tests/examples/validator
 pub mod transformer;
-pub mod trigger_gate;
+// Phase 10 absorption (Proposal 003, 2026-07-04): module moved to katgpt-core.
+// Re-export preserves `katgpt_rs::trigger_gate::*` paths.
+pub use katgpt_core::trigger_gate;
 #[cfg(feature = "turboquant")]
 pub use katgpt_quant::turboquant;
 pub mod types;
@@ -328,16 +340,25 @@ pub use katgpt_transformer::{ContiguousWeights, load_ternary_bits};
 #[cfg(feature = "adaptive_cot_identifiability")]
 pub mod adaptive_cot_stopper;
 
+// Phase 10 absorption (Proposal 003, 2026-07-04): the TrackingAllocator struct
+// + reset_alloc_stats/get_alloc_stats helpers + tests moved to katgpt-core.
+// Re-export preserves `katgpt_rs::alloc::*` paths. The `#[global_allocator]`
+// static MUST stay in the root crate (binary/library crate boundary — the
+// global allocator is process-global and can only be declared once, in the
+// final crate that links into a binary). The katgpt-core module exposes the
+// type + helper fns; root instantiates the static.
 #[cfg(debug_assertions)]
-pub mod alloc;
+pub use katgpt_core::alloc;
 
 /// Debug-only global allocator that tracks allocation count and bytes.
 #[cfg(debug_assertions)]
 #[global_allocator]
-static GLOBAL_ALLOC: alloc::TrackingAllocator = alloc::TrackingAllocator;
+static GLOBAL_ALLOC: katgpt_core::alloc::TrackingAllocator = katgpt_core::alloc::TrackingAllocator;
 
+// Phase 10 absorption (Proposal 003, 2026-07-04): module moved to katgpt-core.
+// Re-export preserves `katgpt_rs::mux_demux::*` paths.
 #[cfg(feature = "mux_demux")]
-pub mod mux_demux;
+pub use katgpt_core::mux_demux;
 
 #[cfg(feature = "mux_latent_context")]
 pub mod mux_latent;
@@ -345,11 +366,15 @@ pub mod mux_latent;
 // Memory Soup LoRA Artifact Importer (Plan 253 T19 G5).
 // Standalone MSP0 binary format parser — uses only std + blake3, no riir-gpu dep.
 // Proves katgpt-rs can consume riir-gpu's exported Memory Soup artifacts.
+// Phase 10 absorption (Proposal 003, 2026-07-04): module moved to katgpt-core.
+// Re-export preserves `katgpt_rs::memory_soup_lora::*` paths.
 #[cfg(feature = "memory_soup_lora")]
-pub mod memory_soup_lora;
+pub use katgpt_core::memory_soup_lora;
 
+// Phase 10 absorption (Proposal 003, 2026-07-04): module moved to katgpt-core.
+// Re-export preserves `katgpt_rs::llmexec_guard::*` paths.
 #[cfg(feature = "llmexec_guard")]
-pub mod llmexec_guard;
+pub use katgpt_core::llmexec_guard;
 
 #[cfg(feature = "validator")]
 pub mod validator;
@@ -392,8 +417,11 @@ pub use katgpt_core::closure::mining as closure_mining;
 // riir-ai Plan 330 — this crate stays math-only, MIT, no game IP.
 // Opt-in until G1 (determinism + monotonicity) + G2 (two-sigmoid ablation
 // parity) + <50ns decide() latency gates pass.
+// Phase 10 absorption (Proposal 003, 2026-07-04): module moved to katgpt-core.
+// Re-export preserves `katgpt_rs::salience::*` paths. The flat type re-export
+// below resolves through this shim.
 #[cfg(feature = "salience_tri_gate")]
-pub mod salience;
+pub use katgpt_core::salience;
 #[cfg(feature = "salience_tri_gate")]
 pub use salience::{
     DelegateToken, FoldbackTarget, SalienceDecision, SalienceTriGate, SilenceToken,

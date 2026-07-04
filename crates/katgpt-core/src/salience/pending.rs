@@ -7,7 +7,7 @@
 //! # Example: caller pattern (Plan 303 T3.4)
 //!
 //! ```no_run
-//! use katgpt_rs::salience::{
+//! use katgpt_core::salience::{
 //!     FoldbackTarget, PendingDelegateQueue, SalienceDecision, SalienceTriGate,
 //! };
 //!

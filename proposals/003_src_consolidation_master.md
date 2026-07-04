@@ -681,9 +681,66 @@ Ordering: foundation first (hoists, splits), then domain crates biggest-first.
   - **Deferred to Phase 12 (or until forward/thinking_cot move):**
     `dense_mesh/node_transformer.rs`, `swir/strategy_adapter.rs`.
   **DONE 2026-07-04.**
-- [ ] **Phase 10 — `katgpt-core` absorption.** `alloc`, `cce`, `cumprodsum`,
+- [x] **Phase 10 — `katgpt-core` absorption.** `alloc`, `cce`, `cumprodsum`,
   `llmexec_guard`, `memory_soup_lora`, `mux_demux`, `salience`, `trigger_gate`,
-  `skill_opt`, `ssd_block`, `channel_simd`, `alien_sampler`.
+  `skill_opt`, `ssd_block`, `channel_simd`. **DONE 2026-07-04.**
+  - **11 modules moved** from `src/` to `crates/katgpt-core/src/`: 8 single
+    files + 3 directory trees (`cce/`, `salience/`, `skill_opt/`). `alien_sampler`
+    was already exiled to `katgpt-deprecated` in Phase 3a (stale proposal ref).
+  - **katgpt-core Cargo.toml**: 7 new features (`cce_moderator`, `llmexec_guard`,
+    `memory_soup_lora`, `salience_tri_gate`, `skill_opt`, `ssd_block`,
+    `channel_simd_align`) + 1 mirror feature (`rv_gated_routing`, see below).
+    `mux_demux` already existed. 4 default-ON additions (`cce_moderator`,
+    `llmexec_guard`, `ssd_block`, `salience_tri_gate`) added to katgpt-core
+    `default` list. `alloc`, `cumprodsum`, `trigger_gate` are always-on (no
+    feature gate — `pub mod X;` unconditionally).
+  - **katgpt-core lib.rs**: 11 module declarations wired (L1297-1322). Always-on
+    trio declares `pub mod` unconditionally; 7 feature-gated modules mirror
+    root feature names. Salience flat type re-export preserved.
+  - **Root shims**: all 11 `pub mod X;` → `pub use katgpt_core::X;`.
+    `#[global_allocator] static GLOBAL_ALLOC` stays in root (process-global —
+    can only be declared in the final binary/library crate; katgpt-core cannot
+    host it because it would conflict when consumed as a library dep). Root
+    instantiates the static using `katgpt_core::alloc::TrackingAllocator`; the
+    struct + helpers (`reset_alloc_stats`/`get_alloc_stats`) live in katgpt-core.
+    A test-only `#[cfg(all(test, debug_assertions))] #[global_allocator]`
+    in katgpt-core/src/lib.rs lets katgpt-core's own alloc tests work without
+    conflicting with the root crate's production global allocator.
+  - **Root Cargo.toml**: 8 features updated to forward to katgpt-core
+    (`cce_moderator`, `llmexec_guard`, `memory_soup_lora`, `salience_tri_gate`,
+    `skill_opt`, `ssd_block`, `channel_simd_align`, `mux_demux`). `mux_demux`
+    forwards to BOTH katgpt-core (actual module) AND katgpt-pruners (historical
+    tracking alias — no module behind it in pruners).
+  - **Mid-fix 1 — `rv_gated_routing` mirror feature.** `trigger_gate.rs`'s
+    `RvThresholds` struct + `TriggerGate::rv_tier_boost` method were gated
+    behind `#[cfg(feature = "rv_gated_routing")]` (Plan 202). That feature was
+    root-only (forwards to `katgpt-pruners/rv_gated_routing`); the gate inside
+    `trigger_gate.rs` was permanently dead post-move. Root `inference_router.rs`
+    failed with E0432 (`RvThresholds` not found) + E0599 (`rv_tier_boost` not
+    found). Added `rv_gated_routing = []` feature to katgpt-core + updated root's
+    forward to `["katgpt-core/rv_gated_routing", "katgpt-pruners/rv_gated_routing"]`.
+  - **Mid-fix 2 — `mux_demux::compute_mux_residual` dead-cfg cleanup.** The fn
+    was gated `#[cfg(all(feature = "mux_demux", feature = "rcd_residual"))]`, but
+    `rcd_residual` is root-only. Dropped the dead half → `#[cfg(feature =
+    "mux_demux")]`. Strictly more permissive (fn available whenever mux_demux
+    is on, where before it required both); no regression risk.
+  - **Mid-fix 3 — `katgpt_core::simd::*` → `crate::simd::*` rewrites.** 3 files
+    had root-crate vocabulary calls into katgpt-core's simd module that needed
+    rewriting post-move: `memory_soup_lora.rs` (3 sites), `ssd_block.rs` (3
+    sites), `channel_simd.rs` (1 site).
+  - **Mid-fix 4 — `trigger_gate.rs` toml dep.** `from_toml`/`to_toml` were
+    test-only API (no external caller). Gated behind `#[cfg(test)]`; added
+    `toml = "0.8"` to katgpt-core `[dev-dependencies]` so katgpt-core stays
+    leaf-clean for downstream consumers.
+  - **GOAT gate G3 — PASS**: workspace `cargo check` clean on default /
+    all-features / no-default-features. katgpt-core lib tests 1221/1221 pass.
+    Root lib tests 1270/1270 pass. Consumer tests: `bench_176_trigger_gate`
+    5/5, `cce_convergence` 4/4, `cce_vs_nash` 3/3, `bench_284_clr_goat_g4`
+    (alloc-zero-alloc gate) 1/1. Workspace clippy: zero warnings, zero errors.
+    Pre-existing failures (NOT from Plan 381): `bench_250_breakeven_goat::t1_overhead_per_forward`
+    (debug-build perf gate, passes in release), `bench_271_attn_match_goat::g5_reconstruction_quality`
+    (pre-existing quality gate — pure file move cannot regress reconstruction
+    quality).
 - [ ] **Phase 11 — new domain crates.** `katgpt-band`, `katgpt-claim`,
   `katgpt-sparse`, `katgpt-ruliology`, `katgpt-validator`, `katgpt-bench`.
 - [ ] **Phase 12 — final sweep.** `src/` should contain only:

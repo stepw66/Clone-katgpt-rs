@@ -98,8 +98,11 @@ impl fmt::Display for TriggerGateConfig {
     }
 }
 
+#[cfg(test)]
 impl TriggerGateConfig {
-    /// Load config from a TOML string.
+    /// Load config from a TOML string (test-only — keeps `toml` out of the
+    /// non-test dep set so katgpt-core stays leaf-clean for downstream
+    /// consumers like riir-engine).
     ///
     /// ```toml
     /// gpu_activate_qps = 15_000.0
@@ -113,7 +116,7 @@ impl TriggerGateConfig {
         toml::from_str(input)
     }
 
-    /// Serialize config to a TOML string.
+    /// Serialize config to a TOML string (test-only).
     pub fn to_toml(&self) -> Result<String, toml::ser::Error> {
         toml::to_string(self)
     }

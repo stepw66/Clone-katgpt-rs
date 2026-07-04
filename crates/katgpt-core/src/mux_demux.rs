@@ -180,7 +180,15 @@ fn bubble_up(buf: &mut [(usize, f32)], mut pos: usize) {
 /// * `position` — position to compute residual for
 /// * `vocab_size` — vocabulary size
 /// * `out` — output buffer `[n_embd]`, caller-allocated
-#[cfg(all(feature = "mux_demux", feature = "rcd_residual"))]
+//
+// Phase 10 (2026-07-04): the original root-crate gate was
+// `#[cfg(all(feature = "mux_demux", feature = "rcd_residual"))]`. `rcd_residual`
+// is a root-only feature (root forwards to katgpt-pruners/rcd_residual); it
+// does not exist in katgpt-core. Drop the dead half of the gate — the fn is
+// now available whenever `mux_demux` is on, which is strictly more permissive
+// than the original AND-gate (no regression risk: callers that didn't enable
+// `rcd_residual` couldn't see it before either way).
+#[cfg(feature = "mux_demux")]
 pub fn compute_mux_residual(
     path_scores: &[f32],
     path_marginals: &[&[f32]],

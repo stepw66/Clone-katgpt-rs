@@ -1293,3 +1293,40 @@ pub use velocity_field_ensemble::{
     accumulate_pair_into, stochastic_interpolant_step_into, ClosureField, EnsembleFitScratch,
     Schedule, VelocityField, VelocityFieldEnsemble,
 };
+
+// ── Phase 10 absorption (Proposal 003, 2026-07-04): modules moved from katgpt-rs/src/.
+// Always-on (no feature gate):
+pub mod alloc;  // Debug-only TrackingAllocator (consumer gates via #[cfg(debug_assertions)])
+pub mod cumprodsum;  // Cumprodsum primitive (Plan 263) — always-on
+pub mod trigger_gate;  // Compute-tier trigger gate — always-on
+// Feature-gated (mirror root feature names):
+#[cfg(feature = "cce_moderator")]
+pub mod cce;
+#[cfg(feature = "llmexec_guard")]
+pub mod llmexec_guard;
+#[cfg(feature = "memory_soup_lora")]
+pub mod memory_soup_lora;
+#[cfg(feature = "mux_demux")]
+pub mod mux_demux;
+#[cfg(feature = "salience_tri_gate")]
+pub mod salience;
+#[cfg(feature = "salience_tri_gate")]
+pub use salience::{
+    DelegateToken, FoldbackTarget, SalienceDecision, SalienceTriGate, SilenceToken,
+};
+#[cfg(feature = "skill_opt")]
+pub mod skill_opt;
+#[cfg(feature = "ssd_block")]
+pub mod ssd_block;
+#[cfg(feature = "channel_simd_align")]
+pub mod channel_simd;
+
+// Test-only `#[global_allocator]` so `alloc::tests::*` pass when running
+// `cargo test -p katgpt-core --lib`. Downstream consumers (katgpt-rs root,
+// riir-engine, etc.) install their OWN `#[global_allocator]`; this static is
+// `cfg(test)` so it does not exist when katgpt-core is consumed as a library
+// dep — no double-declare conflict. Mirrors the root crate's
+// `static GLOBAL_ALLOC: TrackingAllocator` (src/lib.rs:356).
+#[cfg(all(test, debug_assertions))]
+#[global_allocator]
+static TEST_GLOBAL_ALLOC: alloc::TrackingAllocator = alloc::TrackingAllocator;
