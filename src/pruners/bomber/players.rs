@@ -1186,6 +1186,17 @@ pub struct HLPlayer {
     /// Shared trial log for multi-agent episode recording (Issue 051 T4).
     #[cfg(feature = "bandit")]
     shared_log: Option<SharedTrialLog>,
+    /// LoRA adapter for learned action re-weighting (Issue 018 follow-up).
+    /// When `Some`, replaces pure heuristic base with LoRA-blended scores.
+    #[cfg(feature = "bomber-wasm")]
+    lora: Option<LoraAdapter>,
+    /// WASM validator for sandboxed safety checks (Issue 018 follow-up).
+    /// When `Some`, replaces native `is_safe_action` with WASM-backed check.
+    #[cfg(feature = "bomber-wasm")]
+    wasm: Option<super::wasm_pruner::BomberWasmPruner>,
+    /// Reusable LoRA scratch buffer (rank-sized, zero-alloc across calls).
+    #[cfg(feature = "bomber-wasm")]
+    lora_buf: Vec<f32>,
 }
 
 impl HLPlayer {
@@ -1205,6 +1216,47 @@ impl HLPlayer {
             shared_stats: None,
             #[cfg(feature = "bandit")]
             shared_log: None,
+            #[cfg(feature = "bomber-wasm")]
+            lora: None,
+            #[cfg(feature = "bomber-wasm")]
+            wasm: None,
+            #[cfg(feature = "bomber-wasm")]
+            lora_buf: Vec::new(),
+        }
+    }
+
+    /// Create HLPlayer with LoRA + WASM artifacts loaded (the "Full HL" stack).
+    ///
+    /// Mirrors `LoraWasmPlayer::new_with_secrets`: loads the LoRA adapter and
+    /// WASM validator from file paths. On any load failure, silently falls
+    /// back to heuristic-only mode (the player still works, just without the
+    /// model delta and sandboxed safety).
+    ///
+    /// Only loads the first LoRA adapter — multi-adapter L2+ files have layers
+    /// 1+ silently dropped. See `LoraAdapter::load_first` for the limitation.
+    #[cfg(feature = "bomber-wasm")]
+    pub fn new_with_secrets(id: u8, lora_path: &str, wasm_path: &str) -> Self {
+        let lora = LoraAdapter::load_first(std::path::Path::new(lora_path)).ok();
+        let wasm = super::wasm_pruner::BomberWasmPruner::load_from_file(wasm_path).ok();
+        let buf_size = lora.as_ref().map_or(0, |l| l.rank);
+        Self {
+            _id: id,
+            known_bombs: Vec::new(),
+            known_powerups: Vec::new(),
+            known_opponents: Vec::new(),
+            q_values: [0.0; ACTION_COUNT],
+            visits: [0; ACTION_COUNT],
+            total_pulls: 0,
+            compressed: [false; ACTION_COUNT],
+            round_actions: Vec::new(),
+            last_dir: None,
+            #[cfg(feature = "bandit")]
+            shared_stats: None,
+            #[cfg(feature = "bandit")]
+            shared_log: None,
+            lora,
+            wasm,
+            lora_buf: vec![0.0; buf_size],
         }
     }
 
@@ -1235,6 +1287,12 @@ impl HLPlayer {
             last_dir: None,
             shared_stats: Some(stats),
             shared_log,
+            #[cfg(feature = "bomber-wasm")]
+            lora: None,
+            #[cfg(feature = "bomber-wasm")]
+            wasm: None,
+            #[cfg(feature = "bomber-wasm")]
+            lora_buf: Vec::new(),
         }
     }
 
@@ -1514,7 +1572,39 @@ impl HLPlayer {
             shared_stats: None,
             #[cfg(feature = "bandit")]
             shared_log: None,
+            #[cfg(feature = "bomber-wasm")]
+            lora: None,
+            #[cfg(feature = "bomber-wasm")]
+            wasm: None,
+            #[cfg(feature = "bomber-wasm")]
+            lora_buf: Vec::new(),
         })
+    }
+
+    /// Check if action is safe — WASM validator if loaded, native otherwise.
+    ///
+    /// When `self.wasm` is `Some`, delegates to the sandboxed WASM validator
+    /// (stricter, external-process isolation). Otherwise falls back to the
+    /// native `is_safe_action` check. Mirrors `LoraWasmPlayer::is_action_safe`.
+    #[cfg(feature = "bomber-wasm")]
+    fn check_safety(&self, action: &BomberAction, grid: &ArenaGrid, pos: GridPos) -> bool {
+        match &self.wasm {
+            Some(wasm) => wasm.is_safe_action(
+                action_index(action),
+                grid,
+                pos.x,
+                pos.y,
+                self._id,
+                &self.known_bombs,
+            ),
+            None => is_safe_action(action, grid, pos, &self.known_bombs),
+        }
+    }
+
+    /// Native-only safety check (no WASM feature compiled).
+    #[cfg(not(feature = "bomber-wasm"))]
+    fn check_safety(&self, action: &BomberAction, grid: &ArenaGrid, pos: GridPos) -> bool {
+        is_safe_action(action, grid, pos, &self.known_bombs)
     }
 }
 
@@ -1546,6 +1636,22 @@ impl BomberPlayer for HLPlayer {
         let predicted_opponent =
             nearest_info.and_then(|(_, op, prev)| predict_direction(*op, *prev));
 
+        // Issue 018 follow-up: LoRA-blended base scores (if adapter loaded).
+        // When `Some`, replaces pure heuristic with 70% heuristic + 30% LoRA
+        // correction (see `lora_score_actions`). Strategy bonus is added later.
+        #[cfg(feature = "bomber-wasm")]
+        let lora_scores = self.lora.as_ref().and_then(|lora| {
+            lora_score_actions(
+                lora,
+                grid,
+                pos,
+                &self.known_bombs,
+                &self.known_powerups,
+                self.last_dir,
+                &mut self.lora_buf,
+            )
+        });
+
         // Compute blended scores: 85% policy + 15% bandit Q-value
         let mut scores: [(BomberAction, f32); ACTION_COUNT] = ALL_ACTIONS.map(|a| (a, 0.0));
 
@@ -1565,6 +1671,13 @@ impl BomberPlayer for HLPlayer {
                 self.last_dir,
             );
 
+            // Issue 018 follow-up: use LoRA-blended score as base if available
+            #[cfg(feature = "bomber-wasm")]
+            let h = match &lora_scores {
+                Some(s) => s[i],
+                None => h,
+            };
+
             // Domain hard block (unwalkable, unsafe bomb) overrides everything
             if h == f32::NEG_INFINITY {
                 scores[i] = (*action, h);
@@ -1577,7 +1690,7 @@ impl BomberPlayer for HLPlayer {
                 action,
                 BomberAction::Up | BomberAction::Down | BomberAction::Left | BomberAction::Right
             );
-            if !is_move && !is_safe_action(action, grid, pos, &self.known_bombs) {
+            if !is_move && !self.check_safety(action, grid, pos) {
                 scores[i] = (*action, f32::NEG_INFINITY);
                 continue;
             }
