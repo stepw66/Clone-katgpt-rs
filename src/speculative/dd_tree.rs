@@ -26,7 +26,12 @@
 
 #![allow(clippy::needless_range_loop)]
 
-use std::collections::{BinaryHeap, HashMap};
+use std::collections::BinaryHeap;
+// HashMap is only constructed inside `best_of_k_rollouts` (MostFrequent mode),
+// which is `elf_sde`-gated; gate the import so it doesn't read as unused when
+// `elf_sde` is off (e.g. downstream consumer with default-features = false).
+#[cfg(any(feature = "elf_sde", test))]
+use std::collections::HashMap;
 
 #[cfg(test)]
 use super::types::BinaryScreeningPruner;
@@ -34,9 +39,19 @@ use super::types::BinaryScreeningPruner;
 use super::types::NoPruner;
 #[cfg(feature = "domino_correction")]
 use super::types::DominoPruner;
-use super::types::{
-    ConstraintPruner, NoScreeningPruner, ScreeningPruner, SdeConfig, TreeNode,
-};
+use super::types::{ConstraintPruner, ScreeningPruner, SdeConfig, TreeNode};
+// NoScreeningPruner is only constructed inside feature-gated dd-tree wrappers
+// (speculative_generator / belief_drafter / thinking_prune / gdsd_distill) and
+// in tests; gate the import so it doesn't read as unused when all those
+// features are off.
+#[cfg(any(
+    test,
+    feature = "speculative_generator",
+    feature = "belief_drafter",
+    feature = "thinking_prune",
+    feature = "gdsd_distill",
+))]
+use super::types::NoScreeningPruner;
 use crate::types::Rng;
 use rayon::prelude::*;
 

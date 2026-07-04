@@ -11,12 +11,14 @@
 // ── Helpers ──────────────────────────────────────────────────────
 
 /// Dot product of two vectors.
+#[cfg(any(feature = "river_valley", test))]
 #[inline]
 fn dot(a: &[f32], b: &[f32]) -> f32 {
     katgpt_core::simd::simd_dot_f32(a, b, a.len())
 }
 
 /// L2 norm of a vector.
+#[cfg(any(feature = "river_valley", test))]
 #[inline]
 fn l2_norm(v: &[f32]) -> f32 {
     dot(v, v).sqrt()

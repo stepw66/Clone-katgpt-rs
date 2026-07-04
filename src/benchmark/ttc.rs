@@ -7,7 +7,15 @@
 //! - Thompson Sampling exploration cycle (BanditStats)
 //! - BanditPruner full episode (prepare_episode + update)
 
+// BenchCategory + Instant are only referenced inside the `bandit`-gated
+// sub-functions below; gate the imports so they don't read as unused when
+// `bandit` is off (e.g. when a downstream consumer builds katgpt-rs with
+// default-features = false).
+#[cfg(feature = "bandit")]
 use super::{BenchCategory, BenchResult};
+#[cfg(not(feature = "bandit"))]
+use super::BenchResult;
+#[cfg(feature = "bandit")]
 use std::time::Instant;
 
 #[cfg(feature = "bandit")]
@@ -23,6 +31,7 @@ use crate::types::Rng;
 /// `category: BenchCategory::TestTimeCompute`.
 pub fn bench_ttc() -> Vec<BenchResult> {
     // 3 sub-benchmarks when `bandit` is enabled.
+    #[allow(unused_mut)] // only mutated when `bandit` is on
     let mut results: Vec<BenchResult> = Vec::with_capacity(3);
     let warmup = 100;
     let iters = 5_000;

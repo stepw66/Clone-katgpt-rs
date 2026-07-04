@@ -645,7 +645,9 @@ pub fn run_all(config: &Config) -> Vec<BenchResult> {
     cooldown(10);
 
     // ── Phase 10: Test-Time Compute (TTC) ──
-    #[cfg(feature = "bandit")]
+    // Not feature-gated: bench_ttc internally prints a "skipped" notice when
+    // `bandit` is off, so always calling it keeps the public fn live across
+    // feature subsets (mirrors the distillation phase above).
     {
         let ttc_results = ttc::bench_ttc();
         results.extend(ttc_results);
