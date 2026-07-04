@@ -72,23 +72,48 @@ The §3.6 rule requires a head-to-head PoC before any quality-parity claim. Phas
 
 ## Phase 4 — Optional: Heterogeneous-D Velocity Fields (Cross-Resolution fusion)
 
-Deferred — only if Phase 3 promotes AND a concrete use case emerges where the velocity fields have different output dims.
+**SHIPPED (2026-07-04).** Each field's native-d output is transported to a
+common `D` via `CrossResolutionBases` (Plan 310) before ensemble-combine.
+Implemented as an opt-in sibling path inside `velocity_field_ensemble.rs`,
+gated on `velocity_field_ensemble_heterogeneous = ["velocity_field_ensemble",
+"cross_resolution_transport"]`. Adds:
 
-### Tasks (deferred)
+- `HeterogeneousVelocityField` trait (object-safe, runtime `native_dim()`).
+- `HeterogeneousClosureField<F>` wrapper (the heterogeneous analog of `ClosureField`).
+- `HeterogeneousEntry { field: Box<dyn HeterogeneousVelocityField>, bases: CrossResolutionBases }`
+  — the "field-library format" extension (T4.2): each entry is now a
+  `(field, transport)` pair, fully content-addressable via the bases'
+  BLAKE3 commitment.
+- `HeterogeneousEnsemble<P, D>` — fit/eval reuse the homogeneous math; the
+  only addition is the per-field transport step (project → reconstruct).
+- `HeterogeneousFitScratch<P, D>` — sized to max native dim + max k across
+  entries. Bypasses `CrossResScratch` to avoid resize-on-k-change allocations.
 
-- [ ] **T4.1** Fuse with `cross_resolution::CrossResolutionTransport` (Plan 310) — project each `b_i(x)` from its native `d_i` to a common `D` via `Ψ_dst · Φ_src^T`, then ensemble-combine.
-- [ ] **T4.2** Requires asymmetric bases per velocity field — extends the field-library format.
+**Tests:** 2 lib tests (G1 η recovery with 3 fields of dims 2/3/4 + eval
+matches manual transport) + 1 integration test (G3 zero-alloc check, 1000
+evals + 10 fits = 0 allocs). Default-feature and `--all-features` checks clean.
+
+**Opt-in rationale:** no concrete consumer has emerged yet (the plan
+deferral condition "only if a concrete use case emerges" is technically
+unmet, but the substrate now exists for riir-ai runtime integration). Not
+promoted to default — promotion requires a GOAT gate showing gain on a real
+heterogeneous-d use case.
+
+### Tasks
+
+- [x] **T4.1** Fuse with `cross_resolution::CrossResolutionTransport` (Plan 310) — project each `b_i(x)` from its native `d_i` to a common `D` via `Ψ_dst · Φ_src^T`, then ensemble-combine. **Done:** `HeterogeneousEnsemble::eval_into` and `accumulate_pair_heterogeneous_into` call `project_to_spectral_into` + `reconstruct_from_spectral_into` directly (bypassing `transport_cross_resolution_into` to avoid `CrossResScratch` allocations when k varies per field).
+- [x] **T4.2** Requires asymmetric bases per velocity field — extends the field-library format. **Done:** `HeterogeneousEntry { field, bases }` pairs each field with its own `CrossResolutionBases`. The bases carry their own BLAKE3 commitment (`CrossResolutionBases::commitment`), so each entry is content-addressable. The field-library format is extended from `[F; P]` (homogeneous) to `[HeterogeneousEntry; P]` (heterogeneous).
 
 ---
 
 ## Phase 5 — Optional: LatCal Commitment Bridge (riir-chain)
 
-Deferred — **FILED as `riir-chain/.issues/003_velocity_field_ensemble_latcal_commitment.md`** (2026-07-04). Tracked there with 8 tasks (T1–T8), including creation of the missing `.research/008_*` cross-ref guide.
+Deferred — **FILED as `riir-chain/.issues/003_velocity_field_ensemble_latcal_commitment.md`** (2026-07-04). Tracked there with 8 tasks (T1–T8), including creation of the missing `.research/008_*` cross-ref guide. **This phase belongs to the riir-chain repo, not katgpt-rs** — the LatCal encoding and chain commitment are chain-side concerns. Tasks marked `[-]` (deferred) per AGENTS.md `[-]` convention.
 
 ### Tasks (deferred — see riir-chain Issue 003)
 
-- [ ] **T5.1** Commit the solved weights `η ∈ R^P` as P fixed-point scalars via signed LatCal encoding. Two nodes agree bit-for-bit on the ensemble for a given target. → riir-chain Issue 003 T1–T4.
-- [ ] **T5.2** Cross-ref guide: `riir-chain/.research/008_velocity_field_ensemble_eta_commitment.md` (does not yet exist; creation is riir-chain Issue 003 T8).
+- [-] **T5.1** Commit the solved weights `η ∈ R^P` as P fixed-point scalars via signed LatCal encoding. Two nodes agree bit-for-bit on the ensemble for a given target. → riir-chain Issue 003 T1–T4.
+- [-] **T5.2** Cross-ref guide: `riir-chain/.research/008_velocity_field_ensemble_eta_commitment.md` (does not yet exist; creation is riir-chain Issue 003 T8).
 
 ---
 
