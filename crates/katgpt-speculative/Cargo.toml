@@ -109,7 +109,11 @@ thinking_prune = []  # Gates the `build_hop_dd_tree_with_schedule` path in spech
 progressive_mcgs = []
 # Chain Fold — step-boundary-aware context folding (Plan 195). Needs katgpt-kv
 # for still_kv types (BetaBias, KVChunk, CompactionStrategy) used in chain_folder.
-chain_fold = ["dep:katgpt-kv", "katgpt-kv/still_kv", "still_kv", "dep:half", "dep:fastrand"]
+# Note: enables the implicit `fastrand` feature (not `dep:fastrand`) so that
+# `#[cfg(feature = "fastrand")]` in scheduler.rs resolves cleanly without an
+# `unexpected_cfgs` lint. Either form enables the dep; only the feature-name
+# form also defines the cfg-checkable feature.
+chain_fold = ["dep:katgpt-kv", "katgpt-kv/still_kv", "still_kv", "dep:half", "fastrand"]
 # still_kv tracking flag — gates the chain_folder still_kv code path. Implied by chain_fold.
 still_kv = []
 # Bake precision sub-feature for fold's attention_importance path.

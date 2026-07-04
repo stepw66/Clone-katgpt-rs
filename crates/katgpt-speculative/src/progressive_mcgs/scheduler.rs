@@ -230,6 +230,11 @@ pub trait RngLite {
 }
 
 /// Adapter — `fastrand::Rng` implements [`RngLite`].
+///
+/// Only compiled when the `fastrand` dep is available (enabled by `chain_fold`
+/// or dev-deps). `progressive_mcgs` itself is zero-dep; the scheduler is generic
+/// over `RngLite`, so users who bring their own RNG pay nothing.
+#[cfg(any(test, feature = "fastrand"))]
 impl RngLite for fastrand::Rng {
     #[inline]
     fn next_f32(&mut self) -> f32 {
