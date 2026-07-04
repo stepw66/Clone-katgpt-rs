@@ -7,7 +7,7 @@
 
 use std::collections::HashSet;
 
-use crate::ruliology::types::SimpleProgram;
+use crate::types::SimpleProgram;
 
 /// Default tape width for CA simulation.
 const DEFAULT_TAPE_WIDTH: usize = 7;

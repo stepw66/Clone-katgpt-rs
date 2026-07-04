@@ -9,8 +9,8 @@
 //!
 //! Plan 188 Phase 4 integration.
 
-use crate::ruliology::irreducibility::IrreducibilityGate;
-use crate::ruliology::types::WinMatrix;
+use crate::irreducibility::IrreducibilityGate;
+use crate::types::WinMatrix;
 
 // ── SimulationStrategy ─────────────────────────────────────────────
 
@@ -184,7 +184,7 @@ impl SimulationGate {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ruliology::{FsmEnumerator, matching_pennies, prisoners_dilemma};
+    use crate::{FsmEnumerator, matching_pennies, prisoners_dilemma};
 
     #[test]
     fn test_simulation_gate_matching_pennies_reducible() {

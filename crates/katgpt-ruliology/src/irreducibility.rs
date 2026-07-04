@@ -10,7 +10,7 @@
 //!
 //! Plan 188 Phase 4.
 
-use crate::ruliology::types::WinMatrix;
+use crate::types::WinMatrix;
 
 // ── IrreducibilityResult ──────────────────────────────────────
 
@@ -203,7 +203,7 @@ fn rle_compress(data: &[u8]) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ruliology::{FsmEnumerator, matching_pennies};
+    use crate::{FsmEnumerator, matching_pennies};
     use std::time::Instant;
 
     /// Matching pennies with 2-state FSMs should have lots of structure → reducible.

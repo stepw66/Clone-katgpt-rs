@@ -8,7 +8,7 @@
 mod tests {
     use std::time::Instant;
 
-    use crate::ruliology::{
+    use crate::{
         CaStrategy, FsmEnumerator, IrreducibilityGate, SimpleProgram, TmStrategy, matching_pennies,
     };
 

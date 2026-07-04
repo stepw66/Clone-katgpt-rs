@@ -9,9 +9,12 @@
 //!
 //! Plan 188 Phase 5 (feature-gated behind `ruliology`).
 
-use crate::pruners::g_zero::delta_absorb::DeltaGatedConfig;
-use crate::ruliology::fsm::{FsmStrategy, MAX_STATES};
-use crate::ruliology::types::SimpleProgram;
+#![allow(unexpected_cfgs)]  // root may pass-through aggregate features like `full`
+
+#[cfg(feature = "ruliology")]
+use katgpt_pruners::g_zero::delta_absorb::DeltaGatedConfig;
+use crate::fsm::{FsmStrategy, MAX_STATES};
+use crate::types::SimpleProgram;
 
 // ── FsmTemplateProposer ──────────────────────────────────────────
 
@@ -195,7 +198,7 @@ pub fn co_evolve(
 /// Like [`co_evolve`] but instead of simple keep-if-better, it tracks the δ
 /// (delta) between mutant payoff and current payoff, and only accepts mutations
 /// where `delta >= config.delta_threshold`. This is the FSM mutation analogue of
-/// [`DeltaGatedAbsorbCompress`](crate::pruners::g_zero::delta_absorb::DeltaGatedAbsorbCompress)
+/// [`DeltaGatedAbsorbCompress`](katgpt_pruners::g_zero::delta_absorb::DeltaGatedAbsorbCompress)
 /// gating: small improvements below the noise floor are rejected, forcing the
 /// search to find meaningfully better strategies.
 ///
@@ -301,8 +304,8 @@ fn evaluate_vs_opponents(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ruliology::fsm::FsmEnumerator;
-    use crate::ruliology::payoff::matching_pennies;
+    use crate::fsm::FsmEnumerator;
+    use crate::payoff::matching_pennies;
 
     /// Helper: build a simple 2-state FSM (always cooperate).
     fn always_cooperate() -> FsmStrategy {
@@ -467,6 +470,7 @@ mod tests {
 
     // ── δ-Gated Co-Evolution Tests ─────────────────────────────────
 
+    #[cfg(feature = "ruliology")]
     #[test]
     fn test_delta_gated_rejects_small_delta() {
         // With a very high threshold, only massive improvements pass.
@@ -498,6 +502,7 @@ mod tests {
         assert_eq!(result.rejected, 100, "all 100 mutations should be rejected");
     }
 
+    #[cfg(feature = "ruliology")]
     #[test]
     fn test_delta_gated_accepts_large_delta() {
         // With threshold=0.0, any improvement should be accepted.
@@ -534,6 +539,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "ruliology")]
     #[test]
     fn test_delta_gated_converges_better_than_blind() {
         // Compare δ-gated co-evolution against blind (keep-if-better) co-evolution.

@@ -40,7 +40,7 @@
 //! (Plan 264 Phase 2, owned by a separate subagent); it only needs the
 //! storage type, which is already shipped.
 
-use crate::band_conditioner::ComputeTarget;
+use katgpt_band::band_conditioner::ComputeTarget;
 use katgpt_core::sigmoid; // Hoisted from band_conditioner (Proposal 003 Phase 0.1)
 use crate::sparse_task_vector::SparseTaskVector;
 

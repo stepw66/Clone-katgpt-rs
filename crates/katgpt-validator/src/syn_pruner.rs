@@ -1,8 +1,8 @@
 use super::partial_parser::PartialParser;
 use super::types::PruneResult;
-use crate::speculative::types::ConstraintPruner;
-use crate::tokenizer::BpeTokenizer;
-use crate::tokenizer::BpeTokenizerImpl;
+use katgpt_core::ConstraintPruner;
+use katgpt_tokenizer::BpeTokenizer;
+use katgpt_tokenizer::BpeTokenizerImpl;
 use std::sync::Arc;
 use std::sync::Mutex;
 
@@ -108,7 +108,7 @@ mod tests {
 
     #[test]
     fn test_syn_pruner_accepts_valid_rust() {
-        let tokenizer = Arc::new(crate::tokenizer::BpeTrainer::train("fn let mut x", 64));
+        let tokenizer = Arc::new(katgpt_tokenizer::BpeTrainer::train("fn let mut x", 64));
         let pruner = SynPruner::new(tokenizer);
 
         let result = pruner.validate("let x = 42;");
@@ -124,7 +124,7 @@ mod tests {
 
     #[test]
     fn test_syn_pruner_rejects_invalid_rust() {
-        let tokenizer = Arc::new(crate::tokenizer::BpeTrainer::train("fn let mut x", 64));
+        let tokenizer = Arc::new(katgpt_tokenizer::BpeTrainer::train("fn let mut x", 64));
         let pruner = SynPruner::new(tokenizer);
 
         let result = pruner.validate("let = ;");
@@ -140,7 +140,7 @@ mod tests {
 
     #[test]
     fn test_syn_pruner_bracket_tier_rejects() {
-        let tokenizer = Arc::new(crate::tokenizer::BpeTrainer::train("fn let { }", 64));
+        let tokenizer = Arc::new(katgpt_tokenizer::BpeTrainer::train("fn let { }", 64));
         let pruner = SynPruner::new(tokenizer);
 
         // Unmatched closing brace — Tier 0 should reject before syn sees it

@@ -1,0 +1,35 @@
+[package]
+name = "katgpt-claim"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Claim-Level Reliability pair — claim_rubric (L1/L2/L3 evidence ladder validator, Plan 307) + clr (sigmoid-projection vote over claim embeddings, Plan 284). Extracted from katgpt-rs root per Proposal 003 Phase 11 (2026-07-04)."
+repository = "https://github.com/katopz/katgpt-rs"
+keywords = ["claim-reliability", "evidence-ladder", "sigmoid-projection", "verifier", "modelless"]
+categories = ["algorithms", "science"]
+publish = false  # only katgpt-core ships to crates.io
+
+[dependencies]
+# katgpt-core: provides `traits::FeatureClass` (claim_rubric tag) and
+# `simd::simd_sum_f32` (clr mgpo + vote). Always-on — both modules need it.
+katgpt-core = { path = "../katgpt-core" }
+
+[dev-dependencies]
+# blake3: needed only for clr test fixtures (verifier.rs:92, vote.rs:396)
+# — the test stubs that compute direction-vector hashes for tamper-evidence
+# assertions. Production code does not hash.
+blake3 = "1"
+# bytemuck: needed for clr test fixtures (verifier.rs:119, vote.rs:423) —
+# `h.update(bytemuck::cast_slice(&self.vectors))` for hashing f32 slices.
+bytemuck = "1"
+
+[features]
+default = ["claim_rubric", "clr"]
+
+# Claim Rubric Runtime — L1/L2/L3 evidence ladder validator (Plan 307).
+# DEFAULT-ON (Plan 307 T3.3, 2026-06-23): meta-discipline validator.
+claim_rubric = []
+
+# CLR Claim-Level Reliability runtime — sigmoid projection vote over claim
+# embeddings (Plan 284, Research 255). DEFAULT-ON.
+clr = []

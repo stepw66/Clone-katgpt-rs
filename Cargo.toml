@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/katgpt-attn", "crates/katgpt-attn-match", "crates/katgpt-core", "crates/katgpt-dec", "crates/katgpt-deprecated", "crates/katgpt-forward", "crates/katgpt-hla", "crates/katgpt-kv", "crates/katgpt-micro-belief", "crates/katgpt-percepta", "crates/katgpt-personality", "crates/katgpt-pruners", "crates/katgpt-quant", "crates/katgpt-sense", "crates/katgpt-sleep", "crates/katgpt-spectral", "crates/katgpt-speculative", "crates/katgpt-tokenizer", "crates/katgpt-transformer", "crates/katgpt-types", "."]
+members = ["crates/katgpt-attn", "crates/katgpt-attn-match", "crates/katgpt-band", "crates/katgpt-claim", "crates/katgpt-core", "crates/katgpt-dec", "crates/katgpt-deprecated", "crates/katgpt-forward", "crates/katgpt-hla", "crates/katgpt-kv", "crates/katgpt-micro-belief", "crates/katgpt-percepta", "crates/katgpt-personality", "crates/katgpt-pruners", "crates/katgpt-quant", "crates/katgpt-ruliology", "crates/katgpt-sense", "crates/katgpt-sleep", "crates/katgpt-sparse", "crates/katgpt-spectral", "crates/katgpt-speculative", "crates/katgpt-tokenizer", "crates/katgpt-transformer", "crates/katgpt-types", "crates/katgpt-validator", "."]
 resolver = "3"
 
 [package]
@@ -11,6 +11,12 @@ publish = false  # dev/examples aggregator — never published. Only katgpt-core
 [dependencies]
 katgpt-core = { path = "crates/katgpt-core" }
 katgpt-transformer = { path = "crates/katgpt-transformer" }
+# katgpt-validator (Proposal 003 Phase 11, 2026-07-04): extracted two-tier syntax
+# pruner (PartialParser + SynPruner). Non-optional path dep; the historical
+# root `validator` feature is now a back-compat re-export gate. The root
+# re-exports the leaf's surface as `pub use katgpt_validator as validator;`
+# so `katgpt_rs::validator::*` paths continue to resolve.
+katgpt-validator = { path = "crates/katgpt-validator" }
 # katgpt-forward (Issue 007 Phase F, 2026-07-02): the top-tier crate hosting
 # `ForwardContext` — the composition-layer join point that sits ABOVE both
 # katgpt-transformer (buffer types + WallPrefixState) and katgpt-pruners
@@ -38,12 +44,32 @@ katgpt-speculative = { path = "crates/katgpt-speculative" }
 # the leaf as `pub use katgpt_attn_match as attn_match;`. The `adaptive_cot` glue
 # (composes root-only `freq_bandit`) stays in root at `src/attn_match_adaptive_cot.rs`.
 katgpt-attn-match = { path = "crates/katgpt-attn-match" }
+# katgpt-band (Proposal 003 Phase 11, 2026-07-04): extracted Band-Conditioned KV
+# Segment Selector cluster (Plan 265, arXiv:2605.12733) — band_conditioner,
+# bckvss, collider_pruner, adaptive_cot_stopper. Non-optional path dep; each
+# module is opt-in via its feature flag (band_conditioner + collider_consistency
+# are default-ON mirroring root default). The root re-exports each module behind
+# its historical feature so `katgpt_rs::band_conditioner::*` /
+# `katgpt_rs::collider_pruner::*` / etc. continue to resolve.
+katgpt-band = { path = "crates/katgpt-band" }
+# katgpt-claim (Proposal 003 Phase 11, 2026-07-04): extracted Claim-Level
+# Reliability pair (claim_rubric + clr, Plan 307 + Plan 284). Non-optional
+# path dep; both modules are default-ON. Root re-exports each module so
+# `katgpt_rs::claim_rubric::*` / `katgpt_rs::clr::*` paths continue to resolve.
+katgpt-claim = { path = "crates/katgpt-claim" }
 # katgpt-quant (Proposal 003 Phase 1, 2026-07-01): extracted quantization codecs
 # (turboquant, planar_quant, iso_quant, octopus, hybrid_oct_pq). Non-optional path dep;
 # each codec is opt-in via its feature flag. The root re-exports each module behind its
 # historical feature so `katgpt_rs::turboquant::*` / `katgpt_rs::octopus::*` / etc.
 # continue to resolve.
 katgpt-quant = { path = "crates/katgpt-quant" }
+# katgpt-ruliology (Proposal 003 Phase 11, 2026-07-04): extracted Wolfram
+# ruliology (Plan 188, Research 168) — exhaustive simple-program enumeration
+# (FSM/CA/TM) as bandit arms. Non-optional path dep; the historical root
+# `ruliology` feature gates the `delta_gated_co_evolve` path which consumes
+# `katgpt_pruners::g_zero::delta_absorb::DeltaGatedConfig`. Root re-exports
+# the module so `katgpt_rs::ruliology::*` paths continue to resolve.
+katgpt-ruliology = { path = "crates/katgpt-ruliology" }
 # katgpt-attn (Proposal 003 Phase 2, 2026-07-01): extracted attention stack
 # primitives (gdn2 kernel+types, dash_attn clean core, chiaroscuro, rat_bridge,
 # ega_attn, diagonal_gate, static_cal, funcattn_compose). Non-optional path dep;
@@ -60,8 +86,6 @@ fastrand = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 postcard = { version = "1", features = ["alloc"] }
-syn = { version = "2", features = ["full", "parsing"], optional = true }
-proc-macro2 = { version = "1", optional = true }
 bevy_ecs = { version = "0.15", optional = true }  # Standalone ECS (Plan 033)
 wasmi = { version = "1.0", optional = true }       # WASM bomber validator (Plan 034, wasmi migration Plan 167)
 papaya = { version = "0.2", optional = true }      # Lock-free concurrent HashMap (Plan 037)
@@ -79,6 +103,14 @@ katgpt-percepta = { path = "crates/katgpt-percepta" }
 # and has non-KV consumers (funcattn_compose, chiaroscuro, benchmark). The root
 # crate re-exports it as `katgpt_rs::spectralquant` for back-compat.
 katgpt-spectral = { path = "crates/katgpt-spectral" }
+# katgpt-sparse (Proposal 003 Phase 11, 2026-07-04): extracted sparse task-vector
+# family (SOPTV storage + SPLAT specialist projection, Plan 264/265). Non-optional
+# path dep; each module is opt-in via its feature flag (both default-ON).
+# `specialist_projection` consumes `katgpt-band::band_conditioner::ComputeTarget`
+# (cross-crate edge — clean direction: sparse depends on band). Root re-exports
+# each module so `katgpt_rs::sparse_task_vector::*` /
+# `katgpt_rs::specialist_projection::*` paths continue to resolve.
+katgpt-sparse = { path = "crates/katgpt-sparse" }
 # katgpt-kv (Issue 015 Phase 3): extracted KV-cache namespace. Non-optional — the
 # root re-exports each sub-module behind its historical feature flag
 # (`kv_share`, `osc_kv`, `cs_kv_probe`, `shard_kv`, `sp_kv`, `still_kv`, `kvarn`,
@@ -143,7 +175,7 @@ sudoku = ["katgpt-pruners/sudoku"]
 sudoku_mrv = ["sudoku", "katgpt-pruners/sudoku_mrv"]
 # Issue 005 Option B: constraint-propagation drafter (naked-singles → p=1.0).
 sudoku_cp = ["sudoku", "katgpt-pruners/sudoku_cp"]
-validator = ["syn", "proc-macro2"]
+validator = ["katgpt-validator/validator"]  # Two-tier syntax pruner (PartialParser + SynPruner). Phase 11 (2026-07-04): module moved to katgpt-validator; root forwards. The syn/proc-macro2 deps are now in katgpt-validator (root Cargo.toml no longer needs them as optional deps).
 # secure_vessel (Plan 315 / Research 297) REMOVED — moved to riir-neuron-db
 # (Plan 006, 2026-06-29). The primitive is now private. See
 # riir-neuron-db/.plans/006_vessel_primitive_migration.md. The
@@ -268,10 +300,10 @@ gdn2_attention = ["katgpt-attn/gdn2_attention", "katgpt-attn/diagonal_gate"]  # 
 cumprodsum = []  # Cumprodsum primitive — atomic 1-SS matrix multiplication (Plan 263, Research 231) — always compiled, feature reserved for future SIMD gate
 ssd_block = ["katgpt-core/ssd_block"]  # Dual-mode SSD block decomposition — chunked semiseparable computation (Plan 263, Phase 2, GOAT PASS 33-661x speedup, default-ON). Phase 10 (2026-07-04): module moved to katgpt-core; root forwards.
 ss_pruner = ["katgpt-pruners/ss_pruner"]  # SemiseparablePruner — cumprodsum temporal influence pruning for DDTree (Plan 263, Phase 3, GOAT PASS 25-56% branching reduction, default-ON)
-band_conditioner = []  # Band conditioning set + CI test primitives for task-relevant identifiability (Plan 265, Research 232, arXiv 2605.12733) — DEFAULT-ON (T5.3, 2026-07-02): G0a/G0b pass
-bckvss = ["band_conditioner"]  # Fusion A: Band-Conditioned KV Segment Selector (Plan 265 Phase 1) — opt-in until GOAT G1–G3 pass
-collider_consistency = ["band_conditioner", "katgpt-core/local_branch_routing"]  # Fusion C: Collider-Consistency ConstraintPruner for DDTree (Plan 265 Phase 3) — DEFAULT-ON (T5.3, 2026-07-02): G7-G9 pass. Forwards katgpt-core/local_branch_routing so the PreservationScorer impl for ColliderConstraint (Plan 377 Phase 2 follow-up) compiles under --no-default-features --features collider_consistency.
-adaptive_cot_identifiability = ["bckvss"]  # Phase 4: Theory-backed adaptive CoT stopping criterion (Plan 265 Phase 4) — opt-in until GOAT G10 passes
+band_conditioner = ["katgpt-band/band_conditioner"]  # Band conditioning set + CI test primitives for task-relevant identifiability (Plan 265, Research 232, arXiv 2605.12733) — DEFAULT-ON (T5.3, 2026-07-02): G0a/G0b pass. Phase 11 (2026-07-04): module moved to katgpt-band; root forwards.
+bckvss = ["katgpt-band/bckvss"]  # Fusion A: Band-Conditioned KV Segment Selector (Plan 265 Phase 1) — opt-in until GOAT G1–G3 pass. Phase 11 (2026-07-04): module moved to katgpt-band; root forwards.
+collider_consistency = ["katgpt-band/collider_consistency"]  # Fusion C: Collider-Consistency ConstraintPruner for DDTree (Plan 265 Phase 3) — DEFAULT-ON (T5.3, 2026-07-02): G7-G9 pass. Phase 11 (2026-07-04): module moved to katgpt-band; root forwards (the katgpt-core/local_branch_routing forward is preserved inside katgpt-band/collider_consistency).
+adaptive_cot_identifiability = ["katgpt-band/adaptive_cot_identifiability"]  # Phase 4: Theory-backed adaptive CoT stopping criterion (Plan 265 Phase 4) — opt-in until GOAT G10 passes. Phase 11 (2026-07-04): module moved to katgpt-band; root forwards.
 lt2_looped = ["hla_attention"]  # LT2 looped inference pipeline — weight-shared T-pass loop (Plan 108, Research 73)
 sleep_consolidation = ["lt2_looped", "gdn2_attention"]  # Sleep-time offline recursive memory consolidation at eviction (Plan 154 GOAT 14/14, Research 116) — default-ON
 plasma_path = ["katgpt-core/plasma_path", "katgpt-transformer/plasma_path"]  # Bit-plane ternary SIMD matvec — multiplication-free CPU inference (Plan 148, Research 110)
@@ -329,7 +361,7 @@ language_domain = []  # Language domain: BPE vocab, LLM models (Plan 040, future
 newton_schulz = ["katgpt-core/newton_schulz"]  # Newton-Schulz orthogonalization + Muon momentum (Plan 152, Research 114, GOAT 25/25 Bench 050) — default-ON. Extracted to katgpt-core per Issue 355 Phase 1a (pure substrate, zero crate:: deps); this forwards to `katgpt-core/newton_schulz`. Historical `katgpt_rs::newton_schulz::*` paths resolve via the root re-export.
 orthogonal_procrustes = ["katgpt-spectral/orthogonal_procrustes"]  # Orthogonal Procrustes — cross-frame embedding alignment via polar decomposition (Issue 001, GOAT 4/4 PASS G1=365us/G2=3.6ms/G4=0%/G6=50KB). Default-ON since 2026-06-23. Phase 4: substrate moved to katgpt-spectral.
 spectral_budget = ["katgpt-spectral/spectral_budget"]  # Spectral Budget Router — layer-adaptive NS depth + rank-p truncation (Plan 253, Research 222) — opt-in, GOAT gate. Phase 4: substrate moved to katgpt-spectral (forwards newton_schulz).
-gauge_invariant = ["katgpt-spectral/gauge_invariant"]  # Gauge-invariant adapter composition — LoRA-Muon distillation (Plan 270, Research 238, GOAT 17/17 PASS, default-ON). Phase 4: substrate moved to katgpt-spectral (forwards newton_schulz).
+gauge_invariant = ["katgpt-sparse/gauge_invariant", "katgpt-spectral/gauge_invariant"]  # Gauge-invariant adapter composition — LoRA-Muon distillation (Plan 270, Research 238, GOAT 17/17 PASS, default-ON). Phase 4: substrate moved to katgpt-spectral (forwards newton_schulz). Phase 11 (2026-07-04): also forwards to katgpt-sparse so the `compose_gauge_invariant` impl on SparseTaskVector (moved from src/sparse_task_vector.rs) compiles.
 manifold_power_iter_router = ["katgpt-spectral/manifold_power_iter_router"]  # Manifold Power Iteration MoE Router — one-shot router-row conditioning at snapshot swap via shared spectral_retract helper (Plan 279, Research 246, arxiv 2606.12397) — DEFAULT-ON since Plan 279 Phase 4 GOAT 9/9 green. Phase 4: substrate moved to katgpt-spectral (forwards blake3).
 river_valley = ["katgpt-spectral/river_valley"]  # River-valley diagnostic metrics — subspace ratios, effective rank, cosine similarity (Plan 152, Research 114, GOAT 25/25 Bench 050) — default-ON. Phase 4: substrate moved to katgpt-spectral.
 spectral_hierarchy = ["katgpt-core/spectral_hierarchy"]  # Spectral hierarchy diagnostic — eigenspace alignment, Haar wavelets, Cauchy interlacing (Plan 156 GOAT) — default-ON
@@ -375,8 +407,8 @@ cross_resolution_transport = ["katgpt-core/cross_resolution_transport"]  # Cross
 latent_field_steering = ["katgpt-core/latent_field_steering"]  # Latent Field Steering — top-down direction-vector injection into mutable latent state (Plan 309, Research 290, CAA + functional emotions). Zero-alloc SIMD SAXPY + sigmoid-falloff localized support (radius/zone). DEFAULT-ON (Plan 309 Phase 4, 2026-06-23): G1-G5 all PASS — G1 fear-axis 1.50×≥1.30, G2 mean cos 0.9958≥0.95 min cos 0.9667≥0.90, G3 leakage 4.5e-5<0.01, G4 19.2µs<1ms, G5 0 allocs. Caveat: 8% argmax flip at α=0.3 — keep α≤0.3 for hot-path.
 temporal_deriv = ["katgpt-core/temporal_deriv", "katgpt-pruners/temporal_deriv"]  # Temporal Derivative Kernel — dual fast/slow EMA surprise signal (Plan 277, Research 243, arXiv:2606.08720). Opt-in until ≥2 fusion gates pass. Also forwards to katgpt-pruners so S2FCollapseDetector::with_temporal_deriv_alphas compiles (bench_277).
 chain_fold = ["thinking_cot"]  # ThoughtFold chain folding — inference-time CoT step pruning (Plan 195 GOAT 16/16, validated by Plan 228 78% reduction)
-clr = []  # CLR Claim-Level Reliability runtime — sigmoid projection vote over claim embeddings (Plan 284, Research 255)
-claim_rubric = []  # Claim Rubric Runtime — L1/L2/L3 evidence ladder validator (Plan 307, Research 287)
+clr = ["katgpt-claim/clr"]  # CLR Claim-Level Reliability runtime — sigmoid projection vote over claim embeddings (Plan 284, Research 255). Phase 11 (2026-07-04): module moved to katgpt-claim; root forwards.
+claim_rubric = ["katgpt-claim/claim_rubric"]  # Claim Rubric Runtime — L1/L2/L3 evidence ladder validator (Plan 307, Research 287). Phase 11 (2026-07-04): module moved to katgpt-claim; root forwards.
 bandit_top_p = ["bandit", "katgpt-pruners/bandit_top_p"]  # Adaptive top-p bandit arm selection (Plan 181, default ON candidate)
 curvature_alloc = ["bandit", "katgpt-pruners/curvature_alloc"]  # Curvature-influence allocation — EoS proxy budget control (Plan 183)
 nds_proxy = ["bandit", "katgpt-pruners/nds_proxy"]  # NDS curvature proxy — modelless inference budget control (Plan 186)
@@ -398,7 +430,7 @@ mux_latent_wire = ["mux_latent_context", "domain_latent"]  # MUX-Latent Wire Pat
 lclm_adaptive_lod = ["mux_latent_context"]  # LCLM Adaptive LOD — spectral energy-based adaptive compression ratio (Research 211, Plan 238 Phase 4, opt-in)
 kvarn = ["katgpt-kv/kvarn"]  # KVarN variance-normalized KV-cache quantization (Research 159)
 selectivity_router = ["katgpt-pruners/selectivity_router", "kurtosis_gate"]  # Self-Learning Selectivity Router — adaptive CoT via per-position EMA kurtosis (Plan 204, default-OFF until GOAT proof). Implies `kurtosis_gate` because `speculative/step.rs` imports `kurtosis_gate::excess_kurtosis` under this feature gate.
-ruliology = ["bandit", "katgpt-pruners/ruliology"]  # Ruliology Bandit — simple program strategies as bandit arms (Plan 188, Research 168)
+ruliology = ["bandit", "katgpt-pruners/ruliology", "katgpt-ruliology/ruliology"]  # Ruliology Bandit — simple program strategies as bandit arms (Plan 188, Research 168). Phase 11 (2026-07-04): module moved to katgpt-ruliology; root forwards (preserves the bandit + katgpt-pruners/ruliology chain).
 directional_credit = ["katgpt-pruners/directional_credit"]  # Entropy-bifurcated screening — direction-adaptive credit (Plan 184, default on candidate)
 kv_share = ["katgpt-kv/kv_share"]  # Q-K=V projection sharing — 50% KV cache reduction (Plan 185, default on candidate)
 rosetta_pruner = ["papaya", "katgpt-pruners/rosetta_pruner"]  # Rosetta Pruners — universal cross-domain meta-pruner (Plan 201 GOAT 39-55% node reduction, default-ON)
@@ -427,12 +459,12 @@ self_distilling_bandit = ["egcs", "katgpt-pruners/self_distilling_bandit"]  # Se
 lodestar = ["katgpt-pruners/lodestar"]  # Lodestar Completion-Distance Pruning — shortest-accepting-distance powers budget-aware masking + jump-ahead + A* termination (Plan 207, Research 183, GOAT 5/5 Bench 055, default-ON)
 reward_calibrator = ["katgpt-pruners/reward_calibrator"]  # Reward-Gated Pruner Calibration — sigmoid-bounded Q-values + Welford variance + blake3 audit (Plan 210 F4, GOAT 6/6, default-ON)
 reward_mem = ["egcs", "bandit", "katgpt-pruners/reward_mem"]  # Reward-Weighted Branch Memorization — blake3 pattern hashing + EMA reward tracking (Plan 209 T3, GOAT 6/6, default-ON)
-sparse_task_vector = []  # Sparse Off-Principal Task Vector storage — OPD-grounded sparse delta format (Plan 264 Phase 1, Research 231, GOAT G1–G2 PASS 2.9–5.7× storage reduction, default-ON)
+sparse_task_vector = ["katgpt-sparse/sparse_task_vector"]  # Sparse Off-Principal Task Vector storage — OPD-grounded sparse delta format (Plan 264 Phase 1, Research 231, GOAT G1–G2 PASS 2.9–5.7× storage reduction, default-ON). Phase 11 (2026-07-04): module moved to katgpt-sparse; root forwards.
 off_principal_retrieval = ["katgpt-spectral/off_principal_retrieval"]  # Off-Principal Task Vector Retrieval — projection + index + score (Plan 264 Phase 2, Research 231, GOAT G3–G4 PASS ≥99% principal energy removed + beats cosine top-1, default-ON). Phase 4: substrate moved to katgpt-spectral (forwards newton_schulz + blake3).
 hla_eigenbasis_recovery = []  # Issue 001: per-NPC eigenbasis recovery from windowed HLA activations (power iteration on D×D Gram, modelless, opt-in until GOAT gate G1–G5 passes)
 spectral_rank = []  # Spectral-Concentration Adaptive Rank — concentration + adaptive_rank + cot_budget (Plan 264 Phase 3, Research 231, GOAT G5–G6 PASS ≥30% avg rank reduction, default-ON). Phase 4: substrate (module `spectral_concentration`) moved to katgpt-spectral as an always-on module; root feature is now a tracking flag for the re-export gate.
 module_energy_route = []  # Module-Energy Compute Routing — ComputeTarget + route_by_module_energy + ModuleEnergyProfile (Plan 264 Phase 4, Research 231, GOAT G7–G8 PASS paper FFN profile match + monotone QPS routing, default-ON)
-specialist_projection = ["sparse_task_vector", "band_conditioner"]  # Fusion B: SPLAT specialist latent projection (Plan 265 Phase 2) — DEFAULT-ON (T5.3, 2026-07-02): G4-G6 pass
+specialist_projection = ["katgpt-sparse/specialist_projection"]  # Fusion B: SPLAT specialist latent projection (Plan 265 Phase 2) — DEFAULT-ON (T5.3, 2026-07-02): G4-G6 pass. Phase 11 (2026-07-04): module moved to katgpt-sparse; root forwards (the katgpt-band/band_conditioner forward is preserved inside katgpt-sparse/specialist_projection).
 fol_constraints = ["katgpt-pruners/fol_constraints"]  # FOL constraint extraction from prompts — keyword table + FolPruner (Plan 209 T1)
 rule_extraction = ["katgpt-pruners/rule_extraction"]  # Logical rule extraction from DDTree paths — ExtractedRule + RuleExtractor (Plan 209 T2)
 decision_trace = ["rule_extraction", "katgpt-pruners/decision_trace"]  # Interpretable decision traces — opt-in debug/audit (Plan 209 T4)
@@ -470,7 +502,7 @@ memory_soup_dtree = ["segment_checkpoint", "regime_transition"]  # Opt-in — ex
 # artifacts. Uses only std + blake3 (no riir-gpu dependency). Default-OFF.
 memory_soup_lora = ["katgpt-core/memory_soup_lora"]  # Default-OFF. Phase 10 (2026-07-04): module moved to katgpt-core; root forwards.
 llmexec_guard = ["katgpt-core/llmexec_guard"]  # Default-on: entropy-driven verification budgeting (Plan 223). Phase 10 (2026-07-04): module moved to katgpt-core; root forwards.
-hoare_pruner = ["llmexec_guard", "katgpt-pruners/hoare_pruner"]  # Opt-in: predicate propagation (Plan 223)
+hoare_pruner = ["llmexec_guard", "katgpt-pruners/hoare_pruner", "katgpt-validator/hoare_pruner"]  # Opt-in: predicate propagation (Plan 223). Phase 11 (2026-07-04): also forwards to katgpt-validator/hoare_pruner so the SynPruner::propagate impl (line 84 of syn_pruner.rs, moved to katgpt-validator) compiles when both validator + hoare_pruner are on.
 trajectory_doctor = ["hoare_pruner", "katgpt-pruners/trajectory_doctor"]  # Opt-in: failure localization (Plan 223)
 workflow_lattice = ["hoare_pruner", "katgpt-pruners/workflow_lattice"]  # Opt-in: sigmoid-graded relevance (Plan 223)
 wasm_proof_witness = []  # Opt-in: proof certificates (Plan 223)

@@ -17,10 +17,12 @@ pub mod attn_match_adaptive_cot;
 #[cfg(feature = "async_qdq_overlap")]
 pub use katgpt_kv::async_qdq;
 pub mod benchmark;
+// Phase 11 absorption (Proposal 003, 2026-07-04): module moved to katgpt-band.
+// Re-export preserves `katgpt_rs::band_conditioner::*` paths.
 #[cfg(feature = "band_conditioner")]
-pub mod band_conditioner;
+pub use katgpt_band::band_conditioner;
 #[cfg(feature = "bckvss")]
-pub mod bckvss;
+pub use katgpt_band::bckvss;
 #[cfg(feature = "breakeven_routing")]
 pub mod breakeven;
 // Phase 5 absorption (Proposal 003, 2026-07-04): module moved to katgpt-kv.
@@ -38,13 +40,12 @@ pub use katgpt_core::channel_simd;
 // items resolve the same way when that feature forwards to katgpt-core.
 #[cfg(feature = "cgsp")]
 pub use katgpt_core::cgsp;
+// Phase 11 absorption (Proposal 003, 2026-07-04): modules moved to katgpt-claim.
+// Re-exports preserve `katgpt_rs::clr::*` and the flat symbol surface.
 #[cfg(feature = "clr")]
-pub mod clr;
-// CLR — Claim-Level Reliability runtime (Plan 284, Research 255).
-// Opt-in behind the `clr` feature until G1-G5 GOAT gate passes. Re-exports the
-// public surface so consumers can `use katgpt::clr_vote` etc. without nesting.
+pub use katgpt_claim::clr;
 #[cfg(feature = "clr")]
-pub use clr::{
+pub use katgpt_claim::clr::{
     allocate_budget, brevity_tiebreak, Claim, ClaimExtractor, ClaimVerifier, ClrConfig, ClrScratch,
     Cluster, DirectionVectorSource, FnClaimExtractor, learning_potential, mgpo_sampling_weight,
     ReliabilityScore, should_write_memory, SigmoidProjectionVerifier, Trajectory, Verdict,
@@ -57,10 +58,13 @@ pub use clr::{
 // (Functional) / L3 (Causal-mechanistic). Vocabulary must match evidence
 // — "causally controls" requires L3 evidence; "reads" is L1-safe. Opt-in
 // until Phase 2 round-trip tests pass on R287 §4 scores.
+//
+// Phase 11 absorption (Proposal 003, 2026-07-04): module moved to katgpt-claim.
+// Re-exports preserve `katgpt_rs::claim_rubric::*` and the flat symbol surface.
 #[cfg(feature = "claim_rubric")]
-pub mod claim_rubric;
+pub use katgpt_claim::claim_rubric;
 #[cfg(feature = "claim_rubric")]
-pub use claim_rubric::{
+pub use katgpt_claim::claim_rubric::{
     ChecklistSection, ClaimValidator, EvidenceItem, EvidenceItemId, EvidenceLevel, Grade,
     VocabularyViolation,
 };
@@ -94,8 +98,10 @@ pub mod data_probe;
 // Available when either gdn2_attention or wall_attention is enabled.
 #[cfg(feature = "cubical_nerve")]
 pub mod cubical_nerve;
+// Phase 11 absorption (Proposal 003, 2026-07-04): module moved to katgpt-band.
+// Re-export preserves `katgpt_rs::collider_pruner::*` paths.
 #[cfg(feature = "collider_consistency")]
-pub mod collider_pruner;
+pub use katgpt_band::collider_pruner;
 // CompressionDrafter — corpus-as-model quest grammar drafter (Plan 285, Research 256).
 // Re-exports katgpt-core's compression_drafter module for downstream consumers (riir-games).
 // Opt-in behind the `compression_drafter` feature until GOAT gate passes.
@@ -219,8 +225,10 @@ pub use katgpt_spectral::river_valley;
 // Re-export preserves `katgpt_rs::rt_turbo::*` paths.
 #[cfg(feature = "rt_turbo")]
 pub use katgpt_speculative::rt_turbo;
+// Phase 11 absorption (Proposal 003, 2026-07-04): module moved to katgpt-ruliology.
+// Re-export preserves `katgpt_rs::ruliology::*` paths.
 #[cfg(feature = "ruliology")]
-pub mod ruliology;
+pub use katgpt_ruliology as ruliology;
 // Phase 5 absorption (Proposal 003, 2026-07-04): module moved to katgpt-kv.
 // Re-export preserves `katgpt_rs::segment_checkpoint::*` paths.
 #[cfg(feature = "segment_checkpoint")]
@@ -236,10 +244,13 @@ pub use katgpt_attn::chiaroscuro;
     feature = "funcattn_freeze_thaw"
 ))]
 pub use katgpt_attn::funcattn_compose;
+// Phase 11 absorption (Proposal 003, 2026-07-04): modules moved to katgpt-sparse.
+// Re-exports preserve `katgpt_rs::specialist_projection::*` and
+// `katgpt_rs::sparse_task_vector::*` paths.
 #[cfg(feature = "specialist_projection")]
-pub mod specialist_projection;
+pub use katgpt_sparse::specialist_projection;
 #[cfg(feature = "sparse_task_vector")]
-pub mod sparse_task_vector;
+pub use katgpt_sparse::sparse_task_vector;
 #[cfg(feature = "sparse_task_vector")]
 pub mod sparse_compose;
 // Phase 10 absorption (Proposal 003, 2026-07-04): module moved to katgpt-core.
@@ -337,8 +348,10 @@ pub use katgpt_deprecated::unit_distance;
 pub use katgpt_transformer::{ContiguousWeights, load_ternary_bits};
 
 // Plan 265 Phase 4: Adaptive CoT stopping criterion (depends on band_conditioner).
+// Phase 11 absorption (Proposal 003, 2026-07-04): module moved to katgpt-band.
+// Re-export preserves `katgpt_rs::adaptive_cot_stopper::*` paths.
 #[cfg(feature = "adaptive_cot_identifiability")]
-pub mod adaptive_cot_stopper;
+pub use katgpt_band::adaptive_cot_stopper;
 
 // Phase 10 absorption (Proposal 003, 2026-07-04): the TrackingAllocator struct
 // + reset_alloc_stats/get_alloc_stats helpers + tests moved to katgpt-core.
@@ -376,8 +389,10 @@ pub use katgpt_core::memory_soup_lora;
 #[cfg(feature = "llmexec_guard")]
 pub use katgpt_core::llmexec_guard;
 
+// Phase 11 absorption (Proposal 003, 2026-07-04): module moved to katgpt-validator.
+// Re-export preserves `katgpt_rs::validator::*` paths.
 #[cfg(feature = "validator")]
-pub mod validator;
+pub use katgpt_validator as validator;
 
 #[cfg(feature = "breakeven_routing")]
 pub use breakeven::{BreakevenBandit, BreakevenStats, BreakevenTierPair, BreakevenTracker};

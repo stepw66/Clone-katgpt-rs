@@ -22,6 +22,8 @@
 //! println!("Winner: {:?}", matrix.rankings[0]);
 //! ```
 
+#![allow(unexpected_cfgs)]  // root may pass-through aggregate features like `full`
+
 pub mod bandit;
 pub mod ca;
 pub mod fsm;

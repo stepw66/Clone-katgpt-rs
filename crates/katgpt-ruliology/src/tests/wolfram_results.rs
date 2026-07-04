@@ -9,12 +9,12 @@
 //! Plan 188 Phase 2.
 
 #[cfg(test)]
-use crate::ruliology::fsm::FsmEnumerator;
-use crate::ruliology::fsm::{FsmStrategy, MAX_STATES};
+use crate::fsm::FsmEnumerator;
+use crate::fsm::{FsmStrategy, MAX_STATES};
 #[cfg(test)]
-use crate::ruliology::payoff::matching_pennies;
+use crate::payoff::matching_pennies;
 #[cfg(test)]
-use crate::ruliology::types::SimpleProgram;
+use crate::types::SimpleProgram;
 
 /// Build grim trigger FSM: cooperate (0) until opponent defects (1), then defect forever.
 #[allow(dead_code)]
@@ -327,9 +327,9 @@ const EXPECTED_2_STATE_COUNT: usize = 26;
 // ── Cross-paradigm tournament helpers ──────────────────────────────
 
 #[cfg(test)]
-use crate::ruliology::ca::CaStrategy;
+use crate::ca::CaStrategy;
 #[cfg(test)]
-use crate::ruliology::tm::TmStrategy;
+use crate::tm::TmStrategy;
 
 /// Play two SimpleProgram strategies against each other for `rounds` rounds.
 ///

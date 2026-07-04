@@ -1749,6 +1749,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "katgpt-band"
+version = "0.1.0"
+dependencies = [
+ "fastrand",
+ "katgpt-core",
+]
+
+[[package]]
+name = "katgpt-claim"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "bytemuck",
+ "katgpt-core",
+]
+
+[[package]]
 name = "katgpt-core"
 version = "0.2.0"
 dependencies = [
@@ -1907,6 +1924,8 @@ dependencies = [
  "half",
  "katgpt-attn",
  "katgpt-attn-match",
+ "katgpt-band",
+ "katgpt-claim",
  "katgpt-core",
  "katgpt-deprecated",
  "katgpt-forward",
@@ -1914,16 +1933,18 @@ dependencies = [
  "katgpt-percepta",
  "katgpt-pruners",
  "katgpt-quant",
+ "katgpt-ruliology",
+ "katgpt-sparse",
  "katgpt-spectral",
  "katgpt-speculative",
  "katgpt-tokenizer",
  "katgpt-transformer",
+ "katgpt-validator",
  "log",
  "metal",
  "papaya",
  "plotters",
  "postcard",
- "proc-macro2",
  "prost",
  "ratatui",
  "rayon",
@@ -1931,11 +1952,20 @@ dependencies = [
  "rustfft",
  "serde",
  "serde_json",
- "syn",
  "tempfile",
  "toml",
  "uuid",
  "wasmi",
+]
+
+[[package]]
+name = "katgpt-ruliology"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "fastrand",
+ "katgpt-core",
+ "katgpt-pruners",
 ]
 
 [[package]]
@@ -1954,6 +1984,16 @@ version = "0.1.0"
 dependencies = [
  "blake3",
  "katgpt-types",
+]
+
+[[package]]
+name = "katgpt-sparse"
+version = "0.1.0"
+dependencies = [
+ "fastrand",
+ "katgpt-band",
+ "katgpt-core",
+ "katgpt-spectral",
 ]
 
 [[package]]
@@ -2018,6 +2058,16 @@ dependencies = [
  "half",
  "rayon",
  "serde",
+]
+
+[[package]]
+name = "katgpt-validator"
+version = "0.1.0"
+dependencies = [
+ "katgpt-core",
+ "katgpt-tokenizer",
+ "proc-macro2",
+ "syn",
 ]
 
 [[package]]

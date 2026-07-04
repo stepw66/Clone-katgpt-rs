@@ -741,8 +741,79 @@ Ordering: foundation first (hoists, splits), then domain crates biggest-first.
     (debug-build perf gate, passes in release), `bench_271_attn_match_goat::g5_reconstruction_quality`
     (pre-existing quality gate — pure file move cannot regress reconstruction
     quality).
-- [ ] **Phase 11 — new domain crates.** `katgpt-band`, `katgpt-claim`,
+- [x] **Phase 11 — new domain crates.** `katgpt-band`, `katgpt-claim`,
   `katgpt-sparse`, `katgpt-ruliology`, `katgpt-validator`, `katgpt-bench`.
+  **DONE 2026-07-04** (5 of 6 crates; `katgpt-bench` deferred).
+  - **5 new crates created** in `crates/`: `katgpt-band`, `katgpt-validator`,
+    `katgpt-sparse`, `katgpt-claim`, `katgpt-ruliology`. Total 38 source files
+    moved out of root `src/`.
+  - **`katgpt-bench` DEFERRED to Phase 12.** `src/benchmark/` has heavy
+    root-glue coupling: 6+ files construct `crate::transformer::ForwardContext`
+    and call `crate::transformer::forward*`. Self-documented as "Root-resident
+    by design (Issue 033 §C, Option C)". Also coupled to `main.rs` (6 call
+    sites) — Phase 12 deletes `main.rs`, dissolving that coupling.
+    Re-evaluate after Phase 12 lands.
+  - **`katgpt-band`** (Plan 265 cluster, 4 files): band_conditioner, bckvss,
+    collider_pruner, adaptive_cot_stopper. Features: `band_conditioner`
+    (default-ON), `bckvss`, `collider_consistency` (default-ON, preserves
+    `katgpt-core/local_branch_routing` forward), `adaptive_cot_identifiability`.
+    External deps: `katgpt-core` (sigmoid + ConstraintPruner/PreservationScorer
+    traits), `fastrand` (bckvss SyntheticScm prod). The lib.rs comment claiming
+    `adaptive_cot_stopper` depends on `band_conditioner` was inaccurate — the
+    module is fully standalone (audit verified zero `crate::` imports).
+  - **`katgpt-validator`** (4 files): PartialParser + SynPruner. Features:
+    `validator` (back-compat gate), `hoare_pruner` (gates `SynPruner::propagate`
+    method). Deps: `katgpt-core` (ConstraintPruner trait), `katgpt-tokenizer`
+    (BpeTokenizer/BpeTokenizerImpl prod + BpeTrainer test), `syn`, `proc-macro2`.
+    **Dropped root `syn`/`proc-macro2` optional deps** — now in leaf crate.
+    Root `hoare_pruner` feature forward extended to include
+    `katgpt-validator/hoare_pruner` so the propagate impl compiles when both
+    `validator` + `hoare_pruner` features are on.
+  - **`katgpt-sparse`** (2 files): sparse_task_vector, specialist_projection.
+    Features: `sparse_task_vector` (default-ON), `specialist_projection`
+    (default-ON, implies sparse_task_vector + `katgpt-band/band_conditioner`),
+    `gauge_invariant`. **Cross-crate edge**: `specialist_projection.rs:43`
+    `crate::band_conditioner::ComputeTarget` → `katgpt_band::band_conditioner::ComputeTarget`.
+    Clean dep direction (sparse → band, never reverse). The `gauge_invariant`
+    parity test uses `katgpt_spectral::gauge_invariant` (dev-dep with feature).
+  - **`katgpt-claim`** (15 files): claim_rubric (5) + clr (10). Features:
+    `claim_rubric` (default-ON), `clr` (default-ON). Byte-identical move —
+    zero import rewrites (all `crate::` refs are intra-group). Deps:
+    `katgpt-core`. dev-deps: `blake3`, `bytemuck` (clr test fixtures for
+    hashing direction-vector tamper-evidence).
+  - **`katgpt-ruliology`** (13 files): Wolfram ruliology. Feature: `ruliology`.
+    Deps: `katgpt-core`, `katgpt-pruners` (with `g_zero` feature — provides
+    `DeltaGatedConfig` consumed by `delta_gated_co_evolve`), `fastrand`,
+    `blake3` (prod — behavioral fingerprint hashing in fsm/ca/tm).
+    **Cross-couple resolved**: `crate::pruners::g_zero::delta_absorb::DeltaGatedConfig`
+    → `katgpt_pruners::g_zero::delta_absorb::DeltaGatedConfig` (single field
+    read: `config.delta_threshold`). Import gated behind
+    `#[cfg(feature = "ruliology")]` to avoid unused-import warning. All 19
+    intra-module `crate::ruliology::*` paths rewritten to `crate::*` (the
+    crate root IS ruliology now). 3 δ-gated tests newly feature-gated to
+    match the `delta_gated_co_evolve` function's gate.
+  - **GOAT gate G3 — PASS** (workspace-wide):
+    - `cargo check --workspace`: default ✅, all-features ✅, no-default ✅
+      (only pre-existing `src/main.rs` unused-var warnings).
+    - **New crate lib tests all pass**: katgpt-band 24/24, katgpt-validator 7/7,
+      katgpt-sparse 22/22 (29/29 with `--features gauge_invariant`),
+      katgpt-claim 54/54, katgpt-ruliology 91/91 (94/94 with `--features ruliology`).
+    - **Root lib tests**: 1163/1163 pass (down from 1270 — the moved-out
+      tests now run in their respective crates).
+    - **Workspace lib tests total**: ~5500+ across all crates (sum of
+      per-crate results), all pass.
+    - **Consumer tests/examples verified** per crate:
+      - katgpt-band: `bench_176_trigger_gate` 5/5, 3 examples.
+      - katgpt-validator: `core_01_validator` example.
+      - katgpt-sparse: `bench_300_tjs_msa_rescue_goat` 1/1, `splat_vs_dense_attention`.
+      - katgpt-claim: `bench_284_clr_goat_g4` 1/1, `bench_284_clr_goat` 3/3,
+        `claim_rubric_test` 17/17, `bench_307_claim_rubric_goat` 1/1, 4 examples.
+      - katgpt-ruliology: `ruliology_demo` example.
+    - **Pre-existing failures (NOT from Plan 382)**: `bench_250_breakeven_goat::t1_overhead_per_forward`
+      (debug perf gate, passes in release), `bench_270_gauge_invariant_goat::t08_throughput_rebalance_256x16`
+      (release perf flakiness, 32.5 μs > 5 μs target — verified fails identically
+      on prior commit before Plan 382).
+    - **Workspace clippy** `--all-features`: zero warnings, zero errors.
 - [ ] **Phase 12 — final sweep.** `src/` should contain only:
     - **`lib.rs`** — minimal: `pub mod transformer` + retained forward-glue `mod`s + back-compat `pub use katgpt_*` re-exports. **No domain logic.** It is the feature-aggregation surface (cross-crate feature combos in `Cargo.toml` like `cgsp`/`sr2am_configurator` that forward to multiple sibling crates) + the transformer-runtime home (`ForwardContext`). Stays `publish = false` per repo policy — only `katgpt-core` ships to crates.io.
     - **`transformer.rs`** — owns `ForwardContext` (linchpin).

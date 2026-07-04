@@ -5,7 +5,7 @@
 //!
 //! Plan 188 Phase 3.
 
-use crate::ruliology::types::SimpleProgram;
+use crate::types::SimpleProgram;
 
 /// Default tape width for TM simulation.
 const DEFAULT_TAPE_WIDTH: usize = 7;

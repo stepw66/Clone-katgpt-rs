@@ -791,7 +791,7 @@ mod gauge_tests {
     /// weighted delta sum.
     #[test]
     fn test_compose_gauge_invariant_matches_full_compose() {
-        use crate::gauge_invariant::{gauge_invariant_compose, GaugePair};
+        use katgpt_spectral::gauge_invariant::{gauge_invariant_compose, GaugePair};
 
         let (rows, cols) = (3_usize, 3_usize);
         // Two STVs with overlapping masks.

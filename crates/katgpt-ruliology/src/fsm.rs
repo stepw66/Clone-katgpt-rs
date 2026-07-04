@@ -8,7 +8,7 @@
 
 use std::collections::HashSet;
 
-use crate::ruliology::types::{SimpleProgram, WinMatrix};
+use crate::types::{SimpleProgram, WinMatrix};
 
 /// Maximum number of FSM states supported.
 pub const MAX_STATES: usize = 4;

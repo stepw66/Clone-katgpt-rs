@@ -6,8 +6,8 @@
 
 use std::collections::HashSet;
 
-use crate::ruliology::fsm::{FsmEnumerator, FsmStrategy};
-use crate::ruliology::types::SimpleProgram;
+use crate::fsm::{FsmEnumerator, FsmStrategy};
+use crate::types::SimpleProgram;
 
 // ── RuliologyArm ──────────────────────────────────────────────
 
@@ -186,12 +186,12 @@ impl RuliologyBandit {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ruliology::payoff::matching_pennies;
+    use crate::payoff::matching_pennies;
 
     #[test]
     fn test_ruliology_arm_ucb1_unvisited_max() {
-        let transitions = [[0u8; 2]; crate::ruliology::fsm::MAX_STATES];
-        let outputs = [0u8; crate::ruliology::fsm::MAX_STATES];
+        let transitions = [[0u8; 2]; crate::fsm::MAX_STATES];
+        let outputs = [0u8; crate::fsm::MAX_STATES];
         let strategy = FsmStrategy::new(transitions, outputs, 1, 0);
         let arm = RuliologyArm::new(strategy);
         // Unvisited arm should have infinite UCB1 score.
@@ -201,8 +201,8 @@ mod tests {
 
     #[test]
     fn test_ruliology_arm_update_incremental_mean() {
-        let transitions = [[0u8; 2]; crate::ruliology::fsm::MAX_STATES];
-        let outputs = [0u8; crate::ruliology::fsm::MAX_STATES];
+        let transitions = [[0u8; 2]; crate::fsm::MAX_STATES];
+        let outputs = [0u8; crate::fsm::MAX_STATES];
         let strategy = FsmStrategy::new(transitions, outputs, 1, 0);
         let mut arm = RuliologyArm::new(strategy);
 
@@ -435,7 +435,7 @@ impl RuliologyAbsorbCompress {
 #[cfg(test)]
 mod absorb_compress_tests {
     use super::*;
-    use crate::ruliology::payoff::matching_pennies;
+    use crate::payoff::matching_pennies;
 
     fn make_test_bandit() -> RuliologyBandit {
         let strategies = FsmEnumerator::enumerate(2);
