@@ -10,27 +10,11 @@ use katgpt_core::{
     GroupAction, SubgroupClass, discover_subgroup_into, invariance_score,
 };
 use katgpt_core::group_invariance_probe::Rng;
-use std::alloc::{GlobalAlloc, Layout, System};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::Ordering;
 
-struct CountingAllocator;
-
-static ALLOC_COUNT: AtomicUsize = AtomicUsize::new(0);
-static DEALLOC_COUNT: AtomicUsize = AtomicUsize::new(0);
-
-unsafe impl GlobalAlloc for CountingAllocator {
-    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        ALLOC_COUNT.fetch_add(1, Ordering::Relaxed);
-        unsafe { System.alloc(layout) }
-    }
-    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        DEALLOC_COUNT.fetch_add(1, Ordering::Relaxed);
-        unsafe { System.dealloc(ptr, layout) }
-    }
-}
-
-#[global_allocator]
-static A: CountingAllocator = CountingAllocator;
+#[path = "common/mod.rs"]
+mod common;
+counting_allocator!();
 
 // ── Minimal in-house RNG (splitmix64 — matches the in-crate test) ──────────
 

@@ -24,29 +24,13 @@
 use katgpt_core::velocity_field_ensemble::{
     ClosureField, EnsembleFitScratch, VelocityFieldEnsemble,
 };
-use std::alloc::{GlobalAlloc, Layout, System};
 use std::hint::black_box;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
-// ── CountingAllocator (G3 re-verify) ───────────────────────────────────────
-
-struct CountingAllocator;
-
-static ALLOC_COUNT: AtomicUsize = AtomicUsize::new(0);
-
-unsafe impl GlobalAlloc for CountingAllocator {
-    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        ALLOC_COUNT.fetch_add(1, Ordering::Relaxed);
-        unsafe { System.alloc(layout) }
-    }
-    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        unsafe { System.dealloc(ptr, layout) }
-    }
-}
-
-#[global_allocator]
-static A: CountingAllocator = CountingAllocator;
+#[path = "../tests/common/mod.rs"]
+mod common;
+counting_allocator!();
 
 // ── Config ────────────────────────────────────────────────────────────────
 

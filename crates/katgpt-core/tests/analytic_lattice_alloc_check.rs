@@ -17,27 +17,11 @@ use katgpt_core::analytic_lattice::{
     LatticeVector, TransportOperator, batch_compose_chain_into, compose_chain_into,
     direction_vector_decode,
 };
-use std::alloc::{GlobalAlloc, Layout, System};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::Ordering;
 
-struct CountingAllocator;
-
-static ALLOC_COUNT: AtomicUsize = AtomicUsize::new(0);
-static DEALLOC_COUNT: AtomicUsize = AtomicUsize::new(0);
-
-unsafe impl GlobalAlloc for CountingAllocator {
-    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        ALLOC_COUNT.fetch_add(1, Ordering::Relaxed);
-        unsafe { System.alloc(layout) }
-    }
-    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        DEALLOC_COUNT.fetch_add(1, Ordering::Relaxed);
-        unsafe { System.dealloc(ptr, layout) }
-    }
-}
-
-#[global_allocator]
-static A: CountingAllocator = CountingAllocator;
+#[path = "common/mod.rs"]
+mod common;
+counting_allocator!();
 
 /// G5 zero-alloc gate for all three hot-path primitives.
 ///

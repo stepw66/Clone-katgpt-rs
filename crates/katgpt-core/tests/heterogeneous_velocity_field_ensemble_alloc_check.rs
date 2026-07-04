@@ -18,31 +18,11 @@ use katgpt_core::velocity_field_ensemble::{
     HeterogeneousEnsemble, HeterogeneousEntry, HeterogeneousFitScratch,
     HeterogeneousVelocityField,
 };
-use std::alloc::{GlobalAlloc, Layout, System};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::Ordering;
 
-struct CountingAllocator;
-
-static ALLOC_COUNT: AtomicUsize = AtomicUsize::new(0);
-static DEALLOC_COUNT: AtomicUsize = AtomicUsize::new(0);
-
-unsafe impl GlobalAlloc for CountingAllocator {
-    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        unsafe {
-            ALLOC_COUNT.fetch_add(1, Ordering::Relaxed);
-            System.alloc(layout)
-        }
-    }
-    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        unsafe {
-            DEALLOC_COUNT.fetch_add(1, Ordering::Relaxed);
-            System.dealloc(ptr, layout);
-        }
-    }
-}
-
-#[global_allocator]
-static A: CountingAllocator = CountingAllocator;
+#[path = "common/mod.rs"]
+mod common;
+counting_allocator!();
 
 const D: usize = 8;
 const P: usize = 3;

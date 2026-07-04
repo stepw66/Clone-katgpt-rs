@@ -28,35 +28,11 @@ use criterion::{Criterion, criterion_group, criterion_main};
 use katgpt_core::diversity::temp::{
     extrapolated_snapshot_schedule, perturbed_loss_vector, select_diverse_subset_into, LossKernel,
 };
-use std::alloc::{GlobalAlloc, Layout, System};
 use std::hint::black_box;
-use std::sync::atomic::{AtomicUsize, Ordering};
 
-// ─── CountingAllocator (G3-alloc) ──────────────────────────────────────────
-
-struct CountingAllocator;
-
-static ALLOC_COUNT: AtomicUsize = AtomicUsize::new(0);
-
-unsafe impl GlobalAlloc for CountingAllocator {
-    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        ALLOC_COUNT.fetch_add(1, Ordering::Relaxed);
-        unsafe { System.alloc(layout) }
-    }
-    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        unsafe { System.dealloc(ptr, layout) }
-    }
-}
-
-#[global_allocator]
-static A: CountingAllocator = CountingAllocator;
-
-fn alloc_delta<R>(f: impl FnOnce() -> R) -> (R, usize) {
-    let before = ALLOC_COUNT.load(Ordering::Relaxed);
-    let r = f();
-    let after = ALLOC_COUNT.load(Ordering::Relaxed);
-    (r, after - before)
-}
+#[path = "../tests/common/mod.rs"]
+mod common;
+counting_allocator!();
 
 // ─── Deterministic xorshift RNG (fixture generation only) ──────────────────
 

@@ -21,42 +21,12 @@
 
 use katgpt_core::faithfulness::types::FaithfulnessProfile;
 use katgpt_core::functional_substitution::HeadSubstitutionGate;
-use std::alloc::{GlobalAlloc, Layout, System};
 use std::hint::black_box;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
-// ─── Counting allocator (codebase convention) ────────────────────────────
-
-struct CountingAllocator;
-
-static ALLOC_COUNT: AtomicUsize = AtomicUsize::new(0);
-
-unsafe impl GlobalAlloc for CountingAllocator {
-    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        ALLOC_COUNT.fetch_add(1, Ordering::Relaxed);
-        // SAFETY: `layout` is valid; System.alloc is sound for any valid layout.
-        unsafe { System.alloc(layout) }
-    }
-    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        unsafe { System.dealloc(ptr, layout) }
-    }
-}
-
-#[global_allocator]
-static A: CountingAllocator = CountingAllocator;
-
-#[inline]
-fn alloc_count() -> usize {
-    ALLOC_COUNT.load(Ordering::Relaxed)
-}
-
-fn alloc_delta<R>(f: impl FnOnce() -> R) -> (R, usize) {
-    let before = alloc_count();
-    let r = f();
-    let after = alloc_count();
-    (r, after.saturating_sub(before))
-}
+#[path = "../tests/common/mod.rs"]
+mod common;
+counting_allocator!();
 
 // ─── Helpers ────────────────────────────────────────────────────────────
 

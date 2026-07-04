@@ -46,7 +46,6 @@
 //! - Bridge (private): `riir-ai/crates/riir-engine/src/cgsp_runtime/clifford_bridge.rs`
 //! - Primitive: [`katgpt_core::linalg::geometric_product_wedge_into`]
 
-use std::alloc::{GlobalAlloc, Layout, System};
 use std::io::{self, Write};
 use std::time::{Duration, Instant};
 
@@ -159,30 +158,10 @@ fn sigmoid(x: f32) -> f32 {
     1.0 / (1.0 + (-x).exp())
 }
 
-// ─── Counting allocator (G3-style alloc gate) ──────────────────────────────
 
-struct CountingAllocator;
-
-static ALLOC_COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-
-unsafe impl GlobalAlloc for CountingAllocator {
-    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        ALLOC_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        // SAFETY: `layout` is the same one passed to us; System.alloc is sound
-        // for any valid layout. Wrapped in unsafe block for edition-2024
-        // `unsafe_op_in_unsafe_fn` compatibility.
-        unsafe { System.alloc(layout) }
-    }
-
-    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        // SAFETY: caller guarantees `ptr` was returned by a matching `alloc`
-        // and `layout` is the same. See System::dealloc contract.
-        unsafe { System.dealloc(ptr, layout) }
-    }
-}
-
-#[global_allocator]
-static A: CountingAllocator = CountingAllocator;
+#[path = "../tests/common/mod.rs"]
+mod common;
+counting_allocator!();
 
 #[inline]
 fn alloc_count() -> usize {
