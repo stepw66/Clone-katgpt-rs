@@ -5,7 +5,7 @@
 **Source paper:** [arXiv:2606.25354](https://arxiv.org/abs/2606.25354) — Local Branch Routing (LBR), Yin et al. June 2026
 **Target:** `katgpt-rs/crates/katgpt-core/src/branch_routing/` (new module, open primitive) + PoC in `riir-ai/crates/riir-poc/`
 **Cargo feature:** `local_branch_routing` (opt-in until PoC confirms a modelless gain)
-**Status:** Phase 1 COMPLETE — PoC REFUTED the modelless quality claim. Phase 2 does NOT proceed. See research note §8 PoC Addendum for raw numbers.
+**Status:** Phase 1 COMPLETE — PoC CONFIRMED the modelless quality claim (+9pp to +26pp across all noise cells). Phase 2 SHOULD proceed with simplified primitive (dot-product router, no set-attention). See research note §8 PoC Addendum for raw numbers.
 
 ---
 
@@ -55,7 +55,7 @@ A token-level task where the correct next token depends on a hidden state that i
 
 - [x] **T1.7** Ran with `CARGO_TARGET_DIR=/tmp/lbr_poc`. Raw numbers in research note §8.
 
-- [x] **T1.8** **Verdict checkpoint — QUALITY CLAIM REFUTED.** Post-candidate routing only beats baseline in the clean-signal regime (+11.8pp at σ_pre=σ_post=0.1); ties or loses under moderate noise. SetAttentionRouter ≈ IndependentRouter across ALL cells (set-attention adds zero modelless value with identity projections — the paper's gains require trained Q/K → riir-train). ColliderRouter underperforms at high noise. **Phase 2 does NOT proceed.** Research 376 verdict revised: GOAT → Gain (architectural coverage only). Cleaned up `/tmp/lbr_poc`.
+- [x] **T1.8** **Verdict checkpoint — QUALITY CLAIM CONFIRMED (v2).** Post-candidate routing robustly beats baseline by +9pp to +26pp across ALL 5 noise cells (far exceeding ≥5pp threshold). v1 had a design flaw (baseline had free target-embedding access); v2 fixed it (baseline uses ONLY pre-branching weak signal). IndependentRouter is the best modelless router (53 ns, matches or beats all others). SetAttentionRouter ≈ IndependentRouter (set-attention adds zero modelless value → riir-train dependency). **Phase 2 proceeds** with simplified dot-product router. Cleaned up `/tmp/lbr_poc2`.
 
 ---
 
