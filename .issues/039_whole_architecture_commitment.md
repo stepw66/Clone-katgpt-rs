@@ -1,5 +1,7 @@
 # Issue 039 — Whole-Architecture Commitment (single tamper-evident root for an NPC's full cognitive architecture)
 
+**Status:** ✅ **RESOLVED** (2026-07-04). Shipped as `CognitiveArchitectureRoot` in `crates/katgpt-core/src/engram/architecture_root.rs`, DEFAULT-ON feature `cognitive_architecture_root`. All GOAT gates PASS — see `.benchmarks/039_architecture_root_goat.md`. All six tasks T1–T6 ticked below.
+
 **Filed:** 2026-07-04
 **Priority:** P2 (high product payoff: chain-verifiable "NPC brain" — enables quorum-attested personality freeze/thaw, anti-cheat on cognitive state, and on-chain avatar import/export)
 **Origin:** Evaluation of Gemini's "Continuous Neuro-Symbolic DAG" proposal against the codebase (2026-07-04). The mechanism atoms all ship (PTG, EngramTable, NeuronShard, latent_functor direction sets); the missing piece is the unifying commitment root.
@@ -109,16 +111,16 @@ If G1–G6 pass → promote to default-on (modelless gain: anti-cheat + chain ve
 
 ## Tasks
 
-- [ ] **T1** Confirm the four component-root accessors all exist and return `[u8; 32]`:
-  - PTG: `closure::serialize_postcard` + `blake3::hash(...).as_bytes()` — verify the helper exists or add a `pub fn ptg_root(ptg: &PrimitiveTransitionGraph) -> [u8; 32]`.
-  - EngramTable: `EngramTableId::from_table(...).0` — exists.
-  - ShardSet: `NeuronShard::merkle_root` — exists per `riir-neuron-db` AGENTS.md.
-  - FunctorSignatureSet: verify whether this has a commitment today or whether a `functor_sig_root` accessor needs to be added (likely reuses `EngramTableId` if signatures live in an engram table).
-- [ ] **T2** Add `crates/katgpt-core/src/engram/architecture_root.rs` behind feature `cognitive_architecture_root`. Implement `CognitiveArchitectureRoot` per the sketch above.
-- [ ] **T3** Add spec-match tests: avalanche (single-bit input mutation changes ≥ N output bits), `verify()` round-trip, `size_of == 32`.
-- [ ] **T4** Add `criterion` bench in `benches/bench_039_architecture_root.rs`. Record in `.benchmarks/039_architecture_root_goat.md`.
-- [ ] **T5** Run GOAT gate. If G1–G6 pass → promote `cognitive_architecture_root` to default in `crates/katgpt-core/Cargo.toml`.
-- [ ] **T6** If promoted: add a doc section in `engram/mod.rs` explaining the layering (per-component roots → architecture root → chain SyncBlock field).
+- [x] **T1** Confirm the four component-root accessors all exist and return `[u8; 32]`:
+  - PTG: `closure::commitment(ptg: &PrimitiveTransitionGraph) -> [u8; 32]` — **already exists** at `closure/mod.rs:84-90`. No new helper needed.
+  - EngramTable: `EngramTableId::from_table(...).0` — **exists** at `engram/commitment.rs:62-64`.
+  - ShardSet: `NeuronShard::merkle_root() -> [u8; 32]` — **exists** in `riir-neuron-db/src/shard.rs` (chain-set).
+  - FunctorSignatureSet: **grep returns ZERO hits** for `FunctorSignature|functor_signature|FunctorSig` in katgpt-rs. **Decision:** take a raw `[u8; 32]` parameter named `functor_sig_root` — the primitive doesn't care about the source type, only the bytes. Caller supplies whatever commitment they have (an `EngramTableId` if signatures live in an engram table, `[0u8; 32]` if absent). Avoids forcing a `FunctorSignatureSet` type to exist before the primitive can ship. See `.benchmarks/039_architecture_root_goat.md` §"Design note — FunctorSignatureSet".
+- [x] **T2** Add `crates/katgpt-core/src/engram/architecture_root.rs` behind feature `cognitive_architecture_root`. Implement `CognitiveArchitectureRoot` per the sketch above.
+- [x] **T3** Add spec-match tests: avalanche (single-bit input mutation changes ≥ N output bits), `verify()` round-trip, `size_of == 32`. **13 unit tests** covering every input field's bit-flip sensitivity + determinism + verify round-trip + free-function/method agreement + absent-component sentinel convention.
+- [x] **T4** Add `criterion` bench in `benches/bench_039_architecture_root_goat.rs`. Record in `.benchmarks/039_architecture_root_goat.md`.
+- [x] **T5** Run GOAT gate. **G1–G6 all PASS** → promoted `cognitive_architecture_root` to `default` in `crates/katgpt-core/Cargo.toml`. See `.benchmarks/039_architecture_root_goat.md` for the full gate table.
+- [x] **T6** If promoted: add a doc section in `engram/mod.rs` explaining the layering (per-component roots → architecture root → chain SyncBlock field). **Done** — see the ASCII diagram in `engram/mod.rs` above the `mod architecture_root;` declaration.
 
 ## Cross-References
 
