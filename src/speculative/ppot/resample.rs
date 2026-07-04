@@ -1180,6 +1180,7 @@ mod tests {
     use crate::speculative::ppot::QmcConfig;
 
     /// Helper: mean pairwise Hamming distance across variants.
+    #[cfg(feature = "qmc_sampling")]
     fn mean_pairwise_edit_distance(variants: &[Vec<usize>]) -> f64 {
         let k = variants.len();
         if k < 2 {

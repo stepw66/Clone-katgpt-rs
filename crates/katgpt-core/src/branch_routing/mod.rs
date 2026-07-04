@@ -147,12 +147,13 @@ impl DotProductRouter {
     /// ensure matching dimensionality.
     #[inline]
     fn score(&self, candidate: &[f32]) -> f32 {
-        let len = candidate.len().min(self.direction.len());
-        let mut s = 0.0_f32;
-        for i in 0..len {
-            s += candidate[i] * self.direction[i];
-        }
-        s
+        // zip stops at the shorter slice — equivalent to truncating to
+        // `candidate.len().min(self.direction.len())` without the index math.
+        candidate
+            .iter()
+            .zip(self.direction.iter())
+            .map(|(a, b)| a * b)
+            .sum::<f32>()
     }
 }
 

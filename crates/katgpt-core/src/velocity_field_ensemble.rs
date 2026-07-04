@@ -319,16 +319,16 @@ pub fn accumulate_pair_into<F, const P: usize, const D: usize>(
 ) where
     F: VelocityField<D>,
 {
-    for i in 0..P {
-        fields[i].eval_into(i_t, &mut scratch.b_out_i);
-        for j in i..P {
+    for (i, field_i) in fields.iter().enumerate().take(P) {
+        field_i.eval_into(i_t, &mut scratch.b_out_i);
+        for (j, field_j) in fields.iter().enumerate().take(P).skip(i) {
             // Upper triangle (i ≤ j).
             let dot = if i == j {
                 // b_i already in b_out_i; dot with itself (no re-eval).
                 simd_dot_f32(&scratch.b_out_i, &scratch.b_out_i, D)
             } else {
                 // Evaluate b_j into b_out_j; dot with b_out_i.
-                fields[j].eval_into(i_t, &mut scratch.b_out_j);
+                field_j.eval_into(i_t, &mut scratch.b_out_j);
                 simd_dot_f32(&scratch.b_out_i, &scratch.b_out_j, D)
             };
             scratch.gram[i * P + j] += dot;
@@ -364,6 +364,7 @@ pub fn accumulate_pair_into<F, const P: usize, const D: usize>(
 /// Panics (via `ridge_solve_direct_f32`) if `gram_reg.len() < P*P`,
 /// `chol.len() < P*P`, `rhs.len() < P`, or `n == 0`.
 #[inline]
+#[allow(clippy::too_many_arguments)]
 fn solve_ridge_eta_into<const P: usize>(
     eta: &mut [f32; P],
     gram: &mut [f32],
