@@ -37,6 +37,8 @@
 
 pub mod admit;
 pub mod bridge;
+#[cfg(feature = "ptg_functor_edges")]
+pub mod functor_edge;
 pub mod metrics;
 pub mod motif;
 pub mod trace;
@@ -52,6 +54,9 @@ pub use motif::{
     FixedU32Set, MAX_MOTIF_EDGES, MAX_MOTIF_NODES, Motif, MotifMiner, RING_BUFFER_K,
 };
 pub use trace::{NodeId, PtgRecorder};
+
+#[cfg(feature = "ptg_functor_edges")]
+pub use functor_edge::{FunctorEdgeParams, FunctorPtg, apply_functor_edge_into, functor_edge_gate};
 
 // ── Cold-tier serde + commitment helpers ───────────────────────────────────
 // (T1.3 — kept in `mod.rs` next to the data model; the file is small enough

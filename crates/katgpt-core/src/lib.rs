@@ -797,6 +797,15 @@ pub use closure::{
     trace::{DEFAULT_TRACE_CAPACITY, NodeId, PtgRecorder},
 };
 
+// Issue 040 — PTG × latent_functor edge composition. Ships `FunctorPtg`
+// (composite wrapper over an unchanged `PrimitiveTransitionGraph`),
+// `FunctorEdgeParams` (per-edge continuous-functor params), and
+// `apply_functor_edge_into` (zero-alloc sigmoid-gated apply path). Gated by
+// `ptg_functor_edges` (implies `closure_instrument`). Wire-format safe: the
+// inner PTG is byte-identical to a bare PTG.
+#[cfg(feature = "ptg_functor_edges")]
+pub use closure::{FunctorEdgeParams, FunctorPtg, apply_functor_edge_into, functor_edge_gate};
+
 // Sink-Aware Attention — NOP/Broadcast classifier + dual-policy sigmoid gate
 // (Plan 287, Research 258, arxiv 2606.08105, Fesser et al.). Per-head
 // classifier (value-norm-ratio + stable-rank-of-update) decides whether a
