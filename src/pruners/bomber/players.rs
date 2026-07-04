@@ -1652,7 +1652,8 @@ impl BomberPlayer for HLPlayer {
             )
         });
 
-        // Compute blended scores: 85% policy + 15% bandit Q-value
+        // Compute action scores: heuristic (+ LoRA blend when loaded) + strategy bonus
+        // + centered bandit Q-value blend (Issue 371: re-enabled, weight 2.0).
         let mut scores: [(BomberAction, f32); ACTION_COUNT] = ALL_ACTIONS.map(|a| (a, 0.0));
 
         for (i, action) in ALL_ACTIONS.iter().enumerate() {
@@ -1763,15 +1764,16 @@ impl BomberPlayer for HLPlayer {
                 }
             }
 
-            // Bandit Q-value component (default 0.0 for unvisited arms)
-            let _bandit_q = if self.arm_visits(i) > 0 {
-                self.arm_q(i)
+            // Bandit Q-value blend (Issue 371: re-enabled, centered, weight 2.0).
+            // Reward arms with Q > 0.5, penalize Q < 0.5. Unvisited arms are neutral
+            // (treated as Q = 0.5) so the bandit doesn't suppress early exploration.
+            let bandit_term = if self.arm_visits(i) > 0 {
+                (self.arm_q(i) - 0.5) * 2.0
             } else {
                 0.0
             };
 
-            // Pure heuristic + strategy bonus (bandit noise removed — too sparse at this scale)
-            scores[i] = (*action, h + strategy_bonus);
+            scores[i] = (*action, h + strategy_bonus + bandit_term);
         }
 
         // ε-greedy: 10% explore (only safe moves — less random than Greedy's 20%)
