@@ -10,7 +10,7 @@
 //! in addition to selection-based folding.
 //!
 //! _Root-resident by design (Issue 033 §C, Option C)._ Implements root-only
-//! `crate::speculative::types::ScreeningPruner` and integrates with root-only
+//! `katgpt_core::traits::ScreeningPruner` and integrates with root-only
 //! `ThinkingController` (Plan 194).
 
 use super::attention_importance::AttentionImportance;
@@ -198,7 +198,7 @@ impl ChainFolder {
         values: &[half::f16],
         num_heads: usize,
         head_dim: usize,
-        strategy: crate::still_kv::CompactionStrategy,
+        strategy: katgpt_kv::still_kv::CompactionStrategy,
         rope_theta: f32,
         compression_ratio: usize,
     ) -> Option<CompactTraceResult> {
@@ -211,7 +211,7 @@ impl ChainFolder {
         let budget = (kept_tokens / compression_ratio).max(1);
 
         // Build per-chunk compactor using iterative pipeline
-        let compactor = crate::still_kv::IterativeChunkCompactor::new(
+        let compactor = katgpt_kv::still_kv::IterativeChunkCompactor::new(
             kept_tokens, // single chunk: all kept tokens
             0,           // no lookahead
             num_heads,
@@ -221,12 +221,12 @@ impl ChainFolder {
             compression_ratio,
         );
 
-        let chunk = crate::still_kv::KVChunk {
+        let chunk = katgpt_kv::still_kv::KVChunk {
             keys: keys.to_vec(),
             values: values.to_vec(),
             start_pos: 0,
             len: kept_tokens,
-            beta: crate::still_kv::BetaBias::zeros(0, 0),
+            beta: katgpt_kv::still_kv::BetaBias::zeros(0, 0),
         };
 
         let compacted = compactor.compact_chunk(&chunk, None, budget);
@@ -281,7 +281,7 @@ impl ChainFolder {
 /// - Steps marked `Keep` or `Anchor` → 1.0
 /// - Steps marked `Fold` → 0.0
 /// - If no cached decisions → 1.0 (passthrough, safe default)
-impl crate::speculative::types::ScreeningPruner for ChainFolder {
+impl katgpt_core::traits::ScreeningPruner for ChainFolder {
     fn relevance(&self, depth: usize, _token_idx: usize, _parent_tokens: &[usize]) -> f32 {
         let step_idx = self.step_index_for_depth(depth);
         match step_idx {
@@ -604,7 +604,7 @@ mod tests {
             &values,
             num_heads,
             head_dim,
-            crate::still_kv::CompactionStrategy::ClusterCentroids,
+            katgpt_kv::still_kv::CompactionStrategy::ClusterCentroids,
             10000.0,
             2,
         );
@@ -632,7 +632,7 @@ mod tests {
             &values,
             2,
             8,
-            crate::still_kv::CompactionStrategy::ClusterCentroids,
+            katgpt_kv::still_kv::CompactionStrategy::ClusterCentroids,
             10000.0,
             2,
         );
@@ -654,7 +654,7 @@ mod tests {
             &values,
             2,
             8,
-            crate::still_kv::CompactionStrategy::ClusterCentroids,
+            katgpt_kv::still_kv::CompactionStrategy::ClusterCentroids,
             10000.0,
             1, // ratio 1 = no compression
         );

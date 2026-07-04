@@ -86,7 +86,13 @@ Anything beyond the [stay] list is a missed move — log + fix."*
         katgpt_core::trigger_gate, crate::types::Rng → katgpt_core::types::Rng.
         rv_bandit_pruning sub-feature forwarded. Stale check-cfg allowlist for
         freq_bandit removed — it's now a real feature.)
-      - [ ] T4.5 — katgpt-speculative: progressive_mcgs, fold
+      - [x] T4.5 — katgpt-speculative: progressive_mcgs, fold ✅
+        (progressive_mcgs/ 9 files — self-contained, zero deps. fold/ 8 files —
+        import rewrites: crate::still_kv → katgpt_kv::still_kv, crate::types::Rng
+        → katgpt_core::types::Rng, crate::speculative::types::ScreeningPruner →
+        katgpt_core::traits::ScreeningPruner. chain_fold feature pulls katgpt-kv/
+        still_kv + half + fastrand optional deps. still_kv + bake_precision
+        sub-features added.)
       - [ ] T4.6 — katgpt-transformer cascade: thinking_cot + swir/strategy_adapter
       - [ ] T4.7 — katgpt-attn: 8 dash_attn primitives (+ dep wiring for meta_router, sat_analysis)
       - [ ] T4.8 — katgpt-speculative/katgpt-pruners: ~30 speculative primitives

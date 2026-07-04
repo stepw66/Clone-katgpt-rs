@@ -8,7 +8,7 @@
 //! fold→`crate::speculative::types::ScreeningPruner` composition; reward
 //! signal is root-only speculative acceptance variance.
 
-use crate::types::Rng;
+use katgpt_core::types::Rng;
 
 /// Available fold budget arms.
 const BUDGET_ARMS: [f32; 5] = [0.3, 0.5, 0.7, 0.9, 1.0];

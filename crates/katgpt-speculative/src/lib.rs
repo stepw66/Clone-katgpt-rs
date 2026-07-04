@@ -85,3 +85,12 @@ pub use katgpt_core::traits::{
     BinaryScreeningPruner, CompletionHorizon, ConstraintPruner, DominoPruner, NoPruner,
     NoScreeningPruner, ScreeningPruner,
 };
+
+// ── Phase 12 T4.5 (2026-07-04): modules moved from katgpt-rs/src/. ──
+// Progressive MCGS — Monte Carlo Graph Search (Plan 148). Self-contained.
+#[cfg(feature = "progressive_mcgs")]
+pub mod progressive_mcgs;
+// Chain Fold — step-boundary-aware context folding (Plan 195, GOAT 16/16).
+// Needs katgpt-kv/still_kv for chain_folder's KV compaction types.
+#[cfg(feature = "chain_fold")]
+pub mod fold;

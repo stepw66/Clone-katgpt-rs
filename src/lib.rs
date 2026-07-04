@@ -141,7 +141,9 @@ pub use katgpt_attn::ega_attn;
 #[cfg(feature = "feedback")]
 pub use katgpt_deprecated::feedback;
 #[cfg(feature = "chain_fold")]
-pub mod fold;
+// Phase 12 absorption (Proposal 003, 2026-07-04): module moved to katgpt-speculative.
+// Re-export preserves `katgpt_rs::fold::*` paths.
+pub use katgpt_speculative::fold;
 // CCE — Coarse Correlated Equilibria moderator primitives (Plan 295 + Plan 300, Research 274, arxiv 2606.20062).
 // Generic, game-agnostic LP-CCE formulation + external-regret functional +
 // heterogeneous (subjective-CCE) extension + primal-dual iterator.
@@ -224,7 +226,9 @@ pub use katgpt_speculative::precision_aware_draft;
 #[doc(alias = "mcgs")]
 #[doc(alias = "graph_search")]
 #[doc(alias = "monte_carlo")]
-pub mod progressive_mcgs;
+// Phase 12 absorption (Proposal 003, 2026-07-04): module moved to katgpt-speculative.
+// Re-export preserves `katgpt_rs::progressive_mcgs::*` paths.
+pub use katgpt_speculative::progressive_mcgs;
 // Phase 12 absorption (Proposal 003, 2026-07-04): module moved to katgpt-proof-cert.
 // Re-export preserves `katgpt_rs::proof_cert::*` paths. The `conditional_proof!`
 // macro is also re-exported via `#[macro_export]` at the leaf crate root.

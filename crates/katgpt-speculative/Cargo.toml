@@ -26,6 +26,10 @@ blake3 = { version = "1", optional = true }
 # segment_match + rt_turbo sat_retrieval. Optional — only needed when those
 # modules are enabled (Proposal 003 Phase 6).
 katgpt-kv = { path = "../katgpt-kv", default-features = false, optional = true }
+# f16 KV cache storage for chain_fold's chain_folder (Phase 12 T4.5 move).
+half = { version = "2", optional = true }
+# RNG for fold_bandit (Phase 12 T4.5 move).
+fastrand = { version = "2", optional = true }
 
 [features]
 # Forward sr2am_configurator to katgpt-types so `build_inference_result` can
@@ -99,6 +103,17 @@ thinking_prune = []  # Gates the `build_hop_dd_tree_with_schedule` path in spech
 # (Plan 171 FrozenBaseGuard semantics). No deps — the schedule type is defined
 # locally in katgpt-speculative to avoid a katgpt-pruners cycle (katgpt-pruners
 # already depends on katgpt-speculative for sr2am_configurator forwarding).
+
+# ── Phase 12 T4.5 (2026-07-04): modules moved from katgpt-rs/src/. ──
+# Progressive MCGS — self-contained graph search (Plan 148). Zero non-std deps.
+progressive_mcgs = []
+# Chain Fold — step-boundary-aware context folding (Plan 195). Needs katgpt-kv
+# for still_kv types (BetaBias, KVChunk, CompactionStrategy) used in chain_folder.
+chain_fold = ["dep:katgpt-kv", "katgpt-kv/still_kv", "still_kv", "dep:half", "dep:fastrand"]
+# still_kv tracking flag — gates the chain_folder still_kv code path. Implied by chain_fold.
+still_kv = []
+# Bake precision sub-feature for fold's attention_importance path.
+bake_precision = []
 
 [dev-dependencies]
 katgpt-transformer = { path = "../katgpt-transformer" }
