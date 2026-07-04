@@ -143,21 +143,71 @@ Measured with batch timing (1000 calls per measurement, amortized) on a tree wit
 
 **Verdict: G5 PASS.** Fully deterministic. The tree topology, Beta posteriors, BLAKE3 commitment, and `fastrand::Rng` seed are the only inputs — all deterministic. No HashMap iteration, no floating-point nondeterminism (all arithmetic is IEEE 754 f32 with deterministic evaluation order). Suitable for deterministic-replay / quorum-commitment downstream.
 
+## Phase 3 — Real Tree Construction (T3.1–T3.6)
+
+**Date:** 2026-07-04
+**Goal:** Replace the Phase 1 hand-built topology with a real construction pipeline: PCA → 2D embed → Chart Test → DBSCAN → recursive subdivision. Verify the structural advantage holds (G1-real).
+
+### Construction pipeline
+
+| Stage | Implementation | Notes |
+|-------|----------------|-------|
+| **PCA** (T3.1) | Power iteration with Hotelling deflation on D×D covariance | Deterministic (SplitMix64 seeds initial vector). No external LAPACK dep. |
+| **2D embed** (T3.2) | **PCA-to-2D** (UMAP substitute) | Plan deferred UMAP decision to Phase 3. PCA-to-2D is deterministic, modelless, zero-dep. Spectral embedding is a Phase 3.5 upgrade if needed. |
+| **Chart Test** (T3.3) | Local PCA eigenvalue ratio λ₂/λ₁ via closed-form 2×2 eigendecomposition | Computed as diagnostic — DBSCAN has its own noise detection. Can be enabled as pre-filter in Phase 3.5. |
+| **DBSCAN** (T3.4) | **Adaptive-ε DBSCAN** (HDBSCAN substitute) | ε = median kNN distance. Plan explicitly allows simpler density-based alternative. Recursive construction recovers hierarchy. |
+| **build()** (T3.5) | Recursive: PCA → embed → chart → DBSCAN → recurse per cluster | Base case: n ≤ min_cluster OR depth ≥ max_depth → flat leaf group. Noise → nearest cluster. |
+
+### G1-real — Structural advantage with real-constructed tree (T3.6)
+
+| Strategy | Median steps-to-90% | Notes |
+|----------|---------------------|-------|
+| Flat Thompson (64 arms) | **5000** (capped) | Same baseline as hand-built G1 |
+| Hierarchical (real tree, 8 clusters × 8 arms) | **3701** | Tree built via `LatentTaskTree::build` from synthetic 16-dim embeddings |
+| **Ratio** | **0.740** ≤ 0.80 | ✅ **PASS** |
+
+**Comparison to hand-built G1:**
+
+| Tree source | G1 ratio | Median hier steps |
+|-------------|----------|-------------------|
+| Hand-built (Phase 2) | 0.723 | 3615 |
+| **Real-constructed (Phase 3)** | **0.740** | **3701** |
+
+The real-constructed tree produces essentially the same structural advantage as the hand-built tree (0.740 vs 0.723 — within trial noise). The construction pipeline correctly recovers 8 top-level clusters matching the domain structure.
+
+### Key finding: `filter_drift_rate` must be 0.0 for stationary domains
+
+During T3.6, an initial run with `filter_drift_rate: 0.01` (the config default) produced G1-real ratio **1.000** (no advantage). Root cause: the BayesianFilterArm's drift decays the posterior between observations, slowing convergence on stationary domains. The hand-built G1 used `drift_rate = 0.0` (explicit argument to `build_clustered_tree`).
+
+Fix: the G1-real gate uses `filter_drift_rate: 0.0` to match. This is expected: the Bayesian filter is designed for non-stationary environments (G3, where it PASSES at ratio 0.350), not stationary ones (G1). Callers should set `filter_drift_rate = 0.0` for stationary domains.
+
+### Phase 3 unit tests (13 new, 29 total)
+
+- PCA: recovers principal direction, deterministic given seed
+- 2D embed: separates well-separated clusters
+- Chart test: round vs elongated neighborhood classification
+- DBSCAN: finds two clusters, isolated point is noise
+- build(): 128 embeddings → ≥4 top-level clusters, BLAKE3 stable, arm_ids 0..N preserved, sample/observe work end-to-end
+
 ---
 
 ## Shippable outputs
 
-1. `LatentTaskTree` — frozen, BLAKE3-committable hierarchical clustering (Phase 1 `from_root`, Phase 3 `build`).
+1. `LatentTaskTree` — frozen, BLAKE3-committable hierarchical clustering. Phase 1: `from_root` (hand-built topology). **Phase 3: `build(embeddings, config)` — real PCA → 2D embed → Chart Test → DBSCAN construction.**
 2. Top-down Thompson descent (`sample`) + bottom-up EVIDENCE-pooling Empirical Bayes (`observe`).
 3. `BayesianFilterArm` — per-arm non-stationary belief via predict-update drift filter.
 4. Gamma-ratio Beta sampler (Marsaglia-Tsang gamma + Box-Muller normal) — replaces Jöhnk's (catastrophically low acceptance for large α/β).
-5. `bench_370_manifold_bandit_goat` — G1–G5 GOAT gate (Phase 2).
+5. **Phase 3 construction pipeline:** `pca_into`, `embed_2d`, `chart_test`, `dbscan_adaptive`, `build_recursive` — all modelless, deterministic, zero-dep.
+6. `bench_370_manifold_bandit_goat` — G1–G5 GOAT gate (Phase 2) + **G1-real (Phase 3, real-constructed tree)**.
 
 ## Known limitations
 
 - **G2 diversity**: hierarchical exploits more (correct for bandits). Diversity is a caller concern.
 - **Filter on abrupt downward shifts**: the drift filter pulls toward uniform (0.5), which can slow recovery when the true mean drops below 0.5. Sliding-window is better for abrupt shifts.
-- **Phase 1 hand-built trees**: `from_root` accepts pre-built topology. Phase 3 adds PCA → UMAP → Chart Test → HDBSCAN construction.
+- **Filter on stationary domains**: `filter_drift_rate > 0` causes posterior decay that slows convergence on stationary domains (G1). Set `filter_drift_rate = 0.0` for stationary callers.
+- **UMAP substitute**: Phase 3 uses PCA-to-2D (linear). For highly non-linear manifolds, spectral embedding (Laplacian eigenmaps) may be needed — Phase 3.5 upgrade.
+- **HDBSCAN substitute**: Phase 3 uses adaptive-ε DBSCAN. For variable-density clusters, full HDBSCAN (mutual-reachability MST) may be needed — Phase 3.5 upgrade.
+- **Chart test as diagnostic**: computed but not used for filtering in Phase 3. DBSCAN's own noise detection suffices for the synthetic domain. Enable as pre-filter if tighter noise rejection is needed.
 - **Sampler DRY**: the Gamma-ratio Beta sampler is a private copy (same as `edge_bandit.rs`). Consolidating into a shared `katgpt-core::rng_util` is a follow-up refactor.
 
 ## References

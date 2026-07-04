@@ -579,6 +579,114 @@ fn gate_g1_structural_advantage() -> GateResult {
     }
 }
 
+// ─── G1-real: structural advantage with Phase 3 build() tree (T3.6) ──────────
+//
+// Generates synthetic 16-dim embeddings with 8 well-separated Gaussian
+// clusters, builds the tree via `LatentTaskTree::build` (PCA → 2D → Chart →
+// DBSCAN → recurse), and re-runs the G1 structural-advantage comparison.
+// The real-constructed tree should produce a ratio comparable to (or stronger
+// than) the hand-built tree, validating the Phase 3 pipeline end-to-end.
+
+/// Generate N_CLUSTERS × ARMS_PER_CLUSTER embeddings in 16-dim space, where
+/// each cluster occupies a distinct region. The cluster structure aligns with
+/// the `ClusteredDomain` (cluster k = arms k*APC .. k*APC+APC-1).
+fn gen_clustered_embeddings_bench(trial: u64) -> Vec<Vec<f32>> {
+    let dim = 16usize;
+    let mut rng = Lcg::new(trial.wrapping_mul(0x100_0000_0000).wrapping_add(777));
+
+    // Cluster centers: well-separated random points in [−8, 8]^dim.
+    let centers: Vec<Vec<f32>> = (0..N_CLUSTERS)
+        .map(|_| (0..dim).map(|_| rng.next_f32() * 16.0 - 8.0).collect())
+        .collect();
+
+    let mut embeddings = Vec::with_capacity(N_ARMS);
+    for c in 0..N_CLUSTERS {
+        for _ in 0..ARMS_PER_CLUSTER {
+            let point: Vec<f32> = (0..dim)
+                .map(|j| centers[c][j] + rng.next_normal() * 0.5)
+                .collect();
+            embeddings.push(point);
+        }
+    }
+    embeddings
+}
+
+fn gate_g1_real_tree_structural_advantage() -> GateResult {
+    println!(
+        "\n--- G1-real: Structural Advantage with Phase 3 build() tree ---"
+    );
+    println!("    ({} arms, {} clusters, T={}, {} trials)",
+             N_ARMS, N_CLUSTERS, T_G1, TRIALS_G1);
+
+    let mut flat_steps = Vec::with_capacity(TRIALS_G1);
+    let mut hier_steps = Vec::with_capacity(TRIALS_G1);
+    let mut n_top_clusters_seen: Vec<usize> = Vec::with_capacity(TRIALS_G1);
+
+    for trial in 0..TRIALS_G1 {
+        let domain = ClusteredDomain::new_clustered(trial as u64);
+        let optimal = domain.optimal_arm();
+
+        // Generate embeddings with matching cluster structure.
+        let embeddings = gen_clustered_embeddings_bench(trial as u64);
+
+        // Flat.
+        let mut dom = domain.clone();
+        let mut flat = FlatThompson::new(N_ARMS, 0.0);
+        let r = run_trial(&mut flat, &mut dom, trial as u64, T_G1, optimal, N_CLUSTERS, THRESHOLD_G1);
+        flat_steps.push(r.steps_to_threshold as u64);
+
+        // Hierarchical — real-constructed tree.
+        // drift_rate = 0.0 matches the hand-built G1 (stationary domain).
+        let config = LatentTaskTreeConfig {
+            filter_drift_rate: 0.0,
+            ..LatentTaskTreeConfig::default()
+        };
+        let mut dom = domain.clone();
+        let tree = LatentTaskTree::build(&embeddings, config);
+        let n_top = match tree.root() {
+            TreeNode::Internal { children, .. } => children.len(),
+            _ => 0,
+        };
+        n_top_clusters_seen.push(n_top);
+
+        let mut hier = HierarchicalThompson { tree };
+        let r = run_trial(&mut hier, &mut dom, trial as u64, T_G1, optimal, N_CLUSTERS, THRESHOLD_G1);
+        hier_steps.push(r.steps_to_threshold as u64);
+    }
+
+    let med_flat = median_u64(&mut flat_steps);
+    let med_hier = median_u64(&mut hier_steps);
+    let ratio = med_hier as f64 / med_flat as f64;
+    let passed = ratio <= RATIO_GATE_G1 as f64;
+
+    n_top_clusters_seen.sort();
+    let median_top = n_top_clusters_seen[n_top_clusters_seen.len() / 2];
+
+    println!("  flat Thompson    median steps-to-90%: {}", med_flat);
+    println!("  hier (real tree) median steps-to-90%: {}", med_hier);
+    println!("  ratio (hier/flat): {:.3}  (gate: ≤ {:.1})", ratio, RATIO_GATE_G1);
+    println!("  real tree median top-level clusters: {} (domain has {})",
+             median_top, N_CLUSTERS);
+
+    if passed {
+        GateResult::pass(
+            "G1-real structural advantage (Phase 3 build)",
+            format!(
+                "hier {med_hier} ≤ {:.1}× flat {med_flat} (ratio {ratio:.3}, {median_top} top clusters)",
+                RATIO_GATE_G1
+            ),
+        )
+    } else {
+        GateResult::fail(
+            "G1-real structural advantage (Phase 3 build)",
+            format!(
+                "hier {med_hier} > {:.1}× flat {med_flat} (ratio {ratio:.3}, {median_top} top clusters) — real tree does not accelerate convergence",
+                RATIO_GATE_G1
+            ),
+        )
+    }
+}
+
 fn gate_g2_diversity() -> GateResult {
     println!("\n--- G2: Diversity Preservation (T={}, {} trials, cluster-frac threshold {:.0}%) ---",
              T_G2, TRIALS_G2, CLUSTER_FRAC_THRESHOLD * 100.0);
@@ -903,10 +1011,11 @@ fn gate_g5_reproducibility() -> GateResult {
 // ─── Main ───────────────────────────────────────────────────────────────────
 
 fn main() {
-    println!("=== Plan 370 - Manifold Bandit GOAT Gate (Phase 2) ===");
+    println!("=== Plan 370 - Manifold Bandit GOAT Gate (Phase 2 + Phase 3 G1-real) ===");
 
     let gates = [
         gate_g1_structural_advantage(),
+        gate_g1_real_tree_structural_advantage(),
         gate_g2_diversity(),
         gate_g3_nonstationarity(),
         gate_g4_latency(),
