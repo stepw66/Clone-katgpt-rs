@@ -157,4 +157,4 @@ enough about novel combinations", add Raven. Most real workloads want both.
 - **Source paper:** Cheng, Zeng, Dai, Chen et al. (Peking U. + DeepSeek-AI), "Conditional Memory via Scalable Lookup: A New Axis of Sparsity for Large Language Models", [arXiv:2601.07372](https://arxiv.org/pdf/2601.07372), 13 Jan 2026.
 - **Sibling research:** 006 (Raven RSM — the complementary *computation* axis), 196 (KG Latent Octree — spatial lookup, different substrate), 262 (Lore ContentStore — Merkle-blob lookup), 268 (Forensic Asset Fingerprinting — BLAKE3-seeded addressing, same primitive different domain), 276 (Personality-Weighted Composition — same sigmoid×direction kernel, different source).
 - **Private guide (riir-ai):** `riir-ai/.research/147_Engram_Conditional_Memory_NPC_Guide.md` — the selling-point guide for NPC domain use.
-- **Chain commitment half (TODO):** `riir-chain/.research/001_Engram_LatCal_Commitment_Bridge.md` — file when the LatCal bridge starts.
+- **Chain commitment half:** `riir-chain/.research/007_Engram_LatCal_Commitment_Bridge.md` (filed 2026-07-04).

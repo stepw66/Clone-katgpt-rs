@@ -314,7 +314,7 @@ For a 1M-slot × D=64 table, the copy is 256 MB. This is real. Mitigations if it
 - ❌ **GM panel**: riir-viz `EngramCtrl` (Proposal 003 P4). Lives in riir-ai.
 - ❌ **Slice-splitting COW optimization**: only if benchmarks demand it.
 - ❌ **`dhat` allocation profiler integration**: G4 is manual review for now.
-- ❌ **Chain commitment half**: Research 147 §9 — `EngramTableId` quorum-validation. Lives in riir-chain.
+- ❌ **Chain commitment half**: Research 147 §9 — `EngramTableId` quorum-validation. Lives in riir-chain. **Design filed** 2026-07-04: `riir-chain/.research/007_Engram_LatCal_Commitment_Bridge.md` (implementation Plan TBD; ~330 LOC at P1.5 for 3-way check + ~350 LOC at P3 for slashing).
 - ❌ **Promotion of `engram` to default-on**: stays deferred to Plan 299 G6 (effective-depth gate).
 
 ---

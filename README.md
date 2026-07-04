@@ -1022,7 +1022,7 @@ The table is a frozen snapshot populated offline; updates are atomic Arc swaps v
 
 Feature gate: `engram` (**opt-in**, rolls in `unicode-normalization` for NFKC + `papaya` for the plasma-tier LRU). 📖 Plan: [`.plans/299_Engram_Hash_Addressed_Pattern_Memory.md`](.plans/299_Engram_Hash_Addressed_Pattern_Memory.md), Research: [`.research/278_Engram_Conditional_Memory_Latent_Lookup_Fusion.md`](.research/278_Engram_Conditional_Memory_Latent_Lookup_Fusion.md), Benchmark: [`.benchmarks/299_engram_goat.md`](.benchmarks/299_engram_goat.md), Docs: [`.docs/27_engram_conditional_memory.md`](.docs/27_engram_conditional_memory.md). Demo: `cargo run --features engram --example engram_demo`.
 
-> **Unblocks:** riir-ai Guide 147 (NPC conditional-memory selling-point guide) and the chain-commitment half `riir-chain/.research/001_Engram_LatCal_Commitment_Bridge.md` (TODO — file when the LatCal bridge starts). The Super-GOAT (U-shape hybrid Engram+Raven) requires the riir-ai inference wiring + G6 to land.
+> **Unblocks:** riir-ai Guide 147 (NPC conditional-memory selling-point guide) and the chain-commitment half `riir-chain/.research/007_Engram_LatCal_Commitment_Bridge.md` (filed 2026-07-04). The Super-GOAT (U-shape hybrid Engram+Raven) requires the riir-ai inference wiring + G6 to land.
 
 ### 🌀 Manifold Power Iteration MoE Router (Plan 279)
 
