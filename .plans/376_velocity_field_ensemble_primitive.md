@@ -4,10 +4,10 @@
 **Research:** [katgpt-rs/.research/375_Kernelized_Stochastic_Interpolant_Velocity_Field_Ensemble.md](../.research/375_Kernelized_Stochastic_Interpolant_Velocity_Field_Ensemble.md)
 **Source paper:** [arxiv 2602.20070](https://arxiv.org/abs/2602.20070) — Coeurdoux et al., ICML 2026 SPIGM
 **Target:** `katgpt-rs/crates/katgpt-core/src/velocity_field_ensemble.rs` (new module) + Cargo feature `velocity_field_ensemble`
-**Status:** Phase 1+2+3 COMPLETE — PROMOTED to default-on (2026-07-04). Phases 4–6 deferred and **filed as tracked issues**:
-- Phase 5 (LatCal commitment) → `riir-chain/.issues/003_velocity_field_ensemble_latcal_commitment.md`
-- Phase 6 (UQ conformal floor) → `katgpt-rs/.issues/038_velocity_field_ensemble_uq_conformal_floor.md`
-- Phase 4 (heterogeneous-d) remains unfiled (only if a concrete use case emerges).
+**Status:** Phase 1+2+3+4+6 COMPLETE. Phase 5 (LatCal) deferred to riir-chain. PROMOTED to default-on (2026-07-04, Phase 3).
+- Phase 4 (heterogeneous-D) → SHIPPED opt-in behind `velocity_field_ensemble_heterogeneous` (2026-07-04).
+- Phase 5 (LatCal commitment) → `riir-chain/.issues/003_velocity_field_ensemble_latcal_commitment.md` (deferred — belongs to riir-chain).
+- Phase 6 (UQ conformal floor) → SHIPPED (2026-07-04). Benchmark at `.benchmarks/376_uq_floor.md`; verdict BEATS FLOOR. Primitive still ships as non-UQ — the benchmark pre-validates the gate for any future UQ-bearing caller.
 
 ---
 
@@ -119,14 +119,40 @@ Deferred — **FILED as `riir-chain/.issues/003_velocity_field_ensemble_latcal_c
 
 ## Phase 6 — Optional: UQ Conformal Floor (Issue 010)
 
-Deferred — **FILED as `katgpt-rs/.issues/038_velocity_field_ensemble_uq_conformal_floor.md`** (2026-07-04). Mandatory before any UQ claim ("the ensemble generates a calibrated distribution"). Per the §"Report the Floor" rule (adopted 2026-06-28), the GOAT gate MUST benchmark against `ConformalIntervalCalibrator<SeasonalNaiveForecaster>` (Plan 340, m=1) on CRPS / coverage / Winkler score. The primitive currently makes NO UQ claim, so this gate is not yet triggered — it activates the moment anyone adds a UQ claim.
+**SHIPPED (2026-07-04).** Benchmark run; verdict captured in
+[`.benchmarks/376_uq_floor.md`](../.benchmarks/376_uq_floor.md). The primitive
+**beats the conformal-naive floor** on an AR(1) corpus (CRPS ratio 0.93,
+Winkler ratio 0.94, coverage tie). The Issue 010 gate passes.
 
-### Tasks (deferred — see katgpt-rs Issue 038)
+**Important:** this does NOT add a UQ claim to the primitive. The primitive
+still ships as a non-UQ algebraic combiner per Phase 3. The benchmark is a
+pre-validation: if a future caller adds a UQ claim, this gate is satisfied.
 
-- [ ] **T6.1** Run ensemble + `D*_t` integrator on a UQ benchmark (e.g., the bom_arena QMC benchmark in riir-ai Plan 370). Compute CRPS, empirical coverage, Winkler score. → katgpt-rs Issue 038 T1–T4.
-- [ ] **T6.2** Compute the same metrics for the conformal-naive floor.
-- [ ] **T6.3** If ensemble does NOT beat the floor → drop the UQ claim. The primitive ships as a non-UQ algebraic combiner (still valuable — see Phase 3 G2). → katgpt-rs Issue 038 T5.
-- [ ] **T6.4** If ensemble beats the floor → UQ claim stands, document in `.benchmarks/376_uq_floor.md`. → katgpt-rs Issue 038 T5–T6.
+### Tasks
+
+- [x] **T6.1** Run ensemble + integrator on a UQ benchmark (AR(1) corpus,
+      N_TRAIN=200, N_TEST=200). Compute CRPS / coverage / Winkler. → Done:
+      `tests/velocity_field_ensemble_uq_floor.rs::vfe_vs_conformal_floor_ar1`.
+- [x] **T6.2** Compute the same metrics for the conformal-naive floor. → Done:
+      the `run_floor_comparison` harness runs both side-by-side.
+- [-] **T6.3** If ensemble does NOT beat the floor → drop the UQ claim. →
+      **N/A — ensemble beats floor.** This branch did not trigger.
+- [x] **T6.4** If ensemble beats the floor → UQ claim stands, document in
+      `.benchmarks/376_uq_floor.md`. → Done: verdict BEATS FLOOR, documented.
+      Note: the primitive still makes NO UQ claim today (ships as non-UQ
+      algebraic combiner); this benchmark is a pre-validation for any future
+      UQ-bearing caller.
+
+**Caveats (documented in the benchmark doc):**
+1. Single corpus (AR(1), Gaussian innovations). Multi-corpus validation
+   deferred — the win is demonstrated, not exhaustively characterized.
+2. Static-fit regime (ensemble fit once, no online refit). The floor adapts
+   online; the ensemble does not. Fair for "fit once, deploy" use cases.
+3. The adapter uses a simple `drift + σ·ξ` sampler, NOT the full stochastic
+   interpolator (whose schedule is for generation, not 1-step forecasting).
+4. The win is driven by point-quality (regression-optimal drift beats
+   seasonal-naive). On regimes where the point forecast is already optimal
+   (white noise) or innovations are non-Gaussian, the floor may win.
 
 ---
 
@@ -162,7 +188,7 @@ crates/katgpt-core/src/velocity_field_ensemble.rs   ~600 lines (target < 2048)
 | CPU/SIMD first | ✅ Cholesky via `linalg::ridge_solve`; dot products via `simd::simd_dot` if available, else scalar. |
 | File size < 2048 lines | ✅ Target ~600 lines. |
 | `Uuid::now_v7()` if Uuid needed | N/A — no Uuids in this primitive (field IDs are u64 hashes). |
-| UQ-bearing → report the floor | ⏳ Phase 6 — deferred but mandatory before UQ claim. |
+| UQ-bearing → report the floor | ✅ Phase 6 PASS — ensemble beats `ConformalIntervalCalibrator<SeasonalNaiveForecaster>` on AR(1) corpus (CRPS 0.93×, Winkler 0.94×, coverage tie). See `.benchmarks/376_uq_floor.md`. Primitive still ships as non-UQ; the gate is pre-validated for future UQ claims. |
 
 ---
 

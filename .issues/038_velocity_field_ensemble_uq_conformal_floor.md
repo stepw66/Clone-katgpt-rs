@@ -1,7 +1,7 @@
 # Issue 038 — Velocity-Field Ensemble: UQ Conformal Floor (Issue 010 §"Report the Floor")
 
 **Filed:** 2026-07-04
-**Priority:** P3 (deferred — only mandatory if/when the ensemble makes a UQ claim; the primitive ships today as a non-UQ algebraic combiner with no calibrated-distribution claim)
+**Priority:** P3 → **RESOLVED** (benchmark run 2026-07-04, verdict BEATS FLOOR; see `.benchmarks/376_uq_floor.md`). Issue remains open as a tracking pointer — the gate is now pre-validated but the primitive still ships as non-UQ.
 **Origin:** katgpt-rs Plan 376 Phase 6 (deferred) — `.plans/376_velocity_field_ensemble_primitive.md`
 **Blocks:** Any UQ-bearing claim about the velocity-field ensemble (e.g., "calibrated ensemble", "principled uncertainty", "predictive distribution over trajectories"). **Blocked by:** Nothing (the floor already ships — Plan 340 Phase 1, 2026-06-30).
 **Type:** Benchmark / GOAT-gate extension (mandatory gate per Issue 010 before any UQ claim).
