@@ -4,12 +4,17 @@
 //! At Config::draft() scale (372 base params, ~288 LoRA params at rank-4),
 //! training is trivially fast using finite-difference gradients.
 //!
-//! _Root-resident by design (Issue 033 §C, Option C)._ Calls `crate::transformer::forward` — drafter LoRA training composes root forward + root-only `crate::types::LoraAdapter`.
+//! Plan 394 (2026-07-05): moved from root `src/speculative/drafter_lora.rs`.
+//! The historical root-residency reason ("calls crate::transformer::forward")
+//! dissolved when `forward` moved to katgpt-forward in Plan 385 — `forward` is
+//! now a same-crate call. Root re-exports via `pub use katgpt_forward::drafter_lora;`
+//! so all historical `katgpt_rs::speculative::drafter_lora::*` paths resolve.
 
 use std::path::Path;
 
-use crate::transformer::{ForwardContext, MultiLayerKVCache, TransformerWeights, forward};
-use crate::types::{Config, LoraAdapter, Rng, kv_dim, lora_apply, matmul, matmul_relu, rmsnorm};
+use crate::{ForwardContext, forward};
+use katgpt_transformer::{MultiLayerKVCache, TransformerWeights};
+use katgpt_types::{Config, LoraAdapter, Rng, kv_dim, lora_apply, matmul, matmul_relu, rmsnorm};
 
 // ── Binary format constants ──────────────────────────────────
 const DRAFTER_LORA_MAGIC: &[u8; 4] = b"DLRA";

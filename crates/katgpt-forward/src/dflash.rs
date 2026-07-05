@@ -1,12 +1,31 @@
-//! _Root-resident by design (Issue 033 §C, Option C)._ Calls `crate::transformer::forward` + depends on root-only `crate::speculative::types` and the root `dflash` composition (leaf `katgpt-speculative` only has the shared-core `_with` delegations).
+//! DFlare draft-prediction composition layer (Plan 394, 2026-07-05).
+//!
+//! Moved from root `src/speculative/dflash.rs`. The shared-core `_with`
+//! delegations live in `katgpt_speculative::dflash` (generic over
+//! `Ctx: DflashCtx`, `Cache: DflashCache`, a `forward_fn`, and `Weights`);
+//! this file holds the katgpt-forward-specific `_with` entry points
+//! (disjoint field borrow on `SpeculativeContext`) and delegates to the
+//! shared core.
+//!
+//! Historical root-residency reason ("calls `crate::transformer::forward`")
+//! dissolved when `forward` moved to katgpt-forward in Plan 385 — it is now
+//! a same-crate call. The `DflashCtx<TransformerWeights> for ForwardContext`
+//! impl lives in `katgpt_forward::lib` (Issue 007 Phase F) — it travels with
+//! the type per the orphan rule. Root re-exports via
+//! `pub use katgpt_forward::dflash;` so all historical
+//! `katgpt_rs::speculative::dflash::*` paths resolve.
+//
 // `sample_from_distribution` is only used by the feature-gated dflash variants
 // (`domino_lora`, `dflare_kv_routing`); the three shared-core `_with` delegations
 // do their sampling inside `katgpt_speculative::dflash`.
 #[cfg(any(feature = "domino_lora", feature = "dflare_kv_routing"))]
 use katgpt_core::speculative::sampling::sample_from_distribution;
-use crate::speculative::types::{DraftResult, SpeculativeContext};
-use crate::transformer::{ForwardContext, MultiLayerKVCache, TransformerWeights, forward};
-use crate::types::{Config, Rng, softmax_scaled};
+use crate::{ForwardContext, SpeculativeContext, forward};
+use katgpt_core::speculative::types::DraftResult;
+use katgpt_transformer::{MultiLayerKVCache, TransformerWeights};
+use katgpt_types::{Config, Rng, softmax_scaled};
+#[cfg(feature = "dflare_kv_routing")]
+use katgpt_types::kv_dim;
 use katgpt_speculative::dflash::DflashCache;
 // NOTE: `DflashCtx<TransformerWeights> for ForwardContext` now lives in
 // katgpt-forward (Issue 007 Phase F) — the impl travels with the type. The
@@ -57,13 +76,12 @@ impl DflashCache for CacheAdapter<'_> {
     }
 }
 
-// `DflashCtx<TransformerWeights> for ForwardContext` impl moved to
-// `katgpt-forward/src/lib.rs` (Issue 007 Phase F) — it must live with the type
-// now that ForwardContext is foreign to root (orphan rule). The impl is in
-// scope here automatically: `ForwardContext` is re-exported via
-// `crate::transformer::ForwardContext` (→ katgpt_forward::ForwardContext) and
-// `DflashCtx` is imported above from katgpt_speculative; the trait impl
-// travels with the type, so the generic `_with` calls below resolve.
+// `DflashCtx<TransformerWeights> for ForwardContext` impl lives at
+// `katgpt_forward::lib` (Issue 007 Phase F) — it travels with the type per
+// the orphan rule. `ForwardContext` is `crate::ForwardContext` here
+// (defined in this crate's lib.rs) and `DflashCtx` is imported above from
+// katgpt_speculative; the trait impl is auto-discovered, so the generic
+// `_with` calls below resolve.
 
 /// Trampoline matching the shared core's `forward_fn` shape
 /// (`Fn(&mut Ctx, &Weights, &mut Cache, usize, usize, &Config)`). Discards
@@ -167,7 +185,7 @@ pub fn dflash_predict_ar_with_domino(
     token: usize,
     pos: usize,
     rng: &mut Rng,
-    domino: &mut super::domino_lora::DominoLoraCorrection,
+    domino: &mut katgpt_speculative::domino_lora::DominoLoraCorrection,
     gru_state: &mut [f32],
 ) -> usize {
     // NOTE: Caller is responsible for resetting sctx before calling this function.
@@ -274,7 +292,7 @@ pub fn dflash_predict_conditioned_with_routing(
     pos: usize,
     target_hidden_state: &[f32],
     rng: &mut Rng,
-    routing_config: Option<&crate::speculative::types::KvRoutingConfig>,
+    routing_config: Option<&katgpt_core::speculative::types::KvRoutingConfig>,
     pruner_relevance: Option<f32>,
 ) -> usize {
     let Some(cfg) = routing_config else {
@@ -303,7 +321,7 @@ pub fn dflash_predict_conditioned_with_routing(
     );
 
     // Seed draft KV cache with scaled target hidden state
-    let draft_kv_dim = crate::types::kv_dim(draft_config);
+    let draft_kv_dim = kv_dim(draft_config);
     if blend > 0.0 && !target_hidden_state.is_empty() && draft_kv_dim > 0 {
         let target_dim = target_hidden_state.len().min(draft_kv_dim);
         for layer in &mut sctx.cache.layers {
@@ -508,7 +526,7 @@ pub fn dflash_predict_ar_with_fusion(
     pos: usize,
     rng: &mut Rng,
     mtp_context: Option<&[f32]>,
-    fusion_config: Option<&crate::speculative::types::MarginalFusionConfig>,
+    fusion_config: Option<&katgpt_core::speculative::types::MarginalFusionConfig>,
 ) -> usize {
     let Some(config) = fusion_config else {
         return dflash_predict_ar_with(
@@ -617,7 +635,7 @@ pub fn dflash_predict_ar_with_fusion(
 pub fn domino_correct_marginals(
     marginals: &mut [Vec<f32>],
     sampled_tokens: &[usize],
-    table: &super::domino::PrefixCorrectionTable,
+    table: &katgpt_speculative::domino::PrefixCorrectionTable,
 ) {
     if table.is_empty() {
         return;
@@ -633,7 +651,7 @@ pub fn domino_correct_marginals(
             break;
         }
 
-        let hash = super::domino::prefix_hash(&sampled_tokens[..depth]);
+        let hash = katgpt_speculative::domino::prefix_hash(&sampled_tokens[..depth]);
         let correction = table.lookup(hash);
 
         if correction.is_empty() {
@@ -722,9 +740,9 @@ pub fn marginal_fusion_blend(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::speculative::dd_tree::{build_dd_tree, extract_best_path};
-    use crate::transformer::TransformerWeights;
-    use crate::types::{Config, Rng};
+    use katgpt_speculative::dd_tree::{build_dd_tree, extract_best_path};
+    use katgpt_transformer::TransformerWeights;
+    use katgpt_types::{Config, Rng};
 
     fn make_draft() -> (TransformerWeights, Config) {
         let config = Config::draft();
@@ -1085,7 +1103,7 @@ mod tests {
     #[cfg(feature = "dflare_fusion")]
     mod dflare_fusion_blend {
         use super::*;
-        use crate::speculative::types::MarginalFusionConfig;
+        use katgpt_core::speculative::types::MarginalFusionConfig;
 
         #[test]
         fn test_blend_is_weighted_average() {
@@ -1293,7 +1311,7 @@ mod tests {
     #[cfg(feature = "dflare_kv_routing")]
     mod kv_routing {
         use super::*;
-        use crate::speculative::types::KvRoutingConfig;
+        use katgpt_core::speculative::types::KvRoutingConfig;
 
         fn routing_config(enabled: bool, low: f32, high: f32) -> KvRoutingConfig {
             KvRoutingConfig {
@@ -1613,7 +1631,7 @@ mod tests {
     // ── Domino Causal Correction tests (Plan 197) ─────────────────
     #[cfg(feature = "domino_correction")]
     mod domino_correction {
-        use crate::speculative::domino::PrefixCorrectionTable;
+        use katgpt_speculative::domino::PrefixCorrectionTable;
 
         #[test]
         fn test_domino_correct_empty_table_noop() {

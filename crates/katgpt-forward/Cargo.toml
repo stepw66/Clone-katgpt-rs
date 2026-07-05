@@ -33,6 +33,17 @@ katgpt-speculative = { path = "../katgpt-speculative" }
 
 rayon = "1.10"
 
+# Plan 394 (2026-07-05): drafter_lora.rs save/load uses BLAKE3 for the
+# integrity envelope (mirrors katgpt-core's `blake3 = "1"` version).
+blake3 = "1"
+
+# Plan 394: step.rs uses `log::debug!` under the `stability_metrics` feature.
+log = "0.4"
+
+[dev-dependencies]
+# Plan 394: drafter_lora.rs tests use tempfile for round-trip save/load
+tempfile = "3"
+
 [features]
 default = []
 
@@ -109,3 +120,58 @@ dense_mesh = ["katgpt-transformer/dense_mesh"]
 # katgpt-pruners so `should_skip_layer_stage` compiles (matches root's
 # forwarding in its `decode_specialize` feature).
 decode_specialize = ["katgpt-transformer/decode_specialize", "katgpt-pruners/decode_specialize"]
+
+# ── Plan 394 (2026-07-05): features consumed by the moved forward-cycle cluster ──
+# (`drafter_lora`, `dflash`, `verifier`, `step`, `prefill` moved from root
+# `src/speculative/`). Each is a tracking flag here — it gates a cfg block in
+# one of those files. Root forwards its feature to this crate so the cfg
+# blocks resolve when the root feature is enabled.
+
+# Drafter LoRA — MTP LoRA drafter training (Plan 117). No upstream forward
+# needed: drafter_lora.rs is fully self-contained.
+mtp_lora_drafter = []
+
+# Domino LoRA causal correction adapter (Plan 231). Forwards to
+# katgpt-speculative so DominoLoraCorrection resolves.
+domino_lora = ["katgpt-speculative/domino_lora"]
+
+# DFlare Pruner-Confidence KV Routing (Plan 174). Forwards to katgpt-core
+# so KvRoutingConfig + the routing cfg block resolve.
+dflare_kv_routing = ["katgpt-core/dflare_kv_routing"]
+
+# DFlare Marginal Fusion (Plan 174). Forwards to katgpt-core so
+# MarginalFusionConfig resolves.
+dflare_fusion = ["katgpt-core/dflare_fusion"]
+
+# Domino Causal Correction (Plan 197). Forwards to katgpt-speculative so
+# PrefixCorrectionTable + prefix_hash resolve.
+domino_correction = ["katgpt-speculative/domino_correction"]
+
+# Self-Learning Selectivity Router (Plan 204). Forwards to katgpt-speculative
+# so SelectivityRouter + excess_kurtosis resolve.
+selectivity_router = ["katgpt-speculative/selectivity_router"]
+
+# SR²AM Configurator bandit (Plan 112). Forwards to katgpt-pruners so
+# ConfiguratorBandit resolves, mirroring root's forwarding.
+sr2am_configurator = ["katgpt-pruners/sr2am_configurator"]
+
+# Per-step execution stability instrumentation (Plan 102). Forwards to
+# katgpt-core so StabilitySnapshot resolves.
+stability_metrics = ["katgpt-core/stability_metrics"]
+
+# MaxSim late-interaction scoring (Plan 080). Forwards to katgpt-speculative
+# so block_score_maxsim resolves.
+maxsim = ["katgpt-speculative/maxsim"]
+
+# Compression-adaptive decode budget (Plan 167). Forwards to katgpt-speculative
+# so block_compression_ratio resolves.
+budget_adaptation = ["katgpt-speculative/budget_adaptation"]
+
+# AcceptanceForecast — entropy-bounded adaptive γ (Issue 023). Empty tracking
+# flag — AcceptanceForecast struct is in katgpt-speculative unconditionally,
+# this gate only controls the verifier.rs field/method that uses it.
+adaptive_gamma_forecast = []
+
+# REST bridge test fixture (Plan 009). Empty tracking flag — only gates the
+# `#[cfg(feature = "rest")] #[cfg(test)]` bridge test in prefill.rs.
+rest = []

@@ -462,3 +462,76 @@ pub use dense_mesh_node_transformer::TransformerNode;
 // `crate::speculative::types::SpeculativeContext` import paths resolve.
 pub mod speculative_context;
 pub use speculative_context::SpeculativeContext;
+
+// Drafter LoRA training (Plan 117 Phase 1, Plan 394 2026-07-05).
+// Moved from root `src/speculative/drafter_lora.rs`. Lives here because the
+// training loop calls `forward()` (moved here in Plan 385) and uses
+// `ForwardContext` (defined here). Root re-exports via
+// `pub use katgpt_forward::drafter_lora;` so all historical
+// `katgpt_rs::speculative::drafter_lora::*` paths resolve.
+pub mod drafter_lora;
+pub use drafter_lora::{
+    DrafterForwardContext, DrafterLoraWeights, TrainingPair, generate_synthetic_pairs,
+    generate_training_pairs_from_replays, load_drafter_lora, save_drafter_lora, train_drafter_lora,
+};
+
+// DFlare draft-prediction composition layer (Plan 394, 2026-07-05).
+// Moved from root `src/speculative/dflash.rs`. The shared-core `_with`
+// delegations live in `katgpt_speculative::dflash`; this file holds the
+// katgpt-forward-specific `_with` entry points + the back-compat thin
+// wrappers. Root re-exports via `pub use katgpt_forward::dflash;` so all
+// historical `katgpt_rs::speculative::dflash::*` paths resolve.
+pub mod dflash;
+pub use dflash::{
+    dflash_predict, dflash_predict_ar, dflash_predict_ar_with, dflash_predict_conditioned,
+    dflash_predict_conditioned_with, dflash_predict_parallel, dflash_predict_with,
+};
+#[cfg(feature = "dflare_fusion")]
+pub use dflash::{dflash_predict_ar_with_fusion, marginal_fusion_blend};
+#[cfg(feature = "domino_lora")]
+pub use dflash::dflash_predict_ar_with_domino;
+#[cfg(feature = "dflare_kv_routing")]
+pub use dflash::dflash_predict_conditioned_with_routing;
+
+// Speculative verifier composition layer (Plan 394, 2026-07-05).
+// Moved from root `src/speculative/verifier.rs`. Concrete verifier impls
+// (`SimulatedVerifier`, `LeviathanVerifier`) live here because they compose
+// the moved dflash + drafter_lora siblings + forward(). The
+// `SpeculativeVerifier` trait lives in katgpt-speculative; this module
+// re-exports it. Root re-exports via `pub use katgpt_forward::verifier;` so
+// all historical `katgpt_rs::speculative::verifier::*` paths resolve.
+pub mod verifier;
+pub use verifier::{LeviathanVerifier, SimulatedVerifier, SpeculativeVerifier};
+
+// Speculative step pipeline composition layer (Plan 394, 2026-07-05).
+// Moved from root `src/speculative/step.rs`. Lives here because the pipeline
+// composes the moved verifier + dflash siblings + forward(). The deprecated
+// paged-KV variant (`speculative_step_rollback_paged`) stays root in
+// `src/speculative/step_paged.rs` because `DDTreeBranchCache` consumes
+// `forward_paged`, which has genuine root deps. Root re-exports via
+// `pub use katgpt_forward::step;` so all historical
+// `katgpt_rs::speculative::step::*` paths resolve. The internal
+// `extract_ddtree_paths` helper is exported `pub(crate)` so the root-side
+// `step_paged.rs` can call it via `katgpt_forward::step::extract_ddtree_paths`.
+pub mod step;
+pub use step::{speculative_step, speculative_step_verifier};
+#[allow(deprecated)]
+pub use step::{
+    speculative_step_conditioned, speculative_step_conditioned_with,
+    speculative_step_rollback, speculative_step_rollback_with,
+};
+#[cfg(feature = "selectivity_router")]
+pub use step::{speculative_step_conditioned_with_router, speculative_step_rollback_with_router};
+#[cfg(feature = "sr2am_configurator")]
+pub use step::speculative_step_with_configurator;
+
+// Speculative prefill scorers (Plan 394, 2026-07-05).
+// Moved from root `src/speculative/prefill.rs`. Hosts the forward-coupled
+// scorers (`AttentionScorer`, `BlockAttentionScorer`) + the substrate re-export
+// shim from `katgpt_speculative::prefill`. The `block_select_entmax` function
+// stays root (consumes `katgpt-attn`, which depends on katgpt-forward and
+// would create a cycle). Root re-exports via `pub use katgpt_forward::prefill;`
+// (chained through root's slim `prefill.rs`) so all historical
+// `katgpt_rs::speculative::prefill::*` paths resolve.
+pub mod prefill;
+pub use prefill::{AttentionScorer, BlockAttentionScorer};

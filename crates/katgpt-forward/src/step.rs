@@ -1,38 +1,48 @@
 // Speculative step pipeline. Index-based loops are intentional for marginal buffer access.
 #![allow(clippy::needless_range_loop)]
-//! _Root-resident by design (Issue 033 §C, Option C)._ Composes root-only speculative siblings (`crate::speculative::{verifier, dd_tree, dflash, types, kurtosis_gate, selectivity_router}`) + calls `crate::transformer::forward`. 6 root-only deps beyond forward() — trait indirection on forward alone cannot unblock.
+//! Speculative step pipeline composition layer (Plan 394, 2026-07-05).
+//!
+//! Moved from root `src/speculative/step.rs`. Lives here because the pipeline
+//! composes the moved verifier + dflash siblings + forward(). The deprecated
+//! paged-KV variant stays root (see `katgpt-rs/src/speculative/step_paged.rs`)
+//! because `DDTreeBranchCache` consumes `forward_paged`, which has genuine
+//! root deps that cannot move yet. Root re-exports via
+//! `pub use katgpt_forward::step;` so all historical
+//! `katgpt_rs::speculative::step::*` paths resolve.
 
 use std::collections::HashMap;
 
 #[cfg(feature = "stability_metrics")]
 use std::time::Instant;
 
-use crate::speculative::verifier::{SimulatedVerifier, SpeculativeVerifier};
-use crate::transformer::TransformerWeights;
-use crate::types::{Config, Rng};
+use crate::verifier::{SimulatedVerifier, SpeculativeVerifier};
+use katgpt_transformer::TransformerWeights;
+use katgpt_types::{Config, Rng};
 
-use crate::speculative::dd_tree::{build_dd_tree, extract_best_path};
-use crate::speculative::dflash::dflash_predict;
-use crate::speculative::dflash::dflash_predict_conditioned;
+use katgpt_speculative::dd_tree::{build_dd_tree, extract_best_path};
+use crate::dflash::dflash_predict;
+use crate::dflash::dflash_predict_conditioned;
 use katgpt_core::speculative::sampling::sample_from_distribution;
-use crate::transformer::{ForwardContext, MultiLayerKVCache, forward};
-use crate::types::softmax_scaled;
+use crate::{ForwardContext, forward};
+use katgpt_transformer::MultiLayerKVCache;
+use katgpt_types::softmax_scaled;
 
 // Zero-alloc _with imports
-use crate::speculative::dd_tree::TreeBuilder;
-use crate::speculative::dflash::{dflash_predict_conditioned_with, dflash_predict_with};
+use katgpt_speculative::dd_tree::TreeBuilder;
+use crate::dflash::{dflash_predict_conditioned_with, dflash_predict_with};
 use katgpt_core::speculative::sampling::sample_residual_distribution_into;
-use crate::speculative::types::{DDTreeBranchCache, NoPruner, SpeculativeContext};
+use crate::SpeculativeContext;
+use katgpt_core::traits::NoPruner;
 
 // SR²AM configurator imports (Plan 112 T7)
 #[cfg(feature = "sr2am_configurator")]
-use crate::types::{ConfiguratorContext, PlanningDecision};
+use katgpt_types::{ConfiguratorContext, PlanningDecision};
 
 // Selectivity Router imports (Plan 204)
 #[cfg(feature = "selectivity_router")]
-use crate::speculative::kurtosis_gate::excess_kurtosis;
+use katgpt_speculative::kurtosis_gate::excess_kurtosis;
 #[cfg(feature = "selectivity_router")]
-use crate::speculative::selectivity_router::SelectivityRouter;
+use katgpt_speculative::selectivity_router::SelectivityRouter;
 
 /// Speculative decoding step with a custom verifier.
 /// Pass any `SpeculativeVerifier` to control how drafts are verified.
@@ -112,14 +122,14 @@ pub fn speculative_step_rollback(
         pos: usize,
         config: &Config,
     ) -> &'a mut [f32] {
-        crate::transformer::forward_decode_stage(
+        crate::forward::forward_decode_stage(
             ctx,
             weights,
             cache,
             token,
             pos,
             config,
-            crate::transformer::DecodeStage::Verify,
+            katgpt_transformer::DecodeStage::Verify,
         )
     }
 
@@ -574,187 +584,6 @@ pub fn speculative_step_rollback_with_router(
     (vec![fallback], 1)
 }
 
-/// Paged KV-cache variant of [`speculative_step_rollback`].
-///
-/// Uses `DDTreeBranchCache` (copy-on-write `PagedKVCache`) for the draft model's
-/// KV exploration instead of snapshot/restore on `MultiLayerKVCache`. Shared prefix
-/// pages are not copied — only new pages allocate after each fork point.
-///
-/// The target model still uses `MultiLayerKVCache` with snapshot/restore for
-/// verification rollback (only a few candidate paths are verified).
-///
-/// Falls back to `speculative_step_rollback` behavior when branch budget is exhausted.
-#[deprecated(note = "Use speculative_step_rollback_with for zero-alloc production path")]
-#[allow(clippy::too_many_arguments)]
-pub fn speculative_step_rollback_paged(
-    draft_weights: &TransformerWeights,
-    draft_config: &Config,
-    target_weights: &TransformerWeights,
-    target_config: &Config,
-    target_ctx: &mut ForwardContext,
-    target_cache: &mut MultiLayerKVCache,
-    branch_cache: &mut DDTreeBranchCache,
-    draft_ctx: &mut ForwardContext,
-    token: usize,
-    pos: usize,
-    rng: &mut Rng,
-) -> (Vec<usize>, usize) {
-    #[cfg(feature = "stability_metrics")]
-    let _t_draft_start = Instant::now();
-
-    // 1. Draft marginals via DFlash
-    let marginals = dflash_predict(draft_weights, draft_config, token, pos);
-    let mv: Vec<&[f32]> = marginals.iter().map(|s| s.as_slice()).collect();
-
-    // 2. Build DDTree
-    let tree = build_dd_tree(&mv, draft_config);
-
-    // 3. Extract candidate paths (top-3 root branches)
-    let paths = extract_ddtree_paths(&tree);
-
-    if paths.is_empty() {
-        let fallback = sample_from_distribution(
-            marginals.first().map(|m| m.as_slice()).unwrap_or(&[1.0]),
-            rng,
-        );
-        return (vec![fallback], 1);
-    }
-
-    // 4. Explore branches using paged KV cache
-    // Run trunk forward for the prompt token to populate shared prefix
-    branch_cache.reset();
-    let _ = branch_cache.forward_branch(draft_ctx, draft_weights, 0, token, pos, draft_config);
-
-    // Fork branches from the trunk at current position, tracking seq indices
-    let mut branch_seqs: Vec<usize> = Vec::with_capacity(paths.len());
-    for (path_idx, path) in paths.iter().enumerate() {
-        if path_idx == 0 {
-            // First path continues on trunk (seq 0)
-            branch_seqs.push(0);
-            for (depth, &tok) in path.iter().enumerate() {
-                let _ = branch_cache.forward_branch(
-                    draft_ctx,
-                    draft_weights,
-                    0,
-                    tok,
-                    pos + 1 + depth,
-                    draft_config,
-                );
-            }
-        } else {
-            // Subsequent paths fork from trunk
-            let branch_seq = branch_cache.fork_branch(0, pos + 1);
-            branch_seqs.push(branch_seq);
-            for (depth, &tok) in path.iter().enumerate() {
-                let _ = branch_cache.forward_branch(
-                    draft_ctx,
-                    draft_weights,
-                    branch_seq,
-                    tok,
-                    pos + 1 + depth,
-                    draft_config,
-                );
-            }
-        }
-    }
-
-    // 5. Snapshot target KV cache at current position for verification rollback
-    let snapshot = target_cache.snapshot(pos, target_config);
-
-    // 6. Verify candidate paths against target model with draft branch rollback
-    // Lifted scratch buffer (see speculative_step_rollback for rationale).
-    let mut residual_buf: Vec<f32> = Vec::new();
-    for (path_idx, path) in paths.iter().enumerate() {
-        target_cache.restore(&snapshot, target_config);
-
-        let mut accepted = Vec::with_capacity(path.len());
-        let mut all_accepted = true;
-
-        // Score initial token with target
-        let logits = forward(
-            target_ctx,
-            target_weights,
-            target_cache,
-            token,
-            pos,
-            target_config,
-        );
-        let mut p_dist = logits.to_vec();
-        softmax_scaled(&mut p_dist, 1.0 / target_config.temperature);
-
-        for (i, &draft_tok) in path.iter().enumerate() {
-            let q_dist = marginals.get(i).map(|m| m.as_slice()).unwrap_or(&[]);
-            let q_i = q_dist.get(draft_tok).copied().unwrap_or(0.0);
-            let p_i = p_dist.get(draft_tok).copied().unwrap_or(0.0);
-
-            let acceptance_prob = if q_i > 0.0 { (p_i / q_i).min(1.0) } else { 1.0 };
-
-            if rng.uniform() <= acceptance_prob {
-                accepted.push(draft_tok);
-                if i + 1 < path.len() {
-                    let logits = forward(
-                        target_ctx,
-                        target_weights,
-                        target_cache,
-                        draft_tok,
-                        pos + 1 + i,
-                        target_config,
-                    );
-                    p_dist = logits.to_vec();
-                    softmax_scaled(&mut p_dist, 1.0 / target_config.temperature);
-                }
-            } else {
-                residual_buf.clear();
-                residual_buf.resize(p_dist.len(), 0.0);
-                let replacement =
-                    sample_residual_distribution_into(&p_dist, q_dist, &mut residual_buf, rng);
-                accepted.push(replacement);
-                all_accepted = false;
-                break;
-            }
-        }
-
-        if all_accepted && !p_dist.is_empty() {
-            let bonus = sample_from_distribution(&p_dist, rng);
-            accepted.push(bonus);
-        }
-
-        if !accepted.is_empty() {
-            // Rollback draft branch to accepted position, freeing exclusive pages
-            let seq = branch_seqs[path_idx];
-            let rollback_pos = pos + 1 + accepted.len();
-            branch_cache.rollback_branch(seq, rollback_pos);
-            let len = accepted.len();
-            return (accepted, len);
-        }
-
-        // Path fully rejected: rollback/discard draft branch to free pages
-        let seq = branch_seqs[path_idx];
-        if seq == 0 {
-            // Trunk: rollback to prompt position to undo failed draft tokens
-            branch_cache.rollback_branch(0, pos + 1);
-        } else {
-            // Non-trunk branch: discard entirely
-            branch_cache.discard_branch(seq);
-        }
-    }
-
-    // All paths exhausted: restore target and rollback draft trunk, then sample
-    target_cache.restore(&snapshot, target_config);
-    branch_cache.rollback_branch(0, pos + 1);
-    let logits = forward(
-        target_ctx,
-        target_weights,
-        target_cache,
-        token,
-        pos,
-        target_config,
-    );
-    let mut p_dist = logits.to_vec();
-    softmax_scaled(&mut p_dist, 1.0 / target_config.temperature);
-    let fallback = sample_from_distribution(&p_dist, rng);
-    (vec![fallback], 1)
-}
 
 /// Zero-alloc variant of [`speculative_step_conditioned`].
 ///
@@ -934,7 +763,7 @@ pub fn speculative_step_conditioned_with_router(
 /// Each branch follows the best child at subsequent depths.
 /// Depth-indexed optimization: groups nodes by depth in a single O(N) pass,
 /// replacing O(D×N) repeated `.iter().filter()` scans with O(1) depth lookups.
-fn extract_ddtree_paths(tree: &[crate::speculative::types::TreeNode]) -> Vec<Vec<usize>> {
+pub fn extract_ddtree_paths(tree: &[katgpt_core::speculative::types::TreeNode]) -> Vec<Vec<usize>> {
     if tree.is_empty() {
         return Vec::new();
     }
@@ -945,9 +774,9 @@ fn extract_ddtree_paths(tree: &[crate::speculative::types::TreeNode]) -> Vec<Vec
     // For each node at depth > 0, index by (parent_path >> 16) so we can
     // look up children by the parent's parent_path value.
     let mut max_depth: usize = 0;
-    let mut roots: Vec<&crate::speculative::types::TreeNode> = Vec::new();
+    let mut roots: Vec<&katgpt_core::speculative::types::TreeNode> = Vec::new();
     // Index: (depth, parent_path >> 16) → best node (highest score)
-    let mut child_index: HashMap<(usize, u128), &crate::speculative::types::TreeNode> =
+    let mut child_index: HashMap<(usize, u128), &katgpt_core::speculative::types::TreeNode> =
         HashMap::new();
 
     for node in tree.iter() {
@@ -1040,10 +869,10 @@ pub fn speculative_step_with_configurator(
     token: usize,
     pos: usize,
     rng: &mut Rng,
-    configurator: &mut crate::pruners::configurator_bandit::ConfiguratorBandit,
+    configurator: &mut katgpt_pruners::configurator_bandit::ConfiguratorBandit,
     context: ConfiguratorContext,
 ) -> (Vec<usize>, usize, PlanningDecision) {
-    use crate::pruners::configurator_bandit::ConfiguratorBandit;
+    use katgpt_pruners::configurator_bandit::ConfiguratorBandit;
 
     // 1. Draft marginals via DFlash (zero-alloc into draft_sctx flat buffer)
     let num_steps = dflash_predict_with(draft_sctx, draft_weights, draft_config, token, pos);
@@ -1193,8 +1022,8 @@ pub fn speculative_step_with_configurator(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::transformer::TransformerWeights;
-    use crate::types::{Config, Rng};
+    use katgpt_transformer::TransformerWeights;
+    use katgpt_types::{Config, Rng};
 
     fn make_draft() -> (TransformerWeights, Config) {
         let config = Config::draft();
@@ -1236,7 +1065,7 @@ mod tests {
 
     #[test]
     fn test_simulated_verifier_returns_at_least_one() {
-        use crate::speculative::verifier::SimulatedVerifier;
+        use crate::verifier::SimulatedVerifier;
 
         let (weights, config) = make_draft();
         let mut verifier = SimulatedVerifier::new(0.75, &config);
@@ -1252,7 +1081,7 @@ mod tests {
 
     #[test]
     fn test_simulated_verifier_deterministic() {
-        use crate::speculative::verifier::SimulatedVerifier;
+        use crate::verifier::SimulatedVerifier;
 
         let (weights, config) = make_draft();
 
@@ -1271,7 +1100,7 @@ mod tests {
 
     #[test]
     fn test_simulated_verifier_bonus_token() {
-        use crate::speculative::verifier::SimulatedVerifier;
+        use crate::verifier::SimulatedVerifier;
 
         let (weights, config) = make_draft();
         let mut saw_bonus = false;
@@ -1298,7 +1127,7 @@ mod tests {
 
     #[test]
     fn test_no_pruner_allows_all() {
-        use crate::speculative::types::{ConstraintPruner, NoPruner};
+        use katgpt_core::traits::{ConstraintPruner, NoPruner};
 
         let pruner = NoPruner;
         assert!(pruner.is_valid(0, 0, &[]));
@@ -1524,143 +1353,6 @@ mod tests {
         }
     }
 
-    #[allow(deprecated)]
-    #[test]
-    fn test_speculative_step_rollback_paged_returns_at_least_one() {
-        let target_config = Config::micro();
-        let draft_config = Config::draft();
-        let mut rng = Rng::new(42);
-        let target_weights = TransformerWeights::new(&target_config, &mut rng);
-        let mut draft_rng = Rng::new(99);
-        let draft_weights = TransformerWeights::new(&draft_config, &mut draft_rng);
-
-        let mut target_ctx = ForwardContext::new(&target_config);
-        let mut target_cache = MultiLayerKVCache::new(&target_config);
-        let mut branch_cache = DDTreeBranchCache::new(&draft_config, 8);
-        let mut draft_ctx = ForwardContext::new(&draft_config);
-
-        let (accepted, len) = speculative_step_rollback_paged(
-            &draft_weights,
-            &draft_config,
-            &target_weights,
-            &target_config,
-            &mut target_ctx,
-            &mut target_cache,
-            &mut branch_cache,
-            &mut draft_ctx,
-            0,
-            0,
-            &mut Rng::new(100),
-        );
-
-        assert!(!accepted.is_empty(), "should return at least 1 token");
-        assert!(len >= 1);
-        for &t in &accepted {
-            assert!(t < target_config.vocab_size, "token {t} out of range");
-        }
-    }
-
-    #[allow(deprecated)]
-    #[test]
-    fn test_speculative_step_rollback_paged_deterministic() {
-        let target_config = Config::micro();
-        let draft_config = Config::draft();
-        let mut rng = Rng::new(42);
-        let target_weights = TransformerWeights::new(&target_config, &mut rng);
-        let mut draft_rng = Rng::new(99);
-        let draft_weights = TransformerWeights::new(&draft_config, &mut draft_rng);
-
-        let (a1, l1) = {
-            let mut target_ctx = ForwardContext::new(&target_config);
-            let mut target_cache = MultiLayerKVCache::new(&target_config);
-            let mut branch_cache = DDTreeBranchCache::new(&draft_config, 8);
-            let mut draft_ctx = ForwardContext::new(&draft_config);
-            speculative_step_rollback_paged(
-                &draft_weights,
-                &draft_config,
-                &target_weights,
-                &target_config,
-                &mut target_ctx,
-                &mut target_cache,
-                &mut branch_cache,
-                &mut draft_ctx,
-                0,
-                0,
-                &mut Rng::new(100),
-            )
-        };
-
-        let (a2, l2) = {
-            let mut target_ctx = ForwardContext::new(&target_config);
-            let mut target_cache = MultiLayerKVCache::new(&target_config);
-            let mut branch_cache = DDTreeBranchCache::new(&draft_config, 8);
-            let mut draft_ctx = ForwardContext::new(&draft_config);
-            speculative_step_rollback_paged(
-                &draft_weights,
-                &draft_config,
-                &target_weights,
-                &target_config,
-                &mut target_ctx,
-                &mut target_cache,
-                &mut branch_cache,
-                &mut draft_ctx,
-                0,
-                0,
-                &mut Rng::new(100),
-            )
-        };
-
-        assert_eq!(a1, a2, "same seed should produce same results");
-        assert_eq!(l1, l2);
-    }
-
-    #[allow(deprecated)]
-    #[test]
-    fn test_speculative_step_rollback_paged_matches_flat_results() {
-        // Both paged and flat should produce at least 1 valid token
-        let target_config = Config::micro();
-        let draft_config = Config::draft();
-        let mut rng = Rng::new(42);
-        let target_weights = TransformerWeights::new(&target_config, &mut rng);
-        let mut draft_rng = Rng::new(99);
-        let draft_weights = TransformerWeights::new(&draft_config, &mut draft_rng);
-
-        for seed in [0u64, 42, 100, 999] {
-            // Paged variant
-            let (paged_accepted, paged_len) = {
-                let mut target_ctx = ForwardContext::new(&target_config);
-                let mut target_cache = MultiLayerKVCache::new(&target_config);
-                let mut branch_cache = DDTreeBranchCache::new(&draft_config, 8);
-                let mut draft_ctx = ForwardContext::new(&draft_config);
-                speculative_step_rollback_paged(
-                    &draft_weights,
-                    &draft_config,
-                    &target_weights,
-                    &target_config,
-                    &mut target_ctx,
-                    &mut target_cache,
-                    &mut branch_cache,
-                    &mut draft_ctx,
-                    0,
-                    0,
-                    &mut Rng::new(seed),
-                )
-            };
-
-            assert!(
-                !paged_accepted.is_empty(),
-                "seed {seed}: paged should return at least 1 token"
-            );
-            assert!(paged_len >= 1, "seed {seed}: paged len should be >= 1");
-            for &t in &paged_accepted {
-                assert!(
-                    t < target_config.vocab_size,
-                    "seed {seed}: paged token {t} out of range"
-                );
-            }
-        }
-    }
-
     // TODO: Implement embedding-conditioned speculative step functions, then uncomment these tests.
     // Requires: speculative_step_embedding_conditioned() and speculative_step_embedding_conditioned_with()
     // See: Plan 024 (embedding_router)
@@ -1668,7 +1360,7 @@ mod tests {
     // #[cfg(feature = "embedding_router")]
     // #[test]
     // fn test_speculative_step_embedding_conditioned_returns_at_least_one() {
-    //     use crate::speculative::step::speculative_step_embedding_conditioned;
+    //     use crate::step::speculative_step_embedding_conditioned;
     //
     //     let (weights, config) = make_draft();
     //     // Simulate a projected embedding matching n_embd
@@ -1688,7 +1380,7 @@ mod tests {
     // #[cfg(feature = "embedding_router")]
     // #[test]
     // fn test_speculative_step_embedding_conditioned_deterministic() {
-    //     use crate::speculative::step::speculative_step_embedding_conditioned;
+    //     use crate::step::speculative_step_embedding_conditioned;
     //
     //     let (weights, config) = make_draft();
     //     let embedding = vec![0.1; config.n_embd];
@@ -1717,7 +1409,7 @@ mod tests {
     // #[cfg(feature = "embedding_router")]
     // #[test]
     // fn test_speculative_step_embedding_conditioned_differs_from_unconditioned() {
-    //     use crate::speculative::step::speculative_step_embedding_conditioned;
+    //     use crate::step::speculative_step_embedding_conditioned;
     //
     //     let (weights, config) = make_draft();
     //     let embedding = vec![0.5; config.n_embd];
@@ -1763,7 +1455,7 @@ mod tests {
     // #[cfg(feature = "embedding_router")]
     // #[test]
     // fn test_speculative_step_embedding_conditioned_with_returns_at_least_one() {
-    //     use crate::speculative::step::speculative_step_embedding_conditioned_with;
+    //     use crate::step::speculative_step_embedding_conditioned_with;
     //
     //     let (weights, config) = make_draft();
     //     let embedding = vec![0.1; config.n_embd];
@@ -1793,7 +1485,7 @@ mod tests {
     // #[cfg(feature = "embedding_router")]
     // #[test]
     // fn test_speculative_step_embedding_conditioned_with_deterministic() {
-    //     use crate::speculative::step::speculative_step_embedding_conditioned_with;
+    //     use crate::step::speculative_step_embedding_conditioned_with;
     //
     //     let (weights, config) = make_draft();
     //     let embedding = vec![0.1; config.n_embd];
@@ -1834,7 +1526,7 @@ mod tests {
     // #[cfg(feature = "embedding_router")]
     // #[test]
     // fn test_speculative_step_embedding_conditioned_empty_embedding_valid() {
-    //     use crate::speculative::step::speculative_step_embedding_conditioned;
+    //     use crate::step::speculative_step_embedding_conditioned;
     //
     //     let (weights, config) = make_draft();
     //     let mut rng = Rng::new(42);

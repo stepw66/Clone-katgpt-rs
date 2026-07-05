@@ -9,12 +9,18 @@ pub use katgpt_speculative::belief_drafter;
 pub mod dd_tree;
 #[cfg(feature = "dendritic_gate")]
 pub use katgpt_speculative::dendritic_gate;
-pub mod dflash;
+// Plan 394 (2026-07-05): `dflash` moved to katgpt-forward. Re-export
+// preserves every historical `katgpt_rs::speculative::dflash::*` path and
+// the `pub use dflash::{...}` re-exports below.
+pub use katgpt_forward::dflash;
 #[cfg(feature = "domino_correction")]
 pub use katgpt_speculative::domino;
 #[cfg(feature = "domino_lora")]
 pub use katgpt_speculative::domino_lora;
-pub mod drafter_lora;
+// Plan 394 (2026-07-05): `drafter_lora` moved to katgpt-forward. Re-export
+// preserves every historical `katgpt_rs::speculative::drafter_lora::*` path
+// and the `pub use drafter_lora::{...}` re-exports below.
+pub use katgpt_forward::drafter_lora;
 #[cfg(feature = "echo_env_predictor")]
 pub use katgpt_speculative::echo_env;
 // echo_env_integration moved to katgpt-pruners (Plan 388 Phase 3) — it's the
@@ -25,9 +31,17 @@ pub use katgpt_speculative::echo_env;
 pub use katgpt_pruners::echo_env_integration;
 pub mod prefill;
 pub use katgpt_speculative::residency_audit;
-pub mod step;
+// Plan 394 (2026-07-05): `step` moved to katgpt-forward. Re-export preserves
+// every historical `katgpt_rs::speculative::step::*` path and the
+// `pub use step::{...}` re-exports below. The deprecated paged variant stays
+// root in `step_paged.rs` (consumes `DDTreeBranchCache` + `forward_paged`).
+pub use katgpt_forward::step;
+pub mod step_paged;
 pub mod types;
-pub mod verifier;
+// Plan 394 (2026-07-05): `verifier` moved to katgpt-forward. Re-export
+// preserves every historical `katgpt_rs::speculative::verifier::*` path
+// and the `pub use verifier::{...}` re-exports below.
+pub use katgpt_forward::verifier;
 
 pub use katgpt_speculative::trust_region;
 
@@ -108,6 +122,9 @@ pub use dd_tree::{
 };
 #[cfg(feature = "elf_sde")]
 pub use dd_tree::{WidthScaleConfig, WidthSelectionMode, best_of_k_rollouts};
+// Plan 394 (2026-07-05): `dflash` symbols now live in katgpt-forward. The
+// re-exports below pull through `katgpt_forward::dflash::*` (via the module
+// re-export above) so existing call sites are unchanged.
 pub use dflash::{
     dflash_predict, dflash_predict_ar, dflash_predict_ar_with, dflash_predict_conditioned,
     dflash_predict_conditioned_with, dflash_predict_parallel, dflash_predict_with,
@@ -168,11 +185,17 @@ pub use types::{ConflictDetector, EntropyConflictDetector, LDT_THETA_ELIM, LdtPr
 // ── SimpleTES re-exports (Plan 086, feature: tes_loop) ────────
 #[cfg(feature = "tes_loop")]
 pub use types::{TesConfig, TesNode, TrajectoryCredit};
+// Plan 394 (2026-07-05): verifier module moved to katgpt-forward. These
+// re-exports now pull through `katgpt_forward::verifier::*` (via the module
+// re-export above) so existing call sites are unchanged.
 pub use verifier::{SimulatedVerifier, SpeculativeVerifier};
 
 pub use verifier::LeviathanVerifier;
 
 // ── Drafter LoRA re-exports (Plan 117: MTP LoRA Drafter) ──────
+// Plan 394 (2026-07-05): module moved to katgpt-forward. These re-exports now
+// pull through `katgpt_forward::drafter_lora::*` (via the module re-export
+// above) so existing call sites are unchanged.
 pub use drafter_lora::{
     DrafterForwardContext, DrafterLoraWeights, TrainingPair, generate_synthetic_pairs,
     generate_training_pairs_from_replays, load_drafter_lora, save_drafter_lora, train_drafter_lora,

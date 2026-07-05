@@ -1,222 +1,45 @@
-//! Speculative prefill: forward-coupled impls (Plan 390).
+//! Speculative prefill: root-only complement (Plan 394, 2026-07-05).
 //!
-//! This file is the **root-resident complement** to
-//! `katgpt_speculative::prefill`, which hosts the pure substrate half (the
-//! `PrefillScorer` trait + substrate scorers + pure compression/selection
-//! functions + orchestrators). It was extracted in Plan 390 (2026-07-05) via
-//! the **trait-impl split** technique refined in Plan 389.
+//! The forward-coupled scorers (`AttentionScorer`, `BlockAttentionScorer`) and
+//! the pure substrate re-export shim moved to `katgpt_forward::prefill` in
+//! Plan 394. This file is the slim root-side complement that retains:
 //!
-//! ## Why this file is root-only
-//!
-//! The remaining items need either:
-//! - `crate::transformer::forward` + `crate::speculative::types::SpeculativeContext`
-//!   (forward-cycle blocker — see Proposal 003 Phase 16 DEFER), or
-//! - `crate::dash_attn::{entmax_1p5, entmax_support}` — a re-export from
-//!   `katgpt-attn`'s heavy `dash_attn` feature chain (would pull
-//!   katgpt-forward, katgpt-pruners/bandit, katgpt-kv, katgpt-transformer, serde).
-//!
-//! ## Contents
-//!
-//! - Re-export of the substrate from katgpt-speculative (back-compat for
-//!   `katgpt_rs::speculative::prefill::*` paths).
-//! - `AttentionScorer`, `BlockAttentionScorer` (forward-coupled impls).
-//! - `block_select_entmax` (entmax-coupled, gated `dash_attn`).
+//! - `block_select_entmax` (Plan 106 T20) — gated `dash_attn`. Stays root
+//!   because `crate::dash_attn::{entmax_1p5, entmax_support}` is a re-export
+//!   from katgpt-attn's heavy `dash_attn` feature chain (would pull
+//!   katgpt-forward, katgpt-pruners/bandit, katgpt-kv, katgpt-transformer,
+//!   serde). Adding katgpt-attn as a dep of katgpt-forward would create a
+//!   cycle (katgpt-attn already depends on katgpt-forward for forward glue).
+//! - Re-exports of the moved symbols so historical
+//!   `katgpt_rs::speculative::prefill::{AttentionScorer, BlockAttentionScorer}`
+//!   paths keep resolving (the root mod.rs's `pub use prefill::{...}` lines
+//!   expect these names to be visible at `crate::speculative::prefill::*`).
+//! - Bridge test (gated `rest`) — depends on `SimulatedVerifier` (now in
+//!   katgpt-forward, re-exported through `crate::speculative::SimulatedVerifier`)
+//!   and `crate::transformer::forward` (re-export of `katgpt_forward::forward`).
 
-// Re-export the pure substrate from the leaf crate so historical
-// `crate::speculative::prefill::*` paths resolve unchanged.
-pub use katgpt_speculative::prefill::{
-    PrefillScorer, RandomScorer, UniformScorer, block_compression_ratio, block_select,
-    block_select_grid, compress_prompt, compress_prompt_blocks, should_compress,
-    speculative_prefill, speculative_prefill_adaptive, speculative_prefill_block,
+// Plan 394 (2026-07-05): scorers + substrate re-export shim moved to
+// katgpt-forward. Re-export them here so historical paths resolve.
+pub use katgpt_forward::prefill::{
+    AttentionScorer, BlockAttentionScorer, PrefillScorer, RandomScorer, UniformScorer,
+    block_compression_ratio, block_select, block_select_grid, compress_prompt,
+    compress_prompt_blocks, should_compress, speculative_prefill, speculative_prefill_adaptive,
+    speculative_prefill_block,
 };
-// `block_score_maxsim` is gated `maxsim` in the leaf crate; preserve the same
-// gate on the re-export.
 #[cfg(feature = "maxsim")]
-pub use katgpt_speculative::prefill::block_score_maxsim;
+pub use katgpt_forward::prefill::block_score_maxsim;
 
-use crate::speculative::types::{FlashPrefillConfig, SpeculativeContext};
-use crate::transformer::{TransformerWeights, forward};
-use crate::types::Config;
-
-// ── Attention Scorer (forward-coupled) ────────────────────────
-
-/// Attention-based importance scorer (PFlash-inspired).
-/// Uses softmax'd self-attention weights from draft model forward pass.
-///
-/// After each `forward()` call, `ctx.scores[0..=pos]` contains the last
-/// attention head's normalized attention weights. The weight at index `pos`
-/// (the self-attention weight) serves as a proxy for per-token importance.
-pub struct AttentionScorer;
-
-impl AttentionScorer {
-    /// Zero-alloc scoring using pre-allocated context.
-    /// `scores` must be `>= prompt_tokens.len()`.
-    pub fn score_with(
-        &self,
-        sctx: &mut SpeculativeContext,
-        draft_weights: &TransformerWeights,
-        draft_config: &Config,
-        prompt_tokens: &[usize],
-        scores: &mut [f32],
-    ) {
-        if prompt_tokens.is_empty() {
-            return;
-        }
-
-        sctx.cache.reset();
-
-        let len = prompt_tokens.len().min(scores.len());
-        scores[..len].fill(0.0f32);
-
-        for (pos, &token) in prompt_tokens.iter().enumerate() {
-            if pos >= draft_config.block_size {
-                break;
-            }
-            let _logits = forward(
-                &mut sctx.ctx,
-                draft_weights,
-                &mut sctx.cache,
-                token,
-                pos,
-                draft_config,
-            );
-            scores[pos] = sctx.ctx.scores[pos];
-        }
-
-        // Normalize scores to [0, 1] range
-        let max_score = scores[..len].iter().cloned().fold(0.0f32, f32::max);
-        if max_score > 0.0 {
-            for s in scores[..len].iter_mut() {
-                *s /= max_score;
-            }
-        }
-    }
-}
-
-impl PrefillScorer for AttentionScorer {
-    fn score(
-        &self,
-        draft_weights: &TransformerWeights,
-        draft_config: &Config,
-        prompt_tokens: &[usize],
-    ) -> Vec<f32> {
-        if prompt_tokens.is_empty() {
-            return Vec::new();
-        }
-
-        let mut sctx = SpeculativeContext::new(draft_config);
-        let mut scores = vec![0.0f32; prompt_tokens.len()];
-        self.score_with(
-            &mut sctx,
-            draft_weights,
-            draft_config,
-            prompt_tokens,
-            &mut scores,
-        );
-        scores
-    }
-}
-
-// ── Block-Attention Scorer (forward-coupled) ─────────────────
-
-/// Block-sparse attention scorer (CPU fallback for PFlash).
-///
-/// Aggregates token-level attention scores into block-level importance,
-/// then upsamples back to per-token scores for compression.
-pub struct BlockAttentionScorer {
-    pub config: FlashPrefillConfig,
-}
-
-impl BlockAttentionScorer {
-    /// Zero-alloc scoring using pre-allocated context.
-    pub fn score_with(
-        &self,
-        sctx: &mut SpeculativeContext,
-        draft_weights: &TransformerWeights,
-        draft_config: &Config,
-        prompt_tokens: &[usize],
-        scores: &mut [f32],
-    ) {
-        let block_size = self.config.block_size;
-        let seq_len = prompt_tokens.len();
-        let num_blocks = seq_len.div_ceil(block_size);
-
-        if seq_len == 0 {
-            return;
-        }
-
-        sctx.cache.reset();
-
-        let filled = seq_len.min(draft_config.block_size);
-        for (pos, &token) in prompt_tokens.iter().enumerate().take(filled) {
-            let _logits = forward(
-                &mut sctx.ctx,
-                draft_weights,
-                &mut sctx.cache,
-                token,
-                pos,
-                draft_config,
-            );
-        }
-
-        let mut block_scores = vec![0.0f32; num_blocks];
-        let mut block_counts = vec![0usize; num_blocks];
-
-        let tail_start = seq_len.saturating_sub(self.config.tail_window * block_size);
-        for pos in tail_start..filled {
-            let score = sctx.ctx.scores[pos];
-            let block_idx = pos / block_size;
-            if block_idx < num_blocks {
-                block_scores[block_idx] += score;
-                block_counts[block_idx] += 1;
-            }
-        }
-
-        for i in 0..num_blocks {
-            if block_counts[i] > 0 {
-                block_scores[i] /= block_counts[i] as f32;
-            }
-        }
-
-        let max_block = block_scores.iter().cloned().fold(0.0f32, f32::max);
-        if max_block > 0.0 {
-            for s in &mut block_scores {
-                *s /= max_block;
-            }
-        }
-
-        for (pos, slot) in scores.iter_mut().enumerate().take(seq_len) {
-            *slot = block_scores[pos / block_size];
-        }
-    }
-}
-
-impl PrefillScorer for BlockAttentionScorer {
-    fn score(
-        &self,
-        draft_weights: &TransformerWeights,
-        draft_config: &Config,
-        prompt_tokens: &[usize],
-    ) -> Vec<f32> {
-        let mut sctx = SpeculativeContext::new(draft_config);
-        let mut scores = vec![0.0f32; prompt_tokens.len()];
-        self.score_with(
-            &mut sctx,
-            draft_weights,
-            draft_config,
-            prompt_tokens,
-            &mut scores,
-        );
-        scores
-    }
-}
+// `FlashPrefillConfig` is only used by the `dash_attn`-gated `block_select_entmax`.
+// Gate the import to match so it doesn't read as unused under default features.
+#[cfg(feature = "dash_attn")]
+use crate::speculative::types::FlashPrefillConfig;
 
 // ── Adaptive block selection using α-entmax (Plan 106 T20) ────
 //
 // Stays in root because `crate::dash_attn::{entmax_1p5, entmax_support}` is a
 // re-export from katgpt-attn's heavy `dash_attn` feature chain (pulls
 // katgpt-forward, katgpt-pruners/bandit, katgpt-kv, katgpt-transformer, serde).
-// Pulling that into katgpt-speculative for one function would be disproportionate.
+// Pulling that into katgpt-forward for one function would create a cycle.
 //
 // See `katgpt_speculative::prefill` for the pure substrate `block_select`.
 
@@ -287,35 +110,26 @@ pub fn block_select_entmax(block_scores: &[f32], cfg: &FlashPrefillConfig) -> Ve
 
 // ── Tests ──────────────────────────────────────────────────────
 //
-// Only forward-coupled + entmax-coupled tests live here. The pure substrate
-// tests (compress_prompt, block_select, RandomScorer, UniformScorer, NIAH,
-// should_compress, etc.) moved to katgpt_speculative::prefill::tests in
-// Plan 390.
+// Only the root-only tests (entmax + rest-bridge) live here. The forward-coupled
+// scorer test moved to katgpt-forward::prefill::tests. The pure substrate tests
+// (compress_prompt, block_select, RandomScorer, UniformScorer, NIAH,
+// should_compress, etc.) live in katgpt_speculative::prefill::tests (Plan 390).
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::transformer::TransformerWeights;
     use crate::types::Rng;
+    use crate::types::Config;
 
+    // Only used by the `rest`-gated bridge test; gate the helper to match so it
+    // doesn't read as dead code under default features.
+    #[cfg(feature = "rest")]
     fn make_draft() -> (TransformerWeights, Config) {
         let config = Config::draft();
         let mut rng = Rng::new(42);
         let weights = TransformerWeights::new(&config, &mut rng);
         (weights, config)
-    }
-
-    #[test]
-    fn test_attention_scorer_produces_scores() {
-        let (weights, config) = make_draft();
-        let tokens: Vec<usize> = (0..config.vocab_size.min(8)).collect();
-        let scorer = AttentionScorer;
-        let scores = scorer.score(&weights, &config, &tokens);
-        assert_eq!(scores.len(), tokens.len());
-        // All scores should be finite
-        for &s in &scores {
-            assert!(s.is_finite(), "score should be finite, got {s}");
-        }
     }
 
     /// Bridge test: prefill compression → KV cache fill → speculative decode.

@@ -1,28 +1,32 @@
-//! _Root-resident by design (Issue 033 §C, Option C)._ Calls `crate::transformer::forward` + depends on root-only `crate::speculative::{dd_tree, dflash, drafter_lora, types}` siblings.
+//! Speculative verifier composition layer (Plan 394, 2026-07-05).
+//!
+//! Moved from root `src/speculative/verifier.rs`. Concrete verifier impls
+//! (`SimulatedVerifier`, `LeviathanVerifier`) live here because they compose
+//! the moved `dflash::*` and `drafter_lora::*` siblings (also in
+//! katgpt-forward) plus `forward()` (moved here in Plan 385). The
+//! `SpeculativeVerifier` trait itself lives in `katgpt_speculative::verifier_trait`.
+//! Root re-exports via `pub use katgpt_forward::verifier;` so all historical
+//! `katgpt_rs::speculative::verifier::*` paths resolve.
 
-use crate::speculative::dd_tree::{TreeBuilder, extract_best_path_into};
-use crate::speculative::dflash::dflash_predict_with;
-use katgpt_core::speculative::sampling::sample_from_distribution;
-use crate::speculative::types::{NoPruner, SpeculativeContext};
-use crate::transformer::TransformerWeights;
-use crate::types::{Config, Rng};
-
-use crate::speculative::dflash::dflash_predict_ar_with;
-use crate::speculative::drafter_lora::{DrafterForwardContext, DrafterLoraWeights};
-use katgpt_core::speculative::sampling::sample_residual_distribution_into;
-use crate::transformer::{
-    ForwardContext, MultiLayerKVCache, forward, preload_kv_cache, project_target_activation,
-};
-use crate::types::softmax_scaled;
+use crate::dflash::{dflash_predict_ar_with, dflash_predict_with};
+use crate::drafter_lora::{DrafterForwardContext, DrafterLoraWeights};
+use crate::{ForwardContext, SpeculativeContext, forward};
+use katgpt_core::speculative::sampling::{sample_from_distribution, sample_residual_distribution_into};
+use katgpt_core::traits::NoPruner;
+use katgpt_speculative::dd_tree::{TreeBuilder, extract_best_path_into};
+// NOTE: `SpeculativeVerifier` trait is re-exported via `pub use` below —
+// both the concrete impls in this file and downstream consumers reference it
+// through that single re-export.
+use katgpt_transformer::{MultiLayerKVCache, TransformerWeights, preload_kv_cache, project_target_activation};
+use katgpt_types::{Config, Rng, softmax_scaled};
 
 // ── Speculative Verifier: Strategy Pattern ──────────────────
 //
 // Plan 389 (2026-07-05): the trait itself moved to
-// `katgpt_speculative::verifier_trait`. It is re-exported here to preserve
-// the historical `katgpt_rs::speculative::verifier::SpeculativeVerifier`
-// path. The concrete impls (`SimulatedVerifier`, `LeviathanVerifier`) stay
-// here because they consume `crate::transformer::forward` — the
-// forward-cycle architectural blocker (see Proposal 003 Phase 16 DEFER).
+// `katgpt_speculative::verifier_trait`. Plan 394 (2026-07-05): the concrete
+// impls (`SimulatedVerifier`, `LeviathanVerifier`) moved here from root
+// `src/speculative/verifier.rs`. They compose the dflash/drafter_lora
+// siblings + forward(), all of which now live in katgpt-forward.
 pub use katgpt_speculative::verifier_trait::SpeculativeVerifier;
 
 /// Simulated verification: DDTree path + acceptance cap + bonus token.
@@ -140,7 +144,7 @@ pub struct LeviathanVerifier<'a> {
     /// γ is derived from the forecast acceptance rate instead of the static
     /// `Config::draft_lookahead`. One instance reused per step — zero-alloc.
     #[cfg(feature = "adaptive_gamma_forecast")]
-    pub forecast: Option<crate::speculative::acceptance_forecast::AcceptanceForecast>,
+    pub forecast: Option<katgpt_speculative::acceptance_forecast::AcceptanceForecast>,
 }
 
 impl<'a> LeviathanVerifier<'a> {
@@ -198,7 +202,7 @@ impl<'a> LeviathanVerifier<'a> {
     #[cfg(feature = "adaptive_gamma_forecast")]
     pub fn with_forecast(
         mut self,
-        forecast: crate::speculative::acceptance_forecast::AcceptanceForecast,
+        forecast: katgpt_speculative::acceptance_forecast::AcceptanceForecast,
     ) -> Self {
         self.forecast = Some(forecast);
         self
@@ -460,8 +464,8 @@ impl SpeculativeVerifier for LeviathanVerifier<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::transformer::TransformerWeights;
-    use crate::types::{Config, Rng};
+    use katgpt_transformer::TransformerWeights;
+    use katgpt_types::{Config, Rng, kv_dim};
 
     fn make_draft() -> (TransformerWeights, Config) {
         let config = Config::draft();
@@ -805,8 +809,8 @@ mod tests {
         let target_config = Config::bpe(); // kv_dim=32
         let draft_config = Config::bpe_draft(); // kv_dim=16
 
-        let target_kv = crate::types::kv_dim(&target_config);
-        let draft_kv = crate::types::kv_dim(&draft_config);
+        let target_kv = kv_dim(&target_config);
+        let draft_kv = kv_dim(&draft_config);
         assert_ne!(target_kv, draft_kv, "kv_dim should differ for this test");
 
         let mut rng = Rng::new(42);
