@@ -28,8 +28,14 @@ blake3 = { version = "1", optional = true }
 katgpt-kv = { path = "../katgpt-kv", default-features = false, optional = true }
 # f16 KV cache storage for chain_fold's chain_folder (Phase 12 T4.5 move).
 half = { version = "2", optional = true }
-# RNG for fold_bandit (Phase 12 T4.5 move).
+# RNG for fold_bandit (Phase 12 T4.5 move) + belief_drafter/spec_generator
+# (Plan 386 move from root).
 fastrand = { version = "2", optional = true }
+# Lock-free HashMap for belief_cache (Plan 386 move from root; belief_drafter feature).
+papaya = { version = "0.2", optional = true }
+# Zero-cast byte slices for belief_drafter save/load + selectivity_router
+# snapshot serialization (Plan 386 move from root).
+bytemuck = { version = "1", optional = true }
 
 [features]
 # Forward sr2am_configurator to katgpt-types so `build_inference_result` can
@@ -134,6 +140,47 @@ trd_refined_draft = []
 # locally where needed.
 plasma_path = []
 gpu = []
+# depth_invariance tracking flag — belief_drafter's `audit_depth_invariance` path
+# (Plan 386 move from root). Empty tracking flag; the diagnostic primitive lives
+# in katgpt-core/depth_invariance, this just gates the local audit method.
+depth_invariance = []
+# self_cond_draft tracking flag — belief_drafter's 2-pass self-conditioned path
+# (Plan 386 move from root). Forwards to katgpt-core for the trait half.
+self_cond_draft = ["katgpt-core/self_cond_draft"]
+
+# ── Plan 386 (2026-07-05): speculative modules moved from katgpt-rs/src/speculative/. ──
+# Each feature gates one module moved in Phase 1. Root forwards these so
+# historical `katgpt_rs::speculative::<module>::*` paths resolve via re-export.
+
+# AcceptanceForecast — entropy-bounded acceptance-rate forecast (ungated in
+# root; Plan 023 GOAT candidate). Zero deps.
+acceptance_forecast = []
+# NextLat Belief-State Speculative Drafter (Plan 217). Forwards to katgpt-core
+# so BeliefDrafterConfig/traits resolve + pulls papaya (belief_cache) + fastrand.
+belief_drafter = ["katgpt-core/belief_drafter", "dep:papaya", "dep:blake3", "fastrand", "dep:bytemuck"]
+# Best Buddies Drafting — mutual NN filter (Plan 199). Zero deps beyond katgpt-core traits.
+best_buddies = []
+# Domino Causal Correction — PrefixCorrectionTable + domino_score (Plan 197).
+# Pulls blake3 for prefix hashing.
+domino_correction = ["dep:blake3"]
+# SpeculativeGenerator token-domain (Plan 193). Forwards to katgpt-core for the trait.
+speculative_generator = ["katgpt-core/speculative_generator", "fastrand"]
+# DendriticGate NMDA-inspired adaptive tree branching (Plan 260). Forwards to katgpt-core.
+dendritic_gate = ["katgpt-core/dendritic_gate"]
+# Kurtosis Gate — polarization-driven speculative decoding (Plan 203b). Forwards to katgpt-core.
+kurtosis_gate = ["katgpt-core/kurtosis_gate"]
+# Self-Learning Selectivity Router (Plan 204). Implies kurtosis_gate (moved dep).
+selectivity_router = ["kurtosis_gate", "dep:bytemuck"]
+# NFCoT FlowScore tracking flag (Plan 229). nf_flow.rs already in this crate;
+# nf_flow_generator + nf_flow_qgf move in with it (Plan 386). The generator/qgf
+# modules are gated `all(nf_flow_score, speculative_generator)` / `all(nf_flow_score,
+# qgf_drafter)` matching root's gating — nf_flow_score itself stays empty.
+nf_flow_score = []
+# NFCoT × QGF Fusion (Plan 268 T6). Forwards to katgpt-core for QGuidedDrafter.
+qgf_drafter = ["katgpt-core/qgf_drafter"]
+# parallel_probe tracking flag (Plan 133). Gates answer_extract + parallel_probe
+# module (answer_extract moves in Phase 1; parallel_probe module defers — leaf deps).
+parallel_probe = []
 
 [dev-dependencies]
 katgpt-transformer = { path = "../katgpt-transformer" }

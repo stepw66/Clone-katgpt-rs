@@ -45,6 +45,47 @@ pub mod pathway_tracker;
 pub mod prefix_scheduler;
 pub mod vocab_coreset;
 
+// ── Plan 386 (2026-07-05): modules moved from katgpt-rs/src/speculative/. ──
+// Each gated to mirror its historical root feature gate. Root re-exports
+// preserve `katgpt_rs::speculative::<module>::*` paths.
+
+// AcceptanceForecast — entropy-bounded acceptance-rate forecast (ungated).
+pub mod acceptance_forecast;
+// Best Buddies Drafting — mutual NN filter (Plan 199).
+#[cfg(feature = "best_buddies")]
+pub mod best_buddies;
+// Domino Causal Correction — PrefixCorrectionTable + domino_score (Plan 197).
+#[cfg(feature = "domino_correction")]
+pub mod domino;
+// SpeculativeGenerator token-domain (Plan 193).
+#[cfg(feature = "speculative_generator")]
+pub mod spec_generator;
+// Answer Extract — parallel_probe answer extraction (Plan 133).
+#[cfg(feature = "parallel_probe")]
+pub mod answer_extract;
+// DendriticGate NMDA-inspired adaptive tree branching (Plan 260).
+#[cfg(feature = "dendritic_gate")]
+pub mod dendritic_gate;
+// Kurtosis Gate — polarization-driven speculative decoding (Plan 203b).
+#[cfg(feature = "kurtosis_gate")]
+pub mod kurtosis_gate;
+// Self-Learning Selectivity Router (Plan 204).
+#[cfg(feature = "selectivity_router")]
+pub mod selectivity_router;
+// NextLat Belief-State Speculative Drafter (Plan 217). belief_cache is the
+// lock-free papaya-backed drafter cache; belief_drafter is the MLP itself.
+#[cfg(feature = "belief_drafter")]
+pub mod belief_cache;
+#[cfg(feature = "belief_drafter")]
+pub mod belief_drafter;
+// NFCoT FlowScore Generator + QGF Fusion (Plan 229 / Plan 268 T6). nf_flow
+// (the scorer core) is already ungated above; these two compose it with
+// spec_generator / QGuidedDrafter and are gated on both parents.
+#[cfg(all(feature = "nf_flow_score", feature = "speculative_generator"))]
+pub mod nf_flow_generator;
+#[cfg(all(feature = "nf_flow_score", feature = "qgf_drafter"))]
+pub mod nf_flow_qgf;
+
 // PPoT core primitives (Issue 003): types/knowledge/entropy/rank moved here;
 // the `resample` orchestrator stays in katgpt-rs root and consumes these via
 // re-export. Gated because the moved files carry internal `#[cfg(feature = "ppot")]`

@@ -2030,12 +2030,14 @@ name = "katgpt-speculative"
 version = "0.1.0"
 dependencies = [
  "blake3",
+ "bytemuck",
  "fastrand",
  "half",
  "katgpt-core",
  "katgpt-kv",
  "katgpt-transformer",
  "katgpt-types",
+ "papaya",
  "postcard",
  "rayon",
  "serde",

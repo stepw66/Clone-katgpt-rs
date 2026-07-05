@@ -1,17 +1,17 @@
 pub mod budget_compat;
-pub mod acceptance_forecast;
+pub use katgpt_speculative::acceptance_forecast;
 
 #[cfg(feature = "belief_drafter")]
-pub mod belief_cache;
+pub use katgpt_speculative::belief_cache;
 #[cfg(feature = "belief_drafter")]
-pub mod belief_drafter;
+pub use katgpt_speculative::belief_drafter;
 
 pub mod dd_tree;
 #[cfg(feature = "dendritic_gate")]
-pub mod dendritic_gate;
+pub use katgpt_speculative::dendritic_gate;
 pub mod dflash;
 #[cfg(feature = "domino_correction")]
-pub mod domino;
+pub use katgpt_speculative::domino;
 #[cfg(feature = "domino_lora")]
 pub mod domino_lora;
 pub mod drafter_lora;
@@ -57,7 +57,7 @@ pub mod diffusion_sampler;
 pub mod alpha;
 
 #[cfg(feature = "parallel_probe")]
-pub mod answer_extract;
+pub use katgpt_speculative::answer_extract;
 
 #[cfg(feature = "parallel_probe")]
 pub mod parallel_probe;
@@ -124,7 +124,7 @@ pub use types::{
 
 // ── Best Buddies Drafting (Plan 199, feature: best_buddies) ──────
 #[cfg(feature = "best_buddies")]
-pub mod best_buddies;
+pub use katgpt_speculative::best_buddies;
 
 #[cfg(feature = "best_buddies")]
 pub use best_buddies::MarginalBestBuddyAligner;
@@ -235,7 +235,7 @@ pub use budget_compat::{effective_tree_budget, scaled_draft_lookahead};
 
 // ── SpeculativeGenerator Token-Domain (Plan 193 Phase 1) ────────
 #[cfg(feature = "speculative_generator")]
-pub mod spec_generator;
+pub use katgpt_speculative::spec_generator;
 
 #[cfg(feature = "speculative_generator")]
 pub use spec_generator::{
@@ -414,14 +414,14 @@ pub use prefix_scheduler::{HardwareAwarePrefixScheduler, SpsCurve};
 
 // ── Self-Learning Selectivity Router (Plan 204, feature: selectivity_router) ──
 #[cfg(feature = "selectivity_router")]
-pub mod selectivity_router;
+pub use katgpt_speculative::selectivity_router;
 
 #[cfg(feature = "selectivity_router")]
 pub use selectivity_router::{ComputeRoute, ProfileError, SelectivityRouter};
 
 // ── Kurtosis Gate — Polarization-Driven Speculative Decoding (Plan 203b) ──
 #[cfg(feature = "kurtosis_gate")]
-pub mod kurtosis_gate;
+pub use katgpt_speculative::kurtosis_gate;
 
 #[cfg(feature = "kurtosis_gate")]
 pub use kurtosis_gate::{KurtosisGate, excess_kurtosis};
@@ -457,7 +457,7 @@ pub use nf_flow::{
 
 // ── NFCoT FlowScore SpeculativeGenerator Integration (Plan 229 T2) ──
 #[cfg(all(feature = "nf_flow_score", feature = "speculative_generator"))]
-pub mod nf_flow_generator;
+pub use katgpt_speculative::nf_flow_generator;
 
 #[cfg(all(feature = "nf_flow_score", feature = "speculative_generator"))]
 pub use nf_flow_generator::{FlowScoredError, FlowScoredGenerator, ScoredToken};
@@ -520,7 +520,7 @@ pub use nf_flow_fold::{FoldDecision, evaluate_fold, evaluate_fold_batch};
 // density + QGF bonus. Feature-gated on both `nf_flow_score` + `qgf_drafter`,
 // default OFF until GOAT proof.
 #[cfg(all(feature = "nf_flow_score", feature = "qgf_drafter"))]
-pub mod nf_flow_qgf;
+pub use katgpt_speculative::nf_flow_qgf;
 
 #[cfg(all(feature = "nf_flow_score", feature = "qgf_drafter"))]
 pub use nf_flow::{score_with_qgf, score_with_qgf_at, score_with_qgf_batch, select_best_qgf};

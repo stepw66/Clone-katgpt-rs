@@ -33,9 +33,9 @@
 use katgpt_core::qgf::QGuidedDrafter;
 use katgpt_core::SpeculativeGenerator;
 
-use super::nf_flow::NfFlowScore;
-use super::nf_flow_generator::{FlowScoredError, ScoredToken};
-use super::spec_generator::{TokenCondition, TokenGenError, TokenOutput};
+use crate::nf_flow::NfFlowScore;
+use crate::nf_flow_generator::{FlowScoredError, ScoredToken};
+use crate::spec_generator::{TokenCondition, TokenGenError, TokenOutput};
 
 // ── NfQgfDrafter ──────────────────────────────────────────────────
 

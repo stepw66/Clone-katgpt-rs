@@ -834,7 +834,7 @@ Ordering: foundation first (hoists, splits), then domain crates biggest-first.
     - **T4.7** ✅ `52cafcf0`: dash_attn VortexFlow cluster (10 files) → katgpt-attn. Original "stays root" blocker dissolved once pruners/speculative/cache_prune landed in their leaves.
     - **T4.8** ⏭ DEFERRED: ~30 speculative primitives need individual dep audits; 17 files (~25K LOC) are transformer-bound per DEFER table. Genuine separate-session scope.
     - **GOAT gate G3 PASS**: workspace `cargo check` clean on default / all-features / no-default-features. Per-crate lib tests pass (katgpt-attn 150/150, katgpt-core 1435/1435, katgpt-sparse 39/39, katgpt-spectral 100/100, katgpt-pruners 213/213, katgpt-speculative 146/146). bench_256_adaptive_k_goat 1/1 PASS.
-  **Final src/ state**: transformer.rs linchpin + retained forward-glue (gdn2/hla/dash_attn composition + tests, inference_router/backend, gpu/ane_backend, attn_match_adaptive_cot, sp_kv_forward_mod, types) + DEFER items (benchmark/, plot.rs, sleep/, dllm.rs, speculative/{17 transformer-bound files}, pruners/bomber/{19 files}, data_probe/, domino_lora). Each DEFER carries a documented blocker + unblock condition in Plan 383. **Phase 14 (Plan 384, 2026-07-05)** subsequently moved `distill/trd` + `vocab_channel_pruner` out (blockers dissolved by Phase 12 T4.4/T4.5) — see Phase 14 entry below. **Phase 15 (Plan 385, 2026-07-05)** broke the `forward`-linchpin cycle by extracting the forward trio + helpers to katgpt-forward, enabling `dense_mesh/node_transformer` to move out too — see Phase 15 entry below.
+  **Final src/ state**: transformer.rs linchpin + retained forward-glue (gdn2/hla/dash_attn composition + tests, inference_router/backend, gpu/ane_backend, attn_match_adaptive_cot, sp_kv_forward_mod, types) + DEFER items (benchmark/, plot.rs, sleep/, dllm.rs, speculative/{17 transformer-bound files}, pruners/bomber/{19 files}, data_probe/, domino_lora). Each DEFER carries a documented blocker + unblock condition in Plan 383. **Phase 14 (Plan 384, 2026-07-05)** subsequently moved `distill/trd` + `vocab_channel_pruner` out (blockers dissolved by Phase 12 T4.4/T4.5) — see Phase 14 entry below. **Phase 15 (Plan 385, 2026-07-05)** broke the `forward`-linchpin cycle by extracting the forward trio + helpers to katgpt-forward, enabling `dense_mesh/node_transformer` to move out too — see Phase 15 entry below. **Phase 16 (Plan 386, 2026-07-05)** applied the same body-grep lesson to `src/speculative/`, moving 12 zero-root-dep modules (acceptance_forecast, belief_cache, belief_drafter, best_buddies, domino, spec_generator, answer_extract, dendritic_gate, kurtosis_gate, nf_flow_generator, nf_flow_qgf, selectivity_router) to katgpt-speculative — speculative root-only count drops from 40 → 28 files — see Phase 16 entry below.
 - [x] **Phase 13 — commit + record.** Commit on `develop` with `refactor:`
   prefix per phase. Update this proposal status to **done** at Phase 12. **DONE 2026-07-05**
   — Plan 383 is the Phase 13 record; this proposal now reflects Phase 12 as complete with
@@ -922,12 +922,59 @@ Ordering: foundation first (hoists, splits), then domain crates biggest-first.
   - See `.plans/385_dense_mesh_node_transformer_unblock_via_forward_extract.md`
     for the full task list + verification matrix.
   - **Lesson (R296-class):** "transformer-bound" classifications MUST be
-    line-range-audited against the actual leaf crate dependencies, not just
-    the `crate::*` prefix. `forward`'s only `crate::` references are
+    line-range-audited against the actual leaf crate dependencies, not just the
+    `crate::*` prefix. `forward`'s only `crate::` references are
     `crate::types::*` and `crate::pruners::*` — both leaf re-exports. The
     function appeared unmovable because it was the "linchpin" but was in
     fact fully leaf-dependent. Same lesson generalizes to other "linchpin"
     functions: grep the body, not the signature.
+
+- [x] **Phase 16 — Plan 386 speculative cluster move (Phase 1).**
+  Applied the Plan 385 lesson (line-range grep the body) to `src/speculative/`.
+  Re-audit of all 40 root-only speculative files revealed that **28 of 40** have
+  ZERO genuine root dependencies — their `crate::` references are all leaf
+  re-exports (`katgpt-core`, `katgpt-types`, `katgpt-pruners`, `katgpt-transformer`).
+  The "root-only sibling" classifications were stale, exactly as Plan 385 found
+  for `forward`. **DONE 2026-07-05.**
+  - **Phase 1 moved 12 files (~3855 LOC)** to `crates/katgpt-speculative/src/`:
+    `acceptance_forecast`, `belief_cache`, `belief_drafter`, `best_buddies`,
+    `domino`, `spec_generator`, `answer_extract`, `dendritic_gate`,
+    `kurtosis_gate`, `nf_flow_generator`, `nf_flow_qgf`, `selectivity_router`.
+    All zero-crate-ref or leaf-only-dep files. Root `src/speculative/mod.rs`
+    now re-exports each via `pub use katgpt_speculative::<module>;`.
+  - **Features added to katgpt-speculative Cargo.toml**: `acceptance_forecast`,
+    `belief_drafter` (pulls papaya + blake3 + fastrand + bytemuck), `best_buddies`,
+    `domino_correction` (pulls blake3), `speculative_generator` (forwards to
+    katgpt-core + pulls fastrand), `dendritic_gate`, `kurtosis_gate`,
+    `selectivity_router` (implies kurtosis_gate + pulls bytemuck), `nf_flow_score`,
+    `qgf_drafter`, `parallel_probe`. Plus `depth_invariance` + `self_cond_draft`
+    tracking flags (belief_drafter's audit/self-cond paths).
+  - **Root Cargo.toml features updated** to forward to katgpt-speculative:
+    `parallel_probe`, `speculative_generator`, `selectivity_router`,
+    `domino_correction`, `kurtosis_gate`, `nf_flow_score`, `best_buddies`,
+    `belief_drafter` (papaya dep dropped from root — now in leaf),
+    `dendritic_gate`, `qgf_drafter`, `depth_invariance`, `self_cond_draft`.
+  - **GOAT gate G3 PASS**: workspace `cargo check` clean on default /
+    all-features / no-default-features. katgpt-speculative lib tests **848 passed**
+    (178 from moved modules). Root lib tests **613 passed** (default) / **1071
+    passed** (--all-features; was 1249 pre-Plan-386, −178 moved = 1071 ✅).
+    belief_drafter_goat integration 12/12 PASS. prof_dense_mesh 5/5 PASS.
+    and_or_goat 5/5 PASS.
+  - **Phase 2 follow-ups (DEFER):**
+    - **`forward`-cycle block** (dflash/verifier/drafter_lora, ~3768 LOC):
+      these use `crate::transformer::forward`, now in katgpt-forward. Since
+      katgpt-forward depends on katgpt-speculative, moving them TO
+      katgpt-speculative would create a cycle. Needs architectural decision:
+      (a) move `forward` down from katgpt-forward, (b) accept root residency,
+      (c) create a new crate above katgpt-forward.
+    - **dd_tree.rs** (5990 LOC): test dep on `crate::speculative::dflash::dflash_predict`
+      (dflash blocked by forward cycle).
+    - **~16 more leaf-only-dep files** (alpha, budget, flow_pruner, peira_pruner,
+      trust_region, and_or_builder, precision_aware_generator, residency_audit,
+      thinking_controller, echo_env*, caddtree_budget, parallel_probe, budget_compat):
+      moveable but deferred to keep Phase 1 small + safe.
+  - See `.plans/386_speculative_cluster_move.md` for the full task list +
+    verification matrix.
 
 ## Risks and mitigations
 
@@ -975,10 +1022,12 @@ Ordering: foundation first (hoists, splits), then domain crates biggest-first.
 can't move yet). `main.rs` deleted in Phase 12. Every domain gets one stack
 crate. Three new domain stacks beyond 001/002: `katgpt-band` (Plan 265 cluster),
 `katgpt-claim`, `katgpt-sparse`, plus `katgpt-proof-cert` (Phase 12). Losers
-exile to `katgpt-deprecated`. 15 phases (Phase 12 complete 2026-07-05;
+exile to `katgpt-deprecated`. 16 phases (Phase 12 complete 2026-07-05;
 Phase 14 = Plan 384 follow-up moving `distill/trd` + `vocab_channel_pruner`
 to their now-unblocked leaf homes; Phase 15 = Plan 385 breaks the
 `forward`-linchpin cycle by extracting the forward trio to katgpt-forward,
-then moves `dense_mesh/node_transformer` to katgpt-forward too; T4.8
-speculative-primitives follow-up documented in Plan 383). Foundation moves
+then moves `dense_mesh/node_transformer` to katgpt-forward too; Phase 16 =
+Plan 386 applies the same body-grep lesson to `src/speculative/`, moving
+12 zero-root-dep modules to katgpt-speculative; T4.8 speculative-primitives
+follow-up documented in Plan 383). Foundation moves
 first, biggest-payoff attention stack second. Supersedes 001 and 002.

@@ -8,8 +8,8 @@
 
 use katgpt_core::SpeculativeGenerator;
 
-use super::nf_flow::NfFlowScore;
-use super::spec_generator::{TokenCondition, TokenGenError, TokenOutput};
+use crate::nf_flow::NfFlowScore;
+use crate::spec_generator::{TokenCondition, TokenGenError, TokenOutput};
 
 // ── Types ──────────────────────────────────────────────────────
 
