@@ -10,7 +10,7 @@
 //! ## Sink-aware aggregation (Plan 287, Research 258)
 //!
 //! [`LayerSinkSummary`] bridges the per-sink classifier
-//! ([`crate::sink_classify`]) with the whole-layer [`GeometryReport`].
+//! ([`super::sink_classify`]) with the whole-layer [`GeometryReport`].
 //! The classifier is the *mechanism locator* (NOP vs Broadcast per sink
 //! column); `effective_rank` is the *aggregate symptom*. `LayerSinkSummary`
 //! aggregates the per-sink verdicts across all heads in a layer.
@@ -196,7 +196,7 @@ pub fn representation_geometry_report(
 
 /// Per-layer aggregate of sink classifications across all heads.
 ///
-/// Bridges the per-sink [`crate::sink_classify::classify_sink_at`]
+/// Bridges the per-sink [`super::sink_classify::classify_sink_at`]
 /// (mechanism locator) with whole-layer [`GeometryReport`] (aggregate
 /// symptom). Lets a caller ask "does this layer predominantly NOP or
 /// Broadcast?" in O(H · N²) where H is the head count.
@@ -218,7 +218,7 @@ pub struct LayerSinkSummary {
     pub mean_broadcast_value_norm: f32,
 }
 
-/// Run [`crate::sink_classify::classify_all_sinks`] across every head in a
+/// Run [`super::sink_classify::classify_all_sinks`] across every head in a
 /// layer and aggregate into a [`LayerSinkSummary`].
 ///
 /// # Arguments

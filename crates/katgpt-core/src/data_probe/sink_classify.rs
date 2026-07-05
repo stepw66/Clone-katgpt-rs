@@ -74,8 +74,8 @@ pub enum SinkKind {
 /// Per-position sink diagnostic.
 ///
 /// All fields `pub` so callers can build aggregate layer summaries
-/// ([`crate::data_probe`]'s sibling `LayerSinkSummary` in the root crate's
-/// `data_probe::geometry` module) without re-running the classifier.
+/// ([`LayerSinkSummary`] in the sibling `geometry` module) without
+/// re-running the classifier.
 #[derive(Debug, Clone, Copy)]
 pub struct SinkDiagnostic {
     /// Position `s` in the attention sequence.

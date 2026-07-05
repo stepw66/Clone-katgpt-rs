@@ -8,20 +8,26 @@
 //! embeddings are **structurally aligned** across entities/positions,
 //! which is a prerequisite for analogical reasoning.
 
-// Re-export core computation from katgpt-core.
-pub use katgpt_core::dirichlet::{
+// Re-export core computation (intra-katgpt-core since Plan 404 move).
+// Gated `dirichlet_energy` to match the upstream module's feature gate.
+#[cfg(feature = "dirichlet_energy")]
+pub use crate::dirichlet::{
     consecutive_adjacency, dirichlet_energy, functor_adjacency, kv_cache_dirichlet_energy,
 };
 
 // Spectral hierarchy diagnostics (Plan 156, Research 121).
 #[cfg(feature = "spectral_hierarchy")]
-pub use katgpt_core::spectral_hierarchy::{
+pub use crate::spectral_hierarchy::{
     cauchy_interlacing_check, eigenspace_alignment, haar_wavelet_basis,
 };
 
 // ── Tests ─────────────────────────────────────────────────────
+//
+// Gated `dirichlet_energy` because the tests exercise the re-exported
+// `dirichlet_energy` / `consecutive_adjacency` / etc. functions, which
+// require the upstream `dirichlet` module to be compiled.
 
-#[cfg(test)]
+#[cfg(all(test, feature = "dirichlet_energy"))]
 mod tests {
     use super::*;
 

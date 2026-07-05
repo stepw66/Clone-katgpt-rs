@@ -841,7 +841,15 @@ pub use closure::{FunctorEdgeParams, FunctorPtg, apply_functor_edge_into, functo
 // ship here; direct wiring into parallax_attn / funcattn forward paths is
 // deferred until synthetic G2 + latency G3 gates pass on a real model
 // (validation fallback per Plan 287 §Validation).
-#[cfg(feature = "sink_aware_attn")]
+//
+// Plan 404 (2026-07-06): the parent module is now always-on. The pure
+// information-theoretic substrate (markov/nll/typical_set/dirichlet_energy/
+// claim) moved here from root `src/data_probe/`. The sink-aware classifier
+// (`sink_classify`) + `geometry` remain gated `sink_aware_attn` inside the
+// module. The gated re-exports below preserve `crate::data_probe::SinkKind`
+// etc. for internal consumers (notably `parallax_attn.rs`). The always-on
+// re-exports (markov/nll/typical_set/dirichlet_energy/claim) live in
+// `data_probe/mod.rs`.
 pub mod data_probe;
 #[cfg(feature = "sink_aware_attn")]
 pub use data_probe::{
