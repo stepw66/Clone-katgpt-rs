@@ -1,6 +1,8 @@
 # Proposal 003 — Master `src/` consolidation: domain-stack crates + loser crate
 
-Status: **proposed** (not yet implemented) — supersedes Proposal 001 and 002
+Status: **essentially complete** (endgame audit done — Plan 404, 2026-07-06).
+What remains in `src/` is permanently root-resident (transformer-forward
+glue, training infrastructure, tooling). Supersedes Proposal 001 and 002.
 Branch: `develop` (per global rule — no feature branches)
 Owner: unassigned
 Audit basis: full `src/` classification (3 parallel subagent passes + direct
@@ -1211,6 +1213,171 @@ Ordering: foundation first (hoists, splits), then domain crates biggest-first.
     (test_133_parallel_probe_ablation 1/1, speculative_generator_goat 3/3).
   - See `.plans/390_speculative_phase5_prefill_substrate.md`.
 
+- [x] **Phase 21 — Plan 391 dd_tree dead-duplicate kill + substrate extraction.**
+  - Root `dd_tree.rs` had `build_dd_tree_lodestar` / `a_star_score` /
+    `find_forced_token` already re-exported from the leaf via glob — pure dead
+    code. Plan 391 deleted the duplicates and moved the remaining pure
+    substrate (~841 LOC: SDE builders, PTRM width scaling, EqR residual
+    tracker, RecFM cross-scale consistency, best_of_k_rollouts, dendritic gate,
+    manifold pruner, entropy_truncate_horizon) to katgpt-speculative. Root
+    dd_tree.rs 5990→5149 LOC. Phase 3 (feature-gated variant wrappers) deferred
+    to Phase 22.
+  - See `.plans/391_speculative_phase6_dd_tree_substrate.md`.
+
+- [x] **Phase 22 — Plan 392 dd_tree wrapper port + TreeBuilder deletion.**
+  - Ported the 3 extended TreeBuilder methods (build_screened_progressive,
+    _with_depth_budgets, _recfm) into the leaf, moved 13 feature-gated wrappers
+    (domino, speculative, belief, kurtosis, best_buddies, screened_progressive
+    /corr/flow_budget/recfm, and_or) to katgpt-speculative, and deleted the
+    entire root TreeBuilder struct+impl (~998 LOC dead duplicate after wrappers
+    moved). Root dd_tree.rs 5149→2556 LOC (-50%); excluding the test module
+    (~2380 LOC, root-bound on TransformerWeights/dflash_predict), root
+    production code is now ~150 LOC.
+  - See `.plans/392_speculative_phase7_dd_tree_wrappers.md`.
+
+- [x] **Phase 23 — Plan 393 speculative Phase 8: SpeculativeContext +
+  forward_decode_stage substrate extraction.**
+  - Extracted the pure substrate half of the speculative context (types +
+    decode-stage orchestration that doesn't call `forward`) to
+    katgpt-speculative, leaving forward-coupled impls in root. **-224 LOC root.**
+  - See `.plans/393_speculative_phase8_context_substrate.md`.
+
+- [x] **Phase 24 — Plan 394 speculative Phase 9: forward-cycle 5-file move.**
+  - The apparent forward-cycle blocker dissolved under the same R296-class
+    lesson as Plan 391's dd_tree investigation: the 5 files (drafter_lora,
+    dflash, verifier, step, prefill) only needed the *trait*
+    `SpeculativeVerifier` + `TransformerWeights` + `Config`, not `forward`
+    itself. Moved all 5 to katgpt-forward in strict topological order. Only
+    `block_select_entmax` (katgpt-attn cycle) and `speculative_step_rollback_paged`
+    (`forward_paged` + `PagedKVCache`) stayed root. **-5446 LOC root** (the
+    single largest plan in the consolidation).
+  - See `.plans/394_speculative_phase9_forward_cycle_5_file_move.md`.
+
+- [x] **Phase 25 — Plan 396 speculative Phase 10: dd_tree full relocation.**
+  - With Phases 21–24 done, the remaining dd_tree substrate + wrappers
+    relocated cleanly to katgpt-forward. Root dd_tree.rs collapsed to a thin
+    re-export shim. **-2533 LOC root.**
+  - See `.plans/396_speculative_phase10_ddtree_full_relocation.md`.
+
+- [x] **Phase 26 — Plan 398 D2F inference substrate extraction.**
+  - Extracted 4 substrate items (`D2fContext`, `forward_block_causal_with`,
+    `denoising_accuracy`, `attention_forward_safe_into`) from the 4782-LOC root
+    `src/dllm.rs` to `katgpt-forward/src/d2f_context.rs`, gated `dllm`. Root
+    dllm.rs slimmed by ~305 LOC. **-291 LOC root.** This unblocked the
+    dllm-cycle cluster (d2f, d2f_verifier, diffusion_sampler, set_diffusion).
+  - See `.plans/398_d2f_substrate_extraction.md`.
+
+- [x] **Phase 27 — Plan 399 D2F wrapper files relocation.**
+  - With the substrate extracted (Phase 26), the d2f wrapper files moved to
+    katgpt-forward: `d2f.rs`, `d2f_verifier.rs`, `diffusion_sampler.rs`. Root
+    files became thin re-export shims + train-only test residue. **-3630 LOC
+    root.**
+  - See `.plans/399_d2f_wrapper_files_relocation.md`.
+
+- [x] **Phase 28 — Plan 400 FlashAR anchor + consensus relocation.**
+  - Moved `flashar_anchor.rs` + `flashar_consensus.rs` (gated
+    `flashar_anchor` / `flashar_consensus`) to katgpt-forward. Root files
+    became re-export shims. **-1422 LOC root.**
+  - See `.plans/400_flashar_anchor_consensus_relocation.md`.
+
+- [x] **Phase 29 — Plan 401 forward_set_causal_positions + set_diffusion
+  extraction + proof_6 tolerance fix.**
+  - Moved `forward_set_causal_positions` + `forward_bidirectional_positions`
+    to katgpt-forward (unblocking set_diffusion), relocated `set_diffusion.rs`
+    (production + 31 pure tests) to katgpt-forward, slimmed root to re-export
+    shim + train-only tests. Also fixed `proof_6` tolerance drift (deterministic
+    f32 vs Lean ℝ regime, same class as the HLA boundedness split). **-1558 LOC
+    root.**
+  - See `.plans/401_set_causal_unblock_and_proof6_tolerance.md`.
+
+- [x] **Phase 30 — Plan 402 forward-positions cluster extraction.**
+  - Moved the remaining forward-positions substrate (`BidirectionalContext`,
+    `forward_bidirectional_positions`, and supporting types) to
+    katgpt-forward. **-478 LOC root.**
+  - See `.plans/402_forward_positions_cluster_extraction.md`.
+
+- [x] **Phase 31 — Plan 403 denoise-loop cluster extraction.**
+  - The denoise loop was the last large pure-inference cluster in `src/dllm.rs`.
+    Moved the inference substrate to `katgpt-forward/src/denoise_loops.rs`;
+    root dllm.rs now holds only training code (noise schedules, corruption
+    helpers, gradients, sgd_update, train_mini_*). **-651 LOC root.**
+  - See `.plans/403_denoise_loop_cluster_extraction.md`.
+
+- [x] **Phase 32 — Plan 404 data_probe substrate extraction + endgame audit.**
+  - The last plan-sized pure-substrate cluster: 6 root `data_probe/` modules
+    (markov, nll, typical_set, claim, dirichlet_energy, geometry) moved to
+    katgpt-core (joining the existing sink-aware classifier half). Un-gated
+    the katgpt-core `data_probe` parent module (always-on), gated only
+    `sink_classify` + `geometry` as `sink_aware_attn` submodules. **-1635 LOC
+    root.**
+  - **Endgame audit verdict** (see "Endgame audit" section below): consolidation
+    is at its natural endgame. What remains is permanently root-resident.
+  - See `.plans/404_data_probe_substrate_extraction.md`.
+
+## Endgame audit (Plan 404, 2026-07-06)
+
+Plan 404 surveyed every remaining `src/` file and classified each. The verdict:
+**Proposal 003 is essentially complete.** Further extraction requires
+architectural decisions outside this proposal's scope.
+
+### What remains in `src/` (~50.9K LOC total)
+
+| Remaining class | ~LOC | Why it stays |
+|---|---:|---|
+| **Transformer-bound glue** | ~5615 (`transformer.rs`) + scattered | Owns `ForwardContext`, the linchpin. Root-resident until katgpt-transformer grows a forward module (explicitly "Out of scope"). |
+| **Training infrastructure** | ~3008 (`dllm.rs`) | Crosses train/infer boundary. Per the modelless-first mandate, stays root. Moving to riir-train is a cross-repo move ("Out of scope"). |
+| **Forward-coupled speculative / sleep / gdn2 / hla / dash_attn** | various | Need `crate::transformer::{forward, forward_paged}`. Root-resident. |
+| **Bomber arena** (`pruners/bomber/`) | ~11K across ~19 files | Game integration; depends on root transformer/router. |
+| **Backend dispatch** (`inference_backend.rs`, `inference_router.rs`, `gpu_backend.rs`, `ane_backend.rs`) | ~4K | Transformer-bound. |
+| **Tooling** (`benchmark/`, `plot.rs`) | ~3K | Depends on everything; tooling, not library. |
+| **Thin re-export shims** | various | Back-compat for `katgpt_rs::*` paths; nothing left to extract. |
+
+### The "dllm-cycle defer until dllm moves" blocker — DISSOLVED
+
+Phase 18 of this proposal documented:
+
+> **dllm-cycle** (~6K LOC): d2f, d2f_verifier, diffusion_sampler,
+> flashar_anchor, flashar_consensus, set_diffusion — defer until dllm moves.
+
+Phases 26–31 (Plans 398–403) moved all of those to katgpt-forward. The root
+files with those names are now thin re-export shims + training-bridge residue.
+**The blocker is gone; the deferred work is complete.** Same R296-class lesson
+as Plan 391's dd_tree investigation: inherited "BLOCKED" claims go stale —
+always verify before deferring.
+
+### Cumulative impact (Phases 23–32, Plans 393–404)
+
+| Plan | Phase | Net root Δ |
+|---|---|---:|
+| 393 | 23 | -224 |
+| 394 | 24 | -5446 |
+| 396 | 25 | -2533 |
+| 398 | 26 | -291 |
+| 399 | 27 | -3630 |
+| 400 | 28 | -1422 |
+| 401 | 29 | -1558 |
+| 402 | 30 | -478 |
+| 403 | 31 | -651 |
+| 404 | 32 | -1635 |
+| **Total (Phases 23–32)** | | **-17,868** |
+
+Adding the earlier phases (1–22, Plans 008–392), the total root reduction across
+the full Proposal 003 arc is substantially larger. The consolidation has
+achieved its goal: `src/` now holds only permanently-root-resident code.
+
+### What would unblock further extraction
+
+Any of these (all outside Proposal 003's scope) would unlock more moves:
+
+1. **Grow katgpt-transformer to own forward-pass logic.** This is the single
+   biggest unblocker — it would let `ForwardContext`, `forward`, `forward_paged`,
+   and all forward-coupled glue finally leave root. Explicitly deferred in
+   "Out of scope".
+2. **Cross the train/infer boundary** (violates the modelless-first mandate) —
+   would let `dllm.rs` training code move.
+3. **Cross-repo move** of training code to riir-train ("Out of scope" — this
+   proposal is katgpt-rs-internal only).
+
 ## Risks and mitigations
 
 | Risk | Severity | Mitigation |
@@ -1257,7 +1424,16 @@ Ordering: foundation first (hoists, splits), then domain crates biggest-first.
 can't move yet). `main.rs` deleted in Phase 12. Every domain gets one stack
 crate. Three new domain stacks beyond 001/002: `katgpt-band` (Plan 265 cluster),
 `katgpt-claim`, `katgpt-sparse`, plus `katgpt-proof-cert` (Phase 12). Losers
-exile to `katgpt-deprecated`. 22 phases (Phase 12 complete 2026-07-05;
+exile to `katgpt-deprecated`. **32 phases, essentially complete** (endgame
+audit done — Plan 404, 2026-07-06). Phases 23–32 (Plans 393–404) dissolved the
+remaining forward-cycle + dllm-cycle blockers and moved the last pure-substrate
+clusters (speculative, dd_tree, d2f, flashar, set_diffusion, denoise-loops,
+data_probe) to katgpt-forward / katgpt-speculative / katgpt-core — **-17,868 LOC
+root** in that arc alone. What remains is permanently root-resident
+(transformer-forward glue needing `ForwardContext`, training infrastructure
+crossing the train/infer boundary, bomber arena, tooling). Further extraction
+requires growing katgpt-transformer to own forward-pass logic — explicitly
+"Out of scope". (Phase 12 complete 2026-07-05;
 Phase 14 = Plan 384 follow-up moving `distill/trd` + `vocab_channel_pruner`
 to their now-unblocked leaf homes; Phase 15 = Plan 385 breaks the
 `forward`-linchpin cycle by extracting the forward trio to katgpt-forward,
@@ -1294,6 +1470,30 @@ to katgpt-speculative, AND deletes the entire root TreeBuilder struct+impl
 (-50%); excluding the test module (~2380 LOC, root-bound on
 TransformerWeights/dflash_predict), root production code is now ~150 LOC
 (2 root-bound wrappers + module shim).
+Phase 23 = Plan 393 extracts SpeculativeContext + forward_decode_stage
+substrate to katgpt-speculative (-224 LOC root);
+Phase 24 = Plan 394 moves the forward-cycle 5-file cluster (drafter_lora,
+dflash, verifier, step, prefill) to katgpt-forward after the R296-class lesson
+that they need only the SpeculativeVerifier trait, not `forward` itself
+(-5446 LOC root — the single largest plan);
+Phase 25 = Plan 396 fully relocates dd_tree to katgpt-forward (-2533 LOC root);
+Phase 26 = Plan 398 extracts D2F inference substrate from root `dllm.rs` to
+katgpt-forward, unblocking the dllm-cycle cluster (-291 LOC root);
+Phase 27 = Plan 399 moves the d2f wrapper files to katgpt-forward (-3630 LOC root);
+Phase 28 = Plan 400 moves FlashAR anchor + consensus to katgpt-forward
+(-1422 LOC root);
+Phase 29 = Plan 401 unblocks set_diffusion by moving forward_set_causal_positions
+to katgpt-forward, relocates set_diffusion, and fixes proof_6 tolerance drift
+(-1558 LOC root);
+Phase 30 = Plan 402 moves the forward-positions cluster (BidirectionalContext +
+forward_bidirectional_positions) to katgpt-forward (-478 LOC root);
+Phase 31 = Plan 403 moves the denoise-loop cluster (the last pure-inference
+cluster in `dllm.rs`) to katgpt-forward (-651 LOC root);
+Phase 32 = Plan 404 moves the data_probe substrate cluster (markov, nll,
+typical_set, claim, dirichlet_energy, geometry) to katgpt-core and performs the
+endgame audit confirming the consolidation is at its natural end
+(-1635 LOC root). The Phase 18 "dllm-cycle defer until dllm moves" blocker is
+DISSOLVED — Phases 26–31 moved all of it.
 T4.8 speculative-primitives
 follow-up documented in Plan 383). Foundation moves
 first, biggest-payoff attention stack second. Supersedes 001 and 002.
