@@ -23,9 +23,9 @@
 
 use std::hash::Hash;
 
-use super::verifier::SpeculativeVerifier;
-use crate::transformer::TransformerWeights;
-use crate::types::{Config, Rng};
+use crate::verifier_trait::SpeculativeVerifier;
+use katgpt_transformer::TransformerWeights;
+use katgpt_types::{Config, Rng};
 
 // ── Configuration ─────────────────────────────────────────────
 
@@ -487,10 +487,10 @@ impl<A: Clone + Eq + Hash> ParallelProbeController<A> {
 // ── ParallelProbeVerifier (Plan 133 T3) ──────────────────────
 
 /// Wrapper that layers parallel-probe consensus/pruning on top of any
-/// [`SpeculativeVerifier`](super::verifier::SpeculativeVerifier).
+/// [`SpeculativeVerifier`](crate::verifier_trait::SpeculativeVerifier).
 ///
 /// On each speculative step, the verifier extracts answers from all active branches
-/// using the injected [`AnswerExtractor`](super::answer_extract::AnswerExtractor), feeds
+/// using the injected [`AnswerExtractor`](crate::answer_extract::AnswerExtractor), feeds
 /// them to the [`ParallelProbeController`], and handles the resulting [`ProbeDecision`].
 ///
 /// ## Usage
@@ -513,7 +513,7 @@ pub struct ParallelProbeVerifier<V> {
     /// Parallel-probe controller managing branch state and consensus.
     controller: ParallelProbeController<String>,
     /// Answer extractor used to pull structured answers from decoded text.
-    extractor: Box<dyn super::answer_extract::AnswerExtractor>,
+    extractor: Box<dyn crate::answer_extract::AnswerExtractor>,
     /// Per-branch accumulated decoded text (grows between probe steps).
     branch_texts: Vec<String>,
     /// Number of tokens generated since the last probe step.
@@ -546,7 +546,7 @@ impl<V> ParallelProbeVerifier<V> {
         inner: V,
         n_branches: usize,
         config: ParallelProbeConfig,
-        extractor: Box<dyn super::answer_extract::AnswerExtractor>,
+        extractor: Box<dyn crate::answer_extract::AnswerExtractor>,
     ) -> Self {
         let controller = ParallelProbeController::new(n_branches, config);
         let branch_texts = vec![String::new(); n_branches];

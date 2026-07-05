@@ -36,6 +36,13 @@ papaya = { version = "0.2", optional = true }
 # Zero-cast byte slices for belief_drafter save/load + selectivity_router
 # snapshot serialization (Plan 386 move from root).
 bytemuck = { version = "1", optional = true }
+# Transformer substrate types — TransformerWeights (Plan 389, 2026-07-05).
+# Mandatory because the hosted SpeculativeVerifier trait (verifier_trait.rs)
+# references TransformerWeights in its signature, and root's verifier.rs (which
+# is always compiled) implements the trait for SimulatedVerifier +
+# LeviathanVerifier. The parallel_probe module is opt-in via the
+# `parallel_probe` feature, but the trait itself is always-on.
+katgpt-transformer = { path = "../katgpt-transformer" }
 
 [features]
 # Forward sr2am_configurator to katgpt-types so `build_inference_result` can
@@ -178,8 +185,10 @@ selectivity_router = ["kurtosis_gate", "dep:bytemuck"]
 nf_flow_score = []
 # NFCoT × QGF Fusion (Plan 268 T6). Forwards to katgpt-core for QGuidedDrafter.
 qgf_drafter = ["katgpt-core/qgf_drafter"]
-# parallel_probe tracking flag (Plan 133). Gates answer_extract + parallel_probe
-# module (answer_extract moves in Phase 1; parallel_probe module defers — leaf deps).
+# Parallel-Probe 2D controller (Plan 133, Research 094). Gates answer_extract
+# (Phase 16) + parallel_probe module (Plan 389 Phase 4). The hosted
+# SpeculativeVerifier trait (verifier_trait module) is always-on (not gated
+# here) because root's verifier.rs always-compiles impls of the trait.
 parallel_probe = []
 
 # ── Plan 387 (2026-07-05): Phase 2 speculative cluster move. ──
@@ -238,7 +247,6 @@ directional_credit = []
 and_or_dtree = ["katgpt-core/and_or_dtree", "dep:blake3"]
 
 [dev-dependencies]
-katgpt-transformer = { path = "../katgpt-transformer" }
 # katgpt-pruners is a DEV-ONLY dep here (echo_env's GOAT test imports BanditPruner
 # + BanditStrategy). Dev-deps do NOT propagate to dependents, so this does NOT
 # create a cycle even though katgpt-pruners depends on katgpt-speculative.

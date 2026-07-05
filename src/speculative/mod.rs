@@ -63,8 +63,11 @@ pub use katgpt_speculative::alpha;
 #[cfg(feature = "parallel_probe")]
 pub use katgpt_speculative::answer_extract;
 
+// Parallel-Probe 2D controller (Plan 133). Plan 389 (2026-07-05): moved to
+// katgpt-speculative. Re-exported here to preserve
+// `katgpt_rs::speculative::parallel_probe::*` paths.
 #[cfg(feature = "parallel_probe")]
-pub mod parallel_probe;
+pub use katgpt_speculative::parallel_probe;
 
 // Re-exports — preserves existing import paths like `speculative::build_dd_tree`
 pub use dd_tree::{

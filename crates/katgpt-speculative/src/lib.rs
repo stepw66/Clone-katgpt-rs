@@ -204,3 +204,21 @@ pub mod echo_env;
 // (mirrors root gate).
 #[cfg(feature = "thinking_cot")]
 pub mod thinking_controller;
+
+// ── Plan 389 (2026-07-05): speculative Phase 4 — parallel_probe unblock. ──
+// SpeculativeVerifier trait — hosted here (not katgpt-core) because the
+// signature uses TransformerWeights from katgpt-transformer (above katgpt-core).
+// The impls (SimulatedVerifier, LeviathanVerifier) stay in root's verifier.rs
+// because they consume `crate::transformer::forward` (forward-cycle blocker).
+// Always-on (not feature-gated) because root's verifier.rs is always compiled
+// and its impls reference this trait — gating it would break no-default builds.
+pub mod verifier_trait;
+// Re-export the trait at the crate root for ergonomic access
+// (`katgpt_speculative::SpeculativeVerifier`).
+pub use verifier_trait::SpeculativeVerifier;
+
+// Parallel-Probe 2D controller (Plan 133). Moved from root's
+// `src/speculative/parallel_probe.rs`. Root re-exports preserve
+// `katgpt_rs::speculative::parallel_probe::*` paths.
+#[cfg(feature = "parallel_probe")]
+pub mod parallel_probe;

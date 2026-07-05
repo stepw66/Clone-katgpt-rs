@@ -16,24 +16,14 @@ use crate::transformer::{
 use crate::types::softmax_scaled;
 
 // ── Speculative Verifier: Strategy Pattern ──────────────────
-
-/// Strategy for verifying drafted tokens against a target distribution.
-///
-/// Same pattern as `ConstraintPruner` — trait-based swap point.
-/// - `SimulatedVerifier`: fast, no target model needed (default).
-/// - `LeviathanVerifier`: real p/q rejection sampling with target model.
-pub trait SpeculativeVerifier: Send + Sync {
-    /// Run one speculative decoding step end-to-end.
-    /// Returns accepted tokens (always ≥ 1, up to γ + 1 with bonus).
-    fn speculate(
-        &mut self,
-        draft_weights: &TransformerWeights,
-        draft_config: &Config,
-        token: usize,
-        pos: usize,
-        rng: &mut Rng,
-    ) -> Vec<usize>;
-}
+//
+// Plan 389 (2026-07-05): the trait itself moved to
+// `katgpt_speculative::verifier_trait`. It is re-exported here to preserve
+// the historical `katgpt_rs::speculative::verifier::SpeculativeVerifier`
+// path. The concrete impls (`SimulatedVerifier`, `LeviathanVerifier`) stay
+// here because they consume `crate::transformer::forward` — the
+// forward-cycle architectural blocker (see Proposal 003 Phase 16 DEFER).
+pub use katgpt_speculative::verifier_trait::SpeculativeVerifier;
 
 /// Simulated verification: DDTree path + acceptance cap + bonus token.
 /// No target model needed — fast, used by default.

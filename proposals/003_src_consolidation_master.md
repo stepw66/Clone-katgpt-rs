@@ -1098,12 +1098,68 @@ Ordering: foundation first (hoists, splits), then domain crates biggest-first.
   - **Remaining root-only speculative** (14 files, blocked by other cycles):
     - **forward-cycle** (~6K LOC): dflash, verifier, drafter_lora, step,
       dd_tree, parallel_probe — needs architectural decision.
+      **(Phase 19 update: parallel_probe is no longer in this list — moved
+      via the SpeculativeVerifier trait extraction; see Phase 19 below.)**
     - **dllm-cycle** (~6K LOC): d2f, d2f_verifier, diffusion_sampler,
       flashar_anchor, flashar_consensus, set_diffusion — defer until dllm moves.
     - **dash_attn** (~1K LOC): prefill.
     - **Partial**: types.rs (609 LOC, crate::transformer::forward_paged).
   - See `.plans/388_katgpt_pruners_cycle_resolution.md` for the full task list +
     verification matrix.
+
+- [x] **Phase 19 — Plan 389 speculative Phase 4: parallel_probe unblock.**
+  - **Goal**: move `parallel_probe.rs` (1187 LOC) from root to katgpt-speculative,
+    dissolving the apparent forward-cycle blocker for that one file.
+  - **Insight**: `parallel_probe.rs` only consumes the *trait*
+    `SpeculativeVerifier` from `super::verifier` — it does NOT call `forward`.
+    The trait itself is pure (signature uses only `TransformerWeights` + `Config`
+    + `Rng`). Only the impls (`SimulatedVerifier`, `LeviathanVerifier`) need
+    `forward`, and they stay in root. So the cycle can be broken by hosting
+    the trait *in katgpt-speculative* (rather than extracting to katgpt-core
+    as in Phase 18 — the trait signature needs `TransformerWeights` which sits
+    above katgpt-core in the dep graph).
+  - **Phase 19.1 — Host `SpeculativeVerifier` trait in katgpt-speculative**:
+    created `crates/katgpt-speculative/src/verifier_trait.rs`. Trait is
+    always-on (not feature-gated) because root's verifier.rs is always
+    compiled and implements the trait — gating it would break no-default
+    builds.
+  - **Phase 19.2 — Move `parallel_probe.rs`**: 1187 LOC moved via `git mv`.
+    Rewrote imports per the table below. Module is feature-gated by
+    `parallel_probe` (already declared in this crate as a tracking flag).
+  - **Phase 19.3 — Root verifier.rs**: replaced trait definition with
+    `pub use katgpt_speculative::verifier_trait::SpeculativeVerifier;`
+    back-compat shim. Impls unchanged.
+  - **Phase 19.4 — Root mod.rs**: replaced `pub mod parallel_probe;` with
+    `pub use katgpt_speculative::parallel_probe;` (re-export shim).
+  - **Cargo.toml changes**:
+    - katgpt-speculative: promoted `katgpt-transformer` from dev-dep to
+      mandatory regular dep (was dev-dep for tests; now needed at runtime
+      for the trait signature).
+  - **GOAT Gate G3 — PASS**:
+    - `cargo check --workspace` (default / all-features / no-default) clean.
+    - katgpt-speculative lib tests (all-features): **1039 passed** (up +29
+      from Plan 388's 1010 = parallel_probe module's 26 + 3 verifier tests).
+      Only failure: pre-existing `budget_compat` (verified on baseline).
+    - parallel_probe module tests: **26 passed** (Plan 133 GOAT suite).
+    - Root lib tests (default / all-features): **446 / 874 passed** (down by
+      exactly 26 = parallel_probe tests moved to leaf; expected).
+    - `test_133_parallel_probe_ablation`: **1/1 PASS** (GOAT integration).
+    - `examples/tactical_04_parallel`: builds ✅.
+    - Verifier tests in root (`speculative::verifier::*`): **13/13 PASS**
+      (trait re-export + impls both work).
+    - katgpt-pruners: **126 passed** (matches Plan 388).
+    - speculative_generator_goat: 3/3 PASS; spec_reconciliation_bench: 2/2 PASS.
+  - **Import rewrite patterns** (extends Phase 16/17/18 table):
+    | Root pattern | Leaf rewrite |
+    |---|---|
+    | `use super::verifier::SpeculativeVerifier` | `use crate::verifier_trait::SpeculativeVerifier` |
+    | `use crate::transformer::TransformerWeights` | `use katgpt_transformer::TransformerWeights` |
+    | `use crate::types::{Config, Rng}` | `use katgpt_types::{Config, Rng}` |
+    | `use super::answer_extract::*` | `use crate::answer_extract::*` |
+  - **After Phase 19**, root-only speculative drops from 14 → 13 files.
+    forward-cycle blocker shrinks from 6 → 5 files
+    (dflash, verifier, drafter_lora, step, dd_tree remain).
+  - See `.plans/389_speculative_phase4_parallel_probe.md`.
 
 ## Risks and mitigations
 
@@ -1151,7 +1207,7 @@ Ordering: foundation first (hoists, splits), then domain crates biggest-first.
 can't move yet). `main.rs` deleted in Phase 12. Every domain gets one stack
 crate. Three new domain stacks beyond 001/002: `katgpt-band` (Plan 265 cluster),
 `katgpt-claim`, `katgpt-sparse`, plus `katgpt-proof-cert` (Phase 12). Losers
-exile to `katgpt-deprecated`. 18 phases (Phase 12 complete 2026-07-05;
+exile to `katgpt-deprecated`. 19 phases (Phase 12 complete 2026-07-05;
 Phase 14 = Plan 384 follow-up moving `distill/trd` + `vocab_channel_pruner`
 to their now-unblocked leaf homes; Phase 15 = Plan 385 breaks the
 `forward`-linchpin cycle by extracting the forward trio to katgpt-forward,
@@ -1164,6 +1220,10 @@ Phase 18 = Plan 388 resolves that cycle by extracting `freeze` + proof core
 types + `ThinkingMode` to katgpt-core, then moving 4 files
 (and_or_builder, echo_env, thinking_controller → katgpt-speculative;
 echo_env_integration → katgpt-pruners as integration glue);
+Phase 19 = Plan 389 hosts the `SpeculativeVerifier` trait in katgpt-speculative
+(can't go to katgpt-core — signature uses TransformerWeights) and moves
+`parallel_probe` (1187 LOC) out of root, shrinking the forward-cycle
+blocker from 6 → 5 files;
 T4.8 speculative-primitives
 follow-up documented in Plan 383). Foundation moves
 first, biggest-payoff attention stack second. Supersedes 001 and 002.
