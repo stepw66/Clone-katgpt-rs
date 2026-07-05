@@ -66,8 +66,9 @@ Anything beyond the [stay] list is a missed move — log + fix."*
 - [-] **T4** — Move cleanly-movable items per the priority list above.
       One commit per cluster (`refactor:` prefix). Each move: file rename
       + import rewrite + root shim re-export + feature forward + GOAT gate.
-      6 of 8 sub-clusters DONE (T4.1–T4.6); T4.7–T4.8 remain (dash_attn +
-      speculative primitives — heaviest dep wiring, deferred to next session).
+      7 of 8 sub-clusters DONE (T4.1–T4.7); T4.8 remains (speculative primitives —
+      17 of 42 files are transformer-bound per DEFER table; the rest need individual
+      dep audits. Genuinely a separate session's work given the per-file scope.)
       Sub-tasks (one per cluster):
       - [x] T4.1 — Create `katgpt-proof-cert` crate + move proof_cert/ (6 files) ✅ cf23050a
       - [x] T4.2 — Single-file moves: sparse_compose, dllm_solver, pipeline_pruner, hla_eigenbasis ✅
@@ -101,10 +102,14 @@ Anything beyond the [stay] list is a missed move — log + fix."*
         in root. Now both live in katgpt-transformer; crate::thinking_cot resolves
         within the crate. Root swir/ shim deleted; root re-exports directly from
         katgpt_transformer::swir + katgpt_transformer::thinking_cot.)
-      - [-] T4.7 — katgpt-attn: 8 dash_attn primitives (+ dep wiring for meta_router, sat_analysis)
-        (DEFERRED: 12 files in src/dash_attn/. 6 are zero-dep; 2 need dep wiring
-        (meta_router needs katgpt-pruners dep; sat_analysis needs katgpt-kv dep).
-        Requires per-file dep audit + feature gate wiring. Next session.)
+      - [x] T4.7 — katgpt-attn: 8 dash_attn primitives (+ dep wiring for meta_router, sat_analysis) ✅
+        (10 files moved: adaptive_k, block_topk, channel_aware, entmax_router, kv_outer_prefill,
+        meta_router, msa_distill, sat_analysis, value_energy, vortex_flow. Original "stays root"
+        blocker dissolved: meta_router now imports katgpt_pruners::bandit + katgpt_core::traits::
+        ScreeningPruner; sat_analysis now imports katgpt_kv::cache_prune::SummedAreaTable.
+        katgpt-attn Cargo.toml: +katgpt-pruners/bandit +katgpt-kv/cache_prune +serde optional deps.
+        New leaf features: vortex_flow, msa_sparse, msa_per_group, msa_kv_outer, msa_adaptive_k.
+        Root src/dash_attn/ now contains only mod.rs (pure re-export shim) + tests.rs.)
       - [-] T4.8 — katgpt-speculative/katgpt-pruners: ~30 speculative primitives
         (DEFERRED: ~42 files in src/speculative/. Most are heavy-transformer-coupled
         (ForwardContext + TransformerWeights). The plan's DEFER table already

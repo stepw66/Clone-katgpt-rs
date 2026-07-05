@@ -1728,6 +1728,8 @@ dependencies = [
  "fastrand",
  "katgpt-core",
  "katgpt-forward",
+ "katgpt-kv",
+ "katgpt-pruners",
  "katgpt-spectral",
  "katgpt-transformer",
  "rustfft",

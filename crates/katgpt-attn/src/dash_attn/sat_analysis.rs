@@ -5,7 +5,7 @@
 //!
 //! Feature-gated with both `dash_attn` and `cache_prune` (Plan 140, T17).
 
-use crate::cache_prune::SummedAreaTable;
+use katgpt_kv::cache_prune::SummedAreaTable;
 
 /// Sparsity profile for a single attention head (or segment).
 ///
