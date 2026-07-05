@@ -1187,3 +1187,8 @@ pub mod lattice_operad;
 // FrequencyBandit — RV-gated pruning arm selection (Plan 202).
 #[cfg(feature = "freq_bandit")]
 pub mod freq_bandit;
+// VocabChannel Pruner — ROTATE-derived ConstraintPruner (Plan 228). Phase 13
+// (Plan 384, 2026-07-05): moved from katgpt-rs/src/speculative/. Root re-exports
+// as `katgpt_rs::speculative::vocab_channel_pruner`.
+#[cfg(feature = "vocab_channel_pruner")]
+pub mod vocab_channel_pruner;

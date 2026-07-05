@@ -471,8 +471,10 @@ pub use katgpt_speculative::nf_flow_gate;
 pub use nf_flow_gate::NfFlowGate;
 
 // ── VocabChannel Pruner — ROTATE-Derived ConstraintPruner (Plan 228, feature: vocab_channel_pruner) ──
+// Plan 384 (2026-07-05): substrate moved to katgpt-pruners. Root re-exports
+// preserve `katgpt_rs::speculative::vocab_channel_pruner::*` paths.
 #[cfg(feature = "vocab_channel_pruner")]
-pub mod vocab_channel_pruner;
+pub use katgpt_pruners::vocab_channel_pruner;
 
 #[cfg(feature = "vocab_channel_pruner")]
 pub use vocab_channel_pruner::excess_kurtosis as vocab_excess_kurtosis;

@@ -119,6 +119,22 @@ still_kv = []
 # Bake precision sub-feature for fold's attention_importance path.
 bake_precision = []
 
+# ── Plan 384 (2026-07-05): module moved from katgpt-rs/src/. ──
+# TRD = Trajectory-Refined Draft screening (Plan 249). Originally blocked in
+# root by `crate::fold` dep; Phase 12 T4.5 moved `fold/` here, dissolving the
+# cycle. The `prefold_prefix` path inside trd.rs is gated by `chain_fold`
+# (already defined above) — no extra deps needed for this tracking flag.
+trd_refined_draft = []
+# Cross-crate feature references (Plan 384, 2026-07-05): the following
+# features live in the main katgpt-rs crate but are referenced by
+# `#[cfg(feature = "...")]` blocks in trd.rs (moved from root). They are NOT
+# used here — the gated code is dead-code stubs that compile out — but we
+# declare them as empty tracking flags so the `unexpected_cfgs` lint doesn't
+# fire on the cfg attribute. The root crate re-implements the integration
+# locally where needed.
+plasma_path = []
+gpu = []
+
 [dev-dependencies]
 katgpt-transformer = { path = "../katgpt-transformer" }
 fastrand = "2"  # correlation_budget tests (Issue 003 move from root, which has fastrand as a dep)

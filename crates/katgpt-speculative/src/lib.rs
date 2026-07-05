@@ -56,9 +56,11 @@ pub mod ppot;
 // Modules moved from katgpt-rs/src/. Each is feature-gated to mirror its
 // historical root gate. Root re-exports preserve `katgpt_rs::<module>::*` paths.
 
-// distill umbrella — only ilc moved here (trd stays root: fold dep). peira
-// lives in katgpt-spectral; root re-exports it at katgpt_rs::distill::peira.
-#[cfg(feature = "ilc_distill")]
+// distill umbrella — ilc (Phase 6) + trd (Plan 384) live here. peira lives
+// in katgpt-spectral; root re-exports it at katgpt_rs::distill::peira.
+// Gate on any distill submodule feature so the umbrella compiles whenever
+// at least one sub-module is requested.
+#[cfg(any(feature = "ilc_distill", feature = "trd_refined_draft"))]
 pub mod distill;
 
 // RTPurbo retrieval-head sparse decode (Plan 126).

@@ -834,13 +834,46 @@ Ordering: foundation first (hoists, splits), then domain crates biggest-first.
     - **T4.7** ✅ `52cafcf0`: dash_attn VortexFlow cluster (10 files) → katgpt-attn. Original "stays root" blocker dissolved once pruners/speculative/cache_prune landed in their leaves.
     - **T4.8** ⏭ DEFERRED: ~30 speculative primitives need individual dep audits; 17 files (~25K LOC) are transformer-bound per DEFER table. Genuine separate-session scope.
     - **GOAT gate G3 PASS**: workspace `cargo check` clean on default / all-features / no-default-features. Per-crate lib tests pass (katgpt-attn 150/150, katgpt-core 1435/1435, katgpt-sparse 39/39, katgpt-spectral 100/100, katgpt-pruners 213/213, katgpt-speculative 146/146). bench_256_adaptive_k_goat 1/1 PASS.
-  **Final src/ state**: transformer.rs linchpin + retained forward-glue (gdn2/hla/dash_attn composition + tests, inference_router/backend, gpu/ane_backend, attn_match_adaptive_cot, sp_kv_forward_mod, types) + DEFER items (benchmark/, plot.rs, sleep/, distill/trd, dllm.rs, dense_mesh/node_transformer, speculative/{17 transformer-bound files}, pruners/bomber/{19 files}, data_probe/, vocab_channel_pruner, domino_lora). Each DEFER carries a documented blocker + unblock condition in Plan 383.
+  **Final src/ state**: transformer.rs linchpin + retained forward-glue (gdn2/hla/dash_attn composition + tests, inference_router/backend, gpu/ane_backend, attn_match_adaptive_cot, sp_kv_forward_mod, types) + DEFER items (benchmark/, plot.rs, sleep/, dllm.rs, dense_mesh/node_transformer, speculative/{17 transformer-bound files}, pruners/bomber/{19 files}, data_probe/, domino_lora). Each DEFER carries a documented blocker + unblock condition in Plan 383. **Phase 14 (Plan 384, 2026-07-05)** subsequently moved `distill/trd` + `vocab_channel_pruner` out (blockers dissolved by Phase 12 T4.4/T4.5) — see Phase 14 entry below.
 - [x] **Phase 13 — commit + record.** Commit on `develop` with `refactor:`
   prefix per phase. Update this proposal status to **done** at Phase 12. **DONE 2026-07-05**
   — Plan 383 is the Phase 13 record; this proposal now reflects Phase 12 as complete with
   T4.8 (speculative primitives) documented as a follow-up rather than a blocker. The
   Proposal 003 mandate (delete main.rs + audit + log + fix missed moves) is satisfied;
   remaining items are transformer-bound by definition (out of scope per L840-846).
+
+- [x] **Phase 14 — Plan 384 unblocked follow-ups.** Two Phase 12 DEFER items
+  whose documented blockers dissolved during Phase 12 itself, plus a latent
+  umbrella-gate bug uncovered + fixed in transit. **DONE 2026-07-05.**
+  - **`distill/trd.rs`** (1107 LOC) → `katgpt-speculative/src/distill/trd.rs`.
+    Blocker was `crate::fold`; Phase 12 T4.5 moved `fold/` to katgpt-speculative,
+    dissolving the cycle. Imports unchanged (`crate::fold` now native). Root
+    re-exports as `katgpt_rs::distill::trd`.
+  - **`speculative/vocab_channel_pruner.rs`** (2048 LOC) →
+    `katgpt-pruners/src/vocab_channel_pruner.rs`. Blocker was `crate::lattice_operad`;
+    Phase 12 T4.4 moved `lattice_operad/` to katgpt-pruners. **Bonus discovery:**
+    the other supposed blockers (`crate::transformer::TransformerWeights`,
+    `crate::types::Config`) were already leaf-resident (`katgpt-transformer` and
+    `katgpt-types` respectively) — the "transformer-bound" classification was stale.
+    Three import rewrites: `crate::lattice_operad` stayed native, `TransformerWeights`
+    + `Config` became `katgpt_transformer::` / `katgpt_types::`. Root re-exports as
+    `katgpt_rs::speculative::vocab_channel_pruner`.
+  - **Latent bug fix:** `katgpt-speculative/src/lib.rs` had `pub mod distill`
+    gated on `ilc_distill` alone — so enabling `trd_refined_draft` without
+    `ilc_distill` silently cfg'd out the entire distill umbrella (trd compiled
+    in `cargo check` but produced zero test symbols). Fixed to
+    `#[cfg(any(feature = "ilc_distill", feature = "trd_refined_draft"))]`. Root's
+    own `pub mod distill` was already correctly gated on the union — only the
+    katgpt-speculative umbrella was stale (predates Plan 384).
+  - **GOAT gate G3 PASS**: workspace `cargo check` clean on default /
+    all-features / no-default-features. katgpt-speculative lib tests 282/282
+    (incl. all 12 trd tests). katgpt-pruners lib tests (with vocab_channel_pruner)
+    180/180 (incl. all 30 vocab tests). Root lib tests 769/769 (12 fewer than
+    pre-Plan-384 781 — exactly the moved trd tests, now resident in
+    katgpt-speculative). `cargo run --example vocab_channel_pruner_demo` runs
+    end-to-end through the re-export path.
+  - See `.plans/384_unblocked_followups_trd_vocab.md` for the full task list
+    + verification matrix.
 
 ## Risks and mitigations
 
@@ -888,6 +921,8 @@ Ordering: foundation first (hoists, splits), then domain crates biggest-first.
 can't move yet). `main.rs` deleted in Phase 12. Every domain gets one stack
 crate. Three new domain stacks beyond 001/002: `katgpt-band` (Plan 265 cluster),
 `katgpt-claim`, `katgpt-sparse`, plus `katgpt-proof-cert` (Phase 12). Losers
-exile to `katgpt-deprecated`. 13 phases (Phase 12 complete 2026-07-05; T4.8
-speculative-primitives follow-up documented in Plan 383). Foundation moves
-first, biggest-payoff attention stack second. Supersedes 001 and 002.
+exile to `katgpt-deprecated`. 14 phases (Phase 12 complete 2026-07-05;
+Phase 14 = Plan 384 follow-up moving `distill/trd` + `vocab_channel_pruner`
+to their now-unblocked leaf homes; T4.8 speculative-primitives follow-up
+documented in Plan 383). Foundation moves first, biggest-payoff attention
+stack second. Supersedes 001 and 002.

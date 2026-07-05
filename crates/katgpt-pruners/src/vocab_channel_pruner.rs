@@ -30,6 +30,10 @@ use std::sync::RwLock;
 use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
 
 use katgpt_core::traits::ConstraintPruner;
+// TransformerWeights lives in katgpt-transformer (leaf); Config lives in
+// katgpt-types (leaf). Both are mandatory deps of this crate.
+use katgpt_transformer::TransformerWeights;
+use katgpt_types::Config;
 
 #[cfg(feature = "lattice_operad")]
 use crate::lattice_operad::PrunerExpr;
@@ -1002,8 +1006,8 @@ pub struct DecompositionResult {
 ///
 /// Returns timing per layer, total time, and the BLAKE3 hash of all weight bytes.
 pub fn decompose_model_channels(
-    weights: &crate::transformer::TransformerWeights,
-    config: &crate::types::Config,
+    weights: &TransformerWeights,
+    config: &Config,
     channel_config: &VocabChannelConfig,
 ) -> DecompositionResult {
     let mut hasher = blake3::Hasher::new();

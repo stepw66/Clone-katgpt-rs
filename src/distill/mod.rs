@@ -11,13 +11,11 @@
 //! - **`ilc`** → `katgpt-speculative` (Phase 6 — DONE 2026-07-04). ILC = Iterative
 //!   Latent Clustering synonym-aware DDTree pruning (Research 136). Re-exported
 //!   here so `katgpt_rs::distill::ilc::*` paths keep resolving.
-//! - **`trd`** → **stays in root** (Phase 6 scope reduction, 2026-07-04). TRD's
-//!   `prefold_prefix` path depends on `crate::fold::*` (transformer-bound glue
-//!   that lives in root per Phase 12 target). Moving TRD to katgpt-speculative
-//!   would require katgpt-speculative → katgpt-rs (cycle). The `chain_fold`-
-//!   gated prefold path is the only blocker; the rest of TRD is self-contained.
-//!   Kept in root alongside `fold/` until fold's own destination (Phase 9 or 12)
-//!   lands. See `proposals/003_src_consolidation_master.md` Phase 6 notes.
+//! - **`trd`** → `katgpt-speculative` (Plan 384 — DONE 2026-07-05). TRD =
+//!   Trajectory-Refined Draft screening (Plan 249). Originally blocked by
+//!   `crate::fold` dep; Phase 12 T4.5 moved `fold/` to katgpt-speculative,
+//!   dissolving the cycle. Re-exported here so `katgpt_rs::distill::trd::*`
+//!   paths keep resolving.
 
 // → katgpt-spectral (Phase 4 — DONE): spectral alignment metric. Substrate
 // moved; re-export preserves the historical `katgpt_rs::distill::peira` path.
@@ -29,7 +27,8 @@ pub use katgpt_spectral::peira;
 #[cfg(feature = "ilc_distill")]
 pub use katgpt_speculative::distill::ilc;
 
-// → stays in root (Phase 6 scope reduction): trajectory-refined draft screening.
-// Blocked by `crate::fold` dep in the `chain_fold`-gated `prefold_prefix` path.
+// → katgpt-speculative (Plan 384 — DONE 2026-07-05): trajectory-refined draft
+// screening. Substrate moved; re-export preserves the historical
+// `katgpt_rs::distill::trd` path.
 #[cfg(feature = "trd_refined_draft")]
-pub mod trd;
+pub use katgpt_speculative::distill::trd;

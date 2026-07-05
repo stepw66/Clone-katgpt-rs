@@ -190,6 +190,12 @@ freq_bandit = []  # FrequencyBandit — RV-gated pruning arm selection (Plan 202
 rv_bandit_pruning = []  # RV Bandit Pruning — FrequencyBandit top-ρ arm suppression sub-feature (Plan 202 GOAT). DEFAULT-ON via rv_gated_routing.
 interval_pruner = []  # IntervalPruner — interval-closure for valid token sets (Plan 252 Phase 1). DEFAULT-ON in root.
 lattice_operad = []  # LatticeOperad — canonical AND/OR pruner composition (Plan 252 Phase 2). DEFAULT-ON in root.
+# Plan 384 (2026-07-05): module moved from katgpt-rs/src/speculative/. ROTATE-
+# derived ConstraintPruner (Plan 228). No extra deps — katgpt-transformer /
+# katgpt-types / bytemuck / blake3 / serde / serde_json are all already
+# mandatory deps of this crate. Root re-exports as
+# `katgpt_rs::speculative::vocab_channel_pruner`.
+vocab_channel_pruner = []
 wealth_pruner = ["bandit"]
 nds_proxy = ["bandit"]
 curvature_alloc = ["bandit"]
