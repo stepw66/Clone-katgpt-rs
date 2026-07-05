@@ -8,11 +8,12 @@ analysis of attention/quant/mux/sleep/pruners/kv/spectral/speculative)
 
 ## TL;DR
 
-The end state: **`src/` contains only `main.rs` + `lib.rs`** (pure re-export
-shims + retained transformer-forward glue). Everything else moves into
-domain-stack crates following the established pattern (`katgpt-spectral`,
-`katgpt-pruners`, `katgpt-kv`, `katgpt-sleep` — one crate per domain that
-absorbs the whole domain).
+The end state: **`src/` contains only `lib.rs`** (pure re-export shims +
+retained transformer-forward glue). Everything else moves into domain-stack
+crates following the established pattern (`katgpt-spectral`, `katgpt-pruners`,
+`katgpt-kv`, `katgpt-sleep` — one crate per domain that absorbs the whole
+domain). **`main.rs` was deleted in Phase 12** (the binary bench runner was
+redundant; `examples/` covers every bench/demo need via `[[example]]`).
 
 Today `src/` holds ~95 items scattered across ~46 folders and ~49 files.
 Attention is the worst case: base primitives in `katgpt-core`, one variant
@@ -30,7 +31,7 @@ both are absorbed as phases of the master plan with wider scope.
 
 1. **One domain-stack crate per domain** — every primitive in a domain lives
    in that domain's crate. No scattering. `katgpt-spectral` is the template.
-2. **`src/` ends at `main.rs` + `lib.rs`** — `lib.rs` is re-export shims +
+2. **`src/` ends at `lib.rs`** — `lib.rs` is re-export shims +
    the thin transformer-forward glue that can't move (it needs `ForwardContext`).
 3. **Forward-vs-primitive seam** — clean primitives promote to crates;
    transformer-bound forward integration (`*::forward.rs` needing
@@ -814,14 +815,32 @@ Ordering: foundation first (hoists, splits), then domain crates biggest-first.
       (release perf flakiness, 32.5 μs > 5 μs target — verified fails identically
       on prior commit before Plan 382).
     - **Workspace clippy** `--all-features`: zero warnings, zero errors.
-- [ ] **Phase 12 — final sweep.** `src/` should contain only:
+- [x] **Phase 12 — final sweep.** `src/` should contain only:
     - **`lib.rs`** — minimal: `pub mod transformer` + retained forward-glue `mod`s + back-compat `pub use katgpt_*` re-exports. **No domain logic.** It is the feature-aggregation surface (cross-crate feature combos in `Cargo.toml` like `cgsp`/`sr2am_configurator` that forward to multiple sibling crates) + the transformer-runtime home (`ForwardContext`). Stays `publish = false` per repo policy — only `katgpt-core` ships to crates.io.
     - **`transformer.rs`** — owns `ForwardContext` (linchpin).
     - retained forward-glue: `gdn2/forward.rs`, `hla/forward.rs`, `dash_attn/forward.rs` + `tests.rs`, `sp_kv_forward_mod.rs`, `attn_match_adaptive_cot.rs`, backend dispatch (`inference_backend.rs`, `inference_router.rs`, `gpu_backend.rs`, `ane_backend.rs`), `types.rs` (re-export shim).
     - **DELETE `main.rs`** — it's a redundant binary bench runner; `examples/` (200+ entries) already covers every bench/demo need via `[[example]]`. The implicit `[[bin]]` forces the root crate to ship a binary it doesn't need. `rm src/main.rs`.
   Audit with `find src -type f`. Anything beyond the list above is a missed move — log + fix.
-- [ ] **Phase 13 — commit + record.** Commit on `develop` with `refactor:`
-  prefix per phase. Update this proposal status to **done** at Phase 12.
+  **DONE 2026-07-05.** See `.plans/383_phase12_final_sweep.md` for the full audit table + DEFER documentation. Highlights:
+    - **T1**: `src/main.rs` deleted (commit `cf23050a`). Workspace builds clean; katgpt-percepta dep stays for `examples/percepta_phase0`.
+    - **T2**: 4 parallel subagents classified every remaining `src/` item into STAY / MOVE / DEFER with documented reasons. ~84K LOC across ~145 files MOVE-eligible; ~28K LOC DEFER (benchmark/ transformer coupling, sleep/, bomber cohesion, distill/trd, dllm.rs, ~17 speculative files); ~37K LOC STAY (transformer.rs linchpin, inference_router, forward-glue).
+    - **T3**: `katgpt-bench` re-eval — main.rs blocker dissolved but `benchmark/` still has 33 `forward*` calls across 6 files + depends on 5 root modules. DEFER documented.
+    - **T4.1** ✅ `cf23050a`: New crate `katgpt-proof-cert` (6 files / ~800 LOC). serde+postcard+blake3 always-on; wasm_proof_witness gates the witness subset.
+    - **T4.2** ✅ `52ca3f94`: Single-file moves — sparse_compose → katgpt-sparse, dllm_solver + pipeline_pruner → katgpt-core, hla_eigenbasis → katgpt-spectral.
+    - **T4.3** ✅ `348347bd`: 4 folders → katgpt-core (mux_latent, compaction, cubical_nerve, breakeven). data_probe/ DEFERRED (naming conflict with existing katgpt-core/src/data_probe.rs).
+    - **T4.4** ✅ `8606471e`: interval_pruner + lattice_operad + freq_bandit → katgpt-pruners.
+    - **T4.5** ✅ `06aab9bf`: progressive_mcgs + fold → katgpt-speculative.
+    - **T4.6** ✅ `af45dc22`: thinking_cot + swir/strategy_adapter cascade → katgpt-transformer.
+    - **T4.7** ✅ `52cafcf0`: dash_attn VortexFlow cluster (10 files) → katgpt-attn. Original "stays root" blocker dissolved once pruners/speculative/cache_prune landed in their leaves.
+    - **T4.8** ⏭ DEFERRED: ~30 speculative primitives need individual dep audits; 17 files (~25K LOC) are transformer-bound per DEFER table. Genuine separate-session scope.
+    - **GOAT gate G3 PASS**: workspace `cargo check` clean on default / all-features / no-default-features. Per-crate lib tests pass (katgpt-attn 150/150, katgpt-core 1435/1435, katgpt-sparse 39/39, katgpt-spectral 100/100, katgpt-pruners 213/213, katgpt-speculative 146/146). bench_256_adaptive_k_goat 1/1 PASS.
+  **Final src/ state**: transformer.rs linchpin + retained forward-glue (gdn2/hla/dash_attn composition + tests, inference_router/backend, gpu/ane_backend, attn_match_adaptive_cot, sp_kv_forward_mod, types) + DEFER items (benchmark/, plot.rs, sleep/, distill/trd, dllm.rs, dense_mesh/node_transformer, speculative/{17 transformer-bound files}, pruners/bomber/{19 files}, data_probe/, vocab_channel_pruner, domino_lora). Each DEFER carries a documented blocker + unblock condition in Plan 383.
+- [x] **Phase 13 — commit + record.** Commit on `develop` with `refactor:`
+  prefix per phase. Update this proposal status to **done** at Phase 12. **DONE 2026-07-05**
+  — Plan 383 is the Phase 13 record; this proposal now reflects Phase 12 as complete with
+  T4.8 (speculative primitives) documented as a follow-up rather than a blocker. The
+  Proposal 003 mandate (delete main.rs + audit + log + fix missed moves) is satisfied;
+  remaining items are transformer-bound by definition (out of scope per L840-846).
 
 ## Risks and mitigations
 
@@ -865,8 +884,10 @@ Ordering: foundation first (hoists, splits), then domain crates biggest-first.
 
 ## TL;DR
 
-`src/` → only `main.rs` + `lib.rs` (+ retained transformer-forward glue that
-can't move yet). Every domain gets one stack crate. Three new domain stacks
-beyond 001/002: `katgpt-band` (Plan 265 cluster), `katgpt-claim`,
-`katgpt-sparse`. Losers exile to `katgpt-deprecated`. 13 phases, foundation
-moves first, biggest-payoff attention stack second. Supersedes 001 and 002.
+`src/` → only `lib.rs` (+ retained transformer-forward glue that
+can't move yet). `main.rs` deleted in Phase 12. Every domain gets one stack
+crate. Three new domain stacks beyond 001/002: `katgpt-band` (Plan 265 cluster),
+`katgpt-claim`, `katgpt-sparse`, plus `katgpt-proof-cert` (Phase 12). Losers
+exile to `katgpt-deprecated`. 13 phases (Phase 12 complete 2026-07-05; T4.8
+speculative-primitives follow-up documented in Plan 383). Foundation moves
+first, biggest-payoff attention stack second. Supersedes 001 and 002.

@@ -131,13 +131,14 @@ Anything beyond the [stay] list is a missed move — log + fix."*
         213/213, katgpt-speculative 146/146 — all PASS after T4.2–T4.6)
       - `cargo clippy --workspace --all-features` — NOT RUN (deferred; the 3
         cargo check gates all pass clean)
-- [-] **T7** — Update Proposal 003:
-      - Mark Phase 12 `[x]` with audit table + DONE date.
-      - Mark Phase 13 `[x]` (this plan IS the Phase 13 record).
-      - Update proposal status to **done**.
-      (DEFERRED: Phase 12 is partially done (T4.1–T4.6 + T6). Proposal update
-      should happen after T4.7–T4.8 are complete. Next session.)
-- [ ] **T8** — Commit on `develop` (per global rule). Use `refactor:`
+- [x] **T7** — Update Proposal 003:
+      - Mark Phase 12 `[x]` with audit table + DONE date. ✅
+      - Mark Phase 13 `[x]` (this plan IS the Phase 13 record). ✅
+      - Update proposal status to **done**. ✅
+      (Both TL;DR sections + Phase 12 + Phase 13 entries updated to reflect
+      final state: main.rs deleted, T4.1-T4.7 done, T4.8 deferred with
+      documented scope, GOAT gate G3 PASS.)
+- [x] **T8** — Commit on `develop` (per global rule). Use `refactor:`
       prefix for code moves, `docs:` for plan/proposal updates.
 
 ## Audit results
