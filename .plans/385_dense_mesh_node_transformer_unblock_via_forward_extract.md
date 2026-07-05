@@ -1,8 +1,9 @@
 # Plan 385 — Unblock `dense_mesh/node_transformer.rs` by extracting `forward` to `katgpt-forward`
 
 **Started:** 2026-07-05
-**Status:** in-progress
+**Status:** CLOSED
 **Branch:** `develop`
+**Commit:** `2fefd0aa`
 
 ## Motivation
 
@@ -70,7 +71,7 @@ next-session candidate for re-audit. The documented blocker was
   tests moved with the file). dense_mesh_goat_gates 5/5 PASS via re-export.
   prof_dense_mesh 5/5 PASS via re-export. transformer:: 80/80 PASS.
 - [x] **T9** — Updated Proposal 003 with Phase 15 entry + TL;DR + Final src/ state.
-- [ ] **T10** — Commit on `develop` with `refactor:` prefix.
+- [x] **T10** — Committed on `develop` with `refactor:` prefix (commit `2fefd0aa`).
 
 ## Acceptance criteria
 
