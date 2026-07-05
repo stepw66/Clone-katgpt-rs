@@ -43,6 +43,8 @@ log = "0.4"
 [dev-dependencies]
 # Plan 394: drafter_lora.rs tests use tempfile for round-trip save/load
 tempfile = "3"
+# Plan 396: dd_tree.rs tests use fastrand under the `speculative_generator` feature
+fastrand = "2"
 
 [features]
 default = []
@@ -175,3 +177,40 @@ adaptive_gamma_forecast = []
 # REST bridge test fixture (Plan 009). Empty tracking flag — only gates the
 # `#[cfg(feature = "rest")] #[cfg(test)]` bridge test in prefill.rs.
 rest = []
+
+# ── Plan 396 (2026-07-05): features consumed by the moved dd_tree.rs ──
+# (`dd_tree.rs` moved from root `src/speculative/`). The 2 feature-gated
+# production fns + the ~2380-LOC test module use these gates. Root forwards
+# its feature to this crate so the cfg blocks resolve.
+
+# SpeculativeGenerator trait + spec_generator module (Plan 193). Forwards to
+# katgpt-speculative so MarginalTokenGenerator + TokenConstraintPruner resolve.
+# Also enables the `fastrand` dev-dep used by the spec_generator tests.
+speculative_generator = ["katgpt-speculative/speculative_generator"]
+
+# Best Buddies Drafting (Plan 199). Forwards to katgpt-speculative so
+# MarginalBestBuddyAligner resolves.
+best_buddies = ["katgpt-speculative/best_buddies"]
+
+# NextLat Belief-State Speculative Drafter (Plan 217). Forwards to
+# katgpt-speculative so BeliefDrafter + LatentDynamicsMLP resolve.
+belief_drafter = ["katgpt-speculative/belief_drafter"]
+
+# DFlare Position-Weighted DDTree Budget (Plan 174). Forwards to katgpt-core
+# so PositionWeightedBudget resolves, and to katgpt-speculative so
+# build_dd_tree_screened_progressive + TreeBuilder::build_screened_progressive resolve.
+dflare_progressive_budget = ["katgpt-core/dflare_progressive_budget", "katgpt-speculative/dflare_progressive_budget"]
+
+# ELF SDE noise injection (Plan 079). Forwards to katgpt-speculative so
+# WidthScaleConfig + best_of_k_rollouts resolve.
+elf_sde = ["katgpt-speculative/elf_sde"]
+
+# Thinking Prune — FrozenBaseGuard schedule (Plan 171). Empty tracking flag —
+# gates build_dd_tree_screened_with_schedule + 2 tests. PrunerSchedule is
+# unconditional in katgpt-pruners, no upstream forward needed.
+thinking_prune = []
+
+# GDSD Advantage-Guided Pruner (Plan 169). Forwards to katgpt-pruners so
+# GdsdPruner + GdsdConfig + identity_advantage resolve (they are gated
+# `gdsd_distill` in the leaf).
+gdsd_distill = ["katgpt-pruners/gdsd_distill"]

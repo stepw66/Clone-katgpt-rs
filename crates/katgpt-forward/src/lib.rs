@@ -535,3 +535,17 @@ pub use step::speculative_step_with_configurator;
 // `katgpt_rs::speculative::prefill::*` paths resolve.
 pub mod prefill;
 pub use prefill::{AttentionScorer, BlockAttentionScorer};
+
+// Decision-Diffusion Tree feature-gated wrappers + integration tests
+// (Plan 396, 2026-07-05). Moved from root `src/speculative/dd_tree.rs`.
+// Hosts the two feature-gated production fns (`build_dd_tree_screened_with_schedule`,
+// `build_dd_tree_gdsd`) plus the ~2380-LOC integration test module that
+// exercises the full dd_tree + dflash_predict pipeline. The core dd-tree
+// algorithm lives in `katgpt_speculative::dd_tree` (re-exported via glob inside
+// this module). Root re-exports via `pub use katgpt_forward::dd_tree;` so all
+// historical `katgpt_rs::speculative::dd_tree::*` paths resolve.
+pub mod dd_tree;
+#[cfg(feature = "gdsd_distill")]
+pub use dd_tree::build_dd_tree_gdsd;
+#[cfg(feature = "thinking_prune")]
+pub use dd_tree::build_dd_tree_screened_with_schedule;
