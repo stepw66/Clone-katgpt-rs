@@ -424,3 +424,31 @@ impl katgpt_speculative::dflash::DflashCtx<TransformerWeights> for ForwardContex
 // depends on katgpt-core — placing it in katgpt-hla would create a cycle.
 pub mod hla_forward;
 pub use hla_forward::{forward_ahla, forward_hla, generate_ahla_into, generate_hla_into};
+
+// Forward-pass composition layer (Plan 385, 2026-07-05).
+// `forward`, `forward_base`, `forward_coda`, `attention_head`, `standard_lm_head`,
+// `clustered_lm_head`, `select_topk_indices*`, `cluster_map_*` moved from root
+// `src/transformer.rs`. These were the "linchpin" that blocked
+// `dense_mesh/node_transformer.rs` from leaving root — now dissolved.
+//
+// Root re-exports `forward` (and the helpers) so every historical call site at
+// `katgpt_rs::transformer::forward` continues to resolve.
+pub mod forward;
+pub use forward::{
+    attention_head, cluster_map_from_embeddings, cluster_map_round_robin,
+    clustered_lm_head, forward, forward_base, select_topk_indices,
+    select_topk_indices_into_buf, standard_lm_head,
+};
+#[cfg(feature = "coda_fusion")]
+pub use forward::forward_coda;
+
+// DenseMesh `node_transformer` — Plan 385 (2026-07-05).
+// Moved from root `src/dense_mesh/node_transformer.rs`. The substrate (traits,
+// types, topology) lives in katgpt-transformer; this file lives here because it
+// consumes `crate::forward::forward` (which moved here in the same plan).
+// Root re-exports `TransformerNode` so `katgpt_rs::dense_mesh::TransformerNode`
+// continues to resolve.
+#[cfg(feature = "dense_mesh")]
+pub mod dense_mesh_node_transformer;
+#[cfg(feature = "dense_mesh")]
+pub use dense_mesh_node_transformer::TransformerNode;

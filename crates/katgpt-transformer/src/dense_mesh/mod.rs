@@ -39,11 +39,14 @@ pub mod edge_identity;
 pub mod edge_lora;
 pub mod edge_projection;
 pub mod handoff;
-// NOTE: `node_transformer` stays in the katgpt-rs root crate — it consumes
-// `crate::transformer::forward` (the cognitive-primitive composer), which
-// cannot move here without a cycle. The root shim at `src/dense_mesh/mod.rs`
-// re-exports this module's contents AND adds `node_transformer` back as a
-// sibling so `katgpt_rs::dense_mesh::TransformerNode` still resolves.
+// NOTE: `node_transformer` was the DenseMesh file that consumed
+// `crate::transformer::forward` (the cognitive-primitive composer). It could
+// not move here (would create a cycle: katgpt-transformer → root → katgpt-transformer).
+// Plan 385 (2026-07-05) dissolved the cycle by extracting `forward` itself to
+// katgpt-forward. `node_transformer.rs` now lives at
+// `katgpt_forward::dense_mesh_node_transformer` — co-located with `forward`.
+// The root shim at `src/dense_mesh/mod.rs` re-exports it as
+// `katgpt_rs::dense_mesh::TransformerNode`.
 pub mod topology;
 pub mod traits;
 pub mod types;

@@ -49,10 +49,12 @@
 
 use std::sync::Mutex;
 
-use super::traits::DenseNode;
-use super::types::{DenseHidden, MeshScratch};
-use crate::transformer::{forward, ForwardContext, MultiLayerKVCache, TransformerWeights};
-use crate::types::Config;
+use katgpt_transformer::dense_mesh::traits::DenseNode;
+use katgpt_transformer::dense_mesh::types::{DenseHidden, MeshScratch};
+use crate::forward::forward;
+use crate::ForwardContext;
+use katgpt_transformer::{MultiLayerKVCache, TransformerWeights};
+use katgpt_core::types::Config;
 
 /// Default pool size used when the caller does not explicitly request a
 /// parallelism budget. Sized to the host's logical CPU count so that the
@@ -217,7 +219,7 @@ impl DenseNode for TransformerNode {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::Rng;
+    use katgpt_core::types::Rng;
 
     /// Smoke test: TransformerNode produces non-empty output and reports the
     /// correct hidden_dim (= vocab_size, since `forward` returns logits).

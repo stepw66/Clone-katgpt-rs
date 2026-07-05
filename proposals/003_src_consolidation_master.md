@@ -834,7 +834,7 @@ Ordering: foundation first (hoists, splits), then domain crates biggest-first.
     - **T4.7** ✅ `52cafcf0`: dash_attn VortexFlow cluster (10 files) → katgpt-attn. Original "stays root" blocker dissolved once pruners/speculative/cache_prune landed in their leaves.
     - **T4.8** ⏭ DEFERRED: ~30 speculative primitives need individual dep audits; 17 files (~25K LOC) are transformer-bound per DEFER table. Genuine separate-session scope.
     - **GOAT gate G3 PASS**: workspace `cargo check` clean on default / all-features / no-default-features. Per-crate lib tests pass (katgpt-attn 150/150, katgpt-core 1435/1435, katgpt-sparse 39/39, katgpt-spectral 100/100, katgpt-pruners 213/213, katgpt-speculative 146/146). bench_256_adaptive_k_goat 1/1 PASS.
-  **Final src/ state**: transformer.rs linchpin + retained forward-glue (gdn2/hla/dash_attn composition + tests, inference_router/backend, gpu/ane_backend, attn_match_adaptive_cot, sp_kv_forward_mod, types) + DEFER items (benchmark/, plot.rs, sleep/, dllm.rs, dense_mesh/node_transformer, speculative/{17 transformer-bound files}, pruners/bomber/{19 files}, data_probe/, domino_lora). Each DEFER carries a documented blocker + unblock condition in Plan 383. **Phase 14 (Plan 384, 2026-07-05)** subsequently moved `distill/trd` + `vocab_channel_pruner` out (blockers dissolved by Phase 12 T4.4/T4.5) — see Phase 14 entry below.
+  **Final src/ state**: transformer.rs linchpin + retained forward-glue (gdn2/hla/dash_attn composition + tests, inference_router/backend, gpu/ane_backend, attn_match_adaptive_cot, sp_kv_forward_mod, types) + DEFER items (benchmark/, plot.rs, sleep/, dllm.rs, speculative/{17 transformer-bound files}, pruners/bomber/{19 files}, data_probe/, domino_lora). Each DEFER carries a documented blocker + unblock condition in Plan 383. **Phase 14 (Plan 384, 2026-07-05)** subsequently moved `distill/trd` + `vocab_channel_pruner` out (blockers dissolved by Phase 12 T4.4/T4.5) — see Phase 14 entry below. **Phase 15 (Plan 385, 2026-07-05)** broke the `forward`-linchpin cycle by extracting the forward trio + helpers to katgpt-forward, enabling `dense_mesh/node_transformer` to move out too — see Phase 15 entry below.
 - [x] **Phase 13 — commit + record.** Commit on `develop` with `refactor:`
   prefix per phase. Update this proposal status to **done** at Phase 12. **DONE 2026-07-05**
   — Plan 383 is the Phase 13 record; this proposal now reflects Phase 12 as complete with
@@ -874,6 +874,60 @@ Ordering: foundation first (hoists, splits), then domain crates biggest-first.
     end-to-end through the re-export path.
   - See `.plans/384_unblocked_followups_trd_vocab.md` for the full task list
     + verification matrix.
+
+- [x] **Phase 15 — Plan 385 forward-extract + dense_mesh/node_transformer move.**
+  The next Phase 12 DEFER re-audit candidate was `dense_mesh/node_transformer.rs`
+  (334 LOC), whose documented blocker was `crate::transformer::forward`. Re-audit
+  confirmed the blocker was REAL but TRIVIALLY BREAKABLE: `forward` itself,
+  plus its private dispatchers `forward_base` / `forward_coda`, plus the helpers
+  `attention_head` / `standard_lm_head` / `clustered_lm_head` /
+  `select_topk_indices*` / `cluster_map_*`, depend ONLY on `katgpt-core` +
+  `katgpt-pruners` + `katgpt-transformer` (every `crate::types::*` /
+  `crate::pruners::*` reference is a leaf re-export). Per user hint
+  ("feel free to create new primitive or shared crate if it fix cyclic redundant"),
+  the cycle was broken by extracting the trio + helpers into `katgpt-forward`
+  (which already depends on all three leaves). **DONE 2026-07-05.**
+  - **`forward` trio + helpers** (~1063 LOC) → `crates/katgpt-forward/src/forward.rs`.
+    All functions became `pub` (they were `fn` private in root) so root's
+    remaining forward variants (`forward_with_domain_latent`, `forward_decode_stage`,
+    `forward_draft`, `forward_verify`, `generate_with_prefill`,
+    `generate_with_collapse_detection`) can call them via `pub use katgpt_forward::*`.
+    The helpers (`attention_head`, `standard_lm_head`, `clustered_lm_head`,
+    `select_topk_indices*`, `cluster_map_*`) are also `pub` for the same reason.
+  - **`dense_mesh/node_transformer.rs`** (334 LOC) →
+    `crates/katgpt-forward/src/dense_mesh_node_transformer.rs`. Imports rewritten
+    (`crate::transformer::forward` → `crate::forward::forward` natively,
+    `crate::transformer::ForwardContext` → `crate::ForwardContext` natively,
+    `crate::transformer::{MultiLayerKVCache, TransformerWeights}` → `katgpt_transformer::`,
+    `crate::types::Config` / `Rng` → `katgpt_core::types::`,
+    `super::traits::DenseNode` / `super::types::*` → `katgpt_transformer::dense_mesh::`).
+    Root re-exports via `pub use katgpt_forward::TransformerNode` (cfg-gated on
+    `dense_mesh`).
+  - **Features added in katgpt-forward Cargo.toml**: `domain_latent`,
+    `kog_cpu_fusion`, `dense_mesh` (all tracking flags forwarding to the right
+    leaf). Two existing features corrected: `coda_fusion` now also forwards to
+    `katgpt-core/coda_fusion` (so `katgpt_core::coda::*` resolves); `wall_attention`
+    now also forwards to `katgpt-core/wall_attention` (so `Config.wall_config`
+    field is present).
+  - **Features updated in root Cargo.toml**: `domain_latent`, `kog_cpu_fusion`,
+    `dense_mesh` now forward to `katgpt-forward` (in addition to their existing
+    leaf targets).
+  - **GOAT gate G3 PASS**: workspace `cargo check` clean on default /
+    all-features / no-default-features. katgpt-forward lib tests 12/12 with
+    --all-features (8 hla_forward + 4 dense_mesh_node_transformer). Root lib
+    tests 769/769 default, 1249/1249 --all-features (4 fewer than pre-Plan-385
+    — the dense_mesh tests moved with the file). dense_mesh_goat_gates 5/5
+    PASS via re-export. prof_dense_mesh 5/5 PASS via re-export.
+    transformer:: 80/80 PASS.
+  - See `.plans/385_dense_mesh_node_transformer_unblock_via_forward_extract.md`
+    for the full task list + verification matrix.
+  - **Lesson (R296-class):** "transformer-bound" classifications MUST be
+    line-range-audited against the actual leaf crate dependencies, not just
+    the `crate::*` prefix. `forward`'s only `crate::` references are
+    `crate::types::*` and `crate::pruners::*` — both leaf re-exports. The
+    function appeared unmovable because it was the "linchpin" but was in
+    fact fully leaf-dependent. Same lesson generalizes to other "linchpin"
+    functions: grep the body, not the signature.
 
 ## Risks and mitigations
 
@@ -921,8 +975,10 @@ Ordering: foundation first (hoists, splits), then domain crates biggest-first.
 can't move yet). `main.rs` deleted in Phase 12. Every domain gets one stack
 crate. Three new domain stacks beyond 001/002: `katgpt-band` (Plan 265 cluster),
 `katgpt-claim`, `katgpt-sparse`, plus `katgpt-proof-cert` (Phase 12). Losers
-exile to `katgpt-deprecated`. 14 phases (Phase 12 complete 2026-07-05;
+exile to `katgpt-deprecated`. 15 phases (Phase 12 complete 2026-07-05;
 Phase 14 = Plan 384 follow-up moving `distill/trd` + `vocab_channel_pruner`
-to their now-unblocked leaf homes; T4.8 speculative-primitives follow-up
-documented in Plan 383). Foundation moves first, biggest-payoff attention
-stack second. Supersedes 001 and 002.
+to their now-unblocked leaf homes; Phase 15 = Plan 385 breaks the
+`forward`-linchpin cycle by extracting the forward trio to katgpt-forward,
+then moves `dense_mesh/node_transformer` to katgpt-forward too; T4.8
+speculative-primitives follow-up documented in Plan 383). Foundation moves
+first, biggest-payoff attention stack second. Supersedes 001 and 002.

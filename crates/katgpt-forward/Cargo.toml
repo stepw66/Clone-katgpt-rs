@@ -55,7 +55,9 @@ substrate_gate = ["katgpt-pruners/substrate_gate", "sparse_mlp"]
 delta_routing = ["katgpt-transformer/delta_routing"]
 
 # CODA fused kernels: partial RMS accumulation buffer (Plan 103).
-coda_fusion = []
+# Plan 385: also forwards to katgpt-core so `katgpt_core::coda::*` (used by
+# forward_coda) compiles when the feature is enabled.
+coda_fusion = ["katgpt-core/coda_fusion"]
 
 # MLS Multi-Layer Sum aggregation (Plan 104).
 mls_aggregate = []
@@ -70,7 +72,32 @@ tf_loop = []
 hydra_budget = ["katgpt-pruners/hydra_budget"]
 
 # Wall Attention: per-head prefix sum state (Plan 173).
-wall_attention = ["katgpt-transformer/wall_attention"]
+# Plan 385: also forwards to katgpt-core so `Config.wall_config` field (gated
+# in katgpt-types via katgpt-core) compiles when the feature is enabled —
+# forward_base/forward_coda read `config.wall_config` behind
+# `#[cfg(feature = "wall_attention")]`.
+wall_attention = ["katgpt-transformer/wall_attention", "katgpt-core/wall_attention"]
 
 # TurboQuant incremental dequant reset alias (back-compat for reset_tq_dequant).
 turboquant = []
+
+# ── Plan 385 (2026-07-05): features consumed by the extracted forward trio ──
+# (`forward`, `forward_base`, `forward_coda` moved from root `src/transformer.rs`).
+# Each is a tracking flag here — it gates a cfg block in `src/forward.rs`.
+
+# Free Transformer mid-layer domain conditioning (Plan 038). Gates the
+# `domain_latent: Option<&DomainLatent>` parameter of forward_base/forward_coda
+# AND the mid-layer K/V injection block.
+domain_latent = ["katgpt-core/domain_latent"]
+
+# Kog AI monokernel CPU fusion — RMSNorm gamma folding + QKV interleaving
+# (Plan 160). Gates the `types::rmsnorm_with_gamma` branch in forward_base/coda
+# AND the `attn_qkv_fused` fast path. Forwards to katgpt-transformer so the
+# `attn_norm_gamma` / `mlp_norm_gamma` / `attn_qkv_fused` weight fields are present.
+kog_cpu_fusion = ["katgpt-transformer/kog_cpu_fusion"]
+
+# DenseMesh latent node network (Plan 266, Plan 385 T6). Gates the
+# `dense_mesh_node_transformer` module which consumes
+# `katgpt_transformer::dense_mesh::{traits::DenseNode, types::*}`.
+# Forwarded to katgpt-transformer so the substrate compiles.
+dense_mesh = ["katgpt-transformer/dense_mesh"]
