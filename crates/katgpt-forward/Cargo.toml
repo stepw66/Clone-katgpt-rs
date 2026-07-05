@@ -226,7 +226,19 @@ dllm = []
 
 # RCD (Residual-Conditioned Diffusion) injection fields in `D2fContext`.
 # Forwards to katgpt-core so the gated struct fields + reset impl resolve.
+# Plan 402 (2026-07-06): also gates `BidirectionalContext.rcd_residual_embeddings` /
+# `.rcd_active` fields in the moved `forward_positions` module.
 rcd_residual = ["katgpt-core/rcd_residual"]
+
+# D2F 3-State Reuse warm-start fields in `BidirectionalContext`
+# (`tsr_warm_start_embeddings` / `tsr_active`). Empty tracking flag — root
+# forwards its `d2f_3sr_warm_start` feature to this crate so the cfg-gated
+# struct fields + the cfg-gated embedding-override branch in
+# `forward_bidirectional_positions_into` resolve when the root feature is on.
+# Note: this feature transitively enables `rcd_residual` at the root level
+# (see root's feature definition), so the `rcd_active` fallback branch is
+# always available when this is on.
+d2f_3sr_warm_start = []
 
 # ── Plan 399 (2026-07-05): features consumed by the moved d2f wrapper cluster ──
 # (`d2f.rs`, `d2f_verifier.rs`, `diffusion_sampler.rs` moved from root

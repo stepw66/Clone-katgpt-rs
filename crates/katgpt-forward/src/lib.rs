@@ -634,6 +634,25 @@ pub mod forward_set_causal;
 #[cfg(feature = "set_diffusion")]
 pub use forward_set_causal::forward_set_causal_positions;
 
+// ── Plan 402 (2026-07-06): forward-positions cluster ──
+// (`BidirectionalContext`, `forward_bidirectional_positions`,
+// `forward_bidirectional_positions_into`, `attention_forward_safe` allocating
+// wrapper, `forward_block_causal_positions` moved from root `src/dllm.rs`).
+// Gated `dllm` because the module depends on `attention_forward_safe_into`
+// from `d2f_context` (which is `dllm`-gated). Root re-exports these so every
+// historical `crate::dllm::*` import path continues to resolve.
+//
+// The struct fields are `pub` because root's `denoise_loop_rcd` /
+// `denoise_loop_rcd_3sr` (which stay in root) write directly to the
+// cfg-gated `rcd_residual_embeddings` / `tsr_warm_start_embeddings` buffers.
+#[cfg(feature = "dllm")]
+pub mod forward_positions;
+#[cfg(feature = "dllm")]
+pub use forward_positions::{
+    attention_forward_safe, forward_bidirectional_positions, forward_bidirectional_positions_into,
+    forward_block_causal_positions, BidirectionalContext,
+};
+
 // ── Plan 401 (2026-07-06): set_diffusion.rs relocation ──
 // The full set-diffusion inference decoder + 23 PURE inference tests moved
 // from root `src/speculative/set_diffusion.rs`. Root's copy is now a thin
