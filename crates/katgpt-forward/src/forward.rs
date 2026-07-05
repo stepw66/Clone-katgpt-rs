@@ -42,6 +42,10 @@ use katgpt_core::types::{Config, matmul, matmul_parallel};
 #[cfg(not(feature = "kog_cpu_fusion"))]
 use katgpt_core::types::rmsnorm;
 use katgpt_transformer::{MultiLayerKVCache, TransformerWeights};
+// `DecodeStage` is only used by `forward_decode_stage` (gated `decode_specialize`).
+// Gate the import to avoid the unused warning under default features.
+#[cfg(feature = "decode_specialize")]
+use katgpt_transformer::DecodeStage;
 
 use crate::ForwardContext;
 
@@ -1094,4 +1098,109 @@ pub fn forward_coda<'a>(
     }
 
     &mut ctx.logits
+}
+
+// ── Stage-specialized forward pass (Plan 102: TileRT pipeline) ──────────
+// Moved from root `src/transformer.rs` (Plan 393, 2026-07-05). These three
+// functions dispatch to `forward_base` (which lives in this module) based on
+// the `DecodeStage`. Root re-exports `forward_decode_stage` so
+// `crate::transformer::forward_decode_stage` call sites continue to resolve.
+//
+// `forward_draft` / `forward_verify` are private helpers (only
+// `forward_decode_stage` calls them); they travel with the dispatcher because
+// the match arms reference them directly.
+
+/// Stage-specialized forward pass (Plan 102: TileRT pipeline).
+///
+/// `Draft` stage: skips screening pruner, reduces KV cache writes for positions beyond draft length.
+/// `Verify` stage: exact attention with full KV write.
+/// `Prefill` and `Sample` fall through to standard `forward()`.
+#[cfg(feature = "decode_specialize")]
+#[allow(clippy::too_many_arguments)]
+pub fn forward_decode_stage<'a>(
+    ctx: &'a mut ForwardContext,
+    weights: &TransformerWeights,
+    cache: &mut MultiLayerKVCache,
+    token: usize,
+    pos: usize,
+    config: &Config,
+    stage: DecodeStage,
+) -> &'a mut [f32] {
+    cache.advance_pos(pos);
+    match stage {
+        DecodeStage::Draft => forward_draft(ctx, weights, cache, token, pos, config),
+        DecodeStage::Verify => forward_verify(ctx, weights, cache, token, pos, config),
+        DecodeStage::Prefill | DecodeStage::Sample => {
+            // Fall through to standard forward — prefill/sample don't benefit from specialization
+            #[cfg(not(feature = "domain_latent"))]
+            {
+                forward_base(ctx, weights, cache, token, pos, config, None)
+            }
+            #[cfg(feature = "domain_latent")]
+            {
+                forward_base(ctx, weights, cache, token, pos, config, None, None)
+            }
+        }
+        // BeliefDraft falls through to standard forward for now — the BeliefDrafter
+        // operates at the speculative layer (draft() method), not the transformer
+        // forward layer. This variant exists for stage-aware profiling and routing.
+        DecodeStage::BeliefDraft => {
+            #[cfg(not(feature = "domain_latent"))]
+            {
+                forward_base(ctx, weights, cache, token, pos, config, None)
+            }
+            #[cfg(feature = "domain_latent")]
+            {
+                forward_base(ctx, weights, cache, token, pos, config, None, None)
+            }
+        }
+    }
+}
+
+/// Draft-optimized forward: same as forward_base but marks the stage for profiling.
+/// Currently identical to forward() — the optimization surface is skipping screening
+/// and reducing KV writes, which requires deeper integration with the speculative step.
+#[cfg(feature = "decode_specialize")]
+#[allow(clippy::too_many_arguments)]
+fn forward_draft<'a>(
+    ctx: &'a mut ForwardContext,
+    weights: &TransformerWeights,
+    cache: &mut MultiLayerKVCache,
+    token: usize,
+    pos: usize,
+    config: &Config,
+) -> &'a mut [f32] {
+    // Draft path: identical to forward_base for correctness.
+    // Future optimization: skip screening, approximate attention, reduced KV writes.
+    #[cfg(not(feature = "domain_latent"))]
+    {
+        forward_base(ctx, weights, cache, token, pos, config, None)
+    }
+    #[cfg(feature = "domain_latent")]
+    {
+        forward_base(ctx, weights, cache, token, pos, config, None, None)
+    }
+}
+
+/// Verify-optimized forward: exact attention with full KV write.
+#[cfg(feature = "decode_specialize")]
+#[allow(clippy::too_many_arguments)]
+fn forward_verify<'a>(
+    ctx: &'a mut ForwardContext,
+    weights: &TransformerWeights,
+    cache: &mut MultiLayerKVCache,
+    token: usize,
+    pos: usize,
+    config: &Config,
+) -> &'a mut [f32] {
+    // Verify path: identical to forward_base for correctness.
+    // This is the "exact" path — full KV write, no approximations.
+    #[cfg(not(feature = "domain_latent"))]
+    {
+        forward_base(ctx, weights, cache, token, pos, config, None)
+    }
+    #[cfg(feature = "domain_latent")]
+    {
+        forward_base(ctx, weights, cache, token, pos, config, None, None)
+    }
 }

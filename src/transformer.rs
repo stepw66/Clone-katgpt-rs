@@ -81,13 +81,17 @@ pub use katgpt_forward::{DepthRouteIndicesArgs, depth_route_with_indices};
 // katgpt-forward. `forward` is re-exported as pub for historical
 // `katgpt_rs::transformer::forward` callers. `forward_base` / `forward_coda`
 // are imported privately because root's remaining forward variants
-// (`forward_with_domain_latent`, `forward_decode_stage`, `forward_draft`,
-// `forward_verify`, `generate_with_prefill`, `generate_with_collapse_detection`)
-// call them. The helpers (`attention_head`, `standard_lm_head`,
-// `clustered_lm_head`, `select_topk_indices*`, `cluster_map_*`) are also
-// imported because they're called by the remaining forward variants AND by
-// tests inside this file. Public re-exports preserve the historical API
-// surface (`katgpt_rs::transformer::select_topk_indices`, etc.).
+// (`forward_with_domain_latent`, `generate_with_prefill`,
+// `generate_with_collapse_detection`) call them. The helpers (`attention_head`,
+// `standard_lm_head`, `clustered_lm_head`, `select_topk_indices*`,
+// `cluster_map_*`) are also imported because they're called by the remaining
+// forward variants AND by tests inside this file. Public re-exports preserve
+// the historical API surface (`katgpt_rs::transformer::select_topk_indices`,
+// etc.).
+//
+// Plan 393 (2026-07-05): `forward_decode_stage` + `forward_draft` +
+// `forward_verify` also moved to katgpt-forward (they only dispatch to
+// `forward_base`). Re-exported below at the `forward_decode_stage` site.
 #[cfg(feature = "coda_fusion")]
 pub use katgpt_forward::forward_coda;
 pub use katgpt_forward::{
@@ -212,100 +216,14 @@ pub fn forward_with_domain_latent<'a>(
     }
 }
 
-/// Stage-specialized forward pass (Plan 102: TileRT pipeline).
-///
-/// `Draft` stage: skips screening pruner, reduces KV cache writes for positions beyond draft length.
-/// `Verify` stage: exact attention with full KV write.
-/// `Prefill` and `Sample` fall through to standard `forward()`.
+// ── Stage-specialized forward pass (moved to katgpt-forward, Plan 393) ──
+// `forward_decode_stage` + `forward_draft` + `forward_verify` moved to
+// `katgpt_forward::forward` because they only dispatch to `forward_base`
+// (which has lived there since Plan 385). Re-exported here so
+// `crate::transformer::forward_decode_stage` call sites continue to resolve.
 #[cfg(feature = "decode_specialize")]
-#[allow(clippy::too_many_arguments)]
-pub fn forward_decode_stage<'a>(
-    ctx: &'a mut ForwardContext,
-    weights: &TransformerWeights,
-    cache: &mut MultiLayerKVCache,
-    token: usize,
-    pos: usize,
-    config: &Config,
-    stage: DecodeStage,
-) -> &'a mut [f32] {
-    cache.advance_pos(pos);
-    match stage {
-        DecodeStage::Draft => forward_draft(ctx, weights, cache, token, pos, config),
-        DecodeStage::Verify => forward_verify(ctx, weights, cache, token, pos, config),
-        DecodeStage::Prefill | DecodeStage::Sample => {
-            // Fall through to standard forward — prefill/sample don't benefit from specialization
-            #[cfg(not(feature = "domain_latent"))]
-            {
-                forward_base(ctx, weights, cache, token, pos, config, None)
-            }
-            #[cfg(feature = "domain_latent")]
-            {
-                forward_base(ctx, weights, cache, token, pos, config, None, None)
-            }
-        }
-        // BeliefDraft falls through to standard forward for now — the BeliefDrafter
-        // operates at the speculative layer (draft() method), not the transformer
-        // forward layer. This variant exists for stage-aware profiling and routing.
-        DecodeStage::BeliefDraft => {
-            #[cfg(not(feature = "domain_latent"))]
-            {
-                forward_base(ctx, weights, cache, token, pos, config, None)
-            }
-            #[cfg(feature = "domain_latent")]
-            {
-                forward_base(ctx, weights, cache, token, pos, config, None, None)
-            }
-        }
-    }
-}
+pub use katgpt_forward::forward::forward_decode_stage;
 
-/// Draft-optimized forward: same as forward_base but marks the stage for profiling.
-/// Currently identical to forward() — the optimization surface is skipping screening
-/// and reducing KV writes, which requires deeper integration with the speculative step.
-#[cfg(feature = "decode_specialize")]
-#[allow(clippy::too_many_arguments)]
-fn forward_draft<'a>(
-    ctx: &'a mut ForwardContext,
-    weights: &TransformerWeights,
-    cache: &mut MultiLayerKVCache,
-    token: usize,
-    pos: usize,
-    config: &Config,
-) -> &'a mut [f32] {
-    // Draft path: identical to forward_base for correctness.
-    // Future optimization: skip screening, approximate attention, reduced KV writes.
-    #[cfg(not(feature = "domain_latent"))]
-    {
-        forward_base(ctx, weights, cache, token, pos, config, None)
-    }
-    #[cfg(feature = "domain_latent")]
-    {
-        forward_base(ctx, weights, cache, token, pos, config, None, None)
-    }
-}
-
-/// Verify-optimized forward: exact attention with full KV write.
-#[cfg(feature = "decode_specialize")]
-#[allow(clippy::too_many_arguments)]
-fn forward_verify<'a>(
-    ctx: &'a mut ForwardContext,
-    weights: &TransformerWeights,
-    cache: &mut MultiLayerKVCache,
-    token: usize,
-    pos: usize,
-    config: &Config,
-) -> &'a mut [f32] {
-    // Verify path: identical to forward_base for correctness.
-    // This is the "exact" path — full KV write, no approximations.
-    #[cfg(not(feature = "domain_latent"))]
-    {
-        forward_base(ctx, weights, cache, token, pos, config, None)
-    }
-    #[cfg(feature = "domain_latent")]
-    {
-        forward_base(ctx, weights, cache, token, pos, config, None, None)
-    }
-}
 
 // ---------------------------------------------------------------------------
 // LT2 Looped Inference (Plan 108, Research 73)

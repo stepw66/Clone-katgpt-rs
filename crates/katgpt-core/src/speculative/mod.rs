@@ -20,8 +20,9 @@
 //!   `NoPruner`, `NoScreeningPruner`, `BinaryScreeningPruner`) — already in
 //!   [`crate::traits`] since Plan 107 Phase 0.
 //! - Composition types that need `katgpt-transformer`:
-//!   [`SpeculativeContext`], [`DDTreeBranchCache`] — these need
-//!   `ForwardContext`, `MultiLayerKVCache`, `PagedKVCache`, `forward_paged`.
+//!   [`SpeculativeContext`] (moved to `katgpt-forward` Plan 393 — composes
+//!   `ForwardContext`), [`DDTreeBranchCache`] — these need `ForwardContext`,
+//!   `MultiLayerKVCache`, `PagedKVCache`, `forward_paged`.
 //! - Consumer-crate-specific composition: `TesConfig` (needs `BanditStrategy`),
 //!   `SelfSpecConfig` (needs `D2fDecodeConfig`).
 //! - The DDTree builders (`build_dd_tree*`, `TreeBuilder`) — composition that
@@ -34,7 +35,7 @@
 //! from the consumer via `katgpt-core/<feature>` (e.g. `katgpt-core/elf_sde`
 //! gates `EarlyStopGate`).
 //!
-//! [`SpeculativeContext`]: katgpt_rs::speculative::SpeculativeContext
+//! [`SpeculativeContext`]: katgpt_forward::SpeculativeContext
 //! [`DDTreeBranchCache`]: katgpt_rs::speculative::DDTreeBranchCache
 
 pub mod sampling;

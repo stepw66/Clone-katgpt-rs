@@ -101,3 +101,11 @@ kog_cpu_fusion = ["katgpt-transformer/kog_cpu_fusion"]
 # `katgpt_transformer::dense_mesh::{traits::DenseNode, types::*}`.
 # Forwarded to katgpt-transformer so the substrate compiles.
 dense_mesh = ["katgpt-transformer/dense_mesh"]
+
+# Stage-specialized decode paths for speculative decoding (Plan 102 TileRT).
+# Gates `forward_decode_stage` + `forward_draft` + `forward_verify` (moved
+# from root `src/transformer.rs` Plan 393). Forwarded to katgpt-transformer
+# so `DecodeStage` + the stage-aware layer-skip helper compile, and to
+# katgpt-pruners so `should_skip_layer_stage` compiles (matches root's
+# forwarding in its `decode_specialize` feature).
+decode_specialize = ["katgpt-transformer/decode_specialize", "katgpt-pruners/decode_specialize"]

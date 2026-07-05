@@ -452,3 +452,13 @@ pub use forward::forward_coda;
 pub mod dense_mesh_node_transformer;
 #[cfg(feature = "dense_mesh")]
 pub use dense_mesh_node_transformer::TransformerNode;
+
+// Speculative-decoding composition context (Plan 393, 2026-07-05).
+// `SpeculativeContext` moved from root `src/speculative/types.rs`. Lives here
+// (not in katgpt-speculative) because it composes `ForwardContext` and
+// katgpt-forward already depends on katgpt-speculative — placing it in the
+// leaf would create a cycle. Root re-exports via
+// `pub use katgpt_forward::SpeculativeContext;` so all historical
+// `crate::speculative::types::SpeculativeContext` import paths resolve.
+pub mod speculative_context;
+pub use speculative_context::SpeculativeContext;

@@ -3,11 +3,13 @@
 //! Origin: moved verbatim from `katgpt-rs/src/speculative/types.rs` (2026-06-28).
 //! The pure-substrate half lives here (data types + configs + algorithms that
 //! depend only on `crate::types::Config` + `crate::traits::*` + std). The
-//! composition half (`SpeculativeContext`, `DDTreeBranchCache` — which need
-//! `katgpt-transformer::{ForwardContext, MultiLayerKVCache, PagedKVCache,
-//! forward_paged}`) and the root-only composition half (`TesConfig` — which
-//! needs `BanditStrategy`; `SelfSpecConfig` — which needs `D2fDecodeConfig`)
-//! stay in their consumer crates as thin shims that re-export from here.
+//! composition half (`SpeculativeContext` — moved to `katgpt-forward` Plan 393
+//! because it composes `ForwardContext` which also lives there;
+//! `DDTreeBranchCache` — which needs `katgpt-transformer::{ForwardContext,
+//! PagedKVCache, forward_paged}`) and the root-only composition half
+//! (`TesConfig` — which needs `BanditStrategy`; `SelfSpecConfig` — which needs
+//! `D2fDecodeConfig`) stay in their consumer crates as thin shims that
+//! re-export from here.
 //!
 //! The companion traits (`ConstraintPruner`, `ScreeningPruner`, `DominoPruner`,
 //! `NoPruner`, `NoScreeningPruner`, `BinaryScreeningPruner`) live in
