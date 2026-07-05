@@ -405,7 +405,7 @@ fn simd_cumprodsum_channel_group(
     n_channels_in_group: usize,
     seq_len: usize,
 ) {
-    use core::arch::x86_256;
+    use core::arch::x86_64 as x86_256;
 
     debug_assert_eq!(n_channels_in_group, 8);
 
