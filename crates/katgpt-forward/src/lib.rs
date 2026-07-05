@@ -591,3 +591,28 @@ pub use diffusion_sampler::{
     DiffusionSampler, SamplerDecision, SamplerFeatures, SamplerTrajectory, SamplerVariant,
     collect_trajectories,
 };
+
+// ── Plan 400 (2026-07-05): FlashAR cluster ──
+// `flashar_anchor.rs` and `flashar_consensus.rs` moved from root
+// `src/speculative/`. Root's copies are now thin re-export shims. All 10
+// consensus tests + 6 of 8 anchor tests moved with the production files; the
+// 2 training-coupled anchor tests stayed in root (they call
+// `crate::dllm::{train_mini_dllm, generate_pattern_dataset}` which is training
+// code).
+//
+// Gating mirrors root: both files consume `crate::d2f::*` (dllm-gated), so
+// they require `dllm` plus their own tracking flag. Root's `flashar_anchor`
+// pulls only `dllm`; root's `flashar_consensus` pulls `tri_mode` + `plasma_path`
+// (which transitively pulls `dllm`).
+#[cfg(all(feature = "dllm", feature = "flashar_anchor"))]
+pub mod flashar_anchor;
+#[cfg(all(feature = "dllm", feature = "flashar_anchor"))]
+pub use flashar_anchor::{AnchorConfig, AnchorFillResult, anchor_then_fill};
+
+#[cfg(all(feature = "dllm", feature = "flashar_consensus"))]
+pub mod flashar_consensus;
+#[cfg(all(feature = "dllm", feature = "flashar_consensus"))]
+pub use flashar_consensus::{
+    ConsensusConfig, ConsensusResult, DualPathResult, FlashARConsensusVerifier, MAX_DRAFT_WIDTH,
+    ThermalPath, compute_ternary_consensus, dual_path_draft, route_thermal_paths,
+};

@@ -246,3 +246,27 @@ tri_mode = []
 # BlockConvergence. Empty tracking flag — all consumed symbols resolve
 # through katgpt_core + this crate.
 dmax_spd = []
+
+# ── Plan 400 (2026-07-05): features consumed by the moved flashar cluster ──
+# (`flashar_anchor.rs`, `flashar_consensus.rs` moved from root
+# `src/speculative/`). Each is a tracking flag here — it gates a cfg block in
+# one of those files. Root forwards its feature to this crate so the cfg
+# blocks resolve when the root feature is enabled.
+
+# FlashAR strided anchor-then-fill D2F (Plan 166 stretch). Gates the
+# `pub mod flashar_anchor` declaration + re-exports. Empty tracking flag —
+# all consumed symbols resolve through katgpt_core + this crate.
+flashar_anchor = []
+
+# FlashAR Consensus Tri-Mode with Ternary Thermal Paths (Plan 166). Gates
+# the `pub mod flashar_consensus` declaration + re-exports. Empty tracking
+# flag — all consumed symbols resolve through katgpt_core + this crate
+# (the optional `ternary_fusion_gate` fn has its own `plasma_path` cfg below).
+flashar_consensus = []
+
+# Bit-plane ternary SIMD matvec — multiplication-free CPU inference (Plan 148).
+# Plan 400: forwarded to katgpt-forward so the moved flashar_consensus.rs's
+# `#[cfg(feature = "plasma_path")]` block (which uses
+# `katgpt_core::{TernaryWeights, simd_ternary_matvec}`) compiles when the root
+# feature is enabled. Forwards to katgpt-core so those symbols resolve.
+plasma_path = ["katgpt-core/plasma_path"]
