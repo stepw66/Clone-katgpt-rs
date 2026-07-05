@@ -214,3 +214,16 @@ thinking_prune = []
 # GdsdPruner + GdsdConfig + identity_advantage resolve (they are gated
 # `gdsd_distill` in the leaf).
 gdsd_distill = ["katgpt-pruners/gdsd_distill"]
+
+# ── Plan 398 (2026-07-05): features consumed by the d2f substrate ──
+# (`d2f_context.rs` extracted from root `src/dllm.rs`). `D2fContext` has 3
+# fields gated behind `rcd_residual` (Plan 258), and the whole module is
+# gated `dllm` to mirror root. Root forwards its features to this crate.
+
+# D2F inference substrate module gate. Empty tracking flag — gates the
+# `pub mod d2f_context` declaration + re-exports in lib.rs.
+dllm = []
+
+# RCD (Residual-Conditioned Diffusion) injection fields in `D2fContext`.
+# Forwards to katgpt-core so the gated struct fields + reset impl resolve.
+rcd_residual = ["katgpt-core/rcd_residual"]

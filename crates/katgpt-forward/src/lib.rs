@@ -549,3 +549,20 @@ pub mod dd_tree;
 pub use dd_tree::build_dd_tree_gdsd;
 #[cfg(feature = "thinking_prune")]
 pub use dd_tree::build_dd_tree_screened_with_schedule;
+
+// D2F inference substrate (Plan 398, 2026-07-05). Extracted from root
+// `src/dllm.rs` to dissolve the d2f cluster blocker. Hosts `D2fContext`,
+// `forward_block_causal_with`, `attention_forward_safe_into`, and
+// `denoising_accuracy`. Training code stays in root. Root re-exports via
+// `pub use katgpt_forward::d2f_context::{...}` so all historical
+// `katgpt_rs::dllm::{D2fContext, forward_block_causal_with, ...}` paths resolve.
+//
+// `attention_forward_safe_into` is `pub` (not `pub(crate)`) because root's
+// `dllm.rs` training code re-imports it via `use katgpt_forward::...` to
+// preserve a single source of truth across its 5 callers.
+#[cfg(feature = "dllm")]
+pub mod d2f_context;
+#[cfg(feature = "dllm")]
+pub use d2f_context::{
+    D2fContext, attention_forward_safe_into, denoising_accuracy, forward_block_causal_with,
+};
