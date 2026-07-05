@@ -566,3 +566,28 @@ pub mod d2f_context;
 pub use d2f_context::{
     D2fContext, attention_forward_safe_into, denoising_accuracy, forward_block_causal_with,
 };
+
+// ── Plan 399 (2026-07-05): D2F wrapper cluster ──
+// `d2f.rs`, `d2f_verifier.rs`, `diffusion_sampler.rs` moved from root
+// `src/speculative/`. Root's copies are now thin re-export shims. The 8
+// training-dependent tests stayed in root (they call
+// `crate::dllm::{train_mini_dllm, generate_pattern_dataset}` which is
+// training code); the 39 inference-only tests moved with the files.
+//
+// Gating mirrors root: `d2f` is `dllm`-gated (base inference pipeline),
+// `d2f_verifier` and `diffusion_sampler` are additionally `tri_mode`-gated.
+#[cfg(feature = "dllm")]
+pub mod d2f;
+
+#[cfg(all(feature = "dllm", feature = "tri_mode"))]
+pub mod d2f_verifier;
+#[cfg(all(feature = "dllm", feature = "tri_mode"))]
+pub use d2f_verifier::D2fDrafterVerifier;
+
+#[cfg(all(feature = "dllm", feature = "tri_mode"))]
+pub mod diffusion_sampler;
+#[cfg(all(feature = "dllm", feature = "tri_mode"))]
+pub use diffusion_sampler::{
+    DiffusionSampler, SamplerDecision, SamplerFeatures, SamplerTrajectory, SamplerVariant,
+    collect_trajectories,
+};

@@ -227,3 +227,22 @@ dllm = []
 # RCD (Residual-Conditioned Diffusion) injection fields in `D2fContext`.
 # Forwards to katgpt-core so the gated struct fields + reset impl resolve.
 rcd_residual = ["katgpt-core/rcd_residual"]
+
+# ── Plan 399 (2026-07-05): features consumed by the moved d2f wrapper cluster ──
+# (`d2f.rs`, `d2f_verifier.rs`, `diffusion_sampler.rs` moved from root
+# `src/speculative/`). Each is a tracking flag here — it gates a cfg block in
+# one of those files. Root forwards its feature to this crate so the cfg
+# blocks resolve when the root feature is enabled.
+
+# Tri-Mode inference — AR + Diffusion + Self-Speculation (Plan 089).
+# Gates `pub mod d2f_verifier` + `pub mod diffusion_sampler` + the tri_mode-
+# gated soft-decode variants in `d2f.rs`. Empty tracking flag — the gate
+# only controls module registration + a handful of cfg blocks.
+tri_mode = []
+
+# DMax Soft Parallel Decode — hybrid embedding D2F enhancement (Plan 109).
+# Gates ~10 functions in `d2f.rs`: SoftDecodeConfig, HybridEmbedding,
+# d2f_decode_block_soft, check_block_convergence, contiguous_prefix_promote,
+# BlockConvergence. Empty tracking flag — all consumed symbols resolve
+# through katgpt_core + this crate.
+dmax_spd = []
