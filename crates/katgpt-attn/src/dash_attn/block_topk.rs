@@ -545,7 +545,7 @@ fn argtopk_simd(scores: &[f32], k: usize, indices: &mut Vec<usize>) {
 /// finding the insertion point via SIMD-parallel comparison.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
-#[inline(always)]
+#[inline]
 unsafe fn insert_sorted_simd_avx2(
     heap_vals: &mut [f32; 16],
     heap_idxs: &mut [usize; 16],
