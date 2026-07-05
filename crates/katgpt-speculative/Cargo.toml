@@ -246,6 +246,11 @@ directional_credit = []
 # enables blake3 (and_or_builder's compute_hash uses it directly).
 and_or_dtree = ["katgpt-core/and_or_dtree", "dep:blake3"]
 
+# ── Plan 390 (2026-07-05): prefill substrate tracking flags. ──
+# MaxSim late-interaction scoring — gates `block_score_maxsim` in prefill.rs.
+# Forwards to katgpt-core/maxsim so `katgpt_core::simd::maxsim_score` resolves.
+maxsim = ["katgpt-core/maxsim"]
+
 [dev-dependencies]
 # katgpt-pruners is a DEV-ONLY dep here (echo_env's GOAT test imports BanditPruner
 # + BanditStrategy). Dev-deps do NOT propagate to dependents, so this does NOT

@@ -205,6 +205,17 @@ pub mod echo_env;
 #[cfg(feature = "thinking_cot")]
 pub mod thinking_controller;
 
+// ── Plan 390 (2026-07-05): speculative Phase 5 — prefill substrate unblock. ──
+// Prefill pure substrate (PrefillScorer trait + RandomScorer/UniformScorer +
+// pure compression/selection helpers + orchestrators). The forward-coupled
+// impls (AttentionScorer, BlockAttentionScorer) and the entmax-coupled
+// block_select_entmax stay in root's src/speculative/prefill.rs.
+// Always-on (not feature-gated) because the trait signature uses
+// TransformerWeights (always-available) and the substrate functions are pure.
+// Root re-exports via `pub use prefill::*` so historical
+// `katgpt_rs::speculative::prefill::*` paths resolve.
+pub mod prefill;
+
 // ── Plan 389 (2026-07-05): speculative Phase 4 — parallel_probe unblock. ──
 // SpeculativeVerifier trait — hosted here (not katgpt-core) because the
 // signature uses TransformerWeights from katgpt-transformer (above katgpt-core).

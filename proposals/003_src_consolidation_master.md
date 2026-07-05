@@ -1161,6 +1161,56 @@ Ordering: foundation first (hoists, splits), then domain crates biggest-first.
     (dflash, verifier, drafter_lora, step, dd_tree remain).
   - See `.plans/389_speculative_phase4_parallel_probe.md`.
 
+- [x] **Phase 20 — Plan 390 speculative Phase 5: prefill.rs substrate extraction.**
+  - **Goal**: move the pure-substrate half of `src/speculative/prefill.rs` (1099 LOC)
+    to katgpt-speculative, applying the trait-impl split technique refined in
+    Phase 19 to a file with a clean bimodal split.
+  - **Insight**: `prefill.rs` has two clean halves. The **pure substrate**
+    (`PrefillScorer` trait + `RandomScorer`/`UniformScorer` impls + pure
+    compression/selection helpers + orchestrators) needs only
+    `TransformerWeights` + `Config` + `Rng` + `FlashPrefillConfig`/`PrefillMode`
+    (all already available in katgpt-speculative via Plan 389's mandatory
+    katgpt-transformer dep + `pub use katgpt_core::speculative::types::*`).
+    The **forward-coupled half** (`AttentionScorer`, `BlockAttentionScorer`)
+    needs `crate::transformer::forward` + `SpeculativeContext` (root-only types),
+    and `block_select_entmax` needs `crate::dash_attn::{entmax_1p5, entmax_support}`
+    (re-export of katgpt-attn's heavy `dash_attn` chain — disproportionate to
+    pull for one function). Those stay in root.
+  - **Phase 20.1 — Create leaf `prefill.rs`** (~580 LOC, 15 substrate tests):
+    - Trait: `PrefillScorer` (signature: TransformerWeights + Config + tokens).
+    - Substrate impls: `RandomScorer`, `UniformScorer`.
+    - Pure fns: `compress_prompt`, `block_select`, `block_compression_ratio`,
+      `block_select_grid`, `block_score_maxsim` (gated `maxsim`),
+      `compress_prompt_blocks`, `should_compress`.
+    - Orchestrators: `speculative_prefill`, `speculative_prefill_block`,
+      `speculative_prefill_adaptive` (compose trait + pure helpers).
+  - **Phase 20.2 — Root `prefill.rs` rewrite**: kept `AttentionScorer`,
+    `BlockAttentionScorer` (forward-coupled impls of the trait from the leaf),
+    `block_select_entmax` (gated `dash_attn`). Re-export substrate via
+    `pub use katgpt_speculative::prefill::*`. `block_score_maxsim` re-export
+    is gated `maxsim` to mirror the leaf's gating.
+  - **Phase 20.3 — Cargo.toml changes**:
+    - katgpt-speculative: added `maxsim = ["katgpt-core/maxsim"]` tracking flag
+      so `block_score_maxsim` compiles when maxsim is enabled.
+    - Root: extended `maxsim` feature to also forward `katgpt-speculative/maxsim`.
+  - **Import rewrites** (extends Phase 19 table):
+    | Root pattern | Leaf rewrite |
+    |---|---|
+    | `use crate::speculative::types::{FlashPrefillConfig, PrefillMode}` | `use katgpt_core::speculative::types::{FlashPrefillConfig, PrefillMode}` |
+    | `use crate::transformer::TransformerWeights` | `use katgpt_transformer::TransformerWeights` |
+    | `use crate::types::Config` | `use katgpt_types::Config` |
+    | `crate::types::Rng::new` | `katgpt_types::Rng::new` |
+  - **After Phase 20**, root-only speculative stays at 13 files (the file is
+    split, not deleted — root keeps the forward-coupled half).
+    Pure-substrate LOC moved: ~580. Pure-substrate tests moved: 15.
+  - **GOAT gate G3 PASS**: workspace `cargo check` clean on
+    default / all-features / no-default. katgpt-speculative lib tests
+    1054 passed (up +15). Root lib tests 431 default / 859 all-features
+    (down by exactly 15 = tests moved to leaf; expected). katgpt-pruners
+    126 passed (matches Phase 19). All GOAT integration tests pass
+    (test_133_parallel_probe_ablation 1/1, speculative_generator_goat 3/3).
+  - See `.plans/390_speculative_phase5_prefill_substrate.md`.
+
 ## Risks and mitigations
 
 | Risk | Severity | Mitigation |
@@ -1207,7 +1257,7 @@ Ordering: foundation first (hoists, splits), then domain crates biggest-first.
 can't move yet). `main.rs` deleted in Phase 12. Every domain gets one stack
 crate. Three new domain stacks beyond 001/002: `katgpt-band` (Plan 265 cluster),
 `katgpt-claim`, `katgpt-sparse`, plus `katgpt-proof-cert` (Phase 12). Losers
-exile to `katgpt-deprecated`. 19 phases (Phase 12 complete 2026-07-05;
+exile to `katgpt-deprecated`. 20 phases (Phase 12 complete 2026-07-05;
 Phase 14 = Plan 384 follow-up moving `distill/trd` + `vocab_channel_pruner`
 to their now-unblocked leaf homes; Phase 15 = Plan 385 breaks the
 `forward`-linchpin cycle by extracting the forward trio to katgpt-forward,
@@ -1224,6 +1274,10 @@ Phase 19 = Plan 389 hosts the `SpeculativeVerifier` trait in katgpt-speculative
 (can't go to katgpt-core — signature uses TransformerWeights) and moves
 `parallel_probe` (1187 LOC) out of root, shrinking the forward-cycle
 blocker from 6 → 5 files;
+Phase 20 = Plan 390 applies the trait-impl split to `prefill.rs`, moving the
+pure substrate half (~580 LOC + 15 tests) to katgpt-speculative while keeping
+the forward-coupled `AttentionScorer`/`BlockAttentionScorer` impls and the
+entmax-coupled `block_select_entmax` in root;
 T4.8 speculative-primitives
 follow-up documented in Plan 383). Foundation moves
 first, biggest-payoff attention stack second. Supersedes 001 and 002.
