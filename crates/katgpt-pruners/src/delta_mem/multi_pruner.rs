@@ -59,24 +59,31 @@ impl<P: ScreeningPruner> MultiDomainMemoryPruner<P> {
     }
 
     /// Set the current domain for the next DDTree build.
+    ///
+    /// Reuses the existing `String` allocation when possible (Issue 019 C.3 perf opt).
     pub fn set_domain(&mut self, domain: &str) {
-        self.current_domain = Some(domain.to_string());
+        match &mut self.current_domain {
+            Some(s) => {
+                s.clear();
+                s.push_str(domain);
+            }
+            None => self.current_domain = Some(domain.to_string()),
+        }
         self.ensure_domain(domain);
     }
 
     /// Get or create a domain's pruner.
     fn ensure_domain(&mut self, domain: &str) {
-        if !self.pruners.contains_key(domain) {
+        self.pruners.entry(domain.to_string()).or_insert_with(|| {
             let inner = (self.inner_factory)();
-            let pruner = MemorySteeredPruner::new(
+            MemorySteeredPruner::new(
                 inner,
                 self.default_config.clone(),
                 self.default_alpha,
                 self.default_mode,
                 self.default_granularity,
-            );
-            self.pruners.insert(domain.to_string(), pruner);
-        }
+            )
+        });
     }
 
     /// Get the current domain's pruner (mutable).

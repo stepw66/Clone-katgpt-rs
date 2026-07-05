@@ -614,7 +614,11 @@ pub enum ConvergenceSelector {
 /// This means attention kernels are UNCHANGED — they receive pre-rescaled Q and K.
 ///
 /// Only applicable to Wall-trained models (requires W_g gate projection weights).
-#[derive(Clone, Debug)]
+///
+/// The wall on/off switch lives at the parent `Config.wall_config: Option<WallConfig>`
+/// level — `None` means use RoPE/fallback, `Some(_)` means Wall is active. There is
+/// no `use_wall` field on the struct itself (the canonical design since Plan 173).
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 #[cfg(feature = "wall_attention")]
 pub struct WallConfig {
     /// Gate bias initialization value. Default 6.0 = open gate (vanilla attention behavior).
@@ -626,6 +630,11 @@ pub struct WallConfig {
     /// Use key-projected gate variant (derive gate from K projection).
     /// Preferred for zero KV cache overhead — gate is computed from key, not hidden state.
     pub use_key_projected: bool,
+    /// Gate projection dimension = n_kv_heads * head_dim.
+    /// Default 0 = compute from model dims via [`Self::with_dims`] or
+    /// [`Self::validate`]. Set explicitly only when the consumer already knows
+    /// the dim and wants to skip the derivation.
+    pub gate_proj_dim: usize,
 }
 
 #[cfg(feature = "wall_attention")]
@@ -635,6 +644,7 @@ impl Default for WallConfig {
             gate_bias: 6.0,
             gate_max: 0.87,
             use_key_projected: true,
+            gate_proj_dim: 0,
         }
     }
 }
@@ -643,6 +653,34 @@ impl Default for WallConfig {
 impl WallConfig {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Validate config consistency against model dimensions.
+    ///
+    /// Checks:
+    /// - `gate_max` is in the open interval (0, 1) — soft-clamp must produce
+    ///   finite non-degenerate log-gates.
+    /// - `gate_proj_dim` is either unset (0, meaning "derive from dims") or
+    ///   exactly `n_kv_heads * head_dim`.
+    pub fn validate(&self, n_kv_heads: usize, head_dim: usize) -> Result<(), String> {
+        if self.gate_max <= 0.0 || self.gate_max >= 1.0 {
+            return Err(format!("gate_max must be in (0, 1), got {}", self.gate_max));
+        }
+        let expected_dim = n_kv_heads * head_dim;
+        if self.gate_proj_dim != 0 && self.gate_proj_dim != expected_dim {
+            return Err(format!(
+                "gate_proj_dim ({}) must equal n_kv_heads * head_dim ({})",
+                self.gate_proj_dim, expected_dim
+            ));
+        }
+        Ok(())
+    }
+
+    /// Builder: derive `gate_proj_dim` from model dimensions.
+    /// Consumes and returns `self` for chaining.
+    pub fn with_dims(mut self, n_kv_heads: usize, head_dim: usize) -> Self {
+        self.gate_proj_dim = n_kv_heads * head_dim;
+        self
     }
 }
 
