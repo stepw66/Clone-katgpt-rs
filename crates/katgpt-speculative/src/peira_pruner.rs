@@ -34,7 +34,7 @@
 //!
 //! All code behind `#[cfg(feature = "peira_distill")]`.
 
-use super::types::ScreeningPruner;
+use katgpt_core::traits::ScreeningPruner;
 
 // ── PeiraPruner ──────────────────────────────────────────────────
 
@@ -160,7 +160,7 @@ impl<P: ScreeningPruner> ScreeningPruner for PeiraPruner<P> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::speculative::types::NoScreeningPruner;
+    use katgpt_core::traits::NoScreeningPruner;
 
     #[test]
     fn zero_alignment_attenuates_everything() {

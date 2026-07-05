@@ -13,7 +13,7 @@
 //! // Use `effective` and `lookahead` when calling build_dd_tree or TreeBuilder
 //! ```
 
-use crate::speculative::types::BudgetAdaptation;
+use katgpt_core::speculative::types::BudgetAdaptation;
 
 /// Compute effective tree budget for the current prompt.
 ///
@@ -38,7 +38,7 @@ pub fn effective_tree_budget(
 ) -> usize {
     #[cfg(feature = "budget_adaptation")]
     {
-        crate::speculative::budget::adaptive_tree_budget(base_budget, compression_ratio, mode)
+        crate::budget::adaptive_tree_budget(base_budget, compression_ratio, mode)
     }
     #[cfg(not(feature = "budget_adaptation"))]
     {

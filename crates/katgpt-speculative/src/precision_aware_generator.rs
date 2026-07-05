@@ -64,7 +64,7 @@ impl<G: SpeculativeGenerator> SpeculativeGenerator for PrecisionAwareGenerator<G
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::speculative::spec_generator::{MarginalTokenGenerator, TokenCondition};
+    use crate::spec_generator::{MarginalTokenGenerator, TokenCondition};
     use katgpt_core::SpeculativeGenerator;
 
     #[test]

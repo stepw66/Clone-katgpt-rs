@@ -11,9 +11,9 @@
 //! degradation the same way the ANE `MLComputePlan` catches silent CPU fallback.
 
 #[cfg(test)]
-use super::types::NoPruner;
-use super::types::{ConstraintPruner, NoScreeningPruner, ScreeningPruner};
-use crate::types::Config;
+use katgpt_core::traits::NoPruner;
+use katgpt_core::traits::{ConstraintPruner, NoScreeningPruner, ScreeningPruner};
+use katgpt_types::Config;
 use std::time::Instant;
 
 /// Residency report for a single DDTree build audit.
@@ -40,7 +40,7 @@ pub struct ResidencyReport {
 
 /// Audit a DDTree build with a `ConstraintPruner`.
 ///
-/// Builds the tree using [`build_dd_tree_pruned`](super::build_dd_tree_pruned),
+/// Builds the tree using [`build_dd_tree_pruned`](crate::dd_tree::build_dd_tree_pruned),
 /// measures per-node cost, and reports residency metrics.
 ///
 /// # Arguments
@@ -55,7 +55,7 @@ pub fn audit_constraint_pruner(
     chain_seed: bool,
 ) -> ResidencyReport {
     let start = Instant::now();
-    let tree = super::build_dd_tree_pruned(marginals, config, pruner, chain_seed);
+    let tree = crate::dd_tree::build_dd_tree_pruned(marginals, config, pruner, chain_seed);
     let elapsed_ns = start.elapsed().as_nanos() as f64;
 
     let total_nodes = tree.len();
@@ -99,7 +99,7 @@ pub fn audit_constraint_pruner(
 
 /// Audit a DDTree build with a `ScreeningPruner`.
 ///
-/// Builds the tree using [`build_dd_tree_screened`](super::build_dd_tree_screened),
+/// Builds the tree using [`build_dd_tree_screened`](crate::dd_tree::build_dd_tree_screened),
 /// measures per-node cost, and reports residency metrics.
 ///
 /// # Arguments
@@ -114,7 +114,7 @@ pub fn audit_screening_pruner(
     chain_seed: bool,
 ) -> ResidencyReport {
     let start = Instant::now();
-    let tree = super::build_dd_tree_screened(marginals, config, screener, chain_seed);
+    let tree = crate::dd_tree::build_dd_tree_screened(marginals, config, screener, chain_seed);
     let elapsed_ns = start.elapsed().as_nanos() as f64;
 
     let total_nodes = tree.len();
@@ -182,7 +182,7 @@ pub fn is_degrading(candidate: &ResidencyReport, baseline: &ResidencyReport) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::Config;
+    use katgpt_types::Config;
 
     fn test_config() -> Config {
         Config::draft()

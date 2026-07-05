@@ -13,7 +13,7 @@
 use std::collections::HashSet;
 use std::sync::Mutex;
 
-use crate::speculative::types::ScreeningPruner;
+use katgpt_core::traits::ScreeningPruner;
 
 /// Check if solution `y` is consistent with current state `x`.
 ///

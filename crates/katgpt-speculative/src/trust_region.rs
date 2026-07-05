@@ -8,7 +8,7 @@
 //! The trust signal (P_accept = min(πT/πS, 1)) is already computed by `LeviathanVerifier`.
 //! TRAS wraps it with running trust tracking, adaptive window sizing, and blend sampling.
 
-use crate::types::Rng;
+use katgpt_types::Rng;
 
 // ---------------------------------------------------------------------------
 // TrustRegionConfig

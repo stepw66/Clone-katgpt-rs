@@ -137,3 +137,52 @@ pub mod progressive_mcgs;
 // Needs katgpt-kv/still_kv for chain_folder's KV compaction types.
 #[cfg(feature = "chain_fold")]
 pub mod fold;
+
+// ── Plan 387 (2026-07-05): Phase 2 speculative cluster move. ──
+// 10 modules moved from katgpt-rs/src/speculative/. Leaf-only deps verified
+// via line-range grep (Plan 386 R296-class lesson). Root re-exports preserve
+// `katgpt_rs::speculative::<module>::*` paths.
+
+// LDT α-operator conflict-clause pruning (Plan 088, GOAT 7/7, default-on).
+// Forwards to katgpt-core/lattice_deduction for the trait half.
+#[cfg(feature = "lattice_deduction")]
+pub mod alpha;
+
+// Compression-adaptive decode budget (Plan 167). Always-on in root; mirrors
+// that here. Uses katgpt_core::speculative::types::BudgetAdaptation.
+pub mod budget;
+
+// Budget compat shims (Plan 167). Always-on; uses crate::budget::*.
+pub mod budget_compat;
+
+// CaDDTree cost-aware adaptive DDTree budget (Plan 219, GOAT 7/7, default-on).
+// Uses crate::dd_tree::build_dd_tree + katgpt_core::mux_demux.
+#[cfg(feature = "caddtree_budget")]
+pub mod caddtree_budget;
+
+// Flow-based ScreeningPruner (Plan 030 bandit cluster). Gated by `bandit`
+// (local switch in this crate — does NOT pull katgpt-pruners to avoid cycle).
+#[cfg(feature = "bandit")]
+pub mod flow_pruner;
+
+// PEIRA distill ScreeningPruner (Plan 153, GOAT 7/7, default-on). Gated by
+// `peira_distill` (tracking flag in this crate).
+#[cfg(feature = "peira_distill")]
+pub mod peira_pruner;
+
+// Precision-Aware Speculative Generator (Plan 227 Phase 4). Composes
+// precision_aware_draft + spec_generator (both leaf-local).
+#[cfg(all(feature = "precision_aware_draft", feature = "speculative_generator"))]
+pub mod precision_aware_generator;
+
+// Residency audit — KV cache residency tracking. Always-on in root.
+pub mod residency_audit;
+
+// Trust-Region Adaptive Speculation (Plan 182). Always-on module in root
+// (the `trust_region_spec` feature gates the bandit-backed routing path in
+// root's re-export; the module substrate is always compiled).
+pub mod trust_region;
+
+// Domino LoRA causal correction adapter (Plan 231).
+#[cfg(feature = "domino_lora")]
+pub mod domino_lora;

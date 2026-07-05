@@ -10,7 +10,7 @@
 use std::path::Path;
 
 use katgpt_core::simd::simd_add_inplace;
-use crate::types::matmul;
+use katgpt_types::matmul;
 
 // ── Binary format constants ──────────────────────────────────
 const DOMINO_MAGIC: &[u8; 4] = b"DMAD";

@@ -182,6 +182,42 @@ qgf_drafter = ["katgpt-core/qgf_drafter"]
 # module (answer_extract moves in Phase 1; parallel_probe module defers — leaf deps).
 parallel_probe = []
 
+# ── Plan 387 (2026-07-05): Phase 2 speculative cluster move. ──
+# 10 modules moved from katgpt-rs/src/speculative/. Tracking flags + forwards.
+
+# LDT α-operator conflict-clause pruning (Plan 088). Forwards to katgpt-core
+# for the trait half; the α-operator module lives here.
+lattice_deduction = ["katgpt-core/lattice_deduction"]
+
+# Compression-adaptive decode budget (Plan 167). Zero deps beyond
+# katgpt-core speculative types.
+budget_adaptation = []
+
+# CaDDTree cost-aware adaptive DDTree budget (Plan 219). Needs spec_cost_model
+# (forwarded to katgpt-core) for the SpecCostSnapshot seed path.
+caddtree_budget = ["katgpt-core/spec_cost_model"]
+spec_cost_model = ["katgpt-core/spec_cost_model"]
+
+# PEIRA distill ScreeningPruner (Plan 153). Tracking flag — the substrate
+# (katgpt-spectral/peira_distill) is consumed via root re-export; this crate's
+# peira_pruner module is the spec-decode-specific ScreeningPruner impl.
+peira_distill = []
+
+# Domino LoRA causal correction adapter (Plan 231). Zero extra deps.
+domino_lora = []
+
+# Tracking flags for caddtree_budget's mux_residual variant. The function
+# `build_dd_tree_adaptive_mux_residual` is gated `all(mux_demux, rcd_residual)`.
+# Forward to katgpt-core so the underlying `compute_mux_residual` compiles.
+mux_demux = ["katgpt-core/mux_demux"]
+rcd_residual = ["katgpt-core/rcd_residual"]
+
+# Tracking flag for budget.rs's EchoConsistency variant (Plan 167). The
+# echo_env module itself stays in root (blocked by katgpt-pruners cycle);
+# this flag forwards to katgpt-core so BudgetAdaptation::EchoConsistency
+# variant compiles. Forwarded from root.
+echo_env_predictor = ["katgpt-core/echo_env_predictor"]
+
 [dev-dependencies]
 katgpt-transformer = { path = "../katgpt-transformer" }
 fastrand = "2"  # correlation_budget tests (Issue 003 move from root, which has fastrand as a dep)

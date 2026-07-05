@@ -7,16 +7,17 @@
 //!
 //! Pipeline: marginals → acceptance surrogate → throughput(B) → greedy search → B*
 
-use crate::speculative::types::{ScreeningPruner, TreeNode};
-use crate::types::Config;
+use katgpt_core::traits::ScreeningPruner;
+use katgpt_core::speculative::types::TreeNode;
+use katgpt_types::Config;
 
 // Re-export build functions from dd_tree module.
-use crate::speculative::build_dd_tree;
-use crate::speculative::build_dd_tree_screened;
+use crate::dd_tree::build_dd_tree;
+use crate::dd_tree::build_dd_tree_screened;
 
 // SpecCostSnapshot — optional seed source from Plan 096.
 #[cfg(feature = "spec_cost_model")]
-use crate::speculative::SpecCostSnapshot;
+use katgpt_core::speculative::types::SpecCostSnapshot;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Utility
@@ -492,7 +493,7 @@ pub fn build_dd_tree_adaptive_mux_residual(
     position: usize,
     residual_out: &mut [f32],
 ) -> (Vec<TreeNode>, usize) {
-    use crate::mux_demux::compute_mux_residual;
+    use katgpt_core::mux_demux::compute_mux_residual;
 
     // 1. Build the adaptive tree (existing logic, unchanged).
     let (tree, budget) = build_dd_tree_adaptive(marginals, config);
@@ -861,7 +862,7 @@ mod tests {
 
     #[test]
     fn test_adaptive_screened_produces_valid_tree() {
-        use crate::speculative::NoScreeningPruner;
+        use katgpt_core::traits::NoScreeningPruner;
 
         let config = test_config();
         let screener = NoScreeningPruner;

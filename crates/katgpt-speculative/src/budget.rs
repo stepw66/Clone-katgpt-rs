@@ -15,7 +15,7 @@
 //! # Feature flag
 //! `budget_adaptation` — Plan 167, Research R050
 
-use crate::speculative::types::BudgetAdaptation;
+use katgpt_core::speculative::types::BudgetAdaptation;
 
 /// Entropy threshold in nats for budget scaling.
 ///

@@ -15,7 +15,7 @@
 //!
 //! All code behind `#[cfg(feature = "bandit")]`.
 
-use super::types::ScreeningPruner;
+use katgpt_core::traits::ScreeningPruner;
 
 // ── FlowPruner ──────────────────────────────────────────────────
 
@@ -204,7 +204,7 @@ impl<P: ScreeningPruner> ScreeningPruner for FlowPruner<P> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::speculative::types::NoScreeningPruner;
+    use katgpt_core::traits::NoScreeningPruner;
 
     #[test]
     fn test_flow_pruner_no_stop_probs_passes_through() {

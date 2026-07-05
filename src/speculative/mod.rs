@@ -1,4 +1,4 @@
-pub mod budget_compat;
+pub use katgpt_speculative::budget_compat;
 pub use katgpt_speculative::acceptance_forecast;
 
 #[cfg(feature = "belief_drafter")]
@@ -13,31 +13,31 @@ pub mod dflash;
 #[cfg(feature = "domino_correction")]
 pub use katgpt_speculative::domino;
 #[cfg(feature = "domino_lora")]
-pub mod domino_lora;
+pub use katgpt_speculative::domino_lora;
 pub mod drafter_lora;
 #[cfg(feature = "echo_env_predictor")]
 pub mod echo_env;
 #[cfg(feature = "echo_env_predictor")]
 pub mod echo_env_integration;
 pub mod prefill;
-pub mod residency_audit;
+pub use katgpt_speculative::residency_audit;
 pub mod step;
 pub mod types;
 pub mod verifier;
 
-pub mod trust_region;
+pub use katgpt_speculative::trust_region;
 
 #[cfg(feature = "budget_adaptation")]
-pub mod budget;
+pub use katgpt_speculative::budget;
 
 #[cfg(feature = "ppot")]
 pub mod ppot;
 
 #[cfg(feature = "bandit")]
-pub mod flow_pruner;
+pub use katgpt_speculative::flow_pruner;
 
 #[cfg(feature = "peira_distill")]
-pub mod peira_pruner;
+pub use katgpt_speculative::peira_pruner;
 
 #[cfg(feature = "dllm")]
 pub mod d2f;
@@ -54,7 +54,7 @@ pub mod d2f_verifier;
 pub mod diffusion_sampler;
 
 #[cfg(feature = "lattice_deduction")]
-pub mod alpha;
+pub use katgpt_speculative::alpha;
 
 #[cfg(feature = "parallel_probe")]
 pub use katgpt_speculative::answer_extract;
@@ -387,7 +387,7 @@ pub use dd_tree::build_dd_tree_screened_flow_budget;
 
 // ── CaDDTree — Cost-Aware Adaptive DDTree Budget Selection (Plan 219) ──
 #[cfg(feature = "caddtree_budget")]
-pub mod caddtree_budget;
+pub use katgpt_speculative::caddtree_budget;
 
 #[cfg(feature = "caddtree_budget")]
 pub use caddtree_budget::{
@@ -431,7 +431,7 @@ pub use dd_tree::build_dd_tree_speculative_kurtosis;
 
 // ── Precision-Aware Speculative Generator (Plan 227 Phase 4, feature: precision_aware_draft) ──
 #[cfg(all(feature = "precision_aware_draft", feature = "speculative_generator"))]
-pub mod precision_aware_generator;
+pub use katgpt_speculative::precision_aware_generator;
 
 #[cfg(all(feature = "precision_aware_draft", feature = "speculative_generator"))]
 pub use precision_aware_generator::PrecisionAwareGenerator;
