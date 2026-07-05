@@ -270,3 +270,12 @@ flashar_consensus = []
 # `katgpt_core::{TernaryWeights, simd_ternary_matvec}`) compiles when the root
 # feature is enabled. Forwards to katgpt-core so those symbols resolve.
 plasma_path = ["katgpt-core/plasma_path"]
+
+# ── Plan 401 (2026-07-06): feature consumed by the moved forward_set_causal ──
+# (`forward_set_causal_positions` + 5 of 7 Research 376 T0.2 tests moved from
+# root `src/dllm.rs`). Empty tracking flag — gates the `pub mod forward_set_causal`
+# declaration + re-export. Root forwards its `set_diffusion` feature to this
+# crate so the gate resolves when the root feature is enabled. All consumed
+# symbols (`TransformerWeights`, `Config`, `kv_dim`/`matmul`/`matmul_relu`/
+# `rmsnorm`, `katgpt_core::simd::*`) resolve through existing deps.
+set_diffusion = []

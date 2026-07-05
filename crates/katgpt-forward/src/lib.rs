@@ -616,3 +616,41 @@ pub use flashar_consensus::{
     ConsensusConfig, ConsensusResult, DualPathResult, FlashARConsensusVerifier, MAX_DRAFT_WIDTH,
     ThermalPath, compute_ternary_consensus, dual_path_draft, route_thermal_paths,
 };
+
+// ── Plan 401 (2026-07-06): forward_set_causal_positions extraction ──
+// `forward_set_causal_positions` + 5 of 7 Research 376 T0.2 tests moved from
+// root `src/dllm.rs` (the function is pure inference — no gradients/backprop/
+// loss, despite the old "Root-resident by design (Issue 033 §C)" comment).
+// Root keeps a re-export shim at `crate::dllm::forward_set_causal_positions`
+// so every historical caller continues to resolve, including the 2 comparison
+// tests still in root that also need `forward_block_causal_positions` /
+// `forward_bidirectional_positions` (deferred to Plan 402).
+//
+// Gating mirrors root: `set_diffusion` is the root feature, forwarded here as
+// a tracking flag. The function is self-contained (no `dllm`-gated intra-crate
+// deps), so only `set_diffusion` is required.
+#[cfg(feature = "set_diffusion")]
+pub mod forward_set_causal;
+#[cfg(feature = "set_diffusion")]
+pub use forward_set_causal::forward_set_causal_positions;
+
+// ── Plan 401 (2026-07-06): set_diffusion.rs relocation ──
+// The full set-diffusion inference decoder + 23 PURE inference tests moved
+// from root `src/speculative/set_diffusion.rs`. Root's copy is now a thin
+// re-export shim (`pub use katgpt_forward::set_diffusion::*;`) plus the
+// 6 TRAIN-only tests that call `crate::dllm::{train_mini_dllm,
+// generate_pattern_dataset, evaluate_set_causal_nelbo, train_mini_set_causal}`
+// (root-local training code).
+//
+// Gating mirrors root: the decoder + CpuSetCausalForward adapter are
+// `set_diffusion`-gated (the adapter calls
+// `crate::forward_set_causal::forward_set_causal_positions` which is itself
+// `set_diffusion`-gated). The 3 gen-steps helpers (`order_to_gen_steps`,
+// `block_causal_gen_steps`, `mdlm_gen_steps`) + the core decode loop +
+// `SetDiffusionConfig`/`SetDiffusionResult`/`SetCausalForwardFn` trait are
+// *unconditional* in the source — but the module is registered behind
+// `set_diffusion` to mirror root's `#[cfg(feature = "set_diffusion")] pub mod set_diffusion;`
+// gating in `src/speculative/mod.rs`. Root's re-export shim always provides
+// the symbols; they're only reachable when the root feature is on.
+#[cfg(feature = "set_diffusion")]
+pub mod set_diffusion;
