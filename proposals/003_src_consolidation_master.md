@@ -834,7 +834,7 @@ Ordering: foundation first (hoists, splits), then domain crates biggest-first.
     - **T4.7** ✅ `52cafcf0`: dash_attn VortexFlow cluster (10 files) → katgpt-attn. Original "stays root" blocker dissolved once pruners/speculative/cache_prune landed in their leaves.
     - **T4.8** ⏭ DEFERRED: ~30 speculative primitives need individual dep audits; 17 files (~25K LOC) are transformer-bound per DEFER table. Genuine separate-session scope.
     - **GOAT gate G3 PASS**: workspace `cargo check` clean on default / all-features / no-default-features. Per-crate lib tests pass (katgpt-attn 150/150, katgpt-core 1435/1435, katgpt-sparse 39/39, katgpt-spectral 100/100, katgpt-pruners 213/213, katgpt-speculative 146/146). bench_256_adaptive_k_goat 1/1 PASS.
-  **Final src/ state**: transformer.rs linchpin + retained forward-glue (gdn2/hla/dash_attn composition + tests, inference_router/backend, gpu/ane_backend, attn_match_adaptive_cot, sp_kv_forward_mod, types) + DEFER items (benchmark/, plot.rs, sleep/, dllm.rs, speculative/{17 transformer-bound files}, pruners/bomber/{19 files}, data_probe/, domino_lora). Each DEFER carries a documented blocker + unblock condition in Plan 383. **Phase 14 (Plan 384, 2026-07-05)** subsequently moved `distill/trd` + `vocab_channel_pruner` out (blockers dissolved by Phase 12 T4.4/T4.5) — see Phase 14 entry below. **Phase 15 (Plan 385, 2026-07-05)** broke the `forward`-linchpin cycle by extracting the forward trio + helpers to katgpt-forward, enabling `dense_mesh/node_transformer` to move out too — see Phase 15 entry below. **Phase 16 (Plan 386, 2026-07-05)** applied the same body-grep lesson to `src/speculative/`, moving 12 zero-root-dep modules (acceptance_forecast, belief_cache, belief_drafter, best_buddies, domino, spec_generator, answer_extract, dendritic_gate, kurtosis_gate, nf_flow_generator, nf_flow_qgf, selectivity_router) to katgpt-speculative — speculative root-only count drops from 40 → 28 files — see Phase 16 entry below. **Phase 17 (Plan 387, 2026-07-05)** continued with 10 more leaf-only-dep speculative modules (alpha, budget, budget_compat, caddtree_budget, flow_pruner, peira_pruner, precision_aware_generator, residency_audit, trust_region, domino_lora), discovering the katgpt-pruners→katgpt-speculative cycle as a NEW blocker — speculative root-only count drops from 28 → 18 files — see Phase 17 entry below.
+  **Final src/ state**: transformer.rs linchpin + retained forward-glue (gdn2/hla/dash_attn composition + tests, inference_router/backend, gpu/ane_backend, attn_match_adaptive_cot, sp_kv_forward_mod, types) + DEFER items (benchmark/, plot.rs, sleep/, dllm.rs, speculative/{17 transformer-bound files}, pruners/bomber/{19 files}, data_probe/, domino_lora). Each DEFER carries a documented blocker + unblock condition in Plan 383. **Phase 14 (Plan 384, 2026-07-05)** subsequently moved `distill/trd` + `vocab_channel_pruner` out (blockers dissolved by Phase 12 T4.4/T4.5) — see Phase 14 entry below. **Phase 15 (Plan 385, 2026-07-05)** broke the `forward`-linchpin cycle by extracting the forward trio + helpers to katgpt-forward, enabling `dense_mesh/node_transformer` to move out too — see Phase 15 entry below. **Phase 16 (Plan 386, 2026-07-05)** applied the same body-grep lesson to `src/speculative/`, moving 12 zero-root-dep modules (acceptance_forecast, belief_cache, belief_drafter, best_buddies, domino, spec_generator, answer_extract, dendritic_gate, kurtosis_gate, nf_flow_generator, nf_flow_qgf, selectivity_router) to katgpt-speculative — speculative root-only count drops from 40 → 28 files — see Phase 16 entry below. **Phase 17 (Plan 387, 2026-07-05)** continued with 10 more leaf-only-dep speculative modules (alpha, budget, budget_compat, caddtree_budget, flow_pruner, peira_pruner, precision_aware_generator, residency_audit, trust_region, domino_lora), discovering the katgpt-pruners→katgpt-speculative cycle as a NEW blocker — speculative root-only count drops from 28 → 18 files — see Phase 17 entry below. **Phase 18 (Plan 388, 2026-07-05)** resolved the katgpt-pruners cycle by extracting `freeze` + proof core types + `ThinkingMode` to katgpt-core, then moving 4 pruners-consuming files (3 to katgpt-speculative, echo_env_integration to katgpt-pruners) — speculative root-only count drops from 18 → 14 files — see Phase 18 entry below.
 - [x] **Phase 13 — commit + record.** Commit on `develop` with `refactor:`
   prefix per phase. Update this proposal status to **done** at Phase 12. **DONE 2026-07-05**
   — Plan 383 is the Phase 13 record; this proposal now reflects Phase 12 as complete with
@@ -1029,6 +1029,82 @@ Ordering: foundation first (hoists, splits), then domain crates biggest-first.
   - See `.plans/387_speculative_phase2_leaf_cluster.md` for the full task
     list + verification matrix.
 
+- [x] **Phase 18 — Plan 388 katgpt-pruners cycle resolution (speculative Phase 3).**
+  - **Goal**: resolve the katgpt-pruners ↔ katgpt-speculative cycle (NEW blocker
+    discovered in Phase 17) to unblock the 4 remaining pruners-consuming
+    speculative files.
+  - **Strategy**: extract-then-move. Three shared types extracted to katgpt-core
+    (the lowest common ancestor), then the 4 files move to their natural homes.
+  - **Phase 18.1 — Extract `freeze` to katgpt-core**: moved
+    `crates/katgpt-pruners/src/freeze.rs` (120 LOC, pure stdlib) to
+    `crates/katgpt-core/src/freeze.rs`. Re-export shim in pruners preserves
+    `katgpt_pruners::freeze::*` paths.
+  - **Phase 18.2 — Extract `proof` core types to katgpt-core**: extracted
+    GoalHash + GoalResult + GoalVerifier trait + ProofGoalCache from
+    `crates/katgpt-pruners/src/proof/goal_cache.rs` (799 LOC) to
+    `crates/katgpt-core/src/proof_cache.rs`. ProofGoalSnapshot stays in pruners
+    (only uses ProofGoalCache's public API). Re-export shim in pruners.
+  - **Phase 18.3 PREP — Extract ThinkingMode to katgpt-core**: discovered
+    during Phase 3 that `thinking_controller.rs` had
+    `pub use katgpt_pruners::ThinkingMode;` which would re-introduce the cycle.
+    Extracted the 4-variant `#[repr(u8)]` enum to
+    `crates/katgpt-core/src/thinking_mode.rs`. katgpt-pruners now re-exports it.
+  - **Phase 18.3 — Move 4 files** (~2706 LOC):
+    - `and_or_builder.rs` (747) → katgpt-speculative (gated `and_or_dtree`)
+    - `echo_env.rs` (795) → katgpt-speculative (gated `echo_env_predictor`;
+          test uses katgpt-pruners as DEV-DEP — no cycle, dev-deps don't propagate)
+    - `thinking_controller.rs` (867) → katgpt-speculative (gated `thinking_cot`)
+    - `echo_env_integration.rs` (297) → **katgpt-pruners** (it's the integration
+          glue between echo_env + BanditPruner; pruners already depends on speculative)
+  - **NEW dev-dep trick**: `katgpt-speculative[dev-deps] → katgpt-pruners` does
+    NOT create a cycle even though `katgpt-pruners → katgpt-speculative` exists,
+    because dev-deps don't propagate to dependents. This is the canonical
+    pattern for test-only cross-crate references in a cyclic topology.
+  - **Cargo.toml changes**:
+    - katgpt-speculative: added dev-dep `katgpt-pruners` with
+      `features = ["echo_env_predictor"]`; added 4 tracking features
+      (`thinking_cot`, `and_or_dtree`, `rv_gated_thinking`, `directional_credit`);
+      `and_or_dtree` forwards to `katgpt-core/and_or_dtree` + `dep:blake3`.
+    - katgpt-pruners: added `echo_env_predictor` feature (gates module +
+      forwards to `katgpt-speculative/echo_env_predictor`).
+    - Root: 5 features now forward to katgpt-speculative: `echo_env_predictor`,
+      `thinking_cot`, `and_or_dtree`, `rv_gated_thinking`, `directional_credit`.
+  - **GOAT Gate G3 — PASS**:
+    - `cargo check --workspace` (default / all-features / no-default) clean.
+    - katgpt-core: **1247 passed** (default).
+    - katgpt-pruners: **126 passed** (default).
+    - katgpt-speculative: **1010 passed** (all-features, excl. pre-existing
+      `budget_compat` failure that fails on baseline too).
+    - Root lib: **472 passed** (default), **900 passed** (all-features, excl.
+      flaky bench tests).
+    - GOAT integration: belief_drafter_goat 12/12, and_or_goat 5/5,
+      bench_167_budget_adaptation_goat 8/8, bench_trust_region 6/6,
+      caddtree_budget_goat 7/7 — all PASS.
+    - Moved-module tests: echo_env (2) + thinking_controller (11) +
+      and_or_builder (30) = **43 PASS**.
+    - `examples/echo_env_predictor_demo` builds.
+  - **Import rewrite patterns** (extends Phase 16/17 table):
+    | Root pattern | Leaf rewrite |
+    |---|---|
+    | `crate::pruners::freeze::*` | `katgpt_core::freeze::*` |
+    | `crate::pruners::proof::{GoalResult, ProofGoalCache}` | `katgpt_core::proof_cache::{GoalResult, ProofGoalCache}` |
+    | `pub use katgpt_pruners::ThinkingMode` | `pub use katgpt_core::thinking_mode::ThinkingMode` |
+    | `crate::cumprodsum::*` | `katgpt_core::cumprodsum::*` |
+    | `crate::speculative::ScreeningPruner` | `katgpt_core::traits::ScreeningPruner` |
+    | `crate::pruners::bandit::*` (test) | `katgpt_pruners::bandit::*` (dev-dep) |
+    | `crate::speculative::build_dd_tree_screened` | `crate::dd_tree::build_dd_tree_screened` |
+  - **After Phase 18**, root-only speculative drops from 18 → 14 files.
+    katgpt-pruners cycle: **RESOLVED** for these 4 files.
+  - **Remaining root-only speculative** (14 files, blocked by other cycles):
+    - **forward-cycle** (~6K LOC): dflash, verifier, drafter_lora, step,
+      dd_tree, parallel_probe — needs architectural decision.
+    - **dllm-cycle** (~6K LOC): d2f, d2f_verifier, diffusion_sampler,
+      flashar_anchor, flashar_consensus, set_diffusion — defer until dllm moves.
+    - **dash_attn** (~1K LOC): prefill.
+    - **Partial**: types.rs (609 LOC, crate::transformer::forward_paged).
+  - See `.plans/388_katgpt_pruners_cycle_resolution.md` for the full task list +
+    verification matrix.
+
 ## Risks and mitigations
 
 | Risk | Severity | Mitigation |
@@ -1075,7 +1151,7 @@ Ordering: foundation first (hoists, splits), then domain crates biggest-first.
 can't move yet). `main.rs` deleted in Phase 12. Every domain gets one stack
 crate. Three new domain stacks beyond 001/002: `katgpt-band` (Plan 265 cluster),
 `katgpt-claim`, `katgpt-sparse`, plus `katgpt-proof-cert` (Phase 12). Losers
-exile to `katgpt-deprecated`. 17 phases (Phase 12 complete 2026-07-05;
+exile to `katgpt-deprecated`. 18 phases (Phase 12 complete 2026-07-05;
 Phase 14 = Plan 384 follow-up moving `distill/trd` + `vocab_channel_pruner`
 to their now-unblocked leaf homes; Phase 15 = Plan 385 breaks the
 `forward`-linchpin cycle by extracting the forward trio to katgpt-forward,
@@ -1084,6 +1160,10 @@ Plan 386 applies the same body-grep lesson to `src/speculative/`, moving
 12 zero-root-dep modules to katgpt-speculative; Phase 17 = Plan 387 continues
 with 10 more leaf-only-dep speculative modules, discovering the
 katgpt-pruners→katgpt-speculative cycle as a NEW blocker;
+Phase 18 = Plan 388 resolves that cycle by extracting `freeze` + proof core
+types + `ThinkingMode` to katgpt-core, then moving 4 files
+(and_or_builder, echo_env, thinking_controller → katgpt-speculative;
+echo_env_integration → katgpt-pruners as integration glue);
 T4.8 speculative-primitives
 follow-up documented in Plan 383). Foundation moves
 first, biggest-payoff attention stack second. Supersedes 001 and 002.

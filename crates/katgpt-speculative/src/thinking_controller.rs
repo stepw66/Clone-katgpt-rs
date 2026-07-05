@@ -11,16 +11,16 @@
 
 use std::path::Path;
 
-use crate::pruners::freeze::{load_frozen, save_frozen};
+use katgpt_core::freeze::{load_frozen, save_frozen};
 
 // ── T1: Types ──────────────────────────────────────────────────────────
 
-// ThinkingMode is defined canonically in `katgpt_pruners` (the lower crate)
-// and re-exported here so `katgpt_rs::speculative::ThinkingMode` resolves to
-// the same type consumed by `katgpt_pruners::collapse_detector::efficiency_reward`.
-// This eliminates a prior DRY violation where two structurally identical but
-// nominally distinct enums caused type-mismatch errors at call sites.
-pub use katgpt_pruners::ThinkingMode;
+// ThinkingMode is defined canonically in `katgpt_core::thinking_mode` (the
+// lowest crate) and re-exported here so `katgpt_rs::speculative::ThinkingMode`
+// resolves to the same type consumed by `katgpt_pruners::collapse_detector::efficiency_reward`.
+// Extracted to katgpt-core (Plan 388 Phase 3) to break the katgpt-pruners ↔
+// katgpt-speculative cycle.
+pub use katgpt_core::thinking_mode::ThinkingMode;
 
 /// How the thinking mode is selected per-query.
 #[derive(Debug, Clone)]
@@ -497,7 +497,7 @@ impl ThinkingController {
     /// Thinking budget in RiM buffer block passes, clamped to
     /// [`ThinkingConfig::min_blocks`, `ThinkingConfig::max_blocks`].
     pub fn adaptive_budget(&self, decay_factors: &[f32], beta: f32) -> usize {
-        let freshness = crate::cumprodsum::context_freshness(decay_factors);
+        let freshness = katgpt_core::cumprodsum::context_freshness(decay_factors);
         let range = self.config.max_blocks.saturating_sub(self.config.min_blocks);
         let scale = Self::sigmoid(beta * (freshness - 0.5));
         self.config.min_blocks + (range as f32 * scale).round() as usize

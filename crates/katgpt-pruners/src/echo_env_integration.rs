@@ -19,8 +19,8 @@
 //!
 //! All code behind `echo_env_predictor` feature flag.
 
-use crate::pruners::bandit::{BanditPruner, BanditStrategy};
-use crate::speculative::echo_env::{
+use crate::bandit::{BanditPruner, BanditStrategy};
+use katgpt_speculative::echo_env::{
     EnvPredictorConfig, EnvPredictorPruner, PredictionConsistencyGate, PredictionVerifier,
 };
 
@@ -163,7 +163,7 @@ where
         predicted: &[f32],
         actual: &[f32],
         tick: u64,
-    ) -> crate::speculative::echo_env::PredictionRecord {
+    ) -> katgpt_speculative::echo_env::PredictionRecord {
         self.verifier.verify(predicted, actual, tick)
     }
 
@@ -275,8 +275,8 @@ mod tests {
 
     #[test]
     fn test_echo_consistency_budget_adaptation() {
-        use crate::speculative::budget::adaptive_tree_budget;
-        use crate::speculative::types::BudgetAdaptation;
+        use katgpt_speculative::budget::adaptive_tree_budget;
+        use katgpt_core::speculative::types::BudgetAdaptation;
 
         let base = 100;
 

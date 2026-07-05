@@ -212,14 +212,40 @@ domino_lora = []
 mux_demux = ["katgpt-core/mux_demux"]
 rcd_residual = ["katgpt-core/rcd_residual"]
 
-# Tracking flag for budget.rs's EchoConsistency variant (Plan 167). The
-# echo_env module itself stays in root (blocked by katgpt-pruners cycle);
-# this flag forwards to katgpt-core so BudgetAdaptation::EchoConsistency
-# variant compiles. Forwarded from root.
+# Tracking flag for budget.rs's EchoConsistency variant (Plan 167). Also gates
+# the echo_env module (Plan 388 Phase 3 move from root — cycle resolved via
+# freeze/proof_cache/ThinkingMode extraction to katgpt-core). Forwards to
+# katgpt-core so BudgetAdaptation::EchoConsistency variant compiles.
 echo_env_predictor = ["katgpt-core/echo_env_predictor"]
+
+# Adaptive CoT Thinking Controller (Plan 194, Plan 388 Phase 3 move from root).
+# Gates the thinking_controller module. Root forwards via katgpt-speculative/thinking_cot.
+thinking_cot = []
+
+# RV-Gated Thinking — ThinkingController RV bias (Plan 202 GOAT, default-ON
+# via rv_gated_routing in root). Tracking flag for thinking_controller's
+# rv_gated_thinking cfg block.
+rv_gated_thinking = []
+
+# Directional credit — Entropy-bifurcated screening (Plan 184, default-ON).
+# Tracking flag for thinking_controller's directional_credit cfg block.
+directional_credit = []
+
+# AND-OR DDTree Builder (Plan 190 T2, Plan 388 Phase 3 move from root).
+# Gates the and_or_builder module. Root forwards via katgpt-speculative/and_or_dtree.
+# Forwards to katgpt-core/and_or_dtree (gates katgpt_core::and_or::AndOrNode) and
+# enables blake3 (and_or_builder's compute_hash uses it directly).
+and_or_dtree = ["katgpt-core/and_or_dtree", "dep:blake3"]
 
 [dev-dependencies]
 katgpt-transformer = { path = "../katgpt-transformer" }
+# katgpt-pruners is a DEV-ONLY dep here (echo_env's GOAT test imports BanditPruner
+# + BanditStrategy). Dev-deps do NOT propagate to dependents, so this does NOT
+# create a cycle even though katgpt-pruners depends on katgpt-speculative.
+# `features = ["echo_env_predictor"]` transitively enables bandit (which gates
+# the bandit module the test imports).
+# (Plan 388 Phase 3.)
+katgpt-pruners = { path = "../katgpt-pruners", features = ["echo_env_predictor"] }
 fastrand = "2"  # correlation_budget tests (Issue 003 move from root, which has fastrand as a dep)
 serde_json = "1"  # segment_match IndexedSegment JSON roundtrip tests
 tempfile = "3"  # rt_turbo calibration save/load roundtrip tests

@@ -121,6 +121,15 @@ pub use screening::{
 #[cfg(feature = "bandit")]
 pub mod bandit;
 
+// ECHO Environment Predictor integration glue (Plan 247, Plan 388 Phase 3).
+// Wraps `katgpt_speculative::echo_env::EnvPredictorPruner` with `BanditPruner`
+// and wires the ECHO consistency signal into bandit reward updates. Lived in
+// root `src/speculative/` before Plan 388; moved here (the crate that depends
+// on BOTH katgpt-speculative and bandit machinery) to break the
+// katgpt-pruners ↔ katgpt-speculative cycle.
+#[cfg(feature = "echo_env_predictor")]
+pub mod echo_env_integration;
+
 #[cfg(feature = "bandit")]
 pub mod hot_swap;
 

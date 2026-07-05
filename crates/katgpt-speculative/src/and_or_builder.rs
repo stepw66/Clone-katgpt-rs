@@ -8,9 +8,8 @@
 //! across branches are solved once and reused.
 
 use katgpt_core::and_or::AndOrNode;
-
-use crate::pruners::proof::{GoalResult, ProofGoalCache};
-use crate::speculative::ScreeningPruner;
+use katgpt_core::proof_cache::{GoalResult, ProofGoalCache};
+use katgpt_core::traits::ScreeningPruner;
 
 // ── Subgoal ─────────────────────────────────────────────────────
 

@@ -16,9 +16,13 @@ pub use katgpt_speculative::domino;
 pub use katgpt_speculative::domino_lora;
 pub mod drafter_lora;
 #[cfg(feature = "echo_env_predictor")]
-pub mod echo_env;
+pub use katgpt_speculative::echo_env;
+// echo_env_integration moved to katgpt-pruners (Plan 388 Phase 3) — it's the
+// integration glue that wraps EnvPredictorPruner with BanditPruner, and
+// katgpt-pruners is the crate that depends on BOTH katgpt-speculative and
+// the bandit machinery.
 #[cfg(feature = "echo_env_predictor")]
-pub mod echo_env_integration;
+pub use katgpt_pruners::echo_env_integration;
 pub mod prefill;
 pub use katgpt_speculative::residency_audit;
 pub mod step;
@@ -328,11 +332,12 @@ pub use dd_tree::build_dd_tree_screened_progressive;
 pub use types::PositionWeightedBudget;
 
 // ── Adaptive CoT Thinking Controller (Plan 194, feature: thinking_cot) ──
+// Module moved to katgpt-speculative (Plan 388 Phase 3); root re-exports.
 #[cfg(feature = "thinking_cot")]
-pub mod thinking_controller;
+pub use katgpt_speculative::thinking_controller;
 
 #[cfg(feature = "thinking_cot")]
-pub use thinking_controller::{
+pub use katgpt_speculative::thinking_controller::{
     Rng, ThinkingBanditFrozen, ThinkingConfig, ThinkingController, ThinkingMode, ThinkingSelector,
 };
 
@@ -351,11 +356,12 @@ pub use katgpt_speculative::blueprint;
 pub use blueprint::BlueprintPass;
 
 // ── AND-OR DDTree Builder (Plan 190 T2, feature: and_or_dtree) ────
+// Module moved to katgpt-speculative (Plan 388 Phase 3); root re-exports.
 #[cfg(feature = "and_or_dtree")]
-pub mod and_or_builder;
+pub use katgpt_speculative::and_or_builder;
 
 #[cfg(feature = "and_or_dtree")]
-pub use and_or_builder::{AndOrBuilder, Subgoal};
+pub use katgpt_speculative::and_or_builder::{AndOrBuilder, Subgoal};
 
 // ── Trust-Region Adaptive Speculation (Plan 182, Research 162) ──
 pub use trust_region::{

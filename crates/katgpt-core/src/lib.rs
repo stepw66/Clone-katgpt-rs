@@ -108,6 +108,22 @@ pub use katgpt_types::leaky_core;
 /// (`BanditRolloutPolicy` depends on `crate::pruners::bandit::BanditStats`)
 /// stays in the consuming crate.
 pub mod mcts;
+// Shared freeze/thaw disk I/O for `repr(C)` knowledge structs.
+// Extracted from `katgpt-pruners::freeze` (Plan 388 Phase 1) to break the
+// katgpt-pruners ↔ katgpt-speculative cycle. Pure stdlib (Path + fs + mem).
+// Re-exported by katgpt-pruners::freeze for backwards compatibility.
+pub mod freeze;
+// Proof goal deduplication cache core types (GoalHash, GoalResult,
+// GoalVerifier, ProofGoalCache). Extracted from `katgpt-pruners::proof::goal_cache`
+// (Plan 388 Phase 2) to break the katgpt-pruners ↔ katgpt-speculative cycle.
+// Pure substrate (blake3 + HashMap + AtomicU64). Re-exported by
+// katgpt-pruners::proof::goal_cache for backwards compatibility.
+pub mod proof_cache;
+// Per-query thinking mode tag. Extracted from `katgpt-pruners` (Plan 388
+// Phase 3) to break the katgpt-pruners ↔ katgpt-speculative cycle. Pure
+// 4-variant `#[repr(u8)]` enum, no pruners-specific knowledge. Re-exported
+// by katgpt-pruners and katgpt_rs::speculative for backwards compatibility.
+pub mod thinking_mode;
 #[cfg(feature = "parallax_attn")]
 pub mod parallax_attn;
 // Algebraic-structure primitives. Currently home to the tropical (max, +)

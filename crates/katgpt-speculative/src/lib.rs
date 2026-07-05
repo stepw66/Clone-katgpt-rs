@@ -186,3 +186,21 @@ pub mod trust_region;
 // Domino LoRA causal correction adapter (Plan 231).
 #[cfg(feature = "domino_lora")]
 pub mod domino_lora;
+
+// AND-OR DDTree builder (Plan 190 T2). Uses ScreeningPruner::relevance() to
+// detect low-confidence regions and ProofGoalCache for subgoal memoization.
+// Gated by `and_or_dtree` (mirrors root gate).
+#[cfg(feature = "and_or_dtree")]
+pub mod and_or_builder;
+
+// ECHO Environment Predictor (Plan 247). Forward model + consistency gate
+// that wraps EnvPredictorPruner as a ScreeningPruner. The BanditPruner
+// integration glue lives in katgpt-pruners::echo_env_integration.
+#[cfg(feature = "echo_env_predictor")]
+pub mod echo_env;
+
+// Adaptive Chain-of-Thought controller (Plan 194). Decides per-query whether
+// to think (latent reasoning) or answer directly. Gated by `thinking_cot`
+// (mirrors root gate).
+#[cfg(feature = "thinking_cot")]
+pub mod thinking_controller;

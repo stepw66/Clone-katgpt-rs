@@ -524,9 +524,9 @@ mod tests {
     /// Both should produce comparable acceptance rates.
     #[test]
     fn test_goat_echo_predictor_no_regression() {
-        use crate::pruners::bandit::{BanditPruner, BanditStrategy};
-        use crate::speculative::build_dd_tree_screened;
-        use crate::types::{Config, Rng};
+        use katgpt_pruners::bandit::{BanditPruner, BanditStrategy};
+        use crate::dd_tree::build_dd_tree_screened;
+        use katgpt_types::{Config, Rng};
 
         let vocab = 8;
         let lookahead = 4;
@@ -599,7 +599,7 @@ mod tests {
 
         // ECHO OFF: BanditPruner<NoScreeningPruner> (baseline)
         let mut baseline_bp = BanditPruner::new(
-            crate::speculative::NoScreeningPruner,
+            katgpt_core::traits::NoScreeningPruner,
             BanditStrategy::Ucb1,
             vocab,
         );
