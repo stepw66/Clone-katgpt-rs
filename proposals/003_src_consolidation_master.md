@@ -1257,7 +1257,7 @@ Ordering: foundation first (hoists, splits), then domain crates biggest-first.
 can't move yet). `main.rs` deleted in Phase 12. Every domain gets one stack
 crate. Three new domain stacks beyond 001/002: `katgpt-band` (Plan 265 cluster),
 `katgpt-claim`, `katgpt-sparse`, plus `katgpt-proof-cert` (Phase 12). Losers
-exile to `katgpt-deprecated`. 20 phases (Phase 12 complete 2026-07-05;
+exile to `katgpt-deprecated`. 21 phases (Phase 12 complete 2026-07-05;
 Phase 14 = Plan 384 follow-up moving `distill/trd` + `vocab_channel_pruner`
 to their now-unblocked leaf homes; Phase 15 = Plan 385 breaks the
 `forward`-linchpin cycle by extracting the forward trio to katgpt-forward,
@@ -1278,6 +1278,13 @@ Phase 20 = Plan 390 applies the trait-impl split to `prefill.rs`, moving the
 pure substrate half (~580 LOC + 15 tests) to katgpt-speculative while keeping
 the forward-coupled `AttentionScorer`/`BlockAttentionScorer` impls and the
 entmax-coupled `block_select_entmax` in root;
+Phase 21 = Plan 391 kills dead-duplicate substrate in `dd_tree.rs` (root's
+`build_dd_tree_lodestar`/`a_star_score`/`find_forced_token` were already
+re-exported from the leaf via glob — pure dead code) and moves the remaining
+pure substrate (~841 LOC total: SDE builders, PTRM width scaling, EqR residual
+tracker, RecFM cross-scale consistency, best_of_k_rollouts, dendritic gate,
+manifold pruner, entropy_truncate_horizon) to katgpt-speculative. Root dd_tree.rs
+5990→5149 LOC; Phase 3 (feature-gated variant wrappers) deferred.
 T4.8 speculative-primitives
 follow-up documented in Plan 383). Foundation moves
 first, biggest-payoff attention stack second. Supersedes 001 and 002.

@@ -1,4 +1,9 @@
 use std::collections::BinaryHeap;
+// HashMap is only constructed inside `best_of_k_rollouts` (MostFrequent mode),
+// which is `elf_sde`-gated; gate the import so it doesn't read as unused when
+// `elf_sde` is off (e.g. downstream consumer with default-features = false).
+#[cfg(any(feature = "elf_sde", test))]
+use std::collections::HashMap;
 
 #[cfg(test)]
 use katgpt_core::traits::NoScreeningPruner;
@@ -188,6 +193,8 @@ pub fn build_dd_tree_lodestar(
     }
     let seq_len = marginals.len();
     let mut parent_buf: Vec<usize> = vec![0usize; seq_len];
+    // Reusable scratch for jump-ahead span walk; avoids per-iteration allocation.
+    let mut span_parents_buf: Vec<usize> = Vec::with_capacity(seq_len);
 
     // Seed root children (depth 0, empty parent). After placing a token at depth
     // 0, remaining slots = seq_len - 1.
@@ -228,10 +235,12 @@ pub fn build_dd_tree_lodestar(
                     let end_depth = start_depth + span as usize;
                     if end_depth <= seq_len {
                         // Walk the span: collect forced tokens, accumulate log-prob.
+                        // Reuse span_parents_buf: clear + refill avoids per-pop allocation.
                         let mut span_score = best.score;
                         let mut span_path = best.parent_path;
                         let mut span_depth = start_depth;
-                        let mut span_parents = parent_tokens.to_vec();
+                        span_parents_buf.clear();
+                        span_parents_buf.extend_from_slice(parent_tokens);
                         let mut valid = true;
 
                         for _ in 0..span {
@@ -242,7 +251,7 @@ pub fn build_dd_tree_lodestar(
                             let forced = find_forced_token(
                                 marginals,
                                 span_depth,
-                                &span_parents,
+                                &span_parents_buf,
                                 horizon,
                                 seq_len - span_depth - 1,
                             );
@@ -251,7 +260,7 @@ pub fn build_dd_tree_lodestar(
                                     let d = horizon.min_completion_distance(
                                         span_depth,
                                         token,
-                                        &span_parents,
+                                        &span_parents_buf,
                                     );
                                     if d == u32::MAX || (d as usize) > seq_len - span_depth - 1 {
                                         valid = false;
@@ -259,7 +268,7 @@ pub fn build_dd_tree_lodestar(
                                     }
                                     span_score += prob.ln();
                                     span_path = (span_path << 16) | (token as u128);
-                                    span_parents.push(token);
+                                    span_parents_buf.push(token);
                                     span_depth += 1;
                                 }
                                 None => {
@@ -1930,6 +1939,663 @@ impl TreeBuilder {
 
         &self.tree
     }
+}
+
+// ── SDE-Aware DDTree Builders (ELF Plan 079) ────────────────────
+//
+// Plan 391 (2026-07-05): moved from `katgpt-rs/src/speculative/dd_tree.rs`
+// because they only compose leaf-resident primitives (`inject_sde_noise_into`,
+// `build_slices_view`, `build_dd_tree_screened`, `build_dd_tree_balanced`) and
+// `katgpt_types::{Config, Rng}`. Zero root-only deps.
+
+/// DDTree with SDE noise injection (ELF Plan 079).
+///
+/// Applies SDE noise to marginals before building the tree.
+/// When `sde_config.gamma == 0.0`, this is identical to `build_dd_tree_screened`.
+pub fn build_dd_tree_sde(
+    marginals: &[&[f32]],
+    config: &katgpt_types::Config,
+    screener: &dyn ScreeningPruner,
+    chain_seed: bool,
+    sde_config: &SdeConfig,
+    rng: &mut Rng,
+) -> Vec<TreeNode> {
+    let mut noisy_marginals = Vec::with_capacity(marginals.len());
+    inject_sde_noise_into(marginals, sde_config, rng, &mut noisy_marginals);
+    let mut noisy_slices: Vec<&[f32]> = Vec::with_capacity(noisy_marginals.len());
+    build_slices_view(&noisy_marginals, &mut noisy_slices);
+    build_dd_tree_screened(&noisy_slices, config, screener, chain_seed)
+}
+
+/// DDTree balanced with SDE noise injection (ELF Plan 079).
+///
+/// Applies SDE noise to marginals before building the balanced tree.
+/// When `sde_config.gamma == 0.0`, this is identical to `build_dd_tree_balanced`.
+#[allow(clippy::too_many_arguments)]
+pub fn build_dd_tree_balanced_sde(
+    marginals: &[&[f32]],
+    config: &katgpt_types::Config,
+    screener: &dyn ScreeningPruner,
+    chain_seed: bool,
+    stop_probs: &[f32],
+    backward_weight: f32,
+    lambda_flow: f32,
+    sde_config: &SdeConfig,
+    rng: &mut Rng,
+) -> Vec<TreeNode> {
+    let mut noisy_marginals = Vec::with_capacity(marginals.len());
+    inject_sde_noise_into(marginals, sde_config, rng, &mut noisy_marginals);
+    let mut noisy_slices: Vec<&[f32]> = Vec::with_capacity(noisy_marginals.len());
+    build_slices_view(&noisy_marginals, &mut noisy_slices);
+    build_dd_tree_balanced(
+        &noisy_slices,
+        config,
+        screener,
+        chain_seed,
+        stop_probs,
+        backward_weight,
+        lambda_flow,
+    )
+}
+
+// ── PTRM Width Scaling (Plan 083) ──────────────────────────────
+//
+// Plan 391 (2026-07-05): moved from root — pure substrate over
+// `katgpt_types::Config` + `katgpt_core::ConvergenceSelector`. No root-only deps.
+
+/// Selection strategy for [`best_of_k_rollouts`].
+///
+/// - `BestQ`: pick the rollout with highest cumulative relevance (PTRM default)
+/// - `MostFrequent`: pick the most common path (mode@K, majority vote)
+#[cfg(feature = "elf_sde")]
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum WidthSelectionMode {
+    /// Select rollout with highest cumulative relevance score (PTRM Q-head analog).
+    #[default]
+    BestQ,
+    /// Select the most frequent path across all rollouts (mode@K).
+    MostFrequent,
+    /// Select rollout with smallest final residual ∥p_{d+1} − p_d∥₂ (EqR proxy, Plan 119).
+    ///
+    /// Only reliable after landscape shaping (RI + NI training).
+    /// Falls back to BestQ if no residual data available.
+    #[cfg(feature = "eqr_convergence")]
+    Top1Converged,
+}
+
+/// Configuration for width-scaling rollouts (PTRM Plan 083).
+///
+/// Controls how many independent SDE rollouts to run and how to select
+/// the best result. Maps directly to PTRM's K parallel rollouts.
+#[cfg(feature = "elf_sde")]
+#[derive(Debug, Clone)]
+pub struct WidthScaleConfig {
+    /// Number of independent rollouts (PTRM: K). Default: 1 (disabled).
+    pub k_rollouts: usize,
+    /// How to select the winning rollout.
+    pub selection: WidthSelectionMode,
+}
+
+#[cfg(feature = "elf_sde")]
+impl Default for WidthScaleConfig {
+    fn default() -> Self {
+        Self {
+            k_rollouts: 1,
+            selection: WidthSelectionMode::default(),
+        }
+    }
+}
+
+#[cfg(feature = "elf_sde")]
+impl WidthScaleConfig {
+    /// PTRM paper default: K=16, BestQ selection.
+    pub fn ptrm_default() -> Self {
+        Self {
+            k_rollouts: 16,
+            selection: WidthSelectionMode::BestQ,
+        }
+    }
+}
+
+/// Convert Config-level [`ConvergenceSelector`] to runtime [`WidthSelectionMode`].
+///
+/// `MajorityVote` maps to `MostFrequent` (same semantics, different naming convention).
+/// `BtRank` falls back to `BestQ` when `bt_rank` feature is off.
+#[cfg(feature = "eqr_convergence")]
+impl From<katgpt_core::ConvergenceSelector> for WidthSelectionMode {
+    fn from(selector: katgpt_core::ConvergenceSelector) -> Self {
+        match selector {
+            katgpt_core::ConvergenceSelector::BestQ => WidthSelectionMode::BestQ,
+            katgpt_core::ConvergenceSelector::MajorityVote => WidthSelectionMode::MostFrequent,
+            katgpt_core::ConvergenceSelector::Top1Converged => WidthSelectionMode::Top1Converged,
+            katgpt_core::ConvergenceSelector::BtRank => {
+                #[cfg(feature = "bt_rank")]
+                {
+                    WidthSelectionMode::BestQ // TODO: BtRank variant when bt_rank integrates
+                }
+                #[cfg(not(feature = "bt_rank"))]
+                WidthSelectionMode::BestQ
+            }
+        }
+    }
+}
+
+// ── EqR Convergence Selection (Plan 119) ────────────────────────
+
+/// Per-rollout residual tracker for EqR convergence-based selection.
+///
+/// Tracks ∥p_{d+1} − p_d∥₂ across DDTree expansion depths as a proxy
+/// for EqR's fixed-point residual ∥fθ(z;x) − z∥. Only valid after
+/// landscape shaping (RI + NI training).
+///
+/// See Research 079 (EqR) for theoretical justification.
+#[cfg(feature = "eqr_convergence")]
+#[derive(Debug, Clone)]
+pub struct ResidualTracker {
+    /// ∥p_{d+1} − p_d∥₂ at each expansion depth.
+    residuals: Vec<f32>,
+}
+
+#[cfg(feature = "eqr_convergence")]
+impl ResidualTracker {
+    /// Create a new tracker with pre-allocated capacity.
+    pub fn new(max_depths: usize) -> Self {
+        Self {
+            residuals: Vec::with_capacity(max_depths),
+        }
+    }
+
+    /// Record a marginal-change step: compute ∥z_curr − z_prev∥₂.
+    pub fn record_step(&mut self, z_prev: &[f32], z_curr: &[f32]) {
+        let diff: f32 = z_prev
+            .iter()
+            .zip(z_curr.iter())
+            .map(|(a, b)| (a - b) * (a - b))
+            .sum();
+        self.residuals.push(diff.sqrt());
+    }
+
+    /// Last recorded residual (0.0 if empty) — the EqR convergence proxy.
+    pub fn final_residual(&self) -> f32 {
+        self.residuals.last().copied().unwrap_or(0.0)
+    }
+
+    /// Average residual across all recorded steps.
+    pub fn mean_residual(&self) -> f32 {
+        if self.residuals.is_empty() {
+            return 0.0;
+        }
+        self.residuals.iter().sum::<f32>() / self.residuals.len() as f32
+    }
+
+    /// Check if the rollout has converged below the given threshold.
+    pub fn is_converged(&self, threshold: f32) -> bool {
+        self.final_residual() < threshold
+    }
+}
+
+// ── RecFM Cross-Scale Consistency (Plan 168) ───────────────────
+//
+// Plan 391 (2026-07-05): moved from root — pure substrate, no root-only deps.
+
+/// Configuration for RecFM recursive cross-scale consistency filtering (Research 150).
+///
+/// RecFM's Theorem 3.1 proves that consistency loss constrains trajectory acceleration
+/// ∂t_v, directly reducing discretization error. Applied to DDTree, this filters branches
+/// whose probability velocity violates cross-scale consistency.
+///
+/// When `enable` is `false`, all RecFM checks are no-ops (zero cost on hot path).
+#[cfg(feature = "recfm")]
+#[derive(Debug, Clone)]
+pub struct CrossScaleConfig {
+    /// Enable RecFM cross-scale consistency filtering.
+    pub enable: bool,
+    /// Scale factor α for velocity comparison: `|v₂ − α·v₁| ≤ threshold`.
+    /// RecFM default: 0.5 (geometric mean of scales).
+    pub scale_alpha: f32,
+    /// Consistency threshold — branches violating this are pruned.
+    /// RecFM default: 0.1 (loose enough to preserve diverse paths).
+    pub consistency_threshold: f32,
+}
+
+#[cfg(feature = "recfm")]
+impl Default for CrossScaleConfig {
+    fn default() -> Self {
+        Self {
+            enable: false,
+            scale_alpha: 0.5,
+            consistency_threshold: 0.1,
+        }
+    }
+}
+
+/// Compute discrete probability velocity at a given depth from marginal slices.
+///
+/// The velocity is the change in top-1 probability between consecutive depths:
+/// `v(depth) = marginal[depth][top1] − marginal[depth−1][top1]`
+///
+/// This is the discrete analog of RecFM's continuous velocity field.
+/// Zero-alloc: operates on existing marginal slices.
+///
+/// Returns 0.0 if `depth == 0` (no parent to compare against) or if slices are empty.
+#[cfg(feature = "recfm")]
+#[inline]
+pub fn branch_velocity_at(depth: usize, marginal_curr: &[f32], marginal_prev: &[f32]) -> f32 {
+    if depth == 0 || marginal_curr.is_empty() || marginal_prev.is_empty() {
+        return 0.0;
+    }
+    // Only the max VALUE is needed (not the index). `fold` is branch-free and
+    // avoids the closure-call overhead of `.iter().enumerate().max_by(...)`.
+    let top1_curr = marginal_curr.iter().copied().fold(0.0f32, f32::max);
+    let top1_prev = marginal_prev.iter().copied().fold(0.0f32, f32::max);
+    top1_curr - top1_prev
+}
+
+/// Check cross-scale consistency between two velocity measurements.
+///
+/// RecFM consistency: `|v₂ − α·v₁| ≤ threshold`
+///
+/// When consistent, the branch's velocity at scale 2 is proportional to scale 1,
+/// meaning the probability trajectory is smooth (low discretization error).
+/// Branches violating consistency have high curvature and are pruned.
+///
+/// Branch-free inline: returns `true` when consistent, `false` when violated.
+#[cfg(feature = "recfm")]
+#[inline]
+pub fn cross_scale_consistent(v1: f32, v2: f32, alpha: f32, threshold: f32) -> bool {
+    (v2 - alpha * v1).abs() <= threshold
+}
+
+/// Best-of-K rollouts: run K independent SDE-noised trees, select the best path.
+///
+/// This is the core PTRM width-scaling primitive. Each rollout gets an independent
+/// noise seed (`base_seed + k`), producing diverse candidate paths. The winner is
+/// selected by cumulative relevance score (BestQ) or majority vote (MostFrequent).
+///
+/// PTRM proves width (K rollouts) >> depth (T steps): +28.6pp vs +3.1pp on PPBench.
+///
+/// # Arguments
+///
+/// * `marginals` — Per-depth token probability distributions
+/// * `config` — Inference config (tree_budget, draft_lookahead, etc.)
+/// * `screener` — Screening pruner for relevance scoring
+/// * `sde_config` — SDE noise injection configuration
+/// * `width_config` — Width scaling configuration (K, selection mode)
+/// * `base_seed` — Base RNG seed; each rollout uses `base_seed.wrapping_add(k)`
+///
+/// # Returns
+///
+/// The best token path as `Vec<usize>` (one token per depth).
+#[cfg(feature = "elf_sde")]
+pub fn best_of_k_rollouts(
+    marginals: &[&[f32]],
+    config: &katgpt_types::Config,
+    screener: &dyn ScreeningPruner,
+    sde_config: &SdeConfig,
+    width_config: &WidthScaleConfig,
+    base_seed: u64,
+) -> Vec<usize> {
+    if width_config.k_rollouts <= 1 || !sde_config.is_enabled() {
+        // Single rollout or SDE disabled — just build one tree
+        let mut rng = Rng::new(base_seed);
+        let mut noisy = Vec::with_capacity(marginals.len());
+        inject_sde_noise_into(marginals, sde_config, &mut rng, &mut noisy);
+        // Build a fresh immutable view (no need to keep a mutable refs buffer here).
+        let noisy_slices: Vec<&[f32]> = noisy.iter().map(|m| m.as_slice()).collect();
+        let tree = build_dd_tree_screened(&noisy_slices, config, screener, false);
+        return extract_best_path(&tree);
+    }
+
+    // Run K independent rollouts with different noise seeds. Hoist the
+    // `noisy` buffer out of the loop — `inject_sde_noise_into` clears and
+    // refills it each iteration, skipping K-1 outer `Vec<Vec<f32>>`
+    // allocations and reusing the inner `Vec<f32>` slots across rollouts.
+    //
+    // `noisy_slices` must stay loop-local: it holds `&[f32]` references into
+    // `noisy`, so it cannot outlive a single iteration (the next iteration
+    // mutably borrows `noisy` again). Its allocation cost is negligible
+    // (length = #depths, typically ≤ 32) compared to the per-rollout tree
+    // build, but we still `reserve` once on the first iteration via the
+    // `with_capacity` on `noisy.len()`.
+    let mut paths: Vec<Vec<usize>> = Vec::with_capacity(width_config.k_rollouts);
+    let mut scores: Vec<f32> = Vec::with_capacity(width_config.k_rollouts);
+    // EqR convergence: track marginal-change residual per rollout (Plan 119)
+    #[cfg(feature = "eqr_convergence")]
+    let mut final_residuals: Vec<f32> = Vec::with_capacity(width_config.k_rollouts);
+    let mut noisy: Vec<Vec<f32>> = Vec::with_capacity(marginals.len());
+
+    for k in 0..width_config.k_rollouts {
+        let mut rng = Rng::new(base_seed.wrapping_add(k as u64));
+        inject_sde_noise_into(marginals, sde_config, &mut rng, &mut noisy);
+        // Build the `&[&[f32]]` view fresh each iteration — references cannot
+        // escape the loop body because `noisy` is mutably re-borrowed next.
+        let noisy_slices: Vec<&[f32]> = noisy.iter().map(|m| m.as_slice()).collect();
+        let tree = build_dd_tree_screened(&noisy_slices, config, screener, false);
+
+        // Compute cumulative relevance score for the best path
+        let path = extract_best_path(&tree);
+        let score = cumulative_relevance(&path, screener);
+        paths.push(path);
+        scores.push(score);
+
+        // EqR convergence: compute marginal-change residual for this rollout
+        #[cfg(feature = "eqr_convergence")]
+        {
+            let mut tracker = ResidualTracker::new(noisy.len().saturating_sub(1));
+            for d in 0..noisy.len().saturating_sub(1) {
+                tracker.record_step(&noisy[d], &noisy[d + 1]);
+            }
+            final_residuals.push(tracker.final_residual());
+        }
+    }
+
+    match width_config.selection {
+        WidthSelectionMode::BestQ => {
+            // Select rollout with highest cumulative relevance
+            let best_idx = scores
+                .iter()
+                .enumerate()
+                .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+                .map(|(i, _)| i)
+                .unwrap_or(0);
+            paths.into_iter().nth(best_idx).unwrap_or_default()
+        }
+        WidthSelectionMode::MostFrequent => {
+            // Select the most common path (mode@K)
+            let mut counts: HashMap<Vec<usize>, usize> = HashMap::new();
+            for path in &paths {
+                *counts.entry(path.clone()).or_default() += 1;
+            }
+            counts
+                .into_iter()
+                .max_by_key(|(_, count)| *count)
+                .map(|(path, _)| path)
+                .unwrap_or_default()
+        }
+        #[cfg(feature = "eqr_convergence")]
+        WidthSelectionMode::Top1Converged => {
+            // Select rollout with smallest final residual (EqR convergence proxy).
+            // Fallback to BestQ if no residual data (e.g., single depth).
+            let best_idx = if final_residuals.is_empty()
+                || final_residuals.iter().all(|&r| r == 0.0)
+            {
+                scores
+                    .iter()
+                    .enumerate()
+                    .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+                    .map(|(i, _)| i)
+                    .unwrap_or(0)
+            } else {
+                final_residuals
+                    .iter()
+                    .enumerate()
+                    .min_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+                    .map(|(i, _)| i)
+                    .unwrap_or(0)
+            };
+            paths.into_iter().nth(best_idx).unwrap_or_default()
+        }
+    }
+}
+
+/// Compute cumulative relevance score for a path using the screener.
+#[cfg(feature = "elf_sde")]
+fn cumulative_relevance(path: &[usize], screener: &dyn ScreeningPruner) -> f32 {
+    let mut total = 0.0f32;
+    for (depth, &token_idx) in path.iter().enumerate() {
+        let parent_tokens = &path[..depth];
+        total += screener.relevance(depth, token_idx, parent_tokens);
+    }
+    total
+}
+
+// ── SR²AM Entropy-Based Horizon Truncation (Plan 112, Research 076) ──
+//
+// Plan 391 (2026-07-05): moved from root — pure substrate, no root-only deps.
+
+/// If entropy exceeds threshold, cap draft lookahead at a truncated horizon.
+///
+/// High-uncertainty states benefit from shorter planning horizons to avoid
+/// overcommitting to unreliable predictions. Maps to SR²AM's finding that
+/// web tasks (high environmental uncertainty) benefit from planning horizon
+/// capped at 2 steps.
+///
+/// # Arguments
+///
+/// * `entropy` — Shannon entropy in nats (>= 0)
+/// * `max_horizon` — Maximum draft lookahead from domain config
+///
+/// # Returns
+///
+/// Truncated horizon (min of capped value and max_horizon).
+#[cfg(feature = "sr2am_configurator")]
+pub fn entropy_truncate_horizon(entropy: f32, max_horizon: usize) -> usize {
+    const ENTROPY_THRESHOLD: f32 = 2.5;
+    const TRUNCATED_HORIZON: usize = 2;
+    match entropy > ENTROPY_THRESHOLD {
+        true => TRUNCATED_HORIZON.min(max_horizon),
+        false => max_horizon,
+    }
+}
+
+// ── DendriticGate Adaptive Tree (Plan 260, feature: dendritic_gate) ──
+//
+// Plan 391 (2026-07-05): moved from root — uses only leaf-resident
+// `crate::dendritic_gate::DendriticGate` + katgpt_core primitives.
+
+/// Build DDTree with NMDA-gated adaptive expansion budget.
+///
+/// Uses `DendriticGate` to deterministically modulate per-expansion budget:
+/// `effective_budget = base_budget * nmda_gate`
+///
+/// Early exits when `nmda_gate < 0.1` (proximal dendrite sufficient).
+/// This replaces stochastic bandit budget allocation with zero-parameter,
+/// zero-training, physics-based adaptive compute.
+///
+/// Feature-gated behind `dendritic_gate`.
+///
+/// # Arguments
+/// * `marginals` — Per-depth token probability distributions (log-probs)
+/// * `config` — DDTree configuration
+/// * `pruner` — Constraint pruner
+/// * `chain_seed` — Whether to build greedy chain backbone first
+/// * `gate` — The `DendriticGate` instance with threshold/sensitivity params
+///
+/// # Returns
+///
+/// Tree nodes in expansion order. May have fewer nodes than `config.tree_budget`
+/// when gate triggers early exit.
+#[cfg(feature = "dendritic_gate")]
+pub fn build_dd_tree_dendritic(
+    marginals: &[&[f32]],
+    config: &katgpt_types::Config,
+    pruner: &dyn ConstraintPruner,
+    chain_seed: bool,
+    gate: &crate::dendritic_gate::DendriticGate,
+) -> Vec<TreeNode> {
+    use katgpt_core::{coincidence_score, entropy_f32};
+
+    if marginals.is_empty() {
+        return Vec::new();
+    }
+
+    let seq_len = marginals.len();
+    let mut heap: BinaryHeap<TreeNode> = BinaryHeap::with_capacity(config.tree_budget);
+    let mut tree: Vec<TreeNode> = Vec::with_capacity(config.tree_budget);
+    let base_budget = config.tree_budget;
+    let mut parent_buf: Vec<usize> = vec![0usize; seq_len];
+
+    // Optional: seed greedy chain backbone first
+    if chain_seed {
+        let mut chain_path = 0u128;
+        let mut chain_score = 0.0f32;
+        for depth in 0..seq_len {
+            let parent_tokens = extract_parent_tokens_into(chain_path, depth, &mut parent_buf);
+            let mut best_prob = 0.0f32;
+            let mut best_idx = 0;
+            for (i, &prob) in marginals[depth].iter().enumerate() {
+                if prob > best_prob && pruner.is_valid(depth, i, parent_tokens) {
+                    best_prob = prob;
+                    best_idx = i;
+                }
+            }
+            if best_prob > 0.0 {
+                chain_score += best_prob.ln();
+                chain_path = (chain_path << 16) | (best_idx as u128);
+                tree.push(TreeNode {
+                    score: chain_score,
+                    depth,
+                    token_idx: best_idx,
+                    parent_path: chain_path,
+                });
+            } else {
+                break;
+            }
+        }
+    }
+
+    // Seed root children (depth 0)
+    if !chain_seed {
+        for (i, &prob) in marginals[0].iter().enumerate() {
+            if prob > 0.0 && pruner.is_valid(0, i, &[]) {
+                heap.push(TreeNode {
+                    score: prob.ln(),
+                    depth: 0,
+                    token_idx: i,
+                    parent_path: i as u128,
+                });
+            }
+        }
+    }
+
+    // Best-first expansion with dendritic-gated budget
+    let mut effective_budget = base_budget;
+
+    while tree.len() < effective_budget {
+        let Some(best) = heap.pop() else {
+            break;
+        };
+        tree.push(best);
+
+        if best.depth + 1 < seq_len {
+            let next_depth = best.depth + 1;
+            let parent_tokens =
+                extract_parent_tokens_into(best.parent_path, best.depth + 1, &mut parent_buf);
+
+            // Compute gate signal from entropy + coincidence at this depth
+            let entropy = entropy_f32(marginals[next_depth]);
+            let coinc = coincidence_score(
+                &top_k_indices(marginals[next_depth], gate.coincidence_window),
+                parent_tokens,
+                gate.coincidence_window,
+            );
+            let nmda_gate = gate.compute_gate(entropy, coinc);
+
+            // Early exit: proximal dendrite sufficient
+            if nmda_gate < 0.1 {
+                break;
+            }
+
+            // Modulate effective budget
+            effective_budget = ((base_budget as f32) * nmda_gate) as usize;
+            effective_budget = effective_budget.max(tree.len()).min(base_budget);
+
+            // Expand children
+            for (i, &prob) in marginals[next_depth].iter().enumerate() {
+                if prob > 0.0 && pruner.is_valid(next_depth, i, parent_tokens) {
+                    let score = best.score + prob.ln();
+                    heap.push(TreeNode {
+                        score,
+                        depth: next_depth,
+                        token_idx: i,
+                        parent_path: (best.parent_path << 16) | (i as u128),
+                    });
+                }
+            }
+        }
+    }
+
+    tree
+}
+
+/// Extract top-K indices from a probability slice (descending order).
+///
+/// Uses a fixed-size running minimum tracker (smallest-of-top-K at slot 0).
+/// O(N·K·log K) time but only O(K) auxiliary storage — avoids the O(N) full
+/// allocation that `select_nth_unstable_by` on `Vec<(usize,f32)>` would
+/// require (which would allocate ~256KB for a 32k vocab). For small K
+/// (typical `coincidence_window`), this is both faster and dramatically
+/// lighter on the allocator, important since this is called per heap-pop
+/// inside `build_dd_tree_dendritic`.
+#[cfg(feature = "dendritic_gate")]
+#[inline]
+fn top_k_indices(probs: &[f32], k: usize) -> Vec<usize> {
+    let k = k.min(probs.len());
+    if k == 0 {
+        return Vec::new();
+    }
+    // Maintain top as ascending: smallest of top-K at top[0]. When we see a
+    // larger prob, evict top[0] and re-sort (K is tiny — typically ≤8).
+    let mut top: Vec<(f32, usize)> = Vec::with_capacity(k);
+    for (i, &p) in probs.iter().enumerate() {
+        if top.len() < k {
+            top.push((p, i));
+            top.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+        } else if p > top[0].0 {
+            top[0] = (p, i);
+            top.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+        }
+    }
+    // Final pass: reverse to descending (largest prob first), matching the
+    // original `select_nth_unstable_by` + sort contract.
+    top.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+    top.into_iter().map(|(_, i)| i).collect()
+}
+
+// ── ManifoldPruner DDTree wiring (Plan 234 Phase 3, feature: manifold_pruner) ──
+//
+// Plan 391 (2026-07-05): moved from root — uses only the ConstraintPruner trait's
+// `manifold_score` method (already in katgpt_core::traits), no root-only deps.
+
+/// Wrapper that delegates `is_valid` to `manifold_score > 0.5`.
+/// This allows the existing `build_dd_tree_pruned` to use soft scoring
+/// instead of binary pruning — capturing boundary tokens that binary pruning misses.
+#[cfg(feature = "manifold_pruner")]
+struct ManifoldValidWrapper<'a>(&'a dyn ConstraintPruner);
+
+#[cfg(feature = "manifold_pruner")]
+impl ConstraintPruner for ManifoldValidWrapper<'_> {
+    fn is_valid(&self, depth: usize, token_idx: usize, parent_tokens: &[usize]) -> bool {
+        self.0.manifold_score(depth, token_idx, parent_tokens) > 0.5
+    }
+
+    fn manifold_score(&self, depth: usize, token_idx: usize, parent_tokens: &[usize]) -> f32 {
+        self.0.manifold_score(depth, token_idx, parent_tokens)
+    }
+
+    fn constraint_vector(&self, depth: usize, parent_tokens: &[usize]) -> Option<(&[f32], f32)> {
+        self.0.constraint_vector(depth, parent_tokens)
+    }
+}
+
+/// DDTree built with manifold soft scoring instead of binary pruning.
+///
+/// Identical to [`build_dd_tree_pruned`] but replaces `is_valid()` calls with
+/// `manifold_score() > 0.5`. Tokens near the constraint boundary (score ~0.5)
+/// that binary pruning rejects may pass soft scoring, recovering otherwise-lost
+/// candidates.
+///
+/// Feature-gated behind `manifold_pruner`.
+#[cfg(feature = "manifold_pruner")]
+pub fn build_dd_tree_manifold(
+    marginals: &[&[f32]],
+    config: &katgpt_types::Config,
+    pruner: &dyn ConstraintPruner,
+    chain_seed: bool,
+) -> Vec<TreeNode> {
+    let wrapper = ManifoldValidWrapper(pruner);
+    build_dd_tree_pruned(marginals, config, &wrapper, chain_seed)
 }
 
 #[cfg(test)]

@@ -251,6 +251,30 @@ and_or_dtree = ["katgpt-core/and_or_dtree", "dep:blake3"]
 # Forwards to katgpt-core/maxsim so `katgpt_core::simd::maxsim_score` resolves.
 maxsim = ["katgpt-core/maxsim"]
 
+# ── Plan 391 (2026-07-05): dd_tree substrate tracking flags. ──
+# These were originally root-only features that gated dd_tree.rs items now
+# moved to this crate. They are tracking flags only — katgpt-core's elf_sde
+# is forwarded so the EarlyStopGate + ELF SDE noise injection primitives
+# resolve; the rest are pure on/off switches for the migrated items.
+
+# PTRM width-scaling rollouts — gates WidthSelectionMode, WidthScaleConfig,
+# best_of_k_rollouts (Plan 083). Forwards to katgpt-core so EarlyStopGate
+# + inject_sde_noise_into resolve (both live in katgpt-core/speculative).
+elf_sde = ["katgpt-core/elf_sde"]
+
+# EqR convergence-based rollout selection — Top1Converged residual proxy
+# (Plan 119, Research 79). Implies elf_sde (best_of_k_rollouts host).
+eqr_convergence = ["elf_sde"]
+
+# Bradley-Terry pairwise ranking — currently a no-op tracking flag (the
+# BtRank variant falls back to BestQ either way). Mirrors root's bt_rank.
+bt_rank = []
+
+# ManifoldE point-to-manifold soft validity scoring (Plan 234, Research 207).
+# Gates build_dd_tree_manifold + ManifoldValidWrapper in dd_tree.rs. The
+# pruner-side impl lives in katgpt-pruners; this gates the dd_tree wrapper.
+manifold_pruner = []
+
 [dev-dependencies]
 # katgpt-pruners is a DEV-ONLY dep here (echo_env's GOAT test imports BanditPruner
 # + BanditStrategy). Dev-deps do NOT propagate to dependents, so this does NOT
