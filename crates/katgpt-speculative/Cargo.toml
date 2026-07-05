@@ -275,6 +275,24 @@ bt_rank = []
 # pruner-side impl lives in katgpt-pruners; this gates the dd_tree wrapper.
 manifold_pruner = []
 
+# ── Plan 392 (2026-07-05): dd_tree feature-gated wrapper tracking flags. ──
+# These gate the feature-gated DDTree wrappers moved from root's
+# src/speculative/dd_tree.rs into this leaf. Tracking flags only — the
+# wrappers compose leaf-resident siblings + katgpt_core::speculative::types.
+
+# DFlare progressive budget — Position-Weighted DDTree Budget (Plan 174).
+# Gates build_dd_tree_screened_progressive + TreeBuilder::build_screened_progressive.
+# Forwards to katgpt-core so PositionWeightedBudget resolves.
+dflare_progressive_budget = ["katgpt-core/dflare_progressive_budget"]
+
+# Correlation Budget Allocation — EMA-driven depth budget (Plan 200 GOAT, default-ON).
+# Gates build_dd_tree_screened_corr + TreeBuilder::build_screened_with_depth_budgets.
+corr_budget = []
+
+# NFCoT FlowBudget — sigmoid-weighted depth allocation (Plan 229 T4).
+# Gates build_dd_tree_screened_flow_budget + TreeBuilder::build_screened_with_depth_budgets.
+nf_flow_budget = []
+
 [dev-dependencies]
 # katgpt-pruners is a DEV-ONLY dep here (echo_env's GOAT test imports BanditPruner
 # + BanditStrategy). Dev-deps do NOT propagate to dependents, so this does NOT

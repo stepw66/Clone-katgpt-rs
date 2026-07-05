@@ -1257,7 +1257,7 @@ Ordering: foundation first (hoists, splits), then domain crates biggest-first.
 can't move yet). `main.rs` deleted in Phase 12. Every domain gets one stack
 crate. Three new domain stacks beyond 001/002: `katgpt-band` (Plan 265 cluster),
 `katgpt-claim`, `katgpt-sparse`, plus `katgpt-proof-cert` (Phase 12). Losers
-exile to `katgpt-deprecated`. 21 phases (Phase 12 complete 2026-07-05;
+exile to `katgpt-deprecated`. 22 phases (Phase 12 complete 2026-07-05;
 Phase 14 = Plan 384 follow-up moving `distill/trd` + `vocab_channel_pruner`
 to their now-unblocked leaf homes; Phase 15 = Plan 385 breaks the
 `forward`-linchpin cycle by extracting the forward trio to katgpt-forward,
@@ -1285,6 +1285,15 @@ pure substrate (~841 LOC total: SDE builders, PTRM width scaling, EqR residual
 tracker, RecFM cross-scale consistency, best_of_k_rollouts, dendritic gate,
 manifold pruner, entropy_truncate_horizon) to katgpt-speculative. Root dd_tree.rs
 5990→5149 LOC; Phase 3 (feature-gated variant wrappers) deferred.
+Phase 22 = Plan 392 completes the dd_tree consolidation: ports the 3 extended
+TreeBuilder methods (build_screened_progressive, _with_depth_budgets, _recfm)
+into the leaf, moves 13 feature-gated wrappers (domino, speculative, belief,
+kurtosis, best_buddies, screened_progressive/corr/flow_budget/recfm, and_or)
+to katgpt-speculative, AND deletes the entire root TreeBuilder struct+impl
+(~998 LOC dead duplicate after wrappers moved). Root dd_tree.rs 5149→2556 LOC
+(-50%); excluding the test module (~2380 LOC, root-bound on
+TransformerWeights/dflash_predict), root production code is now ~150 LOC
+(2 root-bound wrappers + module shim).
 T4.8 speculative-primitives
 follow-up documented in Plan 383). Foundation moves
 first, biggest-payoff attention stack second. Supersedes 001 and 002.
