@@ -653,6 +653,32 @@ pub use forward_positions::{
     forward_block_causal_positions, BidirectionalContext,
 };
 
+// ── Plan 403 (2026-07-06): denoise-loop cluster ──
+// `denoise_loop` / `denoise_loop_scheduled` / `denoise_loop_rcd` /
+// `denoise_loop_rcd_3sr` + `DenoiseConstraint` / `NoConstraint` /
+// `NoRepeatConstraint` moved from root `src/dllm.rs`. They are pure inference
+// (no gradients/backprop/loss) and compose the `BidirectionalContext`
+// substrate + the `forward_bidirectional_positions_into` kernel (both from
+// `crate::forward_positions`, Plan 402) with the `katgpt_core::dllm_solver`
+// helpers (RCD residual computation, 3SR warm-start).
+//
+// Gating mirrors root: the whole module is `dllm`-gated (depends on
+// `forward_positions`); `denoise_loop_rcd` is additionally `rcd_residual`-
+// gated; `denoise_loop_rcd_3sr` is additionally `d2f_3sr_warm_start`-gated.
+// The 9 denoise tests stay in root (they use root-only training helpers
+// `train_mini_dllm` / `generate_pattern_dataset`) and exercise the public API
+// via the root re-export shim.
+#[cfg(feature = "dllm")]
+pub mod denoise_loops;
+#[cfg(feature = "dllm")]
+pub use denoise_loops::{
+    denoise_loop, denoise_loop_scheduled, DenoiseConstraint, NoConstraint, NoRepeatConstraint,
+};
+#[cfg(all(feature = "dllm", feature = "rcd_residual"))]
+pub use denoise_loops::denoise_loop_rcd;
+#[cfg(all(feature = "dllm", feature = "d2f_3sr_warm_start"))]
+pub use denoise_loops::denoise_loop_rcd_3sr;
+
 // ── Plan 401 (2026-07-06): set_diffusion.rs relocation ──
 // The full set-diffusion inference decoder + 23 PURE inference tests moved
 // from root `src/speculative/set_diffusion.rs`. Root's copy is now a thin

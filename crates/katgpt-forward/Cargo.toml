@@ -228,7 +228,13 @@ dllm = []
 # Forwards to katgpt-core so the gated struct fields + reset impl resolve.
 # Plan 402 (2026-07-06): also gates `BidirectionalContext.rcd_residual_embeddings` /
 # `.rcd_active` fields in the moved `forward_positions` module.
-rcd_residual = ["katgpt-core/rcd_residual"]
+# Plan 403 (2026-07-06): also forwards `katgpt-core/critical_interval_gate` so the
+# moved `denoise_loops` module can reach `katgpt_core::dllm_solver::*`
+# (`compute_residual`, `interpolate_residual`, `normalized_entropy`, `RcdConfig`)
+# — that module is gated `critical_interval_gate` in katgpt-core. Root's
+# `rcd_residual` already transitively enables `critical_interval_gate`; this
+# forward mirrors that for the extracted module.
+rcd_residual = ["katgpt-core/rcd_residual", "katgpt-core/critical_interval_gate"]
 
 # D2F 3-State Reuse warm-start fields in `BidirectionalContext`
 # (`tsr_warm_start_embeddings` / `tsr_active`). Empty tracking flag — root
@@ -238,7 +244,14 @@ rcd_residual = ["katgpt-core/rcd_residual"]
 # Note: this feature transitively enables `rcd_residual` at the root level
 # (see root's feature definition), so the `rcd_active` fallback branch is
 # always available when this is on.
-d2f_3sr_warm_start = []
+# Plan 403 (2026-07-06): now forwards to `katgpt-core/d2f_3sr_warm_start` so
+# the moved `denoise_loop_rcd_3sr` can reach `ThreeStateReuseConfig`,
+# `TransitionType`, `classify_transitions`, `compute_gammas`, `warm_start_lerp`
+# (all `d2f_3sr_warm_start`-gated in katgpt-core's `dllm_solver` module). Also
+# implies `rcd_residual` (local) so the `compute_residual` /
+# `interpolate_residual` / `normalized_entropy` / `RcdConfig` paths resolve —
+# the `_3sr` variant composes on top of RCD and calls those helpers too.
+d2f_3sr_warm_start = ["rcd_residual", "katgpt-core/d2f_3sr_warm_start"]
 
 # ── Plan 399 (2026-07-05): features consumed by the moved d2f wrapper cluster ──
 # (`d2f.rs`, `d2f_verifier.rs`, `diffusion_sampler.rs` moved from root
