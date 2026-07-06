@@ -280,6 +280,7 @@ pub fn forward_bidirectional_positions_into(
 /// Plan 402 (2026-07-06): moved from root `src/dllm.rs`. The `_into` variant
 /// (in `crate::d2f_context`) is the zero-alloc hot-path kernel shared across
 /// all 5 callers; this allocating wrapper is kept for API completeness.
+#[allow(clippy::too_many_arguments)] // attention kernel: all args are distinct tensor dims/slices
 pub fn attention_forward_safe(
     q: &[f32],
     k_all: &[f32],

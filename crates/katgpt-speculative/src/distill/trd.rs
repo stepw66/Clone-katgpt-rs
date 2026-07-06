@@ -625,13 +625,10 @@ fn find_valid_token<P: ConstraintPruner>(
         }
     }
 
-    for &idx in &top_indices {
-        if pruner.is_valid(depth, idx, parent_tokens) {
-            return Some(idx);
-        }
-    }
-
-    None
+    top_indices
+        .iter()
+        .copied()
+        .find(|&idx| pruner.is_valid(depth, idx, parent_tokens))
 }
 
 /// SIMD-optimized branch scoring: gather probs → compute ln → SIMD sum.

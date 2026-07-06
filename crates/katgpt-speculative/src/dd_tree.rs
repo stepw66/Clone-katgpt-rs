@@ -3393,6 +3393,7 @@ pub fn entropy_truncate_horizon(entropy: f32, max_horizon: usize) -> usize {
 /// Tree nodes in expansion order. May have fewer nodes than `config.tree_budget`
 /// when gate triggers early exit.
 #[cfg(feature = "dendritic_gate")]
+#[allow(clippy::needless_range_loop)] // depth is semantic tree depth: marginals[depth] + extract_parent_tokens(depth) + is_valid(depth,..)
 pub fn build_dd_tree_dendritic(
     marginals: &[&[f32]],
     config: &katgpt_types::Config,

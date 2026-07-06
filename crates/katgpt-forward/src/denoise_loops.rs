@@ -115,6 +115,7 @@ impl DenoiseConstraint for NoRepeatConstraint {
 
 /// Run denoising loop starting from all-mask tokens.
 /// Returns (final_tokens, n_steps_to_converge).
+#[allow(clippy::needless_range_loop)] // hot vocab loop: index `t` is the token id (exp_buf[t] + is_valid(p,t,..) + t==mask)
 pub fn denoise_loop(
     weights: &TransformerWeights,
     target_tokens: &[usize],
@@ -218,6 +219,8 @@ pub fn denoise_loop(
 /// **Modelless**: applies to any bidirectionally-trained D2F model. No
 /// retraining needed — the schedule is a pure inference-time filter on the
 /// confidence-based unmasking policy.
+#[allow(clippy::too_many_arguments)] // denoise API: weights+tokens+config+steps+thresh+constraint+rng+schedule
+#[allow(clippy::needless_range_loop)] // hot vocab loop: index `t` is the token id (exp_buf[t] + is_valid(p,t,..) + t==mask)
 pub fn denoise_loop_scheduled(
     weights: &TransformerWeights,
     target_tokens: &[usize],
@@ -318,6 +321,8 @@ pub fn denoise_loop_scheduled(
 ///
 /// When `rcd_config` is `None` or `enabled = false`, behaves identically to
 /// [`denoise_loop`] — the residual buffer is never activated.
+#[allow(clippy::too_many_arguments)] // denoise API: weights+tokens+config+steps+thresh+constraint+rng+rcd_config
+#[allow(clippy::needless_range_loop)] // hot loops: index is token/position id used both as exp_buf index and is_valid arg
 #[cfg(feature = "rcd_residual")]
 pub fn denoise_loop_rcd(
     weights: &TransformerWeights,

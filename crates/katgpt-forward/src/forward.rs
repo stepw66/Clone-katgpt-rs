@@ -63,7 +63,9 @@ use crate::ForwardContext;
 /// When `n_kv_head == n_head`, `kv_group_offset == q_head_offset` and `kv_dim == n_embd`
 /// → identical to standard MHA (backward compatible).
 ///
-/// SAFETY: caller must ensure all indices are in bounds.
+/// # Safety
+///
+/// Caller must ensure all indices are in bounds.
 #[allow(clippy::too_many_arguments)]
 #[inline(always)]
 pub unsafe fn attention_head(
@@ -345,6 +347,7 @@ pub fn cluster_map_from_embeddings(
 ) -> Vec<Vec<usize>> {
     cluster_map_round_robin(vocab_size, cluster_size)
 }
+#[allow(clippy::too_many_arguments)] // forward pass: 7 fixed + 1 cfg-gated (domain_latent)
 pub fn forward_base<'a>(
     ctx: &'a mut ForwardContext,
     weights: &TransformerWeights,
