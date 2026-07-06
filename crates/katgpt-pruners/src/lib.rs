@@ -1118,6 +1118,9 @@ pub mod hoare_pruner;
 #[cfg(feature = "trajectory_doctor")]
 pub mod trajectory_doctor;
 
+#[cfg(feature = "step_attribution_qualifier")]
+pub mod step_attribution_qualifier;
+
 #[cfg(feature = "workflow_lattice")]
 pub mod workflow_lattice;
 

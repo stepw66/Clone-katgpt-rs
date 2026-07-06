@@ -24,8 +24,8 @@ This primitive does NOT fit a transformer stack slot (attention/KV/sampling/spec
 
 ### Tasks
 
-- [ ] **T1.1** Create `crates/katgpt-pruners/src/step_attribution_qualifier.rs` behind feature `step_attribution_qualifier`. Module doc references Plan 381 + Research 381 + SkillAdaptor arXiv:2606.01311 eq. 8.
-- [ ] **T1.2** Define the core trait + types (generic over state `K`, replay input `I`, score `S`):
+- [x] **T1.1** Create `crates/katgpt-pruners/src/step_attribution_qualifier.rs` behind feature `step_attribution_qualifier`. Module doc references Plan 381 + Research 381 + SkillAdaptor arXiv:2606.01311 eq. 8.
+- [x] **T1.2** Define the core trait + types (generic over state `K`, replay input `I`, score `S`):
 
 ```rust
 //! Step-Attribution Δ-Qualification Primitive (Plan 381, Research 381)
@@ -111,7 +111,7 @@ where
 }
 ```
 
-- [ ] **T1.3** Define the **tick-attribution** extension trait (the SkillAdaptor Localize+Link fused into one modelless call, generalizing `TrajectoryDoctor::localize_failure` from token-index to a generic tick-index):
+- [x] **T1.3** Define the **tick-attribution** extension trait (the SkillAdaptor Localize+Link fused into one modelless call, generalizing `TrajectoryDoctor::localize_failure` from token-index to a generic tick-index):
 
 ```rust
 /// A localized fault: which tick, which "responsible direction", improvement hint.
@@ -150,26 +150,28 @@ pub trait StepLocalizer<Dir, W> {
 }
 ```
 
-- [ ] **T1.4** Wire the feature flag into `crates/katgpt-pruners/Cargo.toml` + `lib.rs` module re-export. Verify `cargo check -p katgpt-pruners --features step_attribution_qualifier` is clean.
-- [ ] **T1.5** Update root `Cargo.toml` passthrough feature (mirror the `attention_matching` / `closed_unit_compaction` pattern). Verify `cargo check --features step_attribution_qualifier` is clean.
+- [x] **T1.4** Wire the feature flag into `crates/katgpt-pruners/Cargo.toml` + `lib.rs` module re-export. Verify `cargo check -p katgpt-pruners --features step_attribution_qualifier` is clean.
+- [x] **T1.5** Update root `Cargo.toml` passthrough feature (mirror the `attention_matching` / `closed_unit_compaction` pattern). Verify `cargo check --features step_attribution_qualifier` is clean.
 
 ## Phase 2 — Tests + Doc Example
 
 ### Tasks
 
-- [ ] **T2.1** Unit tests for the Δ≥0 gate: candidate beats baseline → `Commit`; candidate equals baseline → `Commit` (Δ=0 ≥ 0); candidate worse → `Rollback`. Use a deterministic toy `ReplayExecutor` (e.g. `SumExecutor` over `&[f32]`).
-- [ ] **T2.2** Unit tests for the threshold variant: with `threshold = 0.1`, candidate-with-Δ=0.05 → `Rollback` (strictly-better requirement).
-- [ ] **T2.3** Unit tests for `StepLocalizer`: synthetic trajectory with a known fault tick + responsibility weights; assert `localize_and_link` returns the correct `tick_idx` + `responsible_idx`.
-- [ ] **T2.4** Doc-test example in the module doc showing the canonical usage: `let verdict = qualifier.qualify(&baseline_k, &mutation, &replay_window); match verdict { Commit => commit(), Rollback => rollback() }`.
-- [ ] **T2.5** Run `cargo test -p katgpt-pruners --features step_attribution_qualifier --lib` — all green.
+- [x] **T2.1** Unit tests for the Δ≥0 gate: candidate beats baseline → `Commit`; candidate equals baseline → `Commit` (Δ=0 ≥ 0); candidate worse → `Rollback`. Use a deterministic toy `ReplayExecutor` (e.g. `SumExecutor` over `&[f32]`).
+- [x] **T2.2** Unit tests for the threshold variant: with `threshold = 0.1`, candidate-with-Δ=0.05 → `Rollback` (strictly-better requirement).
+- [x] **T2.3** Unit tests for `StepLocalizer`: synthetic trajectory with a known fault tick + responsibility weights; assert `localize_and_link` returns the correct `tick_idx` + `responsible_idx`.
+- [x] **T2.4** Doc-test example in the module doc showing the canonical usage: `let verdict = qualifier.qualify(&baseline_k, &mutation, &replay_window); match verdict { Commit => commit(), Rollback => rollback() }`.
+- [x] **T2.5** Run `cargo test -p katgpt-pruners --features step_attribution_qualifier --lib` — all green. (14/14 tests pass, 2026-07-06.)
 
 ## Phase 3 — Latency Bench (G4)
 
 ### Tasks
 
-- [ ] **T3.1** Add a criterion bench `crates/katgpt-pruners/benches/step_attribution_qualifier.rs` measuring `qualify()` latency for W=16/32/64/128 replay windows with a no-op `ReplayExecutor` (isolates gate overhead from executor overhead).
-- [ ] **T3.2** Document the sub-ms gate-overhead target (excluding executor). Gate overhead = aggregate + compare + branch; should be < 1µs for W=64.
-- [ ] **T3.3** Record results in `katgpt-rs/.benchmarks/381_step_attribution_qualifier_goat.md` (defer creation until bench runs).
+- [x] **T3.1** Add a criterion bench `crates/katgpt-pruners/benches/step_attribution_qualifier.rs` measuring `qualify()` latency for W=16/32/64/128 replay windows with a no-op `ReplayExecutor` (isolates gate overhead from executor overhead).
+  - **DEV NOTE:** bench lives at `benches/step_attribution_qualifier_bench.rs` (root benches/, not crate-local) to match the existing convention (`salience_tri_gate_bench.rs`, `cucg_bench.rs`). Uses `std::time::Instant` + `harness = false`, not Criterion — DRY with the existing crate convention.
+- [x] **T3.2** Document the sub-ms gate-overhead target (excluding executor). Gate overhead = aggregate + compare + branch; should be < 1µs for W=64.
+  - **RESULT:** 13 ns aggregate-only at W=64 (76.9× margin under 1 µs target). End-to-end `qualify()` 119 ns at W=64.
+- [x] **T3.3** Record results in `katgpt-rs/.benchmarks/381_step_attribution_qualifier_goat.md` (defer creation until bench runs).
 
 ## Phase 4 — ClosedUnitCompactionGate + WasmTestGate Adapter Shims (optional)
 
@@ -190,12 +192,12 @@ pub trait StepLocalizer<Dir, W> {
 
 | Gate | Evidence | Status |
 |------|----------|--------|
-| **G1** Correctness (Δ≥0 logic; localize_and_link returns correct fault) | Phase 2 unit tests | ⬜ pending Phase 2 |
+| **G1** Correctness (Δ≥0 logic; localize_and_link returns correct fault) | Phase 2 unit tests | ✅ PASS — 14/14 green (2026-07-06) |
 | **G2** Quality-parity (reproduces SkillAdaptor ±8.1→±5.2 variance reduction) | riir-ai Plan 313 Phase 5 G6 PoC | ⬜ BLOCKED — mandatory before default-on |
-| **G3** No-regression (feature off = byte-identical to develop) | Phase 2 + 4 isolation tests | ⬜ pending |
-| **G4** Perf (gate overhead < 1µs at W=64, excluding executor) | Phase 3 bench | ⬜ pending Phase 3 |
+| **G3** No-regression (feature off = byte-identical to develop) | Phase 2 + 4 isolation tests | ✅ PASS — module is cfg-gated; default-features check clean |
+| **G4** Perf (gate overhead < 1µs at W=64, excluding executor) | Phase 3 bench | ✅ PASS — 13 ns aggregate-only @ W=64 (76.9× margin) |
 | **G5** Modelless (no riir-train/riir_gpu/backprop dep) | Cargo.toml dep audit | ✅ by construction (no new deps) |
-| **G6** Feature-isolation (single-feature + all-features check clean) | `cargo check --features step_attribution_qualifier` + `--all-features` | ⬜ pending Phase 1 |
+| **G6** Feature-isolation (single-feature + all-features check clean) | `cargo check --features step_attribution_qualifier` + `--all-features` | ✅ PASS — single-feature + root passthrough + `--all-features` (37.25s) all clean |
 
 ## Failure Mode
 

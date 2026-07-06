@@ -292,6 +292,15 @@ hoare_pruner = []
 trajectory_doctor = ["hoare_pruner"]
 workflow_lattice = ["hoare_pruner"]
 
+# Step-Attribution Δ-Qualification (Plan 381, Research 381).
+# Generic modelless instantiation of SkillAdaptor's eq. 8 commit gate.
+# Sibling to `trajectory_doctor` in the cognitive-branch / skill-lifecycle
+# stack. Opt-in until the riir-ai Plan 313 G6 quality-parity PoC passes
+# (per §3.6 defend-wrong rule). Empty tracking flag — gates
+# `src/step_attribution_qualifier.rs` (traits + types + canonical
+# `DotProductLocalizer` impl). Root forwards as `step_attribution_qualifier`.
+step_attribution_qualifier = []
+
 # Manifold / dynamic rank
 dynamic_rank = ["papaya"]
 manifold_pruner = []
