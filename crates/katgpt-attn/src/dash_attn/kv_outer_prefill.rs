@@ -355,11 +355,13 @@ fn logaddexp(a: f32, b: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "msa_sparse")]
     use crate::dash_attn::msa_distill::MaxPoolBlockScorer;
 
     const HD: usize = 8;
     const BS: usize = 4;
 
+    #[cfg(feature = "msa_sparse")]
     fn make_prefill() -> KvOuterPrefill {
         let router = VortexRouter::MsaMaxPool(MaxPoolBlockScorer::new(BS));
         KvOuterPrefill::new(router, BS, HD)
@@ -415,8 +417,9 @@ mod tests {
         assert_eq!(hot[2], (2, 1));
     }
 
-    // --- Sparse prefill tests ---
+    // --- Sparse prefill tests (require msa_sparse for make_prefill's MaxPoolBlockScorer router) ---
 
+    #[cfg(feature = "msa_sparse")]
     #[test]
     fn test_sparse_prefill_single_block() {
         // Single block = dense attention. Verify output matches manual computation.
@@ -473,6 +476,7 @@ mod tests {
         assert!(result.lse[0].is_finite());
     }
 
+    #[cfg(feature = "msa_sparse")]
     #[test]
     fn test_sparse_prefill_two_blocks_needle() {
         // Two blocks: block 0 is "haystack" (low scores), block 1 is "needle" (high score).
@@ -512,6 +516,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "msa_sparse")]
     #[test]
     fn test_lse_combine_numerical_stability() {
         // Two blocks, same query selects both. Verify combined output matches
