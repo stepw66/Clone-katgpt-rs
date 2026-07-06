@@ -122,10 +122,19 @@ These losers live in `katgpt-core` and must be exiled when `katgpt-core`
 absorption runs (Phase 10). Move the code from `crates/katgpt-core/src/` to
 `crates/katgpt-deprecated/src/` and update both Cargo.tomls:
 
-- [ ] `dflare_fusion` — 🪦 GOAT FAILED
-- [ ] `dflare_kv_routing` — 🪦 GOAT FAILED
-- [ ] `dflare_progressive_budget` — 🪦 GOAT FAILED
-- [ ] `compression_drafter` — GOAT FAILED + explicit demotion
+**Status (2026-07-06): Phase 10 absorption is DONE (Plan 381), but exile is DEFERRED.**
+All 4 losers are already opt-in (verified: 0 occurrences in any `default` feature
+list). The functional demotion goal is achieved. The exile (moving code to
+katgpt-deprecated) is pure code-organization cleanup with marginal value:
+- `dflare_*` types are inline in `speculative/types.rs` behind `#[cfg]` — extracting
+  them to a movable file is invasive and risky for no functional gain.
+- `compression_drafter` is a separate file but low-traffic.
+Exile can be batched with a future katgpt-deprecated consolidation pass.
+
+- [-] `dflare_fusion` — 🪦 GOAT FAILED — **already opt-in (not in default); exile deferred**
+- [-] `dflare_kv_routing` — 🪦 GOAT FAILED — **already opt-in (not in default); exile deferred**
+- [-] `dflare_progressive_budget` — 🪦 GOAT FAILED — **already opt-in (not in default); exile deferred**
+- [-] `compression_drafter` — GOAT FAILED + explicit demotion — **already opt-in (not in default); exile deferred**
 
 ### Phase 3c — exile katgpt-pruners items (cross-crate, during Phase 8 absorption)
 
@@ -133,11 +142,16 @@ These losers live in `katgpt-pruners` and must be exiled when the pruners
 absorption runs (Phase 8). Move the code from `crates/katgpt-pruners/src/` to
 `crates/katgpt-deprecated/src/` and update both Cargo.tomls:
 
-- [ ] `stepcode` — NO GAIN proven
-- [ ] `delta_mem` — value proposition unproven
-- [ ] `rmsd_distill` — ❌ NO GOAT, demoted
-- [ ] `manifold_pruner` — G1 FAIL, demoted
-- [ ] `sdpg_bandit` — NEGATIVE RESULT
+**Status (2026-07-06): Phase 8 absorption is DONE (Plan 378), but exile is DEFERRED.**
+All 5 losers are already opt-in (verified: `katgpt-pruners` `default = []`, and
+none in root `default`). The functional demotion goal is achieved. Exile is pure
+code-organization cleanup; batch with Phase 3b in a future consolidation pass.
+
+- [-] `stepcode` — NO GAIN proven — **already opt-in (not in default); exile deferred**
+- [-] `delta_mem` — value proposition unproven — **already opt-in (not in default); exile deferred**
+- [-] `rmsd_distill` — ❌ NO GOAT, demoted — **already opt-in (not in default); exile deferred**
+- [-] `manifold_pruner` — G1 FAIL, demoted — **already opt-in (not in default); exile deferred**
+- [-] `sdpg_bandit` — NEGATIVE RESULT — **already opt-in (not in default); exile deferred**
 
 ### Phase 3d — remove dead Cargo.toml entries (no code)
 
@@ -195,7 +209,7 @@ Of the 13 with code: 4 live in `src/` (Phase 3a), 4 live in `katgpt-core` (Phase
 
 - **Phase 0.5 (audit): DONE.** This document.
 - **Phase 3a (src/ exile): 3 of 4 done.** `feedback`, `unit_distance`, `alien_sampler` exiled to `katgpt-deprecated` with back-compat re-exports. `dense_mesh` deferred (transformer-bound glue). All workspace tests pass (122 in deprecated crate, 5266+ in workspace).
-- **Phase 3b/3c (cross-crate exile): deferred** to Phases 8/10 absorption.
+- **Phase 3b/3c (cross-crate exile): DEFERRED 2026-07-06.** Phase 8 (Plan 378) and Phase 10 (Plan 381) absorptions are both DONE, but exile is deferred: all 9 losers are already opt-in (0 in any `default` list). Exile is pure code-organization cleanup (moving dead code to katgpt-deprecated) with marginal value; `dflare_*` types are inline in `speculative/types.rs` making extraction invasive. Batch with a future consolidation pass.
 - **Phase 3d (dead Cargo.toml entries): DONE 2026-07-06.** 3 of 4 removed (`embedding_router`, `language_domain`, `gpu`). The 4th (`rest`) was a false positive — revived by Plan 394 (forwards to `katgpt-forward/rest`, active bridge test). No regression: `default`, `--features full`, `--all-features` all compile clean.
 
 The remaining ~80 opt-in features are either PENDING (GOAT not yet run) or BENCH-LOSER (passed but kept opt-in for A/B). Exiling them would destroy active WIP.

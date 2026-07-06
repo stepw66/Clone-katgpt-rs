@@ -129,7 +129,7 @@ Only proceed if Phase 1 T1.8 confirms a modelless quality gain. The primitive la
 
 - [x] **T3.3** All gates PASS → promoted `local_branch_routing` to `default` feature set in `katgpt-core/Cargo.toml` (2026-07-04).
 
-- [ ] **T3.4** N/A — gates passed, no issue to file.
+- [x] **T3.4** N/A — gates passed, no issue to file. (2026-07-06: marked done — condition "gates passed" is met, no issue needed.)
 
 - [x] **T3.5** Cleaned up `CARGO_TARGET_DIR=/tmp/lbr_goat` and `/tmp/lbr_branch_routing`.
 

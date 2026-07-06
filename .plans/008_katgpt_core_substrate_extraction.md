@@ -146,7 +146,7 @@ refined strategy doc, stranded in a private fork.
   - [x] 4e. Commit: `feat(core): Plan 008 step 4 — move HLA substrate to katgpt-core` (see commit log).
 
   ### Deferred subtask (Phase 2 reconciliation, not Phase 1)
-  - [ ] **4b. Port riir-engine's `*_role_aware` variants behind a core feature `hla_role_aware`.** DEFERRED — this is Phase 2 (riir-engine dedup) work, not Phase 1 (substrate extraction). Rationale:
+  - [-] **4b. Port riir-engine's `*_role_aware` variants behind a core feature `hla_role_aware`.** DEFERRED — this is Phase 2 (riir-engine dedup) work, not Phase 1 (substrate extraction). Rationale:
     1. The role-aware kernel variants (`hla_state_update_role_aware`, `ahla_step_role_aware`, `hla_layer_update_role_aware`, `ahla_layer_step_role_aware`, `third_order_update`, `third_order_readout`) all depend on `crate::role_transport::{RoleEmbeddingTable, diagonal_transport, SlotLabel}` — Category C private composition per Issue 007 §"Cross-repo consumer cleanup".
     2. Porting them to core requires defining a `RoleTransport` trait in core + a `SlotLabel` newtype, then having riir-engine's `RoleEmbeddingTable` impl the trait. That's a design change to core's public API surface, not a pure move.
     3. riir-engine also DIVERGED with `ThirdOrderMoment` (Plan 151 T13) + `HlaUpdateMode` + a `role: Option<SlotLabel>` field on `HlaQHeadState`/`AhlaQHeadState`. These are cognitive extensions, not substrate.
