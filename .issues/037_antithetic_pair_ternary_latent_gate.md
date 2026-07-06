@@ -4,7 +4,7 @@
 **Priority:** P3 (speculative reframe — needs PoC before any verdict)
 **Source paper:** [EGGROLL: Evolution Strategies at the Hyperscale](https://arxiv.org/abs/2511.16652) — Sarkar et al., Oxford/WhiRL/MILA, Feb 2026
 **Cross-ref:** `riir-train/.research/377_EGGROLL_Low_Rank_Evolution_Strategies.md` (training-side distillation)
-**Status:** Open — fusion idea, novelty TBD pending `riir-poc/` defend-wrong PoC (per research skill §3.6)
+**Status:** CLOSED (2026-07-06) — Strengthened PoC complete. Verdict: TIER DOWN. Antithetic-pair is not a universal GOAT (3/7 wins against direct-obs coherence gate). Stays as opt-in research note; no katgpt-rs plan unless a concrete scalar-score-only use case emerges. See Strengthened PoC Addendum.
 
 ---
 
