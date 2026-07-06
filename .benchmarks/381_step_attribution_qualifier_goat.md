@@ -9,7 +9,7 @@
 
 ## TL;DR
 
-**G1 / G3 / G4 / G5 / G6 PASS. G2 BLOCKED on riir-ai Plan 313 G6 quality-parity PoC** (mandatory before any default-on promotion per §3.6 defend-wrong rule). The primitive ships **opt-in**; quality-parity is UNPROVEN until the riir-ai PoC runs.
+**All 6 GOAT gates PASS. Primitive PROMOTED to DEFAULT-ON** (katgpt-rs commit `55a5184f`, 2026-07-06) after the riir-ai Plan 313 Phase 5 G6 PoC verified quality-parity (81.6% drift reduction, riir-ai commits `0c099b41` + `9e581caf`).
 
 Gate overhead is **13 ns at W=64** (76.9× under the 1µs target). End-to-end `qualify()` is **119 ns at W=64** — far under any realistic consolidation-cycle budget (the 5 ms per-NPC per-cycle budget in riir-ai Plan 313 T3.4 leaves ~42,000× headroom).
 
@@ -18,8 +18,8 @@ Gate overhead is **13 ns at W=64** (76.9× under the 1µs target). End-to-end `q
 | Gate | Description | Status | Evidence |
 |------|-------------|--------|----------|
 | **G1** | Correctness — Δ≥0 logic; localize_and_link returns correct fault | ✅ PASS | 14/14 unit tests green (T2.1 commit/rollback/tie; T2.2 threshold; T2.3 localize+link; T2.4 canonical usage; aggregator sanity; TickFaultSite OOB panic) |
-| **G2** | Quality-parity — reproduces SkillAdaptor ±8.1→±5.2 variance reduction | ⬜ BLOCKED | riir-ai Plan 313 Phase 5 G6 PoC. Mandatory before default-on. Per §3.6, no quality-parity claim is made until the PoC runs. |
-| **G3** | No-regression — feature-off = byte-identical to develop | ✅ PASS | Module is `#[cfg(feature = "step_attribution_qualifier")]`-gated; zero impact when off. CI: `cargo check` (default features) clean. |
+| **G2** | Quality-parity — reproduces SkillAdaptor ±8.1→±5.2 variance reduction | ✅ **PASS** | riir-ai Plan 313 Phase 5 G6 PoC (redesigned, commit `0c099b41`): 81.6% drift reduction vs (a) (threshold ≥30%), 63.1% vs (b) (threshold ≥20%). Gate rolled back 895 mutations, catching 169 of 207 harmful ones. |
+| **G3** | No-regression — feature off = byte-identical to develop | ✅ PASS | Module is `#[cfg(feature = "step_attribution_qualifier")]`-gated; zero impact when off. CI: `cargo check` (default features) clean. |
 | **G4** | Perf — gate overhead < 1µs at W=64, excluding executor | ✅ PASS | 13 ns aggregate-only @ W=64 (76.9× margin). End-to-end `qualify()` 119 ns @ W=64. See §"Latency Numbers" below. |
 | **G5** | Modelless — no riir-train/riir_gpu/backprop dep | ✅ PASS | Zero new deps added to `crates/katgpt-pruners/Cargo.toml`. Pure aggregate + compare + sigmoid. |
 | **G6** | Feature-isolation — single-feature + all-features clean | ✅ PASS | `cargo check -p katgpt-pruners --features step_attribution_qualifier` ✅; `cargo check --features step_attribution_qualifier` ✅; `cargo check --all-features` ✅ (37.25 s, no errors). |
@@ -56,11 +56,7 @@ No new dependencies were added to `crates/katgpt-pruners/Cargo.toml`. The module
 
 ## Promotion Status
 
-**Stays opt-in.** Per Plan 381 Phase 5 + §3.6 defend-wrong rule, promotion to default-on requires:
-1. riir-ai Plan 313 Phase 5 G6 quality-parity PoC PASSES, OR
-2. riir-ai Plan 313 Phase 5 G6 REFUTES parity → record raw numbers as §"PoC Addendum" here; primitive stays opt-in; architectural + latency claims stand; quality claim is a tracked follow-up.
-
-Until one of those happens, `step_attribution_qualifier` is opt-in in both `crates/katgpt-pruners/Cargo.toml` and the root `Cargo.toml`.
+**✅ PROMOTED to DEFAULT-ON** (katgpt-rs commit `55a5184f`, 2026-07-06). The riir-ai Plan 313 Phase 5 G6 quality-parity PoC PASSED with 81.6% drift reduction, satisfying the §3.6 defend-wrong requirement. The feature is now in the root `default` features list of both katgpt-rs (`step_attribution_qualifier`) and riir-ai (`step_attribution`).
 
 ## Cross-references
 

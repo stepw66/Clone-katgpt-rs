@@ -184,16 +184,16 @@ pub trait StepLocalizer<Dir, W> {
 
 ### Tasks
 
-- [ ] **T5.1** **BLOCKED** — await riir-ai Plan 313 Phase 5 G6 quality-parity PoC. Per §3.6, the open primitive's promotion to default-on requires the private runtime PoC to confirm the modelless instantiation reproduces SkillAdaptor's variance reduction. Until then, `step_attribution_qualifier` stays opt-in.
-- [ ] **T5.2** If G6 PASSES: open katgpt-rs Issue for promotion (mirror the `committed_field_blend` Issue 005 pattern), flip Cargo.toml default, update README + research note + guide.
-- [ ] **T5.3** If G6 REFUTES parity: record raw PoC numbers as a §"PoC Addendum" in Research 381; the primitive stays opt-in; the architectural + latency claims stand; the quality claim is a tracked follow-up.
+- [x] **T5.1** ~~BLOCKED~~ UNBLOCKED — riir-ai Plan 313 Phase 5 G6 quality-parity PoC PASSED (commit riir-ai 0c099b41 + 9e581caf, 2026-07-06): 81.6% drift reduction vs no-attribution baseline (DirectionDelta mutations), 63.1% vs TrajectoryDoctor-only, 895/1000 rollbacks.
+- [x] **T5.2** PROMOTED — katgpt-rs commit 55a5184f (2026-07-06): `step_attribution_qualifier` added to root `default` features list. GOAT gate G2 now PASS.
+- [-] **T5.3** N/A — PoC PASSED, so the REFUTE path is not taken. The initial REFUTE (Failure mutations, Δ=0 degenerate) and the redesigned PASS (DirectionDelta mutations) are both preserved in riir-ai/.benchmarks/313_step_attribution_goat.md per §3.6.
 
 ## GOAT Gate Summary
 
 | Gate | Evidence | Status |
 |------|----------|--------|
 | **G1** Correctness (Δ≥0 logic; localize_and_link returns correct fault) | Phase 2 unit tests | ✅ PASS — 14/14 green (2026-07-06) |
-| **G2** Quality-parity (reproduces SkillAdaptor ±8.1→±5.2 variance reduction) | riir-ai Plan 313 Phase 5 G6 PoC | ⬜ BLOCKED — mandatory before default-on |
+| **G2** Quality-parity (reproduces SkillAdaptor ±8.1→±5.2 variance reduction) | riir-ai Plan 313 Phase 5 G6 PoC | ✅ PASS — 81.6% drift reduction vs baseline (DirectionDelta mutations, riir-ai commit 0c099b41) |
 | **G3** No-regression (feature off = byte-identical to develop) | Phase 2 + 4 isolation tests | ✅ PASS — module is cfg-gated; default-features check clean |
 | **G4** Perf (gate overhead < 1µs at W=64, excluding executor) | Phase 3 bench | ✅ PASS — 13 ns aggregate-only @ W=64 (76.9× margin) |
 | **G5** Modelless (no riir-train/riir_gpu/backprop dep) | Cargo.toml dep audit | ✅ by construction (no new deps) |
