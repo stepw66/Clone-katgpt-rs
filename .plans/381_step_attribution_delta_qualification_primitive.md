@@ -6,7 +6,7 @@
 **Runtime wiring:** [riir-ai/.plans/313_step_attribution_branch_wiring.md](../../riir-ai/.plans/313_step_attribution_branch_wiring.md)
 **Source paper:** [arXiv:2606.01311](https://arxiv.org/abs/2606.01311) — SkillAdaptor, Yu et al. 2026
 **Target:** `crates/katgpt-pruners/src/step_attribution_qualifier.rs` (new module) + Cargo feature `step_attribution_qualifier`
-**Status:** Active — Phase 1 next
+**Status:** ✅ COMPLETE (Phases 1-5 done; Phase 4 T4.1 done 2026-07-06; T4.2 deferred per plan)
 
 ---
 
@@ -173,11 +173,15 @@ pub trait StepLocalizer<Dir, W> {
   - **RESULT:** 13 ns aggregate-only at W=64 (76.9× margin under 1 µs target). End-to-end `qualify()` 119 ns at W=64.
 - [x] **T3.3** Record results in `katgpt-rs/.benchmarks/381_step_attribution_qualifier_goat.md` (defer creation until bench runs).
 
-## Phase 4 — ClosedUnitCompactionGate + WasmTestGate Adapter Shims (optional)
+## Phase 4 — ClosedUnitCompactionGate + WasmTestGate Adapter Shims
 
 ### Tasks
 
-- [ ] **T4.1** Ship an adapter impl showing `StepAttributionQualifier` subsumes the `WasmTestGate::avg_reward_delta` pattern from R172 ITSE — a `WasmTestGateAdapter` that wraps the existing `WasmTestGate` field as a `StepAttributionQualifier` with `threshold = 0.0`. Document in module doc that R172's gate is the prior art for new-pruner registration; this primitive generalizes to all candidate/baseline pairs.
+- [x] **T4.1** Ship an adapter impl showing `StepAttributionQualifier` subsumes the `WasmTestGate::avg_reward_delta` pattern from R172 ITSE — a `WasmTestGateAdapter` that wraps the existing `WasmTestGate` field as a `StepAttributionQualifier` with `threshold = 0.0`. Document in module doc that R172's gate is the prior art for new-pruner registration; this primitive generalizes to all candidate/baseline pairs.
+  - **DEV NOTE (honesty correction):** Research 381 §2.3 overclaimed R172's `WasmTestGate { avg_reward_delta }` as "SHIPPED". It was **proposed** in R172 §3 "Mechanism 3" but the shipped `WasmTestGate` (`skill_test.rs`) simplified to coverage-only (no Δ field). The adapter restores the R172-proposed Δ acceptance pattern as a special case of `StepAttributionQualifier`.
+  - **Implementation:** `WasmTestGateAdapter` + `ScalarStateExecutor` + `ReplaceScalar` added to `step_attribution_qualifier.rs`. Delegates to `StepAttributionQualifier::new(ScalarStateExecutor, SumAggregator, 0.0)` — proves subsumption by construction.
+  - **Module doc updated:** added "# Prior art: R172 ITSE `WasmTestGate`" section.
+  - **Tests:** 6 new tests (commit/rollback/equal/strict-threshold/subsumption-sweep/default-equals-new). All 20 tests green (14 original + 6 new). Doc-test still passes. `--all-features` clean (G6 no-regression).
 - [ ] **T4.2** **DEFERRED** — adapter for `ClosedUnitCompactionGate` (Plan 333). CUCG's rubric is structurally different (predicate-list + FireRule, not Δ-comparison); the adapter would translate a rubric verdict into a ScoreAggregator output. Out of scope for Phase 1-3; track in `.issues/` if the G6 PoC (riir-ai Plan 313) shows CUCG-style rubrics would benefit from Δ unification.
 
 ## Phase 5 — Promotion Gate (BLOCKED on riir-ai Plan 313 G6)

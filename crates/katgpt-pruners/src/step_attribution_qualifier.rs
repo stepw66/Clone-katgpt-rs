@@ -61,6 +61,20 @@
 //! let verdict = qualifier.qualify(&1.0, &AddConst(2.0), &[(), (), ()]);
 //! assert_eq!(verdict, QualificationVerdict::Commit { delta_above_threshold: true });
 //! ```
+//!
+//! # Prior art: R172 ITSE `WasmTestGate`
+//!
+//! R172 (MUSE/ITSE, arXiv:2605.27366) proposed `avg_reward_delta`-gated
+//! registration for new pruner arms: a candidate arm enters the bandit bank
+//! only if its mean reward on the test suite beats the existing best arm's
+//! (`avg_reward_delta >= 0`). The shipped [`crate::skill_test::WasmTestGate`]
+//! simplified this to a coverage-only gate (no Δ field).
+//! [`WasmTestGateAdapter`] restores the R172-proposed Δ acceptance as a special
+//! case of this generic primitive — the R172 rule is exactly
+//! `StepAttributionQualifier` with `threshold = 0.0` over scalar mean-reward
+//! states. This primitive generalizes from "new-pruner registration" to "any
+//! candidate/baseline pair" (cognitive-branch updates, freeze acceptance,
+//! CommittedFieldBlend gates, etc.).
 
 use core::marker::PhantomData;
 
@@ -489,6 +503,125 @@ fn stable_sigmoid(x: f32) -> f32 {
 }
 
 // ─────────────────────────────────────────────────────────────────────────
+// Phase 4 T4.1 — R172 ITSE `WasmTestGate` adapter (prior-art subsumption)
+// ─────────────────────────────────────────────────────────────────────────
+
+/// Adapter showing [`StepAttributionQualifier`] subsumes R172 ITSE's proposed
+/// `WasmTestGate::avg_reward_delta` acceptance pattern for new-pruner
+/// registration (Plan 381 Phase 4 T4.1).
+///
+/// **Prior art (R172 / MUSE ITSE, arXiv:2605.27366, §3 "Mechanism 3: WASM
+/// Test Gates"):** before a candidate pruner arm enters the bandit bank,
+/// compute its mean reward on the test suite vs the existing best arm's
+/// (`avg_reward_delta`). Register iff `avg_reward_delta >= 0`. The shipped
+/// [`crate::skill_test::WasmTestGate`] simplified R172's proposal to a
+/// coverage-only gate (no Δ field) — this adapter restores the R172-proposed
+/// Δ acceptance as a special case of the generic primitive.
+///
+/// **Subsumption mapping:**
+/// - State `K` = `f32` (the arm's mean reward on the test suite)
+/// - [`ReplayExecutor`] = [`ScalarStateExecutor`] (echoes the scalar state;
+///   the "replay" is trivial because the state IS the pre-aggregated reward)
+/// - [`ScoreAggregator`] = [`SumAggregator`] (identity on a single-element
+///   window)
+/// - [`CandidateMutation`] = [`ReplaceScalar`] (swap to candidate arm's mean)
+/// - `Δ = candidate_mean - baseline_mean = avg_reward_delta`
+///
+/// This proves [`StepAttributionQualifier`] generalizes from "new-pruner
+/// registration" to "any candidate/baseline pair" (cognitive-branch updates,
+/// freeze acceptance, CommittedFieldBlend gates, etc.).
+#[derive(Debug, Clone, Copy)]
+pub struct WasmTestGateAdapter {
+    /// Δ threshold for acceptance. R172 default: `0.0` (candidate must not
+    /// regress vs existing best arm). Positive values enforce "strictly
+    /// better" registration.
+    pub threshold: f32,
+}
+
+impl Default for WasmTestGateAdapter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl WasmTestGateAdapter {
+    /// Construct with R172's default threshold (`Δ ≥ 0.0`).
+    pub fn new() -> Self {
+        Self { threshold: 0.0 }
+    }
+
+    /// Construct with a strict threshold (candidate must beat baseline by
+    /// `threshold`). Mirrors
+    /// [`StepAttributionQualifier::with_threshold`].
+    pub fn with_threshold(threshold: f32) -> Self {
+        Self { threshold }
+    }
+
+    /// R172 acceptance rule via the generic primitive.
+    ///
+    /// Delegates to [`StepAttributionQualifier::qualify`] with
+    /// [`ScalarStateExecutor`] + [`SumAggregator`] + a single-element replay
+    /// window, proving the R172 `avg_reward_delta >= 0` rule is a special
+    /// case of the generic Δ≥threshold gate.
+    ///
+    /// - `baseline_avg_reward` — existing best arm's mean reward on the suite.
+    /// - `candidate_avg_reward` — candidate arm's mean reward on the suite.
+    /// - Returns [`QualificationVerdict::Commit`] iff
+    ///   `candidate - baseline >= threshold`.
+    #[inline]
+    pub fn qualify(
+        &self,
+        baseline_avg_reward: f32,
+        candidate_avg_reward: f32,
+    ) -> QualificationVerdict {
+        let qualifier = StepAttributionQualifier::new(
+            ScalarStateExecutor,
+            SumAggregator,
+            self.threshold,
+        );
+        qualifier.qualify(
+            &baseline_avg_reward,
+            &ReplaceScalar(candidate_avg_reward),
+            &[()],
+        )
+    }
+}
+
+/// [`ReplayExecutor`] that echoes a scalar state — the "replay" is trivial
+/// because the state IS the pre-aggregated reward. Used by
+/// [`WasmTestGateAdapter`] to map R172's pre-computed `avg_reward_delta`
+/// pattern onto the generic primitive.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ScalarStateExecutor;
+
+impl ReplayExecutor<f32, (), f32> for ScalarStateExecutor {
+    /// Returns one score per input, each equal to the state scalar `k`.
+    /// [`SumAggregator`] then reduces to `k * inputs.len()`; with a
+    /// single-element window this is just `k`.
+    #[inline]
+    fn replay(&self, k: &f32, inputs: &[()]) -> Vec<f32> {
+        // Length MUST equal inputs.len() per the trait contract.
+        let mut out = Vec::with_capacity(inputs.len());
+        for _ in inputs {
+            out.push(*k);
+        }
+        out
+    }
+}
+
+/// [`CandidateMutation`] that replaces the scalar state — models "swap to
+/// the candidate arm's mean reward". Used by [`WasmTestGateAdapter`].
+#[derive(Debug, Clone, Copy)]
+pub struct ReplaceScalar(pub f32);
+
+impl CandidateMutation<f32> for ReplaceScalar {
+    #[inline]
+    fn apply_to(&self, _baseline: &f32) -> f32 {
+        self.0
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
 // Tests (Phase 2: T2.1–T2.5)
 // ─────────────────────────────────────────────────────────────────────────
 
@@ -717,5 +850,92 @@ mod tests {
     #[should_panic(expected = "responsible_idx out of bounds")]
     fn tick_fault_site_rejects_out_of_bounds_idx() {
         TickFaultSite::<Vec<f32>, f32>::new(0, "x", vec![0.5], 5);
+    }
+
+    // ── Phase 4 T4.1: WasmTestGateAdapter subsumption tests ──────────────
+    //
+    // Proves the adapter delegates correctly to StepAttributionQualifier and
+    // reproduces R172's `avg_reward_delta >= 0` acceptance as a special case.
+
+    #[test]
+    fn t41_adapter_commit_when_candidate_beats_baseline() {
+        let adapter = WasmTestGateAdapter::new();
+        let verdict = adapter.qualify(1.0, 1.5); // Δ = +0.5
+        assert_eq!(
+            verdict,
+            QualificationVerdict::Commit {
+                delta_above_threshold: true
+            }
+        );
+    }
+
+    #[test]
+    fn t41_adapter_commit_when_candidate_equals_baseline() {
+        // R172 default threshold is 0.0; Δ=0 qualifies (≥ not >).
+        let adapter = WasmTestGateAdapter::new();
+        let verdict = adapter.qualify(1.0, 1.0); // Δ = 0.0
+        assert_eq!(
+            verdict,
+            QualificationVerdict::Commit {
+                delta_above_threshold: true
+            }
+        );
+    }
+
+    #[test]
+    fn t41_adapter_rollback_when_candidate_regresses() {
+        let adapter = WasmTestGateAdapter::new();
+        let verdict = adapter.qualify(1.0, 0.5); // Δ = -0.5
+        assert_eq!(
+            verdict,
+            QualificationVerdict::Rollback {
+                delta_below_threshold: true
+            }
+        );
+    }
+
+    #[test]
+    fn t41_adapter_strict_threshold_enforces_strictly_better() {
+        // threshold = 0.1: candidate must beat baseline by ≥ 0.1.
+        let adapter = WasmTestGateAdapter::with_threshold(0.1);
+        let verdict = adapter.qualify(1.0, 1.05); // Δ = +0.05 < 0.1
+        assert_eq!(
+            verdict,
+            QualificationVerdict::Rollback {
+                delta_below_threshold: true
+            }
+        );
+    }
+
+    #[test]
+    fn t41_adapter_subsumption_matches_direct_qualifier() {
+        // The headline proof: the adapter produces bit-identical verdicts to
+        // a hand-constructed StepAttributionQualifier on the same data, across
+        // a sweep of (baseline, candidate) pairs covering all verdict regimes.
+        let adapter = WasmTestGateAdapter::new();
+        let direct = StepAttributionQualifier::new(ScalarStateExecutor, SumAggregator, 0.0);
+        let cases = [
+            (1.0_f32, 1.5_f32), // commit (Δ=+0.5)
+            (1.0, 1.0),          // commit (Δ=0, ≥ threshold)
+            (1.0, 0.5),          // rollback (Δ=-0.5)
+            (0.3, 0.3),          // commit (Δ=0)
+            (0.9, 0.8),          // rollback (Δ=-0.1)
+            (2.0, 3.0),          // commit (Δ=+1.0)
+        ];
+        for (baseline, candidate) in cases {
+            let adapter_verdict = adapter.qualify(baseline, candidate);
+            let direct_verdict = direct.qualify(&baseline, &ReplaceScalar(candidate), &[()]);
+            assert_eq!(
+                adapter_verdict, direct_verdict,
+                "adapter vs direct mismatch at baseline={baseline}, candidate={candidate}"
+            );
+        }
+    }
+
+    #[test]
+    fn t41_adapter_default_matches_new() {
+        // Default trait impl must agree with `new()` (R172 threshold = 0.0).
+        assert_eq!(WasmTestGateAdapter::default().threshold, WasmTestGateAdapter::new().threshold);
+        assert_eq!(WasmTestGateAdapter::default().threshold, 0.0);
     }
 }
