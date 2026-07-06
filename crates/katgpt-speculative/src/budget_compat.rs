@@ -120,6 +120,7 @@ mod tests {
         assert_eq!(result, 100);
     }
 
+    #[cfg(feature = "budget_adaptation")]
     #[test]
     fn test_effective_tree_budget_entropy_adapts() {
         let result = effective_tree_budget(100, 1.5, BudgetAdaptation::Entropy);
