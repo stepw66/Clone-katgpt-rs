@@ -1,6 +1,6 @@
 # Plan 398 — D2F Inference Substrate Extraction to katgpt-forward
 
-**Status:** DONE — pending commit
+**Status:** DONE — committed `8d688bde` (on `develop`)
 **Branch:** `develop`
 **Predecessor:** Plan 396 (CLOSED `4f59e97b`) — speculative Phase 10 dd_tree full relocation
 **Successor (planned):** Plan 399 — d2f wrapper files (`d2f.rs`, `d2f_verifier.rs`, `diffusion_sampler.rs`) move to katgpt-forward
@@ -58,7 +58,7 @@ These are training-research concerns that belong in root (or eventually riir-tra
   - GOAT `bench_102_tilert_pipeline_goat`: 10/10 PASS ✅ (one flake on first run — `bench_e_stability_profile` CV=2.32 noise; re-run passed cleanly; my changes don't touch any stability-metric code path)
   - GOAT `bench_165_hydra_budget_goat` (hydra_budget + decode_specialize): 1/1 PASS ✅
   - Project-wide diagnostics: 0 errors, 0 warnings ✅
-- [ ] **T8**: Commit on `develop` per global rules. Use `refactor:` prefix.
+- [x] **T8**: Commit on `develop` per global rules. Use `refactor:` prefix. ✅ (commit `8d688bde`)
 
 ## (5) Validation Strategy
 

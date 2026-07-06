@@ -102,7 +102,7 @@ Key findings per crate:
 
 ## Tasks
 
-- [ ] **T0.** Audit (DONE — see above).
+- [x] **T0.** Audit (DONE — see above).
 - [x] **T1.** `katgpt-band` crate. ✅ DONE 2026-07-04.
   - T1.1 Copy 4 files to `crates/katgpt-band/src/`. ✅
   - T1.2 Imports: zero rewrites needed — `crate::band_conditioner::*` refs
