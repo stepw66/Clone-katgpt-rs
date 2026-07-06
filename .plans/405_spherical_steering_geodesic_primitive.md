@@ -197,14 +197,11 @@ pub fn spherical_steering_into(
 
 ---
 
-## Phase 5 — Fusion Follow-up (DEFERRED — tracked, not executed in this plan)
+## Phase 5 — Fusion Follow-up (EVALUATED — F1 fails novelty gate)
 
-The F1 fusion candidate (Slerp × CommittedFieldBlend × HLA divergence detection = "personality drift auto-correction") is a potential Super-GOAT. Per Research 382 §2.4, it is **not committed** in this plan — it requires:
-1. This primitive (Plan 405) to ship and pass G1–G5.
-2. A separate novelty gate (Q1–Q4) for the fusion itself.
-3. If Q1–Q4 all pass, a private guide in `riir-ai/.research/` + a plan in `riir-ai/.plans/`.
+The F1 fusion candidate (Slerp × CommittedFieldBlend × HLA divergence detection = "personality drift auto-correction") was a hypothesized Super-GOAT. Per Research 382 §2.4, it required its own Q1–Q4 novelty gate before commitment. **That gate has now been run — F1 fails Q1, Q2, Q3 (Q4 partial). Not Super-GOAT.** See [Issue 039](../.issues/039_plan405_f1_fusion_novelty_gate_failed.md) for the full verdict.
 
-- [ ] **T5.1 (DEFERRED)** After Plan 405 Phase 3 promotion, evaluate F1 fusion novelty. If promising, open a new research note in `katgpt-rs/.research/` or directly in `riir-ai/.research/` (depending on where the selling point lives).
+- [x] **T5.1 (DONE — verdict: not Super-GOAT)** Evaluated F1 fusion novelty via Q1–Q4 gate. Result: fails Q1 (selling point already shipped as R159 Phase-Rotation Subspace Gate; detect-then-correct loop already shipped as `reestimation`; premise contradicts R146/R158/R311 where drift is intentional behavior), Q2 (same operation class as R159), Q3 (selling point duplicated). No guide, no plan, no primitive. Recorded in Issue 039. F2 fusion (Slerp × Plan 322) untouched — needs its own gate if ever pursued.
 
 ---
 
