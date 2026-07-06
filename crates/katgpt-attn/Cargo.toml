@@ -83,3 +83,9 @@ funcattn_chiar_blend = ["chiaroscuro"]
 # gdn2/forward.rs. Forwards to katgpt-core (for sparse_matmul) and
 # katgpt-forward (for ForwardContext.active_indices/active_values).
 sparse_mlp = ["katgpt-core/sparse_mlp", "katgpt-forward/sparse_mlp"]
+# HOLA Hippocampal Exact KV Cache integration (Plan 395, Research 378).
+# Forwards to katgpt-core/hippocampal_cache. When active, Gdn2LayerState gains
+# an optional `cache: Option<HippocampalCache<HEAD_DIM, W>>` field that observes
+# the delta-rule write magnitude (β·‖e‖) per token. The cache is a pure observer
+# — it does not perturb the GDN2 state. Zero overhead when None.
+hippocampal_cache = ["katgpt-core/hippocampal_cache"]

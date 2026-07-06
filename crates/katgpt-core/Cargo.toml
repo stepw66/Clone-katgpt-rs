@@ -162,6 +162,7 @@ flow_field_nav = ["leo_all_goals", "dep:rustfft"]  # Fourier-smoothed flow field
 spectral_pruner = ["dep:rustfft"]  # Spectral Irrep Pruner — spectral flatness-based speculative decoding pruning (Plan 246, GOAT PASS +3.6% overhead, default-ON)
                                    # Inspired by arXiv:2606.02993: prunes tokens when logit spectrum shows competing modes.
 octree_ctc = ["sense_composition"]  # OctreeCTC Reconstructive Memory Navigation (Plan 248, GOAT PASS, arXiv:2606.06036)
+hippocampal_cache = []  # HOLA Hippocampal Exact KV Cache — surprise-evicted (β·‖e‖) bounded KV cache with decoupled RMSNorm-γ read (Plan 395, Research 378, arxiv 2607.02303). Opt-in until G1–G4 GOAT gate passes. Pure stdlib + katgpt-types (no extra deps).
 newton_schulz = []  # Newton-Schulz orthogonalization + Muon momentum (Plan 152, Research 114, GOAT 25/25 Bench 050). Pure substrate: zero `crate::` deps, zero external deps — self-contained f32 linear algebra (transpose, matmul, 5-iteration cubic Newton-Schulz). Extracted from katgpt-rs/src/ per Issue 355 Phase 1a. Root re-exports via `pub use katgpt_core::newton_schulz;` so historical `katgpt_rs::newton_schulz::*` paths keep resolving. NOT in katgpt-core `default` — root's default-on forwarder activates it; other katgpt-core consumers (e.g. riir-gpu `lora_muon_optimizer`) enable it explicitly.
 subspace_phase_gate = []  # Subspace phase-gate primitives — participation ratio, numerical rank, N≥d phase-transition gate (Wang et al. Thm 4, arXiv:2409.02426), runtime Jacobian SVD via forward differences (Plan 301, Research 279). Pure numeric, no extra deps. Opt-in until G1 GOAT gate passes.
 cognitive_architecture_root = ["engram"]  # Issue 039 — CognitiveArchitectureRoot([u8;32]) — single BLAKE3 pass over the existing per-component roots (PTG + EngramTable + ShardSet + FunctorSig) plus (tick, npc_id) binding pair. Composition layer, NOT a re-walk — ~200 bytes hashed, ~200 ns. Enables anti-cheat on cognitive state + quorum-attested personality freeze/thaw + on-chain NPC avatar portability. Zero-alloc, stack-only newtype mirroring EngramTableId. DEFAULT-ON (2026-07-04): G1 spec-match 13/13 unit tests + bit-flip sensitivity on every input field; G1-avalanche min 120/256 avg 126/256 bits (BLAKE3 expected ~128, floor 96); G2 from_parts 208ns + verify 208ns (<500ns gate, 2.4× headroom); G2-alloc 0 allocs/1000 calls on both hot paths; G3 --all-features + --no-default-features clean; G4 size_of == 32 bytes. Pure modelless (BLAKE3 composition, no training, no softmax).
@@ -1054,3 +1055,15 @@ required-features = ["ptg_functor_edges"]
 name = "bench_379_ane_roofline_goat"
 harness = false
 required-features = ["ane_roofline"]
+
+# Plan 395 — HOLA Hippocampal Exact KV Cache GOAT gate G2 latency + T2.3 heap-vs-sorted.
+# observe ≤ 100 ns (W=64) / ≤ 30 ns (micro); read ≤ 1 µs (W=64, D=256).
+[[bench]]
+name = "hippocampal_cache_goat"
+harness = false
+required-features = ["hippocampal_cache"]
+
+# Plan 395 Phase 4 — G4 synthetic retrieval gate.
+[[test]]
+name = "hippocampal_cache_retrieval"
+required-features = ["hippocampal_cache"]

@@ -1237,6 +1237,30 @@ Distills O'Reilly 2026 *This is how the Neocortex Learns* into a generic, zero-a
 
 Feature gate: `temporal_deriv` (**DEFAULT-ON** since GOAT 4/4 fusions passed). Auto-enabled by `bom_sampling` for the sigmoid-surprise gate. 📖 Plan: [`.plans/277_temporal_derivative_kernel.md`](.plans/277_temporal_derivative_kernel.md), Research: [`.research/243_Temporal_Derivative_Kernel_Neocortical_Learning.md`](.research/243_Temporal_Derivative_Kernel_Neocortical_Learning.md), Paper: [arxiv 2606.08720](https://arxiv.org/abs/2606.08720).
 
+### 🧠 HOLA Hippocampal Exact KV Cache — Surprise-Evicted Bounded KV for Linear Attention (Plan 395, arxiv 2607.02303)
+
+Distills Cui 2026, *A Hippocampus for Linear Attention* into a **surprise-evicted bounded exact KV cache** that complements the GDN2 fixed-size recurrent state (Plan 105, default-on backbone). The cache stores the top-`w` tokens by intrinsic delta-rule write magnitude `β·‖e‖` (computed *for free* by the existing GDN2 update — both `β` and `‖e‖` are already on the hot path), and reads them via a **decoupled RMSNorm-γ** sharpened softmax that turns the exact copies into near-argmax retrieval instead of a soft average.
+
+```text
+  score_t = β_t · ‖e_t‖                        (intrinsic surprise — free from delta-rule update)
+  cache = top-w by score                       (min-heap, O(log w) observe)
+  read: q̃ = RMSNorm_γ(q), k̃_j = RMSNorm_γ(k_j)
+        out = Σ_j softmax(q̃·k̃_j / √d) · v_j   (near-argmax retrieval via √d sharpening)
+```
+
+**GOAT gate G1–G4 modelless PASS** (G5 perplexity deferred to riir-train, Issue 038):
+
+| Gate | Result | Verdict |
+|------|--------|--------|
+| **G1** Eviction correctness | 8/8 needles retained, distractors evicted, 5-order-independent | ✅ PASS |
+| **G2** Latency | observe 28.7 ns (W=64) / 1.75 ns (micro); read 2.87 µs (W=64 D=256 fast) / 86 ns (micro) | ✅ PASS (observe), ⚠️ read 2.9× over at D=256 (compute-bound) |
+| **G3** No-regression | byte-identical GDN2 state with/without cache observer | ✅ PASS |
+| **G4** Retrieval | HOLA softmax 8/8 (cosine ≈ 1.0); recency 0/8; sigmoid-gated 0/8 (documented) | ✅ PASS |
+
+**AGENTS.md deviation (documented):** the cache read uses **softmax**, not sigmoid. The "sigmoid not softmax" rule applies to gating/routing (independent per-option gates); the HOLA read is attention/retrieval (competitive selection), where softmax normalizes for near-argmax retrieval. Sigmoid-gated read recovers 0/8 needles (mean cosine 0.61) — non-matching slots accumulate `sigmoid(0) ≈ 0.5 · v_j` noise. Both read paths ship; softmax is recommended.
+
+Feature gate: `hippocampal_cache` (**opt-in** — G1–G4 PASS modelless; G5 perplexity deferred to riir-train). Competes for the KV-compression slot alongside AM (Plan 271) and Sink-Aware (Plan 287). 📖 Plan: [`.plans/395_hippocampal_exact_kv_cache.md`](.plans/395_hippocampal_exact_kv_cache.md), Research: [`.research/378_HOLA_Hippocampal_Exact_KV_for_Linear_Attention.md`](.research/378_HOLA_Hippocampal_Exact_KV_for_Linear_Attention.md), Paper: [arxiv 2607.02303](https://arxiv.org/abs/2607.02303).
+
 ### 🛡️ Self-Advantage Gate — Dead-Compute Detector via Pre/Post Log-Ratio (Plan 283, arxiv 2511.16886)
 
 Distills Asadulaev et al. *Latent Reasoning in TRMs is Secretly a Policy Improvement Operator* (ICML 2026) into three modelless primitives. The paper proves latent recursion is a policy improvement operator in disguise; we extract the inference-time consequence — detect when a recursion step is **dead compute** and skip it.

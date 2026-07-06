@@ -270,6 +270,15 @@ pub mod temporal_deriv;
 #[cfg(feature = "temporal_deriv")]
 pub use temporal_deriv::{TemporalDerivativeKernel, sigmoid_surprise_gate};
 
+// HOLA Hippocampal Exact KV Cache — surprise-evicted (β·‖e‖) bounded KV cache with
+// decoupled RMSNorm-γ read (Plan 395, Research 378, arxiv 2607.02303). Complements
+// the GDN2 fixed-size recurrent state with a top-w exact KV set for long-range
+// retrieval. Opt-in until G1–G4 GOAT gate passes. Pure stdlib + katgpt-types.
+#[cfg(feature = "hippocampal_cache")]
+pub mod hippocampal_cache;
+#[cfg(feature = "hippocampal_cache")]
+pub use hippocampal_cache::{HippocampalCache, SortedSlotCache};
+
 #[cfg(feature = "dual_leo")]
 pub use traits::{
     ActingMode, AlphaSchedule, AutocurriculumSampler, BcConfig, BcTarget, DualLeoMixer,
