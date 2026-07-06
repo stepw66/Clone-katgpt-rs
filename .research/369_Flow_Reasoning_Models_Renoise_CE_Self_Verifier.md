@@ -466,7 +466,7 @@ where
 
 - [x] **Document the paper** (this note) — record findings, prior-art surface, renoise-CE primitive, fusion targets, → riir-train routing.
 - [-] **No Super-GOAT guide in riir-ai / riir-chain / riir-neuron-db.** Q2/Q3 fail (verifier-free self-eval capability class already ships). No private guide warranted.
-- [ ] **Plan in katgpt-rs** (next session or follow-up): `katgpt-rs/.plans/369_renoise_ce_self_verifier.md` — implement the open primitive behind `renoise_ce` feature flag, run GOAT gate G1–G6, include the §3.6 defend-wrong PoC.
+- [x] **Plan in katgpt-rs** (next session or follow-up): `katgpt-rs/.plans/369_renoise_ce_self_verifier.md` — implement the open primitive behind `renoise_ce` feature flag, run GOAT gate G1–G6, include the §3.6 defend-wrong PoC. — **DONE as Plan 406 (2026-07-06): G1+G2 PASS, promoted to DEFAULT-ON.**
 - [-] **→ riir-train** (if pursued): Flow DPO recipe (wrong-cell localized preference contrast, EMA-pinned reference, self-mined hard negatives, priority replay buffer), self-conditioning channel training (zero-init two-pass scheme), online vs offline FMLM★-style distillation. Out of scope for this workflow; noted for completeness.
 - [-] **Track HLA renoise-CE (F4) as a `.issues/` follow-up** — needs R344 null-result re-validation before planning. The single-step stability probe on a committed HLA state is different from the multi-step FP iteration that null-resulted, but the caveat is serious.
 - [-] **Track proactive freeze-gate probe (F5) for riir-neuron-db** — extends `can_freeze` (Plan 002) with a renoise-CE stability probe. Cross-repo note in `riir-neuron-db/.research/` when pursued.

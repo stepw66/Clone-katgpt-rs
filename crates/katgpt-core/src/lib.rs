@@ -300,6 +300,20 @@ pub mod hga;
 #[cfg(feature = "hga")]
 pub use hga::{GroupSummaryCache, MixedRopeSummarizer};
 
+// Renoise-CE Self-Verifier — perturb a completed state, re-resolve through the
+// same operator, measure drift as a verifier-free correctness score (Plan 406,
+// Research 369, arxiv 2606.29150). Third orthogonal self-eval signal alongside
+// CLR (claim-vote) and CoE (trajectory-shape). Operator-agnostic trait over any
+// state->state map. Opt-in until G1+G2 GOAT gate passes. NOT a UQ primitive
+// (raw ranking signal; conformal wrapping required for any UQ claim).
+#[cfg(feature = "renoise_ce")]
+pub mod renoise_ce;
+#[cfg(feature = "renoise_ce")]
+pub use renoise_ce::{
+    best_of_n_stability, renoise_ce_score, verify_and_restart, Proposer, RenoiseCeConfig,
+    RenoiseCeProbe, RenoiseCeScore,
+};
+
 #[cfg(feature = "dual_leo")]
 pub use traits::{
     ActingMode, AlphaSchedule, AutocurriculumSampler, BcConfig, BcTarget, DualLeoMixer,
