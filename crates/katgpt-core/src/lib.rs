@@ -810,6 +810,24 @@ pub use phase_rotation::{
     compute_phase_per_channel_into, phase_rotation_gate_into,
 };
 
+// Spherical Steering — single-target geodesic Slerp rotation
+// `sin((1−t)θ)/sin θ · ĥ + sin(tθ)/sin θ · μ_T` toward a unit-norm target
+// direction on S^{d-1}, with sigmoid-translated vMF confidence gate (Plan 405,
+// Research 382, arxiv 2602.08169 You/Deng/Chen ICML 2026). Sibling to Plan 322's
+// 2-subspace phase rotation — same norm-preservation thesis, different
+// parameterization: Plan 322 rotates *within* the (a,b) plane; Plan 405 rotates
+// *toward* a target outside the input's direction (Slerp identity holds for all
+// θ ∈ (0,π)). vMF gate reduces to sigmoid via Eq 17:
+// `δ = -tanh(κ·s_T) = 1 − 2·sigmoid(2κ·s_T)`. §3.5 modelless Path 3 (closed-form
+// trig + sigmoid; no training). Opt-in until G1–G6 GOAT gate passes (G1
+// norm-preservation <1e-4 is the kill switch, mirroring Plan 322's G1).
+#[cfg(feature = "spherical_steering")]
+pub mod spherical_steering;
+#[cfg(feature = "spherical_steering")]
+pub use spherical_steering::{
+    SlerpError, SlerpScratch, spherical_steering_into, slerp_steering_into, vmf_confidence_gate,
+};
+
 // ChunkedContentStore — Lore-distilled chunked content-addressed Merkle store (Plan 272, Research 262).
 // Open primitive: chunks → BLAKE3 → dedup via papaya → binary Merkle root. No game/chain IP.
 // Consumed by riir-ai Plan 319 (Executable Asset Vessel + Quorum Gitflow).
