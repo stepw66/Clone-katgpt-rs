@@ -50,7 +50,10 @@
 //! - ✅ Phase 3 (GOAT gate G1–G4) — `.benchmarks/408_pkm_goat.md`.
 //! - ✅ Phase 4 (freeze/thaw wrapper) — [`freeze`] (gated
 //!   `product_key_memory_freeze`).
-//! - ⏳ Phase 5 (δ-rule write gate, F1 fusion) — `episodic.rs` (planned).
+//! - ✅ Phase 5 (δ-rule write gate, F1 fusion) — [`episodic`] (gated
+//!   `product_key_memory_episodic`).
+//! - ⏳ Phase 6 (example + docs) — planned.
+//! - ⏳ Phase 7 (private fusions) — deferred to riir-* repos.
 //!
 //! # CRITICAL — never softmax at the *gate* level
 //!
@@ -77,6 +80,17 @@
 pub mod freeze;
 #[cfg(feature = "product_key_memory_freeze")]
 pub use freeze::FrozenProductKeyMemory;
+
+// Phase 5 — δ-rule write gate (Plan 408 T5.1, F1 fusion: PKM × δ-Mem).
+// PkmEpisodicStore wraps FrozenProductKeyMemory + a mutable working copy,
+// applying `V[idx] += gate * (target - V[idx])` on the top-k value rows.
+// Modelless: one δ-rule step per call (not iterated); the curiosity `gate`
+// is sourced externally. Gated on the freeze wrapper (the publish path
+// delegates to `FrozenProductKeyMemory::commit`).
+#[cfg(feature = "product_key_memory_episodic")]
+pub mod episodic;
+#[cfg(feature = "product_key_memory_episodic")]
+pub use episodic::PkmEpisodicStore;
 
 pub mod kernel;
 pub mod types;

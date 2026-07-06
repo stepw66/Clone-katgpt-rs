@@ -385,6 +385,46 @@ impl<const SQRT_N: usize, const D_K: usize, const D_V: usize>
     pub fn keys_2_flat(&self) -> &[f32] {
         &self.keys_2
     }
+
+    /// Mutably borrow the value row at `flat_index` as a `&mut [f32]` of length
+    /// `D_V`.
+    ///
+    /// Used by the δ-rule write path (Phase 5, `PkmEpisodicStore::write`).
+    /// Panics if `flat_index >= num_slots()` — callers must resolve
+    /// `flat_index` only from the top-k kernel output, which is always
+    /// `< num_slots()`.
+    ///
+    /// This is the mutable counterpart of [`value`](Self::value). The
+    /// codebook rows (`keys_1`, `keys_2`) are intentionally NOT exposed as
+    /// `&mut` — the modelless mandate (Plan 408 constraint #1) forbids
+    /// gradient descent on keys; key refresh goes through the freeze/thaw
+    /// wrapper (Phase 4), not through in-place mutation.
+    #[inline]
+    pub fn value_mut(&mut self, flat_index: usize) -> &mut [f32] {
+        &mut self.values[flat_index * D_V..(flat_index + 1) * D_V]
+    }
+}
+
+/// Deep-clone all three flat slices.
+///
+/// Intentionally a manual impl (not `#[derive(Clone)]`) to surface the cost
+/// at call sites: cloning a production-scale table is `O(SQRT_N² × D_V)` —
+/// 16 MB for `SQRT_N=1000, D_V=4`, 512 MB for `D_V=128`. The primary consumer
+/// is [`crate::product_key_memory::PkmEpisodicStore::publish`], which clones
+/// the working table into the freeze slot at sleep-cycle cadence (seconds-
+/// scale, not per-tick). The Phase 4 bit-identity tests deliberately avoided
+/// `Clone` (using `clone_table_slices` instead) to keep the commitment hash
+/// path allocation-free; Phase 5 lifts that constraint for the publish path.
+impl<const SQRT_N: usize, const D_K: usize, const D_V: usize> Clone
+    for ProductKeyMemory<SQRT_N, D_K, D_V>
+{
+    fn clone(&self) -> Self {
+        Self {
+            keys_1: self.keys_1.clone(),
+            keys_2: self.keys_2.clone(),
+            values: self.values.clone(),
+        }
+    }
 }
 
 // ─── Tiny deterministic PRNG (splitmix64) ──────────────────────────────

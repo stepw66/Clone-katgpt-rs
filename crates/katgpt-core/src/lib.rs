@@ -1085,6 +1085,12 @@ pub use product_key_memory::{
 #[cfg(feature = "product_key_memory_freeze")]
 pub use product_key_memory::FrozenProductKeyMemory;
 
+// Plan 408 Phase 5 — δ-rule write gate over PKM (F1 fusion: PKM × δ-Mem).
+// PkmEpisodicStore wraps FrozenProductKeyMemory + a mutable working copy.
+// Gated on `product_key_memory_episodic` (implies `product_key_memory_freeze`).
+#[cfg(feature = "product_key_memory_episodic")]
+pub use product_key_memory::PkmEpisodicStore;
+
 // Gain/Cost Loop Halting Primitive — open substrate-agnostic kernel for per-loop
 // halting decisions (Plan 304, Research 282, arXiv:2606.18023, LoopCoder-v2).
 //
