@@ -4,7 +4,7 @@
 **Research:** [katgpt-rs/.research/387_Fast_Weight_Product_Key_Memory_PKM.md](../.research/387_Fast_Weight_Product_Key_Memory_PKM.md)
 **Source paper:** [arXiv:2601.00671](https://arxiv.org/abs/2601.00671) — Zhao & Jones, "Fast-weight Product Key Memory", Sakana AI, Feb 2026. (Distills only the PKM factorization from Lample et al. 2019 §2.2; the FwPKM gradient-descent half is forbidden per AGENTS.md constraint #1 and replaced by the shipped δ-rule analog.)
 **Target:** `katgpt-rs/crates/katgpt-core/src/product_key_memory/` (new module) + Cargo feature `product_key_memory`
-**Status:** Active — Phase 1 (skeleton)
+**Status:** Active — Phase 1 ✅ COMPLETE (2026-07-07). Phase 2 (retrieval kernel) is the next unchecked phase.
 
 ---
 
@@ -22,19 +22,19 @@ Ship a generic, modelless, inference-time **Product Key Memory** retrieval primi
 
 ### Tasks
 
-- [ ] **T1.1** Create module `katgpt-core/src/product_key_memory/` with `mod.rs`, `types.rs`, `kernel.rs`. Register in `katgpt-core/src/lib.rs` behind `#[cfg(feature = "product_key_memory")]`.
-- [ ] **T1.2** Add feature `product_key_memory = []` to `katgpt-core/Cargo.toml` (opt-in, no default deps — leaf-clean per tier-0 substrate rule).
-- [ ] **T1.3** Define `ProductKeyMemory<SQRT_N, D_K, D_V>` in `types.rs`:
+- [x] **T1.1** Create module `katgpt-core/src/product_key_memory/` with `mod.rs`, `types.rs`, `kernel.rs`. Register in `katgpt-core/src/lib.rs` behind `#[cfg(feature = "product_key_memory")]`. ✅ Phase 1 (2026-07-07): all three files landed; `mod.rs` re-exports `ProductKeyMemory`, `PkQuery`, `ScoreFn`, `D_K_FLOOR`, `SQRT_N_FLOOR`. **Stable-Rust layout note:** the original plan called for nested const-generic arrays (`Box<[[f32; D_K/2]; SQRT_N]>`, `Box<[[f32; D_V]; SQRT_N*SQRT_N]>`); these require the unstable `generic_const_exprs` feature. Switched to flat `Box<[f32]>` row-major layout with runtime-computed row starts (mirrors Engram's `InMemoryEngramTable`). Dims are runtime-asserted in constructors (panic on invalid monomorphization) rather than type-level.
+- [x] **T1.2** Add feature `product_key_memory = []` to `katgpt-core/Cargo.toml` (opt-in, no default deps — leaf-clean per tier-0 substrate rule). ✅ Phase 1 (2026-07-07): `product_key_memory = []` added; zero deps; pure stdlib splitmix64 PRNG for test init.
+- [x] **T1.3** Define `ProductKeyMemory<SQRT_N, D_K, D_V>` in `types.rs`:
   - `keys_1: Box<[[f32; D_K/2]; SQRT_N]>` (heap, √N rows)
   - `keys_2: Box<[[f32; D_K/2]; SQRT_N]>` (heap, √N rows)
   - `values: Box<[[f32; D_V]; SQRT_N * SQRT_N]>` (heap, N rows; √N×√N flat)
-  - Constructor `new(keys_1, keys_2, values)`, `from_random(seed)`, `from_centroids(centroids)` (k-means init for IDW mode).
-- [ ] **T1.4** Define `ScoreFn` enum in `types.rs`: `Dot` (default), `Idw { epsilon: f32 }` (paper §A.2, `−log(ε + ‖q−K‖²)`).
-- [ ] **T1.5** Define `PkQuery<const K: usize>` result type: `[(flat_idx: usize, weight: f32); K]` — fixed-size array, zero-alloc.
+  - Constructor `new(keys_1, keys_2, values)`, `from_random(seed)`, `from_centroids(centroids)` (k-means init for IDW mode). ✅ Phase 1 (2026-07-07): all three constructors landed (flat-slice variant per T1.1 note). `from_random` uses deterministic splitmix64 — same seed → bit-identical table (G6 determinism gate substrate). `from_centroids` is the modelless IDW-mode init path (paper's `L_addr` GD replaced by caller-supplied frozen centroids).
+- [x] **T1.4** Define `ScoreFn` enum in `types.rs`: `Dot` (default), `Idw { epsilon: f32 }` (paper §A.2, `−log(ε + ‖q−K‖²)`). ✅ Phase 1 (2026-07-07): `ScoreFn::{Dot, Idw{epsilon}}` + `Default` impl (Dot) + `idw_default()` (ε=1e-6) + `idw_with_epsilon()` (clamps bad ε to tiny positive floor, never `log(0)`).
+- [x] **T1.5** Define `PkQuery<const K: usize>` result type: `[(flat_idx: usize, weight: f32); K]` — fixed-size array, zero-alloc. ✅ Phase 1 (2026-07-07): `PkQuery<K>` holds `entries: [PkEntry; K]` where `PkEntry { flat_index, weight }`, plus `n_valid` count + `entries()` accessor returning the filled prefix. Trailing slots are sentinel (`flat_index = usize::MAX`). Zero-alloc by construction (stack-sized array).
 
 ### Validation
 
-- [ ] **T1.6** `cargo check -p katgpt-core --features product_key_memory` compiles clean.
+- [x] **T1.6** `cargo check -p katgpt-core --features product_key_memory` compiles clean. ✅ Phase 1 (2026-07-07): clean. Also verified the full feature matrix per the `merkle_root` lesson — `--no-default-features --features product_key_memory` (leaf-clean baseline) clean, `--all-features` (combo-regression) clean. 11/11 Phase 1 unit tests pass (`product_key_memory::types::tests::*`): determinism (same-seed bit-identical), value range `[-1,1)`, slice lengths match const generics, row accessors contiguous, `ScoreFn` epsilon clamping. Diagnostics on all three new files: zero errors/warnings.
 
 ---
 

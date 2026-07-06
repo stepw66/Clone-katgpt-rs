@@ -1052,6 +1052,29 @@ pub use engram::{
     sigmoid_fuse_multi_branch_into, try_compress_token,
 };
 
+// ── Product Key Memory — O(√N) Factored Retrieval (Plan 408, Research 387) ─
+//
+// Open MIT-licensed primitive: the fourth complexity class in the retrieval
+// stack (Raven O(1) / Engram O(1)-hash / δ-Mem O(r) / PKM O(√N)). Splits a
+// d_k-dim query into two halves, scores two √N codebooks, takes top-k of the
+// k² Cartesian product — yielding `2√N + k²` cost instead of `N`. Scales to
+// ~10⁶ slots at sub-linear retrieval cost.
+//
+// Modelless (constraint #1): the FwPKM paper's gradient-descent half (L_mem
+// GD on V, L_addr GD on K, n-iter TTT) is forbidden. Replaced by shipped
+// δ-rule analog (Plan 053). This primitive ships ONLY the inference-time
+// factored retrieval; the optional δ-rule write path lands in Phase 5
+// (product_key_memory_episodic).
+//
+// Phase 1 (this commit): types only — const-generic
+// `ProductKeyMemory<SQRT_N, D_K, D_V>`, `ScoreFn` (Dot/Idw), fixed-size
+// `PkQuery<K>`. Leaf-clean (zero deps). Phase 2 ships the kernel + GOAT gate.
+// Opt-in until G1+G2+G4 GOAT gate passes.
+#[cfg(feature = "product_key_memory")]
+pub mod product_key_memory;
+#[cfg(feature = "product_key_memory")]
+pub use product_key_memory::{D_K_FLOOR, PkQuery, ProductKeyMemory, ScoreFn, SQRT_N_FLOOR};
+
 // Gain/Cost Loop Halting Primitive — open substrate-agnostic kernel for per-loop
 // halting decisions (Plan 304, Research 282, arXiv:2606.18023, LoopCoder-v2).
 //
