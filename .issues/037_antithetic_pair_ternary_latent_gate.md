@@ -122,15 +122,37 @@ relation whose true direction drifts at a known rate. Measure:
 
 ## Tasks
 
-- [ ] **T1** — Implement the synthetic functor drift toy domain in `riir-poc`
+- [x] **T1** — Implement the synthetic functor drift toy domain in `riir-poc`
       (controlled, deterministic seed, no training).
-- [ ] **T2** — Implement the three gate competitors behind a common trait.
-- [ ] **T3** — Run head-to-head bench, print verdict table.
-- [ ] **T4** — Based on T3 outcome: confirm (→ plan) or refute (→ PoC
+      **DONE (2026-07-06).** `riir-ai/crates/riir-poc/src/antithetic_poc.rs` —
+      `DriftingDirection` rotates a unit direction in the (0,1)-plane at angular
+      rate ω; score = cos(candidate, truth) + Gaussian noise. Deterministic LCG
+      PRNG (splitmix64). 7 unit tests pass.
+- [x] **T2** — Implement the three gate competitors behind a common trait.
+      **DONE (2026-07-06).** `LatentDirectionGate` trait + `Frozen`,
+      `CoherenceTriggered` (distilled ReestimationScheduler analog: coherence
+      EMA < tau_reest → re-estimate from observation buffer), `AntitheticPair`
+      (paper-derived: sign(s⁺−s⁻)·δ·lr latent-direction update).
+- [x] **T3** — Run head-to-head bench, print verdict table.
+      **DONE (2026-07-06).** `riir-ai/crates/riir-poc/benches/antithetic_pair_latent_gate_poc.rs`.
+      7 drift regimes × 8 episodes × 3 competitors. Verdict: CONFIRM 7/7.
+- [x] **T4** — Based on T3 outcome: confirm (→ plan) or refute (→ PoC
       addendum update here + one-line cross-ref in Research 377).
+      **CONFIRM with caveat (see PoC Addendum below).** Antithetic-pair wins
+      on mean recovery error in 7/7 regimes. Latency: 179 ns/tick ≈ coherence's
+      180 ns/tick (the 2× forward-pass-cost concern did NOT materialize — both
+      gates do 3 score calls). Caveat: the distilled CoherenceTriggered gate
+      underperforms the real `ReestimationScheduler` (it barely fires in
+      slow-drift and barely recovers in moderate-drift), so the quality win is
+      partly "antithetic beats a weak baseline." A follow-up PoC against the
+      real `ReestimationScheduler` (or a stronger least-squares refit) is needed
+      before opening a katgpt-rs plan.
 - [ ] **T5** — If T4 confirms, run the modelless unblock protocol §3.5 check
       explicitly: this is a latent-direction update (constraint #4), NOT a
       weight mutation — confirm no `M ← M + ...` step anywhere.
+      **PENDING T4 follow-up.** The antithetic-pair update is `d += sign(s⁺−s⁻)·δ·lr`
+      (latent direction only, no weight mutation) — constraint #4 is satisfied by
+      construction. Will confirm explicitly when the plan opens.
 
 ## Non-tasks (do NOT do)
 
@@ -138,6 +160,76 @@ relation whose true direction drifts at a known rate. Measure:
 - Do NOT apply antithetic-pair to weight matrices. The reframe is
   latent-direction only.
 - Do NOT promote to default on architectural coverage alone — wait for PoC.
+
+## PoC Addendum (2026-07-06)
+
+**Verdict: CONFIRM (7/7 regimes) — with an honest caveat.**
+
+### Raw numbers (representative regime: moderate drift ω=0.02, low noise 0.02)
+
+| Strategy | det_lat (ticks) | mean_rec_err | max_rec_err | updates | score_calls | latency (ns/tick) |
+|---|---|---|---|---|---|---|
+| Frozen (no adaptation) | 200 (never) | 1.5273 | 1.9981 | 0 | 0 | 5.6 |
+| CoherenceTriggered (distilled) | 17 | 1.5202 | 1.9979 | 34 | 600 | 180 |
+| AntitheticPair (paper) | 0 | 0.6014 | 1.0625 | 199.5 | 400 | 179 |
+
+### Full verdict table (7 regimes, 8 episodes each)
+
+| Regime | Frozen err | Coherence err | Antithetic err | Winner |
+|---|---|---|---|---|
+| slow ω=0.005, no noise | 0.2063 | 0.2063 (never fires) | 0.0032 | Antithetic |
+| slow ω=0.005, low noise | 0.2063 | 0.2063 (never fires) | 0.0183 | Antithetic |
+| moderate ω=0.02, no noise | 1.5273 | 1.5206 | 0.4515 | Antithetic |
+| moderate ω=0.02, low noise | 1.5273 | 1.5202 | 0.6014 | Antithetic |
+| moderate ω=0.02, high noise | 1.5273 | 1.5200 | 1.1661 | Antithetic |
+| fast ω=0.05, low noise | 1.1511 | 1.1523 | 1.0563 | Antithetic |
+| fast ω=0.05, high noise | 1.1511 | 1.1523 | 1.1088 | Antithetic |
+
+### Latency (criterion, release, CPU)
+
+- Frozen: 5.6 ns (no-op baseline)
+- CoherenceTriggered: 180 ns/tick (3 score calls + buffer refit)
+- AntitheticPair: 179 ns/tick (3 score calls + sign update)
+
+The Issue 037 concern that antithetic-pair would cost "2× forward passes per
+ gate decision" did NOT materialize — both distilled gates do 3 score calls
+ (coherence: current + probe+ + probe−; antithetic: d+δ + d−δ + current). At
+ D=8 the cost is dominated by the Gaussian RNG, not the score evaluation.
+
+### Caveat — the distilled coherence gate is weak
+
+The `CoherenceTriggered` competitor is a **distillation** of the shipped
+`ReestimationScheduler`, not the real thing. It:
+1. Never fires in slow-drift regimes (coherence EMA stays above tau_reest=0.4
+   because the per-tick score change is small).
+2. Barely recovers in moderate/fast-drift regimes (the finite-difference probe
+   observation is noisy; the mean-of-buffer re-estimate doesn't track the
+   rotating truth well).
+
+The real `ReestimationScheduler` uses a closed-form least-squares refit (Gram
+matrix + ridge) against a proper observation buffer, which would track the
+rotating direction much better. A stronger coherence-gate distillation (or a
+PoC against the real `ReestimationScheduler`) would narrow or eliminate the
+antithetic-pair quality advantage.
+
+**Honest verdict: the antithetic-pair pattern is architecturally sound,
+modelless (constraint #4), latency-competitive (~180 ns), and beats a weak
+coherence-gate distillation. Whether it beats the REAL coherence gate is
+unproven — the §3.6 "architectural coverage ≠ quality parity" lesson applies
+in reverse here (we proved quality superiority over a weak analog, not the
+real one).**
+
+### Next steps (not done in this PoC)
+
+- [ ] Re-run with a stronger CoherenceTriggered distillation (least-squares
+      refit instead of mean-of-probes) to see if the quality gap narrows.
+- [ ] If antithetic-pair still wins after the coherence gate is strengthened,
+      open `katgpt-rs/.plans/NNN_antithetic_pair_latent_gate.md` for the
+      feature-flagged primitive.
+- [ ] If the coherence gate catches up after strengthening, downgrade to
+      REFUTE (the antithetic-pair adds no value over a well-tuned coherence gate).
+
+The PoC stays as a permanent regression check in `riir-poc` per §3.6.
 
 ## Cross-references
 
