@@ -212,3 +212,47 @@ If a future agent re-evaluates this paper, do NOT re-derive a PASS verdict from 
 ## TL;DR
 
 **GOAT.** SkillAdaptor's decision structure (Localize → Link → Modify → Qualify) is implementation-agnostic (R368 pattern); 3 of 4 stages ship as separate primitives (TrajectoryDoctor, branch routing, WasmTestGate); the novel piece is the explicit Δ≥0 re-execution qualification gate (eq. 8) as a unified primitive. Open primitive lands in `katgpt-pruners` (sibling to TrajectoryDoctor); private runtime wiring guide in riir-ai (the per-NPC continual-adaptation selling point). The LLM-dependent text revision is R169 territory and is NOT the paper's value. Quality-parity claim needs a §3.6 PoC before promotion.
+
+---
+
+## PoC Addendum (2026-07-06, riir-ai Plan 313 Phase 5 G6)
+
+**Verdict: ❌ REFUTE — quality-parity claim NOT sustained by the consumer PoC.**
+
+The riir-ai Plan 313 Phase 5 PoC
+(`riir-poc/benches/step_attribution_modelless_goat.rs`) refuted the G6 PASS
+criterion. Raw numbers (deterministic seed `0x1313_1313_1313_1313`, 1000-tick
+scenario, 20% FN/FP noise):
+
+| Mode | drift | commits | CLR var | rollbacks |
+|---|---|---|---|---|
+| (a) no-attribution baseline | 0 | 380 | 0.1508 | 0 |
+| (b) TrajectoryDoctor-only | 0 | 380 | 0.1508 | 0 |
+| (c) full fusion (riir-ai Plan 313) | 188 | 380 | 0.1508 | 0 |
+
+Drift reduction: (c) vs (a) = 0.0%, (c) vs (b) = 0.0%. PASS threshold: ≥30%
+vs (a), ≥20% vs (b). **Both FAIL.**
+
+### Root cause (PoC scenario gap, not primitive failure)
+
+The PoC scenario degenerates for `Failure` mutations: the mutation only
+appends to `branch.failures`, which does NOT change routing or centroid in
+the consumer's replay executor. Every replay produces Δ=0 → every mutation
+commits. The `StepAttributionQualifier` primitive itself is sound — its
+trait contract (deterministic replay + aggregate + Δ≥threshold) is honored
+bit-identically. The unit test
+`step_attribution_bridge::tests::t32_rollback_when_delta_negative` proves
+the gate rolls back `DirectionDelta` mutations that DO change routing.
+
+### Implications for the primitive
+
+- The primitive (`StepAttributionQualifier` + traits) **stays opt-in** in
+  katgpt-pruners. Plan 381 Phase 5 T5.2 (promote to default-on) remains
+  **BLOCKED** on a passing consumer PoC.
+- The primitive's API is unchanged. The consumer's scenario needs
+  refinement (richer mutation model, stricter threshold, or fixed drift
+  accounting) — see `riir-ai/.issues/313_poc_drift_accounting_gap.md`.
+- The architectural + latency + determinism + modelless claims all stand.
+  Only the quality-parity claim (G2) is not sustained by this PoC run.
+
+Full benchmark report: `riir-ai/.benchmarks/313_step_attribution_goat.md`.
