@@ -41,11 +41,12 @@
 //!
 //! # Phase 1 scope (this module)
 //!
-//! Skeleton: API surface + correct explicit-maps math + unit tests. The
-//! identity fast path (delegate to [`graph_laplacian_into`](crate::operators::graph_laplacian_into)
-//! on the first `d_e` dims) is a Phase 2 optimization (Plan 407 T2.4 / G4
-//! latency gate) — marked `TODO` below. Phase 1 runs the general path for all
-//! cases, which is correct but not yet latency-optimal for the identity floor.
+//! Skeleton: API surface + correct explicit-maps math + identity fast path +
+//! unit tests. The identity fast path (Plan 407 T2.4) is implemented: when
+//! `maps.is_identity`, [`sheaf_laplacian_via_maps`] computes the graph
+//! Laplacian on the first `d_e` dims directly, bypassing the explicit `F^T F`
+//! matvec. The general explicit-maps path is reserved for heterogeneous
+//! consensus where maps differ per edge / per endpoint.
 //!
 //! # References
 //!
@@ -446,13 +447,138 @@ fn soft_threshold(x: f32, t: f32) -> f32 {
 /// first `d_e` slots of `scratch.edge_projections` (compute-then-accumulate to
 /// keep the `F^T · d` accumulation cache-friendly).
 ///
-/// # Identity fast path (Phase 2 — TODO, Plan 407 T2.4)
+/// # Identity fast path (Plan 407 T2.4 — Phase 2)
 ///
-/// When `maps.is_identity`, the matvec could delegate to
-/// [`graph_laplacian_into`](crate::operators::graph_laplacian_into) on the
-/// first `d_e` dims and zero the rest — bypassing the explicit `F^T F`
-/// matvec. This is the G4 latency optimization. Phase 1 runs the general
-/// explicit-maps path for all cases (correct, not yet optimal).
+/// When `maps.is_identity`, the restriction maps are `[I_{d_e}; 0]` for every
+/// edge/endpoint. The sheaf Laplacian then reduces bit-for-bit to the graph
+/// Laplacian on the first `d_e` dims (dims `d_e..d_v` have zero disagreement).
+/// We skip the explicit `F^T F` matvec (which wastes ~`d_v` scalar multiplies
+/// per row, most against zero entries) and directly compute the graph-Laplacian
+/// difference per edge on the first `d_e` dims. This is the G4 latency
+/// optimization — turns a ~`O(|E|·d_e·d_v)` general matvec into a lean
+/// `O(|E|·d_e)` identity matvec with no wasted multiplies-against-zero. On
+/// regular grids, the identity path further delegates to
+/// [`sheaf_laplacian_identity_grid_into`] (the 5-point-stencil variant) for
+/// single-write cache-friendly output.
+
+/// 5-point-stencil sheaf Laplacian for identity maps on a regular `w×h` grid.
+///
+/// Computes `(L_F z)_v[r] = deg(v)·z_v[r] − Σ z_u[r]` for `r < d_e`, leaving
+/// dims `d_e..d_v` at zero. Writes each output element exactly once (no
+/// scattered read-modify-write) using the same stencil pattern as
+/// [`graph_laplacian_grid_into`](crate::operators::graph_laplacian_grid_into),
+/// but with stride `d_v` (not `d_e`) to process only the first `d_e` dims of
+/// the `d_v`-dim vertex stalk. This is the G4 latency optimization — the
+/// edge-list identity path does scattered `+=/−=` that causes store-forwarding
+/// stalls; the stencil writes once, reads in row-major order, and
+/// auto-vectorizes cleanly.
+///
+/// `scratch.sheaf_laplacian_z` is written directly (dims `d_e..d_v` left at
+/// the zero value from the caller's `.fill(0.0)`).
+#[inline]
+fn sheaf_laplacian_identity_grid_into(
+    w: usize,
+    h: usize,
+    d_v: usize,
+    d_e: usize,
+    z: &CochainField,
+    scratch: &mut AdmmScratch,
+) {
+    let p = z.data.as_ptr();
+    let o = scratch.sheaf_laplacian_z.as_mut_ptr();
+    let stride = w * d_v;
+
+    // Interior: 4 neighbors, branch-free. deg = 4.
+    if w >= 3 && h >= 3 {
+        for y in 1..(h - 1) {
+            let row = y * stride;
+            let up_row = row - stride;
+            let down_row = row + stride;
+            for x in 1..(w - 1) {
+                let base = row + x * d_v;
+                let left = base - d_v;
+                let right = base + d_v;
+                let up = up_row + x * d_v;
+                let down = down_row + x * d_v;
+                unsafe {
+                    for c in 0..d_e {
+                        let center = *p.add(base + c);
+                        *o.add(base + c) = 4.0 * center
+                            - *p.add(left + c)
+                            - *p.add(right + c)
+                            - *p.add(up + c)
+                            - *p.add(down + c);
+                    }
+                }
+            }
+        }
+    }
+
+    // Boundary: top + bottom rows. deg = 2 at corners, 3 on edges.
+    for &(y, up_off, down_off, has_up, has_down) in [
+        (0usize, 0usize, stride, false, true),
+        (h - 1, stride, 0usize, true, false),
+    ]
+    .iter()
+    {
+        let row = y * stride;
+        let up_row = row.wrapping_sub(up_off);
+        let down_row = row + down_off;
+        for x in 0..w {
+            let base = row + x * d_v;
+            let has_left = x > 0;
+            let has_right = x < w - 1;
+            let deg = (has_left as u8 + has_right as u8 + has_up as u8 + has_down as u8) as f32;
+            let left = base.wrapping_sub(d_v);
+            let right = base.wrapping_add(d_v);
+            let up = up_row + x * d_v;
+            let down = down_row + x * d_v;
+            unsafe {
+                for c in 0..d_e {
+                    let center = *p.add(base + c);
+                    let mut acc = deg * center;
+                    if has_left { acc -= *p.add(left + c); }
+                    if has_right { acc -= *p.add(right + c); }
+                    if has_up { acc -= *p.add(up + c); }
+                    if has_down { acc -= *p.add(down + c); }
+                    *o.add(base + c) = acc;
+                }
+            }
+        }
+    }
+
+    // Left + right boundary columns (interior rows only — top/bottom already
+    // handled above). deg = 3.
+    if h >= 3 {
+        for y in 1..(h - 1) {
+            let row = y * stride;
+            let up_row = row - stride;
+            let down_row = row + stride;
+            for &(x, has_left, has_right) in
+                [(0usize, false, true), (w - 1, true, false)].iter()
+            {
+                let base = row + x * d_v;
+                let deg = 3.0f32; // has_up + has_down + one horizontal neighbor
+                let left = base.wrapping_sub(d_v);
+                let right = base.wrapping_add(d_v);
+                let up = up_row + x * d_v;
+                let down = down_row + x * d_v;
+                unsafe {
+                    for c in 0..d_e {
+                        let center = *p.add(base + c);
+                        let mut acc = deg * center;
+                        if has_left { acc -= *p.add(left + c); }
+                        if has_right { acc -= *p.add(right + c); }
+                        acc -= *p.add(up + c);
+                        acc -= *p.add(down + c);
+                        *o.add(base + c) = acc;
+                    }
+                }
+            }
+        }
+    }
+}
+
 #[inline]
 fn sheaf_laplacian_via_maps(
     cx: &CellComplex,
@@ -462,6 +588,37 @@ fn sheaf_laplacian_via_maps(
 ) {
     let d_v = maps.d_v;
     let d_e = maps.d_e;
+
+    // ── Identity fast path (Plan 407 T2.4) ─────────────────────────────────
+    // F = [I_{d_e}; 0] ⟹ disagreement[r] = z_tail[r] − z_head[r] for r < d_e,
+    // and (L_F z)_v[r] = degree_L(v) · z_v[r] − Σ_{u~v} z_u[r] for r < d_e.
+    // Dims d_e..d_v stay zero.
+    if maps.is_identity {
+        // Grid-stencil path: writes each output element exactly once (no fill,
+        // no scattered read-modify-write). Processes the first `d_e` dims with a
+        // stride-`d_v` 5-point stencil, explicitly zeros dims `d_e..d_v`.
+        if let Some((w, h)) = cx.grid_dims() {
+            sheaf_laplacian_identity_grid_into(w, h, d_v, d_e, z, scratch);
+            return;
+        }
+        // Edge-list fallback for non-grid complexes (needs fill for dims d_e..d_v).
+        scratch.sheaf_laplacian_z.fill(0.0);
+        let entries = cx.boundary_entries(0);
+        for pair in entries.chunks_exact(2) {
+            let v_tail = pair[0].0;
+            let v_head = pair[1].0;
+            let tail_base = v_tail * d_v;
+            let head_base = v_head * d_v;
+            for d in 0..d_e {
+                let diff = z.data[tail_base + d] - z.data[head_base + d];
+                scratch.sheaf_laplacian_z[tail_base + d] += diff;
+                scratch.sheaf_laplacian_z[head_base + d] -= diff;
+            }
+        }
+        return;
+    }
+
+    // General explicit-maps path: zero-fill then accumulate.
     scratch.sheaf_laplacian_z.fill(0.0);
 
     let entries = cx.boundary_entries(0);

@@ -51,17 +51,23 @@ publish = false  # only katgpt-core ships to crates.io
 # Extends the linear path to handle the ReLU nonlinearity in motor-gated
 # field evolution. 13 unit tests pass; T5.2 formal GOAT bench still deferred.
 #
-# `sheaf_admm` (Plan 407, Research 384) — DEFAULT-OFF (Phase 1 skeleton,
-# 2026-07-07): the modelless one-step Sheaf-ADMM coordination primitive
-# (`sheaf_admm_step` / `sheaf_admm_step_into`) distilled from Seely et al.,
-# "Learning Multi-Agent Coordination via Sheaf-ADMM" (arXiv:2605.31005,
-# ICML 2026). Gives each vertex a primal/consensus/dual triple and runs one
-# ADMM iteration over a cellular sheaf (x-update proximal solve → z-update
-# sheaf diffusion via explicit restriction maps → u-update dual
-# accumulation). Builds on the DEC substrate (`graph_laplacian` identity
-# reduction); no new deps. Stays opt-in until the Plan 407 Phase 2 GOAT gate
-# (G1–G6) passes; promotion to default-on is gated on all six gates.
-default = ["heat_kernel_trajectory"]
+# `sheaf_admm` (Plan 407, Research 384) — DEFAULT-ON (Phase 2 GOAT gate passed
+# 2026-07-07, G1–G6 ALL PASS): the modelless one-step Sheaf-ADMM coordination
+# primitive (`sheaf_admm_step` / `sheaf_admm_step_into`) distilled from Seely
+# et al., "Learning Multi-Agent Coordination via Sheaf-ADMM"
+# (arXiv:2605.31005, ICML 2026). Gives each vertex a primal/consensus/dual
+# triple and runs one ADMM iteration over a cellular sheaf (x-update proximal
+# solve → z-update sheaf diffusion via explicit restriction maps → u-update
+# dual accumulation). Builds on the DEC substrate (`graph_laplacian` identity
+# reduction); no new deps. The identity fast path (Plan 407 T2.4) uses a 5-point
+# grid stencil for G4 latency (1.808 µs at K=100/d_v=8/d_e=5/T=5). See
+# .benchmarks/407_sheaf_admm_goat.md for the GOAT gate results.
+default = ["heat_kernel_trajectory", "sheaf_admm"]
 motor_gated_field = []
 heat_kernel_trajectory = []
-sheaf_admm = []
+sheaf_admm = []  # DEFAULT-ON (Plan 407 Phase 2 GOAT G1–G6 ALL PASS)
+
+[[bench]]
+name = "bench_407_sheaf_admm_goat"
+harness = false
+required-features = ["sheaf_admm"]

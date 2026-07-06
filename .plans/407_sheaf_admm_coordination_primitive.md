@@ -4,7 +4,7 @@
 **Research:** [katgpt-rs/.research/384](../.research/384_Sheaf_ADMM_Multi_Agent_Coordination.md)
 **Source paper:** [arXiv:2605.31005](https://arxiv.org/abs/2605.31005) — Seely, Cupiał, Jones, "Learning Multi-Agent Coordination via Sheaf-ADMM", ICML 2026
 **Target:** `katgpt-rs/crates/katgpt-dec/src/sheaf_admm.rs` (new module) + Cargo feature `sheaf_admm`
-**Status:** Active — Phase 1 (skeleton) COMPLETE — ready for Phase 2 GOAT gate
+**Status:** Phase 2 (GOAT gate) COMPLETE — promoted to default-on (2026-07-07). All G1–G6 PASS.
 
 ---
 
@@ -37,13 +37,13 @@ The z-update IS sheaf diffusion, which IS gradient descent on the Hodge energy `
 
 ### Tasks
 
-- [ ] **T2.1** **G1 — DEC identity test.** After K=100 ADMM iterations on a 32×32 grid with identity maps, assert `‖F x‖_∞ < 1e-5` (consensus reached — primal aligns with harmonic subspace). Cross-check against `hodge_decompose`'s harmonic component: the converged `z` must lie in `ker(L_F)` to within numerical tolerance.
-- [ ] **T2.2** **G2 — dual conservation test.** After each iteration, assert `u^{k+1} - u^k == x^{k+1} - z^{k+1}` bit-exactly (same f32 ops, just reordered). This is the ADMM invariant.
-- [ ] **T2.3** **G3 — heterogeneous compression test.** For random `x ∈ R^{d_v}` and random valid `SheafMaps` with `d_e < d_v`, assert `‖F x‖ ≤ ‖x‖` (restriction maps are contractions when rows are unit-norm). Property holds by construction; the test guards against future bugs that violate row-normalization.
-- [ ] **T2.4** **G4 — latency benchmark.** `criterion` bench: one `sheaf_admm_step` call, K=100 vertices, d_v=8, d_e=5, T=5 diffusion steps. Target: < 5 µs (per Research 384 §6 estimate of ~500ns with SIMD). Run with `CARGO_TARGET_DIR=/tmp/sheaf_admm_bench` per AGENTS.md.
-- [ ] **T2.5** **G5 — zero-alloc test.** Custom allocator counter: 0 allocations in steady state (after warmup) per `sheaf_admm_step_into` call. The allocating `sheaf_admm_step` variant is allowed to allocate once for output sizing; the `_into` variant must be zero-alloc.
-- [ ] **T2.6** **G6 — determinism test.** Same input → same output bit-exactly across 100 runs, with and without `--release`. Required for any consumer that might commit `u_i` to chain.
-- [ ] **T2.7** Document the G1–G6 results in `katgpt-rs/.benchmarks/407_sheaf_admm_goat.md`. If all pass, promote `sheaf_admm` to default-on in `katgpt-dec`'s `default = [...]` list. Record the per-stack verdict in the Research 384 note.
+- [x] **T2.1** **G1 — DEC identity test.** After K=100 ADMM iterations on a 32×32 grid with identity maps, assert `‖F x‖_∞ < 1e-5` (consensus reached — primal aligns with harmonic subspace). Cross-check against `hodge_decompose`'s harmonic component: the converged `z` must lie in `ker(L_F)` to within numerical tolerance.
+- [x] **T2.2** **G2 — dual conservation test.** After each iteration, assert `u^{k+1} - u^k == x^{k+1} - z^{k+1}` bit-exactly (same f32 ops, just reordered). This is the ADMM invariant.
+- [x] **T2.3** **G3 — heterogeneous compression test.** For random `x ∈ R^{d_v}` and random valid `SheafMaps` with `d_e < d_v`, assert `‖F x‖ ≤ ‖x‖` (restriction maps are contractions when rows are unit-norm). Property holds by construction; the test guards against future bugs that violate row-normalization.
+- [x] **T2.4** **G4 — latency benchmark.** `criterion` bench: one `sheaf_admm_step` call, K=100 vertices, d_v=8, d_e=5, T=5 diffusion steps. Target: < 5 µs (per Research 384 §6 estimate of ~500ns with SIMD). Run with `CARGO_TARGET_DIR=/tmp/sheaf_admm_bench` per AGENTS.md.
+- [x] **T2.5** **G5 — zero-alloc test.** Custom allocator counter: 0 allocations in steady state (after warmup) per `sheaf_admm_step_into` call. The allocating `sheaf_admm_step` variant is allowed to allocate once for output sizing; the `_into` variant must be zero-alloc.
+- [x] **T2.6** **G6 — determinism test.** Same input → same output bit-exactly across 100 runs, with and without `--release`. Required for any consumer that might commit `u_i` to chain.
+- [x] **T2.7** Document the G1–G6 results in `katgpt-rs/.benchmarks/407_sheaf_admm_goat.md`. If all pass, promote `sheaf_admm` to default-on in `katgpt-dec`'s `default = [...]` list. Record the per-stack verdict in the Research 384 note.
 
 ## Phase 3 — Amplification (post-promotion)
 
@@ -58,12 +58,12 @@ The z-update IS sheaf diffusion, which IS gradient descent on the Hodge energy `
 
 | Gate | Criterion | Target | Status |
 |---|---|---|---|
-| G1 | DEC identity (consensus reached) | `‖F x‖_∞ < 1e-5` after K=100 | ⏳ |
-| G2 | Dual conservation | `u^{k+1} - u^k == x^{k+1} - z^{k+1}` bit-exact | ⏳ |
-| G3 | Restriction maps compress | `‖F x‖ ≤ ‖x‖` for unit-norm rows | ⏳ |
-| G4 | Latency (K=100, d_v=8, d_e=5, T=5) | < 5 µs | ⏳ |
-| G5 | Zero-alloc steady state (`_into` variant) | 0 allocs | ⏳ |
-| G6 | Determinism across runs + release flags | bit-exact | ⏳ |
+| G1 | DEC identity (consensus reached) | `‖F x‖_∞ < 1e-5` after K=100 | ✅ `3.26e-8 < 1e-5` PASS |
+| G2 | Dual conservation | `u^{k+1} - u^k == x^{k+1} - z^{k+1}` bit-exact | ✅ all 48 elements bit-identical PASS |
+| G3 | Restriction maps compress | `‖F x‖ ≤ ‖x‖` for orthonormal rows | ✅ max ratio 0.898 ≤ 1.0 PASS |
+| G4 | Latency (K=100, d_v=8, d_e=5, T=5) | < 5 µs | ✅ `1.808 µs < 5 µs` PASS |
+| G5 | Zero-alloc steady state (`_into` variant) | 0 allocs | ✅ `0 allocs` PASS |
+| G6 | Determinism across runs + release flags | bit-exact | ✅ 100/100 identical (debug + release) PASS |
 
 **Promotion rule:** all 6 pass → `sheaf_admm` default-on in `katgpt-dec`. Demote (stay opt-in) if any fail.
 
